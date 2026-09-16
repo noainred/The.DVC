@@ -101,3 +101,31 @@ export function faultBadgeTitle(snap) {
   const s = nodeFaultSummary(snap);
   return s.unhealthy ? `${s.title} — 클릭하면 어느 노드인지 봅니다` : `${s.title} — 클릭하면 노드별 상태를 봅니다`;
 }
+
+/**
+ * 장비 헬스 배지 색 판정(v2.526 — Chromium 판독으로 발견한 실제 결함).
+ *
+ * v2.525 까지는 `healthState.toLowerCase() === 'healthy'` 만 초록이었다. Unity 수집기는
+ * `'OK'` 를 싣기 때문에(`storage/collectors/unitySsh.js:199`) 화면이 **빨간 `Health: OK`** 를
+ * 그렸다 — 배지 색과 글자가 서로 반대말을 하는 것이다. 사용자는 색을 먼저 읽는다.
+ *
+ * 규칙:
+ *  · 정상 계열(`ok`/`healthy`/`normal`/`good`)만 초록.
+ *  · **`unknown`·빈 값은 빨강이 아니라 회색**이다 — 상태를 읽지 못한 것을 '이상' 이라 말하지
+ *    않는다(v2.523 스토리지 노드 규약과 같은 기준).
+ *  · 그 밖은 빨강(원문을 그대로 보여 준다).
+ *
+ * @returns {{tone:'green'|'red'|'gray', text:string, title:string}}
+ */
+export function healthBadge(raw) {
+  const s = String(raw ?? '').trim();
+  const l = s.toLowerCase();
+  if (!s || l === 'unknown' || l === 'n/a' || l === '?') {
+    return { tone: 'gray', text: `Health: ${s || '확인 불가'}`, title: '장비가 상태를 주지 않았습니다 — 정상이라는 뜻이 아닙니다' };
+  }
+  // 'OK (5)' · 'Healthy' 처럼 뒤에 코드가 붙는 형태도 정상으로 읽는다(장비마다 표기가 다르다).
+  if (/^(ok|healthy|normal|good)\b/.test(l)) {
+    return { tone: 'green', text: `Health: ${s}`, title: '장비가 보고한 상태' };
+  }
+  return { tone: 'red', text: `Health: ${s}`, title: '장비가 보고한 상태(원문 그대로)' };
+}

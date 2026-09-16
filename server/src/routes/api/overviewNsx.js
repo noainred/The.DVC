@@ -13,17 +13,40 @@ import { visibleNsxManagers, managerInScope, scopedNsxRollup } from '../../nsx/s
 import { loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
 import { remoteServersResolved, invForServer } from '../admin/shared.js';
 import { aggregatePhysical } from '../../idrac/physicalCapacity.js'; // v2.486: iDRAC 인식 전체 물리 서버 코어·메모리
+import { serversByCorp } from '../../idrac/serverByCorp.js';          // v2.526: 법인(vCenter)별 물리 서버 수
 
 /**
  * v2.486: iDRAC 가 인식한 모든 물리 서버(중앙 직접 등록 + 위임 법인 원격, OME 엔트리 제외, id 중복은 중앙 우선)의
  * 코어·메모리 합계. Overview CPU/메모리 카드가 vCenter(ESXi) 수치와 나란히 보인다. 스냅샷마다 1회(memoJson).
  */
+function allPhysicalServers() {
+  const local = loadIdracRegistry().filter((s) => s.type !== 'ome');
+  const seen = new Set(local.map((s) => String(s.id)));
+  return local.concat(remoteServersResolved().filter((s) => !seen.has(String(s.id))));
+}
+
+/**
+ * 법인(vCenter)별 물리 서버 수(v2.526, 사용자 요청 "법인별 서버 수량과 guestos 수량").
+ * 귀속 판정은 `idrac/serverByCorp.js` — 전력 귀속과 **같은 신호 순서**를 쓴다(그 파일 머리말).
+ * ⚠ 범위 제한 계정에는 **허용 vCenter 만** 남긴다(전 법인 서버 대수 유출 차단). 귀속되지 않은
+ *   서버(unassigned)는 어느 법인 것인지 모르므로 범위 계정에 **주지 않는다**.
+ */
+function physicalByCorp(hosts, allowed) {
+  try {
+    const r = serversByCorp(allPhysicalServers(), hosts);
+    if (!allowed) return r;
+    const byVcenter = {};
+    for (const [id, n] of Object.entries(r.byVcenter)) if (allowed.has(id)) byVcenter[id] = n;
+    const scopedTotal = Object.values(byVcenter).reduce((a, b) => a + b, 0);
+    return { ...r, byVcenter, byDatacenter: {}, total: scopedTotal, unassigned: null, scoped: true };
+  } catch (e) {
+    return { total: 0, byVcenter: {}, byDatacenter: {}, unassigned: 0, error: e?.message || String(e) };
+  }
+}
+
 function physicalCapacity() {
   try {
-    const local = loadIdracRegistry().filter((s) => s.type !== 'ome');
-    const seen = new Set(local.map((s) => String(s.id)));
-    const servers = local.concat(remoteServersResolved().filter((s) => !seen.has(String(s.id))));
-    return aggregatePhysical(servers, invForServer);
+    return aggregatePhysical(allPhysicalServers(), invForServer);
   } catch (e) {
     return { servers: 0, withInventory: 0, withCores: 0, withMemory: 0, cores: 0, threads: 0, sockets: 0, memGiB: 0, memGB: 0, error: e?.message || String(e) };
   }
@@ -101,7 +124,13 @@ api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
   }
   for (const v of snap.vms) if (v.gpu && (!allowed || allowed.has(v.vcenterId))) gpuVms++;
   const gpuUtilPct = utilN ? Math.round(utilSum / utilN) : 0;
-  return { generatedAt: snap.generatedAt, source: snap.source, ...rollups, gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN, physical: physicalCapacity() };
+  return {
+    generatedAt: snap.generatedAt, source: snap.source, ...rollups,
+    gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN,
+    physical: physicalCapacity(),
+    // v2.526: 법인(vCenter)별 물리 서버 수 — 화면이 사이트별 호스트·VM 과 나란히 보여준다.
+    physicalByCorp: physicalByCorp(snap.hosts.filter(hostInScope), allowed),
+  };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
 // NSX overview — aggregated snapshot from the NSX Manager poller (separate from

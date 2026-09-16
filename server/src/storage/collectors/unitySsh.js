@@ -36,6 +36,8 @@
 
 import { emptySnapshot } from '../types.js';
 import { runCliSession, parseCsv, parseKeyValueBlocks, toBytes, sshFailureSnapshot, firstLine } from './cliSsh.js';
+import { stripUemcliBanner } from '../../proxy/sshExec.js';
+import { parseSpinfo, memoryFromResume } from './svcDiag.js';
 
 /** 구성 상세(deep) 수집 여부 — 기본 켜짐. 끄면 core 항목만 돈다. */
 export const deepEnabled = () => String(process.env.UNITY_SSH_DEEP ?? '1') !== '0';
@@ -44,42 +46,75 @@ export const deepEnabled = () => String(process.env.UNITY_SSH_DEEP ?? '1') !== '
 const LIST_MAX = 64;
 
 /**
- * 명령 명세. `deep:true` 는 구성 상세(끌 수 있다).
- * ⚠ `cmds` 는 **후보 체인**이다 — 앞에서부터 시도해 쓸 만한 출력이 나오면 멈춘다.
+ * 명령 명세(v2.526 재작성 — **사용자 제공 실제 출력 기준**).
+ *
+ * ⚠ `answered: true` 가 **필수**다: uemcli 는 자체서명 인증서 수락 프롬프트에서 멈춘다.
+ *   없으면 어떤 명령도 데이터를 주지 않는다(v2.525 증상의 실제 원인).
+ * ⚠ `-output csv` 는 **후보로만 둔다.** 이 장비에서 확인된 것은 기본(Key = Value) 출력이고,
+ *   csv 를 지원하지 않는 버전이면 오류가 나므로 체인의 뒤에 기본 출력을 반드시 남긴다.
+ *
+ * ── `when` — 수집 주기(사용자 선택 2026-09-16 "구성은 드물게 · 전력은 매번") ──────────
+ *  · `'always'` — 매 주기(용량·상태·전력). 화면의 1순위 수치다.
+ *  · `'config'` — 긴 주기(기본 6시간, `UNITY_CONFIG_EVERY_MS`). 부품번호·시리얼·포트 목록처럼
+ *    거의 변하지 않는 것. 직전 결과를 메모리에 이고 가며(`_configCache`) 스냅샷에 합친다.
+ *    **언제 수집한 구성인지 화면이 밝힌다**(`extra.configAt`) — 조용히 낡은 값을 보여주지 않는다.
  */
 const SPECS = [
-  // ── core: 이것만으로 '용량·상태' 화면이 채워진다 ──
-  { key: 'system', section: 'config', required: true, cmds: ['uemcli -output csv /sys/general show -detail', 'uemcli -output csv /sys/general show', 'uemcli /sys/general show'] },
-  { key: 'pools', section: 'pools', cmds: ['uemcli -output csv /stor/config/pool show -detail', 'uemcli -output csv /stor/config/pool show', 'uemcli /stor/config/pool show'] },
-  { key: 'sps', section: 'nodes', cmds: ['uemcli -output csv /env/sp show -detail', 'uemcli -output csv /env/sp show', 'uemcli /env/sp show'] },
-  { key: 'users', section: 'accounts', cmds: ['uemcli -output csv /user/account show', 'uemcli /user/account show'] },
-  { key: 'alerts', section: 'alerts', cmds: ['uemcli -output csv /event/alert/hist show -active', 'uemcli /event/alert/hist show -active'] },
-  { key: 'software', cmds: ['uemcli -output csv /sys/soft/ver show', 'uemcli /sys/soft/ver show'] },
+  /* ── 매 주기 ───────────────────────────────────────────────────────────── */
+  { key: 'system', section: 'config', required: true, when: 'always', answered: true,
+    cmds: ['uemcli /sys/general show', 'uemcli -output csv /sys/general show'] },
+  // 용량·구독(할당량) — 사용자 요청 "디스크 사용량 할당량". `-detail` 이 Current allocation·
+  // Subscription·Alert threshold·RAID·Drives 를 준다(실측).
+  { key: 'pools', section: 'pools', when: 'always', answered: true,
+    cmds: ['uemcli /stor/config/pool show -detail', 'uemcli /stor/config/pool show', 'uemcli -output csv /stor/config/pool show -detail'] },
+  { key: 'sps', section: 'nodes', when: 'always', answered: true,
+    cmds: ['uemcli /env/sp show -detail', 'uemcli /env/sp show'] },
+  { key: 'alerts', section: 'alerts', when: 'always', answered: true,
+    cmds: ['uemcli /event/alert/hist show -active', 'uemcli /event/alert/hist show'] },
+  // 전력·FRU 상태·부품 인벤토리를 한 번에 주는 유일한 명령(Unisphere 계정 불필요).
+  // ⚠ 출력이 길고 `--More--` 로 멈추므로 페이저 자동 응답이 필요하다.
+  { key: 'spinfo', when: 'always', answered: true, rules: ['pager', 'certAccept'],
+    bin: 'svc_diag', cmds: ['svc_diag -s spinfo'] },
 
-  // ── deep: 장비 구성 정보(사용자 요청 "장비 구성정보 등 최대한 많은 정보") ──
-  { key: 'license', deep: true, cmds: ['uemcli -output csv /sys/lic show', 'uemcli /sys/lic show'] },
-  { key: 'dpe', deep: true, cmds: ['uemcli -output csv /env/dpe show', 'uemcli /env/dpe show'] },
-  { key: 'dae', deep: true, cmds: ['uemcli -output csv /env/dae show', 'uemcli /env/dae show'] },
-  { key: 'disks', deep: true, cmds: ['uemcli -output csv /env/disk show', 'uemcli /env/disk show'] },
-  { key: 'psu', deep: true, cmds: ['uemcli -output csv /env/ps show', 'uemcli /env/ps show'] },
-  { key: 'fans', deep: true, cmds: ['uemcli -output csv /env/fan show', 'uemcli /env/fan show'] },
-  { key: 'bbu', deep: true, cmds: ['uemcli -output csv /env/bbu show', 'uemcli /env/bbu show'] },
-  { key: 'iom', deep: true, cmds: ['uemcli -output csv /env/iomodule show', 'uemcli /env/iomodule show'] },
-  { key: 'ethPorts', deep: true, cmds: ['uemcli -output csv /net/port/eth show', 'uemcli /net/port/eth show'] },
-  { key: 'fcPorts', deep: true, cmds: ['uemcli -output csv /net/port/fc show', 'uemcli /net/port/fc show'] },
-  { key: 'sasPorts', deep: true, cmds: ['uemcli -output csv /net/port/sas show', 'uemcli /net/port/sas show'] },
-  { key: 'nasServers', deep: true, cmds: ['uemcli -output csv /net/nas/server show', 'uemcli /net/nas/server show'] },
-  { key: 'luns', deep: true, cmds: ['uemcli -output csv /stor/prov/luns/lun show', 'uemcli /stor/prov/luns/lun show'] },
-  { key: 'filesystems', deep: true, cmds: ['uemcli -output csv /stor/prov/fs show', 'uemcli /stor/prov/fs show'] },
-  { key: 'vmfs', deep: true, cmds: ['uemcli -output csv /stor/prov/vmware/vmfs show', 'uemcli /stor/prov/vmware/vmfs show'] },
-  { key: 'nfsDs', deep: true, cmds: ['uemcli -output csv /stor/prov/vmware/nfs show', 'uemcli /stor/prov/vmware/nfs show'] },
-  { key: 'hosts', deep: true, cmds: ['uemcli -output csv /remote/host show', 'uemcli /remote/host show'] },
-  { key: 'snaps', deep: true, cmds: ['uemcli -output csv /prot/snap show', 'uemcli /prot/snap show'] },
+  /* ── 긴 주기(구성) ─────────────────────────────────────────────────────── */
+  { key: 'software', when: 'config', answered: true, cmds: ['uemcli /sys/soft/ver show'] },
+  { key: 'license', when: 'config', answered: true, cmds: ['uemcli /sys/lic show'] },
+  { key: 'users', section: 'accounts', when: 'config', answered: true, cmds: ['uemcli /user/account show'] },
+  // 물리 디스크 — 실측 필드: ID·Enclosure·Slot·Health state·Tier·User capacity·Pool
+  { key: 'disks', when: 'config', answered: true,
+    cmds: ['uemcli /env/disk show -detail', 'uemcli /env/disk show'] },
+  { key: 'dpe', when: 'config', answered: true, cmds: ['uemcli /env/dpe show'] },
+  { key: 'dae', when: 'config', answered: true, cmds: ['uemcli /env/dae show'] },
+  { key: 'iom', when: 'config', answered: true, cmds: ['uemcli /env/iomodule show'] },
+  { key: 'ethPorts', when: 'config', answered: true, cmds: ['uemcli /net/port/eth show'] },
+  { key: 'fcPorts', when: 'config', answered: true, cmds: ['uemcli /net/port/fc show'] },
+  { key: 'sasPorts', when: 'config', answered: true, cmds: ['uemcli /net/port/sas show'] },
+  // LUN — 실측 필드: Size·Storage pool·SP owner·Trespassed. `-detail` 은 실제 할당량을 준다(미확인).
+  { key: 'luns', when: 'config', answered: true,
+    cmds: ['uemcli /stor/prov/luns/lun show -detail', 'uemcli /stor/prov/luns/lun show'] },
+  { key: 'filesystems', when: 'config', answered: true,
+    cmds: ['uemcli /stor/prov/fs show -detail', 'uemcli /stor/prov/fs show'] },
+  { key: 'vmfs', when: 'config', answered: true, cmds: ['uemcli /stor/prov/vmware/vmfs show'] },
+  { key: 'nfsDs', when: 'config', answered: true, cmds: ['uemcli /stor/prov/vmware/nfs show'] },
+  { key: 'nasServers', when: 'config', answered: true, cmds: ['uemcli /net/nas/server show'] },
+  { key: 'hosts', when: 'config', answered: true, cmds: ['uemcli /remote/host show'] },
+  { key: 'snaps', when: 'config', answered: true, cmds: ['uemcli /prot/snap show'] },
+  // NAS 할당량(사용자 요청 "할당량"). ⚠ 이 장비에서는 `-filesystem` 같은 필수 인자를 요구해
+  //   문법 오류가 난다(실측: `Expected one of the following mandatory keywords`). 그건 오류가 아니라
+  //   **'이 명령은 대상 지정이 필요하다'** 는 뜻이므로 화면이 그렇게 말한다(없는 값을 지어내지 않는다).
+  { key: 'quotaConfig', when: 'config', answered: true, cmds: ['uemcli /quota/config show'] },
+  { key: 'quotaTree', when: 'config', answered: true, cmds: ['uemcli /quota/tree show'] },
 ];
 
-export function specsFor({ deep = deepEnabled() } = {}) {
-  return SPECS.filter((s) => deep || !s.deep);
+/** 이 주기에 돌릴 명세. `configRound:false` 면 긴 주기 항목을 뺀다. */
+export function specsFor({ deep = deepEnabled(), configRound = true } = {}) {
+  return SPECS.filter((s) => {
+    if (s.when === 'config' && !configRound) return false;
+    if (s.when === 'config' && !deep) return false;    // deep 을 끄면 구성 수집 자체를 안 한다
+    return true;
+  });
 }
+
 
 /** 여러 후보 키 중 처음 존재하는 값(버전마다 헤더명이 달라서 필요). */
 function pick(rec, ...keys) {
@@ -175,29 +210,56 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
     snap.extra.software = soft.slice(0, 8).map((r) => ({ id: pick(r, 'ID'), version: pick(r, 'Version'), date: pick(r, 'Release date', 'Date') })).filter((x) => x.version || x.id);
   }
 
-  /* ── 풀·용량 ──
+  /* ── 풀·용량·할당량 ──
      Unity 는 '클러스터 총량' 명령이 버전마다 달라, 어느 버전에나 있는 풀 합계를 진실의 원천으로
-     쓴다. **풀 밖 공간은 제외**되므로 그 사실을 화면이 밝힌다(capacityNote). */
-  const pools = recordsFor(out.pools || '', ['Name', 'ID', 'Size total', 'Total space']);
+     쓴다. **풀 밖 공간은 제외**되므로 그 사실을 화면이 밝힌다(`capacityBasisNote`).
+
+     ⚠ v2.526 정정 — **사용량 필드는 `Current allocation` 이다**(사용자 제공 실측):
+       Total space = 117544396521472 (106.9T)
+       Current allocation = 29973242855424 (27.2T)   ← 실제 쓰고 있는 물리 공간
+       Remaining space = 87568746020864 (79.6T)
+       Subscription = 55491782770688 (50.4T)         ← 호스트에 약속한 크기(씬 구독)
+       Subscription percent = 47%
+     v2.525 까지는 `Size used`·`Used space`·`Used capacity`·`Used` 만 찾아 **하나도 맞지 않았고**
+     사용량이 0 으로 나왔다. 후보에서 `Current allocation` 을 빼지 말 것.
+     ⚠ **구독(Subscription)은 사용량이 아니다.** 씬 프로비저닝에서 구독이 전체를 넘을 수 있고
+       (오버프로비저닝) 그것 자체는 정상이다 — 사용량으로 섞으면 '100% 넘게 썼다' 는 거짓이 된다. */
+  const pools = recordsFor(out.pools || '', ['Name', 'ID', 'Total space', 'Current allocation', 'Size total']);
   const norm = [];
   let total = 0;
   let used = 0;
   let subscribed = 0;
+  const poolTotalOf = (p) => toBytes(pick(p, 'Total space', 'Size total', 'Total capacity', 'Total'));
   for (const p of pools) {
     const name = nameOf(p, norm.length, '');
     if (!name) continue;
-    const t = toBytes(pick(p, 'Size total', 'Total space', 'Total capacity', 'Total'));
-    const u = toBytes(pick(p, 'Size used', 'Used space', 'Used capacity', 'Used'));
-    const sub = toBytes(pick(p, 'Size subscribed', 'Subscribed'));
+    const t = poolTotalOf(p);
+    const u = toBytes(pick(p, 'Current allocation', 'Size used', 'Used space', 'Used capacity', 'Used'));
+    const free = toBytes(pick(p, 'Remaining space', 'Size free', 'Free'));
+    const sub = toBytes(pick(p, 'Subscription', 'Size subscribed', 'Subscribed'));
     if (!t) continue;               // 용량을 못 읽은 풀은 0 으로 채우지 않고 뺀다(개수는 아래에서 밝힌다)
     total += t; used += u; subscribed += sub;
+    const pctNum = (v) => { const n = Number(String(v || '').replace('%', '').trim()); return Number.isFinite(n) ? n : undefined; };
     norm.push({
       name, totalBytes: t, usedBytes: u, pct: Math.round((u / t) * 1000) / 10,
       health: healthOf(p),
-      raid: pick(p, 'Raid level', 'RAID level') || undefined,
-      driveType: pick(p, 'Drive type', 'Disk type') || undefined,
-      disks: Number(pick(p, 'Number of disks', 'Disks')) || undefined,
+      freeBytes: free || undefined,
       subscribedBytes: sub || undefined,
+      // 구독률 — 장비가 준 값을 우선하고, 없으면 계산한다(계산값임을 구분하지 않으면 근거가 흐려지므로
+      // 장비값이 있을 때만 `subscriptionPctSource:'device'`).
+      subscriptionPct: pctNum(pick(p, 'Subscription percent')) ?? (t ? Math.round((sub / t) * 1000) / 10 : undefined),
+      subscriptionPctSource: pick(p, 'Subscription percent') ? 'device' : 'calc',
+      alertThresholdPct: pctNum(pick(p, 'Alert threshold')),
+      raid: pick(p, 'RAID level', 'Raid level') || undefined,
+      stripeLength: Number(pick(p, 'Stripe length')) || undefined,
+      // 실측 형식: `Drives = 38 x 3.8T SAS Flash 4` — 종류가 이 문자열에만 있다(`Drive type` 필드 없음).
+      drives: pick(p, 'Drives') || undefined,
+      disks: Number(pick(p, 'Number of drives', 'Number of disks', 'Disks')) || undefined,
+      poolType: pick(p, 'Type') || undefined,
+      allFlash: /^yes$/i.test(pick(p, 'All flash pool')) ? true : (/^no$/i.test(pick(p, 'All flash pool')) ? false : undefined),
+      dataReductionRatio: pick(p, 'Data Reduction Ratio') || undefined,
+      dataReductionSaved: toBytes(pick(p, 'Data Reduction space saved')) || undefined,
+      rebalancing: /^yes$/i.test(pick(p, 'Rebalancing')) ? true : (/^no$/i.test(pick(p, 'Rebalancing')) ? false : undefined),
     });
   }
   if (norm.length) {
@@ -205,9 +267,18 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
     snap.capacity = { totalBytes: total, usedBytes: used, pct: total ? Math.round((used / total) * 1000) / 10 : null };
     snap.sections.capacity = 'ok';
     snap.sections.pools = 'ok';
-    if (subscribed > 0) snap.extra.subscribedBytes = subscribed;
-    snap.extra.capacityNote = '전체 용량은 **풀 합계**입니다(uemcli /stor/config/pool). 풀에 속하지 않은 미할당 드라이브는 포함되지 않습니다.';
-    const dropped = pools.filter((p) => nameOf(p, 0, '') && !toBytes(pick(p, 'Size total', 'Total space', 'Total capacity', 'Total'))).length;
+    if (subscribed > 0) {
+      snap.extra.subscribedBytes = subscribed;
+      snap.extra.subscriptionPct = total ? Math.round((subscribed / total) * 1000) / 10 : null;
+      // 오버프로비저닝은 **정상일 수 있다** — 경고가 아니라 사실로 적는다.
+      snap.extra.overProvisioned = total > 0 && subscribed > total;
+    }
+    // ⚠ **`capacityNote` 라는 키를 쓰지 말 것**(v2.526 에 Chromium 판독으로 발견한 실제 결함):
+    //   화면의 `isVirt`(StorageMonTool.jsx)가 그 키의 **존재만으로** 'VPLEX/Metro Node — 자체 용량
+    //   없는 가상화 계층' 으로 판정해 **용량 추이 차트를 숨긴다**. 두 문구는 뜻이 다르다 —
+    //   VPLEX 는 '용량이 없다', 여기는 '용량 숫자를 이렇게 읽으라' 다. 키를 분리한다.
+    snap.extra.capacityBasisNote = '사용량은 풀의 **Current allocation**(실제 할당된 물리 공간)이고, 구독(Subscription)은 **호스트에 약속한 크기**라 서로 다릅니다. 전체 용량은 **풀 합계**이므로 풀에 속하지 않은 미할당 드라이브는 포함되지 않습니다.';
+    const dropped = pools.filter((p) => nameOf(p, 0, '') && !poolTotalOf(p)).length;
     if (dropped) snap.extra.poolsUnreadable = dropped;   // 조용히 빼지 않는다
   } else if (out.pools != null) {
     // 명령은 돌았는데 풀을 하나도 못 읽었다 — '용량 0' 이 아니라 **형식 미인식**이다.
@@ -289,30 +360,54 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
   }
   if (Object.keys(hw).length) snap.extra.hardware = hw;
 
-  /* ── 디스크: 개수가 많아 **타입·용량별 요약**을 우선한다(수백 개를 매 주기 push 하지 않게) ── */
+  /* ── 물리 디스크(사용자 요청 "디스크 관련 정보를 충실하게") ──
+     개수가 많아 요약을 1순위로 두되(수백 개를 매 주기 push 하지 않게) **슬롯 단위 목록도** 담는다.
+
+     ⚠ v2.526 실측 — `uemcli /env/disk show` 의 필드는 다음뿐이다:
+       ID · Enclosure · Slot · Bank slot · Health state · Tier · User capacity · Pool ID · Pool
+     **`Drive type` 필드가 없다**(v2.525 코드가 찾던 것). 종류는 `Tier`(예: Extreme Performance)
+     로 묶고, 매체 표기는 풀의 `Drives = 38 x 3.8T SAS Flash 4` 문자열이 보완한다. */
   if (out.disks != null) {
-    const r = recordsFor(out.disks, ['Name', 'ID', 'Drive type', 'Health state', 'User capacity']);
+    const r = recordsFor(out.disks, ['ID', 'Slot', 'Health state', 'User capacity', 'Tier']);
     if (r.length) {
-      const byType = new Map();
+      const byTier = new Map();
+      const byPool = new Map();
       let rawTotal = 0;
       let unhealthy = 0;
       let unknown = 0;
+      let unpooled = 0;
+      const list = [];
       for (const d of r) {
-        const type = pick(d, 'Drive type', 'Disk type', 'Type') || '알 수 없음';
+        // Tier 우선 — `Drive type` 은 이 버전에 없지만 다른 버전엔 있을 수 있어 후보로 남긴다.
+        const tier = pick(d, 'Tier', 'Drive type', 'Disk type') || '알 수 없음';
         const cap = toBytes(pick(d, 'User capacity', 'Capacity', 'Size', 'Raw capacity'));
         rawTotal += cap;
         const h = healthOf(d);
         if (h === 'unknown') unknown += 1; else if (h !== 'ok') unhealthy += 1;
-        const e = byType.get(type) || { type, count: 0, bytes: 0 };
-        e.count += 1; e.bytes += cap;
-        byType.set(type, e);
+        const pool = pick(d, 'Pool', 'Pool ID');
+        if (!pool) unpooled += 1;      // 풀에 속하지 않은 드라이브(스페어·미할당) — 전체 용량에 안 잡힌다
+        const te = byTier.get(tier) || { tier, count: 0, bytes: 0 };
+        te.count += 1; te.bytes += cap; byTier.set(tier, te);
+        const pe = byPool.get(pool || '(미할당)') || { pool: pool || '(미할당)', count: 0, bytes: 0 };
+        pe.count += 1; pe.bytes += cap; byPool.set(pe.pool, pe);
+        if (list.length < LIST_MAX) {
+          list.push({
+            id: pick(d, 'ID') || '', enclosure: pick(d, 'Enclosure') || '',
+            slot: pick(d, 'Slot') || '', tier, bytes: cap || null, pool: pool || '',
+            health: h, healthRaw: pick(d, 'Health state') || '',
+          });
+        }
       }
       snap.extra.disks = {
         count: r.length,
         unhealthy,
         unknown,                       // '상태를 읽지 못한 디스크' — 정상이라는 뜻이 아니다
+        unpooled,                      // 풀 밖 드라이브(스페어 등) — 전체 용량에 포함되지 않는 이유
         rawBytes: rawTotal || null,    // 0 이면 용량을 못 읽은 것 → null(0 으로 위장 금지)
-        byType: [...byType.values()].sort((a, b) => b.count - a.count).slice(0, 12),
+        byTier: [...byTier.values()].sort((a, b) => b.count - a.count).slice(0, 12),
+        byPool: [...byPool.values()].sort((a, b) => b.count - a.count).slice(0, 12),
+        list,
+        omitted: Math.max(0, r.length - list.length),
       };
     }
   }
@@ -340,14 +435,39 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
     const r = recordsFor(out[key], expect);
     return r.length ? r : null;
   };
-  const luns = provOf('luns', ['Name', 'ID', 'Size', 'Pool']);
+  // ⚠ v2.526 실측 — LUN 의 풀 필드는 **`Storage pool`** 이다(`Pool` 이 아니다).
+  //   실측 필드: ID · Name · Storage pool ID · Storage pool · Type · Health state · Size ·
+  //              Protection size used · Non-base size used · SP owner · Trespassed
+  //   `-detail` 이 실제 할당량을 준다고 보지만 **확인하지 못했다** — 후보로만 읽고 없으면 null 이다.
+  const luns = provOf('luns', ['ID', 'Name', 'Size', 'Storage pool']);
   if (luns) {
     let sz = 0;
-    for (const l of luns) sz += toBytes(pick(l, 'Size', 'Size total', 'Total capacity'));
+    let alloc = 0;
+    let allocRead = 0;
+    const lunOf = (l, i) => {
+      const bytes = toBytes(pick(l, 'Size', 'Size total', 'Total capacity'));
+      const a = toBytes(pick(l, 'Current allocation', 'Size allocated', 'Allocated'));
+      return {
+        name: nameOf(l, i, 'LUN'),
+        bytes,
+        // 할당량을 못 읽으면 **null** — 0 으로 채우면 '아무것도 안 썼다' 는 거짓이 된다.
+        allocatedBytes: a || null,
+        pool: pick(l, 'Storage pool', 'Storage pool ID', 'Pool') || undefined,
+        spOwner: pick(l, 'SP owner') || undefined,
+        trespassed: /^yes$/i.test(pick(l, 'Trespassed')) ? true : undefined,
+        thin: /^yes$/i.test(pick(l, 'Thin provisioning enabled', 'Thin')) ? true : undefined,
+        health: healthOf(l),
+      };
+    };
+    const rows = luns.map(lunOf);
+    for (const x of rows) { sz += x.bytes || 0; if (x.allocatedBytes != null) { alloc += x.allocatedBytes; allocRead += 1; } }
     prov.luns = {
-      count: luns.length, totalBytes: sz || null,
-      top: luns.map((l, i) => ({ name: nameOf(l, i, 'LUN'), bytes: toBytes(pick(l, 'Size', 'Size total')), pool: pick(l, 'Pool') || undefined, health: healthOf(l) }))
-        .sort((a, b) => b.bytes - a.bytes).slice(0, 20),
+      count: luns.length,
+      totalBytes: sz || null,
+      // 몇 개에서 할당량을 읽었는지 밝힌다 — 일부만 읽고 전체 합인 척하지 않는다.
+      allocatedBytes: allocRead ? alloc : null,
+      allocatedRead: allocRead,
+      top: rows.sort((a, b) => (b.bytes || 0) - (a.bytes || 0)).slice(0, 20),
     };
   }
   const fss = provOf('filesystems', ['Name', 'ID', 'Size', 'Size total']);
@@ -395,24 +515,130 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
     }
   }
 
+  /* ── NAS 할당량(사용자 요청 "할당량") ──
+     ⚠ 실측: 이 장비에서 `uemcli /quota/tree show` 는 **문법 오류**다
+       `Expected one of the following mandatory keywords: "--help", "-?", "-h", "-help"`
+     즉 '대상(파일시스템)을 지정해야 하는 명령' 이지 '쿼터가 0개' 가 아니다.
+     **'쿼터 없음' 이라고 말하지 않는다** — 확인하지 못한 것을 없다고 하면 거짓이다. */
+  const quota = {};
+  for (const [key, label] of [['quotaTree', '쿼터 트리'], ['quotaConfig', '쿼터 설정']]) {
+    if (out[key] == null) continue;                    // 명령 실패 — missingCmds 가 사유를 갖는다
+    const r = recordsFor(out[key], ['ID', 'File system', 'Path', 'Hard limit', 'Soft limit', 'Size used']);
+    quota[key] = {
+      label,
+      count: r.length,
+      list: r.slice(0, 40).map((q, i) => ({
+        id: pick(q, 'ID') || `${i + 1}`,
+        filesystem: pick(q, 'File system', 'Filesystem') || '',
+        path: pick(q, 'Path') || '',
+        hardBytes: toBytes(pick(q, 'Hard limit')) || null,
+        softBytes: toBytes(pick(q, 'Soft limit')) || null,
+        usedBytes: toBytes(pick(q, 'Size used', 'Used')) || null,
+        state: pick(q, 'State') || '',
+      })),
+      omitted: Math.max(0, r.length - 40),
+    };
+  }
+  if (Object.keys(quota).length) snap.extra.quota = quota;
+
+  /* ── svc_diag spinfo — FRU 상태·부품 인벤토리·전원(Unisphere 계정 불필요) ── */
+  if (out.spinfo != null) {
+    const sp = parseSpinfo(out.spinfo);
+    if (sp.parsed) {
+      const mem = memoryFromResume(sp.resume);
+      snap.extra.hw = {
+        systemType: sp.systemType, spId: sp.spId, dpeTempC: sp.dpeTemp,
+        fru: {
+          total: sp.fru.total, ok: sp.fru.ok,
+          // 빈 슬롯·확인 불가를 **이상으로 세지 않는다**(svcDiag.js 머리말 규칙 1·2).
+          empty: sp.fru.empty, unknown: sp.fru.unknown, fault: sp.fru.fault,
+          faults: sp.fru.faults.map((f) => ({ name: f.name, sp: f.sp, kind: f.kind, raw: f.raw })),
+          items: sp.fru.items.slice(0, 200),
+          sps: sp.fru.sps,
+        },
+        memory: mem,
+        inventory: sp.resume.devices.slice(0, 40),
+        inventoryOmitted: sp.resume.omitted,
+        inventoryReadErrors: sp.resume.readErrors,
+        truncated: sp.truncated,
+      };
+      if (sp.power.supplies.length) {
+        snap.extra.power = {
+          ...sp.power,
+          // `ps0: OK 330` 의 숫자(FRU 트리)와 `Input Power : 330 Watts`(전원 요약)가 같은 값인지
+          // 화면이 대조할 수 있게 둘 다 싣는다 — 근거를 숨기지 않는다.
+          fromFru: sp.fru.items.filter((x) => x.kind === 'psu' && x.value != null)
+            .map((x) => ({ name: x.name, sp: x.sp, watts: x.value })),
+        };
+      }
+    } else {
+      snap.extra.hwNote = 'svc_diag 출력을 인식하지 못했습니다(형식 미인식) — 연결 테스트의 원문을 확인하세요.';
+    }
+  }
+
   snap.ok = snap.sections.config === 'ok' || snap.sections.capacity === 'ok';
   if (!snap.ok && !snap.error) snap.error = 'uemcli 출력 파싱 실패 — 출력 형식이 예상과 다릅니다(연결 테스트의 원문 확인).';
   return snap;
 }
 
+/**
+ * 긴 주기(구성) 캐시 — 사용자 선택 "구성은 드물게 · 전력은 매번"(2026-09-16).
+ *
+ * 부품번호·시리얼·포트 목록은 거의 변하지 않는데 uemcli 한 번이 1~3초다. 매 주기 20여 개를
+ * 돌리면 SSH 세션을 그만큼 붙잡는다. 그래서 구성 명령은 기본 6시간마다만 돌리고 직전 결과를
+ * 메모리에 이고 간다.
+ *
+ * ⚠ **낡은 구성을 지금 값인 척하지 않는다** — `extra.configAt` 으로 언제 수집한 것인지 밝힌다.
+ * ⚠ 메모리 캐시라 재시작하면 비고, 그 다음 첫 주기가 전량을 수집한다(디스크에 쓰지 않는다 —
+ *   재생성 가능한 값이고 스냅샷 저장소가 이미 최신 1건을 갖는다).
+ */
+const CONFIG_EVERY_MS = Math.max(60_000, Number(process.env.UNITY_CONFIG_EVERY_MS) || 6 * 3_600_000);
+const _configCache = new Map();   // deviceId -> { at, out, usedCmds, errors }
+
+export function _resetConfigCacheForTest() { _configCache.clear(); }
+
 export async function collectViaSsh(device) {
   let raw = [];
   const deep = deepEnabled();
-  const specs = specsFor({ deep });
+  const id = String(device?.id || '');
+  const cached = _configCache.get(id);
+  // 연결 테스트는 항상 전량 수집한다 — '지금 무엇이 되는지' 를 보는 것이 목적이다.
+  const configRound = device._test === true || !cached || (Date.now() - cached.at) >= CONFIG_EVERY_MS;
+  const specs = specsFor({ deep, configRound });
   try {
-    const r = await runCliSession(device, specs);
+    // 배너·인증서 프롬프트를 걷어낸 뒤 오류 판정·파싱을 한다(둘이 같은 텍스트를 봐야 한다).
+    const r = await runCliSession(device, specs, { clean: stripUemcliBanner });
     raw = r.raw;
     // 어떤 후보 명령이 실제로 쓰였나 — 화면이 근거를 보여준다(v2.522 usedCmds 규약).
     const usedCmds = {};
     for (const x of raw) { if (x.ok && !usedCmds[x.key]) usedCmds[x.key] = x.cmd; }
-    const snap = normalizeUnitySsh(device, r.out, { usedCmds, deep });
-    for (const [key, msg] of Object.entries(r.errors)) {
-      const sect = specs.find((s) => s.key === key)?.section;
+
+    let out = r.out;
+    let errors = r.errors;
+    let configAt = configRound ? Date.now() : (cached?.at || null);
+    if (configRound) {
+      // 이번에 받은 구성만 따로 떼어 캐시한다(매 주기 항목은 캐시하지 않는다 — 낡으면 안 된다).
+      const cfgKeys = SPECS.filter((x) => x.when === 'config').map((x) => x.key);
+      const cfgOut = {}; const cfgUsed = {}; const cfgErr = {};
+      for (const k of cfgKeys) {
+        if (out[k] !== undefined) cfgOut[k] = out[k];
+        if (usedCmds[k]) cfgUsed[k] = usedCmds[k];
+        if (errors[k]) cfgErr[k] = errors[k];
+      }
+      _configCache.set(id, { at: configAt, out: cfgOut, usedCmds: cfgUsed, errors: cfgErr });
+    } else if (cached) {
+      // 이번 주기에 돌리지 않은 구성은 직전 값을 합친다(덮어쓰지 않는다 — 이번 값이 우선).
+      out = { ...cached.out, ...out };
+      errors = { ...cached.errors, ...errors };
+      for (const [k, v] of Object.entries(cached.usedCmds)) if (!usedCmds[k]) usedCmds[k] = v;
+    }
+
+    const snap = normalizeUnitySsh(device, out, { usedCmds, deep });
+    snap.extra.configAt = configAt;
+    snap.extra.configEveryMs = CONFIG_EVERY_MS;
+    snap.extra.configRound = configRound;
+    for (const [key, msg] of Object.entries(errors)) {
+      const sect = SPECS.find((s2) => s2.key === key)?.section;
       if (sect && snap.sections[sect] !== 'ok') snap.sections[sect] = `오류: ${msg}`;
       // 섹션이 없는 항목(구성 상세)의 실패도 버리지 않는다 — 어떤 명령이 없는 장비인지 알려준다.
       if (!sect) {

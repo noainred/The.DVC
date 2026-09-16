@@ -12,6 +12,7 @@ import BulkDeviceIo from './BulkDeviceIo.jsx';
 import UnityConfigPanels from './UnityConfigPanels.jsx';   // v2.525: Unity 구성 정보 패널
 import CollectActivity from './CollectActivity.jsx';
 import BoldText from '../../components/boldText.jsx';
+import { healthBadge } from './storageNodeText.js';   // v2.526: 헬스 배지 색 판정(순수)
 import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
 
 /**
@@ -681,6 +682,13 @@ export default function StorageMonTool() {
   );
 }
 
+/** 장비 헬스 배지 — 색 판정은 순수 모듈(`storageNodeText.healthBadge`)이 소유한다.
+    예전에는 'healthy' 문자열만 초록이라 Unity 의 'OK' 가 **빨간 `Health: OK`** 로 나왔다. */
+function HealthBadge({ raw }) {
+  const b = healthBadge(raw);
+  return <span className={`badge ${b.tone}`} title={b.title}>{b.text}</span>;
+}
+
 function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   const s = r.snap;
   // 수집 방식/타입별 UI 분기(v2.325, 사용자 요구 '가져오는 정보에 맞는 최적 UI·최대한 많은 정보').
@@ -691,6 +699,16 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   const ex = (s && s.extra) || {};
   const method = ex.collectMethod === 'ssh' ? 'ssh' : 'api';
   const nodeList = (s && s.nodes && s.nodes.list) || [];
+  // 풀 표 적응형 열(v2.526, Unity uemcli 가 주는 상세) — 이 스냅샷의 풀이 **실제 값을 가진 열만**
+  // 그린다. 전 타입 공용 표라 항상 그리면 다른 장비에서 빈 '—' 열만 늘어난다.
+  const poolList = (s && s.pools) || [];
+  const poolCols = {
+    free: poolList.some((p) => p.freeBytes != null),
+    sub: poolList.some((p) => p.subscribedBytes != null || p.subscriptionPct != null),
+    raid: poolList.some((p) => p.raid),
+    drives: poolList.some((p) => p.drives || p.disks != null),
+    dr: poolList.some((p) => p.dataReductionRatio || p.dataReductionSaved),
+  };
   // 노드 표 적응형 열 — 이 스냅샷의 노드들이 실제 값을 가진 열만 그린다(항상 빈 '—' 열 제거로 압축).
   const ncol = {
     name: nodeList.some((n) => n.name),
@@ -699,7 +717,11 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
     hdd: nodeList.some((n) => n.hdd),
     ssd: nodeList.some((n) => n.ssd || n.l3Bytes > 0),
   };
-  const isVirt = !!ex.capacityNote; // VPLEX/Metro Node — 자체 용량 없음(가상화 계층 — 풀/미디어/추이 숨김)
+  // VPLEX/Metro Node — 자체 용량 없음(가상화 계층 — 미디어/추이 숨김).
+  // ⚠ v2.526: 예전에는 `!!ex.capacityNote` **존재만** 봤다. 다른 수집기가 같은 키에 '용량을 이렇게
+  //   읽으라' 는 안내를 넣는 순간 그 장비의 **용량 추이 차트가 통째로 사라진다**(Unity 에서 실제로
+  //   그랬다 — Chromium 판독으로 발견). 수집기가 용량 섹션을 실제로 건너뛴 경우만 가상화 계층이다.
+  const isVirt = s?.sections?.capacity === 'skip' && !!ex.capacityNote;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [areaView, setAreaView] = useState(null); // OneFS API 영역 원문 뷰(v2.308) — 배지 클릭
@@ -753,7 +775,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           )}
           {s.extra?.healthState && !s.extra?.clusterHealth && (
             <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 10 }}>
-              <span className={`badge ${String(s.extra.healthState).toLowerCase() === 'healthy' ? 'green' : 'red'}`}>Health: {s.extra.healthState}</span>
+              <HealthBadge raw={s.extra.healthState} />
               {s.extra.dataReduction && <span className="muted">Data Reduction <b style={{ color: 'var(--text)' }}>{s.extra.dataReduction}</b></span>}
             </div>
           )}
@@ -776,8 +798,8 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
 
           {/* 가상화 계층(VPLEX/Metro Node) — 자체 용량이 없다는 사유를 명시(용량/미디어/추이 숨김) */}
           {isVirt && (
-            <div className="card" style={{ padding: '8px 12px', marginBottom: 10, fontSize: 12, borderColor: 'var(--border)' }}>
-              ℹ {ex.capacityNote}
+            <div className="card" style={{ padding: '8px 12px', marginBottom: 10, fontSize: 12, borderColor: 'var(--border)', whiteSpace: 'normal', lineHeight: 1.6 }}>
+              ℹ <BoldText text={ex.capacityNote} />
             </div>
           )}
 
@@ -936,11 +958,18 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
             <>
               <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '클러스터 용량' : (r.type === 'vmax' || r.type === 'powermax') ? '어레이별 용량' : '스토리지 풀'} {s.pools.length}</div>
               <STable className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
-                <thead><tr><th style={{ textAlign: 'left' }}>{r.type === 'xtremio' ? '클러스터' : (r.type === 'vmax' || r.type === 'powermax') ? '어레이' : '풀'}</th><th style={{ textAlign: 'right' }}>사용</th><th style={{ textAlign: 'right' }}>전체</th><th>사용률</th></tr></thead>
+                <thead><tr><th style={{ textAlign: 'left' }}>{r.type === 'xtremio' ? '클러스터' : (r.type === 'vmax' || r.type === 'powermax') ? '어레이' : '풀'}</th><th style={{ textAlign: 'right' }}>사용</th><th style={{ textAlign: 'right' }}>전체</th><th>사용률</th>{poolCols.free && <th style={{ textAlign: 'right' }}>여유</th>}{poolCols.sub && <th style={{ textAlign: 'right' }}>구독</th>}{poolCols.sub && <th style={{ textAlign: 'right' }}>구독률</th>}{poolCols.raid && <th>RAID</th>}{poolCols.drives && <th>드라이브</th>}{poolCols.dr && <th>데이터 감축</th>}</tr></thead>
                 <tbody>{s.pools.map((p, i) => (
-                  <tr key={i}><td>{p.name}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.usedBytes)}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.totalBytes)}</td><td>{p.pct != null ? <UsageCell pct={p.pct} /> : '—'}</td></tr>
+                  <tr key={i}><td>{p.name}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.usedBytes)}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.totalBytes)}</td><td>{p.pct != null ? <UsageCell pct={p.pct} /> : '—'}</td>{poolCols.free && <td style={{ textAlign: 'right' }}>{p.freeBytes != null ? tbFmt(p.freeBytes) : '—'}</td>}{poolCols.sub && <td style={{ textAlign: 'right' }}>{p.subscribedBytes != null ? tbFmt(p.subscribedBytes) : '—'}</td>}{poolCols.sub && <td style={{ textAlign: 'right' }} title={p.subscriptionPctSource === 'calc' ? '장비가 구독률을 주지 않아 구독÷전체로 계산한 값입니다' : '장비가 보고한 값'}>{p.subscriptionPct != null ? `${p.subscriptionPct}%${p.subscriptionPctSource === 'calc' ? '*' : ''}` : '—'}</td>}{poolCols.raid && <td className="muted">{p.raid || '—'}{p.stripeLength ? ` (${p.stripeLength})` : ''}</td>}{poolCols.drives && <td className="muted" style={{ whiteSpace: 'normal' }}>{p.drives || (p.disks != null ? `${p.disks}개` : '—')}</td>}{poolCols.dr && <td className="muted">{p.dataReductionRatio || '—'}{p.dataReductionSaved ? ` · ${tbFmt(p.dataReductionSaved)} 절감` : ''}</td>}</tr>
                 ))}</tbody>
               </STable>
+              {/* 근거 표기 — `*` 는 장비가 구독률을 주지 않아 우리가 계산한 값이다.
+                  툴팁에만 두면 복사·공유가 안 되고 모바일에서 볼 수 없다(v2.516 규약). */}
+              {poolCols.sub && poolList.some((p) => p.subscriptionPctSource === 'calc') && (
+                <div className="muted" style={{ fontSize: 11, margin: '-6px 0 12px' }}>
+                  * 구독률에 별표가 붙은 행은 장비가 값을 주지 않아 <b>구독 ÷ 전체</b>로 계산한 값입니다.
+                </div>
+              )}
             </>
           )}
           {(s.accounts || []).length > 0 && (
@@ -1056,7 +1085,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {/* v2.525: Unity(SSH/uemcli) 구성 정보 — 사용자 요청 "용량 정보 확인 및 장비 구성정보 등
               최대한 많은 정보를 수집해줘". 값이 있을 때만 그린다(다른 타입은 변화 없음). */}
           <UnityConfigPanels ex={ex} fmtBytes={tbFmt} />
-          {s.extra?.capacityNote && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>ℹ {s.extra.capacityNote}</div>}
+          {/* v2.526: 이 문구는 `**강조**` 를 담고 있다 — 그대로 그리면 별표가 그대로 인쇄된다
+              (v2.439/2.440/2.505 실제 사고). 반드시 BoldText 로 렌더한다. */}
+          {s.extra?.capacityBasisNote && <div className="muted" style={{ fontSize: 11, marginTop: 6, whiteSpace: 'normal', lineHeight: 1.6 }}>ℹ <BoldText text={s.extra.capacityBasisNote} /></div>}
           {/* 경보 폴백 고지(v2.513) — 장비가 state 필터를 못 받아 '전체를 받아 코드에서 거른' 경우.
               수집은 성공(ok)이지만 **어떻게 센 건수인지**가 다르므로 조용히 넘기지 않는다. */}
           {s.extra?.alertsNote && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>ℹ 경보: {s.extra.alertsNote}</div>}
