@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { ipBlockReason } from '../collector/registry.js'; // v2.537: proxyHost 차단 대역 검사
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
@@ -151,9 +152,21 @@ export function saveConfig(partial = {}) {
     if (moved) dropCarriedSecrets(c.deploy, dep, ['password', 'privateKey']);
   }
   if (partial.guacd) c.guacd = { ...c.guacd, ...partial.guacd };
+  // v2.537: proxyHost 는 SSH 게이트웨이가 다이얼하는 주소다 — 루프백·링크로컬 거부(사용자가 접속할
+  // 주소이기도 하므로 127.x 는 어차피 동작하지 않는다). 이름은 통과시킨다(접속 시 lookup 훅이 본다).
+  { const bad = proxyHostIssue(partial.proxyHost); if (bad) throw new Error(bad); }
   for (const k of ['proxyHost', 'publicPortBase']) if (partial[k] !== undefined) c[k] = partial[k];
   persist();
   return getConfigSafe();
+}
+
+/** v2.537: proxyHost 검증(순수) — 비어 있으면 통과(미설정 허용), IP 리터럴이면 차단 대역 검사. */
+export function proxyHostIssue(v) {
+  if (v === undefined) return null;
+  const h = String(v || '').trim();
+  if (!h) return null;
+  const bad = ipBlockReason(h);
+  return bad ? `proxyHost 거부: ${bad}` : null;
 }
 
 /* ------------------------------ proxies ------------------------------------ */
@@ -217,6 +230,7 @@ export function saveProxy(body = {}) {
   const base = existing || normalizeProxy({ id: crypto.randomBytes(4).toString('hex') });
   const next = { ...base };
   for (const k of ['name', 'proxyHost', 'publicPortBase', 'vcenterIds']) if (body[k] !== undefined) next[k] = body[k];
+  { const bad = proxyHostIssue(body.proxyHost); if (bad) return { ok: false, reason: bad }; } // v2.537
   if (body.dataplane) {
     const bad = basePathIssue(body.dataplane.basePath);
     if (bad) return { ok: false, reason: bad };

@@ -17,13 +17,15 @@
  */
 
 import { Agent } from 'undici';
+import { withSsrfLookup } from '../../util/ssrfLookup.js';
 import { emptySnapshot, summarizePorts, MAX_PORTS } from '../types.js';
 import { applyRates } from '../rates.js';
 import { zoningFromRest } from '../zoningCollect.js';   // v2.511: 조닝 — SSH 경로와 같은 스키마
 
 // 자체서명 인증서 장비 한정 로컬 디스패처 — 전역 TLS 오염 금지(server/CLAUDE.md).
 // 보안(M-4, 2026-09-12): SANSWITCH_TLS_VERIFY=true 면 검증을 켠다(기본은 기존대로 해제 — 자체서명 FOS 대응).
-const dispatcher = new Agent({ connect: { rejectUnauthorized: process.env.SANSWITCH_TLS_VERIFY === 'true' } });
+// v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
+const dispatcher = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: process.env.SANSWITCH_TLS_VERIFY === 'true' }) });
 const TIMEOUT_MS = Number(process.env.SANSW_HTTP_TIMEOUT_MS) || 20_000;
 
 const RE_HEADER_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/; // eslint-disable-line no-control-regex

@@ -16,6 +16,7 @@ import { Agent } from 'undici';
 import { classifyBmcVendor } from './vendorMatch.js'; // v2.495: 비-Dell BMC 판별(추가 HTTP 0회)
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
+import { ssrfLookup } from '../util/ssrfLookup.js';
 import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
 
 // Dedicated dispatcher so iDRAC self-signed certs / legacy TLS always work,
@@ -29,6 +30,7 @@ const dispatcher = new Agent({
       cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT |
       cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
     timeout: config.idrac.timeoutMs,
+    lookup: ssrfLookup, // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
   },
   connectTimeout: config.idrac.timeoutMs,
 });

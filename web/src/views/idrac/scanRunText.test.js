@@ -36,6 +36,14 @@ describe('describeScanRun', () => {
     expect(d.text).toContain('(무응답 250 · 인증실패 2)');
   });
 
+  it('차단 대역이라 찌르지 않은 IP 는 개수를 말한다(v2.537 — 조용한 제외 금지)', () => {
+    const d = describeScanRun({ at: 1, ok: true, found: 1, scanned: 10, blocked: 3 });
+    expect(d.extra).toContain('차단대역 제외 3');
+    expect(d.text).toContain('(차단대역 제외 3)');
+    // 0 이면 조각을 만들지 않는다(없는 것을 말하지 않는다)
+    expect(describeScanRun({ at: 1, ok: true, found: 1, scanned: 10, blocked: 0 }).extra).toEqual([]);
+  });
+
   it('실패 — 사유를 보여주고 툴팁에 전문', () => {
     const err = '엣지 응답 HTTP 401 — 이 엣지에 PUSH 스캔 엔드포인트가 없습니다. 경로가 없어 인증 라우터가 401 을 낸 것입니다.';
     const d = describeScanRun({ at: 1, error: err, agent: 'nb-irs' });

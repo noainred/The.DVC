@@ -6,10 +6,22 @@
 
 import { expandIpList } from './iprange.js';
 import { probeIdrac } from './redfish.js';
+import { ipBlockReason } from '../collector/registry.js'; // v2.537: 차단 대역은 스캔하지 않는다
 
 export async function scanForIdracs({ ips, username, password, concurrency = 32, perHostTimeout = 3000, max = 2048, onProgress = null, shouldAbort = null }) {
   const { ips: list, errors, truncated } = expandIpList(ips);
-  const targets = list.slice(0, max);
+  // v2.537: 차단 대역(루프백·링크로컬·우회표기)은 **찌르지 않는다**. lookup 훅(util/ssrfLookup.js)은
+  // IP 리터럴에는 불리지 않으므로(v2.506 문서의 한계) 스캐너는 정적으로 걸러야 한다.
+  // ⚠ 조용히 빼지 않는다 — 몇 개를 왜 뺐는지 `blocked`·`blockedIps` 로 돌려주고 화면이 말한다.
+  const blockedIps = [];
+  let blocked = 0;
+  const MAX_BLOCKED_IPS = 200;
+  const allowed = [];
+  for (const ip of list) {
+    if (ipBlockReason(ip)) { blocked++; if (blockedIps.length < MAX_BLOCKED_IPS) blockedIps.push(ip); continue; }
+    allowed.push(ip);
+  }
+  const targets = allowed.slice(0, max);
 
   const found = [];
   let unreachable = 0, notIdrac = 0, authFailed = 0;
@@ -86,7 +98,11 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
     unsupported: unsupported.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true })),
     unsupportedCount,
     unsupportedTruncated: unsupportedCount > unsupported.length,
-    truncated: truncated || list.length > max,
+    truncated: truncated || allowed.length > max,
     ipErrors: errors,
+    // v2.537: 차단 대역이라 찌르지 않은 IP — 화면(scanRunText)·스캔 로그가 개수를 밝힌다.
+    blocked,
+    blockedIps,
+    blockedTruncated: blocked > blockedIps.length,
   };
 }

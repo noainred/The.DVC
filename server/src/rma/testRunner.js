@@ -54,7 +54,15 @@ function dirSize(p, depth = 0) {
 async function fetchUrl(url, { timeoutMs, insecure }) {
   const t0 = Date.now();
   let dispatcher;
-  if (insecure) { try { const { Agent } = await import('undici'); dispatcher = new Agent({ connect: { rejectUnauthorized: false } }); } catch { /* */ } }
+  // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. 예전에는 insecure 일 때만 dispatcher 를
+  // 만들었고(훅 없음) 아니면 전역 fetch 였다(전역 fetch 에는 lookup 이 없다 — v2.506 문서). 이제 두 경우
+  // 모두 lookup 훅이 붙은 dispatcher 를 쓴다(TLS 검증 여부는 그대로 insecure 가 정한다). undici 를
+  // 못 불러오는 환경이면 예전처럼 전역 fetch 로 폴백한다(그 사실은 바꾸지 않았다).
+  try {
+    const { Agent } = await import('undici');
+    const { withSsrfLookup } = await import('../util/ssrfLookup.js');
+    dispatcher = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: !insecure }) });
+  } catch { /* undici 미탑재 환경 — 전역 fetch 폴백 */ }
   const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual', ...(dispatcher ? { dispatcher } : {}) });
   const body = await res.text().catch(() => '');
   return { status: res.status, ms: Date.now() - t0, body: body.slice(0, 256 * 1024) };

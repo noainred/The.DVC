@@ -16,6 +16,7 @@
 import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
+import { ssrfLookup } from '../util/ssrfLookup.js';
 import { retryTransient } from '../util/resilientFetch.js';
 
 // 동시성 제한 실행기 — 고RTT OME에서 장치별 전력 조회를 직렬(N×RTT)이 아닌 병렬(캡)로.
@@ -36,6 +37,7 @@ const dispatcher = new Agent({
       cryptoConstants.SSL_OP_LEGACY_SERVER_CONNECT |
       cryptoConstants.SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
     timeout: config.idrac.timeoutMs,
+    lookup: ssrfLookup, // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
   },
   connectTimeout: config.idrac.timeoutMs,
 });

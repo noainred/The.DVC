@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 시 SSRF 정적 가드
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { describeError } from '../util/errors.js';
@@ -107,6 +108,12 @@ function normalize(body, existing = null) {
   // Accept a bare IP/hostname and normalize to https://host.
   if (!/^https?:\/\//.test(host)) host = `https://${host}`;
   host = host.replace(/\/+$/, '');
+  // v2.537(인증·인가 3차 감사): 루프백·링크로컬·우회표기 차단 — storage/sanswitch/pdu 등록부와 같은 규칙.
+  // 이 등록부는 v2.536 까지 host 를 **검사 없이** 받았다(형식 정규화만). 폴러가 그 host 로 Redfish
+  // 자격증명(Basic/Digest)을 보내므로 등록 = 접속이다. bulkAddByIps·registerScanned 도 importServers
+  // → normalize 를 지나므로 여기 한 곳이 전 경로를 덮는다(우회 경로를 만들지 말 것).
+  const ssrf = ssrfBlockReason(host);
+  if (ssrf) return [null, `host 거부: ${ssrf}`];
 
   // hostNames: ESXi host name(s) this iDRAC maps to. Accept array or
   // comma/space/newline-separated string. (OME auto-discovers devices, so

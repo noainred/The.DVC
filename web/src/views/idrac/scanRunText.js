@@ -58,6 +58,8 @@ export function describeScanRun(r, now = Date.now()) {
   const extra = [];
   if (r.unreachable) extra.push(`무응답 ${r.unreachable}`);
   if (r.authFailed) extra.push(`인증실패 ${r.authFailed}`);
+  // v2.537: 차단 대역(루프백·링크로컬)이라 찌르지 않은 IP — 빼 놓고 말하지 않으면 '전부 스캔' 으로 읽힌다.
+  if (r.blocked) extra.push(`차단대역 제외 ${r.blocked}`);
   const d = dur(r.durationMs);
   return {
     state: 'ok', badge: '성공', tone: found > 0 ? 'green' : 'muted',
