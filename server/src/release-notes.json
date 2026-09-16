@@ -1,6 +1,21 @@
 {
   "notes": [
     {
+      "version": "2.532.0",
+      "date": "2026-09-16",
+      "title": "★ PowerMax/VMAX — Unisphere 10.x 수집 전량 실패 수정(버전 경로를 장비가 알려준 목록으로)",
+      "notes": [
+        "★ Unisphere for PowerMax **10.x 장비의 수집이 전량 실패**하던 문제 수정(사용자 신고 'power max 스토리지 10.x 버전에서는 9.x 버전과 좀 달라진것 같네'). 화면 실측(HG-PMAX, 10.2.0.9): 'config: 오류: HTTP 404 — Could not find resource for full path: /univmax/restapi/system/symmetrix' · 'alerts: 오류: HTTP 404 — …/system/alert_summary'. 같은 코드가 GM1(9.2.4.9)에서는 전부 OK 였다",
+        "원인: **10.x 가 무버전 `/univmax/restapi/system/*` 별칭을 없앴다.** 이미 sloprovisioning 에만 적용돼 있던 버전 프리픽스 폴백을 어레이 목록·어레이 상세·알람에는 적용하지 않은 것이 결함이다(powermax.js 의 세 호출이 무버전 경로를 하드코딩하고 있었다)",
+        "★ **버전 목록을 코드에 박지 않는다 — 장비가 스스로 알려준다.** 무버전 `/univmax/restapi/version` 은 10.x 에서도 살아 있고 `{\"version\":\"V10.2.0.9\",\"api_version\":\"102\",\"supported_api_versions\":[\"102\",\"101\",\"100\"]}` 를 돌려준다(사용자 curl 실측). 이제 그 배열을 그대로 경로 후보로 쓴다 — 추측이 아니다. 정적 목록은 그 응답을 못 읽었을 때의 마지막 수단일 뿐이다",
+        "9.x 의 무버전 경로는 **후보 맨 뒤에 남겼다** — GM1(9.2.4.9)이 실제로 그 형태로 동작 중이다. 버전 경로를 앞에 두므로 10.x 에서 매 주기 헛왕복이 생기지 않는다",
+        "**실제로 먹힌 경로를 `extra.usedPaths` 에 기록**한다(v2.522 usedCmds 규약) — '이 장비는 102 로 읽었다' 를 화면이 말할 수 있어야 다음 버전차를 추측 없이 진단한다. 감지한 버전 목록과 그 출처(supported/api_version/derived/fallback)도 `extra.apiVersions` 에 남긴다",
+        "실장비 확인(사용자 제공, 10.2.0.9): `/102/system/symmetrix` 200 · `/102/system/alert` 200 · 무버전 `/system/symmetrix` 404. 응답 본문은 `{\"symmetrixId\":[\"000220201278\"]}` 로 **9.x 와 같은 필드명**이었다 — 10.x 는 경로만 바꾸고 응답 형태는 유지했다",
+        "⚠ 남은 미확인: `/102/sloprovisioning/symmetrix/<id>` 의 `system_capacity` 필드와 `/102/system/alert` 의 응답 형태는 본문을 확인하지 못했다. 필드가 바뀌었다면 경로가 맞아도 'system_capacity 필드 부재' 로 떨어지며, 그때도 화면이 사유를 그대로 표시한다(조용히 0 을 만들지 않는다)",
+        "회귀 테스트 10건 추가 — 장비가 준 목록 우선 · 버전 문자열 유도(V9.2.4.9→92 · V10.2.0.9→102) · 무버전 경로가 후보 맨 뒤에 남아 있는지 · 무버전 하드코딩이 되살아나지 않았는지(소스 검사, 주석 제외)"
+      ]
+    },
+    {
       "version": "2.531.1",
       "date": "2026-09-16",
       "title": "스토리지 증가량 화면 — 핵심 수치 타일이 카드로 렌더되지 않던 문제 수정",
