@@ -34,6 +34,7 @@ const SecretScanTool = React.lazy(() => import('./tools/SecretScanTool.jsx'));
 const CodexCheck = React.lazy(() => import('./CodexCheck.jsx'));
 const VmCloneTool = React.lazy(() => import('./tools/VmCloneTool.jsx'));
 const StorageMonTool = React.lazy(() => import('./tools/StorageMonTool.jsx'));
+const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx'));
 const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
 const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
 const PduTool = React.lazy(() => import('./tools/PduTool.jsx'));
@@ -441,6 +442,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'codex-check' && <CodexCheck />}
       {tool === 'vm-clone' && <VmCloneTool />}
       {tool === 'storage-mon' && <StorageMonTool />}
+      {tool === 'storage-growth' && <StorageGrowthTool />}
       {tool === 'bm-storage' && <BmStorageTool />}
       {tool === 'san-switch' && <SanSwitchTool />}
       {tool === 'pdu' && <PduTool />}

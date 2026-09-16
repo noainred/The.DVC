@@ -31,7 +31,12 @@ import { startAdaptiveTimer as baseAdaptiveTimer } from '../util/adaptiveTimer.j
 
 /** 조정 가능한 주기 항목. min/def 는 서버가 단일 소스 — UI 가 이 표를 받아 폼을 그린다. */
 export const INTERVAL_SPEC = [
-  { key: 'pollMs', env: 'STORAGE_POLL_MS', def: 10 * 60_000, min: 60_000,
+  // v2.531 기본값 10분 → **1시간**(사용자 지시 "폴링을 기본 1시간으로 변경"). 용량은 완만히
+  // 변하는 값이라 10분 해상도가 필요 없고, Unity 처럼 한 주기에 수십 개 SSH 명령을 도는 수집기가
+  // 늘어 장비·회선 점유가 커졌다. 증가량 분석은 **일 단위 롤업**(db.js capacity_daily)이 맡는다.
+  // ⚠ 이것은 **기본값**이다 — 이미 중앙 설정이나 portal.env 로 값을 잡아 둔 곳은 그 값이 그대로다
+  //   (`runtimeIntervalSource` 가 'central'/'env'/'default' 중 무엇인지 화면에 밝힌다).
+  { key: 'pollMs', env: 'STORAGE_POLL_MS', def: 60 * 60_000, min: 60_000,
     label: '장비 수집 주기', hint: '스토리지 장비에 접속해 용량·노드 상태를 읽는 간격. 짧을수록 화면이 최신이지만 장비/회선 부하가 는다.' },
   { key: 'pushMs', env: 'STORAGE_PUSH_MS', def: 5 * 60_000, min: 60_000,
     label: '중앙 전송(push) 주기', hint: '엣지가 수집한 결과를 중앙으로 올리는 간격. 중앙 화면 반영 지연 = 수집 주기 + 이 값.' },

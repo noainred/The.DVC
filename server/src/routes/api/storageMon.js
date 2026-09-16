@@ -12,7 +12,10 @@ import { localSnapshots, dropSnapshot } from '../../storage/store.js';
 import { collectDeviceNow, storagePollerStatus, pollStorageOnce, testDeviceConnection } from '../../storage/poller.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 import { listActivity } from '../../storage/activityLog.js';
-import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable } from '../../storage/db.js';
+import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable,
+  dailySeries, dailySpans, dayIndex, dayLabel, dayStartMs, pruneNow, effectiveKeepDays, DAY_OFFSET_MIN } from '../../storage/db.js';
+import { growthMatrix, normalizePeriods, DEFAULT_PERIODS } from '../../storage/growth.js';
+import { GROWTH_SPEC, loadGrowthSettings, saveGrowthSettings } from '../../storage/growthSettings.js';
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
@@ -508,6 +511,96 @@ api.get('/tools/storage/devices/:id/history', toolsPerm, fullScopeOnly, async (r
  * 각 점의 devices(그 버킷에 데이터가 있던 장비 수)를 함께 반환해, 일부 장비만 수집된 구간을
  * '전체 용량 급감' 으로 오독하지 않게 화면이 표시한다.
  */
+/**
+ * 스토리지 증가량(v2.531) — 특수기능 '스토리지 증가량' 화면(임원 보고 형태).
+ *
+ * 사용자 요청: "전체 스토리지를 보여주고 기간별로 용량이 얼마나 증가하고 있는지 매트릭스 형태로" ·
+ * "장비별로 1일/1주/1달/3개월 등 지정한 기간으로 증가량".
+ *
+ * ⚠ **폴링 금지 대상은 아니지만 자주 부를 이유도 없다** — 일 단위 롤업을 읽을 뿐이라 vCenter/장비
+ *   왕복은 0 이지만, 5년 × 장비수 행을 매번 읽는다. 화면은 마운트 시 1회 + 수동 새로고침만 한다
+ *   (`v4Portal2508.test.js` 규약과 같은 판단).
+ * ⚠ 판정·계산은 전부 `storage/growth.js`(순수)가 한다 — 라우트는 조회와 메타 결합만 한다.
+ */
+api.get('/tools/storage-growth', toolsPerm, fullScopeOnly, async (req, res) => {
+  const { periods, dropped } = normalizePeriods(req.query.periods);
+  const asOfDay = dayIndex(Date.now());
+  // 필요한 만큼만 읽는다 — 가장 긴 기간 + 여유 1일(기준선이 그 날 없을 수 있다).
+  const sinceDay = asOfDay - (Math.max(...periods.map((p) => p.days)) + 1);
+
+  const meta = new Map();
+  for (const d of listDevices()) meta.set(d.id, { name: d.name, type: d.type, host: d.host, datacenterId: d.datacenterId });
+  // 장비가 보고한 이름이 있으면 그것을 쓴다(v2.530 '장비' 열 규약과 같은 순서).
+  for (const snap of [...localSnapshots(), ...edgeStorageSnapshots()]) {
+    const id = snap.deviceId || snap.id;
+    if (id && snap.name && meta.has(id)) meta.set(id, { ...meta.get(id), name: snap.name });
+  }
+
+  const rows = await dailySeries(null, sinceDay);
+  // 조회 구간은 '가장 긴 기간 + 1일' 로 좁히지만, 화면의 '관측 N일' 은 **전체 이력**이어야 한다 —
+  // 구간으로 대신하면 700일치를 가진 장비가 '92일' 로 보인다(v2.531 스크린샷 판독에서 발견).
+  const spans = await dailySpans();
+  const m = growthMatrix(rows, { periods, asOfDay, meta });
+  const keep = effectiveKeepDays();
+  res.json({
+    db: await dbAvailable(),
+    // 화면은 여기 숫자만 쓴다 — 주기·보존을 문구에 박지 않는다(CLAUDE.md 규약).
+    asOfDay, asOfLabel: dayLabel(asOfDay), dayOffsetMin: DAY_OFFSET_MIN,
+    periods: m.periods, periodsDropped: dropped,
+    // 기준선은 **날짜로** 내려준다 — 화면이 일 인덱스(숫자)를 사람에게 보여주면 안 된다.
+    devices: m.devices.map((d) => {
+      const sp = spans[d.deviceId] || {};
+      const firstDay = sp.firstDay ?? d.firstDay;
+      const observedDays = sp.observed ?? d.observedDays;
+      const totalSpan = firstDay == null ? 0 : d.latestDay - firstDay + 1;
+      return {
+      ...d,
+      firstDay,
+      observedDays,
+      // 첫 관측부터 지금까지 중 **수집 기록이 없는 날 수**. 0 이 아니면 화면이 밝힌다
+      // ('매일 관측이 있었다' 고 가정하지 않는다).
+      gapDays: Math.max(0, totalSpan - observedDays),
+      latestLabel: dayLabel(d.latestDay),
+      firstLabel: firstDay == null ? null : dayLabel(firstDay),
+      growth: Object.fromEntries(Object.entries(d.growth).map(([k, g]) => [k,
+        { ...g, baselineLabel: g.baselineDay == null ? null : dayLabel(g.baselineDay) }])),
+      }; }),
+    totals: m.totals,
+    retention: { ...loadGrowthSettings(), effective: keep },
+    // 등록돼 있는데 이력이 한 줄도 없는 장비 — 화면이 '빠진 장비' 로 밝힌다(조용히 빼지 않는다).
+    noHistory: listDevices().filter((d) => !m.devices.some((x) => x.deviceId === d.id)).map((d) => ({ id: d.id, name: d.name, host: d.host, type: d.type, enabled: d.enabled !== false })),
+  });
+});
+
+/** 한 장비의 일 단위 추이(증가량 화면의 상세 차트용). */
+api.get('/tools/storage-growth/:id/daily', toolsPerm, fullScopeOnly, async (req, res) => {
+  const days = Math.max(2, Math.min(3650, Number(req.query.days) || 365));
+  const asOfDay = dayIndex(Date.now());
+  const rows = await dailySeries(req.params.id, asOfDay - days);
+  res.json({
+    db: await dbAvailable(), days, asOfDay,
+    points: rows.map((r) => ({ day: r.day, label: dayLabel(r.day), ts: dayStartMs(r.day),
+      totalBytes: r.total_bytes, usedBytes: r.used_bytes, maxUsed: r.max_used, samples: r.samples })),
+  });
+});
+
+/** 보존 설정 조회 — 폼은 이 SPEC 으로 그린다(숫자 하드코딩 금지). */
+api.get('/tools/storage-growth/settings', toolsPerm, fullScopeOnly, (req, res) => {
+  res.json({ spec: GROWTH_SPEC, values: loadGrowthSettings(), defaultPeriods: DEFAULT_PERIODS });
+});
+
+/**
+ * 보존 설정 저장(관리자) — **되돌릴 수 없는 삭제**가 따라올 수 있으므로 감사로그를 남긴다.
+ * `prune:true` 일 때만 즉시 정리한다(화면이 '지금 정리' 를 눌렀을 때).
+ */
+api.post('/tools/storage-growth/settings', adminOnly, requireSettingsOwner, async (req, res) => {
+  const { values, issues } = saveGrowthSettings(req.body || {});
+  let pruned = false;
+  if (req.body?.prune === true) pruned = await pruneNow();
+  logAudit(req, 'storage.growth.settings', { values, pruned });
+  res.json({ ok: true, values, issues, pruned });
+});
+
 api.get('/tools/storage/history', toolsPerm, fullScopeOnly, async (req, res) => {
   const { spanMs, bucketMs, range } = usageRange(req.query);
   // 전체 합산은 버킷이 필수 — 12시간 구간이라도 10분 버킷으로 시각을 정렬한다.

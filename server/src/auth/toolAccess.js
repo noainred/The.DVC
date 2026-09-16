@@ -67,6 +67,9 @@ export const TOOL_PATH_KEYS = Object.freeze({
   snapshots: 'snapshots',
   solutions: 'solutions',
   storage: 'storage-mon',
+  // v2.531: 스토리지 증가량은 **전용 엔드포인트**다(/tools/storage-growth*) — 'storage' 와
+  // 묶으면 증가량만 막고 싶을 때 모니터링 화면까지 같이 막힌다(반대도 마찬가지).
+  'storage-growth': 'storage-growth',
   'thin-vms': 'thinvms',
   threats: 'threats',
   'vm-clone': 'vm-clone',
