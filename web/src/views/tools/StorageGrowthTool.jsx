@@ -7,7 +7,10 @@ import BoldText from '../../components/boldText.jsx';
 import {
   GROWTH_UNITS, bytesAuto, bytesIn, growthCell, totalCell,
   fullEtaText, headline, missingNote, heat, maxAbsFor,
+  growthPct, growthPctText, aggregateGrowth,
 } from './storageGrowthText.js';
+import { facetState, toggleIn, groupBy } from './deviceFacets.js';
+import DeviceFacetBar from './DeviceFacetBar.jsx';
 
 /**
  * 특수기능 › 스토리지 증가량(v2.531) — **임원 보고서 형태**.
@@ -54,6 +57,12 @@ export default function StorageGrowthTool() {
   const [periods, setPeriods] = useState(() => lsGet(LS_PERIODS, '1,7,30,90'));
   const [detail, setDetail] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  // 법인·장비 종류 필터 + 집계 축(v2.532, 사용자 요청). 판정은 deviceFacets(순수)가 한다.
+  // ⚠ 훅은 전부 조기 return 위에 둔다 — 뒤에 추가하면 React #310 으로 화면이 크래시한다.
+  const [dcSel, setDcSel] = useState(() => new Set());
+  const [typeSel, setTypeSel] = useState(() => new Set());
+  const [query, setQuery] = useState('');
+  const [axis, setAxis] = useState('device');   // 'device' | 'dc' | 'type'
 
   const load = useCallback((p) => {
     setBusy(true);
@@ -66,20 +75,33 @@ export default function StorageGrowthTool() {
   // ⚠ 폴링 없음 — 마운트 1회 + 기간이 바뀔 때만.
   useEffect(() => { load(periods); }, [load, periods]);
 
+  const dcName = useCallback((id) => ((d?.datacenters || []).find((x) => x.id === id)?.name || id || '미지정'), [d]);
+  const typeLabel = useCallback((t) => ((d?.types || []).find((x) => x.type === t)?.label || t || ''), [d]);
+  const facets = useMemo(() => facetState({
+    rows: d?.devices || [], dcSel, typeSel, query, dcName, typeLabel,
+  }), [d, dcSel, typeSel, query, dcName, typeLabel]);
   const head = useMemo(() => headline(d, unit), [d, unit]);
   const miss = useMemo(() => missingNote(d?.noHistory), [d]);
   const cols = d?.periods || [];
   // 열마다 따로 정규화한다 — 1일 증가량과 1년 증가량을 같은 척도로 칠하면 1일 열이 전부 하얘진다.
   const maxAbs = useMemo(() => {
     const m = {};
-    for (const p of cols) m[p.key] = maxAbsFor(d?.devices, p.key);
+    for (const p of cols) m[p.key] = maxAbsFor(facets.shown, p.key);
     return m;
-  }, [d, cols]);
+  }, [facets, cols]);
+  // 필터가 걸리면 **합계도 그 부분집합으로 다시** 낸다 — 서버가 준 전체 합계를 그대로 두면
+  // '표는 3대인데 합계는 59대' 가 되어 보고서가 거짓말을 한다.
+  const shownTotals = useMemo(() => aggregateGrowth(facets.shown, cols), [facets, cols]);
+  const groups = useMemo(() => {
+    if (axis === 'dc') return groupBy(facets.shown, (r) => r.datacenterId || '', (k) => dcName(k));
+    if (axis === 'type') return groupBy(facets.shown, (r) => r.type || '', (k) => typeLabel(k));
+    return null;
+  }, [axis, facets, dcName, typeLabel]);
 
   if (err && !d) return <ErrorBox error={err} />;
   if (!d) return <Loading />;
 
-  const t = d.totals || {};
+  const t = shownTotals;   // 필터가 걸리면 그 부분집합의 합계다(위 주석 참조)
 
   return (
     <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: 14 }}>
@@ -149,10 +171,49 @@ export default function StorageGrowthTool() {
         </div>
       </div>
 
+      {/* ── 법인·장비 종류 필터(v2.532) ─────────────────────────────
+          ⚠ 표시 조건은 **전체 장비 수**다 — 필터 결과로 판단하면 0건일 때 바가 사라져
+             검색창까지 없어지고 사용자가 자기가 친 글자를 지울 수 없다(DeviceFacetBar 머리말). */}
+      {(d.devices?.length || 0) > 0 && (
+        <DeviceFacetBar
+          dcChips={facets.dcChips} typeChips={facets.typeChips}
+          dcSel={dcSel} typeSel={typeSel}
+          onToggleDc={(v) => setDcSel((prev) => toggleIn(prev, v))}
+          onToggleType={(v) => setTypeSel((prev) => toggleIn(prev, v))}
+          onClear={() => { setDcSel(new Set()); setTypeSel(new Set()); }}
+          query={query} onQuery={setQuery} typeLabel={typeLabel}
+          dcMeta={(list) => {
+            const a = aggregateGrowth(list, cols);
+            return {
+              dot: a.pct >= 90 ? 'var(--red)' : a.pct >= 75 ? 'var(--amber)' : 'var(--green)',
+              title: `${list.length}대 · 사용 ${bytesAuto(a.usedBytes) ?? '—'} / ${bytesAuto(a.totalBytes) ?? '—'}`
+                + `${a.pct != null ? ` (${a.pct}%)` : ''}`,
+            };
+          }} />
+      )}
+
+      {/* 지금 무엇으로 걸러진 목록인지 한 줄로 — 부분 목록을 전체로 오해하지 않게. */}
+      {(facets.facetOn || query) && (
+        <div className="muted" style={{ fontSize: 12, margin: '-4px 0 0 2px' }}>
+          🔎 장비 <b style={{ color: 'var(--text)' }}>{facets.shown.length}</b>대 표시
+          (전체 {d.devices.length}대 중) — <b style={{ color: 'var(--text)' }}>아래 수치와 합계는 이 범위 기준</b>입니다.
+        </div>
+      )}
+
       {/* ── 증가량 매트릭스 ─────────────────────────────────────────── */}
       <div className="card" style={{ padding: '14px 16px', minWidth: 0 }}>
-        <SectionTitle n="01" title="장비별 증가량 매트릭스"
-          sub="칸의 배경 농도는 그 기간 열 안에서의 상대 크기입니다. 값에 마우스를 올리면 기준선 날짜와 실제 비교 구간이 나옵니다." />
+        <div className="flex gap wrap" style={{ alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+          <SectionTitle n="01" title={axis === 'dc' ? '법인별 증가량 매트릭스' : axis === 'type' ? '장비 종류별 증가량 매트릭스' : '장비별 증가량 매트릭스'}
+            sub={axis === 'device'
+              ? '칸의 배경 농도는 그 기간 열 안에서의 상대 크기입니다. 값에 마우스를 올리면 기준선 날짜와 실제 비교 구간이 나옵니다.'
+              : '묶음 안에서 기준선이 있는 장비만 더합니다 — 일부만 더했으면 「부분」으로 밝힙니다.'} />
+          <div className="flex gap" style={{ gap: 6, flex: 'none' }}>
+            {[['device', '장비별'], ['dc', '법인별'], ['type', '종류별']].map(([k, label]) => (
+              <button key={k} className={`tab${axis === k ? ' active' : ''}`} onClick={() => setAxis(k)}
+                title={k === 'device' ? '장비 한 대씩 봅니다.' : k === 'dc' ? '법인 한 줄로 합산해 봅니다.' : '장비 종류 한 줄로 합산해 봅니다.'}>{label}</button>
+            ))}
+          </div>
+        </div>
         {d.devices.length === 0
           ? <Note tone="info" text={head.body || '아직 집계할 이력이 없습니다.'} />
           : (
@@ -165,16 +226,18 @@ export default function StorageGrowthTool() {
               <STable>
                 <thead>
                   <tr>
-                    <th>장비</th>
+                    <th>{axis === 'dc' ? '법인' : axis === 'type' ? '장비 종류' : '장비'}</th>
                     <th className="right">사용 / 전체</th>
                     <th className="right">사용률</th>
                     {cols.map((p) => <th key={p.key} className="right">{p.label} 증가</th>)}
-                    <th className="right">소진 예상</th>
+                    {axis === 'device' ? <th className="right">소진 예상</th> : <th className="right">장비</th>}
                     <th data-nosort>관측</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {d.devices.map((dev) => <DeviceRow key={dev.deviceId} dev={dev} cols={cols} unit={unit} maxAbs={maxAbs} onOpen={() => setDetail(dev)} />)}
+                  {axis === 'device'
+                    ? facets.shown.map((dev) => <DeviceRow key={dev.deviceId} dev={dev} cols={cols} unit={unit} maxAbs={maxAbs} onOpen={() => setDetail(dev)} />)
+                    : groups.map((g) => <GroupRow key={g.key || '(미지정)'} g={g} cols={cols} unit={unit} />)}
                   <tr data-pin>
                     <td><b>합계</b></td>
                     <td className="right" data-sort={String(t.usedBytes ?? '')}>
@@ -182,15 +245,22 @@ export default function StorageGrowthTool() {
                     </td>
                     <td className="right">{t.pct != null ? `${t.pct}%` : '—'}</td>
                     {cols.map((p) => {
+                      // 합계 행도 **장비 행과 같은 2줄**이다 — 한 줄만 다르면 사용자가 '합계에는
+                      // 퍼센트가 없다' 고 읽는다(v2.532 Chromium 판독에서 빠져 있는 것을 발견).
                       const c = totalCell(t.growth?.[p.key], unit);
+                      const pctText = growthPctText(growthPct(t.growth?.[p.key], t.usedBytes));
                       return (
-                        <td key={p.key} className="right" title={c.title} data-sort={String(t.growth?.[p.key]?.bytes ?? '')}>
-                          <b style={{ color: TONE_COLOR[c.tone] }}>{c.text}</b>
-                          {c.partial ? <sup style={{ color: 'var(--amber)', marginLeft: 2 }} title={c.title}>부분</sup> : null}
+                        <td key={p.key} className="right" title={c.title} data-sort={String(t.growth?.[p.key]?.bytes ?? '')}
+                          style={{ color: TONE_COLOR[c.tone], fontWeight: c.tone === 'none' ? 400 : 700 }}>
+                          {pctText ? <div style={{ lineHeight: 1.25 }}>{pctText}</div> : null}
+                          <div style={{ lineHeight: 1.25, fontSize: pctText ? 11.5 : undefined, opacity: pctText ? 0.85 : 1 }}>
+                            {c.text}
+                            {c.partial ? <sup style={{ color: 'var(--amber)', marginLeft: 2 }} title={c.title}>부분</sup> : null}
+                          </div>
                         </td>
                       );
                     })}
-                    <td className="right">—</td>
+                    <td className="right">{axis === 'device' ? '—' : `${facets.shown.length}대`}</td>
                     <td>—</td>
                   </tr>
                 </tbody>
@@ -200,7 +270,9 @@ export default function StorageGrowthTool() {
       </div>
 
       {/* ── 주의가 필요한 장비 ───────────────────────────────────────── */}
-      <WatchList devices={d.devices} cols={cols} unit={unit} />
+      {/* ⚠ 필터를 건 범위로 그린다 — 전체를 그리면 '장비 1대 표시' 라고 해 놓고 아래에는
+          범위 밖 장비가 뜬다(v2.532 스크린샷 판독에서 발견). */}
+      <WatchList devices={facets.shown} cols={cols} unit={unit} />
 
       {/* ── 단서(무엇을 못 봤는가) ───────────────────────────────────── */}
       <div className="card" style={{ padding: '14px 16px' }}>
@@ -262,6 +334,80 @@ function Note({ tone, text }) {
   );
 }
 
+/**
+ * 증가량 한 칸 — **증가율(%)과 용량을 2줄로** 보여준다(v2.532 사용자 요청
+ * "1일 증가를 증가하는 퍼센트와 용량으로 2줄로 모두 보여줘").
+ *
+ * 윗줄 = 퍼센트(한눈에 추세), 아랫줄 = 용량(실제 규모). 퍼센트만 보면 작은 어레이의 큰 %가
+ * 커 보이고, 용량만 보면 큰 어레이의 작은 %가 커 보인다 — 그래서 **둘 다** 낸다.
+ *
+ * ⚠ **퍼센트를 못 낼 때 용량 줄까지 숨기지 말 것.** 기준선 사용량이 0 이면 비율이 무한대라
+ *   `growthPct` 가 null 을 주는데, 그때도 증가한 용량은 사실이다 — 용량만 그린다.
+ * ⚠ 값이 없는 칸('—')에는 '≈'(구간 근사)를 붙이지 않는다(v2.531 스크린샷 판독에서 고친 것).
+ */
+function GrowthCell({ g, unit, heatRatio, latestUsed }) {
+  const c = growthCell(g, unit);
+  const pctText = growthPctText(growthPct(g, latestUsed));
+  // 히트맵: 증가는 붉게, 감소는 푸르게. 농도는 그 열 안에서의 상대 크기다.
+  const bg = c.tone === 'up' ? `rgba(229,72,77,${(heatRatio * 0.32).toFixed(3)})`
+    : c.tone === 'down' ? `rgba(55,214,122,${(heatRatio * 0.26).toFixed(3)})` : 'transparent';
+  return (
+    <td className="right" title={c.title} data-sort={String(g?.bytes ?? '')}
+      style={{ background: bg, color: TONE_COLOR[c.tone], fontWeight: c.tone === 'none' ? 400 : 700 }}>
+      {pctText ? <div style={{ lineHeight: 1.25 }}>{pctText}</div> : null}
+      <div style={{ lineHeight: 1.25, fontSize: pctText ? 11.5 : undefined, opacity: pctText ? 0.85 : 1 }}>
+        {c.text}
+        {c.tone !== 'none' && c.exact === false ? <sup style={{ color: 'var(--amber)', marginLeft: 2 }}>≈</sup> : null}
+      </div>
+    </td>
+  );
+}
+
+/**
+ * 법인별·종류별 한 줄(v2.532). 묶음 안에서 **기준선이 있는 장비만** 더하고, 일부만 더했으면
+ * 「부분」으로 밝힌다 — 규칙의 원본은 서버 `storage/growth.js totalsOf` 다.
+ */
+function GroupRow({ g, cols, unit }) {
+  const a = aggregateGrowth(g.list, cols);
+  return (
+    <tr>
+      <td>
+        <div style={{ fontWeight: 700 }}>{g.label || '(미지정)'}</div>
+        <div className="muted" style={{ fontSize: 11 }}>{g.list.length}대</div>
+      </td>
+      <td className="right" data-sort={String(a.usedBytes ?? '')}>
+        <b>{bytesAuto(a.usedBytes) ?? '—'}</b> <span className="muted">/ {bytesAuto(a.totalBytes) ?? '—'}</span>
+      </td>
+      <td className="right" data-sort={String(a.pct ?? '')}
+        style={{ color: a.pct >= 90 ? 'var(--red)' : a.pct >= 75 ? 'var(--amber)' : undefined, fontWeight: 700 }}>
+        {a.pct != null ? `${a.pct}%` : '—'}
+      </td>
+      {cols.map((p) => {
+        const c = totalCell(a.growth?.[p.key], unit);
+        const pctText = growthPctText(growthPct(a.growth?.[p.key], a.usedBytes));
+        return (
+          <td key={p.key} className="right" title={c.title} data-sort={String(a.growth?.[p.key]?.bytes ?? '')}
+            style={{ color: TONE_COLOR[c.tone], fontWeight: c.tone === 'none' ? 400 : 700 }}>
+            {pctText ? <div style={{ lineHeight: 1.25 }}>{pctText}</div> : null}
+            <div style={{ lineHeight: 1.25, fontSize: pctText ? 11.5 : undefined, opacity: pctText ? 0.85 : 1 }}>
+              {c.text}
+              {c.partial ? <sup style={{ color: 'var(--amber)', marginLeft: 2 }} title={c.title}>부분</sup> : null}
+            </div>
+          </td>
+        );
+      })}
+      <td className="right">{g.list.length}대</td>
+      <td>
+        {/* 묶음의 '관측' 은 가장 짧은 장비 기준이다 — 가장 긴 것을 쓰면 '한 대만 700일' 인데
+            묶음 전체가 700일치인 것처럼 보인다. */}
+        <span className="muted" style={{ fontSize: 11.5 }}>
+          최소 {Math.min(...g.list.map((x) => x.observedDays ?? 0))}일
+        </span>
+      </td>
+    </tr>
+  );
+}
+
 function DeviceRow({ dev, cols, unit, maxAbs, onOpen }) {
   const eta = fullEtaText(dev.daysToFull);
   return (
@@ -288,21 +434,8 @@ function DeviceRow({ dev, cols, unit, maxAbs, onOpen }) {
       </td>
       {cols.map((p) => {
         const g = dev.growth?.[p.key];
-        const c = growthCell(g, unit);
         const h = heat(g?.bytes, maxAbs[p.key]);
-        // 히트맵: 증가는 붉게, 감소는 푸르게. 농도는 그 열 안에서의 상대 크기다.
-        const bg = c.tone === 'up' ? `rgba(229,72,77,${(h * 0.32).toFixed(3)})`
-          : c.tone === 'down' ? `rgba(55,214,122,${(h * 0.26).toFixed(3)})` : 'transparent';
-        return (
-          <td key={p.key} className="right" title={c.title} data-sort={String(g?.bytes ?? '')}
-            style={{ background: bg, color: TONE_COLOR[c.tone], fontWeight: c.tone === 'none' ? 400 : 700 }}>
-            {c.text}
-            {/* 요청한 기간과 실제 구간이 다르면 조용히 넘어가지 않는다.
-                ⚠ **값이 없는 칸('—')에는 붙이지 않는다** — 비교 자체를 못 했는데 '근사 구간'
-                이라 표시하면 뜻이 없고 기호 오류처럼 보인다(v2.531 스크린샷 판독에서 발견). */}
-            {c.tone !== 'none' && c.exact === false ? <sup style={{ color: 'var(--amber)', marginLeft: 2 }}>≈</sup> : null}
-          </td>
-        );
+        return <GrowthCell key={p.key} g={g} unit={unit} heatRatio={h} latestUsed={dev.usedBytes} />;
       })}
       <td className="right" data-sort={String(dev.daysToFull?.days ?? '')}
         title={eta?.title} style={{ color: eta?.tone === 'bad' ? 'var(--red)' : eta?.tone === 'warn' ? 'var(--amber)' : undefined }}>

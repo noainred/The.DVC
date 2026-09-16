@@ -9,6 +9,10 @@ import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js
 import { emptyListText, conflictText } from './storageListText.js';
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
+// v2.532: 법인·장비 종류 필터의 **판정과 마크업을 증가량 화면과 공유**한다(CLAUDE.md '코어는
+// 하나다'). 여기 있던 것을 옮긴 것이고, 복사해 두면 '같은 메뉴' 가 조용히 갈라진다.
+import { facetState, toggleIn as toggleSet, groupBy as groupByKey } from './deviceFacets.js';
+import DeviceFacetBar from './DeviceFacetBar.jsx';
 import UnityConfigPanels from './UnityConfigPanels.jsx';   // v2.525: Unity 구성 정보 패널
 import CollectActivity from './CollectActivity.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -384,13 +388,8 @@ export default function StorageMonTool() {
   // 두 축은 AND 로 결합한다 — 'AZ,WA + PowerScale' 이면 AZ·WA 에 있는 PowerScale 만 보인다.
   const [dcSel, setDcSel] = useState(() => new Set());
   const [typeSel, setTypeSel] = useState(() => new Set());
-  const toggleIn = (setter) => (v) => setter((prev) => {
-    const next = new Set(prev);
-    if (next.has(v)) next.delete(v); else next.add(v);
-    return next;
-  });
-  const toggleDc = toggleIn(setDcSel);
-  const toggleType = toggleIn(setTypeSel);
+  const toggleDc = (v) => setDcSel((prev) => toggleSet(prev, v));
+  const toggleType = (v) => setTypeSel((prev) => toggleSet(prev, v));
   const clearFacets = () => { setDcSel(new Set()); setTypeSel(new Set()); };
 
   const load = () => fetchJson('/tools/storage').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
@@ -416,36 +415,18 @@ export default function StorageMonTool() {
    * ⚠ 그룹핑은 반드시 '거른 뒤'에 한다 — 먼저 그룹핑하고 그룹명만 비교하면 장비명으로 찾을 수
    * 없고, 매칭된 법인 안에 매칭되지 않은 장비까지 같이 나온다.
    */
-  const kws = dcQuery.toLowerCase().split(/\s+/).filter(Boolean);
-  const matchDevice = (r) => {
-    if (!kws.length) return true;
-    const hay = [dcName(r.datacenterId), r.name, r.snap?.name, r.host, typeLabel(r.type), r.agent]
-      .filter(Boolean).join(' ').toLowerCase();
-    return kws.every((kw) => hay.includes(kw));
-  };
-  // 검색만 적용한 집합 — 칩 목록/개수의 기준이다. 칩을 '다른 축의 선택'으로 거르면
-  // 방금 고른 칩이 사라져 해제할 수 없게 되므로, 칩 자체는 검색 결과 기준으로 항상 보여준다.
-  const searched = rows.filter(matchDevice);
-  const inDc = (r) => dcSel.size === 0 || dcSel.has(dcName(r.datacenterId));
-  const inType = (r) => typeSel.size === 0 || typeSel.has(r.type);
-  const shown = searched.filter((r) => inDc(r) && inType(r)); // 하단 목록·그룹의 원천
-  const facetOn = dcSel.size > 0 || typeSel.size > 0;
+  // v2.532: 판정은 공용 순수 모듈이 한다(deviceFacets). 검색 건초더미에 **수집 스냅샷 이름**
+  // (`r.snap?.name`)을 더하는 것만 이 화면 고유다 — 장비가 보고한 이름으로도 찾게.
+  const { searched, shown, dcChips, typeChips, facetOn } = facetState({
+    rows, dcSel, typeSel, query: dcQuery, dcName, typeLabel,
+    hay: (r) => [dcName(r.datacenterId), r.name, r.snap?.name, r.host, typeLabel(r.type), r.agent],
+  });
   // v2.522: 목록이 비었을 때 **왜** 비었는지(등록 0 / 필터 0 / 검색 0)를 구분한다 —
   // 판정·문구는 순수 모듈(storageListText)에 있고 테스트가 고정한다.
   const emptyInfo = emptyListText({ registered: rows.length, facetOn, query: dcQuery });
-  // 칩에 표시할 개수는 '다른 축의 선택을 반영한' 수 — 고르면 몇 대가 남는지 미리 보인다.
-  const dcChips = [...new Map(searched.map((r) => [dcName(r.datacenterId), true])).keys()]
-    .sort((a, b) => String(a).localeCompare(String(b)))
-    .map((dc) => ({ dc, list: searched.filter((r) => dcName(r.datacenterId) === dc), count: searched.filter((r) => dcName(r.datacenterId) === dc && inType(r)).length }));
-  const typeChips = [...new Set(searched.map((r) => r.type))]
-    .sort((a, b) => String(typeLabel(a)).localeCompare(String(typeLabel(b))))
-    .map((t) => ({ type: t, count: searched.filter((r) => r.type === t && inDc(r)).length }));
-  // 그룹핑(법인별/타입별) — 서버 평탄 목록을 프론트에서 묶는다(뷰 확장에 서버 변경 불필요).
-  const groupShown = (keyFn) => {
-    const m = new Map();
-    for (const r of shown) { const k = keyFn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
-    return [...m.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
-  };
+  // 칩 목록·개수는 공용 판정이 준다(위 facetState). 그룹핑도 공용 groupBy 를 쓰되,
+  // 이 화면의 기존 소비부가 `[key, list]` 튜플 배열을 기대하므로 형태만 맞춰 준다.
+  const groupShown = (keyFn) => groupByKey(shown, keyFn).map((g) => [g.key, g.list]);
   // 법인 그룹 1회 계산 — 바로가기 칩과 '법인별' 뷰가 같은 배열을 쓴다(그룹핑 중복 순회 방지).
   // 검색 중이면 매칭 장비만 남은 그룹이므로 칩도 자동으로 같이 좁혀진다(칩/목록 불일치 방지).
   const dcGroups = groupShown((r) => dcName(r.datacenterId));
@@ -553,56 +534,19 @@ export default function StorageMonTool() {
           0건일 때 바가 통째로 사라지면 그 안의 검색창까지 없어져 사용자가 자기가 친 글자를
           지울 수 없다(무결과 = 영구 빈 화면). 실제로 그 상태를 만들었다가 잡은 결함이다. */}
       {view !== 'trend' && rows.length > 0 && (
-        <div className="vc-quicknav" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-          {/* 1줄: 법인 필터(다중 선택). v2.406 까지는 누르면 그 법인으로 '이동'했지만, 사용자
-              요구로 **선택한 법인만 보여주는 필터**로 바꿨다. 아무것도 안 고르면 전체. */}
-          <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8 }}>
-            <span className="qn-label" style={{ minWidth: 74 }}>🏢 법인</span>
-            {dcChips.map(({ dc, list, count }) => {
-              const g = dcSummary(list);
-              const on = dcSel.has(dc);
-              return (
-                <button key={dc} className={`qn-btn${on ? ' on' : ''}${g.fail ? ' down' : ''}`}
-                  aria-pressed={on} onClick={() => toggleDc(dc)}
-                  title={`${dc} — 장비 ${list.length}대 · ${tbFmt(g.used)} / ${tbFmt(g.total)}${g.total ? ` (${g.pct}%)` : ''}`
-                    + `${g.fail ? ` · 수집 실패/대기 ${g.fail}` : ''}${g.alerts ? ` · 미해결 경보 ${g.alerts}` : ''}`
-                    + `\n${on ? '클릭하면 선택 해제' : '클릭하면 이 법인만 표시(여러 개 선택 가능)'}`}>
-                  <span className="qn-dot" style={{ background: g.dot }} />{dc}
-                  <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{count}</span>
-                </button>
-              );
-            })}
-          </div>
-          {/* 2줄: 장비 종류 필터(다중 선택). 법인 선택과 AND 로 묶인다 —
-              'AZ,WA + PowerScale' 이면 AZ·WA 의 PowerScale 만 보인다(사용자 예시). */}
-          <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8 }}>
-            <span className="qn-label" style={{ minWidth: 74 }}>🗄 장비 종류</span>
-            {typeChips.map(({ type, count }) => {
-              const on = typeSel.has(type);
-              return (
-                <button key={type} className={`qn-btn${on ? ' on' : ''}${count === 0 ? ' down' : ''}`}
-                  aria-pressed={on} onClick={() => toggleType(type)}
-                  title={`${typeLabel(type)} — 선택된 법인 기준 ${count}대`
-                    + `\n${on ? '클릭하면 선택 해제' : '클릭하면 이 종류만 표시(여러 개 선택 가능)'}`}>
-                  {typeLabel(type)}
-                  <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{count}</span>
-                </button>
-              );
-            })}
-            {/* 오른쪽 묶음: 빠른 찾기 + 필터 해제. 1줄(법인 칩) 끝에 두면 칩이 많을 때 auto 마진이
-                검색창을 혼자 다음 줄로 밀어내 떠 보였다 — 2줄 끝으로 모아 항상 같은 자리에 둔다. */}
-            <span className="flex gap" style={{ marginLeft: 'auto', alignItems: 'center', gap: 8 }}>
-              {/* 무결과여도 박스가 남아야 입력을 지울 수 있다. */}
-              <SearchBox className="input" style={{ maxWidth: 250, minWidth: 180 }}
-                value={dcQuery} onChange={setDcQuery} placeholder="법인·장비 찾기 (목록 필터)"
-                title="입력한 글자가 포함된 법인·장비만 아래 목록에 표시합니다(법인명·장비명·host·타입·엣지에서 검색)." />
-              {facetOn && (
-                <button className="qn-btn" onClick={clearFacets}
-                  title="법인·장비 종류 선택을 모두 해제하고 전체를 봅니다.">✕ 필터 해제</button>
-              )}
-            </span>
-          </div>
-        </div>
+        <DeviceFacetBar
+          dcChips={dcChips} typeChips={typeChips} dcSel={dcSel} typeSel={typeSel}
+          onToggleDc={toggleDc} onToggleType={toggleType} onClear={clearFacets}
+          query={dcQuery} onQuery={setDcQuery} typeLabel={typeLabel}
+          dcMeta={(list) => {
+            const g = dcSummary(list);
+            return {
+              dot: g.dot,
+              bad: !!g.fail,
+              title: `${list.length}대 · ${tbFmt(g.used)} / ${tbFmt(g.total)}${g.total ? ` (${g.pct}%)` : ''}`
+                + `${g.fail ? ` · 수집 실패/대기 ${g.fail}` : ''}${g.alerts ? ` · 미해결 경보 ${g.alerts}` : ''}`,
+            };
+          }} />
       )}
 
       {/* 선택 요약 — 지금 무엇으로 걸러진 목록인지 한 줄로(빈 화면·부분 목록 오해 방지). */}
@@ -617,7 +561,7 @@ export default function StorageMonTool() {
       )}
 
       {/* 검색 결과 안내 — 몇 대가 걸렸는지, 없으면 왜 비었는지 알려준다(빈 화면 오해 방지). */}
-      {kws.length > 0 && (
+      {dcQuery.trim().length > 0 && (
         shown.length === 0
           ? <div className="card" style={{ padding: '14px 16px', marginBottom: 12, color: 'var(--text-dim)', fontSize: 12.5 }}>
               "{dcQuery}" 와 일치하는 장비가 없습니다 — 법인명·장비명·host·타입·엣지에서 검색합니다.
