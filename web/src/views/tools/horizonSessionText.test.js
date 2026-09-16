@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   collectStateNote, connectedText, unionNote, combinedNote, partialNote,
-  provenanceText, sinceNote, intervalText, agoText, kindTone, kindAdvice,
+  provenanceText, sinceNote, intervalText, agoText, kindTone, kindAdvice, authStopNote,
   KIND_TONE, KIND_ADVICE, NAME_MASK_NOTE, TRUST_NOTE, SESSION_PATH_NOTE, SOURCE_STATE_LABEL,
 } from './horizonSessionText.js';
 
@@ -193,6 +193,29 @@ describe('보조 문구', () => {
     expect(kindTone('auth')).toBe('red');
     expect(kindAdvice('auth')).toContain('자동 재시도');
     expect(kindAdvice('없는키')).toBe('');
+  });
+  it("'인증 실패 정지'(v2.535)는 'auth' 와 구분되고 재개 방법을 말한다", () => {
+    // 조치가 같아 보여도 사용자가 알아야 할 사실이 다르다 — 지금은 시도조차 하지 않는다.
+    expect(KIND_TONE['auth-stopped']).toBe('red');
+    const a = kindAdvice('auth-stopped');
+    expect(a).toContain('주기 수집을 멈췄습니다');
+    expect(a).toContain('자동으로 재개');      // 비밀번호를 고치면 버튼 없이 재개된다
+    expect(a).toContain('지금 수집');          // 수동 실행은 막히지 않는다
+    expect(a).not.toBe(KIND_ADVICE.auth);
+  });
+  it('정지 시점·횟수를 말한다 — 없는 값은 지어내지 않는다', () => {
+    const n = 1_700_000_000_000;
+    const r = authStopNote({ since: n - 3 * 3_600_000, at: n - 300_000, attempts: 7, reason: '인증 실패(401)' }, n);
+    expect(r.text).toContain('3시간 전부터 정지');
+    expect(r.text).toContain('실패 7회');
+    expect(r.text).toContain('마지막 시도 5분 전');
+    expect(r.text).toContain('사유: 인증 실패(401)');
+    // ⚠ `Number(null) === 0` — 횟수를 못 읽으면 '0회' 라고 말하지 않는다(v2.525 규약)
+    const noAttempt = authStopNote({ since: n - 60_000, at: n, attempts: null }, n);
+    expect(noAttempt.attempts).toBe(null);
+    expect(noAttempt.text).not.toContain('실패');
+    expect(noAttempt.text).not.toContain('사유');
+    expect(authStopNote(null)).toBe(null);
   });
   it('신뢰·경로·가림 고지를 지우지 않는다', () => {
     expect(TRUST_NOTE).toContain('포탈이 세션을 만들거나 바꾸지 않습니다');

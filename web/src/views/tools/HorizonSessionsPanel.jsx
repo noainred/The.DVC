@@ -24,7 +24,7 @@ import BoldText from '../../components/boldText.jsx';
 import CollectActivity from './CollectActivity.jsx';
 import { Card } from './shared.jsx';
 import {
-  agoText, intervalText, kindTone, kindAdvice, collectStateNote, connectedText,
+  agoText, intervalText, kindTone, kindAdvice, authStopNote, collectStateNote, connectedText,
   unionNote, provenanceText, sinceNote, NAME_MASK_NOTE, TRUST_NOTE, SESSION_PATH_NOTE,
 } from './horizonSessionText.js';
 import { HorizonSessionSettings } from './HorizonSessionSettings.jsx';
@@ -267,6 +267,12 @@ export default function HorizonSessionsPanel() {
           <div style={{ fontSize: 12.5, lineHeight: 1.7 }}>
             <div><b>판정</b> <KindBadge kind={detail.kind} labels={labels} /></div>
             {kindAdvice(detail.kind) && <div style={{ marginTop: 6, whiteSpace: 'normal' }}><BoldText text={kindAdvice(detail.kind)} /></div>}
+            {/* 정지 사실만이 아니라 **시점·횟수**를 말한다(v2.528 규약) — 없으면 사용자가 그동안의 수치를 현재값으로 읽는다. */}
+            {authStopNote(detail.authStopped, data?.now) && (
+              <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-dim)', whiteSpace: 'normal' }}>
+                {authStopNote(detail.authStopped, data?.now).text}
+              </div>
+            )}
             {detail.error && (
               <>
                 <div style={{ marginTop: 8, fontWeight: 700 }}>장비가 돌려준 사유(원문)</div>
