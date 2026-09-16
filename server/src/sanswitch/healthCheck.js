@@ -35,6 +35,36 @@
 export const RX_WARN_DBM = -9;
 export const RX_BAD_DBM = -12;
 
+/**
+ * **링크가 올라온 포트**만 광량을 판정한다(v2.521 — 사용자 신고 "점검결과 포트 광량이 장애수준인데,
+ * 확인해보면 사용하지 않는 포트에, 사용하지 않는 포트는 제외 해야 맞는거 같다").
+ *
+ * 근거: 링크가 없으면 **상대가 빛을 보내지 않으므로** Rx 가 바닥인 것이 정상이다. 실제 현장
+ * 스크린샷에서 포트 10~15·45·46 이 전부 `비어있음` 인데 -27 dBm 으로 '이상' 판정이 나갔다 —
+ * 거짓 경보이고, 이 기능이 만들 수 있는 두 번째로 위험한 거짓이다(첫 번째는 '확인 불가'를
+ * '정상'으로 칠하는 것).
+ * ⚠ 제외한 포트는 **개수를 밝힌다** — 조용히 빼면 '전 포트를 봤다' 는 거짓이 된다.
+ * ⚠ `faulty` 는 제외하지 않는다(장애 포트의 광량은 원인 정보다). 제외 대상은 링크가 없는
+ *   `offline`·`disabled`·`noLicense` 다.
+ */
+export const isLinked = (p) => String(p?.state) === 'online';
+
+/**
+ * 에러 카운터 종류 → **무엇을 의심해야 하는가**(v2.521, 사용자 제공 해석표).
+ * 카운터마다 원인이 다른데 한 줄로 뭉개면 조치가 엉뚱해진다.
+ */
+export const ERROR_CAUSE = Object.freeze({
+  errCrc: { label: 'crc err', cause: '광모듈·케이블 또는 상대 장비 문제 의심' },
+  errEncIn: { label: 'enc in', cause: '물리 계층(Physical Layer) 문제 가능성' },
+  errEncOut: { label: 'enc out', cause: '접점·신호 품질(프레임 밖 인코딩) 문제 가능성' },
+  errLinkFail: { label: 'link fail', cause: '링크 단절 이력 — 케이블·SFP·상대 포트 확인' },
+  errLossSync: { label: 'loss sync', cause: 'Link·Optic·Cable 문제 가능성' },
+  errLossSig: { label: 'loss sig', cause: 'Link·Optic·Cable 문제 가능성(신호 소실)' },
+  discC3: { label: 'disc c3', cause: '혼잡·버퍼 크레딧(Congestion/Buffer) 문제 확인' },
+});
+/** 판정·표기 순서(해석표 순서를 따른다). */
+export const ERROR_KEYS = Object.keys(ERROR_CAUSE);
+
 /** 점검 항목 정의 — 체크리스트 단계(stage)와 라벨. PDF 목차도 이 순서를 쓴다. */
 export const CHECK_ITEMS = [
   { key: 'switchStatus', stage: 1, label: '스위치 종합 상태', cmd: 'switchstatusshow' },
@@ -160,13 +190,19 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
   }
   {
     const withRx = ports.filter((p) => num(p.rxPowerDbm) != null);
+    // ⚠ 링크가 없는 포트는 상대가 빛을 보내지 않아 Rx 가 바닥인 것이 **정상**이다 — 판정에서 뺀다.
+    //   뺀 개수는 반드시 밝힌다(v2.521, 사용자 신고로 확정된 거짓 경보).
+    const judged = withRx.filter(isLinked);
+    const idle = withRx.length - judged.length;
+    const idleNote = idle ? ` · 링크 없는 포트 ${idle}개는 제외(빛을 받지 않는 것이 정상)` : '';
     if (sec.sfp !== 'ok') items.push(mk('optical', 'unknown', uncheckedWhy(sec.sfp, 'sfpshow -all')));
     else if (!withRx.length) items.push(mk('optical', 'unknown', '수신 광량 값이 있는 포트가 없습니다(SFP 미장착 또는 값 미제공).'));
+    else if (!judged.length) items.push(mk('optical', 'unknown', `광량 값은 ${withRx.length}포트에 있지만 **링크가 올라온 포트가 없어** 판정하지 않았습니다(링크 없는 포트의 낮은 Rx 는 정상입니다).`));
     else {
-      const bad = withRx.filter((p) => num(p.rxPowerDbm) <= rxBad);
-      const warn = withRx.filter((p) => num(p.rxPowerDbm) > rxBad && num(p.rxPowerDbm) <= rxWarn);
-      const lo = Math.min(...withRx.map((p) => num(p.rxPowerDbm)));
-      const base = `측정 ${withRx.length}포트 · 최저 ${lo} dBm (주의 ${rxWarn} / 이상 ${rxBad} dBm 기준)`;
+      const bad = judged.filter((p) => num(p.rxPowerDbm) <= rxBad);
+      const warn = judged.filter((p) => num(p.rxPowerDbm) > rxBad && num(p.rxPowerDbm) <= rxWarn);
+      const lo = Math.min(...judged.map((p) => num(p.rxPowerDbm)));
+      const base = `판정 ${judged.length}포트(링크 있음) · 최저 ${lo} dBm (주의 ${rxWarn} / 이상 ${rxBad} dBm 기준)${idleNote}`;
       const ev = (arr) => arr.slice(0, 20).map((p) => `포트 ${p.index}: Rx ${p.rxPowerDbm} dBm${p.attachedName ? ` (${p.attachedName})` : ''}`);
       if (bad.length) items.push(mk('optical', 'bad', `${base} · 하한 미달 ${bad.length}포트 — 케이블 청소 또는 SFP 교체 검토`, { evidence: ev(bad) }));
       else if (warn.length) items.push(mk('optical', 'warn', `${base} · 하한 근접 ${warn.length}포트`, { evidence: ev(warn) }));
@@ -226,17 +262,20 @@ function fruItem(key, fru, section, cmd) {
   return mk(key, 'ok', `${ok}/${total ?? ok} 정상`);
 }
 
-/** 포트 에러 항목 — 누적값과 기준선 이후 신규를 **나눠서** 말한다. */
+/**
+ * 포트 에러 항목 — 누적값과 기준선 이후 신규를 **나눠서** 말하고, v2.521 부터 **카운터 종류별
+ * 원인**(`ERROR_CAUSE`)까지 붙인다. 사용자 제공 해석표를 그대로 옮긴 것이다 —
+ * crc/enc_in/loss_sync·loss_sig/disc_c3 는 의심해야 할 곳이 서로 다르다.
+ */
 function portErrorItem(ports, sec, baseline) {
   if (sec.counters !== 'ok') return mk('portErrors', 'unknown', uncheckedWhy(sec.counters, 'porterrshow'));
-  const KEYS = [['errCrc', 'crc err'], ['errEncOut', 'enc out'], ['errLossSync', 'loss sync'], ['discC3', 'disc c3']];
   const bp = baseline?.ports || null;
   const rows = [];
   let anyCounter = false;
   for (const p of ports) {
     const cur = {}; const dlt = {};
     let curSum = 0; let dltSum = 0; let dltKnown = false;
-    for (const [k] of KEYS) {
+    for (const k of ERROR_KEYS) {
       const v = num(p[k]);
       if (v != null) { anyCounter = true; cur[k] = v; curSum += v; }
       const d = errorDelta(p[k], bp ? bp[String(p.index)]?.[k] : null);
@@ -246,12 +285,12 @@ function portErrorItem(ports, sec, baseline) {
   }
   if (!anyCounter) return mk('portErrors', 'unknown', '`porterrshow` 에서 카운터 값을 읽지 못했습니다.');
 
-  const label = KEYS.map(([k, l]) => l);
+  const label = ERROR_KEYS.map((k) => ERROR_CAUSE[k].label);
   const ev = rows.sort((a, b) => (b.dltKnown ? b.dltSum : b.curSum) - (a.dltKnown ? a.dltSum : a.curSum)).slice(0, 20)
-    .map((r) => `포트 ${r.index}${r.name ? ` (${r.name})` : ''}: ` + KEYS.map(([k, l]) => {
+    .map((r) => `포트 ${r.index}${r.name ? ` (${r.name})` : ''}: ` + ERROR_KEYS.map((k) => {
       const c = r.cur[k]; const d = r.dlt[k];
       if (c == null && d == null) return null;
-      return `${l} ${c ?? '—'}${bp ? ` (신규 ${d == null ? '—' : d})` : ''}`;
+      return `${ERROR_CAUSE[k].label} ${c ?? '—'}${bp ? ` (신규 ${d == null ? '—' : d})` : ''}`;
     }).filter(Boolean).join(', '));
 
   if (!bp) {
@@ -261,14 +300,127 @@ function portErrorItem(ports, sec, baseline) {
       rows.length
         ? `누적 에러가 있는 포트 ${rows.length}개 — **기준선이 없어 '당월 신규' 를 판정할 수 없습니다**(누적값은 부팅 이후 합계입니다).`
         : `에러 카운터가 모두 0 입니다(누적 기준). 기준선이 없어 당월 신규는 판정하지 않았습니다.`,
-      { evidence: ev, needBaseline: true, columns: label });
+      { evidence: ev, needBaseline: true, columns: label, causes: errorCauses(rows, { basis: 'cur' }) });
   }
   const newRows = rows.filter((r) => r.dltSum > 0);
-  if (!newRows.length) return mk('portErrors', 'ok', '기준선 이후 새로 발생한 에러가 없습니다.', { evidence: ev.slice(0, 5), columns: label });
+  const causes = errorCauses(newRows, { basis: 'dlt' });
+  if (!newRows.length) return mk('portErrors', 'ok', '기준선 이후 새로 발생한 에러가 없습니다.', { evidence: ev.slice(0, 5), columns: label, causes: [] });
   const heavy = newRows.filter((r) => r.dltSum >= 100);
   return mk('portErrors', heavy.length ? 'bad' : 'warn',
-    `기준선 이후 신규 에러가 있는 포트 ${newRows.length}개${heavy.length ? ` (100건 이상 ${heavy.length}개)` : ''} — crc err 는 케이블/SFP, enc out 은 접점·신호 품질, disc c3 는 크레딧 부족(Slow Drain)을 가리킵니다.`,
-    { evidence: ev, columns: label });
+    `기준선 이후 신규 에러가 있는 포트 ${newRows.length}개${heavy.length ? ` (100건 이상 ${heavy.length}개)` : ''} — ${causeSentence(causes)}`,
+    { evidence: ev, columns: label, causes });
+}
+
+/**
+ * 카운터 종류별 집계 + 원인(순수 — 테스트가 고정).
+ *
+ * ⚠ 한 문장으로 뭉개지 말 것 — `crc err` 와 `disc c3` 는 조치가 완전히 다르다(전자는 케이블·SFP,
+ *   후자는 혼잡·버퍼 크레딧). 어느 포트에서 났는지도 함께 준다.
+ * @returns [{ key, label, cause, total, ports:number[] }]  건수 많은 순
+ */
+export function errorCauses(rows, { basis = 'dlt', maxPorts = 12 } = {}) {
+  const out = [];
+  for (const k of ERROR_KEYS) {
+    let total = 0; const pts = [];
+    for (const r of rows || []) {
+      const v = num((basis === 'dlt' ? r.dlt : r.cur)?.[k]);
+      if (v != null && v > 0) { total += v; pts.push(r.index); }
+    }
+    if (total > 0) out.push({ key: k, label: ERROR_CAUSE[k].label, cause: ERROR_CAUSE[k].cause, total, ports: pts.slice(0, maxPorts), portsOmitted: Math.max(0, pts.length - maxPorts) });
+  }
+  return out.sort((a, b) => b.total - a.total);
+}
+
+/** 원인 요약 한 문장 — 실제로 발생한 종류만 말한다(없는 원인을 나열하지 않는다). */
+export function causeSentence(causes) {
+  if (!causes || !causes.length) return '';
+  return causes.slice(0, 4).map((c) => `${c.label} ${c.total}건 → ${c.cause}`).join(' / ');
+}
+
+/**
+ * **모든 포트 점검**(v2.521 — 사용자 요청 "모든 포트에 대해서 점검").
+ *
+ * 항목 판정(`checkDevice`)이 '스위치 1대 = 항목 11개' 라면 이것은 '포트 1개 = 행 1개' 다.
+ * 포트마다 상태·광량·에러를 한 줄로 판정하고 **왜 그렇게 봤는지**를 함께 준다.
+ *
+ * ⚠ 링크 없는 포트의 낮은 Rx 는 **이상이 아니다**(위 `isLinked` 머리말). 그 포트의 광량 판정은
+ *   `unknown` 이 아니라 **판정 대상 아님(`skipped`)** 으로 둔다 — '확인 못 함' 과 '볼 필요 없음' 은
+ *   다르고, 둘을 섞으면 '확인 불가 N개' 수치가 의미를 잃는다.
+ * ⚠ 엣지 위임 장비는 문제 포트만 중앙에 올라올 수 있다(`push.js slimSnapshot`) — 그때는
+ *   `complete:false` 로 '전 포트를 본 것이 아니다' 를 밝힌다.
+ */
+export function checkPorts(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad = RX_BAD_DBM } = {}) {
+  const sec = snap?.sections || {};
+  const list = (snap?.ports && snap.ports.list) || [];
+  const bp = baseline?.ports || null;
+  const rows = list.map((p) => {
+    const linked = isLinked(p);
+    const rx = num(p.rxPowerDbm);
+    const reasons = [];
+    let optical = 'skipped';
+    if (sec.sfp !== 'ok') optical = 'unknown';
+    else if (rx == null) optical = 'unknown';
+    else if (!linked) optical = 'skipped';               // 링크 없음 — 판정 대상 아님(이상이 아니다)
+    else if (rx <= rxBad) { optical = 'bad'; reasons.push(`수신 광량 ${rx} dBm — 하한(${rxBad}) 미달`); }
+    else if (rx <= rxWarn) { optical = 'warn'; reasons.push(`수신 광량 ${rx} dBm — 주의(${rxWarn}) 이하`); }
+    else optical = 'ok';
+
+    const cur = {}; const dlt = {};
+    let curSum = 0; let dltSum = 0; let dltKnown = false;
+    for (const k of ERROR_KEYS) {
+      const v = num(p[k]);
+      if (v != null) { cur[k] = v; curSum += v; }
+      const d = errorDelta(p[k], bp ? bp[String(p.index)]?.[k] : null);
+      if (d != null) { dlt[k] = d; dltSum += d; dltKnown = true; }
+    }
+    let errors = 'unknown';
+    if (sec.counters !== 'ok') errors = 'unknown';
+    else if (!Object.keys(cur).length) errors = 'unknown';
+    else if (bp && dltKnown) {
+      if (dltSum >= 100) { errors = 'bad'; reasons.push(`기준선 이후 신규 에러 ${dltSum}건`); }
+      else if (dltSum > 0) { errors = 'warn'; reasons.push(`기준선 이후 신규 에러 ${dltSum}건`); }
+      else errors = 'ok';
+    } else if (curSum > 0) { errors = 'warn'; reasons.push(`누적 에러 ${curSum}건 — 기준선이 없어 신규 여부는 알 수 없습니다`); }
+    else errors = 'ok';
+
+    let state = 'ok';
+    if (p.state === 'faulty') { state = 'bad'; reasons.push(`포트 상태 ${p.stateRaw || p.state}`); }
+    else if (p.state === 'disabled') { state = 'warn'; reasons.push('포트가 비활성(disabled) 입니다'); }
+    else if (p.state === 'noLicense') { state = 'warn'; reasons.push('포트 라이선스가 없습니다'); }
+    else if (!linked) state = 'idle';
+
+    const causes = errorCauses([{ index: p.index, cur, dlt }], { basis: bp && dltKnown ? 'dlt' : 'cur' });
+    const verdict = worst([state === 'idle' ? 'ok' : state, optical, errors]);
+    return {
+      index: p.index, name: p.attachedName || p.attached || '', state: p.state, stateRaw: p.stateRaw || '',
+      linked, speed: p.speed || '', portType: p.portType || '', wwn: String(p.attached || ''),
+      rxPowerDbm: rx, txPowerDbm: num(p.txPowerDbm), sfpTempC: num(p.sfpTempC),
+      optical, errors, verdict, reasons,
+      errCur: cur, errDelta: bp ? dlt : null, errSum: curSum, errNew: bp && dltKnown ? dltSum : null,
+      causes,
+    };
+  });
+  const counts = { total: rows.length, bad: 0, warn: 0, ok: 0, idle: 0, unknown: 0 };
+  for (const r of rows) {
+    counts[r.verdict] = (counts[r.verdict] || 0) + 1;
+    if (!r.linked) counts.idle++;
+  }
+  return {
+    rows,
+    counts,
+    complete: (num(snap?.ports?.portsOmitted) || 0) === 0,
+    portsOmitted: num(snap?.ports?.portsOmitted) || 0,
+    baselineAt: baseline?.at ?? null,
+    rxWarn,
+    rxBad,
+  };
+}
+
+/** 여러 판정 중 가장 나쁜 것. `unknown` 은 ok 보다 나쁘게(확인 못 한 것을 정상으로 칠하지 않는다). */
+function worst(list) {
+  const order = ['bad', 'warn', 'unknown', 'ok', 'skipped'];
+  for (const s of order) if (list.includes(s)) return s === 'skipped' ? 'ok' : s;
+  return 'ok';
 }
 
 function summarize(snap, items, extra = {}) {

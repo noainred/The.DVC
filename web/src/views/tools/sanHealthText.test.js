@@ -5,8 +5,9 @@
  * 결재의 근거이므로, 못 본 항목이 있으면 문구가 반드시 그것을 말해야 한다.
  */
 import { describe, it, expect } from 'vitest';
-import { deviceVerdict, allSummaryText, sortResults, baselineNote, stamp,
-  deviceReportDoc, allReportDoc, reportFileName, STATUS_LABEL, stageLabel } from './sanHealthText.js';
+import {
+  deviceVerdict, allSummaryText, sortResults, baselineNote, stamp, deviceReportDoc, allReportDoc, reportFileName, STATUS_LABEL, stageLabel, portVerdict, opticalText, errorText, portCheckSummary, portBaselineNote, problemPortText, sideText, portBlocks,
+} from './sanHealthText.js';
 
 const R = (over = {}) => ({
   deviceId: 'd1', name: 'SW-A', overall: 'ok', uncheckedCount: 0,
@@ -152,5 +153,53 @@ describe('보조 포맷터', () => {
     expect(stageLabel(1)).toMatch(/1단계/);
     expect(stageLabel(4)).toMatch(/4단계/);
     expect(stageLabel(9)).toBe('기타');
+  });
+});
+
+/* ══════════════ v2.521 — 전 포트 점검 · 불량 포트 세부정보 · 광량 오탐 ══════════════ */
+describe('v2.521 전 포트 점검 문구', () => {
+  it("링크 없는 포트의 광량을 '정상' 이 아니라 '판정 제외' 라고 말한다", () => {
+    expect(opticalText({ optical: 'skipped', rxPowerDbm: -27 })).toContain('판정 제외');
+    expect(opticalText({ optical: 'skipped', rxPowerDbm: -27 })).toContain('링크 없음');
+    expect(opticalText({ optical: 'ok', rxPowerDbm: -3 })).toBe('-3 dBm');
+    expect(opticalText({ optical: 'unknown', rxPowerDbm: null })).toBe('값 없음');
+  });
+  it('에러는 누적과 신규를 나눠서 말한다', () => {
+    expect(errorText({ errors: 'ok', errNew: 0, errSum: 50 })).toBe('신규 0 (누적 50)');
+    expect(errorText({ errors: 'warn', errNew: null, errSum: 50 })).toBe('누적 50 (기준선 없음)');
+    expect(errorText({ errors: 'unknown' })).toBe('카운터 없음');
+  });
+  it('요약이 링크 없는 포트 수를 밝힌다(조용히 빼지 않는다)', () => {
+    const t = portCheckSummary({ rows: [1], counts: { total: 64, bad: 1, warn: 2, ok: 53, unknown: 0, idle: 8 }, complete: true });
+    expect(t).toContain('전 포트 64개');
+    expect(t).toContain('링크 없음 8(광량 판정 제외)');
+  });
+  it('엣지가 일부만 올렸으면 전 포트를 본 것이 아니라고 말한다', () => {
+    const t = portCheckSummary({ rows: [1], counts: { total: 3 }, complete: false, portsOmitted: 120 });
+    expect(t).toContain('전 포트를 본 것이 아닙니다');
+  });
+  it('기준선 유무로 문구가 달라진다', () => {
+    expect(portBaselineNote({ baselineAt: null })).toContain('누적값만');
+    expect(portBaselineNote({ baselineAt: Date.now() })).toContain('신규분');
+  });
+  it('WWN 을 모르는 포트를 "조닝 안 됨" 이라 말하지 않는다', () => {
+    const t = problemPortText({ index: 10, wwns: [], zones: [] });
+    expect(t).toContain('WWN 을 알 수 없어');
+    expect(t).not.toContain('조닝 안 됨');
+  });
+  it('역할은 확정과 추정을 구분한다(v2.511 규칙)', () => {
+    expect(sideText({ side: 'target', confidence: 'confirmed' })).toBe('타깃(확정)');
+    expect(sideText({ side: 'target', confidence: 'inferred' })).toBe('타깃(추정)');
+    expect(sideText({ side: 'middle', confidence: 'none' })).toBe('겸용(추정)');
+  });
+  it('판정 라벨에 초록 정상과 붉은 이상이 있다', () => {
+    expect(portVerdict('bad')).toEqual({ label: '이상', color: 'red' });
+    expect(portVerdict('ok').color).toBe('green');
+    expect(portVerdict('unknown').label).toBe('확인 불가');
+  });
+  it('PDF 블록은 상한으로 자른 개수를 밝힌다', () => {
+    const rows = Array.from({ length: 10 }, (_, i) => ({ index: i, verdict: 'ok', state: 'online', name: '', optical: 'ok', rxPowerDbm: -3, errors: 'ok', errSum: 0, errNew: 0 }));
+    const b = portBlocks({ rows, counts: { total: 10, ok: 10 }, complete: true }, [], { maxRows: 4 });
+    expect(JSON.stringify(b)).toContain('6포트는 생략');
   });
 });

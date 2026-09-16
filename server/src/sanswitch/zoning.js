@@ -475,3 +475,76 @@ export function zoneSummary(parsed, resolved, graph) {
     truncated: !!parsed?.truncated,
   };
 }
+
+/**
+ * **불량 포트의 세부정보**(v2.521 — 사용자 요청 "불량인 포트는 어떤 서버인지, 어디와 조닝되어
+ * 있는지에 대한 세부정보를 표시해줘").
+ *
+ * 점검에서 이상·주의로 걸린 포트만 넘겨 받아, 그 포트에 로그인한 WWN 과 **그 WWN 이 속한 zone,
+ * 그리고 같은 zone 의 상대편**을 돌려준다. 광량이 나쁜 포트가 어느 서버이고 어떤 스토리지와
+ * 묶여 있는지를 알아야 영향 범위를 판단할 수 있기 때문이다.
+ *
+ * ⚠ **전 포트에 대해 부르지 말 것** — 분석은 O(zone × 멤버²)라 수천 zone 패브릭에서 비싸다.
+ *   점검이 지목한 포트(보통 한 자릿수)만 넘긴다.
+ * ⚠ 포트에 로그인한 WWN 이 없으면(링크 없음·네임서버 미조회) `wwns: []` 다 — 그것을
+ *   '조닝 안 됨' 이라고 말하지 말 것(우리는 그 포트의 WWN 을 모를 뿐이다).
+ * ⚠ 상대 목록은 상한을 두고 **자른 개수를 밝힌다**(조용한 상한 금지).
+ */
+export function portZoneDetail(zones, ports, ctx = {}) {
+  const list = Array.isArray(zones) ? zones : [];
+  const names = ctx.names || {};
+  const aliasOf = ctx.aliasOf || {};
+  const roles = ctx.roles instanceof Map ? ctx.roles : classifyEndpoints(list, ctx);
+  const maxPartners = Math.max(1, Number(ctx.maxPartners) || 24);
+  const maxZones = Math.max(1, Number(ctx.maxZones) || 20);
+  const lab = (w) => names[w] || aliasOf[w] || w;
+
+  // WWN → 그 WWN 이 든 zone 들(한 번만 만들어 포트마다 재사용).
+  const zonesOf = new Map();
+  for (const z of list) for (const w of z.wwns || []) {
+    if (!zonesOf.has(w)) zonesOf.set(w, []);
+    zonesOf.get(w).push(z);
+  }
+
+  return (ports || []).map((p) => {
+    const wwns = [...new Set((p.attached || []).map((w) => String(w).toLowerCase()))];
+    const zoneRows = [];
+    const partnerSet = new Map();
+    let zoneTotal = 0;
+    for (const w of wwns) {
+      for (const z of (zonesOf.get(w) || [])) {
+        zoneTotal++;
+        if (zoneRows.length < maxZones) {
+          const partners = (z.wwns || []).filter((x) => !wwns.includes(x));
+          zoneRows.push({
+            name: z.name,
+            memberCount: (z.wwns || []).length + (z.unresolved || []).length,
+            partners: partners.slice(0, maxPartners).map((x) => ({
+              wwn: x, label: lab(x), side: (roles.get(x) || {}).side || 'unknown',
+              confidence: (roles.get(x) || {}).confidence || 'none',
+            })),
+            partnersOmitted: Math.max(0, partners.length - maxPartners),
+            unresolved: (z.unresolved || []).slice(0, 8),
+          });
+        }
+        for (const x of (z.wwns || [])) if (!wwns.includes(x)) partnerSet.set(x, true);
+      }
+    }
+    return {
+      index: p.index,
+      slotPort: p.slotPort ?? null,
+      attachedName: p.attachedName || '',
+      state: p.state,
+      wwns: wwns.map((w) => ({
+        wwn: w, label: lab(w), alias: aliasOf[w] || '',
+        vendor: (wwnHint(w) || {}).vendor || '',
+        side: (roles.get(w) || {}).side || 'unknown',
+        confidence: (roles.get(w) || {}).confidence || 'none',
+      })),
+      zones: zoneRows,
+      zoneCount: zoneTotal,
+      zonesOmitted: Math.max(0, zoneTotal - zoneRows.length),
+      partnerCount: partnerSet.size,
+    };
+  });
+}

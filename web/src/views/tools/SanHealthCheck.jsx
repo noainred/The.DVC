@@ -4,7 +4,8 @@ import { fetchJson, postJson, delJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { STATUS_LABEL, STATUS_MARK, stageLabel, stamp, deviceVerdict, allSummaryText,
-  sortResults, baselineNote, deviceReportDoc, allReportDoc, reportFileName } from './sanHealthText.js';
+  sortResults, baselineNote, deviceReportDoc, allReportDoc, reportFileName,
+  portVerdict, opticalText, errorText, portCheckSummary, portBaselineNote, problemPortText, sideText } from './sanHealthText.js';
 
 /**
  * 특수기능 › SAN 스위치 모니터링 — **월간 점검**(v2.519, 사용자 제공 Brocade 월간 점검 체크리스트).
@@ -95,6 +96,127 @@ function ItemTable({ items }) {
 }
 
 /** 장비 1대 점검 패널 — 포트 상세 모달의 '점검' 탭. */
+/**
+ * **전 포트 점검 표**(v2.521 — 사용자 요청 "모든 포트에 대해서 점검").
+ *
+ * ⚠ `링크 없음` 포트는 광량 판정에서 뺐다 — 그 사실을 표와 요약이 **말한다**(조용히 빼면
+ *   '전 포트를 봤다' 는 거짓이 된다). 신고된 거짓 경보(-27 dBm 인데 빈 포트)의 원인이었다.
+ * ⚠ 훅은 조기 return 위에(React #310).
+ */
+function PortCheckTable({ pc, problems, zoningNote }) {
+  const [open, setOpen] = useState(null);
+  const [onlyBad, setOnlyBad] = useState(true);
+  const probByIndex = useMemo(() => new Map((problems || []).map((p) => [p.index, p])), [problems]);
+  const rows = useMemo(() => {
+    const list = (pc?.rows || []).filter((r) => (!onlyBad || r.verdict === 'bad' || r.verdict === 'warn' || r.verdict === 'unknown'));
+    const ord = ['bad', 'warn', 'unknown', 'ok'];
+    return [...list].sort((a, b) => ord.indexOf(a.verdict) - ord.indexOf(b.verdict) || a.index - b.index);
+  }, [pc, onlyBad]);
+  if (!pc?.rows?.length) return null;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
+        <div style={{ fontWeight: 600 }}>전 포트 점검</div>
+        <button className={onlyBad ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '2px 9px', fontSize: 11 }} onClick={() => setOnlyBad(!onlyBad)}>
+          {onlyBad ? '문제만 보는 중' : '전체 보는 중'}
+        </button>
+        <div className="muted" style={{ fontSize: 11.5 }}>{portCheckSummary(pc)}</div>
+      </div>
+      <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}><BoldText text={portBaselineNote(pc)} /></div>
+      <div className="table-wrap">
+        <STable className="v3-table">
+          <thead>
+            <tr><th>포트</th><th>판정</th><th>상태</th><th>연결 장비</th><th>광량(Rx)</th><th>에러</th><th data-nosort>세부</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <React.Fragment key={r.index}>
+                <tr>
+                  <td data-sort={String(r.index)}>{r.index}{r.slotPort ? ` (${r.slotPort})` : ''}</td>
+                  <td data-sort={r.verdict}><StatusBadge status={r.verdict} label={portVerdict(r.verdict).label} color={portVerdict(r.verdict).color} /></td>
+                  <td data-sort={r.state}>{r.stateRaw || r.state}</td>
+                  <td style={{ fontSize: 11.5 }}>{r.name || '—'}</td>
+                  <td data-sort={String(r.rxPowerDbm ?? 999)}>{opticalText(r)}</td>
+                  <td data-sort={String(r.errNew ?? r.errSum ?? -1)}>{errorText(r)}</td>
+                  <td>
+                    {(r.reasons?.length || probByIndex.has(r.index))
+                      ? <button className="tab" style={{ padding: '1px 7px', fontSize: 11 }} onClick={() => setOpen(open === r.index ? null : r.index)}>{open === r.index ? '접기' : '보기'}</button>
+                      : <span className="muted">—</span>}
+                  </td>
+                </tr>
+                {open === r.index && (
+                  <tr>
+                    <td colSpan={7} style={{ background: 'var(--panel)' }}>
+                      <PortDetail row={r} prob={probByIndex.get(r.index)} zoningNote={zoningNote} />
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            ))}
+            {!rows.length && <tr><td colSpan={7} className="muted">{onlyBad ? '이상·주의·확인 불가 포트가 없습니다.' : '표시할 포트가 없습니다.'}</td></tr>}
+          </tbody>
+        </STable>
+      </div>
+    </div>
+  );
+}
+
+/** 포트 1개의 판정 근거 + **어떤 서버인지 · 어디와 조닝되어 있는지**(v2.521 사용자 요청). */
+function PortDetail({ row, prob, zoningNote }) {
+  return (
+    <div style={{ display: 'grid', gap: 8, padding: '8px 4px', minWidth: 0 }}>
+      {!!row.reasons?.length && (
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 3 }}>판정 근거</div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.7 }}>
+            {row.reasons.map((x, i) => <li key={i} style={{ whiteSpace: 'normal' }}>{x}</li>)}
+          </ul>
+        </div>
+      )}
+      {!!row.causes?.length && (
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 3 }}>에러 종류별 원인</div>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.7 }}>
+            {row.causes.map((c) => <li key={c.key} style={{ whiteSpace: 'normal' }}><code>{c.label}</code> {c.total}건 → {c.cause}</li>)}
+          </ul>
+        </div>
+      )}
+      <div>
+        <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 3 }}>연결 장비 · 조닝</div>
+        {!prob && <div className="muted" style={{ fontSize: 12 }}>{zoningNote || '이 포트는 이상·주의 목록에 없어 조닝 상대를 조회하지 않았습니다.'}</div>}
+        {prob && (
+          <>
+            <div className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>{problemPortText(prob, zoningNote)}</div>
+            {!!prob.wwns?.length && (
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12, lineHeight: 1.7 }}>
+                {prob.wwns.map((w) => (
+                  <li key={w.wwn} style={{ whiteSpace: 'normal' }}>
+                    <b>{w.label}</b> <code style={{ fontSize: 11 }}>{w.wwn}</code>
+                    {w.vendor ? ` · ${w.vendor}` : ''} · {sideText(w)}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {(prob.zones || []).map((z) => (
+              <div key={z.name} style={{ marginTop: 6, paddingLeft: 10, borderLeft: '2px solid var(--border)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>zone {z.name} <span className="muted" style={{ fontWeight: 400 }}>(멤버 {z.memberCount})</span></div>
+                <ul style={{ margin: '2px 0 0', paddingLeft: 18, fontSize: 11.5, lineHeight: 1.7 }}>
+                  {(z.partners || []).map((p) => (
+                    <li key={p.wwn} style={{ whiteSpace: 'normal' }}>↔ <b>{p.label}</b> <code style={{ fontSize: 11 }}>{p.wwn}</code> · {sideText(p)}</li>
+                  ))}
+                  {!!z.partnersOmitted && <li className="muted">↔ … {z.partnersOmitted}개 생략</li>}
+                  {!z.partners?.length && <li className="muted">이 zone 에 다른 멤버가 없습니다(단독 zone).</li>}
+                </ul>
+              </div>
+            ))}
+            {!!prob.zonesOmitted && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>zone {prob.zonesOmitted}개는 생략했습니다.</div>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function DeviceHealthPanel({ deviceId, deviceName }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -130,7 +252,12 @@ export function DeviceHealthPanel({ deviceId, deviceName }) {
     setBusy(true); setMsg('PDF 만드는 중…');
     try {
       const { saveDocAsPdf } = await import('./reportExport.js');
-      await saveDocAsPdf(deviceReportDoc(data.result, { baseline: data.baseline }), reportFileName(data.result?.name || deviceName));
+      await saveDocAsPdf(
+        deviceReportDoc(data.result, {
+          baseline: data.baseline, ports: data.ports, problemPorts: data.problemPorts, zoningNote: data.zoningNote,
+        }),
+        reportFileName(data.result?.name || deviceName),
+      );
       setMsg('PDF 저장 완료');
     } catch (e) { setMsg(`PDF 실패: ${e.message}`); }
     finally { setBusy(false); }
@@ -166,6 +293,7 @@ export function DeviceHealthPanel({ deviceId, deviceName }) {
       </div>
       {error && <ErrorBox message={error} />}
       <ItemTable items={r?.items || []} />
+      <PortCheckTable pc={data.ports} problems={data.problemPorts} zoningNote={data.zoningNote} />
     </div>
   );
 }

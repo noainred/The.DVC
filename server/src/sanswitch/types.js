@@ -56,7 +56,7 @@
  * PortRow = {
  *   index, slotPort, name, state, physical, enabled, speed, maxSpeed, portType,
  *   wwn, attached[], attachedName,       // 연결 장비(WWN·심볼릭 이름)
- *   errCrc, errEncOut, errLinkFail, errLossSync, errLossSig, discC3,  // 누적 카운터
+ *   errCrc, errEncIn, errEncOut, errLinkFail, errLossSync, errLossSig, discC3,  // 누적 카운터
  *   sfpTempC, sfpVoltage, txPowerDbm, rxPowerDbm, sfpVendor, sfpSerial, sfpPartNumber,
  *   inFrames, outFrames, inBytes, outBytes,
  *   inBps, outBps                        // 직전 수집과의 델타 기반(첫 수집은 null — 정직 표기)

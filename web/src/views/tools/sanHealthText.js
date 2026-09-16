@@ -126,7 +126,7 @@ export function reportFileName(scope, now = new Date()) {
 }
 
 /** 장비 1대 상세 보고서 문서 모델. */
-export function deviceReportDoc(r, { baseline = null, now = Date.now() } = {}) {
+export function deviceReportDoc(r, { baseline = null, now = Date.now(), ports = null, problemPorts = [], zoningNote = '' } = {}) {
   const v = deviceVerdict(r);
   const c = r?.counts || {};
   const blocks = [
@@ -145,7 +145,9 @@ export function deviceReportDoc(r, { baseline = null, now = Date.now() } = {}) {
     blocks.push({ type: 'heading', text: stageLabel(stage) });
     blocks.push({
       type: 'table',
-      columns: [{ label: '항목', w: 38 }, { label: '판정', w: 20, align: 'center' }, { label: '명령', w: 32 }, { label: '결과' }],
+      // ⚠ 모든 열에 `w` 를 **명시**한다 — 하나라도 빼면 그 열이 기본 가중치 1 을 받아 1/91 로
+      //   찌그러진다(v2.521 실제 사고. `reportExport.drawTable` 머리말 참조).
+      columns: [{ label: '항목', w: 22 }, { label: '판정', w: 12, align: 'center' }, { label: '명령', w: 20 }, { label: '결과', w: 46 }],
       rows: items.map((i) => [
         { text: i.label },
         { text: STATUS_LABEL[i.status] || i.status, align: 'center', color: STATUS_COLOR[i.status] },
@@ -160,10 +162,13 @@ export function deviceReportDoc(r, { baseline = null, now = Date.now() } = {}) {
       blocks.push({ type: 'note', text: `· ${i.label} 근거\n${ev.map((e) => `   - ${e}`).join('\n')}` });
     }
   }
+  // v2.521 — 전 포트 점검 + 이상·주의 포트의 연결 장비·조닝 상대.
+  blocks.push(...portBlocks(ports, problemPorts, { zoningNote }));
   blocks.push({ type: 'note', text: [
     '판정 기준 메모',
     '- 온도·전압 임계는 스위치 자신의 센서 상태(sensorshow 의 is Ok)를 따릅니다 — 포탈이 임계 숫자를 정하지 않습니다.',
-    '- 수신 광량은 주의 -9 dBm / 이상 -12 dBm 기준입니다(화면 표시와 같은 기준).',
+    '- 수신 광량은 주의 -9 dBm / 이상 -12 dBm 기준이며, 링크가 올라온 포트만 판정합니다',
+    '  (링크가 없으면 상대가 빛을 보내지 않아 Rx 가 낮은 것이 정상입니다 — 판정에서 제외한 개수는 위에 적었습니다).',
     '- 포트 에러는 부팅 이후 누적값입니다. 기준선이 있을 때만 당월 신규분을 판정합니다.',
     '- 포탈은 portstatsclear 를 실행하지 않습니다(다른 도구의 기준선을 지우는 파괴적 동작).',
     "- '확인 불가' 는 이상이 없다는 뜻이 아니라 그 항목을 보지 못했다는 뜻입니다.",
@@ -205,8 +210,8 @@ export function allReportDoc(payload, { now = Date.now(), maxDetail = 30 } = {})
   blocks.push({ type: 'heading', text: '스위치별 요약' });
   blocks.push({
     type: 'table',
-    columns: [{ label: '스위치', w: 34 }, { label: '법인', w: 22 }, { label: '판정', w: 18, align: 'center' },
-      { label: '확인불가', w: 18, align: 'right' }, { label: '내용' }],
+    columns: [{ label: '스위치', w: 20 }, { label: '법인', w: 14 }, { label: '판정', w: 14, align: 'center' },
+      { label: '확인불가', w: 10, align: 'right' }, { label: '내용', w: 42 }],
     rows: results.map((r) => {
       const v = deviceVerdict(r);
       return [
@@ -234,7 +239,7 @@ export function allReportDoc(payload, { now = Date.now(), maxDetail = 30 } = {})
         { text: STATUS_LABEL[i.status] || i.status, align: 'center', color: STATUS_COLOR[i.status] },
         { text: String(i.detail || '').replace(/\*\*/g, '') },
       ]);
-      blocks.push({ type: 'table', columns: [{ label: '항목', w: 46 }, { label: '판정', w: 20, align: 'center' }, { label: '결과' }], rows });
+      blocks.push({ type: 'table', columns: [{ label: '항목', w: 26 }, { label: '판정', w: 12, align: 'center' }, { label: '결과', w: 62 }], rows });
       const bl = baseMap.get(r.deviceId) || null;
       if (!bl) blocks.push({ type: 'note', text: '· 에러 기준선 없음 — 당월 신규 에러는 판정하지 않았습니다.' });
     }
@@ -248,3 +253,129 @@ export function allReportDoc(payload, { now = Date.now(), maxDetail = 30 } = {})
     blocks,
   };
 }
+
+/* ══════════════════ v2.521 — 전 포트 점검 · 불량 포트 세부정보 ══════════════════
+ * 사용자 요청: "모든 포트에 대해서 점검" · "불량인 포트는 어떤 서버인지, 어디와 조닝되어
+ * 있는지에 대한 세부정보를 표시해줘" · (신고) "포트 광량이 장애수준인데 확인해보면 사용하지
+ * 않는 포트에, 사용하지 않는 포트는 제외 해야 맞는거 같다".
+ */
+
+/** 포트 판정 라벨 — `idle`(링크 없음)은 **이상이 아니다**. 초록도 아니다(볼 필요가 없었다). */
+export const PORT_VERDICT = Object.freeze({
+  bad: { label: '이상', color: 'red' },
+  warn: { label: '주의', color: 'amber' },
+  unknown: { label: '확인 불가', color: 'amber' },
+  ok: { label: '정상', color: 'green' },
+});
+export const portVerdict = (v) => PORT_VERDICT[String(v)] || { label: String(v || '—'), color: 'muted' };
+
+/** 광량 셀 문구 — `skipped` 는 '정상' 이 아니라 **판정 대상 아님**이다(거짓 경보의 원인이었다). */
+export function opticalText(row) {
+  if (!row) return '—';
+  if (row.optical === 'skipped') return `${row.rxPowerDbm == null ? '—' : `${row.rxPowerDbm} dBm`} (링크 없음 — 판정 제외)`;
+  if (row.optical === 'unknown') return row.rxPowerDbm == null ? '값 없음' : `${row.rxPowerDbm} dBm (판정 불가)`;
+  return `${row.rxPowerDbm} dBm`;
+}
+
+/** 에러 셀 문구 — 누적과 기준선 이후 신규를 **나눠서** 말한다. */
+export function errorText(row) {
+  if (!row) return '—';
+  if (row.errors === 'unknown') return '카운터 없음';
+  if (row.errNew != null) return `신규 ${row.errNew} (누적 ${row.errSum})`;
+  return `누적 ${row.errSum} (기준선 없음)`;
+}
+
+/**
+ * 전 포트 점검 요약 한 줄.
+ * ⚠ 링크 없는 포트 수를 **밝힌다** — 그 포트를 광량 판정에서 뺐기 때문이다(조용히 빼면 거짓).
+ */
+export function portCheckSummary(pc) {
+  if (!pc || !pc.rows) return '';
+  const c = pc.counts || {};
+  const parts = [`전 포트 ${n0(c.total)}개`];
+  if (n0(c.bad)) parts.push(`이상 ${n0(c.bad)}`);
+  if (n0(c.warn)) parts.push(`주의 ${n0(c.warn)}`);
+  if (n0(c.unknown)) parts.push(`확인 불가 ${n0(c.unknown)}`);
+  parts.push(`정상 ${n0(c.ok)}`);
+  if (n0(c.idle)) parts.push(`링크 없음 ${n0(c.idle)}(광량 판정 제외)`);
+  if (!pc.complete) parts.push(`⚠ 중앙에 ${n0(pc.portsOmitted)}포트 누락 — 전 포트를 본 것이 아닙니다`);
+  return parts.join(' · ');
+}
+
+/** 기준선 없음 안내 — 전 포트 표에서도 한 번만 말한다. */
+export function portBaselineNote(pc) {
+  if (!pc) return '';
+  return pc.baselineAt
+    ? `에러는 기준선(${stamp(pc.baselineAt)}) 이후 **신규분**으로 판정했습니다.`
+    : '에러 기준선이 없어 **누적값만** 표시했습니다 — 신규 발생분은 기준선을 저장한 다음 점검부터 가려집니다.';
+}
+
+/** 역할 배지 문구 — 확정(네임서버)과 추정(zone 구조)을 **구분**한다(v2.511 규칙). */
+export const SIDE_LABEL = Object.freeze({ initiator: '이니시에이터', target: '타깃', middle: '겸용', unknown: '미확정' });
+export function sideText(n) {
+  if (!n) return '—';
+  const base = SIDE_LABEL[n.side] || n.side || '미확정';
+  return n.confidence === 'confirmed' ? `${base}(확정)` : `${base}(추정)`;
+}
+
+/**
+ * 불량 포트 1개의 세부 문구.
+ * ⚠ WWN 을 모르는 것을 '조닝 안 됨' 이라 말하지 말 것 — 우리가 그 포트의 WWN 을 모를 뿐이다.
+ */
+export function problemPortText(p, note = '') {
+  if (!p) return '';
+  if (!p.wwns?.length) {
+    return note
+      || '이 포트에 로그인한 WWN 을 알 수 없어(링크 없음 또는 네임서버 미조회) 연결 장비·조닝 상대를 표시할 수 없습니다.';
+  }
+  if (!p.zones?.length) {
+    return note || `연결 장비는 확인했지만 이 WWN 이 속한 zone 을 찾지 못했습니다(조닝에 없거나 조닝 정보가 잘렸습니다).`;
+  }
+  const om = n0(p.zonesOmitted) ? ` (zone ${n0(p.zonesOmitted)}개는 생략)` : '';
+  return `zone ${n0(p.zoneCount)}개 · 조닝 상대 ${n0(p.partnerCount)}개${om}`;
+}
+
+/** 전 포트 점검을 PDF 문서 모델 블록으로. 상한을 두고 **자른 개수를 밝힌다**. */
+export function portBlocks(pc, problemPorts = [], { maxRows = 80, zoningNote = '' } = {}) {
+  const blocks = [];
+  if (!pc || !pc.rows?.length) return blocks;
+  blocks.push({ type: 'heading', text: '전 포트 점검' });
+  blocks.push({ type: 'note', text: `${portCheckSummary(pc)}\n${portBaselineNote(pc).replace(/\*\*/g, '')}` });
+  const rows = [...pc.rows].sort((a, b) => ORDER.indexOf(a.verdict) - ORDER.indexOf(b.verdict) || a.index - b.index);
+  const shown = rows.slice(0, maxRows);
+  blocks.push({
+    type: 'table',
+    // ⚠ 모든 열에 `w` 명시(빼면 그 열이 1/합계 로 찌그러진다 — v2.521 사고).
+    // ⚠ 포트·판정을 너무 좁게 주면 PDF 에서 두 열이 붙어 보인다(실제 출력 판독으로 조정).
+    columns: [{ label: '포트', w: 9, align: 'right' }, { label: '판정', w: 13, align: 'center' },
+      { label: '상태', w: 14 }, { label: '연결 장비', w: 28 }, { label: '광량(Rx)', w: 18 }, { label: '에러', w: 18 }],
+    rows: shown.map((r) => [
+      { text: String(r.index), align: 'right' },
+      { text: portVerdict(r.verdict).label, align: 'center', color: portVerdict(r.verdict).color },
+      { text: r.stateRaw || r.state || '—' },
+      { text: r.name || '—' },
+      { text: opticalText(r) },
+      { text: errorText(r) },
+    ]),
+  });
+  if (rows.length > shown.length) blocks.push({ type: 'note', text: `· 표는 ${maxRows}포트까지만 실었습니다 — ${rows.length - shown.length}포트는 생략됐습니다.` });
+
+  const probs = (problemPorts || []).filter(Boolean);
+  if (probs.length) {
+    blocks.push({ type: 'heading', text: '이상·주의 포트의 연결 장비와 조닝 상대' });
+    if (zoningNote) blocks.push({ type: 'note', text: `· ${zoningNote}` });
+    for (const p of probs) {
+      const lines = [`· 포트 ${p.index}${p.attachedName ? ` — ${p.attachedName}` : ''} (${problemPortText(p, zoningNote)})`];
+      for (const w of (p.wwns || [])) lines.push(`   - ${w.label}  ${w.wwn}${w.vendor ? ` · ${w.vendor}` : ''} · ${sideText(w)}`);
+      for (const z of (p.zones || [])) {
+        lines.push(`   [zone] ${z.name} (멤버 ${n0(z.memberCount)})`);
+        for (const pt of (z.partners || [])) lines.push(`      ↔ ${pt.label}  ${pt.wwn} · ${sideText(pt)}`);
+        if (n0(z.partnersOmitted)) lines.push(`      ↔ … ${n0(z.partnersOmitted)}개 생략`);
+      }
+      blocks.push({ type: 'note', text: lines.join('\n') });
+    }
+  }
+  return blocks;
+}
+
+const ORDER = ['bad', 'warn', 'unknown', 'ok'];
