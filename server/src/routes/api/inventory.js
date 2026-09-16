@@ -8,6 +8,38 @@ import { auditMiddleware } from '../../audit.js'; // v2.478(감사 S15): 알람 
 import { recordToolUse, getTopTools } from '../../tool-usage.js';
 import { memoJson, applyFilters, sortBy, scopeKey, osFamily } from './shared.js';
 
+/**
+ * 인벤토리 조회 권한 게이트(v2.536 — 인증·인가 전수 감사).
+ *
+ * ⚠ **`inv.*` 6종은 v2.535 까지 서버에서 한 번도 집행되지 않았다.** 카탈로그
+ * (`auth/permissions.js PERMISSION_CATALOG` '인벤토리' 그룹)에 6개가 있고 설정 › 사용자 관리
+ * 화면이 체크박스로 켜고 끄게 하는데, `requirePerm('inv.…')` 를 쓰는 곳은 **알람 음소거
+ * 쓰기 2곳뿐**이었다(`grep -rn "requirePerm('inv\." src/` = 2건). 실제로 쓰이던 자리는
+ * `web/src/App.jsx:51-58` 의 **탭 표시 조건** — 즉 **클라이언트 전용 접근제어**였다.
+ *
+ * 실측(v2.536, mock 스냅샷 vms 2,242 · hosts 186 · ds 38): `viewer` 의 권한을 `dashboard`
+ * 하나로 줄여도 `/api/vms` 500건 · `/api/hosts` 186건 · `/api/datastores` 38건 ·
+ * `/api/alarms` 58건 · `/api/vcenters` 11건이 **200 으로 그대로** 나왔다. 같은 하니스에서
+ * `/api/tools/storage` 는 403 이었다 — 게이트가 있는 경로는 막히므로 하니스가 아니라
+ * **게이트가 없던 것**이다. v2.480(중계 주소)·v2.506(svcmon)과 **같은 계열**이다.
+ *
+ * ※ vCenter 범위(scope)는 이 결함과 무관하게 **정상 동작한다**(같은 실측에서 scope 제한 계정은
+ *   2,242건 중 240건·1개 vCenter 만 받았다). 범위 축은 건드리지 않았다.
+ *
+ * 유지 규칙:
+ *  - **키는 `web/src/App.jsx` 의 탭 `perm` 과 글자 그대로 같아야 한다.** 다르면 '메뉴는 보이는데
+ *    API 는 403' 이 되어 사용자가 장애로 오해한다(v2.506 svcmon 에서 실제로 겪은 문제).
+ *  - 집계(`/summary`·`/overview`·`/compare/matrix`·`/top`)는 **`dashboard` 수준으로 남겨 뒀다** —
+ *    개수·합계만 주고 이름·IP 를 주지 않는다. 조용히 둔 것이 아니라 이 주석이 그 경계를 밝힌다.
+ *  - 기본 매트릭스는 operator·viewer 모두 `inv.*` 6종을 **전부 갖는다** — 기본 설치에서는
+ *    동작이 바뀌지 않고, 관리자가 명시적으로 뺀 현장에서만 이제 실제로 막힌다.
+ */
+const invHosts = requirePerm('inv.hosts');
+const invVms = requirePerm('inv.vms');
+const invDs = requirePerm('inv.datastores');
+const invNet = requirePerm('inv.networks');
+const invAlarms = requirePerm('inv.alarms');
+
 export function registerInventory(api) {
 
 // Consolidated summary: SUM of every resource across all vCenters, with
@@ -162,7 +194,7 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
 // 폴링해도 필터·정렬·합계가 1번만 돈다) ② sendCached 의 키 기반 ETag 로 무변동 폴은 본문
 // 직렬화(JSON.stringify 수 MB) 자체를 건너뛰고 304. 키는 generatedAt|originalUrl(쿼리 포함)이고
 // scope 서명을 extraKey 로 넣는다 — /summary 와 동일한 캐시 교차 노출 방지 규칙(회귀 금지).
-api.get('/hosts', (req, res) => memoJson(req, res, 'inv:hosts', (snap) => {
+api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap) => {
   let hosts = applyFilters(snap.hosts, req.query, snap, ['name', 'cluster'], req.user);
   if (req.query.state) hosts = hosts.filter((h) => h.connectionState === req.query.state);
 
@@ -202,7 +234,7 @@ api.get('/hosts', (req, res) => memoJson(req, res, 'inv:hosts', (snap) => {
   return { total: hosts.length, items: hosts, summary };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
-api.get('/vms', (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
+api.get('/vms', invVms, (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
   const q = req.query;
   let vms = applyFilters(snap.vms, q, snap, ['name', 'guestOS', 'ipAddress', 'host'], req.user);
 
@@ -275,7 +307,7 @@ api.get('/vms', (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
 }, { extraKey: scopeKey(req.user, store.get()) }));
 
 // VM 단건 조회 — 이름/IP/호스트명으로 스냅샷에서 찾아 상세 팝업에 쓴다(모든 화면 공용).
-api.get('/vms/lookup', (req, res) => {
+api.get('/vms/lookup', invVms, (req, res) => {
   const { name, ip, vcenterId } = req.query;
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
@@ -302,7 +334,7 @@ api.get('/vms/lookup', (req, res) => {
   res.json({ vm: vm || null });
 });
 
-api.get('/datastores', (req, res) => memoJson(req, res, 'inv:datastores', (snap) => {
+api.get('/datastores', invDs, (req, res) => memoJson(req, res, 'inv:datastores', (snap) => {
   let ds = applyFilters(snap.datastores, req.query, snap, ['name', 'type'], req.user);
   if (req.query.type) ds = ds.filter((d) => String(d.type || '').toLowerCase().includes(String(req.query.type).toLowerCase()));
   return { total: ds.length, items: ds };
@@ -310,7 +342,7 @@ api.get('/datastores', (req, res) => memoJson(req, res, 'inv:datastores', (snap)
 
 // 데이터스토어 브라우즈 — 할당 VM + 실제 파일 목록(라이브, 60초 캐시). id 를 직접 받는
 // 단건 라우트이므로 vCenter 단위 scope 를 별도 검사하고 범위 밖은 404(존재 여부 미노출).
-api.get('/datastores/:id/browse', async (req, res) => {
+api.get('/datastores/:id/browse', invDs, async (req, res) => {
   res.locals.perfExpectSlow = true; // v2.498: vCenter 탐색 태스크를 최대 90초 기다리는 정상 장기 요청
   const id = req.params.id;
   const snap = store.get();
@@ -321,7 +353,7 @@ api.get('/datastores/:id/browse', async (req, res) => {
   } catch (e) { res.status(e.status === 404 ? 404 : 502).json({ error: e.message }); }
 });
 
-api.get('/networks', (req, res) => memoJson(req, res, 'inv:networks', (snap) => {
+api.get('/networks', invNet, (req, res) => memoJson(req, res, 'inv:networks', (snap) => {
   let nets = applyFilters(snap.networks, req.query, snap, ['name', 'type'], req.user);
   if (req.query.type) nets = nets.filter((n) => n.type === req.query.type);
   return { total: nets.length, items: nets };
@@ -356,7 +388,7 @@ api.get('/top', (req, res) => {
   });
 });
 
-api.get('/alarms', (req, res) => memoJson(req, res, 'inv:alarms', (snap) => {
+api.get('/alarms', invAlarms, (req, res) => memoJson(req, res, 'inv:alarms', (snap) => {
   let alarms = applyFilters(snap.alarms, req.query, snap, ['message', 'entity'], req.user);
   if (req.query.severity) alarms = alarms.filter((a) => a.severity === req.query.severity);
   return { total: alarms.length, items: alarms };
@@ -370,7 +402,7 @@ api.get('/alarms', (req, res) => memoJson(req, res, 'inv:alarms', (snap) => {
 // 있었다(장애 은폐). AUDIT-2026-06-27 C2 가 requireRole 로 막았던 것이 권한 매트릭스 도입 때
 // requirePerm 으로 치환되며 다시 열린 회귀다 — server/CLAUDE.md '상태변경 라우트 RBAC' 불변조건.
 // 역할 게이트 + 쓰기 범위(muteCreateIssue/muteDeleteIssue)를 함께 건다.
-api.get('/alarm-mutes', (req, res) => {
+api.get('/alarm-mutes', invAlarms, (req, res) => {
   res.json({ mutes: visibleMutes(listMutes(), writeScopedVcenterIds(req.user, store.get())) });
 });
 api.post('/alarm-mutes', requireRole('admin', 'operator'), requirePerm('inv.alarms'), auditMiddleware, (req, res) => {

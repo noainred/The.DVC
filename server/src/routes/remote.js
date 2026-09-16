@@ -110,7 +110,7 @@ remoteRouter.get('/proxies', requirePerm('remote.access'), (_req, res) => { // v
 
 // Candidate targets from vCenter: VMs that have at least one IP, with all IPs
 // so the user can pick which address to map (multi-homed VMs). Optional ?q / ?vcenterId.
-remoteRouter.get('/targets', (req, res) => {
+remoteRouter.get('/targets', requirePerm('remote.access'), (req, res) => {
   const snap = store.get();
   const q = String(req.query.q || '').toLowerCase();
   const allowed = scopedVcenterIds(req.user, snap); // 사용자 scope 밖 VM(이름·IP)은 노출 금지

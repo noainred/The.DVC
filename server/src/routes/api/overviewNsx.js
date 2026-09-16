@@ -1,4 +1,5 @@
 // 헬스/개요 집계 + NSX 조회 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
+import { requirePerm } from '../../auth/auth.js'; // v2.536: inv.nsx 서버 집행(그전까지 탭 표시 조건일 뿐이었다)
 import { instanceId } from '../../instanceId.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
@@ -166,7 +167,11 @@ api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
 // v2.320(2026-08-13 감사 보류 갭 적용): 범위 계정에는 귀속 매니저(vcenterId∈허용 ∪
 // region∈허용 vCenter region)만 노출 — 하위 리소스(게이트웨이/세그먼트/DFW/보안그룹)·
 // rollup·collectionErrors 도 보이는 매니저 기준으로 절단(nsx/scope.js — 순수 판정 테스트 고정).
-api.get('/nsx', (req, res) => {
+// ⚠ v2.536 — `inv.nsx` 는 여기까지 **클라이언트 전용**이었다(routes/api/inventory.js 머리말 참조).
+// 키는 `web/src/views/specialToolsList.js` 의 NSX 도구 `perm: 'inv.nsx'` 와 같아야 한다.
+const invNsx = requirePerm('inv.nsx');
+
+api.get('/nsx', invNsx, (req, res) => {
   const snap = nsxStore.get();
   const { managerId, region } = req.query;
   const allowed = scopedVcenterIds(req.user, store.get());
@@ -200,7 +205,7 @@ api.get('/nsx', (req, res) => {
 });
 
 // NSX 보안그룹 라이브 멤버 조회(온디맨드). groupId는 스냅샷의 "managerId:rawId" 형식.
-api.get('/nsx/group-members', async (req, res) => {
+api.get('/nsx/group-members', invNsx, async (req, res) => {
   const full = String(req.query.groupId || '');
   const sep = full.indexOf(':');
   const managerId = req.query.managerId || (sep > 0 ? full.slice(0, sep) : '');
