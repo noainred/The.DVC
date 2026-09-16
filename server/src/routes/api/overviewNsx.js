@@ -35,12 +35,40 @@ function physicalByCorp(hosts, allowed) {
   try {
     const r = serversByCorp(allPhysicalServers(), hosts);
     if (!allowed) return r;
-    const byVcenter = {};
-    for (const [id, n] of Object.entries(r.byVcenter)) if (allowed.has(id)) byVcenter[id] = n;
-    const scopedTotal = Object.values(byVcenter).reduce((a, b) => a + b, 0);
-    return { ...r, byVcenter, byDatacenter: {}, total: scopedTotal, unassigned: null, scoped: true };
+    // ⚠ v2.527: 법인별 맵이 여러 개가 됐다 — **전부** 같은 기준으로 잘라야 한다.
+    //   하나라도 빠뜨리면 범위 계정 화면에 범위 밖 법인의 대수가 그대로 남는다.
+    const trim = (m) => {
+      const o = {};
+      for (const [id, n] of Object.entries(m || {})) if (allowed.has(id)) o[id] = n;
+      return o;
+    };
+    const byVcenter = trim(r.byVcenter);
+    const byVcenterPhysicalOnly = trim(r.byVcenterPhysicalOnly);
+    const byVcenterMatched = trim(r.byVcenterMatched);
+    const byVcenterHosts = trim(r.byVcenterHosts);
+    const byVcenterUnion = trim(r.byVcenterUnion);
+    const sum = (m) => Object.values(m).reduce((a, b) => a + b, 0);
+    return {
+      ...r,
+      byVcenter, byVcenterPhysicalOnly, byVcenterMatched, byVcenterHosts, byVcenterUnion,
+      byDatacenter: {},
+      total: sum(byVcenter),
+      hostsTotal: sum(byVcenterHosts),
+      matchedCount: sum(byVcenterMatched),
+      physicalOnly: sum(byVcenterPhysicalOnly),
+      union: sum(byVcenterUnion),
+      // 귀속되지 않은 서버는 어느 법인 것인지 모르므로 범위 계정에 주지 않는다(대수 유출 차단).
+      unassigned: null,
+      physicalOnlyUnassigned: null,
+      scoped: true,
+    };
   } catch (e) {
-    return { total: 0, byVcenter: {}, byDatacenter: {}, unassigned: 0, error: e?.message || String(e) };
+    return {
+      total: 0, byVcenter: {}, byDatacenter: {}, unassigned: 0,
+      hostsTotal: 0, matchedCount: 0, physicalOnly: 0, union: 0,
+      byVcenterPhysicalOnly: {}, byVcenterMatched: {}, byVcenterHosts: {}, byVcenterUnion: {},
+      error: e?.message || String(e),
+    };
   }
 }
 
