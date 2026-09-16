@@ -1,0 +1,20 @@
+Storage system address: 127.0.0.1
+Storage system port: 443
+HTTPS connection
+
+1:    ID                   = sv_1
+      Name                 = SYNTH_LUN_0
+      Description          =
+      Group                =
+      Storage pool ID      = pool_1
+      Storage pool         = pool_1
+      Type                 = Primary
+      Base storage resource = sv_1
+      Source               =
+      Health state         = OK (5)
+      Size                 = 54975581388800 (50.0T)
+      Protection size used = 0
+      Non-base size used   = 0
+      SP owner             = SPA
+      Trespassed           = no
+

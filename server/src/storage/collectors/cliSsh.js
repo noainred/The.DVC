@@ -162,13 +162,26 @@ export function parseCsv(text) {
       else if (c === ',') { cells.push(cur); cur = ''; } else cur += c;
     }
     cells.push(cur);
-    return cells.map((s) => s.trim());
+    // `open` — 줄이 **따옴표 안에서 끝났다** = 그 줄은 중간에서 잘렸다는 뜻이다.
+    return { cells: cells.map((s) => s.trim()), open: q };
   };
-  const header = split(lines[headIdx]).map((h) => h.replace(/^"|"$/g, ''));
+  const head = split(lines[headIdx]);
+  // ⚠ **줄바꿈된 CSV 는 통째로 거부한다**(v2.530 — 실측으로 확정한 결함).
+  //   TTY 폭(ssh2 기본 80칸)에 걸려 CSV 가 접히면, 접힌 조각이 데이터 줄로 읽혀
+  //   **없는 장비가 만들어진다** — Unity 실측에서 `ID=47%` · 이름 `38 x 3.8T SAS Flash 4`
+  //   라는 가짜 풀이 나왔고, 살아남은 줄도 `Current allocation` 이 `(27.2T` 로 잘렸다.
+  //   일부를 살리려 하지 말 것: **틀린 값은 빈 값보다 나쁘다**(화면이 정상처럼 보인다).
+  //   빈 배열을 돌려주면 `unitySsh.recordsFor` 가 Key=Value 로, 그것도 안 되면 명령 체인의
+  //   다음 후보로 넘어간다 — 안전한 쪽으로 실패한다.
+  if (head.open) return [];
+  const header = head.cells.map((h) => h.replace(/^"|"$/g, ''));
   const rows = [];
   for (const line of lines.slice(headIdx + 1)) {
-    const cells = split(line);
+    const { cells, open } = split(line);
+    if (open) return [];                       // 데이터 줄이 잘렸다 — 위와 같은 이유
     if (cells.length < 2) continue;
+    // 열 수가 헤더와 다르면 그 줄은 CSV 행이 아니다(접힘 조각·꼬리 배너). 조용히 끼워 넣지 않는다.
+    if (cells.length !== header.length) continue;
     const row = {};
     header.forEach((h, i) => { row[h] = cells[i] ?? ''; });
     rows.push(row);

@@ -175,15 +175,16 @@ describe('v2.514 정렬 값 — 모든 열이 정렬 가능해야 한다', () =>
     expect(sortValue('dc', ROW)).toBe('dc-wa');   // 라벨 함수를 안 주면 원문
   });
 
-  it('장비는 **등록 표시명 우선** — 화면(Cell)과 같은 규칙(v2.515)', () => {
-    // v2.514 까지는 스냅샷 이름이 우선이었다. 그래서 이름을 고쳐 저장해도 표에 반영되지 않아
-    // 사용자가 '수정이 안 된다' 고 신고했다(저장은 성공했다). 정렬 기준도 보이는 글자와 같아야 한다.
-    expect(sortValue('device', { ...ROW, name: '새이름', snap: { ...ROW.snap, name: '옛수집이름' } }, labels)).toBe('새이름');
-    expect(sortValue('device', ROW, labels)).toBe('ZULU-PS');
+  it('장비는 **장비가 보고한 이름 우선** — 화면(Cell)과 같은 규칙(v2.530)', () => {
+    // v2.530(사용자 요청 "hostname 에서 획득한 장비 명"): 표에 보이는 굵은 글자는 스냅샷 이름이다.
+    // 정렬 기준이 보이는 글자와 다르면 사용자가 '정렬이 틀렸다' 고 본다.
+    // ⚠ v2.515 의 불만("수정이 반영되지 않는다")은 **둘째 줄의 `등록명 …`** 이 막는다 —
+    //    Cell 에서 그 줄을 지우면 이 순서가 다시 결함이 된다.
+    expect(sortValue('device', { ...ROW, name: '새이름', snap: { ...ROW.snap, name: '수집이름' } }, labels)).toBe('수집이름');
     expect(sortValue('device', { name: '등록명', host: '10.0.0.1' }, labels)).toBe('등록명');
     expect(sortValue('device', { host: '10.0.0.1' }, labels)).toBe('10.0.0.1');
-    // 등록명이 비고 스냅샷만 있으면 스냅샷 이름을 쓴다(빈 칸으로 두지 않는다).
-    expect(sortValue('device', { snap: { name: '수집이름' }, host: '10.0.0.2' }, labels)).toBe('수집이름');
+    // 스냅샷 이름이 비면 등록명으로 내려간다(빈 칸으로 두지 않는다).
+    expect(sortValue('device', { name: '등록명', snap: { name: '' }, host: '10.0.0.2' }, labels)).toBe('등록명');
   });
 
   it('수집 주체 — 중앙 장비도 빈 값이 아니다(빈 값이면 항상 뒤로 밀린다)', () => {

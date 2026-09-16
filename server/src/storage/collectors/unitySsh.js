@@ -1,9 +1,9 @@
 /**
  * storage/collectors/unitySsh.js — Dell Unity SSH(uemcli) 수집기(v2.405 → **v2.525 대폭 확장**).
  *
- * Unity 는 SP 에 SSH 로 접속해 `uemcli` 를 실행할 수 있다. uemcli 는 `-output csv` 로
- * **기계가 읽기 좋은 CSV** 를 내주므로 그것을 1순위로 쓰고, 없으면 기본(Key = Value) 출력을
- * 파싱한다(버전차 폴백).
+ * Unity 는 SP 에 SSH 로 접속해 `uemcli` 를 실행할 수 있다. **1순위는 기본(Key = Value) 평문
+ * 출력**이다 — 이 현장 장비에서 실제 출력을 받아 본 유일한 형식이고(`test/fixtures/uemcli-*.txt`),
+ * `-output csv` 는 뒤 후보로 둔다(v2.530. 그 전 세 번의 순서 뒤집기 경위는 SPECS 머리말 참조).
  *
  * ── v2.525: 사용자 신고와 그 원인(정직 기록) ────────────────────────────────────
  * 사용자 신고(2026-09-16): **"unity 장비에 ssh 로 접속은 성공했는데, 수집하는 정보가 없어.
@@ -60,63 +60,73 @@ const LIST_MAX = 64;
  *    **언제 수집한 구성인지 화면이 밝힌다**(`extra.configAt`) — 조용히 낡은 값을 보여주지 않는다.
  */
 /**
- * ⚠⚠ **`uemcli` 후보의 첫 자리는 반드시 `-output csv` 다**(v2.529 — v2.526 회귀 수정).
+ * ⚠⚠ **`uemcli` 후보의 첫 자리는 평문(기본) 출력이다**(v2.530 — v2.525·v2.526·v2.529 의
+ * 순서 뒤집기를 끝낸다. 사용자 지시 "기존 파싱 자료 모두 삭제하고, 지금 내가 보낸 자료 기반으로
+ * 다시 파싱해줘" + 실제 출력 3건 제공).
  *
- * v2.526 이 사용자 캡처(`pool -detail` 평문)를 보고 **평문 `-detail` 을 첫 후보로** 바꿨는데,
- * 현장 장비(OC2-41.237)에서 **풀·시스템 출력이 파싱되지 않았다** — 화면 실측:
- *   `capacity: 오류: 풀 출력에서 용량 필드를 인식하지 못했습니다` · `config: 건너뜀`
- * 같은 세션의 `alerts` 는 정상이었으므로 SSH·명령 실행은 멀쩡했고 **파싱만** 실패한 것이다.
- * v2.525 는 CSV 를 첫 후보로 썼고 잘 돌았다. `recordsFor` 는 CSV 를 훨씬 안정적으로 읽는다
- * (평문 `-detail` 은 `N:` 접두 + `Key = Value` 라 레코드 경계가 장비/버전마다 다르다).
+ * ── 왜 세 번이나 뒤집혔고, 왜 순서가 원인이 아니었나(정직 기록) ────────────────────
+ *  v2.525 CSV 우선 → 실패 · v2.526 평문 우선 → 실패 · v2.529 CSV 우선 → 실패.
+ *  **셋 다 실패했다는 사실 자체가 순서가 원인이 아니라는 증거다.** 실제 원인은 그 아래층,
+ *  `proxy/sshExec.js` 가 `{ pty: true }` 로 **ssh2 기본 80칸 터미널**을 요청한 것이었다 —
+ *  장비는 TTY 폭에 맞춰 출력을 접고, 접힌 CSV 는 다음과 같이 읽혔다(사용자 제공 실제 값으로 실측):
+ *    · `Current allocation` → `"29973242855424 (27.2T"` (닫는 괄호가 잘림)
+ *    · 접힌 조각이 데이터 줄이 되어 **`ID=47%` · 이름 `38 x 3.8T SAS Flash 4` 인 없는 풀 1개**
+ *  사용자가 **넓은 터미널로 손수 돌린** 같은 명령은 멀쩡했다. → `WIDE_PTY`(1000칸)로 고쳤고,
+ *  `parseCsv` 는 줄이 따옴표 안에서 끊기면 CSV 를 통째로 거부한다(이중 방어).
  *
- * 평문 `-detail` 은 **뒤 후보로 남긴다** — CSV 를 지원하지 않는 항목이 있을 수 있어서다.
- * 되돌리지 말 것: 평문을 앞에 두면 이 회귀가 그대로 재발한다.
+ * ── 그러면 왜 평문이 첫 자리인가 ────────────────────────────────────────────────
+ *  이 장비(OC2-41.237)에서 **실제 출력을 받아 본 형식은 평문뿐이다** — `/stor/config/pool show`,
+ *  `/stor/config/pool show -detail`, `/stor/prov/luns/lun show` 세 건(2026-09-16 사용자 캡처).
+ *  `test/fixtures/uemcli-*.txt` 가 그 캡처(식별자만 익명화)이고 테스트가 숫자까지 고정한다.
+ *  **이 장비의 `-output csv` 출력은 아직 한 번도 보지 못했다.** 검증된 형식을 앞에 두고
+ *  미검증 형식을 뒤에 두는 것이 이 순서의 전부다 — 'CSV 가 더 좋다/나쁘다' 는 주장이 아니다.
+ *  실장비 CSV 캡처를 받으면 다시 판단할 것.
  */
 const SPECS = [
   /* ── 매 주기 ───────────────────────────────────────────────────────────── */
   { key: 'system', section: 'config', required: true, when: 'always', answered: true,
-    cmds: ['uemcli -output csv /sys/general show -detail', 'uemcli -output csv /sys/general show', 'uemcli /sys/general show'] },
+    cmds: ['uemcli /sys/general show -detail', 'uemcli /sys/general show', 'uemcli -output csv /sys/general show -detail'] },
   // 용량·구독(할당량) — 사용자 요청 "디스크 사용량 할당량". `-detail` 이 Current allocation·
-  // Subscription·Alert threshold·RAID·Drives 를 준다(실측).
+  // Subscription·Alert threshold·RAID·Drives 를 준다(실측 캡처로 확인).
   { key: 'pools', section: 'pools', when: 'always', answered: true,
-    cmds: ['uemcli -output csv /stor/config/pool show -detail', 'uemcli -output csv /stor/config/pool show', 'uemcli /stor/config/pool show -detail', 'uemcli /stor/config/pool show'] },
+    cmds: ['uemcli /stor/config/pool show -detail', 'uemcli /stor/config/pool show', 'uemcli -output csv /stor/config/pool show -detail'] },
   { key: 'sps', section: 'nodes', when: 'always', answered: true,
-    cmds: ['uemcli -output csv /env/sp show -detail', 'uemcli -output csv /env/sp show', 'uemcli /env/sp show -detail'] },
+    cmds: ['uemcli /env/sp show -detail', 'uemcli /env/sp show', 'uemcli -output csv /env/sp show -detail'] },
   { key: 'alerts', section: 'alerts', when: 'always', answered: true,
-    cmds: ['uemcli -output csv /event/alert/hist show -active', 'uemcli -output csv /event/alert/hist show', 'uemcli /event/alert/hist show -active'] },
+    cmds: ['uemcli /event/alert/hist show -active', 'uemcli /event/alert/hist show', 'uemcli -output csv /event/alert/hist show -active'] },
   // 전력·FRU 상태·부품 인벤토리를 한 번에 주는 유일한 명령(Unisphere 계정 불필요).
   // ⚠ 출력이 길고 `--More--` 로 멈추므로 페이저 자동 응답이 필요하다.
   { key: 'spinfo', when: 'always', answered: true, rules: ['pager', 'certAccept'],
     bin: 'svc_diag', cmds: ['svc_diag -s spinfo'] },
 
   /* ── 긴 주기(구성) ─────────────────────────────────────────────────────── */
-  { key: 'software', when: 'config', answered: true, cmds: ['uemcli -output csv /sys/soft/ver show', 'uemcli /sys/soft/ver show'] },
-  { key: 'license', when: 'config', answered: true, cmds: ['uemcli -output csv /sys/lic show', 'uemcli /sys/lic show'] },
-  { key: 'users', section: 'accounts', when: 'config', answered: true, cmds: ['uemcli -output csv /user/account show', 'uemcli /user/account show'] },
+  { key: 'software', when: 'config', answered: true, cmds: ['uemcli /sys/soft/ver show', 'uemcli -output csv /sys/soft/ver show'] },
+  { key: 'license', when: 'config', answered: true, cmds: ['uemcli /sys/lic show', 'uemcli -output csv /sys/lic show'] },
+  { key: 'users', section: 'accounts', when: 'config', answered: true, cmds: ['uemcli /user/account show', 'uemcli -output csv /user/account show'] },
   // 물리 디스크 — 실측 필드: ID·Enclosure·Slot·Health state·Tier·User capacity·Pool
   { key: 'disks', when: 'config', answered: true,
-    cmds: ['uemcli -output csv /env/disk show -detail', 'uemcli -output csv /env/disk show', 'uemcli /env/disk show -detail'] },
-  { key: 'dpe', when: 'config', answered: true, cmds: ['uemcli -output csv /env/dpe show', 'uemcli /env/dpe show'] },
-  { key: 'dae', when: 'config', answered: true, cmds: ['uemcli -output csv /env/dae show', 'uemcli /env/dae show'] },
-  { key: 'iom', when: 'config', answered: true, cmds: ['uemcli -output csv /env/iomodule show', 'uemcli /env/iomodule show'] },
-  { key: 'ethPorts', when: 'config', answered: true, cmds: ['uemcli -output csv /net/port/eth show', 'uemcli /net/port/eth show'] },
-  { key: 'fcPorts', when: 'config', answered: true, cmds: ['uemcli -output csv /net/port/fc show', 'uemcli /net/port/fc show'] },
-  { key: 'sasPorts', when: 'config', answered: true, cmds: ['uemcli -output csv /net/port/sas show', 'uemcli /net/port/sas show'] },
-  // LUN — 실측 필드: Size·Storage pool·SP owner·Trespassed. `-detail` 은 실제 할당량을 준다(미확인).
+    cmds: ['uemcli /env/disk show -detail', 'uemcli /env/disk show', 'uemcli -output csv /env/disk show -detail'] },
+  { key: 'dpe', when: 'config', answered: true, cmds: ['uemcli /env/dpe show', 'uemcli -output csv /env/dpe show'] },
+  { key: 'dae', when: 'config', answered: true, cmds: ['uemcli /env/dae show', 'uemcli -output csv /env/dae show'] },
+  { key: 'iom', when: 'config', answered: true, cmds: ['uemcli /env/iomodule show', 'uemcli -output csv /env/iomodule show'] },
+  { key: 'ethPorts', when: 'config', answered: true, cmds: ['uemcli /net/port/eth show', 'uemcli -output csv /net/port/eth show'] },
+  { key: 'fcPorts', when: 'config', answered: true, cmds: ['uemcli /net/port/fc show', 'uemcli -output csv /net/port/fc show'] },
+  { key: 'sasPorts', when: 'config', answered: true, cmds: ['uemcli /net/port/sas show', 'uemcli -output csv /net/port/sas show'] },
+  // LUN — 실측 필드(사용자 캡처): ID·Name·Storage pool·Type·Health state·Size·SP owner·Trespassed.
   { key: 'luns', when: 'config', answered: true,
-    cmds: ['uemcli -output csv /stor/prov/luns/lun show -detail', 'uemcli -output csv /stor/prov/luns/lun show', 'uemcli /stor/prov/luns/lun show -detail'] },
+    cmds: ['uemcli /stor/prov/luns/lun show -detail', 'uemcli /stor/prov/luns/lun show', 'uemcli -output csv /stor/prov/luns/lun show -detail'] },
   { key: 'filesystems', when: 'config', answered: true,
-    cmds: ['uemcli -output csv /stor/prov/fs show -detail', 'uemcli -output csv /stor/prov/fs show', 'uemcli /stor/prov/fs show -detail'] },
-  { key: 'vmfs', when: 'config', answered: true, cmds: ['uemcli -output csv /stor/prov/vmware/vmfs show', 'uemcli /stor/prov/vmware/vmfs show'] },
-  { key: 'nfsDs', when: 'config', answered: true, cmds: ['uemcli -output csv /stor/prov/vmware/nfs show', 'uemcli /stor/prov/vmware/nfs show'] },
-  { key: 'nasServers', when: 'config', answered: true, cmds: ['uemcli -output csv /net/nas/server show', 'uemcli /net/nas/server show'] },
-  { key: 'hosts', when: 'config', answered: true, cmds: ['uemcli -output csv /remote/host show', 'uemcli /remote/host show'] },
-  { key: 'snaps', when: 'config', answered: true, cmds: ['uemcli -output csv /prot/snap show', 'uemcli /prot/snap show'] },
+    cmds: ['uemcli /stor/prov/fs show -detail', 'uemcli /stor/prov/fs show', 'uemcli -output csv /stor/prov/fs show -detail'] },
+  { key: 'vmfs', when: 'config', answered: true, cmds: ['uemcli /stor/prov/vmware/vmfs show', 'uemcli -output csv /stor/prov/vmware/vmfs show'] },
+  { key: 'nfsDs', when: 'config', answered: true, cmds: ['uemcli /stor/prov/vmware/nfs show', 'uemcli -output csv /stor/prov/vmware/nfs show'] },
+  { key: 'nasServers', when: 'config', answered: true, cmds: ['uemcli /net/nas/server show', 'uemcli -output csv /net/nas/server show'] },
+  { key: 'hosts', when: 'config', answered: true, cmds: ['uemcli /remote/host show', 'uemcli -output csv /remote/host show'] },
+  { key: 'snaps', when: 'config', answered: true, cmds: ['uemcli /prot/snap show', 'uemcli -output csv /prot/snap show'] },
   // NAS 할당량(사용자 요청 "할당량"). ⚠ 이 장비에서는 `-filesystem` 같은 필수 인자를 요구해
   //   문법 오류가 난다(실측: `Expected one of the following mandatory keywords`). 그건 오류가 아니라
   //   **'이 명령은 대상 지정이 필요하다'** 는 뜻이므로 화면이 그렇게 말한다(없는 값을 지어내지 않는다).
-  { key: 'quotaConfig', when: 'config', answered: true, cmds: ['uemcli -output csv /quota/config show', 'uemcli /quota/config show'] },
-  { key: 'quotaTree', when: 'config', answered: true, cmds: ['uemcli -output csv /quota/tree show', 'uemcli /quota/tree show'] },
+  { key: 'quotaConfig', when: 'config', answered: true, cmds: ['uemcli /quota/config show', 'uemcli -output csv /quota/config show'] },
+  { key: 'quotaTree', when: 'config', answered: true, cmds: ['uemcli /quota/tree show', 'uemcli -output csv /quota/tree show'] },
 ];
 
 /** 이 주기에 돌릴 명세. `configRound:false` 면 긴 주기 항목을 뺀다. */
@@ -247,14 +257,21 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
     const name = nameOf(p, norm.length, '');
     if (!name) continue;
     const t = poolTotalOf(p);
-    const u = toBytes(pick(p, 'Current allocation', 'Size used', 'Used space', 'Used capacity', 'Used'));
+    let u = toBytes(pick(p, 'Current allocation', 'Size used', 'Used space', 'Used capacity', 'Used'));
     const free = toBytes(pick(p, 'Remaining space', 'Size free', 'Free'));
+    // ⚠ `-detail` 없이 `pool show` 만 성공하면 **사용량 필드가 아예 없다**(사용자 캡처로 확인 —
+    //   평문 `show` 는 Total/Remaining 만 준다). 그대로 두면 화면에 **`0 · 0%` 라는 거짓**이 찍힌다.
+    //   전체 − 잔여로 되돌려 쓰되(실측 대조: 106.9T − 79.6T = 27.26T vs 실제 27.2T) 계산값임을
+    //   `usedSource` 로 **밝힌다** — 장비가 준 값과 우리가 뺀 값을 같은 것처럼 말하지 않는다.
+    const usedSource = u ? 'device' : (t && free ? 'derived' : null);
+    if (!u && usedSource === 'derived') u = Math.max(0, t - free);
     const sub = toBytes(pick(p, 'Subscription', 'Size subscribed', 'Subscribed'));
     if (!t) continue;               // 용량을 못 읽은 풀은 0 으로 채우지 않고 뺀다(개수는 아래에서 밝힌다)
     total += t; used += u; subscribed += sub;
     const pctNum = (v) => { const n = Number(String(v || '').replace('%', '').trim()); return Number.isFinite(n) ? n : undefined; };
     norm.push({
       name, totalBytes: t, usedBytes: u, pct: Math.round((u / t) * 1000) / 10,
+      usedSource: usedSource || undefined,
       health: healthOf(p),
       freeBytes: free || undefined,
       subscribedBytes: sub || undefined,

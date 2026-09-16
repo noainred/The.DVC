@@ -92,7 +92,7 @@ function NodeFaultModal({ r, typeLabel, onClose }) {
   }, [s, onlyBad]);
   if (!r) return null;
   return (
-    <Modal title={`노드 상태 — ${r.name || s?.name || r.host}`} onClose={onClose} width={860}>
+    <Modal title={`노드 상태 — ${s?.name || r.name || r.host}`} onClose={onClose} width={860}>
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, minWidth: 0 }}>
         <div style={{ border: `1px solid var(--${sum.tone === 'red' ? 'red' : sum.tone === 'amber' ? 'amber' : 'border'})`, borderRadius: 8, padding: '9px 11px' }}>
           <div style={{ fontWeight: 700, color: sum.tone === 'red' ? 'var(--red)' : sum.tone === 'amber' ? 'var(--amber)' : undefined }}>{sum.title}</div>
@@ -212,26 +212,42 @@ function Cell({ col, r, ctx }) {
   const v = cellValue(col.key, r);
   const dash = <span className="muted">—</span>;
   switch (col.key) {
-    case 'device':
-      // v2.515: **등록 표시명(r.name)이 먼저**다 — 사람이 '수정' 폼에서 바꾸는 값이 그것이기 때문이다.
-      // 예전에는 `s?.name || r.name` 이라 수집 스냅샷의 이름이 덮어써, 이름을 고쳐 저장해도 표는
-      // 옛 이름을 계속 보여줬다(사용자 신고: "수정하는데 수정사항이 반영되지 않는다" — 저장은
-      // 성공하고 응답도 새 이름인데 화면만 그대로였다. 브라우저로 재현해 확인).
-      // 장비가 스스로 보고한 이름은 다를 때만 둘째 줄에 함께 보여준다(SanSwitchTool 과 같은 규칙) —
-      // 현장 콘솔에 찍히는 실제 이름을 잃지 않기 위해서다.
+    case 'device': {
+      // v2.530(사용자 요청 "'장비' 에 들어가는 데이터를 hostname 에서 획득한 장비 명을 넣어줘"):
+      // **장비가 스스로 보고한 이름(`snap.name`)이 먼저**다. Isilon 은 `isi status` 의 클러스터
+      // 이름, Unity/PowerStore 는 시스템·클러스터 이름 — 현장 콘솔에 찍히는 그 이름이다.
+      //
+      // ⚠ **v2.515 와 반대 방향이므로 그때의 불만이 재발하지 않게 해야 한다.** v2.514 까지
+      //    스냅샷 이름이 우선이었고, 그래서 '수정' 폼에서 이름을 고쳐 저장해도 표가 그대로라
+      //    사용자가 "수정하는데 수정사항이 반영되지 않는다" 고 신고했다(저장은 성공했다).
+      //    원인은 순서가 아니라 **고친 값이 화면 어디에도 안 보였던 것**이다. 그래서 이번에는
+      //    등록 표시명이 다르면 둘째 줄에 **`등록명` 이라고 라벨을 붙여** 보여준다 —
+      //    이름을 고치면 그 줄이 즉시 바뀌므로 '반영이 안 됐다' 로 보이지 않는다.
+      //    ⚠ 이 둘째 줄을 지우면 v2.515 결함이 그대로 되살아난다.
+      //
+      // 장비가 이름을 보고하지 않거나(수집 전·수집 실패) 등록명과 같으면 등록명만 보인다 —
+      // 수집기들이 `snap.name = <장비 이름> || device.name` 으로 폴백하므로 빈 칸이 되지 않는다.
+      const reported = s?.name || '';
+      const differs = !!reported && !!r.name && reported !== r.name;
       return (
         <td>
-          <button className="cell-link" onClick={() => setDetail(r.id)}><b>{r.name || s?.name || r.host}</b></button>
-          {/* ⚠ 둘째 줄에 상한·생략표시를 반드시 둘 것 — 없이 두면 보고명이 장비 열을 넓혀
+          {/* ⚠ 첫 줄도 폭을 묶는다 — 장비가 보고한 이름은 길 수 있고(실측: 25자에서 장비 열
+              101→195px), 묶지 않으면 표가 오른쪽으로 밀려 '작업' 열이 잘린다(v2.403 재발). */}
+          <button className="cell-link" onClick={() => setDetail(r.id)} title={reported || r.name || r.host}
+            style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', textAlign: 'left' }}>
+            <b>{reported || r.name || r.host}</b>
+          </button>
+          {/* ⚠ 둘째 줄에 상한·생략표시를 반드시 둘 것 — 없이 두면 이름이 장비 열을 넓혀
               (A/B 실측 108→136px) 표가 22px 넘치고 오른쪽 '작업' 열이 잘린다(v2.403 이
               고쳤던 문제의 재발). 전체 문자열은 title 로 남긴다. */}
-          <div className="muted" title={s?.name && s.name !== r.name ? `장비가 보고한 이름: ${s.name} · ${r.host}` : r.host}
+          <div className="muted" title={differs ? `등록 표시명: ${r.name} · 장비가 보고한 이름: ${reported} · ${r.host}` : r.host}
             style={{ fontSize: 11, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {s?.name && s.name !== r.name ? <>{s.name}{' · '}</> : null}
+            {differs ? <>{'등록명 '}{r.name}{' · '}</> : null}
             {r.host}
           </div>
         </td>
       );
+    }
     case 'type':
       return <td><span className="badge blue">{typeLabel(r.type)}</span></td>;
     case 'dc':
@@ -755,7 +771,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
   // 제거를 위해 1100 으로 넓혔으나 실제 렌더 결과 노드 표 열 사이 빈 공간이 커서 압축.
   // 노드 표 실제 콘텐츠 폭(모노스페이스 수치 포함)은 ~700px 이라 900 에서도 가로 스크롤 없음.
   return (
-    <Modal title={`${typeLabel(r.type)} — ${r.name || s?.name || r.host}`} onClose={onClose} width={900}>
+    <Modal title={`${typeLabel(r.type)} — ${s?.name || r.name || r.host}`} onClose={onClose} width={900}>
       {/* 새로고침(v2.306, 사용자 요구) — 중앙 수집 장비는 즉시 재수집, 엣지 장비는 주기 안내(202 사유) */}
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '6px 14px', fontSize: 12.5 }} disabled={busy} onClick={refresh}>
