@@ -22,6 +22,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 import { isKnownType, isImplementedType, normalizeCollectMethod } from './types.js';
+import { duplicateIssue } from './duplicate.js';
 
 const FILE = path.join(config.configDir, 'storage-devices.json');
 const MAX_DEVICES = 500;
@@ -111,7 +112,12 @@ export function saveDevice(input = {}) {
   Object.assign(dev, { type, name, host, username, agent, datacenterId, collectMethod, sshPort, enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200) });
   if (!existing) {
     if (db.devices.length >= MAX_DEVICES) throw new Error(`장비는 최대 ${MAX_DEVICES}개까지 등록할 수 있습니다.`);
-    if (db.devices.some((d) => d.host === host && d.type === type)) throw new Error('같은 host 의 같은 타입 장비가 이미 있습니다.');
+    // v2.522: 중복이면 **어느 장비와 충돌하는지** 함께 던진다(사용자 신고 '표에는 없는데
+    // 있다고 나온다' — 판정은 등록부 전체인데 화면은 법인·타입 칩으로 걸러져 있었다).
+    // 규칙(host+type)은 그대로다 — CSV 가져오기 멱등성 키와 같은 것이라 바꾸면 왕복에서
+    // 장비가 중복 생성된다(storage/duplicate.js 머리말 참조).
+    const dup = duplicateIssue(db.devices, { host, type });
+    if (dup) { const e = new Error(dup.message); e.conflict = dup.conflict; throw e; }
     db.devices.push(dev);
   }
   persist();
