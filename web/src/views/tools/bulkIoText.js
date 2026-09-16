@@ -148,7 +148,7 @@ export function tokenHint(item) {
 }
 
 /** 다운로드 경로 — 도구 base 와 형식으로 조립(화면에 경로를 흩뿌리지 않기 위해). */
-export function ioUrl(base, kind, format) {
+export function ioUrl(base, kind, format, resource = 'devices') {
   const f = FORMATS.find((x) => x.key === format) || FORMATS[0];
-  return `${base}/devices/${kind}.${f.ext}`;
+  return `${base}/${resource}/${kind}.${f.ext}`;
 }

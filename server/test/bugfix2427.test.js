@@ -45,5 +45,7 @@ test('#3 chunkMeta: meta 도 예산 안에서 나뉜다(청크 0 에 전량 적�
 test('#4 storage testDeviceConnection 은 signal 을 device._signal 과 opts.signal 양쪽으로 전달한다', async () => {
   const src = fs.readFileSync(new URL('../src/storage/poller.js', import.meta.url), 'utf8');
   assert.match(src, /fn\(\{ \.\.\.full, _signal: signal \}, \{ signal \}\)/, '폴러 경로');
-  assert.match(src, /fn\(\{ \.\.\.device, _signal: ac\.signal \}, \{ signal: ac\.signal \}\)/, '연결 테스트 경로');
+  // v2.525: 연결 테스트 경로에 `_test: true` 가 추가됐다(Unity SSH 가 이때만 전 명령 원문을
+  // 담게 하는 표시). signal 두 갈래 전달 규약 자체는 그대로여야 하므로 그 부분만 고정한다.
+  assert.match(src, /fn\(\{ \.\.\.device, _signal: ac\.signal,[^)]*\}, \{ signal: ac\.signal \}\)/, '연결 테스트 경로');
 });

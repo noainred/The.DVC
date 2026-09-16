@@ -47,10 +47,15 @@ const S = {
 };
 
 export default function BulkDeviceIo({
-  base,                 // 예: '/tools/storage' | '/tools/sanswitch'
+  base,                 // 예: '/tools/storage' | '/tools/sanswitch' | '/admin/horizon'
   title,                // 모달 제목
-  keyLabel = 'host',    // 동일 장비 판정 키(문구용) — 스토리지 'host+type', 스위치 'host'
+  keyLabel = 'host',    // 동일 판정 키(문구용) — 스토리지 'host+type', 스위치 'host', Horizon 'id'
   passwordExport = false, // 비밀번호 포함 내보내기(스토리지만 — 설정 소유자 게이트)
+  // v2.525: 도구마다 다른 것만 **주입**한다(복제 금지 — 이 파일 머리말). 기본값은 기존 두 화면 그대로.
+  resource = 'devices',  // 라우트 경로 조각 — Horizon 은 'servers'
+  unitLabel = '장비',    // 표 머리글·안내 문구의 단위 이름
+  typeCol = '타입',      // 타입 열 머리글. **null 이면 열 자체를 숨긴다**(Horizon 은 타입이 없다 —
+                         // 항상 '—' 인 열을 남기면 사용자가 '무엇을 적어야 하나' 를 찾는다)
   onClose,
   onDone,               // 등록 후 목록 새로고침
 }) {
@@ -80,7 +85,7 @@ export default function BulkDeviceIo({
     let timer = 0;
     const tick = async () => {
       try {
-        const r = await fetchJson(`${base}/devices/import/test/${runId}`);
+        const r = await fetchJson(`${base}/${resource}/import/test/${runId}`);
         if (!alive) return;
         setRun(r);
         if (r.status !== 'done') timer = setTimeout(tick, POLL_MS);
@@ -121,13 +126,13 @@ export default function BulkDeviceIo({
 
   const body = (extra = {}) => (format === 'text' ? { text, format: 'text', ...extra } : { csv: text, format: 'csv', ...extra });
 
-  const dl = (kind) => downloadFile(ioUrl(base, kind, format)).catch((e) => setErr(e.message));
+  const dl = (kind) => downloadFile(ioUrl(base, kind, format, resource)).catch((e) => setErr(e.message));
 
   /* ① 형식 검증 */
   const verify = async () => {
     setBusy(true); setErr(null); setResult(null); setCheck(null); setRunId(null); setRun(null);
     try {
-      const r = await postJson(`${base}/devices/import`, body({ dryRun: true }));
+      const r = await postJson(`${base}/${resource}/import`, body({ dryRun: true }));
       if (r.ok === false) { setErr(r.reason); return; }
       setCheck(r); setCheckedText(text);
       setSel(new Set(defaultSelection(r.report, null)));
@@ -138,7 +143,7 @@ export default function BulkDeviceIo({
   const startTest = async () => {
     setBusy(true); setErr(null); setResult(null); setRun(null);
     try {
-      const r = await postJson(`${base}/devices/import/test`, body());
+      const r = await postJson(`${base}/${resource}/import/test`, body());
       if (r.ok === false) { setErr(r.reason); return; }
       setRunId(r.id); setRunText(text);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
@@ -150,7 +155,7 @@ export default function BulkDeviceIo({
     try {
       const extra = { selectLines: [...sel] };
       if (testOnly && flags.testDone) extra.testRunId = runId;
-      const r = await postJson(`${base}/devices/import`, body(extra));
+      const r = await postJson(`${base}/${resource}/import`, body(extra));
       if (r.ok === false) { setErr(r.reason); return; }
       setResult(r);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
@@ -178,16 +183,16 @@ export default function BulkDeviceIo({
         <button className="tab" style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => fileRef.current?.click()}>📁 파일 선택</button>
         <button className="tab" style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} title={`양식·예시가 담긴 샘플 ${fmt.label} 내려받기(그대로 가져와도 오류가 나지 않습니다)`}
           onClick={() => dl('sample')}>📄 샘플 {fmt.label}</button>
-        <button className="tab" style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} title={`현재 등록 장비를 ${fmt.label} 로 내려받기 — 비밀번호는 담기지 않습니다`}
+        <button className="tab" style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} title={`현재 등록 ${unitLabel}를 ${fmt.label} 로 내려받기 — 비밀번호는 담기지 않습니다`}
           onClick={() => dl('export')}>⬇ 내보내기</button>
         {passwordExport && (
           <button className="tab" style={{ flex: 'none', padding: '5px 11px', fontSize: 12, color: 'var(--amber)' }}
             title="비밀번호를 평문으로 포함해 내려받습니다 — 설정 소유자 계정만 가능하고 감사로그에 남습니다."
-            onClick={() => downloadFile(`${base}/devices/export.csv?passwords=1`).catch((e) => setErr(e.message))}>🔑 비밀번호 포함 CSV</button>
+            onClick={() => downloadFile(`${base}/${resource}/export.csv?passwords=1`).catch((e) => setErr(e.message))}>🔑 비밀번호 포함 CSV</button>
         )}
       </div>
       <div className="muted" style={{ fontSize: 11.5, marginBottom: 8, lineHeight: 1.6 }}>
-        {fmt.hint}. <b>{keyLabel}</b> 가 같은 장비는 <b>수정</b>, 없으면 <b>추가</b>입니다.
+        {fmt.hint}. <b>{keyLabel}</b> 가 같은 {unitLabel}는 <b>수정</b>, 없으면 <b>추가</b>입니다.
         비밀번호 칸은 값이 있으면 저장하고 비우면 기존 값을 유지합니다.
       </div>
 
@@ -237,9 +242,9 @@ export default function BulkDeviceIo({
                 <tr>
                   <th data-nosort>선택</th>
                   <th style={{ textAlign: 'right' }}>줄</th>
-                  <th>장비</th>
-                  <th title="장비 주소(host) — IP 또는 호스트명">주소</th>
-                  <th>타입</th><th>동작</th><th>비밀번호</th>
+                  <th>{unitLabel}</th>
+                  <th title={`${unitLabel} 주소(host)`}>주소</th>
+                  {typeCol && <th>{typeCol}</th>}<th>동작</th><th>비밀번호</th>
                   <th>연결 테스트</th>
                   {/* 조언은 문장이라 길다 — 줄바꿈시키지 않으면 오른쪽에서 잘린다
                       (v2.513 Chromium 스크린샷 판독에서 실제로 잘려 있었다). */}
@@ -260,7 +265,7 @@ export default function BulkDeviceIo({
                       <td style={{ textAlign: 'right' }} className="muted">{r.line}</td>
                       <td><b>{r.name || '—'}</b></td>
                       <td className="muted" style={{ fontSize: 11.5 }}>{r.host || '—'}</td>
-                      <td className="muted" style={{ fontSize: 11.5 }}>{r.type || '—'}</td>
+                      {typeCol && <td className="muted" style={{ fontSize: 11.5 }}>{r.type || '—'}</td>}
                       <td><span className={`badge ${actionClass(r.action)}`}>{actionLabel(r.action)}</span></td>
                       <td className="muted" style={{ fontSize: 11.5 }}>{r.hasPassword ? '반영' : '유지'}</td>
                       <td data-sort={t?.status || ''} style={{ fontSize: 11.5, maxWidth: 240, whiteSpace: 'normal', wordBreak: 'break-word' }}

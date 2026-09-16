@@ -105,6 +105,7 @@ import { startGuestDiskPoller } from './guestdisk/poller.js';       // 게스트
 import { startVmSeriesPoller } from './vmseries/poller.js';         // 실시간(20초) 스파이크 수집(v2.510) — vCenter별 독립 DB
 import { startVmSeriesConfigPull } from './agent/vmSeriesConfigPull.js'; // 〃 중앙→엣지 설정 pull(v2.510)
 import { startCurUserPoller } from './curuser/poller.js';           // '현재 사용자'(v2.520) — guestinfo 읽기, 게스트 계정 없음
+import { startHzSessionPoller } from './horizon/sessionPoller.js';  // Horizon 실시간 사용자(v2.525) — 기존 horizon.json 자격증명 재사용, opt-in
 import { startCurUserConfigPull } from './agent/curUserConfigPull.js'; // 〃 중앙→엣지 설정 pull(v2.520)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
@@ -339,6 +340,7 @@ const stagger = [
   startVmSeriesPoller,  // 실시간 스파이크 수집(v2.510) — 적응형 타이머(기본 50분) + 재진입 가드 + 동시성 4 + 디스크 가드. opt-in(기본 꺼짐). 엣지면 저장 후 중앙 push
   startVmSeriesConfigPull, // 〃 중앙→엣지 설정 pull(v2.510) — CENTRAL_URL 미설정이면 자기기동 안 함
   startCurUserPoller,   // '현재 사용자'(v2.520) — 적응형 타이머(기본 10분) + 재진입 가드 + 동시성 제한. opt-in(기본 꺼짐). 게스트 계정 없이 config.extraConfig 만 읽는다
+  startHzSessionPoller, // Horizon 실시간 사용자(v2.525) — 적응형 타이머(기본 5분) + 재진입 가드 + 서버당 시한. opt-in(기본 꺼짐). 기존 horizon.json 자격증명을 재사용한다
   startCurUserConfigPull, // 〃 중앙→엣지 설정 pull(v2.520)
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());

@@ -60,8 +60,16 @@ export function fieldOfIssue(issue) {
 /** 필드로 환원되지 않는 문제의 조언(중복 등). 없으면 null. */
 export function specialAdvice(issue) {
   const s = String(issue || '');
-  const m = s.match(/파일 내 중복 — (\d+)행/);
-  if (m) return `이 줄은 ${m[1]}줄과 같은 장비를 가리킵니다 — 둘 중 **하나를 지우거나** host 를 올바른 값으로 고치세요(어느 쪽이 저장될지 모호해 저장하지 않았습니다).`;
+  const m = s.match(/파일 내 중복 — (\d+)행과 같은 ([^(]+)/);
+  if (m) {
+    // ⚠ v2.525: 식별 키는 **도구마다 다르다**(스토리지 `host+type` · SAN 스위치 `host` · Horizon `id`).
+    //   예전에는 언제나 "host 를 고치세요" 라고 말해, id 로 판정하는 도구에서 **엉뚱한 열을 지목**했다
+    //   (Chromium 판독에서 발견). 사유 문자열이 이미 키 이름을 담고 있으므로 그것을 그대로 쓴다.
+    const key = String(m[2] || 'host').trim();
+    return `이 줄은 ${m[1]}줄과 같은 대상을 가리킵니다 — 둘 중 **하나를 지우거나** ${key} 를 올바른 값으로 고치세요(어느 쪽이 저장될지 모호해 저장하지 않았습니다).`;
+  }
+  const m2 = s.match(/파일 내 중복 — (\d+)행/);
+  if (m2) return `이 줄은 ${m2[1]}줄과 같은 대상을 가리킵니다 — 둘 중 **하나를 지우거나** 식별 키를 올바른 값으로 고치세요(어느 쪽이 저장될지 모호해 저장하지 않았습니다).`;
   return null;
 }
 
@@ -163,7 +171,7 @@ export function adviseRow(row, issue, { lineText = '', order = [], format = 'tex
  *  · 스마트 인용부호(워드·메일에서 복사)
  * @returns {Array<{line:number, field:string, advice:string, severity:'warn'}>}
  */
-export function preflightHints(rows, fields = []) {
+export function preflightHints(rows, fields = [], { hostForm = 'address' } = {}) {
   const out = [];
   const push = (line, field, advice) => out.push({ line, field, advice, severity: 'warn' });
   for (const r of rows || []) {
@@ -174,9 +182,19 @@ export function preflightHints(rows, fields = []) {
       if (/[‘’“”]/.test(v)) push(r._line, f, `${r._line}줄 '${f}' 에 스마트 인용부호(‘ ’ “ ”)가 있습니다 — 워드·메일에서 복사한 흔적입니다. 보통 따옴표로 바꾸거나 지우세요.`);
     }
     const host = String(r?.host ?? '');
-    if (/^https?:\/\//i.test(host)) push(r._line, 'host', `${r._line}줄 host 에 URL 이 들어갔습니다 — \`${host.replace(/^https?:\/\//i, '').replace(/\/.*$/, '')}\` 처럼 주소만 남기세요.`);
-    else if (/^[^:]+:\d+$/.test(host)) push(r._line, 'host', `${r._line}줄 host 에 포트가 붙어 있습니다 — 주소는 \`${host.split(':')[0]}\`, 포트는 sshPort/httpsPort 열에 따로 적으세요.`);
-    if (/\/$/.test(host)) push(r._line, 'host', `${r._line}줄 host 끝에 \`/\` 가 있습니다 — 지우세요.`);
+    if (!host) continue;
+    // ⚠ v2.525: **도구마다 host 의 정답 형식이 다르다.** 스토리지·SAN 스위치는 IP/호스트명이지만
+    //   Horizon 은 `https://커넥션서버` 가 **필수**다(`horizon/horizon.js normalize` 가 강제).
+    //   그래서 `hostForm:'url'` 일 때 아래 세 조언은 **틀린 조언**이 된다 — 그대로 따르면 등록이
+    //   실패한다(Chromium 판독에서 실제로 "URL 이 들어갔습니다 — 주소만 남기세요" 가 떴다).
+    //   조언은 틀리면 무음 실패보다 나쁘다(사용자가 잘못된 수정을 한다).
+    if (hostForm === 'url') {
+      if (!/^https?:\/\//i.test(host)) push(r._line, 'host', `${r._line}줄 host 는 **https://커넥션서버** 형식이어야 합니다 — 앞에 https:// 를 붙이세요.`);
+      continue;   // 포트·끝 슬래시는 URL 형식에서 정상이다(끝 슬래시는 저장 시 자동으로 지워진다)
+    }
+    if (/^https?:\/\//i.test(host)) push(r._line, 'host', `${r._line}줄 host 에 URL 이 들어갔습니다 — ${host.replace(/^https?:\/\//i, '').replace(/\/.*$/, '')} 처럼 주소만 남기세요.`);
+    else if (/^[^:]+:\d+$/.test(host)) push(r._line, 'host', `${r._line}줄 host 에 포트가 붙어 있습니다 — 주소는 ${host.split(':')[0]}, 포트는 sshPort/httpsPort 열에 따로 적으세요.`);
+    if (/\/$/.test(host)) push(r._line, 'host', `${r._line}줄 host 끝에 / 가 있습니다 — 지우세요.`);
   }
   return out;
 }

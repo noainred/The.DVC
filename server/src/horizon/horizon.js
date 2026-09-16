@@ -79,6 +79,23 @@ function normalize(body, existing = null) {
   return [entry, null, droppedSecrets];
 }
 
+/**
+ * 저장 검증의 **단일 소스**(v2.525) — 대량 가져오기 드라이런이 이걸 쓴다.
+ *
+ * `upsertHorizon` 과 **같은 `normalize` · 같은 existing 조회**를 거치므로 '드라이런 통과 =
+ * 저장 성공' 계약이 성립한다. 여기서 규칙을 복제하면(예: 라우트에서 별도 검사) 두 판정이
+ * 갈라져 '검증 통과 → 저장 예외' 가 된다(v2.513 규약).
+ *
+ * @returns {string|null} 사람용 사유, 문제 없으면 null
+ */
+export function horizonInputIssue(body) {
+  const list = loadHorizon();
+  const id = String(body?.id ?? '').trim();
+  const idx = list.findIndex((s) => s.id === id);
+  const [, err] = normalize(body || {}, idx >= 0 ? list[idx] : null);
+  return err || null;
+}
+
 export function upsertHorizon(body) {
   const list = loadHorizon();
   const id = String(body.id || '').trim();
@@ -106,18 +123,48 @@ async function hzFetch(url, opts, timeoutMs) {
   return res;
 }
 
-/** 한 Connection Server의 라이선스 조회(로그인→조회→로그아웃). 반환: 정규화 배열. */
-export async function fetchHorizonLicenses(s) {
+/**
+ * 로그인 → 작업 → 로그아웃을 **한 곳에서** 처리한다(v2.525).
+ *
+ * 왜 공용인가: 세션(실시간 사용자) 수집이 추가되면서 같은 로그인·TLS·SSRF 설정이 두 곳에
+ * 필요해졌다. 복사하면 `dispatcher`(사설 인증서·DNS 리바인딩 가드)와 로그아웃 누락 방지가
+ * 두 갈래로 갈라진다 — 이 저장소는 그 유형의 사고를 겪었다(v2.506 svcmon).
+ *
+ * `fn(get, tok)` 의 `get(pathname, { query })` 는 Bearer 를 붙인 GET 을 돌려준다(Response 그대로 —
+ * 호출부가 상태코드로 원인을 구분할 수 있게. 여기서 삼키면 '401 인지 404 인지' 를 잃는다).
+ */
+export async function withHorizonSession(s, fn) {
   const timeoutMs = s.timeoutMs > 0 ? s.timeoutMs : 15_000;
   const login = await hzFetch(`${s.host}/rest/login`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ username: s.username, password: s.password, domain: s.domain }),
   }, timeoutMs);
-  if (!login.ok) throw new Error(`Horizon 로그인 실패 (HTTP ${login.status})${login.status === 401 ? ' — 계정/도메인 확인' : ''}`);
+  if (!login.ok) {
+    const e = new Error(`Horizon 로그인 실패 (HTTP ${login.status})${login.status === 401 ? ' — 계정/도메인 확인' : ''}`);
+    e.httpStatus = login.status;
+    throw e;
+  }
   const tok = await login.json().catch(() => ({}));
   const bearer = { Authorization: `Bearer ${tok.access_token}`, Accept: 'application/json' };
+  const get = (pathname, { query = null, timeout = timeoutMs } = {}) => {
+    const qs = query ? `?${new URLSearchParams(query).toString()}` : '';
+    return hzFetch(`${s.host}${pathname}${qs}`, { headers: bearer }, timeout);
+  };
   try {
-    const r = await hzFetch(`${s.host}/rest/config/v1/licenses`, { headers: bearer }, timeoutMs);
+    return await fn(get, tok);
+  } finally {
+    // 세션 누수 방지 — 로그아웃은 베스트에포트.
+    hzFetch(`${s.host}/rest/logout`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: tok.refresh_token || '' }),
+    }, 5_000).catch(() => {});
+  }
+}
+
+/** 한 Connection Server의 라이선스 조회(로그인→조회→로그아웃). 반환: 정규화 배열. */
+export async function fetchHorizonLicenses(s) {
+  return withHorizonSession(s, async (get) => {
+    const r = await get('/rest/config/v1/licenses');
     if (!r.ok) throw new Error(`라이선스 조회 실패 (HTTP ${r.status})`);
     const data = await r.json();
     // 단일 객체 또는 배열 두 형태 모두 수용.
@@ -131,16 +178,9 @@ export async function fetchHorizonLicenses(s) {
       isExpired: l.is_expired === true || String(l.license_health || '').toUpperCase() === 'EXPIRED',
       key: l.license_key ? `${String(l.license_key).slice(0, 5)}-…-${String(l.license_key).slice(-5)}` : '',
     }));
-  } finally {
-    // 세션 누수 방지 — 로그아웃은 베스트에포트.
-    hzFetch(`${s.host}/rest/logout`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: tok.refresh_token || '' }),
-    }, 5_000).catch(() => {});
-  }
+  });
 }
 
-// ── 캐시 + 취합 ──────────────────────────────────────────────────────────────
 const cache = new Map(); // id -> { at, licenses, error }
 const TTL_MS = 10 * 60_000;
 

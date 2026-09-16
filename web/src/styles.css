@@ -200,6 +200,12 @@ tbody tr:last-child td { border-bottom: none; }
 .nowrap { white-space: nowrap; }
 /* 리포트 표(자원 축소·게스트 디스크)는 문장/긴 경로가 있어 셀을 줄바꿈한다(기본 tbody td 는 nowrap). */
 .rpt-wrap tbody td { white-space: normal; overflow-wrap: anywhere; word-break: break-word; line-height: 1.45; }
+/* v2.525(사용자 신고 "실시간 글자 1줄에 나오게 해줘"): 위 규칙의 `overflow-wrap: anywhere` 는
+   문장 칸을 위한 것인데 **숫자 칸과 계열명 칸까지** 단어 중간에서 쪼갰다 —
+   `Consumed` → `Consum/ed`, `63.6 GB` → `63.6/GB`, 실시간 배지 → `실/시간`.
+   그 두 종류 칸만 단어 중간 분리를 끈다(공백에서의 줄바꿈은 그대로 — nowrap 으로 굳히면
+   400px 폭에서 표가 뷰포트를 넘친다). 문장 칸(해석·의미)은 위 규칙을 유지한다. */
+.rpt-wrap tbody td.right, .rpt-wrap tbody td:first-child { overflow-wrap: normal; word-break: normal; }
 .tabular { font-variant-numeric: tabular-nums; }
 
 .loading, .error-box { padding: 40px; text-align: center; color: var(--text-dim); }
