@@ -5,7 +5,8 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { STATUS_LABEL, STATUS_MARK, stageLabel, stamp, deviceVerdict, allSummaryText,
   sortResults, baselineNote, deviceReportDoc, allReportDoc, reportFileName,
-  portVerdict, opticalText, errorText, portCheckSummary, portBaselineNote, problemPortText, sideText } from './sanHealthText.js';
+  portVerdict, opticalText, errorText, portCheckSummary, portBaselineNote, problemPortText, sideText,
+  cmdText, cmdNote, changeLabel, compareSummary, recordNote } from './sanHealthText.js';
 
 /**
  * 특수기능 › SAN 스위치 모니터링 — **월간 점검**(v2.519, 사용자 제공 Brocade 월간 점검 체크리스트).
@@ -65,7 +66,11 @@ function ItemTable({ items }) {
                       <tr>
                         <td style={{ whiteSpace: 'nowrap' }}><b>{i.label}</b></td>
                         <td data-sort={i.status}><StatusBadge status={i.status} /></td>
-                        <td><code style={{ fontSize: 11 }}>{i.cmd || '—'}</code></td>
+                        <td>
+                          <code style={{ fontSize: 11, color: i.usedAlt ? tone('amber') : undefined }}>{cmdText(i)}</code>
+                          {/* ⚠ 대체 명령을 썼으면 반드시 말한다 — 출력이 원 명령과 같지 않을 수 있다(v2.522) */}
+                          {i.usedAlt && <div className="muted" style={{ fontSize: 10.5, whiteSpace: 'normal' }}><BoldText text={cmdNote(i)} /></div>}
+                        </td>
                         {/* 결과 문구는 문장이라 길다 — 줄바꿈을 허용해야 오른쪽에서 잘리지 않는다(v2.513 규약) */}
                         <td style={{ whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: 420 }}><BoldText text={i.detail || ''} /></td>
                         <td>
@@ -217,6 +222,90 @@ function PortDetail({ row, prob, zoningNote }) {
   );
 }
 
+/**
+ * **최근 N회 점검 비교**(v2.522 — 사용자 요청 "점검 결과를 DB 로 저장해서 최근 10번 점검과 비교").
+ *
+ * ⚠ '지난달과 비슷하다' 같은 뭉갠 말을 하지 않는다 — 새로 생긴 문제·해소된 문제·확인 불가로
+ *   바뀐 항목을 **각각** 센다(`compareSummary`).
+ * ⚠ `확인 불가 → 정상` 은 '호전' 이 아니라 **'이제 확인됨'** 이다(명령이 생겼거나 권한이 바뀐 것).
+ * ⚠ 기록은 '수집 1회 = 1건' 이다 — 탭을 열 때마다 쌓이면 '최근 10회' 가 같은 값 10개가 된다.
+ */
+function HistoryPanel({ history }) {
+  const [open, setOpen] = useState(false);
+  const c = history?.compare;
+  if (!history) return null;
+  if (history.available === false) {
+    return (
+      <div className="card muted" style={{ fontSize: 12, padding: 8, marginTop: 12 }}>
+        점검 이력을 저장할 수 없습니다(이 런타임에서 내장 SQLite 를 쓸 수 없습니다{history.db?.error ? ` — ${history.db.error}` : ''}).
+        현재 점검 결과는 보이지만 <b>최근 점검과의 비교는 되지 않습니다</b>.
+      </div>
+    );
+  }
+  const runs = history.runs || [];
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
+        <div style={{ fontWeight: 600 }}>최근 점검 비교</div>
+        <button className="tab" style={{ flex: 'none', padding: '2px 9px', fontSize: 11 }} onClick={() => setOpen(!open)}>
+          {open ? '이력 접기' : `이력 ${runs.length}건 보기`}
+        </button>
+        <div className="muted" style={{ fontSize: 11.5, whiteSpace: 'normal' }}><BoldText text={compareSummary(c)} /></div>
+      </div>
+      <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>{recordNote(history.recorded)}</div>
+
+      {!!c?.changes?.length && (
+        <div className="table-wrap" style={{ marginBottom: 8 }}>
+          <STable>
+            <thead><tr><th>항목</th><th>변화</th><th>직전</th><th>이번</th><th>내용</th></tr></thead>
+            <tbody>
+              {c.changes.map((x) => {
+                const cl = changeLabel(x.dir);
+                return (
+                  <tr key={x.key}>
+                    <td style={{ whiteSpace: 'nowrap' }}><b>{x.label}</b></td>
+                    <td data-sort={x.dir} style={{ color: tone(cl.color), fontWeight: 600, whiteSpace: 'nowrap' }}>{cl.mark} {cl.label}</td>
+                    <td data-sort={x.from}><StatusBadge status={x.from} /></td>
+                    <td data-sort={x.to}><StatusBadge status={x.to} /></td>
+                    <td style={{ whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: 420 }}><BoldText text={x.detail || ''} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </STable>
+        </div>
+      )}
+      {!!c?.persistent?.length && (
+        <div className="muted" style={{ fontSize: 11.5, marginBottom: 6, whiteSpace: 'normal' }}>
+          ⚠ <b>{c.compared}회 내내 문제인 항목</b> — {c.persistent.map((p) => p.label).join(', ')}. 매달 같은 경고가 반복되고 있습니다.
+        </div>
+      )}
+      {open && (
+        <div className="table-wrap">
+          <STable>
+            <thead><tr><th>점검 시각</th><th>수집 시각</th><th>종합</th><th>이상</th><th>주의</th><th>확인 불가</th><th>정상</th><th>이상 포트</th></tr></thead>
+            <tbody>
+              {runs.map((r) => (
+                <tr key={r.id}>
+                  <td data-sort={String(r.at)}>{stamp(r.at)}</td>
+                  <td data-sort={String(r.collectedAt || 0)}>{r.collectedAt ? stamp(r.collectedAt) : '—'}</td>
+                  <td data-sort={r.overall}><StatusBadge status={r.overall} /></td>
+                  <td data-sort={String(r.counts.bad)} style={{ color: r.counts.bad ? tone('red') : undefined }}>{r.counts.bad}</td>
+                  <td data-sort={String(r.counts.warn)} style={{ color: r.counts.warn ? tone('amber') : undefined }}>{r.counts.warn}</td>
+                  <td data-sort={String(r.counts.unknown)} style={{ color: r.counts.unknown ? tone('amber') : undefined }}>{r.counts.unknown}</td>
+                  <td data-sort={String(r.counts.ok)}>{r.counts.ok}</td>
+                  <td data-sort={String(r.ports?.bad ?? -1)}>{r.ports?.bad == null ? '—' : r.ports.bad}</td>
+                </tr>
+              ))}
+              {!runs.length && <tr><td colSpan={8} className="muted">아직 기록된 점검이 없습니다 — 이번 점검부터 쌓입니다.</td></tr>}
+            </tbody>
+          </STable>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DeviceHealthPanel({ deviceId, deviceName }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -254,7 +343,8 @@ export function DeviceHealthPanel({ deviceId, deviceName }) {
       const { saveDocAsPdf } = await import('./reportExport.js');
       await saveDocAsPdf(
         deviceReportDoc(data.result, {
-          baseline: data.baseline, ports: data.ports, problemPorts: data.problemPorts, zoningNote: data.zoningNote,
+          baseline: data.baseline, ports: data.ports, problemPorts: data.problemPorts,
+          zoningNote: data.zoningNote, history: data.history,
         }),
         reportFileName(data.result?.name || deviceName),
       );
@@ -294,6 +384,7 @@ export function DeviceHealthPanel({ deviceId, deviceName }) {
       {error && <ErrorBox message={error} />}
       <ItemTable items={r?.items || []} />
       <PortCheckTable pc={data.ports} problems={data.problemPorts} zoningNote={data.zoningNote} />
+      <HistoryPanel history={data.history} />
     </div>
   );
 }

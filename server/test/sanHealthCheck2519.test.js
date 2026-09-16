@@ -57,15 +57,18 @@ const itemOf = (r, key) => r.items.find((i) => i.key === key);
 
 test("명령이 없으면 '확인 불가' 이고 종합이 정상으로 흡수되지 않는다", () => {
   // 이 현장의 실제 상황: rbash 계정이라 switchstatusshow·licenseshow 가 없다.
-  const r = H.checkDevice(snapOf({ sections: { health: 'skip', sensors: 'skip', raslog: 'skip', bottleneck: 'skip', fabric: 'skip' },
-    extra: { sensors: null, raslog: null, bottleneck: null, fabricMembers: null } }));
+  // ⚠ v2.522 에 ISL 점검 3종(isl·trunk·lsan)을 더해 확인 불가 항목이 5 → **8** 이 됐다
+  //   (사용자 요청 "isl 점검 기능 추가"). 숫자를 고정해 두는 이유는 그대로다 —
+  //   '확인 불가' 가 종합 '정상' 에 흡수되지 않는지를 보는 것이다.
+  const r = H.checkDevice(snapOf({ sections: { health: 'skip', sensors: 'skip', raslog: 'skip', bottleneck: 'skip', fabric: 'skip', isl: 'skip', trunk: 'skip', lsan: 'skip' },
+    extra: { sensors: null, raslog: null, bottleneck: null, fabricMembers: null, isl: null, trunk: null, lsan: null } }));
   assert.equal(itemOf(r, 'switchStatus').status, 'unknown');
   assert.match(itemOf(r, 'switchStatus').detail, /명령이 없거나 계정 권한이 없습니다/);
-  assert.equal(r.uncheckedCount, 5, '확인 불가 항목을 따로 센다');
+  assert.equal(r.uncheckedCount, 8, '확인 불가 항목을 따로 센다');
   assert.ok(r.counts.ok > 0, '나머지는 정상으로 판정된다');
   // 종합은 확인한 항목 기준이지만 uncheckedCount 가 남아 화면·PDF 가 그것을 나란히 적는다.
   assert.equal(r.overall, 'ok');
-  assert.equal(r.counts.unknown, 5);
+  assert.equal(r.counts.unknown, 8);
 });
 
 test('실행 실패와 명령 부재를 구분한다(조치가 다르다)', () => {
@@ -289,11 +292,17 @@ test('parseFabricShow — 도메인·principal 을 읽는다', () => {
   assert.equal(r.switches[0].name, 'SW-A');
 });
 
-test('수집 명령 목록에 새 4종이 들어가고 errshow 는 주 명령이 아니다', () => {
+test('수집 명령 목록에 월간 점검 4종이 들어가고 errdump 를 먼저 시도한다', () => {
   const src = fs.readFileSync(new URL('../src/sanswitch/collectors/fosSsh.js', import.meta.url), 'utf8');
   for (const k of ['sensorshow', 'errdump', 'bottleneckmon', 'fabricshow']) assert.match(src, new RegExp(`key: '${k}'`));
-  // ⚠ FOS 의 `errshow` 는 대화형(페이저)이라 폴러가 부르면 캡처가 시한까지 매달린다.
-  assert.match(src, /bin: 'errdump'/, 'errdump 가 주 명령이어야 한다');
+  /*
+   * ⚠ v2.522 정정: v2.519~2.521 의 이 테스트는 "errshow 는 주 명령이 아니다" 를 고정했고
+   *   그 근거는 '대화형이라 캡처가 시한까지 매달린다' 였다. 사용자 스크린샷으로 **이 스위치에는
+   *   errdump 가 없고 errshow 만 있다**는 것이 확인됐고, 그래서 errshow 를 금지하는 대신
+   *   **페이저 자동 응답 경로**(proxy/sshExec.execPaged — 응답 상한 + 시한)로 다룬다.
+   *   남는 계약은 '순서' 다 — 비대화형 errdump 를 **먼저** 시도한다.
+   */
   const spec = src.slice(src.indexOf("key: 'errdump'"), src.indexOf("key: 'bottleneckmon'"));
-  assert.ok(spec.indexOf("c('errdump')") < spec.indexOf("c('errshow')"), 'errdump 를 먼저 시도해야 한다');
+  assert.ok(spec.indexOf("'errdump'") < spec.indexOf("'errshow'"), 'errdump 를 먼저 시도해야 한다');
+  assert.match(spec, /paged: true/, 'errshow 후보는 페이저 경로여야 한다(일반 exec 은 출력을 버린다)');
 });

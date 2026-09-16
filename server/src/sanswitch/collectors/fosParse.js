@@ -599,3 +599,128 @@ export function parseFabricShow(text) {
   }
   return { parsed: list.length > 0, switches: list.slice(0, 64), count: list.length, principal };
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+ * v2.522 — 실행 가능한 대체 명령용 파서 4종.
+ *
+ * 왜 추가하나: 사용자 현장 계정(`rbash`)에 `switchstatusshow`·`licenseshow`·`sensorshow`·
+ * `errdump`·`bottleneckmon`·`fabricshow` 가 **없다**(스크린샷). 그래서 결과가 비슷한 **실행 가능한
+ * 명령**을 후보로 시도한다(사용자 요청 "실행되지 않는 명령어가 있는데, 결과가 비슷한 실행 가능한
+ * 명령어를 찾아서 대체해줘") + ISL 점검 요청(`islshow`·`trunkshow`·`lsan --show`).
+ *
+ * ⚠ **이 4종의 실장비 출력을 확인하지 못했다**(Broadcom TechDocs 는 이 환경에서 403). 그래서
+ *   파서는 형식에 관용적이고, 아무것도 못 읽으면 `parsed:false` 를 준다 — 판정은 그것을 '정상' 이
+ *   아니라 **'형식 미인식'** 으로 다룬다. 실장비 출력을 받으면 정규식을 조이고 이 고지를 지울 것.
+ * ══════════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * `tempshow` → 온도 센서(`sensorshow` 가 없는 계정의 대체).
+ * 형태(가정): `Sensor ID   Temp(C)  Temp(F)  Status` 머리글 + `  1   31   87   Ok` 행.
+ * ⚠ 임계는 **장비가 준 Status** 를 따른다 — 포탈이 숫자를 정하지 않는다(v2.519 규칙).
+ */
+export function parseTempShow(text) {
+  const s = String(text || '');
+  if (!s.trim()) return { parsed: false, list: [], counts: { total: 0, ok: 0, bad: 0, unknown: 0 } };
+  const list = [];
+  for (const raw of s.split(/\r?\n/)) {
+    if (/sensor\s*id/i.test(raw) || /^[\s=-]+$/.test(raw)) continue;
+    // `<id> <C> [<F>] [<status>]` — 상태 단어가 없으면 ok 를 **추정하지 않는다**(null).
+    const m = raw.match(/^\s*(\d{1,3})\s+(-?\d{1,3}(?:\.\d+)?)\s*(?:(-?\d{1,3}(?:\.\d+)?)\s*)?([A-Za-z]+)?\s*$/);
+    if (!m) continue;
+    const st = (m[4] || '').toLowerCase();
+    list.push({
+      kind: 'temp', id: Number(m[1]), value: Number(m[2]), unit: 'C',
+      ok: st ? /^(ok|normal|good|nominal)$/.test(st) : null,
+      raw: raw.trim().slice(0, 160),
+    });
+  }
+  const counts = { total: list.length, ok: list.filter((x) => x.ok === true).length, bad: list.filter((x) => x.ok === false).length, unknown: list.filter((x) => x.ok == null).length, absent: 0 };
+  return { parsed: list.length > 0, list, counts };
+}
+
+/**
+ * `islshow` → ISL(스위치 간 링크) 목록.
+ * 형태(가정): ` 1: 12-> 12 10:00:00:05:1e:aa:bb:cc  2 fab1 sp: 16.000G bw: 16.000G TRUNK QOS`
+ * 관용 규칙: `->` 와 WWN 이 있는 줄만 본다. 나머지 필드는 있으면 싣고 없으면 null.
+ */
+export function parseIslShow(text) {
+  const s = String(text || '');
+  if (!s.trim()) return { parsed: false, list: [], count: 0, note: '' };
+  const none = /\bno\s+isl|not\s+connected|no\s+e[-_ ]?port/i.test(s);
+  const list = [];
+  for (const raw of s.split(/\r?\n/)) {
+    if (!/->/.test(raw)) continue;
+    const wwn = raw.match(/([0-9a-f]{2}(?::[0-9a-f]{2}){7})/i);
+    if (!wwn) continue;
+    const ports = raw.match(/(\d{1,4})\s*->\s*(\d{1,4})/);
+    const sp = raw.match(/\bsp:\s*([\d.]+\s*[GMK]?)/i);
+    const bw = raw.match(/\bbw:\s*([\d.]+\s*[GMK]?)/i);
+    const dom = raw.match(/(?:[0-9a-f]{2}(?::[0-9a-f]{2}){7})\s+(\d{1,3})\b/i);
+    const flags = (raw.match(/\b(TRUNK|QOS|CR_RECOV|FEC|ENCRYPTED|COMPRESSED|DEGRADED)\b/gi) || []).map((x) => x.toUpperCase());
+    list.push({
+      port: ports ? Number(ports[1]) : null,
+      remotePort: ports ? Number(ports[2]) : null,
+      wwn: wwn[1].toLowerCase(),
+      domain: dom ? Number(dom[1]) : null,
+      speed: sp ? sp[1].trim() : '',
+      bandwidth: bw ? bw[1].trim() : '',
+      flags,
+      raw: raw.trim().slice(0, 200),
+    });
+  }
+  return { parsed: list.length > 0 || none, list, count: list.length, note: none && !list.length ? 'ISL 없음(출력이 그렇게 보고함)' : '' };
+}
+
+/**
+ * `trunkshow` → 트렁크 그룹.
+ * 형태(가정): 그룹 머리줄 ` 1:  0->  0 <wwn>  2  deskew 15  MASTER` + 이어지는 멤버 줄.
+ * 그룹 번호(`N:`)가 있는 줄을 그룹 시작으로, `->` 만 있는 줄을 멤버로 본다.
+ */
+export function parseTrunkShow(text) {
+  const s = String(text || '');
+  if (!s.trim()) return { parsed: false, groups: [], count: 0, members: 0, note: '' };
+  const none = /\bno\s+trunk|trunking.*(not|dis)abled/i.test(s);
+  const groups = [];
+  let cur = null;
+  for (const raw of s.split(/\r?\n/)) {
+    if (!/->/.test(raw)) continue;
+    const head = raw.match(/^\s*(\d{1,3})\s*:\s*(\d{1,4})\s*->\s*(\d{1,4})/);
+    const mem = raw.match(/^\s*(\d{1,4})\s*->\s*(\d{1,4})/);
+    const deskew = raw.match(/deskew\s+(\d+)/i);
+    const master = /\bMASTER\b/i.test(raw);
+    if (head) {
+      cur = { group: Number(head[1]), members: [], master: null };
+      groups.push(cur);
+      cur.members.push({ port: Number(head[2]), remotePort: Number(head[3]), deskew: deskew ? Number(deskew[1]) : null, master });
+      if (master) cur.master = Number(head[2]);
+    } else if (mem && cur) {
+      cur.members.push({ port: Number(mem[1]), remotePort: Number(mem[2]), deskew: deskew ? Number(deskew[1]) : null, master });
+      if (master && cur.master == null) cur.master = Number(mem[1]);
+    }
+  }
+  const members = groups.reduce((a, g) => a + g.members.length, 0);
+  return { parsed: groups.length > 0 || none, groups, count: groups.length, members, note: none && !groups.length ? '트렁크 없음(출력이 그렇게 보고함)' : '' };
+}
+
+/**
+ * `lsan --show` → LSAN(패브릭 간 공유) zone 목록.
+ * 형태(가정): `Fabric ID: 2` 블록 + `LSAN_<name>` 줄 + 멤버 WWN 줄.
+ * LSAN 을 쓰지 않는 환경이 대다수이므로 **없는 것이 정상**이다 — 판정이 아니라 정보로만 싣는다.
+ */
+export function parseLsanShow(text) {
+  const s = String(text || '');
+  if (!s.trim()) return { parsed: false, zones: [], count: 0, note: '' };
+  const none = /\bno\s+lsan|not\s+configured|fc\s*router.*not/i.test(s);
+  const zones = [];
+  let cur = null;
+  for (const raw of s.split(/\r?\n/)) {
+    const zn = raw.match(/\b(LSAN[_A-Za-z0-9-]*)\b/);
+    const wwn = raw.match(/([0-9a-f]{2}(?::[0-9a-f]{2}){7})/i);
+    const fid = raw.match(/fabric\s*id\s*:?\s*(\d{1,3})/i);
+    if (zn) { cur = { name: zn[1], fabricId: cur?.fabricId ?? null, members: [] }; zones.push(cur); }
+    else if (fid) { if (cur) cur.fabricId = Number(fid[1]); else cur = { name: '', fabricId: Number(fid[1]), members: [] }; }
+    if (wwn && cur) cur.members.push(wwn[1].toLowerCase());
+  }
+  const named = zones.filter((z) => z.name);
+  return { parsed: named.length > 0 || none, zones: named, count: named.length, note: none && !named.length ? 'LSAN 구성 없음(출력이 그렇게 보고함)' : '' };
+}

@@ -1,6 +1,20 @@
 {
   "notes": [
     {
+      "version": "2.522.0",
+      "date": "2026-09-16",
+      "title": "SAN 점검 — 안 되는 명령을 실행 가능한 대체로 · ISL 점검 · 최근 10회 비교",
+      "notes": [
+        "명령 후보 체인: 후보마다 자기 bin 을 갖는다 — v2.521 까지 errdump 가 없으면 뒤 후보 errshow 가 한 번도 시도되지 않았다",
+        "errshow 페이저 자동 응답(execPaged): 응답 횟수 상한 + 시한 + 프롬프트 제거 + 절단 표시. errdump 없는 rbash 계정에서 RASLog 를 살린다",
+        "sensorshow 없으면 tempshow 로 대체 — 전압은 못 보므로 판정을 ok 가 아니라 warn 으로 두고 그 사실을 적는다",
+        "무엇으로 확인했는가 표시(usedCmd/usedAlt) — 대체 명령의 출력은 원 명령과 같지 않다",
+        "ISL 점검 추가: islshow·trunkshow·lsan --show. ISL 0개는 단독 스위치면 정상(패브릭 구성원 2대 이상일 때만 주의)",
+        "점검 이력 DB(san-health.db) + 최근 10회 비교: 새로 생긴 문제·해소·확인 불가 전환을 각각 세고 N회 내내 문제인 항목을 밝힌다",
+        "v2.519 결함 수정: buildSnapshot 의 두 번째 snap.extra 대입이 월간 점검 원천 4종을 덮어써 명령이 성공해도 항상 '확인 불가' 였다"
+      ]
+    },
+    {
       "version": "2.521.0",
       "date": "2026-09-16",
       "title": "SAN 점검 — 빈 포트 광량 오탐 수정 · 전 포트 점검 · 불량 포트의 연결 장비·조닝 상대 · PDF 열 폭",

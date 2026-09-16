@@ -95,37 +95,65 @@ export async function probeCommands(sh, key) {
  * 실행할 명령 목록. `sfpshow` 처럼 옵션 유무가 버전마다 다른 것만 후보를 둔다
  * (경로 추측 후보는 없앴다 — 위 머리말 참조).
  */
+/**
+ * 수집 명령 정의 — 항목마다 **후보 명령을 순서대로** 시도한다(v2.522).
+ *
+ * 사용자 요청(2026-09-16): "실행되지 않는 명령어가 있는데, 결과가 비슷한 실행 가능한 명령어를
+ * 찾아서 대체해줘". 현장 계정(`rbash`)에 `switchstatusshow`·`licenseshow`·`sensorshow`·
+ * `errdump`·`bottleneckmon`·`fabricshow` 가 없다.
+ *
+ * ── v2.521 까지의 결함(이 구조 변경의 이유) ─────────────────────────────────────
+ * 후보 목록(`cmds`)은 있었지만 **`bin` 이 항목당 하나**여서, 첫 후보의 실행 파일이 없으면
+ * `probeCommands` 가 **항목 전체를 건너뛰었다**. 그래서 `errdump` 가 없는 이 스위치에서
+ * 뒤 후보인 `errshow` 는 **한 번도 시도되지 않았다** — 실제로는 `errshow` 가 있는데 RASLog 가
+ * 영영 '확인 불가' 였던 원인이다. 이제 후보마다 자기 `bin` 을 갖고, **후보 전부가 없을 때만**
+ * 항목을 건너뛴다.
+ *
+ * ── 정직 규약 ────────────────────────────────────────────────────────────────
+ *  · 어느 후보로 확인했는지(`usedCmds[key]`)를 스냅샷에 싣는다 — 화면·보고서가 '무엇으로
+ *    확인했는가' 를 밝힌다. 대체 명령의 출력은 원 명령과 완전히 같지 않을 수 있기 때문이다.
+ *  · `paged: true` 후보는 페이저 자동 응답 경로(`sh.execPaged`)로 실행한다. 일반 exec 으로
+ *    부르면 시한까지 매달린 뒤 출력을 버린다(`errshow` 가 그 경우다).
+ *  · 대체가 없는 항목은 그대로 '확인 불가' 로 남긴다 — 비슷한 다른 명령을 억지로 끼워 넣어
+ *    **다른 것을 측정해 놓고 같은 것이라 말하지 않는다**.
+ */
 function specs(vfId) {
   const pre = vfId ? `setcontext ${vfId}; ` : '';
-  const c = (cmd) => `${pre}${cmd}`;
+  const K = (cmd, bin, extra = {}) => ({ cmd: `${pre}${cmd}`, bin, label: cmd, ...extra });
   return [
-    { key: 'switchshow', bin: 'switchshow', required: true, cmds: [c('switchshow')] },
-    { key: 'chassisshow', bin: 'chassisshow', cmds: [c('chassisshow')] },
-    { key: 'firmwareshow', bin: 'firmwareshow', cmds: [c('firmwareshow')] },
-    { key: 'licenseshow', bin: 'licenseshow', cmds: [c('licenseshow')] },
-    { key: 'porterrshow', bin: 'porterrshow', cmds: [c('porterrshow')] },
-    { key: 'sfpshow', bin: 'sfpshow', cmds: [c('sfpshow -all'), c('sfpshow')] },
-    { key: 'switchstatusshow', bin: 'switchstatusshow', cmds: [c('switchstatusshow')] },
-    { key: 'fanshow', bin: 'fanshow', cmds: [c('fanshow')] },
-    { key: 'psshow', bin: 'psshow', cmds: [c('psshow')] },
-    { key: 'nsshow', bin: 'nsshow', cmds: [c('nsshow')] },
-    // v2.511: 조닝. `cfgshow` 가 없는 계정/펌웨어면 probeCommands 가 걸러 시도조차 하지 않는다.
-    { key: 'cfgshow', bin: 'cfgshow', cmds: [c('cfgshow')] },
-    /* ── 월간 점검용(v2.519, 사용자 제공 Brocade 월간 점검 체크리스트) ──────────────
-     * 전부 **선택**이다(required 아님) — 없는 장비에서는 probeCommands 가 걸러 시도조차 하지
-     * 않고, 점검 보고서가 '확인 불가(명령 없음)' 로 표시한다.
-     *
-     * ⚠ `errshow` 를 쓰지 않는다 — FOS 의 `errshow` 는 **대화형**(페이저로 입력을 기다린다)이라
-     *   폴러가 부르면 캡처가 시한까지 매달린다. 비대화형인 `errdump` 가 같은 내용을 준다.
-     *   `bin` 은 `errdump` 로 두어(probe 는 실제 파일명을 본다) 부재 판정이 정확하게 되고,
-     *   혹시 이름이 다른 펌웨어를 위해 `errshow` 를 **뒤 후보**로만 남긴다.
-     * ⚠ `bottleneckmon --show` 는 기능이 꺼져 있으면 오류 문구를 낸다 — 그것도 정보다
-     *   (파서가 `enabled:false` 로 읽고, 판정은 '꺼져 있어 알 수 없음' 이라 말한다).
+    { key: 'switchshow', required: true, cmds: [K('switchshow', 'switchshow')] },
+    { key: 'chassisshow', cmds: [K('chassisshow', 'chassisshow')] },
+    { key: 'firmwareshow', cmds: [K('firmwareshow', 'firmwareshow')] },
+    { key: 'licenseshow', cmds: [K('licenseshow', 'licenseshow')] },
+    { key: 'porterrshow', cmds: [K('porterrshow', 'porterrshow')] },
+    { key: 'sfpshow', cmds: [K('sfpshow -all', 'sfpshow'), K('sfpshow', 'sfpshow')] },
+    { key: 'switchstatusshow', cmds: [K('switchstatusshow', 'switchstatusshow')] },
+    { key: 'fanshow', cmds: [K('fanshow', 'fanshow')] },
+    { key: 'psshow', cmds: [K('psshow', 'psshow')] },
+    { key: 'nsshow', cmds: [K('nsshow', 'nsshow')] },
+    { key: 'cfgshow', cmds: [K('cfgshow', 'cfgshow')] },
+    /* ── 월간 점검(v2.519) + 대체 후보(v2.522) ─────────────────────────────────
+     * 전부 **선택**이다 — 후보가 모두 없으면 시도조차 하지 않고 보고서가 '확인 불가(명령 없음)'
+     * 로 표시한다.
      */
-    { key: 'sensorshow', bin: 'sensorshow', cmds: [c('sensorshow')] },
-    { key: 'errdump', bin: 'errdump', cmds: [c('errdump'), c('errshow')] },
-    { key: 'bottleneckmon', bin: 'bottleneckmon', cmds: [c('bottleneckmon --show')] },
-    { key: 'fabricshow', bin: 'fabricshow', cmds: [c('fabricshow')] },
+    // 온도·전압: sensorshow 가 없으면 tempshow(온도만). **전압은 못 본다** — 판정이 그 사실을 밝힌다.
+    { key: 'sensorshow', cmds: [K('sensorshow', 'sensorshow'), K('tempshow', 'tempshow')] },
+    /*
+     * RASLog: `errdump`(비대화형)가 1순위, 없으면 `errshow`.
+     * ⚠ v2.519~2.521 의 "errshow 를 쓰지 말 것" 은 **정정됐다**(v2.522). 근거: 사용자 스크린샷에서
+     *   이 스위치는 errdump 가 없고 errshow 만 있으며, 출력이 `Type <CR> to continue, Q<CR> to
+     *   stop:` 페이저로 멈춘다. 그래서 금지가 아니라 **페이저 자동 응답**(`proxy/sshExec.execPaged`
+     *   — 응답 횟수 상한 + 시한 + 프롬프트 제거)으로 다룬다. 일반 exec 으로 되돌리지 말 것.
+     */
+    { key: 'errdump', cmds: [K('errdump', 'errdump'), K('errshow', 'errshow', { paged: true })] },
+    { key: 'bottleneckmon', cmds: [K('bottleneckmon --show', 'bottleneckmon')] },
+    // 패브릭: fabricshow 가 없으면 islshow 로 **구성원 도메인만** 유추한다(이름·principal 은 모른다).
+    { key: 'fabricshow', cmds: [K('fabricshow', 'fabricshow')] },
+    /* ── ISL 점검(v2.522, 사용자 요청 "isl 점검 기능 추가") ──────────────────── */
+    { key: 'islshow', cmds: [K('islshow', 'islshow')] },
+    { key: 'trunkshow', cmds: [K('trunkshow', 'trunkshow')] },
+    // LSAN 은 FC 라우터를 쓰는 환경에서만 있다 — 없는 것이 정상이므로 정보로만 싣는다.
+    { key: 'lsanshow', cmds: [K('lsan --show', 'lsan')] },
   ];
 }
 
@@ -145,20 +173,25 @@ async function runSession(device, signal, { trace = null, verbose = false } = {}
     if (caps.probeError) raw.push({ key: '_probe', cmd: 'echo $PATH; ls $PATH', ok: false, sample: `명령 조사 실패(그대로 실행합니다): ${caps.probeError}` });
     else raw.push({ key: '_probe', cmd: 'echo $PATH; ls $PATH', ok: true, sample: `PATH: ${caps.path.join(':')}\n확인된 명령 ${caps.has.size}개` });
 
+    const usedCmds = {};
     for (const spec of specs(device.vfId)) {
-      // 조사에 성공했고 그 명령이 없으면 **시도하지 않는다** — 없는 명령에 SSH 왕복을
-      // 반복하지 않고, 사유도 추측이 아닌 사실('이 스위치에 없음')로 남긴다.
-      if (caps.has && spec.bin && !caps.has.has(spec.bin)) {
-        const why = `이 스위치에 '${spec.bin}' 명령이 없습니다(펌웨어/계정이 제공하지 않음)`;
+      // 후보마다 자기 실행 파일을 갖는다 — **후보 전부가 없을 때만** 항목을 건너뛴다(v2.522).
+      const avail = spec.cmds.filter((k) => !(caps.has && k.bin && !caps.has.has(k.bin)));
+      if (!avail.length) {
+        const bins = [...new Set(spec.cmds.map((k) => k.bin).filter(Boolean))];
+        const why = `이 스위치에 ${bins.map((b) => `'${b}'`).join(' · ')} 명령이 없습니다(펌웨어/계정이 제공하지 않음)`;
         errors[spec.key] = why;
-        raw.push({ key: spec.key, cmd: spec.bin, ok: false, sample: `${why}\n확인 경로: ${caps.path.join(':')}` });
+        raw.push({ key: spec.key, cmd: bins.join(' | '), ok: false, sample: `${why}\n확인 경로: ${caps.path.join(':')}` });
         if (spec.required) throw new Error(`${spec.key}: ${why}`);
         continue;
       }
       let lastErr = null; let done = false;
-      for (const cmd of spec.cmds) {
+      for (const k of avail) {
         try {
-          const r = await sh.exec(cmd, CMD_TIMEOUT_MS);
+          // 페이저로 멈추는 명령은 자동 응답 경로로(일반 exec 은 시한까지 매달린 뒤 출력을 버린다).
+          const r = k.paged
+            ? await sh.execPaged(k.cmd, { timeoutMs: CMD_TIMEOUT_MS })
+            : await sh.exec(k.cmd, CMD_TIMEOUT_MS);
           const stdout = String(r.stdout || '');
           const stderr = String(r.stderr || '');
           // FOS 는 오류를 exit 0 + 본문/stderr 문구로 내는 경우가 흔하다. 'command not found' 는
@@ -168,12 +201,15 @@ async function runSession(device, signal, { trace = null, verbose = false } = {}
             || /command not found|not recognized|no such file or directory/i.test(stdout)
             || /^\s*(invalid command|permission denied|not supported)/i.test(stdout)
             || /command not found|not recognized|no such file or directory/i.test(stderr);
-          raw.push({ key: spec.key, cmd, ok: !looksError, sample: (stdout || stderr).slice(0, RAW_LIMIT) });
+          raw.push({ key: spec.key, cmd: k.cmd, ok: !looksError, paged: !!k.paged, pages: r.pages ?? null, truncated: !!r.truncated, sample: (stdout || stderr).slice(0, RAW_LIMIT) });
           if (looksError) { lastErr = new Error(firstLine(stdout || stderr) || '빈 출력'); continue; }
-          out[spec.key] = stdout; done = true; break;
+          out[spec.key] = stdout;
+          // **무엇으로 확인했는가** — 대체 명령의 출력은 원 명령과 같지 않을 수 있어 반드시 남긴다.
+          usedCmds[spec.key] = { cmd: k.label, alt: k.bin !== spec.cmds[0].bin, paged: !!k.paged, truncated: !!r.truncated, pages: r.pages ?? null };
+          done = true; break;
         } catch (e) {
           lastErr = e;
-          raw.push({ key: spec.key, cmd, ok: false, sample: `실행 오류: ${e.message}`.slice(0, RAW_LIMIT) });
+          raw.push({ key: spec.key, cmd: k.cmd, ok: false, sample: `실행 오류: ${e.message}`.slice(0, RAW_LIMIT) });
         }
       }
       if (!done) {
@@ -181,7 +217,7 @@ async function runSession(device, signal, { trace = null, verbose = false } = {}
         if (spec.required) throw new Error(`${spec.key}: ${errors[spec.key]}`);
       }
     }
-    return { out, raw, errors };
+    return { out, raw, errors, usedCmds };
   });
 }
 
@@ -192,7 +228,7 @@ const firstLine = (t) => String(t || '').split(/\r?\n/).find((l) => l.trim())?.t
  * @param out    { switchshow, chassisshow, ... } 각 명령의 stdout
  * @param errors { key: 사유 }
  */
-export function buildSnapshot(device, out = {}, errors = {}) {
+export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}) {
   const snap = emptySnapshot(device);
   const sw = P.parseSwitchShow(out.switchshow || '');
   const chassis = P.parseChassisShow(out.chassisshow || '');
@@ -262,10 +298,18 @@ export function buildSnapshot(device, out = {}, errors = {}) {
    */
   snap.extra = {
     ...(snap.extra || {}),
-    sensors: out.sensorshow ? P.parseSensorShow(out.sensorshow) : null,
+    // sensorshow 가 없으면 tempshow 로 대체된다 — **온도만** 나오고 전압은 알 수 없다.
+    // 어느 명령이었는지는 `usedCmds.sensorshow` 가 알려주고 판정이 그 사실을 문구에 적는다.
+    sensors: out.sensorshow
+      ? (usedCmds.sensorshow?.cmd === 'tempshow' ? P.parseTempShow(out.sensorshow) : P.parseSensorShow(out.sensorshow))
+      : null,
     raslog: out.errdump ? P.parseErrDump(out.errdump, 200) : null,
     bottleneck: out.bottleneckmon ? P.parseBottleneckMon(out.bottleneckmon) : null,
     fabricMembers: out.fabricshow ? P.parseFabricShow(out.fabricshow) : null,
+    // ISL 점검(v2.522, 사용자 요청)
+    isl: out.islshow ? P.parseIslShow(out.islshow) : null,
+    trunk: out.trunkshow ? P.parseTrunkShow(out.trunkshow) : null,
+    lsan: out.lsanshow ? P.parseLsanShow(out.lsanshow) : null,
   };
   snap.sections = {
     ports: 'ok',
@@ -277,9 +321,27 @@ export function buildSnapshot(device, out = {}, errors = {}) {
     licenses: out.licenseshow ? 'ok' : (errors.licenseshow || 'skip'),
     nameserver: out.nsshow ? 'ok' : (errors.nsshow || 'skip'),
     zoning: out.cfgshow ? 'ok' : (errors.cfgshow || 'skip'),
+    // ⚠ v2.522 추가 — 이 4개가 sections 에 없어서 화면이 실패 **사유**(예: `rbash: sensorshow:
+    //   command not found`)를 못 보여주고 범용 문구로 퇴화했다(스크린샷에서 확인).
+    sensors: out.sensorshow ? 'ok' : (errors.sensorshow || 'skip'),
+    raslog: out.errdump ? 'ok' : (errors.errdump || 'skip'),
+    bottleneck: out.bottleneckmon ? 'ok' : (errors.bottleneckmon || 'skip'),
+    fabric: out.fabricshow ? 'ok' : (errors.fabricshow || 'skip'),
+    isl: out.islshow ? 'ok' : (errors.islshow || 'skip'),
+    trunk: out.trunkshow ? 'ok' : (errors.trunkshow || 'skip'),
+    lsan: out.lsanshow ? 'ok' : (errors.lsanshow || 'skip'),
   };
   snap.extra = {
+    // ⚠⚠ **`...snap.extra` 를 지우지 말 것**(v2.522 에 발견한 v2.519 결함): 이 대입이 위에서
+    //   채운 월간 점검 원천(sensors·raslog·bottleneck·fabricMembers·isl·trunk·lsan)을 **통째로
+    //   덮어쓰고 있었다.** 그래서 그 명령들이 성공해도 판정은 언제나 '확인 불가' 였다 —
+    //   현장 스위치가 실제로 그 명령을 갖고 있지 않아 증상이 구분되지 않았고, v2.522 의 회귀
+    //   테스트(`sanHealth2522.test.js` 스냅샷 조립)가 처음 잡아냈다.
+    ...(snap.extra || {}),
     collectMethod: 'ssh',
+    // **무엇으로 확인했는가**(v2.522) — 대체 명령의 출력은 원 명령과 같지 않을 수 있어
+    // 화면·보고서가 이 값을 그대로 밝힌다(예: `sensorshow` 대신 `tempshow` → 전압은 미확인).
+    usedCmds,
     // chassisshow 에서 얻은 섀시 식별·가동 정보(v2.411 — 실장비 출력에 'Chassis Family' 가
     // 없어 모델명을 못 읽는 대신, 실제로 들어 있는 값들을 그대로 노출한다).
     chassisPartNumber: chassis.partNumber || '', chassisId: chassis.chassisId || '',
@@ -298,6 +360,6 @@ export function buildSnapshot(device, out = {}, errors = {}) {
 export async function collect(device, { withRaw = false, signal, trace = null, verbose = false } = {}) {
   const r = await runSession(device, signal, { trace, verbose });
   trace?.(`출력 해석: 성공 섹션 ${Object.keys(r.out).length}개, 실패 ${Object.keys(r.errors).length}개${Object.keys(r.errors).length ? ` (${Object.keys(r.errors).join(', ')})` : ''}`);
-  const snap = buildSnapshot(device, r.out, r.errors);
+  const snap = buildSnapshot(device, r.out, r.errors, r.usedCmds || {});
   return withRaw ? { snap, raw: r.raw } : snap;
 }
