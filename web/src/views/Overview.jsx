@@ -5,8 +5,7 @@ import {
 } from 'recharts';
 import { usePolling, fetchJson, putJson } from '../api.js';
 import { Kpi, Loading, ErrorBox, SeverityBadge } from '../components/ui.jsx';
-import WorldMap from '../components/WorldMap.jsx';
-import ErrorBoundary from '../components/ErrorBoundary.jsx';
+import STable from '../components/STable.jsx';
 
 const REGION_COLORS = { '아시아': '#22d3ee', '중국': '#ef4444', '유럽': '#a855f7', '북미': '#3b82f6', Unknown: '#64748b' };
 
@@ -14,23 +13,6 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   const { data: ov, error, loading } = usePolling('/overview', {}, 15_000);
   const { data: alarmData } = usePolling('/alarms', { severity: undefined }, 15_000);
 
-  // Shared (server-saved) map height + drag view(가로 회전 lambda·세로 이동)so everyone sees the same.
-  const [mapHeight, setMapHeight] = useState(320);
-  const [mapView, setMapView] = useState({ lambda: -127, offsetY: 0 });
-  const [mapSpread, setMapSpread] = useState(10); // 마커 분산 반경(px), 0=off
-  useEffect(() => { fetchJson('/ui-settings').then((s) => {
-    // 과거 저장값이 상한(옛 1200)까지 커져 지도가 화면을 다 차지하던 것을 로드 시 새 상한(560)으로
-    // 줄이고, 서버에도 교정값을 저장해 재발을 막는다.
-    const raw = s.mapHeight || 320;
-    const fixed = Math.max(200, Math.min(560, raw));
-    setMapHeight(fixed);
-    if (raw !== fixed) putJson('/ui-settings', { mapHeight: fixed }).catch(() => {});
-    setMapView({ lambda: s.mapLambda ?? -127, offsetY: s.mapOffsetY ?? 0 });
-    setMapSpread(s.mapSpread ?? 10);
-  }).catch(() => {}); }, []);
-  const saveMapHeight = (px) => { setMapHeight(px); putJson('/ui-settings', { mapHeight: px }).catch(() => {}); };
-  const saveMapView = ({ lambda, offsetY }) => { setMapView({ lambda, offsetY }); putJson('/ui-settings', { mapLambda: lambda, mapOffsetY: offsetY }).catch(() => {}); };
-  const saveMapSpread = (px) => { setMapSpread(px); putJson('/ui-settings', { mapSpread: px }).catch(() => {}); };
 
   // 글로벌 현황 KPI를 '1줄'로 유지 — 한 줄에 안 들어가 둘째 줄로 넘어간 박스는 통째로 숨긴다(부분 잘림 없음).
   const kpisRef = useRef(null);
@@ -82,6 +64,51 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   ];
   const osPie = regions.map((r) => ({ name: r.key, value: r.vms, fill: REGION_COLORS[r.key] || '#64748b' }));
 
+  // ── v2.526 서버·게스트 수량 ──────────────────────────────────────────────────
+  // 사용자 요청: "전체 물리 서버 수량(iDRAC 에서 찾은 수량), 가상화 호스트 수량,
+  // 법인별 서버 수량과 guestos 수량 표시해줘".
+  //
+  // 정직성 규칙(서버 `idrac/serverByCorp.js` 머리말과 짝):
+  //  · 물리 서버는 **iDRAC 에 등록된 것만** 센다 — 등록되지 않은 물리 서버는 포탈이 모른다.
+  //    그래서 문구는 '전체 물리 서버' 가 아니라 근거(등록 수)를 함께 적는다.
+  //  · 법인에 귀속되지 않은 서버를 아무 법인에나 넣지 않는다(`unassigned` 로 따로 밝힌다).
+  //  · 귀속 0 인 법인은 **0 이 아니라 '—'** 다 — '서버가 없다' 가 아니라 '연결되지 않았다' 이므로.
+  //  · 숫자(주기·상한)를 문구에 박지 않는다 — 서버가 준 값만 쓴다.
+  const pbc = ov.physicalByCorp || null;
+  const physNote = (() => {
+    const p = ov.physical || {};
+    if (p.error) return 'iDRAC 집계 실패 — 설정 › iDRAC 등록을 확인하세요';
+    if (!p.servers) return 'iDRAC 에 등록된 서버가 없습니다';
+    const parts = [`iDRAC 등록 ${fmt(p.servers)}대`];
+    if (pbc && pbc.unassigned) parts.push(`법인 미귀속 ${fmt(pbc.unassigned)}대`);
+    if (pbc && pbc.disabled) parts.push(`비활성 ${fmt(pbc.disabled)}대`);
+    return parts.join(' · ');
+  })();
+  const corpNote = (() => {
+    if (!pbc) return '물리 서버 귀속 정보를 불러오지 못했습니다';
+    if (pbc.error) return `물리 서버 집계 실패: ${pbc.error}`;
+    const parts = [];
+    if (pbc.unassigned) parts.push(`법인에 연결되지 않은 서버 ${fmt(pbc.unassigned)}대는 아래 표에 없습니다`);
+    if (pbc.scoped) parts.push('허용된 법인만 표시');
+    parts.push('물리 서버 = iDRAC 등록 기준(이름·서비스태그로 vCenter 에 연결)');
+    return parts.join(' · ');
+  })();
+  const corpRows = sites.map((s) => {
+    const m = s.metrics || {};
+    const hosts = m.hosts || 0;
+    const vms = m.vms || 0;
+    const servers = pbc && !pbc.error ? (pbc.byVcenter?.[s.id] ?? null) : null;
+    return {
+      id: s.id,
+      name: s.name || s.id,
+      servers,
+      hosts,
+      vms,
+      vmsOn: m.vmsPoweredOn || 0,
+      perHost: hosts ? (vms / hosts).toFixed(1) : null,
+    };
+  });
+
   return (
     <div className="ov">
       {error && <div className="badge red" style={{ marginBottom: 8 }}>갱신 실패(직전 데이터 표시 중): {error}</div>}
@@ -126,10 +153,60 @@ export default function Overview({ onSelectSite, onGotoTab }) {
         <Kpi label="GPU 사용 VM 수량" value={fmt(ov.gpuVms)} accent="var(--green)" meta="GPU 할당된 VM 수" onClick={() => onGotoTab?.('tools')} />
       </div>
 
-      <div className="section-title">전세계 데이터센터 분포 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(+/- 로 크기 조절 · 드래그로 이동 · 모든 사용자 공유)</span></div>
-      <ErrorBoundary fallback={<div className="card error-box">지도를 불러올 수 없습니다.</div>}>
-        <WorldMap sites={sites} onSelect={onSelectSite} height={mapHeight} onResizeEnd={saveMapHeight} lambda={mapView.lambda} offsetY={mapView.offsetY} onViewEnd={saveMapView} spreadPx={mapSpread} onSpreadEnd={saveMapSpread} />
-      </ErrorBoundary>
+      {/* v2.526(사용자 요청 "overview 에서 지도 없애줘"): 세계 지도를 제거했다.
+          ⚠ `components/WorldMap.jsx` 자체는 지우지 않는다 — 관제 콘솔(`console/pages/ConsoleOverview.jsx`)이
+            같은 컴포넌트를 쓴다. 여기서만 뺀다. 서버의 `ui-settings` 지도 값(mapHeight/mapLambda/…)도
+            그 화면이 계속 쓰므로 건드리지 않았다. */}
+
+      {/* v2.526(사용자 요청): 물리 서버·가상화 호스트·법인별 서버/게스트 수량 */}
+      <div className="section-title">서버·게스트 수량</div>
+      {/* ⚠ `cols-4` 클래스는 styles.css 에 없다(`cols-2`·`cols-3` 만 있다) — 쓰면 `.grid` 만 걸려
+          1열이 되고 카드 4장이 세로로 쌓인다(v2.526 스크린샷 판독으로 발견. 가로 넘침 수치로는
+          안 잡혔다). 기존 KPI 줄과 같은 `.kpis`(auto-fit minmax 180px)를 쓴다. */}
+      <div className="kpis" style={{ marginBottom: 12 }}>
+        <Kpi label="전체 물리 서버" value={fmt(ov.physical?.servers)} accent="var(--accent-2)"
+          meta={physNote} onClick={() => onGotoTab?.('tools')} />
+        <Kpi label="가상화 호스트(ESXi)" value={fmt(g.hosts)} accent="var(--accent)"
+          meta={`정상 ${fmt(g.hostsConnected)} · 점검 ${fmt(g.hostsMaintenance)} · 끊김 ${fmt(g.hostsDisconnected)}`} />
+        <Kpi label="게스트 OS(VM)" value={fmt(g.vms)} accent="var(--green)"
+          meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`} />
+        <Kpi label="호스트당 게스트" value={g.hosts ? (g.vms / g.hosts).toFixed(1) : '—'}
+          meta="전체 VM ÷ 가상화 호스트" />
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="flex between" style={{ marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+          <b>법인별 서버·게스트 수량</b>
+          <span className="muted" style={{ fontSize: 11.5 }}>{corpNote}</span>
+        </div>
+        <div className="table-wrap" style={{ maxHeight: '40vh' }}>
+          <STable className="v3-table">
+            <thead>
+              <tr>
+                <th>법인(vCenter)</th><th>물리 서버</th><th>가상화 호스트</th>
+                <th>게스트 OS</th><th>구동중</th><th>호스트당 게스트</th>
+              </tr>
+            </thead>
+            <tbody>
+              {corpRows.map((r) => (
+                <tr key={r.id}>
+                  {/* 지도를 없앤 뒤 '사이트를 눌러 그 법인 호스트로 이동' 경로가 사라지지 않게,
+                      법인 이름을 그 진입점으로 남긴다(지도가 하던 onSelectSite 와 같은 동작). */}
+                  <td><a href="#" onClick={(e) => { e.preventDefault(); onSelectSite?.(r.id); }}><b>{r.name}</b></a></td>
+                  {/* 귀속된 물리 서버가 없으면 0 이 아니라 '—' 다 — iDRAC 에 등록되지 않았거나
+                      이름·태그로 이 vCenter 에 연결되지 않은 것이지 '서버가 없다' 는 뜻이 아니다. */}
+                  <td data-sort={String(r.servers ?? -1)}>{r.servers == null ? '—' : fmt(r.servers)}</td>
+                  <td data-sort={String(r.hosts)}>{fmt(r.hosts)}</td>
+                  <td data-sort={String(r.vms)}>{fmt(r.vms)}</td>
+                  <td data-sort={String(r.vmsOn)} className="muted">{fmt(r.vmsOn)}</td>
+                  <td data-sort={String(r.perHost ?? -1)} className="muted">{r.perHost ?? '—'}</td>
+                </tr>
+              ))}
+              {!corpRows.length && <tr><td colSpan={6} className="muted">표시할 법인이 없습니다.</td></tr>}
+            </tbody>
+          </STable>
+        </div>
+      </div>
 
       <div className="grid cols-2" style={{ marginTop: 16 }}>
         <div className="card">

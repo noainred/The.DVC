@@ -212,7 +212,7 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
 
   /* ── 풀·용량·할당량 ──
      Unity 는 '클러스터 총량' 명령이 버전마다 달라, 어느 버전에나 있는 풀 합계를 진실의 원천으로
-     쓴다. **풀 밖 공간은 제외**되므로 그 사실을 화면이 밝힌다(capacityNote).
+     쓴다. **풀 밖 공간은 제외**되므로 그 사실을 화면이 밝힌다(`capacityBasisNote`).
 
      ⚠ v2.526 정정 — **사용량 필드는 `Current allocation` 이다**(사용자 제공 실측):
        Total space = 117544396521472 (106.9T)
@@ -273,7 +273,11 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
       // 오버프로비저닝은 **정상일 수 있다** — 경고가 아니라 사실로 적는다.
       snap.extra.overProvisioned = total > 0 && subscribed > total;
     }
-    snap.extra.capacityNote = '사용량은 풀의 **Current allocation**(실제 할당된 물리 공간)이고, 구독(Subscription)은 **호스트에 약속한 크기**라 서로 다릅니다. 전체 용량은 **풀 합계**이므로 풀에 속하지 않은 미할당 드라이브는 포함되지 않습니다.';
+    // ⚠ **`capacityNote` 라는 키를 쓰지 말 것**(v2.526 에 Chromium 판독으로 발견한 실제 결함):
+    //   화면의 `isVirt`(StorageMonTool.jsx)가 그 키의 **존재만으로** 'VPLEX/Metro Node — 자체 용량
+    //   없는 가상화 계층' 으로 판정해 **용량 추이 차트를 숨긴다**. 두 문구는 뜻이 다르다 —
+    //   VPLEX 는 '용량이 없다', 여기는 '용량 숫자를 이렇게 읽으라' 다. 키를 분리한다.
+    snap.extra.capacityBasisNote = '사용량은 풀의 **Current allocation**(실제 할당된 물리 공간)이고, 구독(Subscription)은 **호스트에 약속한 크기**라 서로 다릅니다. 전체 용량은 **풀 합계**이므로 풀에 속하지 않은 미할당 드라이브는 포함되지 않습니다.';
     const dropped = pools.filter((p) => nameOf(p, 0, '') && !poolTotalOf(p)).length;
     if (dropped) snap.extra.poolsUnreadable = dropped;   // 조용히 빼지 않는다
   } else if (out.pools != null) {

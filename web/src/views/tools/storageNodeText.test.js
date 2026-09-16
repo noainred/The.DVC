@@ -8,7 +8,7 @@
  * 없는데 '비정상 없음' 이라 말하는 것 ③ 목록이 상한으로 잘린 것을 숨기는 것이다.
  */
 import { describe, it, expect } from 'vitest';
-import { nodeHealthKind, nodeRows, nodeFaultSummary, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
+import { nodeHealthKind, nodeRows, nodeFaultSummary, nodeKindLabel, bpsText, faultBadgeTitle, healthBadge } from './storageNodeText.js';
 
 const nodesOf = (list, over = {}) => ({
   nodes: { count: list.length, unhealthy: list.filter((n) => nodeHealthKind(n.health) === 'bad').length, list, ...over },
@@ -101,5 +101,28 @@ describe('보조 문구', () => {
   });
   it('표지 버튼 title 이 클릭 가능함을 알린다', () => {
     expect(faultBadgeTitle(nodesOf([{ id: 1, health: 'DOWN' }]))).toContain('클릭하면');
+  });
+});
+
+describe('healthBadge (v2.526)', () => {
+  it("Unity 의 'OK' 를 빨강으로 그리지 않는다 — 배지 색과 글자가 반대말을 하면 안 된다", () => {
+    expect(healthBadge('OK').tone).toBe('green');
+    expect(healthBadge('OK (5)').tone).toBe('green');   // 장비 코드가 붙는 형태
+    expect(healthBadge('Healthy').tone).toBe('green');
+    expect(healthBadge('normal').tone).toBe('green');
+  });
+
+  it('상태를 읽지 못한 것은 이상이 아니라 회색(확인 불가)이다', () => {
+    for (const v of ['', null, undefined, 'unknown', 'N/A', '?']) {
+      expect(healthBadge(v).tone).toBe('gray');
+    }
+    expect(healthBadge(null).text).toMatch(/확인 불가/);
+    expect(healthBadge('').title).toMatch(/정상이라는 뜻이 아닙니다/);
+  });
+
+  it('그 밖은 빨강이고 장비 원문을 그대로 보여준다', () => {
+    const b = healthBadge('Degraded (7)');
+    expect(b.tone).toBe('red');
+    expect(b.text).toBe('Health: Degraded (7)');
   });
 });

@@ -1,0 +1,132 @@
+# 합성 픽스처 — 실장비 캡처가 아니다(v2.513 규약: 이 저장소는 공개).
+# 형식만 실제 `svc_diag -s spinfo` 출력을 따르고, 부품번호·일련번호는 전부 합성값이다.
+# 보존한 성질(테스트가 의존한다):
+#   · DIMM 24칸 중 OK 12칸 · REMOVED 12칸 → 12 × 8GB = 96GB (배너와 일치하는 실제 관계)
+#   · 상대 SP(spb)의 DIMM 은 UNKNOWN (읽지 못하는 것 — 이상이 아니다)
+#   · `temp: 21` 은 상태가 아니라 DPE 온도 수치
+#   · `ps0: OK 330` 의 330 과 `Input Power : 330 Watts` 가 같은 값(교차 확인용)
+This SP's system type is: EMC Unity 480F
+This SP's ID is: SPA
+
+Displaying all FRU statuses:
+dpe:
+  temp: 21
+  spa: OK
+    dimm0: OK
+    dimm1: REMOVED
+    dimm2: OK
+    dimm3: REMOVED
+    dimm4: OK
+    dimm5: REMOVED
+    dimm6: REMOVED
+    dimm7: OK
+    dimm8: REMOVED
+    dimm9: OK
+    dimm10: REMOVED
+    dimm11: OK
+    dimm12: OK
+    dimm13: REMOVED
+    dimm14: OK
+    dimm15: REMOVED
+    dimm16: OK
+    dimm17: REMOVED
+    dimm18: REMOVED
+    dimm19: OK
+    dimm20: REMOVED
+    dimm21: OK
+    dimm22: REMOVED
+    dimm23: OK
+    iom0: OK SAMPLE_IOM_BOM_A_REV_A
+    slic0: OK
+    bbu0: OK
+    ps0: OK 330
+    fan0: OK
+    fan1: FAULTED
+  spb: OK
+    dimm0: UNKNOWN
+    dimm1: UNKNOWN
+    iom0: UNKNOWN
+    ps0: OK 325
+
+Displaying all FRU resume:
+Device: SPA DIMM0
+EMC TLA Part Number : 000-000-000-00
+EMC TLA Serial Number : SYNTH0000000001
+Module Part Number : SYNTHDIMM8G
+Module Serial Number : SYNTH0000000101
+Density : 8 GB
+Device Type : DDR4
+-----
+Device: SPA DIMM2
+EMC TLA Part Number : 000-000-000-00
+EMC TLA Serial Number : SYNTH0000000002
+Density : 8 GB
+-----
+Device: SPA DIMM4
+Density : 8 GB
+-----
+Device: SPA DIMM7
+Density : 8 GB
+-----
+Device: SPA DIMM9
+Density : 8 GB
+-----
+Device: SPA DIMM11
+Density : 8 GB
+-----
+Device: SPA DIMM12
+Density : 8 GB
+-----
+Device: SPA DIMM14
+Density : 8 GB
+-----
+Device: SPA DIMM16
+Density : 8 GB
+-----
+Device: SPA DIMM19
+Density : 8 GB
+-----
+Device: SPA DIMM21
+Density : 8 GB
+-----
+Device: SPA DIMM23
+Density : 8 GB
+-----
+Device: SPA IOM0
+EMC TLA Part Number : 000-000-111-00
+EMC TLA Serial Number : SYNTH0000000201
+TLA Assembly Name : SAMPLE IO MODULE
+Programmable Name : CPLD
+Programmable Revision : 1.02
+-----
+Device: SPA BBU0
+Error failed to read BBU0 resume prom
+-----
+
+Summary of power supply info:
+__ SPA PS0 Status __
+Inserted : True
+Unique ID : SYNTH-PSU-1600W
+Input Power : 330 Watts
+Input Voltage : 208 Volts
+Temp Sensor : 27
+Firmware Revision : 1.05
+P/S Type [A/C vs D/C] : A/C
+Faulted : False
+Ambient OverTemp Fault : False
+Input Lost : False
+Internal Fan Fault : False
+
+__ SPB PS0 Status __
+Inserted : True
+Unique ID : SYNTH-PSU-1600W
+Input Power : 325 Watts
+Input Voltage : 208 Volts
+Temp Sensor : 28
+Faulted : False
+Input Lost : False
+
+Summary of Suitecase info:
+__ SPA Suitcase Status __
+Inserted : True
+Fault : False

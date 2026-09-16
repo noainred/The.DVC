@@ -320,17 +320,72 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `UNITY_SSH_DEEP=0` 으로 deep 을 끌 수 있고 **끄면 화면이 밝힌다**(`extra.deepSkipped`).
       **쓰인 명령(`usedCmds`)과 실행되지 않은 명령(`missingCmds`)을 둘 다 표시할 것** — 구성 정보가
       비어 있는 이유를 사용자가 알아야 한다.
-    - ⚠ **실장비 출력을 확인하지 못했다**(정직 기록): Dell/Broadcom 문서가 egress 차단이고 장비도 없다.
-      경로는 Unisphere CLI 지식 기반이고 버전마다 있는 것과 없는 것이 다르다. 그래서 파싱이 아무것도
+    - ⚠ **실장비 출력을 일부만 확인했다**(정직 기록): v2.525 시점에는 전혀 확인하지 못했고, v2.526 에
+      사용자가 `svc_diag -s spinfo`·`pool -detail`·`/env/disk show`·`/stor/prov/luns/lun show` 출력을
+      제공해 **그 넷은 실제 값으로 맞췄다**. 나머지 명령(포트·NAS·파일시스템·라이선스 등)은 여전히
+      Unisphere CLI 지식 기반 추정이고 버전마다 있는 것과 없는 것이 다르다. 그래서 파싱이 아무것도
       못 읽으면 **그 항목을 만들지 않는다**(0 을 지어내지 않는다). 원문은 **연결 테스트에서만** 전부
       담고(주기 수집은 실패한 명령만 — 20여 개 × 4KB 를 매 주기 push 하지 않기 위해) 화면이 보여준다.
     - **상태를 읽지 못한 것(`unknown`)을 정상으로도 이상으로도 세지 않는다** — 디스크·팬·PSU·포트
       전부 '상태 미확인 N' 을 따로 밝힌다(v2.523 스토리지 노드 규약과 같다). 라이선스의 설치 여부를
       읽지 못하면 `false` 가 아니라 **null**('?')이다.
-    - **용량 합계는 풀 합계**이고 그 사실을 화면이 밝힌다(`capacityNote`) — 풀 밖 미할당 드라이브는
-      빠진다. **용량을 못 읽은 풀은 합계에서 빼고 개수를 밝힌다**(`poolsUnreadable`).
+    - **용량 합계는 풀 합계**이고 그 사실을 화면이 밝힌다(**`capacityBasisNote`** — v2.526 에 키를
+      바꿨다. 아래 참조) — 풀 밖 미할당 드라이브는 빠진다. **용량을 못 읽은 풀은 합계에서 빼고
+      개수를 밝힌다**(`poolsUnreadable`).
     - 경보 목록은 `extra.alertsList` 에 둔다 — `types.js` 의 공용 스냅샷 계약은 `alerts:{unresolved}`
       뿐이고 거기에 타입별 필드를 끼워 넣으면 다른 수집기·중앙 수신과 계약이 어긋난다.
+  - **Unity 수집의 진짜 원인은 '인증서 확인 프롬프트' 였다 — 파싱 결함은 별건이었다**(`proxy/sshExec.js`
+    `execAnswered`·`storage/collectors/unitySsh.js`·`svcDiag.js`, v2.526):
+    - ⚠ **정직 기록 — v2.525 의 진단은 절반만 맞았다.** `toBytes`·CSV 배너 결함은 실재하고 테스트로
+      고정돼 있지만, 사용자가 신고한 '접속은 되는데 정보가 없다' 의 **실제 원인은 그것이 아니었다**:
+      `uemcli` 첫 실행이 `Please input your selection (The default selection is [1]):` 에서 멈춰
+      **명령이 아예 끝나지 않았다**(사용자 캡처로 확인). 그래서 `execAnswered` 로 프롬프트에 자동
+      응답한다(`PROMPT_RULES` — 페이저 `--More--` 규칙과 같은 틀. v2.522 `execPaged` 를 일반화한 것).
+    - ⚠ **인증서 선택지에서 `[3] Accept and store` 를 절대 고르지 말 것** — 그 선택은 **고객 어레이에
+      상태를 쓴다**. 항상 `1`(이 세션에만 허용)이다. 응답 문자열을 '더 편한 쪽' 으로 바꾸지 말 것.
+      출력 앞에 붙는 배너·프롬프트 잔재는 `stripUemcliBanner` 가 제거한다(안 하면 첫 레코드가 깨진다).
+    - **`svc_diag -s spinfo` 는 Unisphere 계정 없이 하드웨어 정보를 준다**(이 현장 `service` 계정은
+      Unisphere 계정이 아니다 — 사용자 확인). FRU 상태·부품 인벤토리·전원(W/V/℃)·DPE 온도가 나온다.
+      `storage/collectors/svcDiag.js` 는 **사용자가 준 실제 출력**으로 만든 순수 파서다.
+    - ⚠ **`REMOVED` 는 고장이 아니라 빈 슬롯이고, `UNKNOWN` 은 정상도 고장도 아니다.** 실측: SPA 의
+      DIMM 24칸 중 OK 가 정확히 12칸이고 12 × 8GB = **96GB** 로 접속 배너와 일치한다. REMOVED 를
+      이상으로 세면 **정상 장비에 장애 12건**이 찍힌다. 상대 SP 의 DIMM 이 전부 UNKNOWN 인 것도
+      '읽지 못한 것' 이다. 넷(`ok`/`empty`/`unknown`/`fault`)을 각각 세고 화면이 각각 밝힌다.
+    - **`temp: 21` 은 상태가 아니라 수치**(DPE 온도)이고 **`ps0: OK 330` 의 330 은 입력 전력(W)** 이다
+      (`Input Power : 330 Watts` 와 교차 확인). 그래도 단정하지 않고 **두 출처를 나란히 싣는다**.
+    - **구성 정보는 긴 주기로만 수집한다**(`CONFIG_EVERY_MS` 기본 6시간, `UNITY_CONFIG_EVERY_MS`) —
+      매 주기 20여 개 SSH 명령을 돌리면 장비와 회선을 붙잡는다. 용량·상태(`when:'always'`)는 매 주기다.
+      화면은 **`extra.configAt` 으로 언제 수집한 구성인지 밝힌다**(낡은 값을 지금 값인 척하지 않는다).
+    - ⚠ **`extra.capacityNote` 라는 키를 재사용하지 말 것**(v2.526 에 Chromium 판독으로 발견한 실제
+      결함): 화면의 `isVirt`(`StorageMonTool.jsx`)가 그 키의 **존재만으로** 'VPLEX/Metro Node — 자체
+      용량 없는 가상화 계층' 으로 판정해 **그 장비의 용량 추이 차트를 통째로 숨겼다**. 두 문구는 뜻이
+      다르다 — VPLEX 는 '용량이 없다', Unity 는 '용량 숫자를 이렇게 읽으라' 다. Unity 는
+      **`capacityBasisNote`** 를 쓰고, `isVirt` 는 이제 `sections.capacity === 'skip'` 도 함께 본다.
+    - ⚠ **헬스 배지 색 판정은 `views/tools/storageNodeText.js healthBadge` 하나가 소유한다**(v2.526):
+      예전에는 `'healthy'` 문자열만 초록이라 Unity 의 `'OK'` 가 **빨간 `Health: OK`** 로 나왔다
+      (배지 색과 글자가 반대말을 한다 — 사람은 색을 먼저 읽는다). `ok|healthy|normal|good` 로 시작하면
+      초록, **`unknown`·빈 값은 빨강이 아니라 회색**('확인 불가' 는 이상이 아니다), 그 밖은 원문 그대로 빨강.
+    - **픽스처 `test/fixtures/spinfo-sample.txt` 는 합성값이다**(공개 저장소 — v2.513 규약). 단
+      **두 관계는 보존한다** — ① DIMM OK 12칸 × 8GB = 96GB ② `ps0: OK 330` ↔ `Input Power : 330 Watts`.
+      테스트가 일련번호 접두 `SYNTH` 를 검사하므로 실장비 캡처를 다시 커밋하면 CI 가 깨진다.
+  - **Overview 에는 지도가 없다 — 그 자리는 '서버·게스트 수량' 이다**(`web/src/views/Overview.jsx` +
+    `server/src/idrac/serverByCorp.js`, v2.526 — 사용자 요청 "overview 에서 지도 없애줘" ·
+    "전체 물리 서버 수량(idrac 에서 찾은 수량), 가상화 호스트 수량, 법인별 서버 수량과 guestos 수량"):
+    - ⚠ **`components/WorldMap.jsx` 자체는 지우지 말 것** — 관제 콘솔(`console/pages/ConsoleOverview.jsx`)
+      이 같은 컴포넌트를 쓴다. 서버의 `ui-settings` 지도 값(mapHeight/mapView/mapSpread)도 그 화면이
+      계속 쓰므로 건드리지 않았다.
+    - 지도가 하던 '사이트를 눌러 그 법인 호스트로 이동'(`onSelectSite`)은 **법인 이름 링크로 남겼다** —
+      화면을 빼면서 진입 경로까지 없애지 않는다.
+    - **물리 서버 귀속 순서는 전력 귀속과 같다**(명시 `vcenterId` → 호스트 이름 → 서비스태그).
+      다르게 두면 같은 서버가 전력 화면과 다른 법인에 잡힌다. 집계는 **동기 순수 모듈**이다 —
+      전력 귀속(`idrac/service.js allMeasuredPower`)은 전력 DB·OME 캐시·원격 수집기까지 읽는 **비동기**
+      경로라 15초 폴링인 `/overview` 에 태울 수 없다.
+    - **귀속되지 않은 서버를 아무 법인에나 넣지 않는다**(`unassigned` 로 따로 세고 화면이 밝힌다).
+      **귀속 0 인 법인은 `0` 이 아니라 `—`** 다 — '서버가 없다' 가 아니라 '연결되지 않았다' 이다.
+      `type === 'ome'` 는 관리 콘솔 등록이라 물리 서버로 세지 않는다(`physicalCapacity` 와 같은 기준).
+    - ⚠ **`cols-4` 라는 CSS 클래스는 없다**(`styles.css` 에는 `cols-2`·`cols-3` 만). 쓰면 `.grid` 만
+      걸려 1열이 되고 **카드 4장이 세로로 쌓인다** — v2.526 초판이 실제로 그랬고 **가로 넘침 0px 이라
+      수치로는 안 잡혔다**(스크린샷을 읽어야 보인다). KPI 줄은 `.kpis`(auto-fit minmax 180px)를 쓸 것.
   - **리포트 표(`.rpt-wrap`)의 숫자칸·계열명칸은 단어 중간에서 쪼개지 않는다**(`web/src/styles.css`,
     v2.525 — 사용자 신고 "실시간 글자 1줄에 나오게 해줘"): `overflow-wrap: anywhere` 는 **문장 칸**을
     위한 규칙인데 숫자 칸까지 적용돼 `실시간` 배지가 `실/시간` 으로, `Consumed` 가 `Consum/ed` 로,

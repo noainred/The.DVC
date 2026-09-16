@@ -103,7 +103,11 @@ test('정규화: 풀 합계로 용량을 채우고 근거를 밝힌다', () => {
   assert.equal(snap.pools[0].driveType, undefined);
   assert.equal(snap.pools[0].disks, 15);
   assert.equal(snap.pools[0].health, 'ok');
-  assert.match(snap.extra.capacityNote, /풀 합계/, '풀 밖 공간이 빠진다는 사실을 화면이 밝혀야 한다');
+  // v2.526 정정: 키가 `capacityNote` → `capacityBasisNote` 로 바뀌었다. 화면의 `isVirt` 가
+  // `capacityNote` 의 **존재만으로** 'VPLEX — 자체 용량 없는 가상화 계층' 으로 판정해 Unity 의
+  // 용량 추이 차트를 통째로 숨기고 있었다(Chromium 판독으로 발견). 되돌리지 말 것.
+  assert.equal(snap.extra.capacityNote, undefined, 'VPLEX 전용 키를 재사용하면 용량 추이가 숨겨진다');
+  assert.match(snap.extra.capacityBasisNote, /풀 합계/, '풀 밖 공간이 빠진다는 사실을 화면이 밝혀야 한다');
   assert.equal(snap.name, 'OC2-42.237');
   assert.equal(snap.extra.model, 'Unity 380F');
   assert.equal(snap.version, '5.3.0');
