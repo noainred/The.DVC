@@ -9,6 +9,8 @@ import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
 import CollectActivity from './CollectActivity.jsx';
+import BoldText from '../../components/boldText.jsx';
+import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -66,6 +68,78 @@ function failReason(s) {
  * 한 타입만 담긴 표(컬럼이 그 타입 전용). ⚠ 모듈 최상위 컴포넌트(v2.425, 리뷰 #7) — 예전에는 StorageMonTool 렌더 함수
  * 안에서 정의돼 30초 폴링마다 새 함수 타입이 되어 서브트리가 **재마운트**됐다(STable 정렬 상태·포커스·스크롤 소실).
  */
+/**
+ * **노드 장애 상세 팝업**(v2.523 — 사용자 요청 "장애표지 클릭하면 어떤 장애인지 확인하는 팝업").
+ *
+ * 판정·문구는 `storageNodeText.js`(순수, vitest 고정). 여기서는 조립만 한다.
+ * ⚠ `상태 미확인`(unknown)을 **비정상으로도 정상으로도** 세지 않는다 — 수집기와 같은 기준이고,
+ *   그 개수를 따로 밝힌다.
+ * ⚠ 노드 목록이 없는 수집기에서는 **'어느 노드인지 모른다' 고 말한다**(지어내지 않는다).
+ */
+function NodeFaultModal({ r, typeLabel, onClose }) {
+  const [onlyBad, setOnlyBad] = useState(true);
+  const s = r?.snap || null;
+  const sum = useMemo(() => nodeFaultSummary(s), [s]);
+  const rows = useMemo(() => {
+    const all = nodeRows(s);
+    const list = onlyBad ? all.filter((x) => x.kind !== 'ok') : all;
+    const ord = { bad: 0, unknown: 1, ok: 2 };
+    return [...list].sort((a, b) => ord[a.kind] - ord[b.kind] || String(a.label).localeCompare(String(b.label), 'ko', { numeric: true }));
+  }, [s, onlyBad]);
+  if (!r) return null;
+  return (
+    <Modal title={`노드 상태 — ${r.name || s?.name || r.host}`} onClose={onClose} width={860}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, minWidth: 0 }}>
+        <div style={{ border: `1px solid var(--${sum.tone === 'red' ? 'red' : sum.tone === 'amber' ? 'amber' : 'border'})`, borderRadius: 8, padding: '9px 11px' }}>
+          <div style={{ fontWeight: 700, color: sum.tone === 'red' ? 'var(--red)' : sum.tone === 'amber' ? 'var(--amber)' : undefined }}>{sum.title}</div>
+          {sum.body && <div className="muted" style={{ fontSize: 12.5, marginTop: 3, whiteSpace: 'normal', lineHeight: 1.6 }}><BoldText text={sum.body} /></div>}
+          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+            {typeLabel(r.type)} · {r.host} · 수집 {s?.collectedAt ? new Date(s.collectedAt).toLocaleString() : '—'}
+            {s?.sections?.nodes && s.sections.nodes !== 'ok' ? ` · 노드 수집: ${s.sections.nodes}` : ''}
+          </div>
+        </div>
+        {!!sum.listed && (
+          <>
+            <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+              <button className={onlyBad ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '2px 9px', fontSize: 11 }} onClick={() => setOnlyBad(!onlyBad)}>
+                {onlyBad ? '문제·미확인만 보는 중' : '전체 보는 중'}
+              </button>
+              <span className="muted" style={{ fontSize: 11.5 }}>전체 {sum.listed}대 · 이상 {sum.badRows.length} · 상태 미확인 {sum.unknown}</span>
+            </div>
+            <div className="table-wrap">
+              <STable>
+                <thead><tr><th>노드</th><th>IP</th><th>상태</th><th>장비 보고값</th><th>HDD</th><th>SSD</th><th>수신</th><th>송신</th></tr></thead>
+                <tbody>
+                  {rows.map((x) => {
+                    const k = nodeKindLabel(x.kind);
+                    return (
+                      <tr key={x.key}>
+                        <td><b>{x.label}</b></td>
+                        <td className="muted" style={{ fontSize: 11.5 }}>{x.ip || '—'}</td>
+                        <td data-sort={x.kind} style={{ color: `var(--${k.color})`, fontWeight: k.color === 'green' ? 400 : 600, whiteSpace: 'nowrap' }}>{k.label}</td>
+                        {/* 장비가 보고한 원문 — 우리가 해석한 것과 나란히 두어 판정 근거를 숨기지 않는다. */}
+                        <td><code style={{ fontSize: 11 }}>{x.health || '—'}</code></td>
+                        <td data-sort={String(x.hddPct ?? -1)} style={{ textAlign: 'right' }}>{x.hddPct == null ? '—' : `${x.hddPct}%`}</td>
+                        <td data-sort={String(x.ssdPct ?? -1)} style={{ textAlign: 'right' }}>{x.ssdPct == null ? '—' : `${x.ssdPct}%`}</td>
+                        <td data-sort={String(x.inBps ?? -1)} style={{ textAlign: 'right' }}>{bpsText(x.inBps)}</td>
+                        <td data-sort={String(x.outBps ?? -1)} style={{ textAlign: 'right' }}>{bpsText(x.outBps)}</td>
+                      </tr>
+                    );
+                  })}
+                  {!rows.length && <tr><td colSpan={8} className="muted">{onlyBad ? '이상·미확인 노드가 없습니다.' : '표시할 노드가 없습니다.'}</td></tr>}
+                </tbody>
+              </STable>
+            </div>
+          </>
+        )}
+        <div className="muted" style={{ fontSize: 11, whiteSpace: 'normal' }}>
+          이 팝업은 <b>마지막 수집 스냅샷</b>을 보여 줍니다 — 장비에 새로 접속하지 않습니다. 최신 상태가 필요하면 그 장비의 <b>수집</b>을 먼저 누르세요.
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function TypedTable({ list, type, caption, ctx, typeLabel }) {
   const cols = columnsFor(type);
   return (
@@ -116,7 +190,7 @@ function DeviceTable({ list, ctx, typeLabel }) {
 }
 
 function Cell({ col, r, ctx }) {
-  const { setDetail, typeLabel, dcName, busy, collectNow, setForm, remove } = ctx;
+  const { setDetail, setNodeFault, typeLabel, dcName, busy, collectNow, setForm, remove } = ctx;
   const s = r.snap;
   const v = cellValue(col.key, r);
   const dash = <span className="muted">—</span>;
@@ -171,7 +245,25 @@ function Cell({ col, r, ctx }) {
     case 'dataReduction':
       return <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} title="논리 사용량 ÷ 물리 사용량(중복제거·압축 효과)">{v != null ? `${v.toFixed(2)}:1` : dash}</td>;
     case 'nodes':
-      return <td style={{ textAlign: 'right' }}>{v == null ? dash : <>{v}{s?.nodes?.unhealthy ? <b style={{ color: 'var(--red)' }}> ⚠{s.nodes.unhealthy}</b> : null}</>}</td>;
+      /*
+       * ⚠ 장애 표지는 **버튼**이다(v2.523, 사용자 요청 "장애표지 클릭하면 어떤 장애인지 확인하는
+       *   팝업 만들어줘"). v2.522 까지 클릭되지 않는 `<b>` 여서 `24 ⚠1` 을 보고도 **어느 노드가
+       *   비정상인지 알 방법이 없었다**. 실패 사유를 툴팁에만 두지 않는다는 v2.516 규약과 같다.
+       */
+      return (
+        <td style={{ textAlign: 'right' }}>
+          {v == null ? dash : (
+            <>
+              {s?.nodes?.count ? (
+                <button type="button" className="cell-link" title={faultBadgeTitle(s)} onClick={() => setNodeFault(r.id)}>{v}</button>
+              ) : v}
+              {s?.nodes?.unhealthy
+                ? <button type="button" className="badge red fail-badge" style={{ marginLeft: 4 }} title={faultBadgeTitle(s)} onClick={() => setNodeFault(r.id)}>⚠{s.nodes.unhealthy}</button>
+                : null}
+            </>
+          )}
+        </td>
+      );
     case 'health':
       return <td>{v ? <span className={`badge ${/ok|healthy|normal/i.test(String(v)) ? 'green' : 'red'}`}>{v}</span> : dash}</td>;
     case 'status':
@@ -227,6 +319,8 @@ export default function StorageMonTool() {
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [view, setView] = useHashTab({ base: ['tools', 'storage-mon'], valid: ['devices', 'dc', 'type', 'trend'], fallback: 'devices' });
   const [detail, setDetail] = useState(null);    // 장비 상세 모달 — id 로 보관(v2.306: load() 후 최신 스냅샷 자동 반영)
+  // 노드 장애 팝업(v2.523) — 같은 이유로 **id 로** 보관한다(폴링 후 최신 스냅샷이 자동 반영).
+  const [nodeFault, setNodeFault] = useState(null);
   const [form, setForm] = useState(null);        // 등록/수정 폼
   const [importOpen, setImportOpen] = useState(false); // CSV 가져오기 모달(v2.313)
   const [exportOpen, setExportOpen] = useState(false); // CSV 내보내기 모달(v2.317 — 비밀번호 포함 선택)
@@ -348,7 +442,7 @@ export default function StorageMonTool() {
   };
 
   // 셀 렌더 컨텍스트 — Cell 은 최상위 컴포넌트(아래 참조)라 매 렌더 재마운트되지 않는다(v2.417).
-  const cellCtx = { setDetail, typeLabel, dcName, busy, collectNow, setForm, remove };
+  const cellCtx = { setDetail, setNodeFault, typeLabel, dcName, busy, collectNow, setForm, remove };
 
   return (
     <div>
@@ -554,6 +648,12 @@ export default function StorageMonTool() {
         if (!row) return null; // 새로고침 사이에 삭제된 장비 — 모달 조용히 닫힘 방지 위해 null
         return <DeviceDetail r={row} typeLabel={typeLabel} dcName={dcName} onClose={() => setDetail(null)}
           onRefresh={async () => { const res = await postJson(`/tools/storage/devices/${encodeURIComponent(row.id)}/collect`, {}); await load(); return res; }} />;
+      })()}
+      {/* 노드 장애 팝업(v2.523) — 표지를 눌렀을 때 '어느 노드가 왜' 를 보여 준다. */}
+      {nodeFault && (() => {
+        const row = (d?.devices || []).find((x) => x.id === nodeFault);
+        if (!row) return null;
+        return <NodeFaultModal r={row} typeLabel={typeLabel} onClose={() => setNodeFault(null)} />;
       })()}
     </div>
   );
