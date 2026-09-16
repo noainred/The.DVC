@@ -157,7 +157,12 @@ export default function StorageGrowthTool() {
           ? <Note tone="info" text={head.body || '아직 집계할 이력이 없습니다.'} />
           : (
             <div style={{ overflowX: 'auto', minWidth: 0 }}>
-              <STable className="rpt-table">
+              {/* ⚠ `rpt-table` 이라는 클래스는 `styles.css` 에 **없다**(있는 것은 `.rpt-wrap`) —
+                  v2.531 초판이 그것을 달아 두었으나 아무 규칙도 걸리지 않는 죽은 클래스였다.
+                  `.rpt-wrap` 을 대신 쓰지도 않는다: 그 규칙은 `td` 를 `white-space: normal` 로
+                  풀어 **숫자 칸이 단어 중간에서 쪼개진다**(v2.525 에 고쳤던 그 문제). 이 표는
+                  전역 `tbody td { white-space: nowrap }`(styles.css:171)이 맞다. */}
+              <STable>
                 <thead>
                   <tr>
                     <th>장비</th>
@@ -235,8 +240,12 @@ function SectionTitle({ n, title, sub }) {
 
 function ReportKpi({ label, value, meta, tone, title }) {
   const color = tone === 'bad' ? 'var(--red)' : tone === 'warn' ? 'var(--amber)' : undefined;
+  // ⚠ **`card` 를 빼지 말 것**(v2.531.1 에 고친 결함): `styles.css` 에 `.kpi` **단독 박스 규칙은
+  //   없다** — 117~119행은 `.kpi .label/.value/.meta` 자식 규칙뿐이고 `.kpis` 는 그리드일 뿐이다.
+  //   그래서 `className="kpi"` 만 주면 배경·테두리·패딩·그림자가 **하나도 걸리지 않아** 핵심 수치가
+  //   맨 텍스트로 나온다. 포탈의 다른 26곳은 전부 `className="card kpi"` 이고 이 화면만 빠져 있었다.
   return (
-    <div className="kpi" title={title || undefined}>
+    <div className="card kpi" title={title || undefined}>
       <div className="label">{label}</div>
       <div className="value" style={{ color, fontSize: 25 }}>{value ?? '—'}</div>
       {meta ? <div className="meta">{meta}</div> : null}
