@@ -42,7 +42,7 @@ export function registerVmMetrics(api) {
 // On-demand VM performance time-series — NOT collected by the regular poll.
 // Queried live from vCenter only when the user opens the metric viewer.
 //   /vms/:id/metrics?type=cpu|mem|disk|net&interval=realtime|day|week|month|year
-api.get('/vms/:id/metrics', async (req, res) => {
+api.get('/vms/:id/metrics', requirePerm('inv.vms'), async (req, res) => {
   const id = req.params.id;
   const type = METRIC_TYPES.includes(req.query.type) ? req.query.type : 'cpu';
   const interval = PERF_INTERVALS[req.query.interval] ? req.query.interval : 'realtime';
@@ -72,7 +72,7 @@ api.get('/vms/:id/metrics', async (req, res) => {
 
 // ESXi 호스트 성능 — CPU/메모리/디스크/네트워크 실시간 + 기간 조회(VM과 동일 방식).
 //   /hosts/:id/metrics?type=cpu|mem|disk|net&interval=realtime|day|week|month|year
-api.get('/hosts/:id/metrics', async (req, res) => {
+api.get('/hosts/:id/metrics', requirePerm('inv.hosts'), async (req, res) => {
   const id = req.params.id;
   const type = METRIC_TYPES.includes(req.query.type) ? req.query.type : 'cpu';
   const interval = PERF_INTERVALS[req.query.interval] ? req.query.interval : 'realtime';

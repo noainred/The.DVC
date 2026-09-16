@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.536.0",
+      "date": "2026-09-16",
+      "title": "보안 — 인벤토리 권한(inv.*)을 서버가 집행 · 인증·인가 게이트 전수 감사",
+      "notes": [
+        "inv.hosts/vms/datastores/networks/nsx/alarms 6종이 v2.535 까지 서버에서 집행되지 않았다(탭 표시 조건일 뿐이었다) — 이제 API 가 403 으로 막는다",
+        "기본 매트릭스는 operator·viewer 가 6종을 전부 가지므로 기본 설치는 동작 불변. 관리자가 명시적으로 뺀 역할에서만 막힌다",
+        "집계(요약·overview·vCenter 목록)는 dashboard 수준으로 유지 — 개수·합계만 주고 이름·IP 는 주지 않는다",
+        "/remote/targets 에 remote.access 게이트 추가(형제 /proxies 와 같은 기준 — VM 이름·게스트OS·전체 IP 를 주는 경로)",
+        "감사 보고서 docs/AUDIT-2026-09-16b.md (라우트 763개 전수 · critical 0 · high 1 · low 1 — 전부 수정)"
+      ]
+    },
+    {
       "version": "2.535.0",
       "date": "2026-09-16",
       "title": "보안 — 인증 실패 시 주기 수집 정지(Horizon) · 자격증명 감사 4건",

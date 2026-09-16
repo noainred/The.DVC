@@ -253,7 +253,7 @@ const usageCache = new Map(); // `${vmId}|${days}` -> { at, u }
 const USAGE_TTL_MS = 5 * 60_000;
 const USAGE_MAX_VMS = Math.max(1, Math.min(200, Number(process.env.VM_USAGE_MAX_VMS) || 60));
 
-api.post('/vms/usage', async (req, res) => {
+api.post('/vms/usage', requirePerm('inv.vms'), async (req, res) => {
   const days = normDays(req.body?.days);
   const interval = intervalForDays(days);
   const ids = Array.isArray(req.body?.vmIds) ? req.body.vmIds.map(String) : [];
