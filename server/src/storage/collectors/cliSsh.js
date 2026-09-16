@@ -32,7 +32,34 @@ const CMD_TIMEOUT_MS = Number(process.env.STORAGE_CLI_TIMEOUT_MS) || 45_000;
  *   - required 인 명령이 전부 실패하면 전체 수집을 실패로 본다(대개 핵심 상태 조회).
  * 반환: { out: {key: stdout}, raw: [{key, cmd, ok, sample}], errors: {key: message} }
  */
-export async function runCliSession(device, specs) {
+/**
+ * CLI 가 **정상 종료했는데도 오류인** 경우를 잡는다(v2.526, 실측 기반).
+ *
+ * uemcli 는 잘못된 명령에 exit 0 + 본문으로 응답한다(사용자 실측 2026-09-16):
+ *   `Operation failed. Error code: 0x1000017`
+ *   `There is a syntax error in the command. Please recheck the command syntax.`
+ * 배너를 걷어낸 뒤 **앞부분에서** 이 문구를 찾는다 — 본문 아무 데나 찾으면 정상 출력의
+ * `Health details = "…No action is required."` 같은 문장에 오탐한다.
+ */
+export function cliLooksError(stdout, stderr = '') {
+  const head = String(stdout || '').trim().slice(0, 400);
+  if (!head) return true;
+  if (/^\s*(error|command not found|invalid|unknown command)/i.test(head)) return true;
+  if (/Operation failed\.\s*Error code/i.test(head)) return true;
+  if (/There is a syntax error in the command/i.test(head)) return true;
+  if (/Expected one of the following mandatory keywords/i.test(head)) return true;
+  if (/command not found|not recognized/i.test(String(stderr || ''))) return true;
+  return false;
+}
+
+/**
+ * @param {object[]} specs `[{ key, section?, cmds, required?, answered?, rules? }]`
+ *   · `answered:true` — 대화형 프롬프트에 자동 응답한다(`sshExec.execAnswered`).
+ *     uemcli 는 자체서명 인증서 수락 프롬프트에서 멈추므로 이 모드가 **필수**다(v2.526).
+ * @param {object} [opts]
+ * @param {(t:string)=>string} [opts.clean] 파싱 전 전처리(배너 제거 등). 오류 판정도 이 결과로 한다.
+ */
+export async function runCliSession(device, specs, { clean = (t) => t } = {}) {
   const creds = {
     host: device.host,
     port: Number(device.sshPort) || 22,
@@ -49,14 +76,19 @@ export async function runCliSession(device, specs) {
       let done = false;
       for (const cmd of spec.cmds) {
         try {
-          const r = await sh.exec(cmd, CMD_TIMEOUT_MS);
-          const stdout = String(r.stdout || '');
+          const r = spec.answered
+            ? await sh.execAnswered(cmd, { timeoutMs: CMD_TIMEOUT_MS, rules: spec.rules || ['certAccept', 'pager'] })
+            : await sh.exec(cmd, CMD_TIMEOUT_MS);
+          // 배너·프롬프트를 먼저 걷어낸다 — 그 뒤에 오류 판정·파싱을 한다(둘이 같은 텍스트를 봐야 한다).
+          const stdout = clean(String(r.stdout || ''));
           const stderr = String(r.stderr || '');
           // CLI 는 오류를 exit code 0 + stderr/본문 문구로 내보내는 경우가 흔하다.
-          // 그래서 code 만 보지 않고 '내용이 있는지'와 '오류 문구인지'를 함께 본다.
-          const looksError = !stdout.trim() || /^\s*(error|command not found|invalid|unknown command)/i.test(stdout)
-            || /command not found|not recognized/i.test(stderr);
-          raw.push({ key: spec.key, cmd, ok: !looksError, sample: (stdout || stderr).slice(0, RAW_LIMIT) });
+          const looksError = cliLooksError(stdout, stderr);
+          raw.push({
+            key: spec.key, cmd, ok: !looksError, sample: (stdout || stderr).slice(0, RAW_LIMIT),
+            ...(r.truncated ? { truncated: true } : {}),
+            ...(r.answers ? { answers: r.answers } : {}),
+          });
           if (looksError) { lastErr = new Error(firstLine(stdout || stderr) || '빈 출력'); continue; }
           out[spec.key] = stdout;
           done = true;
