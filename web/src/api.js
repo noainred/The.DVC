@@ -65,6 +65,12 @@ export class HttpError extends Error {
     this.requiredPerm = Array.isArray(body?.requiredPerm) ? body.requiredPerm : null;
     this.requiredOwner = !!body?.requiredOwner;
     this.serverReason = body?.reason || '';
+    // v2.522: 실패 응답 본문을 그대로 보관한다. 예전에는 위 네 필드만 남기고 버려서, 서버가
+    // 사유와 함께 내려준 구조화 정보(예: 스토리지 중복 등록의 `conflict` — 어느 장비와
+    // 충돌하는지)가 화면에 도달하지 못했다(2026-09-16 실측: 문구는 떴는데 상자가 안 떴다).
+    // ⚠ 새로 노출되는 것은 없다 — 이미 이 응답을 받아 reason 을 화면에 그리고 있다.
+    // ⚠ 로그·외부 전송에 그대로 싣지 말 것(응답에 따라 내부 식별자가 들어 있을 수 있다).
+    this.body = body ?? null;
   }
 }
 /** 권한 거부(=접근 제어)인가. 장애/버그가 아니라 정책에 따른 정상 거부다. */

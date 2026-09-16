@@ -6,6 +6,7 @@ import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
 import { columnsFor, cellValue, sortValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
+import { emptyListText, conflictText } from './storageListText.js';
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
 import CollectActivity from './CollectActivity.jsx';
@@ -140,7 +141,7 @@ function NodeFaultModal({ r, typeLabel, onClose }) {
   );
 }
 
-function TypedTable({ list, type, caption, ctx, typeLabel }) {
+function TypedTable({ list, type, caption, ctx, typeLabel, empty, onClear }) {
   const cols = columnsFor(type);
   return (
     <div style={{ marginBottom: caption ? 10 : 0 }}>
@@ -155,7 +156,20 @@ function TypedTable({ list, type, caption, ctx, typeLabel }) {
         <STable>
           <thead><tr>{cols.map((c) => <th key={c.key} className={c.align === 'right' ? 'right' : undefined} style={c.align === 'right' ? { textAlign: 'right' } : undefined}>{c.label}</th>)}</tr></thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={cols.length} className="center muted" style={{ padding: 20 }}>등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.</td></tr>}
+            {/* ⚠ 여기에 '등록된 장비가 없습니다' 를 다시 하드코딩하지 말 것(v2.522, 사용자 신고
+                '표에는 없는데 등록하면 있다고 나온다'): 필터가 걸린 0대에도 그 문구가 나와
+                **42대가 등록돼 있는데 화면이 없다고 말하고 있었다**. 문구 판정은 순수 모듈
+                storageListText.emptyListText 가 갖는다(웹 테스트가 node 환경이라 회귀 고정). */}
+            {list.length === 0 && (
+              <tr><td colSpan={cols.length} className="center muted" style={{ padding: 20 }}>
+                {empty?.text || '등록된 장비가 없습니다 — "+ 장비 등록"으로 시작하세요.'}
+                {empty?.canClear && onClear && (
+                  <div style={{ marginTop: 8 }}>
+                    <button className="qn-btn" onClick={onClear}>✕ 필터·찾기 해제하고 전체 보기</button>
+                  </div>
+                )}
+              </td></tr>
+            )}
             {list.map((r) => (
               <tr key={r.id} style={{ opacity: r.enabled === false ? 0.5 : 1 }}>
                 {/* data-sort(v2.425): 셀이 컴포넌트라 STable 이 텍스트를 못 읽는다 — 정렬 값은 storageColumns.cellValue 로 준다. */}
@@ -178,9 +192,9 @@ function TypedTable({ list, type, caption, ctx, typeLabel }) {
  * 그래서 **목록에 여러 타입이 섞여 있으면 타입별로 표를 나눠** 각자의 전용 컬럼으로 그린다.
  * 단일 타입이면 표 하나(제목 없이) — 법인별/타입별 뷰에서 불필요한 머리글이 늘지 않게.
  */
-function DeviceTable({ list, ctx, typeLabel }) {
+function DeviceTable({ list, ctx, typeLabel, empty, onClear }) {
   const types = [...new Set(list.map((r) => r.type))];
-  if (list.length === 0) return <TypedTable list={list} type={null} ctx={ctx} typeLabel={typeLabel} />;
+  if (list.length === 0) return <TypedTable list={list} type={null} ctx={ctx} typeLabel={typeLabel} empty={empty} onClear={onClear} />;
   if (types.length === 1) return <TypedTable list={list} type={types[0]} ctx={ctx} typeLabel={typeLabel} />;
   // 여러 타입 — 타입별 표로 나눈다(타입 이름 순서 고정: 화면이 갱신마다 흔들리지 않게).
   const byType = types
@@ -381,6 +395,9 @@ export default function StorageMonTool() {
   const inType = (r) => typeSel.size === 0 || typeSel.has(r.type);
   const shown = searched.filter((r) => inDc(r) && inType(r)); // 하단 목록·그룹의 원천
   const facetOn = dcSel.size > 0 || typeSel.size > 0;
+  // v2.522: 목록이 비었을 때 **왜** 비었는지(등록 0 / 필터 0 / 검색 0)를 구분한다 —
+  // 판정·문구는 순수 모듈(storageListText)에 있고 테스트가 고정한다.
+  const emptyInfo = emptyListText({ registered: rows.length, facetOn, query: dcQuery });
   // 칩에 표시할 개수는 '다른 축의 선택을 반영한' 수 — 고르면 몇 대가 남는지 미리 보인다.
   const dcChips = [...new Map(searched.map((r) => [dcName(r.datacenterId), true])).keys()]
     .sort((a, b) => String(a).localeCompare(String(b)))
@@ -574,14 +591,18 @@ export default function StorageMonTool() {
             </div>
       )}
 
-      {form && <DeviceForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }} />}
+      {form && <DeviceForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }}
+        /* v2.522: 중복으로 막혔을 때 그 장비를 실제로 보여준다 — 필터·찾기를 풀고(시야 밖이었던
+           것이 원인) 그 host 로 좁힌 뒤 등록 폼을 닫는다. 'devices' 뷰로 되돌려야 표에 나온다. */
+        onShowConflict={(c) => { clearFacets(); setDcQuery(c.host || ''); setView('devices'); setForm(null); }} />}
       {importOpen && (
         <BulkDeviceIo base="/tools/storage" title="스토리지 장비 대량 등록 — CSV · 자유텍스트" keyLabel="host+type"
           onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />
       )}
       {exportOpen && <CsvExport onClose={() => setExportOpen(false)} />}
 
-      {view === 'devices' && <DeviceTable list={shown} ctx={cellCtx} typeLabel={typeLabel} />}
+      {view === 'devices' && <DeviceTable list={shown} ctx={cellCtx} typeLabel={typeLabel}
+        empty={emptyInfo} onClear={() => { clearFacets(); setDcQuery(''); }} />}
       {/* 통합 추이(v2.380) — 전체 합산 + 장비별 선택. 기간 12시간/24시간/1주 등.
           여기는 검색을 적용하지 않는다(전체 합산 차트라 부분집합이면 '전체'가 거짓이 된다). */}
       {view === 'trend' && <StorageTrendPanel devices={rows} />}
@@ -1101,9 +1122,16 @@ function TestResult({ r }) {
   );
 }
 
-function DeviceForm({ d, form, setForm, onSaved }) {
+function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
+  // 충돌 장비 표기용 — 서버는 법인 id·타입 키만 준다(이름은 이 응답이 갖고 있다).
+  // ⚠ 아래 `typeLabel` 은 **지금 폼에서 고른 타입의 라벨**이라 이름이 겹친다. 섞지 말 것.
+  const dcNameOf = (id) => ((d.datacenters || []).find((x) => x.id === id)?.name || id || '미지정');
+  const typeLabelOf = (t) => ((d.types || []).find((x) => x.type === t)?.label || t);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  // 중복 등록으로 거부됐을 때 서버가 지목한 충돌 장비(v2.522). ⚠ 훅은 조기 return 위에서만
+  // 선언한다(CLAUDE.md — React #310 크래시 재발 방지).
+  const [conflict, setConflict] = useState(null);
   // 연결 테스트 결과(v2.404, 사용자 요구 — Unity 등 API 장비를 등록하기 전에 실제로 도는지 확인).
   // null=아직 안 함, {ok,...}=결과. 입력이 바뀌면 낡은 결과를 지운다(다른 설정의 성공을 새 설정의
   // 성공으로 오해하는 것이 이런 UI 의 대표적 사고다).
@@ -1120,8 +1148,17 @@ function DeviceForm({ d, form, setForm, onSaved }) {
   const methodHint = methods.find((m) => m.value === method)?.hint || '';
   const save = async () => {
     setBusy(true); setErr(null);
-    try { const r = await postJson('/tools/storage/devices', form); if (r.ok === false) setErr(r.reason); else onSaved(); }
-    catch (e) { setErr(e.message); } finally { setBusy(false); }
+    // v2.522: 중복 거부는 서버가 **충돌 장비**(conflict)를 함께 준다 — 사유만 보여주면
+    // 13개 법인·42대에서 사용자가 그 장비를 찾을 수 없다(실제 신고). 아래 상자가 지목한다.
+    setConflict(null);
+    try {
+      const r = await postJson('/tools/storage/devices', form);
+      if (r.ok === false) { setErr(r.reason); setConflict(r.conflict || null); } else onSaved();
+    } catch (e) {
+      // ⚠ 400 은 api.js 가 HttpError 로 **던진다** — 여기서 conflict 를 읽지 않으면 사유
+      //   한 줄만 남고 '어느 장비인지' 가 다시 사라진다(v2.522 실측으로 잡은 경로).
+      setErr(e.message); setConflict(e.body?.conflict || null);
+    } finally { setBusy(false); }
   };
   const runTest = async () => {
     setTesting(true); setTest(null); setErr(null);
@@ -1210,7 +1247,22 @@ function DeviceForm({ d, form, setForm, onSaved }) {
         <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !form.name || !form.host} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
       </div>
       {test && <TestResult r={test} />}
-      {err && <div style={{ color: 'var(--red)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
+      {/* 중복 거부 안내(v2.522) — 사유 한 줄이 아니라 **어느 장비인지**를 지목하고 데려간다. */}
+      {conflict ? (() => {
+        const ct = conflictText(conflict, { dcName: dcNameOf, typeLabel: typeLabelOf });
+        return (
+          <div className="card" style={{ padding: '12px 14px', marginTop: 8, borderLeft: '3px solid var(--amber)' }}>
+            <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--amber)' }}>⚠ {ct.head}</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{ct.where}</div>
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 6, whiteSpace: 'normal' }}>{ct.hint}</div>
+            {onShowConflict && (
+              <div style={{ marginTop: 8 }}>
+                <button className="qn-btn" onClick={() => onShowConflict(conflict)}>🔎 그 장비 보기</button>
+              </div>
+            )}
+          </div>
+        );
+      })() : (err && <div style={{ color: 'var(--red)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>)}
       <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>비밀번호는 '설정 › 자격증명 저장 방식'의 정책(평문/암호화)에 따라 저장됩니다. host 변경 시 기존 비밀번호는 이월되지 않습니다(재입력 필요 — 보안 규칙).</div>
     </div>
   );

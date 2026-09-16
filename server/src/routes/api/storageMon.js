@@ -136,7 +136,9 @@ api.post('/tools/storage/devices', adminOnly, (req, res) => {
     const d = saveDevice(req.body || {});
     logAudit({ user: req.user?.username, action: '스토리지 장비 저장', target: `${d.type}/${d.name}`, detail: `${d.host} · 수집=${d.agent || '중앙'}` });
     res.status(201).json({ ok: true, device: d });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+    // v2.522: 중복 거부는 **충돌 장비를 함께** 내려준다 — 화면이 '그 장비 보기'로 필터를 풀고
+    // 데려간다(사유만 주면 13개 법인·42대에서 사용자가 찾을 수 없다는 실제 신고).
+  } catch (e) { res.status(400).json({ ok: false, reason: e.message, conflict: e.conflict || null }); }
 });
 
 api.delete('/tools/storage/devices/:id', adminOnly, (req, res) => {
