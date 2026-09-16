@@ -64,45 +64,67 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   ];
   const osPie = regions.map((r) => ({ name: r.key, value: r.vms, fill: REGION_COLORS[r.key] || '#64748b' }));
 
-  // ── v2.526 서버·게스트 수량 ──────────────────────────────────────────────────
-  // 사용자 요청: "전체 물리 서버 수량(iDRAC 에서 찾은 수량), 가상화 호스트 수량,
-  // 법인별 서버 수량과 guestos 수량 표시해줘".
+  // ── 서버·게스트 수량 (v2.526, v2.527 에 '합/물리 전용/가상화 호스트' 로 재구성) ──────────
+  // 사용자 요청: "전체 물리 서버 수량(idrac 에서 찾은 수량), 가상화 호스트 수량, 법인별 서버
+  // 수량과 guestos 수량" → (v2.527) "서버의 합/물리서버/가상화 호스트 이렇게 구분해서 전체
+  // 서버의 수량을 볼 수 있게 수정해줘".
   //
-  // 정직성 규칙(서버 `idrac/serverByCorp.js` 머리말과 짝):
+  // ★ 세 수는 **겹치지 않는다**(서버 `idrac/serverByCorp.js` 머리말):
+  //     서버 합계 = 물리 전용 + 가상화 호스트(ESXi)
+  //   이 현장은 iDRAC 등록 물리 서버 대부분이 곧 ESXi 호스트라, 단순히 더하면 같은 장비를
+  //   두 번 센다. 그래서 '물리 서버' 열을 **'물리 전용'**(= 가상화 호스트로 확인되지 않은
+  //   서버)으로 바꾸고, 확인된 중복 대수를 화면이 함께 밝힌다.
+  //
+  // 그 밖의 정직성 규칙:
   //  · 물리 서버는 **iDRAC 에 등록된 것만** 센다 — 등록되지 않은 물리 서버는 포탈이 모른다.
-  //    그래서 문구는 '전체 물리 서버' 가 아니라 근거(등록 수)를 함께 적는다.
   //  · 법인에 귀속되지 않은 서버를 아무 법인에나 넣지 않는다(`unassigned` 로 따로 밝힌다).
-  //  · 귀속 0 인 법인은 **0 이 아니라 '—'** 다 — '서버가 없다' 가 아니라 '연결되지 않았다' 이므로.
+  //  · 값을 못 구했으면 **0 이 아니라 '—'** 다 — '없다' 가 아니라 '모른다' 이므로.
   //  · 숫자(주기·상한)를 문구에 박지 않는다 — 서버가 준 값만 쓴다.
-  const pbc = ov.physicalByCorp || null;
+  const pbc = ov.physicalByCorp && !ov.physicalByCorp.error ? ov.physicalByCorp : null;
+  const pbcErr = ov.physicalByCorp?.error || null;
+  // 합계·물리 전용은 서버 집계가 있을 때만 말한다(추정해서 채우지 않는다).
+  const serverUnion = pbc ? pbc.union : null;
+  const physOnly = pbc ? pbc.physicalOnly : null;
+
+  const unionNote = (() => {
+    if (pbcErr) return `물리 서버 집계 실패: ${pbcErr}`;
+    if (!pbc) return '물리 서버 귀속 정보를 불러오지 못했습니다';
+    const parts = [`물리 전용 ${fmt(physOnly)} + 가상화 호스트 ${fmt(pbc.hostsTotal)}`];
+    // '확인된 중복' 은 근거다 — 0 이어도 적는다. 0 은 '중복이 없다' 가 아니라 '못 찾았다' 일
+    // 수 있으므로(이름·서비스태그가 안 맞는 경우) 그 사실도 함께 말한다.
+    parts.push(pbc.matchedCount
+      ? `같은 장비로 확인돼 중복 제외한 서버 ${fmt(pbc.matchedCount)}대`
+      : '중복으로 확인된 장비 없음(이름·서비스태그가 맞지 않으면 못 찾을 수 있습니다)');
+    return parts.join(' · ');
+  })();
   const physNote = (() => {
-    const p = ov.physical || {};
-    if (p.error) return 'iDRAC 집계 실패 — 설정 › iDRAC 등록을 확인하세요';
-    if (!p.servers) return 'iDRAC 에 등록된 서버가 없습니다';
-    const parts = [`iDRAC 등록 ${fmt(p.servers)}대`];
-    if (pbc && pbc.unassigned) parts.push(`법인 미귀속 ${fmt(pbc.unassigned)}대`);
-    if (pbc && pbc.disabled) parts.push(`비활성 ${fmt(pbc.disabled)}대`);
+    if (pbcErr) return 'iDRAC 집계 실패 — 설정 › iDRAC 등록을 확인하세요';
+    if (!pbc) return '물리 서버 귀속 정보를 불러오지 못했습니다';
+    const parts = [`iDRAC 등록 ${fmt(pbc.total)}대 중 가상화 호스트로 확인되지 않은 서버`];
+    if (pbc.unassigned) parts.push(`법인 미귀속 ${fmt(pbc.unassigned)}대`);
+    if (pbc.disabled) parts.push(`비활성 ${fmt(pbc.disabled)}대`);
     return parts.join(' · ');
   })();
   const corpNote = (() => {
+    if (pbcErr) return `물리 서버 집계 실패: ${pbcErr}`;
     if (!pbc) return '물리 서버 귀속 정보를 불러오지 못했습니다';
-    if (pbc.error) return `물리 서버 집계 실패: ${pbc.error}`;
-    const parts = [];
+    const parts = ['서버 합계 = 물리 전용 + 가상화 호스트(같은 장비를 두 번 세지 않습니다)'];
     if (pbc.unassigned) parts.push(`법인에 연결되지 않은 서버 ${fmt(pbc.unassigned)}대는 아래 표에 없습니다`);
     if (pbc.scoped) parts.push('허용된 법인만 표시');
-    parts.push('물리 서버 = iDRAC 등록 기준(이름·서비스태그로 vCenter 에 연결)');
     return parts.join(' · ');
   })();
   const corpRows = sites.map((s) => {
     const m = s.metrics || {};
     const hosts = m.hosts || 0;
     const vms = m.vms || 0;
-    const servers = pbc && !pbc.error ? (pbc.byVcenter?.[s.id] ?? null) : null;
+    // 서버 집계를 못 받았으면 0 이 아니라 null 이다('서버가 없다' 는 거짓을 만들지 않는다).
+    const only = pbc ? (pbc.byVcenterPhysicalOnly?.[s.id] ?? 0) : null;
     return {
       id: s.id,
       name: s.name || s.id,
-      servers,
+      physOnly: only,
       hosts,
+      total: only == null ? null : only + hosts,
       vms,
       vmsOn: m.vmsPoweredOn || 0,
       perHost: hosts ? (vms / hosts).toFixed(1) : null,
@@ -158,18 +180,21 @@ export default function Overview({ onSelectSite, onGotoTab }) {
             같은 컴포넌트를 쓴다. 여기서만 뺀다. 서버의 `ui-settings` 지도 값(mapHeight/mapLambda/…)도
             그 화면이 계속 쓰므로 건드리지 않았다. */}
 
-      {/* v2.526(사용자 요청): 물리 서버·가상화 호스트·법인별 서버/게스트 수량 */}
+      {/* v2.526(사용자 요청): 서버·게스트 수량. v2.527 에 '합 / 물리 전용 / 가상화 호스트' 로 재구성 */}
       <div className="section-title">서버·게스트 수량</div>
-      {/* ⚠ `cols-4` 클래스는 styles.css 에 없다(`cols-2`·`cols-3` 만 있다) — 쓰면 `.grid` 만 걸려
-          1열이 되고 카드 4장이 세로로 쌓인다(v2.526 스크린샷 판독으로 발견. 가로 넘침 수치로는
-          안 잡혔다). 기존 KPI 줄과 같은 `.kpis`(auto-fit minmax 180px)를 쓴다. */}
+      {/* ⚠ `cols-4` 같은 클래스는 styles.css 에 없다 — `.kpis`(auto-fit minmax 180px)를 쓸 것.
+          쓰면 `.grid` 만 걸려 1열이 되고 카드가 세로로 쌓인다(v2.526 실제 결함). */}
       <div className="kpis" style={{ marginBottom: 12 }}>
-        <Kpi label="전체 물리 서버" value={fmt(ov.physical?.servers)} accent="var(--accent-2)"
+        <Kpi label="서버 합계" value={serverUnion == null ? '—' : fmt(serverUnion)} accent="var(--accent)"
+          meta={unionNote} onClick={() => onGotoTab?.('hosts')} />
+        <Kpi label="물리 전용 서버" value={physOnly == null ? '—' : fmt(physOnly)} accent="var(--accent-2)"
           meta={physNote} onClick={() => onGotoTab?.('tools')} />
         <Kpi label="가상화 호스트(ESXi)" value={fmt(g.hosts)} accent="var(--accent)"
-          meta={`정상 ${fmt(g.hostsConnected)} · 점검 ${fmt(g.hostsMaintenance)} · 끊김 ${fmt(g.hostsDisconnected)}`} />
+          meta={`정상 ${fmt(g.hostsConnected)} · 점검 ${fmt(g.hostsMaintenance)} · 끊김 ${fmt(g.hostsDisconnected)}`}
+          onClick={() => onGotoTab?.('hosts')} />
         <Kpi label="게스트 OS(VM)" value={fmt(g.vms)} accent="var(--green)"
-          meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`} />
+          meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`}
+          onClick={() => onGotoTab?.('vms')} />
         <Kpi label="호스트당 게스트" value={g.hosts ? (g.vms / g.hosts).toFixed(1) : '—'}
           meta="전체 VM ÷ 가상화 호스트" />
       </div>
@@ -183,7 +208,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
           <STable className="v3-table">
             <thead>
               <tr>
-                <th>법인(vCenter)</th><th>물리 서버</th><th>가상화 호스트</th>
+                <th>법인(vCenter)</th><th>서버 합계</th><th>물리 전용</th><th>가상화 호스트</th>
                 <th>게스트 OS</th><th>구동중</th><th>호스트당 게스트</th>
               </tr>
             </thead>
@@ -191,18 +216,29 @@ export default function Overview({ onSelectSite, onGotoTab }) {
               {corpRows.map((r) => (
                 <tr key={r.id}>
                   {/* 지도를 없앤 뒤 '사이트를 눌러 그 법인 호스트로 이동' 경로가 사라지지 않게,
-                      법인 이름을 그 진입점으로 남긴다(지도가 하던 onSelectSite 와 같은 동작). */}
-                  <td><a href="#" onClick={(e) => { e.preventDefault(); onSelectSite?.(r.id); }}><b>{r.name}</b></a></td>
-                  {/* 귀속된 물리 서버가 없으면 0 이 아니라 '—' 다 — iDRAC 에 등록되지 않았거나
+                      법인 이름을 그 진입점으로 남긴다(지도가 하던 onSelectSite 와 같은 동작).
+                      ⚠ v2.527(사용자 신고 "법인 글자가 파란색이라서 안보여"): `<a>` 기본 링크
+                      색은 이 어두운 표에서 읽기 어렵다. **표의 다른 글자와 같은 색**을 쓰고
+                      클릭 가능하다는 것은 점선 밑줄로 알린다(App.jsx:409 의 `openList` 관례). */}
+                  <td>
+                    <span role="button" tabIndex={0} title="클릭하면 이 법인의 호스트 목록으로 이동합니다"
+                      onClick={() => onSelectSite?.(r.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectSite?.(r.id); } }}
+                      style={{ color: 'inherit', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>
+                      {r.name}
+                    </span>
+                  </td>
+                  {/* 서버 집계를 못 받았으면 0 이 아니라 '—' 다 — iDRAC 에 등록되지 않았거나
                       이름·태그로 이 vCenter 에 연결되지 않은 것이지 '서버가 없다' 는 뜻이 아니다. */}
-                  <td data-sort={String(r.servers ?? -1)}>{r.servers == null ? '—' : fmt(r.servers)}</td>
+                  <td data-sort={String(r.total ?? -1)}><b>{r.total == null ? '—' : fmt(r.total)}</b></td>
+                  <td data-sort={String(r.physOnly ?? -1)}>{r.physOnly == null ? '—' : fmt(r.physOnly)}</td>
                   <td data-sort={String(r.hosts)}>{fmt(r.hosts)}</td>
                   <td data-sort={String(r.vms)}>{fmt(r.vms)}</td>
                   <td data-sort={String(r.vmsOn)} className="muted">{fmt(r.vmsOn)}</td>
                   <td data-sort={String(r.perHost ?? -1)} className="muted">{r.perHost ?? '—'}</td>
                 </tr>
               ))}
-              {!corpRows.length && <tr><td colSpan={6} className="muted">표시할 법인이 없습니다.</td></tr>}
+              {!corpRows.length && <tr><td colSpan={7} className="muted">표시할 법인이 없습니다.</td></tr>}
             </tbody>
           </STable>
         </div>
