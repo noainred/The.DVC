@@ -77,7 +77,11 @@ export const CHECK_ITEMS = [
   { key: 'portErrors', stage: 3, label: '포트 에러 카운터', cmd: 'porterrshow' },
   { key: 'slowDrain', stage: 3, label: 'Slow Drain(병목)', cmd: 'bottleneckmon --show' },
   { key: 'raslog', stage: 4, label: '시스템 로그(RASLog)', cmd: 'errdump' },
-  { key: 'fabric', stage: 4, label: '패브릭 구성(ISL)', cmd: 'fabricshow' },
+  { key: 'fabric', stage: 4, label: '패브릭 구성원', cmd: 'fabricshow' },
+  // v2.522 — 사용자 요청 "isl 점검 기능 추가".
+  { key: 'isl', stage: 4, label: 'ISL 링크', cmd: 'islshow' },
+  { key: 'trunk', stage: 4, label: 'ISL 트렁크', cmd: 'trunkshow' },
+  { key: 'lsan', stage: 4, label: 'LSAN(FC 라우팅)', cmd: 'lsan --show' },
 ];
 
 const RANK = { ok: 0, warn: 1, bad: 2 };
@@ -98,10 +102,37 @@ export function uncheckedWhy(sectionValue, cmd) {
   return `\`${cmd}\` 실행 실패: ${v.slice(0, 200)}`;
 }
 
+/** 점검 항목 키 → 그 항목을 채우는 **수집 명령 키**(`usedCmds` 조회용). */
+export const ITEM_SOURCE = Object.freeze({
+  switchStatus: 'switchstatusshow', psu: 'psshow', fan: 'fanshow', sensors: 'sensorshow',
+  switchState: 'switchshow', ports: 'switchshow', optical: 'sfpshow',
+  portErrors: 'porterrshow', slowDrain: 'bottleneckmon',
+  raslog: 'errdump', fabric: 'fabricshow', isl: 'islshow', trunk: 'trunkshow', lsan: 'lsanshow',
+});
+
 const mk = (key, status, detail, extra = {}) => {
   const def = CHECK_ITEMS.find((i) => i.key === key) || { key, label: key, stage: 0, cmd: '' };
   return { key, label: def.label, stage: def.stage, cmd: def.cmd, status, detail, ...extra };
 };
+
+/**
+ * 항목에 '실제로 쓴 명령' 을 붙인다(v2.522).
+ * 대체 명령을 썼으면 `usedAlt: true` 이고 화면·보고서가 **원 명령이 아니라 대체로 확인했다**는
+ * 사실을 적는다 — 출력이 완전히 같지 않을 수 있기 때문이다(예: `tempshow` 는 전압을 주지 않는다).
+ */
+export function attachUsed(items, usedCmds = {}) {
+  return (items || []).map((it) => {
+    const u = usedCmds[ITEM_SOURCE[it.key]];
+    if (!u) return it;
+    return {
+      ...it,
+      usedCmd: u.cmd || it.cmd,
+      usedAlt: !!u.alt,
+      usedPaged: !!u.paged,
+      usedTruncated: !!u.truncated,
+    };
+  });
+}
 
 /**
  * 포트 에러 델타(순수). 기준선이 없으면 `null`(모름), 카운터 리셋(음수)도 `null` —
@@ -120,6 +151,9 @@ export function errorDelta(cur, base) {
 export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad = RX_BAD_DBM } = {}) {
   if (!snap) return null;
   const sec = snap.sections || {};
+  // **무엇으로 확인했는가**(v2.522) — 대체 명령을 썼으면 항목에 그 사실을 붙인다.
+  // 수집기가 항목 키(`optical`)가 아니라 명령 키(`sfpshow`)로 남기므로 여기서 매핑한다.
+  const used = snap.extra?.usedCmds || {};
   const ports = (snap.ports && snap.ports.list) || [];
   const health = snap.health || {};
   const ex = snap.extra || {};
@@ -160,8 +194,12 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
         s.counts.absent ? `미장착 ${s.counts.absent}` : null,
         temps.length ? `최고 온도 ${Math.max(...temps)}℃` : null,
       ].filter(Boolean).join(' · ');
-      if (bad.length) items.push(mk('sensors', 'bad', `${info} · 이상 ${bad.length}개`, { evidence: bad.map((x) => x.raw) }));
-      else if (unk.length) items.push(mk('sensors', 'warn', `${info} · 상태를 읽지 못한 센서 ${unk.length}개`, { evidence: unk.map((x) => x.raw) }));
+      // ⚠ `sensorshow` 가 없어 `tempshow` 로 대체했으면 **전압은 보지 못했다** — 그 사실을 적는다.
+      //   적지 않으면 '온도·전압 센서 정상' 이라는 거짓이 된다(v2.522).
+      const alt = used.sensorshow?.alt ? ` ⚠ \`${used.sensorshow.cmd}\` 로 대체 확인 — **전압은 확인하지 못했습니다**(이 명령은 온도만 줍니다).` : '';
+      if (bad.length) items.push(mk('sensors', 'bad', `${info} · 이상 ${bad.length}개${alt}`, { evidence: bad.map((x) => x.raw) }));
+      else if (unk.length) items.push(mk('sensors', 'warn', `${info} · 상태를 읽지 못한 센서 ${unk.length}개${alt}`, { evidence: unk.map((x) => x.raw) }));
+      else if (alt) items.push(mk('sensors', 'warn', `${info} (임계 판정은 스위치 센서 상태 기준)${alt}`, { evidence: [] }));
       else items.push(mk('sensors', 'ok', `${info} (임계 판정은 스위치 센서 상태 기준)`));
     }
   }
@@ -249,7 +287,59 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
     }
   }
 
-  return summarize(snap, items, { baselineAt: baseline?.at ?? null });
+  /* ── ISL 점검(v2.522, 사용자 요청) ────────────────────────────────────────
+   * ⚠ **ISL 이 0개인 것은 이상이 아니다** — 단독 스위치면 정상이다. 그래서 패브릭 구성원이
+   *   2대 이상이라고 알려졌을 때만 '주의' 로 본다(그 정보가 없으면 '정보' 로만 싣는다).
+   * ⚠ 트렁크·LSAN 도 **없는 것이 정상인 환경이 대다수**다. 없다고 경고하지 않는다.
+   */
+  {
+    const isl = ex.isl;
+    const fabCount = num(ex.fabricMembers?.count);
+    if (!isl) items.push(mk('isl', 'unknown', uncheckedWhy(sec.isl, 'islshow')));
+    else if (!isl.parsed) items.push(mk('isl', 'unknown', uncheckedWhy('ok', 'islshow')));
+    else if (!isl.count) {
+      // 패브릭에 다른 스위치가 있다고 알려졌는데 ISL 이 0 이면 그것은 이상 신호다.
+      const multi = fabCount != null && fabCount > 1;
+      items.push(mk('isl', multi ? 'warn' : 'ok',
+        multi
+          ? `ISL 이 없습니다 — 그런데 패브릭 구성원은 ${fabCount}대로 보고됩니다(ISL 없이 같은 패브릭일 수 없습니다. 링크 단절 또는 조회 시점 차이를 확인하세요).`
+          : `ISL 이 없습니다 — 단독 스위치이면 정상입니다${isl.note ? ` (${isl.note})` : ''}.`));
+    } else {
+      const noSpeed = isl.list.filter((x) => !x.speed);
+      const degraded = isl.list.filter((x) => (x.flags || []).includes('DEGRADED'));
+      const ev = isl.list.slice(0, 20).map((x) => `포트 ${x.port ?? '?'} → 도메인 ${x.domain ?? '?'} 포트 ${x.remotePort ?? '?'} · ${x.speed || '속도 미확인'}${x.flags?.length ? ` · ${x.flags.join(' ')}` : ''}`);
+      const base = `ISL ${isl.count}개`;
+      if (degraded.length) items.push(mk('isl', 'bad', `${base} · DEGRADED ${degraded.length}개`, { evidence: ev }));
+      else if (noSpeed.length) items.push(mk('isl', 'warn', `${base} · 속도를 읽지 못한 링크 ${noSpeed.length}개(출력 형식 차이일 수 있습니다)`, { evidence: ev }));
+      else items.push(mk('isl', 'ok', `${base} · 전부 링크 속도 확인`, { evidence: ev }));
+    }
+  }
+  {
+    const t = ex.trunk;
+    const islCount = num(ex.isl?.count);
+    if (!t) items.push(mk('trunk', 'unknown', uncheckedWhy(sec.trunk, 'trunkshow')));
+    else if (!t.parsed) items.push(mk('trunk', 'unknown', uncheckedWhy('ok', 'trunkshow')));
+    else if (!t.count) {
+      items.push(mk('trunk', 'ok', `트렁크 그룹이 없습니다 — 트렁킹을 쓰지 않는 구성이면 정상입니다${t.note ? ` (${t.note})` : ''}.`));
+    } else {
+      // 멤버가 1개인 트렁크 그룹은 '트렁크가 깨져 한 링크만 남은' 신호일 수 있다 — 단정하지
+      // 않고 주의로 밝힌다(정상 구성일 수도 있다).
+      const single = t.groups.filter((g) => g.members.length < 2);
+      const ev = t.groups.slice(0, 20).map((g) => `그룹 ${g.group}: 멤버 ${g.members.length}개(${g.members.map((m) => m.port).join(',')})${g.master != null ? ` · master 포트 ${g.master}` : ''}`);
+      const base = `트렁크 ${t.count}그룹 · 멤버 ${t.members}개${islCount != null ? ` (ISL ${islCount}개 중)` : ''}`;
+      if (single.length) items.push(mk('trunk', 'warn', `${base} · 멤버가 1개인 그룹 ${single.length}개 — 링크 하나가 빠졌는지 확인하세요(정상 구성일 수도 있습니다).`, { evidence: ev }));
+      else items.push(mk('trunk', 'ok', base, { evidence: ev }));
+    }
+  }
+  {
+    const l = ex.lsan;
+    if (!l) items.push(mk('lsan', 'unknown', uncheckedWhy(sec.lsan, 'lsan --show')));
+    else if (!l.parsed) items.push(mk('lsan', 'unknown', uncheckedWhy('ok', 'lsan --show')));
+    else if (!l.count) items.push(mk('lsan', 'ok', `LSAN 구성이 없습니다 — FC 라우팅을 쓰지 않는 환경이면 정상입니다${l.note ? ` (${l.note})` : ''}.`));
+    else items.push(mk('lsan', 'ok', `LSAN zone ${l.count}개`, { evidence: l.zones.slice(0, 20).map((z) => `${z.name}${z.fabricId != null ? ` (FID ${z.fabricId})` : ''} · 멤버 ${z.members.length}개`) }));
+  }
+
+  return summarize(snap, attachUsed(items, used), { baselineAt: baseline?.at ?? null, usedCmds: used });
 }
 
 /** FRU(팬·PSU) 항목 — 개수만 아는 경우(`ok:null`)를 '정상' 으로 칠하지 않는다. */

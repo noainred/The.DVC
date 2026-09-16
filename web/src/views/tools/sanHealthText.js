@@ -126,7 +126,7 @@ export function reportFileName(scope, now = new Date()) {
 }
 
 /** 장비 1대 상세 보고서 문서 모델. */
-export function deviceReportDoc(r, { baseline = null, now = Date.now(), ports = null, problemPorts = [], zoningNote = '' } = {}) {
+export function deviceReportDoc(r, { baseline = null, now = Date.now(), ports = null, problemPorts = [], zoningNote = '', history = null } = {}) {
   const v = deviceVerdict(r);
   const c = r?.counts || {};
   const blocks = [
@@ -164,6 +164,8 @@ export function deviceReportDoc(r, { baseline = null, now = Date.now(), ports = 
   }
   // v2.521 — 전 포트 점검 + 이상·주의 포트의 연결 장비·조닝 상대.
   blocks.push(...portBlocks(ports, problemPorts, { zoningNote }));
+  // v2.522 — 최근 점검과의 비교(사용자 요청 "최근 10번 점검과 비교").
+  blocks.push(...historyBlocks(history));
   blocks.push({ type: 'note', text: [
     '판정 기준 메모',
     '- 온도·전압 임계는 스위치 자신의 센서 상태(sensorshow 의 is Ok)를 따릅니다 — 포탈이 임계 숫자를 정하지 않습니다.',
@@ -379,3 +381,108 @@ export function portBlocks(pc, problemPorts = [], { maxRows = 80, zoningNote = '
 }
 
 const ORDER = ['bad', 'warn', 'unknown', 'ok'];
+
+/* ══════════════ v2.522 — 대체 명령 표시 · 점검 이력 비교 ══════════════
+ * 사용자 요청: "실행되지 않는 명령어가 있는데, 결과가 비슷한 실행 가능한 명령어를 찾아서
+ * 대체해줘" · "점검 결과를 DB 로 저장해서 최근 10번 점검과 비교 하는 기능" · "isl 점검 기능 추가".
+ */
+
+/**
+ * 명령 셀 문구 — **대체 명령을 썼으면 그 사실을 말한다**.
+ * 원 명령과 출력이 완전히 같지 않을 수 있으므로(예: `tempshow` 는 전압을 주지 않는다) 숨기면
+ * 안 된다. 페이저 자동 응답으로 받은 것(`errshow`)과 상한으로 잘린 것도 밝힌다.
+ */
+export function cmdText(i) {
+  if (!i) return '—';
+  if (!i.usedCmd || i.usedCmd === i.cmd) return i.cmd || '—';
+  return `${i.usedCmd} (대체)`;
+}
+export function cmdNote(i) {
+  if (!i?.usedCmd || i.usedCmd === i.cmd) return '';
+  const bits = [`원 명령 \`${i.cmd}\` 대신 \`${i.usedCmd}\` 로 확인했습니다`];
+  if (i.usedPaged) bits.push('페이저 자동 응답으로 받았습니다');
+  if (i.usedTruncated) bits.push('**출력 상한에 걸려 일부만** 받았습니다');
+  return `${bits.join(' · ')}.`;
+}
+
+/** 변화 방향 라벨 — `unknown` 을 `ok` 로 흡수하지 않는다(v2.522 규칙). */
+export const CHANGE_LABEL = Object.freeze({
+  worse: { label: '악화', color: 'red', mark: '▲' },
+  better: { label: '호전', color: 'green', mark: '▼' },
+  nowKnown: { label: '이제 확인됨', color: 'blue', mark: '◆' },
+  nowUnknown: { label: '확인 불가로 바뀜', color: 'amber', mark: '◇' },
+});
+export const changeLabel = (dir) => CHANGE_LABEL[String(dir)] || { label: String(dir || '변화'), color: 'muted', mark: '·' };
+
+/**
+ * 최근 N회 비교 요약 한 줄. **'비슷하다' 같은 뭉갠 말을 하지 않는다** — 무엇이 몇 개
+ * 새로 생겼고 무엇이 해소됐는지 센다.
+ */
+export function compareSummary(c) {
+  if (!c) return '';
+  if (!c.compared) return c.note || '저장된 점검 이력이 없습니다.';
+  if (c.compared === 1) return c.note || '비교할 이전 점검이 없습니다 — 다음 점검부터 변화를 가려 줍니다.';
+  const parts = [`최근 ${c.compared}회 기록`];
+  if (!c.changes.length) parts.push('직전 점검과 **항목 판정이 모두 같습니다**');
+  else {
+    if (c.newProblems.length) parts.push(`새로 생긴 문제 ${c.newProblems.length}건(${c.newProblems.slice(0, 3).join(', ')}${c.newProblems.length > 3 ? ' 등' : ''})`);
+    if (c.resolved.length) parts.push(`해소 ${c.resolved.length}건(${c.resolved.slice(0, 3).join(', ')}${c.resolved.length > 3 ? ' 등' : ''})`);
+    const nk = c.changes.filter((x) => x.dir === 'nowKnown').length;
+    const nu = c.changes.filter((x) => x.dir === 'nowUnknown').length;
+    if (nk) parts.push(`이제 확인된 항목 ${nk}건`);
+    if (nu) parts.push(`확인 불가로 바뀐 항목 ${nu}건`);
+    const other = c.changes.length - c.newProblems.length - c.resolved.length - nk - nu;
+    if (other > 0) parts.push(`그 밖의 판정 변화 ${other}건`);
+  }
+  if (c.persistent?.length) parts.push(`**${c.compared}회 내내 문제인 항목 ${c.persistent.length}건**(${c.persistent.slice(0, 3).map((p) => p.label).join(', ')})`);
+  return parts.join(' · ');
+}
+
+/** 기록 여부 안내 — '수집 1회 = 기록 1회' 를 사람 말로. */
+export function recordNote(rec) {
+  if (!rec) return '';
+  if (rec.saved) return '이번 점검 결과를 이력에 기록했습니다.';
+  return rec.reason || '이번 점검은 이력에 기록하지 않았습니다.';
+}
+
+/** 이력 비교를 PDF 블록으로 — 변화가 없으면 그 사실도 적는다. */
+export function historyBlocks(history, { maxRows = 10 } = {}) {
+  const blocks = [];
+  const c = history?.compare;
+  if (!c) return blocks;
+  blocks.push({ type: 'heading', text: '최근 점검과의 비교' });
+  blocks.push({ type: 'note', text: compareSummary(c).replace(/\*\*/g, '') });
+  if (c.trend?.length) {
+    blocks.push({
+      type: 'table',
+      columns: [{ label: '점검 시각', w: 26 }, { label: '종합', w: 14, align: 'center' },
+        { label: '이상', w: 10, align: 'right' }, { label: '주의', w: 10, align: 'right' },
+        { label: '확인 불가', w: 14, align: 'right' }, { label: '정상', w: 10, align: 'right' },
+        { label: '이상 포트', w: 16, align: 'right' }],
+      rows: [...c.trend].reverse().slice(0, maxRows).map((t) => [
+        { text: stamp(t.at) },
+        { text: STATUS_LABEL[t.overall] || t.overall, align: 'center', color: STATUS_COLOR[t.overall] },
+        { text: String(n0(t.bad)), align: 'right', color: n0(t.bad) ? 'red' : 'muted' },
+        { text: String(n0(t.warn)), align: 'right', color: n0(t.warn) ? 'amber' : 'muted' },
+        { text: String(n0(t.unknown)), align: 'right', color: n0(t.unknown) ? 'amber' : 'muted' },
+        { text: String(n0(t.ok)), align: 'right' },
+        { text: t.portsBad == null ? '—' : String(t.portsBad), align: 'right' },
+      ]),
+    });
+  }
+  if (c.changes?.length) {
+    blocks.push({
+      type: 'table',
+      columns: [{ label: '항목', w: 30 }, { label: '변화', w: 20, align: 'center' },
+        { label: '직전', w: 14, align: 'center' }, { label: '이번', w: 14, align: 'center' }, { label: '내용', w: 42 }],
+      rows: c.changes.map((x) => [
+        { text: x.label },
+        { text: changeLabel(x.dir).label, align: 'center', color: changeLabel(x.dir).color },
+        { text: STATUS_LABEL[x.from] || x.from, align: 'center', color: STATUS_COLOR[x.from] },
+        { text: STATUS_LABEL[x.to] || x.to, align: 'center', color: STATUS_COLOR[x.to] },
+        { text: String(x.detail || '').replace(/\*\*/g, '') },
+      ]),
+    });
+  }
+  return blocks;
+}

@@ -146,6 +146,73 @@ function execCapture(conn, command, captureMs) {
   });
 }
 
+/**
+ * **페이저(--More-- / Type <CR> to continue)로 멈추는 명령**을 자동 응답으로 끝까지 받는다(v2.522).
+ *
+ * 왜 필요한가: 사용자 현장 계정(`rbash`)에는 비대화형 `errdump` 가 **없고** `errshow` 만 있다
+ * (스크린샷으로 확인). `errshow` 는 페이지마다
+ *     Type <CR> to continue, Q<CR> to stop:
+ * 로 입력을 기다리므로 일반 `exec` 은 시한까지 매달린 뒤 **출력을 버리고** reject 한다 —
+ * 그래서 v2.519~2.521 까지 RASLog 는 영영 '확인 불가' 였다.
+ *
+ * 설계(안전 규칙)
+ *  · **응답 횟수에 상한**(`maxPages`). 상한에 닿으면 `q` 를 보내 스스로 끝낸다 — 무한히 개행을
+ *    밀어 넣어 세션을 붙잡지 않는다.
+ *  · 전체 시한·출력 상한은 일반 exec 과 같다. 다만 시한이 되면 **모아 둔 출력을 살려 돌려준다**
+ *    (버리면 이 경로의 존재 이유가 없다). 그때는 `truncated`·`timedOut` 을 켠다.
+ *  · 페이저 프롬프트 줄은 출력에서 제거한다(파서가 로그 줄로 오인하지 않게).
+ *  · 기본 `pty: true` — 페이저가 붙는 명령은 TTY 를 전제로 도는 경우가 많고, 사용자가 본 출력도
+ *    TTY 였다. pty 에서는 ANSI 제어문자가 섞이므로 걸러낸다.
+ *
+ * ⚠ **실장비로 검증하지 못했다** — 이 환경에 FOS 스위치가 없다. 프롬프트 정규식은 관용적이고,
+ *   프롬프트가 한 번도 안 나오면 일반 실행과 같게 끝난다(부작용 없음).
+ */
+const PAGER_PROMPT = /(--\s*more\s*--|Type\s*<CR>\s*to\s*continue[^\n]*|\(END\)|press\s+any\s+key[^\n]*)\s*$/i;
+const PAGER_STRIP = /(--\s*more\s*--|Type\s*<CR>\s*to\s*continue,?\s*Q<CR>\s*to\s*stop:?|\(END\))/gi;
+const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g;
+
+function execPaged(conn, command, {
+  timeoutMs = Number(process.env.SSH_EXEC_TIMEOUT_MS) || 60000,
+  maxPages = Math.max(1, Number(process.env.SSH_PAGER_MAX_PAGES) || 400),
+  pty = true,
+} = {}) {
+  const clean = (t) => String(t).replace(ANSI_RE, '').replace(/\r/g, '').replace(PAGER_STRIP, '');
+  return new Promise((resolve, reject) => {
+    conn.exec(command, { pty }, (err, stream) => {
+      if (err) return reject(err);
+      let stdout = ''; let stderr = ''; let done = false; let bytes = 0; let pages = 0; let truncated = false;
+      const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); fn(arg); };
+      const kill = () => { try { stream.close?.(); } catch { /* */ } try { stream.destroy?.(); } catch { /* */ } };
+      const timer = setTimeout(() => {
+        kill();
+        finish(resolve, { command, code: null, stdout: clean(stdout), stderr, pages, truncated: true, timedOut: true });
+      }, Math.max(1000, timeoutMs));
+      timer.unref?.();
+      stream.on('data', (d) => {
+        bytes += d.length;
+        if (bytes > EXEC_MAX_OUTPUT) { kill(); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(EXEC_MAX_OUTPUT / 1024)}KB) 초과: ${command}`)); }
+        stdout += d.toString();
+        // 꼬리에서만 프롬프트를 본다 — 본문에 같은 문구가 있어도 오응답하지 않게.
+        const tail = stdout.slice(-200).replace(ANSI_RE, '');
+        if (!PAGER_PROMPT.test(tail)) return;
+        if (pages >= maxPages) {
+          truncated = true;
+          try { stream.write('q\n'); } catch { /* */ }
+          const t2 = setTimeout(() => { kill(); finish(resolve, { command, code: null, stdout: clean(stdout), stderr, pages, truncated: true }); }, 300);
+          t2.unref?.();
+          return;
+        }
+        pages++;
+        try { stream.write('\n'); } catch { /* */ }
+      });
+      stream.stderr.on('data', (d) => { stderr += d.toString(); });
+      stream.on('error', (e) => finish(reject, e));
+      stream.stderr.on('error', () => { /* 비치명 */ });
+      stream.on('close', (code) => finish(resolve, { command, code, stdout: clean(stdout), stderr, pages, truncated }));
+    });
+  });
+}
+
 function sftpReadFile(conn, path) {
   return new Promise((resolve, reject) => {
     conn.sftp((err, sftp) => {
@@ -211,6 +278,8 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
     exec: async (cmd, timeoutMs) => { const r = await (trace ? traced('exec', cmd, () => exec(conn, cmd, timeoutMs)) : exec(conn, cmd, timeoutMs)); log.push(r); return r; },
     // 스스로 끝나지 않는 갱신형 명령(portperfshow 등) 전용 — captureMs 만큼 모으고 채널을 닫는다.
     execCapture: async (cmd, captureMs) => { const r = await (trace ? traced('capture', cmd, () => execCapture(conn, cmd, captureMs)) : execCapture(conn, cmd, captureMs)); log.push(r); return r; },
+    // 페이저로 멈추는 명령(errshow 등) — 프롬프트에 자동 응답해 끝까지 받는다(상한·시한 있음).
+    execPaged: async (cmd, opts) => { const r = await (trace ? traced('paged', cmd, () => execPaged(conn, cmd, opts)) : execPaged(conn, cmd, opts)); log.push(r); return r; },
     readFile: (p) => sftpReadFile(conn, p),
     writeFile: (p, c, m) => sftpWriteFile(conn, p, c, m),
     putFile: (local, remote) => sftpPutFile(conn, local, remote),

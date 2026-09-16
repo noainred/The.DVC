@@ -29,6 +29,7 @@ import { perfEmptyDiag } from '../../sanswitch/perfDiag.js';
 import { edgePerfStatusFor, listEdgePerfStatus } from '../../central/sanSwitchPerfEdge.js';
 // 월간 점검(v2.519) — 판정은 순수 모듈, 기준선은 포탈 안에 저장(스위치 카운터는 건드리지 않는다).
 import { checkDevice, checkPorts, summarizeAll, CHECK_ITEMS } from '../../sanswitch/healthCheck.js';
+import { recordRun, listRuns, compareRuns, healthHistoryStatus, MAX_RUNS } from '../../sanswitch/healthHistory.js';
 import { saveBaseline, getBaseline, clearBaseline, publicBaseline, listBaselines } from '../../sanswitch/errBaseline.js';
 import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs, available as perfDbAvailable } from '../../sanswitch/perfDb.js';
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
@@ -378,7 +379,7 @@ function zoneDetailFor(snap, problemRows) {
   return { rows: portZoneDetail(zones, ports, { names, aliasOf, roles }), note: '' };
 }
 
-api.get('/tools/sanswitch/devices/:id/healthcheck', toolsPerm, fullScopeOnly, (req, res) => {
+api.get('/tools/sanswitch/devices/:id/healthcheck', toolsPerm, fullScopeOnly, async (req, res) => {
   const dev = listDevices().find((d) => d.id === req.params.id);
   if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
   const snap = snapshotFor(req.params.id);
@@ -393,30 +394,52 @@ api.get('/tools/sanswitch/devices/:id/healthcheck', toolsPerm, fullScopeOnly, (r
   const portCheck = checkPorts(snap, { baseline });
   const problem = portCheck.rows.filter((r) => r.verdict === 'bad' || r.verdict === 'warn').slice(0, PROBLEM_PORT_MAX);
   const zoned = zoneDetailFor(snap, problem);
+  // v2.522 — 사용자 요청 "점검 결과를 DB 로 저장해서 최근 10번 점검과 비교".
+  // ⚠ **같은 스냅샷(collectedAt)이면 기록하지 않는다** — 점검은 스냅샷 판정이라 탭을 열 때마다
+  //   기록하면 '최근 10회' 가 같은 값 10개가 된다('수집 1회 = 기록 1회', healthHistory.js 머리말).
+  const rec = await recordRun(result, { ports: portCheck });
+  const hist = await listRuns(req.params.id, Number(req.query.history) || 10);
   res.json({
     ok: true, result, baseline: publicBaseline(baseline), items: CHECK_ITEMS,
     ports: portCheck,
     problemPorts: zoned.rows,
     zoningNote: zoned.note,
     problemPortsOmitted: Math.max(0, portCheck.rows.filter((r) => r.verdict === 'bad' || r.verdict === 'warn').length - problem.length),
+    history: { ...hist, recorded: rec, compare: compareRuns(hist.runs), db: await healthHistoryStatus() },
   });
+});
+
+/**
+ * 점검 이력 — 최근 N회(기본 10) + 비교(v2.522).
+ * 기록은 점검 조회가 자동으로 한다('수집 1회 = 기록 1회') — 이 라우트는 조회만 한다.
+ */
+api.get('/tools/sanswitch/devices/:id/healthcheck/history', toolsPerm, fullScopeOnly, async (req, res) => {
+  const dev = listDevices().find((d) => d.id === req.params.id);
+  if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
+  const hist = await listRuns(req.params.id, Number(req.query.limit) || 10);
+  res.json({ ok: true, deviceId: req.params.id, name: dev.name || dev.host, ...hist, maxRuns: MAX_RUNS, compare: compareRuns(hist.runs), db: await healthHistoryStatus() });
 });
 
 /**
  * 전체 점검 — 등록된 모든 스위치를 판정해 **요약 + 장비별 결과**를 준다.
  * 스냅샷이 없는 장비는 결과에서 빼지 않고 `missing` 으로 밝힌다(조용히 빠지면 '전부 점검했다' 는 거짓).
  */
-api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, (req, res) => {
+api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, async (req, res) => {
   const dcs = String(req.query.datacenterId || '').split(',').map((x) => x.trim()).filter(Boolean).map((x) => (x === NONE_DC ? '' : x));
   const dcSet = dcs.length ? new Set(dcs) : null;
   const devices = listDevices().filter((d) => d.enabled !== false && (!dcSet || dcSet.has(String(d.datacenterId || ''))));
-  const results = []; const missing = [];
+  const results = []; const missing = []; const recorded = [];
   for (const d of devices) {
     const snap = snapshotFor(d.id);
     if (!snap) { missing.push({ deviceId: d.id, name: d.name || d.host, agent: d.agent || '', datacenterId: d.datacenterId || '' }); continue; }
     const r = checkDevice(snap, { baseline: getBaseline(d.id) });
-    if (r) results.push({ ...r, datacenterId: d.datacenterId || '' });
+    if (r) {
+      results.push({ ...r, datacenterId: d.datacenterId || '' });
+      // 전체 점검도 기록한다(같은 수집 시각이면 healthHistory 가 스스로 건너뛴다).
+      recorded.push(recordRun(r, { ports: checkPorts(snap, { baseline: getBaseline(d.id) }) }));
+    }
   }
+  const recStats = (await Promise.all(recorded)).reduce((a, x) => { if (x.saved) a.saved++; else a.skipped++; return a; }, { saved: 0, skipped: 0 });
   const dcNameOf = (() => {
     try { const m = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (id) => m.get(id) || id || '(법인 미지정)'; }
     catch { return (id) => id || '(법인 미지정)'; }
@@ -426,6 +449,8 @@ api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, (req, res)
     summary: { ...summarizeAll(results), missing: missing.length, registered: devices.length },
     results: results.map((r) => ({ ...r, datacenterName: dcNameOf(r.datacenterId) })),
     missing, items: CHECK_ITEMS, baselines: listBaselines(),
+    // 이력 기록 결과 — '몇 건이 새로 기록되고 몇 건이 같은 스냅샷이어서 건너뛰었나'.
+    recordedRuns: recStats, historyDb: await healthHistoryStatus(),
   });
 });
 
