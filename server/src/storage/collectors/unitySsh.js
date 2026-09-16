@@ -59,51 +59,64 @@ const LIST_MAX = 64;
  *    거의 변하지 않는 것. 직전 결과를 메모리에 이고 가며(`_configCache`) 스냅샷에 합친다.
  *    **언제 수집한 구성인지 화면이 밝힌다**(`extra.configAt`) — 조용히 낡은 값을 보여주지 않는다.
  */
+/**
+ * ⚠⚠ **`uemcli` 후보의 첫 자리는 반드시 `-output csv` 다**(v2.529 — v2.526 회귀 수정).
+ *
+ * v2.526 이 사용자 캡처(`pool -detail` 평문)를 보고 **평문 `-detail` 을 첫 후보로** 바꿨는데,
+ * 현장 장비(OC2-41.237)에서 **풀·시스템 출력이 파싱되지 않았다** — 화면 실측:
+ *   `capacity: 오류: 풀 출력에서 용량 필드를 인식하지 못했습니다` · `config: 건너뜀`
+ * 같은 세션의 `alerts` 는 정상이었으므로 SSH·명령 실행은 멀쩡했고 **파싱만** 실패한 것이다.
+ * v2.525 는 CSV 를 첫 후보로 썼고 잘 돌았다. `recordsFor` 는 CSV 를 훨씬 안정적으로 읽는다
+ * (평문 `-detail` 은 `N:` 접두 + `Key = Value` 라 레코드 경계가 장비/버전마다 다르다).
+ *
+ * 평문 `-detail` 은 **뒤 후보로 남긴다** — CSV 를 지원하지 않는 항목이 있을 수 있어서다.
+ * 되돌리지 말 것: 평문을 앞에 두면 이 회귀가 그대로 재발한다.
+ */
 const SPECS = [
   /* ── 매 주기 ───────────────────────────────────────────────────────────── */
   { key: 'system', section: 'config', required: true, when: 'always', answered: true,
-    cmds: ['uemcli /sys/general show', 'uemcli -output csv /sys/general show'] },
+    cmds: ['uemcli -output csv /sys/general show -detail', 'uemcli -output csv /sys/general show', 'uemcli /sys/general show'] },
   // 용량·구독(할당량) — 사용자 요청 "디스크 사용량 할당량". `-detail` 이 Current allocation·
   // Subscription·Alert threshold·RAID·Drives 를 준다(실측).
   { key: 'pools', section: 'pools', when: 'always', answered: true,
-    cmds: ['uemcli /stor/config/pool show -detail', 'uemcli /stor/config/pool show', 'uemcli -output csv /stor/config/pool show -detail'] },
+    cmds: ['uemcli -output csv /stor/config/pool show -detail', 'uemcli -output csv /stor/config/pool show', 'uemcli /stor/config/pool show -detail', 'uemcli /stor/config/pool show'] },
   { key: 'sps', section: 'nodes', when: 'always', answered: true,
-    cmds: ['uemcli /env/sp show -detail', 'uemcli /env/sp show'] },
+    cmds: ['uemcli -output csv /env/sp show -detail', 'uemcli -output csv /env/sp show', 'uemcli /env/sp show -detail'] },
   { key: 'alerts', section: 'alerts', when: 'always', answered: true,
-    cmds: ['uemcli /event/alert/hist show -active', 'uemcli /event/alert/hist show'] },
+    cmds: ['uemcli -output csv /event/alert/hist show -active', 'uemcli -output csv /event/alert/hist show', 'uemcli /event/alert/hist show -active'] },
   // 전력·FRU 상태·부품 인벤토리를 한 번에 주는 유일한 명령(Unisphere 계정 불필요).
   // ⚠ 출력이 길고 `--More--` 로 멈추므로 페이저 자동 응답이 필요하다.
   { key: 'spinfo', when: 'always', answered: true, rules: ['pager', 'certAccept'],
     bin: 'svc_diag', cmds: ['svc_diag -s spinfo'] },
 
   /* ── 긴 주기(구성) ─────────────────────────────────────────────────────── */
-  { key: 'software', when: 'config', answered: true, cmds: ['uemcli /sys/soft/ver show'] },
-  { key: 'license', when: 'config', answered: true, cmds: ['uemcli /sys/lic show'] },
-  { key: 'users', section: 'accounts', when: 'config', answered: true, cmds: ['uemcli /user/account show'] },
+  { key: 'software', when: 'config', answered: true, cmds: ['uemcli -output csv /sys/soft/ver show', 'uemcli /sys/soft/ver show'] },
+  { key: 'license', when: 'config', answered: true, cmds: ['uemcli -output csv /sys/lic show', 'uemcli /sys/lic show'] },
+  { key: 'users', section: 'accounts', when: 'config', answered: true, cmds: ['uemcli -output csv /user/account show', 'uemcli /user/account show'] },
   // 물리 디스크 — 실측 필드: ID·Enclosure·Slot·Health state·Tier·User capacity·Pool
   { key: 'disks', when: 'config', answered: true,
-    cmds: ['uemcli /env/disk show -detail', 'uemcli /env/disk show'] },
-  { key: 'dpe', when: 'config', answered: true, cmds: ['uemcli /env/dpe show'] },
-  { key: 'dae', when: 'config', answered: true, cmds: ['uemcli /env/dae show'] },
-  { key: 'iom', when: 'config', answered: true, cmds: ['uemcli /env/iomodule show'] },
-  { key: 'ethPorts', when: 'config', answered: true, cmds: ['uemcli /net/port/eth show'] },
-  { key: 'fcPorts', when: 'config', answered: true, cmds: ['uemcli /net/port/fc show'] },
-  { key: 'sasPorts', when: 'config', answered: true, cmds: ['uemcli /net/port/sas show'] },
+    cmds: ['uemcli -output csv /env/disk show -detail', 'uemcli -output csv /env/disk show', 'uemcli /env/disk show -detail'] },
+  { key: 'dpe', when: 'config', answered: true, cmds: ['uemcli -output csv /env/dpe show', 'uemcli /env/dpe show'] },
+  { key: 'dae', when: 'config', answered: true, cmds: ['uemcli -output csv /env/dae show', 'uemcli /env/dae show'] },
+  { key: 'iom', when: 'config', answered: true, cmds: ['uemcli -output csv /env/iomodule show', 'uemcli /env/iomodule show'] },
+  { key: 'ethPorts', when: 'config', answered: true, cmds: ['uemcli -output csv /net/port/eth show', 'uemcli /net/port/eth show'] },
+  { key: 'fcPorts', when: 'config', answered: true, cmds: ['uemcli -output csv /net/port/fc show', 'uemcli /net/port/fc show'] },
+  { key: 'sasPorts', when: 'config', answered: true, cmds: ['uemcli -output csv /net/port/sas show', 'uemcli /net/port/sas show'] },
   // LUN — 실측 필드: Size·Storage pool·SP owner·Trespassed. `-detail` 은 실제 할당량을 준다(미확인).
   { key: 'luns', when: 'config', answered: true,
-    cmds: ['uemcli /stor/prov/luns/lun show -detail', 'uemcli /stor/prov/luns/lun show'] },
+    cmds: ['uemcli -output csv /stor/prov/luns/lun show -detail', 'uemcli -output csv /stor/prov/luns/lun show', 'uemcli /stor/prov/luns/lun show -detail'] },
   { key: 'filesystems', when: 'config', answered: true,
-    cmds: ['uemcli /stor/prov/fs show -detail', 'uemcli /stor/prov/fs show'] },
-  { key: 'vmfs', when: 'config', answered: true, cmds: ['uemcli /stor/prov/vmware/vmfs show'] },
-  { key: 'nfsDs', when: 'config', answered: true, cmds: ['uemcli /stor/prov/vmware/nfs show'] },
-  { key: 'nasServers', when: 'config', answered: true, cmds: ['uemcli /net/nas/server show'] },
-  { key: 'hosts', when: 'config', answered: true, cmds: ['uemcli /remote/host show'] },
-  { key: 'snaps', when: 'config', answered: true, cmds: ['uemcli /prot/snap show'] },
+    cmds: ['uemcli -output csv /stor/prov/fs show -detail', 'uemcli -output csv /stor/prov/fs show', 'uemcli /stor/prov/fs show -detail'] },
+  { key: 'vmfs', when: 'config', answered: true, cmds: ['uemcli -output csv /stor/prov/vmware/vmfs show', 'uemcli /stor/prov/vmware/vmfs show'] },
+  { key: 'nfsDs', when: 'config', answered: true, cmds: ['uemcli -output csv /stor/prov/vmware/nfs show', 'uemcli /stor/prov/vmware/nfs show'] },
+  { key: 'nasServers', when: 'config', answered: true, cmds: ['uemcli -output csv /net/nas/server show', 'uemcli /net/nas/server show'] },
+  { key: 'hosts', when: 'config', answered: true, cmds: ['uemcli -output csv /remote/host show', 'uemcli /remote/host show'] },
+  { key: 'snaps', when: 'config', answered: true, cmds: ['uemcli -output csv /prot/snap show', 'uemcli /prot/snap show'] },
   // NAS 할당량(사용자 요청 "할당량"). ⚠ 이 장비에서는 `-filesystem` 같은 필수 인자를 요구해
   //   문법 오류가 난다(실측: `Expected one of the following mandatory keywords`). 그건 오류가 아니라
   //   **'이 명령은 대상 지정이 필요하다'** 는 뜻이므로 화면이 그렇게 말한다(없는 값을 지어내지 않는다).
-  { key: 'quotaConfig', when: 'config', answered: true, cmds: ['uemcli /quota/config show'] },
-  { key: 'quotaTree', when: 'config', answered: true, cmds: ['uemcli /quota/tree show'] },
+  { key: 'quotaConfig', when: 'config', answered: true, cmds: ['uemcli -output csv /quota/config show', 'uemcli /quota/config show'] },
+  { key: 'quotaTree', when: 'config', answered: true, cmds: ['uemcli -output csv /quota/tree show', 'uemcli /quota/tree show'] },
 ];
 
 /** 이 주기에 돌릴 명세. `configRound:false` 면 긴 주기 항목을 뺀다. */
