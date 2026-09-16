@@ -13,6 +13,7 @@ import UnityConfigPanels from './UnityConfigPanels.jsx';   // v2.525: Unity 구�
 import CollectActivity from './CollectActivity.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { healthBadge } from './storageNodeText.js';   // v2.526: 헬스 배지 색 판정(순수)
+import { authFailInfo } from './storageAuthText.js';  // v2.528: 401 진단 문구(순수)
 import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
 
 /**
@@ -795,6 +796,40 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {!s.ok && (
             <div className="card" style={{ borderColor: 'var(--red)', padding: '8px 12px', marginBottom: 10, fontSize: 12.5, color: 'var(--red)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>⛔ {failReason(s)}</div>
           )}
+
+          {/* ── 인증 실패(401) 진단 (v2.528, 사용자 신고 "PS-HG-2 인증 실패 · 등록은 됐고 CSV 로
+              내보내면 비밀번호는 정상") ──────────────────────────────────────────────
+              엣지 위임 장비는 **엣지가** 장비에 로그인하므로, 401 만으로는 '배포가 상했나' 와
+              '장비 비밀번호가 다른가' 를 가릴 수 없다. 엣지가 **실제로 쓴** 자격증명 지문
+              (계정·길이·비복원 해시 — 평문 아님)을 보여 중앙 등록값과 대조하게 한다.
+              판정·문구는 `storageAuthText.js` 하나가 소유한다(웹 테스트가 node 환경이라 순수 모듈). */}
+          {(() => {
+            const ai = authFailInfo(s, r);
+            if (!ai) return null;
+            return (
+              <div className="card" style={{ borderColor: 'var(--amber)', padding: '10px 12px', marginBottom: 10, fontSize: 12.5 }}>
+                <div style={{ fontWeight: 700, color: 'var(--amber)', marginBottom: 6 }}>
+                  🔑 {ai.title}
+                  {ai.since && <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>— {ai.since}부터 · 시도 {ai.attempts}회</span>}
+                </div>
+                {ai.fp && (
+                  <div style={{ marginBottom: 6 }}>
+                    <span className="muted">수집에 쓰인 자격증명</span>{' '}
+                    <b style={{ fontFamily: 'ui-monospace, monospace' }}>{ai.fp}</b>
+                    {ai.fpSource && <span className="muted"> ({ai.fpSource === 'central' ? '중앙' : `엣지 ${ai.fpSource}`} 기준)</span>}
+                  </div>
+                )}
+                <ul style={{ margin: '0 0 0 16px', padding: 0, lineHeight: 1.7 }}>
+                  {ai.causes.map((c, i) => <li key={`c${i}`} style={{ whiteSpace: 'normal' }}><BoldText text={c} /></li>)}
+                </ul>
+                {ai.notes.length > 0 && (
+                  <div className="muted" style={{ marginTop: 6, lineHeight: 1.7, whiteSpace: 'normal' }}>
+                    {ai.notes.map((n, i) => <div key={`n${i}`}>· <BoldText text={n} /></div>)}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* 가상화 계층(VPLEX/Metro Node) — 자체 용량이 없다는 사유를 명시(용량/미디어/추이 숨김) */}
           {isVirt && (

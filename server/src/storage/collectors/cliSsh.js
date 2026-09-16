@@ -24,6 +24,23 @@ import { emptySnapshot } from '../types.js';
 const RAW_LIMIT = Number(process.env.STORAGE_CLI_RAW_LIMIT) || 4000;
 /** 명령 1개 타임아웃(ms) — CLI 는 로그인 배너·페이지네이션으로 느릴 수 있어 넉넉히. */
 const CMD_TIMEOUT_MS = Number(process.env.STORAGE_CLI_TIMEOUT_MS) || 45_000;
+/**
+ * 세션 전체 예산(v2.528 — **v2.526 회귀 수정**).
+ *
+ * ⚠ 왜 필요한가: v2.526 이 Unity 명령을 5개 → **24개**로 늘렸는데 폴러의 장비 시한
+ * (`storage/poller.js DEVICE_TIMEOUT_MS`, 기본 180초)은 그대로였다. 명령당 시한이 45초라
+ * **느린 명령 4개면 180초를 넘고**, 그 순간 `withDeadline` 이 던져 **그때까지 모은 결과가
+ * 통째로 버려진다**(용량·상태까지 전부). 사용자 신고 "수정 이후에 유니티 ssh 안되" 가 이것이다.
+ *
+ * 그래서 세션이 **스스로** 예산을 보고 멈춘다 — 남은 시간이 부족하면 새 명령을 시작하지 않고
+ * **여기까지의 결과를 돌려준다**. 필수·매주기 항목이 앞에 있으므로(`unitySsh.js SPECS` 순서)
+ * 용량·상태는 살아남고, 못 돌린 구성 명령은 **개수와 이유를 밝힌다**(조용한 생략 금지).
+ *
+ * 기본값은 장비 시한보다 **작아야** 한다 — 같거나 크면 이 가드가 발동하기 전에 폴러가 먼저 던진다.
+ */
+const SESSION_BUDGET_MS = Math.max(20_000, Number(process.env.STORAGE_CLI_SESSION_BUDGET_MS) || 150_000);
+/** 남은 예산이 이보다 적으면 새 명령을 시작하지 않는다(시작해 놓고 잘리면 결과가 버려진다). */
+const MIN_SLICE_MS = 5_000;
 
 /**
  * 한 SSH 세션에서 명령 묶음을 실행한다.
@@ -59,7 +76,7 @@ export function cliLooksError(stdout, stderr = '') {
  * @param {object} [opts]
  * @param {(t:string)=>string} [opts.clean] 파싱 전 전처리(배너 제거 등). 오류 판정도 이 결과로 한다.
  */
-export async function runCliSession(device, specs, { clean = (t) => t } = {}) {
+export async function runCliSession(device, specs, { clean = (t) => t, budgetMs = SESSION_BUDGET_MS } = {}) {
   const creds = {
     host: device.host,
     port: Number(device.sshPort) || 22,
@@ -67,18 +84,26 @@ export async function runCliSession(device, specs, { clean = (t) => t } = {}) {
     password: device.password || '',
     signal: device._signal, // 폴러의 장비당 타임아웃(v2.417) — 만료 시 세션을 끊는다
   };
+  const startedAt = Date.now();
+  const leftMs = () => budgetMs - (Date.now() - startedAt);
   return withSsh(creds, async (sh) => {
     const out = {};
     const raw = [];
     const errors = {};
+    const skipped = [];      // 예산이 모자라 **시작조차 하지 않은** 항목 — 반드시 밝힌다
     for (const spec of specs) {
+      // ── 세션 예산(v2.528) ──
+      // 필수 항목은 예산을 무시하고 시도한다(그것이 없으면 스냅샷 자체가 무의미하다).
+      if (!spec.required && leftMs() < MIN_SLICE_MS) { skipped.push(spec.key); continue; }
       let lastErr = null;
       let done = false;
       for (const cmd of spec.cmds) {
         try {
+          // 남은 예산 안에서만 기다린다 — 한 명령이 전체 예산을 먹지 않게.
+          const slice = spec.required ? CMD_TIMEOUT_MS : Math.max(MIN_SLICE_MS, Math.min(CMD_TIMEOUT_MS, leftMs()));
           const r = spec.answered
-            ? await sh.execAnswered(cmd, { timeoutMs: CMD_TIMEOUT_MS, rules: spec.rules || ['certAccept', 'pager'] })
-            : await sh.exec(cmd, CMD_TIMEOUT_MS);
+            ? await sh.execAnswered(cmd, { timeoutMs: slice, rules: spec.rules || ['certAccept', 'pager'] })
+            : await sh.exec(cmd, slice);
           // 배너·프롬프트를 먼저 걷어낸다 — 그 뒤에 오류 판정·파싱을 한다(둘이 같은 텍스트를 봐야 한다).
           const stdout = clean(String(r.stdout || ''));
           const stderr = String(r.stderr || '');
@@ -103,7 +128,10 @@ export async function runCliSession(device, specs, { clean = (t) => t } = {}) {
         if (spec.required) throw new Error(`${spec.key}: ${errors[spec.key]}`);
       }
     }
-    return { out, raw, errors };
+    // 예산으로 건너뛴 항목은 '명령이 없는 장비' 와 구분되게 사유를 적는다 — 조치가 다르다
+    // (전자는 주기를 늘리거나 예산을 키우면 되고, 후자는 그 장비에 그 명령이 없는 것이다).
+    for (const k of skipped) errors[k] = '수집 시간 예산 초과로 이번 주기에는 실행하지 않았습니다(다음 주기에 시도).';
+    return { out, raw, errors, skipped, elapsedMs: Date.now() - startedAt, budgetMs };
   });
 }
 

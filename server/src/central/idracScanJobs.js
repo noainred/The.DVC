@@ -17,17 +17,10 @@ import { saveUnsupportedServers } from './unsupportedServers.js'; // v2.495: 비
 import { appendIdracScanLog } from '../idrac/scanLog.js';
 import { recordScanRangeRunByReqId } from '../idrac/scanRanges.js';
 import { buildPendingRemedy, buildPushErrorRemedy } from './scanRemedy.js';
+// 자격증명 지문은 공용 모듈 하나가 소유한다(v2.528) — 스토리지 401 진단이 같은 표기를 쓴다.
+// 두 벌로 두면 표기가 갈라져 '법인 간 눈으로 대조' 라는 이 기능의 목적이 깨진다.
+import { credFingerprint } from '../util/credFingerprint.js';
 
-// 스캔에 실제로 사용된 자격증명의 '지문' — 평문은 절대 남기지 않는다. 계정명 + 비밀번호 길이 +
-// 비복원 해시(djb2)만 표시해, "다른 법인은 되는데 이 법인만 인증 실패"일 때 법인 간 설정을
-// 눈으로 비교(계정/길이/지문이 같은지)할 수 있게 한다. 앞뒤 공백은 [공백] 표기로 드러낸다.
-function credFingerprint(username, password) {
-  const u = String(username ?? '');
-  const p = String(password ?? '');
-  let h = 5381; for (let i = 0; i < p.length; i++) h = (((h << 5) + h) ^ p.charCodeAt(i)) >>> 0;
-  const edge = /^\s|\s$/.test(p) ? ' · ⚠앞뒤공백' : '';
-  return `계정 '${u}'${/^\s|\s$/.test(u) ? '(⚠공백)' : ''} · 비번 ${p.length}자·#${h.toString(16).slice(0, 4)}${edge}`;
-}
 
 const jobs = new Map();    // reqId -> { reqId, agent, ips, username, password, state, createdAt, takenAt, result, doneAt, progress, events }
 const byAgent = new Map(); // agentLower -> Set<reqId> (대기 중)

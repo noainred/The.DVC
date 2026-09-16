@@ -6,6 +6,9 @@
  * 새 타입 추가 시 COLLECTORS 에 한 줄(types.js 절차 ①의 연결 지점).
  */
 import { config } from '../config.js';
+// v2.528: 인증 실패(401) 장비는 주기 수집을 멈춘다(계정 잠금 방지) + 자격증명 지문 표시.
+import { isAuthFailure, markAuthStopped, clearAuthStop, authStopFor } from './authGuard.js';
+import { credFingerprintParts } from '../util/credFingerprint.js';
 import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { putSnapshot } from './store.js';
 import { emptySnapshot } from './types.js';
@@ -38,7 +41,13 @@ let _last = { at: 0, collected: 0, failed: 0 };
 // collectOne 시작에 추가하고 finally 에서 제거해, 수집이 죽어도 유령으로 남지 않게 한다.
 const _inFlight = new Map();
 
-async function collectOne(dev) {
+async function collectOne(dev, { periodic = false } = {}) {
+  // v2.528: **주기 수집만** 인증 실패 장비를 건너뛴다. 수동 실행('지금 수집'·연결 테스트)은
+  // 사람이 1회 누르는 것이라 잠금 위험이 없고, 막으면 '고쳤는지 확인할 길' 이 사라진다.
+  if (periodic) {
+    const stop = authStopFor(dev);
+    if (stop) return null;
+  }
   const startedAt = Date.now();
   _inFlight.set(dev.id, { id: dev.id, name: dev.name || dev.id, at: startedAt });
   try {
@@ -102,6 +111,27 @@ async function collectOneInner(dev, startedAt) {
       } catch (e) { snap.extra = { ...snap.extra, areasError: e.message }; putSnapshot(snap); }
     }
   }
+  // ── v2.528 인증 실패 처리 ──────────────────────────────────────────────────
+  // 401/403 은 재시도해도 결과가 같고 **계정만 잠근다**. 그 장비의 주기 수집을 멈추고,
+  // 멈췄다는 사실·사유·엣지가 실제로 쓴 자격증명 지문을 스냅샷에 실어 화면이 말하게 한다
+  // (조용히 멈추면 사용자는 수집이 되는 줄 안다 — authGuard.js 규칙 1).
+  if (isAuthFailure(snap)) {
+    const rec = markAuthStopped(dev.id, full, snap.error || '인증 실패');
+    const fp = credFingerprintParts(full.username, full.password);
+    snap.extra = {
+      ...(snap.extra || {}),
+      authStopped: { since: rec.since, attempts: rec.attempts, reason: rec.reason },
+      // ⚠ 평문이 아니다 — 계정명·길이·비복원 해시뿐(credFingerprint.js 규칙 1).
+      //   중앙 등록값과 눈으로 대조해 '배포가 상했나' vs '장비 비밀번호가 다른가' 를 가른다.
+      credFp: { user: fp.user, len: fp.len, hash: fp.hash, space: fp.space, empty: fp.empty, userSpace: fp.userSpace },
+      // 이 지문을 만든 주체(중앙인지 어느 엣지인지) — 위임 장비는 엣지 값이어야 한다.
+      credFpSource: config.agent.centralUrl ? (config.agent.name || 'edge') : 'central',
+    };
+    putSnapshot(snap);
+  } else if (snap.ok) {
+    clearAuthStop(dev.id);      // 다시 성공했다 — 정지 해제(다음 주기부터 정상 수집)
+  }
+
   // 작업 로그 기록(v2.315) — 성공/실패 모두 1건. 출처는 이 노드 성격: 중앙(centralUrl 없음)이면
   // 'central', 엣지면 자기 이름(엣지 로컬 로그용 — 중앙 화면엔 엣지 push 를 storageEdge 가 별도 기록).
   const source = config.agent.centralUrl ? (config.agent.name || 'edge') : 'central';
@@ -124,10 +154,20 @@ export async function pollStorageOnce() {
     let ok = 0, fail = 0;
     // 병렬 3개 제한 — 수집이 몰려 장비/네트워크에 부하 주지 않게(단순 워커 풀).
     let idx = 0;
-    const worker = async () => { while (idx < devs.length) { const d = devs[idx++]; (await collectOne(d)) ? ok++ : fail++; } };
+    let authStopped = 0;
+    const worker = async () => {
+      while (idx < devs.length) {
+        const d = devs[idx++];
+        const r = await collectOne(d, { periodic: true });
+        // null = 인증 실패로 건너뛴 것(v2.528). 실패로 세면 '수집 실패 N대' 가 매 주기 늘어나
+        // 새 장애처럼 보인다 — 별도로 센다.
+        if (r === null) authStopped++;
+        else if (r) ok++; else fail++;
+      }
+    };
     await Promise.all(Array.from({ length: Math.min(3, devs.length) }, worker));
-    _last = { at: Date.now(), collected: ok, failed: fail };
-    return { ok, fail };
+    _last = { at: Date.now(), collected: ok, failed: fail, authStopped };
+    return { ok, fail, authStopped };
   } finally { _busy = false; }
 }
 

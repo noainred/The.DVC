@@ -637,6 +637,10 @@ export async function collectViaSsh(device) {
     snap.extra.configAt = configAt;
     snap.extra.configEveryMs = CONFIG_EVERY_MS;
     snap.extra.configRound = configRound;
+    // v2.528: 세션 예산으로 이번 주기에 **시작조차 하지 않은** 명령을 밝힌다(조용한 생략 금지).
+    // 이 값이 자주 보이면 명령이 너무 많거나 장비가 느린 것이다 — 화면이 그 사실을 말한다.
+    if (r.skipped?.length) snap.extra.cliSkipped = r.skipped.length;
+    if (r.elapsedMs != null) { snap.extra.cliElapsedMs = r.elapsedMs; snap.extra.cliBudgetMs = r.budgetMs; }
     for (const [key, msg] of Object.entries(errors)) {
       const sect = SPECS.find((s2) => s2.key === key)?.section;
       if (sect && snap.sections[sect] !== 'ok') snap.sections[sect] = `오류: ${msg}`;
