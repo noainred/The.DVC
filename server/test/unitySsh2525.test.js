@@ -96,7 +96,11 @@ test('정규화: 풀 합계로 용량을 채우고 근거를 밝힌다', () => {
   assert.equal(snap.capacity.usedBytes, 8796093022208 + 4398046511104);
   assert.equal(snap.pools.length, 2);
   assert.equal(snap.pools[0].raid, '5');
-  assert.equal(snap.pools[0].driveType, 'SAS');
+  // ⚠ v2.526 정정: 실장비 출력에는 **`Drive type` 필드가 없다**(사용자 제공 `/env/disk show`·
+  //   `/stor/config/pool show -detail` 실측). 매체 표기는 풀의 `Drives = 38 x 3.8T SAS Flash 4`
+  //   문자열뿐이라 `driveType` 을 빼고 원문 문자열(`drives`)을 그대로 싣는다 — 없는 필드를
+  //   추측해 채우지 않는다. 이 픽스처는 `Drive type` 열이 있는 가상의 버전이므로 값이 없다.
+  assert.equal(snap.pools[0].driveType, undefined);
   assert.equal(snap.pools[0].disks, 15);
   assert.equal(snap.pools[0].health, 'ok');
   assert.match(snap.extra.capacityNote, /풀 합계/, '풀 밖 공간이 빠진다는 사실을 화면이 밝혀야 한다');
@@ -160,9 +164,12 @@ test('구성: 드라이브를 타입별로 요약하고 미확인 개수를 따�
   assert.equal(d.count, 4);
   assert.equal(d.unhealthy, 1);
   assert.equal(d.unknown, 1, '상태를 읽지 못한 드라이브는 따로 센다(정상이라는 뜻이 아니다)');
-  assert.equal(d.byType.length, 2);
-  assert.equal(d.byType[0].type, 'SAS');
-  assert.equal(d.byType[0].count, 2);
+  // ⚠ v2.526 정정: 그룹 키가 `byType`(Drive type) → **`byTier`**(Tier)로 바뀌었다.
+  //   실장비 `/env/disk show` 에는 `Drive type` 이 없고 `Tier`(예: Extreme Performance)만 있다.
+  //   이 픽스처의 `Drive type` 은 `Tier` 의 후보로 여전히 읽힌다(버전차 폴백).
+  assert.equal(d.byTier.length, 2);
+  assert.equal(d.byTier[0].tier, 'SAS');
+  assert.equal(d.byTier[0].count, 2);
   assert.ok(d.rawBytes > 0);
 });
 
@@ -225,19 +232,29 @@ test('경보: 목록은 extra 에 두고(공용 스냅샷 계약 보존) 0건은
 
 /* ─── 명세·근거 ───────────────────────────────────────────────────────────── */
 
-test('명세: 모든 항목이 후보 체인이고 deep 은 끌 수 있다', () => {
-  const all = specsFor({ deep: true });
-  const core = specsFor({ deep: false });
-  assert.ok(all.length > core.length, 'deep 항목이 있어야 한다');
-  assert.ok(core.length >= 6, 'core 만으로도 용량·상태 화면이 채워져야 한다');
+test('명세: 모든 항목이 후보 체인이고 구성 항목은 긴 주기로 뺄 수 있다', () => {
+  const all = specsFor({ deep: true, configRound: true });
+  // ⚠ v2.526 정정: 주기 축이 `deep` 하나에서 **`when`(always|config)** 으로 바뀌었다
+  //   (사용자 선택 "구성은 드물게 · 전력은 매번"). `configRound:false` 는 매 주기 항목만 남긴다.
+  const always = specsFor({ deep: true, configRound: false });
+  assert.ok(all.length > always.length, '긴 주기(구성) 항목이 있어야 한다');
+  assert.ok(always.length >= 5, '매 주기 항목만으로 용량·상태·전력 화면이 채워져야 한다');
+  assert.ok(always.every((s) => s.when === 'always'));
   for (const s of all) {
     assert.ok(Array.isArray(s.cmds) && s.cmds.length >= 1, `${s.key}: cmds 는 후보 배열이다`);
-    assert.ok(s.cmds.every((c) => c.startsWith('uemcli ')), `${s.key}: uemcli 로만 실행한다`);
+    // uemcli 는 인증서 프롬프트에서 멈추므로 **전부 자동 응답 모드**여야 한다(v2.526 실측).
+    assert.equal(s.answered, true, `${s.key}: answered 가 없으면 인증서 프롬프트에서 멈춘다`);
   }
+  // 전력·FRU 는 uemcli 가 아니라 svc_diag 가 준다(Unisphere 계정이 필요 없는 유일한 경로).
+  const spinfo = all.find((s) => s.key === 'spinfo');
+  assert.ok(spinfo && spinfo.cmds[0].startsWith('svc_diag '), 'svc_diag spinfo 가 매 주기 항목이어야 한다');
+  assert.equal(spinfo.when, 'always');
+  assert.ok(spinfo.rules.includes('pager'), 'spinfo 는 --More-- 로 멈추므로 페이저 응답이 필요하다');
+  assert.ok(all.filter((s) => s.key !== 'spinfo').every((s) => s.cmds.every((c) => c.startsWith('uemcli '))));
   assert.equal(all.filter((s) => s.required).length, 1, '필수 항목은 시스템 조회 하나뿐이어야 한다');
-  // 용량·상태 항목은 CSV 우선 + 기본 출력 폴백(버전차)
+  // 용량 항목은 `-detail` 우선 + 기본 폴백(버전차) — `-detail` 이 Current allocation·Subscription 을 준다
   const pools = all.find((s) => s.key === 'pools');
-  assert.ok(pools.cmds.some((c) => c.includes('-output csv')) && pools.cmds.some((c) => !c.includes('-output csv')));
+  assert.ok(pools.cmds[0].includes('-detail') && pools.cmds.some((c) => !c.includes('-detail')));
 });
 
 test('근거: 무엇으로 읽었는지·deep 을 껐는지 스냅샷에 남는다', () => {
