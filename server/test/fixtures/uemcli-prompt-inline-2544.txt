@@ -1,0 +1,34 @@
+22:58:12 service@SYNTH0000000000 spb:~/user# uemcli /stor/config/pool show -detail
+Storage system address: 127.0.0.1
+Storage system port: 443
+HTTPS connection
+
+Remote certificate:
+Issuer: CN=SYNTH0000000000,O=Synthetic,C=US
+Subject: CN=SYNTH0000000000,O=Synthetic,C=US
+Valid from: 2024-01-01
+Valid to: 2034-01-01
+Serial: 00
+Would you like to:
+  [1] Accept the certificate for this session
+  [2] Reject the certificate
+  [3] Accept and store
+Please input your selection (The default selection is [1]): 1:    ID                 = pool_2
+      Type                       = Dynamic
+      Name                       = pool_1
+      Description                =
+      Total space                = 117461986836480 (106.8T)
+      Current allocation         = 32472702623744 (29.5T)
+      Preallocated               = 2081972224 (1.9G)
+      Remaining space            = 84987202240512 (77.2T)
+      Subscription               = 110980344315904 (100.9T)
+      Flash percent              = 100%
+      Subscription percent       = 94%
+      Alert threshold            = 70%
+      Drives                     = 38 x 3.8T SAS Flash 4
+      Number of drives           = 38
+      RAID level                 = 5
+      Stripe length              = 9
+      Health state               = OK (5)
+
+22:58:16 service@SYNTH0000000000 spb:~/user#

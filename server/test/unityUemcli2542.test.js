@@ -201,16 +201,29 @@ test('풀 합계와 시스템 전체가 다르면 교차 경고를 낸다', () =
 
 /* ── 구조 계약 — 되돌리면 v2.526 회귀가 재발한다 ───────────────────────────────── */
 
-test('★ 명령은 3개뿐이고 CSV 후보가 없다', () => {
-  assert.equal(SPECS.length, 3, `명령이 ${SPECS.length}개다 — 늘리려면 예산 산수를 먼저 할 것`);
-  const cmds = SPECS.flatMap((s) => s.cmds);
-  assert.deepEqual(cmds, [
+/*
+ * ★ v2.544 정정 — **용량·상태 경로는 여전히 3개**다. 버전 항목이 하나 늘었다.
+ *
+ * v2.542 는 `SPECS.length === 3` 과 `svc_diag` 금지를 고정했다. 그 의도는 두 가지였다:
+ *  ① v2.526 의 '명령 26개 → 예산 소진 → 뒤 항목이 시도조차 안 됨' 회귀를 막는다
+ *  ② `svc_diag -s spinfo` 를 **이 경로에서 부르지 않는다**(사용자가 준 세 출력에 SP 하드웨어가
+ *     없어 파싱할 것이 없었다)
+ * v2.544 는 ①을 **더 강하게** 지킨다 — 버전 항목은 `required` 가 아니고 시한이 20초라
+ * 예산 가드가 그대로 작동한다(`unitySshBudget2528.test.js` 가 그 산수를 본다).
+ * ②는 뜻이 달라졌다: 이번에 부르는 것은 **인자 없는 `svc_diag`(basic state)** 이고,
+ * 사용자가 그 출력을 직접 제공했다(모델 `Unity 480F` · 버전 · 시리얼). `-s spinfo` 는 그대로 안 부른다.
+ */
+test('★ 용량·상태 명령은 3개 그대로이고 CSV 후보가 없다', () => {
+  const core = SPECS.filter((s) => s.key !== 'version');
+  assert.equal(core.length, 3, `용량·상태 명령이 ${core.length}개다 — 늘리려면 예산 산수를 먼저 할 것`);
+  assert.deepEqual(core.flatMap((s) => s.cmds), [
     'uemcli /stor/config/pool show -detail',
     'uemcli /stor/general/system show',
     'uemcli /stor/config/pool show',
   ]);
-  assert.ok(!cmds.some((c) => /-output csv/.test(c)), '이 장비의 CSV 출력은 확인된 적이 없다');
-  assert.ok(!cmds.some((c) => /svc_diag/.test(c)), 'svc_diag 는 이 경로에서 부르지 않는다(v2.542)');
+  const all = SPECS.flatMap((s) => s.cmds);
+  assert.ok(!all.some((c) => /-output csv/.test(c)), '이 장비의 CSV 출력은 확인된 적이 없다');
+  assert.ok(!all.some((c) => /svc_diag\s+-s/.test(c)), 'svc_diag -s spinfo 는 이 경로에서 부르지 않는다(v2.542)');
 });
 
 test('★ 인증서 프롬프트 응답에 파괴적 선택이 없다', () => {

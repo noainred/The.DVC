@@ -45,6 +45,14 @@ const REC_START = /^(\d+):\s*(.*)$/;
  * @param {string} text
  * @returns {Array<Record<string,string>>}
  */
+/** 그 줄이 `키 = 값` 이면 키를, 아니면 `null`. (경계 판정과 저장이 같은 규칙을 쓰게 한다.) */
+function keyOf(line) {
+  const i = line.indexOf(' = ');
+  if (i >= 0) return line.slice(0, i).trim() || null;
+  const m = /^(.*?)\s+=\s*$/.exec(line);
+  return m ? (m[1].trim() || null) : null;
+}
+
 export function parseUemcli(text) {
   const out = [];
   let cur = null;
@@ -64,15 +72,38 @@ export function parseUemcli(text) {
     if (k) cur[k] = line.slice(i + 3).trim();
   };
 
-  for (const raw of String(text || '').split(/\r?\n/)) {
+  const lines = String(text || '').split(/\r?\n/);
+  /*
+   * ⚠ **레코드 번호가 하나도 없으면** 키 반복으로 경계를 잡는다(v2.544 방어).
+   *
+   * v2.542~2.543 은 `^N:` 이 없으면 **전부 버렸다**(`put` 의 `if (!cur) return`). 실제로
+   * `stripUemcliBanner` 가 그 번호를 지우고 있어 멀쩡한 출력이 통째로 사라졌다 — 명령은
+   * 성공인데 섹션은 '읽지 못했습니다' 였다. 그 원인은 v2.544 에서 고쳤지만, 경계 표시 하나에
+   * 전 출력이 걸려 있는 구조 자체를 남겨 두지 않는다.
+   *
+   * ⚠⚠ **여러 레코드를 하나로 합치지 말 것** — 합치면 뒤 값이 앞 값을 덮어써 **오류 없이
+   * 틀린 값**이 된다(풀 2개가 1개로 보이고 용량이 과소 보고된다). 그래서 **이미 본 키가 다시
+   * 나오면 새 레코드**로 끊는다. 키가 겹치지 않으면 원래 한 레코드였다는 뜻이다.
+   */
+  const noMarker = !lines.some((l) => REC_START.test(l.replace(/\s+$/, '')));
+
+  for (const raw of lines) {
     const line = raw.replace(/\s+$/, '');
     if (!line.trim()) continue;
-    const m = REC_START.exec(line);
+    const m = noMarker ? null : REC_START.exec(line);
     if (m) {
       cur = {};
       out.push(cur);
       if (m[2] && m[2].trim()) put(m[2]);
       continue;
+    }
+    if (noMarker) {
+      const k = keyOf(line);
+      // 첫 키이거나, 이미 본 키가 다시 나왔으면 새 레코드를 연다.
+      if (k && (!cur || Object.prototype.hasOwnProperty.call(cur, k))) {
+        cur = {};
+        out.push(cur);
+      }
     }
     // 들여쓰지 않은 줄은 배너·명령 에코·프롬프트다 — ' = ' 가 없으면 자연히 버려진다.
     put(line);

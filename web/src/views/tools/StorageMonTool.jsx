@@ -351,7 +351,16 @@ function Cell({ col, r, ctx }) {
       );
     }
     case 'version':
-      return <td className="muted" style={{ fontSize: 12 }}>{s?.version || '—'}</td>;
+      /*
+       * ⚠ 표시값은 빌드 문자열에서 뽑은 점 버전이다(`5.4.0.0.5.094`). **원문을 title 로 남긴다** —
+       * 추출이 다른 장비에서 빗나갈 수 있으므로 사용자가 대조할 수 있어야 한다(v2.544).
+       */
+      return (
+        <td className="muted" style={{ fontSize: 12 }}
+          title={s?.extra?.versionRaw ? `원문 ${s.extra.versionRaw}${s.extra.versionSource ? ` · 출처 ${s.extra.versionSource}` : ''}` : undefined}>
+          {s?.version || '—'}
+        </td>
+      );
     case 'usage':
       return (
         <td style={{ minWidth: col.minWidth }}>
@@ -862,7 +871,13 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
             })()}
             <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{r.host}</b></span>
             <span className="muted">법인 <b style={{ color: 'var(--text)' }}>{dcName(r.datacenterId)}</b></span>
-            {s.version && <span className="muted">버전 <b style={{ color: 'var(--text)' }}>{s.version}</b></span>}
+            {s.version && (
+              <span className="muted"
+                title={ex.versionRaw ? `원문 ${ex.versionRaw}${ex.versionSource ? ` · 출처 ${ex.versionSource}` : ''}` : undefined}>
+                버전 <b style={{ color: 'var(--text)' }}>{s.version}</b>
+                {ex.versionSource ? <span style={{ fontSize: 11, marginLeft: 4 }}>({ex.versionSource})</span> : null}
+              </span>
+            )}
             {s.serial && <span className="muted">시리얼/GUID <b style={{ color: 'var(--text)' }}>{s.serial}</b></span>}
             {ex.model && <span className="muted">모델 <b style={{ color: 'var(--text)' }}>{ex.model}</b></span>}
             {ex.ucode && <span className="muted">ucode <b style={{ color: 'var(--text)' }}>{ex.ucode}</b></span>}
