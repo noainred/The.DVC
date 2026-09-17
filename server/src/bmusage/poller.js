@@ -27,10 +27,20 @@ import { buildUsage } from './usage.js';
 import { collectOsUsage } from './collectors/osSsh.js';
 import { insertUsage, pruneUsage } from './db.js';
 import { recordBmUsage } from './activityLog.js';
+import { runBmUsageAlerts, alertStateInfo } from './notify.js';
 
 const CONCURRENCY = Math.max(1, Number(process.env.BMUSAGE_CONCURRENCY) || 4);
 const DEVICE_TIMEOUT_MS = Math.max(20_000, Number(process.env.BMUSAGE_DEVICE_TIMEOUT_MS) || 60_000);
 const PRUNE_EVERY = 12;
+/**
+ * ⚠⚠ **주기당 '리포트 목록 조회' 예산**(v2.551). 텔레메트리 전수 모드는 장비마다 목록을 한 번
+ *   열거해야 하는데(그 뒤 6시간 캐시), 200대가 **같은 주기에** 열거하면 왕복이 주기(300초)를
+ *   꽉 채운다(`redfish.js` 예산 계산 주석의 실제 산수). 주기당 이 수만 허용해 점진적으로 채운다 —
+ *   목록이 없는 장비는 그 주기에 `SystemUsage` 만 읽으므로 **v2.550 과 같은 비용**이고 값도 나온다.
+ *   이 예산을 없애면 첫 주기가 주기를 넘겨 재진입 가드가 다음 틱을 계속 건너뛴다.
+ */
+const LIST_BUDGET_PER_RUN = Math.max(1, Number(process.env.BMUSAGE_LIST_BUDGET) || 20);
+let _listBudget = 0;
 
 const guard = createAuthGuard({ file: 'bmusage-auth-stops.json' });
 
@@ -46,6 +56,9 @@ export function bmUsageStatus() {
     enabled: bmUsageEnabled(), running: _running, intervalMs: s.intervalMs,
     concurrency: CONCURRENCY, deviceTimeoutMs: DEVICE_TIMEOUT_MS,
     rawRetentionDays: s.rawRetentionDays, dailyRetentionDays: s.dailyRetentionDays,
+    idracFullTelemetry: !!s.idracFullTelemetry, listBudgetPerRun: LIST_BUDGET_PER_RUN,
+    alertEnabled: !!s.alertEnabled, alertPct: s.alertPct, alertSustainMin: s.alertSustainMin,
+    alertRepeatHours: s.alertRepeatHours, alertState: alertStateInfo(),
     /*
      * ⚠⚠ **`last` 에 `counts` 를 싣지 않는다**(v2.550.3 에 고친 결함): v2.550.1 이 응답의
      *   `skippedCounts`·`counts` 를 scope 로 걸렀는데, `status.last.counts.byReason` 경로로
@@ -132,8 +145,12 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
   const stopped = (dev && trigger !== 'manual') ? guard.authStopFor(dev) : null;
   if (stopped) _authStopped.set(target.key, stopped); else _authStopped.delete(target.key);
   const jobs = [];
+  // 전수 모드는 설정으로 켜고 끈다. `allowList` 는 **이번 주기의 목록 조회 예산**이다(위 주석).
+  const full = !!loadBmUsageSettings().idracFullTelemetry;
+  const allowList = full && _listBudget > 0;
+  if (allowList) _listBudget -= 1;
   jobs.push(target.paths.includes('idrac')
-    ? import('../idrac/redfish.js').then((m) => m.fetchUsage(target.idrac)).catch((e) => ({ ok: false, kind: 'unreachable', error: String(e?.message || e).slice(0, 300) }))
+    ? import('../idrac/redfish.js').then((m) => m.fetchUsage(target.idrac, { full, allowList })).catch((e) => ({ ok: false, kind: 'unreachable', error: String(e?.message || e).slice(0, 300) }))
     : Promise.resolve(null));
   jobs.push((target.paths.includes('os') && !stopped)
     ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal }), 'OS 수집 시한 초과')
@@ -201,6 +218,7 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
       _last = { at: Date.now(), ms: Date.now() - t0, servers: 0, okCount: 0, failCount: 0, inserted: 0, counts, trigger };
       return { ok: true, servers: 0, counts, reason: '대상 서버가 없습니다.' };
     }
+    _listBudget = LIST_BUDGET_PER_RUN;   // ⚠ 주기 시작마다 리셋(위 상수 주석 참조)
     const results = await pool(targets, CONCURRENCY, (tg) => collectOne(tg, { trigger }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) })));
     /*
      * ⚠ **대상에서 사라진 키를 버린다**(v2.550.3): `_prev` 는 서버마다 누적 카운터 배열(디스크·NIC·
@@ -216,12 +234,20 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
     const rows = results.filter((r) => r?.ok && r.built)
       .map((r) => { const { _perIf: _a, _perFc: _b, ...row } = r.built.row; return row; });
     const ins = await insertUsage(rows, config.agent?.name || '');
+    /*
+     * 임계 초과 알림(v2.551). ⚠ **적재 뒤에** 판정한다(알림은 저장된 값을 근거로 한다).
+     * ⚠ 실패해도 수집을 실패로 만들지 않는다 — 알림은 부가 기능이고, 사유는 `_last` 에 남긴다.
+     */
+    let alerts = null;
+    try { alerts = await runBmUsageAlerts(rows, settings); }
+    catch (e) { alerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     const okCount = results.filter((r) => r?.ok).length;
     await pruneUsage({ rawDays: settings.rawRetentionDays, dailyDays: settings.dailyRetentionDays, every: PRUNE_EVERY });
     _last = {
       at: Date.now(), ms: Date.now() - t0, servers: targets.length,
       okCount, failCount: targets.length - okCount, inserted: ins.inserted || 0,
       dbOk: !!ins.ok, dbError: ins.error || null, counts, trigger,
+      alerts: alerts && !alerts.skipped ? { sent: alerts.sent ?? 0, suppressed: alerts.suppressed ?? 0, capped: alerts.capped ?? 0, over: alerts.counts?.over ?? 0, error: alerts.error || null } : null,
     };
     return { ok: true, ...(_last) };
   } catch (e) {

@@ -25,6 +25,8 @@ const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? N
 
 /** 이전 표본에서 같은 이름의 항목을 찾는다(장치·인터페이스가 추가·제거될 수 있다). */
 const findBy = (list, field, val) => (Array.isArray(list) ? list.find((x) => x[field] === val) : null) || null;
+/** 이전 표본 시각 — OS·iDRAC 이 **같은 기준**을 쓴다(둘이 갈리면 span 이 그만큼 어긋난다 — v2.550.3). */
+const pAtOf = (prev) => n(prev?.at);
 
 /**
  * 한 서버의 한 주기.
@@ -110,10 +112,51 @@ export function buildUsage({ target = {}, idrac = null, os = null, prev = null, 
   }
 
   // ── iDRAC 경로(빈 칸만 채운다) ─────────────────────────────────────────────
+  let idracIf = null; let idracFc = null;
   if (idrac && idrac.ok) {
     if (out.cpu_pct == null && n(idrac.cpuPct) != null) { out.cpu_pct = n(idrac.cpuPct); srcOf.cpu = 'idrac'; }
     if (out.mem_pct == null && n(idrac.memPct) != null) { out.mem_pct = n(idrac.memPct); srcOf.mem = 'idrac'; }
     if (n(idrac.ioPct) != null) { out.io_pct = n(idrac.ioPct); srcOf.io = 'idrac'; }
+
+    /*
+     * ── 텔레메트리 전수 모드(v2.551) ─────────────────────────────────────────
+     * iDRAC 의 NIC·FC 통계는 **부팅 이후 누적 바이트**라 OS 경로와 똑같이 두 주기의 차이가
+     * 필요하다 — 환산은 `rates.js` 하나가 한다(코어는 하나다).
+     * ⚠ **OS 값이 있으면 덮지 않는다**: 커널이 세는 값이 더 정확하고, 같은 서버에서 두 값이
+     *   다를 수 있으므로 `srcOf` 로 어느 쪽을 썼는지 밝힌다.
+     * ⚠ 첫 주기는 `null` 이다(누적 차이가 없다) — 0 으로 채우지 않는다.
+     */
+    const pIdrac = prev?.idrac || null;
+    if ((idrac.nics || []).length) {
+      idracIf = idrac.nics.map((x) => {
+        const p = findBy(pIdrac?.nics, 'iface', x.iface);
+        const rx = perSecond(p?.rxBytes, x.rxBytes, pAtOf(prev), now);
+        const tx = perSecond(p?.txBytes, x.txBytes, pAtOf(prev), now);
+        const bps = sumStrict([rx, tx]);
+        return { iface: x.iface, bps, pct: linkPct(bps, x.bitsPerSec), bitsPerSec: x.bitsPerSec, src: 'idrac' };
+      });
+      const np = maxOrNull(idracIf.map((x) => x.pct));
+      if (out.net_pct == null && np != null) { out.net_pct = np; srcOf.net = 'idrac'; }
+      const nb = maxOrNull(idracIf.map((x) => x.bps));
+      if (out.net_bps == null && nb != null) out.net_bps = nb;
+    }
+    if ((idrac.fcs || []).length) {
+      idracFc = idrac.fcs.map((x) => {
+        const p = findBy(pIdrac?.fcs, 'host', x.host);
+        const rx = perSecond(p?.rxBytes, x.rxBytes, pAtOf(prev), now);
+        const tx = perSecond(p?.txBytes, x.txBytes, pAtOf(prev), now);
+        const bps = sumStrict([rx, tx]);
+        return { host: x.host, bps, pct: linkPct(bps, x.bitsPerSec), bitsPerSec: x.bitsPerSec, src: 'idrac' };
+      });
+      const hp = maxOrNull(idracFc.map((x) => x.pct));
+      if (out.hba_pct == null && hp != null) { out.hba_pct = hp; srcOf.hba = 'idrac'; }
+      const hb = maxOrNull(idracFc.map((x) => x.bps));
+      if (out.hba_bps == null && hb != null) out.hba_bps = hb;
+    }
+    // 디스크 — iDRAC 텔레메트리에 busy% 에 해당하는 값이 **사실상 없다**(파서가 `absent` 로 밝힌다).
+    //   용량 계열이 읽히면 사용 공간만 채운다.
+    const du = maxOrNull((idrac.disks || []).map((d) => d.usedPct));
+    if (out.disk_used_pct == null && du != null) { out.disk_used_pct = du; srcOf.diskUsed = 'idrac'; }
   }
 
   const srcs = [...new Set(Object.values(srcOf))].sort();
@@ -129,12 +172,28 @@ export function buildUsage({ target = {}, idrac = null, os = null, prev = null, 
       idracError: idrac && !idrac.ok ? (idrac.error || '') : '',
       idracUsedIds: idrac?.usedIds || null, idracSeenIds: idrac?.seenIds || null,
       mounts: osOk ? (os.mounts || []) : [], mountsMissing: osOk ? (os.mountsMissing || []) : [],
-      interfaces: out._perIf || (osOk && winShape ? (os.nics || []) : []),
+      interfaces: out._perIf || (osOk && winShape ? (os.nics || []) : []) ,
       fc: out._perFc || (osOk && winShape ? (os.hbas || []) : []),
+      // iDRAC 이 읽은 장치 목록 — OS 목록과 **나란히** 둔다(어느 경로의 값인지 알 수 있게).
+      idracInterfaces: idracIf || [], idracFc: idracFc || [],
+      idracReports: idrac?.usedReports || [], idracSeenReports: idrac?.seenReports || [],
+      idracAbsent: idrac?.absent || [], idracRead: idrac?.read || [],
+      idracFull: !!idrac?.full, idracFullTried: !!idrac?.fullTried,
       memDetail: osOk ? (os.mem || null) : null,
       firstSample: !!(osOk && os.osKind === 'linux' && !prev),
     },
-    // 다음 주기용 — 누적값만 들고 간다(비밀·원문은 담지 않는다).
-    next: osOk && os.osKind === 'linux' ? { at: now, counters: os.counters } : null,
+    /*
+     * 다음 주기용 — 누적값만 들고 간다(비밀·원문은 담지 않는다).
+     * ⚠ **iDRAC 카운터도 담아야 한다**(v2.551): 안 담으면 iDRAC 경로가 매 주기 '첫 표본' 이 되어
+     *   네트워크·HBA 가 영원히 `null` 이다. Windows 는 OS 누적값이 필요 없지만(순간값) iDRAC
+     *   카운터는 OS 종류와 무관하게 필요하므로 **`next` 를 OS 조건에 묶지 않는다**.
+     */
+    next: (() => {
+      const osCounters = osOk && os.osKind === 'linux' ? os.counters : null;
+      const idracCounters = (idrac && idrac.ok && ((idrac.nics || []).length || (idrac.fcs || []).length))
+        ? { nics: idrac.nics || [], fcs: idrac.fcs || [] } : null;
+      if (!osCounters && !idracCounters) return null;
+      return { at: now, counters: osCounters, idrac: idracCounters };
+    })(),
   };
 }

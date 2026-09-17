@@ -873,6 +873,82 @@ export async function fetchSensors(entry) {
   return { temps, fans, inletCelsius, maxCelsius, cpuUsagePct };
 }
 
+/*
+ * ══ iDRAC 텔레메트리 **전수 활용**(v2.551) ══════════════════════════════════
+ * 사용자 요청: 방금 만든 '베어메탈 사용률' 개선 → 「iDRAC 텔레메트리 리포트 전수 활용」.
+ *
+ * v2.550 은 `SystemUsage` 리포트 **하나만** 읽어 CPU·메모리·I/O(집계)뿐이었다. 그래서 디스크·
+ * 네트워크·HBA 는 **OS 계정이 있는 서버만** 값이 나왔고, 이 현장은 OS 계정 등록이 소수라 화면
+ * 대부분이 `—` 로 남는다. iDRAC9 텔레메트리에는 NIC·FC 통계 리포트가 따로 있으므로 그것을 읽는다.
+ *
+ * ⚠⚠ **왕복 예산을 먼저 계산했다**(v2.528 Unity 전량 실패와 같은 함정을 피하려고):
+ *   장비당 `목록 1회 + 리포트 6개(동시 3) = 3배치 × 2초 ≈ 6초` 이고 200대 · 동시 4면 **300초**로
+ *   **주기(300초)와 같아진다**. 그래서 두 가지를 둔다 —
+ *    ① **리포트 목록 캐시**(6시간. 목록은 라이선스·펌웨어가 바뀔 때만 변한다) → 정상 상태 200초
+ *    ② **주기당 목록 조회 예산**(`allowList`) → 첫 주기에 200대가 동시에 목록을 받지 않는다.
+ *       목록이 없는 장비는 그 주기에 `SystemUsage` 만 읽고(v2.550 과 같은 비용) 점진적으로 채운다.
+ *   이 두 개를 지우면 첫 주기가 주기를 넘겨 재진입 가드가 다음 틱을 계속 건너뛴다.
+ *
+ * ⚠ **정직 기록 — 이 현장 iDRAC 의 실제 리포트 목록을 본 적이 없다.** 그래서 id 를 굳히지 않고
+ *   목록을 열거해 **이름 패턴이 맞는 것만** 읽으며, 장비가 가진 전체 목록(`seenReports`)과 실제로
+ *   읽은 것(`usedReports`)을 응답에 실어 화면이 장비별로 밝힌다(사용자 선택).
+ */
+const REPORT_TTL_MS = Math.max(60_000, Number(process.env.BMUSAGE_REPORT_TTL_MS) || 6 * 3_600_000);
+const MAX_REPORTS_PER_DEVICE = Math.max(1, Number(process.env.BMUSAGE_MAX_REPORTS) || 6);
+const REPORT_FETCH_CONCURRENCY = 3;   // 한 장비에 동시 GET — iDRAC(BMC)은 약하므로 보수적으로
+/** hostKey → { ids: string[], at: number } */
+const _reportList = new Map();
+export function _resetReportListForTest() { _reportList.clear(); }
+/** 화면·테스트가 캐시 상태를 볼 수 있게(비밀 없음). */
+export function reportListCacheInfo() {
+  return { entries: _reportList.size, ttlMs: REPORT_TTL_MS, maxReports: MAX_REPORTS_PER_DEVICE };
+}
+
+/** 리포트 URL 을 동시성 제한으로 읽는다(한 장비 안에서). */
+async function getReports(G, ids) {
+  const out = [];
+  let i = 0;
+  const workers = Array.from({ length: Math.min(REPORT_FETCH_CONCURRENCY, ids.length) }, async () => {
+    for (;;) {
+      const idx = i; i += 1;
+      if (idx >= ids.length) return;
+      try { out.push(await G(ids[idx])); } catch { /* 그 리포트만 건너뛴다 */ }
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+/**
+ * 텔레메트리 리포트 전수 조회. `fetchUsage` 가 `full` 일 때 쓴다.
+ * @param {object} entry  iDRAC 등록 항목
+ * @param {{allowList?:boolean}} opt  `allowList:false` 면 **캐시된 목록만** 쓴다(주기 예산 보호)
+ * @returns {Promise<object|null>} `null` = 이번 주기에 전수 조회를 하지 않았다(목록 미보유)
+ */
+async function fetchTelemetryReports(entry, { allowList = true } = {}) {
+  const base = entry.host.replace(/\/+$/, '');
+  const G = (p) => get(base, p, entry.username, entry.password);
+  const key = `${base}|${entry.username || ''}`.toLowerCase();
+  const cached = _reportList.get(key);
+  let ids = (cached && Date.now() - cached.at < REPORT_TTL_MS) ? cached.ids : null;
+  let listedNow = false;
+  if (!ids) {
+    if (!allowList) return null;                       // 예산 없음 — 다음 주기에
+    const reps = await G('/redfish/v1/TelemetryService/MetricReports');
+    ids = (reps.Members || []).map((m) => String(m['@odata.id'] || '')).filter(Boolean);
+    _reportList.set(key, { ids, at: Date.now() });
+    listedNow = true;
+  }
+  const { isWantedReport, buildIdracUsage } = await import('../bmusage/parse/idracTelemetry.js');
+  const idOf = (u) => u.split('/').filter(Boolean).pop() || '';
+  const wanted = ids.filter((u) => isWantedReport(idOf(u))).slice(0, MAX_REPORTS_PER_DEVICE);
+  const reports = wanted.length ? await getReports(G, wanted) : [];
+  const built = buildIdracUsage(reports, ids.map(idOf));
+  built.listedNow = listedNow;
+  built.reportsRequested = wanted.length;
+  return built;
+}
+
 /**
  * Dell 텔레메트리 `SystemUsage` 리포트 → CPU·메모리·I/O 사용률(%). (v2.550)
  *
@@ -895,8 +971,37 @@ const USAGE_IDS = Object.freeze({
   sysPct: ['SystemBoardSYSUsage', 'SYSUsage', 'SystemUsage'],
 });
 
-export async function fetchUsage(entry) {
+export async function fetchUsage(entry, { full = false, allowList = true } = {}) {
   const base = String(entry.host || '').replace(/\/+$/, '');
+  /*
+   * ── 전수 모드(v2.551) ──────────────────────────────────────────────────────
+   * 리포트 목록을 열거해 NIC·FC·스토리지 통계까지 읽는다. **실패하면 `SystemUsage` 단독 경로로
+   * 떨어진다**(아래) — 전수 조회가 안 되는 장비에서 CPU·메모리마저 잃으면 개선이 퇴행이 된다.
+   * ⚠ `null` 은 '이번 주기에 전수 조회를 하지 않았다'(목록 미보유 + 예산 없음)는 뜻이고 실패가 아니다.
+   */
+  if (full) {
+    try {
+      const r = await fetchTelemetryReports(entry, { allowList });
+      // 보드 지표를 하나라도 읽었으면 전수 결과를 쓴다. 아무것도 못 읽었으면 단독 경로가 더 낫다.
+      if (r && (r.cpuPct != null || r.memPct != null || r.nics.length || r.fcs.length || r.disks.length)) {
+        return { ...r, ok: true, full: true, at: r.at || Date.now() };
+      }
+      if (r) {
+        // 리포트는 열거했는데 아는 것이 없었다 — 그 사실을 실어 단독 경로로 내려간다.
+        const fb = await fetchUsage(entry, { full: false });
+        return fb.ok
+          ? { ...fb, seenReports: r.seenReports, usedReports: r.usedReports, absent: r.absent, fullTried: true }
+          : { ...fb, seenReports: r.seenReports, usedReports: r.usedReports, fullTried: true };
+      }
+    } catch (e) {
+      const msg = String(e?.message || e);
+      // 401/403 은 자격증명이라 단독 경로도 같은 결과다 — 바로 알린다(반복 시도 금지 — 계정 잠금).
+      if (/\b40[13]\b/.test(msg)) return { ok: false, kind: 'auth', error: msg.slice(0, 300) };
+      /* 그 밖(404·타임아웃)은 단독 경로로 내려간다 */
+    }
+    const fb = await fetchUsage(entry, { full: false });
+    return { ...fb, fullTried: true };
+  }
   let rep;
   try {
     rep = await get(base, '/redfish/v1/TelemetryService/MetricReports/SystemUsage', entry.username, entry.password);

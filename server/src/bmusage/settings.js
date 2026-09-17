@@ -30,6 +30,23 @@ export const DEFAULTS = Object.freeze({
   dailyRetentionDays: 365 * 5,
   osSsh: true,               // OS SSH 경로(디스크·네트워크·HBA 를 주는 유일한 경로)
   idracTelemetry: true,      // iDRAC 텔레메트리 경로(CPU·MEM·IO — 새 자격증명 0)
+  /*
+   * 텔레메트리 **전수 모드**(v2.551 — 사용자 요청): 리포트 목록을 열거해 NIC·FC 통계까지 읽는다.
+   * 켜면 OS 계정이 없는 서버도 네트워크·HBA 값이 나온다. 왕복이 늘지만 목록 캐시(6시간) +
+   * 주기당 목록 조회 예산으로 주기를 넘기지 않는다(`redfish.js` 의 예산 계산 주석 참조).
+   * ⚠ 끄면 v2.550 처럼 `SystemUsage` 하나만 읽는다 — 회선이 아주 좁은 법인의 탈출구로 남긴다.
+   */
+  idracFullTelemetry: true,
+  /*
+   * 임계 초과 알림(v2.551 — 사용자 요청). ⚠ **기본 꺼짐**이다: 200대 × 5분이면 하루 5.76만 판정이라
+   * 폭주 위험이 실재한다. 켜기 전에 임계·지속·재알림을 확인하게 한다.
+   *  · `alertSustainMin` — 연속 초과가 이만큼 지속돼야 알린다(한 주기 스파이크 무시)
+   *  · `alertRepeatHours` — 같은 서버·같은 지표의 재알림 억제
+   */
+  alertEnabled: false,
+  alertPct: 90,
+  alertSustainMin: 15,
+  alertRepeatHours: 6,
 });
 
 /** 하한·상한은 서버가 강제한다(화면 입력을 믿지 않는다). */
@@ -66,6 +83,11 @@ export function normalizeSettings(raw = {}) {
     includeUnassigned: !!raw.includeUnassigned,
     intervalMs: clampInt(raw.intervalMs, MIN_INTERVAL_MS, MAX_INTERVAL_MS, DEFAULTS.intervalMs),
     // 원시 보존은 행 수를 직접 정한다 — 하한 7일(그 아래면 증가 추세를 못 본다), 상한 365일.
+    idracFullTelemetry: raw.idracFullTelemetry !== false,
+    alertEnabled: raw.alertEnabled === true,
+    alertPct: clampInt(raw.alertPct, 50, 100, DEFAULTS.alertPct),
+    alertSustainMin: clampInt(raw.alertSustainMin, 0, 240, DEFAULTS.alertSustainMin),
+    alertRepeatHours: clampInt(raw.alertRepeatHours, 1, 168, DEFAULTS.alertRepeatHours),
     rawRetentionDays: clampInt(raw.rawRetentionDays, 7, 365, DEFAULTS.rawRetentionDays),
     dailyRetentionDays: clampInt(raw.dailyRetentionDays, 30, 365 * 10, DEFAULTS.dailyRetentionDays),
     osSsh: raw.osSsh === undefined ? DEFAULTS.osSsh : !!raw.osSsh,

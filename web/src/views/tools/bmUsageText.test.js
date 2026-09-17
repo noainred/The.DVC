@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark, SRC_MARK,
   emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, MISSING_MARK, authStopNote, keyConflictNote,
+  facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, CSV_COLS, telemetryNote,
 } from './bmUsageText.js';
 
 const NOW = 1_700_000_000_000;
@@ -221,6 +222,82 @@ describe('키 충돌 — 오류 없이 틀린 값을 만드는 종류다(v2.550.
   });
 });
 
+describe('집계·상위N·CSV (v2.551)', () => {
+  const rows = [
+    { key: 'A', name: 'a', vcenterId: 'vc1', paths: ['idrac', 'os'], cpu_pct: 91.5, mem_pct: 88, ts: NOW, src: 'os' },
+    { key: 'B', name: 'b', vcenterId: 'vc1', paths: ['idrac'], cpu_pct: null, mem_pct: 44, ts: NOW, src: 'idrac' },
+    { key: 'C', name: 'c', vcenterId: 'vc2', paths: ['idrac', 'os'], cpu_pct: 20, mem_pct: 61, ts: NOW, src: 'os' },
+  ];
+  it('공용 facetState 가 읽는 축을 붙인다 — 종류는 수집 경로다', () => {
+    const f = facetRows(rows);
+    expect(f.map((r) => r.type)).toEqual(['idrac+os', 'idrac', 'idrac+os']);
+    expect(f.map((r) => r.datacenterId)).toEqual(['vc1', 'vc1', 'vc2']);
+    expect(pathTypeLabel('idrac+os')).toBe('iDRAC·OS');
+    expect(pathTypeLabel('idrac')).toBe('iDRAC 만');
+  });
+  it("⚠ 값이 없는 서버를 0 으로 줄 세우지 않는다 — 제외하고 개수를 밝힌다", () => {
+    const t = topBusiest(rows, { metric: 'cpu_pct', limit: 5 });
+    expect(t.list.map((r) => r.name)).toEqual(['a', 'c']);
+    expect(t.excluded).toBe(1);
+  });
+  it('법인 집계의 평균은 읽은 대수 기준이다(못 읽은 서버가 평균을 끌어내리지 않게)', () => {
+    const c = corpSummary(rows, { metric: 'cpu_pct' });
+    const vc1 = c.find((x) => x.vcenterId === 'vc1');
+    expect(vc1.servers).toBe(2);
+    expect(vc1.n).toBe(1);
+    expect(vc1.avg).toBe(91.5);
+    expect(vc1.unread).toBe(1);
+    expect(vc1.over90).toBe(1);
+  });
+  it('읽은 대수가 0 이면 평균은 null 이다(0 이 아니다)', () => {
+    const c = corpSummary([{ key: 'X', vcenterId: 'vc9', cpu_pct: null }], { metric: 'cpu_pct' });
+    expect(c[0].avg).toBeNull();
+    expect(c[0].max).toBeNull();
+  });
+  it('귀속 없는 서버를 아무 법인에 넣지 않는다', () => {
+    const c = corpSummary([{ key: 'X', vcenterId: '', cpu_pct: 10 }]);
+    expect(c[0].vcenterId).toBe('(귀속 없음)');
+  });
+  it('⚠ CSV 는 값이 없으면 빈 칸이다 — 0 을 쓰지 않는다(엑셀에서 0 은 부하 없음으로 읽힌다)', () => {
+    const csv = csvOf(rows);
+    const lines = csv.split('\n');
+    expect(lines[0].split(',')).toHaveLength(CSV_COLS.length);
+    const b = lines.find((l) => l.startsWith('b,'));
+    // CPU 열이 빈 칸이어야 한다(쉼표가 연달아 온다)
+    expect(b).toMatch(/,,44,/);
+    expect(b).not.toMatch(/,0,44,/);
+  });
+  it('CSV 에 자격증명·호스트 주소 열이 없다', () => {
+    const keys = CSV_COLS.map(([k]) => k).join(' ');
+    for (const bad of ['password', 'idracHost', 'osHostName', 'username']) expect(keys).not.toContain(bad);
+  });
+  it('CSV 는 쉼표·따옴표를 이스케이프한다', () => {
+    const csv = csvOf([{ key: 'K', name: 'a,b"c', cpu_pct: 1 }]);
+    expect(csv).toContain('"a,b""c"');
+  });
+});
+
+describe('iDRAC 텔레메트리 안내 (v2.551 — 장비별로 무엇을 읽었는지 밝힌다)', () => {
+  it('읽은 리포트 수와 전체 수를 말한다', () => {
+    const s = telemetryNote({ idracSeenReports: ['SystemUsage', 'NICStatistics', 'ThermalSensor'], idracReports: ['SystemUsage', 'NICStatistics'], idracAbsent: [] });
+    expect(s).toContain('3종');
+    expect(s).toContain('2종');
+    expect(s).toContain('NICStatistics');
+  });
+  it('없는 리포트는 원인과 대안을 말한다', () => {
+    const s = telemetryNote({ idracSeenReports: ['SystemUsage'], idracReports: ['SystemUsage'], idracAbsent: ['net', 'hba', 'disk', 'diskbusy'] });
+    expect(s).toContain('Datacenter');
+    expect(s).toContain('OS 계정');
+  });
+  it('디스크 busy% 가 이 경로에 없다는 사실을 따로 말한다', () => {
+    const s = telemetryNote({ idracSeenReports: ['StorageDiskSMARTData'], idracReports: ['StorageDiskSMARTData'], idracAbsent: ['diskbusy'] });
+    expect(s).toContain('사용률(busy%)');
+  });
+  it('정보가 없으면 문구를 만들지 않는다', () => {
+    expect(telemetryNote({})).toBe('');
+  });
+});
+
 describe('마크다운 누출 방지', () => {
   it('BoldText 가 못 그리는 백틱을 문구에 넣지 않는다', () => {
     const all = [
@@ -237,6 +314,7 @@ describe('마크다운 누출 방지', () => {
       missingMark(['no-os-cred']),
       authStopNote([{ key: 'A', name: 'n', since: NOW }], { now: NOW }),
       keyConflictNote([{ key: 'A', names: ['x', 'y'] }]),
+      telemetryNote({ idracSeenReports: ['A', 'B'], idracReports: ['A'], idracAbsent: ['net', 'hba', 'disk', 'diskbusy'] }),
     ];
     for (const s of all) expect(s).not.toContain('`');
   });
