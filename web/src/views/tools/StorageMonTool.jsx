@@ -14,6 +14,7 @@ import BulkDeviceIo from './BulkDeviceIo.jsx';
 import { facetState, toggleIn as toggleSet, groupBy as groupByKey } from './deviceFacets.js';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
 import UnityConfigPanels from './UnityConfigPanels.jsx';   // v2.525: Unity 구성 정보 패널
+import UnityCapacityPlanPanel from './UnityCapacityPlanPanel.jsx'; // v2.540: Unity 용량 산정
 import CollectActivity from './CollectActivity.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { healthBadge } from './storageNodeText.js';   // v2.526: 헬스 배지 색 판정(순수)
@@ -776,6 +777,9 @@ function HealthBadge({ raw }) {
 }
 
 function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
+  // v2.540: 용량 산정이 쓰는 추이 점 — `CapacityTrend` 가 이미 불러온 것을 올려받는다(새 API 왕복 0).
+  // ⚠ 훅은 조기 return 위에 둔다(React #310 — v2.202 실제 사고).
+  const [trendPoints, setTrendPoints] = useState(null);
   const s = r.snap;
   // 수집 방식/타입별 UI 분기(v2.325, 사용자 요구 '가져오는 정보에 맞는 최적 UI·최대한 많은 정보').
   // SSH(isi status): 시리얼 없음 · 클러스터 헬스/감축비/효율/VHS/L3/Critical Events/Job Status +
@@ -939,7 +943,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           )}
 
           {/* 용량 추이 그래프(v2.318) — 가상화 계층(VPLEX 등 자체 용량 없음)은 추이가 무의미해 숨김 */}
-          {!isVirt && <CapacityTrend deviceId={r.id} isEdge={!!r.agent} />}
+          {!isVirt && <CapacityTrend deviceId={r.id} isEdge={!!r.agent} onPoints={setTrendPoints} />}
 
           {/* 노드별 상세(v2.303, 사용자 요구 — isi status 노드 표): ID·IP·상태·외부망 처리량·노드별 HDD/SSD
               v2.310 검증 반영: XtremIO 컨트롤러/Unity SP/PowerStore 노드는 name 이 유일 식별자인데
@@ -1208,6 +1212,8 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               (가상화 계층 — 자체 용량 없음). 사유 없이 '건너뜀'만 보이면 수집 실패로 오해한다. */}
           {/* v2.525: Unity(SSH/uemcli) 구성 정보 — 사용자 요청 "용량 정보 확인 및 장비 구성정보 등
               최대한 많은 정보를 수집해줘". 값이 있을 때만 그린다(다른 타입은 변화 없음). */}
+          {/* v2.540: Unity 용량 산정 — 할당 가능량·소진 예상·수용 개수·원시/유효. 값이 없으면 스스로 그리지 않는다. */}
+          <UnityCapacityPlanPanel snap={s} points={trendPoints} />
           <UnityConfigPanels ex={ex} fmtBytes={tbFmt} />
           {/* v2.526: 이 문구는 `**강조**` 를 담고 있다 — 그대로 그리면 별표가 그대로 인쇄된다
               (v2.439/2.440/2.505 실제 사고). 반드시 BoldText 로 렌더한다. */}
@@ -1538,7 +1544,7 @@ function StorageTrendPanel({ devices }) {
  *   '전체'는 정체성 시리즈가 아니라 한계선(컨텍스트)이라 중립 회색 **점선**(점선=보조 인코딩 —
  *   회색은 계열 색으로는 검증 FAIL 이지만 참조선으로는 의도된 중립). 시리즈 ≥2 라 범례 표시.
  */
-function CapacityTrend({ deviceId, isEdge }) {
+function CapacityTrend({ deviceId, isEdge, onPoints }) {
   // 기간 프리셋(v2.380): 12시간·24시간을 사용자 요구로 추가. 서버 range 파라미터를 쓴다
   // (days 도 계속 지원되지만 12시간은 정수 days 로 표현할 수 없다).
   const [range, setRange] = useState('7d');
@@ -1548,9 +1554,10 @@ function CapacityTrend({ deviceId, isEdge }) {
     let live = true;
     setD(null); setErr(null);
     fetchJson(`/tools/storage/devices/${encodeURIComponent(deviceId)}/history?range=${range}`)
-      .then((r) => { if (live) setD(r); })
+      .then((r) => { if (live) { setD(r); onPoints?.(r?.points || []); } })
       .catch((e) => { if (live) setErr(e.message); });
     return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceId, range]);
 
   const fmtT = (ts) => fmtTrendTs(ts, range);

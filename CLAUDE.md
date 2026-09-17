@@ -475,6 +475,41 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       박지 말 것** — `INTERVAL_SPEC` 에서 읽는다(v2.531 에 `storageIntervals.test.js` 4건이 이것으로
       깨졌다). '기본값이 얼마인가' 는 `storageGrowth2531.test.js` 가 한 곳에서 고정한다.
 
+  - **Unity 용량 산정은 '기준' 을 숨기지 않는다 — 씬 프로비저닝에서 답은 하나가 아니다**
+    (`web/src/views/tools/unityCapacityPlan.js` + `UnityCapacityPlanPanel.jsx` + 서버
+    `storage/collectors/unitySsh.js` `sysCapacity`, v2.540 — 사용자 요청 "이 화면 참고해서 용량 산정
+    하는 기능 만들어줘"(uemcli `/stor/config/pool show -detail` 캡처 3장) · "이 화면에 맞게 일단
+    만들어줘". 범위 선택: 할당 가능량 · 소진 예상일 · 수용 개수 · 원시·유효 용량, **Unity 계열만 먼저**):
+    - ⚠⚠ **'더 줄 수 있는 용량' 을 한 숫자로 답하지 말 것.** 세 기준의 답이 다르고 조치도 다르다 —
+      ① **물리 잔여**(`Remaining space`) ② **경고 임계까지**(장비 `Alert threshold`, 이 현장 70%)
+      ③ **구독분이 다 채워질 때**(`Subscription` − 현재 할당 = 이미 호스트에 약속한 몫). 실측
+      (pool_1): 79.6 TB / **47.6 TB** / 56.4 TB 로 **가장 큰 것과 가장 작은 것이 1.7배**다. 물리
+      잔여만 보여주면 과대평가이고, 그 숫자로 LUN 을 만들면 임계를 넘겨 경보가 뜬다. 가장 작은
+      기준에 **실질 한도** 배지를 달고 `limiting` 으로 표시한다 — 이 배지를 지우지 말 것.
+    - **수용 개수(③)도 같은 이유로 기준을 밝힌다** — 200GB 짜리를 실질 한도로 세면 **243개**,
+      물리 잔여로 세면 **407개**다(실측). 어느 기준으로 셌는지 적지 않으면 그 숫자는 거짓이다.
+    - ⚠ **`extra.capacityNote` 키를 쓰지 말 것**(v2.526 규약) — 화면 `isVirt` 가 존재만으로 VPLEX
+      로 판정해 용량 차트를 통째로 숨긴다. Unity 는 **`capacityBasisNote`** 다.
+    - **소진 예상은 v2.531 규약을 그대로 따른다** — 증가 중일 때만 내고 **근거 기간·관측 점수**를
+      함께 낸다(`basis`). 표본이 적으면 `weak` 로 밝힌다. 감소 추세면 소진일을 내지 않는다.
+    - ⚠ **원시 용량은 계산되지 않는다 — '추정' 이라고 말한다.** 드라이브 표기(`38 x 3.8T SAS Flash 4`)의
+      `3.8T` 가 10진 TB 인지 TiB 인지 출력만으로는 알 수 없어 **범위**(131.3~144.4 TB)로 내고,
+      장비가 보고한 유효 용량(106.9 TB)과의 차이는 패리티·스페어·메타데이터라고 **설명만** 한다.
+      `exact:false` 를 `true` 로 굳히지 말 것 — 확인한 것은 범위뿐이다.
+    - **항등식을 검사해 어긋나면 화면이 말한다**(`verifyIdentity`): `Total = Current allocation +
+      Remaining + Preallocated`. 실측 pool_1 은 정확히 맞는다(117544396521472 = 29973250195456 +
+      87568746020864 + 2400305152). 어긋나면 파싱이 깨진 것이므로 조용히 계산을 이어가지 않는다.
+    - **시스템 전체 용량(`uemcli /stor/general/system show`)과 풀 합계가 다르면 밝힌다**
+      (`extra.capacityCrossCheck`) — 풀 밖 미할당 드라이브가 있다는 뜻이고, 화면 수치는 **풀 합계**
+      기준이다. 둘 중 하나를 조용히 고르지 말 것.
+    - ⚠ **`Number(null) === 0` 함정을 다시 밟았다**(v2.540 자체 테스트가 잡았다): `tb()`·`daysText()`
+      가 null 에 `0.0 TB`·`0.0일` 을 돌려줬다. `bytes == null` 을 **먼저** 본다(v2.525 규약).
+    - ⚠ **단위를 TB 로 굳히지 말 것** — 200GB 가 `0.20 TB` 로 찍혔다(Chromium 스크린샷 판독으로 발견.
+      수치로는 안 잡혔다). `sizeText()` 가 크기에 따라 GB/TB 를 고른다. 표의 용량 열은 `tb()`(기준
+      비교라 단위가 같아야 한다), 단위 크기·남는 공간·하루 증가는 `sizeText()` 다.
+    - **풀이 2개 이상이면 경고 임계·RAID·드라이브를 표시하지 않는다**(`multiPool`) — 풀마다 값이
+      달라 대표값을 만들면 거짓이 된다. 그 사실을 화면이 적는다.
+
   - **인증 실패(401)는 주기 수집을 멈춘다 — 재시도해도 결과가 같고 계정만 잠근다**
     (`storage/authGuard.js` + 웹 `views/tools/storageAuthText.js`, v2.528 — 사용자 신고
     "PowerStore PS-HG-2 인증 실패(401) · 장비 등록은 되고 CSV export 하면 비밀번호는 정상"):
