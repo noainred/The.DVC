@@ -113,7 +113,8 @@ import { startCurUserPoller } from './curuser/poller.js';           // '현재 �
 import { startHzSessionPoller } from './horizon/sessionPoller.js';  // Horizon 실시간 사용자(v2.525) — 기존 horizon.json 자격증명 재사용, opt-in
 import { startCurUserConfigPull } from './agent/curUserConfigPull.js'; // 〃 중앙→엣지 설정 pull(v2.520)
 import { startPartFaultPoller } from './partfault/poller.js';       // 파트 장애(v2.547) — 중앙: 스캔→전이→DB→알림
-import { startPartFaultPush } from './partfault/push.js';           // 〃 엣지: 로컬 판정 후 **장애만** 중앙 push
+import { startPartFaultPush } from './partfault/push.js';           // 〃 엣지: 로컬 판정 후 '장애 + 전체 요약' 을 중앙 push(v2.548 프로토콜 2)
+import { startPartFaultConfigPull } from './agent/partFaultConfigPull.js'; // 〃 중앙→엣지 스위치 배포(v2.548)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
@@ -381,7 +382,7 @@ const stagger = [
   // 파트 장애(v2.547) — 엣지는 로컬 스냅샷을 판정해 **장애만** 중앙에 push 하고,
   // 중앙은 직접 수집분 + 엣지 보고를 합쳐 전이(열림/변화/해소)를 계산해 DB 에 남기고 알린다.
   // 둘 다 opt-in/조건부이며(PARTFAULT_ENABLED · CENTRAL_URL) 왜 안 도는지 로그가 말한다.
-  startPartFaultPoller, startPartFaultPush,
+  startPartFaultPoller, startPartFaultPush, startPartFaultConfigPull,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 

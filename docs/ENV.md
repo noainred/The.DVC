@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **369개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **407개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-14)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-17)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -32,13 +32,14 @@
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (101)
+## 공통 (115)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `AGENT_AUTO_REGISTER` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
 | `AGENT_GUESTDISK_INTERVAL_MS` | `43200000` |  | config.js |
 | `AGENT_INVENTORY_INTERVAL_MS` | `60000` |  | config.js |
+| `AGENT_PUSH_CURUSER` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `AGENT_PUSH_GUESTDISK` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `AGENT_PUSH_INVENTORY` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `AGENT_PUSH_VMSERIES` | `기본 적용('false' 로 끄기)` |  | config.js |
@@ -60,6 +61,10 @@
 | `COLLECTOR_TOKEN` |  | ✅ | config.js |
 | `CORS_ORIGINS` | `''` |  | index.js |
 | `CSP` |  |  | index.js |
+| `CURUSER_ACTIVITY_MAX` | `500` |  | curuser/activityLog.js |
+| `CURUSER_DB_PATH` |  |  | curuser/db.js |
+| `CURUSER_FIRST_DELAY_MS` | `120000` |  | curuser/poller.js |
+| `CURUSER_VM_SERIES` | `''` |  | curuser/db.js |
 | `DATA_SOURCE` |  | ✅ | config.js |
 | `DATACENTER` | `''` |  | config.js |
 | `DIRUSAGE_DB_PATH` |  |  | dirusage/db.js |
@@ -85,6 +90,15 @@
 | `OME_POWER_PLUGIN_ID` | `'2F6D05BE-EE4B-4B0E-B873-C8D2F64A4625'` | ✅ | config.js |
 | `PACKAGE_BASE_URL` |  |  | config.js |
 | `PACKAGE_DIR` |  |  | config.js |
+| `PARTFAULT_DB_PATH` |  |  | partfault/db.js |
+| `PARTFAULT_ENABLED` |  |  | partfault/settings.js |
+| `PARTFAULT_HOOK_DEBOUNCE_MS` | `15000` |  | partfault/hooks.js |
+| `PARTFAULT_INV_MAX_AGE_MS` | `90` |  | partfault/scan.js |
+| `PARTFAULT_POLL_MS` | `10` |  | partfault/poller.js |
+| `PARTFAULT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | partfault/push.js |
+| `PARTFAULT_PUSH_MAX_DEVICES` | `5000` |  | partfault/push.js |
+| `PARTFAULT_PUSH_MS` | `10` |  | partfault/push.js |
+| `PARTFAULT_RETENTION_DAYS` | `730` |  | partfault/db.js |
 | `PERF_HANG_LOG_MAX_BYTES` | `8` |  | perf/hangLog.js |
 | `PERF_HANG_LOG_MAX_LINES` | `20000` |  | perf/hangLog.js |
 | `PERF_HANG_LOG_MAX_PER_MIN` | `60` |  | perf/hangLog.js |
@@ -207,15 +221,18 @@
 | `EDGE_PUSH_TIMEOUT_MS` | `600000` |  | collector/upgradePush.js, upgrade/upgrade.js |
 | `SSRF_ALLOW_LOOPBACK` | `''` | ✅ | collector/registry.js |
 
-## 스토리지 수집 (17)
+## 스토리지 수집 (20)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `STORAGE_ACTIVITY_MAX` | `500` |  | storage/activityLog.js |
 | `STORAGE_CLI_RAW_LIMIT` | `4000` |  | storage/collectors/cliSsh.js |
+| `STORAGE_CLI_SESSION_BUDGET_MS` | `150000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_CLI_TIMEOUT_MS` | `45000` |  | storage/collectors/cliSsh.js |
+| `STORAGE_DAILY_KEEP_DAYS` |  |  | storage/db.js |
 | `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/poller.js |
-| `STORAGE_HISTORY_KEEP_DAYS` | `400` |  | storage/db.js |
+| `STORAGE_GROWTH_TZ_OFFSET_MIN` |  |  | storage/db.js |
+| `STORAGE_HISTORY_KEEP_DAYS` |  |  | storage/db.js |
 | `STORAGE_HTTP_TIMEOUT_MS` | `15000` |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
 | `STORAGE_ISILON_PORT` | `8080` |  | storage/collectors/isilon.js |
@@ -244,25 +261,30 @@
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 
-## 엣지 에이전트 (21)
+## 엣지 에이전트 (26)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `AGENT_BMSTOR_POLL_MS` | `10000` |  | agent/bmstorWorker.js |
 | `AGENT_CAPTURE_POLL_MS` | `4000` |  | agent/captureWorker.js |
 | `AGENT_CONFIG_PUSH_MS` | `1800000` |  | agent/configPush.js |
+| `AGENT_CURUSER_CHUNK_BYTES` | `700000` |  | agent/curUserPush.js |
+| `AGENT_CURUSER_CONFIG_PULL_MS` | `10` |  | agent/curUserConfigPull.js |
+| `AGENT_CURUSER_PUSH_TIMEOUT_MS` | `60000` |  | agent/curUserPush.js |
 | `AGENT_DEPLOY_CONCURRENCY` | `2` | ✅ | agent/bulkDeploy.js |
 | `AGENT_DEPLOY_TIMEOUT_MS` | `900000` | ✅ | agent/bulkDeploy.js |
 | `AGENT_GUESTDISK_PUSH_TIMEOUT_MS` | `120000` |  | agent/guestDiskPush.js |
 | `AGENT_IDRAC_SCAN_POLL_MS` | `5000` |  | agent/idracScanWorker.js |
 | `AGENT_LOGQ_POLL_MS` | `4000` |  | agent/logQueryWorker.js |
+| `AGENT_PARTFAULT_CONFIG_PULL_MS` | `10` |  | agent/partFaultConfigPull.js |
 | `AGENT_PING_POLL_MS` | `4000` |  | agent/pingWorker.js |
 | `AGENT_PUSH_FLEET` | `기본 적용('false' 로 끄기)` |  | agent/fleetPush.js |
-| `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/guestDiskPush.js, agent/inventoryPush.js 외 1 |
+| `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/curUserPush.js, agent/guestDiskPush.js 외 2 |
 | `AGENT_PUSH_TIMEOUT_MS` | `60000` |  | agent/fleetPush.js, agent/inventoryPush.js |
 | `AGENT_VMSERIES_CHUNK_BYTES` | `700000` |  | agent/vmSeriesPush.js |
 | `AGENT_VMSERIES_CONFIG_PULL_MS` | `10` |  | agent/vmSeriesConfigPull.js |
 | `AGENT_VMSERIES_PUSH_TIMEOUT_MS` | `120000` |  | agent/vmSeriesPush.js |
+| `CURUSER_LOCAL` | `''` |  | agent/curUserConfigPull.js, curuser/settings.js |
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
 | `SANSW_CONFIG_PULL_MS` | `5` |  | agent/sanSwitchConfigPull.js |
 | `SVCMON_CONFIG_PULL` | `기본 적용('false' 로 끄기)` |  | agent/svcmonConfigPull.js |
@@ -310,7 +332,7 @@
 | `RMA_TEST_CONCURRENCY` | `4` | ✅ | rma/agent.js |
 | `RMA_TEST_HISTORY_DAYS` | `90` |  | rma/testResults.js |
 
-## 원격 접속(프록시) (22)
+## 원격 접속(프록시) (25)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -335,6 +357,9 @@
 | `SSH_EXEC_MAX_OUTPUT` | `4` |  | proxy/sshExec.js |
 | `SSH_EXEC_TIMEOUT_MS` | `60000` |  | proxy/sshExec.js |
 | `SSH_LEGACY_FALLBACK` | `기본 적용('0' 로 끄기)` | ✅ | proxy/sshExec.js |
+| `SSH_PAGER_MAX_PAGES` | `400` |  | proxy/sshExec.js |
+| `SSH_PTY_COLS` | `1000` |  | proxy/sshExec.js |
+| `SSH_PTY_ROWS` | `200` |  | proxy/sshExec.js |
 | `SSH_READY_TIMEOUT_MS` | `60000` |  | proxy/sshExec.js, proxy/sshGateway.js |
 
 ## 인사이트 (6)
@@ -381,7 +406,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (11)
+## 중앙(위임 수집) (14)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -394,6 +419,9 @@
 | `IDRAC_SCAN_ACK_TIMEOUT_MS` | `90000` |  | central/idracScanJobs.js |
 | `INGEST_PLAIN_WARN_BYTES` | `512` |  | central/ingestStats.js |
 | `INGEST_PLAIN_WARN_STREAK` | `3` |  | central/ingestStats.js |
+| `PARTFAULT_EDGE_DEVICE_PART_MAX` | `2000` |  | central/partFaultEdge.js |
+| `PARTFAULT_EDGE_MAX_DEVICES` | `5000` |  | central/partFaultEdge.js |
+| `PARTFAULT_EDGE_REPORT_PART_MAX` | `50000` |  | central/partFaultEdge.js |
 | `PING_ACK_TIMEOUT_MS` | `30000` |  | central/pingJobs.js |
 | `SVCMON_SILENCE_ALERT` | `기본 적용('false' 로 끄기)` |  | central/svcmonSilence.js |
 
@@ -411,7 +439,7 @@
 |---|---|---|---|
 | `HEALTH_PROBE_TIMEOUT_MS` | `5000` |  | health/network.js |
 
-## API 라우트 (28)
+## API 라우트 (29)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -432,6 +460,7 @@
 | `RIGHTSIZE_MIN_DAYS` |  |  | routes/api/toolsCapacity.js |
 | `RIGHTSIZE_READY_WARN_PCT` |  |  | routes/api/toolsCapacity.js |
 | `RMA_CRED_RATE_PER_MIN` | `120` |  | routes/central.js |
+| `SANSW_PROBLEM_PORT_MAX` | `40` |  | routes/api/sanSwitch.js |
 | `SECRETS_KEY` |  |  | routes/admin/opsSettings.js, security/secretVault.js |
 | `SVCMON_XLSX_MAX_BYTES` | `8000000` |  | routes/svcmon/shared.js |
 | `TREND_CLUSTER_MAX_HOSTS` | `40` |  | routes/api/toolsCapacity.js |
@@ -450,11 +479,14 @@
 |---|---|---|---|
 | `GUEST_GPU_TTL_MS` | `30` |  | gpu/store.js |
 
-## Horizon (1)
+## Horizon (4)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `HORIZON_TLS_VERIFY` | `기본 아님('true' 일 때만 적용)` |  | horizon/horizon.js |
+| `HZSESS_ACTIVITY_MAX` | `500` |  | horizon/sessionActivityLog.js |
+| `HZSESS_DB_PATH` |  |  | horizon/sessionDb.js |
+| `HZSESS_FIRST_DELAY_MS` | `60000` |  | horizon/sessionPoller.js |
 
 ## iDRAC/전력 (7)
 
@@ -506,10 +538,12 @@
 | `PDU_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 
-## SAN 스위치 (22)
+## SAN 스위치 (28)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `SANHEALTH_DB_PATH` |  |  | sanswitch/healthHistory.js |
+| `SANHEALTH_MAX_RUNS` | `24` |  | sanswitch/healthHistory.js |
 | `SANSW_ALIAS_MAX` | `8000` |  | sanswitch/zoning.js |
 | `SANSW_CAPS_TTL_MS` | `6` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CLI_RAW_LIMIT` | `4000` |  | sanswitch/collectors/fosSsh.js |
@@ -517,6 +551,7 @@
 | `SANSW_CONCURRENCY` | `4` |  | sanswitch/poller.js |
 | `SANSW_DEVICE_TIMEOUT_MS` | `120000` |  | sanswitch/poller.js |
 | `SANSW_HTTP_TIMEOUT_MS` | `20000` |  | sanswitch/collectors/fosRest.js |
+| `SANSW_PERF_ACTIVITY_MAX` | `500` |  | sanswitch/perfActivityLog.js |
 | `SANSW_PERF_CONCURRENCY` | `2` |  | sanswitch/perfPoller.js |
 | `SANSW_PERF_DEVICE_TIMEOUT_MS` |  |  | sanswitch/perfPoller.js |
 | `SANSW_PERF_LOCAL` | `''` | ✅ | sanswitch/perfSettings.js |
@@ -525,12 +560,15 @@
 | `SANSW_PERF_PUSH_ROWS` | `20000` | ✅ | sanswitch/perfPush.js |
 | `SANSW_POLL_MS` | `5` |  | sanswitch/poller.js |
 | `SANSW_PUSH_CHUNK_BYTES` | `700` |  | sanswitch/push.js |
+| `SANSW_PUSH_DEVICE_MAX_BYTES` | `900` |  | sanswitch/push.js |
 | `SANSW_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | sanswitch/perfPush.js, sanswitch/push.js |
 | `SANSW_PUSH_MS` | `5` |  | sanswitch/push.js |
 | `SANSW_PUSH_PORT_LIMIT` | `64` |  | sanswitch/push.js |
+| `SANSW_PUSH_PORTS` | `''` |  | sanswitch/push.js |
 | `SANSW_TEST_PICKUP_MS` | `10` | ✅ | sanswitch/testRuns.js |
 | `SANSW_TEST_RESULT_MS` | `5` | ✅ | sanswitch/testRuns.js |
 | `SANSW_ZONE_MAX` | `4000` |  | sanswitch/zoning.js |
+| `SANSWITCH_ACTIVITY_MAX` | `500` |  | sanswitch/activityLog.js |
 | `SANSWITCH_TLS_VERIFY` | `기본 아님('true' 일 때만 적용)` |  | sanswitch/collectors/fosRest.js |
 
 ## vCenter 수집 (2)
@@ -548,4 +586,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 369
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 407

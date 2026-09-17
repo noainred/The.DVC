@@ -286,6 +286,13 @@ centralRouter.post('/register-collector', async (req, res) => {
   if (r.ok && unverified) {
     const { setCollectorStatus } = await import('../collector/state.js');
     setCollectorStatus(r.collector?.id || name, { ok: false, error: `등록 URL(EDGE_ADVERTISE_URL) 검증 실패: ${unverified}`, unverified: true });
+  } else if (r.ok && b.version) {
+    // v2.548: 자기등록이 보낸 버전을 상태에 심어 둔다 — pull 이 한 번도 성공하지 못한 엣지(OC2SDBX 사례)는
+    // puller.js:92 경로로 버전이 들어오지 않아 파트 장애 화면이 '버전 미상' 으로만 말했다. 기존 상태는 보존.
+    const { setCollectorStatus, getCollectorStatus } = await import('../collector/state.js');
+    const id = r.collector?.id || name;
+    const prev = getCollectorStatus(id) || {};
+    if (!prev.version) setCollectorStatus(id, { ...prev, version: String(b.version).slice(0, 32), registeredVersion: true });
   }
   res.status(r.ok ? 200 : 400).json(r.ok ? { ...r, unverified: unverified || undefined } : r);
 });
@@ -838,9 +845,25 @@ centralRouter.post('/part-faults', async (req, res) => {
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : String(req.body?.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const { putEdgeReport } = await import('../central/partFaultEdge.js');
-  const r = putEdgeReport(agent, req.body || {});
+  // v2.548: 프로토콜 2(장애 + 전체 요약) — 수신이 스토리지·SAN 소유권을 검사하고(rejected) agent 를 덮어쓴다.
+  // 수신 예외는 400 으로 답한다 — async 핸들러의 throw 는 express 4 가 잡지 않아 요청이 **응답 없이 매달린다**(v2.548 S1).
+  let r;
+  try { r = await putEdgeReport(agent, req.body || {}); } catch (e) {
+    return res.status(400).json({ ok: false, reason: `본문 형식 오류: ${String(e?.message || e).slice(0, 200)}` });
+  }
   if (!r.ok) return res.status(400).json(r);
-  return res.json({ ok: true, agent, open: r.open });
+  // 응답에 중앙의 스위치 상태를 실어 보낸다 — 엣지가 '보냈는데 중앙이 꺼져 있다' 를 알 수 있게.
+  const { partFaultEnabled } = await import('../partfault/settings.js');
+  return res.json({ ok: true, agent, protocol: r.protocol, devices: r.devices, rejected: r.rejected, open: r.open, centralEnabled: partFaultEnabled().enabled });
+});
+
+// 파트 장애 스위치 배포(v2.548 F3) — 엣지가 주기적으로 GET. 중앙 관리자가 전체/엣지별로 정한 값만 내려간다.
+centralRouter.get('/partfault-config', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = String(req.centralAuth.agent || req.query.agent || '').trim().toLowerCase();
+  const { settingsForAgent } = await import('../partfault/settings.js');
+  res.json({ ok: true, settings: settingsForAgent(agent) });
 });
 
 // POST /api/central/storage-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라

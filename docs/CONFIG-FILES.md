@@ -103,8 +103,8 @@
 | `os-scan.json` | 설정 | 실제 OS 인벤토리 스캐너 — 주기적으로 'DB에 없는(또는 오래된) VM'을 찾아 게스트에서 실제 OS를 읽어 저장. | ✅ |  | ✅ | inventory/osScanner.js |
 | `packages` | 디렉터리 | 디렉터리 — 내려받은 설치/업그레이드 패키지 보관(PACKAGE_DIR) |  |  |  | config.js |
 | `packages.json` | 설정 | Web-editable package source settings — lets an admin change the package | ✅ |  | ✅ | upgrade/packageSettings.js |
-| `part-faults.db` | DB | 파트 장애 이력 DB(v2.547). 파일 `part-faults.db`. |  |  | ✅ | partfault/db.js |
-| `partfault-edge.json` | 설정 | 엣지가 올린 **파트 장애 보고**를 중앙이 보관한다(v2.547). | ✅ | ✅ | ✅ | central/partFaultEdge.js |
+| `part-faults.db` | DB | 파트 장애 이력 DB(v2.547, 스키마 v2 는 v2.548). 파일 `part-faults.db`. |  |  | ✅ | partfault/db.js |
+| `partfault-settings.json` | 설정 | 파트 장애 기능 스위치(v2.548 F3). | ✅ |  | ✅ | partfault/settings.js |
 | `pdu-devices.json` | 설정 | PDU(APC Rack PDU 2G) 장비 등록 — `CONFIG_DIR/pdu-devices.json`(0600). | ✅ | ✅ | ✅ | pdu/registry.js |
 | `pdu-intervals.json` | 설정 | PDU 수집 주기(사용자 요구: '수집 시간은 설정에서 지정'). | ✅ | ✅ | ✅ | pdu/intervals.js |
 | `pdu-thresholds.json` | 설정 | PDU 임계치 판정 + 알림 연동(v2.425). | ✅ | ✅ | ✅ | pdu/thresholds.js |

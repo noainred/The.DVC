@@ -283,20 +283,37 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
  * hostname, service tag, BIOS version + key CMOS settings, iDRAC firmware,
  * IPMI version, CPU/memory summary, health, and iDRAC network identity.
  * Best-effort: missing sub-resources are tolerated.
+ *
+ * v2.548 F1 — `inv.collections`(컬렉션별 'ok'|'failed') + `inv.reachable` 메타를 싣는다. 이 함수는
+ * 모든 블록이 `catch {}` 라 **어떤 경우에도 던지지 않고**, 연결 거부 호스트에도 29ms 만에 `collectedAt`
+ * 이 신선한 **빈 인벤토리**를 돌려준다. 그래서 파트 장애 판정(`partfault/`)이 '부품 0개 = 정상' 으로
+ * 읽어 열린 장애를 거짓으로 닫았다. 소비처는 실패한 컬렉션의 열린 장애를 **닫지 않고 보류**한다
+ * (`HOLD_REASON.collectionFailed`). 키 이름은 `partfault/types.js COLLECTION_KINDS` 와 글자 그대로 같다.
  */
 export async function fetchInventory(entry) {
   const base = entry.host.replace(/\/+$/, '');
   const G = (p) => get(base, p, entry.username, entry.password);
 
   const inv = { collectedAt: Date.now(), system: {}, idrac: {}, cpu: {}, memory: {}, network: [], bios: {} };
+  // 컬렉션별 성공/실패 메타(v2.548 F1). 기본값이 **'failed'** 인 이유: 아래 블록 다수가 `if (sysId)` 로
+  // 감싸여 있어 Systems GET 이 실패하면 **try 본문이 실행되지 않고 catch 도 타지 않는다** — `{}` 로
+  // 시작하면 그 컬렉션은 undefined 로 남아 '읽었는지' 를 말할 수 없다. 성공 지점에 닿은 것만 'ok' 로
+  // 뒤집는다(GET 이 성공했으면 멤버가 0개여도 '읽었다'). 닿지 못한 모든 경로는 '읽지 못함' 이라야
+  // 열린 장애를 거짓으로 닫지 않는다. ⚠ `fans` 는 fetchSensors(Thermal) 경로라 여기 없다.
+  // `system` 은 Systems 멤버(sysId)를 얻었는가 — 파트 장애의 장비 키(서비스태그·UUID)가 여기서 나온다(v2.548 C3).
+  inv.collections = { system: 'failed', psus: 'failed', disks: 'failed', storageControllers: 'failed', memoryDimms: 'failed', cpus: 'failed', gpus: 'failed', pcie: 'failed' };
+  // Systems GET 이 (인증 포함) 응답했거나 어느 컬렉션이든 하나라도 'ok' 면 true. 전부 실패면 false.
+  inv.reachable = false;
 
   // --- System (identity, CPU/mem summary, BIOS version, hostname, health) ---
   let sysId = null;
   try {
     const sysRoot = await G('/redfish/v1/Systems');
+    inv.reachable = true; // 인증까지 통과한 응답을 받았다(get() 은 401·비-2xx 에 던진다)
     sysId = firstMember(sysRoot);
     if (sysId) {
       const s = await G(sysId);
+      inv.collections.system = 'ok';   // 여기까지 왔으면 서비스태그·UUID 를 읽을 수 있는 응답을 받았다
       inv.system = {
         hostName: s.HostName || '',
         model: s.Model || '',
@@ -420,7 +437,8 @@ export async function fetchInventory(entry) {
       }
     }
     if (inv.psus.length) inv.health.psu = inv.psus.some((p) => p.health && p.health !== 'OK') ? 'Warning' : 'OK';
-  } catch { /* psu optional */ }
+    inv.collections.psus = 'ok'; // Chassis GET 성공 — 개별 Chassis/Power 실패(continue)는 컬렉션을 뒤집지 않는다
+  } catch { inv.collections.psus = 'failed'; /* psu optional */ }
 
   // --- 물리 디스크 상태(스토리지): 모델·용량·미디어·SMART 예측 실패·상태 ---
   // + 스토리지 컨트롤러(PERC/HBA) — 이미 GET 하는 컨트롤러 응답의 StorageControllers[] 를
@@ -465,8 +483,11 @@ export async function fetchInventory(entry) {
         }
       }
       if (inv.disks.length) inv.health.storage = inv.disks.some((d) => d.predictiveFailure || (d.health && d.health !== 'OK')) ? 'Warning' : 'OK';
+      // 한 GET(Storage)에서 두 컬렉션을 읽으므로 둘을 같이 찍는다.
+      inv.collections.disks = 'ok';
+      inv.collections.storageControllers = 'ok';
     }
-  } catch { /* storage optional */ }
+  } catch { inv.collections.disks = 'failed'; inv.collections.storageControllers = 'failed'; /* storage optional */ }
 
   // --- 메모리 DIMM: 슬롯·용량·속도·상태 (정정가능 오류/불량 조기 발견) ---
   inv.memoryDimms = [];
@@ -492,8 +513,9 @@ export async function fetchInventory(entry) {
           });
         } catch { /* skip dimm */ }
       }
+      inv.collections.memoryDimms = 'ok';
     }
-  } catch { /* memory optional */ }
+  } catch { inv.collections.memoryDimms = 'failed'; /* memory optional */ }
 
   // --- 최근 하드웨어 이벤트(Critical/Warning) — SEL 또는 Dell LC 로그 ---
   inv.events = [];
@@ -536,8 +558,11 @@ export async function fetchInventory(entry) {
         inv.gpus.push({ name: p.Name || p.Id || '', model: (p.Model || '').trim(), manufacturer: p.Manufacturer || '', health: p.Status?.Health || '', state: p.Status?.State || '' });
       }
       if (inv.gpus.length) inv.health.gpu = inv.gpus.some((g) => g.health && g.health !== 'OK') ? 'Warning' : 'OK';
+      // Processors 한 GET 에서 GPU 와 CPU 소켓을 함께 읽으므로 둘을 같이 찍는다.
+      inv.collections.gpus = 'ok';
+      inv.collections.cpus = 'ok';
     }
-  } catch { /* gpu optional */ }
+  } catch { inv.collections.gpus = 'failed'; inv.collections.cpus = 'failed'; /* gpu optional */ }
 
   // --- NIC 어댑터/포트: 모델·링크 상태·속도 ---
   // iDRAC9(R750 등)는 포트가 어댑터의 NetworkPorts/Ports 또는 Controllers[].Links 로 흩어져 있고,
@@ -620,8 +645,9 @@ export async function fetchInventory(entry) {
           });
         } catch { /* skip device */ }
       }
+      inv.collections.pcie = 'ok';
     }
-  } catch { /* pcie optional(구세대 미지원) */ }
+  } catch { inv.collections.pcie = 'failed'; /* pcie optional(구세대 미지원) — 404 도 '읽지 못함' 이다 */ }
 
   // --- iDRAC 라이선스(Enterprise/DataCenter — GPU 텔레메트리 가용성과 직결) ---
   inv.licenses = [];
@@ -661,6 +687,9 @@ export async function fetchInventory(entry) {
 
   // --- Firmware/driver inventory (각종 카드: NIC·RAID·PSU·BIOS·iDRAC 등 + 버전) ---
   try { inv.firmware = await fetchFirmwareInventory(entry); } catch { inv.firmware = []; }
+
+  // Systems 는 실패했어도 Chassis(psus) 처럼 sysId 없이 도는 컬렉션이 응답했으면 장비는 닿은 것이다.
+  if (Object.values(inv.collections).includes('ok')) inv.reachable = true;
 
   return inv;
 }

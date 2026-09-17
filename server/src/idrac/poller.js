@@ -17,6 +17,7 @@ import { getDb } from './db.js';
 import { describeError } from '../util/errors.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { isMockMode, mockIdracPollTick } from '../mock/seed.js';
+import { onSnapshotRefreshed } from '../partfault/hooks.js'; // v2.548: 인벤토리 갱신 직후 파트 장애 판정/push 트리거
 
 // Hardware inventory is largely static — refresh it at most every 30 minutes.
 const INVENTORY_MAX_AGE_MS = 30 * 60_000;
@@ -28,6 +29,7 @@ let pruneTick = 0; // retention prune 스로틀(10틱마다 1회)
 
 async function pollOnce() {
   if (running) return; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
+  let invRefreshed = 0; // v2.548: 이번 폴에서 인벤토리를 갱신한 서버 수 → 0 이 아니면 파트 장애 훅
   running = true;
   try {
     return await withJob('idrac.poll', pollOnceInner);
@@ -102,7 +104,10 @@ async function pollOnceInner() {
             const inv = await fetchInventory(s);
             // 팬 파트 정보 — Thermal 은 fetchSensors 가 방금 받았으므로 재호출 없이 이관(추가 HTTP 0회).
             if (sensorFans?.length) inv.fans = sensorFans.map(({ name, model, partNumber, manufacturer, health, redundant }) => ({ name, model, partNumber, manufacturer, health, redundant }));
+            // v2.548 F1: 팬은 Thermal 경로라 fetchInventory 의 컬렉션 메타에 없다 — 여기서 찍는다.
+            if (inv.collections && typeof inv.collections === 'object') inv.collections.fans = sensorFans?.length ? 'ok' : (sensorErr ? 'failed' : 'ok');
             setInventory(s.id, inv);
+            invRefreshed += 1;
           } catch { /* keep last */ }
         }
         results.push({
@@ -131,6 +136,9 @@ async function pollOnceInner() {
   const failed = results.filter((r) => r.error).length;
   lastRun = { at: ts, ok: results.length - failed, failed, results, notPolled };
   if (failed) console.warn(`[idrac] poll: ${results.length - failed}/${results.length} 성공`);
+  // v2.548 F7: 인벤토리가 하나라도 갱신됐으면 파트 장애 판정(중앙)/push(엣지)를 즉시 트리거한다 —
+  //   탐지 지연을 '인벤토리 주기 + 몇 초' 로 줄인다(v2.547 은 최대 ~50분). 디바운스는 훅이 한다.
+  if (invRefreshed > 0) { try { onSnapshotRefreshed('idrac'); } catch { /* 훅 실패가 폴을 막지 않는다 */ } }
 }
 
 export function getPollerStatus() {
