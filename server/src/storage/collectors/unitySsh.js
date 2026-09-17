@@ -671,9 +671,19 @@ export async function collectViaSsh(device) {
     // 이 값이 자주 보이면 명령이 너무 많거나 장비가 느린 것이다 — 화면이 그 사실을 말한다.
     if (r.skipped?.length) snap.extra.cliSkipped = r.skipped.length;
     if (r.elapsedMs != null) { snap.extra.cliElapsedMs = r.elapsedMs; snap.extra.cliBudgetMs = r.budgetMs; }
+    // v2.539: 끊긴 명령(시한/자동응답 상한)은 **형식 문제와 구분해** 말한다. 실제 사고 — 인증서 프롬프트
+    //   에코 루프가 400회 응답 뒤 명령을 죽였는데, 파서는 배너만 받고 '형식이 예상과 다릅니다' 라고 했다.
+    //   섹션이 ok 가 아니면 그 섹션의 사유를 '끊김' 으로 바꾼다(형식 사유보다 앞선 원인이다).
+    const truncated = r.truncated || {};
+    if (Object.keys(truncated).length) snap.extra.cliTruncated = truncated;
+    for (const [key, t] of Object.entries(truncated)) {
+      const sect = SPECS.find((s2) => s2.key === key)?.section;
+      if (!sect || snap.sections[sect] === 'ok') continue;
+      snap.sections[sect] = `오류: 명령 출력이 끊겼습니다(${t.timedOut ? '시한 초과' : '자동응답 상한'} · 자동응답 ${t.answers}회 · ${Math.round(t.ms / 1000)}초 · ${t.bytes}B 수신) — 형식 문제가 아니라 대화형 프롬프트/시간 문제일 수 있습니다(상세의 CLI 원문 확인).`;
+    }
     for (const [key, msg] of Object.entries(errors)) {
       const sect = SPECS.find((s2) => s2.key === key)?.section;
-      if (sect && snap.sections[sect] !== 'ok') snap.sections[sect] = `오류: ${msg}`;
+      if (sect && snap.sections[sect] !== 'ok' && !/끊겼습니다/.test(String(snap.sections[sect]))) snap.sections[sect] = `오류: ${msg}`;
       // 섹션이 없는 항목(구성 상세)의 실패도 버리지 않는다 — 어떤 명령이 없는 장비인지 알려준다.
       if (!sect) {
         snap.extra.missingCmds = snap.extra.missingCmds || {};
