@@ -738,6 +738,38 @@ export default function StorageMonTool() {
 
 /** 장비 헬스 배지 — 색 판정은 순수 모듈(`storageNodeText.healthBadge`)이 소유한다.
     예전에는 'healthy' 문자열만 초록이라 Unity 의 'OK' 가 **빨간 `Health: OK`** 로 나왔다. */
+/**
+ * CLI 명령 원문 목록(v2.405 → v2.539 공용화). 연결 테스트(전부)와 장비 상세(실패분만)가 같은 것을 그린다.
+ * 소요(ms)·자동응답 횟수(answers)·끊김(truncated/timedOut)을 명령 줄 옆에 적는다 — '형식이 다르다' 와
+ * '끊겼다' 는 조치가 다르다(전자는 파서, 후자는 프롬프트/시간).
+ */
+function CliRawList({ raw, mode, truncated }) {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const ok = raw.filter((x) => x.ok).length;
+  const ans = (x) => x.answers ? Object.entries(x.answers).filter(([, n]) => n > 0).map(([k, n]) => `${k}×${n}`).join(' ') : '';
+  return (
+    <details style={{ marginTop: 8 }}>
+      <summary style={{ cursor: 'pointer', fontSize: 12 }}>
+        CLI 명령 원문 {raw.length}건 — 성공 {ok} · 실패 {raw.length - ok}{mode === 'failed-only' ? ' (주기 수집은 실패한 명령만 남깁니다)' : ''}
+        {truncated && Object.keys(truncated).length > 0 && <span style={{ color: 'var(--red)', marginLeft: 6 }}>· 끊긴 명령 {Object.keys(truncated).length}건</span>}
+      </summary>
+      <div style={{ marginTop: 6, maxHeight: '40vh', overflow: 'auto' }}>
+        {raw.map((x, i) => (
+          <div key={i} style={{ marginBottom: 8 }}>
+            <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5, color: x.ok ? 'var(--green)' : 'var(--red)', whiteSpace: 'normal' }}>
+              {x.ok ? '✓' : '✗'} [{x.key}] {x.cmd}
+              <span className="muted" style={{ marginLeft: 8, fontWeight: 400 }}>
+                {x.ms != null ? `${(x.ms / 1000).toFixed(1)}초` : ''}{ans(x) ? ` · 자동응답 ${ans(x)}` : ''}{x.timedOut ? ' · 시한 초과' : (x.truncated ? ' · 응답 상한으로 끊김' : '')}
+              </span>
+            </div>
+            <pre style={{ margin: '2px 0 0', padding: '6px 8px', background: 'rgba(148,163,184,.08)', borderRadius: 6, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{x.sample || '(빈 출력)'}</pre>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function HealthBadge({ raw }) {
   const b = healthBadge(raw);
   return <span className={`badge ${b.tone}`} title={b.title}>{b.text}</span>;
@@ -1162,6 +1194,10 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               {Object.entries(s.sections || {}).filter(([, v]) => /오류/.test(String(v))).map(([k, v]) => `${k}: ${v}`).join('\n')}
             </pre>
           )}
+          {/* v2.539: 주기 수집이 남긴 **실패 명령 원문**(cliRawMode=failed-only) — 연결 테스트를 다시 돌리지 않아도
+              무엇이 왔는지 본다. 소요·자동응답 횟수·끊김을 함께 보인다(실제 사고: 인증서 프롬프트 에코 루프가
+              400회 응답 뒤 명령을 죽였는데 화면은 '형식이 다르다' 고만 했다). */}
+          <CliRawList raw={ex.cliRaw} mode={ex.cliRawMode} truncated={ex.cliTruncated} />
           {ex.spaceDebug && (
             <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.6 }}>
               공간 지표 조회 경로: <b>{ex.spaceDebug.source || '—'}</b>{ex.spaceDebug.interval ? ` · 구간 ${ex.spaceDebug.interval}` : ''}
@@ -1225,23 +1261,7 @@ function TestResult({ r }) {
       {/* SSH CLI 수집(pstcli·uemcli·xmcli·vplexcli)의 명령별 원문(v2.405).
           이 CLI 들은 버전마다 출력 형식이 달라 파싱이 빗나갈 수 있다. 원문을 접어서 보여주면
           '어떤 명령이 무엇을 돌려줬는지'를 바로 확인해 교정할 수 있다(추측 제거). */}
-      {Array.isArray(r.cliRaw) && r.cliRaw.length > 0 && (
-        <details style={{ marginTop: 8 }}>
-          <summary style={{ cursor: 'pointer', fontSize: 12 }}>
-            CLI 명령 원문 {r.cliRaw.length}건 — 성공 {r.cliRaw.filter((x) => x.ok).length} · 실패 {r.cliRaw.filter((x) => !x.ok).length}
-          </summary>
-          <div style={{ marginTop: 6, maxHeight: '40vh', overflow: 'auto' }}>
-            {r.cliRaw.map((x, i) => (
-              <div key={i} style={{ marginBottom: 8 }}>
-                <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5, color: x.ok ? 'var(--green)' : 'var(--red)' }}>
-                  {x.ok ? '✓' : '✗'} [{x.key}] {x.cmd}
-                </div>
-                <pre style={{ margin: '2px 0 0', padding: '6px 8px', background: 'rgba(148,163,184,.08)', borderRadius: 6, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{x.sample || '(빈 출력)'}</pre>
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
+      <CliRawList raw={r.cliRaw} />
       {r.ok && <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>테스트 결과는 저장되지 않습니다 — 목록/추이/작업 로그에 반영하려면 '저장' 후 수집하세요.</div>}
     </div>
   );

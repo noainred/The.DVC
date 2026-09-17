@@ -256,7 +256,17 @@ export function stripUemcliBanner(text) {
  *  · `pages`  — 페이저 응답 횟수(v2.522 호환).
  *  · `answers`— 규칙별 응답 횟수(`{pager, certAccept}`) — 화면이 '인증서를 자동 수락했다' 를 말한다.
  */
-function execAnswered(conn, command, {
+/**
+ * ⚠⚠ v2.539 — **에코 루프**(사용자 신고 "지금 파싱이 안되, 처음에는 됐었는데"): 프롬프트에 `1\n` 을 쓰면
+ * pty 가 그 입력을 **에코**하고, 그 에코가 `data` 이벤트로 돌아온다. 꼬리 400자에는 아직 프롬프트 문구가
+ * 남아 있으므로 정규식이 다시 매치 → 또 `1\n` → 또 에코 … 실제 출력이 400자 쌓이기 전까지 자기 자신과
+ * 핑퐁하다 `maxAnswers`(400) 에서 `kill()` 했다. 그 결과 uemcli 의 진짜 출력은 오지 않거나 잘렸고,
+ * 파서는 배너만 보고 "형식이 예상과 다릅니다" 라고 **원인을 잘못 말했다**(실측: 정규식이 에코 뒤·
+ * 실제 출력 120자 뒤에도 매치 — 400자 이후에만 안 매치). 400회 × RTT 가 세션 예산까지 먹었다.
+ * 수정: **마지막 응답 이후에 새로 도착한 출력**에서만 프롬프트를 찾는다(`answeredUpTo`). 페이저처럼
+ * 프롬프트가 반복해서 *새로* 나오는 경우는 그대로 동작한다.
+ */
+export function execAnswered(conn, command, {
   timeoutMs = Number(process.env.SSH_EXEC_TIMEOUT_MS) || 60000,
   maxAnswers = Math.max(1, Number(process.env.SSH_PAGER_MAX_PAGES) || 400),
   rules = ['pager'],
@@ -280,12 +290,14 @@ function execAnswered(conn, command, {
         finish(resolve, out({ code: null, truncated: true, timedOut: true }));
       }, Math.max(1000, timeoutMs));
       timer.unref?.();
+      let answeredUpTo = 0; // 마지막으로 응답했을 때의 stdout 길이 — 그 뒤에 온 출력에서만 프롬프트를 찾는다
       stream.on('data', (d) => {
         bytes += d.length;
         if (bytes > EXEC_MAX_OUTPUT) { kill(); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(EXEC_MAX_OUTPUT / 1024)}KB) 초과: ${command}`)); }
         stdout += d.toString();
         // 꼬리에서만 프롬프트를 본다 — 본문에 같은 문구가 있어도 오응답하지 않게.
-        const tail = stdout.slice(-400).replace(ANSI_RE, '');
+        // ⚠ 그리고 **마지막 응답 이후 새로 온 부분**만 본다(위 머리말 — 우리 응답의 에코로 다시 매치하지 않게).
+        const tail = stdout.slice(Math.max(answeredUpTo, stdout.length - 400)).replace(ANSI_RE, '');
         const hit = active.find(([, r]) => r.re.test(tail));
         if (!hit) return;
         const [key, rule] = hit;
@@ -301,6 +313,7 @@ function execAnswered(conn, command, {
           return finish(resolve, out({ code: null, truncated: true }));
         }
         total += 1; answers[key] += 1;
+        answeredUpTo = stdout.length;
         try { stream.write(rule.answer); } catch { /* */ }
       });
       stream.stderr.on('data', (d) => { stderr += d.toString(); });

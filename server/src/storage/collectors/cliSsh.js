@@ -90,7 +90,8 @@ export async function runCliSession(device, specs, { clean = (t) => t, budgetMs 
     const out = {};
     const raw = [];
     const errors = {};
-    const skipped = [];      // 예산이 모자라 **시작조차 하지 않은** 항목 — 반드시 밝힌다
+    const skipped = [];
+    const truncatedKeys = {}; // v2.539: 시한/응답 상한으로 끊긴 명령 {key: {cmd, ms, timedOut, answers, bytes}}      // 예산이 모자라 **시작조차 하지 않은** 항목 — 반드시 밝힌다
     for (const spec of specs) {
       // ── 세션 예산(v2.528) ──
       // 필수 항목은 예산을 무시하고 시도한다(그것이 없으면 스냅샷 자체가 무의미하다).
@@ -101,19 +102,28 @@ export async function runCliSession(device, specs, { clean = (t) => t, budgetMs 
         try {
           // 남은 예산 안에서만 기다린다 — 한 명령이 전체 예산을 먹지 않게.
           const slice = spec.required ? CMD_TIMEOUT_MS : Math.max(MIN_SLICE_MS, Math.min(CMD_TIMEOUT_MS, leftMs()));
+          const t0 = Date.now();
           const r = spec.answered
             ? await sh.execAnswered(cmd, { timeoutMs: slice, rules: spec.rules || ['certAccept', 'pager'] })
             : await sh.exec(cmd, slice);
+          const ms = Date.now() - t0;
           // 배너·프롬프트를 먼저 걷어낸다 — 그 뒤에 오류 판정·파싱을 한다(둘이 같은 텍스트를 봐야 한다).
           const stdout = clean(String(r.stdout || ''));
           const stderr = String(r.stderr || '');
           // CLI 는 오류를 exit code 0 + stderr/본문 문구로 내보내는 경우가 흔하다.
           const looksError = cliLooksError(stdout, stderr);
+          // v2.539: 소요·끊김·자동응답 횟수를 원문 옆에 남긴다 — '형식이 다르다' 와 '끊겼다' 는 조치가 다르다.
+          //   (실제 사고: 인증서 프롬프트 에코 루프가 400회 응답 뒤 명령을 죽였는데 화면은 형식 탓을 했다.)
           raw.push({
-            key: spec.key, cmd, ok: !looksError, sample: (stdout || stderr).slice(0, RAW_LIMIT),
+            key: spec.key, cmd, ok: !looksError, sample: (stdout || stderr).slice(0, RAW_LIMIT), ms,
             ...(r.truncated ? { truncated: true } : {}),
+            ...(r.timedOut ? { timedOut: true } : {}),
             ...(r.answers ? { answers: r.answers } : {}),
           });
+          if (r.truncated || r.timedOut) {
+            const n = Object.values(r.answers || {}).reduce((a, b) => a + (b || 0), 0);
+            truncatedKeys[spec.key] = { cmd, ms, timedOut: !!r.timedOut, answers: n, bytes: Buffer.byteLength(String(r.stdout || '')) };
+          }
           if (looksError) { lastErr = new Error(firstLine(stdout || stderr) || '빈 출력'); continue; }
           out[spec.key] = stdout;
           done = true;
@@ -131,7 +141,7 @@ export async function runCliSession(device, specs, { clean = (t) => t, budgetMs 
     // 예산으로 건너뛴 항목은 '명령이 없는 장비' 와 구분되게 사유를 적는다 — 조치가 다르다
     // (전자는 주기를 늘리거나 예산을 키우면 되고, 후자는 그 장비에 그 명령이 없는 것이다).
     for (const k of skipped) errors[k] = '수집 시간 예산 초과로 이번 주기에는 실행하지 않았습니다(다음 주기에 시도).';
-    return { out, raw, errors, skipped, elapsedMs: Date.now() - startedAt, budgetMs };
+    return { out, raw, errors, skipped, truncated: truncatedKeys, elapsedMs: Date.now() - startedAt, budgetMs };
   });
 }
 
