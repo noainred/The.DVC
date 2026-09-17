@@ -19,7 +19,7 @@ import { GROWTH_SPEC, loadGrowthSettings, saveGrowthSettings } from '../../stora
 import { AREA_LABEL } from '../../storage/onefsCatalog.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
-import { devicesToCsv, sampleCsv, parseDevicesCsv, analyzeImport,
+import { devicesToCsv, sampleCsv, parseDevicesCsv, analyzeImport, methodChangeHints,
   devicesToText, sampleText, parseDevicesText, TEXT_FIELDS } from '../../storage/csv.js';
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
@@ -334,11 +334,12 @@ api.post('/tools/storage/devices/import', adminOnly, (req, res) => {
   // (host+type) → 기존 장비 id 맵(멱등 update). 구분자 '|' — host 정규식(RE_HOST)이 배제하는
   // 문자라 host/type 경계가 모호해지지 않는다(과거 NUL 구분자는 소스 NUL 금지 규칙 위반).
   const key = (h, t) => `${h}|${t}`;
-  const existing = new Map(listDevices().map((d) => [key(d.host, d.type), d.id]));
+  // v2.545: 값은 **장비 그대로** 둔다 — 아래 `methodChangeHints` 가 현재 수집 방식을 봐야 한다.
+  const existing = new Map(listDevices().map((d) => [key(d.host, d.type), d]));
 
   // 무결성 분석(드라이런·실제 가져오기 공용) — 실제 저장과 같은 검증 규칙을 탄다.
   const { report, summary } = analyzeImport(rows, {
-    existingKey: (h, t) => existing.get(key(h, t)),
+    existingKey: (h, t) => existing.get(key(h, t))?.id,
     resolveDc,
     validate: deviceInputIssue,
   });
@@ -353,7 +354,9 @@ api.post('/tools/storage/devices/import', adminOnly, (req, res) => {
   });
 
   if (req.body?.dryRun) {
-    return res.json({ ok: true, dryRun: true, report: adv.report, summary, hints: adv.hints,
+    // v2.545: '수집 방식 칸이 비어 조용히 기본값으로 바뀌는 행' 을 같은 힌트 목록에 얹는다.
+    const hints = [...adv.hints, ...methodChangeHints(rows, (h, t) => existing.get(key(h, t)))];
+    return res.json({ ok: true, dryRun: true, report: adv.report, summary, hints,
       warnings: warnings || [], headerUsed: headerUsed || null, format, total: rows.length });
   }
 

@@ -19,7 +19,7 @@
 import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../util/csv.js';
 import { analyzeBulkImport } from '../util/bulkImport.js';
 import { parseFreeRows, rowsToFreeText, unmark, EMPTY_MARK } from '../util/bulkText.js';
-import { isKnownType, isImplementedType, STORAGE_TYPES } from './types.js';
+import { isKnownType, isImplementedType, STORAGE_TYPES, collectMethodsFor, defaultCollectMethod } from './types.js';
 
 // 내보내기/샘플 공통 컬럼 순서(password 는 가져오기 전용이라 맨 끝 — export 는 값 비움).
 export const CSV_COLUMNS = ['type', 'name', 'host', 'username', 'collectMethod', 'sshPort', 'datacenter', 'agent', 'enabled', 'note', 'password'];
@@ -29,6 +29,35 @@ const bool = (v, dflt = true) => {
   if (!s) return dflt;
   return !['false', '0', 'no', 'n', 'off', '비활성', 'disabled', '아니오'].includes(s);
 };
+
+
+/**
+ * 내보낼 수집 방식(v2.545 — **왕복 손실을 고친 것**).
+ *
+ * ⚠⚠ v2.544 까지는 `d.type === 'isilon'` 일 때만 내보냈다("수집 방식은 isilon 만 유의미").
+ * 그 전제가 **틀렸다** — `types.js COLLECT_METHODS` 에는 `powerstore: ['api','ssh']` ·
+ * `unity480: ['api','ssh']` 도 있다. 그리고 가져오기는 빈 값을 `normalizeCollectMethod` 로
+ * **기본값에 보정**하므로(`registry.js`), 실측:
+ *     unity480 · 빈 값 import → 'api'   (기본값)
+ * 즉 **SSH 로 고쳐 둔 Unity·PowerStore 를 내보내 고쳐서 다시 넣으면 API 로 되돌아갔다.**
+ * 오류도 경고도 없이 조용히 바뀐다 — 이 저장소가 가장 경계하는 종류의 거짓이다.
+ * (사용자가 `OC2-unity-01` 을 API→SSH 로 고친 바로 그 값이다.)
+ *
+ * 규칙: **고를 수 있는 방식이 2개 이상인 타입은 반드시 내보낸다.** 1개뿐인 타입은 정보가
+ * 없으므로 비운다(가져오기에서 어차피 그 값으로 보정된다).
+ */
+export function exportedCollectMethod(d) {
+  const type = String(d?.type || '');
+  if (collectMethodsFor(type).length < 2) return '';
+  return String(d?.collectMethod || defaultCollectMethod(type));
+}
+
+/** 내보낼 SSH 포트 — 실제로 SSH 로 수집하는 장비에만 값이 있다. */
+export function exportedSshPort(d) {
+  const type = String(d?.type || '');
+  const m = String(d?.collectMethod || defaultCollectMethod(type));
+  return m === 'ssh' ? String(d?.sshPort || 22) : '';
+}
 
 /**
  * 등록 장비 목록 → CSV 문자열(BOM + 헤더 + 행).
@@ -43,8 +72,8 @@ export function devicesToCsv(devices, dcName = (x) => x, { includePasswords = fa
   for (const d of devices) {
     lines.push(csvLine([
       d.type || '', d.name || '', d.host || '', d.username || '',
-      d.type === 'isilon' ? (d.collectMethod || 'ssh') : '',   // 수집 방식은 isilon 만 유의미
-      d.collectMethod === 'ssh' || d.type === 'isilon' ? (d.sshPort || 22) : '',
+      exportedCollectMethod(d),                                 // v2.545: 방식이 2개 이상인 타입은 전부(왕복 손실 수정)
+      exportedSshPort(d),
       dcName(d.datacenterId) || d.datacenterId || '',          // 사람이 읽는 법인명(가져오기는 이름/ID 둘 다 허용)
       d.agent || '',                                            // 빈 값 = 중앙 직접
       d.enabled === false ? 'false' : 'true',
@@ -67,6 +96,39 @@ export function devicesToCsv(devices, dcName = (x) => x, { includePasswords = fa
  *          validate:(input:object)=>string|null}} deps
  * @returns {{report:Array, summary:{add:number,update:number,error:number,withPassword:number}}}
  */
+/**
+ * **수집 방식이 조용히 바뀌는 행**을 경고로 알린다(v2.545).
+ *
+ * `exportedCollectMethod` 로 내보내기는 고쳤지만, **옛 버전이 만든 CSV** 나 손으로 쓴 파일은
+ * 그 칸이 비어 있다. 가져오기는 빈 값을 `normalizeCollectMethod` 로 **타입 기본값에 보정**하므로
+ * (실측: `unity480` 빈 값 → `api`), SSH 로 등록해 둔 장비가 **오류도 경고도 없이** API 로 바뀐다.
+ *
+ * 그래서 '지금 등록된 값과 달라지는 행' 만 골라 말한다 — 조용한 변경을 만들지 않는다.
+ * ⚠ 판정을 다시 하지 않는다(v2.513 규약) — 경고만 만들고 `report` 는 건드리지 않는다.
+ *
+ * @param {Array} rows 파싱된 행
+ * @param {(host:string,type:string)=>object|undefined} findExisting 기존 장비(없으면 undefined)
+ * @returns {Array<{advice:string}>} `enrichAdvice().hints` 와 같은 형태(화면이 그대로 그린다)
+ */
+export function methodChangeHints(rows, findExisting) {
+  const out = [];
+  for (const row of rows || []) {
+    const type = String(row?.type || '');
+    if (collectMethodsFor(type).length < 2) continue;      // 고를 것이 없으면 바뀔 것도 없다
+    if (String(row?.collectMethod || '').trim()) continue;  // 값이 있으면 그대로 저장된다
+    const cur = findExisting?.(String(row?.host || ''), type);
+    if (!cur) continue;                                     // 신규 등록은 '바뀌는' 것이 아니다
+    const now = String(cur.collectMethod || defaultCollectMethod(type));
+    const next = defaultCollectMethod(type);
+    if (now === next) continue;
+    // ⚠ `BoldText` 는 `**강조**` **만** 처리한다 — 백틱·마크다운을 쓰면 글자로 새어 나온다
+    //   (v2.439·v2.440·v2.505 에서 실제로 별표가 화면에 찍혔다. 같은 유형을 만들지 말 것).
+    out.push({ advice: `${row.host} (${type}) — **수집 방식 칸이 비어 있어 기본값 '${next}' 로 저장됩니다**.`
+      + ` 지금 등록된 값은 **'${now}'** 입니다. 그대로 두려면 그 칸에 **${now}** 를 적으세요.` });
+  }
+  return out;
+}
+
 export function analyzeImport(rows, { existingKey, resolveDc, validate }) {
   // v2.513: 판정 코어는 `util/bulkImport.js` 하나다(SAN 스위치도 같은 기능을 요구받았고, 복사하면
   // 두 판정이 갈라진다). 이 함수는 **시그니처를 유지하는 얇은 위임**이다 —
@@ -91,10 +153,11 @@ export function sampleCsv() {
     // 주석 행(# 로 시작) — 파서가 컬럼 매핑을 못 찾는 헤더가 아니라 데이터 행이지만, 가져오기 시
     // type 이 '#...' 라 isKnownType 실패로 걸러진다(안내 목적). 실제 사용 시 이 행은 지운다.
     csvLine([`# type: ${impl} 중 하나`, '# name: 표시명', '# host: IP/FQDN', '# username: 접속 계정',
-      '# collectMethod: isilon 만 ssh|api', '# sshPort: isilon ssh 기본 22', '# datacenter: 법인 이름 또는 ID(비우면 미지정)',
+      '# collectMethod: 방식이 둘인 타입(isilon·powerstore·unity480)은 ssh|api — 비우면 그 타입 기본값으로 저장됩니다',
+      '# sshPort: ssh 일 때만 의미(기본 22)', '# datacenter: 법인 이름 또는 ID(비우면 미지정)',
       '# agent: 엣지 이름(비우면 중앙 직접 수집)', '# enabled: true|false', '# note: 메모', '# password: 비우면 기존 유지(신규는 없음)']),
     csvLine(['isilon', 'WA-Isilon-01', '10.20.0.50', 'root', 'ssh', '22', 'WA', 'WA-Edge', 'true', '법인 WA 아카이브', 'ChangeMe!1']),
-    csvLine(['powerstore', 'KR-PS-500T', '10.10.0.9', 'admin', '', '', '한국', '', 'true', '중앙 직접 수집', 'ChangeMe!2']),
+    csvLine(['unity480', 'KR-Unity-01', '10.10.0.9', 'service', 'ssh', '22', '한국', '', 'true', 'SSH(uemcli) 수집', 'ChangeMe!2']),
   ];
   return CSV_BOM + lines.join('\r\n') + '\r\n';
 }
@@ -220,8 +283,8 @@ export function parseDevicesText(text, { defaults = {} } = {}) {
 export function devicesToText(devices, dcName = (x) => x) {
   const rows = (devices || []).map((d) => ({
     type: d.type || '', name: d.name || '', host: d.host || '', username: d.username || '',
-    collectMethod: d.type === 'isilon' ? (d.collectMethod || 'ssh') : '',
-    sshPort: d.collectMethod === 'ssh' || d.type === 'isilon' ? String(d.sshPort || 22) : '',
+    collectMethod: exportedCollectMethod(d),                  // v2.545: CSV 와 같은 규칙(왕복 손실 수정)
+    sshPort: exportedSshPort(d),
     datacenter: dcName(d.datacenterId) || d.datacenterId || '',
     agent: d.agent || '', enabled: d.enabled === false ? 'false' : 'true',
     note: d.note || '', password: '',                        // 절대 내보내지 않는다

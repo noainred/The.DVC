@@ -82,6 +82,8 @@ export function commandCut(r) {
 
 /**
  * @param {object[]} specs `[{ key, section?, cmds, required?, answered?, rules?, timeoutMs? }]`
+ *   · `accept(stdout)` — **이 후보가 원하는 것을 실제로 줬는가**(v2.545). 거짓이면 다음 후보로.
+ *     오류 문구가 없다는 것과 원하는 값을 읽었다는 것은 다르다(v2.525 규약).
  *   · `timeoutMs` — 그 항목의 명령당 시한(기본 `CMD_TIMEOUT_MS` 45초). 짧은 명령에 45초를
  *     그대로 주면 명령 수 × 45초가 세션 예산을 넘겨 뒤 항목이 실행되지 않는다(v2.528).
  *   · `answered:true` — 대화형 프롬프트에 자동 응답한다(`sshExec.execAnswered`).
@@ -153,7 +155,25 @@ export async function runCliSession(device, specs, { clean = (t) => t, budgetMs 
            * 넘어갈 후보가 없으면 그 항목은 오류다.
            */
           const cut = commandCut(r);
-          const looksError = cut || cliLooksError(stdout, stderr);
+          /*
+           * ⚠⚠ **'오류 문구가 없다' 를 '원하는 것을 읽었다' 로 쓰지 말 것**(v2.545 —
+           * 사용자 신고 "아직 버전명이 나오지 않네").
+           *
+           * v2.544 의 버전 항목은 후보가 둘(`uemcli /sys/general show -detail` → `svc_diag`)인데
+           * 후보를 넘어가는 조건이 `cliLooksError` 하나뿐이었다. 실측:
+           *     svc_diag 출력            → cliLooksError = false (정상)
+           *     버전이 **없는** 정상 출력 → cliLooksError = false  ← 여기서 멈춘다
+           * 그래서 첫 후보가 오류만 안 내면 **버전이 없어도 거기서 체인이 끝나** `svc_diag` 를
+           * 아예 부르지 않았다. 수집은 성공인데 버전 열만 비었다(화면 그대로).
+           * 이것은 v2.525 규약('결과가 비어 있지 않다를 읽었다로 쓰지 말 것')을 어긴 것이다.
+           *
+           * `accept(stdout)` 는 **그 항목이 실제로 원하는 것을 얻었는지**를 본다. 거짓이면 그
+           * 후보는 실패로 보고 다음 후보로 넘어간다 — 넘어갈 후보가 없으면 그 항목은 오류다.
+           * ⚠ 파싱이 무거운 항목(풀 상세 등)에 붙이지 말 것 — 여기서 파싱을 두 번 하게 된다.
+           *   가볍게 판정할 수 있는 항목에만 쓴다(버전은 정규식 한 번이다).
+           */
+          const wanted = typeof spec.accept === 'function' ? !!spec.accept(stdout) : true;
+          const looksError = cut || cliLooksError(stdout, stderr) || !wanted;
           // v2.539: 소요·끊김·자동응답 횟수를 원문 옆에 남긴다 — '형식이 다르다' 와 '끊겼다' 는 조치가 다르다.
           //   (실제 사고: 인증서 프롬프트 에코 루프가 400회 응답 뒤 명령을 죽였는데 화면은 형식 탓을 했다.)
           raw.push({
@@ -172,7 +192,11 @@ export async function runCliSession(device, specs, { clean = (t) => t, budgetMs 
             };
           }
           if (looksError) {
-            lastErr = new Error(r.abortReason || firstLine(stdout || stderr) || '빈 출력');
+            // '오류를 냈다' 와 '원하는 값이 없다' 는 조치가 다르다 — 사유를 구분해 남긴다.
+            lastErr = new Error(r.abortReason
+              || (!cut && !cliLooksError(stdout, stderr) && !wanted
+                ? `${cmd}: 실행은 됐지만 원하는 값이 없습니다(다음 후보로 넘어감).`
+                : (firstLine(stdout || stderr) || '빈 출력')));
             continue;
           }
           out[spec.key] = stdout;
