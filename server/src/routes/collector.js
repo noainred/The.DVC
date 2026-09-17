@@ -126,6 +126,33 @@ collectorRouter.get('/ping', (req, res) => {
   res.json({ ok: true, datacenter: config.collector.datacenter || '', version: currentVersion(), agent: config.agent.name || '', hostname: os.hostname() });
 });
 
+/**
+ * 엣지 로그 + 진행상태(v2.549 — 사용자 요청 "진행상태를 edge 의 로그를 읽어와서 확인").
+ *
+ * 중앙이 **필요할 때만** 당긴다 — 상시 트래픽 0. `collector/puller.js:23` 이 이미 같은 경로로
+ * `/export` 를 당기고 있으므로 **새 네트워크 허용이 필요 없다**.
+ *
+ * ⚠ 이 응답에는 그 법인 포탈의 콘솔 로그가 들어 있다(호스트명·IP 가 흔하다). 그래서
+ *   ① COLLECTOR_TOKEN 게이트(다른 엔드포인트와 같다) ② `edgelog/redact.js` 가 출구에서 비밀을 가림
+ *   ③ 중앙 화면은 admin 전용(`routes/api/edgeLog.js`) — **셋을 같이 지킬 것.**
+ * ⚠ 본문 크기는 `limit`(기본 400줄·최대 1,000줄)이 막는다. 잘린 것은 `logs.truncated` 로 밝힌다.
+ */
+collectorRouter.get('/edge-log', async (req, res) => {
+  if (!config.collector.token) { logCollectorDeny(req, 'edge-log'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
+  if (!checkToken(req)) { logCollectorDeny(req, 'edge-log'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+  try {
+    const { collectEdgeLog } = await import('../edgelog/collect.js');
+    const snap = await collectEdgeLog({
+      since: req.query.since, level: req.query.level,
+      limit: req.query.limit, withStatus: String(req.query.status ?? '1') !== '0',
+    });
+    res.json({ ok: true, ...snap });
+  } catch (err) {
+    // 무음 실패 금지 — 중앙이 '왜 못 읽었는지' 를 화면에 적을 수 있어야 한다.
+    res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) });
+  }
+});
+
 // 중앙 포탈이 이 엣지의 로컬 계정 비밀번호를 원격 변경(기본 비번 일괄 교체용).
 // COLLECTOR_TOKEN 가드 — 토큰을 가진 중앙만 호출 가능. 비밀번호는 로그/감사에 남기지 않는다.
 collectorRouter.post('/set-password', express.json({ limit: '4kb' }), (req, res) => {

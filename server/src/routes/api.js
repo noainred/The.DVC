@@ -23,6 +23,7 @@ import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.2
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
 import { registerPartFaults } from './api/partFaults.js'; // 파트 장애(물리 부품 장애 기록·알림, v2.547)
+import { registerEdgeLog } from './api/edgeLog.js'; // 엣지 로그·진행상태(중앙이 당긴다 + 폴백, v2.549)
 import { registerPdu } from './api/pdu.js';               // PDU 정보(APC Rack PDU 2G, v2.424)
 import { registerSerialLookup } from './api/serialLookup.js'; // 시리얼 통합 조회(v2.412)
 import { registerRma } from './api/rma.js';                   // 원격 명령 실행(RMA, v2.416)
@@ -74,6 +75,7 @@ registerVmClone(api);
 registerStorageMon(api);
 registerSanSwitch(api);
 registerPartFaults(api);
+registerEdgeLog(api);
 registerPdu(api);
 registerSerialLookup(api);
 registerRma(api);

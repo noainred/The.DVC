@@ -1,0 +1,78 @@
+/**
+ * edgelog/redact.js — 엣지 상태·로그를 중앙으로 보내기 전에 **비밀을 지운다**(v2.549).
+ *
+ * server/CLAUDE.md 불변조건: "비밀 값은 어떤 API 응답에도 싣지 않는다".
+ * 이 경로는 각 모듈의 `*Status()` 반환을 **그대로** 실어 나르므로, 어느 모듈이 상태에 토큰·비밀번호를
+ * 담기 시작하면 그 순간 중앙 화면으로 새어 나간다. 모듈을 하나씩 감사하는 대신 **출구에서** 훑는다.
+ *
+ * 규칙:
+ *  · 키 이름이 `secretVault.SECRET_FIELDS` 와 정확히 같거나(`password`·`token`·…),
+ *    `SECRET_KEY_RE`(`…_TOKEN`·`…_PASSWORD`·`…_KEY` 꼴)에 걸리면 값을 `'[가림]'` 으로 바꾼다.
+ *  · ⚠ **키를 지우지 않고 표식을 남긴다** — 지우면 화면이 '그 필드가 없다' 고 오해한다(v2.538 규약).
+ *  · 값이 없거나 빈 문자열이면 그대로 둔다 — `''` 자체가 진단이다(배포가 비밀을 안 실어 왔다).
+ *  · 깊이·노드 수 상한이 있다(순환 참조·거대 객체가 이 함수에서 멈추지 않게).
+ *
+ * ⚠ **이것은 최후 방어선이지 면죄부가 아니다.** 새 `*Status()` 를 만들 때 비밀을 넣지 않는 것이 먼저다.
+ */
+import { SECRET_FIELDS } from '../security/secretVault.js';
+import { isSecretEnvKey } from '../util/envRedact.js';
+
+export const MASK = '[가림]';
+const MAX_DEPTH = 8;
+const MAX_NODES = 5_000;
+
+/** 이 키의 값을 가려야 하는가. 정확 일치(SECRET_FIELDS) + env 스타일 접미(SECRET_KEY_RE). */
+export function isSecretKey(k) {
+  const s = String(k || '');
+  if (SECRET_FIELDS.has(s)) return true;
+  if (isSecretEnvKey(s)) return true;
+  /*
+   * `…Password`·`…Token`·`…Secret`·`…PrivateKey`·`…ApiKey` 같은 카멜케이스 접미(모듈마다 이름이 다르다).
+   * ⚠ **`key$` 를 통째로 넣지 말 것** — 이 저장소에는 비밀이 아닌 `deviceKey`·`partKey`·`dbKey` 가 많고
+   *   그것들이 가려지면 파트 장애·수집 화면의 식별자가 통째로 `[가림]` 이 된다(진단 불가).
+   */
+  return /(password|passwd|passphrase|secret|privatekey|apikey)$/i.test(s) || /(?:^|[a-z0-9])token$/i.test(s);
+}
+
+/**
+ * 객체를 깊이 훑어 비밀 값을 가린다. 원본은 건드리지 않는다(새 객체를 만든다).
+ * @returns {{ value:any, masked:number, truncated:boolean }} `masked` = 가린 개수(화면이 밝힌다)
+ */
+export function redactDeep(input) {
+  let masked = 0;
+  let nodes = 0;
+  let truncated = false;
+  const seen = new WeakSet();
+
+  const walk = (v, depth) => {
+    if (++nodes > MAX_NODES) { truncated = true; return '[상한]'; }
+    if (v === null || typeof v !== 'object') return v;
+    if (depth >= MAX_DEPTH) { truncated = true; return '[깊이 상한]'; }
+    if (seen.has(v)) return '[순환]';
+    seen.add(v);
+    if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));
+    const out = {};
+    for (const [k, val] of Object.entries(v)) {
+      // 빈 값은 그대로 — `''`·null 자체가 진단이다(비밀이 실려 오지 않았다는 사실).
+      if (isSecretKey(k) && val !== '' && val != null) { out[k] = MASK; masked += 1; continue; }
+      out[k] = walk(val, depth + 1);
+    }
+    return out;
+  };
+
+  return { value: walk(input, 0), masked, truncated };
+}
+
+/**
+ * 로그 한 줄에서 비밀처럼 보이는 것을 가린다.
+ * ⚠ 로그는 자유 문자열이라 **완전할 수 없다** — 표본 감사(v2.549)에서 이 저장소의 로그 문구는
+ *   토큰 값을 찍지 않았지만(`[partfault-push] 비활성 — CENTRAL_URL/CENTRAL_TOKEN 없음` 처럼
+ *   **이름만** 적는다), 앞으로 누가 값을 찍을 수 있다. `KEY=value`·`token: value` 꼴만 잡는다.
+ *   잡지 못하는 형태가 있다는 사실을 화면이 말해야 한다(`logRedactNote`).
+ */
+export function redactLogLine(line) {
+  return String(line == null ? '' : line)
+    .replace(/((?:token|password|passwd|passphrase|secret|apikey|api_key)\s*[=:]\s*)(\S+)/gi, `$1${MASK}`)
+    .replace(/\b(Bearer\s+)\S+/gi, `$1${MASK}`)
+    .replace(/(X-[A-Za-z-]*Token\s*[=:]\s*)\S+/gi, `$1${MASK}`);
+}
