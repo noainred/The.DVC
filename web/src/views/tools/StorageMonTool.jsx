@@ -18,7 +18,7 @@ import UnityConfigPanels from './UnityConfigPanels.jsx';   // v2.525: Unity 구�
 import UnityCapacityPlanPanel from './UnityCapacityPlanPanel.jsx'; // v2.540: Unity 용량 산정
 import CollectActivity from './CollectActivity.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { healthBadge, sectionBadge } from './storageNodeText.js';   // v2.526: 헬스 배지 색 판정(순수)
+import { healthBadge, sectionBadge, cliCutText } from './storageNodeText.js';   // v2.526: 헬스 배지 색 판정(순수)
 import { authFailInfo } from './storageAuthText.js';  // v2.528: 401 진단 문구(순수)
 import { capacityRows, srpRows, subscribedNote, usageTrust } from './powermaxCapacityText.js'; // v2.534: 구독/할당/실제기록(순수)
 import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
@@ -772,7 +772,7 @@ function CliRawList({ raw, mode, truncated }) {
             <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11.5, color: x.ok ? 'var(--green)' : 'var(--red)', whiteSpace: 'normal' }}>
               {x.ok ? '✓' : '✗'} [{x.key}] {x.cmd}
               <span className="muted" style={{ marginLeft: 8, fontWeight: 400 }}>
-                {x.ms != null ? `${(x.ms / 1000).toFixed(1)}초` : ''}{ans(x) ? ` · 자동응답 ${ans(x)}` : ''}{x.timedOut ? ' · 시한 초과' : (x.truncated ? ' · 응답 상한으로 끊김' : '')}
+                {x.ms != null ? `${(x.ms / 1000).toFixed(1)}초` : ''}{ans(x) ? ` · 자동응답 ${ans(x)}` : ''}{cliCutText(x)}
               </span>
             </div>
             <pre style={{ margin: '2px 0 0', padding: '6px 8px', background: 'rgba(148,163,184,.08)', borderRadius: 6, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{x.sample || '(빈 출력)'}</pre>

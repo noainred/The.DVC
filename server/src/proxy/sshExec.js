@@ -214,6 +214,28 @@ const WIDE_PTY = Object.freeze({
  * ⚠ 규칙에 없는 프롬프트(예: 계정/비밀번호 요구)가 나오면 답하지 않고 시한까지 기다렸다가
  *   **모아 둔 출력을 살려** 돌려준다 — 그 출력이 '무엇을 더 물었는지' 를 화면이 보여주는 근거다.
  */
+/**
+ * ⚠⚠ **`sudo` 비밀번호 프롬프트는 답하지 않고 즉시 중단한다**(v2.543 — 사용자 재현으로 확정).
+ *
+ * 재현(사용자, 2026-09-17, Unity 10.94.41.237 · 계정 `service`):
+ *   `ssh    service@host 'uemcli /stor/config/pool show -detail'` → **정상 출력**
+ *   `ssh -tt service@host 'uemcli /stor/config/pool show -detail'` → `[sudo] password for root:` 에서 **정지**
+ * 계정·명령·호스트가 같고 **`-tt`(PTY 강제) 하나만** 다른데 증상이 그대로 재현됐다. 그리고 그
+ * 프롬프트는 SSH 인증 직후, **출력이 시작되기 전에** 떴다 — 즉 `uemcli` 는 **실행조차 되지 않았다**.
+ *
+ * ⚠ **여기에 비밀번호를 자동으로 보내지 말 것.** 장비가 묻는 것은 **`root`** 비밀번호인데 우리가
+ * 가진 것은 접속 계정(`service`) 비밀번호다. 틀린 값을 매 주기 반복하면 계정이 잠긴다
+ * (`util/bulkRun.js` 의 '자동 재시도 금지' 와 같은 이유). 그래서 `answer` 가 아니라 `abort` 다.
+ * ⚠ 45초 시한을 기다리지 않는다 — 명령 3개면 135초를 통째로 버린다(실측: 사용자 화면 45.1초 × 3).
+ */
+export const ABORT_PROMPTS = Object.freeze({
+  sudoPassword: {
+    re: /\[sudo\]\s*password\s+for\s+\S+\s*:\s*$/i,
+    reason: 'sudo 비밀번호를 요구합니다 — PTY 세션에서 계정 환경이 sudo 를 부릅니다.'
+      + ' 포탈은 root 비밀번호를 가지고 있지 않고, 틀린 값을 반복하면 계정이 잠기므로 응답하지 않습니다.',
+  },
+});
+
 export const PROMPT_RULES = Object.freeze({
   pager: { re: PAGER_PROMPT, answer: '\n', capAnswer: 'q\n' },
   // uemcli 인증서 수락. 꼬리에서만 본다 — 선택지 블록이거나 실제 입력 프롬프트일 때.
@@ -298,6 +320,13 @@ export function execAnswered(conn, command, {
         // 꼬리에서만 프롬프트를 본다 — 본문에 같은 문구가 있어도 오응답하지 않게.
         // ⚠ 그리고 **마지막 응답 이후 새로 온 부분**만 본다(위 머리말 — 우리 응답의 에코로 다시 매치하지 않게).
         const tail = stdout.slice(Math.max(answeredUpTo, stdout.length - 400)).replace(ANSI_RE, '');
+        // ⚠ 답할 수 없는 프롬프트(sudo)를 만나면 **기다리지 않고** 끝낸다 — 시한까지 매달리면
+        //   명령마다 45초를 버리고, 화면에는 '형식 문제' 처럼 보인다(v2.543 실제 사고).
+        for (const [k, r] of Object.entries(ABORT_PROMPTS)) {
+          if (!r.re.test(tail)) continue;
+          kill();
+          return finish(resolve, out({ code: null, truncated: true, aborted: k, abortReason: r.reason }));
+        }
         const hit = active.find(([, r]) => r.re.test(tail));
         if (!hit) return;
         const [key, rule] = hit;

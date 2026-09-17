@@ -144,6 +144,23 @@ export function healthBadge(raw) {
  * @param {string} v 섹션 값(`'ok'` · `'skip'` · `'미수집…'` · `'오류: …'`)
  * @returns {{tone:'green'|'gray'|'red', text:string, title:string}}
  */
+/**
+ * CLI 명령 한 줄의 **왜 끊겼나** 꼬리 문구(v2.543).
+ *
+ * ⚠⚠ **중단(abort)을 '응답 상한' 이라 말하지 말 것 — 조치가 정반대다.**
+ * 응답 상한은 상한을 늘리면 되고 시한 초과는 시한을 늘리면 되지만, `[sudo] password for root:`
+ * 처럼 **우리가 답할 수 없는 프롬프트**는 늘려도 영원히 안 된다(포탈은 root 비밀번호를 갖고
+ * 있지 않고, 틀린 값을 반복하면 계정이 잠긴다). v2.542 까지 갈래가 둘뿐이라 sudo 중단이
+ * `· 응답 상한으로 끊김` 으로 표시됐다 — 사용자가 상한을 늘리러 간다.
+ */
+export function cliCutText(x) {
+  if (!x) return '';
+  if (x.aborted) return ' · 중단됨(답할 수 없는 프롬프트)';
+  if (x.timedOut) return ' · 시한 초과';
+  if (x.truncated) return ' · 응답 상한으로 끊김';
+  return '';
+}
+
 export function sectionBadge(v) {
   const s = String(v ?? '').trim();
   if (s === 'ok') return { tone: 'green', text: 'OK', title: '수집 성공' };
