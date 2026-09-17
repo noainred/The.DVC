@@ -22,6 +22,8 @@ import { normalizeSettings, DEFAULTS } from '../src/bmusage/settings.js';
 import { linuxCommand, winCommand, shapeLinux, WIN_PS } from '../src/bmusage/collectors/osSsh.js';
 import { dayKey, METRICS } from '../src/bmusage/db.js';
 import { applyScope } from '../src/routes/api/bmUsage.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // ── 환산 코어 ────────────────────────────────────────────────────────────────
 test('첫 표본·리셋·간격 비정상은 0 이 아니라 null', () => {
@@ -304,6 +306,25 @@ test('Windows 는 첫 주기부터 값이 나온다(순간값)', () => {
   assert.equal(r.row.disk_busy_pct, 12);
   assert.equal(r.row.net_pct, 0.8);
   assert.equal(r.next, null, 'Windows 는 다음 주기용 누적값이 필요 없다');
+});
+
+test('⚠ exec 시한은 위치 인자다 — 객체를 넘기면 NaN 이 되어 항상 즉시 타임아웃된다', () => {
+  /*
+   * `proxy/sshExec.js:87` 의 `exec(conn, command, timeoutMs)` 는 **위치 인자**이고
+   * `setTimeout(fn, Math.max(1000, timeoutMs))` 을 쓴다. 객체를 넘기면 `Math.max` 가 **NaN** 이 되고
+   * `setTimeout(fn, NaN)` 은 **즉시 발화**한다(실측 8ms) — OS SSH 수집이 항상 즉시 실패한다.
+   * 목 데이터로는 드러나지 않아 자체 재검토에서 잡았다. 소스를 검사해 재발을 막는다.
+   */
+  const src = fs.readFileSync(path.join(import.meta.dirname, '../src/bmusage/collectors/osSsh.js'), 'utf8');
+  // ⚠ 정규식이 첫 `)` 에서 멈추면 `exec(linuxCommand(mounts)` 만 잡힌다 — **줄 단위**로 본다.
+  const calls = src.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.includes('await exec('));
+  assert.ok(calls.length >= 2, `exec 호출을 찾지 못했다: ${calls.length}`);
+  for (const c of calls) {
+    assert.ok(!/\{\s*timeoutMs/.test(c), `객체를 넘기고 있다(NaN → 즉시 타임아웃): ${c}`);
+    assert.match(c, /,\s*[A-Z_]+\s*\);$/, `시한을 위치 인자(상수)로 넘겨야 한다: ${c}`);
+  }
+  // NaN 이 즉시 발화한다는 사실 자체도 고정한다(근거를 문서가 아니라 테스트가 갖는다).
+  assert.ok(Number.isNaN(Math.max(1000, { timeoutMs: 30_000 })));
 });
 
 // ── 설정·DB·scope ────────────────────────────────────────────────────────────

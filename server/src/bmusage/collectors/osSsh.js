@@ -149,12 +149,15 @@ export async function collectOsUsage(osHost = {}, { signal } = {}) {
       readyTimeout: READY_TIMEOUT_MS, signal,
     }, async ({ exec }) => {
       const tryLinux = async () => {
-        const r = await exec(linuxCommand(mounts), { timeoutMs: CMD_TIMEOUT_MS });
+        // ⚠ `exec` 는 `(cmd, timeoutMs)` **위치 인자**다(`sshExec.js:87`). 객체를 넘기면
+        //   `Math.max(1000, {…})` 이 **NaN** 이 되고 `setTimeout(fn, NaN)` 은 즉시 발화해
+        //   **항상 즉시 타임아웃**된다(v2.550 자체 재검토에서 잡았다 — 목 데이터로는 드러나지 않는다).
+        const r = await exec(linuxCommand(mounts), CMD_TIMEOUT_MS);
         const shaped = shapeLinux(r.stdout || '', mounts);
         return shaped ? { ...shaped, ok: true, stderr: (r.stderr || '').slice(0, 300) } : null;
       };
       const tryWin = async () => {
-        const r = await exec(winCommand(), { timeoutMs: CMD_TIMEOUT_MS });
+        const r = await exec(winCommand(), CMD_TIMEOUT_MS);
         const shaped = parseWinPerf(r.stdout || '');
         // ⚠ '출력이 비어 있지 않다' 를 '읽었다' 로 쓰지 않는다(v2.525 규약) — 실제로 읽은 항목이 있어야 한다.
         return shaped.read.length ? { ...shaped, ok: true, counters: null, mounts: [], mountsMissing: [], stderr: (r.stderr || '').slice(0, 300) } : null;
