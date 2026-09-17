@@ -90,6 +90,12 @@ const SPECS = [
   // Subscription·Alert threshold·RAID·Drives 를 준다(실측 캡처로 확인).
   { key: 'pools', section: 'pools', when: 'always', answered: true,
     cmds: ['uemcli /stor/config/pool show -detail', 'uemcli /stor/config/pool show', 'uemcli -output csv /stor/config/pool show -detail'] },
+  // v2.540: **시스템 레벨 용량**(사용자 제공 화면 `/stor/general/system show`) — Free/Used/Preallocated/
+  //   Total + 데이터 감축을 한 줄로 준다. 풀 합계와 **교차 검증**하는 용도다(둘이 어긋나면 풀 밖 공간이
+  //   있거나 우리가 풀을 놓친 것이다 — 화면이 그 사실을 밝힌다). 용량의 진실은 여전히 풀 합계를 쓴다
+  //   (`capacityBasisNote`) — 이 값으로 덮어쓰지 않는다. 덮어쓰려면 풀별 내역이 없어져 산정이 불가능하다.
+  { key: 'sysCapacity', when: 'always', answered: true,
+    cmds: ['uemcli /stor/general/system show', 'uemcli -output csv /stor/general/system show'] },
   { key: 'sps', section: 'nodes', when: 'always', answered: true,
     cmds: ['uemcli /env/sp show -detail', 'uemcli /env/sp show', 'uemcli -output csv /env/sp show -detail'] },
   { key: 'alerts', section: 'alerts', when: 'always', answered: true,
@@ -252,6 +258,7 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
   let total = 0;
   let used = 0;
   let subscribed = 0;
+  let preallocated = 0;
   const poolTotalOf = (p) => toBytes(pick(p, 'Total space', 'Size total', 'Total capacity', 'Total'));
   for (const p of pools) {
     const name = nameOf(p, norm.length, '');
@@ -266,8 +273,11 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
     const usedSource = u ? 'device' : (t && free ? 'derived' : null);
     if (!u && usedSource === 'derived') u = Math.max(0, t - free);
     const sub = toBytes(pick(p, 'Subscription', 'Size subscribed', 'Subscribed'));
+    // v2.540: 선할당 — 용량 산정의 항등식(`할당 + 잔여 + 선할당 = 전체`)을 검사하는 데 쓴다.
+    //   실측(pool_1): 106.9T = 27.2T + 79.6T + 2.2G — 오차 0. 어긋나면 필드를 잘못 읽은 것이다.
+    const prealloc = toBytes(pick(p, 'Preallocated', 'Preallocated space'));
     if (!t) continue;               // 용량을 못 읽은 풀은 0 으로 채우지 않고 뺀다(개수는 아래에서 밝힌다)
-    total += t; used += u; subscribed += sub;
+    total += t; used += u; subscribed += sub; preallocated += prealloc;
     const pctNum = (v) => { const n = Number(String(v || '').replace('%', '').trim()); return Number.isFinite(n) ? n : undefined; };
     norm.push({
       name, totalBytes: t, usedBytes: u, pct: Math.round((u / t) * 1000) / 10,
@@ -275,6 +285,7 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
       health: healthOf(p),
       freeBytes: free || undefined,
       subscribedBytes: sub || undefined,
+      preallocatedBytes: prealloc || undefined,
       // 구독률 — 장비가 준 값을 우선하고, 없으면 계산한다(계산값임을 구분하지 않으면 근거가 흐려지므로
       // 장비값이 있을 때만 `subscriptionPctSource:'device'`).
       subscriptionPct: pctNum(pick(p, 'Subscription percent')) ?? (t ? Math.round((sub / t) * 1000) / 10 : undefined),
@@ -297,6 +308,7 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
     snap.capacity = { totalBytes: total, usedBytes: used, pct: total ? Math.round((used / total) * 1000) / 10 : null };
     snap.sections.capacity = 'ok';
     snap.sections.pools = 'ok';
+    if (preallocated > 0) snap.extra.preallocatedBytes = preallocated;
     if (subscribed > 0) {
       snap.extra.subscribedBytes = subscribed;
       snap.extra.subscriptionPct = total ? Math.round((subscribed / total) * 1000) / 10 : null;
@@ -314,6 +326,34 @@ export function normalizeUnitySsh(device, out, { usedCmds = {}, deep = deepEnabl
     // 명령은 돌았는데 풀을 하나도 못 읽었다 — '용량 0' 이 아니라 **형식 미인식**이다.
     snap.sections.capacity = '오류: 풀 출력에서 용량 필드를 인식하지 못했습니다(연결 테스트의 원문 확인).';
     snap.sections.pools = snap.sections.capacity;
+  }
+
+  /* ── 시스템 레벨 용량(교차 검증 전용, v2.540) ──
+     사용자 제공 화면 `/stor/general/system show`:
+       Free space = 87568746020864 (79.6T) · Used space = 29973250195456 (27.2T)
+       Preallocated space = 2400305152 (2.2G) · Total space = 117544396521472 (106.9T)
+     ⚠ **용량을 이 값으로 덮어쓰지 않는다** — 풀별 내역이 없어져 용량 산정(임계·구독·RAID)이 불가능해진다.
+       대신 풀 합계와 비교해 어긋나면 그 사실을 밝힌다(풀 밖 공간이 있거나 우리가 풀을 놓친 것이다). */
+  const sysCap = recordsFor(out.sysCapacity || '', ['Total space', 'Used space', 'Free space']);
+  if (sysCap.length) {
+    const c = sysCap[0];
+    const st = toBytes(pick(c, 'Total space'));
+    const su = toBytes(pick(c, 'Used space'));
+    const sf = toBytes(pick(c, 'Free space'));
+    if (st > 0) {
+      snap.extra.systemCapacity = {
+        totalBytes: st,
+        usedBytes: su || 0,
+        freeBytes: sf || 0,
+        preallocatedBytes: toBytes(pick(c, 'Preallocated space')) || undefined,
+        dataReductionRatio: pick(c, 'Data Reduction ratio', 'Data Reduction Ratio') || undefined,
+        dataReductionSaved: toBytes(pick(c, 'Data Reduction space saved')) || undefined,
+      };
+      // 풀 합계와 1GiB 넘게 차이 나면 밝힌다(조용히 한쪽만 쓰지 않는다).
+      if (total > 0 && Math.abs(st - total) > 1024 ** 3) {
+        snap.extra.capacityCrossCheck = `시스템 전체 용량(${st})과 풀 합계(${total})가 다릅니다 — 풀에 속하지 않은 공간이 있거나 일부 풀을 읽지 못했습니다. 화면 수치는 **풀 합계** 기준입니다.`;
+      }
+    }
   }
 
   /* ── 스토리지 프로세서 ── */
