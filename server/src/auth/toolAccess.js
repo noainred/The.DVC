@@ -55,6 +55,8 @@ export const TOOL_PATH_KEYS = Object.freeze({
   // 한 도구에 묶으면 그 엔드포인트를 쓰는 **다른 화면이 같이 막힌다**(가장 위험한 실수).
   'orphan-vmdk': 'orphanvmdk',       // OrphanVmdk.jsx 전용(v2.505)
   'part-faults': 'part-faults',      // PartFaults.jsx 전용(v2.547) — 물리 부품 장애 기록·알림
+  'edge-log': 'edge-log',            // EdgeLog.jsx 전용(v2.549) — 엣지 로그·진행상태(adminOnly)
+  'edge-log-local': 'edge-log',      // 〃 이 포탈 자신의 로그(경로를 `/:agent` 와 섞지 않기 위해 분리)
   'service-check': 'davinci-svc',    // DavinciChecks.jsx ServiceCheck 전용
   'vmware-config': 'vmware-backup',  // DavinciChecks.jsx VmwareConfigBackup 전용
   pdu: 'pdu',

@@ -857,6 +857,40 @@ centralRouter.post('/part-faults', async (req, res) => {
   return res.json({ ok: true, agent, protocol: r.protocol, devices: r.devices, rejected: r.rejected, open: r.open, centralEnabled: partFaultEnabled().enabled });
 });
 
+/**
+ * 엣지 로그 폴백 큐(v2.549) — 중앙이 그 엣지에 **닿지 못할 때만** 쓰인다.
+ * 엣지가 대기 요청을 인출(claim)하고 결과를 회신(ack)한다. 미들웨어가 이미 `?agent=` 와 토큰의
+ * agent 일치를 강제하므로(개별 토큰), 여기서는 그 값을 그대로 쓴다.
+ */
+centralRouter.get('/edge-log-jobs', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = String(req.centralAuth.agent || req.query.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const { takeEdgeLogJob } = await import('../central/edgeLogJobs.js');
+  res.json({ ok: true, job: takeEdgeLogJob(agent) });
+});
+
+centralRouter.post('/edge-log-result', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  // ⚠ 저장 키는 **인증된 agent** 다 — 본문의 `node.agent` 를 믿지 않는다(v2.548 F5 와 같은 규칙).
+  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : String(req.body?.agent || req.query?.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  try {
+    const [{ putEdgeLog }, { ackEdgeLogJob }] = await Promise.all([
+      import('../central/edgeLogStore.js'), import('../central/edgeLogJobs.js'),
+    ]);
+    const rec = putEdgeLog(agent, { ...(req.body || {}), via: 'job', ok: true });
+    const { acked } = ackEdgeLogJob(agent);
+    // `acked:false` 는 '요청한 적 없는 회신'(기한 초과로 회수됐거나 중앙이 재시작) — 버리지 않고 밝힌다.
+    res.json({ ok: true, agent, stored: !!rec, acked });
+  } catch (e) {
+    // async throw 는 express 4 가 잡지 않아 요청이 응답 없이 매달린다(v2.548 S1).
+    res.status(400).json({ ok: false, reason: `본문 형식 오류: ${String(e?.message || e).slice(0, 200)}` });
+  }
+});
+
 // 파트 장애 스위치 배포(v2.548 F3) — 엣지가 주기적으로 GET. 중앙 관리자가 전체/엣지별로 정한 값만 내려간다.
 centralRouter.get('/partfault-config', async (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
