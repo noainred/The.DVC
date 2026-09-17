@@ -7,7 +7,7 @@
 
 import { config } from '../config.js';
 import { loadCollectors } from './registry.js';
-import { setRemoteHost, clearCollectorHosts, setCollectorStatus, clearStaleRemote } from './state.js';
+import { setRemoteHost, clearCollectorHosts, setCollectorStatus, getCollectorStatus, clearStaleRemote } from './state.js';
 import { setCollectorServers } from './remoteInventory.js';
 import { getDb } from '../idrac/db.js';
 import { describeError } from '../util/errors.js';
@@ -116,10 +116,13 @@ async function pullNowInner() {
       fails.set(c.id, n);
       // 깜빡임 방지: 한 사이클(이미 내부 재시도 포함)만 실패하면 '저하(degraded)'로 두고 직전 데이터·온라인을
       // 유지한다. 두 사이클 연속(또는 명백한 인증 실패) 실패해야 '연결 안 됨'으로 내린다.
+      // 실패 상태는 **직전 상태 위에 덮는다**(v2.548 리뷰 H5) — 객체를 통째로 바꾸면 version·agent·hostname 이
+      // 사라져 파트 장애 화면의 엣지 분류가 '구버전' 대신 '버전 미상' 으로 떨어진다(조치가 다르다).
+      const prevSt = getCollectorStatus(c.id) || {};
       if (n >= 2 || isAuth) {
-        setCollectorStatus(c.id, { ok: false, error: d.message, fails: n });
+        setCollectorStatus(c.id, { ...prevSt, ok: false, degraded: false, error: d.message, fails: n });
       } else {
-        setCollectorStatus(c.id, { ok: true, degraded: true, error: d.message, fails: n });
+        setCollectorStatus(c.id, { ...prevSt, ok: true, degraded: true, error: d.message, fails: n });
       }
       console.warn(`[collector] ${c.id} pull 실패(${n}): ${d.message}`);
     }

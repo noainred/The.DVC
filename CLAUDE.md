@@ -153,73 +153,117 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       스크린샷 판독에서 실제로 잘려 있었다. 수치로는 안 잡혔다).
     - **요약 줄 접두('검증 결과:' / '등록 결과:')를 지우지 말 것** — 형태가 같아 한 화면에
       나란히 뜨면 사람이 구분하지 못한다(같은 판독에서 발견).
-  - ⚠⚠ **물리 파트(부품) 장애는 '전이만' 기록하고 '확인 불가' 를 정상으로도 장애로도 세지 않는다**
-    (`partfault/` + 웹 `views/tools/PartFaults.jsx`·`partFaultText.js`, v2.547 — 사용자 요청
-    "서버 스토리지 등의 모든 장비에 있는 물리 파트 장애가 발생하면 노티를 발생하고 체계적으로
-    파트 장애를 기록하는 DB 와 화면" · **"엣지에서 수집해서 로컬에서 처리하고 장애만 중앙으로"**.
-    범위 선택: **전체(스토리지 포함)** · 알림 **파트당 1건 즉시** · 선행 수정 없이 착수):
-    - **상태는 다섯이다** — `ok`/`warn`/`fault`/**`unknown`(못 읽음)**/**`absent`(빈 슬롯)**.
-      뒤 둘을 정상에도 장애에도 넣지 않는다. 근거는 실측이다 — v2.526 Unity SPA 의 DIMM 24칸 중
-      12칸이 `REMOVED`(빈 슬롯)인데 그것을 고장으로 세면 **정상 장비에 장애 12건**이 찍힌다.
-      `redfishPartState` 의 판정 순서도 계약이다: **`State==='Absent'` 가 `Health` 보다 먼저**이고,
-      Health 를 못 읽으면 `unknown` 이다(`ok` 로 접지 말 것). 예측 실패(`FailurePredicted`)는
-      **ok→warn 으로만** 올리고 `unknown` 은 건드리지 않는다(올리면 '확인 불가' 가 화면에서 사라진다).
-    - ⚠ **`inv.health` 롤업을 쓰지 말 것** — `idrac/redfish.js:422·464·535` 가
-      `x.health && x.health !== 'OK'` 꼴이라 **빈 값(못 읽음)을 OK 로 접는다**. 파트 단위 원소
-      배열에서 직접 판정해야 '확인 불가' 가 살아남는다.
-    - **전이만 적재한다**(`part_state` upsert + `part_event` append). 행 수를 먼저 계산했다 —
-      파트 모수는 iDRAC 965대 × 37~66개 ≈ **3.5만~6.4만** 이라 매 주기 전량 적재는 **연 10억 행**,
-      전이만이면 연 수만 행이다(v2.504 규약). **`part_state` 를 인메모리로 바꾸지 말 것** —
-      재기동마다 전 파트가 '새 장애' 가 되어 알림이 폭주한다(`pdu/thresholds.js:141` 은 인메모리라
-      그 방식을 쓰면 안 되는 반례다).
-    - ⚠⚠ **닫는 판정이 가장 위험하다**(`transition.js` 다섯 규칙 — 테스트가 하나씩 고정한다):
-      ① 그 장비의 이번 수집이 실패하면 **아무것도 닫지 않는다**(iDRAC 무응답 1회로 전 파트가
-      '복구' 로 기록된다) ② `unknown` 은 **열지도 닫지도 않는다**(열려 있으면 유지) ③ `absent` 로
-      닫을 때 `closeReason` 을 **`removed`/`ok`** 로 나눈다(뽑은 것과 고친 것은 다르다)
-      ④ 관측 목록에서 **사라진 파트는 닫지 않는다**(`missing`) ⑤ 판정은 **장비 단위**다.
-      `held` 는 이벤트를 만들지 않고 사유만 갱신한다 — 화면이 '왜 아직 열려 있나' 를 말한다.
-    - **엣지는 로컬에서 판정하고 `open[]` 만 올린다**(`push.js`). ⚠ **장애가 0건이어도 보낸다** —
-      요약(`scanned`)이 없으면 중앙은 '정상' 과 '수집 안 됨' 을 **구분할 수 없다**(v2.517
-      `perfPush.sendStatusOnly` 와 같은 규약. `storage/push.js:30` 에는 **아직 그 결함이 남아 있다** —
-      장비 0대면 POST 자체를 안 해 중앙이 그 엣지의 존재를 모른다). ⚠ **전이가 아니라 '지금 열린
-      것 전량'** 을 보낸다 — 전이만 보내면 push 1회 유실로 양쪽 상태가 **영구히 어긋난다**.
-      보고가 오래된 엣지(기본 3시간)는 `deviceOk` 를 **전부 false** 로 바꿔 전이가 닫지 못하게 한다.
-    - ⚠⚠ **엣지는 `unknownKeys`(상태를 읽지 못한 파트의 **키만**)를 함께 보낸다.** 없으면 위임
-      장비에서만 규칙 ②가 깨진다 — 엣지는 장애만 보내므로 `unknown` 이 된 파트도 목록에서
-      사라지고, 중앙이 그것을 '해소' 로 읽어 **'정상으로 복귀' 라는 거짓 이력**이 남는다.
-      상한은 **행 수가 아니라 파일 크기**로 정했다(키 ≈40B × 1,000개 × 엣지 28곳 ≈ 1.1MB —
-      `partfault-edge.json` 은 push 마다 맵 전체를 다시 직렬화한다). ⚠ **구버전 엣지(필드 없음)와
-      상한으로 잘린 엣지는 '닫지 않는 쪽' 으로 실패시킨다**(`unknownTruncated`) — 거짓 복구는
-      회복 불가이고 '조금 늦게 닫힘' 은 회복 가능하다. ⚠ 수신에서 필드 부재를 `[]` 로 정규화하지
-      말 것 — 구버전 보고가 '완전한 정보' 로 둔갑해 그 엣지의 장애를 거짓으로 닫는다(v2.547
-      자체 테스트가 이 결함을 잡았다).
-    - ⚠ **위임 장비는 중앙의 스캔에 들어오지 않는다**(중앙 `loadRegistry()` 에 없고
-      `devicesForThisNode()` 도 agent 없는 스토리지만 준다). 그래서 위임 장비의 파트 상태는
-      **그 엣지가 v2.547 이상일 때만** 보인다. 중앙이 `collector/remoteInventory.js` 를 직접
-      판정하게 만들지 말 것 — 엣지가 push 를 시작하는 순간 **같은 부품이 두 번** 열린다.
-    - **파트 키는 `scope:deviceId:kind:partId` 이고 어떤 이름 변경에도 바뀌면 안 된다**(바뀌면 열린
-      장애가 닫히고 새 장애가 열린다). 식별자 **등급**(slot > serial > name > index)을 화면이 밝힌다 —
-      순번(index) 키는 장비가 목록 순서를 바꾸면 **다른 부품을 같은 것으로 본다**. 같은 식별자가 둘이면
-      **조용히 덮어쓰지 않고** 순번을 붙이고 등급을 index 로 낮춘다.
-    - **NIC 링크는 일부러 파트로 세지 않는다** — 링크 다운 대다수가 케이블 미결선·의도적 비활성이라
-      965대 규모에서 대량 오탐이 된다. 게다가 `redfish.js:571` 이 `LinkStatus` 와 `Status.State` 를
-      **한 필드에 섞어** 넣어 값만으로 구분할 수 없다. NIC **카드** health 를 수집하게 되면 그때 넣는다.
-    - ⚠ **알림 문구에서 `**강조**` 를 제거한다**(`notify.js plain()`) — Slack·메일·웹훅에는
-      `BoldText` 가 없어 별표가 그대로 인쇄된다(v2.439·2.440·2.505 실제 사고). 라벨이 이미 종류를
-      담고 있으면 되풀이하지 않는다(`PSU PSU 2`). 발송은 **순차**다 — `alerts.js:373` 처럼 await 없이
-      부르면 100건이 웹훅에 동시 POST 되어 rate limit 으로 통째로 버려진다. 상한(`max`)은 **버리는
-      것이 아니라 밝히는 것**이고, 메일의 60건/시간 초과분(`email:skip`)도 `countDropped` 로 센다.
-      ⚠ 정직 기록 — **'파트당 1건 즉시' 는 폭주 위험을 알린 뒤 사용자가 고른 방식**이다(장비 1대
-      재부팅으로 수십 건이 동시에 날 수 있다). 임의로 묶음 알림으로 바꾸지 말 것.
-    - **스캔은 장비에 접속하지 않는다** — 이미 수집된 스냅샷·인벤토리만 읽는다(965대에 새 Redfish/SSH
-      를 여는 것이 곧 운영 사고다 — `sanswitch/healthCheck.js` 와 같은 판단). 그래서 '지금 점검' 은
-      연타해도 장비 부하가 없지만 **폴러와 재진입 가드를 공유한다**(전이가 겹치면 상태가 꼬인다).
-      인벤토리가 낡으면(기본 90분) `deviceOk=false` 다 — 낡은 값으로 판정하지 않는다.
-    - 기본 **꺼짐(opt-in, `PARTFAULT_ENABLED`)**. 꺼져 있으면 **왜 안 도는지 로그가 말한다**
-      (`startStorageConfigPull` 이 조용히 return 해 '켜졌는지조차 알 수 없던' 것이 이번 조사의
-      확정 결함이다 — 같은 실수 금지). DB 는 `part-faults.db` 이고 **`config.dbDir` 을 따르며
-      `insights/dbLocation.js MIGRATABLE` 에 등재한다**(둘 중 하나만 하면 이력이 사라진다 —
-      `test/dbLocation2451.test.js` 가 자동 검출).
+  - ⚠⚠ **물리 파트(부품) 장애 — v2.548 재설계. '확인 불가' 를 정상으로도 장애로도 세지 않고, 전이만 기록한다**
+    (`partfault/` + 웹 `views/tools/PartFaults.jsx`·`partFaultText.js`. v2.547 사용자 요청 "서버 스토리지 등의
+    모든 장비에 있는 물리 파트 장애가 발생하면 노티를 발생하고 체계적으로 파트 장애를 기록하는 DB 와 화면" ·
+    **"엣지에서 수집해서 로컬에서 처리하고 장애만 중앙으로"** → v2.548 사용자 지시 **"이게 가능한지 검토, 다시
+    설계해줘"**. 6축 조사 + 적대적 반증(7건 중 4건 확정)으로 v2.547 의 결함 9건을 찾아 재설계했다.
+    사용자 선택: **전체 재설계 · 전부 엣지 판정 · 장애 + 판정한 전체 요약**):
+    - ⚠⚠ **정직 기록 — v2.547 은 제(Claude)가 만든 결함 4건이 '최악의 거짓' 그 자체였다**(전부 코드 실행으로 재현):
+      **F1** `redfish.js fetchInventory` 는 어떤 경우에도 던지지 않아(모든 블록이 `catch{}`, try 밖 `await` 0개)
+      연결 거부에도 29ms 만에 신선한 빈 인벤토리가 오는데, 그것을 '부품 0개' 로 읽어 화면이 **초록으로 '모든 부품이
+      정상'** 이라 했다. **F2** 파트 키에 법인 축이 없고 `idrac/registry.js:248·272` 가 id 를 **IP 문자열**로
+      발급해(등록부에 agent 개념 0건) 두 법인의 다른 서버가 중앙 DB 에서 같은 행이 되고 한쪽 장애가 **거짓 '복구'**
+      됐다. **F3** 문서는 opt-in 인데 엣지 push 가 `PARTFAULT_ENABLED` 를 안 봤다. **F4** `extract/storage.js` 의
+      fru 리더가 **존재한 적 없는 자료구조**(평면 맵)를 읽어, 실제 `svcDiag.parseSpinfo` 집계 객체가 오면 없는 부품
+      8개를 지어냈다. 또 v2.547 문서가 "중앙이 remoteInventory 를 판정하면 두 번 열린다" 라고 적은 것은 **이유가
+      틀렸다** — 진짜 이유는 `collector/agent.js:47-57 compactInv` 가 부품 health·serial·locator 를 **전부 빼서**
+      중앙에는 판정할 데이터 자체가 없다는 것이다. 결론이 맞아도 근거가 틀리면 다음 사람이 잘못 판단한다.
+    - **상태는 다섯이다** — `ok`/`warn`/`fault`/**`unknown`(못 읽음)**/**`absent`(빈 슬롯)**. 뒤 둘을 정상에도
+      장애에도 넣지 않는다(v2.526 Unity SPA DIMM 24칸 중 `REMOVED` 12칸 실측 — 고장으로 세면 정상 장비에 장애 12건).
+      `redfishPartState` 판정 순서: `State==='Absent'` 가 `Health` 보다 **먼저**, Health 를 못 읽으면 `unknown`,
+      예측 실패는 ok→warn 만. ⚠ **`inv.health` 롤업을 쓰지 말 것**(빈 값을 OK 로 접는다) — 원소 배열에서 판정.
+    - ⚠⚠ **수집 실패 ≠ 부품 0개(F1)**: `fetchInventory` 가 `inv.collections[<컬렉션>]='ok'|'failed'` 와
+      `inv.reachable` 을 싣는다(**'failed' 를 사전 초기화**하고 성공 지점에서만 'ok' — `if (sysId)` 블록은 Systems
+      GET 실패 시 catch 조차 안 타므로 `{}` 로 시작하면 '읽었는지' 를 말할 수 없다. 변이 검증으로 확인).
+      `extract/idrac.js` 는 실패한 컬렉션의 종류를 **파트를 만들지 않고 `failedKinds`** 로 올리고, 전이는 그 종류의
+      열린 장애를 **`collection-failed` 로 보류**한다(규칙 ⑥). `reachable=false` 면 `deviceOk=false`. 메타 없는
+      구버전 캐시는 **전부 비어 있을 때만** 불통으로 본다(추측 최소화 — ≤30분이면 메타가 생긴다).
+      팬은 Thermal 경로라 `idrac/poller.js` 가 옮겨 넣을 때 `collections.fans` 를 찍는다.
+    - ⚠⚠ **키 체계(F2)**: `partKey = scope:deviceKey:kind:partId` — 장비 축은 **`deviceKey`**(iDRAC: 서비스태그 →
+      UUID → 로컬 id, `DEVICE_KEY_KIND` 로 등급을 밝힌다. `remoteInventory.js:56` 이 이미 내린 판단) 이고, **법인 축은
+      DB 기본키 `(agent, part_key)`** 가 담당한다. partKey 에 agent 를 넣지 않는 이유: `AGENT_NAME` 기본값이
+      `os.hostname()` 이라(config.js:236) 호스트명 변경만으로 전 장애가 닫혔다 열린다. `scan.deviceOk`·`kindFailed`
+      의 키도 **`agent|deviceId`**(`scan.js devKeyOf`) — deviceId 만 쓰면 한 법인의 성공이 다른 법인의 실패를 덮는다.
+      스키마 v1 파일은 open 시 **DROP 후 재생성**하고 `meta.reset` 마커(at·from·to·rows)를 남겨 화면이 배지로
+      밝힌다(v2.534 `capacityBasisMigration` 과 같은 판단 — 기준이 바뀐 이력은 이어 붙이지 않는다).
+    - **판정 지점은 전 장비군 엣지**(사용자 선택). ⚠ 조사는 스토리지·SAN 을 **중앙 판정**으로 권했다 — 엣지 스냅샷이
+      `storage/push.js:29-31 → storageEdge.js:29-31` 로 **축약 없이 중앙에 그대로 도착**하고 BIG_JSON 도 등록돼 있어
+      중앙이 바로 판정할 수 있었다(실제로 돌려 정상 파트 3건 확인). 사용자가 '전부 엣지' 를 골랐으므로 중앙은
+      `devicesForThisNode()`(agent 없는 장비)만 판정한다. **중앙이 위임 장비를 다시 판정하게 만들지 말 것** — 같은
+      부품이 두 번 열린다. 그 대가로 **판정 규칙을 고치면 전 엣지 업그레이드**가 필요하고 구버전 엣지 법인은
+      화면이 빈다 → 화면이 **버전 단위로** 밝힌다(`routes/api/partFaults.js classifyEdges`: fresh/stale/legacy/
+      old-version/silent/unknown-version, `MIN_EDGE_VERSION`). 엣지 버전은 `selfRegister.js:41` 이 이미 보고한다.
+    - **전송은 프로토콜 2 '장애 + 판정한 전체 요약'**(`push.js buildPayload`): 장비마다 `open[]`(상세) +
+      `states{ok,unknown,absent: 키꼬리[]}` + `ok/reason/failedKinds/deviceKey`. v2.547 의 '장애만' 은 실측
+      18.3KB/push 라 회선 근거가 없었고 `unknownKeys`·`unknownOmitted`·`unknownTruncated` 3단 우회를 낳았다 —
+      전량이면 통째로 사라진다. ⚠ **장애 0건이어도 보낸다**(v2.517 `sendStatusOnly` 규약 — `storage/push.js:30`
+      에는 아직 '0대면 POST 안 함' 결함이 남아 있다). 프로토콜 1 보고는 받되 **`deviceOk=false`**(닫지 않는 쪽).
+    - **중앙 수신(`central/partFaultEdge.js`)은 인메모리다** — 디스크에 쓰지 않는다(전량 요약이면 12.5MB·74ms/push,
+      svcmon 이 실측으로 거부한 방식). 진실의 원천은 `part-faults.db`. 재기동 직후 보고가 없으면 전이가
+      `device-failed` 로 보류한다. **agent 는 인증된 값으로 덮어쓴다**(엣지가 법인 귀속을 정하지 못하게, F5).
+      스토리지·SAN 은 `devicesForAgent(agent)` 에 없는 장비를 **버리고 개수를 밝힌다**(`rejected`). iDRAC 은 중앙
+      등록부에 없어 검사 불가 — DB 기본키의 agent 축이 격리한다. 오래된 보고(기본 3시간)는 `deviceOk` 전부 false.
+    - **스위치는 `partfault/settings.js partFaultEnabled()` 하나다**(F3): env `PARTFAULT_ENABLED` > 중앙 설정
+      (`partfault-settings.json`, 엣지별 off 가능) > 기본 꺼짐. 엣지는 `agent/partFaultConfigPull.js` 로 받는다.
+      **엣지에서는 poller(전이·DB·알림)가 돌지 않는다** — 엣지가 스위치를 켜면 알림이 두 번 나가던 것(v2.547).
+    - **탐지 지연(F7)**: `idrac/poller.js` 가 인벤토리를 갱신하면 `partfault/hooks.js onSnapshotRefreshed()` 가
+      디바운스(15초) 후 엣지는 push · 중앙은 판정을 **즉시** 한다. 남는 지연은 인벤토리 주기(30분)뿐이고 그것은
+      iDRAC 부하 때문에 줄이지 않는다 — 화면이 '탐지 지연 상한 = 인벤토리 주기' 를 적는다.
+    - **SAN 추출기(F9, `extract/sanswitch.js`)**: 포트는 `slotPort` 키(slot 등급), **링크 없는 포트는 판정하지
+      않는다**(v2.521 — 상대가 빛을 안 보내므로 낮은 Rx 는 정상, `notJudged` 로 개수 밝힘). 광량 임계·`isLinked` 는
+      `healthCheck.js` 의 export 를 import 한다(숫자 복제 금지 — 테스트가 소스를 검사). **팬/PSU 는 개수만 온다**
+      (`parseFruShow` → `{ok,total}`) → `partId:'all'`·`keyKind:'none'` 그룹 파트 하나. ⚠ 팬을 빼 둔 정상 장비가
+      fault 로 기록될 수 있다(정직 기록 — 어느 팬인지 알 수 없다). **PDU 는 범위 밖**(F8 — 스냅샷에 상태 필드 없음,
+      `SCOPES_OUT_OF_RANGE`). fru 리더(F4)는 `svcDiag` 집계 객체의 `items[]` 만 읽고 **평면 맵 호환은 만들지 않는다**.
+    - **전이만 적재**(`part_state` upsert + `part_event`; 파트 3.5만~6.4만 × 48회/일 = 전량 적재 시 연 10억 행).
+      **닫는 판정 6규칙**(테스트가 하나씩 고정): ① 장비 수집 실패면 닫지 않음 ② `unknown` 은 열지도 닫지도 않음
+      ③ `absent` 는 `removed`/`ok` 사유 구분 ④ 목록에서 사라진 것은 `missing` 보류 ⑤ 장비 단위 ⑥ 컬렉션 단위.
+      **`part_state` 를 인메모리로 바꾸지 말 것**(재기동마다 전 파트가 새 장애 = 알림 폭주).
+    - **알림은 파트당 1건 즉시**(사용자 선택 — 폭주 위험을 알린 뒤 고른 방식. 임의로 묶지 말 것). 본문에서 `**`
+      제거(Slack·메일엔 BoldText 없음), 순차 발송, 상한·`email:skip` 누락을 화면이 밝힌다.
+    - **스캔은 장비에 접속하지 않는다**(스냅샷만). '지금 점검' 은 연타해도 장비 부하 0 이지만 폴러와 재진입 가드 공유.
+      DB 는 `config.dbDir` 을 따르고 `insights/dbLocation.js MIGRATABLE` 에 등재(둘 중 하나만 하면 이력이 사라진다).
+    - ⚠ **정직 기록 — 실장비에서 확인하지 못한 것**: SSH/REST 수집 경로에 따라 SAN `slotPort` 표기(`12` vs `0/12`)가
+      달라 같은 장비의 파트 키가 바뀔 수 있다(추정) · `fetchInventory` 의 멤버 단위 GET 실패(루트는 성공)는 'ok' 로
+      남아 규칙 ④(missing)가 받는다 · 이 현장 iDRAC 의 IP 중복 실재 여부(목 데이터라 확인 불가).
+    - ⚠⚠ **적대적 리뷰(정확성·보안·정직성 3렌즈 + 반증, v2.548 같은 릴리스) 확정 13건 — 되돌리지 말 것**:
+      · **S1** `putEdgeReport` 는 `owned[scope]` 를 `Object.hasOwn + instanceof Set` 으로만 읽고 devices/open/states
+        의 null·문자열 원소를 건너뛴다. scope `constructor` 하나로 TypeError 가 났고 **express 4 는 async 핸들러의
+        throw 를 잡지 않아 요청이 응답 없이 매달렸다**(리뷰 실측 hang). 라우트도 try/catch → 400. 새 central 수신은 같은 규칙.
+      · **S2** 수신 상한은 장비 수만이 아니라 **파트 수**다 — `DEVICE_PART_MAX`(2,000)·`REPORT_PART_MAX`(50,000)·
+        `SCANNED_MAX_BYTES`(32KB). 장비 1개에 키 꼬리 120만 개(16MB, BIG_JSON 이내)가 파트 객체로 펼쳐져 agent 당
+        ~450MB 상주(리뷰 실측 RSS 556MB). 잘린 장비는 `ok:false`(`parts-capped`)로 **닫지 않는 쪽**, 개수는 `partsOmitted`.
+      · **C1** 같은 `(agent|partKey)` 가 한 주기에 두 번 관측되면 **가장 나쁜 상태 하나**(fault>warn>unknown>ok)만 쓴다.
+        등록부에 같은 서버가 IP 와 서비스태그 두 id 로 있으면 실제로 생기고, 예전엔 ok 관측이 closed·fault 관측이 updated
+        를 만들어 DB 에서 닫힘이 이겨 **매 주기 열림/닫힘 + 알림 반복**이었다. `stats.duplicateObserved` 로 밝힌다.
+      · **C2/H3** 오래된(3시간) 엣지 보고의 파트는 `observed` 에 넣지 않는다 — 넣으면 lastSeenAt 이 '지금' 으로 갱신
+        (거짓 신선)되고 그 보고의 ok 꼬리가 그동안 열린 장애를 **닫는다**. 전이도 `deviceOk===false` 장비의 ok 관측은
+        닫지 않고 보류한다(방어선 2중).
+      · **C3** Systems GET 만 실패하고 Chassis 는 응답한 주기에 장비 키가 서비스태그→IP 로 **떨어지면 파트를 내지 않는다**
+        (`inv.collections.system`·`keyUnstable` → `system-failed` 보류). 그대로 두면 같은 PSU 가 IP 키로 두 번째 행을
+        열고 복구 뒤 그 행이 `missing` 으로 영원히 남는다. 등록부에 서비스태그가 있으면 흔들리지 않으므로 진행한다.
+      · **C4** 같은 이름 부품이 둘이면 **첫 항목도** `#1`·index 등급이다 — 첫 항목만 name 으로 두면 그 키도 배열 순서에
+        묶여 있는데 화면은 경고하지 않고, Members 순서가 뒤집히면 고장 부품이 ok 로 닫히고 #2 가 새로 열린다(재현).
+      · **C5/H7** 보류 사유를 나눴다 — `unassigned`(그 agent 가 보고했는데 이 장비가 없음: 재배정·등록 삭제) ·
+        `no-report`(보고 자체 없음) · `edge-stale` · `edge-legacy`. `transition` 은 `scan.agentsReported`·
+        `scan.deviceReason` 으로 구분한다(없으면 예전대로 `device-failed`). 재배정·삭제된 장비의 장애는 **자동으로 닫지
+        않는다**(보고 부재 ≠ 고침) — 관리자가 `POST /tools/part-faults/close`(adminOnly·사유·감사·이벤트 `close/manual`)
+        로 닫는다. 화면 문구는 "고쳐졌다는 뜻이 아니다" 를 적는다.
+      · **H1/H2/H4** 빈 상태 판정은 **엣지 행을 함께** 본다(전부 위임된 현장에서 '장비가 없다' 오판 → `edges-not-fresh`),
+        KPI 의 unknown/absent 는 신선한 엣지 요약을 **합산**하고 요약 없는 엣지는 개수로 밝힌다(`edgeScanTotals`),
+        자동 점검이 꺼져 있거나 마지막 점검이 주기 2배를 넘기면 초록 '정상' 대신 `stale-off`/`stale-check`(주기는 서버 값).
+      · **H5** `collector/puller.js` 의 실패 경로는 **직전 상태 위에 덮는다** — 통째로 바꾸면 version 이 사라져 엣지 분류가
+        '구버전' 대신 '버전 미상' 이 된다. **H6** 엣지 push 는 중앙 응답의 `centralEnabled`·`rejected` 를 읽어 '중앙이
+        꺼져 있어 기록·알림되지 않는다' 를 화면이 말한다.
+      · ⚠ 리뷰가 확인하지 못한 것(정직 기록): 개별 토큰의 agent 이름이 수집 서버 등록부 name 과 항상 같은지(다르면
+        fresh 엣지가 '등록부에 없음' + 등록부 항목이 'silent' 로 이중 표시) · iDRAC scope 로 남의 스토리지 id 를 실으면
+        수신이 받는다(자기 agent 행에 한정 — 문서화된 한계) · `openFaults` LIMIT 20,000 초과분은 전이 입력에 없다.
+      · 400px 표: 긴 식별 안내는 표 아래 **각주 1회**(`tableFootnotes`)이고 행에는 `keyKindMark`/`deviceKeyMark` 짧은
+        표지만 — 행마다 반복하면 셀이 세로로 길어지고(400px 실측) 1440px 에선 같은 문단이 화면을 덮는다(v2.509).
+      · ⚠ **테스트 시각 결함을 이 릴리스에서 두 번 밟았다**: `mergeEdgeReports` 는 보고 시각을 `Date.now()` 로 찍는데
+        테스트가 `NOW`(정시 −30분, 최대 90분 전) + 4h 를 '오래됨' 으로 썼다 — 실제 나이는 2.5~3.5h 라 **시각에 따라**
+        3h 경계를 넘거나 못 넘겼다(v2.517 규약의 변형). 기준은 **모듈이 찍은 `edgeReport(agent).at`** 이어야 한다.
   - **스토리지 노드 장애 표지는 클릭해 '어느 노드가 왜' 를 본다**(`web/src/views/tools/
     storageNodeText.js` + `StorageMonTool.jsx NodeFaultModal`, v2.523 — 사용자 요청 "장애표지
     클릭하면 어떤 장애인지 확인하는 팝업 만들어줘"): v2.522 까지 노드 열의 `24 ⚠1` 은 클릭되지
@@ -1331,8 +1375,13 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
     리팩터·미해결 버그=높음)
   - `적합`: 그 난이도에 적합한 모델(낮음/보통→Sonnet, 높음→Opus)
   - `실행`: 현재 실행 중인 모델. 적합 모델과 다르면 비고에 한 줄로 알려준다.
-  - `시간`: 그 항목의 **예상 또는 실제 소요 시간**(예: `3분`, `10분`). 완료된 항목은 실제,
-    진행중·대기는 예상을 적는다. 여기에 참고 사항을 섞지 말 것 — 아래 `비고` 가 그 자리다.
+  - `시간`: 그 항목의 **시각과 소요 시간을 함께** 적는다(2026-09-17 사용자 지시 "시간에 시간도
+    표시해줘" — 그 전에도 요청했는데 **이 파일에 적지 않아 세션이 바뀌며 유실됐다**. 지우지 말 것).
+    · 완료: `19:46~20:08 (22분)`  · 진행중: `20:09~ (9분째)`  · 대기: `예상 8분`
+    · ⚠⚠ **시각은 반드시 한국 시각(KST)** 이다. **이 컨테이너의 `date` 는 UTC 라 그대로 쓰면
+      9시간 어긋난다** — `TZ=Asia/Seoul date '+%H:%M'` 으로 뽑을 것. 사용자는 한국에 있다.
+    · 완료 항목은 실제 시각, 진행중·대기는 예상을 적는다.
+    여기에 참고 사항을 섞지 말 것 — 아래 `비고` 가 그 자리다.
   - `상태`: `✅ 완료 / 🔄 진행중 / ⏳ 대기`
   - `비고`: 참고 사항(판단 근거·전제·주의점·적합 모델과 다를 때의 안내). **소요 시간은 적지 않는다.**
   현재 진행 중인 작업 + 추가로 해야 할 작업(미릴리스 포함)을 모두 한 표에 정리해 진행여부를 보인다.

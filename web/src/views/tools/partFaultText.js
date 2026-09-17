@@ -42,18 +42,47 @@ export function intervalText(ms) {
 export function scanNote(scanned) {
   if (!scanned) return null;
   const s = scanned.summary || {};
-  const devices = num(scanned.idrac?.devices) + num(scanned.storage?.devices);
-  const ok = num(scanned.idrac?.ok) + num(scanned.storage?.ok);
-  const failed = num(scanned.idrac?.failed) + num(scanned.storage?.failed);
+  const scopes = ['idrac', 'storage', 'sanswitch'];
+  const devices = scopes.reduce((a, k) => a + num(scanned[k]?.devices), 0);
+  const ok = scopes.reduce((a, k) => a + num(scanned[k]?.ok), 0);
+  const failed = scopes.reduce((a, k) => a + num(scanned[k]?.failed), 0);
   const parts = [`장비 ${ok}/${devices}대에서 부품 ${num(s.total)}개를 판정했습니다`];
-  if (failed) parts.push(`수집이 없거나 낡아 **${failed}대는 보지 못했습니다**`);
+  if (failed) {
+    // v2.548 F1: '보지 못함' 의 이유를 나눈다 — 닿지 못함(불통) / 낡음 / 그 밖. 조치가 다르다.
+    const why = [];
+    if (num(scanned.idrac?.unreachable)) why.push(`불통 ${num(scanned.idrac.unreachable)}대`);
+    if (num(scanned.idrac?.stale)) why.push(`낡음 ${num(scanned.idrac.stale)}대`);
+    parts.push(`**${failed}대는 보지 못했습니다**${why.length ? `(${why.join(' · ')})` : ''}`);
+  }
+  if (num(scanned.idrac?.partial)) parts.push(`일부 부품 종류를 못 읽은 서버 ${num(scanned.idrac.partial)}대(그 종류는 판정 보류)`);
   if (num(s.unknown)) parts.push(`상태를 읽지 못한 부품 ${num(s.unknown)}개(정상이라는 뜻이 아닙니다)`);
   if (num(s.absent)) parts.push(`빈 슬롯 ${num(s.absent)}개(고장이 아닙니다)`);
+  if (num(scanned.sanswitch?.notJudged)) parts.push(`링크 없는 SAN 포트 ${num(scanned.sanswitch.notJudged)}개는 판정 대상 아님`);
   return {
     text: parts.join(' · '),
     unknown: num(s.unknown), absent: num(s.absent),
     devices, ok, failed, total: num(s.total),
+    unreachable: num(scanned.idrac?.unreachable), partial: num(scanned.idrac?.partial),
   };
+}
+
+/**
+ * 엣지 보고의 요약(scanned)을 KPI 에 합산한다(v2.548 리뷰 H2 — 중앙 로컬 스캔만 세면 위임 장비의
+ * unknown/absent 가 0 으로 보인다). **신선한 프로토콜 2 보고만** 더하고, 요약이 없는(scannedDropped·
+ * 구버전) 엣지와 오래된/구 프로토콜 엣지는 개수만 밝힌다 — 0 을 지어내지 않는다.
+ * @returns {{agents:number, unknown:number, absent:number, total:number, noSummary:number, skipped:number}}
+ */
+export function edgeScanTotals(edgeAgents) {
+  const out = { agents: 0, unknown: 0, absent: 0, total: 0, noSummary: 0, skipped: 0 };
+  for (const a of edgeAgents || []) {
+    if (!a) continue;
+    if (a.stale || a.legacy) { out.skipped += 1; continue; }
+    const s = a.scanned?.summary;
+    if (!s || a.scannedDropped) { out.noSummary += 1; continue; }
+    out.agents += 1;
+    out.unknown += num(s.unknown); out.absent += num(s.absent); out.total += num(s.total);
+  }
+  return out;
 }
 
 /**
@@ -61,7 +90,7 @@ export function scanNote(scanned) {
  * 판정 순서: DB 불가 → 점검 안 함(꺼짐/첫 주기) → 본 장비 0 → 엣지 무보고 → 정상.
  * @returns {{kind:string, text:string, tone:'bad'|'warn'|'ok'|'muted', waiting:boolean}}
  */
-export function emptyDiag({ open = [], poller = null, db = null, edges = null, role = 'central' } = {}) {
+export function emptyDiag({ open = [], poller = null, db = null, edges = null, role = 'central', now = Date.now() } = {}) {
   if (open.length) return { kind: 'has', text: '', tone: 'bad', waiting: false };
 
   if (db && db.available === false) {
@@ -75,7 +104,7 @@ export function emptyDiag({ open = [], poller = null, db = null, edges = null, r
     // 엣지는 중앙 DB 를 갖지 않는다 — 여기서 목록이 비는 것은 당연하고, 볼 곳은 중앙이다.
     return {
       kind: 'edge-node',
-      text: '이 노드는 엣지입니다 — 로컬에서 판정한 **장애만 중앙으로 보냅니다**. 기록과 알림은 중앙 포탈에서 봅니다.',
+      text: '이 노드는 엣지입니다 — 로컬에서 판정한 결과(장애 + 전체 요약)를 **중앙으로 보냅니다**. 기록·이력·알림은 중앙 포탈에서 봅니다.',
       tone: 'muted', waiting: false,
     };
   }
@@ -96,16 +125,44 @@ export function emptyDiag({ open = [], poller = null, db = null, edges = null, r
   if (poller.last.error) {
     return { kind: 'error', text: `직전 점검이 실패했습니다 — ${poller.last.error}`, tone: 'bad', waiting: false };
   }
+  // v2.548 리뷰 H4 — 마지막 점검이 낡았으면 '정상' 이라 말하지 않는다. 주기는 서버가 준 값만 쓴다(숫자 하드코딩 금지).
+  const lastAt = num(poller.last.at);
+  if (poller.enabled === false) {
+    return {
+      kind: 'stale-off',
+      text: `자동 점검이 **꺼져 있습니다** — 마지막 점검(${lastAt ? ageText(now - lastAt) : '시각 미상'}) 이후의 부품 상태는 모릅니다. 켜거나 **지금 점검**을 누르세요.`,
+      tone: 'warn', waiting: false,
+    };
+  }
+  const iv = num(poller.intervalMs);
+  if (iv && lastAt && now - lastAt > 2 * iv) {
+    return {
+      kind: 'stale-check',
+      text: `마지막 점검이 ${ageText(now - lastAt)}으로 주기의 2배를 넘겼습니다 — 그 뒤의 부품 상태는 모릅니다. 폴러가 멈추지 않았는지 확인하세요.`,
+      tone: 'warn', waiting: false,
+    };
+  }
 
+  // v2.548 리뷰 H1 — 중앙 직접 장비만 보고 판정하면 전부 위임된 현장에서 '장비가 없다' 고 오판한다. 엣지 행을 함께 본다.
+  const c = edges?.counts || {};
+  const edgeRows = num(edges?.rows?.length);
+  const freshEdges = num(c.fresh);
   const sn = scanNote(poller.last.local);
-  if (sn && sn.devices === 0) {
+  if (sn && sn.devices === 0 && !edgeRows) {
     return {
       kind: 'no-devices',
       text: '점검 대상 장비가 없습니다 — iDRAC 서버나 스토리지 장비가 이 노드에 등록되어 있는지 확인하세요.',
       tone: 'warn', waiting: false,
     };
   }
-  if (sn && sn.ok === 0 && sn.devices > 0) {
+  if (sn && sn.devices === 0 && edgeRows && !freshEdges) {
+    return {
+      kind: 'edges-not-fresh',
+      text: `중앙이 직접 수집하는 장비는 없고, 엣지 ${edgeRows}곳 **모두 정상 보고가 없습니다**(구버전·보고 없음·오래됨). 장애가 없는 것이 아니라 **아직 아무것도 판정하지 못한 것**입니다.`,
+      tone: 'bad', waiting: false,
+    };
+  }
+  if (sn && sn.ok === 0 && sn.devices > 0 && !freshEdges) {
     return {
       kind: 'all-failed',
       text: `등록된 ${sn.devices}대 **전부**에서 최신 수집 결과를 읽지 못했습니다. 장애가 없는 것이 아니라 **확인하지 못한 것**입니다.`,
@@ -113,13 +170,17 @@ export function emptyDiag({ open = [], poller = null, db = null, edges = null, r
     };
   }
 
-  const silent = edges?.silent?.length || 0;
-  const stale = (edges?.reports || []).filter((r) => r.stale).length;
   const extra = [];
+  if (sn && sn.devices === 0 && freshEdges) extra.push('중앙 직접 수집 장비 없음(엣지 보고만 판정)');
+  if (sn && sn.ok === 0 && sn.devices > 0 && freshEdges) extra.push(`중앙 직접 장비 ${sn.devices}대 전부 못 읽음`);
   if (sn?.failed) extra.push(`보지 못한 장비 ${sn.failed}대`);
+  if (sn?.partial) extra.push(`일부 부품 종류를 못 읽은 서버 ${sn.partial}대`);
   if (sn?.unknown) extra.push(`상태를 읽지 못한 부품 ${sn.unknown}개`);
-  if (silent) extra.push(`보고가 없는 엣지 ${silent}곳`);
-  if (stale) extra.push(`보고가 오래된 엣지 ${stale}곳`);
+  if (num(c['old-version'])) extra.push(`구버전 엣지 ${num(c['old-version'])}곳`);
+  if (num(c.legacy)) extra.push(`구 프로토콜 엣지 ${num(c.legacy)}곳`);
+  if (num(c.silent)) extra.push(`보고가 없는 엣지 ${num(c.silent)}곳`);
+  if (num(c.stale)) extra.push(`보고가 오래된 엣지 ${num(c.stale)}곳`);
+  if (num(c['unknown-version'])) extra.push(`버전 미상 엣지 ${num(c['unknown-version'])}곳`);
   if (extra.length) {
     return {
       kind: 'partial',
@@ -130,22 +191,106 @@ export function emptyDiag({ open = [], poller = null, db = null, edges = null, r
   return { kind: 'ok', text: '확인한 모든 부품이 정상입니다.', tone: 'ok', waiting: false };
 }
 
+/** 엣지 분류 라벨(v2.548). 서버 `classifyEdges` 의 kind 와 글자 그대로 짝이다. */
+export const EDGE_KIND_LABEL = Object.freeze({
+  fresh: '정상 보고', stale: '보고 오래됨', legacy: '구 프로토콜(v2.547)',
+  'old-version': '구버전(보고 불가)', silent: '보고 없음', 'unknown-version': '버전 미상',
+});
+export const EDGE_KIND_TONE = Object.freeze({
+  fresh: 'ok', stale: 'warn', legacy: 'warn', 'old-version': 'warn', silent: 'warn', 'unknown-version': 'muted',
+});
+
 /**
- * 엣지 보고 현황 문구. **보고가 없는 것을 '꺼짐' 이라 말하지 않는다**(규칙 ④).
- * @returns {{text:string, tone:string, silent:number, stale:number, fresh:number}}
+ * 엣지 보고 현황 문구(v2.548). **보고가 없는 것을 '정상' 이라 말하지 않고 이유를 나눈다** —
+ * 구버전(업그레이드해야 보인다) / 보고 없음(꺼져 있거나 첫 push 대기) / 오래됨(엣지 확인) / 구 프로토콜
+ * (닫지 못한다 — 업그레이드). 조치가 전부 다르다.
+ * @param {{rows:Array, counts:Object, minVersion:string}|null} edges
+ * @returns {{text:string, tone:string, total:number, notFresh:number, counts:Object}}
  */
 export function edgeNote(edges) {
-  const reports = edges?.reports || [];
-  const silent = edges?.silent?.length || 0;
-  const stale = reports.filter((r) => r.stale).length;
-  const fresh = reports.length - stale;
-  if (!reports.length && !silent) {
-    return { text: '엣지 위임 없음 — 이 노드가 직접 수집한 장비만 판정합니다.', tone: 'muted', silent, stale, fresh };
+  const rows = edges?.rows || [];
+  const c = edges?.counts || {};
+  const total = rows.length;
+  if (!total) return { text: '엣지 위임 없음 — 이 노드가 직접 수집한 장비만 판정합니다.', tone: 'muted', total: 0, notFresh: 0, counts: c };
+  const bits = [`엣지 ${total}곳 중 정상 보고 ${num(c.fresh)}곳`];
+  if (num(c['old-version'])) bits.push(`**구버전 ${num(c['old-version'])}곳**(${edges.minVersion || ''} 미만 — 업그레이드 전까지 그 법인 부품은 보이지 않습니다)`);
+  if (num(c.legacy)) bits.push(`구 프로토콜 ${num(c.legacy)}곳(장애는 보이지만 **해소를 판정하지 못합니다** — 업그레이드 필요)`);
+  if (num(c.silent)) bits.push(`보고 없음 ${num(c.silent)}곳(꺼져 있거나 첫 push 대기 — '장애 없음' 이 아니라 '모름')`);
+  if (num(c.stale)) bits.push(`보고 오래됨 ${num(c.stale)}곳(그 장비의 장애를 해소로 처리하지 않습니다)`);
+  if (num(c['unknown-version'])) bits.push(`버전 미상 ${num(c['unknown-version'])}곳`);
+  const rejected = rows.reduce((a, r) => a + num(r.rejected), 0);
+  if (rejected) bits.push(`**소유권 불일치로 버린 장비 ${rejected}대**(엣지가 자기 몫이 아닌 장비를 보고했습니다)`);
+  // 중앙 수신 상한(v2.548 S2) — 잘린 장비는 '닫지 않는 쪽' 으로 보류된다. 조용히 줄이지 않는다.
+  const partsOmitted = rows.reduce((a, r) => a + num(r.partsOmitted), 0);
+  if (partsOmitted) bits.push(`**수신 상한으로 잘린 파트 ${partsOmitted}개**(그 장비의 장애는 해소로 처리하지 않습니다 — 엣지 보고가 비정상적으로 큽니다)`);
+  const scannedDropped = rows.filter((r) => r.scannedDropped).length;
+  if (scannedDropped) bits.push(`요약(scanned)이 너무 커서 버린 엣지 ${scannedDropped}곳`);
+  const notFresh = total - num(c.fresh);
+  return { text: bits.join(' · '), tone: notFresh ? 'warn' : 'ok', total, notFresh, counts: c };
+}
+
+/** 장비 식별자 등급 안내(v2.548 F2). localId(IP)만 밝힌다 — 나머지는 조용하다. */
+export function deviceKeyNote(deviceKeyKind, notes = {}) {
+  if (!deviceKeyKind || deviceKeyKind === 'serviceTag' || deviceKeyKind === 'uuid' || deviceKeyKind === 'centralId') return '';
+  return notes[deviceKeyKind] || '';
+}
+
+/**
+ * 행 안의 **짧은 표지**(각주와 짝) — 조용한 등급이면 빈 문자열. `none` 은 '식별 불가 식별' 처럼 겹말이 되므로
+ * '그룹 단위' 라고 말한다(v2.548 Chromium 판독에서 실제로 그렇게 찍혔다).
+ */
+export function keyKindMark(keyKind, labels = {}) {
+  if (!keyKindNote(keyKind, { [keyKind]: 'x' })) return '';
+  if (keyKind === 'none') return '⚠ 그룹 단위';
+  return `⚠ ${labels[keyKind] || keyKind} 식별`;
+}
+export function deviceKeyMark(deviceKeyKind, labels = {}) {
+  if (!deviceKeyNote(deviceKeyKind, { [deviceKeyKind]: 'x' })) return '';
+  return `⚠ ${labels[deviceKeyKind] || deviceKeyKind} 식별`;
+}
+
+/**
+ * 열린 장애 표 **아래 각주**(v2.548 Chromium 400px 판독): 행마다 긴 식별 안내를 되풀이하면 400px 에서
+ * 장비 셀이 세로로 길어지고 1440px 에서는 같은 문단이 화면을 덮는다(v2.509 규약). 표시된 행에 실제로
+ * 해당하는 안내만 **한 번씩** 모은다 — 행에는 짧은 표지(`⚠ 로컬 id 식별`)만 남긴다.
+ * @returns {string[]} 중복 제거된 안내 문구(없으면 빈 배열)
+ */
+export function tableFootnotes(rows, labels = {}) {
+  const out = [];
+  const seen = new Set();
+  for (const p of rows || []) {
+    for (const t of [deviceKeyNote(p.deviceKeyKind, labels.deviceKeyKindNote), keyKindNote(p.keyKind, labels.keyKindNote)]) {
+      if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+    }
   }
-  const bits = [`엣지 보고 ${fresh}곳 정상`];
-  if (stale) bits.push(`**${stale}곳은 보고가 오래됐습니다**(그 장비의 장애를 해소로 처리하지 않습니다)`);
-  if (silent) bits.push(`**${silent}곳은 한 번도 보고하지 않았습니다** — 그 법인 장비는 '장애 없음' 이 아니라 '모름' 입니다`);
-  return { text: bits.join(' · '), tone: (stale || silent) ? 'warn' : 'ok', silent, stale, fresh };
+  return out;
+}
+
+/** 키 체계 변경으로 이력을 새로 시작한 사실(v2.548 스키마 v2). 없으면 빈 문자열. */
+export function resetNote(reset) {
+  if (!reset || !reset.at) return '';
+  const d = new Date(reset.at).toLocaleString('ko-KR');
+  return `${d} 에 **파트 키 체계가 바뀌어 이력을 새로 시작했습니다**(스키마 ${reset.from ?? '?'}→${reset.to ?? '?'}). 그 전 이력은 이어 붙이지 않습니다 — 법인 축이 없던 키라 다른 법인 장비와 섞였을 수 있습니다.`;
+}
+
+/**
+ * 엣지 노드의 push 상태 문구(v2.548). 왜 안 보내는지를 **각각** 말한다 — 토큰 없음 / 꺼짐 / 중앙 거부(403) /
+ * 본문 거부(413) / 첫 push 대기 / 정상. 한 문구로 덮으면 조치가 정반대인 상황이 같아 보인다.
+ * @returns {{text:string, tone:string, kind:string}}
+ */
+export function pushNote(push, now = Date.now()) {
+  if (!push) return { text: '', tone: 'muted', kind: 'none' };
+  if (!push.configured) return { text: 'CENTRAL_URL/CENTRAL_TOKEN 이 없어 중앙으로 보내지 않습니다.', tone: 'warn', kind: 'unconfigured' };
+  if (!push.enabled) return { text: `파트 장애 기능이 **꺼져 있습니다**(${push.source === 'env' ? '이 엣지의 PARTFAULT_ENABLED' : push.source === 'edge-central' ? '중앙 설정' : '기본값 — 중앙 설정이 아직 내려오지 않았습니다'}). 켜지면 다음 주기부터 보냅니다.`, tone: 'warn', kind: 'disabled' };
+  const l = push.last;
+  if (!l) return { text: '첫 push 대기 중입니다(기동 직후).', tone: 'muted', kind: 'first' };
+  if (l.skipped) return { text: `직전 주기는 건너뛰었습니다 — ${l.reason || ''}`, tone: 'warn', kind: 'skipped' };
+  // v2.548 리뷰 H6 — 중앙이 응답에 실어 준 스위치 상태. 보냈는데 중앙이 꺼져 있으면 기록·알림이 되지 않는다.
+  if (l.ok && l.centralEnabled === false) return { text: `마지막 push ${ageText(now - num(l.at))} · 장비 ${num(l.devices)}대 · 열린 장애 ${num(l.open)}건 — 그런데 **중앙의 파트 장애 기능이 꺼져 있어** 보낸 판정이 기록·알림되지 않습니다. 중앙 설정을 확인하세요.`, tone: 'warn', kind: 'central-off' };
+  if (l.ok) return { text: `마지막 push ${ageText(now - num(l.at))} · 장비 ${num(l.devices)}대 · 열린 장애 ${num(l.open)}건${l.omitted ? ` · **상한으로 ${l.omitted}대 제외**` : ''}${l.rejected ? ` · **중앙이 소유권 불일치로 버린 장비 ${l.rejected}대**` : ''}`, tone: 'ok', kind: 'ok' };
+  if (l.httpStatus === 403) return { text: `중앙이 이 엣지를 **거부했습니다(403)** — AGENT_NAME 과 중앙의 수집 서버 이름·토큰이 맞는지 확인하세요. (${l.error || ''})`, tone: 'bad', kind: 'rejected' };
+  if (l.httpStatus === 413) return { text: `중앙이 **본문 크기를 거부했습니다(413)** — 중앙의 BIG_JSON 등록 또는 상한 설정을 확인하세요.`, tone: 'bad', kind: 'too-large' };
+  return { text: `마지막 push 실패(${ageText(now - num(l.at))}) — ${l.error || '사유 없음'}`, tone: 'bad', kind: 'error' };
 }
 
 /**
@@ -185,7 +330,12 @@ export function holdText(holdReason) {
   const map = {
     unknown: '판정 보류 — 상태를 읽지 못함',
     'device-failed': '판정 보류 — 이 장비 수집 실패',
+    'collection-failed': '판정 보류 — 이 부품 종류만 수집 실패',   // v2.548 F1: 장비엔 닿았는데 그 컬렉션 GET 만 실패
     missing: '판정 보류 — 이번 목록에 없음',
+    unassigned: '판정 보류 — 이 수집 서버가 더는 이 장비를 보고하지 않음(재배정·등록 삭제?)',   // v2.548 C5
+    'no-report': '판정 보류 — 이 수집 서버의 보고가 없음',
+    'edge-stale': '판정 보류 — 이 수집 서버의 보고가 오래됨(엣지 상태를 확인하세요)',            // v2.548 H7
+    'edge-legacy': '판정 보류 — 구버전 수집 서버(해소를 판정할 수 없음 — 업그레이드 필요)',
   };
   return map[holdReason] || '';
 }
@@ -195,14 +345,20 @@ export function holdText(holdReason) {
  * @returns {string} 보류가 없으면 빈 문자열
  */
 export function holdNote(open = []) {
-  const by = { unknown: 0, 'device-failed': 0, missing: 0 };
+  const by = { unknown: 0, 'device-failed': 0, 'collection-failed': 0, missing: 0, unassigned: 0, 'no-report': 0, 'edge-stale': 0, 'edge-legacy': 0 };
   for (const p of open) if (by[p?.holdReason] != null) by[p.holdReason] += 1;
-  const total = by.unknown + by['device-failed'] + by.missing;
+  const total = Object.values(by).reduce((a, b) => a + b, 0);
   if (!total) return '';
   const bits = [];
   if (by['device-failed']) bits.push(`이 장비 수집 실패 ${by['device-failed']}건`);
+  if (by['collection-failed']) bits.push(`부품 종류 수집 실패 ${by['collection-failed']}건`);
   if (by.unknown) bits.push(`상태를 읽지 못함 ${by.unknown}건`);
   if (by.missing) bits.push(`이번 목록에 없음 ${by.missing}건`);
+  if (by['no-report']) bits.push(`수집 서버 보고 없음 ${by['no-report']}건`);
+  if (by['edge-stale']) bits.push(`수집 서버 보고 오래됨 ${by['edge-stale']}건`);
+  if (by['edge-legacy']) bits.push(`구버전 수집 서버 ${by['edge-legacy']}건(업그레이드 전까지 해소 판정 불가)`);
+  // v2.548 C5 — 재배정·등록 삭제된 장비는 스스로 닫히지 않는다. 관리자가 사유를 적어 닫는 길을 알린다.
+  if (by.unassigned) bits.push(`**수집 서버가 더는 보고하지 않는 장비 ${by.unassigned}건**(재배정·삭제했다면 관리자가 행의 '닫기' 로 정리하세요)`);
   return `판정 보류 ${total}건(${bits.join(' · ')}) — 이번 점검에서 확인하지 못해 **해소로 처리하지 않았습니다**.`
     + ' 사유는 각 행에 적혀 있습니다.';
 }
@@ -214,6 +370,7 @@ export function eventText(ev, labels = {}) {
   if (ev.event === 'open') return `장애 발생 — ${st(ev.state)}`;
   if (ev.event === 'change') return `상태 변화 — ${st(ev.prevState)} → ${st(ev.state)}`;
   if (ev.event === 'close') {
+    if (ev.closeReason === 'manual') return `관리자가 **수동으로 닫음**(재배정·등록 삭제 등 — 장비가 고쳐졌다는 뜻이 아닙니다) — 직전 ${st(ev.prevState)}`;
     return ev.closeReason === 'removed'
       ? `해소(부품이 **제거**됨 — 교체 중일 수 있습니다) — 직전 ${st(ev.prevState)}`
       : `해소(정상으로 복귀) — 직전 ${st(ev.prevState)}`;

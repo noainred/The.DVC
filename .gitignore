@@ -208,3 +208,5 @@ server/config/vmseries/
 # v2.547 파트 장애 — 엣지 보고 캐시(법인별 장비명·부품명·수집 주체가 들어간다). DB(part-faults.db)는
 # 위 server/config/*.db 와일드카드가 이미 덮는다. 새 상태 파일을 만들면 그 커밋에서 함께 등록할 것.
 server/config/partfault-edge.json
+# v2.548 파트 장애 스위치(중앙 전체/엣지별 on-off · 엣지에 내려온 중앙값). 비밀은 없지만 현장 설정이다.
+server/config/partfault-settings.json

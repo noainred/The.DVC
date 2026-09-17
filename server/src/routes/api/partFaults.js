@@ -1,33 +1,44 @@
 /**
- * 파트 장애(물리 부품 장애) 라우트 — 특수기능 '파트 장애' 화면용(v2.547).
+ * 파트 장애(물리 부품 장애) 라우트 — 특수기능 '파트 장애' 화면용(v2.548).
  *
  * 사용자 요청(2026-09-17): "서버 스토리지 등의 모든 장비에 있는 물리 파트 장애가 발생하면
  * 노티를 발생하고 체계적으로 파트 장애를 기록하는 DB 와 화면을 만들고 싶어" +
- * "엣지에서 수집해서 로컬에서 처리하고 장애만 중앙으로 보내게 해줘".
+ * "엣지에서 수집해서 로컬에서 처리하고 장애만 중앙으로 보내게 해줘" → v2.548 재설계
+ * ("전체 재설계 · 전부 엣지 판정 · 장애 + 전체 요약").
  *
  * 조회 권한: 스토리지 모니터링과 **같은 기준**이다 — 파트 장애는 vCenter 귀속이 없는 인프라
- * 장비(iDRAC·스토리지)의 상태라 범위 제한 계정에 부분집합을 줄 축이 없다. 빈 값을 주면
- * '장애 없음' 이라는 거짓이 되므로 **403 으로 거절**한다(`fullScopeOnly` — v2.525 Horizon 규약).
+ * 장비의 상태라 범위 제한 계정에 부분집합을 줄 축이 없다. 빈 값을 주면 '장애 없음' 이라는 거짓이
+ * 되므로 **403 으로 거절**한다(`fullScopeOnly` — v2.525 Horizon 규약).
  *
- * ⚠ 이 라우트는 **장비에 접속하지 않는다**. 이미 수집된 스냅샷만 읽는다(`partfault/scan.js`).
- *   '지금 점검' 도 마찬가지다 — 새 SSH/Redfish 를 열지 않으므로 연타해도 장비 부하가 없다
- *   (그래도 재진입 가드는 폴러와 **공유**한다 — 전이 계산이 겹치면 상태가 꼬인다).
+ * ── 화면이 '왜 비었는지' 를 판정할 재료를 응답이 싣는다 ─────────────────────────────
+ * 열린 장애 0건은 '정상' 일 수도, '점검이 안 돌았다' 일 수도, '엣지가 구버전이라 보고를 못 한다'
+ * 일 수도 있다 — 조치가 정반대다. 그래서 `edges` 는 엣지를 **버전 단위로** 분류한다(v2.548):
+ *   fresh(보고 정상) / stale(보고 오래됨) / legacy(v2.547 프로토콜 1 — 닫지 못한다) /
+ *   old-version(v2.548 미만 — 보고 자체를 못 한다) / silent(버전은 되는데 보고 없음 — 꺼져 있거나
+ *   첫 push 대기) / unknown-version(수집 서버 상태를 모른다).
+ *   판정은 `classifyEdges()`(순수)가 하고 테스트가 고정한다.
+ *
+ * ⚠ 이 라우트는 **장비에 접속하지 않는다**. '지금 점검' 도 스냅샷만 읽는다(재진입 가드는 폴러와 공유).
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { PART_STATE_LABEL, PART_STATE_TONE, PART_KIND_LABEL, SCOPE_LABEL,
-  KEY_KIND_LABEL, KEY_KIND_NOTE } from '../../partfault/types.js';
-import { openFaults, recentEvents, partFaultDbStatus } from '../../partfault/db.js';
+import { PART_STATE_LABEL, PART_STATE_TONE, PART_KIND_LABEL, SCOPE_LABEL, SCOPES_OUT_OF_RANGE,
+  KEY_KIND_LABEL, KEY_KIND_NOTE, DEVICE_KEY_KIND_LABEL, DEVICE_KEY_KIND_NOTE, HOLD_REASON, PUSH_PROTOCOL } from '../../partfault/types.js';
+import { openFaults, recentEvents, partFaultDbStatus, resetInfo } from '../../partfault/db.js';
 import { runPartFaultsNow, partFaultStatus } from '../../partfault/poller.js';
-import { partFaultPushStatus } from '../../partfault/push.js';
-import { edgeReports } from '../../central/partFaultEdge.js';
-import { knownAgentNames } from '../../central/knownAgents.js';
-import { config } from '../../config.js';
+import { partFaultPushStatus, pushPartFaultsNow } from '../../partfault/push.js';
+import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled } from '../../partfault/settings.js';
+import { hookStatus } from '../../partfault/hooks.js';
+import { mergeEdgeReports } from '../../central/partFaultEdge.js';
+import { listCollectors } from '../../collector/registry.js';
+import { allCollectorStatus } from '../../collector/state.js';
+import { config, currentVersion } from '../../config.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
+const adminOnly = requireRole('admin');
 const fullScopeOnly = (req, res, next) => {
   if (scopedVcenterIds(req.user, store.get())) {
     return res.status(403).json({ ok: false, reason: '파트 장애 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
@@ -38,16 +49,75 @@ const fullScopeOnly = (req, res, next) => {
 /** 화면이 문구를 복사하지 않도록 라벨은 서버가 단일 소스로 내려준다(CLAUDE.md '코어는 하나다'). */
 const LABELS = {
   state: PART_STATE_LABEL, tone: PART_STATE_TONE, kind: PART_KIND_LABEL,
-  scope: SCOPE_LABEL, keyKind: KEY_KIND_LABEL, keyKindNote: KEY_KIND_NOTE,
+  scope: SCOPE_LABEL, scopeOutOfRange: SCOPES_OUT_OF_RANGE,
+  keyKind: KEY_KIND_LABEL, keyKindNote: KEY_KIND_NOTE,
+  deviceKeyKind: DEVICE_KEY_KIND_LABEL, deviceKeyKindNote: DEVICE_KEY_KIND_NOTE,
+  holdReason: HOLD_REASON, protocol: PUSH_PROTOCOL,
 };
 
+/** 프로토콜 2 를 처음 보내는 엣지 버전 — 이 아래는 보고 자체를 못 한다('구버전'). */
+export const MIN_EDGE_VERSION = '2.548.0';
 const STATE_RANK = { fault: 0, warn: 1 };
+const t = (v) => String(v ?? '').trim();
+
+/** semver 비교(순수). 'a' < 'b' 면 음수. 형식이 아니면 null. */
+export function cmpVersion(a, b) {
+  const pa = t(a).replace(/^v/, '').split('.').map(Number);
+  const pb = t(b).replace(/^v/, '').split('.').map(Number);
+  if (pa.length < 3 || pb.length < 3 || pa.some(Number.isNaN) || pb.some(Number.isNaN)) return null;
+  for (let i = 0; i < 3; i += 1) if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  return 0;
+}
 
 /**
- * DB 상태를 역할에 맞게 축약한다. **파일 경로는 admin 에게만** —
- * `operator` 는 `tools` 를 기본 보유하므로(v2.500 D/M1 '거부 기본값') 호스트 파일 배치를
- * 그대로 내보내지 않는다. 가린 사실은 `redacted` 로 밝힌다(조용히 빼지 않는다).
+ * 엣지 분류(순수, v2.548). **보고가 없는 것을 '정상' 이라 하지 않는다** — 왜 없는지를 나눈다.
+ * @param {object} p
+ * @param {Array} p.collectors  중앙 수집 서버 등록부 `[{id,name,enabled}]`
+ * @param {Object} p.status     `allCollectorStatus()` — `{[collectorId]: {version,...}}`
+ * @param {Array} p.reports     `mergeEdgeReports().agents`
  */
+export function classifyEdges({ collectors = [], status = {}, reports = [], minVersion = MIN_EDGE_VERSION } = {}) {
+  const byAgent = new Map(reports.map((r) => [t(r.agent).toLowerCase(), r]));
+  const rows = [];
+  const seen = new Set();
+  for (const c of collectors) {
+    const name = t(c.name); if (!name) continue;
+    const key = name.toLowerCase(); seen.add(key);
+    const st = status[c.id] || null;
+    const version = t(st?.version);
+    const r = byAgent.get(key) || null;
+    let kind;
+    if (r) kind = r.legacy ? 'legacy' : (r.stale ? 'stale' : 'fresh');
+    else if (!version) kind = 'unknown-version';
+    else if (cmpVersion(version, minVersion) != null && cmpVersion(version, minVersion) < 0) kind = 'old-version';
+    else kind = 'silent';
+    rows.push({
+      agent: name, enabled: c.enabled !== false, version: version || null, kind,
+      at: r?.at || null, ageMs: r?.ageMs ?? null, protocol: r?.protocol || null,
+      devices: r?.devices ?? null, devicesFailed: r?.devicesFailed ?? null, open: r?.open ?? null,
+      rejected: r?.rejected || 0, omitted: r?.omitted || 0, partsOmitted: r?.partsOmitted || 0, scannedDropped: !!r?.scannedDropped,
+    });
+  }
+  // 등록부에 없는데 보고한 엣지(이름 불일치·삭제된 수집 서버) — 숨기지 않는다.
+  for (const r of reports) {
+    const key = t(r.agent).toLowerCase();
+    if (seen.has(key)) continue;
+    rows.push({ agent: r.agent, enabled: null, version: r.version || null, kind: r.legacy ? 'legacy' : (r.stale ? 'stale' : 'fresh'), unregistered: true,
+      at: r.at, ageMs: r.ageMs, protocol: r.protocol, devices: r.devices, devicesFailed: r.devicesFailed, open: r.open, rejected: r.rejected || 0, omitted: r.omitted || 0, partsOmitted: r.partsOmitted || 0, scannedDropped: !!r.scannedDropped });
+  }
+  const counts = {};
+  for (const x of rows) counts[x.kind] = (counts[x.kind] || 0) + 1;
+  return { rows, counts, minVersion };
+}
+
+function edgesNow() {
+  const collectors = (() => { try { return listCollectors(); } catch { return []; } })();
+  const status = (() => { try { return allCollectorStatus(); } catch { return {}; } })();
+  const merged = mergeEdgeReports();
+  return classifyEdges({ collectors, status, reports: merged.agents });
+}
+
+/** DB 상태 — **파일 경로는 admin 에게만**(operator 는 tools 기본 보유 — v2.500 D/M1 '거부 기본값'). */
 function dbView(db, isAdmin) {
   if (!db) return null;
   if (isAdmin) return db;
@@ -55,59 +125,29 @@ function dbView(db, isAdmin) {
   return { ...rest, redacted: ['path'] };
 }
 
-/**
- * 엣지 보고 현황. **보고가 없는 엣지를 '정상' 이라 말하지 않는다** — '모른다' 다
- * (v2.517 규약: "보고가 없는 엣지를 '꺼짐' 이라 말하지 말 것").
- */
-function edgeStatus(staleMs) {
-  const now = Date.now();
-  const rows = edgeReports().map((r) => ({
-    agent: r.agent,
-    at: r.at || null,
-    reportedAt: r.reportedAt || null,
-    ageMs: r.at ? now - r.at : null,
-    stale: r.at ? (now - r.at) > staleMs : true,
-    open: (r.open || []).length,
-    omitted: r.omitted || 0,
-    scanned: r.scanned || null,
-  }));
-  const seen = new Set(rows.map((r) => r.agent));
-  // 등록돼 있는데 **한 번도 보고하지 않은** 엣지 — 화면이 '장애 없음' 과 구분해 말해야 한다.
-  let silent = [];
-  try { silent = knownAgentNames().filter((n) => n && !seen.has(n)); } catch { silent = []; }
-  return { reports: rows, silent, staleMs };
-}
-
 export function registerPartFaults(api) {
 
-/**
- * 열린 장애 + 스캔 요약. 화면의 주 조회.
- * ⚠ 응답에 **'왜 비었는지'를 판정할 재료**를 함께 싣는다 — 열린 장애 0건이
- *   '정상' 인지 '점검이 한 번도 안 돌았다' 인지 '엣지가 보고를 안 한다' 인지는 다른 상황이고
- *   조치가 정반대다(v2.517 `perfEmptyDiag` 와 같은 판단).
- */
+/** 열린 장애 + 판정 재료. 화면의 주 조회. */
 api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
-  const scope = String(req.query.scope || '').trim();
-  const [open, st] = await Promise.all([
-    openFaults({ scope }).catch(() => []),
-    partFaultStatus().catch(() => null),
-  ]);
-  open.sort((a, b) => (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9)
-    || (b.firstSeenAt || 0) - (a.firstSeenAt || 0));
+  const scope = t(req.query.scope);
+  const isAdmin = req.user?.role === 'admin';
+  const [open, st] = await Promise.all([openFaults({ scope }).catch(() => []), partFaultStatus().catch(() => null)]);
+  open.sort((a, b) => (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9) || (b.firstSeenAt || 0) - (a.firstSeenAt || 0));
   const summary = { fault: 0, warn: 0 };
   const devices = new Set();
-  for (const p of open) { if (summary[p.state] != null) summary[p.state] += 1; devices.add(`${p.scope}:${p.deviceId}`); }
+  for (const p of open) { if (summary[p.state] != null) summary[p.state] += 1; devices.add(`${p.agent}|${p.scope}|${p.deviceId}`); }
+  const role = config.agent.centralUrl ? 'edge' : 'central';
   res.json({
-    ok: true,
-    open,
-    summary: { ...summary, devices: devices.size },
+    ok: true, role, version: currentVersion(),
+    open, summary: { ...summary, devices: devices.size },
     labels: LABELS,
-    poller: st ? { enabled: st.enabled, intervalMs: st.intervalMs, busy: st.busy, last: st.last } : null,
-    db: dbView(st ? st.db : await partFaultDbStatus().catch(() => null), req.user?.role === 'admin'),
-    edges: edgeStatus(3 * 3_600_000),
-    // 이 노드가 엣지면 중앙으로 push 하는 쪽이라 화면 문구가 달라진다(중앙 DB 가 아니라 push 상태를 본다).
-    role: config.agent.centralUrl ? 'edge' : 'central',
-    push: config.agent.centralUrl ? partFaultPushStatus() : null,
+    poller: st ? { enabled: st.enabled, source: st.source, intervalMs: st.intervalMs, busy: st.busy, last: st.last } : null,
+    db: dbView(st ? st.db : await partFaultDbStatus().catch(() => null), isAdmin),
+    reset: st?.reset || null,
+    edges: role === 'central' ? edgesNow() : null,
+    push: role === 'edge' ? partFaultPushStatus() : null,
+    hook: hookStatus(),
+    settings: isAdmin ? loadPartFaultSettings() : null,
   });
 });
 
@@ -115,38 +155,65 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
 api.get('/tools/part-faults/events', toolsPerm, fullScopeOnly, async (req, res) => {
   const days = Math.min(730, Math.max(1, Number(req.query.days) || 30));
   const limit = Math.min(2_000, Math.max(1, Number(req.query.limit) || 500));
-  const partKey = String(req.query.partKey || '').trim();
-  const events = await recentEvents({ sinceMs: days * 86_400_000, limit, partKey }).catch(() => []);
-  res.json({
-    ok: true, events, days, limit, labels: LABELS,
-    // ⚠ 상한으로 잘렸으면 밝힌다(조용한 상한 금지 — CLAUDE.md 규약).
-    truncated: events.length >= limit,
-    db: dbView(await partFaultDbStatus().catch(() => null), req.user?.role === 'admin'),
-  });
+  const partKey = t(req.query.partKey);
+  const agent = t(req.query.agent);
+  const events = await recentEvents({ sinceMs: days * 86_400_000, limit, partKey: partKey ? { agent, partKey } : '' }).catch(() => []);
+  res.json({ ok: true, events, days, limit, labels: LABELS, truncated: events.length >= limit,
+    db: dbView(await partFaultDbStatus().catch(() => null), req.user?.role === 'admin') });
 });
 
 /**
- * 지금 점검(수동). 폴러와 **같은 재진입 가드**를 공유한다 — 겹치면 전이가 꼬인다.
+ * 지금 점검(수동). 중앙이면 전이·알림까지, 엣지면 즉시 push. 폴러와 **같은 재진입 가드**를 공유한다.
  * ⚠ 장비 왕복이 없으므로 '자동 재시도 금지'(계정 잠금) 규칙의 대상이 아니다.
  */
 api.post('/tools/part-faults/scan', writeRole, toolsPerm, fullScopeOnly, async (req, res) => {
-  const r = await runPartFaultsNow({ notify: true });
-  logAudit({
-    user: req.user?.username, action: '파트 장애 지금 점검',
-    detail: r.ok ? `신규 ${r?.stats?.opened ?? 0} · 해소 ${r?.stats?.closed ?? 0} · 변화 ${r?.stats?.changed ?? 0}` : String(r.reason || '실패'),
-  });
+  const r = config.agent.centralUrl ? await pushPartFaultsNow({ reason: 'manual' }) : await runPartFaultsNow({ notify: true, reason: 'manual' });
+  logAudit({ user: req.user?.username, action: config.agent.centralUrl ? '파트 장애 지금 push' : '파트 장애 지금 점검',
+    detail: r.ok ? (r.stats ? `신규 ${r.stats.opened} · 해소 ${r.stats.closed} · 변화 ${r.stats.changed}` : `장비 ${r.devices ?? 0}대 · 열린 장애 ${r.open ?? 0}건`) : String(r.reason || '실패') });
   res.status(r.ok ? 200 : 409).json(r);
 });
 
-/** 상태 — 폴러·DB·push·엣지 보고를 한 번에(진단 화면용). */
+/** 상태 — 폴러·DB·push·엣지 분류를 한 번에(진단 화면용). */
 api.get('/tools/part-faults/status', toolsPerm, fullScopeOnly, async (req, res) => {
   const st = await partFaultStatus().catch((e) => ({ error: String(e.message || e).slice(0, 200) }));
-  res.json({
-    ok: true, ...st, db: dbView(st.db, req.user?.role === 'admin'),
-    role: config.agent.centralUrl ? 'edge' : 'central',
-    push: config.agent.centralUrl ? partFaultPushStatus() : null,
-    edges: edgeStatus(3 * 3_600_000),
-  });
+  res.json({ ok: true, ...st, db: dbView(st.db, req.user?.role === 'admin'), version: currentVersion(),
+    push: config.agent.centralUrl ? partFaultPushStatus() : null, edges: config.agent.centralUrl ? null : edgesNow(), hook: hookStatus() });
+});
+
+/**
+ * 스위치 저장(중앙 admin). `{enabled, edges:{[agent]:{enabled}}}`. 엣지는 다음 설정 pull(기본 10분)에 받는다 —
+ * **주기 숫자를 문구에 박지 말 것**(엣지 pull 주기는 env 로 바뀐다). 응답이 `appliesTo` 로 '엣지는 pull 뒤' 를 말한다.
+ */
+api.put('/tools/part-faults/settings', adminOnly, fullScopeOnly, (req, res) => {
+  if (config.agent.centralUrl) return res.status(409).json({ ok: false, reason: '엣지에서는 스위치를 저장할 수 없습니다 — 중앙 설정이 내려옵니다.' });
+  const before = loadPartFaultSettings();
+  const s = savePartFaultSettings(req.body || {});
+  logAudit({ user: req.user?.username, action: '파트 장애 스위치 저장', detail: `enabled ${before.enabled}→${s.enabled} · 엣지별 ${Object.keys(s.edges).length}곳` });
+  res.json({ ok: true, settings: s, effective: partFaultEnabled(), appliesTo: { central: 'immediate', edges: 'next-config-pull' } });
+});
+
+/**
+ * 관리자 닫기(v2.548 리뷰 C5) — 재배정·등록 삭제로 **어떤 수집도 다시 보지 않을** 장애를 사람이 사유를 적어 닫는다.
+ * 자동으로 닫지 않는 이유: '보고에 없음' 은 '고쳐짐' 이 아니다(규칙 ④). 이벤트는 closeReason `manual` 로 남고
+ * 감사 로그에 사유를 적는다. 열려 있지 않은 키는 404(이미 닫힘·키 불일치).
+ */
+api.post('/tools/part-faults/close', adminOnly, fullScopeOnly, async (req, res) => {
+  const agent = String(req.body?.agent ?? '').trim().toLowerCase();
+  const partKey = String(req.body?.partKey || '').trim();
+  const note = String(req.body?.reason || '').trim().slice(0, 200);
+  if (!partKey) return res.status(400).json({ ok: false, reason: 'partKey 가 필요합니다.' });
+  const row = (await openFaults()).find((r) => String(r.agent || '').toLowerCase() === agent && r.partKey === partKey);
+  if (!row) return res.status(404).json({ ok: false, reason: '열린 장애가 아닙니다(이미 닫혔거나 키가 다릅니다).' });
+  const { applyTransition } = await import('../../partfault/db.js');
+  const now = Date.now();
+  const r = await applyTransition({ opened: [], updated: [], closed: [{ ...row, rawState: note || row.rawState, closedAt: now, closeReason: 'manual' }], held: [] }, { now });
+  logAudit({ user: req.user?.username, action: '파트 장애 수동 닫기', detail: `${agent || '중앙'}|${partKey} · ${row.deviceName || row.deviceId} · ${note || '(사유 없음)'}` });
+  res.json({ ok: r.saved !== false, saved: r.saved, closeReason: 'manual', reason: r.saved === false ? r.reason : undefined });
+});
+
+/** 키 체계 변경으로 이력을 새로 시작했는지(v2.548 스키마 v2) — 화면 배지 근거. */
+api.get('/tools/part-faults/reset', toolsPerm, fullScopeOnly, async (_req, res) => {
+  res.json({ ok: true, reset: await resetInfo().catch(() => null) });
 });
 
 }
