@@ -206,7 +206,10 @@ test('수집 방식 목록의 모든 value 는 실제 수집기가 있는 것만
 
 test('SSH CLI 수집기 4종이 정규화 함수를 내보낸다(테스트 가능 계약)', async () => {
   for (const [mod, fn] of [
-    ['powerstoreSsh.js', 'normalizePowerstoreSsh'], ['unitySsh.js', 'normalizeUnitySsh'],
+    ['powerstoreSsh.js', 'normalizePowerstoreSsh'],
+    // v2.542: unitySsh 는 정규화 함수 이름이 `buildSnapshot` 이다(명령 3개로 재작성 — 옛
+    // `normalizeUnitySsh`/`recordsFor`/`specsFor` 는 삭제했다. 사용자 지시 '기존 파싱 전부 삭제').
+    ['unitySsh.js', 'buildSnapshot'],
     ['xtremioSsh.js', 'normalizeXtremioSsh'], ['vplexSsh.js', 'normalizeVplexSsh'],
   ]) {
     const m = await import(`../src/storage/collectors/${mod}`);

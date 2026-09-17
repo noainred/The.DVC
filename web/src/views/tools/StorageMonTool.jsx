@@ -8,6 +8,7 @@ import { columnsFor, cellValue, sortValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
 import { emptyListText, conflictText } from './storageListText.js';
 import { STable } from '../../components/STable.jsx';
+import { collectMethodView } from './storageMethodText.js';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
 // v2.532: 법인·장비 종류 필터의 **판정과 마크업을 증가량 화면과 공유**한다(CLAUDE.md '코어는
 // 하나다'). 여기 있던 것을 옮긴 것이고, 복사해 두면 '같은 메뉴' 가 조용히 갈라진다.
@@ -17,7 +18,7 @@ import UnityConfigPanels from './UnityConfigPanels.jsx';   // v2.525: Unity 구�
 import UnityCapacityPlanPanel from './UnityCapacityPlanPanel.jsx'; // v2.540: Unity 용량 산정
 import CollectActivity from './CollectActivity.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { healthBadge } from './storageNodeText.js';   // v2.526: 헬스 배지 색 판정(순수)
+import { healthBadge, sectionBadge } from './storageNodeText.js';   // v2.526: 헬스 배지 색 판정(순수)
 import { authFailInfo } from './storageAuthText.js';  // v2.528: 401 진단 문구(순수)
 import { capacityRows, srpRows, subscribedNote, usageTrust } from './powermaxCapacityText.js'; // v2.534: 구독/할당/실제기록(순수)
 import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
@@ -329,12 +330,23 @@ function Cell({ col, r, ctx }) {
     case 'dc':
       return <td className="muted">{dcName(r.datacenterId)}</td>;
     case 'collect': {
-      // 수집 주체(중앙/엣지) + 방식 배지. 실제 수집된 스냅샷의 방식이 진실이고, 없으면 등록값
-      // (saveDevice 가 타입별 허용 목록으로 보정해 저장한다 — types.js COLLECT_METHODS).
-      const m = s?.extra?.collectMethod || r.collectMethod || 'api';
+      /*
+       * 수집 주체(중앙/엣지) + 방식 배지.
+       * ⚠ v2.542 — **등록값이 주 배지**다. 예전에는 `s.extra.collectMethod`(마지막 수집이
+       *   실제로 쓴 방식)를 먼저 봐서, 방식을 고쳐 저장해도 엣지가 다시 수집해 push 할 때까지
+       *   옛 방식이 그대로 보였다(사용자 신고 `OC2-unity-01`: "저장했는데 새로고침해도 API").
+       *   v2.515 장비 이름 열과 **같은 유형**이고, 해법도 같다 — 둘을 나란히 보여준다.
+       *   판정·문구는 `storageMethodText.js` 하나가 갖는다(주기 숫자를 문구에 박지 않는다).
+       */
+      const mv = collectMethodView({
+        registered: r.collectMethod, lastUsed: s?.extra?.collectMethod, hasSnap: !!s, agent: r.agent,
+      });
       return (
         <td>{r.agent ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{r.agent}</span> : <span className="muted">중앙</span>}
-          <span className={`badge ${m === 'ssh' ? 'blue' : 'gray'}`} style={{ marginLeft: 4, fontSize: 10 }} title={`모니터링(수집) 방식: ${m.toUpperCase()} — 등록/수정에서 변경`}>{m.toUpperCase()}</span>
+          <span className={`badge ${mv.tone}`} style={{ marginLeft: 4, fontSize: 10 }} title={mv.title}>{mv.label}</span>
+          {mv.pending && (
+            <span className="badge amber" style={{ marginLeft: 4, fontSize: 10, whiteSpace: 'nowrap' }} title={mv.pending.title}>{mv.pending.label}</span>
+          )}
         </td>
       );
     }
@@ -840,7 +852,14 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {/* 헤더 — 수집 방식/타입이 제공하는 항목만(v2.325). 빈 값은 '—' 대신 칩 자체를 숨긴다
               (예: SSH 는 시리얼/GUID 미제공 → 칩 없음). 수집 방식 배지로 어떤 UI 인지 명확히. */}
           <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 10, alignItems: 'center' }}>
+            {/* ⚠ v2.542: 이 배지는 **이 화면의 값을 어떤 방식으로 받았는지**다(아래 패널 구성도 그
+                기준으로 갈린다 — 있는 데이터가 그 방식으로 받은 것이므로 바꾸면 빈 칸만 늘어난다).
+                등록값이 이미 다른 방식으로 바뀌어 있으면 그 사실을 옆에 밝힌다. */}
             <span className={`badge ${method === 'ssh' ? 'blue' : 'gray'}`} title={method === 'ssh' ? 'SSH(isi status 파싱) 수집 — 시리얼/GUID 미제공, 클러스터 헬스·감축비·이벤트·잡 제공' : 'REST API 수집'}>{method.toUpperCase()} 수집</span>
+            {(() => {
+              const mv = collectMethodView({ registered: r.collectMethod, lastUsed: ex.collectMethod, hasSnap: !!s, agent: r.agent });
+              return mv.pending ? <span className="badge amber" style={{ marginLeft: 4 }} title={mv.pending.title}>등록 {mv.label} · 적용 대기</span> : null;
+            })()}
             <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{r.host}</b></span>
             <span className="muted">법인 <b style={{ color: 'var(--text)' }}>{dcName(r.datacenterId)}</b></span>
             {s.version && <span className="muted">버전 <b style={{ color: 'var(--text)' }}>{s.version}</b></span>}
@@ -1188,9 +1207,13 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
 
           <div className="section-title" style={{ fontSize: 13 }}>섹션별 수집 상태 <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}>— 부분 실패를 숨기지 않습니다(버전별 API 차이 진단용)</span></div>
           <div className="flex gap wrap">
-            {Object.entries(s.sections || {}).map(([k, v]) => (
-              <span key={k} className={`badge ${v === 'ok' ? 'green' : v === 'skip' ? 'gray' : 'red'}`} title={String(v)}>{k}: {v === 'ok' ? 'OK' : v === 'skip' ? '건너뜀' : '오류'}</span>
-            ))}
+            {/* ⚠ v2.542: 색·글자 판정은 `storageNodeText.sectionBadge` 하나가 갖는다. 예전에는
+                여기 인라인이었고 ok/skip 이 아니면 전부 빨간 '오류' 라, '이 방식에서는 조회하지
+                않는다'(미수집)가 장애처럼 보였다(색과 글자가 반대말을 하는 v2.526 과 같은 유형). */}
+            {Object.entries(s.sections || {}).map(([k, v]) => {
+              const b = sectionBadge(v);
+              return <span key={k} className={`badge ${b.tone}`} title={b.title}>{k}: {b.text}</span>;
+            })}
           </div>
           {/* 섹션 오류 원문 + PowerStore 공간 지표 시도 내역(v2.421) — 배지의 툴팁만으로는 복사·공유가 안 된다. */}
           {Object.entries(s.sections || {}).some(([, v]) => /오류/.test(String(v))) && (

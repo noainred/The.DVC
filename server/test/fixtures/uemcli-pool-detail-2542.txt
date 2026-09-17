@@ -1,0 +1,41 @@
+22:55:10 service@SYNTH0000000000 spa:~/user# uemcli /stor/config/pool show -detail
+Storage system address: 127.0.0.1
+Storage system port: 443
+HTTPS connection
+
+1:    ID                                          = pool_1
+      Type                                        = Dynamic
+      Name                                        = pool_1
+      Description                                 =
+      Total space                                 = 117544396521472 (106.9T)
+      Current allocation                          = 29973250195456 (27.2T)
+      Preallocated                                = 2400305152 (2.2G)
+      Remaining space                             = 87568746020864 (79.6T)
+      Subscription                                = 55491782770688 (50.4T)
+      Flash percent                               = 100%
+      Subscription percent                        = 47%
+      Alert threshold                             = 70%
+      Drives                                      = 38 x 3.8T SAS Flash 4
+      Number of drives                            = 38
+      RAID level                                  = 5
+      Stripe length                               = 9
+      Rebalancing                                 = no
+      Rebalancing progress                        =
+      Health state                                = OK (5)
+      Health details                              = "The component is operating normally. No action is required."
+      Protection size used                        = 0
+      Non-base size used                          = 0
+      Auto-delete state                           = Idle
+      Auto-delete paused                          = no
+      Auto-delete pool full threshold enabled     = yes
+      Auto-delete pool full high water mark        = 95%
+      Auto-delete pool full low water mark         = 85%
+      Auto-delete snapshot space used threshold enabled = no
+      Auto-delete snapshot space used high water mark = 25%
+      Auto-delete snapshot space used low water mark  = 20%
+      Data Reduction space saved                  = 0
+      Data Reduction Percent                      = 0%
+      Data Reduction Ratio                        = 1.00:1
+      All flash pool                              = yes
+
+22:55:45 service@SYNTH0000000000 spa:~/user#

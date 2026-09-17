@@ -19,28 +19,32 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { specsFor } from '../src/storage/collectors/unitySsh.js';
+import { SPECS } from '../src/storage/collectors/unitySsh.js';
 
-test('★ 매주기(always) 항목이 구성(config) 항목보다 앞에 온다 — 예산이 모자라도 용량·상태는 살아남는다', () => {
-  const all = specsFor({ deep: true, configRound: true });
-  const firstConfig = all.findIndex((s) => s.when === 'config');
-  const lastAlways = all.map((s) => s.when).lastIndexOf('always');
-  assert.ok(firstConfig > lastAlways, `always 가 전부 앞에 와야 한다(lastAlways=${lastAlways}, firstConfig=${firstConfig})`);
+test('★ 필수 항목이 맨 앞에 있다 — 예산이 모자라도 반드시 시도된다', () => {
+  assert.ok(SPECS[0].required, `첫 명령이 필수여야 한다(현재 ${SPECS[0].key})`);
 });
 
-test('★ 필수 항목은 맨 앞에 있다 — 예산이 모자라도 반드시 시도된다', () => {
-  const all = specsFor({ deep: true, configRound: true });
-  const req = all.findIndex((s) => s.required);
-  assert.equal(req, 0, '필수(system)가 첫 명령이어야 한다');
+/*
+ * ★ v2.542 — 이 테스트가 v2.526 회귀(명령 26개 → 예산 소진 → 전량 실패)의 재발을 막는다.
+ * 사용자 화면 증거: `accounts: 수집 시간 예산 초과로 이번 주기에는 실행하지 않았습니다`.
+ * 명령을 늘리려면 이 산수를 **먼저** 다시 하고, 넘으면 세션 예산·명령 시한을 같이 조정할 것.
+ */
+test('★ 명령 수 × 명령당 시한이 세션 예산 안에 들어간다 — 명령을 늘리기 전에 이 산수를 볼 것', async () => {
+  const fs = await import('node:fs');
+  const url = await import('node:url');
+  const src = fs.readFileSync(url.fileURLToPath(new URL('../src/storage/collectors/cliSsh.js', import.meta.url)), 'utf8');
+  const cmdMs = Number(/CMD_TIMEOUT_MS\s*=[^;]*?(\d{4,})/.exec(src)?.[1] || 45000);
+  const budget = Number(/SESSION_BUDGET_MS\s*=[^;]*?(\d{5,})/.exec(src)?.[1] || 150000);
+  assert.ok(SPECS.length * cmdMs <= budget,
+    `명령 ${SPECS.length}개 × ${cmdMs}ms = ${SPECS.length * cmdMs}ms 가 세션 예산 ${budget}ms 를 넘는다`);
 });
 
-test('구성 주기가 아니면 매주기 항목만 돈다 — 24개를 매번 돌리지 않는다(회귀의 원인)', () => {
-  const every = specsFor({ deep: true, configRound: false });
-  const full = specsFor({ deep: true, configRound: true });
-  assert.ok(every.length < full.length, '매주기 집합이 더 작아야 한다');
-  assert.ok(every.every((s) => s.when === 'always'));
-  // 명령당 45초 기준으로 매주기 집합이 장비 시한(180초) 안에 들어가는지 — 산수로 고정한다.
-  assert.ok(every.length * 45 <= 300, `매주기 명령이 ${every.length}개면 시한 예산을 넘긴다`);
+test('후보 명령 체인을 되살리지 않는다 — 항목당 명령 1개(시한을 두 배로 쓰지 않게)', () => {
+  for (const s of SPECS) {
+    assert.equal(s.cmds.length, 1, `${s.key}: 후보가 ${s.cmds.length}개다 — 실패 시 시한을 그만큼 더 쓴다`);
+    assert.ok(!/-output csv/.test(s.cmds[0]), `${s.key}: 이 장비의 CSV 출력은 확인된 적이 없다(v2.530·2.542)`);
+  }
 });
 
 test('세션 예산 기본값이 장비 시한보다 작다 — 같거나 크면 가드가 발동하기 전에 폴러가 던진다', async () => {

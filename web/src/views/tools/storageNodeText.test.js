@@ -8,7 +8,7 @@
  * 없는데 '비정상 없음' 이라 말하는 것 ③ 목록이 상한으로 잘린 것을 숨기는 것이다.
  */
 import { describe, it, expect } from 'vitest';
-import { nodeHealthKind, nodeRows, nodeFaultSummary, nodeKindLabel, bpsText, faultBadgeTitle, healthBadge } from './storageNodeText.js';
+import { nodeHealthKind, nodeRows, nodeFaultSummary, nodeKindLabel, bpsText, faultBadgeTitle, healthBadge, sectionBadge } from './storageNodeText.js';
 
 const nodesOf = (list, over = {}) => ({
   nodes: { count: list.length, unhealthy: list.filter((n) => nodeHealthKind(n.health) === 'bad').length, list, ...over },
@@ -124,5 +124,33 @@ describe('healthBadge (v2.526)', () => {
     const b = healthBadge('Degraded (7)');
     expect(b.tone).toBe('red');
     expect(b.text).toBe('Health: Degraded (7)');
+  });
+});
+
+// ── v2.542: '조회하지 않은 것' 을 빨간 '오류' 로 그리지 않는다 ──────────────────────
+// Unity 수집기를 명령 3개로 줄이면서 nodes·accounts·alerts 는 '미수집' 이 됐다. 예전 인라인
+// 판정은 ok/skip 이 아니면 전부 빨강이라 그것이 장애처럼 보였다(색이 글자와 반대말을 한다).
+describe('sectionBadge — 미수집을 오류로 그리지 않는다(v2.542)', () => {
+  it("'ok' 는 초록 OK", () => {
+    expect(sectionBadge('ok')).toMatchObject({ tone: 'green', text: 'OK' });
+  });
+  it("'skip' 은 회색 건너뜀", () => {
+    expect(sectionBadge('skip')).toMatchObject({ tone: 'gray', text: '건너뜀' });
+  });
+  it('미수집은 회색이고 사유를 툴팁에 담는다', () => {
+    const b = sectionBadge('미수집(이 수집 방식에서는 조회하지 않습니다)');
+    expect(b.tone).toBe('gray');
+    expect(b.text).toBe('미수집');
+    expect(b.title).toMatch(/조회하지 않습니다/);
+  });
+  it('오류는 계속 빨강이다 — 부분 실패를 회색으로 덮지 않는다', () => {
+    const b = sectionBadge('오류: 명령 출력이 끊겼습니다(26B 수신)');
+    expect(b.tone).toBe('red');
+    expect(b.text).toBe('오류');
+    expect(b.title).toMatch(/26B/);
+  });
+  it('빈 값도 오류로 다룬다(정상이라 하지 않는다)', () => {
+    expect(sectionBadge('').tone).toBe('red');
+    expect(sectionBadge(undefined).tone).toBe('red');
   });
 });

@@ -129,3 +129,25 @@ export function healthBadge(raw) {
   }
   return { tone: 'red', text: `Health: ${s}`, title: '장비가 보고한 상태(원문 그대로)' };
 }
+
+/**
+ * 섹션별 수집 상태 배지(v2.542) — `snap.sections[k]` 하나를 색·글자로 옮긴다.
+ *
+ * ⚠ 왜 순수 모듈로 올렸나: v2.541 까지 이 판정이 `StorageMonTool.jsx` 에 인라인으로 있었고
+ * **`ok`/`skip` 이 아니면 전부 빨간 '오류'** 였다. v2.542 에 Unity 수집기를 명령 3개로 줄이면서
+ * '이 수집 방식으로는 조회하지 않는다'(`미수집…`) 는 상태가 생겼는데, 그것이 빨간 '오류' 로
+ * 그려졌다 — **색과 글자가 반대말을 하는** v2.526 `healthBadge` 와 같은 결함이다(사람은 색을
+ * 먼저 읽는다). 조회하지 않은 것은 실패가 아니다.
+ *
+ * ⚠ `미수집` 을 `오류` 로 되돌리지 말 것. 반대로 **오류를 회색으로 덮지도 말 것** —
+ * 부분 실패를 숨기지 않는 것이 이 배지 줄의 존재 이유다.
+ * @param {string} v 섹션 값(`'ok'` · `'skip'` · `'미수집…'` · `'오류: …'`)
+ * @returns {{tone:'green'|'gray'|'red', text:string, title:string}}
+ */
+export function sectionBadge(v) {
+  const s = String(v ?? '').trim();
+  if (s === 'ok') return { tone: 'green', text: 'OK', title: '수집 성공' };
+  if (s === 'skip') return { tone: 'gray', text: '건너뜀', title: '이 장비/버전에서는 해당 없음' };
+  if (/^미수집/.test(s)) return { tone: 'gray', text: '미수집', title: s };
+  return { tone: 'red', text: '오류', title: s || '사유 없음' };
+}
