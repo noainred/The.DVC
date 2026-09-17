@@ -27,6 +27,11 @@ import { latestAll, samplesOf, eventsOf, eventDetail, dailyOf, dbStatus } from '
 import { allEdgeLinkReports, REPORT_STALE_MS } from '../../central/linkCheckEdge.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { linkCheckWorkerStatus } from '../../agent/linkCheckWorker.js';
+// v2.553 — 설정 전수 점검(25종) + 해결책
+import { buildSettingsTargets, publicTarget } from '../../linkcheck/settingsLinks.js';
+import { SETTING_KINDS, SETTING_KIND_KEYS, DEPTH_LABEL, GROUP_ORDER, SETTINGS_PATHS } from '../../linkcheck/settingsKinds.js';
+import { configFindings, resultFindings, mergeFindings, hostCountsOf, HOST_FORM, CERT_WARN_DAYS } from '../../linkcheck/remedy.js';
+import { ipBlockReason } from '../../collector/registry.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = (req, res, next) => {
@@ -183,6 +188,67 @@ api.post('/tools/link-check/run', adminOnly, fullScopeOnly, async (req, res) => 
 
 api.get('/tools/link-check/settings', adminOnly, fullScopeOnly, (_req, res) => {
   res.json({ ok: true, settings: loadLinkCheckSettings(), defaults: DEFAULTS, kinds: LINK_KINDS });
+});
+
+/**
+ * **설정 전수 점검 목록 + 해결책**(v2.553 — 사용자 요청 "설정에 있는 모든 통신이 되는지 점검하고
+ * 해결책 제시하는 기능").
+ *
+ * ⚠ 이 응답은 **네트워크로 나가지 않는다** — 등록부를 읽어 목록·설정 발견(맞춤 진단)을 만들고,
+ *   측정값은 DB 의 최신 1건을 붙인다. 점검을 켜지 않아도 '설정 문제' 는 즉시 보인다.
+ * ⚠ **측정값이 없는 것을 '정상' 으로 칠하지 않는다**(v2.552 규약) — 화면이 `latest === null` 을
+ *   '측정 없음' 으로 다룬다.
+ */
+api.get('/tools/link-check/targets', adminOnly, fullScopeOnly, async (_req, res) => {
+  const built = await buildSettingsTargets();
+  const latest = await latestAll();
+  const byId = new Map(latest.map((r) => [r.link_id, r]));
+  const hostCounts = hostCountsOf(built.targets);
+  const s = loadLinkCheckSettings();
+
+  const rows = built.targets.map((x) => {
+    const r = byId.get(x.id) || null;
+    /*
+     * 최신 행에는 단계 객체가 없다(요약 표본이다 — v2.552 3단 구조). 결과 기반 발견이 필요한
+     * 것만 **행이 실제로 가진 열**로 되돌린다. 없는 값을 지어내지 않는다.
+     */
+    const pseudoSteps = r ? {
+      ...(r.cert_days != null ? { tls: { certDaysLeft: r.cert_days } } : {}),
+      ...(r.status != null ? { http: { status: r.status } } : {}),
+      ...(r.phase ? { [r.phase]: { ok: !!r.ok, error: '' } } : {}),
+    } : {};
+    const findings = mergeFindings(
+      configFindings(x, { hostCounts, ipBlockReason }),
+      r ? resultFindings(x, { ok: !!r.ok, phase: r.phase, failKind: r.fail_kind, reached: r.reached }, pseudoSteps) : [],
+    );
+    return {
+      ...publicTarget(x),
+      ...(x.bad ? { bad: x.bad } : {}),
+      latest: r ? {
+        ts: r.ts, ok: !!r.ok, phase: r.phase, failKind: r.fail_kind, reached: r.reached,
+        totalMs: r.total_ms, status: r.status, certDaysLeft: r.cert_days,
+        summary: r.summary, sinceTs: r.since_ts, streak: r.streak, byNode: r.by_node,
+      } : null,
+      findings,
+    };
+  });
+
+  res.json({
+    ok: true,
+    enabled: linkCheckEnabled(),
+    settingsCheck: s.settingsCheck !== false,
+    intervalMs: s.intervalMs,
+    targets: rows,
+    counts: built.counts,
+    problems: built.problems,
+    // ⚠ 등록부 하나가 못 읽히면 그 종류가 **통째로 빠진다** — 조용히 0건으로 두지 않는다.
+    sourceErrors: built.sourceErrors,
+    kinds: SETTING_KINDS, kindKeys: SETTING_KIND_KEYS,
+    depthLabel: DEPTH_LABEL, groupOrder: GROUP_ORDER, settingsPaths: SETTINGS_PATHS,
+    hostForm: HOST_FORM, certWarnDays: CERT_WARN_DAYS,
+    poller: linkCheckPollerStatus(),
+    at: Date.now(),
+  });
 });
 
 api.put('/tools/link-check/settings', adminOnly, fullScopeOnly, (req, res) => {

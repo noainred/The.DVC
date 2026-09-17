@@ -78,8 +78,14 @@ export function stepTls(ip, port, servername, { timeoutMs = 10_000 } = {}) {
   return new Promise((resolve) => {
     const t0 = Date.now();
     let done = false;
+    /*
+     * ⚠ **SNI 에 IP 를 넣지 않는다**(v2.553 에 발견): RFC 6066 이 금지하고 Node 가
+     *   `DEP0123` 경고를 내며 앞으로 무시한다. IP 로 등록된 장비(이 현장 다수)에서 매 점검마다
+     *   경고가 찍히고, '앞으로 무시' 라 동작도 조용히 바뀐다. 이름일 때만 붙인다.
+     */
+    const sni = t(servername);
     const sock = tls.connect({
-      host: ip, port, servername: t(servername) || undefined,
+      host: ip, port, ...(sni && !net.isIP(sni) ? { servername: sni } : {}),
       rejectUnauthorized: false, family: net.isIPv6(ip) ? 6 : 4,
     });
     const fin = (r) => { if (done) return; done = true; try { sock.destroy(); } catch { /* */ } resolve({ ...r, ms: ms(t0) }); };
@@ -126,7 +132,8 @@ export async function stepHttp({ url, ip, headers = {}, timeoutMs = 15_000, iden
     const u = new URL(url);
     // ⚠ **검사한 IP 로 붙고 SNI·Host 는 원 호스트명**을 쓴다(v2.506 규약).
     const dispatcher = new Agent({
-      connect: { rejectUnauthorized: false, lookup: pinnedLookup(ip), servername: u.hostname },
+      // ⚠ 같은 이유로 SNI 에 IP 를 넣지 않는다(RFC 6066 · Node DEP0123).
+      connect: { rejectUnauthorized: false, lookup: pinnedLookup(ip), ...(net.isIP(u.hostname) ? {} : { servername: u.hostname }) },
       headersTimeout: timeoutMs, bodyTimeout: timeoutMs,
     });
     res = await fetch(url, { method, headers, dispatcher, signal: AbortSignal.timeout(timeoutMs) });
