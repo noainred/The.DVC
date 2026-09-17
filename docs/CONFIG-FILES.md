@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **137개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **146개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-14)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-17)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -36,6 +36,7 @@
 | `capture-monitors.json` | 설정 | 연속 네트워크 모니터링 — 두 서버 간 캡처를 주기적으로 자동 실행해 이력에 기록하고, 경로 | ✅ |  | ✅ | net/monitor.js |
 | `central-agent-config.json` | 설정 | 엣지 포탈(에이전트) 설정 저장소 — 에이전트가 push한 자기 CONFIG_DIR 설정을 보관한다. | ✅ | ✅ | ✅ | central/agentConfig.js |
 | `central-agent-gpu-guest.json` | 설정 | 중앙에서 지정하는 'agent(엣지)별 GPU 게스트 수집 설정' 저장소. | ✅ | ✅ | ✅ | central/agentGpuGuestConfig.js |
+| `central-agent-sanswitch-perf.json` | 설정 | 엣지가 보고한 **포트 사용량 수집 상태**의 중앙 보관(v2.517, | ✅ | ✅ | ✅ | central/sanSwitchPerfEdge.js |
 | `central-agent-sanswitch.json` | 설정 | 엣지들이 push 한 SAN 스위치 스냅샷의 중앙 보관(v2.410). | ✅ |  | ✅ | central/sanSwitchEdge.js |
 | `central-agent-storage.json` | 설정 | 엣지들이 push 한 스토리지 스냅샷의 중앙 보관(v2.302). | ✅ |  | ✅ | central/storageEdge.js |
 | `central-agent-tokens.json` | 설정 | 엣지 에이전트별 개별 토큰 | ✅ |  | ✅ | central/agentTokens.js |
@@ -48,6 +49,8 @@
 | `collectors.json` | 설정 | 원격 수집 서버(엣지) 목록과 토큰 | ✅ | ✅ | ✅ | collector/registry.js |
 | `credentials-usage.json` | 설정 | 통합 계정 관리 저장소(v2.419) — RMA 가 엣지 망 안의 서버에 SSH 로 점검·명령을 실행할 때 쓰는 | ✅ | ✅ | ✅ | security/credentialStore.js |
 | `credentials.json` | 설정 | 통합 계정(장비 SSH/API 자격증명) | ✅ | ✅ | ✅ | security/credentialStore.js |
+| `curuser-settings.json` | 설정 | '현재 사용자' 수집 설정(v2.520). | ✅ | ✅ | ✅ | curuser/settings.js |
+| `curuser.db` | DB | '현재 사용자' 전용 시계열 DB(v2.520). |  |  | ✅ | curuser/db.js |
 | `daily-report.json` | 설정 | 일일 헬스체크 리포트 발송 스케줄러 — 매일 지정 시각(HH:MM)에 computeHealthReport 결과를 | ✅ |  | ✅ | reports/dailyReport.js |
 | `datacenters.json` | 설정 | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | ✅ |  |  | datacenter/store.js |
 | `db-location.json` | 설정 | 시계열 DB 저장 경로(dbDir) |  |  |  | insights/dbLocation.js |
@@ -63,6 +66,8 @@
 | `guest-disk.db` | DB | 게스트 디스크 회수 리포트 시계열 DB(v2.459). |  |  | ✅ | guestdisk/db.js |
 | `guest-disk.json` | 설정 | 게스트 디스크 회수 리포트 설정 (`guest-disk.json`, v2.459). | ✅ | ✅ | ✅ | guestdisk/settings.js |
 | `guest-scans.json` | 설정 | 게스트 조사 스케줄러 — 사용자가 지정한 주기로 게스트 OS를 조사해 기록·저장한다. | ✅ |  | ✅ | security/guestScanScheduler.js |
+| `horizon-sessions.db` | DB | Horizon 실시간 사용자 전용 DB(v2.525). |  |  | ✅ | horizon/sessionDb.js |
+| `horizon-sessions.json` | 설정 | Horizon 실시간 사용자 수집 설정(v2.525). | ✅ | ✅ | ✅ | horizon/sessionSettings.js |
 | `horizon.json` | 설정 | Horizon Connection Server 연동 — 라이선스 만료일 확인 전용(가벼운 통합). | ✅ | ✅ | ✅ | horizon/horizon.js |
 | `host-access.json` | 설정 | 호스트 접근 제어 설정(`host-access.json`, v2.485). | ✅ | ✅ | ✅ | hostaccess/settings.js |
 | `host-temp.db` | DB | 지표 시계열(온도·GPU·데이터스토어·포탈 메모리) — 이름과 달리 범용 DB |  |  |  | config.js |
@@ -98,6 +103,8 @@
 | `os-scan.json` | 설정 | 실제 OS 인벤토리 스캐너 — 주기적으로 'DB에 없는(또는 오래된) VM'을 찾아 게스트에서 실제 OS를 읽어 저장. | ✅ |  | ✅ | inventory/osScanner.js |
 | `packages` | 디렉터리 | 디렉터리 — 내려받은 설치/업그레이드 패키지 보관(PACKAGE_DIR) |  |  |  | config.js |
 | `packages.json` | 설정 | Web-editable package source settings — lets an admin change the package | ✅ |  | ✅ | upgrade/packageSettings.js |
+| `part-faults.db` | DB | 파트 장애 이력 DB(v2.547). 파일 `part-faults.db`. |  |  | ✅ | partfault/db.js |
+| `partfault-edge.json` | 설정 | 엣지가 올린 **파트 장애 보고**를 중앙이 보관한다(v2.547). | ✅ | ✅ | ✅ | central/partFaultEdge.js |
 | `pdu-devices.json` | 설정 | PDU(APC Rack PDU 2G) 장비 등록 — `CONFIG_DIR/pdu-devices.json`(0600). | ✅ | ✅ | ✅ | pdu/registry.js |
 | `pdu-intervals.json` | 설정 | PDU 수집 주기(사용자 요구: '수집 시간은 설정에서 지정'). | ✅ | ✅ | ✅ | pdu/intervals.js |
 | `pdu-thresholds.json` | 설정 | PDU 임계치 판정 + 알림 연동(v2.425). | ✅ | ✅ | ✅ | pdu/thresholds.js |
@@ -121,7 +128,9 @@
 | `rma-settings.json` | 설정 | RMA 분배 설정(중앙) — `rma-settings.json` { version, defaultMode, agents: { name: { mode, primary } } }. | ✅ | ✅ | ✅ | rma/settings.js |
 | `rma-tests.db` | DB | 원격 점검(RMA) 결과 이력 |  |  | ✅ | rma/testResults.js |
 | `runtime.json` | 설정 | Runtime-adjustable settings that can be changed from the portal UI (and | ✅ |  | ✅ | runtime-settings.js |
+| `san-health.db` | DB | SAN 점검 결과 이력 + **최근 N회 비교**(v2.522). |  |  | ✅ | sanswitch/healthHistory.js |
 | `sanswitch-devices.json` | 설정 | SAN 스위치 등록부(v2.410). | ✅ | ✅ | ✅ | sanswitch/registry.js |
+| `sanswitch-err-baseline.json` | 설정 | 포트 에러 카운터 **월 기준선**(v2.519). | ✅ |  | ✅ | sanswitch/errBaseline.js |
 | `sanswitch-latest.json` | 설정 | 이 노드가 수집한 최신 스냅샷 보관(v2.410, storage/store.js 와 동일 철학). | ✅ |  | ✅ | sanswitch/store.js |
 | `sanswitch-perf-push.json` | 설정 | 엣지 → 중앙 포트 사용량(portperfshow) 시계열 중계(v2.423, 사용자 요구 '연결은 됐는데 데이터 | ✅ |  | ✅ | sanswitch/perfPush.js |
 | `sanswitch-perf-settings.json` | 설정 | 포트 사용량(portperfshow) 수집 설정(v2.411, 사용자 요구 | ✅ | ✅ | ✅ | sanswitch/perfSettings.js |
@@ -130,19 +139,8 @@
 | `secrets-policy.json` | 설정 | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | ✅ | ✅ | ✅ | security/secretVault.js |
 | `security-session.json` | 설정 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ | ✅ | ✅ | security/securitySettings.js |
-| `storage-activity.json` | 설정 | 스토리지 수집 '작업 로그'(v2.315, 사용자 요구 '진행중/완료 창'). | ✅ | ✅ | ✅ | storage/activityLog.js |
-| `sanswitch-activity.json` | 설정 | SAN 스위치 수집 '작업 로그'(v2.516 — 스토리지와 같은 공용 팩토리 `util/activityLog.js`). 링버퍼(기본 500건, `SANSWITCH_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | sanswitch/activityLog.js |
-| `sanswitch-perf-activity.json` | 설정 | SAN 스위치 **포트 사용량**(portperfshow) 수집 작업 로그(v2.517). 기본 수집 로그와 파일을 나눈다 — 주기가 달라 한 링버퍼에 섞으면 잦은 쪽이 상한을 먹어 다른 쪽 이력이 사라진다. 링버퍼(기본 500건, `SANSW_PERF_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | sanswitch/perfActivityLog.js |
-| `curuser-settings.json` | 설정 | '현재 사용자' 수집 설정(v2.520) — 법인별 대상 폴더·주기(포탈 조회 10분 기본 / 게스트 발행 주기는 별도)·보존·상한. **자격증명 없음**(게스트 계정을 쓰지 않는 설계). 0600·원자적 쓰기. | ✅ | ✅ | ✅ | curuser/settings.js |
-| `curuser-activity.json` | 설정 | '현재 사용자' 수집 작업 로그(v2.520). 공용 팩토리 `util/activityLog.js`. 링버퍼(기본 500건, `CURUSER_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | curuser/activityLog.js |
-| `curuser.db` | DB | '현재 사용자' 최신 스냅샷 + vCenter별 추이(v2.520). 10분 주기 × (28 법인 + 전체) ≈ 연 152만행, 보존 기본 180일. VM 단위 계열은 `CURUSER_VM_SERIES=1` 옵트인(연 2,100만행). WAL·0600. |  |  | ✅ | curuser/db.js |
-| `san-health.db` | DB | SAN 스위치 **점검 이력**(v2.522). 장비당 최근 24건(`SANHEALTH_MAX_RUNS`)만 보관하고 **같은 수집 시각(collectedAt)이면 기록하지 않는다**(수집 1회 = 기록 1회 — 탭을 열 때마다 쌓이면 '최근 10회' 가 같은 값 10개가 된다). 근거(evidence)는 저장하지 않는다. WAL·0600. |  |  | ✅ | sanswitch/healthHistory.js |
-| `horizon-sessions.json` | 설정 | Horizon **실시간 사용자**(세션) 수집 설정(v2.525) — 대상 Connection Server·주기(기본 5분)·시한·페이징·상한·계정명 표시. **자격증명 없음**(`horizon.json` 을 재사용한다 — 비밀 스토어를 둘로 늘리지 않기 위해). 0600·원자적 쓰기. | ✅ | ✅ | ✅ | horizon/sessionSettings.js |
-| `horizon-session-activity.json` | 설정 | Horizon 세션 수집 작업 로그(v2.525). 공용 팩토리 `util/activityLog.js`. 링버퍼(기본 500건, `HZSESS_ACTIVITY_MAX`)·0600·손상 시 재생성. | ✅ | ✅ | ✅ | horizon/sessionActivityLog.js |
-| `horizon-sessions.db` | DB | Horizon **실시간 사용자**(세션) 최신 스냅샷 + 서버별·전체 추이(v2.525). 5분 주기 × (서버 수 + 전체 1) → 서버 1대 기준 연 21만행, 보존 기본 180일. **원시 세션 객체는 저장하지 않는다**(계정·풀 집계만 — 1만 세션 직렬화를 매 주기 반복하지 않기 위해). 실패한 주기의 수치는 `NULL`(0 으로 채우면 '사용자 0명' 이라는 거짓). WAL·0600. |  |  | ✅ | horizon/sessionDb.js |
-| `sanswitch-err-baseline.json` | 설정 | 포트 에러 카운터 **월 기준선**(v2.519) — `porterrshow` 는 부팅 이후 누적이라, 이 시점을 기억해 '당월 신규' 를 가린다. ⚠ 포탈은 `portstatsclear` 를 실행하지 않는다(다른 도구의 기준선을 지우는 파괴적 동작) — 기준선은 포탈 안에 둔다. 0600·원자적 쓰기·손상 시 재생성. | ✅ | ✅ | ✅ | sanswitch/errBaseline.js |
-| `central-agent-sanswitch-perf.json` | 설정 | 엣지가 보고한 **포트 사용량 수집 상태**의 중앙 보관(v2.517) — 표본이 0건이어도 올라오는 하트비트라, 중앙이 '엣지가 켜졌는지·돌았는지·왜 실패하는지' 를 안다. 캐시 성격(손상 시 재생성, preserveCorrupt 아님)·0600. | ✅ |  | ✅ | central/sanSwitchPerfEdge.js |
 | `storage-devices.json` | 설정 | 스토리지 장비 등록부(v2.302). | ✅ | ✅ | ✅ | storage/registry.js |
+| `storage-growth-settings.json` | 설정 | 스토리지 사용량 보존 설정(v2.531). | ✅ | ✅ | ✅ | storage/growthSettings.js |
 | `storage-history.db` | DB | 스토리지 장비(8종) 용량 이력 |  |  | ✅ | storage/db.js |
 | `storage-intervals.json` | 설정 | 스토리지 수집 주기(중앙에서 엣지 설정, v2.409). | ✅ | ✅ | ✅ | storage/intervals.js |
 | `storage-latest.json` | 설정 | 이 노드가 수집한 최신 스냅샷 보관(v2.302). | ✅ | ✅ | ✅ | storage/store.js |

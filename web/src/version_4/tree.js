@@ -67,7 +67,7 @@ export const TREE = Object.freeze([
       page('facility'),
       page('power'),
       tool('fleet'), tool('hardware'), tool('serveranalysis'), tool('gpu'), tool('esxitemp'),
-      tool('roomtemp'), tool('powermap'), tool('pdu'), tool('serial-lookup'),
+      tool('roomtemp'), tool('powermap'), tool('pdu'), tool('serial-lookup'), tool('part-faults'),
       tool('nic-speed', true), tool('nic-models', true),
     ],
   },

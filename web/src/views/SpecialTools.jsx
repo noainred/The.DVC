@@ -35,6 +35,7 @@ const CodexCheck = React.lazy(() => import('./CodexCheck.jsx'));
 const VmCloneTool = React.lazy(() => import('./tools/VmCloneTool.jsx'));
 const StorageMonTool = React.lazy(() => import('./tools/StorageMonTool.jsx'));
 const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx'));
+const PartFaults = React.lazy(() => import('./tools/PartFaults.jsx'));   // 파트 장애(v2.547)
 const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
 const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
 const PduTool = React.lazy(() => import('./tools/PduTool.jsx'));
@@ -443,6 +444,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'vm-clone' && <VmCloneTool />}
       {tool === 'storage-mon' && <StorageMonTool />}
       {tool === 'storage-growth' && <StorageGrowthTool />}
+      {tool === 'part-faults' && <PartFaults />}
       {tool === 'bm-storage' && <BmStorageTool />}
       {tool === 'san-switch' && <SanSwitchTool />}
       {tool === 'pdu' && <PduTool />}

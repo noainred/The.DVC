@@ -54,6 +54,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   // v2.506 추가 — 전용 엔드포인트를 가진(= 다른 도구와 공유하지 않는) 도구들. 공유 엔드포인트를
   // 한 도구에 묶으면 그 엔드포인트를 쓰는 **다른 화면이 같이 막힌다**(가장 위험한 실수).
   'orphan-vmdk': 'orphanvmdk',       // OrphanVmdk.jsx 전용(v2.505)
+  'part-faults': 'part-faults',      // PartFaults.jsx 전용(v2.547) — 물리 부품 장애 기록·알림
   'service-check': 'davinci-svc',    // DavinciChecks.jsx ServiceCheck 전용
   'vmware-config': 'vmware-backup',  // DavinciChecks.jsx VmwareConfigBackup 전용
   pdu: 'pdu',
