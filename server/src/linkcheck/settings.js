@@ -15,6 +15,8 @@ const FILE = () => path.join(config.configDir, 'linkcheck-settings.json');
 
 export const DEFAULTS = Object.freeze({
   enabled: false,
+  // v2.553: 설정 전수 점검(25종). 링크 점검과 **같은 주기·같은 가드**를 쓰고 여기서만 끈다.
+  settingsCheck: true,
   intervalMs: 5 * 60_000,
   // 링크 종류별 on/off — 기본은 전부 켜짐(명시 false 만 끈다).
   kinds: {},
@@ -25,6 +27,8 @@ export const DEFAULTS = Object.freeze({
   tcpTimeoutMs: 8_000,
   tlsTimeoutMs: 10_000,
   httpTimeoutMs: 15_000,
+  sshTimeoutMs: 12_000,
+  smtpTimeoutMs: 12_000,
   concurrency: 6,
   // 3단 보존(사용자 선택). 근거는 db.js 머리말의 실제 계산.
   sampleRetentionDays: 90,
@@ -56,12 +60,16 @@ export function normalizeSettings(raw = {}) {
   }
   return {
     enabled: raw?.enabled === true,
+    // 기본 켜짐(명시 false 만 끈다) — '설정에 있는 모든 통신' 이 이 기능의 요청이다.
+    settingsCheck: raw?.settingsCheck !== false,
     intervalMs: clampInt(raw?.intervalMs, MIN_INTERVAL_MS, MAX_INTERVAL_MS, DEFAULTS.intervalMs),
     kinds, pairs,
     dnsTimeoutMs: clampInt(raw?.dnsTimeoutMs, 1_000, 30_000, DEFAULTS.dnsTimeoutMs),
     tcpTimeoutMs: clampInt(raw?.tcpTimeoutMs, 1_000, 60_000, DEFAULTS.tcpTimeoutMs),
     tlsTimeoutMs: clampInt(raw?.tlsTimeoutMs, 1_000, 60_000, DEFAULTS.tlsTimeoutMs),
     httpTimeoutMs: clampInt(raw?.httpTimeoutMs, 1_000, 120_000, DEFAULTS.httpTimeoutMs),
+    sshTimeoutMs: clampInt(raw?.sshTimeoutMs, 1_000, 60_000, DEFAULTS.sshTimeoutMs),
+    smtpTimeoutMs: clampInt(raw?.smtpTimeoutMs, 1_000, 60_000, DEFAULTS.smtpTimeoutMs),
     concurrency: clampInt(raw?.concurrency, 1, 32, DEFAULTS.concurrency),
     sampleRetentionDays: clampInt(raw?.sampleRetentionDays, 7, 365, DEFAULTS.sampleRetentionDays),
     eventRetentionDays: clampInt(raw?.eventRetentionDays, 3, 365, DEFAULTS.eventRetentionDays),

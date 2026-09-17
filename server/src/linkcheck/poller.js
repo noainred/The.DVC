@@ -19,6 +19,8 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { loadCollectors } from '../collector/registry.js';
 import { listRegistry as listVcenters } from '../vcenter/registry.js';
 import { buildLinks, CENTRAL_KINDS } from './links.js';
+import { buildSettingsTargets } from './settingsLinks.js';
+import { runSettingsTarget } from './settingsRun.js';
 import { loadLinkCheckSettings, linkCheckEnabled, onLinkCheckSettingsChange } from './settings.js';
 import { runLink } from './run.js';
 import { insertResults, pruneLinkCheck } from './db.js';
@@ -89,12 +91,31 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
       collectors: new Map(collectors.map((c) => [String(c.name || c.id), c])),
       collectorIds: collectors.map((c) => String(c.id || '')),
     };
-    const timeouts = { dnsMs: s.dnsTimeoutMs, tcpMs: s.tcpTimeoutMs, tlsMs: s.tlsTimeoutMs, httpMs: s.httpTimeoutMs };
+    const timeouts = { dnsMs: s.dnsTimeoutMs, tcpMs: s.tcpTimeoutMs, tlsMs: s.tlsTimeoutMs, httpMs: s.httpTimeoutMs, sshMs: s.sshTimeoutMs, smtpMs: s.smtpTimeoutMs };
 
     const node = selfNode();
     const results = await pool(mine, s.concurrency, (l) => runLink(l, { timeouts, ctx, byNode: node }));
-    const measured = results.filter((r) => r && r.verdict);
-    const skippedLinks = results.filter((r) => r && r.skipped);
+
+    /*
+     * ⚠⚠ **설정 전수 점검도 같은 주기·같은 가드·같은 DB 를 쓴다**(v2.553). 폴러를 하나 더 만들면
+     *   재진입 가드가 둘이 되어 같은 장비에 동시에 두 세션이 열린다(CLAUDE.md 폴러 규약).
+     *   대상 id 는 `set:<종류>|<ref>` 라 v2.552 링크 id 와 **이름공간이 겹치지 않는다**.
+     */
+    let setResults = [];
+    let setProblems = [];
+    let setSourceErrors = [];
+    if (s.settingsCheck !== false) {
+      const built = await buildSettingsTargets();
+      setProblems = built.problems;
+      setSourceErrors = built.sourceErrors;
+      const doable = built.targets.filter((x) => x.enabled !== false && !x.bad
+        // 엣지 위임 장비는 중앙에서 닿지 않는 것이 **정상**이다 — 점검해서 '실패' 로 적으면 거짓이다.
+        && !(x.agent && node === 'central') && !(node !== 'central' && x.agent && x.agent !== node));
+      setResults = await pool(doable, s.concurrency, (x) => runSettingsTarget(x, { timeouts, ctx }));
+    }
+
+    const measured = [...results, ...setResults].filter((r) => r && r.verdict);
+    const skippedLinks = [...results, ...setResults].filter((r) => r && r.skipped);
 
     const saved = await insertResults(measured, { byNode: node });
     // ⚠ 스로틀은 `(++tick % N) === 0` — 기동 첫 틱 즉발 금지(v2.453).
@@ -106,10 +127,12 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
     _last = {
       at: startedAt, ms: Date.now() - startedAt, trigger, node,
       links: counts.total, mine: mine.length,
+      settingsTargets: setResults.length, settingsProblems: setProblems.length, settingsSourceErrors: setSourceErrors,
       checked: measured.length, failed, ok: measured.length - failed,
       skipped: skippedLinks.length,
       // ⚠ **건너뛴 사유를 조용히 버리지 않는다** — '점검했는데 정상' 과 구분해야 한다.
-      skippedReasons: skippedLinks.slice(0, 20).map((r) => ({ id: r.link?.id || '', reason: r.skipped })),
+      // ⚠ 설정 대상은 `target`, v2.552 링크는 `link` 다 — 한쪽만 읽으면 사유가 빈 문자열이 된다.
+      skippedReasons: skippedLinks.slice(0, 20).map((r) => ({ id: r.link?.id || r.target?.id || '', reason: r.skipped })),
       skippedTruncated: Math.max(0, skippedLinks.length - 20),
       problems: problems.length,
       dbOk: saved.ok !== false, dbError: saved.error || '',

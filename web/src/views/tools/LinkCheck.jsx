@@ -24,6 +24,10 @@ import {
   STATE_LABEL, stateTone, rowState, msText, ageText, certText, kpisOf, headerNote,
   runResultText, EVENT_LABEL, eventTone, tableFootnotes, pairNote, trailFromLatest,
 } from './linkCheckText.js';
+// v2.553: 설정 전수 점검(25종) + 해결책 — 같은 화면의 탭이다(도구를 하나 더 만들지 않는다).
+const SettingsCheckPanel = React.lazy(() => import('./SettingsCheckPanel.jsx'));
+
+const VIEWS = [['settings', '설정 전수 점검'], ['links', '중앙↔엣지 링크'], ['logs', '점검 로그']];
 
 const HOURS = [[24, '24시간'], [24 * 7, '7일'], [24 * 30, '30일']];
 /*
@@ -62,6 +66,7 @@ function PhaseTrail({ latest, phases, label }) {
 
 export function LinkCheck() {
   // ⚠ 훅은 전부 조기 return 위에(조기 반환 뒤 훅 추가는 React #310 크래시 — v2.202 실제 사고).
+  const [view, setView] = useState('settings');   // v2.553 — 기본은 '설정 전수'(요청의 초점)
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -142,6 +147,22 @@ export function LinkCheck() {
     <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 }}>
       {error && <div className="banner">{error}</div>}
 
+      {/* 보기 전환 — 한 도구 안의 탭이다(셸을 더 만들지 않는다 — v2.508 규약) */}
+      <div className="card" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {VIEWS.map(([k, label]) => (
+          <button key={k} className="btn" onClick={() => setView(k)}
+            style={view === k ? { background: 'var(--accent, #2b6cb0)', color: '#fff' } : undefined}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'settings' && (
+        <React.Suspense fallback={<Loading />}><SettingsCheckPanel /></React.Suspense>
+      )}
+
+      {view !== 'settings' && (
+      <>
       {/* 배너 — 긴 설명은 여기 한 번만(v2.509) */}
       {banners.length > 0 && (
         <div className="card" style={{ borderLeft: '3px solid var(--warn, #e8b23a)' }}>
@@ -300,6 +321,7 @@ export function LinkCheck() {
         )}
       </div>
 
+      {view === 'logs' && (
       <div className="card">
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
           <div style={{ fontWeight: 600 }}>점검 로그</div>
@@ -347,6 +369,8 @@ export function LinkCheck() {
         )}
       </div>
 
+      )}
+
       {detail && (
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -358,6 +382,8 @@ export function LinkCheck() {
             {detail.detail ? JSON.stringify(detail.detail, null, 2) : (detail.detailRaw || '(원문 없음)')}
           </pre>
         </div>
+      )}
+      </>
       )}
     </div>
   );

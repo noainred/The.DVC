@@ -15,9 +15,17 @@ const t = (v) => String(v ?? '').trim();
  * 단계 순서 — **이 순서가 계약이다**. 앞 단계가 실패하면 뒤 단계는 시도하지 않고 `null`(미시도)이다.
  * ⚠ 미시도를 '실패' 로 세지 말 것 — TCP 가 막혀 TLS 를 못 한 것은 TLS 문제가 아니다.
  */
-export const PHASES = Object.freeze(['dns', 'tcp', 'tls', 'http', 'auth', 'identity']);
+/*
+ * ⚠ v2.553: `ssh`·`smtp`·`port` 는 **HTTP 를 대신하는 마지막 단계**다(설정 전수 점검 —
+ *   SSH 9종·SMTP 1종·LDAP 1종). HTTP 단계와 **동시에 쓰이지 않으므로** 순서상 같은 자리에
+ *   둔다. `judge()` 는 존재하는 키만 보므로 섞여도 안전하다.
+ */
+export const PHASES = Object.freeze(['dns', 'tcp', 'tls', 'ssh', 'smtp', 'port', 'http', 'auth', 'identity']);
 
 export const PHASE_LABEL = Object.freeze({
+  ssh: 'SSH 협상',
+  smtp: 'SMTP 대화',
+  port: '포트 열림',
   dns: 'DNS', tcp: 'TCP', tls: 'TLS', http: 'HTTP', auth: '인증', identity: '정체 대조',
 });
 
@@ -39,6 +47,9 @@ export const FAIL_KINDS = Object.freeze({
   auth: { phase: 'auth', label: '토큰 거부', fix: '토큰이 틀리거나 상대에 설정되지 않았습니다(401/403). ⚠ 반복 시도는 결과가 같습니다.' },
   identity: { phase: 'identity', label: '상대가 다름', fix: '응답한 쪽이 등록된 대상이 아닙니다 — 포워딩이 다른 엣지로 가거나 자기등록 URL 이 중계를 가리킵니다.' },
   'old-version': { phase: 'http', label: '버전 부족', fix: '상대 포탈이 이 점검을 지원하지 않는 버전입니다 — 업그레이드하면 채워집니다.' },
+  // v2.553 — 설정 전수 점검의 비-HTTP 경로
+  'ssh-kex': { phase: 'ssh', label: 'SSH 협상 실패', fix: '키 교환·호스트키 알고리즘이 맞지 않습니다(구형 장비). **자격증명 문제가 아닙니다** — 상대 펌웨어나 우리 쪽 허용 알고리즘을 보세요.' },
+  'smtp-refused': { phase: 'smtp', label: 'SMTP 거부', fix: '연결은 됐지만 서버가 대화를 거부했습니다(220 아님·EHLO 거부) — 릴레이 제한이나 IP 차단입니다.' },
   unknown: { phase: 'http', label: '원인 미상', fix: '분류하지 못한 오류입니다 — 상세 로그의 원문을 보세요.' },
 });
 
