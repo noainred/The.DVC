@@ -17,7 +17,8 @@
  */
 
 import { Router } from 'express';
-import { config, loadVcenterConfig } from '../config.js';
+import { config, loadVcenterConfig, currentVersion } from '../config.js';
+import { instanceId } from '../instanceId.js';
 import { getAssignment, setResult } from '../central/assignments.js';
 import { tokenMatches } from '../util/secureCompare.js';
 import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../central/agentTokens.js';
@@ -60,6 +61,13 @@ import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq } from '../bmstor/jobs.j
 import { applyBmstorResults } from '../bmstor/poller.js';
 import { recordCapture } from '../net/captureHistory.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
+import { putEdgeLinkReport } from '../central/linkCheckEdge.js';   // v2.552: 엣지가 잰 통신 링크 결과 수신
+import { buildLinks, publicLink, EDGE_KINDS } from '../linkcheck/links.js';
+// ⚠ **redact 된 목록**을 쓴다 — 링크 계산에 필요한 것은 name·url·host 뿐이고, 이 응답은 엣지로
+//   나간다(비밀이 섞일 여지를 구조적으로 없앤다).
+import { listCollectors as listCollectorsForLinks } from '../collector/registry.js';
+import { listRegistry as listVcentersForLinks } from '../vcenter/registry.js';
+import { loadLinkCheckSettings, linkCheckEnabled } from '../linkcheck/settings.js';
 
 export const centralRouter = Router();
 
@@ -1321,4 +1329,99 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   if (alive.length) mergeScanResults(alive, Date.now(), agent);
   recordAgentReport(agent, { scanned: b.scanned || 0, alive: alive.length, durationMs: b.durationMs || null });
   res.json({ ok: true, merged: alive.length });
+});
+
+/*
+ * ── 통신 점검(v2.552) ──────────────────────────────────────────────────────────
+ *
+ * `GET /health-probe` — **엣지가 '중앙까지 닿는가' 를 재는 표적**이다. 엣지는 이 응답의
+ *   `yourAgent` 로 '내 토큰이 중앙에서 내 이름으로 해석되는가' 까지 확인한다(토큰 뒤바뀜 탐지).
+ *   ⚠ 인벤토리 같은 무거운 경로를 표적으로 쓰지 말 것 — 점검이 곧 부하가 된다.
+ *   ⚠ 응답에 **다른 엣지의 이름·주소를 싣지 않는다**(한 법인이 다른 법인 구성을 알게 된다).
+ *
+ * `POST /link-check` — 엣지가 잰 링크(엣지→중앙·엣지→vCenter·엣지↔엣지) 결과.
+ *   개별 토큰 전용이고 저장 키는 `req.centralAuth.agent` 뿐이다(본문 agent 미사용 — v2.548 F5).
+ *   ⚠ async 핸들러의 throw 는 express 4 가 잡지 않아 **요청이 응답 없이 매달린다** — try/catch 로
+ *     400 을 돌려준다(v2.548 S1, 리뷰에서 실제 hang 을 확인했다).
+ */
+centralRouter.get('/health-probe', (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    ok: true,
+    at: Date.now(),
+    version: currentVersion(),
+    instance: instanceId(),
+    role: 'central',
+    // 공유 토큰이면 어느 엣지인지 알 수 없다 — **빈 값**이고 그것 자체가 진단이다(개별 토큰 미이관).
+    yourAgent: req.centralAuth?.mode === 'agent' ? String(req.centralAuth.agent || '') : '',
+    tokenMode: req.centralAuth?.mode === 'agent' ? 'agent' : 'shared',
+  });
+});
+
+centralRouter.post('/link-check', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  if (req.centralAuth.mode !== 'agent') {
+    return res.status(403).json({
+      ok: false,
+      reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(공유 CENTRAL_TOKEN 으로는 어느 엣지의 측정인지 신뢰할 수 없습니다). 설정 > 엣지 토큰에서 이 엣지의 토큰을 발급해 주세요.',
+    });
+  }
+  try {
+    const out = await putEdgeLinkReport(req.centralAuth.agent, req.body || {});
+    res.json(out);
+  } catch (e) {
+    res.status(400).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
+  }
+});
+
+/*
+ * `GET /link-check-config?agent=<이름>` — **그 엣지가 재야 하는 링크**를 중앙이 계산해 내려준다.
+ *
+ * 왜 엣지가 스스로 만들지 않는가: 켜진 종류·엣지↔엣지 짝·시한은 **중앙 설정**이고, 엣지가 자기
+ * 복사본을 들고 있으면 중앙에서 바꾼 설정이 그 법인에 영원히 안 먹는다(v2.409 스토리지 주기와
+ * 같은 사고). 판정 규칙은 중앙이 소유한다.
+ *
+ * ⚠ **자기 몫만** 내려간다(`from === agent`). 전 링크를 내려보내면 한 법인이 다른 법인의 주소를
+ *   알게 되고, 남의 링크를 재서 올릴 수도 있다(수신은 거부하지만 애초에 주지 않는다).
+ * ⚠ 엣지↔엣지 짝은 **상대 엣지의 주소**를 필요로 하므로 그 링크에만 상대 주소가 실린다 —
+ *   관리자가 명시한 짝뿐이고(자동 전량 생성 없음), 그 사실을 문서와 화면이 밝힌다.
+ * ⚠ 링크 객체에는 **토큰이 없다**(`links.js` 규약) — 엣지는 자기 `CENTRAL_TOKEN` 을 쓴다.
+ */
+centralRouter.get('/link-check-config', (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  if (req.centralAuth.mode !== 'agent') {
+    return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(설정 > 엣지 토큰).' });
+  }
+  const agent = String(req.centralAuth.agent || '');
+  const reqAgent = String(req.query.agent || '').trim();
+  if (reqAgent && reqAgent.toLowerCase() !== agent.toLowerCase()) {
+    return res.status(403).json({ ok: false, reason: `요청한 agent('${reqAgent}')가 이 토큰의 엣지('${agent}')와 다릅니다.` });
+  }
+  const s = loadLinkCheckSettings();
+  let links = [];
+  try {
+    const built = buildLinks({
+      collectors: listCollectorsForLinks(), vcenters: listVcentersForLinks(), pairs: s.pairs, settings: s,
+    });
+    links = built.links
+      .filter((l) => EDGE_KINDS.includes(l.kind) && l.enabled !== false
+        && String(l.from || '').toLowerCase() === agent.toLowerCase())
+      .map(publicLink);
+  } catch (e) {
+    return res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 200) });
+  }
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    ok: true,
+    // ⚠ 꺼져 있으면 **빈 목록이 아니라 enabled:false** 를 준다 — 엣지가 '링크가 없다' 와
+    //   '중앙이 껐다' 를 구분해 화면·로그에 말할 수 있어야 한다.
+    enabled: linkCheckEnabled(),
+    intervalMs: s.intervalMs, concurrency: s.concurrency,
+    timeouts: { dnsMs: s.dnsTimeoutMs, tcpMs: s.tcpTimeoutMs, tlsMs: s.tlsTimeoutMs, httpMs: s.httpTimeoutMs },
+    links, count: links.length,
+  });
 });

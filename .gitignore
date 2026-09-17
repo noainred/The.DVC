@@ -221,3 +221,9 @@ server/config/bmusage-settings.json
 server/config/bmusage-auth-stops.json
 server/config/bmusage-activity.json
 server/config/bmusage-alert-state.json
+
+# v2.552 통신 점검 — 링크 종류 on/off·엣지↔엣지 짝·시한·보존 설정(엣지 이름이 들어간다).
+#   DB(link-check.db)는 위 server/config/*.db 와일드카드가 이미 덮는다.
+#   ⚠ 비밀은 담지 않지만(토큰은 링크 객체에 넣지 않는다 — linkcheck/links.js 규약) 법인 이름과
+#     점검 짝은 운영 정보다. 이 저장소는 공개다(server/CLAUDE.md v2.535 규약).
+server/config/linkcheck-settings.json
