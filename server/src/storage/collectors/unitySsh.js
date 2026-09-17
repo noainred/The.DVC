@@ -61,8 +61,28 @@ export const SPECS = [
    * ⚠ **required 가 아니다** — 버전을 못 읽어도 용량·상태는 그대로 쓸모가 있다. 예산이 모자라면
    *   건너뛰고 사유를 밝힌다(`errors[key]`).
    */
-  { key: 'version', answered: true, rules: ['pager', 'certAccept'], timeoutMs: 20_000,
-    cmds: ['uemcli /sys/general show -detail', 'svc_diag'] },
+  { key: 'version',
+    answered: true,
+    rules: ['pager', 'certAccept'],
+    timeoutMs: 20_000,
+    /*
+     * ⚠⚠ **순서가 바뀌었다(v2.545)** — `svc_diag` 가 먼저다.
+     * v2.544 는 `uemcli /sys/general show -detail` 를 앞에 뒀는데 **이 장비의 그 출력을 한 번도
+     * 본 적이 없다**. 반면 `svc_diag` 는 사용자가 실제 출력을 **두 번** 제공했고 동작이 확인됐다.
+     * '못 본 형식을 앞에 두는 것' 이 v2.525·2.526·2.529·2.530 네 번의 헛수정을 만든 원인이다 —
+     * **확인한 것을 먼저 쓴다.**
+     */
+    cmds: ['svc_diag', 'uemcli /sys/general show -detail'],
+    /*
+     * ⚠⚠ **성공 조건은 '오류가 없다' 가 아니라 '버전이나 모델을 읽었다' 다**(v2.545 —
+     * 사용자 신고 "아직 버전명이 나오지 않네"). v2.544 는 첫 후보가 오류만 안 내면 거기서
+     * 체인을 끝내, 버전이 없어도 다음 후보를 부르지 않았다(실측으로 확정).
+     * 두 파서를 다 돌려 보는 것은 여기서도 싸다 — 정규식 몇 번이다.
+     */
+    accept: (text) => {
+      const v = mergeVersionInfo(versionFromSvcDiag(text), versionFromUemcli(parseUemcli(text)));
+      return !!(v.version || v.model);
+    } },
 ];
 
 /** 이 수집 방식으로는 알 수 없는 섹션 — '오류' 가 아니라 '미수집' 이다. */
