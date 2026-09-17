@@ -121,7 +121,7 @@ export function verifyIdentity({ totalBytes, usedBytes, freeBytes, preallocatedB
  * ① 할당 가능량 — **기준마다 답이 다르다**. 전부 내고 가장 작은 것을 실질 한도로 표시한다.
  * @returns {null | {bases: Array<{key,label,availBytes,note}>, limiting, totalBytes, usedBytes}}
  */
-export function headroom({ totalBytes, usedBytes, freeBytes, subscribedBytes, alertThresholdPct } = {}) {
+export function headroom({ totalBytes, usedBytes, freeBytes, subscribedBytes, alertThresholdPct, pools } = {}) {
   const t = posNum(totalBytes);
   const u = usedBytes == null ? null : Math.max(0, Number(usedBytes));
   if (!t || u == null || !Number.isFinite(u)) return null;
@@ -139,8 +139,41 @@ export function headroom({ totalBytes, usedBytes, freeBytes, subscribedBytes, al
     bases.push({
       key: 'alert', label: `경고 임계(${thr}%)까지`,
       availBytes: Math.max(0, t * (thr / 100) - u),
-      note: `장비에 설정된 경고 임계까지의 여유입니다. 이 선을 넘으면 장비가 경보를 올립니다(임계값은 장비 설정 \`Alert threshold\`).`,
+      note: '장비에 설정된 경고 임계까지의 여유입니다. 이 선을 넘으면 장비가 경보를 올립니다'
+        + '(임계값은 장비 설정 **Alert threshold**).',
     });
+  } else {
+    /*
+     * ⚠ **풀이 여러 개여도 임계 기준을 버리지 않는다**(v2.546, 사용자 지시).
+     *
+     * v2.545 까지는 `planInput` 이 다중 풀에서 `alertThresholdPct` 를 `null` 로 두어 이 기준이
+     * **통째로 사라졌다**. 2풀 재현 실측: 실질 한도가 47.6 TB(경고 임계) → 84.7 TB(구독)로
+     * **1.8배 느슨해지고** 화면은 "표시하지 않습니다" 라고만 했다 — 가장 보수적인 기준이
+     * 사라진 것을 말하지 않으니 사용자는 두 배 가까운 숫자를 보고 LUN 을 만들게 된다.
+     *
+     * 해법은 **대표 임계를 만들지 않는 것**이다. 풀마다 자기 임계로 계산해 **더한다** —
+     * 이것은 대표값이 아니라 풀별 계산의 합이므로 v2.540 규약('풀마다 값이 달라 대표값을
+     * 만들면 거짓')을 어기지 않는다. 임계를 못 읽은 풀은 **빼고 개수를 밝힌다**(v2.525 규약).
+     */
+    const withThr = (Array.isArray(pools) ? pools : []).filter((p) => {
+      const pt = posNum(p?.totalBytes); const pu = p?.usedBytes == null ? null : Number(p.usedBytes);
+      const pth = posNum(p?.alertThresholdPct);
+      return pt && pu != null && Number.isFinite(pu) && pth != null && pth <= 100;
+    });
+    if (withThr.length) {
+      const avail = withThr.reduce(
+        (a, p) => a + Math.max(0, Number(p.totalBytes) * (Number(p.alertThresholdPct) / 100) - Number(p.usedBytes)),
+        0,
+      );
+      const missing = (Array.isArray(pools) ? pools.length : 0) - withThr.length;
+      bases.push({
+        key: 'alert', label: '경고 임계까지(풀별 합)',
+        availBytes: avail,
+        note: '풀마다 **자기 경고 임계**까지의 여유를 계산해 더한 값입니다(대표 임계를 만들지 않습니다).'
+          + (missing > 0 ? ` ⚠ 임계 또는 사용량을 읽지 못한 풀 ${missing}개는 **빠졌습니다**.` : '')
+          + ' ⚠ 이 합은 **한 덩어리로 쓸 수 있는 공간이 아닙니다** — 풀 경계를 넘지 못합니다.',
+      });
+    }
   }
   if (sub != null) {
     // 구독이 전부 채워졌을 때의 여유 — 오버프로비저닝이면 음수가 될 수 있고, 그것은 사실이다.
@@ -159,6 +192,68 @@ export function headroom({ totalBytes, usedBytes, freeBytes, subscribedBytes, al
 }
 
 /**
+ * 풀별 압박도 — **전체는 여유가 있는데 특정 풀만 꽉 찬** 상황을 드러낸다(v2.546, 사용자 제안:
+ * "전체 용량은 정상인데 pool 의 사용량이 많으면 … 어떤 pool 사용량이 많다고 표시해준다").
+ *
+ * ⚠ **대표 임계를 만들지 않는다** — 풀마다 자기 `Alert threshold` 로 판정한다. `parsePools` 가
+ *   이미 풀별로 그 값을 갖고 있는데(`uemcliParse.js`) v2.545 까지 다중 풀에서 통째로 버려졌다.
+ * ⚠ **`unknown` 을 `ok` 로 흡수하지 않는다**(v2.519·v2.523·v2.534 규약) — 임계나 사용량을
+ *   못 읽은 풀은 '정상' 이 아니라 '판정 불가' 다.
+ * ⚠ `near` 는 임계 자체가 아니라 **임계의 90% 지점**이다(임계 70% → 63% 부터 주의).
+ *   임계를 '거의 찬 것' 으로 바꿔 부르지 않기 위해 경계를 문구로 밝힌다.
+ * @returns {Array<{name,pct,thresholdPct,availToThresholdBytes,state:'over'|'near'|'ok'|'unknown'}>}
+ */
+export function poolPressure(pools) {
+  return (Array.isArray(pools) ? pools : []).map((p, i) => {
+    const name = String(p?.name || p?.id || `풀 ${i + 1}`);
+    const t = posNum(p?.totalBytes);
+    const u = p?.usedBytes == null ? null : Number(p.usedBytes);
+    const thr = posNum(p?.alertThresholdPct);
+    if (!t || u == null || !Number.isFinite(u)) {
+      return { name, pct: null, thresholdPct: thr, availToThresholdBytes: null, state: 'unknown' };
+    }
+    const pct = Math.round((u / t) * 1000) / 10;
+    if (thr == null || thr > 100) {
+      return { name, pct, thresholdPct: null, availToThresholdBytes: null, state: 'unknown' };
+    }
+    const avail = t * (thr / 100) - u;
+    const state = pct >= thr ? 'over' : (pct >= thr * 0.9 ? 'near' : 'ok');
+    return { name, pct, thresholdPct: thr, availToThresholdBytes: avail, state };
+  });
+}
+
+/**
+ * 풀별 압박 요약 문구 — **전체와 풀이 어긋날 때만** 만든다(`null` 이면 화면이 아무것도 안 그린다).
+ * 항상 띄우면 같은 말이 화면을 덮는다(v2.509 규약).
+ * @returns {null | {kind:'over'|'near'|'unknown-only', text:string}}
+ */
+export function poolPressureNote(rows, overallPct) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (list.length < 2) return null;                       // 풀 1개는 전체 = 그 풀이다
+  const over = list.filter((r) => r.state === 'over');
+  const near = list.filter((r) => r.state === 'near');
+  const unknown = list.filter((r) => r.state === 'unknown');
+  const nameList = (xs) => xs.map((r) => `**${r.name}**(${r.pct}% · 임계 ${r.thresholdPct}%)`).join(' · ');
+  const all = overallPct == null ? '' : `전체는 ${overallPct}% 이지만 `;
+  const tail = unknown.length ? ` (판정하지 못한 풀 ${unknown.length}개는 세지 않았습니다)` : '';
+  if (over.length) {
+    const ok = list.filter((r) => r.state === 'ok').map((r) => r.name);
+    return { kind: 'over',
+      text: `${all}${nameList(over)} 가 **경고 임계를 넘었습니다**.`
+        + (ok.length ? ` 추가 할당은 ${ok.map((n) => `**${n}**`).join(' · ')} 에만 여유가 있습니다.` : '')
+        + tail };
+  }
+  if (near.length) {
+    return { kind: 'near', text: `${all}${nameList(near)} 가 **임계에 근접**했습니다(임계의 90% 이상).${tail}` };
+  }
+  if (unknown.length === list.length) {
+    return { kind: 'unknown-only',
+      text: `풀 ${list.length}개 모두 **임계 또는 사용량을 읽지 못해 판정하지 못했습니다** — '이상 없음' 이라는 뜻이 아닙니다.` };
+  }
+  return null;
+}
+
+/**
  * ③ 수용 개수 — 단위 크기 `unitBytes` 짜리를 몇 개 더 만들 수 있나.
  * @returns {null | {count:number, basisKey:string, basisLabel:string, availBytes:number, leftoverBytes:number}}
  */
@@ -173,6 +268,60 @@ export function fitCount(head, unitBytes) {
     basisLabel: head.limiting.label,
     availBytes: avail,
     leftoverBytes: avail - count * unit,
+  };
+}
+
+/**
+ * ③-b **풀 경계를 지키는 수용 개수**(v2.546).
+ *
+ * ⚠⚠ **공간은 풀 사이에서 더할 수 없다.** `fitCount` 는 합산 여유를 한 덩어리처럼 나눈다 —
+ *   풀 A 79.6 TB · 풀 B 39.8 TB 면 합은 119.5 TB 지만 **80 TB 짜리는 어느 풀에도 안 들어간다**.
+ *   단위가 작으면 근사적으로 맞지만 크면 **오류 없이 틀린 답**이 된다(v2.530 규약).
+ *
+ * 그래서 **풀마다 세어 더하고**(`Σ floor`), **한 개짜리 최대 크기**(`maxSingleBytes`)를 함께 낸다.
+ * ⚠ 이것도 '딱 맞게 나눠 담을 수 있을 때' 의 **최대치**다 — 실제 배치 정책은 알 수 없으므로
+ *   화면이 '최대 이만큼' 이라고 적는다(지어내지 않는다).
+ * ⚠ 풀별 여유는 `basisKey` 에 맞춰 계산한다 — 목록 기준과 다른 기준으로 세면 두 숫자가 어긋난다.
+ *   임계 기준인데 그 풀의 임계를 모르면 **그 풀은 빼고 개수를 밝힌다**(v2.525 규약).
+ * @returns {null | {count:number, basisKey:string, basisLabel:string,
+ *                   byPool:Array<{name:string,count:number,availBytes:number}>,
+ *                   maxSingleBytes:number, maxSinglePool:string|null,
+ *                   fitsSingle:boolean, skippedPools:number}}
+ */
+export function fitCountByPool(head, pools, unitBytes) {
+  const unit = posNum(unitBytes);
+  const list = Array.isArray(pools) ? pools : [];
+  if (!head || !head.limiting || !unit || !list.length) return null;
+  const key = head.limiting.key;
+  const byPool = [];
+  let skipped = 0;
+  for (const [i, p] of list.entries()) {
+    const t = posNum(p?.totalBytes);
+    const u = p?.usedBytes == null ? null : Number(p.usedBytes);
+    if (!t || u == null || !Number.isFinite(u)) { skipped += 1; continue; }
+    const free = posNum(p?.freeBytes) ?? Math.max(0, t - u);
+    const sub = posNum(p?.subscribedBytes);
+    const thr = posNum(p?.alertThresholdPct);
+    let avail = null;
+    if (key === 'physical') avail = free;
+    else if (key === 'alert') avail = (thr != null && thr <= 100) ? t * (thr / 100) - u : null;
+    else if (key === 'subscription') avail = sub != null ? t - Math.max(sub, u) : null;
+    if (avail == null || !Number.isFinite(avail)) { skipped += 1; continue; }
+    avail = Math.max(0, avail);
+    byPool.push({ name: String(p?.name || p?.id || `풀 ${i + 1}`), count: Math.floor(avail / unit), availBytes: avail });
+  }
+  if (!byPool.length) return null;
+  const count = byPool.reduce((a, b) => a + b.count, 0);
+  const best = byPool.reduce((a, b) => (b.availBytes > a.availBytes ? b : a));
+  return {
+    count,
+    basisKey: key,
+    basisLabel: head.limiting.label,
+    byPool,
+    maxSingleBytes: best.availBytes,
+    maxSinglePool: best.name,
+    fitsSingle: best.availBytes >= unit,
+    skippedPools: skipped,
   };
 }
 
@@ -268,7 +417,18 @@ export function planInput(snap) {
   const pools = Array.isArray(snap.pools) ? snap.pools : [];
   const ex = snap.extra || {};
   const single = pools.length === 1 ? pools[0] : null;
-  const sumFree = pools.reduce((a, p) => a + (posNum(p.freeBytes) || 0), 0);
+  /*
+   * ⚠ **합산 대상은 서버가 정한다**(v2.546) — `capacityCounted`(`unitySsh.buildSnapshot`)가
+   *   전체·사용량을 **둘 다** 읽은 풀에만 붙는다. 그 전에는 `sumFree` 가 **모든 풀**을 더하고
+   *   `snap.capacity.usedBytes` 는 읽을 수 있는 풀만 더해, 한 풀을 못 읽으면 `verifyIdentity`
+   *   가 깨졌다(2풀 재현 실측 차이 58,770,998,108,160B). 판정을 여기서 다시 하지 않는 것은
+   *   v2.517 규약('판정은 서버 순수 모듈 하나')이다.
+   * ⚠ 구버전 엣지는 이 필드를 보내지 않는다 — 그때는 **전부 포함**해 예전과 같이 동작한다
+   *   (필드가 없다고 0개로 접으면 멀쩡한 장비의 산정이 통째로 사라진다).
+   */
+  const hasFlag = pools.some((p) => p && p.capacityCounted != null);
+  const counted = hasFlag ? pools.filter((p) => p.capacityCounted) : pools;
+  const sumFree = counted.reduce((a, p) => a + (posNum(p.freeBytes) || 0), 0);
   /*
    * ⚠ v2.542 — 구독·선할당은 **풀 속성**이라 풀에서 합산한다(이 함수가 임계·RAID 를 이미
    *   그렇게 다룬다). 예전에는 `extra.subscribedBytes`·`extra.preallocatedBytes` 만 봤는데,
@@ -279,7 +439,7 @@ export function planInput(snap) {
    *   `extra` 폴백은 남겨 둔다 — REST(API) 수집 경로가 그 모양으로 줄 수 있다.
    */
   const sumOf = (k) => {
-    const vals = pools.map((p) => posNum(p[k])).filter((v) => v != null);
+    const vals = counted.map((p) => posNum(p[k])).filter((v) => v != null);
     return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
   };
   return {
@@ -294,7 +454,11 @@ export function planInput(snap) {
     raid: single ? single.raid || null : null,
     stripeLength: single ? single.stripeLength || null : null,
     poolCount: pools.length,
+    countedPoolCount: counted.length,
+    // 합계에서 빠진 풀 수 — 화면이 '전체를 다 더한 값' 이라고 말하지 않게 한다.
+    excludedPoolCount: pools.length - counted.length,
     multiPool: pools.length > 1,
+    pools: counted,
   };
 }
 

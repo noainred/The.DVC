@@ -118,27 +118,52 @@ export function buildSnapshot(device, out = {}, { errors = {}, usedCmds = {} } =
   }
 
   // ── ② 용량 — 풀 합계가 기준이고, 시스템 값은 대조용이다 ──────────────────────────
-  const readable = pools.filter((p) => Number.isFinite(p.totalBytes) && p.totalBytes > 0);
+  /*
+   * ⚠ **집계에 넣을지 여부는 여기 한 곳에서 정하고 풀에 표시한다**(v2.546).
+   *
+   * v2.545 까지는 `total` 만 보고 걸렀고 `used` 는 `Number.isFinite(p.usedBytes) ? … : 0` 으로
+   * **못 읽은 풀을 0 으로 세었다**. 2풀 재현 실측: 25.5% 여야 할 것이 **17%** 로 찍히고
+   * `poolsUnreadable` 도 뜨지 않았다 — 오류 없이 사용률이 과소 보고된다(v2.530 '틀린 값은
+   * 빈 값보다 나쁘다'). 이제 **전체와 사용량을 둘 다 읽은 풀만** 더한다.
+   *
+   * 판정을 `capacityCounted` 로 풀에 실어 **웹이 같은 판정을 복제하지 않게** 한다
+   * (v2.517 '판정은 서버 순수 모듈 하나' 규약). `unityCapacityPlan.planInput` 의 `sumFree` 가
+   * 예전에는 **모든 풀**을 더해 `verifyIdentity` 가 깨졌다(실측 차이 58,770,998,108,160B).
+   */
+  for (const p of pools) {
+    p.capacityCounted = Number.isFinite(p.totalBytes) && p.totalBytes > 0 && Number.isFinite(p.usedBytes);
+  }
+  const readable = pools.filter((p) => p.capacityCounted);
+  // 제외 사유를 **둘로 나눈다** — 조치가 다르다(전체를 못 읽음 / 사용량만 못 읽음).
+  const noTotal = pools.filter((p) => !(Number.isFinite(p.totalBytes) && p.totalBytes > 0)).length;
+  const noUsed = pools.length - readable.length - noTotal;
   const sys = out.system ? parseSystemSpace(out.system) : null;
   if (readable.length) {
     const total = readable.reduce((a, p) => a + p.totalBytes, 0);
-    const used = readable.reduce((a, p) => a + (Number.isFinite(p.usedBytes) ? p.usedBytes : 0), 0);
+    const used = readable.reduce((a, p) => a + p.usedBytes, 0);
     snap.capacity = { totalBytes: total, usedBytes: used, pct: total ? Math.round((used / total) * 1000) / 10 : null };
     snap.sections.capacity = 'ok';
     // 용량을 못 읽은 풀은 합계에서 뺐다는 사실을 밝힌다(v2.525 규약).
-    if (readable.length !== pools.length) snap.extra.poolsUnreadable = pools.length - readable.length;
+    if (noTotal) snap.extra.poolsUnreadable = noTotal;
+    if (noUsed) snap.extra.poolsUsedUnreadable = noUsed;
     snap.extra.capacityBasisNote = '사용량은 풀의 **Current allocation**(장비가 보고한 실제 할당량)이고 '
       + '전체 용량은 **풀 합계**입니다 — 풀 밖 미할당 드라이브는 빠집니다.';
     if (readable.some((p) => p.usedSource === 'computed')) {
-      snap.extra.capacityBasisNote += ' ⚠ 일부 풀은 `Current allocation` 을 받지 못해 '
+      snap.extra.capacityBasisNote += ' ⚠ 일부 풀은 **Current allocation** 을 받지 못해 '
         + '**전체 − 잔여**로 계산했습니다(선할당분만큼 실제보다 큽니다).';
+    }
+    // 조용히 빼지 않는다 — 제외하면 합계·사용률이 **그만큼 작아진다**는 사실을 말한다.
+    if (noUsed) {
+      snap.extra.capacityBasisNote += ` ⚠ **사용량을 읽지 못한 풀 ${noUsed}개는 합계에서 제외**했습니다`
+        + ' — 전체 용량과 사용량이 그만큼 작게 나옵니다. 상세의 CLI 원문에서 그 풀의'
+        + ' **Current allocation**·**Remaining space** 를 확인하세요.';
     }
   } else if (sys && Number.isFinite(sys.totalBytes) && sys.totalBytes > 0) {
     // 풀을 못 읽었지만 시스템 전체 용량은 읽은 경우 — 그 사실을 밝히고 그것을 쓴다.
     snap.capacity = { totalBytes: sys.totalBytes, usedBytes: sys.usedBytes ?? null,
       pct: sys.usedBytes != null ? Math.round((sys.usedBytes / sys.totalBytes) * 1000) / 10 : null };
     snap.sections.capacity = 'ok';
-    snap.extra.capacityBasisNote = '풀 목록을 읽지 못해 **시스템 전체 용량**(`/stor/general/system show`)을 씁니다.';
+    snap.extra.capacityBasisNote = '풀 목록을 읽지 못해 **시스템 전체 용량**(general/system show)을 씁니다.';
   } else {
     snap.capacity = { totalBytes: null, usedBytes: null, pct: null }; // 0 을 만들지 않는다
     snap.sections.capacity = errors.system

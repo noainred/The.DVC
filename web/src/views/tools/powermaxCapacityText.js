@@ -77,10 +77,28 @@ export function srpRows(extra) {
 }
 
 /**
- * 사용량을 믿을 수 있는지 — **판정을 한 곳에서** 한다.
- * @returns {{kind:'suspect'|'undocumented'|'ok', short:string|null, text:string|null}}
+ * 사용량을 믿을 수 있는지 — **판정을 한 곳에서** 한다(목록 배지 + 상세 문구의 단일 소유자).
+ *
+ * ⚠ v2.546 — `partial` 갈래 추가. 다중 풀 장비에서 일부 풀이 합계에서 빠지면 **사용률·전체
+ *   용량이 그만큼 작게** 나온다. 그 사실이 상세에만 있으면(`capacityBasisNote`) 목록에서
+ *   퍼센트만 훑는 사람은 그대로 믿는다 — v2.516 '실패 사유를 툴팁에만 두지 말 것',
+ *   v2.534 '상세를 열어야만 알 수 있으면 사용자는 100% 를 용량 부족으로 읽는다' 와 같은 규약.
+ * ⚠ 이 갈래를 **가장 먼저** 본다 — `capacitySuspect`(VMAX 전용)와 실제로 겹치지는 않지만,
+ *   '어느 풀이 빠졌나' 는 조치가 분명한 반면 '기준 불명' 은 조사가 필요하다.
+ * @returns {{kind:'partial'|'suspect'|'undocumented'|'ok', short:string|null, text:string|null}}
  */
 export function usageTrust(extra) {
+  const skipped = (Number(extra?.poolsUnreadable) || 0) + (Number(extra?.poolsUsedUnreadable) || 0);
+  if (skipped > 0) {
+    return {
+      kind: 'partial',
+      short: `풀 ${skipped}개 제외`,
+      text: `용량 또는 사용량을 읽지 못한 풀 ${skipped}개를 합계에서 제외했습니다 — `
+        + '**전체 용량과 사용률이 실제보다 작게** 나옵니다. 상세의 CLI 원문에서 그 풀의 '
+        + '**Total space**·**Current allocation**·**Remaining space** 를 확인하세요. '
+        + '⚠ 이 주기는 **증가량 추이에 적재되지 않습니다**(기준이 달라진 값을 이어 붙이지 않기 위해).',
+    };
+  }
   if (extra?.capacitySuspect) {
     return {
       kind: 'suspect',

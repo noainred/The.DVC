@@ -1,0 +1,60 @@
+22:55:10 service@SYNTH0000000000 spa:~/user# uemcli /stor/config/pool show -detail
+Storage system address: 127.0.0.1
+Storage system port: 443
+HTTPS connection
+
+1:    ID                                          = pool_1
+      Type                                        = Dynamic
+      Name                                        = pool_1
+      Description                                 =
+      Total space                                 = 117544396521472 (106.9T)
+      Current allocation                          = 29973250195456 (27.2T)
+      Preallocated                                = 2400305152 (2.2G)
+      Remaining space                             = 87568746020864 (79.6T)
+      Subscription                                = 55491782770688 (50.4T)
+      Flash percent                               = 100%
+      Subscription percent                        = 47%
+      Alert threshold                             = 70%
+      Drives                                      = 38 x 3.8T SAS Flash 4
+      Number of drives                            = 38
+      RAID level                                  = 5
+      Stripe length                               = 9
+      Rebalancing                                 = no
+      Rebalancing progress                        =
+      Health state                                = OK (5)
+      Health details                              = "The component is operating normally. No action is required."
+      Protection size used                        = 0
+      Non-base size used                          = 0
+      Data Reduction space saved                  = 0
+      Data Reduction Percent                      = 0%
+      Data Reduction Ratio                        = 1.00:1
+      All flash pool                              = yes
+
+2:    ID                                          = pool_2
+      Type                                        = Dynamic
+      Name                                        = pool_2
+      Description                                 =
+      Total space                                 = 58772198260736 (53.5T)
+      Current allocation                          = 53952823013376 (49.1T)
+      Preallocated                                = 1200152576 (1.1G)
+      Remaining space                             = 4818175094784 (4.4T)
+      Subscription                                = 55491782770688 (50.4T)
+      Flash percent                               = 100%
+      Subscription percent                        = 94%
+      Alert threshold                             = 70%
+      Drives                                      = 19 x 3.8T SAS Flash 4
+      Number of drives                            = 19
+      RAID level                                  = 5
+      Stripe length                               = 9
+      Rebalancing                                 = no
+      Rebalancing progress                        =
+      Health state                                = OK (5)
+      Health details                              = "The component is operating normally. No action is required."
+      Protection size used                        = 0
+      Non-base size used                          = 0
+      Data Reduction space saved                  = 0
+      Data Reduction Percent                      = 0%
+      Data Reduction Ratio                        = 1.00:1
+      All flash pool                              = yes
+
+22:55:45 service@SYNTH0000000000 spa:~/user#
