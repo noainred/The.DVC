@@ -872,3 +872,67 @@ export async function fetchSensors(entry) {
 
   return { temps, fans, inletCelsius, maxCelsius, cpuUsagePct };
 }
+
+/**
+ * Dell 텔레메트리 `SystemUsage` 리포트 → CPU·메모리·I/O 사용률(%). (v2.550)
+ *
+ * 사용자 요청(2026-09-17): 베어메탈 서버의 CPU·메모리·디스크·네트워크·HBA 사용률 수집.
+ * **이 경로가 주는 것은 CPU·MEM·IO(집계)뿐**이다 — 디스크·네트워크·HBA 개별 사용률은 여기에 없고
+ * OS 경로(`bmusage/collectors/osSsh.js`)만 준다. 그 한계를 화면이 말해야 한다.
+ *
+ * ⚠⚠ **메트릭 id 를 하나로 굳히지 말 것**(v2.545 '후보 체인' 규약): 이 저장소에서 실제로 확인된
+ *   것은 `fetchSensors` 가 쓰는 `SystemBoardCPUUsage`/`CPUUsage` 뿐이고, MEM·IO id 는 Dell 문서
+ *   기반 **추정**이다(이 현장 응답을 본 적이 없다). 그래서 후보 목록으로 찾고 **실제로 쓴 id** 를
+ *   `usedIds` 로, 응답에 있던 전체 id 를 `seenIds` 로 돌려준다 — 실장비 응답을 받으면 좁힐 것.
+ * ⚠ 텔레메트리는 **iDRAC Datacenter 라이선스**가 필요하다(없으면 404/빈 리포트). 그 경우
+ *   `ok:false, kind:'no-telemetry'` 이고 '미지원' 이라 단정하지 않는다(v2.493 규약) —
+ *   404·403·빈 리포트를 각각 구분해 돌려준다.
+ */
+const USAGE_IDS = Object.freeze({
+  cpuPct: ['SystemBoardCPUUsage', 'CPUUsage', 'SystemBoardCPUUsagePercent'],
+  memPct: ['SystemBoardMEMUsage', 'MemoryUsage', 'SystemBoardMemoryUsage'],
+  ioPct: ['SystemBoardIOUsage', 'IOUsage', 'SystemBoardIOUsagePercent'],
+  sysPct: ['SystemBoardSYSUsage', 'SYSUsage', 'SystemUsage'],
+});
+
+export async function fetchUsage(entry) {
+  const base = String(entry.host || '').replace(/\/+$/, '');
+  let rep;
+  try {
+    rep = await get(base, '/redfish/v1/TelemetryService/MetricReports/SystemUsage', entry.username, entry.password);
+  } catch (e) {
+    const msg = String(e?.message || e);
+    // 404 는 '이 iDRAC 에 그 리포트가 없다'(라이선스·버전), 401/403 은 자격증명이다 — 조치가 다르다.
+    const kind = /\b404\b/.test(msg) ? 'no-telemetry' : (/\b40[13]\b/.test(msg) ? 'auth' : 'unreachable');
+    return { ok: false, kind, error: msg.slice(0, 300) };
+  }
+  const vals = Array.isArray(rep?.MetricValues) ? rep.MetricValues : [];
+  const seenIds = vals.map((v) => String(v.MetricId || '')).filter(Boolean);
+  if (!vals.length) return { ok: false, kind: 'empty-report', error: 'SystemUsage 리포트가 비어 있습니다(텔레메트리가 켜져 있지 않을 수 있습니다).', seenIds };
+
+  const byId = new Map();
+  for (const v of vals) {
+    const id = String(v.MetricId || '').trim();
+    if (!id || byId.has(id.toLowerCase())) continue;
+    byId.set(id.toLowerCase(), v.MetricValue);
+  }
+  const out = { ok: true, seenIds, usedIds: {}, at: Date.now() };
+  for (const [field, cands] of Object.entries(USAGE_IDS)) {
+    for (const c of cands) {
+      if (!byId.has(c.toLowerCase())) continue;
+      // `37` · `37 %` · `37.5` 형태가 섞여 온다 — 숫자만 뽑는다. 못 뽑으면 **그 필드를 만들지 않는다**.
+      const n = Number(String(byId.get(c.toLowerCase())).replace(/[^\d.]/g, ''));
+      if (!Number.isFinite(n)) continue;
+      out[field] = Math.round(n * 10) / 10;
+      out.usedIds[field] = c;
+      break;
+    }
+  }
+  // 하나도 못 읽었으면 성공이 아니다 — '오류가 없다' 를 '읽었다' 로 쓰지 않는다(v2.545 규약).
+  if (!Object.keys(out.usedIds).length) {
+    return { ok: false, kind: 'ids-unmatched', error: `SystemUsage 에서 아는 메트릭 id 를 찾지 못했습니다(응답 id ${seenIds.length}개).`, seenIds };
+  }
+  return out;
+}
+
+export { USAGE_IDS };

@@ -24,6 +24,7 @@ import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
 import { registerPartFaults } from './api/partFaults.js'; // 파트 장애(물리 부품 장애 기록·알림, v2.547)
 import { registerEdgeLog } from './api/edgeLog.js'; // 엣지 로그·진행상태(중앙이 당긴다 + 폴백, v2.549)
+import { registerBmUsage } from './api/bmUsage.js'; // 베어메탈 사용률(CPU·MEM·디스크·NET·HBA, v2.550)
 import { registerPdu } from './api/pdu.js';               // PDU 정보(APC Rack PDU 2G, v2.424)
 import { registerSerialLookup } from './api/serialLookup.js'; // 시리얼 통합 조회(v2.412)
 import { registerRma } from './api/rma.js';                   // 원격 명령 실행(RMA, v2.416)
@@ -76,6 +77,7 @@ registerStorageMon(api);
 registerSanSwitch(api);
 registerPartFaults(api);
 registerEdgeLog(api);
+registerBmUsage(api);
 registerPdu(api);
 registerSerialLookup(api);
 registerRma(api);
