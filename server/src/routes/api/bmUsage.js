@@ -22,6 +22,7 @@ import { publicTarget, NO_PATH_REASON } from '../../bmusage/targets.js';
 import { currentTargets, pollBmUsageOnce, bmUsageStatus } from '../../bmusage/poller.js';
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
+import { config } from '../../config.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -49,6 +50,22 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       dbStatus().catch(() => ({ available: false })),
     ]);
     const targets = applyScope(tg.targets.map(publicTarget), allowed);
+    const skipped = applyScope(tg.skipped, allowed);
+    /*
+     * ⚠ **사유별 개수도 scope 를 타야 한다**(v2.550 자체 재검토에서 잡은 결함): 예전에는
+     *   `tg.counts.byReason` 을 그대로 내보내 범위 제한 계정이 **다른 법인 서버 대수**를 알 수 있었다
+     *   (server/CLAUDE.md '귀속 없는 데이터·범위 밖 요약은 범위 계정에 노출하지 않는다').
+     *   전체 범위 계정은 그대로, 범위 계정은 **보이는 목록에서 다시 센다**.
+     */
+    const skippedCounts = allowed
+      ? skipped.reduce((acc, x) => { acc[x.reason] = (acc[x.reason] || 0) + 1; return acc; }, {})
+      : (tg.counts.byReason || {});
+    const counts = allowed
+      ? { ...tg.counts, targets: targets.length, skipped: skipped.length, byReason: skippedCounts,
+          idrac: targets.filter((x) => (x.paths || []).includes('idrac')).length,
+          os: targets.filter((x) => (x.paths || []).includes('os')).length,
+          both: targets.filter((x) => (x.paths || []).length > 1).length }
+      : tg.counts;
     const keys = new Set(targets.map((x) => x.key));
     // 최신값은 **대상 목록 안의 것만** 준다(법인을 끄거나 등록이 사라진 서버의 옛 값이 새어 나가지 않게).
     const rows = latest.filter((r) => keys.has(t(r.key)));
@@ -58,9 +75,9 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       settings: loadBmUsageSettings(), defaults: DEFAULTS,
       targets, rows,
       // '왜 대상이 아닌지' 는 개수와 사유로만 준다(범위 밖 서버 이름을 흘리지 않기 위해).
-      skippedCounts: tg.counts.byReason || {},
-      skipped: applyScope(tg.skipped, allowed),
-      counts: tg.counts,
+      skippedCounts,
+      skipped,
+      counts,
       metrics: METRICS, reasons: NO_PATH_REASON,
       vcenters: applyScope(tg.vcenters.map((v) => ({ ...v, vcenterId: v.id })), allowed),
       isEdge: tg.isEdge,
@@ -86,7 +103,13 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
     if (!target || (allowed && (!target.vcenterId || !allowed.includes(target.vcenterId)))) {
       return res.status(404).json({ ok: false, reason: '대상 서버를 찾지 못했습니다.' });
     }
-    const agent = tg.isEdge ? '' : '';   // 중앙·엣지 모두 자기가 적재한 행을 읽는다(agent 열은 적재 시 결정)
+    /*
+     * ⚠⚠ **적재 키와 조회 키가 같아야 한다**(v2.550 자체 재검토에서 잡은 결함):
+     *   `poller.js` 는 `insertUsage(rows, config.agent?.name || '')` 로 적재한다 — 엣지에서는
+     *   `AGENT_NAME`, 중앙에서는 `''` 다. 조회를 `''` 로 굳혀 두면 **엣지에서는 추이가 영원히 빈다**
+     *   (수집은 되는데 상세가 비어 '저장이 안 된다' 로 보인다). 같은 식을 쓴다.
+     */
+    const agent = config.agent?.name || '';
     const [raw, daily] = await Promise.all([
       usageHistory(key, { agent, hours: Number(req.query.hours) || 24 }),
       usageDaily({ key, agent, days: Number(req.query.days) || 90 }),

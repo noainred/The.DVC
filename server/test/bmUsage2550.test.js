@@ -370,3 +370,25 @@ test('scope — 범위 계정에는 그 법인만, 귀속 없는 것은 숨긴�
   assert.equal(scoped.length, 1);
   assert.equal(scoped[0].vcenterId, 'vc1');
 });
+
+test('⚠ 사유별 개수도 scope 를 탄다 — 범위 밖 법인의 서버 대수가 새지 않는다', () => {
+  // v2.550 자체 재검토에서 잡은 결함: `counts.byReason` 을 그대로 내보내 범위 계정이
+  // 다른 법인의 서버 대수를 알 수 있었다. 라우트는 **보이는 목록에서 다시 센다**.
+  const src = fs.readFileSync(path.join(import.meta.dirname, '../src/routes/api/bmUsage.js'), 'utf8');
+  assert.ok(/const skippedCounts = allowed/.test(src), '범위 계정은 개수를 다시 세야 한다');
+  assert.ok(/const counts = allowed/.test(src), 'KPI 개수도 다시 세야 한다');
+  assert.ok(!/skippedCounts: tg\.counts\.byReason/.test(src), '무스코프 개수를 그대로 내보내면 안 된다');
+});
+
+test('⚠ 추이 조회의 agent 키가 적재 키와 같다 — 엣지에서 추이가 비지 않게', () => {
+  /*
+   * `poller.js` 는 `insertUsage(rows, config.agent?.name || '')` 로 적재한다(엣지=AGENT_NAME).
+   * 라우트가 조회를 `''` 로 굳히면 **엣지에서 추이가 영원히 빈다** — 수집은 되는데 상세가 비어
+   * '저장이 안 된다' 로 보인다. 두 파일이 같은 식을 쓰는지 소스로 고정한다.
+   */
+  const route = fs.readFileSync(path.join(import.meta.dirname, '../src/routes/api/bmUsage.js'), 'utf8');
+  const poller = fs.readFileSync(path.join(import.meta.dirname, '../src/bmusage/poller.js'), 'utf8');
+  assert.match(poller, /insertUsage\(rows, config\.agent\?\.name \|\| ''\)/, '적재 키');
+  assert.match(route, /const agent = config\.agent\?\.name \|\| '';/, '조회 키가 적재 키와 같아야 한다');
+  assert.ok(!/const agent = tg\.isEdge \? '' : ''/.test(route), "'' 로 굳힌 코드가 남아 있다");
+});
