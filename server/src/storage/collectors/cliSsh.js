@@ -81,7 +81,9 @@ export function commandCut(r) {
 }
 
 /**
- * @param {object[]} specs `[{ key, section?, cmds, required?, answered?, rules? }]`
+ * @param {object[]} specs `[{ key, section?, cmds, required?, answered?, rules?, timeoutMs? }]`
+ *   · `timeoutMs` — 그 항목의 명령당 시한(기본 `CMD_TIMEOUT_MS` 45초). 짧은 명령에 45초를
+ *     그대로 주면 명령 수 × 45초가 세션 예산을 넘겨 뒤 항목이 실행되지 않는다(v2.528).
  *   · `answered:true` — 대화형 프롬프트에 자동 응답한다(`sshExec.execAnswered`).
  *     uemcli 는 자체서명 인증서 수락 프롬프트에서 멈추므로 이 모드가 **필수**다(v2.526).
  * @param {object} [opts]
@@ -112,7 +114,14 @@ export async function runCliSession(device, specs, { clean = (t) => t, budgetMs 
       for (const cmd of spec.cmds) {
         try {
           // 남은 예산 안에서만 기다린다 — 한 명령이 전체 예산을 먹지 않게.
-          const slice = spec.required ? CMD_TIMEOUT_MS : Math.max(MIN_SLICE_MS, Math.min(CMD_TIMEOUT_MS, leftMs()));
+          /*
+           * 항목별 시한(v2.544) — 기본은 `CMD_TIMEOUT_MS`(45초)지만 **빠른 것이 확실한 명령은
+           * 짧게** 준다. 명령을 늘릴 때 45초를 그대로 곱하면 세션 예산을 넘겨 뒤 항목이
+           * 통째로 실행되지 않는다(v2.528 이 고친 회귀가 정확히 그것이다).
+           * ⚠ 늘릴 때는 `unitySshBudget2528.test.js` 의 산수를 **먼저** 볼 것.
+           */
+          const cap = Math.max(1000, Number(spec.timeoutMs) || CMD_TIMEOUT_MS);
+          const slice = spec.required ? cap : Math.max(MIN_SLICE_MS, Math.min(cap, leftMs()));
           const t0 = Date.now();
           const r = spec.answered
             /*

@@ -36,14 +36,49 @@ test('★ 명령 수 × 명령당 시한이 세션 예산 안에 들어간다 �
   const src = fs.readFileSync(url.fileURLToPath(new URL('../src/storage/collectors/cliSsh.js', import.meta.url)), 'utf8');
   const cmdMs = Number(/CMD_TIMEOUT_MS\s*=[^;]*?(\d{4,})/.exec(src)?.[1] || 45000);
   const budget = Number(/SESSION_BUDGET_MS\s*=[^;]*?(\d{5,})/.exec(src)?.[1] || 150000);
-  assert.ok(SPECS.length * cmdMs <= budget,
-    `명령 ${SPECS.length}개 × ${cmdMs}ms = ${SPECS.length * cmdMs}ms 가 세션 예산 ${budget}ms 를 넘는다`);
+  /*
+   * ★ v2.544 — 항목별 시한(`spec.timeoutMs`)이 생겨 '명령 수 × 45초' 가 아니라 **실제 합**을 센다.
+   * 한 항목의 최악은 `후보 수 × 그 항목의 시한` 이다(후보가 전부 시한까지 매달리는 경우).
+   */
+  const worstOf = (sp) => sp.cmds.length * (Number(sp.timeoutMs) || cmdMs);
+  const total = SPECS.reduce((a, sp) => a + worstOf(sp), 0);
+  const req = SPECS.filter((sp) => sp.required).reduce((a, sp) => a + worstOf(sp), 0);
+
+  /*
+   * ⚠ **필수 항목은 예산을 무시한다**(없으면 스냅샷이 무의미하다) — 그러니 필수만으로도
+   * 예산을 넘으면 가드가 발동하기 전에 폴러가 먼저 던진다. 이것이 진짜 하한선이다.
+   */
+  assert.ok(req <= budget,
+    `필수 항목 최악 합 ${req}ms 가 세션 예산 ${budget}ms 를 넘는다 — 예산 가드가 무력해진다`);
+
+  /*
+   * 전체 합이 예산을 넘는 것 자체는 설계상 허용된다(예산이 모자라면 뒤 항목을 **시작하지 않고**
+   * 사유를 남긴다). 다만 **얼마나 넘는지**를 고정해 둔다 — 여기서 크게 넘기 시작하면
+   * '버전은 매번 건너뛴다' 가 되어 기능이 조용히 죽는다(v2.526 회귀의 경로).
+   */
+  assert.ok(total <= budget * 1.25,
+    `전체 최악 합 ${total}ms 가 예산 ${budget}ms 의 1.25배를 넘는다 — 뒤 항목이 상시 생략된다`);
 });
 
-test('후보 명령 체인을 되살리지 않는다 — 항목당 명령 1개(시한을 두 배로 쓰지 않게)', () => {
+/*
+ * ★ v2.544 정정 — 후보 체인은 **버전 항목 하나만** 허용한다(사용자 선택 "둘 다 — 후보 체인").
+ * v2.542 의 '항목당 1개' 규칙은 **용량·상태 경로**를 지키려던 것이다: 그 경로의 후보가 실패하면
+ * 시한을 두 배로 쓰고 뒤 항목이 통째로 생략된다(v2.526 회귀). 버전은 `required` 가 아니고
+ * 시한도 20초로 줄였으므로 예외로 둔다 — 대신 **후보마다 자기 시한을 갖는지**를 위 산수가 본다.
+ */
+test('후보 체인은 버전 항목만 — 용량·상태 경로는 항목당 명령 1개다', () => {
   for (const s of SPECS) {
-    assert.equal(s.cmds.length, 1, `${s.key}: 후보가 ${s.cmds.length}개다 — 실패 시 시한을 그만큼 더 쓴다`);
-    assert.ok(!/-output csv/.test(s.cmds[0]), `${s.key}: 이 장비의 CSV 출력은 확인된 적이 없다(v2.530·2.542)`);
+    const max = s.key === 'version' ? 2 : 1;
+    assert.ok(s.cmds.length <= max,
+      `${s.key}: 후보가 ${s.cmds.length}개다(허용 ${max}) — 실패 시 시한을 그만큼 더 쓴다`);
+    if (s.cmds.length > 1) {
+      assert.ok(Number(s.timeoutMs) > 0 && Number(s.timeoutMs) < 45000,
+        `${s.key}: 후보가 여럿이면 그 항목의 시한을 기본값보다 줄여야 한다`);
+      assert.ok(!s.required, `${s.key}: 후보가 여럿인 항목을 required 로 두지 말 것(예산 가드를 무시한다)`);
+    }
+    for (const c of s.cmds) {
+      assert.ok(!/-output csv/.test(c), `${s.key}: 이 장비의 CSV 출력은 확인된 적이 없다(v2.530·2.542)`);
+    }
   }
 });
 

@@ -37,7 +37,8 @@
 import { runCliSession, sshFailureSnapshot } from './cliSsh.js';
 import { stripUemcliBanner } from '../../proxy/sshExec.js';
 import { emptySnapshot } from '../types.js';
-import { parsePools, parseSystemSpace, checkSpaceIdentity } from './uemcliParse.js';
+import { parsePools, parseSystemSpace, checkSpaceIdentity, parseUemcli } from './uemcliParse.js';
+import { versionFromUemcli, versionFromSvcDiag, mergeVersionInfo } from './unityVersion.js';
 
 /** 이 수집기가 실행하는 명령 전부. **늘리기 전에 시간 예산을 함께 볼 것**(v2.528 회귀의 원인). */
 export const SPECS = [
@@ -47,6 +48,21 @@ export const SPECS = [
     cmds: ['uemcli /stor/general/system show'] },
   { key: 'poolShort', answered: true, rules: ['pager', 'certAccept'],
     cmds: ['uemcli /stor/config/pool show'] },
+  /*
+   * 모델·소프트웨어 버전(v2.544 — 사용자 요청 "버전 보이게 명령어 추가하고 여기에 버전 표시해줘").
+   *
+   * ⚠ **후보 2개**다(사용자 선택 "둘 다 — 후보 체인"):
+   *   ① `uemcli /sys/general show -detail` — uemcli 계열로 통일. 다만 **이 장비의 그 출력을 본
+   *      적이 없다**(v2.530 이 CSV 에 대해 적어 둔 것과 같은 상태). 그래서 키를 체인으로 읽는다.
+   *   ② `svc_diag` — **사용자가 실제 출력을 보여준 명령**이고 이 장비에서 동작한다.
+   * ⚠ **시한을 45초로 주지 말 것** — 후보 2개 × 45초 = 90초가 세션 예산(150초)을 먹어 v2.528 이
+   *   고친 '뒤 항목이 실행조차 안 된다' 회귀가 그대로 재발한다. 실측은 uemcli 4초·svc_diag 11초
+   *   (사용자 캡처 03:53:47→03:53:58)라 20초면 충분하다.
+   * ⚠ **required 가 아니다** — 버전을 못 읽어도 용량·상태는 그대로 쓸모가 있다. 예산이 모자라면
+   *   건너뛰고 사유를 밝힌다(`errors[key]`).
+   */
+  { key: 'version', answered: true, rules: ['pager', 'certAccept'], timeoutMs: 20_000,
+    cmds: ['uemcli /sys/general show -detail', 'svc_diag'] },
 ];
 
 /** 이 수집 방식으로는 알 수 없는 섹션 — '오류' 가 아니라 '미수집' 이다. */
@@ -130,7 +146,35 @@ export function buildSnapshot(device, out = {}, { errors = {}, usedCmds = {} } =
     snap.extra.missingCmds = { ...(snap.extra.missingCmds || {}), system: '시스템 용량 출력을 인식하지 못했습니다.' };
   }
 
-  // ── ③ 이 세 명령으로는 알 수 없는 것 — '오류' 가 아니라 '미수집' ────────────────────
+  // ── ③ 모델·소프트웨어 버전(v2.544) ──────────────────────────────────────────────
+  /*
+   * ⚠ **두 파서를 다 돌리고 합친다** — 후보 체인이라 어느 명령이 성공했는지 여기서는 모른다.
+   *   서로의 형식에 대해 안전하다: uemcli 출력은 ` = ` 라 svc_diag 파서의 `키: 값` 목록에
+   *   걸리지 않고, svc_diag 출력은 ` = ` 가 없어 `parseUemcli` 가 빈 배열을 준다.
+   * ⚠ 읽지 못하면 **빈 문자열**이다(`emptySnapshot` 기본값). 화면은 `—` 로 둔다 — 지어내지 않는다.
+   */
+  if (out.version) {
+    const info = mergeVersionInfo(
+      versionFromUemcli(parseUemcli(out.version)),
+      versionFromSvcDiag(out.version),
+    );
+    if (info.version) snap.version = info.version;
+    if (info.serial) snap.serial = info.serial;
+    if (info.model) snap.extra.model = info.model;
+    // 원문을 나란히 남긴다 — `5.4.0.0.5.094` 추출이 다른 장비에서 빗나갈 수 있다(화면이 툴팁으로 보여준다).
+    if (info.versionRaw && info.versionRaw !== info.version) snap.extra.versionRaw = info.versionRaw;
+    if (info.sources.length) snap.extra.versionSource = info.sources.join(' + ');
+    if (info.usedKey) snap.extra.versionKey = info.usedKey;
+    if (!info.version && !info.model) {
+      snap.extra.missingCmds = { ...(snap.extra.missingCmds || {}),
+        version: '버전 출력을 인식하지 못했습니다(상세의 CLI 원문 확인).' };
+    }
+  } else if (errors.version) {
+    // 실행 자체가 안 된 것 — '형식을 못 읽었다' 와 조치가 다르므로 사유를 그대로 전한다.
+    snap.extra.missingCmds = { ...(snap.extra.missingCmds || {}), version: errors.version };
+  }
+
+  // ── ④ 이 세 명령으로는 알 수 없는 것 — '오류' 가 아니라 '미수집' ────────────────────
   snap.sections.config = snap.sections.pools === 'ok' || snap.sections.capacity === 'ok' ? 'ok' : snap.sections.pools;
   snap.sections.nodes = NOT_COLLECTED;
   snap.sections.accounts = NOT_COLLECTED;
@@ -139,7 +183,7 @@ export function buildSnapshot(device, out = {}, { errors = {}, usedCmds = {} } =
   snap.accounts = [];
   snap.alerts = { unresolved: null };
   snap.extra.notCollected = ['nodes', 'accounts', 'alerts'];
-  snap.extra.scopeNote = '이 수집 방식은 **풀·시스템 용량만** 조회합니다(명령 2개 + 폴백 1개) '
+  snap.extra.scopeNote = '이 수집 방식은 **풀·시스템 용량 + 모델·버전**만 조회합니다 '
     + '— 노드·계정·경보는 조회하지 않으므로 0 이 아니라 빈 값입니다.';
 
   snap.ok = snap.sections.pools === 'ok' || snap.sections.capacity === 'ok';

@@ -260,8 +260,22 @@ export const PROMPT_RULES = Object.freeze({
  */
 export function stripUemcliBanner(text) {
   return String(text || '')
-    // 응답 프롬프트 접두 — 같은 줄에 붙은 데이터는 보존한다.
-    .replace(/^.*Please input your selection[^:]*:\s*\d*:?\s*/gm, '')
+    /*
+     * 응답 프롬프트 접두 — 같은 줄에 붙은 데이터는 보존한다.
+     *
+     * ⚠⚠ **레코드 번호(`1:`)를 먹지 말 것**(v2.544 에 고친 **v2.542 회귀**).
+     * 실장비는 프롬프트 줄 **뒤에 이어서** 데이터를 낸다:
+     *   `Please input your selection (The default selection is [1]): 1:    ID = pool_2`
+     * 여기엔 `1` 이 둘 있다 — 프롬프트의 기본 선택과 **uemcli 출력의 레코드 번호 `1:`**.
+     * v2.526 은 `\d*:?` 로 뒤의 `1:` 까지 지웠다. 그때 파서(`parseKeyValueBlocks`)가 `:` 를
+     * 키 경계로 읽어 그 줄을 통째로 잃었기 때문이고, **그 시점엔 맞는 규칙이었다**.
+     * v2.542 가 파서를 ` = ` 규칙으로 바꾸면서 **레코드 경계를 `^N:` 으로 정했는데** 이 규칙은
+     * 그대로 남아, 새 파서가 반드시 필요로 하는 표시를 지우고 있었다.
+     * 증상: 명령은 성공(`✓ 성공 3 · 실패 0`)인데 섹션은 `풀 출력을 읽지 못했습니다`.
+     * ⚠ 풀이 2개 이상이면 **더 나쁘다** — 프롬프트 줄에 붙는 것은 첫 레코드뿐이라
+     *   `2:` 이후만 살아남아 **오류 없이 용량이 과소 보고**된다(실측으로 확인).
+     */
+    .replace(/^.*Please input your selection[^:]*:[ \t]*/gm, '')
     // 접속 배너
     .replace(/^Storage system (address|port):.*$/gm, '')
     .replace(/^HTTPS connection\s*$/gm, '')

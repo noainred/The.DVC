@@ -1,0 +1,17 @@
+03:53:47 service@SYNTH0000000000 spb:~/user# svc_diag
+======== Now executing basic state ========
+* System Serial Number is: SYNTH0000000000
+* System Model Number is: Unity 480F
+* System Friendly Host Name is: SYNTH0000000000
+* Current Software version: c4dev_PIE_8775R-5.4.0.0.5.094-GNOSIS_RETAIL
+* Unisphere IP address(es): 10.0.0.1 fe80::260:1600:4a20:5c5
+* SSH Enabled: true
+* FIPS mode: Disabled
+* Boot Mode: Normal Mode
+* Post Faults:  0x0000
+* Backend Faults:        0x0000
+* Boot Faults:           0x0000
+* Rescue Reason:         0x0000
+* Rescue reason for code 0x0000 - No faults detected.
+* SP Service Hint Code: <None>
+03:53:58 service@SYNTH0000000000 spb:~/user#
