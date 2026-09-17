@@ -38,6 +38,7 @@ const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx
 const PartFaults = React.lazy(() => import('./tools/PartFaults.jsx'));   // 파트 장애(v2.547)
 const EdgeLog = React.lazy(() => import('./tools/EdgeLog.jsx'));         // 엣지 로그·진행상태(v2.549)
 const BmUsage = React.lazy(() => import('./tools/BmUsage.jsx'));         // 베어메탈 사용률(v2.550)
+const LinkCheck = React.lazy(() => import('./tools/LinkCheck.jsx'));     // 통신 점검(중앙↔엣지·vCenter, v2.552)
 const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
 const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
 const PduTool = React.lazy(() => import('./tools/PduTool.jsx'));
@@ -449,6 +450,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'part-faults' && <PartFaults />}
       {tool === 'edge-log' && <EdgeLog />}
       {tool === 'bm-usage' && <BmUsage />}
+      {tool === 'link-check' && <LinkCheck />}
       {tool === 'bm-storage' && <BmStorageTool />}
       {tool === 'san-switch' && <SanSwitchTool />}
       {tool === 'pdu' && <PduTool />}

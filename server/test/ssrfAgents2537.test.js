@@ -49,7 +49,14 @@ test('★ src 의 모든 undici Agent 생성부에 lookup: ssrfLookup 이 있다
     while ((m = re.exec(code))) {
       total++;
       const body = m[1];
-      let hooked = /lookup: ssrfLookup|withSsrfLookup\(/.test(body);
+      /*
+       * ⚠ v2.552 추가 — `pinnedLookup(<검사한 IP>)` 도 유효한 형태다(`util/ssrfLookup.js`).
+       *   통신 점검은 DNS 를 자기 단계로 먼저 재고 그 주소를 검사해 두므로 **재해석이 아니라 핀**
+       *   이어야 한다(재해석하면 단계별 계측이 섞이고 '이 IP 로 점검했다' 는 기록이 거짓이 된다).
+       *   TOCTOU 창은 재해석 방식보다 작다. ⚠ 인라인 콜백은 여전히 불통과다 — 훅을 파일마다
+       *   복제하면 다음 파일에서 검사가 빠진다(이 스윕의 존재 이유).
+       */
+      let hooked = /lookup: ssrfLookup|withSsrfLookup\(|lookup: pinnedLookup\(/.test(body);
       // `connect: vcConnect` 처럼 변수를 참조하면 그 변수의 정의가 withSsrfLookup( 으로 감싸져 있어야 한다.
       const ref = /connect:\s*([A-Za-z_$][\w$]*)\s*[,}]/.exec(body);
       if (!hooked && ref) hooked = new RegExp(`const ${ref[1]} = withSsrfLookup\\(`).test(code);

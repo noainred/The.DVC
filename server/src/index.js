@@ -117,6 +117,8 @@ import { startPartFaultPush } from './partfault/push.js';           // 〃 엣�
 import { startPartFaultConfigPull } from './agent/partFaultConfigPull.js'; // 〃 중앙→엣지 스위치 배포(v2.548)
 import { startEdgeLogWorker } from './agent/edgeLogWorker.js';  // 엣지 로그 폴백 워커(v2.549) — 중앙이 못 닿는 법인에서만 쓰인다
 import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 사용률 수집(v2.550) — 기본 꺼짐, 법인 단위 opt-in
+import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
+import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 재는 링크(엣지→중앙·엣지↔엣지)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
@@ -241,6 +243,9 @@ app.use('/api/central/sanswitch-perf', BIG_JSON);
 // '현재 사용자' push(v2.520) — 레코드에 계정명 목록이 붙어 대상이 많은 법인은 1MB 기본을 넘을 수
 // 있다. express.json 의 limit 은 **gzip 해제 후 길이**라 gzip 만으로는 413 이 해결되지 않는다.
 app.use('/api/central/curuser', BIG_JSON);
+// 통신 점검 엣지 보고(v2.552) — 링크 최대 500개 × 단계 6개 상세라 1MB 기본을 넘을 수 있다.
+// 413 은 재시도 대상이 아니라 **그 엣지 측정분의 조용한 전량 소실**이 된다(v2.517 규약).
+app.use('/api/central/link-check', BIG_JSON);
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
 app.use('/api/svcmon/targets/import', BIG_JSON);
 app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);
@@ -388,6 +393,8 @@ const stagger = [
   startPartFaultPoller, startPartFaultPush, startPartFaultConfigPull,
   startEdgeLogWorker,
   startBmUsagePoller,
+  startLinkCheckPoller,
+  startLinkCheckWorker,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 

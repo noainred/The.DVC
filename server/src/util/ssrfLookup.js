@@ -191,3 +191,29 @@ export const ssrfLookup = makeSsrfLookup({
  * 자체서명 허용 같은 기존 동작을 실수로 되돌리지 않기 위해서다.
  */
 export const withSsrfLookup = (connectOpts = {}) => ({ ...connectOpts, lookup: ssrfLookup });
+
+/**
+ * **이미 검사한 IP 로 고정하는 lookup**(v2.552).
+ *
+ * 통신 점검(`linkcheck/checks.js`)은 DNS 를 **자기 단계로 먼저 재고**(실패 원인을 '이름 해석' 과
+ * '연결' 로 갈라야 한다) 그 결과 주소를 `ipBlockReason` 으로 걸러 둔다. 그 뒤 단계(TCP·TLS·HTTP)는
+ * **같은 주소**로 붙어야 한다 — 여기서 `makeSsrfLookup()` 을 쓰면 이름을 **다시 해석**해서
+ *   ① 단계별 시간이 뒤 단계에 섞이고
+ *   ② 방금 잰 주소와 다른 주소로 붙어 "이 IP 로 점검했다" 는 기록이 거짓이 된다.
+ * 그래서 재해석 대신 **핀**이다. TOCTOU 창은 makeSsrfLookup 보다 **더 작다**(재해석 자체가 없다).
+ *
+ * ⚠ 그래도 넘겨받은 IP 를 여기서 **한 번 더 검사한다** — 호출부가 걸러 두는 것을 전제로 하지 않는다
+ *   (전제는 다음 리팩터에 깨진다 — v2.535 '우연히 성립하는 게이트를 두지 말 것').
+ * ⚠ SNI·Host·인증서 검증은 호출부가 **원 호스트명**으로 유지해야 한다(`servername` 옵션).
+ */
+export function pinnedLookup(ip) {
+  return function pinned(hostname, options, callback) {
+    const cb = typeof options === 'function' ? options : callback;
+    const opts = typeof options === 'function' ? {} : (options || {});
+    const addr = String(ip || '');
+    const reason = addr ? ipBlockReason(addr) : '고정할 주소가 없습니다.';
+    if (reason) return cb(ssrfLookupError(hostname, reason));
+    const family = addr.includes(':') ? 6 : 4;
+    return isAllForm(opts) ? cb(null, [{ address: addr, family }]) : cb(null, addr, family);
+  };
+}
