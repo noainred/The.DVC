@@ -100,7 +100,12 @@ test('cliSsh 는 끊긴 명령을 원문 옆에 밝히고(ms·answers·truncated
   const { runCliSession } = await import('../src/storage/collectors/cliSsh.js');
   // withSsh 를 거치지 않도록 sh 를 직접 주입하는 경로가 없으면 소스 계약으로 고정한다.
   const src = fs.readFileSync(path.join(HERE, '..', 'src', 'storage', 'collectors', 'cliSsh.js'), 'utf8');
-  assert.match(src, /truncatedKeys\[spec\.key\] = \{ cmd, ms, timedOut: !!r\.timedOut, answers: n, bytes/);
+  // ⚠ 줄바꿈에 기대지 말 것 — v2.543 이 `aborted` 를 더하면서 이 객체가 여러 줄이 됐고
+  //   한 줄 고정이던 예전 단언이 **서식만 바뀌었는데** 깨졌다. 키 존재로 고정한다.
+  assert.match(src, /truncatedKeys\[spec\.key\] = \{/);
+  for (const k of ['cmd', 'ms', 'timedOut: !!r.timedOut', 'answers: n', 'bytes:']) {
+    assert.ok(src.includes(k), `끊긴 명령 기록에 ${k} 가 없다`);
+  }
   assert.match(src, /return \{ out, raw, errors, skipped, truncated: truncatedKeys/);
   assert.match(src, /sample: \(stdout \|\| stderr\)\.slice\(0, RAW_LIMIT\), ms,/, '원문에 소요(ms)를 싣는다');
   assert.equal(typeof runCliSession, 'function');

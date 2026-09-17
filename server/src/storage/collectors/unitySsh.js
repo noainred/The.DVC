@@ -147,6 +147,44 @@ export function buildSnapshot(device, out = {}, { errors = {}, usedCmds = {} } =
   return snap;
 }
 
+/**
+ * 끊긴/중단된 명령을 스냅샷에 **정직하게** 반영한다(v2.543 — 순수 함수로 분리해 테스트로 고정).
+ *
+ * 규칙 셋:
+ *  ① 끊김을 '형식 문제' 와 구분해 말한다(v2.539) — 26B 만 받은 것을 '형식이 다르다' 고 하면
+ *     사용자는 파서를 의심하며 고친다. 실제로 그렇게 **네 번** 헛수정했다.
+ *  ② 중단(abort)은 '시간 부족' 과 조치가 다르다. 섹션 문구는 **짧게** 쓰고, 긴 사유는
+ *     머리말이 **한 번만** 말한다 — 섹션이 6개라 긴 문장을 넣으면 같은 문단이 화면에 6번
+ *     반복된다(CLAUDE.md v2.509. 스크린샷을 읽어야 보인다).
+ *  ③ ⚠⚠ **머리말이 원인을 말한다.** 예전에는 중단됐을 때도 맨 위가
+ *     `uemcli 출력을 읽지 못했습니다(상세의 CLI 원문 확인)` — **형식 탓**이었고, 진짜 원인은
+ *     CLI 원문을 펼쳐야만 보였다. 원인을 아는 순간에는 맨 위에서 말한다.
+ */
+export function applyCutInfo(snap, truncated = {}) {
+  if (Object.keys(truncated).length) snap.extra.cliTruncated = truncated;
+  for (const [key, t] of Object.entries(truncated)) {
+    const sect = SPECS.find((s) => s.key === key)?.section;
+    if (!sect || snap.sections[sect] === 'ok') continue;
+    snap.sections[sect] = t.aborted
+      ? `오류: 답할 수 없는 프롬프트로 중단됐습니다(${Math.round(t.ms / 1000)}초 · ${t.bytes}B 수신)`
+        + ' — 사유는 위 안내, 원문은 아래 CLI 명령 원문.'
+      : `오류: 명령 출력이 끊겼습니다(${t.timedOut ? '시한 초과' : '자동응답 상한'}`
+        + ` · 자동응답 ${t.answers}회 · ${Math.round(t.ms / 1000)}초 · ${t.bytes}B 수신)`
+        + ' — 형식 문제가 아니라 대화형 프롬프트/시간 문제입니다(상세의 CLI 원문 확인).';
+  }
+  // ⚠ `config` 는 pools/capacity 를 비추는 **파생 값**이다(`buildSnapshot` 참조). 위에서 그 둘을
+  //   고쳐 놓고 여기를 두면 한 화면에서 **서로 다른 원인**을 말한다 — 실측(v2.543 판독):
+  //   `config: 풀 출력을 읽지 못했습니다` 와 `pools: 중단됐습니다` 가 나란히 떴다.
+  if (snap.sections.config !== 'ok') {
+    snap.sections.config = snap.sections.pools === 'ok' || snap.sections.capacity === 'ok'
+      ? 'ok'
+      : snap.sections.pools;
+  }
+  const reasons = [...new Set(Object.values(truncated).filter((t) => t.aborted).map((t) => t.abortReason))];
+  if (reasons.length) snap.error = reasons.join(' / ');
+  return snap;
+}
+
 export async function collectViaSsh(device) {
   let raw = [];
   try {
@@ -158,17 +196,8 @@ export async function collectViaSsh(device) {
 
     const snap = buildSnapshot(device, r.out, { errors: r.errors, usedCmds });
 
-    // 끊긴 명령은 **형식 문제와 구분해** 말한다(v2.539) — 26B 만 받은 것을 '형식이 다르다' 고
-    // 하면 사용자는 파서를 의심하며 고친다. 실제로 그렇게 네 번 헛수정했다.
-    const truncated = r.truncated || {};
-    if (Object.keys(truncated).length) snap.extra.cliTruncated = truncated;
-    for (const [key, t] of Object.entries(truncated)) {
-      const sect = SPECS.find((s) => s.key === key)?.section;
-      if (!sect || snap.sections[sect] === 'ok') continue;
-      snap.sections[sect] = `오류: 명령 출력이 끊겼습니다(${t.timedOut ? '시한 초과' : '자동응답 상한'}`
-        + ` · 자동응답 ${t.answers}회 · ${Math.round(t.ms / 1000)}초 · ${t.bytes}B 수신)`
-        + ' — 형식 문제가 아니라 대화형 프롬프트/시간 문제입니다(상세의 CLI 원문 확인).';
-    }
+    applyCutInfo(snap, r.truncated || {});
+
     if (r.skipped?.length) snap.extra.cliSkipped = r.skipped.length;
     if (r.elapsedMs != null) { snap.extra.cliElapsedMs = r.elapsedMs; snap.extra.cliBudgetMs = r.budgetMs; }
 

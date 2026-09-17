@@ -8,7 +8,7 @@
  * 없는데 '비정상 없음' 이라 말하는 것 ③ 목록이 상한으로 잘린 것을 숨기는 것이다.
  */
 import { describe, it, expect } from 'vitest';
-import { nodeHealthKind, nodeRows, nodeFaultSummary, nodeKindLabel, bpsText, faultBadgeTitle, healthBadge, sectionBadge } from './storageNodeText.js';
+import { nodeHealthKind, nodeRows, nodeFaultSummary, nodeKindLabel, bpsText, faultBadgeTitle, healthBadge, sectionBadge, cliCutText } from './storageNodeText.js';
 
 const nodesOf = (list, over = {}) => ({
   nodes: { count: list.length, unhealthy: list.filter((n) => nodeHealthKind(n.health) === 'bad').length, list, ...over },
@@ -152,5 +152,23 @@ describe('sectionBadge — 미수집을 오류로 그리지 않는다(v2.542)', 
   it('빈 값도 오류로 다룬다(정상이라 하지 않는다)', () => {
     expect(sectionBadge('').tone).toBe('red');
     expect(sectionBadge(undefined).tone).toBe('red');
+  });
+});
+
+// ── v2.543: '왜 끊겼나' 는 조치가 갈리므로 갈래를 합치지 않는다 ──────────────────
+describe('cliCutText — 중단/시한/상한을 구분한다', () => {
+  it('★ 중단(abort)을 응답 상한이라 말하지 않는다 — 상한을 늘려도 영원히 안 된다', () => {
+    const t = cliCutText({ aborted: 'sudoPassword', truncated: true });
+    expect(t).toContain('중단');
+    expect(t).not.toContain('응답 상한');
+    expect(t).not.toContain('시한');
+  });
+  it('시한 초과와 응답 상한은 그대로 구분된다', () => {
+    expect(cliCutText({ timedOut: true, truncated: true })).toBe(' · 시한 초과');
+    expect(cliCutText({ truncated: true })).toBe(' · 응답 상한으로 끊김');
+  });
+  it('끊기지 않았으면 아무 말도 하지 않는다', () => {
+    expect(cliCutText({ ok: true })).toBe('');
+    expect(cliCutText(null)).toBe('');
   });
 });

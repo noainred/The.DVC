@@ -70,6 +70,17 @@ export function cliLooksError(stdout, stderr = '') {
 }
 
 /**
+ * 한 명령의 결과가 **끊겼는가**(v2.543). 시한 초과·응답 상한·중단(abort) 은 전부 그 후보의 실패다.
+ *
+ * ⚠ 순수 함수로 분리한 이유: 이 판정을 되돌리면 sudo 프롬프트 26 바이트가 **명령의 정상 출력으로
+ * 저장**되고(파서가 '형식이 다르다' 고 엉뚱한 탓을 한다) 화면은 `✓ 성공 3 · 실패 0` 이라는
+ * 거짓을 말한다. 회귀를 소스 grep 이 아니라 **동작으로** 고정하기 위한 것이다.
+ */
+export function commandCut(r) {
+  return !!(r && (r.truncated || r.timedOut || r.aborted));
+}
+
+/**
  * @param {object[]} specs `[{ key, section?, cmds, required?, answered?, rules? }]`
  *   · `answered:true` — 대화형 프롬프트에 자동 응답한다(`sshExec.execAnswered`).
  *     uemcli 는 자체서명 인증서 수락 프롬프트에서 멈추므로 이 모드가 **필수**다(v2.526).
@@ -104,27 +115,57 @@ export async function runCliSession(device, specs, { clean = (t) => t, budgetMs 
           const slice = spec.required ? CMD_TIMEOUT_MS : Math.max(MIN_SLICE_MS, Math.min(CMD_TIMEOUT_MS, leftMs()));
           const t0 = Date.now();
           const r = spec.answered
-            ? await sh.execAnswered(cmd, { timeoutMs: slice, rules: spec.rules || ['certAccept', 'pager'] })
+            /*
+             * ⚠⚠ **PTY 를 요청하지 않는다**(`pty:false`, v2.543 — 사용자 재현으로 확정).
+             * 같은 계정·같은 명령인데 `-tt`(PTY) 를 붙이면 `[sudo] password for root:` 에서 멈추고,
+             * 안 붙이면 3.7초에 정상 출력이 나온다. PTY 세션에서 그 계정 환경이 sudo 를 부르기
+             * 때문이고 `uemcli` 는 실행조차 되지 않는다.
+             * ⚠ v2.530 이 넣은 `WIDE_PTY`(1000칸)는 **PTY 가 만든 줄바꿈을 PTY 로 막으려던 것**이다.
+             *   PTY 가 없으면 장비가 폭에 맞춰 접을 이유 자체가 없다 — 사용자의 비-PTY 출력이
+             *   한 줄도 접히지 않은 것이 그 증거다. **PTY 를 되살리지 말 것.**
+             * ⚠ 프롬프트 자동 응답은 그대로 둔다 — PTY 없이도 exec 채널의 stdin 에 쓸 수 있다.
+             */
+            ? await sh.execAnswered(cmd, { timeoutMs: slice, pty: false, rules: spec.rules || ['certAccept', 'pager'] })
             : await sh.exec(cmd, slice);
           const ms = Date.now() - t0;
           // 배너·프롬프트를 먼저 걷어낸다 — 그 뒤에 오류 판정·파싱을 한다(둘이 같은 텍스트를 봐야 한다).
           const stdout = clean(String(r.stdout || ''));
           const stderr = String(r.stderr || '');
           // CLI 는 오류를 exit code 0 + stderr/본문 문구로 내보내는 경우가 흔하다.
-          const looksError = cliLooksError(stdout, stderr);
+          /*
+           * ⚠⚠ **끊긴 명령을 성공으로 세지 말 것**(v2.543 에 고친 v2.539 결함).
+           * v2.542 까지 `ok` 는 `!cliLooksError(...)` 하나였다. 그런데 sudo 프롬프트 26 바이트는
+           * 오류 문구가 아니므로 `looksError` 가 거짓이었고, 그 결과:
+           *   ① 화면이 `✓ 성공 3 · 실패 0` 이라고 말했다(**동시에 '끊긴 명령 3건' 이었다**)
+           *   ② 더 나쁜 것 — 아래 `out[spec.key] = stdout` 이 실행돼 **그 26 바이트가 명령의
+           *      정상 출력으로 저장**됐다. 파서는 그것을 읽고 '풀 출력을 읽지 못했습니다' 라고
+           *      **형식 탓**을 했다. 원인은 형식이 아니라 명령이 시작조차 못 한 것이다.
+           * 시한 초과·응답 상한·중단(abort)은 **전부 그 후보의 실패**다 — 다음 후보로 넘어가고,
+           * 넘어갈 후보가 없으면 그 항목은 오류다.
+           */
+          const cut = commandCut(r);
+          const looksError = cut || cliLooksError(stdout, stderr);
           // v2.539: 소요·끊김·자동응답 횟수를 원문 옆에 남긴다 — '형식이 다르다' 와 '끊겼다' 는 조치가 다르다.
           //   (실제 사고: 인증서 프롬프트 에코 루프가 400회 응답 뒤 명령을 죽였는데 화면은 형식 탓을 했다.)
           raw.push({
             key: spec.key, cmd, ok: !looksError, sample: (stdout || stderr).slice(0, RAW_LIMIT), ms,
             ...(r.truncated ? { truncated: true } : {}),
             ...(r.timedOut ? { timedOut: true } : {}),
+            ...(r.aborted ? { aborted: r.aborted, abortReason: r.abortReason } : {}),
             ...(r.answers ? { answers: r.answers } : {}),
           });
-          if (r.truncated || r.timedOut) {
+          if (cut) {
             const n = Object.values(r.answers || {}).reduce((a, b) => a + (b || 0), 0);
-            truncatedKeys[spec.key] = { cmd, ms, timedOut: !!r.timedOut, answers: n, bytes: Buffer.byteLength(String(r.stdout || '')) };
+            truncatedKeys[spec.key] = {
+              cmd, ms, timedOut: !!r.timedOut, answers: n,
+              bytes: Buffer.byteLength(String(r.stdout || '')),
+              ...(r.aborted ? { aborted: r.aborted, abortReason: r.abortReason } : {}),
+            };
           }
-          if (looksError) { lastErr = new Error(firstLine(stdout || stderr) || '빈 출력'); continue; }
+          if (looksError) {
+            lastErr = new Error(r.abortReason || firstLine(stdout || stderr) || '빈 출력');
+            continue;
+          }
           out[spec.key] = stdout;
           done = true;
           break;
