@@ -246,3 +246,128 @@ export function edgeNote(isEdge) {
   if (!isEdge) return '';
   return '이 포탈은 **엣지**입니다 — 자기 법인의 베어메탈만 수집하고, 중앙은 중앙이 직접 닿는 서버만 수집합니다(같은 서버를 두 곳에서 찌르지 않습니다).';
 }
+
+/* ══════════════ v2.551 개선 — 집계·상위 N·CSV ══════════════════════════════ */
+
+/**
+ * `deviceFacets.facetState` 가 읽는 축(`datacenterId`·`type`)을 베어메탈 행에 붙인다.
+ * ⚠ **공용 모듈을 고치지 않는다** — 그 모듈은 스토리지·증가량 화면이 함께 쓰므로(v2.533
+ *   '코어는 하나다') 축 이름을 바꾸면 그쪽이 깨진다. 이 쪽에서 맞춰 준다.
+ * 종류 축은 **수집 경로**다 — 'OS 계정이 있는 서버만 보기' 가 되어 실제로 쓸모가 있다.
+ */
+export function facetRows(rows = []) {
+  return (rows || []).map((r) => ({
+    ...r,
+    datacenterId: t(r.vcenterId) || '',
+    type: (r.paths || []).includes('os') ? (((r.paths || []).length > 1) ? 'idrac+os' : 'os') : 'idrac',
+  }));
+}
+export const PATH_LABEL = Object.freeze({ 'idrac+os': 'iDRAC·OS', os: 'OS 만', idrac: 'iDRAC 만' });
+export function pathTypeLabel(x) { return PATH_LABEL[t(x)] || t(x) || '미상'; }
+
+/**
+ * **가장 바쁜 서버 상위 N**. ⚠ 값이 없는 서버를 0 으로 세어 목록 끝에 넣지 않는다 —
+ * 아예 **제외하고 개수를 밝힌다**(0% 로 줄 세우면 '한가한 서버' 라는 거짓이 된다).
+ * @returns {{list:Array, excluded:number, metric:string}}
+ */
+export function topBusiest(rows = [], { metric = 'cpu_pct', limit = 5 } = {}) {
+  const withVal = [];
+  let excluded = 0;
+  for (const r of rows || []) {
+    const v = n(r[metric]);
+    if (v == null) { excluded += 1; continue; }
+    withVal.push({ ...r, _v: v });
+  }
+  withVal.sort((a, b) => b._v - a._v || String(a.name).localeCompare(String(b.name), 'ko'));
+  return { list: withVal.slice(0, Math.max(1, limit)), excluded, metric };
+}
+
+/**
+ * 법인별 집계. ⚠ **`null` 을 분모에 넣지 않는다** — 넣으면 '못 읽은 서버' 가 평균을 끌어내린다
+ * (v2.550 DB 롤업과 같은 규칙). 읽은 대수(`n`)를 함께 내 화면이 '몇 대 기준' 인지 말할 수 있게 한다.
+ */
+export function corpSummary(rows = [], { metric = 'cpu_pct' } = {}) {
+  const by = new Map();
+  for (const r of rows || []) {
+    const k = t(r.vcenterId) || '(귀속 없음)';
+    const cur = by.get(k) || { vcenterId: k, servers: 0, n: 0, sum: 0, max: null, over90: 0 };
+    cur.servers += 1;
+    const v = n(r[metric]);
+    if (v != null) {
+      cur.n += 1; cur.sum += v;
+      if (cur.max == null || v > cur.max) cur.max = v;
+      if (v >= 90) cur.over90 += 1;
+    }
+    by.set(k, cur);
+  }
+  return [...by.values()].map((x) => ({
+    ...x,
+    // ⚠ 읽은 대수가 0 이면 평균은 **null** 이다(0 이 아니다).
+    avg: x.n > 0 ? Math.round((x.sum / x.n) * 10) / 10 : null,
+    unread: x.servers - x.n,
+  })).sort((a, b) => (b.max ?? -1) - (a.max ?? -1) || a.vcenterId.localeCompare(b.vcenterId, 'ko'));
+}
+
+/** CSV 열 — 화면 표와 **같은 순서**를 쓴다(내보낸 파일이 화면과 달라 보이면 안 된다). */
+export const CSV_COLS = Object.freeze([
+  ['server', '서버'], ['serviceTag', '서비스태그'], ['vcenterId', '법인'], ['model', '모델'],
+  ['paths', '수집경로'], ['src', '값출처'],
+  ['cpu_pct', 'CPU(%)'], ['mem_pct', '메모리(%)'], ['disk_busy_pct', '디스크I/O(%)'],
+  ['disk_used_pct', '디스크공간(%)'], ['net_pct', '네트워크(%)'], ['net_bps', '네트워크(B/s)'],
+  ['hba_pct', 'HBA(%)'], ['hba_bps', 'HBA(B/s)'], ['io_pct', 'iDRAC_IO(%)'],
+  ['collectedAt', '수집시각(KST)'], ['missing', '누락'],
+]);
+
+/**
+ * CSV 본문. ⚠ **값이 없으면 빈 칸이다 — 0 을 쓰지 않는다**(엑셀에서 0 은 '부하 없음' 으로 읽힌다).
+ * ⚠ 자격증명·호스트 주소는 담지 않는다(응답에 이미 없지만 열 정의에서도 배제한다).
+ */
+export function csvOf(rows = []) {
+  const esc = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const cell = (r, key) => {
+    if (key === 'server') return t(r.name);
+    if (key === 'paths') return (r.paths || []).map((p) => (p === 'os' ? 'OS' : 'iDRAC')).join('+');
+    if (key === 'src') return t(r.src);
+    if (key === 'missing') return (r.missing || []).join('+');
+    if (key === 'collectedAt') {
+      const ts = n(r.ts);
+      if (ts == null) return '';
+      const d = new Date(ts + 9 * 3_600_000);
+      return d.toISOString().slice(0, 19).replace('T', ' ');
+    }
+    const v = r[key];
+    return v == null || v === '' ? '' : String(v);
+  };
+  const head = CSV_COLS.map(([, label]) => esc(label)).join(',');
+  const body = (rows || []).map((r) => CSV_COLS.map(([k]) => esc(cell(r, k))).join(',')).join('\n');
+  return `${head}\n${body}`;
+}
+
+/**
+ * iDRAC 텔레메트리 전수 모드 안내(v2.551). 장비가 **무엇을 지원하는지** 말한다(사용자 선택).
+ * 충족 조건이 없으면 문구를 만들지 않는다.
+ */
+export function telemetryNote(detail = {}) {
+  const used = detail.idracReports || [];
+  const seen = detail.idracSeenReports || [];
+  if (!seen.length && !used.length) return '';
+  const absent = detail.idracAbsent || [];
+  const parts = [];
+  parts.push(`iDRAC 이 가진 텔레메트리 리포트 **${seen.length}종** 중 **${used.length}종**을 읽었습니다`
+    + `${used.length ? `(${used.slice(0, 5).join(' · ')}${used.length > 5 ? ' 외' : ''})` : ''}.`);
+  const missKind = [];
+  if (absent.includes('net')) missKind.push('네트워크');
+  if (absent.includes('hba')) missKind.push('HBA');
+  if (absent.includes('disk')) missKind.push('디스크');
+  if (missKind.length) {
+    parts.push(`**${missKind.join('·')} 통계 리포트가 없습니다** — iDRAC Datacenter 라이선스나 펌웨어에 따라 다릅니다.`
+      + ' OS 계정을 등록하면 그 지표는 OS 경로로 읽습니다.');
+  }
+  if (absent.includes('diskbusy') && !absent.includes('disk')) {
+    parts.push('디스크 **사용률(busy%)** 은 iDRAC 텔레메트리에 없습니다(용량·상태 계열만 있습니다) — 그 값은 OS 경로만 줍니다.');
+  }
+  return parts.join(' ');
+}

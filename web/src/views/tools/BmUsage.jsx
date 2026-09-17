@@ -17,12 +17,17 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
-import { Loading, ErrorBox, SearchBox, Kpi } from '../../components/ui.jsx';
+import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import DeviceFacetBar from './DeviceFacetBar.jsx';
+import { facetState, toggleIn } from './deviceFacets.js';
+const BmUsageChart = React.lazy(() => import('./BmUsageChart.jsx'));   // 추이 차트(v2.551)
 import BoldText from '../../components/boldText.jsx';
+import { rangeOf } from './bmUsageChart.js';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark,
   emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, authStopNote, keyConflictNote,
+  facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote,
 } from './bmUsageText.js';
 
 /** 표의 지표 열 — 서버가 준 `metrics` 계약과 같은 순서를 쓴다. */
@@ -50,8 +55,13 @@ export function BmUsage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [q, setQ] = useState('');
+  const [dcSel, setDcSel] = useState(() => new Set());
+  const [typeSel, setTypeSel] = useState(() => new Set());
+  const [topMetric, setTopMetric] = useState('cpu_pct');
   const [sel, setSel] = useState('');
   const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [rangeKey, setRangeKey] = useState('24h');
   const [showSkipped, setShowSkipped] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -70,12 +80,35 @@ export function BmUsage() {
     return (data?.targets || []).map((tg) => ({ ...tg, ...(byKey.get(String(tg.key)) || {}), key: tg.key }));
   }, [data]);
 
-  const shown = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return rows;
-    return rows.filter((r) => [r.name, r.serviceTag, r.vcenterId, r.model, r.idracHost, r.osHostName]
-      .some((v) => String(v || '').toLowerCase().includes(s)));
-  }, [rows, q]);
+  /*
+   * 법인·수집경로 필터 + 검색은 **공용 `deviceFacets.facetState` 하나**가 한다(v2.533 규약:
+   * 스토리지·증가량 화면과 같은 모듈 — 20줄을 복사하면 두 화면의 칩 개수가 갈라진다).
+   * ⚠ 검색을 여기서 또 걸지 말 것 — `facetState` 가 이미 한다(이중 적용이면 칩 개수가 어긋난다).
+   */
+  const facets = useMemo(() => facetState({
+    rows: facetRows(rows), dcSel, typeSel, query: q,
+    dcName: (id) => (id ? String(id) : '(귀속 없음)'),
+    typeLabel: pathTypeLabel,
+    hay: (r) => [r.name, r.serviceTag, r.vcenterId, r.model, r.idracHost, r.osHostName, pathTypeLabel(r.type)],
+  }), [rows, dcSel, typeSel, q]);
+  const shown = facets.shown;
+  const top = useMemo(() => topBusiest(shown, { metric: topMetric, limit: 5 }), [shown, topMetric]);
+  const corps = useMemo(() => corpSummary(shown, { metric: topMetric }), [shown, topMetric]);
+
+  /** CSV 내보내기 — **화면에 보이는 것만**(필터를 적용한 결과다. 그 사실을 파일명이 말한다). */
+  function exportCsv() {
+    const csv = csvOf(shown);
+    const stamp = new Date(Date.now() + 9 * 3_600_000).toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    // ⚠ 파일명은 ASCII — 헤드리스·일부 브라우저가 한글 download 이름을 떨어뜨린다(v2.519 실측).
+    const name = `bm-usage-${stamp}${facets.facetOn || q.trim() ? '-filtered' : ''}.csv`;
+    try {
+      const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });   // BOM — 엑셀 한글
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      setMsg({ tone: 'ok', text: `**${shown.length}대**를 CSV 로 내보냈습니다(${name}).${facets.facetOn || q.trim() ? ' 지금 화면에 보이는 것만 담았습니다.' : ''}` });
+    } catch (e) { setMsg({ tone: 'bad', text: `내보내기 실패: ${e?.message || e}` }); }
+  }
 
   const diag = useMemo(() => (data ? emptyDiag(data) : null), [data]);
 
@@ -91,10 +124,26 @@ export function BmUsage() {
     finally { setBusy(false); }
   }
 
+  /**
+   * 상세 조회. ⚠ **폴링하지 않는다** — 행을 누를 때와 기간을 바꿀 때만 1회다(v2.508 규약).
+   * 90일은 원시가 아니라 일 롤업을 쓰므로 `days` 로 묻는다(뜻이 다른 데이터라 화면이 밝힌다).
+   */
+  const loadDetail = React.useCallback(async (key, rk) => {
+    const r = rangeOf(rk);
+    setDetailLoading(true);
+    try {
+      const q = r.source === 'daily' ? { key, days: r.days, hours: 1 } : { key, hours: r.hours, days: 90 };
+      setDetail(await fetchJson('/tools/bm-usage/history', q));
+    } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }
+    finally { setDetailLoading(false); }
+  }, []);
   async function openDetail(key) {
-    setSel(key); setDetail(null);
-    try { setDetail(await fetchJson('/tools/bm-usage/history', { key, hours: 24 })); }
-    catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }
+    setSel(key); setDetail(null); setRangeKey('24h');
+    await loadDetail(key, '24h');
+  }
+  async function changeRange(rk) {
+    setRangeKey(rk);
+    if (sel) await loadDetail(sel, rk);
   }
 
   async function saveSettings(patch) {
@@ -156,8 +205,15 @@ export function BmUsage() {
       </div>
 
       <div className="card" style={{ minWidth: 0 }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
-          <SearchBox value={q} onChange={setQ} placeholder="서버·서비스태그·법인·모델 검색" />
+        <DeviceFacetBar
+          dcChips={facets.dcChips} typeChips={facets.typeChips} dcSel={dcSel} typeSel={typeSel}
+          onToggleDc={(v) => setDcSel((p) => toggleIn(p, v))}
+          onToggleType={(v) => setTypeSel((p) => toggleIn(p, v))}
+          onClear={() => { setDcSel(new Set()); setTypeSel(new Set()); setQ(''); }}
+          query={q} onQuery={setQ} typeLabel={pathTypeLabel}
+        />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '8px 0' }}>
+          <button onClick={exportCsv} disabled={!shown.length}>CSV 내보내기</button>
           <button onClick={collectNow} disabled={busy || !data?.enabled} title={data?.enabled ? '' : '수집이 꺼져 있습니다'}>
             {busy ? '수집 중…' : '지금 수집'}
           </button>
@@ -165,6 +221,9 @@ export function BmUsage() {
           <button onClick={() => setShowSettings((v) => !v)}>{showSettings ? '설정 닫기' : '설정'}</button>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>
             마지막 수집 {ageText(st.last?.at)} · 주기 {st.intervalMs ? `${Math.round(st.intervalMs / 60000)}분` : '—'} · 동시 {st.concurrency ?? '—'}
+            {st.last?.alerts && (st.last.alerts.sent > 0 || st.last.alerts.over > 0) && (
+              <> · 알림 {st.last.alerts.sent}건 발송{st.last.alerts.capped > 0 && ` (상한으로 ${st.last.alerts.capped}건 생략)`}</>
+            )}
           </span>
         </div>
 
@@ -216,6 +275,79 @@ export function BmUsage() {
           <BoldText text={'`—` 는 **못 읽은 것**이고 0% 가 아닙니다. 디스크·네트워크·HBA 의 값은 그 서버에서 **가장 높은 장치·회선** 기준입니다(평균을 쓰면 한 디스크가 가득 찬 서버가 낮게 보입니다).'.replace(/`/g, '')} />
         </p>
       </div>
+
+      {/* ── 상위 N + 법인별 집계(v2.551) ─────────────────────────────────────── */}
+      {!!shown.length && (
+        <div className="card" style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+            <h4 style={{ margin: 0 }}>가장 바쁜 서버 · 법인별</h4>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>기준</span>
+            {COLS.filter((c) => c.kind === 'pct').map((c) => (
+              <button
+                key={c.col} onClick={() => setTopMetric(c.col)}
+                style={{
+                  fontSize: 12, padding: '2px 8px', cursor: 'pointer', color: 'inherit', borderRadius: 4,
+                  background: topMetric === c.col ? 'rgba(96,165,250,0.18)' : 'transparent',
+                  border: '1px solid', borderColor: topMetric === c.col ? '#60a5fa' : 'var(--border, rgba(255,255,255,0.14))',
+                }}
+              >{c.label}</button>
+            ))}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 12, minWidth: 0 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>상위 {top.list.length}대</div>
+              <div style={{ overflowX: 'auto', minWidth: 0 }}>
+                <STable>
+                  <thead><tr><th>서버</th><th>법인</th><th className="right">{COLS.find((c) => c.col === topMetric)?.label}</th></tr></thead>
+                  <tbody>
+                    {top.list.map((r) => (
+                      <tr key={r.key}>
+                        <td data-sort={r.name}>
+                          <span role="button" tabIndex={0} onClick={() => openDetail(r.key)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.key); } }}
+                            style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3, color: 'inherit' }}
+                          >{r.name}</span>
+                        </td>
+                        <td data-sort={r.vcenterId || ''}>{r.vcenterId || '—'}</td>
+                        <td className="right" data-sort={r._v}><span style={{ color: toneVar(usageTone(r._v)) }}>{pctText(r._v)}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </STable>
+              </div>
+              {/* ⚠ 값이 없는 서버를 0 으로 줄 세우지 않았다 — 제외했고 그 개수를 밝힌다. */}
+              {top.excluded > 0 && (
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
+                  <BoldText text={`이 지표를 읽지 못한 **${top.excluded}대**는 순위에서 빼었습니다 — 0% 로 줄 세우면 '한가한 서버' 라는 거짓이 됩니다.`} />
+                </p>
+              )}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>법인별</div>
+              <div style={{ overflowX: 'auto', minWidth: 0 }}>
+                <STable>
+                  <thead><tr><th>법인</th><th className="right">대수</th><th className="right">최대</th><th className="right">평균</th><th className="right">90%↑</th><th className="right">못 읽음</th></tr></thead>
+                  <tbody>
+                    {corps.map((c) => (
+                      <tr key={c.vcenterId}>
+                        <td data-sort={c.vcenterId}>{c.vcenterId}</td>
+                        <td className="right" data-sort={c.servers}>{c.servers}</td>
+                        <td className="right" data-sort={c.max ?? -1}><span style={{ color: toneVar(usageTone(c.max)) }}>{pctText(c.max)}</span></td>
+                        <td className="right" data-sort={c.avg ?? -1}>{pctText(c.avg)}</td>
+                        <td className="right" data-sort={c.over90}>{c.over90 ? <b style={{ color: toneVar('bad') }}>{c.over90}</b> : '—'}</td>
+                        <td className="right" data-sort={c.unread}>{c.unread || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </STable>
+              </div>
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
+                <BoldText text={'평균은 **읽은 대수 기준**입니다 — 못 읽은 서버를 0 으로 세면 평균이 아래로 끌려갑니다.'} />
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {msg && (
         <div className="card" style={{ borderLeft: `3px solid ${toneVar(msg.tone)}`, minWidth: 0 }}>
@@ -279,6 +411,48 @@ export function BmUsage() {
               <input type="checkbox" checked={!!form.includeUnassigned} onChange={(e) => saveSettings({ includeUnassigned: e.target.checked })} disabled={saving} /> 법인 귀속 없는 서버도 포함
             </label>
           </div>
+
+          {/* ── iDRAC 텔레메트리 전수 모드(v2.551) ──────────────────────────── */}
+          <h4 style={{ margin: '14px 0 6px' }}>iDRAC 텔레메트리</h4>
+          <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
+            <input type="checkbox" checked={!!form.idracFullTelemetry} onChange={(e) => saveSettings({ idracFullTelemetry: e.target.checked })} disabled={saving} />
+            {' '}리포트 전수 읽기
+          </label>
+          <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+            <BoldText text={'켜면 iDRAC 의 텔레메트리 리포트 목록을 열거해 **NIC·FC 통계까지** 읽습니다 — OS 계정이 없는 서버도 네트워크·HBA 값이 나옵니다. 끄면 CPU·메모리·I/O(집계)만 읽습니다(v2.550 방식). ⚠ **이 현장 iDRAC 의 실제 리포트 목록을 확인한 적이 없습니다** — 장비별로 무엇을 읽었는지는 서버를 눌러 상세에서 보세요.'} />
+          </p>
+
+          {/* ── 임계 초과 알림(v2.551) ──────────────────────────────────────── */}
+          <h4 style={{ margin: '14px 0 6px' }}>임계 초과 알림</h4>
+          <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
+            <input type="checkbox" checked={!!form.alertEnabled} onChange={(e) => saveSettings({ alertEnabled: e.target.checked })} disabled={saving} />
+            {' '}알림 켜기
+          </label>
+          <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+            <BoldText text={'⚠ **기본 꺼짐**입니다 — 대상이 많고 주기가 짧아 한 번 튄 값으로 알리면 야간에 수백 통이 나갑니다. 그래서 **지속 시간**을 넘겨야 알리고, 같은 서버·같은 지표는 **재알림 간격** 안에 다시 보내지 않으며, 임계 아래로 내려오면 해제를 **1회** 알립니다. 채널은 설정 › 알림(Slack·Webhook·메일)을 그대로 씁니다.'} />
+          </p>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <label style={{ fontSize: 12 }}>임계(%){' '}
+              <input type="number" min={50} max={100} defaultValue={form.alertPct} disabled={saving}
+                onBlur={(e) => saveSettings({ alertPct: Number(e.target.value) })} style={{ width: 70, minWidth: 0 }} />
+            </label>
+            <label style={{ fontSize: 12 }}>지속(분){' '}
+              <input type="number" min={0} max={240} defaultValue={form.alertSustainMin} disabled={saving}
+                onBlur={(e) => saveSettings({ alertSustainMin: Number(e.target.value) })} style={{ width: 70, minWidth: 0 }} />
+            </label>
+            <label style={{ fontSize: 12 }}>재알림 간격(시간){' '}
+              <input type="number" min={1} max={168} defaultValue={form.alertRepeatHours} disabled={saving}
+                onBlur={(e) => saveSettings({ alertRepeatHours: Number(e.target.value) })} style={{ width: 80, minWidth: 0 }} />
+            </label>
+            {data?.status?.alertState && (
+              <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+                추적 중 {data.status.alertState.tracked}건 · 알린 것 {data.status.alertState.notified}건
+              </span>
+            )}
+          </div>
+          <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
+            <BoldText text={'감시 지표는 **퍼센트 지표 6개**(CPU·메모리·디스크 I/O·디스크 공간·네트워크·HBA)입니다 — 처리량(B/s)은 장비마다 정상 범위가 달라 임계를 정하지 않습니다. **못 읽은 주기는 초과도 정상도 아닙니다**(판정 보류).'} />
+          </p>
         </div>
       )}
 
@@ -292,6 +466,10 @@ export function BmUsage() {
               {selRow.osHostName ? ` · OS ${selRow.osHostName}` : ''}
             </span>
           </h4>
+          {/* iDRAC 이 무엇을 지원하는지 장비별로 밝힌다(v2.551 — 사용자 선택). */}
+          {telemetryNote(selRow.detail || {}) && (
+            <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={telemetryNote(selRow.detail)} /></p>
+          )}
           {detailNotes(detail?.target ? { ...detail.target, ...(selRow.detail || {}) } : (selRow.detail || {})).map((s, i) => (
             <p key={i} style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={s} /></p>
           ))}
@@ -304,6 +482,16 @@ export function BmUsage() {
           {detail && !detail.raw?.length && !detail.daily?.length && (
             <p style={{ fontSize: 12, color: 'var(--muted)' }}>저장된 추이가 없습니다 — 아직 수집되지 않았거나 이 서버의 값을 읽지 못했습니다.</p>
           )}
+          {/* 추이 차트 — 판정·좌표는 순수 모듈이 갖는다. 롤업 표는 그 아래에 남긴다(수치 대조용). */}
+          <React.Suspense fallback={<p style={{ fontSize: 12, color: 'var(--muted)' }}>차트를 불러오는 중…</p>}>
+            <BmUsageChart
+              raw={detail?.raw || []} daily={detail?.daily || []}
+              rawTruncated={!!detail?.rawTruncated}
+              intervalMs={data?.status?.intervalMs}
+              absent={[...(selRow?.detail?.idracAbsent || []), ...(selRow?.detail?.osAbsent || [])]}
+              rangeKey={rangeKey} onRange={changeRange} loading={detailLoading}
+            />
+          </React.Suspense>
           {!!detail?.daily?.length && (
             <div style={{ overflowX: 'auto', minWidth: 0 }}>
               <STable>

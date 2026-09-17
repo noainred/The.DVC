@@ -146,6 +146,9 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
   logAudit(req, 'bm-usage.settings', {
     enabled: next.enabled, corps: Object.keys(next.corps).length,
     intervalMs: next.intervalMs, rawRetentionDays: next.rawRetentionDays, dailyRetentionDays: next.dailyRetentionDays,
+    // v2.551 — 수집 범위·알림을 바꾸는 동작이라 감사에 남긴다.
+    idracFullTelemetry: next.idracFullTelemetry, alertEnabled: next.alertEnabled,
+    alertPct: next.alertPct, alertSustainMin: next.alertSustainMin, alertRepeatHours: next.alertRepeatHours,
   });
   res.json({ ok: true, settings: next });
 });
