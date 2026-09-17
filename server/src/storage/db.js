@@ -424,6 +424,73 @@ export async function resetCapacityHistory(deviceIds, { reason = '측정 기준 
  * 장비별 '이력 재시작' 기록 — 증가량 화면이 '관측 N일' 이 왜 짧은지 말할 수 있게 한다.
  * @returns {Promise<Record<string,{at:number, reason:string, rows:number}>>}
  */
+/**
+ * **0 바이트 용량 행 제거** — 1회(v2.541).
+ *
+ * 왜 필요한가(사용자 신고 2026-09-17, Unity OC2-unity-03): 수집이 SSH 인증 실패로 전량
+ * 실패하는 장비인데 **용량 추이 차트가 0.0 TB 로 그려지고 있었다**. `emptySnapshot` 의
+ * 초기값이 `{totalBytes:0, usedBytes:0}` 이라 실패 스냅샷이 그대로 적재되면 그렇게 된다.
+ * v2.531 의 `capacityPointEligible()` 이 **지금은** 그것을 막지만(전체 용량이 유한한 양수일
+ * 때만 적재), 그 가드가 배포되기 전에 쌓인 행은 DB 에 그대로 남아 있다.
+ *
+ * ⚠ 남겨 두면 증가량 화면에서 이 한 점이 `−106TB → +106TB` 라는 **거짓 급변**이 되고
+ * (CLAUDE.md '감소(−)를 0 으로 깎지 않는다' 때문에 그대로 표시된다), 상세 화면에서는
+ * **'용량 0 TB 장비'** 라고 말하게 된다.
+ *
+ * ⚠ **장비의 이력을 통째로 지우지 않는다** — `total_bytes` 가 없거나 0 이하인 **그 행만**
+ * 지운다. 유효한 값이 섞여 있는 장비는 그 값을 잃지 않는다(`resetCapacityHistory` 와
+ * 의도적으로 다르다. 그쪽은 '측정 기준이 바뀌어 옛 값이 뜻을 잃은' 경우다).
+ *
+ * ⚠ **조용히 지우지 않는다** — 행을 잃은 장비마다 `capacity_reset:<id>` 를 남겨 증가량
+ * 화면이 '이력 정리' 배지를 띄운다(없으면 '관측 1일' 을 수집 장애로 오해한다).
+ *
+ * @returns {Promise<{ran:boolean, devices:number, rows:number}>}
+ */
+/**
+ * **테스트 전용** — 적재 가드(`capacityPointEligible`)를 우회해 원시 행을 심는다.
+ * v2.531 가드 이전 배포가 남긴 0 바이트 행을 재현하기 위한 것이다(제품 경로에서 쓰지 말 것 —
+ * 그 가드가 존재하는 이유가 바로 이런 행을 막는 것이다).
+ */
+export async function _insertRawCapacityForTest(deviceId, ts, totalBytes, usedBytes) {
+  const db = await open();
+  if (!db) return false;
+  db.insCap.run(deviceId, ts, totalBytes, usedBytes, null, null, null, null);
+  db.upDaily.run(deviceId, dayIndex(ts), ts, totalBytes, usedBytes, null, null, null, null, usedBytes);
+  return true;
+}
+
+export async function purgeZeroCapacityRows({ once = null, reason = '0 바이트 용량 행 제거', at = Date.now() } = {}) {
+  const db = await open();
+  if (!db) return { ran: false, devices: 0, rows: 0 };
+  if (once) {
+    const done = db.metaGet.get(`migration:${once}`);
+    if (done) return { ran: false, devices: 0, rows: 0 };
+  }
+  const BAD = 'total_bytes IS NULL OR total_bytes <= 0';
+  let rows = 0; let devices = 0;
+  db.conn.exec('BEGIN');
+  try {
+    // 어느 장비가 몇 행을 잃는지 **먼저** 센다(지운 뒤에는 알 수 없다 — 배지의 근거다).
+    const per = new Map();
+    for (const t of ['capacity_history', 'capacity_daily']) {
+      const q = db.conn.prepare(`SELECT device_id AS id, COUNT(*) AS n FROM ${t} WHERE ${BAD} GROUP BY device_id`);
+      for (const r of q.all()) per.set(String(r.id), (per.get(String(r.id)) || 0) + Number(r.n || 0));
+    }
+    for (const t of ['capacity_history', 'capacity_daily']) db.conn.prepare(`DELETE FROM ${t} WHERE ${BAD}`).run();
+    for (const [id, n] of per) {
+      if (!n) continue;
+      rows += n; devices += 1;
+      db.metaSet.run(RESET_KEY(id), JSON.stringify({ at, reason, rows: n, kind: 'zero-rows' }));
+    }
+    if (once) db.metaSet.run(`migration:${once}`, JSON.stringify({ at, devices, rows }));
+    db.conn.exec('COMMIT');
+  } catch (e) {
+    try { db.conn.exec('ROLLBACK'); } catch { /* */ }
+    throw e;
+  }
+  return { ran: true, devices, rows };
+}
+
 export async function capacityResets() {
   const db = await open();
   if (!db) return {};

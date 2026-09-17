@@ -234,7 +234,13 @@ export function aggregateGrowth(devices, periods) {
  * 사용자 결정에 따라 그 장비의 이력만 지웠는데, **그 사실을 말하지 않으면** 화면의 '관측 N일'
  * 이 이유 없이 1일로 줄어 사용자가 수집 장애로 오해한다(조용한 삭제 금지).
  *
- * @param {{at:number, reason:string, rows:number}|null} reset
+ * ⚠ **두 가지를 한 문구로 덮지 말 것**(v2.541): 이력이 줄어드는 이유는 두 개이고 사용자가
+ * 읽어야 할 뜻이 정반대다 — ① `기준 변경`(v2.534): 값의 **뜻이 바뀌어** 이전 값과 이어서
+ * 비교할 수 없다 ② `이력 정리`(v2.541, `kind:'zero-rows'`): 수집 실패로 들어온 **0 바이트
+ * 행만** 지웠고 **남은 값은 그대로 유효**하다. ②를 '기준 변경' 이라 말하면 멀쩡한 이력을
+ * 못 믿게 만든다. `kind` 가 없는 옛 기록은 ①로 본다(하위호환).
+ *
+ * @param {{at:number, reason:string, rows:number, kind?:string}|null} reset
  * @returns {{badge:string, title:string}|null}
  */
 export function historyResetNote(reset) {
@@ -243,11 +249,18 @@ export function historyResetNote(reset) {
   const p = (n) => String(n).padStart(2, '0');
   const when = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   const rows = Number(reset.rows);
+  const nRows = Number.isFinite(rows) && rows > 0 ? ` (${rows.toLocaleString('ko-KR')}행 삭제)` : '';
+  const why = reset.reason ? ` — ${reset.reason}` : '';
+  if (reset.kind === 'zero-rows') {
+    return {
+      badge: '이력 정리',
+      title: `${when} 에 수집 실패로 기록된 0 바이트 용량 행을 지웠습니다${why}${nRows}.`
+        + ' 그 행만 지웠으므로 남아 있는 값은 그대로 유효합니다.',
+    };
+  }
   return {
     badge: '기준 변경',
-    title: `${when} 에 측정 기준이 바뀌어 이전 이력을 재시작했습니다`
-      + (reset.reason ? ` — ${reset.reason}` : '')
-      + (Number.isFinite(rows) && rows > 0 ? ` (이전 ${rows.toLocaleString('ko-KR')}행 삭제)` : '')
+    title: `${when} 에 측정 기준이 바뀌어 이전 이력을 재시작했습니다${why}${nRows.replace('(', '(이전 ')}`
       + '. 그 전 값과는 뜻이 달라 이어서 비교할 수 없습니다.',
   };
 }

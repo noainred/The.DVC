@@ -252,3 +252,25 @@ describe('이력 재시작 안내(v2.534)', () => {
     expect(historyResetNote({ reason: 'x' })).toBe(null);
   });
 });
+
+// ── v2.541: '기준 변경' 과 '이력 정리' 를 한 배지로 덮지 않는다 ──────────────────────
+// 두 문구는 뜻이 정반대다 — 전자는 남은 값과 **이어서 비교할 수 없다**, 후자는 0 바이트 행만
+// 지웠으므로 **남은 값은 그대로 유효**하다. 섞으면 멀쩡한 이력을 못 믿게 만든다.
+describe('historyResetNote — 정리 종류 구분(v2.541)', () => {
+  const at = Date.parse('2026-09-17T01:00:00Z');
+  it('0 바이트 행 정리는 "이력 정리" 이고 남은 값이 유효하다고 말한다', () => {
+    const n = historyResetNote({ at, rows: 3, kind: 'zero-rows', reason: '수집 실패 스냅샷' });
+    expect(n.badge).toBe('이력 정리');
+    expect(n.title).toMatch(/남아 있는 값은 그대로 유효/);
+    expect(n.title).not.toMatch(/이어서 비교할 수 없/);
+  });
+  it('kind 가 없는 옛 기록은 기존대로 "기준 변경" 이다(하위호환)', () => {
+    const n = historyResetNote({ at, rows: 12, reason: 'VMAX 기준 변경' });
+    expect(n.badge).toBe('기준 변경');
+    expect(n.title).toMatch(/이어서 비교할 수 없/);
+  });
+  it('시각이 없으면 배지를 만들지 않는다', () => {
+    expect(historyResetNote(null)).toBe(null);
+    expect(historyResetNote({ rows: 3 })).toBe(null);
+  });
+});

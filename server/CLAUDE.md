@@ -648,3 +648,39 @@ XFF 우회·대용량 본문). 경로 탈출·열거·잠금·헤더는 전부 �
   CSP 는 `CSP` env 로만 · 세션 토큰은 localStorage(XSS 시 탈취 — CSP 없이는 완화가 없다) ·
   `/api/auth/config` 가 setup 미완료 동안 초기 비밀번호 **파일 경로**를 무인증 응답에 싣는다(값이
   아니라 경로. 로그인 화면 안내용 — 코드 주석이 근거를 적고 있다). WS 토큰은 쿼리스트링(프록시 로그).
+
+## 2026-09-17 SSH 인증 실패가 주기 수집을 멈추지 않던 결함(v2.541) — 되돌리지 말 것
+
+사용자 신고(Unity `OC2-unity-03` · 호스트 10.94.41.237): 장비 상세에
+`SSH 수집 실패: All configured authentication methods failed` 가 떠 있는데 **정지 안내가 없었다**.
+회귀 테스트 `test/sshAuthStop2541.test.js`(7건 — 양성 12문구·음성 11문구를 함께 고정하고,
+ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식을 되돌리면 그 항목만 깨진다).
+
+- ⚠⚠ **`isAuthFailureText` 는 ssh2 의 정식 문구를 잡아야 한다**(`util/authGuard.js`):
+  ssh2 의 인증 실패는 `All configured authentication methods failed` 하나뿐이고
+  (`node_modules/ssh2/lib/client.js:863`) 그 객체에 `err.level = 'client-authentication'` 이 붙는다.
+  v2.540 까지의 패턴은 `authentication fail` **연속 일치**만 봐서 사이에 낀 `methods` 때문에
+  **매치하지 않았다**. 결과는 두 가지였다 — ① SSH 수집기(Unity·Isilon·PowerStore CLI)는
+  자격증명이 틀려도 **주기 수집이 멈추지 않아** 매 주기 같은 계정으로 재로그인했다(v2.528 이
+  막으려던 **계정 잠금 경로**. 1시간 주기면 장비당 하루 24회, 수동 실행까지 더해진다)
+  ② 화면의 `authStopped`(정지 사실·시도 횟수·자격증명 지문 대조)가 **영원히 뜨지 않아**
+  엣지 위임 장비의 '중앙 배포가 상했나 / 실제 비밀번호가 다른가' 를 가릴 단서가 없었다.
+  · 패턴은 `authentication <낱말 0~3개> fail` 로 넓혔고 반복에 **상한을 둔다**(무한 반복은 긴
+    비매치 입력에서 백트래킹한다 — 테스트가 200KB 입력으로 고정한다).
+  · **음성 목록을 지우지 말 것**(규칙 4): `ETIMEDOUT`·`ECONNREFUSED`·`ENOTFOUND`·`socket hang up`·
+    `Handshake failed: no matching key exchange algorithm`(협상 실패 — 'failed' 가 있지만 자격증명
+    문제가 아니고 구형 알고리즘 폴백이 처리한다)·`Cannot parse privateKey`(설정 오류이고 **로그인
+    시도가 서버에 도달하지 않아** 계정을 잠그지 않는다)·파싱/예산 초과.
+- **판정은 문구보다 `err.level` 을 먼저 본다**(`proxy/sshExec.js isSshAuthError`): 영문 문구는
+  라이브러리 판올림으로 바뀔 수 있지만 `level` 은 ssh2 가 직접 붙이는 값이다. `withSsh` 의
+  `conn.on('error')` 가 `reject(e)` 로 **원본 오류를 그대로** 넘기므로 호출부에서 읽을 수 있다 —
+  오류를 `new Error(e.message)` 로 갈아끼우면 이 판정이 죽는다.
+- **실패 문구 조립은 `cliSsh.sshFailureSnapshot` 하나가 한다**: 자격증명 거부면
+  `SSH 인증 실패: <원문> — 계정·비밀번호(또는 개인키)를 확인하세요.` 다. **원문을 지우지 말 것** —
+  어느 단계에서 거부됐는지(공개키/비밀번호/키보드 인터랙티브)가 진단이다. `isilonSsh.js` 는
+  자체 조립 5줄을 버리고 이 함수에 위임한다(CLAUDE.md '코어는 하나다' — 복제해 두면 분류 수정이
+  한쪽에만 들어간다). 테스트가 소스를 검사해 고정한다.
+- ⚠ **아직 가드가 없는 주기 SSH 수집기**(v2.541 전수 스윕 결과 — 붙일 때 UI 표시를 **함께** 해야
+  한다. 화면이 말하지 않는 정지는 규칙 1 위반이라 가드만 넣으면 더 나쁘다):
+  `sanswitch/poller.js` · `sanswitch/perfPoller.js` · `pdu/poller.js` · `gpu/sshCollect.js` ·
+  `bmstor/collect.js`. 전부 저장된 자격증명으로 주기 로그인한다.

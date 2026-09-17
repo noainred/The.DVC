@@ -16,6 +16,7 @@
  */
 
 import { withSsh } from '../../proxy/sshExec.js';
+import { sshFailureSnapshot } from './cliSsh.js';
 import { emptySnapshot } from '../types.js';
 
 /* ── 단위 파서 ──────────────────────────────────────────────────────────── */
@@ -216,9 +217,9 @@ export async function collectViaSsh(device) {
     if (!users) snap.sections.accounts = r.usersRaw ? '오류: users JSON 파싱 실패' : '오류: isi auth users list 실행 실패';
     return snap;
   } catch (e) {
-    const snap = emptySnapshot(device);
-    snap.extra = { collectMethod: 'ssh' };
-    snap.error = `SSH 수집 실패: ${e.message}`;
-    return snap;
+    // ⚠ 실패 문구 조립을 여기서 **복제하지 않는다**(v2.541 — CLAUDE.md '코어는 하나다').
+    // 예전에는 이 5줄이 cliSsh.sshFailureSnapshot 과 따로 있었고, 자격증명 거부를
+    // '인증 실패' 로 못 박는 수정이 cliSsh 에만 들어가면 Isilon 만 조용히 빠진다.
+    return sshFailureSnapshot(device, e);
   }
 }
