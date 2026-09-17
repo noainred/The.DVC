@@ -105,6 +105,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, prev = null, 
     if (hp != null) { out.hba_pct = hp; srcOf.hba = 'os'; }
     const hb = maxOrNull(perFc.map((x) => x.bps));
     if (hb != null) out.hba_bps = hb;
+    // ⚠ 화면 상세용이고 **DB 에는 넣지 않는다** — 폴러가 적재 직전에 뗀다(v2.550.3).
     out._perIf = perIf; out._perFc = perFc;
   }
 

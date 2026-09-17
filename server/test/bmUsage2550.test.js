@@ -321,7 +321,12 @@ test('⚠ exec 시한은 위치 인자다 — 객체를 넘기면 NaN 이 되어
   assert.ok(calls.length >= 2, `exec 호출을 찾지 못했다: ${calls.length}`);
   for (const c of calls) {
     assert.ok(!/\{\s*timeoutMs/.test(c), `객체를 넘기고 있다(NaN → 즉시 타임아웃): ${c}`);
-    assert.match(c, /,\s*[A-Z_]+\s*\);$/, `시한을 위치 인자(상수)로 넘겨야 한다: ${c}`);
+    /*
+     * ⚠ 요구는 '**숫자**를 위치 인자로' 다 — 상수 이름으로 좁히면 안 된다. v2.550.3 이 시한을
+     *   세션 예산 기반 `slice()`(남은 시간, 숫자 반환)로 바꾸자 이 검사가 깨졌다. 규칙의 의도는
+     *   "객체를 넘기면 NaN 이 된다" 이고 `slice()` 는 그 의도를 만족한다.
+     */
+    assert.match(c, /,\s*(?:[A-Z_]+|slice\(\))\s*\);$/, `시한을 숫자 위치 인자로 넘겨야 한다: ${c}`);
   }
   // NaN 이 즉시 발화한다는 사실 자체도 고정한다(근거를 문서가 아니라 테스트가 갖는다).
   assert.ok(Number.isNaN(Math.max(1000, { timeoutMs: 30_000 })));

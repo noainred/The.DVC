@@ -213,6 +213,24 @@ export function authStopNote(stops = [], { now = Date.now() } = {}) {
     + " '지금 수집' 은 정지와 무관하게 동작하니 고친 뒤 눌러 확인하세요.";
 }
 
+/**
+ * **키 충돌** 안내(v2.550.3). ⚠ 조용히 두면 안 되는 종류다 — DB 기본키가 `(agent, key, ts)` 라
+ * 두 서버가 같은 키를 쓰면 **한쪽의 사용률이 다른 서버 값으로 보이고 오류는 나지 않는다**
+ * (v2.548 F2 와 같은 유형). 대상에서 빼지 않는 이유도 함께 말한다(어느 쪽을 버릴지 알 수 없다).
+ * 충돌이 없으면 **문구를 만들지 않는다**.
+ */
+export function keyConflictNote(list = []) {
+  const arr = Array.isArray(list) ? list : [];
+  if (!arr.length) return '';
+  const shown = arr.slice(0, 3).map((x) => `${t(x.key)}(${(x.names || []).join(' · ')})`);
+  const more = arr.length > shown.length ? ` 외 ${arr.length - shown.length}건` : '';
+  return `**식별 키가 겹치는 서버 ${arr.length}건**이 있습니다 — ${shown.join(' / ')}${more}.`
+    + ' 같은 키를 쓰면 **한 서버의 값이 다른 서버 것으로 보입니다**(추이가 섞입니다).'
+    + ' 서비스태그가 비어 있어 이름·내부 id 로 키가 정해진 경우가 대부분이니'
+    + ' 설정 › iDRAC 등록에서 **서비스태그를 채우면** 해결됩니다.'
+    + ' 어느 쪽을 버릴지 판단할 근거가 없어 **수집에서 빼지는 않았습니다**.';
+}
+
 /** 보존·행 수 안내 — 서버가 준 값으로만 만든다(숫자를 박지 않는다). */
 export function retentionNote(settings = {}, db = {}) {
   const raw = n(settings.rawRetentionDays);

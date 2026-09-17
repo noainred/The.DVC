@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark, SRC_MARK,
-  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, MISSING_MARK, authStopNote,
+  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, MISSING_MARK, authStopNote, keyConflictNote,
 } from './bmUsageText.js';
 
 const NOW = 1_700_000_000_000;
@@ -197,6 +197,30 @@ describe('인증 실패 정지 — 조용히 멈추지 않는다', () => {
   });
 });
 
+describe('키 충돌 — 오류 없이 틀린 값을 만드는 종류다(v2.550.3)', () => {
+  it('충돌이 없으면 문구를 만들지 않는다', () => {
+    expect(keyConflictNote([])).toBe('');
+    expect(keyConflictNote(null)).toBe('');
+  });
+  it('몇 건인지·무엇이 겹쳤는지·왜 위험한지·어떻게 고치는지 말한다', () => {
+    const s = keyConflictNote([{ key: 'DUP1', names: ['bm-a', 'bm-b'], vcenterId: 'vc1' }]);
+    expect(s).toContain('1건');
+    expect(s).toContain('DUP1');
+    expect(s).toContain('bm-a');
+    expect(s).toContain('다른 서버 것으로 보입니다');
+    expect(s).toContain('서비스태그를 채우면');
+  });
+  it('수집에서 빼지 않았다는 사실도 말한다(사용자가 사라진 서버를 찾지 않게)', () => {
+    expect(keyConflictNote([{ key: 'A', names: ['x', 'y'] }])).toContain('빼지는 않았습니다');
+  });
+  it('많으면 일부만 나열하고 나머지는 개수로', () => {
+    const many = Array.from({ length: 7 }, (_, i) => ({ key: `K${i}`, names: [`a${i}`, `b${i}`] }));
+    const s = keyConflictNote(many);
+    expect(s).toContain('7건');
+    expect(s).toContain('외 4건');
+  });
+});
+
 describe('마크다운 누출 방지', () => {
   it('BoldText 가 못 그리는 백틱을 문구에 넣지 않는다', () => {
     const all = [
@@ -212,6 +236,7 @@ describe('마크다운 누출 방지', () => {
       ...missingFootnotes([{ missing: ['no-os-cred', 'no-idrac', 'no-idrac-cred'] }]),
       missingMark(['no-os-cred']),
       authStopNote([{ key: 'A', name: 'n', since: NOW }], { now: NOW }),
+      keyConflictNote([{ key: 'A', names: ['x', 'y'] }]),
     ];
     for (const s of all) expect(s).not.toContain('`');
   });

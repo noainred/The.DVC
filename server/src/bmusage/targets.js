@@ -136,7 +136,23 @@ export function resolveTargets({ bareMetal = [], registry = [], bmServers = [], 
   for (const s of skipped) byReason[s.reason] = (byReason[s.reason] || 0) + 1;
   counts.byReason = byReason;
   counts.osDuplicates = os.duplicates;
-  return { targets, skipped, counts };
+  /*
+   * ⚠⚠ **키 충돌을 조용히 두지 않는다**(v2.550.3). DB 기본키가 `(agent, key, ts)` 라 두 서버가 같은
+   *   `key` 를 쓰면 **한쪽이 다른쪽을 덮어쓴다** — 그 서버의 사용률이 다른 서버 값으로 보이고
+   *   오류도 나지 않는다(v2.548 F2 가 겪은 것과 같은 유형: 서비스태그가 비어 fleetId·serverId 로
+   *   떨어진 서버끼리, 또는 한쪽의 fleetId 가 다른쪽의 서비스태그와 같을 때 성립한다).
+   *   여기서 **대상에서 빼지는 않는다** — 어느 쪽을 버릴지 판단할 근거가 없고, 빼면 멀쩡한 서버가
+   *   조용히 사라진다. 개수와 목록을 올려 화면이 말하게 한다.
+   */
+  const seen = new Map();
+  const keyConflicts = [];
+  for (const x of targets) {
+    const prev = seen.get(x.key) || null;
+    if (prev) keyConflicts.push({ key: x.key, names: [prev.name, x.name].filter(Boolean), keyKind: x.keyKind, vcenterId: x.vcenterId || prev.vcenterId || '' });
+    else seen.set(x.key, x);
+  }
+  counts.keyConflicts = keyConflicts.length;
+  return { targets, skipped, counts, keyConflicts };
 }
 
 /** 안정 키 — 서비스태그 우선(v2.548 `deviceKey` 와 같은 등급 판단). */
