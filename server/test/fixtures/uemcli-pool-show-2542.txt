@@ -1,0 +1,20 @@
+22:57:14 service@SYNTH0000000000 spa:~/user# uemcli /stor/config/pool show
+Storage system address: 127.0.0.1
+Storage system port: 443
+HTTPS connection
+
+1:    ID                    = pool_1
+      Name                  = pool_1
+      Total space           = 117544396521472 (106.9T)
+      Remaining space       = 87568746020864 (79.6T)
+      Flash percent         = 100%
+      Subscription percent  = 47%
+      Number of drives      = 38
+      RAID level            = 5
+      Stripe length         = 9
+      Rebalancing           = no
+      Health state          = OK (5)
+      Protection size used  = 0
+      Non-base size used    = 0
+
+22:57:19 service@SYNTH0000000000 spa:~/user#

@@ -269,12 +269,25 @@ export function planInput(snap) {
   const ex = snap.extra || {};
   const single = pools.length === 1 ? pools[0] : null;
   const sumFree = pools.reduce((a, p) => a + (posNum(p.freeBytes) || 0), 0);
+  /*
+   * ⚠ v2.542 — 구독·선할당은 **풀 속성**이라 풀에서 합산한다(이 함수가 임계·RAID 를 이미
+   *   그렇게 다룬다). 예전에는 `extra.subscribedBytes`·`extra.preallocatedBytes` 만 봤는데,
+   *   그것은 v2.540 의 옛 수집기가 **단일 풀 값을 extra 로 올려 준** 것에 기댄 것이었다.
+   *   v2.542 에 수집기를 재작성해 그 hoist 가 없어지자 '구독분이 다 채워질 때' 기준이 통째로
+   *   사라지고(기준 3개 → 2개) 항등식이 선할당분만큼 어긋났다. 두 값은 **더할 수 있는 양**이라
+   *   여러 풀에서도 합이 뜻을 갖는다(퍼센트인 `alertThresholdPct` 와 다른 점이다).
+   *   `extra` 폴백은 남겨 둔다 — REST(API) 수집 경로가 그 모양으로 줄 수 있다.
+   */
+  const sumOf = (k) => {
+    const vals = pools.map((p) => posNum(p[k])).filter((v) => v != null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+  };
   return {
     totalBytes: posNum(cap.totalBytes),
     usedBytes: cap.usedBytes == null ? null : Number(cap.usedBytes),
     freeBytes: sumFree > 0 ? sumFree : null,
-    preallocatedBytes: posNum(ex.preallocatedBytes),
-    subscribedBytes: posNum(ex.subscribedBytes),
+    preallocatedBytes: sumOf('preallocatedBytes') ?? posNum(ex.preallocatedBytes),
+    subscribedBytes: sumOf('subscribedBytes') ?? posNum(ex.subscribedBytes),
     // 임계·RAID·드라이브는 풀 속성이다 — 풀이 여러 개면 대표값을 만들지 않는다(거짓이 된다).
     alertThresholdPct: single ? posNum(single.alertThresholdPct) : null,
     drives: single ? single.drives || null : null,
