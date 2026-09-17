@@ -112,6 +112,8 @@ import { startVmSeriesConfigPull } from './agent/vmSeriesConfigPull.js'; // 〃 
 import { startCurUserPoller } from './curuser/poller.js';           // '현재 사용자'(v2.520) — guestinfo 읽기, 게스트 계정 없음
 import { startHzSessionPoller } from './horizon/sessionPoller.js';  // Horizon 실시간 사용자(v2.525) — 기존 horizon.json 자격증명 재사용, opt-in
 import { startCurUserConfigPull } from './agent/curUserConfigPull.js'; // 〃 중앙→엣지 설정 pull(v2.520)
+import { startPartFaultPoller } from './partfault/poller.js';       // 파트 장애(v2.547) — 중앙: 스캔→전이→DB→알림
+import { startPartFaultPush } from './partfault/push.js';           // 〃 엣지: 로컬 판정 후 **장애만** 중앙 push
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
@@ -224,6 +226,7 @@ app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다
 // **그 법인 데이터가 조용히 전량 소실**된다(guest-disk 가 v2.466 에 겪은 것과 같은 사고).
 // 엣지 쪽은 gzip 을 붙였지만 express.json 의 limit 은 **해제 후 길이**라 한도도 함께 올려야 한다.
 app.use('/api/central/storage-data', BIG_JSON);
+app.use('/api/central/part-faults', BIG_JSON);  // 파트 장애 push(v2.547) — 열린 장애가 많은 법인이 1mb 기본을 넘으면 413 = 조용한 소실
 app.use('/api/central/pdu-data', BIG_JSON);
 // v2.517: SAN 스위치 push 가 **전체 포트**로 바뀌었다(`sanswitch/push.js` 머리말 — gzip 실측 근거).
 // 엣지는 700KB 청크 + gzip 으로 보내지만 express.json 의 limit 은 **해제 후 길이**라 기본 1MB 로는
@@ -375,6 +378,10 @@ const stagger = [
   startCurUserPoller,   // '현재 사용자'(v2.520) — 적응형 타이머(기본 10분) + 재진입 가드 + 동시성 제한. opt-in(기본 꺼짐). 게스트 계정 없이 config.extraConfig 만 읽는다
   startHzSessionPoller, // Horizon 실시간 사용자(v2.525) — 적응형 타이머(기본 5분) + 재진입 가드 + 서버당 시한. opt-in(기본 꺼짐). 기존 horizon.json 자격증명을 재사용한다
   startCurUserConfigPull, // 〃 중앙→엣지 설정 pull(v2.520)
+  // 파트 장애(v2.547) — 엣지는 로컬 스냅샷을 판정해 **장애만** 중앙에 push 하고,
+  // 중앙은 직접 수집분 + 엣지 보고를 합쳐 전이(열림/변화/해소)를 계산해 DB 에 남기고 알린다.
+  // 둘 다 opt-in/조건부이며(PARTFAULT_ENABLED · CENTRAL_URL) 왜 안 도는지 로그가 말한다.
+  startPartFaultPoller, startPartFaultPush,
 ];
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
 

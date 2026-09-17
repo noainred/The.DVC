@@ -49,6 +49,7 @@ export const MIGRATABLE = [
   { file: 'curuser.db', label: "'현재 사용자' 로그인 사용자 수 추이(v2.520)" },
   { file: 'san-health.db', label: 'SAN 스위치 점검 이력(최근 N회 비교, v2.522)' },
   { file: 'horizon-sessions.db', label: 'Horizon 실시간 사용자(세션) 추이(v2.525)' },
+  { file: 'part-faults.db', label: '물리 파트(부품) 장애 이력 — 열림/변화/해소 전이(v2.547)' },
   // vcenter-logs.db 는 **이미 자체 경로 설정**(설정 › 로그 수집의 storagePath)이 있어 제외한다 —
   // 두 곳에서 경로를 제어하면 어느 쪽이 이겼는지 알 수 없다(그 화면에서 옮기세요).
   // ipam.db 는 **외부 프로그램이 경로를 고정해 읽는 공유 파일**이라 기본 대상에서 제외한다

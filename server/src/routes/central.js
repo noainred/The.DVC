@@ -825,6 +825,24 @@ centralRouter.get('/storage-config', async (req, res) => {
   });
 });
 
+// POST /api/central/part-faults — 엣지가 **로컬에서 판정한 파트 장애만** 올린다(v2.547).
+// 사용자 지시: "엣지에서 수집해서 로컬에서 처리하고 장애만 중앙으로 보내게 해줘".
+// ⚠ 본문은 `{open[], scanned, deviceOk}` 이고 **open 이 0건이어도 받는다** — 요약이 있어야
+//   중앙이 '정상' 과 '수집 안 됨' 을 구분한다(v2.517 규약. `storage/push.js:30` 의 미수정 결함
+//   — 장비 0대면 POST 자체를 안 하는 것 — 을 이 경로는 반복하지 않는다).
+// ⚠ BIG_JSON 등록 필수(index.js) — 열린 장애가 많은 법인이 413 으로 **조용히 전량 소실**된다.
+centralRouter.post('/part-faults', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  // 개별 토큰이면 **인증된 agent** 만 쓴다(body.agent 를 믿지 않는다 — 자격증명 횡탈 차단).
+  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : String(req.body?.agent || '').trim();
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const { putEdgeReport } = await import('../central/partFaultEdge.js');
+  const r = putEdgeReport(agent, req.body || {});
+  if (!r.ok) return res.status(400).json(r);
+  return res.json({ ok: true, agent, open: r.open });
+});
+
 // POST /api/central/storage-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
 // **인증된 agent**(개별 토큰 바인딩)만 쓴다. 공유 토큰(레거시)은 body.agent 신뢰(TOFU — 기존 축과 동일).
 centralRouter.post('/storage-data', async (req, res) => {

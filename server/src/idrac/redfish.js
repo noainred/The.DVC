@@ -455,7 +455,10 @@ export async function fetchInventory(entry) {
               protocol: drive.Protocol || '',
               health: drive.Status?.Health || '',
               state: drive.Status?.State || '',
-              predictiveFailure: !!(drive.FailurePredicted),
+              // ⚠ v2.547 — 예전에는 `!!(drive.FailurePredicted)` 라 **필드 부재(undefined)를
+              //   false 로 굳혔다**. '예측 실패 없음' 과 '읽지 못함' 이 구분되지 않았고,
+              //   그 둘 중 **위험한 쪽(조용히 정상)** 으로 떨어졌다(v2.525 `Number(null)===0` 계열).
+              predictiveFailure: drive.FailurePredicted == null ? null : !!drive.FailurePredicted,
               rpm: num(drive.RotationSpeedRPM),
             });
           } catch { /* skip drive */ }
@@ -799,9 +802,17 @@ export async function fetchSensors(entry) {
       }
       for (const f of thermal.Fans || []) {
         const rpm = num(f.Reading ?? f.ReadingRPM);
-        if (rpm == null) continue;
+        /*
+         * ⚠ v2.547 — 예전에는 `if (rpm == null) continue;` 였다. **멈춘 팬이 Reading 을 주지
+         *   않으면 그 팬이 배열에서 통째로 사라져** 장애를 영원히 볼 수 없었다('팬 0개' 와
+         *   '팬을 읽지 못했다' 가 구분되지 않는다 — CLAUDE.md v2.493 규약 위반).
+         *   이제 rpm 은 `null` 로 남기고 **레코드는 남긴다**. 상태 판정은 health 가 한다.
+         *   ⚠ 이름도 rpm 도 없는 항목만 버린다(그건 팬이라고 볼 근거가 없다).
+         */
+        const fname = f.Name || f.FanName || f.MemberId || '';
+        if (rpm == null && !fname && !f.Status?.Health) continue;
         fans.push({
-          name: f.Name || f.FanName || f.MemberId || 'Fan', rpm,
+          name: fname || 'Fan', rpm,
           // 파트 인벤토리용 식별 필드(같은 응답, 추가 HTTP 0회). 시계열(sensorStore)에는
           // 싣지 않고 폴러가 인벤토리 갱신 시에만 invCache 로 옮긴다(시계열 비대화 방지).
           model: f.Model || '', partNumber: f.PartNumber || '', manufacturer: f.Manufacturer || '',

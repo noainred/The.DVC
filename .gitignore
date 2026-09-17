@@ -204,3 +204,7 @@ server/config/storage-auth-stops.json
 server/config/storage-growth-settings.json
 server/config/vmseries.json
 server/config/vmseries/
+
+# v2.547 파트 장애 — 엣지 보고 캐시(법인별 장비명·부품명·수집 주체가 들어간다). DB(part-faults.db)는
+# 위 server/config/*.db 와일드카드가 이미 덮는다. 새 상태 파일을 만들면 그 커밋에서 함께 등록할 것.
+server/config/partfault-edge.json
