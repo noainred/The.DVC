@@ -53,6 +53,8 @@ let _db = null;
 let _tried = false;
 let _opening = null;   // 진행 중인 open 프라미스
 let _tick = 0;
+let _counts = null;    // { raw, daily, at } — dbStatus 의 COUNT(*) 캐시(아래 주석 참조)
+const COUNT_CACHE_MS = Math.max(0, Number(process.env.BMUSAGE_COUNT_CACHE_MS) || 60_000);
 
 /**
  * ⚠⚠ **진행 중인 open 을 공유한다**(v2.550 실화면 검증에서 잡은 결함): 예전에는 `_tried = true` 를
@@ -97,7 +99,37 @@ async function openDb() {
         samples INTEGER NOT NULL DEFAULT 0, last_ts INTEGER,
         PRIMARY KEY (agent, key, day)
       );
-      CREATE INDEX IF NOT EXISTS idx_bmusage_daily_day ON usage_daily(day);`);
+      CREATE INDEX IF NOT EXISTS idx_bmusage_daily_day ON usage_daily(day);
+      /* 최신값 전용 테이블(v2.550.3) — 근거는 latestUsage() 의 JSDoc 에 적었다.
+         SQL 주석에는 백틱을 쓰지 않는다(이 문자열 자체가 템플릿 리터럴이다). */
+      CREATE TABLE IF NOT EXISTS usage_latest (
+        agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, ts INTEGER NOT NULL,
+        name TEXT, vcenter_id TEXT, src TEXT,
+        cpu_pct REAL, mem_pct REAL, disk_busy_pct REAL, disk_used_pct REAL,
+        net_pct REAL, net_bps REAL, hba_pct REAL, hba_bps REAL, io_pct REAL,
+        PRIMARY KEY (agent, key)
+      );`);
+    // 기존 DB 마이그레이션 — 비어 있을 때만 1회(실측 747ms. 기동 1회이고 이후는 upsert 가 유지한다).
+    try {
+      const has = conn.prepare('SELECT COUNT(*) c FROM usage_latest').get()?.c ?? 0;
+      if (!has) {
+        const any = conn.prepare('SELECT 1 FROM usage_history LIMIT 1').get();
+        if (any) {
+          conn.exec('BEGIN');
+          conn.prepare(`INSERT OR REPLACE INTO usage_latest
+            (agent,key,ts,name,vcenter_id,src,cpu_pct,mem_pct,disk_busy_pct,disk_used_pct,net_pct,net_bps,hba_pct,hba_bps,io_pct)
+            SELECT h.agent,h.key,h.ts,h.name,h.vcenter_id,h.src,h.cpu_pct,h.mem_pct,h.disk_busy_pct,h.disk_used_pct,
+                   h.net_pct,h.net_bps,h.hba_pct,h.hba_bps,h.io_pct
+              FROM usage_history h
+              JOIN (SELECT agent,key,MAX(ts) ts FROM usage_history GROUP BY agent,key) m
+                ON m.agent=h.agent AND m.key=h.key AND m.ts=h.ts`).run();
+          conn.exec('COMMIT');
+        }
+      }
+    } catch (e) {
+      try { conn.exec('ROLLBACK'); } catch { /* */ }
+      console.warn('[bmusage-db] usage_latest 시드 실패(다음 수집부터 채워집니다):', e?.message);
+    }
     _db = conn;
   } catch (e) {
     console.warn('[bmusage-db] 사용 불가(DB 없이 동작):', e?.message);
@@ -112,22 +144,34 @@ export async function dbStatus() {
   const db = await getDb();
   if (!db) return { available: false, path: FILE() };
   try {
-    const raw = db.prepare('SELECT COUNT(*) c FROM usage_history').get()?.c ?? 0;
-    const daily = db.prepare('SELECT COUNT(*) c FROM usage_daily').get()?.c ?? 0;
-    const span = db.prepare('SELECT MIN(ts) a, MAX(ts) b FROM usage_history').get() || {};
+    /*
+     * ⚠ 행 수는 **짧게 캐시한다**(v2.550.3 실측): `COUNT(*)` 는 커버링 인덱스를 타지만 518만 행에서
+     *   **27ms** 이고 이 함수는 화면 로드마다 돈다. 이 값은 진단·참고용("현재 원시 N행")이라 초
+     *   단위로 정확할 이유가 없다. **캐시라는 사실은 숨기지 않는다** — `countsAt` 을 함께 싣는다.
+     */
+    let raw = _counts?.raw; let daily = _counts?.daily;
+    if (!_counts || Date.now() - _counts.at > COUNT_CACHE_MS) {
+      raw = db.prepare('SELECT COUNT(*) c FROM usage_history').get()?.c ?? 0;
+      daily = db.prepare('SELECT COUNT(*) c FROM usage_daily').get()?.c ?? 0;
+      _counts = { raw, daily, at: Date.now() };
+    }
+    /*
+     * ⚠⚠ **`MIN(ts)` 과 `MAX(ts)` 를 한 쿼리에 쓰지 말 것**(v2.550.3 실측): SQLite 는 aggregate 가
+     *   **하나뿐일 때만** 인덱스 양끝 조회로 최적화한다. 둘을 같이 쓰면 인덱스를 통째로 훑어
+     *   518만 행에서 **400ms** 였다(나누면 **0.01ms** — 4만 배). 이 함수는 화면 로드마다 돈다.
+     *   `metrics/db.js` 의 `metaKey`(v2.504)가 기록한 것과 같은 계열의 함정이다.
+     */
+    const span = {
+      a: db.prepare('SELECT MIN(ts) v FROM usage_history').get()?.v ?? null,
+      b: db.prepare('SELECT MAX(ts) v FROM usage_history').get()?.v ?? null,
+    };
     let bytes = null;
     try { bytes = fs.statSync(FILE()).size; } catch { /* 없으면 null */ }
-    return { available: true, path: FILE(), rawRows: raw, dailyRows: daily, firstTs: span.a ?? null, lastTs: span.b ?? null, bytes };
+    return { available: true, path: FILE(), rawRows: raw, dailyRows: daily, countsAt: _counts?.at ?? null, firstTs: span.a ?? null, lastTs: span.b ?? null, bytes };
   } catch (e) { return { available: true, path: FILE(), error: String(e?.message || e).slice(0, 200) }; }
 }
 
 const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
-const maxOf = (a, b) => {
-  const x = n(a); const y = n(b);
-  if (x == null) return y;
-  if (y == null) return x;
-  return Math.max(x, y);
-};
 
 /**
  * 한 주기의 행들을 적재하고 일 롤업을 갱신한다. **트랜잭션 1회**로 묶는다
@@ -138,46 +182,82 @@ const maxOf = (a, b) => {
 export async function insertUsage(rows = [], agent = '') {
   const db = await getDb();
   if (!db || !rows.length) return { ok: !!db, inserted: 0 };
-  const ins = db.prepare(`INSERT OR REPLACE INTO usage_history
+  /*
+   * ⚠ **`INSERT OR IGNORE`** 다(예전에는 `OR REPLACE`). 같은 `(agent,key,ts)` 가 두 번 오면
+   *   history 는 덮어써도 **일 롤업은 두 번 누적**돼 평균·표본수가 틀어진다. IGNORE 로 두고
+   *   `changes` 가 1일 때만 롤업을 갱신하면 그 이중 계수가 **구조적으로 없다**(쿼리 수는 같다).
+   */
+  const ins = db.prepare(`INSERT OR IGNORE INTO usage_history
     (agent,key,ts,name,vcenter_id,src,cpu_pct,mem_pct,disk_busy_pct,disk_used_pct,net_pct,net_bps,hba_pct,hba_bps,io_pct)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-  const selDay = db.prepare('SELECT * FROM usage_daily WHERE agent=? AND key=? AND day=?');
-  const upDay = db.prepare(`INSERT OR REPLACE INTO usage_daily
+  /*
+   * ⚠ 일 롤업은 **`ON CONFLICT DO UPDATE`** 다(예전에는 `SELECT` + `OR REPLACE` 로 행당 2쿼리).
+   *   200행/주기 실측 **14.5ms → 7.4ms**. SQL 안에서 누적하므로 읽기 왕복이 사라진다.
+   *   ⚠ `MAX()` 는 인자 중 하나가 NULL 이면 NULL 을 준다 — `IFNULL(...,-1e308)` 로 감싸고
+   *     결과가 그 하한이면 NULL 로 되돌린다(첫 관측이 null 인 지표를 0 으로 만들지 않기 위해).
+   *   ⚠ `cpu_n` 은 **값이 있을 때만** 1 을 더한다(호출부가 0/1 을 넘긴다) — null 을 분모에 넣으면
+   *     '못 읽은 주기' 가 평균을 0 쪽으로 끌어내린다.
+   */
+  const upDay = db.prepare(`INSERT INTO usage_daily
     (agent,key,day,name,vcenter_id,cpu_sum,cpu_n,cpu_max,mem_sum,mem_n,mem_max,
      disk_busy_max,disk_used_max,net_max,net_bps_max,hba_max,hba_bps_max,io_max,samples,last_ts)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-  let inserted = 0;
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(agent,key,day) DO UPDATE SET
+      name=excluded.name, vcenter_id=excluded.vcenter_id,
+      cpu_sum=cpu_sum+excluded.cpu_sum, cpu_n=cpu_n+excluded.cpu_n,
+      cpu_max=NULLIF(MAX(IFNULL(cpu_max,-1e308),IFNULL(excluded.cpu_max,-1e308)),-1e308),
+      mem_sum=mem_sum+excluded.mem_sum, mem_n=mem_n+excluded.mem_n,
+      mem_max=NULLIF(MAX(IFNULL(mem_max,-1e308),IFNULL(excluded.mem_max,-1e308)),-1e308),
+      disk_busy_max=NULLIF(MAX(IFNULL(disk_busy_max,-1e308),IFNULL(excluded.disk_busy_max,-1e308)),-1e308),
+      disk_used_max=NULLIF(MAX(IFNULL(disk_used_max,-1e308),IFNULL(excluded.disk_used_max,-1e308)),-1e308),
+      net_max=NULLIF(MAX(IFNULL(net_max,-1e308),IFNULL(excluded.net_max,-1e308)),-1e308),
+      net_bps_max=NULLIF(MAX(IFNULL(net_bps_max,-1e308),IFNULL(excluded.net_bps_max,-1e308)),-1e308),
+      hba_max=NULLIF(MAX(IFNULL(hba_max,-1e308),IFNULL(excluded.hba_max,-1e308)),-1e308),
+      hba_bps_max=NULLIF(MAX(IFNULL(hba_bps_max,-1e308),IFNULL(excluded.hba_bps_max,-1e308)),-1e308),
+      io_max=NULLIF(MAX(IFNULL(io_max,-1e308),IFNULL(excluded.io_max,-1e308)),-1e308),
+      samples=samples+1, last_ts=MAX(IFNULL(last_ts,0),excluded.last_ts)`);
+  /* 최신값 테이블 — ⚠ **`ts` 가 더 클 때만** 갱신한다(엣지 push 는 순서대로 오지 않는다 — v2.531 규약). */
+  const upLatest = db.prepare(`INSERT INTO usage_latest
+    (agent,key,ts,name,vcenter_id,src,cpu_pct,mem_pct,disk_busy_pct,disk_used_pct,net_pct,net_bps,hba_pct,hba_bps,io_pct)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(agent,key) DO UPDATE SET
+      ts=excluded.ts, name=excluded.name, vcenter_id=excluded.vcenter_id, src=excluded.src,
+      cpu_pct=excluded.cpu_pct, mem_pct=excluded.mem_pct,
+      disk_busy_pct=excluded.disk_busy_pct, disk_used_pct=excluded.disk_used_pct,
+      net_pct=excluded.net_pct, net_bps=excluded.net_bps,
+      hba_pct=excluded.hba_pct, hba_bps=excluded.hba_bps, io_pct=excluded.io_pct
+      WHERE excluded.ts > usage_latest.ts`);
+  let inserted = 0; let duplicates = 0;
   db.exec('BEGIN');
   try {
     for (const r of rows) {
       const key = String(r.key || '').trim();
       const ts = Number(r.ts);
       if (!key || !Number.isFinite(ts)) continue;
-      ins.run(agent, key, ts, String(r.name || ''), String(r.vcenterId || ''), String(r.src || ''),
-        n(r.cpu_pct), n(r.mem_pct), n(r.disk_busy_pct), n(r.disk_used_pct),
-        n(r.net_pct), n(r.net_bps), n(r.hba_pct), n(r.hba_bps), n(r.io_pct));
+      const name = String(r.name || ''); const vc = String(r.vcenterId || '');
+      const cpu = n(r.cpu_pct); const mem = n(r.mem_pct);
+      const vals = [n(r.disk_busy_pct), n(r.disk_used_pct), n(r.net_pct), n(r.net_bps), n(r.hba_pct), n(r.hba_bps), n(r.io_pct)];
+      const res = ins.run(agent, key, ts, name, vc, String(r.src || ''), cpu, mem, ...vals);
+      // ⚠ 같은 ts 가 이미 있으면(changes 0) 롤업을 **건드리지 않는다** — 이중 계수 방지.
+      if (!Number(res?.changes)) { duplicates += 1; continue; }
       inserted += 1;
 
-      const day = dayKey(ts);
-      const cur = selDay.get(agent, key, day) || {};
-      const cpu = n(r.cpu_pct); const mem = n(r.mem_pct);
       upDay.run(
-        agent, key, day, String(r.name || ''), String(r.vcenterId || ''),
+        agent, key, dayKey(ts), name, vc,
         // ⚠ null 은 합·개수에 넣지 않는다 — 넣으면 '못 읽은 주기' 가 평균을 끌어내린다.
-        (cur.cpu_sum ?? 0) + (cpu ?? 0), (cur.cpu_n ?? 0) + (cpu == null ? 0 : 1), maxOf(cur.cpu_max, cpu),
-        (cur.mem_sum ?? 0) + (mem ?? 0), (cur.mem_n ?? 0) + (mem == null ? 0 : 1), maxOf(cur.mem_max, mem),
-        maxOf(cur.disk_busy_max, r.disk_busy_pct), maxOf(cur.disk_used_max, r.disk_used_pct),
-        maxOf(cur.net_max, r.net_pct), maxOf(cur.net_bps_max, r.net_bps),
-        maxOf(cur.hba_max, r.hba_pct), maxOf(cur.hba_bps_max, r.hba_bps), maxOf(cur.io_max, r.io_pct),
-        (cur.samples ?? 0) + 1, Math.max(Number(cur.last_ts) || 0, ts),
+        cpu ?? 0, cpu == null ? 0 : 1, cpu,
+        mem ?? 0, mem == null ? 0 : 1, mem,
+        ...vals, 1, ts,
       );
+      upLatest.run(agent, key, ts, name, vc, String(r.src || ''), cpu, mem, ...vals);
     }
     db.exec('COMMIT');
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch { /* */ }
     return { ok: false, inserted: 0, error: String(e?.message || e).slice(0, 200) };
   }
-  return { ok: true, inserted };
+  if (inserted) _counts = null;
+  return { ok: true, inserted, duplicates };
 }
 
 /**
@@ -193,19 +273,26 @@ export async function pruneUsage({ rawDays = 90, dailyDays = 365 * 5, every = 12
   try {
     const a = db.prepare('DELETE FROM usage_history WHERE ts < ?').run(rawCut);
     const b = db.prepare('DELETE FROM usage_daily WHERE day < ?').run(dayCut);
+    if (Number(a?.changes) || Number(b?.changes)) _counts = null;
     return { ok: true, rawDeleted: Number(a?.changes) || 0, dailyDeleted: Number(b?.changes) || 0 };
   } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 200) }; }
 }
 
-/** 최신 1건씩(화면 표) — 서버별 마지막 관측. */
+/**
+ * 최신 1건씩(화면 표) — 서버별 마지막 관측.
+ *
+ * ⚠⚠ **`usage_latest` 전용 테이블을 읽는다**(v2.550.3 실측으로 도입). 예전에는
+ *   `GROUP BY agent,key` + JOIN 이었고 그것은 **PK 인덱스 전체를 훑어** 518만 행에서 **702ms** 였다
+ *   — 그게 화면 로드마다 돌았다. 전용 테이블은 **0.62ms**(1,130배). CLAUDE.md 의
+ *   `idrac/db.js withLatestCache` 항목이 이미 같은 함정을 기록해 두었다
+ *   ("latestAll(GROUP BY MAX)은 테이블 풀스캔이라 … 초 단위 블로킹이었음").
+ * ⚠ **`WHERE ts>=?` 로 최근 구간만 좁히는 대안은 효과가 없다**(실측 303ms) — 옵티마이저가
+ *   `GROUP BY agent,key` 때문에 여전히 PK 커버링 인덱스를 스캔한다. 그 방향으로 되돌리지 말 것.
+ */
 export async function latestUsage() {
   const db = await getDb();
   if (!db) return [];
-  try {
-    return db.prepare(`SELECT h.* FROM usage_history h
-      JOIN (SELECT agent, key, MAX(ts) ts FROM usage_history GROUP BY agent, key) m
-        ON m.agent=h.agent AND m.key=h.key AND m.ts=h.ts`).all();
-  } catch { return []; }
+  try { return db.prepare('SELECT * FROM usage_latest').all(); } catch { return []; }
 }
 
 /** 원시 추이(한 서버). 상한을 두고 **잘렸으면 밝힌다**(조용한 상한 금지). */
@@ -227,10 +314,14 @@ export async function usageDaily({ key = '', agent = '', days = 90 } = {}) {
   if (!db) return [];
   const from = dayKey(Date.now() - Math.max(1, Number(days) || 90) * 86_400_000);
   try {
-    const sql = key
-      ? 'SELECT * FROM usage_daily WHERE key=? AND agent=? AND day>=? ORDER BY day'
-      : 'SELECT * FROM usage_daily WHERE day>=? ORDER BY day';
-    const rows = key ? db.prepare(sql).all(String(key), String(agent), from) : db.prepare(sql).all(from);
+    /*
+     * ⚠ 전체 조회도 **agent 로 걸러야 한다**(v2.550.3 에 고친 결함): 예전에는 `key` 가 없으면
+     *   agent 조건이 사라져 중앙이 자기 행과 엣지 행을 섞어 돌려줬다. 두 노드의 같은 서비스태그
+     *   서버가 한 계열로 합쳐지는 종류의 거짓이다(v2.548 `(agent, part_key)` 와 같은 판단).
+     */
+    const rows = key
+      ? db.prepare('SELECT * FROM usage_daily WHERE key=? AND agent=? AND day>=? ORDER BY day').all(String(key), String(agent), from)
+      : db.prepare('SELECT * FROM usage_daily WHERE agent=? AND day>=? ORDER BY day, key').all(String(agent), from);
     return rows.map((r) => ({
       ...r,
       cpu_avg: r.cpu_n > 0 ? Math.round((r.cpu_sum / r.cpu_n) * 10) / 10 : null,
@@ -239,4 +330,4 @@ export async function usageDaily({ key = '', agent = '', days = 90 } = {}) {
   } catch { return []; }
 }
 
-export function _resetForTest() { try { _db?.close?.(); } catch { /* */ } _db = null; _tried = false; _opening = null; _tick = 0; }
+export function _resetForTest() { try { _db?.close?.(); } catch { /* */ } _db = null; _tried = false; _opening = null; _tick = 0; _counts = null; }

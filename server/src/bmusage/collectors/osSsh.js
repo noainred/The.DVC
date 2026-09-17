@@ -26,6 +26,19 @@ import { parseWinPerf } from '../parse/winPerf.js';
 
 const READY_TIMEOUT_MS = Number(process.env.BMUSAGE_SSH_TIMEOUT_MS) || 15_000;
 const CMD_TIMEOUT_MS = Number(process.env.BMUSAGE_CMD_TIMEOUT_MS) || 30_000;
+/**
+ * ⚠⚠ **세션 예산 — 두 번 시도하는 경로는 장비 시한을 넘길 수 있다**(v2.550.3 에 고친 결함.
+ *   CLAUDE.md v2.528 이 Unity 에서 겪은 것과 **같은 유형**):
+ *   최악은 `READY(15s) + 첫 시도(30s) + 두 번째 시도(30s) = 75s` 인데 폴러의 장비 시한은 **60초**다.
+ *   그 순간 `withDeadline` 이 먼저 던져 **두 번째 시도의 결과가 통째로 버려진다** — 화면에는
+ *   'OS 수집 시한 초과' 만 남고 무엇을 읽었는지 알 수 없다.
+ *   그래서 이 모듈이 **스스로 예산을 보고** 남은 시간만큼만 시도한다.
+ * ⚠ `SESSION_BUDGET_MS` 는 **장비 시한보다 반드시 작아야 한다** — 같거나 크면 이 가드가 발동하기
+ *   전에 폴러가 먼저 던져 회귀가 그대로 재발한다(`bmUsageBudget2550.test.js` 가 두 숫자를 고정한다).
+ * ⚠ 남은 시간이 `MIN_SLICE_MS` 아래면 **시작하지 않는다** — 시작해 놓고 잘리면 그 결과도 버려진다.
+ */
+export const SESSION_BUDGET_MS = Math.max(10_000, Number(process.env.BMUSAGE_SESSION_BUDGET_MS) || 50_000);
+export const MIN_SLICE_MS = 5_000;
 
 /** 호스트별 OS 판정 캐시(인메모리 — 틀리면 그 주기에 스스로 고친다). */
 const _osKind = new Map();
@@ -148,16 +161,20 @@ export async function collectOsUsage(osHost = {}, { signal } = {}) {
       password: osHost.password || '', privateKey: osHost.privateKey || undefined,
       readyTimeout: READY_TIMEOUT_MS, signal,
     }, async ({ exec }) => {
+      // 예산 시계는 **SSH 연결이 끝난 시점**부터 센다(READY 는 withSsh 가 이미 소비했다).
+      const endsAt = Date.now() + Math.max(MIN_SLICE_MS, SESSION_BUDGET_MS - READY_TIMEOUT_MS);
+      const slice = () => Math.min(CMD_TIMEOUT_MS, Math.max(0, endsAt - Date.now()));
+      let budgetSkipped = '';
       const tryLinux = async () => {
         // ⚠ `exec` 는 `(cmd, timeoutMs)` **위치 인자**다(`sshExec.js:87`). 객체를 넘기면
         //   `Math.max(1000, {…})` 이 **NaN** 이 되고 `setTimeout(fn, NaN)` 은 즉시 발화해
         //   **항상 즉시 타임아웃**된다(v2.550 자체 재검토에서 잡았다 — 목 데이터로는 드러나지 않는다).
-        const r = await exec(linuxCommand(mounts), CMD_TIMEOUT_MS);
+        const r = await exec(linuxCommand(mounts), slice());
         const shaped = shapeLinux(r.stdout || '', mounts);
         return shaped ? { ...shaped, ok: true, stderr: (r.stderr || '').slice(0, 300) } : null;
       };
       const tryWin = async () => {
-        const r = await exec(winCommand(), CMD_TIMEOUT_MS);
+        const r = await exec(winCommand(), slice());
         const shaped = parseWinPerf(r.stdout || '');
         // ⚠ '출력이 비어 있지 않다' 를 '읽었다' 로 쓰지 않는다(v2.525 규약) — 실제로 읽은 항목이 있어야 한다.
         return shaped.read.length ? { ...shaped, ok: true, counters: null, mounts: [], mountsMissing: [], stderr: (r.stderr || '').slice(0, 300) } : null;
@@ -166,10 +183,21 @@ export async function collectOsUsage(osHost = {}, { signal } = {}) {
       // 아는 쪽을 먼저, 실패하면 반대쪽을 **같은 세션에서** 한 번 더.
       const order = known === 'windows' ? [tryWin, tryLinux] : [tryLinux, tryWin];
       for (const fn of order) {
+        // ⚠ 남은 예산이 없으면 **시작하지 않고 사유를 남긴다**(조용히 생략하지 않는다 — v2.528 규약).
+        if (slice() < MIN_SLICE_MS) {
+          budgetSkipped = '남은 수집 시간이 부족해 다른 형식(Windows/Linux) 시도는 건너뛰었습니다.';
+          break;
+        }
         const got = await fn().catch(() => null);
         if (got) { _osKind.set(hostKey, got.osKind); return got; }
       }
-      return { ok: false, error: 'Linux(/proc)·Windows(PowerShell) 어느 형식으로도 읽지 못했습니다 — 셸이 제한적일 수 있습니다.' };
+      return {
+        ok: false,
+        error: budgetSkipped
+          ? `첫 형식으로 읽지 못했고 ${budgetSkipped}`
+          : 'Linux(/proc)·Windows(PowerShell) 어느 형식으로도 읽지 못했습니다 — 셸이 제한적일 수 있습니다.',
+        budgetSkipped: !!budgetSkipped,
+      };
     });
   } catch (e) {
     return { ok: false, error: String(e?.message || e).slice(0, 300) };

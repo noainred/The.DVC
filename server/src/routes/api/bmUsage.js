@@ -78,6 +78,8 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       skippedCounts,
       skipped,
       counts,
+      /* 키 충돌 — 범위 계정에는 보이는 것만(v2.550.3). 조용히 두면 한 서버 값이 다른 서버로 보인다. */
+      keyConflicts: applyScope(tg.keyConflicts || [], allowed),
       metrics: METRICS, reasons: NO_PATH_REASON,
       vcenters: applyScope(tg.vcenters.map((v) => ({ ...v, vcenterId: v.id })), allowed),
       isEdge: tg.isEdge,

@@ -79,13 +79,15 @@ export function parseWinPerf(text) {
   for (const row of arr(kv.DISK)) {
     const f = String(row).split('|').map((x) => x.trim());
     if (!f[0]) continue;
+    const total = num(f[2]); const free = num(f[3]);
     disks.push({
       name: f[0],
       busyPct: num(f[1]),
-      totalBytes: num(f[2]),
-      freeBytes: num(f[3]),
-      usedPct: (num(f[2]) != null && num(f[3]) != null && num(f[2]) > 0)
-        ? Math.round(((num(f[2]) - num(f[3])) / num(f[2])) * 1000) / 10 : null,
+      totalBytes: total,
+      freeBytes: free,
+      // ⚠ 여유 공간을 모르면 사용률도 **모른다** — 100% 라고 말하면 '오류 없이 틀린 값' 이다.
+      usedPct: (total != null && free != null && total > 0)
+        ? Math.round(((total - free) / total) * 1000) / 10 : null,
     });
   }
   mark('disk', disks.length > 0);

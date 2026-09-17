@@ -46,7 +46,15 @@ export function bmUsageStatus() {
     enabled: bmUsageEnabled(), running: _running, intervalMs: s.intervalMs,
     concurrency: CONCURRENCY, deviceTimeoutMs: DEVICE_TIMEOUT_MS,
     rawRetentionDays: s.rawRetentionDays, dailyRetentionDays: s.dailyRetentionDays,
-    last: _last, prevKeys: _prev.size,
+    /*
+     * ⚠⚠ **`last` 에 `counts` 를 싣지 않는다**(v2.550.3 에 고친 결함): v2.550.1 이 응답의
+     *   `skippedCounts`·`counts` 를 scope 로 걸렀는데, `status.last.counts.byReason` 경로로
+     *   **같은 정보가 무스코프로 그대로 나갔다**(범위 계정이 다른 법인의 베어메탈 대수와 사유
+     *   분포를 알 수 있다 — server/CLAUDE.md '범위 밖 요약은 범위 계정에 노출하지 않는다').
+     *   개수는 라우트가 보이는 목록에서 다시 세어 내보낸다. 여기서는 '몇 대를 돌았나' 만 남긴다.
+     */
+    last: _last ? (({ counts: _c, ...rest }) => rest)(_last) : null,
+    prevKeys: _prev.size,
     authStopCount: _authStopped.size,
   };
 }
@@ -105,8 +113,18 @@ function authDev(target) {
 /** 화면이 '몇 대가 정지됐나' 를 말할 수 있게 이번 주기의 정지분을 기억한다. */
 const _authStopped = new Map();
 
-/** 한 서버 수집 — 두 경로를 병렬로 시도하고 실패도 사유와 함께 돌려준다. */
-async function collectOne(target, now, { trigger = 'auto' } = {}) {
+/**
+ * 한 서버 수집 — 두 경로를 병렬로 시도하고 실패도 사유와 함께 돌려준다.
+ *
+ * ⚠⚠ **표본 시각은 이 서버가 실제로 읽힌 시각이다**(v2.550.3 에 고친 결함). 예전에는 주기 시작
+ *   시각 하나(`pollBmUsageOnce` 의 `now`)를 전 서버에 썼다. 동시성 4로 200대를 돌면 마지막
+ *   서버는 주기 시작보다 수 분 뒤에 읽히고, 그 offset 은 **주기마다 흔들린다**(한 대가 60초
+ *   시한에 걸리면 뒤 서버들이 통째로 밀린다). 그러면 `perSecond`·`busyPct` 의 분모(span)가
+ *   실제 경과와 달라져 사용률이 **오류 없이 틀린 값**이 된다 — 재현 계산: offset 10초→200초면
+ *   실제 경과 490초인데 300초로 나눠 **63% 과다**, 200초→10초면 **63% 과소**, 5초→250초면
+ *   **82% 과다**. `now` 를 다시 전 서버 공용으로 되돌리지 말 것.
+ */
+async function collectOne(target, { trigger = 'auto' } = {}) {
   const t0 = Date.now();
   const dev = authDev(target);
   // ⚠ **수동 실행은 막지 않는다** — 사람이 1회 누르는 것은 잠금 위험이 없고, 비밀번호를 고친 뒤
@@ -122,6 +140,12 @@ async function collectOne(target, now, { trigger = 'auto' } = {}) {
       .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) }))
     : Promise.resolve(stopped ? { ok: false, error: `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: stopped } : null));
   const [idrac, os] = await Promise.all(jobs);
+  /*
+   * 이 서버의 표본 시각. Linux 는 명령 1회 왕복이라 '출력을 받은 시각' 과 여기의 차이는 수십 ms 이고
+   * (주기 300초 대비 무시 가능), 예전 방식의 오차는 **수 분**이었다. `prev.at` 과 `row.ts` 가 같은
+   * 기준을 쓰는 것이 핵심이다 — 하나만 바꾸면 span 이 그만큼 어긋난다.
+   */
+  const sampledAt = Date.now();
 
   // 인증 실패면 주기 수집을 멈춘다 — 반복 시도는 결과가 같고 계정만 잠근다.
   if (dev && os && os.ok === false && !os.authStopped && isAuthFailureText(os.error)) {
@@ -133,7 +157,7 @@ async function collectOne(target, now, { trigger = 'auto' } = {}) {
     _authStopped.delete(target.key);
   }
 
-  const built = buildUsage({ target, idrac, os, prev: _prev.get(target.key) || null, now });
+  const built = buildUsage({ target, idrac, os, prev: _prev.get(target.key) || null, now: sampledAt });
   if (built.next) _prev.set(target.key, built.next);
   const ok = !!(idrac?.ok || os?.ok);
   recordBmUsage({
@@ -177,9 +201,20 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
       _last = { at: Date.now(), ms: Date.now() - t0, servers: 0, okCount: 0, failCount: 0, inserted: 0, counts, trigger };
       return { ok: true, servers: 0, counts, reason: '대상 서버가 없습니다.' };
     }
-    const now = Date.now();
-    const results = await pool(targets, CONCURRENCY, (tg) => collectOne(tg, now, { trigger }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) })));
-    const rows = results.filter((r) => r?.ok && r.built).map((r) => ({ ...r.built.row, src: r.built.row.src }));
+    const results = await pool(targets, CONCURRENCY, (tg) => collectOne(tg, { trigger }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) })));
+    /*
+     * ⚠ **대상에서 사라진 키를 버린다**(v2.550.3): `_prev` 는 서버마다 누적 카운터 배열(디스크·NIC·
+     *   HBA)을 들고 있어 서버당 수 KB 다. 법인을 끄거나 등록부에서 서버가 빠져도 예전에는 그 항목이
+     *   프로세스 수명 내내 남았다 — 등록부를 오래 편집하는 현장에서 조용히 늘어나는 누수다.
+     *   더 나쁜 것: 서버가 **되돌아오면** 몇 시간 전 카운터와 비교해 `MAX_SPAN_MS`(1시간) 상한에
+     *   걸려 그 주기가 통째로 `null` 이 된다(첫 수집이라고 말하지도 않는다).
+     */
+    const live = new Set(targets.map((t2) => t2.key));
+    for (const k of _prev.keys()) if (!live.has(k)) _prev.delete(k);
+    for (const k of _authStopped.keys()) if (!live.has(k)) _authStopped.delete(k);
+    // ⚠ `_perIf`·`_perFc` 는 화면 상세용 내부 배열이다 — DB 적재 경로로 넘기지 않는다(오염 방지).
+    const rows = results.filter((r) => r?.ok && r.built)
+      .map((r) => { const { _perIf: _a, _perFc: _b, ...row } = r.built.row; return row; });
     const ins = await insertUsage(rows, config.agent?.name || '');
     const okCount = results.filter((r) => r?.ok).length;
     await pruneUsage({ rawDays: settings.rawRetentionDays, dailyDays: settings.dailyRetentionDays, every: PRUNE_EVERY });
