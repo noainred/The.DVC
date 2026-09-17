@@ -17,7 +17,7 @@
  * 섹션별 성공/실패는 snap.sections 에 남겨 부분 실패를 숨기지 않는다.
  */
 
-import { withSsh } from '../../proxy/sshExec.js';
+import { withSsh, isSshAuthError } from '../../proxy/sshExec.js';
 import { emptySnapshot } from '../types.js';
 
 /** 캡처할 원문 상한(문자) — 응답/로그가 비대해지지 않게. */
@@ -274,10 +274,25 @@ function scale(n, unit) {
   return Math.round(n * mult);
 }
 
-/** 실패 스냅샷(공통) — SSH 자체가 안 될 때. raw 를 붙여 진단이 가능하게 한다. */
+/**
+ * 실패 스냅샷(공통) — SSH 자체가 안 될 때. raw 를 붙여 진단이 가능하게 한다.
+ *
+ * ⚠ **자격증명 거부는 여기서 '인증 실패' 라고 못 박는다**(v2.541). 예전에는 어떤 실패든
+ * `SSH 수집 실패: <원문>` 이었고, ssh2 의 원문은
+ * `All configured authentication methods failed` 라 `util/authGuard.js` 의 판정을 빠져나갔다
+ * → 비밀번호가 틀려도 **주기 수집이 멈추지 않고 매 주기 같은 계정으로 재로그인**했다
+ * (계정 잠금 경로. v2.528 이 막으려던 바로 그것). 판정은 문구가 아니라 ssh2 의
+ * `err.level` 을 보는 `isSshAuthError` 가 한다.
+ *
+ * ⚠ 원문을 지우지 말 것 — 뒤에 그대로 붙인다. '인증 실패' 라고만 하면 어느 단계에서
+ * 거부됐는지(공개키/비밀번호/키보드 인터랙티브)를 사용자가 알 수 없다.
+ */
 export function sshFailureSnapshot(device, err, raw = []) {
   const snap = emptySnapshot(device);
   snap.extra = { collectMethod: 'ssh', cliRaw: raw };
-  snap.error = `SSH 수집 실패: ${err?.message || err}`;
+  const msg = err?.message || err;
+  snap.error = isSshAuthError(err)
+    ? `SSH 인증 실패: ${msg} — 계정·비밀번호(또는 개인키)를 확인하세요.`
+    : `SSH 수집 실패: ${msg}`;
   return snap;
 }

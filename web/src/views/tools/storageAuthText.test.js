@@ -104,3 +104,28 @@ describe('agoText', () => {
     expect(agoText(now - 50 * 3600_000, now)).toBe('2일 전');
   });
 });
+
+// ── v2.541: 모양이 다른 값을 지문인 척 그리지 않는다 ────────────────────────────────
+// Chromium 판독에서 발견: 문자열이 들어오면 `계정 없음 · 비번 undefined자·#undefined` 라는
+// **그럴듯한 한 줄**이 만들어졌다. 진짜 지문과 나란히 놓이면 사용자가 그것을 대조 값으로 읽는다.
+describe('credFpText — 읽지 못한 값은 지어내지 않는다(v2.541)', () => {
+  it('문자열·배열·숫자는 null 이다', () => {
+    expect(credFpText('svc:12:#4a1f')).toBeNull();
+    expect(credFpText(['svc', 12])).toBeNull();
+    expect(credFpText(42)).toBeNull();
+  });
+  it('길이나 해시를 읽지 못하면 null 이다', () => {
+    expect(credFpText({ user: 'svc' })).toBeNull();
+    expect(credFpText({ user: 'svc', len: 12 })).toBeNull();
+    expect(credFpText({ user: 'svc', hash: 'ab12' })).toBeNull();
+  });
+  it('빈 비밀번호(len:0)는 그 자체가 진단이라 계속 표시한다', () => {
+    expect(credFpText({ user: 'svc', len: 0, empty: true })).toMatch(/비번 \*\*없음\*\*/);
+  });
+  it('어떤 입력에도 undefined 를 찍지 않는다', () => {
+    for (const bad of ['x', 42, [], {}, { user: 'a' }, { len: 3 }, { hash: 'z' }]) {
+      const out = credFpText(bad);
+      expect(out === null || !String(out).includes('undefined')).toBe(true);
+    }
+  });
+});

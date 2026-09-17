@@ -28,10 +28,30 @@ import { credFingerprintParts } from './credFingerprint.js';
 /**
  * 문구가 '인증 실패' 인가(순수).
  * ⚠ 넓게 잡지 말 것 — '연결 실패' 까지 포함하면 네트워크 장애가 수집을 영구 정지시킨다.
+ *
+ * ⚠⚠ **v2.541 에 고친 실제 결함 — SSH 인증 실패를 통째로 놓치고 있었다.**
+ * ssh2 가 인증에 실패할 때 내는 문구는 `All configured authentication methods failed`
+ * 하나뿐인데(`node_modules/ssh2/lib/client.js:863`, `err.level='client-authentication'`),
+ * 예전 패턴은 `authentication fail` **연속 일치**만 봤다 — 실제 문구는 사이에 `methods` 가
+ * 끼어 있어 **매치되지 않았다**(사용자 화면: `SSH 수집 실패: All configured authentication
+ * methods failed`). 결과는 두 가지였다:
+ *   ① Unity·Isilon 같은 SSH 수집기는 자격증명이 틀려도 **주기 수집이 멈추지 않아** 매 주기
+ *      같은 계정으로 다시 로그인했다 — v2.528 이 막으려던 바로 그 **계정 잠금 경로**다.
+ *   ② 화면에 `authStopped`(정지 사실·지문 대조 안내)가 **영원히 뜨지 않아**, 엣지 위임 장비의
+ *      '중앙 배포가 상했나 / 실제 비밀번호가 다른가' 를 가려낼 단서가 사라졌다.
+ * 그래서 `authentication <낱말 0~3개> fail` 로 넓히고 `client-authentication`(ssh2 의 level)도
+ * 함께 본다. 낱말 반복은 `{0,3}` 으로 **상한을 둔다**(무한 반복은 긴 비매치 입력에서 백트래킹).
+ *
+ * ⚠ 아래 것들은 **여전히 잡지 않는다**(잡으면 규칙 4 위반 — 일시 장애가 수집을 영구 정지시킨다):
+ *   `ETIMEDOUT` · `ECONNREFUSED` · `ENOTFOUND` · `socket hang up` · `self signed certificate` ·
+ *   `Handshake failed: no matching key exchange algorithm`(협상 실패 — 'failed' 가 들어 있지만
+ *   자격증명 문제가 아니다) · `Cannot parse privateKey`(설정 오류이고 **서버에 로그인 시도가
+ *   도달하지 않아** 계정을 잠그지 않는다) · 파싱·예산 초과.
+ * `test/sshAuthStop2541.test.js` 가 양성 12건·음성 11건을 전부 고정한다.
  * @param {...string} texts
  */
 export function isAuthFailureText(...texts) {
-  return texts.some((t) => /인증 실패|\b401\b|\b403\b|authentication fail|permission denied|invalid (?:user|password|credential)/i
+  return texts.some((t) => /인증 실패|\b401\b|\b403\b|authentication (?:\w+\s+){0,3}fail|client-authentication|permission denied|invalid (?:user|password|credential)|auth(?:entication)? (?:rejected|denied)/i
     .test(String(t || '')));
 }
 

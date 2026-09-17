@@ -363,6 +363,26 @@ function sftpWriteFile(conn, path, content, mode = 0o644) {
  * Open a session, run fn({exec, readFile, writeFile, log}), and always close.
  * `log` accumulates {command, code, stdout, stderr} entries for the response.
  */
+/**
+ * ssh2 가 던진 오류가 **자격증명 거부**인가(순수, v2.541).
+ *
+ * ⚠ 왜 문자열이 아니라 여기서 판정하나: ssh2 의 인증 실패 문구는
+ * `All configured authentication methods failed` 하나뿐이고(`ssh2/lib/client.js:863`)
+ * 그 객체에 **`level = 'client-authentication'`** 가 붙는다. 영문 문구만 보던 예전
+ * 판정(`util/authGuard.js`)은 사이에 `methods` 가 끼어 있어 **매치하지 못했고**, 그래서
+ * 자격증명이 틀린 SSH 장비의 주기 수집이 멈추지 않았다(v2.541 에 고친 실제 결함).
+ * `level` 은 라이브러리가 직접 붙이는 값이라 문구가 바뀌어도 살아남는다 — 그것을 **먼저** 본다.
+ *
+ * ⚠ 여기에 협상 실패(`no matching key exchange algorithm`)·타임아웃·`ECONNREFUSED` 를
+ * 넣지 말 것 — 일시 장애로 주기 수집을 영구 정지시키게 된다(authGuard 규칙 4).
+ * @param {any} err
+ */
+export function isSshAuthError(err) {
+  if (!err) return false;
+  if (err.level === 'client-authentication') return true;
+  return /all configured authentication methods failed|authentication (?:\w+\s+){0,3}fail/i.test(String(err.message || ''));
+}
+
 export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
   const conn = await connect({ ...creds, signal });
   const log = [];

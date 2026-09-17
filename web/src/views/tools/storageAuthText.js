@@ -34,6 +34,15 @@ export function agoText(ts, now = Date.now()) {
 /** 자격증명 지문 한 줄 — 서버 `util/credFingerprint.js` 와 **같은 표기**를 쓴다(대조가 목적). */
 export function credFpText(fp) {
   if (!fp) return null;
+  // ⚠ **모양이 다른 값을 지문인 척 그리지 말 것**(v2.541 — Chromium 판독에서 발견).
+  // 이 지문의 존재 이유는 '법인 간·중앙↔엣지 간 눈으로 대조' 다. 객체가 아니거나 길이·해시를
+  // 읽지 못하는 값이 오면 예전에는 `계정 없음 · 비번 undefined자·#undefined` 라고 **그럴듯한
+  // 한 줄을 지어냈다** — 옆줄의 진짜 지문과 나란히 놓이면 사용자가 그것을 값으로 읽고 대조한다.
+  // 읽지 못하면 null 을 돌려 호출부가 '지문을 읽지 못했습니다' 로 다루게 한다(0 을 지어내지
+  // 않는다는 규약과 같은 계열). 구버전 엣지가 다른 모양을 보내는 경우도 여기서 막힌다.
+  if (typeof fp !== 'object' || Array.isArray(fp)) return null;
+  const lenOk = Number.isFinite(Number(fp.len));
+  if (!fp.empty && (!lenOk || !fp.hash)) return null;
   const user = fp.user ? `계정 '${fp.user}'${fp.userSpace ? '(⚠앞뒤공백)' : ''}` : '계정 없음';
   // 비밀번호가 비어 있는 것 자체가 진단이다 — 길이 0 을 숨기지 않는다.
   const pw = fp.empty ? '비번 **없음**(배포에 비밀번호가 실리지 않았습니다)' : `비번 ${fp.len}자·#${fp.hash}`;

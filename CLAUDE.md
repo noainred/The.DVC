@@ -510,6 +510,26 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **풀이 2개 이상이면 경고 임계·RAID·드라이브를 표시하지 않는다**(`multiPool`) — 풀마다 값이
       달라 대표값을 만들면 거짓이 된다. 그 사실을 화면이 적는다.
 
+  - ⚠⚠ **그 가드는 v2.540 까지 SSH 인증 실패를 통째로 놓치고 있었다**(v2.541 — 사용자 신고
+    Unity `OC2-unity-03`): ssh2 의 문구 `All configured authentication methods failed` 가
+    `authentication fail` **연속 일치** 패턴을 빠져나갔다. 상세는 `server/CLAUDE.md` 의
+    'SSH 인증 실패가 주기 수집을 멈추지 않던 결함(v2.541)'. **새 수집기의 실패 문구를 만들 때
+    영문 원문만 싣지 말 것** — 자격증명 거부는 출처에서 '인증 실패' 로 못 박는다.
+  - **모양이 다른 값을 지문인 척 그리지 말 것**(`views/tools/storageAuthText.js credFpText`,
+    v2.541 — Chromium 판독에서 발견): 객체가 아니거나 길이·해시를 읽지 못하는 값이 오면 예전에는
+    `계정 없음 · 비번 undefined자·#undefined` 라는 **그럴듯한 한 줄**을 만들었다. 이 지문의 존재
+    이유는 '눈으로 대조' 라, 진짜 지문 옆에 놓이면 사용자가 그것을 값으로 읽는다. 읽지 못하면
+    `null` 을 돌려 호출부가 '지문을 읽지 못했습니다' 로 다루게 한다. 단 **빈 비밀번호(`len:0`)는
+    계속 표시한다** — 그 자체가 진단이다(배포가 비밀번호를 안 실어 왔다).
+  - **0 바이트 용량 행은 '행 단위' 로 지운다**(`storage/zeroCapacityPurge.js` +
+    `db.purgeZeroCapacityRows`, v2.541 — 사용자 화면에서 수집 전량 실패 장비의 추이가 `0.0 TB`
+    선으로 그려졌다): 적재 경로 두 곳(`storage/poller.js`·`central/storageEdge.js`)은 모두
+    `capacityPointEligible`(v2.531)에 막히므로 **새로 생기지는 않는다** — 남은 것은 그 가드 이전에
+    쌓인 행이다(⚠ 정직 기록: '언제 쌓였나' 는 화면만으로 확정하지 못했다. 원인을 지어내지 않고
+    정리만 했다). **장비 이력을 통째로 지우는 `capacityBasisMigration`(v2.534)과 섞지 말 것** —
+    그쪽은 '측정 기준이 바뀌어 옛 값이 뜻을 잃은' 경우이고, 이쪽은 **유효한 값은 남긴다**.
+    배지도 구분한다 — `기준 변경`(이어서 비교 불가) vs **`이력 정리`**(남은 값은 그대로 유효).
+    한 배지로 덮으면 멀쩡한 이력을 못 믿게 만든다.
   - **인증 실패(401)는 주기 수집을 멈춘다 — 재시도해도 결과가 같고 계정만 잠근다**
     (`storage/authGuard.js` + 웹 `views/tools/storageAuthText.js`, v2.528 — 사용자 신고
     "PowerStore PS-HG-2 인증 실패(401) · 장비 등록은 되고 CSV export 하면 비밀번호는 정상"):

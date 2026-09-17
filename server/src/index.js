@@ -93,6 +93,7 @@ import { startVmCloneScheduler } from './vmclone/scheduler.js'; // VM 복제(백
 import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
 import { applyGrowthSettings } from './storage/growthSettings.js'; // 사용량 보존 기간(v2.531)
 import { runCapacityBasisMigration } from './storage/capacityBasisMigration.js'; // 용량 기준 변경 1회 정리(v2.534)
+import { runZeroCapacityPurge } from './storage/zeroCapacityPurge.js'; // 0 바이트 용량 행 1회 정리(v2.541)
 import { startSanSwitchPoller } from './sanswitch/poller.js';    // SAN 스위치 수집(Brocade FOS, v2.410)
 import { startPduPoller } from './pdu/poller.js';                 // PDU 수집(APC Rack PDU 2G, v2.424)
 import { startPduPush } from './pdu/push.js';                     // 엣지→중앙 PDU 스냅샷 push(v2.424)
@@ -333,6 +334,13 @@ try { applyGrowthSettings(); } catch (e) { console.warn(`[storage-growth] 보존
 runCapacityBasisMigration()
   .then((r) => { if (r.ran) console.log(`[storage] 용량 기준 변경 — 장비 ${r.devices}대 이력 ${r.rows}행 재시작(v2.534)`); })
   .catch((e) => console.warn(`[storage] 용량 이력 재시작 실패(${e.message}) — 증가량 화면에 기준 변경 구간이 남을 수 있습니다`));
+// v2.541: 수집 실패 스냅샷에서 들어온 **0 바이트 용량 행**을 1회 정리한다(사용자 신고 —
+// SSH 인증 실패로 전 섹션이 '건너뜀' 인 장비의 추이가 `0.0 TB` 선으로 그려졌다). 지금 코드의
+// 적재 경로 두 곳은 모두 `capacityPointEligible`(v2.531)에 막히므로 새로 생기지는 않는다.
+// ⚠ 장비 이력을 통째로 지우지 않고 **그 행만** 지운다(위 마이그레이션과 의도적으로 다르다).
+runZeroCapacityPurge()
+  .then((r) => { if (r.ran && r.rows) console.log(`[storage] 0 바이트 용량 행 정리 — 장비 ${r.devices}대 ${r.rows}행 제거(v2.541)`); })
+  .catch((e) => console.warn(`[storage] 0 바이트 용량 행 정리 실패(${e.message}) — 추이 차트에 0 TB 점이 남을 수 있습니다`));
 store.start();
 startLoopLagMonitor(); // 이벤트 루프 지연 계측(additive·no-op-on-fail) — docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0
 try { pruneHangLog(); } catch { /* hang 로그 보존일 정리(기동 1회) — 실패 무시 */ }
