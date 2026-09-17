@@ -19,7 +19,7 @@ import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS } from '../../bmusage/settings.js';
 import { publicTarget, NO_PATH_REASON } from '../../bmusage/targets.js';
-import { currentTargets, pollBmUsageOnce, bmUsageStatus } from '../../bmusage/poller.js';
+import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor } from '../../bmusage/poller.js';
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
 import { config } from '../../config.js';
@@ -84,6 +84,12 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
       db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
       status: bmUsageStatus(),
+      /*
+       * ⚠ 인증 실패로 정지된 대상은 **파일 기준으로 다시 센다** — 폴러의 인메모리 맵은 재시작하면
+       *   비어서, 그것만 보고 '정지 0건' 이라 말하면 조용한 정지가 된다(v2.528 규약).
+       *   범위 계정에는 보이는 대상만.
+       */
+      authStops: applyScope(authStopsFor(tg.targets), allowed),
       log: bmUsageLogInfo(),
     });
   } catch (e) {

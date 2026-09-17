@@ -51,6 +51,23 @@ export function bmUsageStatus() {
   };
 }
 
+/**
+ * 지금 **인증 실패로 정지된** 대상 목록. ⚠ 인메모리 맵(`_authStopped`)은 재시작하면 비므로
+ * 그것만 보고 '정지 0건' 이라 말하면 **조용한 정지**가 된다(v2.528 규약: "조용히 멈추지 않는다").
+ * `authGuard` 는 파일에 남기므로 **대상마다 다시 물어본다**(자격증명이 바뀐 대상은 그 함수가
+ * 스스로 기록을 지우고 null 을 준다 = 자동 재개).
+ */
+export function authStopsFor(targets = []) {
+  const out = [];
+  for (const tg of targets) {
+    const dev = authDev(tg);
+    if (!dev) continue;
+    const rec = guard.authStopFor(dev);
+    if (rec) out.push({ key: tg.key, name: tg.name, vcenterId: tg.vcenterId || '', ...rec });
+  }
+  return out;
+}
+
 /** 대상 해석 — 스냅샷·등록부를 읽어 온다(장비에 접속하지 않는다). */
 export async function currentTargets() {
   const s = loadBmUsageSettings();
@@ -120,7 +137,9 @@ async function collectOne(target, now, { trigger = 'auto' } = {}) {
   if (built.next) _prev.set(target.key, built.next);
   const ok = !!(idrac?.ok || os?.ok);
   recordBmUsage({
-    deviceId: target.key, name: target.name, host: target.idracHost || target.osHost?.host || '',
+    // ⚠ `idracHost` 는 `publicTarget()` 이 만드는 응답용 필드다 — **내부 target 에는 없다**.
+    //   `target.idracHost` 로 읽으면 iDRAC 전용 서버의 작업 로그에 host 가 빈 칸으로 남는다.
+    deviceId: target.key, name: target.name, host: target.osHost?.host || target.idrac?.host || '',
     source: config.agent?.name || 'central', ok, durationMs: Date.now() - t0,
     error: ok ? null : (os?.error || idrac?.error || '두 경로 모두 실패'),
     // ⚠ 실패 주기의 수치는 싣지 않는다(0 은 '부하 없음' 이라는 거짓).

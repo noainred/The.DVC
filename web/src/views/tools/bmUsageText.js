@@ -195,6 +195,24 @@ export function detailNotes(detail = {}) {
   return out;
 }
 
+/**
+ * 인증 실패로 **주기 수집이 정지된** 대상 안내. ⚠ 이것이 없으면 '조용한 정지' 가 된다 —
+ * 사용자는 수집되는 줄 알고 값이 낡아 가는 것을 못 본다(v2.528 규약: "말없이 멈추면 사용자는
+ * '수집되는 줄' 안다 — 이 기능이 만들 수 있는 최악의 거짓이다").
+ * 정지 대상이 없으면 **문구를 만들지 않는다**.
+ */
+export function authStopNote(stops = [], { now = Date.now() } = {}) {
+  const list = Array.isArray(stops) ? stops : [];
+  if (!list.length) return '';
+  const names = list.slice(0, 4).map((x) => t(x.name) || t(x.key)).filter(Boolean);
+  const more = list.length > names.length ? ` 외 ${list.length - names.length}대` : '';
+  const oldest = list.map((x) => n(x.since)).filter((v) => v != null).sort((a, b) => a - b)[0];
+  return `**${list.length}대는 인증 실패로 주기 수집이 정지됐습니다**(${names.join(' · ')}${more})`
+    + `${oldest ? ` — 가장 오래된 정지는 ${ageText(oldest, now)}입니다` : ''}.`
+    + ' 반복 시도는 결과가 같고 **계정만 잠급니다** — 비밀번호를 고치면 자동으로 재개합니다.'
+    + " '지금 수집' 은 정지와 무관하게 동작하니 고친 뒤 눌러 확인하세요.";
+}
+
 /** 보존·행 수 안내 — 서버가 준 값으로만 만든다(숫자를 박지 않는다). */
 export function retentionNote(settings = {}, db = {}) {
   const raw = n(settings.rawRetentionDays);

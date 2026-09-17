@@ -327,6 +327,17 @@ test('⚠ exec 시한은 위치 인자다 — 객체를 넘기면 NaN 이 되어
   assert.ok(Number.isNaN(Math.max(1000, { timeoutMs: 30_000 })));
 });
 
+test('⚠ 작업 로그의 host 는 내부 target 필드를 읽는다 — publicTarget 전용 필드를 읽으면 빈 칸이 된다', () => {
+  // `idracHost` 는 `publicTarget()` 이 만드는 **응답용** 필드다(targets.js:160). 폴러가 그것을
+  // 읽으면 iDRAC 전용 서버의 작업 로그 host 가 항상 비어 '어느 장비였나' 를 알 수 없다.
+  /* ⚠ **주석을 먼저 지운다** — 규칙을 설명하는 주석에 그 문자열이 들어 있으면 검사가 자기
+     주석을 잡는다(v2.550 에서 실제로 그랬다. `secAudit2535.test.js` 와 같은 규약). */
+  const raw = fs.readFileSync(path.join(import.meta.dirname, '../src/bmusage/poller.js'), 'utf8');
+  const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/target\.idracHost/.test(src), 'publicTarget 전용 필드를 폴러가 읽고 있다');
+  assert.match(src, /target\.idrac\?\.host/, '내부 target 의 idrac.host 를 읽어야 한다');
+});
+
 // ── 설정·DB·scope ────────────────────────────────────────────────────────────
 test('설정 — 하한·상한을 서버가 강제하고 켠 법인만 남긴다', () => {
   const s = normalizeSettings({ intervalMs: 5, corps: { a: true, b: false }, rawRetentionDays: 9_999, dailyRetentionDays: 1 });
