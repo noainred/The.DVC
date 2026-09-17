@@ -280,6 +280,22 @@ export function capacityPointEligible(snap) {
   if (!snap?.ok) return { ok: false, reason: 'collect-failed' };
   const t = Number(snap.capacity?.totalBytes);
   if (!Number.isFinite(t) || t <= 0) return { ok: false, reason: 'no-capacity' };
+  /*
+   * ⚠ **일부 풀이 합계에서 빠진 주기는 적재하지 않는다**(v2.546, 사용자 선택 '적재 안 함').
+   *
+   * 다중 풀 장비에서 한 풀의 용량·사용량을 못 읽으면 그 주기만 **측정 기준이 달라진다**
+   * (합계가 그 풀만큼 작다). 그대로 적재하면 증가량 화면에 그 날만 `-58TB → +58TB` 라는
+   * **거짓 급변**이 찍힌다 — v2.534 가 VMAX 에서 겪은 '측정 기준이 바뀌면 이어 붙이지
+   * 않는다' 와 같은 유형이고, 여기서는 하루 단위로 오락가락하므로 더 나쁘다.
+   * 그 날은 '수집 없음'(`gapDays`)이 되는 편이 정직하다 — v2.530 '틀린 값은 빈 값보다 나쁘다'.
+   *
+   * ⚠ 화면 표시(사용률 %)는 **막지 않는다** — 제외 사실을 `capacityBasisNote` 가 밝힌다.
+   *   막는 것은 **시계열 적재뿐**이다(v2.528 '막는 것은 주기 수집뿐' 과 같은 경계 감각).
+   * ⚠ 구버전 엣지는 이 필드를 보내지 않으므로 예전처럼 적재된다(조용히 실패하지는 않는다).
+   */
+  const ex = snap.extra || {};
+  const skipped = (Number(ex.poolsUnreadable) || 0) + (Number(ex.poolsUsedUnreadable) || 0);
+  if (skipped > 0) return { ok: false, reason: 'partial-pools' };
   return { ok: true };
 }
 

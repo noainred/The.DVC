@@ -19,7 +19,8 @@ import React, { useState } from 'react';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import {
-  planInput, headroom, fitCount, trendPerDay, runway, rawCapacity, verifyIdentity, tb, sizeText, daysText, posNum,
+  planInput, headroom, fitCount, fitCountByPool, poolPressure, poolPressureNote,
+  trendPerDay, runway, rawCapacity, verifyIdentity, tb, sizeText, daysText, posNum,
 } from './unityCapacityPlan.js';
 
 /** 수용 개수 계산의 단위 프리셋(GB) — 흔한 VM/LUN 크기. 직접 입력도 받는다. */
@@ -47,9 +48,13 @@ export default function UnityCapacityPlanPanel({ snap, points }) {
   const trend = trendPerDay(points);
   const way = runway({ ...input, trend });
   const raw = rawCapacity({ ...input, deviceUsableBytes: input.totalBytes });
+  // v2.546 — 풀별 압박도(전체는 여유인데 한 풀만 꽉 찬 경우를 드러낸다).
+  const pressure = poolPressure(input.pools);
+  const pressNote = poolPressureNote(pressure, snap?.capacity?.pct ?? null);
 
   const unitBytes = (posNum(custom) || unitGb) * GIB;
   const fit = fitCount(head, unitBytes);
+  const byPool = fitCountByPool(head, input.pools, unitBytes);
 
   return (
     <div style={{ marginTop: 14 }}>
@@ -86,10 +91,67 @@ export default function UnityCapacityPlanPanel({ snap, points }) {
               </tbody>
             </STable>
           </div>
+          {/*
+            * ⚠ v2.546 — 예전에는 여기 문구가 `**…**` 를 **BoldText 없이** 그려 별표가 그대로 샜고
+            *   (v2.439·2.440·2.505 와 같은 유형), 내용도 '경고 임계를 표시하지 않는다' 였다.
+            *   이제 임계는 **풀별로** 보여주므로(아래 표) 여기서는 RAID·드라이브만 말한다.
+            */}
           {input.multiPool && (
             <div className="muted" style={{ fontSize: 11, marginTop: 4, whiteSpace: 'normal' }}>
-              풀이 {input.poolCount}개라 **경고 임계·RAID·드라이브는 표시하지 않습니다** — 풀마다 값이 달라 대표값을 만들면 거짓이 됩니다.
+              <BoldText text={`풀이 ${input.poolCount}개라 **RAID·드라이브 구성은 표시하지 않습니다** — 풀마다 값이 달라 대표값을 만들면 거짓이 됩니다. 경고 임계는 아래에서 **풀마다** 판정합니다.`} />
             </div>
+          )}
+          {input.excludedPoolCount > 0 && (
+            <div style={{ fontSize: 11, marginTop: 4, whiteSpace: 'normal', color: 'var(--amber)' }}>
+              <BoldText text={`⚠ 용량 또는 사용량을 읽지 못한 풀 ${input.excludedPoolCount}개는 **위 계산에서 빠졌습니다** — 실제로는 더 줄 수 있는 양이 다를 수 있습니다.`} />
+            </div>
+          )}
+
+          {/* ①-b 풀별 압박도 — 전체는 여유인데 특정 풀만 꽉 찬 경우(v2.546, 사용자 제안) */}
+          {input.multiPool && pressure.length > 0 && (
+            <>
+              {pressNote && (
+                <div
+                  className={pressNote.kind === 'over' ? 'badge red' : 'badge amber'}
+                  style={{ display: 'block', whiteSpace: 'normal', margin: '8px 0 6px', padding: '6px 8px', lineHeight: 1.6 }}
+                >
+                  <BoldText text={pressNote.text} />
+                </div>
+              )}
+              <div className="table-wrap">
+                <STable className="v3-table rpt-wrap">
+                  <thead><tr><th>풀</th><th className="right">사용률</th><th className="right">경고 임계</th><th className="right">임계까지</th><th>판정</th></tr></thead>
+                  <tbody>
+                    {pressure.map((r) => (
+                      <tr key={r.name}>
+                        <td>{r.name}</td>
+                        <td className="right">{r.pct == null ? '—' : `${r.pct}%`}</td>
+                        <td className="right">{r.thresholdPct == null ? '—' : `${r.thresholdPct}%`}</td>
+                        {/*
+                          * ⚠ 음수를 그대로 `-11.7 TB` 로 찍지 말 것(v2.546 스크린샷 판독에서 발견) —
+                          *   열 이름이 '임계까지' 라 마이너스 숫자가 무슨 뜻인지 읽히지 않는다.
+                          *   넘긴 양은 **'초과 11.7 TB'** 로 말한다(수치는 그대로, 부호를 말로 바꾼다).
+                          */}
+                        <td className="right" style={{ color: r.availToThresholdBytes < 0 ? 'var(--red)' : undefined }}>
+                          {r.availToThresholdBytes == null
+                            ? '—'
+                            : (r.availToThresholdBytes < 0 ? `초과 ${tb(-r.availToThresholdBytes)}` : tb(r.availToThresholdBytes))}
+                        </td>
+                        <td>
+                          {r.state === 'over' && <span className="badge red" style={{ fontSize: 10.5 }}>임계 초과</span>}
+                          {r.state === 'near' && <span className="badge amber" style={{ fontSize: 10.5 }}>임계 근접</span>}
+                          {r.state === 'ok' && <span className="badge green" style={{ fontSize: 10.5 }}>여유</span>}
+                          {r.state === 'unknown' && <span className="badge" style={{ fontSize: 10.5 }}>판정 불가</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </STable>
+              </div>
+              <div className="muted" style={{ fontSize: 10.5, marginTop: 3, whiteSpace: 'normal' }}>
+                <BoldText text="임계 근접 = 임계의 90% 이상. 판정 불가는 임계 또는 사용량을 읽지 못한 것이며 **이상 없음이라는 뜻이 아닙니다**." />
+              </div>
+            </>
           )}
         </>
       )}
@@ -150,10 +212,34 @@ export default function UnityCapacityPlanPanel({ snap, points }) {
       </div>
       {fit ? (
         <div style={{ fontSize: 13 }}>
-          <b style={{ fontSize: 18, color: 'var(--accent)' }}>{fit.count.toLocaleString('ko-KR')}개</b>
+          {/*
+            * ⚠ v2.546 — **풀이 여러 개면 합산 여유를 한 덩어리로 세지 않는다.** 풀 경계를 넘을 수
+            *   없으므로 `fitCountByPool` 이 풀마다 세어 더한 값을 쓰고, '한 개짜리 최대 크기' 를
+            *   함께 낸다. 풀이 1개면 `byPool` 이 한 줄이라 예전 값과 같다(회귀 없음).
+            */}
+          <b style={{ fontSize: 18, color: 'var(--accent)' }}>{(byPool ? byPool.count : fit.count).toLocaleString('ko-KR')}개</b>
           <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>
-            {sizeText(unitBytes)} 단위 · 계산 기준 <b>{fit.basisLabel}</b> {tb(fit.availBytes)} · 남는 공간 {sizeText(fit.leftoverBytes)}
+            {sizeText(unitBytes)} 단위 · 계산 기준 <b>{fit.basisLabel}</b> {tb(fit.availBytes)}
+            {byPool ? null : <> · 남는 공간 {sizeText(fit.leftoverBytes)}</>}
           </span>
+          {byPool && input.multiPool && (
+            <div className="muted" style={{ fontSize: 11, marginTop: 4, whiteSpace: 'normal', lineHeight: 1.6 }}>
+              <BoldText
+                text={`풀별 ${byPool.byPool.map((b) => `${b.name} ${b.count.toLocaleString('ko-KR')}개`).join(' · ')}`
+                  + ` — **한 개로 만들 수 있는 최대 크기는 ${sizeText(byPool.maxSingleBytes)}**(${byPool.maxSinglePool})입니다.`
+                  + ' 공간은 **풀 경계를 넘지 못하므로** 합계를 한 덩어리로 쓸 수 없습니다.'
+                  + (byPool.skippedPools > 0 ? ` ⚠ 이 기준으로 계산할 수 없는 풀 ${byPool.skippedPools}개는 빠졌습니다.` : '')}
+              />
+            </div>
+          )}
+          {byPool && !byPool.fitsSingle && (
+            <div className="badge amber" style={{ display: 'block', whiteSpace: 'normal', marginTop: 6, padding: '6px 8px', lineHeight: 1.6 }}>
+              <BoldText
+                text={`⚠ 요청한 ${sizeText(unitBytes)} 는 **어느 풀에도 들어가지 않습니다** — 가장 큰 풀 여유가 `
+                  + `${sizeText(byPool.maxSingleBytes)}(${byPool.maxSinglePool})입니다.`}
+              />
+            </div>
+          )}
         </div>
       ) : <div className="muted" style={{ fontSize: 12 }}>단위 크기를 입력하세요.</div>}
 

@@ -21,6 +21,8 @@
  */
 import React, { useState } from 'react';
 import { STable } from '../../components/STable.jsx';
+import BoldText from '../../components/boldText.jsx';
+import { usageTrust } from './powermaxCapacityText.js';
 
 const n = (v) => (v == null ? '—' : String(v));
 
@@ -94,9 +96,15 @@ export default function UnityConfigPanels({ ex = {}, fmtBytes = (b) => String(b)
           ℹ 구성 상세 수집이 꺼져 있습니다(<code>UNITY_SSH_DEEP=0</code>) — 용량·상태만 수집합니다.
         </div>
       )}
-      {ex.poolsUnreadable > 0 && (
-        <div style={{ fontSize: 11, marginTop: 4, color: 'var(--amber)' }}>
-          ⚠ 용량 필드를 읽지 못한 풀 {ex.poolsUnreadable}개는 합계에서 제외했습니다 — 전체 용량이 실제보다 작을 수 있습니다.
+      {/*
+        * ⚠ v2.546 — 제외된 풀 고지는 `usageTrust` **한 곳**이 문구를 만든다(목록 배지와 같은 소유자).
+        *   예전에는 여기서 `poolsUnreadable` 만 자체 문구로 적어, '사용량만 못 읽은 풀'
+        *   (`poolsUsedUnreadable`)은 **아무 데서도 말하지 않았다**. 두 문구가 갈라지면 목록 배지와
+        *   상세가 다른 말을 한다.
+        */}
+      {usageTrust(ex).kind === 'partial' && (
+        <div style={{ fontSize: 11, marginTop: 4, color: 'var(--amber)', whiteSpace: 'normal', lineHeight: 1.6 }}>
+          ⚠ <BoldText text={usageTrust(ex).text} />
         </div>
       )}
 
