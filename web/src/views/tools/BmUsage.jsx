@@ -22,7 +22,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark,
-  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes,
+  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, authStopNote,
 } from './bmUsageText.js';
 
 /** 표의 지표 열 — 서버가 준 `metrics` 계약과 같은 순서를 쓴다. */
@@ -130,6 +130,12 @@ export function BmUsage() {
           </p>
         )}
         {fsNote && <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={fsNote} /></p>}
+        {/* ⚠ 인증 실패 정지는 **반드시 화면이 말한다** — 조용히 멈추면 사용자는 수집되는 줄 안다(v2.528). */}
+        {authStopNote(data?.authStops || []) && (
+          <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('bad') }}>
+            <BoldText text={authStopNote(data.authStops)} />
+          </p>
+        )}
         {edgeNote(data?.isEdge) && <p style={{ margin: '0 0 6px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={edgeNote(data.isEdge)} /></p>}
         <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
           <BoldText text={retentionNote(data?.settings || {}, data?.db || {})} />

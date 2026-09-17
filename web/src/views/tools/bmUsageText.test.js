@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark, SRC_MARK,
-  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, MISSING_MARK,
+  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, MISSING_MARK, authStopNote,
 } from './bmUsageText.js';
 
 const NOW = 1_700_000_000_000;
@@ -175,6 +175,28 @@ describe('행 단위 누락 표지', () => {
   });
 });
 
+describe('인증 실패 정지 — 조용히 멈추지 않는다', () => {
+  it('정지가 없으면 문구를 만들지 않는다', () => {
+    expect(authStopNote([])).toBe('');
+    expect(authStopNote(null)).toBe('');
+  });
+  it('몇 대인지·언제부터인지·무엇을 하면 되는지 말한다', () => {
+    const s = authStopNote([{ key: 'A', name: 'bm-01', since: NOW - 3_600_000, attempts: 3 }], { now: NOW });
+    expect(s).toContain('1대');
+    expect(s).toContain('bm-01');
+    expect(s).toContain('1시간 전');
+    expect(s).toContain('계정만 잠급니다');
+    expect(s).toContain('자동으로 재개');
+    expect(s).toContain("'지금 수집'");
+  });
+  it('많으면 일부만 나열하고 나머지는 개수로 밝힌다', () => {
+    const many = Array.from({ length: 9 }, (_, i) => ({ key: `K${i}`, name: `bm-${i}`, since: NOW }));
+    const s = authStopNote(many, { now: NOW });
+    expect(s).toContain('9대는');
+    expect(s).toContain('외 5대');
+  });
+});
+
 describe('마크다운 누출 방지', () => {
   it('BoldText 가 못 그리는 백틱을 문구에 넣지 않는다', () => {
     const all = [
@@ -189,6 +211,7 @@ describe('마크다운 누출 방지', () => {
       edgeNote(true),
       ...missingFootnotes([{ missing: ['no-os-cred', 'no-idrac', 'no-idrac-cred'] }]),
       missingMark(['no-os-cred']),
+      authStopNote([{ key: 'A', name: 'n', since: NOW }], { now: NOW }),
     ];
     for (const s of all) expect(s).not.toContain('`');
   });
