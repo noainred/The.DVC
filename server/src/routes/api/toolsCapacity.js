@@ -19,12 +19,13 @@ import { powerOffPollerStatus, runPowerOffCheckNow } from '../../tools/powerOffP
 import { diskBreakdown, analyzeDiskTrend, diskTrendPolicyFromEnv } from '../../tools/diskTrend.js';
 import { getMetricsDb } from '../../metrics/db.js';
 // v2.512: '서버 온도' — iDRAC 수집 온도 + 물리/가상화 구분 + 법인별 평균, 5분 평균 창 적응.
-import { buildServerTempReport, avgWindowMs, avgWindowLabel } from '../../tools/serverTemp.js';
+import { buildServerTempReport, avgWindowMs, avgWindowLabel, sparkMetricFor, sparkMetricFallback } from '../../tools/serverTemp.js';
 import { analysisServersWithRemote } from '../admin/shared.js';
 import { getSensorSeries } from '../../idrac/sensorStore.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { loadMetricsSettings } from '../../metrics/settings.js';
 import { DEFAULT_MAX_AGE_MS } from '../../idrac/roomTemp.js';
+import { TEMP_SERIES_DETAIL } from '../../idrac/serverTempSeries.js'; // v2.556: 스파크 메트릭 선택(흡기 계열은 상세 적재일 때만 있다)
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
 import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from './shared.js';
@@ -1218,6 +1219,116 @@ api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
     }
   }
   res.json({ level, key, days, bucket, bucketMs, synthesized, points });
+});
+
+/* ── 24시간 스파크라인 배치(v2.556) ────────────────────────────────────────────
+ * 시안 B(히트맵 보드, docs/design/server-temp/README.md)의 표·'이상 서버' 리스트가 행마다
+ * 24시간 미니차트를 그린다. 행마다 GET 을 날리면 화면 진입 한 번에 수백 개 HTTP 라
+ * **보이는 행만 배치로** 묻는다(`/tools/waste/spark` 와 같은 규약).
+ *
+ * 출처는 **우리 시계열 DB** 다(vCenter SOAP 왕복이 아니다) — 온도는 샘플러가 이미
+ * `temp_host`·`temp_cluster`·`temp_vc`·`idractemp_*` 로 적재하고 있다. 그래서 이 라우트는
+ * vCenter 부하가 0 이고, 상한의 이유도 SOAP 이 아니라 **응답 크기와 DB 조회 횟수**다.
+ *
+ * 지킬 것:
+ *  · 범위 강제는 **존재 은닉**(위 history 라우트의 `owns` 와 같은 규약) — 범위 밖 키는
+ *    조회하지 않고 `series[key] = null`. 403 으로 알리면 그 키의 존재가 드러난다.
+ *  · 상한(`maxItems`)을 **응답에 실어** 화면이 배치 크기를 맞춘다. 화면에 숫자를 하드코딩
+ *    하지 않는다(sparkBatch.js 규약 — v2.502 가 '잘라 놓고 잘랐다는 말을 안 한' 결함을 고쳤다).
+ *  · DB 실패는 **그 키만 null**(응답 전체를 500 으로 만들지 않는다).
+ *  · 어떤 메트릭으로 읽었는지 `metricByKey` 로 밝힌다 — 표의 '현재온도'(흡기)와 스파크라인
+ *    (기본 설정에서는 최고 센서)이 **다른 계열일 수 있다**(tools/serverTemp.js sparkMetricFor 주석).
+ */
+const TEMP_SPARK_MAX = Math.max(1, Math.min(1000, Number(process.env.ESXI_TEMP_SPARK_MAX) || 200));
+
+api.post('/tools/esxi-temp/spark', requirePerm('tools'), async (req, res) => {
+  const hours = Math.max(1, Math.min(168, Number(req.body?.hours) || 24));
+  const bucketMs = 3_600_000;
+  const raw = Array.isArray(req.body?.items) ? req.body.items : [];
+  const detail = TEMP_SERIES_DETAIL;
+  const base = {
+    hours, bucketMs, maxItems: TEMP_SPARK_MAX, capped: false, skipped: 0,
+    synthesized: false, series: {}, metricByKey: {},
+  };
+  if (!raw.length) return res.json(base);
+
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  /* 범위 집합은 **필요할 때만** 만든다 — iDRAC 항목이 없으면 서버 목록을 훑지 않는다
+   * (`analysisServersWithRemote` 는 등록부 + 원격 인벤토리를 합친다). */
+  let idracIds = null;
+  const hostVc = new Map((snap.hosts || []).map((h) => [h.id, h.vcenterId]));
+  const ownsKey = (source, key) => {
+    if (!allowed) return true;                       // 전체 범위 계정 — history 라우트와 같은 기준
+    if (source === 'cluster') return allowed.has(String(key).split('|')[0]);
+    if (source === 'vc') return allowed.has(String(key));
+    if (source === 'esxi' || source === 'host') return allowed.has(hostVc.get(String(key)));
+    if (source === 'idrac') {
+      if (!idracIds) {
+        let servers = analysisServersWithRemote(req) || [];
+        servers = servers.filter((x) => x.vcenterId && allowed.has(x.vcenterId));
+        idracIds = new Set(servers.map((x) => String(x.id)));
+      }
+      return idracIds.has(String(key));
+    }
+    return false;
+  };
+
+  // 상한까지만 받는다. 넘은 것은 capped 로 **밝힌다**(조용히 자르지 않는다).
+  const targets = [];
+  for (const it of raw) {
+    if (targets.length >= TEMP_SPARK_MAX) { base.capped = true; break; }
+    const key = String(it?.key ?? '').trim();
+    const source = String(it?.source ?? '').trim();
+    if (!key) { base.skipped += 1; continue; }
+    const metric = sparkMetricFor(source, { detail });
+    if (!metric) { base.skipped += 1; base.series[key] = null; continue; }
+    targets.push({ key, source, metric });
+  }
+
+  const since = Date.now() - hours * 3_600_000;
+  let db = null;
+  try { db = await getMetricsDb(); } catch (e) {
+    console.warn('[toolsCapacity] 온도 스파크 DB 열기 실패 — 전 키 null:', e?.message);
+  }
+  const isMock = snap.source === 'mock';
+  for (const t of targets) {
+    if (!ownsKey(t.source, t.key)) {
+      // 존재 은닉 — 조회하지 않고 '없음' 으로 답한다(오류가 아니다).
+      base.series[t.key] = null;
+      base.skipped += 1;
+      continue;
+    }
+    let metric = t.metric;
+    let points = [];
+    const read = (m) => {
+      if (!db) return [];
+      try { return db.history(m, t.key, since, bucketMs, hours + 1) || []; } catch (e) {
+        console.warn('[toolsCapacity] 온도 스파크 조회 실패 — 이 키만 null:', m, e?.message);
+        return [];
+      }
+    };
+    points = read(metric);
+    // detail 인데 흡기 계열이 비어 있으면 최고 센서로 한 번 더 — **실제로 쓴 메트릭을 적는다**.
+    if (points.length === 0) {
+      const alt = sparkMetricFallback(metric);
+      if (alt) { const p2 = read(alt); if (p2.length) { metric = alt; points = p2; } }
+    }
+    if (points.length < 2 && isMock) {
+      // 데모 합성 — history 라우트와 같은 결정적 곡선(실데이터가 아님을 응답에 밝힌다).
+      base.synthesized = true;
+      const b = 26 + (hash(t.key) % 8);
+      points = [];
+      for (let i = hours; i >= 0; i -= 1) {
+        const ts = Date.now() - i * bucketMs;
+        const v = b + 3 * Math.sin(ts / (6 * 3_600_000)) + 1.2 * Math.sin(ts / 3_600_000) + (hash(t.key + i) % 3);
+        points.push({ ts, avg: Number(v.toFixed(1)), max: Number((v + 2).toFixed(1)) });
+      }
+    }
+    base.metricByKey[t.key] = metric;
+    base.series[t.key] = points.length >= 2 ? points : null;   // 점 1개로는 선을 그릴 수 없다
+  }
+  res.json(base);
 });
 
 // 데이터스토어 용량 추세/예측 — ds_usedgb 히스토리로 선형회귀 → 가득 찰 예상일.

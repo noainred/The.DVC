@@ -100,8 +100,30 @@ export function SeverityBadge({ severity }) {
   return <span className={`badge ${cls}`}>{label}</span>;
 }
 
-/** Sortable, client-side table. columns: [{key,label,render?,align?,sortValue?}] */
-export function DataTable({ columns, rows, initialSort, emptyText = '데이터가 없습니다.' }) {
+/**
+ * Sortable, client-side table. columns: [{key,label,render?,align?,sortValue?}]
+ *
+ * v2.556 에 **선택 인자 5개**를 더했다(모두 기본값 = 예전 동작 그대로 — 181개 표의 회귀 0):
+ *   · `rowStyle(r)`  — 행 배경 등. '서버 온도' 는 40℃↑ 행을 붉게, 32℃↑ 행을 노랗게 칠한다.
+ *                      ⚠ hover 가 위로 와야 하므로 색은 인라인이 아니라 CSS 가 이긴다 —
+ *                      호출부는 `background` 만 주고 hover 는 스타일시트가 덮는다.
+ *   · `className`    — 표에 클래스를 붙여 **시각 규격은 CSS 가 갖게** 한다(인라인 스타일을
+ *                      수십 개 prop 으로 넘기지 않기 위해. `.dc-table` 참조).
+ *   · `bare`         — `.table-wrap`(테두리·반경)을 그리지 않는다. 카드가 테두리를 그릴 때.
+ *   · `maxHeight`    — 스크롤 상한(기본 64vh 유지).
+ *   · `onVisible(rows)` — **지금 화면에 그린 행**을 알려 준다. 정렬을 이 컴포넌트가 소유하므로
+ *                      호출부는 그것 없이 '보이는 행' 을 알 수 없다. '서버 온도' 는 이 목록으로
+ *                      24시간 추이를 배치 조회한다 — 밖에서 따로 정렬하면 **정렬을 두 곳이
+ *                      구현**하게 되고, 열을 바꿔 정렬한 순간 엉뚱한 행의 차트를 불러온다.
+ *   · `limit`+`footer` — **정렬한 뒤** 앞 N 행만 그린다. 순서가 중요하다 — 호출부에서 먼저
+ *                      잘라서 넘기면 '전체를 정렬한 상위 N' 이 아니라 '앞 N 을 정렬한 것' 이
+ *                      되어 표가 거짓이 된다(그래서 limit 을 이 컴포넌트가 받는다).
+ *                      `footer` 는 표 아래에 그대로 그릴 노드(행 수·더 보기 버튼).
+ */
+export function DataTable({
+  columns, rows, initialSort, emptyText = '데이터가 없습니다.',
+  rowStyle, className = '', bare = false, maxHeight = '64vh', limit = 0, footer = null, onVisible,
+}) {
   const [sort, setSort] = useState(initialSort || { key: columns[0].key, dir: 'asc' });
   // 같은 위치의 DataTable이 뷰 전환으로 다른 columns를 받으면(initialSort는 최초 마운트만 반영)
   // 존재하지 않는 컬럼 키에 정렬이 고착돼 사실상 무정렬이 된다 → 키가 사라지면 리셋.
@@ -130,9 +152,15 @@ export function DataTable({ columns, rows, initialSort, emptyText = '데이터�
   const toggle = (key) =>
     setSort((s) => ({ key, dir: s.key === key && s.dir === 'asc' ? 'desc' : 'asc' }));
 
+  // ⚠ 자르는 것은 **정렬 뒤**다(위 주석). limit 0/미지정은 전부 그린다.
+  const shown = limit > 0 ? sorted.slice(0, limit) : sorted;
+  // 보이는 행을 호출부에 알린다(키 목록이 바뀔 때만 — 매 렌더 호출하면 부모가 무한 갱신된다).
+  const shownKey = shown.map((r) => r.key ?? r.id ?? '').join(',');
+  useEffect(() => { if (onVisible) onVisible(shown); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [shownKey]);
+
   return (
-    <div className="table-wrap" style={{ maxHeight: '64vh' }}>
-      <table>
+    <div className={bare ? '' : 'table-wrap'} style={{ overflow: 'auto', maxHeight }}>
+      <table className={className}>
         <thead>
           <tr>
             {columns.map((c) => (
@@ -143,11 +171,11 @@ export function DataTable({ columns, rows, initialSort, emptyText = '데이터�
           </tr>
         </thead>
         <tbody>
-          {sorted.length === 0 && (
+          {shown.length === 0 && (
             <tr><td colSpan={columns.length} className="center muted" style={{ padding: 30 }}>{emptyText}</td></tr>
           )}
-          {sorted.map((r, i) => (
-            <tr key={r.id || i}>
+          {shown.map((r, i) => (
+            <tr key={r.id || r.key || i} style={rowStyle ? rowStyle(r) : undefined}>
               {columns.map((c) => (
                 <td key={c.key} style={{ textAlign: c.align || 'left' }}>
                   {c.render ? c.render(r) : r[c.key]}
@@ -157,6 +185,7 @@ export function DataTable({ columns, rows, initialSort, emptyText = '데이터�
           ))}
         </tbody>
       </table>
+      {footer}
     </div>
   );
 }

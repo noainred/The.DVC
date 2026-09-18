@@ -218,3 +218,37 @@ export function buildServerTempReport({
 
   return { rows, summary: splitAggregate(rows), byDatacenter, counts };
 }
+
+/* ── 24시간 스파크라인 메트릭 선택(v2.556) ──────────────────────────────────── */
+
+/**
+ * 그 행의 24시간 추이를 어떤 시계열 메트릭에서 읽을지 고른다(순수).
+ *
+ * ⚠⚠ **표의 '현재온도' 와 스파크라인이 다른 계열일 수 있다 — 숨기지 않는다.**
+ *   iDRAC 서버의 장기 이력은 기본 설정에서 **서버당 1계열(`idractemp_max` — 그 서버의 최고
+ *   센서)** 만 적재된다(`idrac/serverTempSeries.js` 머리말 — 계열 수 × 24 × 365 행/년 이라
+ *   흡기·배기·CPU 를 다 적재하면 4배다). 흡기 계열(`idractemp_inlet`)은
+ *   `IDRAC_TEMP_SERIES_DETAIL=true` 일 때만 있다. 그런데 표의 '현재온도' 는 **흡기**다.
+ *   그래서 라우트는 **실제로 쓴 메트릭을 응답(`metricByKey`)에 실어** 화면이 툴팁에
+ *   '24시간 · 최고' / '24시간 · 흡기' 로 **구분해 적게** 한다. 이것을 지우고 한 문구로
+ *   덮으면 사용자가 다른 계열을 같은 것으로 읽는다(루트 CLAUDE.md 정직성 규약).
+ *
+ * @param {'idrac'|'esxi'|'cluster'|'vc'} source  행의 출처(서버별 뷰는 r.source, 다른 뷰는 뷰 이름)
+ * @param {{detail?: boolean}} opt  detail = 상세 계열 적재 여부(TEMP_SERIES_DETAIL)
+ * @returns {string|null}  메트릭 이름. 모르는 source 는 **null**(추측해서 엉뚱한 계열을 주지 않는다)
+ */
+export function sparkMetricFor(source, { detail = false } = {}) {
+  switch (String(source || '')) {
+    case 'idrac': return detail ? 'idractemp_inlet' : 'idractemp_max';
+    case 'esxi': return 'temp_host';
+    case 'host': return 'temp_host';       // 'ESXi 호스트별' 뷰는 뷰 이름을 그대로 보낸다
+    case 'cluster': return 'temp_cluster';
+    case 'vc': return 'temp_vc';
+    default: return null;
+  }
+}
+
+/** detail 모드에서 흡기 계열이 비었을 때의 대체 메트릭(없으면 null). */
+export function sparkMetricFallback(metric) {
+  return metric === 'idractemp_inlet' ? 'idractemp_max' : null;
+}

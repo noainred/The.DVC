@@ -806,6 +806,67 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       올릴 수 없다. `/link-check-config`·`/link-check` 는 **엣지별 개별 토큰 전용**이므로(공유
       `CENTRAL_TOKEN` 은 어느 엣지의 측정인지 신뢰할 수 없다) **공유 토큰만 쓰는 현장에서는 이 기능이
       통째로 동작하지 않는다**. 그 사실을 `edge-silent` 문구가 첫 번째 원인으로 적는다.
+  - ⚠⚠ **서버 온도 — 히트맵 보드(시안 B). '못 읽은 값' 을 정상으로도 이상으로도 세지 않는다**
+    (`web/src/views/tools/serverTemp/`{board.js·parts.jsx·ServerTempBoard.jsx·useTempSparklines.js} +
+    `server/src/routes/api/toolsCapacity.js POST /tools/esxi-temp/spark`, v2.556 —
+    핸드오프 `docs/design/server-temp/README.md`(사용자 제공 시안. `*.dc.html` 은 **대조용
+    프로토타입이고 복사 대상이 아니다**). 선택: **셸까지 한 번에** · 전체 검증 · 완료 후 릴리스):
+    - **계산은 `board.js` 하나가 소유한다**(순수·vitest 30건). 버킷·타일 격자·막대 폭·스파크
+      path·집계를 컴포넌트에 흩어 두면 **KPI 의 32℃↑ 개수와 히스토그램 임계선이 다른 기준**을
+      쓰게 된다. 임계값도 여기(`TEMP_WARN_C`·`TEMP_HOT_C`)가 소유하고 `shared.jsx` 가 재수출한다
+      (반대 방향으로 두면 이 모듈의 테스트가 React·api.js 를 끌고 와 node 환경에서 깨진다).
+    - ⚠⚠ **`Number(null) === 0` 을 또 밟았다 — 자체 테스트가 내 결함 2건을 잡았다**(v2.525·
+      v2.540·v2.550·v2.552 에 이어 다섯 번째): ① `sparkPath` 가 `.map(Number).filter(isFinite)`
+      라 **결측 점이 0℃ 로 살아남아** 스파크라인이 바닥으로 떨어졌다 ② `tempBuckets`·`tempCounts`
+      가 빈 문자열을 0℃(14℃ 칸)로 읽어 그 서버를 **'정상' 으로 셌다**. `Number([]) === 0` 까지
+      걸려 파서를 **타입부터 좁혔다**(`tempNum` — 숫자이거나 숫자 문자열일 때만). 둘 다 오류 없이
+      틀린 값이라 화면은 정상처럼 보인다.
+    - ⚠⚠ **개수가 0 인 히스토그램 칸을 온도색으로 칠하지 말 것**(스크린샷 판독에서 발견. 수치로는
+      안 잡혔다): 시안의 `height: max(2%, …)` 를 그대로 쓰면 빈 칸도 2px 막대가 남는데 40℃ 이상
+      구간에서는 그것이 **빨간 선**이 되어, KPI 가 `40℃↑ 0` 이라고 말하는 동시에 분포는 '고온
+      서버가 있다' 고 말한다. 0 인 칸은 온도가 아니라 **축 눈금**이므로 중립색 1px 이다.
+    - ⚠ **범례를 색으로 설명하지 말 것**(같은 판독에서 발견한 **시안의 내부 불일치**): 시안 §3 은
+      법인 비교 범례를 '물리=#fbbf24 / 가상화=#4ade80' 로 적었지만 막대 채움은 `tempColor(평균)`
+      이라 30℃ 물리 막대도 초록이다 — 범례가 **거짓**이 된다. 막대 색은 '온도' 를 말하므로 범례는
+      **자리(위/아래)** 로 설명한다.
+    - ⚠⚠ **`minWidth: 0` 을 지우지 말 것**(400px 실측 628px → 400px): flex/grid 자식의 기본
+      `min-width: auto` 때문에 안쪽 표(열 11개·975px)가 카드를 **밀어 늘려** 페이지가 가로로
+      넘친다. 자식의 `overflow: auto` 만으로는 부족하다(v2.520 규약을 여기서 다시 밟았다).
+    - **표는 `DataTable` 을 쓰고 선택 인자를 더했다**(`rowStyle`·`className`·`bare`·`maxHeight`·
+      `limit`+`footer`·`onVisible`). 전부 기본값이 예전 동작이라 기존 181개 표는 회귀 0.
+      · ⚠ **`limit` 은 정렬 뒤 자른다** — 호출부에서 먼저 자르면 '전체를 정렬한 상위 N' 이 아니라
+        '앞 N 을 정렬한 것' 이 되어 표가 거짓이 된다. 그래서 상한을 컴포넌트가 받는다.
+      · ⚠ **`onVisible` 로 보이는 행을 받는다** — 정렬을 DataTable 이 소유하므로 그것 없이는
+        '보이는 행' 을 알 수 없다. 밖에서 따로 정렬하면 **정렬을 두 곳이 구현**하게 되고, 열을
+        바꿔 정렬한 순간 엉뚱한 행의 24시간 차트를 불러온다.
+    - **스파크라인은 계열 이름을 정직하게 붙인다**(`sparkMetricFor` + 응답 `metricByKey`):
+      iDRAC 장기 이력은 기본 설정에서 **서버당 1계열(`idractemp_max`)** 만 적재되고 흡기 계열은
+      `IDRAC_TEMP_SERIES_DETAIL=true` 일 때만 있다(v2.504). 그런데 표의 '현재온도' 는 **흡기**다 —
+      표와 차트가 **다른 계열일 수 있다**는 사실을 툴팁이 말한다. 한 문구로 덮지 말 것.
+      모르는 출처는 **null**(엉뚱한 계열을 추측해 주지 않는다).
+    - **`/tools/esxi-temp/spark` 규약**: 범위 강제는 **존재 은닉**(범위 밖 키는 조회하지 않고
+      `series[key]=null`·200) · 상한(`maxItems`)을 **응답에 실어** 화면이 배치 크기를 맞춘다
+      (숫자 하드코딩 금지 — `sparkBatch.js`) · 상한을 넘기면 `capped` 로 **밝힌다** · DB 실패는
+      **그 키만 null**(응답 전체를 500 으로 만들지 않는다) · 점 2개 미만은 null(한 점을 선으로
+      만들면 추세가 있는 것처럼 보인다) · mock 은 `synthesized`. 출처는 **우리 시계열 DB** 라
+      vCenter 왕복이 0 이다(순차 배치의 이유는 SOAP 이 아니라 응답 크기·DB 조회 횟수).
+    - **법인 그룹 키는 서버 조립 규칙과 글자 그대로 같아야 한다**(`dcKeyOf` =
+      `datacenterId || vcenterId || '(미분류)'`). 다르면 비교 목록의 임계 개수와 히트맵 그룹이
+      **서로 다른 집합**을 세면서도 오류가 나지 않는다.
+    - **히트맵 타일에 애니메이션을 걸지 말 것** — 맥동은 범례 사각 하나만(`hotglow`). 타일 수백
+      개에 걸면 GPU 낭비다. 타일은 그룹당 `<svg>` 하나 + `<rect>` 마다 `<title>`(1,157개 실측 문제없음).
+    - `EsxiTemp` **래퍼 이름을 바꾸지 말 것** — 도구 키 `esxitemp` 는 `permissions.json`(사용자별
+      허용/거부)의 값이자 `auth/toolAccess.js` 의 집행 매핑이다(v2.508 규약).
+  - ⚠⚠ **상단 메뉴 2단화 — 탭 규칙은 `.topbar .tabs .tab` 으로 한정한다**(v2.556, 같은 핸드오프 §0):
+    `className="tab"` 은 앱 **전역에서 일반 버튼**으로도 쓰인다(접속확인·필터 초기화·CSV 선택·
+    집계 단위 … 수십 곳). 전역 `.tab` 을 밑줄 스타일로 바꾸면 그 버튼들이 전부 테두리 없는 글자가
+    된다. Chromium 으로 확인했고(전역 `.tab`: radius 8px·active 파란 채움 / 헤더 탭: radius 0·청록
+    밑줄) `web/src/shellStyles.test.js` 가 CSS 소스로 그 계약을 고정한다(주석을 먼저 제거해 검사).
+    · **브랜드 행의 `flex-wrap: wrap`** 이 좁은 폭 가로 넘침의 해법이다 — 이 셸은 v2.555 까지
+      400px 에서 **628px** 로 넘쳤고(원인: `status-pill`·`user-box`) 2단화로 0 이 됐다.
+    · 상태 칩 내용·사용자 메뉴 동작은 **그대로 두고 톤만** 바꿨다(모노·자간·배경). 하단 상태바도
+      칸 개수·내용은 그대로다.
+
   - ⚠⚠ **사용자별 특수기능 권한 — '허용 목록' 은 거부 목록과 반대 방향의 성질을 가진다**
     (`auth/permissions.js effectiveToolAccess`·`auth/toolAccess.js issueFor` + 웹
     `views/toolVisibility.js`·`views/userAdmin/userToolText.js`, v2.555 — 사용자 요청 "특정 사용자는
