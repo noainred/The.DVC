@@ -230,3 +230,7 @@ server/config/linkcheck-settings.json
 
 # v2.562: 외부 연동 API 키(해시·이름·지문·허용목록). SECRET_FILES 등록과 **별개** 항목이다.
 server/config/api-keys.json
+
+# v2.564: 공개 API 안내 페이지(`/api/docs`) on/off. 비밀은 없지만 '이 현장이 그 페이지를
+#   껐다' 는 운영 결정과 조작자 계정명(updatedBy)이 담긴다. 이 저장소는 공개다.
+server/config/public-api-docs.json

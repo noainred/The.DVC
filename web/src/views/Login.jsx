@@ -70,6 +70,15 @@ export default function Login({ onSuccess, notice, setup }) {
       <style>{THEMES_CSS}</style>
       <Comp f={f} />
 
+      {/*
+        * 공개 API 안내(v2.564) — 로그인 없이 열린다. 연동 담당자가 계정 없이도 찾을 수 있게
+        * 여기에 둔다. ⚠ 이 링크는 포탈에 무엇이 있는지 말하지 않는다 — 대상 화면도 외부
+        *   연동용 조회 API 만 다루고 운영 데이터를 담지 않는다.
+        */}
+      <a className="lt-apidocs" href="#/api-docs" title="로그인 없이 볼 수 있는 API 안내 페이지">
+        ⇗ API 안내
+      </a>
+
       <button type="button" className="lt-reshuffle" onClick={reshuffle}
         title={`현재 테마: ${name} — 클릭하면 다른 로그인 화면으로 바뀝니다`}>
         🎲 {name}
