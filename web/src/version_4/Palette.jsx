@@ -6,17 +6,24 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { TOOLS } from '../views/specialToolsList.js';
+import { visibleTools } from '../views/toolVisibility.js';
 import { PAGE_META } from './nav.js';
 import { search, flatten } from './palette.js';
 
 const KIND_LABEL = { tool: '기능', page: '화면', tab: '탭' };
 
-export default function Palette({ onClose, onPick, isAdmin }) {
+export default function Palette({ onClose, onPick, isAdmin, toolsAllowed = null }) {
   const [q, setQ] = useState('');
   const [cur, setCur] = useState(0);
   const inputRef = useRef(null);
-  // 관리자 전용 도구는 비관리자에게 제안하지 않는다(내비 트리와 같은 규칙).
-  const tools = useMemo(() => TOOLS.filter((t) => isAdmin || !t.adminOnly), [isAdmin]);
+  // 관리자 전용 도구는 비관리자에게 제안하지 않는다(내비 트리와 같은 규칙 — 판정은
+  // views/toolVisibility.js 하나가 소유한다. 여기서 조건을 다시 쓰면 트리와 갈라진다).
+  // ⚠ 의존성 키는 JSON — 빈 배열(전면 차단)과 null(재정의 없음)을 구분해야 한다.
+  const allowKey = JSON.stringify(toolsAllowed ?? null);
+  const tools = useMemo(
+    () => visibleTools(TOOLS, { isAdmin, toolsAllowed: JSON.parse(allowKey), hideAdminOnly: true }),
+    [isAdmin, allowKey],
+  );
   const res = useMemo(() => search(q, { tools, pageMeta: PAGE_META }), [q, tools]);
   const flat = useMemo(() => flatten(res), [res]);
 

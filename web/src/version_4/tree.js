@@ -148,7 +148,7 @@ export function groupLabelsOfTool(k) {
  * **보일지 말지**만 정한다 — 잠긴 도구는 숨기지 않고 회색으로 보여주는 것이 기존 정책이다
  * (SpecialTools: "숨김보다 회색 잠금"). 항목이 하나도 없는 그룹만 접는다.
  */
-export function visibleTree(TOOLS, { isAdmin, pageAllowed, tabAllowed } = {}) {
+export function visibleTree(TOOLS, { isAdmin, pageAllowed, tabAllowed, toolShown } = {}) {
   const byKey = new Map((TOOLS || []).map((t) => [t.k, t]));
   return TREE.map((g) => ({
     ...g,
@@ -157,6 +157,13 @@ export function visibleTree(TOOLS, { isAdmin, pageAllowed, tabAllowed } = {}) {
       if (i.kind === 'tab') return tabAllowed ? tabAllowed(i.id) : true;
       const t = byKey.get(i.k);
       if (!t) return false;                       // 목록에 없는 키는 그리지 않는다(유령 항목 금지)
+      /*
+       * v2.555: 도구를 **숨길지**는 `views/toolVisibility.js toolHidden` 하나가 판정한다 —
+       * 카드 그리드·이 트리·⌘K 팔레트가 같은 답을 써야 한다. 여기서 규칙을 다시 쓰면
+       * "내비에는 없는데 팔레트로는 열린다" 가 된다. 호출부가 주지 않으면(테스트·구버전
+       * 호출) 예전 규칙(관리자 전용만 숨김)을 그대로 쓴다.
+       */
+      if (toolShown) return toolShown(t);
       if (t.adminOnly && !isAdmin) return false;  // 관리자 전용은 비관리자에게 아예 보이지 않는다
       return true;
     }),

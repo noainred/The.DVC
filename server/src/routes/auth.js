@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState } from '../auth/auth.js';
-import { rolePermissions, roleToolsDenied } from '../auth/permissions.js';
+import { rolePermissions, roleToolsDenied, effectiveToolAccess } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { requireSettingsOwner } from './admin/shared.js';
 import { logAudit } from '../audit.js';
@@ -91,7 +91,14 @@ authRouter.post('/login', async (req, res) => {
   const enriched = {
     ...user,
     permissions: rolePermissions(user.role),
-    toolsDenied: roleToolsDenied(user.role),
+    /*
+     * ⚠⚠ **사용자 재정의를 반영한 유효값**이다(v2.555). `roleToolsDenied(role)` 로 되돌리면
+     *   '이 사용자만 스토리지' 설정이 화면에 반영되지 않아 **숨겨야 할 메뉴가 그대로 보인다**.
+     *   `toolsAllowed` 가 배열이면 **그 목록만** 허용이라는 뜻이고(웹 `toolAllowed` 가 그렇게
+     *   판정한다), `null` 이면 기존 거부목록 방식이다 — 서버가 전체 도구 목록을 **추측하지
+     *   않는다**(추측하면 새로 추가된 도구가 조용히 새어 나간다).
+     */
+    ...toolFields(user),
     // username 만으로 판정 — 표시이름(name)은 admin 이 변경 가능한 값이라 권한 축에서 제외한다
     // (routes/admin/shared.js requireSettingsOwner 주석 참고: 4차 재감사에서 승계 우회 재현).
     isSettingsOwner: !config.auth.enabled || owners.includes(user.username),
@@ -102,6 +109,20 @@ authRouter.post('/login', async (req, res) => {
   res.json({ token, user: enriched });
 });
 
+/**
+ * 응답에 싣는 도구 접근 필드(v2.555) — **한 곳에서 만든다**. 로그인과 `/auth/me` 가 각자
+ * 만들면 한쪽만 고쳐져 '로그인 직후에는 숨는데 새로고침하면 보인다' 같은 상태가 생긴다.
+ */
+function toolFields(user) {
+  const a = effectiveToolAccess({ username: user?.username, role: user?.role });
+  return {
+    toolsDenied: a.denied,
+    // ⚠ `allowed` 가 `null` 이면 키를 **빈 배열로 두지 말 것** — 웹이 '전부 차단' 으로 읽는다.
+    toolsAllowed: Array.isArray(a.allowed) ? a.allowed : null,
+    toolMode: a.mode,
+  };
+}
+
 // Returns the current user when a valid token is presented.
 authRouter.get('/me', authMiddleware, (req, res) => {
   const u = getUser(req.user.username);
@@ -110,7 +131,7 @@ authRouter.get('/me', authMiddleware, (req, res) => {
   // isSettingsOwner: '설정' 탭 노출 여부(계정명 목록 대신 불리언만 — 열거 단서 제거).
   const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
   const isSettingsOwner = !config.auth.enabled || owners.includes(req.user.username); // username 만(위 주석 참고)
-  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: rolePermissions(req.user.role), toolsDenied: roleToolsDenied(req.user.role), isSettingsOwner, serviceHubUrl: config.serviceHubUrl || '' } });
+  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: rolePermissions(req.user.role), ...toolFields(req.user), isSettingsOwner, serviceHubUrl: config.serviceHubUrl || '' } });
 });
 
 /**

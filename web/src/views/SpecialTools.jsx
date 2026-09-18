@@ -3,9 +3,11 @@
 // 이 파일은 목록/권한 게이트/딥링크/최근검색 셸과 ToolPanel 라우팅만 가진다.
 // App.jsx(IpamStandalone)·Summary.jsx(GuestOsVmsModal) 호환을 위해 아래에서 재export 한다.
 import React, { useEffect, useState } from 'react';
-import { fetchJson, postJson, usePolling, toolAllowed, can } from '../api.js';
+import { fetchJson, postJson, usePolling, toolAllowed, toolExplicitlyAllowed, can, getCurrentUser } from '../api.js';
 import { SearchBox } from '../components/ui.jsx';
+import BoldText from '../components/boldText.jsx';
 import { TOOLS } from './specialToolsList.js';
+import { visibleTools, gridIntro } from './toolVisibility.js';
 import { buildSections } from './toolSections.js'; // 카테고리 섹션 계산(v2.455, 순수)
 import { searchTools } from './toolSearch.js'; // 도구 검색 매칭(v2.508, 순수 · V4 팔레트와 공용)
 
@@ -209,7 +211,9 @@ export default function SpecialTools() {
   // 어떤 기능이 있는지는 보이고, 권한이 없으면 클릭만 막아 관리자에게 요청할 수 있게 한다.
   const lockReasonOf = (t) => {
     if (!t) return '알 수 없는 기능입니다.';
-    if (t.adminOnly && !isAdmin) return '관리자(admin) 전용 기능입니다.';
+    // v2.555: 관리자가 이 계정에 **명시적으로** 허용한 도구면 'adminOnly' 표시 관례를 넘긴다
+    // (그 플래그는 접근제어가 아니다 — api.js toolExplicitlyAllowed 주석). 서버 권한은 그대로다.
+    if (t.adminOnly && !isAdmin && !toolExplicitlyAllowed(t.k)) return '관리자(admin) 전용 기능입니다.';
     // 기능별 권한(예: NSX=inv.nsx) — 상단 메뉴에서 이동한 도구의 접근 경계를 그대로 보존한다.
     if (t.perm && !can(t.perm)) return '이 기능에 대한 접근 권한이 없습니다 — 관리자에게 요청하세요(설정 › 사용자 관리 › 권한).';
     if (!toolAllowed(t.k)) return '이 기능에 대한 접근 권한이 없습니다 — 관리자에게 요청하세요(설정 › 사용자 관리 › 특수 기능 도구별 접근).';
@@ -231,7 +235,10 @@ export default function SpecialTools() {
   // 전 도구를 노출하되, 권한이 없으면 disabled(회색·클릭불가)로 표시한다(숨기지 않음).
   // 외부 포탈 항목은 주소가 설정된 경우에만 노출한다(미설치 환경에 죽은 카드를 남기지 않음).
   // topTab(상단 메뉴로 승격) 항목은 카드로 노출하지 않는다(권한 매트릭스 편집용으로만 목록에 존재).
-  const base = TOOLS.filter((t) => !t.topTab).filter((t) => !t.external || externalUrls[t.external]).map((t) => {
+  // v2.555: **허용 목록 모드에서는 목록 밖 도구를 숨긴다**(사용자 선택 '아예 숨긴다').
+  // 거부 목록 모드는 위 주석대로 회색 잠금을 유지한다 — 판정은 views/toolVisibility.js 하나.
+  const base = visibleTools(TOOLS, { isAdmin, toolsAllowed: getCurrentUser()?.toolsAllowed || null })
+    .filter((t) => !t.topTab).filter((t) => !t.external || externalUrls[t.external]).map((t) => {
     const lock = lockReasonOf(t);
     return lock ? { ...t, disabled: true, comingSoon: false, lockReason: lock } : t;
   });
@@ -265,7 +272,11 @@ export default function SpecialTools() {
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🛠️ 특수 기능</div>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: recent.length ? 6 : 14 }}>
-        <div className="muted" style={{ fontSize: 13 }}>아래 기능을 클릭하면 해당 진단을 실행해 보여줍니다. <b>🔒 회색 카드</b>는 접근 권한이 없어 클릭할 수 없습니다.</div>
+        {/* v2.555: 허용 목록 모드에서는 회색 카드가 하나도 없으므로 그 안내가 **거짓**이 된다.
+            판정·문구는 toolVisibility.gridIntro 하나가 소유한다(Chromium 판독에서 발견). */}
+        <div className="muted" style={{ fontSize: 13 }}>
+          <BoldText text={gridIntro({ isAdmin, toolsAllowed: getCurrentUser()?.toolsAllowed || null, shownCount: base.length })} />
+        </div>
         <SearchBox className="input" style={{ maxWidth: 280 }} placeholder="메뉴 빠른 찾기 (예: G, GPU, IP)" value={menuQ} onChange={setMenuQ}
           onKeyDown={(e) => { if (e.key === 'Enter') addRecent(e.target.value); }} />
       </div>

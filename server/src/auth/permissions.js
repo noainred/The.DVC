@@ -92,6 +92,71 @@ const DEFAULT_MATRIX = {
 // 그 역할이 'tools' 기본 권한을 가지면 모든 도구 접근(기존 동작 유지). admin 은 거부 대상 아님.
 const DEFAULT_TOOLS_DENIED = { operator: [], viewer: [] };
 
+/*
+ * ══ 사용자별 도구 재정의(v2.555) ═══════════════════════════════════════════════
+ *
+ * 사용자 요청(2026-09-18): "특정 사용자는 특수기능의 특정 기능만 사용할 수 있고, 나머지 기능은
+ * 권한이 제한됩니다 라는 메뉴를 띄우고 **보여주지 않고** 싶다 — 예를 들면 스토리지 엔지니어에게
+ * 스토리지 메뉴만". 선택: **허용 목록 모드 추가** · **사용자 단위** · **아예 숨김**.
+ *
+ * ── 왜 '허용 목록' 모드를 새로 두는가 ────────────────────────────────────────
+ * 기존 `toolsDenied` 는 **거부 목록**이다(도구가 프론트에서 동적으로 늘어나 allow-list 를 매번
+ * 시드할 수 없었기 때문 — 위 주석). 그런데 "스토리지만 허용" 을 거부 목록으로 표현하려면 나머지
+ * **수십 개를 전부 적어야** 하고, 더 나쁜 것은 **새 도구가 추가될 때마다 그 사용자에게 자동으로
+ * 열린다**(적어 둔 거부 목록에 새 키가 없으므로). 그래서 두 모드를 **함께** 지원한다:
+ *   · `allow` — 적은 것만 허용. 새 도구는 **자동으로 차단**된다(거부 기본값).
+ *   · `deny`  — 적은 것을 역할 거부에 **더한다**(기존 사고방식의 사용자 단위 확장).
+ * 역할별 `toolsDenied` 는 **그대로 둔다** — 기존 계정 동작 불변(회귀 0).
+ *
+ * ⚠ **`allow` 모드는 역할 거부를 대체한다**(합치지 않는다). 관리자가 그 사람에게 "이것만" 이라고
+ *   명시한 것이므로 역할 거부와 교집합을 내면 **관리자가 준 것이 조용히 사라진다**. 대신 상위
+ *   게이트인 `tools` 기능 권한은 **여전히 필요하다** — 그것이 없으면 허용 목록이 있어도 아무것도
+ *   못 본다. 그 조합을 화면이 경고해야 한다(무음 실패 금지).
+ * ⚠ **재정의 없음(`off`)은 저장하지 않는다** — false 를 쌓아 두면 '한 번 건드린 사용자' 와
+ *   '건드리지 않은 사용자' 를 구분할 수 없다(v2.550 `corps` 규약과 같은 판단).
+ * ⚠ **admin 은 재정의 대상이 아니다** — 관리자 잠김 방지는 이 파일의 최초 설계 원칙이다.
+ *   저장은 거부하고 사유를 돌려준다(조용히 무시하면 관리자가 적용된 줄 안다).
+ *
+ * ⚠ `SCHEMA_VERSION` 은 올리지 않는다 — 이 섹션은 **권한 키 추가가 아니다**. 파일에 `users` 가
+ *   없으면 `{}` 가 되어 '재정의 없음' 이고, 그것이 곧 기존 동작이라 **조용한 거부가 생길 수 없다**
+ *   (버전 마이그레이션은 '행이 곧 부여 목록' 인 권한 키에만 필요하다 — 위 SCHEMA_VERSION 주석).
+ */
+export const USER_TOOL_MODES = Object.freeze(['off', 'allow', 'deny']);
+/** 사용자명 형식 — 임의 키가 파일에 쌓이지 않게. `auth.js` 의 계정명 규칙과 같은 범위. */
+const USERNAME_RE = /^[A-Za-z0-9._@-]{1,64}$/;
+
+/** 사용자 재정의 1건 정규화(순수). 유효하지 않으면 `null`(= 저장하지 않는다). */
+function sanitizeUserEntry(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const mode = String(raw.mode || '').trim();
+  if (!USER_TOOL_MODES.includes(mode) || mode === 'off') return null;   // off 는 항목을 만들지 않는다
+  const tools = sanitizeTools(raw.tools);
+  /*
+   * ⚠ **`allow` + 빈 목록을 버리지 말 것.** "이 사용자에게 특수기능을 하나도 주지 않는다" 는
+   *   정당한 설정이고, 버리면 그 의도가 조용히 '제한 없음' 으로 되돌아간다(최악의 거짓).
+   *   반대로 `deny` + 빈 목록은 아무것도 막지 않으므로 '재정의 없음' 과 같다 → 저장하지 않는다.
+   */
+  if (mode === 'deny' && !tools.length) return null;
+  return {
+    mode,
+    tools,
+    at: Number(raw.at) > 0 ? Math.round(Number(raw.at)) : 0,
+    by: String(raw.by || '').trim().slice(0, 64),
+  };
+}
+
+function sanitizeUsers(raw) {
+  const out = {};
+  const src = raw && typeof raw === 'object' ? raw : {};
+  for (const [name, v] of Object.entries(src)) {
+    const u = String(name || '').trim();
+    if (!USERNAME_RE.test(u)) continue;
+    const e = sanitizeUserEntry(v);
+    if (e) out[u] = e;
+  }
+  return out;
+}
+
 function matrixFile() {
   return path.join(config.configDir, 'permissions.json');
 }
@@ -131,6 +196,7 @@ function defaultMatrix() {
     operator: [...DEFAULT_MATRIX.operator],
     viewer: [...DEFAULT_MATRIX.viewer],
     toolsDenied: { operator: [...DEFAULT_TOOLS_DENIED.operator], viewer: [...DEFAULT_TOOLS_DENIED.viewer] },
+    users: {},                 // v2.555 — 사용자별 도구 재정의(위 주석)
   };
 }
 
@@ -152,6 +218,7 @@ export function loadMatrix() {
           operator: sanitizeTools(td.operator ?? DEFAULT_TOOLS_DENIED.operator),
           viewer: sanitizeTools(td.viewer ?? DEFAULT_TOOLS_DENIED.viewer),
         },
+        users: sanitizeUsers(m.users),
       };
       return cached;
     } catch (err) {
@@ -180,6 +247,9 @@ export function saveMatrix(next = {}) {
       operator: td.operator !== undefined ? sanitizeTools(td.operator) : cur.toolsDenied.operator,
       viewer: td.viewer !== undefined ? sanitizeTools(td.viewer) : cur.toolsDenied.viewer,
     },
+    // ⚠ 부분 갱신: `users` 를 안 보내면 **기존 재정의를 유지**한다(역할 행만 저장하는 화면이
+    //   사용자 재정의를 통째로 날리지 않게 — 실제로 그 화면이 먼저 있었다).
+    users: next.users !== undefined ? sanitizeUsers(next.users) : (cur.users || {}),
   };
   persistMatrix();
   return cached;
@@ -197,6 +267,86 @@ export function roleToolsDenied(role) {
   if (role === 'admin') return [];
   const m = loadMatrix();
   return role === 'operator' ? [...m.toolsDenied.operator] : role === 'viewer' ? [...m.toolsDenied.viewer] : [];
+}
+
+/* ══ 사용자별 도구 접근 — 판정은 이 함수 하나가 소유한다(v2.555) ═══════════════
+ *
+ * ⚠⚠ **판정을 복제하지 말 것.** 이 값을 쓰는 곳이 셋이다 — ① 서버 집행(`auth/toolAccess.js`)
+ *   ② 로그인·`/auth/me` 응답(웹 숨김의 근거) ③ 관리 화면(무엇이 적용 중인지 표시).
+ *   세 곳이 각자 `mode === 'allow'` 를 해석하면 **화면은 숨겼는데 API 는 열려 있는** 상태가
+ *   생긴다 — v2.536 이 실제로 겪은 사고(프론트 탭 조건만 있고 서버 집행이 없었다)와 같은 유형이다.
+ */
+
+/**
+ * 이 사용자에게 실제로 적용되는 도구 접근(순수).
+ * @param {{username?:string, role?:string}|string} user  사용자 객체(문자열이면 역할로 본다 — 하위호환)
+ * @returns {{mode:'admin'|'role'|'allow'|'deny', allowed:string[]|null, denied:string[],
+ *            source:'admin'|'role'|'user', by:string, at:number}}
+ *   · `allowed` 가 배열이면 **그 목록만** 허용이다(그 밖은 전부 차단 — 새 도구도 차단).
+ *   · `allowed` 가 `null` 이면 `denied` 로 판정한다(기존 방식).
+ */
+export function effectiveToolAccess(user) {
+  const u = (typeof user === 'string') ? { role: user } : (user || {});
+  const role = String(u.role || '');
+  if (role === 'admin') return { mode: 'admin', allowed: null, denied: [], source: 'admin', by: '', at: 0 };
+  const m = loadMatrix();
+  const name = String(u.username || '').trim();
+  const ov = name ? (m.users || {})[name] : null;
+  if (ov && ov.mode === 'allow') {
+    /*
+     * ⚠ 역할 거부와 **합치지 않는다**(위 상수 주석). 관리자가 "이 사람은 이것만" 이라고 명시한
+     *   것이므로 교집합을 내면 준 것이 조용히 사라진다. 상위 게이트인 `tools` 기능 권한은
+     *   여전히 필요하고, 그 조합은 화면이 경고한다.
+     */
+    return { mode: 'allow', allowed: [...ov.tools], denied: [], source: 'user', by: ov.by || '', at: ov.at || 0 };
+  }
+  const roleDenied = role === 'operator' ? [...m.toolsDenied.operator]
+    : role === 'viewer' ? [...m.toolsDenied.viewer] : [];
+  if (ov && ov.mode === 'deny') {
+    // 합집합 — 역할이 막은 것 + 이 사용자만 추가로 막는 것.
+    return { mode: 'deny', allowed: null, denied: [...new Set([...roleDenied, ...ov.tools])], source: 'user', by: ov.by || '', at: ov.at || 0 };
+  }
+  return { mode: 'role', allowed: null, denied: roleDenied, source: 'role', by: '', at: 0 };
+}
+
+/**
+ * 그 도구를 이 사용자가 쓸 수 있는가(순수). 서버 집행과 응답이 같은 답을 쓰게 하는 단일 지점.
+ * ⚠ `tools` 기능 권한은 **여기서 보지 않는다** — 그것은 상위 게이트(`requirePerm('tools')`)의
+ *   몫이고, 두 판정을 섞으면 '왜 막혔나' 를 화면이 구분해 말할 수 없다.
+ */
+export function userToolAllowed(user, key) {
+  const k = String(key || '').trim();
+  if (!k) return true;
+  const a = effectiveToolAccess(user);
+  if (a.mode === 'admin') return true;
+  if (Array.isArray(a.allowed)) return a.allowed.includes(k);
+  return !a.denied.includes(k);
+}
+
+/**
+ * 사용자 재정의 저장. `mode:'off'` 면 **항목을 지운다**(false 를 쌓지 않는다).
+ * @returns {{ok:boolean, reason?:string, entry?:object|null}}
+ */
+export function setUserTools(username, { mode = 'off', tools = [], by = '' } = {}) {
+  const name = String(username || '').trim();
+  if (!USERNAME_RE.test(name)) return { ok: false, reason: '사용자명 형식이 올바르지 않습니다.' };
+  if (!USER_TOOL_MODES.includes(String(mode))) return { ok: false, reason: `mode 는 ${USER_TOOL_MODES.join('/')} 중 하나여야 합니다.` };
+  const cur = loadMatrix();
+  const users = { ...(cur.users || {}) };
+  if (String(mode) === 'off') {
+    delete users[name];
+  } else {
+    const e = sanitizeUserEntry({ mode, tools, at: Date.now(), by });
+    // `deny` + 빈 목록은 '재정의 없음' 과 같다 → 항목을 지운다(위 sanitizeUserEntry 주석).
+    if (!e) delete users[name]; else users[name] = e;
+  }
+  saveMatrix({ users });
+  return { ok: true, entry: users[name] || null };
+}
+
+/** 사용자 재정의 전체(화면·감사용). 값 그대로 — 비밀이 없다. */
+export function userToolOverrides() {
+  return { ...(loadMatrix().users || {}) };
 }
 
 /** 역할이 가진 권한 키 집합(Set). admin → 전체. */
