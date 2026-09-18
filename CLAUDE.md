@@ -1087,6 +1087,95 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `unreachable`/`not-run` 5경로를 실제 HTTP 로 돌렸고 `measured 3 · probeOk 1 · 33%` 를 실측).
       엣지의 `selfProbe` 성공 경로(`yourAgent` 가 개별 토큰 이름으로 오는 것)는 이 환경에
       `CENTRAL_URL` 이 없어 **코드 경로만** 확인했다 — 엣지가 올라간 뒤 첫 인출로 확인할 것.
+  - ⚠⚠ **외부 포탈 조회 API — '전부 노출' 이 아니라 허용 목록이고, 계약은 투사(projection)가 집행한다**
+    (`publicapi/{keys,allowlist,auth,openapi,time}.js` · `routes/publicApi.js` ·
+    `routes/admin/apiKeys.js` + 웹 `views/ApiKeys.jsx`·`apiKeyText.js`, v2.562 — 사용자 질문
+    "모든 기능에 대해서 api 서비스 엔드포인트를 만들어서 다른 포탈에서 읽어서 사용하게 할 수 있어?".
+    선택: **조회 전용 + 허용 목록** · **전용 API 키 신규 발급** · **버전 고정 경로 + OpenAPI** ·
+    **설정 화면에서 발급** · 1차 분류 **인벤토리 · 용량/사용량 · 장애/알람**):
+    - ⚠⚠ **'엔드포인트가 없다' 가 아니었다** — 이 저장소의 `/api/*` 라우트는 **686개**(조회 204 ·
+      상태변경 280)로 이미 있었다. 없던 것은 ① 기계 인증 ② 고정된 계약 ③ 문서다. 그래서 만든 것은
+      '새 API' 가 아니라 **좁은 공개 표면**이다. 상태변경 280개에는 RMA 원격 명령 실행 · VM
+      프로비저닝 · `shutdown` · 호스트 방화벽 변경 · **백업 다운로드(= `AUTH_SECRET`·TOTP 시크릿
+      사본)** 가 섞여 있다 — '전부 노출' 은 외부 키 하나가 인프라를 조작한다는 뜻이다.
+      `ENDPOINTS` 는 **전부 GET** 이고 테스트가 `v1.post|put|patch|delete` 가 0 임을 고정한다.
+    - ⚠⚠ **`CENTRAL_TOKEN`·`COLLECTOR_TOKEN` 을 재사용하지 말 것**(사용자 선택). 그 토큰은 엣지
+      수집 데이터 열람과 **설정 배포** 권한을 주고 **범위를 좁힐 축이 없다**. viewer 비밀번호
+      로그인도 아니다(세션·OTP 정책이 기계 호출과 맞지 않는다). 전용 키는 `sha256` **해시만**
+      보관하고(`api-keys.json`, SECRET_FILES + `.gitignore` **둘 다**) 평문은 **발급 응답에만**
+      실린다. 검증은 `crypto.timingSafeEqual`, 표기는 `tokenFingerprint` 8자(v2.560 규약 —
+      **전체 해시를 내보내는 export 를 만들지 말 것**: 그 값이 곧 저장값이다).
+    - ⚠⚠ **내부 응답 형태를 그대로 내보내지 않는다 — `project()` 가 선언 필드만 남긴다.** 이
+      저장소의 응답은 자체 UI 전용이라 필드가 자유롭게 바뀐다(`zoning.zones` 가 숫자→배열,
+      `capacityNote`→`capacityBasisNote` 로 바뀐 전례). 외부 소비자가 내부 형태에 붙으면 그
+      변경이 **남의 포탈을 깨뜨린다**. `{...row}` 로 펼치지 말 것 — 지금 없는 필드가 나중에
+      들어오며 조용히 샌다(v2.500 D/M1 · v2.503 S-3 와 같은 사고). 테스트가 **응답 키 집합 ==
+      선언 `fields`** 를 대조하므로 내부 필드가 사라지면 **소비자가 아니라 우리가 먼저** 안다.
+    - ⚠⚠ **범위 축이 없는 자원에 부분 데이터를 주지 않는다 — 403 `needs-full-scope`** 다.
+      스토리지 장비는 `datacenterId`(자유 라벨)만 있고 `vcenterId` 가 없어 vCenter 범위와
+      교집합할 수 없다(내부 라우트도 그래서 `fullScopeOnly`). 빈 목록은 **'장비 0대' 라는 거짓**
+      이고 전량은 범위 위반이다(v2.525 규약). 화면이 그 403 을 **미리** 말한다
+      (`fullScopeWarning`) — 숨기면 상대 포탈이 '토큰이 거부됐다' 고 오해한다.
+    - ⚠ **`scopedVcenterIds(user, snap)` 의 `null` 은 '제한 없음' 이다** — 빈 집합으로 읽으면
+      전체 범위 키가 **아무것도 못 본다**. 범위는 합성 사용자(`req.user`, `role:'viewer'`)로
+      기존 판정에 태운다 — 그 역할을 넓히지 말 것.
+    - ⚠⚠ **시각 표기는 `publicapi/time.js msOrNull` 하나가 소유한다**(v2.562 자체 검증에서 잡은
+      결함): `snap.generatedAt` 은 **ISO 문자열**(`store.js:402`)이고 DB 계열은 epoch ms 숫자다.
+      시각을 `numOrNull()` 로 통과시키면 ISO 가 **`null`** 이 되고, 이 API 의 계약이 "읽지 못한
+      값은 null" 이라 그것은 **'수집 시각을 읽지 못했다' 는 거짓**이 된다(`/inventory/collection`
+      의 `generatedAt` 이 실제로 그랬다). ⚠ **숫자 문자열을 `Date.parse` 에 넘기지 말 것** —
+      `Date.parse('12345')` 는 **연도 12345**(epoch 3.27e14)로 해석된다. 표기는 **epoch ms 하나**다.
+    - ⚠ **`normalizePeriods` 는 배열이 아니라 `{periods, dropped}` 를 돌려준다**(`storage/growth.js:43`).
+      v2.562 초판이 반환값을 그대로 넘겨 `/capacity/storage-growth` 가 **통째로 500**
+      (`periods.map is not a function`)이었다. 버린 개수도 응답에 밝힌다.
+    - ⚠⚠ **중복 집계는 테스트가 대조해야만 갈라지지 않는다**: `/inventory/summary` 의 합계는 내부
+      `/summary` 와 **같은 값이어야 하는데** 그 집계가 라우트 안에 인라인이라 꺼내 쓸 함수가 없다.
+      `test/publicApi2562.test.js` 가 두 값을 대조한다(실측 17항목 전부 일치 — 단위만 Ghz/GB/TB ↔
+      Mhz/MB/GB 로 다르다). ⚠ 이 대조를 지우면 중복 구현이 **조용히** 어긋난다.
+    - ⚠⚠ **`guarded()` 는 `Promise.resolve().then().catch()` 로 감싼다** — express 4 는 async
+      핸들러의 throw 를 잡지 않아 요청이 **응답 없이 매달린다**(v2.548 S1 실측 hang). 동기
+      `try/catch` 는 async reject 를 **놓친다**. `res.headersSent` 가드도 함께 둔다.
+    - **사유를 한 문구로 덮지 않는다**: 401 `missing-key`/`unknown-key`/`revoked`/`expired` ·
+      403 `no-groups`/`group-denied`/`needs-full-scope` · 404 `unknown-endpoint` · 429
+      `rate-limited`(+`Retry-After`) · 503 `not-collected`/`unavailable`. ⚠ **`no-groups` 는
+      403 이다**(키는 유효하고 인가가 빈 것) — 401 로 두면 상대 포탈이 멀쩡한 키를 재발급한다.
+      ⚠ 404 에 **경로 목록을 싣지 말 것**(열거 단서) — 카탈로그(`GET /api/v1/`)가 그 역할이고
+      거기서는 이미 키가 검증된 상태다.
+    - **첫 수집 미완료는 빈 배열이 아니라 503** 이다(v2.509 규약 — '데이터가 없다' 와 구분).
+      목록 상한은 `meta.truncated`·`meta.omitted`·`meta.limit` 로 **밝힌다**(조용한 상한 금지).
+      응답은 `Cache-Control: no-store`(키마다 범위가 달라 중간 캐시가 섞으면 남의 법인 데이터가 간다).
+    - **OpenAPI 는 카탈로그에서 생성하고 그 키가 쓸 수 있는 것만 담는다** — 손으로 쓴 스펙을 두면
+      문서와 응답이 갈라지고, 그때 상대 포탈은 **문서를 믿고** 잘못된 코드를 쓴다(v2.553 '조언이
+      틀리면 무음 실패보다 나쁘다'). 전량을 담으면 403 이 날 경로를 '있다' 고 말하게 된다.
+    - **빈 허용목록을 '전부 허용' 으로 읽지 말 것**(거부 기본값 — v2.555 규약). ⚠ 다만 **vCenter
+      범위의 빈 배열은 '전체'** 다 — 도구 권한 허용목록과 **방향이 반대**이므로 화면이 그 차이를
+      말한다. 모르는 분류는 **버리고 개수를 밝힌다**.
+    - ⚠ **카탈로그에 없는 분류를 라벨인 척 보여주지 말 것**(v2.562 스크린샷 판독에서 발견):
+      분류를 없앤 릴리스 뒤에는 옛 키가 사라진 분류를 들고 있고 그것은 아무 경로도 열지 않는다.
+      코드만 덩그러니 보여주면 사용자는 **아직 유효한 분류**로 읽는다 → `portal(무효)` + 각주 1회
+      (`staleGroups`). 기록은 **지우지 않는다**(무엇을 들고 있었는지가 진단).
+    - ⚠ **요청되지 않은 분류를 '있으니까' 로 함께 싣지 말 것**(v2.562 정직 기록): 초판이 관리자가
+      고르지 않은 `portal`(포탈 자체 상태)을 함께 넣었는데, 그것이 **선언 필드와 핸들러가 어긋난
+      채로** 있었다 — 선언은 `uptimeSec`·`source`·`generatedAt` 인데 핸들러는 `startedAt`·
+      `dataSource` 를 만들어 `project()` 가 3개를 영원히 `null` 로 채웠고, 근거로 읽던
+      `config.startedAt`·`collector.lastSeenAt` 은 **이 저장소에 없는 필드**였다(grep 0건 →
+      `edgesFresh` 가 언제나 0). 요청 범위를 넘겨 만들면 이렇게 검증이 얕아진다. 되살리려면
+      **근거 필드를 코드로 확인한 뒤** 별건으로.
+    - 권한은 **조회 admin · 발급/수정/폐기/삭제 adminOnly + `requireSettingsOwner`** 다 — 이 키는
+      전 함대 조회 데이터에 **상시** 접근하는 자격증명이라 백업 아카이브·중앙 토폰 배달과 같은
+      등급이다(v2.210 H3 기준). 전부 `logAudit` 하고 **평문은 남기지 않는다**(지문만 — v2.419).
+      ⚠ `logAudit` 의 인자명은 `user`·`target`·`detail` 이다(`audit.js:53`) — `actor` 로 쓰면
+      **조용히 버려진다**.
+    - ⚠ **표는 가로 스크롤 컨테이너로 감싸는 것만으로 부족하다 — 표에 `minWidth` 를 줄 것**
+      (v2.562 판독에서 발견): 없으면 브라우저가 스크롤 대신 **열을 짜부라뜨려** 400px 에서 셀이
+      한두 글자 폭으로 세로로 길어진다(실측 페이지 높이 6,054px → `minWidth` 부여 후 3,471px).
+      **넘침은 0px 이라 수치로는 안 잡힌다.** ⚠ **0 인 KPI 칸을 경고색으로 칠하지 말 것** —
+      숫자는 '문제 없음' 이라 하고 색은 '문제 있음' 이라 말한다(v2.556 규약).
+    - ⚠ **정직 기록 — 확인한 것과 못 한 것**: 목 서버(포트 4744)에 실제로 키를 발급해 **401·403·
+      404·429·200 전 경로를 HTTP 로 돌렸고** 투사 계약·범위 403·내부 집계 대조(17항목)·평문
+      미노출·Chromium 1440/400 을 실측했다. **실제 외부 포탈이 이 API 를 소비하는 것은 확인하지
+      못했다** — 첫 연동에서 `GET /api/v1/` 카탈로그와 `openapi.json` 을 상대가 읽는지로 확인할 것.
+
   - ⚠ **'빈 인벤토리' 배지는 클릭해 원인·상태·로그·조치를 본다**(`web/src/views/collectors/
     emptyInvText.js`·`EmptyInvModal.jsx` + `store.js storeStatus`, v2.560 — 사용자 요청 "빈 인벤터리로
     나올때 상태와 로그, 해결방법을 클릭하면 나오게 해줘"):

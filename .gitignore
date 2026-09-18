@@ -227,3 +227,6 @@ server/config/bmusage-alert-state.json
 #   ⚠ 비밀은 담지 않지만(토큰은 링크 객체에 넣지 않는다 — linkcheck/links.js 규약) 법인 이름과
 #     점검 짝은 운영 정보다. 이 저장소는 공개다(server/CLAUDE.md v2.535 규약).
 server/config/linkcheck-settings.json
+
+# v2.562: 외부 연동 API 키(해시·이름·지문·허용목록). SECRET_FILES 등록과 **별개** 항목이다.
+server/config/api-keys.json

@@ -41,6 +41,7 @@ import { startMappingExpiry } from './proxy/expiry.js';
 import { collectorRouter } from './routes/collector.js';
 import { startSelfRegister } from './agent/selfRegister.js';
 import { centralRouter } from './routes/central.js';
+import publicApiRouter from './routes/publicApi.js';
 import { dlSourceRouter } from './routes/dlsource.js';
 import { insightsRouter } from './routes/insights.js';
 import { metricsExportRouter } from './routes/metricsExport.js';
@@ -262,6 +263,14 @@ app.use(express.json({ limit: '1mb' }));
 
 app.use('/api/collector', collectorRouter);            // token-gated agent export (no user auth)
 app.use('/api/central', centralRouter);                // token-gated agent<->central (no user auth)
+/*
+ * 외부 포탈용 공개 조회 API(v2.562) — **키 기반**이라 사용자 세션 미들웨어를 타지 않는다
+ * (collector·central 과 같은 층). 인증·범위·허용목록은 라우터 안에서 직접 판정한다
+ * (`publicapi/auth.js` + `publicapi/allowlist.js`).
+ * ⚠ `authMiddleware`·`requireEnrolled` 를 붙이지 말 것 — 세션 사용자와 키 사용자가 한
+ *   라우터에 섞이면 판정이 흐려진다(머리말 참조). 조회 전용이므로 BIG_JSON 도 필요 없다.
+ */
+app.use('/api/v1', publicApiRouter);
 app.use('/dl', dlSourceRouter);                        // 중앙 업그레이드 소스(versions.json + 번들, 공개)
 app.use('/metrics', metricsExportRouter);              // Prometheus/OTel 익스포터(선택 토큰)
 app.use('/api/auth', authRouter);                      // public: login / config / me

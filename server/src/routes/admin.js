@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { registerStatusTools } from './admin/statusTools.js';
+import { registerApiKeys } from './admin/apiKeys.js';
 import { registerUsers } from './admin/users.js';
 import { registerDeployLlm } from './admin/deployLlm.js';
 import { registerCentralIpam } from './admin/centralIpam.js';
@@ -26,6 +27,7 @@ import { registerSecurityCheck } from './admin/securityCheck.js'; // v2.500: 설
 // (idracRouteOrder.test.js 가 런타임으로 검증). adminOnly·requireSettingsOwner 는 admin/shared.js.
 export const adminRouter = Router();
 registerStatusTools(adminRouter);
+registerApiKeys(adminRouter);            // 설정 › 연동 키(외부 포탈용 API 키, v2.562)
 registerUsers(adminRouter);
 registerDeployLlm(adminRouter);
 registerCentralIpam(adminRouter);
