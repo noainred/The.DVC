@@ -85,7 +85,11 @@ export function reconcileCursor(cursor, max) {
 async function statusPayload() {
   try {
     const { perfStatusForCentral } = await import('./perfPoller.js');
-    return { ...perfStatusForCentral(), pushAt: _last?.at || null, version: currentVersion() };
+    /*
+     * ⚠ `pushError` 를 빼지 말 것(v2.566) — 이 값이 없어서 v2.427 의 중계 정지가 10일 동안
+     * 중앙에 전달되지 않았다. 엣지에서만 아는 실패 사유를 화면이 말할 수 있는 유일한 통로다.
+     */
+    return { ...perfStatusForCentral(), pushAt: _last?.at || null, pushError: _last?.error || null, version: currentVersion() };
   } catch (e) {
     // 상태를 못 만들어도 push 를 막지 않는다 — '모른다' 를 그대로 보낸다(지어내지 않는다).
     return { enabled: loadPerfSettings().enabled, at: null, devices: [], statusError: String(e.message).slice(0, 200), version: currentVersion() };
@@ -114,7 +118,15 @@ export async function pushPerfNow() {
     const max = await maxRowid();
     const rec = reconcileCursor(from, max);
     if (rec !== from) { console.warn(`[sanswitch-perf-push] 커서(${from})가 현재 최대 rowid(${max})보다 큼 — 표가 비워졌다 재적재된 것으로 보고 0 으로 되돌립니다.`); from = rec; saveCursor(0); }
-    const { rows, maxRowid, unavailable } = await samplesAfter(from, MAX_ROWS);
+    /*
+     * ⚠⚠ **`maxRowid` 로 구조분해하지 말 것 — 위의 `await maxRowid()` 가 TDZ 로 던진다.**
+     * v2.427 이 커서 정합을 넣으며 실제로 그렇게 썼고, `const maxRowid` 가 이 블록 전체를
+     * TDZ 로 만들어 `pushPerfNow()` 가 **매 호출 첫 줄에서** ReferenceError 로 죽었다
+     * (실측: `Cannot access 'maxRowid' before initialization`). 호출부가 전부
+     * `.catch(() => {})` 라 **10일 동안 조용히** 엣지 사용량이 한 건도 중앙에 오지 않았다.
+     * 회귀는 `test/sanPerfPush2566.test.js` 가 실제로 이 함수를 호출해 고정한다.
+     */
+    const { rows, maxRowid: lastRowid, unavailable } = await samplesAfter(from, MAX_ROWS);
     const status = await statusPayload();
     if (unavailable) {
       // DB 를 못 열면 표본은 영원히 0건이다 — 그 사실도 중앙이 알아야 한다(아래 하트비트로 보고).
@@ -162,12 +174,21 @@ export async function pushPerfNow() {
       sent += c.length;
       if (c.length) saveCursor(Number(c[c.length - 1].rowid)); // 청크마다 커서 전진 — 다음 청크가 실패해도 성공분은 재전송하지 않는다
     }
-    _last = { at: Date.now(), sent, chunks: chunks.length, bytes, gzBytes, cursor: maxRowid, more: rows.length >= MAX_ROWS };
+    _last = { at: Date.now(), sent, chunks: chunks.length, bytes, gzBytes, cursor: lastRowid, more: rows.length >= MAX_ROWS };
     // 상한만큼 읽었으면 밀린 표본이 더 있을 수 있다 — 다음 틱을 기다리지 않고 이어서 한 번 더.
     if (rows.length >= MAX_ROWS) setImmediate(() => pushPerfNow().catch(() => {}));
     return { ok: true, sent, chunks: chunks.length };
-  } catch (e) { _last = { at: Date.now(), error: e.message }; return { ok: false, reason: e.message }; }
-  finally { _busy = false; }
+  } catch (e) {
+    /*
+     * ⚠ **여기를 조용히 두지 말 것**(v2.549·v2.561 규약). 호출부는 전부
+     * `pushPerfNow().catch(() => {})` 라 이 catch 가 유일한 기록 지점이고, v2.427~v2.565 는
+     * `_last.error` 에만 적어 **어디에도 드러나지 않았다** — 그것이 이 결함이 10일을 간 이유다.
+     * 상태 객체와 콘솔 **둘 다** 남긴다(엣지 로그 화면이 콘솔 링버퍼를 읽는다).
+     */
+    _last = { at: Date.now(), error: e.message };
+    console.warn(`[sanswitch-perf-push] 중계 실패: ${e.message}`);
+    return { ok: false, reason: e.message };
+  } finally { _busy = false; }
 }
 
 export function startSanSwitchPerfPush() {

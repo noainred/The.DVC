@@ -27,17 +27,32 @@
 export const PERF_DIAG_KINDS = [
   'db-unavailable',     // 이 서버가 node:sqlite 를 쓸 수 없다 → 이력 자체가 저장되지 않는다
   'out-of-range',       // 표본은 있는데 조회 기간 밖 → 기간을 넓히면 보인다
+  'stale',              // 표본이 있지만 **한참 오래됐다** — 수집이 멈춘 것이다(기간을 넓혀도 새 값은 없다)
   'rest-method',        // REST 수집 장비 → portperfshow 미사용(설계상 영구 없음)
   'edge-no-report',     // 엣지 위임인데 엣지가 상태를 한 번도 보고하지 않았다
   'edge-disabled',      // 엣지가 '수집 꺼짐' 으로 보고했다
   'edge-device-failed', // 엣지가 이 장비에서 실패했다고 보고했다
   'edge-first-cycle',   // 엣지가 켜졌고 아직 첫 수집 전 → 기다리면 된다
+  'edge-push-failed',   // 엣지가 수집은 했는데 **중앙으로 올리지 못한다**(엣지가 사유를 보고했다)
   'edge-pending-push',  // 엣지는 수집했는데 중앙에 아직 반영 전 → 기다리면 된다
   'disabled',           // 중앙 직접 장비인데 수집이 꺼져 있다
   'device-failed',      // 중앙이 이 장비 수집에 실패했다
   'first-cycle',        // 켜졌고 아직 첫 폴 전 → 기다리면 된다
   'collected-empty',    // 폴은 돌았는데 이 장비 표본이 없다(원인 단정 금지)
 ];
+
+/**
+ * '멈춘 것' 으로 볼 나이. 수집 주기의 배수이되 **최소 1시간**이다(기본 5분 주기면 12주기 연속
+ * 결손 — 일시적 실패가 아니라 정지다). 주기를 모르면 최소값만 쓴다.
+ * ⚠ 숫자를 화면 문구에 박지 말 것 — 판정과 근거(`sampleAgeMs`·`staleLimitMs`)만 서버가 주고
+ *   문장은 웹이 만든다(v2.517 규약).
+ */
+export const STALE_FACTOR = 6;
+export const STALE_MIN_MS = 3600_000;
+export const staleLimitMs = (intervalMs) => {
+  const n = Number(intervalMs);
+  return Number.isFinite(n) && n > 0 ? Math.max(STALE_MIN_MS, n * STALE_FACTOR) : STALE_MIN_MS;
+};
 
 // ⚠ `Number(null)` 은 0 이고 0 은 유한수다 — null 을 그대로 통과시키면 '표본 시각 0'(1970년)이
 // 되어 기간 판정이 뒤집힌다(초판에서 실제로 `lastSampleAt: 0` 이 나왔다). null/''/undefined 는 null.
@@ -64,6 +79,7 @@ const num = (v) => {
 export function perfEmptyDiag({
   device = null, settings = null, dbUnavailable = false,
   lastSampleAt = null, since = null, poller = null, lastEvent = null, edge = null,
+  now = Date.now(),
 } = {}) {
   const agent = String(device?.agent || '').trim();
   const facts = {
@@ -80,6 +96,10 @@ export function perfEmptyDiag({
     edgeAt: num(edge?.at),
     edgePushAt: num(edge?.pushAt),
     edgeEnabled: edge ? edge.enabled === true : null,
+    edgePushError: edge?.pushError ? String(edge.pushError).slice(0, 300) : null,
+    now: num(now),
+    sampleAgeMs: null,
+    staleLimitMs: null,
   };
   const out = (kind, waiting) => ({ kind, waiting, facts });
 
@@ -89,6 +109,21 @@ export function perfEmptyDiag({
   // ② 표본이 **있는데** 화면이 비었다면 원인은 조회 기간이다 — '수집 안 됨' 이라 말하면 거짓이다.
   //    since 를 모르면(범위 미지정) 판정하지 않는다(있는 표본을 '기간 밖' 이라 단정하지 않기 위해).
   if (facts.lastSampleAt != null && facts.since != null && facts.lastSampleAt < facts.since) {
+    /*
+     * ⚠⚠ **'기간을 넓히세요' 만 말하면 거짓이 될 수 있다**(v2.566, 사용자 신고 "엣지 장비는
+     * 차트가 안 보인다"). 그 현장은 마지막 표본이 **10일 전**이었는데 화면이
+     * "이 기간에는 표본이 없습니다 — **수집은 되고 있습니다**" 라고 말했다. 실제로는 엣지 중계가
+     * v2.427 의 TDZ 결함으로 죽어 있었고, 기간을 넓혀 봐야 **10일 전 값**만 보인다.
+     * 그래서 마지막 표본의 나이가 정지 수준이면 별도 판정으로 가른다 — 둘은 **조치가 다르다**
+     * (기간을 넓힌다 / 수집 경로를 고친다).
+     * ⚠ 수집이 꺼져 있으면 오래된 것이 **정상**이다 — 그때는 아래 '꺼짐' 판정이 말하게 둔다.
+     */
+    facts.staleLimitMs = staleLimitMs(facts.intervalMs);
+    if (facts.now != null) facts.sampleAgeMs = facts.now - facts.lastSampleAt;
+    const running = agent ? edge?.enabled === true : facts.enabled;
+    if (running && facts.sampleAgeMs != null && facts.sampleAgeMs > facts.staleLimitMs) {
+      return out('stale', false);
+    }
     return out('out-of-range', false);
   }
 
@@ -108,6 +143,18 @@ export function perfEmptyDiag({
       return out('edge-device-failed', false);
     }
     if (facts.edgeAt == null) return out('edge-first-cycle', true);
+    /*
+     * ⚠⚠ **'기다리면 온다' 와 '못 올리고 있다' 는 다르다**(v2.566). v2.427~v2.565 에서 엣지의
+     * `pushPerfNow()` 가 TDZ 로 매번 죽었는데, 그 사실이 중앙에 전달될 길이 없어 화면은 계속
+     * '곧 도착한다' 는 쪽으로만 말했다. 이제 엣지가 마지막 push 오류를 함께 보고하므로
+     * 그것이 있으면 **기다리는 문제가 아니라고** 말한다(`waiting:false`).
+     */
+    if (facts.edgePushError) {
+      facts.error = facts.edgePushError;
+      facts.errorAt = num(edge?.pushAt);
+      facts.errorSource = agent;
+      return out('edge-push-failed', false);
+    }
     return out('edge-pending-push', true);   // 엣지는 돌았다 → push 주기 안에 도착한다
   }
 
