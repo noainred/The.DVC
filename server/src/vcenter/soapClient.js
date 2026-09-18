@@ -1260,7 +1260,9 @@ export async function collectFromVCenterSoap(vc) {
       { type: 'ClusterComputeResource', paths: ['name'] },
       { type: 'HostSystem', paths: [
         'name', 'parent', 'runtime.connectionState', 'runtime.powerState', 'runtime.inMaintenanceMode',
-        'summary.hardware.numCpuCores', 'summary.hardware.numCpuThreads', 'summary.hardware.cpuMhz', 'summary.hardware.memorySize',
+        // v2.556: cpuModel 추가(사용자 요청 — 호스트 상세에 CPU 모델명). 같은 retrieveProperties
+        // 에 필드 하나를 더하는 것이라 **SOAP 왕복은 늘지 않는다**(문자열 1개/호스트).
+        'summary.hardware.numCpuCores', 'summary.hardware.numCpuThreads', 'summary.hardware.cpuMhz', 'summary.hardware.cpuModel', 'summary.hardware.memorySize',
         'summary.config.product.version', 'summary.config.product.build', 'config.graphicsInfo',
         'config.pciPassthruInfo', 'hardware.pciDevice',
         'summary.hardware.vendor', 'summary.hardware.model', 'summary.hardware.otherIdentifyingInfo', 'config.storageDevice.hostBusAdapter',
@@ -1329,6 +1331,9 @@ export async function collectFromVCenterSoap(vc) {
         memUsageMB,
         memUsagePct: pct(memUsageMB, memTotalMB),
         cpuThreads: num(p['summary.hardware.numCpuThreads']) || cores,
+        // CPU 모델명(예: 'Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz'). 못 받으면 빈 문자열 —
+        // 화면이 '—' 로 표시한다(모델명을 코어 수나 클럭으로 추측해 지어내지 않는다).
+        cpuModel: String(p['summary.hardware.cpuModel'] || '').trim(),
         version: p['summary.config.product.version'] || '',
         build: p['summary.config.product.build'] || '',
         // 게스트 파일 회수용: vCenter 실제 IP(호스트가 보고) + ESXi 관리 IP(vmk).

@@ -42,7 +42,14 @@ export function useTool(path, params) {
   return state;
 }
 
-export function tempColor(c) { return c == null ? 'var(--text-faint)' : c >= 40 ? 'var(--red)' : c >= 32 ? 'var(--amber)' : 'var(--green)'; }
+/*
+ * 온도 임계(v2.556) — KPI 개수·히스토그램 임계선·표 행 배경·히트맵 타일 색이 **같은 상수**를
+ * 써야 한다. 예전에는 이 함수 안에만 32/40 이 있어 화면 여러 곳이 숫자를 각자 적었고, 한 곳을
+ * 고치면 색과 개수가 어긋났다(docs/design/server-temp/README.md §Design Tokens).
+ */
+export { TEMP_WARN_C, TEMP_HOT_C } from './serverTemp/board.js';
+import { TEMP_WARN_C, TEMP_HOT_C } from './serverTemp/board.js';
+export function tempColor(c) { return c == null ? 'var(--text-faint)' : c >= TEMP_HOT_C ? 'var(--red)' : c >= TEMP_WARN_C ? 'var(--amber)' : 'var(--green)'; }
 
 // 집계 단위(bucketMs)에 맞춰 X축 라벨: 분/시간이면 시각, 일 이상이면 날짜.
 function fmtTempTick(ts, bucketMs) {

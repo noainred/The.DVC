@@ -76,6 +76,17 @@ const HW = [
   { vendor: 'Cisco Systems Inc', model: 'UCSC-C240-M6' },
   { vendor: 'Supermicro', model: 'SYS-220U-TNR' },
 ];
+/* v2.556: CPU 모델 믹스(데모) — 코어 수와 어울리는 실제 제품명을 쓴다. 이 값은 mock 이며
+   실장비 값은 vCenter `summary.hardware.cpuModel` 에서 온다. */
+const CPU_MODELS = [
+  'Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz',
+  'Intel(R) Xeon(R) Gold 6348 CPU @ 2.60GHz',
+  'Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz',
+  'Intel(R) Xeon(R) Gold 5318Y CPU @ 2.10GHz',
+  'AMD EPYC 7763 64-Core Processor',
+  'AMD EPYC 9354 32-Core Processor',
+  'Intel(R) Xeon(R) Gold 6248R CPU @ 3.00GHz',
+];
 const HBA_FC = [
   { model: 'Emulex LPe35002 32Gb FC', speeds: [32, 16] },
   { model: 'QLogic QLE2772 32Gb FC', speeds: [32, 32] },
@@ -333,6 +344,7 @@ export function generateSnapshot() {
         memUsagePct: Math.round((memUsageMB / h.memTotalMB) * 100),
         vmCount: vmsOnHost.length,
         cpuThreads: h.cpuCores * 2, // logical cores (hyper-threaded)
+        cpuModel: CPU_MODELS[(h.idx * 3 + site.id.length) % CPU_MODELS.length],
         version: ESXI_VERSIONS[(h.idx + site.id.length) % ESXI_VERSIONS.length],
         vendor: HW[(h.idx + site.id.length) % HW.length].vendor,
         model: HW[(h.idx + site.id.length) % HW.length].model,

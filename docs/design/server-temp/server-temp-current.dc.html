@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+html, body { height: 100%; margin: 0; color-scheme: dark; }
+body { background: radial-gradient(1200px 600px at 70% -10%, #16213a 0%, #0a0e17 55%); color: #e6edf6; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; font-size: 14px; -webkit-font-smoothing: antialiased; }
+a { color: #22d3ee; } a:hover { color: #3b82f6; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+</style>
+</helmet>
+<div data-screen-label="서버 온도 (현재)" style="display:flex;flex-direction:column;min-height:100vh;box-sizing:border-box">
+  <header style="display:flex;align-items:center;gap:20px;padding:14px 24px;background:linear-gradient(180deg, rgba(20,27,45,0.95), rgba(20,27,45,0.75));border-bottom:1px solid #243049;position:sticky;top:0;z-index:30;backdrop-filter:blur(8px)">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg, #3b82f6, #22d3ee);display:grid;place-items:center;font-weight:800;color:#04101f;cursor:pointer">V</div>
+      <div>
+        <h1 style="font-size:16px;margin:0;font-weight:700;letter-spacing:.2px;line-height:1.15">The Davinci<br>Virtual Platform</h1>
+        <div style="display:flex;gap:6px;margin-top:5px">
+          <span style="font-size:11px;font-weight:700;color:#22d3ee;background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.3);padding:1px 7px;border-radius:10px;cursor:pointer;line-height:1.35">v2.553.0</span>
+          <span style="font-size:11px;font-weight:700;color:#4ade80;background:rgba(34,197,94,.12);border:1px solid transparent;padding:1px 7px;border-radius:10px;cursor:pointer;line-height:1.35">LIVE</span>
+        </div>
+      </div>
+    </div>
+    <nav style="display:flex;gap:4px;margin-left:12px;flex-wrap:wrap">
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">Overview</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">Summary</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">Platform</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">Monitoring</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">VM호스트</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">가상머신</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">스토리지</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">네트워크</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">IP관리</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">알람</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#fff;font-weight:600;border:1px solid #3b82f6;background:#3b82f6;font-size:13px;font-family:inherit">특수 기능</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">인사이트</button>
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">설정</button>
+    </nav>
+    <div style="flex:1"></div>
+    <div style="display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:20px;background:#1a2236;border:1px solid #243049;font-size:12px;color:#8b9bb4;white-space:nowrap;flex-shrink:0">
+      <div style="display:flex;flex-direction:column;line-height:1.3">
+        <span style="display:inline-flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 8px #22c55e;animation:pulse 2s infinite"></span><span>21/21 vCenter</span><span style="color:#4ade80;font-weight:700">OK</span></span>
+        <span style="font-size:11px;text-align:center;color:#8b9bb4">오전 8:24:07</span>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg, #22d3ee, #3b82f6);color:#04101f;font-weight:800">A</div>
+      <div style="line-height:1.2">
+        <div style="font-size:13px;font-weight:600">admin</div>
+        <div style="font-size:11px;text-transform:capitalize;color:#8b9bb4">admin</div>
+      </div>
+      <button style="margin-left:6px;padding:7px 12px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;background:#1a2236;border:1px solid #243049;color:#8b9bb4;font-family:inherit" style-hover="color:#e6edf6;border-color:#3b82f6">Out</button>
+    </div>
+  </header>
+
+  <main style="padding:22px 24px 72px;max-width:1680px;width:100%;margin:0 auto;box-sizing:border-box">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+      <button style="padding:8px 14px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:13px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">← 특수 기능</button>
+      <div style="font-size:13px;text-transform:uppercase;letter-spacing:1px;color:#5d6b85;margin:0;font-weight:700">🌡️ 서버 온도</div>
+      <div style="display:flex;gap:12px;align-items:center">
+        <span style="color:#8b9bb4">범위</span>
+        <select style="background:#141b2d;border:1px solid #243049;color:#e6edf6;padding:8px 12px;border-radius:8px;font-size:13px;outline:none;min-width:120px;font-family:inherit">
+          <option>전체 vCenter</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:14px;margin-bottom:14px">
+      <div style="background:linear-gradient(180deg, #141b2d, #111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4)">
+        <div style="color:#8b9bb4;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">온도 수집 서버</div>
+        <div style="font-size:24px;font-weight:800;margin-top:6px;line-height:1;text-align:center">1157</div>
+        <div style="font-size:12px;color:#5d6b85;margin-top:8px">iDRAC 1133 · ESXi 24</div>
+      </div>
+      <div style="background:linear-gradient(180deg, #141b2d, #111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4)">
+        <div style="color:#8b9bb4;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">물리 서버 평균</div>
+        <div style="font-size:24px;font-weight:800;margin-top:6px;line-height:1;text-align:center;color:#f59e0b">20.4℃</div>
+        <div style="font-size:12px;color:#5d6b85;margin-top:8px">502대 · 최고 100℃</div>
+      </div>
+      <div style="background:linear-gradient(180deg, #141b2d, #111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4)">
+        <div style="color:#8b9bb4;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">가상화 서버 평균</div>
+        <div style="font-size:24px;font-weight:800;margin-top:6px;line-height:1;text-align:center;color:#22c55e">20.7℃</div>
+        <div style="font-size:12px;color:#5d6b85;margin-top:8px">655대 · 최고 98℃</div>
+      </div>
+      <div style="background:linear-gradient(180deg, #141b2d, #111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4)">
+        <div style="color:#8b9bb4;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">최고 온도</div>
+        <div style="font-size:24px;font-weight:800;margin-top:6px;line-height:1;text-align:center;color:#ef4444">100℃</div>
+        <div style="font-size:12px;color:#5d6b85;margin-top:8px">흡기 평균 20.6℃</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
+      <button style="flex:none;margin-top:4px;padding:7px 14px;border-radius:8px;border:none;cursor:pointer;background:linear-gradient(135deg, #3b82f6, #2563eb);color:#fff;font-weight:700;font-size:14px;font-family:inherit">서버별</button>
+      <button style="flex:none;margin-left:6px;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;background:#1a2236;border:1px solid #243049;color:#8b9bb4;font-family:inherit" style-hover="color:#e6edf6;border-color:#3b82f6">ESXi 호스트별</button>
+      <button style="flex:none;margin-left:6px;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;background:#1a2236;border:1px solid #243049;color:#8b9bb4;font-family:inherit" style-hover="color:#e6edf6;border-color:#3b82f6">클러스터별</button>
+      <button style="flex:none;margin-left:6px;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;background:#1a2236;border:1px solid #243049;color:#8b9bb4;font-family:inherit" style-hover="color:#e6edf6;border-color:#3b82f6">법인별</button>
+      <span style="width:1px;height:20px;background:rgba(255,255,255,.14)"></span>
+      <button style="flex:none;margin-top:4px;padding:6px 12px;border-radius:8px;border:none;cursor:pointer;background:linear-gradient(135deg, #3b82f6, #2563eb);color:#fff;font-weight:700;font-size:12px;font-family:inherit">전체 1157</button>
+      <button style="flex:none;padding:6px 12px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:12px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">물리 502</button>
+      <button style="flex:none;padding:6px 12px;border-radius:8px;cursor:pointer;color:#8b9bb4;font-weight:600;border:1px solid transparent;background:none;font-size:12px;font-family:inherit" style-hover="color:#e6edf6;background:#1a2236">가상화 655</button>
+    </div>
+
+    <div style="overflow:auto;border-radius:12px;border:1px solid #243049;margin-bottom:12px">
+      <div style="color:#8b9bb4;font-size:12px;margin:0 0 6px">법인별 평균 — 물리 서버와 가상화 서버를 나눠서 봅니다.</div>
+      <div style="overflow:auto;border-radius:12px;border:1px solid #243049;max-height:64vh">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;color:#e6edf6">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">법인</th>
+              <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">물리 대수</th>
+              <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">물리 평균 ℃</th>
+              <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">물리 최고 ℃</th>
+              <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">가상화 대수</th>
+              <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">가상화 평균 ℃</th>
+              <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">가상화 최고 ℃</th>
+              <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">전체 평균 ℃ ▼</th>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{ dcRows }}" as="r" hint-placeholder-count="18">
+              <tr style-hover="background:rgba(59,130,246,.06)">
+                <td style="text-align:left;padding:10px 14px;border-bottom:{{ r.bb }};white-space:nowrap">{{ r.name }}</td>
+                <td style="text-align:right;padding:10px 14px;border-bottom:{{ r.bb }};white-space:nowrap">{{ r.pN }}</td>
+                <td style="text-align:right;padding:10px 14px;border-bottom:{{ r.bb }};white-space:nowrap"><span style="color:{{ r.pAvgC }}">{{ r.pAvg }}</span></td>
+                <td style="text-align:right;padding:10px 14px;border-bottom:{{ r.bb }};white-space:nowrap"><span style="color:{{ r.pMaxC }}">{{ r.pMax }}</span></td>
+                <td style="text-align:right;padding:10px 14px;border-bottom:{{ r.bb }};white-space:nowrap">{{ r.vN }}</td>
+                <td style="text-align:right;padding:10px 14px;border-bottom:{{ r.bb }};white-space:nowrap"><span style="color:{{ r.vAvgC }}">{{ r.vAvg }}</span></td>
+                <td style="text-align:right;padding:10px 14px;border-bottom:{{ r.bb }};white-space:nowrap"><span style="color:{{ r.vMaxC }}">{{ r.vMax }}</span></td>
+                <td style="text-align:right;padding:10px 14px;border-bottom:{{ r.bb }};white-space:nowrap"><b style="color:{{ r.aAvgC }}">{{ r.aAvg }}</b></td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="overflow:auto;border-radius:12px;border:1px solid #243049;max-height:64vh">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;color:#e6edf6">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">서버</th>
+            <th style="text-align:left;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">구분</th>
+            <th style="text-align:left;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">출처</th>
+            <th style="text-align:left;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">클러스터</th>
+            <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">현재온도 ℃ ▼</th>
+            <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">흡기 ℃</th>
+            <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">배기 ℃</th>
+            <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">CPU ℃</th>
+            <th style="text-align:right;padding:11px 14px;background:#1a2236;color:#8b9bb4;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;cursor:pointer;white-space:nowrap;border-bottom:1px solid #243049">최고 ℃</th>
+          </tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{ srvRows }}" as="s" hint-placeholder-count="12">
+            <tr style-hover="background:rgba(59,130,246,.06)">
+              <td style="text-align:left;padding:10px 14px;border-bottom:{{ s.bb }};white-space:nowrap"><span style="font-weight:{{ s.nameWeight }};color:{{ s.nameColor }}">{{ s.name }}</span></td>
+              <td style="text-align:left;padding:10px 14px;border-bottom:{{ s.bb }};white-space:nowrap"><span style="display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:{{ s.badgeBg }};color:{{ s.badgeColor }}">{{ s.kindLabel }}</span></td>
+              <td style="text-align:left;padding:10px 14px;border-bottom:{{ s.bb }};white-space:nowrap"><span style="color:#8b9bb4;font-size:11.5px">{{ s.source }}</span></td>
+              <td style="text-align:left;padding:10px 14px;border-bottom:{{ s.bb }};white-space:nowrap"><span style="color:#8b9bb4;font-size:12px">{{ s.cluster }}</span></td>
+              <td style="text-align:right;padding:10px 14px;border-bottom:{{ s.bb }};white-space:nowrap"><b style="color:{{ s.curC }}">{{ s.cur }}</b></td>
+              <td style="text-align:right;padding:10px 14px;border-bottom:{{ s.bb }};white-space:nowrap"><span style="color:{{ s.inletC }}">{{ s.inlet }}</span></td>
+              <td style="text-align:right;padding:10px 14px;border-bottom:{{ s.bb }};white-space:nowrap"><span style="color:{{ s.exhaustC }}">{{ s.exhaust }}</span></td>
+              <td style="text-align:right;padding:10px 14px;border-bottom:{{ s.bb }};white-space:nowrap"><span style="color:{{ s.cpuC }}">{{ s.cpu }}</span></td>
+              <td style="text-align:right;padding:10px 14px;border-bottom:{{ s.bb }};white-space:nowrap"><span style="color:{{ s.maxC }}">{{ s.max }}</span></td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </div>
+  </main>
+
+  <footer style="position:fixed;left:0;right:0;bottom:0;z-index:25;display:flex;align-items:stretch;background:linear-gradient(180deg, rgba(20,27,45,.92), rgba(10,14,23,.98));border-top:1px solid #243049;backdrop-filter:blur(8px)">
+    <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:10px;padding:9px 14px;border-right:1px solid #243049;font-size:13px"><span style="color:#5d6b85;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">서버 Uptime</span><span style="color:#e6edf6;font-weight:700;font-variant-numeric:tabular-nums">3분</span></div>
+    <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:10px;padding:9px 14px;border-right:1px solid #243049;font-size:13px"><span style="color:#5d6b85;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">전체 호스트</span><span style="color:#e6edf6;font-weight:700;font-variant-numeric:tabular-nums">655</span></div>
+    <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:10px;padding:9px 14px;border-right:1px solid #243049;font-size:13px"><span style="color:#5d6b85;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">전체 VM</span><span style="color:#e6edf6;font-weight:700;font-variant-numeric:tabular-nums">5,900 <small style="color:#8b9bb4;font-weight:400">(4,641 On)</small></span></div>
+    <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:10px;padding:9px 14px;font-size:13px"><span style="color:#5d6b85;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">활성 알람</span><span style="color:#e6edf6;font-weight:700;font-variant-numeric:tabular-nums">3</span></div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const tc = (c) => (c == null ? '#5d6b85' : c >= 40 ? '#ef4444' : c >= 32 ? '#f59e0b' : '#22c55e');
+    const fmt = (v) => (v == null ? '—' : String(v));
+    const DC = [
+      ['MIL', 0, null, null, 1, 27, 34, 27], ['MIL', 18, 24.8, 75, 34, 25.6, 78, 25.3], ['HG', 16, 24.9, 45, 26, 21.9, 74, 23],
+      ['NB-IRS', 0, null, null, 11, 22.9, 46, 22.9], ['NB', 24, 24, 77, 37, 22, 82, 22.8], ['OC1', 3, 21, 46.1, 15, 22.9, 54, 22.6],
+      ['HM', 18, 24.7, 58, 42, 20.9, 77, 22.1], ['GM2', 0, null, null, 1, 22, 40, 22], ['GM1', 18, 22.1, 98, 49, 21.7, 83, 21.8],
+      ['HD', 18, 26.6, 49, 33, 19, 83, 21.7], ['WA', 46, 24.2, 98, 94, 19.4, 96, 21], ['GM2', 18, 22.4, 52, 35, 20.1, 63, 20.9],
+      ['OC2', 153, 18.4, 100, 89, 22.9, 76, 20.1], ['MI', 43, 19.9, 98, 32, 19.6, 97, 19.8], ['OC2Sandbox', 0, null, null, 5, 19.8, 54, 19.8],
+      ['OC2Sandbox', 0, null, null, 32, 19.6, 64, 19.6], ['ST', 18, 20.8, 71, 33, 18.6, 77, 19.4], ['AZ', 37, 18.5, 56, 23, 19.7, 68, 19],
+      ['SH', 30, 19.1, 61, 25, 18.7, 59, 18.9], ['TJ', 24, 18.6, 48, 20, 18.2, 52, 18.4], ['DL', 18, 17.9, 44, 18, 17.5, 47, 17.7],
+    ];
+    const bbOf = (i, n) => (i === n - 1 ? 'none' : '1px solid rgba(36,48,73,.5)');
+    const dcRows = DC.map(([name, pN, pAvg, pMax, vN, vAvg, vMax, aAvg], i) => ({
+      name, pN, vN, pAvg: fmt(pAvg), pAvgC: tc(pAvg), pMax: fmt(pMax), pMaxC: tc(pMax),
+      vAvg: fmt(vAvg), vAvgC: tc(vAvg), vMax: fmt(vMax), vMaxC: tc(vMax), aAvg: fmt(aAvg), aAvgC: tc(aAvg), bb: bbOf(i, DC.length),
+    }));
+    let seed = 20260918;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    const r1 = (v) => Math.round(v * 10) / 10;
+    const DCS = ['OC2', 'WA', 'MI', 'NB', 'HM', 'GM1', 'HD', 'ST', 'AZ', 'HG', 'MIL', 'OC1'];
+    const srv = [];
+    for (let i = 0; i < 48; i++) {
+      const dc = DCS[Math.floor(rnd() * DCS.length)];
+      const physical = rnd() < 0.45;
+      const esxi = rnd() < 0.05;
+      const inlet = r1(17 + rnd() * 9 + (rnd() < 0.06 ? 14 : 0));
+      const exhaust = r1(inlet + 9 + rnd() * 12);
+      const cpu = Math.round(34 + rnd() * 30);
+      const max = Math.round(Math.max(exhaust, cpu) + rnd() * 30);
+      const rack = String(1 + Math.floor(rnd() * 24)).padStart(2, '0');
+      const unit = String(1 + Math.floor(rnd() * 40)).padStart(2, '0');
+      srv.push({
+        name: esxi ? `esxi-${dc.toLowerCase()}-${rack}${unit}.corp.local` : `${dc.toLowerCase()}-r${rack}-u${unit}`,
+        physical, source: esxi ? 'ESXi' : 'iDRAC',
+        cluster: physical ? '—' : `${dc}-CL${String(1 + Math.floor(rnd() * 4)).padStart(2, '0')}`,
+        cur: inlet, inlet, exhaust, cpu, max,
+      });
+    }
+    srv.sort((a, b) => b.cur - a.cur);
+    const srvRows = srv.map((s, i) => ({
+      name: s.name, nameWeight: s.source === 'ESXi' ? 700 : 400, nameColor: s.source === 'ESXi' ? '#fff' : '#e6edf6',
+      kindLabel: s.physical ? '물리' : '가상화', badgeBg: s.physical ? 'rgba(245,158,11,.15)' : 'rgba(34,197,94,.15)', badgeColor: s.physical ? '#fbbf24' : '#4ade80',
+      source: s.source, cluster: s.cluster,
+      cur: fmt(s.cur), curC: tc(s.cur), inlet: fmt(s.inlet), inletC: tc(s.inlet), exhaust: fmt(s.exhaust), exhaustC: tc(s.exhaust),
+      cpu: fmt(s.cpu), cpuC: tc(s.cpu), max: fmt(s.max), maxC: tc(s.max), bb: bbOf(i, srv.length),
+    }));
+    return { dcRows, srvRows };
+  }
+}
+</script>
+</body>
+</html>

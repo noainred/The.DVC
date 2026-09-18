@@ -9,6 +9,7 @@
 // 태그)이 전부 이 클러스터에 집중되는데, 같은 파일이 Loading/ErrorBox(86개 파일 소비)의
 // 수출원이라 기능 커밋마다 최다 소비 공유 파일이 diff 에 걸렸다 — 다중 세션 병합 충돌 표면 축소.
 import React, { useState, useEffect } from 'react';
+import { cpuModelCell } from './cpuModelText.js'; // v2.556: CPU 모델명 문구(순수·vitest 고정)
 // v2.447(감사 T11): 차트를 쓰는 두 모듈을 lazy 로 — 이 파일은 components/ui.jsx 가 재수출해
 // **앱 entry 그래프에 정적으로 붙어 있어서**, recharts(vendor-charts 496KB)가 차트가 없는
 // 로그인 화면에서까지 modulepreload 됐다(실측). 둘 다 상세 화면에서만 렌더되므로 지연 로드가 맞다.
@@ -379,6 +380,12 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="서비스 태그">{item.serviceTag ? <b style={{ letterSpacing: 0.5 }}>{item.serviceTag}</b> : '—'}</DRow>
             <DRow label="ESXi 버전">{item.version ? `${item.version}${item.build ? ` (build ${item.build})` : ''}` : '—'}</DRow>
             <DRow label="CPU">{item.cpuCores}코어{item.cpuThreads ? ` / ${item.cpuThreads}스레드` : ''}{item.cpuTotalMhz ? ` · ${(item.cpuTotalMhz / 1000).toFixed(1)}GHz` : ''}</DRow>
+            {/* v2.556(사용자 요청): CPU 모델명. 원문이 40자 안팎이라 2열 칸에 넣으면 옆 칸을
+                밀어내므로 **한 줄 전체**를 쓴다. 다듬은 값 옆에 원문을 툴팁으로 남기고(정리가
+                다른 벤더에서 빗나갈 수 있다), 값이 없으면 '—' + 이유를 말한다. */}
+            <DRow label="CPU 모델" full nowrap>
+              {(() => { const c = cpuModelCell(item.cpuModel); return <span title={c.title || undefined}>{c.text}</span>; })()}
+            </DRow>
             <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
             <DRow label="메모리">{gb(item.memTotalMB)}{item.memUsageMB ? ` · 사용 ${gb(item.memUsageMB)}` : ''}</DRow>
             <DRow label="메모리 사용률"><UsageCell pct={item.memUsagePct} /></DRow>

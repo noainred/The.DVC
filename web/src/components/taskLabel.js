@@ -47,6 +47,7 @@ const EXACT = {
   '/tools/hardware': { label: '하드웨어 인벤토리' },
   '/tools/esxi': { label: 'ESXi 버전·패치 현황' },
   '/tools/esxi-temp': { label: '서버 온도 조회' },
+  '/tools/esxi-temp/spark': { label: '서버 온도 24시간 추이' },
   '/tools/hba': { label: 'HBA·스토리지 경로 조회' },
   '/tools/licenses': { label: '라이선스 현황' },
   '/tools/license-expiry': { label: '라이선스 만료 점검' },

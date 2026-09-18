@@ -16,6 +16,14 @@
   --mint: #34e0b4;       /* THE DAVINCI 로그인 액센트 — 대시보드 톤 통일용 */
   --mint-dim: #2dd4bf;
   --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* v2.556 '서버 온도' 시안 토큰(docs/design/server-temp/README.md §Design Tokens).
+     ⚠ 같은 색에 새 hex 를 늘리지 않는다 — --teal 은 이미 있는 값(--mint-dim #2dd4bf,
+     .badge.teal 글자색과 같다)을, --font-mono 는 기존 --mono 스택을 가리킨다. 시안이 쓰는
+     이름을 만들되 값의 출처는 하나로 둔다(루트 CLAUDE.md '코어는 하나다'). */
+  --border-soft: #1f2a40;   /* 카드 내부 구분선·헤더/푸터 테두리 — --border 보다 한 단계 어둡다 */
+  --panel-deep: #0f1626;    /* 세그먼트·th·더보기 버튼 배경 — --bg-soft 보다 살짝 어둡다 */
+  --teal: var(--mint-dim);
+  --font-mono: var(--mono);
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
   --radius: 12px;
 }
@@ -75,6 +83,9 @@ body {
 .dot.live { animation: pulse 2s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
 @keyframes blink-red { 0%,100% { opacity: 1; } 50% { opacity: .2; } }
+/* v2.556: 히트맵 범례의 '40℃↑' 사각만 맥동시킨다 — 타일 수백 개에 걸면 GPU 낭비다
+   (docs/design/server-temp/README.md §Interactions 이 그 경계를 적고 있다). */
+@keyframes hotglow { 0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); } 50% { box-shadow: 0 0 0 3px rgba(239,68,68,.35); } }
 /* 미정형(진행률 미상) 막대 — 좌→우로 매끄럽게 반복(경계에서 보간 없이 점프). */
 @keyframes indeterminate-bar { 0% { margin-left: -28%; } 100% { margin-left: 100%; } }
 .blink-red { color: var(--red,#ef4444); font-weight: 700; animation: blink-red 1s infinite; }
