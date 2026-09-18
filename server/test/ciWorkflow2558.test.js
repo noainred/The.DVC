@@ -112,6 +112,51 @@ test('마커 파일명에 버전이 없다 — prune 이 지우면 이 변경이
   execFileSync('rm', ['-f', vfile]);
 });
 
+/* ------------------- ③ Python 매트릭스 단일화 (v2.559) ------------------- */
+
+/**
+ * ci.yml 의 python-version 식에서 두 갈래(PR 용 / main push 용)를 읽는다.
+ * 리터럴 배열이 아니라 `A && fromJSON(...) || fromJSON(...)` 식이므로 fromJSON 인자를 뽑는다.
+ */
+const pyLegs = () => {
+  const expr = CI.match(/python-version:[\s\S]*?\}\}/)?.[0] || '';
+  const arrays = [...expr.matchAll(/fromJSON\('(\[[^']*\])'\)/g)].map((m) => JSON.parse(m[1]));
+  return { pr: arrays[0], push: arrays[1], expr };
+};
+
+test('두 갈래 모두에 운영 대상 3.9 가 있다', () => {
+  // 방향이 반대로 바뀌어 3.9 가 빠지면 **실제 배포되는 버전을 한 번도 검사하지 않는 CI** 가
+  // 되는데, 그래도 초록으로 뜨므로 아무도 모른다 — 그래서 여기서 고정한다.
+  const { pr, push } = pyLegs();
+  assert.ok(Array.isArray(pr) && Array.isArray(push), 'python-version 식에서 두 배열을 읽지 못했다');
+  assert.ok(pr.includes('3.9'), `PR 갈래(${pr.join(', ')})에 3.9 가 없다 — 운영 버전이 PR 에서 검사되지 않는다`);
+  assert.ok(push.includes('3.9'), `push 갈래(${push.join(', ')})에 3.9 가 없다`);
+});
+
+test('main push 갈래는 상위 버전을 더 돌린다 (3.9+ 보장의 근거)', () => {
+  // 이 레그가 사라지면 README 의 '3.9+' 중 '+' 를 아무도 확인하지 않게 된다.
+  const { pr, push } = pyLegs();
+  assert.ok(push.length > pr.length,
+    `push 갈래(${push.join(', ')})가 PR 갈래(${pr.join(', ')})보다 많아야 한다 — 같으면 절충안이 무의미하다`);
+  assert.ok(push.some((v) => v !== '3.9'), 'push 갈래에 3.9 말고 상위 버전이 있어야 한다');
+});
+
+test('빈 배열을 두지 않는다 (GitHub 삼항이 falsy 로 접힌다)', () => {
+  // `A && [] || C` 는 빈 배열이 falsy 라 C 로 접힌다 — PR 에서도 상위 버전이 돌아버린다.
+  const { pr, push } = pyLegs();
+  assert.ok(pr.length >= 1 && push.length >= 1, '두 배열 모두 최소 1개여야 한다');
+});
+
+test('README 가 밝힌 최소 버전을 CI 가 실제로 돌린다', () => {
+  // 문서가 '3.9+' 라고 말하면 CI 가 최소한 그 버전은 돌려야 한다. 한쪽만 바뀌면
+  // 문서가 거짓이 되거나(검사 안 하는 버전을 지원한다고 말함) CI 가 헛돈다.
+  const floor = read('pyportal/README.md').match(/Python\s*(\d+\.\d+)\+/)?.[1];
+  assert.ok(floor, 'pyportal/README.md 가 최소 파이썬 버전을 밝혀야 한다');
+  const { pr, push } = pyLegs();
+  assert.ok(pr.includes(floor) && push.includes(floor),
+    `README 는 ${floor}+ 라고 하는데 CI 갈래는 PR ${pr.join(',')} / push ${push.join(',')} 다`);
+});
+
 test('사라질 수 있다는 사실을 문서가 말한다', () => {
   // 조용히 사라지면 사용자는 '앱이 없어졌다' 만 알고 되살리는 법을 모른다.
   const doc = read('uagmon/README.md');

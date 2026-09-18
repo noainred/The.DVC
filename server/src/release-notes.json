@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.559.0",
+      "date": "2026-09-18",
+      "title": "CI — pyportal 파이썬 레그를 이벤트별로 나눔 (PR 은 3.9, main 은 3.9+상위)",
+      "notes": [
+        "ci.yml pyportal 잡의 python-version 을 조건식으로 바꿨다 — pull_request 는 ['3.9'], main push·수동 실행은 ['3.9','3.12'].",
+        "남기는 기준이 3.9 인 이유: pyportal/README.md:19 가 'Python 3.9+' 이고 배포처가 Rocky Linux 9(=3.9)다. 3.9 를 빼면 실제로 돌아가는 버전을 한 번도 검사하지 않는 CI 가 되는데 그래도 초록으로 뜬다.",
+        "상위 버전 레그를 main 으로 좁힌 근거(실측): 9월 18일간 ci 실행 644회 중 main push 는 162회뿐이라 그 레그 비용이 1/4 로 준다. 상위 버전 깨짐은 머지 직전에 잡히므로 README 의 '3.9+' 보장은 유지된다.",
+        "⚠ 식은 한 줄로 둘 것 — YAML `>-` 폴딩은 더 깊게 들여쓴 줄을 그대로 보존해 식 안에 줄바꿈이 남는다(작성 중 실제로 그랬다). ⚠ `A && B || C` 는 GitHub 삼항이라 B 가 빈 배열이면 falsy 로 접혀 C 가 된다 — 두 배열 모두 비우지 말 것.",
+        "회귀 테스트 4건 추가(server/test/ciWorkflow2558.test.js, 총 12건) — 두 갈래 모두에 3.9 존재 · push 갈래가 더 많을 것 · 빈 배열 금지 · README 최소 버전과 일치."
+      ]
+    },
+    {
       "version": "2.558.0",
       "date": "2026-09-18",
       "title": "CI 중복 실행 제거 · macOS 앱 빌드 조건부화 (Actions 분 76% 절감)",
