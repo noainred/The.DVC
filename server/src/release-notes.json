@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.558.0",
+      "date": "2026-09-18",
+      "title": "CI 중복 실행 제거 · macOS 앱 빌드 조건부화 (Actions 분 76% 절감)",
+      "notes": [
+        "ci.yml: push 트리거를 main 으로 좁혀 같은 커밋 2회 실행을 없앴다(실측 run #1210·#1211 이 같은 sha 7716ede). concurrency 로는 못 막는 중복 — push 와 pull_request 의 ref 가 달라 그룹이 갈린다.",
+        "release.yml: uagmon 소스 내용 해시가 바뀐 릴리스에서만 macOS 앱을 빌드한다. macos-latest 는 분 차감 ×10 이라 46초 잡이 10분을 먹는데, uagmon 은 2026-08-24 이후 295 커밋 동안 무변경이었다.",
+        "되살리는 경로: release 워크플로를 build_macos=true 로 수동 실행. 판정 마커는 파일명에 버전이 없어 prune 대상이 아니다.",
+        "⚠ macOS 앱 자산은 그 버전이 versions.json 유지 목록(15개) 밖으로 밀려나면 prune 이 삭제한다 — uagmon/README.md 에 그 사실과 복구법을 적었다."
+      ]
+    },
+    {
       "version": "2.557.0",
       "date": "2026-09-18",
       "title": "공개 저장소 — 저작자 연락처를 회사 도메인에서 개인 주소로 교체",
