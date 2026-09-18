@@ -21,6 +21,7 @@
  *
  * 입력은 `db.js dailySeries()` 의 행 그대로다 — `{device_id, day, total_bytes, used_bytes, samples, ...}`.
  */
+import { numOrNull } from '../util/numOrNull.js';
 
 /** 화면 기본 기간(사용자 예시 "1일, 1주, 1달, 3개월 등"). `days` 가 계약이고 key 는 화면용. */
 export const DEFAULT_PERIODS = Object.freeze([
@@ -88,7 +89,7 @@ function floorDay(days, day) {
   return best;
 }
 
-const numOrNull = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+// v2.561: 판정은 util/numOrNull.js 하나 — 이 지역 사본은 빈 문자열을 0 으로 읽었다.
 
 /**
  * 한 장비의 한 기간 증가량.

@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'idrac-scan-log.json');
 const MAX_ENTRIES = 2000; // 240h 주기 × 법인 ~16곳 기준 수년치 — 수동 스캔이 잦아도 충분
@@ -45,7 +46,7 @@ function write(data) {
 }
 
 const s = (v, max = 128) => String(v ?? '').trim().slice(0, max);
-const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+const n = numOrNull;     // v2.561: 판정은 util/numOrNull.js 하나가 갖는다(Number(null)===0 함정)
 
 /**
  * 실행 기록 1건 추가. rec:

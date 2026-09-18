@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 // DB 저장 경로 설정(v2.379)을 따른다 — dbLocation 이 지정한 dbDir 아래, 없으면 configDir.
 // (vmperf/vmtrack 과 동일 규약. MIGRATABLE 에 이 파일이 있어 미적용 시 마이그레이션 후
@@ -312,10 +313,27 @@ export async function saveCapacityPoint(snap) {
 
   const ts = Number(snap.collectedAt) || Date.now();
   const total = Number(snap.capacity.totalBytes);
-  const used = Number.isFinite(Number(snap.capacity?.usedBytes)) ? Number(snap.capacity.usedBytes) : null;
-  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
-  const hT = n(snap.media?.hdd?.totalBytes); const hU = n(snap.media?.hdd?.usedBytes);
-  const sT = n(snap.media?.ssd?.totalBytes); const sU = n(snap.media?.ssd?.usedBytes);
+  /*
+   * ⚠⚠ **'사용량을 못 읽었다'(null) 를 0 으로 적재하지 말 것**(v2.561 에 고친 실제 결함).
+   *
+   * 예전에는 `Number.isFinite(Number(v)) ? Number(v) : null` 이었는데 `Number(null) === 0` ·
+   * `Number.isFinite(0) === true` 라 **null 이 0 으로 적재됐다**. 도달 경로가 실재한다 —
+   * `unitySsh.js` 는 풀 목록을 못 읽고 `general/system show` 만 성공하면
+   * `{ totalBytes: <읽음>, usedBytes: null }` 을 정직하게 내보내고(`parseSystemSpace` 는
+   * 'Total space' 만 있어도 레코드를 돌려준다), `capacityPointEligible` 은 **total 만** 검사한다.
+   *
+   * 실측 영향(v2.561 재현 — 정상 7일 뒤 그 한 주기만 usedBytes null):
+   *   현재 사용량 `27.60T → 0.00T` · 사용률 `23.5% → 0%` ·
+   *   남은 용량 `89.94T → 117.54T`(**27.6T 과다** — 없는 공간에 LUN 을 만들게 된다) ·
+   *   증가량[1d] **`-27.60T`**(하루에 27.6TB 가 줄었다는 거짓 급변)
+   * 그리고 결정적으로 `growth.js:206 unknownUsed`(= 사용량 미상 장비 수)가 **0** 이 되어,
+   * 화면이 이미 갖고 있던 정직 안내 — "**사용량을 읽지 못한 장비 N대**가 합계에서 빠졌습니다 —
+   * 0 으로 채우지 않았습니다" (`StorageGrowthTool.jsx:149`) — 가 **무력화됐다**.
+   * 즉 화면은 '0 으로 채우지 않았다' 고 약속하면서 0 을 보여주고 있었다.
+   */
+  const used = numOrNull(snap.capacity?.usedBytes);
+  const hT = numOrNull(snap.media?.hdd?.totalBytes); const hU = numOrNull(snap.media?.hdd?.usedBytes);
+  const sT = numOrNull(snap.media?.ssd?.totalBytes); const sU = numOrNull(snap.media?.ssd?.usedBytes);
 
   db.insCap.run(snap.deviceId, ts, total, used, hT, hU, sT, sU);
   const day = dayIndex(ts);

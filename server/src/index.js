@@ -233,6 +233,11 @@ app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다
 app.use('/api/central/storage-data', BIG_JSON);
 app.use('/api/central/part-faults', BIG_JSON);  // 파트 장애 push(v2.547) — 열린 장애가 많은 법인이 1mb 기본을 넘으면 413 = 조용한 소실
 app.use('/api/central/edge-log-result', BIG_JSON);  // 엣지 로그 폴백 회신(v2.549) — 로그 400줄 × 줄당 최대 2,000자면 1mb 기본을 넘고, 413 은 재시도 대상이 아니라 조용한 소실이 된다
+// 엣지 로그 **연합 조회** 결과(v2.561) — v2.549 가 형제 경로만 등록해 이쪽이 빠져 있었다.
+// 실측: 500행(`checksLogs.js` 의 limit 상한) × vCenter 이벤트 message 1,900자 = 981KB 로 기본 1mb 에 닿고
+// 2,000자면 1,079KB 로 넘는다. 413 은 재시도 대상이 아니라 **그 조회 결과의 조용한 전량 소실**이고,
+// 중앙은 결과가 없으면 영원히 `{state:'pending'}` 을 돌려주므로 화면이 무한 대기가 된다.
+app.use('/api/central/log-query-result', BIG_JSON);
 app.use('/api/central/pdu-data', BIG_JSON);
 // v2.517: SAN 스위치 push 가 **전체 포트**로 바뀌었다(`sanswitch/push.js` 머리말 — gzip 실측 근거).
 // 엣지는 700KB 청크 + gzip 으로 보내지만 express.json 의 limit 은 **해제 후 길이**라 기본 1MB 로는

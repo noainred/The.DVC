@@ -832,7 +832,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       쓰게 된다. 임계값도 여기(`TEMP_WARN_C`·`TEMP_HOT_C`)가 소유하고 `shared.jsx` 가 재수출한다
       (반대 방향으로 두면 이 모듈의 테스트가 React·api.js 를 끌고 와 node 환경에서 깨진다).
     - ⚠⚠ **`Number(null) === 0` 을 또 밟았다 — 자체 테스트가 내 결함 2건을 잡았다**(v2.525·
-      v2.540·v2.550·v2.552 에 이어 다섯 번째): ① `sparkPath` 가 `.map(Number).filter(isFinite)`
+      v2.540·v2.550·v2.552 에 이어 다섯 번째. **v2.561 에 여섯 번째** — 그때는 실제로 틀린 값을 만들고 있었고 판정을 `util/numOrNull.js` 하나로 통합했다): ① `sparkPath` 가 `.map(Number).filter(isFinite)`
       라 **결측 점이 0℃ 로 살아남아** 스파크라인이 바닥으로 떨어졌다 ② `tempBuckets`·`tempCounts`
       가 빈 문자열을 0℃(14℃ 칸)로 읽어 그 서버를 **'정상' 으로 셌다**. `Number([]) === 0` 까지
       걸려 파서를 **타입부터 좁혔다**(`tempNum` — 숫자이거나 숫자 문자열일 때만). 둘 다 오류 없이
@@ -945,6 +945,55 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       헤더(`status-pill`·`user-box`)라 **이 변경과 무관**하다(A/B 확인). 실제 운영 계정·AD 계정으로는
       확인하지 못했다.
 
+  - ⚠⚠ **'읽지 못한 수치' 를 0 으로 둔갑시키지 않는다 — 판정은 `util/numOrNull.js` 하나다**
+    (v2.561 — 사용자 요청 "버그 찾아서 수정". **여섯 번째 재발**이고 이번엔 실제로 틀린 값을 만들고
+    있었다. 회귀는 `test/numOrNull2561.test.js`):
+    - ⚠⚠ **확정 결함 — 스토리지 용량 적재가 `usedBytes: null` 을 `0` 으로 저장했다**
+      (`storage/db.js saveCapacityPoint`). 원인은 `Number(null) === 0` 이고 `Number.isFinite(0)` 이
+      참이라 `Number.isFinite(Number(v)) ? Number(v) : null` 형태가 **null 을 0 으로** 바꾼 것이다.
+      · **도달 경로**(코드로 확인): `unitySsh.js:163` 은 풀 목록을 못 읽고 `general/system show` 만
+        성공하면 `{ totalBytes: <읽음>, usedBytes: sys.usedBytes ?? null }` 을 **정직하게** 내보내고
+        (`parseSystemSpace` 는 'Total space' 만 있어도 레코드를 준다), `capacityPointEligible` 은
+        **전체 용량만** 검사한다 — 그래서 sink 가 정직해야 했다.
+      · **A/B 실측**(정상 7일 + 그 한 주기만 null): 사용량 `0.00T`(실제 27.60T) · 사용률 `0%` ·
+        남은 용량 `117.54T`(**27.6T 과다** — 없는 공간에 LUN 을 만들게 된다) ·
+        증가량[1d] **`-27.60T`**(하루에 27.6TB 가 줄었다는 거짓 급변).
+      · ⚠ **가장 나쁜 것**: `growth.js:206 unknownUsed` 가 **0** 이 되어, 화면이 이미 갖고 있던
+        정직 안내 — `StorageGrowthTool.jsx:149` 의 "**사용량을 읽지 못한 장비 N대**가 합계에서
+        빠졌습니다 — 0 으로 채우지 않았습니다" — 가 **무력화됐다**. 즉 화면은 '0 으로 채우지
+        않았다' 고 약속하면서 0 을 보여주고 있었다. **정직 장치를 무력화하는 강제변환이 가장 위험하다.**
+    - **같은 헬퍼가 13벌 복사돼 있었고 7벌이 틀린 형태였다** — `util/numOrNull.js` 하나로 통합했다
+      (CLAUDE.md '코어는 하나다'). 타입부터 좁혀 `Number([]) === 0`·`Number([5]) === 5`·
+      `Number(true) === 1`·공백만인 문자열까지 막는다(v2.556 규약의 확장).
+    - ⚠ **'0 이 정답인 카운터' 에 쓰지 말 것.** 보고가 없을 때 0 이 맞는 값(`central/svcmonEdge.js`
+      의 `items`·`reported`, `curuser/aggregate.js`, `edgelog/collect.js`, `tools/diskTrend.js`)은
+      의도적으로 `: 0` 이고 이 함수를 쓰지 않는다. 이 함수는 **측정값 전용**이다.
+    - ⚠ **없는 결함을 만들어 고치지 말 것**(v2.550.3 규약). 스윕이 잡은 후보 중 셋은 **실행으로
+      도달 불가를 확인**해 그대로 뒀고 `REVIEWED_SAFE` 에 근거와 함께 선언했다 —
+      `storage/db.js` 의 보존일 2곳(`loadGrowthSettings()` 가 명시적 null 을 기본값으로 막는다.
+      손상 설정 파일로 돌려 확인. ⚠ 여기서 0 이 되면 `0 ?? 기본값 === 0` 이라 **전량 삭제**이므로
+      경로가 열리면 즉시 고칠 것) · `growth.js` 의 `asOfDay`(호출부가 항상
+      `dayIndex(Date.now())`). **여기에 줄을 더할 때는 실행으로 확인한 근거를 함께 적을 것.**
+  - ⚠⚠ **엣지 로그 연합 조회가 조용히 실패하면 화면이 영원히 '대기 중' 이다**(v2.561 —
+    `agent/logQueryWorker.js`. v2.549 가 `edgeLogWorker` 에만 적용한 규약을 여기에도):
+    - v2.560 까지 결과 POST 를 `.catch(() => {})` 로 삼키고 바깥도 `catch { return null; }` 라
+      상태 객체도 로그도 없이 **4초마다 무음 실패**했다. 그런데 중앙의 `getLogQueryResult` 는 결과가
+      없으면 **영원히 `{state:'pending'}`** 을 돌려준다(`central/logQueries.js:57` — 시한도 사유도
+      없다). 즉 사용자가 누르면 **왜 안 되는지 모른 채 무한 대기**한다. CLAUDE.md 가 v2.549 에
+      "위임 워커 4개가 전부 `catch { return null; }`" 이라 **적어 두고도 고치지 않은** 것 중 하나다.
+    - 이제 인출 403(토큰 거부) · 결과 보고 413 · DB 오류 · 잴 것 0건을 **구분해** `_last` 에 남기고
+      콘솔에도 적는다. `edgelog/spec.js` 표에도 등재했다(v2.554 규약 — **새 엣지 워커는 이 표에
+      함께 넣을 것**).
+    - ⚠ **타이머 콜백의 `runLogQueryWorkerOnce().catch(() => {})` 는 정당하다** — 안쪽이 이미 상태를
+      남기고, setInterval 의 unhandled rejection 을 막는 관례다. 테스트는 `resilientFetch` 에 붙은
+      빈 catch 만 검사한다(그것이 무음 실패 지점이었다).
+    - `/api/central/log-query-result` 를 **BIG_JSON 에 등록**했다 — v2.549 가 형제 경로
+      (`edge-log-result`)만 등록해 빠져 있었다. 실측: 500행(`checksLogs.js` 의 limit 상한) ×
+      vCenter 이벤트 message **1,900자 = 981KB** 로 기본 1MB 에 닿고 2,000자면 1,079KB 로 넘는다.
+      413 은 재시도 대상이 아니라 **그 조회 결과의 조용한 전량 소실**이다.
+    - ⚠ **아직 같은 상태인 위임 워커**(v2.561 시점): `pingWorker` · `captureWorker` ·
+      `bmstorWorker`. 붙일 때 **UI 표시(spec 표 등재)를 함께** 해야 한다 — 화면이 말하지 않는
+      상태는 없는 것과 같다.
   - ⚠⚠ **토큰 점검 — 중앙이 평문으로 가진 토큰은 두 가지뿐이고, 나머지는 엣지가 스스로 말해야 한다**
     (`util/tokenFingerprint.js` · `portalcheck/{tokenScan,tokenProbe,tokenFindings,edgeReport}.js` ·
     `central/tokenCheckPull.js` · `routes/api/portalCheck.js` + 웹 `views/tools/PortalCheck.jsx`·
