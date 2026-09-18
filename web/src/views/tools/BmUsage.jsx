@@ -28,6 +28,9 @@ import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark,
   emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, authStopNote, keyConflictNote,
   facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote,
+  // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
+  licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes,
+  unassignedNote, edgePullState, edgePullNote,
 } from './bmUsageText.js';
 
 /** 표의 지표 열 — 서버가 준 `metrics` 계약과 같은 순서를 쓴다. */
@@ -66,6 +69,15 @@ export function BmUsage() {
   const [showSettings, setShowSettings] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(null);
+  /*
+   * ⚠ 엣지 보관분(v2.554) — **폴링하지 않는다**(사용자 지시 "중앙으로 전달은 중앙에서 조회할때만").
+   *   마운트 1회 + 버튼(v2.508 규약). `/edges` 는 네트워크에 나가지 않고 보관분만 읽는다.
+   */
+  const [edges, setEdges] = useState(null);
+  const [showEdges, setShowEdges] = useState(false);
+  const [pulling, setPulling] = useState('');
+  // Enterprise 동의 체크 — 저장 버튼을 누르기 전 단계(서버는 ack 없이는 켜지 않는다).
+  const [entAgree, setEntAgree] = useState(false);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -74,6 +86,27 @@ export function BmUsage() {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  /** 엣지 보관분 — 마운트 1회. ⚠ 실패해도 화면 전체를 오류로 갈아치우지 않는다(부가 패널이다). */
+  const loadEdges = React.useCallback(async () => {
+    try { setEdges(await fetchJson('/tools/bm-usage/edges')); }
+    catch (e) { setEdges({ ok: false, reason: e?.message || String(e), rows: [] }); }
+  }, []);
+  useEffect(() => { loadEdges(); }, [loadEdges]);
+
+  /** 엣지에서 지금 가져온다 — 사람이 누를 때만(상시 전송이 없는 것이 이 기능의 설계다). */
+  async function pullEdge(agent) {
+    setPulling(agent);
+    try {
+      const r = await postJson('/tools/bm-usage/edges/pull', { agents: [agent] });
+      const one = (r.results || [])[0] || null;
+      setMsg(one?.ok
+        ? { tone: 'ok', text: `**${agent}** 에서 가져왔습니다(${one.ms}ms).` }
+        : { tone: 'bad', text: `**${agent}** 가져오기 실패 — ${one?.reason || r.reason || '사유 미상'}` });
+      await loadEdges();
+    } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }
+    finally { setPulling(''); }
+  }
 
   const rows = useMemo(() => {
     const byKey = new Map((data?.rows || []).map((r) => [String(r.key), r]));
@@ -191,6 +224,25 @@ export function BmUsage() {
             <BoldText text={authStopNote(data.authStops)} />
           </p>
         )}
+        {/*
+          * ⚠⚠ **'법인 귀속 없음' 의 원인을 말한다**(v2.554 — 사용자 지시 "원인까지 조사").
+          *   이 현장은 이 사유로 500대가 빠져 표가 통째로 비어 있었다. 사유만 말하고 원인·조치를
+          *   말하지 않으면 사용자가 무엇을 고쳐야 하는지 알 수 없다.
+          * ⚠ 긴 설명은 **여기 한 번만** — 행마다 반복하면 같은 문단이 화면을 덮는다(v2.509 규약).
+          */}
+        {unassignedNote(data?.unassignedInfo) && (
+          <div style={{ margin: '0 0 6px', padding: '8px 10px', borderLeft: `3px solid ${toneVar('warn')}`, background: 'rgba(251,191,36,0.06)' }}>
+            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}><BoldText text={unassignedNote(data.unassignedInfo).head} /></p>
+            {unassignedNote(data.unassignedInfo).items.map((x, i) => (
+              <p key={i} style={{ margin: '4px 0 0', fontSize: 12, lineHeight: 1.6 }}><BoldText text={`· ${x}`} /></p>
+            ))}
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={unassignedNote(data.unassignedInfo).how} /></p>
+          </div>
+        )}
+        {/* Enterprise 대체 수집 상태 — '켰는데 왜 값이 없나' 를 말한다(예산으로 미룬 대수 포함). */}
+        {enterpriseStatusNote(st) && (
+          <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={enterpriseStatusNote(st)} /></p>
+        )}
         {edgeNote(data?.isEdge) && <p style={{ margin: '0 0 6px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={edgeNote(data.isEdge)} /></p>}
         <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
           <BoldText text={retentionNote(data?.settings || {}, data?.db || {})} />
@@ -256,6 +308,10 @@ export function BmUsage() {
                     {/* ⚠ 전부 `—` 인 행이 **왜** 비었는지 행 자체가 말해야 한다 — 긴 설명은 표 아래 각주가 한 번만 한다. */}
                     {!!(r.missing || []).length && (
                       <div style={{ fontSize: 11, color: toneVar('warn') }}>{missingMark(r.missing)}</div>
+                    )}
+                    {/* ⚠ 라이선스는 **짧은 표지**만(v2.509) — 설명은 서버를 눌러 상세에서. 미상이면 아무것도 쓰지 않는다. */}
+                    {licenseMark(r.license) && (
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{licenseMark(r.license)}</div>
                     )}
                   </td>
                   {COLS.map((c) => (
@@ -366,6 +422,64 @@ export function BmUsage() {
         </div>
       )}
 
+      {/* ── 엣지 보관분(v2.554) — 상시 전송 없음. 누를 때만 가져온다 ─────────── */}
+      {!!(edges?.rows || []).length && (
+        <div className="card" style={{ minWidth: 0 }}>
+          <button onClick={() => setShowEdges((v) => !v)} style={{ background: 'transparent', border: 0, padding: 0, color: 'inherit', cursor: 'pointer', fontSize: 13 }}>
+            {showEdges ? '▾' : '▸'} 엣지 보관분 — {(edges.rows || []).filter((r) => r.snapAt).length}/{(edges.rows || []).length}곳
+          </button>
+          {showEdges && (
+            <>
+              <p style={{ margin: '6px 0 8px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+                <BoldText text={edgePullNote(edges.rows)} />
+              </p>
+              {/* ⚠ 표는 **가로 스크롤 컨테이너**로 감싼다 — 400px 에서 페이지를 밀어낸다(v2.549 실측). */}
+              <div style={{ overflowX: 'auto', minWidth: 0 }}>
+                <STable>
+                  <thead><tr><th>엣지</th><th>상태</th><th className="right">서버</th><th>버전</th><th>가져온 때</th><th data-nosort>동작</th></tr></thead>
+                  <tbody>
+                    {(edges.rows || []).map((r) => {
+                      const es = edgePullState(r, { minEdgeVersion: edges.minEdgeVersion, staleMs: edges.staleMs });
+                      return (
+                        <tr key={r.agent}>
+                          <td data-sort={r.agent}>
+                            {r.agent}
+                            {/* ⚠ 엣지가 말한 이름이 다르면 **나란히** 보여준다 — 그 자체가 진단이다(v2.548 F5). */}
+                            {r.reportedAgent && r.reportedAgent !== r.agent && (
+                              <div style={{ fontSize: 11, color: toneVar('warn') }}>엣지 보고 이름 {r.reportedAgent}</div>
+                            )}
+                          </td>
+                          <td data-sort={es.state}><span style={{ color: toneVar(es.tone) }}>{es.label}</span></td>
+                          <td className="right" data-sort={(r.targets || []).length}>{r.snapAt ? (r.targets || []).length : '—'}</td>
+                          <td data-sort={r.version || ''}>{r.version || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+                          <td data-sort={r.snapAt || 0}>{r.snapAt ? ageText(r.snapAt) : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+                          <td>
+                            <button onClick={() => pullEdge(r.agent)} disabled={!!pulling || r.enabled === false || !r.hasUrl}
+                              title={r.enabled === false ? '중앙에서 비활성으로 두었습니다' : (!r.hasUrl ? 'URL 이 없습니다' : '')}>
+                              {pulling === r.agent ? '가져오는 중…' : '지금 가져오기'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </STable>
+              </div>
+              {/* ⚠ 사유는 **행 아래 한 번씩** — 표 안에 긴 문장을 넣으면 셀이 세로로 길어진다(v2.509). */}
+              {(edges.rows || []).map((r) => {
+                const es = edgePullState(r, { minEdgeVersion: edges.minEdgeVersion, staleMs: edges.staleMs });
+                if (es.state === 'ok') return null;
+                return (
+                  <p key={`why-${r.agent}`} style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
+                    <BoldText text={`**${r.agent}** — ${es.why}`} />
+                  </p>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
+
       {showSettings && form && (
         <div className="card" style={{ minWidth: 0 }}>
           <h4 style={{ marginTop: 0 }}>수집 설정</h4>
@@ -422,6 +536,60 @@ export function BmUsage() {
             <BoldText text={'켜면 iDRAC 의 텔레메트리 리포트 목록을 열거해 **NIC·FC 통계까지** 읽습니다 — OS 계정이 없는 서버도 네트워크·HBA 값이 나옵니다. 끄면 CPU·메모리·I/O(집계)만 읽습니다(v2.550 방식). ⚠ **이 현장 iDRAC 의 실제 리포트 목록을 확인한 적이 없습니다** — 장비별로 무엇을 읽었는지는 서버를 눌러 상세에서 보세요.'} />
           </p>
 
+          {/* ── Enterprise 라이선스 대체 수집(v2.554) ───────────────────────── */}
+          <h4 style={{ margin: '14px 0 6px' }}>Enterprise 라이선스 대체 수집</h4>
+          <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+            <BoldText text={enterpriseConsentNote()} />
+          </p>
+          {/*
+            * ⚠⚠ **동의 없이는 켜지지 않는다**(사용자 지시: "사용할것이냐고 물어보고 사용하겠다고
+            *   하면 기능을 구현한다"). 서버도 `enabled && ack` 로 못 박으므로 화면만 고쳐서는
+            *   켤 수 없다 — 이 두 단계를 하나로 합치지 말 것.
+            */}
+          {!form.enterpriseAck ? (
+            <>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 6 }}>
+                <input type="checkbox" checked={entAgree} onChange={(e) => setEntAgree(e.target.checked)} disabled={saving} />
+                {' '}위 부하를 확인했고 <b>사용하겠습니다</b>
+              </label>
+              <button
+                onClick={() => saveSettings({ enterpriseAck: true, enterpriseEnabled: true })}
+                disabled={!entAgree || saving}
+                title={entAgree ? '' : '먼저 동의에 체크하세요'}
+              >{saving ? '저장 중…' : '동의하고 켜기'}</button>
+            </>
+          ) : (
+            <>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
+                <input type="checkbox" checked={!!form.enterpriseEnabled} onChange={(e) => saveSettings({ enterpriseEnabled: e.target.checked, enterpriseAck: true })} disabled={saving} />
+                {' '}대체 수집 켜기
+              </label>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                <label style={{ fontSize: 12 }}>방식{' '}
+                  <select value={form.enterpriseMode || 'auto'} disabled={saving}
+                    onChange={(e) => saveSettings({ enterpriseMode: e.target.value })} style={{ minWidth: 0 }}>
+                    <option value="auto">자동 — Redfish 센서 먼저, 못 읽으면 SSH</option>
+                    <option value="api">Redfish 센서만(부하 가장 적음)</option>
+                    <option value="ssh">iDRAC SSH(racadm)만</option>
+                  </select>
+                </label>
+                {form.enterpriseAckAt ? (
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    동의 {ageText(form.enterpriseAckAt)}{form.enterpriseAckBy ? ` · ${form.enterpriseAckBy}` : ''}
+                  </span>
+                ) : null}
+              </div>
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
+                <BoldText text={'⚠ **이 현장 장비에서 확인하지 못한 것이 있습니다** — 표준 Redfish 센서 컬렉션의 응답과 racadm 출력 형식입니다. 읽지 못하면 값을 지어내지 않고 **읽지 못했다고 표시**하며, 서버를 눌러 상세에서 **원문**을 볼 수 있습니다. 그 원문을 알려 주시면 파서를 맞추겠습니다.'} />
+              </p>
+            </>
+          )}
+          {!form.idracTelemetry && (
+            <p style={{ margin: '6px 0 0', fontSize: 12, color: toneVar('warn'), lineHeight: 1.6 }}>
+              <BoldText text={'⚠ 위에서 **iDRAC 텔레메트리가 꺼져 있어** 이 대체 수집도 돌지 않습니다 — 그 설정이 ‘iDRAC 로 수집할지’ 를 정하는 축입니다.'} />
+            </p>
+          )}
+
           {/* ── 임계 초과 알림(v2.551) ──────────────────────────────────────── */}
           <h4 style={{ margin: '14px 0 6px' }}>임계 초과 알림</h4>
           <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
@@ -473,6 +641,24 @@ export function BmUsage() {
           {detailNotes(detail?.target ? { ...detail.target, ...(selRow.detail || {}) } : (selRow.detail || {})).map((s, i) => (
             <p key={i} style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={s} /></p>
           ))}
+          {/* 라이선스 — **언제 본 값인지** 함께(인벤토리는 느린 주기로 갱신된다). */}
+          {licenseNote(selRow.detail?.license || selRow.license) && (
+            <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={licenseNote(selRow.detail?.license || selRow.license)} /></p>
+          )}
+          {entDetailNotes(selRow.detail || {}).map((x, i) => (
+            <p key={`ent${i}`} style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={x} /></p>
+          ))}
+          {/*
+            * ⚠⚠ **원문을 그대로 보여주는 것이 이 기능의 정직성 장치다**(v2.542 `cliRaw` 규약):
+            *   이 현장 racadm 출력 형식을 확인한 적이 없어 파싱이 빗나갈 수 있다. 그때 사용자가
+            *   실제 출력을 보고 알려줄 수 있어야 한다 — '읽지 못했습니다' 만 남기면 추측만 남는다.
+            */}
+          {!!selRow.detail?.entRaw && (
+            <details style={{ margin: '0 0 8px' }}>
+              <summary style={{ fontSize: 12, cursor: 'pointer' }}>iDRAC SSH(racadm) 원문 보기</summary>
+              <pre style={{ margin: '6px 0 0', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 240, overflow: 'auto', background: 'rgba(0,0,0,0.25)', padding: 8, borderRadius: 4 }}>{selRow.detail.entRaw}</pre>
+            </details>
+          )}
           {detail?.rawTruncated && (
             <p style={{ margin: '0 0 6px', fontSize: 12, color: toneVar('warn'), lineHeight: 1.6 }}>
               <BoldText text={'조회 상한으로 **일부 구간이 잘렸습니다** — 더 긴 기간은 일 단위 롤업으로 보세요.'} />

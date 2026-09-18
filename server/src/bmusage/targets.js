@@ -18,6 +18,8 @@
  * ⚠ `serverId` 가 `host:<vcenterId>:<name>` 인 항목은 **수동 태그로 베어메탈이 된 ESXi 호스트**로
  *   (`fleetInventory.js:170`) iDRAC 등록이 없다 — 그것을 '주소 없음' 이라 말해야 한다.
  */
+import { licenseFromInventory } from './license.js';
+
 const t = (v) => String(v ?? '').trim();
 const norm = (v) => t(v).toLowerCase();
 /**
@@ -73,9 +75,12 @@ export function indexOsHosts(bmServers = []) {
  * @param {object} p.settings    `loadBmUsageSettings()`
  * @param {string} p.agentName   이 노드의 agent 이름(엣지면 자기 것만 가져간다)
  * @param {boolean} p.isEdge     이 노드가 엣지인가
+ * @param {function} [p.inventoryOf] `(registryId) => inv` — **캐시된** iDRAC 인벤토리(장비 왕복 0).
+ *   v2.554: 이것으로 라이선스 등급(Datacenter/Enterprise)을 판정해 화면이 '텔레메트리가 왜 비었나'
+ *   를 추측이 아니라 **근거로** 말한다(`bmusage/license.js` 머리말).
  * @returns {{targets:Array, skipped:Array, counts:object}}
  */
-export function resolveTargets({ bareMetal = [], registry = [], bmServers = [], settings = {}, agentName = '', isEdge = false } = {}) {
+export function resolveTargets({ bareMetal = [], registry = [], bmServers = [], settings = {}, agentName = '', isEdge = false, inventoryOf = null, now = Date.now() } = {}) {
   const regById = new Map(registry.map((r) => [t(r.id), r]));
   const regByTag = new Map(registry.filter((r) => t(r.serviceTag)).map((r) => [norm(r.serviceTag), r]));
   const os = indexOsHosts(bmServers);
@@ -115,9 +120,20 @@ export function resolveTargets({ bareMetal = [], registry = [], bmServers = [], 
       skipped.push({ ...idOf(b), reason, vcenterId: vc, osMissing: !osEntry });
       continue;
     }
+    /*
+     * iDRAC 라이선스 등급(v2.554) — **캐시된 인벤토리만** 읽는다(장비 왕복 0).
+     * ⚠ 인벤토리가 없으면 `unknown` 이고 '라이선스가 없다' 고 말하지 않는다.
+     * ⚠ `entAllowed` 는 '설정이 허용하는가' 일 뿐이다 — **실제로 시도할지**는 텔레메트리 결과를
+     *   본 뒤 `license.enterpriseEligible()` 이 정한다(정상인 Datacenter 장비에 부하를 더하지 않게).
+     */
+    const license = (paths.includes('idrac') && typeof inventoryOf === 'function')
+      ? licenseFromInventory((() => { try { return inventoryOf(t(reg.id)); } catch { return null; } })(), { now })
+      : { tier: 'unknown', label: '미상', names: [], count: 0, expired: 0, evaluation: false, matched: '', source: '', at: null };
     targets.push({
       ...idOf(b), vcenterId: vc, vcName: b.vcName || '', model: b.model || '',
       paths,
+      license,
+      entAllowed: !!(paths.includes('idrac') && settings.enterpriseEnabled && settings.enterpriseAck),
       // ⚠ 비밀은 여기 담기지만 **응답에는 절대 싣지 않는다**(라우트가 publicTarget 으로 뺀다).
       idrac: paths.includes('idrac') ? { host: t(reg.host), username: t(reg.username), password: reg.password } : null,
       osHost: paths.includes('os') ? osEntry : null,
@@ -132,6 +148,16 @@ export function resolveTargets({ bareMetal = [], registry = [], bmServers = [], 
     if (x.paths.includes('os')) counts.os += 1;
     if (x.paths.length > 1) counts.both += 1;
   }
+  /*
+   * 라이선스 등급 분포 — 화면이 '이 법인은 Enterprise 가 N대' 라고 말할 수 있게.
+   * ⚠ `unknown` 을 Enterprise 에 흡수하지 않는다(v2.548 규약: 확인 못 한 것을 한쪽으로 접지 않는다).
+   */
+  const byLicense = {};
+  for (const x of targets) {
+    const k = t(x.license?.tier) || 'unknown';
+    byLicense[k] = (byLicense[k] || 0) + 1;
+  }
+  counts.byLicense = byLicense;
   const byReason = {};
   for (const s of skipped) byReason[s.reason] = (byReason[s.reason] || 0) + 1;
   counts.byReason = byReason;

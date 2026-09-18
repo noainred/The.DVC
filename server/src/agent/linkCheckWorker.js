@@ -48,6 +48,31 @@ async function pool(items, limit, fn) {
   return out;
 }
 
+/**
+ * 중앙으로 보고를 올린다(gzip). **결과가 0건이어도 부른다** — 위 주석 참조.
+ * ⚠ 던지지 않는다(0건 보고 실패가 점검 자체를 실패로 만들지 않게) — 사유는 `_last` 에 남는다.
+ */
+async function pushReport(base, agent, { results = [], note = '', disabled = false } = {}) {
+  const json = JSON.stringify({ at: Date.now(), version: currentVersion(), results, note, disabled });
+  const hdrs = { ...headers(), 'Content-Type': 'application/json', 'X-Agent-Name': agent };
+  let payload = json;
+  try { payload = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { payload = json; }
+  const post = await resilientFetch(`${base}/api/central/link-check`, { method: 'POST', headers: hdrs, body: payload, timeoutMs: 30_000, retries: 2 });
+  if (post.status === 413) console.warn(`[linkcheck-worker] 중앙이 본문 크기를 거부(413) — 링크 ${results.length}개. 중앙의 BIG_JSON 등록을 확인하세요.`);
+  if (!post.ok) {
+    // ⚠ 무음 실패 금지 — 403 은 '개별 토큰이 아니다' 라는 가장 흔한 원인이다.
+    console.warn(`[linkcheck-worker] 보고 실패: HTTP ${post.status}${post.status === 403 ? ' — 이 엣지의 개별 토큰(설정 > 엣지 토큰)이 필요합니다.' : ''}`);
+    return { ok: false, httpStatus: post.status };
+  }
+  return await post.json().catch(() => ({}));
+}
+
+/** 중앙 응답에서 화면이 쓰는 값만(v2.548 H6 — 중앙이 버린 것을 엣지도 안다). */
+const ackFields = (ack) => ({
+  stored: ack?.stored ?? null, rejected: ack?.rejected ?? null, omitted: ack?.omitted ?? null,
+  reportPosted: ack?.ok === true, reportHttpStatus: ack?.httpStatus ?? null,
+});
+
 export async function runLinkCheckWorkerOnce() {
   const base = config.agent.centralUrl;
   if (!base) return { ok: false, reason: 'CENTRAL_URL 없음(엣지 아님)' };
@@ -67,13 +92,30 @@ export async function runLinkCheckWorkerOnce() {
     const cfg = await r.json().catch(() => ({}));
     if (Number.isFinite(Number(cfg?.intervalMs)) && Number(cfg.intervalMs) > 0) _intervalMs = Number(cfg.intervalMs);
 
+    /*
+     * ⚠⚠ **0건·꺼짐이어도 중앙에 상태를 올린다**(v2.554 에 고친 v2.552 결함 — 사용자 실화면으로 확정).
+     *
+     *   v2.552~2.553 은 여기서 **조기 return** 했다. 그래서 '잴 링크가 0개' 인 엣지는 중앙에
+     *   **아무것도 보내지 않았고**, 중앙 화면은 그 상태를 '첫 보고 대기'(= 기다리면 된다)라고
+     *   말했다 — 기다려도 영원히 채워지지 않는다. 이것은 CLAUDE.md v2.517 `sendStatusOnly` 규약
+     *   ("엣지는 표본이 0건이어도 상태를 올린다 … 0건이면 push 가 조용히 조기 반환해 중앙으로
+     *   아무것도 가지 않았고 — 그게 바로 신고된 상태다")을 그대로 어긴 것이다.
+     *   **이 push 를 다시 조기 return 으로 되돌리지 말 것.**
+     *
+     *   ⚠ 남는 한계(정직 기록): 중앙이 **403**(개별 토큰 아님)으로 거부하면 이 보고조차 올릴 수
+     *     없다 — 그 경우는 엣지 콘솔 로그와 `linkCheckWorkerStatus`(엣지 로그 화면)가 말한다.
+     */
     if (cfg?.enabled !== true) {
-      _last = { at: Date.now(), ms: Date.now() - t0, ok: true, disabled: true, note: '중앙에서 통신 점검이 꺼져 있습니다.', links: 0 };
+      const note = '중앙에서 통신 점검이 꺼져 있습니다.';
+      const ack = await pushReport(base, agent, { results: [], note, disabled: true });
+      _last = { at: Date.now(), ms: Date.now() - t0, ok: true, disabled: true, note, links: 0, ...ackFields(ack) };
       return { ok: true, disabled: true };
     }
     const links = Array.isArray(cfg.links) ? cfg.links : [];
     if (!links.length) {
-      _last = { at: Date.now(), ms: Date.now() - t0, ok: true, links: 0, note: '이 엣지가 잴 링크가 없습니다(종류를 껐거나 담당 vCenter·짝이 없습니다).' };
+      const note = '이 엣지가 잴 링크가 없습니다(종류를 껐거나 담당 vCenter·짝이 없습니다).';
+      const ack = await pushReport(base, agent, { results: [], note });
+      _last = { at: Date.now(), ms: Date.now() - t0, ok: true, links: 0, note, ...ackFields(ack) };
       return { ok: true, links: 0 };
     }
 
@@ -82,14 +124,7 @@ export async function runLinkCheckWorkerOnce() {
     const measured = results.filter((x) => x && x.verdict);
     const skipped = results.filter((x) => x && x.skipped);
 
-    const json = JSON.stringify({ at: Date.now(), version: currentVersion(), results });
-    const hdrs = { ...headers(), 'Content-Type': 'application/json', 'X-Agent-Name': agent };
-    let payload = json;
-    try { payload = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { payload = json; }
-    const post = await resilientFetch(`${base}/api/central/link-check`, { method: 'POST', headers: hdrs, body: payload, timeoutMs: 30_000, retries: 2 });
-    if (post.status === 413) console.warn(`[linkcheck-worker] 중앙이 본문 크기를 거부(413) — 링크 ${results.length}개. 중앙의 BIG_JSON 등록을 확인하세요.`);
-    if (!post.ok) throw Object.assign(new Error(`link-check <- HTTP ${post.status}`), { status: post.status });
-    const ack = await post.json().catch(() => ({}));
+    const ack = await pushReport(base, agent, { results });
 
     const failed = measured.filter((x) => !x.verdict.ok).length;
     _last = {
@@ -98,7 +133,7 @@ export async function runLinkCheckWorkerOnce() {
       skipped: skipped.length,
       skippedReasons: skipped.slice(0, 10).map((x) => ({ id: x.link?.id || '', reason: x.skipped })),
       // ⚠ 중앙이 **버린 것**을 화면이 말할 수 있게 그대로 들고 있는다(v2.548 H6).
-      stored: ack?.stored ?? null, rejected: ack?.rejected ?? null, omitted: ack?.omitted ?? null,
+      ...ackFields(ack),
     };
     console.log(`[linkcheck-worker] 링크 ${links.length}개 점검 — 정상 ${measured.length - failed} · 실패 ${failed} · 건너뜀 ${skipped.length} · ${Date.now() - t0}ms`);
     return { ok: true, checked: measured.length, failed };

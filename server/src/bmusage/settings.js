@@ -38,6 +38,27 @@ export const DEFAULTS = Object.freeze({
    */
   idracFullTelemetry: true,
   /*
+   * ⚠⚠ **Enterprise 라이선스 대체 수집**(v2.554 — 사용자 신고 "내가 가진건 enterprise 라이선스라서,
+   * 엔터프라이즈 라이선스 대상 서버도 수집하는 기능 추가로 만들어줘").
+   *
+   * 텔레메트리(`SystemUsage`)는 **Datacenter 전용**이라(사용자 확인) Enterprise 서버는 CPU·메모리가
+   * 영원히 `—` 였다. 이 스위치를 켜면 **표준 Redfish 센서 + iDRAC SSH(racadm)** 로 대체 수집한다.
+   *
+   * ⚠⚠ **`enterpriseAck` 없이는 켜지지 않는다**(사용자 지시: "시스템에 부하는 있겠지만, 사용할
+   *   것이냐고 물어보고 사용하겠다고 하면 기능을 구현한다"). BMC 는 약한 프로세서라 주기마다
+   *   센서 GET 4회 + SSH 세션 1개가 붙는다 — 화면이 그 부하를 먼저 말하고 관리자가 동의해야 한다.
+   *   `normalizeSettings` 가 `enabled && ack` 로 못 박으므로 **그 논리곱을 지우지 말 것.**
+   * ⚠ `enterpriseMode` — `auto`(기본: API 로 못 읽은 것만 SSH) · `api` · `ssh`.
+   *   SSH 만 고르면 세션이 항상 열린다(부하가 가장 크다) — 회선·장비를 보며 고르게 한다.
+   * ⚠ 이 경로는 **iDRAC 경로의 확장**이다 — `idracTelemetry` 를 끄면 함께 돌지 않는다
+   *   (그 설정이 'iDRAC 로 수집할지' 를 정하는 축이다).
+   */
+  enterpriseEnabled: false,
+  enterpriseAck: false,
+  enterpriseAckAt: 0,
+  enterpriseAckBy: '',
+  enterpriseMode: 'auto',
+  /*
    * 임계 초과 알림(v2.551 — 사용자 요청). ⚠ **기본 꺼짐**이다: 200대 × 5분이면 하루 5.76만 판정이라
    * 폭주 위험이 실재한다. 켜기 전에 임계·지속·재알림을 확인하게 한다.
    *  · `alertSustainMin` — 연속 초과가 이만큼 지속돼야 알린다(한 주기 스파이크 무시)
@@ -84,6 +105,16 @@ export function normalizeSettings(raw = {}) {
     intervalMs: clampInt(raw.intervalMs, MIN_INTERVAL_MS, MAX_INTERVAL_MS, DEFAULTS.intervalMs),
     // 원시 보존은 행 수를 직접 정한다 — 하한 7일(그 아래면 증가 추세를 못 본다), 상한 365일.
     idracFullTelemetry: raw.idracFullTelemetry !== false,
+    /*
+     * ⚠⚠ **동의 없이는 켜지지 않는다**(위 DEFAULTS 주석). 이 논리곱이 사용자 지시의 집행부다 —
+     *   화면이 부하를 고지하고 관리자가 `enterpriseAck` 를 보내야 대체 수집이 돈다.
+     *   `enterpriseAck` 자체는 기록으로 남긴다(끄고 다시 켤 때 누가·언제 동의했는지 보이게).
+     */
+    enterpriseAck: raw.enterpriseAck === true,
+    enterpriseEnabled: raw.enterpriseEnabled === true && raw.enterpriseAck === true,
+    enterpriseAckAt: Number(raw.enterpriseAckAt) > 0 ? Math.round(Number(raw.enterpriseAckAt)) : 0,
+    enterpriseAckBy: String(raw.enterpriseAckBy || '').trim().slice(0, 64),
+    enterpriseMode: ['auto', 'api', 'ssh'].includes(String(raw.enterpriseMode || '').trim()) ? String(raw.enterpriseMode).trim() : DEFAULTS.enterpriseMode,
     alertEnabled: raw.alertEnabled === true,
     alertPct: clampInt(raw.alertPct, 50, 100, DEFAULTS.alertPct),
     alertSustainMin: clampInt(raw.alertSustainMin, 0, 240, DEFAULTS.alertSustainMin),
@@ -117,6 +148,16 @@ export function bmUsageEnabled() {
   if (env === 'false' || env === '0') return false;
   if (env === 'true' || env === '1') return true;
   return loadBmUsageSettings().enabled;
+}
+
+/**
+ * Enterprise 대체 수집이 **실제로 돌아야 하는가**(순수). 한 곳에서만 판정한다 —
+ * 폴러·라우트·화면이 각자 `enabled && ack` 를 쓰면 한 곳을 고칠 때 갈라진다.
+ */
+export function enterpriseActive(settings = loadBmUsageSettings()) {
+  const env = String(process.env.BMUSAGE_ENTERPRISE || '').trim().toLowerCase();
+  if (env === 'false' || env === '0') return false;          // 현장 탈출구(장비 부하가 문제일 때)
+  return !!(settings.enterpriseEnabled && settings.enterpriseAck && settings.idracTelemetry);
 }
 
 export function _resetForTest() { _cache = null; _cacheAt = 0; }

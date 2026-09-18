@@ -65,7 +65,11 @@ export function toneVar(tone) {
 }
 
 /** 값의 출처 표지 — 짧게. 행마다 긴 문장을 넣으면 셀이 세로로 길어진다(v2.509 규약). */
-export const SRC_MARK = Object.freeze({ os: 'OS', idrac: 'iDRAC', 'idrac+os': 'OS·iDRAC', 'os+idrac': 'OS·iDRAC' });
+export const SRC_MARK = Object.freeze({
+  os: 'OS', idrac: 'iDRAC', 'idrac+os': 'OS·iDRAC', 'os+idrac': 'OS·iDRAC',
+  // v2.554 — Enterprise 대체 경로. **텔레메트리와 구분해 표시한다**(측정 방식이 다르다).
+  'idrac-ent': 'iDRAC(대체)', 'idrac-ent+os': 'OS·iDRAC(대체)', 'idrac+idrac-ent': 'iDRAC·대체',
+});
 export function srcMark(src) {
   const s = t(src);
   if (!s) return '';
@@ -179,7 +183,7 @@ export function detailNotes(detail = {}) {
   if (t(detail.osError)) out.push(`OS 수집 실패: ${t(detail.osError)}`);
   if (t(detail.idracKind)) {
     const k = t(detail.idracKind);
-    out.push(k === 'no-telemetry' ? 'iDRAC 텔레메트리 리포트가 없습니다 — **Datacenter 라이선스**가 필요할 수 있습니다(이 경로가 없어도 OS 계정이 있으면 전부 읽습니다).'
+    out.push(k === 'no-telemetry' ? telemetryMissingText(detail)
       : k === 'auth' ? 'iDRAC 계정·비밀번호를 확인하세요(반복 시도해도 결과는 같습니다).'
         : k === 'empty-report' ? 'iDRAC 텔레메트리 리포트가 비어 있습니다 — 텔레메트리가 켜져 있지 않을 수 있습니다.'
           : k === 'ids-unmatched' ? `iDRAC 응답에서 **아는 메트릭 id 를 찾지 못했습니다** — 이 환경의 id 를 확인해야 합니다${(detail.idracSeenIds || []).length ? `(응답 id ${detail.idracSeenIds.length}개)` : ''}.`
@@ -370,4 +374,217 @@ export function telemetryNote(detail = {}) {
     parts.push('디스크 **사용률(busy%)** 은 iDRAC 텔레메트리에 없습니다(용량·상태 계열만 있습니다) — 그 값은 OS 경로만 줍니다.');
   }
   return parts.join(' ');
+}
+
+
+/* ══════════════ v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 ══════════ */
+
+/**
+ * ⚠⚠ **'텔레메트리가 왜 비었나' 를 추측으로 말하지 않는다**(v2.554).
+ *
+ * v2.550~2.551 은 `Datacenter 라이선스가 필요할 수 있습니다` 라고 **추측**했다. 그런데 라이선스
+ * 목록은 iDRAC 인벤토리에 이미 있다(`redfish.js:653` → `invCache`) — 그래서 등급을 읽었으면
+ * **단정**하고, 못 읽었으면 그 사실을 말한다. 근거가 있으면 말해야 하고, 없으면 말하지 않는다.
+ *
+ * ⚠ '텔레메트리 = Datacenter' 의 근거는 **사용자 확인**이다(2026-09-17 신고 원문). Dell 의 기능
+ *   매트릭스 원문은 이 환경에서 읽지 못했다 — 그래서 문구가 '확인된 것은' 형태다.
+ */
+export function telemetryMissingText(detail = {}) {
+  const lic = detail.license || null;
+  const tier = t(lic?.tier);
+  const base = 'iDRAC 텔레메트리 리포트가 없습니다';
+  /*
+   * ⚠ **꼬리 문장을 지우지 말 것**(v2.550 부터의 규약): 이 경로가 없어도 OS 계정이 있으면 다섯
+   *   지표를 전부 읽는다 — 그 사실을 말하지 않으면 사용자가 라이선스를 사야 한다고 읽는다.
+   */
+  const tail = ' 이 경로가 없어도 **OS 계정**이 등록돼 있으면 디스크·네트워크·HBA 까지 전부 읽습니다.';
+  if (tier && tier !== 'unknown' && tier !== 'datacenter') {
+    return `${base} — 이 iDRAC 의 라이선스는 **${t(lic.label) || tier}** 입니다.`
+      + ' 텔레메트리(SystemUsage)는 **Datacenter 등급**에서만 제공됩니다.'
+      + ' 아래 **Enterprise 대체 수집**을 켜면 표준 Redfish 센서와 iDRAC SSH(racadm)로 CPU·메모리를 읽습니다.'
+      + tail;
+  }
+  if (tier === 'datacenter') {
+    return `${base} — 라이선스는 **Datacenter** 로 읽혔으므로 등급 문제가 아닙니다.`
+      + ' iDRAC 에서 **텔레메트리가 꺼져 있거나** 펌웨어가 오래되었을 수 있습니다.'
+      + tail;
+  }
+  return `${base} — **이 iDRAC 의 라이선스 등급을 읽지 못했습니다**(인벤토리가 아직 수집되지 않았을 수 있습니다).`
+    + ' Datacenter 등급이 필요한 기능이라 등급 문제일 가능성이 있지만 **단정할 수 없습니다**.'
+    + tail;
+}
+
+/** 표 행에 붙이는 **짧은** 라이선스 표지. 값이 없으면 빈 문자열(행마다 긴 문장 금지 — v2.509). */
+export function licenseMark(license = null) {
+  const tier = t(license?.tier);
+  if (!tier || tier === 'unknown') return '';
+  return t(license.label) || tier;
+}
+
+/**
+ * 라이선스 상세 한 줄. ⚠ **언제 본 값인지 밝힌다** — 라이선스를 추가 설치했는데 화면이 옛 등급으로
+ * 말하면 사용자가 '기능이 고장났다' 고 읽는다. 인벤토리는 느린 주기(기본 30분)로 갱신된다.
+ */
+export function licenseNote(license = null, { now = Date.now() } = {}) {
+  if (!license) return '';
+  const tier = t(license.tier);
+  if (!tier || tier === 'unknown') {
+    if (!license.count) return 'iDRAC 라이선스 목록을 읽지 못했습니다(인벤토리 미수집 또는 이 iDRAC 이 목록을 주지 않음) — **등급 미상**입니다.';
+    return `iDRAC 라이선스 **${license.count}건**을 읽었지만 등급 단어(Datacenter·Enterprise·Express)를 찾지 못했습니다 — **등급 미상**입니다.`
+      + (license.expired ? ` 만료된 항목 ${license.expired}건이 있습니다.` : '');
+  }
+  const parts = [`iDRAC 라이선스 **${t(license.label) || tier}**`];
+  if (license.at) parts.push(`(인벤토리 ${ageText(license.at, now)} 기준)`);
+  if (license.evaluation) parts.push('· **평가판(Evaluation)** 항목이 포함돼 있습니다');
+  if (license.expired) parts.push(`· 만료 항목 ${license.expired}건은 등급 판정에서 제외했습니다`);
+  return `${parts.join(' ')}.`;
+}
+
+/**
+ * Enterprise 대체 수집 **동의 고지**(사용자 지시: "시스템에 부하는 있겠지만, 사용할것이냐고
+ * 물어보고 사용하겠다고 하면 기능을 구현한다").
+ * ⚠ **부하를 축소해 말하지 않는다** — 관리자가 무엇에 동의하는지 알아야 동의가 의미를 갖는다.
+ */
+export function enterpriseConsentNote() {
+  return '⚠ **이 경로는 장비에 부하를 더합니다.** 주기마다 그 서버의 iDRAC 에 **표준 Redfish 센서 GET 4회**가 붙고,'
+    + ' 센서로 읽지 못하면 **iDRAC SSH 세션 1개**를 열어 racadm 을 실행합니다. BMC 는 약한 프로세서라 이 부하가 작지 않습니다.'
+    + ' 그래서 **켜려면 아래 동의가 필요합니다** — 동의 없이는 저장되지 않습니다.'
+    + ' 대신 텔레메트리가 **정상인 서버에는 붙지 않습니다**(Datacenter 등급이고 값이 나오면 건너뜁니다).';
+}
+
+/**
+ * Enterprise 대체 수집 현재 상태. ⚠ **'켰는데 왜 값이 없나' 를 말한다** — 주기당 예산으로 미룬
+ * 대수, 어느 경로로 읽었는지, 형식을 못 읽은 대수까지. 조건이 없으면 빈 문자열이다.
+ */
+export function enterpriseStatusNote(status = {}) {
+  if (!status || status.enterpriseActive !== true) return '';
+  const last = status.last?.ent || null;
+  const parts = [`Enterprise 대체 수집이 **켜져 있습니다**(모드 ${t(status.enterpriseMode) || 'auto'}).`];
+  if (!last) { parts.push('아직 이 경로로 수집한 주기가 없습니다 — 다음 주기를 기다리거나 ‘지금 수집’ 을 누르세요.'); return parts.join(' '); }
+  parts.push(`마지막 주기에 **${n(last.tried) ?? 0}대**를 시도해 **${n(last.ok) ?? 0}대**에서 값을 읽었습니다`
+    + `(Redfish 센서 ${n(last.viaApi) ?? 0}대 · racadm ${n(last.viaSsh) ?? 0}대).`);
+  if (n(last.deferred)) {
+    parts.push(`**${last.deferred}대는 이번 주기 예산을 넘겨 미뤘습니다** — 다음 주기에 시도합니다(장비 부하를 평탄화하기 위한 상한입니다).`);
+  }
+  if (n(last.unparsed)) {
+    parts.push(`**${last.unparsed}대는 racadm 출력 형식을 읽지 못했습니다** — 그 서버를 눌러 상세의 원문을 확인해 주세요(이 현장 출력 형식을 아직 확인하지 못했습니다).`);
+  }
+  return parts.join(' ');
+}
+
+/**
+ * Enterprise 대체 경로의 서버별 상세. ⚠ **원문을 보여주는 것이 이 기능의 정직성 장치**다 —
+ * 파싱이 빗나가도 사용자가 실제 출력을 보고 알려줄 수 있어야 한다(v2.542 규약).
+ */
+export function entDetailNotes(detail = {}) {
+  const out = [];
+  const tried = detail.entTried || [];
+  if (!tried.length) return out;
+  const via = t(detail.entVia);
+  if (via) {
+    const how = [];
+    if (via.includes('api')) how.push(`표준 Redfish 센서(${Object.keys(detail.entUsedPaths || {}).length}개)`);
+    if (via.includes('ssh')) how.push(`iDRAC SSH — ${t(detail.entUsedCmd) || 'racadm'}`);
+    out.push(`대체 경로로 읽었습니다: **${how.join(' + ')}**.`);
+    const stat = detail.entUsedStat || {};
+    const peak = Object.entries(stat).filter(([, v]) => v === 'peak' || v === 'avg');
+    if (peak.length) {
+      out.push(`⚠ **${peak.length}개 지표는 현재값이 아니라 ${peak.some(([, v]) => v === 'peak') ? '최고치' : '평균'} 열을 읽었습니다** — 그 값은 지금 부하가 아닙니다.`);
+    }
+  }
+  const kind = t(detail.entKind);
+  if (kind) {
+    out.push(kind === 'auth' ? '대체 경로: iDRAC 계정·비밀번호가 거부됐습니다(401/403) — **반복 시도하지 않습니다**(계정이 잠깁니다).'
+      : kind === 'ssh-auth' ? '대체 경로: iDRAC **SSH 로그인**이 거부됐습니다 — 반복 시도하지 않습니다(계정이 잠깁니다).'
+        : kind === 'auth-stopped' ? `대체 경로가 **인증 실패로 정지**됐습니다 — ${t(detail.entError)}`
+          : kind === 'unparsed' ? '대체 경로: **racadm 출력 형식을 읽지 못했습니다** — 아래 원문을 보고 알려 주시면 파서를 맞추겠습니다(이 현장 출력을 확인한 적이 없습니다).'
+            : kind === 'timeout' ? '대체 경로: 시한을 넘겨 중단했습니다(다음 주기에 다시 시도합니다).'
+              : kind === 'absent' ? '대체 경로: 이 iDRAC 에 표준 Redfish 사용률 센서가 없습니다 — racadm 경로로 넘어갑니다.'
+                : kind.startsWith('not-eligible') ? '' : `대체 경로 실패: ${t(detail.entError) || kind}`);
+  }
+  for (const sk of (detail.entSkipped || [])) {
+    if (t(sk.reason)) out.push(`대체 경로 생략: ${t(sk.reason)}`);
+  }
+  if ((detail.entSeenSensors || []).length && !Object.keys(detail.entUsedPaths || {}).length) {
+    out.push(`이 iDRAC 의 센서 **${detail.entSeenSensors.length}개** 중 사용률 이름이 맞는 것이 없었습니다 — 센서 이름을 알려 주시면 패턴을 맞추겠습니다.`);
+  }
+  return out.filter(Boolean);
+}
+
+/**
+ * **'법인 귀속 없음' 의 원인과 조치**(v2.554 — 사용자 지시 "네 — 원인까지 조사").
+ *
+ * 이 현장은 이 사유로 500대가 제외돼 표가 통째로 비어 있었다. '귀속 없음' 만 말하면 사용자가
+ * 무엇을 고쳐야 하는지 알 수 없다 — 원인마다 **조치가 다르다**.
+ * ⚠ 자동 귀속을 제안하지 않는다 — 어느 서버가 어느 법인인지 포탈은 알지 못하고, 틀리게 귀속하면
+ *   그 법인의 부하 통계가 거짓이 된다.
+ * @returns {{head:string, items:string[], how:string}|null}
+ */
+export function unassignedNote(info = null) {
+  if (!info || !n(info.total)) return null;
+  const by = info.byCause || {};
+  const items = [];
+  if (by['registry-no-vc']) {
+    items.push(`**iDRAC 등록에 법인이 비어 있음 ${by['registry-no-vc']}대** — 설정 › iDRAC 등록에서 각 서버의 법인을 고르거나, 서버 분석 › 통합 인벤토리에서 **일괄 지정**하세요.`);
+  }
+  if (by['assign-ghost']) {
+    items.push(`**지금 없는 법인을 가리킴 ${by['assign-ghost']}대** — 수동 귀속이 삭제된 vCenter 를 가리킵니다. 다시 지정하면 해결됩니다.`);
+  }
+  if (by['edge-no-vc']) {
+    items.push(`**엣지가 보고했지만 법인이 없음 ${by['edge-no-vc']}대** — 그 법인 포탈의 iDRAC 등록에서 지정해야 합니다(중앙에서는 바꿀 수 없습니다).`);
+  }
+  if (by['no-registry-match']) {
+    items.push(`**등록부에서 찾지 못함 ${by['no-registry-match']}대** — iDRAC 등록이 없거나 **서비스태그가 비어 키가 맞지 않습니다**. 둘 중 어느 것인지는 여기서 구분할 수 없습니다.`);
+  }
+  if (info.error) items.push(`⚠ 원인을 판정하지 못했습니다: ${t(info.error)}`);
+  return {
+    head: `**법인 귀속이 없어 ${info.total}대가 수집 대상에서 빠졌습니다.** 어느 법인의 부하인지 알 수 없어 기본 제외입니다 — 이것은 이상이 아니라 **등록 데이터가 비어 있는 것**입니다.`,
+    items,
+    how: '지금 바로 보려면 설정에서 **‘법인 귀속 없는 서버도 포함’** 을 켤 수 있습니다.'
+      + ' 다만 그 서버들의 사용률은 **법인별 집계에 들어가지 않습니다**(귀속 없음으로 묶입니다) —'
+      + ' 법인별로 보려면 귀속을 지정하는 것이 맞습니다.',
+  };
+}
+
+/**
+ * 엣지 보관분 한 줄의 상태(v2.554). ⚠⚠ **값이 없는 것을 '정상' 으로 칠하지 않는다** —
+ * 이 표 최악의 거짓이다. 이유를 **순서대로** 말한다(v2.552 `rowState` 와 같은 규약).
+ * @returns {{state:string, label:string, why:string, tone:string}}
+ */
+export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60_000, now = Date.now() } = {}) {
+  const at = n(row.snapAt);
+  const att = row.lastAttempt || null;
+  if (row.enabled === false) return { state: 'off-central', label: '중앙에서 비활성', why: '중앙에서 이 수집 서버를 비활성으로 두었습니다 — 켜야 가져올 수 있습니다.', tone: 'idle' };
+  if (!row.hasUrl) return { state: 'no-url', label: 'URL 없음', why: '설정 › 수집 서버에 이 엣지의 URL 이 없습니다.', tone: 'bad' };
+  if (!at) {
+    if (!att) return { state: 'never', label: '가져온 적 없음', why: '아직 한 번도 가져오지 않았습니다 — 이 기능은 **누를 때만** 나가므로 이상이 아닙니다.', tone: 'idle' };
+    return {
+      state: 'failed', label: '실패', tone: 'bad',
+      why: att.kind === 'old-version' ? `이 엣지에 해당 경로가 없습니다 — v${minEdgeVersion} 이상으로 업그레이드해야 합니다(다시 눌러도 같습니다).`
+        : att.kind === 'auth' ? '수집 서버 토큰이 맞지 않습니다 — 중앙 등록값과 그 엣지의 설정을 대조하세요(다시 눌러도 같습니다).'
+          : att.kind === 'disabled' ? '그 엣지에서 수집 서버 토큰이 설정돼 있지 않습니다.'
+            : `${t(att.kind) || '실패'}: ${t(att.reason)}`,
+    };
+  }
+  if (row.enabledOnEdge === false) {
+    return { state: 'off-edge', label: '엣지에서 꺼짐', why: '그 엣지에서 베어메탈 사용률 수집이 꺼져 있습니다 — 그 법인 포탈에서 켜야 값이 생깁니다(중앙에서는 켤 수 없습니다).', tone: 'warn' };
+  }
+  const old = now - at > staleMs;
+  if (att && !att.ok) {
+    return { state: 'stale-failed', label: '마지막 시도 실패', tone: 'warn', why: `아래 값은 ${ageText(at, now)} 가져온 것이고, **가장 최근 시도는 실패**했습니다 — ${t(att.kind)}: ${t(att.reason)}` };
+  }
+  if (old) return { state: 'stale', label: '낡음', tone: 'warn', why: `${ageText(at, now)} 가져온 값입니다 — 지금 값을 보려면 다시 가져오세요.` };
+  return { state: 'ok', label: '보관분 있음', tone: 'ok', why: `${ageText(at, now)} 가져온 값입니다.` };
+}
+
+/**
+ * 엣지 패널 머리말. ⚠ **'push 가 없다' 는 사실을 말한다** — 값이 낡은 것이 장애가 아니라 설계다
+ * (사용자 선택: "중앙으로 전달은 중앙에서 조회할때만").
+ */
+export function edgePullNote(rows = []) {
+  const arr = Array.isArray(rows) ? rows : [];
+  const have = arr.filter((r) => n(r.snapAt)).length;
+  return `엣지는 자기 법인 베어메탈을 **스스로 수집·종합**하고, 중앙은 **누를 때만** 그 결과를 가져옵니다(상시 전송 없음).`
+    + ` 등록된 엣지 **${arr.length}곳** 중 **${have}곳**의 보관분이 있습니다.`
+    + (have < arr.length ? ' 보관분이 없는 곳은 아직 가져오지 않은 것이며 이상이 아닙니다.' : '');
 }

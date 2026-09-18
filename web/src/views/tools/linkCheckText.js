@@ -37,7 +37,7 @@ export function stateTone(state) {
  * @param {object} p    `{ enabled, minEdgeVersion }`
  * @returns {{state:string, reason:string, whyShort:string, why:string, fix:string}}
  */
-export function rowState(row = {}, { enabled = true, minEdgeVersion = '2.552.0' } = {}) {
+export function rowState(row = {}, { enabled = true, minEdgeVersion = '2.552.0', runningSinceTs = null, intervalMs = 0, now = Date.now() } = {}) {
   if (row.enabled === false) {
     return { state: 'disabled', reason: 'disabled', whyShort: '비활성', why: '이 대상이 비활성입니다(등록부에서 껐습니다).', fix: '' };
   }
@@ -63,9 +63,36 @@ export function rowState(row = {}, { enabled = true, minEdgeVersion = '2.552.0' 
       if (cmpVersion(ver, minEdgeVersion) !== null && cmpVersion(ver, minEdgeVersion) < 0) {
         return { state: 'no-data', reason: 'edge-old', whyShort: `구버전 ${ver}`, why: `이 엣지가 구버전입니다(${ver} · 필요 ${minEdgeVersion}).`, fix: '그 엣지를 업그레이드하면 자동으로 측정이 시작됩니다.' };
       }
+      /*
+       * ⚠⚠ **'기다리면 된다' 를 영원히 말하지 않는다**(v2.554 — 사용자 실화면으로 확정한 v2.552 결함).
+       *   엣지가 v2.553 으로 전부 올라가고 중앙 점검이 10분·3회를 돌았는데도 전 엣지가
+       *   '첫 보고 대기' 였다. 원인은 셋인데(중앙이 개별 토큰이 아니라 403 / 그 엣지가 잴 링크가
+       *   0개 / 워커 미동작) **셋 다 기다려서 되는 것이 아니다**. 점검이 주기의 3배를 넘게 돌았는데도
+       *   보고가 없으면 문구를 바꾼다 — 조치가 정반대이기 때문이다(v2.517 규약).
+       * ⚠ `runningSinceTs` 가 없으면(첫 주기 전) escalate 하지 않는다 — 없는 문제를 만들지 않는다.
+       */
+      const ranMs = (runningSinceTs && intervalMs) ? (now - runningSinceTs) : 0;
+      if (ranMs > intervalMs * 3) {
+        return {
+          state: 'no-data', reason: 'edge-silent', whyShort: '보고 없음(대기 초과)',
+          why: '중앙 점검은 여러 주기를 돌았는데 이 엣지의 보고가 한 번도 오지 않았습니다 — 기다려서 될 상태가 아닙니다.',
+          fix: '원인은 셋입니다 — ① 이 엣지가 **개별 토큰**을 쓰지 않아 중앙이 거부(403)하고 있다(설정 › 수집 서버 › 엣지 토큰에서 발급) ② 중앙이 계산한 이 엣지의 링크가 **0개**다(이름 불일치·담당 vCenter 없음) ③ 엣지 워커가 돌지 않는다. **특수기능 › 엣지 로그**에서 그 엣지를 가져와 linkcheck-worker 줄을 보면 바로 갈립니다.',
+        };
+      }
       return { state: 'no-data', reason: 'edge-waiting', whyShort: '첫 보고 대기', why: '이 엣지가 아직 첫 보고를 올리지 않았습니다.', fix: '엣지 워커의 첫 주기를 기다리세요(버전은 충분합니다).' };
     }
     if (rep.stale) return { state: 'no-data', reason: 'edge-stale', whyShort: '보고 오래됨', why: '이 엣지의 마지막 보고가 오래됐습니다 — 지금 값이 맞는지 알 수 없습니다.', fix: '엣지→중앙 통신을 먼저 확인하세요.' };
+    /*
+     * ⚠ v2.554 — 엣지가 **왜 0건인지** 말해 주면 그것을 그대로 쓴다(추측하지 않는다).
+     *   구버전 엣지는 `note` 가 없으므로 예전 문구로 떨어진다 — 그 차이도 문구가 드러낸다.
+     */
+    if (t(rep.note)) {
+      return {
+        state: 'no-data', reason: 'edge-no-link', whyShort: '엣지가 잴 링크 없음',
+        why: `이 엣지가 보고했지만 잴 링크가 없다고 답했습니다 — ${t(rep.note)}`,
+        fix: '중앙이 이 엣지에 내려주는 링크가 0개입니다 — 점검 종류 설정과 이 엣지의 이름(수집 서버 등록부 name ↔ 엣지 AGENT_NAME)이 맞는지 보세요.',
+      };
+    }
     return { state: 'no-data', reason: 'edge-no-link', whyShort: '이 링크만 없음', why: '이 엣지는 보고했지만 이 링크의 결과가 없습니다(점검하지 않았거나 중앙이 버렸습니다).', fix: '엣지 로그의 linkcheck-worker 줄을 보세요.' };
   }
   return { state: 'no-data', reason: 'first', whyShort: '첫 주기 대기', why: '아직 이 링크를 점검한 기록이 없습니다.', fix: '첫 주기를 기다리거나 \'지금 점검\' 을 누르세요.' };

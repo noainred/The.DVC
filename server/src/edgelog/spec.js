@@ -49,6 +49,13 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'push.sanswitchPerf', label: 'SAN 포트 사용량', group: 'push', mod: '../sanswitch/perfPush.js', fn: 'sanSwitchPerfPushStatus' },
   { key: 'push.pdu', label: 'PDU', group: 'push', mod: '../pdu/push.js', fn: 'pduPushStatus' },
   { key: 'push.partFault', label: '파트 장애', group: 'push', mod: '../partfault/push.js', fn: 'partFaultPushStatus' },
+  /*
+   * ⚠ v2.554 에 추가 — v2.552 가 이 워커를 만들면서 **이 표에 넣지 않았다**. 그래서 엣지가
+   *   보고하지 못하는 상황(개별 토큰 아님 403 · 잴 링크 0개 · 워커 미동작)을 중앙 화면에서도
+   *   엣지 로그 화면에서도 볼 수 없었고, 통신 점검 화면은 '첫 보고 대기' 라고만 말했다.
+   *   **새 엣지 워커를 만들면 이 표에 함께 넣을 것.**
+   */
+  { key: 'push.linkCheck', label: '통신 점검', group: 'push', mod: '../agent/linkCheckWorker.js', fn: 'linkCheckWorkerStatus' },
 
   // ── 중앙 → 엣지(설정 수신) ──────────────────────────────────────────────────
   { key: 'pull.storage', label: '스토리지 설정', group: 'pull', mod: '../agent/storageConfigPull.js', fn: 'storageConfigPullStatus' },

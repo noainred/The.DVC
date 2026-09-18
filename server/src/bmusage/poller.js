@@ -21,8 +21,10 @@ import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withDeadline } from '../proxy/sshExec.js';
 import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
-import { loadBmUsageSettings, bmUsageEnabled } from './settings.js';
+import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive } from './settings.js';
 import { resolveTargets } from './targets.js';
+import { enterpriseEligible } from './license.js';
+import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
 import { buildUsage } from './usage.js';
 import { collectOsUsage } from './collectors/osSsh.js';
 import { insertUsage, pruneUsage } from './db.js';
@@ -41,6 +43,20 @@ const PRUNE_EVERY = 12;
  */
 const LIST_BUDGET_PER_RUN = Math.max(1, Number(process.env.BMUSAGE_LIST_BUDGET) || 20);
 let _listBudget = 0;
+/**
+ * ⚠⚠ **주기당 'Enterprise 대체 수집' 예산**(v2.554). 이 경로는 장비당 센서 GET 4회 +
+ *   (필요하면) **iDRAC SSH 세션 1개**다. BMC 핸드셰이크는 느려(수 초) 200대에 무제한으로 붙이면
+ *   주기(300초)를 넘기고 재진입 가드가 다음 틱을 계속 건너뛴다 — v2.551 의 목록 조회 예산과
+ *   같은 판단이다. 실제 산수: 40대 × 약 10초 ÷ 동시 4 = **100초**.
+ *   예산을 넘긴 장비는 **사유를 남기고**(조용한 생략 금지) 다음 주기에 시도한다.
+ * ⚠ 센서 경로 **탐색**(Chassis + Sensors 열거)은 더 비싸므로 별도 예산을 둔다.
+ */
+const ENT_BUDGET_PER_RUN = Math.max(1, Number(process.env.BMUSAGE_ENT_PER_RUN) || 40);
+const ENT_PROBE_PER_RUN = Math.max(1, Number(process.env.BMUSAGE_ENT_PROBE_PER_RUN) || 10);
+let _entBudget = 0;
+let _entProbeBudget = 0;
+/** 이번 주기에 예산으로 미룬 대수 — 화면이 '왜 아직 안 나오나' 를 말할 수 있게. */
+let _entDeferred = 0;
 
 const guard = createAuthGuard({ file: 'bmusage-auth-stops.json' });
 
@@ -57,6 +73,11 @@ export function bmUsageStatus() {
     concurrency: CONCURRENCY, deviceTimeoutMs: DEVICE_TIMEOUT_MS,
     rawRetentionDays: s.rawRetentionDays, dailyRetentionDays: s.dailyRetentionDays,
     idracFullTelemetry: !!s.idracFullTelemetry, listBudgetPerRun: LIST_BUDGET_PER_RUN,
+    // v2.554 — Enterprise 대체 수집(동의 기반). 화면이 부하·예산을 말할 수 있게 그대로 낸다.
+    enterpriseActive: enterpriseActive(s), enterpriseMode: s.enterpriseMode,
+    enterpriseAck: !!s.enterpriseAck, enterpriseAckAt: s.enterpriseAckAt || 0, enterpriseAckBy: s.enterpriseAckBy || '',
+    entBudgetPerRun: ENT_BUDGET_PER_RUN, entProbePerRun: ENT_PROBE_PER_RUN,
+    entBudgetMs: ENT_BUDGET_MS, entDeferred: _entDeferred,
     alertEnabled: !!s.alertEnabled, alertPct: s.alertPct, alertSustainMin: s.alertSustainMin,
     alertRepeatHours: s.alertRepeatHours, alertState: alertStateInfo(),
     /*
@@ -81,10 +102,12 @@ export function bmUsageStatus() {
 export function authStopsFor(targets = []) {
   const out = [];
   for (const tg of targets) {
-    const dev = authDev(tg);
-    if (!dev) continue;
-    const rec = guard.authStopFor(dev);
-    if (rec) out.push({ key: tg.key, name: tg.name, vcenterId: tg.vcenterId || '', ...rec });
+    // ⚠ 두 경로를 **각각** 보고한다(`path` 로 구분) — 뭉치면 사용자가 엉뚱한 비밀번호를 고친다.
+    for (const [path, dev] of [['os', authDev(tg)], ['idrac', authDevIdrac(tg)]]) {
+      if (!dev) continue;
+      const rec = guard.authStopFor(dev);
+      if (rec) out.push({ key: tg.key, name: tg.name, vcenterId: tg.vcenterId || '', path, ...rec });
+    }
   }
   return out;
 }
@@ -93,8 +116,9 @@ export function authStopsFor(targets = []) {
 export async function currentTargets() {
   const s = loadBmUsageSettings();
   const snap = store.get();
-  const [{ getFleetInventory }, { loadRegistry }, { listBmServersRaw }] = await Promise.all([
+  const [{ getFleetInventory }, { loadRegistry }, { listBmServersRaw }, { getInventory }] = await Promise.all([
     import('../insights/fleetInventory.js'), import('../idrac/registry.js'), import('../bmstor/registry.js'),
+    import('../idrac/invCache.js'),
   ]);
   const fleet = await getFleetInventory(snap).catch(() => ({ bareMetal: [] }));
   const registry = (() => { try { return loadRegistry(); } catch { return []; } })();
@@ -105,6 +129,8 @@ export async function currentTargets() {
     ...resolveTargets({
       bareMetal: fleet.bareMetal || [], registry, bmServers, settings: s,
       agentName: config.agent?.name || '', isEdge,
+      // ⚠ **캐시된** 인벤토리만 읽는다(장비 왕복 0) — 라이선스 등급 판정용(v2.554).
+      inventoryOf: (id) => getInventory(id),
     }),
     vcenters: (snap?.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id })),
     isEdge,
@@ -123,6 +149,21 @@ function authDev(target) {
     username: target.osHost.username, password: target.osHost.password,
   };
 }
+/**
+ * Enterprise 대체 수집(iDRAC 계정)용 정지 식별자(v2.554). ⚠ **OS 계정과 다른 이름공간**이어야
+ * 한다 — 같은 서버의 OS 비밀번호가 틀린 것과 iDRAC 비밀번호가 틀린 것은 **조치가 다르고**,
+ * 한쪽 정지가 다른쪽을 멈추면 멀쩡한 경로가 죽는다(v2.535 '도구마다 다른 이름' 의 변형).
+ * ⚠ **iDRAC 계정도 잠긴다** — 5분마다 틀린 비밀번호로 Redfish·SSH 로그인을 시도하면
+ *   iDRAC 의 계정 잠금 정책(기본 3~5회)에 걸려 **전력·온도 수집까지 함께 죽는다**.
+ */
+function authDevIdrac(target) {
+  if (!target.idrac) return null;
+  return {
+    id: `${config.agent?.name || 'central'}|idrac|${target.key}`,
+    username: target.idrac.username, password: target.idrac.password,
+  };
+}
+
 /** 화면이 '몇 대가 정지됐나' 를 말할 수 있게 이번 주기의 정지분을 기억한다. */
 const _authStopped = new Map();
 
@@ -164,6 +205,53 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
    */
   const sampledAt = Date.now();
 
+  /*
+   * ── ③ Enterprise 대체 수집(v2.554) ─────────────────────────────────────────
+   * 사용자 신고: "텔레메트리는 Datacenter 라이선스가 필요한데 내가 가진건 enterprise 라서".
+   * ⚠⚠ **텔레메트리 결과를 본 뒤에 판정한다**(`license.enterpriseEligible`) — 등급만 보고 걸면
+   *   ⓐ 등급을 못 읽은 서버가 영영 제외되고 ⓑ 텔레메트리가 잘 되는 Datacenter 장비에도 SSH·추가
+   *   GET 이 붙어 **장비 부하가 두 배**가 된다. 관리자가 동의한 것은 '텔레메트리로 못 읽는 서버'
+   *   에 대한 부하다.
+   * ⚠ **401/403 이면 시도하지 않는다** — 같은 계정이라 결과가 같고 **iDRAC 계정을 잠근다**.
+   * ⚠ **주기당 예산**을 넘기면 이번 주기는 미루고 **사유를 남긴다**(조용한 생략 금지).
+   * ⚠ 시한은 `withDeadline` + `signal` 로 **SSH 세션을 실제로 끊는다**(v2.417).
+   */
+  let ent = null;
+  const entDev = authDevIdrac(target);
+  const entStopped = (entDev && trigger !== 'manual') ? guard.authStopFor(entDev) : null;
+  if (entStopped) _authStopped.set(`${target.key}|idrac`, entStopped); else _authStopped.delete(`${target.key}|idrac`);
+  if (target.entAllowed && enterpriseActive(loadBmUsageSettings())) {
+    const el = enterpriseEligible({
+      tier: target.license?.tier || '', telemetryOk: !!idrac?.ok,
+      telemetryKind: idrac?.ok ? '' : (idrac?.kind || ''),
+    });
+    if (entStopped) {
+      ent = { ok: false, kind: 'auth-stopped', error: `iDRAC 인증 실패로 주기 대체 수집이 정지됐습니다(${entStopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: entStopped };
+    } else if (!el.eligible) {
+      ent = { ok: false, kind: `not-eligible:${el.why}`, skipped: true };
+    } else if (_entBudget <= 0) {
+      _entDeferred += 1;
+      ent = { ok: false, kind: 'budget', skipped: true, error: '이번 주기의 대체 수집 예산을 다 써서 미뤘습니다 — 다음 주기에 시도합니다.' };
+    } else {
+      _entBudget -= 1;
+      const allowProbe = _entProbeBudget > 0;
+      if (allowProbe) _entProbeBudget -= 1;
+      ent = await withDeadline(DEVICE_TIMEOUT_MS,
+        (signal) => collectEnterpriseUsage(target.idrac, { mode: loadBmUsageSettings().enterpriseMode, allowProbe, signal }),
+        'iDRAC 대체 수집 시한 초과')
+        .catch((e) => ({ ok: false, kind: 'timeout', error: String(e?.message || e).slice(0, 300) }));
+      // 자격증명 거부면 주기 수집을 멈춘다(위 주석 — iDRAC 계정 잠금 방지).
+      if (entDev && (ent.kind === 'auth' || ent.kind === 'ssh-auth')) {
+        const rec = guard.markAuthStopped(entDev.id, entDev, ent.error || ent.kind);
+        _authStopped.set(`${target.key}|idrac`, rec);
+        console.warn(`[bmusage] ${target.name}: iDRAC 인증 실패로 대체 수집 정지(${rec.attempts}회)`);
+      } else if (entDev && ent.ok) {
+        guard.clearAuthStop(entDev.id);
+        _authStopped.delete(`${target.key}|idrac`);
+      }
+    }
+  }
+
   // 인증 실패면 주기 수집을 멈춘다 — 반복 시도는 결과가 같고 계정만 잠근다.
   if (dev && os && os.ok === false && !os.authStopped && isAuthFailureText(os.error)) {
     const rec = guard.markAuthStopped(dev.id, dev, os.error);
@@ -174,19 +262,19 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
     _authStopped.delete(target.key);
   }
 
-  const built = buildUsage({ target, idrac, os, prev: _prev.get(target.key) || null, now: sampledAt });
+  const built = buildUsage({ target, idrac, os, ent, prev: _prev.get(target.key) || null, now: sampledAt });
   if (built.next) _prev.set(target.key, built.next);
-  const ok = !!(idrac?.ok || os?.ok);
+  const ok = !!(idrac?.ok || os?.ok || ent?.ok);
   recordBmUsage({
     // ⚠ `idracHost` 는 `publicTarget()` 이 만드는 응답용 필드다 — **내부 target 에는 없다**.
     //   `target.idracHost` 로 읽으면 iDRAC 전용 서버의 작업 로그에 host 가 빈 칸으로 남는다.
     deviceId: target.key, name: target.name, host: target.osHost?.host || target.idrac?.host || '',
     source: config.agent?.name || 'central', ok, durationMs: Date.now() - t0,
-    error: ok ? null : (os?.error || idrac?.error || '두 경로 모두 실패'),
+    error: ok ? null : (os?.error || ent?.error || idrac?.error || '수집 경로 전부 실패'),
     // ⚠ 실패 주기의 수치는 싣지 않는다(0 은 '부하 없음' 이라는 거짓).
     ...(ok ? { cpuPct: built.row.cpu_pct, memPct: built.row.mem_pct, diskBusyPct: built.row.disk_busy_pct, netPct: built.row.net_pct, hbaPct: built.row.hba_pct } : {}),
   });
-  return { ok, target, built, idrac, os };
+  return { ok, target, built, idrac, os, ent };
 }
 
 /** 동시성 제한 풀(store.collectPool 과 같은 판단 — 새 의존성을 들이지 않는다). */
@@ -219,6 +307,9 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
       return { ok: true, servers: 0, counts, reason: '대상 서버가 없습니다.' };
     }
     _listBudget = LIST_BUDGET_PER_RUN;   // ⚠ 주기 시작마다 리셋(위 상수 주석 참조)
+    _entBudget = ENT_BUDGET_PER_RUN;
+    _entProbeBudget = ENT_PROBE_PER_RUN;
+    _entDeferred = 0;
     const results = await pool(targets, CONCURRENCY, (tg) => collectOne(tg, { trigger }).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) })));
     /*
      * ⚠ **대상에서 사라진 키를 버린다**(v2.550.3): `_prev` 는 서버마다 누적 카운터 배열(디스크·NIC·
@@ -229,7 +320,8 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
      */
     const live = new Set(targets.map((t2) => t2.key));
     for (const k of _prev.keys()) if (!live.has(k)) _prev.delete(k);
-    for (const k of _authStopped.keys()) if (!live.has(k)) _authStopped.delete(k);
+    // ⚠ iDRAC 정지 키는 `<key>|idrac` 이므로 접미를 떼고 대조한다(안 떼면 영원히 남는다 — 누수).
+    for (const k of _authStopped.keys()) if (!live.has(String(k).replace(/\|idrac$/, ''))) _authStopped.delete(k);
     // ⚠ `_perIf`·`_perFc` 는 화면 상세용 내부 배열이다 — DB 적재 경로로 넘기지 않는다(오염 방지).
     const rows = results.filter((r) => r?.ok && r.built)
       .map((r) => { const { _perIf: _a, _perFc: _b, ...row } = r.built.row; return row; });
@@ -246,6 +338,18 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
     _last = {
       at: Date.now(), ms: Date.now() - t0, servers: targets.length,
       okCount, failCount: targets.length - okCount, inserted: ins.inserted || 0,
+      /*
+       * Enterprise 대체 수집 요약(v2.554) — 화면이 '동의했는데 왜 값이 없나' 를 말할 수 있게.
+       * ⚠ 개수만 담는다(장비 이름·법인은 담지 않는다 — `status.last` 는 무스코프로 나간다. v2.550.3).
+       */
+      ent: {
+        tried: results.filter((r) => r?.ent && !r.ent.skipped).length,
+        ok: results.filter((r) => r?.ent?.ok).length,
+        deferred: _entDeferred,
+        viaApi: results.filter((r) => r?.ent?.ok && String(r.ent.via || '').includes('api')).length,
+        viaSsh: results.filter((r) => r?.ent?.ok && String(r.ent.via || '').includes('ssh')).length,
+        unparsed: results.filter((r) => r?.ent && r.ent.kind === 'unparsed').length,
+      },
       dbOk: !!ins.ok, dbError: ins.error || null, counts, trigger,
       alerts: alerts && !alerts.skipped ? { sent: alerts.sent ?? 0, suppressed: alerts.suppressed ?? 0, capped: alerts.capped ?? 0, over: alerts.counts?.over ?? 0, error: alerts.error || null } : null,
     };

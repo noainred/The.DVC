@@ -206,3 +206,47 @@ describe('cmpVersion', () => {
     expect(cmpVersion('abc', '2.552.0')).toBe(null);
   });
 });
+
+/* ══════════════ v2.554 — 엣지 미보고를 '기다리면 된다' 로 덮지 않는다 ═════════ */
+describe('v2.554 — 엣지 보고가 오지 않을 때', () => {
+  const NOW2 = 1_700_000_000_000;
+  const edgeRow = { by: 'edge', from: 'GM1', kind: 'edge->central', enabled: true, latest: null, edgeReport: null, edgeVersion: '2.553.0' };
+
+  it('첫 주기 안에는 "첫 보고 대기" 다(없는 문제를 만들지 않는다)', () => {
+    const s = rowState(edgeRow, { enabled: true, runningSinceTs: NOW2 - 60_000, intervalMs: 300_000, now: NOW2 });
+    expect(s.reason).toBe('edge-waiting');
+  });
+
+  it('⚠⚠ 주기의 3배를 넘게 돌았는데 보고가 없으면 문구가 바뀐다(기다려서 될 일이 아니다)', () => {
+    const s = rowState(edgeRow, { enabled: true, runningSinceTs: NOW2 - 40 * 60_000, intervalMs: 300_000, now: NOW2 });
+    expect(s.reason).toBe('edge-silent');
+    expect(s.why).toContain('기다려서 될 상태가 아닙니다');
+    // 조치 셋을 모두 말한다 — 조치가 서로 다르다.
+    expect(s.fix).toContain('개별 토큰');
+    expect(s.fix).toContain('0개');
+    expect(s.fix).toContain('엣지 로그');
+  });
+
+  it('⚠ runningSinceTs 가 없으면 escalate 하지 않는다', () => {
+    const s = rowState(edgeRow, { enabled: true, runningSinceTs: null, intervalMs: 300_000, now: NOW2 });
+    expect(s.reason).toBe('edge-waiting');
+  });
+
+  it('엣지가 "잴 링크가 없다" 고 답했으면 그 사유를 그대로 쓴다(추측하지 않는다)', () => {
+    const s = rowState({ ...edgeRow, edgeReport: { at: NOW2, stale: false, note: '이 엣지가 잴 링크가 없습니다(종류를 껐거나 담당 vCenter·짝이 없습니다).' } }, { enabled: true, now: NOW2 });
+    expect(s.reason).toBe('edge-no-link');
+    expect(s.why).toContain('잴 링크가 없다고 답했습니다');
+    expect(s.fix).toContain('AGENT_NAME');
+  });
+
+  it('구버전 엣지는 note 가 없으므로 예전 문구로 떨어진다(그 차이가 드러난다)', () => {
+    const s = rowState({ ...edgeRow, edgeReport: { at: NOW2, stale: false } }, { enabled: true, now: NOW2 });
+    expect(s.reason).toBe('edge-no-link');
+    expect(s.whyShort).toBe('이 링크만 없음');
+  });
+
+  it('구버전 엣지 판정이 escalate 보다 먼저다(업그레이드가 조치다)', () => {
+    const s = rowState({ ...edgeRow, edgeVersion: '2.540.0' }, { enabled: true, runningSinceTs: NOW2 - 40 * 60_000, intervalMs: 300_000, now: NOW2 });
+    expect(s.reason).toBe('edge-old');
+  });
+});
