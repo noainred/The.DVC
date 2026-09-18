@@ -6,6 +6,7 @@
  *   키는 'YYYY-MM-DDT00' | 'YYYY-MM-DDT12'. 같은 슬롯에 두 번 수집되면 DB 가 UPSERT 로
  *   덮어써 중복 행이 생기지 않는다(수동 스냅샷도 같은 슬롯이면 최신 값으로 갱신).
  */
+import { numOrNull } from '../util/numOrNull.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 
@@ -98,7 +99,7 @@ export function diffVcenter(vms, prevRoster) {
 // 합계 시계열(ds_used_gb)은 임계와 무관하게 항상 정확하다(차트는 그 값을 쓴다).
 const DS_DELTA_MIN_GB = Number(process.env.VMTRACK_DS_DELTA_MIN_GB) || 1;
 
-const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+const num = numOrNull;   // v2.561: 판정은 util/numOrNull.js 하나가 갖는다(Number(null)===0 함정)
 
 /** 스냅샷 데이터스토어 → 추적 필드. id 는 스냅샷 id('<vcId>:<name>')를 그대로 쓴다. */
 export function normalizeDs(d) {

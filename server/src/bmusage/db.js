@@ -25,6 +25,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'bm-usage.db');
 
@@ -171,7 +172,7 @@ export async function dbStatus() {
   } catch (e) { return { available: true, path: FILE(), error: String(e?.message || e).slice(0, 200) }; }
 }
 
-const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+const n = numOrNull;   // v2.561: 공용 판정
 
 /**
  * 한 주기의 행들을 적재하고 일 롤업을 갱신한다. **트랜잭션 1회**로 묶는다

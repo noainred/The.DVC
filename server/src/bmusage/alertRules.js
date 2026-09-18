@@ -19,7 +19,8 @@
  * ⚠ 값이 없는 동안 시간이 흐르는 것을 '지속' 으로 세지 않는다 — `since` 는 유지하되
  *   `lastOverAt`(마지막으로 실제 초과를 본 시각)이 오래되면 그 초과는 **끊어진 것**으로 본다.
  */
-const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+import { numOrNull } from '../util/numOrNull.js';
+const n = numOrNull;   // v2.561: 공용 판정
 
 /** 해제 판정 여유 — 임계 90 이면 87 아래로 내려와야 해제다. */
 export const HYSTERESIS_PCT = 3;

@@ -20,8 +20,9 @@
  *   Windows 경로는 `Win32_PerfFormattedData_*` 가 순간값이라 첫 주기부터 나온다 — 그 차이도 밝힌다.
  */
 import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict } from './rates.js';
+import { numOrNull } from '../util/numOrNull.js';
 
-const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+const n = numOrNull;   // v2.561: 공용 판정
 
 /** 이전 표본에서 같은 이름의 항목을 찾는다(장치·인터페이스가 추가·제거될 수 있다). */
 const findBy = (list, field, val) => (Array.isArray(list) ? list.find((x) => x[field] === val) : null) || null;

@@ -25,6 +25,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { recordActivity } from '../sanswitch/perfActivityLog.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'central-agent-sanswitch-perf.json');
 const MAX_DEVICES_PER_AGENT = 300;
@@ -39,11 +40,6 @@ function load() {
   return _map;
 }
 
-const numOrNull = (v) => {
-  if (v == null || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
 
 /** 엣지가 보고한 상태를 정규화(신뢰 경계 — 형식·상한을 여기서 강제한다). */
 export function normalizeEdgePerfStatus(input = {}) {

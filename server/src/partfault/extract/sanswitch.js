@@ -44,10 +44,11 @@
 
 import { makePart, PART_STATE, KEY_KIND, DEVICE_KEY_KIND } from '../types.js';
 import { isLinked, RX_WARN_DBM, RX_BAD_DBM } from '../../sanswitch/healthCheck.js';
+import { numOrNull } from '../../util/numOrNull.js';
 
 const t = (v) => String(v ?? '').trim();
 /** ⚠ `Number(null) === 0` 함정(v2.525 규약) — null/빈 값은 먼저 걸러 null 로 돌린다. */
-const num = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+const num = numOrNull; // v2.561: 공용 판정
 
 /**
  * @param {{id:string, name?:string, host?:string, agent?:string}} device 레지스트리 항목(`sanswitch/registry.js`)

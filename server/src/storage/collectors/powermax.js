@@ -59,6 +59,7 @@
  */
 import { emptySnapshot } from '../types.js';
 import { makeGetter } from './restCommon.js';
+import { numOrNull } from '../../util/numOrNull.js';
 
 const TB = 1e12; // Unisphere *_tb → 바이트(10진 가정 — 파일 머리말 정직 표기 참조)
 const GB = 1e9;  // Unisphere *_gb → 바이트(TB 와 같은 10진 가정)
@@ -100,7 +101,7 @@ export function apiVersionsFrom(v) {
   return { vers: out.slice(0, MAX_VERS), source };
 }
 
-const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+const num = numOrNull;   // v2.561: 판정은 util/numOrNull.js 하나가 갖는다(Number(null)===0 함정)
 
 /**
  * 어레이 응답 → 용량(순수 · v2.534).

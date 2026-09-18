@@ -6,6 +6,7 @@
  */
 import { emptySnapshot } from '../types.js';
 import { makeGetter, makeRawGetter, makePoster, tryAny } from './restCommon.js';
+import { numOrNull } from '../../util/numOrNull.js';
 
 /**
  * 공간 시계열 응답에서 쓸 점 하나 고르기(순수).
@@ -69,7 +70,7 @@ export function normalizePowerstore(device, raw) {
     snap.sections.capacity = 'ok';
     // 물리 사용량의 맥락(논리 사용량·데이터 감축률·절감) — 상세 화면에서 '실제 디스크를 얼마나
     // 쓰는지'와 '논리적으로 얼마를 할당했는지'를 함께 보기 위해 extra 로 싣는다(스키마 확장 금지 규칙).
-    const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+    const num = numOrNull;   // v2.561: 공용 판정(Number(null)===0 함정)
     snap.extra.space = {
       physicalTotal: total, physicalUsed: used,
       logicalUsed: num(m.logical_used), logicalProvisioned: num(m.logical_provisioned),
@@ -155,7 +156,7 @@ export function normalizePowerstore(device, raw) {
   // 성능(최신 1점) — IOPS/대역폭/지연. 용량과 달리 '지금 얼마나 일하는지'를 본다.
   const perf = pickLatestSpacePoint(raw.perf); // 같은 시계열 선택 규칙(최신 점) 재사용
   if (perf) {
-    const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+    const num = numOrNull;   // v2.561: 공용 판정(Number(null)===0 함정)
     snap.extra.perf = {
       readIops: num(perf.read_iops), writeIops: num(perf.write_iops), totalIops: num(perf.total_iops),
       readBandwidth: num(perf.read_bandwidth), writeBandwidth: num(perf.write_bandwidth), totalBandwidth: num(perf.total_bandwidth),

@@ -11,6 +11,7 @@
 
 import { emptySnapshot } from '../types.js';
 import { runCliSession, parseCsv, parseJsonLoose, toBytes, sshFailureSnapshot } from './cliSsh.js';
+import { numOrNull } from '../../util/numOrNull.js';
 
 const SPECS = [
   { key: 'cluster', section: 'config', required: true, cmds: ['pstcli -output json cluster show', 'pstcli -output csv cluster show', 'pstcli cluster show'] },
@@ -66,7 +67,7 @@ export function normalizePowerstoreSsh(device, out) {
     if (total) {
       snap.capacity = { totalBytes: total, usedBytes: used, pct: Math.round((used / total) * 1000) / 10 };
       snap.sections.capacity = 'ok';
-      const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+      const num = numOrNull;   // v2.561: 공용 판정(Number(null)===0 함정)
       snap.extra.space = {
         physicalTotal: total, physicalUsed: used,
         logicalUsed: toBytes(pick(pt, 'logical_used')) || null,

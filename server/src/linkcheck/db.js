@@ -31,6 +31,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'link-check.db');
 export const DAY_OFFSET_MIN = Number(process.env.LINKCHECK_TZ_OFFSET_MIN) || 9 * 60;
@@ -107,7 +108,7 @@ async function openDb() {
 }
 export async function available() { return !!(await getDb()); }
 
-const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+const n = numOrNull;   // v2.561: 공용 판정
 const iOr = (v, d = null) => { const x = n(v); return x == null ? d : Math.round(x); };
 
 export async function dbStatus() {

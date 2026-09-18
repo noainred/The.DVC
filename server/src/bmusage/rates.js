@@ -12,10 +12,11 @@
  * ⚠ **시간 간격이 비정상이면 `null`** — 주기를 건너뛰거나 시계가 뒤로 가면(NTP 보정) 비율이
  *   말이 안 되는 값이 된다. 상한(`MAX_SPAN_MS`)을 넘긴 간격은 버린다.
  */
+import { numOrNull } from '../util/numOrNull.js';
 const MIN_SPAN_MS = 1_000;
 export const MAX_SPAN_MS = 60 * 60_000;   // 1시간 넘게 벌어진 두 표본은 비율로 쓰지 않는다
 
-const fin = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+const fin = numOrNull; // v2.561: 공용 판정
 
 /**
  * 누적값 두 개의 초당 증가량.

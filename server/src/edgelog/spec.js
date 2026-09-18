@@ -56,6 +56,12 @@ export const STATUS_SPEC = Object.freeze([
    *   **새 엣지 워커를 만들면 이 표에 함께 넣을 것.**
    */
   { key: 'push.linkCheck', label: '통신 점검', group: 'push', mod: '../agent/linkCheckWorker.js', fn: 'linkCheckWorkerStatus' },
+  /*
+   * ⚠ v2.561 에 추가 — 이 워커도 표에 없었다. 중앙의 `getLogQueryResult` 는 결과가 없으면
+   *   **영원히 `{state:'pending'}`** 이라(`central/logQueries.js:57`) 사용자는 '엣지 로그 조회' 가
+   *   왜 안 되는지 알 길이 없었다. 이제 인출 403 · 결과 보고 413 · DB 오류가 여기 드러난다.
+   */
+  { key: 'push.logQuery', label: '엣지 로그 연합 조회', group: 'push', mod: '../agent/logQueryWorker.js', fn: 'logQueryWorkerStatus' },
 
   // ── 중앙 → 엣지(설정 수신) ──────────────────────────────────────────────────
   { key: 'pull.storage', label: '스토리지 설정', group: 'pull', mod: '../agent/storageConfigPull.js', fn: 'storageConfigPullStatus' },
