@@ -56,6 +56,13 @@ let maxBytesOverride = 0;
 let trimPending = false;          // 쓰기 중에 들어온 트림 요청(끝난 뒤 처리)
 let pendingRetentionDays = 0;
 let generation = 0;               // clearHangs 세대 — 진행 중 쓰기의 잔여 큐가 파일을 되살리지 못하게
+/*
+ * 쓰기 중에 들어온 '비우기' — **그 쓰기의 콜백이** 수행한다(v2.560, 세 부분 수정의 ①).
+ * clearHangs() 가 직접 rmSync 만 하면, 이미 커널에 넘긴 `fs.appendFile` 은 `O_CREAT|O_APPEND`
+ * 라 unlink **뒤에** 도착하면 **파일을 되살린다**. `generation` 검사는 *잔여 큐* 의 재기록만
+ * 막고 이미 넘긴 write 는 못 막는다(v2.527 에 확정한 제품 결함).
+ */
+let clearPending = false;
 let permsFixed = false;
 // 보존일을 알려주는 주입 함수 — hangLog 가 settings 를 직접 import 하면 순환이 생긴다.
 // 주입이 없으면 0(보존일 미적용, 크기·줄 수만)으로 동작한다.
@@ -83,15 +90,33 @@ function flushQueue() {
     try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); } catch { /* 이미 있거나 권한 문제 */ }
     fs.appendFile(FILE, chunk, { mode: 0o600 }, (err) => {
       writing = false;
+      // 이 write 가 **지금 세대**의 것인가. 아니면 '비우기(또는 테스트 리셋) 이전' 의 write 다.
+      const mine = gen === generation;
       if (err) lastError = err.message;
       else {
-        appended += lines.length;
+        if (mine) appended += lines.length;
         // mode 는 **신규 생성 때만** 적용된다 — 파일이 0644 로 이미 있으면 그대로다. 이 파일에는
         // 사용자명·IP·User-Agent·요청 경로가 담기므로 audit.js ensurePerms 패턴으로 1회 교정한다.
         if (!permsFixed) { permsFixed = true; try { fs.chmodSync(FILE, 0o600); } catch { /* 무시 */ } }
       }
-      if (gen !== generation) return;             // 그 사이 로그를 비웠다 — 잔여 큐를 되살리지 않는다
+      /*
+       * ② **미룬 삭제는 '자기 세대가 아닌' write 의 콜백만 수행한다**(v2.560).
+       *   `mine` 이면 방금 쓴 줄이 유효하므로 지우면 안 된다 — v2.527 이 그 조건 없이 지워
+       *   **60회 중 60회** '유실 없음 19 !== 20' 으로 실패했다. `!mine` 이면 이 write 는 비우기
+       *   **이전** 의 것이고, 그것이 되살린 파일을 여기서 확실히 없앤다.
+       */
+      if (!mine && clearPending) {
+        clearPending = false;
+        try { if (fs.existsSync(FILE)) fs.rmSync(FILE); } catch { /* 이미 없음·권한 */ }
+        permsFixed = false;
+      }
+      /*
+       * ⚠ 큐 배수는 **세대와 무관하게** 계속한다. 예전에는 여기 앞에서 `return` 했는데, 그러면
+       *   세대가 바뀐 콜백이 대기 줄을 남겨 두고 끝나 **이후 append 가 영원히 밀린다**(단일비행
+       *   잠금은 이 콜백만 내린다). 비우기가 버려야 할 줄은 clearHangs 가 이미 큐에서 비웠다.
+       */
       if (queue.length) { flushQueue(); return; }
+      if (!mine) return;                          // 트림은 지금 세대의 쓰기 뒤에만
       // 트림은 쓰기가 없을 때만 — 동시에 하면 읽은 뒤 도착한 줄이 재기록으로 사라진다.
       // 보존일은 주입된 provider 에서 읽는다(예전에는 인자 없이 불러 보존일이 자동 경로에서
       // 아예 적용되지 않았다 — 사용자명·IP 가 설정 기간을 넘겨 남았다).
@@ -263,9 +288,18 @@ export function clearHangs() {
   try {
     generation += 1;      // 진행 중 쓰기의 후속 flush 가 잔여 큐를 쓰지 않게
     queue = [];
+    /*
+     * ① **쓰기 중이면 삭제를 콜백에 미룬다**(v2.560). 지금 지워도 이미 커널에 넘긴
+     *   `fs.appendFile` 은 `O_CREAT|O_APPEND` 라 unlink 뒤에 도착하면 **파일을 되살린다** —
+     *   그래서 관리자가 '로그 비우기' 를 눌렀는데 사용자명·IP·User-Agent 가 담긴 줄이 남고
+     *   API 는 `{ok:true}` 를 보고했다(v2.527 에 재현·확정한 제품 결함).
+     *   여기서 **한 번 지우고**(동기 확인이 바로 사라진 것을 보게) 콜백이 **한 번 더** 지운다.
+     */
+    if (writing) clearPending = true;
     if (fs.existsSync(FILE)) fs.rmSync(FILE);
     appended = 0; dropped = 0; sinceTrim = 0; lastError = ''; trimPending = false; permsFixed = false;
-    return { ok: true };
+    // 미룬 삭제가 남아 있다는 사실을 숨기지 않는다(화면·테스트가 확인할 수 있게).
+    return { ok: true, ...(clearPending ? { deferred: true } : {}) };
   } catch (e) { return { ok: false, reason: e.message }; }
 }
 
@@ -278,4 +312,18 @@ export function hangLogStatus() {
 /** 테스트 전용 — 분당 상한·바이트 상한 오버라이드(0 이면 env/기본값). */
 export function _setHangLogMaxPerMinForTest(n) { maxPerMinOverride = Math.max(0, Number(n) || 0); }
 export function _setHangLogMaxBytesForTest(n) { maxBytesOverride = Math.max(0, Number(n) || 0); }
-export function _resetHangLogCounters() { minuteBucket = 0; minuteCount = 0; minuteByKind = new Map(); dropped = 0; appended = 0; lastError = ''; sinceTrim = 0; queue = []; writing = false; trimPending = false; pendingRetentionDays = 0; permsFixed = false; }
+/**
+ * 테스트 전용 카운터 초기화.
+ *
+ * ⚠⚠ ③ **`writing` 을 강제로 내리지 않는다**(v2.560 — v2.527 실패의 진짜 원인):
+ *   내리면 이전 테스트의 in-flight 콜백과 이번 테스트의 write 가 **동시에 존재**해 단일비행
+ *   잠금이 무의미해지고, 그 상태에서 미룬 삭제가 **방금 쓴 줄을 지웠다**(60회 중 60회 실패).
+ *   대신 **세대를 올려** 이전 콜백을 무해하게 만든다 — 그 콜백은 `mine=false` 라 카운터를
+ *   건드리지도, 트림을 돌리지도 않고, 대기 줄만 흘려보낸 뒤 잠금을 스스로 내린다.
+ */
+export function _resetHangLogCounters() {
+  generation += 1;
+  minuteBucket = 0; minuteCount = 0; minuteByKind = new Map(); dropped = 0; appended = 0;
+  lastError = ''; sinceTrim = 0; queue = []; trimPending = false; pendingRetentionDays = 0; permsFixed = false;
+  clearPending = false;
+}

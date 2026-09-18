@@ -7,7 +7,6 @@
 import { Router } from 'express';
 import express from 'express';
 import os from 'node:os';
-import { createHash } from 'node:crypto';
 import { config, currentVersion } from '../config.js';
 import { buildExport } from '../collector/agent.js';
 import { upgradeManager } from '../upgrade/manager.js';
@@ -18,6 +17,7 @@ import { logAudit } from '../audit.js';
 import { runLocalIdracScan } from '../idrac/localScan.js';
 import { collectMany as bmstorCollectMany } from '../bmstor/collect.js';
 import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';
+import { tokenFingerprint } from '../util/tokenFingerprint.js'; // v2.560: 토큰 지문 표기는 한 곳이 소유한다
 
 export const collectorRouter = Router();
 
@@ -43,10 +43,11 @@ const DENY_KEEP = 20, DENY_SRC_KEEP = 12;
 const denyRecent = [];              // [{ at, endpoint, ip, why, tokenLen, fp, ua }] — 최신이 앞
 const denyBySrc = new Map();        // ip → { ip, count, firstAt, lastAt, lastWhy, lastEndpoint }
 /**
- * 토큰 지문 — sha256 앞 8자 + 길이. **값의 일부도 싣지 않는다**(앞 몇 글자를 노출하면 그것도 토큰 값이다 —
- * server/CLAUDE.md '비밀 값은 어떤 API 응답에도 싣지 않는다'). 서로 다른 요청이 같은 토큰인지 구분하는 용도.
+ * 토큰 지문 — v2.560 에 `util/tokenFingerprint.js` 로 승격했다. **여기서 다시 구현하지 말 것** —
+ * 중앙의 토큰 점검 화면이 같은 표기를 쓰므로 두 벌이 되면 '엣지 거부 기록의 지문' 과 '중앙 화면의
+ * 지문' 을 눈으로 맞춰 볼 수 없다(v2.528 credFingerprint 규약과 같은 이유).
  */
-function tokenFp(t) { return t ? `sha256:${createHash('sha256').update(String(t)).digest('hex').slice(0, 8)}(len=${String(t).length})` : ''; }
+const tokenFp = (t) => tokenFingerprint(t);
 export function getCollectorDenyStats() {
   return {
     ...denyStats,
@@ -172,6 +173,34 @@ collectorRouter.get('/bm-usage', async (req, res) => {
   try {
     const { buildBmUsageEnvelope } = await import('../bmusage/edgePull.js');
     const snap = await buildBmUsageEnvelope({ limit: req.query.limit });
+    res.json({ ok: true, ...snap });
+  } catch (err) {
+    // 무음 실패 금지 — 중앙이 '왜 못 읽었는지' 를 화면에 적을 수 있어야 한다.
+    res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) });
+  }
+});
+
+/**
+ * 이 엣지의 **토큰 자기보고**(v2.560 — 사용자 요청 "등록된 모든 엣지/수집 서버의 모든 토큰 …
+ * 중앙에 저장된 토큰과 엣지에 저장된 토큰이 동일한지 점검").
+ *
+ * 중앙이 **필요할 때만** 당긴다 — 상시 push 0. `/edge-log`·`/bm-usage` 와 **같은 url·같은 토큰**
+ * 이므로 새 네트워크 허용이 필요 없다.
+ * ⚠⚠ 이 경로를 **개별 토큰 전용 라우트로 만들지 말 것** — v2.554 가 기록한 한계가 그것이다
+ *   (`/api/central/link-check` 는 개별 토큰 전용이라 공유 `CENTRAL_TOKEN` 만 쓰는 법인은 403 이고
+ *   "403 을 받고 있다는 사실조차 보고할 수 없다"). 수집 토큰 게이트는 공유/개별과 무관하다.
+ *
+ * ⚠⚠ 응답에 **평문 토큰도 전체 해시도 싣지 않는다** — 8자 지문 + 길이 + 앞뒤공백 플래그뿐이다
+ *   (`portalcheck/edgeReport.js` 머리말이 근거를 적는다). 전체 해시는 곧 중앙 저장값이고, 사람이
+ *   정한 공유 토큰이면 오프라인 사전 공격이 성립한다.
+ * ⚠ `?selfprobe=0` 이면 중앙에 두드려 보는 자기확인을 건너뛴다(그 사실을 응답이 밝힌다).
+ */
+collectorRouter.get('/token-check', async (req, res) => {
+  if (!config.collector.token) { logCollectorDeny(req, 'token-check'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
+  if (!checkToken(req)) { logCollectorDeny(req, 'token-check'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+  try {
+    const { buildTokenCheckEnvelope } = await import('../portalcheck/edgeReport.js');
+    const snap = await buildTokenCheckEnvelope({ selfProbe: String(req.query.selfprobe ?? '1') !== '0' });
     res.json({ ok: true, ...snap });
   } catch (err) {
     // 무음 실패 금지 — 중앙이 '왜 못 읽었는지' 를 화면에 적을 수 있어야 한다.

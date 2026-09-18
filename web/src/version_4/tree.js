@@ -114,7 +114,7 @@ export const TREE = Object.freeze([
       tab('settings', '설정 · 권한', '#/settings'),
       tab('upgrade', '업그레이드', '#/upgrade'),
       tab('legacy-tools', '특수 기능 (레거시 그리드)', '#/tools'),
-      tool('mail-diag'), tool('service-hub'), tool('edge-log'),
+      tool('mail-diag'), tool('service-hub'), tool('edge-log'), tool('portal-check'),
       tool('portaldb', true),
     ],
   },

@@ -537,3 +537,52 @@ const round = (v, d) => Number(v.toFixed(d));
 const pct = (used, total) => (total > 0 ? Math.round((used / total) * 100) : 0);
 
 export const store = new Store();
+
+/**
+ * vCenter 인벤토리 수집 상태(v2.560) — 엣지 로그·진행상태(`edgelog/spec.js`)가 읽는다.
+ *
+ * 왜 필요한가: 중앙의 '에이전트 수신 트래픽 진단' 이 어떤 엣지의 push 를 `호스트 0 · VM 0` 으로
+ * 받으면 화면이 **'빈 인벤토리'** 라고만 말했다. 그런데 그 한 배지가 **조치가 정반대인 상황들**을
+ * 덮는다 — 그 엣지에 vCenter 등록이 0개(등록해야 한다) / 첫 수집 중(기다리면 된다) /
+ * vCenter 접속 실패(자격증명·방화벽) / mock 데이터라 push 에서 빠졌다 / 그 vCenter 가 실제로 비었다.
+ * 이 상태를 중앙이 **당겨서** 읽으면 그 구분이 가능해진다(v2.549 pull — 새 네트워크 허용 불필요).
+ *
+ * ⚠ **자격증명을 담지 않는다** — vCenter id·이름·상태·오류 문구까지다(호스트명은 오류 문구에
+ *   들어갈 수 있고, 그것은 엣지 로그와 같은 노출 수준이다. 응답은 `edgelog/redact.js` 를 지난다).
+ * ⚠ 목록에 **상한을 둔다**(64) — 잘렸으면 개수를 밝힌다(조용한 상한 금지).
+ */
+export function storeStatus() {
+  const snap = store.snapshot || {};
+  const all = Array.isArray(snap.vcenters) ? snap.vcenters : [];
+  const MAX = 64;
+  const counts = { total: all.length, ok: 0, pending: 0, unreachable: 0, disabled: 0, mock: 0, site: 0, other: 0 };
+  for (const vc of all) {
+    if (vc.mock === true) counts.mock += 1;
+    if (vc.collectMode === 'site' || vc.collectSource === 'site') counts.site += 1;
+    const st = String(vc.status || '').toLowerCase();
+    if (st === 'ok' || st === 'connected' || st === '') counts.ok += 1;
+    else if (st === 'pending') counts.pending += 1;
+    else if (st === 'unreachable') counts.unreachable += 1;
+    else if (st === 'disabled') counts.disabled += 1;
+    else counts.other += 1;
+  }
+  return {
+    // ⚠ 등록 자체가 0 인 것과 '수집이 아직 없다' 는 다르다 — 둘을 구분할 수 있게 함께 낸다.
+    registered: all.length,
+    generatedAt: snap.generatedAt || null,
+    lastError: store.lastError || null,
+    refreshing: store._refreshing === true,
+    intervalMs: config.pollIntervalMs,
+    counts,
+    truncated: all.length > MAX,
+    omitted: Math.max(0, all.length - MAX),
+    vcenters: all.slice(0, MAX).map((vc) => ({
+      id: vc.id, name: vc.name || '', status: vc.status || 'ok',
+      hosts: Array.isArray(vc.hosts) ? vc.hosts.length : (vc.hostCount ?? null),
+      vms: Array.isArray(vc.vms) ? vc.vms.length : (vc.vmCount ?? null),
+      mock: vc.mock === true,
+      collectMode: vc.collectMode || vc.collectSource || '',
+      error: vc.error || '', code: vc.code || '', hint: vc.hint || '',
+    })),
+  };
+}
