@@ -19,7 +19,6 @@ import {
   issueApiKey, revokeApiKey, deleteApiKey, updateApiKey, listApiKeys, DEFAULT_RPM, KEY_PREFIX,
 } from '../../publicapi/keys.js';
 import { GROUPS, ENDPOINTS } from '../../publicapi/allowlist.js';
-import { docsSettings, setDocsEnabled } from '../../publicapi/docsSettings.js';
 
 export function registerApiKeys(adminRouter) {
   const owner = [adminOnly, requireSettingsOwner];
@@ -39,7 +38,6 @@ export function registerApiKeys(adminRouter) {
         fields: e.fields, requiresFullScope: !!e.requiresFullScope, scoped: !!e.scoped,
       })),
       defaults: { rpm: DEFAULT_RPM, prefix: KEY_PREFIX },
-      publicDocs: docsSettings(),   // 공개 안내 페이지 on/off(v2.564)
       /*
        * 화면이 '지금 무슨 상태인가' 를 세는 근거 — 겹치지 않게 나눈다(v2.553 KPI 규약).
        * ⚠ `합계 = 사용중 + 폐기 + 만료 + 분류없음` 이 성립해야 한다.
@@ -56,23 +54,6 @@ export function registerApiKeys(adminRouter) {
         return { total: keys.length, live, revoked, expired, noGroups };
       })(),
     });
-  });
-
-  /**
-   * 공개 API 안내 페이지(`#/api-docs`) on/off.
-   * ⚠ **로그인 없이 보이는 면**을 여닫는 스위치라 발급과 같은 등급으로 게이트한다.
-   * ⚠ 끄면 그 경로는 **404** 다(403 은 존재를 알려준다 — `publicDocs.js` 머리말).
-   */
-  adminRouter.put('/api-keys/public-docs', owner, (req, res) => {
-    const enabled = req.body?.enabled === true;
-    const next = setDocsEnabled(enabled, req.user?.username || '');
-    logAudit({
-      user: req.user?.username || 'unknown',
-      action: 'apikey.public-docs',
-      target: enabled ? 'enabled' : 'disabled',
-      detail: next.forcedOffByEnv ? 'env PUBLIC_API_DOCS=false 로 강제 꺼짐 상태' : '',
-    });
-    res.json({ ok: true, publicDocs: next });
   });
 
   /**

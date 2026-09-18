@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchJson, postJson, patchJson, putJson, delJson } from '../api.js';
+import { fetchJson, postJson, patchJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
@@ -208,17 +208,6 @@ export default function ApiKeys() {
     finally { setBusy(false); }
   };
 
-  const togglePublicDocs = async (enabled) => {
-    setBusy(true); setMsg(null);
-    try {
-      const r = await putJson('/admin/api-keys/public-docs', { enabled });
-      if (!r.ok) throw new Error(r.reason || '바꿀 수 없습니다.');
-      setMsg({ tone: 'ok', text: enabled ? '안내 페이지를 공개했습니다.' : '안내 페이지를 비공개로 바꿨습니다(그 주소는 404 입니다).' });
-      await load();
-    } catch (e) { setMsg({ tone: 'bad', text: String(e.message || e) }); }
-    finally { setBusy(false); }
-  };
-
   const startEdit = (k) => {
     setEditId(k.id);
     setForm({
@@ -288,38 +277,6 @@ export default function ApiKeys() {
           </div>
         </div>
       ) : null}
-
-      {/*
-        * 공개 안내 페이지 on/off (v2.564) — **로그인 없이 보이는 면**이라 발급과 같은 등급으로
-        * 게이트한다(adminOnly + 설정 소유자). 끄면 그 경로는 404 다.
-        */}
-      <div className="card" style={{ minWidth: 0 }}>
-        <h4 style={{ marginTop: 0 }}>공개 API 안내 페이지</h4>
-        <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
-          <BoldText text={'로그인 없이 볼 수 있는 API 안내 화면입니다(주소 **#/api-docs**). 연동 담당자가 계정 없이 엔드포인트·필드·예시·샘플을 보고, 자기 키를 넣어 직접 호출해 볼 수 있습니다.'} />
-          <br />
-          <BoldText text={'이 페이지에는 **운영 데이터가 없습니다** — 샘플은 손으로 지어낸 값이고, 공개 API 8개만 다룹니다(포탈 내부 API 는 싣지 않습니다).'} />
-        </div>
-        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, fontSize: 13 }}>
-          <input type="checkbox" checked={!!data.publicDocs?.stored} disabled={busy}
-            onChange={(e) => togglePublicDocs(e.target.checked)} style={{ marginTop: 3 }} />
-          <span>안내 페이지를 공개합니다(끄면 그 주소는 <b>404</b> 입니다)</span>
-        </label>
-        {data.publicDocs?.forcedOffByEnv ? (
-          <div style={{ color: TONE.warn, fontSize: 11, marginTop: 6 }}>
-            <BoldText text={'⚠ 이 서버는 환경변수 **PUBLIC_API_DOCS=false** 로 강제 꺼짐 상태입니다 — 위 설정을 켜도 페이지는 열리지 않습니다.'} />
-          </div>
-        ) : null}
-        {data.publicDocs?.updatedAt ? (
-          <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-            마지막 변경 {new Date(data.publicDocs.updatedAt).toLocaleString()} · {data.publicDocs.updatedBy || '(미상)'}
-          </div>
-        ) : null}
-        <div style={{ marginTop: 8 }}>
-          <a className="btn" href="#/api-docs" target="_blank" rel="noreferrer"
-            style={{ display: 'inline-block', textDecoration: 'none' }}>안내 페이지 열기 ↗</a>
-        </div>
-      </div>
 
       <div className="card" style={{ minWidth: 0 }}>
         <h4 style={{ marginTop: 0 }}>{editId ? '키 수정' : '새 키 발급'}</h4>
