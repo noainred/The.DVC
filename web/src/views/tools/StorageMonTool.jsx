@@ -22,8 +22,6 @@ import { healthBadge, sectionBadge, cliCutText } from './storageNodeText.js';   
 import { authFailInfo } from './storageAuthText.js';  // v2.528: 401 진단 문구(순수)
 import { capacityRows, srpRows, subscribedNote, usageTrust } from './powermaxCapacityText.js'; // v2.534: 구독/할당/실제기록(순수)
 import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
-// v2.567: '장애 장비' 판정·문구(순수) — 무엇을 장애로 세는지 한 곳이 소유한다.
-import { deviceFault, faultKpi, faultKpiMeta, faultKpiTone, faultKpiTitle, faultFilterNote } from './storageFaultText.js';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -425,10 +423,7 @@ function Cell({ col, r, ctx }) {
                   title={`부분 실패 — 접속은 됐지만 일부 섹션을 수집하지 못했습니다:\n${partialReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
                   부분 <span aria-hidden="true">ⓘ</span>
                 </button>
-              /* ⚠ 이 '정상' 은 **수집 성공**이라는 뜻이다 — 부품 장애와 무관하다(열 이름도 '수집 상태').
-                 title 을 지우지 말 것: 노드 장애가 있는 장비의 행에서도 이 배지가 초록이라
-                 title 이 없으면 '장비가 정상' 으로 읽힌다(v2.567 스크린샷 판독에서 실제로 그랬다). */
-              : <span className="badge green" title="수집 성공 — 장비 부품 상태가 아닙니다(노드·Health 열과 '장애 장비' 카드를 보세요)">정상</span>
+              : <span className="badge green">정상</span>
           ) : (
             <button type="button" className="badge red fail-badge" onClick={() => setDetail(r.id)}
               title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
@@ -489,11 +484,6 @@ export default function StorageMonTool() {
   ACTIVE_UNIT = unit; // 아래 자식(표 셀·상세 모달·차트)이 그리기 전에 반영된다(tbFmt 주석 참고)
   // 법인·장비 종류 다중 선택 필터(v2.407, 사용자 요구). 빈 Set = 전체(필터 없음).
   // 두 축은 AND 로 결합한다 — 'AZ,WA + PowerScale' 이면 AZ·WA 에 있는 PowerScale 만 보인다.
-  /*
-   * '장애 장비' 카드 클릭 필터(v2.567). ⚠ 훅은 조기 return **위**에 선언한다 — 렌더 간 훅
-   * 개수가 달라지면 React #310 으로 화면이 크래시한다(v2.202 실제 사고).
-   */
-  const [onlyFault, setOnlyFault] = useState(false);
   const [dcSel, setDcSel] = useState(() => new Set());
   const [typeSel, setTypeSel] = useState(() => new Set());
   const toggleDc = (v) => setDcSel((prev) => toggleSet(prev, v));
@@ -514,14 +504,8 @@ export default function StorageMonTool() {
     total: sum(withSnap, (r) => r.snap.capacity?.totalBytes),
     used: sum(withSnap, (r) => r.snap.capacity?.usedBytes),
     fail: rows.filter((r) => r.snap && !r.snap.ok).length + rows.filter((r) => !r.snap).length,
+    alerts: sum(withSnap, (r) => r.snap.alerts?.unresolved),
   };
-  /*
-   * v2.567(사용자 요청 "장애 있으면 장애 장비 숫자를 카드로 … 미해결정보를 빼고"):
-   * '미해결 경보'(alerts.unresolved 전 장비 합 — 이 현장 실측 5,404)를 뺐다. 정보성 이벤트가
-   * 섞여 **숫자가 커도 조치할 것이 없을 수 있어** '장애가 얼마나 있나' 에 답하지 못했다.
-   * 대신 **장비 몇 대가 이상인가**를 센다 — 판정은 `storageFaultText` 하나가 소유한다.
-   */
-  const faultK = faultKpi(rows);
   /**
    * 빠른 찾기 판정(사용자 요구 2026-09-02) — 검색은 **칩 이름이 아니라 하단 스토리지 목록**을
    * 거른다. 판정 단위는 장비 1대이고, 그 장비의 법인·표시명·host·타입·수집주체(엣지)를 모두
@@ -531,17 +515,10 @@ export default function StorageMonTool() {
    */
   // v2.532: 판정은 공용 순수 모듈이 한다(deviceFacets). 검색 건초더미에 **수집 스냅샷 이름**
   // (`r.snap?.name`)을 더하는 것만 이 화면 고유다 — 장비가 보고한 이름으로도 찾게.
-  const { searched, shown: shownAll, dcChips, typeChips, facetOn: chipOn } = facetState({
+  const { searched, shown, dcChips, typeChips, facetOn } = facetState({
     rows, dcSel, typeSel, query: dcQuery, dcName, typeLabel,
     hay: (r) => [dcName(r.datacenterId), r.name, r.snap?.name, r.host, typeLabel(r.type), r.agent],
   });
-  /*
-   * 장애 필터는 법인·종류와 **다른 축**이라 facetState 뒤에 겹쳐 적용한다.
-   * ⚠ 칩 개수는 `facetState` 가 '검색만 적용한 집합' 에서 세므로 건드리지 않는다(v2.533 규약) —
-   *   장애 필터로 칩을 0 으로 만들면 해제할 때까지 다른 칩을 고를 수 없는 것처럼 보인다.
-   */
-  const shown = onlyFault ? shownAll.filter((r) => deviceFault(r).kind === 'fault') : shownAll;
-  const facetOn = chipOn || onlyFault;
   // v2.522: 목록이 비었을 때 **왜** 비었는지(등록 0 / 필터 0 / 검색 0)를 구분한다 —
   // 판정·문구는 순수 모듈(storageListText)에 있고 테스트가 고정한다.
   const emptyInfo = emptyListText({ registered: rows.length, facetOn, query: dcQuery });
@@ -645,16 +622,7 @@ export default function StorageMonTool() {
         <Kpi label="총 용량" value={tbFmt(totals.total)} />
         <Kpi label="사용" value={tbFmt(totals.used)} pct={totals.total ? Math.round((totals.used / totals.total) * 100) : 0} />
         <Kpi label="수집 실패/대기" value={totals.fail} accent={totals.fail ? 'var(--red)' : 'var(--green)'} />
-        {/* 장애 장비(v2.567) — 누르면 목록이 장애 장비만 남는다. 0 이어도 확인 불가가 있으면
-            초록으로 칠하지 않는다(판정·색·문구는 storageFaultText 가 소유). */}
-        <Kpi
-          label={onlyFault ? '장애 장비 (필터 켜짐)' : '장애 장비'}
-          value={faultK.fault}
-          meta={faultKpiMeta(faultK)}
-          accent={faultKpiTone(faultK) === 'red' ? 'var(--red)' : faultKpiTone(faultK) === 'green' ? 'var(--green)' : undefined}
-          title={faultKpiTitle(faultK)}
-          onClick={faultK.fault || onlyFault ? () => { setOnlyFault((v) => !v); setView('devices'); } : undefined}
-        />
+        <Kpi label="미해결 경보" value={totals.alerts} accent={totals.alerts ? 'var(--amber)' : undefined} />
       </div>
 
       {/* 법인 바로가기(사용자 요구 2026-09-02) — Platform 화면의 vCenter 바로가기와 동일한 UX/스타일.
@@ -673,10 +641,8 @@ export default function StorageMonTool() {
             return {
               dot: g.dot,
               bad: !!g.fail,
-              // v2.567: 카드에서 '미해결 경보' 를 뺐으므로 칩 툴팁도 같은 축(장애 대수)으로 맞춘다 —
-              // 한 화면에서 두 개념이 섞이면 사용자가 어느 것을 믿을지 모른다.
               title: `${list.length}대 · ${tbFmt(g.used)} / ${tbFmt(g.total)}${g.total ? ` (${g.pct}%)` : ''}`
-                + `${g.fail ? ` · 수집 실패/대기 ${g.fail}` : ''}${faultKpi(list).fault ? ` · 장애 ${faultKpi(list).fault}대` : ''}`,
+                + `${g.fail ? ` · 수집 실패/대기 ${g.fail}` : ''}${g.alerts ? ` · 미해결 경보 ${g.alerts}` : ''}`,
             };
           }} />
       )}
@@ -687,19 +653,8 @@ export default function StorageMonTool() {
           {dcSel.size > 0 && <>법인 <b style={{ color: 'var(--text)' }}>{[...dcSel].join(', ')}</b></>}
           {dcSel.size > 0 && typeSel.size > 0 && ' · '}
           {typeSel.size > 0 && <>종류 <b style={{ color: 'var(--text)' }}>{[...typeSel].map(typeLabel).join(', ')}</b></>}
-          {onlyFault && (
-            <>
-              {(dcSel.size > 0 || typeSel.size > 0) && ' · '}
-              <b style={{ color: 'var(--red)' }}>장애 장비만</b>
-              {' '}
-              <button type="button" className="tab" style={{ padding: '1px 7px', fontSize: 11 }}
-                onClick={() => setOnlyFault(false)}>해제</button>
-            </>
-          )}
           {' — '}장비 {shown.length}대 (전체 {rows.length}대 중)
-          {shown.length === 0 && !onlyFault && <span style={{ color: 'var(--amber)' }}> · 조건에 맞는 장비가 없습니다</span>}
-          {/* ⚠ 0건일 때 '왜' 0건인지 말한다 — 장애 0 인데 확인 불가가 있으면 그 사실까지(초록 거짓 방지). */}
-          {onlyFault && <div style={{ marginTop: 3 }}>{faultFilterNote(faultK, shown.length)}</div>}
+          {shown.length === 0 && <span style={{ color: 'var(--amber)' }}> · 조건에 맞는 장비가 없습니다</span>}
         </div>
       )}
 
