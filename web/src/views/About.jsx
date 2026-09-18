@@ -54,7 +54,9 @@ export default function About() {
                 background: 'linear-gradient(135deg,#6366f1,#22d3ee)', color: '#0b1220' }}>박</div>
               <div>
                 <div style={{ fontWeight: 800, fontSize: 17 }}>박준호 <span className="muted" style={{ fontWeight: 500, fontSize: 13 }}>(Park Junho)</span></div>
-                <a href="mailto:noainred@lgcns.com" style={{ color: '#7dd3fc', fontSize: 13, textDecoration: 'none' }}>noainred@lgcns.com</a>
+                {/* ⚠ 이 저장소는 공개다 — 저작자 연락처에 **회사 도메인 주소를 쓰지 말 것**(v2.557).
+                    소속까지 함께 공개되고, 법인 코드·장비명·운영 IP 와 묶이면 귀속이 특정된다. */}
+                <a href="mailto:noainred@outlook.com" style={{ color: '#7dd3fc', fontSize: 13, textDecoration: 'none' }}>noainred@outlook.com</a>
               </div>
             </div>
           </div>
