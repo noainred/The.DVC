@@ -9,6 +9,19 @@ Horizon UAG 어플라이언스의 상태·세션을 모아 보는 경량 모니�
 | Windows 앱 | `uag-monitor-app-<v>-win-x64.zip` | 압축 해제 후 `UAG Monitor.exe` 실행 — **자체 창**(브라우저 불필요) |
 | macOS 앱 | `uag-monitor-app-<v>-macos-arm64.tar.gz` (Apple Silicon) / `-macos-x64` (Intel) | `UAG Monitor.app` 실행 — **자체 창**(브라우저 불필요) |
 
+> ⚠ **`<v>` 가 포탈 최신 버전과 다를 수 있습니다 — 그게 정상입니다.**
+> v2.558 부터 릴리스 워크플로는 **`uagmon/`·`packaging/uagmon/` 이 실제로 바뀐 릴리스에서만**
+> 데스크톱 앱을 다시 빌드합니다(macOS 러너는 분 차감이 ×10 이라 46초 잡이 10분을 먹는데,
+> `uagmon/` 은 2026-08-24 이후 295 커밋 동안 한 번도 바뀌지 않았습니다). 그래서 릴리스 페이지의
+> 앱 파일 이름에는 **그 앱을 마지막으로 빌드한 버전**이 붙습니다. 내용은 최신입니다.
+>
+> ⚠ **macOS 앱 파일이 아예 안 보일 수 있습니다.** 롤링 `downloads` 릴리스는 자산 1000개 상한
+> 때문에 `versions.json` 의 최근 15개 버전에 속하지 않는 파일을 정리하는데(`packaging/release/
+> prune-assets.mjs`), 앱을 오래 다시 빌드하지 않으면 그 버전이 15개 밖으로 밀려나 **앱 파일이
+> 함께 지워집니다**. 되살리는 방법은 하나입니다 — GitHub Actions 에서 **release 워크플로를
+> `build_macos = true` 로 수동 실행**하면 그 릴리스에 다시 올라옵니다. (Windows 앱은 ubuntu 에서
+> 교차빌드하므로 매 릴리스에 항상 있습니다.)
+
 데스크톱 앱은 내장 서버를 127.0.0.1 임의 포트에 띄우고 자체 창(Electron)으로 엽니다.
 데이터는 OS 사용자 폴더(`~/Library/Application Support/uag-monitor` · `%APPDATA%/uag-monitor`)에
 저장되어 앱을 교체해도 유지됩니다. 창을 모두 닫으면 내장 서버도 함께 종료됩니다.
