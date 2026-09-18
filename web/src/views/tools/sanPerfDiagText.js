@@ -77,6 +77,27 @@ export function perfDiagText(diag, now = Date.now()) {
         waiting: false, tone: 'info', action: '위에서 더 긴 기간(7일·30일)을 눌러 보세요.', error: null,
       };
     }
+    /*
+     * ⚠⚠ **`out-of-range` 와 한 문구로 덮지 말 것**(v2.566). 사용자 현장은 마지막 표본이
+     * **10일 전**인데 화면이 "수집은 되고 있습니다 · 기간을 넓히면 보입니다" 라고 말했다 —
+     * 기간을 넓혀도 나오는 것은 **10일 전 값**이고 수집은 멈춰 있었다(엣지 중계가 죽어 있었다).
+     * 조치가 정반대이므로(기간을 넓힌다 / 수집 경로를 고친다) 문장도 반대로 말한다.
+     * ⚠ '예전 값은 더 긴 기간에서 보인다' 는 사실은 **지우지 말 것** — 그것도 참이다.
+     */
+    case 'stale': {
+      const w = whenText(f.lastSampleAt);
+      const a = agoText(f.lastSampleAt, now);
+      return {
+        title: '수집이 멈춘 것으로 보입니다 — 기간 문제가 아닙니다.',
+        body: `마지막 표본이 ${w || '확인된 시각'}${a ? ` (${a})` : ''} 이고 그 뒤로 새 표본이 없습니다(${intervalText(f.intervalMs)} 기준). `
+          + '더 긴 기간을 누르면 예전 값은 보이지만, 그 시점 이후로는 쌓이지 않았습니다.',
+        waiting: false, tone: 'bad',
+        action: f.agent
+          ? `아래 수집 작업 로그에서 이 엣지(${f.agent})의 최근 결과를 확인하세요 — 엣지가 중앙으로 올리지 못하고 있을 수 있습니다.`
+          : '아래 수집 작업 로그에서 이 스위치의 최근 실패 사유를 확인하세요.',
+        error: null,
+      };
+    }
     case 'rest-method':
       return {
         title: 'REST 방식으로 수집하는 장비입니다 — 이 화면의 사용량은 쌓이지 않습니다.',
@@ -115,6 +136,21 @@ export function perfDiagText(diag, now = Date.now()) {
         body: `설정은 켜져 있습니다(${iv}). 첫 표본이 중앙에 반영되면 여기에 채워집니다.`,
         waiting: true, tone: 'wait', action: null, error: null,
       };
+    /*
+     * ⚠ '기다리면 온다' 가 아니다 — 엣지가 **올리지 못하고 있다**고 스스로 보고했다(v2.566).
+     * 이 통로가 없어서 v2.427 의 중계 정지가 10일 동안 중앙에 전달되지 않았다.
+     */
+    case 'edge-push-failed': {
+      const a = agoText(f.edgeAt, now);
+      return {
+        title: '엣지가 수집은 했지만 중앙으로 올리지 못하고 있습니다.',
+        body: `엣지(${f.agent || '이 법인'})는 ${a ? `${a}에 ` : ''}수집을 마쳤는데 중계가 실패하고 있습니다. `
+          + '기다려도 채워지지 않습니다 — 엣지 포탈을 확인해야 합니다.',
+        waiting: false, tone: 'bad',
+        action: '엣지 로그에서 sanswitch-perf-push 줄을 확인하고, 엣지가 최신 버전인지 보세요.',
+        error: f.error || f.edgePushError || null,
+      };
+    }
     case 'edge-pending-push': {
       const a = agoText(f.edgeAt, now);
       return {

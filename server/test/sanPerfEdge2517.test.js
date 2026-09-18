@@ -62,9 +62,36 @@ test('DB 를 못 열면 그 판정이 다른 모든 것을 이긴다(무엇을 �
 });
 
 test('표본이 있는데 조회 기간 밖이면 "수집 안 됨" 이라 하지 않는다', () => {
-  const r = perfEmptyDiag({ device: {}, settings: ON, lastSampleAt: NOW - 8 * 86400_000, since: NOW - 86400_000 });
+  // ⚠ v2.566 정정 — 예전에는 여기 `NOW - 8일` 을 썼는데, **그것은 out-of-range 가 아니라 정지**다.
+  //   그 단언이 곧 사용자가 신고한 거짓("10일째 죽었는데 화면이 '수집은 되고 있습니다'")을 고정하고
+  //   있었다. 진짜 out-of-range 는 **최근 표본이 좁은 창 밖에 있는 것**이다.
+  const r = perfEmptyDiag({ device: {}, settings: ON, lastSampleAt: NOW - 10 * 60_000, since: NOW - 5 * 60_000, now: NOW });
   assert.equal(r.kind, 'out-of-range');
-  assert.equal(r.facts.lastSampleAt, NOW - 8 * 86400_000);
+  assert.equal(r.facts.lastSampleAt, NOW - 10 * 60_000);
+});
+
+test('⚠ 마지막 표본이 한참 오래되면 "기간을 넓히세요" 가 아니라 "멈췄다" 라고 말한다 (v2.566)', () => {
+  const r = perfEmptyDiag({ device: {}, settings: ON, lastSampleAt: NOW - 10 * 86400_000, since: NOW - 3600_000, now: NOW });
+  assert.equal(r.kind, 'stale', '10일 전 표본을 조회 기간 문제로 말하면 거짓이다');
+  assert.equal(r.waiting, false, '기다려서 될 일이 아니다');
+  assert.ok(r.facts.sampleAgeMs > r.facts.staleLimitMs, '판정 근거(나이·한계)를 함께 실어야 화면이 설명할 수 있다');
+});
+
+test('수집이 꺼져 있으면 오래된 표본은 정상이다 — "멈췄다" 라고 하지 않는다', () => {
+  const off = { ...ON, enabled: false };
+  const r = perfEmptyDiag({ device: {}, settings: off, lastSampleAt: NOW - 10 * 86400_000, since: NOW - 3600_000, now: NOW });
+  assert.notEqual(r.kind, 'stale', '끈 것은 고장이 아니다');
+  assert.equal(r.kind, 'out-of-range');
+});
+
+test('⚠ 엣지가 "올리지 못하고 있다" 고 보고하면 기다리라고 말하지 않는다 (v2.566)', () => {
+  const r = perfEmptyDiag({
+    device: { agent: 'agent-WA' }, settings: ON, lastSampleAt: null, since: NOW - 3600_000, now: NOW,
+    edge: { enabled: true, at: NOW - 60_000, pushAt: NOW - 30_000, pushError: "Cannot access 'maxRowid' before initialization", device: null },
+  });
+  assert.equal(r.kind, 'edge-push-failed');
+  assert.equal(r.waiting, false);
+  assert.match(r.facts.error, /maxRowid/, '엣지만 아는 사유가 화면까지 와야 한다');
 });
 
 test('기간(since)을 모르면 있는 표본을 "기간 밖" 이라 단정하지 않는다', () => {

@@ -138,3 +138,57 @@ describe('perfCollectSummary — 즉시와 요청을 뭉치지 않는다', () =>
     expect(perfCollectSummary(null)).toBe('');
   });
 });
+
+const KINDS = ['db-unavailable', 'out-of-range', 'stale', 'rest-method', 'edge-no-report', 'edge-disabled',
+  'edge-device-failed', 'edge-first-cycle', 'edge-push-failed', 'edge-pending-push', 'disabled',
+  'device-failed', 'first-cycle', 'collected-empty'];
+
+describe('v2.566 — 정지와 기간 문제를 구분한다', () => {
+  const f = (o = {}) => ({ kind: 'stale', waiting: false, facts: { intervalMs: 300_000, lastSampleAt: Date.now() - 10 * 86400_000, agent: null, ...o } });
+
+  it('stale 은 "수집은 되고 있습니다" 라고 말하지 않는다 — 그것이 신고된 거짓이었다', () => {
+    const t = perfDiagText(f());
+    expect(t.title).not.toMatch(/수집은 되고 있습니다/);
+    expect(t.title).toMatch(/멈춘/);
+    expect(t.waiting).toBe(false);
+    expect(t.tone).toBe('bad');
+  });
+
+  it('stale 도 "예전 값은 더 긴 기간에서 보인다" 는 사실은 함께 말한다', () => {
+    expect(perfDiagText(f()).body).toMatch(/예전 값은/);
+  });
+
+  it('엣지 위임이면 조치가 엣지를 가리킨다', () => {
+    expect(perfDiagText(f({ agent: 'agent-WA' })).action).toMatch(/agent-WA/);
+  });
+
+  it('edge-push-failed 는 기다리라고 하지 않고 엣지 사유를 보여준다', () => {
+    const t = perfDiagText({ kind: 'edge-push-failed', waiting: false, facts: { agent: 'agent-WA', edgeAt: Date.now() - 60_000, error: "Cannot access 'maxRowid' before initialization" } });
+    expect(t.waiting).toBe(false);
+    expect(t.tone).toBe('bad');
+    expect(t.error).toMatch(/maxRowid/);
+    expect(t.action).toMatch(/엣지/);
+  });
+
+  it('⚠ 어느 kind 든 title·body·action 에 ** 를 쓰지 않는다 — 이 패널은 평문으로 그린다', () => {
+    /*
+     * v2.566 Chromium 판독에서 실제로 잡았다: `stale` 의 body 에 `**예전 값은 보이지만**` 을 썼더니
+     * **별표가 그대로 화면에 찍혔다**(이 패널은 BoldText 를 타지 않는다). 기존 12개 kind 는 어느
+     * 필드에도 ** 를 쓰지 않는다 — 그 관례를 전 kind 에 대해 고정한다.
+     */
+    const facts = { agent: 'a', intervalMs: 300_000, lastSampleAt: 1, since: 2, edgeAt: 1, edgePushAt: 1, error: 'e', errorAt: 1, errorSource: 'a', pollerAt: 1, sampleAgeMs: 1, staleLimitMs: 1 };
+    for (const kind of KINDS) {
+      const t = perfDiagText({ kind, waiting: false, facts });
+      for (const [k, v] of Object.entries({ title: t.title, body: t.body, action: t.action })) {
+        expect(String(v || ''), `${kind}.${k}`).not.toContain('**');
+      }
+    }
+  });
+
+  it('⚠ 문구에 백틱을 쓰지 않는다 — BoldText 는 **강조** 만 해석한다', () => {
+    for (const kind of ['stale', 'edge-push-failed']) {
+      const t = perfDiagText({ kind, waiting: false, facts: { agent: 'a', intervalMs: 300_000, lastSampleAt: 1, edgeAt: 1, error: 'e' } });
+      for (const v of [t.title, t.body, t.action]) expect(String(v || '')).not.toContain('`');
+    }
+  });
+});

@@ -62,6 +62,8 @@ export function normalizeEdgePerfStatus(input = {}) {
     failed: numOrNull(input.failed),
     total: numOrNull(input.total),
     pushAt: numOrNull(input.pushAt),
+    // 엣지의 마지막 중계 실패 사유(v2.566). 300자 상한은 작업 로그와 같다.
+    pushError: input.pushError ? String(input.pushError).slice(0, 300) : null,
     version: input.version ? String(input.version).slice(0, 40) : null,
     devices,
   };
@@ -113,7 +115,7 @@ export function edgePerfStatusFor(deviceId, agent) {
   if (!rec?.status) return null;
   const st = rec.status;
   return {
-    agent: a, receivedAt: rec.at, enabled: st.enabled, at: st.at, pushAt: st.pushAt,
+    agent: a, receivedAt: rec.at, enabled: st.enabled, at: st.at, pushAt: st.pushAt, pushError: st.pushError || null,
     intervalMs: st.intervalMs, version: st.version,
     device: st.devices.find((d) => String(d.id) === String(deviceId)) || null,
   };
