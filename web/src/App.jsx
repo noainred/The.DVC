@@ -351,11 +351,18 @@ function Portal({ user, onLogout }) {
 
   return (
     <div className="app">
+      {/*
+        v2.556: 상단 메뉴 2단화(docs/design/server-temp/README.md §0) — 1행 브랜드/상태/사용자,
+        2행 메뉴(밑줄 탭). ⚠ CSS 는 `.topbar .tabs .tab` 로 **한정**한다 — `className="tab"` 은
+        앱 전역에서 일반 버튼으로도 쓰이므로(접속확인·필터 초기화·CSV 선택 등 수십 곳) 전역
+        `.tab` 을 건드리면 그 버튼들이 전부 밑줄 탭이 된다.
+      */}
       <header className="topbar">
+        <div className="tb-brandrow">
         <div className="brand">
           <div className="logo" onClick={bumpEgg} style={{ cursor: 'pointer' }}>V</div>
           <div>
-            <h1 className="brand-title">The Davinci<br />Virtual Platform</h1>
+            <h1 className="brand-title"><span className="bt-strong">The Davinci</span> <span className="bt-dim">Virtual Platform</span></h1>
             {upgrading ? (
               <span className="ver-badge brand-ver upgrading-badge"
                 title={`업그레이드 진행 중 — 서버가 재시작되어 잠시 응답하지 않습니다${health?.latestVersion ? ` (→ v${health.latestVersion})` : ''}`}>
@@ -383,14 +390,6 @@ function Portal({ user, onLogout }) {
             )}
           </div>
         </div>
-        <nav className="tabs">
-          {visibleTabs.map((t) => (
-            <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`}
-              onClick={() => { if (t.id === 'vcenters') setPlatformResetSeq((n) => n + 1); setTab(t.id); }}>
-              {t.label}
-            </button>
-          ))}
-        </nav>
         <div className="spacer" />
         <div className="status-pill">
           {(() => {
@@ -432,6 +431,15 @@ function Portal({ user, onLogout }) {
           </div>
           <button className="logout-btn" onClick={onLogout} title="로그아웃">Out</button>
         </div>
+        </div>
+        <nav className="tabs">
+          {visibleTabs.map((t) => (
+            <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`}
+              onClick={() => { if (t.id === 'vcenters') setPlatformResetSeq((n) => n + 1); setTab(t.id); }}>
+              {t.label}
+            </button>
+          ))}
+        </nav>
       </header>
 
       <main className="content">

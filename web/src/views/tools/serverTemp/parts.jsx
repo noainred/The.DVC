@@ -58,9 +58,16 @@ export function DensityToggle({ dense, onChange }) {
 }
 
 /** 섹션 카드(헤더 + 본문). */
+/**
+ * 섹션 카드(헤더 + 본문).
+ * ⚠⚠ **`minWidth: 0` 을 지우지 말 것** — flex/grid 자식의 기본 `min-width: auto` 때문에 안쪽
+ *   표(열 11개, 400px 에서 실측 975px)가 카드를 **밀어 늘려** 페이지 전체가 가로로 넘친다
+ *   (v2.556 Chromium 실측 628px → 수정 후 400px). 자식 쪽 `overflow: auto` 만으로는 부족하다 —
+ *   루트 CLAUDE.md v2.520 이 기록한 함정이고 여기서 다시 밟았다.
+ */
 export function Section({ title, sub, right, children, bodyStyle }) {
   return (
-    <div className="card" style={{ padding: 0, borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div className="card" style={{ padding: 0, borderRadius: 12, overflow: 'hidden', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--border-soft)', flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13.5, fontWeight: 700 }}>{title}</div>
@@ -68,7 +75,7 @@ export function Section({ title, sub, right, children, bodyStyle }) {
         </div>
         {right}
       </div>
-      <div style={bodyStyle}>{children}</div>
+      <div style={{ minWidth: 0, ...bodyStyle }}>{children}</div>
     </div>
   );
 }
@@ -91,11 +98,20 @@ export function TempHistogram({ rows, total, maxC, avgInletC }) {
           {buckets.map((b) => (
             <div key={b.t} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', height: '100%' }}>
               {showBucketLabel(b, maxN) && <div style={{ fontSize: 10, color: 'var(--text-dim)', lineHeight: 1 }}>{b.n}</div>}
+              {/*
+                ⚠⚠ **개수가 0 인 칸을 온도색으로 칠하지 말 것**(v2.556 스크린샷 판독에서 잡은 결함):
+                  시안의 `height: max(2%, …)` 를 그대로 쓰면 빈 칸도 2px 막대가 남는데, 40℃ 이상
+                  구간에서는 그것이 **빨간 선**이 되어 KPI 가 `40℃↑ 0` 이라고 말하는 동시에 분포는
+                  '고온 서버가 있다' 고 말한다. 수치로는 안 잡히고 **그림을 읽어야** 보인다.
+                  0 인 칸은 온도가 아니라 **축 눈금**이므로 중립색 1px 로 둔다.
+              */}
               <div title={bucketTitle(b)}
-                style={{
-                  width: '100%', height: `${Math.max(2, (b.n / maxN) * 100)}%`, minHeight: 2,
-                  background: tempColor(b.t), borderRadius: '3px 3px 0 0', opacity: 0.85, marginTop: 2,
-                }} />
+                style={b.n === 0
+                  ? { width: '100%', height: 1, background: 'var(--border-soft)', marginTop: 2 }
+                  : {
+                    width: '100%', height: `${Math.max(2, (b.n / maxN) * 100)}%`, minHeight: 2,
+                    background: tempColor(b.t), borderRadius: '3px 3px 0 0', opacity: 0.85, marginTop: 2,
+                  }} />
             </div>
           ))}
         </div>

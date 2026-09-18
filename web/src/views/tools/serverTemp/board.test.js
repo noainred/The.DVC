@@ -207,3 +207,28 @@ describe('밀도', () => {
     expect(b.barW).toBeLessThan(a.barW);
   });
 });
+
+describe('법인 그룹 키 — 서버 조립 규칙과 같아야 한다 (v2.556)', () => {
+  it('datacenterId → vcenterId → (미분류) 순서', async () => {
+    const { dcKeyOf, UNASSIGNED_DC } = await import('./board.js');
+    expect(dcKeyOf({ datacenterId: 'dc1', vcenterId: 'vc1' })).toBe('dc1');
+    expect(dcKeyOf({ datacenterId: '', vcenterId: 'vc1' })).toBe('vc1');
+    expect(dcKeyOf({})).toBe(UNASSIGNED_DC);
+    expect(UNASSIGNED_DC).toBe('(미분류)');
+  });
+  it('★ 미분류 행도 비교 목록에서 세어진다(조용히 빠지면 개수가 어긋난다)', async () => {
+    const { compareRows } = await import('./board.js');
+    const out = compareRows([{ key: '(미분류)', name: '(미분류)', all: { avgC: 40 } }], [{ curC: 41 }]);
+    expect(out[0].hot).toBe(1);
+  });
+});
+
+describe('빈 버킷은 온도색이 아니다 (v2.556 스크린샷 판독)', () => {
+  it('★ 개수 0 인 칸에는 라벨도 막대도 없다 — 40℃↑ 0 인데 빨간 선이 보이던 결함', () => {
+    // 판정은 showBucketLabel 이 갖고, 렌더는 parts.jsx 가 n===0 을 중립색 1px 로 그린다.
+    expect(showBucketLabel({ t: 44, n: 0 }, 100)).toBe(false);
+    expect(showBucketLabel({ t: 20, n: 0 }, 100)).toBe(false);
+    // 그리고 그 칸의 툴팁은 '0대' 라고 정직하게 말한다.
+    expect(bucketTitle({ t: 44, n: 0 })).toBe('44~45℃ · 0대');
+  });
+});

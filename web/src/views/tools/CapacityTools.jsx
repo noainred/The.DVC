@@ -7,6 +7,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { Card, fmtTrendTick, tb, tempColor, useTool } from './shared.jsx';
 import RightsizeReport from './RightsizeReport.jsx'; // v2.445: VM 자원 축소 근거 리포트
 import DiskTrend from './DiskTrend.jsx'; // v2.446: 디스크 트렌드(할당·사용·회수 가능)
+import ServerTempBoard from './serverTemp/ServerTempBoard.jsx'; // v2.556: 서버 온도 — 히트맵 보드(시안 B)
 import { sparkCellState, sparkCellText, sparkProgressText, sparkCapText, SPARK_ROW_CAP } from './sparkBatch.js';
 // v2.497: 엑셀(ZIP) 내보내기 버튼 문구·예상치 — 판정은 순수 모듈(node 테스트로 고정)
 import { reportCount, exportLabel, exportTitle, progressNote, exportErrText } from './wasteExportText.js';
@@ -15,170 +16,16 @@ import { reportCount, exportLabel, exportTitle, progressNote, exportErrText } fr
 /** 서버 구분 라벨(v2.512) — iDRAC serviceTag 가 ESXi 호스트와 맞으면 가상화, 아니면 물리(베어메탈). */
 const KIND_KO = { physical: '물리', virtual: '가상화' };
 
-/** v2.512: '서버 온도' — iDRAC 수집 온도 + 물리/가상화 구분. 컴포넌트 이름은 라우팅 호환을 위해 유지. */
+/**
+ * '서버 온도'(v2.512 도입) — v2.556 에 시안 B(히트맵 보드)로 재구현하며 본문을
+ * `views/tools/serverTemp/ServerTempBoard.jsx` 로 옮겼다.
+ *
+ * ⚠ **이 래퍼의 이름(`EsxiTemp`)은 바꾸지 말 것** — `SpecialTools.jsx` 가 도구 키 `esxitemp`
+ *   에 이 컴포넌트를 물려 놓았고, 도구 키는 `permissions.json`(사용자별 허용/거부 목록)의 값이자
+ *   `auth/toolAccess.js` 의 집행 매핑이다(루트 CLAUDE.md '도구 키는 어떤 이름 변경에도 바꾸지 않는다').
+ */
 export function EsxiTemp({ scope }) {
-  const { loading, data, error } = useTool('/tools/esxi-temp', scope ? { vcenterId: scope } : {});
-  // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
-  // v2.512: 'server'(iDRAC 서버별)를 추가하고 기본 탭으로 둔다 — 'host'(ESXi) 는 그대로 남긴다.
-  const [view, setView] = useHashTab({ base: ['tools', 'esxitemp'], valid: ['server', 'host', 'cluster', 'vc'], fallback: 'server' });
-  const [kindF, setKindF] = useState('all');   // all | physical | virtual — 물리/가상화 필터
-  const [hist, setHist] = useState(null); // { level, key, days, points, synthesized }
-  const [days, setDays] = useState(7);
-  const [bucket, setBucket] = useState('auto'); // auto | minute | hour | day
-  const histGen = useRef(0); // 세대 가드 — 늦은 응답이 닫힌 모달을 재오픈하거나 다른 대상 차트를 덮어쓰지 않게
-  const openHist = async (level, key) => {
-    const gen = ++histGen.current;
-    setHist({ level, key, loading: true });
-    const bq = bucket && bucket !== 'auto' ? `&bucket=${bucket}` : '';
-    const r = await fetchJson(`/tools/esxi-temp/history?level=${level}&key=${encodeURIComponent(key)}&days=${days}${bq}`).catch(() => null);
-    if (gen !== histGen.current) return;
-    setHist(r ? { ...r } : { error: true });
-  };
-  const closeHist = () => { histGen.current++; setHist(null); };
-  useEffect(() => { if (hist && hist.key) openHist(hist.level, hist.key); /* eslint-disable-next-line */ }, [days, bucket]);
-  if (loading) return <Loading />;
-  if (error) return <ErrorBox message={error} />;
-
-  const idrac = data.idrac || { rows: [], summary: null, byDatacenter: [], counts: null, reason: '' };
-  const S = idrac.summary || {};
-  const srvAll = idrac.rows || [];
-  const srvRows = kindF === 'all' ? srvAll : srvAll.filter((r) => r.kind === kindF);
-  const avgLabel = `${data.avgWindowLabel || '5분'} 평균 ℃`;
-  const degC = (v) => (v == null ? '—' : `${v}℃`);
-
-  const rows = view === 'server'
-    ? srvRows.map((r) => ({
-      key: r.id, name: r.name, kind: r.kind, source: r.source, stale: r.stale,
-      sub: [KIND_KO[r.kind], r.hostName && r.hostName !== r.name ? r.hostName : '', r.cluster].filter(Boolean).join(' / ') || '-',
-      curC: r.curC, inletC: r.inletC, exhaustC: r.exhaustC, cpuC: r.cpuC, maxC: r.maxC,
-      level: r.source === 'esxi' ? 'host' : null,   // 추이 차트는 ESXi 계열(temp_host)에만 있다
-    }))
-    : view === 'host'
-      ? data.hosts.map((h) => ({ key: h.id, name: h.name, sub: `${h.vcenterId} / ${h.cluster || '-'}`, curC: h.curC, avg5C: h.avg5C, maxC: h.tempMaxC, level: 'host' }))
-      : (view === 'cluster' ? data.clusters : data.vcenters).map((g) => ({ key: g.key, name: g.key.replace('|', ' / '), sub: `${g.hosts} 호스트`, curC: g.curC, avg5C: g.avg5C, maxC: g.maxC, level: view === 'cluster' ? 'cluster' : 'vc' }));
-
-  return (
-    <>
-      <div className="kpis" style={{ marginBottom: 14 }}>
-        <Card label="온도 수집 서버" value={`${S.all?.reporting ?? 0}`}
-          meta={`iDRAC ${idrac.counts?.idrac ?? 0} · ESXi ${idrac.counts?.esxi ?? 0}`} />
-        <Card label="물리 서버 평균" value={degC(S.physical?.avgC)} accent="var(--amber)"
-          meta={`${S.physical?.servers ?? 0}대 · 최고 ${degC(S.physical?.maxC)}`} />
-        <Card label="가상화 서버 평균" value={degC(S.virtual?.avgC)} accent="var(--green)"
-          meta={`${S.virtual?.servers ?? 0}대 · 최고 ${degC(S.virtual?.maxC)}`} />
-        <Card label="최고 온도" value={degC(S.all?.maxC)} accent="var(--red)"
-          meta={S.all?.avgInletC != null ? `흡기 평균 ${degC(S.all.avgInletC)}` : '전체 센서 기준'} />
-      </div>
-      {idrac.reason && <div className="card" style={{ marginBottom: 12, borderColor: 'var(--amber)' }}><span className="muted">{idrac.reason} ESXi 센서 값으로 대체 표시합니다.</span></div>}
-      {data.avgError && <div className="card" style={{ marginBottom: 12, borderColor: 'var(--amber)' }}><span className="muted">평균 온도 이력을 읽지 못했습니다: {data.avgError}</span></div>}
-      {data.reportingHosts === 0 && (idrac.counts?.idrac ?? 0) === 0 && <div className="card" style={{ marginBottom: 12, borderColor: 'var(--amber)' }}><span className="muted">온도 센서를 보고하는 서버가 없습니다(iDRAC 미등록이거나 하드웨어/CIM 미지원·nested ESXi). 라이브 수집 시 표시됩니다.</span></div>}
-      <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
-        {[['server', '서버별'], ['host', 'ESXi 호스트별'], ['cluster', '클러스터별'], ['vc', '법인별']].map(([k, l]) => (
-          <button key={k} className={view === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView(k)}>{l}</button>
-        ))}
-        {view === 'server' && <>
-          <span style={{ width: 1, height: 20, background: 'rgba(255,255,255,.14)' }} />
-          {[['all', `전체 ${srvAll.length}`], ['physical', `물리 ${S.physical?.servers ?? 0}`], ['virtual', `가상화 ${S.virtual?.servers ?? 0}`]].map(([k, l]) => (
-            <button key={k} className={kindF === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setKindF(k)}>{l}</button>
-          ))}
-        </>}
-      </div>
-
-      {view === 'server' && (idrac.byDatacenter || []).length > 0 && (
-        <div className="table-wrap" style={{ marginBottom: 12 }}>
-          <div className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>법인별 평균 — 물리 서버와 가상화 서버를 나눠서 봅니다.</div>
-          <DataTable rows={idrac.byDatacenter.map((d) => ({
-            key: d.key, name: d.name,
-            pN: d.physical.servers, pAvg: d.physical.avgC, pMax: d.physical.maxC,
-            vN: d.virtual.servers, vAvg: d.virtual.avgC, vMax: d.virtual.maxC,
-            aAvg: d.all.avgC, aMax: d.all.maxC,
-          }))} initialSort={{ key: 'aAvg', dir: 'desc' }} columns={[
-            { key: 'name', label: '법인' },
-            { key: 'pN', label: '물리 대수', align: 'right' },
-            { key: 'pAvg', label: '물리 평균 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.pAvg) }}>{r.pAvg ?? '—'}</span> },
-            { key: 'pMax', label: '물리 최고 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.pMax) }}>{r.pMax ?? '—'}</span> },
-            { key: 'vN', label: '가상화 대수', align: 'right' },
-            { key: 'vAvg', label: '가상화 평균 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.vAvg) }}>{r.vAvg ?? '—'}</span> },
-            { key: 'vMax', label: '가상화 최고 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.vMax) }}>{r.vMax ?? '—'}</span> },
-            { key: 'aAvg', label: '전체 평균 ℃', align: 'right', render: (r) => <b style={{ color: tempColor(r.aAvg) }}>{r.aAvg ?? '—'}</b> },
-          ]} />
-        </div>
-      )}
-
-      {view === 'server' ? (
-        <DataTable rows={srvRows.map((r) => ({
-          key: r.id, name: r.name, kind: r.kind, source: r.source, stale: r.stale,
-          sub: [KIND_KO[r.kind], r.cluster].filter(Boolean).join(' / '),
-          curC: r.curC, inletC: r.inletC, exhaustC: r.exhaustC, cpuC: r.cpuC, maxC: r.maxC,
-          level: r.source === 'esxi' ? 'host' : null,
-        }))} initialSort={{ key: 'curC', dir: 'desc' }} columns={[
-          { key: 'name', label: '서버', render: (r) => (r.level
-            ? <button className="cell-link" onClick={() => openHist(r.level, r.key)}>{r.name}</button>
-            : <span>{r.name}</span>) },
-          { key: 'kind', label: '구분', render: (r) => <span className={`badge ${r.kind === 'physical' ? 'amber' : 'green'}`}>{KIND_KO[r.kind]}</span> },
-          { key: 'source', label: '출처', render: (r) => <span className="muted" style={{ fontSize: 11.5 }}>{r.source === 'idrac' ? 'iDRAC' : 'ESXi'}{r.stale ? ' · 오래됨' : ''}</span> },
-          { key: 'sub', label: '클러스터', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.cluster || '—'}</span> },
-          { key: 'curC', label: '현재온도 ℃', align: 'right', render: (r) => <b style={{ color: tempColor(r.curC) }}>{r.curC ?? '—'}</b> },
-          { key: 'inletC', label: '흡기 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.inletC) }}>{r.inletC ?? '—'}</span> },
-          { key: 'exhaustC', label: '배기 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.exhaustC) }}>{r.exhaustC ?? '—'}</span> },
-          { key: 'cpuC', label: 'CPU ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.cpuC) }}>{r.cpuC ?? '—'}</span> },
-          { key: 'maxC', label: '최고 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.maxC) }}>{r.maxC ?? '—'}</span> },
-        ]} />
-      ) : (
-        <DataTable rows={rows} initialSort={{ key: 'curC', dir: 'desc' }} columns={[
-          { key: 'name', label: view === 'host' ? '호스트' : (view === 'cluster' ? '클러스터' : '법인'), render: (r) => <button className="cell-link" onClick={() => openHist(r.level, r.key)}>{r.name}</button> },
-          { key: 'sub', label: '구분', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.sub}</span> },
-          { key: 'curC', label: '현재온도 ℃', align: 'right', render: (r) => <b style={{ color: tempColor(r.curC) }}>{r.curC ?? '—'}</b> },
-          // v2.512: 라벨이 고정 '5분' 이 아니다 — 서버가 알려준 실제 평균 창을 쓴다(샘플 주기에 따라 달라짐).
-          { key: 'avg5C', label: avgLabel, align: 'right', render: (r) => <span style={{ color: tempColor(r.avg5C) }}>{r.avg5C ?? '—'}</span> },
-          { key: 'maxC', label: '최대 온도 ℃', align: 'right', render: (r) => <span style={{ color: tempColor(r.maxC) }}>{r.maxC ?? '—'}</span> },
-          { key: 'hist', label: '추이', render: (r) => <button className="tab" onClick={() => openHist(r.level, r.key)}>5년 추이</button> },
-        ]} />
-      )}
-      {view !== 'server' && data.sampleIntervalMs > 5 * 60_000 && (
-        <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
-          ※ 온도 샘플 주기가 {Math.round(data.sampleIntervalMs / 60000)}분이라 평균 창을 {data.avgWindowLabel} 로 넓혀 계산했습니다
-          (설정 › 수집 주기에서 조정). 주기보다 짧은 창으로는 표본이 없어 값이 비어 보입니다.
-        </div>
-      )}
-
-      {hist && (
-        <Modal title={`온도 추이 — ${hist.key || ''}`} onClose={closeHist} width={760}>
-          <div className="flex gap wrap" style={{ marginBottom: 8 }}>
-            {[[1, '1일'], [7, '1주'], [30, '1달'], [365, '1년'], [1830, '5년']].map(([d, l]) => (
-              <button key={d} className={days === d ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setDays(d)}>{l}</button>
-            ))}
-            {hist.synthesized && <span className="badge amber" style={{ alignSelf: 'center' }}>데모 합성</span>}
-          </div>
-          <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center' }}>
-            <span className="muted" style={{ fontSize: 12 }}>집계 단위(기준)</span>
-            {[['auto', '자동'], ['minute', '분'], ['hour', '시간'], ['day', '일']].map(([b, l]) => (
-              <button key={b} className={bucket === b ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} onClick={() => setBucket(b)}>{l}</button>
-            ))}
-            {hist.points?.length ? <span className="muted" style={{ fontSize: 11 }}>{hist.points.length}개 구간</span> : null}
-          </div>
-          {hist.loading ? <Loading /> : hist.error ? <ErrorBox message="이력을 불러오지 못했습니다." /> : (hist.points || []).length === 0
-            ? <div className="muted">해당 기간 데이터가 없습니다(수집 누적 후 표시).</div>
-            : (
-              <>
-                <ResponsiveContainer width="100%" height={320}>
-                  <LineChart data={(hist.points || []).map((p) => ({ t: fmtTrendTick(p.ts, days), avg: p.avg, max: p.max }))}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
-                    <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={40} />
-                    <YAxis tick={{ fontSize: 11 }} unit="℃" domain={['auto', 'auto']} />
-                    <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} />
-                    <Line type="monotone" dataKey="avg" stroke="#22d3ee" dot={false} name="평균" isAnimationActive={false} />
-                    <Line type="monotone" dataKey="max" stroke="#f87171" dot={false} name="최고" isAnimationActive={false} />
-                    <Brush dataKey="t" height={22} stroke="#6366f1" travellerWidth={8} tickFormatter={() => ''} />
-                  </LineChart>
-                </ResponsiveContainer>
-                <div className="muted" style={{ fontSize: 11, marginTop: 4, textAlign: 'center' }}>아래 막대를 드래그하면 구간을 좁혀 스크롤·확대해 볼 수 있습니다.</div>
-              </>
-            )}
-        </Modal>
-      )}
-    </>
-  );
+  return <ServerTempBoard scope={scope} />;
 }
 
 export function Forecast({ scope }) {

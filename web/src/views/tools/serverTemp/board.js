@@ -221,10 +221,21 @@ export function hotList(rows = []) {
 }
 
 /** 법인 비교 목록 — 전체 평균 내림차순 + 그 법인의 임계 개수. */
+export const UNASSIGNED_DC = '(미분류)';
+
+/**
+ * 행 → 법인 그룹 키. ⚠ **서버의 `byDatacenter` 조립 규칙과 글자 그대로 같아야 한다**
+ * (`server/src/tools/serverTemp.js`: `r.datacenterId || r.vcenterId || '(미분류)'`).
+ * 다르면 비교 목록의 임계 개수와 히트맵 그룹이 **서로 다른 집합**을 세면서도 오류가 나지 않는다.
+ */
+export function dcKeyOf(r) {
+  return String(r?.datacenterId || r?.vcenterId || UNASSIGNED_DC);
+}
+
 export function compareRows(byDatacenter = [], rows = []) {
   const perDc = new Map();
   for (const r of rows || []) {
-    const k = String(r?.datacenterId || r?.vcenterId || '');
+    const k = dcKeyOf(r);
     if (!k) continue;
     const g = perDc.get(k) || [];
     g.push(r);

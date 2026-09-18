@@ -40,21 +40,32 @@ body {
 
 .app { display: flex; flex-direction: column; min-height: 100%; }
 
-/* Top bar */
+/* ── Top bar — 2단(v2.556, docs/design/server-temp/README.md §0) ──────────────
+   1행 브랜드/상태/사용자 · 2행 메뉴(밑줄 탭).
+   ⚠⚠ 탭 규칙은 반드시 `.topbar .tabs .tab` 로 **한정**한다 — `className="tab"` 은 앱 전역에서
+     일반 버튼으로도 쓰인다(접속확인·필터 초기화·CSV 선택 등 수십 곳). 전역 `.tab` 을 밑줄
+     스타일로 바꾸면 그 버튼들이 전부 테두리 없는 글자가 된다.
+   ⚠ 브랜드 행에 `flex-wrap: wrap` 을 두는 것이 400px 가로 넘침(실측 628px)의 해법이다 —
+     상태칩·사용자칩이 한 줄에 안 들어가면 줄바꿈으로 흘린다.
+   ─────────────────────────────────────────────────────────────────────────── */
 .topbar {
-  display: flex; align-items: center; gap: 20px;
-  padding: 14px 24px;
-  background: linear-gradient(180deg, rgba(20,27,45,0.95), rgba(20,27,45,0.75));
-  border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; z-index: 30; backdrop-filter: blur(8px);
+  background: rgba(12,17,30,.9);
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky; top: 0; z-index: 30; backdrop-filter: blur(10px);
 }
-.brand { display: flex; align-items: center; gap: 12px; }
+.topbar .tb-brandrow {
+  display: flex; align-items: center; gap: 14px;
+  padding: 6px 20px; min-height: 44px; flex-wrap: wrap; row-gap: 4px;
+}
+.brand { display: flex; align-items: center; gap: 10px; }
 .brand .logo {
-  width: 34px; height: 34px; border-radius: 9px;
+  width: 26px; height: 26px; border-radius: 7px; font-size: 13px;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   display: grid; place-items: center; font-weight: 800; color: #04101f;
 }
-.brand h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: .2px; }
+.brand h1 { font-size: 13px; margin: 0; font-weight: 700; letter-spacing: .2px; white-space: nowrap; }
+.brand h1 .bt-strong { font-weight: 700; }
+.brand h1 .bt-dim { font-weight: 500; color: var(--text-dim); }
 /* 업그레이드 진행 중 헤더 배지(v2.458) — 서버 재시작으로 포탈이 멈추는 구간을 빨간 점멸로 알린다. */
 .upgrading-badge { margin-left: 8px; color: #fff; background: #dc2626; border-color: #dc2626 !important; animation: blink-red 1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .upgrading-badge { animation: none; } }
@@ -71,12 +82,33 @@ body {
 .tab:hover { color: var(--text); background: var(--panel-2); }
 .tab.active { color: #fff; background: var(--accent); border-color: var(--accent); }
 
+/* 메뉴 행(2단 헤더) — 이 선택자 밖의 `.tab` 은 전역 규칙을 그대로 쓴다(위 ⚠). */
+.topbar .tabs {
+  gap: 2px; margin-left: 0; padding: 0 12px; overflow-x: auto;
+  flex-wrap: nowrap; border-top: 1px solid rgba(255,255,255,.04);
+}
+.topbar .tabs .tab {
+  padding: 9px 12px; background: none; border: none; border-bottom: 2px solid transparent;
+  border-radius: 0; color: var(--text-dim); font-weight: 600; font-size: 13px; white-space: nowrap;
+  transition: color .12s, border-color .12s;
+}
+.topbar .tabs .tab:hover { color: var(--text); background: none; }
+.topbar .tabs .tab.active {
+  color: var(--text); font-weight: 700; background: none;
+  border-color: transparent; border-bottom-color: var(--accent-2);
+}
+
 .topbar .spacer { flex: 1; }
 .status-pill {
   display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
   border-radius: 20px; background: var(--panel-2); border: 1px solid var(--border);
   font-size: 12px; color: var(--text-dim);
   white-space: nowrap; flex-shrink: 0;
+}
+/* 브랜드 행의 상태 표시 — 칩 배경 없이 모노(README §0). 내용·동작은 그대로. */
+.topbar .tb-brandrow .status-pill {
+  background: none; border: none; padding: 0; border-radius: 0;
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: .04em;
 }
 .status-pill > span { white-space: nowrap; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
@@ -94,18 +126,20 @@ body {
 .content { padding: 22px 24px 72px; max-width: 1680px; width: 100%; margin: 0 auto; }
 
 /* Bottom status bar */
+/* 하단 상태바 — v2.556 에 톤만 바꿨다(모노·라벨 자간·배경). 칸 내용·개수는 그대로. */
 .statusbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
   display: flex; align-items: stretch;
-  background: linear-gradient(180deg, rgba(20,27,45,.92), rgba(10,14,23,.98));
-  border-top: 1px solid var(--border); backdrop-filter: blur(8px);
+  background: rgba(12,18,32,.92);
+  border-top: 1px solid var(--border-soft); backdrop-filter: blur(10px);
+  font-family: var(--font-mono);
 }
 .statusbar .sb-cell {
   flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px;
-  padding: 9px 14px; border-right: 1px solid var(--border); font-size: 13px;
+  padding: 7px 14px; border-right: 1px solid var(--border-soft); font-size: 12px;
 }
 .statusbar .sb-cell:last-child { border-right: none; }
-.statusbar .sb-label { color: var(--text-faint); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+.statusbar .sb-label { color: var(--text-faint); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .12em; }
 .statusbar .sb-val { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
 .grid { display: grid; gap: 16px; }
 .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-faint); margin: 26px 0 12px; font-weight: 700; }
@@ -426,6 +460,11 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* User box */
 .user-box { display: flex; align-items: center; gap: 10px; }
+/* 2단 헤더의 사용자 칩은 한 단계 작게(README §0) — 다른 화면의 .user-box 는 그대로. */
+.topbar .tb-brandrow .user-avatar { width: 26px; height: 26px; font-size: 12px; }
+.topbar .tb-brandrow .user-name { font-size: 12.5px; }
+.topbar .tb-brandrow .user-role { font-size: 10.5px; }
+.topbar .tb-brandrow .logout-btn { padding: 4px 9px; border-radius: 6px; background: none; font-size: 11.5px; }
 .user-avatar {
   width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
   background: linear-gradient(135deg, var(--accent-2), var(--accent)); color: #04101f; font-weight: 800;
@@ -913,3 +952,37 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .gd-search input { width:200px; text-align:left; }
 .gd-sel { padding:5px 9px; border-radius:8px; background:var(--bg-soft); border:1px solid var(--border); color:var(--text); font:inherit; font-size:12px; max-width:220px; }
 .gd-sel:focus { outline:none; border-color:var(--accent); }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   서버 온도 — 히트맵 보드(v2.556, docs/design/server-temp/README.md)
+   ⚠ 시각 규격은 여기 두고 컴포넌트는 구조만 갖는다(인라인 스타일을 prop 수십 개로 넘기지
+     않기 위해). 표 규격은 `.st-table` 로 **한정**한다 — 전역 `table`/`thead th` 규칙(181개 표)
+     을 건드리면 앱 전체가 바뀐다.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* 2. KPI + 분포 — 1200px 미만 1열(README §Screens 2) */
+.st-kpis { display: grid; grid-template-columns: minmax(260px, 300px) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 1200px) { .st-kpis { grid-template-columns: minmax(0, 1fr); } }
+/* 3. 법인 비교 + 이상 서버 — 1100px 미만 1열 */
+.st-mid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr); gap: 14px; }
+@media (max-width: 1100px) { .st-mid { grid-template-columns: minmax(0, 1fr); } }
+
+/* 5. 표 — 카드가 테두리를 그리므로 표는 테두리가 없다(DataTable bare) */
+.st-table { border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.st-table thead th {
+  padding: 10px 14px; background: var(--panel-deep); color: var(--text-dim);
+  font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: none;
+  border-bottom: 1px solid var(--border);
+}
+.st-table thead th:hover { color: var(--text); }
+.st-table tbody td {
+  padding: 9px 14px; border-bottom: 1px solid rgba(36,48,73,.55);
+  font-variant-numeric: tabular-nums; vertical-align: middle;
+}
+/* ⚠ hover 가 임계 배경(rowStyle 인라인)보다 **위**여야 한다 — 인라인 background 는 우선순위가
+   높으므로 `!important` 로 덮는다. 그러지 않으면 40℃ 행에서 마우스 위치를 알 수 없다. */
+.st-table tbody tr:hover { background: rgba(59,130,246,.10) !important; }
+.st-table tbody tr { transition: background-color .12s; }
+.st-table.dense { font-size: 12.5px; }
+.st-table.dense thead th { padding: 8px 12px; }
+.st-table.dense tbody td { padding: 5px 12px; }
