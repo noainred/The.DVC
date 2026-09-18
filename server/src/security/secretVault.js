@@ -82,6 +82,9 @@ export const SECRET_FILES = [
   'guest-scans.json',              // 게스트 로그인 스캔 예약 — 게스트 OS 계정(guestPass)(security/guestScanScheduler.js)
   'upgrade.json',                  // 자동 업그레이드 원격 소스 토큰(upgrade/settings.js)
   'packages.json',                 // 패키지 저장소 토큰(upgrade/packageSettings.js)
+  // v2.562: 외부 연동 API 키. 값은 sha256 해시만 저장하지만 이름·지문·허용목록이 평문으로
+  // 남으므로 `.gitignore` 차단과 **함께** 해야 한다(v2.535 규약 — 둘은 별개 항목).
+  'api-keys.json',                 // 외부 포탈용 조회 API 키(publicapi/keys.js)
 ];
 
 /* ── 정책(모드·레벨·알고리즘) ─────────────────────────────────────────────── */
