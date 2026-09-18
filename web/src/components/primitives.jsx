@@ -36,7 +36,7 @@ export function usageColor(pct) {
   return 'var(--green)';
 }
 
-export function Kpi({ label, value, unit, meta, pct, accent, onClick }) {
+export function Kpi({ label, value, unit, meta, pct, accent, onClick, title }) {
   return (
     <div
       className={`card kpi${onClick ? ' kpi-click' : ''}`}
@@ -44,7 +44,8 @@ export function Kpi({ label, value, unit, meta, pct, accent, onClick }) {
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
-      title={onClick ? '클릭하여 보기' : undefined}
+      // v2.567: 카드가 무엇을 세는지 설명이 필요할 때 문구를 덮어쓴다(기본은 기존 그대로).
+      title={title || (onClick ? '클릭하여 보기' : undefined)}
       style={accent ? { '--kpi-accent': accent } : undefined}
     >
       <div className="label">{label}</div>
