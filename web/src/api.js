@@ -36,13 +36,43 @@ export const can = (key) => {
   if (!Array.isArray(u.permissions)) return true;
   return u.permissions.includes(key);
 };
-// 특수 기능 개별 도구 접근 가능 여부 — 'tools' 기본 권한 + 역할별 거부목록(toolsDenied)에 없을 것.
+/**
+ * 특수 기능 개별 도구 접근 가능 여부 — 'tools' 기본 권한 + 서버가 준 유효 접근값.
+ *
+ * ⚠⚠ **`toolsAllowed` 가 배열이면 그것이 전부다**(v2.555 — 사용자별 허용 목록). 목록에 없는
+ *   도구는 **차단**이고, 새로 추가된 도구도 자동으로 차단된다(거부 기본값 — 관리자가 명시한
+ *   것만 열린다). `toolsDenied` 만 보던 예전 판정으로 되돌리면 허용 목록 설정이 **화면에서
+ *   통째로 무시**되어 숨겨야 할 메뉴가 그대로 보인다.
+ * ⚠ 이 함수는 **표시 게이팅**이다 — 서버도 같은 판정을 집행한다
+ *   (`auth/permissions.js userToolAllowed` → `auth/toolAccess.js`). 한쪽만 고치지 말 것.
+ */
 export const toolAllowed = (k) => {
   const u = _currentUser;
   if (!u || u.role === 'admin') return true;
   if (!can('tools')) return false;
+  if (Array.isArray(u.toolsAllowed)) return u.toolsAllowed.includes(k);
   const denied = Array.isArray(u.toolsDenied) ? u.toolsDenied : [];
   return !denied.includes(k);
+};
+
+/**
+ * 관리자가 **이 계정에 명시적으로 허용한** 도구인가(v2.555).
+ *
+ * 왜 필요한가: 카드 목록의 `adminOnly` 플래그(`specialToolsList.js`)는 **표시 관례**이고
+ * 접근제어가 아니다 — 예로 스토리지 모니터링의 조회 라우트는 `requirePerm('tools') +
+ * fullScopeOnly` 이므로 operator 는 이미 API 로 읽을 수 있는데(v2.536 이 기록한 것과 같은
+ * 성질) 카드만 감춰져 있었다. 그래서 사용자 요청("스토리지 엔지니어에게 스토리지 메뉴만")을
+ * 그 플래그가 막아 **기능이 성립하지 않는다**.
+ *
+ * 이 함수가 참이면 `adminOnly` 표시 관례를 넘어 카드를 보여 준다. **서버 권한은 무엇도
+ * 넓히지 않는다** — 조회에 admin 이 필요한 도구는 열어도 403 이 되고, 그 사실을 관리 화면이
+ * 미리 경고한다(무음 실패 금지). 허용 목록 모드가 아니면(`toolsAllowed` 가 배열이 아니면)
+ * 항상 거짓이라 기존 동작이 그대로다.
+ */
+export const toolExplicitlyAllowed = (k) => {
+  const u = _currentUser;
+  if (!u || u.role === 'admin') return false;
+  return Array.isArray(u.toolsAllowed) && u.toolsAllowed.includes(k);
 };
 
 /**

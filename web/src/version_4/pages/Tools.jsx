@@ -9,12 +9,13 @@
  * 78장을 회색으로 늘어놓는 대신 **무엇이 필요한지와 요청 문구**를 먼저 보여준다.
  */
 import React, { useMemo, useState } from 'react';
-import { can, toolAllowed } from '../../api.js';
+import { can, toolAllowed, getCurrentUser } from '../../api.js';
 import { TOOLS } from '../../views/specialToolsList.js';
 import { searchTools } from '../../views/toolSearch.js';
 import { Panel, Empty } from '../ui.jsx';
 import { PAGE_META } from '../nav.js';
 import { visibleTree, groupLabelOfTool, groupLabelsOfTool, primaryToolKeys } from '../tree.js';
+import { toolHidden } from '../../views/toolVisibility.js';
 import { fmtInt } from '../data.js';
 
 const KIND_TAG = { page: '화면', tab: '탭', tool: '기능' };
@@ -22,9 +23,16 @@ const KIND_TAG = { page: '화면', tab: '탭', tool: '기능' };
 export default function Tools({ isAdmin, goAnywhere, go }) {
   const [q, setQ] = useState('');
   const canTools = can('tools');
-  const groups = useMemo(() => visibleTree(TOOLS, { isAdmin }), [isAdmin]);
+  // v2.555: 숨김 판정은 views/toolVisibility.js 하나가 소유한다(내비 트리·팔레트와 같은 답).
+  // ⚠ 의존성 키는 JSON — 빈 배열(전면 차단)과 null(재정의 없음)을 구분해야 한다.
+  const allowKey = JSON.stringify(getCurrentUser()?.toolsAllowed ?? null);
+  const shownOf = useMemo(() => {
+    const allow = JSON.parse(allowKey);
+    return (t) => !toolHidden(t, { isAdmin, toolsAllowed: allow, hideAdminOnly: true });
+  }, [isAdmin, allowKey]);
+  const groups = useMemo(() => visibleTree(TOOLS, { isAdmin, toolShown: shownOf }), [isAdmin, shownOf]);
   const byKey = useMemo(() => new Map(TOOLS.map((t) => [t.k, t])), []);
-  const openable = useMemo(() => TOOLS.filter((t) => !t.adminOnly || isAdmin).filter((t) => canTools && toolAllowed(t.k)).length, [isAdmin, canTools]);
+  const openable = useMemo(() => TOOLS.filter(shownOf).filter((t) => canTools && toolAllowed(t.k)).length, [shownOf, canTools]);
 
   const hits = useMemo(() => (q.trim()
     ? new Set(searchTools(TOOLS, q, { catsOf: (t) => groupLabelsOfTool(t.k) }).map((t) => t.k))

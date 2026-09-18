@@ -49,12 +49,22 @@ export const api = Router();
 // 역할 결정만 여기서 한다(인증 비활성 환경의 대체 역할). 게이트 본체는 auth/toolAccess.js
 // toolGate() — 그래야 회귀 테스트가 실제 미들웨어를 express 앱에 마운트해 403 을 확인할 수 있다.
 const toolGateRole = (req) => (!config.auth.enabled ? authDisabledRole() : (req.user && req.user.role));
-api.use('/tools', toolGate({ roleOf: toolGateRole }));
+/*
+ * ⚠⚠ **사용자 축을 함께 넘긴다**(v2.555 — 사용자별 '허용 목록' 집행). 역할만 넘기면
+ *   '스토리지 엔지니어에게 스토리지만' 설정이 **서버에서 집행되지 않아** 메뉴만 숨고 curl 로는
+ *   그대로 열린다(v2.536 이 겪은 '프론트 탭 조건만 있던' 사고와 같은 유형).
+ *   인증 비활성 환경에서는 사용자가 없으므로 역할만 남는다(대체 역할은 위 함수가 정한다).
+ */
+const toolGateUser = (req) => ({
+  username: (config.auth.enabled && req.user && req.user.username) || '',
+  role: toolGateRole(req),
+});
+api.use('/tools', toolGate({ roleOf: toolGateRole, userOf: toolGateUser }));
 // 같은 집행을 `/api/tools` **밖**의 전용 엔드포인트에도 적용한다(v2.506 검증 반영):
 // `/search/nl`(AI 검색)·`/top`(탐색·랭킹)은 각각 한 화면만 쓰는데 기능 권한 게이트가 없어
 // 도구를 거부해도 curl 로 그대로 200 이 나왔다. 정확 일치 표(TOOL_EXACT_PATHS)만 보므로
 // 다른 경로에는 영향이 없다.
-api.use(toolGate({ roleOf: toolGateRole, issueOf: exactToolAccessIssue }));
+api.use(toolGate({ roleOf: toolGateRole, userOf: toolGateUser, issueOf: exactToolAccessIssue }));
 
 registerVmMetrics(api);
 registerOverviewNsx(api);

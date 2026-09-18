@@ -1,6 +1,6 @@
 // 사용자 관리·권한 매트릭스·비밀번호·TOTP — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, setLocalPassword, clearLoginCredentials } from '../../auth/auth.js';
-import { PERMISSION_CATALOG, ROLES, loadMatrix, saveMatrix, resetMatrix, rolePermissions } from '../../auth/permissions.js';
+import { PERMISSION_CATALOG, ROLES, loadMatrix, saveMatrix, resetMatrix, rolePermissions, USER_TOOL_MODES, setUserTools, userToolOverrides, effectiveToolAccess } from '../../auth/permissions.js';
 // v2.506: 도구 거부목록의 '서버 집행 가능 여부' 를 권한 화면에 함께 내려준다(무음 실패 제거).
 import { enforcedToolKeys, TOOL_ENFORCEMENT_NOTES } from '../../auth/toolAccess.js';
 import { logAudit } from '../../audit.js';
@@ -49,7 +49,42 @@ adminRouter.get('/permissions', adminOnly, (_req, res) => {
       enforced: [...enforcedToolKeys()].sort(),
       notes: TOOL_ENFORCEMENT_NOTES,
     },
+    // v2.555: 사용자별 재정의의 모드 목록. 화면이 'off/allow/deny' 를 하드코딩하면
+    // 서버가 모드를 늘렸을 때 조용히 안 보인다(숫자·목록을 화면에 박지 말 것 — v2.493 규약).
+    userToolModes: USER_TOOL_MODES,
   });
+});
+
+/*
+ * 사용자별 특수기능 접근 재정의(v2.555 — 사용자 요청 "스토리지 엔지니어에게 스토리지 메뉴만").
+ * 저장 형태·판정은 `auth/permissions.js` 가 소유하고 여기서는 **경계만** 본다.
+ *   · `matrix.users` 는 이미 `GET /permissions` 가 내려주므로 조회 라우트를 따로 만들지 않는다
+ *     (두 곳이 각자 읽으면 화면이 어느 것을 믿을지 모른다).
+ *   · ⚠ **admin 계정은 재정의 대상이 아니다** — '관리자 잠김 방지' 가 이 모듈의 최초 설계
+ *     원칙이다. 조용히 무시하면 관리자가 적용된 줄 알므로 **400 + 사유**로 거절한다.
+ *   · ⚠ 존재하지 않는 계정에 저장하지 않는다 — 오타로 만든 유령 항목은 화면에 뜨지 않고
+ *     파일에만 남아, 나중에 같은 이름의 계정을 만들면 **뜻하지 않게 제한이 걸린다**.
+ */
+adminRouter.put('/user-tools/:username', adminOnly, (req, res) => {
+  const name = String(req.params.username || '').trim();
+  const target = listUsers().find((u) => u.username === name);
+  if (!target) return res.status(400).json({ ok: false, reason: '없는 계정입니다.' });
+  if (target.role === 'admin') {
+    return res.status(400).json({ ok: false, reason: 'admin 계정에는 기능 제한을 걸 수 없습니다(관리자 잠김 방지). 역할을 먼저 바꾸세요.' });
+  }
+  const b = req.body || {};
+  const r = setUserTools(name, { mode: b.mode, tools: b.tools, by: req.user?.username || '' });
+  const eff = r.ok ? effectiveToolAccess({ username: name, role: target.role }) : null;
+  logAudit({
+    user: req.user?.username,
+    action: r.ok ? '사용자 기능 접근 재정의' : '사용자 기능 접근 재정의 거부',
+    target: name,
+    detail: r.ok
+      ? `mode=${r.entry ? r.entry.mode : 'off'}·도구=${r.entry ? r.entry.tools.length : 0}`
+      : (r.reason || ''),
+    ip: req.ip || '',
+  });
+  res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, entry: r.entry, effective: eff, users: userToolOverrides() } : r);
 });
 adminRouter.put('/permissions', adminOnly, (req, res) => {
   const b = req.body || {};

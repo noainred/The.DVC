@@ -15,7 +15,7 @@
  *  · 거부 응답은 기존 403 형태를 유지한다 — 프론트 ErrorBox 가 AccessDenied 로 자동 전환하려면
  *    `{error:'forbidden', requiredPerm}` 계약이 필요하다(CLAUDE.md 프론트 규칙).
  */
-import { roleToolsDenied } from './permissions.js';
+import { roleToolsDenied, userToolAllowed, effectiveToolAccess } from './permissions.js';
 
 /**
  * 라우트 경로 첫 세그먼트 → 프론트 도구 키(`web/src/views/specialToolsList.js` 의 k).
@@ -168,26 +168,44 @@ export function toolKeyForPath(pathname) {
  * @param {string} role  req.user.role (인증 비활성 환경은 호출부가 대체 역할을 넘긴다)
  * @param {string} pathname  `/tools` 하위 경로(예: '/ipam.csv')
  */
-export function toolAccessIssue(role, pathname) {
-  if (role === 'admin') return null;
+export function toolAccessIssue(actor, pathname) {
   const key = toolKeyForPath(pathname);
   if (!key) return null;                       // 매핑 없는 경로는 이 게이트의 대상이 아니다
-  const denied = roleToolsDenied(role);
-  if (!denied.includes(key)) return null;
-  return { tool: key, reason: `이 기능(${key})에 대한 접근이 관리자 설정으로 차단되어 있습니다.` };
+  return issueFor(actor, key);
+}
+
+/**
+ * 도구 키 하나에 대한 거부 판정(v2.555) — **판정은 `permissions.userToolAllowed` 하나가 소유**하고
+ * 이 함수는 사유 문구만 만든다. 두 곳이 각자 `mode === 'allow'` 를 해석하면 '화면은 숨겼는데
+ * API 는 열려 있는' 상태가 생긴다(v2.536 실제 사고와 같은 유형).
+ *
+ * ⚠ 첫 인자는 **사용자 객체**(`{username, role}`)다. 문자열이면 역할로 본다 — 기존 호출부·테스트
+ *   하위호환이며, 그 경우 사용자 재정의는 **적용되지 않는다**(username 이 없으므로). 새 호출부는
+ *   반드시 `req.user` 를 넘길 것 — 넘기지 않으면 사용자별 제한이 조용히 무시된다.
+ * ⚠ **사유를 한 문구로 덮지 않는다**: '허용 목록에 없음' 과 '거부 목록에 있음' 은 관리자가 고칠
+ *   자리가 다르다(사용자 재정의 / 역할 거부목록).
+ */
+export function issueFor(actor, key) {
+  const a = (typeof actor === 'string') ? { role: actor } : (actor || {});
+  if (a.role === 'admin') return null;
+  if (userToolAllowed(a, key)) return null;
+  const eff = effectiveToolAccess(a);
+  const reason = eff.mode === 'allow'
+    // ⚠ 조사(은/는·이/가)를 키에 붙이지 말 것 — 도구 키의 마지막 글자가 영문이라 받침 유무를
+      //   알 수 없고 '...ipam 은' 처럼 어색해진다. 괄호 뒤에 조사를 붙이는 형태로 쓴다.
+      ? `이 계정은 관리자가 지정한 기능만 사용할 수 있습니다 — 허용 목록에 이 기능(${key})이 없습니다.`
+    : `이 기능(${key})에 대한 접근이 관리자 설정으로 차단되어 있습니다.`;
+  return { tool: key, reason, mode: eff.mode };
 }
 
 /**
  * `/api/tools` 밖의 전용 엔드포인트용 — 전체 경로(api 마운트 기준)를 정확 일치로 본다.
  * 접두 일치가 아니라 **정확 일치**다: `/top` 은 막되 `/top-something` 은 건드리지 않는다.
  */
-export function exactToolAccessIssue(role, pathname) {
-  if (role === 'admin') return null;
+export function exactToolAccessIssue(actor, pathname) {
   const key = TOOL_EXACT_PATHS[stripPath(pathname)];
   if (!key) return null;
-  const denied = roleToolsDenied(role);
-  if (!denied.includes(key)) return null;
-  return { tool: key, reason: `이 기능(${key})에 대한 접근이 관리자 설정으로 차단되어 있습니다.` };
+  return issueFor(actor, key);
 }
 
 /**
@@ -201,15 +219,25 @@ export function exactToolAccessIssue(role, pathname) {
  * @param {object} o
  * @param {(req:any)=>string} o.roleOf  req → 역할. 인증 비활성 환경의 대체 역할 결정은 호출부
  *   (routes/api.js)가 한다 — 이 모듈이 auth/auth.js 를 import 하면 순환이 생긴다.
- * @param {(role:string,pathname:string)=>({tool:string,reason:string}|null)} [o.issueOf]
+ * @param {(req:any)=>({username?:string,role?:string})} [o.userOf]  req → 사용자(v2.555).
+ *   ⚠⚠ **이것을 넘기지 않으면 사용자별 제한이 조용히 무시된다** — 역할만으로 판정하므로
+ *   '스토리지만 허용' 같은 설정이 서버에서 집행되지 않는다(= 메뉴만 숨김 = 접근제어 아님,
+ *   v2.536 실제 사고). 기본값은 `roleOf` 로 만든 역할 객체이고, `routes/api.js` 는 `req.user` 를
+ *   넘긴다. 회귀 테스트가 실제 express 앱에 마운트해 403 을 확인한다.
+ * @param {(actor:any,pathname:string)=>({tool:string,reason:string}|null)} [o.issueOf]
  *   기본은 `/tools` 하위 경로용 `toolAccessIssue`. 전용 엔드포인트용은 `exactToolAccessIssue`.
  */
-export function toolGate({ roleOf, issueOf = toolAccessIssue }) {
+export function toolGate({ roleOf, userOf = null, issueOf = toolAccessIssue }) {
   return function toolGateMiddleware(req, res, next) {
-    const issue = issueOf(roleOf(req), req.path);
+    const actor = userOf ? userOf(req) : { role: roleOf(req) };
+    const issue = issueOf(actor, req.path);
     if (!issue) return next();
     // 403 본문 계약 — 프론트 ErrorBox 가 AccessDenied 로 자동 전환하는 근거(CLAUDE.md 프론트 규칙).
-    return res.status(403).json({ error: 'forbidden', requiredPerm: [`tool:${issue.tool}`], reason: issue.reason });
+    // v2.555: `toolMode` 를 함께 싣는다 — '역할이 막았다'(deny)와 '허용 목록에 없다'(allow)는
+    // 사용자가 관리자에게 요청할 내용이 다르므로 화면이 구분해 말해야 한다(무음 실패 금지).
+    return res.status(403).json({
+      error: 'forbidden', requiredPerm: [`tool:${issue.tool}`], reason: issue.reason, toolMode: issue.mode || '',
+    });
   };
 }
 

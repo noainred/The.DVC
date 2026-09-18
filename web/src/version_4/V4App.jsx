@@ -16,13 +16,14 @@
  * 권한상 호출하지 않을 API 는 path 를 null 로 넘겨 403 을 만들지 않는다.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { usePolling, toolAllowed, can } from '../api.js';
+import { usePolling, toolAllowed, can, getCurrentUser } from '../api.js';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import { hashSegments } from '../hooks/hashTab.js';
 import { TOOLS } from '../views/specialToolsList.js';
 import './v4.css';
 import { PAGE_IDS, PAGE_META, GROUP_TILE } from './nav.js';
 import { visibleTree, groupLabelOfTool } from './tree.js';
+import { toolHidden } from '../views/toolVisibility.js';
 import { MODE_LABEL, MODE_KEY, resolveMode, modeSpec, viewFromHash } from './mode.js';
 import { loadPhase, loadText, collectProgress, liveText, shouldBanner } from './loadState.js';
 import { buildDomainTiles, severityCounts, siteRows, fmtInt, levelBar } from './data.js';
@@ -139,7 +140,14 @@ export default function V4App({ user, health, healthError, onExit }) {
     return lv.length ? Math.max(...lv) : null;
   };
   // 트리는 관리자 전용 도구만 숨긴다 — 잠긴 도구는 숨기지 않고 회색으로 보여주는 것이 기존 정책이다.
-  const groups = useMemo(() => visibleTree(TOOLS, { isAdmin }), [isAdmin]);
+  // v2.555: 허용 목록 모드면 목록 밖 도구를 내비에서 **숨긴다**(사용자 선택 '아예 숨긴다').
+  // ⚠ 의존성 키를 `join(',')` 으로 만들지 말 것 — 빈 배열(전면 차단)과 null(재정의 없음)이
+  //   둘 다 빈 문자열이 되어 **전면 차단 설정이 조용히 '제한 없음' 으로 읽힌다**.
+  const allowKey = JSON.stringify(getCurrentUser()?.toolsAllowed ?? null);
+  const groups = useMemo(() => {
+    const allow = JSON.parse(allowKey);
+    return visibleTree(TOOLS, { isAdmin, toolShown: (t) => !toolHidden(t, { isAdmin, toolsAllowed: allow, hideAdminOnly: true }) });
+  }, [isAdmin, allowKey]);
   const byKey = useMemo(() => new Map(TOOLS.map((t) => [t.k, t])), []);
 
   const meta = PAGE_META[page] || PAGE_META.overview;
@@ -270,7 +278,7 @@ export default function V4App({ user, health, healthError, onExit }) {
           </ErrorBoundary>
         </div>
       </div>
-      {paletteOn && <Palette onClose={() => setPaletteOn(false)} onPick={goAnywhere} isAdmin={isAdmin} />}
+      {paletteOn && <Palette onClose={() => setPaletteOn(false)} onPick={goAnywhere} isAdmin={isAdmin} toolsAllowed={JSON.parse(allowKey)} />}
     </div>
   );
 }

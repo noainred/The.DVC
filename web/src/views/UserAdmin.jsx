@@ -4,6 +4,8 @@ import { fetchJson, postJson, patchJson, delJson, putJson } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { TOOLS as SPECIAL_TOOLS } from './specialToolsList.js';
 import { enforcementOf, enforcementSummary, LEVEL_SERVER, LEVEL_PARTIAL } from './userAdmin/toolEnforcementText.js';
+import { MODE_OFF, MODE_ALLOW, MODE_DENY, MODE_LABEL, modeHelp, overrideBadge, overrideByText, toolsPermWarning, enforcementGapNote, saveSummary, SECTION_NOTE } from './userAdmin/userToolText.js';
+import BoldText from '../components/boldText.jsx';
 
 // 도구별 접근 표에 나오는 행 — adminOnly 도구는 admin 전용이라 제외(모듈 상수: 렌더마다 재계산 불필요).
 const TOOL_ROWS = SPECIAL_TOOLS.filter((t) => !t.adminOnly);
@@ -31,6 +33,8 @@ export default function UserAdmin() {
   // v2.202에서 pwEdit useState 를 조기 return 뒤에 뒀다가 렌더 간 훅 개수가 달라져
   // React #310(사용자 관리 화면 전체 크래시)이 발생했다.
   const [pwEdit, setPwEdit] = useState(null); // { username, pw, pw2, error }
+  // v2.555 사용자별 특수기능 접근 — { username, role, mode, tools:[], q }
+  const [toolEdit, setToolEdit] = useState(null);
 
   const load = async () => {
     try {
@@ -167,6 +171,30 @@ export default function UserAdmin() {
     if (r?.ok !== false) { await load(); flash(true, '로그인을 차단했습니다(자격증명 제거).'); } else flash(false, r.reason);
   };
 
+  // ── 사용자별 특수기능 접근(v2.555) ─────────────────────────────────────────
+  // ⚠ 판정·문구는 userAdmin/userToolText.js(순수·vitest) 가 소유한다 — 여기는 setState 와 호출만.
+  const userOv = (username) => (perms?.matrix?.users || {})[username] || null;
+  const openToolEdit = (u) => {
+    const ov = userOv(u.username);
+    setToolEdit({
+      username: u.username,
+      role: u.role,
+      mode: ov?.mode || MODE_OFF,
+      tools: [...(ov?.tools || [])],
+      q: '',
+    });
+  };
+  const saveToolEdit = async () => {
+    const r = await putJson(`/admin/user-tools/${encodeURIComponent(toolEdit.username)}`, { mode: toolEdit.mode, tools: toolEdit.tools })
+      .catch((e) => ({ ok: false, reason: e.message }));
+    if (r.ok) {
+      // 응답의 users 를 그대로 반영한다 — 서버가 정규화한 값(빈 목록 처리 등)이 진실이다.
+      setPerms((p) => ({ ...p, matrix: { ...p.matrix, users: r.users || {} } }));
+      setToolEdit(null);
+      flash(true, '사용자별 기능 접근을 저장했습니다 — 그 계정의 다음 요청부터 적용됩니다.');
+    } else flash(false, r.reason);
+  };
+
   return (
     <>
       <div className="flex between wrap gap" style={{ marginBottom: 10 }}>
@@ -200,7 +228,7 @@ export default function UserAdmin() {
 
       <div className="table-wrap">
         <STable>
-          <thead><tr><th>사용자 ID</th><th>이름</th><th>역할</th><th>로그인 방식</th><th>데이터 범위</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
+          <thead><tr><th>사용자 ID</th><th>이름</th><th>역할</th><th>로그인 방식</th><th>데이터 범위</th><th>특수기능</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
           <tbody>
             {data.users.map((u) => (
               <tr key={u.username}>
@@ -226,6 +254,22 @@ export default function UserAdmin() {
                     title="이 계정이 볼 수 있는 vCenter/리전을 제한합니다.">
                     {scopeLabel(u)}
                   </button>
+                </td>
+                {/* v2.555 사용자별 특수기능 접근 — admin 은 대상이 아니다(관리자 잠김 방지). */}
+                <td data-sort={overrideBadge(userOv(u.username)).mode}>
+                  {u.role === 'admin'
+                    ? <span className="muted" style={{ fontSize: 12 }} title="admin 은 항상 전체 기능을 사용합니다(관리자 잠김 방지).">전체</span>
+                    : (() => {
+                      const b = overrideBadge(userOv(u.username));
+                      const cls = b.tone === 'bad' ? 'red' : b.tone === 'warn' ? 'amber' : 'gray';
+                      const by = overrideByText(userOv(u.username));
+                      return (
+                        <button className="tab" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => openToolEdit(u)}
+                          title={by ? `설정: ${by}` : '이 계정이 쓸 수 있는 특수기능 도구를 지정합니다.'}>
+                          <span className={`badge ${cls}`} style={{ fontSize: 11 }}>{b.text}</span>
+                        </button>
+                      );
+                    })()}
                 </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {/* 비밀번호가 로그인에 쓰일 수 없는 계정에는 [비번 설정]을 노출하지 않는다:
@@ -375,6 +419,80 @@ export default function UserAdmin() {
           </div>
         </Modal>
       )}
+
+      {/* ── 사용자별 특수기능 접근 편집 모달(v2.555) ──────────────────────── */}
+      {toolEdit && (() => {
+        const all = SPECIAL_TOOLS;
+        const allKeys = all.map((t) => t.k);
+        const entryNow = { mode: toolEdit.mode, tools: toolEdit.tools };
+        const hasToolsPerm = hasMx(toolEdit.role, 'tools');
+        const permWarn = toolsPermWarning({ entry: entryNow, hasToolsPerm, role: toolEdit.role });
+        const gap = enforcementGapNote(entryNow, allKeys, (k) => enforcementOf(k, perms?.toolEnforcement).level, { serverLevel: LEVEL_SERVER });
+        const ql = toolEdit.q.trim().toLowerCase();
+        const rows = ql ? all.filter((t) => `${t.k} ${t.label} ${t.desc || ''}`.toLowerCase().includes(ql)) : all;
+        const picking = toolEdit.mode !== MODE_OFF;
+        const toggle = (k) => setToolEdit((e) => ({ ...e, tools: e.tools.includes(k) ? e.tools.filter((x) => x !== k) : [...e.tools, k] }));
+        return (
+          <Modal title={`특수기능 접근 — ${toolEdit.username}`} onClose={() => setToolEdit(null)} width={640}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 12, lineHeight: 1.7 }}>
+              <BoldText text={SECTION_NOTE} />
+            </div>
+            <div className="flex wrap gap" style={{ marginBottom: 6 }}>
+              {[MODE_OFF, MODE_ALLOW, MODE_DENY].map((m) => (
+                <label key={m} className="flex gap" style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+                  <input type="radio" name="usertoolmode" checked={toolEdit.mode === m}
+                    onChange={() => setToolEdit((e) => ({ ...e, mode: m }))} /> {MODE_LABEL[m]}
+                </label>
+              ))}
+            </div>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.7 }}>
+              <BoldText text={modeHelp(toolEdit.mode)} />
+            </div>
+            {permWarn && (
+              <div style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(239,68,68,.12)', color: '#f87171' }}>
+                <BoldText text={permWarn} />
+              </div>
+            )}
+            {gap && (
+              <div style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(251,191,36,.12)', color: '#fbbf24' }}>
+                <BoldText text={gap.text} />
+              </div>
+            )}
+            {picking && (
+              <>
+                <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 6 }}>
+                  <input className="input" placeholder="도구 검색(이름·키)" value={toolEdit.q}
+                    onChange={(e) => setToolEdit((s2) => ({ ...s2, q: e.target.value }))} style={{ maxWidth: 260 }} />
+                  <div className="flex gap" style={{ fontSize: 12 }}>
+                    <button className="tab" style={{ padding: '3px 8px' }} onClick={() => setToolEdit((e) => ({ ...e, tools: [...new Set([...e.tools, ...rows.map((t) => t.k)])] }))}>보이는 것 전체선택</button>
+                    <button className="tab" style={{ padding: '3px 8px' }} onClick={() => setToolEdit((e) => ({ ...e, tools: [] }))}>선택 해제</button>
+                  </div>
+                </div>
+                <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid rgba(148,163,184,.2)', borderRadius: 8, padding: 10 }}>
+                  {rows.length === 0 && <div className="muted" style={{ fontSize: 12 }}>검색 결과가 없습니다.</div>}
+                  {rows.map((t) => (
+                    <label key={t.k} className="flex gap" style={{ alignItems: 'center', fontSize: 13, cursor: 'pointer', padding: '3px 0' }}>
+                      <input type="checkbox" checked={toolEdit.tools.includes(t.k)} onChange={() => toggle(t.k)} />
+                      <span>{t.icon} {t.label} <span className="muted" style={{ fontSize: 11 }}>({t.k})</span></span>
+                      {t.adminOnly && (
+                        <span className="badge gray" style={{ fontSize: 10 }}
+                          title="목록에서는 관리자 전용으로 표시되는 도구입니다. 여기서 고르면 이 계정에 카드가 보이지만, 조회 API 가 admin 을 요구하는 도구는 열 때 403 이 됩니다(권한을 넓히지는 않습니다).">관리자 표시</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+            <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7 }}>
+              <BoldText text={saveSummary(toolEdit.mode, toolEdit.tools, allKeys.length)} />
+            </div>
+            <div className="flex gap" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+              <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setToolEdit(null)}>취소</button>
+              <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={saveToolEdit}>저장</button>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* ── 데이터 범위(scope) 편집 모달 ────────────────────────────────────── */}
       {scopeEdit && (
