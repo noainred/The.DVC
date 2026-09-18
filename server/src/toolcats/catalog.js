@@ -76,7 +76,8 @@ export const PRESET = Object.freeze([
   {
     id: 'report', label: '리포트·점검', icon: '📋',
     tools: ['daily-health', 'insights', 'compliance-report', 'change-history', 'unprotected-vms',
-      'alert-channels', 'davinci-svc', 'svcmon-config', 'vmware-backup', 'dir-usage', 'capacity'],
+      'alert-channels', 'davinci-svc', 'svcmon-config', 'vmware-backup', 'dir-usage', 'capacity',
+      'portal-check'],
   },
   {
     id: 'search', label: '검색', icon: '🔎',

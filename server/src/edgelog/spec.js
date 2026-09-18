@@ -69,6 +69,13 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'pull.partFault', label: '파트 장애 설정', group: 'pull', mod: '../agent/partFaultConfigPull.js', fn: 'partFaultConfigPullStatus' },
 
   // ── 로컬 수집 ──────────────────────────────────────────────────────────────
+  /*
+   * ⚠ v2.560 에 추가 — 이 표에 **가장 중요한 폴러가 빠져 있었다**. 중앙이 '빈 인벤토리'(호스트 0 ·
+   *   VM 0) push 를 받았을 때 그 원인이 ① 그 엣지에 vCenter 등록 0 ② 첫 수집 중 ③ 접속 실패
+   *   ④ mock 이라 push 에서 빠짐 ⑤ 그 vCenter 가 실제로 비었음 중 무엇인지 볼 길이 없었다.
+   *   **새 폴러를 만들면 이 표에 함께 넣을 것**(v2.554 가 같은 규약을 적어 두었다).
+   */
+  { key: 'collect.inventory', label: 'vCenter 인벤토리 수집', group: 'collect', mod: '../store.js', fn: 'storeStatus' },
   { key: 'collect.storage', label: '스토리지 수집', group: 'collect', mod: '../storage/poller.js', fn: 'storagePollerStatus' },
   { key: 'collect.sanswitch', label: 'SAN 스위치 수집', group: 'collect', mod: '../sanswitch/poller.js', fn: 'sanSwitchPollerStatus' },
   { key: 'collect.sanswitchPerf', label: 'SAN 포트 사용량 수집', group: 'collect', mod: '../sanswitch/perfPoller.js', fn: 'sanSwitchPerfStatus' },

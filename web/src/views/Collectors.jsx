@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 /** mock 생성기(server/src/mock/generator.js)의 vCenter id 패턴 — 실데이터가 아닌 push 를 표에서 드러낸다(v2.424). */
-const MOCK_VC_RE = /^vc-(us|br|eu|me|ap|cn)-[a-z]+$/;
+// v2.560: mock vCenter id 판정은 `views/collectors/emptyInvText.js` 하나가 소유한다 —
+// 진단 모달이 같은 기준을 써야 '배지는 뜨는데 모달은 다른 원인을 말한다' 가 되지 않는다.
 import { fetchJson, postJson, putJson, delJson, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import { rowCards } from './collectorDiag.js';
+import { MOCK_VC_RE } from './collectors/emptyInvText.js';
+const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx')); // v2.560 — '빈 인벤토리' 원인·로그·조치
 
 const EMPTY = { id: '', name: '', datacenter: '', url: 'http://', token: '', enabled: true };
 
@@ -676,6 +679,9 @@ function DiagModal({ entry, onClose }) {
 // 누가(어느 에이전트) 무엇을(엔드포인트·페이로드) 얼마나(와이어 바이트·빈도) 중앙에 보내는지.
 // iftop에서 특정 에이전트 트래픽이 비정상적으로 높을 때, 원인이 '큰 페이로드'인지 '잦은 push'인지 짚어낸다.
 function IngestStats({ data, onReset }) {
+  // ⚠ 훅은 조기 return 위에(React #310 — v2.202 실제 사고). 이 컴포넌트에는 조기 return 이
+  //   없지만 규약을 지켜 맨 위에 둔다.
+  const [invDiag, setInvDiag] = useState(null);   // v2.560 — '빈 인벤토리'·MOCK 배지 클릭 대상
   const rows = data?.rows || [];
   const fmtB = (n) => (n == null ? '—' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(0)} KB` : `${n} B`);
   const fmtRate = (bps) => (bps == null ? '—' : `${fmtB(bps)}/s`);
@@ -725,13 +731,20 @@ function IngestStats({ data, onReset }) {
                     <td className="muted" style={{ fontSize: 12 }}>
                       {r.last ? <>{ep(r.last.endpoint)}{r.last.vcenterId ? ` · ${r.last.vcenterId}` : ''}{r.last.vms != null ? ` · 호스트 ${r.last.hosts}·VM ${r.last.vms}` : ''}{r.last.gzip ? ' · gzip' : ' · 무압축'}
                         {/* 빈/mock 인벤토리(v2.424): push 는 되지만 실데이터가 아니다 — mock 생성기 vCenter id(vc-*) 또는 호스트 0·VM 0. */}
+                        {/*
+                          * v2.560 — 배지를 **버튼**으로 바꿨다(사용자 요청 "빈 인벤터리로 나올때
+                          * 상태와 로그, 해결방법을 클릭하면 나오게 해줘"). 예전에는 클릭되지 않는
+                          * `<span title=…>` 이라 ① 복사·공유가 안 되고 ② 모바일에서는 볼 수 없고
+                          * ③ 한 문장이 **조치가 정반대인 원인들**(등록 0 / 첫 수집 중 / 접속 실패 /
+                          * mock 제외 / 실제로 빈 vCenter)을 통째로 덮었다 — v2.516·v2.517 규약.
+                          */}
                         {(MOCK_VC_RE.test(String(r.last.vcenterId || '')) || (r.last.vms === 0 && r.last.hosts === 0)) && (
-                          <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }}
-                            title={MOCK_VC_RE.test(String(r.last.vcenterId || ''))
-                              ? `'${r.last.vcenterId}' 는 개발용 mock 생성기의 vCenter id 입니다 — 이 엣지가 DATA_SOURCE=mock(또는 EDGE_MODE=all 없이 DATA_SOURCE 미설정)으로 돌고 있어 실데이터가 아닙니다. portal.env 에 DATA_SOURCE=live 를 넣고 vCenter 를 등록·재시작하세요.`
-                              : '최근 push 에 호스트 0·VM 0 — 이 엣지에 vCenter 가 등록되지 않았거나 수집이 실패하고 있습니다(엣지 포탈의 설정 › vCenter 관리 확인).'}>
+                          <button type="button" className="badge amber"
+                            style={{ marginLeft: 6, cursor: 'pointer', border: 'none', font: 'inherit', fontSize: 10, padding: '1px 6px' }}
+                            onClick={() => setInvDiag({ agent: r.agent, push: r.last })}
+                            title="클릭하면 원인·엣지 상태·로그·해결 방법을 봅니다">
                             {MOCK_VC_RE.test(String(r.last.vcenterId || '')) ? 'MOCK' : '빈 인벤토리'}
-                          </span>
+                          </button>
                         )}</> : '—'}
                     </td>
                     <td className="right muted" style={{ fontSize: 11.5 }}>{ago(r.lastAt)}</td>
@@ -747,6 +760,11 @@ function IngestStats({ data, onReset }) {
         <b>평균 간격</b>이 짧으면(예: 수초) push 주기가 과도(<code>AGENT_INVENTORY_INTERVAL_MS</code> 확인) ·
         <b>무압축</b>이면 에이전트가 구버전(gzip 미적용 → 업그레이드 시 ~1/10). ⚠는 평균 대비 3배↑.
       </div>
+      {invDiag && (
+        <React.Suspense fallback={null}>
+          <EmptyInvModal agent={invDiag.agent} push={invDiag.push} onClose={() => setInvDiag(null)} />
+        </React.Suspense>
+      )}
     </div>
   );
 }
