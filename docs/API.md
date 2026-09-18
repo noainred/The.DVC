@@ -22,12 +22,12 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **820개** |
-| 마운트 그룹 | 14개 |
-| 라우트 파일 | 74개 |
-| GET | 426개 |
+| 엔드포인트 | **822개** |
+| 마운트 그룹 | 15개 |
+| 라우트 파일 | 75개 |
+| GET | 427개 |
 | POST | 261개 |
-| PUT | 85개 |
+| PUT | 86개 |
 | PATCH | 2개 |
 | DELETE | 46개 |
 
@@ -40,8 +40,9 @@
 | [`/api/upgrade`](#apiupgrade) | 8 | 자동 업그레이드 제어(번들 수신·적용). |
 | [`/api/remote`](#apiremote) | 19 | 원격 접속(HAProxy/SSH/RDP 중계). |
 | [`/api/svcmon`](#apisvcmon) | 56 | 성능점검(서비스 모니터링). 마운트에서 `requirePerm('svcmon')` — v2.506 에 추가된 게이트다. |
-| [`/api/admin`](#apiadmin) | 303 | 설정·관리. `authMiddleware + requireEnrolled + auditMiddleware` 뒤에 있고 대부분 `adminOnly`, 비밀을 다루는 것은 `requireSettingsOwner` 가 추가된다. |
+| [`/api/admin`](#apiadmin) | 304 | 설정·관리. `authMiddleware + requireEnrolled + auditMiddleware` 뒤에 있고 대부분 `adminOnly`, 비밀을 다루는 것은 `requireSettingsOwner` 가 추가된다. |
 | [`/api/auth`](#apiauth) | 9 | 로그인·OTP·`/me`. **로그인 전** 호출되므로 `requireEnrolled` 를 타지 않는다(내부 admin 라우트는 스스로 게이트한다). |
+| [`/api/docs`](#apidocs) | 1 | — |
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
@@ -306,11 +307,12 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/alerts/test` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:40](../server/src/routes/admin/opsSettings.js#L40) |
 | GET | `/anomaly` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:63](../server/src/routes/admin/opsSettings.js#L63) |
 | PUT | `/anomaly` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:64](../server/src/routes/admin/opsSettings.js#L64) |
-| GET | `/api-keys` | 역할 `admin` | [server/src/routes/admin/apiKeys.js:30](../server/src/routes/admin/apiKeys.js#L30) |
-| POST | `/api-keys` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/apiKeys.js:63](../server/src/routes/admin/apiKeys.js#L63) |
-| DELETE | `/api-keys/:id` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/apiKeys.js:99](../server/src/routes/admin/apiKeys.js#L99) |
-| PATCH | `/api-keys/:id` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/apiKeys.js:80](../server/src/routes/admin/apiKeys.js#L80) |
-| POST | `/api-keys/:id/revoke` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/apiKeys.js:91](../server/src/routes/admin/apiKeys.js#L91) |
+| GET | `/api-keys` | 역할 `admin` | [server/src/routes/admin/apiKeys.js:31](../server/src/routes/admin/apiKeys.js#L31) |
+| POST | `/api-keys` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/apiKeys.js:82](../server/src/routes/admin/apiKeys.js#L82) |
+| DELETE | `/api-keys/:id` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/apiKeys.js:118](../server/src/routes/admin/apiKeys.js#L118) |
+| PATCH | `/api-keys/:id` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/apiKeys.js:99](../server/src/routes/admin/apiKeys.js#L99) |
+| POST | `/api-keys/:id/revoke` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/apiKeys.js:110](../server/src/routes/admin/apiKeys.js#L110) |
+| PUT | `/api-keys/public-docs` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/apiKeys.js:66](../server/src/routes/admin/apiKeys.js#L66) |
 | GET | `/assignments` | 역할 `admin` | [server/src/routes/admin/horizonAssign.js:177](../server/src/routes/admin/horizonAssign.js#L177) |
 | POST | `/assignments` | 역할 `admin` | [server/src/routes/admin/horizonAssign.js:185](../server/src/routes/admin/horizonAssign.js#L185) |
 | DELETE | `/assignments/:agent` | 역할 `admin` | [server/src/routes/admin/horizonAssign.js:195](../server/src/routes/admin/horizonAssign.js#L195) |
@@ -596,6 +598,12 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/me` | `authMiddleware` | [server/src/routes/auth.js:127](../server/src/routes/auth.js#L127) |
 | POST | `/totp/begin` | `authMiddleware` | [server/src/routes/auth.js:199](../server/src/routes/auth.js#L199) |
 | POST | `/totp/confirm` | `authMiddleware` | [server/src/routes/auth.js:203](../server/src/routes/auth.js#L203) |
+
+## `/api/docs`
+
+| 메서드 | 경로 | 게이트(공통 제외) | 소스 |
+|---|---|---|---|
+| GET | `/` | — | [server/src/routes/publicDocs.js:87](../server/src/routes/publicDocs.js#L87) |
 
 ## `/api/ping`
 
@@ -993,7 +1001,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
 | `fullScopeOnly` | 55 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
-| `requireSettingsOwner` | 33 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
+| `requireSettingsOwner` | 34 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
 | `guarded` | 8 | 공개 API 전용 래퍼 — 허용 목록 검사 + 스냅샷 준비 + async throw 안전 처리. 미들웨어가 아니라 핸들러를 감싼 것이다. |
 | `authMiddleware` | 7 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |
 | `reauth` | 3 | 통합 계정 관리의 재인증 — 로컬 OTP 계정은 OTP, OTP 없는 계정은 설정 소유자만. |

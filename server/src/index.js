@@ -42,6 +42,7 @@ import { collectorRouter } from './routes/collector.js';
 import { startSelfRegister } from './agent/selfRegister.js';
 import { centralRouter } from './routes/central.js';
 import publicApiRouter from './routes/publicApi.js';
+import publicDocsRouter from './routes/publicDocs.js';
 import { dlSourceRouter } from './routes/dlsource.js';
 import { insightsRouter } from './routes/insights.js';
 import { metricsExportRouter } from './routes/metricsExport.js';
@@ -271,6 +272,14 @@ app.use('/api/central', centralRouter);                // token-gated agent<->ce
  *   라우터에 섞이면 판정이 흐려진다(머리말 참조). 조회 전용이므로 BIG_JSON 도 필요 없다.
  */
 app.use('/api/v1', publicApiRouter);
+/*
+ * 공개 API **안내 페이지의 데이터**(v2.564) — 로그인 없이 열린다.
+ * ⚠ 나가는 것은 **문서뿐**이다: 엔드포인트 선언(`allowlist.js`) + 손으로 지어낸 샘플
+ *   (`samples.js`) + 오류 코드표. 운영 스냅샷·DB·등록부를 읽지 않는다.
+ * ⚠ 내부 API 812개는 싣지 않는다 — 무인증 열거 단서가 된다(`/api/v1` 404 규약과 같은 이유).
+ * ⚠ `PUBLIC_API_DOCS=false` 또는 설정에서 끄면 **404** 다(403 은 존재를 알려준다).
+ */
+app.use('/api/docs', publicDocsRouter);
 app.use('/dl', dlSourceRouter);                        // 중앙 업그레이드 소스(versions.json + 번들, 공개)
 app.use('/metrics', metricsExportRouter);              // Prometheus/OTel 익스포터(선택 토큰)
 app.use('/api/auth', authRouter);                      // public: login / config / me

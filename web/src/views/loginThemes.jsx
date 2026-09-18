@@ -611,6 +611,13 @@ export const THEMES_CSS = `
   border: 1px solid rgba(255,255,255,.16); color: #cbd5e1; border-radius: 20px; padding: 7px 15px;
   font-size: 11px; letter-spacing: .1em; cursor: pointer; font-family: 'JetBrains Mono', monospace; }
 .lt-reshuffle:hover { border-color: #94a3b8; color: #fff; }
+/* 공개 API 안내 링크(v2.564) — 로그인 없이 열리는 화면으로 간다.
+   ⚠ 오른쪽 아래는 테마 셔플 버튼이 쓰므로 **왼쪽 아래**에 둔다(겹치면 둘 다 못 누른다). */
+.lt-apidocs { position: fixed; z-index: 6; left: 16px; bottom: 14px; background: rgba(0,0,0,.4);
+  border: 1px solid rgba(255,255,255,.16); color: #cbd5e1; border-radius: 20px; padding: 7px 15px;
+  font-size: 11px; letter-spacing: .1em; cursor: pointer; text-decoration: none;
+  font-family: 'JetBrains Mono', monospace; }
+.lt-apidocs:hover { border-color: #94a3b8; color: #fff; }
 
 /* ── 1) Davinci: 좌 히어로 + 우 카드 + 도트맵 ── */
 .lt-davinci { --lt-card: rgba(13,20,28,.93); --lt-accent: #34e0b4; --lt-accent-ink: #052e25; --lt-glow: rgba(45,212,191,.15);
