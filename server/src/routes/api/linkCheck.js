@@ -87,7 +87,12 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
       } : null,
       // 엣지 측정분의 '왜 비었나' 재료 — 화면이 문구를 만든다(서버가 문구를 만들지 않는다).
       ...(l.by === 'edge' ? {
-        edgeReport: rep ? { at: rep.at, stale: rep.stale, ageMs: rep.ageMs, version: rep.version, rejected: rep.rejected, omitted: rep.omitted } : null,
+        edgeReport: rep ? {
+          at: rep.at, stale: rep.stale, ageMs: rep.ageMs, version: rep.version,
+          rejected: rep.rejected, omitted: rep.omitted,
+          // v2.554 — 엣지가 밝힌 '왜 0건인가'. 없으면 구버전 엣지다(그 사실도 화면이 말한다).
+          note: rep.note || '', disabledOnCentral: !!rep.disabledOnCentral, links: rep.links ?? null,
+        } : null,
         edgeVersion: versions[t(l.from).toLowerCase()] || '',
       } : {}),
     };
@@ -108,6 +113,16 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
       sampleRetentionDays: s.sampleRetentionDays, eventRetentionDays: s.eventRetentionDays, dailyRetentionDays: s.dailyRetentionDays,
     },
     links: rows, counts, problems,
+    /*
+     * ⚠⚠ **'언제부터 점검이 돌고 있나'**(v2.554). 이 값이 없으면 화면이 엣지 미보고를 영원히
+     *   '첫 보고 대기'(= 기다리면 된다)라고 말한다 — 사용자 실화면에서 10분·3회가 지나도 그
+     *   문구가 그대로였다. 중앙 측정분의 **가장 오래된 상태 시작 시각**을 프록시로 쓴다
+     *   (중앙 폴러가 처음 돈 시점 이후로는 줄지 않는다). 없으면 null 이고 화면은 escalate 하지 않는다.
+     */
+    runningSinceTs: (() => {
+      const xs = rows.map((r) => Number(r.latest?.sinceTs)).filter((v) => Number.isFinite(v) && v > 0);
+      return xs.length ? Math.min(...xs) : null;
+    })(),
     kinds: LINK_KINDS, kindKeys: KIND_KEYS, edgeKinds: EDGE_KINDS,
     phases: PHASES, phaseLabel: PHASE_LABEL, failKinds: FAIL_KINDS,
     poller: linkCheckPollerStatus(),

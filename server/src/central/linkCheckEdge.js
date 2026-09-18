@@ -105,6 +105,12 @@ export async function putEdgeLinkReport(agent, body = {}) {
   const failed = toSave.filter((x) => !x.verdict.ok).length;
   _reports.set(ag, {
     at, version: t(body?.version).slice(0, 40),
+    /*
+     * ⚠ v2.554 — **엣지가 '왜 0건인지' 를 말한다.** v2.552~2.553 은 0건이면 push 자체를 하지
+     *   않아 중앙이 '첫 보고 대기' 라고만 말했다(기다려도 영원히 안 채워진다). 이제 엣지가
+     *   사유(`note`)와 '중앙이 껐다'(`disabled`)를 실어 보내고 화면이 그대로 옮긴다.
+     */
+    note: t(body?.note).slice(0, 200), disabledOnCentral: body?.disabled === true,
     links: toSave.length + skipped, ok: toSave.length - failed, failed, skipped,
     rejected, omitted,
     dbOk: saved.ok !== false, dbError: saved.error || '',

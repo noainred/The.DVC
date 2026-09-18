@@ -17,7 +17,9 @@ import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS } from '../../bmusage/settings.js';
+import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive } from '../../bmusage/settings.js';
+import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
+import { TIER_LABEL } from '../../bmusage/license.js';
 import { publicTarget, NO_PATH_REASON } from '../../bmusage/targets.js';
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor } from '../../bmusage/poller.js';
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
@@ -86,6 +88,17 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
       db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
       status: bmUsageStatus(),
+      enterpriseActive: enterpriseActive(),
+      licenseLabels: TIER_LABEL,
+      /*
+       * ⚠⚠ **'법인 귀속 없음' 의 원인을 말한다**(v2.554 — 사용자 지시 "네 — 원인까지 조사").
+       *   이 현장은 이 사유로 **500대**가 제외돼 표가 통째로 비어 있었다. 사유만 말하고 원인을
+       *   말하지 않으면 사용자가 무엇을 고쳐야 하는지 알 수 없다.
+       * ⚠ **범위 제한 계정에는 주지 않는다** — 귀속 없는 서버의 이름·서비스태그를 노출하는 것은
+       *   '귀속 없는 데이터 미노출' 불변조건 위반이다(server/CLAUDE.md).
+       */
+      unassignedInfo: allowed ? null : await unassignedInfoFor(tg),
+      unassignedCauses: UNASSIGNED_CAUSE,
       /*
        * ⚠ 인증 실패로 정지된 대상은 **파일 기준으로 다시 센다** — 폴러의 인메모리 맵은 재시작하면
        *   비어서, 그것만 보고 '정지 0건' 이라 말하면 조용한 정지가 된다(v2.528 규약).
@@ -140,14 +153,122 @@ api.get('/tools/bm-usage/activity', toolsPerm, (req, res) => {
   res.json({ ok: true, poller: bmUsageStatus(), events: bmUsageEvents(Number(req.query.limit) || 100), log: bmUsageLogInfo() });
 });
 
+/**
+ * 귀속 없음 원인 — 등록부·수동 귀속 파일을 읽어 판정한다(장비 왕복 0).
+ * ⚠ 읽기 실패는 조용히 삼키지 않는다 — 원인을 못 판정했다는 사실을 화면이 알 수 있게 `error` 로.
+ */
+async function unassignedInfoFor(tg) {
+  const unassigned = (tg.skipped || []).filter((x) => x.reason === 'unassigned');
+  if (!unassigned.length) return { total: 0, byCause: {}, samples: [], truncated: 0, assignKeys: 0 };
+  try {
+    const [{ loadRegistry }, { loadFleetAssign }] = await Promise.all([
+      import('../../idrac/registry.js'), import('../../insights/fleetAssign.js'),
+    ]);
+    return unassignedCauses({
+      unassigned,
+      registry: (() => { try { return loadRegistry(); } catch { return []; } })(),
+      assign: (() => { try { return loadFleetAssign(); } catch { return {}; } })(),
+      vcenterIds: (tg.vcenters || []).map((v) => v.id),
+    });
+  } catch (e) {
+    return { total: unassigned.length, byCause: {}, samples: [], truncated: 0, assignKeys: 0, error: String(e?.message || e).slice(0, 200) };
+  }
+}
+
+/**
+ * 엣지 보관분 — **네트워크에 나가지 않는다**(v2.554). 중앙이 이미 당겨 둔 값만 보여준다.
+ * 사용자 지시 "엣지에서 종합하고 중앙으로 전달은 중앙에서 조회할때만" 이라 상시 push 가 없으므로,
+ * 여기서 폴링하면 그 설계가 무의미해진다 — 화면은 마운트 1회 + 버튼(v2.508 규약).
+ */
+api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
+  const allowed = scopedVcenterIds(req.user, store.get());
+  try {
+    const { listEdgeBmUsage, MIN_EDGE_VERSION, STALE_MS } = await import('../../central/bmUsageEdgePull.js');
+    const { loadCollectors } = await import('../../collector/registry.js');
+    const cols = (() => { try { return loadCollectors(); } catch { return []; } })();
+    const stored = listEdgeBmUsage();
+    const byName = new Map(stored.map((x) => [t(x.agent).toLowerCase(), x]));
+    /*
+     * ⚠ **등록부를 기준으로 줄을 만든다** — 보관분만 나열하면 '한 번도 당기지 않은 엣지' 가
+     *   목록에서 사라져 화면이 '전부 봤다' 는 거짓을 말한다(v2.548 `classifyEdges` 와 같은 판단).
+     */
+    const rows = cols.filter((c) => t(c.name)).map((c) => {
+      const rec = byName.get(t(c.name).toLowerCase()) || null;
+      const snap = rec?.snap || null;
+      const targets = snap ? applyScope(snap.targets || [], allowed) : [];
+      const keys = new Set(targets.map((x) => t(x.key)));
+      return {
+        agent: c.name, enabled: c.enabled !== false, hasUrl: !!t(c.url),
+        at: rec?.at || null, snapAt: rec?.snapAt || null,
+        lastAttempt: rec?.lastAttempt || null,
+        // ⚠ 엣지가 말한 이름을 **나란히** 둔다(다르면 그 자체가 진단 — v2.548 F5·v2.549 규약).
+        reportedAgent: snap?.node?.agent || '', version: snap?.node?.version || '',
+        enabledOnEdge: snap ? !!snap.enabled : null,
+        settings: snap?.settings || null,
+        targets, rows: snap ? (snap.rows || []).filter((r) => keys.has(t(r.key))) : [],
+        counts: snap && !allowed ? (snap.counts || {}) : null,
+        skippedCounts: snap && !allowed ? (snap.skippedCounts || {}) : null,
+        truncated: snap?.truncated || 0,
+        authStops: snap?.authStops || [],
+      };
+    });
+    res.json({ ok: true, at: Date.now(), rows, minEdgeVersion: MIN_EDGE_VERSION, staleMs: STALE_MS });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
+  }
+});
+
+/**
+ * 엣지에서 지금 당긴다(사람이 누를 때만). 상태를 바꾸지는 않지만 **외부로 나가는 동작**이라
+ * writeRole + 감사. ⚠ 연타 방지는 엣지당 한 번에 하나(중앙 인메모리 플래그).
+ */
+const _pulling = new Set();
+api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) => {
+  // ⚠ 엣지 목록·보관분에는 다른 법인 서버가 섞여 있다 — 당기는 동작은 **전체 범위 계정만**.
+  if (scopedVcenterIds(req.user, store.get())) {
+    return res.status(403).json({ ok: false, requiredOwner: true, reason: '엣지 인출은 전체 범위 계정만 할 수 있습니다(엣지는 법인 축으로 나눌 수 없습니다).' });
+  }
+  const agents = Array.isArray(req.body?.agents) ? req.body.agents.map(t).filter(Boolean).slice(0, 40) : [];
+  if (!agents.length) return res.status(400).json({ ok: false, reason: '가져올 엣지 이름이 필요합니다.' });
+  try {
+    const { pullBmUsage } = await import('../../central/bmUsageEdgePull.js');
+    const results = [];
+    for (const a of agents) {
+      if (_pulling.has(a.toLowerCase())) { results.push({ agent: a, ok: false, kind: 'busy', reason: '이 엣지에서 이미 가져오는 중입니다.' }); continue; }
+      _pulling.add(a.toLowerCase());
+      try { results.push({ agent: a, ...(await pullBmUsage(a, { limit: Number(req.body?.limit) || 0 })) }); }
+      finally { _pulling.delete(a.toLowerCase()); }
+    }
+    logAudit(req, 'bm-usage.edge-pull', { agents: agents.length, ok: results.filter((r) => r.ok).length });
+    // ⚠ 응답에 `rec.snap` 을 담지 않는다(수 백 KB) — 화면은 `/edges` 로 다시 읽는다.
+    res.json({ ok: true, results: results.map(({ agent, ok, kind, reason, ms }) => ({ agent, ok, kind, reason, ms })) });
+  } catch (e) {
+    res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
+  }
+});
+
 /** 설정 — 법인 on/off·주기·보존. 수집 범위를 바꾸는 동작이라 admin 전용 + 감사. */
 api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
-  const next = saveBmUsageSettings(req.body || {});
+  /*
+   * ⚠⚠ **Enterprise 대체 수집 동의는 '누가·언제' 를 기록한다**(v2.554 — 사용자 지시 "사용할
+   *   것이냐고 물어보고 사용하겠다고 하면"). 장비에 부하를 더하는 결정이라 근거를 남긴다.
+   * ⚠ 동의를 서버가 대신 켜지 않는다 — 본문에 `enterpriseAck:true` 가 와야 한다
+   *   (`normalizeSettings` 가 `enabled && ack` 로 못 박는다).
+   */
+  const body = { ...(req.body || {}) };
+  const prev = loadBmUsageSettings();
+  if (body.enterpriseAck === true && !prev.enterpriseAck) {
+    body.enterpriseAckAt = Date.now();
+    body.enterpriseAckBy = String(req.user?.username || '').slice(0, 64);
+  }
+  const next = saveBmUsageSettings(body);
   logAudit(req, 'bm-usage.settings', {
     enabled: next.enabled, corps: Object.keys(next.corps).length,
     intervalMs: next.intervalMs, rawRetentionDays: next.rawRetentionDays, dailyRetentionDays: next.dailyRetentionDays,
     // v2.551 — 수집 범위·알림을 바꾸는 동작이라 감사에 남긴다.
     idracFullTelemetry: next.idracFullTelemetry, alertEnabled: next.alertEnabled,
+    // v2.554 — 장비 부하를 더하는 결정이라 감사에 남긴다(동의 여부·모드).
+    enterpriseEnabled: next.enterpriseEnabled, enterpriseAck: next.enterpriseAck, enterpriseMode: next.enterpriseMode,
     alertPct: next.alertPct, alertSustainMin: next.alertSustainMin, alertRepeatHours: next.alertRepeatHours,
   });
   res.json({ ok: true, settings: next });

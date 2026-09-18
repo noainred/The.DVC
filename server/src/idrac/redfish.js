@@ -1041,3 +1041,127 @@ export async function fetchUsage(entry, { full = false, allowList = true } = {})
 }
 
 export { USAGE_IDS };
+
+/*
+ * ══ Enterprise 라이선스 대체 경로 — 표준 Redfish `Sensors` (v2.554) ═══════════
+ *
+ * 사용자 신고(2026-09-17): "idarc 텔레메트리는 data center 라이선스가 필요한데, 내가 가진건
+ * enterprise 라이선스라서, 엔터프라이즈 라이선스 대상 서버도 수집하는 기능 추가로 만들어줘".
+ *
+ * `TelemetryService/MetricReports` 는 Datacenter 전용이다(사용자 확인). 그래서 **텔레메트리가 아닌**
+ * 경로로 보드 사용률을 찾는다 — 표준 Redfish 의 `Chassis/<id>/Sensors` 컬렉션이다.
+ *
+ * ⚠⚠ **정직 기록 — 이 현장 iDRAC 에서 이 컬렉션의 응답을 받아 본 적이 없다.** Redfish 스키마상
+ *   `Sensors` 는 `Reading` 을 주는 표준 자원이고 iDRAC9 펌웨어 4.40 이후 존재한다고 알려져 있으나
+ *   **확인하지 못했다**. 그래서 ① id 를 굳히지 않고 컬렉션을 **열거해 이름 패턴으로** 찾고
+ *   ② 찾지 못하면 `absent` 로 밝히며 ③ 찾은 URL 과 못 찾은 사실을 **캐시**해 매 주기 다시 찔러
+ *   장비를 괴롭히지 않는다. 첫 실수집에서 `usedPaths`·`seenSensors` 를 보고 좁힐 것.
+ *
+ * ⚠⚠ **왕복 예산**(v2.551 과 같은 산수): 탐색은 `Chassis 1회 + Sensors 컬렉션 최대 2회` 이고
+ *   정상 상태는 **캐시된 URL 4개 이하의 GET** 뿐이다(동시 3). 탐색 결과를 캐시하지 않으면
+ *   200대 × 3회가 매 주기에 더해져 주기를 넘긴다.
+ */
+const SENSOR_TTL_MS = Math.max(60_000, Number(process.env.BMUSAGE_SENSOR_TTL_MS) || 6 * 3_600_000);
+/** 이름 패턴 → 우리 필드. `USAGE_IDS` 와 **같은 후보 문자열**을 쓴다(두 벌을 만들지 않는다). */
+const SENSOR_PATTERNS = Object.freeze([
+  ['cpuPct', /cpu.*usage|usage.*cpu/i],
+  ['memPct', /(?:mem|memory).*usage|usage.*(?:mem|memory)/i],
+  ['ioPct', /(?:^|[^a-z])io.*usage|usage.*io(?:[^a-z]|$)/i],
+  ['sysPct', /sys(?:tem)?.*usage|usage.*sys(?:tem)?/i],
+]);
+/** base|user → { urls:{field:url}, seen:string[], at:number } | { absent:true, reason, at } */
+const _sensorPaths = new Map();
+export function _resetSensorPathsForTest() { _sensorPaths.clear(); }
+export function sensorPathCacheInfo() { return { entries: _sensorPaths.size, ttlMs: SENSOR_TTL_MS }; }
+
+/** 이름 꼬리만(URL 마지막 조각) — 센서 id 가 곧 이름인 경우가 많다. */
+const tailOf = (u) => String(u || '').split('/').filter(Boolean).pop() || '';
+
+/**
+ * 표준 Redfish `Sensors` 로 보드 사용률을 읽는다(Enterprise 대체 경로).
+ * @param {object} entry iDRAC 등록 항목(host·username·password)
+ * @param {{allowProbe?:boolean}} opt `allowProbe:false` 면 **캐시가 있을 때만** 읽는다(주기 예산 보호)
+ * @returns {Promise<object>} `{ ok, cpuPct?, memPct?, ioPct?, sysPct?, usedPaths, seenSensors,
+ *   absent, kind?, error? }` — `kind:'not-probed'` 는 실패가 아니라 '이번 주기엔 탐색 안 함' 이다.
+ */
+export async function fetchUsageSensors(entry, { allowProbe = true } = {}) {
+  const base = String(entry.host || '').replace(/\/+$/, '');
+  const G = (p) => get(base, p, entry.username, entry.password);
+  const key = `${base}|${entry.username || ''}`.toLowerCase();
+  const cached = _sensorPaths.get(key);
+  const fresh = cached && Date.now() - cached.at < SENSOR_TTL_MS;
+  if (fresh && cached.absent) {
+    return { ok: false, kind: 'absent', error: cached.reason, usedPaths: {}, seenSensors: cached.seen || [], absent: ['sensors'] };
+  }
+  let urls = fresh ? cached.urls : null;
+  let seen = fresh ? (cached.seen || []) : [];
+
+  if (!urls) {
+    if (!allowProbe) return { ok: false, kind: 'not-probed', usedPaths: {}, seenSensors: [], absent: [] };
+    try {
+      const chassisRoot = await G('/redfish/v1/Chassis');
+      const members = (chassisRoot.Members || []).map((x) => x['@odata.id']).filter(Boolean).slice(0, 2);
+      const found = {};
+      const names = [];
+      for (const c of members) {
+        let coll;
+        try { coll = await G(`${c}/Sensors`); } catch { continue; }
+        for (const m of (coll.Members || [])) {
+          const u = String(m['@odata.id'] || '');
+          if (!u) continue;
+          const name = tailOf(u);
+          names.push(name);
+          for (const [field, re] of SENSOR_PATTERNS) {
+            if (found[field] || !re.test(name)) continue;
+            found[field] = u;
+            break;
+          }
+        }
+        if (Object.keys(found).length) break;   // 한 섀시에서 찾으면 더 열거하지 않는다
+      }
+      seen = [...new Set(names)].slice(0, 40);
+      if (!Object.keys(found).length) {
+        const reason = names.length
+          ? `이 iDRAC 의 Sensors 컬렉션에 사용률 센서가 없습니다(센서 ${names.length}개 중 이름이 맞는 것 0개).`
+          : '이 iDRAC 에 표준 Redfish Sensors 컬렉션이 없습니다(펌웨어가 오래되었을 수 있습니다).';
+        _sensorPaths.set(key, { absent: true, reason, seen, at: Date.now() });
+        return { ok: false, kind: 'absent', error: reason, usedPaths: {}, seenSensors: seen, absent: ['sensors'] };
+      }
+      urls = found;
+      _sensorPaths.set(key, { urls, seen, at: Date.now() });
+    } catch (e) {
+      const msg = String(e?.message || e);
+      // ⚠ 401/403 은 캐시하지 않는다 — 비밀번호를 고치면 바로 되어야 한다.
+      const kind = /\b40[13]\b/.test(msg) ? 'auth' : (/\b404\b/.test(msg) ? 'absent' : 'unreachable');
+      if (kind === 'absent') {
+        _sensorPaths.set(key, { absent: true, reason: 'Sensors 경로가 없습니다(404).', seen: [], at: Date.now() });
+      }
+      return { ok: false, kind, error: msg.slice(0, 300), usedPaths: {}, seenSensors: [], absent: kind === 'absent' ? ['sensors'] : [] };
+    }
+  }
+
+  // ── 값 읽기 — 캐시된 URL 만 GET 한다(동시 3, `getReports` 와 같은 보수적 상한) ──
+  const fields = Object.entries(urls);
+  const out = { ok: false, usedPaths: {}, seenSensors: seen, absent: [], at: Date.now() };
+  let i = 0;
+  const workers = Array.from({ length: Math.min(3, fields.length) }, async () => {
+    for (;;) {
+      const idx = i; i += 1;
+      if (idx >= fields.length) return;
+      const [field, u] = fields[idx];
+      try {
+        const s = await G(u);
+        // ⚠ `Reading` 이 없으면 **그 필드를 만들지 않는다**(0 을 지어내지 않는다).
+        const v = num(s?.Reading ?? s?.ReadingValue);
+        if (v == null || v < 0 || v > 100) continue;
+        out[field] = Math.round(v * 10) / 10;
+        out.usedPaths[field] = u;
+      } catch { /* 그 센서만 건너뛴다 */ }
+    }
+  });
+  await Promise.all(workers);
+  out.ok = Object.keys(out.usedPaths).length > 0;
+  // 오류가 없다를 읽었다로 쓰지 않는다(v2.545 규약).
+  if (!out.ok) out.error = '사용률 센서를 찾았지만 값(Reading)을 읽지 못했습니다.';
+  return out;
+}

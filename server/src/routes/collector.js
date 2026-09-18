@@ -153,6 +153,32 @@ collectorRouter.get('/edge-log', async (req, res) => {
   }
 });
 
+/**
+ * 엣지가 종합한 **베어메탈 사용률**(v2.554 — 사용자 지시 "엣지에서 종합하고 중앙으로 전달은
+ * 중앙에서 조회할때만 한다").
+ *
+ * 중앙이 **필요할 때만** 당긴다 — 상시 push 0. `/edge-log` 와 **같은 url·같은 토큰**이므로
+ * 새 네트워크 허용이 필요 없다.
+ *
+ * ⚠ 이 응답에는 그 법인 서버 이름·서비스태그·iDRAC 주소가 들어 있다(자격증명은 없다 —
+ *   `publicTarget()` 이 뺀다). 그래서 ① COLLECTOR_TOKEN 게이트 ② 중앙 화면은 tools 권한 +
+ *   vCenter scope(`routes/api/bmUsage.js`) — 둘을 같이 지킬 것.
+ * ⚠ 수집이 꺼져 있어도 **200 + `enabled:false`** 로 답한다 — 중앙이 '안 켰다' 와 '못 읽었다' 를
+ *   구분할 수 있어야 한다(v2.517 `sendStatusOnly` 규약).
+ */
+collectorRouter.get('/bm-usage', async (req, res) => {
+  if (!config.collector.token) { logCollectorDeny(req, 'bm-usage'); return res.status(404).json({ ok: false, reason: 'collector 비활성화(COLLECTOR_TOKEN 미설정)' }); }
+  if (!checkToken(req)) { logCollectorDeny(req, 'bm-usage'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
+  try {
+    const { buildBmUsageEnvelope } = await import('../bmusage/edgePull.js');
+    const snap = await buildBmUsageEnvelope({ limit: req.query.limit });
+    res.json({ ok: true, ...snap });
+  } catch (err) {
+    // 무음 실패 금지 — 중앙이 '왜 못 읽었는지' 를 화면에 적을 수 있어야 한다.
+    res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) });
+  }
+});
+
 // 중앙 포탈이 이 엣지의 로컬 계정 비밀번호를 원격 변경(기본 비번 일괄 교체용).
 // COLLECTOR_TOKEN 가드 — 토큰을 가진 중앙만 호출 가능. 비밀번호는 로그/감사에 남기지 않는다.
 collectorRouter.post('/set-password', express.json({ limit: '4kb' }), (req, res) => {

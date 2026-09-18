@@ -104,7 +104,16 @@ export function LinkCheck() {
   }, []);
   useEffect(() => { loadEvents(evLink, evHours, evKind); }, [loadEvents, evLink, evHours, evKind]);
 
-  const opt = useMemo(() => ({ enabled: !!data?.enabled }), [data?.enabled]);
+  /*
+   * ⚠ v2.554 — `runningSinceTs`·`intervalMs` 를 함께 넘긴다. 없으면 `rowState` 가 엣지 미보고를
+   *   영원히 '첫 보고 대기'(= 기다리면 된다)라고 말한다(사용자 실화면으로 확정한 v2.552 결함).
+   */
+  const opt = useMemo(() => ({
+    enabled: !!data?.enabled,
+    minEdgeVersion: data?.minEdgeVersion,
+    runningSinceTs: data?.runningSinceTs ?? null,
+    intervalMs: data?.poller?.intervalMs ?? data?.settings?.intervalMs ?? 0,
+  }), [data?.enabled, data?.minEdgeVersion, data?.runningSinceTs, data?.poller?.intervalMs, data?.settings?.intervalMs]);
   const rows = useMemo(() => {
     const list = data?.links || [];
     const needle = q.trim().toLowerCase();

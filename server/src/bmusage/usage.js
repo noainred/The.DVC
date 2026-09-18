@@ -34,10 +34,11 @@ const pAtOf = (prev) => n(prev?.at);
  * @param {object} p.target      `targets.resolveTargets()` 의 항목
  * @param {object|null} p.idrac  `redfish.fetchUsage()` 결과
  * @param {object|null} p.os     `osSsh.collectOsUsage()` 결과
+ * @param {object|null} p.ent    `collectors/idracEnterprise.collectEnterpriseUsage()` 결과(v2.554)
  * @param {object|null} p.prev   이전 주기의 `{ at, counters }`(같은 서버)
  * @param {number} p.now
  */
-export function buildUsage({ target = {}, idrac = null, os = null, prev = null, now = Date.now() } = {}) {
+export function buildUsage({ target = {}, idrac = null, os = null, ent = null, prev = null, now = Date.now() } = {}) {
   const srcOf = {};
   const notes = [];
   const out = {
@@ -159,6 +160,22 @@ export function buildUsage({ target = {}, idrac = null, os = null, prev = null, 
     if (out.disk_used_pct == null && du != null) { out.disk_used_pct = du; srcOf.diskUsed = 'idrac'; }
   }
 
+  /*
+   * ── Enterprise 대체 경로(v2.554) — **빈 칸만** 채운다 ─────────────────────────
+   * 사용자 신고: 텔레메트리(Datacenter 전용)가 없는 Enterprise 서버에서 CPU·메모리가 영원히 `—`.
+   * ⚠ **OS·텔레메트리 값을 덮지 않는다** — 셋의 측정 방식이 달라 같은 서버에서 값이 다를 수 있다.
+   *   어느 쪽을 썼는지 `srcOf`(`idrac-ent`)로 밝힌다. 조용히 고르면 두 화면의 숫자가 다른 이유를
+   *   사용자가 알 수 없다(v2.550 `srcOf` 규약의 확장).
+   * ⚠ **전력·온도를 사용률로 환산하지 않는다**(사용자 지시 "수집하지 않는다") — 여기서
+   *   `watts`·`celsius` 로 무엇을 만들려 하지 말 것.
+   * ⚠ `io_pct` 는 iDRAC 계열 값이므로 텔레메트리가 못 읽었을 때만 채운다.
+   */
+  if (ent && ent.ok) {
+    if (out.cpu_pct == null && n(ent.cpuPct) != null) { out.cpu_pct = n(ent.cpuPct); srcOf.cpu = 'idrac-ent'; }
+    if (out.mem_pct == null && n(ent.memPct) != null) { out.mem_pct = n(ent.memPct); srcOf.mem = 'idrac-ent'; }
+    if (out.io_pct == null && n(ent.ioPct) != null) { out.io_pct = n(ent.ioPct); srcOf.io = 'idrac-ent'; }
+  }
+
   const srcs = [...new Set(Object.values(srcOf))].sort();
   out.src = srcs.join('+');
   return {
@@ -180,6 +197,24 @@ export function buildUsage({ target = {}, idrac = null, os = null, prev = null, 
       idracAbsent: idrac?.absent || [], idracRead: idrac?.read || [],
       idracFull: !!idrac?.full, idracFullTried: !!idrac?.fullTried,
       memDetail: osOk ? (os.mem || null) : null,
+      /*
+       * Enterprise 대체 경로 상세(v2.554). ⚠ `entRaw` 는 racadm **원문**이다 — 파싱이 빗나가도
+       * 사용자가 실제 출력을 보고 알려줄 수 있어야 한다(v2.542 `cliRaw` 규약). 비밀번호는
+       * 명령줄에 싣지 않으므로 원문에 없다.
+       */
+      license: target.license || null,
+      entTried: ent ? (ent.tried || []) : [],
+      entVia: ent?.via || '',
+      entKind: ent && !ent.ok ? (ent.kind || '') : '',
+      entError: ent && !ent.ok ? (ent.error || '') : '',
+      entUsedPaths: ent?.usedPaths || null,
+      entUsedCmd: ent?.usedCmd || '',
+      entUsedStat: ent?.usedStat || null,
+      entSeenSensors: ent?.seenSensors || [],
+      entSkipped: ent?.skipped || [],
+      entSshTried: ent?.sshTried || [],
+      entRaw: ent?.raw || '',
+      entMs: ent?.ms ?? null,
       firstSample: !!(osOk && os.osKind === 'linux' && !prev),
     },
     /*

@@ -6,6 +6,9 @@ import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark, SRC_MARK,
   emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, MISSING_MARK, authStopNote, keyConflictNote,
   facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, CSV_COLS, telemetryNote,
+  // v2.554
+  telemetryMissingText, licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote,
+  entDetailNotes, unassignedNote, edgePullState, edgePullNote,
 } from './bmUsageText.js';
 
 const NOW = 1_700_000_000_000;
@@ -317,5 +320,123 @@ describe('마크다운 누출 방지', () => {
       telemetryNote({ idracSeenReports: ['A', 'B'], idracReports: ['A'], idracAbsent: ['net', 'hba', 'disk', 'diskbusy'] }),
     ];
     for (const s of all) expect(s).not.toContain('`');
+  });
+});
+
+/* ══════════════ v2.554 — 라이선스 · Enterprise 대체 수집 · 귀속 원인 ═════════ */
+describe('v2.554 — iDRAC 라이선스 인식과 Enterprise 대체 수집', () => {
+  it('⚠⚠ 텔레메트리가 왜 비었는지를 라이선스 근거로 단정한다(추측 문구로 되돌리지 말 것)', () => {
+    const s = telemetryMissingText({ license: { tier: 'enterprise', label: 'Enterprise' } });
+    expect(s).toContain('Enterprise');
+    expect(s).toContain('Datacenter');
+    // 추측 어미('있습니다' 류의 가능성 표현)가 아니라 단정이어야 한다.
+    expect(s).not.toContain('필요할 수 있습니다');
+  });
+
+  it('⚠ 등급을 못 읽었으면 단정하지 않는다', () => {
+    const s = telemetryMissingText({});
+    expect(s).toContain('읽지 못했습니다');
+    expect(s).toContain('단정할 수 없습니다');
+  });
+
+  it('Datacenter 인데 비었으면 "등급 문제가 아니다" 라고 말한다', () => {
+    expect(telemetryMissingText({ license: { tier: 'datacenter', label: 'Datacenter' } })).toContain('등급 문제가 아닙니다');
+  });
+
+  it('라이선스 표지는 미상일 때 아무것도 쓰지 않는다(빈 배지를 만들지 않는다)', () => {
+    expect(licenseMark({ tier: 'unknown' })).toBe('');
+    expect(licenseMark(null)).toBe('');
+    expect(licenseMark({ tier: 'datacenter', label: 'Datacenter' })).toBe('Datacenter');
+  });
+
+  it('⚠ 라이선스 문구는 언제 본 값인지 밝힌다', () => {
+    const s = licenseNote({ tier: 'enterprise', label: 'Enterprise', at: Date.now() - 600_000, count: 1 });
+    expect(s).toContain('인벤토리');
+  });
+
+  it('동의 고지는 부하를 축소해 말하지 않는다(SSH·GET 을 명시)', () => {
+    const s = enterpriseConsentNote();
+    expect(s).toContain('SSH');
+    expect(s).toContain('부하');
+  });
+
+  it('⚠ 예산으로 미룬 대수와 형식을 못 읽은 대수를 말한다', () => {
+    const s = enterpriseStatusNote({ enterpriseActive: true, enterpriseMode: 'auto', last: { ent: { tried: 40, ok: 33, viaApi: 2, viaSsh: 31, deferred: 12, unparsed: 5 } } });
+    expect(s).toContain('12대');
+    expect(s).toContain('5대');
+  });
+
+  it('꺼져 있으면 상태 문구를 만들지 않는다', () => {
+    expect(enterpriseStatusNote({ enterpriseActive: false })).toBe('');
+    expect(enterpriseStatusNote({})).toBe('');
+  });
+
+  it('⚠ 최고치·평균 열을 읽었으면 "지금 부하가 아니다" 라고 말한다', () => {
+    const out = entDetailNotes({ entTried: ['ssh'], entVia: 'ssh', entUsedCmd: 'racadm x', entUsedStat: { cpuPct: 'peak' } });
+    expect(out.join(' ')).toContain('지금 부하가 아닙니다');
+  });
+
+  it('시도하지 않았으면 문구를 만들지 않는다', () => {
+    expect(entDetailNotes({}).length).toBe(0);
+  });
+
+  it('⚠⚠ 귀속 없음은 원인별로 조치를 나눈다', () => {
+    const r = unassignedNote({ total: 500, byCause: { 'registry-no-vc': 498, 'no-registry-match': 2 } });
+    expect(r.head).toContain('500대');
+    expect(r.items.length).toBe(2);
+    expect(r.items[0]).toContain('일괄 지정');
+    // ⚠ 자동 귀속을 제안하지 않는다(틀린 귀속은 법인 통계를 거짓으로 만든다).
+    expect(r.how).not.toContain('자동으로 지정');
+  });
+
+  it('귀속 없음이 0이면 문구를 만들지 않는다', () => {
+    expect(unassignedNote({ total: 0 })).toBe(null);
+    expect(unassignedNote(null)).toBe(null);
+  });
+
+  it('⚠⚠ 엣지 보관분이 없는 것을 "정상" 으로 칠하지 않는다', () => {
+    const s = edgePullState({ enabled: true, hasUrl: true });
+    expect(s.state).toBe('never');
+    expect(s.tone).not.toBe('ok');
+  });
+
+  it('구버전 엣지는 "기다리면 된다" 고 말하지 않는다', () => {
+    const s = edgePullState({ enabled: true, hasUrl: true, lastAttempt: { ok: false, kind: 'old-version' } }, { minEdgeVersion: '2.554.0' });
+    expect(s.why).toContain('업그레이드');
+    expect(s.why).toContain('다시 눌러도 같습니다');
+  });
+
+  it('엣지에서 꺼져 있으면 중앙에서 켤 수 없다고 말한다', () => {
+    const s = edgePullState({ enabled: true, hasUrl: true, snapAt: Date.now(), enabledOnEdge: false });
+    expect(s.why).toContain('중앙에서는 켤 수 없습니다');
+  });
+
+  it('⚠ 값은 있는데 마지막 시도가 실패면 그 사실을 말한다(낡은 값을 지금 값인 척하지 않는다)', () => {
+    const s = edgePullState({ enabled: true, hasUrl: true, snapAt: Date.now(), lastAttempt: { ok: false, kind: 'timeout', reason: 'x' } });
+    expect(s.state).toBe('stale-failed');
+  });
+
+  it('엣지 패널 머리말은 상시 전송이 없다는 사실을 말한다', () => {
+    expect(edgePullNote([{ snapAt: 1 }, {}])).toContain('누를 때만');
+  });
+
+  it('값 출처 표지에 대체 경로가 구분돼 있다', () => {
+    expect(srcMark('idrac-ent')).toContain('대체');
+  });
+
+  it('⚠ v2.554 문구에도 백틱이 없다(BoldText 는 `**` 만 해석 — v2.553 규약)', () => {
+    const all = [
+      telemetryMissingText({ license: { tier: 'enterprise', label: 'E' } }), telemetryMissingText({}),
+      licenseNote({ tier: 'enterprise', label: 'E', at: 1 }), licenseNote({ count: 0 }),
+      enterpriseConsentNote(),
+      enterpriseStatusNote({ enterpriseActive: true, last: { ent: { tried: 1, ok: 0, deferred: 1, unparsed: 1 } } }),
+      ...entDetailNotes({ entTried: ['api'], entKind: 'unparsed' }),
+      unassignedNote({ total: 1, byCause: { 'edge-no-vc': 1, 'assign-ghost': 1, 'registry-no-vc': 1, 'no-registry-match': 1 } }).head,
+      ...unassignedNote({ total: 1, byCause: { 'edge-no-vc': 1, 'assign-ghost': 1 } }).items,
+      unassignedNote({ total: 1, byCause: {} }).how,
+      edgePullState({ enabled: true, hasUrl: true }).why,
+      edgePullNote([{ snapAt: 1 }]),
+    ];
+    for (const s of all) expect(String(s)).not.toContain('`');
   });
 });
