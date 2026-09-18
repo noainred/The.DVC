@@ -14,7 +14,10 @@
 | [GUIDE-BEGINNER.md](GUIDE-BEGINNER.md) | 처음 사용자 가이드 — 조회 위주 기본 사용법(화면 캡처 포함) |
 | [GUIDE-INTERMEDIATE.md](GUIDE-INTERMEDIATE.md) | 중급 사용자 가이드 — 운영 리포트·특수 기능 등 실무 기능 활용 |
 | [GUIDE-ADMIN.md](GUIDE-ADMIN.md) | 관리자 가이드 — 설치·구성·계정/권한·보안 운영 |
-| [SETTINGS.md](SETTINGS.md) | **설정 화면 32개 탭 전체 안내** — 각 탭의 기능·저장 파일·환경변수·권한·주의사항 |
+| [SETTINGS.md](SETTINGS.md) | **설정 화면 42개 탭 전체 안내** — 각 탭의 기능·저장 파일·환경변수·권한·주의사항 |
+| [API.md](API.md) | **API 레퍼런스 — 전 엔드포인트 820개**(자동 생성). 그룹·게이트·권한·소스 위치 |
+| [API-PUBLIC.md](API-PUBLIC.md) | **외부 포탈 연동 가이드** — 공개 조회 API(`/api/v1`) 인증·계약·필드·오류·예제 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | **코드 지도와 데이터 흐름** — 모듈 배치, 중앙↔엣지 6방향, 시계열 DB 20종, 폴러 규약 |
 | [ENV.md](ENV.md) | **환경변수 레퍼런스**(329개, 자동 생성) — 분류·기본값·정의 위치 |
 | [CONFIG-FILES.md](CONFIG-FILES.md) | **설정·데이터 파일 레퍼런스**(130개, 자동 생성) — 용도·원자적 쓰기·권한·지우면 생기는 일 |
 
