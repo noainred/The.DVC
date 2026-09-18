@@ -38,14 +38,6 @@ const V4App = lazy(() => import('./version_4/V4App.jsx'));
 const isV4Hash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'v4';
 // 구 딥링크 보존: v2.490~v2.507 사용자가 저장한 #/v3/<page> 북마크를 버리지 않는다.
 const isV3Hash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'v3';
-/*
- * 공개 API 안내(v2.564, `#/api-docs`) — **로그인 없이** 보는 화면이다.
- * ⚠⚠ 이 분기는 반드시 `if (!user) return <Login…>` **앞**에 있어야 한다. 뒤에 두면 로그인
- *   화면이 먼저 가로채 '로그인 없이' 라는 요구가 통째로 성립하지 않는다.
- * ⚠ lazy() 를 유지할 것 — 로그인한 사용자는 평생 열지 않는 화면이라 초기 번들에 넣지 않는다.
- */
-const ApiDocs = lazy(() => import('./views/ApiDocs.jsx'));
-const isApiDocsHash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'api-docs';
 const redirectV3 = () => { window.location.replace(`${window.location.pathname}${window.location.search}${window.location.hash.replace(/^#\/?v3/, '#/v4')}`); };
 
 const TABS = [
@@ -153,38 +145,9 @@ export default function App() {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  /*
-   * 공개 API 안내 해시 추적 — v2.564 에 **실제로 깨져 있던 것을 Chromium 이 잡았다**.
-   * 아래 `hashchange` 리스너(콘솔·V4 전환용)는 조기 return **아래**에 있어 **로그아웃
-   * 상태에서는 아예 등록되지 않는다.** 그래서 로그인 화면의 '⇗ API 안내' 를 누르면
-   * 주소는 `#/api-docs` 로 바뀌는데 **화면이 그대로였다**(직접 주소로 들어가면 열렸다 —
-   * 그래서 첫 검증에서 못 봤다). 이 화면의 존재 이유가 '로그인 없이 찾아 들어오는 것'
-   * 이므로 그 경로가 죽으면 기능이 통째로 무의미하다.
-   * ⚠ 훅은 조기 return **위**에 선언한다(렌더 간 훅 개수가 달라지면 React #310 — v2.202 사고).
-   */
-  const [apiDocsOn, setApiDocsOn] = useState(isApiDocsHash);
-  useEffect(() => {
-    const onHash = () => setApiDocsOn(isApiDocsHash());
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
-
   // 전역 권한 접근자(api.can/toolAllowed)에 현재 사용자를 반영 — 버튼/도구 게이팅이 참조한다.
   setCurrentUser(user === 'loading' ? null : user);
 
-  /*
-   * 공개 API 안내 — 인증·부팅 조회보다 **먼저** 판정한다.
-   * ⚠ `user === 'loading'` 아래에 두면 부팅 조회(auth/config·auth/me)가 끝날 때까지 빈 화면이고,
-   *   그 조회가 실패하는 환경(토큰 없음·프록시)에서는 영영 안 열린다. 이 화면은 그 조회가
-   *   전혀 필요 없다 — 부르는 것은 무인증 `/api/docs` 하나다.
-   */
-  if (apiDocsOn) {
-    return (
-      <Suspense fallback={<div className="login-screen"><Loading label="API 안내" /></div>}>
-        <ApiDocs onBack={() => { window.location.hash = '#/'; }} />
-      </Suspense>
-    );
-  }
   if (user === 'loading') {
     // v2.498: 공용 Loading 을 쓴다 — 부팅 조회(auth/config·auth/me)가 반열림 연결에서 고착되는
     // 것이 사용자 신고('불러오는 중 3분 이상')의 재현 가능한 경로였다. 이제 타임아웃으로 최대
