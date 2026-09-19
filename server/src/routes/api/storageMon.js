@@ -609,7 +609,10 @@ api.post('/tools/storage-growth/settings', adminOnly, requireSettingsOwner, asyn
   const { values, issues } = saveGrowthSettings(req.body || {});
   let pruned = false;
   if (req.body?.prune === true) pruned = await pruneNow();
-  logAudit(req, 'storage.growth.settings', { values, pruned });
+  logAudit({
+    user: req.user?.username, action: 'storage.growth.settings', ip: req.ip || '',
+    detail: JSON.stringify({ values, pruned }).slice(0, 300),
+  });
   res.json({ ok: true, values, issues, pruned });
 });
 

@@ -160,7 +160,10 @@ api.post('/tools/edge-log/fetch', adminOnly, fullScopeOnly, async (req, res) => 
     const job = enqueueEdgeLogJob(agent, opt);
     queued = job ? { state: 'pending', at: job.at } : null;
   }
-  logAudit(req, 'edge-log.fetch', { agent, ok: !!r.ok, kind: r.kind || null, queued: !!queued });
+  logAudit({
+    user: req.user?.username, action: 'edge-log.fetch', ip: req.ip || '',
+    detail: JSON.stringify({ agent, ok: !!r.ok, kind: r.kind || null, queued: !!queued }).slice(0, 300),
+  });
   res.json({
     ok: !!r.ok, kind: r.kind || null, reason: r.reason || null, ms: r.ms ?? null,
     queued, jobState: edgeLogJobState(agent),

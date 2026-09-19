@@ -691,12 +691,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | DELETE | `/tools/bm-storage/servers/:id` | 역할 `admin` | [server/src/routes/api/bmstor.js:34](../server/src/routes/api/bmstor.js#L34) |
 | PUT | `/tools/bm-storage/settings` | 역할 `admin` | [server/src/routes/api/bmstor.js:41](../server/src/routes/api/bmstor.js#L41) |
 | GET | `/tools/bm-usage` | 권한 `tools` | [server/src/routes/api/bmUsage.js:45](../server/src/routes/api/bmUsage.js#L45) |
-| GET | `/tools/bm-usage/activity` | 권한 `tools` | [server/src/routes/api/bmUsage.js:152](../server/src/routes/api/bmUsage.js#L152) |
+| GET | `/tools/bm-usage/activity` | 권한 `tools` | [server/src/routes/api/bmUsage.js:155](../server/src/routes/api/bmUsage.js#L155) |
 | POST | `/tools/bm-usage/collect` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:145](../server/src/routes/api/bmUsage.js#L145) |
-| GET | `/tools/bm-usage/edges` | 권한 `tools` | [server/src/routes/api/bmUsage.js:183](../server/src/routes/api/bmUsage.js#L183) |
-| POST | `/tools/bm-usage/edges/pull` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:226](../server/src/routes/api/bmUsage.js#L226) |
+| GET | `/tools/bm-usage/edges` | 권한 `tools` | [server/src/routes/api/bmUsage.js:186](../server/src/routes/api/bmUsage.js#L186) |
+| POST | `/tools/bm-usage/edges/pull` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmUsage.js:229](../server/src/routes/api/bmUsage.js#L229) |
 | GET | `/tools/bm-usage/history` | 권한 `tools` | [server/src/routes/api/bmUsage.js:116](../server/src/routes/api/bmUsage.js#L116) |
-| PUT | `/tools/bm-usage/settings` | 역할 `admin` | [server/src/routes/api/bmUsage.js:251](../server/src/routes/api/bmUsage.js#L251) |
+| PUT | `/tools/bm-usage/settings` | 역할 `admin` | [server/src/routes/api/bmUsage.js:257](../server/src/routes/api/bmUsage.js#L257) |
 | GET | `/tools/capacity` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:37](../server/src/routes/api/toolsCapacity.js#L37) |
 | GET | `/tools/capacity-forecast` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1440](../server/src/routes/api/toolsCapacity.js#L1440) |
 | GET | `/tools/capacity/disk-history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1345](../server/src/routes/api/toolsCapacity.js#L1345) |
@@ -706,19 +706,19 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/credentials/:id` | 역할 `admin` · `reauth` | [server/src/routes/api/credentials.js:62](../server/src/routes/api/credentials.js#L62) |
 | POST | `/tools/credentials/:id/test` | 역할 `admin` | [server/src/routes/api/credentials.js:80](../server/src/routes/api/credentials.js#L80) |
 | POST | `/tools/credentials/inspect-key` | 역할 `admin` | [server/src/routes/api/credentials.js:47](../server/src/routes/api/credentials.js#L47) |
-| GET | `/tools/current-users/combined` | 권한 `tools` | [server/src/routes/api/horizonSessions.js:151](../server/src/routes/api/horizonSessions.js#L151) |
+| GET | `/tools/current-users/combined` | 권한 `tools` | [server/src/routes/api/horizonSessions.js:157](../server/src/routes/api/horizonSessions.js#L157) |
 | GET | `/tools/curuser` | 권한 `tools` | [server/src/routes/api/curUser.js:44](../server/src/routes/api/curUser.js#L44) |
 | GET | `/tools/curuser/activity` | 권한 `tools` | [server/src/routes/api/curUser.js:98](../server/src/routes/api/curUser.js#L98) |
-| GET | `/tools/curuser/agent-script` | 권한 `tools` | [server/src/routes/api/curUser.js:170](../server/src/routes/api/curUser.js#L170) |
+| GET | `/tools/curuser/agent-script` | 권한 `tools` | [server/src/routes/api/curUser.js:176](../server/src/routes/api/curUser.js#L176) |
 | POST | `/tools/curuser/collect` | 역할 `admin` | [server/src/routes/api/curUser.js:102](../server/src/routes/api/curUser.js#L102) |
 | GET | `/tools/curuser/history` | 권한 `tools` | [server/src/routes/api/curUser.js:76](../server/src/routes/api/curUser.js#L76) |
-| GET | `/tools/curuser/settings` | 권한 `tools` | [server/src/routes/api/curUser.js:108](../server/src/routes/api/curUser.js#L108) |
-| PUT | `/tools/curuser/settings` | 역할 `admin` | [server/src/routes/api/curUser.js:147](../server/src/routes/api/curUser.js#L147) |
+| GET | `/tools/curuser/settings` | 권한 `tools` | [server/src/routes/api/curUser.js:111](../server/src/routes/api/curUser.js#L111) |
+| PUT | `/tools/curuser/settings` | 역할 `admin` | [server/src/routes/api/curUser.js:150](../server/src/routes/api/curUser.js#L150) |
 | POST | `/tools/deep-search` | 권한 `tools` | [server/src/routes/api/checksLogs.js:38](../server/src/routes/api/checksLogs.js#L38) |
 | GET | `/tools/duplicate-ips` | 권한 `tools` | [server/src/routes/api/vcTools.js:23](../server/src/routes/api/vcTools.js#L23) |
 | GET | `/tools/edge-log` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:116](../server/src/routes/api/edgeLog.js#L116) |
 | GET | `/tools/edge-log-local` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:128](../server/src/routes/api/edgeLog.js#L128) |
-| GET | `/tools/edge-log/:agent` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:174](../server/src/routes/api/edgeLog.js#L174) |
+| GET | `/tools/edge-log/:agent` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:177](../server/src/routes/api/edgeLog.js#L177) |
 | POST | `/tools/edge-log/fetch` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:145](../server/src/routes/api/edgeLog.js#L145) |
 | GET | `/tools/esxi` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:272](../server/src/routes/api/hardwareGpu.js#L272) |
 | GET | `/tools/esxi-temp` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1088](../server/src/routes/api/toolsCapacity.js#L1088) |
@@ -747,8 +747,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/horizon-sessions/activity` | 권한 `tools` | [server/src/routes/api/horizonSessions.js:104](../server/src/routes/api/horizonSessions.js#L104) |
 | POST | `/tools/horizon-sessions/collect` | 역할 `admin` | [server/src/routes/api/horizonSessions.js:109](../server/src/routes/api/horizonSessions.js#L109) |
 | GET | `/tools/horizon-sessions/history` | 권한 `tools` | [server/src/routes/api/horizonSessions.js:88](../server/src/routes/api/horizonSessions.js#L88) |
-| GET | `/tools/horizon-sessions/settings` | 권한 `tools` | [server/src/routes/api/horizonSessions.js:115](../server/src/routes/api/horizonSessions.js#L115) |
-| PUT | `/tools/horizon-sessions/settings` | 역할 `admin` | [server/src/routes/api/horizonSessions.js:128](../server/src/routes/api/horizonSessions.js#L128) |
+| GET | `/tools/horizon-sessions/settings` | 권한 `tools` | [server/src/routes/api/horizonSessions.js:118](../server/src/routes/api/horizonSessions.js#L118) |
+| PUT | `/tools/horizon-sessions/settings` | 역할 `admin` | [server/src/routes/api/horizonSessions.js:131](../server/src/routes/api/horizonSessions.js#L131) |
 | GET | `/tools/insights` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:27](../server/src/routes/api/toolsAnalytics.js#L27) |
 | GET | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:346](../server/src/routes/api/hardwareGpu.js#L346) |
 | POST | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:334](../server/src/routes/api/hardwareGpu.js#L334) |
@@ -784,9 +784,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/link-check/events` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:154](../server/src/routes/api/linkCheck.js#L154) |
 | POST | `/tools/link-check/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:191](../server/src/routes/api/linkCheck.js#L191) |
 | GET | `/tools/link-check/samples` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:143](../server/src/routes/api/linkCheck.js#L143) |
-| GET | `/tools/link-check/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:204](../server/src/routes/api/linkCheck.js#L204) |
-| PUT | `/tools/link-check/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:269](../server/src/routes/api/linkCheck.js#L269) |
-| GET | `/tools/link-check/targets` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:217](../server/src/routes/api/linkCheck.js#L217) |
+| GET | `/tools/link-check/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:207](../server/src/routes/api/linkCheck.js#L207) |
+| PUT | `/tools/link-check/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:272](../server/src/routes/api/linkCheck.js#L272) |
+| GET | `/tools/link-check/targets` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:220](../server/src/routes/api/linkCheck.js#L220) |
 | GET | `/tools/network-check` | 권한 `tools` | [server/src/routes/api/checksLogs.js:66](../server/src/routes/api/checksLogs.js#L66) |
 | GET | `/tools/orphan-vmdk` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1510](../server/src/routes/api/toolsCapacity.js#L1510) |
 | GET | `/tools/orphan-vmdk/datastores` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1474](../server/src/routes/api/toolsCapacity.js#L1474) |
@@ -913,7 +913,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/storage/devices/import/test/:id` | 역할 `admin` | [server/src/routes/api/storageMon.js:459](../server/src/routes/api/storageMon.js#L459) |
 | GET | `/tools/storage/devices/sample.csv` | 역할 `admin` | [server/src/routes/api/storageMon.js:287](../server/src/routes/api/storageMon.js#L287) |
 | GET | `/tools/storage/devices/sample.txt` | 역할 `admin` | [server/src/routes/api/storageMon.js:304](../server/src/routes/api/storageMon.js#L304) |
-| GET | `/tools/storage/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:616](../server/src/routes/api/storageMon.js#L616) |
+| GET | `/tools/storage/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:619](../server/src/routes/api/storageMon.js#L619) |
 | GET | `/tools/storage/intervals` | 역할 `admin` | [server/src/routes/api/storageMon.js:212](../server/src/routes/api/storageMon.js#L212) |
 | PUT | `/tools/storage/intervals` | 역할 `admin` | [server/src/routes/api/storageMon.js:230](../server/src/routes/api/storageMon.js#L230) |
 | POST | `/tools/storage/test` | 역할 `admin` | [server/src/routes/api/storageMon.js:85](../server/src/routes/api/storageMon.js#L85) |

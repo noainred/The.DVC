@@ -193,7 +193,10 @@ api.post('/tools/link-check/run', adminOnly, fullScopeOnly, async (req, res) => 
   const { mine, all } = centralLinks();
   const edgeSide = all.filter((l) => l.by === 'edge' && l.enabled !== false).length;
   const out = await pollOnce({ trigger: 'manual' });
-  logAudit(req, 'link-check.run', { central: mine.length, edge: edgeSide, ...out });
+  logAudit({
+    user: req.user?.username, action: 'link-check.run', ip: req.ip || '',
+    detail: JSON.stringify({ central: mine.length, edge: edgeSide, ...out }).slice(0, 300),
+  });
   res.json({
     ok: out.ok !== false, ...out,
     centralNow: mine.length, edgePending: edgeSide,
@@ -268,9 +271,12 @@ api.get('/tools/link-check/targets', adminOnly, fullScopeOnly, async (_req, res)
 
 api.put('/tools/link-check/settings', adminOnly, fullScopeOnly, (req, res) => {
   const next = saveLinkCheckSettings(req.body || {});
-  logAudit(req, 'link-check.settings', {
-    enabled: next.enabled, intervalMs: next.intervalMs, concurrency: next.concurrency,
-    pairs: next.pairs.length, kindsOff: Object.keys(next.kinds),
+  logAudit({
+    user: req.user?.username, action: 'link-check.settings', ip: req.ip || '',
+    detail: JSON.stringify({
+      enabled: next.enabled, intervalMs: next.intervalMs, concurrency: next.concurrency,
+      pairs: next.pairs.length, kindsOff: Object.keys(next.kinds),
+    }).slice(0, 300),
   });
   res.json({ ok: true, settings: next });
 });

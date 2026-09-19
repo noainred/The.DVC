@@ -1,6 +1,20 @@
 {
   "notes": [
     {
+      "version": "2.569.0",
+      "date": "2026-09-19",
+      "title": "감사 로그가 열리지 않던 결함 — logAudit(req, …) 오용으로 기록이 오염됐다",
+      "notes": [
+        "사용자 신고: 설정 › 감사 로그가 Minified React error #31 로 탭 전체가 죽음",
+        "원인: 라우트 11곳이 logAudit(req, '액션', {…}) 로 불러 express req 를 옵션 객체 자리에 넘겼다 — user 에 {username,role,name,scope,mustEnrollOtp} 객체가 저장돼 화면이 React 자식으로 렌더하다 죽었다",
+        "같은 오용이 action 도 잃게 해(req.action 이 undefined) 그 기록들은 누가·무엇을 했는지 둘 다 없다",
+        "방어선 2층: 쓰기(logAudit)가 전 필드를 문자열로 굳히고 오용을 console.warn 으로 드러낸다 · 읽기(listAudit)도 같은 소독을 해 이미 저장된 줄로도 화면이 죽지 않는다",
+        "오용 11곳(horizonSessions·bmUsage·curUser·storageMon·linkCheck·edgeLog)을 올바른 호출로 고쳐 action 이 제대로 기록된다",
+        "소실된 action 은 지어내지 않고 화면이 '작업 미기록' 으로 그 사실을 말한다",
+        "회귀: test/auditMiscall2569.test.js 4건(오용 감지·읽기 소독·소스 전수 스윕·정상 회귀)"
+      ]
+    },
+    {
       "version": "2.568.0",
       "date": "2026-09-18",
       "title": "스토리지 '장애 장비' 카드 철회 — 장애 대수가 27로 잘못 나왔다(실제 3)",

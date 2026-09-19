@@ -144,7 +144,10 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
 /** 지금 수집 — 폴러와 **재진입 가드를 공유**한다(연타가 세션을 곱하지 않게). */
 api.post('/tools/bm-usage/collect', writeRole, toolsPerm, async (req, res) => {
   const r = await pollBmUsageOnce({ trigger: 'manual' });
-  logAudit(req, 'bm-usage.collect', { ok: !!r.ok, servers: r.servers ?? null });
+  logAudit({
+    user: req.user?.username, action: 'bm-usage.collect', ip: req.ip || '',
+    detail: JSON.stringify({ ok: !!r.ok, servers: r.servers ?? null }).slice(0, 300),
+  });
   res.json(r);
 });
 
@@ -239,7 +242,10 @@ api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) =>
       try { results.push({ agent: a, ...(await pullBmUsage(a, { limit: Number(req.body?.limit) || 0 })) }); }
       finally { _pulling.delete(a.toLowerCase()); }
     }
-    logAudit(req, 'bm-usage.edge-pull', { agents: agents.length, ok: results.filter((r) => r.ok).length });
+    logAudit({
+      user: req.user?.username, action: 'bm-usage.edge-pull', ip: req.ip || '',
+      detail: JSON.stringify({ agents: agents.length, ok: results.filter((r) => r.ok).length }).slice(0, 300),
+    });
     // ⚠ 응답에 `rec.snap` 을 담지 않는다(수 백 KB) — 화면은 `/edges` 로 다시 읽는다.
     res.json({ ok: true, results: results.map(({ agent, ok, kind, reason, ms }) => ({ agent, ok, kind, reason, ms })) });
   } catch (e) {
@@ -262,14 +268,17 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
     body.enterpriseAckBy = String(req.user?.username || '').slice(0, 64);
   }
   const next = saveBmUsageSettings(body);
-  logAudit(req, 'bm-usage.settings', {
-    enabled: next.enabled, corps: Object.keys(next.corps).length,
-    intervalMs: next.intervalMs, rawRetentionDays: next.rawRetentionDays, dailyRetentionDays: next.dailyRetentionDays,
-    // v2.551 — 수집 범위·알림을 바꾸는 동작이라 감사에 남긴다.
-    idracFullTelemetry: next.idracFullTelemetry, alertEnabled: next.alertEnabled,
-    // v2.554 — 장비 부하를 더하는 결정이라 감사에 남긴다(동의 여부·모드).
-    enterpriseEnabled: next.enterpriseEnabled, enterpriseAck: next.enterpriseAck, enterpriseMode: next.enterpriseMode,
-    alertPct: next.alertPct, alertSustainMin: next.alertSustainMin, alertRepeatHours: next.alertRepeatHours,
+  logAudit({
+    user: req.user?.username, action: 'bm-usage.settings', ip: req.ip || '',
+    detail: JSON.stringify({
+      enabled: next.enabled, corps: Object.keys(next.corps).length,
+      intervalMs: next.intervalMs, rawRetentionDays: next.rawRetentionDays, dailyRetentionDays: next.dailyRetentionDays,
+      // v2.551 — 수집 범위·알림을 바꾸는 동작이라 감사에 남긴다.
+      idracFullTelemetry: next.idracFullTelemetry, alertEnabled: next.alertEnabled,
+      // v2.554 — 장비 부하를 더하는 결정이라 감사에 남긴다(동의 여부·모드).
+      enterpriseEnabled: next.enterpriseEnabled, enterpriseAck: next.enterpriseAck, enterpriseMode: next.enterpriseMode,
+      alertPct: next.alertPct, alertSustainMin: next.alertSustainMin, alertRepeatHours: next.alertRepeatHours,
+    }).slice(0, 300),
   });
   res.json({ ok: true, settings: next });
 });

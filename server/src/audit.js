@@ -50,9 +50,53 @@ function describe(method, urlPath) {
   return `${method} ${p}`;
 }
 
-export function logAudit({ user = 'unknown', action, target = '', detail = '', ip = '' } = {}) {
+/**
+ * 감사 필드는 **무조건 문자열**이다(v2.569).
+ *
+ * ⚠⚠ 왜 강제하는가 — 실제 사고: 라우트 11곳이 `logAudit(req, '액션', {...})` 로 불러
+ * **express `req` 를 옵션 객체 자리에** 넘겼다. 이 함수는 첫 인자를 구조분해하므로
+ * `user = req.user` 가 되어 `{username, role, name, scope, mustEnrollOtp}` **객체가 그대로**
+ * 파일에 저장됐고, 감사 로그 화면이 그것을 React 자식으로 렌더하다
+ * **Minified React error #31 로 설정 탭 전체가 죽었다**(사용자 신고, v2.568 실화면).
+ * 같은 호출이 `action` 도 잃어(= `req.action` 이 undefined) 기록이 무의미해졌다.
+ *
+ * 그래서 방어선을 두 개 둔다 — 여기(쓰기)와 `listAudit`(읽기). 쓰기만 고치면 **이미 저장된
+ * 줄**이 계속 화면을 죽이고, 읽기만 고치면 새 줄이 계속 오염된다. 둘 다 유지할 것.
+ */
+function auditStr(v) {
+  if (v == null) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  // 객체가 왔다 — 잘못된 호출이다. 값을 **지어내지 않고** 아는 이름만 되살린다.
+  if (typeof v === 'object') {
+    const name = typeof v.username === 'string' ? v.username : '';
+    return name || '(형식 오류)';
+  }
+  return String(v);
+}
+
+export function logAudit(opts = {}, ...rest) {
+  // ⚠ `logAudit(req, '액션', {...})` 오용 감지 — 조용히 넘기면 위 사고가 반복된다.
+  //   express req 는 `method`·`headers` 를 갖는다(감사 옵션 객체에는 없다).
+  if (opts && typeof opts === 'object' && opts.headers && opts.method && rest.length) {
+    console.warn(`[audit] logAudit(req, …) 오용 — 옵션 객체로 호출할 것 (action=${String(rest[0]).slice(0, 60)})`);
+    const [action, extra] = rest;
+    opts = {
+      user: opts.user?.username || 'unknown', action,
+      detail: extra && typeof extra === 'object' ? JSON.stringify(extra).slice(0, 300) : String(extra ?? ''),
+      ip: opts.ip || '',
+    };
+  }
+  const { user = 'unknown', action, target = '', detail = '', ip = '' } = opts || {};
   try {
-    const line = JSON.stringify({ at: new Date().toISOString(), user, action, target, detail, ip }) + '\n';
+    const line = JSON.stringify({
+      at: new Date().toISOString(),
+      user: auditStr(user) || 'unknown',
+      action: auditStr(action),
+      target: auditStr(target),
+      detail: auditStr(detail),
+      ip: auditStr(ip),
+    }) + '\n';
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     fs.appendFileSync(FILE, line, { mode: 0o600 });
     ensurePerms();
@@ -102,7 +146,17 @@ export function auditMiddleware(req, res, next) {
 export function listAudit({ limit = 100, offset = 0, user = '', q = '' } = {}) {
   let lines = [];
   try { lines = fs.readFileSync(FILE, 'utf8').split('\n').filter(Boolean); } catch { lines = []; }
-  let items = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean).reverse();
+  // ⚠ 읽기 소독 — 이미 저장된 오염 줄(위 주석의 사고)이 화면을 죽이지 않게 한다.
+  //   과거 줄은 고칠 수 없으므로 **여기서 문자열로 되돌린다**(값은 지어내지 않는다).
+  const clean = (e) => ({
+    ...e,
+    user: auditStr(e.user) || 'unknown',
+    action: auditStr(e.action),
+    target: auditStr(e.target),
+    detail: auditStr(e.detail),
+    ip: auditStr(e.ip),
+  });
+  let items = lines.map((l) => { try { return clean(JSON.parse(l)); } catch { return null; } }).filter(Boolean).reverse();
   if (user) items = items.filter((e) => e.user === user);
   if (q) { const t = q.toLowerCase(); items = items.filter((e) => `${e.user} ${e.action} ${e.target} ${e.detail}`.toLowerCase().includes(t)); }
   const total = items.length;
