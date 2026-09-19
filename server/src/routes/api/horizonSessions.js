@@ -108,7 +108,10 @@ api.get('/tools/horizon-sessions/activity', requirePerm('tools'), (req, res) => 
 
 api.post('/tools/horizon-sessions/collect', requireRole('admin'), async (req, res) => {
   const r = await runHzSessionsNow('manual');
-  logAudit(req, 'horizon.sessions.collect', { ok: r.ok, servers: r.servers ?? null, skipped: !!r.skipped });
+  logAudit({
+    user: req.user?.username, action: 'horizon.sessions.collect', ip: req.ip || '',
+    detail: JSON.stringify({ ok: r.ok, servers: r.servers ?? null, skipped: !!r.skipped }).slice(0, 300),
+  });
   res.json(r);
 });
 
@@ -138,7 +141,10 @@ api.put('/tools/horizon-sessions/settings', requireRole('admin'), (req, res) => 
   }
   const before = loadHzSettings();
   const next = saveHzSettings({ ...before, ...b, servers: b.servers === undefined ? before.servers : b.servers });
-  logAudit(req, 'horizon.sessions.settings', { enabled: next.enabled, intervalMs: next.intervalMs });
+  logAudit({
+    user: req.user?.username, action: 'horizon.sessions.settings', ip: req.ip || '',
+    detail: JSON.stringify({ enabled: next.enabled, intervalMs: next.intervalMs }).slice(0, 300),
+  });
   res.json({ ok: true, settings: next, limits: LIMITS });
 });
 

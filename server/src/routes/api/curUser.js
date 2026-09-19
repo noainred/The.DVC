@@ -101,7 +101,10 @@ api.get('/tools/curuser/activity', requirePerm('tools'), (req, res) => {
 
 api.post('/tools/curuser/collect', requireRole('admin'), async (req, res) => {
   const r = await runCurUserNow('manual');
-  logAudit(req, 'curuser.collect', { ok: r.ok, records: r.records ?? null, skipped: !!r.skipped });
+  logAudit({
+    user: req.user?.username, action: 'curuser.collect', ip: req.ip || '',
+    detail: JSON.stringify({ ok: r.ok, records: r.records ?? null, skipped: !!r.skipped }).slice(0, 300),
+  });
   res.json(r);
 });
 
@@ -156,9 +159,12 @@ api.put('/tools/curuser/settings', requireRole('admin'), (req, res) => {
   }
   const before = loadCurUser();
   const next = saveCurUser({ ...before, ...b, vcenters: b.vcenters === undefined ? before.vcenters : b.vcenters });
-  logAudit(req, 'curuser.settings', {
-    enabled: next.enabled, intervalMs: next.intervalMs,
-    vcenters: Object.entries(next.vcenters).filter(([, v]) => v.enabled).map(([id]) => id),
+  logAudit({
+    user: req.user?.username, action: 'curuser.settings', ip: req.ip || '',
+    detail: JSON.stringify({
+      enabled: next.enabled, intervalMs: next.intervalMs,
+      vcenters: Object.entries(next.vcenters).filter(([, v]) => v.enabled).map(([id]) => id),
+    }).slice(0, 300),
   });
   res.json({ ok: true, settings: next, limits: LIMITS, staleAfterMs: staleAfterMs(next) });
 });

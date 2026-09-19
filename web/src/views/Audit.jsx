@@ -43,7 +43,14 @@ export default function Audit() {
               <tr key={i}>
                 <td className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{new Date(e.at).toLocaleString()}</td>
                 <td><b>{e.user}</b></td>
-                <td>{/실패/.test(e.action) ? <span className="badge red">{e.action}</span> : e.action}{e.detail ? <span className="muted" style={{ fontSize: 11 }}> · {e.detail}</span> : ''}</td>
+                {/* ⚠ `action` 이 빈 줄은 v2.568 이전 `logAudit(req, …)` 오용으로 **기록 자체가 소실**된 것이다.
+                    빈칸으로 두면 화면 결함처럼 읽히므로 소실 사실을 말한다 — 값을 지어내지 않는다. */}
+                <td>
+                  {e.action
+                    ? (/실패|거부/.test(e.action) ? <span className="badge red">{e.action}</span> : e.action)
+                    : <span className="muted" title="이 줄은 작업 이름이 기록되지 않았습니다(v2.568 이전 기록 결함). 사용자·시각·IP 는 유효합니다.">작업 미기록</span>}
+                  {e.detail ? <span className="muted" style={{ fontSize: 11 }}> · {e.detail}</span> : ''}
+                </td>
                 <td className="muted" style={{ fontSize: 12 }}>{e.target || '—'}</td>
                 <td className="muted" style={{ fontSize: 12 }}>{e.ip || '—'}</td>
               </tr>

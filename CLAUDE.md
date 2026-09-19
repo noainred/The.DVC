@@ -1293,6 +1293,37 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **mock vCenter id 판정은 `emptyInvText.js` 하나가 소유한다**(`Collectors.jsx` 가 import).
       ⚠ `/^vc-/` 로 넓히지 말 것 — 현장에서 `vc-hg01` 로 이름 지은 **실제** vCenter 가 mock 으로
       오판된다. 생성기 id 는 `vc-<지역>-<도시>` 형식이다(`mock/generator.js:34-36`).
+  - ⚠⚠ **`logAudit` 은 옵션 객체 하나로 부른다 — `logAudit(req, …)` 가 감사 로그 화면을 통째로 죽였다**
+    (`audit.js` + 라우트 6파일 11곳, v2.569 — 사용자 신고 "감사로그가 에러나고 안되".
+    회귀는 `test/auditMiscall2569.test.js`):
+    - **증상**: 설정 › 감사 로그가 `Minified React error #31 … object with keys
+      {username, role, name, scope, mustEnrollOtp}` 로 **설정 탭 전체**가 죽었다. 그 키 집합은
+      `auth/auth.js resolveTokenUser` 의 반환, 즉 **`req.user`** 다.
+    - **원인**: `logAudit({ user, action, target, detail, ip })` 는 **첫 인자를 구조분해**하는데
+      라우트 11곳이 `logAudit(req, '액션', {…})` 로 불렀다 — `user = req.user`(객체)가 그대로
+      `audit.ndjson` 에 저장됐고, 화면이 `{e.user}` 와 `<option>{u}</option>` 로 렌더하다 죽었다.
+      · ⚠ **더 나쁜 것 — `action` 도 함께 잃었다**(`req.action` 이 undefined → JSON 에서 탈락).
+        즉 그 기록들은 **누가·무엇을 했는지 둘 다** 없다. 감사 로그의 존재 이유가 사라진 셈이다.
+      · 오용 지점은 전부 v2.520~2.552 에 새로 들어온 라우트다 — `horizonSessions`(2) ·
+        `bmUsage`(3) · `curUser`(2) · `storageMon`(1) · `linkCheck`(2) · `edgeLog`(1).
+    - ⚠⚠ **방어선은 둘이고 둘 다 유지할 것**: ① **쓰기**(`logAudit`) 가 `auditStr` 로 전 필드를
+      문자열로 굳히고 오용 형태(`headers`+`method` 가 있는 객체)를 만나면 **`console.warn` 으로
+      드러낸다**(조용한 통과 금지 — v2.549 규약) ② **읽기**(`listAudit`) 도 같은 소독을 한다.
+      쓰기만 고치면 **이미 저장된 줄**이 계속 화면을 죽이고(운영 파일은 우리가 고칠 수 없다),
+      읽기만 고치면 새 줄이 계속 오염된다.
+    - **값을 지어내지 않는다** — 객체가 오면 `username` 이 있을 때만 그것을 쓰고, 없으면
+      `(형식 오류)` 다. 소실된 `action` 은 빈 문자열이고 화면이 **`작업 미기록`** 으로 그 사실을
+      말한다(빈칸으로 두면 화면 결함처럼 읽힌다).
+    - ⚠ **A/B 로 확정했다** — 수정 전 코드로 되돌려 같은 데이터를 띄우니 Chromium 에서
+      `React error #31` 이 그대로 재현됐고(에러박스 true · 표 없음), 수정 후에는 3행이 정상
+      렌더된다(에러 0). 추측이 아니라 재현이다.
+    - ⚠ **왜 못 잡았나**: `logAudit` 은 반환값이 없고 실패해도 `catch {}` 라, 오용해도 **라우트는
+      정상 200 을 돌려준다**. 테스트도 감사 *파일 내용* 을 보지 않았다. 그래서 회귀 테스트가
+      **소스 전수 스윕**(`logAudit(req` 0건)까지 함께 고정한다 — 주석 제거 시 **개행을 보존**할 것
+      (지우면 줄 번호가 밀려 엉뚱한 줄을 지목한다 — 이 테스트 초판의 실제 오탐).
+    - ⚠ **라우트 파일을 고치면 `node scripts/api-doc.mjs` 를 돌릴 것**(v2.563 규약) — 이번에도
+      줄 번호가 밀려 `apiDoc2563.test.js` 2건이 깨졌다.
+
   - ⚠⚠ **스토리지 '장애 장비' 카드는 v2.567 에 넣었다가 v2.568 에 철회했다 — 되살리려면 판정 근거부터
     고칠 것**(사용자 신고 "장애 장비가 3개인데 27개라고 나와" → 지시 "방금 처리한 장애는 적용 취소해줘".
     지운 것: `web/src/views/tools/storageFaultText.js`·`storageFaultText.test.js` + `StorageMonTool.jsx`
