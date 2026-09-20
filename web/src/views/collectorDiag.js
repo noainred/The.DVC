@@ -1,6 +1,6 @@
 /**
  * views/collectorDiag.js — 수집 서버 표의 경고 배지('이름 충돌'·'거부 N'·'응답 …')를 **읽을 수 있는
- * 진단 카드**로 바꾸는 순수 함수(v2.437).
+ * 진단 카드**로 바꾸는 순수 함수(v2.437, 화면 재구성 v2.571).
  *
  * 왜 분리했나: 기존에는 배지에 `title=` 툴팁 한 줄이 전부여서 (a) 마우스를 올려야만 보이고 (b) 줄바꿈 없이
  * 잘리고 (c) '무엇이·어디서·어떻게 고치는지'가 빠져 있었다. 사용자가 실제로 물었다 — "자세한 오류 메시지
@@ -10,10 +10,79 @@
  * 반환 카드: { kind, badge, tone, title, summary, evidence:[{k,v}], steps:[…], where:[…] }
  *   · evidence = 화면이 근거로 제시할 수치/시각/IP (추정이 아니라 서버가 실제로 관측한 값만)
  *   · steps    = 해결 절차, where = 원문을 더 볼 수 있는 위치
+ *   · deny 카드는 추가로 { denyKind } 를 갖는다 — 토큰 거부 사유 3갈래(disabled/no-header/mismatch)의
+ *     판정 결과 하나로 상단 배너·요청-경로 시각화·해결 절차가 전부 갈린다(중복 판정 금지).
  */
 
 const ts = (v) => (v ? new Date(v).toLocaleString('ko-KR') : '—');
 const lower = (v) => String(v || '').trim().toLowerCase();
+
+/**
+ * IPv4-매핑 IPv6(`::ffff:10.0.0.1` 꼴) 표기를 화면용으로만 풀어준다. 원본 값을 바꾸는 것이 아니라
+ * 렌더링 시점의 표시 변환일 뿐이다 — 매치하지 않는 값은 그대로 돌려준다(추정·가공 금지).
+ */
+const IPV4_MAPPED_RE = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i;
+export function displayIp(ip) {
+  if (!ip) return ip;
+  const s = String(ip);
+  const m = s.match(IPV4_MAPPED_RE);
+  return m ? m[1] : s;
+}
+const dispIp = (v) => (v ? displayIp(v) : v);
+
+/**
+ * User-Agent 는 인증 토큰 값도 엣지 이름도 아니다 — 요청을 보낸 프로그램을 밝힐 뿐이다. `node` 는
+ * 엣지의 기본 HTTP 클라이언트가 남기는 값이라 사람이 읽을 수 있는 이름을 붙이되 원문은 지우지 않고
+ * 작게 남긴다. 그 밖의 값(curl/8.0 등)은 원문 그대로 보여준다 — 지어내지 않는다.
+ */
+export function uaDisplay(ua) {
+  if (String(ua || '').trim() === 'node') return { label: 'Node.js HTTP 요청', raw: 'node', known: true };
+  return { label: ua || '—', raw: '', known: false };
+}
+
+/** '거부 N' 카드의 사유 3갈래 — 조치가 서로 다르므로 판정을 한 곳에 모은다(화면 배너·경로도 이 값을 쓴다). */
+export const DENY_KIND = { DISABLED: 'disabled', NO_HEADER: 'no-header', MISMATCH: 'mismatch' };
+export function denyReasonKind(why) {
+  const w = String(why || '');
+  if (/미설정/.test(w)) return DENY_KIND.DISABLED;
+  if (/헤더 없음/.test(w)) return DENY_KIND.NO_HEADER;
+  return DENY_KIND.MISMATCH;
+}
+
+/** 요청-경로 시각화의 가운데(결과) 노드 문구. */
+export function denyPathResultLabel(kind) {
+  if (kind === DENY_KIND.DISABLED) return '차단 · 토큰 미설정';
+  if (kind === DENY_KIND.NO_HEADER) return '차단 · 헤더 없음';
+  return '403 · 토큰 불일치';
+}
+
+/**
+ * 가장 흔한 사고(토큰 불일치)에만 붙는 상단 배너 — 정확한 문구를 화면이 그대로 쓴다. 다른 두
+ * 갈래(미설정·헤더 없음)는 "요청이 edge 까지 도착했지만 토큰만 다르다"는 이 문장이 성립하지 않는다
+ * (미설정은 애초에 그 엣지가 검증할 토큰이 없고, 헤더 없음은 요청자가 중앙 포맷을 안 지킨 것이다).
+ */
+export function tokenMismatchBanner(card) {
+  if (!card || card.kind !== 'deny' || card.denyKind !== DENY_KIND.MISMATCH) return null;
+  return {
+    title: '요청 서버와 edge의 수집 토큰이 일치하지 않습니다.',
+    sub: '요청은 edge까지 정상 도착했지만 토큰 검증에서 거부되었습니다. 네트워크 연결은 정상입니다.',
+  };
+}
+
+/** 요청-경로 시각화(요청 서버 IP → 결과 → 이 엣지) — deny 카드에만 있다. */
+export function denyPathOf(card, collector) {
+  if (!card || card.kind !== 'deny') return null;
+  const lastIp = card.rows?.[0]?.ip;
+  const to = collector?.name && collector.name !== collector.id ? `${collector.name} (${collector.id})` : (collector?.id || '—');
+  return {
+    fromLabel: '요청 서버',
+    from: lastIp ? displayIp(lastIp) : '(출처 미상)',
+    resultLabel: denyPathResultLabel(card.denyKind),
+    toLabel: '수집 서버(edge)',
+    to,
+    toSub: collector?.url || '',
+  };
+}
 
 /** '거부 N' — 엣지가 collector 토큰을 거부한 요청들. status.authDeny 는 엣지 export 가 실어 온다. */
 export function denyCard(status) {
@@ -24,14 +93,15 @@ export function denyCard(status) {
   const last = recent[0] || null;
   // 사유별 해결 절차 — 세 갈래가 서로 다른 조치를 요구한다.
   const why = String(last?.why || d.lastWhy || '');
+  const kind = denyReasonKind(why);
   let steps;
-  if (/미설정/.test(why)) {
+  if (kind === DENY_KIND.DISABLED) {
     steps = [
       '이 엣지의 portal.env 에 COLLECTOR_TOKEN 이 없습니다 — 수집 기능 자체가 꺼져 있습니다.',
       '설정 › 수집 서버에서 이 항목의 토큰을 확인한 뒤, 엣지 portal.env 에 같은 값으로 COLLECTOR_TOKEN 을 넣고 재시작하세요.',
       '또는 설정 › 엣지 노드 포탈 설치 › 수집 서버 연결 상태에서 "대상 → 엣지(SSH)" 로 토큰을 반영할 수 있습니다.',
     ];
-  } else if (/헤더 없음/.test(why)) {
+  } else if (kind === DENY_KIND.NO_HEADER) {
     steps = [
       '요청에 X-Collector-Token 헤더가 아예 없었습니다 — 중앙의 정상 폴링은 항상 헤더를 붙이므로 이 요청은 중앙이 아닐 가능성이 높습니다.',
       '아래 "출처" 의 IP 가 중앙 포탈(또는 알고 있는 관리 도구)인지 확인하세요.',
@@ -46,6 +116,7 @@ export function denyCard(status) {
   }
   return {
     kind: 'deny',
+    denyKind: kind,
     badge: `거부 ${d.count}`,
     tone: 'amber',
     title: `엣지가 수집 요청을 거부했습니다 — ${d.count}건`,
@@ -55,7 +126,7 @@ export function denyCard(status) {
       { k: '마지막 시각', v: ts(last?.at || d.lastAt) },
       { k: '마지막 사유', v: why || '—' },
       { k: '마지막 대상', v: last?.endpoint || d.lastEndpoint || '—' },
-      { k: '마지막 출처 IP', v: last?.ip || '(구버전 엣지 — 미제공)' },
+      { k: '마지막 출처 IP', v: last?.ip ? displayIp(last.ip) : '(구버전 엣지 — 미제공)' },
     ],
     rows: recent,
     bySrc,
@@ -85,8 +156,8 @@ export function identityCards(collector, ident) {
       summary: '중앙은 push 본문의 agent 이름으로 데이터 주인을 판단합니다. 두 장비가 같은 이름을 쓰면 인벤토리·함대·스토리지·원격 명령이 서로를 덮어씁니다(마지막에 보낸 쪽만 남음).',
       evidence: [
         { k: '엣지 이름', v: a.agent },
-        { k: '지금 이 이름으로 보내는 장비', v: `${a.hostname || '(hostname 미제공)'}${a.peer ? ` · ${a.peer}` : ''}` },
-        { k: '직전에 같은 이름으로 보낸 장비', v: `${a.conflict.hostname || '(hostname 미제공)'}${a.conflict.peer ? ` · ${a.conflict.peer}` : ''}` },
+        { k: '지금 이 이름으로 보내는 장비', v: `${a.hostname || '(hostname 미제공)'}${a.peer ? ` · ${dispIp(a.peer)}` : ''}` },
+        { k: '직전에 같은 이름으로 보낸 장비', v: `${a.conflict.hostname || '(hostname 미제공)'}${a.conflict.peer ? ` · ${dispIp(a.conflict.peer)}` : ''}` },
         { k: '충돌 관측', v: `${a.conflict.flips || 1}회 · 마지막 ${ts(a.conflict.at)}` },
         { k: '이 이름으로 받은 push', v: `${a.seen || 0}회 · 마지막 ${ts(a.at)}` },
       ],
@@ -112,8 +183,8 @@ export function identityCards(collector, ident) {
       summary: '엣지 이름은 다르지만 보내는 vCenter id 가 같습니다. 중앙은 vCenter id 로 인벤토리를 저장하므로 두 엣지의 데이터가 서로를 덮어씁니다 — 호스트/VM 수가 주기마다 튀거나 0 이 됩니다.',
       evidence: [
         { k: 'vCenter id', v: vc.vcenterId },
-        { k: '지금 보내는 엣지', v: `${vc.agent}${vc.hostname ? ` (${vc.hostname})` : ''}${vc.peer ? ` · ${vc.peer}` : ''}` },
-        { k: '직전에 보낸 엣지', v: `${vc.other}${vc.otherHostname ? ` (${vc.otherHostname})` : ''}${vc.otherPeer ? ` · ${vc.otherPeer}` : ''}` },
+        { k: '지금 보내는 엣지', v: `${vc.agent}${vc.hostname ? ` (${vc.hostname})` : ''}${vc.peer ? ` · ${dispIp(vc.peer)}` : ''}` },
+        { k: '직전에 보낸 엣지', v: `${vc.other}${vc.otherHostname ? ` (${vc.otherHostname})` : ''}${vc.otherPeer ? ` · ${dispIp(vc.otherPeer)}` : ''}` },
         { k: '충돌 관측', v: `${vc.flips || 1}회 · 마지막 ${ts(vc.at)}` },
       ],
       steps: [

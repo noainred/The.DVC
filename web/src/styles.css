@@ -453,6 +453,49 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .modal { width: 100%; max-width: 640px; max-height: 88vh; overflow: auto; }
 
+/* 수집 서버 진단 모달 재구성(v2.571) — 문제 요약 → 요청 경로 → 해결 순서 → 증거 → 상세(접힘) 순.
+   기존 다크 테마 토큰만 재사용(--panel·--border·--text·--text-dim·--accent·--amber·--red). */
+.collector-diag-section-title {
+  font-size: 12px; font-weight: 700; margin: 14px 0 6px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .4px;
+}
+.collector-diag-section-title:first-of-type { margin-top: 0; }
+.collector-diag-banner {
+  border: 1px solid var(--red); border-radius: 10px; background: rgba(239, 68, 68, .08);
+  padding: 12px 14px; margin-bottom: 10px;
+}
+.collector-diag-banner-title { font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.collector-diag-banner-sub { color: var(--text-dim); font-size: 12.5px; margin-top: 6px; line-height: 1.6; }
+
+.collector-diag-path { display: flex; align-items: stretch; gap: 8px; margin-bottom: 12px; }
+.collector-diag-path-node {
+  flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px;
+}
+.collector-diag-path-node.mid { border-color: var(--red); }
+.collector-diag-path-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 3px; }
+.collector-diag-path-value { font-weight: 700; font-size: 13px; word-break: break-all; color: var(--text); }
+.collector-diag-path-node.mid .collector-diag-path-value { color: var(--red); }
+.collector-diag-path-sub { font-size: 11px; color: var(--text-dim); margin-top: 3px; word-break: break-all; }
+.collector-diag-path-arrow { flex: none; align-self: center; color: var(--text-dim); font-size: 16px; }
+
+.collector-diag-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+
+.collector-diag-ua-sub { font-size: 10.5px; color: var(--text-dim); margin-top: 2px; }
+
+.collector-diag-details { margin-bottom: 4px; }
+.collector-diag-details > summary {
+  cursor: pointer; font-size: 12px; font-weight: 700; color: var(--accent);
+  padding: 4px 0; list-style: revert;
+}
+.collector-diag-details > summary:hover { text-decoration: underline; }
+.collector-diag-details[open] > summary { margin-bottom: 8px; }
+
+@media (max-width: 720px) {
+  .collector-diag-path { flex-direction: column; }
+  .collector-diag-path-arrow { align-self: center; transform: rotate(90deg); }
+}
+
 /* Settings (landing page) box */
 .settings-box { display: flex; align-items: center; gap: 7px; font-size: 11px; }
 .settings-box .muted { white-space: nowrap; }

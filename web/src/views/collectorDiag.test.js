@@ -3,7 +3,86 @@
  * 웹 테스트는 node 환경(DOM 없음)이라 컴포넌트 렌더는 못 한다 — 판정·문구를 순수 함수로 고정한다.
  */
 import { describe, it, expect } from 'vitest';
-import { denyCard, identityCards, urlIdentityCard, rowCards } from './collectorDiag.js';
+import {
+  denyCard, identityCards, urlIdentityCard, rowCards,
+  displayIp, uaDisplay, DENY_KIND, denyReasonKind, denyPathResultLabel, tokenMismatchBanner, denyPathOf,
+} from './collectorDiag.js';
+
+describe('displayIp — v2.571 진단 모달 재구성: 표시 전용 변환, 원본은 바꾸지 않는다', () => {
+  it('IPv4-매핑 IPv6 는 IPv4 로 풀어 보여준다', () => {
+    expect(displayIp('::ffff:192.168.20.143')).toBe('192.168.20.143');
+    expect(displayIp('::FFFF:10.0.0.1')).toBe('10.0.0.1'); // 대소문자 무관
+  });
+  it('그 밖의 값은 그대로 돌려준다(가공·추정 금지)', () => {
+    expect(displayIp('192.168.1.1')).toBe('192.168.1.1');
+    expect(displayIp('2001:db8::1')).toBe('2001:db8::1');
+    expect(displayIp('')).toBe('');
+    expect(displayIp(null)).toBe(null);
+    expect(displayIp(undefined)).toBe(undefined);
+  });
+});
+
+describe('uaDisplay — User-Agent 는 토큰도 엣지 이름도 아니다', () => {
+  it('"node" 는 사람이 읽을 수 있는 이름 + 원문을 함께 준다', () => {
+    const u = uaDisplay('node');
+    expect(u.label).toBe('Node.js HTTP 요청');
+    expect(u.raw).toBe('node');
+    expect(u.known).toBe(true);
+  });
+  it('그 밖의 값은 원문 그대로(변형 없음)', () => {
+    const u = uaDisplay('curl/8.0');
+    expect(u.label).toBe('curl/8.0');
+    expect(u.known).toBe(false);
+  });
+  it('값이 없으면 대시', () => {
+    expect(uaDisplay(null).label).toBe('—');
+    expect(uaDisplay('').label).toBe('—');
+  });
+});
+
+describe('denyReasonKind / denyPathResultLabel / tokenMismatchBanner — v2.571', () => {
+  it('세 갈래를 정확히 가른다', () => {
+    expect(denyReasonKind('COLLECTOR_TOKEN 미설정(이 엣지의 수집 기능이 꺼져 있음)')).toBe(DENY_KIND.DISABLED);
+    expect(denyReasonKind('요청에 X-Collector-Token 헤더 없음')).toBe(DENY_KIND.NO_HEADER);
+    expect(denyReasonKind('토큰 불일치')).toBe(DENY_KIND.MISMATCH);
+  });
+  it('경로 결과 라벨은 갈래마다 다르다', () => {
+    expect(denyPathResultLabel(DENY_KIND.MISMATCH)).toContain('토큰 불일치');
+    expect(denyPathResultLabel(DENY_KIND.DISABLED)).toContain('미설정');
+    expect(denyPathResultLabel(DENY_KIND.NO_HEADER)).toContain('헤더');
+  });
+  it('상단 배너는 토큰 불일치일 때만 뜨고 문구가 고정돼 있다', () => {
+    const mismatch = denyCard({ authDeny: { count: 1, recent: [{ at: 1, why: '토큰 불일치' }] } });
+    const b = tokenMismatchBanner(mismatch);
+    expect(b.title).toBe('요청 서버와 edge의 수집 토큰이 일치하지 않습니다.');
+    expect(b.sub).toBe('요청은 edge까지 정상 도착했지만 토큰 검증에서 거부되었습니다. 네트워크 연결은 정상입니다.');
+
+    const disabled = denyCard({ authDeny: { count: 1, recent: [{ at: 1, why: 'COLLECTOR_TOKEN 미설정' }] } });
+    expect(tokenMismatchBanner(disabled)).toBe(null);
+    expect(tokenMismatchBanner(null)).toBe(null);
+    expect(tokenMismatchBanner({ kind: 'agent-name' })).toBe(null);
+  });
+});
+
+describe('denyPathOf — 요청 경로 시각화(deny 카드 전용)', () => {
+  it('deny 가 아닌 카드는 경로가 없다', () => {
+    expect(denyPathOf({ kind: 'agent-name' }, {})).toBe(null);
+    expect(denyPathOf(null, {})).toBe(null);
+  });
+  it('출처 IP·결과·대상 엣지를 담는다(IPv4-매핑 표기도 화면용으로 풀린다)', () => {
+    const card = denyCard({ authDeny: { count: 1, recent: [{ at: 1, ip: '::ffff:10.20.30.40', why: '토큰 불일치' }] } });
+    const p = denyPathOf(card, { id: 'hd', name: 'HD', url: 'http://10.20.30.40:4000' });
+    expect(p.from).toBe('10.20.30.40');
+    expect(p.resultLabel).toContain('토큰 불일치');
+    expect(p.to).toBe('HD (hd)');
+    expect(p.toSub).toBe('http://10.20.30.40:4000');
+  });
+  it('출처 IP 가 없으면(구버전 엣지) 그 사실을 말한다', () => {
+    const card = denyCard({ authDeny: { count: 2, lastAt: 5, lastWhy: '토큰 불일치' } });
+    const p = denyPathOf(card, { id: 'hd' });
+    expect(p.from).toBe('(출처 미상)');
+  });
+});
 
 describe('denyCard — 엣지가 수집 요청을 거부한 내역', () => {
   it('거부가 없으면 카드를 만들지 않는다', () => {
