@@ -352,10 +352,14 @@ function Portal({ user, onLogout }) {
   return (
     <div className="app">
       {/*
-        v2.556: 상단 메뉴 2단화(docs/design/server-temp/README.md §0) — 1행 브랜드/상태/사용자,
-        2행 메뉴(밑줄 탭). ⚠ CSS 는 `.topbar .tabs .tab` 로 **한정**한다 — `className="tab"` 은
+        v2.573: 상단 메뉴 1행 통합(사용자 요청 — 버전/메뉴/로그인 사용자가 한 줄에 보이게).
+        v2.556 의 2단 분리(브랜드행 + 메뉴행)를 되돌려 메뉴(nav.tabs)를 브랜드 행 안으로 옮기고
+        예전 `.spacer` 자리를 메뉴가 대신 채운다(flex:1) — 넓은 화면에서 로고~메뉴~상태~사용자가
+        한 줄에 정렬된다. ⚠ CSS 는 `.topbar .tabs .tab` 로 **한정**한다 — `className="tab"` 은
         앱 전역에서 일반 버튼으로도 쓰이므로(접속확인·필터 초기화·CSV 선택 등 수십 곳) 전역
         `.tab` 을 건드리면 그 버튼들이 전부 밑줄 탭이 된다.
+        ⚠ 좁은 폭에서는 `.tb-brandrow` 의 `flex-wrap: wrap`(v2.556 이 400px 가로 넘침을 잡은 값,
+        되돌리지 말 것)이 그대로 안전망이다 — 한 줄에 다 안 들어가면 다음 줄로 흘러 넘침을 막는다.
       */}
       <header className="topbar">
         <div className="tb-brandrow">
@@ -390,7 +394,14 @@ function Portal({ user, onLogout }) {
             )}
           </div>
         </div>
-        <div className="spacer" />
+        <nav className="tabs">
+          {visibleTabs.map((t) => (
+            <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`}
+              onClick={() => { if (t.id === 'vcenters') setPlatformResetSeq((n) => n + 1); setTab(t.id); }}>
+              {t.label}
+            </button>
+          ))}
+        </nav>
         <div className="status-pill">
           {(() => {
             const total = health?.vcenters ?? 0;
@@ -432,14 +443,6 @@ function Portal({ user, onLogout }) {
           <button className="logout-btn" onClick={onLogout} title="로그아웃">Out</button>
         </div>
         </div>
-        <nav className="tabs">
-          {visibleTabs.map((t) => (
-            <button key={t.id} className={`tab ${tab === t.id ? 'active' : ''}`}
-              onClick={() => { if (t.id === 'vcenters') setPlatformResetSeq((n) => n + 1); setTab(t.id); }}>
-              {t.label}
-            </button>
-          ))}
-        </nav>
       </header>
 
       <main className="content">
