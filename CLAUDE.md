@@ -2297,6 +2297,54 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     (idrac/db.js, 적재 트랜잭션 내 증분 upsert)로, 위임 잡 인출 2단계 확인응답(claim→ack)은
     v2.290(central/captureJobs.js — claim 기한 + 재수확 reap + 재시도 상한, idracScanJobs 패턴
     이식)으로 해결됨. **새 위임 잡 큐를 추가할 때 같은 claim→ack 패턴을 따를 것.**
+  - ⚠⚠ **포탈 점검 › 인벤토리 점검 — '거부됨' 과 '낡음' 을 구분하지 않으면 며칠 전 값이 지금
+    값처럼 보인다**(`central/ingestReject.js` + `portalcheck/invScan.js` + 웹
+    `views/tools/invCheckText.js`·`PortalCheck.jsx`, v2.570 — 사용자가 '에이전트 수신 트래픽
+    진단' 표의 최근 페이로드가 전부 `—` 인 것을 보고 "여기서 수집되는 데이터가 없으면 어떤 문제가
+    발생하는지 확인하고 오류를 점검하려면 어떻게 해야 하는지" → "점검할 수 있는 기능 만들어줘"):
+    - **조사에서 코드로 확인한 확정 결함 3건을 이 기능이 고친다** — ① `store.js` 가 위임(site)
+      vCenter 의 마지막 push 가 `SITE_INVENTORY_STALE_MS`(기본 5분)를 넘으면 `stale:true` 를
+      찍는데 **웹 소비처가 0건**이고 `/health` 도 안 셌다 — 데이터는 디스크 캐시에서 계속
+      서빙되므로 며칠 전 값이 지금 값처럼 보일 수 있었다(이 포탈이 만들 수 있는 가장 위험한
+      거짓) ② 수신 집계(`routes/central.js`)가 4xx/5xx 를 `return` 으로 빼서 **'안 보냈다' 와
+      '보냈는데 막혔다'(mock 차단·소유권 충돌·토큰 불일치)가 화면에서 똑같이 `—`** 로 보였다 —
+      조치가 정반대인데 구분이 없었다 ③ 저장된 인벤토리 목록(`GET /api/admin/central/inventory`)에
+      화면 진입로가 없어 API 로만 확인 가능했다.
+    - **거부는 빼지 않고 따로 기록한다**(`central/ingestReject.js`) — `routes/central.js` 의
+      집계 미들웨어가 예전에는 `if (res.statusCode >= 400) return;` 로 거부를 통째로 버렸는데,
+      이제 그 지점에서 종류(`mock`/`owner`/`auth`/`bad-request`/`disabled`/`server`)와 근거를
+      기록한다. ⚠⚠ **이 기록의 `agent` 이름은 검증되지 않았다** — 거부된 요청이므로 토큰
+      바인딩을 통과하지 못했을 수 있고, 그때 이름은 공격자가 고른 값이다. 응답에 `unverified:true`
+      를 항상 실어 화면이 그 한계를 말한다(이름을 근거로 조치를 안내하지 않는다).
+    - **판정 순서가 계약이다**(`invScan.js scanInventory`): 거부가 마지막 수신보다 **뒤**일 때만
+      `rejected` 로 올린다(`never`·`stale` 보다 우선) — 거부가 이미 해소된 과거 기록이면(그 뒤에
+      정상 수신이 왔으면) 상태에 반영하지 않는다. 순서를 반대로 두면 옛 거부 기록이 방금 들어온
+      정상 수신을 영원히 결함으로 덮는다.
+    - **'인벤토리를 안 보낸 엣지' 는 위임 담당으로 학습된 적이 있을 때만 결함이다**
+      (`agent.knownOwner`). 스토리지·SAN 전용 엣지처럼 인벤토리를 애초에 다루지 않는 정상
+      구성을 결함으로 세면(v2.560 오탐과 같은 유형) 사용자가 멀쩡한 설정을 의심한다. 담당 학습은
+      등록부 필드가 아니라 **한 번이라도 성공한 push 에서** 나온다 — 한 번도 없으면 중앙은 누가
+      보내야 하는지 자체를 모른다(`owner:null` 로 밝히고 추측하지 않는다).
+    - **KPI 다섯 칸은 겹치지 않는다** — 합계 = 정상 수신 + 낡음 + 수신 이력 없음 + 거부됨 +
+      확인 불가. `emptyPush`(수신은 정상인데 호스트·VM 0)는 별도 축이라 합에 더하지 않는다.
+      신선율의 분모는 **측정분(ok+stale)** 이고 0 이면 `null`(0% 가 아니다).
+    - **왕복이 없다** — 토큰 점검과 달리 '지금 점검' 버튼이 없다. 이미 중앙이 가진 값(위임
+      vCenter 캐시·수신 통계·거부 기록·엣지 정체)만 조합하므로 마운트 1회 + 새로고침으로 충분하다.
+    - **화면은 특수기능 › 포탈 점검 › 인벤토리 점검**(두 번째 서브메뉴)이다. 셸을 더 만들지
+      않고(v2.508 규약) `PortalCheck.jsx` 를 서브메뉴 셸로 리팩터해 `TokenCheckView`(기존)와
+      `InventoryCheckView`(신규)를 각자 데이터·상태를 갖는 독립 컴포넌트로 나눴다 — 검색어·
+      필터 같은 상태가 서브메뉴 사이에 새는 것을 막는다. 권한은 토큰 점검과 같은 기준
+      **adminOnly + fullScopeOnly**(엣지·vCenter 는 범위 계정에 나눌 축이 없다).
+    - ⚠ **표에 `overflowX:'auto'` 만으로는 부족했다**(v2.562 규약과 같은 재발 — Chromium 400px
+      판독에서 발견. 수치로는 안 잡혔다): `.v3-table { width:100% }` 라 `minWidth` 없이는 400px
+      에서 스크롤 대신 셀이 줄바꿈되며 행이 세로로 크게 늘어난다(실측: 표 3개 붙은 페이지 높이
+      3,601px → `STable style={{minWidth}}` 부여 후 2,469px). **새 다열 표는 `<STable
+      style={{minWidth: N}}>` 을 반드시 지정할 것** — `overflowX` 래퍼만으로는 400px 에서 회귀한다.
+    - ⚠ **정직 기록**: mock·auth 거부, never, ok 4가지 상태는 목 서버에 실제로 site vCenter 를
+      등록하고 `/api/central/inventory` 를 curl 로 직접 두드려 실측했다(API 응답·Chromium 렌더
+      양쪽 확인). **stale 상태는 시간 경과가 필요해 스크린샷으로 확인하지 못했다** — 판정 로직은
+      `invCheck2570.test.js` 단위 테스트로 고정했다. owner 충돌(같은 vCenter 를 다른 엣지가
+      번갈아 push)도 개별 토큰 발급 절차가 필요해 실측하지 못했고 단위 테스트로만 검증했다.
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 

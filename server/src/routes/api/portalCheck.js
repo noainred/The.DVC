@@ -47,6 +47,19 @@ import {
   PROBE_CONCURRENCY, PROBE_TIMEOUT_MS, PROBE_BUDGET_MS,
 } from '../../portalcheck/tokenProbe.js';
 import { pullTokenCheck, listEdgeTokenReports, MIN_EDGE_VERSION, STALE_MS } from '../../central/tokenCheckPull.js';
+// v2.570 — 인벤토리 점검(두 번째 서브메뉴): 위임(site) vCenter 의 push 가 실제로 들어오는가.
+import { listRegistry as listVcentersFull } from '../../vcenter/registry.js';
+import { listInventory } from '../../central/inventory.js';
+import { getIngestStats } from '../../central/ingestStats.js';
+import { rejectStats } from '../../central/ingestReject.js';
+import { agentIdentitySummary } from '../../central/agentIdentity.js';
+import {
+  scanInventory, findingsOf as invFindingsOf, groupFindings as invGroupFindings,
+  findingCounts as invFindingCounts, INV_STATE, INV_FINDING, INV_GRADE,
+} from '../../portalcheck/invScan.js';
+
+// vc 별 위임 여부만 필요하다 — redact() 는 이미 password 를 뺀다(vcenter/registry.js:45).
+const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000; // store.js 와 같은 env·같은 기본값
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = (req, res, next) => {
@@ -253,6 +266,37 @@ api.post('/tools/portal-check/tokens/edge-pull', adminOnly, fullScopeOnly, async
   } catch (err) {
     res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) });
   } finally { running = ''; }
+});
+
+/**
+ * 두 번째 서브메뉴 — 인벤토리 점검(v2.570).
+ *
+ * 사용자 요청: 에이전트 수신 트래픽 진단의 '최근 페이로드 —' 를 보고 "여기서 수집되는 데이터가
+ * 없으면 어떤 문제가 발생하는지 확인하고 오류를 점검하려면 어떻게 해야 하는지" → 점검 기능.
+ *
+ * **왕복 0** — 이미 중앙이 가진 값(위임 vCenter 인벤토리 캐시·수신 통계·거부 기록·엣지 정체)만
+ * 조합한다. 토큰 점검과 달리 엣지에 나가는 프로브가 없다 — 그래서 재진입 가드(`running`)를
+ * 공유하지 않는다(공유할 왕복이 없다).
+ */
+api.get('/tools/portal-check/inventory', adminOnly, fullScopeOnly, (_req, res) => {
+  const scan = scanInventory({
+    vcenters: safe(() => listVcentersFull(), []),
+    inventory: safe(() => listInventory(), []),
+    ingestRows: safe(() => getIngestStats().rows, []),
+    rejects: safe(() => rejectStats(), null),
+    identity: safe(() => agentIdentitySummary(), null),
+    now: Date.now(),
+    staleMs: SITE_STALE_MS,
+  });
+  const findings = invFindingsOf(scan);
+  res.json({
+    ok: true,
+    ...scan,
+    findings,
+    findingGroups: invGroupFindings(findings),
+    findingCounts: invFindingCounts(findings),
+    vocab: { states: INV_STATE, findings: INV_FINDING, grades: INV_GRADE },
+  });
 });
 
 }
