@@ -6,7 +6,7 @@ import { fetchJson, postJson, putJson, delJson, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
-import { rowCards } from './collectorDiag.js';
+import { rowCards, displayIp, uaDisplay, tokenMismatchBanner, denyPathOf } from './collectorDiag.js';
 import { MOCK_VC_RE } from './collectors/emptyInvText.js';
 const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx')); // v2.560 — '빈 인벤토리' 원인·로그·조치
 
@@ -577,17 +577,28 @@ export default function Collectors() {
         </div>
       )}
 
-      {diag && <DiagModal entry={diag} onClose={() => setDiag(null)} />}
+      {diag && (
+        <DiagModal
+          entry={diag}
+          onClose={() => setDiag(null)}
+          onEdit={(collector) => { setDiag(null); openEdit(collector); }}
+        />
+      )}
     </>
   );
 }
 
 /**
- * 경고 배지 상세(v2.437) — 원인·근거·해결 절차를 한 화면에.
+ * 경고 배지 상세(v2.437, 화면 재구성 v2.571) — 원인·근거·해결 절차를 한 화면에.
  * 문구·판정은 views/collectorDiag.js(순수)에서 만들고 여기서는 표시만 한다.
+ *
+ * 순서(v2.571 재구성): ① 문제 요약 ② 요청 경로(있을 때만) ③ 권장 해결 순서(+ 바로가기 버튼)
+ * ④ 마지막 거부 증거 ⑤ 접힌 상세(최근 거부 내역·출처 집계·원문 위치). 해결 순서를 증거보다
+ * 앞에 두는 것이 이 재구성의 핵심 — 무엇이 문제인지 본 다음 바로 "어떻게 고치나"를 보게 한다.
  */
-function DiagModal({ entry, onClose }) {
+function DiagModal({ entry, onClose, onEdit }) {
   const { collector: c, cards } = entry;
+  const openTokenCheck = () => { onClose(); window.location.hash = '#/tools/portal-check'; };
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <EscClose onClose={onClose} />
@@ -596,80 +607,143 @@ function DiagModal({ entry, onClose }) {
           <b style={{ fontSize: 15 }}>진단 — {c.id}{c.name && c.name !== c.id ? ` (${c.name})` : ''} · {c.url}</b>
           <button className="logout-btn" onClick={onClose}>닫기</button>
         </div>
-        {cards.map((card, i) => (
-          <div key={`${card.kind}-${i}`} className="card" style={{ marginBottom: 12, borderLeft: `3px solid var(--${card.tone === 'red' ? 'red' : 'amber'})` }}>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>
-              <span className={`badge ${card.tone}`} style={{ marginRight: 6, fontSize: 10 }}>{card.badge}</span>
-              {card.title}
-            </div>
-            <div className="muted" style={{ marginBottom: 10, lineHeight: 1.6 }}>{card.summary}</div>
-
-            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>근거(서버가 실제로 관측한 값)</div>
-            <div className="table-wrap" style={{ marginBottom: 10 }}>
-              <STable>
-                <thead><tr><th>항목</th><th>값</th></tr></thead>
-                <tbody>{card.evidence.map((e, j) => <tr key={j}><td className="muted">{e.k}</td><td>{e.v}</td></tr>)}</tbody>
-              </STable>
-            </div>
-
-            {card.note && <div className="muted" style={{ marginBottom: 10, color: 'var(--amber)' }}>{card.note}</div>}
-
-            {card.rows?.length > 0 && (
-              <>
-                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>최근 거부 내역 (최대 20건 · 토큰 값은 저장하지 않음)</div>
-                <div className="table-wrap" style={{ marginBottom: 10 }}>
-                  <STable>
-                    <thead><tr><th>시각</th><th>출처 IP</th><th>대상</th><th>사유</th><th>요청 토큰</th><th>User-Agent</th></tr></thead>
-                    <tbody>
-                      {card.rows.map((r, j) => (
-                        <tr key={j}>
-                          <td className="muted nowrap" data-sort={r.at}>{r.at ? new Date(r.at).toLocaleString('ko-KR') : '—'}</td>
-                          <td>{r.ip || '—'}</td>
-                          <td className="muted">{r.endpoint || '—'}</td>
-                          <td>{r.why || '—'}</td>
-                          <td className="muted">{r.fp || (r.tokenLen ? `len=${r.tokenLen}` : '없음')}</td>
-                          <td className="muted" style={{ fontSize: 11 }}>{r.ua || '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </STable>
+        {cards.map((card, i) => {
+          const banner = tokenMismatchBanner(card);
+          const path = denyPathOf(card, c);
+          const hasDetails = (card.rows?.length > 0) || (card.bySrc?.length > 0) || (card.where?.length > 0);
+          return (
+            <div key={`${card.kind}-${i}`} className="card" style={{ marginBottom: 12, borderLeft: `3px solid var(--${card.tone === 'red' ? 'red' : 'amber'})` }}>
+              {/* ① 문제 요약 — 토큰 불일치는 정확한 고정 문구의 상단 배너로, 그 외엔 기존 제목/설명으로. */}
+              <div className="collector-diag-section-title">문제 요약</div>
+              {banner ? (
+                <div className="collector-diag-banner">
+                  <div className="collector-diag-banner-title">
+                    <span className={`badge ${card.tone}`} style={{ fontSize: 10 }}>{card.badge}</span>
+                    {banner.title}
+                  </div>
+                  <div className="collector-diag-banner-sub">{banner.sub}</div>
                 </div>
-              </>
-            )}
+              ) : (
+                <>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                    <span className={`badge ${card.tone}`} style={{ marginRight: 6, fontSize: 10 }}>{card.badge}</span>
+                    {card.title}
+                  </div>
+                  <div className="muted" style={{ marginBottom: 10, lineHeight: 1.6 }}>{card.summary}</div>
+                </>
+              )}
 
-            {card.bySrc?.length > 0 && (
-              <>
-                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>출처별 집계</div>
-                <div className="table-wrap" style={{ marginBottom: 10 }}>
-                  <STable>
-                    <thead><tr><th>출처 IP</th><th className="right">건수</th><th>처음</th><th>마지막</th><th>마지막 사유</th></tr></thead>
-                    <tbody>
-                      {card.bySrc.map((r, j) => (
-                        <tr key={j}>
-                          <td>{r.ip}</td>
-                          <td className="right tabular" data-sort={r.count}>{r.count}</td>
-                          <td className="muted nowrap" data-sort={r.firstAt}>{r.firstAt ? new Date(r.firstAt).toLocaleString('ko-KR') : '—'}</td>
-                          <td className="muted nowrap" data-sort={r.lastAt}>{r.lastAt ? new Date(r.lastAt).toLocaleString('ko-KR') : '—'}</td>
-                          <td className="muted">{r.lastWhy || '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </STable>
-                </div>
-              </>
-            )}
+              {/* ② 요청 경로 — 거부(deny) 카드에만 있다(요청 서버 IP → 결과 → 이 엣지). */}
+              {path && (
+                <>
+                  <div className="collector-diag-section-title">요청 경로</div>
+                  <div className="collector-diag-path">
+                    <div className="collector-diag-path-node">
+                      <div className="collector-diag-path-label">{path.fromLabel}</div>
+                      <div className="collector-diag-path-value">{path.from}</div>
+                    </div>
+                    <div className="collector-diag-path-arrow">→</div>
+                    <div className="collector-diag-path-node mid">
+                      <div className="collector-diag-path-label">결과</div>
+                      <div className="collector-diag-path-value">{path.resultLabel}</div>
+                    </div>
+                    <div className="collector-diag-path-arrow">→</div>
+                    <div className="collector-diag-path-node">
+                      <div className="collector-diag-path-label">{path.toLabel}</div>
+                      <div className="collector-diag-path-value">{path.to}</div>
+                      {path.toSub && <div className="collector-diag-path-sub">{path.toSub}</div>}
+                    </div>
+                  </div>
+                </>
+              )}
 
-            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>해결 방법</div>
-            <ol style={{ margin: '0 0 10px', paddingLeft: 20, lineHeight: 1.7 }}>
-              {card.steps.map((t, j) => <li key={j}>{t}</li>)}
-            </ol>
+              {/* ③ 권장 해결 순서 — 증거보다 먼저 보여준다. */}
+              <div className="collector-diag-section-title">권장 해결 순서</div>
+              <ol style={{ margin: '0 0 6px', paddingLeft: 20, lineHeight: 1.7 }}>
+                {card.steps.map((t, j) => <li key={j}>{t}</li>)}
+              </ol>
+              <div className="collector-diag-actions">
+                <button type="button" className="logout-btn" onClick={() => onEdit?.(c)}>⚙ 수집 서버 설정</button>
+                {card.kind === 'deny' && (
+                  <button type="button" className="logout-btn" onClick={openTokenCheck}>🔎 토큰 점검 열기</button>
+                )}
+              </div>
 
-            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>원문은 어디서 보나</div>
-            <ul className="muted" style={{ margin: 0, paddingLeft: 20, lineHeight: 1.7 }}>
-              {card.where.map((t, j) => <li key={j}><code>{t}</code></li>)}
-            </ul>
-          </div>
-        ))}
+              {card.note && <div className="muted" style={{ marginBottom: 10, color: 'var(--amber)' }}>{card.note}</div>}
+
+              {/* ④ 마지막 거부 증거(거부 카드) / 근거(그 외 카드) */}
+              <div className="collector-diag-section-title">{card.kind === 'deny' ? '마지막 거부 증거' : '근거(서버가 실제로 관측한 값)'}</div>
+              <div className="table-wrap" style={{ marginBottom: 10 }}>
+                <STable>
+                  <thead><tr><th>항목</th><th>값</th></tr></thead>
+                  <tbody>{card.evidence.map((e, j) => <tr key={j}><td className="muted">{e.k}</td><td>{e.v}</td></tr>)}</tbody>
+                </STable>
+              </div>
+
+              {/* ⑤ 접힌 상세 — 최근 거부 내역·출처 집계·원문 위치. 기본 접힘(native details). */}
+              {hasDetails && (
+                <details className="collector-diag-details">
+                  <summary>{card.rows?.length > 0 ? `최근 거부 내역 보기 (최대 20건 · ${card.rows.length}건 · 토큰 값은 저장하지 않음)` : '원문 위치 보기'}</summary>
+
+                  {card.rows?.length > 0 && (
+                    <>
+                      <div className="table-wrap" style={{ marginBottom: 10 }}>
+                        <STable>
+                          <thead><tr><th>시각</th><th>출처 IP</th><th>대상</th><th>사유</th><th>요청 토큰</th><th>요청 프로그램</th></tr></thead>
+                          <tbody>
+                            {card.rows.map((r, j) => {
+                              const ua = uaDisplay(r.ua);
+                              return (
+                                <tr key={j}>
+                                  <td className="muted nowrap" data-sort={r.at}>{r.at ? new Date(r.at).toLocaleString('ko-KR') : '—'}</td>
+                                  <td>{displayIp(r.ip) || '—'}</td>
+                                  <td className="muted">{r.endpoint || '—'}</td>
+                                  <td>{r.why || '—'}</td>
+                                  <td className="muted">{r.fp || (r.tokenLen ? `len=${r.tokenLen}` : '없음')}</td>
+                                  <td className="muted" style={{ fontSize: 11 }}>
+                                    {ua.label}
+                                    {ua.known && <div className="collector-diag-ua-sub">원문: {ua.raw}</div>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </STable>
+                      </div>
+                    </>
+                  )}
+
+                  {card.bySrc?.length > 0 && (
+                    <>
+                      <div className="collector-diag-section-title">출처별 집계</div>
+                      <div className="table-wrap" style={{ marginBottom: 10 }}>
+                        <STable>
+                          <thead><tr><th>출처 IP</th><th className="right">건수</th><th>처음</th><th>마지막</th><th>마지막 사유</th></tr></thead>
+                          <tbody>
+                            {card.bySrc.map((r, j) => (
+                              <tr key={j}>
+                                <td>{displayIp(r.ip)}</td>
+                                <td className="right tabular" data-sort={r.count}>{r.count}</td>
+                                <td className="muted nowrap" data-sort={r.firstAt}>{r.firstAt ? new Date(r.firstAt).toLocaleString('ko-KR') : '—'}</td>
+                                <td className="muted nowrap" data-sort={r.lastAt}>{r.lastAt ? new Date(r.lastAt).toLocaleString('ko-KR') : '—'}</td>
+                                <td className="muted">{r.lastWhy || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </STable>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="collector-diag-section-title">원문은 어디서 보나</div>
+                  <ul className="muted" style={{ margin: 0, paddingLeft: 20, lineHeight: 1.7 }}>
+                    {card.where.map((t, j) => <li key={j}><code>{t}</code></li>)}
+                  </ul>
+                </details>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
