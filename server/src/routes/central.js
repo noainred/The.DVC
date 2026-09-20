@@ -33,6 +33,9 @@ import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, agentOfReq
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
 import { upsertCollectorFromAgent, ssrfBlockReasonResolved, verifyDerivedCollectorUrl } from '../collector/registry.js';
 import { recordIngest, noteInventoryCompression } from '../central/ingestStats.js';
+// v2.570: 거부된 push 를 기록한다 — 아래 집계는 4xx/5xx 를 빼므로, 그것만으로는 '안 보냈다' 와
+//         '보냈는데 막혔다' 가 화면에서 똑같이 보인다(조치가 정반대다).
+import { recordReject, REJECT_KIND } from '../central/ingestReject.js';
 import { notify } from '../alerts.js';
 import { ingestReport } from '../central/svcmonEdge.js';
 import { getAssignmentForAgent, markPulled, ackAssignment } from '../central/svcmonAssign.js';
@@ -77,9 +80,24 @@ centralRouter.use((req, res, next) => {
   if (req.method === 'POST') {
     res.on('finish', () => {
       try {
-        if (res.statusCode >= 400) return; // 인증 실패/오류는 집계 제외
         const agent = String(req.body?.agent || req.get('X-Agent-Name') || '').trim() || '(unknown)';
         const wireBytes = Number(req.get('content-length')) || 0;
+        if (res.statusCode >= 400) {
+          // v2.570 — 거부는 **수신 집계에서 빼되 따로 기록**한다. 예전에는 여기서 그냥 return 해
+          // 거부된 push 가 어디에도 남지 않았고, 그래서 진단 표의 '최근 페이로드 —' 가
+          // '안 보냈다'(엣지 문제)와 '막혔다'(중앙 판정)를 구분하지 못했다.
+          // ⚠ 이 agent 이름은 **검증되지 않은 값**이다(거부됐으므로 토큰 바인딩을 통과하지 못했을
+          //   수 있다) — `ingestReject.js` 가 상한을 걸고 응답이 그 사실을 밝힌다.
+          const hint = res.locals?.ingestReject;
+          recordReject(agent, req.path, {
+            status: res.statusCode,
+            kind: hint?.kind || '',
+            reason: hint?.reason || (res.statusCode === 403 ? (req.centralAuth?.reason || '토큰 불일치') : ''),
+            vcenterId: hint?.vcenterId || String(req.body?.vcenterId || ''),
+            wireBytes,
+          });
+          return;
+        }
         if (!wireBytes && agent === '(unknown)') return;
         // 인벤토리 push는 페이로드 규모(vCenter·호스트·VM 수)도 함께 기록 → '왜 큰지' 바로 파악.
         const b = req.body || {};
@@ -450,7 +468,10 @@ centralRouter.post('/inventory', (req, res) => {
   if (req.centralAuth.mode === 'agent') {
     const owner = getInventory(String(b.vcenterId))?.agent || '';
     if (owner && owner.toLowerCase() !== agent.toLowerCase()) {
-      return res.status(403).json({ ok: false, reason: `vcenterId '${b.vcenterId}'는 '${owner}' 소유입니다(다른 엣지가 덮어쓸 수 없습니다).` });
+      const reason = `vcenterId '${b.vcenterId}'는 '${owner}' 소유입니다(다른 엣지가 덮어쓸 수 없습니다).`;
+      // v2.570: 거부 기록에 종류를 남긴다 — '소유권' 과 '토큰 불일치' 는 조치가 다르다.
+      res.locals.ingestReject = { kind: REJECT_KIND.OWNER, reason, vcenterId: String(b.vcenterId) };
+      return res.status(403).json({ ok: false, reason });
     }
   }
   // v2.428(미스매치 #12): mock 노드의 인벤토리는 저장하지 않는다 — IRS 들이 DATA_SOURCE=mock 으로 같은 가짜 vCenter id 를 push 해
@@ -466,11 +487,10 @@ centralRouter.post('/inventory', (req, res) => {
     const why = mockByFlag
       ? `엣지가 스스로 mock 임을 알렸습니다(source=${b.source || 'mock'})`
       : `보낸 vCenter '${b.vcenterId}' 가 데모 생성기의 가짜 사이트와 id·이름이 같습니다(DATA_SOURCE=auto 로 접속 실패 시 목 데이터로 폴백했거나, 엣지가 구버전이라 mock 표시를 못 보냅니다)`;
-    return res.status(400).json({
-      ok: false,
-      reason: `엣지 '${agent}' 가 mock(가짜) 데이터를 보냈습니다 — 저장하지 않습니다. ${why}. 엣지 portal.env 에 DATA_SOURCE=live 를 넣고(auto 는 접속 실패 시 가짜로 채웁니다) vCenter 접속 정보를 확인·재시작하세요.`,
-      mockBlocked: true, by: mockByFlag ? 'flag' : 'content',
-    });
+    const reason = `엣지 '${agent}' 가 mock(가짜) 데이터를 보냈습니다 — 저장하지 않습니다. ${why}. 엣지 portal.env 에 DATA_SOURCE=live 를 넣고(auto 는 접속 실패 시 가짜로 채웁니다) vCenter 접속 정보를 확인·재시작하세요.`;
+    // v2.570: 이것이 '보냈는데 중앙이 막은' 대표 사례다 — 기록하지 않으면 화면에서 '안 보냄' 과 구분되지 않는다.
+    res.locals.ingestReject = { kind: REJECT_KIND.MOCK, reason, vcenterId: String(b.vcenterId || '') };
+    return res.status(400).json({ ok: false, reason, mockBlocked: true, by: mockByFlag ? 'flag' : 'content' });
   }
   // v2.428(미스매치 #6/#7): 같은 vcenterId 를 다른 agent 가 번갈아 push 하거나, 같은 agent 이름이 다른 hostname 에서 오면 충돌로 기록.
   noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: false, peer: req.socket?.remoteAddress || '' });

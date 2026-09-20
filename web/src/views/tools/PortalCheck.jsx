@@ -29,8 +29,13 @@ import {
   DUP_LABEL, dupText, scopeLabel, findingGroupLine, fpText, bannerText, okRateText,
   tableFootnotes, runSummary, evidenceText, centralAxisText,
 } from './tokenCheckText.js';
+import {
+  INV_STATE_LABEL, INV_STATE_TONE, invRowState, ageText, rowExplain, agentRowExplain,
+  findingGroupLine as invFindingGroupLine, bannerText as invBannerText, freshRateText,
+  tableFootnotes as invTableFootnotes,
+} from './invCheckText.js';
 
-const VIEWS = [['tokens', '토큰 점검']];
+const VIEWS = [['tokens', '토큰 점검'], ['inventory', '인벤토리 점검']];
 
 const TONE = Object.freeze({
   green: 'var(--ok, #35c46a)', red: 'var(--bad, #ef5a5a)',
@@ -52,9 +57,9 @@ const ago = (ts) => {
   return `${Math.round(s / 86400)}일 전`;
 };
 
-export function PortalCheck() {
+/** 토큰 점검 서브메뉴 — 기존 컴포넌트(v2.560), 자기 데이터·상태를 갖는다. */
+function TokenCheckView() {
   // ⚠ 훅은 전부 조기 return 위에(조기 반환 뒤 훅 추가는 React #310 크래시 — v2.202 실제 사고).
-  const [view, setView] = useState('tokens');
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -112,17 +117,6 @@ export function PortalCheck() {
   return (
     <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 }}>
       {error && <div className="banner">{error}</div>}
-
-      {/* 서브메뉴 — 한 도구 안의 탭이다(셸을 더 만들지 않는다 — v2.508 규약).
-          지금은 '토큰 점검' 하나이고, 다음 점검 항목이 여기 붙는다. */}
-      <div className="card" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {VIEWS.map(([k, label]) => (
-          <button key={k} className="btn" onClick={() => setView(k)}
-            style={view === k ? { background: 'var(--accent, #2b6cb0)', color: '#fff' } : undefined}>
-            {label}
-          </button>
-        ))}
-      </div>
 
       {/* 배너 — 긴 설명은 여기 한 번만(v2.509) */}
       <div className="card" style={{ borderLeft: `3px solid ${TONE[banner.tone] || TONE.gray}` }}>
@@ -332,6 +326,222 @@ export function PortalCheck() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 인벤토리 점검 서브메뉴(v2.570) — 위임(site) vCenter 의 push 가 실제로 들어오는지.
+ *
+ * 사용자 요청(2026-09-20): 에이전트 수신 트래픽 진단에서 최근 페이로드가 전부 `—` 인 것을 보고
+ * "여기서 수집되는 데이터가 없으면 어떤 문제가 발생하는지 확인하고 오류를 점검하려면 어떻게
+ * 해야 하는지" → "점검할 수 있는 기능 만들어줘".
+ *
+ * ⚠ **왕복이 없다** — 토큰 점검과 달리 '지금 점검' 버튼이 없다. 이미 중앙이 가진 값(위임
+ *   vCenter 캐시·수신 통계·거부 기록·엣지 정체)을 조합해 보여줄 뿐이라 새로고침이면 충분하다.
+ * ⚠ **폴링하지 않는다**(마운트 1회 + 새로고침 버튼 — v2.508 V4 규약).
+ */
+function InventoryCheckView() {
+  // ⚠ 훅은 조기 return 위에(React #310 — v2.202 실제 사고).
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
+  const [onlyBad, setOnlyBad] = useState(false);
+
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try { setData(await fetchJson('/tools/portal-check/inventory')); setError(''); }
+    catch (e) { setError(e?.message || String(e)); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const rows = useMemo(() => {
+    const all = data?.rows || [];
+    const needle = String(q || '').trim().toLowerCase();
+    return all.filter((r) => {
+      if (onlyBad && !['rejected', 'stale', 'never'].includes(invRowState(r))) return false;
+      if (!needle) return true;
+      return [r.vcenterId, r.name, r.owner].some((v) => String(v || '').toLowerCase().includes(needle));
+    });
+  }, [data, q, onlyBad]);
+
+  const agents = useMemo(() => {
+    const all = data?.agents || [];
+    const needle = String(q || '').trim().toLowerCase();
+    return all.filter((a) => {
+      if (onlyBad && (a.sentInventory || !a.knownOwner) && !a.mockReported) return false;
+      if (!needle) return true;
+      return String(a.agent || '').toLowerCase().includes(needle);
+    });
+  }, [data, q, onlyBad]);
+
+  const banner = useMemo(() => invBannerText(data), [data]);
+  const foots = useMemo(() => invTableFootnotes(data), [data]);
+
+  if (loading && !data) return <Loading />;
+  if (error && !data) return <ErrorBox error={error} />;
+
+  const kpi = data?.kpis || {};
+  const findings = data?.findings || [];
+  const groups = data?.findingGroups || findings.map((f) => ({ ...f, count: 1, targets: f.target ? [f.target] : [] }));
+
+  return (
+    <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 }}>
+      {error && <div className="banner">{error}</div>}
+
+      <div className="card" style={{ borderLeft: `3px solid ${TONE[banner.tone] || TONE.gray}` }}>
+        <div style={{ fontSize: 12, lineHeight: 1.6 }}><BoldText text={banner.text} /></div>
+      </div>
+
+      {/* ⚠ 다섯 칸이 겹치지 않는다 — 합계 = 정상+낡음+미수신+거부됨+확인불가. emptyPush 는 별도 축. */}
+      <div className="kpis">
+        <Kpi label="위임 vCenter" value={kpi.total ?? '—'} />
+        <Kpi label="정상 수신" value={kpi.ok ?? '—'} />
+        <Kpi label="낡음" value={kpi.stale ?? '—'} />
+        <Kpi label="수신 이력 없음" value={kpi.never ?? '—'} />
+        <Kpi label="거부됨" value={kpi.rejected ?? '—'} />
+        <Kpi label="확인 불가" value={kpi.unknown ?? '—'} />
+        <Kpi label="신선율(측정분)" value={freshRateText(kpi)} meta={kpi.measured != null ? `측정 ${kpi.measured}곳` : undefined} />
+      </div>
+      {kpi.emptyPush > 0 && (
+        <div className="card" style={{ fontSize: 12 }}>
+          <BoldText text={`수신은 정상인데 호스트·VM 이 0인 vCenter **${kpi.emptyPush}곳** — 신규 구축·철거 직후라면 정상입니다.`} />
+        </div>
+      )}
+
+      <div className="card" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button className="btn" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>
+        <SearchBox value={q} onChange={setQ} placeholder="vCenter·담당 엣지 검색" />
+        <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
+          <input type="checkbox" checked={onlyBad} onChange={(e) => setOnlyBad(e.target.checked)} /> 문제 있는 것만
+        </label>
+      </div>
+
+      {/* 위임 vCenter 표 */}
+      <div className="card" style={{ display: 'grid', gap: 6 }}>
+        <div style={{ fontWeight: 600 }}>
+          위임 vCenter {rows.length}곳{rows.length !== (data?.rows || []).length ? ` (전체 ${(data?.rows || []).length}곳 중)` : ''}
+        </div>
+        {/* ⚠ overflowX 만으로는 부족하다 — minWidth 가 없으면 400px 에서 스크롤 대신 셀이
+            줄바꿈되며 행이 세로로 크게 늘어난다(v2.562 규약). */}
+        <div style={{ overflowX: 'auto' }}>
+          <STable className="v3-table" style={{ minWidth: 820 }}>
+            <thead><tr><th>vCenter</th><th>담당 엣지</th><th>마지막 수신</th><th>호스트·VM</th><th>상태</th><th data-nosort>설명</th></tr></thead>
+            <tbody>
+              {rows.map((r) => {
+                const st = invRowState(r);
+                return (
+                  <tr key={r.vcenterId}>
+                    <td style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.vcenterId}>{r.name}</td>
+                    <td>{r.owner || <span style={{ color: 'var(--muted)' }}>미상</span>}</td>
+                    <td data-sort={r.lastAt || 0} style={{ whiteSpace: 'nowrap', fontSize: 11.5 }}>{ageText(r.ageMs)}</td>
+                    <td className="tabular" style={{ whiteSpace: 'nowrap' }}>{r.hosts == null ? '—' : `${r.hosts}·${r.vms}`}</td>
+                    <td data-sort={st}><Badge text={INV_STATE_LABEL[st]} tone={INV_STATE_TONE[st]} /></td>
+                    <td style={{ whiteSpace: 'normal', fontSize: 12, lineHeight: 1.6 }}><BoldText text={rowExplain(r)} /></td>
+                  </tr>
+                );
+              })}
+              {rows.length === 0 && (
+                <tr><td colSpan={6} style={{ color: 'var(--muted)', whiteSpace: 'normal' }}>
+                  {(data?.rows || []).length === 0
+                    ? '엣지 위임(collectMode=site) vCenter 가 없습니다.'
+                    : '표시할 항목이 없습니다 — 검색·필터를 지워 보세요.'}
+                </td></tr>
+              )}
+            </tbody>
+          </STable>
+        </div>
+      </div>
+
+      {/* 엣지 축 — 수신 트래픽 표의 '—' 를 설명한다 */}
+      <div className="card" style={{ display: 'grid', gap: 6 }}>
+        <div style={{ fontWeight: 600 }}>
+          엣지별 인벤토리 전송 여부 {agents.length}곳{agents.length !== (data?.agents || []).length ? ` (전체 ${(data?.agents || []).length}곳 중)` : ''}
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <STable className="v3-table" style={{ minWidth: 760 }}>
+            <thead><tr><th>에이전트</th><th>인벤토리 전송</th><th>위임 담당</th><th className="right">거부 횟수</th><th data-nosort>설명</th></tr></thead>
+            <tbody>
+              {agents.map((a) => (
+                <tr key={a.agent}>
+                  <td style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.agent}</td>
+                  <td data-sort={a.sentInventory ? 1 : 0}>
+                    {a.mockReported ? <Badge text="mock" tone="red" />
+                      : a.sentInventory ? <Badge text="전송 중" tone="green" />
+                        : <Badge text="미전송" tone={a.knownOwner ? 'red' : 'gray'} />}
+                  </td>
+                  <td>{a.knownOwner ? '예' : '아니오'}</td>
+                  <td className="right tabular" data-sort={a.rejects?.total || 0}>{a.rejects?.total ?? 0}</td>
+                  <td style={{ whiteSpace: 'normal', fontSize: 12, lineHeight: 1.6 }}><BoldText text={agentRowExplain(a)} /></td>
+                </tr>
+              ))}
+              {agents.length === 0 && (
+                <tr><td colSpan={5} style={{ color: 'var(--muted)', whiteSpace: 'normal' }}>
+                  아직 수신된 push 가 없습니다{q || onlyBad ? ' — 검색·필터를 지워 보세요.' : '.'}
+                </td></tr>
+              )}
+            </tbody>
+          </STable>
+        </div>
+        {foots.length > 0 && (
+          <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.7, display: 'grid', gap: 3 }}>
+            {foots.map((f, i) => <div key={i}><BoldText text={f} /></div>)}
+          </div>
+        )}
+      </div>
+
+      {/* 발견 목록 — 위험한 것이 위다(서버가 정렬). */}
+      <div className="card" style={{ display: 'grid', gap: 6 }}>
+        <div style={{ fontWeight: 600 }}>
+          점검 결과 {findings.length}건{groups.length !== findings.length ? ` (같은 항목을 묶어 ${groups.length}줄)` : ''}
+        </div>
+        {findings.length === 0 && (
+          <div style={{ fontSize: 12, color: 'var(--muted)', whiteSpace: 'normal' }}>발견된 문제가 없습니다.</div>
+        )}
+        {findings.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <STable className="v3-table" style={{ minWidth: 640 }}>
+              <thead><tr><th>등급</th><th className="right">건수</th><th data-nosort>내용과 조치</th></tr></thead>
+              <tbody>
+                {groups.map((g, i) => (
+                  <tr key={`${g.code}-${i}`}>
+                    <td data-sort={g.grade}><Badge
+                      text={{ fault: '결함', warn: '주의', info: '정보' }[g.grade] || g.grade}
+                      tone={{ fault: 'red', warn: 'amber', info: 'gray' }[g.grade] || 'gray'} /></td>
+                    <td className="right tabular" data-sort={g.count}>{g.count}</td>
+                    <td style={{ whiteSpace: 'normal', fontSize: 12, lineHeight: 1.6 }}><BoldText text={invFindingGroupLine(g)} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 포탈 점검 — 서브메뉴 셸(v2.570). 각 서브메뉴는 자기 데이터·상태를 갖는 독립 컴포넌트다
+ * (한 도구 안의 탭이다 — 셸을 더 만들지 않는다, v2.508 규약). 셸을 바꿔 태우면 안 되는 상태
+ * (검색어·필터·모달)가 서브메뉴 사이에 새는 것을 막기 위해 컴포넌트 자체를 스위치한다.
+ */
+export function PortalCheck() {
+  const [view, setView] = useState('tokens');
+  return (
+    <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 }}>
+      <div className="card" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {VIEWS.map(([k, label]) => (
+          <button key={k} className="btn" onClick={() => setView(k)}
+            style={view === k ? { background: 'var(--accent, #2b6cb0)', color: '#fff' } : undefined}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === 'inventory' ? <InventoryCheckView /> : <TokenCheckView />}
     </div>
   );
 }
