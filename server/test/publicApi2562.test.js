@@ -25,7 +25,9 @@ const SRC = path.resolve(HERE, '../src');
 const ROOT = path.resolve(SRC, '..');
 const read = (rel) => fs.readFileSync(path.join(SRC, rel), 'utf8');
 /** 주석을 규칙의 통과 근거로 쓰지 않는다(v2.535 규약) — 검사 전에 제거한다. */
-const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+// v2.574: 지역 정규식 판본은 **줄 주석 안의 슬래시+별 조합**에 걸려 코드를 통째로 지운다
+// (실제 사례 `agent/configPush.js:34`). 공용 상태기계 코어를 쓴다 — `_stripComments.js` 머리말.
+import { stripComments } from './_stripComments.js';
 
 /* ── 실제 앱을 띄우는 하니스 ──────────────────────────────────────────────── */
 

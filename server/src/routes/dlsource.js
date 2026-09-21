@@ -16,7 +16,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getPackageDir } from '../upgrade/packageSettings.js';
 
+import { wrapAsyncRouter } from '../util/asyncRoute.js';
 export const dlSourceRouter = Router();
+// v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
+// 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
+// ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
+wrapAsyncRouter(dlSourceRouter);
 
 const REPO_DOWNLOAD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..', 'download');
 const BUNDLE_RE = /^vmware-portal-(\d+\.\d+\.\d+)\.tar\.gz$/;

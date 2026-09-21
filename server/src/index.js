@@ -252,6 +252,15 @@ app.use('/api/central/curuser', BIG_JSON);
 // 통신 점검 엣지 보고(v2.552) — 링크 최대 500개 × 단계 6개 상세라 1MB 기본을 넘을 수 있다.
 // 413 은 재시도 대상이 아니라 **그 엣지 측정분의 조용한 전량 소실**이 된다(v2.517 규약).
 app.use('/api/central/link-check', BIG_JSON);
+// ⚠⚠ v2.574 SEC-11 — IP 스캔 결과. 중앙의 `slice(0, 8000)`(`routes/central.js:1336`)은 **파싱 후**라
+//   보호가 되지 않고, 엣지(`agent/ipScanWorker.js:36`)는 자르지 않는다. 실측(실제 레코드 형태
+//   `{ip, openPorts[], services[], hostname}` — `ipam/scan.js:269`, 레코드당 133B):
+//   5,000건 0.633MB 통과 / **8,000건 1.016MB → 413** / 10,000건 1.270MB → 413.
+//   즉 **코드가 선언한 상한(8,000)이 이미 기본 1MB 를 넘는다**. 413 은 `resilientFetch` 재시도
+//   대상이 아니라 그 주기 IP 대장이 **조용히 전량 소실**된다(v2.517 규약).
+app.use('/api/central/ip-scan-result', BIG_JSON);
+// 형제 — iDRAC 스캔 결과도 같은 이유(대역이 넓으면 발견 호스트가 수천 건).
+app.use('/api/central/idrac-scan-result', BIG_JSON);
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
 app.use('/api/svcmon/targets/import', BIG_JSON);
 app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);

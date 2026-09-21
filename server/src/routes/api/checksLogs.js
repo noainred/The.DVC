@@ -110,11 +110,25 @@ api.get('/tools/vmware-config', requirePerm('tools'), async (req, res) => {
 });
 
 // 로그 출처 — 이 포탈 로컬 보관(local) vs 엣지 보관(remote, 연합 조회 필요).
-api.get('/tools/vclogs/sources', requirePerm('tools'), (_req, res) => {
-  const localIds = new Set((loadVcenterConfig().vcenters || []).map((v) => v.id));
+// ⚠⚠ v2.574 SEC-01 — **이 라우트만 scope 가 없었다.** 예전 시그니처는 `(_req, res)` 였다(사용자를
+//   아예 보지 않는다는 뜻이다). 실측: 범위 계정(`vc-asia-seoul` 만 허용)의 응답이
+//   `{"local":["vc-asia-seoul","vc-eu-warsaw","vc-us-east"],"remote":[]}` 로 **admin 응답과
+//   바이트 단위로 동일**했다 — 다른 법인 vCenter 의 **존재와 id** 가 그대로 나갔다.
+//   바로 위 형제(`/tools/vmware-config`)와 아래 형제(`/tools/vclogs/federate`)는 둘 다
+//   `allowed.has(reqVc)` 로 거르고 있었다(게이팅 비대칭). server/CLAUDE.md '조회 라우트 scope 는
+//   예외 없이' · '귀속 없는/범위 밖 데이터 미노출' 불변조건.
+// ⚠ `allowed === null` 은 '제한 없음(전체)' 이다 — 빈 집합으로 읽으면 전체 범위 계정이
+//   아무것도 못 본다(`auth/scope.js:16-26`).
+api.get('/tools/vclogs/sources', requirePerm('tools'), (req, res) => {
+  const allowed = scopedVcenterIds(req.user, store.get());
+  const inScope = (id) => allowed == null || allowed.has(id);
+  const localIds = new Set((loadVcenterConfig().vcenters || []).map((v) => v.id).filter(inScope));
   const vcAgent = new Map();
-  for (const inv of listInventory()) if (inv.agent) vcAgent.set(inv.vcenterId, inv.agent);
-  for (const a of getAllGpuGuestDiag()) { if (!a.agent) continue; for (const vc of a.vcenters || []) if (vc.vcId) vcAgent.set(vc.vcId, a.agent); }
+  for (const inv of listInventory()) if (inv.agent && inScope(inv.vcenterId)) vcAgent.set(inv.vcenterId, inv.agent);
+  for (const a of getAllGpuGuestDiag()) {
+    if (!a.agent) continue;
+    for (const vc of a.vcenters || []) if (vc.vcId && inScope(vc.vcId)) vcAgent.set(vc.vcId, a.agent);
+  }
   const remote = [];
   for (const [vcenterId, agent] of vcAgent) if (!localIds.has(vcenterId)) remote.push({ vcenterId, agent });
   res.json({ local: [...localIds], remote });

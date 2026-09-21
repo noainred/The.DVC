@@ -26,7 +26,9 @@ const { stepSsh, stepSmtp, stepPortOnly } = await import('../src/linkcheck/proto
 const { PHASES, PHASE_LABEL, FAIL_KINDS, judge, fixHint } = await import('../src/linkcheck/phases.js');
 
 const SRC = (p) => fs.readFileSync(new URL(`../src/${p}`, import.meta.url), 'utf8');
-const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+// v2.574: 지역 정규식 판본은 **줄 주석 안의 슬래시+별 조합**에 걸려 코드를 통째로 지운다
+// (실제 사례 `agent/configPush.js:34`). 공용 상태기계 코어를 쓴다 — `_stripComments.js` 머리말.
+import { stripComments } from './_stripComments.js';
 
 test('카탈로그 — 25종이 전부 라벨·깊이·설정경로·authMode 를 갖는다', () => {
   assert.ok(SETTING_KIND_KEYS.length >= 25, `종류 ${SETTING_KIND_KEYS.length}개`);

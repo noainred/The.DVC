@@ -229,8 +229,28 @@ export async function sendMail(cfg, msg, opts = {}) {
     const me = cfg.name || 'vmware-portal';
     let ehlo = expect(await converse(sk, `EHLO ${me}`, timeoutMs, T), [250], 'EHLO');
 
-    // STARTTLS — 평문 연결에서 인증 정보를 보내기 전에 반드시 승격한다.
-    if (cfg.startTls !== false && !cfg.secure && ehloCaps(ehlo).has('STARTTLS')) {
+    /*
+     * STARTTLS — 평문 연결에서 인증 정보를 보내기 전에 반드시 승격한다.
+     *
+     * ⚠⚠ v2.574 SEC-10 — **광고가 없을 때 조용히 평문으로 내려가면 안 된다.**
+     * v2.573 까지는 조건이 `… && ehloCaps(ehlo).has('STARTTLS')` 하나여서, 서버가 EHLO 응답에
+     * `250-STARTTLS` 를 **광고하지 않으면** 이 블록을 건너뛰고 그대로 아래의
+     * `AUTH PLAIN <base64(user\0pass)>` 로 내려갔다. base64 는 **암호화가 아니다** —
+     * 중간자가 EHLO 응답에서 그 한 줄만 지우면 **SMTP 자격증명이 평문으로 나간다**
+     * (전형적인 STARTTLS stripping). 바로 위 주석이 "인증 정보를 보내기 전에 **반드시** 승격한다"
+     * 고 약속해 놓고 그 경로가 약속을 지키지 않았다.
+     *
+     * 규칙:
+     *  · 관리자가 'STARTTLS 사용' 을 켰고(기본값) 자격증명이 있는데 서버가 광고하지 않으면
+     *    → **중단한다**(자격증명을 보내지 않는다). 사유와 조치를 문구로 말한다.
+     *  · 자격증명이 없으면 승격 실패해도 **새어 나갈 비밀이 없으므로** 진행한다(사내 릴레이의
+     *    정상 구성이다 — 여기서 막으면 멀쩡한 현장이 메일을 못 보낸다).
+     *  · 관리자가 체크를 **끈** 경우(`startTls === false`)는 명시적 선택이므로 진행하되,
+     *    자격증명을 평문으로 보낸다는 사실을 추적 로그에 **남긴다**(조용한 다운그레이드 금지).
+     */
+    const wantTls = cfg.startTls !== false && !cfg.secure;
+    const advertised = ehloCaps(ehlo).has('STARTTLS');
+    if (wantTls && advertised) {
       expect(await converse(sk, 'STARTTLS', timeoutMs, T), [220], 'STARTTLS');
       sk = await new Promise((resolve, reject) => {
         const up = tls.connect({ socket: sock, servername: host, rejectUnauthorized: cfg.rejectUnauthorized !== false },
@@ -239,6 +259,16 @@ export async function sendMail(cfg, msg, opts = {}) {
       });
       if (trace) trace.push({ dir: 'i', text: 'STARTTLS 승격 완료 — 이후 통신은 암호화됩니다' });
       ehlo = expect(await converse(sk, `EHLO ${me}`, timeoutMs, T), [250], 'EHLO(TLS)');
+    } else if (wantTls && !advertised && cfg.user) {
+      throw new Error(
+        'STARTTLS 를 쓰도록 설정돼 있는데 서버가 STARTTLS 를 광고하지 않습니다 — '
+        + '계정·비밀번호를 평문으로 보내지 않고 중단했습니다. '
+        + '서버에서 STARTTLS 를 켜거나, 465 포트(암시적 TLS)를 쓰거나, '
+        + '사내 릴레이라 인증이 필요 없다면 계정을 비우세요.',
+      );
+    } else if (!wantTls && cfg.user && !cfg.secure && trace) {
+      // 관리자가 끈 경우 — 막지는 않지만 **무슨 일이 일어나는지** 적는다.
+      trace.push({ dir: 'i', text: 'STARTTLS 가 꺼져 있습니다 — 계정·비밀번호가 평문(base64)으로 전송됩니다' });
     }
 
     if (cfg.user) {

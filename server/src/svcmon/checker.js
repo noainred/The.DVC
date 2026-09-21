@@ -25,6 +25,23 @@ import { ssrfBlockReasonResolved } from '../collector/registry.js';
 
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher. 저장 시점 ssrfBlockReason·실행 시점 ssrfBlockReasonResolved 는 **해석한 IP 로 접속하지 않으므로** 리바인딩 창이 남는다.
 const insecureAgent = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: false }) });
+/*
+ * ⚠⚠ v2.574 SEC-09 — **기본(TLS 검증) 경로에도 dispatcher 가 있어야 한다.**
+ * v2.573 까지 `...(test.insecure ? { dispatcher: insecureAgent } : {})` 라, `insecure` 가 아닌
+ * **기본 경로는 dispatcher 없이 전역 `fetch`** 로 나갔다. CLAUDE.md v2.506 이 직접 경고한 그것 —
+ * "**`globalThis.fetch` 에는 lookup 이 없다**". 즉 이 저장소가 두 번(v2.506·v2.537) 배선한
+ * 리바인딩 방어가 svcmon 의 **가장 흔한 경로에서만** 빠져 있었다.
+ *
+ * 실측(CLAUDE.md 가 정한 실증 기준 — `https://localhost:8443/`):
+ *   · dispatcher 있음 → `fetch failed ← ESSRFBLOCKED` ✓ (접속 자체를 막았다)
+ *   · dispatcher 없음 → `fetch failed ← ECONNREFUSED` ✗ (**연결이 실제로 시도됐다**)
+ *
+ * ⚠ v2.537 의 전수 스윕(`test/ssrfAgents2537.test.js`)은 `new Agent(` 를 훑어 **모든 Agent 에
+ * 훅이 붙었는지** 본다 — 여기는 **Agent 를 아예 안 쓰던 경로**라 그 스윕의 사각지대였다.
+ * ⚠ 이 Agent 는 `rejectUnauthorized` 를 건드리지 않는다(기본값 = 검증 ON). 검증 정책은 그대로 두고
+ *   lookup 훅만 더하는 것이 이 수정의 전부다 — 여기서 TLS 를 느슨하게 만들지 말 것.
+ */
+const secureAgent = new Agent({ connect: withSsrfLookup({}) });
 const SAFE_HOST = /^[a-zA-Z0-9._:-]+$/;
 const shortErr = (e) => String(e?.cause?.code || e?.code || e?.message || e).slice(0, 140);
 
@@ -110,7 +127,8 @@ async function runCheckInner(test, host) {
             headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: test.soapAction || '' },
             body: test.body || '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body/></s:Envelope>',
           } : {}),
-          ...(test.insecure ? { dispatcher: insecureAgent } : {}),
+          // ⚠ 두 갈래 **모두** dispatcher 를 준다 — 한쪽만 주면 그쪽만 리바인딩 방어가 산다(SEC-09).
+          dispatcher: test.insecure ? insecureAgent : secureAgent,
         });
         const ms = Date.now() - started;
         const okStatus = test.expectStatus ? res.status === test.expectStatus : res.status < 500;

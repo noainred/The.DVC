@@ -9,9 +9,14 @@ import { recordPortalLoginFail } from '../security/loginStore.js';
 import { loadSessionSecurity, singleSessionRequired } from '../security/securitySettings.js';
 import { newSessionId, setActiveSession } from '../auth/sessions.js';
 import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '../security/loginRateLimit.js';
+import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { clientIp } from '../util/rateLimit.js';   // v2.503: 잠금 출발지 판정을 전역 레이트리밋과 통일(trust proxy 규약)
 
 export const authRouter = Router();
+// v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
+// 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
+// ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
+wrapAsyncRouter(authRouter);
 
 // Whether auth is required at all, and whether AD login is enabled (UI hint).
 // 유휴 자동 로그아웃 설정도 함께 내려 클라이언트가 그 시간으로 타이머를 건다(비밀 아님).

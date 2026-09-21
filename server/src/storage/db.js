@@ -165,6 +165,18 @@ async function open() {
         ) GROUP BY ts ORDER BY ts LIMIT 2000`),
       // 일 롤업 upsert — **더 늦은 관측만** last_* 를 갱신한다(엣지 push 가 순서대로 오지 않을 수
       // 있다). max_used 는 항상 최대를 유지하고 samples 는 누적한다.
+      /*
+       * ⚠⚠ v2.574 BUG-04 — `max_used` 는 **측정값**이라 '못 읽음' 과 '0바이트' 를 구분해야 한다.
+       *   예전: `MAX(COALESCE(capacity_daily.max_used, 0), COALESCE(excluded.max_used, 0))`
+       *     → 하루 종일 못 읽은 장비의 그날 최대가 **0** 으로 저장된다(= '사용량 0' 이라는 거짓).
+       *   도달 경로는 v2.561 이 기록한 그대로다 — `storage/collectors/unitySsh.js:163` 이 풀 목록을
+       *   못 읽으면 `usedBytes: null` 을 **정직하게** 내보내고, 수집 주기가 1시간이다.
+       *   정답 형태는 CLAUDE.md v2.550.3 이 못 박아 두었고 `bmusage/db.js:209-213` 이 실제로 쓴다:
+       *     NULLIF(MAX(IFNULL(x, -1e308), IFNULL(excluded.x, -1e308)), -1e308)
+       *   SQL 스칼라 MAX() 는 인자 하나가 NULL 이면 NULL 을 주므로 IFNULL 로 감싸야 하고,
+       *   그 하한은 NULLIF 로 **반드시 되돌려야** 한다 — 안 되돌리면 -1e308 이 값으로 저장된다.
+       * ⚠ 실측(v2.574): 첫 관측이 null 일 때 예전 형태는 **0**, 새 형태는 **null** 이다.
+       */
       upDaily: conn.prepare(`INSERT INTO capacity_daily
           (device_id, day, last_ts, total_bytes, used_bytes, hdd_total, hdd_used, ssd_total, ssd_used, max_used, samples)
         VALUES (?,?,?,?,?,?,?,?,?,?,1)
@@ -176,7 +188,10 @@ async function open() {
           hdd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.hdd_used    ELSE capacity_daily.hdd_used    END,
           ssd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.ssd_total   ELSE capacity_daily.ssd_total   END,
           ssd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.ssd_used    ELSE capacity_daily.ssd_used    END,
-          max_used    = MAX(COALESCE(capacity_daily.max_used, 0), COALESCE(excluded.max_used, 0)),
+          -- v2.574 BUG-04 — COALESCE(..., 0) 은 '못 읽음' 을 '최대 사용량 0바이트' 로 바꾼다.
+          -- v2.561 이 used_bytes 는 고쳤는데 여기만 남아 있었다. 근거·정답 형태는 이 함수의
+          -- JSDoc 에 적었다(리터럴 안이라 여기에는 백틱을 쓸 수 없다 — v2.550.3 규약).
+          max_used    = NULLIF(MAX(IFNULL(capacity_daily.max_used, -1e308), IFNULL(excluded.max_used, -1e308)), -1e308),
           samples     = capacity_daily.samples + 1`),
       selDaily: conn.prepare(`SELECT device_id, day, last_ts, total_bytes, used_bytes,
           hdd_total, hdd_used, ssd_total, ssd_used, max_used, samples

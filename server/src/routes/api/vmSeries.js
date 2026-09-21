@@ -30,6 +30,43 @@ import { memoJson, scopeKey } from './shared.js';
 
 const morefOf = (id, vcId) => String(id || '').slice(String(vcId || '').length + 1);
 
+/**
+ * 폴러 상태를 **범위 계정용으로 축약**한다 (v2.574 SEC-07).
+ *
+ * ⚠⚠ `lastResult` 의 `errors[]`·`skipped[]`·`per[]` 는 전부 `vcenterId` 를 들고 있고
+ *   `errors[].error` 에는 그 vCenter 의 **수집 실패 메시지**가 실린다(`vmseries/poller.js:142`).
+ *   `/settings`(:35)는 `vcenters`·`usage`·`resolved`·`settings.targets` 를 전부 `allowed` 로
+ *   거르는데 **바로 옆 `status:` 필드가 그 필터를 우회**하고 있었다 — v2.550.3 이
+ *   `status.last.counts` 에서 겪은 것과 같은 유형(필드 단위 누락)이다.
+ * ⚠ 개수(`vcenters`·`vms`·`samples`)도 전 법인 합계라 범위 계정에는 주지 않는다 —
+ *   대신 **거른 목록에서 다시 세어** 준다(주 조회 `bmUsage.js:57-70` 과 같은 방식).
+ * ⚠ 통째로 null 로 만들지 않는다 — `running`·`enabled`·`intervalMs` 는 화면이
+ *   '수집이 꺼져 있다 / 도는 중이다' 를 말하는 근거라 범위와 무관하다.
+ */
+export function scopeVmSeriesStatus(st, allowed) {
+  if (!st || typeof st !== 'object') return st;
+  if (!allowed) return st;
+  const { lastResult, ...rest } = st;
+  if (!lastResult) return { ...rest, lastResult: null, scoped: true };
+  const keep = (x) => x && allowed.has(String(x.vcenterId));
+  const errors = (lastResult.errors || []).filter(keep);
+  const skipped = (lastResult.skipped || []).filter(keep);
+  const per = (lastResult.per || []).filter(keep);
+  const sum = (k) => per.reduce((a, x) => a + (Number(x?.[k]) || 0), 0);
+  return {
+    ...rest,
+    lastResult: {
+      at: lastResult.at, trigger: lastResult.trigger, ms: lastResult.ms,
+      paused: lastResult.paused ?? undefined, mock: lastResult.mock ?? undefined,
+      errors, skipped, per,
+      // 전 법인 합계 대신 **보이는 것만** 다시 센다.
+      vcenters: per.length, vms: sum('vms'), hosts: sum('hosts'),
+      samples: sum('samples'), moments: sum('moments'), spikeRows: sum('spikeRows'),
+    },
+    scoped: true,
+  };
+}
+
 export function registerVmSeries(api) {
 
 api.get('/tools/vmseries/settings', requirePerm('tools'), (req, res) => {
@@ -45,7 +82,8 @@ api.get('/tools/vmseries/settings', requirePerm('tools'), (req, res) => {
   res.json({
     settings: { ...s, targets: safeTargets }, limits: VMSERIES_LIMITS, vcenters, resolved, usage,
     totalBytes: usage.reduce((a, u) => a + u.bytes, 0), freeBytes: vmSeriesFreeBytes(),
-    status: vmSeriesPollerStatus(), push: vmSeriesPushStatus(), mock: snap.source === 'mock',
+    // ⚠ v2.574 SEC-07 — `status` 도 거른다. 옆 필드들만 거르고 이것을 그대로 두면 우회로가 남는다.
+    status: scopeVmSeriesStatus(vmSeriesPollerStatus(), allowed), push: vmSeriesPushStatus(), mock: snap.source === 'mock',
   });
 });
 
@@ -95,8 +133,11 @@ api.get('/tools/vmseries/scope-data', requirePerm('tools'), (req, res) => {
   res.json({ vcenterId: vcId, clusters, hosts, vms });
 });
 
-api.get('/tools/vmseries/status', requirePerm('tools'), (_req, res) => {
-  res.json({ ok: true, ...vmSeriesPollerStatus(), push: vmSeriesPushStatus() });
+// ⚠ v2.574 SEC-07 — 예전 시그니처는 `(_req, res)` 였다(사용자를 보지 않는다는 뜻). `lastResult` 의
+//   `errors[].vcenterId`·`skipped[].vcenterId` 로 범위 밖 vCenter id 와 실패 메시지가 나갔다.
+api.get('/tools/vmseries/status', requirePerm('tools'), (req, res) => {
+  const allowed = scopedVcenterIds(req.user, store.get());
+  res.json({ ok: true, ...scopeVmSeriesStatus(vmSeriesPollerStatus(), allowed), push: vmSeriesPushStatus() });
 });
 
 api.post('/tools/vmseries/run', requireRole('admin'), async (req, res) => {

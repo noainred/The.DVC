@@ -67,8 +67,29 @@ export async function resolveInstall(exec) {
   return { prefix, user, configDir, envFile };
 }
 
+/**
+ * `portal.env` 에 KEY=VALUE 를 upsert.
+ *
+ * ⚠⚠ **값에 개행이 있으면 그 줄 하나가 여러 줄이 되어 임의 키가 주입된다.**
+ * 2026-09-21 감사가 이 경로를 지적했는데, **실제로는 주입되지 않았다** —
+ * `deployInputIssue` 가 password·agentName·centralToken·comment·centralUrl·serviceUnits·
+ * fileRoots·instance 이름 **8개 전부**에서 개행을 거부하는 것을 실행으로 확인했다
+ * (JS 의 `$` 는 `m` 플래그 없이 **후행 개행 앞에서 매치하지 않는다** — Perl/Python 과 다르다).
+ * 그러니 이것은 **결함 수정이 아니라 sink 방어**다(v2.574).
+ *
+ * 그럼에도 여기서 한 번 더 막는 이유: 지금 안전한 것은 **호출부 8곳이 각자 검사하기 때문**이고,
+ * 새 키를 추가하는 사람이 그 검사를 빠뜨리면 그 순간 뚫린다. 불변조건은 **값이 파일에 닿는
+ * 지점**이 갖는 것이 맞다(v2.561 '정직 장치를 무력화하는 강제변환이 가장 위험하다' 와 같은 판단).
+ */
+const ENV_INJECT_RE = /[\r\n\0]/;
 async function upsertEnv(exec, envFile, pairs) {
   if (!pairs.length) return;
+  for (const [k, v] of pairs) {
+    if (ENV_INJECT_RE.test(String(k)) || ENV_INJECT_RE.test(String(v))) {
+      throw new Error(`env 값에 개행·NUL 이 있어 중단했습니다(키 주입 방지): ${String(k).slice(0, 40)}`);
+    }
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(k))) throw new Error(`env 키 형식 오류: ${String(k).slice(0, 40)}`);
+  }
   const delScript = pairs.map(([k]) => `/^${k}=/d`).join(';');
   await exec(`sed -i '${delScript}' ${envFile} 2>/dev/null || true`);
   const block = '\n# --- RMA (auto-deployed) ---\n' + pairs.map(([k, v]) => `${k}=${v}`).join('\n') + '\n';

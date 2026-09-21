@@ -17,9 +17,14 @@ import { logAudit } from '../audit.js';
 import { runLocalIdracScan } from '../idrac/localScan.js';
 import { collectMany as bmstorCollectMany } from '../bmstor/collect.js';
 import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';
+import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { tokenFingerprint } from '../util/tokenFingerprint.js'; // v2.560: 토큰 지문 표기는 한 곳이 소유한다
 
 export const collectorRouter = Router();
+// v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
+// 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
+// ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
+wrapAsyncRouter(collectorRouter);
 
 // Verify the shared collector token on a request (상수시간 비교).
 function checkToken(req) {
