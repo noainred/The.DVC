@@ -949,6 +949,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       전부 체크돼 있기 때문이다. 이것은 **바뀐 것이 아니라 원래 그랬던 사실이 보이게 된 것**
       이다(서버 동작은 한 줄도 바꾸지 않았다). 머리말이 그 사실을 말한다.
 
+  - ⚠⚠ **사용자별 특수기능 권한 — '허용 목록' 은 거부 목록과 반대 방향의 성질을 가진다**
     (`auth/permissions.js effectiveToolAccess`·`auth/toolAccess.js issueFor` + 웹
     `views/toolVisibility.js`·`views/userAdmin/userToolText.js`, v2.555 — 사용자 요청 "특정 사용자는
     특수기능의 특정 기능만 사용할 수 있고, 나머지 기능은 보여주지 않고 싶다 · 스토리지 엔지니어에게
