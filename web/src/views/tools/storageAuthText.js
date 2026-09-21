@@ -18,18 +18,16 @@
  * 4. 주기·상한 **숫자를 문구에 박지 않는다** — 서버가 준 값만 쓴다.
  */
 
+import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+
 /** 시각 → '3시간 전' 형태. 값이 없으면 null(지어내지 않는다). */
-export function agoText(ts, now = Date.now()) {
-  const t = Number(ts);
-  if (!Number.isFinite(t) || t <= 0) return null;
-  const s = Math.max(0, Math.floor((now - t) / 1000));
-  if (s < 60) return '방금';
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}분 전`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}시간 전`;
-  return `${Math.floor(h / 24)}일 전`;
-}
+/**
+ * ⚠ v2.574 IMP-03 — 문구는 **공용 코어 `relTime.js`** 가 소유한다. 아래는 호출부 호환을 위한
+ *   위임 껍데기다. v2.573 까지 9벌이 각자 구현이었고 **실제로 갈라져 있었다**
+ *   (90초 → `2분 전` 7벌 vs `1분 전` 2벌 · 결측 `—` 6벌 / `null` 2벌 / `없음` 1벌).
+ *   ⚠ 새 상대시각 문구를 만들지 말 것 — `agoText`(타임스탬프)·`elapsedText`(경과 ms) 를 쓴다.
+ */
+export const agoText = (ts, now = Date.now()) => _ago(ts, now, { dash: null, subMinute: '방금' });
 
 /** 자격증명 지문 한 줄 — 서버 `util/credFingerprint.js` 와 **같은 표기**를 쓴다(대조가 목적). */
 export function credFpText(fp) {

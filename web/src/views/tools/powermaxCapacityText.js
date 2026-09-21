@@ -104,8 +104,8 @@ export function usageTrust(extra) {
       kind: 'suspect',
       short: '기준 불명',
       text: '이 장비의 사용량은 **실제 기록량이 아닐 수 있습니다** — Dell 스펙에 설명이 없는 '
-        + '`physicalCapacity` 필드로 읽었고 사용량이 전체 용량과 같게 보고됩니다. '
-        + 'Unisphere 응답에 `system_capacity.usable_used_tb` 가 있거나 SRP 조회가 되면 실제 기록량이 표시됩니다.',
+        + '‘physicalCapacity’ 필드로 읽었고 사용량이 전체 용량과 같게 보고됩니다. '
+        + 'Unisphere 응답에 ‘system_capacity.usable_used_tb’ 가 있거나 SRP 조회가 되면 실제 기록량이 표시됩니다.',
     };
   }
   const basis = String(extra?.capacityBasis || '');

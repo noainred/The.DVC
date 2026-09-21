@@ -200,7 +200,7 @@ export default function BulkDeviceIo({
         value={text} onChange={(e) => invalidate(e.target.value)}
         placeholder={format === 'csv'
           ? '여기에 CSV 를 붙여넣거나 위에서 파일을 고르세요.'
-          : '탭·파이프·공백으로 나눈 줄, 또는 `host=10.0.0.1 계정=admin` 처럼 키=값 으로 적어도 됩니다.'} />
+          : '탭·파이프·공백으로 나눈 줄, 또는 ‘host=10.0.0.1 계정=admin’ 처럼 키=값 으로 적어도 됩니다.'} />
 
       {err && <div style={{ color: 'var(--red)', fontSize: 12.5, marginTop: 8 }}>⚠ {err}</div>}
       {flags.note && <div style={{ color: 'var(--amber)', fontSize: 12.5, marginTop: 8 }}>⚠ {flags.note}</div>}

@@ -1011,6 +1011,95 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       헤더(`status-pill`·`user-box`)라 **이 변경과 무관**하다(A/B 확인). 실제 운영 계정·AD 계정으로는
       확인하지 못했다.
 
+  - ⚠⚠ **express 4 는 async 핸들러의 throw 를 잡지 않는다 — 라우터를 `wrapAsyncRouter` 로 감싼다**
+    (`util/asyncRoute.js`, v2.574 — 감사 BUG-01·02·03. 회귀는 `test/asyncHang2574.test.js`):
+    - **증상은 500 이 아니라 '무응답' 이다.** 동기 throw 는 전역 핸들러가 500 을 주지만 async
+      reject 는 **아무도 응답하지 않아** 그 요청이 클라이언트가 끊을 때까지 매달리고 **소켓 fd 를
+      잡는다**. `index.js:10` 의 `unhandledRejection` 은 로그만 남기고 계속 실행하므로 프로세스는
+      죽지 않는다 — **그래서 더 안 보인다**. 스윕: `routes/` 의 async 라우트 **284건 중 138건**이 무보호였다.
+    - ⚠⚠ **래퍼는 핸들러를 `동기로` 부른다.** `Promise.resolve().then(() => handler(...))` 로 감싸면
+      실행이 마이크로태스크로 밀려, **라우터 스택에서 핸들러를 꺼내 동기로 부르고 바로 단언하는**
+      하니스가 깨진다(`test/collectorDiag2437.test.js:23` — v2.574 초판이 6통과 → 3실패로 만들었다).
+      동기 throw 는 express 가 이미 잡으므로 미룰 이유도 없다. 되돌리지 말 것.
+    - ⚠ **`use` 는 감싸지 않는다** — `use` 로 마운트되는 **하위 라우터**(그 자체가 `(req,res,next)`
+      함수다)를 감싸면 라우터 속성이 사라진 평범한 함수가 되어 마운트가 깨진다.
+      4-인자 에러 핸들러도 감싸지 않는다(인자 3개가 되면 express 가 에러 핸들러로 인식하지 못한다).
+    - ⚠ **`next(err)` 로 보낸다 — 래퍼가 직접 응답하지 않는다.** 전역 핸들러가 이미 스택 은닉·
+      `pushLog`·`headersSent` 를 처리한다. 두 곳이 그 판정을 갖게 하지 말 것.
+    - 회귀 테스트가 ① 라우터 14개가 전부 감싸졌는지 ② **감싸기가 라우트 등록보다 앞인지**(뒤면 그
+      앞 라우트는 보호되지 않는다) 를 소스로 고정한다. **새 라우터를 만들면 선언 직후에 부를 것.**
+    - ⚠ **SQL 에 값을 보간하는 곳은 그 값을 먼저 좁힐 것**: `pdu/db.js rangeOf` 가 `hours`/`to` 를
+      클램프하지 않아 `bucketMs` 가 `Infinity` 가 됐고 그것이 `(ts/${bucketMs})` 로 들어가
+      SQLite 가 **식별자로 파싱**(`no such column: Infinity`)했다. 실측 `?hours=1e400` →
+      **`000 / 8.002s`(무응답)**, 매달린 요청 40개에 fd **111 → 151**. 형제 `sanswitch/perfDb.js` 는
+      라우트에서 `Math.min(24*90, …)` 로 클램프해 같은 결함을 피하고 있었다 — PDU 에만 없었다.
+      클램프는 **라우트가 아니라 헬퍼**(`rangeOf`)에 둔다(새 시계열 라우트가 자동으로 보호되게).
+
+  - ⚠⚠ **범위(scope)는 '형제 라우트가 하고 있는가' 로 점검한다 — 한 파일에서 하나만 빠지면 실수다**
+    (v2.574 감사 SEC-01~08. 회귀는 `test/scopeLeak2574.test.js` — **실제 라우터를 띄워 응답으로** 본다):
+    - **SEC-01 유출 실증**: `routes/api/checksLogs.js:113` 이 `(_req, res)` 였다(사용자를 아예 보지
+      않는다는 뜻이다). 범위 계정 응답이 **admin 응답과 바이트 단위로 동일**했다. 같은 파일의
+      형제(`:78`·`vmware-config`)는 둘 다 `allowed.has(reqVc)` 로 거르고 있었다.
+    - ⚠⚠ **`scopedVcenterIds()` 는 `Set` 또는 `null` 을 돌려준다.** `allowed.includes(...)` 는
+      **TypeError** 이고, 그 라우트가 async 면 위 항목과 겹쳐 **응답 없이 매달린다**.
+      전체 범위 계정은 `allowed === null` 이라 `&&` 에서 단락돼 **아무도 못 느낀다** — 그래서 오래 남는다.
+      저장소 전수 `allowed.has(` 110곳 vs `allowed.includes(` 1곳(`bmUsage.js:124`)이었다.
+      ⚠ 스윕을 `allowed.includes(` 로 넓게 잡으면 **오탐**이다 — 같은 이름의 무관한 배열이 둘 있다
+      (`auth/permissions.js:322`·`svcmon/store.js:152`). `allowed = scopedVcenterIds(` 인 파일만 본다.
+    - ⚠ **같은 객체 리터럴 안에서 일부 필드만 거르지 말 것**(v2.550.3 재발): `bmUsage.js` 가
+      `counts`·`skippedCounts` 는 막고 옆의 `settings.corps`·`authStops` 는 무필터였다.
+      `vmSeries.js` 도 `vcenters`·`usage`·`resolved` 는 거르고 옆 `status:` 가 우회했다.
+    - **뺀 것은 반드시 밝힌다** — `omittedOutOfScope`·`scoped`·`corpsHidden`·`addressHidden`.
+      조용히 빼면 화면이 '전부 봤다' 는 거짓을 말한다(v2.509 규약).
+    - ⚠ **엣지 주소를 여는 라우트를 403 으로 막기 전에 그 화면이 누구 것인지 볼 것**:
+      `/api/ping/edge/overview` 는 권한 게이트조차 없었지만(viewer 도달) 그 응답은 **메인 내비
+      '네트워크 › 체크'** 가 쓴다. 403 으로 막으면 operator 의 정상 업무가 깨지므로 **주소만 가렸다**
+      (v2.500 D/M1 relaycheck 이 택한 방식). adminOnly 로 올리는 것은 별건이다.
+    - ⚠ **공개 API 선언(`publicapi/allowlist.js`)과 내부 라우트의 `fullScopeOnly` 를 대조할 것**:
+      `/faults/parts` 는 `requiresFullScope` 가 빠져 **같은 데이터가 세션 경로에서는 403 인데 키
+      경로로는 전량** 나갔다. 그 플래그는 손으로 붙이는 것이라 전 카탈로그에서 2곳뿐이었다.
+
+  - ⚠⚠ **테스트의 `stripComments` 정규식 2줄 판본은 틀렸다 — `test/_stripComments.js` 를 쓸 것**
+    (v2.574): `s.replace(<블록주석>, '').replace(<줄주석>, '')` 형태는 **줄 주석 안에 슬래시+별
+    조합이 있으면**(이 저장소 실제 사례: `agent/configPush.js:34` 의 `// … (*.json/*.env) …`)
+    블록 주석 규칙이 **거기서부터 다음 종료 기호까지 코드를 통째로 지운다**. 실측: 그 파일의
+    `catch` 5개가 **전부 사라져**(스트립 후 0개) 새 스윕이 멀쩡한 코드를 '무음 실패' 로 오판했다.
+    순서를 뒤집어도 블록 주석 안의 `//` 로 같은 문제가 난다 → **상태 기계**가 정답이다.
+    · ⚠ 코어는 **개행만 남기고 나머지 주석 문자는 지운다**. 공백으로 채우면 기존 스윕들의
+      **거리 창**(`설정: {[\s\S]{0,200}키`)을 넘겨 멀쩡한 코드를 누락으로 오판한다
+      (v2.574 에 `linkCheck2552` 가 실제로 그렇게 깨졌다).
+    · ⚠ **JSDoc 안에 블록주석 종료 기호를 쓰지 말 것** — 이 세션에서 **세 번** 밟았다
+      (`_stripComments.js` 자신의 머리말 · `edgeSweep2574.test.js` 의 대상 설명 ·
+      `storage/db.js` 의 SQL 주석 백틱). 그 자리에서 리터럴·주석이 끊긴다.
+
+  - ⚠ **새 엣지 워커·폴러는 `edgelog/spec.js` 에 자동으로 등재되지 않는다 — 스윕이 고정한다**
+    (v2.574 IMP-06·07, `test/edgeSweep2574.test.js`): CLAUDE.md 가 v2.554·v2.560·v2.561 에 **세 번**
+    같은 경고를 적었는데도 v2.573 시점에 **13개가 빠져 있었다**(표 41 → 54). 기존 테스트가
+    `length >= 20` 만 봤기 때문이다 — **그런 검사는 '추가를 잊은 것' 을 절대 잡지 못한다.**
+    이제 소스를 훑어 `*Status()` 를 export 하는 워커·폴러가 전부 표에 있는지 본다(의도적 제외는
+    사유와 함께 `EXCLUDED` 에 적는다). 그리고 push/pull 진입 함수를 **실제로 호출한다**(v2.566 TDZ
+    교훈 — 순수 헬퍼만 고정하는 테스트는 그 종류를 통과시킨다).
+    · 함께 고친 무음 실패: `pingWorker`·`captureWorker`·`bmstorWorker` 가 `catch { return null; }`
+      하나로 끝나 **4~10초마다 조용히 실패**하고 있었다(v2.561 이 이름까지 적어 뒀다).
+
+  - ⚠ **STARTTLS 는 '광고하지 않으면 평문으로 내려간다' 가 기본값이었다**(`util/smtp.js`, v2.574 SEC-10):
+    조건이 `… && ehloCaps(ehlo).has('STARTTLS')` 하나라, 서버가 그 한 줄을 광고하지 않으면
+    블록을 건너뛰고 **`AUTH PLAIN <base64>` 로 내려갔다**(base64 는 암호화가 아니다). 중간자가
+    EHLO 응답에서 그 줄만 지우면 자격증명이 평문으로 나간다. 이제 **자격증명이 있으면 중단**하고
+    (실증: AUTH 미전송), **없으면 진행**한다(사내 릴레이의 정상 구성 — 막으면 멀쩡한 현장이 깨진다).
+    관리자가 체크를 끈 경우는 진행하되 추적 로그에 **평문 전송 사실을 적는다**.
+  - ⚠ **`new Agent(` 스윕은 'Agent 를 안 쓰는 경로' 를 못 본다**(v2.574 SEC-09):
+    `svcmon/checker.js:113` 이 `...(test.insecure ? { dispatcher } : {})` 라 **기본(TLS 검증) 경로는
+    전역 `fetch`** 로 나갔다 — CLAUDE.md v2.506 이 직접 경고한 "`globalThis.fetch` 에는 lookup 이
+    없다" 가 그대로였다. 실증 기준(v2.537)으로 측정: dispatcher 있음 `ESSRFBLOCKED` / 없음
+    **`ECONNREFUSED`(연결이 실제로 시도됐다)**. **두 갈래 모두에 dispatcher 를 줄 것.**
+  - ⚠ **`resilientFetch` 는 리다이렉트를 직접 따라가며 출처가 바뀌면 비밀 헤더를 뗀다**(v2.574 SEC-14):
+    fetch 기본값 `redirect:'follow'` 는 교차 출처에서 `Authorization`·`Cookie` 만 뗀다 —
+    이 저장소가 쓰는 **`X-Collector-Token`·`X-Central-Token` 같은 커스텀 헤더는 그대로 따라간다**.
+    엣지가 `302 Location: https://공격자/` 한 줄만 돌려주면 중앙이 그 토큰을 보낸다.
+    ⚠ `redirect:'manual'` 로 통째로 막지 말 것 — GitHub 릴리스 자산이 실제로 리다이렉트되므로
+    **자동 업그레이드가 깨진다**. 뗀 헤더는 `__secretsDroppedOnRedirect` 로 밝힌다.
+
   - ⚠⚠ **'읽지 못한 수치' 를 0 으로 둔갑시키지 않는다 — 판정은 `util/numOrNull.js` 하나다**
     (v2.561 — 사용자 요청 "버그 찾아서 수정". **여섯 번째 재발**이고 이번엔 실제로 틀린 값을 만들고
     있었다. 회귀는 `test/numOrNull2561.test.js`):

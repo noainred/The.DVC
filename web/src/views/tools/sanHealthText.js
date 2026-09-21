@@ -92,7 +92,7 @@ export function sortResults(results) {
 /** 기준선 안내 — 없으면 '왜 필요한지' 를 말한다. */
 export function baselineNote(baseline) {
   if (!baseline) {
-    return '기준선이 없어 **당월 신규 에러**를 판정하지 않았습니다 — 포트 에러 카운터는 부팅 이후 누적이라 누적값만으로는 최근 발생을 알 수 없습니다. 아래 `이번 달 기준선 저장` 을 누르면 다음 점검부터 신규분을 가려 줍니다.';
+    return '기준선이 없어 **당월 신규 에러**를 판정하지 않았습니다 — 포트 에러 카운터는 부팅 이후 누적이라 누적값만으로는 최근 발생을 알 수 없습니다. 아래 ‘이번 달 기준선 저장’ 을 누르면 다음 점검부터 신규분을 가려 줍니다.';
   }
   const parts = [`기준선 ${stamp(baseline.at)} (포트 ${n0(baseline.portCount)}개)`];
   if (baseline.portsComplete === false) parts.push('⚠ 이 기준선은 중앙에 일부 포트만 있을 때 저장돼 누락 포트는 신규 판정이 되지 않습니다');

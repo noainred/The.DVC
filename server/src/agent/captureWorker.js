@@ -12,6 +12,19 @@ let timer = null;
 let busy = false;
 const POLL_MS = Number(process.env.AGENT_CAPTURE_POLL_MS) || 4_000;
 
+/*
+ * ⚠⚠ v2.574 IMP-07 — **무음 실패를 만들지 않는다.** v2.573 까지 이 워커는 `catch { return null; }`
+ * 하나로 끝나 상태 객체도 로그도 없었다. 4~10초 마다 조용히 실패해도 **엣지 로그 화면에서조차
+ * 진단할 길이 없었다** — CLAUDE.md 가 v2.549·v2.554·v2.561 에 **세 번** 같은 경고를 적어 두고도
+ * 이 셋만 남아 있던 것이다(v2.561 이 이름까지 적어 뒀다).
+ * 이제 `_last` 를 남기고(`captureWorkerStatus`) 실패는 콘솔에도 적으며 `edgelog/spec.js` 표에 등재한다.
+ * ⚠ 타이머 콜백의 `.catch(() => {})` 는 정당하다 — 안쪽이 이미 상태를 남기고, setInterval 의
+ *   unhandled rejection 을 막는 관례다(v2.561 규약).
+ */
+let _last = null;
+/** 마지막 실행 결과 — `edgelog/spec.js` 가 화면에 싣는다. 비밀은 담지 않는다. */
+export function captureWorkerStatus() { return { pollMs: POLL_MS, ..._last }; }
+
 function headers() {
   return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
@@ -45,8 +58,14 @@ export async function runCaptureWorkerOnce() {
         console.log(`[capture-agent] 캡처 완료 reqId=${job.reqId}${result?.dual ? ' (dual)' : ''}`);
       }
     }
-    return { at: Date.now() };
-  } catch { return null; }
+    _last = { at: Date.now(), ok: true };
+    return _last;
+  } catch (e) {
+    const msg = String(e?.message || e).slice(0, 300);
+    _last = { at: Date.now(), ok: false, error: msg };
+    console.warn('[capture-agent] 실패: ' + msg);
+    return null;
+  }
   finally { busy = false; }
 }
 

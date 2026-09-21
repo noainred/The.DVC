@@ -95,7 +95,7 @@ export function rawCapacity({ drives, raid, stripeLength, deviceUsableBytes } = 
     usableShareHigh: pct(usable, rawLow),
     usableShareLow: pct(usable, rawHigh),
     exact: false,
-    note: '원시 용량은 드라이브 표기(`38 x 3.8T`)로 **추정**한 값입니다 — `3.8T` 가 TiB 인지 10진 TB 인지 출력만으로는 알 수 없어 범위로 냅니다. 장비가 보고한 유효 용량과의 차이는 **패리티·핫스페어·시스템 예약**이 섞인 것이고, uemcli 출력에는 그 내역이 없어 분해하지 않습니다. 계산에 쓰는 값은 언제나 **장비가 보고한 전체 용량**입니다.',
+    note: '원시 용량은 드라이브 표기(‘38 x 3.8T’)로 **추정**한 값입니다 — ‘3.8T’ 가 TiB 인지 10진 TB 인지 출력만으로는 알 수 없어 범위로 냅니다. 장비가 보고한 유효 용량과의 차이는 **패리티·핫스페어·시스템 예약**이 섞인 것이고, uemcli 출력에는 그 내역이 없어 분해하지 않습니다. 계산에 쓰는 값은 언제나 **장비가 보고한 전체 용량**입니다.',
   };
 }
 

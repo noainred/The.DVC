@@ -9,6 +9,8 @@
  *   값이 없다. 그것을 초록으로 칠하면 "모든 통신이 정상" 이라는 화면이 거짓이 된다 —
  *   `rowState()` 가 **`no-data` 를 별도 상태**로 두고 이유 후보를 함께 말한다(v2.548 규약).
  */
+
+import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
 const t = (v) => String(v ?? '').trim();
 
 export const STATE_LABEL = Object.freeze({
@@ -122,14 +124,13 @@ export function msText(v) {
 }
 
 /** 경과 시간. `null` 은 '없음' 이다. */
-export function ageText(at, now = Date.now()) {
-  if (at == null) return '없음';
-  const d = Math.max(0, now - Number(at));
-  if (d < 60_000) return `${Math.round(d / 1_000)}초 전`;
-  if (d < 3_600_000) return `${Math.round(d / 60_000)}분 전`;
-  if (d < 86_400_000) return `${Math.round(d / 3_600_000)}시간 전`;
-  return `${Math.round(d / 86_400_000)}일 전`;
-}
+/**
+ * ⚠ v2.574 IMP-03 — 문구는 **공용 코어 `relTime.js`** 가 소유한다. 아래는 호출부 호환을 위한
+ *   위임 껍데기다. v2.573 까지 9벌이 각자 구현이었고 **실제로 갈라져 있었다**
+ *   (90초 → `2분 전` 7벌 vs `1분 전` 2벌 · 결측 `—` 6벌 / `null` 2벌 / `없음` 1벌).
+ *   ⚠ 새 상대시각 문구를 만들지 말 것 — `agoText`(타임스탬프)·`elapsedText`(경과 ms) 를 쓴다.
+ */
+export const ageText = (ts, now = Date.now()) => _ago(ts, now, { dash: '없음', subMinute: 'seconds' });
 
 /**
  * 인증서 표시. ⚠ **만료일을 모르면 '유효' 라고 말하지 않는다**(HTTP 링크·TLS 단계 미도달).

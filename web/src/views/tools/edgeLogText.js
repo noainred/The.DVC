@@ -19,6 +19,8 @@
  * ⚠ 주기·상한 **숫자를 문구에 박지 말 것** — 서버가 주는 값(`limits`·`store`·`jobs`)만 쓴다.
  */
 
+import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+
 const t = (v) => String(v ?? '').trim();
 /**
  * ⚠ **`v == null` 을 먼저 본다** — `Number(null) === 0` 이라 `Number.isFinite(Number(v))` 만 보면
@@ -51,15 +53,13 @@ export function toneVar(tone) {
 }
 
 /** 경과 시간 — `null` 은 '—' 다(0 으로 만들지 않는다). */
-export function ageText(at, now = Date.now()) {
-  const v = n(at);
-  if (!v) return '—';
-  const ms = Math.max(0, now - v);
-  if (ms < 60_000) return `${Math.round(ms / 1000)}초 전`;
-  if (ms < 3_600_000) return `${Math.round(ms / 60_000)}분 전`;
-  if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}시간 전`;
-  return `${Math.round(ms / 86_400_000)}일 전`;
-}
+/**
+ * ⚠ v2.574 IMP-03 — 문구는 **공용 코어 `relTime.js`** 가 소유한다. 아래는 호출부 호환을 위한
+ *   위임 껍데기다. v2.573 까지 9벌이 각자 구현이었고 **실제로 갈라져 있었다**
+ *   (90초 → `2분 전` 7벌 vs `1분 전` 2벌 · 결측 `—` 6벌 / `null` 2벌 / `없음` 1벌).
+ *   ⚠ 새 상대시각 문구를 만들지 말 것 — `agoText`(타임스탬프)·`elapsedText`(경과 ms) 를 쓴다.
+ */
+export const ageText = (ts, now = Date.now()) => _ago(ts, now, { subMinute: 'seconds' });
 
 /** 소요 시간. */
 export function msText(ms) {

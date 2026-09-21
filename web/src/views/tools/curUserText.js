@@ -18,18 +18,18 @@
  *    감사 증적이 아니다. 화면이 그 사실을 적는다.
  */
 
+import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+
 const n0 = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
 /** 경과 시간 — '방금 · N분 전 · N시간 전 · N일 전'. 미래는 '곧'(시계 오차). */
-export function agoText(ms) {
-  if (ms == null || !Number.isFinite(Number(ms))) return '—';
-  const v = Number(ms);
-  if (v < 0) return '미래(시계 오차)';
-  if (v < 60_000) return '방금';
-  if (v < 3_600_000) return `${Math.round(v / 60_000)}분 전`;
-  if (v < 86_400_000) return `${Math.round(v / 3_600_000)}시간 전`;
-  return `${Math.round(v / 86_400_000)}일 전`;
-}
+/**
+ * ⚠ v2.574 IMP-03 — 문구는 **공용 코어 `relTime.js`** 가 소유한다. 아래는 호출부 호환을 위한
+ *   위임 껍데기다. v2.573 까지 9벌이 각자 구현이었고 **실제로 갈라져 있었다**
+ *   (90초 → `2분 전` 7벌 vs `1분 전` 2벌 · 결측 `—` 6벌 / `null` 2벌 / `없음` 1벌).
+ *   ⚠ 새 상대시각 문구를 만들지 말 것 — `agoText`(타임스탬프)·`elapsedText`(경과 ms) 를 쓴다.
+ */
+export const agoText = (ms) => _elapsed(ms, { subMinute: '방금', future: '미래(시계 오차)' });
 
 /** 절대 시각 + 경과. `now` 를 주면 '(N분 전)' 이 붙는다. */
 export function whenText(ts, now = null) {
@@ -73,10 +73,10 @@ export function kindAdvice(kind) {
   switch (String(kind)) {
     case 'ok': return { waiting: false, text: '' };
     case 'stale': return { waiting: false, text: '게스트 안의 발행 작업이 멈췄거나 VMware Tools 가 내려갔을 수 있습니다. 해당 서버에서 스케줄 작업(PortalCurrentUsers)이 도는지 확인하세요.' };
-    case 'no-agent': return { waiting: false, text: '이 VM 에서 `guestinfo.curuser.*` 값을 찾지 못했습니다. 발행기 스크립트가 아직 등록되지 않았거나, 이 환경이 게스트가 쓴 값을 vCenter 구성에 노출하지 않는 경우입니다 — **두 경우를 구분할 정보가 포탈에 없습니다.** 한 대에 먼저 등록해 값이 올라오는지 확인해 보세요.' };
-    case 'guest-error': return { waiting: false, text: '게스트에서 `quser` 를 실행하지 못했습니다(명령 부재·정책 차단). 아래 사유 원문을 확인하세요.' };
+    case 'no-agent': return { waiting: false, text: '이 VM 에서 ‘guestinfo.curuser.*’ 값을 찾지 못했습니다. 발행기 스크립트가 아직 등록되지 않았거나, 이 환경이 게스트가 쓴 값을 vCenter 구성에 노출하지 않는 경우입니다 — **두 경우를 구분할 정보가 포탈에 없습니다.** 한 대에 먼저 등록해 값이 올라오는지 확인해 보세요.' };
+    case 'guest-error': return { waiting: false, text: '게스트에서 ‘quser’ 를 실행하지 못했습니다(명령 부재·정책 차단). 아래 사유 원문을 확인하세요.' };
     case 'incomplete': return { waiting: true, text: '발행 도중에 읽은 것으로 보입니다 — 다음 주기에 정상화되는 것이 보통입니다.' };
-    case 'unparsed': return { waiting: false, text: '값은 받았지만 `quser` 출력 형식을 읽지 못했습니다. **사용자 0명이 아닙니다.** 원문을 보내주시면 파서를 고칩니다.' };
+    case 'unparsed': return { waiting: false, text: '값은 받았지만 ‘quser’ 출력 형식을 읽지 못했습니다. **사용자 0명이 아닙니다.** 원문을 보내주시면 파서를 고칩니다.' };
     case 'clock-skew': return { waiting: false, text: '게스트가 보고한 발행 시각이 미래입니다(게스트 시계 오차) — 신선도 판정을 신뢰할 수 없습니다. 게스트 시간 동기화를 확인하세요.' };
     case 'not-found': return { waiting: true, text: 'vCenter 응답에 그 VM 이 없었습니다(삭제·권한·조회 시점 차이). 다음 주기에 다시 확인합니다.' };
     default: return { waiting: false, text: '' };
@@ -112,7 +112,7 @@ export function collectStateNote(d, now = Date.now()) {
     return {
       kind: 'all-no-agent', tone: 'amber', waiting: false,
       title: `대상 ${recs}대 모두에서 발행 값을 찾지 못했습니다`,
-      body: '각 Windows 서버에 발행기 스크립트를 등록해야 값이 올라옵니다(아래 안내). 또는 이 환경이 게스트가 쓴 `guestinfo.*` 를 vCenter 구성에 노출하지 않는 경우일 수 있습니다 — **두 원인을 포탈이 구분할 수 없습니다.** 먼저 한 대에 등록해 값이 보이는지 확인하는 것이 가장 빠릅니다.',
+      body: '각 Windows 서버에 발행기 스크립트를 등록해야 값이 올라옵니다(아래 안내). 또는 이 환경이 게스트가 쓴 ‘guestinfo.*’ 를 vCenter 구성에 노출하지 않는 경우일 수 있습니다 — **두 원인을 포탈이 구분할 수 없습니다.** 먼저 한 대에 등록해 값이 보이는지 확인하는 것이 가장 빠릅니다.',
     };
   }
   const unchecked = recs - n0(kinds.ok);

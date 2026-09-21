@@ -13,6 +13,8 @@
  * 4. **상한으로 자른 것은 개수를 밝힌다.**
  */
 
+import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+
 /** 서버별 상태 배지 색조. `unparsed`·`no-endpoint` 는 '실패' 가 아니라 '확인 불가' 계열이다. */
 export const KIND_TONE = Object.freeze({
   ok: 'green',
@@ -53,16 +55,13 @@ export function intervalText(intervalMs) {
   return `${m(intervalMs)}분 주기`;
 }
 
-export function agoText(ts, now = Date.now()) {
-  const t = Number(ts);
-  if (!Number.isFinite(t) || t <= 0) return '—';
-  const s = Math.round((now - t) / 1000);
-  if (s < 0) return '방금';
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.round(s / 60)}분 전`;
-  if (s < 86_400) return `${Math.round(s / 3600)}시간 전`;
-  return `${Math.round(s / 86_400)}일 전`;
-}
+/**
+ * ⚠ v2.574 IMP-03 — 문구는 **공용 코어 `relTime.js`** 가 소유한다. 아래는 호출부 호환을 위한
+ *   위임 껍데기다. v2.573 까지 9벌이 각자 구현이었고 **실제로 갈라져 있었다**
+ *   (90초 → `2분 전` 7벌 vs `1분 전` 2벌 · 결측 `—` 6벌 / `null` 2벌 / `없음` 1벌).
+ *   ⚠ 새 상대시각 문구를 만들지 말 것 — `agoText`(타임스탬프)·`elapsedText`(경과 ms) 를 쓴다.
+ */
+export const agoText = (ts, now = Date.now()) => _ago(ts, now, { subMinute: 'seconds' });
 
 /**
  * 인증 실패로 **주기 수집을 멈춘** 상태의 사실 관계(v2.535).

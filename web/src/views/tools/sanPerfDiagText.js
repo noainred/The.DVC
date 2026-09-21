@@ -13,17 +13,16 @@
  *   없으면 '몇 분' 처럼 범위로 말한다(CLAUDE.md).
  */
 
+import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+
 /** 상대 시각('3분 전'). 미래·비정상 값은 null 을 돌려 문구에서 빠진다(지어내지 않는다). */
-export function agoText(ts, now = Date.now()) {
-  const t = Number(ts);
-  if (!Number.isFinite(t) || t <= 0) return null;
-  const s = Math.round((now - t) / 1000);
-  if (s < -60) return null;              // 시계 차이 이상 — 말하지 않는다
-  if (s < 60) return '방금';
-  if (s < 3600) return `${Math.round(s / 60)}분 전`;
-  if (s < 86400) return `${Math.round(s / 3600)}시간 전`;
-  return `${Math.round(s / 86400)}일 전`;
-}
+/**
+ * ⚠ v2.574 IMP-03 — 문구는 **공용 코어 `relTime.js`** 가 소유한다. 아래는 호출부 호환을 위한
+ *   위임 껍데기다. v2.573 까지 9벌이 각자 구현이었고 **실제로 갈라져 있었다**
+ *   (90초 → `2분 전` 7벌 vs `1분 전` 2벌 · 결측 `—` 6벌 / `null` 2벌 / `없음` 1벌).
+ *   ⚠ 새 상대시각 문구를 만들지 말 것 — `agoText`(타임스탬프)·`elapsedText`(경과 ms) 를 쓴다.
+ */
+export const agoText = (ts, now = Date.now()) => _ago(ts, now, { dash: null, subMinute: '방금', future: 'null' });
 
 /** 절대 시각(로컬). 없으면 null. */
 export function whenText(ts) {

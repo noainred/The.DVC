@@ -266,7 +266,17 @@ export default function HorizonSessionsPanel() {
         <Modal title={`${detail.name || detail.serverId} — 수집 상태`} onClose={() => setDetail(null)} width={720}>
           <div style={{ fontSize: 12.5, lineHeight: 1.7 }}>
             <div><b>판정</b> <KindBadge kind={detail.kind} labels={labels} /></div>
-            {kindAdvice(detail.kind) && <div style={{ marginTop: 6, whiteSpace: 'normal' }}><BoldText text={kindAdvice(detail.kind)} /></div>}
+            {/*
+              * ⚠⚠ v2.574 BUG-11 — `kindAdvice()` 는 **객체** `{waiting, text}` 를 돌려준다.
+              *   예전에는 그 객체를 그대로 BoldText 에 넘겨 `boldText.jsx boldParts` 의
+              *   `String(text ?? '')` 가 **`[object Object]`** 를 만들었다 — 조치 안내가 통째로
+              *   사라진 것이다(v2.569 React #31 과 같은 계열). 게다가 객체는 **항상 truthy** 라
+              *   문구가 없는 `ok` 에서도 그 상자가 떴다.
+              *   같은 함수를 쓰는 `CurrentUsers.jsx:258` 은 처음부터 `adv.text` 로 올바르게 썼다.
+              */}
+            {kindAdvice(detail.kind).text && (
+              <div style={{ marginTop: 6, whiteSpace: 'normal' }}><BoldText text={kindAdvice(detail.kind).text} /></div>
+            )}
             {/* 정지 사실만이 아니라 **시점·횟수**를 말한다(v2.528 규약) — 없으면 사용자가 그동안의 수치를 현재값으로 읽는다. */}
             {authStopNote(detail.authStopped, data?.now) && (
               <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-dim)', whiteSpace: 'normal' }}>

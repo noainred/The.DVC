@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "2.574.0",
+      "date": "2026-09-21",
+      "title": "감사 확정 결함 21건 수정 — 무응답·범위 유출·전송 보안·Number(null)",
+      "notes": [
+        "무응답 3건: PDU 시계열이 ?hours=1e400 하나로 영구 무응답 + fd 고갈(실측 fd 111→151) · svcmon push-now 무응답 20초 · async 라우트 138건을 라우터 단위로 보호(util/asyncRoute.js)",
+        "범위 유출 8건: /tools/vclogs/sources 가 범위 계정에 전 법인 vCenter id 를 줬다(응답이 admin 과 바이트 단위로 동일) · bmUsage 가 Set 에 .includes() · bm-usage·curuser activity·vmseries status 무스코프 · /ping/edge/overview 는 권한 게이트조차 없어 엣지 주소가 열려 있었다 · 공개 API /faults/parts 의 requiresFullScope 누락",
+        "전송 보안 4건: svcmon 기본 경로에 DNS 리바인딩 가드 없음 · SMTP 가 STARTTLS 미광고 시 경고 없이 평문 AUTH · ip-scan-result BIG_JSON 미등록(선언 상한 8,000건이 이미 413) · resilientFetch 가 교차 출처 리다이렉트에 인증 헤더를 유지",
+        "Number(null)===0 여섯 곳: 스토리지 일 롤업 max_used · 통신 점검이 다운된 링크를 '0ms 즉시 응답' 으로 · 엣지 로그 ms/statusFailed · RMA 점검값 · vmtrack 사양",
+        "화면 4건: Horizon 세션 상세가 조치 안내 자리에 [object Object] · 사용률이 null 인데 초록 '정상' · 문구 11곳의 백틱 노출 · 서버 온도 스파크라인이 수집 공백을 직선으로 이음",
+        "개선 5건: CI 문서 검사가 bash -e 로 첫 실패 뒤 안 돌던 것 · 문서 3종 재생성 · 상대시각 문구 9벌 통합 · 위임 워커 3개의 무음 실패 · 엣지 상태 표에 13개 추가(자동 스윕으로 고정)"
+      ]
+    },
+    {
       "version": "2.573.0",
       "date": "2026-09-21",
       "title": "새 특수기능이 권한 설정에 자동으로 나온다 — 역할별 표에서 25개가 빠져 있던 결함 수정",

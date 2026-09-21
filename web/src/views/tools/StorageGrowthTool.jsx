@@ -131,8 +131,15 @@ export default function StorageGrowthTool() {
       {/* ── 핵심 수치 ───────────────────────────────────────────────── */}
       <div className="kpis">
         <ReportKpi label="전체 용량" value={bytesAuto(t.totalBytes)} meta={`${t.devices ?? 0}대 합계`} />
+        {/*
+          * ⚠⚠ v2.574 BUG-12 — `t.pct` 가 null 이면 `null >= 90`·`null >= 75` 가 둘 다 false 라
+          *   예전에는 **초록 'ok'** 가 됐다. 글자는 '사용률 미상' 이라 말하면서 색은 '정상' 이라
+          *   말하는 것이고, **사람은 색을 먼저 읽는다**(v2.526 healthBadge·v2.542 sectionBadge 와
+          *   같은 유형). 확인 불가는 정상도 이상도 아니므로 중립(tone 없음)이다.
+          */}
         <ReportKpi label="사용 중" value={bytesAuto(t.usedBytes)}
-          meta={t.pct != null ? `${t.pct}%` : '사용률 미상'} tone={t.pct >= 90 ? 'bad' : t.pct >= 75 ? 'warn' : 'ok'} />
+          meta={t.pct != null ? `${t.pct}%` : '사용률 미상'}
+          tone={t.pct == null ? undefined : t.pct >= 90 ? 'bad' : t.pct >= 75 ? 'warn' : 'ok'} />
         <ReportKpi label="남은 용량" value={bytesAuto(t.freeBytes)} meta="전체 − 사용" />
         {cols.map((p) => {
           const c = totalCell(t.growth?.[p.key], unit);

@@ -97,6 +97,30 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.osScan', label: '게스트 OS 스캔', group: 'collect', mod: '../inventory/osScanner.js', fn: 'osScanStatus' },
   { key: 'collect.idracScan', label: 'iDRAC 스캔 위임', group: 'collect', mod: '../agent/idracScanWorker.js', fn: 'getIdracScanWorkerStatus' },
   { key: 'collect.agentScan', label: '에이전트 스캔', group: 'collect', mod: '../agent/scanner.js', fn: 'getAgentScanStatus' },
+  /*
+   * ⚠⚠ v2.574 IMP-07 — 아래 7개는 v2.573 까지 **이 표에 없었다**. CLAUDE.md 가 v2.554·v2.560·
+   *   v2.561 에 "새 엣지 워커·폴러는 이 표에 함께 넣을 것" 을 **세 번** 적었는데도 빠졌다
+   *   (테스트가 `length >= 20` 만 봐서 잡히지 않았다 — 이제 소스 스윕이 고정한다).
+   *   앞의 셋은 상태 export 자체가 없어 `catch { return null; }` 로 **무음 실패**하고 있었다.
+   */
+  { key: 'push.ping', label: 'Ping 위임', group: 'push', mod: '../agent/pingWorker.js', fn: 'pingWorkerStatus' },
+  { key: 'push.capture', label: '트래픽 캡처 위임', group: 'push', mod: '../agent/captureWorker.js', fn: 'captureWorkerStatus' },
+  { key: 'push.bmstor', label: '베어메탈 스토리지 위임', group: 'push', mod: '../agent/bmstorWorker.js', fn: 'bmstorWorkerStatus' },
+  { key: 'collect.bmUsage', label: '베어메탈 사용률 수집', group: 'collect', mod: '../bmusage/poller.js', fn: 'bmUsageStatus' },
+  { key: 'collect.linkCheck', label: '통신 점검 수집', group: 'collect', mod: '../linkcheck/poller.js', fn: 'linkCheckPollerStatus' },
+  { key: 'collect.gpuPhysical', label: 'GPU 물리 수집', group: 'collect', mod: '../gpu/physicalPoller.js', fn: 'physicalPollerStatus' },
+  { key: 'collect.dirUsage', label: '디렉터리 사용량', group: 'collect', mod: '../dirusage/scheduler.js', fn: 'schedulerStatus' },
+  /*
+   * ⚠ 아래 6개는 v2.574 의 **소스 스윕이 추가로 찾아낸 것**이다(손으로 세던 목록은 이미 7개를
+   *   놓친 뒤였다). 전부 `index.js` 가 **조건 없이** 시작하므로 엣지에서도 돈다 —
+   *   엣지에서 '꺼짐/유휴' 로 보이는 것은 잡음이 아니라 **사실**이다.
+   */
+  { key: 'push.edgeLog', label: '엣지 로그 폴백', group: 'push', mod: '../agent/edgeLogWorker.js', fn: 'edgeLogWorkerStatus' },
+  { key: 'collect.gpuGuest', label: 'GPU 게스트 수집', group: 'collect', mod: '../gpu/poller.js', fn: 'gpuGuestStatus' },
+  { key: 'collect.idrac', label: 'iDRAC 수집', group: 'collect', mod: '../idrac/poller.js', fn: 'getPollerStatus' },
+  { key: 'collect.idracScanLocal', label: 'iDRAC 스캔(로컬)', group: 'collect', mod: '../idrac/scanPoller.js', fn: 'idracScanStatus' },
+  { key: 'collect.powerOff', label: '전원 꺼짐 점검', group: 'collect', mod: '../tools/powerOffPoller.js', fn: 'powerOffPollerStatus' },
+  { key: 'collect.vmClone', label: 'VM 복제 스케줄러', group: 'collect', mod: '../vmclone/scheduler.js', fn: 'schedulerStatus' },
 ]);
 
 /** 표의 키 집합 — 중앙 수신이 모르는 키를 조용히 받아들이지 않게 한다. */
