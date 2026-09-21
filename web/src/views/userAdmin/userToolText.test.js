@@ -1,8 +1,18 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import {
   MODE_OFF, MODE_ALLOW, MODE_DENY, MODE_LABEL, modeHelp, overrideBadge,
   overrideByText, toolsPermWarning, enforcementGapNote, saveSummary, SECTION_NOTE,
+  roleToolRows, ROLE_SECTION_NOTE, ADMIN_MARK_LABEL, ADMIN_MARK_TITLE_ROLE, ADMIN_MARK_TITLE_USER,
 } from './userToolText.js';
+import { TOOLS as SPECIAL_TOOLS } from '../specialToolsList.js';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+/** 소스 검사 전에 주석을 지운다 — 규칙을 설명하는 주석이 통과 근거가 되면 안 된다(v2.535 규약).
+ *  ⚠ 개행은 **보존**한다(지우면 줄 번호가 밀려 엉뚱한 줄을 지목한다 — v2.569 오탐). */
+const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 
 const ALL = ['storage-mon', 'ipam', 'ping', 'gpu'];
 const levelOf = (k) => (k === 'ipam' || k === 'storage-mon' ? 'server' : 'declared');
@@ -62,12 +72,61 @@ describe('userToolText (v2.555)', () => {
 
   it('문구에 백틱이 없어야 한다 — BoldText 는 **강조** 만 해석한다(v2.553 규약)', () => {
     const texts = [
-      SECTION_NOTE, modeHelp(MODE_OFF), modeHelp(MODE_ALLOW), modeHelp(MODE_DENY),
+      SECTION_NOTE, ROLE_SECTION_NOTE, ADMIN_MARK_TITLE_ROLE, ADMIN_MARK_TITLE_USER,
+      modeHelp(MODE_OFF), modeHelp(MODE_ALLOW), modeHelp(MODE_DENY),
       saveSummary(MODE_ALLOW, [], 3), saveSummary(MODE_DENY, [], 3), saveSummary(MODE_OFF, [], 3),
       toolsPermWarning({ entry: { mode: MODE_ALLOW }, hasToolsPerm: false, role: 'viewer' }),
       enforcementGapNote({ mode: MODE_ALLOW, tools: [] }, ALL, levelOf).text,
       ...Object.values(MODE_LABEL),
     ];
     for (const t of texts) expect(String(t)).not.toContain('`');
+  });
+});
+
+/* ── v2.573 — 새 특수기능이 권한 화면에 자동으로 나온다 ───────────────────────
+ * 사용자 지시: "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘".
+ * v2.572 까지 역할 표가 `adminOnly` 를 걸러 카탈로그 86개 중 61개만 보였고, 빠진 25개는
+ * 대부분 최근 추가분이었다 — 즉 기능을 더할수록 권한 화면이 뒤처졌다. 여기서 고정한다.  */
+describe('역할별 도구 표는 카탈로그 전체다 (v2.573)', () => {
+  it('roleToolRows 는 카탈로그를 거르지 않는다 — 실제 카탈로그로 확인', () => {
+    const rows = roleToolRows(SPECIAL_TOOLS);
+    expect(rows.length).toBe(SPECIAL_TOOLS.length);
+    expect(rows.map((t) => t.k)).toEqual(SPECIAL_TOOLS.map((t) => t.k));
+    // 핵심: adminOnly 도구가 반드시 들어 있어야 한다(그것이 예전에 빠지던 것들이다).
+    const admins = SPECIAL_TOOLS.filter((t) => t.adminOnly).map((t) => t.k);
+    expect(admins.length).toBeGreaterThan(0);
+    for (const k of admins) expect(rows.some((t) => t.k === k)).toBe(true);
+  });
+
+  it('키가 없는 행만 뺀다 — 표에 그릴 수 없기 때문이다', () => {
+    expect(roleToolRows([{ k: 'a' }, null, { label: '키없음' }, { k: '' }])).toEqual([{ k: 'a' }]);
+    expect(roleToolRows(null)).toEqual([]);
+    expect(roleToolRows()).toEqual([]);
+  });
+
+  it('UserAdmin.jsx 가 행을 다시 거르지 않는다 — 호출부에서 재발하는 것을 막는다', () => {
+    const src = stripComments(fs.readFileSync(path.join(HERE, '../UserAdmin.jsx'), 'utf8'));
+    expect(src).toMatch(/const TOOL_ROWS = roleToolRows\(SPECIAL_TOOLS\)/);
+    // `SPECIAL_TOOLS.filter(...)` 형태가 하나라도 있으면 다시 걸러지고 있는 것이다.
+    expect(src).not.toMatch(/SPECIAL_TOOLS\s*\.filter/);
+    expect(src).not.toMatch(/TOOL_ROWS\s*\.filter/);
+  });
+
+  it('머리말이 "목록에서 제외" 라고 말하지 않는다 — 이제 제외하지 않는다', () => {
+    expect(ROLE_SECTION_NOTE).not.toContain('제외');
+    expect(ROLE_SECTION_NOTE).toContain('모든 도구');
+    // adminOnly 가 접근제어가 아니라는 사실을 말해야 한다(v2.555 가 확인한 사실).
+    expect(ROLE_SECTION_NOTE).toContain('접근제어가 아닙니다');
+  });
+
+  it('관리자 표시 배지는 두 화면이 같은 상수를 쓴다 — 말이 갈라지지 않게', () => {
+    const src = stripComments(fs.readFileSync(path.join(HERE, '../UserAdmin.jsx'), 'utf8'));
+    expect(src).toContain('ADMIN_MARK_TITLE_ROLE');
+    expect(src).toContain('ADMIN_MARK_TITLE_USER');
+    // 라벨 문자열을 JSX 에 다시 적으면 한쪽만 바뀐다.
+    expect(src.match(/관리자 표시/g)).toBe(null);
+    expect(ADMIN_MARK_LABEL).toBe('관리자 표시');
+    // 두 뜻이 다르므로 문구도 달라야 한다(한 문구로 덮으면 반대 방향 안내가 된다).
+    expect(ADMIN_MARK_TITLE_ROLE).not.toBe(ADMIN_MARK_TITLE_USER);
   });
 });

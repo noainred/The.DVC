@@ -913,6 +913,42 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - `shellStyles.test.js` 의 기존 7개 계약(탭 선택자 범위·전역 `.tab` 스타일·brandrow
       flex-wrap·`.topbar .tabs` overflow-x:auto 등)은 전부 무수정으로 통과 — 이번 변경은 이
       계약들과 독립적인 **폭 조건부 순서 재배치**다.
+
+  - ⚠⚠ **역할별 ‘도구별 접근’ 표는 특수기능 카탈로그 전체를 쓴다 — 여기에 필터를 붙이지 말 것**
+    (`web/src/views/userAdmin/userToolText.js roleToolRows` + `UserAdmin.jsx:11`, v2.573 —
+    사용자 지시 "특수기능이 추가되면 자동으로 권한설정 하는 기능에 추가되게 해줘"):
+    - **증상**: v2.572 까지 `const TOOL_ROWS = SPECIAL_TOOLS.filter((t) => !t.adminOnly)` 라
+      카탈로그 **86개 중 61개만** 표에 나왔다. 빠진 25개는 대부분 **최근에 추가된 기능**
+      (통신 점검 v2.552 · 포탈 점검 v2.560 · 엣지 로그 v2.549 · 파트 장애 v2.547 · 스토리지
+      증가량 v2.531 …)이라 — **기능을 더할수록 권한 화면이 조용히 뒤처졌다**.
+    - ⚠⚠ **그 필터는 틀린 전제 위에 있었다.** `adminOnly` 는 카드 표시 관례이고 접근제어가
+      아니다 — v2.555 가 **사용자별 모달에서 이미 확인해 기록해 둔 사실**인데(아래 항목)
+      역할 표에는 적용하지 않았다. 실측: `/api/tools/pdu` 의 조회는 `routes/api/pdu.js:52`
+      에서 `requirePerm('tools') + fullScopeOnly` 이고 `/api/tools/storage` 도 같다 — operator 가
+      주소로 직접 열 수 있는데 **그 도구가 표에 없으니 관리자는 끌 방법 자체가 없었다**.
+      빠진 25개 중 **16개가 서버 집행 대상**(`enforcedToolKeys()`)이었다.
+    - **고친 방식**: 필터를 없애고 `roleToolRows(catalog)` 하나가 '거르지 않는다' 를 선언한다
+      (키 없는 행만 뺀다 — 표에 그릴 수 없다). adminOnly 행에는 사용자별 모달과 **같은 상수**
+      (`ADMIN_MARK_LABEL`·`ADMIN_MARK_TITLE_ROLE`/`_USER`)로 ‘관리자 표시’ 배지를 단다.
+      ⚠ 두 화면의 **뜻이 반대**라 title 은 따로 둔다 — 모달은 '고르면 보인다', 역할 표는
+      '끄면 막힌다'. 한 문구로 덮으면 반대 방향 안내가 된다(테스트가 두 값이 다름을 고정).
+    - ⚠ **머리말도 함께 고쳐야 한다** — 예전 문구는 "관리자 전용 도구는 목록에서 제외됩니다"
+      였다. 제외를 없애고 문장을 남기면 **화면이 거짓말을 한다**(테스트가 ‘제외’ 0 을 고정).
+    - **회귀는 소스까지 검사한다**(`userToolText.test.js`): ① `roleToolRows(SPECIAL_TOOLS)` 가
+      실제 카탈로그와 **개수·순서 모두 일치** ② `UserAdmin.jsx` 에 `SPECIAL_TOOLS.filter`·
+      `TOOL_ROWS.filter` 가 **0건** ③ 라벨 문자열을 JSX 에 다시 적지 않았는지. 변이 검증 —
+      필터를 되살리면 ②가 실패한다(실측 1 failed / 12 passed).
+    - ⚠ **나머지 등록처는 이미 자동이거나 테스트가 막고 있다**(v2.573 에 전수 확인):
+      사용자별 모달(`SPECIAL_TOOLS` 직접) · `version_4/tree.js` 배치(미배치 0, `tree.test.js`) ·
+      서버 집행 커버리지(`audit2506.test.js:282` 가 `specialToolsList.js` 를 **정규식으로 읽어**
+      미선언 0 을 고정 — 새 도구를 매핑도 선언도 없이 추가하면 CI 가 깨진다). 즉 **남은
+      수동 작업은 `auth/toolAccess.js` 에 경로를 매핑하거나 사유를 선언하는 것 하나**이고,
+      그것은 경로를 사람이 확인해야 하므로 자동화 대상이 아니다(잘못 매핑하면 **엉뚱한 화면이
+      막힌다** — v2.506 `capacity-forecast` 사고).
+    - ⚠ **화면이 갑자기 '권한이 열린 것처럼' 보인다** — 새로 나온 25행의 operator·viewer 가
+      전부 체크돼 있기 때문이다. 이것은 **바뀐 것이 아니라 원래 그랬던 사실이 보이게 된 것**
+      이다(서버 동작은 한 줄도 바꾸지 않았다). 머리말이 그 사실을 말한다.
+
     (`auth/permissions.js effectiveToolAccess`·`auth/toolAccess.js issueFor` + 웹
     `views/toolVisibility.js`·`views/userAdmin/userToolText.js`, v2.555 — 사용자 요청 "특정 사용자는
     특수기능의 특정 기능만 사용할 수 있고, 나머지 기능은 보여주지 않고 싶다 · 스토리지 엔지니어에게
