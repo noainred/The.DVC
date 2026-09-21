@@ -45,7 +45,7 @@ export default function ConsoleNetwork({ global: g, sitesAll, scope, polls }) {
           <PollState poll={polls.nsx}>
             {managers.length === 0 ? <Empty>{polls.nsx.data?.managers?.length ? '범위 안에 NSX 매니저가 없습니다.' : 'NSX 매니저가 등록되어 있지 않습니다(설정 › NSX).'}</Empty> : (
               <div className="dvc-tablewrap">
-                <STable className="dvc-table">
+                <STable minWidth={1040} wrap={false} className="dvc-table">
                   <thead><tr><th>매니저</th><th>리전</th><th>vCenter</th><th>버전</th><th className="num">노드</th><th className="num">게이트웨이</th><th className="num">세그먼트</th><th className="num">TN UP/DOWN</th><th className="num">DFW 규칙</th><th>상태</th></tr></thead>
                   <tbody>
                     {managers.map((m) => (
@@ -73,7 +73,7 @@ export default function ConsoleNetwork({ global: g, sitesAll, scope, polls }) {
             <PollState poll={nets}>
               {pgRows.length === 0 ? <Empty>범위 안에 포트그룹이 없습니다.</Empty> : (
                 <div className="dvc-tablewrap">
-                  <STable className="dvc-table">
+                  <STable minWidth={720} wrap={false} className="dvc-table">
                     <thead><tr><th>vCenter</th><th className="num">포트그룹</th><th className="num">Dist.</th><th className="num">Std.</th><th className="num">VLAN</th><th className="num">VM</th></tr></thead>
                     <tbody>
                       {pgRows.map((x) => (

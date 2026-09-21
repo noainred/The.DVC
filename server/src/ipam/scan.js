@@ -9,6 +9,7 @@
 import net from 'node:net';
 import dnsp from 'node:dns/promises';
 import { execFile } from 'node:child_process';
+import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
 export const DEFAULT_PORTS = [22, 80, 443, 445, 3389, 623, 8006, 902, 5985, 5986];
 const SERVICE = {
@@ -217,14 +218,11 @@ async function pingAliveSet(deadIps, timeoutMs, ping) {
 /** 역DNS 일괄(동시성 제한) — 생존 IP 만 대상. */
 async function reverseMany(ips, limit = 16) {
   const m = new Map();
-  let i = 0;
-  const worker = async () => {
-    while (i < ips.length) {
-      const ip = ips[i++];
-      try { const names = await dnsp.reverse(ip); if (names?.[0]) m.set(ip, names[0]); } catch { /* no PTR */ }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, ips.length || 1) }, worker));
+  // v2.575 IMP-08: 동시성 풀은 `util/pool.js` 하나다. 여기는 항목별 실패(PTR 없음)를
+  // 스스로 삼키므로 `poolRun`(첫 rejection 을 올리는 쪽) 이 맞다.
+  await poolRun(ips, limit, async (ip) => {
+    try { const names = await dnsp.reverse(ip); if (names?.[0]) m.set(ip, names[0]); } catch { /* no PTR */ }
+  });
   return m;
 }
 
@@ -244,18 +242,14 @@ export async function scanRanges(specs, { ports = DEFAULT_PORTS, concurrency = 1
 
   // 1단계: TCP 전수.
   const tcp = new Map(); // ip -> openPorts[]
-  let idx = 0;
   let done = 0;
-  const worker = async () => {
-    while (idx < ips.length) {
-      const ip = ips[idx++];
-      const open = await tcpPortsOf(ip, ports, timeoutMs).catch(() => []);
-      if (open.length) tcp.set(ip, open);
-      done++;
-      onProgress?.(done, total, tcp.size);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(concurrency, ips.length || 1) }, worker));
+  // v2.575 IMP-08: 동시성 풀 단일 소스. `tcpPortsOf` 의 실패는 이미 `.catch` 로 삼킨다.
+  await poolRun(ips, concurrency, async (ip) => {
+    const open = await tcpPortsOf(ip, ports, timeoutMs).catch(() => []);
+    if (open.length) tcp.set(ip, open);
+    done++;
+    onProgress?.(done, total, tcp.size);
+  });
 
   // 2단계: 포트 무응답 IP만 ping.
   const dead = ips.filter((ip) => !tcp.has(ip));

@@ -30,7 +30,7 @@
  */
 import { requireRole } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { store } from '../../store.js';
+import { store, SITE_STALE_MS } from '../../store.js';
 import { config } from '../../config.js';
 import { logAudit } from '../../audit.js';
 import { loadCollectors } from '../../collector/registry.js';
@@ -59,7 +59,7 @@ import {
 } from '../../portalcheck/invScan.js';
 
 // vc 별 위임 여부만 필요하다 — redact() 는 이미 password 를 뺀다(vcenter/registry.js:45).
-const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000; // store.js 와 같은 env·같은 기본값
+// v2.575 IMP-11: store.js 의 값을 그대로 쓴다(두 벌이면 판정 기준이 조용히 갈린다).
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = (req, res, next) => {

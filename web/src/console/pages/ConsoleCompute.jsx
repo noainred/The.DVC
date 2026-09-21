@@ -30,7 +30,7 @@ export default function ConsoleCompute({ global: g, ov, sitesAll, scope, polls }
         <Panel title={`vCenter ${sites.length}`} sub="Platform · CPU/메모리 최대 사용률 내림차순 · 제목 클릭 정렬" bodyPad={false}>
           <PollState poll={polls.ov}>
             <div className="dvc-tablewrap">
-              <STable className="dvc-table">
+              <STable minWidth={880} wrap={false} className="dvc-table">
                 <thead><tr><th>vCenter</th><th>사이트</th><th className="num">호스트</th><th className="num">VM</th><th className="num">클러스터</th><th>CPU</th><th>메모리</th><th>상태</th></tr></thead>
                 <tbody>
                   {sites.map((s) => (

@@ -1,7 +1,8 @@
 // 용량/낭비/씬/VM파인더/온도/용량예측 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
-import { logAudit } from '../../audit.js';           // 수집 정책 변경·데이터 삭제는 감사 기록
+import { logAudit } from '../../audit.js';
+import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드(단일 소스)
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { scanOrphanDisks } from '../../vcenter/orphanScan.js';   // v2.505: 고아 VMDK 탐지(라이브)
@@ -372,26 +373,21 @@ api.get('/tools/waste/off-since', requirePerm('tools'), async (req, res) => {
  *  - 리포트 계열은 vCenter 당 로그인 1회 + 8 VM 청크당 QueryPerf 1회(fetchVmsRightsizeBatch), vCenter 동시 4.
  *  - 5분 rightsizeCache 공유 — 모달에서 이미 본 VM 은 왕복 0, 내보내기 뒤 모달을 열면 즉시.
  *  - 리포트 상한 WASTE_EXPORT_MAX_REPORTS(기본 200) — 넘는 VM 은 '리포트 생략(상한)' 으로 정직 표기.
- *  - 서버 전체 동시 1건(wasteExportBusy) — 반복 클릭으로 vCenter/포탈 CPU 가 몰리지 않게(폴러 재진입 가드와
+ *  - 서버 전체 동시 1건(acquireExport('waste.export')) — 반복 클릭으로 vCenter/포탈 CPU 가 몰리지 않게(폴러 재진입 가드와
  *    같은 원칙). 진행 중이면 409 export_busy.
  *  - HTML 생성 10건마다·xlsx 200행마다 setImmediate 양보.
  * scope: /tools/waste 와 동일(scopeSlice → cluster/folder). 리포트 대상도 그 결과에서만 나온다.
  * full=1: 상위 N 절단 없이 전량(전원 꺼짐 300·그 외 50 → 전부). 리포트 상한은 그대로 적용된다.
  */
-let wasteExportBusy = null; // { user, at }
+// v2.575 IMP: 동시 1건 가드 구현은 `util/exportBusy.js` 하나다(`/tools/ipam.xlsx` 가 이 20줄을
+// 갖고 있지 않아 실제로 프로세스를 죽이는 취약점이 됐다 — 복사하지 말고 코어를 쓴다).
 const WASTE_EXPORT_MAX_REPORTS = Math.max(1, Math.min(1000, Number(process.env.WASTE_EXPORT_MAX_REPORTS) || 200));
 const WASTE_EXPORT_CHUNK = Math.max(1, Math.min(50, Number(process.env.WASTE_EXPORT_CHUNK) || 8));
 api.get('/tools/waste/export', requirePerm('tools'), async (req, res) => {
   res.locals.perfExpectSlow = true; // v2.498: vCenter 성능 조회를 동반해 수십 초가 정상인 내보내기
-  if (wasteExportBusy) {
-    const sec = Math.round((Date.now() - wasteExportBusy.at) / 1000);
-    // v2.500(감사 L-2): 진행자 계정명은 **본인일 때만** 밝힌다. tools 권한만 있는 계정이 연타해
-    // 관리자 로그인 ID 를 알아내는 계정 열거 단서였다(미인증 응답에 계정명을 싣지 않는 규칙의 형제).
-    const mine = wasteExportBusy.user && wasteExportBusy.user === (req.user?.username || '');
-    const who = mine ? '내 요청' : '다른 사용자';
-    return res.status(409).json({ ok: false, error: 'export_busy', reason: `다른 내보내기가 진행 중입니다(${who} · ${sec}초 경과). 끝난 뒤 다시 시도하세요.` });
-  }
-  wasteExportBusy = { user: req.user?.username || '', at: Date.now() };
+  // 진행자 계정명은 **본인일 때만** 밝힌다(v2.500 감사 L-2) — 판정·문구는 acquireExport 가 갖는다.
+  const lock = acquireExport('waste.export', req);
+  if (!lock.ok) return res.status(lock.status).json(lock.body);
   const t0 = Date.now();
   try {
     const vcId = req.query.vcenterId ? String(req.query.vcenterId) : '';
@@ -456,7 +452,7 @@ api.get('/tools/waste/export', requirePerm('tools'), async (req, res) => {
     console.error('[waste-export] 실패:', e);
     if (!res.headersSent) res.status(500).json({ ok: false, reason: `내보내기 실패: ${e.message}` });
   } finally {
-    wasteExportBusy = null;
+    lock.release();
   }
 });
 

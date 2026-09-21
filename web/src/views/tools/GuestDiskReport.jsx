@@ -319,7 +319,7 @@ export default function GuestDiskReport({ scope = '' }) {
           <summary>
             vCenter 커버리지 — {coverage.length}개 중 <b>{covWithData}</b>개 데이터 있음{covEmpty > 0 ? `, ${covEmpty}개 없음` : ''}
           </summary>
-          <STable className="gd-table">
+          <STable minWidth={720} className="gd-table">
             <thead><tr><th>vCenter</th><th>법인</th><th>수집원</th><th className="gd-num">데이터 VM</th><th>최근 수집</th><th data-nosort>상태</th></tr></thead>
             <tbody>
               {coverage.map((c) => (

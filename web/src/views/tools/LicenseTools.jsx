@@ -65,15 +65,18 @@ export function Solutions() {
               </div>
             )}
             <div className="table-wrap">
-              <STable>
+              {/* v2.575 BUG-19: 상한은 정렬 뒤 적용(먼저 자르면 버전 정렬이 앞 30개 안에서만 돈다). */}
+              <STable limit={30}>
                 <thead><tr><th>확장 솔루션</th><th>버전</th><th>공급사</th></tr></thead>
                 <tbody>
-                  {(it.solutions || []).slice(0, 30).map((s) => (
+                  {(it.solutions || []).map((s) => (
                     <tr key={s.key}><td>{/nsx/i.test(s.key + s.label) ? '🛡️ ' : ''}{s.label}</td><td className="tabular">{s.version || '—'}</td><td className="muted">{s.company || '—'}</td></tr>
                   ))}
                   {(it.solutions || []).length === 0 && <tr><td colSpan={3} className="muted center" style={{ padding: 14 }}>vCenter 확장 솔루션 정보 없음</td></tr>}
                 </tbody>
               </STable>
+              {/* v2.575: 조용한 상한 금지 — 뺀 개수를 밝힌다. */}
+              {(it.solutions || []).length > 30 && <div className="muted" style={{ fontSize: 11, padding: '4px 8px' }}>전체 {(it.solutions || []).length}건 중 <b>30건만</b> 표시합니다.</div>}
             </div>
           </div>
         ))}
@@ -223,7 +226,7 @@ export function LicenseExpiry({ scope, isAdmin }) {
           <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🖥️ Horizon 연결 서버 관리 ({(hz || []).length}대 등록)</summary>
           <div className="card" style={{ marginTop: 8, padding: 14 }}>
             {(hz || []).length > 0 && (
-              <STable style={{ marginBottom: 10 }}>
+              <STable minWidth={720} style={{ marginBottom: 10 }}>
                 <thead><tr><th>ID</th><th>이름</th><th>host</th><th>계정</th><th>도메인</th><th className="right">작업</th></tr></thead>
                 <tbody>
                   {hz.map((s) => (

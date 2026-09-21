@@ -76,18 +76,14 @@ export function hygieneOf(raw, { minLen = 16 } = {}) {
 
 /* ── 엣지 버전 분류(v2.549·v2.552 규약) ───────────────────────────────────── */
 
-/** 문자열 버전 비교 — `2.10.0 > 2.9.0`. 형식이 아니면 null(모르는 것을 낮게 보지 않는다). */
-export function cmpVersion(a, b) {
-  const pa = String(a ?? '').trim().split('.').map((x) => Number(x));
-  const pb = String(b ?? '').trim().split('.').map((x) => Number(x));
-  if (!pa.length || pa.some((x) => !Number.isFinite(x))) return null;
-  if (!pb.length || pb.some((x) => !Number.isFinite(x))) return null;
-  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
-    const d = (pa[i] || 0) - (pb[i] || 0);
-    if (d) return d > 0 ? 1 : -1;
-  }
-  return 0;
-}
+// v2.575 IMP-04: 구현은 `util/cmpVersion.js` 하나다(예전엔 3벌이 서로 다르게 동작했다).
+// 재수출은 기존 호출부·테스트의 import 를 그대로 유지하기 위한 것이다.
+// ⚠ `export { x } from …`(재수출)은 **이 모듈 스코프에 이름을 만들지 않는다** — 같은 파일의
+//   `edgeReportCapability()` 가 `cmpVersion is not defined` 로 죽는다(v2.575 에 실제로 겪었다).
+//   import 한 뒤 다시 export 할 것.
+import { cmpVersion } from '../util/cmpVersion.js';
+
+export { cmpVersion };
 
 /**
  * 엣지가 토큰 보고(`GET /api/collector/token-check`)를 할 수 있는가.

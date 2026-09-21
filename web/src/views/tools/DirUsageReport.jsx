@@ -133,7 +133,7 @@ export function DirUsageReport() {
             </div>
           )}
 
-          <STable style={{ width: '100%', fontSize: 12.5 }}>
+          <STable minWidth={720} style={{ width: '100%', fontSize: 12.5 }}>
             <thead>
               <tr>
                 <th>#</th><th>폴더(사용자)</th><th>사용량</th><th>비율</th><th data-nosort>분포</th><th>증감</th>

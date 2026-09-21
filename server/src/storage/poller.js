@@ -24,6 +24,7 @@ import { recordActivity } from './activityLog.js';
 import { runtimeIntervals, runtimeIntervalSource, centralIntervalsInfo, startAdaptiveTimer, applyOwnIntervals } from './intervals.js';
 
 import { withDeadline } from '../proxy/sshExec.js';
+import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 /** 장비당 수집 타임아웃 — 느린 어레이 1대가 전체 주기를 막지 않게(기본 3분, 하한 30초). */
 const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.STORAGE_DEVICE_TIMEOUT_MS) || 180_000);
 const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, unity480: unity.collect,
@@ -152,20 +153,15 @@ export async function pollStorageOnce() {
   try {
     const devs = devicesForThisNode();
     let ok = 0, fail = 0;
-    // 병렬 3개 제한 — 수집이 몰려 장비/네트워크에 부하 주지 않게(단순 워커 풀).
-    let idx = 0;
+    // 병렬 3개 제한 — 수집이 몰려 장비/네트워크에 부하 주지 않게(v2.575 IMP-08: 풀은 util/pool.js).
     let authStopped = 0;
-    const worker = async () => {
-      while (idx < devs.length) {
-        const d = devs[idx++];
-        const r = await collectOne(d, { periodic: true });
-        // null = 인증 실패로 건너뛴 것(v2.528). 실패로 세면 '수집 실패 N대' 가 매 주기 늘어나
-        // 새 장애처럼 보인다 — 별도로 센다.
-        if (r === null) authStopped++;
-        else if (r) ok++; else fail++;
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(3, devs.length) }, worker));
+    await poolRun(devs, 3, async (d) => {
+      const r = await collectOne(d, { periodic: true });
+      // null = 인증 실패로 건너뛴 것(v2.528). 실패로 세면 '수집 실패 N대' 가 매 주기 늘어나
+      // 새 장애처럼 보인다 — 별도로 센다.
+      if (r === null) authStopped++;
+      else if (r) ok++; else fail++;
+    });
     _last = { at: Date.now(), collected: ok, failed: fail, authStopped };
     return { ok, fail, authStopped };
   } finally { _busy = false; }

@@ -21,6 +21,7 @@ import EscClose from '../../components/EscClose.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, Brush } from 'recharts';
 import { fmtTrendTick } from '../tools/shared.jsx';   // ESXi 온도 추이와 **같은** 눈금 규칙(조작을 화면마다 다르게 만들지 않는다)
 import { STable } from '../../components/STable.jsx';
+import { unitText } from '../unitText.js';
 
 const LINE_COLORS = ['#60a5fa', '#f87171', '#34d399', '#fbbf24', '#a78bfa', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#e879f9', '#94a3b8', '#fca5a5'];
 const FW_TYPE_ORDER = ['iDRAC', 'BIOS', 'NIC', 'Storage', 'GPU', 'PSU', 'Disk', 'CPLD', 'Driver', '기타'];
@@ -179,8 +180,8 @@ export function IdracDetailModal({ server, onClose }) {
                   <span className="muted" style={{ marginLeft: 8, fontSize: 11 }}>(서비스태그 {vh.serviceTag} 일치)</span>
                 </div>
                 <div className="flex gap" style={{ fontSize: 12.5 }}>
-                  <span className="muted">CPU <b style={{ color: 'var(--text)' }}>{vh.host.cpuUsagePct ?? '—'}%</b></span>
-                  <span className="muted">MEM <b style={{ color: 'var(--text)' }}>{vh.host.memUsagePct ?? '—'}%</b></span>
+                  <span className="muted">CPU <b style={{ color: 'var(--text)' }}>{unitText(vh.host.cpuUsagePct, '%')}</b></span>
+                  <span className="muted">MEM <b style={{ color: 'var(--text)' }}>{unitText(vh.host.memUsagePct, '%')}</b></span>
                   <span className="muted">VM <b style={{ color: 'var(--text)' }}>{vh.host.vmCount ?? '—'}</b></span>
                 </div>
               </div>

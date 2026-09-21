@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { usePolling, fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import BoldText from '../components/boldText.jsx';
+import { pingEmptyReason } from './pingEmptyText.js';
 
 // 상태별 색상(파이썬 원본의 baseline 편차 색상 코딩 이식).
 const COLOR = { ok: '#22c55e', warn: '#eab308', crit: '#f97316', down: '#ef4444', unknown: '#6b7280' };
@@ -180,7 +182,18 @@ export default function PingMonitor() {
           </div>
           {seriesErr ? <ErrorBox message={seriesErr} />
             : !series ? <Loading />
-            : series.series.length === 0 ? <div className="center muted" style={{ padding: 30 }}>이 기간에 측정 데이터가 없습니다. 잠시 후 자동 측정되면 표시됩니다.</div>
+            : series.series.length === 0 ? (() => {
+                // v2.575 BUG-16: 한 문구로 덮지 않는다 — 비활성 대상·폴러 꺼짐은 **기다려도 안 된다**.
+                const why = pingEmptyReason({
+                  target: selTarget, monitorEnabled: data?.monitorEnabled, intervalMs: data?.intervalMs,
+                  lastTs: selTarget?.lastTs, rangeMs: series?.rangeMs, now: Date.now(),
+                });
+                return (
+                  <div className="center muted" style={{ padding: 30, lineHeight: 1.7 }}>
+                    <BoldText text={why.text} />
+                  </div>
+                );
+              })()
             : <SeriesChart data={series} />}
           {series && series.series.length > 0 && (
             <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>버킷 {Math.round((series.bucketMs || 0) / 1000)}초 · 막대 높이=최대 RTT, 흐린 영역=min~max, 빨강=무응답. 기준선(하늘색) 대비 색상으로 지연 악화를 표시합니다.</div>

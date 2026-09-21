@@ -293,10 +293,11 @@ function DsBrowseSection({ item }) {
           {files.length === 0 && !d.filesError && <div className="muted" style={{ fontSize: 13 }}>{q ? '검색 결과 없음' : '파일 없음'}</div>}
           {files.length > 0 && (
             <div className="table-wrap" style={{ maxHeight: '32vh' }}>
-              <STable>
+              {/* v2.575 BUG-19: 상한은 STable 이 정렬 뒤 적용한다(먼저 자르면 '앞 2,000개를 정렬한 것'). */}
+              <STable limit={2000}>
                 <thead><tr><th>폴더</th><th>파일</th><th>유형</th><th style={{ textAlign: 'right' }}>크기</th><th>수정</th></tr></thead>
                 <tbody>
-                  {files.slice(0, 2000).map((f, i) => {
+                  {files.map((f, i) => {
                     const [tl, tc] = DS_FILE_TYPE[f.type] || [f.type, 'gray'];
                     return (
                       <tr key={i}>

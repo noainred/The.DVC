@@ -62,9 +62,26 @@ let lastSummary = null;
 const alerted = new Map(); // key -> lastAlertTs (쿨다운)
 const COOLDOWN = 60 * 60_000;
 
+let running = false;   // v2.575 BUG-21 — 재진입 가드(아래 주석)
+
+/**
+ * 로그인 실패 분석 1회.
+ *
+ * ⚠⚠ v2.575 BUG-21 — **재진입 가드가 없었다.** 이 저장소의 폴러 규약은 두 가지다:
+ *  ① `setInterval(()=>asyncFn())` 폴러는 이전 주기가 간격을 넘기면 **중첩 실행**돼 CPU 가 쌓인다
+ *  ② **같은 작업의 수동 실행 API 도 그 가드를 공유**한다(`net/monitor.runMonitorNow` 패턴)
+ * 이 함수는 둘 다 없어, 관리자가 `POST /admin/security/login-fails/run` 을 연타하면
+ * `analyzeLoginFails`(로그 전량 스캔)가 그만큼 동시에 돈다. 2026-09-21 감사 전수 확인 결과
+ * **다른 수동 실행 5곳은 전부 가드를 공유하고 있었고 여기만 예외**였다.
+ * ⚠ 로컬 DB 조회라 계정 잠금 위험은 없다 — 그래서 🟡 였다. 그래도 규약의 유일한 구멍이다.
+ * ⚠ 진행 중이면 **던지지 않고** 사유를 돌려준다 — 수동 실행 라우트가 500 이 되면
+ *   관리자가 '고장' 으로 읽는다(연타는 오류가 아니다).
+ */
 async function runOnce() {
   const s = loadLoginMonitor();
-  if (!s.enabled) return;
+  if (!s.enabled) return undefined;
+  if (running) return { skipped: true, reason: '이미 분석이 진행 중입니다 — 이번 요청은 건너뜁니다.' };
+  running = true;
   try {
     const r = await analyzeLoginFails({ days: s.days, threshold: s.threshold, windowMin: s.windowMin });
     lastRun = Date.now(); lastSummary = r.summary;
@@ -80,7 +97,12 @@ async function runOnce() {
     // 쿨다운 만료 정리
     for (const [k, t] of alerted) if (now - t > COOLDOWN) alerted.delete(k);
   } catch (e) { console.warn(`[loginmon] 분석 실패: ${e.message}`); }
+  finally { running = false; }   // ⚠ 예외·조기 return 어느 쪽이든 반드시 푼다
+  return undefined;
 }
+
+/** 진행 중인가 — 화면·테스트가 가드의 존재를 확인할 수 있게. */
+export const loginMonitorBusy = () => running;
 
 function reschedule() {
   if (timer) { clearInterval(timer); timer = null; }

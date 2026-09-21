@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import { unitText } from '../unitText.js';
 
 /**
  * 특수기능 › VM 복제(백업)(v2.299, admin 전용) — 사용자 요구사항:
@@ -149,7 +150,7 @@ function JobForm({ d, form, setForm, onSaved }) {
                 {filtered.map((v) => (
                   <div key={v.id} className="vcd-link" style={{ padding: '3px 6px', cursor: 'pointer', fontSize: 12.5 }}
                     onClick={() => { setForm({ ...form, vmId: v.id, vmName: v.name }); setQ(v.name); }}>
-                    🧊 {v.name} <span className="muted">· {v.host || '—'} · {v.cpuCount}vCPU/{Math.round((v.memMB || 0) / 1024)}GB · 💾 {v.storageGB ?? '—'}GB</span>
+                    🧊 {v.name} <span className="muted">· {v.host || '—'} · {v.cpuCount}vCPU/{Math.round((v.memMB || 0) / 1024)}GB · 💾 {unitText(v.storageGB, 'GB')}</span>
                   </div>
                 ))}
                 {!filtered.length && <div className="muted" style={{ fontSize: 12, padding: 6 }}>일치 VM 없음</div>}

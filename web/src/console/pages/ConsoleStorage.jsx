@@ -36,7 +36,7 @@ export default function ConsoleStorage({ global: g, scope, polls, perms }) {
               <Empty><b>등록된 스토리지 장비가 없습니다.</b><br />특수 기능 › 스토리지 모니터링에서 장비(Isilon·PowerStore·Unity·XtremIO·VMAX·VPLEX)를 등록하면 여기에 용량·노드·수집 상태가 표시됩니다.</Empty>
             ) : (
               <div className="dvc-tablewrap">
-                <STable className="dvc-table">
+                <STable minWidth={880} wrap={false} className="dvc-table">
                   <thead><tr><th>어레이</th><th>법인</th><th>타입</th><th className="num">용량</th><th>사용률</th><th className="num">노드</th><th className="num">수집</th><th>상태</th></tr></thead>
                   <tbody>
                     {arrays.map((a) => (

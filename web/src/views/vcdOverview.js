@@ -7,6 +7,7 @@
 // 트리 배지와 정확히 같은 값이 된다.
 import { allocByHost, virtSum } from './vcdVirt.js';
 import { csvCell as esc } from '../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
+import { numOrNull } from '../numOrNull.js';
 
 const HOST_STATE_KO = { CONNECTED: '정상', MAINTENANCE: '점검', DISCONNECTED: '끊김', NOT_RESPONDING: '무응답' };
 /** 호스트 연결 상태 한글 표기(트리의 StateBadge 와 같은 어휘). 모르는 값은 원문 그대로. */
@@ -29,7 +30,9 @@ export function groupClusters(hosts) {
   return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 
-const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+// v2.575: `Number(null)===0` 함정. 연결 끊긴 호스트는 `cpuUsagePct`·`memUsagePct`·`tempC` 가
+// null 로 오는데 예전 형태는 그것을 **0** 으로 바꿨다 — 실측 재현 `흡기온도 0℃ · CPU 0% · MEM 0%`.
+const num = numOrNull;
 const sumBy = (list, pick) => list.reduce((a, h) => a + (Number(pick(h)) || 0), 0);
 // 클러스터 CPU/MEM 사용률은 트리와 동일하게 호스트 단순 평균(가중 평균이 아님 — 표시값 일치가 우선).
 const avgBy = (list, pick) => (list.length ? Math.round(sumBy(list, pick) / list.length) : 0);

@@ -7,6 +7,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { SORTS, VIEWS, sortGroups, matrixStats, heat, tileData, boardCounts, sparkPath } from './roomTempView.js'; // v2.534 시안 적용(순수 판정)
+import { unitText } from '../unitText.js';
 
 const C = (v) => (v == null ? '—' : `${v}℃`);
 
@@ -124,7 +125,7 @@ function RangeBar({ min, max, avg, color = '#4ade80', lo = 10, hi = 45 }) {
   const width = Math.max(1.5, pct(max) - left);   // 최소 폭 — min==max 여도 보이게
   return (
     <div style={{ position: 'relative', height: 8, background: 'rgba(148,163,184,.15)', borderRadius: 4, margin: '4px 0 2px' }}
-      title={`최저 ${min}℃ · 평균 ${avg ?? '—'}℃ · 최고 ${max}℃`}>
+      title={`최저 ${unitText(min, '℃')} · 평균 ${unitText(avg, '℃')} · 최고 ${unitText(max, '℃')}`}>
       {/* 권장 대역(18~27℃) 참조 — 흡기 비교의 기준선 */}
       <div style={{ position: 'absolute', left: `${pct(18)}%`, width: `${pct(27) - pct(18)}%`, top: 0, bottom: 0, background: 'rgba(74,222,128,.12)', borderLeft: '1px dashed rgba(74,222,128,.4)', borderRight: '1px dashed rgba(74,222,128,.4)' }} />
       <div style={{ position: 'absolute', left: `${left}%`, width: `${width}%`, top: 0, bottom: 0, background: color, borderRadius: 4 }} />
@@ -187,7 +188,7 @@ function PlotRow({ g, lo, hi, dtMax, onPick, onHover }) {
       <td style={{ minWidth: 220 }}>
         {has ? (
           <div style={{ position: 'relative', height: 10, background: 'rgba(148,163,184,.15)', borderRadius: 5 }}
-            title={`최저 ${a.min}℃ · 평균 ${a.avg ?? '—'}℃ · 최고 ${a.max}℃ · ${a.servers}대`}>
+            title={`최저 ${unitText(a.min, '℃')} · 평균 ${unitText(a.avg, '℃')} · 최고 ${unitText(a.max, '℃')} · ${a.servers}대`}>
             {/* ASHRAE A1 권장 급기 18~27℃ */}
             <div style={{ position: 'absolute', left: `${pct(18)}%`, width: `${pct(27) - pct(18)}%`, top: 0, bottom: 0, background: 'rgba(74,222,128,.13)', borderLeft: '1px dashed rgba(74,222,128,.45)', borderRight: '1px dashed rgba(74,222,128,.45)' }} />
             {/* 32℃ 위험선 */}
@@ -307,12 +308,14 @@ function MatrixRow({ g, stats, expanded, onToggle, onTrend }) {
               <div className="muted" style={{ fontSize: 12 }}>이 법인에서 온도를 읽은 서버가 없습니다.</div>
             ) : (
               <div className="table-wrap" style={{ maxHeight: 320 }}>
-                <STable>
+                {/* v2.575 BUG-19: '상위 6대' 는 정렬 뒤 자른 것이어야 한다 — 열을 눌러도
+                    앞 6대 안에서만 정렬되던 결함(v2.556 limit 규약). */}
+                <STable limit={6}>
                   <thead><tr>
                     <th>서버</th><th>서비스태그</th><th className="right">흡기</th><th className="right">배기</th><th className="right">CPU</th><th className="right">ΔT</th>
                   </tr></thead>
                   <tbody>
-                    {g.hosts.slice(0, 6).map((h) => (
+                    {g.hosts.map((h) => (
                       <tr key={h.id}>
                         <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={h.name}>{h.name}</td>
                         <td className="muted" style={{ fontSize: 11.5 }}>{h.serviceTag || '—'}{h.remote ? ' · 위임' : ''}</td>

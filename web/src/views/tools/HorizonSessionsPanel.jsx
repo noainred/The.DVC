@@ -201,10 +201,11 @@ export default function HorizonSessionsPanel() {
         </div>
         {!canShowNames && <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginBottom: 6, whiteSpace: 'normal' }}>{NAME_MASK_NOTE}</div>}
         <div className="table-wrap" style={{ maxHeight: '38vh' }}>
-          <STable className="v3-table">
+          {/* v2.575 BUG-19: 상한은 정렬 뒤 적용(먼저 자르면 '세션 많은 순' 이 앞 500명 안에서만 돈다). */}
+          <STable className="v3-table" limit={500}>
             <thead><tr><th>계정</th><th>접속 중</th><th>세션</th><th>{picked ? '풀·장비' : '서버'}</th></tr></thead>
             <tbody>
-              {nameRows.slice(0, 500).map((u, i) => (
+              {nameRows.map((u, i) => (
                 <tr key={`${u.name}-${i}`}>
                   <td>{canShowNames ? u.name : <span style={{ color: 'var(--text-faint)' }}>{`사용자 #${i + 1}`}</span>}{u.isSid && <span style={{ fontSize: 10, marginLeft: 4, color: 'var(--amber)' }}>SID</span>}</td>
                   <td data-sort={String(u.connected ?? 0)}>{u.connected ?? '—'}</td>

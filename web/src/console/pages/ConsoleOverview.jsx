@@ -94,7 +94,7 @@ export default function ConsoleOverview({ tiles, global: g, ov, sitesAll, alarms
         <Panel title="사이트" sub="vCenter 단위 · 최대 사용률 내림차순 · 행 클릭 → 컴퓨트" bodyPad={false}>
           <PollState poll={polls.ov}>
             <div className="dvc-tablewrap">
-              <STable className="dvc-table">
+              <STable minWidth={960} wrap={false} className="dvc-table">
                 <thead><tr><th>사이트</th><th>리전</th><th className="num">호스트</th><th className="num">VM</th><th>컴퓨트</th><th>스토리지</th><th className="num">전력</th><th className="num">알람</th><th>상태</th></tr></thead>
                 <tbody>
                   {sites.map((s) => (

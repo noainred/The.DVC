@@ -89,7 +89,7 @@ export function PowerMap({ scope }) {
                     <span className="muted">월 {won(d.costMonth)} · 연 {won(d.costYear)}</span>
                   </div>
                 </div>
-                <STable style={{ width: '100%', fontSize: 13 }}>
+                <STable minWidth={720} style={{ width: '100%', fontSize: 13 }}>
                   <thead><tr>
                     <th style={{ textAlign: 'left' }}>2차 분류</th><th style={{ textAlign: 'right' }}>서버</th>
                     <th style={{ textAlign: 'right' }}>현재 전력</th><th style={{ width: 160 }}>비중</th>

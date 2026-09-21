@@ -22,6 +22,7 @@ import { healthBadge, sectionBadge, cliCutText } from './storageNodeText.js';   
 import { authFailInfo } from './storageAuthText.js';  // v2.528: 401 진단 문구(순수)
 import { capacityRows, srpRows, subscribedNote, usageTrust } from './powermaxCapacityText.js'; // v2.534: 구독/할당/실제기록(순수)
 import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
+import { unitText } from '../unitText.js';
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -1115,7 +1116,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {(s.pools || []).length > 0 && (
             <>
               <div className="section-title" style={{ fontSize: 13 }}>{r.type === 'xtremio' ? '클러스터 용량' : (r.type === 'vmax' || r.type === 'powermax') ? '어레이별 용량' : '스토리지 풀'} {s.pools.length}</div>
-              <STable className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
+              <STable minWidth={1040} className="data-table" style={{ width: '100%', fontSize: 12.5, marginBottom: 12 }}>
                 <thead><tr><th style={{ textAlign: 'left' }}>{r.type === 'xtremio' ? '클러스터' : (r.type === 'vmax' || r.type === 'powermax') ? '어레이' : '풀'}</th><th style={{ textAlign: 'right' }}>사용</th><th style={{ textAlign: 'right' }}>전체</th><th>사용률</th>{poolCols.free && <th style={{ textAlign: 'right' }}>여유</th>}{poolCols.sub && <th style={{ textAlign: 'right' }}>구독</th>}{poolCols.sub && <th style={{ textAlign: 'right' }}>구독률</th>}{poolCols.raid && <th>RAID</th>}{poolCols.drives && <th>드라이브</th>}{poolCols.dr && <th>데이터 감축</th>}</tr></thead>
                 <tbody>{s.pools.map((p, i) => (
                   <tr key={i}><td>{p.name}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.usedBytes)}</td><td style={{ textAlign: 'right' }}>{tbFmt(p.totalBytes)}</td><td>{p.pct != null ? <UsageCell pct={p.pct} /> : '—'}</td>{poolCols.free && <td style={{ textAlign: 'right' }}>{p.freeBytes != null ? tbFmt(p.freeBytes) : '—'}</td>}{poolCols.sub && <td style={{ textAlign: 'right' }}>{p.subscribedBytes != null ? tbFmt(p.subscribedBytes) : '—'}</td>}{poolCols.sub && <td style={{ textAlign: 'right' }} title={p.subscriptionPctSource === 'calc' ? '장비가 구독률을 주지 않아 구독÷전체로 계산한 값입니다' : '장비가 보고한 값'}>{p.subscriptionPct != null ? `${p.subscriptionPct}%${p.subscriptionPctSource === 'calc' ? '*' : ''}` : '—'}</td>}{poolCols.raid && <td className="muted">{p.raid || '—'}{p.stripeLength ? ` (${p.stripeLength})` : ''}</td>}{poolCols.drives && <td className="muted" style={{ whiteSpace: 'normal' }}>{p.drives || (p.disks != null ? `${p.disks}개` : '—')}</td>}{poolCols.dr && <td className="muted">{p.dataReductionRatio || '—'}{p.dataReductionSaved ? ` · ${tbFmt(p.dataReductionSaved)} 절감` : ''}</td>}</tr>
@@ -1202,7 +1203,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {s.extra?.areas && (
             <>
               <div className="section-title" style={{ fontSize: 13 }}>OneFS API 영역 수집 {s.extra.areas.filter((a) => !a.skipped).length}
-                <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> — 엔드포인트 {s.extra.areasEndpoints ?? '—'}개 · {s.extra.areasAt ? new Date(s.extra.areasAt).toLocaleString('ko-KR') : ''} · 원문은 수집 노드 DB 저장</span>
+                <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> — 엔드포인트 {unitText(s.extra.areasEndpoints, '개')} · {s.extra.areasAt ? new Date(s.extra.areasAt).toLocaleString('ko-KR') : ''} · 원문은 수집 노드 DB 저장</span>
               </div>
               <div className="flex gap wrap" style={{ marginBottom: 8 }}>
                 {s.extra.areas.map((a) => (

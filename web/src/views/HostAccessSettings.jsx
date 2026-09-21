@@ -166,7 +166,7 @@ export default function HostAccessSettings() {
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 700 }}>③ OS 방화벽 — 추가 규칙(기본 존 rich rule)</div>
         <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>포트/프로토콜별 허용·차단. 출발지를 비우면 전체에 적용. 여기 없는 기존 존 설정(다른 서비스·포트)은 건드리지 않습니다.</div>
-        <STable sortable={false} style={{ fontSize: 12.5 }}>
+        <STable minWidth={720} sortable={false} style={{ fontSize: 12.5 }}>
           <thead><tr><th>포트(a 또는 a-b)</th><th>프로토콜</th><th>동작</th><th>출발지(IP/CIDR, 비우면 전체)</th><th>메모</th><th></th></tr></thead>
           <tbody>
             {draft.extra.map((r, i) => (

@@ -7,6 +7,8 @@
  *   (v2.439·2.440·2.505·2.545·2.553 실제 사고). 값 인용은 홑화살괄호 ‘ ’ 로 한다.
  */
 
+import { numOrNull } from '../numOrNull.js';
+
 /** 키 상태 — 겹치지 않는다. KPI 항등식: 합계 = 사용중 + 폐기 + 만료 + 분류없음. */
 export const KEY_STATES = Object.freeze({
   live: { label: '사용중', tone: 'ok' },
@@ -138,7 +140,7 @@ export function lastUsedText(lastUsedAt, useCount, now = Date.now()) {
   const t = Number(lastUsedAt);
   if (!Number.isFinite(t)) return { kind: 'unknown', text: '사용 시각을 읽지 못했습니다.' };
   const mins = Math.floor((now - t) / 60_000);
-  const n = Number.isFinite(Number(useCount)) ? Number(useCount) : null;
+  const n = numOrNull(useCount); // v2.575: 사용 시각이 있는데 횟수가 null 이면 '0회' 가 아니라 미기록이다
   const cnt = n == null ? '' : ` · 누적 ${n.toLocaleString()}회`;
   if (mins < 1) return { kind: 'recent', text: `방금 전${cnt}` };
   if (mins < 60) return { kind: 'recent', text: `${mins}분 전${cnt}` };

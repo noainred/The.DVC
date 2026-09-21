@@ -18,6 +18,7 @@ import React, { useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import EscClose from '../../components/EscClose.jsx';
 import BoldText from '../../components/boldText.jsx';
+import { STable } from '../../components/STable.jsx';
 import {
   diagnoseEmptyInventory, headline, CAUSE_WHY, CAUSE_FIX, CAUSE_WAITING,
   statusValue, relevantLogs,
@@ -140,8 +141,11 @@ export default function EmptyInvModal({ agent, push, onClose }) {
             </div>
           )}
           {inv && (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ fontSize: 11.5, borderCollapse: 'collapse', minWidth: 460 }}>
+            <div>
+              {/* v2.575 IMP-05: 웹에 마지막으로 남아 있던 raw `<table>` — 사용자 상시 요구
+                  '모든 표는 제목 클릭 정렬'(v2.422)의 유일한 예외였다. STable 이 가로 스크롤
+                  래퍼까지 만든다(minWidth 와 짝) — 바깥 overflowX div 는 이제 필요 없다. */}
+              <STable minWidth={460} style={{ fontSize: 11.5, borderCollapse: 'collapse' }}>
                 <thead><tr style={{ textAlign: 'left', color: 'var(--muted)' }}>
                   <th style={{ padding: '2px 8px 2px 0' }}>vCenter</th><th style={{ padding: '2px 8px' }}>상태</th>
                   <th style={{ padding: '2px 8px' }}>호스트</th><th style={{ padding: '2px 8px' }}>VM</th>
@@ -163,7 +167,7 @@ export default function EmptyInvModal({ agent, push, onClose }) {
                     <tr><td colSpan={6} className="muted" style={{ padding: '4px 0' }}>이 엣지에 등록된 vCenter 가 없습니다.</td></tr>
                   )}
                 </tbody>
-              </table>
+              </STable>
               {inv.truncated && <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>목록이 상한으로 잘렸습니다 — {inv.omitted}개 더 있습니다.</div>}
               {inv.lastError && <div style={{ fontSize: 11.5, marginTop: 4, color: 'var(--red)' }}>마지막 수집 오류: {inv.lastError}</div>}
             </div>

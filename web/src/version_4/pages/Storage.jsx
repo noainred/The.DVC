@@ -157,10 +157,11 @@ export default function Storage({ global: g, scope, polls, perms, spec, phase, p
                 ? <Empty>소유 VM 이 없는 파일을 찾지 못했습니다{scan.excluded ? ` (제외 ${fmtInt(scan.excluded)}건)` : ''}.</Empty>
                 : (
                   <div className="v3-tablewrap">
-                    <STable className="v3-table">
+                    {/* v2.575 BUG-19: 상한은 STable 이 **정렬 뒤** 적용한다(먼저 자르면 '앞 200개를 정렬한 것'). */}
+                    <STable className="v3-table" limit={200}>
                       <thead><tr><th>경로</th><th className="num">크기</th><th>판정</th><th className="num">최종 변경</th></tr></thead>
                       <tbody>
-                        {(scan.items || []).slice(0, 200).map((it) => (
+                        {(scan.items || []).map((it) => (
                           <tr key={it.path}>
                             <td><div className="v3-cellname ellipsis" title={it.path}>{it.path}</div></td>
                             <td className="num" data-sort={it.sizeBytes ?? ''}>{it.size || '—'}</td>
@@ -170,6 +171,8 @@ export default function Storage({ global: g, scope, polls, perms, spec, phase, p
                         ))}
                       </tbody>
                     </STable>
+                    {/* v2.575: 조용한 상한 금지 — 뺀 개수를 밝힌다. */}
+                    {(scan.items || []).length > 200 && <div className="v3-note">전체 {fmtInt((scan.items || []).length)}건 중 <b>200건만</b> 표시합니다(열을 눌러 정렬하면 전체를 정렬한 상위 200건입니다).</div>}
                   </div>
                 ))}
             </>

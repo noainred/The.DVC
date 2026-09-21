@@ -229,7 +229,7 @@ export default function CollectorSync() {
           {result && (
             <div className="card" style={{ marginTop: 8, background: 'var(--panel-2)' }}>
               <b style={{ fontSize: 13 }}>추가 결과 — 성공 {result.added}/{result.total}</b>
-              <STable style={{ fontSize: 12, marginTop: 4 }}>
+              <STable minWidth={960} style={{ fontSize: 12, marginTop: 4 }}>
                 <thead><tr><th>호스트</th><th>에이전트</th><th>결과</th><th>수집 서버</th><th>조치</th><th>토큰</th><th>엣지 반영</th><th>연결 확인</th><th>사유</th></tr></thead>
                 <tbody>{(result.results || []).map((x) => (
                   <tr key={x.id}>

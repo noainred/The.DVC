@@ -7,6 +7,7 @@ import {
   ms as fmtMs, pct, when, ago, reasonLabel, loopBadge, loopNote, hangSummary, hangKindLabel,
   measureVerdict, slowRate, routeHint,
 } from './perfMonitorText.js';
+import { unitText } from './unitText.js';
 
 /**
  * 설정 › 서버 성능 측정(v2.498) — 사용자 요청: "'불러오는 중…' 이 3분 이상 지속될 때가 있다.
@@ -109,7 +110,7 @@ export default function PerfMonitor() {
         <Card label="느린 요청" value={d.totals?.slow ?? 0} sub={`전체 ${(d.totals?.requests ?? 0).toLocaleString()}건 중 · 임계 ${fmtMs(st.slowRequestMs)}`}
           color={d.totals?.slow ? 'var(--amber)' : undefined} />
         <Card label="hang 기록" value={d.totals?.hangs ?? 0} sub={`화면 로딩 보고 ${d.totals?.clientStalls ?? 0}건 · 임계 ${fmtMs(st.hangLagMs)}`} color={d.totals?.hangs ? 'var(--red)' : undefined} />
-        <Card label="메모리(RSS)" value={`${d.mem?.rssMb ?? '—'} MB`} sub={`heap ${d.mem?.heapUsedMb ?? '—'}/${d.mem?.heapTotalMb ?? '—'} MB · 가동 ${Math.floor((d.totals?.uptimeSec || 0) / 3600)}시간`} />
+        <Card label="메모리(RSS)" value={unitText(d.mem?.rssMb, ' MB')} sub={`heap ${unitText(d.mem?.heapUsedMb)}/${unitText(d.mem?.heapTotalMb, ' MB')} · 가동 ${Math.floor((d.totals?.uptimeSec || 0) / 3600)}시간`} />
       </div>
 
       <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center' }}>
@@ -194,7 +195,7 @@ export default function PerfMonitor() {
           {d.routesTruncated && <> 라우트가 많아 상위 {(d.routes || []).length}개만 표시합니다.</>}
           {d.totals?.routesEvicted ? <> 키 상한({d.totals.routeKeys}개)에 닿아 가장 오래된 키 {d.totals.routesEvicted}개를 퇴출했습니다 — 라우터가 매칭하지 못한 요청(401·404)은 개별 키를 만들지 않고 <code>__unauthorized__</code>·<code>__unmatched__</code> 로 모입니다.</> : null}
         </div>
-        <STable className="table">
+        <STable minWidth={1180} className="table">
           <thead><tr><th>라우트</th><th>건수</th><th>평균</th><th>p50</th><th>p95</th><th>p99</th><th>최대</th><th>느림</th><th>느림 비율</th><th>5xx</th><th>유형</th><th>마지막</th></tr></thead>
           <tbody>{(d.routes || []).map((r) => {
             const rate = slowRate(r);
@@ -228,7 +229,7 @@ export default function PerfMonitor() {
           최근 {st.keepSlow}건만 보관합니다(프로세스 재시작 시 초기화).
         </div>
         {(d.slow || []).length ? (
-          <STable className="table">
+          <STable minWidth={1120} className="table">
             <thead><tr><th>시각</th><th>사유</th><th>소요</th><th>정체 겹침</th><th>상태</th><th>메서드</th><th>경로</th><th>사용자</th><th>진행중</th><th>RSS</th><th>작업</th></tr></thead>
             <tbody>{d.slow.map((r, i) => {
               const rl = reasonLabel(r.reason);

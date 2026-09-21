@@ -15,6 +15,8 @@
  *  · **목록 상한(64)으로 잘렸으면 밝힌다** — `count > list.length` 면 조용한 절단이다.
  */
 
+import { numOrNull } from '../../numOrNull.js';
+
 const n0 = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
 /** 노드 상태 문자열 → 'ok' | 'bad' | 'unknown'(수집기 판정 기준과 같게). */
@@ -31,7 +33,7 @@ export const NODE_KIND = Object.freeze({
 });
 export const nodeKindLabel = (k) => NODE_KIND[k] || NODE_KIND.unknown;
 
-const pctOf = (x) => (x && Number.isFinite(Number(x.pct)) ? Number(x.pct) : null);
+const pctOf = (x) => (x ? numOrNull(x.pct) : null);
 
 /** 표에 그릴 노드 행(순수). 이름이 없으면 id·ip 로 대체하고 **지어내지 않는다**. */
 export function nodeRows(snap) {
@@ -46,8 +48,11 @@ export function nodeRows(snap) {
       kind,
       hddPct: pctOf(n.hdd),
       ssdPct: pctOf(n.ssd),
-      inBps: Number.isFinite(Number(n.inBps)) ? Number(n.inBps) : null,
-      outBps: Number.isFinite(Number(n.outBps)) ? Number(n.outBps) : null,
+      // v2.575: `Number(null)===0` 함정. Unity·VPLEX·PowerStore 수집기는 이 값을 재지 않아
+      // **명시적으로 `null`** 을 보내는데, 예전 형태는 그것을 0 으로 바꿔 화면이
+      // `0 bps`(= '트래픽 없음')라고 **거짓말**했다(`bpsText(null)` 은 '—' 다).
+      inBps: numOrNull(n.inBps),
+      outBps: numOrNull(n.outBps),
     };
   });
 }

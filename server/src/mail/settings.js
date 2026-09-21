@@ -19,6 +19,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { normalizeAddresses } from '../util/smtp.js';
 import { KINDS, isKind } from './kinds.js';
 
+import { ssrfBlockReason } from '../collector/registry.js';   // v2.575 SEC-15
 const FILE = path.join(config.configDir, 'mail.json');
 
 export const DEFAULTS = Object.freeze({
@@ -77,14 +78,40 @@ export function load() {
   return cache;
 }
 
+/**
+ * SMTP 서버 주소를 저장 전에 검사한다 (v2.575 SEC-15).
+ *
+ * ⚠ 이 저장소는 **저장되는 접속처를 등록 시점에 `ssrfBlockReason` 으로 거른다**
+ * (server/CLAUDE.md v2.537 — storage·sanswitch·pdu·iDRAC·NSX·bmstor 6개 등록부).
+ * SMTP 만 그 규약 밖에 있었다 — 링크로컬(169.254.169.254 클라우드 메타데이터)·루프백·
+ * 우회 표기를 넣어도 통과했고, 그 주소로 **계정·비밀번호가 나간다**.
+ * ⚠ RFC1918(사내망)은 **허용**이다 — 사내 릴레이가 정상 구성이다. 막는 것은 링크로컬·
+ *   루프백·우회 표기뿐이고, 그것이 `ssrfBlockReason` 의 정책 그대로다.
+ * ⚠ **기존에 저장된 값은 재검증하지 않는다**(수정 시점에 걸린다) — 그러지 않으면 업그레이드
+ *   직후 멀쩡히 돌던 현장의 메일이 저장도 못 한 채 죽는다(v2.537 규약과 같은 판단).
+ * ⚠ 비우는 것(`host: ''`)은 '메일 끄기' 이므로 막지 않는다.
+ */
+export function smtpHostIssue(host) {
+  const h = String(host ?? '').trim();
+  if (!h) return null;                       // 미설정 = 끄기
+  // ssrfBlockReason 은 URL 을 받는다. 포트는 별도 필드이므로 호스트만 검사한다.
+  return ssrfBlockReason(h.includes(':') && !h.startsWith('[') ? `[${h}]` : h);
+}
+
 export function save(body = {}) {
   const cur = load();
   const next = structuredClone(cur);
   if (typeof body.enabled === 'boolean') next.enabled = body.enabled;
   if (body.smtp && typeof body.smtp === 'object') {
     const s = body.smtp;
+    // ⚠ v2.575 SEC-15 — 바뀐 주소만 검사한다(기존 값 재검증 금지 — 위 주석).
+    const newHost = String(s.host ?? cur.smtp.host).trim().slice(0, 253);
+    if (newHost !== String(cur.smtp.host || '').trim()) {
+      const issue = smtpHostIssue(newHost);
+      if (issue) throw Object.assign(new Error(`SMTP 서버 주소를 쓸 수 없습니다 — ${issue}`), { status: 400 });
+    }
     next.smtp = {
-      host: String(s.host ?? cur.smtp.host).trim().slice(0, 253),
+      host: newHost,
       port: clamp(s.port, 1, 65535, cur.smtp.port || 25),
       secure: s.secure === true,
       startTls: s.startTls !== false,

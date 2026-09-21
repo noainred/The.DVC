@@ -77,7 +77,7 @@ const isSettingsOwner = (u) => {
   return u.isSettingsOwner === true;
 };
 
-const REGIONS = ['아시아', '중국', '유럽', '북미'];
+import { REGIONS } from './regions.js'; // v2.575 IMP-10 — 단일 소스
 
 // Per-menu filter (added to the shared filter bar on the matching tab).
 const MENU_FILTERS = {
@@ -576,7 +576,7 @@ function VcDownList({ user, onClose }) {
         <div className="muted" style={{ padding: 8, fontSize: 13 }}>지금은 전부 연결되어 있습니다(마지막 수집 이후 복구됐을 수 있음 — 헤더 카운트는 최대 30초 지연).</div>
       ) : (
         <>
-          <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
+          <STable minWidth={720} className="data-table" style={{ width: '100%', fontSize: 13 }}>
             <thead><tr><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'left' }}>vCenter</th><th style={{ textAlign: 'left' }}>위치</th><th style={{ textAlign: 'left' }}>버전</th><th style={{ textAlign: 'right' }}>호스트/VM</th>{isAdmin && <th data-nosort style={{ textAlign: 'right' }}>접속확인</th>}</tr></thead>
             <tbody>
               {list.map((v) => {

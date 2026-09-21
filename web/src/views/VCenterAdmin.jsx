@@ -4,7 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 
-const REGIONS = ['아시아', '중국', '유럽', '북미'];
+import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 const EMPTY = {
   id: '', name: '', host: 'https://', username: '', password: '',
   enabled: true, maintenance: false, pollIntervalSec: '', timeoutMs: '', collectMode: 'direct',

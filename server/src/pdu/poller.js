@@ -19,6 +19,7 @@ import { pollMs, startAdaptiveTimer } from './intervals.js';
 import { emptySnapshot, summarize } from './types.js';
 import { evaluateSnapshot, diffAlerts, loadThresholds } from './thresholds.js';
 import { loadAlertConfig, notify } from '../alerts.js';
+import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
 const CONCURRENCY = Math.max(1, Number(process.env.PDU_CONCURRENCY) || 4);
 const DEVICE_TIMEOUT_MS = Math.max(10_000, Number(process.env.PDU_DEVICE_TIMEOUT_MS) || 90_000);
@@ -83,15 +84,11 @@ export async function pollOnce() {
   const started = Date.now();
   let ok = 0, fail = 0;
   try {
-    let i = 0;
-    const worker = async () => {
-      while (i < devices.length) {
-        const d = devices[i++];
-        const r = await collectDeviceNow(d.id);
-        if (r.ok) ok++; else fail++;
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, devices.length) }, worker));
+    // v2.575 IMP-08: 동시성 풀 단일 소스.
+    await poolRun(devices, CONCURRENCY, async (d) => {
+      const r = await collectDeviceNow(d.id);
+      if (r.ok) ok++; else fail++;
+    });
     // 임계치 평가는 **한 주기가 끝난 뒤 한 번**만 한다 — 장비마다 평가하면 '복구' 판정이
     // 아직 수집 안 된 장비를 '위반 해소'로 잘못 읽는다(diffAlerts 는 전체 위반 집합을 본다).
     await evaluateAndNotify();

@@ -19,6 +19,7 @@ import { loadVcenterConfig } from '../../config.js';
 import { expandIpList } from '../../idrac/iprange.js';
 import { listCollectors } from '../../collector/registry.js';
 import { adminOnly, maskPw, requireSettingsOwner } from './shared.js';
+import { poolRun } from '../../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
 export function registerGpuGuest(adminRouter) {
 
@@ -214,21 +215,17 @@ adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, async (req, res)
   const st = loadGpuGuestSettings();
   const port = Number(b.port) || 22; const password = b.password || ''; const vcenterId = String(b.vcenterId || '').trim(); const force = !!b.force;
   const results = new Array(targets.length);
-  let idx = 0;
-  const worker = async () => {
-    while (idx < targets.length) {
-      const i = idx++; const ip = targets[i];
-      const det = await detectPhysicalGpu(ip, { username, password }, { timeoutMs: st.timeoutMs, port }).catch((e) => ({ reachable: false, error: e.message, gpuModels: [] }));
-      if (!det.reachable) { results[i] = { ip, ok: false, reachable: false, error: det.error || '접속 실패' }; continue; }
-      if (!det.gpuModels.length && !force) { results[i] = { ip, ok: false, reachable: true, noGpu: true, host: det.hostname || '' }; continue; }
-      const os = /microsoft|windows/i.test(det.os) ? 'windows' : 'linux';
-      const fields = { name: det.hostname || ip, host: ip, port, username, password, os, vcenterId, gpuModels: det.gpuModels, enabled: true };
-      const exist = findPhysicalByHost(ip);
-      if (exist) updatePhysical(exist.id, fields); else addPhysical(fields);
-      results[i] = { ip, ok: true, updated: !!exist, noGpu: !det.gpuModels.length, gpuCount: det.gpuModels.length, host: det.hostname || ip };
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(8, targets.length) }, worker));
+  // v2.575 IMP-08: 동시성 풀 단일 소스(index 를 함께 받아 결과 순서를 보존한다).
+  await poolRun(targets, 8, async (ip, i) => {
+    const det = await detectPhysicalGpu(ip, { username, password }, { timeoutMs: st.timeoutMs, port }).catch((e) => ({ reachable: false, error: e.message, gpuModels: [] }));
+    if (!det.reachable) { results[i] = { ip, ok: false, reachable: false, error: det.error || '접속 실패' }; return; }
+    if (!det.gpuModels.length && !force) { results[i] = { ip, ok: false, reachable: true, noGpu: true, host: det.hostname || '' }; return; }
+    const os = /microsoft|windows/i.test(det.os) ? 'windows' : 'linux';
+    const fields = { name: det.hostname || ip, host: ip, port, username, password, os, vcenterId, gpuModels: det.gpuModels, enabled: true };
+    const exist = findPhysicalByHost(ip);
+    if (exist) updatePhysical(exist.id, fields); else addPhysical(fields);
+    results[i] = { ip, ok: true, updated: !!exist, noGpu: !det.gpuModels.length, gpuCount: det.gpuModels.length, host: det.hostname || ip };
+  });
   pollPhysicalOnce().catch(() => {});
   const registered = results.filter((r) => r && r.ok).length;
   res.json({ ok: true, total: targets.length, registered, results, ipErrors: errors, truncated: truncated || list.length > MAX });
