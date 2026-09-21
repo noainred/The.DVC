@@ -157,16 +157,42 @@ export function layoutGroup(items = [], valOf = (x) => x?.curC, { view = 'server
 export function sparkPath(points = [], { width = 84, height = 24, pad = 2, bottom = 3, minSpan = 2 } = {}) {
   // ⚠ `.map(Number).filter(Number.isFinite)` 로 쓰면 **null 점이 0℃ 로 살아남는다**(위 tempNum
   //   주석). 자체 테스트가 이 결함을 잡았다 — 결측은 건너뛴다(선을 바닥으로 끌지 않는다).
-  const vals = (points || []).map((p) => tempNum(typeof p === 'number' ? p : p?.avg)).filter((v) => v != null);
+  /*
+   * ⚠⚠ v2.574 BUG-15 — **수집이 없던 구간은 선을 잇지 않는다.**
+   *   v2.573 까지는 결측을 버린 뒤 남은 점을 전부 `L` 로 이어 붙여, 6시간 공백이 **직선 보간**
+   *   으로 그려졌다 — 없는 데이터를 있는 것처럼 보여주는 것이다. CLAUDE.md v2.551 이
+   *   "수집이 없던 구간은 선을 잇지 않는다(끊어진 subpath — `roomTempView.sparkPath` 와 같은
+   *   규약)" 라고 못 박았고 그 형제(`roomTempView.js:140`)는 실제로
+   *   `prevTs != null && p.ts - prevTs <= gapMs ? 'L' : 'M'` 로 끊고 있었다. 여기만 빠져 있었다.
+   * ⚠ x 좌표는 **결측 점까지 포함한 전체 길이**로 잡는다 — 버린 뒤 다시 세면 공백이 시간축에서
+   *   사라져 남은 점들이 균등 간격으로 당겨진다(그것도 거짓이다).
+   */
+  const raw = (points || []).map((p) => tempNum(typeof p === 'number' ? p : p?.avg));
+  const vals = raw.filter((v) => v != null);
   if (vals.length < 2) return null;
   const lo = Math.min(...vals);
   const hi = Math.max(...vals);
   const span = Math.max(hi - lo, minSpan);
-  const xs = (i) => pad + (i * (width - pad * 2)) / (vals.length - 1);
+  const denom = Math.max(1, raw.length - 1);
+  const xs = (i) => pad + (i * (width - pad * 2)) / denom;
   const ys = (v) => height - bottom - ((v - lo) / span) * (height - bottom * 2);
-  const d = vals.map((v, i) => `${i === 0 ? 'M' : 'L'}${xs(i).toFixed(1)},${ys(v).toFixed(1)}`).join(' ');
-  const area = `${d} L${xs(vals.length - 1).toFixed(1)},${height} L${xs(0).toFixed(1)},${height} Z`;
-  return { d, area, lo, hi, first: vals[0], last: vals[vals.length - 1], n: vals.length };
+  // 결측이 하나라도 끼면 그 자리에서 subpath 를 끊는다(`M`).
+  let broke = false;
+  const seg = [];
+  raw.forEach((v, i) => {
+    if (v == null) { broke = true; return; }
+    const cmd = seg.length === 0 || broke ? 'M' : 'L';
+    broke = false;
+    seg.push(`${cmd}${xs(i).toFixed(1)},${ys(v).toFixed(1)}`);
+  });
+  const d = seg.join(' ');
+  const firstI = raw.findIndex((v) => v != null);
+  const lastI = raw.length - 1 - [...raw].reverse().findIndex((v) => v != null);
+  // ⚠ 면적은 **끊긴 구간이 있으면 그리지 않는다** — 채우면 공백이 메워져 보인다.
+  const gaps = raw.some((v) => v == null);
+  const area = gaps ? null
+    : `${d} L${xs(lastI).toFixed(1)},${height} L${xs(firstI).toFixed(1)},${height} Z`;
+  return { d, area, lo, hi, first: vals[0], last: vals[vals.length - 1], n: vals.length, gaps };
 }
 
 /** 24시간 변화량 문구(현재 − 계열 첫 점). 계열이 없으면 빈 문자열(지어내지 않는다). */

@@ -19,6 +19,7 @@ import { registerVmSeries } from './api/vmSeries.js'; // v2.510: 실시간(20초
 import { registerCurUser } from './api/curUser.js';
 import { registerHorizonSessions } from './api/horizonSessions.js';  // v2.525: Horizon 실시간 사용자(세션)  // v2.520: '현재 사용자' — 게스트 계정 없이 guestinfo 읽기
 import { registerInventory } from './api/inventory.js';
+import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
@@ -43,6 +44,10 @@ import { registerVmTrack } from './api/vmtrack.js'; // VM 수량 추이(00/12시
 // 원본(단일 파일 시절) 정의 순서를 그대로 유지한다. 새 라우트 추가 시 해당 도메인 모듈에 넣을 것.
 // RBAC(requirePerm)·scope 강제는 각 모듈 라우트에 그대로 있다(CLAUDE.md 보안 불변조건).
 export const api = Router();
+// v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
+// 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
+// ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
+wrapAsyncRouter(api);
 
 // 특수 기능 '도구별 접근'(toolsDenied) 서버 집행(v2.447, 감사 S2) — 프론트 toolAllowed() 만으로는
 // curl 직접 호출을 막지 못했다. register* 보다 **먼저** 걸어야 모든 /tools 라우트에 적용된다.

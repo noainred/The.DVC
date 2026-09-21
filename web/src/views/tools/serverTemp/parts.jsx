@@ -231,7 +231,9 @@ export function HotList({ rows, dense, spark, onOpen }) {
                 <svg width="84" height="24" style={{ display: 'block', marginLeft: 'auto' }}
                   role="img" aria-label={sparkSeriesLabel(spark?.metric?.[r.key])}>
                   <title>{`${sparkSeriesLabel(spark?.metric?.[r.key])} · 최저 ${sp.lo.toFixed(1)}℃ · 최고 ${sp.hi.toFixed(1)}℃ · ${sp.n}점`}</title>
-                  <path d={sp.area} fill={hot ? 'rgba(239,68,68,.16)' : 'rgba(245,158,11,.14)'} />
+                  {/* ⚠ v2.574 BUG-15 — 끊긴 구간이 있으면 `area` 가 null 이다(면적을 채우면
+                      수집 공백이 메워져 보인다). 그때는 면적 path 자체를 그리지 않는다. */}
+                  {sp.area && <path d={sp.area} fill={hot ? 'rgba(239,68,68,.16)' : 'rgba(245,158,11,.14)'} />}
                   <path d={sp.d} fill="none" stroke={tempColor(r.curC)} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
                 </svg>
               ) : (

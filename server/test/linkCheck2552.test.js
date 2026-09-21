@@ -30,7 +30,9 @@ const { normalizeSettings, DEFAULTS } = await import('../src/linkcheck/settings.
 
 const SRC = (p) => fs.readFileSync(new URL(`../src/${p}`, import.meta.url), 'utf8');
 /** 주석을 지운 뒤 소스를 검사한다 — 주석에 규칙을 적어 둔 것이 통과 근거가 되면 안 된다(v2.535 규약). */
-const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+// v2.574: 지역 정규식 판본은 **줄 주석 안의 슬래시+별 조합**에 걸려 코드를 통째로 지운다
+// (실제 사례 `agent/configPush.js:34`). 공용 상태기계 코어를 쓴다 — `_stripComments.js` 머리말.
+import { stripComments } from './_stripComments.js';
 
 test('링크 자동 발견 — 종류별로 나오고 설정 문제를 조용히 빼지 않는다', () => {
   const out = buildLinks({

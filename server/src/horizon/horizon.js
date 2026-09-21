@@ -25,7 +25,26 @@ const FILE = path.join(config.configDir, 'horizon.json');
 // v2.506(감사 S1 #2): DNS 리바인딩(TOCTOU) 차단 — 검증을 `lookup` 안에서 해 소켓이 실제로 쓸
 // 주소를 그 순간에 검사한다. SNI(`servername`)·Host·인증서 검증은 원래 호스트명을 그대로 쓴다.
 // 자세한 근거는 util/ssrfLookup.js 머리말.
-const dispatcher = new Agent({ connect: { rejectUnauthorized: process.env.HORIZON_TLS_VERIFY === 'true', lookup: ssrfLookup } });
+export const HORIZON_TLS_VERIFY = process.env.HORIZON_TLS_VERIFY === 'true';
+/*
+ * ⚠ v2.574 SEC-16 — **기본값(검증 off)은 그대로 둔다. 다만 조용하지 않게 한다.**
+ * 2026-09-21 감사가 "TLS 검증 기본 OFF + AD 도메인 계정" 을 지적했다. 사실이지만, 이 저장소는
+ * 장비·어플라이언스 수집기에 대해 **"기본은 자체서명 허용(기존 동작), env 로 켠다"** 를 명시적
+ * 규약으로 채택해 두었다(server/CLAUDE.md M-4 — `STORAGE_TLS_VERIFY`·`SANSWITCH_TLS_VERIFY`,
+ * `sanswitch/collectors/fosRest.js:26`·`storage/collectors/isilon.js:22` 가 같은 형태다).
+ * 기본을 뒤집으면 자체서명 커넥션 서버를 쓰는 **모든 현장에서 Horizon 수집이 즉시 죽는다** —
+ * 그것은 감사 지적을 고치는 것이 아니라 장애를 만드는 것이다.
+ *
+ * 그래서 고친 것은 **정직성**이다: `resilientFetch` 가 `WAN_TLS_INSECURE=true` 일 때 하는 것처럼
+ * 기동 시 한 번 경고하고, 상태(`horizonTlsInfo`)로 화면이 말할 수 있게 한다.
+ * ⚠ 기본을 켜려면 **별건**으로 다룰 것 — 현장 인증서 실태를 확인하고 마이그레이션 안내가 필요하다.
+ */
+if (!HORIZON_TLS_VERIFY) {
+  console.warn('[horizon] ⚠ HTTPS 인증서 검증이 꺼져 있습니다(기본값) — 커넥션 서버로 AD 계정이 전송되는 경로입니다. 사설 CA 를 신뢰시키고 HORIZON_TLS_VERIFY=true 로 켜는 것을 권장합니다.');
+}
+/** 화면·진단이 '지금 검증 중인가' 를 말할 수 있게 한다(조용한 약한 설정 금지). */
+export const horizonTlsInfo = () => ({ verify: HORIZON_TLS_VERIFY, env: 'HORIZON_TLS_VERIFY' });
+const dispatcher = new Agent({ connect: { rejectUnauthorized: HORIZON_TLS_VERIFY, lookup: ssrfLookup } });
 
 export function loadHorizon() {
   if (!fs.existsSync(FILE)) return [];

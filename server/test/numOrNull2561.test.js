@@ -25,9 +25,9 @@ const SRC = new URL('../src/', import.meta.url).pathname;
 const { numOrNull } = await import('../src/util/numOrNull.js');
 
 /** 줄 주석·블록 주석을 제거한 소스(규칙을 설명하는 주석이 통과 근거가 되지 않게). */
-function stripComments(s) {
-  return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
+// v2.574: 지역 정규식 판본은 **줄 주석 안의 슬래시+별 조합**에 걸려 코드를 통째로 지운다
+// (실제 사례 `agent/configPush.js:34`). 공용 상태기계 코어를 쓴다 — `_stripComments.js` 머리말.
+import { stripComments } from './_stripComments.js';
 
 function walk(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래. env 가 최우선.
 // v2.451: 이 파일만 configDir 에 고정돼 있어, 경로를 옮겨도 PDU 이력은 계속 CONFIG_DIR 에 쌓였다
@@ -125,11 +126,49 @@ function pruneOld(db) {
   } catch (e) { console.error('[pdu-db] prune 실패:', e.message); }
 }
 
-function rangeOf({ hours = 24, from = null, to = null, points = 120 }) {
-  const until = to ? Number(to) : Date.now();
-  const since = from ? Number(from) : until - hours * 3_600_000;
-  const bucketMs = Math.max(60_000, Math.round((until - since) / Math.max(10, points)));
-  return { since, until, bucketMs };
+/** 조회 창의 상한 — 보존 기간을 넘겨 물어도 의미가 없다(그 뒤엔 prune 돼 행이 없다). */
+const MAX_HOURS = RETAIN_DAYS * 24;
+const MAX_POINTS = 500;
+
+/**
+ * 조회 구간 → `{ since, until, bucketMs }`.
+ *
+ * ⚠⚠ **`bucketMs` 는 반드시 유한한 양의 정수여야 한다.** 이 값은 `powerSeries`·`envSeries` 에서
+ * **템플릿 리터럴로 SQL 에 보간**되므로(`(ts/${bucketMs})`) `Infinity`·`NaN` 이 들어가면 SQLite 가
+ * 그것을 **식별자로 파싱**해 `no such column: Infinity` 로 `prepare()` 가 던진다. 두 라우트는
+ * async 이고 express 4 는 async throw 를 잡지 않으므로 **그 요청이 영원히 응답 없이 매달리고**
+ * 소켓 fd 가 잡힌다(2026-09-21 감사 BUG-01 — `?hours=1e400` 실측 무응답, 요청 40개에 fd +40).
+ *
+ * 그래서 입력을 **전부 유한수로 좁힌 뒤** 범위를 클램프한다. `numOrNull` 은 `Infinity`·`NaN`·
+ * 빈 문자열·객체를 전부 `null` 로 돌려주므로(v2.561) 그것이 1차 방어이고, 2차로 `clamp` 가
+ * 상·하한을 건다. 형제 모듈 `sanswitch/perfDb.js` 는 라우트(`routes/api/sanSwitch.js:74`)에서
+ * `Math.min(24*90, …)` 로 클램프해 같은 결함을 피하고 있었다 — 여기에는 그 클램프가 없었다.
+ *
+ * ⚠ 클램프를 라우트가 아니라 **이 헬퍼**에 둔 이유: 두 라우트가 같은 실수를 반복하지 않게 하고,
+ * 새 시계열 라우트가 `rangeOf` 를 재사용할 때 자동으로 보호되게 하기 위해서다.
+ */
+export function rangeOf({ hours, from, to, points } = {}) {
+  const clamp = (v, lo, hi, dflt) => {
+    const n = numOrNull(v);
+    return n == null ? dflt : Math.min(hi, Math.max(lo, n));
+  };
+  const h = clamp(hours, 1 / 60, MAX_HOURS, 24);          // 1분 ~ 보존기간
+  const pts = Math.round(clamp(points, 10, MAX_POINTS, 120));
+  const now = Date.now();
+  // 시각은 epoch ms 로만 받는다 — 유한하지 않으면 '미지정' 으로 보고 기본값을 쓴다.
+  const toMs = numOrNull(to);
+  const fromMs = numOrNull(from);
+  const until = toMs == null ? now : Math.min(toMs, now + 86_400_000); // 미래는 하루까지만
+  const sinceRaw = fromMs == null ? until - h * 3_600_000 : fromMs;
+  // from > to 로 뒤집혀 오면 구간이 음수가 된다 — 기본 창으로 되돌린다(빈 결과를 내지 않기 위해).
+  // ⚠ 보존 기간보다 더 과거는 받지 않는다 — 그 구간은 prune 돼 행이 없는데 bucketMs 만 거대해져
+  //   (epoch 0 을 주면 수백만 시간) 버킷 축이 무의미해진다.
+  const floor = until - MAX_HOURS * 3_600_000;
+  const since = Math.max(floor, sinceRaw < until ? sinceRaw : until - h * 3_600_000);
+  const span = Math.max(1, until - since);
+  const bucketMs = Math.max(60_000, Math.round(span / pts));
+  // 여기까지 왔는데도 유한하지 않다면 SQL 에 넣지 않는다(있을 수 없지만, 보간이라 마지막 방어).
+  return { since, until, bucketMs: Number.isSafeInteger(bucketMs) && bucketMs > 0 ? bucketMs : 60_000 };
 }
 
 /**

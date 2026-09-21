@@ -105,7 +105,13 @@ export const ENDPOINTS = Object.freeze([
     fields: ['id', 'vcenterId', 'entity', 'entityType', 'name', 'severity', 'triggeredAt', 'muted'],
   },
   {
-    path: '/faults/parts', group: 'faults', method: 'GET', scoped: false,
+    // ⚠⚠ v2.574 SEC-08 — `requiresFullScope` 가 빠져 있었다. 내부 동등 라우트
+    //   `GET /api/tools/part-faults`(`routes/api/partFaults.js:131`)는 `fullScopeOnly` 로 **403**
+    //   인데(머리말 `:11` 이 근거를 적고 있다) 공개 API 키 경로로는 **전량이 나갔다** — 같은
+    //   데이터가 세션 경로에서 거절되고 키 경로에서 열리던 비대칭이다. 응답 필드 `agent`(법인 엣지
+    //   이름)·`deviceKey`(서비스태그)가 그대로 실린다.
+    //   부품 장애는 **agent(법인 엣지) 축**이라 vCenter 범위와 교집합할 수 없다 → 전체 범위 키만.
+    path: '/faults/parts', group: 'faults', method: 'GET', scoped: false, requiresFullScope: true,
     summary: '물리 부품 장애 — 확인 불가(unknown)를 정상으로도 장애로도 세지 않는다',
     fields: ['partKey', 'agent', 'scope', 'deviceKey', 'kind', 'partId', 'state', 'openedAt', 'lastSeenAt', 'reason'],
   },

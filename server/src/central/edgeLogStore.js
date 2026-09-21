@@ -11,6 +11,8 @@
  * 상한은 **두 축**이다 — 엣지당 건수(`KEEP`)와 봉투당 로그 줄 수(엣지가 이미 `limit` 로 자르지만
  * 중앙도 스스로 막는다. 구버전·조작된 엣지가 거대 본문을 올릴 수 있다 — v2.548 S2 와 같은 규칙).
  */
+
+import { numOrNull } from '../util/numOrNull.js';
 const KEEP = Math.max(2, Number(process.env.EDGELOG_KEEP_PER_AGENT) || 10);
 const LINE_CAP = Math.max(100, Number(process.env.EDGELOG_LINE_CAP) || 1_000);
 const AGENT_CAP = Math.max(10, Number(process.env.EDGELOG_MAX_AGENTS) || 200);
@@ -36,7 +38,9 @@ export function putEdgeLog(agent, snap = {}) {
     via: t(snap.via) || 'pull',
     ok: snap.ok !== false,
     error: snap.error ? String(snap.error).slice(0, 300) : null,
-    ms: Number.isFinite(Number(snap.ms)) ? Number(snap.ms) : null,
+    // ⚠ v2.574 BUG-06 — `Number(null) === 0` 이라 예전 형태는 **'못 읽음' 을 '0ms(즉시 응답)'**
+    //   으로 바꿨다. 측정값 판정은 `numOrNull` 하나가 갖는다(v2.561 규약).
+    ms: numOrNull(snap.ms),
     reportedAt: Number(snap.at) || null,
     node: snap.node && typeof snap.node === 'object' ? snap.node : null,
     logs: logs ? {
@@ -47,7 +51,10 @@ export function putEdgeLog(agent, snap = {}) {
       items,
     } : null,
     status: Array.isArray(snap.status) ? snap.status : null,
-    statusFailed: Number.isFinite(Number(snap.statusFailed)) ? Number(snap.statusFailed) : null,
+    // ⚠⚠ v2.574 BUG-07 — 생산자 `edgelog/collect.js:101` 은 `withStatus=false` 면 **정직하게
+    //   `null`** 을 주는데 여기서 0 이 되어 화면이 **"상태 점검 실패 0건"**(= 점검을 안 한 것을
+    //   '전부 정상' 으로)이라 말했다. v2.561 이 스토리지 적재에서 겪은 것과 같은 유형이다.
+    statusFailed: numOrNull(snap.statusFailed),
     maskedFields: Number(snap.maskedFields) || 0,
   };
   const cur = _map.get(key) || { agent: t(agent), snaps: [] };

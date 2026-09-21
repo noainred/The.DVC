@@ -10,7 +10,12 @@ import { bundleShaIssue } from '../upgrade/upgrade.js'; // v2.480(3차 감사): 
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 
+import { wrapAsyncRouter } from '../util/asyncRoute.js';
 export const upgradeRouter = Router();
+// v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
+// 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
+// ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
+wrapAsyncRouter(upgradeRouter);
 
 // ── PUT /settings 입력 검증(감사 H16) ─────────────────────────────────────────
 // installDir는 업그레이드 시 '디렉터리 통째 교체' 대상이고 watchDir는 번들 탐색 경로,

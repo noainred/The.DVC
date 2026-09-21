@@ -38,9 +38,14 @@ export function normalizeVm(v) {
     // 데이터스토어: 스냅샷은 배열(여러 개 사용) 또는 단일 문자열일 수 있다 — 표시용으로 합친다.
     datastore: Array.isArray(v.datastores) ? v.datastores.join(', ') : (v.datastore || ''),
     powerState: v.powerState || '',
-    cpu: Number.isFinite(Number(v.cpuCount)) ? Number(v.cpuCount) : null,
-    memMB: Number.isFinite(Number(v.memMB)) ? Number(v.memMB) : null,
-    storageGB: Number.isFinite(Number(v.storageGB)) ? Number(v.storageGB) : null,
+    // ⚠ v2.574 BUG-09 — `Number(null) === 0` 형태였다. **도달 경로는 확정하지 못했다**
+    //   (생산자 3곳 `soapClient.js:1453`·`restClient.js:204`·`mock/generator.js:257` 이 `null` 을
+    //   내는 경우를 증명하지 못했다) — 그래서 '결함 수정' 이 아니라 **형태 교정**이다.
+    //   그래도 고치는 이유: 여기서 0 이 되면 '0 vCPU'·'0MB' 라는 **오류 없이 틀린 값**이고
+    //   그것이 추이 diff 에 '사양 변경' 으로 기록된다. 판정은 `numOrNull` 하나가 갖는다(v2.561).
+    cpu: numOrNull(v.cpuCount),
+    memMB: numOrNull(v.memMB),
+    storageGB: numOrNull(v.storageGB),
     guestOS: v.guestOS || '',
   };
 }

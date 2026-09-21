@@ -12,6 +12,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { notify } from '../alerts.js';
 
+import { numOrNull } from '../util/numOrNull.js';
 const FILE = () => path.join(config.dbDir || config.configDir, 'rma-tests.db');
 const RETENTION_DAYS = Math.max(1, Number(process.env.RMA_TEST_HISTORY_DAYS) || 90);
 const REPEAT_LOG_MS = 60 * 60_000;
@@ -50,9 +51,14 @@ export async function ingestResult(agent, r, { now = Date.now(), alert = true, n
   const prev = latest.get(k);
   const status = ['ok', 'warn', 'bad', 'unknown'].includes(r.status) ? r.status : 'unknown';
   const at = Math.min(Number(r.at) || now, now);
+  // ⚠ v2.574 BUG-08 — `value` 는 **측정값**이다(RTT·손실률·인증서 잔여일). 예전 형태는
+  //   `Number(null) === 0` 이라 '값 없음' 을 **0** 으로 바꿨다. 도달 경로가 확정돼 있다 —
+  //   `rma/agent.js:219` 가 실행 오류 시 `value: null` 을 보내고 `rma/tests.js:164` 는 값이
+  //   없으면 `?? null` 을 준다. 같은 코드베이스가 `value == null` 을 '값 없음' 으로 정의해 두고
+  //   sink 에서 0 으로 바꾸고 있었다.
   const cur = {
     agent: String(agent), instance: String(r.instance || ''), testId: String(r.id), test: String(r.test || prev?.test || ''), name: name || r.name || prev?.name || '',
-    status, reply: String(r.reply || '').slice(0, 500), value: Number.isFinite(Number(r.value)) ? Number(r.value) : null, at,
+    status, reply: String(r.reply || '').slice(0, 500), value: numOrNull(r.value), at,
     since: prev && prev.status === status ? prev.since : at,
     okAt: status === 'ok' ? at : (prev?.okAt ?? null),
     streak: prev && prev.status === status ? (prev.streak || 1) + 1 : 1,

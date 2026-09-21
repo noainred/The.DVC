@@ -179,6 +179,23 @@ export async function pushSvcmonNow() {
     };
     if (errors.length) console.warn(`[svcmon-push] 일부 실패: ${errors.join(' · ')}`);
     return { ok: errors.length === 0, ...last };
+  } catch (e) {
+    // ⚠⚠ v2.574 BUG-02 — 이 catch 를 지우지 말 것. 없으면 두 가지가 동시에 깨진다:
+    //  ① 라우트(`routes/svcmon/edge.js` POST /push-now)가 async 라 express 4 가 throw 를
+    //     잡지 못하고 **요청이 응답 없이 매달린다**(실측 `code=000 time=20.002`. 같은 파일의
+    //     형제 `config-pull-now` 는 catch 가 있어 `202 / 0.0044s` 였다).
+    //  ② `last` 가 try 끝에 있어 **실패가 상태 객체에 남지 않는다** — `edgelog/spec.js` 가
+    //     이 값을 화면에 실으므로 엣지 로그가 "아직 안 보냄" 이라 말한다. 그것이 v2.566 이
+    //     10일짜리 무음 실패로 겪은 바로 그 모양이다(CLAUDE.md '무음 실패 금지').
+    // push 진입 함수 6개 중 catch 가 없던 것은 이 하나뿐이었다(2026-09-21 감사 전수 확인).
+    const msg = e?.message || String(e);
+    last = {
+      at: Date.now(), ms: Date.now() - startedAt, error: msg,
+      chunks: 0, rows: null, items: null, accepted: 0, dropped: 0, bytes: 0, wire: 0,
+      gzip: PUSH_GZIP, chunkRows, errors: [msg], metaSig: sentMetaSig,
+    };
+    console.warn(`[svcmon-push] 실패: ${msg}`);
+    return { ok: false, reason: msg, ...last };
   } finally {
     running = false;
   }

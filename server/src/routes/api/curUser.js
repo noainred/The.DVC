@@ -95,8 +95,26 @@ api.get('/tools/curuser/history', requirePerm('tools'), async (req, res) => {
   });
 });
 
+/**
+ * 작업 로그.
+ * ⚠⚠ v2.574 SEC-05 — **이 라우트만 scope 규약 밖에 있었다.** 이벤트의 `deviceId` 는 vCenter id 이고
+ *   `name` 은 vCenter 이름, 수치 `users` 는 **그 법인의 접속 사용자 수**다(`curuser/poller.js:138·153`).
+ *   이 파일 머리말이 "조회는 `scopedVcenterIds` 교집합을 **요청 필터보다 먼저** 적용한다 …
+ *   범위 제한 계정이 다른 법인 사용자 수를 보지 못하게" 라고 선언하는데 여기만 빠져 있었다
+ *   (형제 `:44`·`:76`·`:111` 은 전부 `scopeFilter` 를 쓴다).
+ * ⚠ 폴러 상태의 `inFlight` 에도 `deviceId`(vCenter id)가 들어 있다 — 같이 거른다.
+ */
 api.get('/tools/curuser/activity', requirePerm('tools'), (req, res) => {
-  res.json({ poller: curUserPollerStatus(), events: listCurUserActivity(Number(req.query.limit) || 100) });
+  const ok = scopeFilter(req, store.get());
+  const all = listCurUserActivity(Number(req.query.limit) || 100);
+  const events = all.filter((e) => ok(e?.deviceId));
+  const p = curUserPollerStatus() || {};
+  res.json({
+    poller: { ...p, inFlight: (p.inFlight || []).filter((x) => ok(x?.deviceId)) },
+    events,
+    // 조용히 빼지 않는다(v2.509 규약) — 범위 밖이라 빠진 건수를 화면이 말할 수 있게.
+    omittedOutOfScope: Math.max(0, all.length - events.length),
+  });
 });
 
 api.post('/tools/curuser/collect', requireRole('admin'), async (req, res) => {

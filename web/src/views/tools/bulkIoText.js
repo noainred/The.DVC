@@ -18,7 +18,7 @@
 /** 입력 형식 — CSV 와 자유텍스트. 서버는 body.csv / body.text 로 구분한다. */
 export const FORMATS = [
   { key: 'csv', label: 'CSV', ext: 'csv', hint: '헤더 행 + 쉼표 구분(엑셀에서 저장한 그대로)' },
-  { key: 'text', label: '자유텍스트', ext: 'txt', hint: '탭·파이프·공백 구분 또는 `키=값` — 위키 표·메일 본문을 붙여넣어도 됩니다' },
+  { key: 'text', label: '자유텍스트', ext: 'txt', hint: '탭·파이프·공백 구분 또는 ‘키=값’ — 위키 표·메일 본문을 붙여넣어도 됩니다' },
 ];
 
 /** 드라이런 동작 배지. */

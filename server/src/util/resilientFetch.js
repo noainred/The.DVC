@@ -56,6 +56,64 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * @returns {Promise<Response>} 최종 응답(성공 또는 재시도 소진 후의 마지막 응답). 연결 자체가
  *          끝까지 실패하면 마지막 오류를 throw 한다.
  */
+/**
+ * 리다이렉트 때 **버려야 하는 헤더** (v2.574 SEC-14).
+ *
+ * ⚠⚠ fetch 의 기본값은 `redirect: 'follow'` 이고, 표준이 교차 출처에서 자동으로 떼는 것은
+ * `Authorization`·`Cookie`·`Proxy-Authorization` **뿐**이다. 이 저장소가 실어 보내는 것은
+ * `X-Collector-Token`·`X-Central-Token` 같은 **커스텀 헤더**라 그대로 따라간다 —
+ * 즉 엣지(또는 그 앞의 무엇)가 `302 Location: https://공격자/` 한 줄만 돌려주면
+ * **중앙이 그 토큰을 공격자에게 보낸다**. 수집 토큰 유출 = 그 법인 수집 데이터 열람,
+ * 중앙 토큰 유출 = 엣지→중앙 API 임의 호출이다.
+ *
+ * ⚠ `redirect:'manual'` 로 통째로 막지는 않는다 — GitHub 릴리스 자산 다운로드가 실제로
+ *   `objects.githubusercontent.com` 으로 리다이렉트되므로 자동 업그레이드가 깨진다.
+ *   그래서 **직접 따라가되 출처가 바뀌면 비밀 헤더를 뗀다**.
+ * ⚠ 리바인딩 방어는 그대로다 — 같은 dispatcher 를 쓰므로 `ssrfLookup` 이 리다이렉트 대상에도 걸린다.
+ */
+const SECRET_HEADER_RE = /^(authorization|cookie|proxy-authorization|x-[\w-]*(token|key|secret|auth)|api-key)$/i;
+const MAX_REDIRECTS = 5;
+
+/** 헤더 입력(객체·배열·Headers)을 평범한 객체로 — 출처가 바뀌면 비밀만 뺀다. */
+export function headersWithoutSecrets(headers) {
+  const h = new Headers(headers || {});
+  const dropped = [];
+  for (const [k] of [...h]) if (SECRET_HEADER_RE.test(k)) { dropped.push(k); h.delete(k); }
+  return { headers: h, dropped };
+}
+
+/** 같은 출처인가(scheme+host+port). 다르면 비밀 헤더를 뗀다. */
+const sameOrigin = (a, b) => { try { return new URL(a).origin === new URL(b).origin; } catch { return false; } };
+
+/**
+ * 리다이렉트를 **직접** 따라간다 — 출처가 바뀌는 순간 비밀 헤더를 뗀다(SEC-14).
+ * 반환은 최종 응답이며, 뺀 헤더가 있으면 `res.__secretsDroppedOnRedirect` 로 밝힌다
+ * (조용히 떼면 호출부가 '왜 401 이지' 를 영원히 모른다).
+ */
+async function fetchFollowing(url, init, disp, timeoutMs) {
+  let cur = url;
+  let headers = init.headers;
+  let dropped = [];
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const res = await fetch(cur, { ...init, headers, dispatcher: disp, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
+    const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+    if (!loc) { if (dropped.length) res.__secretsDroppedOnRedirect = dropped; return res; }
+    const next = new URL(loc, cur).href;
+    if (!sameOrigin(next, cur)) {
+      const r = headersWithoutSecrets(headers);
+      if (r.dropped.length) dropped = [...new Set([...dropped, ...r.dropped])];
+      headers = r.headers;
+    }
+    try { await res.body?.cancel?.(); } catch { /* 본문이 없거나 이미 닫힘 */ }
+    // 303 과 'POST → 302/301' 은 표준대로 GET 으로 바꾼다.
+    if (res.status === 303 || ((res.status === 301 || res.status === 302) && init.method && init.method !== 'GET' && init.method !== 'HEAD')) {
+      init = { ...init, method: 'GET', body: undefined };
+    }
+    cur = next;
+  }
+  throw new Error(`리다이렉트가 ${MAX_REDIRECTS}회를 넘었습니다: ${url}`);
+}
+
 export async function resilientFetch(url, { timeoutMs = 20_000, retries = 2, retryBackoffMs = 400, onRetry, dispatcher, ...init } = {}) {
   let lastErr;
   // dispatcher 옵션: 업그레이드 다운로드처럼 'TLS 검증 강제' 디스패처(upgradeAgent)를 넘겨야 하는
@@ -63,7 +121,7 @@ export async function resilientFetch(url, { timeoutMs = 20_000, retries = 2, ret
   const disp = dispatcher || wanAgent;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch(url, { ...init, dispatcher: disp, signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetchFollowing(url, init, disp, timeoutMs);
       if (RETRYABLE_STATUS.has(res.status) && attempt < retries) {
         onRetry?.({ attempt: attempt + 1, status: res.status });
         // 재시도 전 이전 응답 본문을 취소 — undici는 미소진 본문이 연결을 붙잡아, 제한된

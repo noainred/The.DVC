@@ -35,7 +35,12 @@ import { pollOnce } from '../ping/monitor.js';
 import { listCollectors } from '../collector/registry.js';
 import { listDatacenters, getDatacenterOrder } from '../datacenter/store.js';
 
+import { wrapAsyncRouter } from '../util/asyncRoute.js';
 export const pingRouter = express.Router();
+// v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
+// 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
+// ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
+wrapAsyncRouter(pingRouter);
 const adminOnly = requireRole('admin');
 
 // 일 단위 범위(네트워크 체크 UI: 1일/7일/30일/90일/365일) + 기존 시간 범위 호환.
@@ -109,6 +114,34 @@ pingRouter.post('/seed-vcenters', adminOnly, (_req, res) => {
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
+/**
+ * 엣지 노드 주소를 **볼 수 있는 계정인가** (v2.574 SEC-06).
+ *
+ * ⚠⚠ 엣지 타깃의 `host`/`port` 는 `ping/store.js:176-182 seedEdgeTargets()` 가
+ *   **수집 서버 등록부의 url 에서 뽑아** 넣은 값 = 각 법인 **엣지 포탈의 실제 주소와 포트**다.
+ *   이 저장소는 그 정보를 반복해서 **adminOnly + fullScopeOnly** 로 묶어 왔다
+ *   (`routes/api/linkCheck.js:8` · `portalCheck.js:9` · `edgeLog.js:7` — 전부 "전 법인 엣지
+ *   주소·내부 IP 가 담긴다 … operator 는 tools 를 기본 보유한다" 가 근거).
+ *   그런데 `/edge/overview` 는 `index.js:297` 이 `authMiddleware + requireEnrolled` 로만
+ *   mount 해 **아무 로그인 계정(viewer 포함)** 이 전 법인 엣지 주소를 볼 수 있었다.
+ *
+ * ⚠ 그렇다고 라우트를 403 으로 막지는 않는다 — 이 응답은 메인 내비의 **네트워크 › 체크** 화면
+ *   (`web/src/views/Networks.jsx:60`)이 쓰는 것이라 막으면 operator 의 정상 업무가 통째로 깨진다.
+ *   대신 **주소만 가린다**(이름·RTT·상태·추이는 그대로) — v2.500 D/M1 이 relaycheck 에서 택한
+ *   것과 같은 방식이다("역할별 축약은 응답을 스프레드하지 말고 전용 모듈에서").
+ * ⚠ 가린 사실을 **숨기지 않는다**(`addressHidden`) — 화면이 '왜 주소가 비었나' 를 말할 수 있게.
+ */
+function redactEdgeAddresses(out, req) {
+  const isAdmin = req.user?.role === 'admin';
+  const fullScope = !scopedVcenterIds(req.user, store.get());
+  if (isAdmin && fullScope) return out;
+  const groups = (out?.groups || []).map((g) => ({
+    ...g,
+    items: (g.items || []).map(({ host, port, ...rest }) => ({ ...rest, host: null, port: null })),
+  }));
+  return { ...out, groups, addressHidden: true };
+}
+
 // ── 네트워크 체크(서버 Ping) — 엣지 노드, DataCenter 그룹 ───────────────────────
 pingRouter.get('/edge/overview', async (req, res) => {
   try {
@@ -116,7 +149,7 @@ pingRouter.get('/edge/overview', async (req, res) => {
       rangeMs: rangeMsOf(req.query.range, '1d'), points: Math.max(60, Math.min(600, Number(req.query.points) || 300)),
       groupName: dcNameMap(), groupOrder: getDatacenterOrder(),
     });
-    res.json(r);
+    res.json(redactEdgeAddresses(r, req));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 

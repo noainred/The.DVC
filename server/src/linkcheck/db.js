@@ -83,7 +83,7 @@ async function openDb() {
       CREATE TABLE IF NOT EXISTS link_daily (
         link_id TEXT NOT NULL, day TEXT NOT NULL,
         n INTEGER NOT NULL DEFAULT 0, ok_n INTEGER NOT NULL DEFAULT 0,
-        ms_sum INTEGER NOT NULL DEFAULT 0, ms_max INTEGER,
+        ms_sum INTEGER NOT NULL DEFAULT 0, ms_max INTEGER, ms_n INTEGER NOT NULL DEFAULT 0,
         f_dns INTEGER DEFAULT 0, f_tcp INTEGER DEFAULT 0, f_tls INTEGER DEFAULT 0,
         f_http INTEGER DEFAULT 0, f_auth INTEGER DEFAULT 0, f_identity INTEGER DEFAULT 0,
         last_ts INTEGER,
@@ -98,6 +98,13 @@ async function openDb() {
         status INTEGER, cert_days INTEGER, by_node TEXT, summary TEXT,
         since_ts INTEGER, streak INTEGER DEFAULT 1
       );`);
+    /*
+     * ⚠⚠ v2.574 BUG-05 — 구버전 DB 에 `ms_n` 을 더한다(있으면 조용히 실패하고 넘어간다).
+     *   `CREATE TABLE IF NOT EXISTS` 는 **이미 있는 표의 열을 늘리지 않는다** — 이 한 줄이
+     *   없으면 업그레이드한 현장에서 `no such column: ms_n` 으로 적재가 통째로 죽는다.
+     */
+    try { conn.exec('ALTER TABLE link_daily ADD COLUMN ms_n INTEGER NOT NULL DEFAULT 0'); }
+    catch { /* 이미 있는 열 — 정상 */ }
     _db = conn;
   } catch (e) {
     console.warn('[linkcheck-db] 사용 불가(DB 없이 동작):', e?.message);
@@ -166,12 +173,22 @@ export async function insertResults(results = [], { byNode = '' } = {}) {
       tls_ms=excluded.tls_ms, http_ms=excluded.http_ms, status=excluded.status, cert_days=excluded.cert_days,
       by_node=excluded.by_node, summary=excluded.summary, since_ts=excluded.since_ts, streak=excluded.streak
       WHERE excluded.ts >= link_latest.ts`);
+  /*
+   * ⚠⚠ v2.574 BUG-05 — **실패 표본을 응답시간 평균의 분모에 넣지 말 것.**
+   *   예전에는 `n` 하나가 '표본 수' 와 '응답시간 표본 수' 를 겸했고 실패 표본도
+   *   `ms_sum += 0` 을 더했다. 그래서 하루 종일 다운된 링크가 `n=288, ms_sum=0` 이 되어
+   *   **`ms_avg = 0ms`(= 즉시 응답)** 라는 거짓을 냈고, 절반만 다운이면 실제 40ms 가 20ms 로
+   *   보였다(실행 재현). v2.552 가 **화면에서** 고친 `0ms` 거짓이 DB 층에 남아 있던 것이다.
+   *   `bmusage/db.js:96·199` 는 같은 함정을 `cpu_n` 분모 분리로 이미 피하고 있었다
+   *   ("값이 있을 때만 1 을 더한다 — null 을 분모에 넣으면…"). 여기에도 `ms_n` 을 둔다.
+   * ⚠ `n`(전체 표본)·`ok_n`(성공 수)은 그대로다 — 가용률 계산이 그 둘을 쓴다.
+   */
   const upDaily = db.prepare(`INSERT INTO link_daily
-    (link_id,day,n,ok_n,ms_sum,ms_max,f_dns,f_tcp,f_tls,f_http,f_auth,f_identity,last_ts)
-    VALUES (?,?,1,?,?,?,?,?,?,?,?,?,?)
+    (link_id,day,n,ok_n,ms_sum,ms_max,ms_n,f_dns,f_tcp,f_tls,f_http,f_auth,f_identity,last_ts)
+    VALUES (?,?,1,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(link_id,day) DO UPDATE SET
-      n=n+1, ok_n=ok_n+excluded.ok_n, ms_sum=ms_sum+excluded.ms_sum,
-      ms_max=MAX(IFNULL(ms_max,0), IFNULL(excluded.ms_max,0)),
+      n=n+1, ok_n=ok_n+excluded.ok_n, ms_sum=ms_sum+excluded.ms_sum, ms_n=ms_n+excluded.ms_n,
+      ms_max=NULLIF(MAX(IFNULL(ms_max,-1), IFNULL(excluded.ms_max,-1)), -1),
       f_dns=f_dns+excluded.f_dns, f_tcp=f_tcp+excluded.f_tcp, f_tls=f_tls+excluded.f_tls,
       f_http=f_http+excluded.f_http, f_auth=f_auth+excluded.f_auth, f_identity=f_identity+excluded.f_identity,
       last_ts=MAX(IFNULL(last_ts,0), excluded.last_ts)`);
@@ -200,7 +217,14 @@ export async function insertResults(results = [], { byNode = '' } = {}) {
       const fcol = ok ? null : F_COL[String(v.phase || '')];
       const f = { f_dns: 0, f_tcp: 0, f_tls: 0, f_http: 0, f_auth: 0, f_identity: 0 };
       if (fcol) f[fcol] = 1;
-      upDaily.run(id, dayKey(ts), ok, iOr(v.totalMs, 0), iOr(v.totalMs, 0),
+      /*
+       * ⚠ 응답시간은 **측정된 주기만** 더한다. `totalMs` 가 없거나(도달 0단계) 실패면
+       *   합에도 개수에도 넣지 않는다 — 0 을 더하면 그것이 곧 '0ms 응답' 이라는 거짓이다.
+       * ⚠ `ms_max` 도 측정분만(없으면 NULL → 위 upsert 의 센티널이 되돌린다).
+       */
+      const measured = ok ? n(v.totalMs) : null;
+      upDaily.run(id, dayKey(ts), ok, measured == null ? 0 : Math.round(measured),
+        measured == null ? null : Math.round(measured), measured == null ? 0 : 1,
         f.f_dns, f.f_tcp, f.f_tls, f.f_http, f.f_auth, f.f_identity, ts);
 
       // 최신값 + 연속 횟수(같은 상태가 몇 번째인가 — 이슈 분석에서 '언제부터' 를 준다)
@@ -319,7 +343,10 @@ export async function dailyOf({ linkId = '', days = 90 } = {}) {
       : db.prepare('SELECT * FROM link_daily WHERE day>=? ORDER BY day, link_id').all(from);
     return rows.map((r) => ({
       ...r,
-      ms_avg: r.n > 0 ? Math.round(r.ms_sum / r.n) : null,
+      // ⚠ 분모는 **응답시간을 측정한 주기 수**(`ms_n`)다. 구버전 행은 `ms_n=0` 이라
+      //   평균을 **null** 로 준다 — 0ms 라고 거짓말하지 않는다(마이그레이션 전 데이터).
+      ms_avg: r.ms_n > 0 ? Math.round(r.ms_sum / r.ms_n) : null,
+      msSamples: r.ms_n ?? 0,
       ok_pct: r.n > 0 ? Math.round((r.ok_n / r.n) * 1000) / 10 : null,
     }));
   } catch { return []; }
