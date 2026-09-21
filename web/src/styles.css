@@ -568,7 +568,15 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* vCenter dashboard cards */
 .vc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
-.vc-card { display: flex; flex-direction: column; gap: 12px; cursor: pointer; transition: border-color .15s, transform .15s; scroll-margin-top: 16px; }
+/* ⚠⚠ `min-width: 0` 을 지우지 말 것(v2.576 실측): 그리드 자식의 기본 `min-width: auto` 때문에
+   카드 안의 긴 설명문(줄바꿈 지점이 없는 토큰)이 **트랙을 밀어 늘려** 페이지가 가로로 넘친다.
+   실측 — 특수 기능 카드 84장에서 `스토리지 모니터링` 설명(min-content 456px)이 트랙을 474px 로
+   키워 **1440px 에서 115px · 400px 에서 99px** 넘쳤다(1280px 는 3열이 되며 우연히 0, 1920px 는
+   문서 폭 여유로 0 — 그래서 한 폭만 재면 놓친다). `min-width: 0` 만으로는 텍스트가 카드를 넘쳐
+   잘리므로 아래 `.vc-card .muted` 의 `overflow-wrap` 과 **둘 다** 필요하다. */
+.vc-card { display: flex; flex-direction: column; gap: 12px; cursor: pointer; transition: border-color .15s, transform .15s; scroll-margin-top: 16px; min-width: 0; }
+/* 카드 설명문만 대상 — 숫자 칸에 걸면 `63.6 GB` 가 `63.6/GB` 로 쪼개진다(v2.525 실제 사고). */
+.vc-card .muted { overflow-wrap: anywhere; min-width: 0; }
 .vc-card:hover { border-color: var(--accent); transform: translateY(-2px); }
 
 /* vCenter 바로가기 버튼 줄 (KPI 아래) */

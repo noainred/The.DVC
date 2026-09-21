@@ -134,7 +134,7 @@ export function growthFor(entry, latestDay, days) {
 export function growthMatrix(rows, { periods = DEFAULT_PERIODS, asOfDay, meta = null } = {}) {
   const per = periods.length ? periods : DEFAULT_PERIODS;
   const grouped = byDevice(rows);
-  const asOf = Number.isFinite(Number(asOfDay)) ? Number(asOfDay) : null;
+  const asOf = numOrNull(asOfDay);   // v2.576: 코어는 하나다(빈 문자열·배열이 0 = '1970년 1월 1일' 로 둔갑하지 않게)
   const metaOf = (id) => (meta instanceof Map ? meta.get(id) : meta?.[id]) || {};
 
   const devices = [];

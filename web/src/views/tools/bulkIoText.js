@@ -141,7 +141,7 @@ export function registerSummary(result) {
 export function tokenHint(item) {
   const t = item?.token;
   if (!t) return '';
-  if (t.form === 'keyed') return `\`${item.field}=\` 값`;
+  if (t.form === 'keyed') return `‘${item.field}=’ 값`;
   if (t.form === 'missing') return `${t.col}번째 항목이 없음`;
   if (t.form === 'positional') return `${t.col}번째 항목`;
   return '';

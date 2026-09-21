@@ -399,7 +399,7 @@ export function cmdText(i) {
 }
 export function cmdNote(i) {
   if (!i?.usedCmd || i.usedCmd === i.cmd) return '';
-  const bits = [`원 명령 \`${i.cmd}\` 대신 \`${i.usedCmd}\` 로 확인했습니다`];
+  const bits = [`원 명령 ‘${i.cmd}’ 대신 ‘${i.usedCmd}’ 로 확인했습니다`];
   if (i.usedPaged) bits.push('페이저 자동 응답으로 받았습니다');
   if (i.usedTruncated) bits.push('**출력 상한에 걸려 일부만** 받았습니다');
   return `${bits.join(' · ')}.`;

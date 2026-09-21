@@ -19,9 +19,11 @@
  * ⚠ 문구에 **백틱을 쓰지 말 것** — `BoldText` 는 `**강조**` 만 해석한다(v2.439·2.440·2.505 사고).
  */
 
+import { numOrNull } from '../../numOrNull.js';
+
 const t = (v) => String(v ?? '').trim();
 /** ⚠ `v == null || v === ''` 를 먼저 — `Number(null)===0`·`Number('')===0` 함정(v2.525·2.550). */
-const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+const n = numOrNull;   // v2.576: 사본 금지 — 코어는 하나다(사본은 Number([])===0 을 막지 못했다)
 
 /**
  * 개발용 mock 생성기의 vCenter id 패턴 — 중앙이 받은 id 만으로 판정할 수 있는 **유일한** 원인이다.

@@ -255,7 +255,7 @@ export default function UnityCapacityPlanPanel({ snap, points }) {
                 <Row
                   label="원시 용량(추정)"
                   value={`${tb(raw.rawLow)} ~ ${tb(raw.rawHigh)}`}
-                  sub={`표기 \`${raw.drives.text.split(/\s+/)[2] || ''}\` 를 10진 TB 로 볼 때와 TiB 로 볼 때의 범위입니다.`}
+                  sub={`표기 ‘${raw.drives.text.split(/\s+/)[2] || ''}’ 를 10진 TB 로 볼 때와 TiB 로 볼 때의 범위입니다.`}
                 />
                 {raw.raid && (
                   <Row

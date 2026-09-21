@@ -66,10 +66,13 @@ export function dayLabel(day, offsetMin = DAY_OFFSET_MIN) {
 /** 보존 일수(설정 → env → 기본). 순환 import 를 피하려고 setter 로 주입받는다. */
 let _keepDays = { raw: null, daily: null };
 export function setKeepDays({ rawKeepDays, dailyKeepDays } = {}) {
-  _keepDays = {
-    raw: Number.isFinite(Number(rawKeepDays)) ? Number(rawKeepDays) : null,
-    daily: Number.isFinite(Number(dailyKeepDays)) ? Number(dailyKeepDays) : null,
-  };
+  // ⚠⚠ v2.576: `numOrNull` 로 좁힌다. 예전 형태(`Number.isFinite(Number(v)) ? … : null`)는
+  //   `Number(null)`·`Number('')`·`Number([])` 를 전부 **0** 으로 통과시킨다. 여기서 0 이 되면
+  //   아래 `keepDays()` 의 `_keepDays.raw ?? 기본값` 이 **0 ?? x === 0** 이라 기본값으로 되돌지
+  //   못하고 **보존 0일 = 전량 삭제**가 된다. v2.561 은 `loadGrowthSettings()` 가 명시적 null 을
+  //   막고 있다는 근거로 REVIEWED_SAFE 로 뒀지만, 그 근거는 **호출부 하나**에 기댄 것이라
+  //   다음 호출부가 생기면 무효가 된다. 결과가 파괴적이므로 sink 에서 막는다.
+  _keepDays = { raw: numOrNull(rawKeepDays), daily: numOrNull(dailyKeepDays) };
 }
 function keepDays() {
   return {

@@ -183,7 +183,7 @@ export function CurrentUsersSettings({ onSaved }) {
       </div>
 
       <div style={{ fontSize: 11.5, color: 'var(--text-faint)', whiteSpace: 'normal', lineHeight: 1.6 }}>
-        <BoldText text={`게스트 발행기 등록 명령: \`${src.installCommand}\` — 각 Windows 서버에서 **관리자 권한**으로 한 번만 실행합니다. 포탈로 나가는 방화벽 허용은 필요하지 않습니다.`} />
+        <BoldText text={`게스트 발행기 등록 명령: ‘${src.installCommand}’ — 각 Windows 서버에서 **관리자 권한**으로 한 번만 실행합니다. 포탈로 나가는 방화벽 허용은 필요하지 않습니다.`} />
       </div>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

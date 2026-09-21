@@ -20,6 +20,7 @@
  */
 
 import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+import { numOrNull } from '../../numOrNull.js';
 
 const t = (v) => String(v ?? '').trim();
 /**
@@ -27,7 +28,7 @@ const t = (v) => String(v ?? '').trim();
  *   결측이 **0 으로 둔갑**한다(v2.525 Horizon 규약. v2.549 초판이 실제로 그랬고 자체 테스트가 잡았다 —
  *   `msText(null)` 이 '0ms' 를 돌려줬다).
  */
-const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+const n = numOrNull;   // v2.576: 사본 금지 — 코어는 하나다(사본은 Number([])===0 을 막지 못했다)
 
 /** 엣지 행 상태 라벨·색. ⚠ `ready` 는 '아직 안 가져옴' 이지 이상이 아니다. */
 export const EDGE_KIND_LABEL = Object.freeze({

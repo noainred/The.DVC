@@ -130,7 +130,8 @@ export async function saveElementAsPdf(el, filename, { scale = 2, quality = 0.92
  * 사용자 요구(v2.471): "PDF 를 그림이 아니라 글자와 도형으로". html2canvas 캡처는 화면을 픽셀로
  * 떠 넣어 확대하면 흐리고 텍스트 선택도 안 된다. 여기서는 리포트의 '문서 모델'을 받아 제목·표·
  * 차트를 jsPDF 의 text/line/rect 로 그린다 → 선택·확대해도 선명한 벡터, 파일도 작다.
- * 한글은 임베드 폰트(Pretendard KS X 1001 서브셋, 저장 클릭 시 동적 로드)로 진짜 텍스트로 그린다.
+ * 한글은 임베드 폰트(DVC Sans KSX — Pretendard 의 KS X 1001 서브셋, 저장 클릭 시 동적 로드)로
+ * 진짜 텍스트로 그린다.
  *
  * 문서 모델: { title, subtitle?, meta?, blocks: [ block ] }
  *   block = { type:'kvrow', items:[{k,v,color?,sub?}] }
@@ -151,9 +152,11 @@ async function newVectorPdf() {
   const { jsPDF } = await import('jspdf');
   const { PRETENDARD_KSX_BASE64 } = await import('../../vendor/pretendardKsxFont.js');
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
-  pdf.addFileToVFS('PretendardKSX.ttf', PRETENDARD_KSX_BASE64);
-  pdf.addFont('PretendardKSX.ttf', 'Pretendard', 'normal');
-  pdf.setFont('Pretendard', 'normal');
+  // ⚠ 별칭은 **예약 폰트 이름이 아니어야 한다**(v2.576 F1) — 이 값이 PDF 의 폰트 리소스 이름으로
+  //   들어가므로 'Pretendard' 로 되돌리면 수정본이 예약 이름을 다시 쓰게 된다(OFL 3조).
+  pdf.addFileToVFS('DVCSansKSX.ttf', PRETENDARD_KSX_BASE64);
+  pdf.addFont('DVCSansKSX.ttf', 'DVCSansKSX', 'normal');
+  pdf.setFont('DVCSansKSX', 'normal');
   return pdf;
 }
 
