@@ -8,6 +8,19 @@
  *  - th 에 이미 onClick 이 있거나 th 가 컴포넌트(<SortTh>/<Th>)인 표 → 그 표는 자체 정렬을 쓰므로 손대지 않는다.
  *  - th 가 입력/버튼을 품거나 colSpan>1 이거나 `data-nosort` 면 그 열만 제외. `sortable={false}` 로 표 전체 제외.
  *  - thead 가 없거나 tbody 가 없으면 그대로 렌더.
+ * ⚠⚠ `limit`(v2.575 BUG-19): 행을 **정렬한 뒤** 자른다. 호출부에서 `rows.slice(0, N)` 으로 먼저
+ *   자르면 표는 '전체를 정렬한 상위 N' 이 아니라 **'앞 N 을 정렬한 것'** 이 된다 — 사용자가 열을
+ *   눌러 '크기 상위' 를 보려 해도 원래 순서의 앞 N 안에서만 정렬되므로 **오류 없이 틀린 표**다
+ *   (v2.556 이 `DataTable` 에 같은 이유로 `limit` 을 넣으며 "정렬 뒤 자른다" 를 못 박았는데
+ *   `STable` 에는 그 수단이 없어 호출부 6곳이 먼저 자르고 있었다). 상한으로 뺀 개수는 호출부가
+ *   **말해야 한다**(조용한 상한 금지) — 그래서 컴포넌트가 문구를 만들지 않는다.
+ * ⚠⚠ `minWidth`(v2.575 BUG-23/IMP-12): 다열 표는 **가로 스크롤 컨테이너 + 표의 `minWidth`** 가
+ *   **둘 다** 있어야 한다. 래퍼만 있으면 `table { width:100% }` 때문에 브라우저가 스크롤 대신
+ *   **열을 짜부라뜨려** 400px 에서 셀이 한두 글자 폭이 되고 행이 세로로 길어진다 — **넘침은 0px
+ *   이라 수치로는 안 잡히고 스크린샷을 읽어야 보인다**(v2.562 실측 6,054px → 3,471px).
+ *   반대로 `minWidth` 만 있고 래퍼가 없으면 **페이지가 통째로 가로로 밀린다**. 이 짝을 손으로
+ *   맞추다 한쪽을 빠뜨리는 것이 이 저장소의 반복 사고라, `minWidth` 를 주면 컴포넌트가
+ *   **래퍼까지 함께** 만든다. 이미 스크롤 래퍼 안이면 `wrap={false}` 로 바깥 것을 쓴다.
  * 정렬은 화면(엘리먼트) 재배열이라 서버·상태를 건드리지 않고, 데이터가 갱신돼도 마지막 정렬이 유지된다.
  * 셀에 컴포넌트가 있으면 텍스트 자식 → value/pct/label 순으로 값을 찾고, 정확한 값을 원하면 td 에 `data-sort` 를 준다.
  */
@@ -16,7 +29,7 @@ import { headerSortable, sortChildren, nextSortState } from './sortableText.js';
 
 const ARROW = { asc: '▲', desc: '▼' };
 
-export function STable({ sortable = true, children, ...rest }) {
+export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, children, ...rest }) {
   const [sort, setSort] = useState(null); // { col, dir } | null
   // ⚠ Children.toArray 는 호출마다 새 엘리먼트(키 접두)를 만들므로 **한 번만** 호출해 그 배열 안에서 동일성 비교한다.
   const kids = React.Children.toArray(children);
@@ -42,16 +55,30 @@ export function STable({ sortable = true, children, ...rest }) {
     [sort, tbodyKids],
   );
 
-  if (!thead || !tbody) return <table {...rest}>{children}</table>;
+  // 상한은 정렬 결과에 적용한다. 정렬 전(초기 렌더)이면 원래 순서의 앞 N — 호출부가 먼저
+  // 자르던 예전 동작과 같고, 열을 누른 순간부터 '전체를 정렬한 상위 N' 이 된다.
+  const cap = Number(limit) > 0 ? Math.floor(Number(limit)) : 0;
+  const capKids = (kids2) => (cap > 0 ? React.Children.toArray(kids2).slice(0, cap) : kids2);
+
+  // minWidth 를 주면 표에 최소폭을 걸고 **가로 스크롤 래퍼까지 함께** 만든다(짝을 놓칠 수 없게).
+  const mw = Number(minWidth) > 0 ? Number(minWidth) : 0;
+  const doWrap = wrap === undefined ? mw > 0 : !!wrap;
+  const tableProps = mw > 0 ? { ...rest, style: { minWidth: mw, ...(rest.style || {}) } } : rest;
+  const render = (inner) => {
+    const t = <table {...tableProps}>{inner}</table>;
+    return doWrap ? <div style={{ overflowX: 'auto', maxWidth: '100%' }}>{t}</div> : t;
+  };
+
+  if (!thead || !tbody) return render(children);
 
   const headKids = React.Children.toArray(thead.props.children);
   const headRows = headKids.filter((r) => React.isValidElement(r) && r.type === 'tr');
   const lastRow = headRows[headRows.length - 1];
-  if (!lastRow) return <table {...rest}>{children}</table>;
+  if (!lastRow) return render(children);
   const ths = React.Children.toArray(lastRow.props.children);
   // 자체 정렬 표(컴포넌트 th 또는 onClick th)는 손대지 않는다.
   const selfSorted = ths.some((t) => React.isValidElement(t) && (typeof t.type !== 'string' || t.props?.onClick));
-  if (selfSorted) return <table {...rest}>{children}</table>;
+  if (selfSorted) return render(children);
 
   let col = 0;
   const newThs = ths.map((th, idx) => {
@@ -69,9 +96,10 @@ export function STable({ sortable = true, children, ...rest }) {
   });
   const newLast = React.cloneElement(lastRow, {}, newThs);
   const newThead = React.cloneElement(thead, {}, headKids.map((r) => (r === lastRow ? newLast : r)));
-  const newTbody = sort ? React.cloneElement(tbody, {}, sortedKids) : tbody;
+  const bodyKids = sort ? sortedKids : tbodyKids;
+  const newTbody = (sort || cap > 0) ? React.cloneElement(tbody, {}, capKids(bodyKids)) : tbody;
   const out = kids.map((c) => (c === thead ? newThead : c === tbody ? newTbody : c));
-  return <table {...rest}>{out}</table>;
+  return render(out);
 }
 
 export default STable;

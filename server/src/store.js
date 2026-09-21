@@ -15,9 +15,15 @@ import { buildIpamRows } from './ipam/ledger.js';
 import { syncLedger } from './ipam/db.js';
 import { getInventory, pruneInventory } from './central/inventory.js';
 import { isStopped } from './security/emergencyStop.js';
+import { poolSettled } from './util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
-// 사이트 위임 vCenter가 이 시간 이상 push가 없으면 'stale'로 표시(데이터는 계속 서빙).
-const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
+/**
+ * 사이트 위임 vCenter가 이 시간 이상 push가 없으면 'stale'로 표시(데이터는 계속 서빙).
+ * ⚠ v2.575 IMP-11: **export 한다** — `routes/api/portalCheck.js` 가 같은 값을 다시 읽고 있었고
+ *   그 주석이 직접 "store.js 와 같은 env·같은 기본값" 이라 적고 있었다. 두 벌이면 한쪽만
+ *   바꿨을 때 **인벤토리 점검 화면이 store 와 다른 기준으로 '낡음' 을 세면서도 오류가 없다**.
+ */
+export const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
 // 수집 실패 시 마지막 정상 수집(lastGood)을 이월해 서빙하는 최대 시간(v2.279). 이 창 안에서는
 // 일시 실패(고RTT 타임아웃 등)로 vCenter 인벤토리가 스냅샷에서 사라지지 않는다(호스트/VM 소실·
 // ipam.db 대량 재기록·알람 전원 해소→재발송 방지). 이 창을 넘겨 계속 실패하면 진짜 장기 장애로
@@ -30,21 +36,10 @@ const COLLECT_CONCURRENCY = Math.max(1, Number(process.env.COLLECT_CONCURRENCY) 
 /**
  * Promise.allSettled과 같은 결과 배열([{status,value|reason}])을 돌려주되, 동시 실행을
  * `limit`개로 제한한다. 빈 슬롯이 나는 대로 다음 항목을 시작 → 28개가 한꺼번에 몰리지 않음.
+ * v2.575 IMP-08: 구현은 `util/pool.js poolSettled` 하나다(같은 스캐폴드가 손으로 23벌이었고
+ * 항목별 catch 유무가 갈려 있었다). 이 이름은 CLAUDE.md 가 불변조건으로 부르는 것이라 남긴다.
  */
-async function collectPool(items, limit, fn) {
-  const results = new Array(items.length);
-  let next = 0;
-  const worker = async () => {
-    for (;;) {
-      const idx = next++;
-      if (idx >= items.length) return;
-      try { results[idx] = { status: 'fulfilled', value: await fn(items[idx]) }; }
-      catch (reason) { results[idx] = { status: 'rejected', reason }; }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
+const collectPool = poolSettled;
 
 // IP 대장의 '내용' 지문(djb2). generatedAt 같은 비본질 변화는 제외하고 외부 DB에 반영할
 // 실제 변동(IP·소유자·전원·관리상태 등)만 감지해 불필요한 SQLite 재기록을 막는다.

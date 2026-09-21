@@ -140,13 +140,13 @@ export default function DeepSearch() {
           {scanItems.length === 0 ? (
             <div className="muted" style={{ fontSize: 12 }}>스캔 결과에서 일치하는 IP가 없습니다. (IP/서브넷/검색어 조건이 있어야 하며, IP 스캔이 실행돼 결과가 있어야 합니다)</div>
           ) : (
-            <STable className="data-table" style={{ width: '100%', fontSize: 12.5 }}>
+            <STable minWidth={720} className="data-table" style={{ width: '100%', fontSize: 12.5 }} limit={500}>
               <thead><tr>
                 <th style={{ textAlign: 'left' }}>IP</th><th style={{ textAlign: 'left' }}>호스트명</th>
                 <th style={{ textAlign: 'left' }}>열린 포트</th><th style={{ textAlign: 'left' }}>서비스</th>
                 <th style={{ textAlign: 'left' }}>최초 발견</th><th style={{ textAlign: 'left' }}>최근</th>
               </tr></thead>
-              <tbody>{scanItems.slice(0, 500).map((s) => (
+              <tbody>{scanItems.map((s) => (
                 <tr key={s.ip}>
                   <td><b>{s.ip}</b></td>
                   <td className="muted">{s.hostname || '—'}</td>
@@ -157,6 +157,10 @@ export default function DeepSearch() {
                 </tr>
               ))}</tbody>
             </STable>
+          )}
+          {/* v2.575: 조용한 상한 금지 — 뺀 개수를 밝힌다. */}
+          {scanItems.length > 500 && (
+            <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>전체 {scanItems.length.toLocaleString()}건 중 <b>500건만</b> 표시합니다(열을 눌러 정렬하면 전체를 정렬한 상위 500건입니다).</div>
           )}
         </div>
       )}

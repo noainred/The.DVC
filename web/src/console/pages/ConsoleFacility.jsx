@@ -53,7 +53,7 @@ export default function ConsoleFacility({ global: g, sitesAll, scope, polls, per
             <PollState poll={hosts}>
               {rows.length === 0 ? <Empty>범위 안에 호스트가 없습니다.</Empty> : (
                 <div className="dvc-tablewrap">
-                  <STable className="dvc-table">
+                  <STable minWidth={720} wrap={false} className="dvc-table">
                     <thead><tr><th>사이트</th><th>iDRAC 연동</th><th className="num">미연동</th><th className="num">전력 보고</th><th className="num">끊김</th><th className="num">최고 온도</th></tr></thead>
                     <tbody>
                       {rows.map((r) => (
@@ -76,7 +76,7 @@ export default function ConsoleFacility({ global: g, sitesAll, scope, polls, per
             <PollState poll={polls.pdu} skipped={perms.pdu ? null : "특수 기능('tools') 권한이 없어 /tools/pdu 를 조회하지 않습니다."}>
               {pduDevs.length === 0 ? <Empty><b>등록된 PDU 가 없습니다.</b><br />특수 기능 › PDU 정보에서 APC Rack PDU 를 등록하면 전력·온도·임계 위반이 표시됩니다.</Empty> : (
                 <div className="dvc-tablewrap">
-                  <STable className="dvc-table">
+                  <STable minWidth={800} wrap={false} className="dvc-table">
                     <thead><tr><th>PDU</th><th>법인</th><th className="num">전력</th><th className="num">온도</th><th className="num">센서</th><th className="num">위반</th><th>상태</th></tr></thead>
                     <tbody>
                       {pduDevs.map((d) => (

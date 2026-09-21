@@ -15,6 +15,7 @@ import { getTemplate, materializeForTarget } from '../../svcmon/templates.js';
 import { expandGenSpec, expandNames } from '../../svcmon/genspec.js';
 import { recordBatch, listBatches, rollbackBatch, deleteBatchRecord } from '../../svcmon/batches.js';
 import { canEdit, dryRunTargets } from './shared.js';
+import { poolRun } from '../../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
 const dnsResolve4 = promisify(dns.resolve4);
 
@@ -68,18 +69,13 @@ async function resolveDnsHostMap(spec) {
   const concurrency = 24;
   const hostMap = {};
   const unresolved = [];
-  let idx = 0;
-  const worker = async () => {
-    while (idx < names.length) {
-      const i = idx; idx += 1;
-      const name = names[i];
-      const fqdn = `${name}${domain}`;
-      const r = await resolve4Timed(fqdn, timeoutMs);
-      if (r.ips.length) hostMap[name] = r.ips.slice().sort()[0];  // 다IP 면 정렬 후 첫 주소로 고정(결정적)
-      else unresolved.push(`${fqdn}: ${r.err}`);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(concurrency, names.length) }, worker));
+  // v2.575 IMP-08: 동시성 풀 단일 소스. `resolve4Timed` 는 스스로 오류를 담아 돌려준다.
+  await poolRun(names, concurrency, async (name) => {
+    const fqdn = `${name}${domain}`;
+    const r = await resolve4Timed(fqdn, timeoutMs);
+    if (r.ips.length) hostMap[name] = r.ips.slice().sort()[0];  // 다IP 면 정렬 후 첫 주소로 고정(결정적)
+    else unresolved.push(`${fqdn}: ${r.err}`);
+  });
 
   if (unresolved.length) {
     const head = unresolved.slice(0, 5);

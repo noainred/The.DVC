@@ -290,7 +290,7 @@ export default function RelayTopoTool() {
               </div>
               {r?.ok && (
                 <>
-                  <STable style={{ marginTop: 8, fontSize: 12 }}>
+                  <STable minWidth={880} style={{ marginTop: 8, fontSize: 12 }}>
                     <thead><tr><th>노드</th><th>접속</th><th>호스트명</th><th>IP</th><th>HAProxy</th><th>리스너</th><th>포탈 유닛</th><th>portal.env</th></tr></thead>
                     <tbody>{[r.edge, r.irs].filter(Boolean).map((n) => (
                       <tr key={n.role}>
@@ -305,7 +305,7 @@ export default function RelayTopoTool() {
                       </tr>))}</tbody>
                   </STable>
                   {r.edge.ok && (
-                    <STable style={{ marginTop: 8, fontSize: 12 }}>
+                    <STable minWidth={880} style={{ marginTop: 8, fontSize: 12 }}>
                       <thead><tr><th>서비스</th><th>listen</th><th>기대 백엔드</th><th>실제 백엔드</th><th>mode</th><th>상태</th><th>문제</th><th>해결</th></tr></thead>
                       <tbody>{r.rows.map((x) => <tr key={x.key}>
                         <td><b>{x.label}</b> <span className="muted">{x.key}</span></td><td>{x.listenPort || '—'}</td>

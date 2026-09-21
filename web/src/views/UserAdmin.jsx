@@ -16,7 +16,7 @@ import { hasMatrixKey, toggleMatrixKey, isToolAllowed, toggleToolDenied, setAllT
 import { STable } from '../components/STable.jsx';
 
 const ROLES = ['viewer', 'operator', 'admin'];
-const REGIONS = ['아시아', '중국', '유럽', '북미'];
+import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 
 /** 설정 → 사용자 관리: 계정 CRUD + Google OTP(TOTP) 등록/해제 + 기능 권한 매트릭스 + 데이터 범위(scope). */
 export default function UserAdmin() {

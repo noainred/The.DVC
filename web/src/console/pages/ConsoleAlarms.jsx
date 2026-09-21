@@ -51,7 +51,7 @@ export default function ConsoleAlarms({ alarmsAll, scope, polls }) {
           <PollState poll={polls.al}>
             {rows.length === 0 ? <Empty>조건에 맞는 활성 알람이 없습니다.</Empty> : (
               <div className="dvc-tablewrap">
-                <STable className="dvc-table">
+                <STable minWidth={800} wrap={false} className="dvc-table">
                   <thead><tr><th>심각도</th><th>도메인</th><th>메시지</th><th>대상</th><th>사이트</th><th className="num">경과</th><th className="num">확인</th></tr></thead>
                   <tbody>
                     {rows.map((a) => (

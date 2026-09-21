@@ -7,6 +7,8 @@
  * 진짜 튜닝 대상이다. 이 구분이 없으면 목록을 보고도 무엇을 고쳐야 할지 알 수 없다.
  */
 
+import { unitText } from './unitText.js';
+
 export const ms = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : (Number(v) >= 1000 ? `${(Number(v) / 1000).toFixed(Number(v) >= 10_000 ? 0 : 1)}초` : `${Math.round(Number(v))}ms`));
 export const pct = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : `${Number(v)}%`);
 export const when = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
@@ -60,7 +62,7 @@ export function hangSummary(ev) {
     return `화면 ${ev.view || '—'} 에서 ${ms(ev.ms)} 동안 로딩 · ${waited} · 그때 서버 진행 중 요청 ${ev.serverInflightN ?? 0}건`;
   }
   const jobs = (ev.jobs || []).length ? ` · 진행 작업 ${(ev.jobs || []).join(', ')}` : ' · 계측된 작업 없음(수집·집계 밖의 코드일 수 있음)';
-  return `이벤트 루프 최대 ${ms(ev.maxMs)} 멈춤(p99 ${ms(ev.p99Ms)})${jobs} · 진행 중 요청 ${ev.inflightN ?? 0}건 · RSS ${ev.rssMb ?? '—'}MB`;
+  return `이벤트 루프 최대 ${ms(ev.maxMs)} 멈춤(p99 ${ms(ev.p99Ms)})${jobs} · 진행 중 요청 ${ev.inflightN ?? 0}건 · RSS ${unitText(ev.rssMb, 'MB')}`;
 }
 
 /** hang 종류 라벨. */

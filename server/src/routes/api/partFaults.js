@@ -60,14 +60,12 @@ export const MIN_EDGE_VERSION = '2.548.0';
 const STATE_RANK = { fault: 0, warn: 1 };
 const t = (v) => String(v ?? '').trim();
 
-/** semver 비교(순수). 'a' < 'b' 면 음수. 형식이 아니면 null. */
-export function cmpVersion(a, b) {
-  const pa = t(a).replace(/^v/, '').split('.').map(Number);
-  const pb = t(b).replace(/^v/, '').split('.').map(Number);
-  if (pa.length < 3 || pb.length < 3 || pa.some(Number.isNaN) || pb.some(Number.isNaN)) return null;
-  for (let i = 0; i < 3; i += 1) if (pa[i] !== pb[i]) return pa[i] - pb[i];
-  return 0;
-}
+// v2.575 IMP-04: 구현은 `util/cmpVersion.js` 하나다. 예전 이 사본은 **3세그먼트를 강제**해
+// `2.5` 를 '버전 미상' 으로 만들었다(tokenScan 사본은 숫자를 돌려줬다 — 같은 입력, 다른 결론).
+// ⚠ 재수출(`export … from`)은 이 스코프에 이름을 만들지 않는다 — import 후 export 한다.
+import { cmpVersion } from '../../util/cmpVersion.js';
+
+export { cmpVersion };
 
 /**
  * 엣지 분류(순수, v2.548). **보고가 없는 것을 '정상' 이라 하지 않는다** — 왜 없는지를 나눈다.

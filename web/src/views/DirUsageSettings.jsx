@@ -113,7 +113,7 @@ export default function DirUsageSettings() {
       {/* ── 대상 ─────────────────────────────────────────────── */}
       <h4 style={{ margin: '16px 0 8px', fontSize: 14 }}>스캔 대상</h4>
       {targets.length === 0 && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>등록된 대상이 없습니다.</div>}
-      <STable style={{ width: '100%', fontSize: 12.5 }}>
+      <STable minWidth={880} style={{ width: '100%', fontSize: 12.5 }}>
         <thead>
           <tr>
             <th data-nosort>사용</th><th>이름(선택)</th><th>엣지(법인)</th><th>경로</th>

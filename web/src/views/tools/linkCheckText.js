@@ -228,11 +228,19 @@ export function tableFootnotes(rows = [], opt = {}) {
    * ⚠ 사유별 긴 설명은 **여기서 한 번만**(행에는 `whyShort` 짧은 표지만 — v2.509 규약).
    *   등장 순서를 유지해 표와 각주를 눈으로 잇게 한다.
    */
+  /*
+   * ⚠ v2.575 BUG-18 — **묶는 키가 `reason` 뿐이면 조치가 사라진다.** 같은 `reason` 이라도
+   *   `whyShort`·`why`·`fix` 가 다른 경우가 있고(상태가 다르면 조치도 다르다), 예전에는
+   *   먼저 나온 것 하나만 남기고 나머지를 버렸다 — 사용자는 자기 행의 조치를 영영 못 본다.
+   *   묶음 키를 **실제로 출력할 문장**으로 잡으면 중복은 그대로 접히고 서로 다른 조치는 살아남는다.
+   */
   const seen = new Set();
   for (const s of states) {
-    if (!s.reason || seen.has(s.reason)) continue;
-    seen.add(s.reason);
-    out.push(`**${s.whyShort}** — ${s.why}${s.fix ? ` ${s.fix}` : ''}`);
+    if (!s.reason) continue;
+    const line = `**${s.whyShort}** — ${s.why}${s.fix ? ` ${s.fix}` : ''}`;
+    if (seen.has(line)) continue;
+    seen.add(line);
+    out.push(line);
   }
   if (kinds.has('no-data')) {
     out.push('**측정 없음**: 아직 값이 없는 링크입니다. 정상도 장애도 아닙니다 — 행의 사유가 '

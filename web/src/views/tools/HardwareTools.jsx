@@ -351,7 +351,7 @@ function ServerListBody({ corpName, model, servers, onRow }) {
           <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} disabled={!(servers || []).length} onClick={exportCsv}>⬇ CSV</button>
         </div>
       </div>
-      <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
+      <STable minWidth={720} className="data-table" style={{ width: '100%', fontSize: 13 }}>
         <thead><tr>
           <th style={{ textAlign: 'left' }}>이름</th><th>유형</th>{allMode && <th style={{ textAlign: 'left' }}>모델</th>}<th style={{ textAlign: 'left' }}>주소</th><th style={{ textAlign: 'left' }}>서비스태그</th><th>상태</th>
         </tr></thead>

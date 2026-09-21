@@ -17,7 +17,7 @@ import { retryTransient } from '../util/resilientFetch.js';
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 
 const FILE = path.join(config.configDir, 'nsx.json');
-const REGIONS = ['아시아', '중국', '유럽', '북미'];
+import { REGIONS } from '../util/regions.js'; // v2.575 IMP-10 — 단일 소스
 
 export function loadRegistry() {
   if (!fs.existsSync(FILE)) return [];

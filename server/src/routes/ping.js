@@ -77,7 +77,9 @@ pingRouter.get('/status', async (req, res) => {
     if (scope.all) return res.json(r);
     const targets = (r.targets || []).filter((t) => scope.okId(t.id));
     const counts = targets.reduce((a, t) => { a[t.status] = (a[t.status] || 0) + 1; return a; }, {});
-    res.json({ targets, counts, total: targets.length });
+    // ⚠ v2.575 BUG-16: `...r` 로 펼쳐 `monitorEnabled`·`intervalMs` 를 보존한다 —
+    // 빠뜨리면 범위 제한 계정 화면만 '폴러가 꺼졌는지' 를 모른 채 '기다리면 됩니다' 라고 말한다.
+    res.json({ ...r, targets, counts, total: targets.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -37,14 +37,12 @@ const fullScopeOnly = (req, res, next) => {
 
 const t = (v) => String(v ?? '').trim();
 
-/** semver 비교(`partFaults.js cmpVersion` 과 같은 규칙 — 형식이 아니면 null). */
-export function cmpVersion(a, b) {
-  const pa = t(a).replace(/^v/, '').split('.').map(Number);
-  const pb = t(b).replace(/^v/, '').split('.').map(Number);
-  if (pa.length < 3 || pb.length < 3 || pa.some(Number.isNaN) || pb.some(Number.isNaN)) return null;
-  for (let i = 0; i < 3; i += 1) if (pa[i] !== pb[i]) return pa[i] - pb[i];
-  return 0;
-}
+// v2.575 IMP-04: 구현은 `util/cmpVersion.js` 하나다(주석은 'partFaults 와 같은 규칙' 이라
+// 적혀 있었지만 tokenScan 사본과는 실제로 달랐다).
+// ⚠ 재수출(`export … from`)은 이 스코프에 이름을 만들지 않는다 — import 후 export 한다.
+import { cmpVersion } from '../../util/cmpVersion.js';
+
+export { cmpVersion };
 
 /**
  * 엣지 행 조립(순수 — 테스트가 고정한다).

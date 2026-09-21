@@ -18,6 +18,7 @@ import { ipToNum } from '../../ipam/ledger.js';
 import { logAudit } from '../../audit.js';
 import { getIpHistory, scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { buildWorkbook } from '../../ipam/excel.js';
+import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드
 
 
 // VM 전체 정보 export (특수 기능) — 선택 vCenter 의 모든 VM 을 '획득 가능한 최대 필드'로.
@@ -382,16 +383,33 @@ api.delete('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 삭제', target: `정책 ${pol?.spec || req.params.id}`, detail: pol ? JSON.stringify(pol).slice(0, 800) : '' }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
 });
+/**
+ * ⚠⚠ v2.575(전수 감사, **실측으로 확정된 가용성 취약점**): exceljs 는 워크북을 통째로 메모리에
+ * 조립한다. 가드가 없어 `tools` 권한 계정(operator 는 기본 보유)이 동시 요청을 보내면 그만큼
+ * 쌓였다 — 목 데이터 실측 **동시 5개에 RSS 728MB → 2.45GB**, 전수 퍼징 중 실제로 힙 한계(8GB)에서
+ * `FATAL ERROR: Ineffective mark-compacts near heap limit` 로 **프로세스가 죽었다**(누수는 아니다 —
+ * 유휴 60초 뒤 회수된다. 문제는 **동시성에 상한이 없다**는 것이다).
+ * 형제 라우트 `/tools/waste/export` 는 v2.500 부터 같은 가드를 갖고 있었는데 여기만 빠져 있었다.
+ * **이 가드를 지우지 말 것.** 새 내보내기 라우트도 `acquireExport` 를 쓴다.
+ */
 api.get('/tools/ipam.xlsx', requirePerm('tools'), async (req, res) => {
+  res.locals.perfExpectSlow = true; // 수십 초가 정상인 내보내기(v2.498 계측이 '느린 요청' 으로 세지 않게)
+  const lock = acquireExport('ipam.xlsx', req);
+  if (!lock.ok) return res.status(lock.status).json(lock.body);
   try {
     const snap = store.get();
     const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, allowed: scopedVcenterIds(req.user, snap) });
     const wb = await buildWorkbook(sheets);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="ip-ledger-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.setHeader('Cache-Control', 'no-store');
     await wb.xlsx.write(res);
     res.end();
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    // 헤더를 이미 보냈으면 상태코드를 바꿀 수 없다 — 스트림만 끊는다.
+    if (!res.headersSent) res.status(500).json({ error: err.message });
+    else res.end();
+  } finally { lock.release(); }
 });
 
 // CSV export of the IP ledger for sharing with other tools/spreadsheets.

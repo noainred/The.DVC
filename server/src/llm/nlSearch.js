@@ -6,6 +6,7 @@
  */
 
 import { store } from '../store.js';
+import { REGIONS } from '../util/regions.js'; // v2.575 IMP-10 — 단일 소스
 import { loadLlmConfig } from './config.js';
 import { ollamaGenerate } from './ollama.js';
 
@@ -132,7 +133,7 @@ function fallbackParse(query) {
   const s = query.toLowerCase();
   const entity = /호스트|host|esxi/.test(s) ? 'host' : /스토리지|데이터스토어|datastore|볼륨/.test(s) ? 'datastore' : /네트워크|network|포트그룹/.test(s) ? 'network' : 'vm';
   const filters = [];
-  for (const r of ['아시아', '중국', '유럽', '북미']) if (query.includes(r)) filters.push({ field: 'region', op: 'eq', value: r });
+  for (const r of REGIONS) if (query.includes(r)) filters.push({ field: 'region', op: 'eq', value: r });
   const pct = query.match(/(\d+)\s*%/);
   if (pct) {
     const op = /이하|미만|under|낮|적/.test(s) ? 'lte' : 'gt';

@@ -1,6 +1,22 @@
 {
   "notes": [
     {
+      "version": "2.575.0",
+      "date": "2026-09-21",
+      "title": "전수 감사 잔여 🟡 전건 + 재감사 확정 3건",
+      "notes": [
+        "🔴 내보내기 동시성 가드 — /tools/ipam.xlsx 가 동시 요청으로 힙(8GB)을 터뜨려 프로세스가 죽었다(실측). util/exportBusy.js 로 동시 1건·409, waste/export 인라인 사본도 흡수",
+        "🟠 연결 끊긴 호스트가 vCenter 개요에서 '흡기온도 0℃ · CPU 0% · MEM 0%' 로 보이던 결함 — 웹 numOrNull 신설(Number(null)===0, 여덟 번째 재발)",
+        "🟠 처리량을 재지 않는 Unity·VPLEX·PowerStore 노드가 '0 bps'(= 트래픽 없음) 로 보이던 결함",
+        "객체·배열 쿼리로 500 나던 7경로 — req.query 값을 입구에서 문자열로 고정(퍼징 89,250요청 실측)",
+        "표 머리글·KPI 라벨의 영문 대소문자 누출 11건 제거(vCenter→VCENTER · ESXi→ESXI · vCore→VCORE, Chromium 판독)",
+        "표 상한을 정렬 뒤 적용(STable limit) + 다열 표 23곳에 minWidth+가로 스크롤 래퍼",
+        "Ping 추이 '측정 없음' 사유 분리 — 폴러 꺼짐·대상 비활성은 기다려도 안 된다",
+        "값이 없는 칸에 단위를 붙이지 않는다(unitText) 9곳",
+        "중복 구현 통합 — cmpVersion 3벌·REGIONS 7벌·SITE_STALE_MS 2벌·동시성 풀·마지막 raw table"
+      ]
+    },
+    {
       "version": "2.574.0",
       "date": "2026-09-21",
       "title": "감사 확정 결함 21건 수정 — 무응답·범위 유출·전송 보안·Number(null)",

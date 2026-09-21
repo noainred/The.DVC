@@ -8,6 +8,7 @@ import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import { rowCards, displayIp, uaDisplay, tokenMismatchBanner, denyPathOf } from './collectorDiag.js';
 import { MOCK_VC_RE } from './collectors/emptyInvText.js';
+import { unitText } from './unitText.js';
 const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx')); // v2.560 — '빈 인벤토리' 원인·로그·조치
 
 const EMPTY = { id: '', name: '', datacenter: '', url: 'http://', token: '', enabled: true };
@@ -138,7 +139,7 @@ export default function Collectors() {
       const retryNote = r.retried ? ` · 재시도 ${r.retried}회` : '';
       const stepsText = (r.steps || []).length ? `\n단계: ${r.steps.map((s) => `${s.level === 'error' ? '✖' : s.level === 'warn' ? '⚠' : '·'} ${s.msg}`).join('\n')}` : '';
       setMsg(r.ok
-        ? { ok: !r.identity, text: `${r.identity ? '⚠ 연결은 되지만 다른 엣지가 응답' : '연결 성공'} (${r.ms}ms${retryNote}) · 호스트 ${r.hosts ?? '—'}대 · v${r.version || '?'}${r.datacenter ? ` · ${r.datacenter}` : ''}${r.agent ? ` · 응답 엣지 ${r.agent}${r.hostname ? `(${r.hostname})` : ''}` : ''}${r.identity ? `\n${r.identity.reason}` : ''}${stepsText}` }
+        ? { ok: !r.identity, text: `${r.identity ? '⚠ 연결은 되지만 다른 엣지가 응답' : '연결 성공'} (${r.ms}ms${retryNote}) · 호스트 ${unitText(r.hosts, '대')} · v${r.version || '?'}${r.datacenter ? ` · ${r.datacenter}` : ''}${r.agent ? ` · 응답 엣지 ${r.agent}${r.hostname ? `(${r.hostname})` : ''}` : ''}${r.identity ? `\n${r.identity.reason}` : ''}${stepsText}` }
         : { ok: false, text: `연결 실패: ${r.reason}${r.retried ? ` (재시도 ${r.retried}회 후)` : ''}${stepsText}` });
     } catch (e) { setMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }

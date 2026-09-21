@@ -4,7 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 
-const REGIONS = ['아시아', '중국', '유럽', '북미'];
+import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 const EMPTY = { id: '', name: '', host: 'https://', username: '', password: '', vcenterId: '', proxyId: '', enabled: true, pollIntervalSec: '', timeoutMs: '', location: { region: '아시아' } };
 
 /** 설정 → NSX 관리: NSX Manager 등록/수정/연결테스트/삭제. (vCenter와 별개 수집기) */

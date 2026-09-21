@@ -22,7 +22,7 @@ import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.
 // kept outside the app dir (e.g. /etc/vmware-portal) to survive upgrades.
 const FILE = path.join(config.configDir, 'vcenters.json');
 
-const REGIONS = ['아시아', '중국', '유럽', '북미'];
+import { REGIONS } from '../util/regions.js'; // v2.575 IMP-10 — 단일 소스
 
 export function loadRegistry() {
   if (!fs.existsSync(FILE)) return [];

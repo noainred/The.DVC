@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import { unitText } from '../unitText.js';
 
 /**
  * 성능점검 로그 분석 — CSV 로그를 기간·버킷(시간/일/주/월/분기/반기/연간)으로 집계해 본다.
@@ -128,7 +129,7 @@ export default function AnalyzeTab() {
               <span className="pc-ok">정상 {(data.totals?.ok || 0).toLocaleString()} ({pct(data.totals?.ok, data.totals?.rows)})</span>
               <span className="pc-warn">주의 {(data.totals?.warn || 0).toLocaleString()}</span>
               <span className="pc-bad">실패 {(data.totals?.bad || 0).toLocaleString()} ({pct(data.totals?.bad, data.totals?.rows)})</span>
-              <span className="muted">평균 {data.totals?.avgMs != null ? `${Math.round(data.totals.avgMs)} ms` : '—'} · 최대 {data.totals?.maxMs ?? '—'} ms</span>
+              <span className="muted">평균 {data.totals?.avgMs != null ? `${Math.round(data.totals.avgMs)} ms` : '—'} · 최대 {unitText(data.totals?.maxMs, ' ms', { fmt: (v) => Math.round(v) })}</span>
             </div>
           </div>
 

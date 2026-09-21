@@ -124,9 +124,14 @@ import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 �
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
 import { startStorageConfigPull } from './agent/storageConfigPull.js'; // 중앙→엣지 장비 배포 pull(v2.302)
+import { queryNormalizer } from './util/queryNormalize.js'; // v2.575 BUG-22
 
 const app = express();
 app.disable('x-powered-by'); // v2.538: 'X-Powered-By: Express' 는 정보 노출(프레임워크 지문)일 뿐이다
+// v2.575 BUG-22: `req.query` 의 값을 **전부 문자열로 고정**한다. express 4 기본 파서(qs)는
+// `?id[a]=1` 을 객체, `?id=a&id=b` 를 배열로 만들고 라우트는 문자열을 가정하므로 500 이 난다
+// (퍼징 실측 7경로 22건). ⚠ **모든 라우터보다 먼저** 있어야 한다 — 아래로 옮기지 말 것.
+app.use(queryNormalizer());
 
 // 보안 응답 헤더(helmet 무의존 최소 세트) — 클릭재킹·MIME 스니핑·레퍼러 유출·전송보안.
 // CSP는 인라인 스타일/intro 페이지 호환 이슈로 기본 비활성(CSP env로 옵트인 지정 가능).

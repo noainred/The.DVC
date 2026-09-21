@@ -13,6 +13,7 @@
 
 import { getPingDb } from './db.js';
 import { listTargets, getTarget } from './store.js';
+import { config } from '../config.js';
 
 const WARN = 1.2;
 const CRIT = 1.5;
@@ -57,7 +58,12 @@ export async function statusAll(sources = null) {
     });
   }
   const counts = rows.reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
-  return { targets: rows, counts, total: rows.length };
+  // v2.575 BUG-16: 화면이 '기다리면 채워진다' 와 '기다려도 안 된다' 를 구분할 수 있게 폴러
+  // 전역 스위치와 주기를 함께 싣는다(주기 숫자를 화면에 박지 말 것 — 루트 CLAUDE.md v2.493).
+  return {
+    targets: rows, counts, total: rows.length,
+    monitorEnabled: !!config.ping.enabled, intervalMs: config.ping.pollIntervalMs,
+  };
 }
 
 /** 단일 대상의 시계열(다운샘플). rangeMs 범위를 최대 points개 버킷으로 나눠 avg/min/max/loss + 상태. */
@@ -76,7 +82,8 @@ export async function seriesOf(id, { rangeMs = 6 * 3_600_000, points = 240 } = {
     status: b.loss >= 1 ? 'down' : classify(b.avg, b.avg != null, baseline),
   }));
   const meta = db.meta(t.id);
-  return { ok: true, target: { id: t.id, name: t.name, host: t.host, port: t.port, kind: t.kind }, baseline, baselineAuto: auto, bucketMs, series, meta };
+  // v2.575 BUG-16: rangeMs 를 함께 실어 화면이 '마지막 측정이 조회 기간 밖' 을 구분할 수 있게 한다.
+  return { ok: true, target: { id: t.id, name: t.name, host: t.host, port: t.port, kind: t.kind, enabled: t.enabled }, baseline, baselineAuto: auto, bucketMs, rangeMs, series, meta };
 }
 
 /**

@@ -24,7 +24,19 @@
  *   값만 쓰고, 서버가 주지 않는 것은 '몇 분' 처럼 범위로만 말한다.
  */
 
-const num = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+/**
+ * ⚠ v2.575 BUG-17 — `Number('') === 0`·`Number([]) === 0` 이라 예전 형태는 **빈 값을 0 으로**
+ *   바꿨다. 이 값들은 `/health` 의 vCenter 대수라 0 이 곧 '등록 0개' 라는 판정을 만든다
+ *   ('기다리면 채워진다' 대신 '등록하세요' 가 뜬다 — 조치가 정반대다).
+ *   서버의 `util/numOrNull.js` 와 같은 규칙이다(웹은 별도 파일이라 여기서 좁힌다).
+ */
+const num = (v) => {
+  if (v == null || v === '') return null;
+  if (typeof v !== 'number' && typeof v !== 'string') return null;   // [] · {} · true 차단
+  if (typeof v === 'string' && v.trim() === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
 
 /**
  * 타임아웃/중단 계열 오류인가 — 브라우저·폴리필이 문구를 제각각 쓰므로 넓게 본다.

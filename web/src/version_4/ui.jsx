@@ -83,7 +83,14 @@ export function PollState({ poll, skipped, phase, health, children }) {
  * 표본이 2개 미만이면 차트를 그리지 않고 호출자가 이유를 문장으로 쓴다.
  */
 export function Spark({ points, height = 120, color = '#2563eb', fill = true, yZero = false }) {
-  const pts = (points || []).filter((p) => p && Number.isFinite(Number(p.x)));
+  /*
+   * ⚠ v2.575 BUG-10 — `Number(null) === 0` 이라 예전 형태는 **x 가 없는 점을 1970년(0)** 으로
+   *   살려 두었다. 그러면 `x0 = 0` 이 되어 **실제 점이 전부 오른쪽 끝에 뭉친다**(실행 재현).
+   *   y 축은 처음부터 `v != null` 로 옳게 걸렀는데 x 만 빠져 있었다.
+   * ⚠ 호출부에서 `x: null` 을 증명하지는 못했다(도달 미확인) — 그래도 **형태가 틀렸다**.
+   */
+  const pts = (points || []).filter((p) => p && p.x != null && p.x !== ''
+    && (typeof p.x === 'number' || typeof p.x === 'string') && Number.isFinite(Number(p.x)));
   const ys = pts.map((p) => p.y).filter((v) => v != null && Number.isFinite(Number(v))).map(Number);
   if (pts.length < 2 || ys.length < 2) return null;
   const W = 100, H = 100; // viewBox 비율 좌표 — 실제 크기는 CSS 가 정한다
