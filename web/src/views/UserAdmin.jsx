@@ -4,11 +4,12 @@ import { fetchJson, postJson, patchJson, delJson, putJson } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { TOOLS as SPECIAL_TOOLS } from './specialToolsList.js';
 import { enforcementOf, enforcementSummary, LEVEL_SERVER, LEVEL_PARTIAL } from './userAdmin/toolEnforcementText.js';
-import { MODE_OFF, MODE_ALLOW, MODE_DENY, MODE_LABEL, modeHelp, overrideBadge, overrideByText, toolsPermWarning, enforcementGapNote, saveSummary, SECTION_NOTE } from './userAdmin/userToolText.js';
+import { MODE_OFF, MODE_ALLOW, MODE_DENY, MODE_LABEL, modeHelp, overrideBadge, overrideByText, toolsPermWarning, enforcementGapNote, saveSummary, SECTION_NOTE, roleToolRows, ROLE_SECTION_NOTE, ADMIN_MARK_LABEL, ADMIN_MARK_TITLE_ROLE, ADMIN_MARK_TITLE_USER } from './userAdmin/userToolText.js';
 import BoldText from '../components/boldText.jsx';
 
-// 도구별 접근 표에 나오는 행 — adminOnly 도구는 admin 전용이라 제외(모듈 상수: 렌더마다 재계산 불필요).
-const TOOL_ROWS = SPECIAL_TOOLS.filter((t) => !t.adminOnly);
+// 도구별 접근 표에 나오는 행 — **카탈로그 전체**다(v2.573). 여기에 필터를 붙이면 새로 추가한
+// 특수기능이 권한 화면에서 조용히 빠진다(사유는 userToolText.roleToolRows 머리말).
+const TOOL_ROWS = roleToolRows(SPECIAL_TOOLS);
 // 권한 매트릭스 순수 연산(v2.295, 3차 감사 확정 #6) — toolsDenied '거부목록 반전' 의미론을
 // vitest 로 고정(userAdmin/permMatrixOps.test.js). 이 파일은 setState 래퍼만 유지.
 import { hasMatrixKey, toggleMatrixKey, isToolAllowed, toggleToolDenied, setAllToolsDenied } from './userAdmin/permMatrixOps.js';
@@ -367,8 +368,7 @@ export default function UserAdmin() {
             </div>
           </div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.7 }}>
-            체크 = 해당 도구 접근 허용. '특수 기능' 기본 권한이 있어야 도구가 보이며, 여기서 도구별로 세부 차단할 수 있습니다.
-            <b>관리자 전용</b> 도구(VM 생성·에이전트 작업 등)는 admin에게만 노출되어 목록에서 제외됩니다.
+            <BoldText text={ROLE_SECTION_NOTE} />
             <div style={{ marginTop: 6 }}>{enforcementSummary(TOOL_ROWS.map((t) => t.k), perms.toolEnforcement)}</div>
           </div>
           <div className="table-wrap">
@@ -382,7 +382,12 @@ export default function UserAdmin() {
                   const cls = en.level === LEVEL_SERVER ? 'green' : en.level === LEVEL_PARTIAL ? 'yellow' : 'gray';
                   return (
                     <tr key={t.k}>
-                      <td>{t.icon} {t.label} <span className="muted" style={{ fontSize: 11 }}>({t.k})</span></td>
+                      <td>
+                        {t.icon} {t.label} <span className="muted" style={{ fontSize: 11 }}>({t.k})</span>
+                        {t.adminOnly && (
+                          <span className="badge gray" style={{ fontSize: 10, marginLeft: 6 }} title={ADMIN_MARK_TITLE_ROLE}>{ADMIN_MARK_LABEL}</span>
+                        )}
+                      </td>
                       <td data-sort={en.level}><span className={`badge ${cls}`} style={{ fontSize: 11 }} title={en.title}>{en.badge}</span></td>
                       <td style={{ textAlign: 'center' }}><input type="checkbox" checked readOnly disabled title="admin은 항상 전체" /></td>
                       <td style={{ textAlign: 'center' }}><input type="checkbox" checked={toolAllowedMx('operator', t.k)} onChange={() => toggleTool('operator', t.k)} /></td>
@@ -475,8 +480,7 @@ export default function UserAdmin() {
                       <input type="checkbox" checked={toolEdit.tools.includes(t.k)} onChange={() => toggle(t.k)} />
                       <span>{t.icon} {t.label} <span className="muted" style={{ fontSize: 11 }}>({t.k})</span></span>
                       {t.adminOnly && (
-                        <span className="badge gray" style={{ fontSize: 10 }}
-                          title="목록에서는 관리자 전용으로 표시되는 도구입니다. 여기서 고르면 이 계정에 카드가 보이지만, 조회 API 가 admin 을 요구하는 도구는 열 때 403 이 됩니다(권한을 넓히지는 않습니다).">관리자 표시</span>
+                        <span className="badge gray" style={{ fontSize: 10 }} title={ADMIN_MARK_TITLE_USER}>{ADMIN_MARK_LABEL}</span>
                       )}
                     </label>
                   ))}
