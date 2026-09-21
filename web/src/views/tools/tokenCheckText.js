@@ -21,12 +21,14 @@
  * ⚠ 주기·상한 **숫자를 문구에 박지 말 것** — 서버가 주는 `limits` 만 쓴다.
  */
 
+import { numOrNull } from '../../numOrNull.js';
+
 const t = (v) => String(v ?? '').trim();
 /**
  * ⚠ **`v == null || v === ''` 를 먼저 본다** — `Number(null) === 0` 이고 `Number('') === 0` 이라
  *   그 검사 없이는 결측이 **0 으로 둔갑**한다(v2.525·v2.550·v2.552 에서 같은 함정을 네 번 밟았다).
  */
-const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+const n = numOrNull;   // v2.576: 사본 금지 — 코어는 하나다(사본은 Number([])===0 을 막지 못했다)
 
 /* ── 행 상태 ───────────────────────────────────────────────────────────────── */
 

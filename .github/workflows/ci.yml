@@ -88,6 +88,12 @@ jobs:
       - name: 문서 최신 여부 — docs/API.md
         continue-on-error: true
         run: node scripts/api-doc.mjs --check
+      # v2.576(라이선스 점검 F3): 번들에 실리는 오픈소스 고지도 생성물이다 — 의존성이 바뀌면
+      # 갱신해야 한다(MIT·ISC·BSD 는 사본마다 저작권 고지 동봉을 요구하고 minify 는 주석을 지운다).
+      # ⚠ 이 검사는 `npm ci` 가 끝난 뒤에 와야 한다(설치되지 않은 의존성이 있으면 종료코드 1).
+      - name: 문서 최신 여부 — THIRD-PARTY-NOTICES.txt
+        continue-on-error: true
+        run: node scripts/third-party-notices.mjs --check
 
       # v2.478: critical 은 CI 를 실패시킨다(자동 업그레이드 경로에 critical 의존성이 실리는 것을 차단).
       # high 이하는 정보성으로 출력만 한다 — 잔여 high(d3-color: 3d-force-graph·react-simple-maps 경유, 외부 입력

@@ -16,9 +16,11 @@
  *     기간을 바꾸면 `source` 가 바뀌고 화면이 그 사실을 말한다.
  *  ⑤ **점이 1개면 선을 그리지 않는다** — 한 점을 선으로 만들면 추세가 있는 것처럼 보인다.
  */
+import { numOrNull } from '../../numOrNull.js';
+
 const t = (v) => String(v ?? '').trim();
 /** ⚠ null·빈 문자열을 **먼저** 본다(위 규칙 ②). */
-const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+const n = numOrNull;   // v2.576: 사본 금지 — 코어는 하나다(사본은 Number([])===0 을 막지 못했다)
 
 /** 차트에 그릴 지표 — 표(`COLS`)와 **같은 순서**를 쓴다(두 곳이 어긋나면 사용자가 헷갈린다). */
 export const CHART_SERIES = Object.freeze([

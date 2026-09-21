@@ -153,7 +153,9 @@ export default function RelayTopoTool() {
           {issues.length > 0 && (
             <div className="card" style={{ marginBottom: 12 }}>
               <b>표 점검 결과</b> <span className="muted" style={{ fontSize: 12 }}>(저장된 토폴로지 기준 · SSH 없이 표만 보고 판정)</span>
-              <STable style={{ marginTop: 6, fontSize: 12 }}>
+              {/* ⚠ minWidth 필수(v2.576 실측): '내용'·'해결책' 이 문장이라 400px 에서 이 표와
+                  아래 서비스 표가 함께 페이지를 **613px** 밀어냈다. */}
+              <STable minWidth={640} style={{ marginTop: 6, fontSize: 12 }}>
                 <thead><tr><th>수준</th><th>사이트</th><th>내용</th><th>해결책</th></tr></thead>
                 <tbody>{issues.map((i, k) => <tr key={k}><td><span className={`badge ${LEVEL[i.level]?.[1] || 'gray'}`}>{LEVEL[i.level]?.[0] || i.level}</span></td><td>{i.dc || '—'}</td><td>{i.text}</td><td className="muted">{i.fix || '—'}</td></tr>)}</tbody>
               </STable>
@@ -180,7 +182,7 @@ export default function RelayTopoTool() {
               <button className="tab" onClick={() => setForm((p) => ({ ...p, services: [...p.services, { key: '', label: '', listenPort: 0, target: 'irs', targetPort: 0, mode: 'tcp', enabled: true }] }))}>+ 서비스 추가</button>
               <button className="tab" onClick={() => setForm((p) => ({ ...p, services: data.defaultServices.map((s) => ({ ...s })) }))}>기본값 복원</button>
             </div>
-            <STable style={{ marginTop: 6, fontSize: 12 }}>
+            <STable minWidth={900} style={{ marginTop: 6, fontSize: 12 }}>
               <thead><tr><th>사용</th><th>키</th><th>표시명</th><th>listen 포트</th><th>대상</th><th>대상 포트</th><th>mode</th><th data-nosort>삭제</th></tr></thead>
               <tbody>{form.services.map((s, i) => (
                 <tr key={i}>

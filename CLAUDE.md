@@ -2602,6 +2602,82 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     (앞 셋은 **기다려도 안 된다**). 판정 순서가 계약이고 `waiting` 플래그가 그것을 들고 있다 —
     실패 판정들 **뒤**에 '기다리면 된다' 를 둔다(v2.509·v2.517 규약).
 
+  - ⚠⚠ **오픈소스 라이선스 준수는 '생성물' 로 관리한다 — 손으로 적은 고지는 다음 릴리스에 낡는다**
+    (`scripts/third-party-notices.mjs` → `web/public/THIRD-PARTY-NOTICES.txt` · 루트 `LICENSE` ·
+    회귀는 `test/license2576.test.js`, v2.576 — 사용자 질문 "저작권이나 라이선스를 침해했는지 확인"
+    에서 **확정 위반 2건**을 찾아 고쳤다):
+    - ⚠⚠ **F1(확정) — 서브셋 폰트가 예약 폰트 이름을 쓰고 있었다.** `fontTools` 로 직접 디코드해
+      확정: `web/src/vendor/pretendardKsxFont.js` 는 상류 Pretendard **가변폰트(글리프 14,757)**
+      를 **2,918 글리프 정적 인스턴스**로 줄인 것인데 `name` 테이블 패밀리명이 **`Pretendard`**
+      그대로였다. `Pretendard-OFL.txt:2` 가 **"with Reserved Font Name Pretendard"** 를 선언하고
+      OFL 1.1 의 "Modified Version" 정의는 *"adding to, **deleting**, or substituting … **by
+      changing formats**"* 이므로 **글리프 삭제와 가변→정적 변환 양쪽 모두** 해당한다. 3조가
+      수정본의 예약 이름 사용을 금지한다 → **`DVC Sans KSX`**(nameID 1/3/4/6)로 바꿨다.
+      ⚠ **nameID 0(원저작자 저작권)은 지우지 말 것** — OFL 1조가 보존을 요구한다.
+      ⚠ **jsPDF 별칭도 예약 이름이면 안 된다**(그 값이 PDF 의 폰트 리소스 이름이 된다) —
+      `reportExport.js` 의 `addFont`/`setFont` 를 `'Pretendard'` 로 되돌리지 말 것.
+      폰트를 다시 서브셋하면 이 이름 규칙을 **다시 적용**할 것.
+    - ⚠⚠ **F2(확정) — 배포 산출물에 라이선스 사본이 없었다.**
+      `packaging/offline/build-package.sh:114` 는 **`web/dist` 만** 복사한다 — `web/src` 는 패키지에
+      들어가지 않으므로 `web/src/vendor/Pretendard-OFL.txt` 는 **고객에게 배포되지 않았다**(실측:
+      `web/dist` 전체 grep `"Open Font License"` **0건**, 서브셋 TTF 에 nameID 13/14 도 없음).
+      OFL 2조가 허용하는 세 경로(stand-alone text / human-readable headers / **machine-readable
+      metadata fields**)가 **전부 비어 있었다.** → nameID 13·14 주입 +
+      **`web/public/THIRD-PARTY-NOTICES.txt`**(vite 가 `web/dist` 로 복사 ⇒ 웹 배포와 오프라인
+      패키지 **양쪽** 포함) + About 화면 링크. **`web/src` 에만 두면 배포되지 않는다** — 새 라이선스
+      문서는 `web/public` 에 둘 것.
+    - **F3 — minify 가 고지 주석을 지운다**(실측: `web/dist/assets/*.js` 118개에 `@license` 16건 ·
+      `Copyright` 12건뿐인데 번들에는 d3 계열·recharts·dompurify·pako·guacamole-common-js·jspdf 가
+      들어 있다). MIT·ISC·BSD 는 공통으로 사본마다 고지 동봉을 요구한다 → 생성기를 두고 CI 가
+      `--check` 한다(`api-doc.mjs` 와 같은 관례). ⚠ **못 읽은 것을 조용히 넘기지 않는다** — 설치되지
+      않은 의존성이 있으면 **종료코드 1 이고 문서를 쓰지 않는다**(`docsGen2452` 사고).
+      **의존성을 추가·제거하면 `node scripts/third-party-notices.mjs` 를 돌릴 것.**
+    - **F4 — `buffers@0.1.1` 은 라이선스 선언이 어디에도 없다**(`exceljs → unzipper → binary →
+      buffers`). 오프라인 패키지가 `server/node_modules` 를 `cp -a` 로 **그대로 재배포**하므로
+      허락 근거 없이 재배포되는 상태다. `precond@0.2.3` 은 README 에만 MIT. **숨기지 말 것** —
+      고지 파일의 전용 절이 개수와 이름을 적는다(상용 납품 실사 대상).
+    - **F5 — 루트 `LICENSE`**: 이 저장소는 **공개**인데 `package.json` 3개가 `private: true` 이고
+      `license` 필드도 LICENSE 파일도 없었다. 사유 라이선스 선언 + **"제3자 구성요소는 이 조항의
+      영향을 받지 않는다"** + 고지 파일 위치를 적는다.
+    - **회귀 테스트는 폰트 바이너리를 실제로 디코드한다**(최소 sfnt `name` 파서) — base64 안의
+      테이블은 소스 grep 으로 볼 수 없다. 비어 있는 값을 통과시키지 않도록 `assert.ok(v)` 를 **먼저**
+      본다(빈 문자열이면 `!/pretendard/i` 가 공허하게 참이 된다).
+    - ⚠ **카피레프트는 0건이다**(479개 전수: MIT 372 · ISC 45 · BSD-3 22 · Apache-2.0 15 · BSD-2 6 ·
+      기타 소수. GPL/LGPL/**AGPL**/SSPL/BUSL **없음**. `jszip` 만 `MIT OR GPL-3.0-or-later` 듀얼이고
+      MIT 선택). 서버 Apache 패키지(`crc-32`·`readdir-glob`)와 `guacamole-common-js` 는 **NOTICE 파일이
+      없어** §4(d) 전파 의무가 발생하지 않는다. **새 의존성을 추가할 때 이 성질을 먼저 확인할 것.**
+    - ⚠ **타 프로그램 코드 복사는 없다**(v2.576 확인): CLAUDE.md 가 읽었다고 기록한 외부 소스
+      3종은 전부 **사실·필드명·수치 관계**만 참조하고 출처를 밝힌다 — `horizon-mcp`(필드명·상태값) ·
+      Dell `PyU4V/tools/openapi.json`(필드 **설명문 5줄** 인용, Apache-2.0) ·
+      `Comcast/libstorage`(수치 관계만, 식별자는 합성). **픽스처에 실장비 값을 넣지 말 것**(v2.513).
+
+  - ⚠⚠ **화면 문구에 백틱 금지는 전수 스윕이 고정한다**(`web/src/views/uiText.test.js`, v2.576 —
+    **여섯 번째 재발**): `BoldText` 는 `**강조**` 만 해석하므로 백틱은 **화면에 글자로 보인다**.
+    v2.439·v2.440·v2.505·v2.545·v2.553 에 다섯 번 기록하고도 그때마다 **그 파일 하나만** 고쳤고
+    (v2.553 테스트는 `settingsCheckText` 만 검사한다) v2.576 에 **6곳**이 남아 있었다 —
+    `sanHealthText.cmdNote`(BoldText) · `bulkIoText.tokenHint`(plain) ·
+    `UnityCapacityPlanPanel` 의 `sub` prop(plain) · `CurrentUsersSettings`(BoldText) ·
+    `curUserText.agentGuide` 2줄(`<li>{g}</li>`). 값 인용은 **홑화살괄호 `‘ ’`** 로 한다.
+    · 검출은 **이스케이프된 백틱**(앞선 백슬래시 연속 개수가 **홀수**)이다 — `` `${sel}\` ``
+      (백슬래시 짝수 = Windows 경로)는 대상이 아니다.
+    · ⚠ **홑따옴표 문자열 안의 백틱까지 정규식으로 잡으려 하지 말 것** — 중첩 템플릿 리터럴
+      (`` `평균 ${x == null ? '—' : `${x}%`}` ``)에서 **오탐 30여 건**이 났다. 오탐이 있는 스윕은
+      곧 무력화된다(현재 그 형태는 0건).
+
+  - ⚠⚠ **그리드·플렉스 자식의 `min-width: 0` 은 한 폭만 재면 놓친다**(`.vc-grid`/`.vc-card`,
+    v2.576 — 특수기능·vCenter 목록·IPAM·하드웨어 **5화면이 공유**하는 그리드):
+    카드 하나(`스토리지 모니터링`)의 설명문이 **줄바꿈 지점 없는 min-content 456px 토큰**이라
+    `min-width: auto` 때문에 트랙을 474px 로 키웠다. 실측 — **1920px 0px / 1440px 115px /
+    1280px 0px**(3열이 되며 트랙이 우연히 충분) **/ 400px 99px**. 표준 폭에서 넘치는데 더 넓은
+    폭에서는 0 이므로 **여러 폭을 재야 보인다**.
+    · 수정은 **`min-width: 0` 과 `.vc-card .muted { overflow-wrap: anywhere }` 둘 다** 필요하다 —
+      전자만 두면 텍스트가 카드를 넘쳐 잘리고, 후자만 두면 `auto` 트랙이 여전히 max-content 다.
+    · ⚠ `overflow-wrap: anywhere` 는 **설명문 전용**이다. 숫자 칸에 걸면 `63.6 GB` 가 `63.6/GB` 로
+      쪼개진다(v2.525 `.rpt-wrap` 실제 사고).
+    · 함께 고친 표 3곳 — `DatastoreUsage.DsVcTable`(400px **201px** 넘침 · 한 화면에 11개) ·
+      `RelayTopoTool` 2곳(**613px**). 6열이어도 `minWidth` 가 없으면 넘친다(v2.575 스윕은 7열
+      이상만 봤다) — **열 수로 면제하지 말 것.**
+
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
 서버 보안 불변조건(전역 TLS·RBAC·토큰 검증·scope·OTP·WS 게이트웨이 등 전 항목)은

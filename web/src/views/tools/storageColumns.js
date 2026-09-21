@@ -17,6 +17,8 @@
  */
 
 /** 공통 왼쪽/오른쪽 컬럼(모든 타입). */
+import { numOrNull } from '../../numOrNull.js';
+
 const LEFT = [
   { key: 'device', label: '장비' },
   { key: 'type', label: '타입', onlyMixed: true },
@@ -126,7 +128,7 @@ export function cellValue(key, row) {
   const cap = s?.capacity || null;
   // ⚠ null/'' 을 먼저 걸러야 한다 — Number(null)===0 이 유한값이라 미수집이 '0%'·'0 TB' 로 둔갑한다
   //   (모듈 머리말 규칙 위반 사례 — v2.416 리뷰 확정).
-  const num = (v) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null);
+  const num = numOrNull;   // v2.576: 사본 금지 — 코어는 하나다(사본은 Number([])===0 을 막지 못했다)
 
   switch (key) {
     case 'usage': return num(cap?.pct);

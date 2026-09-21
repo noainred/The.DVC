@@ -21,9 +21,10 @@
  */
 
 import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+import { numOrNull } from '../../numOrNull.js';
 const t = (v) => String(v ?? '').trim();
 /** ⚠ `v == null` 을 **먼저** 본다 — `Number(null)===0`·`Number('')===0` 이라 결측이 0 으로 둔갑한다. */
-const n = (v) => (v == null || v === '' ? null : (Number.isFinite(Number(v)) ? Number(v) : null));
+const n = numOrNull;   // v2.576: 사본 금지 — 코어는 하나다(사본은 Number([])===0 을 막지 못했다)
 
 /** 퍼센트 표시. 값이 없으면 단위를 붙이지 않는다(`— %` 는 0% 처럼 읽힌다 — v2.534 규약). */
 export function pctText(v) {

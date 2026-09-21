@@ -182,8 +182,8 @@ export function skippedSummary(skipped, reasons = {}) {
 /** 발행기 배포 안내(화면이 그대로 보여 준다). `installCommand` 는 서버가 만든 것을 쓴다. */
 export function agentGuide({ agentFile = 'curuser-agent.ps1', installCommand = '', guestPublishMs = 0 } = {}) {
   return [
-    `1. 아래 '발행기 스크립트 내려받기' 로 \`${agentFile}\` 를 받아 Windows 서버에 둡니다(예: C:\\ProgramData\\Portal\\).`,
-    `2. 관리자 PowerShell 에서 한 번 실행해 스케줄 작업을 등록합니다 — \`powershell -ExecutionPolicy Bypass -File .\\${agentFile} -Install\``,
+    `1. 아래 '발행기 스크립트 내려받기' 로 ‘${agentFile}’ 를 받아 Windows 서버에 둡니다(예: C:\\ProgramData\\Portal\\).`,
+    `2. 관리자 PowerShell 에서 한 번 실행해 스케줄 작업을 등록합니다 — ‘powershell -ExecutionPolicy Bypass -File .\\${agentFile} -Install’`,
     '   (또는 아래 schtasks 명령을 그대로 붙여넣습니다.)',
     `3. 발행 주기는 ${intervalText(guestPublishMs)}입니다. 포탈은 그 값을 vCenter 구성에서 읽기만 하므로 **게스트 계정도, 포탈로 나가는 방화벽 허용도 필요 없습니다.**`,
     installCommand ? `4. 등록 명령: ${installCommand}` : '',

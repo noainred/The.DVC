@@ -39,8 +39,11 @@ function DsCapBar({ capacityGB, freeGB }) {
 // 한 vCenter의 데이터스토어 표(이름 정렬).
 function DsVcTable({ items }) {
   const sorted = items.slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true }));
+  // ⚠ minWidth 를 지우지 말 것(v2.576 실측): 6열 + 사용률 칸 최소폭 120px 이라 감싸지 않으면
+  //   400px 에서 이 표들이 페이지를 **201px** 밀어낸다(한 화면에 11개가 뜬다). STable 은
+  //   minWidth 를 받으면 가로 스크롤 래퍼까지 함께 만든다(v2.575 규약).
   return (
-    <STable className="data-table" style={{ width: '100%', fontSize: 12.5, marginTop: 8 }}>
+    <STable minWidth={560} className="data-table" style={{ width: '100%', fontSize: 12.5, marginTop: 8 }}>
       <thead><tr>
         <th style={{ textAlign: 'left' }}>데이터스토어</th><th>유형</th>
         <th style={{ textAlign: 'right' }}>전체</th><th style={{ textAlign: 'right' }}>사용</th>

@@ -93,6 +93,19 @@ export default function About() {
             <div style={{ marginTop: 8, fontStyle: 'italic', opacity: .85 }}>
               Copyright © {year} 박준호 (Park Junho). All rights reserved. Unauthorized reproduction or distribution is prohibited.
             </div>
+            {/* ⚠ 이 링크를 지우지 말 것(v2.576 라이선스 점검): 이 포탈은 MIT·ISC·BSD·Apache·OFL
+                오픈소스를 번들에 담아 배포한다. 그 라이선스들은 사본마다 저작권 고지와 허가 문구를
+                함께 실을 것을 요구하는데 minify 가 고지 주석을 지운다(실측: dist 118파일에 @license
+                16건뿐). 고지 파일은 `scripts/third-party-notices.mjs` 가 생성하고 `web/public` 에
+                있어 빌드 산출물과 오프라인 패키지에 함께 실린다. */}
+            <div style={{ marginTop: 12, fontSize: 12.5, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+              <a href="/THIRD-PARTY-NOTICES.txt" target="_blank" rel="noreferrer" style={{ color: '#7dd3fc', textDecoration: 'none' }}>
+                제3자 오픈소스 고지 보기 (THIRD-PARTY NOTICES) ⇗
+              </a>
+              <div style={{ marginTop: 3, opacity: .8 }}>
+                위 저작권 주장은 이 소프트웨어 자체에 대한 것이며, 포함된 오픈소스 구성요소는 각자의 라이선스를 따릅니다.
+              </div>
+            </div>
           </div>
         </div>
 

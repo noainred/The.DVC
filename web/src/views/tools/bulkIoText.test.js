@@ -139,7 +139,7 @@ describe('조용한 제외 금지', () => {
 
 describe('토큰 위치 — 특정 못 하면 말하지 않는다', () => {
   it('키=값 / 순서 / 누락', () => {
-    expect(tokenHint({ field: 'host', token: { form: 'keyed' } })).toBe('`host=` 값');
+    expect(tokenHint({ field: 'host', token: { form: 'keyed' } })).toBe('‘host=’ 값');
     expect(tokenHint({ field: 'host', token: { form: 'positional', col: 3 } })).toBe('3번째 항목');
     expect(tokenHint({ field: 'host', token: { form: 'missing', col: 5 } })).toBe('5번째 항목이 없음');
   });
