@@ -17,7 +17,7 @@
  */
 
 import { roomTempReport, UNASSIGNED_KEY } from './roomTemp.js';
-import { analysisServersWithRemote } from '../routes/admin/shared.js';
+import { analysisServersWithRemote } from '../insights/analysisServers.js'; // v2.579: ARCH-04
 
 export const ROOMTEMP_METRICS = [
   'roomtemp_inlet_avg', 'roomtemp_inlet_max',

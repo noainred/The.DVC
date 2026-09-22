@@ -19,6 +19,7 @@ import * as fosRest from './collectors/fosRest.js';
 import { withDeadline } from '../proxy/sshExec.js';
 import { classifyFailure, makeTracer } from './testDiag.js';
 import { precheckTarget } from './precheck.js';
+import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.SANSW_CONCURRENCY) || 4));
 const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.SANSW_DEVICE_TIMEOUT_MS) || 120_000);
@@ -81,14 +82,6 @@ async function collectOne(dev) {
   } finally { _inFlight.delete(dev.id); }
 }
 
-/** 동시 개수 제한 실행(storage.collectPool 과 같은 패턴 — 순간 부하 평탄화). */
-async function pool(items, limit, fn) {
-  const it = items[Symbol.iterator]();
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (let n = it.next(); !n.done; n = it.next()) await fn(n.value);
-  });
-  await Promise.all(workers);
-}
 
 export async function pollSanSwitchOnce() {
   if (_busy) return { ok: false, reason: '이전 수집 진행 중(겹침 방지)' };

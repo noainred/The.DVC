@@ -10,6 +10,7 @@ import { store } from '../store.js';
 import { load as loadSettings } from './settings.js';
 import { collectAndStore } from './service.js';
 import { prune, getDb } from './db.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 
 const TICK_MS = 60_000;
 const CONCURRENCY = Math.max(1, Number(process.env.GUESTDISK_CONCURRENCY) || 4);
@@ -22,18 +23,9 @@ const PRUNE_EVERY_MS = 6 * 3_600_000; // 6h
 
 export function guestDiskPollerStatus() { return { running, lastResult, lastRunTs }; }
 
-/** 동시성 제한 실행 — items 를 최대 n 개씩 병렬로. */
+// v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
 async function pool(items, n, fn) {
-  const results = [];
-  let i = 0;
-  const workers = Array.from({ length: Math.min(n, items.length) }, async () => {
-    while (i < items.length) {
-      const idx = i++;
-      results[idx] = await fn(items[idx]).catch((e) => ({ error: String(e.message || e) }));
-    }
-  });
-  await Promise.all(workers);
-  return results;
+  return (await poolSettled(items, n, fn)).map((r) => (r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message || r.reason) }));
 }
 
 /** 전체 vCenter 수집 1회(수동/자동 공용). 진행 중이면 skipped. */

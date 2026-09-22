@@ -18,6 +18,7 @@ import { cleanPlacement } from './placement.js';
 import { addSaved } from './saved.js';
 import { createProvisioner } from './vsphere.js';
 import { describeError } from '../util/errors.js';
+import { poolRun } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
 const CONCURRENCY = Number(process.env.PROVISION_CONCURRENCY) || 4;
 const MAX_JOBS = 50; // keep the most recent N jobs in memory
@@ -128,7 +129,7 @@ async function runJob(job, source) {
 
   const prov = createProvisioner(vc);
   try {
-    await eachLimited(job.vms, CONCURRENCY, async (v) => {
+    await poolRun(job.vms, CONCURRENCY, async (v) => {
       v.status = 'running';
       try {
         const r = await prov.cloneOne(source, v, { powerOn: job.powerOn, placement: job.placement });
@@ -146,7 +147,7 @@ async function runJob(job, source) {
 }
 
 async function runMock(job) {
-  await eachLimited(job.vms, CONCURRENCY, async (v) => {
+  await poolRun(job.vms, CONCURRENCY, async (v) => {
     v.status = 'running';
     await sleep(300 + Math.floor(Math.random() * 700));
     // ~4% synthetic failure so the UI exercises the error path in demos.
@@ -157,11 +158,4 @@ async function runMock(job) {
 }
 
 /** Run `fn` over items with at most `limit` in flight at once. */
-async function eachLimited(items, limit, fn) {
-  let i = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (i < items.length) { const idx = i++; await fn(items[idx], idx); }
-  });
-  await Promise.all(workers);
-}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

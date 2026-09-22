@@ -9,6 +9,7 @@ import { loadPhysical, updatePhysical } from './physicalRegistry.js';
 import { collectVmGpuSsh, detectPhysicalGpu } from './sshCollect.js';
 import { setPhysicalGpu, prunePhysicalGpu, physicalGpuCounts } from './physicalStore.js';
 import { isStopped } from '../security/emergencyStop.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
 let timer = null;
 let lastRun = null;
@@ -26,13 +27,6 @@ function classifyErr(e) {
   return { errorCode: 'error', errorLabel: '오류' };
 }
 
-async function eachLimited(items, limit, fn) {
-  const q = [...items];
-  const workers = Array.from({ length: Math.min(limit, q.length || 1) }, async () => {
-    while (q.length) { const it = q.shift(); try { await fn(it); } catch { /* isolated */ } }
-  });
-  await Promise.all(workers);
-}
 
 export async function pollPhysicalOnce() {
   if (running) return lastRun;
@@ -42,7 +36,7 @@ export async function pollPhysicalOnce() {
     const servers = loadPhysical().filter((s) => s.enabled !== false && s.host && s.username);
     const s = loadGpuGuestSettings();
     let ok = 0; let failed = 0;
-    await eachLimited(servers, Math.max(1, s.concurrency || 4), async (sv) => {
+    await poolSettled(servers, Math.max(1, s.concurrency || 4), async (sv) => {
       const vm = { name: sv.name, ipAddresses: [sv.host], ipAddress: sv.host };
       const creds = { username: sv.username, password: sv.password || '' };
       try {

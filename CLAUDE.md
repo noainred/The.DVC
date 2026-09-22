@@ -2775,6 +2775,48 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `soapClient.js` 의 '이 계열은 전부 통계 레벨 1' 주석은 같은 파일 `:941`·v2.481 과 어긋난
       **낡은 주석**으로 남아 있다. 별건.
 
+  - ⚠⚠ **의존 방향은 한쪽이다 — routes/ 는 index.js 만 import 하고, util/ 은 도메인을 모른다**
+    (`test/arch2579.test.js` 가 고정, v2.579 — 사용자 요청 "아키텍처 점검, 버그 수정, 튜닝"):
+    - **왜**: v2.566 의 TDZ 사고(순환 안에서 이름이 가려져 push 함수가 통째로 죽고 10일간 조용했다)는
+      **방향이 뒤집힌 의존**에서 나온다. 644개 모듈·2,510개 edge 를 그래프로 그려 확정한 것 —
+      순환 SCC **7 → 5**(남은 5개는 전부 같은 도메인 안의 2-cycle 이고 각 파일이 단독 진입점으로도
+      로드된다 — 실측). 없앤 둘이 위험한 것이었다:
+      · **ARCH-02** `util/ssrfLookup.js`(leaf util) → `collector/registry.js` → `util/resilientFetch.js`.
+        registry.js 는 그 순환을 피하려고 `resilientFetch` 를 **동적 import 로 미루고** 있었다 — 즉
+        '지금은 괜찮은' 상태를 우회로 하나가 떠받치고 있었다. IP/URL 차단 판정을 `util/ssrfBlock.js`
+        로 옮기고 registry.js 는 재수출한다(호출부 29곳 무변경).
+      · **ARCH-03** `collector/agent.js`(export 본문) → `routes/collector.js`(라우트) → `collector/agent.js`.
+        거부 링버퍼 상태가 라우트 파일에 살아 있었다 → `collector/denyLog.js`.
+      · **ARCH-04** 도메인 4곳(`idrac/roomTempSeries`·`serverTempSeries`·`insights/serialLookup`·
+        `agent/autoRegister`)이 `routes/admin/shared.js` 의 **도메인 헬퍼**를 import → `insights/analysisServers.js`.
+      · **ARCH-05** `proxy/sshGateway.js` → `routes/remote.js` 의 순수 함수 → `proxy/targetHostScope.js`.
+        주석이 "런타임 호출이라 순환 안전" 이라 적고 있었다 — **안전한 이유가 '호출 시점' 하나에
+        걸린 구조는 그 자체가 결함**이다.
+    - ⚠⚠ **재수출은 `import { x } from …; export { x };` 다** — `export { x } from` 은 그 모듈 스코프에
+      이름을 만들지 않아 같은 파일의 다른 함수가 `x is not defined` 로 죽는다(v2.575 실제 사고).
+      registry.js 의 `normalize()` 가 `ssrfBlockReason` 을 직접 쓰므로 여기서도 그 형태다.
+    - ⚠⚠ **ARCH-01 — v2.575 "동시성 풀 23벌 → 1" 은 절반만 사실이었다.** 그 스윕은 `collectPool`
+      이름만 봤고, `eachLimited`(9벌)·`pool`(13벌)·인라인 스캐폴드는 남아 있었다 — **24벌**.
+      전부 `util/pool.js` 로 모았다(`poolRun` 13 · `poolSettled` 11). 남긴 것은 둘뿐이고 사유와 함께
+      테스트의 `POOL_EXCLUDED` 에 적었다(`svcmon/pool.js` 두 레인 배수 · `routes/admin/gpuGuest.js`
+      사전 판정 루프). **결과 모양은 호출부마다 예전 그대로**(`{ok,value}`·`{error}`·`{link,skipped}`) —
+      `poolSettled` 결과를 그 모양으로 입히는 3줄 래퍼만 남겼다(동작 변경 0).
+      · ⚠ 예전 사본들은 `limit<=0` 이면 **워커 0개를 만들어 아무것도 실행하지 않고 조용히 끝났다**.
+        오늘 전 호출부가 하한을 1 로 클램프해 **잠재** 결함이었다(실행으로 확인) — `poolRun` 은
+        최소 1 워커라 이제 구조적으로 불가능하다(`③-b` 테스트).
+      · ⚠ **`poolRun`/`poolSettled` 는 `Array.isArray(items)` 가 아니면 빈 배열로 본다** — Set/Map 을
+        넘기면 조용히 0건이다. 옮긴 24곳은 전부 `items.length` 를 쓰는 배열이었다(확인). 새 호출부는
+        `[...set]` 으로 넘길 것.
+    - **util/ 의 허용 예외는 명시 목록이다**(`UTIL_ALLOW`): `perf/monitor.js`(횡단 계측) ·
+      `vcenter/soapParse.js`(순수 파서가 vcenter/ 아래 산다 — 옮기는 것은 별건). 암묵 허용을 늘리지 말 것.
+    - **튜닝 실측(33 vCenter · 558 호스트 · 6,004 VM, `MOCK_SCALE=3`)** — 고칠 것이 **없었다**:
+      기동→health **1.1초** · RSS **183MB**(부하 후 227MB) · 폴링 라우트 9종 p50 **1.4~5.4ms** ·
+      동시 20 `/api/vms` 벽시계 **89ms** · 루프 프로브 30초 p99 **5.8ms**(72.9ms 스톨 1회) ·
+      `/api/hosts` 484KB → gzip **27KB**. 없는 결함을 만들어 고치지 않았다(v2.550.3 규약).
+    - ⚠ **정직 기록**: 웹 셸 `console/`(12파일·1,691줄)은 V4 가 `consoleData.js`(순수·import 0)를
+      **재수출**해 쓰는 관계라 중복이 아니고 위치만 어색하다 — 손대지 않았다. 남은 순환 5개(`config ↔
+      secretVault` 등)는 각각 동적 import·지연 평가로 막혀 있고 실측 로드 OK 라 **이번에 풀지 않았다**.
+
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
 서버 보안 불변조건(전역 TLS·RBAC·토큰 검증·scope·OTP·WS 게이트웨이 등 전 항목)은

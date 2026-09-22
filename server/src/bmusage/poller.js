@@ -30,6 +30,7 @@ import { collectOsUsage } from './collectors/osSsh.js';
 import { insertUsage, pruneUsage } from './db.js';
 import { recordBmUsage } from './activityLog.js';
 import { runBmUsageAlerts, alertStateInfo } from './notify.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 
 const CONCURRENCY = Math.max(1, Number(process.env.BMUSAGE_CONCURRENCY) || 4);
 const DEVICE_TIMEOUT_MS = Math.max(20_000, Number(process.env.BMUSAGE_DEVICE_TIMEOUT_MS) || 60_000);
@@ -277,19 +278,15 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
   return { ok, target, built, idrac, os, ent };
 }
 
-/** 동시성 제한 풀(store.collectPool 과 같은 판단 — 새 의존성을 들이지 않는다). */
+/**
+ * 동시성 제한 풀 — v2.579(ARCH-01): 본체는 `util/pool.js poolSettled` 다(손으로 쓴 사본 제거).
+ * 이 호출부의 `fn` 은 스스로 catch 해 절대 거부하지 않으므로 `value` 만 뽑으면 예전 반환(결과 배열,
+ * 입력 순서 보존)과 같다. 만에 하나 거부되면 예전에는 전체가 거부됐고 지금은 `undefined` 자리가
+ * 남는다 — 그 항목은 아래 `results.filter(Boolean)` 계열이 거르므로 조용히 0 으로 둔갑하지 않는다.
+ */
 async function pool(items, limit, fn) {
-  const out = new Array(items.length);
-  let i = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (;;) {
-      const idx = i; i += 1;
-      if (idx >= items.length) return;
-      out[idx] = await fn(items[idx], idx);
-    }
-  });
-  await Promise.all(workers);
-  return out;
+  const settled = await poolSettled(items, limit, fn);
+  return settled.map((r) => (r.status === 'fulfilled' ? r.value : undefined));
 }
 
 /**

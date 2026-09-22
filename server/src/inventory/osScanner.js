@@ -14,6 +14,7 @@ import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
 import { detectGuestOs } from './osDetect.js';
 import { upsertOs, getScannedIds, getScanInfo, osSummary, pruneMissing } from './osStore.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { poolRun } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
 const FILE = path.join(config.configDir, 'os-scan.json');
 const DEFAULTS = { enabled: false, intervalMin: 720, scope: 'all', maxVms: 200, rescanDays: 30, concurrency: 4 };
@@ -72,7 +73,6 @@ export function saveOsScanSettings(body = {}) {
 // 부분기록 시 설정이 기본값으로 리셋되어 스캐너가 조용히 꺼진다. tmp+fsync+rename으로 방지.
 function write(obj) { try { atomicWriteFileSync(FILE, JSON.stringify(obj, null, 2), { mode: 0o600 }); } catch { /* */ } cache = null; }
 
-async function eachLimited(items, limit, fn) { let i = 0; const w = async () => { while (i < items.length) { const x = items[i++]; await fn(x); } }; await Promise.all(Array.from({ length: Math.min(limit, items.length) }, w)); }
 
 /** 스캔 대상 VM 선별: 범위 내 전원 ON + Tools 동작 + (DB에 없거나 rescanDays 초과). */
 function pickTargets(scopeVcId, settings) {
@@ -92,7 +92,7 @@ async function scanVcenter(vc, targets, settings) {
   let found = 0; const errs = [];
   try {
     await c.login();
-    await eachLimited(targets, settings.concurrency, async (v) => {
+    await poolRun(targets, settings.concurrency, async (v) => {
       const isWindows = /windows/i.test(v.guestOS || '');
       const creds = resolveVmCreds(gset, vc.id, v.id, isWindows);
       if (!creds || !creds.username) { upsertOs(v, null, '게스트 계정 없음'); errs.push(`${v.name}:계정없음`); return; }

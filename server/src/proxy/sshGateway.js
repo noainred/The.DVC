@@ -18,7 +18,7 @@ import { userHasPermission } from '../auth/permissions.js';
 import { getMapping, getProxyById, touchMapping } from './registry.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { store } from '../store.js';
-import { targetHostScopeIssue } from '../routes/remote.js'; // 순수 함수(런타임 호출 — 순환 import 안전)
+import { targetHostScopeIssue } from './targetHostScope.js'; // v2.579: 도메인은 routes 를 import 하지 않는다(ARCH-05)
 import { config } from '../config.js';
 
 export function attachSshGateway(server) {

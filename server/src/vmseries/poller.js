@@ -27,6 +27,7 @@ import { resolveTargets, vcenterSelected } from './scope.js';
 import { collectVcenterSpikes } from './collect.js';
 import { commitVmSeries, loadCursors, pruneVmSeries, vmSeriesFreeBytes, setVmSeriesMeta, vmSeriesDiskUsage } from './db.js';
 import { pushVmSeriesSlice, vmSeriesPushEnabled } from '../agent/vmSeriesPush.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.VMSERIES_CONCURRENCY) || 4));
 const MIN_FREE_BYTES = Math.max(0, Number(process.env.VMSERIES_MIN_FREE_GB ?? 5)) * 1024 ** 3;
@@ -44,19 +45,9 @@ export function vmSeriesPollerStatus() {
   return { running, lastResult, lastRunTs, intervalMs: s.intervalMin * 60_000, enabled: s.enabled, concurrency: CONCURRENCY, minFreeBytes: MIN_FREE_BYTES };
 }
 
+// v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
 async function pool(items, n, fn) {
-  const results = new Array(items.length);
-  let i = 0;
-  const workers = Array.from({ length: Math.min(n, items.length) }, async () => {
-    for (;;) {
-      const idx = i++;
-      if (idx >= items.length) return;
-      try { results[idx] = { ok: true, value: await fn(items[idx]) }; }
-      catch (e) { results[idx] = { ok: false, error: e }; }
-    }
-  });
-  await Promise.all(workers);
-  return results;
+  return (await poolSettled(items, n, fn)).map((r) => (r.status === 'fulfilled' ? { ok: true, value: r.value } : { ok: false, error: r.reason }));
 }
 
 /** 데드라인: 주기의 절반 또는 10분 중 작은 값(다음 주기를 넘기지 않게), 최소 90초. */

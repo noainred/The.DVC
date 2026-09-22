@@ -57,7 +57,7 @@
  */
 
 import dns from 'node:dns';
-import { ipBlockReason } from '../collector/registry.js';
+import { ipBlockReason } from './ssrfBlock.js'; // v2.579: util 은 collector 를 import 하지 않는다(ARCH-02)
 
 /** `dns.lookup` 이 `{all:true}` 로 불렸는지에 따라 콜백 인자 모양이 다르다 — 둘 다 다룬다. */
 const isAllForm = (opts) => !!(opts && typeof opts === 'object' && opts.all);

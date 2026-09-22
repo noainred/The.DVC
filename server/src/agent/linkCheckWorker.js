@@ -20,6 +20,7 @@ import { config, currentVersion } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { runLink } from '../linkcheck/run.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 
 const gzipAsync = promisify(gzip);
 const FALLBACK_MS = 5 * 60_000;
@@ -34,18 +35,9 @@ export function linkCheckWorkerStatus() {
 
 const headers = () => ({ Accept: 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) });
 
-/** 동시성 제한(중앙이 준 값). 결과 순서는 입력 순서를 지킨다. */
+// v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
 async function pool(items, limit, fn) {
-  const out = new Array(items.length);
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length || 1)) }, async () => {
-    for (;;) {
-      const k = i++;
-      if (k >= items.length) return;
-      try { out[k] = await fn(items[k]); } catch (e) { out[k] = { link: items[k], skipped: `점검 중 예외: ${String(e?.message || e).slice(0, 200)}` }; }
-    }
-  }));
-  return out;
+  return (await poolSettled(items, limit, fn)).map((r, k) => (r.status === 'fulfilled' ? r.value : { link: items[k], skipped: `점검 중 예외: ${String(r.reason?.message || r.reason).slice(0, 200)}` }));
 }
 
 /**

@@ -4,7 +4,7 @@
  */
 import { addCollector, updateCollector, loadCollectors } from '../collector/registry.js';
 import { pullNow } from '../collector/puller.js';
-import { ensureCollectorDatacenter } from '../routes/admin/shared.js';
+import { ensureCollectorDatacenter } from '../insights/analysisServers.js'; // v2.579: 도메인은 routes 를 import 하지 않는다(ARCH-04)
 
 /** 수집 서버 id 로 쓸 슬러그(법인 → 에이전트명 → host 순). */
 export function collectorIdFor(target) {

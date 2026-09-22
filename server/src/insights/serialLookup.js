@@ -16,7 +16,7 @@
  *    다시 만들 수 없다.
  */
 
-import { analysisServersWithRemote, invForServer } from '../routes/admin/shared.js';
+import { analysisServersWithRemote, invForServer } from './analysisServers.js'; // v2.579: ARCH-04
 import { allOmeDevices, dbKey as omeDbKey } from '../idrac/omeCache.js';
 import { store } from '../store.js';
 import { listDevices as listStorageDevices } from '../storage/registry.js';

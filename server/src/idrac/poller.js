@@ -10,7 +10,8 @@ import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진�
 import { loadRegistry } from './registry.js';
 import { fetchPower, fetchInventory, fetchSensors } from './redfish.js';
 import { pushSensorSample } from './sensorStore.js';
-import { fetchOmeDevices, eachLimited } from './ome.js';
+import { fetchOmeDevices } from './ome.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(예전 ome.eachLimited 와 같은 격리 의미)
 import { setOmeDevices, dbKey } from './omeCache.js';
 import { setInventory, inventoryStale } from './invCache.js';
 import { getDb } from './db.js';
@@ -65,7 +66,7 @@ async function pollOnceInner() {
   const results = [];
   const samples = []; // 전력 샘플을 모아 폴 종료 후 단일 트랜잭션으로 적재(서버 수만큼 fsync 방지).
   // 동시성 상한 — 무제한 Promise.all은 수백 대에 동시 TLS를 열어 CPU 스파이크/소켓 고갈.
-  await eachLimited(servers, config.idrac.pollConcurrency, async (s) => {
+  await poolSettled(servers, config.idrac.pollConcurrency, async (s) => {
     try {
       if (s.type === 'ome') {
         // One OME -> many devices. Persist a sample per device + cache for lookups.

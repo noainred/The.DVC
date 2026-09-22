@@ -10,6 +10,7 @@ import { loadTopology } from '../relaytopo/store.js';        // 중계 토폴로
 import { kindForService } from '../relaytopo/validate.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { notify } from '../alerts.js';
+import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.RELAYCHECK_CONCURRENCY) || 4));
 let _timer = null;
@@ -56,10 +57,6 @@ export function buildTargets(settings, collectors = [], topology = null) {
   return out;
 }
 
-async function pool(items, limit, fn) {
-  const it = items[Symbol.iterator]();
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => { for (let n = it.next(); !n.done; n = it.next()) await fn(n.value); }));
-}
 
 /** 상태 전이 판정(순수): 이전 상태와 이번 결과로 알림 종류 반환 'fail'|'recover'|null. */
 export function transition(prev, ok, failStreak) {

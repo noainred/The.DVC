@@ -11,6 +11,7 @@ import { getTargetRaw, listTargetsRaw } from '../agent/deployRegistry.js';
 import { ipBlockReason } from '../collector/registry.js';
 import { loadTopologyRaw } from './store.js';
 import { renderManagedBlock, mergeManagedBlock, parseConfig, diffConfig } from './haproxy.js';
+import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const TIMEOUT_MS = Math.max(10_000, Number(process.env.RELAYTOPO_SSH_TIMEOUT_MS) || 45_000);
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.RELAYTOPO_CONCURRENCY) || 4));
@@ -146,10 +147,6 @@ export async function fetchSite(dc, { withIrs = true, timeoutMs = TIMEOUT_MS } =
   } finally { _busy.delete(dc); }
 }
 
-async function pool(items, limit, fn) {
-  const it = items[Symbol.iterator]();
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => { for (let n = it.next(); !n.done; n = it.next()) await fn(n.value); }));
-}
 export async function fetchAll(opts = {}) {
   const topo = loadTopologyRaw(); const out = [];
   await pool(topo.sites.map((s) => s.dc), CONCURRENCY, async (dc) => { out.push(await fetchSite(dc, opts)); });

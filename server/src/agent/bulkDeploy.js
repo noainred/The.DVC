@@ -18,6 +18,7 @@ import { deployAgent } from './deploy.js';
 import { saveTarget, findTargetByHost, recordResult } from './deployRegistry.js';
 import { autoRegisterCollector } from './autoRegister.js';
 import { ipBlockReason } from '../collector/registry.js';
+import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.AGENT_DEPLOY_CONCURRENCY) || 2));
 const NODE_TIMEOUT_MS = Math.max(60_000, Number(process.env.AGENT_DEPLOY_TIMEOUT_MS) || 900_000); // 기본 15분(SFTP + install.sh)
@@ -75,12 +76,6 @@ export function cancelRun(runId) {
 }
 export function _resetForTest() { _runs.clear(); _active = null; }
 
-async function pool(items, limit, fn) {
-  const it = items[Symbol.iterator]();
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (let n = it.next(); !n.done; n = it.next()) await fn(n.value);
-  }));
-}
 
 /**
  * 대량 배포 시작. rows 는 parseTargetsText 결과(자격증명 포함) — **호출부가 admin 게이트/감사 책임**.

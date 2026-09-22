@@ -23,6 +23,8 @@
  *   멀쩡한 자격증명을 의심하며 고친다.
  */
 
+import { poolRun as pool } from './pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
+
 const TTL_MS = 15 * 60_000;
 const MAX_RUNS = 20;
 const _runs = new Map();          // id → run
@@ -34,14 +36,6 @@ function sweep() {
   while (_runs.size > MAX_RUNS) _runs.delete(_runs.keys().next().value);
 }
 
-/** 동시 실행 제한 풀 — storage.collectPool·sanswitch.pool 과 같은 패턴. */
-async function pool(items, limit, fn) {
-  const it = items.entries();
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (let n = it.next(); !n.done; n = it.next()) await fn(n.value[1], n.value[0]);
-  });
-  await Promise.all(workers);
-}
 
 /** 시한 — 결과만 포기하지 않도록 testOne 에 signal 을 넘긴다(v2.417 규약). */
 async function withDeadline(ms, fn) {

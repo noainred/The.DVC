@@ -18,15 +18,12 @@ import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';
 import { retryTransient } from '../util/resilientFetch.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 
 // 동시성 제한 실행기 — 고RTT OME에서 장치별 전력 조회를 직렬(N×RTT)이 아닌 병렬(캡)로.
-export async function eachLimited(items, limit, fn) {
-  const q = [...items];
-  const workers = Array.from({ length: Math.min(limit, q.length || 1) }, async () => {
-    while (q.length) { const it = q.shift(); try { await fn(it); } catch { /* isolated */ } }
-  });
-  await Promise.all(workers);
-}
+// v2.579(ARCH-01): 본문은 `util/pool.js poolSettled`(항목별 격리)와 같다 — 사본을 지우고 별칭만 남긴다.
+// `idrac/poller.js` 가 이 이름을 import 하므로 export 는 유지한다.
+export const eachLimited = poolSettled;
 
 const dispatcher = new Agent({
   connect: {

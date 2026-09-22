@@ -18,6 +18,7 @@ import { recordNetScan } from './netIssueStore.js';
 import { notify } from '../alerts.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
+import { poolRun } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
 const FILE = path.join(config.configDir, 'guest-scans.json');
 
@@ -80,7 +81,6 @@ export function saveGuestScan(body = {}) {
 }
 export function removeGuestScan(id) { load(); const b = cache.length; cache = cache.filter((x) => x.id !== id); if (cache.length !== b) persist(); return b !== cache.length; }
 
-async function eachLimited(items, limit, fn) { let i = 0; const w = async () => { while (i < items.length) { const x = items[i++]; await fn(x); } }; await Promise.all(Array.from({ length: Math.min(limit, items.length) }, w)); }
 
 async function runJob(j) {
   const vc = (loadVcenterConfig().vcenters || []).find((v) => v.id === j.vcenterId);
@@ -97,7 +97,7 @@ async function runJob(j) {
   let found = 0; const errs = [];
   try {
     await c.login();
-    await eachLimited(vms, 4, async (v) => {
+    await poolRun(vms, 4, async (v) => {
       const isWindows = /windows/i.test(v.guestOS || '');
       const creds = (j.guestUser && j.guestPass) ? { username: j.guestUser, password: j.guestPass } : resolveVmCreds(gset, j.vcenterId, v.id, isWindows);
       if (!creds || !creds.username) { errs.push(`${v.name}:계정없음`); return; }

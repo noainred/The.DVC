@@ -15,6 +15,7 @@ import { setGuestGpu, pruneGuestGpu, guestGpuCounts } from './store.js';
 import { collectVmGpu, VimSoapClient } from './guestops.js';
 import { collectVmGpuSsh, guestIps } from './sshCollect.js';
 import { isStopped } from '../security/emergencyStop.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
 let timer = null;
 let lastRun = null;
@@ -23,13 +24,6 @@ let running = false;
 const learnedMethod = new Map(); // vmId -> 'ssh'|'guestops' : auto 모드에서 직전에 성공한 수집 방식(다음 주기 우선)
 
 // 간단한 동시성 제한 실행기.
-async function eachLimited(items, limit, fn) {
-  const q = [...items];
-  const workers = Array.from({ length: Math.min(limit, q.length || 1) }, async () => {
-    while (q.length) { const it = q.shift(); try { await fn(it); } catch { /* isolated */ } }
-  });
-  await Promise.all(workers);
-}
 
 export function passthruHostIds(snap, vcId) {
   const ids = new Set();
@@ -114,7 +108,7 @@ async function pollLive(snap, vc, s) {
   const vms = [];
   const byHost = new Map();
   try {
-    await eachLimited(cands, s.concurrency, async (v) => {
+    await poolSettled(cands, s.concurrency, async (v) => {
       const isWindows = /windows/i.test(v.guestOS || '');
       const creds = resolveVmCreds(s, vc.id, v.id, isWindows);
       if (!creds) return;
@@ -189,7 +183,7 @@ async function pollOnce() {
     let collectedHosts = 0; let collectedVms = 0; let errors = 0;
     const diags = [];
 
-    await eachLimited(enabledIds, Math.min(4, enabledIds.length), async (vcId) => {
+    await poolSettled(enabledIds, Math.min(4, enabledIds.length), async (vcId) => {
       try {
         let result;
         if (mock) result = pollMock(snap, vcId);
