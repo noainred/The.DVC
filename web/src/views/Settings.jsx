@@ -1,31 +1,34 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, lazy, Suspense } from 'react';
+import { Loading } from '../components/ui.jsx';
+// v2.580(튜닝): 설정 하위 화면 42개가 **한 청크(605KB)** 로 묶여 있었다 — 어느 탭을 열든 전부 받는다.
+// 큰 화면 12개(Collectors 1,012줄 …)를 lazy 로 떼어 탭을 열 때만 받는다. `SUB` 표·키·URL 은 그대로다.
 import { useHashTab } from '../hooks/useHashTab.js';
-import VCenterAdmin from './VCenterAdmin.jsx';
-import DatacenterAdmin from './DatacenterAdmin.jsx';
+const VCenterAdmin = lazy(() => import('./VCenterAdmin.jsx'));
+const DatacenterAdmin = lazy(() => import('./DatacenterAdmin.jsx'));
 import VCenterConnTest from './VCenterConnTest.jsx';
 import NsxAdmin from './NsxAdmin.jsx';
 import IdracAdmin from './IdracAdmin.jsx';
 import IdracScanLog from './IdracScanLog.jsx';
-import Collectors from './Collectors.jsx';
-import AgentDeploy from './AgentDeploy.jsx';
+const Collectors = lazy(() => import('./Collectors.jsx'));
+const AgentDeploy = lazy(() => import('./AgentDeploy.jsx'));
 import ProxySettings from './ProxySettings.jsx';
 import RemoteAccess from './RemoteAccess.jsx';
 import AdSettings from './AdSettings.jsx';
 import LlmSettings from './LlmSettings.jsx';
-import UserAdmin from './UserAdmin.jsx';
+const UserAdmin = lazy(() => import('./UserAdmin.jsx'));
 import EdgeUserDeploy from './EdgeUserDeploy.jsx';
-import Diagnostics from './Diagnostics.jsx';
+const Diagnostics = lazy(() => import('./Diagnostics.jsx'));
 import Alerts2 from './Alerts2.jsx';
 import Audit from './Audit.jsx';
-import MetricsSettings from './MetricsSettings.jsx';
+const MetricsSettings = lazy(() => import('./MetricsSettings.jsx'));
 import StorageIntervals from './StorageIntervals.jsx'; // 스토리지 수집 주기(중앙→엣지 배포, v2.409)
 import PowerOffCheckSettings from './PowerOffCheckSettings.jsx'; // 전원 꺼짐 점검 주기(v2.484)
-import VmSeriesSettings from './VmSeriesSettings.jsx'; // VM 실시간 스파이크 수집(20초 표본 · vCenter별 DB, v2.510)
-import PerfMonitor from './PerfMonitor.jsx'; // 서버 성능 측정(요청 지연·루프 정체·hang 로그, v2.498)
+const VmSeriesSettings = lazy(() => import('./VmSeriesSettings.jsx')); // VM 실시간 스파이크 수집(20초 표본 · vCenter별 DB, v2.510)
+const PerfMonitor = lazy(() => import('./PerfMonitor.jsx')); // 서버 성능 측정(요청 지연·루프 정체·hang 로그, v2.498)
 import HostAccessSettings from './HostAccessSettings.jsx'; // 호스트 접근 제어(SSH/웹/OS 방화벽, v2.485)
 import V4Portal from './V4Portal.jsx'; // 신규 포탈 보기(version_4 진입, v2.508 — v2.490 의 V3 승격)
 import SanSwitchPerf from './SanSwitchPerf.jsx';       // SAN 스위치 포트 사용량 수집(portperfshow, v2.411)
-import GpuGuestSettings from './GpuGuestSettings.jsx';
+const GpuGuestSettings = lazy(() => import('./GpuGuestSettings.jsx'));
 import GpuGuestDiag from './GpuGuestDiag.jsx';
 import GpuSettings from './GpuSettings.jsx';
 import NfsMounts from './NfsMounts.jsx'; // Edge NFS 마운트(백업 대상, v2.299)
@@ -38,9 +41,9 @@ import GuestAccount from './GuestAccount.jsx';
 import AnomalyDetection from './AnomalyDetection.jsx';
 import SessionSecurity from './SessionSecurity.jsx';
 import SecretsSettings from './SecretsSettings.jsx'; // 자격증명 저장 방식(평문/암호화, v2.296)
-import ApiKeys from './ApiKeys.jsx';                 // 외부 포탈 조회 API 키(v2.562)
+const ApiKeys = lazy(() => import('./ApiKeys.jsx'));                 // 외부 포탈 조회 API 키(v2.562)
 import SecuritySelfCheck from './SecuritySelfCheck.jsx'; // 보안 자가진단(지금 이 서버의 실측 상태, v2.500)
-import Upgrade from './Upgrade.jsx';
+const Upgrade = lazy(() => import('./Upgrade.jsx'));
 import About from './About.jsx';
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
@@ -180,7 +183,8 @@ export default function Settings({ initialSub }) {
           <div className="muted" style={{ fontSize: 12, marginBottom: 14, marginLeft: 14 }}>{GROUPS[activeGroup].desc}</div>
         </>
       )}
-      <Cur />
+      {/* lazy 화면의 첫 로드 동안만 잠깐 보인다 — 이미 받은 청크는 즉시 그려진다. */}
+      <Suspense fallback={<Loading />}><Cur /></Suspense>
     </>
   );
 }

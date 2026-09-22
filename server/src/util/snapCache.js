@@ -21,10 +21,30 @@ import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진�
 // v2.503(성능 감사 P3): 기본값 12 는 **운영 vCenter 수(28, 30+ 확장 예정)보다 작다**.
 // 화면 대부분이 `?vcenterId=` 로 스코프를 나누므로, 법인별로 다른 화면을 동시에 보는 사용자가
 // 13명만 돼도 LRU 가 스래싱해 v2.447 이 고친 '히트율 0%' 가 그대로 되살아난다.
-// 32 로 올리면 28개 vCenter + 'all' + 여유가 한 번에 들어간다. 상한은 엔드포인트 수 × 이 값이고
-// 값은 스냅샷이 넘어가면 교체되므로(메모리는 스냅샷 1세대분) 비용은 키 수만큼의 참조뿐이다.
+// 32 로 올리면 28개 vCenter + 'all' + 여유가 한 번에 들어간다. 상한은 엔드포인트 수 × 이 값이다.
+// ⚠ v2.580(TUNE-C) 정정 — 여기 적혀 있던 "값은 스냅샷이 넘어가면 교체되므로 메모리는 스냅샷 1세대분" 은
+// **틀렸다**. 키가 `${generatedAt}|…` 라 세대가 바뀌면 **새 키가 추가**될 뿐 옛 세대 항목은 32개가 찰 때까지
+// 남았다(폴링 사용자 1명이면 30초마다 세대가 바뀌므로 16분 뒤 이름마다 32세대 응답 객체가 상주 —
+// `ipam/ledger.js` 의 같은 유형을 힙 스냅샷으로 확정한 뒤 이쪽도 같은 규칙을 적용했다). 이제 새 키를 넣을 때
+// **다른 세대(첫 조각이 다른) 항목을 버린다** — 같은 세대의 여러 scope 는 그대로 남고 32 상한은 백스톱이다.
+// 첫 조각이 세대가 아닌 키(`anomalies|…`·`parts|…`)는 전부 한 세대로 취급되어 예전과 같다(TTL 만 적용).
 export const MAX_PER_NAME = Math.max(2, Math.min(64, Number(process.env.SNAP_CACHE_PER_NAME) || 32));
 const store = new Map(); // name -> Map(key -> { at, value, promise })  ※ Map 은 삽입 순서 = LRU 순서
+
+// 세대 = 키의 첫 조각(`|` 앞). `|` 가 없는 키는 세대 개념이 없으므로(null) 세대 축출 대상이 아니다 —
+// 그런 키는 예전대로 TTL + LRU 상한만 적용된다(`audit2447.test.js` T6 의 `kr`/`pl` 형 키).
+const generationOf = (key) => { const s = String(key); const i = s.indexOf('|'); return i < 0 ? null : s.slice(0, i); };
+/** 새 key 와 세대가 다른 항목을 버린다(진행 중 계산은 남긴다 — 합류 중인 요청이 있을 수 있다). */
+function evictOtherGenerations(b, key) {
+  const gen = generationOf(key);
+  if (gen == null) return;
+  for (const [k, e] of b) { const g = generationOf(k); if (g != null && g !== gen && !e?.promise) b.delete(k); }
+}
+/** 테스트·진단용 — 이름별 항목 수와 세대 수. */
+export function _snapCacheStats(name) {
+  const b = store.get(name) || new Map();
+  return { entries: b.size, generations: new Set([...b.keys()].map(generationOf)).size };
+}
 
 function bucket(name) {
   let b = store.get(name);
@@ -70,6 +90,7 @@ export async function snapMemo(name, key, ttlMs, compute) {
     return value;
   })();
   // 진행 중 표시(같은 key 동시 요청이 위에서 promise 에 합류). 이전 값은 있으면 임시 보존.
+  evictOtherGenerations(b, key); // v2.580(TUNE-C)
   touch(b, key, { at: now, value: cur ? cur.value : undefined, has: !!cur?.has, promise });
   try {
     return await promise;
