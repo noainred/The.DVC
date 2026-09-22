@@ -17,6 +17,8 @@ import { fmtSize, resolveUnit, UNIT_DIV, trendLabel, toRows, TrendChart } from '
 // v2.510: 'Local + vCenter' 템플릿 — 포탈 실시간(20초) 스파이크 수집 섹션. 기존 템플릿은 'vCenter Only' 로 이름만 붙고 수치·산정은 불변.
 import RightsizeLocal from './RightsizeLocal.jsx';
 import { TEMPLATES, localPhaseText, fmtSec, coverageText } from '../vmSeriesText.js';
+// v2.578 D2·D3: 요청 기간이 프리셋으로 내려앉은 사실과 '기간 = 해상도' 인과를 화면이 말한다.
+import { normalizedDaysNote, resolutionNote, sourceNote } from '../trendMeta.js';
 
 /** 게스트 디스크 응답을 PDF 블록으로(게스트 디스크 상세 PDF 와 같은 구성, 파티션별 차트는 생략). */
 function guestDiskBlocks(gd, days) {
@@ -293,6 +295,14 @@ export default function RightsizeReport({ vm, onClose }) {
           <>
             {/* 판정 */}
             <div className="card" style={{ marginBottom: 10, borderLeft: `4px solid ${st.color}` }}>
+              {/* v2.578 D2: 서버가 프리셋 밖 기간을 조용히 7일로 떨어뜨린다 — 같은 값이면 null 이라
+                  배너가 뜨지 않는다(불필요한 경고 금지). 화면 선택지는 프리셋뿐이라 평소에는 안 보이고,
+                  주소로 직접 days 를 준 경우에만 뜬다. */}
+              {normalizedDaysNote(r.requestedDays, r.window?.days ?? days)
+                ? <div className="badge amber" style={{ display: 'block', marginBottom: 6, whiteSpace: 'normal', lineHeight: 1.6 }}>
+                  {normalizedDaysNote(r.requestedDays, r.window?.days ?? days)}
+                </div>
+                : null}
               <div style={{ fontWeight: 700, fontSize: 14 }}>{st.icon} {r.verdict.title}</div>
               <div style={{ marginTop: 4, lineHeight: 1.6 }}>{r.verdict.summary}</div>
               {r.evidence.reasons.length > 0 && (
@@ -306,6 +316,11 @@ export default function RightsizeReport({ vm, onClose }) {
                 <Stat k="정책" v={`여유 ${r.policy.headroomPct}% · 상한 ${r.policy.capReductionPct}%`} sub={`최소 ${r.policy.minDays}일 · 커버리지 ${r.policy.minCoveragePct}% · Ready ${r.policy.readyWarnPct}%`} />
                 {r.synthesized && <span className="badge gray" style={{ alignSelf: 'center' }}>데모(mock) 합성 데이터</span>}
                 {r.cached && <span className="badge gray" style={{ alignSelf: 'center', fontSize: 10 }}>5분 캐시</span>}
+              </div>
+              {/* v2.578 D3·D4: 같은 '7일' 이라도 화면마다 롤업 구간이 다르다(트리 2시간 · 이 리포트
+                  30분). 출처와 인과를 적지 않으면 두 화면의 숫자가 다른 이유를 알 수 없다. */}
+              <div className="muted" style={{ marginTop: 6, fontSize: 11.5, lineHeight: 1.6, whiteSpace: 'normal' }}>
+                {sourceNote({ source: 'vcenter', intervalSec: r.window?.intervalSec })} · {resolutionNote((r.window?.intervalSec || 0) * 1000)}
               </div>
             </div>
 

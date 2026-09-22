@@ -13,6 +13,8 @@ import { STable } from '../components/STable.jsx';
 // v2.499: '비교하기' → 가로 vCenter × 세로 클러스터/스토리지 매트릭스(사용자 요구). 예전 2개 비교 표를 대체한다.
 import CompareMatrix from './CompareMatrix.jsx';
 // VM 행의 기간 실사용률(v2.492) — 기간 프리셋·보이는 행 수집·문구·색 판정은 순수 모듈(vitest 고정).
+// v2.578 D1·D3·D4: 기준선·해상도 인과·출처 문구 — 판정과 문장을 한 순수 모듈이 소유한다.
+import { sinceNote, resolutionNote, sourceNote, maxPctGapNote } from './trendMeta.js';
 import {
   USAGE_DAYS, DEFAULT_USAGE_DAYS, normUsageDays, usageDaysLabel, usageKey,
   visibleTreeVmIds, visibleHostVmIds, pendingIds, mergeUsage, usageText, usageTitle, usagePctColor, noSampleLabel,
@@ -46,9 +48,12 @@ const TREND_RANGES = [
   ['1h', '1시간'], ['6h', '6시간'], ['12h', '12시간'], ['24h', '24시간'],
   ['7d', '7일'], ['30d', '30일'], ['60d', '60일'], ['120d', '120일'], ['365d', '365일'],
 ];
+// v2.578: `max`/`maxPct` 는 **버킷 최대**(그 집계 구간 안에서 가장 높았던 값)다. 기간을 늘리면
+// 버킷이 굵어져 평균은 거의 그대로인데 이 최대가 평탄해진다 — 사용자가 본 '기간마다 값이 다르다'
+// 의 실체이므로 토글로 직접 보여준다. 디스크는 버킷 최대가 뜻이 약해(단조 증가) 두지 않는다.
 const TREND_SERIES = {
-  cpu: { label: 'CPU', unit: 'GHz', used: 'cpuUsedGHz', alloc: 'cpuAllocGHz', pct: 'cpuPct', color: '#60a5fa' },
-  mem: { label: '메모리', unit: 'GB', used: 'memUsedGB', alloc: 'memAllocGB', pct: 'memPct', color: '#4ade80' },
+  cpu: { label: 'CPU', unit: 'GHz', used: 'cpuUsedGHz', alloc: 'cpuAllocGHz', pct: 'cpuPct', max: 'cpuUsedMaxGHz', maxPct: 'cpuMaxPct', color: '#60a5fa' },
+  mem: { label: '메모리', unit: 'GB', used: 'memUsedGB', alloc: 'memAllocGB', pct: 'memPct', max: 'memUsedMaxGB', maxPct: 'memMaxPct', color: '#4ade80' },
   disk: { label: '디스크', unit: 'GB', used: 'diskUsedGB', alloc: 'diskCapGB', pct: 'diskPct', color: '#fbbf24' },
 };
 
@@ -94,6 +99,8 @@ function MiniTrend({ points, field, color, label }) {
 function TrendView({ vcenterId, clusters = [], hosts = [] }) {
   const [range, setRange] = useState('24h');
   const [mode, setMode] = useState('pct');   // pct(사용률) | abs(절대량)
+  // v2.578 D3: '구간 최대' 토글(기본 꺼짐). 훅이므로 조기 return 위에 선언한다.
+  const [showMax, setShowMax] = useState(false);
   // v2.494(사용자 요구): 추이를 vCenter 전체 / 클러스터 / 호스트 단위로. 훅은 조기 return 위에.
   const [scopeKind, setScopeKind] = useState('vc'); // vc | cluster | host
   const [scopeKey, setScopeKey] = useState('');
@@ -143,6 +150,9 @@ function TrendView({ vcenterId, clusters = [], hosts = [] }) {
           <button className={mode === 'pct' || !isVc ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={() => setMode('pct')}>사용률(%)</button>
           <button className={mode === 'abs' && isVc ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={() => setMode('abs')}
             disabled={!isVc} title={!isVc ? '호스트·클러스터 범위는 사용률(%)만 제공합니다(vCenter 성능 카운터가 % 단위)' : ''}>사용량/할당량</button>
+          <button className={showMax && isVc ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }}
+            onClick={() => setShowMax((v) => !v)} disabled={!isVc}
+            title={!isVc ? '호스트·클러스터 범위(vCenter 롤업)는 구간 최대를 제공하지 않습니다' : '각 집계 구간 안에서 가장 높았던 값을 점선으로 겹쳐 그립니다 — 기간을 늘릴수록 평탄해지는 값입니다'}>구간 최대</button>
         </div>
       </div>
 
@@ -157,9 +167,9 @@ function TrendView({ vcenterId, clusters = [], hosts = [] }) {
           ) : pts.length < 2 ? (
             <div className="muted" style={{ fontSize: 13, padding: 24, textAlign: 'center', lineHeight: 1.7 }}>
               이 기간에 표시할 추이 데이터가 없습니다.<br />
-              사용량 추이는 <b>수집이 시작된 시점부터</b> 쌓입니다
-              {d.collectedSince ? <> — 수집 시작: <b>{new Date(d.collectedSince).toLocaleString('ko-KR')}</b>. 더 긴 기간은 그만큼 시간이 지나야 채워집니다.</>
-                : <>. 업그레이드 직후에는 몇 시간 뒤부터 그래프가 보입니다.</>}
+              {/* v2.578 D1: collectedSince 는 prune 된 MIN(ts) 라 '수집 시작' 과 '보존 경계' 를
+                  구분할 수 없다 — 구분되지 않는 것을 단정하지 않는다(판정은 trendMeta.sinceNote). */}
+              {sinceNote({ collectedSince: d.collectedSince, retentionDays: d.retentionDays, now: Date.now() }).text}
             </div>
           ) : (
             <>
@@ -184,10 +194,18 @@ function TrendView({ vcenterId, clusters = [], hosts = [] }) {
                           <Tooltip labelFormatter={(t) => new Date(t).toLocaleString('ko-KR')}
                             contentStyle={{ background: 'var(--panel)', border: '1px solid var(--border)', fontSize: 12 }} />
                           {mode === 'pct'
-                            ? <Line type="monotone" dataKey={sInfo.pct} name={`${sInfo.label} 사용률(%)`} stroke={sInfo.color} dot={false} connectNulls={false} />
+                            ? <>
+                              <Line type="monotone" dataKey={sInfo.pct} name={`${sInfo.label} 사용률(%)`} stroke={sInfo.color} dot={false} connectNulls={false} />
+                              {showMax && isVc && sInfo.maxPct
+                                ? <Line type="monotone" dataKey={sInfo.maxPct} name="구간 최대(%)" stroke={sInfo.color} strokeOpacity={0.55} strokeDasharray="2 3" dot={false} connectNulls={false} />
+                                : null}
+                            </>
                             : <>
                               <Line type="monotone" dataKey={sInfo.alloc} name={`할당(${sInfo.unit})`} stroke={sInfo.color} strokeDasharray="4 3" dot={false} connectNulls={false} />
                               <Line type="monotone" dataKey={sInfo.used} name={`사용(${sInfo.unit})`} stroke={sInfo.color} dot={false} connectNulls={false} />
+                              {showMax && isVc && sInfo.max
+                                ? <Line type="monotone" dataKey={sInfo.max} name={`구간 최대(${sInfo.unit})`} stroke={sInfo.color} strokeOpacity={0.55} strokeDasharray="2 3" dot={false} connectNulls={false} />
+                                : null}
                             </>}
                         </LineChart>
                       </ResponsiveContainer>
@@ -197,12 +215,19 @@ function TrendView({ vcenterId, clusters = [], hosts = [] }) {
               })}
               <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.7 }}>
                 {!isVc && (
-                  <>출처: vCenter 성능 롤업({d.interval || '—'}) · {scopeKind === 'cluster' ? `호스트 ${d.hosts ?? 0}대 평균` : '호스트 1대'}
+                  <>{scopeKind === 'cluster' ? `호스트 ${d.hosts ?? 0}대 평균` : '호스트 1대'}
                     {d.hostsOmitted > 0 ? <b style={{ color: 'var(--amber)' }}> · 상한으로 {d.hostsOmitted}대 제외(이름순 앞 {d.hosts}대의 평균)</b> : null}
                     {d.synthesized ? ' · 데모 합성값(실측 아님)' : ''}<br /></>
                 )}
-                점선 = 할당(디스크는 총 용량), 실선 = 실사용. 집계 단위 {(d.bucketMs || 0) >= 86_400_000 ? `${Math.round(d.bucketMs / 86_400_000)}일` : (d.bucketMs || 0) >= 3_600_000 ? `${Math.round(d.bucketMs / 3_600_000)}시간` : `${Math.round((d.bucketMs || 0) / 60_000)}분`} 평균 · 표본 {pts.length}점
-                {d.collectedSince ? ` · 수집 시작 ${new Date(d.collectedSince).toLocaleDateString('ko-KR')}` : ''}
+                점선 = 할당(디스크는 총 용량), 실선 = 실사용.
+                {' '}{isVc ? sourceNote({ source: 'portal', bucketMs: d.bucketMs }) : sourceNote({ source: 'vcenter', intervalSec: d.intervalSec })} · 표본 {pts.length}점
+                {showMax && isVc ? ' · 짧은 점선 = 그 구간의 최대(분모는 구간 평균 할당)' : ''}
+                {showMax && isVc && mode === 'pct' && maxPctGapNote(d.maxPctUnstable)
+                  ? <><br /><b style={{ color: 'var(--amber)' }}>{maxPctGapNote(d.maxPctUnstable)}</b></> : null}
+                {/* v2.578 D3: 기간이 곧 해상도라는 사실을 적는다 — 적지 않으면 7일 곡선과 60일
+                    곡선을 같은 뜻으로 보고 직접 비교한다(사용자 질문의 출발점이었다). */}
+                <br />{resolutionNote(d.bucketMs)}
+                {isVc ? <><br />{sinceNote({ collectedSince: d.collectedSince, retentionDays: d.retentionDays, now: Date.now() }).text}</> : null}
                 <br />※ 선이 끊긴 구간은 그 시각에 수집이 없었다는 뜻입니다(0이 아니라 결측). 디스크는 데이터스토어 사용/총용량 합계입니다.
               </div>
             </>
@@ -377,7 +402,8 @@ export default function VCenterDetail({ site, onBack }) {
           usageRef.current = merged;
           if (r?.maxVms) usageMaxRef.current = r.maxVms;
           setUsage(merged);
-          setUsageInfo({ loading: false, synthesized: !!r?.synthesized, truncated: !!r?.truncated, maxVms: r?.maxVms || usageMaxRef.current, error: '' });
+          // v2.578 D4: 롤업 구간(초)을 기억해 툴팁이 서버가 아는 값으로 말하게 한다(숫자 하드코딩 금지).
+          setUsageInfo({ loading: false, synthesized: !!r?.synthesized, truncated: !!r?.truncated, maxVms: r?.maxVms || usageMaxRef.current, intervalSec: r?.intervalSec ?? null, error: '' });
         } catch (e) {
           if (!alive) return;
           // 조회 실패는 화면 전체 오류로 바꾸지 않는다 — 트리는 계속 보여야 한다(고RTT 깜빡임 방지 규약).
@@ -512,7 +538,7 @@ export default function VCenterDetail({ site, onBack }) {
             {USAGE_DAYS.map((d) => (
               <button key={d} className={usageDays === d ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 11px' }}
                 onClick={() => setUsageDays(normUsageDays(d))}
-                title={`최근 ${usageDaysLabel(d)} 평균 CPU·메모리 사용률을 VM 행에 표시합니다(${d <= 30 ? 'vCenter 2시간 롤업' : 'vCenter 1일 롤업'} 기준)`}>
+                title={`최근 ${usageDaysLabel(d)} 평균 CPU·메모리 사용률을 VM 행에 표시합니다 — ${usageDays === d && usageInfo.intervalSec ? sourceNote({ source: 'vcenter', intervalSec: usageInfo.intervalSec }) : '출처: vCenter 성능 롤업'}. 기간을 바꾸면 롤업 구간도 함께 바뀌어 짧은 최대값이 평탄해집니다(평균은 거의 그대로).`}>
                 {usageDaysLabel(d)}
               </button>
             ))}
