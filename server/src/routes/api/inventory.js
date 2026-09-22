@@ -361,8 +361,14 @@ api.get('/networks', invNet, (req, res) => memoJson(req, res, 'inv:networks', (s
 
 // Top resource consumers across the whole estate (or a filtered scope).
 // ?vcenterId= / ?region= scope it; ?limit= controls list length (default 10).
-api.get('/top', (req, res) => {
-  const snap = store.get();
+// ⚠ 이 라우트는 **상시 폴링 경로**다(`web/src/views/Explore.jsx:59` 가 15초마다 부른다).
+// v2.576 까지 형제 인벤토리 5종과 달리 memoJson 이 없어 **매 요청 전량 정렬**을 했다 —
+// 운영 규모 실측(MOCK_SCALE=3 · 33 vCenter · 6,004 VM)에서 **14.1ms 고정**이었고
+// 콜드/웜 배수가 1.0x 라(다른 라우트는 2.8~5.5x) 캐시가 전혀 없다는 것이 그대로 드러났다.
+// VM 배열을 5번·호스트를 3번 **복사해서 정렬**하므로 사용자 수·폴링 주기에 그대로 곱해진다.
+// ⚠ `extraKey: scopeKey(...)` 는 **필수**다 — 없으면 무제한 계정의 결과가 범위 계정에 캐시로
+//   샌다(v2.255~2.257 규약. `/summary`·`/overview` 에서 실제로 겪은 사고다).
+api.get('/top', (req, res) => memoJson(req, res, 'inv:top', (snap) => {
   const limit = Math.max(1, Math.min(Number(req.query.limit) || 10, 100)); // Math.max(1,…): 음수 limit slice(0,-n) 방지
   const vms = applyFilters(snap.vms, req.query, snap, ['name'], req.user);
   const hosts = applyFilters(snap.hosts, req.query, snap, ['name'], req.user);
@@ -372,7 +378,7 @@ api.get('/top', (req, res) => {
   const top = (arr, key, n = limit) =>
     [...arr].sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0)).slice(0, n);
 
-  res.json({
+  return {
     generatedAt: snap.generatedAt,
     scope: { vms: vms.length, hosts: hosts.length, datastores: datastores.length },
     vmsByCpuUsage: top(onVms, 'cpuUsagePct'),
@@ -385,8 +391,8 @@ api.get('/top', (req, res) => {
     hostsByVmCount: top(hosts, 'vmCount'),
     hostsByPower: top(hosts.filter((h) => h.powerWatts > 0), 'powerWatts'),
     datastoresByUsage: top(datastores, 'usagePct'),
-  });
-});
+  };
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 api.get('/alarms', invAlarms, (req, res) => memoJson(req, res, 'inv:alarms', (snap) => {
   let alarms = applyFilters(snap.alarms, req.query, snap, ['message', 'entity'], req.user);
