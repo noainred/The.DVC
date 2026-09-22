@@ -134,7 +134,67 @@ app.disable('x-powered-by'); // v2.538: 'X-Powered-By: Express' 는 정보 노�
 app.use(queryNormalizer());
 
 // 보안 응답 헤더(helmet 무의존 최소 세트) — 클릭재킹·MIME 스니핑·레퍼러 유출·전송보안.
-// CSP는 인라인 스타일/intro 페이지 호환 이슈로 기본 비활성(CSP env로 옵트인 지정 가능).
+//
+// ⚠⚠ CSP 는 v2.577 부터 **기본 켜짐**이다. v2.576 까지 주석이 "인라인 스타일/intro 페이지 호환
+// 이슈로 기본 비활성" 이라고 적고 있었지만 그것은 **측정하지 않은 가정**이었다. 실제로 걸어 보니
+// 이 앱에 필요한 완화는 `style-src 'unsafe-inline'` 하나뿐이고(React 의 `style={{}}` 은 인라인
+// 스타일 속성이다 — 스크립트가 아니다), 스크립트는 전부 번들 파일이라 `'unsafe-inline'`·`'unsafe-eval'`
+// **없이** 동작한다. `/intro` 의 vendored React·dc-runtime 도 같은 출처의 `.js` 파일이다.
+// 이 값이 중요한 이유: 세션 토큰이 `localStorage` 에 있어 **XSS 한 번이면 그대로 탈취**된다.
+// CSP 가 없으면 그 위험에 완화 수단이 하나도 없다(v2.538 이 그 한계를 그대로 기록해 두었다).
+//
+// 각 지시자의 근거(임의로 좁히거나 넓히지 말 것 — Chromium 실측으로 정한 값이다):
+//  · `script-src 'self'`     — 인라인 스크립트 0개(빌드 산출물은 전부 외부 .js). `'unsafe-eval'` 불필요.
+//  · `style-src` 에 `'unsafe-inline'` — React 인라인 스타일과 이 앱의 동적 색상 계산에 필수다.
+//    ⚠ 이것은 스크립트 실행을 허용하지 않는다 — XSS→토큰 탈취 경로는 `script-src` 가 막는다.
+//  · `img-src 'self' data: blob:` — 지도 타일 없음. data:/blob: 는 jsPDF·html2canvas·QR 생성용.
+//  · `connect-src 'self' ws: wss:` — SSH/RDP 게이트웨이가 WebSocket 이다(같은 출처, 포트만 같음).
+//  · `worker-src 'self' blob:`   — 일부 라이브러리가 blob 워커를 만든다.
+//  · `frame-ancestors 'none'`    — X-Frame-Options 와 같은 뜻의 현대식 표기.
+//  · `object-src 'none'` · `base-uri 'self'` · `form-action 'self'` — 기본 하드닝.
+// 끄려면 `CSP=off`, 바꾸려면 `CSP=<정책 문자열>`(둘 다 기존 옵트인 경로를 그대로 쓴다).
+const DEFAULT_CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self' ws: wss:",
+  "worker-src 'self' blob:",
+  "media-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join('; ');
+// ⚠⚠ `/intro` 만 완화한다 — 그리고 그 근거는 **측정**이다(v2.577 Chromium 실측):
+//   메인 포탈 **21화면에서 위반 0건**, 위반은 전부 `/intro/index.html`·`/intro/light.html` 에서만
+//   나왔다. 둘이다 — ① 외부 CDN 스타일시트(jsdelivr 의 Pretendard, Google Fonts 의 IBM Plex Mono)
+//   ② `dc-runtime` 의 logic class **문자열 eval**(`EvalError: Refused to evaluate a string`).
+//   v2.576 까지의 주석은 "인라인 스타일/intro 호환 이슈" 라고 **둘을 묶어** 적고 CSP 를 통째로
+//   꺼 두었는데, 인라인 스타일 쪽은 `style-src 'unsafe-inline'` 하나로 끝나고 **메인 앱과는
+//   무관한 문제**였다. 가정을 측정으로 바꾸니 앱 전체에 CSP 를 걸 수 있게 됐다.
+//
+// `/intro` 를 완화해도 되는 이유: **실데이터·API 와 완전히 분리된 셀프부트 정적 데모**이고
+// (index.js 의 `/intro` 마운트 주석) 세션 토큰이 없다 — v2.577 확인: 사설 IP 0건·법인 문자열
+// 0건·vCenter 이름 0건. 즉 여기서 스크립트가 훔칠 것이 없다.
+// ⚠ **완화 정책을 앱 전체로 넓히지 말 것** — `'unsafe-eval'` 이 붙는 순간 메인 포탈의
+//   XSS→`localStorage` 토큰 탈취 완화가 사라진다.
+// ⚠ 정직 기록: `/intro` 는 **외부 CDN(jsdelivr·Google Fonts)에 의존**한다. 폐쇄망에서는 그
+//   글꼴이 그냥 안 받아지고(기능은 동작), 공급망 관점에서는 공개 페이지의 외부 의존이다.
+//   없애려면 글꼴을 번들해야 하는데 그건 별건이다.
+const INTRO_CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-eval'",
+  "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com",
+  "font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com",
+  "img-src 'self' data: blob:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+].join('; ');
+const CSP_HEADER = process.env.CSP === 'off' ? '' : (process.env.CSP || DEFAULT_CSP);
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');            // 웹에 iframe 없음 → 클릭재킹 차단
@@ -143,7 +203,10 @@ app.use((req, res, next) => {
   if (req.secure || req.get('x-forwarded-proto') === 'https') {
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains'); // 실제 HTTPS일 때만
   }
-  if (process.env.CSP) res.setHeader('Content-Security-Policy', process.env.CSP);
+  if (CSP_HEADER) {
+    const isIntro = req.path === '/intro' || req.path.startsWith('/intro/');
+    res.setHeader('Content-Security-Policy', isIntro && !process.env.CSP ? INTRO_CSP : CSP_HEADER);
+  }
   next();
 });
 

@@ -14,6 +14,9 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { redactEnvSecrets, mergeRedactedEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 
+/** 백업 아카이브(gzip JSON) 해제 출력 상한 — 설정 디렉터리 전체가 들어가도 수 MB 다(실측 2KB). */
+const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
+
 const CONFIG_DIR = config.configDir;
 const BACKUP_DIR = path.join(CONFIG_DIR, 'backups');
 
@@ -115,7 +118,8 @@ export function deleteBackup(name) {
 export function readBackup(name) {
   const p = backupPath(name);
   if (!p) return null;
-  try { return JSON.parse(zlib.gunzipSync(fs.readFileSync(p)).toString('utf8')); } catch { return null; }
+  // 상한은 위 parseUploadedArchive 와 같은 이유(손상·조작된 백업 파일도 프로세스를 밀지 못하게).
+  try { return JSON.parse(zlib.gunzipSync(fs.readFileSync(p), { maxOutputLength: MAX_ARCHIVE_BYTES }).toString('utf8')); } catch { return null; }
 }
 
 /**
@@ -149,6 +153,16 @@ export function restoreCentral(archive) {
 }
 
 /** 업로드된 gzip 아카이브 버퍼를 파싱. */
+/**
+ * ⚠⚠ `maxOutputLength` 를 지우지 말 것(v2.577). gzip 은 증폭비가 1000:1 을 넘길 수 있어
+ * 상한 없는 `gunzipSync` 는 작은 입력으로 프로세스 메모리를 밀어 올린다(zip bomb).
+ * 형제 파일 `upgrade/archive.js:66,106` 은 v2.488(L-1)에 이미 상한을 받았는데 여기만 빠져
+ * 있었다 — CLAUDE.md 가 반복해 경고하는 '형제 경로 누락' 패턴이다.
+ * ⚠ **정직 기록**: v2.577 시점에 `parseUploadedArchive` 를 부르는 라우트는 **없다**(전수 확인) —
+ * 즉 지금 도달 가능한 취약점이 아니라 **잠재**다. 그래도 막는 이유는 이름이 'Uploaded' 이고,
+ * 업로드 라우트를 붙이는 순간 상한 없는 경로가 되기 때문이다.
+ */
 export function parseUploadedArchive(buf) {
-  try { return JSON.parse(zlib.gunzipSync(buf).toString('utf8')); } catch (e) { throw new Error(`백업 파일 해석 실패: ${e.message}`); }
+  try { return JSON.parse(zlib.gunzipSync(buf, { maxOutputLength: MAX_ARCHIVE_BYTES }).toString('utf8')); }
+  catch (e) { throw new Error(`백업 파일 해석 실패: ${e.message}`); }
 }

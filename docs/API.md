@@ -653,10 +653,10 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/alarm-mutes` | 권한 `inv.alarms` | [server/src/routes/api/inventory.js:405](../server/src/routes/api/inventory.js#L405) |
-| POST | `/alarm-mutes` | 역할 `admin/operator` · 권한 `inv.alarms` · `auditMiddleware` | [server/src/routes/api/inventory.js:408](../server/src/routes/api/inventory.js#L408) |
-| DELETE | `/alarm-mutes/:id` | 역할 `admin/operator` · 권한 `inv.alarms` · `auditMiddleware` | [server/src/routes/api/inventory.js:416](../server/src/routes/api/inventory.js#L416) |
-| GET | `/alarms` | 권한 `inv.alarms` | [server/src/routes/api/inventory.js:391](../server/src/routes/api/inventory.js#L391) |
+| GET | `/alarm-mutes` | 권한 `inv.alarms` | [server/src/routes/api/inventory.js:411](../server/src/routes/api/inventory.js#L411) |
+| POST | `/alarm-mutes` | 역할 `admin/operator` · 권한 `inv.alarms` · `auditMiddleware` | [server/src/routes/api/inventory.js:414](../server/src/routes/api/inventory.js#L414) |
+| DELETE | `/alarm-mutes/:id` | 역할 `admin/operator` · 권한 `inv.alarms` · `auditMiddleware` | [server/src/routes/api/inventory.js:422](../server/src/routes/api/inventory.js#L422) |
+| GET | `/alarms` | 권한 `inv.alarms` | [server/src/routes/api/inventory.js:397](../server/src/routes/api/inventory.js#L397) |
 | GET | `/compare/matrix` | — | [server/src/routes/api/compareMatrix.js:28](../server/src/routes/api/compareMatrix.js#L28) |
 | GET | `/datastores` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:337](../server/src/routes/api/inventory.js#L337) |
 | GET | `/datastores/:id/browse` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:345](../server/src/routes/api/inventory.js#L345) |
@@ -680,8 +680,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/release-notes` | — | [server/src/routes/api/searchNotes.js:19](../server/src/routes/api/searchNotes.js#L19) |
 | POST | `/search/nl` | — | [server/src/routes/api/searchNotes.js:11](../server/src/routes/api/searchNotes.js#L11) |
 | GET | `/summary` | — | [server/src/routes/api/inventory.js:50](../server/src/routes/api/inventory.js#L50) |
-| POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:435](../server/src/routes/api/inventory.js#L435) |
-| GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:431](../server/src/routes/api/inventory.js#L431) |
+| POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:441](../server/src/routes/api/inventory.js#L441) |
+| GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:437](../server/src/routes/api/inventory.js#L437) |
 | GET | `/tools/bm-storage` | 역할 `admin` | [server/src/routes/api/bmstor.js:16](../server/src/routes/api/bmstor.js#L16) |
 | POST | `/tools/bm-storage/collect` | 역할 `admin` | [server/src/routes/api/bmstor.js:106](../server/src/routes/api/bmstor.js#L106) |
 | GET | `/tools/bm-storage/export.csv` | 역할 `admin` | [server/src/routes/api/bmstor.js:50](../server/src/routes/api/bmstor.js#L50) |
@@ -964,7 +964,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/waste/settings` | 역할 `admin` | [server/src/routes/api/toolsCapacity.js:777](../server/src/routes/api/toolsCapacity.js#L777) |
 | DELETE | `/tools/waste/settings/data` | 역할 `admin` | [server/src/routes/api/toolsCapacity.js:813](../server/src/routes/api/toolsCapacity.js#L813) |
 | POST | `/tools/waste/spark` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:845](../server/src/routes/api/toolsCapacity.js#L845) |
-| GET | `/top` | — | [server/src/routes/api/inventory.js:364](../server/src/routes/api/inventory.js#L364) |
+| GET | `/top` | — | [server/src/routes/api/inventory.js:371](../server/src/routes/api/inventory.js#L371) |
 | GET | `/ui-settings` | — | [server/src/routes/api/toolsInfo.js:233](../server/src/routes/api/toolsInfo.js#L233) |
 | PUT | `/ui-settings` | 역할 `admin/operator` | [server/src/routes/api/toolsInfo.js:235](../server/src/routes/api/toolsInfo.js#L235) |
 | GET | `/vcenters` | — | [server/src/routes/api/vcTools.js:12](../server/src/routes/api/vcTools.js#L12) |

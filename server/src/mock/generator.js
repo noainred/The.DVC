@@ -45,7 +45,7 @@ export function isMockVcenter(vc) {
     || EXAMPLE_SITES.some((s) => s.id === id && s.name === name);
 }
 
-const SITES = [
+const BASE_SITES = [
   { id: 'vc-us-east', name: 'vcenter-us-east-01', city: 'Ashburn', country: 'USA', region: '북미', lat: 39.04, lon: -77.49, hosts: 24 },
   { id: 'vc-us-west', name: 'vcenter-us-west-01', city: 'San Jose', country: 'USA', region: '북미', lat: 37.33, lon: -121.89, hosts: 18 },
   { id: 'vc-br-sao', name: 'vcenter-br-sao-01', city: 'São Paulo', country: 'Brazil', region: '북미', lat: -23.55, lon: -46.63, hosts: 8 },
@@ -58,6 +58,32 @@ const SITES = [
   { id: 'vc-cn-east', name: 'vcenter-cn-east-01', city: 'Shanghai', country: 'China', region: '중국', lat: 31.23, lon: 121.47, hosts: 20 },
   { id: 'vc-cn-north', name: 'vcenter-cn-north-01', city: 'Beijing', country: 'China', region: '중국', lat: 39.90, lon: 116.41, hosts: 16 },
 ];
+
+/**
+ * ⚠⚠ 운영 규모 부하 측정용 스케일 — `MOCK_SCALE`(기본 1, 상한 8).
+ *
+ * 왜 필요한가(v2.577): 이 저장소의 성능 규약은 전부 **"28개 vCenter(~658 호스트·~5,850 VM),
+ * 향후 30+"** 를 전제로 쓰여 있는데(CLAUDE.md 운영 환경) 목 데이터는 **11 vCenter · 186 호스트 ·
+ * 2,242 VM** 이라 그 규모를 재는 수단이 아예 없었다. v2.576 감사가 성능을 "확정 결함 0건" 으로
+ * 보고하면서 *"측정은 목 데이터 기준이다"* 를 한계로 적어야 했던 것이 그 때문이다.
+ * `MOCK_SCALE=3` 이면 33 vCenter · 558 호스트 · 약 6,700 VM 으로 **운영 규모를 넘어서** 측정된다.
+ *
+ * ⚠ 기본값은 **1** 이다 — 데모·CI 의 기존 수치(테스트가 고정하는 vCenter 11개)를 바꾸지 않는다.
+ * ⚠ 사본 id·name 은 **접미사로만** 구분한다(`-c2`). `mockVcenterList()`·`isMockVcenter()` 가
+ *   이 배열에서 파생하므로 사본도 자동으로 'mock' 으로 인식된다 — 그래야 엣지 push 차단
+ *   (v2.257 direct-mode 봉인)과 '빈 인벤토리' 판정(v2.560)이 사본에서도 같게 동작한다.
+ */
+const MOCK_SCALE = Math.max(1, Math.min(8, Math.floor(Number(process.env.MOCK_SCALE) || 1)));
+const SITES = MOCK_SCALE === 1 ? BASE_SITES : BASE_SITES.flatMap((s) => (
+  Array.from({ length: MOCK_SCALE }, (_, k) => (k === 0 ? s : {
+    ...s,
+    id: `${s.id}-c${k + 1}`,
+    name: s.name.replace(/-(\d+)$/, (_m, n) => `-${String(Number(n) + k).padStart(n.length, '0')}`),
+    // 지도에서 겹치지 않게 살짝 흩는다(측정용이므로 정확한 좌표는 뜻이 없다).
+    lat: s.lat + (k * 0.35), lon: s.lon + (k * 0.35),
+  }))
+));
+
 
 const GUEST_OS = [
   'Red Hat Enterprise Linux 9', 'Ubuntu Server 22.04', 'Windows Server 2022',
