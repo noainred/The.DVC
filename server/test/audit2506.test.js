@@ -266,9 +266,15 @@ test('② dispatcher 훅은 사전 가드가 없던 경로도 덮는다(horizon 
 test('② IP 리터럴은 lookup 을 타지 않으므로 동기 가드를 없애면 안 된다', () => {
   // 실측: http://127.0.0.1 요청은 lookup 이 불리지 않아 그대로 나간다.
   // 그래서 저장·요청 시점의 ssrfBlockReason(동기, IP 리터럴 검사)이 계속 있어야 한다.
+  // v2.579(ARCH-02): 동기 가드의 본체는 `util/ssrfBlock.js` 로 옮겼고(util 이 collector 를 import 하던
+  // 역방향 의존 제거) `collector/registry.js` 는 같은 이름을 재수출한다 — 검사 의도('동기 가드가 있고
+  // 호출부가 그것을 쓴다')는 그대로다. 둘 다 본다: 본체가 있고, 호환 재수출이 남아 있어야 한다.
+  const blk = read('util/ssrfBlock.js');
+  assert.match(blk, /export function ssrfBlockReason\(/);
+  assert.match(blk, /export function ipBlockReason\(/);
   const reg = read('collector/registry.js');
-  assert.match(reg, /export function ssrfBlockReason\(/);
-  assert.match(reg, /export function ipBlockReason\(/);
+  assert.match(reg, /export \{[^}]*\bssrfBlockReason\b[^}]*\}/, 'registry.js 의 호환 재수출이 사라지면 호출부 29곳이 깨진다');
+  assert.match(reg, /export \{[^}]*\bipBlockReason\b[^}]*\}/);
   for (const f of ['alerts.js', 'horizon/horizon.js']) {
     assert.match(read(f), /ssrfBlockReason(Resolved)?\(/, `${f}: 사전 가드를 제거하면 IP 리터럴 SSRF 가 열린다`);
   }

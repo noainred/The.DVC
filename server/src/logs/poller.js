@@ -4,7 +4,7 @@
  */
 
 import { config, loadVcenterConfig } from '../config.js';
-import { eachLimited } from '../routes/api/shared.js';   // v2.447: vCenter 병렬 수집(감사 T2)
+import { poolRun } from '../util/pool.js';   // v2.447: vCenter 병렬 수집(감사 T2) · v2.579: routes 의존 제거
 import { store } from '../store.js';
 import { collectVCenterEvents } from '../vcenter/soapClient.js';
 import { getLogsDb } from './db.js';
@@ -77,7 +77,7 @@ export async function pollLogsOnce() {
       return Promise.race([p, guard]).finally(() => clearTimeout(timer));
     };
     const perVc = [];
-    await eachLimited(vcs, LOG_CONCURRENCY, async (vc) => {
+    await poolRun(vcs, LOG_CONCURRENCY, async (vc) => {
       try {
         const last = db.lastTs(vc.id);
         const sinceTs = last ? last + 1 : Date.now() - 7 * DAY; // 첫 수집은 최근 7일

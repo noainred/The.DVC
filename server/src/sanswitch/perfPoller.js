@@ -22,6 +22,7 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { config } from '../config.js';
 import { pushPerfNow } from './perfPush.js';
 import { recordActivity, latestEventByDevice } from './perfActivityLog.js';
+import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.SANSW_PERF_CONCURRENCY) || 2));
 /**
@@ -92,12 +93,6 @@ async function collectOne(dev) {
   return { ports: Object.keys(r.parsed.ports).length, total: r.parsed.total, saved: saved.saved };
 }
 
-async function pool(items, limit, fn) {
-  const it = items[Symbol.iterator]();
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (let n = it.next(); !n.done; n = it.next()) await fn(n.value);
-  }));
-}
 
 export async function pollPerfOnce({ force = false } = {}) {
   const st = loadPerfSettings();

@@ -24,6 +24,7 @@ import { runSettingsTarget } from './settingsRun.js';
 import { loadLinkCheckSettings, linkCheckEnabled, onLinkCheckSettingsChange } from './settings.js';
 import { runLink } from './run.js';
 import { insertResults, pruneLinkCheck } from './db.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 
 /*
  * **측정자 이름은 지어내지 않는다.** 이 폴러는 중앙에서도 엣지에서도 돈다(중계 엣지는 자기
@@ -60,19 +61,9 @@ export function centralLinks() {
   };
 }
 
-/** 동시성 제한 실행 — 결과 순서는 입력 순서를 지킨다(화면 표가 흔들리지 않게). */
+// v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
 async function pool(items, limit, fn) {
-  const out = new Array(items.length);
-  let i = 0;
-  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
-    for (;;) {
-      const k = i++;
-      if (k >= items.length) return;
-      try { out[k] = await fn(items[k], k); } catch (e) { out[k] = { error: String(e?.message || e) }; }
-    }
-  });
-  await Promise.all(workers);
-  return out;
+  return (await poolSettled(items, limit, fn)).map((r) => (r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message || r.reason) }));
 }
 
 /**

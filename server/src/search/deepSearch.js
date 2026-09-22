@@ -8,6 +8,7 @@ import { loadVcenterConfig } from '../config.js';
 import { morefOf } from '../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import { VimSoapClient, runGuestScript } from '../gpu/guestops.js';
 import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
+import { poolRun } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
 const has = (s, q) => String(s || '').toLowerCase().includes(String(q).toLowerCase());
 const numOr = (x) => (x === '' || x == null || Number.isNaN(Number(x)) ? null : Number(x));
@@ -97,12 +98,6 @@ export const slimVm = (v) => ({
 });
 
 // 간단 동시성 제한기.
-async function eachLimited(items, limit, fn) {
-  const out = []; let i = 0;
-  async function worker() { while (i < items.length) { const idx = i++; out[idx] = await fn(items[idx]); } }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return out;
-}
 
 const shq = (s) => `'${String(s).replace(/'/g, "'\\''")}'`; // 셸 작은따옴표 안전
 
@@ -136,7 +131,7 @@ export async function guestProbe(candidates, probe, { guestUser = '', guestPass 
     const c = new VimSoapClient(vc);
     try {
       await c.login();
-      await eachLimited(vms, concurrency, async (v) => {
+      await poolRun(vms, concurrency, async (v) => {
         const isWindows = /windows/i.test(v.guestOS || '');
         const creds = (guestUser && guestPass) ? { username: guestUser, password: guestPass } : resolveVmCreds(gset, vcId, v.id, isWindows);
         if (!creds || !creds.username) { errors.push({ vm: v.name, error: '게스트 계정 없음' }); return; }

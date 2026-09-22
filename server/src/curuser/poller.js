@@ -34,6 +34,7 @@ import { refreshKinds } from './report.js';
 import { aggregateAll, seriesRow } from './aggregate.js';
 import { recordCurUserActivity } from './activityLog.js';
 import { pushCurUserRecords, curUserPushEnabled } from '../agent/curUserPush.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 
 const CONCURRENCY_CAP = 8;
 const PRUNE_EVERY_RUNS = 6;                       // 10분 × 6 = 1시간에 1회
@@ -57,18 +58,9 @@ export function curUserPollerStatus() {
   };
 }
 
+// v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
 async function pool(items, n, fn) {
-  const out = new Array(items.length);
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, n), items.length || 1) }, async () => {
-    for (;;) {
-      const idx = i++;
-      if (idx >= items.length) return;
-      try { out[idx] = { ok: true, value: await fn(items[idx]) }; }
-      catch (e) { out[idx] = { ok: false, error: e }; }
-    }
-  }));
-  return out;
+  return (await poolSettled(items, n, fn)).map((r) => (r.status === 'fulfilled' ? { ok: true, value: r.value } : { ok: false, error: r.reason }));
 }
 
 /** 이번 주기의 시계열 행을 **전체 latest** 로부터 다시 만든다(위 머리말 참조). */

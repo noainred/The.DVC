@@ -21,6 +21,7 @@ import { issueRdpTicket } from '../proxy/rdpTicket.js';
 import { ssrfBlockReasonResolved, ipBlockReason } from '../collector/registry.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
+import { targetHostScopeIssue } from '../proxy/targetHostScope.js'; // v2.579: 라우트와 게이트웨이가 같은 판정을 쓴다
 export const remoteRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
@@ -58,28 +59,9 @@ remoteRouter.get('/mappings', requirePerm('remote.access'), (req, res) => {
 // 선행 '-'를 막아 ping/포트체크에 플래그(인자) 주입을 차단(첫 글자는 영숫자/IP만).
 const SAFE_HOST = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
 
-/**
- * targetHost 의 사용자 scope 검사(v2.320, 2026-08-13 감사 보류 갭 적용 — 순수, 테스트 고정).
- * 범위 계정은 **허용 vCenter 인벤토리에 실재하는 대상**(VM 의 IP/이름 또는 호스트 이름)만
- * 프로브/터널 생성 가능 — 임의 사내 IP 도달성 스캔(정찰)·범위 밖 피벗 준비를 차단한다.
- * 인벤토리에 없는 대상은 범위 계정에겐 거부('vCenter 귀속 없는 데이터 미노출' 규칙과 동일 취지).
- * 전체 범위 계정(allowed=null)은 기존 신뢰 모델 유지(임의 대상 허용 — 변화 없음).
- * @returns {string|null} 거부 사유(존재 여부를 흘리지 않는 일반 문구) 또는 null(허용)
- */
-export function targetHostScopeIssue(snap, allowedSet, targetHost) {
-  if (!allowedSet) return null;
-  const t = String(targetHost || '').toLowerCase();
-  for (const vm of snap.vms || []) {
-    if (!allowedSet.has(vm.vcenterId)) continue;
-    const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
-    if (ips.some((ip) => String(ip).toLowerCase() === t) || String(vm.name || '').toLowerCase() === t) return null;
-  }
-  for (const h of snap.hosts || []) {
-    if (!allowedSet.has(h.vcenterId)) continue;
-    if (String(h.name || '').toLowerCase() === t) return null; // 호스트 name 은 통상 FQDN/IP
-  }
-  return '범위 내 vCenter 의 VM/호스트(IP·이름)만 대상으로 할 수 있습니다.';
-}
+// `targetHostScopeIssue` 는 v2.579 에 `proxy/targetHostScope.js` 로 옮겼다(ARCH-05). 테스트 호환 재수출.
+export { targetHostScopeIssue };
+
 // 프록시에서 SSH로 ping/포트체크를 대행 — 내부망 도달성 탐침이므로 admin/operator만(감사 H3/H7).
 remoteRouter.post('/probe', requirePerm('remote.access'), async (req, res) => {
   const { vcenterId, targetHost } = req.body || {};

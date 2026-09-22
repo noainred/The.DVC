@@ -1,6 +1,23 @@
 {
   "notes": [
     {
+      "version": "2.579.0",
+      "date": "2026-09-22",
+      "title": "아키텍처 점검 — 의존 방향 고정(순환 7→5) + 동시성 풀 사본 24벌 통합 + 운영 규모 튜닝 실측",
+      "notes": [
+        "**배경**: 사용자 요청 \"아키텍처 점검, 버그 수정, 튜닝\". 서버 644 모듈·2,510 import edge 를 그래프로 만들어(SCC) 순환·계층 위반을 기계적으로 뽑고, 순환 멤버 15개를 단독 진입점으로 로드해 TDZ(v2.566 유형) 여부를 실측했다(전부 OK). 운영 규모(`MOCK_SCALE=3`: 33 vCenter·558 호스트·6,004 VM)로 기동·RSS·폴링 라우트·루프 지연·gzip 을 쟀다.",
+        "**ARCH-01 — 동시성 풀 사본 24벌 통합**: v2.575 \"23벌 → 1\" 은 `collectPool` 이름만 본 것이었고 `eachLimited` 9벌·`pool` 13벌·인라인 2벌이 남아 있었다. 전부 `util/pool.js`(`poolRun` 13 · `poolSettled` 11)로 모았다. 결과 모양은 호출부마다 예전 그대로(`{ok,value}`·`{error}`·`{link,skipped}`) — 동작 변경 0. 남긴 2곳(`svcmon/pool.js` 두 레인 배수 · `routes/admin/gpuGuest.js` 사전 판정 루프)은 사유와 함께 테스트에 적었다.",
+        "**ARCH-01b — 잠재 결함 제거**: 예전 사본들은 `limit<=0` 이면 워커 0개를 만들어 **아무것도 실행하지 않고 조용히 끝났다**. 전 호출부가 하한 1 을 클램프해 오늘은 도달 불가였다(실행으로 확인) — `poolRun`/`poolSettled` 는 최소 1 워커라 구조적으로 불가능해졌다.",
+        "**ARCH-02 — util → 도메인 역방향 순환 제거**: `util/ssrfLookup.js`(leaf util) → `collector/registry.js` → `util/resilientFetch.js` 3-순환. registry 는 그 순환을 피하려고 `resilientFetch` 를 동적 import 로 미루고 있었다. IP/URL 차단 판정을 `util/ssrfBlock.js` 로 옮기고 registry 는 같은 이름을 재수출한다(호출부 29곳 무변경).",
+        "**ARCH-03 — 도메인 → 라우트 순환 제거**: `collector/agent.js`(export 본문)가 `routes/collector.js` 의 거부 링버퍼를 import 했다. 상태를 `collector/denyLog.js` 로 옮기고 라우트는 재수출(테스트 하니스 호환). 토큰 값을 담지 않는 불변조건 그대로.",
+        "**ARCH-04 — 도메인 4곳 → `routes/admin/shared.js`**: 서버 분석 헬퍼 10개(`analysisServersWithRemote`·`invForServer`·`ensureCollectorDatacenter` …)를 `insights/analysisServers.js` 로. shared.js 는 재수출(라우트 5곳 무변경).",
+        "**ARCH-05 — `proxy/sshGateway.js` → `routes/remote.js`**: 순수 함수 `targetHostScopeIssue` 를 `proxy/targetHostScope.js` 로. 주석이 \"런타임 호출이라 순환 안전\" 이라 적고 있었다 — 안전한 이유가 호출 시점 하나에 걸린 구조는 그 자체가 결함이다.",
+        "**규칙을 테스트로 고정**(`test/arch2579.test.js` 6건): ① routes/ 는 index.js 만 import ② util/ 은 util/·config·node 내장(+명시 allowlist 2건)만 import ③ util 이 속한 순환 0 · 순환 SCC ≤ 5 ④ 풀 스캐폴드 사본 0 ⑤ `limit<=0` 에서도 항목을 건너뛰지 않음 ⑥ 호환 재수출이 같은 함수. 결과: 순환 SCC 7 → 5(남은 것은 같은 도메인 안 2-cycle), 비-routes → routes 21 → 14(전부 index.js 마운트).",
+        "**튜닝 — 실측 결과 고칠 것 없음**(33 vCenter·6,004 VM): 기동→health 1.1초 · RSS 183MB(부하 후 227MB) · 폴링 라우트 9종 p50 1.4~5.4ms · 동시 20 `/api/vms` 89ms · 루프 프로브 p99 5.8ms(72.9ms 스톨 1회, 원인 미확정) · `/api/hosts` 484KB → gzip 27KB. 없는 결함을 만들어 고치지 않았다.",
+        "**검증**: 서버 2,812건(+6)·웹 1,467건 전부 통과 · lint 0 error · 편집 모듈 24개 단독 로드 OK · 영향 테스트 파일 31개 432건 통과 · 목 서버 스모크(거부 기록·서버 분석·온도 경로) 정상. **Chromium 은 생략** — 화면이 바뀌지 않았다(서버 내부 재배치·테스트·문서만)."
+      ]
+    },
+    {
       "version": "2.578.0",
       "date": "2026-09-22",
       "title": "기간이 값을 바꾸는 이유를 화면이 말하게 — v2.510 이 'v2.511 로 분리' 라 적고 67개 릴리스 동안 하지 않은 결함 4건",

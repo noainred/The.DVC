@@ -24,6 +24,7 @@ import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { ensureNsxDial } from './proxy.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
 const norm = (s) => String(s || '').replace(/\/+$/, '');
 
@@ -109,13 +110,6 @@ function clusterHealth(status) {
  * failing the whole manager. The identity call (node) must succeed.
  */
 // 동시성 제한 실행기(인덱스 전달). 고RTT·다수 매니저에서 NSX API 과부하 방지.
-async function eachLimited(items, limit, fn) {
-  let i = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length || 1) }, async () => {
-    while (i < items.length) { const idx = i++; try { await fn(items[idx], idx); } catch { /* isolated */ } }
-  });
-  await Promise.all(workers);
-}
 
 export async function collectFromNsx(mgr) {
   const dial = await ensureNsxDial(mgr); // proxyId가 있으면 HAProxy 경유 다이얼 주소
@@ -156,7 +150,7 @@ export async function collectFromNsx(mgr) {
 
   // 세그먼트별 연결 포트(=VM vNIC) 조회 → VM 수/포트 목록. NSX는 세그먼트에 VM 수를
   // 직접 주지 않으므로 포트를 세어야 한다. 매니저 부하를 위해 동시성 8로 제한.
-  await eachLimited((segs.results || []), 8, async (s, idx) => {
+  await poolSettled((segs.results || []), 8, async (s, idx) => {
     try {
       const r = await client.segmentPorts(s.id);
       const ports = (r.results || []).filter((p) => p.attachment && p.attachment.id);
@@ -169,7 +163,7 @@ export async function collectFromNsx(mgr) {
   // 동일하게 동시성 8로 제한 — 무제한 Promise.all(최대 60 동시)은 고RTT 매니저를 과부하시킨다.
   const policies = (pols.results || []).slice(0, 60);
   const ruleSets = new Array(policies.length).fill(null);
-  await eachLimited(policies, 8, async (p, i) => {
+  await poolSettled(policies, 8, async (p, i) => {
     try { ruleSets[i] = (await client.policyRules(p.id)).results || []; } catch { ruleSets[i] = null; }
   });
   const dfw = policies.map((p, i) => {

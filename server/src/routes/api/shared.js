@@ -3,6 +3,7 @@
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { snapMemo, sendCached } from '../../util/snapCache.js';
+import { poolRun } from '../../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 
 
 // 동시 다발 폴링/클릭 최적화 — 여러 사용자가 같은 스냅샷에 대해 같은 무거운 계산을 각자 재실행하던
@@ -36,12 +37,11 @@ export function linregSlope(xs, ys) {
 }
 
 // Run `fn` over items with at most `limit` concurrent (for bounded on-demand vCenter queries).
-export async function eachLimited(items, limit, fn) {
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (i < items.length) { const idx = i++; await fn(items[idx], idx); }
-  }));
-}
+// v2.579(ARCH-01): 동시성 풀은 `util/pool.js` 하나다(v2.575 IMP-08). 이 함수는 그 규약을 세우면서
+// **이름이 달라 스윕에서 빠진 9벌** 중 하나였다. 예전 본문은 `limit<=0` 이면 워커 0개를 만들어
+// **아무것도 실행하지 않고 조용히 끝났다**(전 호출부가 하한을 1 로 클램프해 오늘은 잠재 결함이다).
+// 호출부 12곳이 이 이름을 쓰므로 별칭으로 남긴다 — 새 코드는 `poolRun`/`poolSettled` 를 직접 쓸 것.
+export const eachLimited = poolRun;
 
 export function applyFilters(items, query, snap, searchFields = ['name'], user = null) {
   let out = items;

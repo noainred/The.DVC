@@ -40,7 +40,7 @@
 
 import { classifySensor, DEFAULT_MAX_AGE_MS } from './roomTemp.js';
 import { getSensorSeries } from './sensorStore.js';
-import { analysisServersWithRemote } from '../routes/admin/shared.js';
+import { analysisServersWithRemote } from '../insights/analysisServers.js'; // v2.579: ARCH-04
 
 /** 켜짐/상세 여부 — 환경변수로만 바꾼다(현장이 저장량을 알고 결정해야 한다). */
 export const TEMP_SERIES_ENABLED = process.env.IDRAC_TEMP_SERIES !== 'false';

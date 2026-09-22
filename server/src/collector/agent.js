@@ -7,7 +7,7 @@
 
 import os from 'node:os';
 import { config, currentVersion } from '../config.js';
-import { getCollectorDenyStats } from '../routes/collector.js';
+import { getCollectorDenyStats } from './denyLog.js'; // v2.579: 도메인은 routes 를 import 하지 않는다(ARCH-03)
 import { localPowerByHostName } from '../idrac/service.js';
 import { getPollerStatus } from '../idrac/poller.js';
 import { allOmeDevices } from '../idrac/omeCache.js';

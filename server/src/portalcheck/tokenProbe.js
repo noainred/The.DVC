@@ -26,6 +26,7 @@
 import { resilientFetch } from '../util/resilientFetch.js';
 import { identityIssue } from '../collector/registry.js';
 import { PROBE_STATE, probeState, identityEvidence } from './tokenScan.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 
 /** 장비가 아니라 포탈이라 가볍지만, 28곳 × 고RTT 를 감당해야 한다. */
 export const PROBE_CONCURRENCY = Math.max(1, Number(process.env.PORTALCHECK_CONCURRENCY) || 4);
@@ -142,19 +143,9 @@ export async function probeCentralRole(row, { fetchImpl = resilientFetch, timeou
   return { probed: true, kind: 'unknown', httpStatus: res.status, reason: `HTTP ${res.status}` };
 }
 
-/** 동시성 제한 실행 — 결과 순서는 입력 순서를 지킨다(표가 흔들리지 않게). */
+// v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
 async function pool(items, limit, fn) {
-  const out = new Array(items.length);
-  let i = 0;
-  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length || 1)) }, async () => {
-    for (;;) {
-      const k = i++;
-      if (k >= items.length) return;
-      try { out[k] = await fn(items[k], k); } catch (e) { out[k] = { error: String(e?.message || e) }; }
-    }
-  });
-  await Promise.all(workers);
-  return out;
+  return (await poolSettled(items, limit, fn)).map((r) => (r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message || r.reason) }));
 }
 
 /**

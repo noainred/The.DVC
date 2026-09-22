@@ -26,6 +26,7 @@ import { collectServerSessions, mockSessionResult } from './sessionCollect.js';
 import { commitHzSessions, hzLatestRecords, pruneHzSessions, hzSessionDbStatus, dropHzLatest } from './sessionDb.js';
 import { combineServers, seriesRow } from './sessions.js';
 import { recordHzSessionActivity } from './sessionActivityLog.js';
+import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 
 const CONCURRENCY_CAP = 8;
 const PRUNE_EVERY_RUNS = 12;                        // 5분 × 12 = 1시간에 1회
@@ -66,18 +67,9 @@ export function hzSessionPollerStatus() {
   };
 }
 
+// v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
 async function pool(items, n, fn) {
-  const out = new Array(items.length);
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, n), items.length || 1) }, async () => {
-    for (;;) {
-      const idx = i++;
-      if (idx >= items.length) return;
-      try { out[idx] = { ok: true, value: await fn(items[idx]) }; }
-      catch (e) { out[idx] = { ok: false, error: e }; }
-    }
-  }));
-  return out;
+  return (await poolSettled(items, n, fn)).map((r) => (r.status === 'fulfilled' ? { ok: true, value: r.value } : { ok: false, error: r.reason }));
 }
 
 /** 대상 서버 — 등록 + 활성 + 설정에서 끄지 않은 것. */
