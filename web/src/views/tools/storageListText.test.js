@@ -6,7 +6,7 @@
  * 42대가 등록돼 있는데. 그 문구를 믿으면 뒤이은 중복 오류는 설명이 안 된다.
  */
 import { describe, it, expect } from 'vitest';
-import { emptyListText, conflictText } from './storageListText.js';
+import { emptyListText, conflictText, edgeReportNotes } from './storageListText.js';
 
 describe('emptyListText', () => {
   it('진짜 등록 0대일 때만 "등록된 장비가 없습니다"', () => {
@@ -81,5 +81,25 @@ describe('conflictText', () => {
   it('문구에 ** 강조가 없다 — 별표로 새는 사고(v2.439/2.440/2.505) 방지', () => {
     const t = conflictText(c);
     for (const s of [t.head, t.where, t.hint]) expect(s).not.toContain('**');
+  });
+});
+
+describe('edgeReportNotes (v2.581 BUG-D)', () => {
+  const T = 1_700_000_000_000;
+  it('상태 전용 보고(0대)만 문구를 만들고 사유별 톤이 다르다', () => {
+    const notes = edgeReportNotes([
+      { agent: 'a', at: T - 60_000, deviceCount: 0, status: { reason: 'no-snapshots', registered: 0, at: T } },
+      { agent: 'b', at: T - 60_000, deviceCount: 0, status: { reason: 'no-snapshots', registered: 3, at: T } },
+      { agent: 'c', at: T - 60_000, deviceCount: 0, status: { reason: 'no-snapshots', registered: null, at: T } },
+    ]);
+    expect(notes.map((n) => [n.agent, n.tone])).toEqual([['a', 'info'], ['b', 'warn'], ['c', 'warn']]);
+    expect(notes[1].text).toContain('3대');
+    expect(notes[0].text).toContain('정상');
+    for (const n of notes) expect(n.text).not.toContain('`');
+  });
+  it('장비 보고가 상태 보고보다 최근이면 말하지 않는다 · status 없으면 말하지 않는다', () => {
+    expect(edgeReportNotes([{ agent: 'a', at: T, deviceCount: 5, status: { reason: 'no-snapshots', registered: 0, at: T - 1 } }])).toEqual([]);
+    expect(edgeReportNotes([{ agent: 'a', at: T, deviceCount: 5, status: null }])).toEqual([]);
+    expect(edgeReportNotes(null)).toEqual([]);
   });
 });

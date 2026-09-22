@@ -28,7 +28,8 @@ function load() {
 export function saveEdgeStorage(agent, devices) {
   const list = (Array.isArray(devices) ? devices : []).slice(0, MAX_DEVICES_PER_AGENT)
     .map((d) => ({ ...d, agent })); // 표시용 출처 각인(엣지가 뭐라 보냈든 인증된 agent 로 덮음)
-  load().set(agent, { at: Date.now(), devices: list });
+  const prev = load().get(agent);
+  load().set(agent, { at: Date.now(), devices: list, ...(prev?.status ? { status: prev.status } : {}) });
   atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(load())), { mode: 0o600 });
   // 작업 로그(v2.315) — 엣지가 보낸 각 장비의 '완료' 이벤트를 중앙 로그에 남긴다(화면 '완료' 구획).
   // 같은 collectedAt 재push 는 건너뛴다(엣지 5분 push × 10분 수집 = 같은 스냅샷이 두 번 옴).
@@ -54,6 +55,33 @@ export function saveEdgeStorage(agent, devices) {
     } catch { /* 로그 실패가 push 수신을 막지 않게 */ }
   }
   return list.length;
+}
+
+/**
+ * v2.581(BUG-D): 엣지의 상태 전용 보고 — 장비 목록(`devices`·`at`)은 그대로 두고 `status` 만 기록한다.
+ * 아는 키만 담고(reason·registered·at) 문자열 길이를 자른다(변조 본문이 파일을 부풀리지 않게).
+ */
+export function saveEdgeStorageStatus(agent, status) {
+  const src = status && typeof status === 'object' ? status : {};
+  const rec = load().get(agent) || { at: 0, devices: [] };
+  const registered = Number(src.registered);
+  rec.status = {
+    reason: String(src.reason || 'unknown').slice(0, 64),
+    registered: Number.isFinite(registered) ? registered : null,
+    at: Date.now(),
+  };
+  load().set(agent, rec);
+  atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(load())), { mode: 0o600 });
+  return true;
+}
+
+/** 엣지별 보고 요약(화면용): 장비 보고 시각·대수 + 마지막 상태 전용 보고. */
+export function edgeStorageReports() {
+  const out = [];
+  for (const [agent, rec] of load()) {
+    out.push({ agent, at: rec.at || null, deviceCount: (rec.devices || []).length, status: rec.status || null });
+  }
+  return out;
 }
 
 /** 전 엣지 스냅샷 평탄화(+ 보고 시각). 오래된 보고도 노출하되 staleMs 로 표시(숨기지 않음 — 정직). */

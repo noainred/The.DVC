@@ -6,7 +6,7 @@ import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
 import { columnsFor, cellValue, sortValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
-import { emptyListText, conflictText } from './storageListText.js';
+import { emptyListText, conflictText, edgeReportNotes } from './storageListText.js';
 import { STable } from '../../components/STable.jsx';
 import { collectMethodView } from './storageMethodText.js';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
@@ -724,6 +724,12 @@ export default function StorageMonTool() {
           ⚠ 등록부에 없는 스냅샷 {d.orphans.length}건(삭제된 장비의 엣지 잔존 push) — 다음 엣지 push 주기에 자연 소멸합니다.
         </div>
       )}
+      {/* v2.581(BUG-D): 엣지가 '장비 0대' 로 상태 전용 보고를 보냈을 때 — 예전에는 아예 POST 가 없어 구분할 수 없었다 */}
+      {edgeReportNotes(d.edgeReports).map((n) => (
+        <div key={n.agent} className="card" style={{ padding: '9px 13px', marginTop: 8, borderColor: n.tone === 'warn' ? 'var(--amber)' : 'var(--border)', fontSize: 12 }}>
+          {n.tone === 'warn' ? '⚠ ' : 'ℹ '}<BoldText text={n.text} />
+        </div>
+      ))}
       <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
         수집 주기 {Math.round((d.poller?.intervalMs || 0) / 60000)}분 · 엣지 장비는 config pull(≤5분) 후 현지 수집 → 중앙 push(≤5분).
         확장 로드맵(카탈로그): {(d.types || []).filter((t) => !t.implemented).map((t) => t.label).join(' · ')} — 수집기 구현 시 이 화면 변경 없이 표시됩니다.

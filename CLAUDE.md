@@ -19,8 +19,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   수정은 `NOW = floor(Date.now()/HOUR)*HOUR - 30*60_000`(정시 -30분 — 항상 과거이고 경계에서 30분
   떨어짐) + 버킷 조회도 run 시작 기준. `t0 % HOUR` 이 항상 30분이라 경계가 **불가능**하다
   (10만 표본 검증 0건). 새 시계열 테스트를 쓸 때 같은 규칙 — **기준 시각은 경계에서 떨어뜨려 고정**한다.
-  ⚠ 남은 플래키: `chunkedPrune2453.test.js:48` 은 **원인 미확정**이다.
-  '재실행하면 통과' 로 넘기지 말고 이 건처럼 **경계값을 재현해** 확정할 것.
+  ✅ `chunkedPrune2453.test.js:48` 플래키는 **v2.581 에 원인을 확정하고 고쳤다**(아래 v2.581 항목) —
+  프로브 `setInterval(fn, 0)` 의 하한 1ms 대 0.06ms 루프. '재실행하면 통과' 로 넘기지 말고 이 건처럼
+  **경계값을 재현해** 확정할 것.
 - ✅ **`perfMonitor2498.test.js` 플래키 — v2.560 에 고쳤다(제품 결함이었다).** 아래는 원인 기록이고
   **되돌리지 말 것**. 회귀는 `test/hangClear2560.test.js` 가 세 부분을 각각 고정한다(변이 검증:
   세 부분 중 하나만 되돌리면 6회 중 6회 실패). 실측 — 수정 후 격리 **60회 0실패** · 전량 3회 0실패.
@@ -2858,6 +2859,31 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ **웹 그래프 스크립트는 `export … from` 재수출 edge 를 보지 못한다** — '고아 후보' 2건
       (`components/EntityDetail.jsx`·`views/tools/IpamCore.jsx`)은 재수출로 쓰이는 **정상 모듈**이다.
       팬인 0 을 죽은 코드로 단정하지 말고 grep 으로 재수출을 먼저 볼 것.
+
+  - ⚠⚠ **런타임 계측 훅으로 잰다 — 'SQL 실행 계획 전수'·'동기 fs 호출 지점별 빈도' 는 grep 으로 안 보인다**
+    (v2.581 — 사용자 요청 "아키텍처 점검, 버그 수정, 튜닝" 3차. 회귀는 `test/arch2581.test.js`):
+    - **방법**: `node --import <훅> src/index.js` 로 `DatabaseSync.prototype.prepare` 와 `fs.*Sync` 를 가로챈다
+      (SQL 마다 `EXPLAIN QUERY PLAN` 1회 · 호출 지점은 스택의 `src/` 첫 프레임). ⚠ 세 함정을 실제로 밟았다:
+      ① `import { readFileSync } from 'node:fs'` 이름 바인딩은 `module.syncBuiltinESMExports()` 없이는 패치되지
+      않는다 ② IPAM 쓰기 워커가 `--import` 를 물려받아 **같은 덤프 파일을 덮었다**(스레드·PID 별 파일명)
+      ③ **누적 카운트로 판정하지 말 것** — '839회/분 readFileSync' 는 기동 CJS 로딩이었다. 60초 창 두 덤프의
+      **차분**으로 본다.
+    - **TUNE-D — `VMPERF_MAX_OPEN_DB` 기본 8 → 48**: `metrics/vmperfDb.js` 는 vCenter 마다 파일 하나인데 상한 8
+      이라 33 vCenter 에서 매 샘플 주기 LRU 스래싱(`openFile` **68회/분** → 수정 후 0). v2.503 snapCache 의
+      '상한은 vCenter 수보다 커야 한다' 와 같은 판단이고 테스트가 하한 ≥36 을 고정한다. **파일별 핸들 캐시를
+      새로 만들면 상한을 vCenter 수(28 · 30+ 예정)로 계산해 정할 것** — `vmseries/db.js` 는 같은 상한(8)이지만
+      opt-in 수집이라 이번엔 두었다(켜는 현장이 생기면 같은 결함이다).
+    - **TUNE-E — `config.currentVersion()` 메모**: 부를 때마다 `package.json` 을 읽고 있었다(19회/분). 버전은
+      프로세스 수명 동안 불변이다(업그레이드 = 재시작).
+    - **BUG-D — storage push 0대 무음 조기 반환**(v2.548 이 "아직 남아 있다" 고 적어 둔 것): `statusOnly` 본문을
+      보내고 중앙 `saveEdgeStorageStatus` 는 **장비 목록을 건드리지 않는다** — 빈 목록으로 덮으면 엣지 재시작
+      직후 한 주기 동안 중앙 화면이 빈다. 화면(`storageListText.edgeReportNotes`)은 사유별로 조치를 나눈다
+      (위임 0대 = 정상 / 위임 N대인데 스냅샷 없음 = 엣지 로그 / 등록부 못 읽음). **CLAUDE.md 에 '남아 있다' 고
+      적은 결함은 다음 점검 회차의 첫 후보다** — 이 건은 33개 릴리스 동안 문서 안에만 있었다.
+    - **BUG-E — `chunkedPrune2453.test.js:48` 플래키 원인 확정**: 프로브가 `setInterval(fn, 0)`(하한 **1ms**)인데
+      30청크 setImmediate 루프는 워밍업 시 **0.06ms** 에 끝난다 → 단독 300회 중 269회 실패, 하니스(콜드 ~2ms)
+      에서는 20회 0실패. **양보 여부를 벽시계 타이머로 재지 말 것** — 양보 수단(setImmediate)과 같은 큐에 자기를
+      다시 거는 프로브가 결정적이다(300회 0실패 · 청크마다 1회).
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 

@@ -333,11 +333,20 @@ function parseEdges(raw) {
   }
 }
 
-/** Current running version, read from the repo root package.json. */
+/**
+ * Current running version, read from the repo root package.json.
+ * v2.581(TUNE-E): **1회 읽고 메모한다** — 런타임 계측(fs 훅)에서 이 함수가 분당 19회 디스크를 읽고 있었다
+ * (엣지 push·자기등록·health 응답이 매번 부른다). 버전은 프로세스 수명 동안 바뀌지 않는다 — 업그레이드는
+ * 프로세스를 재시작한다(`upgrade/manager.js`). 읽기 실패('0.0.0')는 메모하지 않는다(다음 호출이 다시 시도).
+ */
+let _versionMemo = null;
 export function currentVersion() {
+  if (_versionMemo) return _versionMemo;
   try {
     const pkg = JSON.parse(fs.readFileSync(path.resolve(ROOT, '..', 'package.json'), 'utf8'));
-    return pkg.version || '0.0.0';
+    const v = pkg.version || '0.0.0';
+    if (v !== '0.0.0') _versionMemo = v;
+    return v;
   } catch {
     return '0.0.0';
   }
