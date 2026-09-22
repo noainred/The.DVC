@@ -45,14 +45,24 @@ test('청크로 끊어 지운다 — 한 방 DELETE 가 아니다', async () => 
   assert.deepEqual(st.calls.slice(0, 2), [10_000, 10_000], 'LIMIT 이 청크 크기로 들어간다');
 });
 
-test('청크 사이에 이벤트 루프를 양보한다(다른 타이머가 끼어들 수 있다)', async () => {
+test('청크 사이에 이벤트 루프를 양보한다(다른 작업이 끼어들 수 있다)', async () => {
   const st = fakeStmt(30_000);
+  // ⚠ v2.581 — 이 테스트의 플래키 원인(CLAUDE.md '원인 미확정' 이던 것)을 실측으로 확정했다.
+  //   예전 프로브는 `setInterval(fn, 0)` 이었는데 그 간격의 하한은 **1ms** 다. 30청크 루프는 setImmediate
+  //   양보 30회라 워밍업된 프로세스에서는 **0.06ms(p50)** 에 끝난다 — 즉 타이머가 한 번도 만기되지 않아
+  //   interleaved=0 으로 **실패**한다(단독 300회 실측: 269회 실패). 하니스 안에서는 콜드 실행이라 ~2ms 가
+  //   걸려 2회 발화했고 그래서 '가끔' 만 깨졌다. 판정이 벽시계에 매달려 있던 것이 결함이다(제품은 정상).
+  //   지금은 setImmediate 로 자기를 다시 거는 프로브를 쓴다 — 양보가 setImmediate 이므로 청크마다
+  //   **반드시** 한 번씩 끼어든다(결정적). 양보가 사라지면 프로브는 루프가 끝난 뒤에야 처음 돌아 0 이다.
   let interleaved = 0;
-  const timer = setInterval(() => { interleaved++; }, 0);
+  let stop = false;
+  const probe = () => { if (stop) return; interleaved++; setImmediate(probe); };
+  setImmediate(probe);
   await chunkedDelete(st, [1], { chunk: 1_000, maxRows: 0 });
-  clearInterval(timer);
-  // 양보가 없으면 루프가 끝날 때까지 타이머가 한 번도 못 돈다 — 이 값이 0 이면 회귀다.
+  stop = true;
+  // 양보가 없으면 루프가 끝날 때까지 프로브가 한 번도 못 돈다 — 이 값이 0 이면 회귀다.
   assert.ok(interleaved > 0, `삭제 도중 다른 작업이 실행되지 못했다(interleaved=${interleaved})`);
+  assert.ok(interleaved >= 25, `청크 30개 사이에 최소 25회는 끼어들어야 한다(interleaved=${interleaved})`);
 });
 
 test('상한에서 멈추고 남은 것을 알린다 — 다음 주기가 이어서 지운다', async () => {

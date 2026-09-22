@@ -940,7 +940,12 @@ centralRouter.post('/storage-data', async (req, res) => {
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : String(req.body?.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  const { saveEdgeStorage } = await import('../central/storageEdge.js');
+  const { saveEdgeStorage, saveEdgeStorageStatus } = await import('../central/storageEdge.js');
+  // v2.581(BUG-D): 상태 전용 보고(엣지가 0대일 때) — 장비 목록은 건드리지 않고 상태만 기록한다.
+  if (req.body?.statusOnly === true) {
+    const saved = saveEdgeStorageStatus(agent, req.body?.status);
+    return res.json({ ok: true, saved: 0, statusOnly: true, recorded: saved });
+  }
   // 소유권 필터(v2.417, sanswitch-data 와 동일): 개별 토큰 엣지는 자기에게 위임된 deviceId 만,
   // collectedAt 은 수신 시각으로 clamp. 공유 토큰(레거시)은 기존 신뢰 유지.
   let devices = Array.isArray(req.body?.devices) ? req.body.devices : [];

@@ -10,7 +10,7 @@ import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceIn
 import { requireSettingsOwner } from '../admin/shared.js';
 import { localSnapshots, dropSnapshot } from '../../storage/store.js';
 import { collectDeviceNow, storagePollerStatus, pollStorageOnce, testDeviceConnection } from '../../storage/poller.js';
-import { edgeStorageSnapshots } from '../../central/storageEdge.js';
+import { edgeStorageSnapshots, edgeStorageReports } from '../../central/storageEdge.js';
 import { listActivity } from '../../storage/activityLog.js';
 import { areaSummary, areaJson, capacityHistory, capacityHistoryAll, dbAvailable,
   dailySeries, dailySpans, dayIndex, dayLabel, dayStartMs, pruneNow, effectiveKeepDays, DAY_OFFSET_MIN, capacityResets } from '../../storage/db.js';
@@ -63,6 +63,9 @@ api.get('/tools/storage', toolsPerm, fullScopeOnly, (_req, res) => {
     // iDRAC 위임과 동일 소스). 토큰 미발급(공유 CENTRAL_TOKEN) 환경에서도 엣지를 고를 수 있다.
     agents: knownAgentNames(),
     poller: storagePollerStatus(),
+    // v2.581(BUG-D): 엣지별 보고 요약 — 장비 보고 시각·대수 + 상태 전용 보고(0대). 화면이 '엣지가 0대라고
+    // 보고했다' 와 '엣지가 아무것도 안 보냈다' 를 구분해 말한다.
+    edgeReports: edgeStorageReports(),
   });
 });
 

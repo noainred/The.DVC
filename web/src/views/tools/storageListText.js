@@ -69,3 +69,28 @@ export function conflictText(conflict, { dcName = (x) => x, typeLabel = (x) => x
     hint: '같은 host 의 같은 종류는 한 대만 등록됩니다. 아래 "그 장비 보기" 를 누르면 필터를 풀고 이동합니다.',
   };
 }
+
+/**
+ * v2.581(BUG-D): 엣지 보고 요약 문구 — 엣지가 **장비 0대** 라고 상태 전용 보고를 보냈을 때만 말한다
+ * (장비 보고가 상태 보고보다 나중이면 그 상태는 지난 것이라 말하지 않는다). 예전에는 0대인 엣지가 아예
+ * POST 를 하지 않아 '안 보냈다' 와 '0대다' 를 구분할 수 없었다. 사유별로 조치가 다르다:
+ *   registered === 0 → 이 엣지에 위임된 장비가 없다(정상 — 등록부의 담당 엣지 지정을 볼 것)
+ *   registered > 0   → 위임은 있는데 수집 스냅샷이 없다(엣지 로그의 storage 폴러를 볼 것)
+ *   registered null  → 엣지가 등록부를 읽지 못했다(단정하지 않는다)
+ * @param {Array<{agent:string, at:number|null, deviceCount:number, status:{reason:string, registered:number|null, at:number}|null}>} reports
+ * @returns {Array<{agent:string, text:string, tone:'info'|'warn'}>}
+ */
+export function edgeReportNotes(reports = []) {
+  const out = [];
+  for (const r of Array.isArray(reports) ? reports : []) {
+    const st = r?.status;
+    if (!st || !Number.isFinite(Number(st.at))) continue;
+    if (Number(r.at) > Number(st.at)) continue; // 장비 보고가 더 최근 — 상태 보고는 지난 것
+    const when = new Date(Number(st.at)).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    const reg = st.registered;
+    if (reg === 0) out.push({ agent: r.agent, tone: 'info', text: `엣지 **${r.agent}** 는 ${when} 에 ‘장비 0대’ 로 보고했습니다 — 이 엣지에 위임된 스토리지가 없습니다(정상). 장비를 이 엣지로 수집하려면 등록부에서 담당 엣지를 지정하세요.` });
+    else if (Number.isFinite(Number(reg)) && reg > 0) out.push({ agent: r.agent, tone: 'warn', text: `엣지 **${r.agent}** 는 ${when} 에 ‘장비 0대’ 로 보고했습니다 — 위임된 장비 ${reg}대가 있는데 수집 스냅샷이 없습니다. 엣지 로그의 스토리지 폴러(collect·push.storage)를 확인하세요.` });
+    else out.push({ agent: r.agent, tone: 'warn', text: `엣지 **${r.agent}** 는 ${when} 에 ‘장비 0대’ 로 보고했습니다 — 위임 장비 수는 읽지 못했습니다(엣지 등록부 확인).` });
+  }
+  return out;
+}

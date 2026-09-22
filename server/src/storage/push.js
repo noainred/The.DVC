@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { localSnapshots } from './store.js';
+import { devicesForThisNode } from './registry.js';
 import { runtimeIntervals, startAdaptiveTimer } from './intervals.js';
 
 // v2.409: 주기는 중앙 배포값(storage/intervals.js)을 매번 조회 — 모듈 로드 시 상수로 굳히지 않는다.
@@ -27,7 +28,14 @@ export async function pushStorageNow() {
   _busy = true;
   try {
     const devices = localSnapshots();
-    if (!devices.length) { _last = { at: Date.now(), sent: 0 }; return { ok: true, sent: 0 }; }
+    if (!devices.length) {
+      // v2.581(BUG-D): **0대여도 상태는 올린다**(v2.517 `sendStatusOnly` 규약 — v2.548 이 "storage/push.js:30 에는
+      // 아직 '0대면 POST 안 함' 결함이 남아 있다" 고 기록해 둔 것). 예전에는 여기서 조용히 반환해 중앙은
+      // '엣지가 안 보냈다' 와 '보냈는데 장비가 0대다' 를 구분할 수 없었다. 상태 전용 본문은 수백 바이트다.
+      const r = await sendStatusOnly({ reason: 'no-snapshots', registered: registeredCount() });
+      _last = { at: Date.now(), sent: 0, statusSent: r.ok, statusError: r.ok ? null : r.reason };
+      return { ok: true, sent: 0, statusSent: r.ok };
+    }
     const json = JSON.stringify({ agent: config.agent.name, devices });
     const hdrs = { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
     let body = json;
@@ -45,6 +53,25 @@ export async function pushStorageNow() {
     return { ok: true, sent: devices.length };
   } catch (e) { _last = { at: Date.now(), error: e.message }; return { ok: false, reason: e.message }; }
   finally { _busy = false; }
+}
+
+/** 이 노드에 위임된 장비 수(상태 보고용 — 자격증명은 싣지 않는다). 등록부를 못 읽으면 null. */
+function registeredCount() {
+  try { return devicesForThisNode().length; } catch { return null; }
+}
+
+/**
+ * 상태 전용 push(v2.581) — `devices: []` 에 `statusOnly:true` 를 붙인다. 중앙은 보관 중인 장비 목록을
+ * **건드리지 않고** 상태만 기록한다(빈 목록으로 덮으면 엣지 재시작 직후 한 주기 동안 중앙 화면이 빈다).
+ */
+async function sendStatusOnly(status) {
+  try {
+    const json = JSON.stringify({ agent: config.agent.name, devices: [], statusOnly: true, status: { ...status, at: Date.now() } });
+    const hdrs = { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken };
+    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/storage-data`, { method: 'POST', headers: hdrs, body: json, timeoutMs: 20_000, retries: 1 });
+    if (!res.ok) return { ok: false, reason: `storage-data <- ${res.status}` };
+    return { ok: true };
+  } catch (e) { return { ok: false, reason: e.message }; }
 }
 
 export function startStoragePush() {

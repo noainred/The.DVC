@@ -25,7 +25,13 @@ import { config } from '../config.js';
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래 vmperf/.
 // VMPERF_DB_DIR env 가 있으면 그것이 최우선(명시 설정을 덮지 않는다).
 const DIR = process.env.VMPERF_DB_DIR || path.join(config.dbDir || config.configDir, 'vmperf');
-const MAX_OPEN = Math.max(2, Math.min(32, Number(process.env.VMPERF_MAX_OPEN_DB) || 8));
+// v2.581(TUNE-D): 기본 8 → 48. 이 파일은 **vCenter 마다 하나**인데 운영은 28개(30+ 예정) + 합계 파일이라
+// 상한 8 이면 매 샘플 주기마다 LRU 가 스래싱한다 — 런타임 계측(MOCK_SCALE=3 · 33 vCenter)에서 `openFile`
+// (mkdir + 인덱스 파일 읽기 + 마이그레이션 검사 + open + PRAGMA + prepare)이 **분당 68회** 돌고 있었다.
+// 핸들 하나는 fd 3개(db·wal·shm)와 페이지 캐시(기본 최대 2MB)뿐이다. v2.503 snapCache 의 '상한은 vCenter
+// 수보다 커야 한다' 와 같은 판단이고 테스트가 기본값 하한을 고정한다.
+export const VMPERF_MAX_OPEN_DEFAULT = 48;
+const MAX_OPEN = Math.max(2, Math.min(256, Number(process.env.VMPERF_MAX_OPEN_DB) || VMPERF_MAX_OPEN_DEFAULT));
 const HOUR = 3_600_000;
 const TOTAL_KEY = '';           // 전체 합계 계열의 k
 const TOTAL_FILE = '_all';      // 그 계열이 사는 파일명
