@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'ping-targets.json');
 const norm = (s) => String(s || '').trim();
@@ -35,7 +35,16 @@ function loadRaw() {
       // vCenter 포트 응답속도에서 측정할 포트 목록(모든 vCenter에 공통 적용).
       vcPorts: Array.isArray(p.vcPorts) ? p.vcPorts.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 65535) : [],
     };
-  } catch { cache = { targets: [], seededVc: [], seededEdge: [], vcPorts: [] }; }
+  } catch (e) {
+    // v2.580(BUG-B): 부재는 정상이지만 **손상**은 다르다 — 조용히 빈 값을 돌려주면 다음 save() 가
+    // 대상 0개짜리 파일로 덮어써 Ping 대상·자동시드 tombstone·vCenter 포트 목록이 **영구 유실**된다
+    // (v2.447 alarm-mutes B4 와 같은 유형). 원본을 `.corrupt.<ts>` 로 보존하고 경고를 남긴다.
+    if (fs.existsSync(FILE)) {
+      preserveCorrupt(FILE, e?.message);
+      console.warn(`[ping] 대상 파일이 손상돼 읽지 못했습니다 — 원본을 보존했습니다: ${e?.message || e}`);
+    }
+    cache = { targets: [], seededVc: [], seededEdge: [], vcPorts: [] };
+  }
   cacheTok = t;
   return cache;
 }

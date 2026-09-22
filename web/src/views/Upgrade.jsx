@@ -195,7 +195,8 @@ export default function Upgrade() {
           <span>새 버전 발견 시 <b>자동 적용 + 재시작</b> (끄면 확인만 하고 수동 적용)</span>
         </label>
 
-        <div className="flex gap" style={{ marginTop: 14 }}>
+        {/* v2.580: 버튼 4개가 한 줄에 고정돼 400px 에서 83px 가로 넘침(Chromium A/B 실측 — 기존 결함). 줄바꿈 허용. */}
+        <div className="flex gap" style={{ marginTop: 14, flexWrap: 'wrap' }}>
           <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy} onClick={saveSettings}>
             {busy === 'save' ? '저장 중…' : '설정 저장'}
           </button>

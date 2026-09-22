@@ -1,6 +1,21 @@
 {
   "notes": [
     {
+      "version": "2.580.0",
+      "date": "2026-09-22",
+      "title": "아키텍처 점검 2차 — SQLite 동시 open 결함 7모듈 + 세대 키 캐시 2곳의 메모리 상주(힙 스냅샷 확정) + 핑 대상 손상 유실 방어 + 설정 청크 605→250KB",
+      "notes": [
+        "**배경**: 사용자 요청 \"아키텍처 점검, 버그 수정, 튜닝\"(v2.579 와 같은 문장). 앞 릴리스가 보지 않은 축을 봤다 — 웹 의존성 그래프(300 파일·1,011 edge·순환 0), SQLite open 패턴 전수, 손상 파일의 조용한 빈값 반환, 설정 청크 지연 로드, RSS 시계열 + 힙 상한 대조 실험. 상세는 `docs/AUDIT-2026-09-23b.md`.",
+        "**BUG-A — SQLite 동시 open 으로 같은 파일에 핸들 2개**: `_db` 만 보고 여는 모듈은 첫 호출 2건이 겹치면 두 번째 핸들이 첫 핸들을 덮어 **닫히지 않은 채 버린다**(fd 누수 + WAL 연결 2개). `storage/db.js` 에 `Promise.all` 로 재현해 `/proc/self/fd` 에 같은 파일 2개를 확인했다. v2.550 이 `bmusage/db.js` 에 기록한 규칙이 형제 7모듈(storage/db · sanswitch/perfDb · rma/historyDb · pdu/db · rma/testResults · metrics/vmperfDb · vmseries/db)에 없었다 — 손 grep 은 6곳이었고 7번째는 새 테스트 스윕이 잡았다. 단일 파일은 `_opening` 프라미스 공유, 파일별 Map 모듈은 파일 키의 `opening` Map. 회귀는 `test/arch2580.test.js`(소스 스윕 + fd 실측).",
+        "**BUG-B — 핑 대상 파일이 손상되면 조용히 전량 유실**: `ping/store.js` 가 파싱 실패를 빈 목록으로 넘겨 다음 저장이 온전했던 `ping-targets.json` 을 덮어썼다. `preserveCorrupt`(`.corrupt.<ts>` 보존) + 경고. 테스트가 실제 손상 파일로 고정.",
+        "**BUG-C — 설정 화면 400px 가로 넘침 2곳(기존 결함, A/B 확정)**: GPU 게스트 수집 필터 행 166px · 업그레이드 버튼 행 83px. 변경 전 빌드에서 같은 수치라 이번 변경이 만든 것이 아니다. `flexWrap` 으로 0px.",
+        "**TUNE-B/C — 세대 키 캐시가 지난 스냅샷 세대를 32개까지 상주시켰다(힙 스냅샷으로 확정)**: `MOCK_SCALE=3` 목 서버의 RSS 가 18분에 198→423MB 로 오르고 힙 상한 160MB 에서는 9분 만에 OOM 이었다. 4.7분 간격 힙 스냅샷 2장의 retainer 경로 집계로 원인을 `ipam/ledger.js` 의 `_ipamCache`(rows)·`_sheetCache` 로 확정 — 키 첫 조각이 `snap.generatedAt` 인데 '최근 32개' 만 지켜, `store.js` 가 매 폴링마다 부르는 `buildIpamRows` 가 세대마다 새 항목을 만들고 **다시 히트할 수 없는** 옛 세대가 32개까지 남았다. `util/snapCache.js`(응답 캐시 42 엔드포인트)도 같은 구조였고 v2.503 주석의 '메모리는 1세대분' 전제가 틀렸다(폴링 사용자 1명이면 16분 뒤 이름마다 32세대 응답 객체 상주). 두 곳 모두 **세대가 다른 항목을 즉시 버린다**(같은 세대의 다중 scope 는 유지 · 진행 중 계산 보호). 실측(A/B, 같은 부하 8분): 부하 없음 4분 heapUsed 수정 전 49→약 113MB / 수정 후 48→49MB(평탄) · 부하 8분 GC 최저치 A(snapCache 구판) 52→65MB(상승) / B(둘 다 수정) 58→58MB(평탄). 목 부하에서 snapCache 몫은 작고(+13MB/7분) 운영 규모의 크기는 측정하지 못했다 — 구조적 상주 사실만 확정.",
+        "**튜닝 — 설정 청크 지연 로드**: `Settings.jsx` 가 큰 패널 12개(Collectors 1,012줄 등)를 `lazy()` 로 떼어 `Settings-*.js` **605KB/159KB gz → 250KB/74.7KB gz**. 하위 탭 키·URL 은 그대로. Chromium 12 서브탭 × 1440/400: 오류 0 · 넘침 0 · 폴백 잔류 0.",
+        "**고치지 않은 것**: 웹 계층 후보 1건(`components/EntityDetail → views/tools/RightsizeReport`)은 `ui.jsx` 머리말이 셸 설계로 밝힌 것이고 동작 결함이 아니다. '고아' 후보 2건은 `export … from` 재수출로 쓰이는 정상 모듈(스크립트가 재수출 edge 를 못 본 것). 목 로그의 loop-lag 5.9초 1건은 목 데이터 시드 시점이라 운영 경로가 아니다.",
+        "검증: 서버 2,817 통과(+5 신규) · 웹 1,467 통과 · 빌드 성공 · Chromium 설정 12 서브탭 × 1440/400 오류 0·넘침 0."
+      ]
+    },
+    {
       "version": "2.579.0",
       "date": "2026-09-22",
       "title": "아키텍처 점검 — 의존 방향 고정(순환 7→5) + 동시성 풀 사본 24벌 통합 + 운영 규모 튜닝 실측",

@@ -201,7 +201,8 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
     <div className="card" style={{ padding: 16, marginTop: 14 }}>
       <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8, gap: 8 }}>
         <b>VM별 계정 (계정이 VM마다 다를 때)</b>
-        <div className="flex gap" style={{ alignItems: 'center' }}>
+        {/* v2.580: 필터 3개 + 버튼이 한 줄 고정이라 400px 에서 166px 가로 넘침(Chromium A/B — 기존 결함). 줄바꿈 허용. */}
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <select className="select" value={osFilter} onChange={(e) => setOsFilter(e.target.value)} style={{ minWidth: 110 }} title="OS별로 구분해 보기">
             <option value="all">전체 OS</option>
             <option value="linux">🐧 Linux</option>

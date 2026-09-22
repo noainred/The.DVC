@@ -21,7 +21,16 @@ const PRUNE_EVERY = 50;
 const latest = new Map();
 let _db = null; let _tick = 0;
 
+// v2.580(BUG-A): 진행 중인 open 을 공유한다 — `/api/central/rma-result` 는 엣지 여러 곳이 동시에 부르므로
+// 첫 보고 2건이 겹치면 같은 파일에 핸들이 2개 열렸다(테스트 스윕이 잡은 7번째 모듈).
+let _opening = null;
 async function open() {
+  if (_db) return _db === 'unavailable' ? null : _db;
+  if (_opening) return _opening;
+  _opening = openInner().finally(() => { _opening = null; });
+  return _opening;
+}
+async function openInner() {
   if (_db) return _db === 'unavailable' ? null : _db;
   try {
     const { DatabaseSync } = await import('node:sqlite');

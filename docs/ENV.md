@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **452개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **453개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-21)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-22)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -12,7 +12,7 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (15)
+## 공용 유틸 (16)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -28,11 +28,12 @@
 | `SNAP_CACHE_PER_NAME` | `32` |  | util/snapCache.js |
 | `SOAP_PARSE_MIN_CHARS` | `262144` |  | util/soapParsePool.js |
 | `SOAP_PARSE_WORKERS` |  |  | util/soapParsePool.js |
+| `SSRF_ALLOW_LOOPBACK` | `''` | ✅ | util/ssrfBlock.js |
 | `WAN_CONNECT_TIMEOUT_MS` | `20000` |  | util/resilientFetch.js |
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (139)
+## 공통 (141)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -78,7 +79,7 @@
 | `COLLECTOR_TIMEOUT_MS` | `20000` |  | config.js |
 | `COLLECTOR_TOKEN` |  | ✅ | config.js |
 | `CORS_ORIGINS` | `''` |  | index.js |
-| `CSP` |  |  | index.js |
+| `CSP` | `기본 아님('off' 일 때만 적용)` |  | index.js |
 | `CURUSER_ACTIVITY_MAX` | `500` |  | curuser/activityLog.js |
 | `CURUSER_DB_PATH` |  |  | curuser/db.js |
 | `CURUSER_FIRST_DELAY_MS` | `120000` |  | curuser/poller.js |
@@ -107,6 +108,7 @@
 | `LINKCHECK_DETAIL_MAX` | `8000` |  | linkcheck/db.js |
 | `LINKCHECK_ENABLED` | `''` |  | linkcheck/settings.js |
 | `LINKCHECK_TZ_OFFSET_MIN` | `9` |  | linkcheck/db.js |
+| `MOCK_SCALE` | `1` |  | mock/generator.js |
 | `OME_POWER_DURATION` | `0` | ✅ | config.js |
 | `OME_POWER_METRIC_TYPES` | `'3,4,1'` | ✅ | config.js |
 | `OME_POWER_PLUGIN_ID` | `'2F6D05BE-EE4B-4B0E-B873-C8D2F64A4625'` | ✅ | config.js |
@@ -143,6 +145,7 @@
 | `SHOW_UPGRADE_TAB` | `기본 아님('true' 일 때만 적용)` |  | config.js |
 | `SHUTDOWN_GRACE_MS` | `8000` |  | index.js |
 | `SHUTDOWN_HARD_MS` | `1500` |  | index.js |
+| `SITE_INVENTORY_STALE_MS` | `300000` |  | store.js |
 | `SVCMON_ROLE` | `''` |  | config.js |
 | `TEMP_DB_PATH` |  |  | config.js |
 | `TEMP_RAW_RETENTION_DAYS` | `0` |  | config.js |
@@ -238,12 +241,11 @@
 | `SVCMON_ENABLED` | `기본 적용('false' 로 끄기)` |  | svcmon/poller.js |
 | `SVCMON_WORKERS` |  |  | svcmon/capacity.js |
 
-## 수집 서버 (2)
+## 수집 서버 (1)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `EDGE_PUSH_TIMEOUT_MS` | `600000` |  | collector/upgradePush.js, upgrade/upgrade.js |
-| `SSRF_ALLOW_LOOPBACK` | `''` | ✅ | collector/registry.js |
 
 ## 스토리지 수집 (20)
 
@@ -479,7 +481,7 @@
 |---|---|---|---|
 | `HEALTH_PROBE_TIMEOUT_MS` | `5000` |  | health/network.js |
 
-## API 라우트 (31)
+## API 라우트 (30)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -503,7 +505,6 @@
 | `RMA_CRED_RATE_PER_MIN` | `120` |  | routes/central.js |
 | `SANSW_PROBLEM_PORT_MAX` | `40` |  | routes/api/sanSwitch.js |
 | `SECRETS_KEY` |  |  | routes/admin/opsSettings.js, security/secretVault.js |
-| `SITE_INVENTORY_STALE_MS` | `300000` |  | routes/api/portalCheck.js, store.js |
 | `SVCMON_XLSX_MAX_BYTES` | `8000000` |  | routes/svcmon/shared.js |
 | `TREND_CLUSTER_MAX_HOSTS` | `40` |  | routes/api/toolsCapacity.js |
 | `UPGRADE_INSTALL_DIR` | `''` | ✅ | config.js, routes/upgrade.js |
@@ -631,4 +632,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 452
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 453

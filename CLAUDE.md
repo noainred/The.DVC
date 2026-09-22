@@ -2817,6 +2817,48 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       **재수출**해 쓰는 관계라 중복이 아니고 위치만 어색하다 — 손대지 않았다. 남은 순환 5개(`config ↔
       secretVault` 등)는 각각 동적 import·지연 평가로 막혀 있고 실측 로드 OK 라 **이번에 풀지 않았다**.
 
+  - ⚠⚠ **SQLite 모듈의 open 은 예외 없이 '진행 중인 시도' 를 공유한다 — 단일 파일이든 파일별 Map 이든**
+    (`test/arch2580.test.js` 가 소스 스윕 + fd 실측으로 고정, v2.580 — 사용자 요청 "아키텍처 점검, 버그 수정,
+    튜닝" 2차):
+    - **결함(BUG-A)**: `_db` 만 보고 `if (_db) return _db; … _db = new DatabaseSync(FILE)` 로 여는 모듈은
+      **첫 호출 2건이 겹치면 같은 파일에 핸들이 2개** 열리고, 뒤 핸들이 `_db` 를 덮어 **앞 핸들은 닫히지
+      않은 채 버려진다**(fd 누수 + WAL 연결 2개). `storage/db.js` 에 `capacityResets()`·`dailySpans()` 를
+      `Promise.all` 로 부르면 `/proc/self/fd` 에 `storage-history.db` **2개**로 재현했다. v2.550 이
+      `bmusage/db.js` 에 같은 결함을 기록해 두었는데 형제 모듈 **7곳**(`storage/db.js`·`sanswitch/perfDb.js`·
+      `rma/historyDb.js`·`pdu/db.js`·`rma/testResults.js`·`metrics/vmperfDb.js`·`vmseries/db.js`)에
+      적용되지 않았다 — 손 grep 은 6곳을 셌고 **7번째는 테스트 스윕이 잡았다**(v2.579 풀 사본과 같은 교훈).
+    - **규칙**: 단일 파일 모듈은 `_opening` 프라미스를 공유하고(`if (_opening) return _opening;`),
+      파일별 Map 모듈(`getVmperfDb(vcenterId)` 류)은 **파일 키의 `opening` Map** 을 둔다. `_tried`/
+      `'unavailable'` 은 성패가 확정된 뒤에만 세운다(v2.550 규약). 새 DB 모듈은 이 둘 중 하나다 — 스윕이
+      `await import('node:sqlite')` 를 쓰면서 핸들을 보관하는 모듈 전부를 검사한다.
+    - **BUG-B**: `ping/store.js loadRaw()` 가 파싱 실패를 **조용히 빈 목록**으로 넘겼다 — 다음 저장이 온전했던
+      `ping-targets.json` 을 빈 목록으로 덮어써 핑 대상 전량 유실. server/CLAUDE.md '로드 catch 의 조용한
+      빈값 반환 금지' 의 누락 지점이고 `preserveCorrupt` + `console.warn` 으로 고쳤다. **비밀이 없는 설정
+      파일도 이 규칙의 대상이다** — 유실되는 것이 자격증명이 아니라도 사용자가 손으로 등록한 것이면 같다.
+    - ⚠⚠ **TUNE-B/C — '세대 키 + 개수 상한' 캐시는 세대가 바뀌면 옛 세대를 버려야 한다.** 키가
+      `${snap.generatedAt}|…` 인 캐시를 '최근 N개' 로만 지키면, 스냅샷이 30초마다 바뀌는 이 서버에서 **다시
+      히트할 수 없는 옛 세대 항목이 N개가 찰 때까지 상주**한다. `ipam/ledger.js`(`_ipamCache`·`_sheetCache` —
+      `store.js` 가 매 폴링마다 부른다)와 `util/snapCache.js`(`memoJson` 응답 캐시 42 엔드포인트)가 그랬다.
+      **힙 스냅샷 2장(4.7분)의 retainer 집계로 확정**했다 — 살아 있는 힙 156→219MB 의 대부분이
+      `_ipamCache > Map.table > Object.rows` 아래였고, 힙 상한 160MB 서버는 9분 만에 OOM 이었다.
+      v2.503 이 snapCache 에 적어 둔 *"값은 스냅샷이 넘어가면 교체되므로 메모리는 1세대분"* 은 **틀린
+      전제**였다 — 주석이 근거를 대신하면 안 된다. 지금은 새 키를 넣을 때 세대(첫 조각)가 다른 항목을
+      버린다(같은 세대의 다중 scope 는 유지 · 진행 중 promise 는 보호 · N 은 백스톱). **새 캐시를 만들 때
+      '세대가 바뀌면 무엇이 지워지는가' 를 먼저 답할 것** — 답이 '상한에 밀릴 때' 면 이 결함이다.
+      · ⚠ RSS 만 보고 '누수' 라 적지 말 것 — 판정은 **힙 상한 대조(OOM 여부) → 힙 스냅샷 retainer** 순서다.
+        v2.579 의 'RSS 183/227MB' 2점 측정은 이 성장을 볼 수 없었다(시계열이어야 보인다).
+      · `--heapsnapshot-signal` 은 **실제 node PID** 에 보내야 한다 — `cd … && node … &` 의 `$!` 는
+        서브셸이라 신호가 셸을 죽인다(v2.580 에 실제로 겪었다).
+    - **튜닝**: `Settings.jsx` 가 큰 패널 12개를 `lazy()` 로 떼어 `Settings-*.js` 청크 **605KB/159KB gz →
+      250KB/74.7KB gz**. `SUB` 표·키·URL(`#/settings/<k>`)은 그대로다. 새 설정 패널을 추가할 때 정적
+      import 로 되돌리지 말 것(청크가 다시 자란다). Suspense 폴백은 공용 `Loading` 하나다.
+    - **BUG-C(기존 결함, A/B 확정)**: 설정 › GPU 게스트 수집 필터 행(**166px**)·업그레이드 버튼 행(**83px**)이
+      400px 에서 넘쳤다 — 한 줄 고정 flex 에 `flexWrap:'wrap'`. **버튼·필터를 한 줄에 여러 개 두는 flex 행은
+      `flexWrap` 을 기본으로** 둘 것(v2.576 그리드 `min-width:0` 규약과 같은 계열 — 수치로는 400px 에서만 보인다).
+    - ⚠ **웹 그래프 스크립트는 `export … from` 재수출 edge 를 보지 못한다** — '고아 후보' 2건
+      (`components/EntityDetail.jsx`·`views/tools/IpamCore.jsx`)은 재수출로 쓰이는 **정상 모듈**이다.
+      팬인 0 을 죽은 코드로 단정하지 말고 grep 으로 재수출을 먼저 볼 것.
+
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
 서버 보안 불변조건(전역 TLS·RBAC·토큰 검증·scope·OTP·WS 게이트웨이 등 전 항목)은

@@ -96,12 +96,22 @@ function prepare(db) {
 }
 
 /** vCenter 의 DB 핸들(없으면 생성). node:sqlite 미지원이면 null. */
+// v2.580(BUG-A): 파일별 **진행 중 open 을 공유한다** — `open.get(file)` 검사와 핸들 생성 사이에 같은
+// vCenter 의 두 번째 호출이 들어오면 같은 파일에 `DatabaseSync` 가 둘 생기고(`open.set` 이 덮어써) 첫
+// 핸들이 새어 나갔다(단일 파일 모듈의 v2.580 재현과 같은 유형). 파일 단위로 in-flight 를 공유한다.
+const opening = new Map(); // file -> Promise<entry>
 export async function getVmSeriesDb(vcenterId, { create = true } = {}) {
   const mod = await loadSqlite();
   if (!mod) return null;
   const file = dbFileName(vcenterId);
   const hit = open.get(file);
   if (hit) { hit.usedAt = Date.now(); return hit; }
+  if (opening.has(file)) return opening.get(file);
+  const p = openFile(vcenterId, file, mod, create).finally(() => { opening.delete(file); });
+  opening.set(file, p);
+  return p;
+}
+async function openFile(vcenterId, file, mod, create) {
   const p = path.join(DIR, `${file}.db`);
   // 조회 경로가 없는 vCenter id 로 파일을 무한 생성하지 않게(toolsCapacity v2.447 교훈) — create=false 면 없으면 null.
   if (!create && !fs.existsSync(p)) return null;

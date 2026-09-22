@@ -12,6 +12,26 @@ import { findPolicy, policiesRev, getPolicies } from './rangePolicies.js';
 // buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override/정책 리비전이면 재계산하지 않는다.
 // (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
 const _ipamCache = new Map(); // key -> rows결과
+// v2.580(TUNE-B): 캐시 키의 첫 조각은 `snap.generatedAt`(스냅샷 세대)다. 예전에는 '최근 32개' 만 지켰는데,
+// `store.js` 가 **매 폴링(30초)마다** `buildIpamRows(snapshot)` 을 부르므로 세대가 바뀔 때마다 새 항목이
+// 들어오고 지난 세대 항목은 **다시 히트할 수 없는데도** 32개가 찰 때까지 남았다. 힙 스냅샷 비교(4.7분,
+// MOCK_SCALE=3)로 확인 — 새 객체 54.7MB 중 대부분이 `_ipamCache > Map.table > Object.rows` 아래였고,
+// 힙 상한 160MB 서버는 9분 만에 OOM 이었다(32세대 × 세대당 수 MB 가 상주). 지금은 **현재 세대와 다른
+// 세대의 항목을 전부 버린다** — 같은 세대의 여러 scope(다중 vCenter 동시 조회) 는 그대로 남고, 32개 상한은
+// 한 세대 안의 백스톱으로 유지한다.
+const MAX_CACHE_ENTRIES = 32;
+const generationOf = (key) => { const s = String(key); const i = s.indexOf('|'); return i < 0 ? null : s.slice(0, i); };
+function putGenerationCache(map, key, value) {
+  const gen = generationOf(key);
+  if (gen != null) for (const k of map.keys()) { const g = generationOf(k); if (g != null && g !== gen) map.delete(k); }
+  map.set(key, value);
+  if (map.size > MAX_CACHE_ENTRIES) map.delete(map.keys().next().value);
+}
+/** 테스트·진단용 — 캐시 항목 수와 세대 수. */
+export function _ledgerCacheStats() {
+  const gens = (m) => new Set([...m.keys()].map(generationOf)).size;
+  return { rows: _ipamCache.size, rowsGenerations: gens(_ipamCache), sheets: _sheetCache.size, sheetsGenerations: gens(_sheetCache) };
+}
 // 캐시 키에 사용자 scope 서명(sc:)을 반드시 포함한다 — 빠지면 무제한 계정의 전체 원장이
 // 범위 제한 계정에 캐시 히트로 새어 나간다(M1 캐시 교차 유출과 동형). allowed=null='all'.
 const _ipamKey = (snap, vcenterId, allowed = null) => `${snap?.generatedAt || ''}|${vcenterId || ''}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}`;
@@ -250,9 +270,7 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
     byVcenter: Object.entries(byVc).map(([id, c]) => ({ vcenterId: id, vcenterName: vcName[id] || (id || '네트워크 스캔'), scanned: !id, count: c })).sort((a, b) => b.count - a.count),
     rows,
   };
-  // 최근 키만 소량 보관(스냅샷이 바뀌면 키가 달라져 자연 만료). 메모리 상한.
-  _ipamCache.set(_ck, out);
-  if (_ipamCache.size > 32) _ipamCache.delete(_ipamCache.keys().next().value); // 다중 vCenter 스코프 동시 조회 대비
+  putGenerationCache(_ipamCache, _ck, out);
   return out;
 }
 
@@ -270,8 +288,7 @@ export function buildSubnetSheets(snap, { vcenterId, onlyBase, allowed = null } 
   const hit = _sheetCache.get(ck);
   if (hit) return hit;
   const sheets = buildSubnetSheetsUncached(snap, { vcenterId, onlyBase, allowed });
-  _sheetCache.set(ck, sheets);
-  if (_sheetCache.size > 32) _sheetCache.delete(_sheetCache.keys().next().value);
+  putGenerationCache(_sheetCache, ck, sheets);
   return sheets;
 }
 

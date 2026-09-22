@@ -15,7 +15,17 @@ const OUTPUT_MAX = 64 * 1024; // 행당 stdout/stderr 저장 상한(64KB × 수�
 let _db = null;
 let _tick = 0;
 
+// v2.580(BUG-A): **진행 중인 open 을 공유한다** — 예전에는 `_db` 검사와 `await import('node:sqlite')`
+// 사이에서 두 번째 호출이 들어오면 같은 파일에 `DatabaseSync` 가 **둘** 만들어지고 첫 핸들이 새어
+// 나갔다(v2.580 재현: 동시 2호출 → 같은 파일 fd 2개). `bmusage/db.js`(v2.550)와 같은 패턴이다.
+let _opening = null;
 async function open() {
+  if (_db) return _db === 'unavailable' ? null : _db;
+  if (_opening) return _opening;
+  _opening = openInner().finally(() => { _opening = null; });
+  return _opening;
+}
+async function openInner() {
   if (_db) return _db === 'unavailable' ? null : _db;
   try {
     const { DatabaseSync } = await import('node:sqlite');
