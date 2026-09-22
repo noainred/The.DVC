@@ -30,6 +30,7 @@ import { TEMP_SERIES_DETAIL } from '../../idrac/serverTempSeries.js'; // v2.556:
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
 import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from './shared.js';
+import { numOrNull } from '../../util/numOrNull.js'; // v2.578: 요청 기간 등 '읽지 못한 수치' 를 0 으로 둔갑시키지 않는다
 import { normGroupQuery, filterVmsByGroup, inventoryGroups, hasGroup } from './groupFilter.js'; // v2.491: 클러스터·폴더 하위 범위
 
 export function registerToolsCapacity(api) {
@@ -259,7 +260,13 @@ api.post('/vms/usage', requirePerm('inv.vms'), async (req, res) => {
   const days = normDays(req.body?.days);
   const interval = intervalForDays(days);
   const ids = Array.isArray(req.body?.vmIds) ? req.body.vmIds.map(String) : [];
-  const base = { days, interval, intervalSec: PERF_INTERVALS[interval], maxVms: USAGE_MAX_VMS, allDays: USAGE_DAYS };
+  // v2.578 D2: `normDays` 는 프리셋 밖 기간을 **조용히 30일로** 떨어뜨린다. 정규화된 값만 실으면
+  // 화면이 요청값(예: 14일)을 그대로 보여줘 사용자가 14일 결과라고 믿는다 — 요청값도 함께 준다.
+  const requestedDays = numOrNull(req.body?.days);
+  const base = {
+    days, requestedDays, interval, intervalSec: PERF_INTERVALS[interval],
+    maxVms: USAGE_MAX_VMS, allDays: USAGE_DAYS,
+  };
   if (!ids.length) return res.json({ ...base, truncated: false, synthesized: false, usage: {} });
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
@@ -611,8 +618,19 @@ api.get('/tools/waste/history', requirePerm('tools'), async (req, res) => {
     const m = await vmperfMeta(vcId, 'vm_cpu_alloc_mhz');
     meta = { firstTs: m.firstTs, lastTs: m.lastTs };
   } catch (e) { console.warn('[toolsCapacity] 시계열 조회 실패 — 빈 배열로 응답(감사 B8):', e?.message); points = []; }
-  // 관측 시작 이전 구간은 데이터가 없다 — 프론트가 '수집 시작' 을 표기할 수 있게 meta 를 준다.
-  res.json({ vcenterId: vcId || 'all', days, bucketMs, collectedSince: meta?.firstTs ?? null, points });
+  // v2.578: 조용한 절단 금지(CLAUDE.md v2.509). `bucket=hour` 를 손으로 지정하면 365일 × 1시간 =
+  // 8,760점 > limit 3,000 이라 `ORDER BY b DESC LIMIT` 이 **최근 ≈125일만** 남긴다. 예전에는 그
+  // 사실을 아무 데서도 말하지 않아 화면이 '365일을 봤다' 는 거짓을 말했다.
+  const truncated = points.length >= limit;
+  const coveredDays = truncated && points.length > 1
+    ? Math.max(1, Math.round((points[points.length - 1].ts - points[0].ts) / 86_400_000))
+    : null;
+  // collectedSince 는 prune 된 MIN(ts) 다 — 보존일을 함께 줘야 화면이 단정하지 않는다(D1).
+  res.json({
+    vcenterId: vcId || 'all', days, bucketMs,
+    collectedSince: meta?.firstTs ?? null, retentionDays: loadVmperfSettings().retentionDays,
+    truncated, coveredDays, limit, points,
+  });
 });
 
 /**
@@ -702,7 +720,10 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
       const points = [...byTs.values()].sort((a, b) => a.ts - b.ts).map((e) => ({ diskPct: null, ...e }));
       return res.json({
         vcenterId: vcId, scope: scopeRaw, range: rangeKey, bucketMs: intervalSec * 1000, ranges: Object.keys(USAGE_RANGES),
-        collectedSince: null, points, source: 'vcenter-perf', interval, hosts: targets.length, hostsTotal: totalHosts,
+        // v2.578 D4: 롤업 구간을 **초로** 함께 준다 — 화면이 'week' 같은 내부 이름이나 하드코딩한
+        // 숫자가 아니라 서버가 아는 값으로 '30분 구간' 이라고 적을 수 있게(CLAUDE.md 규약).
+        collectedSince: null, points, source: 'vcenter-perf', interval, intervalSec: PERF_INTERVALS[interval] ?? null,
+        hosts: targets.length, hostsTotal: totalHosts,
         hostsOmitted: totalHosts - targets.length, diskAvailable: false,
         counters: { cpu: !!r.cpuId, mem: !!r.memId },
       });
@@ -714,6 +735,7 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
 
   let points = [];
   let collectedSince = null;
+  let maxPctUnstable = 0;   // 구간 안에서 할당이 바뀌어 '최대 사용률' 을 낼 수 없던 구간 수
   try {
     const metrics = [...VMPERF_METRICS, ...VMPERF_DISK_METRICS];
     const series = await Promise.all(metrics.map((m) => vmperfHistory(vcId, m, since, bucketMs, limit)));
@@ -723,10 +745,17 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
         let e = byTs.get(p.ts);
         if (!e) { e = { ts: p.ts }; byTs.set(p.ts, e); }
         e[m] = p.avg;
+        // v2.578 D3: `vmperfHistory` 는 버킷 최대도 이미 계산해 돌려준다(`vmperfDb.js:139-142`) —
+        // 예전에는 avg 만 취하고 버렸다. 기간을 늘리면 버킷이 굵어져 **평균은 거의 그대로인데
+        // 최대가 평탄해지는 것**이 사용자가 본 '기간마다 값이 다르다' 의 실체이므로, 그 최대를
+        // 화면이 직접 볼 수 있게 함께 싣는다(추가 쿼리 0 — 같은 행의 다른 열이다).
+        e[`${m}__max`] = p.max;
       }
     });
     const r1 = (x) => (x == null ? null : Number(x.toFixed(1)));
     const pct = (u, a) => (a > 0 && u != null ? Math.round((u / a) * 100) : null);
+    // 최대 사용률: 분모(평균 할당)가 그 구간에서 움직였으면 비율이 뜻을 잃는다 → null.
+    const maxPct = (u, a) => { const v = pct(u, a); return v == null || v > 100 ? null : v; };
     points = [...byTs.values()].sort((a, b) => a.ts - b.ts).map((e) => ({
       ts: e.ts,
       cpuAllocGHz: r1(e.vm_cpu_alloc_mhz == null ? null : e.vm_cpu_alloc_mhz / 1000),
@@ -738,14 +767,33 @@ api.get('/vcenters/:id/usage-history', async (req, res) => {
       diskCapGB: r1(e.ds_cap_gb_vc),
       diskUsedGB: r1(e.ds_used_gb_vc),
       diskPct: pct(e.ds_used_gb_vc, e.ds_cap_gb_vc),
+      // 구간 최대(사용량만). 절대량은 언제나 옳다 — 그 구간에서 실제로 관측된 최댓값이다.
+      cpuUsedMaxGHz: r1(e.vm_cpu_used_mhz__max == null ? null : e.vm_cpu_used_mhz__max / 1000),
+      memUsedMaxGB: r1(e.vm_mem_used_mb__max == null ? null : e.vm_mem_used_mb__max / 1024),
+      // ⚠⚠ 최대 **사용률**의 분모는 그 버킷의 **평균 할당**이다(우리가 가진 것이 그것뿐이다).
+      // 버킷 안에서 할당이 늘면 `max(사용) / avg(할당)` 이 100% 를 넘는다 — v2.578 검증에서 실제로
+      // 나왔다(12시간 버킷 1개: 할당 729.7GHz · 최대 1,400.5GHz = 192%). 차트 y축이 [0,100] 이라
+      // 그대로 두면 **조용히 잘려** 100% 에 붙은 선이 되고, 그것은 '꽉 찼다' 는 거짓이다.
+      // 그래서 근사가 성립하지 않는 구간은 **null 로 비우고 개수를 밝힌다**(조용한 보정 금지).
+      cpuMaxPct: maxPct(e.vm_cpu_used_mhz__max, e.vm_cpu_alloc_mhz),
+      memMaxPct: maxPct(e.vm_mem_used_mb__max, e.vm_mem_alloc_mb),
     }));
+    maxPctUnstable = points.filter((x) => (
+      (x.cpuUsedMaxGHz != null && x.cpuMaxPct == null) || (x.memUsedMaxGB != null && x.memMaxPct == null)
+    )).length;
     const m1 = await vmperfMeta(vcId, 'vm_cpu_alloc_mhz');
     const m2 = await vmperfMeta(vcId, 'ds_cap_gb_vc');
     const firsts = [m1.firstTs, m2.firstTs].filter((x) => x != null);
     collectedSince = firsts.length ? Math.min(...firsts) : null;
   } catch (e) { console.warn('[toolsCapacity] 시계열 조회 실패 — 빈 배열로 응답(감사 B8):', e?.message); points = []; }
 
-  res.json({ vcenterId: vcId, range: rangeKey, bucketMs, ranges: Object.keys(USAGE_RANGES), collectedSince, points });
+  // v2.578 D1: `collectedSince` 는 **prune 된 테이블의 MIN(ts)** 라 `max(수집 시작, 지금 - 보존일)`
+  // 이다. 보존일을 함께 주지 않으면 화면이 그것을 '수집 시작' 으로 단정하고 "기다리면 채워집니다"
+  // 라는 거짓을 말한다(보존 경계면 영원히 안 채워진다). 판정은 웹 `views/trendMeta.js sinceNote`.
+  res.json({
+    vcenterId: vcId, range: rangeKey, bucketMs, ranges: Object.keys(USAGE_RANGES),
+    collectedSince, retentionDays: loadVmperfSettings().retentionDays, maxPctUnstable, points,
+  });
 });
 
 /**
@@ -938,6 +986,8 @@ const rightsizePolicy = () => ({
 
 api.get('/tools/rightsize', requirePerm('tools'), async (req, res) => {
   const vmId = String(req.query.vmId || '');
+  // v2.578 D2: 프리셋 밖이면 7일로 내려앉는다 — 그 사실을 응답이 밝힌다(조용한 대체 금지).
+  const requestedDays = numOrNull(req.query.days);
   const days = [7, 30, 90, 180, 365].includes(Number(req.query.days)) ? Number(req.query.days) : 7;
   const snap = store.get();
   const vm = (snap.vms || []).find((v) => v.id === vmId);
@@ -945,7 +995,7 @@ api.get('/tools/rightsize', requirePerm('tools'), async (req, res) => {
   if (!vm || (allowed && !allowed.has(vm.vcenterId))) return res.status(404).json({ ok: false, reason: 'VM 을 찾을 수 없습니다.' });
   const ck = `${vmId}|${days}`;
   const hit = rightsizeCache.get(ck);
-  if (hit && Date.now() - hit.at < RIGHTSIZE_TTL_MS) return res.json({ ok: true, cached: true, ...hit.report });
+  if (hit && Date.now() - hit.at < RIGHTSIZE_TTL_MS) return res.json({ ok: true, cached: true, requestedDays, ...hit.report });
 
   // 호스트 코어당 MHz — 샘플러와 같은 계산(총 MHz ÷ 코어). 모르면 null(추정 금지).
   const host = (snap.hosts || []).find((h) => h.vcenterId === vm.vcenterId && h.name === vm.host);
@@ -976,7 +1026,7 @@ api.get('/tools/rightsize', requirePerm('tools'), async (req, res) => {
   const out = { ...report, series: fetched.series, realtime: fetched.realtime || null, synthesized: !!fetched.synthesized };
   rightsizeCache.set(ck, { at: Date.now(), report: out });
   if (rightsizeCache.size > 2000) for (const [k, e] of rightsizeCache) if (Date.now() - e.at > RIGHTSIZE_TTL_MS) rightsizeCache.delete(k);
-  res.json({ ok: true, cached: false, ...out });
+  res.json({ ok: true, cached: false, requestedDays, ...out });
 });
 
 // Thin-provisioned VM finder. thin = uncommitted(여유)이 큰 VM(추정). committed=실사용,

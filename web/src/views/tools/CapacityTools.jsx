@@ -11,6 +11,8 @@ import ServerTempBoard from './serverTemp/ServerTempBoard.jsx'; // v2.556: 서�
 import { sparkCellState, sparkCellText, sparkProgressText, sparkCapText, SPARK_ROW_CAP } from './sparkBatch.js';
 // v2.497: 엑셀(ZIP) 내보내기 버튼 문구·예상치 — 판정은 순수 모듈(node 테스트로 고정)
 import { reportCount, exportLabel, exportTitle, progressNote, exportErrText } from './wasteExportText.js';
+// v2.578 D1·D3·D4: 기준선(언제부터의 자료인가)·해상도 인과·절단 사실 — 판정과 문구를 한 모듈이 소유한다.
+import { sinceNote, bucketAvgLabel, resolutionNote, truncationNote } from '../trendMeta.js';
 
 
 /** 서버 구분 라벨(v2.512) — iDRAC serviceTag 가 ESXi 호스트와 맞으면 가상화, 아니면 물리(베어메탈). */
@@ -242,10 +244,11 @@ function WasteTrend({ scope }) {
       {err ? <ErrorBox message={err} />
         : !d ? <Loading />
           : pts.length < 2 ? (
-            <div className="muted" style={{ fontSize: 13, padding: 20, textAlign: 'center' }}>
-              표시할 추이 데이터가 아직 없습니다. 사용량은 <b>샘플러가 수집하는 시점부터</b> 쌓입니다
-              {d.collectedSince ? <> (수집 시작: {new Date(d.collectedSince).toLocaleString('ko-KR')})</> : null}.
-              업그레이드 직후에는 몇 시간 뒤부터 그래프가 보입니다.
+            <div className="muted" style={{ fontSize: 13, padding: 20, textAlign: 'center', lineHeight: 1.7 }}>
+              표시할 추이 데이터가 아직 없습니다.<br />
+              {/* v2.578 D1: '수집 시작' 이라 단정하지 않는다 — collectedSince 는 prune 된 MIN(ts) 라
+                  보존 경계일 수 있고, 그때는 기다려도 채워지지 않는다. */}
+              {sinceNote({ collectedSince: d.collectedSince, retentionDays: d.retentionDays, now: Date.now() }).text}
             </div>
           ) : (
             <div style={{ width: '100%', height: 320 }}>
@@ -271,10 +274,14 @@ function WasteTrend({ scope }) {
             </div>
           )}
       {pts.length >= 2 && (
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.7 }}>
           점선 = 할당, 실선 = 실사용. 사용률이 장기간 낮게 유지되면 할당을 줄일 여지가 있습니다.
-          {' '}집계 단위 {d.bucketMs >= 86_400_000 ? `${Math.round(d.bucketMs / 86_400_000)}일` : `${Math.round(d.bucketMs / 3_600_000)}시간`} 평균 ·
-          {' '}표본 {pts.length}점{d.collectedSince ? ` · 수집 시작 ${new Date(d.collectedSince).toLocaleDateString('ko-KR')}` : ''}
+          {' '}출처: 포탈 시계열({bucketAvgLabel(d.bucketMs) || '집계 단위 미상'}) · 표본 {pts.length}점
+          {truncationNote({ truncated: d.truncated, covered: d.coveredDays, requestedDays: d.days })
+            ? <><br /><b style={{ color: 'var(--amber)' }}>{truncationNote({ truncated: d.truncated, covered: d.coveredDays, requestedDays: d.days })}</b></>
+            : null}
+          <br />{resolutionNote(d.bucketMs)}
+          <br />{sinceNote({ collectedSince: d.collectedSince, retentionDays: d.retentionDays, now: Date.now() }).text}
         </div>
       )}
     </>
