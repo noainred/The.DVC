@@ -28,8 +28,7 @@ export const TREE = Object.freeze([
       page('overview'),
       tab('summary', '요약 리포트', '#/summary'),
       tab('vcenters', '법인 · 플랫폼', '#/vcenters'),
-      tab('insights', '인사이트', '#/insights'),
-      tool('aisearch'), tool('deepsearch'), tool('explore'),
+      tool('insights-hub'), tool('aisearch'), tool('deepsearch'), tool('explore'),
     ],
   },
   {

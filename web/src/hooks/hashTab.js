@@ -37,3 +37,19 @@ export function tabFromHash(hash, base, valid) {
 export function buildHash(base, key) {
   return `#/${[...base, key].join('/')}`;
 }
+
+/**
+ * 상단 탭에서 특수 기능으로 옮긴 화면의 옛 해시 → 새 해시(v2.592).
+ * 북마크·공유 링크·관제 콘솔 내비가 옛 주소를 들고 있으므로 지우지 말 것 — 옮긴 화면이 늘면 여기에 더한다.
+ *   '#/insights'         → '#/tools/insights-hub'
+ *   '#/insights/anomaly' → '#/tools/insights-hub/anomaly'
+ * ⚠ '#/tools/insights' 는 다른 화면(운영 인사이트)이다 — 그리로 보내지 말 것.
+ * 해당 없으면 null.
+ */
+export const MOVED_TABS = Object.freeze({ insights: ['tools', 'insights-hub'] });
+export function movedTabHash(hash) {
+  const segs = hashSegments(hash);
+  const to = segs.length ? MOVED_TABS[segs[0]] : null;
+  if (!to || !Object.hasOwn(MOVED_TABS, segs[0])) return null;
+  return `#/${[...to, ...segs.slice(1)].join('/')}`;
+}

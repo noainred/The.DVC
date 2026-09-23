@@ -9,6 +9,9 @@ export const TOOLS = [
   { k: 'service-hub', icon: '🧰', label: '서비스 허브 (별도 포탈)', desc: '운영 서비스 바로가기 모음 · 링크 상태 점검/추이 · 데이터센터 구성 (새 탭)', external: 'serviceHubUrl' },
   { k: 'aisearch', icon: '🔎', label: 'AI 검색 (자연어)', desc: '자연어로 VM/호스트/IP 검색 · 로컬 LLM' },
   { k: 'insights', icon: '🧠', label: '운영 인사이트', desc: 'VM 라이트사이징 · 클러스터 N+1 여력 · 알람 핫스팟 · GPU 유휴' },
+  // v2.592: 상단 메뉴 '인사이트'(FinOps·이상탐지 등 7패널)를 특수 기능으로 옮겼다. 위 'insights'(운영 인사이트)와
+  // 다른 화면이다 — 키를 합치면 permissions.json 의 toolsDenied 'insights' 가 엉뚱한 화면을 막는다.
+  { k: 'insights-hub', icon: '📊', label: '인사이트', desc: 'FinOps · 이상탐지 · 용량예측 · 보안 · 토폴로지 · 인시던트 · ChatOps — 예전 상단 메뉴의 인사이트', perm: 'insights', aka: ['insights', 'finops', '이상탐지', '용량예측', '인시던트', 'chatops', '상단 인사이트'] },
   { k: 'explore', icon: '🏆', label: '탐색·랭킹', desc: '자원 최다 사용 Top 랭킹(CPU·메모리·디스크·전력) + 상세 스펙 VM 검색 — 리전/vCenter 범위 선택', perm: 'dashboard' },
   { k: 'threats', icon: '🛡️', label: '위협 탐지', desc: '마이닝 의심 · 위험 포트 노출 · EOL OS · 신규 rogue IP · NSX IDS' },
   { k: 'secret-scan', icon: '🔐', label: '평문 자격증명 점검', desc: '설정 파일·portal.env·로그·소스에 평문으로 남은 계정정보/토큰/키 탐지(값은 마스킹) · 암호화 저장 전환 안내', adminOnly: true },

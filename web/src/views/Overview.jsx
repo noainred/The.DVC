@@ -168,7 +168,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
             meta={g.powerRegistered != null && g.powerRegistered !== g.powerReporting
               ? `전력 보고 ${fmt(g.powerReporting)}대 / 등록 ${fmt(g.powerRegistered)}대`
               : `전력 보고 ${fmt(g.powerReporting)}대 합계`}
-            onClick={() => onGotoTab?.('insights')} />
+            onClick={() => { window.location.hash = '#/tools/insights-hub'; }} />
         )}
         <Kpi label="GPU 카드 수량" value={fmt(ov.gpuCards)} accent="var(--accent-2)" meta="설치된 GPU 장수" onClick={() => onGotoTab?.('tools')} />
         <Kpi label="GPU 사용 VM 수량" value={fmt(ov.gpuVms)} accent="var(--green)" meta="GPU 할당된 VM 수" onClick={() => onGotoTab?.('tools')} />
