@@ -17,7 +17,7 @@ export default function Compare({ scope, sitesAll, spec, go }) {
   const [axis, setAxis] = useState('cluster');
   const [normalize, setNormalize] = useState(false);
   const canTools = can('tools');
-  const canFc = canTools && toolAllowed('capacity-forecast');
+  const canFc = canTools && toolAllowed('forecast') /* v2.583 #38: 서버는 capacity-forecast 경로를 forecast 키로 집행한다 */;
   const canCap = canTools && toolAllowed('capacity');
   const canTrack = canTools && toolAllowed('vm-track');
   const canInsights = can('insights'); // /insights/* 는 requirePerm('insights') 아래다(index.js:229)

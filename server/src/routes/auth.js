@@ -11,6 +11,9 @@ import { newSessionId, setActiveSession } from '../auth/sessions.js';
 import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '../security/loginRateLimit.js';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { clientIp } from '../util/rateLimit.js';   // v2.503: 잠금 출발지 판정을 전역 레이트리밋과 통일(trust proxy 규약)
+import { createDenyAuditGate, foldedNote } from '../util/denyAuditGate.js';
+const loginFailGate = createDenyAuditGate();
+const loginBlockedGate = createDenyAuditGate();
 
 export const authRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
@@ -59,7 +62,9 @@ authRouter.post('/login', async (req, res) => {
   // 무차별 대입 방어: peer+계정 잠금 상태면 인증 시도 자체를 막는다.
   const gate = checkLoginAllowed(gateIp, username);
   if (gate.blocked) {
-    logAudit({ user: username, action: '로그인 차단(잠금)', detail: `${gate.retryAfterSec}s`, ip });
+    // v2.583(감사 확정): 잠긴 뒤의 시도는 공격자에게 비용이 없다 — 출처당 1분에 한 줄로 합친다(util/denyAuditGate.js).
+    const sum = loginBlockedGate(gateIp);
+    if (sum.write) logAudit({ user: username, action: '로그인 차단(잠금)', detail: `${gate.retryAfterSec}s${foldedNote(sum.folded)}`, ip });
     return res.status(429).set('Retry-After', String(gate.retryAfterSec))
       .json({ error: `로그인 시도가 일시적으로 잠겼습니다. ${gate.retryAfterSec}초 후 다시 시도하세요.` });
   }
@@ -67,7 +72,9 @@ authRouter.post('/login', async (req, res) => {
   const user = await authenticate(username, password);
   if (!user) {
     const lk = recordLoginFailure(gateIp, username);
-    logAudit({ user: username, action: lk.locked ? '로그인 실패(잠금 발동)' : '로그인 실패', ip });
+    // 잠금을 **발동시킨** 줄은 항상 남긴다. 그 밖의 실패는 출처당 1분에 한 줄 + 합친 개수(감사 이력 밀어내기 방지).
+    if (lk.locked) logAudit({ user: username, action: '로그인 실패(잠금 발동)', ip });
+    else { const sum = loginFailGate(gateIp); if (sum.write) logAudit({ user: username, action: '로그인 실패', detail: foldedNote(sum.folded).replace(/^ · /, ''), ip }); }
     try { recordPortalLoginFail({ username, ip, reason: 'invalid credentials' }); } catch { /* */ }
     if (lk.locked) {
       return res.status(429).set('Retry-After', String(lk.retryAfterSec))

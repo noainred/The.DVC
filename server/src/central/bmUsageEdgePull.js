@@ -12,6 +12,7 @@
  *   (v2.548 F5). 둘이 다르면 그 사실 자체가 진단이므로 화면이 나란히 보여 준다.
  * ⚠ 실패를 '모름' 으로 뭉개지 않는다 — `kind` 로 원인을 나눈다(조치가 전부 다르다).
  */
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
 import { resilientFetch } from '../util/resilientFetch.js';
 import { findCollector } from './edgeLogPull.js';
 
@@ -88,7 +89,7 @@ export async function pullBmUsage(agent, { limit = 0 } = {}) {
 
   const ms = Date.now() - t0;
   let body = null;
-  try { body = await res.json(); } catch { body = null; }
+  try { body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '엣지 사용률 응답'); } catch { body = null; } // v2.583: 크기 상한
 
   const fail = (kind, reason) => {
     const rec = putEdgeBmUsage(name, { ok: false, kind, reason, ms });

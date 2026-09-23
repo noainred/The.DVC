@@ -14,6 +14,7 @@
  * ⚠ 404 는 **두 뜻**이다(엣지의 collector 가 꺼짐 / 구버전이라 이 경로가 없음) — 본문으로 가른다.
  *   구버전 엣지는 express 기본 404(HTML·`Cannot GET`)를 주고, 이 코드의 엣지는 `{ok:false,reason}` 을 준다.
  */
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
 import { resilientFetch } from '../util/resilientFetch.js';
 import { putEdgeLog } from './edgeLogStore.js';
 
@@ -73,7 +74,7 @@ export async function pullEdgeLog(agent, { since = 0, level = '', limit = 0, wit
 
   const ms = Date.now() - t0;
   let body = null;
-  try { body = await res.json(); } catch { body = null; }
+  try { body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '엣지 로그 응답'); } catch { body = null; } // v2.583: 크기 상한
 
   if (res.status === 401 || res.status === 403) {
     const rec = { ok: false, kind: 'auth', reason: '수집 서버 토큰 불일치 — 중앙 등록값과 그 엣지의 COLLECTOR_TOKEN 을 대조하세요.', ms };

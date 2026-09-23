@@ -105,13 +105,25 @@ for (const file of walk(SRC)) {
   // `process.env.KEY` + 이 파일이 쓰는 별칭의 `alias.KEY` 를 한 정규식으로 훑는다.
   const aliases = envAliases(text);
   const refRe = new RegExp(`(?:process\\.env|\\b(?:${['__never__', ...aliases].join('|')}))\\.([A-Z][A-Z_0-9]*)`, 'g');
+  /*
+   * v2.583: **`process.env[이름]` 동적 조회**도 잡는다 — 그 전에는 주기 표(`storage/intervals.js` 의
+   * `{ env: 'STORAGE_POLL_MS', … }`)와 도우미(`const envNum = (k, d) => … process.env[k] …` 의 `envNum('X', …)`)로
+   * 읽는 키가 문서에서 **조용히 빠졌다**(설정 문서가 실제 키 STORAGE_POLL_MS 를 안내하자 '코드에 없는 키' 로 오판됐다).
+   * 동적 조회가 있는 파일에서만 ① 객체 필드 `env: 'KEY'` ② process.env[인자] 를 쓰는 도우미의 첫 인자 리터럴을 본다.
+   */
+  const dyn = /process\.env\[/.test(text);
+  const helperNames = dyn ? [...text.matchAll(/\b(?:const|function)\s+([A-Za-z_$][\w$]*)\s*(?:=\s*)?\(\s*([A-Za-z_$][\w$]*)[^)]*\)\s*(?:=>)?\s*\{?[^\n]*process\.env\[\2\]/g)].map((m) => m[1]) : [];
+  const dynRe = dyn ? new RegExp(`(?:\\benv:\\s*'([A-Z][A-Z_0-9]{2,})'${helperNames.length ? `|\\b(?:${helperNames.join('|')})\\(\\s*'([A-Z][A-Z_0-9]{2,})'` : ''})`, 'g') : null;
   for (const line of text.split('\n')) {
-    for (const m of line.matchAll(refRe)) {
-      const key = m[1];
-      if (SKIP.has(key)) continue;
+    const hits = [...line.matchAll(refRe)].map((m) => ({ key: m[1], expr: m[0] }));
+    if (dynRe) for (const m of line.matchAll(dynRe)) hits.push({ key: m[1] || m[2], expr: m[0] });
+    for (const { key, expr } of hits) {
+      if (!key || SKIP.has(key)) continue;
       const cur = rows.get(key) || { area, files: new Set(), def: '' };
       cur.files.add(rel);
-      if (!cur.def) cur.def = defaultOf(line, key, m[0]);
+      if (!cur.def) cur.def = defaultOf(line, key, expr);
+      // 주기 표 형태(`{ env: 'X', def: 60 * 60_000, … }`)의 기본값(v2.583)
+      if (!cur.def) { const d = /\bdef:\s*([^,}]+)/.exec(line); if (d && /env:\s*'/.test(line)) cur.def = d[1].trim(); }
       // 여러 모듈에서 쓰면 첫 분류를 유지하되 '공통' 보다 구체적인 쪽을 선호
       if (cur.area === '공통' && area !== '공통') cur.area = area;
       rows.set(key, cur);

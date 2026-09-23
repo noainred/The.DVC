@@ -3,6 +3,7 @@ import { usePolling, fetchJson } from '../api.js';
 import { growth, hasDsData, tb, gbTb } from './tools/storageTrack.js'; // 추이 KPI(v2.358) 계산 재사용
 import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../components/ui.jsx';
 import VCenterDetail from './VCenterDetail.jsx';
+import { vcCardState } from './vcCardText.js';
 
 /** 미니 스파크라인(v2.358) — recharts 를 끌어오지 않는 순수 SVG(Platform 은 차트 벤더 청크 미로드). */
 function Spark({ points, color }) {
@@ -149,9 +150,10 @@ export default function VCenters({ onSelectSite, resetSignal }) {
           <span className="qn-label">⚡ 바로가기</span>
           {shown.map((s) => {
             const m = s.metrics || {};
-            const down = s.status !== 'connected';
+            const tone = vcCardState(s).tone; // v2.583 #39: 첫 수집 대기·비활성을 빨간 '장애' 로 칠하지 않는다
+            const down = tone === 'bad';
             const alarms = (m.alarmsCritical || 0) + (m.alarmsWarning || 0);
-            const dot = down ? 'var(--red)' : alarms ? 'var(--amber)' : 'var(--green)';
+            const dot = down ? 'var(--red)' : (tone === 'wait' || tone === 'off') ? 'var(--text-faint)' : (alarms || tone === 'warn') ? 'var(--amber)' : 'var(--green)';
             return (
               <button key={s.id} className={`qn-btn${down ? ' down' : ''}`} title={`${s.name} 카드로 이동`} onClick={() => gotoCard(s.id)}>
                 <span className="qn-dot" style={{ background: dot }} />{s.id}
@@ -173,7 +175,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
       <div className="vc-grid">
         {shown.map((s) => {
           const m = s.metrics || {};
-          const down = s.status !== 'connected';
+          const cs = vcCardState(s); // v2.583 #39: 상태별 본문(대기·점검·비활성·연결 실패를 나눈다)
           return (
             <div className="card vc-card" key={s.id} ref={(el) => { cardRefs.current[s.id] = el; }} onClick={() => setOpenId(s.id)}>
               <div className="vc-head">
@@ -184,11 +186,14 @@ export default function VCenters({ onSelectSite, resetSignal }) {
                 <StateBadge state={s.status} />
               </div>
 
-              {down ? (
+              {cs.text && cs.showMetrics && (
+                <div className="muted" style={{ fontSize: 12, margin: '6px 0', color: 'var(--amber)' }}>{cs.text}</div>
+              )}
+              {!cs.showMetrics ? (
                 <div style={{ padding: '12px 0' }}>
-                  <div className="muted" style={{ marginBottom: 6 }}>이 vCenter에 연결할 수 없습니다.</div>
-                  {s.error && <div className="diag-err-msg" style={{ fontSize: 12 }}>{s.error}</div>}
-                  {s.hint && <div className="diag-err-hint" style={{ fontSize: 12 }}>💡 {s.hint}</div>}
+                  <div className="muted" style={{ marginBottom: 6 }}>{cs.text}</div>
+                  {cs.showError && s.error && <div className="diag-err-msg" style={{ fontSize: 12 }}>{s.error}</div>}
+                  {cs.showError && s.hint && <div className="diag-err-hint" style={{ fontSize: 12 }}>💡 {s.hint}</div>}
                 </div>
               ) : (
                 <>

@@ -134,8 +134,33 @@ export function loadBmUsageSettings() {
   return _cache;
 }
 
+/*
+ * ⚠⚠ v2.583 감사 #36 — 저장 **패치**에서 숫자 필드의 '빈 값·0(하한 > 0 인 필드)' 은 **미지정**이다.
+ *   화면 숫자칸을 비우고 나가면 `Number('') === 0` 이 PUT 되고, clampInt 가 그것을 **하한으로 승격**해
+ *   원시 보존 90→7일 · 롤업 5년→30일로 줄였다 — 다음 prune 이 그 차이만큼 이력을 **지운다**(되돌릴 수 없다).
+ *   storage/intervals.js v2.409 의 '빈 값·0 은 하한으로 승격하지 않고 미지정으로 버린다' 와 같은 규칙이다.
+ *   정규화(normalizeSettings)의 하한 강제는 그대로 둔다 — 이 필터는 **패치 입력**에만 건다.
+ */
+const PATCH_NUM_MIN = Object.freeze({
+  intervalMs: MIN_INTERVAL_MS, rawRetentionDays: 7, dailyRetentionDays: 30,
+  alertPct: 50, alertSustainMin: 0, alertRepeatHours: 1,
+});
+export function dropUnspecifiedNumbers(body = {}) {
+  const out = { ...(body && typeof body === 'object' ? body : {}) };
+  const dropped = [];
+  for (const [k, lo] of Object.entries(PATCH_NUM_MIN)) {
+    if (!Object.hasOwn(out, k)) continue;
+    const v = out[k];
+    const blank = v == null || (typeof v === 'string' && v.trim() === '');
+    const n = blank ? NaN : Number(v);
+    if (blank || !Number.isFinite(n) || (lo > 0 && n === 0)) { delete out[k]; dropped.push(k); }
+  }
+  return { patch: out, dropped };
+}
+
 export function saveBmUsageSettings(body = {}) {
-  const next = normalizeSettings({ ...loadBmUsageSettings(), ...body });
+  const { patch } = dropUnspecifiedNumbers(body);
+  const next = normalizeSettings({ ...loadBmUsageSettings(), ...patch });
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
   _cache = next; _cacheAt = Date.now();

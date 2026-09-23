@@ -40,9 +40,26 @@ async function _pushConfigNow() {
       method: 'POST', headers: headers(),
       body: JSON.stringify({ agent: config.agent.name, files }), timeoutMs: 20_000, retries: 2,
     });
-    if (res.ok) console.log(`[config-push] sent → ${config.agent.centralUrl} (${Object.keys(files).length}개 설정)`);
+    if (res.ok) {
+      console.log(`[config-push] sent → ${config.agent.centralUrl} (${Object.keys(files).length}개 설정)`);
+      _last = { at: Date.now(), ok: true, files: Object.keys(files).length, status: res.status };
+    } else {
+      // v2.583 감사 #34: 403(토큰)·413(본문 한도)을 조용히 false 로 넘기지 않는다 — 상태·콘솔에 남긴다.
+      const hint = res.status === 413 ? ' — 중앙 본문 한도 초과(설정 파일이 너무 큼)' : res.status === 403 ? ' — 중앙이 토큰·에이전트 이름을 거부' : '';
+      _last = { at: Date.now(), ok: false, status: res.status, error: `HTTP ${res.status}${hint}` };
+      console.warn(`[config-push] 실패: HTTP ${res.status}${hint}`);
+    }
     return res.ok;
-  } catch (e) { console.warn(`[config-push] 실패: ${e.message}`); return false; }
+  } catch (e) {
+    _last = { at: Date.now(), ok: false, error: String(e?.message || e) };
+    console.warn(`[config-push] 실패: ${e.message}`); return false;
+  }
+}
+
+let _last = null;
+/** 엣지 로그 화면용 상태(edgelog/spec.js). 설정 내용·토큰은 담지 않는다(개수·상태코드뿐). */
+export function configPushStatus() {
+  return { enabled: !!config.agent.centralUrl, running, intervalMs: PUSH_MS, last: _last };
 }
 
 export function startConfigPush() {

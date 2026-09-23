@@ -41,8 +41,21 @@ export async function runIpScanAgentOnce() {
     if (!rRes.ok) throw new Error(`result ${rRes.status}`);
     last = { at: Date.now(), assigned: true, scanned, alive: alive.length };
     return last;
-  } catch (e) { last = { at: Date.now(), error: e.message }; return last; }
+  } catch (e) {
+    // v2.583 감사 #34: 무음 실패 금지(v2.549·v2.561 규약) — 상태에 남기고(엣지 로그 표에 등재) 콘솔에도 적는다.
+    const msg = String(e?.message || e);
+    streak = (last?.error ? streak : 0) + 1;
+    last = { at: Date.now(), error: msg, kind: /\b403\b/.test(msg) ? 'auth' : /\b413\b/.test(msg) ? 'too-large' : 'error', streak };
+    console.warn(`[ipscan-agent] 실패(연속 ${streak}회): ${msg}`);
+    return last;
+  }
   finally { running = false; }
+}
+
+let streak = 0;
+/** 엣지 로그 화면용 상태(edgelog/spec.js) — 실패 사유·연속 횟수를 담는다. */
+export function ipScanAgentStatus() {
+  return { enabled: !!config.agent.centralUrl, running, intervalMs: config.agent.scanIntervalMs, last };
 }
 
 export function startIpScanAgent() {

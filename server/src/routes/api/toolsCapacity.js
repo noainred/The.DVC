@@ -1,5 +1,6 @@
 // 용량/낭비/씬/VM파인더/온도/용량예측 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
+import { scopePollerStatus } from '../../auth/scopeStatus.js';
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
 import { logAudit } from '../../audit.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드(단일 소스)
@@ -548,8 +549,11 @@ function mockRightsizeSeries(vm, days, interval, hostMhzPerCore, start) {
 }
 
 // v2.484 전원 꺼짐 점검 설정/상태(조회는 tools 권한, 변경·수동 점검은 admin — 게스트 디스크 설정과 같은 경계).
-api.get('/tools/waste/off-check', requirePerm('tools'), (_req, res) => {
-  res.json({ ok: true, ...powerOffPollerStatus(), limits: POWEROFF_LIMITS });
+api.get('/tools/waste/off-check', requirePerm('tools'), (req, res) => {
+  // v2.583(감사 검증 지적 — v2.574 SEC-05 형제 누락): lastResult 의 vcenters·offVms·newStreaks·cleared 는
+  //   전 법인 합계다. 범위 계정에는 시각·소요만 남긴다(scopePollerStatus).
+  const allowed = scopedVcenterIds(req.user, store.get());
+  res.json({ ok: true, ...scopePollerStatus(powerOffPollerStatus(), allowed), limits: POWEROFF_LIMITS });
 });
 api.put('/tools/waste/off-check/settings', requireRole('admin'), (req, res) => {
   const next = savePowerOffSettings(req.body || {});

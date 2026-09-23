@@ -80,3 +80,34 @@ describe('화면 문구에 백틱 금지 (v2.576 — 여섯 번째 재발 차단
     expect(escapedBackticks('t.path.startsWith(`${sel}\\\\`)').length).toBe(0);
   });
 });
+
+/**
+ * JSX **텍스트 노드**에 쓴 `**강조**`(v2.583 감사 #37). 텍스트 노드는 BoldText 를 거치지 않으므로 별표가 그대로
+ * 보인다(v2.583 에 LinkCheck·RemoteCommand·CurrentUsersSettings·EmptyInvModal 4곳). 규칙: `>` 와 `<`/`{` 사이의
+ * 텍스트에 `**X**` 가 있으면 결함이다. 문자열(따옴표·템플릿) 안의 `**` 는 대상이 아니다 — 그것은 BoldText 로
+ * 렌더되는 문구 모듈의 정상 형태다(그쪽의 plain 렌더는 호출부를 봐야 해서 이 스윕으로 못 잡는다 — 정직 기록).
+ */
+function jsxTextBold(body) {
+  const hits = [];
+  const re = /[>}]([^<>{}`'"]*\*\*[^*<>{}`'"]+\*\*[^<>{}`'"]*)(?=[<{])/g;
+  let m;
+  while ((m = re.exec(body))) hits.push(body.slice(0, m.index).split('\n').length);
+  return hits;
+}
+
+describe('JSX 텍스트 노드에 **강조** 금지 (v2.583 — BoldText 밖의 별표)', () => {
+  it('★ .jsx 파일의 JSX 텍스트 노드에 **X** 가 0건이다', () => {
+    const bad = [];
+    for (const f of FILES.filter((x) => x.endsWith('.jsx'))) {
+      const body = stripComments(fs.readFileSync(f, 'utf8'));
+      for (const ln of jsxTextBold(body)) bad.push(`${path.relative(SRC, f)}:${ln}`);
+    }
+    expect(bad, `JSX 텍스트는 BoldText 를 거치지 않는다 — <b> 를 쓰거나 BoldText 로 감쌀 것.\n${bad.join('\n')}`).toEqual([]);
+  });
+  it('★ 스윕이 실제로 동작한다(변이 검증)', () => {
+    expect(jsxTextBold('<div>저장 상한으로 **잘린** 기록입니다.</div>').length).toBe(1);
+    expect(jsxTextBold('<div>{src.x} 추이가 **저장되지 않습니다**{e}</div>').length).toBe(1);
+    expect(jsxTextBold("<BoldText text={'**굵게**'} />").length).toBe(0);
+    expect(jsxTextBold('<b>굵게</b>').length).toBe(0);
+  });
+});

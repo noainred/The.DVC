@@ -105,6 +105,50 @@ export function stallPayload({ view = '', path = '', ms = 0, inflight = [] } = {
     path: normPath(path),
     ms: Math.max(0, Math.round(Number(ms) || 0)),
     inflight: (inflight || []).filter((x) => x && x.path).slice(0, 10)
-      .map((x) => ({ path: normPath(x.path), ms: Math.max(0, Math.round(Number(x.ms) || 0)) })),
+      .map((x) => ({ path: normPath(x.path), ms: Math.max(0, Math.round(Number(x.ms) || 0)), ...(x.rid ? { rid: String(x.rid).slice(0, 40) } : {}) })),
   };
+}
+
+/**
+ * 서버 상태를 물어볼 요청 ID 고르기(v2.583, 순수) — 문턱(detailMs)을 넘긴 것 중 오래된 순 최대 limit 개.
+ * 빠른 요청은 묻지 않는다(묻는 요청이 부하가 되지 않게).
+ */
+export function statusPollTargets(inflight = [], { detailMs = 3_000, limit = 5 } = {}) {
+  return (inflight || [])
+    .filter((x) => x && x.rid && (Number(x.ms) || 0) >= detailMs)
+    .sort((a, b) => (Number(b.ms) || 0) - (Number(a.ms) || 0))
+    .slice(0, Math.max(1, limit))
+    .map((x) => x.rid);
+}
+
+/**
+ * 요청 한 건의 '누가 지연시키는가' 문구(v2.583, 순수). 사용자 요청: "불러오는 중… 이 나올 때
+ * 누가 이 지연을 발생시켰는지 ID 도 같이 보여줘."
+ *
+ * 서버 상태(GET /perf/req-status)에 따라 **지연의 주체를 나눠** 말한다 — 조치가 다르기 때문이다.
+ *  · processing — 서버가 이 요청을 아직 처리 중이다(그 라우트·외부 왕복이 지연 주체).
+ *  · done       — 서버는 이미 응답했다(전송·브라우저 처리가 지연 주체 — 서버를 의심할 이유가 없다).
+ *  · unknown    — 서버에 기록이 없다. 원인이 셋(미도달·서버 재시작·완료 기록 밀림)이라 **단정하지 않는다**.
+ *  · 상태 없음  — 아직 묻지 않았다('확인 중').
+ * 숫자가 없으면 단위를 붙이지 않는다(v2.575 규약).
+ * @returns {{tone:'busy'|'done'|'unknown'|'pending', text:string}}
+ */
+export function serverStateText(server) {
+  const s = server && typeof server === 'object' ? server : null;
+  const sec = (ms) => {
+    if (ms == null || ms === '' || !Number.isFinite(Number(ms))) return '';
+    const n = Number(ms);
+    return n < 1000 ? '1초 미만' : `${Math.round(n / 1000)}초`;
+  };
+  if (!s || !s.state) return { tone: 'pending', text: '서버 상태 확인 중' };
+  if (s.state === 'processing') {
+    const t = sec(s.serverMs);
+    return { tone: 'busy', text: `서버가 처리 중${t ? ` (${t}째)` : ''} — 지연 주체는 서버의 이 작업입니다` };
+  }
+  if (s.state === 'done') {
+    const t = sec(s.serverMs);
+    const st = Number.isFinite(Number(s.status)) && Number(s.status) > 0 ? ` · ${Number(s.status)}` : '';
+    return { tone: 'done', text: `서버는 이미 응답했습니다${t ? ` (${t}${st})` : st ? ` (${st.slice(3)})` : ''} — 전송이나 브라우저 처리를 기다리는 중입니다` };
+  }
+  return { tone: 'unknown', text: '서버에 이 요청 기록이 없습니다 — 서버에 도달하지 않았거나, 서버가 재시작됐거나, 완료 기록에서 밀려났습니다' };
 }

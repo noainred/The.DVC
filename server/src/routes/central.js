@@ -73,6 +73,8 @@ import { listRegistry as listVcentersForLinks } from '../vcenter/registry.js';
 import { loadLinkCheckSettings, linkCheckEnabled } from '../linkcheck/settings.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
+import { createChangeLogger } from '../util/logThrottle.js'; // v2.583: 반복 수신 로그 조절
+const gpuRecvLog = createChangeLogger();
 export const centralRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
@@ -314,16 +316,19 @@ centralRouter.post('/register-collector', async (req, res) => {
   }
   const r = upsertCollectorFromAgent({ name, url, token: String(b.collectorToken), datacenter: String(b.datacenter || '') });
   if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${b.version ? ` (v${b.version})` : ''}${unverified ? ` ⚠ 미검증: ${unverified}` : ''}`);
-  if (r.ok && unverified) {
-    const { setCollectorStatus } = await import('../collector/state.js');
-    setCollectorStatus(r.collector?.id || name, { ok: false, error: `등록 URL(EDGE_ADVERTISE_URL) 검증 실패: ${unverified}`, unverified: true });
-  } else if (r.ok && b.version) {
+  if (r.ok && (unverified || b.version)) {
     // v2.548: 자기등록이 보낸 버전을 상태에 심어 둔다 — pull 이 한 번도 성공하지 못한 엣지(OC2SDBX 사례)는
     // puller.js:92 경로로 버전이 들어오지 않아 파트 장애 화면이 '버전 미상' 으로만 말했다. 기존 상태는 보존.
+    // ⚠ v2.583 감사 #32: '미검증' 분기가 상태를 **통째로 바꿔** version·agent·authDeny·identity 를 지웠고(v2.548 H5
+    //   '실패 경로는 직전 상태 위에 덮는다' 위반), 버전 심기는 else 쪽이라 **미검증 엣지(= pull 이 안 되는 전형)**
+    //   에는 한 번도 돌지 않았다. 두 갈래를 합쳐 직전 상태 위에 덮는다.
     const { setCollectorStatus, getCollectorStatus } = await import('../collector/state.js');
     const id = r.collector?.id || name;
     const prev = getCollectorStatus(id) || {};
-    if (!prev.version) setCollectorStatus(id, { ...prev, version: String(b.version).slice(0, 32), registeredVersion: true });
+    const next = { ...prev };
+    if (b.version && !prev.version) { next.version = String(b.version).slice(0, 32); next.registeredVersion = true; }
+    if (unverified) { next.ok = false; next.error = `등록 URL(EDGE_ADVERTISE_URL) 검증 실패: ${unverified}`; next.unverified = true; }
+    setCollectorStatus(id, next);
   }
   res.status(r.ok ? 200 : 400).json(r.ok ? { ...r, unverified: unverified || undefined } : r);
 });
@@ -820,7 +825,9 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
   }
   setGuestGpu({ hosts, vms, agent });
   if (b.diag) setGpuGuestDiag(agent, b.diag, { hosts: hosts.length, vms: vms.length }); // 수집 진단 보관
-  console.log(`[central] gpu-guest-data 수신: agent=${agent} hosts=${hosts.length} vms=${vms.length}`);
+  // v2.583: 엣지마다 인벤토리 주기로 찍혀 저널을 덮었다(28곳 × 60초 ≈ 하루 4만 줄) — 값이 바뀔 때와
+  //   1시간마다만 찍는다(util/logThrottle.js). 문구 형식은 그대로다(로그 분석 규칙이 이 형식을 읽는다).
+  if (gpuRecvLog(agent, `${hosts.length}/${vms.length}`)) console.log(`[central] gpu-guest-data 수신: agent=${agent} hosts=${hosts.length} vms=${vms.length}`);
   res.json({ ok: true, agent, hosts: hosts.length, vms: vms.length });
 });
 

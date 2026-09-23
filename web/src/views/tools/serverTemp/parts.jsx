@@ -12,10 +12,14 @@ import {
   TEMP_WARN_C, TEMP_HOT_C, tempNum, tempBuckets, thresholdLeftPct, showBucketLabel, bucketTitle,
   barPct1530, heatPct, tileFill, layoutGroup, sparkPath, sparkDeltaText, sparkSeriesLabel, densityMetrics,
 } from './board.js';
+import { unitText } from '../../unitText.js';
 
 const MONO = { fontFamily: 'var(--font-mono)' };
 const num1 = (v) => { const n = tempNum(v); return n == null ? '—' : n.toFixed(1); };
 const numRaw = (v) => { const n = tempNum(v); return n == null ? '—' : String(n); };
+// v2.583 #40: 값이 없으면 단위를 붙이지 않는다('—℃' 는 0℃ 처럼 읽힌다).
+const c1 = (v) => unitText(num1(v), '℃');
+const cRaw = (v) => unitText(numRaw(v), '℃');
 
 /** 모노 라벨(대문자·자간) — 카드·툴바 제목. */
 export function MonoLabel({ children, size = 10.5, spacing = '.14em', color = 'var(--text-dim)', style }) {
@@ -90,7 +94,7 @@ export function TempHistogram({ rows, total, maxC, avgInletC }) {
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <MonoLabel>현재 온도 분포 · 서버 {Number(total || 0).toLocaleString()}대 · 1℃ 구간</MonoLabel>
         <div className="muted" style={{ fontSize: 12 }}>
-          최고 센서 <b style={{ color: '#f87171' }}>{numRaw(maxC)}℃</b> · 흡기 평균 <b style={{ color: 'var(--text)' }}>{num1(avgInletC)}℃</b>
+          최고 센서 <b style={{ color: '#f87171' }}>{cRaw(maxC)}</b> · 흡기 평균 <b style={{ color: 'var(--text)' }}>{c1(avgInletC)}</b>
         </div>
       </div>
       <div style={{ position: 'relative', flex: 1, minHeight: 104, marginTop: 12 }}>
@@ -163,7 +167,7 @@ export function DcCompare({ rows, sel, onPick, allAvgC, dense, regionOf }) {
                 </div>
               ))}
               {tempNum(allAvgC) != null && (
-                <div title={`전체 평균 ${num1(allAvgC)}℃`}
+                <div title={`전체 평균 ${c1(allAvgC)}`}
                   style={{ position: 'absolute', left: `${barPct1530(allAvgC)}%`, top: 0, bottom: 0, borderLeft: '1px dashed rgba(245,158,11,.35)' }} />
               )}
               {tempNum(d.all?.avgC) != null && (
@@ -276,7 +280,7 @@ export function TempHeatmap({ groups, view, dense, sel, onPick }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, whiteSpace: 'nowrap' }}>
               <span style={{ fontWeight: 700 }}>{g.name}</span>
               <span style={{ color: 'var(--text-faint)', fontVariantNumeric: 'tabular-nums' }}>{L.n}</span>
-              <span style={{ marginLeft: 'auto', fontWeight: 700, color: tempColor(L.avg), fontVariantNumeric: 'tabular-nums' }}>{num1(L.avg)}℃</span>
+              <span style={{ marginLeft: 'auto', fontWeight: 700, color: tempColor(L.avg), fontVariantNumeric: 'tabular-nums' }}>{c1(L.avg)}</span>
             </div>
             <svg width={L.width} height={L.height} style={{ display: 'block' }} aria-hidden="true">
               {L.items.map(({ item, x, y, v }, i) => {

@@ -127,7 +127,8 @@
 /* 표(STable) */
 .dvc-tablewrap { overflow: auto; }
 .dvc-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.dvc-table th { text-align: left; padding: 8px 10px; background: #f9fafb; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; font-family: var(--mono); font-size: 9.5px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: #6b7280; white-space: nowrap; cursor: pointer; user-select: none; }
+/* v2.583 감사 #41: uppercase 금지 — vCenter·vCPU 가 VCENTER·VCPU 로 샌다(v2.575 BUG-13 의 V4 누락분) */
+.dvc-table th { text-align: left; padding: 8px 10px; background: #f9fafb; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; font-family: var(--mono); font-size: 9.5px; font-weight: 500; letter-spacing: .06em; color: #6b7280; white-space: nowrap; cursor: pointer; user-select: none; }
 .dvc-table th:first-child, .dvc-table td:first-child { padding-left: 18px; }
 .dvc-table th:last-child, .dvc-table td:last-child { padding-right: 18px; }
 .dvc-table td { padding: 8px 10px; border-bottom: 1px solid rgba(229,231,235,.5); vertical-align: middle; }

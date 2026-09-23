@@ -263,7 +263,7 @@ export default function ApiKeys() {
           }}>{issued.plaintext}</pre>
           <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
             지문 {issued.key?.fp || '(읽지 못함)'} · {scopeText(issued.key?.vcenters)} ·{' '}
-            {groupsText(issued.key?.groups, data.groups)}
+            <BoldText text={groupsText(issued.key?.groups, data.groups)} />
           </div>
           <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>사용 예시</div>
           <pre style={{

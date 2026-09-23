@@ -16,7 +16,6 @@
  *  · **vCenter·엣지에 로그인하지 않는다**(`linkcheck/run.js` 머리말 — 점검이 계정을 잠그지 않게).
  */
 import { requireRole } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { publicLink, LINK_KINDS, KIND_KEYS, EDGE_KINDS } from '../../linkcheck/links.js';
@@ -32,14 +31,11 @@ import { buildSettingsTargets, publicTarget } from '../../linkcheck/settingsLink
 import { SETTING_KINDS, SETTING_KIND_KEYS, DEPTH_LABEL, GROUP_ORDER, SETTINGS_PATHS } from '../../linkcheck/settingsKinds.js';
 import { configFindings, resultFindings, mergeFindings, hostCountsOf, HOST_FORM, CERT_WARN_DAYS } from '../../linkcheck/remedy.js';
 import { ipBlockReason } from '../../collector/registry.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
 
 const adminOnly = requireRole('admin');
-const fullScopeOnly = (req, res, next) => {
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, reason: '통신 점검 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다 — 링크에는 전 법인의 엣지 주소·내부 IP 가 들어갑니다.' });
-  }
-  next();
-};
+// v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
+const fullScopeOnly = fullScopeOnlyWith('통신 점검 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다 — 링크에는 전 법인의 엣지 주소·내부 IP 가 들어갑니다.');
 
 const t = (v) => String(v ?? '').trim();
 const num = (v, dflt) => { const n = Number(v); return Number.isFinite(n) ? n : dflt; };

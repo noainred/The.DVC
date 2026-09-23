@@ -93,14 +93,23 @@ export async function pushCurUserRecords(records, { generatedAt = Date.now() } =
   const vcenterIds = [...new Set(slim.map((r) => r.vcenterId))];
   const chunks = chunkRecords(slim);
   const t0 = Date.now();
-  let bytes = 0; let gzBytes = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    const r = await post({
-      agent: config.agent.name, generatedAt, chunk: i, chunks: chunks.length,
-      ...(i === 0 ? { vcenterIds } : {}),
-      records: chunks[i],
-    });
-    bytes += r.bytes; gzBytes += r.gzBytes;
+  let bytes = 0; let gzBytes = 0; let sent = 0;
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      const r = await post({
+        agent: config.agent.name, generatedAt, chunk: i, chunks: chunks.length,
+        ...(i === 0 ? { vcenterIds } : {}),
+        records: chunks[i],
+      });
+      bytes += r.bytes; gzBytes += r.gzBytes; sent++;
+    }
+  } catch (e) {
+    // v2.583 감사 #33: 실패도 상태에 남긴다 — 예전에는 `last` 가 **직전 성공**에 머물러 엣지 로그의 push.curUser
+    //   항목이 실패 중에도 '정상' 으로 보였다(v2.566 '새 엣지 push 경로는 실패 사유를 상태에 싣는다' — 형제
+    //   vmSeriesPush 는 이미 그랬다).
+    last = { at: Date.now(), chunks: chunks.length, sentChunks: sent, records: slim.length, bytes, gzBytes, ms: Date.now() - t0, error: e?.message || String(e) };
+    console.warn(`[curuser-push] 실패(${sent}/${chunks.length} 청크 전송 후): ${e?.message || e}`);
+    throw e;
   }
   last = { at: Date.now(), chunks: chunks.length, records: slim.length, bytes, gzBytes, ms: Date.now() - t0, error: null };
   return { ok: true, ...last };

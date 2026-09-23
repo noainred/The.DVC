@@ -12,10 +12,27 @@
  * 403/429 를 주면 그 세션 동안 보고를 멈춘다(구버전 서버·권한 없음). sendBeacon 은 Authorization
  * 헤더를 못 붙여 쓰지 않는다(Bearer 규약).
  */
-import { allowReport, newReportState, stallPayload } from './perfClientLogic.js';
+import { allowReport, newReportState, stallPayload, statusPollTargets } from './perfClientLogic.js';
 
-const inflight = new Map();     // id -> { path, method, t0 }
+const inflight = new Map();     // id -> { path, method, t0, rid }
 let seq = 0;
+// v2.583: 요청 ID 접두 — 탭마다 다르게(같은 사용자의 두 탭이 같은 ID 를 만들지 않게). 서버가 형식을
+// 검사하므로(영숫자로 시작 · [A-Za-z0-9._-] · 4~40자) 그 안에서만 만든다.
+const SESSION = (() => {
+  try {
+    const a = new Uint8Array(4);
+    (globalThis.crypto || {}).getRandomValues?.(a);
+    const s = [...a].map((b) => b.toString(36).padStart(2, '0')).join('').slice(0, 6);
+    if (/^[a-z0-9]{6}$/.test(s) && a.some(Boolean)) return `w${s}`;
+  } catch { /* 폴백 */ }
+  return `w${Math.random().toString(36).slice(2, 8).padEnd(6, '0')}`;
+})();
+// 서버에 물어본 요청 상태(요청 ID → {state, serverMs, …, at}). 로딩 표시가 '서버 처리 중 / 응답 완료 /
+// 서버 기록 없음' 을 구분하는 근거다. 유계 — 끝난 요청의 항목은 endReq 에서 지운다.
+const serverState = new Map();
+let statusBusy = false;
+let lastStatusAt = 0;
+let statusDisabled = false;
 const listeners = new Set();
 const reportState = newReportState();
 let disabled = false;           // 서버가 거부했거나 계측이 꺼져 있으면 true
@@ -35,21 +52,29 @@ export function startReq(path, method = 'GET') {
   if (String(path || '').startsWith('/perf/')) return null;
   if (inflight.size >= 200) return null;              // 유계(비정상 누수 방어)
   const id = ++seq;
-  inflight.set(id, { path: String(path || ''), method, t0: now() });
+  inflight.set(id, { path: String(path || ''), method, t0: now(), rid: `${SESSION}-${id.toString(36)}` });
   emit();
   return id;
+}
+
+/** 이 요청의 ID(헤더 X-Request-Id 로 보낸다). 추적하지 않는 요청이면 ''. */
+export function ridOf(id) {
+  if (id == null) return '';
+  return inflight.get(id)?.rid || '';
 }
 
 /** 요청 종료 알림(성공·실패 모두). */
 export function endReq(id) {
   if (id == null) return;
+  const r = inflight.get(id);
+  if (r?.rid) serverState.delete(r.rid);
   if (inflight.delete(id)) emit();
 }
 
 /** 진행 중 요청 스냅샷(오래 기다린 것 먼저). */
 export function inflightSnapshot(limit = 10) {
   const t = now();
-  const rows = [...inflight.values()].map((r) => ({ path: r.path, method: r.method, ms: Math.round(t - r.t0) }));
+  const rows = [...inflight.values()].map((r) => ({ path: r.path, method: r.method, ms: Math.round(t - r.t0), rid: r.rid || '', server: serverState.get(r.rid) || null }));
   rows.sort((a, b) => b.ms - a.ms);
   return rows.slice(0, Math.max(1, limit));
 }
@@ -118,11 +143,40 @@ export function reportStall({ view = '', path = '', ms = 0, base = '/api', heade
   return true;
 }
 
+/**
+ * 오래 기다리는 요청의 **서버 쪽 상태**를 묻는다(v2.583 — GET /perf/req-status).
+ * 부르는 쪽(Loading·GlobalProgress)은 0.5초마다 부르지만 실제 조회는 **5초에 1번 · 한 번에 하나**다
+ * (statusPollTargets 가 문턱을 넘긴 요청만 고른다 — 빠른 요청에는 아무 일도 하지 않는다).
+ * 서버가 404(구버전)·403 을 주면 이 세션 동안 멈춘다. 실패는 화면에 영향이 없다.
+ */
+export function pollServerStatus(fetchJson, { minGapMs = 5_000 } = {}) {
+  if (statusDisabled || statusBusy || typeof fetchJson !== 'function') return;
+  const t = Date.now();
+  if (t - lastStatusAt < minGapMs) return;
+  const ids = statusPollTargets(inflightSnapshot(20), { detailMs });
+  if (!ids.length) return;
+  statusBusy = true; lastStatusAt = t;
+  fetchJson('/perf/req-status', { ids: ids.join(',') }, undefined, { retries: 0, timeoutMs: 8_000 })
+    .then((r) => {
+      const items = (r && r.items) || {};
+      for (const rid of ids) {
+        if (!items[rid]) continue;
+        // 그사이 끝난 요청은 다시 넣지 않는다(endReq 가 이미 지웠다).
+        let alive = false;
+        for (const x of inflight.values()) if (x.rid === rid) { alive = true; break; }
+        if (alive) serverState.set(rid, { ...items[rid], at: Date.now() });
+      }
+      emit();
+    })
+    .catch((e) => { if (e && (e.status === 404 || e.status === 403)) statusDisabled = true; })
+    .finally(() => { statusBusy = false; });
+}
+
 /** 테스트·진단용. */
 export function _perfClientState() {
   return { inflightN: inflight.size, disabled, stuckMs, dropped: reportState.dropped, keys: reportState.keys.size };
 }
 export function _resetPerfClient() {
-  inflight.clear(); seq = 0; disabled = false; stuckMs = 60_000; configLoaded = false; configPromise = null; lastConfigTry = 0;
+  inflight.clear(); seq = 0; disabled = false; serverState.clear(); statusBusy = false; lastStatusAt = 0; statusDisabled = false; stuckMs = 60_000; configLoaded = false; configPromise = null; lastConfigTry = 0;
   reportState.keys.clear(); reportState.hourBucket = 0; reportState.hourCount = 0; reportState.dropped = 0;
 }

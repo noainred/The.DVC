@@ -1,8 +1,8 @@
 // 스토리지 모니터링 라우트(v2.302) — 특수기능 '스토리지 모니터링(Isilon 등)' 화면용.
 // 조회: 전체 범위 계정만(스토리지는 vCenter 귀속이 없는 인프라 장비 — 'vCenter 귀속 없는
 // 데이터는 범위 계정에 노출 금지' 규칙, fleet 과 동일 403 패턴). 변경: adminOnly + 감사로그.
+import { fullScopeOnlyWith } from '../admin/shared.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { STORAGE_TYPES, collectMethodsFor, normalizeCollectMethod } from '../../storage/types.js';
@@ -29,12 +29,8 @@ import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgen
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
-const fullScopeOnly = (req, res, next) => {
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, reason: '스토리지 모니터링은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
-  }
-  next();
-};
+// v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
+const fullScopeOnly = fullScopeOnlyWith('스토리지 모니터링은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 
 export function registerStorageMon(api) {
 

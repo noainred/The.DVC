@@ -49,7 +49,8 @@ insightsRouter.get('/finops', async (req, res) => {
     // 반환하므로, 범위 제한 계정에는 '귀속되지 않는 서버'를 반드시 잘라내야 한다(안 하면 범위 밖
     // 서버가 '(미매핑)' 으로 강등된 채 총량·topHosts 에 그대로 실려 전 함대가 노출됐다).
     const scopeLimited = scopedVcenterIds(req.user, snap) != null;
-    const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}|${fleetRev()}|${scopeKey(req.user, snap)}`;
+    // v2.583(감사 확정): ?vcenterId= 가 키에 없어 다른 vCenter(또는 전체)의 결과가 60초 동안 그대로 나갔다(형제 /power-breakdown 은 넣는다).
+    const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}|${fleetRev()}|${scopeKey(req.user, snap)}|vc:${String(req.query.vcenterId || '')}`;
     const validIds = new Set((scoped.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('finops', key, 60_000, async () => {
       let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true }), validIds)), scoped);

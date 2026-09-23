@@ -58,3 +58,19 @@ export function localClock(ts = Date.now(), offsetMin = DAY_OFFSET_MIN) {
   const d = new Date(Number(ts) + offsetMin * 60_000);
   return { day: d.toISOString().slice(0, 10), hour: d.getUTCHours(), minute: d.getUTCMinutes(), offsetMin };
 }
+
+/**
+ * 사람이 읽는 시각 `YYYY-MM-DD HH:MM`(포탈 오프셋 — v2.583 감사 #25). `toLocaleString('ko-KR')` 은 **프로세스 TZ**
+ * 를 따르는데 패키지 유닛은 TZ 를 지정하지 않는다 — UTC 서버에서 KST 09:00 이 `오전 12:00` 으로 찍혔다.
+ * 못 읽으면 빈 문자열(시각을 지어내지 않는다).
+ */
+export function localStamp(ts, offsetMin = DAY_OFFSET_MIN) {
+  const t = toMs(ts);
+  if (!Number.isFinite(t)) return '';
+  return new Date(t + offsetMin * 60_000).toISOString().slice(0, 16).replace('T', ' ');
+}
+/** 파일명용 `YYYYMMDD-HHMM`(포탈 오프셋). */
+export function fileStamp(ts = Date.now(), offsetMin = DAY_OFFSET_MIN) {
+  const s = localStamp(ts, offsetMin);
+  return s ? `${s.slice(0, 10).replace(/-/g, '')}-${s.slice(11, 13)}${s.slice(14, 16)}` : '';
+}

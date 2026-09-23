@@ -23,23 +23,30 @@ export function computeUnprotected(vms, rows, opts = {}) {
     .map((p) => String(p).trim().toLowerCase()).filter(Boolean);
   const lookbackDays = Number(opts.lookbackDays) || 7;
 
-  // entity(VM 이름) → 마지막 백업 이벤트 시각
-  const protectedByName = new Map();
-  let backupEvents = 0;
+  // (vCenter, VM 이름) → 마지막 백업 이벤트 시각.
+  // ⚠ v2.583 감사 #21: 예전에는 **이름만** 키로 써서, 28개 법인 중 한 곳의 `web-01` 이 백업되면 다른 법인의
+  //   같은 이름 VM 까지 '보호됨' 으로 셌다 — 백업 공백을 찾는 리포트가 공백을 **숨겼다**(가장 나쁜 방향의 오류).
+  //   이벤트 행에 vcenterId 가 있으면 반드시 그것까지 맞춘다. vcenterId 가 없는 옛 행만 이름으로 폴백하고
+  //   그 개수를 밝힌다(nameOnlyEvents).
+  const key = (vc, name) => `${vc}\u0000${name}`;
+  const protectedByVcName = new Map();
+  const protectedByNameOnly = new Map();
+  let backupEvents = 0, nameOnlyEvents = 0;
+  const keep = (m, k, r) => { const prev = m.get(k); if (!prev || r.ts > prev.ts) m.set(k, { ts: r.ts, user: r.user || '' }); };
   for (const r of rows || []) {
     if (!isBackupEvent(r, patterns)) continue;
     backupEvents++;
     const name = r.entity || '';
     if (!name) continue;
-    const prev = protectedByName.get(name);
-    if (!prev || r.ts > prev.ts) protectedByName.set(name, { ts: r.ts, user: r.user || '' });
+    if (r.vcenterId) keep(protectedByVcName, key(r.vcenterId, name), r);
+    else { nameOnlyEvents++; keep(protectedByNameOnly, name, r); }
   }
 
   const unprotectedList = [];
   const protectedList = [];
   for (const v of vms) {
     if (v.template || v.powerState !== 'POWERED_ON') continue; // 가동 중 VM만 보호 대상 판단
-    const hit = protectedByName.get(v.name);
+    const hit = protectedByVcName.get(key(v.vcenterId, v.name)) || protectedByNameOnly.get(v.name);
     const item = {
       id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host || '', cluster: v.cluster || '',
       guestOS: v.guestOS || '', storageGB: v.storageGB || 0,
@@ -57,6 +64,9 @@ export function computeUnprotected(vms, rows, opts = {}) {
       protectedCount: protectedList.length,
       unprotectedCount: unprotectedList.length,
       backupEvents,
+      nameOnlyEvents,
+      // 이벤트 조회 상한에 걸렸으면 오래된 백업 흔적이 빠져 '미보호' 가 과대 보고될 수 있다 — 조용히 두지 않는다.
+      eventsTruncated: Number(opts.rowLimit) > 0 && (rows || []).length >= Number(opts.rowLimit),
       protectedPct: (unprotectedList.length + protectedList.length) > 0
         ? Math.round((protectedList.length / (unprotectedList.length + protectedList.length)) * 100) : 0,
     },

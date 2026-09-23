@@ -58,11 +58,39 @@ export function hangSummary(ev) {
   if (!ev) return '';
   if (ev.kind === 'client') {
     const top = (ev.clientInflight || [])[0];
-    const waited = top ? `대기 ${top.path} ${ms(top.ms)}` : '대기 중인 요청 없음(화면 상태 문제 가능)';
+    const waited = top ? `대기 ${top.path} ${ms(top.ms)}${top.rid ? ` (요청 ID ${top.rid})` : ''}` : '대기 중인 요청 없음(화면 상태 문제 가능)';
     return `화면 ${ev.view || '—'} 에서 ${ms(ev.ms)} 동안 로딩 · ${waited} · 그때 서버 진행 중 요청 ${ev.serverInflightN ?? 0}건`;
   }
   const jobs = (ev.jobs || []).length ? ` · 진행 작업 ${(ev.jobs || []).join(', ')}` : ' · 계측된 작업 없음(수집·집계 밖의 코드일 수 있음)';
   return `이벤트 루프 최대 ${ms(ev.maxMs)} 멈춤(p99 ${ms(ev.p99Ms)})${jobs} · 진행 중 요청 ${ev.inflightN ?? 0}건 · RSS ${unitText(ev.rssMb, 'MB')}`;
+}
+
+/**
+ * 요청 ID 검색(v2.583, 순수) — 로딩 화면에 보인 ID 로 느린 요청·hang·진행 중 목록을 거른다.
+ * hang 이벤트는 ID 가 여러 곳에 있다(브라우저가 기다린 목록 · 그때 서버 진행 중 목록 · 루프 창의 진행 중).
+ * 빈 검색어는 전부 통과. 대소문자는 구분하지 않고 부분 일치다(ID 뒤쪽만 옮겨 적어도 찾게).
+ */
+export function ridMatches(row, q) {
+  const needle = String(q || '').trim().toLowerCase();
+  if (!needle) return true;
+  if (!row || typeof row !== 'object') return false;
+  const hit = (v) => typeof v === 'string' && v.toLowerCase().includes(needle);
+  if (hit(row.rid)) return true;
+  for (const k of ['clientInflight', 'serverInflight', 'inflight']) {
+    for (const x of Array.isArray(row[k]) ? row[k] : []) if (x && hit(x.rid)) return true;
+  }
+  return false;
+}
+
+/**
+ * 서버의 요청 ID 조회 결과 한 줄(v2.583). 느린 요청 목록에는 임계를 넘은 것만 남으므로, 빠르게 끝난
+ * 요청은 '최근 완료 기록' 으로만 확인된다. 기록이 없으면 원인을 단정하지 않는다.
+ */
+export function ridLookupText(rid, item) {
+  if (!item || !item.state) return '';
+  if (item.state === 'processing') return `${rid} — 지금 서버가 처리 중입니다(${ms(item.serverMs)}째 · ${item.method || ''} ${item.route || ''}).`;
+  if (item.state === 'done') return `${rid} — 서버가 ${ms(item.serverMs)} 만에 응답을 끝냈습니다(상태 ${item.status || '—'} · ${item.method || ''} ${item.route || ''}).`;
+  return `${rid} — 서버에 기록이 없습니다. 서버에 도달하지 않았거나, 서버가 재시작됐거나, 최근 완료 기록에서 밀려났습니다.`;
 }
 
 /** hang 종류 라벨. */

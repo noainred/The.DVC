@@ -8,20 +8,16 @@
  * (vmMetrics.js 의 serviceTag 우회 선례와 같은 모양).
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { KINDS, serialIndex, searchSerials } from '../../insights/serialLookup.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { todayStamp } from "../../util/dayKey.js";
+import { fullScopeOnlyWith } from '../admin/shared.js';
 
 const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
-const fullScopeOnly = (req, res, next) => {
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, reason: '시리얼 조회는 전체 범위(vCenter 제한 없는) 계정만 사용할 수 있습니다.' });
-  }
-  next();
-};
+// v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
+const fullScopeOnly = fullScopeOnlyWith('시리얼 조회는 전체 범위(vCenter 제한 없는) 계정만 사용할 수 있습니다.');
 
 const CSV_COLS = [
   ['serial', '시리얼'], ['serialType', '항목'], ['kindLabel', '장비 종류'],

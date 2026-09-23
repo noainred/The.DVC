@@ -42,6 +42,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'push.guestDisk', label: '게스트 디스크', group: 'push', mod: '../agent/guestDiskPush.js', fn: 'guestDiskPushStatus' },
   { key: 'push.vmseries', label: '실시간 스파이크', group: 'push', mod: '../agent/vmSeriesPush.js', fn: 'vmSeriesPushStatus' },
   { key: 'push.curUser', label: '현재 사용자', group: 'push', mod: '../agent/curUserPush.js', fn: 'curUserPushStatus' },
+  { key: 'push.config', label: '설정 사본', group: 'push', mod: '../agent/configPush.js', fn: 'configPushStatus' }, // v2.583 #34
   { key: 'push.gpuGuest', label: 'GPU 게스트', group: 'push', mod: '../agent/gpuGuestPush.js', fn: 'gpuGuestPushStatus' },
   { key: 'push.svcmon', label: '성능 점검(svcmon)', group: 'push', mod: '../agent/svcmonPush.js', fn: 'svcmonPushStatus' },
   { key: 'push.storage', label: '스토리지', group: 'push', mod: '../storage/push.js', fn: 'storagePushStatus' },
@@ -96,6 +97,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.ipamScan', label: 'IPAM 스캔', group: 'collect', mod: '../ipam/scanPoller.js', fn: 'scanStatus' },
   { key: 'collect.osScan', label: '게스트 OS 스캔', group: 'collect', mod: '../inventory/osScanner.js', fn: 'osScanStatus' },
   { key: 'collect.idracScan', label: 'iDRAC 스캔 위임', group: 'collect', mod: '../agent/idracScanWorker.js', fn: 'getIdracScanWorkerStatus' },
+  { key: 'collect.ipScanAgent', label: 'IP 스캔 위임', group: 'collect', mod: '../agent/ipScanWorker.js', fn: 'ipScanAgentStatus' }, // v2.583 #34: 무음 실패하던 워커
   { key: 'collect.agentScan', label: '에이전트 스캔', group: 'collect', mod: '../agent/scanner.js', fn: 'getAgentScanStatus' },
   /*
    * ⚠⚠ v2.574 IMP-07 — 아래 7개는 v2.573 까지 **이 표에 없었다**. CLAUDE.md 가 v2.554·v2.560·

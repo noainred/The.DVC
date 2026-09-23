@@ -5,7 +5,7 @@ import { STable } from '../components/STable.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from 'recharts';
 import {
   ms as fmtMs, pct, when, ago, reasonLabel, loopBadge, loopNote, hangSummary, hangKindLabel,
-  measureVerdict, slowRate, routeHint,
+  measureVerdict, slowRate, routeHint, ridMatches, ridLookupText,
 } from './perfMonitorText.js';
 import { unitText } from './unitText.js';
 
@@ -45,6 +45,9 @@ export default function PerfMonitor() {
   const [msg, setMsg] = useState(null);
   const [measured, setMeasured] = useState(null);
   const [hangFile, setHangFile] = useState(null); // 파일에서 읽은 기록(재시작 전 포함)
+  // v2.583: 요청 ID 찾기 — 로딩 화면에 보인 ID 로 느린 요청·hang·진행 중 목록을 거르고, 서버의 최근 완료 기록을 조회한다.
+  const [ridQ, setRidQ] = useState('');
+  const [ridHit, setRidHit] = useState(null);
   const inited = useRef(false);
 
   const load = async () => {
@@ -96,6 +99,17 @@ export default function PerfMonitor() {
     catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
   };
 
+  const lookupRid = async () => {
+    const q = ridQ.trim();
+    if (!q) { setRidHit(null); return; }
+    try {
+      const r = await fetchJson('/perf/req-status', { ids: q }, undefined, { retries: 0 });
+      setRidHit({ q, text: ridLookupText(q, r?.items?.[q]) || `${q} — 요청 ID 형식이 아닙니다(영숫자로 시작 · 4~40자).` });
+    } catch (e) { setRidHit({ q, text: `조회 실패: ${e.message || e}` }); }
+  };
+  const slowRows = (d.slow || []).filter((r) => ridMatches(r, ridQ));
+  const inflightRows = (d.inflight || []).filter((r) => ridMatches(r, ridQ));
+
   const mv = measured ? measureVerdict(measured) : null;
   const chart = (d.loop?.windows || []).map((w) => ({ ts: w.ts, maxMs: w.maxMs, p99Ms: w.p99Ms, eluPct: w.eluPct }));
 
@@ -121,6 +135,14 @@ export default function PerfMonitor() {
         <span style={{ marginLeft: 'auto' }} className="muted">{st.enabled ? `계측 켜짐 · ${POLL_MS / 1000}초마다 갱신` : '⚠ 계측 꺼짐 — 설정 탭에서 켜세요'}</span>
       </div>
       {msg && <div style={{ marginBottom: 8, fontSize: 12.5, color: msg.ok ? 'var(--green)' : 'var(--red)', overflowWrap: 'anywhere' }}>{msg.text}</div>}
+      <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center' }}>
+        <input className="input" style={{ width: 220, maxWidth: '100%' }} placeholder="요청 ID 찾기(로딩 화면에 보인 값)"
+          value={ridQ} onChange={(e) => { setRidQ(e.target.value); setRidHit(null); }}
+          onKeyDown={(e) => { if (e.key === 'Enter') lookupRid(); }} />
+        <button className="tab" style={{ padding: '5px 12px' }} onClick={lookupRid} disabled={!ridQ.trim()}>서버 기록 조회</button>
+        {ridQ.trim() && <span className="muted" style={{ fontSize: 11.5 }}>느린 요청·hang·진행 중 목록을 이 ID 로 거릅니다.</span>}
+        {ridHit && <div style={{ flexBasis: '100%', fontSize: 12.5, overflowWrap: 'anywhere' }}>{ridHit.text}</div>}
+      </div>
 
       {tab === 'now' && (<>
         <div className="card" style={{ padding: 14, marginBottom: 12 }}>
@@ -173,13 +195,14 @@ export default function PerfMonitor() {
           </div>
         )}
         <div className="card" style={{ padding: 14 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>진행 중 요청 {d.inflight?.length ? `(${d.inflight.length})` : ''}</div>
-          {(d.inflight || []).length ? (
-            <STable className="table">
-              <thead><tr><th>경과</th><th>메서드</th><th>경로</th></tr></thead>
-              <tbody>{d.inflight.map((r) => (
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>진행 중 요청 {inflightRows.length ? `(${inflightRows.length})` : ''}</div>
+          {inflightRows.length ? (
+            <STable className="table" minWidth={520}>
+              <thead><tr><th>경과</th><th>요청 ID</th><th>메서드</th><th>경로</th></tr></thead>
+              <tbody>{inflightRows.map((r) => (
                 <tr key={r.id}>
                   <td data-sort={r.ageMs} style={{ color: r.ageMs > 5000 ? 'var(--amber)' : undefined }}>{fmtMs(r.ageMs)}</td>
+                  <td style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12 }}>{r.rid || '—'}</td>
                   <td>{r.method}</td><td style={{ overflowWrap: 'anywhere' }}>{r.path}</td>
                 </tr>
               ))}</tbody>
@@ -228,14 +251,15 @@ export default function PerfMonitor() {
           롱폴·데이터스토어 탐색처럼 오래 걸리는 것이 정상인 라우트는 월타임 기준에서 제외합니다.
           최근 {st.keepSlow}건만 보관합니다(프로세스 재시작 시 초기화).
         </div>
-        {(d.slow || []).length ? (
-          <STable minWidth={1120} className="table">
-            <thead><tr><th>시각</th><th>사유</th><th>소요</th><th>정체 겹침</th><th>상태</th><th>메서드</th><th>경로</th><th>사용자</th><th>진행중</th><th>RSS</th><th>작업</th></tr></thead>
-            <tbody>{d.slow.map((r, i) => {
+        {slowRows.length ? (
+          <STable minWidth={1240} className="table">
+            <thead><tr><th>시각</th><th>요청 ID</th><th>사유</th><th>소요</th><th>정체 겹침</th><th>상태</th><th>메서드</th><th>경로</th><th>사용자</th><th>진행중</th><th>RSS</th><th>작업</th></tr></thead>
+            <tbody>{slowRows.map((r, i) => {
               const rl = reasonLabel(r.reason);
               return (
                 <tr key={`${r.ts}-${i}`}>
                   <td data-sort={r.ts}>{when(r.ts)}</td>
+                  <td style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12 }}>{r.rid || '—'}</td>
                   <td title={rl.help}><Badge label={rl.label} color={rl.color} /></td>
                   <td data-sort={r.ms}>{fmtMs(r.ms)}</td>
                   <td data-sort={r.stallMs}>{r.stallMs ? fmtMs(r.stallMs) : '—'}</td>
@@ -250,7 +274,7 @@ export default function PerfMonitor() {
               );
             })}</tbody>
           </STable>
-        ) : <div className="muted" style={{ fontSize: 12.5 }}>임계를 넘은 요청이 아직 없습니다.</div>}
+        ) : <div className="muted" style={{ fontSize: 12.5 }}>{ridQ.trim() && (d.slow || []).length ? '이 요청 ID 에 해당하는 느린 요청이 없습니다 — 위 서버 기록 조회로 빠르게 끝난 요청인지 확인하세요.' : '임계를 넘은 요청이 아직 없습니다.'}</div>}
       </>)}
 
       {tab === 'hangs' && (<>
@@ -281,7 +305,7 @@ export default function PerfMonitor() {
           </div>
         )}
         {(() => {
-          const rows = hangFile?.rows?.length ? hangFile.rows : (d.hangs || []);
+          const rows = (hangFile?.rows?.length ? hangFile.rows : (d.hangs || [])).filter((ev) => ridMatches(ev, ridQ));
           if (!rows.length) return <div className="muted" style={{ fontSize: 12.5 }}>기록된 hang 이 없습니다 — 정체가 관측되지 않았거나 계측이 켜진 뒤 아직 발생하지 않았습니다.</div>;
           return (
             <STable className="table">

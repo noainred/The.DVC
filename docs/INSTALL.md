@@ -318,6 +318,8 @@ COLLECTOR_DATACENTER=Seoul-DC1
 | 중앙 → 수집 에이전트 | TCP 4000 | 전력 export pull · PUSH 스캔 · 업그레이드 푸시 |
 | 포탈 → vCenter | TCP 443 | vim25 SOAP/REST |
 | 포탈/에이전트 → iDRAC/OME | TCP 443 | Redfish/OME |
+| 포탈/엣지 → 스토리지·SAN 스위치·PDU·베어메탈 OS | TCP 22 / 443 / 8080(PowerScale) / 8443(PowerMax) | 장비 수집(SSH·REST). 장비별·타입별 상세는 NETWORK-COMMS-FIREWALL.md ⑦ |
+| 포탈 → SMTP 릴레이 | TCP 25 / 465 / 587 | 메일 발송(설정 › 메일 발송, 사용 시) |
 
 ```bash
 sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
@@ -337,7 +339,7 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 |---|---|
 | **초기 비번** | `initial-admin-password.txt`로 로그인 후 **즉시 변경**하고 파일 삭제(§2.2). |
 | **★ 고권한 OTP 전용** | `admin`·`operator`의 최종 상태는 **OTP 전용 로그인**입니다(v2.206+). OTP 미등록 계정만 최초 1회 비밀번호로 로그인할 수 있고, 그 세션은 **OTP 등록 외 모든 API가 차단**되며 등록을 마치면 **비밀번호가 삭제**됩니다. 설치 직후 §2.2 절차로 첫 관리자 등록을 완료하세요. 콘솔 등록·잠금 복구는 `sudo vmware-portal-otp`, 긴급 해제는 `OTP_ROLE_ENFORCE=false`. |
-| **기능 권한 매트릭스** | 설정 → 사용자 관리 하단에서 역할(operator/viewer)별로 **기능 권한 17종**과 **특수기능 도구별 접근**을 켜고 끕니다. 서버(`requirePerm`)와 WS SSH/RDP 게이트웨이가 강제하므로 UI를 우회한 API 호출도 차단됩니다. admin은 항상 전체(잠김 방지). 기본값은 종전 role 동작과 동일. |
+| **기능 권한 매트릭스** | 설정 → 사용자 관리 하단에서 역할(operator/viewer)별로 **기능 권한 18종**과 **특수기능 도구별 접근**(역할별 거부 목록 + 사용자별 허용 목록/거부 목록, v2.555)을 켜고 끕니다. 서버(`requirePerm`)와 WS SSH/RDP 게이트웨이가 강제하므로 UI를 우회한 API 호출도 차단됩니다. admin은 항상 전체(잠김 방지). 기본값은 종전 role 동작과 동일. |
 | **데이터 범위(scope)** | 계정별로 **볼 수 있는 vCenter/리전**을 제한할 수 있습니다(외주·감사·데모 계정 권장). 미지정 시 전체. 목록 API뿐 아니라 **id를 직접 받는 단건 라우트**(VM 콘솔 티켓·호스트/VM 지표)도 검사하며, 범위 밖은 **404**로 응답합니다(존재 여부 은닉, v2.207.0). |
 | **특수 계정** | `noainred`(수퍼관리자 — 강등/삭제/차단 불가), `thedvcdemp`(데모 — 비번 설정 시에만 로그인, [로그인 차단]으로 즉시 잠금). §2.2 표 참고. |
 | **★ 설정 접근 계정** | '설정' 탭은 지정 계정만 접근할 수 있습니다(서버측 강제). 세 경로가 **합산** 적용: ① `portal.env` 의 `SETTINGS_OWNERS=계정1,계정2` ② `$CONFIG_DIR/settings-owners.txt`(한 줄에 하나, `#` 주석) ③ 포탈 UI(설정 › 세션 보안). ①②는 **UI 저장으로 지워지지 않아** 아무도 설정에 못 들어가는 잠금 상황의 복구 경로입니다. 편집 후 `systemctl restart vmware-portal` 없이도 즉시 반영되지만(파일은 매 조회 시 읽음), `SETTINGS_OWNERS` 환경변수 변경은 재시작이 필요합니다. |
@@ -352,7 +354,7 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 | **AD 그룹 매핑** | 그룹→역할은 **CN/전체 DN 완전일치**가 기본입니다. 예전처럼 부분문자열로 맞춰 쓰던 설정은 로그인 시 서버 로그에 `[ad]` 경고가 남으니 실제 그룹명으로 교정하세요(임시 호환은 `AD_GROUP_MATCH=substring`, 권한 상승 위험으로 비권장). |
 | **역할(RBAC)** | 상태변경 API·브라우저 SSH/RDP는 기본적으로 `admin`·`operator`만(기능 권한 매트릭스로 조정). 인증을 끌 수밖에 없다면(`AUTH_ENABLED=false`) `AUTH_DISABLED_ROLE=viewer`로 익명 권한을 낮추세요. |
 | **OTP 잠금** | 민감작업 재인증 OTP는 계정별 실패 잠금(`OTP_MAX_FAILS`/`OTP_LOCKOUT_MS`)이 걸립니다. |
-| **CSP(선택)** | 필요 시 `CSP=<정책문자열>`로 옵트인(인라인 스타일/intro 호환 확인 후). |
+| **CSP(기본 켜짐, v2.577)** | 앱 전체에 기본 Content-Security-Policy 가 걸립니다(`/intro` 데모 페이지만 완화 정책). 끄려면 `CSP=off`, 바꾸려면 `CSP=<정책문자열>`. 세션 토큰이 브라우저 저장소(localStorage)에 있으므로 끄는 것은 권장하지 않습니다. |
 
 > 전체 보안 감사 이력과 잔여 백로그는 [docs/AUDIT-2026-06-27.md](AUDIT-2026-06-27.md) 상단의 후속 조치 노트를 참고하세요.
 
@@ -410,6 +412,20 @@ sudo cat /etc/vmware-portal/portal.env    # 현재 설정(민감정보 포함 �
 **백업/복원**: 설정·데이터는 전부 `/etc/vmware-portal` 아래에 있습니다. 이 디렉터리를 백업하면
 계정·토큰·vCenter·수집기·시계열 DB가 보존됩니다(포탈 **설정 → 포탈 백업**에서 스냅샷 내보내기도 가능).
 
+**로그 분석(설정 › Log › 로그 분석(개선점), v2.583) 준비**: 폐쇄망에서 저널을 반출하지 않고 포탈이 직접 읽어
+분석합니다. 원천 중 **서비스 저널**은 포탈 서비스 계정(`install.sh` 기본 `vmportal`, `--user` 로 바꾼 경우 그 계정)이
+시스템 저널을 읽을 권한이 있어야 합니다. 권한이 없으면 `journalctl` 이 빈 결과를 주고 화면이 '권한 없음' 과 조치를
+안내합니다(빈 결과를 '로그 없음' 으로 말하지 않습니다). `install.sh` 는 이 그룹을 추가하지 않으므로 한 번 직접 넣으세요:
+
+```bash
+sudo usermod -aG systemd-journal vmportal    # 서비스 계정 이름으로
+sudo systemctl restart vmware-portal         # 그룹은 프로세스를 다시 띄워야 적용됩니다
+```
+
+- 유닛 이름이 `vmware-portal` 이 아니면 `portal.env` 에 `PORTAL_SYSTEMD_UNIT=<유닛>` 을 넣습니다(형식이 틀리면 기본값 사용).
+- 기본 원천인 **누적** 집계는 줄이 들어오는 순간 시간 단위로 쌓아 `/etc/vmware-portal/log-analysis-stats.json` 에
+  남깁니다(최대 7일, 재시작해도 이어짐). 끄려면 `LOGANALYSIS_LIVE=0`.
+
 ### 10.1 (선택) 서비스 바로가기 허브 — 별도 페이지
 
 운영에 쓰는 여러 서비스 포탈을 한 화면에 모아 두는 **독립 페이지**입니다(Python 표준 라이브러리 전용,
@@ -461,6 +477,8 @@ sudo cat /etc/dc-service-hub/initial-settings-password.txt
 | VM 사양 변경 안 보임 | **관리자**로 로그인 + **live**(mock 차단). vCenter 계정에 reconfigure 권한 |
 | vCenter 인증서 오류 | `VC_TLS_REJECT_UNAUTHORIZED=false` |
 | 브라우저 교차출처(CORS) 차단 | 별도 프론트 출처면 `CORS_ORIGINS`에 그 출처 추가(§7) |
+| 로그 분석 '서비스 저널' 이 권한 없음 | 서비스 계정을 `systemd-journal` 그룹에 추가 후 재시작(§10). 그 전에는 '누적'·'붙여넣기' 원천을 쓴다 |
+| 화면이 '불러오는 중…' 에서 오래 멈춤 | 작업 줄 아래의 **요청 ID** 로 설정 › Log › 서버 성능 측정의 '요청 ID 찾기' 에서 같은 요청을 찾는다(서버 처리 중 / 이미 응답 / 기록 없음) |
 
 ---
 

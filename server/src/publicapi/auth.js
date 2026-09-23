@@ -22,6 +22,8 @@
 import { verifyApiKey, markUsed, rateAllow, KEY_STATE, publicKey, KEY_PREFIX } from './keys.js';
 import { tokenFingerprint } from '../util/tokenFingerprint.js';
 import { logAudit } from '../audit.js';
+import { clientIp } from '../util/rateLimit.js'; // v2.583: 거부 감사 요약의 출처 키
+import { createDenyAuditGate } from '../util/denyAuditGate.js';
 
 /** 키를 읽는 위치 — 헤더 우선. ⚠ 쿼리스트링은 프록시 액세스 로그·브라우저 히스토리에 남는다. */
 export function readKey(req) {
@@ -48,6 +50,17 @@ const DENY = Object.freeze({
  * ⚠ `next()` 로 흘려보내지 않는다 — 이 라우터는 **공개 API 전용**이므로 키가 없으면 401 이다
  *   (세션 사용자에게도 열면 두 인증 경로가 한 라우터에 섞여 판정이 흐려진다).
  */
+/**
+ * 무인증 거부의 감사 기록 조절(v2.583) — 출처(IP)당 1분에 한 줄. 넘친 건수는 다음에 쓰는 줄에 합친다.
+ * 출처 표는 유계(2,000)이고 넘치면 가장 오래된 출처부터 버린다(그 출처의 합친 건수만 사라진다).
+ * @returns {{ write: boolean, folded: number }}
+ */
+const DENY_WINDOW_MS = 60_000;
+// v2.583: 게이트 구현은 util/denyAuditGate.js 하나다(로그인 실패·차단도 같은 것을 쓴다 — 검증 에이전트 권고).
+const _gate = createDenyAuditGate({ windowMs: DENY_WINDOW_MS });
+export function denyAuditGate(ip, now = Date.now()) { return _gate(ip, now); }
+export function _resetDenyAuditGate() { _gate.reset(); }
+
 export function apiKeyAuth() {
   return function apiKeyAuthMw(req, res, next) {
     const { key, from } = readKey(req);
@@ -62,12 +75,18 @@ export function apiKeyAuth() {
        * ⚠ 평문이 아니라 지문만 남긴다. 모르는 키도 지문을 남겨야 '누가 무엇으로 찔렀나' 를 본다.
        * ⚠ 인자명은 `user`·`target`·`detail` 이다(`audit.js:53`) — `actor` 로 쓰면 **조용히 버려진다**.
        */
-      logAudit({
-        user: rec?.name ? `apikey:${rec.name}` : '(미상 키)',
-        action: 'publicapi.deny',
-        target: req.path,
-        detail: `${d.code} · ${tokenFingerprint(key)} · from=${from}`,
-      });
+      // v2.583(감사 확정): 무인증 요청 한 번이 감사 로그 한 줄이라, 한 IP 가 분당 1,800회(전역 레이트리밋)로
+      //   **감사 이력 2만 줄을 약 11분에 밀어낼 수 있었다**. 같은 출처는 1분에 한 줄만 쓰고 나머지는 세어 두었다가
+      //   다음 줄에 '직전에 요약한 N건' 으로 붙인다(버리지 않고 합친다 — 거부 사실 자체는 남는다).
+      const sum = denyAuditGate(clientIp(req));
+      if (sum.write) {
+        logAudit({
+          user: rec?.name ? `apikey:${rec.name}` : '(미상 키)',
+          action: 'publicapi.deny',
+          target: req.path,
+          detail: `${d.code} · ${tokenFingerprint(key)} · from=${from}${sum.folded ? ` · 같은 출처 거부 ${sum.folded}건을 이 줄에 합침(1분 요약)` : ''}`,
+        });
+      }
       return res.status(d.status).json({ ok: false, error: d.code, code: d.code, reason: d.reason });
     }
 

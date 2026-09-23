@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { usePolling } from '../api.js';
+import { usePolling, can } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, EntityDetail } from '../components/ui.jsx';
 
 function SumCard({ label, value, meta, accent }) {
@@ -13,7 +13,9 @@ function SumCard({ label, value, meta, accent }) {
 }
 
 /** Compact leaderboard list for a "top consumers" category. Rows are clickable. */
-function TopList({ title, items, valueOf, label, accent, type, onSelect }) {
+// v2.583: 서버가 권한 없는 목록을 빼고 withheld 로 밝힌다 — 그 패널에 '데이터 없음' 이라 말하면 거짓이다(권한이 없는 것이다).
+const KIND_OF_TYPE = { vm: 'vms', host: 'hosts', datastore: 'datastores' };
+function TopList({ title, items, valueOf, label, accent, type, onSelect, heldKinds = null }) {
   const max = Math.max(1, ...items.map(valueOf));
   return (
     <div className="card">
@@ -21,7 +23,7 @@ function TopList({ title, items, valueOf, label, accent, type, onSelect }) {
         <b>{title}</b>
         <span className="muted" style={{ fontSize: 12 }}>상위 {items.length}</span>
       </div>
-      {items.length === 0 && <div className="muted" style={{ padding: 12 }}>데이터 없음</div>}
+      {items.length === 0 && <div className="muted" style={{ padding: 12 }}>{heldKinds?.has(KIND_OF_TYPE[type]) ? '조회 권한이 없어 표시하지 않았습니다' : '데이터 없음'}</div>}
       {items.map((it, i) => {
         const v = valueOf(it);
         return (
@@ -63,10 +65,13 @@ export default function Explore() {
     vcpuMin: '', ramMinGB: '', diskMinGB: '', cpuUsageMin: '', memUsageMin: '', os: '', powerState: 'POWERED_ON',
   });
   const searchParams = Object.fromEntries(Object.entries({ ...scope, ...spec }).filter(([, v]) => v !== ''));
-  const { data: vmResult } = usePolling('/vms', { ...searchParams, sortBy: 'cpuUsagePct', order: 'desc', limit: 200 }, 20_000);
+  // v2.583: inv.vms 가 없으면 VM 검색을 부르지 않는다(403 을 만들지 않는다 — 서버가 그 권한으로 막는다).
+  const canVms = can('inv.vms');
+  const { data: vmResult } = usePolling(canVms ? '/vms' : null, { ...searchParams, sortBy: 'cpuUsagePct', order: 'desc', limit: 200 }, 20_000);
 
   if (loading && !top) return <Loading />;
   if (error && !top) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
+  const heldKinds = new Set((top?.withheld || []).map((w) => w.kind));
 
   const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
 
@@ -104,37 +109,44 @@ export default function Explore() {
         </div>
       </div>
 
+      {/* v2.583: 서버가 inv.* 권한이 없는 목록을 빼고 그 사실을 withheld 로 준다 — 빈 목록을 '없음' 으로 읽지 않게 밝힌다. */}
+      {top.withheld?.length > 0 && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          조회 권한이 없어 표시하지 않은 목록: {top.withheld.map((w) => ({ vms: 'VM', hosts: '호스트', datastores: '데이터스토어' }[w.kind] || w.kind)).join(' · ')}
+          {' '}(필요 권한 {top.withheld.map((w) => w.requiredPerm).join(', ')} — 관리자에게 요청하세요)
+        </div>
+      )}
       <div className="grid cols-3">
-        <TopList title="CPU 사용률 최다 VM" items={top.vmsByCpuUsage} valueOf={(v) => v.cpuUsagePct}
+        <TopList heldKinds={heldKinds} title="CPU 사용률 최다 VM" items={top.vmsByCpuUsage} valueOf={(v) => v.cpuUsagePct}
           label={(v) => `${v.cpuUsagePct}%`} accent="var(--accent)" type="vm" onSelect={setDetail} />
-        <TopList title="메모리 사용률 최다 VM" items={top.vmsByMemUsage} valueOf={(v) => v.memUsagePct}
+        <TopList heldKinds={heldKinds} title="메모리 사용률 최다 VM" items={top.vmsByMemUsage} valueOf={(v) => v.memUsagePct}
           label={(v) => `${v.memUsagePct}%`} accent="var(--purple)" type="vm" onSelect={setDetail} />
-        <TopList title="디스크 할당 최다 VM" items={top.vmsByStorage} valueOf={(v) => v.storageGB}
+        <TopList heldKinds={heldKinds} title="디스크 할당 최다 VM" items={top.vmsByStorage} valueOf={(v) => v.storageGB}
           label={(v) => tb(v.storageGB)} accent="var(--accent-2)" type="vm" onSelect={setDetail} />
       </div>
 
       <div className="grid cols-3" style={{ marginTop: 16 }}>
-        <TopList title="CPU 사용률 최다 호스트" items={top.hostsByCpu} valueOf={(h) => h.cpuUsagePct}
+        <TopList heldKinds={heldKinds} title="CPU 사용률 최다 호스트" items={top.hostsByCpu} valueOf={(h) => h.cpuUsagePct}
           label={(h) => `${h.cpuUsagePct}%`} accent="var(--red)" type="host" onSelect={setDetail} />
-        <TopList title="메모리 사용률 최다 호스트" items={top.hostsByMem} valueOf={(h) => h.memUsagePct}
+        <TopList heldKinds={heldKinds} title="메모리 사용률 최다 호스트" items={top.hostsByMem} valueOf={(h) => h.memUsagePct}
           label={(h) => `${h.memUsagePct}%`} accent="var(--amber)" type="host" onSelect={setDetail} />
-        <TopList title="사용률 최다 데이터스토어" items={top.datastoresByUsage} valueOf={(d) => d.usagePct}
+        <TopList heldKinds={heldKinds} title="사용률 최다 데이터스토어" items={top.datastoresByUsage} valueOf={(d) => d.usagePct}
           label={(d) => `${d.usagePct}% · ${tb(d.capacityGB)}`} accent="var(--green)" type="datastore" onSelect={setDetail} />
       </div>
 
       {top.hostsByPower?.length > 0 && (
         <div className="grid cols-3" style={{ marginTop: 16 }}>
-          <TopList title="소비전력 최다 호스트" items={top.hostsByPower} valueOf={(h) => h.powerWatts}
+          <TopList heldKinds={heldKinds} title="소비전력 최다 호스트" items={top.hostsByPower} valueOf={(h) => h.powerWatts}
             label={(h) => `${(h.powerWatts / 1000).toFixed(2)} kW`} accent="var(--amber)" type="host" onSelect={setDetail} />
         </div>
       )}
 
       <div className="grid cols-3" style={{ marginTop: 16 }}>
-        <TopList title="vCPU 할당 최다 VM" items={top.vmsByVcpu} valueOf={(v) => v.cpuCount}
+        <TopList heldKinds={heldKinds} title="vCPU 할당 최다 VM" items={top.vmsByVcpu} valueOf={(v) => v.cpuCount}
           label={(v) => `${v.cpuCount} vCPU`} accent="var(--accent)" type="vm" onSelect={setDetail} />
-        <TopList title="RAM 할당 최다 VM" items={top.vmsByRam} valueOf={(v) => v.memMB}
+        <TopList heldKinds={heldKinds} title="RAM 할당 최다 VM" items={top.vmsByRam} valueOf={(v) => v.memMB}
           label={(v) => `${Math.round(v.memMB / 1024)} GB`} accent="var(--purple)" type="vm" onSelect={setDetail} />
-        <TopList title="VM 수 최다 호스트" items={top.hostsByVmCount} valueOf={(h) => h.vmCount}
+        <TopList heldKinds={heldKinds} title="VM 수 최다 호스트" items={top.hostsByVmCount} valueOf={(h) => h.vmCount}
           label={(h) => `${h.vmCount} VM`} accent="var(--accent-2)" type="host" onSelect={setDetail} />
       </div>
 
@@ -161,7 +173,7 @@ export default function Explore() {
           </label>
         </div>
         <div className="muted" style={{ margin: '12px 0 10px' }}>
-          조건 일치 VM: <b style={{ color: 'var(--text)' }}>{vmResult?.total?.toLocaleString() ?? '…'}</b>개
+          {canVms ? <>조건 일치 VM: <b style={{ color: 'var(--text)' }}>{vmResult?.total?.toLocaleString() ?? '…'}</b>개</> : 'VM 조회 권한(inv.vms)이 없어 사양 검색을 하지 않습니다 — 관리자에게 요청하세요.'}
           {vmResult && vmResult.total > vmResult.items.length && ` (상위 ${vmResult.items.length}개 표시)`}
         </div>
         {vmResult?.totals && (

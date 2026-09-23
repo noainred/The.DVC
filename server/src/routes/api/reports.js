@@ -161,8 +161,9 @@ api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJso
     const allowed = scopedVcenterIds(req.user, snap);
     const lf = { vcenterId: vcParam, q: 'Snapshot', since: Date.now() - lookbackDays * 86_400_000 };
     if (allowed) lf.vcenterIds = vcParam ? (allowed.has(vcParam) ? [vcParam] : []) : [...allowed];
-    const rows = db.query(lf, 20_000, 0);
-    return computeUnprotected(scoped.vms, rows, { patterns: patterns.length ? patterns : DEFAULT_BACKUP_PATTERNS, lookbackDays });
+    const ROW_LIMIT = 20_000;
+    const rows = db.query(lf, ROW_LIMIT, 0);
+    return computeUnprotected(scoped.vms, rows, { patterns: patterns.length ? patterns : DEFAULT_BACKUP_PATTERNS, lookbackDays, rowLimit: ROW_LIMIT });
   }
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 }

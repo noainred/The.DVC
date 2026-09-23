@@ -361,7 +361,7 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
       )}
       {!group.global && (
         <div className="card" style={{ marginTop: 12 }}>
-          <b>원격 관리(RMA Manager 대응)</b> — 엣지 <code>RMA_REMOTE_MANAGE=true</code> 인 인스턴스만 받아들입니다. 허용 범위는 **축소만** 가능합니다.
+          <b>원격 관리(RMA Manager 대응)</b> — 엣지 <code>RMA_REMOTE_MANAGE=true</code> 인 인스턴스만 받아들입니다. 허용 범위는 <b>축소만</b> 가능합니다.
           <div className="flex gap wrap" style={{ marginTop: 6 }}>
             <label>롱폴(ms) <input className="input" style={{ width: 90 }} value={remote.longpollMs} onChange={(e) => setRemote({ ...remote, longpollMs: e.target.value.replace(/\D/g, '') })} placeholder="20000" /></label>
             <label>동시 점검 <input className="input" style={{ width: 60 }} value={remote.testConcurrency} onChange={(e) => setRemote({ ...remote, testConcurrency: e.target.value.replace(/\D/g, '') })} placeholder="4" /></label>

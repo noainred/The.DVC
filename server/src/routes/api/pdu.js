@@ -10,7 +10,6 @@
 
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { requireSettingsOwner } from '../admin/shared.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import {
@@ -26,15 +25,12 @@ import { devicesToCsv, csvToDevices, sampleCsv } from '../../pdu/csv.js';
 import { summarize } from '../../pdu/types.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
-const fullScopeOnly = (req, res, next) => {
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, reason: 'PDU 정보는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
-  }
-  next();
-};
+// v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
+const fullScopeOnly = fullScopeOnlyWith('PDU 정보는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 
 /** 중앙 직접 수집분 + 엣지 push 분을 합친다(같은 id 는 최신 것 우선). */
 function allSnapshots() {

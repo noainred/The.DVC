@@ -1,14 +1,14 @@
 # 네트워크 통신 · 방화벽 오픈 가이드 (The DVC Portal)
 
 > 전체 소스코드 분석으로 도출한 **모든 프로세스 간 통신 경로**입니다. 방화벽 정책(ACL) 작성에 바로 쓰도록 출발지/도착지·방향·프로토콜·포트·기본값·환경변수·근거 파일까지 정리했습니다.
-> 분석 범위: 중앙 포탈 ↔ 엣지 포탈 ↔ 수집 에이전트 ↔ vCenter/ESXi ↔ iDRAC/OME ↔ HAProxy 중계 ↔ 게스트/네트워크 점검 + AD·LLM·NSX·알림·업그레이드.
-> 총 **82개 통신 경로**(6개 도메인). 포트는 기본값 기준이며, 대부분 환경변수/설정으로 변경 가능합니다(아래 표의 '환경변수/설정' 열).
+> 분석 범위: 중앙 포탈 ↔ 엣지 포탈 ↔ 수집 에이전트 ↔ vCenter/ESXi ↔ iDRAC/OME ↔ HAProxy 중계 ↔ 게스트/네트워크 점검 + AD·LLM·NSX·알림(메일 포함)·업그레이드 + 스토리지·SAN 스위치·PDU·베어메탈 + 통신 점검.
+> 총 **106개 통신 경로**(8개 도메인 — 3장 표의 행 수). v2.583 에 재집계했다: 예전 머리말의 '82개(6개 도메인)' 는 ①~⑥ 표(실제 87행)와도 맞지 않았고, 스토리지·SAN·PDU·베어메탈(⑦)과 통신 점검(⑧)이 빠져 있었다. 포트는 기본값 기준이며, 대부분 환경변수/설정으로 변경 가능합니다(아래 표의 '환경변수/설정' 열).
 
 ## 0. 핵심 요약 (먼저 읽기)
 
 - **포탈은 단일 인바운드 포트 `TCP 4000`(`PORT`) 하나만 listen합니다.** 웹 UI, 모든 `/api/*`(admin·collector·central·upgrade·metrics·dl), WebSocket 원격콘솔(`/api/remote/ssh`·`/rdp`)이 전부 이 포트로 들어옵니다. HTTPS 종단은 보통 앞단 리버스프록시(nginx 등)에서 443→4000으로 처리합니다.
 - **나머지는 거의 전부 포탈/에이전트 → 인프라 방향의 아웃바운드**입니다.
-- **엣지(분산) 에이전트는 중앙으로 단방향 아웃바운드 push/pull만** 합니다(`CENTRAL_URL`→중앙 `4000`). 중앙이 에이전트로 먼저 연결하는 건 (a) 수집 에이전트 전력 pull(`/api/collector/export`)과 (b) 업그레이드 번들 push 두 가지뿐 → NAT/폐쇄망 사이트는 에이전트 방식이 유리.
+- **엣지(분산) 에이전트는 중앙으로 단방향 아웃바운드 push/pull만** 합니다(`CENTRAL_URL`→중앙 `4000`). 중앙이 에이전트로 먼저 연결하는 것은 전부 **에이전트 `4000` 의 `/api/collector/*`**(수집 토큰)다 — 전력 pull(`/export`) · 연결 테스트(`/ping`) · 사람이 누를 때만 도는 조회(`/edge-log`·`/bm-usage`·`/token-check`) · 위임 작업(`/idrac-scan`·`/bmstor-collect`·`/set-password`) · 업그레이드 번들 push(`/upgrade`). 즉 중앙→에이전트는 4000 하나면 된다 → NAT/폐쇄망 사이트는 에이전트 방식이 유리. 예외: 통신 점검의 **엣지↔엣지 짝**(⑧, 관리자가 지정했을 때만).
 - **vCenter를 HAProxy로 중계**하는 구성에서는 vCenter 포트가 `443`이 아니라 **중계 frontend의 커스텀 포트**(예: `4065`)입니다 — `vcenters.json`의 `host`에 `https://중계IP:포트`로 들어갑니다.
 - **HAProxy 원격접속 frontend 포트는 동적**입니다(`20000`+, `PROXY_PUBLIC_PORT_BASE`부터 매핑마다 1씩 증가 할당).
 
@@ -50,13 +50,17 @@
 | Ollama LLM | **11434** | HTTP | 자연어 검색 해석 | `OLLAMA_URL` |
 | NSX Manager | **443**(중계 시 publicPort) | HTTPS | NSX 인벤토리/보안 | nsx.json |
 | Slack/Webhook | **443** | HTTPS | 알림 | alerts.json |
-| (SMTP 게이트웨이) | **25/465/587** | SMTP | 이메일 알림(현재 미구현, Webhook 권장) | — |
+| (SMTP 릴레이) | **25/465/587**(설정값, 기본 25 · 암시적 TLS 면 465) | SMTP(STARTTLS·암시적 TLS) | 포탈 공용 메일 발송(v2.454, 설정 › 메일 발송) — 알림·일일 리포트·폴더 사용량 리포트가 사용 | mail.json(host·port) |
 | GitHub Releases / LAN 미러 | **443** | HTTPS | 원격 업그레이드 다운로드 | `PACKAGE_BASE_URL`/`UPGRADE_REMOTE_BASE` |
 | 수집/엣지 에이전트 | 에이전트 **4000** | HTTPS | 전력 pull(`/export`)·업그레이드 push | 등록 URL/`UPGRADE_EDGES` |
 | IP 스캔 대상 | **22,80,443,445,3389,623,8006,902,5985,5986** | TCP | IP 능동 스캔 | 스캔설정 ports |
 | DNS 리졸버 | **53** | DNS(UDP/TCP) | 역DNS(호스트명) | OS resolver |
 | 게스트 VM/물리서버 | **22** | SSH | GPU/실제OS 수집·tcpdump | 게스트설정 sshPort |
 | ping 대상 | **ICMP** + TCP **445,3389,22,80,443,135** | ICMP/TCP | 도달성/RTT | — |
+| 스토리지 어레이 | **8080**(PowerScale) · **8443**(PowerMax/VMAX) · **443**(Unity·PowerStore·XtremIO·VPLEX/Metro Node) · SSH **22** | HTTPS REST / SSH | 스토리지 모니터링(담당 엣지 없는 장비) — ⑦ | `STORAGE_*_PORT` · 장비 sshPort |
+| Brocade SAN 스위치 | **22** · **443** | SSH / HTTPS(FOS REST) | SAN 스위치 모니터링 — ⑦ | 장비 sshPort·httpsPort |
+| PDU(APC) | **22** | SSH | 전력·센서 — ⑦ | 장비 sshPort |
+| 베어메탈 서버 OS / iDRAC SSH | **22** | SSH | 베어메탈 스토리지·사용률, iDRAC `racadm`(Enterprise 대체 경로 동의 시) — ⑦ | 등록 port |
 
 ### 2-C. 엣지(분산) 에이전트 — 아웃바운드
 
@@ -66,6 +70,8 @@
 | 로컬 vCenter | **443** | HTTPS | 사이트 인벤토리(`AGENT_PUSH_INVENTORY`) |
 | 로컬 iDRAC/OME | **443** | HTTPS | 현장 전력 수집(중앙은 결과만 pull) |
 | 로컬 스캔/게스트 | **DEFAULT_PORTS / 22** | TCP/SSH | 사이트 IP스캔·GPU/OS 수집 |
+| 로컬 스토리지·SAN 스위치·PDU·베어메탈 | **22 / 443 / 8080 / 8443** | SSH/HTTPS | 위임된 장비 수집(⑦) |
+| 다른 엣지 | 상대 엣지 포트(기본 **4000**) | HTTP(S) | 통신 점검 엣지↔엣지 — 관리자가 짝을 지정했을 때만(⑧) |
 
 ### 2-D. 사용자 브라우저 → 인프라(포탈은 URL만 생성)
 
@@ -177,7 +183,7 @@
 | 7 | Portal (server) | HAProxy 중계 서버 (NSX 프록시 경유 시) | outbound | HTTPS(TCP 패스스루) | publicPort(동적 할당) |  | —(proxyId는 nsx.json 항목; publicPort는 proxy/registry가 할당) | 직접 닿지 않는 타 법인 NSX Manager를 등록된 HAProxy frontend로 다이얼. 프록시에 NSX:443 TCP 패스스루 매핑을 보장/프로비저닝하고 baseUrl=https://proxyHost:publicPort로 접속(TLS 종단은 NSX). | server/src/nsx/proxy.js:28-42, server/src/nsx/client.js:31-34 |
 | 8 | Portal (server) | Slack Incoming Webhook | outbound | HTTPS | 443 | 443 | —(채널 url은 CONFIG_DIR/alerts.json, 설정 UI에서 관리) | 알림 — 임계/조건 규칙 발화 시 Slack incoming webhook으로 JSON POST({ text }). 알림엔진 tick 주기 평가. | server/src/alerts.js:186-198, 192-193 |
 | 9 | Portal (server) | 일반 Webhook 수신처 | outbound | HTTPS/HTTP | 443 | 443 | —(webhook url은 alerts.json, 설정 UI) | 알림 — 범용 webhook으로 JSON POST({ source:'vmware-portal', severity, title, detail, text, at }). 이메일은 사내 webhook→메일 게이트웨이 경유 권장. | server/src/alerts.js:195-196, 186-188 |
-| 10 | Portal (server) | 메일 게이트웨이 (SMTP, 미구현/권장만) | outbound | SMTP | 25/465/587 | 587 | —(현재 구현 없음) | 이메일 알림 — 코드상 직접 SMTP 발신은 구현되어 있지 않음. 주석/안내로 'SMTP가 필요해 현재는 Webhook 경유 권장(사내 webhook→메일 게이트웨이)'으로만 언급. | server/src/alerts.js:4-5, web/src/views/Alerts2.jsx:43 |
+| 10 | Portal (server) | 메일 릴레이 (SMTP) | outbound | SMTP(STARTTLS · 암시적 TLS) | 25/465/587 | 25(암시적 TLS 설정 시 465) | 설정 › 메일 발송(CONFIG_DIR/mail.json — host·port·secure·startTls, 비밀번호 봉인 저장) | 포탈 공용 메일 발송(v2.454) — 알림(`email` 채널)·일일 리포트·폴더 사용량 리포트·테스트. 'STARTTLS 사용'(기본 켜짐) + 자격증명이 있는데 서버가 STARTTLS 를 광고하지 않으면 AUTH 를 보내지 않고 중단(v2.574). | server/src/util/smtp.js:200-220; server/src/mail/settings.js:25-30; server/src/mail/kinds.js:15-20; server/src/alerts.js:278 |
 | 11 | Portal (server) | GitHub Releases (또는 LAN 미러) | outbound | HTTPS | 443 | 443 | UPGRADE_REMOTE_BASE(기본 github releases/download/downloads), PACKAGE_BASE_URL(동일 기본), UPGRADE_TOKEN(PAT), PACKAGE_DIR, UPGRADE_ENABLED, UPGRADE_POLL_INTERVAL_MS, UPGRADE_AUTO_APPLY | 원격 업그레이드 체크/다운로드 — remoteBase/PACKAGE_BASE_URL의 versions.json 조회 후 vmware-portal-<ver>.tar.gz 다운로드(SHA-256 검증). private repo면 raw URL을 GitHub contents API(api.github.com)로 재작성하고 PAT(Bearer)로 인증. | server/src/upgrade/upgrade.js:241-318, 320-352, server/src/upgrade/fetchPackage.js:16-62, server/src/config.js:12-13, 91-92, 161-163 |
 | 12 | Portal (server) | Edge/Collector 에이전트 | outbound | HTTPS/HTTP | edge URL 포트 |  | UPGRADE_EDGES(JSON 배열 [{url,token}]) | 자가 업그레이드 후 동일 번들을 등록된 edge/collector 에이전트에 푸시 — POST <edge>/api/upgrade/bundle (Content-Type: application/gzip, 선택 Bearer 토큰). | server/src/upgrade/upgrade.js:357-375, server/src/upgrade/manager.js:97-114, 107-114 |
 | 13 | Edge/Collector 에이전트 | Portal /dl (중앙 업그레이드 소스) | inbound | HTTPS/HTTP | 4000 | 4000 | PORT(포탈 리슨, 기본 4000), PACKAGE_DIR/download 디렉터리에서 번들 스캔 | 이 포탈이 에이전트들의 업그레이드 원본 — 에이전트의 UPGRADE_REMOTE_BASE가 /dl을 가리키면 GET /dl/versions.json과 GET /dl/<번들>(vmware-portal-<ver>.tar.gz)을 내려받아 자가 업그레이드. 토큰 없이 공개 제공(authMiddleware 앞 마운트). | server/src/routes/dlsource.js:39-63, 18-36, server/src/index.js:84 |
@@ -203,6 +209,39 @@
 | 11 | 네트워크 캡처 대상 — hostA의 tcpdump host 필터 (간접: A↔B 트래픽) | peer B (대상 호스트 IP/이름) — hostA에서 tcpdump host <B>로 관찰 | bidirectional | (관찰 대상) hostA↔B 간 TCP 트래픽 (포탈이 B로 직접 접속하지 않음 — A에서 패킷만 캡처) | B와의 모든 포트(필터=host B, 포트 무관) |  |  | A에서 'tcpdump host B'로 A↔B 패킷을 캡처해 경로 손실/단방향/RST 진단. 양방향 캡처(runDualCapture)는 B에도 SSH 접속해 동시 캡처 후 대조 | server/src/net/tcpdump.js:75 (peer), :125 (runDualCapture: hostA+hostB 둘 다 SSH 22), :135 |
 | 12 | ICMP ping 유틸 (server/src/util/ping.js pingOne/pingMany) | 대상 호스트 IP | outbound | ICMP Echo (OS ping CLI execFile; raw 소켓 미사용) | (ICMP — 포트 없음) |  |  | 대상 IP 도달성/RTT 측정 — OS ping 명령 호출 | server/src/util/ping.js:35 (pingOne), :44 (execFile 'ping'), :85 (pingMany) |
 | 13 | ping TCP 폴백/프로브 (server/src/util/ping.js tcpReachable, tcpConnect, tcpProbeMany) | 대상 호스트 IP | outbound | TCP 연결 프로브 (net.connect) | 445,3389,22,80,443,135 (FALLBACK_PORTS, ping 미설치 시) / tcpConnect는 기본 443(또는 지정 포트) | 443 |  | ping CLI 없는 환경(컨테이너)에서 흔한 관리 포트로 TCP 연결해 도달성 추정 / tcpConnect·tcpProbeMany는 제어플레인(443 등) 도달성·지연 측정 | server/src/util/ping.js:16 (FALLBACK_PORTS), :17 (tcpReachable), :59 (tcpConnect, port=443), :75 (tcpProbeMany) |
+
+### ⑦ 스토리지 · SAN 스위치 · PDU · 베어메탈 (v2.302~v2.554) (16)
+
+> 출발 노드: 담당 엣지(`agent`)가 없는 장비는 **중앙**이, 엣지에 위임된 장비는 **그 엣지**가 직접 접속한다(`devicesForThisNode`). 엣지는 결과만 중앙 4000 으로 push 한다(아래 #15).
+
+| # | 출발(연결 시작) | 도착 | 방향 | 프로토콜 | 포트 | 기본 | 환경변수/설정 | 용도 | 근거 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Central/Edge Portal (스토리지 폴러) | Dell PowerScale(Isilon) — OneFS Platform API | outbound | HTTPS REST(Basic) | 8080 | 8080 | STORAGE_ISILON_PORT, STORAGE_TLS_VERIFY(기본 검증 안 함), STORAGE_HTTP_TIMEOUT_MS | 수집 방식 `api` 일 때 용량·노드·상태 | server/src/storage/collectors/isilon.js:24-29 |
+| 2 | Central/Edge Portal (스토리지 폴러) | PowerMax / VMAX — Unisphere for PowerMax | outbound | HTTPS REST(Basic, `/univmax/restapi`) | 8443 | 8443 | STORAGE_UNISPHERE_PORT | 용량(system_capacity·SRP)·상태. 장비 SSH 수집 경로는 없음(symcli 는 별도 SYMAPI 호스트 필요) | server/src/storage/collectors/powermax.js:364; server/src/storage/types.js:77-78 |
+| 3 | Central/Edge Portal (스토리지 폴러) | Dell Unity — Unisphere REST | outbound | HTTPS REST(Basic + X-EMC-REST-CLIENT) | 443 | 443 | STORAGE_UNITY_PORT | 수집 방식 `api` 일 때 | server/src/storage/collectors/unity.js:62 |
+| 4 | Central/Edge Portal (스토리지 폴러) | Dell PowerStore REST | outbound | HTTPS REST(`/api/rest`) | 443 | 443 | STORAGE_POWERSTORE_PORT | 수집 방식 `api` 일 때 용량·인벤토리·성능 | server/src/storage/collectors/powerstore.js:174, 255-257 |
+| 5 | Central/Edge Portal (스토리지 폴러) | XtremIO XMS REST | outbound | HTTPS REST(`/api/json/v3`, v2 폴백) | 443 | 443 | STORAGE_XMS_PORT | 수집 방식 `api` 일 때 | server/src/storage/collectors/xtremio.js:87 |
+| 6 | Central/Edge Portal (스토리지 폴러) | VPLEX / Metro Node REST | outbound | HTTPS REST | 443 | 443 | STORAGE_VPLEX_PORT | 수집 방식 `api` 일 때 | server/src/storage/collectors/vplex.js:76-80 |
+| 7 | Central/Edge Portal (스토리지 폴러) | 스토리지 관리 SSH(PowerScale `isi status` · Unity `uemcli` · PowerStore `pstcli` · XtremIO `xmcli` · VPLEX/Metro Node `vplexcli`) | outbound | SSH(exec) | 22 | 22 | 장비 등록의 `sshPort` | 수집 방식 `ssh` 일 때 | server/src/storage/collectors/cliSsh.js:94-97; isilonSsh.js:203; server/src/storage/registry.js:111; server/src/storage/types.js:60-86 |
+| 8 | Central/Edge Portal (SAN 스위치 폴러) | Brocade SAN 스위치 — FOS CLI | outbound | SSH(exec) | 22 | 22 | 장비 등록의 `sshPort` | 구성·포트·센서·조닝·포트 사용량(`portperfshow`) | server/src/sanswitch/collectors/fosSsh.js:162; server/src/sanswitch/registry.js:85 |
+| 9 | Central/Edge Portal (SAN 스위치 폴러) | Brocade SAN 스위치 — FOS REST | outbound | HTTPS REST(`/rest`) | 443 | 443 | 장비 등록의 `httpsPort`, SANSWITCH_TLS_VERIFY | REST 수집 방식일 때 | server/src/sanswitch/collectors/fosRest.js:28, 83 |
+| 10 | Central/Edge Portal (PDU 폴러) | PDU(APC) 관리 카드 | outbound | SSH(exec) | 22 | 22 | 장비 등록의 `sshPort` | 전력·센서·뱅크·상 | server/src/pdu/collectors/apcSsh.js:32 |
+| 11 | Central/Edge Portal (베어메탈 스토리지) | 베어메탈 서버 OS | outbound | SSH(exec, `df`) | 22 | 22 | 등록의 `port` | 로컬 디스크 용량 | server/src/bmstor/collect.js:68-73 |
+| 12 | Central/Edge Portal (베어메탈 사용률, 법인 단위 opt-in) | 베어메탈 서버 OS | outbound | SSH(exec — Linux `/proc`·`/sys` 1회, Windows PowerShell `-EncodedCommand`) | 22 | 22 | 베어메탈 스토리지 등록의 `port` 재사용 | CPU·메모리·디스크·NIC·HBA 사용률 | server/src/bmusage/collectors/osSsh.js:158-159 |
+| 13 | Central/Edge Portal (베어메탈 사용률) | iDRAC Redfish | outbound | HTTPS(`TelemetryService/MetricReports` · `Chassis/<id>/Sensors`) | 443 | 443 | iDRAC 등록 host | 텔레메트리(Datacenter 라이선스) · 표준 센서(Enterprise 대체 경로) | server/src/idrac/redfish.js:974(fetchUsage), 1087(fetchUsageSensors) |
+| 14 | Central/Edge Portal (베어메탈 사용률 — Enterprise 대체 경로, 관리자 동의 시에만) | iDRAC SSH | outbound | SSH(exec, `racadm systemperfstatistics`) | 22 | 22(고정) | 설정의 Enterprise 대체 경로 + 동의(`enterpriseAck`) | 텔레메트리로 못 읽은 서버의 CPU·메모리·I/O | server/src/bmusage/collectors/idracEnterprise.js:55, 138-141 |
+| 15 | Edge/Collection Agent | Central Portal | outbound | HTTPS/HTTP(POST/GET, JSON·gzip) | CENTRAL_URL 의 포트(기본 4000) | 4000 | CENTRAL_URL / CENTRAL_TOKEN | 수집분 push(`/api/central/storage-data`·`sanswitch-data`·`sanswitch-perf`·`pdu-data`·`part-faults`) + 설정 pull(`storage-config`·`sanswitch-config`·`pdu-config`) + 베어메탈 스토리지 위임 잡(`bmstor-jobs`·`bmstor-result`) | server/src/routes/central.js |
+| 16 | Central Portal | Edge/Collection Agent | outbound | HTTPS/HTTP(GET, JSON) | 수집 서버 등록 URL 의 포트(기본 4000) | 4000 | 등록 URL · COLLECTOR_TOKEN | 베어메탈 사용률을 **조회할 때만** 엣지에서 인출(`GET /api/collector/bm-usage`, 상시 push 없음) | server/src/routes/collector.js:105; server/src/central/bmUsageEdgePull.js |
+
+### ⑧ 통신 점검 (v2.552~v2.554, 기본 꺼짐) (3)
+
+> 중앙→엣지(`/api/collector/ping`)와 엣지→중앙(`/api/central/health-probe`) 측정은 ②의 기존 포트(4000)를 그대로 쓴다. 아래는 그 밖에 **새로 생기는 방향·경로**다. 어느 경로도 장비 계정으로 로그인하지 않는다.
+
+| # | 출발(연결 시작) | 도착 | 방향 | 프로토콜 | 포트 | 기본 | 환경변수/설정 | 용도 | 근거 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Edge Portal (통신 점검 워커) | 다른 Edge Portal | outbound | HTTP(S) GET `/api/health` | 상대 엣지 등록 URL 의 포트(기본 4000) | 4000 | 특수기능 › 통신 점검 설정의 엣지↔엣지 **짝**(관리자가 고른 것만 — 전량 자동 생성 없음) | 엣지 상호 도달성. **엣지 간 방화벽을 따로 열어야 하는 유일한 경로**다 | server/src/linkcheck/run.js:75-77; server/src/linkcheck/links.js:192-201 |
+| 2 | Central/Edge Portal (통신 점검) | vCenter | outbound | HTTPS GET `/sdk/vimServiceVersions.xml`(무인증) | 443(등록 host 의 포트) | 443 | vcenters.json host | 그 주소가 실제 vCenter 인지까지 확인(로그인 없음) | server/src/linkcheck/run.js:58-70 |
+| 3 | Central Portal (설정 전수 점검 25종) | 설정에 등록된 모든 접속처(vCenter·iDRAC·스토리지·SAN·PDU·SMTP·LDAP·웹훅·엣지 등) | outbound | TCP → TLS → HTTP / SSH 키 교환까지 / SMTP 220 배너 + EHLO / LDAP 포트 열림 | 각 등록 포트 | — | 특수기능 › 통신 점검 › 설정 전수 점검 | 도달성만 확인(장비 비밀번호로 로그인하지 않음). 엣지 위임 대상은 중앙이 점검하지 않는다 | server/src/linkcheck/settingsRun.js; server/src/linkcheck/protocols.js:28, 92 |
 
 ---
 
@@ -236,5 +275,7 @@
 | `PACKAGE_BASE_URL`/`UPGRADE_REMOTE_BASE` | GitHub releases | 업그레이드 소스 |
 | `METRICS_EXPORT_TOKEN` | (없음=/metrics 404 비활성) | /metrics 인증(무인증 공개는 `METRICS_ALLOW_ANON=true` 옵트인) |
 | `VC_TLS_REJECT_UNAUTHORIZED`/`VC_KEEPALIVE_MS` | false/4000ms | vCenter TLS/keepalive |
+| `STORAGE_ISILON_PORT`/`STORAGE_UNISPHERE_PORT` | 8080/8443 | PowerScale OneFS REST / PowerMax·VMAX Unisphere |
+| `STORAGE_UNITY_PORT`/`STORAGE_POWERSTORE_PORT`/`STORAGE_XMS_PORT`/`STORAGE_VPLEX_PORT` | 443 | Unity / PowerStore / XtremIO XMS / VPLEX·Metro Node REST |
 
-> 본 문서는 소스 분석(82개 경로)으로 자동 생성·정리되었습니다. 코드 변경 시 갱신이 필요하면 동일 분석을 재실행하세요.
+> 본 문서는 소스 분석(v2.583 재집계 106개 경로)으로 정리되었습니다. 코드 변경 시 갱신이 필요하면 동일 분석을 재실행하세요.

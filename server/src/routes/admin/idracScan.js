@@ -304,7 +304,8 @@ adminRouter.put('/idrac/scan-ranges', adminOnly, (req, res) => {
 adminRouter.delete('/idrac/scan-ranges/:id', adminOnly, (req, res) => {
   const r = removeScanRanges(req.params.id);
   if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 삭제', target: req.params.id });
-  res.status(r.ok ? 200 : 404).json(r);
+  // v2.583: '없는 항목' 만 404 — 디스크 쓰기 실패는 500(서버 쪽 문제다. 404 로 두면 사용자가 목록이 낡은 줄 안다)
+  res.status(r.ok ? 200 : r.reason === '없는 항목' ? 404 : 500).json(r);
 });
 /* ── 스캔 대역 CSV 일괄 관리(v2.339, 사용자 요구) — 수집 서버 CSV(v2.338)와 동일 골격. ──────
  * 내보내기 기본은 비밀번호 제외, ?secrets=1 은 requireSettingsOwner + 감사로그.

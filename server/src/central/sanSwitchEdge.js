@@ -66,7 +66,11 @@ export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1 } = {}
 /** 전 엣지 스냅샷 평탄 목록(중앙 화면이 로컬 수집분과 합쳐 쓴다). */
 export function edgeSanSwitchSnapshots() {
   const out = [];
-  for (const [agent, v] of load()) for (const d of v.devices || []) out.push({ ...d, agent, pushedAt: v.at });
+  const now = Date.now();
+  // v2.583(검증 에이전트 권고): 보고 나이(staleMs)를 싣는다 — storageEdge 와 같은 규약(숨기지 않고 표시).
+  for (const [agent, v] of load()) for (const d of v.devices || []) out.push({ ...d, agent, pushedAt: v.at, staleMs: v.at ? now - v.at : null });
   return out;
 }
+/** 등록부에서 빠진 장비(orphan)의 엣지 보관분을 목록에서 내리는 기준 — 기본 7일(보고가 끊긴 엣지의 유령 스위치). */
+export const ORPHAN_TTL_MS = Math.max(3_600_000, Number(process.env.CENTRAL_SANSW_ORPHAN_TTL_MS) || 7 * 86_400_000);
 export function _resetForTest() { _map = null; _lastRec.clear(); }

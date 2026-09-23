@@ -26,7 +26,7 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
   const now = Date.now();
   const exec = mode !== 'eng';
   const canTools = can('tools');
-  const canFc = exec && canTools && toolAllowed('capacity-forecast');
+  const canFc = exec && canTools && toolAllowed('forecast') /* v2.583 #38: 서버는 capacity-forecast 경로를 forecast 키로 집행한다 */;
   const canWaste = exec && canTools && toolAllowed('waste');
   const canTrack = exec && canTools && toolAllowed('vm-track');
   const canInsights = exec && can('insights');

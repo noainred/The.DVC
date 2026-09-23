@@ -15,6 +15,7 @@
  * ⚠ **실패가 직전 값을 지우지 않는다**(v2.550.3 H5) — 한 번 실패한 뒤 화면이 '보고 없음' 이 되면
  *   방금까지 보던 값이 사라진다. 실패는 `lastAttempt` 로 남긴다.
  */
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
 import { resilientFetch } from '../util/resilientFetch.js';
 import { findCollector } from './edgeLogPull.js';
 
@@ -122,7 +123,7 @@ export async function pullTokenCheck(agent, { selfProbe = true, fetchImpl = resi
 
   // ⚠ 접속처는 **등록부 저장값에서만** 읽는다 — 요청 본문의 url 을 받지 않는다(v2.480 규약).
   const url = `${t(col.url).replace(/\/+$/, '')}/api/collector/token-check${selfProbe ? '' : '?selfprobe=0'}`;
-  const name = col.name || agent;
+  const name = col.id || col.name || agent; // v2.583 #29: 점검 행 키(수집 서버 id = 에이전트 이름)와 같은 키로 저장한다
 
   let res;
   try {
@@ -139,7 +140,7 @@ export async function pullTokenCheck(agent, { selfProbe = true, fetchImpl = resi
 
   const ms = Date.now() - t0;
   let body = null;
-  try { body = await res.json(); } catch { body = null; }
+  try { body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '엣지 토큰 점검 응답'); } catch { body = null; } // v2.583: 크기 상한
 
   const fail = (kind, reason) => {
     const rec = putEdgeTokenReport(name, { ok: false, kind, reason, ms });

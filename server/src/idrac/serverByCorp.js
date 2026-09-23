@@ -32,6 +32,22 @@
  *    `idrac/physicalCapacity.js` 를 쓰는 `/overview` 의 `physical.servers` 와 같은 기준이다.
  * 3. **비활성(enabled:false) 서버도 센다** — 등록돼 있고 물리적으로 존재하기 때문이다.
  *    다만 개수를 따로 밝혀(`disabled`) 화면이 구분할 수 있게 한다.
+ *
+ * ── ★ v2.583 — '물리 전용' 이 법인별 표에서 전부 0 이던 결함 ─────────────────────
+ * 사용자 신고(스크린샷): "서버 합계에 물리서버 수량 안나오는거 수정해줘". 실측 화면은
+ * `물리 전용 503` 인데 **법인별 표의 물리 전용 열이 전 행 0** 이었고, 503대가 전부 '법인 미귀속'
+ * 이었다. 원인: 귀속 신호가 ① 등록부 `vcenterId` ② ESXi 호스트 이름 ③ 서비스태그 셋뿐인데,
+ * **물리 전용 서버는 정의상 ESXi 호스트가 아니라 ②③ 이 절대 맞지 않는다**. 그러면 ① 이 비어 있는
+ * 서버(엣지가 스캔으로 등록한 베어메탈 — 엣지 등록부에 vCenter 가 없다)는 전부 미귀속이 된다.
+ * 그런데 포탈은 이미 두 가지를 알고 있었다:
+ *   ④ 관리자가 특수 기능 › 통합 서버 인벤토리(베어메탈 행의 '법인(vCenter)')에서 지정한 귀속(`fleet-assign.json` — 서비스태그/서버 id → vCenter)
+ *   ⑤ 서버의 **법인(DataCenter)** — 스캔 등록분은 직접, 원격은 보고한 수집기의 법인
+ *      (`analysisServers.remoteServersResolved`). DataCenter ↔ vCenter 할당(`datacenters.json`)에서
+ *      **그 법인의 vCenter 가 정확히 하나면** 그 vCenter 행이 곧 그 법인이다.
+ * ④⑤ 는 ①②③ **뒤에만** 본다 — 기존에 귀속되던 서버의 귀속은 바뀌지 않는다(전력 화면과 어긋나지 않게).
+ * ⑤ 에서 법인의 vCenter 가 **둘 이상이거나 없으면 추측하지 않는다** — 어느 vCenter 행에 넣을지
+ * 근거가 없다. 그 서버는 `unplacedByDatacenter`(법인별 개수)로 따로 내보내 화면이 '법인 · vCenter 미지정'
+ * 행으로 보인다. 법인조차 모르는 것만 `physicalOnlyNoDatacenter` 다. 합계 항등식은 그대로다.
  */
 
 const norm = (s) => String(s || '').trim().toLowerCase();
@@ -54,7 +70,12 @@ const shortOf = (s) => norm(s).split('.')[0];
  *   byVcenterUnion:Record<string,number>
  * }}
  */
-export function serversByCorp(servers = [], hosts = []) {
+export function serversByCorp(servers = [], hosts = [], opts = {}) {
+  // v2.583 보조 귀속 재료(선택 — 없으면 예전과 같다).
+  const fleetAssign = opts && typeof opts.fleetAssign === 'object' && opts.fleetAssign ? opts.fleetAssign : {};
+  const dcVcenters = opts?.dcVcenters instanceof Map ? opts.dcVcenters : new Map();
+  const knownVc = opts?.knownVcenters instanceof Set ? opts.knownVcenters : null;
+  const isKnown = (id) => !!id && (!knownVc || knownVc.has(id));
   // 호스트 이름·서비스태그 → vCenter id 색인(한 번만 만든다 — 서버마다 전체 순회하면 O(N×M)).
   const byName = new Map();
   const byTag = new Map();
@@ -74,7 +95,7 @@ export function serversByCorp(servers = [], hosts = []) {
   const out = {
     total: 0, disabled: 0, unassigned: 0,
     byVcenter: {}, byDatacenter: {},
-    matchedBy: { explicit: 0, hostName: 0, serviceTag: 0, none: 0 },
+    matchedBy: { explicit: 0, hostName: 0, serviceTag: 0, assigned: 0, datacenter: 0, none: 0 },
     // v2.527 — 중복 제거 합계의 재료
     hostsTotal,
     matchedCount: 0,            // ESXi 호스트와 **같은 장비로 확인된** iDRAC 등록 서버 수
@@ -85,6 +106,9 @@ export function serversByCorp(servers = [], hosts = []) {
     byVcenterMatched: {},
     byVcenterHosts,
     byVcenterUnion: {},
+    // v2.583 — 법인은 알지만 vCenter 행을 정할 수 없는 물리 전용 서버(법인 id → 대수)와 법인도 모르는 것
+    unplacedByDatacenter: {},
+    physicalOnlyNoDatacenter: 0,
   };
   const bump = (obj, key) => { if (key) obj[key] = (obj[key] || 0) + 1; };
 
@@ -122,6 +146,19 @@ export function serversByCorp(servers = [], hosts = []) {
       if (byNameHit) out.matchedBy.hostName += 1; else out.matchedBy.serviceTag += 1;
     }
 
+    // ── ④ 관리자 지정 귀속(특수 기능 › 통합 서버 인벤토리) — 서비스태그 → 서버 id 순 ──
+    if (!vc) {
+      const a = String(fleetAssign[norm(s.serviceTag)] || fleetAssign[norm(s.id)] || '').trim();
+      if (isKnown(a)) { vc = a; out.matchedBy.assigned += 1; }
+    }
+    // ── ⑤ 법인(DataCenter)의 vCenter 가 하나뿐이면 그 vCenter ──
+    const dcId = String(s.datacenterId || '').trim();
+    let dcAmbiguous = false;
+    if (!vc && dcId) {
+      const list = (dcVcenters.get(norm(dcId)) || []).filter(isKnown);
+      if (list.length === 1) { vc = list[0]; out.matchedBy.datacenter += 1; } else dcAmbiguous = true;
+    }
+
     if (vc) bump(out.byVcenter, vc); else { out.unassigned += 1; out.matchedBy.none += 1; }
 
     if (hostHit) {
@@ -130,7 +167,11 @@ export function serversByCorp(servers = [], hosts = []) {
       bump(out.byVcenterMatched, hostHit);
     } else {
       out.physicalOnly += 1;
-      if (vc) bump(out.byVcenterPhysicalOnly, vc); else out.physicalOnlyUnassigned += 1;
+      if (vc) bump(out.byVcenterPhysicalOnly, vc);
+      else {
+        out.physicalOnlyUnassigned += 1;
+        if (dcAmbiguous) bump(out.unplacedByDatacenter, dcId); else out.physicalOnlyNoDatacenter += 1;
+      }
     }
 
     // 법인(DataCenter)은 별도 축이다 — vCenter 귀속과 독립적으로 센다(둘을 합치지 않는다).

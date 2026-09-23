@@ -14,6 +14,7 @@ export function httpFailHint(status) {
   if (status === 403 || status === 401) return '토큰(COLLECTOR_TOKEN) 불일치 — 엣지의 COLLECTOR_TOKEN과 동일하게 저장하세요';
   if (status === 404) return '구버전이라 업그레이드 엔드포인트가 없거나 collector 비활성(COLLECTOR_TOKEN 미설정)';
   if (status === 413) return '업그레이드 번들이 너무 큽니다(413)';
+  if (status >= 300 && status < 400) return '리다이렉트 응답 — 포트포워딩·프록시가 다른 주소로 보냅니다(토큰을 싣고 따라가지 않습니다)';
   return '';
 }
 
@@ -38,6 +39,9 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
       headers: { 'Content-Type': 'application/gzip', 'X-Bundle-Sha256': bundleSha(bytes), ...(c.token ? { 'X-Collector-Token': c.token } : {}) }, // v2.480: 수신측 무결성 검증
       body: bytes,
       dispatcher: _rf.wanAgent, // 전역 디스패처가 검증 ON으로 복원돼(감사 C1/C3) 자체서명 https 엣지 호환용 WAN 디스패처 명시
+      // v2.583(감사 확정): 기본 redirect:'follow' 는 교차 출처에서 X-Collector-Token 을 떼지 않는다(undici 는
+      //   authorization·cookie 만 뗀다) — 번들 push 는 리다이렉트될 이유가 없으므로 따라가지 않는다(3xx = 실패).
+      redirect: 'manual',
       signal: AbortSignal.timeout(timeout),
     });
     const body = await res.json().catch(() => ({}));

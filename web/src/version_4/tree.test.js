@@ -88,3 +88,15 @@ describe('역할 필터', () => {
     for (const g of shown) expect(g.items.length).toBeGreaterThan(0);
   });
 });
+
+// v2.583 감사 #38: V4 화면이 /tools/capacity-forecast 를 부를 때 쓰는 도구 키는 서버 집행 키('forecast')와 같아야 한다.
+//   'capacity-forecast' 로 판정하면 허용 목록 계정은 데이터가 안 보이고, 거부 목록 계정은 화면이 호출해 403 을 받는다.
+describe('V4 capacity-forecast 도구 키 (v2.583)', () => {
+  it("toolAllowed('capacity-forecast') 를 쓰지 않는다", async () => {
+    const fs = await import('node:fs');
+    for (const f of ['pages/Overview.jsx', 'pages/Compare.jsx', 'pages/Storage.jsx']) {
+      const src = fs.readFileSync(new URL(`./${f}`, import.meta.url), 'utf8');
+      expect(src.includes("toolAllowed('capacity-forecast')"), f).toBe(false);
+    }
+  });
+});

@@ -7,6 +7,12 @@
 const MAX = 1000;
 const buffer = [];
 let seq = 0;
+// v2.583: 로그 분석(loganalysis/live.js)이 줄마다 누적 집계를 하려고 붙는 탭. 링 버퍼(1,000줄)는
+// 몇 분이면 밀려나므로 24시간·7일 분석의 원천이 될 수 없다 — 그래서 들어오는 순간 집계한다.
+// 탭은 **절대 던지지 않고 console 을 부르지 않아야 한다**(재귀) — 여기서도 try 로 막는다.
+const taps = new Set();
+let inTap = false;
+export function addLogTap(fn) { if (typeof fn === 'function') taps.add(fn); return () => taps.delete(fn); }
 
 function safeStringify(o) {
   if (o instanceof Error) return o.stack || o.message;
@@ -16,8 +22,13 @@ function safeStringify(o) {
 function record(level, args) {
   try {
     const msg = args.map((a) => (typeof a === 'string' ? a : safeStringify(a))).join(' ');
-    buffer.push({ id: ++seq, time: Date.now(), level, msg });
+    const entry = { id: ++seq, time: Date.now(), level, msg };
+    buffer.push(entry);
     if (buffer.length > MAX) buffer.shift();
+    if (taps.size && !inTap) {
+      inTap = true;
+      try { for (const fn of taps) { try { fn(entry); } catch { /* 탭 실패는 무시 */ } } } finally { inTap = false; }
+    }
   } catch { /* never let logging break the app */ }
 }
 

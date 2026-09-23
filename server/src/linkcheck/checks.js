@@ -19,6 +19,7 @@ import { ipBlockReason } from '../collector/registry.js';
 // ⚠ DNS 단계가 이미 검사한 주소로 **핀**한다(재해석 금지 — 단계별 계측과 기록의 정직성 때문).
 //   판정은 `util/ssrfLookup.js` 하나가 소유한다(v2.506·v2.537 규약 — 훅을 파일마다 복제하지 말 것).
 import { pinnedLookup } from '../util/ssrfLookup.js';
+import { WAN_TLS_VERIFY } from '../util/resilientFetch.js'; // v2.583: 비밀 헤더를 싣는 점검은 WAN 검증 설정을 따른다
 import { certExpiryStatus } from '../security/certMonitor.js';
 import { failKindOfCode } from './phases.js';
 
@@ -131,15 +132,24 @@ export async function stepHttp({ url, ip, headers = {}, timeoutMs = 15_000, iden
     const { Agent } = await import('undici');
     const u = new URL(url);
     // ⚠ **검사한 IP 로 붙고 SNI·Host 는 원 호스트명**을 쓴다(v2.506 규약).
+    // ⚠⚠ v2.583(감사 확정): 예전에는 `rejectUnauthorized: false` 고정 + fetch 기본 `redirect:'follow'` 라,
+    //   중앙↔엣지 링크가 싣는 **X-Collector-Token·X-Central-Token 이 검증 안 된 TLS 로 나가고**, 상대가 302 를
+    //   주면 **제3의 출처로 그 토큰을 다시 보냈다**(undici 는 authorization·cookie 만 뗀다 — v2.574 SEC-14 와 같은
+    //   유형, 여기가 형제 누락). 규칙: 비밀 헤더를 싣는 요청은 WAN 설정(`WAN_TLS_VERIFY`, 기본 검증 ON)을 따르고,
+    //   점검 요청은 **리다이렉트를 따라가지 않는다**(3xx 는 그 상태 그대로 결과다). 비밀이 없는 정체 확인
+    //   (vCenter·장비 무인증 경로)은 자체서명이 흔하므로 예전처럼 검증하지 않는다 — 보낼 비밀이 없다.
+    const carriesSecret = Object.keys(headers || {}).some((k) => /token|authorization|cookie|api-key/i.test(k));
     const dispatcher = new Agent({
       // ⚠ 같은 이유로 SNI 에 IP 를 넣지 않는다(RFC 6066 · Node DEP0123).
-      connect: { rejectUnauthorized: false, lookup: pinnedLookup(ip), ...(net.isIP(u.hostname) ? {} : { servername: u.hostname }) },
+      connect: { rejectUnauthorized: carriesSecret ? WAN_TLS_VERIFY : false, lookup: pinnedLookup(ip), ...(net.isIP(u.hostname) ? {} : { servername: u.hostname }) },
       headersTimeout: timeoutMs, bodyTimeout: timeoutMs,
     });
-    res = await fetch(url, { method, headers, dispatcher, signal: AbortSignal.timeout(timeoutMs) });
+    res = await fetch(url, { method, headers, dispatcher, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
     body = (await res.text().catch(() => '')).slice(0, BODY_SNIP * 4);
   } catch (e) {
-    const msg = String(e?.message || e);
+    // undici 는 원인을 e.cause 에 둔다('fetch failed' 만으로는 원인을 알 수 없다) — 문구에 원인을 덧붙인다.
+    const cause = e?.cause?.message ? ` — ${e.cause.message}` : '';
+    const msg = `${String(e?.message || e)}${cause}`;
     out.http = { ok: false, ms: ms(t0), failKind: failKindOfCode(e?.code || e?.cause?.code, msg), error: msg.slice(0, 200) };
     return out;
   }
@@ -157,6 +167,12 @@ export async function stepHttp({ url, ip, headers = {}, timeoutMs = 15_000, iden
   if (status === 404) {
     out.http = { ok: true, ...common };
     out.auth = { ok: false, ms: 0, failKind: 'auth', error: 'HTTP 404 — 상대에 그 엔드포인트가 없습니다(토큰 미설정 또는 구버전).', status };
+    return out;
+  }
+  if (status >= 300 && status < 400) {
+    // 리다이렉트는 따라가지 않는다(v2.583) — 목적지를 밝혀 사람이 판단하게 한다.
+    const loc = t(res.headers.get('location')).slice(0, 200);
+    out.http = { ok: false, ...common, failKind: 'http-error', error: `HTTP ${status} — 리다이렉트는 따라가지 않습니다${loc ? `(→ ${loc})` : ''}. 포트포워딩·프록시가 다른 곳으로 보내고 있는지 확인하세요.` };
     return out;
   }
   if (!res.ok) {

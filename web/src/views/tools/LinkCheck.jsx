@@ -386,7 +386,7 @@ export function LinkCheck() {
             <div style={{ fontWeight: 600 }}>상세 원문 — {detail.row?.link_id}</div>
             <button className="btn" onClick={() => setDetail(null)}>닫기</button>
           </div>
-          {detail.row?.truncated ? <div style={{ fontSize: 11, color: 'var(--warn, #e8b23a)' }}>저장 상한으로 **잘린** 기록입니다.</div> : null}
+          {detail.row?.truncated ? <div style={{ fontSize: 11, color: 'var(--warn, #e8b23a)' }}>저장 상한으로 <b>잘린</b> 기록입니다.</div> : null}
           <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11, lineHeight: 1.45, maxHeight: 420, overflow: 'auto' }}>
             {detail.detail ? JSON.stringify(detail.detail, null, 2) : (detail.detailRaw || '(원문 없음)')}
           </pre>

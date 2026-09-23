@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { DEFAULT_PORTS, isIpv4 } from './scan.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { getOverrides } from './overrides.js';
 import { getPolicies, isCoveredByAnyPolicy } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
@@ -47,7 +47,16 @@ const DEFAULTS = {
 };
 
 const clamp = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : d; };
-function readJson(file, dflt) { if (!fs.existsSync(file)) return dflt; try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return dflt; } }
+// ⚠ v2.583 감사 #23: 손상 파일을 **조용히** 기본값으로 넘기면 다음 디바운스 저장이 온전했던 원본(사용자가 입력한
+//   에이전트별 스캔 범위·포트, 1년치 up/down 이력)을 빈 값으로 덮어쓴다. 보존(.corrupt.<ts>) + 경고 후 기본값.
+function readJson(file, dflt) {
+  if (!fs.existsSync(file)) return dflt;
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) {
+    preserveCorrupt(file, e?.message || String(e));
+    console.warn(`[ipam] ${path.basename(file)} 파싱 실패(${e?.message || e}) — 손상본을 .corrupt 로 보존하고 기본값으로 시작합니다.`);
+    return dflt;
+  }
+}
 
 // ---- 디바운스 원자적 쓰기 ---------------------------------------------------
 // 분산 에이전트가 POST /ip-scan-result로 보고할 때마다 전체 results.json·history.json을

@@ -170,7 +170,7 @@ export default function HorizonSessionsPanel() {
                   <td data-sort={String(s.sessions ?? -1)}>{s.sessions ?? '—'}</td>
                   <td style={{ fontSize: 11.5 }}>{`${s.connected ?? '—'} / ${s.disconnected ?? '—'} / ${s.pending ?? '—'}`}</td>
                   <td data-sort={String(s.ts || 0)}>{agoText(s.ts, data?.now)}</td>
-                  <td style={{ fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'normal', maxWidth: 320 }}>{provenanceText(s) || '—'}</td>
+                  <td style={{ fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'normal', maxWidth: 320 }}><BoldText text={provenanceText(s) || '—'} /></td>
                 </tr>
               ))}
               {(data?.pending || []).map((p) => (
@@ -291,7 +291,7 @@ export default function HorizonSessionsPanel() {
                 <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11.5, background: 'var(--panel)', padding: 8, borderRadius: 6 }}>{detail.error}</pre>
               </>
             )}
-            <div style={{ marginTop: 8 }}><b>근거</b> — {provenanceText(detail) || '수집에 성공하지 못해 근거가 없습니다.'}</div>
+            <div style={{ marginTop: 8 }}><b>근거</b> — <BoldText text={provenanceText(detail) || '수집에 성공하지 못해 근거가 없습니다.'} /></div>
             {detail.sampleKeys?.length > 0 && (
               <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-dim)', whiteSpace: 'normal' }}>응답 필드: {detail.sampleKeys.join(', ')}</div>
             )}

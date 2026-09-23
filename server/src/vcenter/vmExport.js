@@ -182,15 +182,24 @@ export async function collectDetails(vc, morefs) {
 
 // vCenter 단위 결과 캐시(60초) — 미리보기(JSON)와 CSV 다운로드가 연달아 와도 라이브 조회 1회.
 // 진행 중 프라미스를 캐시해 동시 요청도 합류시킨다.
-const _cache = new Map(); // vcenterId -> { at, promise }
+// ⚠ v2.583 감사 #27(dsBrowse v2.277 과 같은 결함): TTL 을 **시작 시각**부터 재면 60초를 넘긴 라이브 조회가 진행 중인데도
+//   '만료' 로 판정돼 같은 vCenter 에 두 번째 전량 조회가 시작되고 첫 결과는 버려졌다. 완료된 결과는 **완료 시각**부터
+//   60초 유지하고, 진행 중인 것은 합류시킨다. 단 진행 중 상한(10분)을 둔다 — 이 경로에는 자체 시한이 없어, 매달린
+//   조회에 영원히 합류하면 다시 시도할 길이 없다.
+const _cache = new Map(); // vcenterId -> { startedAt, at(완료 시각, 진행 중엔 0), settled, promise }
 const CACHE_MS = 60_000;
+const PENDING_MAX_MS = 10 * 60_000;
 
 export function buildVmExport(vcenterId) {
   const hit = _cache.get(vcenterId);
-  if (hit && Date.now() - hit.at < CACHE_MS) return hit.promise;
-  const promise = buildVmExportFresh(vcenterId).catch((e) => { _cache.delete(vcenterId); throw e; });
-  _cache.set(vcenterId, { at: Date.now(), promise });
-  return promise;
+  const now = Date.now();
+  if (hit && (hit.settled ? now - hit.at < CACHE_MS : now - hit.startedAt < PENDING_MAX_MS)) return hit.promise;
+  const entry = { startedAt: now, at: 0, settled: false, promise: null };
+  entry.promise = buildVmExportFresh(vcenterId)
+    .then((r) => { entry.settled = true; entry.at = Date.now(); return r; })
+    .catch((e) => { if (_cache.get(vcenterId) === entry) _cache.delete(vcenterId); throw e; });
+  _cache.set(vcenterId, entry);
+  return entry.promise;
 }
 
 async function buildVmExportFresh(vcenterId) {

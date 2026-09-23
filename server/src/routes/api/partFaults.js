@@ -20,8 +20,8 @@
  *
  * ⚠ 이 라우트는 **장비에 접속하지 않는다**. '지금 점검' 도 스냅샷만 읽는다(재진입 가드는 폴러와 공유).
  */
+import { fullScopeOnlyWith } from '../admin/shared.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { PART_STATE_LABEL, PART_STATE_TONE, PART_KIND_LABEL, SCOPE_LABEL, SCOPES_OUT_OF_RANGE,
@@ -39,12 +39,8 @@ import { config, currentVersion } from '../../config.js';
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
-const fullScopeOnly = (req, res, next) => {
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, reason: '파트 장애 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
-  }
-  next();
-};
+// v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
+const fullScopeOnly = fullScopeOnlyWith('파트 장애 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 
 /** 화면이 문구를 복사하지 않도록 라벨은 서버가 단일 소스로 내려준다(CLAUDE.md '코어는 하나다'). */
 const LABELS = {

@@ -125,6 +125,7 @@ async function overlayIdracPower(snap) {
     const idx = buildHostIndex(snap.hosts);
     const validVcIds = new Set(snap.vcenters.map((v) => v.id));
     const byVc = new Map();
+    const countByVc = new Map(); // v2.583: 범위 계정 KPI 용(vCenter 별 보고 서버 수 — scopedRollups)
     let totalW = 0, count = 0;
     for (const mm of measured) {
       const w = Number(mm.watts);
@@ -133,8 +134,9 @@ async function overlayIdracPower(snap) {
       const hit = resolveServerVcenter(mm, idx, validVcIds);
       const vcId = hit ? hit.vcenterId : '(미매핑)';
       byVc.set(vcId, (byVc.get(vcId) || 0) + w);
+      countByVc.set(vcId, (countByVc.get(vcId) || 0) + 1);
     }
-    snap.measuredPower = { totalWatts: Math.round(totalW), servers: count, byVc: Object.fromEntries(byVc) };
+    snap.measuredPower = { totalWatts: Math.round(totalW), servers: count, byVc: Object.fromEntries(byVc), countByVc: Object.fromEntries(countByVc) };
   } catch { /* power overlay is best-effort */ }
   return snap;
 }
@@ -405,6 +407,39 @@ function emptySnapshot() {
 /** Compute global / regional / per-vCenter rollups used by the dashboard. */
 function withRollups(snap) {
   if (!snap.collectionErrors) snap.collectionErrors = [];
+  snap.rollups = rollupsOf(snap);
+  return snap;
+}
+
+/**
+ * 범위 제한 계정용 롤업(v2.583 감사 #20). ⚠ 전체 롤업을 **필터링하면 안 된다** — `byRegion` 한 행은 그
+ *   지역의 **모든** vCenter 합이라(같은 지역의 다른 법인 대수·전력이 섞인다), `global` 은 전 함대 합이다.
+ *   v2.582 까지 `/overview` 는 byRegion 을 존재하지 않는 `r.region` 으로 걸러 빈 배열을 주고 `global` 은
+ *   **그대로** 내보냈다(범위 계정이 전 함대 vCenter·호스트·VM 수를 봤다 — 실측 11/186/2242).
+ *   허용 vCenter 의 원소만으로 **다시 계산**한다. 전 함대 값(iDRAC 등록 수·미매핑 전력)은 null 로 비운다.
+ */
+export function scopedRollups(snap, allowed) {
+  const inV = (x) => allowed.has(x.vcenterId);
+  const mp = snap.measuredPower;
+  let measuredPower = null;
+  if (mp) {
+    const byVc = {}; let totalWatts = 0; let servers = mp.countByVc ? 0 : null; // 구 스냅샷(countByVc 없음)은 모른다 — 지어내지 않는다
+    for (const id of allowed) {
+      const w = Number(mp.byVc?.[id]) || 0; if (w) { byVc[id] = w; totalWatts += w; }
+      if (servers != null) servers += Number(mp.countByVc[id]) || 0;
+    }
+    measuredPower = { totalWatts: Math.round(totalWatts), servers, byVc };
+  }
+  const view = {
+    vcenters: (snap.vcenters || []).filter((v) => allowed.has(v.id)),
+    hosts: (snap.hosts || []).filter(inV), vms: (snap.vms || []).filter(inV),
+    datastores: (snap.datastores || []).filter(inV), networks: (snap.networks || []).filter(inV),
+    alarms: (snap.alarms || []).filter(inV), measuredPower,
+  };
+  return rollupsOf(view, { scoped: true });
+}
+
+function rollupsOf(snap, { scoped = false } = {}) {
   const sum = (arr, fn) => arr.reduce((a, x) => a + (fn(x) || 0), 0);
 
   // 전역 카운터 단일 루프(v2.343 #10): 종전엔 filter/sum 으로 호스트 8회·VM 2회·알람 2회·DS 2회
@@ -460,10 +495,10 @@ function withRollups(snap) {
     // 총 소비전력: 측정된 '모든' 서버(iDRAC/OME/원격) 합계 — ESXi 호스트로 매핑 안 된 서버도 포함.
     powerWatts: snap.measuredPower ? snap.measuredPower.totalWatts : hc.powerW,
     powerKw: round((snap.measuredPower ? snap.measuredPower.totalWatts : hc.powerW) / 1000, 1),
-    powerReporting: snap.measuredPower ? snap.measuredPower.servers : hc.powerReporting,
+    powerReporting: snap.measuredPower ? (snap.measuredPower.servers ?? null) : hc.powerReporting,
     // 등록된 Dell iDRAC 서버 수(OME 자동발견 엔트리 제외) — '전력 보고 중' 수량과 비교용.
-    powerRegistered: idracRegisteredCount(),
-    powerUnmappedKw: round((snap.measuredPower?.byVc?.['(미매핑)'] || 0) / 1000, 1),
+    powerRegistered: scoped ? null : idracRegisteredCount(), // 전 함대 등록 수 — 범위 계정에는 주지 않는다
+    powerUnmappedKw: scoped ? null : round((snap.measuredPower?.byVc?.['(미매핑)'] || 0) / 1000, 1),
   };
 
   // 성능: 호스트/VM/DS/알람을 vCenter별로 '한 번만' 그룹핑한 뒤 조회한다. 이전에는
@@ -524,8 +559,7 @@ function withRollups(snap) {
   const vcMetrics = new Map(vcRollup.map((x) => [x.key, x]));
   const sites = snap.vcenters.map((vc) => ({ ...vc, metrics: vcMetrics.get(vc.id) }));
 
-  snap.rollups = { global, byRegion: byKey('region'), sites };
-  return snap;
+  return { global, byRegion: byKey('region'), sites };
 }
 
 const round = (v, d) => Number(v.toFixed(d));

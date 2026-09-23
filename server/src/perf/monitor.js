@@ -20,6 +20,7 @@ import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 import { loadPerfSettings } from './settings.js';
 import { appendHang, hangLogStatus, trimHangLog, setHangRetentionProvider } from './hangLog.js';
 import { newRouteEntry, addSample, summarizeRoute, rankRoutes, routeKeyOf, downsampleMax, stallWindows } from './stats.js';
+import { sanitizeRid } from './requestId.js';
 
 const MAX_ROUTES = 400;          // 넘으면 가장 오래 안 쓴 키를 퇴출한다(아래 routeEntryFor)
 const MAX_INFLIGHT = 5_000;      // 동시 요청 추적 상한(넘으면 추적만 생략 — 집계는 계속)
@@ -31,7 +32,11 @@ const STALL_RING = 512;          // 스톨 에피소드(요청 구간 대조용)
 const MAX_JOB_NAMES = 64;
 
 const routes = new Map();        // routeKey -> entry(stats.newRouteEntry)
-const inflight = new Map();      // id -> { t0, method, path, route, user }
+const inflight = new Map();      // id -> { t0, method, path, rid, userOf }
+// 최근 끝난 요청(요청 ID → 결과, v2.583). 로딩 화면이 '서버는 이미 응답했다' 와 '서버에 기록이 없다' 를
+// 구분하는 근거다. 유계(삽입 순서 Map — 넘치면 가장 오래된 것부터 버린다).
+const RECENT_DONE_MAX = 2_000;
+const recentDone = new Map();    // rid -> { method, route, status, ms, endedAt, user }
 let slowRing = [];               // 최근 느린 요청(설정 keepSlow)
 let hangRing = [];               // 최근 hang 이벤트(설정 keepHangs)
 let loopWindows = [];            // [{ts, maxMs, p99Ms, meanMs, windowMs, eluPct}]
@@ -88,10 +93,14 @@ export function withJobSync(name, fn) {
  * hang 이벤트·ndjson 이 긴 경로로 증폭되지 않게 한다.
  * 라우트 템플릿은 여기서 알 수 없다(라우터 dispatch 전) — 진행 중 목록에는 경로만 보인다.
  */
-export function beginRequest({ method = '', path = '' } = {}) {
+export function beginRequest({ method = '', path = '', rid = '', userOf = null } = {}) {
   if (inflight.size >= MAX_INFLIGHT) { totals.untracked += 1; return null; }
   const id = ++reqSeq;
-  inflight.set(id, { t0: performance.now(), ts: Date.now(), method: String(method || '').slice(0, 10), path: String(path || '').slice(0, 200) });
+  // userOf: 인증은 이 미들웨어보다 뒤라 시작 시점에는 사용자를 모른다 — 조회할 때 읽는 함수로 둔다.
+  inflight.set(id, {
+    t0: performance.now(), ts: Date.now(), method: String(method || '').slice(0, 10), path: String(path || '').slice(0, 200),
+    rid: sanitizeRid(rid), userOf: typeof userOf === 'function' ? userOf : null,
+  });
   return id;
 }
 
@@ -116,9 +125,21 @@ export function reapInflight(maxAgeMs = INFLIGHT_MAX_AGE_MS) {
  * expectSlow=true 인 라우트(롱폴·vCenter 태스크 대기)는 월타임 기준 '느린 요청' 기록에서 제외하고
  * 루프 정체 기준만 적용한다 — 정상 대기를 느린 요청으로 채우면 목록이 쓸모없어진다.
  */
-export function endRequest(id, { method = '', path = '', route = '', status = 0, ms = 0, user = '', bytes = null, expectSlow = false } = {}) {
+export function endRequest(id, { method = '', path = '', route = '', status = 0, ms = 0, user = '', bytes = null, expectSlow = false, rid = '' } = {}) {
   let rec = null;
   if (id != null) { rec = inflight.get(id) || null; inflight.delete(id); }
+  const reqId = sanitizeRid(rid) || rec?.rid || '';
+  // 계측이 꺼져 있어도 '끝났다' 는 사실은 남긴다 — 로딩 화면의 상태 조회가 그것에 기댄다(비용 Map 1건).
+  if (reqId) {
+    try {
+      if (recentDone.has(reqId)) recentDone.delete(reqId);
+      recentDone.set(reqId, {
+        method: String(method || '').slice(0, 10), route: String(route || routeKeyOf({ path })).slice(0, 120),
+        status: Number(status) || 0, ms: Math.round(Number(ms) || 0), endedAt: Date.now(), user: String(user || '').slice(0, 60),
+      });
+      while (recentDone.size > RECENT_DONE_MAX) recentDone.delete(recentDone.keys().next().value);
+    } catch { /* 계측 실패는 무시 */ }
+  }
   try {
     const st = loadPerfSettings();
     if (!st.enabled) return;
@@ -139,7 +160,7 @@ export function endRequest(id, { method = '', path = '', route = '', status = 0,
     if (Number(status) >= 500) totals.err += 1;
     if (!slow) return;
     slowRing.push({
-      ts: now, method, path: String(path || '').slice(0, 200), route: key, status: Number(status) || 0,
+      ts: now, rid: reqId, method, path: String(path || '').slice(0, 200), route: key, status: Number(status) || 0,
       ms: Math.round(ms), user: String(user || '').slice(0, 60), bytes: bytes == null ? null : Number(bytes),
       stallMs: Math.round(stall.ms), stallN: stall.n, jobs: stall.jobs.slice(0, 6),
       rssMb: Math.round(process.memoryUsage.rss() / 1048576),
@@ -235,7 +256,7 @@ export function inflightSnapshot(limit = 20) {
   const now = performance.now();
   const rows = [];
   for (const [id, r] of inflight) {
-    rows.push({ id, method: r.method, path: r.path, ageMs: Math.round(now - r.t0) });
+    rows.push({ id, rid: r.rid || '', method: r.method, path: r.path, ageMs: Math.round(now - r.t0) });
     if (rows.length >= 500) break;                      // 스냅샷 자체가 비싸지 않게
   }
   rows.sort((a, b) => b.ageMs - a.ageMs);
@@ -277,7 +298,7 @@ export function recordClientStall({ user = '', ip = '', view = '', path = '', ms
       kind: 'client', at: now, user: String(user || '').slice(0, 60), ip: String(ip || '').slice(0, 60),
       view: String(view || '').slice(0, 120), path: String(path || '').slice(0, 200), ms: Math.round(Number(ms) || 0),
       clientInflight: (Array.isArray(clientInflight) ? clientInflight : []).slice(0, 10)
-        .map((x) => ({ path: String(x?.path || '').slice(0, 200), ms: Math.round(Number(x?.ms) || 0) })),
+        .map((x) => ({ path: String(x?.path || '').slice(0, 200), ms: Math.round(Number(x?.ms) || 0), rid: sanitizeRid(x?.rid) })),
       userAgent: String(userAgent || '').slice(0, 160),
       serverInflight: inflightSnapshot(10), serverInflightN: inflight.size,
       loop: lastLoopWindow, jobs: activeJobNames(),
@@ -287,6 +308,45 @@ export function recordClientStall({ user = '', ip = '', view = '', path = '', ms
     pushHang(ev);
     return { ok: true };
   } catch (e) { return { ok: false, reason: e.message }; }
+}
+
+/* ── 요청 ID 상태 조회(v2.583) ─────────────────────────────────── */
+/**
+ * 로딩 화면이 오래 기다리는 요청의 **서버 쪽 사실**을 묻는다. 세 가지를 구분하는 것이 목적이다 —
+ *  · processing — 서버가 받아서 아직 응답하지 않았다(지연의 주체는 서버 처리: 그 라우트·외부 왕복).
+ *  · done       — 서버는 이미 응답을 끝냈다(지연은 전송·브라우저 처리 쪽).
+ *  · unknown    — 서버에 기록이 없다. 요청이 서버에 도달하지 않았거나(프록시·네트워크), 서버가
+ *                 재시작됐거나, 최근 완료 기록(2,000건)에서 밀려났다. **셋을 구분할 수 없으므로 단정하지 않는다.**
+ * 소유자만 본다 — 남의 요청 ID 를 알아도 그 사람의 경로·시간을 볼 수 없다(관리자는 전부).
+ * 경로는 식별자를 가린 라우트 키만 준다.
+ */
+export function requestStatus(rids = [], { user = '', isAdmin = false } = {}) {
+  const want = [...new Set((Array.isArray(rids) ? rids : []).map(sanitizeRid).filter(Boolean))].slice(0, 20);
+  const out = {};
+  if (!want.length) return out;
+  const me = String(user || '');
+  const mine = (owner) => isAdmin || (owner !== '' && owner === me);
+  const now = performance.now();
+  const live = new Map();
+  for (const r of inflight.values()) {
+    if (!r.rid || !want.includes(r.rid)) continue;
+    let owner = '';
+    try { owner = r.userOf ? String(r.userOf() || '') : ''; } catch { owner = ''; }
+    if (!mine(owner)) continue;
+    const ageMs = Math.round(now - r.t0);
+    const prev = live.get(r.rid);
+    if (!prev || prev.serverMs < ageMs) live.set(r.rid, { state: 'processing', serverMs: ageMs, method: r.method, route: routeKeyOf({ path: r.path }) });
+  }
+  for (const rid of want) {
+    if (live.has(rid)) { out[rid] = live.get(rid); continue; }
+    const d = recentDone.get(rid);
+    if (d && mine(d.user)) {
+      out[rid] = { state: 'done', serverMs: d.ms, status: d.status, method: d.method, route: d.route, endedAgoMs: Math.max(0, Date.now() - d.endedAt) };
+      continue;
+    }
+    out[rid] = { state: 'unknown' };
+  }
+  return out;
 }
 
 /* ── 즉시 측정(수동) ────────────────────────────────────────────── */
@@ -367,7 +427,7 @@ setHangRetentionProvider(() => loadPerfSettings().retentionDays);
 
 export function _resetPerfMonitorForTest() {
   routes.clear(); inflight.clear(); activeJobs.clear();
-  slowRing = []; hangRing = []; loopWindows = []; stalls = []; windowJobs = new Set();
+  slowRing = []; hangRing = []; loopWindows = []; stalls = []; windowJobs = new Set(); recentDone.clear();
   reqSeq = 0; lastLoopWindow = null;
   totals = { requests: 0, slow: 0, err: 0, hangs: 0, clientStalls: 0, reaped: 0, untracked: 0, routesEvicted: 0, startedAt: Date.now() };
 }

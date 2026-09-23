@@ -195,7 +195,7 @@ export default function EmptyInvModal({ agent, push, onClose }) {
                   : '이 조건에 맞는 로그 줄이 없습니다(콘솔 링버퍼는 상한이 있고 재시작하면 비워집니다 — 아무 일도 없었다는 뜻은 아닙니다).'}
               </pre>
               <div className="muted" style={{ fontSize: 10.5, marginTop: 4, lineHeight: 1.6 }}>
-                로그의 비밀 값은 엣지에서 가린 뒤 보냅니다. 다만 자유 문자열이라 **완전하지는 않습니다** —
+                로그의 비밀 값은 엣지에서 가린 뒤 보냅니다. 다만 자유 문자열이라 <b>완전하지는 않습니다</b> —
                 외부에 공유하기 전에 직접 확인하세요.
               </div>
             </div>

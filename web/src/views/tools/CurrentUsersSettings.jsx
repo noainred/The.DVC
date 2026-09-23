@@ -103,7 +103,7 @@ export function CurrentUsersSettings({ onSaved }) {
       {!isAdmin && <div style={{ fontSize: 12, color: 'var(--amber)' }}>보기 전용입니다 — 저장은 관리자만 할 수 있습니다.</div>}
       {src.db?.available === false && (
         <div style={{ fontSize: 12, color: 'var(--red)', whiteSpace: 'normal' }}>
-          이 런타임에서 내장 SQLite(node:sqlite)를 쓸 수 없어 **추이가 저장되지 않습니다**{src.db.error ? ` — ${src.db.error}` : ''}.
+          이 런타임에서 내장 SQLite(node:sqlite)를 쓸 수 없어 <b>추이가 저장되지 않습니다</b>{src.db.error ? ` — ${src.db.error}` : ''}.
         </div>
       )}
 

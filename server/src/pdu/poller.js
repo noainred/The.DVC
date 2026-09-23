@@ -17,7 +17,7 @@ import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { recordSnapshot } from './db.js';
 import { pollMs, startAdaptiveTimer } from './intervals.js';
 import { emptySnapshot, summarize } from './types.js';
-import { evaluateSnapshot, diffAlerts, loadThresholds } from './thresholds.js';
+import { evaluateSnapshot, diffAlerts, loadThresholds, forgetDeviceAlerts } from './thresholds.js';
 import { loadAlertConfig, notify } from '../alerts.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
@@ -79,6 +79,14 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000, onTrace
 export async function pollOnce() {
   if (_running) return { ok: false, reason: '이미 수집 중입니다.', running: true };
   const devices = devicesForThisNode();
+  // v2.583: 삭제·재배정된 장비의 스냅샷을 대상 목록 기준으로 걸러낸다 — 남겨 두면 없는 장비에 대해 계속
+  //   임계 알림이 나가고 push 에도 실린다(인메모리 상태 맵은 대상 목록으로 정리한다 — v2.550.3 규약).
+  {
+    const live = new Set(devices.map((d) => String(d.id)));
+    const gone = [..._snapshots.keys()].filter((id) => !live.has(String(id)));
+    for (const id of gone) _snapshots.delete(id);
+    if (gone.length) forgetDeviceAlerts(gone);   // 없어진 장비를 '정상 복귀' 로 알리지 않는다
+  }
   if (!devices.length) { _last = { ..._last, at: Date.now(), ok: 0, fail: 0 }; return { ok: true, devices: 0 }; }
   _running = true;
   const started = Date.now();
@@ -106,9 +114,13 @@ async function evaluateAndNotify() {
     const th = loadThresholds();
     if (th.enabled === false) return;
     const violations = [];
-    for (const s of _snapshots.values()) violations.push(...evaluateSnapshot(s, th));
+    const heldDeviceIds = [];
+    for (const s of _snapshots.values()) {
+      if (s && s.ok === false) { heldDeviceIds.push(s.id); continue; }   // 못 읽은 장비는 판정 보류(v2.583)
+      violations.push(...evaluateSnapshot(s, th));
+    }
     const cfg = loadAlertConfig();
-    const { fire, resolve } = diffAlerts(violations, { cooldownMs: (cfg.cooldownMin || 60) * 60_000 });
+    const { fire, resolve } = diffAlerts(violations, { cooldownMs: (cfg.cooldownMin || 60) * 60_000, heldDeviceIds });
     for (const a of [...fire, ...resolve]) {
       await notify(a, cfg).catch(() => {}); // 알림 실패가 수집을 막지 않는다
     }

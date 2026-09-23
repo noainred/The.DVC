@@ -589,3 +589,17 @@ export function edgePullNote(rows = []) {
     + ` 등록된 엣지 **${arr.length}곳** 중 **${have}곳**의 보관분이 있습니다.`
     + (have < arr.length ? ' 보관분이 없는 곳은 아직 가져오지 않은 것이며 이상이 아닙니다.' : '');
 }
+
+/**
+ * 숫자 설정 칸의 입력 해석(v2.583 감사 #36, 순수). 비었거나 숫자가 아니면 **null** — 저장하지 않는다.
+ * ⚠ `Number('') === 0` 이라 그대로 PUT 하면 서버가 0 을 하한으로 올려 보존일이 7일·30일로 줄고,
+ *   다음 prune 이 그 차이만큼 이력을 지운다(되돌릴 수 없다). 0 자체가 유효한 칸(지속 0분)은 0 을 돌려준다.
+ */
+export function blurNumber(raw) {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (s === '') return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+export const BLANK_KEPT_TEXT = '빈 칸은 저장하지 않았습니다 — 이전 값으로 되돌렸습니다.';

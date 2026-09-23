@@ -127,7 +127,8 @@
 /* ── 표(STable) — 아트보드의 그리드 헤더(#f0f3f7 · 대문자 모노 9.5px) ── */
 .v3-tablewrap { overflow: auto; }
 .v3-table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.v3-table th { text-align: left; padding: 9px 10px; background: #f0f3f7; border-top: 1px solid #dfe4ec; border-bottom: 1px solid #dfe4ec; font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 9.5px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: #526075; white-space: nowrap; cursor: pointer; user-select: none; }
+/* v2.583 감사 #41: uppercase 금지 — vCenter·vCPU 가 VCENTER·VCPU 로 샌다(v2.575 BUG-13 의 V4 누락분) */
+.v3-table th { text-align: left; padding: 9px 10px; background: #f0f3f7; border-top: 1px solid #dfe4ec; border-bottom: 1px solid #dfe4ec; font-family: "JetBrains Mono", var(--mono, ui-monospace), monospace; font-size: 9.5px; font-weight: 500; letter-spacing: .06em; color: #526075; white-space: nowrap; cursor: pointer; user-select: none; }
 .v3-table th:first-child, .v3-table td:first-child { padding-left: 18px; }
 .v3-table th:last-child, .v3-table td:last-child { padding-right: 18px; }
 .v3-table td { padding: 8px 10px; border-bottom: 1px solid #e6eaf0; vertical-align: middle; }
