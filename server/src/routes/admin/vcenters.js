@@ -1,5 +1,6 @@
 // 데이터 소스·vCenter CRUD/테스트/순서 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
-import { config } from '../../config.js';
+import { config, loadVcenterConfig } from '../../config.js';
+import { vcAuthGuard } from '../../vcenter/restClient.js';
 import { store } from '../../store.js';
 import { getDataSource, setDataSource, isDataSourceOverridden } from '../../runtime-settings.js';
 import { listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection } from '../../vcenter/registry.js';
@@ -24,7 +25,16 @@ adminRouter.put('/data-source', adminOnly, async (req, res) => {
 
 // List registered vCenters (credentials redacted) + current data-source mode.
 adminRouter.get('/vcenters', adminOnly, (_req, res) => {
-  res.json({ dataSource: getDataSource(), vcenters: sortByOrder(listRegistry()) }); // 저장된 표시 순서 적용
+  // v2.590(감사 F1): 인증 실패로 **주기 수집을 멈춘** vCenter 를 목록이 말하게 정지 기록을 싣는다.
+  // 판정에는 복호된 자격증명이 필요하다(credHash — 비밀번호를 고쳤으면 스스로 해제된다). 응답에는
+  // 해시·비밀번호를 싣지 않는다(시각·횟수·사유만).
+  let full = new Map();
+  try { full = new Map((loadVcenterConfig().vcenters || []).map((v) => [v.id, v])); } catch { /* 목록은 그대로 */ }
+  const withStop = (v) => {
+    const rec = full.has(v.id) ? vcAuthGuard.authStopFor(full.get(v.id)) : null;
+    return rec ? { ...v, authStopped: { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } } : v;
+  };
+  res.json({ dataSource: getDataSource(), vcenters: sortByOrder(listRegistry()).map(withStop) }); // 저장된 표시 순서 적용
 });
 
 // Register a new vCenter, then trigger a re-poll.

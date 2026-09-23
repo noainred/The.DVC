@@ -143,10 +143,12 @@ export function PhysicalGpuManager({ vcs }) {
         const rs = d.servers.map((s) => results.get(s.id)).filter(Boolean);
         const c = { ok: rs.filter((r) => r.count != null).length, login: 0, nodriver: 0, unreachable: 0, error: 0 };
         for (const r of rs) if (r.error) c[r.errorCode || 'error'] = (c[r.errorCode || 'error'] || 0) + 1;
+        const stopped = rs.filter((r) => r.authStopped).length; // v2.590: 인증 실패로 주기 수집을 멈춘 서버(login 에 포함돼 있다)
         return (
           <div className="flex gap wrap" style={{ fontSize: 12, marginBottom: 8 }}>
             <span className="badge green">수집 {c.ok}</span>
             {c.login > 0 && <span className="badge red">로그인 안됨 {c.login}</span>}
+            {stopped > 0 && <span className="badge red" title="같은 계정으로 반복 로그인하면 계정이 잠기므로 주기 수집을 멈췄습니다. 수정에서 비밀번호를 고치면 자동으로 다시 시작하고, 각 행의 테스트(저장된 계정)가 성공해도 풀립니다.">그중 인증 실패 정지 {stopped}</span>}
             {c.nodriver > 0 && <span className="badge amber">드라이버 없음 {c.nodriver}</span>}
             {c.unreachable > 0 && <span className="badge gray">접속 불가 {c.unreachable}</span>}
             {c.error > 0 && <span className="badge red">오류 {c.error}</span>}
@@ -168,7 +170,7 @@ export function PhysicalGpuManager({ vcs }) {
                   <td className="muted">{s.vcenterId || '—'}</td>
                   <td className="tabular">{r && r.count != null ? <span>{r.utilNA ? 'N/A(MIG)' : `${r.utilPct}%`} · {r.count}GPU{r.memUsedPct != null ? ` · mem ${r.memUsedPct}%` : ''}</span> : <span className="muted">—</span>}</td>
                   <td>{!s.enabled ? <span className="badge gray">중지</span>
-                    : r && r.error ? <span className={`badge ${PGPU_ERR_COLOR[r.errorCode] || 'red'}`} title={r.error}>{r.errorLabel || '오류'}</span>
+                    : r && r.error ? <span className={`badge ${PGPU_ERR_COLOR[r.errorCode] || 'red'}`} title={r.error}>{r.authStopped ? '인증 실패 정지' : (r.errorLabel || '오류')}</span>
                       : r && r.count != null ? <span className="badge green">수집</span>
                         : <span className="badge gray">대기</span>}</td>
                   <td className="right nowrap">
@@ -185,6 +187,7 @@ export function PhysicalGpuManager({ vcs }) {
       {testRes && testRes.who !== 'form' && (
         <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
           {testRes.read ? `✅ ${testRes.host}: 수집 OK — ${testRes.sample?.gpus}GPU · ${testRes.sample?.utilNA ? 'N/A(MIG)' : testRes.sample?.utilPct + '%'}` : `❌ ${testRes.host}: ${testRes.error || (testRes.login ? '읽기 실패' : '로그인 실패')}`}
+          {testRes.authStopCleared ? ' · 저장된 계정으로 성공해 인증 실패 정지를 풀었습니다(다음 주기부터 수집)' : ''}
         </div>
       )}
 

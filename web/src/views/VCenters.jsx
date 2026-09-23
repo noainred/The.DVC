@@ -4,6 +4,7 @@ import { growth, hasDsData, tb, gbTb } from './tools/storageTrack.js'; // 추이
 import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../components/ui.jsx';
 import VCenterDetail from './VCenterDetail.jsx';
 import { vcCardState } from './vcCardText.js';
+import BoldText from '../components/boldText.jsx';
 
 /** 미니 스파크라인(v2.358) — recharts 를 끌어오지 않는 순수 SVG(Platform 은 차트 벤더 청크 미로드). */
 function Spark({ points, color }) {
@@ -187,11 +188,11 @@ export default function VCenters({ onSelectSite, resetSignal }) {
               </div>
 
               {cs.text && cs.showMetrics && (
-                <div className="muted" style={{ fontSize: 12, margin: '6px 0', color: 'var(--amber)' }}>{cs.text}</div>
+                <div className="muted" style={{ fontSize: 12, margin: '6px 0', color: cs.authStopped ? 'var(--red)' : 'var(--amber)' }}><BoldText text={cs.text} /></div>
               )}
               {!cs.showMetrics ? (
                 <div style={{ padding: '12px 0' }}>
-                  <div className="muted" style={{ marginBottom: 6 }}>{cs.text}</div>
+                  <div className="muted" style={{ marginBottom: 6 }}><BoldText text={cs.text} /></div>
                   {cs.showError && s.error && <div className="diag-err-msg" style={{ fontSize: 12 }}>{s.error}</div>}
                   {cs.showError && s.hint && <div className="diag-err-hint" style={{ fontSize: 12 }}>💡 {s.hint}</div>}
                 </div>

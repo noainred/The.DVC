@@ -7,7 +7,7 @@ import { metricsSamplerStatus, rescheduleMetricsSampler } from '../../metrics/sa
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds, resolveCollectMethod } from '../../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller, gpuHostIds, vmUsesGpu, getGpuGuestDiag } from '../../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../../gpu/guestops.js';
-import { testVmGuestSsh, detectPhysicalGpu, guestIps } from '../../gpu/sshCollect.js';
+import { testVmGuestSsh, detectPhysicalGpu, guestIps, gpuAuthGuard } from '../../gpu/sshCollect.js';
 import { listPhysical, addPhysical, updatePhysical, removePhysical, getPhysicalRaw, findPhysicalByHost } from '../../gpu/physicalRegistry.js';
 import { getAllPhysicalGpu } from '../../gpu/physicalStore.js';
 import { physicalPollerStatus, pollPhysicalOnce } from '../../gpu/physicalPoller.js';
@@ -176,7 +176,7 @@ adminRouter.delete('/gpu-physical/:id', adminOnly, (req, res) => {
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.post('/gpu-physical/poll', adminOnly, async (_req, res) => {
-  res.json({ ok: true, lastRun: await pollPhysicalOnce() });
+  res.json({ ok: true, lastRun: await pollPhysicalOnce({ manual: true }) }); // v2.590: 수동 실행은 인증 실패 정지 서버도 1회 시도
 });
 // IP+ID+PW+소속 vCenter만 받아 SSH 로그인→GPU/OS/호스트명 자동 감지→자동 등록.
 // 같은 host가 이미 있으면 갱신. Body { host, username, password, port?, vcenterId? }
@@ -241,7 +241,10 @@ adminRouter.post('/gpu-physical/test', adminOnly, async (req, res) => {
   const seed = b.revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명: id=${username} · pw=${maskPw(password)} · 포트=${port}` }] : [];
   try {
     const r = await testVmGuestSsh({ ipAddresses: [host] }, { username, password }, { timeoutMs: st.timeoutMs, port, trace: seed });
-    res.json({ ok: true, host, port, ...r });
+    // v2.590(감사 F2): 저장된 자격증명(비밀번호 미입력)으로 성공했으면 그 서버의 인증 실패 정지를 푼다 — 원격에서
+    //   잠금만 풀었거나 같은 비밀번호로 되돌린 경우 credHash 가 그대로라 자동 재개되지 않는다.
+    const authStopCleared = !!(b.id && !b.password && r && r.read && gpuAuthGuard.clearAuthStop(`phys|${b.id}`));
+    res.json({ ok: true, host, port, ...r, ...(authStopCleared ? { authStopCleared } : {}) });
   } catch (e) { res.json({ ok: false, host, port, login: false, read: false, error: e.message, trace: seed }); }
 });
 
@@ -325,6 +328,13 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
           }
         } else {
           r = await testVmGuest(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts, trace: seed }).catch((e) => ({ login: false, read: false, error: e.message, trace: seed.concat({ t: Date.now(), msg: `✗ 예외: ${e.message}` }) }));
+        }
+        // v2.590(감사 F2): 이 수동 테스트가 **주기 수집이 쓰는 바로 그 계정**으로 성공했으면 그 VM 의 인증 실패
+        //   정지를 푼다 — 게스트 쪽에서 잠금을 풀었거나 같은 비밀번호로 되돌린 경우 credHash 가 그대로라 자동
+        //   재개되지 않는다. 입력한 다른 계정으로 성공한 것은 저장 계정이 맞다는 근거가 아니므로 풀지 않는다.
+        const pollerCreds = resolveVmCreds(s, vcenterId, it.vmId, isWindows);
+        if (r && r.read && pollerCreds && pollerCreds.username === creds.username && (pollerCreds.password || '') === (creds.password || '')) {
+          if (gpuAuthGuard.clearAuthStop(`vm|${vcenterId}|${it.vmId}`)) r.authStopCleared = true;
         }
         results[i] = { vmId: it.vmId, ...r };
       }

@@ -201,6 +201,15 @@ server/config/horizon-sessions.json
 server/config/horizon-session-activity.json
 server/config/horizon-auth-stops.json
 server/config/storage-auth-stops.json
+# v2.590 인증 실패 정지 — 주기 수집기 7종으로 확장(도구마다 파일이 다르다 — 한 파일에 섞으면 id 가 충돌한다).
+#   자격증명 **지문**(계정명·길이·16비트 해시)과 대상 id·사유를 담는다. 이 저장소는 공개다(v2.535 규약).
+server/config/vcenter-auth-stops.json
+server/config/idrac-auth-stops.json
+server/config/nsx-auth-stops.json
+server/config/sanswitch-auth-stops.json
+server/config/pdu-auth-stops.json
+server/config/gpu-auth-stops.json
+server/config/bmstor-auth-stops.json
 server/config/storage-growth-settings.json
 server/config/vmseries.json
 server/config/vmseries/

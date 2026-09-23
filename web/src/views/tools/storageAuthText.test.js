@@ -5,7 +5,7 @@
  * **배포가 상했는지 / 장비 비밀번호가 다른지** 가릴 수 없었다.
  */
 import { describe, it, expect } from 'vitest';
-import { authFailInfo, credFpText, agoText } from './storageAuthText.js';
+import { authFailInfo, credFpText, agoText, authStopInfo, authStopSummary } from './storageAuthText.js';
 
 const FP = { user: 'admin', len: 13, hash: 'b12b', space: false, empty: false, userSpace: false };
 const snapOf = (over = {}) => ({
@@ -127,5 +127,49 @@ describe('credFpText — 읽지 못한 값은 지어내지 않는다(v2.541)', (
       const out = credFpText(bad);
       expect(out === null || !String(out).includes('undefined')).toBe(true);
     }
+  });
+});
+
+/* v2.590 — 인증 실패 '정지' 안내(도구 공통: vCenter·iDRAC·NSX·SAN·PDU·GPU·베어메탈). 기준 시각은 고정한다(v2.517). */
+describe('authStopInfo(v2.590)', () => {
+  const NOW = 1_800_000_000_000;
+  const stop = { since: NOW - 3 * 3_600_000, at: NOW - 5 * 60_000, attempts: 3, reason: 'vCenter 인증 실패(InvalidLogin)' };
+  it('정지 사실·시점·횟수·사유를 말하고 강조는 BoldText 형식(별표 두 개)만 쓴다', () => {
+    const r = authStopInfo(stop, { what: '이 vCenter', manual: '연결 테스트', now: NOW });
+    expect(r.short).toBe('인증 실패 정지');
+    expect(r.text).toMatch(/\*\*인증 실패로 이 vCenter의 주기 수집을 멈췄습니다\*\*/);
+    expect(r.text).toMatch(/실패 3회/);
+    expect(r.text).toMatch(/계정이 잠기기 때문/);
+    expect(r.text).toMatch(/사유: vCenter 인증 실패\(InvalidLogin\)/);
+    expect(r.text).not.toMatch(/`/);   // 백틱은 BoldText 가 해석하지 않는다(v2.576 스윕)
+  });
+  it('수동 버튼 이름이 있으면 막지 않는다고 말하고, 조사는 받침에 맞춘다', () => {
+    expect(authStopInfo(stop, { manual: '연결 테스트', now: NOW }).text).toMatch(/'연결 테스트'는 막지 않습니다/);
+    expect(authStopInfo(stop, { manual: '지금 수집', now: NOW }).text).toMatch(/'지금 수집'은 막지 않습니다/);
+    expect(authStopInfo(stop, { now: NOW }).text).not.toMatch(/막지 않습니다/);   // 없는 버튼을 말하지 않는다
+  });
+  it('횟수를 모르면 지어내지 않는다 — null·빈 문자열은 0회가 아니다(Number(null)===0 함정)', () => {
+    expect(authStopInfo({ ...stop, attempts: null }, { now: NOW }).attempts).toBe(null);
+    expect(authStopInfo({ ...stop, attempts: '' }, { now: NOW }).text).not.toMatch(/실패 0회/);
+  });
+  it('모양이 다른 값은 null(그럴듯한 문장을 만들지 않는다)', () => {
+    expect(authStopInfo(null)).toBe(null);
+    expect(authStopInfo('stopped')).toBe(null);
+    expect(authStopInfo([stop])).toBe(null);
+  });
+});
+
+describe('authStopSummary(v2.590)', () => {
+  it('비어 있으면 문구를 만들지 않는다', () => {
+    expect(authStopSummary([])).toBe('');
+    expect(authStopSummary(null)).toBe('');
+  });
+  it('개수·이름(최대 4개 + 외 N)과 조치를 말한다', () => {
+    const list = ['a', 'b', 'c', 'd', 'e'].map((n) => ({ name: n }));
+    const t = authStopSummary(list, { unit: '대', what: 'PDU' });
+    expect(t).toMatch(/\*\*PDU 5대는 인증 실패로 주기 수집을 멈췄습니다\*\*/);
+    expect(t).toMatch(/a · b · c · d 외 1대/);
+    expect(t).toMatch(/비밀번호를 고치면 자동으로 다시 시작/);
+    expect(authStopSummary([{ id: 'x' }], { unit: '곳', what: 'vCenter' })).toMatch(/vCenter 1곳은/);
   });
 });

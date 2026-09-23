@@ -2,6 +2,35 @@ import { Agent } from 'undici';
 import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
+import { createAuthGuard } from '../util/authGuard.js';
+
+/**
+ * vCenter 주기 수집의 **인증 실패 정지** 저장소(v2.590 — 감사 F1, 계정 잠금 경로).
+ *
+ * 왜 여기인가: 이 파일이 수집 진입점(`collectFromVCenter`)을 갖고 있고, 같은 계정으로 로그인하는
+ * 다른 주기 수집기(vCenter 이벤트 로그·GPU 게스트 수집)가 **같은 정지 기록**을 봐야 한다 —
+ * 수집기마다 따로 두면 store 가 멈춰도 로그 폴러가 같은 계정으로 계속 로그인해 **잠금은 그대로**다.
+ * 코어는 `util/authGuard.js` 하나다(v2.535 — 20줄을 복사하지 않는다). 파일은 도구마다 다르다.
+ *
+ * ⚠ 멈추는 것은 **자격증명 거부뿐**이다 — SOAP `InvalidLogin` · REST `POST /api/session` 401.
+ *   타임아웃·연결 실패·5xx 로 멈추면 일시 장애가 수집을 영구 정지시킨다(authGuard 규칙 4).
+ * ⚠ 수동 실행(연결 테스트·'지금 수집')은 막지 않는다 — 막는 것은 **주기 수집뿐**이다(규칙 3).
+ */
+export const vcAuthGuard = createAuthGuard({ file: 'vcenter-auth-stops.json' });
+
+/**
+ * 오류가 vCenter **자격증명 거부**인가(출처에서 못 박은 플래그만 본다 — 문구 추측 금지).
+ * `#call`(SOAP)과 `#request`(REST)가 `authFailed=true` 를 붙인다.
+ */
+export function isVcAuthError(err) {
+  return !!(err && err.authFailed === true);
+}
+
+/** 수집 1회용 신호 — 건별 시한과 외부(데드라인) 신호를 함께 건다(v2.590 — 감사 F7, v2.417 규약). */
+export function vcRequestSignal(timeoutMs, external) {
+  const t = AbortSignal.timeout(timeoutMs);
+  return external ? AbortSignal.any([t, external]) : t;
+}
 
 /**
  * Thin client for the vSphere Automation REST API (vCenter 7.0+ / 8.0).
@@ -49,13 +78,18 @@ export const vcDispatcher = new Agent({
 });
 
 export class VCenterClient {
-  constructor(vc) {
+  /**
+   * @param {object} vc
+   * @param {{signal?: AbortSignal}} [opts] signal — 수집 데드라인(v2.590). 만료되면 진행 중인 요청을 실제로 끊는다.
+   */
+  constructor(vc, { signal = null } = {}) {
     this.vc = vc;
     this.baseUrl = vc.host.replace(/\/+$/, '');
     this.session = null;
+    this.signal = signal || null;
   }
 
-  async #request(pathname, { method = 'GET', headers = {}, body } = {}) {
+  async #request(pathname, { method = 'GET', headers = {}, body, ignoreExternal = false } = {}) {
     const url = `${this.baseUrl}${pathname}`;
     const res = await fetch(url, {
       method,
@@ -67,11 +101,14 @@ export class VCenterClient {
       body: body ? JSON.stringify(body) : undefined,
       dispatcher: vcDispatcher, // vCenter 전용 TLS 정책(전역 오염 금지 — 감사 C1/C3)
       // per-vCenter 타임아웃 존중(고RTT 사이트가 15초에 abort되지 않게) — SOAP 경로와 동일 규칙.
-      signal: AbortSignal.timeout(this.vc?.timeoutMs > 0 ? this.vc.timeoutMs : 15_000),
+      // v2.590: 수집 데드라인 신호도 함께 건다(결과만 포기하지 않고 요청을 실제로 끊는다 — v2.417).
+      signal: vcRequestSignal(this.vc?.timeoutMs > 0 ? this.vc.timeoutMs : 15_000, ignoreExternal ? null : this.signal),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`${method} ${pathname} -> ${res.status} ${res.statusText} ${text.slice(0, 200)}`);
+      const err = new Error(`${method} ${pathname} -> ${res.status} ${res.statusText} ${text.slice(0, 200)}`);
+      err.status = res.status; // v2.590: 판정은 호출부가 한다(login 의 401 만 자격증명 거부 — 아래 login())
+      throw err;
     }
     const ct = res.headers.get('content-type') || '';
     return ct.includes('application/json') ? res.json() : res.text();
@@ -79,10 +116,18 @@ export class VCenterClient {
 
   async login() {
     const auth = Buffer.from(`${this.vc.username}:${this.vc.password}`).toString('base64');
-    const data = await this.#request('/api/session', {
-      method: 'POST',
-      headers: { Authorization: `Basic ${auth}` },
-    });
+    let data;
+    try {
+      data = await this.#request('/api/session', {
+        method: 'POST',
+        headers: { Authorization: `Basic ${auth}` },
+      });
+    } catch (err) {
+      // v2.590(감사 F1): **세션 생성의 401 만** 자격증명 거부다. 로그인 뒤 목록 조회의 401(세션 만료 등)이나
+      // 403(로그인은 됐고 권한이 없다)은 잠금 경로가 아니라서 주기 수집을 멈추지 않는다(authGuard 규칙 4).
+      if (err?.status === 401) err.authFailed = true;
+      throw err;
+    }
     // The API returns the session id either as a bare string or wrapped.
     this.session = typeof data === 'string' ? data.replace(/"/g, '') : data?.value || data;
     return this.session;
@@ -91,7 +136,8 @@ export class VCenterClient {
   async logout() {
     if (!this.session) return;
     try {
-      await this.#request('/api/session', { method: 'DELETE' });
+      // 데드라인이 지난 뒤에도 세션은 정리한다(외부 신호 무시 · 건별 시한만) — 남기면 vCenter 세션 수를 먹는다.
+      await this.#request('/api/session', { method: 'DELETE', ignoreExternal: true });
     } catch {
       /* best effort */
     }
@@ -138,12 +184,23 @@ function isTransientSoapError(err) {
   return /Abort|Timeout|timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|socket hang up|network|fetch failed|EPIPE|502|503|504/i.test(m);
 }
 
-export async function collectFromVCenter(vc) {
+/**
+ * @param {object} vc
+ * @param {{signal?: AbortSignal}} [opts] signal — 데드라인(v2.590). 만료되면 SOAP·REST 요청을 **실제로 끊는다**.
+ */
+export async function collectFromVCenter(vc, { signal = null } = {}) {
   if (config.vcSoapMetrics) {
     try {
       const { collectFromVCenterSoap } = await import('./soapClient.js');
-      return await collectFromVCenterSoap(vc);
+      return await collectFromVCenterSoap(vc, { signal });
     } catch (err) {
+      // v2.590(감사 F1): **자격증명 거부는 REST 로 폴백하지 않는다.** 예전에는 SOAP `InvalidLogin` 이
+      // '일시 오류' 가 아니라서 '능력 부재' 로 분류돼 REST 로 **한 번 더 로그인**했다(주기당 실패 2회 —
+      // 30초 주기면 1분에 4회). 같은 계정이라 결과는 같고 잠금만 앞당긴다. 화면에 남는 오류도 REST 의
+      // `POST /api/session -> 401` 이라 진짜 원인(SOAP InvalidLogin)을 가렸다.
+      if (isVcAuthError(err)) throw err;
+      // 데드라인으로 끊긴 것은 폴백하지 않는다(REST 가 같은 신호로 즉시 끊긴다 — 헛 로그인만 남는다).
+      if (signal?.aborted) throw err;
       if (isTransientSoapError(err)) {
         // 일시 오류 → 폴백 금지. 던지면 store 가 실패로 처리하되 마지막 정상 스냅샷을 유지한다.
         throw err;
@@ -153,11 +210,11 @@ export async function collectFromVCenter(vc) {
       console.warn(`[collect] SOAP metrics failed for ${vc.id} (${err.message}); falling back to REST list API`);
     }
   }
-  return collectFromVCenterRest(vc);
+  return collectFromVCenterRest(vc, { signal });
 }
 
-async function collectFromVCenterRest(vc) {
-  const client = new VCenterClient(vc);
+async function collectFromVCenterRest(vc, { signal = null } = {}) {
+  const client = new VCenterClient(vc, { signal });
   await client.login();
   try {
     // 핵심 목록(호스트/VM/데이터스토어)의 실패를 빈 배열로 삼키면 vCenter가 'connected'인데

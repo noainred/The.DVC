@@ -54,6 +54,7 @@ export function registerPdu(api) {
         ...d,
         snapshot: s ? {
           ok: s.ok, error: s.error || '', collectedAt: s.collectedAt, agent: s.agent || '',
+          authStopped: s.authStopped || null,   // v2.590: 인증 실패로 주기 수집이 멈췄다(화면이 말한다)
           model: s.model || '', serial: s.serial || '',
           summary: summarize(s),
           units: (s.units || []).map((u) => ({
@@ -236,7 +237,7 @@ export function registerPdu(api) {
   });
 
   api.post('/tools/pdu/collect-all', adminOnly, async (req, res) => {
-    const r = await pollOnce();
+    const r = await pollOnce({ manual: true }); // v2.590: 수동 실행은 인증 실패 정지 장비도 1회 시도한다
     logAudit({ user: req.user?.username, action: 'PDU 전체 수집', target: `${r.devices ?? 0}대` });
     res.json(r);
   });

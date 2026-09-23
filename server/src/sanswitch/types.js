@@ -113,7 +113,7 @@ export function emptySnapshot(device = {}) {
     fabricOs: '', model: '', serial: '', wwn: '', domainId: null, switchState: '',
     ports: { total: 0, licensed: 0, online: 0, offline: 0, disabled: 0, faulty: 0, noLicense: 0,
       free: 0, usedPct: 0, bySpeed: {}, list: [], truncated: false },
-    health: { status: '', fans: null, psus: null, tempC: null, alerts: 0 },
+    health: { status: '', fans: null, psus: null, tempC: null, alerts: null },   // v2.590: 못 읽으면 null(0 은 '경보 없음' 이라는 거짓)
     licenses: [], fabric: { switches: 0, principal: '' },
     // v2.511: `zones` 는 **배열**(zone 멤버), 개수는 `zoneCount`. v2.510 까지는 숫자(항상 0)였다.
     zoning: { effectiveConfig: '', zones: [], zoneCount: 0, aliases: {}, source: 'none', available: false, reason: '', counts: { zones: 0, definedZones: 0, aliases: 0, cfgs: 0 }, truncated: false, limited: false },

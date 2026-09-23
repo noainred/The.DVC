@@ -86,7 +86,7 @@ adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
   res.json(s);
 });
 adminRouter.post('/vclogs/collect', adminOnly, async (_req, res) => {
-  try { res.json({ ok: true, ...(await pollLogsOnce()) }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+  try { res.json({ ok: true, ...(await pollLogsOnce({ manual: true })) }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 // ───────────────────────── 네트워크 트래픽 분석 ─────────────────────────

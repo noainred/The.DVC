@@ -135,7 +135,8 @@ export function resolveTargets({ bareMetal = [], registry = [], bmServers = [], 
       license,
       entAllowed: !!(paths.includes('idrac') && settings.enterpriseEnabled && settings.enterpriseAck),
       // ⚠ 비밀은 여기 담기지만 **응답에는 절대 싣지 않는다**(라우트가 publicTarget 으로 뺀다).
-      idrac: paths.includes('idrac') ? { host: t(reg.host), username: t(reg.username), password: reg.password } : null,
+      // `regId`(v2.590): 주 iDRAC 폴러의 인증 실패 정지 기록을 같은 id 로 조회하기 위한 것(poller.js).
+      idrac: paths.includes('idrac') ? { regId: t(reg.id), host: t(reg.host), username: t(reg.username), password: reg.password } : null,
       osHost: paths.includes('os') ? osEntry : null,
       // OS 계정은 있는데 iDRAC 이 없거나 반대인 경우 — 그 사실을 화면이 말해야 한다.
       missing: [idracReason, (settings.osSsh && !osEntry) ? 'no-os-cred' : ''].filter(Boolean),

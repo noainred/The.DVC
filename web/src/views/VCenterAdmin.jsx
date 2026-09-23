@@ -3,6 +3,8 @@ import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
+import BoldText from '../components/boldText.jsx';
+import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
 import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 const EMPTY = {
@@ -93,7 +95,10 @@ export default function VCenterAdmin() {
     setBusy(true); setMsg(null);
     try {
       const r = await postJson('/admin/vcenters/test', form);
-      setMsg(r.ok ? { ok: true, text: `연결 성공 (${r.ms}ms)` } : { ok: false, text: `연결 실패: ${r.reason}` });
+      setMsg(r.ok
+        ? { ok: true, text: `연결 성공 (${r.ms}ms)${r.authStopCleared ? ' — 저장된 비밀번호로 로그인됐으므로 인증 실패로 멈췄던 주기 수집을 다시 시작합니다' : ''}` }
+        : { ok: false, text: `연결 실패: ${r.reason}` });
+      if (r.ok && r.authStopCleared) load();
     } catch (e) { setMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };
@@ -147,6 +152,12 @@ export default function VCenterAdmin() {
         </div>
       </div>
 
+      {authStopSummary(list.filter((v) => v.authStopped), { unit: '곳', what: 'vCenter' }) && (
+        <div className="card" style={{ marginBottom: 12, padding: '10px 14px', borderColor: 'var(--red)', fontSize: 13 }}>
+          <BoldText text={authStopSummary(list.filter((v) => v.authStopped), { unit: '곳', what: 'vCenter' })} />
+          <span className="muted"> 수정 창의 ‘연결 테스트’ 는 저장된 비밀번호로 1회 시도하며, 성공하면 정지를 풉니다.</span>
+        </div>
+      )}
       <div className="table-wrap">
         <STable>
           <thead><tr>
@@ -160,6 +171,7 @@ export default function VCenterAdmin() {
                 <td>{vc.name}
                   {vc.collectMode === 'site' && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="사이트 위임 수집 — 현장 서버가 수집해 중앙으로 push">사이트 위임</span>}
                   {vc.maintenance && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="점검중 — 수집 일시중단, 연결불가/알림 제외">🛠 점검중</span>}
+                  {vc.authStopped && <span className="badge red" style={{ marginLeft: 6, fontSize: 10, whiteSpace: 'nowrap' }} title={authStopInfo(vc.authStopped, { what: '이 vCenter' })?.detail || ''}>인증 실패 정지</span>}
                 </td>
                 <td className="muted">{vc.host}</td>
                 <td className="muted">{vc.username}</td>
@@ -266,6 +278,11 @@ export default function VCenterAdmin() {
                 <input type="checkbox" checked={!!form.maintenance} onChange={(e) => setForm((f) => ({ ...f, maintenance: e.target.checked }))} /> 점검중(수집 일시중단)
               </label>
             </div>
+            {editing && form.authStopped && (
+              <div style={{ marginTop: 10, padding: '9px 12px', borderRadius: 8, fontSize: 13, background: 'rgba(239,68,68,.12)' }}>
+                <BoldText text={authStopInfo(form.authStopped, { what: '이 vCenter', manual: '연결 테스트' })?.text || ''} />
+              </div>
+            )}
             <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
               고지연(RTT 높은) vCenter는 <b>수집 주기를 길게</b>(예 300초) + <b>타임아웃을 크게</b>(예 60000ms) 설정하면, 느린 1곳이 전체 폴링을 막지 않습니다.
             </div>

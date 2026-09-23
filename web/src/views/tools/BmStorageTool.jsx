@@ -9,6 +9,8 @@ import EscClose from '../../components/EscClose.jsx';
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx'; // CSV 일괄 관리(v2.341)
 import { fmtAgo } from '../../util/fmt.js';
 import { STable } from '../../components/STable.jsx';
+import BoldText from '../../components/boldText.jsx';
+import { authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
@@ -130,6 +132,14 @@ export default function BmStorageTool() {
       {msg && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: '#93c5fd' }}>{msg}</div>}
       {error && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {error}</div>}
 
+      {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** 서버 — 조용히 멈추지 않는다(authGuard 규칙 1). */}
+      {authStopSummary(servers.filter((s) => s.authStopped), { unit: '대', what: '베어메탈 서버' }) && (
+        <div className="card" style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: 'var(--red)' }}>
+          <BoldText text={authStopSummary(servers.filter((s) => s.authStopped), { unit: '대', what: '베어메탈 서버' })} />
+          <span className="muted"> 위의 지금 수집 버튼은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다.</span>
+        </div>
+      )}
+
       {/* 전체 합산 KPI — 사용자 요구: 지정 마운트들의 전체 용량·사용량·사용 가능 용량 종합 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 14 }}>
         <Kpi label="서버" value={`${total.servers}대`} meta={`정상 ${total.ok} · 오류 ${total.errors}${total.pending ? ` · 미수집 ${total.pending}` : ''}`} accent={total.errors ? 'var(--red)' : undefined} />
@@ -187,6 +197,7 @@ export default function BmStorageTool() {
                     <td style={{ textAlign: 'right' }}>{s.ok ? fmtBytes(s.usedBytes) : '—'}</td>
                     <td style={{ textAlign: 'right' }}>{s.ok ? fmtBytes(s.availBytes) : '—'}</td>
                     <td>{s.ok ? <>{bar(s.usedPct)} <b style={{ fontSize: 12, color: pctColor(s.usedPct) }}>{s.usedPct}%</b></>
+                      : s.authStopped ? <span className="badge red" style={{ fontSize: 11 }} title={s.error || ''}>인증 실패 정지{s.authStopped.attempts != null ? ` · ${s.authStopped.attempts}회` : ''}</span>
                       : s.error ? <span style={{ color: 'var(--red)', fontSize: 11.5 }} title={s.error}>⚠ {s.error.slice(0, 40)}{s.error.length > 40 ? '…' : ''}</span>
                         : <span className="muted" style={{ fontSize: 12 }}>수집 대기</span>}</td>
                     <td className="muted" style={{ fontSize: 11.5 }}>{s.at ? fmtAgo(s.at) : '—'}</td>

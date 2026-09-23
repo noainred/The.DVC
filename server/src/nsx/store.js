@@ -11,6 +11,9 @@ import { describeError } from '../util/errors.js';
 import { loadRegistry } from './registry.js';
 import { collectFromNsx } from './client.js';
 import { generateNsxSnapshot, generateNsxForManager } from './mock.js';
+import { nsxAuthGuard, isNsxAuthError } from './client.js'; // v2.590: 인증 실패 정지(정의는 client.js — 순환 방지)
+export { nsxAuthGuard };
+const stopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
 
 class NsxStore {
   constructor() {
@@ -56,6 +59,8 @@ class NsxStore {
     const globalMs = config.pollIntervalMs;
     const due = managers.filter((m) => {
       if (m.enabled === false) return false;
+      // v2.590: 인증 실패로 멈춘 매니저는 주기 수집에서 건너뛴다(비밀번호를 고치면 credHash 로 자동 재개).
+      if (nsxAuthGuard.authStopFor(m)) return false;
       const last = this.last.get(m.id) || 0;
       const intervalMs = m.pollIntervalSec > 0 ? m.pollIntervalSec * 1000 : globalMs;
       return now - last >= intervalMs - 500;
@@ -64,11 +69,15 @@ class NsxStore {
     results.forEach((r, i) => {
       const m = due[i];
       this.last.set(m.id, Date.now());
-      if (r.status === 'fulfilled') this.cache.set(m.id, { ok: true, data: r.value });
+      if (r.status === 'fulfilled') { this.cache.set(m.id, { ok: true, data: r.value }); nsxAuthGuard.clearAuthStop(m.id); }
       else {
         const d = describeError(r.reason);
         console.error(`[nsx] ${m.id} (${m.name}) 연결 실패: ${d.message}${d.hint ? ` — ${d.hint}` : ''}`);
         this.cache.set(m.id, { ok: false, mgr: m, err: d, at: Date.now() });
+        if (isNsxAuthError(r.reason)) {
+          const rec = nsxAuthGuard.markAuthStopped(m.id, m, d.message);
+          console.warn(`[nsx] ${m.id} (${m.name}) 인증 실패로 주기 수집 정지(${rec.attempts}회) — 비밀번호를 고치면 자동 재개합니다`);
+        }
       }
     });
     const ids = new Set(managers.map((m) => m.id));
@@ -81,11 +90,16 @@ class NsxStore {
     for (const m of managers) {
       if (m.enabled === false) { parts.push({ manager: disabledManager(m), gateways: [], segments: [], transportNodes: [], firewall: { policies: 0, rules: 0 }, groups: 0 }); continue; }
       const c = this.cache.get(m.id);
+      // v2.590: 정지 기록(파일) — 재시작 뒤 캐시가 비어도 '대기(첫 수집 중)' 라는 거짓 안내가 되지 않게 싣는다.
+      const stop = c?.ok ? null : stopView(nsxAuthGuard.authStopFor(m));
       if (c?.ok) parts.push(c.data);
       else if (c && !c.ok) {
-        errors.push({ managerId: m.id, name: m.name, ...c.err, at: c.at, fallback: mockFallback });
-        if (mockFallback) parts.push(generateNsxForManager(m));
-        else parts.push({ manager: unreachableManager(m, c.err), gateways: [], segments: [], transportNodes: [], firewall: { policies: 0, rules: 0 }, groups: 0 });
+        errors.push({ managerId: m.id, name: m.name, ...c.err, at: c.at, fallback: mockFallback, ...(stop ? { authStopped: stop } : {}) });
+        if (mockFallback && !stop) parts.push(generateNsxForManager(m));
+        else parts.push({ manager: unreachableManager(m, c.err, stop), gateways: [], segments: [], transportNodes: [], firewall: { policies: 0, rules: 0 }, groups: 0 });
+      } else if (stop) {
+        errors.push({ managerId: m.id, name: m.name, message: stop.reason, at: stop.at, fallback: false, authStopped: stop });
+        parts.push({ manager: unreachableManager(m, { message: stop.reason, hint: '인증 실패 — 계정/비밀번호 또는 권한을 확인하세요.' }, stop), gateways: [], segments: [], transportNodes: [], firewall: { policies: 0, rules: 0 }, groups: 0 });
       } else parts.push({ manager: pendingManager(m), gateways: [], segments: [], transportNodes: [], firewall: { policies: 0, rules: 0 }, groups: 0 });
     }
     this.snapshot = rollup(merge(parts, errors, dataSource));
@@ -102,7 +116,7 @@ class NsxStore {
 
 const disabledManager = (m) => ({ id: m.id, name: m.name, host: m.host, region: m.location?.region || '', vcenterId: m.vcenterId || '', status: 'disabled', version: '', nodeCount: 0 });
 const pendingManager = (m) => ({ id: m.id, name: m.name, host: m.host, region: m.location?.region || '', vcenterId: m.vcenterId || '', status: 'pending', version: '', nodeCount: 0 });
-const unreachableManager = (m, err) => ({ id: m.id, name: m.name, host: m.host, region: m.location?.region || '', vcenterId: m.vcenterId || '', status: 'unreachable', version: '', nodeCount: 0, error: err.message, hint: err.hint, code: err.code });
+const unreachableManager = (m, err, authStopped = null) => ({ id: m.id, name: m.name, host: m.host, region: m.location?.region || '', vcenterId: m.vcenterId || '', status: 'unreachable', version: '', nodeCount: 0, error: err.message, hint: err.hint, code: err.code, ...(authStopped ? { authStopped } : {}) });
 
 function empty() {
   return { generatedAt: new Date().toISOString(), source: getDataSource(), managers: [], gateways: [], segments: [], transportNodes: [], dfw: [], securityGroups: [], idsEvents: [], collectionErrors: [], rollup: null };

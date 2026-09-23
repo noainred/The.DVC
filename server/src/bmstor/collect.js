@@ -7,7 +7,7 @@
  * df 는 없는 마운트가 섞여도 있는 것은 출력하고 exit≠0 — 있는 것은 살리고 없는 것만 오류 표기.
  */
 
-import { withSsh } from '../proxy/sshExec.js';
+import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
 
 /** 마운트 경로 검증 — 절대경로 + 안전 문자만(공백/따옴표/셸 메타문자 거부 = 명령 주입 방어). */
 export const MOUNT_RE = /^\/[A-Za-z0-9._\/-]*$/;
@@ -84,7 +84,9 @@ export async function collectServer(server) {
     }
     return { ok: true, mounts: rows, missing };
   } catch (e) {
-    return { ok: false, mounts: [], error: e.message };
+    // v2.590(감사 F2): 자격증명 거부를 출처에서 못 박는다 — 폴러가 주기 수집을 멈출 수 있게. 엣지 폴링 위임은
+    // 회신에서 이 플래그를 빼므로(agent/bmstorWorker.js 가 용량 필드만 싣는다) 폴러는 문구(ssh2 정식 문구)도 본다.
+    return { ok: false, mounts: [], error: e.message, ...(isSshAuthError(e) ? { authFailed: true } : {}) };
   }
 }
 

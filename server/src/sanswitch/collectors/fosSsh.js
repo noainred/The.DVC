@@ -288,7 +288,10 @@ export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}) {
     fans, psus, powerWatts: chassis.powerWatts, psuDetail: chassis.psus.slice(0, 8),
     tempC: Math.max(...list.map((p) => p.sfpTempC ?? -Infinity)) > -Infinity
       ? Math.max(...list.map((p) => p.sfpTempC ?? -Infinity)) : null,
-    alerts: Object.values(status.monitors || {}).filter((v) => v !== 'HEALTHY').length,
+    // v2.590(감사 F6): **상태를 읽었을 때만 숫자**다. switchstatusshow 가 없거나(rbash) 형식을 못 읽어 모니터가
+    // 0개면 `null`(확인 불가) — 0 으로 두면 화면이 측정 없이 '헬스 경보 없음' 이라 말한다(확인 불가를 정상으로 칠함).
+    alerts: Object.keys(status.monitors || {}).length
+      ? Object.values(status.monitors).filter((v) => v !== 'HEALTHY').length : null,
     monitors: status.monitors || {},
   };
   /**

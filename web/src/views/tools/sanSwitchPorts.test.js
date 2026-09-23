@@ -3,7 +3,7 @@
  * 이 규칙들이 틀리면 운영자가 **정상 포트를 장애로, 장애 포트를 정상으로** 본다.
  */
 import { describe, it, expect } from 'vitest';
-import { opticalHealth, errorLevel, capacityLevel, aggregate, throughputText, bps, filterPorts, stateLabel, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText, toChartRows, topSeries, sortPorts, nextSort, sortRows, seriesStats }
+import { opticalHealth, errorLevel, capacityLevel, aggregate, alertsMeta, throughputText, bps, filterPorts, stateLabel, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText, toChartRows, topSeries, sortPorts, nextSort, sortRows, seriesStats }
   from './sanSwitchPorts.js';
 
 describe('opticalHealth', () => {
@@ -234,5 +234,23 @@ describe('v2.416 리뷰 회귀 — 상태 정렬에서 unknown 은 값 없음(�
     expect(asc[asc.length - 1]).toBe(1);
     const desc = sortPorts(ports, 'state', 'desc').map((p) => p.index);
     expect(desc[desc.length - 1]).toBe(1);
+  });
+});
+
+/* v2.590(감사 F6) — 스위치 상태를 못 읽은 것(health.alerts=null)을 '경보 없음' 으로 세지 않는다. */
+describe('aggregate · alertsMeta(v2.590)', () => {
+  const sw = (alerts) => ({ snap: { ok: true, ports: { online: 1, licensed: 2, total: 2, free: 1, faulty: 0, disabled: 0 }, health: { alerts } } });
+  it('null 은 합계에 0 으로 들어가지 않고 미확인으로 따로 센다', () => {
+    const a = aggregate([sw(0), sw(null), sw(2), { snap: { ok: false } }]);
+    expect(a.alerts).toBe(2);
+    expect(a.alertsKnown).toBe(2);
+    expect(a.alertsUnknown).toBe(1);
+  });
+  it('문구 — 확인한 것만 경보 없음이라 말한다', () => {
+    expect(alertsMeta(aggregate([sw(0), sw(0)]))).toBe('헬스 경보 없음');
+    expect(alertsMeta(aggregate([sw(null)]))).toBe('헬스 상태 미확인 1대');
+    expect(alertsMeta(aggregate([sw(0), sw(null)]))).toBe('확인한 1대 경보 없음 · 헬스 상태 미확인 1대');
+    expect(alertsMeta(aggregate([sw(3), sw(null)]))).toBe('헬스 경보 3 · 헬스 상태 미확인 1대');
+    expect(alertsMeta(aggregate([{ snap: { ok: false } }]))).toBe('—');   // 수집 성공 0대 — 말할 근거가 없다
   });
 });
