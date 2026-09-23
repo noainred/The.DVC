@@ -12,6 +12,22 @@ export function hasDsData(p) {
   return (p.dsCapGB || 0) > 0 || (p.dsUsedGB || 0) > 0 || (p.dsCount || 0) > 0;
 }
 
+/**
+ * v2.598(감사 RECENT2598-03): 사용량을 읽지 못한 데이터스토어(vCenter REST 폴백 — usedGB 없음)는 서버가 용량·사용량
+ * 합계에서 **빼고** 그 개수를 dsUsedUnknown 으로 준다. 빼지 않고 0 으로 더하면 사용률이 거짓으로 낮아지고, 빼고 말하지
+ * 않으면 용량이 줄어든 것처럼 보인다. 이 함수가 그 사실을 화면 문구로 만든다(0·결측이면 null — 표시하지 않는다).
+ * @returns {{ short: string, title: string } | null}
+ */
+export function dsUnknownNote(n) {
+  const k = Number(n);
+  if (!Number.isFinite(k) || k <= 0) return null;
+  const c = Math.floor(k);
+  return {
+    short: `사용량 모름 ${c.toLocaleString()}개 제외`,
+    title: `데이터스토어 ${c.toLocaleString()}개의 사용량을 읽지 못해 용량·사용량 합계에서 뺐습니다. 사용률은 읽은 데이터스토어끼리의 비율이고, 직전 시점과 빠진 개수가 다르면 증감은 비교할 수 없습니다(0 으로 채우지 않았습니다).`,
+  };
+}
+
 /** 슬롯 키 → '8/24 00시' 라벨(하루 2점이라 날짜만으로는 구분이 안 된다). */
 export function slotLabel(slot) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(00|12)$/.exec(String(slot || ''));
@@ -63,6 +79,7 @@ export function perVcSummary(bySlotVc) {
       freeGB: Math.max(0, capGB - usedGB),
       usagePct: cur.dsUsagePct ?? (capGB > 0 ? Math.round((usedGB / capGB) * 1000) / 10 : 0),
       deltaGB: Math.round((usedGB - (f.dsUsedGB || 0)) * 10) / 10,
+      dsUsedUnknown: cur.dsUsedUnknown || 0,   // v2.598: 사용량 모름으로 합계에서 뺀 DS 수
     };
   });
 }

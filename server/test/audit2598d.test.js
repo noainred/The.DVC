@@ -138,7 +138,7 @@ test('T2598-01 영역 수집 — 응답 없는 장비는 연속 3회 뒤 멈추�
   assert.equal(r.stopped, 'transport');
   assert.equal(r.endpoints, TRANSPORT_FAIL_LIMIT, `시도한 엔드포인트 ${r.endpoints}(예전 66)`);
   assert.ok(r.notTried > 0);
-  assert.ok(r.summary.some((x) => x.skipped && /응답 없음/.test(x.error || '')));
+  assert.ok(r.summary.some((x) => x.skipped && x.notTried && /응답 없음/.test(x.error || '')));
   assert.ok(Date.now() - t < 20_000);
 });
 

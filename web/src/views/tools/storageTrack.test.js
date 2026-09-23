@@ -180,3 +180,22 @@ describe('growth', () => {
     expect(growth(null).fullDays).toBeNull();
   });
 });
+
+// v2.598(감사 RECENT2598-03): 사용량을 모르는 DS 를 합계에서 뺐다는 사실을 화면이 말한다.
+describe('dsUnknownNote', () => {
+  it('0·결측·음수·숫자 아님은 표시하지 않는다', () => {
+    for (const v of [0, null, undefined, '', -1, 'x', NaN]) expect(dsUnknownNote(v)).toBe(null);
+  });
+  it('개수와 뜻(뺐다 · 0 으로 채우지 않았다)을 말한다 — 백틱 없음', () => {
+    const n = dsUnknownNote(3);
+    expect(n.short).toBe('사용량 모름 3개 제외');
+    expect(n.title).toMatch(/3개/);
+    expect(n.title).toMatch(/뺐습니다/);
+    expect(n.title).toMatch(/0 으로 채우지 않았습니다/);
+    expect(`${n.short}${n.title}`).not.toMatch(/`/);
+  });
+  it('perVcSummary 가 vCenter 별 개수를 넘긴다', () => {
+    const rows = perVcSummary({ '2026-09-20T00': [{ vcenterId: 'a', dsCount: 2, dsCapGB: 1000, dsUsedGB: 800, dsUsedUnknown: 1 }] });
+    expect(rows[0].dsUsedUnknown).toBe(1);
+  });
+});

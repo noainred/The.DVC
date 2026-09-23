@@ -19,6 +19,7 @@ import UnityConfigPanels from './UnityConfigPanels.jsx';   // v2.525: Unity 구�
 import UnityCapacityPlanPanel from './UnityCapacityPlanPanel.jsx'; // v2.540: Unity 용량 산정
 import CollectActivity from './CollectActivity.jsx';
 import BoldText from '../../components/boldText.jsx';
+import { areasStopNote, areaBadgeSuffix } from './areasStopText.js'; // v2.598 T2598-01: 영역 수집이 도중에 멈춘 사실
 import { healthBadge, sectionBadge, cliCutText } from './storageNodeText.js';   // v2.526: 헬스 배지 색 판정(순수)
 import { authFailInfo } from './storageAuthText.js';  // v2.528: 401 진단 문구(순수)
 import { capacityRows, srpRows, subscribedNote, usageTrust } from './powermaxCapacityText.js'; // v2.534: 구독/할당/실제기록(순수)
@@ -1252,13 +1253,24 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               </div>
               <div className="flex gap wrap" style={{ marginBottom: 8 }}>
                 {s.extra.areas.map((a) => (
-                  <span key={a.area} className={`badge ${a.skipped ? 'gray' : a.failed === 0 ? 'green' : a.ok > 0 ? 'amber' : 'red'}`}
+                  <span key={a.area} className={`badge ${a.notTried ? 'amber' : a.skipped ? 'gray' : a.failed === 0 ? 'green' : a.ok > 0 ? 'amber' : 'red'}`}
                     title={a.error || `성공 ${a.ok} · 실패 ${a.failed}`} style={{ fontSize: 10.5, cursor: !a.skipped && !r.agent ? 'pointer' : 'default' }}
                     onClick={() => { if (!a.skipped && !r.agent) setAreaView(a.area); }}>
-                    {a.area}{a.skipped ? ' (비활성)' : a.failed ? ` ${a.ok}/${a.ok + a.failed}` : ''}
+                    {a.area}{areaBadgeSuffix(a)}
                   </span>
                 ))}
               </div>
+              {(() => {
+                const st = areasStopNote(s.extra);
+                if (!st) return null;
+                return (
+                  <div style={{ fontSize: 11.5, marginBottom: 8, padding: '6px 10px', borderRadius: 6, lineHeight: 1.6,
+                    background: st.tone === 'red' ? 'rgba(255,90,90,.10)' : 'rgba(255,176,32,.10)',
+                    border: `1px solid ${st.tone === 'red' ? 'rgba(255,90,90,.35)' : 'rgba(255,176,32,.35)'}` }}>
+                    ⚠ <BoldText text={st.text} />{st.fix ? <> {st.fix}</> : null}
+                  </div>
+                );
+              })()}
               {r.agent
                 ? <div className="muted" style={{ fontSize: 11, marginBottom: 12 }}>이 장비는 엣지 '{r.agent}' 가 수집 — API 원문은 엣지 포탈의 DB 에 저장됩니다(여기는 요약만).</div>
                 : <div className="muted" style={{ fontSize: 11, marginBottom: 12 }}>배지를 클릭하면 저장된 원문(JSON)을 봅니다.</div>}
