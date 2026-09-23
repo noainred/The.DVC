@@ -79,9 +79,9 @@ function fmtMem(usedGB, totalGB) {
   return `${usedGB}/${totalGB} GB`;
 }
 
-function Bar({ label, pct, detail }) {
+function Bar({ label, pct, detail, title }) {
   return (
-    <div className="vc-metric">
+    <div className="vc-metric" title={title}>
       <div className="vc-mlabel"><span>{label}</span><b>{pct == null ? '—' : `${pct}%`}{detail ? ` · ${detail}` : ''}</b></div>
       <div className="usage-bar"><span style={{ width: `${pct == null ? 0 : Math.min(pct, 100)}%`, background: usageColor(pct ?? 0) }} /></div>
     </div>
@@ -203,7 +203,8 @@ export default function VCenters({ onSelectSite, resetSignal }) {
                     <div className="vc-count"><b>{m.vms}</b><span>VM ({m.vmsPoweredOn} on)</span></div>
                     <div className="vc-count"><b style={{ color: m.alarmsCritical ? 'var(--red)' : m.alarmsWarning ? 'var(--amber)' : 'var(--green)' }}>{(m.alarmsCritical || 0) + (m.alarmsWarning || 0)}</b><span>알람</span></div>
                   </div>
-                  <Bar label="CPU" pct={m.cpuUsagePct ?? null} detail={m.cpuTotalGhz ? `${m.cpuUsedGhz}/${m.cpuTotalGhz} GHz${m.hostsUsageExcluded ? ` · 끊긴 호스트 ${m.hostsUsageExcluded}대 사용률 제외` : ''}` : undefined} />
+                  <Bar label="CPU" pct={m.cpuUsagePct ?? null} detail={m.cpuTotalGhz ? `${m.cpuUsedGhz}/${m.cpuTotalGhz} GHz${m.hostsUsageExcluded ? ' *' : ''}` : undefined}
+                    title={m.hostsUsageExcluded ? `* 연결 끊긴 호스트 ${m.hostsUsageExcluded}대는 사용량을 알 수 없어 사용률(%) 계산에서 뺐습니다(GHz 합계에는 포함)` : undefined} />
                   <Bar label="메모리" pct={m.memUsagePct ?? null} detail={fmtMem(m.memUsedGB, m.memTotalGB)} />
                   <Bar label="스토리지" pct={m.storageUsagePct || 0} detail={m.storageUsedTB != null ? `${m.storageUsedTB}/${m.storageTotalTB} TB` : `${m.storageTotalTB || 0} TB`} />
                 </>
