@@ -626,7 +626,9 @@ test('v2.416: 무광 SFP — REST 0 µW 와 CLI "-inf dBm (0.0 uW)" 는 0 dBm �
   const { parseSfpShow } = await import('../src/sanswitch/collectors/fosParse.js');
   const r = parseSfpShow(['Port  4:', 'RX Power: -inf dBm (0.0 uW)', 'TX Power: -2.4 dBm (575.0 uW)', 'Port  5:', 'RX Power: N/A', 'TX Power: 316.2 uW (-5.0 dBm)'].join('\n'));
   assert.equal(r[4].rxPowerDbm, null); assert.equal(r[4].txPowerDbm, -2.4);
-  assert.equal(r[5].rxPowerDbm, null); assert.equal(r[5].txPowerDbm, 316.2, '기존 형식(첫 숫자)은 그대로');
+  assert.equal(r[5].rxPowerDbm, null); assert.equal(r[5].txPowerDbm, -5.0, 'v2.598 L2598-05: 선두가 uW 면 괄호 안 dBm 을 쓴다(316.2 dBm 이 아니다)');
+  const u = parseSfpShow(['Port  6:', 'RX Power: 441.9 uW', 'TX Power: 0.0 uW', 'Port  7:', 'RX Power: 0.5 mW'].join('\n'));
+  assert.equal(u[6].rxPowerDbm, -3.5); assert.equal(u[6].txPowerDbm, null); assert.equal(u[7].rxPowerDbm, -3);
 });
 test('v2.416: portperfshow 마지막 샘플이 절단(포트 수 부족)이면 직전 완전 샘플을 쓴다', async () => {
   const { parsePortPerfShow } = await import('../src/sanswitch/collectors/fosParse.js');

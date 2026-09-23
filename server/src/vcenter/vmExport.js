@@ -167,8 +167,10 @@ export const VM_EXPORT_COLUMNS = [
 
 /** 라이브 보강 — 대상 vCenter 에 로그인해 per-VM 상세 속성을 한 번에 가져온다.
  *  (v2.459: 게스트 디스크 회수 리포트 폴러가 같은 벌크 조회를 재사용하므로 export 한다.) */
-export async function collectDetails(vc, morefs) {
-  const c = new VimSoapClient(vc);
+export async function collectDetails(vc, morefs, { signal = null } = {}) {
+  // v2.598 T2598-02: 호출부(게스트 디스크)의 시한 신호를 SOAP 요청에 건다 — 결과만 포기하면 세션이 남은 조회를 계속한다.
+  // 로그아웃은 VimSoapClient 가 신호와 무관하게 보낸다(ignoreExternal).
+  const c = new VimSoapClient(vc, { signal });
   await c.login();
   try {
     const objs = await c.retrieveManyObjectProps('VirtualMachine', morefs, ENRICH_PROPS);

@@ -129,11 +129,31 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
      * ⚠ 첫 주기는 `null` 이다(누적 차이가 없다) — 0 으로 채우지 않는다.
      */
     const pIdrac = prev?.idrac || null;
+    /*
+     * v2.598(감사 IDRAC-2598-03): 누적 카운터의 **분모는 리포트 표본 시각(`at`)의 차이**다. 폴러 시계(prev.at→now)로
+     *   나누면, iDRAC 이 리포트를 아직 갱신하지 않아 **같은 카운터를 두 번 읽은 주기**가 0 B/s·0% 가 된다 —
+     *   '트래픽 없음' 이라는 거짓이다. 이번 표본 시각이 이전과 같거나 이르면 그 장치는 **판정 보류(null)** 다.
+     *   ⚠ 표본 시각이 없는 구버전 이전 상태·리포트는 예전처럼 폴러 시계를 쓴다(그때는 갱신 여부를 알 수 없다).
+     */
+    let idracStale = 0;
+    const idracSpan = (p, x) => {
+      const pa = n(p?.at); const ca = n(x?.at);
+      if (pa != null && ca != null) {
+        if (ca <= pa) { idracStale += 1; return null; }
+        return [pa, ca];
+      }
+      return [pAtOf(prev), now];
+    };
+    const idracRow = (p, x) => {
+      const sp = idracSpan(p, x);
+      const rx = sp ? perSecond(p?.rxBytes, x.rxBytes, sp[0], sp[1]) : null;
+      const tx = sp ? perSecond(p?.txBytes, x.txBytes, sp[0], sp[1]) : null;
+      return { rx, tx };
+    };
     if ((idrac.nics || []).length) {
       idracIf = idrac.nics.map((x) => {
         const p = findBy(pIdrac?.nics, 'iface', x.iface);
-        const rx = perSecond(p?.rxBytes, x.rxBytes, pAtOf(prev), now);
-        const tx = perSecond(p?.txBytes, x.txBytes, pAtOf(prev), now);
+        const { rx, tx } = idracRow(p, x);
         const bps = sumStrict([rx, tx]);
         return { iface: x.iface, bps, pct: linkPct(maxStrict([rx, tx]), x.bitsPerSec), bitsPerSec: x.bitsPerSec, src: 'idrac' };
       });
@@ -145,8 +165,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     if ((idrac.fcs || []).length) {
       idracFc = idrac.fcs.map((x) => {
         const p = findBy(pIdrac?.fcs, 'host', x.host);
-        const rx = perSecond(p?.rxBytes, x.rxBytes, pAtOf(prev), now);
-        const tx = perSecond(p?.txBytes, x.txBytes, pAtOf(prev), now);
+        const { rx, tx } = idracRow(p, x);
         const bps = sumStrict([rx, tx]);
         return { host: x.host, bps, pct: linkPct(maxStrict([rx, tx]), x.bitsPerSec), bitsPerSec: x.bitsPerSec, src: 'idrac' };
       });
@@ -154,6 +173,9 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       if (out.hba_pct == null && hp != null) { out.hba_pct = hp; srcOf.hba = 'idrac'; }
       const hb = maxOrNull(idracFc.map((x) => x.bps));
       if (out.hba_bps == null && hb != null) out.hba_bps = hb;
+    }
+    if (idracStale) {
+      notes.push(`iDRAC 텔레메트리 리포트가 이전 주기 이후 갱신되지 않은 장치 ${idracStale}개는 네트워크·HBA 사용률을 판정하지 않았습니다(같은 값을 두 번 읽어 0 으로 보이지 않게).`);
     }
     // 디스크 — iDRAC 텔레메트리에 busy% 에 해당하는 값이 **사실상 없다**(파서가 `absent` 로 밝힌다).
     //   용량 계열이 읽히면 사용 공간만 채운다.

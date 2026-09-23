@@ -9,7 +9,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi, VmLink } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { fmtAgo } from '../../util/fmt.js';
-import { hasDsData } from './storageTrack.js';
+import { hasDsData, dsUnknownNote } from './storageTrack.js';
 import { STable } from '../../components/STable.jsx';
 
 const DAY_OPTS = [7, 30, 90, 365];
@@ -129,7 +129,7 @@ export default function VmTrackTool() {
         {/* 데이터스토어 사용량(v2.348) — DS 데이터가 있는 마지막 스냅샷 기준(구버전 행 제외) */}
         <Kpi label="데이터스토어 사용량" value={dsLast ? `${tb(dsLast.dsUsedGB)} / ${tb(dsLast.dsCapGB)} TB` : '—'}
           pct={dsLast ? Math.round(dsLast.dsUsagePct || 0) : undefined}
-          meta={dsLast ? `${(dsLast.dsCount || 0).toLocaleString()}개 · 가용 ${tb((dsLast.dsCapGB || 0) - (dsLast.dsUsedGB || 0))} TB` : '스냅샷 없음'} />
+          meta={dsLast ? `${(dsLast.dsCount || 0).toLocaleString()}개 · 가용 ${tb((dsLast.dsCapGB || 0) - (dsLast.dsUsedGB || 0))} TB${dsUnknownNote(dsLast.dsUsedUnknown) ? ` · ${dsUnknownNote(dsLast.dsUsedUnknown).short}` : ''}` : '스냅샷 없음'} />
         <Kpi label={`${days}일 사용량 증감`} value={`${dsNet >= 0 ? '+' : ''}${tb(dsNet)} TB`}
           accent={dsNet > 0 ? 'var(--amber)' : dsNet < 0 ? 'var(--green)' : undefined}
           meta={`${dsNet >= 0 ? '+' : ''}${dsNet.toLocaleString()} GB`} />
@@ -316,7 +316,7 @@ export default function VmTrackTool() {
                         <td style={{ textAlign: 'right', color: net > 0 ? 'var(--green)' : net < 0 ? 'var(--red)' : undefined }}>{net > 0 ? `+${net}` : net}</td>
                         {/* 데이터스토어(v2.348) — 사용/용량(TB), 사용률, 직전 슬롯 대비 사용량 증감(GB, 클릭 시 상세) */}
                         <td style={{ textAlign: 'right', fontSize: 12 }}>
-                          {p.dsCount ? <>{tb(p.dsUsedGB)} / {tb(p.dsCapGB)} TB <span className="muted" style={{ fontSize: 11 }}>({p.dsCount})</span></> : <span className="muted">—</span>}
+                          {p.dsCount ? <>{tb(p.dsUsedGB)} / {tb(p.dsCapGB)} TB <span className="muted" style={{ fontSize: 11 }}>({p.dsCount})</span>{dsUnknownNote(p.dsUsedUnknown) && <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }} title={dsUnknownNote(p.dsUsedUnknown).title}>{dsUnknownNote(p.dsUsedUnknown).short}</span>}</> : <span className="muted">—</span>}
                         </td>
                         <td style={{ textAlign: 'right', fontSize: 12, color: (p.dsUsagePct || 0) >= 90 ? 'var(--red)' : (p.dsUsagePct || 0) >= 75 ? 'var(--amber)' : undefined }}>
                           {p.dsCount ? `${p.dsUsagePct ?? 0}%` : '—'}

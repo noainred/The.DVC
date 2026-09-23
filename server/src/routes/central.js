@@ -381,15 +381,8 @@ centralRouter.post('/result', (req, res) => {
   // 하위호환으로 body.agent 를 쓴다(완전 봉인은 CENTRAL_REQUIRE_AGENT_TOKEN=true).
   const agent = req.centralAuth.agent || String(b.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  setResult(agent, {
-    scanned: b.scanned || 0,
-    foundCount: b.foundCount ?? (b.found?.length || 0),
-    found: Array.isArray(b.found) ? b.found.slice(0, 5000) : [],
-    unreachable: b.unreachable || 0,
-    notIdrac: b.notIdrac || 0,
-    authFailed: b.authFailed || 0,
-    durationMs: b.durationMs || null,
-  });
+  // v2.598(감사 CENTRAL-03): 본문을 그대로 싣지 않는다 — 정제는 setResult(sanitizeScanResult) 하나가 한다.
+  setResult(agent, b);
   res.json({ ok: true });
 });
 

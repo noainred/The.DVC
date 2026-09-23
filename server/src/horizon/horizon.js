@@ -18,6 +18,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; /
 import { describeError } from '../util/errors.js';
 import { ssrfBlockReason, ssrfBlockReasonResolved } from '../collector/registry.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
+import { normRequestTimeoutMs, effectiveRequestTimeoutMs } from '../vcenter/soapParse.js'; // v2.598 T2598-03: 요청 시한 [1초, 10분]
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 
 const FILE = path.join(config.configDir, 'horizon.json');
@@ -82,7 +83,8 @@ function normalize(body, existing = null) {
     id, name, host, username, domain,
     password: body.password ? String(body.password) : e.password || '',
     enabled: body.enabled !== undefined ? body.enabled !== false : (e.enabled !== false),
-    timeoutMs: Math.max(0, Math.round(Number(body.timeoutMs ?? e.timeoutMs) || 0)) || 15_000,
+    // v2.598 T2598-03: 상한 없으면 2^31ms 이상에서 AbortSignal.timeout 이 1ms 가 되어 모든 요청이 즉시 끊긴다.
+    timeoutMs: normRequestTimeoutMs(body.timeoutMs ?? e.timeoutMs) || 15_000,
   };
   if (!entry.password) return [null, 'password는 필수입니다.'];
 
@@ -153,7 +155,7 @@ async function hzFetch(url, opts, timeoutMs) {
  * 호출부가 상태코드로 원인을 구분할 수 있게. 여기서 삼키면 '401 인지 404 인지' 를 잃는다).
  */
 export async function withHorizonSession(s, fn) {
-  const timeoutMs = s.timeoutMs > 0 ? s.timeoutMs : 15_000;
+  const timeoutMs = effectiveRequestTimeoutMs(s.timeoutMs, 15_000); // v2.598 T2598-03: 옛 저장값(상한 이전)도 10분으로 자른다
   const login = await hzFetch(`${s.host}/rest/login`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ username: s.username, password: s.password, domain: s.domain }),

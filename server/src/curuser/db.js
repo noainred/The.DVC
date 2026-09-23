@@ -159,6 +159,8 @@ export async function commitCurUser({ ts, records = [], series = [], replaceVcen
       if (vmSeriesEnabled() && r.ok) h.st.upVmSeries.run(String(r.vmId), Number(ts), Number(r.sessions) || 0, Number(r.active) || 0);
     }
     for (const s of series) {
+      // v2.598: 확인 서버 0대 주기는 users 등이 null 로 온다 — 열이 NOT NULL 이라 0 으로 적되 `vms_ok = 0` 이
+      //   '모름' 표지다(seriesRange 가 읽을 때 null 로 되돌린다). 0 을 값으로 읽는 새 조회를 만들지 말 것.
       h.st.upSeries.run(String(s.vcenterId || ''), Number(ts), Number(s.users) || 0, Number(s.usersActive) || 0,
         Number(s.sessions) || 0, Number(s.sessionsActive) || 0, Number(s.sessionsDisc) || 0,
         Number(s.vmsOk) || 0, Number(s.vmsFailed) || 0);
@@ -190,15 +192,25 @@ export async function latestRecords(vcenterId = null) {
 export async function seriesRange(vcenterId, fromTs, toTs) {
   const h = await open();
   if (!h) return { available: false, rows: [], span: null };
-  const rows = h.st.seriesOf.all(String(vcenterId ?? ''), Number(fromTs), Number(toTs)).map((r) => ({
-    ts: Number(r.ts), users: r.users, usersActive: r.users_active,
-    sessions: r.sessions, sessionsActive: r.sessions_active, sessionsDisc: r.sessions_disc,
-    vmsOk: r.vms_ok, vmsFailed: r.vms_failed,
-  }));
+  // ⚠ v2.598(WEBUI-2598-02 후속): `vms_ok = 0` 인 행은 **확인한 서버가 0대**인 주기다 — 그때의 사용자·세션 수는
+  //   '0명' 이 아니라 **모른다**. 열이 NOT NULL(0) 이라 저장값은 0 이지만(예전 행도 같다 — 스키마 재작성 없이
+  //   기존 DB 까지 한 번에 바로잡으려고 **읽을 때** 바꾼다) 응답에서는 null 로 내 차트가 선을 끊게 한다.
+  let unknownRows = 0;
+  const rows = h.st.seriesOf.all(String(vcenterId ?? ''), Number(fromTs), Number(toTs)).map((r) => {
+    const known = Number(r.vms_ok) > 0;
+    if (!known) unknownRows++;
+    const v = (x) => (known ? x : null);
+    return {
+      ts: Number(r.ts), users: v(r.users), usersActive: v(r.users_active),
+      sessions: v(r.sessions), sessionsActive: v(r.sessions_active), sessionsDisc: v(r.sessions_disc),
+      vmsOk: r.vms_ok, vmsFailed: r.vms_failed,
+    };
+  });
   const sp = h.st.seriesSpan.get(String(vcenterId ?? ''));
   return {
     available: true,
     rows,
+    unknownRows,
     // ⚠ `first` 는 '수집 시작' 이 아니라 **max(수집 시작, 보존 경계)** 다 — prune 된 테이블의
     //   MIN(ts) 이므로 화면이 '기다리면 채워진다' 고 단정하면 거짓이 될 수 있다(plan D1 과 같은 유형).
     span: sp && sp.n ? { first: Number(sp.mn), last: Number(sp.mx), rows: Number(sp.n) } : null,

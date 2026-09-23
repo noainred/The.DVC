@@ -12,9 +12,23 @@ import { pingMany } from '../../util/ping.js';
 import { todayStamp } from "../../util/dayKey.js";
 
 
+/**
+ * GPU 호스트 매핑 키(v2.598 VC2598-03) — 호스트 **이름 단독** 키는 다른 vCenter 의 같은 이름 호스트
+ * (esx01 같은 이름이 법인마다 있다)의 할당 VM·게스트 사용률·GPU 모델을 한 호스트에 섞는다.
+ * 호스트 이름은 vCenter 안에서만 유일하므로 (vcenterId, 이름) 쌍으로 묶는다.
+ */
+export const gpuHostKey = (vcenterId, host) => `${vcenterId ?? ''}\t${host ?? ''}`;
+
+/** GPU 호스트 → 대표 모델 맵(키 gpuHostKey). */
+export function gpuHostModelMap(hosts) {
+  const m = new Map();
+  for (const h of hosts || []) if ((h.gpus || []).length) m.set(gpuHostKey(h.vcenterId, h.name), h.gpus[0].model);
+  return m;
+}
+
 // GPU inventory per host + aggregate counts by model and vCenter.
 // GPU 인벤토리 집계(호스트별 GPU 장수·모드·사용률·할당 VM) — /tools/gpu 와 CSV/JSON export 공용.
-function buildGpuInventory(snap, vcenterId, allowed = null) {
+export function buildGpuInventory(snap, vcenterId, allowed = null) {
   let hosts = snap.hosts;
   if (allowed) hosts = hosts.filter((h) => allowed.has(h.vcenterId));  // 사용자 scope 선강제
   if (vcenterId) hosts = hosts.filter((h) => h.vcenterId === vcenterId);
@@ -26,21 +40,26 @@ function buildGpuInventory(snap, vcenterId, allowed = null) {
   const byMode = { vgpu: 0, passthrough: 0, vsga: 0 };
   let totalGpus = 0;
   // GPU가 할당된 VM을 호스트(이름)별로 집계 — 각 GPU 호스트에 몇 개 VM이 GPU를 쓰는지.
-  const gpuVmByHost = {};
+  // 키는 gpuHostKey(vcenterId, 호스트 이름) — 이름 단독이면 다른 vCenter 의 동명 호스트와 섞인다(VC2598-03).
+  const gpuVmByHost = new Map();
   for (const v of scopedVms) {
     if (!v.gpu || !v.host) continue;
-    const e = gpuVmByHost[v.host] || { vms: 0, on: 0, off: 0, vgpu: 0, passthrough: 0, names: [] };
+    const k = gpuHostKey(v.vcenterId, v.host);
+    const e = gpuVmByHost.get(k) || { vms: 0, on: 0, off: 0, vgpu: 0, passthrough: 0, names: [] };
     e.vms++; e.vgpu += v.gpu.vgpu || 0; e.passthrough += v.gpu.passthrough || 0;
     if (v.powerState === 'POWERED_ON') e.on++; else e.off++;
     if (v.name) e.names.push({ name: v.name, on: v.powerState === 'POWERED_ON' });
-    gpuVmByHost[v.host] = e;
+    gpuVmByHost.set(k, e);
   }
-  // 게스트 수집 사용률은 '전원 ON GPU VM'만 집계(전원 OFF VM의 stale 값 제외) → 호스트(이름)별 평균.
-  const onGpuVmIds = new Set(scopedVms.filter((v) => v.gpu && v.powerState === 'POWERED_ON').map((v) => v.id));
-  const guestUtilByHost = new Map(); // hostName -> [utilPct...]
+  // 게스트 수집 사용률은 '전원 ON GPU VM'만 집계(전원 OFF VM의 stale 값 제외) → 호스트별 평균.
+  // 게스트 레코드의 vCenter 는 스냅샷 VM 에서 얻는다(레코드에 vcenterId 가 없을 수 있다 — 구버전 엣지).
+  const onGpuVms = new Map(scopedVms.filter((v) => v.gpu && v.powerState === 'POWERED_ON').map((v) => [v.id, v]));
+  const guestUtilByHost = new Map(); // gpuHostKey -> [utilPct...]
   for (const g of getGuestGpuVms()) {
-    if (!onGpuVmIds.has(g.vmId) || g.utilPct == null) continue;
-    const arr = guestUtilByHost.get(g.host) || []; arr.push(g.utilPct); guestUtilByHost.set(g.host, arr);
+    const vm = onGpuVms.get(g.vmId);
+    if (!vm || g.utilPct == null) continue;
+    const k = gpuHostKey(vm.vcenterId, g.host || vm.host);
+    const arr = guestUtilByHost.get(k) || []; arr.push(g.utilPct); guestUtilByHost.set(k, arr);
   }
   for (const h of hosts) {
     const gpus = h.gpus || [];
@@ -51,10 +70,10 @@ function buildGpuInventory(snap, vcenterId, allowed = null) {
     for (const g of gpus) { const md = g.mode || (g.vgpuMode ? 'vgpu' : 'passthrough'); modes[md] = (modes[md] || 0) + 1; byMode[md] = (byMode[md] || 0) + 1; }
     const primaryMode = Object.entries(modes).sort((a, b) => b[1] - a[1])[0][0];
     // ESXi가 사용률을 못 보는 패스쓰루 호스트는 게스트 OS 수집 오버레이로 보완(전원 ON VM만).
-    const gu = guestUtilByHost.get(h.name);
+    const gu = guestUtilByHost.get(gpuHostKey(h.vcenterId, h.name));
     const guestUtil = gu && gu.length ? Math.round(gu.reduce((a, b) => a + b, 0) / gu.length) : null;
     const utilPct = h.gpuUtilPct ?? guestUtil;
-    const vmAlloc = gpuVmByHost[h.name] || { vms: 0, on: 0, off: 0, vgpu: 0, passthrough: 0, names: [] };
+    const vmAlloc = gpuVmByHost.get(gpuHostKey(h.vcenterId, h.name)) || { vms: 0, on: 0, off: 0, vgpu: 0, passthrough: 0, names: [] };
     hostsWithGpu.push({
       id: h.id, host: h.name, vcenterId: h.vcenterId, cluster: h.cluster, count: gpus.length,
       model: gpus[0].model, memGB: gpus[0].memGB, mode: primaryMode, modes,
@@ -378,15 +397,15 @@ api.get('/tools/ip-ping', requirePerm('tools'), (req, res) => {
 // 선택 필터: vcenterId, host, mode(vgpu|passthrough|mixed), model(호스트 GPU 모델).
 api.get('/tools/gpu/vms', requirePerm('tools'), (req, res) => {
   const snap = store.get();
-  // 호스트명 → GPU 모델 매핑(모델 필터용)
-  const hostModel = {};
-  for (const h of snap.hosts) if ((h.gpus || []).length) hostModel[h.name] = h.gpus[0].model;
+  // (vCenter, 호스트명) → GPU 모델 매핑(모델 필터용 — 이름 단독 키는 다른 vCenter 동명 호스트와 섞인다, VC2598-03)
+  const hostModel = gpuHostModelMap(snap.hosts);
+  const modelOf = (v) => hostModel.get(gpuHostKey(v.vcenterId, v.host)) || '';
   let vms = (snap.vms || []).filter((v) => v.gpu);
   const allowed = scopedVcenterIds(req.user, snap);
   if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
   if (req.query.host) vms = vms.filter((v) => v.host === req.query.host);
-  if (req.query.model) vms = vms.filter((v) => hostModel[v.host] === req.query.model);
+  if (req.query.model) vms = vms.filter((v) => modelOf(v) === req.query.model);
   if (req.query.mode) vms = vms.filter((v) => v.gpu.type === req.query.mode || (req.query.mode === 'vgpu' && v.gpu.vgpu) || (req.query.mode === 'passthrough' && v.gpu.passthrough));
   // 게스트 OS(nvidia-smi)에서 수집한 VM별 GPU 사용률/메모리 오버레이(패스쓰루 GPU는 ESXi가 못 봄).
   const guestByVm = new Map(getGuestGpuVms().map((g) => [g.vmId, g]));
@@ -397,7 +416,7 @@ api.get('/tools/gpu/vms', requirePerm('tools'), (req, res) => {
       const g = v.powerState === 'POWERED_ON' ? guestByVm.get(v.id) : null;
       return {
         id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
-        powerState: v.powerState, model: hostModel[v.host] || '', gpu: v.gpu,
+        powerState: v.powerState, model: modelOf(v), gpu: v.gpu,
         guestUtilPct: g ? g.utilPct : null, guestUtilNA: g ? !!g.utilNA : false, guestMemPct: g ? (g.memUsedPct ?? null) : null, guestAt: g ? g.at : null,
       };
     }).sort((a, b) => (a.vcenterId === b.vcenterId

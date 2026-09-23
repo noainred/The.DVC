@@ -5,7 +5,7 @@ import { usePolling, toolAllowed } from '../../api.js';
 import { StateBadge } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { Panel, KpiCard, Bar, PollState, Empty } from '../ui.jsx';
-import { nsxManagerRows, networkTypeCounts, ipamTop, ipamStats, fmtInt, fmtPct, colorOf, rowMatches, REGION_COLORS } from '../consoleData.js';
+import { nsxManagerRows, networkTypeCounts, portgroupsByVc, ipamTop, ipamStats, fmtInt, fmtPct, colorOf, rowMatches, REGION_COLORS } from '../consoleData.js';
 
 export default function ConsoleNetwork({ global: g, sitesAll, scope, polls }) {
   const nets = usePolling('/networks', {}, 60_000);
@@ -20,15 +20,10 @@ export default function ConsoleNetwork({ global: g, sitesAll, scope, polls }) {
   const ist = ipamStats(subnets);
   const top = ipamTop(subnets.filter((s) => rowMatches(s, scope.q)), 8);
   // vCenter 별 포트그룹 집계 — /networks 는 상태가 없어 유형·VM 수만 보여준다.
-  const byVc = new Map();
-  for (const n of netItems) {
-    const row = byVc.get(n.vcenterId) || { vcenterId: n.vcenterId, total: 0, distributed: 0, standard: 0, vms: 0, vlans: new Set() };
-    row.total += 1; if (n.type === 'DISTRIBUTED_PORTGROUP') row.distributed += 1; else if (n.type === 'STANDARD_PORTGROUP') row.standard += 1;
-    row.vms += n.vmCount || 0; if (n.vlanId != null) row.vlans.add(n.vlanId);
-    byVc.set(n.vcenterId, row);
-  }
+  // v2.598 VC2598-04: VM 수를 모르는 네트워크(null)를 0 으로 더하지 않는다 — portgroupsByVc 가 판정한다.
+  const byVc = portgroupsByVc(netItems);
   const siteName = new Map(sitesAll.map((s) => [s.id, s]));
-  const pgRows = [...byVc.values()].map((x) => ({ ...x, vlans: x.vlans.size, name: siteName.get(x.vcenterId)?.name || x.vcenterId, region: siteName.get(x.vcenterId)?.region || '' })).filter((x) => rowMatches(x, scope.q)).sort((a, b) => b.total - a.total);
+  const pgRows = byVc.map((x) => ({ ...x, vlans: x.vlans.size, name: siteName.get(x.vcenterId)?.name || x.vcenterId, region: siteName.get(x.vcenterId)?.region || '' })).filter((x) => rowMatches(x, scope.q)).sort((a, b) => b.total - a.total);
 
   return (
     <>
@@ -79,7 +74,7 @@ export default function ConsoleNetwork({ global: g, sitesAll, scope, polls }) {
                       {pgRows.map((x) => (
                         <tr key={x.vcenterId}>
                           <td><div className="dvc-mono" style={{ fontSize: 12, fontWeight: 600 }}>{x.name}</div><div className="dvc-cellsub" style={{ color: REGION_COLORS[x.region] || '#9ca3af' }}>{x.region}</div></td>
-                          <td className="num">{x.total}</td><td className="num dvc-dim">{x.distributed}</td><td className="num dvc-dim">{x.standard}</td><td className="num dvc-dim">{x.vlans}</td><td className="num">{fmtInt(x.vms)}</td>
+                          <td className="num">{x.total}</td><td className="num dvc-dim">{x.distributed}</td><td className="num dvc-dim">{x.standard}</td><td className="num dvc-dim">{x.vlans}</td><td className="num" title={x.vmsUnknown ? `VM 수를 수집하지 않은 포트그룹 ${x.vmsUnknown}개 — 합계에 넣지 않았습니다(0 이 아니라 모름)` : undefined}>{fmtInt(x.vms)}</td>
                         </tr>
                       ))}
                     </tbody>

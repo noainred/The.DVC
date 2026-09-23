@@ -19,22 +19,30 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
   let timer = null;
   let stopped = false;
   let lastRunAt = Date.now();
+  // v2.598 T2598-04: 실행 중에 주기 변경 알림이 오면 예전엔 즉시 재무장해 **진행 중인 fn 과 겹쳐 두 번째 fn 이
+  // 돌 수 있었다**(실측: 4초 걸리는 작업 중 주기를 2초로 바꾸면 동시 실행 2). 호출부 폴러가 전부 재진입 가드를
+  // 가져 피해는 없었지만, 이 유틸의 약속('틱이 겹쳐 쌓이지 않는다')이 깨져 있었다. 실행 중에는 재무장하지 않고
+  // 끝날 때 getMs() 로 새 주기를 잡는다.
+  let inFlight = false;
   const arm = (ms) => {
     clearTimeout(timer);
     // 하한 1초 — 0/음수 주기로 이벤트 루프를 태우지 않게(설정 실수·시계 역행 방어).
-    timer = setTimeout(tick, Math.max(1_000, ms));
+    // 상한 약 24.8일 — setTimeout 은 2^31−1ms 를 넘으면 1ms 가 된다(v2.591 L2·L3).
+    timer = setTimeout(tick, Math.min(2_147_000_000, Math.max(1_000, ms)));
     timer.unref?.();
   };
   const tick = async () => {
     lastRunAt = Date.now();
+    inFlight = true;
     try { await fn(); } catch { /* 폴러는 자기 오류를 삼킨다(기존 .catch(()=>{}) 와 동일) */ }
+    finally { inFlight = false; }
     if (!stopped) arm(getMs());
   };
   arm(firstDelayMs);
   // 주기 변경 시 재무장 — 이미 흘린 시간을 빼고 다시 잡는다(주기를 늘렸다고 방금 돈 작업을
   // 또 돌리지 않고, 줄였다면 남은 시간이 음수가 되어 바로 다음 틱으로 간다).
   const off = subscribe ? subscribe(() => {
-    if (stopped) return;
+    if (stopped || inFlight) return;   // 실행 중이면 종료 시 tick 이 새 주기로 재무장한다
     const next = getMs() - (Date.now() - lastRunAt);
     if (name) console.log(`[adaptive-timer] ${name} 타이머 재무장: ${Math.round(Math.max(1_000, next) / 1000)}초 후`);
     arm(next);

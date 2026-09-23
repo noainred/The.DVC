@@ -4,7 +4,7 @@
 //     과대 계상된다 → vCenter 단위 첫/마지막.
 //  2) 일평균을 '슬롯 수 ÷ 2'로 나누면 폴러가 멈춘 구간에서 왜곡된다 → 수집 시각 차이.
 import { describe, it, expect } from 'vitest';
-import { tb, gbTb, perVcSummary, growth, hasDsData } from './storageTrack.js';
+import { tb, gbTb, perVcSummary, growth, hasDsData, dsUnknownNote } from './storageTrack.js';
 
 const DAY = 86_400_000;
 
@@ -178,5 +178,24 @@ describe('growth', () => {
   it('빈 입력도 안전', () => {
     expect(growth([])).toEqual({ spanDays: 0, netGB: 0, perDayGB: 0, freeGB: 0, fullDays: null });
     expect(growth(null).fullDays).toBeNull();
+  });
+});
+
+// v2.598(감사 RECENT2598-03): 사용량을 모르는 DS 를 합계에서 뺐다는 사실을 화면이 말한다.
+describe('dsUnknownNote', () => {
+  it('0·결측·음수·숫자 아님은 표시하지 않는다', () => {
+    for (const v of [0, null, undefined, '', -1, 'x', NaN]) expect(dsUnknownNote(v)).toBe(null);
+  });
+  it('개수와 뜻(뺐다 · 0 으로 채우지 않았다)을 말한다 — 백틱 없음', () => {
+    const n = dsUnknownNote(3);
+    expect(n.short).toBe('사용량 모름 3개 제외');
+    expect(n.title).toMatch(/3개/);
+    expect(n.title).toMatch(/뺐습니다/);
+    expect(n.title).toMatch(/0 으로 채우지 않았습니다/);
+    expect(`${n.short}${n.title}`).not.toMatch(/`/);
+  });
+  it('perVcSummary 가 vCenter 별 개수를 넘긴다', () => {
+    const rows = perVcSummary({ '2026-09-20T00': [{ vcenterId: 'a', dsCount: 2, dsCapGB: 1000, dsUsedGB: 800, dsUsedUnknown: 1 }] });
+    expect(rows[0].dsUsedUnknown).toBe(1);
   });
 });

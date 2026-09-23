@@ -3,6 +3,7 @@ import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
+import { countText, durationText, strField } from './agentScanText.js'; // v2.598 CENTRAL-03: 숫자만 글자로, 나머지는 —
 
 const EMPTY = { agent: '', ips: '', username: 'root', password: '', enabled: true };
 
@@ -127,11 +128,11 @@ export default function AgentScans() {
                     <td className="muted" style={{ maxWidth: 260, whiteSpace: 'pre-wrap', fontSize: 12 }}>{a.ips}</td>
                     <td className="muted">{a.username}</td>
                     <td>{a.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">on</span>}</td>
-                    <td className="muted">{r?.at ? new Date(r.at).toLocaleString('ko-KR') : <span className="muted">미보고</span>}{r?.error && <span className="badge red" style={{ marginLeft: 6 }} title={r.error}>오류</span>}</td>
+                    <td className="muted">{r?.at ? new Date(r.at).toLocaleString('ko-KR') : <span className="muted">미보고</span>}{r?.error && <span className="badge red" style={{ marginLeft: 6 }} title={strField(r.error)}>오류</span>}</td>
                     <td className="tabular">
                       {r && !r.error ? <>
-                        <b style={{ color: 'var(--green)' }}>{r.foundCount}</b> / {r.scanned}
-                        {r.found?.length > 0 && <button className="tab" style={{ marginLeft: 6 }} onClick={() => setExpanded(expanded === a.agent ? null : a.agent)}>{expanded === a.agent ? '접기' : '보기'}</button>}
+                        <b style={{ color: 'var(--green)' }}>{countText(r.foundCount)}</b> / {countText(r.scanned)}
+                        {Array.isArray(r.found) && r.found.length > 0 && <button className="tab" style={{ marginLeft: 6 }} onClick={() => setExpanded(expanded === a.agent ? null : a.agent)}>{expanded === a.agent ? '접기' : '보기'}</button>}
                       </> : '—'}
                     </td>
                     <td className="right nowrap">
@@ -139,18 +140,18 @@ export default function AgentScans() {
                       <button className="tab" style={{ color: 'var(--red)' }} onClick={() => remove(a)}>삭제</button>
                     </td>
                   </tr>
-                  {expanded === a.agent && r?.found?.length > 0 && (
+                  {expanded === a.agent && Array.isArray(r?.found) && r.found.length > 0 && (
                     <tr><td colSpan={7} style={{ background: 'rgba(12,19,34,.5)' }}>
                       <div style={{ maxHeight: 220, overflowY: 'auto', fontSize: 12 }}>
                         <STable><thead><tr><th>IP</th><th>서비스태그</th><th>호스트명</th><th>모델</th></tr></thead>
                           <tbody>
-                            {r.found.map((f) => (
-                              <tr key={f.ip}><td><b>{f.ip}</b></td><td className="muted">{f.serviceTag || '—'}</td><td className="muted">{f.hostName || '—'}</td><td className="muted">{[f.manufacturer, f.model].filter(Boolean).join(' ') || '—'}</td></tr>
+                            {r.found.filter((f) => f && typeof f === 'object').map((f, i) => (
+                              <tr key={strField(f.ip) || i}><td><b>{strField(f.ip) || '—'}</b></td><td className="muted">{strField(f.serviceTag) || '—'}</td><td className="muted">{strField(f.hostName) || '—'}</td><td className="muted">{[strField(f.manufacturer), strField(f.model)].filter(Boolean).join(' ') || '—'}</td></tr>
                             ))}
                           </tbody>
                         </STable>
                       </div>
-                      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>미응답 {r.unreachable} · 타장비 {r.notIdrac} · 인증실패 {r.authFailed}{r.durationMs ? ` · ${(r.durationMs / 1000).toFixed(0)}s` : ''}</div>
+                      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>미응답 {countText(r.unreachable)} · 타장비 {countText(r.notIdrac)} · 인증실패 {countText(r.authFailed)}{durationText(r.durationMs)}</div>
                     </td></tr>
                   )}
                 </React.Fragment>

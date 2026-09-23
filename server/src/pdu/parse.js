@@ -112,7 +112,8 @@ function phMetric(w) {
 
 /** `about` 출력에서 모델/시리얼을 뽑는다(등록 화면 표시·식별용). 실패해도 수집은 계속한다. */
 export function parseAbout(text) {
-  const s = String(text || '');
+  // v2.598 INJ-01: about 출력은 실장비에서 수 KB 다 — 64KB 로 자른다(비정상 출력이 루프를 붙잡지 않게).
+  const s = String(text || '').slice(0, 65_536);
   const grab = (label) => {
     const m = new RegExp(`${label}\\s*:\\s*(.+)`, 'i').exec(s);
     return m ? m[1].trim() : '';
@@ -124,7 +125,10 @@ export function parseAbout(text) {
     model: models[0] || '',
     serial: serials[0] || '',
     nmcModel: models[1] || '',
-    aosVersion: /aos[\s\S]*?Version\s*:\s*(\S+)/i.exec(s)?.[1] || '',
-    appVersion: /rpdu2g[\s\S]*?Version\s*:\s*(\S+)/i.exec(s)?.[1] || grab('Version'),
+    // ⚠ v2.598 INJ-01: 사이 구간을 **유한하게** 묶는다. 무제한 `[\s\S]*?` 는 'aos' 가 나올 때마다 끝까지 훑어
+    //   'Version' 이 없는 긴 출력에서 O(n²) 였다(실측 440KB → 2.9초 루프 정지). 실장비의 about 출력은
+    //   'Name: aos' 바로 다음 줄이 'Version:' 이라 400자면 충분하다.
+    aosVersion: /aos[\s\S]{0,400}?Version\s*:\s*(\S+)/i.exec(s)?.[1] || '',
+    appVersion: /rpdu2g[\s\S]{0,400}?Version\s*:\s*(\S+)/i.exec(s)?.[1] || grab('Version'),
   };
 }

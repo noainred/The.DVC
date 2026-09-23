@@ -234,7 +234,21 @@ export function parseSfpShow(text) {
   const num = (s) => { const m = String(s).match(/-?[\d.]+/); return m ? Number(m[0]) : null; };
   // 광 레벨: '-inf dBm (0.0 uW)' 처럼 무광 포트는 dBm 자리가 -inf 다. 첫 숫자 매치(num)는 -inf 를
   // 건너뛰고 괄호 안 0.0 을 잡아 '0 dBm'(완벽한 광레벨)으로 오독한다 → 무광은 null(v2.416 리뷰 확정).
-  const dbm = (s) => { const t = String(s).trim(); if (/^-?inf\b/i.test(t) || /^n\/?a\b/i.test(t)) return null; const m = t.match(/^-?[\d.]+/); return m ? Number(m[0]) : num(t); };
+  // v2.598(감사 L2598-05): 선두 값이 uW/mW 면 그것은 dBm 이 아니다('316.2 uW (-5.0 dBm)' 이 316.2 dBm 이 됐다).
+  //   괄호 안 dBm 이 있으면 그것을, 없으면 전력값을 dBm 으로 환산한다(0 uW 는 무광 → null).
+  const dbm = (s) => {
+    const t = String(s).trim();
+    if (/^-?inf\b/i.test(t) || /^n\/?a\b/i.test(t)) return null;
+    const pw = t.match(/^(-?[\d.]+)\s*(uW|µW|mW)\b/i);
+    if (pw) {
+      const paren = t.match(/\(\s*(-?[\d.]+)\s*dBm\s*\)/i);
+      if (paren) return Number(paren[1]);
+      if (/-inf\s*dBm/i.test(t)) return null;
+      const uw = Number(pw[1]) * (/^mW$/i.test(pw[2]) ? 1000 : 1);
+      return uw > 0 ? Math.round(10 * Math.log10(uw / 1000) * 10) / 10 : null;
+    }
+    const m = t.match(/^-?[\d.]+/); return m ? Number(m[0]) : num(t);
+  };
   for (const raw of lines) {
     const l = raw.trim();
     let m;

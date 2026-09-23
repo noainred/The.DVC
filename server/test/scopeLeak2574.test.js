@@ -215,8 +215,11 @@ describe('소스 계약 — 같은 실수가 되살아나지 않게', () => {
     const src = read('routes/ping.js');
     assert.match(src, /redactEdgeAddresses\(r, req\)/, '엣지 overview 가 주소를 가리지 않는다');
     const fn = /function redactEdgeAddresses[\s\S]*?\n\}/.exec(src)[0];
-    assert.match(fn, /role === 'admin'/);
-    assert.match(fn, /scopedVcenterIds/);
+    // v2.598(AUTHZ-2598-01): 판정은 canSeeEdgeAddress 하나로 옮겼다(/series 와 공유) — 그 함수가 두 조건을 갖는다.
+    assert.match(fn, /canSeeEdgeAddress\(req\)/);
+    const judge = /function canSeeEdgeAddress[\s\S]*?\n\}/.exec(src)[0];
+    assert.match(judge, /role === 'admin'/);
+    assert.match(judge, /scopedVcenterIds/);
     assert.match(fn, /addressHidden/, '가린 사실을 밝혀야 한다(조용한 축약 금지)');
   });
 

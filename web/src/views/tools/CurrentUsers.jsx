@@ -152,8 +152,10 @@ function WindowsUsersPanel({ scope }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-        <Card label={picked ? `${cur?.vcenterName || picked} 고유 사용자` : '전체 고유 사용자'} value={`${agg.users ?? 0}명`} meta={`활성 ${agg.usersActive ?? 0} · 연결끊김 ${agg.usersDisc ?? 0}`} accent="var(--accent)" />
-        <Card label="세션" value={`${agg.sessions ?? 0}`} meta={`활성 ${agg.sessionsActive ?? 0} · 끊김 ${agg.sessionsDisc ?? 0}${agg.sessionsOther ? ` · 기타 ${agg.sessionsOther}` : ''}`} />
+        {/* v2.598 WEBUI-2598-02: 확인한 서버가 0대면 서버가 null 을 준다 — '0명' 으로 채우지 않고 '—' + 사유. */}
+        <Card label={picked ? `${cur?.vcenterName || picked} 고유 사용자` : '전체 고유 사용자'} value={agg.users == null ? '—' : `${agg.users}명`}
+          meta={agg.users == null ? (data?.settings?.enabled === false ? '수집 꺼짐 — 확인한 서버 0대' : '확인한 서버 0대 — 0명이 아니라 확인 불가') : `활성 ${agg.usersActive ?? '—'} · 연결끊김 ${agg.usersDisc ?? '—'}`} accent="var(--accent)" />
+        <Card label="세션" value={agg.sessions == null ? '—' : `${agg.sessions}`} meta={agg.sessions == null ? '확인한 서버 없음' : `활성 ${agg.sessionsActive ?? '—'} · 끊김 ${agg.sessionsDisc ?? '—'}${agg.sessionsOther ? ` · 기타 ${agg.sessionsOther}` : ''}`} />
         <Card label="확인한 서버" value={`${agg.vmsOk ?? 0}대`} meta={`확인 불가 ${agg.vmsFailed ?? 0}대 · 대상 ${data?.targets ?? 0}대`} />
         <Card label="대상 아님" value={`${skip.total}대`} meta={skip.rows.slice(0, 2).map((r) => `${r.short} ${r.n}대`).join(' · ') || '없음'} />
       </div>
@@ -177,9 +179,9 @@ function WindowsUsersPanel({ scope }) {
             {vcenters.map((v) => (
               <tr key={v.vcenterId} onClick={() => { setPicked(v.vcenterId === picked ? '' : v.vcenterId); setHist(null); }} style={{ cursor: 'pointer', background: v.vcenterId === picked ? 'var(--hover)' : undefined }}>
                 <td>{v.vcenterName || v.vcenterId}</td>
-                <td data-sort={String(v.users)}>{v.users}명</td>
-                <td data-sort={String(v.usersActive)}>{v.usersActive}</td>
-                <td data-sort={String(v.sessions)}>{v.sessions}</td>
+                <td data-sort={String(v.users ?? -1)}>{v.users == null ? '—' : `${v.users}명`}</td>
+                <td data-sort={String(v.usersActive ?? -1)}>{v.usersActive ?? '—'}</td>
+                <td data-sort={String(v.sessions ?? -1)}>{v.sessions ?? '—'}</td>
                 <td data-sort={String(v.vmsOk)}>{v.vmsOk}</td>
                 <td data-sort={String(v.vmsFailed)} style={{ color: v.vmsFailed ? 'var(--amber)' : undefined }}>{v.vmsFailed}</td>
                 <td data-sort={String(v.skipped || 0)}>{v.skipped || 0}</td>
@@ -195,7 +197,7 @@ function WindowsUsersPanel({ scope }) {
       {/* 사용자 목록 */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ fontWeight: 700 }}>로그인한 사용자 {(agg.names || []).length}명</span>
+          <span style={{ fontWeight: 700 }}>로그인한 사용자 {agg.users == null ? '—' : `${(agg.names || []).length}명`}</span>
           <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setShowNames(!showNames)}>
             {showNames ? '계정명 숨기기' : '계정명 보기'}
           </button>
@@ -283,6 +285,11 @@ function WindowsUsersPanel({ scope }) {
         </div>
         {histErr && <ErrorBox error={histErr} inline />}
         {since && <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginBottom: 6, whiteSpace: 'normal' }}><BoldText text={since.text} /></div>}
+        {hist?.unknownRows > 0 && (
+          <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginBottom: 6, whiteSpace: 'normal' }}>
+            확인한 서버가 0대였던 시각 {hist.unknownRows}개는 선을 끊었습니다 — 0명이 아니라 확인 불가입니다.
+          </div>
+        )}
         {hist?.rows?.length ? (
           <div style={{ height: 240 }}>
             <ResponsiveContainer>
@@ -352,10 +359,11 @@ function CombinedPanel() {
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-        <Card label="전체 고유 사용자(합집합)" value={`${c?.union ?? 0}명`} meta={c?.partial ? '⚠ 일부 출처 누락 — 하한' : 'Windows ∪ VDI'} accent="var(--accent)" />
-        <Card label="양쪽 동시" value={`${c?.both ?? 0}명`} meta="Windows 서버와 VDI 에 모두 접속" />
-        <Card label="Windows 서버만" value={`${c?.onlyWindows ?? 0}명`} meta={SOURCE_STATE_LABEL[src.windows?.state] || ''} />
-        <Card label="VDI 만" value={`${c?.onlyVdi ?? 0}명`} meta={SOURCE_STATE_LABEL[src.vdi?.state] || ''} />
+        {/* v2.598: 읽은 출처가 하나도 없으면 서버가 null 을 준다 — '0명' 으로 채우지 않는다. */}
+        <Card label="전체 고유 사용자(합집합)" value={c?.union == null ? '—' : `${c.union}명`} meta={c?.union == null ? '읽은 출처가 없어 확인 불가' : (c?.partial ? '⚠ 일부 출처 누락 — 하한' : 'Windows ∪ VDI')} accent="var(--accent)" />
+        <Card label="양쪽 동시" value={c?.both == null ? '—' : `${c.both}명`} meta="Windows 서버와 VDI 에 모두 접속" />
+        <Card label="Windows 서버만" value={c?.onlyWindows == null ? '—' : `${c.onlyWindows}명`} meta={SOURCE_STATE_LABEL[src.windows?.state] || ''} />
+        <Card label="VDI 만" value={c?.onlyVdi == null ? '—' : `${c.onlyVdi}명`} meta={SOURCE_STATE_LABEL[src.vdi?.state] || ''} />
       </div>
       {c && <div style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'normal', lineHeight: 1.6 }}><BoldText text={combinedNote(c)} /></div>}
       {c?.nameFormNote && <div style={{ fontSize: 11.5, color: 'var(--text-faint)', whiteSpace: 'normal', lineHeight: 1.55 }}><BoldText text={c.nameFormNote} /></div>}

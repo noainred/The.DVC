@@ -53,6 +53,8 @@ export function stepAlert(prev, value, cfg = {}, now = Date.now()) {
   const sustainMs = Math.max(0, n(cfg.sustainMin) ?? 15) * 60_000;
   const repeatMs = Math.max(0, n(cfg.repeatHours) ?? 6) * 3_600_000;
   const staleMs = Math.max(60_000, (n(cfg.intervalMs) || 300_000) * STALE_FACTOR);
+  // 연속 관측으로 볼 최대 간격 — 주기의 1.5배(수집 지연 여유). 그보다 벌어진 두 초과 관측 사이는 '지속' 이 아니다.
+  const gapMs = Math.max(60_000, (n(cfg.intervalMs) || 300_000) * 1.5);
   const p = prev || null;
 
   // 임계가 없으면 판정하지 않는다(설정이 비었을 때 0 으로 떨어지면 전 서버가 초과가 된다).
@@ -70,10 +72,22 @@ export function stepAlert(prev, value, cfg = {}, now = Date.now()) {
 
   const over = v >= pct;
   if (over) {
-    const since = p && n(p.since) != null ? p.since : now;
+    /*
+     * v2.598(감사 IDRAC-2598-04): 지속 시간은 **연속 초과로 관측한 시간**만 센다(`overMs`).
+     *   예전에는 `now - since` 였고 `since` 가 히스테리시스 구간·null 공백 동안 유지돼, 한 번 튄 값 두 개가
+     *   공백을 사이에 두고 오면 그 공백까지 '지속' 으로 세어 즉시 알렸다. 이제
+     *   ① 직전 관측도 초과였고 그 간격이 주기의 1.5배 이내일 때만 간격을 더한다(공백은 더하지 않는다 — 보류는 보류다)
+     *   ② 추적 중인 구간이 없으면(`since` 없음 — 처음이거나 히스테리시스로 끊겼다) 0 에서 다시 센다.
+     *   구버전 상태(`overMs` 없음)는 `lastOverAt - since` 로 이어받는다.
+     */
+    const active = !!(p && n(p.since) != null);
+    const since = active ? p.since : now;
+    const lastOver = active ? n(p.lastOverAt) : null;
+    let overMs = active ? (n(p.overMs) ?? Math.max(0, (lastOver ?? since) - since)) : 0;
+    if (lastOver != null && now > lastOver && now - lastOver <= gapMs) overMs += now - lastOver;
     const peak = Math.max(n(p?.peak) ?? 0, v);
-    const sustained = now - since;
-    const st = { since, lastOverAt: now, peak, notifiedAt: n(p?.notifiedAt) ?? null };
+    const sustained = overMs;
+    const st = { since, lastOverAt: now, overMs, peak, notifiedAt: n(p?.notifiedAt) ?? null };
     if (sustained < sustainMs) return { state: st, fire: null, reason: 'sustaining', sustainedMin: Math.round(sustained / 60_000) };
     const last = n(st.notifiedAt);
     if (last != null && now - last < repeatMs) return { state: st, fire: null, reason: 'suppressed', sustainedMin: Math.round(sustained / 60_000) };
@@ -83,8 +97,12 @@ export function stepAlert(prev, value, cfg = {}, now = Date.now()) {
   // 정상 범위 — 추적 중이던 것이 있으면 해제를 판단한다.
   if (!p) return { state: null, fire: null, reason: 'ok', sustainedMin: 0 };
   // ⚠ 경계에서 떨리는 것을 해제로 보지 않는다(오르내림이 알림을 두 배로 만든다).
+  // v2.598(감사 IDRAC-2598-04): 단 **지속 구간은 끊는다** — 임계 아래 관측은 '연속 초과' 가 아니다.
+  //   알린 적이 없으면 추적을 버린다(해제 알림 대상이 아니다). 알린 적이 있으면 해제 판정만 보류하고
+  //   `notifiedAt`(재알림 억제·해제 알림의 근거)은 남긴 채 `since`·`overMs` 를 비운다 — 다음 초과는 0 부터 센다.
   if (v > pct - HYSTERESIS_PCT) {
-    return { state: p, fire: null, reason: 'hysteresis', sustainedMin: Math.round(((now - (n(p.since) ?? now))) / 60_000) };
+    if (n(p.notifiedAt) == null) return { state: null, fire: null, reason: 'hysteresis', sustainedMin: 0 };
+    return { state: { ...p, since: null, overMs: 0 }, fire: null, reason: 'hysteresis', sustainedMin: 0 };
   }
   // 알린 적이 있으면 해제도 알린다(알린 적이 없으면 조용히 잊는다 — 알리지 않은 것의 해제는 뜻이 없다).
   const fire = n(p.notifiedAt) != null ? 'recovered' : null;

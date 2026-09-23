@@ -3492,6 +3492,41 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       vCenter REST 폴백 DS 결측이 있으면 스토리지 합계가 부분 합(합계 헬퍼가 null 을 0 으로 더한다 — 폴백 경로 한정).
     - ⚠ 정직 기록: 실장비(APC 데이지체인 CLI·Isilon/Unity 결측 응답·다중 프로세스 SQLite 잠금)로는 확인하지 못했다 — 합성 입력 재현이다.
 
+  - ⚠⚠ **v2.598 — 10축 감사 + 발견별 2인 반증(9차 점검) 확정분**("더 자세하게, 두번 더" 1회차. 발견 68 = 확정 49 · SPLIT 4 ·
+    가능성 4 · 반증 11, 고침 55. 회귀는 `test/audit2598{a..f}.test.js` 95건 + 웹 vitest 6파일 — 그룹별 변이 검증. 상세 `docs/AUDIT-2026-09-24f.md`):
+    - ⚠⚠ **암호화 모드는 저장마다 재봉인하지 않는다**(L2598-01 high — 40대 1대 수정 저장 4.1초 → 1ms): 세션 키 + 문맥(필드·식별 필드) HMAC
+      기반 **암호문 재사용**. 보안 의미 변경은 `server/CLAUDE.md` 'v2.598' 절. 백업 지문은 봉인 원문을 그대로 비교한다(RECENT2598-01 —
+      v2.597 openSecretIfCached 표식이 캐시 상태로 뒤집혀 무변경 change 백업이 생겼다).
+    - ⚠⚠ **엣지가 올리는 진단·결과는 '아는 필드만' 담는다**(CENTRAL-01~03): gpuGuestDiag 는 상한 없이 상주했고 오염 원소가 로그 소스 화면을
+      TypeError 로 죽였다. 스캔 결과의 수치가 객체면 화면이 React #31. 정제는 **저장 함수 안**에 둔다(라우트가 아니라 — 로드한 옛 파일도 거친다).
+      ⚠ 정제 헬퍼는 모듈 로드 코드보다 **위에** 둘 것(아래면 TDZ 로 로드가 실패해 정상 파일이 손상 파일로 보존된다 — 구현 중 실제로 그랬다).
+    - **가림은 역할·범위로 — 이번 형제 누락 5곳**(AUTHZ-2598-01~05): ping 추이 엣지 주소(`canSeeEdgeAddress` 하나로 판정) · 원격 프록시 범위 ·
+      svcmon push/pull `centralUrl`·실패 원문(`scopeStatus.redactPushStatus`, 문구 상수 `ADMIN_ONLY_TEXT`) · 작업 로그 절대 경로
+      (`scopeFilePaths` — 라우트의 `*LogInfo()`·`FILE` 은 전부 이것을 거치게 스윕 테스트가 고정) · 도구 사용 기록 키 화이트리스트.
+    - ⚠⚠ **node:sqlite 는 JS number 를 REAL 로 바인딩한다 — `ts/?` 버킷은 `CAST(ts/? AS INTEGER)`**(DB2598-01): ping 24시간 추이가 1,440칸이었다.
+      정수 나눗셈을 기대하는 새 SQL 은 같은 규칙.
+    - **시한은 결과가 아니라 세션을 끊는다 — 네 곳 더**(T2598-01·02): Isilon 영역 수집(연속 무응답 3회면 멈추고 `notTried`) · vCenter 로그 ·
+      이벤트(`collectVCenterEvents` signal, 정리 호출은 `callRaw({ignoreExternal})`) · 게스트 디스크. v2.417·v2.590 F7 규약의 누락이었다.
+      `adaptiveTimer` 는 실행 중 재무장하지 않는다(T2598-04).
+    - **저장된 요청 시한은 [1초, 10분]**(T2598-03 — `soapParse.js normRequestTimeoutMs`/`effectiveRequestTimeoutMs`): 3e9 가 setTimeout 1ms 가 되어
+      모든 요청이 즉시 실패했다. 옛 저장값도 실행 시점에 자른다(vCenter·NSX·Horizon·REST·store 데드라인).
+    - **vCenter 가공 정확성**(VC2598-01~10): 스냅샷 크기는 delta·sesparse·vmem·vmsd·uniqueSize 포함 · 성능 -1 은 null · GPU 호스트 키는
+      `gpuHostKey(vcenterId, host)` · 네트워크 hostCount/vmCount 는 **모르면 null**(예전 값은 지어낸 것) · 파생 알람 시각은 처음 본 시각 ·
+      vCenter id 는 `vcRefOf`/`morefOf` 로 푼다(**콜론 split 금지**) · freeSpace 없으면 null + 'inaccessible' 알람 · 전력 -1 저장 안 함 ·
+      자기닫힘 `<val/>`. ⚠ 보류: 템플릿을 VM 수에 넣을지(VC2598-09 — 공개 API 대조 계약) — 롤업에 `templates` 개수만 추가했다.
+    - **결측을 0 으로 — 이번에도 여덟 곳**(RECENT2598-03·04, WEBUI-01·02·06·07, IDRAC-02·03, DB-03): DS 사용량 결측은 합계에서 빼고
+      '사용량 모름 N개 제외' · 알림은 보류(해소 아님) · Horizon·현재 사용자 확인 불가는 null(추이는 `vms_ok=0` 행을 null 로 읽는다) ·
+      라이선스 0 포트 사용률 '—' · KPI 0 을 경고색으로 칠하지 않음 · 보드 퍼센트 범위 밖은 null · 리포트 미갱신은 0 B/s 가 아니라 null ·
+      PDU 데이지체인 추이는 유닛 **합**(한 유닛이라도 못 읽은 시각은 빼고 `partialSamples`).
+    - **정규식 ReDoS 두 곳**(INJ-01·06): PDU about 440KB 2.9초 → 27ms(사이 구간 400자 + 입력 64KB) · `stripUemcliBanner` 800KB 7.9초 → 26ms
+      (줄 단위 O(n)). 장비 출력도 '외부 입력' 이다 — 긴 출력에 무제한 `[\s\S]*?` 를 쓰지 말 것.
+    - **설정 파일에 들어가는 문자열은 제어 문자를 지운다**(INJ-02): 중계 토폴로지 dc 이름의 개행이 HAProxy 설정에 listen/bind 줄을 넣었다.
+    - **SFP 광량 'N uW (M dBm)' 는 dBm 을 쓴다**(L2598-05): 선두 값을 dBm 으로 읽어 316.2 dBm 이 됐다. 괄호 dBm 우선, 없으면 환산, 0 uW 는 null.
+    - 반증: L2598-04(라우트 검증이 저장 전에 거부) 외 검증 단계 11건. ⚠ 정직 기록: 목 데이터로 만들 수 없는 상태의 안내 문구는 브라우저로
+      보지 못했다 · 실장비 응답(Unity health 열거·iDRAC 리포트 목록·실 vCenter 결측)은 합성 재현이다.
+    - ⚠ **작업 방식**: 병렬 수정 중 stop hook 때문에 WIP 커밋을 넣으면 HEAD 에 이미 수정이 들어간다 — 변이 검증의 '수정 전' 판본은
+      **감사 시작 커밋**(`git show <base>:경로`)으로 할 것(HEAD 로 하면 거짓 통과한다).
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

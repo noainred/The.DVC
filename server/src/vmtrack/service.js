@@ -79,6 +79,7 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
     added: totalRow.added, removed: totalRow.removed,
     poweredOn: totalRow.poweredOn, poweredOff: totalRow.poweredOff,
     dsCount: totalRow.dsCount, dsCapGB: totalRow.dsCapGB, dsUsedGB: totalRow.dsUsedGB,
+    ...(totalRow.dsUsedUnknown ? { dsUsedUnknown: totalRow.dsUsedUnknown } : {}),
     baseline: totalRow.baseline,
     ...(skippedVcenters.length ? { skippedVcenters: skippedVcenters.slice(0, 64), skippedCount: skippedVcenters.length } : {}),
   };
@@ -102,7 +103,7 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
         added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off,
         dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
         dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
-        baseline: !!r.baseline })),
+        baseline: !!r.baseline, dsUsedUnknown: r.ds_used_unknown || 0 })),
       vcenters: [vcenterId],
     };
   }
@@ -118,7 +119,7 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
         added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off,
         dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
         dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
-        baseline: !!r.baseline, skipped: r.skipped || 0 })),
+        baseline: !!r.baseline, skipped: r.skipped || 0, dsUsedUnknown: r.ds_used_unknown || 0 })),
       vcenters: vcs,
       bySlotVc: groupBySlot(perVcRows),
     };
@@ -127,12 +128,29 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
   const bySlot = new Map();
   for (const r of perVcRows) {
     let a = bySlot.get(r.slot);
-    if (!a) bySlot.set(r.slot, a = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts, total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, dsCount: 0, dsCapGB: 0, dsUsedGB: 0, dsUsagePct: 0, baseline: true });
+    if (!a) bySlot.set(r.slot, a = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts, total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, dsCount: 0, dsCapGB: 0, dsUsedGB: 0, dsUsagePct: 0, dsUsedUnknown: 0, baseline: true });
     a.total += r.total; a.onCount += r.on_count; a.offCount += (r.total - r.on_count);
     a.added += r.added; a.removed += r.removed;
     a.poweredOn += (r.powered_on || 0); a.poweredOff += (r.powered_off || 0);
     a.dsCount += (r.ds_count || 0); a.dsCapGB += (r.ds_cap_gb || 0); a.dsUsedGB += (r.ds_used_gb || 0);
+    a.dsUsedUnknown += (r.ds_used_unknown || 0);
     if (!r.baseline) a.baseline = false;
+  }
+  // v2.598(감사 RECENT2598-02 — 재현: a 5대 + b 7대 → 다음 슬롯 b 수집 실패 · 범위 a,b 계정은 12→5 를 배지 없이 봤다):
+  // 저장된 합계 행의 skipped 는 **전 함대** 기준이라 범위 계정에 그대로 줄 수 없고, 예전에는 아예 버렸다. 범위 안에서
+  // 다시 센다 — 슬롯 S 에 행이 없는 범위 안 vCenter 중 **S 이전에 행이 있던 것**(조회 구간 안에서 추적 중이던 것)을
+  // 후보로 보고, 그 슬롯의 전 함대 skipped 를 넘지 않게 자른다(그 슬롯에 '빠진 vCenter' 가 없었다면 등록 해제·신규라
+  // 부분 합이 아니다). 범위 밖 vCenter 의 skipped 가 섞여 한 대까지 과대할 수 있다 — 과소(급감을 정상으로 보이게)보다 낫다.
+  const totalSkipped = new Map((await readSeries({ vcenterId: '', sinceTs })).map((r) => [r.slot, Number(r.skipped) || 0]));
+  const firstSlotOf = new Map();
+  for (const r of perVcRows) { const f = firstSlotOf.get(r.vcenter_id); if (f == null || r.slot < f) firstSlotOf.set(r.vcenter_id, r.slot); }
+  const presentBySlot = new Map();
+  for (const r of perVcRows) (presentBySlot.get(r.slot) || presentBySlot.set(r.slot, new Set()).get(r.slot)).add(r.vcenter_id);
+  for (const a of bySlot.values()) {
+    const present = presentBySlot.get(a.slot) || new Set();
+    let cand = 0;
+    for (const [id, first] of firstSlotOf) if (first < a.slot && !present.has(id)) cand += 1;
+    a.skipped = Math.min(cand, totalSkipped.get(a.slot) || 0);
   }
   // 사용률은 합산 후 1회 계산 — '전체 사용량 ÷ 전체 용량'(vCenter별 사용률의 평균이 아니다).
   for (const a of bySlot.values()) {
@@ -157,7 +175,7 @@ function groupBySlot(rows) {
       poweredOn: r.powered_on || 0, poweredOff: r.powered_off || 0,
       dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
       dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
-      baseline: !!r.baseline });
+      baseline: !!r.baseline, dsUsedUnknown: r.ds_used_unknown || 0 });
   }
   return m;
 }

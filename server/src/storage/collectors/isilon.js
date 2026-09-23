@@ -27,15 +27,18 @@ const isilonDispatcher = new Agent({ connect: withSsrfLookup({ rejectUnauthorize
 const PORT = Number(process.env.STORAGE_ISILON_PORT) || 8080;
 const TIMEOUT_MS = Number(process.env.STORAGE_HTTP_TIMEOUT_MS) || 15_000;
 
-export async function get(device, apiPath) { // v2.308: 영역 수집기(areasCollector)가 재사용
+export async function get(device, apiPath, { signal } = {}) { // v2.308: 영역 수집기(areasCollector)가 재사용
   const url = `https://${device.host}:${PORT}${apiPath}`;
   const auth = Buffer.from(`${device.username}:${device.password || ''}`).toString('base64');
+  // v2.598 T2598-01: 바깥 시한(영역 수집 withDeadline · 폴러가 넘기는 device._signal)이 요청을 **실제로** 끊게
+  // 건별 시한과 합친다(v2.417 규약) — 예전엔 건별 15초만 있어 시한이 지나도 남은 엔드포인트를 계속 호출했다.
+  const outer = signal || device?._signal || null;
   let res;
   try {
     res = await fetch(url, {
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
       dispatcher: isilonDispatcher,
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: outer ? AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), outer]) : AbortSignal.timeout(TIMEOUT_MS),
     });
   } catch (e) {
     if (!isTransportError(e)) throw e;

@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **485개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **486개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-23)
@@ -259,12 +259,13 @@
 |---|---|---|---|
 | `EDGE_PUSH_TIMEOUT_MS` | `600000` |  | collector/upgradePush.js, upgrade/upgrade.js |
 
-## 스토리지 수집 (23)
+## 스토리지 수집 (24)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `STORAGE_ACTIVITY_MAX` | `500` |  | storage/activityLog.js |
 | `STORAGE_AREAS_MS` | `60 * 60_000` |  | storage/intervals.js |
+| `STORAGE_AREAS_TIMEOUT_MS` | `300000` |  | storage/poller.js |
 | `STORAGE_CLI_RAW_LIMIT` | `4000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_CLI_SESSION_BUDGET_MS` | `150000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_CLI_TIMEOUT_MS` | `45000` |  | storage/collectors/cliSsh.js |
@@ -664,4 +665,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 485
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 486

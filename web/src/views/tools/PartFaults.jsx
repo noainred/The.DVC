@@ -24,6 +24,7 @@ import BoldText from '../../components/boldText.jsx';
 import {
   emptyDiag, scanNote, edgeScanTotals, edgeNote, keyKindNote, deviceKeyNote, keyKindMark, deviceKeyMark, tableFootnotes, holdText, holdNote, eventText,
   notifyNote, lastRunText, ageText, intervalText, toneVar, resetNote, pushNote,
+  historyEmptyText, kpiValue, kpiAccent,
   EDGE_KIND_LABEL, EDGE_KIND_TONE,
 } from './partFaultText.js';
 
@@ -198,9 +199,10 @@ export function PartFaults() {
       {/* ② 수치 — unknown/absent 를 정상에도 장애에도 넣지 않는다(각각 표시). */}
       {!isEdge && (
         <div className="kpis">
-          <Kpi label="이상 부품" value={data?.summary?.fault ?? 0} accent="var(--red)" meta="즉시 조치" />
-          <Kpi label="주의 부품" value={data?.summary?.warn ?? 0} accent="var(--amber)" meta="예고·성능저하 포함" />
-          <Kpi label="영향 장비" value={data?.summary?.devices ?? 0} meta="이상·주의가 열려 있는 장비 수" />
+          {/* v2.598 WEBUI-2598-06: 0 은 경고색으로 칠하지 않고, 요약이 없으면 0 이 아니라 '—' 다. */}
+          <Kpi label="이상 부품" value={kpiValue(data?.summary, 'fault')} accent={kpiAccent(kpiValue(data?.summary, 'fault'), 'var(--red)')} meta="즉시 조치" />
+          <Kpi label="주의 부품" value={kpiValue(data?.summary, 'warn')} accent={kpiAccent(kpiValue(data?.summary, 'warn'), 'var(--amber)')} meta="예고·성능저하 포함" />
+          <Kpi label="영향 장비" value={kpiValue(data?.summary, 'devices')} meta="이상·주의가 열려 있는 장비 수" />
           <Kpi label="상태 미확인 부품" value={kpiCount('unknown')} meta={kpiMeta('정상이라는 뜻이 아닙니다')} />
           <Kpi label="빈 슬롯" value={kpiCount('absent')} meta={kpiMeta('고장이 아닙니다')} />
         </div>
@@ -284,7 +286,8 @@ export function PartFaults() {
                     <thead><tr><th>시각</th><th>장비</th><th>부품</th><th>사건</th><th>장비 보고 원문</th><th>수집</th></tr></thead>
                     <tbody>
                       {events.events.length === 0 && <tr><td colSpan={6} style={{ padding: 16, color: 'var(--text-faint)' }}>
-                        <BoldText text="이 기간에 기록된 전이가 없습니다. 이력은 **상태가 바뀐 순간만** 남기므로, 기록이 없다는 것은 그동안 변화가 없었다는 뜻입니다." />
+                        {/* v2.598 WEBUI-2598-03: '변화 없음' 은 점검이 돌았을 때만 참이다 */}
+                        <BoldText text={historyEmptyText({ poller: data?.poller, db: events.db || data?.db, days }).text} />
                       </td></tr>}
                       {events.events.map((ev, i) => (
                         <tr key={`${ev.agent}|${ev.partKey}:${ev.at}:${i}`}>

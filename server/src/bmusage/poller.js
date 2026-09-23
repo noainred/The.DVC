@@ -259,9 +259,15 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
   let ent = null;
   if (entStopped) _authStopped.set(`${target.key}|idrac`, entStopped); else _authStopped.delete(`${target.key}|idrac`);
   if (target.entAllowed && enterpriseActive(loadBmUsageSettings())) {
+    /*
+     * v2.598(감사 IDRAC-2598-01): '텔레메트리가 값을 줬다' 는 **보드 CPU·메모리를 읽었다** 는 뜻이어야 한다 — 전수 모드가
+     *   NIC·스토리지 값만 읽고 ok 로 돌아오면 CPU·메모리가 비었는데도 대체 경로가 '텔레메트리 정상' 으로 막혔다.
+     *   대체 경로는 **빈 칸만** 채우므로(usage.js) 텔레메트리 값을 덮지 않는다.
+     */
+    const boardRead = !!idrac?.ok && (idrac.cpuPct != null || idrac.memPct != null);
     const el = enterpriseEligible({
-      tier: target.license?.tier || '', telemetryOk: !!idrac?.ok,
-      telemetryKind: idrac?.ok ? '' : (idrac?.kind || ''),
+      tier: target.license?.tier || '', telemetryOk: boardRead,
+      telemetryKind: idrac?.ok ? (boardRead ? '' : 'board-missing') : (idrac?.kind || ''),
     });
     if (entStopped) {
       ent = { ok: false, kind: 'auth-stopped', error: `iDRAC 인증 실패로 주기 대체 수집이 정지됐습니다(${entStopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: entStopped };

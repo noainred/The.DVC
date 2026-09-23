@@ -1,3 +1,4 @@
+import { blankOr } from './blankOr.js';
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
@@ -33,7 +34,7 @@ export default function GpuSettings() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson('/admin/metrics/settings', { gpuUtilEnabled: enabled, gpuUtilIntervalSec: Number(sec) || 60 });
+      const r = await putJson('/admin/metrics/settings', { gpuUtilEnabled: enabled, gpuUtilIntervalSec: blankOr(sec) }); // v2.598: 빈 칸은 보내지 않는다(60 으로 둔갑 금지)
       setData(r); setSec(r.settings.gpuUtilIntervalSec ?? 60);
       setMsg('저장되었습니다. 새 주기가 즉시 적용됩니다.');
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
@@ -60,13 +61,13 @@ export default function GpuSettings() {
         <label className="muted" style={{ fontSize: 12, display: 'block', marginTop: 16 }}>수집 주기</label>
         <div className="flex gap wrap" style={{ margin: '6px 0 10px' }}>
           {PRESETS.map((p) => (
-            <button key={p.s} className={sec === p.s ? 'login-btn' : 'tab'} disabled={!enabled}
+            <button key={p.s} className={Number(sec) === p.s ? 'login-btn' : 'tab'} disabled={!enabled}
               style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setSec(p.s)}>{p.label}</button>
           ))}
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           <input className="input" type="number" min={20} max={86400} value={sec} disabled={!enabled}
-            onChange={(e) => setSec(Number(e.target.value))} style={{ width: 120 }} />
+            onChange={(e) => setSec(e.target.value)} style={{ width: 120 }} />
           <span className="muted">초 (20초 ~ 24시간)</span>
         </div>
 

@@ -399,3 +399,46 @@ export function lastRunText(poller, now = Date.now()) {
 }
 
 export const _n = n; // 테스트에서 null 처리 확인용(굳이 쓰지 않아도 계약을 고정한다)
+
+/**
+ * 이력 탭이 비었을 때의 문구(v2.598 WEBUI-2598-03).
+ * '변화가 없었다' 는 **점검이 돌았을 때만** 참이다 — 한 번도 점검하지 않았거나 마지막 점검이 조회 기간
+ * 이전이면 그 문장은 거짓이다(기록이 없는 이유가 '변화 없음' 이 아니라 '보지 않았음' 이다).
+ * ⚠ `poller.last` 는 인메모리라 재시작 뒤 비어 있을 수 있다 — 그래서 DB 에 남은 부품 상태(`db.openParts`)
+ *   ·전이(`db.rows`)가 있으면 '한 번도 안 했다' 고 단정하지 않는다.
+ * @returns {{kind:'never'|'before'|'nochange', text:string}}
+ */
+export function historyEmptyText({ poller = null, db = null, days = 30, now = Date.now() } = {}) {
+  const lastAt = poller?.last?.at == null ? null : Number(poller.last.at);
+  const hasDbTrace = Number(db?.openParts) > 0 || Number(db?.rows) > 0;
+  if ((lastAt == null || !Number.isFinite(lastAt)) && !hasDbTrace) {
+    return {
+      kind: 'never',
+      text: poller && poller.enabled === false
+        ? '아직 점검이 한 번도 실행되지 않아 **이력이 없습니다**(자동 점검 꺼짐) — 변화가 없었다는 뜻이 아닙니다. **지금 점검**을 누르거나 자동 점검을 켜세요.'
+        : '아직 점검이 한 번도 실행되지 않아 **이력이 없습니다** — 변화가 없었다는 뜻이 아닙니다. **지금 점검**을 누르거나 첫 주기를 기다리세요.',
+    };
+  }
+  const from = now - Number(days) * 86_400_000;
+  if (lastAt != null && Number.isFinite(lastAt) && lastAt < from) {
+    return {
+      kind: 'before',
+      text: `마지막 점검(${ageText(now - lastAt)})이 조회 기간(최근 ${days}일) **이전**입니다 — 이 기간에는 점검이 돌지 않아 기록이 없습니다(변화가 없었다는 뜻이 아닙니다).`,
+    };
+  }
+  return {
+    kind: 'nochange',
+    text: '이 기간에 기록된 전이가 없습니다. 이력은 **상태가 바뀐 순간만** 남기므로, 기록이 없다는 것은 그동안 변화가 없었다는 뜻입니다.',
+  };
+}
+
+/** KPI 수치 — 요약이 없으면 '—'(0 으로 채우지 않는다). v2.598 WEBUI-2598-06 */
+export function kpiValue(summary, key) {
+  const v = summary?.[key];
+  return v == null || !Number.isFinite(Number(v)) ? '—' : Number(v);
+}
+
+/** KPI 강조색 — 0·결측은 경고색을 쓰지 않는다(숫자는 '문제 없음' 인데 색이 '문제 있음' 이라 말하지 않게). */
+export function kpiAccent(value, color) {
+  return typeof value === 'number' && value > 0 ? color : undefined;
+}

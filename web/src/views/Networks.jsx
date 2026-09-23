@@ -23,8 +23,9 @@ function NetworkList({ filters }) {
     { key: 'vcenterId', label: 'vCenter', render: (n) => <span className="muted">{n.vcenterId}</span> },
     { key: 'type', label: '유형', render: (n) => { const [c, l] = label(n.type); return <span className={`badge ${c}`}>{l}</span>; } },
     { key: 'vlanId', label: 'VLAN', align: 'right' },
-    { key: 'hostCount', label: '호스트', align: 'right' },
-    { key: 'vmCount', label: 'VM', align: 'right' },
+    // v2.598 VC2598-04: SOAP 수집은 네트워크별 호스트·VM 수를 조회하지 않아 null 을 준다 — 빈칸이 아니라 '—'(모름).
+    { key: 'hostCount', label: '호스트', align: 'right', render: (n) => (n.hostCount == null ? '—' : n.hostCount) },
+    { key: 'vmCount', label: 'VM', align: 'right', render: (n) => (n.vmCount == null ? '—' : n.vmCount) },
   ];
 
   return (

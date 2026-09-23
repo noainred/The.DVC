@@ -17,7 +17,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { fmtAgo } from '../../util/fmt.js';
-import { tb, gbTb, perVcSummary, growth, hasDsData } from './storageTrack.js';
+import { tb, gbTb, perVcSummary, growth, hasDsData, dsUnknownNote } from './storageTrack.js';
 import DsTrendModal from './DsTrendModal.jsx'; // 개별 DS 추이 모달(v2.354) — 변경 이력 칩/행 클릭용
 
 const DAY_OPTS = [7, 30, 90, 365];
@@ -67,6 +67,7 @@ export default function StorageTrackTool() {
       deltaGB: has && prevHas ? Math.round(((p.dsUsedGB || 0) - (arr[i - 1].dsUsedGB || 0)) * 10) / 10 : 0,
       collectedAt: p.collectedAt,
       baseline: p.baseline,
+      dsUsedUnknown: p.dsUsedUnknown || 0,
     };
   }), [data]);
 
@@ -143,7 +144,8 @@ export default function StorageTrackTool() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 14 }}>
         <Kpi label="총 용량" value={last ? `${last.dsCapTB.toLocaleString()} TB` : '—'} meta={last ? `데이터스토어 ${last.dsCount.toLocaleString()}개` : '스냅샷 없음'} />
-        <Kpi label="사용량" value={last ? `${last.dsUsedTB.toLocaleString()} TB` : '—'} pct={last ? Math.round(last.dsUsagePct) : undefined} />
+        <Kpi label="사용량" value={last ? `${last.dsUsedTB.toLocaleString()} TB` : '—'} pct={last ? Math.round(last.dsUsagePct) : undefined}
+          meta={last && dsUnknownNote(last.dsUsedUnknown) ? <span title={dsUnknownNote(last.dsUsedUnknown).title}>{dsUnknownNote(last.dsUsedUnknown).short}</span> : undefined} />
         <Kpi label="가용" value={last ? `${last.dsFreeTB.toLocaleString()} TB` : '—'}
           accent={last && last.dsUsagePct >= 90 ? 'var(--red)' : last && last.dsUsagePct >= 75 ? 'var(--amber)' : undefined} />
         <Kpi label={`${days}일 증감`} value={`${netGB >= 0 ? '+' : ''}${gbTb(netGB)}`}
@@ -225,7 +227,7 @@ export default function StorageTrackTool() {
                   <tbody>
                     {sortedVc.map((v) => (
                       <tr key={v.vcenterId}>
-                        <td><b>{v.vcenterId}</b></td>
+                        <td><b>{v.vcenterId}</b>{dsUnknownNote(v.dsUsedUnknown) && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={dsUnknownNote(v.dsUsedUnknown).title}>{dsUnknownNote(v.dsUsedUnknown).short}</span>}</td>
                         <td style={{ textAlign: 'right' }} className="muted">{v.dsCount.toLocaleString()}</td>
                         <td style={{ textAlign: 'right' }}>{tb(v.usedGB).toLocaleString()} TB</td>
                         <td style={{ textAlign: 'right' }} className="muted">{tb(v.capGB).toLocaleString()} TB</td>
@@ -276,7 +278,7 @@ export default function StorageTrackTool() {
                 <tbody>
                   {[...chart].reverse().map((r) => (
                     <tr key={r.slot}>
-                      <td><b>{slotLabel(r.slot)}</b>{r.baseline && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }}>기준선</span>}</td>
+                      <td><b>{slotLabel(r.slot)}</b>{r.baseline && <span className="badge gray" style={{ marginLeft: 6, fontSize: 10 }}>기준선</span>}{dsUnknownNote(r.dsUsedUnknown) && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={dsUnknownNote(r.dsUsedUnknown).title}>{dsUnknownNote(r.dsUsedUnknown).short}</span>}</td>
                       <td style={{ textAlign: 'right' }} className="muted">{r.hasDs ? r.dsCount.toLocaleString() : '—'}</td>
                       <td style={{ textAlign: 'right' }}>{r.hasDs ? `${r.dsUsedTB.toLocaleString()} TB` : '—'}</td>
                       <td style={{ textAlign: 'right' }} className="muted">{r.hasDs ? `${r.dsCapTB.toLocaleString()} TB` : '—'}</td>

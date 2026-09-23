@@ -214,8 +214,19 @@ function ldapEscape(v) {
   return String(v ?? '').replace(/[\\*()\x00]/g, (c) => `\\${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
 }
 
+/**
+ * 사용자 검색 필터 조립(순수 — v2.598, 감사 INJ-05).
+ * ⚠ **치환은 함수형으로 한 번에** 한다. 문자열 치환(`.replace(re, str)`)은 치환값의 `$\``·`$'`·`$&` 를 특수 패턴으로
+ *   읽어(ldapEscape 는 `$` 를 이스케이프하지 않는다) 사용자명에 그 문자가 있으면 필터 앞뒤 조각이 끼어든다.
+ *   두 번에 나눠 치환하면 앞 치환값 안의 `{user}` 글자가 다시 치환된다 — 한 번의 정규식으로 둘 다 막는다.
+ */
+export function buildUserFilter(userFilter, username, upn) {
+  const vals = { upn: ldapEscape(upn), user: ldapEscape(username) };
+  return String(userFilter || '').replace(/\{(upn|user)\}/g, (_m, k) => vals[k]);
+}
+
 function searchUser(client, ad, username, upn) {
-  const filter = ad.userFilter.replace(/\{upn\}/g, ldapEscape(upn)).replace(/\{user\}/g, ldapEscape(username));
+  const filter = buildUserFilter(ad.userFilter, username, upn);
   return new Promise((resolve, reject) => {
     client.search(ad.baseDN, { scope: 'sub', filter, attributes: ['memberOf', 'displayName', 'cn', 'distinguishedName'] }, (err, res) => {
       if (err) return reject(err);

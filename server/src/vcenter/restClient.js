@@ -3,6 +3,7 @@ import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { createAuthGuard } from '../util/authGuard.js';
+import { effectiveRequestTimeoutMs } from './soapParse.js'; // v2.598 T2598-03 — 옛 저장값의 시한 상한(2^31ms 이상이면 1ms 로 abort)
 
 /**
  * vCenter 주기 수집의 **인증 실패 정지** 저장소(v2.590 — 감사 F1, 계정 잠금 경로).
@@ -104,7 +105,7 @@ export class VCenterClient {
       dispatcher: vcDispatcher, // vCenter 전용 TLS 정책(전역 오염 금지 — 감사 C1/C3)
       // per-vCenter 타임아웃 존중(고RTT 사이트가 15초에 abort되지 않게) — SOAP 경로와 동일 규칙.
       // v2.590: 수집 데드라인 신호도 함께 건다(결과만 포기하지 않고 요청을 실제로 끊는다 — v2.417).
-      signal: vcRequestSignal(this.vc?.timeoutMs > 0 ? this.vc.timeoutMs : 15_000, ignoreExternal ? null : this.signal),
+      signal: vcRequestSignal(effectiveRequestTimeoutMs(this.vc?.timeoutMs, 15_000), ignoreExternal ? null : this.signal),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');

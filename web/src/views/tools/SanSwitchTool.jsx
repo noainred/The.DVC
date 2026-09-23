@@ -9,7 +9,7 @@ import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../compo
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
   throughputText, throughputTitle, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
   toChartRows, topSeries, bps, sortPorts, nextSort, sortRows, seriesStats,
-  RX_WARN_DBM, RX_BAD_DBM, alertsMeta } from './sanSwitchPorts.js';
+  RX_WARN_DBM, RX_BAD_DBM, alertsMeta, usedPctText, switchesMeta } from './sanSwitchPorts.js';
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
 import CollectActivity from './CollectActivity.jsx';
@@ -192,9 +192,9 @@ export default function SanSwitchTool() {
 
       {/* 상단 KPI — '용량'은 포트 용량이다. 라이선스 없는 포트는 여유에서 빠진다. */}
       <div className="kpis" style={{ marginBottom: 12 }}>
-        <Kpi label="스위치" value={agg.switches} meta={agg.failed ? `수집 실패 ${agg.failed}대` : '전부 수집 정상'} accent={agg.failed ? 'var(--red)' : undefined} />
+        <Kpi label="스위치" value={agg.switches} meta={switchesMeta(agg)} accent={agg.failed ? 'var(--red)' : undefined} />
         <Kpi label="물리 포트" value={agg.total.toLocaleString()} meta={`라이선스 ${agg.licensed.toLocaleString()}`} />
-        <Kpi label="사용 중" value={agg.online.toLocaleString()} pct={agg.usedPct} meta={`포트 사용률 ${agg.usedPct}%`} />
+        <Kpi label="사용 중" value={agg.online.toLocaleString()} pct={agg.usedPct ?? undefined} meta={`포트 사용률 ${usedPctText(agg.usedPct)}`} />
         <Kpi label="여유 포트" value={agg.free.toLocaleString()} meta="라이선스 − 사용중(증설 가능분)" accent={capacityLevel(agg.usedPct) === 'bad' ? 'var(--red)' : capacityLevel(agg.usedPct) === 'warn' ? 'var(--amber)' : undefined} />
         <Kpi label="장애/비활성 포트" value={`${agg.faulty} / ${agg.disabled}`} meta={alertsMeta(agg)} accent={agg.faulty ? 'var(--red)' : undefined} />
       </div>
@@ -210,7 +210,7 @@ export default function SanSwitchTool() {
             return (
               <button key={dc} className={`qn-btn${on ? ' on' : ''}${a.failed ? ' down' : ''}`} aria-pressed={on}
                 onClick={() => setDcSel((p) => { const n = new Set(p); n.has(dc) ? n.delete(dc) : n.add(dc); return n; })}
-                title={`${dc} — 스위치 ${a.switches}대 · 포트 ${a.online}/${a.licensed} (${a.usedPct}%) · 여유 ${a.free}`}>
+                title={`${dc} — 스위치 ${a.switches}대 · 포트 ${a.online}/${a.licensed} (${usedPctText(a.usedPct)}) · 여유 ${a.free}`}>
                 {dc}<span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{list.length}</span>
               </button>
             );
@@ -323,7 +323,7 @@ export default function SanSwitchTool() {
                       )}
                   </td>
                   <td>{s?.ok ? <>{p.online}<span className="muted"> / {p.licensed}</span>{p.noLicense ? <span className="muted" style={{ fontSize: 11 }}> (미라이선스 {p.noLicense})</span> : null}</> : <span className="muted">—</span>}</td>
-                  <td>{s?.ok ? <span title={`${p.usedPct}% 사용 · ${lvl === 'bad' ? '증설 검토 필요' : lvl === 'warn' ? '여유 부족' : '여유 있음'}`}><UsageCell pct={p.usedPct || 0} /></span> : <span className="muted">—</span>}</td>
+                  <td>{s?.ok ? lvl === 'unknown' ? <span className="muted" title="라이선스 포트 0 — 사용률 미상">—</span> : <span title={`${p.usedPct}% 사용 · ${lvl === 'bad' ? '증설 검토 필요' : lvl === 'warn' ? '여유 부족' : '여유 있음'}`}><UsageCell pct={p.usedPct || 0} /></span> : <span className="muted">—</span>}</td>
                   <td style={{ color: lvl === 'bad' ? TONE.bad : lvl === 'warn' ? TONE.warn : undefined, fontWeight: 600 }}>{s?.ok ? p.free : '—'}</td>
                   <td>{s?.ok ? <span style={{ color: (p.faulty || p.disabled) ? TONE.warn : undefined }}>{p.faulty} / {p.disabled}</span> : <span className="muted">—</span>}</td>
                   <td className="muted" style={{ fontSize: 11 }}>{r.agent ? `엣지 ${r.agent}` : '중앙 직접'}<div>{r.collectMethod === 'rest' ? 'REST' : 'SSH'}</div></td>

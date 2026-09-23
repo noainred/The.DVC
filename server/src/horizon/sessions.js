@@ -227,6 +227,19 @@ export function combineServers(results) {
   const maxServerUsers = ok.reduce((m, r) => Math.max(m, Number(r.users) || 0), 0);
   const lowerBound = usersOmitted > 0;
   const maxServerConnected = ok.reduce((m, r) => Math.max(m, Number(r.usersConnected) || 0), 0);
+  // ⚠ v2.598 WEBUI-2598-01: 읽어낸 서버가 **0대**면 수치는 '0명' 이 아니라 **모른다**(null)다.
+  //   예전엔 모든 합계가 0 으로 남아 화면이 '실시간 사용자 0' 을 말하고 추이 DB 에도 0 이 적재됐다
+  //   (사용자가 모두 로그아웃한 것처럼 보이는 거짓 급락). 실패 개수(`serversFailed`)는 그대로 밝힌다.
+  if (!ok.length) {
+    return {
+      servers: list.length, serversOk: 0, serversFailed: list.length,
+      sessions: null, connected: null, disconnected: null, pending: null,
+      stateBlind: false,
+      users: null, usersConnected: null, usersByServerSum: null,
+      usersLowerBound: false, usersOmitted: 0,
+      names: [],
+    };
+  }
   return {
     servers: list.length,
     serversOk: ok.length,

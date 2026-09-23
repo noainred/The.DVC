@@ -6,6 +6,7 @@ import { fetchJson } from '../api.js';
 import EscClose from './EscClose.jsx';
 import BoldText from './boldText.jsx';
 import { metricErrorState, metricAuthStopText } from './vmMetricsText.js';
+import { metricStats } from './vmMetricStats.js'; // v2.598 VC2598-02 — 결측 점을 0 으로 더하지 않는다
 
 const TYPES = [
   { k: 'cpu', label: 'CPU 사용률', color: '#3b82f6' },
@@ -29,7 +30,7 @@ function fmtRate(kbps) {
   if (kbps >= 1024) return `${(kbps / 1024).toFixed(1)} MB/s`;
   return `${Math.round(kbps)} KB/s`;
 }
-const fmtVal = (v, unit) => (unit === 'KBps' ? fmtRate(v) : `${v}${unit}`);
+const fmtVal = (v, unit) => (v == null ? '—' : unit === 'KBps' ? fmtRate(v) : `${v}${unit}`); // v2.598: 결측(null)은 단위 없이 '—'(null% 금지)
 
 function fmtTick(t, interval) {
   const d = new Date(t);
@@ -95,9 +96,8 @@ function MetricModal({ metricsPath, name, onClose }) {
   const { loading, data, error, authStopped } = state;
   const cfg = TYPES.find((t) => t.k === type);
   const pts = (data?.points || []).map((p) => ({ t: p.t, v: p.v }));
-  const last = pts.length ? pts[pts.length - 1].v : null;
-  const avg = pts.length ? Math.round((pts.reduce((a, p) => a + p.v, 0) / pts.length) * 10) / 10 : null;
-  const peak = pts.length ? Math.max(...pts.map((p) => p.v)) : null;
+  // v2.598 VC2598-02: 결측(null) 점은 요약에서 빼고, 차트는 그 구간에서 선을 끊는다(connectNulls 없음).
+  const { last, avg, peak } = metricStats(pts);
   const unit = data?.unit || '';
 
   return (
@@ -166,7 +166,7 @@ function MetricModal({ metricsPath, name, onClose }) {
                 <YAxis stroke="#8b9bb4" fontSize={11} width={unit === 'KBps' ? 72 : 48}
                   tickFormatter={(v) => fmtVal(v, unit)} domain={type === 'cpu' || type === 'mem' ? [0, 100] : [0, 'auto']} />
                 <Tooltip contentStyle={tipStyle} labelFormatter={(t) => new Date(t).toLocaleString('ko-KR')} formatter={(v) => [fmtVal(v, unit), cfg.label]} />
-                <Area type="monotone" dataKey="v" stroke={cfg.color} strokeWidth={2} fill="url(#vmMetricFill)" isAnimationActive={false} connectNulls dot={false} />
+                <Area type="monotone" dataKey="v" stroke={cfg.color} strokeWidth={2} fill="url(#vmMetricFill)" isAnimationActive={false} dot={false} />
               </AreaChart>
             </ResponsiveContainer>
           )}

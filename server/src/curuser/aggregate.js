@@ -84,11 +84,18 @@ export function aggregate(records) {
     }
   }
   const names = [...byUser.values()];
+  // ⚠ v2.598 WEBUI-2598-02: 확인한 서버가 0대면 사용자·세션 수는 **모른다**(null) — 0 으로 두면
+  //   수집이 꺼졌거나 전 서버가 stale/no-agent 일 때 머리 카드가 '전체 고유 사용자 0명' 이라는
+  //   거짓을 말하고 추이 DB 에도 0 이 남는다(규칙: 확인하지 못한 서버를 '사용자 0명' 으로 뭉개지 않는다).
+  const known = vmsOk > 0;
   return {
-    users: names.length,
-    usersActive: names.filter((u) => u.active > 0).length,
-    usersDisc: names.filter((u) => u.active === 0 && u.disc > 0).length,
-    sessions, sessionsActive: sa, sessionsDisc: sd, sessionsOther: so,
+    users: known ? names.length : null,
+    usersActive: known ? names.filter((u) => u.active > 0).length : null,
+    usersDisc: known ? names.filter((u) => u.active === 0 && u.disc > 0).length : null,
+    sessions: known ? sessions : null,
+    sessionsActive: known ? sa : null,
+    sessionsDisc: known ? sd : null,
+    sessionsOther: known ? so : null,
     vms: list.length, vmsOk, vmsFailed, vmsSkipped,
     names: names.sort((a, b) => b.sessions - a.sessions || String(a.name).localeCompare(String(b.name), 'ko')),
   };
@@ -110,9 +117,11 @@ export function aggregateAll(records, { vcNameOf = (id) => id } = {}) {
   }
   const vcenters = [...byVc.entries()].map(([id, rs]) => ({
     vcenterId: id, vcenterName: vcNameOf(id), ...aggregate(rs),
-  })).sort((a, b) => b.users - a.users || String(a.vcenterName).localeCompare(String(b.vcenterName), 'ko'));
+  })).sort((a, b) => (b.users ?? -1) - (a.users ?? -1) || String(a.vcenterName).localeCompare(String(b.vcenterName), 'ko'));
   const total = aggregate(list);
-  const byVcSum = vcenters.reduce((a, v) => a + n0(v.users), 0);
+  // 값을 읽은 법인만 더한다 — 하나도 없으면 null(0 은 '0명' 이라는 거짓이다).
+  const readVcs = vcenters.filter((v) => v.users != null);
+  const byVcSum = readVcs.length ? readVcs.reduce((a, v) => a + v.users, 0) : null;
   return {
     total: { ...total, usersUnion: total.users, usersByVcSum: byVcSum },
     vcenters,
@@ -125,9 +134,11 @@ export function aggregateAll(records, { vcNameOf = (id) => id } = {}) {
  * 계정 목록은 **최신 1건만** 보관한다(현재 누가 붙어 있나가 질문이므로 이력은 불필요).
  */
 export function seriesRow(agg) {
+  // v2.598 WEBUI-2598-02: 확인한 서버가 0대인 주기의 수치는 null 로 넘긴다(NULL 로 적재 — 0 이 아니다).
+  const nn = (v) => (v == null ? null : n0(v));
   return {
-    users: n0(agg.users), usersActive: n0(agg.usersActive),
-    sessions: n0(agg.sessions), sessionsActive: n0(agg.sessionsActive), sessionsDisc: n0(agg.sessionsDisc),
+    users: nn(agg.users), usersActive: nn(agg.usersActive),
+    sessions: nn(agg.sessions), sessionsActive: nn(agg.sessionsActive), sessionsDisc: nn(agg.sessionsDisc),
     vmsOk: n0(agg.vmsOk), vmsFailed: n0(agg.vmsFailed),
   };
 }

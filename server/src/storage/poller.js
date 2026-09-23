@@ -27,6 +27,9 @@ import { withDeadline } from '../proxy/sshExec.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 /** 장비당 수집 타임아웃 — 느린 어레이 1대가 전체 주기를 막지 않게(기본 3분, 하한 30초). */
 const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.STORAGE_DEVICE_TIMEOUT_MS) || 180_000);
+// v2.598 T2598-01: OneFS 영역 수집(66 엔드포인트 직렬)의 시한 — 예전엔 없어서 응답 없는 장비 하나가 최대 약 16.5분
+// 동안 폴러의 재진입 가드를 붙잡았다. 장비 수집 시한과 따로 둔다(고RTT 현장의 정상 영역 수집이 3분을 넘을 수 있다).
+const AREAS_TIMEOUT_MS = Math.max(60_000, Number(process.env.STORAGE_AREAS_TIMEOUT_MS) || 300_000);
 const COLLECTORS = { isilon: isilon.collect, powerstore: powerstore.collect, unity480: unity.collect,
   xtremio: xtremio.collect, vmax: powermax.collect, powermax: powermax.collect,
   vplex: vplex.collect, metronode: vplex.collect };
@@ -106,8 +109,10 @@ async function collectOneInner(dev, startedAt) {
       try {
         const r = config.dataSource === 'mock'
           ? { summary: [{ area: 'cluster', ok: 3, failed: 0 }, { area: 'node', ok: 1, failed: 0 }], endpoints: 4 }
-          : await collectAreasOnce(full);
-        snap.extra = { ...snap.extra, areas: r.summary, areasAt: Date.now(), areasEndpoints: r.endpoints };
+          // 시한이 끊어도 collectAreasOnce 는 던지지 않고 모은 결과를 저장·반환한다(stopped:'deadline').
+          : await withDeadline(AREAS_TIMEOUT_MS, (signal) => collectAreasOnce(full, { signal }), '영역 수집 타임아웃');
+        snap.extra = { ...snap.extra, areas: r.summary, areasAt: Date.now(), areasEndpoints: r.endpoints,
+          ...(r.stopped ? { areasStopped: r.stopped, areasNotTried: r.notTried ?? 0 } : {}) };
         putSnapshot(snap); // 요약 갱신분 재저장(push 가 최신 요약을 실어가게)
       } catch (e) { snap.extra = { ...snap.extra, areasError: e.message }; putSnapshot(snap); }
     }

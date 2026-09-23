@@ -140,10 +140,16 @@ export function normalizeDs(d) {
  */
 export function diffDatastores(datastores, prevRoster) {
   const live = (datastores || []).map(normalizeDs).filter((d) => d.dsId);
-  let capGB = 0, usedGB = 0;
-  for (const d of live) { capGB += d.capGB || 0; usedGB += d.usedGB || 0; }
+  // v2.598(감사 RECENT2598-03): 사용량을 못 읽은 DS(vCenter REST 폴백 — usedGB:null)를 0 으로 더하면 합계 사용량이
+  // 과소가 되고 사용률이 그만큼 낮게 보인다. 용량·사용량 **둘 다에서 빼고**(비율이 읽은 DS 끼리 맞게) 개수를 밝힌다.
+  let capGB = 0, usedGB = 0, usedUnknown = 0;
+  for (const d of live) {
+    if (d.usedGB == null) { if ((d.capGB || 0) > 0) usedUnknown += 1; continue; }
+    capGB += d.capGB || 0; usedGB += d.usedGB;
+  }
   const agg = {
     count: live.length,
+    usedUnknown,
     capGB: Math.round(capGB * 10) / 10,
     usedGB: Math.round(usedGB * 10) / 10,
     freeGB: Math.round((capGB - usedGB) * 10) / 10,
@@ -199,7 +205,7 @@ export function diffDatastores(datastores, prevRoster) {
 /** 전체 합계 행 — vCenter별 결과를 더한다(증감·전원 전환·데이터스토어도 합산). */
 export function totalsOf(perVc) {
   const t = { total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0,
-    dsCount: 0, dsCapGB: 0, dsUsedGB: 0, baseline: false };
+    dsCount: 0, dsCapGB: 0, dsUsedGB: 0, dsUsedUnknown: 0, baseline: false };
   let allBaseline = perVc.length > 0;
   for (const vc of perVc) {
     t.total += vc.total; t.onCount += vc.onCount; t.offCount += (vc.offCount ?? (vc.total - vc.onCount));
@@ -208,6 +214,7 @@ export function totalsOf(perVc) {
     t.dsCount += vc.ds?.count || 0;
     t.dsCapGB += vc.ds?.capGB || 0;
     t.dsUsedGB += vc.ds?.usedGB || 0;
+    t.dsUsedUnknown += vc.ds?.usedUnknown || 0;   // v2.598: 사용량 미상으로 합계에서 뺀 DS 수
     if (!vc.baseline) allBaseline = false;
   }
   t.dsCapGB = Math.round(t.dsCapGB * 10) / 10;

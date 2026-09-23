@@ -15,6 +15,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; /
 import { VCenterClient, vcAuthGuard } from './restClient.js';
 import { describeError } from '../util/errors.js';
 import { geocode } from './geocode.js';
+import { normRequestTimeoutMs } from './soapParse.js'; // v2.598 T2598-03: 요청 시한 [1초, 10분] (0 = 기본값)
 import { config } from '../config.js';
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 
@@ -84,7 +85,8 @@ function normalize(body, existing = null) {
   const intRaw = body.pollIntervalSec ?? e.pollIntervalSec;
   const toRaw = body.timeoutMs ?? e.timeoutMs;
   const pollIntervalSec = intRaw != null && intRaw !== '' ? Math.max(0, Math.round(Number(intRaw) || 0)) : 0; // 0 = global default
-  const timeoutMs = toRaw != null && toRaw !== '' ? Math.max(0, Math.round(Number(toRaw) || 0)) : 0;          // 0 = 30s default
+  // v2.598 T2598-03: 상한 없이 저장하면 2^31ms 이상에서 모든 요청이 1ms 에 abort 된다 — [1초, 10분] 으로 자른다.
+  const timeoutMs = normRequestTimeoutMs(toRaw);          // 0 = 30s default
   const enabled = body.enabled !== undefined ? body.enabled !== false : (e.enabled !== false);
   // 수집 방식: 'direct'(중앙이 직접 폴링) | 'site'(현장 서버가 수집해 중앙으로 push)
   const collectMode = (body.collectMode ?? e.collectMode) === 'site' ? 'site' : 'direct';

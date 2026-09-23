@@ -293,6 +293,10 @@ function Detail({ snap }) {
               {u.banks.map((b) => <span key={b.index} className="badge" style={{ marginRight: 6 }}>뱅크{b.index} {fmtA(b.currentA)}</span>)}
             </div>
           )}
+          {/* v2.598 RECENT2598-04: 데이지체인 유닛 2 이상은 뱅크·상을 읽지 않는다 — '없음' 이 아니라 '미수집' 이다. */}
+          {u.banksNotCollected && (
+            <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>뱅크·상 미수집 — 데이지체인 유닛 2 이상은 명령에 유닛 지정이 없어 읽지 않습니다(유닛 1 값이 복제되기 때문).</div>
+          )}
           {(u.phases || []).length > 0 && (
             <div style={{ marginTop: 6 }}>
               <span className="muted">상(phase): </span>
@@ -389,7 +393,7 @@ function TestResult({ r }) {
       <div style={{ marginTop: 8 }}>
         <b>PDU 본체 {r.units}대</b>
         {(d.units || []).map((u) => (
-          <span key={u.index} className="badge" style={{ marginLeft: 6 }}>#{u.index} {fmtW(u.powerW)} · 뱅크 {u.banks} · 상 {u.phases}</span>
+          <span key={u.index} className="badge" style={{ marginLeft: 6 }}>#{u.index} {fmtW(u.powerW)} · {u.banks == null ? '뱅크·상 미수집' : `뱅크 ${u.banks} · 상 ${u.phases ?? '—'}`}</span>
         ))}
       </div>
       <div style={{ marginTop: 6 }}>
@@ -423,7 +427,7 @@ function CsvModal({ onClose }) {
         </div>
         <div className="muted" style={{ fontSize: 12.5, marginBottom: 10, lineHeight: 1.6 }}>
           열: <code>name, host, username, sshPort, datacenter, agent, enabled, note, password</code><br />
-          같은 <b>host</b> 가 이미 있으면 <b>수정</b>, 없으면 추가됩니다(내보내기 → 편집 → 가져오기 왕복 안전).
+          같은 <b>host</b> 가 이미 있으면 <b>수정</b>, 없으면 추가됩니다(내보내기 → 편집 → 가져오기 왕복 안전).{' '}
           <b>비밀번호는 내보내지 않습니다</b>(가져오기에서 비워 두면 기존 값 유지).
           센서/PDU 수량 열이 없는 것은 의도입니다 — 자동 탐지합니다.
         </div>
@@ -521,9 +525,9 @@ function ThresholdModal({ data, onClose }) {
           <button className="logout-btn" style={{ padding: '5px 10px', marginLeft: 'auto' }} onClick={onClose}>닫기</button>
         </div>
         <div className="muted" style={{ fontSize: 12.5, marginBottom: 12, lineHeight: 1.6 }}>
-          임계치를 넘으면 <b>설정 › 알림</b>에 등록된 채널(Slack/Teams/웹훅)로 보냅니다.
+          임계치를 넘으면 <b>설정 › 알림</b>에 등록된 채널(Slack/Teams/웹훅)로 보냅니다.{' '}
           <b>상태가 바뀔 때만</b> 알리고(정상→경고→위험), 해소되면 복구 1통을 보냅니다.
-          재알림 간격은 알림 설정의 쿨다운을 따릅니다. <b>비워 두면 그 항목은 감시하지 않습니다.</b>
+          재알림 간격은 알림 설정의 쿨다운을 따릅니다. <b>비워 두면 그 항목은 감시하지 않습니다.</b>{' '}
           측정값이 없으면(센서 미장착·첫 수집) 판정하지 않습니다.
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>

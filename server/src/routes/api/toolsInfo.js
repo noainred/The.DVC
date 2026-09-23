@@ -6,12 +6,19 @@ import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { loadUiSettings, saveUiSettings } from '../../ui-settings.js';
 import { upgradeVmTools } from '../../vcenter/soapClient.js';
+import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론 포함 vCenter id 안전한 분해
 import { nsxStore } from '../../nsx/store.js';
 import { licenseFamilyOf, licenseExpiryStatus } from '../../util/licenseExpiry.js';
 import { collectHorizonLicenses, listHorizon } from '../../horizon/horizon.js';
 import { memoJson, scopeKey, osFamily } from './shared.js';
 import { aggregateGuestOs } from '../../inventory/guestOsAgg.js';
 import { dayKey } from "../../util/dayKey.js";
+
+/** VM id → 스냅샷 VM 의 vcenterId(없으면 null). v2.598 VC2598-06 — id 를 첫 콜론에서 자르지 않는다. */
+export function upgradeVcOf(snap) {
+  const byId = new Map((snap?.vms || []).map((v) => [v.id, v.vcenterId]));
+  return (id) => (byId.has(id) ? String(byId.get(id) ?? '') : null);
+}
 
 export function registerToolsInfo(api) {
 
@@ -197,8 +204,10 @@ api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), requirePerm('to
   // v2.369: 쓰기 라우트이므로 조회 범위가 아니라 **쓰기 범위**(writeVcenters ∩ 조회)를 쓴다 —
   // writeVcenters 미설정이면 조회 범위와 동일해 기존 동작 불변.
   const allowed = writeScopedVcenterIds(req.user, snap);
+  // v2.598 VC2598-06: vCenter 는 id 문자열(첫 콜론)이 아니라 **스냅샷 VM 의 vcenterId** 로 정한다 — vCenter id 에 콜론이
+  // 있으면 첫 콜론 분해가 다른 vCenter 를 가리킨다. 스냅샷에 없는 id 는 vCenter 를 모르므로 범위 계정에서는 뺀다.
+  const vcOf = upgradeVcOf(snap);
   if (allowed) {
-    const vcOf = (id) => (id.indexOf(':') >= 0 ? id.slice(0, id.indexOf(':')) : id);
     const dropped = ids.filter((id) => !allowed.has(vcOf(id))).length;
     ids = ids.filter((id) => allowed.has(vcOf(id)));
     if (!ids.length) return res.status(403).json({ ok: false, reason: '요청한 VM 이 모두 접근 범위 밖입니다.' });
@@ -209,15 +218,14 @@ api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), requirePerm('to
   }
   // live: group by vCenter and call UpgradeTools_Task
   const byVc = new Map();
+  const results = [];
   for (const id of ids) {
-    const sep = id.indexOf(':');
-    const vcId = sep >= 0 ? id.slice(0, sep) : id;
-    const moref = sep >= 0 ? id.slice(sep + 1) : '';
+    const vcId = vcOf(id);
+    if (vcId == null) { results.push({ id, ok: false, error: 'VM을 찾을 수 없습니다(현재 스냅샷에 없음)' }); continue; }
     if (!byVc.has(vcId)) byVc.set(vcId, []);
-    byVc.get(vcId).push({ id, moref });
+    byVc.get(vcId).push({ id, moref: morefOf(id, vcId) });
   }
   const cfg = loadVcenterConfig().vcenters;
-  const results = [];
   for (const [vcId, list] of byVc) {
     const vc = cfg.find((v) => v.id === vcId);
     if (!vc) { for (const x of list) results.push({ id: x.id, ok: false, error: 'vCenter 설정 없음' }); continue; }

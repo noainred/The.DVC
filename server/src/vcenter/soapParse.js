@@ -16,6 +16,10 @@ export function xmlUnescape(s) {
   });
 }
 
+// 스냅샷 체인 파일 판정(snapshotInfo) — layoutEx.file 의 type 과 델타 디스크 이름 형식.
+const SNAP_FILE_TYPES = new Set(['snapshotData', 'snapshotMemory', 'snapshotList']);
+const SNAP_DELTA_RE = /-\d{6}(?:-(?:delta|sesparse))?\.vmdk$/i;
+
 /**
  * VM 'snapshot'(VirtualMachineSnapshotInfo) + 'layoutEx.file' XML → 스냅샷 요약.
  * 개수·근사 크기에 더해 생성일(가장 오래된/최신)과 이름 목록을 파싱한다 — 커뮤니티 표준
@@ -28,11 +32,19 @@ export function snapshotInfo(snapXml, layoutXml) {
     || (snapXml.match(/<VirtualMachineSnapshotTree>/g) || []).length;
   let bytes = 0;
   if (snapshotCount > 0 && layoutXml) {
-    // Sum sizes of snapshot data (.vmsn) files as a best-effort delta size.
+    // 스냅샷 체인이 차지하는 파일 크기 합(v2.598 VC2598-01 — 예전에는 .vmsn 과 `-000001.vmdk`
+    // **디스크립터**(수백 바이트)만 더해, 실제 용량인 델타 익스텐트(-000001-sesparse.vmdk ·
+    // -000001-delta.vmdk)와 메모리(.vmem)가 빠졌다 → 스냅샷 크기가 거의 0 으로 보였다).
+    // 판정: layoutEx.file 의 type 이 스냅샷 계열(snapshotData=.vmsn · snapshotMemory=.vmem ·
+    // snapshotList=.vmsd)이거나, 파일 이름이 델타 체인 형식(`-NNNNNN.vmdk` · `-NNNNNN-delta.vmdk` ·
+    // `-NNNNNN-sesparse.vmdk`)이면 더한다. 크기는 uniqueSize(다른 VM 과 공유하지 않는 바이트)가 있으면
+    // 그것을 쓴다 — 링크드 클론이 공유하는 부모 체인을 이 VM 의 회수 가능 용량으로 세지 않게.
     for (const blk of layoutXml.split('<file>').slice(1)) {
       const type = /<type>([^<]+)<\/type>/.exec(blk)?.[1];
-      const size = Number(/<size>(\d+)<\/size>/.exec(blk)?.[1] || 0);
-      if (type === 'snapshotData' || /-(\d{6})\.vmdk/.test(blk)) bytes += size;
+      const name = /<name>([^<]*)<\/name>/.exec(blk)?.[1] || '';
+      const unique = /<uniqueSize>(\d+)<\/uniqueSize>/.exec(blk)?.[1];
+      const size = Number(unique ?? /<size>(\d+)<\/size>/.exec(blk)?.[1] ?? 0);
+      if (SNAP_FILE_TYPES.has(type) || SNAP_DELTA_RE.test(name)) bytes += size;
     }
   }
   // 트리 내 모든 <createTime>(중첩 child 포함)에서 가장 오래된/최신 생성일을 뽑는다.
@@ -73,11 +85,15 @@ export function parseObjectContent(xml) {
     const objM = /<obj type="([^"]+)">([^<]+)<\/obj>/.exec(block);
     if (!objM) continue;
     const props = {};
-    const psRe = /<propSet>\s*<name>([^<]+)<\/name>\s*<val[^>]*>([\s\S]*?)<\/val>\s*<\/propSet>/g;
+    // v2.598 VC2598-10: 빈 속성은 자기닫힘 `<val xsi:type="ArrayOfX"/>` 으로 올 수 있다. 예전 `<val[^>]*>`
+    // 은 그 `/>` 까지 여는 태그로 읽고 **다음 propSet 의 `</val>` 까지** 삼켜, 그 속성에 옆 속성의 XML 이
+    // 들어가고 옆 속성은 사라졌다. 자기닫힘을 먼저 따로 받는다(값은 빈 문자열).
+    const psRe = /<propSet>\s*<name>([^<]+)<\/name>\s*<val(?:\s[^>]*?)?(?:\/>|>([\s\S]*?)<\/val>)\s*<\/propSet>/g;
     let p;
     while ((p = psRe.exec(block))) {
+      const raw = p[2] ?? '';
       // 스칼라 텍스트 값만 엔티티 복원(중첩 XML은 이후 내부 파서가 다루므로 원형 유지).
-      props[p[1]] = p[2].indexOf('<') === -1 ? xmlUnescape(p[2]) : p[2];
+      props[p[1]] = raw.indexOf('<') === -1 ? xmlUnescape(raw) : raw;
     }
     out.push({ type: objM[1], ref: objM[2], props });
   }
@@ -208,4 +224,33 @@ export function parseLayoutFilePaths(xml) {
     if (name) out.push(xmlUnescape(name));
   }
   return out;
+}
+
+/* ------------------- 요청 시한 정규화 (v2.598 T2598-03) ------------------- */
+
+// vCenter·NSX·Horizon 등록의 요청 시한(timeoutMs) 범위. ⚠ 상한이 없으면 사고가 두 가지다 —
+// ① AbortSignal.timeout / setTimeout 은 2^31−1ms(24.8일)를 넘으면 **1ms** 로 바뀌어(v2.591 L2 와 같은
+//    함정) 모든 요청이 즉시 abort 된다 ② store 의 수집 데드라인은 timeoutMs×3 이라 715,827,883ms 부터
+//    그 곱이 2^31 을 넘어 **데드라인이 즉시 발화**한다. 10분이면 800ms+ RTT 회선의 대형 RetrieveProperties
+//    에도 충분하다. 이 파일에 두는 이유: 부수효과 없는 leaf 모듈이라 soapClient·registry·store 가 순환 없이
+//    함께 쓸 수 있다(vcenter/registry.js 는 restClient 를 import 하고 restClient 는 soapClient 를 동적
+//    import 하므로, soapClient 가 registry 를 import 하면 순환이 생긴다).
+export const REQUEST_TIMEOUT_MIN_MS = 1_000;
+export const REQUEST_TIMEOUT_MAX_MS = 600_000;
+
+/**
+ * 등록 저장용 — 빈 값·0·음수·숫자 아님은 0(= 기본값 규약), 그 밖은 [1초, 10분] 으로 자른다.
+ * `Number('') === 0` 함정은 빈 값을 먼저 걸러 피한다(빈 칸 = 기본값이 이 등록부의 기존 규약이다).
+ */
+export function normRequestTimeoutMs(raw) {
+  if (raw == null || raw === '' || typeof raw === 'boolean' || Array.isArray(raw)) return 0;
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.max(REQUEST_TIMEOUT_MIN_MS, Math.min(REQUEST_TIMEOUT_MAX_MS, n));
+}
+
+/** 실행 시점 방어선 — 저장 파일에 남은 옛 큰 값(정규화 이전 저장분)도 상한으로 자른다. 0/없음은 dflt. */
+export function effectiveRequestTimeoutMs(ms, dflt) {
+  const n = normRequestTimeoutMs(ms);
+  return n > 0 ? n : dflt;
 }

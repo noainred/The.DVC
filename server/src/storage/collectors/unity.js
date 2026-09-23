@@ -7,8 +7,27 @@
 import { emptySnapshot } from '../types.js';
 import { makeGetter } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { healthWord } from '../healthWord.js';
 
 const entries = (v) => (v?.entries || []).map((e) => e.content || {});
+
+/**
+ * Unisphere REST `HealthEnum` → 상태 단어(순수, v2.598 감사 IDRAC-2598-05).
+ * ⚠ 열거값의 뜻은 Unisphere REST 문서 기반이고 **실장비 응답으로 확인하지 못했다**(이 파일 머리말과 같은 한계):
+ *   0 UNKNOWN · 5 OK · 7 OK_BUT · 10 DEGRADED · 15 MINOR · 20 MAJOR · 25 CRITICAL · 30 NON_RECOVERABLE.
+ * 단어는 `storage/healthWord.js`(ok/bad/unknown)와 `partfault/classify.js healthStringState`(warn 세분)가
+ * 그대로 읽을 수 있는 것으로 고른다. 모르는 값은 예전처럼 `health:N` 원문을 남긴다(지어내지 않는다).
+ */
+// 20 이상(MAJOR·CRITICAL·NON_RECOVERABLE)은 예전처럼 'health:N' 원문을 남긴다 — 어느 판정에서도 이상(bad/fault)이고
+// 화면·기존 테스트(storageMon 'health:20')가 원문 표기를 기대한다. 번역이 필요했던 것은 0·10·15 가 **이상으로
+// 과대 판정**되던 것이다.
+const UNITY_HEALTH = Object.freeze({ 0: 'unknown', 5: 'ok', 7: 'ok', 10: 'degraded', 15: 'minor' });
+export function unityHealthWord(value) {
+  if (value == null || value === '') return 'unknown';
+  const v = Number(value);
+  if (!Number.isInteger(v)) return 'unknown';
+  return UNITY_HEALTH[v] || `health:${v}`;
+}
 
 /** 원시 응답 → 정규화(순수). raw: {system,sw,cap,pools,sps,users,alerts} */
 export function normalizeUnity(device, raw) {
@@ -44,9 +63,11 @@ export function normalizeUnity(device, raw) {
   }
   const sps = entries(raw.sps);
   if (sps.length) {
-    // health.value: 5=OK 계열(Unisphere HealthEnum) — 문서 기반, 모르면 unknown 으로 정직 표기.
-    const healthOf = (h) => (h?.value === 5 || h?.value === 7 ? 'ok' : h?.value != null ? `health:${h.value}` : 'unknown');
-    snap.nodes = { count: sps.length, unhealthy: sps.filter((s) => healthOf(s.health) !== 'ok' && healthOf(s.health) !== 'unknown').length,
+    // v2.598(감사 IDRAC-2598-05): 열거값을 **단어로 번역**하고 비정상 계수는 공용 판정(healthWord)을 쓴다.
+    //   예전에는 5·7 만 ok 이고 나머지는 전부 'health:N' 이라 0(UNKNOWN)이 **비정상 노드**·파트 장애 fault 로 세졌고
+    //   10·15(DEGRADED·MINOR)도 fault 였다.
+    const healthOf = (h) => unityHealthWord(h?.value);
+    snap.nodes = { count: sps.length, unhealthy: sps.filter((s) => healthWord(healthOf(s.health)) === 'bad').length,
       list: sps.slice(0, 64).map((s, i) => ({ id: i + 1, ip: '', health: healthOf(s.health), inBps: null, outBps: null, hdd: null, ssd: null, l3Bytes: 0, name: s.name || s.id || '' })) };
     snap.sections.nodes = 'ok';
   }

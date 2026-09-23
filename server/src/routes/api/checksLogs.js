@@ -137,8 +137,9 @@ api.get('/tools/vclogs/sources', requirePerm('tools'), (req, res) => {
   const vcAgent = new Map();
   for (const inv of listInventory()) if (inv.agent && inScope(inv.vcenterId)) vcAgent.set(inv.vcenterId, inv.agent);
   for (const a of getAllGpuGuestDiag()) {
-    if (!a.agent) continue;
-    for (const vc of a.vcenters || []) if (vc.vcId && inScope(vc.vcId)) vcAgent.set(vc.vcId, a.agent);
+    // v2.598(감사 CENTRAL-02): insights/graph.js 와 같은 형식 가드 — 오염된 저장값이 이 목록을 500 으로 만들지 않게.
+    if (!a || !a.agent || !Array.isArray(a.vcenters)) continue;
+    for (const vc of a.vcenters) if (vc && vc.vcId && inScope(vc.vcId)) vcAgent.set(vc.vcId, a.agent);
   }
   const remote = [];
   for (const [vcenterId, agent] of vcAgent) if (!localIds.has(vcenterId)) remote.push({ vcenterId, agent });
