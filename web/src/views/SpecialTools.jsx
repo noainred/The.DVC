@@ -42,7 +42,8 @@ const EdgeLog = React.lazy(() => import('./tools/EdgeLog.jsx'));         // 엣�
 const BmUsage = React.lazy(() => import('./tools/BmUsage.jsx'));         // 베어메탈 사용률(v2.550)
 const LinkCheck = React.lazy(() => import('./tools/LinkCheck.jsx'));     // 통신 점검(중앙↔엣지·vCenter, v2.552)
 const PortalCheck = React.lazy(() => import('./tools/PortalCheck.jsx')); // 포탈 점검 › 토큰 점검(v2.560)
-const CommMap = React.lazy(() => import('./tools/CommMap.jsx'));         // 통신 지도(중앙↔엣지 라디얼, v2.584)
+const CommMap = React.lazy(() => import('./tools/CommMap.jsx'));
+const DataFlow = React.lazy(() => import('./tools/DataFlow.jsx'));       // 데이터 흐름 지도(포탈 사이 전 경로, v2.587)         // 통신 지도(중앙↔엣지 라디얼, v2.584)
 const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
 const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
 const PduTool = React.lazy(() => import('./tools/PduTool.jsx'));
@@ -466,6 +467,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'link-check' && <LinkCheck />}
       {tool === 'portal-check' && <PortalCheck />}
       {tool === 'comm-map' && <CommMap />}
+      {tool === 'data-flow' && <DataFlow />}
       {tool === 'bm-storage' && <BmStorageTool />}
       {tool === 'san-switch' && <SanSwitchTool />}
       {tool === 'pdu' && <PduTool />}

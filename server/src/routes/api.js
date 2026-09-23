@@ -29,6 +29,7 @@ import { registerBmUsage } from './api/bmUsage.js'; // 베어메탈 사용률(CP
 import { registerLinkCheck } from './api/linkCheck.js'; // 통신 점검(중앙↔엣지·vCenter·엣지↔엣지, v2.552)
 import { registerPortalCheck } from './api/portalCheck.js'; // 포탈 점검 › 토큰 점검(v2.560)
 import { registerCommMap } from './api/commMap.js'; // 통신 지도(중앙↔엣지 통신 시각화, v2.584)
+import { registerDataFlow } from './api/dataFlow.js'; // 데이터 흐름 지도(포탈 사이 전 경로, v2.587)
 import { registerPdu } from './api/pdu.js';               // PDU 정보(APC Rack PDU 2G, v2.424)
 import { registerSerialLookup } from './api/serialLookup.js'; // 시리얼 통합 조회(v2.412)
 import { registerRma } from './api/rma.js';                   // 원격 명령 실행(RMA, v2.416)
@@ -99,6 +100,7 @@ registerBmUsage(api);
 registerLinkCheck(api);
 registerPortalCheck(api);
 registerCommMap(api);
+registerDataFlow(api);
 registerPdu(api);
 registerSerialLookup(api);
 registerRma(api);

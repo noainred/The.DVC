@@ -3048,6 +3048,32 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ 확인하지 못한 것(정직 기록): `curUser /settings` 가 범위 계정에 함대 전체 `overLimit`·`push.last.records` 를 줄
       수 있다는 스윕 후보는 curuser 를 켜고 대상이 `maxVms` 를 넘어야 재현돼 **재현하지 못했다**(후속).
 
+  - ⚠⚠ **데이터 흐름 지도(v2.587) — 경로는 라우터 선언에서 읽고, 계측이 없는 방향은 계측부터 만든다**
+    (`server/src/dataflow/build.js`(순수) + `central/pullStats.js` + `util/outboundStats.js` + `routes/api/dataFlow.js` +
+    웹 `views/tools/DataFlow.jsx`·`dataFlowLayout.js`·`dataFlowText.js`, 사용자 요청 "엣지·수집 agent·iDRAC·GPU·전력 …
+    엣지에서 포탈로 통신하는 모든 데이터, push pull 로 가져오는 모든 데이터를 표시" + 노드 그래프 영상. 선택: 엣지 내부
+    수집은 **누를 때만** · 통신 지도 확장이 아니라 **새 화면** · 시안은 클로드 디자인 캔버스):
+    - **경로 목록을 손으로 적지 않는다** — `declaredRoutes()` 가 `centralRouter`·`collectorRouter` 의 stack 을 읽는다.
+      분류(`CATS`)는 `side:path` 정규식이고 걸리지 않으면 `other` + `unmapped` 로 밝힌다 — 테스트가 `unmapped` 0 을
+      고정하므로 **새 central/collector 경로를 만들면 `CATS` 에 분류할 것**(안 하면 CI 가 깨진다).
+    - ⚠⚠ **GET 은 예전에 기록되지 않았다** — `routes/central.js` 집계 미들웨어가 POST 만 셌다. 이제 GET 도 `pullStats` 에
+      남기되 키는 **매칭된 라우트의 선언 경로**(`req.route.path`)이고, 인증에서 막혀 라우트에 닿지 못한 요청은
+      **선언 GET 경로 집합에 있을 때만** 실패로 센다(없는 경로로 키를 불리지 못하게 — v2.583 ingestReject 상한 사고).
+      이름은 개별 토큰이면 검증됨, 아니면 `verified:false`.
+    - **중앙 → 엣지 호출은 `resilientFetch` 한 곳에서 기록한다**(`util/outboundStats.js`, `/api/collector/`·`/api/central/`
+      경로만). **쿼리를 버리고** 헤더·본문을 저장하지 않는다(토큰). 전역 `fetch` 를 쓰는 `collector/upgradePush.js` 는
+      직접 기록한다 — **포탈 사이 호출을 전역 fetch 로 새로 만들면 여기 기록도 붙일 것**(안 붙이면 지도에서 빠진다).
+    - 판정: 기록 없는 연결은 **만들지 않는다**(경로는 `none` 회색) · 실패가 성공보다 뒤일 때만 `fail` · 낡음 =
+      `max(관측 간격 × 3, 10분)` · 거부의 시각은 `recent` 원문에만 있어 밀려난 거부는 **개수만**(`rejectsWithoutTime`).
+      전부 인메모리라 **중앙 재시작 직후엔 전부 회색**이고 화면이 `since` 로 밝힌다.
+    - ⚠ **`<button>` 을 카드로 쓸 때 `display:flex; flex-direction:column; justify-content:flex-start`** — 버튼은 내용을
+      세로 가운데 정렬해 카드 위에 빈 띠가 생겼다(v2.587 스크린샷 판독에서 발견. 수치로는 안 잡혔다).
+    - ⚠ **그래프 폭은 1440px 본문(약 1390px) 안** — 1400px 초판은 세 번째 열 엣지 카드가 잘렸다(같은 판독). 좁은 화면은
+      그래프 상자만 가로 스크롤(페이지 넘침 0 — 400px 실측).
+    - ⚠ 정직 기록: 검증은 **중앙+엣지 목 스택 2대**(공유 토큰)로 했다 — 그래서 목 엣지의 pull 은 전부 '이름 미검증'이고
+      `capacity-report`·`svcmon-report` 는 '개별 토큰만 허용' 으로 **실제로 거부**되어 빨간 선으로 보였다(제품 동작 그대로).
+      시안의 '중앙 직접' 노드는 포탈 사이 통신이 아니라 구현에서 뺐다. 실엣지 28곳 규모의 선 겹침은 보지 못했다.
+
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
 서버 보안 불변조건(전역 TLS·RBAC·토큰 검증·scope·OTP·WS 게이트웨이 등 전 항목)은
