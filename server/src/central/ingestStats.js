@@ -32,8 +32,10 @@ export function recordIngest(agent, endpoint, { wireBytes = 0, summary = null } 
   if (a.lastAt && now > a.lastAt) a.intervalMsEwma = ewma(a.intervalMsEwma, now - a.lastAt);
   a.lastAt = now; a.pushes++; a.wireBytes += wireBytes;
   let e = a.byEndpoint.get(endpoint);
-  if (!e) { e = { endpoint, count: 0, wireBytes: 0, lastAt: 0 }; a.byEndpoint.set(endpoint, e); }
-  e.count++; e.wireBytes += wireBytes; e.lastAt = now;
+  if (!e) { e = { endpoint, count: 0, wireBytes: 0, firstAt: now, lastAt: 0, lastBytes: 0, intervalMsEwma: null }; a.byEndpoint.set(endpoint, e); }
+  // v2.587 — 경로별 간격(데이터 흐름 지도의 '낡음' 경계). 에이전트 전체 간격은 경로가 섞여 짧게 나온다.
+  if (e.lastAt && now > e.lastAt) e.intervalMsEwma = ewma(e.intervalMsEwma, now - e.lastAt);
+  e.count++; e.wireBytes += wireBytes; e.lastAt = now; e.lastBytes = wireBytes;
   if (summary) a.last = { at: now, endpoint, wireBytes, ...summary };
 }
 

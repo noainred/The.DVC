@@ -13,6 +13,7 @@
  *  3) 일시적 오류(연결 리셋/타임아웃/5xx 게이트웨이)는 지수 백오프로 재시도한다.
  */
 
+import { recordOutbound } from './outboundStats.js';
 import { Agent } from 'undici';
 import { ssrfLookup } from './ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
 import { ssrfBlockReason } from './ssrfBlock.js'; // v2.583: 리다이렉트 hop 마다 IP 리터럴 대상 검사
@@ -147,7 +148,23 @@ async function fetchFollowing(url, init, disp, timeoutMs) {
   throw new Error(`리다이렉트가 ${MAX_REDIRECTS}회를 넘었습니다: ${url}`);
 }
 
-export async function resilientFetch(url, { timeoutMs = 20_000, retries = 2, retryBackoffMs = 400, onRetry, dispatcher, ...init } = {}) {
+/**
+ * v2.587 — 포탈 사이 호출(`/api/collector/*`·`/api/central/*`)은 결과를 `util/outboundStats.js` 에 남긴다
+ * (데이터 흐름 지도). 기록은 최종 결과 1회(재시도 중간 결과가 아니다)이고, 기록 실패가 호출을 깨지 않는다.
+ */
+export async function resilientFetch(url, opts = {}) {
+  const t0 = Date.now();
+  try {
+    const res = await resilientFetchInner(url, opts);
+    try { recordOutbound(url, { status: res.status, bytes: Number(res.headers?.get?.('content-length')) || 0, ms: Date.now() - t0, method: opts.method }); } catch { /* 계측은 best-effort */ }
+    return res;
+  } catch (err) {
+    try { recordOutbound(url, { error: String(err?.message || err), ms: Date.now() - t0, method: opts.method }); } catch { /* 계측은 best-effort */ }
+    throw err;
+  }
+}
+
+async function resilientFetchInner(url, { timeoutMs = 20_000, retries = 2, retryBackoffMs = 400, onRetry, dispatcher, ...init } = {}) {
   let lastErr;
   // dispatcher 옵션: 업그레이드 다운로드처럼 'TLS 검증 강제' 디스패처(upgradeAgent)를 넘겨야 하는
   // 경로는 wanAgent(검증 off) 대신 그 디스패처로 재시도한다(보안 보존).

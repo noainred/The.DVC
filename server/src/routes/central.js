@@ -33,6 +33,7 @@ import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, agentOfReq
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
 import { upsertCollectorFromAgent, ssrfBlockReasonResolved, verifyDerivedCollectorUrl } from '../collector/registry.js';
 import { recordIngest, noteInventoryCompression } from '../central/ingestStats.js';
+import { recordPull } from '../central/pullStats.js';
 // v2.570: 거부된 push 를 기록한다 — 아래 집계는 4xx/5xx 를 빼므로, 그것만으로는 '안 보냈다' 와
 //         '보냈는데 막혔다' 가 화면에서 똑같이 보인다(조치가 정반대다).
 import { recordReject, REJECT_KIND } from '../central/ingestReject.js';
@@ -76,6 +77,15 @@ import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.583: 반복 수신 로그 조절
 const gpuRecvLog = createChangeLogger();
 export const centralRouter = Router();
+let _getPaths = null;
+/** 이 라우터에 선언된 GET 경로 집합(첫 호출 때 한 번 만든다 — 라우트 등록은 모듈 로드 때 끝난다). */
+function declaredGetPaths() {
+  if (!_getPaths) {
+    _getPaths = new Set();
+    for (const l of centralRouter.stack) if (l.route?.methods?.get && typeof l.route.path === 'string') _getPaths.add(l.route.path);
+  }
+  return _getPaths;
+}
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
 // ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
@@ -84,6 +94,22 @@ wrapAsyncRouter(centralRouter);
 // 수신 트래픽 진단 — 에이전트→중앙 POST의 와이어 바이트(Content-Length)·페이로드 요약을 에이전트·
 // 엔드포인트별로 집계한다(특정 에이전트가 무엇을 얼마나 보내는지 화면에서 확인). 응답 완료 시 1회 기록.
 centralRouter.use((req, res, next) => {
+  // v2.587 — 엣지가 **가져가는**(GET) 요청도 기록한다(데이터 흐름 지도). 예전에는 POST 만 세어
+  //   설정 pull·작업 인출이 언제·누가 가져갔는지 중앙에 남지 않았다. 키는 매칭된 라우트의 선언 경로
+  //   (`req.route.path`) — 매칭되지 않은 요청은 세지 않는다(없는 경로로 키를 불리지 못하게).
+  if (req.method === 'GET') {
+    res.on('finish', () => {
+      try {
+        // 인증에서 막힌 요청은 라우트 매칭 전에 끝나 req.route 가 없다 — 그래도 **선언된 경로면** 실패로 센다
+        // (막힌 pull 이 안 보이면 '안 가져갔다' 와 '막혔다' 가 구분되지 않는다).
+        const ep = req.route?.path || (declaredGetPaths().has(req.path) ? req.path : '');
+        if (!ep) return;
+        const auth = req.centralAuth;
+        const agent = String(auth?.agent || req.query?.agent || req.get('X-Agent-Name') || '').trim() || '(unknown)';
+        recordPull(agent, ep, { status: res.statusCode, bytes: Number(res.get('content-length')) || 0, verified: auth?.mode === 'agent' });
+      } catch { /* 진단은 best-effort */ }
+    });
+  }
   if (req.method === 'POST') {
     res.on('finish', () => {
       try {

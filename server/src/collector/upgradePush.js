@@ -7,7 +7,8 @@
 import { createHash } from 'node:crypto';
 import { loadCollectors } from './registry.js';
 import { setCollectorStatus, getCollectorStatus } from './state.js';
-import { _internals as _rf } from '../util/resilientFetch.js'; // wanAgent — WAN 전용 로컬 디스패처(전역 오염 없음)
+import { _internals as _rf } from '../util/resilientFetch.js';
+import { recordOutbound } from '../util/outboundStats.js'; // v2.587 — 전역 fetch 경로라 직접 기록(데이터 흐름 지도) // wanAgent — WAN 전용 로컬 디스패처(전역 오염 없음)
 
 // 실패 HTTP 상태를 사람이 이해할 원인으로 분류(엣지별로 '무엇을 점검할지' 바로 알려주기 위함).
 export function httpFailHint(status) {
@@ -46,6 +47,7 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
     });
     const body = await res.json().catch(() => ({}));
     const ok = res.ok && body.ok !== false;
+    recordOutbound(url, { status: ok ? res.status : (res.status < 400 ? 500 : res.status), bytes: bytes?.length || 0, method: 'POST', error: ok ? '' : String(body.reason || body.error || '') });
     if (ok) return { id: c.id, name: c.name, ok: true, status: res.status, version: body.version };
     // 실패: 상태코드 + 서버 사유 + 점검 힌트를 하나의 reason으로 합쳐 UI/로그에서 바로 원인 파악.
     const serverMsg = body.reason || body.error || '';
@@ -53,6 +55,7 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
     const reason = `HTTP ${res.status}${serverMsg ? ` — ${serverMsg}` : ''}${hint ? ` · ${hint}` : ''}`;
     return { id: c.id, name: c.name, ok: false, status: res.status, reason };
   } catch (err) {
+    recordOutbound(url, { error: String(err?.message || err), method: 'POST' });
     return { id: c.id, name: c.name, ok: false, reason: netFailReason(err.message), netError: true };
   }
 }
