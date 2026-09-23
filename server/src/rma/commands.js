@@ -19,6 +19,7 @@
  *    start/stop/restart 는 RMA_SERVICE_UNITS 목록의 유닛만, reboot 는 RMA_ALLOW_REBOOT=true 일 때만,
  *    허용/차단 목록(RMA_ENABLED_COMMANDS/RMA_DISABLED_COMMANDS)이 최종. sudoers 는 같은 목록에서 생성한다.
  */
+import { strictIpv4Num, cidrMatch } from '../util/ipv4.js';
 
 const RE_HOST = /^[A-Za-z0-9][A-Za-z0-9.:-]{0,253}$/;                 // IP(v4/v6)·호스트명, 선행 - 금지
 const RE_UNIT = /^[A-Za-z0-9][A-Za-z0-9@._-]{0,79}$/;                   // systemd 유닛명
@@ -271,14 +272,15 @@ export function commandAllowed(id, policy = {}) {
 export function targetAllowed(host, list = []) {
   const h = String(host || '').trim().toLowerCase();
   if (!h) return false;
+  // v2.589: 숫자·점 모양인데 정규형이 아니면(선행 0 = 8진 해석 위험) 목록과 무관하게 거부 — util/ipv4 단일 소스.
+  const n = strictIpv4Num(h);
+  if (n === false) return false;
   if (!list || !list.length) return true;
-  const toN = (s) => { const p = s.split('.').map(Number); return p.length === 4 && p.every((x) => Number.isInteger(x) && x >= 0 && x <= 255) ? ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0 : null; };
-  const n = toN(h);
   for (const raw of list) {
     const e = String(raw).trim().toLowerCase();
     if (e === '*') return true;
     if (e.startsWith('*.')) { if (h.endsWith(e.slice(1))) return true; continue; }
-    if (e.includes('/')) { const [b, bits] = e.split('/'); const bn = toN(b); const k = Number(bits); if (n == null || bn == null || !(k >= 0 && k <= 32)) continue; const mask = k === 0 ? 0 : (0xffffffff << (32 - k)) >>> 0; if ((n & mask) === (bn & mask)) return true; continue; }
+    if (e.includes('/')) { if (n != null && cidrMatch(n, e) === true) return true; continue; }
     if (e === h) return true;
   }
   return false;

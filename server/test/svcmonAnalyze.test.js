@@ -15,6 +15,7 @@
  * T10~T13 은 위 메인 픽스처의 파일 수 단언(listLogWindows/skipped)을 보호하기 위해
  * 각자 별도 로그 디렉터리(setLogSettings dirName 전환)에서 돈다 — T8 과 같은 패턴.
  */
+import { portalMs, portalParts } from '../src/util/dayKey.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -40,7 +41,8 @@ function q(v) {
   if (/[",\n\r]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
   return s;
 }
-const L = (...a) => new Date(...a).getTime(); // 로컬 시간 ms epoch
+// v2.589: 버킷·파일명 경계는 프로세스 TZ 가 아니라 포탈 오프셋 기준이다 — 기준 시각도 같은 기준으로 만든다.
+const L = (y, mo, d = 1, h = 0, mi = 0, sec = 0) => portalMs(y, mo, d, h) + mi * 60_000 + sec * 1000;
 function row(ts, p, target, host, testName, type, status, reply, ms, streak = 1) {
   return [new Date(ts).toISOString(), p, target, host, testName, type, status, reply, ms, streak].map(q).join(',');
 }
@@ -95,7 +97,7 @@ test('parseLogFileName: day/hour/part/week/month/quarter 형식 + 불가 시 nul
   // 주간 — 시작이 월요일이고, csvlog.periodKey(라이터의 진실)와 키가 왕복 일치한다
   const wk = parseLogFileName('results-2026-W32.csv');
   assert.equal(wk.rotate, 'week');
-  assert.equal(new Date(wk.from).getDay(), 1);
+  assert.equal(portalParts(wk.from).dow, 1);
   assert.equal(periodKey(wk.from, 'week'), '2026-W32');
   assert.equal(periodKey(wk.to - 1, 'week'), '2026-W32');
   assert.equal(periodKey(wk.to, 'week'), '2026-W33');
@@ -335,7 +337,7 @@ test('T10 hour/week/quarter 버킷: 경계 행이 올바른 버킷으로 갈린�
       ['2026-W32', 2, L(2026, 7, 3)],
       ['2026-W33', 1, L(2026, 7, 10)],
     ]);
-    assert.equal(new Date(wk.buckets[0].from).getDay(), 1); // 주 시작 = 월요일
+    assert.equal(portalParts(wk.buckets[0].from).dow, 1); // 주 시작 = 월요일
 
     // 연말 ISO 주 — 2026-12-28(월)~2027-01-03(일)은 해가 갈려도 2026-W53 한 버킷이다
     writeLog('results-20261228.csv', [

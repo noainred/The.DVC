@@ -289,7 +289,7 @@ sudo systemctl start ${service}`}
             정지 시간 동안 <b>포탈 접속·vCenter 수집·알림이 모두 중단</b>됩니다.
             <div className="card" style={{ padding: 12, marginTop: 10, background: 'var(--panel-2)' }}>
               <div>· 이전 용량: <b>{fmtBytes(inv.totalBytes)}</b></div>
-              <div>· 예상 복사 시간: <b>약 {pf?.estimatedSeconds ?? '—'}초</b> (디스크 속도에 따라 달라집니다)</div>
+              <div>· 예상 복사 시간: <b>{pf?.estimatedSeconds == null ? '—' : `약 ${pf.estimatedSeconds}초`}</b> (디스크 속도에 따라 달라집니다)</div>
               <div>· 새 경로: <code>{target}</code></div>
               <div>· 서비스: <code>{service}</code></div>
             </div>

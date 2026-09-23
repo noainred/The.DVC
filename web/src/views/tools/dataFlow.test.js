@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { layoutDataFlow, W, EDGE_X, BUS_X } from './dataFlowLayout.js';
-import { edgeBadge, innerItemText, sinceNote, linkText, routePath, edgeLasts, LEGEND, KIND_LABEL, STATE_LABEL } from './dataFlowText.js';
+import { edgeBadge, innerItemText, sinceNote, linkText, routePath, edgeLasts, LEGEND, legendLines, KIND_LABEL, STATE_LABEL } from './dataFlowText.js';
 
 const data = {
   cats: [{ id: 'inv', label: '인벤토리', routes: 2 }, { id: 'gpu', label: 'GPU', routes: 1 }],
@@ -84,5 +84,13 @@ describe('dataFlowText', () => {
   it('문구에 백틱 없음', () => {
     const all = [...LEGEND, ...Object.values(KIND_LABEL), ...Object.values(STATE_LABEL)];
     for (const s of all) expect(s.includes('`')).toBe(false);
+  });
+});
+
+describe('legendLines', () => {
+  it('낡음 경계는 서버 값으로 채우고, 없으면 숫자를 지어내지 않는다', () => {
+    expect(legendLines({ staleFactor: 4, staleMinMs: 15 * 60_000 })[0]).toMatch('4배(하한 15분)');
+    const blank = legendLines({})[0];
+    expect(blank).toMatch('서버 설정'); expect(blank.includes('{')).toBe(false);
   });
 });

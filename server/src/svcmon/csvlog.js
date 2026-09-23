@@ -15,6 +15,7 @@
  * 파일명: results-YYYYMMDD[-HH][-pNN].csv · week=YYYY-Www · month=YYYYMM · quarter=YYYYQn
  */
 
+import { portalParts } from '../util/dayKey.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { getLogSettings, logDir, ROTATE_UNITS, ROTATE_LABEL } from './logsettings.js';
@@ -27,8 +28,10 @@ const MAX_BUFFER_BYTES = 32 * 1024 * 1024; // 백프레셔 상한(32MB) — 초�
 
 const pad = (n, w = 2) => String(n).padStart(w, '0');
 
-function isoWeek(d) {
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+// v2.589: 파일명·회전 경계는 **포탈 오프셋**(util/dayKey.js) 기준이다 — 예전에는 로컬 getter 라 UTC 호스트에서
+//   KST 09:00 에 파일이 갈리고 날짜·시가 틀렸다. KST 호스트에서는 결과가 예전과 같다.
+function isoWeek(p) {
+  const t = new Date(Date.UTC(p.y, p.mo, p.d));
   const day = t.getUTCDay() || 7;
   t.setUTCDate(t.getUTCDate() + 4 - day);
   const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
@@ -37,13 +40,13 @@ function isoWeek(d) {
 
 /** 시간 구간 키 — 이 값이 바뀌면 파일을 회전한다. */
 export function periodKey(ts, rotate) {
-  const d = new Date(ts);
+  const p = portalParts(ts);
   switch (rotate) {
-    case 'hour': return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}`;
-    case 'week': { const w = isoWeek(d); return `${w.year}-W${pad(w.week)}`; }
-    case 'month': return `${d.getFullYear()}${pad(d.getMonth() + 1)}`;
-    case 'quarter': return `${d.getFullYear()}Q${Math.floor(d.getMonth() / 3) + 1}`;
-    case 'day': default: return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+    case 'hour': return `${p.y}${pad(p.mo + 1)}${pad(p.d)}-${pad(p.h)}`;
+    case 'week': { const w = isoWeek(p); return `${w.year}-W${pad(w.week)}`; }
+    case 'month': return `${p.y}${pad(p.mo + 1)}`;
+    case 'quarter': return `${p.y}Q${Math.floor(p.mo / 3) + 1}`;
+    case 'day': default: return `${p.y}${pad(p.mo + 1)}${pad(p.d)}`;
   }
 }
 

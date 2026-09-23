@@ -17,7 +17,7 @@ process.env.CONFIG_DIR = DIR;
 
 const { buildDataFlow, linkState, kindOf, catOf, CATS, STALE_MIN_MS, STALE_FACTOR } = await import('../src/dataflow/build.js');
 const { declaredRoutes } = await import('../src/routes/api/dataFlow.js');
-const { recordPull, pullStats, resetPullStats } = await import('../src/central/pullStats.js');
+const { recordPull, pullStats, resetPullStats, PULL_UNAUTH_KEY } = await import('../src/central/pullStats.js');
 const { recordOutbound, outboundStats, resetOutboundStats } = await import('../src/util/outboundStats.js');
 
 const HOUR = 3_600_000;
@@ -141,8 +141,10 @@ test('⑥ 중앙 라우터 GET 은 선언 경로로 기록된다(매칭 안 된 
   const rows = pullStats().rows;
   const eps = rows.flatMap((r) => r.byEndpoint.map((e) => e.endpoint));
   assert.ok(eps.every((e) => !e.startsWith('/no-such-route')), '없는 경로로 키를 만들지 않는다');
-  // 토큰 없는 요청은 인증에서 막힌다(라우트 매칭 전) — 그래도 선언 경로라 **실패로** 기록돼야 한다
-  const blocked = rows.find((r) => r.agent === 'gm1')?.byEndpoint.find((x) => x.endpoint === '/storage-config');
+  // 토큰 없는 요청은 인증에서 막힌다(라우트 매칭 전) — 그래도 선언 경로라 **실패로** 기록돼야 한다.
+  // v2.589: 단 주장한 이름(gm1)으로 적지 않는다 — 인증 실패 칸 하나에만 센다(이름 위조로 실제 엣지 기록을 오염시키지 못하게).
+  assert.equal(rows.find((r) => r.agent === 'gm1'), undefined, '인증 실패 요청의 이름을 믿지 않는다');
+  const blocked = rows.find((r) => r.agent === PULL_UNAUTH_KEY)?.byEndpoint.find((x) => x.endpoint === '/storage-config');
   assert.ok(blocked, '막힌 pull 도 기록한다');
   assert.equal(blocked.failCount, 1); assert.equal(blocked.okCount, 0);
   for (const r of rows) assert.equal(r.verified, false);

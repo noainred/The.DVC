@@ -16,6 +16,8 @@
  */
 
 const MAX_AGENTS = 500;
+/** 인증에 실패한 GET 은 주장한 이름 대신 이 한 칸에 센다(v2.589 — 이름 위조·LRU 밀어내기 차단). */
+export const PULL_UNAUTH_KEY = '(인증 실패)';
 const MAX_ENDPOINTS = 64;
 const t = (v) => String(v ?? '').trim();
 const ewma = (prev, sample, a = 0.3) => (prev == null ? sample : prev * (1 - a) + sample * a);
@@ -35,8 +37,10 @@ export function recordPull(agent, endpoint, { status = 0, bytes = 0, verified = 
   let a = byAgent.get(key);
   if (!a) {
     if (byAgent.size >= MAX_AGENTS) {
+      // 검증된 행은 밀어내지 않는다 — 공유 토큰 보유자가 이름을 바꿔 가며 불려도 개별 토큰 엣지의 기록은 남는다.
       let oldest = null;
-      for (const [k, v] of byAgent) if (!oldest || v.lastAt < oldest[1].lastAt) oldest = [k, v];
+      for (const [k, v] of byAgent) if (!v.verified && (!oldest || v.lastAt < oldest[1].lastAt)) oldest = [k, v];
+      if (!oldest) return;
       if (oldest) byAgent.delete(oldest[0]);
     }
     a = { agent: key, verified: false, firstAt: now, lastAt: now, byEndpoint: new Map() };

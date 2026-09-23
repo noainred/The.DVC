@@ -110,8 +110,18 @@ export function innerItemText(it = {}, now = Date.now()) {
 }
 
 export const LEGEND = Object.freeze([
-  '선은 **기록이 있는 연결만** 그립니다. 굵은 빨간 선은 마지막 실패가 마지막 성공보다 뒤인 연결, 주황은 관측 간격의 3배(하한 10분)를 넘겨 새 기록이 없는 연결입니다.',
+  '선은 **기록이 있는 연결만** 그립니다. 굵은 빨간 선은 마지막 실패가 마지막 성공보다 뒤인 연결, 주황은 관측 간격의 {factor}배(하한 {min})를 넘겨 새 기록이 없는 연결입니다.',
   '가운데 버스의 눈금 하나가 경로 하나입니다. 회색 눈금은 중앙이 기록을 한 번도 받지 못한 경로입니다 — 쓰지 않는 기능일 수도, 막혀 있을 수도 있습니다.',
   '거부된 요청의 엣지 이름은 요청이 주장한 값이라 **검증되지 않았습니다**. 공유 토큰으로 가져간 pull 도 같습니다.',
   '엣지 **안의** 수집 상태는 엣지 카드의 ‘내부 수집’ 버튼을 누를 때만 그 엣지에서 가져옵니다.',
 ]);
+
+/**
+ * 범례 — 낡음 경계는 서버가 주는 값(`rules.staleFactor`·`staleMinMs`)으로 채운다(v2.589: 숫자를 박아 두면
+ * 서버 상수를 바꾼 날 화면이 거짓말을 한다). 값이 없으면 숫자를 지어내지 않고 '서버 설정' 이라 말한다.
+ */
+export function legendLines(rules = {}) {
+  const factor = Number.isFinite(rules?.staleFactor) ? String(rules.staleFactor) : '(서버 설정)';
+  const min = Number.isFinite(rules?.staleMinMs) ? spanText(rules.staleMinMs) : '서버 설정';
+  return LEGEND.map((s) => s.replace('{factor}', factor).replace('{min}', min));
+}

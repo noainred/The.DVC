@@ -17,6 +17,7 @@
  *    파일에 남기지 않는다(schedule/outbox 파일에도 없음). 사용마다 감사 + useCount/lastUsed 갱신.
  *  - SSH 키는 저장 시 ssh2 로 파싱 검증(형식·패스프레이즈)하고 공개키 SHA-256 지문만 화면에 보인다.
  */
+import { strictIpv4Num, cidrMatch } from '../util/ipv4.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -104,17 +105,15 @@ export function inspectPrivateKey(privateKey, passphrase = '') {
 export function hostAllowed(host, list) {
   const h = lc(host).replace(/^::ffff:/, '');
   if (!h || !Array.isArray(list) || !list.length) return false;
-  const toN = (s) => { const p = s.split('.').map(Number); return p.length === 4 && p.every((x) => Number.isInteger(x) && x >= 0 && x <= 255) ? ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0 : null; };
-  const n = toN(h);
+  // v2.589: 비정규 IPv4(선행 0 → 8진 해석)는 거부 — 볼트 비밀이 허용 대역 밖으로 나가지 않게(util/ipv4 단일 소스).
+  const n = strictIpv4Num(h);
+  if (n === false) return false;
   for (const raw of list) {
     const e = lc(raw);
     if (e === '*') return true;
     if (e.startsWith('*.')) { if (h.endsWith(e.slice(1)) && h.length > e.length - 1) return true; continue; }
     if (e.includes('/')) {
-      const [base, bits] = e.split('/'); const bn = toN(base); const b = Number(bits);
-      if (n == null || bn == null || !(b >= 0 && b <= 32)) continue;
-      const mask = b === 0 ? 0 : (0xffffffff << (32 - b)) >>> 0;
-      if ((n & mask) === (bn & mask)) return true;
+      if (n != null && cidrMatch(n, e) === true) return true;
       continue;
     }
     if (e === h) return true;

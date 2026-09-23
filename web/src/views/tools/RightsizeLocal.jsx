@@ -87,7 +87,7 @@ export default function RightsizeLocal({ local, localError, r, days }) {
           )}
 
           {/* CPU: vCenter 롤업 선 + 로컬 20초 순간 점 */}
-          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>사용 MHz — 파란 선 = vCenter 롤업({r?.window?.intervalSec ?? '—'}초 평균) · 주황 점 = 로컬 20초 표본 중 임계 이상 순간{local.downsampled ? ` (점이 많아 구간별 최대만 ${local.moments.length}개 표시)` : ''}</div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>사용 MHz — 파란 선 = vCenter 롤업({r?.window?.intervalSec == null ? '간격 미상' : `${r.window.intervalSec}초 평균`}) · 주황 점 = 로컬 20초 표본 중 임계 이상 순간{local.downsampled ? ` (점이 많아 구간별 최대만 ${local.moments.length}개 표시)` : ''}</div>
           <div style={{ height: 220 }}>
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={cpuRows} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>

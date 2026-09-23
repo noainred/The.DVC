@@ -161,9 +161,15 @@ export function buildCommMap(p = {}) {
 
   // ── 통계를 엣지 id 로 접는다(이름·id 어느 쪽으로 기록됐든) ──
   const ingestById = new Map();
-  for (const r of ingestRows) { const id = toId(r.agent); if (id && !ingestById.has(id)) ingestById.set(id, r); }
-  const rejectById = new Map();
-  for (const r of rejectRows) { const id = toId(r.agent); if (id && !rejectById.has(id)) rejectById.set(id, r); }
+  // v2.589: 한 엣지가 이름·id 두 행을 가질 수 있다(이름 변경 뒤). 행은 바이트 순으로 오므로 '첫 행' 을 쓰면
+  //   몇 시간 전의 큰 행이 이겨 건강한 엣지가 '거부/낡음' 이 됐다 — **마지막 수신이 가장 늦은 행**을 쓴다.
+  const latestBy = (rows) => {
+    const m = new Map();
+    for (const r of rows) { const id = toId(r.agent); if (!id) continue; const cur = m.get(id); if (!cur || (Number(r.lastAt) || 0) > (Number(cur.lastAt) || 0)) m.set(id, r); }
+    return m;
+  };
+  for (const [k, v] of latestBy(ingestRows)) ingestById.set(k, v);
+  const rejectById = latestBy(rejectRows);
   const linkById = new Map(latestLinks.map((r) => [r.link_id, r]));
   const reportsOf = (list, id) => (Array.isArray(list) ? list : []).find((r) => toId(r.agent) === id) || null;
   const snapById = new Map(snapVcenters.map((v) => [t(v.id), v]));

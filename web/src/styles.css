@@ -94,6 +94,21 @@ body {
 }
 .tab:hover { color: var(--text); background: var(--panel-2); }
 .tab.active { color: #fff; background: var(--accent); border-color: var(--accent); }
+/* v2.589: .btn·.banner 는 37·11곳이 쓰는데 규칙이 없어 브라우저 기본 버튼·맨 글자로 보였다(.tab 톤을 따른다). */
+.btn {
+  display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+  font: inherit; font-size: 12.5px; line-height: 1.4; cursor: pointer; text-decoration: none; white-space: nowrap;
+}
+.btn:hover:not(:disabled) { background: var(--panel); border-color: var(--accent); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.banner {
+  padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); border-left: 4px solid var(--accent);
+  background: var(--panel); color: var(--text); font-size: 12.5px; line-height: 1.55;
+}
+.banner.warn { border-color: rgba(245, 158, 11, .35); border-left-color: var(--amber); }
+.banner.bad, .banner.error { border-color: rgba(239, 68, 68, .35); border-left-color: var(--red); }
 
 /* 브랜드 행 안의 메뉴 — 이 선택자 밖의 `.tab` 은 전역 규칙을 그대로 쓴다(위 ⚠).
    기본(1600px 미만)은 `order:4` + `flex-basis:100%` 로 항상 독립된 새 줄(= 예전 2행 레이아웃과

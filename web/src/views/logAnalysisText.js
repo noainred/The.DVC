@@ -18,6 +18,8 @@ export const SEVERITY = {
   info: { label: '정보', color: 'gray' },
 };
 
+import { numOrNull } from '../numOrNull.js';
+
 export const SOURCES = [
   { k: 'live', label: '누적(이 포탈)', help: '이 포탈이 찍은 로그를 들어오는 순간 시간 단위로 집계한 것입니다(최대 7일, 재시작해도 이어집니다).' },
   { k: 'buffer', label: '최근 로그(메모리)', help: '메모리에 남아 있는 최근 로그 1,000줄입니다. 요청 로그가 섞여 몇 분이면 밀려납니다.' },
@@ -26,7 +28,8 @@ export const SOURCES = [
   { k: 'edge', label: '엣지 로그', help: '특수기능 › 엣지 로그에서 가져온 엣지의 최근 로그 보관분을 분석합니다.' },
 ];
 
-const fmt = (n) => (Number.isFinite(Number(n)) ? Number(n).toLocaleString() : '—');
+// v2.589: Number(null)===0 이라 '읽지 못한 줄 수' 가 0 으로 보였다 — numOrNull 로 먼저 좁힌다.
+const fmt = (n) => { const v = numOrNull(n); return v == null ? '—' : v.toLocaleString(); };
 const dt = (t) => (Number.isFinite(Number(t)) && t ? new Date(Number(t)).toLocaleString('ko-KR') : '');
 
 /** 구간 배너 — {tone:'ok'|'warn'|'bad', text} */
@@ -99,7 +102,8 @@ export function kpis(report) {
     urgent: (fc.critical || 0) + (fc.high || 0),
     medium: fc.medium || 0,
     minor: (fc.low || 0) + (fc.info || 0),
-    http5xx: r.http?.err5xx ?? 0,
+    // 요청 로그가 한 줄도 없으면 5xx 는 '0건' 이 아니라 '측정 없음'(null)이다.
+    http5xx: r.http?.total ? (r.http.err5xx ?? 0) : null,
   };
 }
 

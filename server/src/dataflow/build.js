@@ -166,8 +166,10 @@ export function buildDataFlow(p = {}) {
     }
   }
   // 거부: 시각은 최근 원문(recent)에만 경로별로 있다. 원문이 밀려난 거부는 개수만 싣고 상태에 넣지 않는다(시각을 모른다).
+  let rejectsPlaced = 0; // v2.589: 선에 실제로 올린 개수 — '시각 모름' 은 전체에서 이것만 뺀다('(기타)' 로 빠진 건이 사라지지 않게)
   for (const r of p.rejects?.recent || []) {
     if (!t(r.endpoint) || r.endpoint === '(기타)') continue;
+    rejectsPlaced += 1;
     const s = slot(edgeOf(r.agent, { verified: false }), ensureRoute('central', 'POST', t(r.endpoint)));
     if ((Number(r.at) || 0) > s.failAt) { s.failAt = Number(r.at) || 0; s.reason = t(r.reason) || `거부 ${r.kind || ''}`.trim(); }
     s.failCount += 1; s.unverified = true;
@@ -230,7 +232,7 @@ export function buildDataFlow(p = {}) {
     routes: routesOut, cats, edges: edgesOut, links, recent, totals,
     unmapped: routesOut.filter((r) => r.cat === 'other').map((r) => r.id),
     undeclared: extra,
-    rejectsWithoutTime: Math.max(0, (p.rejects?.rows || []).reduce((a, r) => a + (Number(r.total) || 0), 0) - (p.rejects?.recent || []).length),
+    rejectsWithoutTime: Math.max(0, (p.rejects?.rows || []).reduce((a, r) => a + (Number(r.total) || 0), 0) - rejectsPlaced),
     since: sinceVals.length ? Math.min(...sinceVals) : null,
     rules: { staleFactor: STALE_FACTOR, staleMinMs: STALE_MIN_MS },
   };

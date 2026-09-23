@@ -65,7 +65,8 @@ api.get('/tools/curuser', requirePerm('tools'), async (req, res) => {
       retentionDays: s.retentionDays,
     },
     targets: scope.targets.filter((t) => ok(t.vcenterId)).length,
-    overLimit: scope.overLimit,
+    // v2.589 SEC-2589-02: overLimit·push 는 **함대 전체** 수치다 — 범위 계정에는 싣지 않는다(범위 밖 법인의 규모 추정 차단).
+    overLimit: scopedVcenterIds(req.user, snap) ? null : scope.overLimit,
     skipReasons: SKIP_REASON,
     kindLabels: KIND_LABEL,
     poller: scopePollerStatus(curUserPollerStatus(), scopedVcenterIds(req.user, snap)),   // v2.583: 전 법인 합계·범위 밖 id 차단
@@ -159,11 +160,12 @@ api.get('/tools/curuser/settings', requirePerm('tools'), async (req, res) => {
     limits: LIMITS, vcenters,
     folders: [...folders.values()].filter((f) => f.windows > 0).sort((a, b) => b.windows - a.windows).slice(0, 500),
     resolved: [...resolved.values()],
-    overLimit: scope.overLimit,
+    overLimit: scopedVcenterIds(req.user, snap) ? null : scope.overLimit,
     staleAfterMs: staleAfterMs(s),
     agentFile: AGENT_FILE,
     installCommand: installCommand({ intervalMinutes: Math.round(s.guestPublishMs / 60_000) }),
-    poller: scopePollerStatus(curUserPollerStatus(), scopedVcenterIds(req.user, snap)), push: curUserPushStatus(),
+    poller: scopePollerStatus(curUserPollerStatus(), scopedVcenterIds(req.user, snap)),
+    push: scopedVcenterIds(req.user, snap) ? null : curUserPushStatus(),
     db: scopeDbStatus(await curUserDbStatus(), req.user), vmSeries: vmSeriesEnabled(), mock: snap.source === 'mock',
   });
 });

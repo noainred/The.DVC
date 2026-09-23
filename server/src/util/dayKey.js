@@ -39,10 +39,16 @@ export function toMs(ts) {
   return Number(ts);
 }
 
+/**
+ * Date 가 표현할 수 있는 범위(±8.64e15 ms)인가 — v2.589: 유한하지만 범위 밖인 값(예: 장비가 준 1e16)은
+ * `toISOString` 이 RangeError 를 던져 목록 라우트 전체를 500 으로 만들었다. 못 읽은 값으로 다룬다.
+ */
+const inDateRange = (t, offsetMin) => Number.isFinite(t) && Math.abs(t + offsetMin * 60_000) <= 8.64e15;
+
 /** epoch ms → `YYYY-MM-DD`(오프셋 적용). 못 읽으면 빈 문자열(날짜를 지어내지 않는다). */
 export function dayKey(ts, offsetMin = DAY_OFFSET_MIN) {
   const t = toMs(ts);
-  if (!Number.isFinite(t)) return '';
+  if (!inDateRange(t, offsetMin)) return '';
   return new Date(t + offsetMin * 60_000).toISOString().slice(0, 10);
 }
 /** 파일명용 오늘 날짜(오프셋 적용). */
@@ -66,11 +72,25 @@ export function localClock(ts = Date.now(), offsetMin = DAY_OFFSET_MIN) {
  */
 export function localStamp(ts, offsetMin = DAY_OFFSET_MIN) {
   const t = toMs(ts);
-  if (!Number.isFinite(t)) return '';
+  if (!inDateRange(t, offsetMin)) return '';
   return new Date(t + offsetMin * 60_000).toISOString().slice(0, 16).replace('T', ' ');
 }
 /** 파일명용 `YYYYMMDD-HHMM`(포탈 오프셋). */
 export function fileStamp(ts = Date.now(), offsetMin = DAY_OFFSET_MIN) {
   const s = localStamp(ts, offsetMin);
   return s ? `${s.slice(0, 10).replace(/-/g, '')}-${s.slice(11, 13)}${s.slice(14, 16)}` : '';
+}
+
+/**
+ * 포탈 오프셋 기준의 '벽시계 날짜 부품'(v2.589) — 로컬 getter(getHours·getDate…)는 **프로세스 TZ** 를 따르므로
+ * 파일명·버킷 경계에 쓰면 UTC 호스트에서 KST 09:00 에 날이 바뀐다. 반환 필드는 Date 의 로컬 getter 와 같은 뜻이다
+ * (month 는 0 기준, dow 는 0=일요일).
+ */
+export function portalParts(ts, offsetMin = DAY_OFFSET_MIN) {
+  const d = new Date(Number(ts) + offsetMin * 60_000);
+  return { y: d.getUTCFullYear(), mo: d.getUTCMonth(), d: d.getUTCDate(), h: d.getUTCHours(), dow: d.getUTCDay() };
+}
+/** 포탈 오프셋 기준 벽시계(연·월(0기준)·일·시) → epoch ms. `new Date(y, mo, d, h)` 의 오프셋 판. 넘침은 Date.UTC 처럼 이월된다. */
+export function portalMs(y, mo, d = 1, h = 0, offsetMin = DAY_OFFSET_MIN) {
+  return Date.UTC(y, mo, d, h) - offsetMin * 60_000;
 }

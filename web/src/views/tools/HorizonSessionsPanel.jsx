@@ -23,6 +23,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import CollectActivity from './CollectActivity.jsx';
 import { Card } from './shared.jsx';
+import { unitText } from '../unitText.js';
 import {
   agoText, intervalText, kindTone, kindAdvice, authStopNote, collectStateNote, connectedText,
   unionNote, provenanceText, sinceNote, NAME_MASK_NOTE, TRUST_NOTE, SESSION_PATH_NOTE,
@@ -87,7 +88,7 @@ export default function HorizonSessionsPanel() {
     try {
       const r = await postJson('/tools/horizon-sessions/collect', {});
       setMsg(r.ok
-        ? `수집 완료 — 서버 ${r.servers ?? 0}대 · 고유 사용자 ${r.users ?? '—'}명${r.serversFailed ? ` · 실패 ${r.serversFailed}대` : ''}`
+        ? `수집 완료 — 서버 ${unitText(r.servers, '대')} · 고유 사용자 ${unitText(r.users, '명')}${r.serversFailed ? ` · 실패 ${r.serversFailed}대` : ''}`
         : `수집 실패: ${r.reason || (r.errors || []).map((e) => e.error).join(' · ') || '사유 없음'}`);
       reload();
     } catch (e) { setMsg(`실패: ${e?.message || e}`); }

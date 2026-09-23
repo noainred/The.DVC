@@ -36,3 +36,29 @@ export function numToIp(n) {
 
 /** 유효한 IPv4 점표기인가. */
 export const isIpv4 = (s) => ipToNum(s) != null;
+
+/**
+ * 접속처 판정용 IPv4 — **정규형일 때만** 숫자를 준다(v2.589, 감사 ARCH-A2).
+ * ⚠ 허용 목록 대조에 느슨한 `ipToNum` 을 쓰면 `'010.0.0.5'` 가 10.0.0.5 로 허용되는데 실제 접속의
+ *   `dns.lookup`(glibc inet_aton)은 그것을 **8진수 8.0.0.5** 로 해석한다 — 허용 대역 밖으로 나간다.
+ * 반환: 정규형이면 숫자, 숫자·점만으로 된 비정규형(선행 0·짧은 표기·빈 옥텟)이면 `false`(거부해야 함),
+ * IP 모양이 아니면(호스트명) `null`.
+ */
+export function strictIpv4Num(s) {
+  const h = String(s ?? '').trim();
+  if (!/^[0-9.]+$/.test(h)) return null;
+  const n = ipToNum(h);
+  if (n == null || numToIp(n) !== h) return false;
+  return n;
+}
+
+/** CIDR·단일 IPv4 목록 항목(관리자 입력 — 느슨히 읽는다)과 정규형 대상 숫자의 일치. 항목이 IP 가 아니면 null. */
+export function cidrMatch(n, entry) {
+  const [base, bits] = String(entry ?? '').trim().split('/');
+  const bn = ipToNum(base);
+  if (bn == null) return null;
+  const k = bits == null ? 32 : (/^\d+$/.test(bits) ? Number(bits) : NaN);
+  if (!(k >= 0 && k <= 32)) return null;
+  const mask = k === 0 ? 0 : (0xffffffff << (32 - k)) >>> 0;
+  return ((n & mask) >>> 0) === ((bn & mask) >>> 0);
+}
