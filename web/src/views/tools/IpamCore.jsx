@@ -216,7 +216,7 @@ function Ipam({ scope, onScope }) {
         ))}
       </div>
       <div className="flex between wrap gap" style={{ marginBottom: 8, alignItems: 'center' }}>
-        <div className="flex gap" style={{ alignItems: 'center' }}>
+        <div className="flex gap wrap" style={{ alignItems: 'center', minWidth: 0 }}>
           <button className={view === 'list' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('list')}>목록</button>
           <button className={view === 'sheet' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={openSheets}>서브넷 대장(엑셀형)</button>
           <button className={view === 'insights' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('insights')} title="유명 IPAM 솔루션 대표 기능 30선을 수집 데이터로 계산">🧠 추천 기능 30선</button>
@@ -227,7 +227,7 @@ function Ipam({ scope, onScope }) {
               눈에 안 띔. 빨간 테두리 + 은은한 글로우로 시선 유도(값 입력과 무관한 정적 스타일). */}
           {view === 'list' && <SearchBox className="input" style={{ maxWidth: 260, border: '2px solid #ef4444', boxShadow: '0 0 6px rgba(239,68,68,.45)', borderRadius: 8 }} placeholder="🔍 IP / VM / 호스트 검색" value={q} onChange={setQ} />}
         </div>
-        <div className="flex gap">
+        <div className="flex gap wrap">
           {canIpms && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setScanStatusOpen(true)} title="진행 중인 IP 스캔 + 완료된 스캔 이력 보기">📊 스캔 상태</button>}
           {canIpms && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setIpms(true)}>⚙ IPMS 설정</button>}
           {canIpms && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => setScanOpen(true)}>🛰️ IP 스캔</button>}

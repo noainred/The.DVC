@@ -20,6 +20,10 @@ import { loadLlmConfig } from '../llm/config.js';
 
 const MIN = 60_000;
 const ago = (ts) => (ts ? Date.now() - ts : null);
+// v2.590 W1: 폴러 상태의 lastRun/lastCheck 는 epoch 숫자가 아니라 `{ at, … }` 객체다(metrics/sampler·ipam/scanPoller·
+// gpu/poller·upgrade/manager). 숫자로 빼면 NaN 이 되어 화면이 'NaN분 전' 을 말했고, 더 나쁘게는 `NaN > 30분` 이 항상 거짓이라
+// **지표 샘플러가 멈춰도 '정상'** 이었다. 두 형태를 다 받고, 모르면 null(단정하지 않는다).
+const atOf = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : (x && typeof x.at === 'number' && Number.isFinite(x.at) ? x.at : null));
 const wrap = (key, label, fn) => { try { return { key, label, ...fn() }; } catch (e) { return { key, label, status: 'warn', detail: `점검 오류: ${e.message}`, at: Date.now() }; } };
 
 export function getServiceCheck() {
@@ -54,19 +58,21 @@ export function getServiceCheck() {
 
   checks.push(wrap('metrics', '지표 샘플러', () => {
     const m = metricsSamplerStatus();
-    const age = ago(m.lastRun);
-    return { status: m.enabled === false ? 'off' : (age != null && age > 30 * MIN) ? 'warn' : 'ok', detail: `${m.enabled === false ? '비활성' : '활성'}${m.lastRun ? ` · 최근 ${Math.round(ago(m.lastRun) / MIN)}분 전` : ''}`, at: m.lastRun || Date.now() };
+    const last = atOf(m.lastRun);
+    const age = last == null ? null : ago(last);
+    return { status: m.enabled === false ? 'off' : (age != null && age > 30 * MIN) ? 'warn' : 'ok', detail: `${m.enabled === false ? '비활성' : '활성'}${last != null ? ` · 최근 ${Math.round(age / MIN)}분 전` : ''}`, at: last ?? Date.now() };
   }));
 
   checks.push(wrap('gpu-guest', 'GPU 게스트 수집', () => {
     const g = gpuGuestStatus();
     const ov = g.overlay || {};
-    return { status: !g.enabled ? 'off' : 'ok', detail: `${g.enabled ? '활성' : '비활성'} · 대상 vCenter ${g.monitored ?? '-'} · 오버레이 호스트 ${ov.hosts ?? 0}/VM ${ov.vms ?? 0}`, at: g.lastRun || Date.now() };
+    return { status: !g.enabled ? 'off' : 'ok', detail: `${g.enabled ? '활성' : '비활성'} · 대상 vCenter ${g.monitored ?? '-'} · 오버레이 호스트 ${ov.hosts ?? 0}/VM ${ov.vms ?? 0}`, at: atOf(g.lastRun) ?? Date.now() };
   }));
 
   checks.push(wrap('ipscan', 'IP 스캔', () => {
     const s = scanStatus();
-    return { status: s.enabled === false ? 'off' : 'ok', detail: `${s.enabled === false ? '비활성' : '활성'}${s.lastRun ? ` · 최근 ${Math.round(ago(s.lastRun) / MIN)}분 전` : ''}`, at: s.lastRun || Date.now() };
+    const last = atOf(s.lastRun);
+    return { status: s.enabled === false ? 'off' : 'ok', detail: `${s.enabled === false ? '비활성' : '활성'}${last != null ? ` · 최근 ${Math.round(ago(last) / MIN)}분 전` : ''}`, at: last ?? Date.now() };
   }));
 
   checks.push(wrap('alerts', '알림 엔진', () => {
@@ -78,7 +84,8 @@ export function getServiceCheck() {
 
   checks.push(wrap('upgrade', '업그레이드 매니저', () => {
     const u = upgradeManager.status();
-    return { status: 'ok', detail: `현재 v${u.version}${u.remoteConfigured ? ' · 원격소스 설정됨' : ' · 로컬'}${u.lastCheck ? ` · 점검 ${Math.round(ago(u.lastCheck) / MIN)}분 전` : ''}`, at: u.lastCheck || Date.now() };
+    const last = atOf(u.lastCheck);
+    return { status: 'ok', detail: `현재 v${u.version}${u.remoteConfigured ? ' · 원격소스 설정됨' : ' · 로컬'}${last != null ? ` · 점검 ${Math.round(ago(last) / MIN)}분 전` : ''}`, at: last ?? Date.now() };
   }));
 
   checks.push(wrap('backup', '포탈 백업', () => {
@@ -118,3 +125,4 @@ export function getServiceCheck() {
   const overall = summary.down ? 'down' : summary.warn ? 'warn' : 'ok';
   return { overall, summary, checks, generatedAt: Date.now() };
 }
+export { atOf as _atOf };

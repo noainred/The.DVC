@@ -1,24 +1,32 @@
 // ShutdownTool.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
-import { Modal } from '../../components/ui.jsx';
+import { Modal, ErrorBox } from '../../components/ui.jsx';
 
 
 /** 긴급중단 — 모든 수집을 즉시 정지. 관리자 2명이 각자 OTP로 인증해야(2인 승인) 실행/해제된다. */
 export function Shutdown() {
   const [status, setStatus] = useState(null);
+  const [loadErr, setLoadErr] = useState(null);
   const [open, setOpen] = useState(null); // 'stop' | 'resume' | null
-  const load = () => fetchJson('/admin/emergency-stop').then(setStatus).catch(() => {});
+  // v2.590 W2: 조회 실패를 삼키면 status=null → active=false → 초록 '정상 — 수집 동작 중' 이었다. 조회는 관리자 전용이라
+  //   operator 는 **언제나** 그 거짓 초록을 봤다(전 수집이 멈춘 상태에서도). 실패는 따로 들고 '확인하지 못했다' 를 말한다.
+  const load = () => fetchJson('/admin/emergency-stop').then((s) => { setStatus(s); setLoadErr(null); }).catch((e) => setLoadErr(e));
   useEffect(() => { load(); const t = setInterval(load, 10_000); return () => clearInterval(t); }, []);
+  const known = status != null;
   const active = !!status?.active;
   return (
     <>
-      <div className="card" style={{ borderColor: active ? 'var(--red)' : 'var(--accent)', padding: 28 }}>
+      {loadErr && !known && <ErrorBox message={loadErr} />}
+      <div className="card" style={{ borderColor: !known ? 'var(--border)' : active ? 'var(--red)' : 'var(--accent)', padding: 28 }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 44 }}>{active ? '🛑' : '🟢'}</div>
-          <div style={{ fontSize: 18, fontWeight: 800, margin: '10px 0', color: active ? 'var(--red)' : 'var(--green)' }}>
-            {active ? '긴급중단 상태 — 모든 수집 정지됨' : '정상 — 수집 동작 중'}
+          <div style={{ fontSize: 44 }}>{!known ? '❔' : active ? '🛑' : '🟢'}</div>
+          <div style={{ fontSize: 18, fontWeight: 800, margin: '10px 0', color: !known ? 'var(--text-dim)' : active ? 'var(--red)' : 'var(--green)' }}>
+            {!known ? (loadErr ? '긴급중단 상태를 확인하지 못했습니다' : '긴급중단 상태를 확인하는 중…') : active ? '긴급중단 상태 — 모든 수집 정지됨' : '정상 — 수집 동작 중'}
           </div>
+          {known && loadErr && (
+            <div className="muted" style={{ fontSize: 12, color: 'var(--amber)' }}>최근 조회가 실패해 위 상태는 마지막으로 읽은 값입니다.</div>
+          )}
           {active && status?.by?.length === 2 && (
             <div className="muted" style={{ fontSize: 13 }}>승인: <b>{status.by[0]}</b> + <b>{status.by[1]}</b>{status.at ? ` · ${new Date(status.at).toLocaleString('ko-KR')}` : ''}</div>
           )}

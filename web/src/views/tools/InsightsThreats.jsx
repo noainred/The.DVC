@@ -76,7 +76,7 @@ export function Insights({ scope }) {
         </div>
       )}
       {sec === 'alarms' && (
-        <div className="grid2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        <div className="grid2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 14 }}>
           <div><div className="section-title" style={{ fontSize: 14 }}>알람 많은 엔티티</div>
             <div className="table-wrap" style={{ maxHeight: '52vh' }}><STable><thead><tr><th>엔티티</th><th style={{ textAlign: 'right' }}>알람 수</th></tr></thead>
               <tbody>{ah.topEntities.length === 0 && <tr><td colSpan={2} className="center muted" style={{ padding: 18 }}>알람 없음</td></tr>}

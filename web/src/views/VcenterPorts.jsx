@@ -42,7 +42,7 @@ export default function VcenterPorts() {
           <div className="section-title" style={{ marginTop: 0, marginBottom: 4 }}>vCenter 포트 응답속도</div>
           <div className="muted" style={{ fontSize: 12.5 }}>각 vCenter의 지정한 포트에 대한 TCP 응답속도(ms)를 주기적으로 측정해 누적합니다. 평소(중앙값) 대비 +20% 노랑, +50% 빨강으로 표시됩니다.</div>
         </div>
-        <div className="flex gap" style={{ flexShrink: 0 }}>
+        <div className="flex gap wrap" style={{ minWidth: 0 }}>
           {RANGES.map(([k, l]) => <button key={k} className={range === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px' }} onClick={() => setRange(k)}>{l}</button>)}
           <button className="logout-btn" style={{ padding: '6px 11px' }} onClick={load}>새로고침</button>
         </div>

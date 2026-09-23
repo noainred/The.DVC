@@ -234,7 +234,9 @@ adminRouter.get('/idrac/nic-speed', adminOnly, (req, res) => {
   const virtualN = rows.filter((r) => r.type === 'virtual').length;
   res.json({
     ok: true, datacenterId: dcFilter, type: typeFilter,
-    totalServers: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
+    // v2.590 W8: '대상' 은 필터를 통과한 전체(수집됨 + 미수집)다 — 예전엔 수집된 행 수라 '대상 0 · 미수집 204' 처럼 스스로
+    //   모순됐고, 하드웨어 집계(:167 servers.length)와 뜻이 달랐다. 필터 버튼이 쓰는 행 수는 rowCount 로 따로 준다.
+    totalServers: collected + missing, rowCount: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
     bySpeed: speedBuckets, servers: rows,
     datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })),
   });
@@ -309,7 +311,9 @@ adminRouter.get('/idrac/nic-models', adminOnly, (req, res) => {
   const virtualN = rows.filter((r) => r.type === 'virtual').length;
   res.json({
     ok: true, datacenterId: dcFilter, type: typeFilter,
-    totalServers: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
+    // v2.590 W8: '대상' 은 필터를 통과한 전체(수집됨 + 미수집)다 — 예전엔 수집된 행 수라 '대상 0 · 미수집 204' 처럼 스스로
+    //   모순됐고, 하드웨어 집계(:167 servers.length)와 뜻이 달랐다. 필터 버튼이 쓰는 행 수는 rowCount 로 따로 준다.
+    totalServers: collected + missing, rowCount: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
     byModel: toBuckets(byModel), vcByModel: toBuckets(vcByModel), servers: rows,
     datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })),
   });

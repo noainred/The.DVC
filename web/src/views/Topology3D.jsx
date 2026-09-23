@@ -120,7 +120,7 @@ export default function Topology3D() {
           설정된 구성을 3D 네트워크로 — <b>휠=줌</b>, <b>드래그=회전</b>, 노드 클릭=포커스. VM 단위로 보려면 vCenter/호스트를 선택하세요.
           {counts && <span style={{ marginLeft: 8 }}>중앙 1 · 엣지 {counts.agents} · vCenter {counts.vcenters} · NSX {counts.nsx} · 호스트 {counts.hosts}{(showVms || vc || host) ? ` · VM ${counts.vms}` : ''}</span>}
         </div>
-        <div className="flex gap wrap" style={{ flex: 'none', alignItems: 'center' }}>
+        <div className="flex gap wrap" style={{ flex: '1 1 auto', minWidth: 0, alignItems: 'center' }}>
           <select className="select" style={{ maxWidth: 200 }} value={vc} onChange={(e) => pickVc(e.target.value)} title="vCenter 포커스(VM까지 표시)">
             <option value="">전체 (호스트까지)</option>
             {vcList.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}

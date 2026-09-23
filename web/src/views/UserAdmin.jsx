@@ -358,7 +358,7 @@ export default function UserAdmin() {
           {/* 특수 기능 도구별 접근 — '특수 기능' 권한을 가진 역할에 대해 개별 도구를 켜고 끈다. */}
           <div className="flex between wrap gap" style={{ margin: '20px 0 6px' }}>
             <div style={{ fontWeight: 700, fontSize: 13 }}>특수 기능 — 도구별 접근</div>
-            <div className="flex gap" style={{ fontSize: 12 }}>
+            <div className="flex gap wrap" style={{ fontSize: 12 }}>
               <span className="muted">operator:</span>
               <button className="tab" style={{ padding: '3px 8px' }} onClick={() => setAllTools('operator', true)}>전체허용</button>
               <button className="tab" style={{ padding: '3px 8px' }} onClick={() => setAllTools('operator', false)}>전체차단</button>

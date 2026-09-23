@@ -74,10 +74,13 @@ export function DatastoreUsage({ scope }) {
   const { loading, data, error } = usePolling('/datastores', {}, 15_000);
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
   const [dc, setDc] = useState({ datacenters: [], assign: {} });
+  // v2.590 W3: 법인 목록 조회는 관리자 전용이다. 실패를 삼키면 assign 이 비어 **전부 '⚠ 법인 미지정'** 으로 묶여
+  //   관리자가 정상 지정해 둔 현장에서 operator 화면이 '설정 결함' 처럼 읽혔다. 실패는 따로 들고 그렇게 말한다.
+  const [dcErr, setDcErr] = useState(null);
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [view, setView] = useHashTab({ base: ['tools', 'dsusage'], valid: ['dc', 'vc'], fallback: 'dc' });
   const [q, setQ] = useState('');
-  useEffect(() => { fetchJson('/admin/datacenters').then((r) => setDc({ datacenters: r.datacenters || [], assign: r.assign || {} })).catch(() => {}); }, []);
+  useEffect(() => { fetchJson('/admin/datacenters').then((r) => { setDc({ datacenters: r.datacenters || [], assign: r.assign || {} }); setDcErr(null); }).catch((e) => setDcErr(e)); }, []);
   if (loading && !data) return <Loading />;
   // 데이터 보유 중 일시 폴링 오류로 화면 전체를 오류 박스로 갈아치우지 않는다(CLAUDE.md 회귀
   // 방지, 고RTT 깜빡임) — 데이터가 없을 때만 전체 오류, 있으면 아래 배너로만 알린다.
@@ -129,7 +132,7 @@ export function DatastoreUsage({ scope }) {
       {view === 'vc' && vcBlocks.map((vc) => (
         <div key={vc.id} className="card" style={{ padding: 14, marginBottom: 14 }}>
           <div className="flex between wrap gap" style={{ alignItems: 'center' }}>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>🖥 {vc.name} <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· {vc.items.length}개 · {dcName.get(dcOfVc(vc.id)) || dcOfVc(vc.id) || '법인 미지정'}</span></div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>🖥 {vc.name} <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· {vc.items.length}개 · {dcName.get(dcOfVc(vc.id)) || dcOfVc(vc.id) || (dcErr ? '법인 정보 없음' : '법인 미지정')}</span></div>
             <DsCapBar capacityGB={vc.capacityGB} freeGB={vc.freeGB} />
           </div>
           <DsVcTable items={vc.items} />
@@ -141,10 +144,16 @@ export function DatastoreUsage({ scope }) {
         const byDc = new Map();
         for (const vc of vcBlocks) { const k = dcOfVc(vc.id) || '__unassigned__'; if (!byDc.has(k)) byDc.set(k, []); byDc.get(k).push(vc); }
         const dcBlocks = [...byDc.entries()].map(([id, vcs]) => ({
-          id, name: id === '__unassigned__' ? '⚠ 법인 미지정' : (dcName.get(id) || id), vcs,
+          id, name: id === '__unassigned__' ? (dcErr ? '법인 정보를 읽지 못함' : '⚠ 법인 미지정') : (dcName.get(id) || id), vcs,
           capacityGB: dsSum(vcs, 'capacityGB'), freeGB: dsSum(vcs, 'freeGB'),
         })).sort((a, b) => (a.id === '__unassigned__' ? 1 : 0) - (b.id === '__unassigned__' ? 1 : 0) || b.capacityGB - a.capacityGB);
-        return dcBlocks.map((d) => (
+        const dcNote = dcErr ? (
+          <div key="__dcerr" className="card" style={{ padding: 12, marginBottom: 12, borderLeft: '3px solid var(--amber)', fontSize: 13, whiteSpace: 'normal' }}>
+            법인(DataCenter) 정보를 읽지 못했습니다{dcErr?.status === 403 ? ' — 이 계정에는 법인 목록 조회 권한(관리자)이 없습니다' : ` — ${dcErr?.message || dcErr}`}.
+            아래는 법인으로 묶지 못한 목록이며, <b>법인이 지정되지 않았다는 뜻이 아닙니다</b>. vCenter별 보기를 쓰세요.
+          </div>
+        ) : null;
+        return [dcNote, ...dcBlocks.map((d) => (
           <div key={d.id} className="card" style={{ padding: 14, marginBottom: 16, borderLeft: '3px solid var(--accent, #60a5fa)' }}>
             <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 6 }}>
               <div style={{ fontWeight: 800, fontSize: 16 }}>🏢 {d.name} <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· {d.vcs.length} vCenter · {dsSum(d.vcs.flatMap((v) => v.items), 'capacityGB') ? d.vcs.reduce((a, v) => a + v.items.length, 0) : 0}개 데이터스토어</span></div>
@@ -160,7 +169,7 @@ export function DatastoreUsage({ scope }) {
               </div>
             ))}
           </div>
-        ));
+        ))];
       })()}
     </div>
   );

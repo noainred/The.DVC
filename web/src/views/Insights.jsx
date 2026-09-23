@@ -84,7 +84,7 @@ function FinOps() {
         </div>
       )}
       <div className="flex gap wrap" style={{ alignItems: 'flex-start' }}>
-        <div className="card" style={{ padding: 14, flex: '2 1 380px' }}>
+        <div className="card" style={{ padding: 14, flex: '2 1 380px', minWidth: 0 }}>
           <div className="section-title" style={{ marginTop: 0 }}>전력 상위 호스트</div>
           <div className="table-wrap" style={{ maxHeight: '46vh' }}>
             <STable><thead><tr><th>호스트</th><th>vCenter</th><th>모델</th><th style={{ textAlign: 'right' }}>W</th></tr></thead>

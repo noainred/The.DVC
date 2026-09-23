@@ -74,7 +74,7 @@ export default function NetworkCheck() {
           <div className="section-title" style={{ marginTop: 0, marginBottom: 4 }}>네트워크 체크 (서버 Ping)</div>
           <div className="muted" style={{ fontSize: 12.5 }}>매니저에서 각 서버로의 TCP 연결 지연(ms)을 주기적으로 측정해 1년간 누적합니다. 평소(중앙값) 대비 +20% 노랑, +50% 빨강으로 표시됩니다.</div>
         </div>
-        <div className="flex gap" style={{ flexShrink: 0 }}>
+        <div className="flex gap wrap" style={{ minWidth: 0 }}>
           {RANGES.map(([k, l]) => <button key={k} className={range === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px' }} onClick={() => setRange(k)}>{l}</button>)}
           <button className="logout-btn" style={{ padding: '6px 11px' }} disabled={busy} onClick={load}>새로고침</button>
           {isAdmin && <button className="logout-btn" style={{ padding: '6px 11px' }} disabled={busy} onClick={sync} title="등록된 엣지 노드(수집 서버)를 대상으로 동기화">엣지 동기화</button>}

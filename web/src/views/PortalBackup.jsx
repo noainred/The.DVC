@@ -89,7 +89,7 @@ export default function PortalBackup() {
           <span className="muted">보관 개수</span>
           <input className="input" type="number" min="1" style={{ width: 80 }} value={s.retention} onChange={(e) => setS({ ...s, retention: e.target.value })} />
         </div>
-        <div className="flex gap" style={{ marginTop: 12 }}>
+        <div className="flex gap wrap" style={{ marginTop: 12 }}>
           <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'save'} onClick={saveSettings}>{busy === 'save' ? '저장 중…' : '정책 저장'}</button>
           <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'now'} onClick={backupNow}>{busy === 'now' ? '백업 중…' : '⬇ 지금 백업'}</button>
           <span className="muted" style={{ alignSelf: 'center', fontSize: 12 }}>

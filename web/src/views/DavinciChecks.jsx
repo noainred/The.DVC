@@ -6,7 +6,8 @@ import { STable } from '../components/STable.jsx';
 
 const DOT = { ok: '#22c55e', warn: '#f59e0b', down: '#ef4444', off: '#64748b', slow: '#f97316' };
 const LBL = { ok: '정상', warn: '주의', down: '실패', off: '비활성', slow: '느림' };
-const fmtAgo = (ts) => { if (!ts) return ''; const s = Math.round((Date.now() - ts) / 1000); return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : `${Math.round(s / 3600)}시간 전`; };
+// v2.590 W1: 객체·NaN 이면 'NaN분 전' 대신 비운다(서버가 폴러의 { at, … } 객체를 그대로 싣던 적이 있다).
+const fmtAgo = (ts) => { if (typeof ts !== 'number' || !Number.isFinite(ts) || !ts) return ''; const s = Math.round((Date.now() - ts) / 1000); return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : `${Math.round(s / 3600)}시간 전`; };
 const Dot = ({ s }) => <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: DOT[s] || '#64748b', boxShadow: s === 'ok' ? `0 0 6px ${DOT.ok}` : 'none', marginRight: 8 }} />;
 // fmtBytes 는 util/fmt.js 로 통합(v2.319 — 동일 구현 복붙 제거)
 

@@ -435,3 +435,21 @@ test('★ P9: 스토리지 보존일 env 가 설정 파일이 없을 때 반영�
   assert.equal(s.dailyKeepDaysSource, 'default');
   delete process.env.STORAGE_HISTORY_KEEP_DAYS;
 });
+
+// ── W1·W8: 웹 전수 감사가 찾은 서버 쪽 결함 ────────────────────────────────────
+test("★ W1: 서비스 점검은 폴러의 { at } 객체를 시각으로 읽는다('NaN분 전' · 정체 경고 불발 금지)", async () => {
+  const { _atOf } = await import('../src/health/services.js');
+  assert.equal(_atOf({ at: 1234, rows: 9 }), 1234);
+  assert.equal(_atOf(5678), 5678);
+  assert.equal(_atOf(null), null, '모르면 null');
+  assert.equal(_atOf({ skipped: '비활성' }), null);
+  const s = src('health/services.js');
+  assert.doesNotMatch(s, /ago\((?:m|s|g|u)\.last(?:Run|Check)\)/, '객체를 그대로 ago() 에 넣으면 NaN 이다');
+  assert.doesNotMatch(s, /at: (?:m|s|g|u)\.last(?:Run|Check) \|\|/, '객체를 그대로 at 으로 싣는다');
+});
+
+test("★ W8: NIC 속도·모델의 '대상' 은 수집됨 + 미수집이다(수집된 행 수가 아니다)", () => {
+  const s = src('routes/admin/idracCore.js');
+  assert.equal((s.match(/totalServers: collected \+ missing/g) || []).length, 2, "nic-speed·nic-models 둘 다 '대상 0 · 미수집 204' 모순을 고쳐야 한다");
+  assert.doesNotMatch(s, /totalServers: rows\.length/, '수집된 행 수를 대상으로 되돌렸다');
+});
