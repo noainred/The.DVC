@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **453개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **455개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-22)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-23)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -12,28 +12,33 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (16)
+## 공용 유틸 (21)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `API_RATE_DISABLED` | `''` |  | util/rateLimit.js |
 | `API_RATE_LIMIT` | `1800` |  | util/rateLimit.js |
 | `API_RATE_WINDOW_MS` | `60000` |  | util/rateLimit.js |
+| `BMUSAGE_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `GZIP_MIN_BYTES` | `1024` |  | util/compress.js |
+| `LINKCHECK_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `LOOP_LAG_INTERVAL_MS` | `30000` |  | util/loopLag.js |
 | `LOOP_LAG_MONITOR` | `기본 적용('0' 로 끄기)` |  | perf/monitor.js, util/loopLag.js |
 | `LOOP_LAG_WARN_MS` | `500` |  | util/loopLag.js |
+| `PORTAL_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `PRUNE_CHUNK_ROWS` |  |  | util/chunkedPrune.js |
 | `PRUNE_MAX_ROWS` |  |  | util/chunkedPrune.js |
 | `SNAP_CACHE_PER_NAME` | `32` |  | util/snapCache.js |
 | `SOAP_PARSE_MIN_CHARS` | `262144` |  | util/soapParsePool.js |
 | `SOAP_PARSE_WORKERS` |  |  | util/soapParsePool.js |
 | `SSRF_ALLOW_LOOPBACK` | `''` | ✅ | util/ssrfBlock.js |
+| `STORAGE_GROWTH_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `WAN_CONNECT_TIMEOUT_MS` | `20000` |  | util/resilientFetch.js |
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
+| `X` |  |  | util/dayKey.js |
 
-## 공통 (141)
+## 공통 (139)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -66,7 +71,6 @@
 | `BMUSAGE_LIST_BUDGET` | `20` |  | bmusage/poller.js |
 | `BMUSAGE_SESSION_BUDGET_MS` | `50000` |  | bmusage/collectors/osSsh.js |
 | `BMUSAGE_SSH_TIMEOUT_MS` | `15000` |  | bmusage/collectors/osSsh.js |
-| `BMUSAGE_TZ_OFFSET_MIN` | `9` |  | bmusage/db.js |
 | `CAPACITY_DB_PATH` |  |  | config.js |
 | `CAPACITY_MON_ENABLED` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `CAPACITY_PUSH` | `기본 적용('false' 로 끄기)` |  | config.js |
@@ -107,7 +111,6 @@
 | `LINKCHECK_COUNT_CACHE_MS` | `60000` |  | linkcheck/db.js |
 | `LINKCHECK_DETAIL_MAX` | `8000` |  | linkcheck/db.js |
 | `LINKCHECK_ENABLED` | `''` |  | linkcheck/settings.js |
-| `LINKCHECK_TZ_OFFSET_MIN` | `9` |  | linkcheck/db.js |
 | `MOCK_SCALE` | `1` |  | mock/generator.js |
 | `OME_POWER_DURATION` | `0` | ✅ | config.js |
 | `OME_POWER_METRIC_TYPES` | `'3,4,1'` | ✅ | config.js |
@@ -173,7 +176,7 @@
 | `VMSERIES_ENABLED` | `기본 아님('true' 일 때만 적용)` |  | vmseries/settings.js |
 | `VMSERIES_FIRST_DELAY_MS` | `180000` |  | vmseries/poller.js |
 | `VMSERIES_INTERVAL_MIN` |  |  | vmseries/settings.js |
-| `VMSERIES_MAX_OPEN_DB` | `8` |  | vmseries/db.js |
+| `VMSERIES_MAX_OPEN_DB` | `48` |  | vmseries/db.js |
 | `VMSERIES_MEM_PCT` |  |  | vmseries/settings.js |
 | `VMSERIES_MIN_FREE_GB` | `5` |  | vmseries/poller.js |
 | `VMSERIES_READY_PCT` |  |  | vmseries/settings.js |
@@ -195,7 +198,7 @@
 | `METRICS_DEADBAND_TEMP_C` | `0.5` |  | metrics/deadband.js |
 | `VMPERF_DB_DIR` |  |  | metrics/vmperfDb.js |
 | `VMPERF_ENABLED` | `기본 적용('false' 로 끄기)` |  | metrics/vmperfSettings.js |
-| `VMPERF_MAX_OPEN_DB` | `8` |  | metrics/vmperfDb.js |
+| `VMPERF_MAX_OPEN_DB` |  |  | metrics/vmperfDb.js |
 | `VMPERF_RETENTION_DAYS` | `90` |  | metrics/vmperfSettings.js |
 | `VMPERF_TRACK_TOTAL` | `기본 적용('false' 로 끄기)` |  | metrics/vmperfSettings.js |
 
@@ -247,7 +250,7 @@
 |---|---|---|---|
 | `EDGE_PUSH_TIMEOUT_MS` | `600000` |  | collector/upgradePush.js, upgrade/upgrade.js |
 
-## 스토리지 수집 (20)
+## 스토리지 수집 (19)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -257,7 +260,6 @@
 | `STORAGE_CLI_TIMEOUT_MS` | `45000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_DAILY_KEEP_DAYS` |  |  | storage/db.js |
 | `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/poller.js |
-| `STORAGE_GROWTH_TZ_OFFSET_MIN` |  |  | storage/db.js |
 | `STORAGE_HISTORY_KEEP_DAYS` |  |  | storage/db.js |
 | `STORAGE_HTTP_TIMEOUT_MS` | `15000` |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
@@ -632,4 +634,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 453
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 455

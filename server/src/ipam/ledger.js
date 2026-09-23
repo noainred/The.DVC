@@ -34,6 +34,8 @@ export function _ledgerCacheStats() {
 }
 // 캐시 키에 사용자 scope 서명(sc:)을 반드시 포함한다 — 빠지면 무제한 계정의 전체 원장이
 // 범위 제한 계정에 캐시 히트로 새어 나간다(M1 캐시 교차 유출과 동형). allowed=null='all'.
+/** 스냅샷 세대 밖의 변동 축(설정·주석·스캔·override·정책 리비전) — 라우트 memo 키가 같이 써야 주석 저장 직후 TTL 동안 낡은 응답이 나가지 않는다(v2.582 TUNE-1). */
+export function ipamRevKey() { return `s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}`; }
 const _ipamKey = (snap, vcenterId, allowed = null) => `${snap?.generatedAt || ''}|${vcenterId || ''}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}`;
 
 // 자동 발견 출처(discovery)를 사용자 친화 reconcile 상태로 매핑.

@@ -18,10 +18,10 @@ export default function IpmsMatches({ filters }) {
     if (!qIpms || !q) { setRows([]); return undefined; }
     let on = true;
     const p = filters?.vcenterId ? { vcenterId: filters.vcenterId } : {};
-    fetchJson('/tools/ipam', p).then((r) => {
+    // v2.582 TUNE-2: 검색어마다 원장 전량(운영 규모 5.3MB)을 받아 브라우저에서 거르던 것을 서버 ?q= 필터로.
+    fetchJson('/tools/ipam', { ...p, q, limit: 2000 }).then((r) => {
       if (!on) return;
-      const ql = q.toLowerCase();
-      setRows((r.rows || []).filter((row) => String(row.ip || '').toLowerCase().includes(ql)).slice(0, 2000));
+      setRows(r.rows || []);
     }).catch(() => { if (on) setRows([]); });
     return () => { on = false; };
   }, [qIpms, q, filters?.vcenterId]);

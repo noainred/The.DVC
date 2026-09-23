@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'datacenters.json');
 const norm = (s) => String(s || '').trim();
@@ -40,7 +40,7 @@ function loadRaw() {
       // 사용자가 지정한 표시 순서(id 배열). 모든 'DataCenter 선택' 콤보박스/목록에 적용.
       order: Array.isArray(p.order) ? p.order.map(String) : [],
     };
-  } catch { cache = { datacenters: [], assign: {}, deleted: [], order: [] }; }
+  } catch (e) { preserveCorrupt(FILE, e.message); cache = { datacenters: [], assign: {}, deleted: [], order: [] }; }
   cacheTok = t;
   return cache;
 }

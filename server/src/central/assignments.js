@@ -13,6 +13,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 import { parseCsvRows } from '../util/csv.js';
+import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
 const FILE = path.join(config.configDir, 'agent-assignments.json');
 const RESULT_FILE = path.join(config.configDir, 'agent-results.json');
@@ -174,6 +175,7 @@ function persistResults() {
   }, 3_000);
   persistTimer.unref?.();
 }
+registerExitFlush('central/assignments.results', () => { if (!persistTimer) return; clearTimeout(persistTimer); persistTimer = null; atomicWriteFileSync(RESULT_FILE, JSON.stringify(results), { mode: 0o600 }); });
 
 export function setResult(agent, data) {
   results[String(agent)] = { at: Date.now(), ...data };

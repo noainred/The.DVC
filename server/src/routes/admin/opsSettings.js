@@ -15,6 +15,7 @@ import { ssrfBlockReasonResolved } from '../../collector/registry.js';
 import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../../reports/dailyReport.js';
 import { refreshCerts } from '../../security/certMonitor.js';
 import { adminOnly, requireSettingsOwner } from './shared.js';
+import { todayStamp } from "../../util/dayKey.js";
 
 export function registerOpsSettings(adminRouter) {
 
@@ -150,7 +151,7 @@ adminRouter.get('/os-scan/results.csv', adminOnly, (req, res) => {
   const lines = [head.join(',')];
   for (const r of rows) lines.push([r.vmName, r.vcenterId, r.cluster, r.host, r.esxiGuestOS, r.os, r.osVersion, r.family, r.kernel, r.mismatch ? 'Y' : 'N', new Date(r.at).toISOString(), r.error].map(esc).join(','));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="real-os-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="real-os-${todayStamp()}.csv"`);
   res.send('﻿' + lines.join('\r\n'));
 });
 

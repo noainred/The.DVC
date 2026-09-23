@@ -7,6 +7,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
+import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
 const FILE = path.join(config.configDir, 'login-fails.ndjson');
 const MAX = 50_000;
@@ -27,10 +29,11 @@ function persistSoon() {
     writeTimer = null;
     const cut = Date.now() - RETAIN_MS;
     rows = load().filter((r) => r.ts >= cut).slice(-MAX);
-    try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ }
+    try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ }
   }, 4000);
   writeTimer.unref?.();
 }
+registerExitFlush('security/loginStore', () => { if (!writeTimer) return; clearTimeout(writeTimer); writeTimer = null; const cut = Date.now() - RETAIN_MS; rows = load().filter((r) => r.ts >= cut).slice(-MAX); atomicWriteFileSync(FILE, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); });
 
 /** 범용: 실패 레코드 배열 적재(중복 dedup by ts|kind|user|ip|vm). */
 export function recordLoginFails(list = []) {

@@ -12,6 +12,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
+import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
 const FILE = path.join(config.configDir, 'central-fleet.json');
 const TTL_MS = Number(process.env.CENTRAL_FLEET_TTL_MS) || 30 * 60_000; // 30분 무보고 시 만료
@@ -41,17 +43,13 @@ function persistSoon() {
 // 윈도우 유실 방지. 중앙 역할일 때만 핸들러 등록(테스트/엣지에서 부작용·중복 쓰기 방지).
 export function flushEdgeFleetNow() {
   if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
-  try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify({ fleet: cache }), { mode: 0o600 }); } catch { /* best-effort */ }
+  try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify({ fleet: cache }), { mode: 0o600 }); } catch { /* best-effort */ }
 }
 if (config.central?.token && !config.agent?.centralUrl) {
-  let flushed = false;
-  const onExit = () => { if (flushed) return; flushed = true; flushEdgeFleetNow(); };
-  process.once('exit', onExit);
-  // v2.447(감사 I3): 시그널에서는 **flush 만** 한다. 예전에는 여기서 process.exit(0) 을 불러
-  // index.js 의 정상 종료(진행 중 HTTP 응답 대기)가 실행되기도 전에 프로세스가 죽었다.
-  // 종료 결정은 index.js gracefulExit 한 곳에만 둔다('exit' 훅이 있어 flush 는 어차피 보장된다).
-  process.once('SIGTERM', onExit);
-  process.once('SIGINT', onExit);
+  // v2.582 ARCH-4: 자체 exit 훅 대신 공용 레지스트리(util/exitFlush.js). 시그널 훅은 두지 않는다 — index.js
+  // gracefulExit 이 process.exit 을 부르므로 exit 훅 하나로 flush 가 보장된다(v2.447 판단 그대로).
+  registerExitFlush('central/fleet', () => { if (writeTimer) flushEdgeFleetNow(); });
+  // v2.447(감사 I3): 종료 결정은 index.js gracefulExit 한 곳에만 둔다 — 여기서 process.exit 을 부르지 말 것.
 }
 
 /** 엣지가 push한 베어메탈 목록 저장. */

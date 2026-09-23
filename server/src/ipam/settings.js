@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { ipToNum } from './ledger.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'ipam-settings.json');
 
@@ -22,7 +22,7 @@ export function settingsRev() { return rev; }
 function load() {
   if (cache) return cache;
   cache = { global: [], vcenters: {}, publicRanges: [], privateRanges: [] };
-  try { if (fs.existsSync(FILE)) { const s = JSON.parse(fs.readFileSync(FILE, 'utf8')); cache = { global: s.global || [], vcenters: s.vcenters || {}, publicRanges: s.publicRanges || [], privateRanges: s.privateRanges || [] }; } } catch { /* defaults */ }
+  try { if (fs.existsSync(FILE)) { const s = JSON.parse(fs.readFileSync(FILE, 'utf8')); cache = { global: s.global || [], vcenters: s.vcenters || {}, publicRanges: s.publicRanges || [], privateRanges: s.privateRanges || [] }; } } catch (e) { preserveCorrupt(FILE, e.message); /* defaults */ }
   return cache;
 }
 

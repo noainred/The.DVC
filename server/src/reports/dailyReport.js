@@ -13,6 +13,7 @@ import { store } from '../store.js';
 import { sendText } from '../alerts.js';
 import { computeHealthReport, buildDailyReportText } from './healthReport.js';
 import { certStatus } from '../security/certMonitor.js';
+import { localClock, dayKey, DAY_OFFSET_MIN } from "../util/dayKey.js";
 
 const FILE = path.join(config.configDir, 'daily-report.json');
 const DEFAULTS = { enabled: false, hour: 8, minute: 0, snapshotAgeDays: 3, dsWarnPct: 85, lastRunTs: 0 };
@@ -83,15 +84,21 @@ export async function runDailyReportNow() {
   }
 }
 
-const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString();
+// v2.582 BUG-5: 발송 시각·'오늘 이미 발송' 판정은 **서버 프로세스 TZ 가 아니라 포탈 날짜 오프셋**(기본 UTC+9)
+// 기준이다. 예전엔 `getHours()`·`toDateString()` 이라 TZ 가 UTC 인 호스트(패키지 unit 은 TZ 를 지정하지
+// 않는다)에서는 '08시' 로 설정한 보고가 **17시(KST)** 에 나갔다. 화면은 이 오프셋을 `dailyReportStatus().tzOffsetMin` 으로 받아 적는다.
+export function dailyReportDue(s, nowTs = Date.now()) {
+  const c = localClock(nowTs);
+  const due = c.hour > s.hour || (c.hour === s.hour && c.minute >= s.minute);
+  if (!due) return false;
+  if (s.lastRunTs && dayKey(s.lastRunTs) === c.day) return false; // 오늘(오프셋 기준) 이미 발송
+  return true;
+}
 
 async function tick() {
   const s = loadDailyReportSettings();
   if (!s.enabled) return;
-  const now = new Date();
-  const due = now.getHours() > s.hour || (now.getHours() === s.hour && now.getMinutes() >= s.minute);
-  if (!due) return;
-  if (s.lastRunTs && sameDay(s.lastRunTs, now.getTime())) return; // 오늘 이미 발송
+  if (!dailyReportDue(s)) return;
   const r = await runDailyReportNow();
   if (r?.ok) console.log('[daily-report] 일일 헬스체크 리포트 발송 완료');
   else console.warn(`[daily-report] 발송 실패 — ${r?.reason || '알 수 없는 오류'} (다음 틱에 재시도)`);
@@ -99,7 +106,7 @@ async function tick() {
 
 export function dailyReportStatus() {
   const s = loadDailyReportSettings();
-  return { ...s, running, schedulerOn: !!timer };
+  return { ...s, running, schedulerOn: !!timer, tzOffsetMin: DAY_OFFSET_MIN };
 }
 
 export function startDailyReport() {

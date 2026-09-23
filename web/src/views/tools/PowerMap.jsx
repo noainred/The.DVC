@@ -6,6 +6,7 @@ import { Loading, ErrorBox, ResultCount, SearchBox } from '../../components/ui.j
 import { Card, fmtKwh, fmtWatts, useTool } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
+import { dayStamp } from '../../dayStamp.js';
 
 
 /** 가로 막대(비중 표시) — recharts 없이 CSS만으로. */
@@ -38,7 +39,7 @@ export function PowerMap({ scope }) {
     const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `power-breakdown-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    a.href = url; a.download = `power-breakdown-${dayStamp()}.csv`; a.click();
     URL.revokeObjectURL(url);
   };
 

@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
-import { atomicWriteFileSync } from './util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from './util/atomicWrite.js';
 import { store } from './store.js';
 import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
@@ -68,7 +68,7 @@ export function loadAlertConfig() {
         suppressWindowMin: s.suppressWindowMin ?? DEFAULTS.suppressWindowMin,
       };
     }
-  } catch { /* defaults */ }
+  } catch (e) { preserveCorrupt(FILE, e.message); /* defaults */ }
   return cache;
 }
 export function saveAlertConfig(body = {}) {

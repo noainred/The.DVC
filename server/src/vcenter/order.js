@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'vcenter-order.json');
 
@@ -16,7 +16,7 @@ let cache = null;
 function load() {
   if (cache) return cache;
   cache = [];
-  try { if (fs.existsSync(FILE)) { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); cache = Array.isArray(j?.order) ? j.order.map(String) : []; } } catch { cache = []; }
+  try { if (fs.existsSync(FILE)) { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); cache = Array.isArray(j?.order) ? j.order.map(String) : []; } } catch (e) { preserveCorrupt(FILE, e.message); cache = []; }
   return cache;
 }
 

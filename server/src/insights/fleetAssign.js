@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { bumpFleetRev } from './fleetRev.js';
 
 const FILE = path.join(config.configDir, 'fleet-assign.json');
@@ -32,7 +32,8 @@ export function loadFleetAssign() {
   try {
     const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     cache = p && typeof p.assign === 'object' && p.assign ? p.assign : {};
-  } catch {
+  } catch (e) {
+    preserveCorrupt(FILE, e.message);
     cache = {};
   }
   cacheMtimeMs = mtime;

@@ -51,8 +51,15 @@ async function runIdracScanWorkerInner() {
   try {
     const url = `${config.agent.centralUrl}/api/central/idrac-scan-jobs?agent=${encodeURIComponent(config.agent.name)}`;
     const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      // v2.582 BUG-1: 예전에는 여기서 조용히 null — 중앙이 403(개별 토큰 아님·엣지 이름 불일치)이나 5xx 를
+      // 돌려줘도 상태 객체·콘솔에 아무것도 남지 않아 '엣지 로그' 화면에서 진단할 길이 없었다
+      // (v2.549·v2.561·v2.574 가 형제 워커 6개에 적용한 규약의 누락 지점).
+      noteFail(r.status === 403 ? 'auth' : 'http', `HTTP ${r.status}`);
+      return null;
+    }
     const { jobs } = await r.json();
+    lastPollAt = Date.now(); lastPollError = null; failStreak = 0;
     if (!jobs || !jobs.length) return null;
     for (const job of jobs) {
       const started = Date.now();
@@ -86,11 +93,23 @@ async function runIdracScanWorkerInner() {
       }
     }
     return last;
-  } catch { return null; }
+  } catch (e) {
+    noteFail(/timeout|abort/i.test(e?.message || '') ? 'timeout' : 'unreachable', e?.message || String(e));
+    return null;
+  }
+}
+
+let lastPollAt = 0; let lastPollError = null; let failStreak = 0;
+function noteFail(kind, detail) {
+  failStreak++;
+  lastPollError = { at: Date.now(), kind, detail: String(detail).slice(0, 300), streak: failStreak };
+  // 무음 실패 금지 — 첫 실패와 그 뒤 매 20회(5초 폴이면 ~100초)마다 한 줄.
+  if (failStreak === 1 || failStreak % 20 === 0) console.warn(`[idrac-scan-agent] 중앙 잡 인출 실패(${kind}) ${lastPollError.detail} — ${failStreak}회 연속. 개별 CENTRAL_TOKEN·엣지 이름·중앙 URL 을 확인하세요.`);
 }
 
 export function getIdracScanWorkerStatus() {
-  return { name: config.agent.name, centralUrl: config.agent.centralUrl || null, pollMs: POLL_MS, last };
+  // lastPollAt: 마지막 성공 인출 · lastPollError: 마지막 실패(성공하면 null · streak 는 연속 실패 수)
+  return { name: config.agent.name, centralUrl: config.agent.centralUrl || null, pollMs: POLL_MS, last, lastPollAt: lastPollAt || null, lastPollError };
 }
 
 export function startIdracScanWorker() {

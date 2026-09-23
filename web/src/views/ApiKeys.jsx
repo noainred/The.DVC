@@ -8,6 +8,7 @@ import {
   lastUsedText, fullScopeWarning, curlExample, rpmNote, staleGroups,
   DIRECTION_NOTE, ONCE_NOTE, READONLY_NOTE,
 } from './apiKeyText.js';
+import { dayStamp } from '../dayStamp.js';
 
 /**
  * 설정 › 연동 키 — 다른 포탈이 이 포탈의 조회 데이터를 읽는 **전용 API 키**(v2.562).
@@ -34,7 +35,7 @@ function msToDay(ms) {
   if (ms == null) return '';
   const t = Number(ms);
   if (!Number.isFinite(t)) return '';
-  return new Date(t).toISOString().slice(0, 10);
+  return dayStamp(t);
 }
 
 function Badge({ state }) {

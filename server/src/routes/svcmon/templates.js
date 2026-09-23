@@ -18,6 +18,7 @@ import {
   MAX_TEMPLATES, MAX_ITEMS, SUBST_VARS,
 } from '../../svcmon/templates.js';
 import { canEdit } from './shared.js';
+import { todayStamp } from "../../util/dayKey.js";
 
 export function registerTemplates(svcmonRouter) {
 
@@ -77,7 +78,7 @@ svcmonRouter.delete('/templates/:id', canEdit, (req, res) => {
 svcmonRouter.get('/templates/export.csv', canEdit, (req, res) => {
   const all = listTemplates();
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="svcmon-templates-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="svcmon-templates-${todayStamp()}.csv"`);
   logAudit({ user: req.user?.username, action: 'svcmon.template.export', detail: `템플릿 ${all.length}개` });
   res.send(templatesToCsv(all));
 });

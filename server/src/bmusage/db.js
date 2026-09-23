@@ -29,13 +29,10 @@ import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'bm-usage.db');
 
-export const DAY_OFFSET_MIN = Number(process.env.BMUSAGE_TZ_OFFSET_MIN) || 9 * 60;
-
-/** `ts` → 한국 기준 `YYYY-MM-DD`(순수 — 테스트가 경계를 고정한다). */
-export function dayKey(ts, offsetMin = DAY_OFFSET_MIN) {
-  const d = new Date(Number(ts) + offsetMin * 60_000);
-  return d.toISOString().slice(0, 10);
-}
+// 날짜 경계 코어는 `util/dayKey.js` 하나다(v2.582 ARCH-2 — 세 벌이던 것을 합쳤다). 여기서는 재수출만.
+// ⚠ `export { x } from` 은 이 모듈 스코프에 이름을 만들지 않는다(v2.575 실제 사고) — import 뒤 export.
+import { DAY_OFFSET_MIN, dayKey } from "../util/dayKey.js";
+export { DAY_OFFSET_MIN, dayKey };
 
 /** 우리가 적재하는 지표 열 — 이 목록이 계약이다(화면·롤업·테스트가 같이 쓴다). */
 export const METRICS = Object.freeze([

@@ -13,6 +13,7 @@ import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { KINDS, serialIndex, searchSerials } from '../../insights/serialLookup.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
+import { todayStamp } from "../../util/dayKey.js";
 
 const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
 const fullScopeOnly = (req, res, next) => {
@@ -76,7 +77,7 @@ api.get('/tools/serial-lookup/export.csv', toolsPerm, fullScopeOnly, (req, res) 
     lines.push(csvLine(CSV_COLS.map(([k]) => (k === 'kindLabel' ? (labelOf.get(r.kind) || r.kind) : (r[k] ?? '')))));
   }
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="serials-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="serials-${todayStamp()}.csv"`);
   res.send(CSV_BOM + lines.join('\r\n')); // BOM — 엑셀이 UTF-8 한글을 깨지 않게
 });
 

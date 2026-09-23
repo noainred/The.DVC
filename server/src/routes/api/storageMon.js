@@ -66,6 +66,16 @@ api.get('/tools/storage', toolsPerm, fullScopeOnly, (_req, res) => {
     // v2.581(BUG-D): 엣지별 보고 요약 — 장비 보고 시각·대수 + 상태 전용 보고(0대). 화면이 '엣지가 0대라고
     // 보고했다' 와 '엣지가 아무것도 안 보냈다' 를 구분해 말한다.
     edgeReports: edgeStorageReports(),
+    // v2.582 BUG-4: 화면 각주가 'config pull(≤5분) · push(≤5분)' 을 **숫자로 박고** 있었다(CLAUDE.md '주기 숫자를
+    // 문구에 박지 말 것'). 중앙이 배포하는 값(전역 지정)이 있으면 그것, 없으면 기본값을 실어 준다. 엣지가 portal.env 로
+    // 현장 값을 잡았으면 중앙은 그것을 모른다 — 그래서 'source' 를 함께 실어 화면이 '중앙 지정'/'기본값' 을 밝힌다.
+    edgeIntervals: (() => {
+      try {
+        const g = loadIntervalConfig().global || {};
+        const pick = (key) => { const spec = INTERVAL_SPEC.find((x) => x.key === key); const v = Number(g[key]); return Number.isFinite(v) && v > 0 ? { ms: v, source: 'central' } : { ms: spec?.def ?? null, source: 'default' }; };
+        return { configPull: pick('configPullMs'), push: pick('pushMs') };
+      } catch { return null; }
+    })(),
   });
 });
 
@@ -171,12 +181,20 @@ api.get('/tools/storage/activity', toolsPerm, fullScopeOnly, (req, res) => {
 api.post('/tools/storage/collect-all', adminOnly, async (req, res) => {
   try {
     const all = listDevices().filter((d) => d.enabled !== false);
-    const edge = all.filter((d) => (d.agent || '').trim()).length;
+    const edgeDevs = all.filter((d) => (d.agent || '').trim());
+    const edge = edgeDevs.length;
     const central = all.length - edge;
     const result = await pollStorageOnce(); // { ok, fail } 또는 { skipped:true }(이미 진행 중)
+    // v2.582 BUG-2: 엣지 위임 장비는 '다음 주기' 로 안내만 했다 — 형제 도구(SAN 스위치 v2.516)는 재수집 요청을
+    // 등록해 엣지가 다음 설정 pull 때 즉시 수집·push 한다. 같은 큐(collectRequests)를 쓰고 연타는 hasPendingRequest 가 막는다.
+    let requested = 0; let alreadyQueued = 0;
+    for (const d of edgeDevs) {
+      if (hasPendingRequest(d.id)) { alreadyQueued++; continue; }
+      try { requestCollect(d.id, d.agent); requested++; } catch { /* 한 대 실패가 전체를 막지 않게 */ }
+    }
     logAudit({ user: req.user?.username, action: '스토리지 전체 새로고침',
-      detail: `중앙 ${central}대 재수집(${result.skipped ? '이미 진행중' : `성공 ${result.ok}·실패 ${result.fail}`})·엣지 ${edge}대 다음주기` });
-    res.json({ ok: true, central, edge, result });
+      detail: `중앙 ${central}대 재수집(${result.skipped ? '이미 진행중' : `성공 ${result.ok}·실패 ${result.fail}`}) · 엣지 ${edge}대 중 요청 ${requested}(대기중 ${alreadyQueued})` });
+    res.json({ ok: true, central, edge, requested, alreadyQueued, result });
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }
 });
 

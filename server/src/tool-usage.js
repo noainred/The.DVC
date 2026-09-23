@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 import { atomicWriteFileSync } from './util/atomicWrite.js';
+import { registerExitFlush } from './util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
 const FILE = path.join(config.configDir, 'tool-usage.json');
 
@@ -46,6 +47,7 @@ function scheduleFlush() {
   }, 2_000);
   flushTimer.unref?.();
 }
+registerExitFlush('tool-usage', () => { if (!flushTimer) return; clearTimeout(flushTimer); flushTimer = null; atomicWriteFileSync(FILE, JSON.stringify(state)); });
 
 /** 키 유효성: 영문/숫자/하이픈만 허용(임의 입력으로 파일이 부풀지 않게). */
 function validKey(k) {

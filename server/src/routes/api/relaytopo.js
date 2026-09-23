@@ -10,6 +10,7 @@ import { renderManagedBlock } from '../../relaytopo/haproxy.js';
 import { fetchSite, fetchAll, applySite, testNode, lastResults, resolveNodeAccess } from '../../relaytopo/ops.js';
 import { loadCollectors } from '../../collector/registry.js';
 import { listTargets } from '../../agent/deployRegistry.js';
+import { todayStamp } from "../../util/dayKey.js";
 
 const adminOnly = requireRole('admin');
 /**
@@ -73,7 +74,7 @@ api.post('/tools/relaytopo/import', adminOnly, (req, res) => {
 
 /** 내보내기(비밀 없음): ?format=json|csv */
 api.get('/tools/relaytopo/export', adminOnly, (req, res) => {
-  const topo = loadTopology(); const day = new Date().toISOString().slice(0, 10);
+  const topo = loadTopology(); const day = todayStamp();
   logAudit({ user: req.user?.username, action: '중계 토폴로지 내보내기', detail: `format=${req.query.format || 'json'} sites=${topo.sites.length}`, ip: req.ip });
   if (String(req.query.format || 'json').toLowerCase() === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', `attachment; filename="relay-topology-${day}.csv"`);

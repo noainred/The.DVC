@@ -18,7 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = () => path.join(config.configDir, 'sanswitch-err-baseline.json');
 /** 장비 수 상한 — 28대 운영에 30+ 확장을 가정해도 넉넉하다. 포트는 디렉터 768까지. */
@@ -34,7 +34,7 @@ let _map = null;
 function load() {
   if (_map) return _map;
   try { _map = new Map(Object.entries(JSON.parse(fs.readFileSync(FILE(), 'utf8')))); }
-  catch { _map = new Map(); }   // 없거나 손상 — 새로 시작(다시 저장 가능한 값)
+  catch (e) { if (fs.existsSync(FILE())) preserveCorrupt(FILE(), e.message); _map = new Map(); }   // 손상 — 보존 후 새로 시작(v2.582: 0 으로 시작하면 다음 점검에서 오래된 누적이 통째로 '당월 신규' 로 둔갑한다)
   return _map;
 }
 

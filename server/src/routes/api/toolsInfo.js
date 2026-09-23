@@ -11,6 +11,7 @@ import { licenseFamilyOf, licenseExpiryStatus } from '../../util/licenseExpiry.j
 import { collectHorizonLicenses, listHorizon } from '../../horizon/horizon.js';
 import { memoJson, scopeKey, osFamily } from './shared.js';
 import { aggregateGuestOs } from '../../inventory/guestOsAgg.js';
+import { dayKey } from "../../util/dayKey.js";
 
 export function registerToolsInfo(api) {
 
@@ -139,7 +140,7 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
         family: licenseFamilyOf(`${l.name} ${l.edition} ${l.product}`),
         edition: l.edition || '', product: l.product || '', productVersion: l.productVersion || '',
         key: l.key || '', total: l.total ?? null, used: l.used ?? null,
-        expires: ts ? new Date(ts).toISOString().slice(0, 10) : '',
+        expires: dayKey(ts),
         status: st.status, daysLeft: st.daysLeft,
       });
     }
@@ -154,7 +155,7 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
           name: l.description || 'NSX License', family: 'NSX',
           edition: l.capacityType || '', product: 'NSX', productVersion: m.version || '',
           key: l.key || '', total: l.quantity ?? null, used: null,
-          expires: l.expiry ? new Date(l.expiry).toISOString().slice(0, 10) : '',
+          expires: dayKey(l.expiry),
           status: st.status, daysLeft: st.daysLeft,
         });
       }
@@ -172,7 +173,7 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
           name: l.name, family: 'Horizon',
           edition: l.usageModel || '', product: 'Horizon', productVersion: '',
           key: l.key || '', total: null, used: null,
-          expires: l.expiry ? new Date(l.expiry).toISOString().slice(0, 10) : '',
+          expires: dayKey(l.expiry),
           status: st.status, daysLeft: st.daysLeft,
         });
       }

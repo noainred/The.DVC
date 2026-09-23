@@ -311,15 +311,31 @@ export class VimSoapClient {
     const objs = await this.retrieveObjectProps('PerformanceManager', this.sc.perfManager, ['perfCounter']);
     const xml = objs[0]?.props?.perfCounter || '';
     const map = new Map();
+    // v2.582 ARCH-5: <level>(통계 레벨 1~4)도 함께 읽는다 — v2.510 계획 6번이 미완이었다. 예전엔 버려서 계열이 빈
+    // 이유를 '레벨 문제일 가능성이 크다' 로만 말했다. 별도 맵에 두는 이유: 기존 호출부 6곳이 map.get(key) 로
+    // 숫자 id 를 기대한다(값 모양을 바꾸면 전부 깨진다). perfCounterLevels() 로 꺼낸다.
+    const levels = new Map();
     for (const blk of xml.split('<PerfCounterInfo').slice(1)) {
       const key = /<key>(\d+)<\/key>/.exec(blk)?.[1];
       const name = /<nameInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
       const group = /<groupInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
       const rollup = /<rollupType>(\w+)<\/rollupType>/.exec(blk)?.[1];
-      if (key && name && group && rollup) map.set(`${group}.${name}.${rollup}`, key);
+      if (key && name && group && rollup) {
+        const full = `${group}.${name}.${rollup}`;
+        map.set(full, key);
+        const lv = /<level>(\d)<\/level>/.exec(blk)?.[1];
+        if (lv) levels.set(full, Number(lv));
+      }
     }
-    if (map.size) PERF_COUNTER_CACHE.set(ck, { at: Date.now(), map });
+    if (map.size) PERF_COUNTER_CACHE.set(ck, { at: Date.now(), map, levels });
     return map;
+  }
+
+  /** 카운터 키('group.name.rollup') → 그 vCenter 가 답한 통계 레벨(1~4). 카탈로그를 아직 안 읽었거나 <level> 이 없으면 빈 Map. */
+  async perfCounterLevels() {
+    await this.perfCounterMap();
+    const ck = `${this.vc?.id || this.vc?.host || ''}`;
+    return PERF_COUNTER_CACHE.get(ck)?.levels || new Map();
   }
 
   /**
@@ -888,8 +904,10 @@ export const fetchVmMetric = (vc, moref, type, interval, opts) => fetchEntityMet
 export const fetchHostMetric = (vc, moref, type, interval, opts) => fetchEntityMetric(vc, 'HostSystem', moref, type, interval, opts);
 
 /**
- * 자원 축소 근거 리포트용 VM 카운터(v2.445). 전부 vCenter **통계 레벨 1** 에 포함되는 계열이라
- * 기본 설정의 vCenter 라면 추가 설정 없이 1일(5분)·1주(30분)·1달(2시간)·1년(1일) 롤업이 있다.
+ * 자원 축소 근거 리포트용 VM 카운터(v2.445). ⚠ v2.582 정정 — 예전 주석은 "전부 통계 레벨 1" 이라 적었지만
+ * 같은 파일의 실시간 폴백 주석(v2.481)이 밝히듯 **mem.active·mem.swapped 는 레벨 2** 다(기본 레벨 1 의 vCenter
+ * 에서는 주/월/년 롤업이 비어 온다). 어느 카운터가 어느 레벨인지는 하드코딩하지 않는다 — vCenter 카탈로그의
+ * <level> 을 `perfCounterLevels()` 로 읽어 `levels` 로 돌려준다(그 vCenter 가 답한 값).
  *  - cpu.usagemhz.average  : 실제 사용 MHz(vCPU 산정 근거)      - cpu.usage.average : 사용률 %(×0.01)
  *  - cpu.ready.summation   : Ready 시간 ms(경합 — 감축 보류 신호. %Ready = ms/(interval*1000)/vCPU)
  *  - mem.active.average    : 게스트가 실제로 만지는 메모리 KB(VMware 가이드의 '워킹셋' 추정 지표)
@@ -930,6 +948,10 @@ export async function fetchVmRightsizeSeries(vc, moref, interval, { start, end }
   try {
     const map = await c.perfCounterMap();
     const wanted = rightsizeWanted(map);
+    // v2.582 ARCH-5: 계열별 통계 레벨(그 vCenter 카탈로그 값). empty 인 계열의 레벨이 1 보다 크면 화면이
+    // '이 카운터는 레벨 N 이 필요합니다' 라고 **그 vCenter 가 답한 값으로** 말한다(추측 아님).
+    const lvMap = await c.perfCounterLevels();
+    const levels = Object.fromEntries(wanted.map((w) => [w.name, lvMap.get(w.cfg.key) ?? null]));
     // 진단 문구에는 vCenter 카운터 키를 함께 싣는다 — 사용자가 vCenter 에서 바로 대조할 수 있게(rsLabel).
     const missing = wanted.filter((w) => !w.id).map(rsLabel);
     const empty = [];
@@ -953,7 +975,7 @@ export async function fetchVmRightsizeSeries(vc, moref, interval, { start, end }
         realtime = summarizeRealtime(rtNeed, rtRaw);
       } catch { realtime = null; /* 실시간도 안 되면 조용히 넘어간다 — 이력 '표본 없음' 안내는 유지 */ }
     }
-    return { intervalSec: intervalId, series, missing, empty, noData, realtime };
+    return { intervalSec: intervalId, series, missing, empty, noData, realtime, levels };
   } finally {
     await c.logout();
   }

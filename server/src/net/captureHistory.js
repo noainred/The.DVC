@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 
 const FILE = path.join(config.configDir, 'capture-history.json');
 const MAX = 300;
@@ -17,7 +18,7 @@ function load() {
   try { if (fs.existsSync(FILE)) list = JSON.parse(fs.readFileSync(FILE, 'utf8')) || []; } catch { list = []; }
   return list;
 }
-function persist() { try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(list), { mode: 0o600 }); } catch { /* */ } }
+function persist() { try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify(list), { mode: 0o600 }); } catch { /* */ } }
 
 const worstSev = (issues = []) => (issues.some((i) => i.sev === 'error') ? 'error' : issues.some((i) => i.sev === 'warning') ? 'warning' : 'ok');
 

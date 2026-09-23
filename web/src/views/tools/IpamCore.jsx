@@ -9,6 +9,7 @@ import { IpamNetMap, IpamRanges, RangePolicies } from './IpamNet.jsx';
 import { IpScanSettings, IpmsSettings, MemoEditor, OverrideEditor, ScanStatusModal } from './IpamSettings.jsx';
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
+import { dayStamp } from '../../dayStamp.js';
 
 
 /**
@@ -77,7 +78,7 @@ function Ipam({ scope, onScope }) {
     const blob = await res.blob(); const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
   };
-  const downloadXlsx = () => blobDownload(`/tools/ipam.xlsx${sp}`, `ip-ledger-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  const downloadXlsx = () => blobDownload(`/tools/ipam.xlsx${sp}`, `ip-ledger-${dayStamp()}.xlsx`);
 
   const [canIpms, setCanIpms] = useState(false);
   const [ipms, setIpms] = useState(false); // IPMS settings modal open
@@ -134,7 +135,7 @@ function Ipam({ scope, onScope }) {
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `ipam-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    a.href = url; a.download = `ipam-${dayStamp()}.csv`; a.click();
     URL.revokeObjectURL(url);
   };
 

@@ -7,6 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { classifyOs, majorOf } from './osDetect.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
+import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
 const FILE = path.join(config.configDir, 'os-inventory.json');
 
@@ -21,9 +23,10 @@ function load() {
 }
 function persistSoon() {
   if (wt) return;
-  wt = setTimeout(() => { wt = null; try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); fs.writeFileSync(FILE, JSON.stringify(Object.fromEntries(load()), null, 0), { mode: 0o600 }); } catch { /* */ } }, 2000);
+  wt = setTimeout(() => { wt = null; try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(load()), null, 0), { mode: 0o600 }); } catch { /* */ } }, 2000);
   wt.unref?.();
 }
+registerExitFlush('inventory/osStore', () => { if (!wt) return; clearTimeout(wt); wt = null; try { atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(load()), null, 0), { mode: 0o600 }); } catch { /* */ } });
 
 /** ESXi 보고 guestOS와 실제 탐지 OS의 불일치 판정(계열 또는 메이저 버전 차이). */
 export function computeMismatch(esxiGuestOS, detected) {

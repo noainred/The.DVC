@@ -14,6 +14,7 @@ import { enqueueLogQuery, getLogQueryResult, ownerOfReq, vcenterOfReq } from '..
 import { listInventory } from '../../central/inventory.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import zlib from 'node:zlib';
+import { todayStamp } from "../../util/dayKey.js";
 
 
 // vClogs scope: 사용자 scope 를 f.vcenterIds 화이트리스트로 강제하고, meta 도 범위 내 vCenter 만 남긴다.
@@ -180,7 +181,7 @@ api.get('/tools/vclogs/export.csv', requirePerm('tools'), async (req, res) => {
     const MAX = Math.max(1000, Number(process.env.VCLOGS_EXPORT_MAX_ROWS) || 100_000);
     const CHUNK = 20_000;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="vcenter-logs-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="vcenter-logs-${todayStamp()}.csv"`);
     res.write('﻿time,vcenter,severity,type,user,entity,message\n'); // BOM(엑셀 한글)
     let offset = 0;
     for (;;) {

@@ -47,21 +47,10 @@ export const DAILY_KEEP_DAYS_DEF = 5 * 365;   // 5년(사용자 지정 기본값
  * UTC 로 자르면 한국 기준 오전 9시에 날이 바뀌어 '어제 증가량' 이 사람이 세는 하루와 어긋난다.
  * 다른 지역에서 쓰려면 `STORAGE_GROWTH_TZ_OFFSET_MIN` 으로 바꾼다.
  */
-export const DAY_OFFSET_MIN = Number.isFinite(Number(process.env.STORAGE_GROWTH_TZ_OFFSET_MIN))
-  ? Number(process.env.STORAGE_GROWTH_TZ_OFFSET_MIN) : 540;
-const DAY_MS = 86_400_000;
-/** epoch ms → 일 인덱스(오프셋 적용). 순수 — 테스트가 고정한다. */
-export function dayIndex(ts, offsetMin = DAY_OFFSET_MIN) {
-  return Math.floor((Number(ts) + offsetMin * 60_000) / DAY_MS);
-}
-/** 일 인덱스 → 그 날의 시작 epoch ms(오프셋 적용). */
-export function dayStartMs(day, offsetMin = DAY_OFFSET_MIN) {
-  return Number(day) * DAY_MS - offsetMin * 60_000;
-}
-/** 일 인덱스 → `YYYY-MM-DD`(그 지역의 날짜). */
-export function dayLabel(day, offsetMin = DAY_OFFSET_MIN) {
-  return new Date(dayStartMs(day, offsetMin) + offsetMin * 60_000).toISOString().slice(0, 10);
-}
+// 날짜 경계 코어는 `util/dayKey.js` 하나다(v2.582 ARCH-2 — 세 벌이던 것을 합쳤다). `STORAGE_GROWTH_TZ_OFFSET_MIN`
+// 은 그 모듈이 호환으로 계속 읽는다. import 뒤 export(v2.575 재수출 규약).
+import { DAY_OFFSET_MIN, DAY_MS, dayIndex, dayStartMs, dayLabel } from "../util/dayKey.js";
+export { DAY_OFFSET_MIN, dayIndex, dayStartMs, dayLabel };
 
 /** 보존 일수(설정 → env → 기본). 순환 import 를 피하려고 setter 로 주입받는다. */
 let _keepDays = { raw: null, daily: null };

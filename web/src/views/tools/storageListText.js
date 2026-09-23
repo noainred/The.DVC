@@ -94,3 +94,14 @@ export function edgeReportNotes(reports = []) {
   }
   return out;
 }
+
+/**
+ * v2.582 BUG-4: 엣지 주기 표기 — 서버가 준 값만 쓴다(숫자를 문구에 박지 않는다). 값이 없으면 '미상'.
+ * @param {{ms:number|null, source:string}|null|undefined} iv
+ */
+export function edgeIntervalText(iv) {
+  const ms = Number(iv?.ms);
+  if (!Number.isFinite(ms) || ms <= 0) return '미상';
+  if (ms % 60_000 === 0) return `${ms / 60_000}분`;
+  return `${Math.round(ms / 1000)}초`;
+}

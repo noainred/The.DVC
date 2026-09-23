@@ -12,6 +12,7 @@ import { reclaimReport, vmDetail, reclaimCsv } from '../../guestdisk/service.js'
 import { guestDiskDbStatus } from '../../guestdisk/db.js';
 import { guestDiskPollerStatus, runGuestDiskNow } from '../../guestdisk/poller.js';
 import { load as loadSettings, save as saveSettings } from '../../guestdisk/settings.js';
+import { todayStamp } from "../../util/dayKey.js";
 
 export function registerToolsGuestDisk(api) {
   // 회수 목록(VM별 할당/사용/여유/비율) — scope 적용.
@@ -46,7 +47,7 @@ export function registerToolsGuestDisk(api) {
     const report = await reclaimReport({ allowed, minReclaimGB: Number.isFinite(minReclaimGB) ? minReclaimGB : 5, maxRatioPct, vcenterId, usageFactor });
     const csv = reclaimCsv(report.rows);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="guest-disk-reclaim-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="guest-disk-reclaim-${todayStamp()}.csv"`);
     res.send(csv);
   });
 

@@ -5,7 +5,8 @@ import { guardCell } from '../../util/csv.js';
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { buildVmExport, vmExportCsv } from '../../vcenter/vmExport.js';
-import { buildIpamRows, buildSubnetSheets, listSubnets, ipVcenterOwners } from '../../ipam/ledger.js';
+import { buildIpamRows, buildSubnetSheets, listSubnets, ipVcenterOwners, ipamRevKey } from '../../ipam/ledger.js';
+import { memoJson, scopeKey } from './shared.js';
 import { buildIpamInsights } from '../../ipam/insights.js';
 import { buildNetmap } from '../../ipam/netmap.js';
 import { listVcRanges } from '../../ipam/rangeStore.js';
@@ -19,6 +20,7 @@ import { logAudit } from '../../audit.js';
 import { getIpHistory, scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { buildWorkbook } from '../../ipam/excel.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드
+import { todayStamp } from "../../util/dayKey.js";
 
 
 // VM 전체 정보 export (특수 기능) — 선택 vCenter 의 모든 VM 을 '획득 가능한 최대 필드'로.
@@ -67,11 +69,29 @@ export function registerIpamExport(api) {
 // 만들어 JSON.stringify + SHA-1(ETag)이 요청마다 이벤트 루프를 세웠다. 목록에선 hasOwner
 // 플래그만 내리고, 상세 팝업은 /vms/lookup?ip= 로 클릭 시 1건만 가져온다(프론트 지연 조회).
 // 호스트/스캔 행은 원래 작아 유지. buildIpamRows 결과는 캐시 공유 객체라 여기서 변형하지 않는다.
-api.get('/tools/ipam', requirePerm('tools'), (req, res) => {
-  const snap = store.get();
+/**
+ * v2.582 TUNE-1: 이 응답은 운영 규모(33 vCenter · 6,004 VM 목)에서 **5.3MB** 이고, 예전에는 요청마다
+ * rows 복사 → JSON 직렬화 → SHA-1(ETag) → gzip 을 다시 했다(in-process p50 71ms — 다른 폴링 라우트는
+ * 전부 ≤1ms). 304 도 본문을 다 만든 뒤에야 판정해 33ms 였다. memoJson 은 같은 세대·같은 범위·같은 URL 이면
+ * 직렬화·해시·압축을 재사용하고 If-None-Match 는 키 ETag 로 본문 없이 304 다. 캐시 키에는 스냅샷 세대 외에
+ * **범위(scopeKey)** 와 **원장 리비전(ipamRevKey — 주석·override·정책·스캔·설정)** 이 들어간다 — 후자가 없으면
+ * 주석을 저장한 직후 TTL 동안 옛 응답이 나간다.
+ *  ?q= : IP 부분 문자열 필터(v2.582 TUNE-2). IPMS 검색(IpmsMatches)이 검색어마다 전량을 받아 브라우저에서
+ *  거르던 것을 서버가 거른다 — 응답이 5.3MB 에서 수 KB 가 된다. 상한(2,000행)은 밝힌다(`truncated`).
+ */
+api.get('/tools/ipam', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-ipam', (snap) => {
   const data = buildIpamRows(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
-  res.json({ ...data, rows: data.rows.map((r) => (r.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : r)) });
-});
+  let rows = data.rows.map((r) => (r.ownerType === 'vm' && r.owner ? { ...r, owner: undefined, hasOwner: true } : r));
+  const q = String(req.query.q || '').trim().toLowerCase();
+  let truncated = false; let matched = null;
+  if (q) {
+    const lim = Math.max(1, Math.min(10_000, Number(req.query.limit) || 2_000));
+    const hit = rows.filter((row) => String(row.ip || '').toLowerCase().includes(q));
+    matched = hit.length;
+    if (hit.length > lim) { truncated = true; rows = hit.slice(0, lim); } else rows = hit;
+  }
+  return { ...data, rows, ...(q ? { q, matched, truncated } : {}) };
+}, { extraKey: `${scopeKey(req.user, store.get())}|${ipamRevKey()}` }));
 api.get('/tools/vm-export', requirePerm('tools'), async (req, res) => {
   const vcenterId = vmExportGuard(req, res);
   if (!vcenterId) return;
@@ -87,7 +107,7 @@ api.get('/tools/vm-export.csv', requirePerm('tools'), async (req, res) => {
   try {
     const r = await buildVmExport(vcenterId);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="vm-export-${encodeURIComponent(vcenterId)}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="vm-export-${encodeURIComponent(vcenterId)}-${todayStamp()}.csv"`);
     res.send(vmExportCsv(r));
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
@@ -140,7 +160,7 @@ api.get('/tools/ipam/vc-ranges.csv', requirePerm('tools'), (req, res) => {
   for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
   const list = listVcRanges().filter((e) => !allowed || allowed.has(e.vcenterId));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="ipam-vc-ranges-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="ipam-vc-ranges-${todayStamp()}.csv"`);
   res.send(vcRangesToCsv(list, (id) => vcName[id] || id));
 });
 
@@ -160,7 +180,7 @@ api.get('/tools/ipam/scan-report.csv', requirePerm('tools'), (req, res) => {
   // 범위 제한 계정에는 헤더만 반환한다(ledger.js 스캔 행 차단과 일관 — 이 경로로 새면 하드닝 무의미).
   if (scopedVcenterIds(req.user, store.get())) {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="ip-scan-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="ip-scan-report-${todayStamp()}.csv"`);
     return res.send(`${head}\n`);
   }
   const histMap = getIpHistoryMap();
@@ -174,7 +194,7 @@ api.get('/tools/ipam/scan-report.csv', requirePerm('tools'), (req, res) => {
   });
   const csv = `${head}\n${lines.join('\n')}\n`;
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="ip-scan-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="ip-scan-report-${todayStamp()}.csv"`);
   res.send(csv);
 });
 
@@ -401,7 +421,7 @@ api.get('/tools/ipam.xlsx', requirePerm('tools'), async (req, res) => {
     const sheets = buildSubnetSheets(snap, { vcenterId: req.query.vcenterId, allowed: scopedVcenterIds(req.user, snap) });
     const wb = await buildWorkbook(sheets);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="ip-ledger-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="ip-ledger-${todayStamp()}.xlsx"`);
     res.setHeader('Cache-Control', 'no-store');
     await wb.xlsx.write(res);
     res.end();
@@ -424,7 +444,7 @@ api.get('/tools/ipam.csv', requirePerm('tools'), (req, res) => {
   for (const r of rows) lines.push([r.ip, r.vcenterId, r.vcenterName, r.ownerType, r.ownerName, r.powerState, r.guestOS, r.hostName, r.cluster, r.scope, r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0,
     r.discovery || '', r.reconcile || '', r.mgmtStatus || '', r.owner_ || '', r.label || '', r.deviceType || '', r.appliedBy || '', r.rangePolicySpec || '', iso(r.reservedUntil), iso(r.firstSeen), iso(r.lastSeen), r.usageStatus || ''].map(esc).join(','));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="ipam-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="ipam-${todayStamp()}.csv"`);
   res.send('﻿' + lines.join('\r\n')); // BOM for Excel
 });
 }

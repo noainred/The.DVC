@@ -8,6 +8,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { redactEnvSecrets } from '../util/envRedact.js'; // v2.538
+import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
 const FILE = path.join(config.configDir, 'central-agent-config.json');
 
@@ -28,6 +29,7 @@ function persistSoon() {
   }, 3_000);
   writeTimer.unref?.();
 }
+registerExitFlush('central/agentConfig', () => { if (!writeTimer) return; clearTimeout(writeTimer); writeTimer = null; atomicWriteFileSync(FILE, JSON.stringify(byAgent), { mode: 0o600 }); });
 
 /** 에이전트가 자기 설정을 push. files: { name: content(utf8) }. */
 export function setAgentConfig(agent, files) {

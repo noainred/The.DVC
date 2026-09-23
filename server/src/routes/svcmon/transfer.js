@@ -24,6 +24,7 @@ import {
 import { getTemplate, materializeForTarget } from '../../svcmon/templates.js';
 import { recordBatch } from '../../svcmon/batches.js';
 import { canEdit, XLSX_MAX_BYTES, dryRunTargets } from './shared.js';
+import { todayStamp } from "../../util/dayKey.js";
 
 export function registerTransfer(svcmonRouter) {
 
@@ -39,7 +40,7 @@ svcmonRouter.get('/targets/export.csv', canEdit, (req, res) => {
     if (scope && !(t.path === scope || t.path.startsWith(`${scope}\\`))) return false;
     return true;
   });
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = todayStamp();
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="svcmon-targets-${stamp}.csv"`);
   let tests = 0;
@@ -79,7 +80,7 @@ svcmonRouter.get('/targets/export.:format', canEdit, async (req, res) => {
   try {
     const body = await serializeTargets(all, format, { includeTests: withTests });
     const meta = FORMAT_META[format];
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = todayStamp();
     res.setHeader('Content-Type', meta.mime);
     res.setHeader('Content-Disposition', `attachment; filename="svcmon-targets-${stamp}.${meta.ext}"`);
     logAudit({ user: req.user?.username, action: 'svcmon.target.export', detail: `대상 ${all.length} · ${format}${scope ? ` · 경로 ${scope}` : ''}` });

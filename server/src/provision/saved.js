@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'provision-saved.json');
 
@@ -17,7 +17,7 @@ let cache = null;
 function load() {
   if (cache) return cache;
   cache = [];
-  try { if (fs.existsSync(FILE)) { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); cache = Array.isArray(j) ? j : (j.items || []); } } catch { cache = []; }
+  try { if (fs.existsSync(FILE)) { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); cache = Array.isArray(j) ? j : (j.items || []); } } catch (e) { preserveCorrupt(FILE, e.message); cache = []; }
   return cache;
 }
 function persist() {
