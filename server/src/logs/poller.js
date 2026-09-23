@@ -7,6 +7,7 @@ import { config, loadVcenterConfig } from '../config.js';
 import { poolRun } from '../util/pool.js';   // v2.447: vCenter 병렬 수집(감사 T2) · v2.579: routes 의존 제거
 import { store } from '../store.js';
 import { collectVCenterEvents } from '../vcenter/soapClient.js';
+import { vcAuthGuard } from '../vcenter/restClient.js';
 import { getLogsDb } from './db.js';
 import { loadLogSettings } from './settings.js';
 
@@ -50,7 +51,12 @@ function synthEvents(vcId, sinceTs, n) {
   return out;
 }
 
-export async function pollLogsOnce() {
+/**
+ * @param {{manual?: boolean}} [opts] manual — 관리자 '지금 수집'. v2.590: 인증 실패로 멈춘 vCenter 는
+ *   **주기 수집에서만** 건너뛴다(store 와 같은 정지 기록 — 같은 계정이다. 로그 폴러가 따로 로그인하면
+ *   store 가 멈춰도 계정 잠금은 그대로다). 수동 실행은 막지 않는다(authGuard 규칙 3).
+ */
+export async function pollLogsOnce({ manual = false } = {}) {
   if (running) return lastRun;
   const s = loadLogSettings();
   if (!s.enabled) { lastRun = { at: Date.now(), collected: 0, skipped: true }; return lastRun; }
@@ -61,6 +67,7 @@ export async function pollLogsOnce() {
     const minRank = SEV_RANK[s.minSeverity] || 0;
     const vcs = mock ? (store.get().vcenters || []).map((v) => ({ id: v.id, name: v.name })) : (loadVcenterConfig().vcenters || []);
     let collected = 0;
+    const authStopped = [];   // v2.590: 이번 주기에 인증 실패 정지로 건너뛴 vCenter — 조용히 빼지 않고 밝힌다
     // v2.447(감사 T2): vCenter 를 **병렬 + per-vCenter 데드라인**으로 수집한다.
     // 예전에는 순차 await 라 vCenter 당 왕복 5회 이상(login→createCollector→readNext…→destroy→logout)이
     // 그대로 더해졌다 — 28곳 중 폴란드·미 동부처럼 RTT 800ms 를 넘는 곳이 섞이면 한 주기가 10초를
@@ -78,6 +85,7 @@ export async function pollLogsOnce() {
     };
     const perVc = [];
     await poolRun(vcs, LOG_CONCURRENCY, async (vc) => {
+      if (!mock && !manual && vcAuthGuard.authStopFor(vc)) { authStopped.push(vc.id); return; }
       try {
         const last = db.lastTs(vc.id);
         const sinceTs = last ? last + 1 : Date.now() - 7 * DAY; // 첫 수집은 최근 7일
@@ -123,7 +131,7 @@ export async function pollLogsOnce() {
         if (dropped) { db.vacuum(); console.log(`[vclogs] 용량 제한(${s.maxSizeMB}MB) 초과 → 오래된 ${dropped}건 정리`); }
       }
     }
-    lastRun = { at: Date.now(), collected };
+    lastRun = { at: Date.now(), collected, ...(authStopped.length ? { authStopped } : {}) };
     if (collected) console.log(`[vclogs] ${collected}건 장기 보관`);
     return lastRun;
   } finally { running = false; }

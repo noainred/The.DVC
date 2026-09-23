@@ -168,20 +168,43 @@ export async function listLatest(vcenterIds = null) {
   }));
 }
 
-/** 한 VM 의 총 사용/할당 추이(diff-저장 점들). */
+/**
+ * 한 VM 의 총 사용/할당 추이(diff-저장 점들).
+ * ⚠ v2.590 P3: 창(sinceTs) 앞의 **마지막 행을 창 시작점으로 이월**한다(carry-in, `carried:true`). diff-저장은 1GB 이상
+ *   바뀔 때만 행을 남기므로, 40일 전 이후 안 바뀐 VM 은 30일 창에 행이 0개였다 — 목록은 파티션 2개라 말하는데 상세는
+ *   빈 표·빈 추이였다(오류 없이 틀린 화면). 이월값은 '그 시점에 유효하던 값' 이라 지어낸 값이 아니다.
+ */
 export async function vmSeries(vmId, sinceTs = 0) {
   const db = await getDb();
   if (!db) return [];
-  return db.prepare('SELECT ts, alloc_gb, used_gb FROM vm_series WHERE vm_id=? AND ts>=? ORDER BY ts')
+  const rows = db.prepare('SELECT ts, alloc_gb, used_gb FROM vm_series WHERE vm_id=? AND ts>=? ORDER BY ts')
     .all(vmId, sinceTs).map((r) => ({ ts: r.ts, allocGB: r.alloc_gb, usedGB: r.used_gb }));
+  if (sinceTs > 0 && (!rows.length || rows[0].ts > sinceTs)) {
+    const c = db.prepare('SELECT ts, alloc_gb, used_gb FROM vm_series WHERE vm_id=? AND ts<? ORDER BY ts DESC LIMIT 1').get(vmId, sinceTs);
+    if (c) rows.unshift({ ts: sinceTs, allocGB: c.alloc_gb, usedGB: c.used_gb, carried: true, carriedFromTs: c.ts });
+  }
+  return rows;
 }
 
-/** 한 VM 의 파티션별 추이(diff-저장 점들). */
+/** 한 VM 의 파티션별 추이(diff-저장 점들). 창 앞 마지막 행을 경로별로 이월한다(v2.590 P3 — vmSeries 와 같은 이유). */
 export async function partSeries(vmId, sinceTs = 0) {
   const db = await getDb();
   if (!db) return [];
-  return db.prepare('SELECT path, ts, cap_gb, used_gb FROM part_series WHERE vm_id=? AND ts>=? ORDER BY path, ts')
+  const rows = db.prepare('SELECT path, ts, cap_gb, used_gb FROM part_series WHERE vm_id=? AND ts>=? ORDER BY path, ts')
     .all(vmId, sinceTs).map((r) => ({ path: r.path, ts: r.ts, capGB: r.cap_gb, usedGB: r.used_gb }));
+  if (!(sinceTs > 0)) return rows;
+  const carry = db.prepare(`SELECT p.path, p.ts, p.cap_gb, p.used_gb FROM part_series p
+    WHERE p.vm_id=? AND p.ts = (SELECT MAX(q.ts) FROM part_series q WHERE q.vm_id=p.vm_id AND q.path=p.path AND q.ts<?)`).all(vmId, sinceTs);
+  if (!carry.length) return rows;
+  const firstTs = new Map();
+  for (const r of rows) if (!firstTs.has(r.path)) firstTs.set(r.path, r.ts);
+  const add = [];
+  for (const c of carry) {
+    const f = firstTs.get(c.path);
+    if (f != null && f <= sinceTs) continue;
+    add.push({ path: c.path, ts: sinceTs, capGB: c.cap_gb, usedGB: c.used_gb, carried: true, carriedFromTs: c.ts });
+  }
+  return [...add, ...rows].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : a.ts - b.ts));
 }
 
 /**
@@ -221,7 +244,13 @@ export async function prune(retentionDays = 180) {
   const cut = Date.now() - Math.max(1, retentionDays) * 86_400_000;
   const a = db.prepare('DELETE FROM vm_series WHERE ts<?').run(cut);
   const b = db.prepare('DELETE FROM part_series WHERE ts<?').run(cut);
-  return { ok: true, vmSeriesDeleted: a.changes || 0, partSeriesDeleted: b.changes || 0 };
+  // ⚠ v2.590 P3: 행을 다 지운 키의 diff 기준(vm_last·part_last)도 지운다. 남겨 두면 값이 안 바뀌는 VM 은 기준선이
+  //   '이미 기록됨' 이라 다음 수집에서도 행을 쓰지 않아 **영원히 추이·파티션이 비었다**(목록은 파티션 N개라 말한다).
+  //   기준을 지우면 다음 수집이 첫 관측으로 다시 기록한다. 기준 행 수 = VM·파티션 수라 EXISTS(인덱스)로 가볍다.
+  let vmLastCleared = 0; let partLastCleared = 0;
+  if ((a.changes || 0) > 0) vmLastCleared = db.prepare('DELETE FROM vm_last WHERE NOT EXISTS (SELECT 1 FROM vm_series s WHERE s.vm_id = vm_last.vm_id)').run().changes || 0;
+  if ((b.changes || 0) > 0) partLastCleared = db.prepare('DELETE FROM part_last WHERE NOT EXISTS (SELECT 1 FROM part_series s WHERE s.vm_id = part_last.vm_id AND s.path = part_last.path)').run().changes || 0;
+  return { ok: true, vmSeriesDeleted: a.changes || 0, partSeriesDeleted: b.changes || 0, vmLastCleared, partLastCleared };
 }
 
 export const _DB_PATH = DB_PATH;

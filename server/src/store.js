@@ -1,7 +1,8 @@
+import crypto from 'node:crypto';
 import { config, loadVcenterConfig , secretsReady } from './config.js';
 import { withJob } from './perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 import { generateSnapshot } from './mock/generator.js';
-import { collectFromVCenter } from './vcenter/restClient.js';
+import { collectFromVCenter, vcAuthGuard, isVcAuthError } from './vcenter/restClient.js';
 import { describeError } from './util/errors.js';
 import { latestPowerByHostName, latestPowerByServiceTag, allMeasuredPower, vcPowerKey } from './idrac/service.js';
 import { filterMeasuredByMapping, loadPowerSettings } from './idrac/powerSettings.js';
@@ -41,27 +42,29 @@ const COLLECT_CONCURRENCY = Math.max(1, Number(process.env.COLLECT_CONCURRENCY) 
  */
 const collectPool = poolSettled;
 
-// IP 대장의 '내용' 지문(djb2). generatedAt 같은 비본질 변화는 제외하고 외부 DB에 반영할
+// IP 대장의 '내용' 지문. generatedAt 같은 비본질 변화는 제외하고 외부 DB에 반영할
 // 실제 변동(IP·소유자·전원·관리상태 등)만 감지해 불필요한 SQLite 재기록을 막는다.
-function ledgerSignature(rows) {
-  let h = 5381;
-  const mix = (s) => { const str = String(s ?? ''); for (let i = 0; i < str.length; i++) h = (((h << 5) + h) ^ str.charCodeAt(i)) >>> 0; };
-  mix(rows.length);
+// ⚠ v2.590 RT-1: 예전에는 필드마다 문자 단위 JS 루프로 djb2 를 돌려 운영 규모(8천 행)에서 매 폴링(30초) 43ms+ 를
+//   메인 스레드에서 썼다(내용이 그대로여도 — '변화 없음' 판정 비용이 매 틱 전량). 행 문자열을 만들어 네이티브 sha1 에
+//   넣는다(실측 43.3ms → 13.3ms). 비교 대상 컬럼은 **그대로**다 — 줄이면 외부 ipam.db 가 stale 로 남는다(아래 주석).
+export function ledgerSignature(rows) {
+  const h = crypto.createHash('sha1');
+  const f = (v) => (v == null ? '' : String(v));
+  h.update(String(rows.length));
   // db.js toRecord가 ipam.db에 쓰는 '모든' 식별/귀속/관리 컬럼을 지문에 포함한다(타임스탬프
   // firstSeen/lastSeen/updatedAt만 제외). 이전엔 7개 필드만 해시해, label·owner·deviceType·
   // vcenter·host·guestOS·os·cluster·scope·multiHomed 등만 바뀌면 재기록이 스킵되어 외부
   // ipam.db가 stale로 남던 버그가 있었다.
   for (const r of rows) {
-    mix(r.ip); mix('|'); mix(r.ipNum); mix('|'); mix(r.vcenterId); mix('|'); mix(r.vcenterName); mix('|');
-    mix(r.ownerType); mix('|'); mix(r.serverType); mix('|'); mix(r.ownerName); mix('|');
-    mix(r.powerState); mix('|'); mix(r.guestOS); mix('|'); mix(r.osName); mix('|'); mix(r.osVersion); mix('|');
-    mix(r.hostName); mix('|'); mix(r.cluster); mix('|'); mix(r.scope); mix('|');
-    mix(r.multiHomed ? 1 : 0); mix('|'); mix(r.duplicate ? 1 : 0); mix('|');
-    mix(r.discovery); mix('|'); mix(r.reconcile); mix('|'); mix(r.mgmtStatus); mix('|'); mix(r.owner_); mix('|');
-    mix(r.label); mix('|'); mix(r.deviceType); mix('|'); mix(r.usageStatus); mix('|');
-    mix(r.appliedBy); mix('|'); mix(r.rangePolicySpec); mix(';');
+    h.update([
+      r.ip, r.ipNum, r.vcenterId, r.vcenterName, r.ownerType, r.serverType, r.ownerName,
+      r.powerState, r.guestOS, r.osName, r.osVersion, r.hostName, r.cluster, r.scope,
+      r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0,
+      r.discovery, r.reconcile, r.mgmtStatus, r.owner_, r.label, r.deviceType, r.usageStatus,
+      r.appliedBy, r.rangePolicySpec,
+    ].map(f).join('|') + ';');
   }
-  return h;
+  return h.digest('hex');
 }
 
 // 등록된 iDRAC 서버 수(OME 자동발견 엔트리 제외). best-effort.
@@ -94,7 +97,12 @@ async function persistVcenterPower(snap) {
     if (config.idrac.retentionDays > 0 && (++_vcPersistTicks % 10 === 0)) {
       // v2.453: db.prune 은 청크 삭제라 **비동기**다 — await 를 빼면 부동 프로미스가 되어
       // 실패가 unhandledRejection 으로 새고 다음 주기와 겹쳐 돌 수 있다.
-      try { await db.prune(ts - config.idrac.retentionDays * 86_400_000); }
+      // v2.590 P15: 원본(raw)과 롤업의 보존을 idrac/poller 와 같은 두 인자로 나눈다 — 인자 하나로 부르면 원본도
+      // retentionDays 까지 남아, iDRAC 을 전부 엣지에 위임한 중앙에서는 IDRAC_RAW_RETENTION_DAYS 가 집행되지 않았다
+      // (idrac/poller 는 서버가 0대면 prune 전에 return 한다).
+      const keep = config.idrac.retentionDays;
+      const raw = config.idrac.rawRetentionDays > 0 ? Math.min(config.idrac.rawRetentionDays, keep) : keep;
+      try { await db.prune(ts - raw * 86_400_000, ts - keep * 86_400_000); }
       catch (e) { console.warn(`[store] 전력 prune 실패: ${e.message}`); }
     }
   } catch { /* best effort — 전력 적재 실패는 수집을 막지 않음 */ }
@@ -216,6 +224,10 @@ class Store {
         if (vc.maintenance) return false; // 점검중: 수집 일시 중단(연결 실패로 잡지 않음)
         if (vc.collectMode === 'site') return false; // 사이트 위임: 중앙은 직접 폴링하지 않음
         if (collectAll) return true; // 수동 '지금 수집': 주기 무시하고 전부(동시성 제한은 유지)
+        // v2.590(감사 F1): 자격증명 거부로 멈춘 vCenter 는 **주기 수집에서만** 건너뛴다 — 30초마다 같은
+        // 계정으로 다시 로그인하면 SSO/AD 계정이 잠긴다. 비밀번호를 고치면(credHash 변경) authStopFor 가
+        // 스스로 기록을 지워 이번 주기부터 재개하고, 수동 '지금 수집'(collectAll)은 위에서 이미 통과했다.
+        if (vcAuthGuard.authStopFor(vc)) return false;
         const last = this.vcLast.get(vc.id) || 0;
         const intervalMs = vc.pollIntervalSec > 0 ? vc.pollIntervalSec * 1000 : globalMs;
         return now - last >= intervalMs - 500;
@@ -230,23 +242,23 @@ class Store {
       // vCenter 하나를 max(건별타임아웃×3, 90초)로 감싸 초과 시 실패로 떨어뜨린다(#2 lastGood 이월로
       // 인벤토리는 유지). '느린 1개가 전체 폴링을 막지 않게' 라는 CLAUDE.md 불변조건을 합산 경로에 적용.
       const vcDeadlineMs = (vc) => Math.max(90_000, (vc?.timeoutMs > 0 ? vc.timeoutMs : 30_000) * 3);
-      const withDeadline = (vc) => {
-        let timer;
-        const guard = new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`vCenter 수집 데드라인 초과(${Math.round(vcDeadlineMs(vc) / 1000)}초) — 응답이 느립니다`)), vcDeadlineMs(vc));
-          timer.unref?.();
-        });
-        return Promise.race([collectFromVCenter(vc), guard]).finally(() => clearTimeout(timer));
-      };
+      const withDeadline = (vc) => collectWithDeadline(vc, vcDeadlineMs(vc));
       const results = await collectPool(due, COLLECT_CONCURRENCY, (vc) => withDeadline(vc));
       results.forEach((r, i) => {
         const vc = due[i];
         this.vcLast.set(vc.id, Date.now());
         if (r.status === 'fulfilled') {
           this.vcCache.set(vc.id, { ok: true, data: r.value, at: Date.now() });
+          vcAuthGuard.clearAuthStop(vc.id); // 다시 로그인됐다 — 정지 기록 해제(수동 실행으로 확인한 경우 포함)
         } else {
           const d = describeError(r.reason);
           console.error(`[collect] ${vc.id} (${vc.name}) 연결 실패: ${d.message}${d.hint ? ` — ${d.hint}` : ''}`);
+          // v2.590(감사 F1): 자격증명 거부면 주기 수집을 멈춘다(재시도해도 결과가 같고 계정만 잠근다).
+          // 조용히 멈추지 않는다 — 아래 병합 단계가 `authStopped` 를 vCenter 항목에 실어 화면이 말한다.
+          if (isVcAuthError(r.reason)) {
+            const rec = vcAuthGuard.markAuthStopped(vc.id, vc, d.message);
+            console.warn(`[collect] ${vc.id} (${vc.name}) 인증 실패로 주기 수집 정지(${rec.attempts}회) — 비밀번호를 고치면 자동 재개합니다`);
+          }
           // ⚠ 회귀 방지(v2.279): 실패 시 마지막 정상 데이터를 폐기하지 말고 lastGood 으로 이월한다.
           // 과거에는 {ok:false} 로 덮어써 그 vCenter 인벤토리가 스냅샷에서 통째로 사라졌고(호스트/VM
           // 수백 개 소실 플랩), 외부 공유 ipam.db 가 DELETE+INSERT 로 대량 재기록되며, 파생 알람이
@@ -311,6 +323,9 @@ class Store {
           continue;
         }
         const c = this.vcCache.get(vc.id);
+        // v2.590: 인증 실패 정지 기록(있으면 항목에 싣는다 — 화면이 '멈췄다' 를 말한다). 캐시가 ok 면
+        // (방금 성공했거나 정지 전 값) 기록은 이미 지워졌거나 무관하다.
+        const authStop = c?.ok ? null : authStopView(vcAuthGuard.authStopFor(vc));
         if (c?.ok) {
           const s = c.data;
           merged.vcenters.push(s.vcenter);
@@ -320,12 +335,12 @@ class Store {
           merged.networks.push(...s.networks);
           merged.alarms.push(...s.alarms);
         } else if (c && !c.ok) {
-          merged.collectionErrors.push({ vcenterId: vc.id, name: vc.name, ...c.err, at: c.at, fallback: isAuto });
+          merged.collectionErrors.push({ vcenterId: vc.id, name: vc.name, ...c.err, at: c.at, fallback: isAuto, ...(authStop ? { authStopped: authStop } : {}) });
           if (c.lastGood?.vcenter && (Date.now() - (c.lastGoodAt || 0)) <= LASTGOOD_HOLD_MS) {
             // 마지막 정상 수집을 이월(보존 창 안) — 상태는 unreachable + stale 로 표시해 낡은
             // 데이터임을 알리되, 인벤토리·알람은 유지해 소실 플랩·ipam.db 재기록·알람 재발송을 막는다.
             const s = c.lastGood;
-            merged.vcenters.push({ ...s.vcenter, status: 'unreachable', stale: true, staleSince: c.lastGoodAt, error: c.err.message, hint: c.err.hint, code: c.err.code });
+            merged.vcenters.push({ ...s.vcenter, status: 'unreachable', stale: true, staleSince: c.lastGoodAt, error: c.err.message, hint: c.err.hint, code: c.err.code, ...(authStop ? { authStopped: authStop } : {}) });
             merged.hosts.push(...s.hosts);
             merged.vms.push(...s.vms);
             merged.datastores.push(...s.datastores);
@@ -337,8 +352,14 @@ class Store {
             // 안 되는데, DATA_SOURCE 는 'auto' 라 기존 차단(source==='mock')을 그냥 통과했다.
           } else {
             // 보존 창을 넘긴 장기 장애(또는 lastGood 없음) → 최소 unreachable 엔트리(인벤토리는 비움).
-            merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'unreachable', error: c.err.message, hint: c.err.hint, code: c.err.code });
+            merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'unreachable', error: c.err.message, hint: c.err.hint, code: c.err.code, ...(authStop ? { authStopped: authStop } : {}) });
           }
+        } else if (authStop) {
+          // v2.590: 재시작 직후처럼 캐시는 없는데 정지 기록(파일)이 남아 있는 경우. 주기 수집이 이 vCenter 를
+          // 건너뛰므로 'pending(첫 수집 중 — 기다리면 채워진다)' 으로 두면 **영원히 채워지지 않는 거짓 안내**가
+          // 된다(v2.509 규약). 연결 실패로 두고 정지 사실을 싣는다.
+          merged.collectionErrors.push({ vcenterId: vc.id, name: vc.name, message: authStop.reason, at: authStop.at, fallback: false, authStopped: authStop });
+          merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'unreachable', error: authStop.reason, hint: '인증 실패 — 계정/비밀번호 또는 권한을 확인하세요.', authStopped: authStop });
         } else {
           merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'pending' });
         }
@@ -379,6 +400,37 @@ class Store {
   get() {
     return this.snapshot;
   }
+}
+
+/**
+ * vCenter 1곳 수집 + 데드라인(v2.590 — 감사 F7, v2.417 규약).
+ *
+ * 예전에는 `Promise.race([collectFromVCenter(vc), guard])` 로 **결과만 포기**했다 — 버려진 수집이 남은
+ * SOAP 왕복(건당 최대 30초 × 9회 이상)을 계속 돌리는 동안 `_refreshing` 이 풀리고, 다음 주기가 같은
+ * vCenter 에 **두 번째 세션**을 열었다(COLLECT_CONCURRENCY 는 버려진 수집을 세지 않는다). 이제 데드라인에
+ * 신호를 **abort** 해 진행 중인 요청을 실제로 끊는다. race 는 남긴다 — 신호가 닿지 않는 구간(워커 파싱 등)이
+ * 있어도 결과 대기는 데드라인에서 끝나야 한다.
+ * @returns {Promise<object>}
+ */
+export function collectWithDeadline(vc, deadlineMs, collect = collectFromVCenter) {
+  const ac = new AbortController();
+  let timer;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      ac.abort(new Error('vCenter 수집 데드라인'));
+      reject(new Error(`vCenter 수집 데드라인 초과(${Math.round(deadlineMs / 1000)}초) — 응답이 느립니다`));
+    }, deadlineMs);
+    timer.unref?.();
+  });
+  const work = Promise.resolve().then(() => collect(vc, { signal: ac.signal }));
+  work.catch(() => {}); // 데드라인 뒤의 abort 거부가 unhandled 로 남지 않게
+  return Promise.race([work, guard]).finally(() => clearTimeout(timer));
+}
+
+/** 정지 기록 → 화면·API 용(자격증명 해시는 싣지 않는다). */
+function authStopView(rec) {
+  if (!rec) return null;
+  return { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason };
 }
 
 // 목 스냅샷에서 vcId에 해당하는 사이트를 target에 복사. vc를 찾았으면 true(호출부가 폴백

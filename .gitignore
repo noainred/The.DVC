@@ -201,6 +201,15 @@ server/config/horizon-sessions.json
 server/config/horizon-session-activity.json
 server/config/horizon-auth-stops.json
 server/config/storage-auth-stops.json
+# v2.590 인증 실패 정지 — 주기 수집기 7종으로 확장(도구마다 파일이 다르다 — 한 파일에 섞으면 id 가 충돌한다).
+#   자격증명 **지문**(계정명·길이·16비트 해시)과 대상 id·사유를 담는다. 이 저장소는 공개다(v2.535 규약).
+server/config/vcenter-auth-stops.json
+server/config/idrac-auth-stops.json
+server/config/nsx-auth-stops.json
+server/config/sanswitch-auth-stops.json
+server/config/pdu-auth-stops.json
+server/config/gpu-auth-stops.json
+server/config/bmstor-auth-stops.json
 server/config/storage-growth-settings.json
 server/config/vmseries.json
 server/config/vmseries/
@@ -230,3 +239,9 @@ server/config/linkcheck-settings.json
 
 # v2.562: 외부 연동 API 키(해시·이름·지문·허용목록). SECRET_FILES 등록과 **별개** 항목이다.
 server/config/api-keys.json
+
+# v2.590 D4(AUDIT-2026-09-21 SEC-12 재발): server/config 는 **기본 차단**한다. 파일 단위 열거는 새 설정·상태 파일이
+# 생길 때마다 뒤처졌다(v2.583 log-analysis-stats.json·central-inventory.json 등 33개가 커밋 가능했다). 공개 저장소다.
+# 예시 파일만 추적한다 — 새 예시가 필요하면 *.example.json 이름을 쓸 것. 테스트(audit2590)가 CONFIG-FILES.md 전 항목을 check-ignore 로 고정한다.
+server/config/*
+!server/config/*.example.json

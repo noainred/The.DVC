@@ -137,7 +137,7 @@ export default function MailSettings() {
 
       {/* ── 종류별 ───────────────────────────────────────────── */}
       <h4 style={{ margin: '20px 0 8px', fontSize: 14 }}>기능별 발송</h4>
-      <STable style={{ width: '100%', fontSize: 12.5 }}>
+      <STable minWidth={640} style={{ fontSize: 12.5 }}>
         <thead><tr><th data-nosort>사용</th><th>기능</th><th data-nosort>받는 사람(비우면 기본)</th><th data-nosort>참조</th></tr></thead>
         <tbody>
           {(d.kinds || []).map((k) => {

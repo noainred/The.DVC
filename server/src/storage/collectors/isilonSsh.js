@@ -55,7 +55,7 @@ function parsePoolCell(s) {
 export function parseIsiStatus(text) {
   const lines = String(text || '').split('\n');
   const out = { name: '', health: '', dataReduction: '', storageEfficiency: '', hdd: null, ssd: null, vhsBytes: 0, l3TotalBytes: 0, nodes: [],
-    criticalEvents: [], jobs: { running: [], paused: [], failed: [], recent: [] } };
+    criticalEvents: [], criticalEventCount: 0, sawEvents: false, jobs: { running: [], paused: [], failed: [], recent: [] } };
   const grab = (re) => { for (const l of lines) { const m = re.exec(l); if (m) return m; } return null; };
   out.name = grab(/Cluster Name:\s*(\S+)/)?.[1] || '';
   out.health = grab(/Cluster Health:\s*\[\s*([A-Z]+)/i)?.[1]?.toUpperCase() || '';
@@ -113,7 +113,7 @@ export function parseIsiStatus(text) {
   let mode = '';
   for (const l of lines) {
     const t = l.trim();
-    if (/^Critical Events:/.test(t)) { mode = 'events'; continue; }
+    if (/^Critical Events:/.test(t)) { mode = 'events'; out.sawEvents = true; continue; }
     if (/^Running jobs:/.test(t)) { mode = 'running'; continue; }
     if (/^Paused and waiting jobs:/.test(t)) { mode = 'paused'; continue; }
     if (/^Failed jobs:/.test(t)) { mode = 'failed'; continue; }
@@ -124,7 +124,8 @@ export function parseIsiStatus(text) {
     if (mode === 'events') {
       // "08/15 22:10:03   3   <이벤트 문구...>" — 시간(2토큰) + LNN + 나머지 전부 이벤트.
       const m = /^(\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2})\s+(\d+)\s+(.+)$/.exec(t);
-      if (m && out.criticalEvents.length < 50) out.criticalEvents.push({ time: m[1], lnn: Number(m[2]), event: m[3].trim() });
+      // v2.590 F10: 개수는 **상한 없이** 센다 — 목록만 50개로 자른다. 예전엔 50에서 세기를 멈춰 '미해결 경보' 가 과소였다.
+      if (m) { out.criticalEventCount += 1; if (out.criticalEvents.length < 50) out.criticalEvents.push({ time: m[1], lnn: Number(m[2]), event: m[3].trim() }); }
       continue;
     }
     if (mode === 'running' || mode === 'paused') {
@@ -182,14 +183,21 @@ export function normalizeIsiStatus(device, parsed, { version = '', users = null 
     snap.sections.accounts = 'ok';
   }
   // Critical Events(v2.307) — SSH 모드의 경보 소스(그동안 alerts 섹션이 '건너뜀'이던 갭 해소).
-  snap.alerts.unresolved = (parsed.criticalEvents || []).length;
-  snap.sections.alerts = 'ok';
+  // v2.590 F10: 'Critical Events' 절을 찾지 못하면 '경보 0건' 이라 말하지 않는다(형식 변화일 수 있다) — null + 미수집.
+  if (parsed.sawEvents === false) {
+    snap.alerts.unresolved = null;
+    snap.sections.alerts = '미수집: isi status 출력에서 Critical Events 절을 찾지 못했습니다(경보 수를 모릅니다)';
+  } else {
+    snap.alerts.unresolved = parsed.criticalEventCount ?? (parsed.criticalEvents || []).length;
+    snap.sections.alerts = 'ok';
+  }
   // isi status 에 없는 부가 정보(사용자 화면의 상단 블록) — extra 로 그대로 노출.
   snap.extra = {
     collectMethod: 'ssh', clusterHealth: parsed.health,
     dataReduction: parsed.dataReduction, storageEfficiency: parsed.storageEfficiency,
     vhsBytes: parsed.vhsBytes, l3TotalBytes: parsed.l3TotalBytes,
     criticalEvents: parsed.criticalEvents || [],
+    criticalEventsOmitted: Math.max(0, (parsed.criticalEventCount || 0) - (parsed.criticalEvents || []).length),
     jobs: parsed.jobs || { running: [], paused: [], failed: [], recent: [] },
   };
   snap.ok = snap.sections.config === 'ok' || snap.sections.capacity === 'ok';

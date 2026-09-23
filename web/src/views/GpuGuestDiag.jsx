@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import BoldText from '../components/boldText.jsx';
+import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
 const fmtAgo = (ts) => {
   if (!ts) return '없음';
@@ -53,6 +55,7 @@ function VcDiag({ d, failOnly }) {
   const all = d.results || [];
   const [sort, setSort] = useState({ key: '', dir: 'asc' }); // 헤더 클릭 정렬(빈 key=원래 순서)
   const failN = all.filter((r) => !r.ok).length;
+  const vcStop = authStopInfo(d.authStopped, { what: '이 vCenter', manual: '설정 › vCenter 의 연결 테스트' });
   const hasOsAcct = all.some((r) => r.os || r.account); // 구버전 agent는 OS/계정이 없을 수 있음
   const sortVal = (r, key) => {
     switch (key) {
@@ -83,7 +86,14 @@ function VcDiag({ d, failOnly }) {
         <span className="muted" style={{ fontSize: 11 }}>{fmtAgo(d.at)}</span>
       </div>
       <Funnel c={d.counts} />
-      {d.error && <div className="badge red" style={{ marginTop: 4, whiteSpace: 'normal' }}>오류: {d.error}</div>}
+      {/* v2.590: vCenter 계정이 인증 실패로 멈췄으면 그 사실을 먼저 말한다(오류 한 줄로 두면 '왜 매번 실패하나' 로 읽힌다). */}
+      {vcStop && <div style={{ marginTop: 4, fontSize: 12, color: 'var(--red)', lineHeight: 1.6 }}><BoldText text={vcStop.text} /></div>}
+      {!vcStop && d.error && <div className="badge red" style={{ marginTop: 4, whiteSpace: 'normal' }}>오류: {d.error}</div>}
+      {d.authStoppedVms > 0 && (
+        <div className="muted" style={{ marginTop: 4, fontSize: 12, lineHeight: 1.6 }}>
+          <BoldText text={`**게스트 계정 인증 실패로 VM ${d.authStoppedVms}대의 주기 수집을 멈췄습니다.** 같은 계정으로 반복 로그인하면 계정이 잠기기 때문입니다. 설정 › GPU 게스트 수집에서 그 VM의 계정(비밀번호)을 고치면 자동으로 다시 시작합니다. 같은 화면의 VM별 테스트는 막지 않습니다 — 저장된 계정으로 성공하면 정지가 풀립니다.`} />
+        </div>
+      )}
       {all.length > 0 && (
         <div className="table-wrap" style={{ maxHeight: '40vh', marginTop: 6 }}>
           <STable><thead><tr>
@@ -107,7 +117,7 @@ function VcDiag({ d, failOnly }) {
                   <td style={{ fontSize: 12 }}>
                     {r.ok
                       ? <span className="badge green">✓ util {r.util}% · mem {r.mem ?? '-'}% · {r.gpus}GPU</span>
-                      : <span className="badge red" style={{ whiteSpace: 'normal' }}>✗ {r.error}</span>}
+                      : <span className="badge red" style={{ whiteSpace: 'normal' }}>{r.authStopped ? '인증 실패 정지 · ' : '✗ '}{r.error}</span>}
                   </td>
                 </tr>
               ))}

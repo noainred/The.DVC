@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { createBackup } from './service.js';
+import { createBackup, isRuntimeStateFile } from './service.js';
 
 const FILE = path.join(config.configDir, 'backup.json');
 
@@ -53,9 +53,15 @@ let schedTimer = null;
 let watcher = null;
 let changeTimer = null;
 let lastRun = null;
+let lastSkip = null;
 
 function safeBackup(reason) {
-  try { const m = createBackup(reason, { retention: loadBackupSettings().retention }); lastRun = { at: Date.now(), reason, name: m.name, size: m.size }; return m; }
+  try {
+    // v2.590 P1: 'change' 는 설정 내용이 직전 백업과 같으면 만들지 않는다(상태 파일만 바뀐 경우). 건너뛴 사실은 lastSkip 으로 남긴다.
+    const m = createBackup(reason, { retention: loadBackupSettings().retention, skipIfUnchanged: reason === 'change' });
+    if (m.skipped) { lastSkip = { at: Date.now(), reason, why: m.why }; return null; }
+    lastRun = { at: Date.now(), reason, name: m.name, size: m.size, skipped: m.skipped?.length || 0 }; return m;
+  }
   catch (e) { console.warn(`[backup] ${reason} 백업 실패: ${e.message}`); return null; }
 }
 
@@ -77,7 +83,9 @@ function startWatcher() {
       if (!filename) return;
       const ext = path.extname(String(filename)).toLowerCase();
       if (ext !== '.json' && ext !== '.env') return;          // 설정 파일만
-      if (filename === 'backup.json' || filename === 'central-agent-config.json') return; // 자기 자신/엣지수신 변경은 제외(루프 방지)
+      // 자기 자신·엣지 수신 사본·폴러/엣지 push 가 스스로 쓰는 상태·캐시 파일은 '설정 변경' 이 아니다(v2.590 P1 —
+      // 예전엔 두 이름만 뺐고, 캐시 쓰기가 보관 슬롯을 채우거나 디바운스를 계속 초기화했다).
+      if (isRuntimeStateFile(String(filename))) return;
       if (!loadBackupSettings().autoOnChange) return;
       if (changeTimer) clearTimeout(changeTimer);
       changeTimer = setTimeout(() => safeBackup('change'), 10_000); // 디바운스 10s
@@ -95,5 +103,5 @@ export function startBackupScheduler() {
 }
 
 export function backupStatus() {
-  return { settings: loadBackupSettings(), lastRun, scheduleActive: !!schedTimer, watching: !!watcher };
+  return { settings: loadBackupSettings(), lastRun, lastSkip, scheduleActive: !!schedTimer, watching: !!watcher };
 }

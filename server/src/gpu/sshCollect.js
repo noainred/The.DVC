@@ -8,8 +8,31 @@
  *   해결책이며, ESXi 파일전송(InitiateFileTransferFromGuest)을 안 써서 회수 404/미도달도 없다.
  */
 
-import { withSsh, withDeadline } from '../proxy/sshExec.js';
+import { withSsh, withDeadline, isSshAuthError } from '../proxy/sshExec.js';
 import { parseNvidiaSmiCsv } from './guestops.js';
+import { createAuthGuard } from '../util/authGuard.js';
+
+/**
+ * GPU 게스트·물리 서버 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F2, server/CLAUDE.md v2.541 '아직 가드가
+ * 없는 주기 SSH 수집기' 의 `gpu/sshCollect.js`). 게스트 폴러(`poller.js`, 기본 60초)와 물리 폴러
+ * (`physicalPoller.js`)가 함께 쓴다 — 두 폴러가 import 하는 공통 모듈이라 여기 둔다(새 모듈을 만들지 않는다).
+ * id 이름공간을 나눈다: 게스트 `vm|<vcId>|<vmId>` · 물리 `phys|<serverId>` — 섞으면 엉뚱한 대상이 멈춘다.
+ *
+ * ⚠ 게스트 VM 은 **VM 단위**로 멈춘다. 법인 공용 계정(`resolveVmCreds` 의 vc/vc-win)이라도 게스트마다 로컬
+ *   계정이 따로일 수 있어(한 VM 만 비밀번호가 다른 경우) 계정 단위로 멈추면 멀쩡한 VM 까지 죽는다. 대가로
+ *   **첫 실패 주기에는 VM 마다 1회씩** 실패가 난다(도메인 계정이면 그 합이 잠금 임계에 닿을 수 있다 — 정직 기록).
+ *   그 뒤로는 VM 마다 0회다. 예전에는 1분마다 VM 수 × 방식 수(auto 는 2)였다.
+ */
+export const gpuAuthGuard = createAuthGuard({ file: 'gpu-auth-stops.json' });
+/** 정지 기록 → 화면·API 용(해시 제외). */
+export const gpuStopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+/** 게스트 작업(VMware Tools) 또는 SSH 의 **자격증명 거부**인가. */
+export function isGpuAuthError(err) {
+  if (!err) return false;
+  if (err.authFailed === true) return true;
+  // 게스트 작업 fault(InvalidGuestLogin)는 guestops.cleanGuestError 가 '게스트 로그인 실패' 로 요약한다.
+  return /InvalidGuestLogin|게스트 로그인 실패/.test(String(err.message || err));
+}
 
 const NVSMI = '--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,mig.mode.current --format=csv,noheader,nounits';
 const tlog = (tr, msg) => { if (tr) tr.push({ t: Date.now(), msg: String(msg) }); };
@@ -95,6 +118,13 @@ export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22
     } catch (e) {
       lastErr = cleanSshErr(e.message);
       tlog(trace, `✗ ${ip}: ${lastErr}`);
+      // v2.590(감사 F2): 자격증명 거부면 **다른 IP 를 더 시도하지 않는다** — 같은 게스트의 같은 계정이라 결과가
+      // 같고, IP 수만큼 실패 로그인이 곱해진다(계정 잠금 경로). 호출자가 `authFailed` 로 주기 수집을 멈춘다.
+      if (isSshAuthError(e)) {
+        const err = new Error(`SSH 수집 실패: ${lastErr}`);
+        err.guestDiag = true; err.sshConnected = false; err.authFailed = true;
+        throw err;
+      }
     }
   }
   const e = new Error(`SSH 수집 실패: ${lastErr}`);

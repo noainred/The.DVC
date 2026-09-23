@@ -5,6 +5,8 @@ import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import PduCharts from './PduCharts.jsx';
+import BoldText from '../../components/boldText.jsx';
+import { authStopInfo, authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
 /**
  * 특수 기능 › PDU 정보 — APC Rack PDU 2G(rpdu2g) 전력·뱅크·온도·습도.
@@ -100,7 +102,7 @@ export default function PduTool() {
   };
   const collectAll = async () => {
     setBusy(true);
-    try { const r = await postJson('/tools/pdu/collect-all', {}); setMsg({ ok: true, text: `수집 ${r.collected ?? 0} / 실패 ${r.failed ?? 0}` }); await load(); }
+    try { const r = await postJson('/tools/pdu/collect-all', {}); setMsg({ ok: true, text: `수집 ${r.collected ?? 0} / 실패 ${r.failed ?? 0}${r.authStopped ? ` / 인증 실패 정지 ${r.authStopped}` : ''}` }); await load(); }
     catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
 
@@ -145,6 +147,14 @@ export default function PduTool() {
       {msg && <div className={msg.ok ? 'card' : 'card error-box'} style={{ padding: 10, marginBottom: 12, fontSize: 13 }}>{msg.text}</div>}
       {error && data && <div className="card error-box" style={{ padding: 10, marginBottom: 12, fontSize: 13 }}>폴링 오류: {error}</div>}
 
+      {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** PDU — 조용히 멈추지 않는다(authGuard 규칙 1). */}
+      {authStopSummary(devices.filter((d) => d.snapshot?.authStopped), { unit: '대', what: 'PDU' }) && (
+        <div className="card" style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: 'var(--red)' }}>
+          <BoldText text={authStopSummary(devices.filter((d) => d.snapshot?.authStopped), { unit: '대', what: 'PDU' })} />
+          <span className="muted"> 행의 수집 버튼은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다.</span>
+        </div>
+      )}
+
       {tab === 'charts' && <PduCharts devices={devices} thresholds={data.thresholds || {}} />}
 
       {tab === 'list' && (devices.length === 0 ? (
@@ -174,7 +184,9 @@ export default function PduTool() {
                           {openId === d.id ? '▾ ' : '▸ '}{d.name}
                         </b>
                         {d.enabled === false && <span className="badge" style={{ marginLeft: 6 }}>중지</span>}
-                        {s && !s.ok && <span className="badge red" style={{ marginLeft: 6 }} title={s.error}>오류</span>}
+                        {s && !s.ok && (s.authStopped
+                          ? <span className="badge red" style={{ marginLeft: 6, whiteSpace: 'nowrap' }} title={`${authStopInfo(s.authStopped, { what: '이 PDU' })?.detail || ''} — 펼치면 사유를 봅니다`}>인증 실패 정지</span>
+                          : <span className="badge red" style={{ marginLeft: 6 }} title={s.error}>오류</span>)}
                         {(s?.violations || []).length > 0 && (
                           <span className="badge" style={{ marginLeft: 6, background: s.violations.some((v) => v.severity === 'critical') ? 'rgba(239,68,68,.2)' : 'rgba(245,158,11,.2)', color: s.violations.some((v) => v.severity === 'critical') ? '#ef4444' : '#f59e0b' }}
                             title={s.violations.map((v) => `${v.title} — ${v.detail}`).join('\n')}>
@@ -248,6 +260,11 @@ function Detail({ snap }) {
         </div>
       )}
       {(snap.notes || []).map((n, i) => <div key={i} className="muted" style={{ marginBottom: 4 }}>ⓘ {n}</div>)}
+      {snap.authStopped && (
+        <div className="card" style={{ padding: 8, marginBottom: 8, borderColor: 'var(--red)', fontSize: 13 }}>
+          <BoldText text={authStopInfo(snap.authStopped, { what: '이 PDU', manual: '수집' })?.text || ''} />
+        </div>
+      )}
       {snap.error && <div className="error-box" style={{ padding: 8, marginBottom: 8 }}>{snap.error}</div>}
 
       {(snap.units || []).map((u) => (

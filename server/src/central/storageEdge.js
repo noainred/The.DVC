@@ -10,6 +10,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { recordActivity } from '../storage/activityLog.js';
 import { saveCapacityPoint } from '../storage/db.js';
+import { ackCollect } from '../storage/collectRequests.js';
 
 const FILE = path.join(config.configDir, 'central-agent-storage.json');
 const MAX_DEVICES_PER_AGENT = 500;
@@ -37,6 +38,7 @@ export function saveEdgeStorage(agent, devices) {
     const key = dv.deviceId || dv.id;
     if (!key) continue;
     const ca = Number(dv.collectedAt) || 0;
+    ackCollect(key, ca || null); // v2.590 P16: 위임 '지금 수집' 요청의 완료 확인(인출 이후 수집분일 때만)
     if (_lastRec.get(key) === ca) continue;
     _lastRec.set(key, ca);
     // 용량 시계열 적재(v2.318, 사용자 요구 '용량 추이 그래프') — 엣지 수집 장비의 추이를

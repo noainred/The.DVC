@@ -6,6 +6,7 @@
  */
 
 import { withSsh } from './sshExec.js';
+import { fileStamp } from '../util/dayKey.js';
 
 const BEGIN = '# >>> portal-remote-access (auto-generated — do not edit) >>>';
 const END = '# <<< portal-remote-access (auto-generated) <<<';
@@ -66,7 +67,10 @@ export async function deployToProxy(deploy, mappings, opts = {}) {
         return { ok: false, reason: `HAProxy 설정 검증 실패: ${v.stderr || v.stdout || `exit ${v.code}`}` };
       }
       // backup original, swap in the validated file, reload
-      const stamp = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
+      // v2.590 D9: 사람이 롤백할 때 읽는 파일명이라 **포탈 시각**(기본 KST)으로 쓴다 — 예전 toISOString 은 'Z' 까지 잘려
+      // KST 08:30 배포가 '전날 23:30' 백업으로 남았다. 초까지 붙여 같은 분의 재배포가 앞 백업을 덮지 않게 한다.
+      const now = Date.now();
+      const stamp = `${fileStamp(now)}${String(new Date(now).getUTCSeconds()).padStart(2, '0')}`;
       await exec(`cp -a ${cfgPath} ${cfgPath}.bak.${stamp}`);
       await exec(`mv ${tmpPath} ${cfgPath}`);
       const r = await exec(deploy.reloadCmd || 'systemctl reload haproxy');

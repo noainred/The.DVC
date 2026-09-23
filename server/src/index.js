@@ -314,6 +314,9 @@ app.use('/api/central/edge-log-result', BIG_JSON);  // 엣지 로그 폴백 회�
 // 2,000자면 1,079KB 로 넘는다. 413 은 재시도 대상이 아니라 **그 조회 결과의 조용한 전량 소실**이고,
 // 중앙은 결과가 없으면 영원히 `{state:'pending'}` 을 돌려주므로 화면이 무한 대기가 된다.
 app.use('/api/central/log-query-result', BIG_JSON);
+// v2.590 D2: svcmon 엣지 보고 — 행 2,000 + 메타(경로·호스트·점검명)가 한 청크에 실리면 1mb 기본을 넘는다(실측 5,000항목 1.09MB → 413).
+// 엣지가 메타를 청크마다 나누고 413 이면 청크를 줄여 다시 나누지만, 한도를 넉넉히 두는 것이 1차 방어다.
+app.use('/api/central/svcmon-report', BIG_JSON);
 app.use('/api/central/pdu-data', BIG_JSON);
 // v2.517: SAN 스위치 push 가 **전체 포트**로 바뀌었다(`sanswitch/push.js` 머리말 — gzip 실측 근거).
 // 엣지는 700KB 청크 + gzip 으로 보내지만 express.json 의 limit 은 **해제 후 길이**라 기본 1MB 로는

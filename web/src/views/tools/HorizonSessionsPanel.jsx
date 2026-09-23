@@ -123,10 +123,10 @@ export default function HorizonSessionsPanel() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
         <Card label={picked ? `${picked.name || picked.serverId} 접속 중 사용자` : '실시간(접속 중) 사용자'}
-          value={`${connectedText(picked || total)}${connectedText(picked || total) === '—' ? '' : '명'}`}
+          value={`${!picked && total.usersLowerBound && connectedText(total) !== '—' ? '최소 ' : ''}${connectedText(picked || total)}${connectedText(picked || total) === '—' ? '' : '명'}`}
           meta={connectedText(picked || total) === '—' ? '상태 필드를 읽지 못했습니다' : '접속 중 세션이 있는 고유 계정'}
           accent="var(--accent)" />
-        <Card label="고유 사용자(전체 상태)" value={`${(picked || total).users ?? '—'}${(picked || total).users == null ? '' : '명'}`}
+        <Card label="고유 사용자(전체 상태)" value={`${!picked && total.usersLowerBound && total.users != null ? '최소 ' : ''}${(picked || total).users ?? '—'}${(picked || total).users == null ? '' : '명'}`}
           meta={`연결 끊김 포함 · 세션 ${(picked || total).sessions ?? '—'}`} />
         <Card label="세션 상태" value={`${(picked || total).connected ?? '—'}`}
           meta={`끊김 ${(picked || total).disconnected ?? '—'} · 연결 중 ${(picked || total).pending ?? '—'}`} />

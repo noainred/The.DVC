@@ -223,6 +223,9 @@ export default function GpuGuestSettings() {
             {last && (last.skipped
               ? <span className="muted">({last.skipped})</span>
               : <span className="muted">[{last.mode}] 호스트 <b style={{ color: 'var(--text)' }}>{last.hosts}</b> · VM <b style={{ color: 'var(--text)' }}>{last.vms}</b>{last.errors ? ` · 오류 ${last.errors}` : ''}</span>)}
+            {/* v2.590: 인증 실패로 주기 수집을 멈춘 VM·vCenter 수(조용한 정지 금지 — 상세는 GPU 게스트 수집 진단) */}
+            {last && last.authStoppedVms > 0 && <span className="badge red" title="게스트 계정 인증 실패로 이 VM들의 주기 수집을 멈췄습니다(반복 로그인은 계정을 잠급니다). 계정을 고치면 자동으로 다시 시작합니다 — 대상 VM은 설정 › GPU 게스트 수집 진단에서 확인하세요.">인증 실패 정지 VM {last.authStoppedVms}대</span>}
+            {last && Array.isArray(last.vcAuthStopped) && last.vcAuthStopped.length > 0 && <span className="badge red" title={`vCenter 계정 인증 실패로 멈춘 vCenter: ${last.vcAuthStopped.join(', ')} — 설정 › vCenter 에서 계정을 고치면 자동으로 다시 시작합니다.`}>vCenter 인증 실패 정지 {last.vcAuthStopped.length}곳</span>}
           </div>
         </div>
       )}

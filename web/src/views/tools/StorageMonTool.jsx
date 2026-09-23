@@ -1168,8 +1168,11 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
           {/* Critical Events + Cluster Job Status(v2.307, 사용자 요구 — isi status 꼬리 섹션) */}
           {s.extra?.criticalEvents && (
             <>
-              <div className="section-title" style={{ fontSize: 13 }}>Critical Events {s.extra.criticalEvents.length}</div>
-              {s.extra.criticalEvents.length === 0
+              <div className="section-title" style={{ fontSize: 13 }}>Critical Events {s.extra.criticalEvents.length + (s.extra.criticalEventsOmitted || 0)}
+                {s.extra.criticalEventsOmitted > 0 && <span className="muted" style={{ fontSize: 11.5, fontWeight: 400 }}> — 목록은 {s.extra.criticalEvents.length}건까지만(나머지 {s.extra.criticalEventsOmitted}건 생략)</span>}</div>
+              {/^미수집/.test(String(s.sections?.alerts || ''))
+                ? <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>{s.sections.alerts}</div>
+                : s.extra.criticalEvents.length === 0
                 ? <div className="muted" style={{ fontSize: 12.5, marginBottom: 12 }}>✅ 미해결 Critical 이벤트 없음</div>
                 : (
                   <div className="table-wrap" style={{ maxHeight: '20vh', marginBottom: 12 }}>

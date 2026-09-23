@@ -41,8 +41,13 @@ test('실장비 경로 폴이 예외 없이 끝나고, 인벤토리를 갱신하
 
 test('소스 — 카운터는 그것을 쓰는 함수 안에 선언된다', () => {
   const s = fs.readFileSync(new URL('../src/idrac/poller.js', import.meta.url), 'utf8');
-  const inner = s.slice(s.indexOf('async function pollOnceInner()'));
-  const outer = s.slice(s.indexOf('async function pollOnce()'), s.indexOf('async function pollOnceInner()'));
+  // v2.590: 두 함수가 옵션 인자({ manual })를 받게 됐다 — 시그니처가 아니라 함수 이름으로 경계를 찾는다
+  //   (인자 목록까지 문자열로 고정하면 indexOf 가 -1 이 되어 slice(-1) 로 검사가 공허하게 깨진다).
+  const iInner = s.indexOf('async function pollOnceInner(');
+  const iOuter = s.indexOf('async function pollOnce(');
+  assert.ok(iOuter >= 0 && iInner > iOuter, '두 함수를 찾아야 한다(순서: pollOnce → pollOnceInner)');
+  const inner = s.slice(iInner);
+  const outer = s.slice(iOuter, iInner);
   assert.match(inner, /let invRefreshed = 0;/);
   assert.doesNotMatch(outer, /invRefreshed/);
 });

@@ -536,7 +536,7 @@ export function ServerAnalysis() {
           <button className={sub === 'unsupported' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 16px' }} onClick={() => setSub('unsupported')}
             title="iDRAC 스캔 대역에서 발견된 Dell 이 아닌 서버(HPE iLO 등). Redfish 서비스 루트가 응답했으나 Dell 시그니처가 없는 장비만 담습니다.">🚫 미지원 서버</button>
         </div>
-        <div className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
+        <div className="flex gap wrap" style={{ alignItems: 'center', fontSize: 13 }}>
           {/* 1차 박스: 법인(DataCenter) — 고르면 그 법인의 모든 장비 */}
           <label className="flex gap" style={{ alignItems: 'center' }} title="1차: 법인(DataCenter). 고르면 그 법인의 모든 장비가 보입니다.">
             <span className="muted">법인(DataCenter)</span>

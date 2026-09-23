@@ -1147,9 +1147,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       (`edge-log-result`)만 등록해 빠져 있었다. 실측: 500행(`checksLogs.js` 의 limit 상한) ×
       vCenter 이벤트 message **1,900자 = 981KB** 로 기본 1MB 에 닿고 2,000자면 1,079KB 로 넘는다.
       413 은 재시도 대상이 아니라 **그 조회 결과의 조용한 전량 소실**이다.
-    - ⚠ **아직 같은 상태인 위임 워커**(v2.561 시점): `pingWorker` · `captureWorker` ·
-      `bmstorWorker`. 붙일 때 **UI 표시(spec 표 등재)를 함께** 해야 한다 — 화면이 말하지 않는
-      상태는 없는 것과 같다.
+    - ✅ **v2.561 시점에 같은 상태였던 위임 워커**(`pingWorker` · `captureWorker` · `bmstorWorker`)는
+      v2.574 IMP-07 에 `_last` + `console.warn` 을 받았다(`edgeSweep2574` 가 고정 — v2.590 에 이 줄을 정정).
+      새 워커도 **UI 표시(spec 표 등재)를 함께** 해야 한다 — 화면이 말하지 않는 상태는 없는 것과 같다.
   - ⚠⚠ **토큰 점검 — 중앙이 평문으로 가진 토큰은 두 가지뿐이고, 나머지는 엣지가 스스로 말해야 한다**
     (`util/tokenFingerprint.js` · `portalcheck/{tokenScan,tokenProbe,tokenFindings,edgeReport}.js` ·
     `central/tokenCheckPull.js` · `routes/api/portalCheck.js` + 웹 `views/tools/PortalCheck.jsx`·
@@ -3045,8 +3045,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `loadState` 판정을 받는다(V4·관제 콘솔 양쪽). 위 v2.509·v2.583·v2.578·v2.579 의 '남은 것' 줄도 함께 정정했다 —
       **문서의 '남아 있다' 는 다음 점검의 첫 후보이고, 고친 뒤에는 그 줄을 반드시 고칠 것**(이번에 4줄이 이미 고쳐진
       결함을 '남아 있다' 로 적고 있었다).
-    - ⚠ 확인하지 못한 것(정직 기록): `curUser /settings` 가 범위 계정에 함대 전체 `overLimit`·`push.last.records` 를 줄
-      수 있다는 스윕 후보는 curuser 를 켜고 대상이 `maxVms` 를 넘어야 재현돼 **재현하지 못했다**(후속).
+    - ✅ (당시 확인하지 못한 것) `curUser /settings` 가 범위 계정에 함대 전체 `overLimit`·`push.last.records` 를 줄
+      수 있다는 스윕 후보는 **v2.589 SEC-2589-02 에 고쳤다**(범위 계정에 null — v2.590 에 이 줄을 정정).
 
   - ⚠⚠ **데이터 흐름 지도(v2.587) — 경로는 라우터 선언에서 읽고, 계측이 없는 방향은 계측부터 만든다**
     (`server/src/dataflow/build.js`(순수) + `central/pullStats.js` + `util/outboundStats.js` + `routes/api/dataFlow.js` +
@@ -3131,6 +3131,94 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ 정직 기록: 성능 에이전트는 운영 규모(`MOCK_SCALE=3`) 폴링 라우트 p50 ≤ 1ms · 3단 지도 조립기 선형(30×4,000 에서
       14~17ms)으로 **고칠 것이 없다**고 보고했다 — 없는 결함을 만들지 않았다. 확인 못 한 것: 실엣지 규모의 지도 라우트,
       express·ws patch 의 changelog(전량 테스트로만 확인).
+
+  - ⚠⚠ **v2.590 — 6축 병렬 감사(2차 점검) 확정분**(사용자 요청 "한번더" = v2.589 와 같은 "아키텍처 점검 개선 버그패치
+    업그레이드 보안점검". 회귀는 `test/audit2590.test.js` 27건 — **변이 검증 6/6**: 수정을 하나씩 되돌리면 그 테스트가 실패한다):
+    - ⚠⚠ **`requirePerm` 은 역할을 보지 않는다 — 상태 변경 라우트는 `requireRole` 을 먼저**(D1): IPAM 쓰기 7곳
+      (`routes/api/ipamExport.js canWrite`)·`/vms/upgrade-tools` 가 `requirePerm('tools')` 뿐이라 **viewer + tools** 가
+      주석·override·정책을 바꾸고 게스트 재부팅 유발 작업을 실행할 수 있었다. `docs/AUDIT-2026-06-27.md` 가 'C2 대부분 수정
+      확인' 이라 적은 것이 **틀린 기록**이었다(정정). 테스트는 실제 `api` 라우터를 띄워 상태코드 + `requiredRole` 을 본다.
+    - ⚠⚠ **`.gitignore` 는 `server/config/*` 기본 차단 + `!*.example.json`**(D4): 파일 단위 열거라 CONFIG-FILES.md 의
+      **33개**가 공개 저장소에 올라갈 수 있었고 `vcenter-order.json` 은 이미 추적 중이었다(추적 해제). v2.575 SEC-12 는
+      '고침' 으로 분류됐지만 실제로는 남아 있었다. 테스트가 **문서 전수를 `git check-ignore`** 로 고정한다 —
+      새 설정 파일은 이제 자동으로 막힌다.
+    - ⚠⚠ **위임 '지금 수집' 요청은 claim→ack 다**(P16, `util/collectRequestQueue.js` — 스토리지·SAN·PDU·SAN 사용량 4큐 공용):
+      엣지가 인출하는 순간 지우면 고RTT 회선에서 응답이 유실돼도 '처리됨' 으로 보였다. 결과 push 가 도착하면 `ack`,
+      시한 안에 없으면 1회 재인출, 그래도 없으면 폐기하고 `lastDropped` 로 **밝힌다**. 인출 전 수집분(1분 여유)으로는 완료
+      처리하지 않는다. **새 위임 큐는 이 팩토리를 쓸 것**(CLAUDE.md 가 v2.290 부터 적은 규약의 네 번째 누락이었다).
+    - ⚠⚠ **백업 변경 감시는 상태 파일을 설정으로 보지 않는다**(P1, `backup/service.js isRuntimeStateFile`·`settingsFingerprint`):
+      엣지 push·폴러가 쓰는 파일에도 반응해 같은 내용의 change 백업이 보관 슬롯을 채우고 **정기·수동 백업을 지웠다**(엣지가
+      많으면 반대로 디바운스가 계속 초기화돼 실제 설정 변경 백업이 한 번도 안 생겼다). 지문이 같으면 생략 · 자동 사유
+      (change·startup)는 최대 10개 · 파일명에 사유. ⚠ 8MB 초과 설정 파일은 **조용히 빼지 않고** 결과·번들·화면에 밝힌다(D5).
+      복원 전 자동 백업은 설정된 보관 개수를 따른다(P2 — 하드코딩 30 이었다).
+    - ⚠⚠ **'못 읽은 값' 은 해소도 정상도 아니다 — 세 곳에서 또 밟았다**:
+      · PDU(F5): 장비는 읽혔지만 센서·뱅크 값을 못 읽은 주기를 '정상으로 돌아왔습니다' 로 알렸다. 이제 `readAlertKeys` 로
+        **값을 읽은 항목만** 해소 판정하고, 오래(`HOLD_MAX_MS` 6시간) 못 읽으면 알림 없이 끊는다(bmusage 규약과 같다).
+      · SAN(F3): `porterrshow` 의 k/m/g 축약 카운터는 **반올림값**이라 `1.2m → 1.2m` 이 '신규 0 — 정상' 이 됐다. 파서가
+        `_approx` 를 싣고 포트 행 `errApprox`·`framesApprox` → 기준선 `_approx` → 판정은 **증분 보류(unknown)**, 처리량은
+        `fpsHeld:'approx'`. 누적값 표시는 그대로다(누적은 맞다).
+      · SAN(F4): REST 스위치 스냅샷은 섹션 키가 달라(`stats`·`media`) 월간 점검이 **이미 받은 광량·에러를 보지 않고**
+        '명령이 없거나 권한이 없다' 는 틀린 조치를 줬다(−15.2 dBm 포트가 있는데 종합 '정상(일부 미확인)'). 판정 쪽
+        `restHealthSections` 가 SSH 키로 맞추고(구버전 엣지 스냅샷도 고쳐진다) REST 가 조회하지 않는 항목은 그렇게 말한다.
+        ⚠ 점검 문구의 **백틱 6곳**도 함께 뺐다(서버 문자열이 BoldText 로 그려진다 — 웹 스윕이 못 보는 자리).
+    - **추이 carry-in**(P3·P4·P5): 게스트 디스크는 조회 기간 안에 변화가 없으면 파티션·선이 사라졌다(diff 저장의 이면) →
+      기간 시작 전 마지막 행을 `carried:true` 로 싣는다. vmtrack DS 는 1GB 미만씩 늘면 기준이 첫 관측에 고정돼 차트가
+      실제에서 계속 벌어졌다 → 비교 기준을 **series 의 마지막 값**으로. prune 은 DS 별 마지막 행(`MAX(rowid)`)을 남긴다.
+    - **만료 없는 대기**(P11): 인출하는 엣지가 없는 ping·로그 연합 조회 요청이 영원히 '대기 중' 이었다 → `expired`
+      (ping 90초·로그 60초) + 화면이 **'엣지가 가져가지 않았다' 와 '결과가 오지 않았다'** 를 나눠 말한다. 중앙 직접 수집
+      vCenter 의 ping 은 엣지 큐에 넣지 않는다(가져갈 엣지가 없다).
+    - **svcmon push**(D2): 전 메타를 첫 청크에 몰아 항목 약 5,500개 이상이면 **매 주기 413 · 영원히 needMeta** 였고,
+      413 재시도는 뒷부분 행을 오류 없이 버렸다 → `splitSvcmonChunks` 가 메타를 청크마다 나누고 413 이면 스냅샷 전체를
+      다시 나눈다. `/api/central/svcmon-report` BIG_JSON 등록. ⚠ 로그 문구를 바꾸면 **로그 분석 카탈로그의 probe 도**
+      바꿀 것(`logAnalysis2583` 이 잡았다 — 이번에 실제로 깨졌다).
+    - 그 밖: LLM URL SSRF 검사(D6) · 로그 분석 붙여넣기 BIG_JSON 게이트 등록 · 전원꺼짐 점검이 수집 대기·연결 실패 vCenter 의
+      'VM 0개' 를 전부 꺼짐으로 세던 것(P6) · VM 복제 일일 스케줄 포탈 오프셋(P8) · 스토리지 보존일 env 출처(P9) · 로그 DB
+      크기에 -wal · VACUUM 뒤 체크포인트(P10) · 같은 수집 시각 용량 표본 이중 계수(P12) · 볼트 사용 기록 종료 flush(P13) ·
+      업그레이드 체크포인트 하위 디렉터리(P14) · 원시/롤업 보존일 분리 prune(P15) · RMA outbox 가 보내는 중 추가분을 지우던
+      것(P17) · DB 점검 quick_check 가 512MB 초과 파일에서 루프를 막던 것 → 생략하고 밝힌다 + 동시 점검 가드(P7) ·
+      Horizon 이름 목록 절단 시 전체 사용자 **하한값**(F8) · Isilon 경보 절단·이벤트 절 부재(F10) · 베어메탈 NIC·HBA 사용률
+      방향별 최대(F9 — rx+tx 합을 한 방향 속도로 나눠 최대 2배) · `/proc/stat` guest 이중 계수(F11) · HAProxy 백업 파일명(D9).
+    - ⚠⚠ **인증 실패 정지 가드가 vCenter·iDRAC·NSX 에 없었다 — 가장 많이 로그인하는 수집기였다**(수집기 축 F1 high ·
+      `vcenter/restClient.js vcAuthGuard`·`idrac/poller.js`·`nsx/client.js` + SSH 5종. 상세·남은 것은 `server/CLAUDE.md`):
+      server/CLAUDE.md 가 v2.541 에 '아직 가드가 없다' 고 적은 목록에 **이 셋은 들어 있지도 않았다**. 28개 vCenter 계정이
+      30초마다 로그인하므로 비밀번호가 바뀐 구간에 **서비스 계정이 잠긴다**. 회귀 테스트는 가짜 vCenter(SOAP
+      InvalidLogin + REST 401)·Redfish·NSX·ssh2 서버로 **실제 로그인 시도 수**를 센다(다음 주기 0회 · 자격증명 변경 시
+      재개 · 수동 실행은 시도 · 연결 거부는 멈추지 않음). 변이 14종 중 13종 검출(나머지 1종은 문구 기반 이중 방어).
+      · 함께 드러난 결함: `redfish.get` 의 401 문구에 숫자가 없어 bmusage 가 **401 을 '연결 불가' 로 분류**했다.
+    - **vCenter 수집 데드라인이 세션을 실제로 끊는다**(docs F7 — v2.417 규약의 vCenter 누락. PERF-AUDIT-2026-09-13 §4 미해결):
+      `store.collectWithDeadline` 이 AbortController 로 abort 하고 SOAP·REST 요청 신호는 `AbortSignal.any([건별 시한,
+      외부 신호])` 다. 예전 `Promise.race` 는 결과만 버리고 남은 SOAP 왕복을 계속해 다음 주기가 같은 vCenter 에 두 번째
+      세션을 열었다. 로그아웃은 외부 신호를 무시하고 끝까지 정리한다. 테스트가 서버 쪽 소켓이 약 300ms 에 끊기는 것을 본다.
+    - **iDRAC 센서 실패가 '표본 0' 으로 숨던 것**(F7): `fetchSensors` 가 모든 실패를 삼켜 v2.493 센서 진단·v2.548 팬 컬렉션
+      실패 표시가 도달 불가였다 → Chassis 루트 실패는 던지고 Thermal 전부 실패면 `thermalOk:false` + `sensorError`.
+    - **SAN '헬스 경보 없음' 은 상태를 읽었을 때만**(F6): 못 읽으면 `health.alerts` 가 0 이 아니라 null 이고 KPI 가
+      '헬스 상태 미확인 N대' 를 말한다(REST 는 상태를 조회하지 않아 **언제나** 0 이었다).
+    - **웹 전수(159경로 × 1440/400 · admin·operator·viewer, 약 400회 로드) 확정 8건**:
+      · ⚠⚠ **W1 폴러 상태의 `lastRun`·`lastCheck` 는 `{ at, … }` 객체다**(metrics·ipscan·gpu·upgrade) — `health/services.js` 가
+        숫자로 빼 `최근 NaN분 전` 이었고, **`NaN > 30분` 이 항상 거짓이라 지표 샘플러가 멈춰도 '정상'** 이었다(`atOf`).
+        새 상태 헬퍼를 소비할 때 **모양을 먼저 확인할 것**.
+      · ⚠⚠ **W2·W3 관리자 전용 조회 실패를 삼키면 거짓 초록·거짓 결함이 된다**: 긴급중단 화면은 operator 가 상태를 못 읽어
+        **전 수집이 멈춘 상태에서 '🟢 정상 — 수집 동작 중'** 을 봤다(이제 '❔ 확인하지 못했습니다' + AccessDenied). DS 사용량
+        'DataCenter별' 은 법인 목록 403 을 삼켜 **전부 '⚠ 법인 미지정'**(설정 결함처럼 읽힌다) → '법인 정보를 읽지 못함' + 사유 배너.
+        `.catch(() => {})` 로 끝나는 관리자 전용 조회를 새로 만들지 말 것 — **'못 읽음' 을 기본값(비활성·미지정)으로 칠하는 것**이다.
+      · W4·W5·W6·W7 400px: 메일 설정 표 772px(`STable minWidth`) · `.cols-2/.cols-3` 좁은 폭 트랙 `minmax(0,1fr)`(v2.576
+        `.vc-grid` 와 같은 결함 — 2화면) · IPAM 도구줄 579px + 세로 글자 버튼 · 서버 분석·네트워크 체크·vCenter 포트 버튼 행 wrap ·
+        3D 토폴로지 `flex:none` · 인사이트 카드 `minWidth:0` · 알람 핫스팟 2열 고정 · 디스크 트렌드 `minmax(min(380px,100%),1fr)` ·
+        특수 기능 카테고리 오른쪽 패널이 **폭 2px 로 사라지던 것**(`.toolcat-grid` 좁은 폭 1열 — 넘침 0 이라 수치로는 안 잡혔다).
+      · W8 NIC 속도·모델 '대상' 이 **수집된 행 수**라 `대상 0 · 수집됨 0 · 미수집 204` 로 스스로 모순 → `collected + missing`
+        (필터 버튼의 행 수는 `rowCount`).
+    - **런타임·의존성**(15분 장시간 실행 · 운영 규모 `MOCK_SCALE=3` · 힙 스냅샷 비교 — **누수 없음**(9분 +0.2MB), `.db` 핸들
+      47 고정): ⚠ **30초마다 `store.refresh` 에서 200~360ms 정지** 원인은 `ledgerSignature` 의 문자 단위 djb2 JS 루프였다
+      (내용이 그대로여도 매 틱 전량) → 네이티브 sha1(43ms → 13~26ms). 더 줄이려면 '수집 변동 없는 틱은 syncLedger 생략' 이
+      있지만 외부 ipam.db 리더의 신선도 계약을 바꾸므로 **사용자 결정 사항**이다(측정하지 않았다). ⚠ **CI 는 root 를 audit 하지
+      않는다** — root `concurrently` 9.2.1 이 `shell-quote` critical 2 를 핀하고 있었고 아무도 몰랐다(9.2.4 로 0). 새 dev
+      도구를 root 에 넣으면 `npm audit`(root)도 볼 것. 범위 안 전이 업데이트는 사본에서 테스트·빌드·Chromium A/B 로 확인 후 적용했다
+      (three 0.184→0.186 은 semver 를 따르지 않는다 — 3D 화면은 1회 렌더 확인까지만). `ldapjs`(AD 로그인)는 상류가 **decommissioned**
+      로 표시했다(정보 — 보안 수정이 더 나오지 않는다).
+    - ⚠ **API 문서 생성기는 '선언 줄 끝의 주석 + 다음 줄 핸들러' 를 게이트로 읽는다** — 이번에 `async` 가 '뜻 모르는 게이트' 로
+      실렸다. 라우트 선언에 주석을 붙이려면 **선언 위 줄**에 둘 것.
+    - 문서: 이미 고친 것을 '아직'·'후속' 으로 적은 줄 2개 정정 · AUDIT-2026-09-21 표 누락(BUG-17·18·21)·SEC-12 분류 정정 ·
+      문서의 원시 NUL 바이트 2개 제거(grep 이 문서를 바이너리로 취급했다).
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 

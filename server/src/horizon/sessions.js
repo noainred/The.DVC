@@ -220,6 +220,13 @@ export function combineServers(results) {
     }
   }
   const names = [...union.values()].sort((a, b) => b.connected - a.connected || b.sessions - a.sessions);
+  // ⚠ v2.590 F8: 서버 레코드의 names 는 상한(maxUsers)으로 **잘린 목록**이다. 한 서버라도 잘렸으면 이름 합집합은 전체가
+  //   아니다 — 예전엔 그 잘린 목록의 합집합(2,000)을 '전체 사용자' 로 내 서버별 행(2,500)보다 작은 모순이 났고 DB 추이에도
+  //   그 값이 남았다. 잘렸으면 **하한값**(= max(이름 합집합, 가장 큰 서버의 고유 사용자))을 내고 그 사실을 밝힌다.
+  const usersOmitted = ok.reduce((a, r) => a + (Number(r.usersOmitted) || 0), 0);
+  const maxServerUsers = ok.reduce((m, r) => Math.max(m, Number(r.users) || 0), 0);
+  const lowerBound = usersOmitted > 0;
+  const maxServerConnected = ok.reduce((m, r) => Math.max(m, Number(r.usersConnected) || 0), 0);
   return {
     servers: list.length,
     serversOk: ok.length,
@@ -230,9 +237,11 @@ export function combineServers(results) {
     disconnected: stateBlind ? null : disconnected,
     pending: stateBlind ? null : pending,
     stateBlind,
-    users: names.length,
-    usersConnected: stateBlind ? null : names.filter((u) => u.connected > 0).length,
+    users: lowerBound ? Math.max(names.length, maxServerUsers) : names.length,
+    usersConnected: stateBlind ? null : (lowerBound ? Math.max(names.filter((u) => u.connected > 0).length, maxServerConnected) : names.filter((u) => u.connected > 0).length),
     usersByServerSum: ok.reduce((a, r) => a + (Number(r.users) || 0), 0),
+    usersLowerBound: lowerBound,
+    usersOmitted,
     names,
   };
 }

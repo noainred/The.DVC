@@ -24,6 +24,7 @@ import crypto from 'node:crypto';
 import ssh2 from 'ssh2';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { registerExitFlush } from '../util/exitFlush.js';
 import { openSecretsDeep, sealSecretsDeep } from './secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 
@@ -64,6 +65,9 @@ function scheduleUsagePersist() {
   _usageTimer = setTimeout(flushUsage, USAGE_DEBOUNCE_MS);
   _usageTimer.unref?.();
 }
+// v2.590 P13: 종료 직전 5초 디바운스 창의 사용 기록(어느 엣지가 어느 호스트로 인출)을 잃지 않게 동기 flush 를 등록한다
+// (v2.582 규약 — 디바운스 저장은 util/exitFlush 에 등록한다. 이 변수명은 그때 스윕 정규식을 빠져나갔다).
+registerExitFlush('security/credentialStore.usage', () => { if (_usageTimer) { clearTimeout(_usageTimer); flushUsage(); } });
 export function _flushUsageForTest() { if (_usageTimer) { clearTimeout(_usageTimer); _usageTimer = null; } flushUsage(); }
 
 function load() {

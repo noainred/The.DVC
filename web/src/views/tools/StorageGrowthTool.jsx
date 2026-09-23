@@ -172,7 +172,7 @@ export default function StorageGrowthTool() {
           ))}
           <span className="muted" style={{ fontSize: 11.5, marginLeft: 'auto' }}>
             기준일 {d.asOfLabel} · 저장 기간 {d.retention?.dailyKeepDays}일
-            {d.retention?.dailyKeepDaysSource === 'default' ? '(기본값)' : '(지정값)'}
+            {d.retention?.dailyKeepDaysSource === 'default' ? '(기본값)' : d.retention?.dailyKeepDaysSource === 'env' ? '(환경변수)' : '(지정값)'}
           </span>
         </div>
       </div>

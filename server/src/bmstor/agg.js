@@ -56,6 +56,7 @@ export function aggregate(servers, latest) {
       enabled: s.enabled !== false, mountCount: (s.mounts || []).length,
       ...sums, usedPct: pct(sums.usedBytes, sums.totalBytes),
       ok: !!r?.ok, error: r?.error || null, missing: r?.missing || [], at: r?.at || null,
+      authStopped: r?.authStopped || null,   // v2.590: 인증 실패로 주기 수집이 멈췄다(화면이 말한다)
       mounts: r?.mounts || [],
     };
     perServer.push(row);

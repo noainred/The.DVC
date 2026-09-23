@@ -92,17 +92,23 @@ export function parseWinPerf(text) {
   }
   mark('disk', disks.length > 0);
 
-  // NIC — `NIC=<이름>|<bytesPerSec>|<currentBandwidthBits>`
+  // NIC — `NIC=<이름>|<bytesTotalPerSec>|<currentBandwidthBits>|<bytesReceivedPerSec>|<bytesSentPerSec>`
+  // v2.590 F9: 사용률은 방향별 max(수신, 송신) ÷ 링크 속도(전이중). 방향별 값이 없는 옛 형식(필드 3개)은 합계로 나누되
+  // 그 사실을 `pctBasis:'total'` 로 밝힌다(최대 2배 과대일 수 있다).
   const nics = [];
   for (const row of arr(kv.NIC)) {
     const f = String(row).split('|').map((x) => x.trim());
     if (!f[0]) continue;
     const bps = num(f[1]);
     const bw = num(f[2]);
+    const rx = num(f[3]); const tx = num(f[4]);
+    const dir = rx != null && tx != null ? Math.max(rx, tx) : null;
+    const basis = dir != null ? dir : bps;
     nics.push({
       iface: f[0], bytesPerSec: bps,
       bitsPerSec: bw != null && bw > 0 ? bw : null,          // 0 은 '모른다' 다(카운터 기본값)
-      pct: (bps != null && bw != null && bw > 0) ? Math.min(100, Math.round(((bps * 8) / bw) * 1000) / 10) : null,
+      pct: (basis != null && bw != null && bw > 0) ? Math.min(100, Math.round(((basis * 8) / bw) * 1000) / 10) : null,
+      pctBasis: dir != null ? 'direction' : 'total',
     });
   }
   mark('net', nics.length > 0);

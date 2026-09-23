@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { ackCollect } from '../pdu/collectRequests.js';
 
 const FILE = path.join(config.configDir, 'central-pdu.json');
 // 엣지가 오래 조용하면 낡은 값을 '현재'처럼 보여주지 않도록 만료시킨다(정직 표기).
@@ -48,6 +49,7 @@ export function saveEdgePdu(agent, snapshots) {
   }));
   load().set(key, { agent: String(agent), at: Date.now(), snapshots: list });
   persist();
+  for (const sn of list) if (sn?.id) ackCollect(sn.id, Number(sn.collectedAt) || null); // v2.590 P16: '지금 수집' 완료 확인
   return { ok: true, count: list.length };
 }
 

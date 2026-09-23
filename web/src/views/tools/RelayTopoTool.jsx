@@ -177,7 +177,7 @@ export default function RelayTopoTool() {
           </div>
 
           <div className="card" style={{ marginBottom: 12 }}>
-            <div className="flex gap" style={{ alignItems: 'center' }}>
+            <div className="flex gap wrap" style={{ alignItems: 'center' }}>
               <b>서비스(중계 엣지 HAProxy listen 포트 → 백엔드)</b><span style={{ flex: 1 }} />
               <button className="tab" onClick={() => setForm((p) => ({ ...p, services: [...p.services, { key: '', label: '', listenPort: 0, target: 'irs', targetPort: 0, mode: 'tcp', enabled: true }] }))}>+ 서비스 추가</button>
               <button className="tab" onClick={() => setForm((p) => ({ ...p, services: data.defaultServices.map((s) => ({ ...s })) }))}>기본값 복원</button>

@@ -74,10 +74,18 @@ export function loadGrowthSettings() {
     }
     _cache = normalizeGrowthSettings(saved).values;
   }
+  // v2.590 P9: 저장값이 없으면 **env 가 기본값보다 먼저**다(`storage/db.js` 머리말의 약속 '설정 → env → 기본').
+  // v2.589 까지는 여기서 기본값 숫자를 채워 `applyGrowthSettings` 가 db 에 주입했으므로 db 의 env 폴백이
+  // 도달 불가였다 — env 로 원시 400일을 잡은 현장이 설정을 한 번도 저장하지 않았으면 90일 넘는 원시 이력이
+  // 다음 prune 에서 지워졌고, 화면은 '기본값' 이라 말했다.
+  const envVals = normalizeGrowthSettings({
+    rawKeepDays: process.env.STORAGE_HISTORY_KEEP_DAYS, dailyKeepDays: process.env.STORAGE_DAILY_KEEP_DAYS,
+  }).values;
   const out = {};
   for (const s of GROWTH_SPEC) {
-    out[s.key] = _cache[s.key] ?? s.def;
-    out[`${s.key}Source`] = _cache[s.key] != null ? 'saved' : 'default';
+    const src = _cache[s.key] != null ? 'saved' : envVals[s.key] != null ? 'env' : 'default';
+    out[s.key] = src === 'saved' ? _cache[s.key] : src === 'env' ? envVals[s.key] : s.def;
+    out[`${s.key}Source`] = src;
   }
   return out;
 }

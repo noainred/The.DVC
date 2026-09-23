@@ -3,6 +3,8 @@ import { useHashTab } from '../hooks/useHashTab.js';
 import { usePolling, fetchJson } from '../api.js';
 import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox, VmLink } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import BoldText from '../components/boldText.jsx';
+import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
 const MGR_BADGE = { connected: 'green', degraded: 'amber', unreachable: 'red', pending: 'gray', disabled: 'gray' };
 const MGR_LABEL = { connected: '정상', degraded: '저하', unreachable: '연결끊김', pending: '대기', disabled: '비활성' };
@@ -48,7 +50,11 @@ export default function Nsx() {
         <div className="card" style={{ marginBottom: 12, borderColor: 'var(--red)', padding: '10px 14px' }}>
           <b style={{ color: 'var(--red)' }}>수집 오류 {data.collectionErrors.length}건</b>
           <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12 }} className="muted">
-            {data.collectionErrors.slice(0, 5).map((e) => <li key={e.managerId}>{e.name}: {e.message}{e.hint ? ` — ${e.hint}` : ''}</li>)}
+            {data.collectionErrors.slice(0, 5).map((e) => (
+              <li key={e.managerId}>{e.name}: {e.authStopped
+                ? <BoldText text={authStopInfo(e.authStopped, { what: '이 NSX Manager', manual: '설정 › NSX 관리의 연결 테스트' })?.text || e.message} />
+                : <>{e.message}{e.hint ? ` — ${e.hint}` : ''}</>}</li>
+            ))}
           </ul>
         </div>
       )}
@@ -69,7 +75,8 @@ export default function Nsx() {
             {managers.map((m) => (
               <tr key={m.id} style={{ cursor: 'pointer', background: mgr === m.id ? 'rgba(99,102,241,.08)' : undefined }} onClick={() => setMgr(mgr === m.id ? '' : m.id)}>
                 <td><b>{m.name}</b><span className="muted" style={{ fontSize: 11 }}> · {m.id}</span></td>
-                <td><span className={`badge ${MGR_BADGE[m.status] || 'gray'}`}>{MGR_LABEL[m.status] || m.status}</span></td>
+                <td><span className={`badge ${MGR_BADGE[m.status] || 'gray'}`}>{MGR_LABEL[m.status] || m.status}</span>
+                  {m.authStopped && <span className="badge red" style={{ marginLeft: 4, fontSize: 10, whiteSpace: 'nowrap' }} title={authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || ''}>인증 실패 정지</span>}</td>
                 <td className="muted">{m.version || '—'}</td>
                 <td><span className="badge blue">{m.region || '—'}</span></td>
                 <td className="muted">{m.vcenterId || '—'}</td>

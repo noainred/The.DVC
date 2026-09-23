@@ -6,7 +6,7 @@
 
 import { loadGpuGuestSettings } from './settings.js';
 import { loadPhysical, updatePhysical } from './physicalRegistry.js';
-import { collectVmGpuSsh, detectPhysicalGpu } from './sshCollect.js';
+import { collectVmGpuSsh, detectPhysicalGpu, gpuAuthGuard, gpuStopView, isGpuAuthError } from './sshCollect.js';
 import { setPhysicalGpu, prunePhysicalGpu, physicalGpuCounts } from './physicalStore.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
@@ -28,17 +28,29 @@ function classifyErr(e) {
 }
 
 
-export async function pollPhysicalOnce() {
+/**
+ * @param {{manual?: boolean}} [opts] manual — 관리자 '지금 수집'. v2.590(감사 F2): 인증 실패로 멈춘 서버는
+ *   **주기 수집에서만** 건너뛴다(등록·수정 직후 호출은 자격증명이 바뀌었으면 credHash 로 자동 재개된다).
+ */
+export async function pollPhysicalOnce({ manual = false } = {}) {
   if (running) return lastRun;
   running = true;
   try {
     if (isStopped()) { lastRun = { at: Date.now(), skipped: '긴급중단' }; return lastRun; }
     const servers = loadPhysical().filter((s) => s.enabled !== false && s.host && s.username);
     const s = loadGpuGuestSettings();
-    let ok = 0; let failed = 0;
+    let ok = 0; let failed = 0; let authStopped = 0;
     await poolSettled(servers, Math.max(1, s.concurrency || 4), async (sv) => {
       const vm = { name: sv.name, ipAddresses: [sv.host], ipAddress: sv.host };
       const creds = { username: sv.username, password: sv.password || '' };
+      const authDev = { id: `phys|${sv.id}`, username: sv.username, password: sv.password || '' };
+      const stop = manual ? null : gpuAuthGuard.authStopFor(authDev);
+      if (stop) {
+        // 정지 사실을 결과에 싣는다 — 조용히 건너뛰면 화면이 '마지막 값' 을 지금 값처럼 보여준다.
+        setPhysicalGpu(sv.id, { id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '', error: `인증 실패로 주기 수집 정지(${stop.attempts}회) — 비밀번호를 고치면 자동 재개합니다`, errorCode: 'login', errorLabel: '로그인 안됨', authStopped: gpuStopView(stop) });
+        authStopped++;
+        return;
+      }
       try {
         const r = await collectVmGpuSsh(vm, creds, { timeoutMs: s.timeoutMs, port: sv.port || 22 });
         setPhysicalGpu(sv.id, {
@@ -49,14 +61,18 @@ export async function pollPhysicalOnce() {
         if (!(sv.gpuModels && sv.gpuModels.length)) {
           try { const det = await detectPhysicalGpu(sv.host, creds, { timeoutMs: s.timeoutMs, port: sv.port || 22 }); if (det.gpuModels.length) updatePhysical(sv.id, { gpuModels: det.gpuModels }); } catch { /* best effort */ }
         }
+        gpuAuthGuard.clearAuthStop(authDev.id);
         ok++;
       } catch (e) {
-        setPhysicalGpu(sv.id, { id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '', error: e.message, ...classifyErr(e) });
+        // v2.590: 자격증명 거부면 이 서버의 주기 수집을 멈춘다(재시도해도 결과가 같고 계정만 잠근다).
+        const rec = isGpuAuthError(e) ? gpuAuthGuard.markAuthStopped(authDev.id, authDev, e.message) : null;
+        if (rec) console.warn(`[gpu-physical] ${sv.name || sv.host}: 인증 실패로 주기 수집 정지(${rec.attempts}회) — 비밀번호를 고치면 자동 재개합니다`);
+        setPhysicalGpu(sv.id, { id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '', error: e.message, ...classifyErr(e), ...(rec ? { authStopped: gpuStopView(rec) } : {}) });
         failed++;
       }
     });
     prunePhysicalGpu(new Set(servers.map((x) => x.id)));
-    lastRun = { at: Date.now(), servers: servers.length, ok, failed, overlay: physicalGpuCounts() };
+    lastRun = { at: Date.now(), servers: servers.length, ok, failed, authStopped, overlay: physicalGpuCounts() };
     return lastRun;
   } finally { running = false; }
 }

@@ -64,6 +64,9 @@ export function baselineFromSnapshot(snap) {
     const row = {};
     let any = false;
     for (const k of KEYS) { const v = num(p[k]); if (v != null) { row[k] = v; any = true; } }
+    // v2.590 F3: 축약(k/m/g) 값으로 잡은 기준선은 증분의 출발점이 될 수 없다 — 어느 키였는지 함께 남긴다.
+    const ap = Array.isArray(p.errApprox) ? p.errApprox.filter((k) => KEYS.includes(k)) : [];
+    if (ap.length) row._approx = ap;
     if (any) { ports[String(p.index)] = row; counted++; }
   }
   return {

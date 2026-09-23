@@ -278,7 +278,9 @@ async function pollOnce() {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const body = await r.json();
   await onContact();
-  if (batch.length) { outbox = outbox.slice(batch.length); saveJson(OUTBOX_FILE, outbox); }
+  // v2.590 P17: 보낸 항목만 **정체성으로** 지운다. 앞에서 batch 개수만큼 자르면, 폴(최대 55초) 도중 상한(OUTBOX_MAX)에
+  // 걸려 pushOutbox 가 앞을 잘라낸 경우 **보내지 않은 결과**가 대신 잘려 조용히 사라졌다.
+  if (batch.length) { const sent = new Set(batch); outbox = outbox.filter((x) => !sent.has(x)); saveJson(OUTBOX_FILE, outbox); }
   if (body.schedule) applySchedule(body.schedule);
   if (body.config) applyRemoteConfig(body.config);
   for (const job of body.jobs || []) {

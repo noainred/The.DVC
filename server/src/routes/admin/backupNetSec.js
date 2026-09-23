@@ -59,7 +59,7 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, (req,
   try {
     const a = readBackup(req.params.name);
     if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
-    const r = restoreCentral(a);
+    const r = restoreCentral(a, { retention: loadBackupSettings().retention });
     logAudit({ user: req.user?.username, action: '포탈 설정 복원', target: req.params.name, detail: `${r.restored}개 파일`, ip: req.ip || '' });
     res.json({ ok: true, ...r, note: '중앙 설정 복원 완료 — 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.' });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
@@ -86,7 +86,7 @@ adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
   res.json(s);
 });
 adminRouter.post('/vclogs/collect', adminOnly, async (_req, res) => {
-  try { res.json({ ok: true, ...(await pollLogsOnce()) }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+  try { res.json({ ok: true, ...(await pollLogsOnce({ manual: true })) }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 // ───────────────────────── 네트워크 트래픽 분석 ─────────────────────────

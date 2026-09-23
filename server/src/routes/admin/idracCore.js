@@ -4,7 +4,7 @@ import { listUnsupportedServers } from '../../central/unsupportedServers.js'; //
 import { logAudit } from '../../audit.js';
 import { listPhysical } from '../../gpu/physicalRegistry.js';
 import { listRegistry as listServers, addServer, testServer, loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
-import { getPollerStatus, pollNow } from '../../idrac/poller.js';
+import { getPollerStatus, pollNow, idracAuthStops } from '../../idrac/poller.js';
 import { purgeStalePower, measuredPowerBreakdown } from '../../idrac/service.js';
 import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
@@ -82,7 +82,9 @@ adminRouter.get('/room-temp', adminOnly, (req, res) => {
 adminRouter.get('/idrac', adminOnly, (_req, res) => {
   const tagMap = hostVcByTag();
   const mapTag = (s) => (tagMap.get(String(s.serviceTag || s.inv?.system?.serviceTag || '').trim().toLowerCase()) || '');
-  const local = listServers().map((s) => ({ ...s, mappedVcenterId: s.vcenterId || mapTag(s), model: s.model || getIdracInventory(s.id)?.system?.model || '' }));
+  // v2.590: 인증 실패로 주기 수집이 멈춘 서버를 행마다 싣는다(조용한 정지 금지 — authGuard 규칙 1).
+  const stops = idracAuthStops();
+  const local = listServers().map((s) => ({ ...s, mappedVcenterId: s.vcenterId || mapTag(s), model: s.model || getIdracInventory(s.id)?.system?.model || '', ...(stops.has(String(s.id)) ? { authStopped: stops.get(String(s.id)) } : {}) }));
   const seen = new Set(local.map((s) => String(s.id)));
   const remote = remoteServersResolved()
     .filter((s) => !seen.has(String(s.id)))
@@ -107,7 +109,7 @@ adminRouter.post('/idrac/test', adminOnly, async (req, res) => {
 
 // Trigger an immediate poll of all servers.
 adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
-  res.json({ ok: true, lastRun: await pollNow() });
+  res.json({ ok: true, lastRun: await pollNow({ manual: true }) }); // v2.590: 수동 실행은 인증 실패 정지 서버도 1회 시도한다
 });
 
 // 전력 집계 표시 설정 — excludeUnmapped: vCenter 미매핑 측정 전력을 총합/보고/목록에서 제외.
@@ -234,7 +236,9 @@ adminRouter.get('/idrac/nic-speed', adminOnly, (req, res) => {
   const virtualN = rows.filter((r) => r.type === 'virtual').length;
   res.json({
     ok: true, datacenterId: dcFilter, type: typeFilter,
-    totalServers: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
+    // v2.590 W8: '대상' 은 필터를 통과한 전체(수집됨 + 미수집)다 — 예전엔 수집된 행 수라 '대상 0 · 미수집 204' 처럼 스스로
+    //   모순됐고, 하드웨어 집계(:167 servers.length)와 뜻이 달랐다. 필터 버튼이 쓰는 행 수는 rowCount 로 따로 준다.
+    totalServers: collected + missing, rowCount: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
     bySpeed: speedBuckets, servers: rows,
     datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })),
   });
@@ -309,7 +313,9 @@ adminRouter.get('/idrac/nic-models', adminOnly, (req, res) => {
   const virtualN = rows.filter((r) => r.type === 'virtual').length;
   res.json({
     ok: true, datacenterId: dcFilter, type: typeFilter,
-    totalServers: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
+    // v2.590 W8: '대상' 은 필터를 통과한 전체(수집됨 + 미수집)다 — 예전엔 수집된 행 수라 '대상 0 · 미수집 204' 처럼 스스로
+    //   모순됐고, 하드웨어 집계(:167 servers.length)와 뜻이 달랐다. 필터 버튼이 쓰는 행 수는 rowCount 로 따로 준다.
+    totalServers: collected + missing, rowCount: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
     byModel: toBuckets(byModel), vcByModel: toBuckets(vcByModel), servers: rows,
     datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })),
   });

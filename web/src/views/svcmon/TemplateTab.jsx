@@ -230,7 +230,7 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
       <div className="card" style={{ padding: 14 }}>
         <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
           <b>점검 템플릿 ({templates.length} / {limits.maxTemplates})</b>
-          <div className="flex gap">
+          <div className="flex gap wrap">
             <button className="tab" onClick={csvExport}>⤓ CSV 내보내기</button>
             <button className="tab" onClick={csvSample}>⤓ 샘플 CSV</button>
             {canEdit && <button className="tab" onClick={() => { setCsvOpen((v) => !v); setCsvPreview(null); }}>⤒ CSV 가져오기</button>}

@@ -86,7 +86,9 @@ function DbDetailModal({ f, health, onClose, onCheck, checking }) {
           ) : h.error ? <ErrorBox message={h.error} /> : (
             <>
               <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 8 }}>
-                <span className={`badge ${h.checks?.integrity?.ok ? 'green' : 'red'}`}>정합성 {h.checks?.integrity?.ok ? '정상' : '이상'}</span>
+                {h.checks?.integrity?.ok == null
+                  ? <span className="badge gray" title={h.checks?.integrity?.detail || ''}>정합성 생략(큰 파일)</span>
+                  : <span className={`badge ${h.checks?.integrity?.ok ? 'green' : 'red'}`}>정합성 {h.checks?.integrity?.ok ? '정상' : '이상'}</span>}
                 <span className={`badge ${h.checks?.foreignKeys?.ok ? 'green' : 'red'}`}>FK {h.checks?.foreignKeys?.detail || '—'}</span>
                 <span className="badge blue">저널 {h.pragmas?.journalMode || '—'}</span>
                 <span className={`badge ${(h.pragmas?.fragmentationPct || 0) >= 25 ? 'amber' : 'gray'}`}>빈 페이지 {h.pragmas?.fragmentationPct ?? 0}%</span>
@@ -343,7 +345,9 @@ function HealthPanel({ report, busy, onRun }) {
                   <tr key={r.path}>
                     <td><b>{r.file}</b></td>
                     <td>{r.error ? <span className="badge red">오류</span>
-                      : <span className={`badge ${r.checks?.integrity?.ok ? 'green' : 'red'}`}>{r.checks?.integrity?.ok ? 'ok' : String(r.checks?.integrity?.detail || '이상').slice(0, 40)}</span>}</td>
+                      : r.checks?.integrity?.ok == null
+                        ? <span className="badge gray" title={r.checks?.integrity?.detail || ''}>생략</span>
+                        : <span className={`badge ${r.checks?.integrity?.ok ? 'green' : 'red'}`}>{r.checks?.integrity?.ok ? 'ok' : String(r.checks?.integrity?.detail || '이상').slice(0, 40)}</span>}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{r.checks?.foreignKeys?.detail || '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{r.pragmas?.journalMode || '—'}</td>
                     <td style={{ textAlign: 'right' }}>{r.pragmas?.fragmentationPct != null ? `${r.pragmas.fragmentationPct}%` : '—'}</td>

@@ -6,6 +6,7 @@
  * 저장 위치: CONFIG_DIR/backups/portal-backup-<ISO>.json.gz
  */
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -25,10 +26,53 @@ const ALLOW_EXT = new Set(['.json', '.env']);
 const DENY_NAMES = new Set(['central-inventory.json', 'central-agent-config.json', 'ipam-scan-history.json', 'ipam-scan-results.json']);
 const FILE_SIZE_CAP = 8 * 1024 * 1024; // 파일당 8MB 상한(대용량 데이터 방지)
 
+/**
+ * v2.590 P1: 설정이 아니라 **폴러·엣지 push 가 스스로 다시 쓰는** 상태·캐시 파일.
+ * '설정 변경 시 자동 백업' 감시는 이 파일들의 쓰기로 깨지 않는다. v2.589 까지는 `.json` 쓰기 전부가 'change' 백업을
+ * 만들어, 엣지 1곳(60초 push)만 있어도 30분 만에 보관 슬롯이 같은 내용의 'change' 백업으로 채워져 정기·수동 백업이
+ * 조용히 지워졌고, 엣지가 많으면 반대로 디바운스가 계속 초기화돼 **실제 설정 변경 백업이 한 번도 생기지 않았다**.
+ * 백업 **내용**은 바꾸지 않는다(복원 의미 유지) — 트리거와 중복 판정에서만 뺀다.
+ */
+export const RUNTIME_STATE_NAMES = new Set([
+  'backup.json', 'central-agent-config.json', 'central-inventory.json', 'central-fleet.json', 'central-pdu.json',
+  'central-agent-storage.json', 'central-agent-sanswitch.json', 'central-agent-sanswitch-perf.json',
+  'central-agent-gpu-guest.json', 'central-unsupported-servers.json', 'agent-assignments.json', 'agent-results.json',
+  'active-sessions.json', 'sanswitch-perf-push.json', 'ipam-scan-history.json', 'ipam-scan-results.json',
+]);
+// 이름 규약으로 드러나는 상태 파일(-latest·-activity·-history·-results·-runs·-log·-state·-usage·-stats·-stops·-inventory·-cache).
+// ⚠ 'vcenter-logs.json'(설정)·'dirusage.json'(설정)은 하이픈 뒤 정확한 단어가 아니라 걸리지 않는다 — 테스트가 고정한다.
+const RUNTIME_STATE_RE = /-(latest|activity|history|results|runs|log|state|usage|stats|stops|inventory|cache)\.json$/i;
+export function isRuntimeStateFile(name) {
+  const b = path.basename(String(name || ''));
+  return DENY_NAMES.has(b) || RUNTIME_STATE_NAMES.has(b) || RUNTIME_STATE_RE.test(b);
+}
+
+/** 설정 파일 묶음의 지문 — 상태·캐시 파일은 뺀다. 'change' 백업이 직전 백업과 같은 내용이면 만들지 않는 데 쓴다. */
+export function settingsFingerprint(files) {
+  const h = crypto.createHash('sha1');
+  for (const name of Object.keys(files || {}).filter((n) => n !== REDACTED_META && n !== SKIPPED_META && !isRuntimeStateFile(n)).sort()) {
+    h.update(name); h.update('\0'); h.update(String(files[name])); h.update('\0');
+  }
+  return h.digest('hex');
+}
+let _lastFingerprint = null;
+export function _resetBackupFingerprint() { _lastFingerprint = null; }
+
+/** 사유별 보관 상한 — 자동 사유('change'·'startup')는 전체 보관 개수 중 이 개수까지만 차지한다(정기·수동을 밀어내지 않게). */
+export const AUTO_REASON_KEEP = 10;
+const AUTO_REASONS = new Set(['change', 'startup']);
+/** 파일명에서 사유를 읽는다 — v2.590 이전 이름(사유 없음)은 null(= 보호 대상, 자동 사유로 치지 않는다). */
+export function reasonOfName(name) {
+  const m = /^portal-backup-.+-(manual|schedule|change|startup|pre-restore)\.json\.gz$/.exec(String(name || ''));
+  return m ? m[1] : null;
+}
+
 function ensureDir() { fs.mkdirSync(BACKUP_DIR, { recursive: true }); }
 
 /** 번들 파일 맵 안의 메타 키 — 가린 env 키 목록 `{ 'portal.env': ['AUTH_SECRET', …] }`. 파일이 아니다. */
 export const REDACTED_META = '__redacted__';
+/** 크기 상한으로 뺀 파일 `[{name,size}]`(v2.590 D5). 메타 키이고 파일이 아니다. */
+export const SKIPPED_META = '__skipped__';
 /** CONFIG_DIR(비재귀)에서 설정 파일들을 { name: content(utf8) }로 수집. */
 export function collectConfigDir(dir = CONFIG_DIR) {
   const out = {};
@@ -41,7 +85,9 @@ export function collectConfigDir(dir = CONFIG_DIR) {
     if (!ALLOW_EXT.has(path.extname(name).toLowerCase())) continue;
     try {
       const st = fs.statSync(path.join(dir, name));
-      if (st.size > FILE_SIZE_CAP) continue;
+      // v2.590 D5: 상한 초과 파일을 **조용히** 빼지 않는다 — 대규모 svcmon.json(실측 16.4MB)이 빠진 채 '백업 완료' 로
+      // 보고되어 그 백업으로 복원하면 성능점검 대상 전량이 사라졌다. 뺀 파일을 결과·번들에 싣고 화면이 말한다.
+      if (st.size > FILE_SIZE_CAP) { (out[SKIPPED_META] ||= []).push({ name, size: st.size }); continue; }
       let content = fs.readFileSync(path.join(dir, name), 'utf8');
       // v2.538: .env 의 서명 키·봉인 키·토큰은 번들에 싣지 않는다(util/envRedact.js 머리말). 가린 개수는
       // `out[REDACTED_META]` 로 돌려 화면·결과가 말한다 — 조용히 빼면 복원 뒤 '왜 키가 사라졌나' 를 모른다.
@@ -57,26 +103,42 @@ export function collectConfigDir(dir = CONFIG_DIR) {
 }
 
 /** 백업 아카이브 1개 생성. reason: 'manual'|'schedule'|'change'|'startup'. */
-export function createBackup(reason = 'manual', { retention = 30 } = {}) {
+export function createBackup(reason = 'manual', { retention = 30, skipIfUnchanged = false } = {}) {
   ensureDir();
   const files = collectConfigDir();
   const redactedMeta = files[REDACTED_META] || null; delete files[REDACTED_META];
-  const central = { version: currentVersion(), files, redacted: redactedMeta };
+  const skippedFiles = files[SKIPPED_META] || []; delete files[SKIPPED_META];
+  const fp = settingsFingerprint(files);
+  // v2.590 P1: 변경 감시가 깨웠는데 설정 내용이 직전 백업과 같으면(상태 파일만 바뀜) 만들지 않는다 — 사유를 돌려 호출부가 기록한다.
+  if (skipIfUnchanged && _lastFingerprint && fp === _lastFingerprint) return { skipped: true, reason, why: 'unchanged' };
+  const central = { version: currentVersion(), files, redacted: redactedMeta, skipped: skippedFiles.length ? skippedFiles : undefined };
   const edges = getAllAgentConfigs();
   const archive = { v: 1, createdAt: Date.now(), reason, central, edges };
   const gz = zlib.gzipSync(Buffer.from(JSON.stringify(archive)));
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const name = `portal-backup-${stamp}.json.gz`;
+  const safeReason = /^[a-z-]{1,20}$/.test(String(reason)) ? reason : 'manual';
+  const name = `portal-backup-${stamp}-${safeReason}.json.gz`;
   fs.writeFileSync(path.join(BACKUP_DIR, name), gz, { mode: 0o600 });
+  _lastFingerprint = fp;
   pruneBackups(retention);
   const edgeAgents = Object.keys(edges);
   const redacted = redactedMeta ? Object.values(redactedMeta).reduce((n, ks) => n + ks.length, 0) : 0;
-  return { name, size: gz.length, createdAt: archive.createdAt, reason, centralFiles: Object.keys(central.files).length, edges: edgeAgents.length, edgeAgents, redacted };
+  return { name, size: gz.length, createdAt: archive.createdAt, reason, centralFiles: Object.keys(central.files).length, edges: edgeAgents.length, edgeAgents, redacted, skipped: skippedFiles, sizeCapBytes: FILE_SIZE_CAP };
 }
 
 /** 보관 개수 초과분(오래된 것)을 삭제. */
 export function pruneBackups(keep = 30) {
-  const list = listBackups();
+  let list = listBackups();
+  // v2.590 P1: 자동 사유(change·startup)는 최신 AUTO_REASON_KEEP 개까지만 — 그 이상은 정기·수동보다 먼저 지운다.
+  // 보관 개수가 그보다 작으면 자동 사유 상한도 그만큼(보관 개수를 넘는 상한은 뜻이 없다).
+  const autoKeep = Math.min(AUTO_REASON_KEEP, Math.max(1, keep));
+  let auto = 0;
+  const kept = [];
+  for (const b of list) {
+    if (AUTO_REASONS.has(reasonOfName(b.name)) && ++auto > autoKeep) { try { fs.unlinkSync(path.join(BACKUP_DIR, b.name)); } catch { /* */ } continue; }
+    kept.push(b);
+  }
+  list = kept;
   for (const b of list.slice(keep)) { try { fs.unlinkSync(path.join(BACKUP_DIR, b.name)); } catch { /* */ } }
 }
 
@@ -88,7 +150,7 @@ export function listBackups() {
   return files.map((name) => {
     let size = 0, at = 0;
     try { const st = fs.statSync(path.join(BACKUP_DIR, name)); size = st.size; at = st.mtimeMs; } catch { /* */ }
-    return { name, size, at };
+    return { name, size, at, reason: reasonOfName(name) };
   }).sort((a, b) => b.at - a.at);
 }
 
@@ -127,15 +189,17 @@ export function readBackup(name) {
  * central.files 를 CONFIG_DIR에 덮어쓴다. 적용에는 보통 재시작이 필요하다.
  * @param archive readBackup 결과 또는 업로드 파싱 결과
  */
-export function restoreCentral(archive) {
+export function restoreCentral(archive, { retention = 30 } = {}) {
   if (!archive || !archive.central || typeof archive.central.files !== 'object') throw new Error('유효하지 않은 백업 아카이브');
-  createBackup('pre-restore');
+  // v2.590 P2: 사전 백업도 **설정된 보관 개수**로 정리한다 — 기본값 30 으로 잘라 보관 100 인 현장에서 오래된 백업
+  // (방금 복원한 원본 포함)이 조용히 지워졌다.
+  createBackup('pre-restore', { retention });
   ensureDir();
   let restored = 0;
   let envRestored = 0; const envDropped = [];
   for (const [name, content0] of Object.entries(archive.central.files)) {
     const base = path.basename(name);
-    if (base === REDACTED_META) continue; // 메타 키는 파일이 아니다
+    if (base === REDACTED_META || base === SKIPPED_META) continue; // 메타 키는 파일이 아니다
     if (DENY_NAMES.has(base) || !ALLOW_EXT.has(path.extname(base).toLowerCase())) continue;
     let content = content0;
     // v2.538: 번들의 .env 는 키·토큰이 가려져 있다 — 현재 파일의 값으로 되살리고, 없으면 그 줄을 버린다

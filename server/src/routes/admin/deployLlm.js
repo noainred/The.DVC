@@ -1,7 +1,7 @@
 // 오프라인 패키지·에이전트 배포·LLM/Ollama·릴리스 노트 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { saveNote, deleteNote } from '../../release-notes.js';
-import { loadLlmConfig, saveLlmConfig } from '../../llm/config.js';
+import { loadLlmConfig, llmUrlIssue, saveLlmConfig } from '../../llm/config.js';
 import { ollamaTest } from '../../llm/ollama.js';
 import { installOllama } from '../../llm/ollamaDeploy.js';
 import { deployAgent, testTarget, installerInfo, checkAgentStatus } from '../../agent/deploy.js';
@@ -481,9 +481,16 @@ adminRouter.get('/agent-deploy/targets/sample.txt', adminOnly, (req, res) => {
 
 // --- Local LLM (Ollama) config for natural-language search ---
 adminRouter.get('/llm-config', adminOnly, (_req, res) => res.json({ config: loadLlmConfig() }));
-adminRouter.put('/llm-config', adminOnly, (req, res) => res.json({ ok: true, config: saveLlmConfig(req.body || {}) }));
+adminRouter.put('/llm-config', adminOnly, (req, res) => {
+  try { res.json({ ok: true, config: saveLlmConfig(req.body || {}) }); }
+  catch (e) { res.status(e.status || 500).json({ ok: false, reason: e.message }); }
+});
 adminRouter.post('/llm-test', adminOnly, async (req, res) => {
-  res.json(await ollamaTest({ ...loadLlmConfig(), ...(req.body || {}) }));
+  // v2.590 D6: 본문 url 로 임의 주소를 찌르지 못하게 같은 검증을 건다(저장값을 쓰든 본문을 쓰든 동일).
+  const cfg = { ...loadLlmConfig(), ...(req.body || {}) };
+  const why = llmUrlIssue(cfg.url);
+  if (why) return res.status(400).json({ ok: false, reason: why });
+  res.json(await ollamaTest(cfg));
 });
 
 // SSH-install Ollama on a separate server (test reuses the agent SSH probe).

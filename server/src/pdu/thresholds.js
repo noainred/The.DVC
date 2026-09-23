@@ -138,7 +138,30 @@ const _state = new Map();
  * 위반 목록을 이전 상태와 비교해 **보낼 것만** 골라낸다(순수 — 발송은 하지 않는다).
  * @returns {{ fire:Array, resolve:Array }}
  */
-export function diffAlerts(violations, { now = Date.now(), cooldownMs = 60 * 60_000, state = _state, heldDeviceIds = [] } = {}) {
+/**
+ * 이번 주기에 **값을 실제로 읽은** 경보 키 집합(순수 — v2.590 F5). 장비 수집은 성공했는데 그 센서·뱅크 값만 못 읽은
+ * 경우(프로브 분리·E102·명령 실패 → 값 null 이거나 목록에서 빠짐)는 여기에 들지 않는다 — `diffAlerts` 가 그 키를
+ * 해소가 아니라 **보류**로 다룬다. 키 형식은 `evaluateSnapshot` 과 글자 그대로 같아야 한다.
+ */
+export function readAlertKeys(snap) {
+  const out = new Set();
+  if (!snap || snap.ok === false) return out;
+  const nn = (v) => v != null && v !== '' && Number.isFinite(Number(v));
+  for (const s of snap.sensors || []) {
+    if (nn(s.tempC)) out.add(`pdu.temp.${snap.id}.${s.index}`);
+    if (nn(s.humidityPct)) { out.add(`pdu.hum.high.${snap.id}.${s.index}`); out.add(`pdu.hum.low.${snap.id}.${s.index}`); }
+  }
+  for (const u of snap.units || []) {
+    if (nn(u.powerW)) out.add(`pdu.power.${snap.id}.${u.index}`);
+    for (const b of u.banks || []) if (nn(b.currentA)) out.add(`pdu.bank.${snap.id}.${u.index}.${b.index}`);
+  }
+  return out;
+}
+
+/** 값을 못 읽어 보류 중인 경보를 이 시간이 지나면 **해소 알림 없이** 끊는다(복구가 아니라 모르는 것 — bmusage 규약). */
+export const HOLD_MAX_MS = 6 * 60 * 60_000;
+
+export function diffAlerts(violations, { now = Date.now(), cooldownMs = 60 * 60_000, state = _state, heldDeviceIds = [], readKeys = null, holdMaxMs = HOLD_MAX_MS } = {}) {
   // v2.583: 이번 주기에 **읽지 못한** 장비(스냅샷 ok:false)의 위반은 해소로 보지 않는다. 예전에는 수집 실패로
   // 스냅샷이 비면 위반이 사라진 것처럼 읽혀 '정상으로 돌아왔습니다' 가 나가고, 다음 정상 수집에서 같은 위반이
   // 새 알림으로 다시 나갔다('확인 불가 ≠ 정상' 규약 — v2.519·v2.548). 보류된 상태는 그대로 둔다.
@@ -148,7 +171,9 @@ export function diffAlerts(violations, { now = Date.now(), cooldownMs = 60 * 60_
   const fire = [];
   for (const v of violations) {
     seen.add(v.key);
-    const prev = state.get(v.key);
+    const prev0 = state.get(v.key);
+    if (prev0?.heldSince) { delete prev0.heldSince; }   // 다시 읽혔다 — 보류 해제(같은 위반이면 쿨다운을 그대로 따른다)
+    const prev = prev0;
     if (!prev) { state.set(v.key, { severity: v.severity, since: now, lastNotified: now }); fire.push(v); continue; }
     if (prev.severity !== v.severity) {
       // 전이(경고↔위험)는 쿨다운과 무관하게 즉시 알린다 — 악화를 늦게 아는 것이 더 위험하다.
@@ -162,13 +187,21 @@ export function diffAlerts(violations, { now = Date.now(), cooldownMs = 60 * 60_
     }
   }
   const resolve = [];
+  const dropped = [];
   for (const [key, st] of state) {
     if (seen.has(key)) continue;
     if (held.size && isHeld(key)) continue;
+    // v2.590 F5: 장비는 읽었지만 **이 값은 못 읽었다** — 해소가 아니라 보류다(센서가 분리되는 순간 '정상으로 돌아왔습니다'
+    //   가 나가고 다시 읽히면 쿨다운 없이 재발송되던 결함). 오래 보류되면 알림 없이 끊는다.
+    if (readKeys && !readKeys.has(key)) {
+      if (!st.heldSince) st.heldSince = now;
+      if (now - st.heldSince >= holdMaxMs) { state.delete(key); dropped.push(key); }
+      continue;
+    }
     resolve.push({ key, severity: 'info', title: `PDU 임계치 복구 — ${key}`, detail: `${Math.round((now - st.since) / 60_000)}분 만에 정상으로 돌아왔습니다.` });
     state.delete(key);
   }
-  return { fire, resolve };
+  return { fire, resolve, dropped };
 }
 
 /**

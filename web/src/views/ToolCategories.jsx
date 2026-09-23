@@ -133,7 +133,9 @@ export default function ToolCategories() {
         {cats.length === 0 && <> — <button className="logout-btn" style={{ padding: '2px 10px', fontSize: 11 }} disabled={busy} onClick={loadPreset}>추천 분류로 시작</button></>}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px,300px) minmax(0,1fr)', gap: 16, alignItems: 'start' }}>
+      {/* v2.590 W7: 400px 에서 첫 열(최소 220·최대 300px)이 폭을 다 먹어 오른쪽 '기능 목록' 이 폭 2px 로 사라졌다 —
+          좁은 폭에서는 한 열로 쌓는다(.toolcat-grid, styles.css). 데스크톱 비율은 그대로다. */}
+      <div className="toolcat-grid" style={{ display: 'grid', gap: 16, alignItems: 'start' }}>
         {/* ── 카테고리 목록 ── */}
         <div style={{ minWidth: 0 }}>
           <div className="flex gap" style={{ alignItems: 'center', marginBottom: 6 }}>

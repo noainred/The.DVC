@@ -175,7 +175,7 @@ export default function DiskTrend({ scope }) {
 
       {/* 회수 후보 목록 */}
       {(b.topOff.length > 0 || b.topSnap.length > 0) && (
-        <div className="grid2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 12, marginBottom: 12 }}>
+        <div className="grid2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(380px, 100%), 1fr))', gap: 12, marginBottom: 12 }}>
           {b.topOff.length > 0 && (
             <div className="card">
               <b>정지 VM 상위 {b.topOff.length} (커밋 용량 순)</b>

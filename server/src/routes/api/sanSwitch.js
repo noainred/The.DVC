@@ -693,7 +693,7 @@ api.post('/tools/sanswitch/collect-all', adminOnly, async (req, res) => {
       if (hasPendingRequest(d.id)) { alreadyQueued++; continue; }
       try { requestCollect(d.id, d.agent); requested++; } catch { /* 한 대 실패가 전체를 막지 않게 */ }
     }
-    const result = await pollSanSwitchOnce();   // { ok, collected, failed, ... } 또는 { ok:false, reason }
+    const result = await pollSanSwitchOnce({ manual: true });   // { ok, collected, failed, ... } 또는 { ok:false, reason }
     logAudit({ user: req.user?.username, action: 'SAN 스위치 전체 수집',
       detail: `중앙 ${central}대 즉시(${result.ok === false ? result.reason : `성공 ${result.collected ?? 0}·실패 ${result.failed ?? 0}`})`
         + ` · 엣지 ${edgeDevs.length}대 중 요청 ${requested}(대기중 ${alreadyQueued})` });
@@ -704,7 +704,7 @@ api.post('/tools/sanswitch/collect-all', adminOnly, async (req, res) => {
 /** 이 노드 몫 전체 재수집(관리자 수동 실행 — 폴러와 재진입 가드를 공유한다). */
 api.post('/tools/sanswitch/poll', adminOnly, async (req, res) => {
   logAudit({ user: req.user?.username, action: 'SAN 스위치 전체 수집 실행' });
-  res.json(await pollSanSwitchOnce());
+  res.json(await pollSanSwitchOnce({ manual: true })); // v2.590: 수동 실행은 인증 실패 정지 장비도 1회 시도한다
 });
 
 

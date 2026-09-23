@@ -107,9 +107,9 @@ test('⚠⚠ iDRAC 카운터도 next 에 담아야 한다 — 안 담으면 영�
   const a = buildUsage({ target: TG, idrac: mk(0, 0), prev: null, now: 1_000 });
   assert.equal(a.row.net_pct, null, '첫 주기는 null(0 이 아니다)');
   assert.ok(a.next?.idrac, 'iDRAC 카운터가 next 에 담겨야 한다');
-  // 1초에 rx+tx 62.5MB → 62.5MB/s × 8 / 25Gb = 2%
+  // 1초에 rx·tx 각 31.25MB → 방향별 max 31.25MB/s × 8 / 25Gb = 1%(v2.590 F9 — 전이중은 방향별이다)
   const b = buildUsage({ target: TG, idrac: mk(31_250_000, 31_250_000), prev: a.next, now: 2_000 });
-  assert.equal(b.row.net_pct, 2);
+  assert.equal(b.row.net_pct, 1);
   assert.equal(b.row.net_bps, 62_500_000);
   assert.equal(b.srcOf.net, 'idrac');
 });

@@ -31,6 +31,7 @@ import { insertUsage, pruneUsage } from './db.js';
 import { recordBmUsage } from './activityLog.js';
 import { runBmUsageAlerts, alertStateInfo } from './notify.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
+import { idracAuthStopFor } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 
 const CONCURRENCY = Math.max(1, Number(process.env.BMUSAGE_CONCURRENCY) || 4);
 const DEVICE_TIMEOUT_MS = Math.max(20_000, Number(process.env.BMUSAGE_DEVICE_TIMEOUT_MS) || 60_000);
@@ -106,7 +107,9 @@ export function authStopsFor(targets = []) {
     // ⚠ 두 경로를 **각각** 보고한다(`path` 로 구분) — 뭉치면 사용자가 엉뚱한 비밀번호를 고친다.
     for (const [path, dev] of [['os', authDev(tg)], ['idrac', authDevIdrac(tg)]]) {
       if (!dev) continue;
-      const rec = guard.authStopFor(dev);
+      // v2.590: iDRAC 경로는 **주 iDRAC 폴러의 정지**도 함께 본다 — 같은 계정이라 그쪽이 멈췄으면
+      //   이쪽도 시도하지 않는다(아래 collectOne). 화면이 그 정지를 말하지 않으면 조용한 정지다.
+      const rec = guard.authStopFor(dev) || (path === 'idrac' ? mainIdracStop(tg) : null);
       if (rec) out.push({ key: tg.key, name: tg.name, vcenterId: tg.vcenterId || '', path, ...rec });
     }
   }
@@ -165,6 +168,13 @@ function authDevIdrac(target) {
   };
 }
 
+/** 주 iDRAC 폴러가 같은 계정을 인증 실패로 멈췄는가(읽기 전용 — 해제는 그 폴러만 한다, v2.590). */
+function mainIdracStop(target) {
+  const i = target?.idrac;
+  if (!i?.regId) return null;
+  try { return idracAuthStopFor({ id: i.regId, username: i.username, password: i.password }); } catch { return null; }
+}
+
 /** 화면이 '몇 대가 정지됐나' 를 말할 수 있게 이번 주기의 정지분을 기억한다. */
 const _authStopped = new Map();
 
@@ -187,13 +197,23 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
   const stopped = (dev && trigger !== 'manual') ? guard.authStopFor(dev) : null;
   if (stopped) _authStopped.set(target.key, stopped); else _authStopped.delete(target.key);
   const jobs = [];
+  /*
+   * v2.590(감사 F1 보조): **iDRAC 텔레메트리 GET 도 인증 실패 정지를 본다.** 예전에는 Enterprise 대체
+   *   경로(아래 ③)만 `authStopFor` 를 봤고 텔레메트리 GET 은 정지 없이 매 주기 같은 iDRAC 계정으로
+   *   로그인했다 — 게다가 `redfish.get` 의 401 문구에 숫자가 없어 `fetchUsage` 가 401 을 'unreachable' 로
+   *   분류해 **정지 조건에 닿지도 않았다**(redfish.js 에서 함께 고쳤다). 주 iDRAC 폴러(1분)가 같은 계정을
+   *   이미 멈췄으면 여기서도 시도하지 않는다. 수동 실행은 막지 않는다.
+   */
+  const entDev = authDevIdrac(target);
+  let entStopped = (entDev && trigger !== 'manual')
+    ? (guard.authStopFor(entDev) || mainIdracStop(target)) : null;
   // 전수 모드는 설정으로 켜고 끈다. `allowList` 는 **이번 주기의 목록 조회 예산**이다(위 주석).
   const full = !!loadBmUsageSettings().idracFullTelemetry;
-  const allowList = full && _listBudget > 0;
+  const allowList = full && _listBudget > 0 && !entStopped;
   if (allowList) _listBudget -= 1;
-  jobs.push(target.paths.includes('idrac')
-    ? import('../idrac/redfish.js').then((m) => m.fetchUsage(target.idrac, { full, allowList })).catch((e) => ({ ok: false, kind: 'unreachable', error: String(e?.message || e).slice(0, 300) }))
-    : Promise.resolve(null));
+  jobs.push(!target.paths.includes('idrac') ? Promise.resolve(null)
+    : entStopped ? Promise.resolve({ ok: false, kind: 'auth-stopped', error: `iDRAC 인증 실패로 주기 수집이 정지됐습니다(${entStopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: entStopped })
+      : import('../idrac/redfish.js').then((m) => m.fetchUsage(target.idrac, { full, allowList })).catch((e) => ({ ok: false, kind: 'unreachable', error: String(e?.message || e).slice(0, 300) })));
   jobs.push((target.paths.includes('os') && !stopped)
     ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal }), 'OS 수집 시한 초과')
       .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) }))
@@ -205,6 +225,17 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
    * 기준을 쓰는 것이 핵심이다 — 하나만 바꾸면 span 이 그만큼 어긋난다.
    */
   const sampledAt = Date.now();
+
+  // v2.590: 텔레메트리가 자격증명 거부(401/403)면 iDRAC 경로를 멈춘다 — 같은 계정으로 대체 경로(③)도
+  //   이번 주기에 시도하지 않는다(시도하면 한 주기에 실패 로그인이 두 경로만큼 쌓인다).
+  if (entDev && idrac && idrac.ok === false && idrac.kind === 'auth') {
+    const rec = guard.markAuthStopped(entDev.id, entDev, idrac.error || 'iDRAC 인증 실패');
+    _authStopped.set(`${target.key}|idrac`, rec);
+    entStopped = rec;
+    console.warn(`[bmusage] ${target.name}: iDRAC 인증 실패로 텔레메트리 주기 수집 정지(${rec.attempts}회)`);
+  } else if (entDev && idrac?.ok) {
+    guard.clearAuthStop(entDev.id);
+  }
 
   /*
    * ── ③ Enterprise 대체 수집(v2.554) ─────────────────────────────────────────
@@ -218,8 +249,6 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
    * ⚠ 시한은 `withDeadline` + `signal` 로 **SSH 세션을 실제로 끊는다**(v2.417).
    */
   let ent = null;
-  const entDev = authDevIdrac(target);
-  const entStopped = (entDev && trigger !== 'manual') ? guard.authStopFor(entDev) : null;
   if (entStopped) _authStopped.set(`${target.key}|idrac`, entStopped); else _authStopped.delete(`${target.key}|idrac`);
   if (target.entAllowed && enterpriseActive(loadBmUsageSettings())) {
     const el = enterpriseEligible({

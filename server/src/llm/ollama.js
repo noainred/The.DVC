@@ -29,6 +29,8 @@ export async function ollamaTest(cfg) {
     const models = (json.models || []).map((m) => m.name);
     return { ok: true, ms: Date.now() - started, models, hasModel: models.includes(cfg.model) };
   } catch (err) {
-    return { ok: false, reason: err.message };
+    // v2.590 D6: 'fetch failed' 만으로는 원인을 알 수 없다 — SSRF 가드(ESSRFBLOCKED)·연결 거부 사유를 붙인다.
+    const cause = err?.cause?.message || err?.cause?.code || '';
+    return { ok: false, reason: cause && !String(err.message).includes(cause) ? `${err.message} — ${cause}` : err.message };
   }
 }

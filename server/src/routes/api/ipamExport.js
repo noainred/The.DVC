@@ -1,5 +1,9 @@
 // IPAM 조회/쓰기 + VM 전체 export — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
-import { requirePerm } from '../../auth/auth.js';
+import { requirePerm, requireRole } from '../../auth/auth.js';
+// v2.590 D1: 상태변경 라우트는 역할 게이트가 **먼저**다(server/CLAUDE.md '상태변경 라우트 RBAC 은 requirePerm 만으로
+// 대체되지 않는다'). viewer 에게 tools 만 줘도 IPAM 예약·상태·정책을 바꾸고 지울 수 있었다 — 2026-06-27 감사가 고쳤다고
+// 기록한 C2 의 회귀다. 테스트(audit2590)가 viewer+tools → 403 을 실제 라우터로 고정한다.
+const canWrite = requireRole('admin', 'operator');
 import { scopedVcenterIds, writeScopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { guardCell } from '../../util/csv.js';
 import { store } from '../../store.js';
@@ -210,7 +214,7 @@ api.get('/tools/ipam/annotation', requirePerm('tools'), (req, res) => {
   }
   res.json({ ip, annotation: getAnnotation(ip) });
 });
-api.put('/tools/ipam/annotation', requirePerm('tools'), (req, res) => {
+api.put('/tools/ipam/annotation', canWrite, requirePerm('tools'), (req, res) => {
   const { ip, memo, tags } = req.body || {};
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
@@ -250,7 +254,7 @@ api.get('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
   res.json({ ip: req.params.ip, override: ov });
 });
 // 한 IP의 override 생성/수정(부분). 변경은 운영자/관리자만.
-api.put('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
+api.put('/tools/ipam/ip/:ip', canWrite, requirePerm('tools'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
@@ -277,7 +281,7 @@ api.put('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 한 IP의 override 삭제(자동발견 상태로 되돌림).
-api.delete('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
+api.delete('/tools/ipam/ip/:ip', canWrite, requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const owners = ipVcenterOwners(snap);
@@ -291,7 +295,7 @@ api.delete('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
   res.json(r);
 });
 // 여러 IP 일괄 관리(예: 한 대역 전체를 'reserved'로). body: { ips:[...], ...fields }.
-api.post('/tools/ipam/bulk', requirePerm('tools'), (req, res) => {
+api.post('/tools/ipam/bulk', canWrite, requirePerm('tools'), (req, res) => {
   const { ips, ...fields } = req.body || {};
   if (fields.claimedVcenterId && !isKnownVcenter(fields.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   const snap = store.get();
@@ -344,7 +348,7 @@ api.get('/tools/ipam/policies/preview', requirePerm('tools'), (req, res) => {
   res.json({ spec: req.query.spec || '', valid: !!r, size: r?.size ?? 0, lo: r?.lo ?? null, hi: r?.hi ?? null });
 });
 // 정책 생성. body: { spec, status?, priority?, claimedVcenterId?, owner?, label?, deviceType?, note?, enabled? }.
-api.post('/tools/ipam/policies', requirePerm('tools'), (req, res) => {
+api.post('/tools/ipam/policies', canWrite, requirePerm('tools'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   // 범위 제한 계정은 자기 vCenter 에 귀속된 정책만 만들 수 있다(전역 정책은 전 vCenter 뷰에 영향).
   const allowedP = scopedVcenterIds(req.user, store.get());
@@ -361,7 +365,7 @@ api.post('/tools/ipam/policies', requirePerm('tools'), (req, res) => {
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 정책 수정(부분). :id.
-api.put('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
+api.put('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), (req, res) => {
   if (req.body?.claimedVcenterId && !isKnownVcenter(req.body.claimedVcenterId)) return res.status(400).json({ ok: false, reason: '알 수 없는 vCenter입니다.' });
   // 범위 제한 계정: 기존 정책·변경 후 귀속 모두 자기 범위여야 한다(범위 밖 정책 탈취·전역화 차단).
   const allowedP = scopedVcenterIds(req.user, store.get());
@@ -388,7 +392,7 @@ api.put('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 정책 삭제. :id. (적용 IP는 자동발견 상태로 복귀)
-api.delete('/tools/ipam/policies/:id', requirePerm('tools'), (req, res) => {
+api.delete('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), (req, res) => {
   const pol = getPolicy(req.params.id);
   const allowedP = scopedVcenterIds(req.user, store.get());
   if (allowedP && !(pol && allowedP.has(pol.claimedVcenterId))) {

@@ -4,6 +4,14 @@ import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { fmtBytes, fmtTime } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
 
+/** v2.590 D5: 크기 상한으로 번들에서 뺀 설정 파일 — '백업 완료' 가 전부를 담았다고 말하지 않게 한다. */
+export function skippedText(r) {
+  const list = Array.isArray(r?.skipped) ? r.skipped : [];
+  if (!list.length) return '';
+  const names = list.slice(0, 5).map((f) => `${f.name}(${fmtBytes(f.size)})`).join(', ');
+  return ` ⚠ 파일당 상한(${fmtBytes(r.sizeCapBytes)})을 넘어 ${list.length}개를 뺐습니다: ${names}${list.length > 5 ? ' 외' : ''} — 이 백업으로 복원하면 그 파일은 되살아나지 않습니다.`;
+}
+
 // fmtBytes/fmtTime 은 util/fmt.js 로 통합(v2.319 — 동일 구현 복붙 제거)
 const REASON = { manual: '수동', schedule: '정기', change: '변경감지', startup: '시작', 'pre-restore': '복원전' };
 
@@ -28,7 +36,7 @@ export default function PortalBackup() {
   };
   const backupNow = async () => {
     setBusy('now'); setMsg(null);
-    try { const r = await postJson('/admin/backup/now', {}); setMsg(`백업 완료: ${r.name} (${fmtBytes(r.size)}, 중앙 ${r.centralFiles}개 · 엣지 ${r.edges}개${r.redacted ? ` · .env 의 키·토큰 ${r.redacted}개는 번들에서 제외` : ''})`); await load(); }
+    try { const r = await postJson('/admin/backup/now', {}); setMsg(`백업 완료: ${r.name} (${fmtBytes(r.size)}, 중앙 ${r.centralFiles}개 · 엣지 ${r.edges}개${r.redacted ? ` · .env 의 키·토큰 ${r.redacted}개는 번들에서 제외` : ''})${skippedText(r)}`); await load(); }
     catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); }
   };
   const download = async (name) => {
@@ -81,12 +89,13 @@ export default function PortalBackup() {
           <span className="muted">보관 개수</span>
           <input className="input" type="number" min="1" style={{ width: 80 }} value={s.retention} onChange={(e) => setS({ ...s, retention: e.target.value })} />
         </div>
-        <div className="flex gap" style={{ marginTop: 12 }}>
+        <div className="flex gap wrap" style={{ marginTop: 12 }}>
           <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'save'} onClick={saveSettings}>{busy === 'save' ? '저장 중…' : '정책 저장'}</button>
           <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'now'} onClick={backupNow}>{busy === 'now' ? '백업 중…' : '⬇ 지금 백업'}</button>
           <span className="muted" style={{ alignSelf: 'center', fontSize: 12 }}>
             {d.scheduleActive ? '정기 백업 동작 중' : '정기 백업 꺼짐'} · {d.watching ? '변경 감시 켜짐' : '변경 감시 꺼짐'}
             {d.lastRun && ` · 최근: ${REASON[d.lastRun.reason] || d.lastRun.reason} ${fmtTime(d.lastRun.at)}`}
+            {d.lastRun?.skipped > 0 && <span style={{ color: 'var(--amber)' }}>{` · 크기 상한으로 뺀 파일 ${d.lastRun.skipped}개(수동 백업 결과에 이름이 나옵니다)`}</span>}
           </span>
         </div>
         {msg && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{msg}</div>}

@@ -121,6 +121,18 @@ export function createAuthGuard({ file }) {
       if (rec.credHash !== credHashOf(dev)) { this.clearAuthStop(dev.id); return null; }
       return { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason };
     },
+    /**
+     * **읽기 전용** 조회(v2.590) — 다른 수집기가 '같은 계정이 이미 멈췄나' 를 볼 때 쓴다.
+     * ⚠ `authStopFor` 와 달리 기록을 **지우지 않는다**. 호출자가 넘긴 자격증명이 기록과 다르면 null 을
+     *   돌려줄 뿐이다 — 호출자 쪽 값이 조금 달라도(예: 앞뒤 공백을 다듬은 사본) 기록의 주인(주 폴러)의
+     *   정지를 풀어 버리면 그 폴러가 다음 틱에 다시 로그인한다. 해제는 주인만 한다.
+     */
+    peekAuthStop(dev) {
+      if (!dev?.id) return null;
+      const rec = load()[dev.id];
+      if (!rec || rec.credHash !== credHashOf(dev)) return null;
+      return { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason };
+    },
     _resetForTest() { _mem = null; try { fs.rmSync(FILE()); } catch { /* 없음 */ } },
     _fileForTest() { return FILE(); },
   };

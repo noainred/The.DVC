@@ -27,6 +27,9 @@ const COUNT_MAX_BYTES = Number(process.env.DB_HEALTH_COUNT_MAX_BYTES) || 512 * 1
 // (node:sqlite 는 동기 API — GB 급 DB 면 수 초 이상 전체 API·폴러가 멈춘다). 상한 초과 시
 // quick_check 로 강등하고 그 사실을 skipped 로 알린다(추정치를 지어내지 않는다).
 const FULL_MAX_BYTES = Number(process.env.DB_HEALTH_FULL_MAX_BYTES) || 256 * 1024 * 1024;
+// v2.590 P7: quick_check 도 전 페이지를 읽는다(SQLite 문서: O(N)). 실측 423MB 에 657ms — 운영 DB(수십 GB)면 수십 초
+// 이벤트 루프 정지다. 상한 초과면 **생략하고 그 사실을 밝힌다**(ok 를 지어내지 않는다 — integrity.ok = null).
+const QUICK_MAX_BYTES = Number(process.env.DB_HEALTH_QUICK_MAX_BYTES) || 512 * 1024 * 1024;
 
 /** 이 저장소 규약: ipam.db 는 외부 프로그램이 직접 읽어 WAL 금지, 나머지 시계열 DB 는 WAL 권장. */
 const EXPECT_WAL = (file) => !/^ipam\.db$/i.test(file);
@@ -79,8 +82,12 @@ export async function inspectSqlite(absPath, { full = false } = {}) {
     const fullOk = full && sizeBytes <= FULL_MAX_BYTES;
     if (full && !fullOk) out.skipped.push(`전체 점검 생략 — 파일이 ${Math.round(sizeBytes / 1048576)}MB(상한 ${Math.round(FULL_MAX_BYTES / 1048576)}MB) 로 동기 스캔이 이벤트 루프를 막음 → 빠른 점검으로 대체`);
     const chkSql = fullOk ? 'PRAGMA integrity_check' : 'PRAGMA quick_check';
-    const chk = q(chkSql);
-    if (chk?.__err) out.checks.integrity = { mode: fullOk ? 'full' : 'quick', ok: false, detail: chk.__err };
+    const quickOk = fullOk || sizeBytes <= QUICK_MAX_BYTES;
+    const chk = quickOk ? q(chkSql) : null;
+    if (!quickOk) {
+      out.checks.integrity = { mode: 'skipped', ok: null, detail: `파일이 ${Math.round(sizeBytes / 1048576)}MB 라 생략(상한 ${Math.round(QUICK_MAX_BYTES / 1048576)}MB)` };
+      out.skipped.push(`정합성 점검 생략 — 파일이 ${Math.round(sizeBytes / 1048576)}MB(상한 ${Math.round(QUICK_MAX_BYTES / 1048576)}MB) 로 quick_check 도 전 페이지를 동기로 읽어 이벤트 루프를 막음. 유지보수 시간에 sqlite3 로 직접 점검하세요`);
+    } else if (chk?.__err) out.checks.integrity = { mode: fullOk ? 'full' : 'quick', ok: false, detail: chk.__err };
     else {
       const msgs = chk.map((r) => String(val(r))).filter(Boolean);
       const good = msgs.length === 1 && /^ok$/i.test(msgs[0]);
@@ -132,9 +139,14 @@ export async function inspectSqlite(absPath, { full = false } = {}) {
       let range = null;
       const tsCol = colNames.includes('ts') ? 'ts' : colNames.includes('h') ? 'h' : null;
       if (tsCol) {
-        const r = q(`SELECT MIN("${tsCol}") AS mn, MAX("${tsCol}") AS mx FROM "${t.name.replace(/"/g, '""')}"`);
-        const row = r?.__err ? null : first(r);
-        if (row && row.mn != null) range = { column: tsCol, firstTs: Number(row.mn), lastTs: Number(row.mx) };
+        // v2.590 P7: MIN 과 MAX 를 **각각** 묻는다 — 한 쿼리에 두 aggregate 를 두면 SQLite 가 인덱스 끝 탐색 최적화를
+        // 못 써 인덱스를 통째로 훑는다(v2.550.3 실측: 단독 0.01ms vs 둘 261~377ms).
+        const tq = `"${t.name.replace(/"/g, '""')}"`;
+        const mnR = q(`SELECT MIN("${tsCol}") AS v FROM ${tq}`);
+        const mxR = q(`SELECT MAX("${tsCol}") AS v FROM ${tq}`);
+        const mn = mnR?.__err ? null : first(mnR)?.v;
+        const mx = mxR?.__err ? null : first(mxR)?.v;
+        if (mn != null) range = { column: tsCol, firstTs: Number(mn), lastTs: Number(mx) };
       }
       out.tables.push({
         name: t.name, sql: t.sql || '', columns: colNames, rowCount, range,
@@ -142,6 +154,7 @@ export async function inspectSqlite(absPath, { full = false } = {}) {
       });
     }
     out.ok = out.checks.integrity?.ok !== false && out.checks.foreignKeys?.ok !== false;
+    if (out.checks.integrity?.ok == null) out.unchecked = true; // 생략은 '정상' 이 아니다 — 화면이 구분한다
   } catch (e) {
     out.error = e.message;
   } finally {

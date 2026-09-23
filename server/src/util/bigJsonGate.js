@@ -25,6 +25,9 @@ export function bigJsonGate(parser, resolvers) {
     try {
       if (full.startsWith('/api/central/')) return Boolean(central && central(req));
       if (full.startsWith('/api/svcmon/')) return Boolean(session && session(req));
+      // v2.590: 로그 분석 붙여넣기(adminOnly, 라우트가 8MB 를 재검사)도 세션 계열이다. v2.583 이 BIG_JSON 에 등록했지만
+      // 여기 접두 목록에 없어 판정이 항상 false → 16MB 파서가 한 번도 돌지 않고 전역 1MB 가 걸려, 2MB 붙여넣기가 413 이었다.
+      if (full.startsWith('/api/admin/log-analysis/')) return Boolean(session && session(req));
     } catch { /* 판정 오류는 '미인증' 으로 — 파싱하지 않는다 */ }
     return false;
   };

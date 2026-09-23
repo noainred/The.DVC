@@ -81,8 +81,12 @@ export function capacityLevel(usedPct) {
 
 /** 여러 스위치 합산(법인 카드·상단 KPI). 실패 스냅샷은 포트 합계에서 제외한다. */
 export function aggregate(rows = []) {
+  // v2.590(감사 F6): `alerts` 는 **상태를 읽은 스위치만** 더한다. 스위치 상태(switchstatusshow)를 못 읽었거나
+  // (rbash 계정·명령 없음) REST 처럼 조회하지 않는 경로면 서버가 `health.alerts` 를 null 로 보낸다 — 예전에는
+  // `|| 0` 으로 더해져 측정 없이 '헬스 경보 없음' 이라 말했다(확인 불가를 정상으로 칠함). 그 대수는
+  // `alertsUnknown` 으로 따로 센다.
   const a = { switches: 0, ok: 0, failed: 0, total: 0, licensed: 0, online: 0, free: 0,
-    faulty: 0, disabled: 0, alerts: 0, usedPct: 0 };
+    faulty: 0, disabled: 0, alerts: 0, alertsKnown: 0, alertsUnknown: 0, usedPct: 0 };
   for (const r of rows) {
     a.switches++;
     const s = r.snap;
@@ -95,10 +99,30 @@ export function aggregate(rows = []) {
     a.free += p.free || 0;
     a.faulty += p.faulty || 0;
     a.disabled += p.disabled || 0;
-    a.alerts += s.health?.alerts || 0;
+    const al = s.health?.alerts;
+    if (typeof al === 'number' && Number.isFinite(al)) { a.alerts += al; a.alertsKnown++; } else a.alertsUnknown++;
   }
   a.usedPct = a.licensed ? Math.round((a.online / a.licensed) * 1000) / 10 : 0;
   return a;
+}
+
+/**
+ * KPI 의 헬스 경보 한 줄(v2.590, 순수). 확인 불가를 '경보 없음' 으로 말하지 않는다.
+ *  · 경보가 있으면 그 수 + (미확인이 있으면) 미확인 대수
+ *  · 전부 확인했고 경보 0 → '헬스 경보 없음'
+ *  · 일부만 확인 → '확인한 N대 경보 없음 · 헬스 상태 미확인 M대'
+ *  · 하나도 확인 못 함 → '헬스 상태 미확인 M대'
+ * 수집에 성공한 스위치가 0대면 말할 근거가 없으므로 '—'.
+ */
+export function alertsMeta(agg = {}) {
+  const known = Number(agg.alertsKnown) || 0;
+  const unknown = Number(agg.alertsUnknown) || 0;
+  const alerts = Number(agg.alerts) || 0;
+  const unk = unknown ? `헬스 상태 미확인 ${unknown}대` : '';
+  if (alerts > 0) return `헬스 경보 ${alerts}${unk ? ` · ${unk}` : ''}`;
+  if (!known && !unknown) return '—';
+  if (!known) return unk;
+  return unknown ? `확인한 ${known}대 경보 없음 · ${unk}` : '헬스 경보 없음';
 }
 
 /** 처리량 표기 — REST 는 bps, SSH 는 프레임/초. 단위를 섞어 보여주지 않는다. */
@@ -109,6 +133,12 @@ export function throughputText(port, unit) {
   }
   if (numOrNull(port?.inFps) == null && numOrNull(port?.outFps) == null) return '—';
   return `${num(port.inFps)} / ${num(port.outFps)} f/s`;
+}
+
+/** 처리량 칸이 '—' 인 이유(v2.590 F3) — 축약 카운터는 기다려도 채워지지 않는다(첫 수집과 구분). */
+export function throughputTitle(port) {
+  if (port?.fpsHeld === 'approx') return '스위치가 프레임 카운터를 k/m/g 로 줄여(반올림해) 보여 줘 두 수집의 차이로 초당 프레임을 셀 수 없습니다.';
+  return undefined;
 }
 const num = (n) => (numOrNull(n) == null ? '—' : Number(n).toLocaleString());
 export function bps(v) {

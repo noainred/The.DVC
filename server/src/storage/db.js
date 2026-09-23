@@ -136,6 +136,10 @@ async function openInner() {
           bytes=excluded.bytes, truncated=excluded.truncated, json=excluded.json, error=excluded.error`),
       insHist: conn.prepare('INSERT INTO api_history (device_id, area, ts, ok, bytes, error) VALUES (?,?,?,?,?,?)'),
       insCap: conn.prepare('INSERT INTO capacity_history (device_id, ts, total_bytes, used_bytes, hdd_total, hdd_used, ssd_total, ssd_used) VALUES (?,?,?,?,?,?,?,?)'),
+      // v2.590 P12: 같은 (장비, 시각) 표본이 다시 오면(중앙 재시작 뒤 엣지 재전송 — 중앙의 중복 차단 `_lastRec` 은 메모리
+      // 전용이다) 원시 행도 일 롤업 표본 수도 늘리지 않는다. 유일 인덱스를 새로 걸면 기존 중복 행 때문에 생성이 실패하므로
+      // 기존 (device_id, ts) 인덱스로 존재만 확인한다(v2.550.3 규약: 중복이면 롤업을 건드리지 않는다).
+      hasCap: conn.prepare('SELECT 1 AS x FROM capacity_history WHERE device_id = ? AND ts = ? LIMIT 1'),
       selAreas: conn.prepare('SELECT area, endpoint, ts, ok, bytes, truncated, error FROM api_latest WHERE device_id = ? ORDER BY area, endpoint'),
       selOne: conn.prepare('SELECT json, ts, ok, truncated, error FROM api_latest WHERE device_id = ? AND endpoint = ?'),
       selCap: conn.prepare('SELECT ts, total_bytes, used_bytes, hdd_total, hdd_used, ssd_total, ssd_used FROM capacity_history WHERE device_id = ? AND ts >= ? ORDER BY ts LIMIT 5000'),
@@ -352,6 +356,7 @@ export async function saveCapacityPoint(snap) {
   const hT = numOrNull(snap.media?.hdd?.totalBytes); const hU = numOrNull(snap.media?.hdd?.usedBytes);
   const sT = numOrNull(snap.media?.ssd?.totalBytes); const sU = numOrNull(snap.media?.ssd?.usedBytes);
 
+  if (db.hasCap.get(snap.deviceId, ts)) return { saved: false, duplicate: true, reason: 'duplicate' };
   db.insCap.run(snap.deviceId, ts, total, used, hT, hU, sT, sU);
   const day = dayIndex(ts);
   db.upDaily.run(snap.deviceId, day, ts, total, used, hT, hU, sT, sU, used);

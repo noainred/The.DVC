@@ -227,11 +227,17 @@ async function gpuSeriesExport(req, res, fmt) {
 }
 
 // 중앙에서 직접 ping 시도 후 결과 저장(에이전트 없이도 같은 망이면 즉시 결과). 실패 격리.
-async function pingLocallyAndStore(vcenterId, ips) {
+// v2.590 P11: 위임(site) vCenter 는 도달한 것만 저장하고 나머지는 담당 엣지 보고를 기다린다. **중앙 직접 수집
+// vCenter 는 담당 엣지가 없으므로** 무응답도 그대로 저장한다 — 예전에는 엣지를 기다린다며 영원히 '확인 중…' 이었다.
+async function pingLocallyAndStore(vcenterId, ips, { direct = false } = {}) {
   const rows = await pingMany(ips, { timeoutMs: 1500 });
-  // 도달한 것만 저장 — 중앙이 못 가는 IP는 alive=false로 덮어쓰지 않고 에이전트 보고를 기다림.
-  const reachable = rows.filter((r) => r.alive);
-  if (reachable.length) setPingResults(vcenterId, reachable);
+  const keep = direct ? rows : rows.filter((r) => r.alive);
+  if (keep.length) setPingResults(vcenterId, keep);
+}
+/** 이 vCenter 가 엣지 위임(site)인가 — 스냅샷 항목의 수집 방식으로 판정한다(store.js 가 같은 필드를 쓴다). */
+function isSiteVcenter(snap, vcenterId) {
+  const vc = (snap?.vcenters || []).find((v) => v.id === vcenterId);
+  return !!vc && (vc.collectMode === 'site' || vc.collectSource === 'site');
 }
 
 export function registerHardwareGpu(api) {
@@ -339,10 +345,11 @@ api.post('/tools/ip-ping', requirePerm('tools'), async (req, res) => {
   // v2.322 보안 감사: 범위 밖 vCenter 로 위임 ping(범위 밖 에이전트가 임의 IP 도달성 프로빙)
   // 차단 — 단건 라우트 규칙대로 범위 밖은 404(존재 은닉). 전체 범위 계정은 무영향.
   if (!inUserScope(req.user, store.get(), vcenterId)) return res.status(404).json({ ok: false, reason: 'not found' });
-  enqueuePing(vcenterId, ips);
-  // 에이전트가 없는(중앙 직접 수집) vCenter는 중앙에서 직접 ping 시도(같은 망일 때 즉시 결과).
-  if (config.dataSource !== 'mock') pingLocallyAndStore(vcenterId, ips).catch(() => {});
-  res.json({ ok: true, queued: ips.length });
+  const site = isSiteVcenter(store.get(), vcenterId);
+  // 엣지 위임 vCenter 만 엣지 대행 큐에 올린다 — 중앙 직접 수집 vCenter 를 큐에 올리면 가져갈 엣지가 없다(v2.590 P11).
+  if (site) enqueuePing(vcenterId, ips);
+  if (config.dataSource !== 'mock') pingLocallyAndStore(vcenterId, ips, { direct: !site }).catch(() => {});
+  res.json({ ok: true, queued: site ? ips.length : 0, direct: !site });
 });
 api.get('/tools/ip-ping', requirePerm('tools'), (req, res) => {
   const vcenterId = String(req.query.vcenterId || '').trim();

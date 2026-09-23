@@ -38,7 +38,7 @@ export function splitSections(text) {
 
 /**
  * `/proc/stat` 의 `cpu` 집계 줄 → 누적 jiffies.
- * 형식: `cpu  user nice system idle iowait irq softirq steal guest guest_nice`
+ * 형식: `cpu  user nice system idle iowait irq softirq steal guest guest_nice` — guest 는 user 에 이미 포함(합에서 뺀다)
  * ⚠ **idle 은 `idle + iowait`** 다 — iowait 를 busy 로 세면 디스크 대기 중인 서버가 CPU 100% 로 보인다.
  */
 export function parseProcStat(lines = []) {
@@ -47,7 +47,10 @@ export function parseProcStat(lines = []) {
     if (!m) continue;
     const f = m[1].trim().split(/\s+/).map(num);
     if (f.length < 4 || f.slice(0, 4).some((x) => x == null)) return null;
-    const total = f.reduce((a, b) => a + (b ?? 0), 0);
+    // v2.590 F11: guest·guest_nice(9·10번째)는 커널이 user·nice 에 **이미 포함**해 누적한다(account_guest_time) —
+    // 10개를 다 더하면 KVM 을 돌리는 물리 서버에서 guest 시간을 두 번 세어 CPU 가 과대(실측 정답 50% → 64.3%).
+    // procps top·mpstat 처럼 user~steal(앞 8개)만 합한다.
+    const total = f.slice(0, 8).reduce((a, b) => a + (b ?? 0), 0);
     const idle = (f[3] ?? 0) + (f[4] ?? 0);
     return { total, idle };
   }

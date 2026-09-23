@@ -193,7 +193,7 @@ export function buildSnapshot(device, parts = {}) {
     psus: psus.length ? { ok: psus.filter((p) => String(p['operational-state'] || '').toLowerCase() === 'ok').length, total: psus.length } : null,
     tempC: list.reduce((mx, p) => (p.sfpTempC != null && p.sfpTempC > mx ? p.sfpTempC : mx), -Infinity) > -Infinity
       ? list.reduce((mx, p) => (p.sfpTempC != null && p.sfpTempC > mx ? p.sfpTempC : mx), -Infinity) : null,
-    alerts: 0, monitors: {},
+    alerts: null, monitors: {},   // v2.590(감사 F6): REST 경로는 스위치 상태 모니터를 조회하지 않는다 — 0 이 아니라 '확인 불가'
   };
   snap.extra = { collectMethod: 'rest', rateReady: rate.computed, rateGapSec: rate.gapSec, rateUnit: 'bps',
     fabricName: sw['fabric-user-friendly-name'] || '' };

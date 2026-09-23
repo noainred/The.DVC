@@ -176,7 +176,10 @@ function initSqlite() {
         JOIN (SELECT ds_id, MAX(ts) AS mts FROM ds_series WHERE ts<? GROUP BY ds_id) m
           ON m.ds_id=s.ds_id AND m.mts=s.ts`),
       dsRosterAll: db.prepare('SELECT vcenter_id, ds_id, name, type, cap_gb, used_gb, free_gb, first_seen FROM ds_roster'),
-      pruneDsSeries: db.prepare('DELETE FROM ds_series WHERE ts < ?'),
+      // v2.590 P5: ds 별 **마지막 행은 남긴다** — 보존기간보다 오래 안 변한 DS(ISO·템플릿)의 유일한 행을 지우면 그 DS 가
+      // 차트에서 '관측 없음' 이 되고 값이 안 바뀌어 다시 기록되지도 않았다. diff-저장이라 행이 적어 GROUP BY 가 가볍다.
+      pruneDsSeries: db.prepare('DELETE FROM ds_series WHERE ts < ? AND rowid NOT IN (SELECT MAX(rowid) FROM ds_series GROUP BY ds_id)'),
+      dsSeriesLast: db.prepare('SELECT used_gb, cap_gb FROM ds_series WHERE ds_id=? ORDER BY ts DESC LIMIT 1'),
       // 스토리지 변경 이력(v2.355) — 윈도우 내 변경분 전부를 슬롯과 함께(그룹핑은 서비스에서 1회).
       dsChangesWindow: db.prepare(`SELECT d.kind, d.ds_id, d.name, d.type, d.cap_gb, d.used_gb,
           d.usage_pct, d.prev_used_gb, d.delta_gb, d.vcenter_id, s.slot, s.ts AS slot_ts
@@ -416,7 +419,14 @@ export async function dropRoster(vcenterId) {
 export async function loadDsRoster(vcenterId) {
   const x = await getDb();
   if (!x) return new Map();
-  return new Map(x.st.dsRosterOf.all(String(vcenterId)).map((r) => [r.ds_id, r]));
+  // v2.590 P4: 시계열 기록 판정은 '직전 **슬롯**(로스터 — 매 슬롯 갱신)' 이 아니라 '마지막으로 **기록한** 값' 과 비교해야 한다.
+  //   로스터와 비교하면 슬롯당 1GB 미만으로 꾸준히 느는 DS(하루 1.2GB)는 한 달 36GB 가 늘어도 한 번도 기록되지 않아
+  //   차트가 첫 관측값 그대로의 수평선이었다(같은 화면의 '기간 증감' 숫자와 모순). 마지막 기록값을 붙여 준다 —
+  //   기록이 없으면(첫 관측·prune 뒤) undefined 라 diff 가 첫 관측으로 다시 기록한다.
+  return new Map(x.st.dsRosterOf.all(String(vcenterId)).map((r) => {
+    const last = x.st.dsSeriesLast.get(r.ds_id);
+    return [r.ds_id, { ...r, series_used_gb: last ? last.used_gb : undefined, series_cap_gb: last ? last.cap_gb : undefined, series_known: !!last }];
+  }));
 }
 
 /** 데이터스토어별 시계열(v2.353) — 윈도우 내 관측 행 + 윈도우 직전 마지막 관측(carry-in). */

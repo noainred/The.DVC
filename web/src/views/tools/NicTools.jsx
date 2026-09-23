@@ -73,7 +73,7 @@ export function NicSpeed() {
         </div>
 
         <div className="flex gap wrap" style={{ marginTop: 12, gap: 8 }}>
-          <button className="tab" style={{ padding: '6px 12px', fontWeight: 700, background: !speedSel ? 'rgba(34,211,238,.12)' : undefined }} onClick={() => setSpeedSel('')}>전체 {data.totalServers}</button>
+          <button className="tab" style={{ padding: '6px 12px', fontWeight: 700, background: !speedSel ? 'rgba(34,211,238,.12)' : undefined }} onClick={() => setSpeedSel('')}>전체 {data.rowCount ?? data.totalServers}</button>
           {(data.bySpeed || []).map((b) => (
             <button key={b.speed} className="tab" style={{ padding: '6px 12px', fontWeight: 700, background: speedSel === b.speed ? 'rgba(34,211,238,.18)' : undefined, color: b.mbps >= 10000 ? 'var(--green)' : undefined }}
               onClick={() => setSpeedSel(speedSel === b.speed ? '' : b.speed)} title={`최고 NIC ${b.speed}인 서버 ${b.count}대`}>
@@ -196,7 +196,7 @@ export function NicModels() {
 
         <div className="flex gap wrap" style={{ marginTop: 12, gap: 8, alignItems: 'center' }}>
           <span className="muted" style={{ fontSize: 12, fontWeight: 700 }}>iDRAC</span>
-          <button className="tab" style={{ padding: '6px 12px', fontWeight: 700, background: !modelSel ? 'rgba(34,211,238,.12)' : undefined }} onClick={() => setModelSel('')}>전체 {data.totalServers}</button>
+          <button className="tab" style={{ padding: '6px 12px', fontWeight: 700, background: !modelSel ? 'rgba(34,211,238,.12)' : undefined }} onClick={() => setModelSel('')}>전체 {data.rowCount ?? data.totalServers}</button>
           {(data.byModel || []).map((b) => (
             <button key={b.model} className="tab" style={{ padding: '6px 12px', background: modelSel === b.model ? 'rgba(34,211,238,.18)' : undefined }}
               onClick={() => setModelSel(modelSel === b.model ? '' : b.model)} title={`${b.model} — 서버 ${b.servers}대 · 포트 ${b.ports}`}>

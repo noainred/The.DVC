@@ -76,7 +76,7 @@ export const WIN_PS = [
   "try { $c=(Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor | Where-Object {$_.Name -eq '_Total'}).PercentProcessorTime; if ($c -ne $null) { \"CPU_PCT=$c\" } } catch {}",
   'try { $o=Get-CimInstance Win32_OperatingSystem; "MEM_TOTAL_KB=" + $o.TotalVisibleMemorySize; "MEM_FREE_KB=" + $o.FreePhysicalMemory } catch {}',
   'try { $p=@{}; Get-CimInstance Win32_PerfFormattedData_PerfDisk_LogicalDisk | ForEach-Object { $p[$_.Name]=$_.PercentDiskTime }; Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object { "DISK=" + $_.DeviceID + "|" + $p[$_.DeviceID] + "|" + $_.Size + "|" + $_.FreeSpace } } catch {}',
-  "try { Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface | Where-Object { $_.Name -notmatch 'Loopback|isatap|Teredo|Pseudo' } | ForEach-Object { \"NIC=\" + $_.Name + \"|\" + $_.BytesTotalPersec + \"|\" + $_.CurrentBandwidth } } catch {}",
+  "try { Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface | Where-Object { $_.Name -notmatch 'Loopback|isatap|Teredo|Pseudo' } | ForEach-Object { \"NIC=\" + $_.Name + \"|\" + $_.BytesTotalPersec + \"|\" + $_.CurrentBandwidth + \"|\" + $_.BytesReceivedPersec + \"|\" + $_.BytesSentPersec } } catch {}",
   "try { Get-CimInstance -Namespace 'root\\WMI' -ClassName MSFC_FibrePortHBAAttributes | ForEach-Object { \"HBA=\" + $_.InstanceName + \"|\" + $_.Attributes.PortState + \"|\" + $_.Attributes.PortSpeed } } catch {}",
 ].join('\n');
 

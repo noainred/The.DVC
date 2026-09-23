@@ -118,8 +118,22 @@ async function get(base, pathname, username, password) {
   const res = await rawGet(base, pathname, username, password);
   // 오류 응답은 본문을 소진(cancel)한 뒤 throw — undici는 미소진 본문이 소켓을 붙잡아
   // 다수 iDRAC 폴링/스캔에서 연결·FD 누수가 누적된다.
-  if (res.status === 401) { try { await res.body?.cancel?.(); } catch { /* */ } throw new Error('iDRAC 인증 실패 (사용자/비밀번호 확인)'); }
-  if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } throw new Error(`Redfish ${pathname} -> ${res.status} ${res.statusText}`); }
+  // v2.590(감사 F1): 자격증명 거부를 **출처에서 못 박는다** — `authFailed`·`status` 를 싣는다. 폴러가 문구를
+  // 추측하지 않고 주기 수집을 멈출 수 있게. ⚠ 문구에 `401` 을 넣은 이유: 예전 문구
+  // 'iDRAC 인증 실패 (사용자/비밀번호 확인)' 에는 숫자가 없어 `fetchUsage` 의 `/\b40[13]\b/` 판정이
+  // 401 을 **'unreachable'** 로 분류했다(베어메탈 사용률의 iDRAC 경로가 인증 실패에도 정지하지 않던 원인).
+  if (res.status === 401) {
+    try { await res.body?.cancel?.(); } catch { /* */ }
+    const err = new Error('iDRAC 인증 실패(401) — 사용자/비밀번호 확인');
+    err.authFailed = true; err.status = 401;
+    throw err;
+  }
+  if (!res.ok) {
+    try { await res.body?.cancel?.(); } catch { /* */ }
+    const err = new Error(`Redfish ${pathname} -> ${res.status} ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
   return res.json();
 }
 
@@ -808,8 +822,17 @@ export async function probeGpuTelemetry(entry) {
 
 /**
  * 현재 온도센서 전체 + CPU 사용량(%)을 읽는다(1분 시계열용, 가벼움).
- * 반환 { temps: [{name, celsius}], inletCelsius, maxCelsius, cpuUsagePct }.
+ * 반환 { temps: [{name, celsius}], inletCelsius, maxCelsius, cpuUsagePct, thermalOk, error }.
  * cpuUsagePct는 Dell 텔레메트리(SystemUsage) 가용 시에만(미지원이면 null).
+ *
+ * ⚠⚠ v2.590(감사 F7) — **읽지 못한 것을 '읽었고 0개' 로 돌려주지 않는다.** 예전에는 Thermal 블록 전체가
+ *   `catch { /* thermal optional *\/ }` 라 이 함수는 **어떤 경우에도 던지지 않았다**(전부 401 이어도) —
+ *   그래서 ① 폴러의 `sensorError`(v2.493 '센서만 실패하는 상황을 진단') 가 한 번도 채워지지 않았고
+ *   ② 빈 센서 표본이 매 분 쌓였으며 ③ 파트 장애의 `collections.fans` 가 항상 'ok'(v2.548 F1 의 '수집 실패 ≠
+ *   부품 0개' 가 팬에서만 무력)였다. 이제:
+ *   · **Chassis 루트 GET 이 실패하면 던진다** — 인증 실패(`authFailed`)·연결 실패를 호출자가 구분한다.
+ *   · 멤버의 Thermal 이 **하나도** 안 읽히면 `thermalOk:false` + `error`(멤버 0개도 '읽은 것이 없다' 다).
+ *     하나라도 읽혔으면 `thermalOk:true`(일부 섀시 실패는 부분 결과로 남긴다 — 예전 동작과 같다).
  */
 export async function fetchSensors(entry) {
   const base = entry.host.replace(/\/+$/, '');
@@ -817,12 +840,23 @@ export async function fetchSensors(entry) {
 
   const temps = [];
   const fans = [];
+  let thermalRead = 0;
+  let thermalFailed = 0;
+  let thermalErr = '';
   // 1) 모든 Chassis의 Thermal → Temperatures[] + Fans[]
-  try {
-    const chassisRoot = await G('/redfish/v1/Chassis');
+  // Chassis 루트는 try 밖이다(v2.590) — 못 읽으면 던진다(인증 실패·연결 실패를 삼키지 않는다).
+  const chassisRoot = await G('/redfish/v1/Chassis');
+  {
     for (const m of (chassisRoot.Members || []).map((x) => x['@odata.id']).filter(Boolean)) {
       let thermal;
-      try { thermal = await G(`${m}/Thermal`); } catch { continue; }
+      try { thermal = await G(`${m}/Thermal`); thermalRead += 1; }
+      catch (e) {
+        thermalFailed += 1;
+        if (!thermalErr) thermalErr = String(e?.message || e).slice(0, 200);
+        // 인증 거부는 다른 섀시도 같은 결과다 — 더 시도하지 않고 올린다(계정 잠금 방지).
+        if (e?.authFailed) throw e;
+        continue;
+      }
       for (const t of thermal.Temperatures || []) {
         const c = num(t.ReadingCelsius);
         if (c == null) continue;
@@ -849,7 +883,10 @@ export async function fetchSensors(entry) {
         });
       }
     }
-  } catch { /* thermal optional */ }
+  }
+  const thermalOk = thermalRead > 0;
+  const thermalError = thermalOk ? null
+    : (thermalFailed ? `Thermal 조회 실패(섀시 ${thermalFailed}개 전부): ${thermalErr}` : 'Chassis 멤버가 없어 Thermal 을 읽을 대상이 없습니다');
 
   let inletCelsius = null, maxCelsius = null;
   for (const t of temps) {
@@ -870,7 +907,7 @@ export async function fetchSensors(entry) {
     }
   } catch { /* telemetry optional/unlicensed */ }
 
-  return { temps, fans, inletCelsius, maxCelsius, cpuUsagePct };
+  return { temps, fans, inletCelsius, maxCelsius, cpuUsagePct, thermalOk, error: thermalError };
 }
 
 /*
