@@ -21,7 +21,7 @@ import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withDeadline } from '../proxy/sshExec.js';
 import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
-import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive } from './settings.js';
+import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange } from './settings.js';
 import { resolveTargets } from './targets.js';
 import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
@@ -392,7 +392,7 @@ export function startBmUsagePoller() {
   _timer = startAdaptiveTimer(() => loadBmUsageSettings().intervalMs, async () => {
     if (!bmUsageEnabled()) return;
     await pollBmUsageOnce({ trigger: 'auto' });
-  }, { name: 'bmusage', firstDelayMs: 45_000 });
+  }, { name: 'bmusage', firstDelayMs: 45_000, subscribe: onBmUsageSettingsChange });
   console.log('[bmusage] 폴러 등록(설정에서 켜면 수집 시작)');
 }
 

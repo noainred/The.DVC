@@ -69,6 +69,16 @@ describe('dataFlowText', () => {
     expect(t.tone).toBe('ok'); expect(t.text).toMatch('마지막');
     expect(innerItemText({ ok: true, value: { lastAt: '' } }).tone).toBe('muted'); // '' 를 0 시각으로 읽지 않는다
   });
+  it('v2.591 C1: 최상위 {at, ok:false, reason} 은 실패 · ISO generatedAt 은 시각 · 숫자 문자열은 Date.parse 하지 않는다', () => {
+    const now = Date.now();
+    const sr = innerItemText({ ok: true, value: { at: now - 120_000, ok: false, status: 400, reason: '요청 IP가 루프백입니다' } }, now);
+    expect(sr.tone).toBe('bad'); expect(sr.text).toMatch('루프백');
+    expect(innerItemText({ ok: true, value: { at: now, ok: false, status: 413 } }, now).text).toMatch('HTTP 413');
+    const inv = innerItemText({ ok: true, value: { generatedAt: new Date(now - 30_000).toISOString() } }, now);
+    expect(inv.tone).toBe('ok'); expect(inv.text).toMatch('마지막');
+    expect(innerItemText({ ok: true, value: { generatedAt: '12345' } }, now).tone).toBe('muted');
+    expect(innerItemText({ ok: true, value: { at: now, ok: true } }, now).tone).toBe('ok');
+  });
   it('문구 — 기록 시작·미검증·경로 접두', () => {
     expect(sinceNote({ since: Date.now() - 60_000 })).toMatch('정상으로 칠하지 않습니다');
     expect(sinceNote({ rejectsWithoutTime: 3 })).toMatch('거부 3건');

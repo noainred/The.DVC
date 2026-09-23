@@ -113,13 +113,19 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
   const vmLast = new Map();
   for (const r of db.prepare('SELECT vm_id, alloc_gb, used_gb FROM vm_last WHERE vcenter_id=?').all(vcenterId)) vmLast.set(r.vm_id, r);
   const partLast = new Map();
-  for (const r of db.prepare('SELECT vm_id, path, cap_gb, used_gb FROM part_last WHERE vcenter_id=?').all(vcenterId)) partLast.set(`${r.vm_id}\u0000${r.path}`, r);
+  const knownPaths = new Map(); // vm_id → Set(path) — 이번 수집에 없는 경로를 part_last 에서 지우려고(v2.591 R-G1)
+  for (const r of db.prepare('SELECT vm_id, path, cap_gb, used_gb FROM part_last WHERE vcenter_id=?').all(vcenterId)) {
+    partLast.set(`${r.vm_id}\u0000${r.path}`, r);
+    if (!knownPaths.has(r.vm_id)) knownPaths.set(r.vm_id, new Set());
+    knownPaths.get(r.vm_id).add(r.path);
+  }
 
   const insLatest = db.prepare('INSERT OR REPLACE INTO vm_latest (vm_id,vcenter_id,vcenter_name,vm_name,alloc_gb,used_gb,part_count,ts) VALUES (?,?,?,?,?,?,?,?)');
   const insVmSer = db.prepare('INSERT INTO vm_series (vcenter_id,vm_id,ts,alloc_gb,used_gb) VALUES (?,?,?,?,?)');
   const upVmLast = db.prepare('INSERT OR REPLACE INTO vm_last (vm_id,vcenter_id,alloc_gb,used_gb) VALUES (?,?,?,?)');
   const insPartSer = db.prepare('INSERT INTO part_series (vcenter_id,vm_id,path,ts,cap_gb,used_gb) VALUES (?,?,?,?,?,?)');
   const upPartLast = db.prepare('INSERT OR REPLACE INTO part_last (vm_id,path,vcenter_id,cap_gb,used_gb) VALUES (?,?,?,?,?)');
+  const delPartLast = db.prepare('DELETE FROM part_last WHERE vm_id=? AND path=?');
 
   let vmSeriesRows = 0; let partSeriesRows = 0;
   db.exec('BEGIN');
@@ -140,6 +146,14 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
           insPartSer.run(vcenterId, vm.vmId, p.path, ts, p.capGB, p.usedGB); partSeriesRows++;
           upPartLast.run(vm.vmId, p.path, vcenterId, p.capGB, p.usedGB);
         }
+      }
+      // v2.591(3차 감사 R-G1): 이번 수집에 **없는** 경로는 part_last 에서 지운다 — 남겨 두면 상세 화면이 그 경로의 마지막 값을
+      // 이월·끝점 연장해 **언마운트된 파티션을 '평탄 → 축소 후보(safe)'** 로 권고했다. part_last 가 곧 '현재 파티션 목록' 이 된다.
+      // ⚠ 파티션 목록이 비어 온 VM(VMware Tools 일시 미보고)은 지우지 않는다 — 관측 못 한 것을 '없음' 으로 단정하지 않는다(빈 수집 방어와 같은 판단).
+      const cur = vm.parts || [];
+      if (cur.length) {
+        const now = new Set(cur.map((p) => p.path));
+        for (const old of knownPaths.get(vm.vmId) || []) if (!now.has(old)) delPartLast.run(vm.vmId, old);
       }
     }
     db.exec('COMMIT');
@@ -184,6 +198,16 @@ export async function vmSeries(vmId, sinceTs = 0) {
     if (c) rows.unshift({ ts: sinceTs, allocGB: c.alloc_gb, usedGB: c.used_gb, carried: true, carriedFromTs: c.ts });
   }
   return rows;
+}
+
+/**
+ * 한 VM 의 **현재** 파티션 경로(v2.591 R-G1) — part_last 는 수집마다 사라진 경로를 지우므로 곧 현재 목록이다.
+ * 반환 null = DB 없음. 빈 Set = 기록 없음(구버전 DB 에서 한 번도 파티션을 못 본 VM).
+ */
+export async function currentPartPaths(vmId) {
+  const db = await getDb();
+  if (!db) return null;
+  return new Set(db.prepare('SELECT path FROM part_last WHERE vm_id=?').all(vmId).map((r) => r.path));
 }
 
 /** 한 VM 의 파티션별 추이(diff-저장 점들). 창 앞 마지막 행을 경로별로 이월한다(v2.590 P3 — vmSeries 와 같은 이유). */

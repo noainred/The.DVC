@@ -17,6 +17,7 @@ import { perfDiagText, diagBorder, perfCollectSummary } from './sanPerfDiagText.
 import { portsScopeNote } from './sanPortsScopeText.js';
 import { DeviceHealthPanel, AllHealthCheck } from './SanHealthCheck.jsx';
 import { authStopInfo, authStopSummary, credFpText } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -260,6 +261,16 @@ export default function SanSwitchTool() {
           <span className="muted"> 행의 ‘수집’ 은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다. 포트 사용량 수집도 같은 계정이라 함께 멈춥니다.</span>
         </div>
       )}
+
+      {/* v2.591: 엣지가 가져갔지만 결과가 오지 않아 폐기된 '지금 수집' 요청 — 배지만 조용히 꺼지지 않게 */}
+      {(() => {
+        const t = collectDropNote(data?.collectDrops, (id) => rows.find((r) => r.id === id)?.name || id);
+        return t ? (
+          <div className="card" style={{ marginBottom: 10, padding: '10px 14px', fontSize: 13, borderColor: TONE.warn }}>
+            ⚠ <BoldText text={t} />
+          </div>
+        ) : null;
+      })()}
 
       {/* 스위치 목록 */}
       <div className="table-wrap">

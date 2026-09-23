@@ -7,6 +7,7 @@
  */
 
 import { config, loadVcenterConfig } from '../config.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { pingMany } from '../util/ping.js';
 
@@ -28,7 +29,33 @@ let _last = null;
 export function pingWorkerStatus() { return { pollMs: POLL_MS, ..._last }; }
 
 function headers() {
-  return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+  // v2.591(3차 감사 PR-2 ④): X-Agent-Name — 공유 토큰 엣지의 인출·회신이 중앙 데이터 흐름 지도에서 '(unknown)' 한 칸으로 합쳐지지 않게.
+  return { 'Content-Type': 'application/json', ...(config.agent.name ? { 'X-Agent-Name': config.agent.name } : {}), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+}
+
+// v2.591(3차 감사 PR-5): 인출·회신의 **HTTP 오류**도 상태와 콘솔에 남긴다. v2.574 IMP-07 은 catch 경로만 고쳐서
+//   중앙이 403(토큰 불일치)·5xx 를 주면 `if (!r.ok) return null` 로 조용히 끝났다 — 4~10초마다 반복되는 거부가
+//   엣지 로그 화면·저널 어디에도 남지 않았다. 같은 사유는 10분에 한 번만 찍는다(저널 폭주 방지).
+const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
+async function httpFail(stage, r) {
+  let reason = '';
+  try { const b = await r.json(); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
+  const msg = `${stage} HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
+  _last = { at: Date.now(), ok: false, error: msg, status: r.status };
+  if (_logChange(stage, msg)) console.warn(`[ping-agent] ${msg}`);
+  return null;
+}
+/** 결과 회신 — 응답 상태를 본다(예전엔 .catch(()=>{}) 로 413·403·5xx 가 '완료' 로 보였다). 실패 사유를 돌려준다(없으면 null). */
+async function postResult(url, body, timeoutMs) {
+  let r;
+  try { r = await resilientFetch(url, { method: 'POST', headers: headers(), body, timeoutMs, retries: 2 }); }
+  catch (e) { const msg = `결과 회신 실패 — ${String(e?.message || e).slice(0, 200)}`; if (_logChange('회신', msg)) console.warn(`[ping-agent] ${msg}`); return msg; }
+  if (r.ok) return null;
+  let reason = '';
+  try { const b = await r.json(); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
+  const msg = `결과 회신 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
+  if (_logChange('회신', msg)) console.warn(`[ping-agent] ${msg}`);
+  return msg;
 }
 
 export async function runPingWorkerOnce() {
@@ -44,18 +71,17 @@ async function runPingWorkerInner() {
   try {
     const url = `${config.agent.centralUrl}/api/central/ping-jobs?vcenters=${encodeURIComponent(vcIds.join(','))}`;
     const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
-    if (!r.ok) return null;
+    if (!r.ok) return await httpFail('인출', r);
     const { jobs } = await r.json();
     if (!jobs || !Object.keys(jobs).length) return null;
+    let postErr = null;
     for (const [vcenterId, ips] of Object.entries(jobs)) {
       if (!Array.isArray(ips) || !ips.length) continue;
       const results = await pingMany(ips, { timeoutMs: 1500, concurrency: 8 });
-      await resilientFetch(`${config.agent.centralUrl}/api/central/ping-result`, {
-        method: 'POST', headers: headers(), body: JSON.stringify({ vcenterId, results }), timeoutMs: 15_000, retries: 2,
-      }).catch(() => {});
+      postErr = (await postResult(`${config.agent.centralUrl}/api/central/ping-result`, JSON.stringify({ vcenterId, results }), 15_000)) || postErr;
       console.log(`[ping-agent] ${vcenterId}: ${results.filter((x) => x.alive).length}/${results.length} 응답`);
     }
-    _last = { at: Date.now(), ok: true };
+    _last = postErr ? { at: Date.now(), ok: false, error: postErr } : { at: Date.now(), ok: true };
     return _last;
   } catch (e) {
     const msg = String(e?.message || e).slice(0, 300);

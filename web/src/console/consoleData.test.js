@@ -1,7 +1,7 @@
 // DVC 콘솔 순수 계산 모듈 회귀 테스트(v2.487) — 판정 규칙·정렬·집계가 화면과 무관하게 고정된다.
 import { describe, it, expect } from 'vitest';
 import {
-  levelOf, colorOf, ageText, domainOf, severityCounts, alarmCountsByDomain, sortAlarms, correlateAlarms,
+  levelOf, colorOf, ageText, tsMs, domainOf, severityCounts, alarmCountsByDomain, sortAlarms, correlateAlarms,
   normalizeMessage, siteRows, clusterRows, clusterCountByVc, capacityAdvice, datastoreTypeCounts, datastoresOver,
   ipamTop, ipamStats, svcmonLevel, tempColor, hostFacilityRows, storageRows, sanCells, sanTotals, pduSummary,
   nsxManagerRows, networkTypeCounts, buildDomainTiles, rowMatches, fmtInt, fmtPct, CRIT_PCT, WARN_PCT,
@@ -14,6 +14,19 @@ describe('임계 판정', () => {
   });
   it('값 없음은 null 이고 회색', () => { expect(levelOf(null)).toBeNull(); expect(levelOf('')).toBeNull(); expect(colorOf(undefined)).toBe('#9ca3af'); });
   it('fmt: null 은 —', () => { expect(fmtInt(null)).toBe('—'); expect(fmtInt(1234)).toBe('1,234'); expect(fmtPct(59.6)).toBe('60%'); });
+});
+
+describe('v2.591 C2 tsMs·ageText — epoch ms 숫자', () => {
+  it('숫자·숫자 문자열은 epoch ms, ISO 는 Date.parse, 빈 값·0 은 NaN', () => {
+    const now = Date.parse('2026-09-12T03:00:00Z');
+    expect(ageText(now - 90_000, now)).toBe('1m');
+    expect(ageText(String(now - 30_000), now)).toBe('30s');
+    expect(tsMs(now)).toBe(now);
+    expect(Number.isNaN(tsMs(''))).toBe(true);
+    expect(Number.isNaN(tsMs(0))).toBe(true);
+    expect(Number.isNaN(tsMs(null))).toBe(true);
+    expect(tsMs('2026-09-12T02:59:30Z')).toBe(now - 30_000);
+  });
 });
 
 describe('ageText', () => {
@@ -98,7 +111,21 @@ describe('스토리지·네트워크·IPAM', () => {
   it('SAN 셀·합계', () => {
     const cells = sanCells([{ id: 's1', name: 'S1', snap: { ports: { total: 48, online: 46, offline: 2, faulty: 0 } } }, { id: 's2', name: 'S2', snap: null }]);
     expect(cells[0].level).toBe(2); expect(cells[1].level).toBeNull();
-    expect(sanTotals(cells)).toEqual({ devices: 2, online: 46, total: 48, offline: 2, faulty: 0, measured: 1 });
+    expect(sanTotals(cells)).toEqual({ devices: 2, online: 46, total: 48, offline: 2, faulty: 0, measured: 1, failed: 0, none: 1 });
+  });
+  it('v2.591 C9·P2: 수집 실패 스냅샷은 초록 0/0 도 0.0 TB 도 아니다', () => {
+    const fail = { ok: false, error: 'connect ECONNREFUSED', ports: { total: 0, online: 0, offline: 0, faulty: 0 } };
+    const cells = sanCells([{ id: 'f', name: 'san-audit', snap: fail }, { id: 'e', name: 'err-only', snap: { error: 'x', ports: { total: 0, online: 0 } } }]);
+    expect(cells[0]).toMatchObject({ failed: true, level: null, total: null });
+    expect(cells[1].failed).toBe(true);
+    expect(sanTotals(cells)).toMatchObject({ measured: 0, failed: 2, none: 0 });
+    const rows = storageRows([
+      { id: 'a', name: 'fail', type: 'unity480', snap: { ok: false, error: 'SSH 인증 실패', capacity: { pct: 0, totalBytes: 0, usedBytes: 0 }, nodes: { count: 0 } } },
+      { id: 'b', name: 'zero', type: 'isilon', snap: { ok: true, capacity: { pct: 0, totalBytes: 0, usedBytes: 0 } } },
+    ], []);
+    const f = rows.find((r) => r.id === 'a');
+    expect(f).toMatchObject({ pct: null, totalBytes: null, usedBytes: null, nodes: null, ok: false });
+    expect(rows.find((r) => r.id === 'b').totalBytes).toBeNull();
   });
 });
 

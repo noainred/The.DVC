@@ -10,7 +10,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { recordActivity } from '../storage/activityLog.js';
 import { saveCapacityPoint } from '../storage/db.js';
-import { ackCollect } from '../storage/collectRequests.js';
+import { ackCollect, setCollectBaseResolver } from '../storage/collectRequests.js';
 
 const FILE = path.join(config.configDir, 'central-agent-storage.json');
 const MAX_DEVICES_PER_AGENT = 500;
@@ -25,6 +25,12 @@ function load() {
   catch { _map = new Map(); } // 캐시 성격 — 다음 push 가 재구축
   return _map;
 }
+
+// v2.591: '지금 수집' 요청 큐의 기준선 — 중앙 재시작 직후에도 보관 중인 엣지 스냅샷의 수집 시각(엣지 시계 값)을 쓴다.
+setCollectBaseResolver((id) => {
+  for (const rec of load().values()) for (const d of rec?.devices || []) if (String(d?.deviceId || d?.id) === String(id)) return Number(d.collectedAt) || null;
+  return null;
+});
 
 export function saveEdgeStorage(agent, devices) {
   const list = (Array.isArray(devices) ? devices : []).slice(0, MAX_DEVICES_PER_AGENT)

@@ -334,6 +334,8 @@ function HealthPanel({ report, busy, onRun }) {
           <div className="flex gap wrap" style={{ marginBottom: 10 }}>
             <Card label="점검 DB" value={report.count} meta={report.mode === 'full' ? '전체 점검' : '빠른 점검'} />
             <Card label="정상" value={report.okCount} accent="var(--green)" />
+            {/* v2.591: 정합성 점검을 생략한 큰 DB 는 '정상' 에 세지 않는다 — 확인하지 못한 것이다(서버가 따로 센다) */}
+            {report.uncheckedCount > 0 && <Card label="점검 생략" value={report.uncheckedCount} meta="크기 상한 초과 — 정상 확인 아님" accent="var(--amber)" />}
             <Card label="이상" value={report.failCount} accent={report.failCount ? 'var(--red)' : undefined} />
             <Card label="경고" value={report.warningCount} accent={report.warningCount ? 'var(--amber)' : undefined} />
           </div>

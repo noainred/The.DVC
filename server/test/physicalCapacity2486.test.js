@@ -20,7 +20,8 @@ test('aggregatePhysical — 중복 id 제거, 인벤토리 없는 서버는 개�
   assert.equal(r.withInventory, 3);
   assert.equal(r.withCores, 3); assert.equal(r.cores, 64 + 16 + 48);
   assert.equal(r.withMemory, 3); assert.equal(r.memGiB, 896);
-  assert.equal(r.memGB, Math.round(896 * 1.073741824));
+  // v2.591 C6: vCenter 카드의 'GB'(실제 GiB)와 같은 이진 단위 — 10진 환산(×1.0737)하면 한 카드에서 7.4% 어긋난다.
+  assert.equal(r.memGB, 896);
   assert.equal(r.sockets, 2 + 1 + 2);
   assert.equal(r.threads, 128);
   assert.deepEqual(aggregatePhysical([], () => null).servers, 0);

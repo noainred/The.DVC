@@ -3,11 +3,11 @@ import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { currentVersion } from '../../config.js';
 import { listNotes } from '../../release-notes.js';
-import { nlSearch } from '../../llm/nlSearch.js';
+import { nlSearch, NL_ENTITY_PERM } from '../../llm/nlSearch.js';
 import { userHasPermission } from '../../auth/permissions.js';
 
-// v2.583: 자연어 검색 결과 종류 → 필요한 조회 권한(inv.* — v2.536 집행과 같은 축).
-const NL_PERM = { vm: 'inv.vms', host: 'inv.hosts', datastore: 'inv.datastores', network: 'inv.networks' };
+// v2.583: 자연어 검색 결과 종류 → 필요한 조회 권한(inv.* — v2.536 집행과 같은 축). v2.591: 표는 nlSearch.js 하나가 소유한다.
+const NL_PERM = NL_ENTITY_PERM;
 
 export function registerSearchNotes(api) {
 

@@ -283,6 +283,8 @@ export function rescheduleMetricsSampler() {
 export function startMetricsSampler() {
   const { sampleIntervalMs, retentionDays } = loadMetricsSettings();
   setTimeout(() => sampleOnce().catch((e) => console.error('[metrics] sample 실패:', e.message)), 12_000).unref?.();
+  // v2.591 L9: 기동 스태거 전에 설정 저장(reschedule)이 먼저 오면 그 interval 이 고아로 남아 샘플러가 두 벌이 됐다.
+  if (timer) clearInterval(timer);
   timer = setInterval(() => sampleOnce().catch(() => {}), sampleIntervalMs);
   timer.unref?.();
   console.log(`[metrics] sampler started (every ${Math.round(sampleIntervalMs / 1000)}s, retention ${retentionDays}d)`);

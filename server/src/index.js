@@ -31,6 +31,7 @@ import { authRouter } from './routes/auth.js';
 import { authMiddleware, requireEnrolled, requirePerm, warnIfNoOtpAdmin, resolveTokenUser } from './auth/auth.js';
 import { bigJsonGate } from './util/bigJsonGate.js';        // v2.538: 인증 전 대용량 본문 파싱 차단
 import { resolveCentralAuth } from './routes/central.js';   // v2.538: 게이트가 토큰만 먼저 본다
+import { recordReject } from './central/ingestReject.js';
 import { pruneMockInventory } from './central/inventory.js';
 import { auditMiddleware } from './audit.js';
 import { upgradeRouter } from './routes/upgrade.js';
@@ -82,7 +83,7 @@ import { startSvcmonPoller } from './svcmon/poller.js';
 import { startSvcmonPush } from './agent/svcmonPush.js';
 import { startSvcmonConfigPull } from './agent/svcmonConfigPull.js';
 import { startSvcmonSilenceWatch } from './central/svcmonSilence.js';
-import { closeCsvLog } from './svcmon/csvlog.js';
+import { closeCsvLog, closeCsvLogAsync } from './svcmon/csvlog.js';
 import { flushStore as flushSvcmonStore } from './svcmon/store.js';
 import { closePool as closeSvcmonPool } from './svcmon/pool.js';
 import { startPingMonitor } from './ping/monitor.js';
@@ -428,6 +429,20 @@ app.use((err, req, res, _next) => {
   try {
     pushLog(status >= 500 ? 'error' : 'warn', `unhandled ${req.method} ${(req.originalUrl || '').split('?')[0]} ${status}: ${err?.stack || err}`);
   } catch { /* 로깅 실패가 응답을 막지 않게 */ }
+  // v2.591(3차 감사 PR-6): 엣지 push 가 **본문 파서 단계**에서 거부되면(413 한도 초과·400 깨진 JSON) 중앙 라우터의 수신 훅까지
+  //   가지 못해 거부 기록(ingestReject)에 **아무것도 남지 않았다** — 데이터 흐름 지도·인벤토리 점검이 그 경로를 계속 '정상' 으로
+  //   말했다. 여기서 토큰으로 이름을 가리고(개별 토큰이면 그 이름, 아니면 주장된 이름 — 검증 안 됨) 기록한다.
+  if (clientFault && String(req.originalUrl || '').startsWith('/api/central/')) {
+    try {
+      const auth = resolveCentralAuth(req);
+      const claimed = String(req.get('X-Agent-Name') || req.query?.agent || '').trim();
+      const name = auth?.ok && auth.mode === 'agent' ? auth.agent : (auth?.ok ? claimed : '');
+      recordReject(name || '(unknown)', String(req.originalUrl).split('?')[0].slice('/api/central'.length) || '/', {
+        status, reason: err?.type === 'entity.too.large' ? `본문이 중앙 한도(${err?.limit ?? '?'} 바이트)를 넘었습니다` : '본문 JSON 을 읽지 못했습니다',
+        wireBytes: Number(req.get('content-length')) || 0,
+      });
+    } catch { /* 진단은 best-effort */ }
+  }
   if (res.headersSent) return res.destroy?.();
   res.status(status).json({
     ok: false,
@@ -579,7 +594,13 @@ const gracefulExit = (signal) => {
   if (shuttingDown) return;            // 두 번째 시그널은 무시(중복 종료 경로 방지)
   shuttingDown = true;
   console.log(`[shutdown] ${signal} 수신 — 새 연결을 멈추고 진행 중 요청을 마무리합니다(최대 ${Math.round(SHUTDOWN_GRACE_MS / 1000)}초).`);
-  const done = (code) => { svcmonShutdown(); process.exit(code); };
+  // v2.591 L7: CSV 결과 로그 스트림이 디스크까지 비워질 때를 기다린 뒤 종료한다(상한 2초 — 유예 안쪽).
+  let exiting = false;
+  const done = (code) => {
+    if (exiting) return;
+    exiting = true;
+    closeCsvLogAsync(2000).catch(() => {}).finally(() => { svcmonShutdown(); process.exit(code); });
+  };
   const timer = setTimeout(() => {
     console.warn('[shutdown] 유예 시간 초과 — 남은 연결을 끊고 종료합니다.');
     done(0);

@@ -7,6 +7,7 @@ import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from 
 import { columnsFor, cellValue, sortValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
 import { emptyListText, conflictText, edgeReportNotes, edgeIntervalText } from './storageListText.js';
+import { collectDropNote } from './collectDropText.js';
 import { STable } from '../../components/STable.jsx';
 import { collectMethodView } from './storageMethodText.js';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
@@ -744,6 +745,15 @@ export default function StorageMonTool() {
           ⚠ 등록부에 없는 스냅샷 {d.orphans.length}건(삭제된 장비의 엣지 잔존 push) — 다음 엣지 push 주기에 자연 소멸합니다.
         </div>
       )}
+      {/* v2.591: 엣지가 가져갔지만 결과가 오지 않아 폐기된 '지금 수집' 요청 — 배지만 조용히 꺼지지 않게 */}
+      {(() => {
+        const t = collectDropNote(d.collectDrops, (id) => (d.devices || []).find((x) => x.id === id)?.name || id);
+        return t ? (
+          <div className="card" style={{ padding: '9px 13px', marginTop: 8, borderColor: 'var(--amber)', fontSize: 12 }}>
+            ⚠ <BoldText text={t} />
+          </div>
+        ) : null;
+      })()}
       {/* v2.581(BUG-D): 엣지가 '장비 0대' 로 상태 전용 보고를 보냈을 때 — 예전에는 아예 POST 가 없어 구분할 수 없었다 */}
       {edgeReportNotes(d.edgeReports).map((n) => (
         <div key={n.agent} className="card" style={{ padding: '9px 13px', marginTop: 8, borderColor: n.tone === 'warn' ? 'var(--amber)' : 'var(--border)', fontSize: 12 }}>

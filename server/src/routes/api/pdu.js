@@ -17,7 +17,7 @@ import {
 } from '../../pdu/registry.js';
 import { collectDeviceNow, testDeviceConnection, pollOnce, pduPollerStatus, localSnapshots, getLocalSnapshot } from '../../pdu/poller.js';
 import { edgePduSnapshots, edgePduStatus } from '../../central/pduEdge.js';
-import { requestCollect, hasPendingRequest } from '../../pdu/collectRequests.js';
+import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../pdu/collectRequests.js';
 import { INTERVAL_SPEC, saveIntervals, runtimeIntervals, intervalsForEdge } from '../../pdu/intervals.js';
 import { THRESHOLD_SPEC, loadThresholds, saveThresholds, evaluateSnapshot, activeViolations } from '../../pdu/thresholds.js';
 import { powerSeries, envSeries, dbStats } from '../../pdu/db.js';
@@ -75,6 +75,8 @@ export function registerPdu(api) {
       agents: knownAgentNames(),
       poller: pduPollerStatus(),
       edges: edgePduStatus(),
+      // v2.591: 엣지가 가져갔지만 새 수집 결과가 오지 않아 재인출 뒤 폐기한 '지금 수집' 요청(조용한 소실 금지).
+      collectDrops: recentCollectDrops(),
       intervals: runtimeIntervals(),
       intervalSpec: INTERVAL_SPEC,
       thresholds: th,

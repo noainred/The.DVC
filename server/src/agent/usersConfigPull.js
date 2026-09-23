@@ -11,11 +11,14 @@
 
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyManagedUsers } from '../auth/auth.js';
 
 let timer = null;
 let last = null;
+// v2.591(3차 감사 PR-7): 실패를 상태뿐 아니라 콘솔에도(같은 사유는 10분에 한 번) — 403·5xx 가 저널 어디에도 안 남았다.
+const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 let lastSig = '';
 // 재진입 가드(single-flight) — CLAUDE.md 성능 불변조건: setInterval(()=>asyncFn()) 폴러는
 // 이전 주기가 간격을 넘기면(고RTT·중앙 지연) 다음 틱이 겹쳐 돌아 연결·CPU 가 누적된다.
@@ -49,6 +52,7 @@ async function _pullUsersConfigNow() {
     return { ok: true, applied: true, ...r };
   } catch (e) {
     last = { at: Date.now(), applied: false, error: e.message };
+    if (_logChange('pull', e.message)) console.warn(`[users-config] 중앙 설정 pull 실패: ${e.message}`);
     return { ok: false, error: e.message };
   }
 }

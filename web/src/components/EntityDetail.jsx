@@ -70,19 +70,35 @@ export function VmIpPing({ vcenterId, ips }) {
   const [res, setRes] = useState({}); // ip -> { state, rttMs }
   const [run, setRun] = useState(0);
   const [denied, setDenied] = useState(false); // viewer 403 — 영구 '확인 중…' 대신 권한 안내
+  const [settled, setSettled] = useState(false); // 요청 직후의 'unknown'(아직 큐에 안 들어감)을 '결과 없음' 으로 말하지 않게
   useEffect(() => {
     if (!vcenterId || !ips.length) return;
     let alive = true;
+    setSettled(false);
     const qs = `vcenterId=${encodeURIComponent(vcenterId)}&ips=${encodeURIComponent(ips.join(','))}`;
     // ping 트리거는 admin/operator 전용 — viewer의 403은 '권한 필요' 상태로 종결해
     // 영구 '확인 중…' 점멸을 막는다(결과 폴링은 읽기라 계속 동작).
     postJson('/tools/ip-ping', { vcenterId, ips }).catch((e) => { if (/403|forbidden/i.test(String(e.message))) setDenied(true); });
-    const poll = () => fetchJson(`/tools/ip-ping?${qs}`).then((d) => { if (alive) setRes(d.results || {}); }).catch(() => {});
+    // v2.591 C7: 서버는 인출되지 않은 요청을 약 90초 뒤 'expired' 로 바꾼다(v2.590 P11). 예전에는 폴링을 33초에
+    //   끊어 그 만료를 **볼 수 없었고** 화면이 영원히 '확인 중…' 이었다. 전부 끝난 상태가 되면 멈추고, 그 전까지는
+    //   처음 30초는 3초 · 그 뒤는 10초 간격으로 최대 2분 본다.
+    const DONE = new Set(['up', 'down', 'error', 'expired']);
+    const t0 = Date.now();
+    let timer = null;
+    const poll = () => fetchJson(`/tools/ip-ping?${qs}`).then((d) => {
+      if (!alive) return;
+      const r = d.results || {};
+      setRes(r);
+      const allDone = ips.every((ip) => DONE.has(r[ip]?.state));
+      const el = Date.now() - t0;
+      if (!allDone && el < 120_000) timer = setTimeout(poll, el < 30_000 ? 3000 : 10_000);
+    }).catch(() => { if (alive && Date.now() - t0 < 120_000) timer = setTimeout(poll, 10_000); });
     poll();
-    const t = setInterval(poll, 3000);
-    const stop = setTimeout(() => clearInterval(t), 33000); // ~30초 후 폴링 종료
-    return () => { alive = false; clearInterval(t); clearTimeout(stop); };
+    const st = setTimeout(() => { if (alive) setSettled(true); }, 15_000);
+    return () => { alive = false; clearTimeout(timer); clearTimeout(st); };
   }, [vcenterId, ips.join(','), run]);
+  // 'expired'(엣지가 가져가지 않음)와, 15초가 지나도 큐에 없는 'unknown' 은 '확인 중' 이 아니라 '결과 없음' 이다.
+  const noResult = (st) => st === 'expired' || (st === 'unknown' && settled);
   const dot = (state) => {
     const c = state === 'up' ? 'var(--green,#22c55e)' : (state === 'down' || state === 'error') ? 'var(--red,#ef4444)' : '#9ca3af';
     return <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: c,
@@ -104,7 +120,9 @@ export function VmIpPing({ vcenterId, ips }) {
     <>
       <div style={{ display: 'inline-grid', gridTemplateColumns: 'auto auto auto', columnGap: 8, rowGap: 3, alignItems: 'center' }}>
         {sorted.map((ip, i) => {
-          const r = res[ip] || { state: 'pending' };
+          const r0 = res[ip] || { state: 'pending' };
+          // 요청 직후(15초 안)의 'unknown' 은 아직 큐에 들어가기 전일 수 있다 — '확인 중' 으로 둔다(툴팁도 같이).
+          const r = r0.state === 'unknown' && !settled ? { ...r0, state: 'pending' } : r0;
           const color = PING_COLOR[r.state] || '';
           const strong = r.state === 'up' || r.state === 'down';
           return (
@@ -113,7 +131,7 @@ export function VmIpPing({ vcenterId, ips }) {
               <span title={pingTip(ip, r)} style={{ fontFamily: 'ui-monospace, monospace', color: color || 'inherit', fontWeight: strong ? 600 : 400, cursor: 'help' }}>{ip}</span>
               <span style={{ fontSize: 11, textAlign: 'right', fontFamily: 'ui-monospace, monospace',
                 color: r.state === 'down' ? 'var(--red,#ef4444)' : 'var(--text-dim,#9ca3af)' }}>
-                {r.state === 'up' ? (r.rttMs != null ? `${r.rttMs}ms` : '응답') : r.state === 'down' ? '무응답' : r.state === 'error' ? '오류' : '확인 중…'}
+                {r.state === 'up' ? (r.rttMs != null ? `${r.rttMs}ms` : '응답') : r.state === 'down' ? '무응답' : r.state === 'error' ? '오류' : noResult(r.state) ? '결과 없음' : '확인 중…'}
               </span>
             </React.Fragment>
           );

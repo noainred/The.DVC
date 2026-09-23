@@ -202,12 +202,53 @@ export function pruneOld(dir, cfg = getLogSettings()) {
   } catch { return 0; }
 }
 
-/** 종료 시 잔여 버퍼 flush(프로세스 재시작에서 마지막 배치 유실 방지). */
+/**
+ * 스트림 없이 대기 행을 동기로 붙인다(v2.591 L7). 첫 flush 전·회전 직후·스트림 오류 뒤에는 stream 이 null 이고,
+ * 예전 closeCsvLog 는 그때 버퍼를 **쓰지 않고 비웠다**(재현: 첫 flush 200ms 전 100행 → 파일 자체 없음).
+ */
+function appendSync(data) {
+  const cfg = getLogSettings();
+  if (!cfg.enabled || !data) return;
+  const dir = logDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const now = Date.now();
+  const key = periodKey(now, cfg.rotate);
+  const file = curFile && key === curKey ? curFile : path.join(dir, fileNameFor(now, cfg.rotate, 1));
+  const head = fs.existsSync(file) ? '' : BOM + HEADER.join(',') + '\n';
+  fs.appendFileSync(file, head + data, { mode: 0o600 });
+}
+
+/**
+ * 종료 시 잔여 버퍼 flush — **동기 최선**(process 'exit' 훅용. exit 중에는 비동기 쓰기가 끝나지 않는다).
+ * 스트림이 있으면 그 스트림에 넘기고(순서 보존 — 이미 스트림 안에 쌓인 조각 뒤에 붙어야 한다), 없으면 파일에 동기로 붙인다.
+ * ⚠ 스트림 안에 이미 쌓인 조각은 이 경로로 보장되지 않는다 — 정상 종료는 아래 `closeCsvLogAsync` 가 끝까지 기다린다.
+ */
 export function closeCsvLog() {
   if (timer) { clearTimeout(timer); timer = null; }
-  if (buf.length && stream) { try { stream.write(buf.join('')); } catch { /* noop */ } }
+  const data = buf.length ? buf.join('') : '';
   buf = []; bufBytes = 0;
+  if (data) {
+    if (stream) { try { stream.write(data); } catch { try { appendSync(data); } catch { /* noop */ } } }
+    else { try { appendSync(data); } catch (e) { stats.lastError = e?.message || String(e); } }
+  }
   if (stream) { try { stream.end(); } catch { /* noop */ } stream = null; }
+}
+
+/**
+ * 정상 종료용(v2.591 L7): 잔여 버퍼를 넘기고 **스트림이 디스크까지 비워질 때(finish)** 까지 기다린다(상한 timeoutMs).
+ * 예전에는 write 직후 반환하고 곧바로 process.exit 해, 백프레셔 중 쌓인 조각이 잘렸다(재현: 60,000행 → 디스크 573행).
+ */
+export function closeCsvLogAsync(timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    const s = stream;
+    closeCsvLog();                       // 버퍼를 스트림에 넘기고 end() — stream 변수는 null 이 된다
+    if (!s || s.writableFinished || s.destroyed) return resolve();
+    const t = setTimeout(resolve, Math.max(100, timeoutMs));
+    t.unref?.();
+    const fin = () => { clearTimeout(t); resolve(); };
+    s.once('finish', fin);
+    s.once('error', fin);
+  });
 }
 
 /** 설정 화면용 현황. */

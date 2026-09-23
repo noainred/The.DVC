@@ -143,7 +143,8 @@ export function buildDataFlow(p = {}) {
   };
 
   for (const row of p.ingest?.rows || []) {
-    const e = edgeOf(row.agent);
+    // v2.591(PR-2): 수신 행도 이름 검증 여부를 싣는다(예전엔 무조건 검증됨 — 공유 토큰의 주장 이름이 검증된 엣지로 그려졌다).
+    const e = edgeOf(row.agent, { verified: row.verified !== false });
     for (const ep of row.byEndpoint || []) {
       const s = slot(e, ensureRoute('central', 'POST', t(ep.endpoint)));
       s.okAt = Math.max(s.okAt, Number(ep.lastAt) || 0);

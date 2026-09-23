@@ -249,8 +249,8 @@ export default function GuestDiskDetailModal({ vm, initUnit = 'auto', usageFacto
                   {(d.partitions || []).map((p) => {
                     const rp = p.capGB > 0 ? Math.round((p.usedGB / p.capGB) * 1000) / 10 : null;
                     return (
-                      <tr key={p.path}>
-                        <td>{p.path}</td>
+                      <tr key={p.path} style={p.removed ? { opacity: 0.6 } : undefined}>
+                        <td>{p.path}{p.removed && <span className="muted" style={{ fontSize: 11 }}> · 제거됨</span>}</td>
                         <td data-sort={p.capGB} className="gd-num">{fmtSize(p.capGB, dispUnit)}</td>
                         <td data-sort={p.usedGB} className="gd-num">{fmtSize(p.usedGB, dispUnit)}</td>
                         <td data-sort={p.freeGB} className="gd-num" style={{ color: '#4ade80' }}>{fmtSize(p.freeGB, dispUnit)}</td>
@@ -271,7 +271,7 @@ export default function GuestDiskDetailModal({ vm, initUnit = 'auto', usageFacto
               {(d.partitions || []).map((p) => (
                 <div key={p.path} className="card gd-part-card">
                   <div className="flex between" style={{ alignItems: 'baseline', marginBottom: 4 }}>
-                    <b style={{ fontSize: 12.5 }}>{p.path}</b>
+                    <b style={{ fontSize: 12.5 }}>{p.path}{p.removed && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> · 제거됨(최근 수집에 없음)</span>}</b>
                     <span className="muted" style={{ fontSize: 11 }}>사용 {fmtSize(p.usedGB, dispUnit)} / 할당 {fmtSize(p.capGB, dispUnit)} · 여유 <b style={{ color: '#4ade80' }}>{fmtSize(p.freeGB, dispUnit)}</b></span>
                   </div>
                   <TrendChart rows={toRows(p.trend?.points, div)} unitLabel={dispUnit} days={days} capGB={p.capGB != null ? p.capGB / div : null} height={150} />

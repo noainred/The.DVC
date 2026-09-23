@@ -6,14 +6,18 @@
 
 import { loadLlmConfig } from './config.js';
 import { ollamaGenerate } from './ollama.js';
-import { nlSearch } from './nlSearch.js';
+import { nlSearch, NL_ENTITY_PERM } from './nlSearch.js';
 import { store } from '../store.js';
 import { alertStatus } from '../alerts.js';
 
 const pct = (n) => (Number.isFinite(n) ? Math.round(n) : 0);
 
-/** 스냅샷 → LLM에 줄 컴팩트 컨텍스트(수MB가 아니라 핵심 수치만). allowed 로 사용자 scope 강제. */
-function buildContext(allowed = null) {
+/**
+ * 스냅샷 → LLM에 줄 컴팩트 컨텍스트(수MB가 아니라 핵심 수치만). allowed 로 사용자 scope 강제.
+ * v2.591 S1: `can(permKey)` 로 **이름** 을 가린다 — 개수는 대시보드 수준(v2.536 이 집계를 dashboard 로 둔 경계)이지만
+ * 호스트·데이터스토어·경보 **이름**은 inv.* 권한 없이 주지 않는다(`/search/nl` v2.583 수정의 형제 누락이었다).
+ */
+function buildContext(allowed = null, can = () => true) {
   const snap = store.get();
   const inScope = (x) => !allowed || allowed.has(x.vcenterId);
   const hosts = (snap.hosts || []).filter(inScope);
@@ -35,9 +39,9 @@ function buildContext(allowed = null) {
       `생성시각: ${snap.generatedAt}`,
       `vCenter ${vcenters.length}개: ${vcLines.join(', ')}`,
       `호스트 ${hosts.length}개, VM ${vms.length}개(가동 ${onVms.length}), 데이터스토어 ${ds.length}개`,
-      `CPU 상위: ${topCpu.join(', ') || '없음'}`,
-      `포화 임박 데이터스토어: ${fullDs.join(', ') || '없음'}`,
-      `진행중 경보 ${firingAll.length}건: ${firing.join('; ') || '없음'}`,
+      `CPU 상위: ${can('inv.hosts') ? (topCpu.join(', ') || '없음') : '(호스트 조회 권한 없음 — 이름 생략)'}`,
+      `포화 임박 데이터스토어: ${can('inv.datastores') ? (fullDs.join(', ') || '없음') : '(데이터스토어 조회 권한 없음 — 이름 생략)'}`,
+      `진행중 경보 ${firingAll.length}건: ${can('inv.alarms') ? (firing.join('; ') || '없음') : '(경보 조회 권한 없음 — 내용 생략)'}`,
     ].join('\n'),
     counts: { vcenters: vcenters.length, hosts: hosts.length, vms: vms.length, onVms: onVms.length, firing: firingAll.length },
   };
@@ -48,15 +52,24 @@ function buildContext(allowed = null) {
  * - LLM 켜져 있으면 컨텍스트+질문으로 답변 생성.
  * - "조회/목록/몇 개" 류 질문은 nlSearch로 실제 데이터도 함께 첨부.
  */
-export async function chatOps(question, allowed = null) {
+export async function chatOps(question, allowed = null, { can = () => true } = {}) {
   const q = String(question || '').trim();
   if (!q) return { answer: '질문을 입력하세요.', source: 'none' };
-  const ctx = buildContext(allowed);
+  const ctx = buildContext(allowed, can);
 
   // 데이터 조회 의도가 있으면 nlSearch 결과를 근거로 첨부(사용자 scope 관통).
+  // v2.591 S1: 결과는 원본 객체라 그 종류의 조회 권한(inv.*)이 없으면 싣지 않는다 — 가린 사실은 withheld 로 밝힌다.
   let search = null;
   if (/(몇|개수|목록|리스트|보여|찾아|조회|이상|초과|넘는|top|상위)/i.test(q)) {
-    try { const r = await nlSearch(q, allowed); if (r && r.total != null) search = { entity: r.entity, total: r.total, summary: r.summary, sample: (r.results || []).slice(0, 10) }; } catch { /* 무시 */ }
+    try {
+      const r = await nlSearch(q, allowed);
+      if (r && r.total != null) {
+        const need = NL_ENTITY_PERM[r.entity];
+        search = need && !can(need)
+          ? { entity: r.entity, withheld: true, requiredPerm: need }
+          : { entity: r.entity, total: r.total, summary: r.summary, sample: (r.results || []).slice(0, 10) };
+      }
+    } catch { /* 무시 */ }
   }
 
   const cfg = loadLlmConfig();
@@ -64,7 +77,8 @@ export async function chatOps(question, allowed = null) {
     // 폴백: 컨텍스트 + 검색결과를 결정적으로 요약.
     const lines = ['(LLM 비활성 — 규칙 기반 요약. 설정 › AI 검색에서 Ollama 활성화 시 자연어 답변)'];
     lines.push(ctx.text);
-    if (search) lines.push(`\n질의 결과: ${search.entity} ${search.total}건 — ${search.summary || ''}`);
+    if (search?.withheld) lines.push(`\n질의 결과: ${search.entity} — 조회 권한(${search.requiredPerm})이 없어 표시하지 않습니다.`);
+    else if (search) lines.push(`\n질의 결과: ${search.entity} ${search.total}건 — ${search.summary || ''}`);
     return { answer: lines.join('\n'), source: 'fallback', context: ctx.counts, search };
   }
 
@@ -74,7 +88,7 @@ export async function chatOps(question, allowed = null) {
     '',
     '== 인프라 현황 ==',
     ctx.text,
-    search ? `\n== 질의 데이터(${search.entity} ${search.total}건) ==\n${(search.sample || []).map((x) => x.name || x.id).join(', ')}` : '',
+    search && !search.withheld ? `\n== 질의 데이터(${search.entity} ${search.total}건) ==\n${(search.sample || []).map((x) => x.name || x.id).join(', ')}` : '',
     '',
     `== 질문 ==\n${q}`,
     '',

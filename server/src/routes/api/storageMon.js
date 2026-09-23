@@ -23,7 +23,7 @@ import { devicesToCsv, sampleCsv, parseDevicesCsv, analyzeImport, methodChangeHi
   devicesToText, sampleText, parseDevicesText, TEXT_FIELDS } from '../../storage/csv.js';
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
-import { requestCollect, hasPendingRequest } from '../../storage/collectRequests.js';
+import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../storage/collectRequests.js';
 import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgent,
   envIntervals, runtimeIntervalSource, applyOwnIntervals } from '../../storage/intervals.js';
 
@@ -59,6 +59,8 @@ api.get('/tools/storage', toolsPerm, fullScopeOnly, (_req, res) => {
     // iDRAC 위임과 동일 소스). 토큰 미발급(공유 CENTRAL_TOKEN) 환경에서도 엣지를 고를 수 있다.
     agents: knownAgentNames(),
     poller: storagePollerStatus(),
+    // v2.591: 엣지가 가져갔지만 새 수집 결과가 오지 않아 재인출 뒤 폐기한 '지금 수집' 요청 — 화면이 말한다(조용한 소실 금지).
+    collectDrops: recentCollectDrops(),
     // v2.581(BUG-D): 엣지별 보고 요약 — 장비 보고 시각·대수 + 상태 전용 보고(0대). 화면이 '엣지가 0대라고
     // 보고했다' 와 '엣지가 아무것도 안 보냈다' 를 구분해 말한다.
     edgeReports: edgeStorageReports(),
@@ -212,7 +214,8 @@ api.post('/tools/storage/devices/:id/collect', adminOnly, async (req, res) => {
           ? `이미 재수집 요청이 대기 중입니다 — 엣지 '${dev.agent}' 의 다음 pull(≤5분) 시 즉시 수집·push 됩니다.`
           : `재수집 요청 등록 — 엣지 '${dev.agent}' 가 다음 pull(≤5분) 시 즉시 수집하고 바로 push 합니다.` });
     }
-    await collectDeviceNow(req.params.id);
+    // v2.591 L1: 이미 수집 중이면 새 세션을 열지 않는다 — '됐다' 고 말하지 않고 409 로 그 사실을 알린다.
+    if (!(await collectDeviceNow(req.params.id))) return res.status(409).json({ ok: false, busy: true, reason: '이 장비는 지금 수집 중입니다 — 끝나면 결과가 표에 반영됩니다(같은 장비에 세션을 두 개 열지 않습니다).' });
     logAudit({ user: req.user?.username, action: '스토리지 즉시 수집', target: req.params.id });
     res.json({ ok: true });
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }

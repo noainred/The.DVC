@@ -119,7 +119,13 @@ centralRouter.use((req, res, next) => {
   if (req.method === 'POST') {
     res.on('finish', () => {
       try {
-        const agent = String(req.body?.agent || req.get('X-Agent-Name') || '').trim() || '(unknown)';
+        // v2.591(3차 감사 PR-1·PR-2): 이름은 **인증된 토큰의 것이 먼저**다. 예전에는 본문 agent 를 그대로 Map 키로 써서
+        //   ① 개별 토큰 edge-a 가 본문에 edge-b 를 적으면 저장은 edge-a, 집계는 edge-b(죽은 엣지를 살아 있게 그림)였고
+        //   ② 본문 agent 에 길이 상한이 없어 5MB 문자열 30개로 중앙 RSS 가 179→726MB, 데이터 흐름 지도가 10초 멈춘 뒤 500 이었다.
+        //   공유 토큰이면 주장된 이름을 쓰되 64자로 자르고 verified:false 로 남긴다(형제 ingestReject·pullStats 와 같은 상한).
+        const auth = req.centralAuth;
+        const verified = !!auth?.ok && auth.mode === 'agent';
+        const agent = (verified ? String(auth.agent || '') : String(req.body?.agent || req.get('X-Agent-Name') || '')).trim().slice(0, 64) || '(unknown)';
         const wireBytes = Number(req.get('content-length')) || 0;
         if (res.statusCode >= 400) {
           // v2.570 — 거부는 **수신 집계에서 빼되 따로 기록**한다. 예전에는 여기서 그냥 return 해
@@ -140,12 +146,12 @@ centralRouter.use((req, res, next) => {
         if (!wireBytes && agent === '(unknown)') return;
         // 인벤토리 push는 페이로드 규모(vCenter·호스트·VM 수)도 함께 기록 → '왜 큰지' 바로 파악.
         const b = req.body || {};
-        const summary = req.path === '/inventory'
-          ? { vcenterId: b.vcenterId || '', hosts: (b.hosts || []).length, vms: (b.vms || []).length,
+        const summary = res.locals?.ingestSummary || (req.path === '/inventory'
+          ? { vcenterId: String(b.vcenterId || '').slice(0, 128), hosts: (b.hosts || []).length, vms: (b.vms || []).length,
               datastores: (b.datastores || []).length, networks: (b.networks || []).length, alarms: (b.alarms || []).length,
               gzip: (req.get('content-encoding') || '').includes('gzip') }
-          : null;
-        recordIngest(agent, req.path, { wireBytes, summary });
+          : null);
+        recordIngest(agent, req.path, { wireBytes, summary, verified });
         // 무압축 대형 인벤토리 push 경고 승격(v2.344, #12) — 진단 표에만 보이던 '무압축(구버전
         // 엣지 추정)'을 알림 채널로. 연속 임계는 추적기가, 재발화 억제는 warned 래치+notify
         // 전역 억제 창이 담당. 알림 실패가 수신 경로를 막지 않게 catch.
@@ -408,10 +414,9 @@ centralRouter.post('/svcmon-report', (req, res) => {
   // 소켓 관측 주소 — 통신 진단(probe)의 목적지. 프록시 뒤면 프록시 주소일 수 있다.
   const sourceIp = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
   const r = ingestReport(agent, req.body || {}, Date.now(), { sourceIp });
-  recordIngest(agent, 'svcmon-report', {
-    wireBytes: Number(req.get('content-length')) || 0,
-    summary: { accepted: r.accepted, dropped: r.dropped, rows: Array.isArray(req.body?.rows) ? req.body.rows.length : 0 },
-  });
+  // v2.591(PR-2 ③): 예전에는 여기서 슬래시 없는 키('svcmon-report')로 **한 번 더** recordIngest 해 pushes 가 두 배가 되고
+  //   데이터 흐름 지도가 그 키를 '라우터에 없는 경로(구버전 엣지일 수 있음)' 로 말했다. 요약만 넘기고 기록은 공용 훅이 한다.
+  res.locals.ingestSummary = { accepted: r.accepted, dropped: r.dropped, rows: Array.isArray(req.body?.rows) ? req.body.rows.length : 0 };
   if (!r.ok) return res.status(400).json(r);
   res.json(r);
 });
@@ -453,10 +458,7 @@ centralRouter.post('/capacity-report', async (req, res) => {
     const db = await getCapacityDb();
     // 빈 rows 도 hosts.lastTs 는 갱신한다 — '살아 있으나 첫 델타 기준선 중'과 '죽음'을 구별(하트비트).
     db.insertSnapshot(agent, rows, Date.now(), meta);
-    recordIngest(agent, 'capacity-report', {
-      wireBytes: Number(req.get('content-length')) || 0,
-      summary: { rows: rows.length },
-    });
+    res.locals.ingestSummary = { rows: rows.length }; // v2.591(PR-2 ③): 기록은 공용 훅이 한다(이중 기록 제거)
     res.json({ ok: true, accepted: rows.length });
   } catch (e) {
     res.status(500).json({ ok: false, reason: `저장 실패: ${e.message}` });
@@ -818,8 +820,10 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
   const b = req.body || {};
   const agent = req.centralAuth.agent || String(b.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  let hosts = Array.isArray(b.hosts) ? b.hosts.slice(0, 50_000) : [];
-  let vms = Array.isArray(b.vms) ? b.vms.slice(0, 500_000) : [];
+  // v2.591(3차 감사 PR-8): null·문자열 원소를 건너뛴다(v2.548 S1 규약) — `{"hosts":[null]}` 가 `h.hostId` TypeError → 500 이었다.
+  const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
+  let hosts = Array.isArray(b.hosts) ? b.hosts.slice(0, 50_000).filter(isObj) : [];
+  let vms = Array.isArray(b.vms) ? b.vms.slice(0, 500_000).filter(isObj) : [];
   // 엣지 간 쓰기 격리: hostId/vmId 는 `${vc.id}:${moRef}` 네임스페이스다. 개별 토큰(agent 모드)일 때,
   // 그 vCenter 를 소유(최초 등록)한 엣지가 아니면 그 항목을 버린다 — 한 엣지가 남의 vCenter GPU
   // 오버레이를 덮어쓰는 것을 차단(/inventory TOFU 소유권과 동일 모델). 미등록 vCenter(owner='')는

@@ -8,7 +8,7 @@
  */
 
 import { currentVersion, config } from '../config.js';
-import { loadSettings, saveSettings, redactSettings } from './settings.js';
+import { loadSettings, saveSettings, redactSettings, clampPollMs } from './settings.js';
 import { checkpointConfigDbs } from './dbCheckpoint.js';
 import {
   findNewerArchive, upgradeFromArchive, checkRemote, upgradeFromRemote,
@@ -133,8 +133,10 @@ class UpgradeManager {
   #restartTimer() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     const s = this.settings;
-    if (s.enabled && s.pollIntervalMs > 0) {
-      this.timer = setInterval(() => this.tick().catch((e) => console.error('[upgrade] tick error:', e.message)), s.pollIntervalMs);
+    // v2.591 L3: env·옛 파일의 값도 같은 범위로(저장 시 클램프만으로는 env 기본값이 새지 않는다).
+    const ms = clampPollMs(s.pollIntervalMs);
+    if (s.enabled && ms > 0) {
+      this.timer = setInterval(() => this.tick().catch((e) => console.error('[upgrade] tick error:', e.message)), ms);
       this.timer.unref?.();
       this.tick().catch(() => {});
     }
@@ -148,13 +150,19 @@ class UpgradeManager {
     this.#restartTimer();
   }
 
+  // v2.591 L3: 재진입 가드 — 확인이 주기를 넘기면(고RTT 원격 소스) 겹쳐 실행되고, autoApply 면 apply() 가 겹칠 수 있다.
+  #ticking = false;
   async tick() {
-    const check = await this.check();
-    const newer = check.watch?.available || check.remote?.available;
-    if (newer && this.settings.autoApply) {
-      console.log('[upgrade] 새 버전 감지 — 적용 후 재시작합니다');
-      await this.apply({ source: 'auto', restart: true });
-    }
+    if (this.#ticking) return;
+    this.#ticking = true;
+    try {
+      const check = await this.check();
+      const newer = check.watch?.available || check.remote?.available;
+      if (newer && this.settings.autoApply) {
+        console.log('[upgrade] 새 버전 감지 — 적용 후 재시작합니다');
+        await this.apply({ source: 'auto', restart: true });
+      }
+    } finally { this.#ticking = false; }
   }
 }
 

@@ -51,6 +51,9 @@ export function aggregatePhysical(servers, invOf) {
     if (cap.memGiB != null) { out.withMemory++; out.memGiB += cap.memGiB; }
   }
   out.memGiB = Math.round(out.memGiB);
-  out.memGB = Math.round(out.memGiB * 1.073741824);   // GiB → GB(10진) — vCenter 카드의 GB 와 같은 단위로 병기
+  // v2.591 C6: vCenter 카드의 'GB' 는 실제로 **GiB** 다(memorySize/1048576 → MB, /1024 → GB). 예전에는 여기서 10진 GB 로
+  //   바꿔(×1.0737) '같은 단위' 라 적었는데 반대였다 — 같은 카드에 병기된 두 값이 7.4% 어긋났다(1 TiB 서버 = ESXi 1024 · 물리 1100).
+  //   카드와 같은 이진 단위로 싣는다(이름은 호환을 위해 memGB 를 유지한다).
+  out.memGB = out.memGiB;
   return out;
 }

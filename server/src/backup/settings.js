@@ -10,6 +10,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { createBackup, isRuntimeStateFile } from './service.js';
+import { every as everyLong } from '../util/longTimer.js';
 
 const FILE = path.join(config.configDir, 'backup.json');
 
@@ -59,19 +60,21 @@ function safeBackup(reason) {
   try {
     // v2.590 P1: 'change' 는 설정 내용이 직전 백업과 같으면 만들지 않는다(상태 파일만 바뀐 경우). 건너뛴 사실은 lastSkip 으로 남긴다.
     const m = createBackup(reason, { retention: loadBackupSettings().retention, skipIfUnchanged: reason === 'change' });
-    if (m.skipped) { lastSkip = { at: Date.now(), reason, why: m.why }; return null; }
-    lastRun = { at: Date.now(), reason, name: m.name, size: m.size, skipped: m.skipped?.length || 0 }; return m;
+    // v2.591 L5: `m.skipped` 는 성공한 백업에서도 **배열**(크기 상한으로 뺀 파일 — v2.590 D5)이라 빈 배열도 참이다. 그 값으로
+    //   '생략' 을 판정하면 모든 자동 백업이 lastSkip 으로 가고 lastRun 이 영원히 비어 서비스 점검이 '백업 없음' 이라 말했다.
+    if (m.skipped === true) { lastSkip = { at: Date.now(), reason, why: m.why }; return null; }
+    lastRun = { at: Date.now(), reason, name: m.name, size: m.size, skipped: Array.isArray(m.skipped) ? m.skipped.length : 0 }; return m;
   }
   catch (e) { console.warn(`[backup] ${reason} 백업 실패: ${e.message}`); return null; }
 }
 
 function reschedule() {
   const s = loadBackupSettings();
-  if (schedTimer) { clearInterval(schedTimer); schedTimer = null; }
+  if (schedTimer) { schedTimer.clear(); schedTimer = null; }
   if (s.scheduleEnabled) {
     const ms = Math.max(60_000, (Number(s.every) || 1) * (UNIT_MS[s.unit] || UNIT_MS.day));
-    schedTimer = setInterval(() => safeBackup('schedule'), ms);
-    schedTimer.unref?.();
+    // v2.591 L2: setInterval 은 24.8일(2^31−1ms)을 넘으면 1ms 로 바뀐다(월 1회·600시간 이상 설정) — 조각 타이머로 건다.
+    schedTimer = everyLong(() => safeBackup('schedule'), ms);
     console.log(`[backup] 정기 백업 활성: 매 ${s.every} ${s.unit} (보관 ${s.retention})`);
   }
 }

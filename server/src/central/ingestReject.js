@@ -25,6 +25,7 @@ export const REJECT_KIND = Object.freeze({
   BAD: 'bad-request',    // 400 그 밖(형식·필수값)
   DISABLED: 'disabled',  // 404 중앙 수신 비활성
   SERVER: 'server',      // 5xx 중앙 오류
+  TOO_LARGE: 'too-large', // 413 본문이 중앙 파서 한도를 넘음(v2.591 PR-6 — 예전엔 거부 기록에 아예 안 남았다)
   OTHER: 'other',
 });
 
@@ -48,6 +49,7 @@ export function rejectKindOf(status, hint) {
   if (s === 404) return REJECT_KIND.DISABLED;
   if (s >= 500) return REJECT_KIND.SERVER;
   if (s === 400) return REJECT_KIND.BAD;
+  if (s === 413) return REJECT_KIND.TOO_LARGE;
   return REJECT_KIND.OTHER;
 }
 

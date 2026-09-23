@@ -26,7 +26,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { recordActivity } from '../sanswitch/perfActivityLog.js';
 import { numOrNull } from '../util/numOrNull.js';
-import { ackPerfCollect } from '../sanswitch/collectRequests.js';
+import { ackPerfCollect, setPerfBaseResolver } from '../sanswitch/collectRequests.js';
 
 const FILE = path.join(config.configDir, 'central-agent-sanswitch-perf.json');
 const MAX_DEVICES_PER_AGENT = 300;
@@ -40,6 +40,12 @@ function load() {
   catch { _map = new Map(); }   // 없거나 손상 — 다음 push 가 재구축
   return _map;
 }
+
+// v2.591: 사용량 '지금 수집' 요청의 기준선 — 보관 중인 그 엣지 상태의 at(엣지 시계 값). 큐는 소문자 키다.
+setPerfBaseResolver((a) => {
+  for (const [k, v] of load()) if (String(k).toLowerCase() === String(a)) return Number(v?.status?.at) || null;
+  return null;
+});
 
 
 /** 엣지가 보고한 상태를 정규화(신뢰 경계 — 형식·상한을 여기서 강제한다). */
@@ -79,7 +85,9 @@ export function saveEdgePerfStatus(agent, status, { owned = null, names = null }
   if (owned) st.devices = st.devices.filter((d) => owned.has(String(d.id)));
   const m = load();
   m.set(a, { at: Date.now(), status: st });
-  ackPerfCollect(a); // v2.590 P16: 사용량 '지금 수집' 요청의 완료 확인(엣지가 상태를 올렸다)
+  // v2.591: 상태의 at(엣지의 마지막 사용량 수집 시각)이 인출 때 기준선보다 새면 완료 — 하트비트 도착만으로 완료하지 않는다.
+  // at 이 없으면(아직 한 번도 수집 안 함) 완료로 보지 않는다(요청은 시한 뒤 폐기 목록으로 밝혀진다).
+  if (st.at != null) ackPerfCollect(a, st.at);
   if (m.size > MAX_AGENTS) for (const k of [...m.keys()].slice(0, m.size - MAX_AGENTS)) m.delete(k);
   try { atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(m)), { mode: 0o600 }); }
   catch { /* 영속 실패는 무시 — 인메모리는 유지 */ }

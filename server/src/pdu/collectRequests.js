@@ -21,13 +21,20 @@ import { createCollectRequestQueue } from '../util/collectRequestQueue.js';
 // v2.590 P16: 인출 즉시 지우던 one-shot 을 claim→ack 로 바꿨다(코어 util/collectRequestQueue.js 머리말 참조).
 // 엣지가 인출한 뒤에도 그 장비의 새 수집 결과가 올 때까지 '요청 대기' 가 유지되고, 결과가 없으면 한 번 재인출한다.
 const TTL_MS = 15 * 60_000;
-const Q = createCollectRequestQueue({ ttlMs: TTL_MS });
+// v2.591: 엣지는 pull 당 20대만 처리한다(`agent/*ConfigPull.js slice(0,20)`) — 그만큼만 인출하고,
+// 결과 시한은 인출 대수 × 장비 시한(엣지가 순차 수집 후 한 번에 push 한다)을 더해 잡는다. 기준선은 보관 중인 엣지 스냅샷에서.
+export const TAKE_MAX = 20;
+const PER_ITEM_MS = Math.max(10_000, Number(process.env.PDU_DEVICE_TIMEOUT_MS) || 90_000);
+let _baseOf = null;
+/** 엣지 수신 모듈이 등록한다 — deviceId → 보관 중인 엣지 스냅샷의 collectedAt(엣지 시계 값). 순환 import 를 피하려는 등록식. */
+export function setCollectBaseResolver(fn) { _baseOf = typeof fn === 'function' ? fn : null; }
+const Q = createCollectRequestQueue({ ttlMs: TTL_MS, perItemMs: PER_ITEM_MS, baseOf: (id) => (_baseOf ? _baseOf(id) : null) });
 
 /** 수집 요청 등록(중앙에서 '수집' 클릭). agent 는 그 장비의 위임 엣지 이름. */
 export function requestCollect(deviceId, agent) { const r = Q.request(deviceId, agent); return { pending: r.pending }; }
 
 /** 이 엣지 몫 요청을 인출(config 서빙 시 호출) — 지우지 않고 진행 중으로 옮긴다(결과 도착 시 ackCollect). */
-export function takeRequestsForAgent(agentName) { return Q.take(agentName); }
+export function takeRequestsForAgent(agentName) { return Q.take(agentName, Date.now(), TAKE_MAX); }
 
 /** 엣지 push 로 그 장비의 새 수집 결과가 도착했다 — 인출 이후 수집이면 요청 완료. */
 export function ackCollect(deviceId, collectedAt = null) { return Q.ack(deviceId, collectedAt); }
@@ -36,5 +43,7 @@ export function ackCollect(deviceId, collectedAt = null) { return Q.ack(deviceId
 export function hasPendingRequest(deviceId) { return Q.has(deviceId); }
 export function requestState(deviceId) { return Q.state(deviceId); }
 export function lastDroppedRequest() { return Q.lastDropped(); }
+/** 최근 폐기된 요청(결과가 오지 않아 재인출까지 해 보고 버린 것) — 목록 API 가 화면에 싣는다(v2.591). */
+export function recentCollectDrops() { return Q.drops(); }
 export function pendingCount() { return Q.pendingCount(); }
 export function _resetForTest() { Q._reset(); }

@@ -20,7 +20,7 @@ import { listActivity as listSwActivity } from '../../sanswitch/activityLog.js';
 import { zonesFromCompact, buildZoneGraph, buildZoneMatrix, zoneFindings, zoneSummary, portZoneDetail, classifyEndpoints } from '../../sanswitch/zoning.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
-import { requestCollect, hasPendingRequest, requestPerfCollect, hasPendingPerfRequest } from '../../sanswitch/collectRequests.js';
+import { requestCollect, hasPendingRequest, requestPerfCollect, hasPendingPerfRequest, recentCollectDrops } from '../../sanswitch/collectRequests.js';
 import { loadPerfSettings, savePerfSettings, LIMITS as PERF_LIMITS } from '../../sanswitch/perfSettings.js';
 import { pollPerfOnce, sanSwitchPerfStatus } from '../../sanswitch/perfPoller.js';
 import { listActivity as listPerfActivity, latestEventByDevice as latestPerfEventByDevice } from '../../sanswitch/perfActivityLog.js';
@@ -106,6 +106,8 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (_req, res) => {
     datacenters: (() => { try { return listDatacenters(); } catch { return []; } })(),
     agents: knownAgentNames(),
     poller: sanSwitchPollerStatus(),
+    // v2.591: 엣지가 가져갔지만 새 수집 결과가 오지 않아 재인출 뒤 폐기한 '지금 수집' 요청 — 화면이 말한다(조용한 소실 금지).
+    collectDrops: recentCollectDrops(),
   });
 });
 
@@ -257,7 +259,8 @@ api.post('/tools/sanswitch/devices/:id/collect', adminOnly, async (req, res) => 
       return res.status(202).json({ ok: true, requested: true,
         reason: `${dup ? '이미 재수집 요청이 대기 중입니다' : '재수집 요청 등록'} — 엣지 '${dev.agent}' 의 다음 설정 pull 때 즉시 수집하고 바로 push 합니다.` });
     }
-    await collectDeviceNow(req.params.id);
+    // v2.591 L1: 이미 수집 중이면 새 세션을 열지 않는다 — '됐다' 고 말하지 않고 409 로 그 사실을 알린다.
+    if (!(await collectDeviceNow(req.params.id))) return res.status(409).json({ ok: false, busy: true, reason: '이 장비는 지금 수집 중입니다 — 끝나면 결과가 표에 반영됩니다(같은 장비에 세션을 두 개 열지 않습니다).' });
     logAudit({ user: req.user?.username, action: 'SAN 스위치 즉시 수집', target: req.params.id });
     res.json({ ok: true });
   } catch (e) { res.status(502).json({ ok: false, reason: e.message }); }

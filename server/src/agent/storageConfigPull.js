@@ -7,6 +7,7 @@
  */
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../storage/registry.js';
 import { collectDeviceNow } from '../storage/poller.js';
@@ -20,6 +21,8 @@ const configPullMs = () => runtimeIntervals().configPullMs;
 let _timer = null;
 let _lastSig = '';
 let _last = null;
+// v2.591(3차 감사 PR-7): 실패를 상태뿐 아니라 콘솔에도(같은 사유는 10분에 한 번) — 403·5xx 가 저널 어디에도 안 남았다.
+const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 // 재진입 가드(single-flight) — CLAUDE.md 성능 불변조건: setInterval(()=>asyncFn()) 폴러는
 // 이전 주기가 간격을 넘기면(고RTT·중앙 지연) 다음 틱이 겹쳐 돌아 연결·CPU 가 누적된다.
 // 수동 실행 API 도 같은 exported 함수를 부르므로 가드를 공유한다(inventoryPush 와 동일 패턴).
@@ -61,7 +64,8 @@ async function _pullStorageConfigNow() {
     if (wants.length) {
       console.log(`[storage-config] 중앙 재수집 요청 ${wants.length}건 수신 — 즉시 수집`);
       for (const id of wants) {
-        try { await collectDeviceNow(String(id)); collected++; }
+        // v2.591 L1: false = 이미 수집 중(주기 수집) — 그 결과가 곧 push 되므로 새 세션을 열지 않는다.
+        try { if (await collectDeviceNow(String(id))) collected++; else console.log(`[storage-config] ${id} 는 이미 수집 중 — 그 결과로 대신합니다`); }
         catch (e) { console.warn(`[storage-config] 재수집 실패(${id}): ${e.message}`); } // 실패 스냅샷도 push 로 전달됨
       }
       try { await pushStorageNow(); } catch (e) { console.warn(`[storage-config] 재수집 push 실패: ${e.message}`); }
@@ -70,7 +74,11 @@ async function _pullStorageConfigNow() {
       intervals: runtimeIntervals(), intervalsApplied: !!intervalsApplied.applied };
     return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected,
       intervals: runtimeIntervals(), intervalsApplied: !!intervalsApplied.applied };
-  } catch (e) { _last = { at: Date.now(), error: e.message }; return { ok: false, reason: e.message }; }
+  } catch (e) {
+    _last = { at: Date.now(), error: e.message };
+    if (_logChange('pull', e.message)) console.warn(`[storage-config] 중앙 설정 pull 실패: ${e.message}`);
+    return { ok: false, reason: e.message };
+  }
 }
 
 export function startStorageConfigPull() {

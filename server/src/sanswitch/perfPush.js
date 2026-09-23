@@ -16,6 +16,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, currentVersion } from '../config.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { samplesAfter, metaFor, maxRowid } from './perfDb.js';
 import { loadPerfSettings } from './perfSettings.js';
@@ -32,6 +33,7 @@ export const perfPushMs = () => Math.max(60_000, Number(process.env.SANSW_PERF_P
 
 let _timer = null;
 let _busy = false;
+const _hbLog = createChangeLogger({ windowMs: 10 * 60_000 });
 let _last = null;
 
 function loadCursor() {
@@ -144,6 +146,8 @@ export async function pushPerfNow() {
        */
       const r = await sendStatusOnly(status);
       _last = { at: Date.now(), sent: 0, cursor: from, statusSent: r.ok, statusError: r.ok ? null : r.reason };
+      // v2.591(PR-7): 하트비트 실패도 콘솔에(예전엔 statusError 에만 — 저널에서 안 보였다). 같은 사유는 10분에 한 번.
+      if (!r.ok && _hbLog('status', r.reason)) console.warn(`[sanswitch-perf-push] 상태 보고 실패: ${r.reason}`);
       return { ok: true, sent: 0, statusSent: r.ok };
     }
     const meta = await metaFor(rows.map((r) => r.d));

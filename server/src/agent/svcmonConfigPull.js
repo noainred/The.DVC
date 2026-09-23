@@ -22,6 +22,7 @@
  */
 
 import { config } from '../config.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { bulkAddTargets, deleteTargetsByBatch, batchCounts, LIMITS } from '../svcmon/store.js';
 
@@ -38,6 +39,8 @@ let timer = null;
 let running = false;
 let appliedSig = '';        // 마지막으로 적용에 성공한 sig
 let last = null;
+// v2.591(3차 감사 PR-7): 실패를 상태뿐 아니라 콘솔에도(같은 사유는 10분에 한 번) — 403·5xx 가 저널 어디에도 안 남았다.
+const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 let unsupportedUntil = 0;
 
 function headers() {
@@ -79,7 +82,15 @@ export async function pullSvcmonConfigNow() {
       unsupportedUntil = Date.now() + 3_600_000;
       return { ok: false, reason: '중앙이 /api/central/svcmon-config 를 지원하지 않습니다(1시간 후 재시도).' };
     }
-    if (!res.ok) return { ok: false, reason: `pull → ${res.status}` };
+    if (!res.ok) {
+      // v2.591(PR-7): 예전엔 상태(last)에도 안 남았다 — svcmon-config 는 개별 토큰 전용이라 공유 토큰 엣지는 **영구 403** 인데 흔적이 없었다.
+      let why = '';
+      try { const b = await res.json(); why = String(b?.reason || '').slice(0, 200); } catch { /* 본문 없음 */ }
+      const reason = `pull → ${res.status}${why ? ` — ${why}` : ''}`;
+      last = { at: Date.now(), error: reason };
+      if (_logChange('pull', reason)) console.warn(`[svcmon-pull] 중앙 정의 pull 실패: ${reason}`);
+      return { ok: false, reason };
+    }
     const d = await res.json();
     if (!d?.assigned) { last = { at: Date.now(), assigned: false }; return { ok: true, assigned: false }; }
     if (d.unchanged) { last = { at: Date.now(), assigned: true, unchanged: true, sig: d.sig }; return { ok: true, unchanged: true, sig: d.sig }; }
@@ -129,6 +140,7 @@ export async function pullSvcmonConfigNow() {
     return { ok: !errors.length, ...last };
   } catch (e) {
     last = { at: Date.now(), error: e?.message || String(e) };
+    if (_logChange('pull', last.error)) console.warn(`[svcmon-pull] 실패: ${last.error}`);
     return { ok: false, reason: last.error };
   } finally {
     running = false;

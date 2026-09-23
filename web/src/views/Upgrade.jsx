@@ -175,8 +175,8 @@ export default function Upgrade() {
               <input className="input" type="password" value={form.token} onChange={setF('token')}
                 placeholder={status.hasToken ? '저장됨 (비우면 유지)' : '선택'} />
             </label>
-            <label>확인 주기 (분, 0=끔)
-              <input className="input" type="number" min="0" value={form.pollMinutes} onChange={setF('pollMinutes')} />
+            <label>확인 주기 (분, 0=끔 · 1~10080분 — 범위 밖은 서버가 맞춥니다)
+              <input className="input" type="number" min="0" max="10080" value={form.pollMinutes} onChange={setF('pollMinutes')} />
             </label>
           </div>
         </div>

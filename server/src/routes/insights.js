@@ -7,6 +7,7 @@ import { Router } from 'express';
 import { requireRole } from '../auth/auth.js';
 import { store } from '../store.js';
 import { scopedVcenterIds } from '../auth/scope.js';
+import { userHasPermission } from '../auth/permissions.js';
 // scope 강제 헬퍼(v2.288, 확정 버그 재발 방지): 조회 라우트는 사용자 scope 로 좁힌 스냅샷을 빌더에
 // 넘기고, 캐시 키에 scope 서명을 섞어 스코프가 다른 계정이 같은 캐시를 공유하지 못하게 한다.
 // (routes/api/reports.js 와 동일 패턴 — 그쪽은 memoJson, 여기선 snapMemo 캐시.)
@@ -271,6 +272,7 @@ insightsRouter.get('/incidents', (req, res) => res.json(getIncidents({
 
 // --- ChatOps(자연어 운영 질의) ---
 insightsRouter.post('/chatops', async (req, res) => {
-  try { res.json(await chatOps(req.body?.question || req.body?.q || '', scopedVcenterIds(req.user, store.get()))); }
+  // v2.591 S1: inv.* 권한이 없는 종류의 원본 객체·이름을 싣지 않는다(`/search/nl` 과 같은 기준).
+  try { res.json(await chatOps(req.body?.question || req.body?.q || '', scopedVcenterIds(req.user, store.get()), { can: (k) => userHasPermission(req.user, k) })); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

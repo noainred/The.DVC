@@ -81,6 +81,9 @@ export function startIpScanPoller() {
   const s = loadScanSettings();
   // 첫 스캔은 부팅 30초 후(다른 수집과 겹치지 않게), 이후 주기 반복.
   setTimeout(() => runScanOnce().catch((e) => console.error('[ipscan] 실패:', e.message)), 30_000).unref?.();
+  // v2.591 L9: 기동 스태거 전 reschedule 이 먼저 왔으면 그 interval 을 지운다(IP 스캔 주기가 두 벌이 되지 않게).
+  if (timer) clearInterval(timer);
+  if (releaseTimer) clearInterval(releaseTimer);
   timer = setInterval(() => runScanOnce().catch(() => {}), s.intervalMs);
   timer.unref?.();
   // 분산 에이전트가 중앙으로 보고하는 경우 로컬 스캔이 꺼져 있어도 '해제' 전이는 기록해야 하므로

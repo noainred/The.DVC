@@ -32,9 +32,21 @@ export const fmtPct = (n) => (num(n) == null ? '—' : `${Math.round(Number(n))}
 export const fmtTB = (gb) => (num(gb) == null ? '—' : `${(Number(gb) / 1024).toFixed(1)} TB`);
 export const fmtBytesTB = (b) => (num(b) == null ? '—' : `${(Number(b) / 1024 ** 4).toFixed(1)} TB`);
 
+/**
+ * 시각 값 → epoch ms(못 읽으면 NaN). v2.591 C2: 서버 collectedAt 은 epoch ms **숫자**다(storage/types.js) —
+ * Date.parse(숫자) 는 NaN 이라 방금 수집한 장비가 '—'(미수집)로 보이고 정렬도 무효였다. 숫자·숫자 문자열은
+ * epoch ms 로, 그 밖의 문자열만 Date.parse 로 읽는다(숫자 문자열을 Date.parse 에 넘기면 연도로 해석된다 — v2.562 규약).
+ */
+export function tsMs(x) {
+  if (typeof x === 'number') return x > 0 ? x : NaN;
+  if (typeof x !== 'string' || x.trim() === '') return NaN;
+  if (/^\d+$/.test(x.trim())) return Number(x) > 0 ? Number(x) : NaN;
+  return Date.parse(x);
+}
+
 /** 경과 시간 문구('6m' · '1h25m' · '3d'). now 를 받아 결정론적으로 계산한다(테스트·서버 시각 기준). */
 export function ageText(iso, now = Date.now()) {
-  const t = iso ? Date.parse(iso) : NaN;
+  const t = tsMs(iso);
   if (!Number.isFinite(t)) return '—';
   const s = Math.max(0, Math.floor((now - t) / 1000));
   if (s < 60) return `${s}s`;
@@ -241,11 +253,16 @@ export function hostFacilityRows(hosts, sites) {
 export function storageRows(devices, types) {
   const label = new Map((types || []).map((t) => [t.type, t.label]));
   return (devices || []).map((d) => {
-    const cap = d.snap?.capacity || null;
+    // v2.591 P2: 수집 실패 스냅샷의 용량·노드는 emptySnapshot 초기값(0)이다 — 그대로 실으면 '0.0 TB · 노드 0' 이라는
+    //   거짓이 된다(v2.516 '실패 스냅샷의 수치는 null' 규약). 전체 용량이 양수가 아니면 용량을 읽은 것이 아니다
+    //   (v2.531 capacityPointEligible 과 같은 기준).
+    const failed = !!d.snap && d.snap.ok === false;
+    const cap0 = failed ? null : d.snap?.capacity || null;
+    const cap = cap0 && (num(cap0.totalBytes) ?? 0) > 0 ? cap0 : null;
     return {
       id: d.id, name: d.name || d.host || d.id, dc: d.datacenterId || '', type: d.type || '', typeLabel: label.get(d.type) || d.type || '',
       pct: num(cap?.pct), totalBytes: num(cap?.totalBytes), usedBytes: num(cap?.usedBytes),
-      nodes: d.snap ? (d.snap.nodes?.count ?? null) : null, collectedAt: d.snap?.collectedAt || null,
+      nodes: d.snap && !failed ? (d.snap.nodes?.count ?? null) : null, collectedAt: d.snap?.collectedAt || null,
       ok: d.snap ? d.snap.ok !== false && !d.snap.error : null, error: d.snap?.error || '',
       enabled: d.enabled !== false, version: d.snap?.version || '',
     };
@@ -255,15 +272,22 @@ export function storageRows(devices, types) {
 /** /tools/sanswitch.devices → 포트 셀. 문제 포트(offline+faulty) 로 색을 정한다. */
 export function sanCells(devices) {
   return (devices || []).map((d) => {
-    const p = d.snap?.ports || null;
+    // v2.591 C9: 수집 실패 스냅샷은 ports 가 emptySnapshot 초기값(0/0)이다 — 그것을 포트로 읽으면 실패한 스위치가
+    //   초록 '0/0 · 측정됨' 이 된다. `sanSwitchPorts.aggregate` 와 같은 기준(!ok 는 실패)으로 뺀다.
+    const failed = !!d.snap && (d.snap.ok === false || !!d.snap.error);
+    const p = failed ? null : d.snap?.ports || null;
     const bad = p ? (num(p.offline) ?? 0) + (num(p.faulty) ?? 0) : null;
     const level = p == null ? null : bad >= 2 ? 2 : bad >= 1 ? 1 : 0;
-    return { id: d.id, name: d.name || d.id, dc: d.datacenterId || '', online: num(p?.online), total: num(p?.total), offline: num(p?.offline), faulty: num(p?.faulty), level, collectedAt: d.snap?.collectedAt || null, error: d.snap?.error || '' };
+    return { id: d.id, name: d.name || d.id, dc: d.datacenterId || '', online: num(p?.online), total: num(p?.total), offline: num(p?.offline), faulty: num(p?.faulty), level, failed, collectedAt: d.snap?.collectedAt || null, error: d.snap?.error || '' };
   });
 }
 export function sanTotals(cells) {
-  const t = { devices: (cells || []).length, online: 0, total: 0, offline: 0, faulty: 0, measured: 0 };
-  for (const c of cells || []) { if (c.total == null) continue; t.measured += 1; t.online += c.online ?? 0; t.total += c.total; t.offline += c.offline ?? 0; t.faulty += c.faulty ?? 0; }
+  const t = { devices: (cells || []).length, online: 0, total: 0, offline: 0, faulty: 0, measured: 0, failed: 0, none: 0 };
+  for (const c of cells || []) {
+    if (c.failed) { t.failed += 1; continue; }
+    if (c.total == null) { t.none += 1; continue; }
+    t.measured += 1; t.online += c.online ?? 0; t.total += c.total; t.offline += c.offline ?? 0; t.faulty += c.faulty ?? 0;
+  }
   return t;
 }
 

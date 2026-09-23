@@ -60,7 +60,11 @@ export function getServiceCheck() {
     const m = metricsSamplerStatus();
     const last = atOf(m.lastRun);
     const age = last == null ? null : ago(last);
-    return { status: m.enabled === false ? 'off' : (age != null && age > 30 * MIN) ? 'warn' : 'ok', detail: `${m.enabled === false ? '비활성' : '활성'}${last != null ? ` · 최근 ${Math.round(age / MIN)}분 전` : ''}`, at: last ?? Date.now() };
+    // v2.591(3차 감사 R-H1): 정체 경계는 **설정된 샘플 주기의 2배**(최소 30분). 30분 고정이면 주기를 60분으로 둔 현장에서
+    // 멀쩡한 샘플러가 매번 '주의' 가 된다(v2.590 atOf 수정 전에는 NaN 이라 경고 자체가 안 났다 — 수정이 새 거짓을 만들었다).
+    const iv = Number(m.intervalMs);
+    const staleMs = Math.max(30 * MIN, Number.isFinite(iv) && iv > 0 ? iv * 2 : 0);
+    return { status: m.enabled === false ? 'off' : (age != null && age > staleMs) ? 'warn' : 'ok', detail: `${m.enabled === false ? '비활성' : '활성'}${last != null ? ` · 최근 ${Math.round(age / MIN)}분 전` : ''}`, at: last ?? Date.now() };
   }));
 
   checks.push(wrap('gpu-guest', 'GPU 게스트 수집', () => {

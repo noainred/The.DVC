@@ -3,7 +3,7 @@ import React from 'react';
 import { usePolling, toolAllowed } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Panel, KpiCard, PctCell, Bar, LevelBadge, PollState, Empty } from '../ui.jsx';
-import { datastoreTypeCounts, datastoresOver, storageRows, sanCells, sanTotals, fmtInt, fmtPct, fmtBytesTB, colorOf, rowMatches, ageText } from '../consoleData.js';
+import { datastoreTypeCounts, datastoresOver, storageRows, sanCells, sanTotals, fmtInt, fmtPct, fmtBytesTB, colorOf, rowMatches, ageText, tsMs } from '../consoleData.js';
 
 export default function ConsoleStorage({ global: g, scope, polls, perms }) {
   const canSan = toolAllowed('san-switch'), canFc = toolAllowed('forecast');
@@ -26,7 +26,7 @@ export default function ConsoleStorage({ global: g, scope, polls, perms }) {
         <KpiCard label="스토리지 어레이" value={polls.stor.data ? fmtInt(arrays.length) : '—'} accent="#0891b2" meta={polls.stor.data ? (arrays.length ? `수집 정상 ${arrOk} · 실패 ${arrBad} · 미수집 ${arrays.length - arrOk - arrBad}` : '등록된 장비 없음') : perms.storage ? '수집 대기' : "권한 필요('tools')"} />
         <KpiCard label="전사 사용률" value={fmtPct(g?.storageUsagePct)} accent={colorOf(g?.storageUsagePct)} meta={g ? `${g.storageUsedTB} / ${g.storageTotalTB} TB (vCenter 데이터스토어 합)` : '수집 대기'} />
         <KpiCard label="임계 초과 DS" value={polls.ds.data ? fmtInt(over90) : '—'} accent="#ef4444" meta={polls.ds.data ? `≥ 90% ${over90} · ≥ 95% ${over95} (서버 알람 기준과 동일)` : '수집 대기'} />
-        <KpiCard label="SAN 스위치" value={san.data ? fmtInt(st.devices) : '—'} accent="#f59e0b" meta={san.data ? (st.measured ? `포트 ${fmtInt(st.online)}/${fmtInt(st.total)} 온라인 · 오프라인 ${st.offline} · 결함 ${st.faulty}` : st.devices ? '포트 스냅샷 없음' : '등록된 장비 없음') : canSan ? '수집 대기' : "권한 필요('tools')"} />
+        <KpiCard label="SAN 스위치" value={san.data ? fmtInt(st.devices) : '—'} accent="#f59e0b" meta={san.data ? (st.measured ? `포트 ${fmtInt(st.online)}/${fmtInt(st.total)} 온라인 · 오프라인 ${st.offline} · 결함 ${st.faulty}${st.failed ? ` · 수집 실패 ${st.failed}대` : ''}` : st.failed ? `수집 실패 ${st.failed}대` : st.devices ? '포트 스냅샷 없음' : '등록된 장비 없음') : canSan ? '수집 대기' : "권한 필요('tools')"} />
       </div>
 
       <div className="dvc-grid2">
@@ -47,7 +47,7 @@ export default function ConsoleStorage({ global: g, scope, polls, perms }) {
                         <td className="num" data-sort={a.totalBytes ?? ''}>{fmtBytesTB(a.totalBytes)}</td>
                         <td data-sort={a.pct ?? ''}><PctCell pct={a.pct} /></td>
                         <td className="num dvc-dim" data-sort={a.nodes ?? ''}>{a.nodes ?? '—'}</td>
-                        <td className="num dvc-dim" data-sort={a.collectedAt ? Date.parse(a.collectedAt) : ''}>{a.collectedAt ? ageText(a.collectedAt, now) : '—'}</td>
+                        <td className="num dvc-dim" data-sort={Number.isFinite(tsMs(a.collectedAt)) ? tsMs(a.collectedAt) : ''}>{a.collectedAt ? ageText(a.collectedAt, now) : '—'}</td>
                         <td><LevelBadge level={a.ok === true ? 0 : a.ok === false ? 2 : null} label={a.ok === true ? '정상' : a.ok === false ? '수집 실패' : '미수집'} /></td>
                       </tr>
                     ))}
@@ -66,11 +66,11 @@ export default function ConsoleStorage({ global: g, scope, polls, perms }) {
                     {cells.map((c) => (
                       <div key={c.id} className={`dvc-cell ${c.level == null ? 'lvn' : `lv${c.level}`}`} title={`${c.name}${c.dc ? ` · ${c.dc}` : ''} · ${c.total != null ? `온라인 ${c.online}/${c.total} · 오프라인 ${c.offline ?? 0} · 결함 ${c.faulty ?? 0}` : (c.error || '스냅샷 없음')}`}>
                         <div className="dvc-cell-name">{c.name}</div>
-                        <div className="dvc-cell-val">{c.total != null ? `${c.online}/${c.total}` : '—'}</div>
+                        <div className="dvc-cell-val">{c.failed ? '수집 실패' : c.total != null ? `${c.online}/${c.total}` : '—'}</div>
                       </div>
                     ))}
                   </div>
-                  <div className="dvc-note" style={{ marginTop: 10 }}>오프라인 {st.offline} · 결함 {st.faulty} · 스냅샷 없음 {st.devices - st.measured}. 색: 문제 포트 0 초록 · 1 노랑 · 2 이상 빨강.</div>
+                  <div className="dvc-note" style={{ marginTop: 10 }}>오프라인 {st.offline} · 결함 {st.faulty} · 수집 실패 {st.failed} · 스냅샷 없음 {st.none}. 색: 문제 포트 0 초록 · 1 노랑 · 2 이상 빨강.</div>
                 </>
               )}
             </PollState>

@@ -245,11 +245,15 @@ test('★ P16: 엣지 위임 수집 요청은 인출 즉시 사라지지 않고 
   const { createCollectRequestQueue } = await import('../src/util/collectRequestQueue.js');
   const q = createCollectRequestQueue({ ttlMs: 60_000, ackMs: 1000, maxTries: 2 });
   const t0 = 1_000_000;
+  // v2.591 정정: '인출 전 수집분' 판정은 이제 **엣지 시계끼리** 비교한다 — 인출 때 그 장비의 마지막 수집 시각(기준선)보다
+  // 새 값이 와야 완료. v2.590 초판은 엣지 collectedAt 을 중앙 인출 시각과 비교해 시계가 어긋나면 두 번 수집·폐기했다(R-Q1·PR-3).
+  const EDGE_T = 5_000_000; // 엣지 시계 값(중앙 t0 와 무관한 축)
+  q.ack('dev1', EDGE_T); // 주기 push — 기준선이 된다
   q.request('dev1', 'Edge-A', t0);
   assert.deepEqual(q.take('edge-a', t0 + 10), ['dev1']);
   assert.equal(q.has('dev1', t0 + 20), true, '인출과 동시에 요청 표시가 꺼졌다(one-shot 회귀)');
-  assert.equal(q.ack('dev1', t0 - 10 * 60_000), false, '인출 전 수집분으로 완료 처리하면 안 된다');
-  assert.equal(q.ack('dev1', t0 + 30), true);
+  assert.equal(q.ack('dev1', EDGE_T), false, '인출 전 수집분(기준선과 같은 값)으로 완료 처리하면 안 된다');
+  assert.equal(q.ack('dev1', EDGE_T + 30), true);
   assert.equal(q.has('dev1', t0 + 40), false);
   // 결과가 안 오면 재인출 1회 → 그래도 없으면 폐기하고 그 사실을 남긴다(조용한 소실 금지)
   q.request('dev2', 'edge-a', t0);

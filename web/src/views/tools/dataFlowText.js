@@ -90,12 +90,24 @@ export function innerItemText(it = {}, now = Date.now()) {
   // 모듈마다 '마지막 실행' 을 담는 자리가 다르다(v2.587 실측: last · lastRun · lastResult · at · lastRunTs …).
   const rec = [v.last, v.lastRun, v.lastResult].find((x) => x && typeof x === 'object') || {};
   // ⚠ 시각은 숫자이거나 숫자 문자열일 때만 — '' 를 0 시각으로 읽지 않는다(Number('') === 0).
-  const tsOf = (x) => (typeof x === 'number' || (typeof x === 'string' && x.trim() !== '')) && Number(x) > 1e12 ? Number(x) : 0;
-  const at = [rec.at, v.at, v.lastAt, v.lastRunTs, v.lastRunAt, v.lastTickAt, v.lastTick, v.lastPollAt, v.finishedAt].map(tsOf).find((x) => x) || 0;
+  //   v2.591 C1: ISO 문자열(`generatedAt` — 인벤토리 폴러)도 받는다. 단 **숫자 문자열은 Date.parse 에 넘기지
+  //   않는다**(`Date.parse('12345')` 는 연도 12345 — v2.562 규약). ISO 날짜 꼴일 때만 해석한다.
+  const tsOf = (x) => {
+    if (typeof x === 'number') return x > 1e12 ? x : 0;
+    if (typeof x !== 'string' || x.trim() === '') return 0;
+    if (/^\d+$/.test(x.trim())) return Number(x) > 1e12 ? Number(x) : 0;
+    if (!/^\d{4}-\d{2}-\d{2}T/.test(x.trim())) return 0;
+    const t = Date.parse(x);
+    return Number.isFinite(t) && t > 1e12 ? t : 0;
+  };
+  const at = [rec.at, v.at, v.lastAt, v.lastRunTs, v.lastRunAt, v.lastTickAt, v.lastTick, v.lastPollAt, v.finishedAt, v.generatedAt].map(tsOf).find((x) => x) || 0;
   const str = (x) => (typeof x === 'string' ? x : '');
+  const failText = (o) => str(o.reason) || str(o.error) || (o.status ? `HTTP ${o.status}` : '실패');
+  // v2.591 C1: 최상위 `{at, ok:false, reason}` 모양(selfRegister·pdu push·pdu 설정 pull)도 실패다 — 예전에는
+  //   rec(last/lastRun/lastResult) 의 ok 만 봐서 실패한 push 가 초록 '마지막 N분 전' 으로 보였다.
   const err = str(v.lastPollError?.detail) || str(v.lastError?.detail) || str(v.lastError) || str(v.lastErr) || str(v.error) ||
     str(rec.error) || (Array.isArray(rec.errors) && rec.errors.length ? `오류 ${rec.errors.length}건` : '') ||
-    (rec.ok === false ? (str(rec.reason) || (rec.status ? `HTTP ${rec.status}` : '실패')) : '') || str(v.pushError);
+    (rec.ok === false ? failText(rec) : '') || (v.ok === false ? failText(v) : '') || str(v.pushError);
   const bits = [];
   if (v.running === true || v.inFlight === true || v.busy === true) bits.push('실행 중');
   if (at) bits.push(`마지막 ${ageText(at, now)}`);

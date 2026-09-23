@@ -7,6 +7,7 @@ import EscClose from '../../components/EscClose.jsx';
 import PduCharts from './PduCharts.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 
 /**
  * 특수 기능 › PDU 정보 — APC Rack PDU 2G(rpdu2g) 전력·뱅크·온도·습도.
@@ -154,6 +155,16 @@ export default function PduTool() {
           <span className="muted"> 행의 수집 버튼은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다.</span>
         </div>
       )}
+
+      {/* v2.591: 엣지가 가져갔지만 결과가 오지 않아 폐기된 '지금 수집' 요청 — 배지만 조용히 꺼지지 않게 */}
+      {(() => {
+        const t = collectDropNote(data.collectDrops, (id) => devices.find((x) => x.id === id)?.name || id);
+        return t ? (
+          <div className="card" style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: 'var(--amber)' }}>
+            ⚠ <BoldText text={t} />
+          </div>
+        ) : null;
+      })()}
 
       {tab === 'charts' && <PduCharts devices={devices} thresholds={data.thresholds || {}} />}
 
