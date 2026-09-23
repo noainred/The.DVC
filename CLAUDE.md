@@ -3219,6 +3219,11 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       실렸다. 라우트 선언에 주석을 붙이려면 **선언 위 줄**에 둘 것.
     - 문서: 이미 고친 것을 '아직'·'후속' 으로 적은 줄 2개 정정 · AUDIT-2026-09-21 표 누락(BUG-17·18·21)·SEC-12 분류 정정 ·
       문서의 원시 NUL 바이트 2개 제거(grep 이 문서를 바이너리로 취급했다).
+    - ⚠⚠ **테스트용 SSH 호스트 키에 `ssh2.utils.generateKeyPairSync('ed25519')` 를 쓰지 말 것**(v2.590 **릴리스 CI 가 이것으로
+      실패했다** — PR CI·로컬은 통과): ssh2 1.17.0 의 그 생성기는 **자기 파서가 거부하는 키**(`Malformed OpenSSH private key`)를
+      **5,000회 중 26회(0.52%)** 만든다(실측 재현). `authStop2590` 은 서버를 4개 띄워 실행당 약 **2.1%** 였다. Node
+      `crypto.generateKeyPairSync('ec', {namedCurve:'prime256v1'})` 의 **SEC1 PEM** 은 5,000회 0회다(`credentials`·
+      `sanSwitchTest2421` 은 RSA PKCS1 PEM — 역시 안전). 제품 코드는 이 생성기를 쓰지 않는다(grep 0건).
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 

@@ -22,6 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
+import crypto from 'node:crypto';
 import ssh2 from 'ssh2';
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'authstop2590-'));
@@ -123,11 +124,14 @@ async function fakeNsx() {
 
 /* ───────────── 모든 인증을 거부하는 SSH 서버(계정별 비밀번호 시도 수를 센다) ───────────── */
 async function sshRejectServer(host = '127.0.0.1') {
-  const { Server, utils } = ssh2;
-  const kp = utils.generateKeyPairSync('ed25519');
+  const { Server } = ssh2;
+  // 호스트 키는 Node crypto 의 EC SEC1 PEM(v2.591): ssh2 1.17.0 의 utils.generateKeyPairSync('ed25519') 는
+  // 자기 파서가 거부하는 키를 0.52%(5,000회 중 26회) 만든다 — 이 파일은 서버를 4개 띄우므로 실행당 약 2.1%
+  // 확률로 'Malformed OpenSSH private key' 가 났다(v2.590 릴리스 CI 에서 실제로 실패). EC SEC1 PEM 은 5,000회 0회.
+  const hostKey = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'sec1', format: 'pem' });
   const tries = new Map(); // username → 비밀번호 시도 수
   const conns = new Map(); // username → 연결 수(첫 인증 요청 기준)
-  const srv = new Server({ hostKeys: [kp.private] }, (client) => {
+  const srv = new Server({ hostKeys: [hostKey] }, (client) => {
     let seen = false;
     client.on('authentication', (ctx) => {
       if (!seen) { seen = true; conns.set(ctx.username, (conns.get(ctx.username) || 0) + 1); }
