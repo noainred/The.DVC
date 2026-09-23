@@ -21,7 +21,7 @@ export const NAV_GROUPS = [
   { id: 'overview', label: '개요', items: [
     { id: 'overview', name: '전사 현황', page: true },
     { id: 'summary', name: '요약 리포트', hash: '#/summary' },
-    { id: 'insights', name: '인사이트', hash: '#/insights' },
+    { id: 'insights', name: '인사이트', hash: '#/tools/insights-hub' },
   ] },
   { id: 'compute', label: '컴퓨트', items: [
     { id: 'compute', name: 'vCenter · 호스트 · VM', page: true, count: 'hosts' },

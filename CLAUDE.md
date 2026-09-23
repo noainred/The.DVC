@@ -3333,6 +3333,15 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **RMA 결과 회신**(PR-9): `resilientFetch` 는 비-2xx 를 throw 하지 않는다 — `.catch` 만 두면 413·403 이 무음이다(형제 워커 3종은
       v2.591 PR-5 가 고쳤다). `/api/central/rma-result` 도 BIG_JSON 에 등록했다. **`resilientFetch` 결과는 `r.ok` 를 볼 것.**
 
+  - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
+    이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
+    (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는
+    다른 화면이다** — v2.592 초판이 둘을 같은 것으로 보고 옛 주소를 `#/tools/insights` 로 보냈다가 Chromium 판독에서
+    엉뚱한 화면이 떠서 잡았다. 도구 키는 바꾸지 않으므로(`toolsDenied` 값) 새 키를 만들었다.
+    · 옛 주소 `#/insights[/<패널>]` 는 `hooks/hashTab.js MOVED_TABS`·`movedTabHash` 가 `replaceState` 로 바꾼다
+      (App 최초 렌더 + hashchange). **지우지 말 것** — 북마크·공유 링크가 있다. 옮긴 탭이 늘면 이 표에 더한다.
+    · 탭 권한(`perm:'insights'`)은 카드의 `perm` 으로 옮겼다 — 데이터 API `/api/insights/*` 는 원래대로 requirePerm.
+
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
 서버 보안 불변조건(전역 TLS·RBAC·토큰 검증·scope·OTP·WS 게이트웨이 등 전 항목)은

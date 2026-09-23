@@ -285,6 +285,7 @@ export const TOOL_ENFORCEMENT_NOTES = Object.freeze({
   'nic-speed': [ENFORCE_OTHER_ROUTER, '/api/admin/idrac/nic-speed(adminOnly)'],
   'nic-models': [ENFORCE_OTHER_ROUTER, '/api/admin/idrac/nic-models(adminOnly)'],
   topo3d: [ENFORCE_OTHER_ROUTER, '/api/insights/graph(insights 권한)'],
+  'insights-hub': [ENFORCE_OTHER_ROUTER, '/api/insights/*(insights 권한) — v2.592 에 상단 탭에서 옮겨 온 화면'],
   'capacity-advisor': [ENFORCE_OTHER_ROUTER, '/api/capacity/*(routes/capacity.js:22 capacityRouter.use(adminOnly))'],
   'svcmon-config': [ENFORCE_OTHER_ROUTER, "/api/svcmon/*(v2.506 부터 requirePerm('svcmon'))"],
   'net-traffic': [ENFORCE_OTHER_ROUTER, '/api/admin/net/*(adminOnly)'],

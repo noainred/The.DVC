@@ -3,7 +3,7 @@
  * 웹 테스트는 node 환경(DOM 없음)이라 훅 자체는 못 돌린다 — 판정을 순수 함수로 고정한다.
  */
 import { describe, it, expect } from 'vitest';
-import { hashSegments, isUnderBase, tabFromHash, buildHash } from './hashTab.js';
+import { hashSegments, isUnderBase, tabFromHash, buildHash, movedTabHash, MOVED_TABS } from './hashTab.js';
 
 describe('hashSegments', () => {
   it('선행 #/ 와 빈 조각을 걷어낸다', () => {
@@ -50,5 +50,25 @@ describe('buildHash', () => {
   it('왕복한다', () => {
     const h = buildHash(['tools', 'storage-mon'], 'trend');
     expect(tabFromHash(h, ['tools', 'storage-mon'], ['devices', 'trend'])).toBe('trend');
+  });
+});
+
+// v2.592 — 상단 '인사이트' 탭을 특수 기능 하위로 옮겼다. 옛 북마크·링크가 새 주소로 가야 한다.
+describe('movedTabHash (v2.592 인사이트 → 특수 기능)', () => {
+  it('옛 탭 주소를 새 주소로 바꾸고 하위 패널을 보존한다', () => {
+    expect(movedTabHash('#/insights')).toBe('#/tools/insights-hub');
+    expect(movedTabHash('#/insights/anomaly')).toBe('#/tools/insights-hub/anomaly');
+    expect(movedTabHash('#insights/chatops')).toBe('#/tools/insights-hub/chatops');
+  });
+  it('다른 주소·새 주소·프로토타입 키는 건드리지 않는다', () => {
+    expect(movedTabHash('#/tools/insights-hub')).toBeNull();
+    expect(movedTabHash('#/tools/insights')).toBeNull(); // 운영 인사이트(다른 화면)
+    expect(movedTabHash('#/overview')).toBeNull();
+    expect(movedTabHash('')).toBeNull();
+    expect(movedTabHash('#/constructor')).toBeNull();
+    expect(movedTabHash('#/__proto__')).toBeNull();
+  });
+  it('새 주소는 useHashTab 의 base 와 맞아 하위 패널이 읽힌다', () => {
+    expect(tabFromHash(movedTabHash('#/insights/security'), MOVED_TABS.insights, ['finops', 'security'])).toBe('security');
   });
 });

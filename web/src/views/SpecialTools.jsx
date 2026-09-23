@@ -72,6 +72,8 @@ const UnprotectedVms = React.lazy(() => import('./ToolsReports.jsx').then((m) =>
 const AiSearch = React.lazy(() => import('./tools/AiSearch.jsx').then((m) => ({ default: m.AiSearch })));
 const VmExport = React.lazy(() => import('./tools/VmExport.jsx').then((m) => ({ default: m.VmExport })));
 const Insights = React.lazy(() => import('./tools/InsightsThreats.jsx').then((m) => ({ default: m.Insights })));
+// v2.592: 상단 '인사이트' 탭(FinOps 등 7패널)을 특수 기능으로 옮겼다 — 위 운영 인사이트와 다른 화면.
+const InsightsHub = React.lazy(() => import('./Insights.jsx'));
 const Threats = React.lazy(() => import('./tools/InsightsThreats.jsx').then((m) => ({ default: m.Threats })));
 const Esxi = React.lazy(() => import('./tools/HardwareTools.jsx').then((m) => ({ default: m.Esxi })));
 const Hardware = React.lazy(() => import('./tools/HardwareTools.jsx').then((m) => ({ default: m.Hardware })));
@@ -456,6 +458,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'aisearch' && <AiSearch />}
       {tool === 'explore' && <Explore />}
       {tool === 'insights' && <Insights scope={scope} />}
+      {tool === 'insights-hub' && <InsightsHub />}
       {tool === 'threats' && <Threats scope={scope} />}
       {tool === 'secret-scan' && <SecretScanTool />}
       {tool === 'codex-check' && <CodexCheck />}

@@ -25,7 +25,7 @@ const Upgrade = lazy(() => import('./views/Upgrade.jsx'));
 const Settings = lazy(() => import('./views/Settings.jsx'));
 const SpecialTools = lazy(() => import('./views/SpecialTools.jsx'));
 const SvcMonitor = lazy(() => import('./views/SvcMonitor.jsx'));
-const Insights = lazy(() => import('./views/Insights.jsx'));
+import { movedTabHash } from './hooks/hashTab.js';
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
 // 통합 관제 콘솔(v2.487) — 헤더의 데이터 소스 배지(LIVE/MOCK)를 누르면 전환되는 별도 화면(#/console/…).
 // 기존 탭 화면은 그대로 두고(개발용), 콘솔은 자체 좌측 내비·6화면을 가진다. 실 API 만 사용.
@@ -58,7 +58,9 @@ const TABS = [
   { id: 'alarms', label: '알람', perm: 'inv.alarms' },
   // '특수 기능'은 항목이 많아 탭 자체는 항상 노출한다(권한 없는 도구는 화면 안에서 회색·클릭불가).
   { id: 'tools', label: '특수 기능' },
-  { id: 'insights', label: '인사이트', perm: 'insights' },
+  // 인사이트는 v2.592 에 '특수 기능' 하위로 이동(specialToolsList 'insights-hub' 카드 · #/tools/insights-hub.
+  // ⚠ 'insights' 카드는 다른 화면(운영 인사이트)이다).
+  // 옛 주소 #/insights[/<패널>] 는 hooks/hashTab.js movedTabHash 가 새 주소로 바꾼다.
   { id: 'settings', label: '설정', adminOnly: true, ownerOnly: true, perm: 'settings' },
   { id: 'upgrade', label: '업그레이드', adminOnly: true, feature: 'upgradeTab', perm: 'upgrade' },
 ];
@@ -193,6 +195,12 @@ function Portal({ user, onLogout }) {
     return Boolean(t && (!t.adminOnly || user.role === 'admin') && (!t.ownerOnly || isOwner) && hasPerm(user, t.perm)
       && (!t.toolKey || toolAllowed(t.toolKey))); // 특수 기능에서 승격한 탭은 도구별 접근(toolsDenied)도 유지
   };
+  // 특수 기능으로 옮긴 옛 탭 주소(#/insights …)를 새 주소로 바꾼다 — 기록을 남기지 않고 교체(뒤로가기 루프 방지).
+  const migrateMovedHash = () => {
+    const to = movedTabHash(window.location.hash);
+    if (to) window.history.replaceState(null, '', to);
+    return Boolean(to);
+  };
   const tabFromHash = () => {
     // 첫 세그먼트만 탭으로 사용(예: #/tools/esxitemp → tools). 나머지는 각 뷰가 처리.
     const h = window.location.hash.replace(/^#\/?/, '').split('/')[0];
@@ -201,7 +209,7 @@ function Portal({ user, onLogout }) {
 
   // Initial view: the tab in the URL hash (so a refresh stays put), else the
   // user's saved landing-page preference.
-  const [tab, setTabState] = useState(() => tabFromHash() || getLandingTab());
+  const [tab, setTabState] = useState(() => { migrateMovedHash(); return tabFromHash() || getLandingTab(); });
   const [landingTab, setLandingTab] = useState(getLandingTab);
   // Filters are kept PER TAB so a filter set on one menu never carries over to
   // (or shows on) another menu. Each tab has its own { region, vcenterId, q }.
@@ -241,6 +249,7 @@ function Portal({ user, onLogout }) {
       if (isConsoleHash()) { setConsoleOn(true); setV4On(false); return; }  // 콘솔 내부 페이지 전환은 콘솔이 처리
       if (isV4Hash()) { setV4On(true); setConsoleOn(false); return; }       // 신규 포탈 내부 페이지 전환은 V4App 이 처리
       setConsoleOn(false); setV4On(false);
+      migrateMovedHash();
       const t = tabFromHash(); if (t) setTabState(t);
     };
     window.addEventListener('hashchange', onHash);
@@ -325,7 +334,7 @@ function Portal({ user, onLogout }) {
   // 아닌 경우. 성능점검(svcmon)은 트리 검색·상태 칩·Test name 검색을 자체로 갖고 상단 필터값을
   // 받지도 않아(<SvcMonitor /> 는 filters 미전달) 상단 검색이 눌러도 아무 일이 없는 죽은 UI 였다.
   // IP관리(ipam)는 화면 안에 자체 vCenter 범위 선택자가 있어 상단 필터바를 쓰지 않는다.
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'insights', 'settings', 'svcmon', 'ipam'];
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'settings', 'svcmon', 'ipam'];
   const showFilters = !noFilterTabs.includes(tab);
 
   // Drill into a site → set the HOSTS tab's own vCenter filter, then go there.
@@ -494,7 +503,6 @@ function Portal({ user, onLogout }) {
           {tab === 'networks' && <Networks filters={filters} />}
           {tab === 'alarms' && <Alarms filters={filters} />}
           {tab === 'tools' && <SpecialTools />}
-          {tab === 'insights' && <Insights onGotoTab={setTab} />}
           {tab === 'settings' && user.role === 'admin' && isOwner && <Settings />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
          </Suspense>

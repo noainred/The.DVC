@@ -439,12 +439,13 @@ const PANELS = [
 ];
 
 export default function Insights() {
-  // 하위 패널 7종을 URL(#/insights/<키>)에 싣는다(v2.438) — 새로고침·북마크·링크 공유 지원.
-  const [sub, setSub] = useHashTab({ base: ['insights'], valid: PANELS.map((p) => p.k), fallback: 'finops' });
+  // 하위 패널 7종을 URL(#/tools/insights-hub/<키>)에 싣는다(v2.438) — 새로고침·북마크·링크 공유 지원.
+  // v2.592: 상단 '인사이트' 탭을 특수 기능 하위로 옮겼다. 옛 #/insights/<키> 는 App 이 새 주소로 바꾼다.
+  const [sub, setSub] = useHashTab({ base: ['tools', 'insights-hub'], valid: PANELS.map((p) => p.k), fallback: 'finops' });
   const Cur = (PANELS.find((p) => p.k === sub) || PANELS[0]).C;
   return (
     <div>
-      <div className="section-title" style={{ marginTop: 0 }}>📊 인사이트</div>
+      {/* 제목은 특수 기능 화면 머리가 그린다(v2.592 — 두 번 나오지 않게). */}
       <div className="vcd-views" style={{ marginBottom: 14 }}>
         {PANELS.map((p) => (
           <button key={p.k} className={sub === p.k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '8px 14px' }} onClick={() => setSub(p.k)}>{p.label}</button>
