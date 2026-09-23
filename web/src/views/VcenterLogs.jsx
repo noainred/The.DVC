@@ -3,6 +3,18 @@ import { fetchJson, putJson, postJson, usePolling, getToken } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 
+/** v2.590 P11: 연합 조회가 끝나지 않은 사유 — 결과 0건('로그 없음')과 구분해 말한다(조치가 다르다). */
+export function fedExpiredText(why) {
+  if (why === 'not-taken') return '담당 엣지가 조회 요청을 가져가지 않았습니다(엣지 포탈이 꺼졌거나 이 vCenter 를 담당하지 않습니다). 로그가 없다는 뜻이 아닙니다.';
+  if (why === 'no-result') return '담당 엣지가 조회를 가져갔지만 결과를 보내지 않았습니다(엣지의 로그 DB 오류·결과 전송 실패 — 엣지 로그 화면의 logquery-worker 줄을 보세요). 로그가 없다는 뜻이 아닙니다.';
+  return '엣지 조회가 만료됐습니다. 로그가 없다는 뜻이 아닙니다.';
+}
+export function fedTimeoutText(lastState) {
+  return lastState === 'running'
+    ? '엣지가 조회 중인데 화면 대기 한도를 넘었습니다 — 잠시 뒤 다시 조회하세요. 로그가 없다는 뜻이 아닙니다.'
+    : '엣지가 아직 조회 요청을 가져가지 않았습니다 — 잠시 뒤 다시 조회하세요. 로그가 없다는 뜻이 아닙니다.';
+}
+
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const fmtNum = (n) => (n == null ? '—' : Number(n).toLocaleString());
 const fmtMB = (b) => (b == null ? '—' : b < 1048576 ? `${Math.round(b / 1024)} KB` : `${(b / 1048576).toFixed(1)} MB`);
@@ -87,6 +99,8 @@ function LogViewer() {
   // 선택한 vCenter 의 보관 위치를 보고 설정). URL 에 실으면 조회할 때마다 해시가 덮여 무의미하므로
   // v2.438 하위 탭 URL 유지 대상에서 제외한다.
   const [mode, setMode] = useState('local');
+  // v2.590 P11: 엣지 연합 조회가 끝나지 않은 이유 — 예전에는 13초 뒤 조용히 빈 표로 끝나 '로그가 없다' 처럼 보였다.
+  const [fedNote, setFedNote] = useState('');
   const LIMIT = 200;
   const remoteAgent = (id) => sources.remote.find((r) => r.vcenterId === id)?.agent;
 
@@ -97,24 +111,27 @@ function LogViewer() {
   const fedGen = useRef(0);
   const federate = async () => {
     const gen = ++fedGen.current;
-    setMode('edge'); setLoading(true); setRows([]);
+    setMode('edge'); setLoading(true); setRows([]); setFedNote('');
     try {
       const { reqId } = await postJson('/tools/vclogs/federate', { vcenterId: f.vcenterId, severity: f.severity, q: f.q, limit: LIMIT });
+      let last = 'pending';
       for (let i = 0; i < 9; i++) {
         await new Promise((r) => setTimeout(r, 1500));
         if (gen !== fedGen.current) return; // 다른 조회로 대체됨 → 이 루프 폐기
         const d = await fetchJson(`/tools/vclogs/federate?reqId=${encodeURIComponent(reqId)}`);
         if (gen !== fedGen.current) return;
         if (d.state === 'done') { setRows(d.rows || []); setTotal(d.total || 0); setLoading(false); return; }
+        if (d.state === 'expired') { setFedNote(fedExpiredText(d.why)); setLoading(false); return; }
+        last = d.state;
       }
-      if (gen === fedGen.current) setLoading(false); // 타임아웃(엣지 미응답)
-    } catch { if (gen === fedGen.current) setLoading(false); }
+      if (gen === fedGen.current) { setLoading(false); setFedNote(fedTimeoutText(last)); } // 화면 대기 한도(엣지 미응답)
+    } catch (e) { if (gen === fedGen.current) { setLoading(false); setFedNote(`엣지 조회 요청 실패: ${e.message || e}`); } }
   };
 
   const load = (reset = true) => {
     if (f.vcenterId && remoteAgent(f.vcenterId)) return federate(); // 엣지 보관 → 연합 조회
     const gen = ++fedGen.current; // 진행 중이던 연합 폴링 무효화 + 이 로컬 조회의 세대
-    setMode('local'); setLoading(true);
+    setMode('local'); setLoading(true); setFedNote('');
     const off = reset ? 0 : offset;
     const qs = new URLSearchParams({ limit: String(LIMIT), offset: String(off) });
     if (f.vcenterId) qs.set('vcenterId', f.vcenterId);
@@ -178,6 +195,7 @@ function LogViewer() {
       </div>
       {mode === 'local' && rows.length < total && <button className="tab" style={{ marginTop: 10, padding: '7px 16px' }} disabled={loading} onClick={() => load(false)}>{loading ? '불러오는 중…' : `더 보기 (${rows.length}/${fmtNum(total)})`}</button>}
       {mode === 'edge' && loading && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>엣지 포탈에 조회 중… (응답 대기)</div>}
+      {mode === 'edge' && !loading && fedNote && <div style={{ fontSize: 12, marginTop: 8, color: 'var(--amber)' }}>{fedNote}</div>}
     </div>
   );
 }

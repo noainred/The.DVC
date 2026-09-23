@@ -30,6 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { portalParts, portalMs } from '../util/dayKey.js';
 
 const FILE = path.join(config.configDir, 'vm-clone.json');
 const MAX_JOBS = 200;
@@ -144,8 +145,10 @@ export function isDue(job, now = Date.now()) {
   if (s.mode === 'interval') return now - last >= s.hours * 3600_000;
   if (s.mode === 'daily') {
     const [hh, mm] = s.time.split(':').map(Number);
-    const today = new Date(now); today.setHours(hh, mm, 0, 0);
-    const target = today.getTime();
+    // v2.590 P8: '매일 HH:MM' 은 **포탈 시각**(util/dayKey — 기본 KST)이다. setHours(프로세스 TZ)로 두면 TZ 를 지정하지
+    // 않는 패키지 unit(UTC 호스트)에서 02:00 잡이 한국 11:00(업무 시간)에 돌았다(v2.582 '스케줄 판정도 localClock' 규약).
+    const { y, mo, d } = portalParts(now);
+    const target = portalMs(y, mo, d, hh) + mm * 60_000;
     return now >= target && last < target;
   }
   return false;

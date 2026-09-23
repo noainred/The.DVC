@@ -94,7 +94,12 @@ async function persistVcenterPower(snap) {
     if (config.idrac.retentionDays > 0 && (++_vcPersistTicks % 10 === 0)) {
       // v2.453: db.prune 은 청크 삭제라 **비동기**다 — await 를 빼면 부동 프로미스가 되어
       // 실패가 unhandledRejection 으로 새고 다음 주기와 겹쳐 돌 수 있다.
-      try { await db.prune(ts - config.idrac.retentionDays * 86_400_000); }
+      // v2.590 P15: 원본(raw)과 롤업의 보존을 idrac/poller 와 같은 두 인자로 나눈다 — 인자 하나로 부르면 원본도
+      // retentionDays 까지 남아, iDRAC 을 전부 엣지에 위임한 중앙에서는 IDRAC_RAW_RETENTION_DAYS 가 집행되지 않았다
+      // (idrac/poller 는 서버가 0대면 prune 전에 return 한다).
+      const keep = config.idrac.retentionDays;
+      const raw = config.idrac.rawRetentionDays > 0 ? Math.min(config.idrac.rawRetentionDays, keep) : keep;
+      try { await db.prune(ts - raw * 86_400_000, ts - keep * 86_400_000); }
       catch (e) { console.warn(`[store] 전력 prune 실패: ${e.message}`); }
     }
   } catch { /* best effort — 전력 적재 실패는 수집을 막지 않음 */ }

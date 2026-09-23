@@ -22,6 +22,9 @@ export function powerOffPollerStatus() {
   return { running, lastResult, lastRunTs, settings: s, nextRunTs: s.enabled && lastRunTs ? lastRunTs + s.intervalHours * 3_600_000 : null };
 }
 
+/** 인벤토리를 서빙하지 못하는 vCenter 상태(store.js) — VM 0 과 함께면 '전부 켜짐' 이 아니라 '모른다' 다. */
+const NOT_SERVING = new Set(['unreachable', 'pending', 'maintenance', 'disabled']);
+
 /** 점검 1회(수동/자동 공용). 진행 중이면 skipped. */
 export async function runPowerOffCheckNow(trigger = 'manual', { now = Date.now() } = {}) {
   if (running) return { ok: false, skipped: true, reason: '이미 점검이 진행 중입니다.' };
@@ -32,15 +35,26 @@ export async function runPowerOffCheckNow(trigger = 'manual', { now = Date.now()
     const snap = store.get();
     if (!snap?.vcenters?.length) return { ok: false, reason: '수집된 vCenter 스냅샷이 없습니다(폴링 전).' };
     const perVc = new Map();
-    for (const vc of snap.vcenters) perVc.set(vc.id, []);
+    // v2.590 P6: 인벤토리를 서빙하지 못하는 vCenter(연결 실패·첫 수집 전·점검중·비활성 + VM 0)는 **관측에서 뺀다** —
+    // 빈 목록으로 넣으면 commitPowerOffObservation 이 그 법인의 '꺼진 VM' 행을 전부 지워, 복구 뒤 '꺼진 지 40일' 이
+    // 0 으로 돌아갔다(vmtrack/service.js 가 같은 이유로 이미 건너뛰고 있다). 뺀 개수는 결과에 밝힌다.
+    const vmCount = new Map();
+    for (const v of snap.vms || []) vmCount.set(v.vcenterId, (vmCount.get(v.vcenterId) || 0) + 1);
+    const heldVc = [];
+    for (const vc of snap.vcenters) {
+      if (NOT_SERVING.has(vc.status) && !vmCount.get(vc.id)) { heldVc.push(vc.id); continue; }
+      perVc.set(vc.id, []);
+    }
+    const held = new Set(heldVc);
     for (const v of snap.vms || []) {
       if (v.template || v.powerState === 'POWERED_ON') continue;
+      if (held.has(v.vcenterId)) continue;
       if (!perVc.has(v.vcenterId)) perVc.set(v.vcenterId, []);
       perVc.get(v.vcenterId).push({ vmId: v.id, name: v.name || '' });
     }
     const r = await commitPowerOffObservation({ ts: now, perVc: [...perVc].map(([vcenterId, offVms]) => ({ vcenterId, offVms })) });
     lastRunTs = now;
-    lastResult = { at: now, trigger, vcenters: perVc.size, offVms: r.offVms, newStreaks: r.inserted, cleared: r.deleted, ms: Date.now() - started };
+    lastResult = { at: now, trigger, vcenters: perVc.size, heldVcenters: heldVc.length, offVms: r.offVms, newStreaks: r.inserted, cleared: r.deleted, ms: Date.now() - started };
     return { ok: true, ...lastResult };
   } finally {
     running = false;

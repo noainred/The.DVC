@@ -37,8 +37,9 @@ test('잡 저장: 필수값 검증·같은 VM 중복 금지·keep/스케줄 정�
 });
 
 test('isDue — daily(오늘 시각 경과 + 오늘 미실행)·interval(N시간 경과)·manual/비활성 false', () => {
-  const base = new Date('2026-08-15T10:00:00'); // 로컬 10:00
-  const at = (h, m) => new Date(`2026-08-15T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).getTime();
+  // v2.590 P8: '매일 HH:MM' 은 포탈 시각(기본 KST, util/dayKey)이다 — 프로세스 TZ 와 무관하게 같은 답이어야 한다.
+  const base = new Date('2026-08-15T10:00:00+09:00'); // 포탈(KST) 10:00
+  const at = (h, m) => new Date(`2026-08-15T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00+09:00`).getTime();
   const daily = { enabled: true, schedule: { mode: 'daily', time: '02:00' }, lastRun: null };
   assert.equal(store.isDue(daily, base.getTime()), true, '오늘 02:00 이 지났고 미실행 → due');
   assert.equal(store.isDue({ ...daily, lastRun: { at: at(2, 30) } }, base.getTime()), false, '오늘 이미 실행 → 미도래');

@@ -60,6 +60,9 @@ const pingTip = (ip, r) => {
   if (r.state === 'up') return `${ip} — 엣지 에이전트에서 ping 응답함${r.rttMs != null ? ` (${r.rttMs}ms)` : ''} · 도달 가능`;
   if (r.state === 'down') return `${ip} — 이 vCenter 담당(중앙/엣지)에서 ping 무응답 · 도달 불가. 이 IP가 다른 망이면 그 망 엣지 포탈에서는 닿을 수 있습니다(한 곳이라도 응답하면 녹색 유지).`;
   if (r.state === 'error') return `${ip} — ping 확인 실패(${r.error || '에이전트 오류'})`;
+  // v2.590 P11: 대기 만료 — 담당 엣지가 요청을 가져가지 않았다('확인 중' 이라 말하며 영원히 기다리지 않는다).
+  if (r.state === 'expired') return `${ip} — 결과 없음: 이 vCenter 담당 엣지 에이전트가 요청을 가져가지 않았습니다(엣지 포탈이 꺼졌거나 이 vCenter 를 담당하지 않습니다). 도달 가능 여부는 모릅니다.`;
+  if (r.state === 'unknown') return `${ip} — 결과 없음: 중앙에서 응답을 받지 못했고 대행할 엣지도 없습니다(도달 가능 여부는 모릅니다).`;
   return `${ip} — ping 확인 중…(해당 vCenter 담당 엣지 에이전트가 대행)`;
 };
 
@@ -84,13 +87,13 @@ export function VmIpPing({ vcenterId, ips }) {
     const c = state === 'up' ? 'var(--green,#22c55e)' : (state === 'down' || state === 'error') ? 'var(--red,#ef4444)' : '#9ca3af';
     return <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: c,
       boxShadow: state === 'up' ? '0 0 6px var(--green,#22c55e)' : 'none', marginRight: 6, flex: '0 0 auto',
-      animation: state === 'pending' || state === 'unknown' ? 'pulse 1.2s infinite' : 'none' }} />;
+      animation: state === 'pending' ? 'pulse 1.2s infinite' : 'none' }} />;
   };
   if (denied) {
     return <span className="muted" style={{ fontSize: 12 }}>IP ping 확인은 operator/admin 권한이 필요합니다. IP: {ips.join(', ')}</span>;
   }
   // 정렬: 도달(up) → 확인중(pending/unknown) → 실패(error/down) 순, 같은 상태면 RTT 오름차순.
-  const ORDER = { up: 0, pending: 1, unknown: 1, error: 2, down: 3 };
+  const ORDER = { up: 0, pending: 1, unknown: 1, expired: 1, error: 2, down: 3 };
   const sorted = [...ips].sort((a, b) => {
     const ra = res[a] || { state: 'pending' }, rb = res[b] || { state: 'pending' };
     const d = (ORDER[ra.state] ?? 1) - (ORDER[rb.state] ?? 1);

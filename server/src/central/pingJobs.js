@@ -34,6 +34,7 @@
 const pending = new Map();  // vcenterId -> Map<ip, { at, tries }>          (요청됐으나 아직 인출 안 된 IP)
 const inflight = new Map(); // vcenterId -> Map<ip, { deadline, tries }>    (인출됐고 결과(ack) 대기 중인 IP)
 const results = new Map();  // vcenterId -> Map<ip, { alive, rttMs, at }>
+const expired = new Map();  // vcenterId -> Map<ip, at>  (v2.590 P11: 대기 만료 — 아무 엣지도 가져가지 않았다)
 
 const RESULT_TTL = 5 * 60_000; // 결과 보존 5분
 const UP_STICKY_MS = 2 * 60_000; // 최근 'up'은 이 시간 동안 down 보고로 덮어쓰지 않음(멀티홈/멀티에이전트 깜빡임 방지)
@@ -47,6 +48,9 @@ const ACK_TIMEOUT_MS = Number(process.env.PING_ACK_TIMEOUT_MS) || 30_000;
 // IP당 재인출 한도 — 초과 시 폐기(UI는 unknown). ping 은 저비용·멱등이라 2회면 충분하고,
 // 무한 재시도는 죽은 엣지에 같은 IP 를 영원히 돌리는 낭비가 된다.
 const MAX_TRIES = 2;
+// v2.590 P11: 인출되지 않은 대기 IP 의 만료. 담당 엣지가 폴(4초)을 돌고 있으면 수 초 안에 가져간다 — 이 시간이 지나도
+// 대기면 엣지가 꺼졌거나 이 vCenter 를 담당하지 않는다. 예전에는 대기에 만료가 없어 화면이 영원히 '확인 중…' 이었다.
+const PENDING_TTL_MS = Number(process.env.PING_PENDING_TTL_MS) || 90_000;
 
 /**
  * 만료 in-flight 재수확 — 기한 내 결과(ack)가 없는 IP 를 처리한다.
@@ -58,6 +62,15 @@ const MAX_TRIES = 2;
  */
 export function reapPingClaims(now = Date.now()) {
   let requeued = 0, dropped = 0;
+  for (const [vc, m] of pending) {
+    for (const [ip, p] of m) {
+      if (now - (p.at || 0) <= PENDING_TTL_MS) continue;
+      m.delete(ip);
+      const e = expired.get(vc) || new Map(); e.set(ip, now); expired.set(vc, e);
+    }
+    if (!m.size) pending.delete(vc);
+  }
+  for (const [vc, e] of expired) { for (const [ip, at] of e) if (now - at > RESULT_TTL) e.delete(ip); if (!e.size) expired.delete(vc); }
   for (const [vc, fl] of inflight) {
     for (const [ip, f] of fl) {
       if (now <= f.deadline) continue;
@@ -84,7 +97,8 @@ export function enqueuePing(vcenterId, ips = []) {
     const v = String(ip || '').trim();
     if (!v || m.size >= MAX_IPS) continue;
     if (fl && fl.has(v)) continue; // 진행 중 — 재적재하면 결과 도착 직후 또 인출되는 낭비
-    m.set(v, { at: now, tries: m.get(v)?.tries || 0 });
+    m.set(v, { at: m.get(v)?.at || now, tries: m.get(v)?.tries || 0 });
+    expired.get(vcenterId)?.delete(v); // 다시 요청했으니 만료 표시를 지운다
   }
   pending.set(vcenterId, m);
   return m.size;
@@ -146,13 +160,14 @@ export function getPingResults(vcenterId, ips = []) {
   const m = results.get(vcenterId) || new Map();
   const pend = pending.get(vcenterId) || new Map();
   const fl = inflight.get(vcenterId) || new Map();
+  const exp = expired.get(vcenterId) || new Map();
   const now = Date.now();
   const out = {};
   for (const ip of ips) {
     const key = String(ip);
     const r = m.get(key);
     if (r && now - r.at <= RESULT_TTL) out[key] = { alive: r.alive, rttMs: r.rttMs, ageMs: now - r.at, state: r.alive ? 'up' : 'down' };
-    else out[key] = { state: (pend.has(key) || fl.has(key)) ? 'pending' : 'unknown' };
+    else out[key] = { state: (pend.has(key) || fl.has(key)) ? 'pending' : exp.has(key) ? 'expired' : 'unknown' };
   }
   return out;
 }

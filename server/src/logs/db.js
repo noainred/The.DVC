@@ -104,9 +104,11 @@ function initSqlite() {
         return v;
       },
       prune: (beforeTs) => { const r = prune.run(beforeTs); metaCache = null; return Number(r?.changes || 0); },
-      sizeBytes: () => { try { return fs.statSync(DB_PATH).size; } catch { return 0; } },
+      // v2.590 P10: 디스크 사용은 본 파일 + -wal 이다. VACUUM 은 WAL 모드에서 새 페이지를 WAL 로 쓰고 체크포인트 뒤에도
+      // -wal 파일은 줄지 않아, 본 파일만 재면 상한 1GB 현장의 실제 점유가 약 2GB 였다.
+      sizeBytes: () => { let n = 0; for (const f of [DB_PATH, `${DB_PATH}-wal`]) { try { n += fs.statSync(f).size; } catch { /* 없으면 0 */ } } return n; },
       pruneOldest: (n) => { const r = pruneOldestStmt.run(Math.max(1, n)); metaCache = null; return Number(r?.changes || 0); },
-      vacuum: () => { try { db.exec('VACUUM'); } catch { /* */ } },
+      vacuum: () => { try { db.exec('VACUUM'); db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch { /* */ } },
       path: DB_PATH,
       close: () => { try { db.close(); } catch { /* */ } },
     };

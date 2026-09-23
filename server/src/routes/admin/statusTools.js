@@ -91,7 +91,11 @@ adminRouter.get('/portal-db', adminOnly, (_req, res) => res.json(portalDbReport(
  * ?file=<파일명> 으로 한 개만 점검할 수 있다(전체 점검이 부담스러운 운영 시간대 대비).
  * 쓰기·VACUUM 을 수행하지 않으므로 서비스 중단 없이 안전하다.
  */
+// v2.590 P7: 점검은 파일마다 동기 PRAGMA 라 겹쳐 돌면 정지 시간이 곱해진다 — 동시 1건(연타·여러 관리자).
+let _dbHealthBusy = false;
 adminRouter.get('/portal-db/health', adminOnly, async (req, res) => {
+  if (_dbHealthBusy) return res.status(409).json({ ok: false, reason: '다른 DB 점검이 진행 중입니다. 끝난 뒤 다시 누르세요.' });
+  _dbHealthBusy = true;
   try {
     const full = req.query.mode === 'full';
     const only = String(req.query.file || '').trim();
@@ -101,6 +105,7 @@ adminRouter.get('/portal-db/health', adminOnly, async (req, res) => {
     const report = await inspectMany(targets.map((f) => f.path), { full });
     res.json({ ok: true, ...report });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+  finally { _dbHealthBusy = false; }
 });
 
 /**

@@ -20,13 +20,22 @@ export async function checkpointConfigDbs(dir) {
   try { ({ DatabaseSync } = await import('node:sqlite')); }
   catch { return { ok: false, reason: 'node:sqlite 미사용(NDJSON 폴백) — 체크포인트 불필요' }; }
 
+  // v2.590 P14: 한 단계 하위 디렉터리(vmperf/·vmseries/ — vCenter 마다 파일 하나)도 본다. 업그레이드는 config 를
+  // **재귀** 복사하는데 여기는 비재귀라 vCenter별 DB 30여 개가 -wal 과 다른 순간에 복사될 수 있었다.
   let entries = [];
-  try { entries = fs.readdirSync(dir).filter((f) => f.endsWith('.db')); }
-  catch { return { ok: false, reason: `디렉터리 없음: ${dir}` }; }
+  try {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.isFile() && e.name.endsWith('.db')) entries.push(e.name);
+      else if (e.isDirectory() && e.name !== 'backups') {
+        try { for (const f of fs.readdirSync(path.join(dir, e.name))) if (f.endsWith('.db')) entries.push(path.join(e.name, f)); }
+        catch { /* 하위 디렉터리 읽기 실패는 건너뛴다(best effort) */ }
+      }
+    }
+  } catch { return { ok: false, reason: `디렉터리 없음: ${dir}` }; }
 
   const checkpointed = [];
   for (const f of entries) {
-    if (/ipam/i.test(f)) continue;                 // ipam.db 제외(비 WAL·외부 공유)
+    if (/ipam/i.test(path.basename(f))) continue;                 // ipam.db 제외(비 WAL·외부 공유)
     const p = path.join(dir, f);
     if (!fs.existsSync(`${p}-wal`)) continue;       // -wal 없으면 flush할 것도 없음
     let db = null;
