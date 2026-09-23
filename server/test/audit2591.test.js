@@ -445,3 +445,60 @@ test('★ PR-9: RMA 결과 회신의 비-2xx 가 로그에 남고, rma-result �
   assert.match(body, /HTTP \$\{r\.status\}/);
   assert.match(src('index.js'), /app\.use\('\/api\/central\/rma-result', BIG_JSON\)/);
 });
+
+test('★ L4: iDRAC 인증 캐시는 LRU · 대상이 512 를 넘어도 세션을 매 주기 새로 만들지 않는다 · 밀려난 세션은 DELETE', async () => {
+  const http = await import('node:http');
+  const { spawn } = await import('node:child_process');
+  let made = 0, deleted = 0;
+  const live = new Set();
+  const srv = http.createServer((req, res) => {
+    // 'b-' 로 시작하는 계정은 Basic 을 받는 iDRAC 처럼 굴게 한다(LRU 순서 확인용).
+    const basicUser = Buffer.from(String(req.headers.authorization || '').replace(/^Basic /, ''), 'base64').toString().split(':')[0];
+    if (basicUser.startsWith('b-')) { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('{"Members":[]}'); }
+    if (req.method === 'POST' && req.url === '/redfish/v1/SessionService/Sessions') {
+      made += 1; const tok = `tok-${made}`; live.add(tok);
+      req.resume(); res.writeHead(201, { 'X-Auth-Token': tok, Location: `/redfish/v1/SessionService/Sessions/${made}` }); return res.end('{}');
+    }
+    if (req.method === 'DELETE' && req.url.startsWith('/redfish/v1/SessionService/Sessions/')) { deleted += 1; live.delete(req.headers['x-auth-token']); res.writeHead(204); return res.end(); }
+    if (req.headers['x-auth-token'] && live.has(req.headers['x-auth-token'])) { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('{"Members":[]}'); }
+    res.writeHead(401); res.end('{}'); // Basic 비활성(세션 전용) iDRAC
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  const script = `
+    const { fetchPower, authCacheInfo } = await import(${JSON.stringify(path.join(SRC, 'idrac/redfish.js'))});
+    const n = Number(process.env.N);
+    const hit = (u) => fetchPower({ host: 'http://127.0.0.1:${port}', username: u, password: 'p' }).catch(() => {});
+    if (process.env.MODE === 'hot') {
+      // 자주 쓰는 세션 키 10개 사이에 한 번 쓰고 마는 키 n개 — LRU 면 자주 쓰는 키는 밀려나지 않는다.
+      for (let i = 0; i < n; i++) { await hit('hot' + (i % 10)); await hit('cold' + i); }
+    } else if (process.env.MODE === 'basic') {
+      for (let i = 0; i < 64; i++) await hit('b-' + i);   // 상한까지 채운다
+      await hit('b-0');                                     // 가장 오래된 키를 다시 쓴다 → 맨 뒤로
+      await hit('b-new');                                   // 하나 더 → 밀려나는 것은 b-1 이어야 한다
+    } else {
+      for (let round = 0; round < 2; round++) for (let i = 0; i < n; i++) await hit('u' + i);
+    }
+    await new Promise((r) => setTimeout(r, 300)); // DELETE 는 기다리지 않고 나간다
+    console.log(JSON.stringify(authCacheInfo()));`;
+  const run = async (env) => {
+    const before = made, delBefore = deleted;
+    const out = await new Promise((resolve) => {
+      const c = spawn(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, CONFIG_DIR: TMP, ...env } });
+      let so = ''; c.stdout.on('data', (d) => { so += d; }); c.on('close', () => resolve(so));
+    });
+    return { made: made - before, deleted: deleted - delBefore, info: JSON.parse(out.trim().split('\n').pop() || '{}') };
+  };
+  try {
+    const big = await run({ N: '600' });
+    assert.equal(big.made, 600, `2회 × 600 키에서 세션은 키마다 1번만 만들어야 한다(예전 FIFO 512 는 1,200) — ${big.made}`);
+    assert.ok(big.info.max >= 4096);
+    const small = await run({ N: '100', IDRAC_AUTH_CACHE_MAX: '64' });
+    assert.ok(small.made > 100, '상한보다 대상이 많으면 밀려나는 것은 어쩔 수 없다');
+    assert.ok(small.deleted >= small.made - 64, `밀려난 세션을 닫아야 한다(만듦 ${small.made} · 닫음 ${small.deleted})`);
+    const hot = await run({ N: '200', MODE: 'hot', IDRAC_AUTH_CACHE_MAX: '64' });
+    assert.equal(hot.made, 210, `자주 쓰는 키 10개는 한 번씩만 세션을 만들어야 한다(LRU) — 만듦 ${hot.made}`);
+    const basic = await run({ N: '0', MODE: 'basic', IDRAC_AUTH_CACHE_MAX: '64' });
+    assert.ok(basic.info.order.includes('b-0') && !basic.info.order.includes('b-1'), `다시 쓴 키가 뒤로 가지 않았다(FIFO): 앞 ${basic.info.order.slice(0, 3)}`);
+  } finally { srv.close(); }
+});
