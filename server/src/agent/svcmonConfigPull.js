@@ -51,17 +51,26 @@ function headers() {
   };
 }
 
+/**
+ * 적용 결과를 중앙에 알린다. 성공이면 true.
+ * v2.593(감사 EDGE-1 — 재현): 예전엔 반환값이 없고 `r.ok` 도 보지 않았는데 호출부가 ack **전에** appliedSig 를
+ * 세웠다 — ack 가 한 번 실패하면 다음 pull 이 그 sig 를 보내 중앙이 `unchanged` 로 답하고, 엣지는 다시 ack 하지
+ * 않아 중앙 배정 상태가 **영원히 'pending'** 이었다. 이제 ack 가 성공해야 appliedSig 를 세운다(실패하면 다음 pull 이
+ * 정의 전문을 다시 받아 멱등 재적용 후 다시 ack 한다 — 적용 자체는 되돌리지 않는다).
+ */
 async function ack(sig, applied, removed, errors) {
   try {
-    await resilientFetch(`${config.agent.centralUrl}/api/central/svcmon-config-ack`, {
+    const r = await resilientFetch(`${config.agent.centralUrl}/api/central/svcmon-config-ack`, {
       method: 'POST', headers: headers(),
       body: JSON.stringify({ sig, applied, removed, errors: errors.slice(0, 20) }),
       timeoutMs: 20_000, retries: 1,
     });
+    if (!r.ok) { console.warn(`[svcmon-pull] ack 실패: HTTP ${r.status} — 다음 pull 에서 다시 적용·보고합니다`); return false; }
+    return true;
   } catch (e) {
-    // ack 실패는 적용 자체를 되돌리지 않는다 — 중앙이 pending 으로 남겨 두고 다음 주기에
-    // 다시 확인하는 편이 안전하다(적용을 롤백하면 감시 공백이 생긴다).
-    console.warn(`[svcmon-pull] ack 실패: ${e?.message || e}`);
+    // ack 실패는 적용 자체를 되돌리지 않는다(롤백하면 감시 공백이 생긴다) — 다음 pull 에서 다시 보고한다.
+    console.warn(`[svcmon-pull] ack 실패: ${e?.message || e} — 다음 pull 에서 다시 적용·보고합니다`);
+    return false;
   }
 }
 
@@ -127,11 +136,10 @@ export async function pullSvcmonConfigNow() {
     } else if (r.saved === false) {
       errors.push('적용했지만 파일 저장에 실패했습니다(재기동 시 유실).');
     }
-    if (r.committed && !errors.length) appliedSig = d.sig;
-
-    await ack(d.sig, { added: r.added || 0, newTests: r.newTests || 0 }, removed, errors);
+    const acked = await ack(d.sig, { added: r.added || 0, newTests: r.newTests || 0 }, removed, errors);
+    if (r.committed && !errors.length && acked) appliedSig = d.sig;
     last = {
-      at: Date.now(), assigned: true, sig: d.sig, tag: d.tag,
+      at: Date.now(), assigned: true, sig: d.sig, tag: d.tag, acked,
       added: r.added || 0, newTests: r.newTests || 0, skipped: (r.skipped || []).length,
       removed, committed: !!r.committed, errors,
     };

@@ -192,6 +192,13 @@ body {
    letter-spacing 이 '작은 라벨' 느낌을 유지한다. 되살리지 말 것. */
 .statusbar .sb-label { color: var(--text-faint); font-size: 10px; font-weight: 600; letter-spacing: .12em; }
 .statusbar .sb-val { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+/* v2.593(감사 UI-2593-03 — 400px 실측): 칸 4개가 한 줄에 눌려 라벨이 한 글자씩 세로로 쪼개졌다. 좁은 폭에서는
+   2×2 로 접고 라벨·값을 한 줄로 묶는다(칸 내용·개수는 그대로 — v2.556 규약). */
+@media (max-width: 720px) {
+  .statusbar { flex-wrap: wrap; }
+  .statusbar .sb-cell { flex: 1 1 50%; padding: 4px 8px; gap: 6px; border-bottom: 1px solid var(--border-soft); }
+  .statusbar .sb-label, .statusbar .sb-val { white-space: nowrap; }
+}
 .grid { display: grid; gap: 16px; }
 .section-title { font-size: 13px; letter-spacing: 1px; color: var(--text-faint); margin: 26px 0 12px; font-weight: 700; }
 

@@ -15,6 +15,7 @@
  */
 import { emptySnapshot } from '../types.js';
 import { makeGetter, tryAny } from './restCommon.js';
+import { numOrNull } from '../../util/numOrNull.js';
 
 const KB = 1024; // XMS 공간 값 단위(KB) → 바이트 환산 계수
 
@@ -40,15 +41,17 @@ export function normalizeXtremio(device, raw) {
     snap.extra.numBricks = Number(c0['num-of-bricks']) || 0;
     snap.sections.config = 'ok';
     // 클러스터별 용량(KB→바이트) — 합산이 capacity, 개별은 pools.
+    // v2.593(감사 DATA-01): 한 클러스터라도 사용량을 못 읽으면 합계 사용량은 null(부분 합을 전체라 말하지 않는다).
     let total = 0, used = 0;
     snap.pools = cls.slice(0, 32).map((c) => {
       const t = (Number(c['ud-ssd-space']) || 0) * KB;
-      const u = (Number(c['ud-ssd-space-in-use']) || 0) * KB;
-      total += t; used += u;
-      return { name: c.name || '', totalBytes: t, usedBytes: u, pct: t ? Math.round((u / t) * 1000) / 10 : null };
+      const un = numOrNull(c['ud-ssd-space-in-use']);
+      const u = un == null ? null : un * KB;
+      total += t; used = used == null || u == null ? null : used + u;
+      return { name: c.name || '', totalBytes: t, usedBytes: u, pct: t && u != null ? Math.round((u / t) * 1000) / 10 : null };
     });
     if (total > 0) {
-      snap.capacity = { totalBytes: total, usedBytes: used, pct: Math.round((used / total) * 1000) / 10 };
+      snap.capacity = { totalBytes: total, usedBytes: used, pct: used == null ? null : Math.round((used / total) * 1000) / 10 };
       // 전체 플래시 — SSD 풀 = 전체 용량(HDD 없음: null 로 '풀 없음' 표기, isilon 의미와 동일).
       snap.media = { hdd: null, ssd: { totalBytes: total, usedBytes: used, pct: snap.capacity.pct } };
       snap.sections.capacity = 'ok';

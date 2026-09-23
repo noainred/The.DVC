@@ -15,10 +15,12 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { getOverrides } from './overrides.js';
 import { getPolicies, isCoveredByAnyPolicy } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
+import { ipToNum } from '../util/ipv4.js';
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 
-const _ipNum = (s) => { const p = String(s).split('.').map(Number); return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) ? (((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) : null; };
+// v2.593(감사 DEPS-03): 손으로 쓴 사본이 '10..1.1'·'0x0a.1.1.1' 을 받았다 — IPv4 파서는 util/ipv4.js 하나다(v2.586).
+const _ipNum = ipToNum;
 // 운영자가 관리(수동 override 또는 대역 정책)하는 IP인지 판단하는 '예측자'를 1회 구성해 반환.
 // 루프 안에서 매번 override 맵/정책 목록을 다시 읽지 않도록 컨텍스트를 캡처하고,
 // 활성 정책이 하나도 없으면 findPolicy 자체를 건너뛴다(대다수 환경에서 O(N)로 동작).

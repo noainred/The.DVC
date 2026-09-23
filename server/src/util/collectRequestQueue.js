@@ -42,12 +42,20 @@ export function createCollectRequestQueue({ ttlMs = 15 * 60_000, ackMs = 10 * 60
   const norm = (a) => (lower ? String(a || '').trim().toLowerCase() : String(a || '').trim());
 
   function reap(now = Date.now()) {
-    for (const [id, r] of pending) if (now - r.requestedAt > ttlMs) pending.delete(id);
+    // v2.593(감사 R2593-03): TTL 만료도 폐기다 — 예전엔 drops 에 남기지 않아, 가장 흔한 경우(엣지가 꺼져 있거나 pull 을
+    //   안 해 요청을 한 번도 가져가지 않음)가 화면에서 **조용히 사라졌다**. 사유를 나눈다: 'untaken'(엣지가 가져가지 않았다) /
+    //   'requeued-expired'(한 번 가져갔는데 결과가 오지 않았고 재대기 뒤 다시 가져가지 않았다) / 'no-result'(시도 상한).
+    for (const [id, r] of pending) {
+      if (now - r.requestedAt <= ttlMs) continue;
+      pending.delete(id);
+      drops.unshift({ id, agent: r.agent, at: now, tries: r.tries || 0, reason: r.tries ? 'requeued-expired' : 'untaken' });
+      if (drops.length > DROPS_MAX) drops.length = DROPS_MAX;
+    }
     for (const [id, f] of inflight) {
       if (now <= f.deadline) continue;
       inflight.delete(id);
       if (f.tries >= maxTries) {
-        drops.unshift({ id, agent: f.agent, at: now, tries: f.tries });
+        drops.unshift({ id, agent: f.agent, at: now, tries: f.tries, reason: 'no-result' });
         if (drops.length > DROPS_MAX) drops.length = DROPS_MAX;
         continue;
       }

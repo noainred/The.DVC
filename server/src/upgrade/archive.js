@@ -38,6 +38,16 @@ export function parseTar(buf) {
   let offset = 0;
   let longName = null;
   let longLink = null;
+  // v2.593(감사 R2593-02 — 재현): 하드링크는 헤더 크기가 0 이라 gunzip 의 maxOutputLength 가 원본 **한 번**만 센다.
+  //   사본을 다 만든 뒤 collectMembers 가 누적을 재면 이미 늦다(20KB tgz → 사본 60개 · 1.22GB 상주).
+  //   만드는 **동안** 누적 바이트·개수를 세어 상한을 넘기 전에 던진다(v2.488 L-1 '압축 해제에는 상한' 의 연장).
+  let total = 0;
+  const account = (n) => {
+    total += n;
+    if (total > MAX_BUNDLE_BYTES || entries.length >= MAX_MEMBERS) {
+      throw new Error(`아카이브가 너무 큽니다 — 풀린 크기·개수 상한(${MAX_BUNDLE_BYTES}B · ${MAX_MEMBERS}개)을 넘었습니다(하드링크 사본 포함)`);
+    }
+  };
 
   while (offset + 512 <= buf.length) {
     const block = buf.subarray(offset, offset + 512);
@@ -71,6 +81,7 @@ export function parseTar(buf) {
     const target = longLink || linkName;
     longName = null; longLink = null;
     if (typeflag === '0' || typeflag === '7') {
+      account(data.length);
       const b = Buffer.from(data);
       if (mode & 0o111) b.exec = true;
       entries.push({ name: fullName, data: b });
@@ -79,6 +90,7 @@ export function parseTar(buf) {
       // 하드링크 — 대상은 이 아카이브에서 **앞서 나온** 일반 파일이어야 한다(없으면 버린다: 밖을 가리킬 수 없다).
       const src = byName.get(target);
       if (src) {
+        account(src.length);
         const b = Buffer.from(src);
         if (src.exec || (mode & 0o111)) b.exec = true;
         entries.push({ name: fullName, data: b });

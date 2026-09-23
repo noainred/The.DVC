@@ -27,9 +27,11 @@ async function postResult(payload) {
     const r = await resilientFetch(`${config.agent.centralUrl}/api/central/idrac-scan-result`, {
       method: 'POST', headers: headers(), body: JSON.stringify(payload), timeoutMs: 30_000, retries: 2,
     });
-    if (!r.ok) console.error(`[idrac-scan-agent] 결과 회신 거부 HTTP ${r.status} (reqId=${payload.reqId}) — CENTRAL_TOKEN/중앙 버전을 확인하세요.`);
+    if (!r.ok) { console.error(`[idrac-scan-agent] 결과 회신 거부 HTTP ${r.status} (reqId=${payload.reqId}) — CENTRAL_TOKEN/중앙 버전을 확인하세요.`); return `결과 회신 거부(HTTP ${r.status})`; }
+    return null;
   } catch (e) {
     console.error(`[idrac-scan-agent] 결과 회신 실패: ${e.message} (reqId=${payload.reqId})`);
+    return `결과 회신 실패: ${e.message}`;
   }
 }
 
@@ -85,12 +87,13 @@ async function runIdracScanWorkerInner() {
         // 스캔+현지등록 코어는 PUSH 엔드포인트와 공유(runLocalIdracScan). durationMs는 헬퍼가 계산.
         // v2.591(감사 F3): 중앙이 싣는 trigger·rangeId — 주기 잡이면 인증 정지 IP 를 건너뛴다(구버전 중앙은 필드가 없어 수동=전부 시도).
         const scan = await runLocalIdracScan({ ips: job.ips, username: job.username, password: job.password, noRegister: job.noRegister, vcenterId: job.vcenterId || '', datacenterId: job.datacenterId || '', mode: job.mode || 'merge', onProgress, trigger: job.trigger === 'periodic' ? 'periodic' : 'manual', rangeId: String(job.rangeId || '') });
-        await postResult({ reqId: job.reqId, agent: config.agent.name, ...scan });
-        last = { at: Date.now(), reqId: job.reqId, foundCount: scan.foundCount, registered: scan.registered };
+        // v2.593(감사 EDGE-4): 회신 실패를 콘솔뿐 아니라 상태에도 싣는다 — 엣지 로그 화면이 '성공 모양' 으로 보이지 않게.
+        const postErr = await postResult({ reqId: job.reqId, agent: config.agent.name, ...scan });
+        last = { at: Date.now(), reqId: job.reqId, foundCount: scan.foundCount, registered: scan.registered, ...(postErr ? { postError: postErr } : {}) };
         console.log(`[idrac-scan-agent] ${config.agent.name}: ${scan.foundCount}/${scan.scanned} iDRAC, ${scan.registered} 현지 등록${job.noRegister ? ' (등록 보류)' : ''}`);
       } catch (e) {
-        await postResult({ reqId: job.reqId, agent: config.agent.name, error: e.message });
-        last = { at: Date.now(), reqId: job.reqId, error: e.message };
+        const postErr = await postResult({ reqId: job.reqId, agent: config.agent.name, error: e.message });
+        last = { at: Date.now(), reqId: job.reqId, error: e.message, ...(postErr ? { postError: postErr } : {}) };
       }
     }
     return last;

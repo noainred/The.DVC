@@ -189,8 +189,10 @@ async function pollLive(snap, vc, s) {
       const acct = `${creds.username}(${creds.source})·${usedMethod}`;
       if (r && r.utilPct != null) {
         console.log(`[gpu-guest]   ✓ ${v.name}: util=${r.utilPct}% mem=${r.memUsedPct ?? '-'}% gpus=${r.count}`);
-        vms.push({ vmId: v.id, host: v.host, vcenterId: vc.id, utilPct: r.utilPct, memUsedPct: r.memUsedPct });
-        const arr = byHost.get(v.host) || []; arr.push(r.utilPct); byHost.set(v.host, arr);
+        // v2.593(감사 DATA-02): MIG 모드로 GPU 단위 사용률이 없으면(utilNA) 파서가 0 을 채운다 — 그 0 을 그대로 저장하면
+        //   '사용률 0%(유휴)' 가 되어 호스트 대표값·평균을 끌어내린다. 사용률은 null + utilNA 로 싣고 호스트 대표값에서 뺀다.
+        vms.push({ vmId: v.id, host: v.host, vcenterId: vc.id, utilPct: r.utilNA ? null : r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct });
+        if (!r.utilNA) { const arr = byHost.get(v.host) || []; arr.push(r.utilPct); byHost.set(v.host, arr); }
         if (diag.results.length < 200) diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: true, util: r.utilPct, mem: r.memUsedPct ?? null, gpus: r.count });
       } else if (diag.results.length < 200) {
         diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: false, error: err || 'nvidia-smi 결과 없음(stdout 비어있음)', ...(authRec ? { authStopped: gpuStopView(authRec) } : {}) });

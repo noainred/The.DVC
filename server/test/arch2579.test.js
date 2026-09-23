@@ -31,7 +31,8 @@ const rel = (p) => path.relative(ROOT, p).split(path.sep).join('/');
 const code = (p) => stripComments(fs.readFileSync(p, 'utf8'));
 const importsOf = (p) => {
   const out = [];
-  for (const m of code(p).matchAll(/(?:^|\n)\s*import[^'"]*?from\s*['"](\.[^'"]+)['"]|import\(\s*['"](\.[^'"]+)['"]\s*\)/g)) {
+  // v2.593(감사 DEPS-06): 재수출(`export … from`) edge 도 센다 — 재수출만으로 만든 순환은 예전 정규식이 보지 못했다.
+  for (const m of code(p).matchAll(/(?:^|\n)\s*(?:import|export)[^'"]*?from\s*['"](\.[^'"]+)['"]|import\(\s*['"](\.[^'"]+)['"]\s*\)/g)) {
     let t = path.resolve(path.dirname(p), m[1] || m[2]);
     if (!t.endsWith('.js')) t = fs.existsSync(`${t}.js`) ? `${t}.js` : path.join(t, 'index.js');
     if (fs.existsSync(t)) out.push(rel(t));

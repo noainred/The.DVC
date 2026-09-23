@@ -343,16 +343,28 @@ api.get('/tools/gpu/export.json', requirePerm('tools'), (req, res) => gpuSeriesE
 // 중앙이 직접 수집하는 vCenter(에이전트 없음)는 중앙이 직접 ping해 즉시 결과를 채운다.
 api.post('/tools/ip-ping', requirePerm('tools'), async (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').trim();
-  const ips = Array.isArray(req.body?.ips) ? req.body.ips.map((s) => String(s).trim()).filter(Boolean).slice(0, 16) : [];
+  let ips = Array.isArray(req.body?.ips) ? req.body.ips.map((s) => String(s).trim()).filter(Boolean).slice(0, 16) : [];
   if (!vcenterId || !ips.length) return res.status(400).json({ ok: false, reason: 'vcenterId·ips가 필요합니다.' });
   // v2.322 보안 감사: 범위 밖 vCenter 로 위임 ping(범위 밖 에이전트가 임의 IP 도달성 프로빙)
   // 차단 — 단건 라우트 규칙대로 범위 밖은 404(존재 은닉). 전체 범위 계정은 무영향.
   if (!inUserScope(req.user, store.get(), vcenterId)) return res.status(404).json({ ok: false, reason: 'not found' });
+  // v2.593(감사 AUTHZ-02): 범위만 보고 IP 는 무엇이든 받았다 — tools 계정이 중앙·엣지를 시켜 외부 IP·다른 법인
+  //   VM IP·호스트명의 도달성을 캐볼 수 있었다(v2.322 가 막으려던 '임의 IP 도달성 프로빙' 의 남은 절반). 이 화면
+  //   (VM 상세)이 보내는 것은 **그 vCenter 의 VM 에 수집된 IP** 뿐이므로 그 집합으로 좁히고, 뺀 개수를 밝힌다.
+  const known = new Set();
+  for (const v of store.get().vms || []) {
+    if (v.vcenterId !== vcenterId) continue;
+    if (v.ipAddress) known.add(String(v.ipAddress));
+    for (const ip of v.ipAddresses || []) known.add(String(ip));
+  }
+  const rejected = ips.filter((ip) => !known.has(ip));
+  ips = ips.filter((ip) => known.has(ip));
+  if (!ips.length) return res.status(400).json({ ok: false, reason: '그 vCenter 의 VM 에서 수집된 IP 가 아닙니다.', rejected: rejected.length });
   const site = isSiteVcenter(store.get(), vcenterId);
   // 엣지 위임 vCenter 만 엣지 대행 큐에 올린다 — 중앙 직접 수집 vCenter 를 큐에 올리면 가져갈 엣지가 없다(v2.590 P11).
   if (site) enqueuePing(vcenterId, ips);
   if (config.dataSource !== 'mock') pingLocallyAndStore(vcenterId, ips, { direct: !site }).catch(() => {});
-  res.json({ ok: true, queued: site ? ips.length : 0, direct: !site });
+  res.json({ ok: true, queued: site ? ips.length : 0, direct: !site, rejected: rejected.length });
 });
 api.get('/tools/ip-ping', requirePerm('tools'), (req, res) => {
   const vcenterId = String(req.query.vcenterId || '').trim();
@@ -386,7 +398,7 @@ api.get('/tools/gpu/vms', requirePerm('tools'), (req, res) => {
       return {
         id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
         powerState: v.powerState, model: hostModel[v.host] || '', gpu: v.gpu,
-        guestUtilPct: g ? g.utilPct : null, guestMemPct: g ? (g.memUsedPct ?? null) : null, guestAt: g ? g.at : null,
+        guestUtilPct: g ? g.utilPct : null, guestUtilNA: g ? !!g.utilNA : false, guestMemPct: g ? (g.memUsedPct ?? null) : null, guestAt: g ? g.at : null,
       };
     }).sort((a, b) => (a.vcenterId === b.vcenterId
       ? String(a.name || '').localeCompare(String(b.name || ''))

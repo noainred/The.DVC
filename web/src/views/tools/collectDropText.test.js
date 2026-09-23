@@ -28,4 +28,15 @@ describe('collectDropNote — 폐기된 위임 수집 요청 안내(v2.591)', ()
     const t = collectDropNote([{ id: 'a', agent: 'e', at: NOW, tries: 2 }], undefined, NOW);
     expect(t.includes('`')).toBe(false);
   });
+  it('v2.593 — 엣지가 가져가지도 않은 폐기(untaken)는 엣지 상태를 보라고 말한다 · 섞이면 개수를 밝힌다', () => {
+    const only = collectDropNote([{ id: 'a', agent: 'e1', at: NOW, tries: 0, reason: 'untaken' }], undefined, NOW);
+    expect(only).toContain('가져가지 않은 채');
+    expect(only).not.toContain('엣지 로그에서 그 장비의 수집 오류');
+    const mixed = collectDropNote([
+      { id: 'a', agent: 'e1', at: NOW, tries: 0, reason: 'untaken' },
+      { id: 'b', agent: 'e1', at: NOW, tries: 2, reason: 'no-result' },
+    ], undefined, NOW);
+    expect(mixed).toContain('수집 오류');
+    expect(mixed).toContain('그중 1건은 엣지가 요청을 가져가지도 않았습니다');
+  });
 });

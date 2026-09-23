@@ -283,7 +283,8 @@ export function parseNvidiaSmiCsv(text) {
   if (!text || !text.trim()) return null;
   const gpus = [];
   // '[N/A]' / 'N/A' / 빈값 → null. nounits라도 MIG 모드면 사용률이 '[N/A]'로 온다.
-  const num = (s) => { const v = Number(String(s).replace(/[[\]]/g, '').trim()); return Number.isFinite(v) ? v : null; };
+  // v2.593(감사 DATA-04): 빈 칸을 먼저 본다 — Number('') === 0 이라 빈 값이 '0%·utilNA=false' 로 읽혔다(주석과 반대).
+  const num = (s) => { const t = String(s ?? '').replace(/[[\]]/g, '').trim(); if (!t) return null; const v = Number(t); return Number.isFinite(v) ? v : null; };
   for (const line of text.trim().split(/\r?\n/)) {
     if (!line.trim()) continue; // 빈 줄 건너뜀
     const raw = line.split(',').map((x) => String(x).trim());

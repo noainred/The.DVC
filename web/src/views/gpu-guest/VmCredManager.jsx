@@ -264,7 +264,7 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
                       </td>
                       <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
                         {r.collected
-                          ? <span className="badge green" title={`마지막 수집 ${fmtAgo(r.collected.at)}`}>● {r.collected.utilPct}% <span style={{ opacity: 0.7 }}>{fmtAgo(r.collected.at)}</span></span>
+                          ? <span className="badge green" title={`마지막 수집 ${fmtAgo(r.collected.at)}`}>● {r.collected.utilNA ? 'N/A(MIG)' : `${r.collected.utilPct}%`} <span style={{ opacity: 0.7 }}>{fmtAgo(r.collected.at)}</span></span>
                           : <span className="badge gray" title="아직 게스트에서 사용률을 읽어오지 못함">미수집</span>}
                       </td>
                       <td>

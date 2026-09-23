@@ -31,8 +31,12 @@ export function parseVersion(s) {
 
 export const vstr = (t) => (Array.isArray(t) ? t.join('.') : String(t));
 
-/** Lexicographic compare of [maj,min,patch] tuples. */
-export function cmpVersion(a, b) {
+/**
+ * Lexicographic compare of [maj,min,patch] **tuples**.
+ * v2.593(감사 DEPS-02): 예전 이름이 `cmpVersion` 이라 문자열을 받는 단일 소스 `util/cmpVersion.js` 와 이름이 같았다 —
+ * 문자열을 넘기면 글자 단위로 비교해 '2.10.0' < '2.9.0' 이 된다. 자동 import·grep 이 엉뚱한 쪽을 집지 않게 이름을 나눴다.
+ */
+export function cmpVersionTuple(a, b) {
   for (let i = 0; i < 3; i++) {
     if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0) ? -1 : 1;
   }
@@ -56,7 +60,7 @@ export function findNewerArchive(watchDir, currentVersion) {
   }
   for (const name of names) {
     const v = archiveVersion(name);
-    if (v && cmpVersion(v, cur) > 0 && (best === null || cmpVersion(v, best.version) > 0)) {
+    if (v && cmpVersionTuple(v, cur) > 0 && (best === null || cmpVersionTuple(v, best.version) > 0)) {
       best = { path: path.join(watchDir, name), version: v };
     }
   }
@@ -261,7 +265,7 @@ function applyIfNewer(members, installDir, currentVersion, { allowSame = false }
   const newV = membersVersion(members);
   if (!newV) return { ok: false, reason: 'no valid vmware-portal package/version in archive' };
   const cur = parseVersion(currentVersion) || [0, 0, 0];
-  const c = cmpVersion(newV, cur);
+  const c = cmpVersionTuple(newV, cur);
   if (c < 0 || (c === 0 && !allowSame)) {
     return { ok: false, reason: `not newer (${vstr(newV)} <= ${vstr(cur)})`, version: vstr(newV) };
   }
@@ -367,7 +371,7 @@ export async function checkRemote(baseUrl, currentVersion, { token, timeout = 10
   const latest = String(data.latest || '');
   const lt = parseVersion(latest);
   out.latest = latest;
-  out.available = Boolean(lt && cmpVersion(lt, cur) > 0);
+  out.available = Boolean(lt && cmpVersionTuple(lt, cur) > 0);
   for (const v of data.versions || []) {
     if (String(v.version) === latest) {
       out.tarGz = v.tar_gz;

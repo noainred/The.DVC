@@ -155,7 +155,7 @@ export function powermaxCapacity(sym) {
   const pu = num(pc?.used_capacity_gb);
   if (pt && pt > 0) {
     return {
-      totalBytes: pt * GB, usedBytes: (pu || 0) * GB,
+      totalBytes: pt * GB, usedBytes: pu == null ? null : pu * GB, // v2.593(DATA-01): 못 읽은 사용량은 0 이 아니다
       basis: 'physicalCapacity', documented: false,
       // V3 표본 2건이 used==total 이었다 — 그때는 '사용량' 이 아닐 가능성이 크다.
       suspect: pu != null && pu === pt,

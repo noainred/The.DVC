@@ -25,8 +25,11 @@ export function recordIngest(agent, endpoint, { wireBytes = 0, summary = null, v
   let a = byAgent.get(key);
   if (!a) {
     if (byAgent.size >= MAX_AGENTS) { // 백스톱: 오래된 항목 정리
-      let oldest = null; for (const [k, v] of byAgent) if (!oldest || v.lastAt < oldest[1].lastAt) oldest = [k, v];
-      if (oldest) byAgent.delete(oldest[0]);
+      // v2.593(감사 R2593-04): 검증된(개별 토큰) 행은 밀어내지 않는다 — v2.589 pullStats 와 같은 규칙. 공유 토큰 보유자가
+      //   본문 이름 500개로 개별 토큰 엣지의 수신 기록을 밀어내면 통신 지도·데이터 흐름 지도가 그 엣지를 '기록 없음' 으로 그린다.
+      let oldest = null; for (const [k, v] of byAgent) if (!v.verifiedPushes && (!oldest || v.lastAt < oldest[1].lastAt)) oldest = [k, v];
+      if (!oldest) return; // 전부 검증된 행이면 새 미검증 이름을 세지 않는다(상한은 지킨다)
+      byAgent.delete(oldest[0]);
     }
     a = { agent: key, firstAt: now, lastAt: now, pushes: 0, verifiedPushes: 0, wireBytes: 0, intervalMsEwma: null, byEndpoint: new Map(), last: null };
     byAgent.set(key, a);

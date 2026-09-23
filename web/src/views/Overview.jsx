@@ -6,7 +6,8 @@ import {
 import { usePolling, fetchJson, putJson } from '../api.js';
 import { Kpi, Loading, ErrorBox, SeverityBadge } from '../components/ui.jsx';
 import STable from '../components/STable.jsx';
-import { unplacedRows, corpNoteText, physNoteText } from './overviewServerText.js'; // v2.583: 미배치 물리 서버 행
+import { unplacedRows, corpNoteText, physNoteText } from './overviewServerText.js';
+import { unitText } from './unitText.js'; // v2.583: 미배치 물리 서버 행
 
 const REGION_COLORS = { '아시아': '#22d3ee', '중국': '#ef4444', '유럽': '#a855f7', '북미': '#3b82f6', Unknown: '#64748b' };
 
@@ -46,6 +47,11 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   if (!ov.global) return <div className="muted" style={{ padding: 40, textAlign: 'center' }}>수집 준비 중… (첫 vCenter 수집 완료 후 표시)</div>;
 
   const g = ov.global;
+  // v2.593(감사 DATA-05): 분모가 0 이면(호스트·데이터스토어 0 — 범위 계정의 vCenter 가 전부 연결 불가일 때 등) 서버 pct() 가
+  //   0 을 준다. 그것을 '사용률 0%' 로 그리면 '비어 있다' 는 거짓이 된다 — 측정할 대상이 없으면 '—'.
+  const cpuPct = g.hosts > 0 && Number(g.cpuTotalGhz) > 0 ? g.cpuUsagePct : null;
+  const memPct = g.hosts > 0 && Number(g.memTotalGB) > 0 ? g.memUsagePct : null;
+  const stoPct = g.datastores > 0 && Number(g.storageTotalTB) > 0 ? g.storageUsagePct : null;
   const regions = ov.byRegion || [];
   const sites = ov.sites || [];
   const alarms = (alarmData?.items || []).slice(0, 8);
@@ -59,9 +65,9 @@ export default function Overview({ onSelectSite, onGotoTab }) {
     On: s.metrics?.vmsPoweredOn || 0,
   }));
   const capacityData = [
-    { name: 'CPU', used: g.cpuUsagePct },
-    { name: 'Memory', used: g.memUsagePct },
-    { name: 'Storage', used: g.storageUsagePct },
+    { name: 'CPU', used: cpuPct },
+    { name: 'Memory', used: memPct },
+    { name: 'Storage', used: stoPct },
   ];
   const osPie = regions.map((r) => ({ name: r.key, value: r.vms, fill: REGION_COLORS[r.key] || '#64748b' }));
 
@@ -154,15 +160,15 @@ export default function Overview({ onSelectSite, onGotoTab }) {
         <Kpi label="가상머신" value={fmt(g.vms)} meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`} accent="var(--green)" onClick={() => onGotoTab?.('vms')} />
         {/* v2.486: 사용률(%)은 vCenter(ESXi 호스트) 실측이고, 두 번째 줄은 iDRAC 가 인식한 모든 물리 서버(베어메탈 포함)의
             코어·메모리 합계 — 출처가 달라 나란히 표기한다(물리 합계로 %를 다시 계산하지 않음: 베어메탈은 사용률 자료가 없다). */}
-        <Kpi label="CPU 사용률" value={`${g.cpuUsagePct}%`} pct={g.cpuUsagePct} meta={<>
+        <Kpi label="CPU 사용률" value={unitText(cpuPct, '%')} pct={cpuPct ?? undefined} meta={<>
           {g.cpuUsedGhz} / {g.cpuTotalGhz} GHz · ESXi {fmt(g.cpuCores)} cores
           {ov.physical?.servers > 0 && <><br />물리 서버 코어 <b>{fmt(ov.physical.cores)}</b> · iDRAC {fmt(ov.physical.servers)}대{ov.physical.withCores < ov.physical.servers ? ` (코어 정보 ${fmt(ov.physical.withCores)}대)` : ''}</>}
         </>} />
-        <Kpi label="메모리 사용률" value={`${g.memUsagePct}%`} pct={g.memUsagePct} meta={<>
+        <Kpi label="메모리 사용률" value={unitText(memPct, '%')} pct={memPct ?? undefined} meta={<>
           {fmt(g.memUsedGB)} / {fmt(g.memTotalGB)} GB (ESXi)
           {ov.physical?.servers > 0 && <><br />물리 메모리 <b>{fmt(ov.physical.memGB)}</b> GB · iDRAC {fmt(ov.physical.servers)}대{ov.physical.withMemory < ov.physical.servers ? ` (메모리 정보 ${fmt(ov.physical.withMemory)}대)` : ''}</>}
         </>} />
-        <Kpi label="스토리지 사용률" value={`${g.storageUsagePct}%`} pct={g.storageUsagePct} meta={`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${g.datastores} DS`} onClick={() => onGotoTab?.('datastores')} />
+        <Kpi label="스토리지 사용률" value={unitText(stoPct, '%')} pct={stoPct ?? undefined} meta={`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${g.datastores} DS`} onClick={() => onGotoTab?.('datastores')} />
         {g.powerReporting > 0 && (
           <Kpi label="총 소비전력" value={`${fmt(g.powerKw)} kW`} accent="var(--amber)"
             meta={g.powerRegistered != null && g.powerRegistered !== g.powerReporting

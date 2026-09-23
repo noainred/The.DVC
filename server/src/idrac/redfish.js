@@ -49,6 +49,8 @@ const AUTH_TTL_MS = 20 * 60_000;
 // 이제 ① **LRU**(조회 성공·갱신 때 뒤로 옮긴다) ② 상한은 등록 규모보다 넉넉히(`IDRAC_AUTH_CACHE_MAX`, 기본 4096)
 // ③ 세션 항목이 밀려나거나 새 토큰으로 바뀌면 **옛 세션을 DELETE** 한다(best-effort — 실패해도 idle 만료로 사라진다).
 const AUTH_CACHE_MAX = Math.max(64, Number(process.env.IDRAC_AUTH_CACHE_MAX) || 4096);
+/** v2.593: 키별 진행 중인 세션 생성(single-flight). */
+const SESSION_INFLIGHT = new Map();
 const SESSION_PATH_RE = /^\/redfish\/v1\/SessionService\/Sessions\/[^/?#\s]+$/;
 /** 캐시에서 빠지는 세션 항목의 iDRAC 세션을 닫는다(응답을 기다리지 않는다). 같은 base 의 세션 경로만. */
 function closeSession(v) {
@@ -110,7 +112,16 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
     if (cached.mode === 'session' && cached.token) {
       const r = await doFetch({ 'X-Auth-Token': cached.token });
       if (r.status !== 401) { bumpAuthCache(key); return r; }
-      AUTH_CACHE.delete(key); await drain(r); // 토큰 만료 → 아래에서 재수립(이미 무효라 DELETE 하지 않는다)
+      await drain(r);
+      // v2.593(감사 R2593-01): 그 사이 다른 요청이 새 세션으로 바꿔 끼웠으면(옛 토큰은 DELETE 됐다) 그 토큰으로 1회
+      //   다시 본다 — 교체를 '인증 실패' 로 읽으면 authGuard 가 멀쩡한 서버의 주기 수집을 멈춘다.
+      const now = AUTH_CACHE.get(key);
+      if (now && now.mode === 'session' && now.token && now.token !== cached.token) {
+        const r2 = await doFetch({ 'X-Auth-Token': now.token });
+        if (r2.status !== 401) { bumpAuthCache(key); return r2; }
+        await drain(r2);
+      }
+      if (AUTH_CACHE.get(key)?.token === cached.token) AUTH_CACHE.delete(key); // 토큰 만료 → 아래에서 재수립(이미 무효라 DELETE 하지 않는다)
     } else if (cached.mode === 'digest' && cached.challenge) {
       const r = await doFetch({ Authorization: buildDigestHeader({ username, password, method: 'GET', uri: pathname, challenge: cached.challenge }) });
       if (r.status !== 401) { bumpAuthCache(key); return r; }
@@ -138,15 +149,27 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
   }
 
   // 3) 세션 토큰 폴백(Basic/Digest 비활성 iDRAC)
+  // v2.593(감사 R2593-01 — 재현): 같은 키로 동시에 캐시를 놓친 요청이 **각자** 세션을 만들면, 뒤 요청의
+  //   touchAuthCache 가 앞 요청의 세션을 DELETE 해 앞 요청의 GET 이 401 이 됐다(3동시 호출에 1건) — 그 401 한 번이
+  //   authGuard 로 그 서버의 주기 수집을 멈춘다. 세션 생성은 **키마다 한 번만**(진행 중인 생성을 공유) 한다.
   try {
-    const sres = await doFetch({}, 'POST', '/redfish/v1/SessionService/Sessions', JSON.stringify({ UserName: username, Password: password }));
-    const token = sres.headers.get('x-auth-token');
-    const location = sres.headers.get('location') || '';
-    await drain(sres);
-    if ((sres.status === 201 || sres.ok) && token) {
-      touchAuthCache(key, { mode: 'session', token, location, base });
-      return await doFetch({ 'X-Auth-Token': token });
+    let inflight = SESSION_INFLIGHT.get(key);
+    if (!inflight) {
+      inflight = (async () => {
+        const sres = await doFetch({}, 'POST', '/redfish/v1/SessionService/Sessions', JSON.stringify({ UserName: username, Password: password }));
+        const token = sres.headers.get('x-auth-token');
+        const location = sres.headers.get('location') || '';
+        await drain(sres);
+        if ((sres.status === 201 || sres.ok) && token) {
+          touchAuthCache(key, { mode: 'session', token, location, base });
+          return token;
+        }
+        return null;
+      })().finally(() => SESSION_INFLIGHT.delete(key));
+      SESSION_INFLIGHT.set(key, inflight);
     }
+    const token = await inflight;
+    if (token) return await doFetch({ 'X-Auth-Token': token });
   } catch { /* 세션 생성 실패 → 아래에서 원래 401 반환 */ }
   return res; // 세 방식 모두 실패 — 401(자격증명/권한/잠금)
 }

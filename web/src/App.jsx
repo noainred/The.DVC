@@ -505,6 +505,11 @@ function Portal({ user, onLogout }) {
           {tab === 'tools' && <SpecialTools />}
           {tab === 'settings' && user.role === 'admin' && isOwner && <Settings />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
+          {/* v2.593(감사 UI-2593-02): 기능이 꺼져 있으면 #/upgrade 가 아무 안내 없는 빈 화면이었다. ⚠ isAllowed 에서 거르지 않는 이유 —
+              그 함수는 health 폴링(아래 선언)보다 먼저 실행돼 TDZ 가 되고, health 가 오기 전에 걸러 버리면 주소로 들어온 사용자를 내쫓는다. */}
+          {tab === 'upgrade' && user.role === 'admin' && health && !health.features?.upgradeTab && (
+            <div className="card" style={{ padding: 20 }}>업그레이드 화면이 이 포탈에서 꺼져 있습니다 — 서버 portal.env 의 ‘SHOW_UPGRADE_TAB=true’ 로 켭니다(재시작 필요).</div>
+          )}
          </Suspense>
         </ErrorBoundary>
       </main>

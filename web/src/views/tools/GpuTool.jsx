@@ -61,7 +61,7 @@ function GpuVmsModal({ title, params, onClose }) {
                     <td><VmGpuModeBadge gpu={v.gpu} /></td>
                     <td className="muted" style={{ fontSize: 12 }}>{v.gpu?.profile || '—'}</td>
                     <td style={{ textAlign: 'right' }}>{v.gpu?.count ?? '—'}</td>
-                    <td style={{ textAlign: 'right' }}>{v.guestUtilPct == null ? <span className="muted" title={v.powerState === 'POWERED_ON' ? 'GPU 게스트 수집 미설정/미수집 — 설정 › GPU 게스트 수집에서 해당 VM 계정 등록 후 수집됩니다' : '전원 OFF — 게스트에서 사용률 수집 불가'}>—</span> : <UsageCell pct={v.guestUtilPct} />}</td>
+                    <td style={{ textAlign: 'right' }}>{v.guestUtilNA ? <span className="muted" title="MIG 모드 — GPU 단위 사용률을 nvidia-smi 가 주지 않습니다(0% 가 아닙니다)">N/A(MIG)</span> : v.guestUtilPct == null ? <span className="muted" title={v.powerState === 'POWERED_ON' ? 'GPU 게스트 수집 미설정/미수집 — 설정 › GPU 게스트 수집에서 해당 VM 계정 등록 후 수집됩니다' : '전원 OFF — 게스트에서 사용률 수집 불가'}>—</span> : <UsageCell pct={v.guestUtilPct} />}</td>
                     <td style={{ textAlign: 'right' }}>{v.guestMemPct == null ? <span className="muted" title={v.powerState === 'POWERED_ON' ? 'GPU 게스트 수집 미설정/미수집 — 설정 › GPU 게스트 수집에서 계정 등록 후 수집됩니다' : '전원 OFF — 수집 불가'}>—</span> : <UsageCell pct={v.guestMemPct} />}</td>
                     <td>{v.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>}</td>
                   </tr>

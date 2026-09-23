@@ -3333,6 +3333,49 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **RMA 결과 회신**(PR-9): `resilientFetch` 는 비-2xx 를 throw 하지 않는다 — `.catch` 만 두면 413·403 이 무음이다(형제 워커 3종은
       v2.591 PR-5 가 고쳤다). `/api/central/rma-result` 도 BIG_JSON 에 등록했다. **`resilientFetch` 결과는 `r.ok` 를 볼 것.**
 
+  - ⚠⚠ **v2.593 — 7축 병렬 감사(4차 점검) 확정분**(사용자 요청 "아키텍처 점검, 개선, 버그 개선, 튜닝, 업그레이드 찾아서 진행, 문서화" ·
+    선택: 병렬 에이전트 7축 · 전체 검증 · 범위 안 patch/minor 만. 발견 30 = 확정 22 · 가능성 5 · 반증 3, 고침 23. 회귀는
+    `test/audit2593.test.js` 17건 — **변이 검증 18/18**(고친 파일을 하나씩 되돌리면 해당 테스트가 실패한다). 상세 `docs/AUDIT-2026-09-24.md`):
+    - ⚠⚠ **세션을 만드는 캐시는 키마다 생성을 한 번으로 묶는다**(`idrac/redfish.js SESSION_INFLIGHT`, R2593-01 — v2.591 L4 의 회귀):
+      같은 iDRAC 에 여러 수집(폴러·bmusage·파트장애)이 동시에 캐시를 놓치면 각자 세션을 만들고, 뒤 요청의 `touchAuthCache` 가
+      앞 요청의 세션을 DELETE 해 앞 요청이 **거짓 401** 을 받았다 — 그 401 한 번이 v2.590 authGuard 로 **멀쩡한 서버의 주기 수집을
+      멈춘다**. 진행 중인 생성을 공유하고, 캐시 토큰의 401 은 그 사이 바뀐 새 토큰으로 한 번 더 본다. **세션을 지우는 캐시를
+      만들 때는 '그 세션을 지금 쓰는 요청이 있는가' 를 먼저 답할 것.**
+    - ⚠⚠ **압축 해제 상한은 '해제된 스트림' 이 아니라 '만들어지는 사본' 까지 센다**(`upgrade/archive.js parseTar`, R2593-02 —
+      v2.591 P4 의 회귀): 하드링크는 헤더 크기가 0 이라 gunzip `maxOutputLength` 가 원본을 한 번만 센다 — 20KB tgz 가 1.22GB 로
+      풀렸다. 사본을 만드는 **동안** 누적 크기·개수를 센다(v2.488 L-1 · v2.577 의 연장). 복사로 늘어나는 모든 전개에 같은 규칙.
+    - **폐기는 시한 초과만이 아니다**(`util/collectRequestQueue.js`, R2593-03): 한 번도 인출되지 않은 채 TTL 이 지난 요청이 drops 없이
+      사라졌다 — 엣지가 꺼져 있을 때(가장 흔한 경우)가 화면에 안 보였다. 사유 `untaken`·`requeued-expired`·`no-result` 를 나눠 싣고
+      `collectDropText` 가 조치(엣지 상태를 보라 / 장비 수집 오류를 보라)를 나눠 말한다.
+    - **계측 상한의 '검증된 행 보호' 는 POST·GET 둘 다**(`central/ingestStats.js`, R2593-04 — v2.589 pullStats 의 형제 누락).
+    - ⚠ **카드가 adminOnly 여도 API 는 아니다 — 주소는 역할로 가린다**(`routes/api/relaytopo.js maskTopology`, AUTHZ-01):
+      `/tools/relaytopo` 가 tools 권한(operator 기본 보유)으로 전 사이트 IP·SSH 계정명을 줬다. 비-admin 은 주소·계정을 비우고
+      `addressHidden`·`issueCount`(점검 문구에 주소가 들어가 개수만)로 밝힌다. **`export` 를 라우트 등록 함수 안에 두지 말 것** —
+      이번에 그렇게 넣었다가 모듈 전체가 SyntaxError 가 됐다(`node --check` 는 잡지 못했고 테스트가 잡았다).
+    - **대리 도달성 확인은 '그 화면이 보내는 값' 으로 좁힌다**(`/tools/ip-ping`, AUTHZ-02): 범위만 보고 IP 는 무엇이든 받았다 —
+      그 vCenter VM 에서 수집된 IP 만 받고 뺀 개수(`rejected`)를 밝힌다.
+    - **ack 는 성공해야 '적용 완료' 다**(`agent/svcmonConfigPull.js`, EDGE-1): ack 전에 appliedSig 를 세워 ack 한 번 유실이 중앙 배정을
+      **영원히 pending** 으로 만들었다(다음 pull 이 unchanged 라 다시 ack 하지 않는다). ⚠ `resilientFetch` 는 비-2xx 를 throw 하지
+      않는다 — 결과의 `r.ok` 를 볼 것(v2.591 PR-9 의 형제 두 곳 `agent/scanner.js`·`idracScanWorker.js` 도 이번에 상태에 실었다).
+    - **'못 읽은 값' 을 0 으로 — 이번엔 REST 스토리지 5종과 GPU**(DATA-01·02·04): `Number(x) || 0` 이 사용량 결측을 0 으로 만들었다
+      (v2.561 은 SSH 적재 지점만 고쳤다 — **수집기 쪽 원천**이 남아 있었다). MIG `utilNA` 는 사용률 null + 플래그로 싣고 호스트 대표값에서
+      뺀다. ⚠ 보고된 0 은 값이다 — 테스트가 둘을 모두 고정한다.
+    - **분모가 0 인 사용률은 0% 가 아니라 '—'**(Overview, DATA-05) · '준비 중' 도구 주소는 안내를 보인다(UI-01) · 기능 플래그로 꺼진
+      탭 주소도 안내를 보인다(UI-02 — ⚠ `isAllowed` 에서 `health` 를 보지 말 것: 그 함수는 health 선언보다 먼저 실행돼 TDZ 가 된다) ·
+      상태바는 720px 이하에서 2×2(UI-03).
+    - **튜닝**: `listNotes` mtime 캐시(1.9MB 읽기·파싱 23~48ms → 0) — 저장 경로는 캐시를 직접 버린다(같은 ms·같은 크기 저장 대비).
+    - **아키텍처**: `util/ping.js` 손 풀 → `poolRun`(concurrency 0 이면 0 워커 — v2.579 ③-b 와 같은 결함) · `upgrade.js cmpVersion` →
+      `cmpVersionTuple` · `ipam/scanStore.js` IPv4 사본 → `util/ipv4` · `arch2579` 가 `export … from` edge 도 센다(순환 SCC 는 여전히 4) ·
+      CI 가 루트 `npm audit` 도 본다 · dompurify 3.4.16.
+    - **남긴 것(판단 필요 — 다음 점검의 첫 후보)**: ① **DISCONNECTED 호스트가 사용률 분모에만 남는다**(DATA-03 가능성 — 실 vCenter 가
+      끊긴 호스트의 `hardware` 요약을 계속 주는지 미확인. 재현은 합성 스냅샷) ② **30초마다 IPAM 원장 재구성·서명 50~85ms**(PERF-1 —
+      외부 ipam.db 리더 신선도 계약, 사용자 결정) ③ PDU·SAN push 0건 조기 반환(EDGE-3 — v2.583 설계) ④ 손으로 쓴 풀 7곳 더
+      (`ping/monitor.js`·`bmstor/collect.js`·`idrac/redfish.js` 2·`idrac/scan.js`·`deployLlm.js` 2·`certMonitor.js` — 호출부가 전부
+      고정값·클램프라 잠재) ⑤ 버전 비교 사본 3곳(`bundleSource.js cmp3`·`dlsource.js cmp`·`release-notes.js cmpVersionDesc` — 입력이
+      정규식 검증된 값) ⑥ IPv4 류 사본 3곳(`ipam/insights.js`·`netmap.js`·`ledger.js` — /24 기준 문자열이라 IP 파서가 아니다).
+    - ⚠ 정직 기록: 실장비(iDRAC 동시 세션 한도·Redfish 세션 DELETE 동작·실 Unity/Isilon 결측 응답·MIG nvidia-smi 출력)로는 확인하지
+      못했다 — 전부 가짜 서버·합성 입력 재현이다. 웹 전수(90카드·43설정·206로드)는 UI 축이 목 스택에서 봤다.
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

@@ -87,7 +87,7 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
         gpu: v.gpu || null,
         hasOwnCred: !!saved[v.id]?.username, ownUsername: saved[v.id]?.username || '', ownPwless: !!saved[v.id]?.passwordless,
         ipAddresses: guestIps(v), ipOverride: (s.vcenters[vcId]?.vmIps || {})[v.id] || '',
-        collected: c ? { utilPct: c.utilPct, memUsedPct: c.memUsedPct ?? null, at: c.at } : null,
+        collected: c ? { utilPct: c.utilPct, utilNA: !!c.utilNA, memUsedPct: c.memUsedPct ?? null, at: c.at } : null,
       };
     })
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));

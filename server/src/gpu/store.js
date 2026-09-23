@@ -12,7 +12,8 @@ export function setGuestGpu({ hosts = [], vms = [], agent = '' }) {
   // agent = 이 오버레이를 보고한 엣지(출처). 위임(central) 경로에서 어느 엣지가 넣었는지 기록해
   // 사후 추적·향후 scope 필터의 근거로 남긴다. 로컬 폴러 경로는 agent 미지정(빈 값).
   for (const h of hosts) if (h && h.hostId != null && h.utilPct != null) byHost.set(h.hostId, { utilPct: h.utilPct, at: now, source: 'guest', agent });
-  for (const v of vms) if (v && v.vmId != null && v.utilPct != null) byVm.set(v.vmId, { utilPct: v.utilPct, memUsedPct: v.memUsedPct ?? null, at: now, host: v.host, vcenterId: v.vcenterId, agent });
+  // v2.593(DATA-02): MIG(utilNA)는 사용률 없이도 싣는다 — 수집은 됐고 사용률만 GPU 단위로 없는 것이다(0% 가 아니다).
+  for (const v of vms) if (v && v.vmId != null && (v.utilPct != null || v.utilNA)) byVm.set(v.vmId, { utilPct: v.utilNA ? null : v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, at: now, host: v.host, vcenterId: v.vcenterId, agent });
 }
 
 export function getGuestGpuHost(hostId) { return byHost.get(hostId) || null; }
