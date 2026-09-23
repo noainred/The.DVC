@@ -138,7 +138,12 @@ const _state = new Map();
  * 위반 목록을 이전 상태와 비교해 **보낼 것만** 골라낸다(순수 — 발송은 하지 않는다).
  * @returns {{ fire:Array, resolve:Array }}
  */
-export function diffAlerts(violations, { now = Date.now(), cooldownMs = 60 * 60_000, state = _state } = {}) {
+export function diffAlerts(violations, { now = Date.now(), cooldownMs = 60 * 60_000, state = _state, heldDeviceIds = [] } = {}) {
+  // v2.583: 이번 주기에 **읽지 못한** 장비(스냅샷 ok:false)의 위반은 해소로 보지 않는다. 예전에는 수집 실패로
+  // 스냅샷이 비면 위반이 사라진 것처럼 읽혀 '정상으로 돌아왔습니다' 가 나가고, 다음 정상 수집에서 같은 위반이
+  // 새 알림으로 다시 나갔다('확인 불가 ≠ 정상' 규약 — v2.519·v2.548). 보류된 상태는 그대로 둔다.
+  const held = new Set((heldDeviceIds || []).map(String));
+  const isHeld = (key) => held.has(deviceOfAlertKey(key)); // v2.583: 부분 문자열이 아니라 장비 id 정확 매칭(id '1' 이 다른 장비의 뱅크 키에 걸리지 않게)
   const seen = new Set();
   const fire = [];
   for (const v of violations) {
@@ -159,10 +164,37 @@ export function diffAlerts(violations, { now = Date.now(), cooldownMs = 60 * 60_
   const resolve = [];
   for (const [key, st] of state) {
     if (seen.has(key)) continue;
+    if (held.size && isHeld(key)) continue;
     resolve.push({ key, severity: 'info', title: `PDU 임계치 복구 — ${key}`, detail: `${Math.round((now - st.since) / 60_000)}분 만에 정상으로 돌아왔습니다.` });
     state.delete(key);
   }
   return { fire, resolve };
+}
+
+/**
+ * 대상에서 빠진(삭제·재배정) 장비의 위반 상태를 **알림 없이** 지운다(v2.583). 없어진 장비의 경보를
+ * '정상으로 돌아왔습니다' 라고 알리면 거짓이다 — 고쳐진 것이 아니라 더 이상 보지 않는 것이다.
+ * @returns {number} 지운 키 수
+ */
+/**
+ * 경보 키 → 장비 id(v2.583 — 검증 에이전트 권고). 키 형식: pdu.temp|power.<id>.<i> · pdu.hum.high|low.<id>.<i> ·
+ * pdu.bank.<id>.<u>.<b>. `key.includes('.1.')` 같은 부분 문자열 비교는 숫자 id(사용자가 등록 시 지정 가능)가 다른 장비의
+ * 뱅크 인덱스와 겹쳐 **엉뚱한 장비의 경보를 보류·삭제**한다. id 에 점이 있어도 되게 꼬리 인덱스만 떼어 낸다.
+ */
+export function deviceOfAlertKey(key) {
+  const k = String(key || '');
+  let m = /^pdu\.bank\.(.+)\.[^.]+\.[^.]+$/.exec(k); if (m) return m[1];
+  m = /^pdu\.hum\.(?:high|low)\.(.+)\.[^.]+$/.exec(k); if (m) return m[1];
+  m = /^pdu\.(?:temp|power)\.(.+)\.[^.]+$/.exec(k); if (m) return m[1];
+  return '';
+}
+
+export function forgetDeviceAlerts(deviceIds = [], state = _state) {
+  let n = 0;
+  for (const id of deviceIds.map(String)) {
+    for (const key of [...state.keys()]) if (deviceOfAlertKey(key) === String(id)) { state.delete(key); n += 1; }
+  }
+  return n;
 }
 
 /** 현재 활성 위반(화면 배지용). */

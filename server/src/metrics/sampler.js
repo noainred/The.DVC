@@ -200,7 +200,9 @@ async function sampleOnceInner() {
         try { await insertVmperf(vcId, vcRows, ts); } catch (e) { console.warn(`[vmperf] ${vcId || '(전체)'} insert 실패: ${e.message}`); }
       }
       // 보존기간 prune — DB 개수만큼 DELETE 가 돌므로 공용(20틱)보다 더 드물게(120틱 ≈ 2시간@1분).
-      if (vmperfCfg.retentionDays > 0 && (++_vmperfPruneTicks % 120 === 1)) {
+      // v2.583: `% 120 === 1` 은 **기동 첫 샘플에서 즉시 참**이었다(v2.453 규약 위반 — 보존일을 줄이고 재시작하면
+      //   첫 틱이 그 차액을 한 번에 지운다). `(++t % N) === 0` 으로 쓴다.
+      if (vmperfCfg.retentionDays > 0 && ((++_vmperfPruneTicks % 120) === 0)) {
         for (const vcId of vmperfByVc.keys()) {
           try { await pruneVmperf(vcId, vmperfCfg.retentionDays); } catch { /* per-DB 격리 */ }
         }

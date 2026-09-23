@@ -101,7 +101,8 @@ test('SETTINGS.md — 존재하지 않는 환경변수를 안내하지 않는다
   // v2.448 은 METRICS_SAMPLE_INTERVAL_MS · METRICS_RETENTION_DAYS 를 안내했으나 코드에 없는 키였다.
   // 백틱으로 감싼 대문자 토큰 중 ENV.md 에 없는 것은 오안내다(허용 목록은 환경변수가 아닌 상수/값).
   // 환경변수가 아닌 토큰(SQL 키워드·파일 상수 등)은 제외한다.
-  const ALLOW = new Set(['KEY', 'AUTH_SECRET', 'CENTRAL_TOKEN', 'SETTINGS_OWNERS', 'RMA_SUDOERS', 'DELETE', 'VACUUM']);
+  // v2.583: 코드 상수 이름(설정 문서가 '진실의 원천' 으로 가리킨다) — 환경변수가 아니다.
+  const ALLOW = new Set(['KEY', 'AUTH_SECRET', 'CENTRAL_TOKEN', 'SETTINGS_OWNERS', 'RMA_SUDOERS', 'DELETE', 'VACUUM', 'INTERVAL_SPEC', 'BUCKETS_MS', 'LICENSE', 'MIGRATABLE', 'MIGRATABLE_DIRS']);
   const tokens = new Set([...SET_MD.matchAll(/`([A-Z][A-Z_0-9]{4,})`/g)].map((m) => m[1]));
   const bogus = [...tokens].filter((t) => !ALLOW.has(t) && !ENV_MD.includes(`\`${t}\``));
   assert.deepEqual(bogus, [], `docs/SETTINGS.md 가 코드에 없는 환경변수를 안내한다: ${bogus.join(', ')}`);

@@ -20,8 +20,10 @@ import { writeReleaseFile } from './util/releaseFile.js';
 import { compression } from './util/compress.js';
 import { rateLimit } from './util/rateLimit.js';
 import { startLoopLagMonitor } from './util/loopLag.js';
+import { startLogAnalysis } from './loganalysis/index.js'; // v2.583: 설정 › Log › 로그 분석 — 로그 누적 집계
 // v2.498: 서버 성능 측정 — 요청 지연·진행 중 요청 추적(설정 › 서버 성능 측정). 계측 실패는 서비스에 영향 없음.
 import { beginRequest, endRequest, pruneHangLog } from './perf/monitor.js';
+import { sanitizeRid, newRid } from './perf/requestId.js';
 import { routeKeyOf } from './perf/stats.js';
 import { store } from './store.js';
 import { api } from './routes/api.js';
@@ -237,7 +239,11 @@ app.use((req, res, next) => {
   // 성능 집계는 **API 요청만** 한다 — 정적 자산(해시 파일명)까지 넣으면 라우트 키가 빌드마다
   // 새로 생기고 표가 잡음으로 덮인다. 라이브 로그 한 줄은 예전처럼 전 경로에 남는다.
   const isApi = url.startsWith('/api');
-  const perfId = isApi ? beginRequest({ method: req.method, path: url }) : null;
+  // v2.583: 요청 ID — 브라우저가 보낸 X-Request-Id(형식 검사) 또는 서버가 만든 값. 로딩 화면·느린 요청·
+  // 라이브 로그가 같은 ID 를 싣는다(perf/requestId.js). 응답 헤더로도 돌려준다.
+  const rid = isApi ? (sanitizeRid(req.get('x-request-id')) || newRid()) : '';
+  if (rid) { req.reqId = rid; try { res.setHeader('X-Request-Id', rid); } catch { /* 헤더 이미 전송 */ } }
+  const perfId = isApi ? beginRequest({ method: req.method, path: url, rid, userOf: () => req.user?.username || '' }) : null;
   let settled = false;
   const settle = (aborted) => {
     if (settled) return;
@@ -245,7 +251,8 @@ app.use((req, res, next) => {
     const ms = Date.now() - start;
     if (!aborted) {
       const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
-      pushLog(level, `${req.method} ${url} ${res.statusCode} ${ms}ms`);
+      // 뒤에 붙인 `#<요청 ID>` 는 v2.583 — 로딩 화면에 보인 ID 로 이 줄을 찾는다(앞부분 형식은 그대로).
+      pushLog(level, `${req.method} ${url} ${res.statusCode} ${ms}ms${rid ? ` #${rid}` : ''}`);
     }
     if (!isApi) return;
     try {
@@ -266,7 +273,7 @@ app.use((req, res, next) => {
         route,
         status: aborted ? 499 : res.statusCode, ms,
         user: req.user?.username || '', bytes: Number(res.getHeader('Content-Length')) || null,
-        expectSlow: !!res.locals?.perfExpectSlow,
+        expectSlow: !!res.locals?.perfExpectSlow, rid,
       });
     } catch { /* 계측 실패는 무시 */ }
   };
@@ -330,6 +337,8 @@ app.use('/api/central/ip-scan-result', BIG_JSON);
 // 형제 — iDRAC 스캔 결과도 같은 이유(대역이 넓으면 발견 호스트가 수천 건).
 app.use('/api/central/idrac-scan-result', BIG_JSON);
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
+// 로그 분석 붙여넣기(v2.583) — 폐쇄망 현장이 다른 서버의 journalctl 출력을 붙여넣는다(라우트가 8MB 상한을 다시 건다).
+app.use('/api/admin/log-analysis/paste', BIG_JSON);
 app.use('/api/svcmon/targets/import', BIG_JSON);
 app.use('/api/svcmon/targets/hostmap/parse', BIG_JSON);
 // TRUST_PROXY(v2.428, 구성도 미스매치 #8): 중앙/엣지가 HAProxy·nginx 뒤에 있으면 홉 수(예 1)를 지정 — req.ip 가 X-Forwarded-For 의
@@ -445,6 +454,7 @@ runZeroCapacityPurge()
   .then((r) => { if (r.ran && r.rows) console.log(`[storage] 0 바이트 용량 행 정리 — 장비 ${r.devices}대 ${r.rows}행 제거(v2.541)`); })
   .catch((e) => console.warn(`[storage] 0 바이트 용량 행 정리 실패(${e.message}) — 추이 차트에 0 TB 점이 남을 수 있습니다`));
 store.start();
+try { startLogAnalysis(); } catch { /* 로그 분석 누적(v2.583) — 실패해도 서비스에 영향 없음(화면이 상태를 말한다) */ }
 startLoopLagMonitor(); // 이벤트 루프 지연 계측(additive·no-op-on-fail) — docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0
 try { pruneHangLog(); } catch { /* hang 로그 보존일 정리(기동 1회) — 실패 무시 */ }
 upgradeManager.start();

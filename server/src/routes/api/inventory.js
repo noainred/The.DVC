@@ -1,5 +1,6 @@
 // 요약·호스트·VM·데이터스토어·네트워크·알람·도구사용 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { requirePerm, requireRole } from '../../auth/auth.js';
+import { userHasPermission } from '../../auth/permissions.js'; // v2.583: /top 의 inv.* 집행
 import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { browseDatastore } from '../../vcenter/dsBrowse.js';
@@ -368,8 +369,15 @@ api.get('/networks', invNet, (req, res) => memoJson(req, res, 'inv:networks', (s
 // VM 배열을 5번·호스트를 3번 **복사해서 정렬**하므로 사용자 수·폴링 주기에 그대로 곱해진다.
 // ⚠ `extraKey: scopeKey(...)` 는 **필수**다 — 없으면 무제한 계정의 결과가 범위 계정에 캐시로
 //   샌다(v2.255~2.257 규약. `/summary`·`/overview` 에서 실제로 겪은 사고다).
+// ⚠⚠ v2.583(감사 확정): inv.* 6종은 v2.536 부터 서버가 집행하는데(/vms·/hosts 는 403) 이 라우트는 **같은 원본
+//   객체(IP·메모·태그 포함)를 목록으로** 돌려줬다 — 역할에서 inv.vms 를 빼도 /top?limit=100 으로 VM 을 볼 수 있었다.
+//   목록은 해당 권한이 있을 때만 싣고, 뺀 것은 `withheld` 로 밝힌다(개수는 대시보드 수준이라 남긴다).
+//   ⚠ 캐시 키에 권한 조합을 넣는다 — 같은 범위의 다른 권한 사용자에게 캐시가 새지 않게.
+const TOP_PERMS = [['vms', 'inv.vms'], ['hosts', 'inv.hosts'], ['datastores', 'inv.datastores']];
+const topPermKey = (u) => TOP_PERMS.map(([, k]) => (userHasPermission(u, k) ? 1 : 0)).join('');
 api.get('/top', (req, res) => memoJson(req, res, 'inv:top', (snap) => {
   const limit = Math.max(1, Math.min(Number(req.query.limit) || 10, 100)); // Math.max(1,…): 음수 limit slice(0,-n) 방지
+  const can = Object.fromEntries(TOP_PERMS.map(([n, k]) => [n, userHasPermission(req.user, k)]));
   const vms = applyFilters(snap.vms, req.query, snap, ['name'], req.user);
   const hosts = applyFilters(snap.hosts, req.query, snap, ['name'], req.user);
   const datastores = applyFilters(snap.datastores, req.query, snap, ['name'], req.user);
@@ -377,22 +385,24 @@ api.get('/top', (req, res) => memoJson(req, res, 'inv:top', (snap) => {
 
   const top = (arr, key, n = limit) =>
     [...arr].sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0)).slice(0, n);
+  const gate = (kind, list) => (can[kind] ? list : []);
 
   return {
     generatedAt: snap.generatedAt,
     scope: { vms: vms.length, hosts: hosts.length, datastores: datastores.length },
-    vmsByCpuUsage: top(onVms, 'cpuUsagePct'),
-    vmsByMemUsage: top(onVms, 'memUsagePct'),
-    vmsByVcpu: top(vms, 'cpuCount'),
-    vmsByRam: top(vms, 'memMB'),
-    vmsByStorage: top(vms, 'storageGB'),
-    hostsByCpu: top(hosts, 'cpuUsagePct'),
-    hostsByMem: top(hosts, 'memUsagePct'),
-    hostsByVmCount: top(hosts, 'vmCount'),
-    hostsByPower: top(hosts.filter((h) => h.powerWatts > 0), 'powerWatts'),
-    datastoresByUsage: top(datastores, 'usagePct'),
+    withheld: TOP_PERMS.filter(([n]) => !can[n]).map(([n, k]) => ({ kind: n, requiredPerm: k })),
+    vmsByCpuUsage: gate('vms', top(onVms, 'cpuUsagePct')),
+    vmsByMemUsage: gate('vms', top(onVms, 'memUsagePct')),
+    vmsByVcpu: gate('vms', top(vms, 'cpuCount')),
+    vmsByRam: gate('vms', top(vms, 'memMB')),
+    vmsByStorage: gate('vms', top(vms, 'storageGB')),
+    hostsByCpu: gate('hosts', top(hosts, 'cpuUsagePct')),
+    hostsByMem: gate('hosts', top(hosts, 'memUsagePct')),
+    hostsByVmCount: gate('hosts', top(hosts, 'vmCount')),
+    hostsByPower: gate('hosts', top(hosts.filter((h) => h.powerWatts > 0), 'powerWatts')),
+    datastoresByUsage: gate('datastores', top(datastores, 'usagePct')),
   };
-}, { extraKey: scopeKey(req.user, store.get()) }));
+}, { extraKey: `${scopeKey(req.user, store.get())}|p${topPermKey(req.user)}` }));
 
 api.get('/alarms', invAlarms, (req, res) => memoJson(req, res, 'inv:alarms', (snap) => {
   let alarms = applyFilters(snap.alarms, req.query, snap, ['message', 'entity'], req.user);

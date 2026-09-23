@@ -30,7 +30,7 @@ test('명시 지정 > 호스트명 > 서비스태그 순서로 귀속한다', ()
   assert.equal(r.byVcenter['vc-us'], 1);
   assert.equal(r.byVcenter['vc-pl'], 1);
   assert.equal(r.byVcenter['vc-kr'], 1);
-  assert.deepEqual(r.matchedBy, { explicit: 1, hostName: 1, serviceTag: 1, none: 0 });
+  assert.deepEqual(r.matchedBy, { explicit: 1, hostName: 1, serviceTag: 1, assigned: 0, datacenter: 0, none: 0 });
 });
 
 test('귀속되지 않은 서버는 어느 법인에도 넣지 않고 따로 센다', () => {

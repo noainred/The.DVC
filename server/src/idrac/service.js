@@ -61,6 +61,8 @@ export async function localPowerByHostName() {
   // iDRAC-direct entries: match by registry keys. (serviceTag/model을 함께 실어 중앙 dedup·표시에 사용)
   for (const s of loadRegistry()) {
     if (s.type === 'ome') continue;
+    // v2.583 감사 #30: 엣지 export 도 중앙 직접 경로와 같은 기준 — 비활성 서버의 마지막 샘플은 '현재 전력' 이 아니다.
+    if (s.enabled === false) continue;
     const sample = latest.get(s.id);
     if (!sample) continue;
     const { model, serviceTag } = serverIdentity(s.id, s);
@@ -162,6 +164,9 @@ export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}
     const seenRemoteOrigin = new Set(); // 같은 수집기의 동일 서버(여러 별칭 보고)를 한 번만 집계
     for (const [host, r] of remotePowerByHost()) {
       if (r.watts == null || !Number.isFinite(r.watts)) continue;
+      // v2.583 감사 #30: 위임(엣지) 전력도 v2.287 #13 의 신선도 컷을 따른다. 엣지가 죽으면 puller 는 직전 값을
+      //   지우지 않으므로(실패 시 보존) 그 법인의 마지막 샘플이 **무기한** '현재 전력' 으로 합산됐다.
+      if (r.ts && (nowTs - r.ts) > POWER_STALE_MS) continue;
       // 출처 서버 식별: serverId가 있으면 그 기준으로 중복 제거(구버전 수집기의 별칭 중복 행 흡수).
       if (r.serverId != null) {
         const origin = `${r.collectorId}:${r.serverId}`;

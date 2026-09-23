@@ -68,12 +68,23 @@ function read() {
   return cache;
 }
 
+/**
+ * 저장. 실패하면 오류 문구를 돌려준다(성공이면 null).
+ * ⚠ v2.583(감사 카탈로그 N3 — 실행으로 확인): 예전에는 실패를 콘솔에만 찍고 메모리 캐시는 이미 바꾼 뒤라 라우트가
+ *   200 + 감사로그 'iDRAC 스캔 대역 저장' 을 남겼다 — 화면은 저장됐다고 말하고 **재시작하면 사라졌다**(v2.560
+ *   clearHangs 와 같은 정직성 유형). 이제 디스크에 쓴 뒤에만 캐시를 바꾸고, 사용자 저장 경로는 실패를 400 으로 돌려준다.
+ */
 function write(data) {
-  cache = data;
   try {
     atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(data), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인(복제 — cache 평문 유지)
+    cache = data;
     try { cacheMtime = fs.statSync(FILE).mtimeMs; } catch { cacheMtime = -1; }
-  } catch (e) { console.error('[idrac-scan-ranges] 저장 실패:', e.message); }
+    return null;
+  } catch (e) {
+    console.error('[idrac-scan-ranges] 저장 실패:', e.message);
+    cache = data; // 실행 이력(lastRun) 같은 내부 갱신은 메모리에라도 남긴다 — 사용자 저장 경로는 아래에서 되돌린다
+    return e.message || String(e);
+  }
 }
 
 const normRanges = (r) => (Array.isArray(r) ? r : String(r || '').split(/[\n,]/))
@@ -173,8 +184,10 @@ export function saveScanRanges(body = {}) {
     updatedAt: Date.now(),
     lastRun: cur.lastRun || null, // 실행 이력은 보존
   };
+  const prevEntries = data.entries;
   data.entries = { ...data.entries, [id]: next };
-  write(data);
+  const err = write(data);
+  if (err) { cache = { ...data, entries: prevEntries }; return { ok: false, reason: `저장 실패(디스크에 쓰지 못해 반영하지 않았습니다): ${err}` }; }
   return { ok: true, ...redact(id, next) };
 }
 
@@ -185,7 +198,8 @@ export function removeScanRanges(id) {
   if (!data.entries[key]) return { ok: false, reason: '없는 항목' };
   const rest = { ...data.entries };
   delete rest[key];
-  write({ entries: rest });
+  const err = write({ ...data, entries: rest });
+  if (err) { cache = data; return { ok: false, reason: `삭제 실패(디스크에 쓰지 못해 반영하지 않았습니다): ${err}` }; }
   return { ok: true };
 }
 

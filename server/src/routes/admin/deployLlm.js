@@ -488,7 +488,9 @@ adminRouter.post('/llm-test', adminOnly, async (req, res) => {
 
 // SSH-install Ollama on a separate server (test reuses the agent SSH probe).
 adminRouter.post('/ollama-deploy/test', adminOnly, async (req, res) => res.json(await testTarget(req.body || {})));
-adminRouter.post('/ollama-deploy', adminOnly, async (req, res) => {
+// v2.583(감사 확정): 서버의 로컬 파일을 요청자가 고른 호스트로 보내는 경로라 자격증명 CSV 내보내기와 같은
+//   등급(설정 소유자)으로 올린다 — 파일 검증(checkOllamaArchive)과 이중 방어.
+adminRouter.post('/ollama-deploy', adminOnly, requireSettingsOwner, async (req, res) => {
   const { mode, binaryPath, model, port, applyToPortal, ...target } = req.body || {};
   const r = await installOllama(target, { mode, binaryPath, model, port, applyToPortal });
   res.status(r.ok ? 200 : 400).json(r);

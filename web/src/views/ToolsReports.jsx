@@ -616,6 +616,13 @@ export function UnprotectedVms({ scope }) {
       </div>
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'storageGB', dir: 'desc' }} emptyText="해당 항목이 없습니다." />
       <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>{data.note}</p>
+      {/* v2.583 #21: 이벤트 조회 상한·vCenter 미기록 이벤트를 밝힌다(미보호 과대·과소 보고의 근거). */}
+      {s.eventsTruncated && (
+        <p style={{ fontSize: 12, marginTop: 4, color: 'var(--amber)' }}>조회 기간의 스냅샷 이벤트가 조회 상한에 걸렸습니다 — 더 오래된 백업 흔적이 빠져 미보호가 실제보다 많게 보일 수 있습니다. 조회 기간을 줄이거나 vCenter 를 골라 다시 보세요.</p>
+      )}
+      {s.nameOnlyEvents > 0 && (
+        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>vCenter 가 기록되지 않은 백업 이벤트 {s.nameOnlyEvents}건은 VM 이름으로만 대조했습니다(다른 법인의 같은 이름 VM 과 구분하지 못합니다).</p>
+      )}
     </>
   );
 }

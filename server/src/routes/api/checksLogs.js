@@ -10,7 +10,7 @@ import { getServiceCheck } from '../../health/services.js';
 import { getNetworkCheck } from '../../health/network.js';
 import { buildVmwareConfigExport } from '../../backup/vmwareExport.js';
 import { getLogsDb } from '../../logs/db.js';
-import { enqueueLogQuery, getLogQueryResult, ownerOfReq, vcenterOfReq } from '../../central/logQueries.js';
+import { enqueueLogQuery, getLogQueryResult, bindingOfReq } from '../../central/logQueries.js';
 import { listInventory } from '../../central/inventory.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import zlib from 'node:zlib';
@@ -150,10 +150,11 @@ api.get('/tools/vclogs/federate', requirePerm('tools'), (req, res) => {
   if (!reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   // v2.478(감사 S6): reqId 는 `lq_<ms36>_<seq36>` 로 예측 가능 → 큐잉한 사용자(또는 admin)만 결과를 받고,
   // 대상 vCenter 가 조회 범위 밖이면 404(존재 은닉). 만료(TTL)된 reqId 는 기존대로 빈 결과.
-  const owner = ownerOfReq(reqId);
-  if (owner && req.user?.role !== 'admin' && owner !== req.user?.username) return res.status(404).json({ ok: false, reason: '조회 요청을 찾을 수 없습니다.' });
-  const vcOf = vcenterOfReq(reqId);
-  if (vcOf && !inUserScope(req.user, store.get(), vcOf)) return res.status(404).json({ ok: false, reason: '조회 요청을 찾을 수 없습니다.' });
+  // v2.583 #35: 바인딩이 없으면(만료·위조 reqId) 결과를 주지 않는다 — 빈 owner/vc 로 검사를 건너뛰던 것이 우회로였다.
+  const bind = bindingOfReq(reqId);
+  if (!bind) return res.status(404).json({ ok: false, reason: '조회 요청을 찾을 수 없습니다(만료되었을 수 있습니다 — 다시 조회하세요).' });
+  if (req.user?.role !== 'admin' && bind.owner !== String(req.user?.username || '')) return res.status(404).json({ ok: false, reason: '조회 요청을 찾을 수 없습니다.' });
+  if (!bind.vcenterId || !inUserScope(req.user, store.get(), bind.vcenterId)) return res.status(404).json({ ok: false, reason: '조회 요청을 찾을 수 없습니다.' });
   res.json({ ok: true, ...getLogQueryResult(reqId) });
 });
 // vCenter 장기 보관 로그 조회 — 필터: vcenterId·severity·q·since·until + 페이징.

@@ -7,7 +7,6 @@
  *  - 변경(등록/수정/삭제/테스트/수집): adminOnly + 감사로그.
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
@@ -15,7 +14,7 @@ import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithS
 import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store.js';
 import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection } from '../../sanswitch/poller.js';
 import { startTestRun, getTestRun } from '../../sanswitch/testRuns.js';
-import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
+import { edgeSanSwitchSnapshots, ORPHAN_TTL_MS } from '../../central/sanSwitchEdge.js';
 import { listActivity as listSwActivity } from '../../sanswitch/activityLog.js';
 // v2.511: 조닝 그림 — 순수 분석(스위치 왕복 없음).
 import { zonesFromCompact, buildZoneGraph, buildZoneMatrix, zoneFindings, zoneSummary, portZoneDetail, classifyEndpoints } from '../../sanswitch/zoning.js';
@@ -38,15 +37,12 @@ import { edgeStorageSnapshots } from '../../central/storageEdge.js';
 import * as swBulk from '../../sanswitch/bulk.js';
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools'); // 조회 라우트에도 기능 권한(v2.416 감사 L-3 — 프론트 게이팅만으로는 API 직접 호출을 못 막는다)
-const fullScopeOnly = (req, res, next) => {
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, reason: 'SAN 스위치 모니터링은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
-  }
-  next();
-};
+// v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
+const fullScopeOnly = fullScopeOnlyWith('SAN 스위치 모니터링은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 
 /** 목록 화면용 축약 — 포트 상세(수백 행)는 빼고 요약만 보낸다(목록 응답이 MB 가 되지 않게). */
 const listShape = (s) => {
@@ -99,9 +95,13 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (_req, res) => {
   }
   const devices = listDevices().map((d) => ({ ...d, snap: listShape(byId.get(d.id)), pending: hasPendingRequest(d.id) }));
   const known = new Set(devices.map((d) => d.id));
-  const orphans = [...byId.values()].filter((s) => !known.has(s.deviceId)).map(listShape);
+  // v2.583: 등록부에 없는 장비(orphan) 중 엣지 보고가 ORPHAN_TTL 을 넘긴 것은 목록에서 내리고 **개수를 밝힌다** —
+  //   보고를 멈춘(철거된) 엣지의 스위치가 '고아' 로 무기한 남던 것(중앙 SAN 보관소에는 TTL 이 없다).
+  const orphanAll = [...byId.values()].filter((s) => !known.has(s.deviceId));
+  const orphans = orphanAll.filter((s) => !(s.staleMs > ORPHAN_TTL_MS)).map(listShape);
+  const orphansExpired = orphanAll.length - orphans.length;
   res.json({
-    devices, orphans,
+    devices, orphans, ...(orphansExpired ? { orphansExpired, orphanTtlMs: ORPHAN_TTL_MS } : {}),
     types: SAN_SWITCH_TYPES.map((t) => ({ ...t, methods: collectMethodsFor(t.type) })),
     datacenters: (() => { try { return listDatacenters(); } catch { return []; } })(),
     agents: knownAgentNames(),

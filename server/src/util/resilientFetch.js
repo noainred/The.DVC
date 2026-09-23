@@ -15,6 +15,7 @@
 
 import { Agent } from 'undici';
 import { ssrfLookup } from './ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
+import { ssrfBlockReason } from './ssrfBlock.js'; // v2.583: 리다이렉트 hop 마다 IP 리터럴 대상 검사
 
 // TLS 검증은 기본 ON(보안). 과거 이 값은 `WAN_TLS_INSECURE === 'false' ? true : false`로,
 // 이름과 반대로 '미설정=검증 off'였다 — 중앙↔엣지 구간은 수집 토큰·배포 사용자 자격증명이
@@ -69,7 +70,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * ⚠ `redirect:'manual'` 로 통째로 막지는 않는다 — GitHub 릴리스 자산 다운로드가 실제로
  *   `objects.githubusercontent.com` 으로 리다이렉트되므로 자동 업그레이드가 깨진다.
  *   그래서 **직접 따라가되 출처가 바뀌면 비밀 헤더를 뗀다**.
- * ⚠ 리바인딩 방어는 그대로다 — 같은 dispatcher 를 쓰므로 `ssrfLookup` 이 리다이렉트 대상에도 걸린다.
+ * ⚠ 리바인딩 방어는 그대로다 — 같은 dispatcher 를 쓰므로 `ssrfLookup` 이 리다이렉트 대상에도 걸린다. 단 **호스트 이름일
+ *   때만**이다(IP 리터럴은 lookup 을 타지 않는다) — 그래서 hop 마다 `ssrfBlockReason` 을 따로 본다(v2.583).
  */
 const SECRET_HEADER_RE = /^(authorization|cookie|proxy-authorization|x-[\w-]*(token|key|secret|auth)|api-key)$/i;
 const MAX_REDIRECTS = 5;
@@ -86,6 +88,21 @@ export function headersWithoutSecrets(headers) {
 const sameOrigin = (a, b) => { try { return new URL(a).origin === new URL(b).origin; } catch { return false; } };
 
 /**
+ * 이 리다이렉트 한 번을 '같은 상대' 로 믿어도 되는가(v2.583 — 검증 에이전트 권고, 순수).
+ * 같은 출처이거나 **같은 호스트 이름의 http → https 업그레이드**면 믿는다. 엣지 앞 리버스 프록시가 흔히
+ * `308 http://edge → https://edge` 로 올리는데, 이것을 교차 출처로 보면 ① 토큰 헤더를 떼어 403 이 되고
+ * ② v2.583 의 '본문 있는 교차 출처 307/308 거부' 가 멀쩡하던 POST push 를 실패시킨다.
+ * 하향(https → http)·호스트 변경은 믿지 않는다.
+ */
+export function trustedRedirect(cur, next) {
+  if (sameOrigin(cur, next)) return true;
+  try {
+    const a = new URL(cur); const b = new URL(next);
+    return a.protocol === 'http:' && b.protocol === 'https:' && a.hostname.toLowerCase() === b.hostname.toLowerCase();
+  } catch { return false; }
+}
+
+/**
  * 리다이렉트를 **직접** 따라간다 — 출처가 바뀌는 순간 비밀 헤더를 뗀다(SEC-14).
  * 반환은 최종 응답이며, 뺀 헤더가 있으면 `res.__secretsDroppedOnRedirect` 로 밝힌다
  * (조용히 떼면 호출부가 '왜 401 이지' 를 영원히 모른다).
@@ -94,12 +111,28 @@ async function fetchFollowing(url, init, disp, timeoutMs) {
   let cur = url;
   let headers = init.headers;
   let dropped = [];
+  // v2.583(감사 확정): 호출자가 `redirect:'manual'`·`'error'` 를 줬으면 그 뜻을 따른다(예전엔 덮어써서 무시했다).
+  const callerManual = init.redirect === 'manual' || init.redirect === 'error';
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const res = await fetch(cur, { ...init, headers, dispatcher: disp, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
     const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
-    if (!loc) { if (dropped.length) res.__secretsDroppedOnRedirect = dropped; return res; }
+    if (!loc || callerManual) { if (dropped.length) res.__secretsDroppedOnRedirect = dropped; return res; }
     const next = new URL(loc, cur).href;
-    if (!sameOrigin(next, cur)) {
+    // v2.583(감사 확정 — 반증 에이전트 재현): ① 리다이렉트 대상이 **IP 리터럴**이면 dispatcher 의 DNS lookup
+    //   가드를 타지 않는다 — hop 마다 차단 대역을 직접 검사한다(루프백·링크로컬·메타데이터로 끌려가지 않게).
+    const blocked = ssrfBlockReason(next);
+    if (blocked) {
+      try { await res.body?.cancel?.(); } catch { /* */ }
+      throw new Error(`리다이렉트 대상이 차단 대역입니다(${blocked}): ${new URL(next).host}`);
+    }
+    // ② 307/308 은 표준상 **본문을 그대로 다시 보낸다** — 출처가 바뀌면 헤더는 떼도 본문(iDRAC 비밀번호 같은)이
+    //   제3 출처로 갔다. 교차 출처 307/308 에 본문이 있으면 따라가지 않고 그 응답을 돌려준다(호출부는 3xx 를 실패로 본다).
+    if (!trustedRedirect(cur, next) && (res.status === 307 || res.status === 308) && init.body != null) {
+      res.__redirectRefused = `교차 출처 ${res.status} 에 요청 본문을 다시 보내지 않습니다(→ ${new URL(next).host})`;
+      if (dropped.length) res.__secretsDroppedOnRedirect = dropped;
+      return res;
+    }
+    if (!trustedRedirect(cur, next)) {
       const r = headersWithoutSecrets(headers);
       if (r.dropped.length) dropped = [...new Set([...dropped, ...r.dropped])];
       headers = r.headers;

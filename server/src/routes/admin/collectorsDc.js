@@ -14,7 +14,7 @@ import { precheckTarget } from '../../sanswitch/precheck.js';
 import { collectorsToCsv, sampleCsv as collectorsSampleCsv, parseCollectorsCsv, analyzeCollectorsImport } from '../../collector/csv.js';
 import { clearCollectorServers } from '../../collector/remoteInventory.js';
 import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, getDatacenterOrder, saveDatacenterOrder } from '../../datacenter/store.js';
-import { allCollectorStatus, clearCollectorHosts } from '../../collector/state.js';
+import { allCollectorStatus, clearCollectorHosts, clearCollectorStatus } from '../../collector/state.js';
 import { agentIdentitySummary } from '../../central/agentIdentity.js';
 import { pullNow } from '../../collector/puller.js';
 import { pushUpgradeToCollectors } from '../../collector/upgradePush.js';
@@ -102,6 +102,7 @@ adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
   if (result.ok) {
     clearCollectorHosts(req.params.id);   // 원격 전력 병합 상태 제거
     clearCollectorServers(req.params.id); // 서버 분석용 원격 인벤토리 제거(유령 서버 방지)
+    clearCollectorStatus(req.params.id);  // v2.583 #31: 수집 상태도(원격 호스트 0개인 수집기는 정리 루프가 못 만난다)
     logAudit({ user: req.user?.username, action: '수집 서버 삭제', target: req.params.id, ip: req.ip || '' });
   }
   res.status(result.ok ? 200 : 404).json(result);
@@ -171,7 +172,11 @@ adminRouter.post('/collectors/import', adminOnly, (req, res) => {
     if (curId) {
       if (!allowOverwrite) { skipped.push({ line: row._line, id: row.id, reason: '기존 항목 — 덮어쓰기 미허용(overwrite 확인 필요)' }); continue; }
       const r = updateCollector(curId, input, { managed: true });
-      if (r.ok) { overwritten++; ensureCollectorDatacenter(r.collector); }
+      if (r.ok) {
+        overwritten++; ensureCollectorDatacenter(r.collector);
+        // v2.583 #31: PUT 라우트와 같게 — CSV 로 비활성화해도 원격 데이터를 즉시 걷어낸다(유령 서버 방지).
+        if (r.collector?.enabled === false) { clearCollectorHosts(curId); clearCollectorServers(curId); }
+      }
       else failed.push({ line: row._line, id: row.id, reason: r.reason });
     } else {
       const r = addCollector(input, { managed: true });

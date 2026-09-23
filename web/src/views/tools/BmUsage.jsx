@@ -30,8 +30,7 @@ import {
   facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote,
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes,
-  unassignedNote, edgePullState, edgePullNote,
-} from './bmUsageText.js';
+  unassignedNote, edgePullState, edgePullNote, blurNumber, BLANK_KEPT_TEXT } from './bmUsageText.js';
 
 /** 표의 지표 열 — 서버가 준 `metrics` 계약과 같은 순서를 쓴다. */
 const COLS = [
@@ -177,6 +176,18 @@ export function BmUsage() {
   async function changeRange(rk) {
     setRangeKey(rk);
     if (sel) await loadDetail(sel, rk);
+  }
+
+  // v2.583 #36: 빈 칸을 0 으로 저장하지 않는다(서버가 하한으로 올려 보존일이 줄고 이력이 지워진다).
+  function numBlur(e, field, scale = 1) {
+    const n = blurNumber(e.target.value);
+    if (n == null) {
+      e.target.value = String(Math.round((Number(form?.[field]) || 0) / scale));
+      setMsg({ tone: 'bad', text: BLANK_KEPT_TEXT });
+      return;
+    }
+    if (Math.round(n * scale) === Number(form?.[field])) return; // 바뀐 게 없으면 저장하지 않는다
+    saveSettings({ [field]: n * scale });
   }
 
   async function saveSettings(patch) {
@@ -505,15 +516,15 @@ export function BmUsage() {
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <label style={{ fontSize: 12 }}>주기(분){' '}
               <input type="number" min={1} max={360} defaultValue={Math.round((form.intervalMs || 0) / 60000)} disabled={saving}
-                onBlur={(e) => saveSettings({ intervalMs: Number(e.target.value) * 60000 })} style={{ width: 70, minWidth: 0 }} />
+                onBlur={(e) => numBlur(e, 'intervalMs', 60000)} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>원시 보존(일){' '}
               <input type="number" min={7} max={365} defaultValue={form.rawRetentionDays} disabled={saving}
-                onBlur={(e) => saveSettings({ rawRetentionDays: Number(e.target.value) })} style={{ width: 70, minWidth: 0 }} />
+                onBlur={(e) => numBlur(e, 'rawRetentionDays')} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>롤업 보존(일){' '}
               <input type="number" min={30} max={3650} defaultValue={form.dailyRetentionDays} disabled={saving}
-                onBlur={(e) => saveSettings({ dailyRetentionDays: Number(e.target.value) })} style={{ width: 80, minWidth: 0 }} />
+                onBlur={(e) => numBlur(e, 'dailyRetentionDays')} style={{ width: 80, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>
               <input type="checkbox" checked={!!form.osSsh} onChange={(e) => saveSettings({ osSsh: e.target.checked })} disabled={saving} /> OS SSH
@@ -602,15 +613,15 @@ export function BmUsage() {
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <label style={{ fontSize: 12 }}>임계(%){' '}
               <input type="number" min={50} max={100} defaultValue={form.alertPct} disabled={saving}
-                onBlur={(e) => saveSettings({ alertPct: Number(e.target.value) })} style={{ width: 70, minWidth: 0 }} />
+                onBlur={(e) => numBlur(e, 'alertPct')} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>지속(분){' '}
               <input type="number" min={0} max={240} defaultValue={form.alertSustainMin} disabled={saving}
-                onBlur={(e) => saveSettings({ alertSustainMin: Number(e.target.value) })} style={{ width: 70, minWidth: 0 }} />
+                onBlur={(e) => numBlur(e, 'alertSustainMin')} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>재알림 간격(시간){' '}
               <input type="number" min={1} max={168} defaultValue={form.alertRepeatHours} disabled={saving}
-                onBlur={(e) => saveSettings({ alertRepeatHours: Number(e.target.value) })} style={{ width: 80, minWidth: 0 }} />
+                onBlur={(e) => numBlur(e, 'alertRepeatHours')} style={{ width: 80, minWidth: 0 }} />
             </label>
             {data?.status?.alertState && (
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>

@@ -31,6 +31,10 @@ const DEFAULT_REMOTE_BASE =
 // 숫자 env 파서 — 명시된 유한 숫자면 그 값(0 포함), 아니면 기본값. `Number(x) || d`는
 // 0을 falsy로 흘려 "0=비활성" 계약을 깨므로(주기 0으로 끄기 불가) 이 헬퍼로 통일한다.
 const numEnv = (raw, def) => { const n = Number(raw); return Number.isFinite(n) ? n : def; };
+// 보존일 전용(v2.583 감사 #24): '0 = 전부 보관' 계약을 지킨다 — `Number(x) || d` 는 0 을 기본값으로 되돌려
+// 문서가 약속한 keep-all 이 조용히 prune 이 됐다(IDRAC/TEMP/PING 3곳 실측). 빈 문자열(`KEY=`)은 0 이 아니라
+// **미지정**이다 — `Number('') === 0` 이라 그대로 두면 빈 줄 하나가 '무제한 보관' 으로 둔갑한다.
+const retentionEnv = (raw, def) => (raw == null || String(raw).trim() === '' ? def : numEnv(raw, def));
 
 const EDGE_ALL = (process.env.EDGE_MODE || '').trim().toLowerCase() === 'all';
 const EDGE_TOKEN = process.env.EDGE_TOKEN || process.env.CENTRAL_TOKEN || '';
@@ -112,7 +116,7 @@ export const config = {
     // preserve history. Override with IDRAC_DB_PATH.
     dbPath: process.env.IDRAC_DB_PATH || dbFile('idrac-power.db'),
     // How many days of samples to retain (older rows pruned). 0 = keep all.
-    retentionDays: Number(process.env.IDRAC_RETENTION_DAYS) || 90,
+    retentionDays: retentionEnv(process.env.IDRAC_RETENTION_DAYS, 90),
     // 원본(샘플 단위) 보존기간(v2.451). 0 = retentionDays 와 동일(기존 동작).
     // 시간당 롤업(power_hourly)은 retentionDays 만큼 남으므로 대시보드 집계는 그대로다.
     rawRetentionDays: Number(process.env.IDRAC_RAW_RETENTION_DAYS) || 0,
@@ -133,7 +137,7 @@ export const config = {
     // so it survives upgrades. 5-year retention by default; sampled on an interval.
     dbPath: process.env.TEMP_DB_PATH || dbFile('host-temp.db'),
     sampleIntervalMs: Number(process.env.TEMP_SAMPLE_INTERVAL_MS) || 60_000,  // 1분 (설정에서 변경 가능)
-    retentionDays: Number(process.env.TEMP_RETENTION_DAYS) || 1830,           // ~5년(시간당 롤업 기준)
+    retentionDays: retentionEnv(process.env.TEMP_RETENTION_DAYS, 1830),           // ~5년(시간당 롤업 기준)
     // 원본(분 단위) 보존기간 — 용량의 대부분이 원본이라 짧게 두면, 그 이전 구간은 시간당
     // 롤업(평균·최소·최대)만 남는다. 60분+ 버킷 조회는 이미 롤업을 쓰므로 장기 추이는 그대로다.
     //
@@ -154,7 +158,7 @@ export const config = {
     timeoutMs: numEnv(process.env.PING_MON_TIMEOUT_MS, 2_500),
     // 동시에 프로브할 대상 수 상한(고RTT·다수 대상에서 이벤트 루프/소켓 폭주 방지).
     concurrency: Math.max(1, numEnv(process.env.PING_MON_CONCURRENCY, 8)),
-    retentionDays: Number(process.env.PING_MON_RETENTION_DAYS) || 365, // ~1년
+    retentionDays: retentionEnv(process.env.PING_MON_RETENTION_DAYS, 365), // ~1년
   },
   ipam: {
     // Shareable IP ledger DB (SQLite). Replaced on every refresh so external

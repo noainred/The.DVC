@@ -4,10 +4,24 @@ import fs from 'node:fs';
 import { config } from '../../config.js';
 import { requireRole } from '../../auth/auth.js';
 import { loadSessionSecurity } from '../../security/securitySettings.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
+import { store } from '../../store.js';
 import { analysisFilter, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc, collectorToDatacenterMap, remoteServersResolved, analysisServersWithRemote, invForServer, ensureCollectorDatacenter } from '../../insights/analysisServers.js'; // v2.579: 재수출용
 
 
 export const adminOnly = requireRole('admin');
+
+/**
+ * 전체 범위(vCenter 제한 없는) 계정만 통과(v2.583 — 공용 팩토리). 로그·엣지·토큰처럼 **법인 축으로
+ * 나눌 수 없는** 데이터를 주는 라우트가 쓴다. 예전에는 라우트 파일마다 같은 6줄을 복사했다
+ * (routes/api 8곳 — 사유 문구만 다르다). 새 라우트는 이것을 쓴다.
+ */
+export function fullScopeOnlyWith(reason = '이 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.') {
+  return (req, res, next) => {
+    if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason });
+    next();
+  };
+}
 
 // '설정 소유 계정(settingsOwners)' 서버측 강제 — 지금까지 소유자 경계는 UI(App.jsx)에서만
 // 걸려, 소유자가 아닌 admin이 엔드포인트를 직접 호출하면 소유자 목록을 갈아치우고 소유 계층을

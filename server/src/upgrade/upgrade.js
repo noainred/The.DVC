@@ -457,6 +457,8 @@ export async function pushBundleToEdge(edge, archivePath, { timeout = Number(pro
       // 엣지 토큰+번들이 미검증 TLS로 나가 MITM에 노출되던 것 차단(http 엣지엔 무영향).
       // https 자체서명 엣지면 UPGRADE_TLS_INSECURE=true로 완화(upgradeAgent가 반영).
       dispatcher: upgradeAgent,
+      // v2.583(감사 확정 — upgradePush 의 형제): 리다이렉트를 따라가지 않는다(토큰·번들을 제3 출처로 다시 보내지 않게).
+      redirect: 'manual',
       signal: AbortSignal.timeout(timeout),
     });
     const body = await res.json().catch(() => ({}));

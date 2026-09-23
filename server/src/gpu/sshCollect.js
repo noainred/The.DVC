@@ -8,7 +8,7 @@
  *   해결책이며, ESXi 파일전송(InitiateFileTransferFromGuest)을 안 써서 회수 404/미도달도 없다.
  */
 
-import { withSsh } from '../proxy/sshExec.js';
+import { withSsh, withDeadline } from '../proxy/sshExec.js';
 import { parseNvidiaSmiCsv } from './guestops.js';
 
 const NVSMI = '--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,mig.mode.current --format=csv,noheader,nounits';
@@ -24,10 +24,13 @@ function nvsmiCmds(argStr) {
     `"C:\\Windows\\System32\\nvidia-smi.exe" ${argStr}`,
   ];
 }
-async function runNvsmi(sh, argStr) {
+async function runNvsmi(sh, argStr, remainingMs = () => 60_000) {
   let stderr = '';
   for (const cmd of nvsmiCmds(argStr)) {
-    let res; try { res = await sh.exec(cmd); } catch { continue; }
+    // v2.583(감사 확정): 명령마다 sshExec 기본 60초를 쓰던 것을 **남은 예산**으로 줄인다(4후보 × 60초 = 4분까지 갔다).
+    const left = remainingMs();
+    if (left < 1_000) break;
+    let res; try { res = await sh.exec(cmd, left); } catch { continue; }
     const out = (res.stdout || '').trim();
     if (out) return { out, cmd };
     if (res.stderr) stderr = res.stderr.trim() || stderr;
@@ -63,6 +66,10 @@ function cleanSshErr(m) {
  * 반환 parseNvidiaSmiCsv 결과({ count, utilPct, memUsedPct, ... }). 실패 시 throw(e.guestDiag).
  */
 export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22, trace = null, preferIp = '' } = {}) {
+  // v2.583(감사 확정 — v2.417 규약 위반): VM당 시한이 SSH **핸드셰이크에만** 걸리고 nvidia-smi 명령은 명령마다
+  //   60초였다(IP·후보 수만큼 곱해진다). 이제 IP 한 곳당 예산(핸드셰이크 + 명령 = 시한 × 2)을 withDeadline 으로
+  //   걸어 **세션을 실제로 끊는다**(signal) — 장비당 시한은 세션을 끊어야 한다(sshExec withDeadline 규약).
+  const perIpBudget = Math.max(10_000, timeoutMs * 2);
   const ips = guestIps(vm, preferIp);
   if (!ips.length) { const e = new Error('게스트 IP 없음(VMware Tools가 IP 미보고) — SSH 수집 불가'); e.guestDiag = true; throw e; }
   let lastErr = '모든 IP 접속 실패';
@@ -70,10 +77,11 @@ export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22
   for (const ip of ips) {
     tlog(trace, `SSH ${creds.username}@${ip}:${port} → nvidia-smi`);
     try {
-      const r = await withSsh(
-        { host: ip, port, username: creds.username, password: creds.password || '', privateKey: creds.privateKey || undefined, readyTimeout: Math.max(5_000, timeoutMs) },
-        async (sh) => runNvsmi(sh, NVSMI),
-      );
+      const until = Date.now() + perIpBudget;
+      const r = await withDeadline(perIpBudget, (signal) => withSsh(
+        { host: ip, port, username: creds.username, password: creds.password || '', privateKey: creds.privateKey || undefined, readyTimeout: Math.max(5_000, timeoutMs), signal },
+        async (sh) => runNvsmi(sh, NVSMI, () => Math.min(timeoutMs, until - Date.now())),
+      ), 'SSH 수집 시간 초과');
       connected = true;
       const out = (r.out || '').trim();
       if (out) {
@@ -101,17 +109,23 @@ export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22
 export async function detectPhysicalGpu(host, creds, { timeoutMs = 20_000, port = 22 } = {}) {
   const out = { reachable: false, hostname: '', os: '', gpuModels: [], error: null };
   try {
-    const r = await withSsh(
-      { host, port, username: creds.username, password: creds.password || '', privateKey: creds.privateKey || undefined, readyTimeout: Math.max(5_000, timeoutMs) },
+    // v2.583(검증 에이전트 권고 — collectVmGpuSsh 와 같은 규약): 세션 전체에 예산을 두고 **세션을 실제로 끊는다**
+    //   (v2.417 withDeadline + signal). 예전에는 nvidia-smi 후보 4개 × 60초 + hostname/uname/ver 기본 시한까지 갔다.
+    const budget = Math.max(10_000, timeoutMs * 2);
+    const until = Date.now() + budget;
+    const left = () => Math.min(timeoutMs, until - Date.now());
+    const r = await withDeadline(budget, (signal) => withSsh(
+      { host, port, username: creds.username, password: creds.password || '', privateKey: creds.privateKey || undefined, readyTimeout: Math.max(5_000, timeoutMs), signal },
       async (sh) => {
-        const names = await runNvsmi(sh, '--query-gpu=name --format=csv,noheader');
-        const hn = await sh.exec('hostname').catch(() => ({ stdout: '' }));
+        const names = await runNvsmi(sh, '--query-gpu=name --format=csv,noheader', left);
+        const slot = () => Math.max(1_000, Math.min(10_000, left()));
+        const hn = await sh.exec('hostname', slot()).catch(() => ({ stdout: '' }));
         // OS: Linux는 uname, Windows는 'ver'(cmd) — 되는 쪽 사용.
-        const uname = await sh.exec('uname -s').catch(() => ({ stdout: '' }));
-        const ver = (uname.stdout || '').trim() ? { stdout: '' } : await sh.exec('cmd /c ver').catch(() => ({ stdout: '' }));
+        const uname = await sh.exec('uname -s', slot()).catch(() => ({ stdout: '' }));
+        const ver = (uname.stdout || '').trim() ? { stdout: '' } : await sh.exec('cmd /c ver', slot()).catch(() => ({ stdout: '' }));
         return { names: names.out, nvCmd: names.cmd, hostname: hn.stdout, os: (uname.stdout || ver.stdout || '') };
       },
-    );
+    ), 'SSH 탐지 시간 초과');
     out.reachable = true;
     out.gpuModels = String(r.names || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     // Windows 절대경로 명령으로 GPU를 찾았으면 OS를 windows로 보정.

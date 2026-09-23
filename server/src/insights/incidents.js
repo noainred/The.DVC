@@ -6,13 +6,10 @@
 
 import { alertStatus } from '../alerts.js';
 import { store } from '../store.js';
+import { dayKey } from '../util/dayKey.js';
 
-const pad2 = (n) => String(n).padStart(2, '0');
-/** ms → 서버 로컬 시간 기준 'YYYY-MM-DD'(vmtrack/diff.js slotKey 와 같은 규칙). */
-function localDay(ts) {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
+/** ms → 포탈 오프셋(기본 KST) 기준 'YYYY-MM-DD'. v2.583 #25: 프로세스 TZ(패키지 유닛은 지정하지 않는다)를 믿지 않는다. */
+const localDay = (ts) => dayKey(ts);
 
 const sevRank = (s) => (s === 'critical' ? 3 : s === 'warning' ? 2 : s === 'resolved' ? 1 : 0);
 
@@ -62,9 +59,8 @@ export function getIncidents({ limit = 200, allowed = null } = {}) {
   const byDay = new Map();
   for (const e of events) {
     if (e.kind !== 'fired') continue;
-    // ⚠ 서버 로컬 시간 기준 일자 — toISOString()(UTC)로 자르면 KST(UTC+9)에서 00:00~08:59 에
-    // 발생한 인시던트가 '전날' 칸에 들어간다. 아침 장애가 어제 그래프에 찍히는 오독을 만들고,
-    // 같은 화면의 다른 추이(vmtrack slotKey 는 getFullYear/getMonth/getDate = 로컬)와도 어긋난다.
+    // ⚠ 포탈 오프셋(KST) 기준 일자 — toISOString()(UTC)로 자르면 KST 00:00~08:59 에 발생한 인시던트가
+    // '전날' 칸에 들어간다. v2.583: 서버 로컬 getter 도 쓰지 않는다(UTC 서버에서 같은 오독이 재발했다).
     const day = localDay(e.ts);
     const g = byDay.get(day) || { day, critical: 0, warning: 0 };
     if (e.severity === 'critical') g.critical++; else if (e.severity === 'warning') g.warning++;

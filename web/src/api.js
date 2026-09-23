@@ -1,6 +1,6 @@
 // v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지
 // 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다).
-import { startReq, endReq, reportStall, loadPerfClientConfig } from './perfClient.js';
+import { startReq, endReq, reportStall, loadPerfClientConfig, ridOf, pollServerStatus } from './perfClient.js';
 import { useEffect, useRef, useState } from 'react';
 
 const BASE = '/api';
@@ -160,6 +160,12 @@ function httpFail(path, res, data) {
   return err;
 }
 
+/** v2.583: 요청 ID 헤더 — 로딩 화면·서버 성능 측정·라이브 로그가 같은 ID 로 한 요청을 가리킨다. */
+function ridHeader(perfId, extra = {}) {
+  const rid = ridOf(perfId);
+  return rid ? { ...extra, 'X-Request-Id': rid } : extra;
+}
+
 function authHeaders(extra = {}) {
   const token = getToken();
   return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
@@ -225,7 +231,7 @@ export async function fetchJson(path, params = {}, signal, opts = {}) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
     try {
-      res = await fetch(url, { headers: authHeaders(), signal: withTimeout(signal, timeoutMs) });
+      res = await fetch(url, { headers: authHeaders(ridHeader(perfId)), signal: withTimeout(signal, timeoutMs) });
     } catch (err) {
       lastErr = err;
       if (signal?.aborted) throw err;                 // 사용자가 취소(언마운트) → 재시도 안 함
@@ -255,7 +261,7 @@ export async function postJson(path, body = {}) {
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      headers: authHeaders(ridHeader(perfId, { 'Content-Type': 'application/json' })),
       body: JSON.stringify(body),
       signal: timeoutSignal(MUT_TIMEOUT_MS),
     });
@@ -271,7 +277,7 @@ export async function sendJson(path, method, body = {}) {
   try {
     const res = await fetch(`${BASE}${path}`, {
       method,
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      headers: authHeaders(ridHeader(perfId, { 'Content-Type': 'application/json' })),
       body: method === 'DELETE' && !Object.keys(body).length ? undefined : JSON.stringify(body),
       signal: timeoutSignal(MUT_TIMEOUT_MS),
     });
@@ -406,7 +412,7 @@ async function pollFetch(path, params, signal, etag) {
     let res;
     try {
       res = await fetch(url, {
-        headers: authHeaders(etag ? { 'If-None-Match': etag } : {}),
+        headers: authHeaders(ridHeader(perfId, etag ? { 'If-None-Match': etag } : {})),
         signal: withTimeout(signal, GET_TIMEOUT_MS),
         cache: 'no-store', // 브라우저 캐시 대신 우리가 ETag/304를 직접 구동(결정적)
       });
@@ -535,3 +541,21 @@ export function usePolling(path, params = {}, intervalMs = 15_000) {
   // 그리므로 대개 쓸 필요는 없고, 자체 오류 UI 를 가진 화면이 명시 판정할 때 쓴다.
   return { data, error, errorInfo, loading };
 }
+
+/**
+ * '불러오는 중' 이 문턱을 넘긴 요청의 서버 쪽 상태를 묻는다(v2.583 — 요청 ID 로 조회).
+ * ensurePerfClientConfig 와 같은 이유로 **fetchJson 을 쓰지 않는다** — 401 에 전역 로그아웃이 걸리면
+ * 로딩 표시 하나 때문에 세션이 끊긴다. 조회 간격·대상 선택은 perfClient.pollServerStatus 가 갖는다.
+ */
+export const pollLoadingServerStatus = () => {
+  // 토큰 조건을 두지 않는다 — 인증을 끈 설치(AUTH_ENABLED=false)에는 토큰이 없는데도 조회가 필요하다.
+  // 이 함수는 3초 넘게 기다리는 요청이 있을 때만 실제로 나가고, 401 은 perfClient 가 조용히 넘긴다.
+  pollServerStatus(async (path, params, _signal, opts) => {
+    const qs = new URLSearchParams(params || {}).toString();
+    const res = await fetch(`${BASE}${path}${qs ? `?${qs}` : ''}`, {
+      headers: authHeaders(), cache: 'no-store', signal: timeoutSignal(opts?.timeoutMs || 8_000),
+    });
+    if (!res.ok) { const e = new Error(`${path} -> ${res.status}`); e.status = res.status; throw e; }
+    return res.json();
+  });
+};

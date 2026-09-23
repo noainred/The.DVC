@@ -65,7 +65,10 @@ export function failKindOfCode(code, message = '') {
   if (c === 'ENOTFOUND' || c === 'EAI_AGAIN') return 'dns-fail';
   if (c === 'ESSRFBLOCKED') return 'dns-blocked';
   if (/CERT_HAS_EXPIRED/i.test(c) || /certificate has expired/i.test(m)) return 'tls-expired';
-  if (/^ERR_TLS|^ERR_SSL|EPROTO|WRONG_VERSION|SSL/i.test(c) || /tls|ssl|handshake/i.test(m)) return 'tls-fail';
+  // v2.583(검증 에이전트 권고): 토큰을 싣는 점검이 WAN TLS 검증을 따르게 되면서 자체서명 엣지는 인증서 검증 실패가 된다 —
+  //   그 코드들을 'unknown'('fetch failed')이 아니라 TLS 실패로 분류한다(조치: 사설 CA 신뢰 또는 WAN_TLS_INSECURE).
+  if (/^ERR_TLS|^ERR_SSL|EPROTO|WRONG_VERSION|SSL|SELF_SIGNED|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER|CERT_UNTRUSTED|ALTNAME/i.test(c)
+    || /tls|ssl|handshake|self[- ]signed|certificate/i.test(m)) return 'tls-fail';
   return 'unknown';
 }
 

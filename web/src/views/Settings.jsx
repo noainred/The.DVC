@@ -25,6 +25,7 @@ import StorageIntervals from './StorageIntervals.jsx'; // 스토리지 수집 �
 import PowerOffCheckSettings from './PowerOffCheckSettings.jsx'; // 전원 꺼짐 점검 주기(v2.484)
 const VmSeriesSettings = lazy(() => import('./VmSeriesSettings.jsx')); // VM 실시간 스파이크 수집(20초 표본 · vCenter별 DB, v2.510)
 const PerfMonitor = lazy(() => import('./PerfMonitor.jsx')); // 서버 성능 측정(요청 지연·루프 정체·hang 로그, v2.498)
+const LogAnalysis = lazy(() => import('./LogAnalysis.jsx')); // 로그 분석 — 로그에서 개선점 도출(v2.583)
 import HostAccessSettings from './HostAccessSettings.jsx'; // 호스트 접근 제어(SSH/웹/OS 방화벽, v2.485)
 import V4Portal from './V4Portal.jsx'; // 신규 포탈 보기(version_4 진입, v2.508 — v2.490 의 V3 승격)
 import SanSwitchPerf from './SanSwitchPerf.jsx';       // SAN 스위치 포트 사용량 수집(portperfshow, v2.411)
@@ -94,6 +95,7 @@ const SUB = [
   { k: 'vclogs', label: 'vCenter 로그 보관', C: VcenterLogs, group: 'log' },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics, group: 'log' },
   { k: 'perf-monitor', label: '서버 성능 측정', C: PerfMonitor, group: 'log' },
+  { k: 'log-analysis', label: '로그 분석(개선점)', C: LogAnalysis, group: 'log' },
   { k: 'audit', label: '감사 로그', C: Audit, group: 'log' },
   // 업그레이드: 상단 '업그레이드' 탭은 SHOW_UPGRADE_TAB로 숨겨져 있어도, 관리자 설정 안에서는
   // 항상 접근 가능하게 둔다(오프라인 업그레이드 번들 적용/원격 자동 업그레이드 설정).
@@ -109,7 +111,7 @@ const GROUPS = {
   'remote-srv': { label: '🔌 원격 접속 서버', desc: '브라우저 SSH/RDP 중계 서버(프록시)와 원격접속 설정을 한 곳에서.' },
   usercontrol: { label: '👤 User Control', desc: '사용자 계정(역할·2FA)·엣지 사용자 배포(중앙→엣지)·인증(AD/LDAP) 연동을 한 곳에서.' },
   security: { label: '🛡️ Security', desc: '세션 보안·자격증명 저장 방식·연동 키(외부 포탈 조회 API)·이상동작 탐지·호스트 접근 제어(SSH/웹/OS 방화벽)를 한 곳에서.' },
-  log: { label: '📋 Log', desc: 'vCenter 로그 보관 · 진단·로그 · 감사 로그를 한 곳에서.' },
+  log: { label: '📋 Log', desc: 'vCenter 로그 보관 · 진단·로그 · 서버 성능 측정 · 로그 분석(개선점) · 감사 로그를 한 곳에서.' },
 };
 const groupChildren = (g) => SUB.filter((s) => s.group === g);
 

@@ -2,7 +2,7 @@
 import { requirePerm } from '../../auth/auth.js'; // v2.536: inv.nsx 서버 집행(그전까지 탭 표시 조건일 뿐이었다)
 import { instanceId } from '../../instanceId.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { store } from '../../store.js';
+import { store, scopedRollups } from '../../store.js';
 import { currentVersion, config } from '../../config.js';
 import { upgradeManager } from '../../upgrade/manager.js';
 import { getGuestGpuHost } from '../../gpu/store.js';
@@ -15,6 +15,8 @@ import { loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
 import { remoteServersResolved, invForServer } from '../admin/shared.js';
 import { aggregatePhysical } from '../../idrac/physicalCapacity.js'; // v2.486: iDRAC 인식 전체 물리 서버 코어·메모리
 import { serversByCorp } from '../../idrac/serverByCorp.js';          // v2.526: 법인(vCenter)별 물리 서버 수
+import { loadFleetAssign } from '../../insights/fleetAssign.js';       // v2.583: 관리자 지정 귀속(특수 기능 › 통합 서버 인벤토리)
+import { listDatacenters, getDatacenterAssign } from '../../datacenter/store.js'; // v2.583: 법인 ↔ vCenter 할당
 
 /**
  * v2.486: iDRAC 가 인식한 모든 물리 서버(중앙 직접 등록 + 위임 법인 원격, OME 엔트리 제외, id 중복은 중앙 우선)의
@@ -32,9 +34,36 @@ function allPhysicalServers() {
  * ⚠ 범위 제한 계정에는 **허용 vCenter 만** 남긴다(전 법인 서버 대수 유출 차단). 귀속되지 않은
  *   서버(unassigned)는 어느 법인 것인지 모르므로 범위 계정에 **주지 않는다**.
  */
-function physicalByCorp(hosts, allowed) {
+/**
+ * v2.583 보조 귀속 재료 — 관리자 지정(fleet-assign) · 법인(DataCenter) → vCenter 목록 · 살아 있는 vCenter.
+ * 법인 id 는 대소문자를 무시해 맞춘다(`matchDatacenterId` 와 같은 관례). 이름도 함께 준다(화면의 행 이름).
+ */
+function corpAttribution(vcenters) {
+  const known = new Set((vcenters || []).map((v) => String(v.id)));
+  const byLower = new Map();
+  for (const id of known) byLower.set(id.toLowerCase(), id);
+  const dcVcenters = new Map();
+  for (const [vcRaw, dc] of Object.entries(getDatacenterAssign() || {})) {
+    const vc = byLower.get(String(vcRaw).trim().toLowerCase());
+    const k = String(dc || '').trim().toLowerCase();
+    if (!vc || !k) continue;
+    const arr = dcVcenters.get(k) || [];
+    if (!arr.includes(vc)) arr.push(vc);
+    dcVcenters.set(k, arr);
+  }
+  const dcNames = {};
+  for (const d of listDatacenters() || []) if (d?.id) dcNames[String(d.id)] = String(d.name || d.id);
+  let fleetAssign = {};
+  try { fleetAssign = loadFleetAssign() || {}; } catch { fleetAssign = {}; }
+  return { opts: { fleetAssign, dcVcenters, knownVcenters: known }, dcNames };
+}
+
+function physicalByCorp(hosts, allowed, vcenters = []) {
   try {
-    const r = serversByCorp(allPhysicalServers(), hosts);
+    const { opts, dcNames } = corpAttribution(vcenters);
+    const r0 = serversByCorp(allPhysicalServers(), hosts, opts);
+    // 법인 이름표 — 미배치 행에 나오는 법인만(전체 목록을 싣지 않는다).
+    const r = { ...r0, datacenterNames: Object.fromEntries(Object.keys(r0.unplacedByDatacenter || {}).map((id) => [id, dcNames[id] || id])) };
     if (!allowed) return r;
     // ⚠ v2.527: 법인별 맵이 여러 개가 됐다 — **전부** 같은 기준으로 잘라야 한다.
     //   하나라도 빠뜨리면 범위 계정 화면에 범위 밖 법인의 대수가 그대로 남는다.
@@ -61,6 +90,8 @@ function physicalByCorp(hosts, allowed) {
       // 귀속되지 않은 서버는 어느 법인 것인지 모르므로 범위 계정에 주지 않는다(대수 유출 차단).
       unassigned: null,
       physicalOnlyUnassigned: null,
+      // v2.583: vCenter 행을 정하지 못한 서버도 같은 이유로 범위 계정에 주지 않는다.
+      unplacedByDatacenter: {}, datacenterNames: {}, physicalOnlyNoDatacenter: null,
       scoped: true,
     };
   } catch (e) {
@@ -81,13 +112,30 @@ function physicalCapacity() {
   }
 }
 
+// /health 는 헤더가 15초마다 부른다 — 범위 계정의 재계산은 (스냅샷 세대, 범위) 당 1회. 세대가 바뀌면 옛 항목을
+// 버린다(v2.580 TUNE-B '세대 키 캐시는 옛 세대를 버린다').
+const _healthScoped = new Map();
+function healthScopedGlobal(snap, allowed) {
+  const key = `${snap.generatedAt}|${[...allowed].sort().join(',')}`;
+  const hit = _healthScoped.get(key);
+  if (hit) return hit;
+  for (const k of _healthScoped.keys()) if (!k.startsWith(`${snap.generatedAt}|`)) _healthScoped.delete(k);
+  if (_healthScoped.size >= 64) _healthScoped.clear();
+  const g = scopedRollups(snap, allowed).global;
+  _healthScoped.set(key, g);
+  return g;
+}
+
 export function registerOverviewNsx(api) {
 
-api.get('/health', (_req, res) => {
+api.get('/health', (req, res) => {
   const snap = store.get();
-  const byStatus = (s) => snap.vcenters.filter((v) => v.status === s).length;
+  // v2.583 #20: 범위 계정의 헤더 수치(vCenter·호스트·VM·알람)는 허용 vCenter 기준이다 — 전 함대 합을 주지 않는다.
+  const allowed = scopedVcenterIds(req.user, snap);
+  const vcs = allowed ? snap.vcenters.filter((v) => allowed.has(v.id)) : snap.vcenters;
+  const byStatus = (s) => vcs.filter((v) => v.status === s).length;
   const connected = byStatus('connected');
-  const g = snap.rollups?.global || {};
+  const g = (allowed ? healthScopedGlobal(snap, allowed) : snap.rollups?.global) || {};
   // 업그레이드 가용 요약(비민감 — 버전 문자열뿐). 헤더가 '새 버전 있음'을 표시하고,
   // 서버 불응답(폴링 실패)과 결합해 '업그레이드 중' 점멸을 판정하는 데 쓴다(v2.458).
   // lastCheck 는 백그라운드 폴러/수동 확인이 채운다. 접근 제어와 무관(전 사용자 헤더).
@@ -103,7 +151,7 @@ api.get('/health', (_req, res) => {
     source: snap.source,
     generatedAt: snap.generatedAt,
     uptimeSec: Math.floor(process.uptime()),
-    vcenters: snap.vcenters.length,
+    vcenters: vcs.length,
     vcentersConnected: connected,
     // 상태 분류 — 'pending'(첫 수집 전/수집 중)을 'unreachable'(연결 실패)과 구분해 헤더가
     // 수집 직후 잠깐을 '불가'로 잘못 표시하지 않게 한다.
@@ -130,14 +178,8 @@ api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
   const allowed = scopedVcenterIds(req.user, snap);
   const hostInScope = (h) => !allowed || allowed.has(h.vcenterId);
   let rollups = snap.rollups;
-  if (allowed && rollups) {
-    const regions = new Set((snap.vcenters || []).filter((v) => allowed.has(v.id)).map((v) => v.location?.region));
-    rollups = {
-      ...rollups,
-      sites: (rollups.sites || []).filter((s) => allowed.has(s.id)),
-      byRegion: (rollups.byRegion || []).filter((r) => regions.has(r.region)),
-    };
-  }
+  // v2.583 #20: 걸러내지 않고 허용 vCenter 원소로 **다시 계산**한다(store.scopedRollups 주석 참고).
+  if (allowed && rollups) rollups = { ...scopedRollups(snap, allowed), scoped: true };
   // GPU 집계: 설치된 GPU 카드 총 장수 + GPU 평균 사용률(글로벌 현황 KPI용).
   // 사용률은 GPU 보유 호스트의 util(ESXi 보고 + 게스트 오버레이)을 평균.
   let gpuCards = 0, gpuVms = 0;
@@ -158,7 +200,7 @@ api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
     gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN,
     physical: physicalCapacity(),
     // v2.526: 법인(vCenter)별 물리 서버 수 — 화면이 사이트별 호스트·VM 과 나란히 보여준다.
-    physicalByCorp: physicalByCorp(snap.hosts.filter(hostInScope), allowed),
+    physicalByCorp: physicalByCorp(snap.hosts.filter(hostInScope), allowed, snap.vcenters || []),
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 

@@ -113,7 +113,27 @@ export async function pushSanSwitchNow() {
   try {
     const scope = portsScopeSetting();
     const devices = localSnapshots().map((s) => scopeSnapshot(s, { scope }));
-    if (!devices.length) { _last = { at: Date.now(), sent: 0 }; return { ok: true, sent: 0 }; }
+    if (!devices.length) {
+      /*
+       * ⚠ v2.583 감사 #13(v2.581 BUG-D 의 형제): 0대면 예전에는 **아무것도 보내지 않아**, 이 엣지에서 장비를 모두
+       *   빼도 중앙은 마지막 목록을 무기한 들고 있었다(중앙 SAN 보관소는 TTL 이 없다 — 유령 스위치).
+       *   ① 위임 장비가 **정말 0대**면 빈 청크 0 을 보내 중앙 목록을 비운다(교체 규약 그대로).
+       *   ② 위임 장비는 있는데 스냅샷이 아직 없으면(재기동 직후) **보내지 않는다** — 빈 목록으로 덮으면 한 주기 동안
+       *      중앙 화면이 빈다(v2.581 BUG-D 와 같은 판단). 사유는 상태에 남긴다.
+       */
+      let assigned = null;
+      try { const { devicesForThisNode } = await import('./registry.js'); assigned = devicesForThisNode().length; } catch { /* 등록부를 못 읽음 — 비우지 않는다 */ }
+      if (assigned !== 0) {
+        _last = { at: Date.now(), sent: 0, reason: assigned == null ? '등록부를 읽지 못해 보내지 않았습니다' : `위임 장비 ${assigned}대 — 아직 수집된 스냅샷이 없습니다(첫 수집 대기)` };
+        return { ok: true, sent: 0 };
+      }
+      const json = Buffer.from(JSON.stringify({ agent: config.agent.name, devices: [], chunk: 0, chunks: 1 }));
+      const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+      const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-data`, { method: 'POST', headers: hdrs, body: json, timeoutMs: 30_000, retries: 2 });
+      if (!res.ok) throw new Error(`sanswitch-data <- ${res.status} (위임 0대 — 중앙 목록 비우기)`);
+      _last = { at: Date.now(), sent: 0, cleared: true, reason: '위임 장비 0대 — 중앙 목록을 비웠습니다' };
+      return { ok: true, sent: 0, cleared: true };
+    }
     // 청크 전송(chunk/chunks 필드): 첫 청크는 중앙의 내 목록을 교체, 이후 청크는 덧붙인다(중앙 sanSwitchEdge).
     const chunks = chunkDevices(devices);
     let bytes = 0, gzBytes = 0;
@@ -132,7 +152,11 @@ export async function pushSanSwitchNow() {
     const downgraded = devices.filter((d) => d.ports?.portsScopeReason).length;
     _last = { at: Date.now(), sent: devices.length, chunks: chunks.length, bytes, gzBytes, gzip: PUSH_GZIP, portsScope: scope, downgraded };
     return { ok: true, sent: devices.length, chunks: chunks.length, portsScope: scope, downgraded };
-  } catch (e) { _last = { at: Date.now(), error: e.message }; return { ok: false, reason: e.message }; }
+  } catch (e) {
+    _last = { at: Date.now(), error: e.message };
+    console.warn(`[sanswitch-push] 실패: ${e.message}`); // v2.583(카탈로그 N2)
+    return { ok: false, reason: e.message };
+  }
   finally { _busy = false; }
 }
 

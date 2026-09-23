@@ -16,7 +16,7 @@
  *  - 사용자별 쿨다운(기본 60초) + hangLog 의 분당 상한(기본 60) + 파일 줄 수 상한 → 디스크 유계.
  *  - 본문은 경로·화면 해시·숫자만 받는다. 쿼리스트링·본문 데이터는 받지 않는다(검색어·id 유출 방지).
  */
-import { recordClientStall } from '../../perf/monitor.js';
+import { recordClientStall, requestStatus } from '../../perf/monitor.js';
 import { loadPerfSettings } from '../../perf/settings.js';
 import { routeKeyOf } from '../../perf/stats.js';
 import { clientIp } from '../../util/rateLimit.js';
@@ -76,7 +76,7 @@ export function registerPerfClient(api) {
         user, ip,
         view: normView(b.view), path: normPath(b.path), ms: b.ms,
         inflight: (Array.isArray(b.inflight) ? b.inflight : []).slice(0, 10)
-          .map((x) => ({ path: normPath(x?.path), ms: x?.ms })),
+          .map((x) => ({ path: normPath(x?.path), ms: x?.ms, rid: x?.rid })),
         userAgent: req.get('user-agent') || '',
       });
     } catch { /* 보고 처리 실패는 조용히 — 화면에 영향 없음 */ }
@@ -87,6 +87,21 @@ export function registerPerfClient(api) {
    * GET /perf/client-config — 브라우저가 '몇 초부터 보고할지' 를 서버 설정에서 받는다.
    * 화면에 주기·임계를 하드코딩하지 않는다는 규칙(CLAUDE.md 프론트 회귀 방지)의 적용.
    */
+  /**
+   * GET /perf/req-status?ids=a,b,c — 로딩 화면이 오래 기다리는 요청의 서버 쪽 상태(v2.583).
+   * 사용자 요청: "'불러오는 중…' 이 나올 때 누가 이 지연을 발생시켰는지 ID 도 같이 보여줘."
+   * 응답 { at, items: { <id>: {state:'processing'|'done'|'unknown', serverMs?, status?, method?, route?} } }.
+   * 소유자만 본다(관리자는 전부) — 판정은 monitor.requestStatus 하나가 갖는다. 최대 20개.
+   * 인증된 사용자 누구나 부른다(자기 요청만 보인다 — 조회 권한만 있는 계정도 '불러오는 중' 을 겪는다).
+   */
+  api.get('/perf/req-status', (req, res) => {
+    const raw = typeof req.query.ids === 'string' ? req.query.ids : '';
+    const ids = raw.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20);
+    const items = requestStatus(ids, { user: req.user?.username || '', isAdmin: req.user?.role === 'admin' });
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, at: Date.now(), items });
+  });
+
   api.get('/perf/client-config', (_req, res) => {
     const st = loadPerfSettings();
     // clientDetailMs(v2.501): 화면이 '무슨 작업을 기다리는지' 를 보이기 시작하는 문턱. 3초를 뷰에

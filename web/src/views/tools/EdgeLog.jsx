@@ -189,7 +189,7 @@ export function EdgeLog() {
                   </td>
                   <td data-sort={h.label}>
                     <span style={{ color: toneVar(h.tone) }}>{h.label}</span>
-                    {j && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{j}</div>}
+                    {j && <div style={{ fontSize: 11, color: 'var(--muted)' }}><BoldText text={j} /></div>}
                   </td>
                   <td data-sort={r.version || ''}>{r.version || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                   <td data-sort={r.last?.at || 0}>

@@ -130,14 +130,21 @@ async function pollLive(snap, vc, s) {
         // 직전 성공 방식을 먼저(학습). 처음엔 게스트작업 → 실패하면 SSH 폴백. 추가 설정 없이 자동 수집.
         // Windows는 SSH 폴백이 대개 무의미(무sshd)하므로 항상 게스트작업 우선(학습된 ssh 무시).
         const order = (!isWindows && learnedMethod.get(v.id) === 'ssh') ? ['ssh', 'guestops'] : ['guestops', 'ssh'];
+        // v2.583: 시도마다 사유를 따로 모은다. 예전에는 err 하나를 덮어써 **마지막 시도(대개 SSH 폴백)의
+        // 사유만** 남았다 — Windows VM 은 sshd 가 없어 항상 'SSH 타임아웃' 이 찍히고, 정작 실패한
+        // 게스트 작업(VMware Tools)의 원인이 로그·진단 어디에도 남지 않았다(중앙 저널 판독에서 확인).
+        const tried = [];
         for (const m of order) {
-          r = await (m === 'ssh' ? viaSsh() : viaGuestops()).catch((e) => { err = e.message; return null; });
+          let mErr = '';
+          r = await (m === 'ssh' ? viaSsh() : viaGuestops()).catch((e) => { mErr = e.message; return null; });
+          if (!(r && r.utilPct != null)) tried.push(`${m === 'ssh' ? 'SSH' : '게스트작업'}: ${mErr || 'nvidia-smi 결과 없음'}`);
           if (r && r.utilPct != null) {
             // 삭제된 VM의 키가 무한 누적되지 않도록 상한 — 넘으면 비우고 다시 학습(무해).
             if (learnedMethod.size > 20000) learnedMethod.clear();
             usedMethod = m; learnedMethod.set(v.id, m); break;
           }
         }
+        if (!(r && r.utilPct != null) && tried.length) err = tried.join(' / ');
       } else {
         r = await viaGuestops().catch((e) => { err = e.message; return null; });
       }

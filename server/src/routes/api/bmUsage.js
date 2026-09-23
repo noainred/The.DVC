@@ -17,7 +17,7 @@ import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive } from '../../bmusage/settings.js';
+import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers } from '../../bmusage/settings.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
 import { publicTarget, NO_PATH_REASON } from '../../bmusage/targets.js';
@@ -50,8 +50,29 @@ export function scopeEdgeSettings(settings, allowed) {
   if (!settings || typeof settings !== 'object') return null;
   if (!allowed) return settings;
   const { corps, ...rest } = settings;
-  return { ...rest, corps: null, corpsHidden: true, corpsCount: Array.isArray(corps) ? corps.length : null };
+  // v2.583: corps 는 배열이 아니라 `{ [vcenterId]: true }` 맵이다 — 예전 `Array.isArray` 판정은 늘 null 을 줬다.
+  const n = Array.isArray(corps) ? corps.length : (corps && typeof corps === 'object' ? Object.keys(corps).length : null);
+  return { ...rest, corps: null, corpsHidden: true, corpsCount: n };
 }
+
+/**
+ * 주 조회의 설정·상태를 범위·역할에 맞게 깎는다(v2.583 — 감사 확정. SEC-03 이 /edges 만 고친 형제 누락).
+ *  · 범위 계정: `corps`(수집을 켠 법인 목록 — 그 자체가 조직 구성)를 **자기 범위 것만** 남기고 그 사실을 밝힌다.
+ *  · 관리자가 아니면: 대체 경로 동의자 계정명(`enterpriseAckBy`)을 뺀다(설정·상태 양쪽).
+ */
+export function scopeMainSettings(settings, allowed, isAdmin) {
+  if (!settings || typeof settings !== 'object') return settings;
+  let out = settings;
+  if (allowed && settings.corps && typeof settings.corps === 'object') {
+    out = { ...out, corps: Object.fromEntries(Object.entries(settings.corps).filter(([id]) => allowed.has(id))), corpsScoped: true };
+  }
+  if (!isAdmin && 'enterpriseAckBy' in out) { const { enterpriseAckBy: _a, ...rest } = out; void _a; out = { ...rest, enterpriseAckByHidden: true }; }
+  return out;
+}
+const stripAckBy = (st, isAdmin) => {
+  if (isAdmin || !st || typeof st !== 'object' || !('enterpriseAckBy' in st)) return st;
+  const { enterpriseAckBy: _a, ...rest } = st; void _a; return rest;
+};
 
 export function registerBmUsage(api) {
 
@@ -88,7 +109,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
     res.json({
       ok: true, at: Date.now(),
       enabled: bmUsageEnabled(),
-      settings: loadBmUsageSettings(), defaults: DEFAULTS,
+      settings: scopeMainSettings(loadBmUsageSettings(), allowed, isAdmin), defaults: DEFAULTS,
       targets, rows,
       // '왜 대상이 아닌지' 는 개수와 사유로만 준다(범위 밖 서버 이름을 흘리지 않기 위해).
       skippedCounts,
@@ -101,7 +122,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       isEdge: tg.isEdge,
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
       db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
-      status: bmUsageStatus(),
+      status: stripAckBy(bmUsageStatus(), isAdmin),
       enterpriseActive: enterpriseActive(),
       licenseLabels: TIER_LABEL,
       /*
@@ -162,6 +183,11 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
 
 /** 지금 수집 — 폴러와 **재진입 가드를 공유**한다(연타가 세션을 곱하지 않게). */
 api.post('/tools/bm-usage/collect', writeRole, toolsPerm, async (req, res) => {
+  // v2.583(감사 확정): 범위 계정이 **전 법인** 수동 수집(인증 정지도 무시)을 걸고 전 법인 counts 를 받았다 —
+  //   형제 /edges/pull 처럼 전체 범위 계정만 허용한다(수집 대상을 범위로 나누는 경로가 폴러에 없다).
+  if (scopedVcenterIds(req.user, store.get())) {
+    return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '지금 수집은 전 법인 서버에 접속합니다 — 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.' });
+  }
   const r = await pollBmUsageOnce({ trigger: 'manual' });
   logAudit({
     user: req.user?.username, action: 'bm-usage.collect', ip: req.ip || '',
@@ -340,7 +366,9 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
       alertPct: next.alertPct, alertSustainMin: next.alertSustainMin, alertRepeatHours: next.alertRepeatHours,
     }).slice(0, 300),
   });
-  res.json({ ok: true, settings: next });
+  // v2.583 #36: 비어 있어 **저장하지 않은** 숫자 칸을 밝힌다(조용히 버리면 '저장했는데 왜 그대로지' 가 된다).
+  const { dropped } = dropUnspecifiedNumbers(req.body || {});
+  res.json({ ok: true, settings: next, ...(dropped.length ? { ignoredBlank: dropped } : {}) });
 });
 
 }

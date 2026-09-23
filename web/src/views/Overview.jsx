@@ -6,6 +6,7 @@ import {
 import { usePolling, fetchJson, putJson } from '../api.js';
 import { Kpi, Loading, ErrorBox, SeverityBadge } from '../components/ui.jsx';
 import STable from '../components/STable.jsx';
+import { unplacedRows, corpNoteText, physNoteText } from './overviewServerText.js'; // v2.583: 미배치 물리 서버 행
 
 const REGION_COLORS = { '아시아': '#22d3ee', '중국': '#ef4444', '유럽': '#a855f7', '북미': '#3b82f6', Unknown: '#64748b' };
 
@@ -97,22 +98,20 @@ export default function Overview({ onSelectSite, onGotoTab }) {
       : '중복으로 확인된 장비 없음(이름·서비스태그가 맞지 않으면 못 찾을 수 있습니다)');
     return parts.join(' · ');
   })();
+  // v2.583(사용자 신고 "서버 합계에 물리서버 수량 안나오는거 수정해줘"): 예전에는 법인 미귀속 물리 서버가
+  // 문구 한 줄로만 밝혀지고 표에는 없어 '물리 전용' 열이 전 행 0 으로 보였다. 이제 서버가 법인(DataCenter)·
+  // 관리자 지정으로 vCenter 행을 정하고, 정하지 못한 것은 표 아래 고정 행으로 보인다(overviewServerText.js).
   const physNote = (() => {
     if (pbcErr) return 'iDRAC 집계 실패 — 설정 › iDRAC 등록을 확인하세요';
     if (!pbc) return '물리 서버 귀속 정보를 불러오지 못했습니다';
-    const parts = [`iDRAC 등록 ${fmt(pbc.total)}대 중 가상화 호스트로 확인되지 않은 서버`];
-    if (pbc.unassigned) parts.push(`법인 미귀속 ${fmt(pbc.unassigned)}대`);
-    if (pbc.disabled) parts.push(`비활성 ${fmt(pbc.disabled)}대`);
-    return parts.join(' · ');
+    return physNoteText(pbc);
   })();
   const corpNote = (() => {
     if (pbcErr) return `물리 서버 집계 실패: ${pbcErr}`;
     if (!pbc) return '물리 서버 귀속 정보를 불러오지 못했습니다';
-    const parts = ['서버 합계 = 물리 전용 + 가상화 호스트(같은 장비를 두 번 세지 않습니다)'];
-    if (pbc.unassigned) parts.push(`법인에 연결되지 않은 서버 ${fmt(pbc.unassigned)}대는 아래 표에 없습니다`);
-    if (pbc.scoped) parts.push('허용된 법인만 표시');
-    return parts.join(' · ');
+    return corpNoteText(pbc);
   })();
+  const extraRows = pbc ? unplacedRows(pbc) : [];
   const corpRows = sites.map((s) => {
     const m = s.metrics || {};
     const hosts = m.hosts || 0;
@@ -238,7 +237,16 @@ export default function Overview({ onSelectSite, onGotoTab }) {
                   <td data-sort={String(r.perHost ?? -1)} className="muted">{r.perHost ?? '—'}</td>
                 </tr>
               ))}
-              {!corpRows.length && <tr><td colSpan={7} className="muted">표시할 법인이 없습니다.</td></tr>}
+              {/* v2.583: vCenter 행을 정하지 못한 물리 서버 — 정렬에서 빼고 표 아래에 고정한다(data-pin). */}
+              {extraRows.map((r) => (
+                <tr key={r.id} data-pin title={r.title}>
+                  <td className="muted" style={{ fontWeight: 600 }}>{r.name}</td>
+                  <td><b>{fmt(r.total)}</b></td>
+                  <td>{fmt(r.physOnly)}</td>
+                  <td className="muted">—</td><td className="muted">—</td><td className="muted">—</td><td className="muted">—</td>
+                </tr>
+              ))}
+              {!corpRows.length && !extraRows.length && <tr><td colSpan={7} className="muted">표시할 법인이 없습니다.</td></tr>}
             </tbody>
           </STable>
         </div>

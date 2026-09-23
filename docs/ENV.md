@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **455개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **482개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-23)
@@ -12,7 +12,7 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (21)
+## 공용 유틸 (23)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -20,6 +20,8 @@
 | `API_RATE_LIMIT` | `1800` |  | util/rateLimit.js |
 | `API_RATE_WINDOW_MS` | `60000` |  | util/rateLimit.js |
 | `BMUSAGE_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
+| `EDGE_EXPORT_MAX_BYTES` | `64` |  | util/readCapped.js |
+| `EDGE_RESPONSE_MAX_BYTES` | `16` |  | util/readCapped.js |
 | `GZIP_MIN_BYTES` | `1024` |  | util/compress.js |
 | `LINKCHECK_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `LOOP_LAG_INTERVAL_MS` | `30000` |  | util/loopLag.js |
@@ -38,7 +40,7 @@
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 | `X` |  |  | util/dayKey.js |
 
-## 공통 (139)
+## 공통 (141)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -102,7 +104,7 @@
 | `IDRAC_POLL_CONCURRENCY` |  |  | config.js |
 | `IDRAC_POLL_INTERVAL_MS` |  | ✅ | config.js |
 | `IDRAC_RAW_RETENTION_DAYS` | `0` |  | config.js |
-| `IDRAC_RETENTION_DAYS` | `90` | ✅ | config.js |
+| `IDRAC_RETENTION_DAYS` |  | ✅ | config.js |
 | `IDRAC_SCAN_INTERVAL_MS` |  |  | config.js |
 | `IDRAC_TIMEOUT_MS` | `15000` |  | config.js |
 | `IPAM_DB_PATH` |  |  | config.js |
@@ -111,6 +113,7 @@
 | `LINKCHECK_COUNT_CACHE_MS` | `60000` |  | linkcheck/db.js |
 | `LINKCHECK_DETAIL_MAX` | `8000` |  | linkcheck/db.js |
 | `LINKCHECK_ENABLED` | `''` |  | linkcheck/settings.js |
+| `LOGANALYSIS_LIVE` | `'1'` |  | loganalysis/live.js |
 | `MOCK_SCALE` | `1` |  | mock/generator.js |
 | `OME_POWER_DURATION` | `0` | ✅ | config.js |
 | `OME_POWER_METRIC_TYPES` | `'3,4,1'` | ✅ | config.js |
@@ -134,10 +137,11 @@
 | `PING_MON_CONCURRENCY` |  |  | config.js |
 | `PING_MON_ENABLED` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `PING_MON_INTERVAL_MS` |  |  | config.js |
-| `PING_MON_RETENTION_DAYS` | `365` |  | config.js |
+| `PING_MON_RETENTION_DAYS` |  |  | config.js |
 | `PING_MON_TIMEOUT_MS` |  |  | config.js |
 | `POLL_INTERVAL_MS` | `30000` | ✅ | config.js |
 | `PORT` | `4000` | ✅ | config.js |
+| `PORTAL_SYSTEMD_UNIT` | `'vmware-portal'` |  | loganalysis/journal.js |
 | `PORTALCHECK_BUDGET_MS` | `90000` |  | portalcheck/tokenProbe.js |
 | `PORTALCHECK_CONCURRENCY` | `4` |  | portalcheck/tokenProbe.js |
 | `PORTALCHECK_TIMEOUT_MS` | `8000` |  | portalcheck/tokenProbe.js |
@@ -152,7 +156,7 @@
 | `SVCMON_ROLE` | `''` |  | config.js |
 | `TEMP_DB_PATH` |  |  | config.js |
 | `TEMP_RAW_RETENTION_DAYS` | `0` |  | config.js |
-| `TEMP_RETENTION_DAYS` | `1830` |  | config.js |
+| `TEMP_RETENTION_DAYS` |  |  | config.js |
 | `TEMP_SAMPLE_INTERVAL_MS` | `60000` |  | config.js |
 | `TOTP_ISSUER` | `'VMware Portal'` |  | config.js |
 | `TRUST_PROXY` |  | ✅ | index.js |
@@ -237,12 +241,17 @@
 | `DISKTREND_SNAPSHOT_MAX_HOURS` | `72` |  | tools/diskTrend.js |
 | `DISKTREND_WARN_PCT` | `75` |  | tools/diskTrend.js |
 
-## 서비스 모니터 (2)
+## 서비스 모니터 (7)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `SVCMON_BATCH` |  |  | svcmon/pool.js |
+| `SVCMON_CONCURRENCY` |  |  | svcmon/pool.js |
 | `SVCMON_ENABLED` | `기본 적용('false' 로 끄기)` |  | svcmon/poller.js |
-| `SVCMON_WORKERS` |  |  | svcmon/capacity.js |
+| `SVCMON_MAX_PER_TICK` |  |  | svcmon/poller.js |
+| `SVCMON_PROC_CONCURRENCY` |  |  | svcmon/pool.js |
+| `SVCMON_TICK_MS` |  |  | svcmon/poller.js |
+| `SVCMON_WORKERS` |  |  | svcmon/capacity.js, svcmon/pool.js |
 
 ## 수집 서버 (1)
 
@@ -250,24 +259,28 @@
 |---|---|---|---|
 | `EDGE_PUSH_TIMEOUT_MS` | `600000` |  | collector/upgradePush.js, upgrade/upgrade.js |
 
-## 스토리지 수집 (19)
+## 스토리지 수집 (23)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `STORAGE_ACTIVITY_MAX` | `500` |  | storage/activityLog.js |
+| `STORAGE_AREAS_MS` | `60 * 60_000` |  | storage/intervals.js |
 | `STORAGE_CLI_RAW_LIMIT` | `4000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_CLI_SESSION_BUDGET_MS` | `150000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_CLI_TIMEOUT_MS` | `45000` |  | storage/collectors/cliSsh.js |
+| `STORAGE_CONFIG_PULL_MS` | `5 * 60_000` |  | storage/intervals.js |
 | `STORAGE_DAILY_KEEP_DAYS` |  |  | storage/db.js |
 | `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/poller.js |
 | `STORAGE_HISTORY_KEEP_DAYS` |  |  | storage/db.js |
 | `STORAGE_HTTP_TIMEOUT_MS` | `15000` |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
 | `STORAGE_ISILON_PORT` | `8080` |  | storage/collectors/isilon.js |
+| `STORAGE_POLL_MS` | `60 * 60_000` |  | storage/intervals.js |
 | `STORAGE_POWERSTORE_LIST_LIMIT` | `2000` |  | storage/collectors/powerstore.js |
 | `STORAGE_POWERSTORE_METRICS_INTERVAL` | `'OneDay'` |  | storage/collectors/powerstore.js |
 | `STORAGE_POWERSTORE_PORT` | `443` |  | storage/collectors/powerstore.js |
 | `STORAGE_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | storage/push.js |
+| `STORAGE_PUSH_MS` | `5 * 60_000` |  | storage/intervals.js |
 | `STORAGE_TLS_VERIFY` | `기본 아님('true' 일 때만 적용)` |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_UNISPHERE_PORT` | `8443` |  | storage/collectors/powermax.js |
 | `STORAGE_UNITY_PORT` | `443` |  | storage/collectors/unity.js |
@@ -289,7 +302,7 @@
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 
-## 엣지 에이전트 (28)
+## 엣지 에이전트 (33)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -318,8 +331,13 @@
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
 | `SANSW_CONFIG_PULL_MS` | `5` |  | agent/sanSwitchConfigPull.js |
 | `SVCMON_CONFIG_PULL` | `기본 적용('false' 로 끄기)` |  | agent/svcmonConfigPull.js |
+| `SVCMON_CONFIG_PULL_MS` |  |  | agent/svcmonConfigPull.js |
+| `SVCMON_PULL_TIMEOUT_MS` |  |  | agent/svcmonConfigPull.js |
 | `SVCMON_PUSH` | `기본 적용('false' 로 끄기)` |  | agent/svcmonPush.js |
+| `SVCMON_PUSH_CHUNK` |  |  | agent/svcmonPush.js |
 | `SVCMON_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/svcmonPush.js |
+| `SVCMON_PUSH_INTERVAL_MS` |  |  | agent/svcmonPush.js |
+| `SVCMON_PUSH_TIMEOUT_MS` |  |  | agent/svcmonPush.js |
 | `VMSERIES_LOCAL_SETTINGS` | `기본 적용('true' 로 끄기)` |  | agent/vmSeriesConfigPull.js |
 
 ## 원격 명령(RMA) (35)
@@ -436,7 +454,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (28)
+## 중앙(위임 수집) (34)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -446,6 +464,7 @@
 | `CENTRAL_FLEET_MAX_AGENTS` | `500` |  | central/fleet.js |
 | `CENTRAL_FLEET_TTL_MS` | `30` |  | central/fleet.js |
 | `CENTRAL_PDU_TTL_MS` | `6` |  | central/pduEdge.js |
+| `CENTRAL_SANSW_ORPHAN_TTL_MS` | `7` |  | central/sanSwitchEdge.js |
 | `CENTRAL_TOKEN` | `''` | ✅ | central/token.js, config.js 외 1 |
 | `EDGELOG_ACK_TIMEOUT_MS` | `60000` |  | central/edgeLogJobs.js |
 | `EDGELOG_KEEP_PER_AGENT` | `10` |  | central/edgeLogStore.js |
@@ -467,7 +486,12 @@
 | `PING_ACK_TIMEOUT_MS` | `30000` |  | central/pingJobs.js |
 | `PORTALCHECK_PULL_STALE_MS` | `30` |  | central/tokenCheckPull.js |
 | `PORTALCHECK_PULL_TIMEOUT_MS` | `20000` |  | central/tokenCheckPull.js |
+| `SVCMON_EDGE_MAX_AGENTS` |  |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_MAX_ROWS` |  |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_SILENCE_MIN_MS` |  |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_SKEW_WARN_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_SILENCE_ALERT` | `기본 적용('false' 로 끄기)` |  | central/svcmonSilence.js |
+| `SVCMON_SILENCE_TICK_MS` |  |  | central/svcmonSilence.js |
 
 ## 추이 트래킹 (3)
 
@@ -575,15 +599,18 @@
 |---|---|---|---|
 | `NSX_TLS_REJECT_UNAUTHORIZED` | `기본 아님('true' 일 때만 적용)` |  | nsx/client.js |
 
-## PDU (6)
+## PDU (9)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `PDU_CONCURRENCY` | `4` |  | pdu/poller.js |
+| `PDU_CONFIG_PULL_MS` | `5 * 60_000` |  | pdu/intervals.js |
 | `PDU_DB` |  |  | pdu/db.js |
 | `PDU_DEVICE_TIMEOUT_MS` | `90000` |  | pdu/poller.js |
 | `PDU_INTERVALS_LOCAL` | `기본 아님('1' 일 때만 적용)` |  | pdu/intervals.js |
+| `PDU_POLL_MS` | `5 * 60_000` |  | pdu/intervals.js |
 | `PDU_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | pdu/push.js |
+| `PDU_PUSH_MS` | `5 * 60_000` |  | pdu/intervals.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 
 ## SAN 스위치 (28)
@@ -634,4 +661,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 455
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 482

@@ -33,6 +33,7 @@ import {
   HeatLegend, HeatCell, PeakCell, TempSpark,
 } from './parts.jsx';
 import { useTempSparklines } from './useTempSparklines.js';
+import { unitText } from '../../unitText.js';
 
 const KIND_KO = { physical: '물리', virtual: '가상화' };
 const VIEWS = [['server', '서버별'], ['host', 'ESXi 호스트별'], ['cluster', '클러스터별'], ['vc', '법인별']];
@@ -40,6 +41,8 @@ const VIEW_TITLE = { server: '서버별', host: 'ESXi 호스트별', cluster: '�
 const HEAT_TITLE = { server: '서버 히트맵', host: 'ESXi 호스트 히트맵', cluster: '클러스터 히트맵', vc: '법인 히트맵' };
 const n1 = (v) => { const n = tempNum(v); return n == null ? '—' : n.toFixed(1); };
 const nRaw = (v) => { const n = tempNum(v); return n == null ? '—' : String(n); };
+// v2.583 #40: 값이 없으면 단위를 붙이지 않는다('— ℃' 는 0℃ 처럼 읽힌다 — v2.575 unitText 규약).
+const cRaw = (v) => unitText(nRaw(v), '℃');
 const int = (v) => Number(v || 0).toLocaleString();
 
 export default function ServerTempBoard({ scope }) {
@@ -162,27 +165,27 @@ export default function ServerTempBoard({ scope }) {
       return order.map((k) => ({
         key: k, name: nameOf(k), items: srvKind.filter((r) => dcKeyOf(r) === k),
         valOf: (r) => r.curC, idOf: (r) => r.id,
-        titleOf: (r) => `${r.name} · ${KIND_KO[r.kind] || '?'} · ${nRaw(r.curC)}℃`,
+        titleOf: (r) => `${r.name} · ${KIND_KO[r.kind] || '?'} · ${cRaw(r.curC)}`,
       })).filter((g) => g.items.length);
     }
     if (view === 'host') {
       return order.map((k) => ({
         key: k, name: nameOf(k), items: hosts.filter((h) => h.vcenterId === k),
         valOf: (h) => h.curC, idOf: (h) => h.id,
-        titleOf: (h) => `${h.name} · ${h.cluster || '클러스터 없음'} · ${nRaw(h.curC)}℃`,
+        titleOf: (h) => `${h.name} · ${h.cluster || '클러스터 없음'} · ${cRaw(h.curC)}`,
       })).filter((g) => g.items.length);
     }
     if (view === 'cluster') {
       return order.map((k) => ({
         key: k, name: nameOf(k), items: clusters.filter((c) => String(c.key).split('|')[0] === k),
         valOf: (c) => c.curC, idOf: (c) => c.key,
-        titleOf: (c) => `${String(c.key).replace('|', ' / ')} · 호스트 ${c.hosts} · ${nRaw(c.curC)}℃`,
+        titleOf: (c) => `${String(c.key).replace('|', ' / ')} · 호스트 ${c.hosts} · ${cRaw(c.curC)}`,
       })).filter((g) => g.items.length);
     }
     return [{
       key: null, name: '전체 법인', items: vcenters.filter((v) => !sel || v.key === sel),
       valOf: (v) => v.curC, idOf: (v) => v.key,
-      titleOf: (v) => `${v.key} · 호스트 ${v.hosts} · ${nRaw(v.curC)}℃`,
+      titleOf: (v) => `${v.key} · 호스트 ${v.hosts} · ${cRaw(v.curC)}`,
     }].filter((g) => g.items.length);
   })();
 
@@ -313,9 +316,9 @@ export default function ServerTempBoard({ scope }) {
               <MonoLabel>{label}</MonoLabel>
               <div style={{ marginTop: 6 }}>
                 <span style={{ fontSize: 24, fontWeight: 800, color: col, fontVariantNumeric: 'tabular-nums' }}>{n1(g?.avgC)}</span>
-                <span style={{ fontSize: 12, color: 'var(--text-dim)', fontWeight: 600, marginLeft: 3 }}>℃</span>
+                {tempNum(g?.avgC) != null && <span style={{ fontSize: 12, color: 'var(--text-dim)', fontWeight: 600, marginLeft: 3 }}>℃</span>}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>{int(g?.servers)}대 · 최고 {nRaw(g?.maxC)}℃</div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>{int(g?.servers)}대 · 최고 {cRaw(g?.maxC)}</div>
             </div>
           ))}
         </div>

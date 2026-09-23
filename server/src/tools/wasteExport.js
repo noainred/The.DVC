@@ -17,6 +17,7 @@
  * 한글·공백이 들어가면 Excel 이 링크를 못 열 수 있다(추정). VM 이름은 슬러그 + id 해시 8자리로 구분.
  */
 import crypto from 'node:crypto';
+import { dayKey, fileStamp, localStamp } from '../util/dayKey.js';
 
 /** 셀 값 규약: 문자열/숫자/null 또는 { text, hyperlink, tooltip }(링크 셀). */
 export const LINK = (text, hyperlink, tooltip = '') => ({ text, hyperlink, tooltip });
@@ -31,8 +32,7 @@ export function reportFileName(vm) {
 
 /** ZIP 파일명(ASCII — 웹 downloadFile 이 filename="…" 만 파싱한다). scope 는 vCenter id 또는 'all'. */
 export function exportZipName({ scope = 'all', cluster = '', folder = '', at = Date.now() } = {}) {
-  const d = new Date(at);
-  const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+  const stamp = fileStamp(at); // v2.583 #25: 포탈 오프셋(KST) — 프로세스 TZ 를 믿지 않는다
   const parts = ['waste', asciiSlug(scope || 'all')];
   if (cluster) parts.push(asciiSlug(cluster));
   if (folder) parts.push(asciiSlug(folder));
@@ -42,7 +42,7 @@ export function exportZipName({ scope = 'all', cluster = '', folder = '', at = D
 
 const r1 = (x) => (x == null || !Number.isFinite(Number(x)) ? null : Math.round(Number(x) * 10) / 10);
 const r2 = (x) => (x == null || !Number.isFinite(Number(x)) ? null : Math.round(Number(x) * 100) / 100);
-const fmtDate = (ms) => { const d = new Date(ms); return Number.isFinite(d.getTime()) ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : ''; };
+const fmtDate = (ms) => dayKey(ms); // v2.583 #25: 포탈 오프셋 날짜(못 읽으면 빈 문자열)
 const OFF_SRC = { event: '이벤트', observed: '점검', track: '추적', first_seen: '관측 시작' };
 
 /**
@@ -79,7 +79,7 @@ export function buildWasteSheets({ waste = {}, offSince = null, reports = new Ma
   // 요약 — KPI + vCenter 별 현황(사용자 요구 'vCenter 별 전체 현황').
   const byVc = Array.isArray(waste.byVcenter) ? waste.byVcenter : [];
   const kpi = [
-    ['생성 시각', `${fmtDate(generatedAt)} ${new Date(generatedAt).toTimeString().slice(0, 5)}`],
+    ['생성 시각', localStamp(generatedAt)],
     ['범위', `${scopeLabel === 'all' ? '전체 vCenter' : `vCenter ${scopeLabel}`}${cluster ? ` · 클러스터 ${cluster}` : ''}${folder ? ` · 폴더 ${folder}` : ''}`],
     ['행 범위', full ? '전량(상위 N 절단 없음)' : '화면 표와 동일(전원 꺼짐 상위 300 · 그 외 상위 50)',
       nameFilter ? `VM 이름 검색 '${nameFilter}' 적용 — 아래 KPI·vCenter 별 현황은 화면과 같이 전체 기준입니다(표만 걸렀습니다)` : ''],

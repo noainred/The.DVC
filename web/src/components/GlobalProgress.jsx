@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { inflightSnapshot, subscribeInflight, detailThresholdMs } from '../perfClient.js';
 import { normPath } from '../perfClientLogic.js';
 import { visibleProgress, secText } from './taskLabel.js';
+import { pollLoadingServerStatus } from '../api.js';
+import TaskWho from './TaskWho.jsx';
 
 /**
  * 전역 진행 표시(v2.501) — 사용자 요구: "대기가 3초 이상이면 구체적으로 어떤 작업을 하는지
@@ -28,7 +30,11 @@ export default function GlobalProgress() {
   // 진행 중일 때만 0.5초 tick — 경과 시간을 갱신한다.
   useEffect(() => {
     if (!hasWork) return undefined;
-    const id = setInterval(() => setTick((n) => n + 1), 500);
+    const id = setInterval(() => {
+      setTick((n) => n + 1);
+      // v2.583: 문턱을 넘긴 요청이 있으면 서버 쪽 상태를 묻는다(자체 조절 — 5초에 1번 · 한 번에 하나).
+      if (inflightSnapshot(1)[0]?.ms >= detailThresholdMs()) { try { pollLoadingServerStatus(); } catch { /* 무시 */ } }
+    }, 500);
     return () => clearInterval(id);
   }, [hasWork]);
 
@@ -56,6 +62,7 @@ export default function GlobalProgress() {
             {' · '}
             {secText(x.ms)}
             {x.slow && <span className="muted" style={{ marginLeft: 6 }}>(오래 걸리는 것이 정상)</span>}
+            <TaskWho task={x} />
           </li>
         ))}
       </ul>

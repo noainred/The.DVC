@@ -304,7 +304,7 @@ function WindowsUsersPanel({ scope }) {
       <details>
         <summary style={{ cursor: 'pointer', fontWeight: 700 }}>게스트 발행기 배포 방법 (게스트 계정 없이 동작하는 이유)</summary>
         <ol style={{ fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.7, paddingLeft: 20 }}>
-          {guide.map((g, i) => <li key={i} style={{ whiteSpace: 'normal' }}>{g}</li>)}
+          {guide.map((g, i) => <li key={i} style={{ whiteSpace: 'normal' }}><BoldText text={g} /></li>)}
         </ol>
       </details>
 

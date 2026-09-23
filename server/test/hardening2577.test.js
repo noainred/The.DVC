@@ -58,7 +58,8 @@ test('★ /top — memoJson + scopeKey (없으면 무제한 계정 결과가 범
   assert.ok(i > 0, '/top 라우트가 사라졌다');
   const body = s.slice(i, s.indexOf("api.get('/alarms'", i));
   assert.match(body, /memoJson\(req, res, 'inv:top'/, '/top 이 다시 캐시 없는 경로가 됐다(15초 폴링 · 전량 정렬)');
-  assert.match(body, /extraKey: scopeKey\(req\.user, store\.get\(\)\)/, 'scopeKey 가 빠지면 스코프가 다른 계정이 같은 캐시를 공유한다');
+  // v2.583: 키에 권한 조합(`|p…`)이 더 붙었다(inv.* 게이트) — 의도는 'scopeKey 가 키에 들어 있다' 이다.
+  assert.match(body, /extraKey: `?\$?\{?scopeKey\(req\.user, store\.get\(\)\)/, 'scopeKey 가 빠지면 스코프가 다른 계정이 같은 캐시를 공유한다');
   assert.ok(!/res\.json\(\{/.test(body), 'memoJson 은 값을 return 해야 한다 — res.json 을 직접 부르면 캐시가 채워지지 않는다');
 });
 

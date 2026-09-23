@@ -110,7 +110,14 @@ export async function latestSampleTs(deviceIds = []) {
   const out = new Map();
   if (!db || !deviceIds.length) return out;
   const ids = [...new Set(deviceIds.map(String))].slice(0, 500);
-  for (const r of db.conn.prepare(`SELECT device_id AS d, MAX(ts) AS ts FROM port_perf WHERE device_id IN (${ids.map(() => '?').join(',')}) GROUP BY device_id`).all(...ids)) out.set(String(r.d), Number(r.ts));
+  // v2.583(감사 확정 — 반증 에이전트 실측 8.85M 행): `IN (...) GROUP BY device_id` + MAX(ts) 는 SQLite 의 min/max
+  //   단축을 끄고 **각 스위치의 인덱스 항목을 전부** 훑었다(665ms/호출 — 화면을 열 때마다). 장비별 단독 MAX 는
+  //   `idx_pp_dev_ts` 끝 하나만 읽는다(0.04ms 합계). v2.550.3 이 기록한 '최신 1건씩을 GROUP BY+MAX 로 만들지 말 것' 의 재발.
+  const q = db.conn.prepare('SELECT MAX(ts) AS ts FROM port_perf WHERE device_id = ?');
+  for (const id of ids) {
+    const r = q.get(id);
+    if (r && r.ts != null) out.set(id, Number(r.ts));
+  }
   return out;
 }
 

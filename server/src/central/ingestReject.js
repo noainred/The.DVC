@@ -29,6 +29,7 @@ export const REJECT_KIND = Object.freeze({
 });
 
 const MAX_AGENTS = Number(process.env.INGEST_REJECT_MAX_AGENTS) || 500;
+const MAX_ENDPOINTS = 32; // v2.583: 에이전트당 경로 종류 상한(인증 전 기록 — 위조 경로 폭주 방지)
 const KEEP = Math.max(10, Number(process.env.INGEST_REJECT_KEEP) || 50); // 최근 원문 보관 수
 const REASON_MAX = 300; // SSH 추적·스택이 통째로 들어오는 것을 막는다(activityLog 와 같은 상한)
 
@@ -56,10 +57,13 @@ export function rejectKindOf(status, hint) {
  * @param endpoint 중앙 경로(예: /inventory)
  */
 export function recordReject(agent, endpoint, { status = 0, kind = '', reason = '', vcenterId = '', wireBytes = 0 } = {}) {
-  const key = t(agent) || '(unknown)';
+  // ⚠⚠ v2.583(감사 확정 — 반증 에이전트 실측 heap +23MB): 이 기록은 **인증 전**에 불린다. 이름·경로 길이에 상한이
+  //   없어 무토큰 요청이 900KB 짜리 agent 키 500개·8KB 경로 수천 개를 상주시킬 수 있었다. 이름 64자·경로 128자로
+  //   자르고, 에이전트당 경로 종류는 MAX_ENDPOINTS 개까지(넘치면 '(기타)' 로 합친다).
+  const key = (t(agent) || '(unknown)').slice(0, 64);
   const now = Date.now();
   const k = rejectKindOf(status, kind);
-  const ep = t(endpoint);
+  const ep0 = t(endpoint).slice(0, 128);
   let a = byAgent.get(key);
   if (!a) {
     if (byAgent.size >= MAX_AGENTS) { // 백스톱: 위조 이름 폭주 대비 — 가장 오래된 항목 정리
@@ -74,6 +78,7 @@ export function recordReject(agent, endpoint, { status = 0, kind = '', reason = 
   a.lastReason = cut(reason);
   if (vcenterId) a.lastVcenterId = t(vcenterId).slice(0, 128);
   a.byKind.set(k, (a.byKind.get(k) || 0) + 1);
+  const ep = ep0 && (a.byEndpoint.has(ep0) || a.byEndpoint.size < MAX_ENDPOINTS) ? ep0 : (ep0 ? '(기타)' : '');
   if (ep) a.byEndpoint.set(ep, (a.byEndpoint.get(ep) || 0) + 1);
 
   recent.unshift({ at: now, agent: key, endpoint: ep, status: Number(status) || 0, kind: k, reason: cut(reason), vcenterId: t(vcenterId).slice(0, 128), wireBytes: Number(wireBytes) || 0 });

@@ -5,6 +5,7 @@
  * 않는다(보안 불변조건). 상태변경(설정 저장·수동 수집)은 requireRole('admin').
  */
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopePollerStatus, scopeDbStatus } from '../../auth/scopeStatus.js'; // v2.583
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): 조회는 tools 권한
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
@@ -23,7 +24,8 @@ export function registerToolsGuestDisk(api) {
     const vcenterId = req.query.vcenterId ? String(req.query.vcenterId) : null;
     const usageFactor = req.query.usageFactor != null ? Number(req.query.usageFactor) : 1; // v2.482: 회수 = 할당 − 사용×배율(정규화는 service)
     const report = await reclaimReport({ allowed, minReclaimGB: Number.isFinite(minReclaimGB) ? minReclaimGB : 5, maxRatioPct, vcenterId, usageFactor });
-    res.json({ ...report, db: guestDiskDbStatus(), poller: guestDiskPollerStatus(), settings: loadSettings() });
+    // v2.583: 폴러 상태의 전 vCenter 합계·오류(범위 밖 id)·DB 경로를 범위 계정에 싣지 않는다(auth/scopeStatus.js).
+    res.json({ ...report, db: scopeDbStatus(guestDiskDbStatus(), req.user), poller: scopePollerStatus(guestDiskPollerStatus(), allowed), settings: loadSettings() });
   });
 
   // 한 VM 의 파티션별 최신값 + 추이 — scope 단건 검사(범위 밖은 404 존재 은닉).
@@ -52,8 +54,9 @@ export function registerToolsGuestDisk(api) {
   });
 
   // 상태 — DB/폴러/설정.
-  api.get('/tools/guest-disk/status', requirePerm('tools'), (_req, res) => {
-    res.json({ db: guestDiskDbStatus(), poller: guestDiskPollerStatus(), settings: loadSettings() });
+  api.get('/tools/guest-disk/status', requirePerm('tools'), (req, res) => {
+    const allowed = scopedVcenterIds(req.user, store.get());
+    res.json({ db: scopeDbStatus(guestDiskDbStatus(), req.user), poller: scopePollerStatus(guestDiskPollerStatus(), allowed), settings: loadSettings() });
   });
 
   // 설정 저장(주기·임계·보존) — admin.

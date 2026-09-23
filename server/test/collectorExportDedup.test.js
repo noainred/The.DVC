@@ -47,3 +47,16 @@ test('allMeasuredPower: 원격 동일 서버 중복(별칭) → 1대', async () 
   const remoteX = measured.filter((m) => m.source === 'remote' && m.serverName === 'REMOTE-SRV');
   assert.equal(remoteX.length, 1, '동일 출처 서버는 별칭 수와 무관하게 1대');
 });
+
+// v2.583 감사 #30: 위임(엣지) 전력도 신선도 컷(기본 2시간)을 따른다 — 죽은 엣지의 마지막 값이 '현재 전력' 에 무기한 남지 않게.
+test('allMeasuredPower: 2시간 넘은 원격 샘플은 현재 전력에서 뺀다(ts 없는 구버전 보고는 판단하지 않고 유지)', async () => {
+  registry.importServers([], 'replace');
+  state.setRemoteHost('stale-srv', { watts: 800, ts: Date.now() - 3 * 3_600_000, collectorId: 'colS', serverName: 'STALE-SRV', serverId: 'srv-stale' });
+  state.setRemoteHost('fresh-srv', { watts: 700, ts: Date.now() - 60_000, collectorId: 'colS', serverName: 'FRESH-SRV', serverId: 'srv-fresh' });
+  state.setRemoteHost('nots-srv', { watts: 600, collectorId: 'colS', serverName: 'NOTS-SRV', serverId: 'srv-nots' });
+  const measured = await service.allMeasuredPower();
+  const names = measured.filter((m) => m.source === 'remote').map((m) => m.serverName);
+  assert.ok(!names.includes('STALE-SRV'), '오래된 원격 샘플이 합산되면 안 된다');
+  assert.ok(names.includes('FRESH-SRV'));
+  assert.ok(names.includes('NOTS-SRV'));
+});

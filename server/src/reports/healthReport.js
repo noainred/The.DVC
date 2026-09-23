@@ -4,6 +4,8 @@
  * 웹훅 텍스트 리포트가 같은 결과를 공유한다. 순수 함수(now·certs 주입)라 테스트 가능.
  */
 
+import { localStamp } from '../util/dayKey.js'; // v2.583 #25: 프로세스 TZ 가 아니라 포탈 오프셋
+
 const DAY = 86_400_000;
 
 export function computeHealthReport(snap, opts = {}) {
@@ -82,7 +84,7 @@ export function computeHealthReport(snap, opts = {}) {
 export function buildDailyReportText(report, portalName = 'VMware Portal') {
   const icon = { ok: '✅', warn: '🟠', crit: '🔴' };
   const lines = [
-    `${icon[report.overall] || ''} ${portalName} 일일 헬스체크 (${new Date(report.generatedAt).toLocaleString('ko-KR')})`,
+    `${icon[report.overall] || ''} ${portalName} 일일 헬스체크 (${localStamp(report.generatedAt)})`,
     `vCenter ${report.summary.vcenters} · 호스트 ${report.summary.hosts} · VM ${report.summary.vms} · 발견 이슈 ${report.summary.issues}건`,
     '',
   ];

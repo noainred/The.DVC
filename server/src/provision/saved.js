@@ -54,6 +54,10 @@ export function savedVcenters(allowed = null) {
     .filter((id) => !allowed || allowed.has(id)).sort();
 }
 
+// v2.583 감사 #26: 응답에는 **사본**을 준다. `util/compress.js` 는 응답 객체의 **정체성**으로 직렬화 본문·ETag 를
+//   캐시하고(WeakMap), 이 모듈은 캐시 원소를 제자리에서 고친다(updateSaved) — 원본을 그대로 res.json 하면 메모를 고친 뒤
+//   GET 이 **옛 메모**를 돌려줬다(실측). 원소 사본 + 배열 필드 사본이면 충분하다(깊은 중첩 없음).
+const copyOf = (e) => (e ? { ...e, ...(Array.isArray(e.tags) ? { tags: [...e.tags] } : {}) } : e);
 /**
  * Paginated list. { vcenterId?, limit=10, offset=0, allowed? } → { total, items, vcenters }.
  * allowed(Set|null): 사용자 scope 로 허용된 vCenter id 집합. 요청 vcenterId 필터보다 먼저
@@ -67,10 +71,10 @@ export function listSaved({ vcenterId = '', limit = 10, offset = 0, allowed = nu
   const total = items.length;
   const lim = Math.max(1, Math.min(200, Number(limit) || 10));
   const off = Math.max(0, Number(offset) || 0);
-  return { total, offset: off, limit: lim, items: items.slice(off, off + lim), vcenters: savedVcenters(allowed) };
+  return { total, offset: off, limit: lim, items: items.slice(off, off + lim).map(copyOf), vcenters: savedVcenters(allowed) };
 }
 
-export function getSaved(id) { return load().find((e) => e.id === id) || null; }
+export function getSaved(id) { return copyOf(load().find((e) => e.id === id)) || null; }
 
 export function updateSaved(id, { memo, tags } = {}) {
   const e = load().find((x) => x.id === id);
@@ -78,7 +82,7 @@ export function updateSaved(id, { memo, tags } = {}) {
   if (memo !== undefined) e.memo = String(memo || '').slice(0, 2000);
   if (tags !== undefined) e.tags = cleanTags(tags);
   persist();
-  return { ok: true, item: e };
+  return { ok: true, item: copyOf(e) };
 }
 
 export function removeSaved(id) {

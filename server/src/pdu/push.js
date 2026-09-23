@@ -26,7 +26,16 @@ export async function pushPduNow() {
     return { ok: false, reason: 'push 비활성화(CENTRAL_URL/CENTRAL_TOKEN 미설정)' };
   }
   const snapshots = localSnapshots().slice(0, 500);
-  if (!snapshots.length) { _last = { at: Date.now(), ok: true, count: 0, reason: '보낼 스냅샷 없음' }; return { ok: true, count: 0 }; }
+  if (!snapshots.length) {
+    // v2.583 감사 #13: 위임 PDU 가 **정말 0대**일 때만 빈 목록을 보내 중앙 보관분을 비운다(장비를 뺀 법인의 유령 PDU).
+    //   위임 장비는 있는데 스냅샷이 아직 없으면(재기동 직후) 보내지 않는다 — 빈 목록으로 덮으면 중앙 화면이 빈다.
+    let assigned = null;
+    try { const { devicesForThisNode } = await import('./registry.js'); assigned = devicesForThisNode().length; } catch { /* 등록부를 못 읽음 — 비우지 않는다 */ }
+    if (assigned !== 0) {
+      _last = { at: Date.now(), ok: true, count: 0, reason: assigned == null ? '등록부를 읽지 못해 보내지 않았습니다' : `위임 PDU ${assigned}대 — 아직 수집된 스냅샷이 없습니다(첫 수집 대기)` };
+      return { ok: true, count: 0 };
+    }
+  }
   try {
     const json = JSON.stringify({ agent: config.agent.name, snapshots });
     const hdrs = { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken };
@@ -41,10 +50,12 @@ export async function pushPduNow() {
     if (res.status === 413) {
       console.warn(`[pdu-push] 중앙이 본문 크기를 거부(413). 스냅샷 ${snapshots.length}건 · JSON ${Math.round(json.length / 1024)}KB — 중앙의 JSON_BODY_LIMIT 을 확인하세요.`);
     }
-    _last = { at: Date.now(), ok, count: snapshots.length, bytes: json.length, reason: ok ? '' : `HTTP ${res.status}` };
+    _last = { at: Date.now(), ok, count: snapshots.length, bytes: json.length, reason: ok ? (snapshots.length ? '' : '위임 PDU 0대 — 중앙 목록을 비웠습니다') : `HTTP ${res.status}` };
+    if (!ok && res.status !== 413) console.warn(`[pdu-push] 실패: HTTP ${res.status}`); // v2.583(카탈로그 N2) — 413 은 위에서 크기와 함께 찍었다
     return { ok, count: snapshots.length };
   } catch (e) {
     _last = { at: Date.now(), ok: false, count: 0, reason: e.message };
+    console.warn(`[pdu-push] 실패: ${e.message}`); // v2.583(카탈로그 N2)
     return { ok: false, reason: e.message };
   }
 }

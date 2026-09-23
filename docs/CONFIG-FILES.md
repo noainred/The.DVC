@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **152개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **153개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-23)
@@ -85,17 +85,18 @@
 | `ipam-annotations.json` | 설정 | Per-IP user annotations (custom memo + tags) for the IP ledger. These are | ✅ | ✅ |  | ipam/annotations.js |
 | `ipam-overrides.json` | 설정 | Per-IP 수동 관리(override) 저장소 — vCenter/스캔으로 자동 발견되는 정보와 별개로, | ✅ | ✅ | ✅ | ipam/overrides.js |
 | `ipam-range-policies.json` | 설정 | 대역(subnet/range) 단위 IP 정책 저장소 — IP 단위 override(overrides.js)와 '평행'한 | ✅ | ✅ | ✅ | ipam/rangePolicies.js |
-| `ipam-scan-agents.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ |  | ✅ | ipam/scanStore.js |
-| `ipam-scan-history.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ |  | ✅ | ipam/scanStore.js |
-| `ipam-scan-results.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ |  | ✅ | ipam/scanStore.js |
-| `ipam-scan-runs.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ |  | ✅ | ipam/scanStore.js |
-| `ipam-scan.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ |  | ✅ | ipam/scanStore.js |
+| `ipam-scan-agents.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
+| `ipam-scan-history.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
+| `ipam-scan-results.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
+| `ipam-scan-runs.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
+| `ipam-scan.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
 | `ipam-settings.json` | 설정 | IPMS settings — IP ranges to hide from the IP ledger. Supports a global | ✅ | ✅ |  | ipam/settings.js |
 | `ipam-vcenter-ranges.json` | 설정 | vCenter별 IP 스캔 대역 저장소 — 각 vCenter(법인/사이트)에 귀속된 스캔 대역을 저장하고, | ✅ | ✅ | ✅ | ipam/rangeStore.js |
 | `ipam.db` | DB | IPAM IP 관리대장(외부 프로그램이 직접 읽는 공유 파일) |  |  |  | config.js |
 | `link-check.db` | DB | 통신 점검 로그 **3단 DB**(v2.552). 파일: `<dbDir>/link-check.db` |  |  | ✅ | linkcheck/db.js |
 | `linkcheck-settings.json` | 설정 | 통신 점검 설정(v2.552). 파일: `CONFIG_DIR/linkcheck-settings.json` | ✅ | ✅ | ✅ | linkcheck/settings.js |
 | `llm.json` | 설정 | Local LLM (Ollama) settings for natural-language search. Stored in | ✅ | ✅ | ✅ | llm/config.js |
+| `log-analysis-stats.json` | 설정 | 이 포탈 로그의 **누적** 집계(v2.583). 설정 › Log › 로그 분석의 기본 원천. | ✅ |  |  | loganalysis/live.js |
 | `login-fails.ndjson` | 로그(NDJSON) | 로그인 실패 저장소(분석용) — 포탈 자체 실패 + 게스트 OS 조사 결과를 적재한다. | ✅ |  | ✅ | security/loginStore.js |
 | `login-monitor.json` | 설정 | 로그인 실패 주기 모니터 — 일정 주기로 로그인 실패를 분석하고, 브루트포스(임계 이상 반복) 의심이 | ✅ |  | ✅ | security/loginMonitor.js |
 | `login-policy-users.txt` | 텍스트 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
@@ -108,7 +109,7 @@
 | `os-inventory.json` | 설정 | 실제 OS 인벤토리 저장소(별도 DB) — VM별 1행, vmId 키로 upsert. | ✅ |  | ✅ | inventory/osStore.js |
 | `os-scan.json` | 설정 | 실제 OS 인벤토리 스캐너 — 주기적으로 'DB에 없는(또는 오래된) VM'을 찾아 게스트에서 실제 OS를 읽어 저장. | ✅ |  | ✅ | inventory/osScanner.js |
 | `packages` | 디렉터리 | 디렉터리 — 내려받은 설치/업그레이드 패키지 보관(PACKAGE_DIR) |  |  |  | config.js |
-| `packages.json` | 설정 | Web-editable package source settings — lets an admin change the package | ✅ |  | ✅ | upgrade/packageSettings.js |
+| `packages.json` | 설정 | Web-editable package source settings — lets an admin change the package | ✅ | ✅ | ✅ | upgrade/packageSettings.js |
 | `part-faults.db` | DB | 파트 장애 이력 DB(v2.547, 스키마 v2 는 v2.548). 파일 `part-faults.db`. |  |  | ✅ | partfault/db.js |
 | `partfault-settings.json` | 설정 | 파트 장애 기능 스위치(v2.548 F3). | ✅ | ✅ | ✅ | partfault/settings.js |
 | `pdu-devices.json` | 설정 | PDU(APC Rack PDU 2G) 장비 등록 — `CONFIG_DIR/pdu-devices.json`(0600). | ✅ | ✅ | ✅ | pdu/registry.js |

@@ -28,8 +28,8 @@
  *   환원한 뒤에만 밖으로 나간다(server/CLAUDE.md 의 '비밀 포함 내보내기는 소유자 전용' 규칙은
  *   *값을 내보내는* 경로에 대한 것이고, 여기는 값을 내보내지 않는다). 그 경계가 이 파일의 계약이다.
  */
+import { fullScopeOnlyWith } from '../admin/shared.js';
 import { requireRole } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
 import { store, SITE_STALE_MS } from '../../store.js';
 import { config } from '../../config.js';
 import { logAudit } from '../../audit.js';
@@ -62,12 +62,8 @@ import {
 // v2.575 IMP-11: store.js 의 값을 그대로 쓴다(두 벌이면 판정 기준이 조용히 갈린다).
 
 const adminOnly = requireRole('admin');
-const fullScopeOnly = (req, res, next) => {
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, reason: '토큰 점검 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다 — 전 법인 엣지의 주소와 토큰 지문이 들어갑니다.' });
-  }
-  next();
-};
+// v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
+const fullScopeOnly = fullScopeOnlyWith('토큰 점검 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다 — 전 법인 엣지의 주소와 토큰 지문이 들어갑니다.');
 
 const t = (v) => String(v ?? '').trim();
 const norm = (v) => t(v).toLowerCase();
@@ -83,15 +79,35 @@ let running = '';
  * ⚠ 이것이 없으면 `collectors.json` 에 없는 사이트(공유 토큰만 쓰고 자기등록도 안 함)가 표에
  *   아예 나타나지 않아 화면이 '전부 정상' 이라는 거짓을 말한다.
  */
+/*
+ * ⚠ v2.583 감사 #29: 한 엣지의 키는 **수집 서버 id(= 에이전트 이름)** 하나다 — `tokenScan` 행·수집 상태 맵·
+ *   개별 토큰·배포 대상이 전부 그 값을 쓴다. 예전에는 이 함수·`tokenLookup`·`tokenCheckPull` 이 **표시 이름**
+ *   (`c.name`)을 썼고, id 와 이름이 다른 수집 서버(수동 등록)는 ① 표시 이름으로 '등록부 없음' 유령 행이 생기고
+ *   ② 등록 행은 프로브 토큰을 못 찾아 '토큰 없음' 으로 **건너뛰고** ③ 엣지 보고가 다른 키에 저장돼 합쳐지지 않았다.
+ *   표시 이름으로 들어온 이름은 id 로 **접는다**(aliasOf).
+ */
+function collectorAlias() {
+  const m = new Map();
+  for (const c of safe(() => loadCollectors(), [])) {
+    const id = t(c.id || c.name);
+    if (!id) continue;
+    m.set(norm(id), id);
+    if (c.name) m.set(norm(c.name), id);
+  }
+  return m;
+}
+
 function knownAgentSources() {
   const by = new Map(); // norm → { name, from: Set }
-  const add = (name, from) => {
+  const alias = collectorAlias();
+  const add = (name0, from) => {
+    const name = alias.get(norm(name0)) || name0;
     const k = norm(name);
     if (!k) return;
     if (!by.has(k)) by.set(k, { name: t(name), from: new Set() });
     by.get(k).from.add(from);
   };
-  for (const c of safe(() => loadCollectors(), [])) add(c.name || c.id, 'registry');
+  for (const c of safe(() => loadCollectors(), [])) add(c.id || c.name, 'registry');
   for (const a of safe(() => listAgentTokens(), [])) add(a.agent, 'agent-token');
   for (const d of safe(() => listTargetsRaw(), [])) add(d.agentName, 'deploy-target');
   for (const a of safe(() => listAgentConfigs(), [])) add(a.agent, 'config-push');
@@ -154,8 +170,10 @@ function tokenLookup() {
   const by = new Map();
   for (const c of safe(() => loadCollectors(), [])) {
     if (c.enabled === false) continue;
-    const k = norm(c.name || c.id);
-    if (k) by.set(k, String(c.token ?? ''));
+    const tok = String(c.token ?? '');
+    const k = norm(c.id || c.name); // #29: 행 키(id)와 같은 값
+    if (k) by.set(k, tok);
+    if (c.name && !by.has(norm(c.name))) by.set(norm(c.name), tok); // 표시 이름으로 들어온 행도 찾는다
   }
   return (row) => by.get(norm(row?.agent)) || '';
 }

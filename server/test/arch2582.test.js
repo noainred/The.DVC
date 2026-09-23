@@ -92,10 +92,11 @@ test('ARCH-1 스윕 — configDir JSON 을 읽고 원자 쓰기로 저장하는 
     'bmusage/notify.js',                                  // 알림 억제 상태 — 손상이면 재알림 1회
     'rma/agent.js',                                       // 엣지 RMA 에이전트 상태
     'insights/finops.js', 'insights/dbLocation.js', 'reports/dailyReport.js', // 설정 — 손상이면 기본값(별도 감사 대상)
-    'upgrade/packageSettings.js', 'routes/admin/nsxImport.js', 'central/inventory.js', 'ipam/scanStore.js', 'central/agentTokens.js', // 자체 보존 로직 또는 별 경로
+    'routes/admin/nsxImport.js', 'central/inventory.js', 'central/agentTokens.js', // 자체 보존 로직(renameSync .corrupt) 또는 저장소가 아닌 경로(nsxImport 는 가져오기 파일 읽기) — v2.583: scanStore·packageSettings 는 '자체 보존' 이 사실이 아니어서 빼고 고쳤다
     'svcmon/logsettings.js', 'net/monitor.js', 'central/svcmonEdge.js', 'security/netIssueStore.js', 'security/loginStore.js', 'storage/authGuard.js', 'util/authGuard.js', 'util/tokenFingerprint.js',
     'central/sanSwitchPerfEdge.js', 'storage/store.js',     // 엣지 push·스냅샷 캐시 — 다음 push/수집이 재구축
     'util/activityLog.js', 'tool-usage.js',                  // 링버퍼·사용 횟수 — v2.516 이 'preserveCorrupt 대상이 아니다' 로 못 박은 캐시
+    'loganalysis/live.js',                                   // v2.583 로그 분석 누적 통계 — 재생성 가능한 집계(손상 시 새로 시작하고 상태에 밝힌다)
   ]);
   const missing = [];
   for (const f of walk(SRC)) {

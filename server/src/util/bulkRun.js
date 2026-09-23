@@ -16,7 +16,7 @@
  *    한 번만 시도하고 사유를 그대로 보고한다.
  *  · **비밀번호는 run 객체에 남지만 응답에 절대 싣지 않는다**(`publicRun` sanitize) —
  *    `sanswitch/testRuns.js` 의 같은 규약.
- *  · **TTL 로 폐기**: 자격증명을 들고 있으므로 오래 두지 않는다(기본 15분, 완료 후에도 동일).
+ *  · **TTL 로 폐기**: 자격증명을 들고 있으므로 오래 두지 않는다(완료 시각부터 15분 — v2.583 에 시작 기준에서 바꿨다).
  *
  * ⚠ 정직 규약: 중앙이 직접 닿을 수 없는 대상(엣지 위임 장비 등)은 '실패' 가 아니라
  *   **'테스트 불가'**(`skipped`)로 구분한다. 닿지 못한 것을 '연결 실패' 라고 말하면 사용자가
@@ -30,10 +30,24 @@ const MAX_RUNS = 20;
 const _runs = new Map();          // id → run
 const _busyKinds = new Set();     // kind → 진행 중(재진입 가드)
 
+/*
+ * ⚠ v2.583 감사 #22: TTL 은 **끝난 시각**부터 잰다 — 진행 중인 실행은 지우지 않는다. 예전에는 시작 시각 기준이라
+ *   느린·닿지 않는 장비가 많은 대량 테스트(동시 4 · 장비당 60초 → 64대부터 15분 초과)가 **진행 중에** 사라졌다:
+ *   화면 폴링은 null(실행 없음), 재진입 가드는 여전히 '진행 중' 이라 새 실행도 거절, 끝난 뒤 '통과분만 등록' 은
+ *   passedLines=null 로 불가 — 사용자는 15분을 기다리고 아무것도 못 한다. 진행 중 실행은 장비당 시한으로 유한하다.
+ */
 function sweep() {
   const cut = Date.now() - TTL_MS;
-  for (const [id, r] of _runs) if (r.startedAt < cut) _runs.delete(id);
-  while (_runs.size > MAX_RUNS) _runs.delete(_runs.keys().next().value);
+  for (const [id, r] of _runs) {
+    if (r.status === 'running') continue;
+    if ((r.finishedAt || r.startedAt) < cut) _runs.delete(id);
+  }
+  if (_runs.size > MAX_RUNS) {
+    for (const [id, r] of _runs) {
+      if (_runs.size <= MAX_RUNS) break;
+      if (r.status !== 'running') _runs.delete(id);
+    }
+  }
 }
 
 

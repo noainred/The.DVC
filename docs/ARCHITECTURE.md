@@ -63,9 +63,9 @@
 | 경로 | 책임 |
 |---|---|
 | `index.js` | express 조립 · 라우터 마운트 · 폴러 기동(스태거) · WS 업그레이드 라우팅 |
-| `config.js` | 환경변수 → 설정 객체(**단일 소유자**). 329개 키가 여기서 읽힙니다 |
+| `config.js` | 환경변수 → 설정 객체(**핵심 키**). 도메인 전용 키는 각 모듈이 직접 읽습니다 — 전체 목록과 정의 위치는 [ENV.md](ENV.md) |
 | `store.js` | **vCenter 인벤토리 메모리 스냅샷** + 폴링 루프. 조회 API 는 거의 전부 이것을 읽습니다 |
-| `audit.js` `alerts.js` `logbuffer.js` | 감사 로그 · 알림 발송 · 콘솔 링버퍼(1,000줄) |
+| `audit.js` `alerts.js` `logbuffer.js` | 감사 로그 · 알림 발송 · 콘솔 링버퍼(1,000줄 — `addLogTap` 으로 줄을 받아 가는 구독자가 있다: `loganalysis/live.js`) |
 
 ### 3-2. 도메인 모듈 (줄 수 순)
 
@@ -92,10 +92,11 @@
 | `publicapi/` | — | **외부 공개 API**(v2.562) — 키·허용목록·인증·OpenAPI |
 
 나머지: `curuser`(현재 사용자) · `proxy`(SSH/RDP 중계) · `horizon` · `pdu` · `gpu` ·
-`vmtrack`(수량 추이) · `vmseries`(20초 스파이크) · `upgrade` · `portalcheck`(토큰 점검) ·
+`vmtrack`(수량 추이) · `vmseries`(20초 스파이크) · `upgrade` · `portalcheck`(포탈 점검 — 토큰 점검 · 인벤토리 점검) ·
 `metrics`(시계열) · `collector`(엣지 등록부·puller) · `bmstor` · `backup` · `dirusage` ·
 `net`(캡처) · `relaytopo`·`relaycheck`(HAProxy) · `guestdisk` · `capacity`(자체 적정성) ·
-`edgelog` · `hostaccess` · `intro` · `mock`(데모 생성기).
+`edgelog` · `hostaccess` · `intro` · `mock`(데모 생성기) ·
+`perf`(요청 지연·루프 정체·hang 기록 · 요청 ID) · `loganalysis`(로그 분석 — 개선점 도출, v2.583).
 
 ### 3-3. 라우트 그룹 → 게이트
 
@@ -213,6 +214,38 @@ withRollups()  ─ vCenter별 1회 그룹핑 ─▶  store.snapshot (메모리)
 반복하면 **계정이 잠깁니다.** 멈추는 것은 자격증명 거부뿐이고(타임아웃으로 멈추면 일시 장애가
 수집을 영구 정지시킵니다), 자격증명이 바뀌면 자동 재개하며 **수동 실행은 막지 않습니다.**
 
+### 4-5. 요청 추적과 로그 분석 (v2.583)
+
+**요청 ID — '불러오는 중…' 을 누가 지연시키는가**
+
+```
+브라우저 api.js ── X-Request-Id: <ID> ──▶ index.js 요청 계측 미들웨어
+  (perfClient.js 가 ID 생성)                 · 형식 검사(perf/requestId.js sanitizeRid) — 안 맞으면 서버가 새로 만든다
+                                              · 응답 헤더 X-Request-Id 로 되돌려 준다
+                                              · perf/monitor.js 진행 중 목록·최근 완료 기록·느린 요청·hang 기록에 ID
+                                              · 라이브 로그 줄 끝에 `#<ID>`
+화면(Loading·GlobalProgress → components/TaskWho.jsx)
+  └ 오래 기다리는 요청만 GET /api/perf/req-status?ids= (5초에 1번)
+       → monitor.requestStatus: processing(서버 처리 중) / done(이미 응답) / unknown(서버에 기록 없음)
+```
+
+- ID 는 **식별용이지 권한 근거가 아닙니다** — 상태 조회는 그 요청을 보낸 계정만(관리자는 전부) 봅니다.
+- `unknown` 은 '서버에 도달하지 않음 · 서버 재시작 · 최근 완료 기록에서 밀려남' 을 구분할 수 없어 **단정하지 않습니다.**
+- 같은 ID 를 설정 › Log › 서버 성능 측정의 '요청 ID 찾기' 와 진단·로그의 라이브 로그에서 찾을 수 있습니다.
+
+**로그 분석 — `loganalysis/`**
+
+```
+logbuffer.js ── addLogTap ──▶ loganalysis/live.js  시간 버킷 누적(최대 7일) → log-analysis-stats.json(10분·종료 시)
+링버퍼 1,000줄 / journalctl -u <PORTAL_SYSTEMD_UNIT> / 붙여넣기 / 엣지 로그 보관분(central/edgeLogStore)
+        └──────────────▶ parse.js → engine.js(rules.js 규칙 · template.js 문장 틀) → 보고서
+                                  └─▶ GET·POST /api/admin/log-analysis* (adminOnly + 전체 범위)
+```
+
+- 원천 5가지를 **같은 엔진**으로 분석합니다(누적 · 최근 로그 · 서비스 저널 · 붙여넣기 · 엣지 로그).
+- 저널은 셸을 거치지 않고 고정 인자로 읽으며, 서비스 계정이 `systemd-journal` 그룹이 아니면 읽지 못한다는 사실을 화면이 말합니다.
+- 붙여넣기 경로(`/api/admin/log-analysis/paste`)는 `BIG_JSON` 에 등록돼 있습니다(8MB 한도).
+
 ---
 
 ## 5. 인증·인가 (네 층)
@@ -229,7 +262,7 @@ withRollups()  ─ vCenter별 1회 그룹핑 ─▶  store.snapshot (메모리)
 - **기계 인증은 별도 층**입니다 — 수집 토큰 / 중앙 토큰(엣지별 개별 토큰은 해시만 보관) /
   공개 API 키. 세션과 섞지 않습니다.
 
-비밀은 `security/secretVault.js` 가 봉인하고(`SECRET_FILES` 24종), 파일은 **원자적 쓰기 +
+비밀은 `security/secretVault.js` 가 봉인하고(`SECRET_FILES` 25종 — v2.583 기준, 목록이 진실의 원천), 파일은 **원자적 쓰기 +
 손상 시 `.corrupt.<ts>` 보존** 입니다. 로드 catch 가 조용히 빈 값을 돌려주면 **다음 저장이
 온전했던 원본을 덮어씁니다.**
 
@@ -261,13 +294,14 @@ withRollups()  ─ vCenter별 1회 그룹핑 ─▶  store.snapshot (메모리)
 
 ## 7. 문서가 자기 자신을 지키는 방법
 
-이 저장소는 문서 세 개를 **소스에서 생성**합니다.
+이 저장소는 문서 네 개를 **소스에서 생성**합니다. 개수는 릴리스마다 바뀌므로 여기 적지 않습니다 — 각 생성 문서의 머리말이 최신 값입니다.
 
 | 문서 | 생성기 | 항목 |
 |---|---|---|
-| [ENV.md](ENV.md) | `scripts/env-doc.mjs` | 환경변수 329개 |
-| [CONFIG-FILES.md](CONFIG-FILES.md) | `scripts/config-doc.mjs` | 설정·데이터 파일 130여 개 |
-| [API.md](API.md) | `scripts/api-doc.mjs` | 엔드포인트 820개 |
+| [ENV.md](ENV.md) | `scripts/env-doc.mjs` | `server/src` 가 읽는 환경변수 |
+| [CONFIG-FILES.md](CONFIG-FILES.md) | `scripts/config-doc.mjs` | 설정·데이터 파일 |
+| [API.md](API.md) | `scripts/api-doc.mjs` | 엔드포인트 |
+| `web/public/THIRD-PARTY-NOTICES.txt` | `scripts/third-party-notices.mjs` | 번들·패키지에 실리는 오픈소스 고지(v2.576) |
 
 ⚠ **왜 생성인가**: 손으로 적은 목록은 조용히 낡습니다. 실제로 겪은 사고가 있습니다 —
 정규식이 못 잡는 형태가 생겨 **환경변수 28개와 가장 큰 DB 2개가 문서에서 사라졌는데,
@@ -275,8 +309,8 @@ withRollups()  ─ vCenter별 1회 그룹핑 ─▶  store.snapshot (메모리)
 문서를 쓰지 않고 종료코드 1** 로 실패하고, 스캐너가 인식해야 할 형태는 회귀 테스트가
 고정합니다(`server/test/docsGen2452.test.js` · `apiDoc2563.test.js`).
 
-CI 는 `--check` 로 문서가 최신인지 검사합니다. **라우트·환경변수·설정 파일을 추가하면
-생성기를 다시 돌리세요.**
+CI 는 `--check` 로 문서가 최신인지 검사합니다(경고만 — 릴리스를 막지는 않습니다). **라우트·환경변수·설정 파일·의존성을
+바꾸면 생성기를 다시 돌리세요.**
 
 ---
 

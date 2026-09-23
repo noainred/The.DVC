@@ -16,6 +16,7 @@
  * ⚠ 계정명은 개인정보성이다. 응답에는 싣되(권한 게이트 안이다) 목록 화면의 기본 표시는
  *   `settings.showNamesInList` 가 정한다 — 화면이 그 사실을 밝힌다.
  */
+import { scopePollerStatus, scopeDbStatus } from '../../auth/scopeStatus.js'; // v2.583
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
@@ -67,8 +68,8 @@ api.get('/tools/curuser', requirePerm('tools'), async (req, res) => {
     overLimit: scope.overLimit,
     skipReasons: SKIP_REASON,
     kindLabels: KIND_LABEL,
-    poller: curUserPollerStatus(),
-    db: await curUserDbStatus(),
+    poller: scopePollerStatus(curUserPollerStatus(), scopedVcenterIds(req.user, snap)),   // v2.583: 전 법인 합계·범위 밖 id 차단
+    db: scopeDbStatus(await curUserDbStatus(), req.user),
     mock: snap.source === 'mock',
   });
 });
@@ -91,7 +92,7 @@ api.get('/tools/curuser/history', requirePerm('tools'), async (req, res) => {
     retentionDays: s.retentionDays, intervalMs: s.intervalMs,
     // ⚠ `span.first` 는 '수집 시작' 이 아니라 **max(수집 시작, 보존 경계)** 다 — 화면이
     //   '기다리면 채워진다' 고 단정하지 않도록 보존일을 함께 내려준다.
-    db: await curUserDbStatus(),
+    db: scopeDbStatus(await curUserDbStatus(), req.user), // v2.583: DB 경로는 admin 에게만(검증 에이전트 지적 — 형제 3곳과 같게)
   });
 });
 
@@ -109,8 +110,10 @@ api.get('/tools/curuser/activity', requirePerm('tools'), (req, res) => {
   const all = listCurUserActivity(Number(req.query.limit) || 100);
   const events = all.filter((e) => ok(e?.deviceId));
   const p = curUserPollerStatus() || {};
+  const allowedAct = scopedVcenterIds(req.user, store.get());
   res.json({
-    poller: { ...p, inFlight: (p.inFlight || []).filter((x) => ok(x?.deviceId)) },
+    // v2.583: inFlight 만 거르고 `...p` 로 lastResult(전 법인 users·vcenters·errors)가 그대로 나갔다 — 한 헬퍼로.
+    poller: allowedAct ? scopePollerStatus(p, allowedAct) : { ...p, inFlight: (p.inFlight || []).filter((x) => ok(x?.deviceId)) },
     events,
     // 조용히 빼지 않는다(v2.509 규약) — 범위 밖이라 빠진 건수를 화면이 말할 수 있게.
     omittedOutOfScope: Math.max(0, all.length - events.length),
@@ -160,8 +163,8 @@ api.get('/tools/curuser/settings', requirePerm('tools'), async (req, res) => {
     staleAfterMs: staleAfterMs(s),
     agentFile: AGENT_FILE,
     installCommand: installCommand({ intervalMinutes: Math.round(s.guestPublishMs / 60_000) }),
-    poller: curUserPollerStatus(), push: curUserPushStatus(),
-    db: await curUserDbStatus(), vmSeries: vmSeriesEnabled(), mock: snap.source === 'mock',
+    poller: scopePollerStatus(curUserPollerStatus(), scopedVcenterIds(req.user, snap)), push: curUserPushStatus(),
+    db: scopeDbStatus(await curUserDbStatus(), req.user), vmSeries: vmSeriesEnabled(), mock: snap.source === 'mock',
   });
 });
 

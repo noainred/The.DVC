@@ -14,8 +14,8 @@
  *  · **상시 폴링하지 않는다.** 사람이 누를 때만 엣지로 나간다(로그는 대부분 볼 일이 없다).
  *  · **장비에 접속하지 않는다.** 엣지가 이미 갖고 있는 로그·상태만 읽는다(v2.548 파트 장애와 같은 판단).
  */
+import { fullScopeOnlyWith } from '../admin/shared.js';
 import { requireRole } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { listCollectors } from '../../collector/registry.js';
@@ -28,12 +28,8 @@ import { MAX_LOG_LIMIT, DEFAULT_LOG_LIMIT } from '../../edgelog/collect.js';
 import { config, currentVersion } from '../../config.js';
 
 const adminOnly = requireRole('admin');
-const fullScopeOnly = (req, res, next) => {
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, reason: '엣지 로그 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
-  }
-  next();
-};
+// v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
+const fullScopeOnly = fullScopeOnlyWith('엣지 로그 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 
 const t = (v) => String(v ?? '').trim();
 

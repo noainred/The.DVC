@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { config } from '../config.js';
+import { chunkedDelete } from '../util/chunkedPrune.js';
 
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래 vmperf/.
 // VMPERF_DB_DIR env 가 있으면 그것이 최우선(명시 설정을 덮지 않는다).
@@ -150,8 +151,9 @@ function prepare(db) {
     // v2.447(감사 B3): k 필터 추가 — 파일이 한 vCenter 전용이라도, 구버전 충돌 파일이 남아 있으면
     // 남의 행까지 세어 '수집 시작' 이 틀리게 표시됐다.
     meta: db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx, COUNT(*) AS n FROM samples WHERE metric=? AND k=?'),
-    prune: db.prepare('DELETE FROM samples WHERE ts < ?'),
-    pruneHourly: db.prepare('DELETE FROM samples_hourly WHERE h < ?'),
+    // v2.583(검증 에이전트 권고): 청크 삭제용 — 공용 metrics/db.js 와 같은 형태(LIMIT 은 chunkedDelete 가 붙인다)
+    prune: db.prepare('DELETE FROM samples WHERE rowid IN (SELECT rowid FROM samples WHERE ts < ? LIMIT ?)'),
+    pruneHourly: db.prepare('DELETE FROM samples_hourly WHERE rowid IN (SELECT rowid FROM samples_hourly WHERE h < ? LIMIT ?)'),
   };
 }
 
@@ -240,9 +242,11 @@ export async function pruneVmperf(vcenterId, retentionDays) {
   if (!x) return 0;
   const before = Date.now() - days * 86_400_000;
   let n = 0;
-  try { n = x.st.prune.run(before)?.changes ?? 0; } catch { /* */ }
+  // v2.583: 청크 + 이벤트 루프 양보(v2.453 규약). 한 방 DELETE 는 보존일을 줄인 첫 주기에 수백만 행을 동기로 지워
+  //   포탈을 멈춘다(공용 metrics/db.js 는 이미 이 형태였다 — vCenter별 파일만 빠져 있었다).
+  try { n = (await chunkedDelete(x.st.prune, [before], { label: `vmperf.${vcenterId}` })).deleted; } catch (e) { console.warn(`[vmperf] ${vcenterId} prune 실패: ${e?.message || e}`); }
   // 경계의 부분 시간대는 남겨 롤업이 원본보다 먼저 비지 않게(공용 DB prune 과 같은 규약).
-  try { x.st.pruneHourly.run(before - HOUR); } catch { /* */ }
+  try { await chunkedDelete(x.st.pruneHourly, [before - HOUR], { label: `vmperf.${vcenterId}.hourly` }); } catch (e) { console.warn(`[vmperf] ${vcenterId} 롤업 prune 실패: ${e?.message || e}`); }
   return n;
 }
 

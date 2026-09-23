@@ -34,6 +34,7 @@ export async function pushStorageNow() {
       // '엣지가 안 보냈다' 와 '보냈는데 장비가 0대다' 를 구분할 수 없었다. 상태 전용 본문은 수백 바이트다.
       const r = await sendStatusOnly({ reason: 'no-snapshots', registered: registeredCount() });
       _last = { at: Date.now(), sent: 0, statusSent: r.ok, statusError: r.ok ? null : r.reason };
+      if (!r.ok) console.warn(`[storage-push] 상태 보고 실패: ${r.reason}`);
       return { ok: true, sent: 0, statusSent: r.ok };
     }
     const json = JSON.stringify({ agent: config.agent.name, devices });
@@ -51,7 +52,11 @@ export async function pushStorageNow() {
     if (!res.ok) throw new Error(`storage-data <- ${res.status}`);
     _last = { at: Date.now(), sent: devices.length, bytes: json.length, gzip: PUSH_GZIP && hdrs['Content-Encoding'] === 'gzip' };
     return { ok: true, sent: devices.length };
-  } catch (e) { _last = { at: Date.now(), error: e.message }; return { ok: false, reason: e.message }; }
+  } catch (e) {
+    _last = { at: Date.now(), error: e.message };
+    console.warn(`[storage-push] 실패: ${e.message}`); // v2.583(카탈로그 N2): 상태 객체만이 아니라 로그에도 — 로그 분석이 볼 수 있게
+    return { ok: false, reason: e.message };
+  }
   finally { _busy = false; }
 }
 

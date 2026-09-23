@@ -166,7 +166,8 @@ test('insights/incidents: 일자 집계에 UTC(toISOString) 를 쓰지 않는다
   const s = read('insights/incidents.js');
   assert.ok(!/const day = new Date\(e\.ts\)\.toISOString\(\)/.test(s),
     'KST(UTC+9)에서 00~08시 인시던트가 전날 칸에 들어간다.');
-  assert.ok(/function localDay\(/.test(s) && /const day = localDay\(e\.ts\)/.test(s));
+  // v2.583 #25: localDay 는 포탈 오프셋 코어(dayKey)를 쓴다 — 프로세스 로컬 getter 도 TZ 미지정 유닛에서 UTC 가 된다.
+  assert.ok(/const localDay = \(ts\) => dayKey\(ts\)/.test(s) && /const day = localDay\(e\.ts\)/.test(s));
 });
 
 // ─── B4: 모지바케 재발 방지 ────────────────────────────────────────────────────────

@@ -131,6 +131,8 @@ export function secText(ms) {
 /**
  * 진행 중 요청 목록 → 표시용 행. 오래 기다린 것부터, 최대 `limit` 건.
  * 같은 작업이 여러 건이면 하나로 묶고 건수를 붙인다(폴링이 겹칠 때 같은 줄이 반복되지 않게).
+ * v2.583: 묶인 행은 **가장 오래 기다린 요청**의 ID·메서드·서버 상태를 싣는다(`rid`·`method`·`server`) —
+ * 사용자 요청 "누가 이 지연을 발생시켰는지 ID 도 같이 보여줘". 경로(`path`)는 식별자를 가린 형태다.
  */
 export function taskRows(inflight = [], { limit = 3, normalize = (x) => x } = {}) {
   const rows = (inflight || []).filter((x) => x && x.path);
@@ -139,8 +141,12 @@ export function taskRows(inflight = [], { limit = 3, normalize = (x) => x } = {}
     const t = taskLabel(normalize(r.path));
     const prev = byLabel.get(t.label);
     const ms = Number(r.ms) || 0;
-    if (prev) { prev.count += 1; prev.ms = Math.max(prev.ms, ms); }
-    else byLabel.set(t.label, { label: t.label, slow: t.slow, known: t.known, path: t.path, ms, count: 1 });
+    const who = { rid: r.rid || '', method: r.method || '', server: r.server || null, path: t.path };
+    if (prev) {
+      prev.count += 1;
+      if (ms > prev.ms) Object.assign(prev, who);
+      prev.ms = Math.max(prev.ms, ms);
+    } else byLabel.set(t.label, { label: t.label, slow: t.slow, known: t.known, ms, count: 1, ...who });
   }
   return [...byLabel.values()].sort((a, b) => b.ms - a.ms).slice(0, Math.max(1, limit));
 }

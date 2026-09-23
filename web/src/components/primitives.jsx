@@ -9,12 +9,13 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 // 권한 거부(403) 안내 — AccessDenied 는 api.js 만 참조하므로 이 import 로 순환이 생기지 않는다
 // (api.js 는 컴포넌트를 import 하지 않는다). 위 '순환의 씨앗' 주의사항과 배치되지 않음.
-import { permissionInfoFor, httpInfoFor, reportLoadingStall, ensurePerfClientConfig } from '../api.js';
+import { permissionInfoFor, httpInfoFor, reportLoadingStall, ensurePerfClientConfig, pollLoadingServerStatus } from '../api.js';
 // v2.498: '불러오는 중' 이 길어지면 몇 초째인지·무엇을 기다리는지 정직하게 보이고 서버에 1회 보고한다.
 import { inflightSnapshot, stuckThresholdMs, detailThresholdMs } from '../perfClient.js';
 import { loadingText } from '../perfClientLogic.js';
 import { secText } from './taskLabel.js';
 import AccessDenied from './AccessDenied.jsx';
+import TaskWho from './TaskWho.jsx';
 import ServiceDown from './ServiceDown.jsx';
 import { serviceDownKind } from './serviceDownText.js';
 
@@ -254,6 +255,8 @@ export function Loading({ label = '' } = {}) {
     const id = setInterval(() => {
       const ms = Date.now() - t0;
       setSec(ms / 1000);
+      // v2.583: 문턱을 넘긴 요청의 서버 쪽 상태를 묻는다(5초에 1번 · 한 번에 하나 — 자체 조절).
+      if (ms >= detailThresholdMs()) { try { pollLoadingServerStatus(); } catch { /* 표시 보조 — 실패 무시 */ } }
       if (!reported.current && ms >= stuckThresholdMs()) {
         reported.current = true;
         const rows = inflightSnapshot(10);
@@ -286,6 +289,7 @@ export function Loading({ label = '' } = {}) {
               {' · '}
               {secText(x.ms)} 대기
               {x.slow && <span style={{ marginLeft: 6 }}>(오래 걸리는 것이 정상인 작업)</span>}
+              <TaskWho task={x} />
             </li>
           ))}
         </ul>
