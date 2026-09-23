@@ -42,22 +42,27 @@ export function declaredRoutes() {
   return out;
 }
 
+/** 데이터 흐름 입력 — 3단 지도(v2.588)가 재사용한다. 왕복 0(인메모리 계측기 + 등록부 캐시). */
+export function gatherFlowInputs(sourceErrors) {
+  let collectors = [];
+  try { collectors = listCollectors(); } catch (e) { sourceErrors.push({ source: 'collectors', error: String(e?.message || e).slice(0, 160) }); }
+  const ingest = getIngestStats();
+  return {
+    now: Date.now(),
+    routes: declaredRoutes(),
+    collectors,
+    ingest, ingestSince: ingest.since,
+    pulls: pullStats(),
+    rejects: rejectStats(),
+    outbound: outboundStats(),
+  };
+}
+
 export function registerDataFlow(api) {
   api.get('/tools/data-flow', adminOnly, fullScopeOnly, async (req, res) => {
     await memoJson(req, res, 'data-flow', async () => {
       const sourceErrors = [];
-      let collectors = [];
-      try { collectors = listCollectors(); } catch (e) { sourceErrors.push({ source: 'collectors', error: String(e?.message || e).slice(0, 160) }); }
-      const ingest = getIngestStats();
-      const flow = buildDataFlow({
-        now: Date.now(),
-        routes: declaredRoutes(),
-        collectors,
-        ingest, ingestSince: ingest.since,
-        pulls: pullStats(),
-        rejects: rejectStats(),
-        outbound: outboundStats(),
-      });
+      const flow = buildDataFlow(gatherFlowInputs(sourceErrors));
       // 엣지 주소는 origin 만(경로·쿼리에 토큰이 실릴 수 있다) — build 가 이미 origin 만 담는다.
       return { ok: true, ...flow, kinds: KINDS, innerGroupLabel: GROUP_LABEL, sourceErrors, generatedAt: Date.now() };
     });

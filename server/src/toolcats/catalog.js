@@ -51,7 +51,7 @@ export const PRESET = Object.freeze([
   {
     id: 'network', label: '네트워크', icon: '🌐',
     tools: ['net-check', 'net-traffic', 'net-issues', 'nsx', 'ipam', 'dupip', 'relaytopo',
-      'relaycheck', 'link-check', 'comm-map', 'data-flow', 'san-switch', 'hba', 'nic-speed', 'nic-models', 'topo3d'],
+      'relaycheck', 'link-check', 'comm-map', 'data-flow', 'device-flow', 'san-switch', 'hba', 'nic-speed', 'nic-models', 'topo3d'],
   },
   {
     id: 'storage', label: '스토리지', icon: '💾',
