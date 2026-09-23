@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
-  layoutDataFlow, W, EDGE_X, BUS_X, EDGE_COLS, MAIN_X, MAIN_MIN_H, UP_KINDS, DOWN_KINDS, edgeDirections, mainSummary,
+  layoutDataFlow, W, EDGE_X, BUS_X, EDGE_COLS, MAIN_X, MAIN_MIN_H, MAIN_BASE_H, MAIN_ROW_H, UP_KINDS, DOWN_KINDS, edgeDirections, mainSummary,
 } from './dataFlowLayout.js';
 import {
   edgeBadge, innerItemText, sinceNote, linkText, routePath, edgeLasts, LEGEND, legendLines, KIND_LABEL, STATE_LABEL,
-  dirCellText, dirSumText, DIR_LABEL, DIR_KINDS_TEXT,
+  dirCellText, dirSumText, DIR_LABEL, DIR_KINDS_TEXT, shortEdgeLabels,
 } from './dataFlowText.js';
 
 const data = {
@@ -177,8 +177,10 @@ describe('엣지 ↔ MAIN(v2.591 — 데이터 방향)', () => {
         }
         expect(m.mainY).toBeGreaterThan(l.main.y); expect(m.mainY).toBeLessThan(l.main.y + l.main.h);
         const ss = segs(m.d);
-        if (m.dir === 'up') { expect(ss[0].x1).toBe(own.x + own.w); expect(ss[ss.length - 1].x2).toBe(MAIN_X); }
-        else { expect(ss[0].x1).toBe(MAIN_X); expect(ss[ss.length - 1].x2).toBe(own.x + own.w); }
+        // 엣지 쪽 끝점은 x 뿐 아니라 y 도 **자기 카드의 높이 안**이어야 한다(v2.591 검토 — x 만 보면 다른 행 카드를 가리켜도 통과했다).
+        const inOwn = (y) => y > own.y && y < own.y + own.h;
+        if (m.dir === 'up') { expect(ss[0].x1).toBe(own.x + own.w); expect(inOwn(ss[0].y1)).toBe(true); expect(ss[ss.length - 1].x2).toBe(MAIN_X); }
+        else { expect(ss[0].x1).toBe(MAIN_X); expect(ss[ss.length - 1].x2).toBe(own.x + own.w); expect(inOwn(ss[ss.length - 1].y2)).toBe(true); }
       }
       // 높이는 MAIN 카드와 마지막 행 간격을 모두 담는다.
       expect(l.height).toBeGreaterThanOrEqual(l.main.y + l.main.h);
@@ -210,7 +212,7 @@ describe('엣지 ↔ MAIN(v2.591 — 데이터 방향)', () => {
     expect(lm.inLines.every((x) => x.dim)).toBe(true);
     const le = layoutDataFlow({ routes: ROUTES6, edges: edgesN(3), links }, { type: 'edge', id: 'e1' });
     expect(le.mainLines.filter((m) => m.hot).map((m) => m.key).sort()).toEqual(['down:e1', 'up:e1']);
-    const lc = layoutDataFlow({ routes: ROUTES6, edges: edgesN(3), links }, { type: 'cat', id: 'inv' });
+    const lc = layoutDataFlow({ cats: [{ id: 'inv' }], routes: ROUTES6, edges: edgesN(3), links }, { type: 'cat', id: 'inv' });
     expect(lc.mainLines.every((m) => m.dim)).toBe(true);
   });
   it('엣지 0곳이면 MAIN 선이 없고 죽지 않는다', () => {
@@ -223,11 +225,62 @@ describe('엣지 ↔ MAIN(v2.591 — 데이터 방향)', () => {
     expect(dirCellText({ state: 'none', links: 0 }, now).text).toBe('—');
     expect(dirCellText({ state: 'none', links: 0 }, now).title).toMatch('정상이라는 뜻이 아닙니다');
     const f = dirCellText({ state: 'fail', links: 2, ok: 1, fail: 1, okAt: now - 600_000, failAt: now - 60_000, lastAt: now - 60_000, reason: '소유권 충돌' }, now);
-    expect(f.text).toBe('실패'); expect(f.title).toMatch('소유권 충돌'); expect(f.title).toMatch('마지막 성공');
+    expect(f.text).toBe('실패'); expect(f.title).toMatch('소유권 충돌'); expect(f.title).toMatch('가장 최근 성공');
     const o = dirCellText({ state: 'ok', links: 1, ok: 1, okAt: now - 30_000, lastAt: now - 30_000 }, now);
     expect(o.text).toMatch('전'); expect(o.state).toBe('ok');
     expect(o.short.endsWith('전')).toBe(false); expect(o.short).toMatch('초');
     expect(dirSumText({ ok: 3, none: 1 })).toBe('정상 3 · 낡음 0 · 실패 0 · 없음 1');
     for (const x of [...Object.values(DIR_LABEL), ...Object.values(DIR_KINDS_TEXT), f.title, o.title]) expect(x.includes('`')).toBe(false);
+  });
+});
+
+describe('v2.591 검토 반영', () => {
+  const byId = new Map(ROUTES6.map((r) => [r.id, r]));
+  it('낡음 칸의 시각은 낡은 연결의 마지막 성공이다(다른 연결의 최근 성공이 아니다)', () => {
+    const now = 100_000_000;
+    const links = [
+      { edge: 'a', route: 'r-pull', state: 'ok', okAt: now - 30_000, lastAt: now - 30_000 },
+      { edge: 'a', route: 'r-job', state: 'stale', okAt: now - 2 * 3_600_000, lastAt: now - 2 * 3_600_000 },
+    ];
+    const d = edgeDirections('a', links, byId).down;
+    expect(d.state).toBe('stale'); expect(d.okAt).toBe(now - 30_000); expect(d.worstOkAt).toBe(now - 2 * 3_600_000);
+    const x = dirCellText(d, now);
+    expect(x.short).toMatch('시간'); expect(x.short).not.toMatch('초');
+    expect(x.title).toMatch('낡은 연결의 마지막 성공');
+  });
+  it('실패 사유는 서로 다른 것을 전부 든다 · 이름 미검증을 밝힌다', () => {
+    const links = [
+      { edge: 'a', route: 'r-push', state: 'fail', failAt: 3, reason: '소유권 충돌' },
+      { edge: 'a', route: 'r-reply', state: 'fail', failAt: 5, reason: '토큰 불일치', unverified: true },
+      { edge: 'a', route: 'r-cpull', state: 'fail', failAt: 4, reason: '소유권 충돌' },
+    ];
+    const d = edgeDirections('a', links, byId).up;
+    expect(d.reasons).toEqual(['토큰 불일치', '소유권 충돌']);
+    expect(d.worstUnverified).toBe(1);
+    const t = dirCellText(d, 10).title;
+    expect(t).toMatch('토큰 불일치 / 소유권 충돌'); expect(t).toMatch('이름 미검증');
+  });
+  it('고른 엣지가 사라지면 선택을 버린다(선이 전부 흐린 채 남지 않게)', () => {
+    const l = layoutDataFlow({ routes: ROUTES6, edges: edgesN(2), links: [] }, { type: 'edge', id: 'GONE' });
+    expect(l.sel).toBe(null);
+    expect(l.mainLines.some((m) => m.dim)).toBe(false);
+    expect(layoutDataFlow({ cats: [], routes: ROUTES6, edges: edgesN(1) }, { type: 'cat', id: 'x' }).sel).toBe(null);
+    expect(layoutDataFlow({ routes: ROUTES6, edges: edgesN(1) }, { type: 'main', id: 'main' }).sel?.type).toBe('main');
+  });
+  it('MAIN 카드는 엣지 목록이 다 들어가는 높이다(엣지 3~4곳에서 마지막 행이 잘리던 것)', () => {
+    for (const n of [1, 3, 4, 5, 6, 28]) {
+      const l = layoutDataFlow({ routes: ROUTES6, edges: edgesN(n), links: [] });
+      expect(l.main.h).toBeGreaterThanOrEqual(MAIN_BASE_H + n * MAIN_ROW_H);
+    }
+    expect(MAIN_MIN_H).toBe(MAIN_BASE_H);
+  });
+  it('짧은 이름 — 앞부분이 겹치면 뒷부분으로 구분하고, 짧은 이름은 그대로', () => {
+    expect(shortEdgeLabels(['LGES-HG01', 'LGES-HG02'], 10)).toEqual(['LGES-HG01', 'LGES-HG02']);
+    const x = shortEdgeLabels(['EDGE-IN-MUMBAI-DC2', 'EDGE-IN-MUMBAI-DC3', 'EDGE-PL-WROCLAW'], 10);
+    expect(new Set(x).size).toBe(3);
+    expect(x[0]).toMatch(/DC2$/); expect(x[2]).toBe('EDGE-PL-W…');
+    for (const v of x) expect(v.length).toBeLessThanOrEqual(10);
+    // 뒷부분까지 같으면 원래 이름(말줄임은 화면이 한다) — 지어낸 구분을 만들지 않는다.
+    expect(shortEdgeLabels(['AAAAAAAAAAAAAXYZ', 'AAAAAAAAAAAAAXYZ'], 10)).toEqual(['AAAAAAAAAAAAAXYZ', 'AAAAAAAAAAAAAXYZ']);
   });
 });

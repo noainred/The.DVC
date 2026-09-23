@@ -23,7 +23,7 @@ import { layoutDataFlow, W, BUS_X, BUS_W } from './dataFlowLayout.js';
 import {
   STATE_LABEL, STATE_COLOR, STATE_DOT, KIND_LABEL, KIND_SHORT, CAT_COLOR, TONE_HEAD,
   routePath, sinceNote, linkText, edgeBadge, edgeLasts, innerItemText, legendLines, ageText, spanText, bytesText,
-  DIR_LABEL, DIR_ARROW, DIR_KINDS_TEXT, dirCellText, dirSumText,
+  DIR_LABEL, DIR_ARROW, DIR_KINDS_TEXT, dirCellText, dirSumText, shortEdgeLabels,
 } from './dataFlowText.js';
 import { fetchResultText, statusSummary, groupStatus } from './edgeLogText.js';
 
@@ -31,6 +31,8 @@ const MONO = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 const PANEL = { background: '#13161c', border: '1px solid #1f242e', borderRadius: 6, padding: '10px 12px', minWidth: 0 };
 const CAP = { fontFamily: MONO, fontSize: 10, color: '#6b7384', letterSpacing: '0.08em', marginBottom: 6 };
 const TONE_TEXT = { ok: '#aab1bf', bad: '#f08a8d', warn: '#e0a43a', muted: '#8a93a6' };
+/** 상태 열 정렬 — 심각도 순(실패 먼저). 기록 없음은 빈 값이라 방향과 무관하게 뒤로 간다(STable 규칙). */
+const SEVERITY_SORT = Object.freeze({ fail: 0, stale: 1, ok: 2, none: '' });
 
 function Dot({ state, dashed }) {
   return <i aria-hidden="true" style={{ display: 'inline-block', width: 7, height: 7, flexShrink: 0, borderRadius: '50%', marginRight: 4, boxSizing: 'border-box',
@@ -67,12 +69,16 @@ export default function DataFlow() {
   if (!data || !lay) return <Loading />;
   const now = Date.now();
   const toggle = (type, id) => setSel((s) => (s && s.type === type && s.id === id ? null : { type, id }));
-  const selEdge = sel?.type === 'edge' ? edgesById.get(sel.id) : null;
-  const selCat = sel?.type === 'cat' ? (data.cats || []).find((c) => c.id === sel.id) : null;
-  const selMain = sel?.type === 'main';
+  // 배치가 정규화한 선택(다음 조회에서 사라진 엣지·종류는 버린다 — 선만 흐린 채 남지 않게).
+  const cur = lay.sel;
+  const selEdge = cur?.type === 'edge' ? edgesById.get(cur.id) : null;
+  const selCat = cur?.type === 'cat' ? (data.cats || []).find((c) => c.id === cur.id) : null;
+  const selMain = cur?.type === 'main';
   const tot = data.totals || {};
   const ms = lay.summary;
   const mainRowOf = new Map(ms.rows.map((r) => [r.edge, r]));
+  const mainLabels = shortEdgeLabels(ms.rows.map((r) => r.name), 9); // 칸 폭(약 64px)에 모노 글꼴 9자 — 10자면 CSS 가 한 번 더 자른다(v2.591 판독)
+  const mainAria = `MAIN 중앙 포탈 — 엣지 ${ms.rows.length}곳. ${DIR_LABEL.up}: ${dirSumText(ms.upSum)}. ${DIR_LABEL.down}: ${dirSumText(ms.downSum)}. 누르면 엣지별 상세를 아래에 엽니다.`;
 
   async function fetchInner(e) {
     setInner((m) => ({ ...m, [e.id]: { busy: true } }));
@@ -106,11 +112,12 @@ export default function DataFlow() {
         <div style={{ position: 'relative', width: W + 24, height: lay.height, padding: '0 12px' }}>
           <svg width={W} height={lay.height} style={{ position: 'absolute', left: 12, top: 0 }} aria-hidden="true">
             <defs>
-              {Object.keys(STATE_DOT).map((st) => (
-                <marker key={st} id={`df-mk-${st}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
-                  <path d="M0 0 L10 5 L0 10 z" fill={STATE_DOT[st]} />
+              {/* 화살촉은 선의 strokeOpacity 를 물려받지 않는다(SVG marker) — 흐린 선에는 흐린 화살촉을 따로 쓴다(v2.591 검토). */}
+              {Object.keys(STATE_DOT).flatMap((st) => [false, true].map((dim) => (
+                <marker key={`${st}${dim ? '-dim' : ''}`} id={`df-mk-${st}${dim ? '-dim' : ''}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
+                  <path d="M0 0 L10 5 L0 10 z" fill={STATE_DOT[st]} fillOpacity={dim ? 0.12 : 1} />
                 </marker>
-              ))}
+              )))}
             </defs>
             {lay.inLines.map((l) => (
               <path key={l.key} d={l.d} fill="none" stroke={l.state === 'none' ? STATE_COLOR.none : CAT_COLOR[l.cat] || '#6b7384'}
@@ -131,12 +138,12 @@ export default function DataFlow() {
             {lay.mainLines.map((m) => (
               <path key={m.key} d={m.d} fill="none" stroke={STATE_DOT[m.state]} strokeLinejoin="round"
                 strokeWidth={m.hot ? 2 : 1.5} strokeOpacity={m.dim ? 0.12 : 0.95}
-                strokeDasharray={m.state === 'none' ? '3 3' : undefined} markerEnd={`url(#df-mk-${m.state})`} />
+                strokeDasharray={m.state === 'none' ? '3 3' : undefined} markerEnd={`url(#df-mk-${m.state}${m.dim ? '-dim' : ''})`} />
             ))}
           </svg>
 
           {(data.cats || []).map((c) => {
-            const p = lay.catPos.get(c.id); const on = sel?.type === 'cat' && sel.id === c.id;
+            const p = lay.catPos.get(c.id); const on = cur?.type === 'cat' && cur.id === c.id;
             return (
               <button type="button" key={c.id} onClick={() => toggle('cat', c.id)} aria-pressed={on}
                 title={`${c.label} — 경로 ${c.routes}개 · 클릭하면 이 종류의 선만 강조`}
@@ -154,7 +161,7 @@ export default function DataFlow() {
           })}
 
           {(data.edges || []).map((e) => {
-            const p = lay.edgePos.get(e.id); const on = sel?.type === 'edge' && sel.id === e.id;
+            const p = lay.edgePos.get(e.id); const on = cur?.type === 'edge' && cur.id === e.id;
             const b = edgeBadge(e); const last = edgeLasts(e.id, data.links, routesById);
             return (
               <button type="button" key={e.id} onClick={() => toggle('edge', e.id)} aria-pressed={on}
@@ -176,7 +183,7 @@ export default function DataFlow() {
             );
           })}
 
-          <button type="button" onClick={() => toggle('main', 'main')} aria-pressed={selMain}
+          <button type="button" onClick={() => toggle('main', 'main')} aria-pressed={selMain} aria-label={mainAria}
             title="MAIN(중앙 포탈) — 클릭하면 엣지 ↔ 메인 선만 강조하고 아래에 엣지별 방향 상태"
             style={{ position: 'absolute', left: 12 + lay.main.x, top: lay.main.y, width: lay.main.w, height: lay.main.h, padding: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'stretch',
               border: `1px solid ${selMain ? '#5fd4c4' : '#2b4f4b'}`, background: '#12181b', borderRadius: 6, textAlign: 'left', cursor: 'pointer', color: '#d7dbe3', overflow: 'hidden' }}>
@@ -193,13 +200,13 @@ export default function DataFlow() {
                 </div>
               ))}
               <div style={{ borderTop: '1px solid #232833', paddingTop: 7, display: 'flex', flexDirection: 'column', gap: 4, minHeight: 0, overflow: 'hidden' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '54px minmax(0, 1fr) minmax(0, 1fr)', gap: 4, color: '#6b7384', fontSize: 9.5 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 42px 42px', gap: 4, color: '#6b7384', fontSize: 9.5 }}>
                   <span>엣지</span><span title="엣지 → 메인 마지막 성공 뒤 지난 시간">↑ 경과</span><span title="메인 → 엣지 마지막 성공 뒤 지난 시간">↓ 경과</span>
                 </div>
                 {ms.rows.length === 0 && <span style={{ fontFamily: "'IBM Plex Sans KR', sans-serif" }}>엣지가 없습니다.</span>}
-                {ms.rows.map((r) => (
-                  <div key={r.edge} style={{ display: 'grid', gridTemplateColumns: '54px minmax(0, 1fr) minmax(0, 1fr)', gap: 4, alignItems: 'center', color: '#aab1bf', minWidth: 0 }}>
-                    <span title={r.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                {ms.rows.map((r, i) => (
+                  <div key={r.edge} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 42px 42px', gap: 4, alignItems: 'center', color: '#aab1bf', minWidth: 0 }}>
+                    <span title={r.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mainLabels[i]}</span>
                     <DirCell d={r.up} now={now} />
                     <DirCell d={r.down} now={now} />
                   </div>
@@ -281,17 +288,19 @@ export default function DataFlow() {
               {ms.rows.map((r) => (
                 <tr key={r.edge}>
                   <td>{r.name}{!r.registered ? ' (등록부에 없음)' : ''}{!r.enabled ? ' (비활성)' : ''}</td>
-                  {['up', 'down'].map((dir) => {
-                    const d = r[dir];
-                    return (
-                      <React.Fragment key={dir}>
-                        <td data-sort={d.state}><Dot state={d.state} dashed={d.state === 'none'} />{STATE_LABEL[d.state]}</td>
-                        <td className="right" data-sort={d.links}>{d.links ? `${d.links} (정상 ${d.ok} · 낡음 ${d.stale} · 실패 ${d.fail})` : '—'}</td>
-                        <td data-sort={d.okAt || 0}>{d.okAt ? ageText(d.okAt, now) : '—'}</td>
-                      </React.Fragment>
-                    );
+                  {/* ⚠ Fragment 로 감싸지 말 것 — 표 정렬(sortableText.cellText)이 Fragment 를 펼치지 않아 열이 어긋난다(v2.591 검토). */}
+                  {['up', 'down'].flatMap((dir) => {
+                    const d = r[dir]; const x = dirCellText(d, now);
+                    return [
+                      <td key={`${dir}-s`} data-sort={SEVERITY_SORT[d.state]} title={x.title}><Dot state={d.state} dashed={d.state === 'none'} />{STATE_LABEL[d.state]}</td>,
+                      <td key={`${dir}-n`} className="right" data-sort={d.links || ''}>{d.links ? `${d.links} (정상 ${d.ok} · 낡음 ${d.stale} · 실패 ${d.fail})` : '—'}</td>,
+                      <td key={`${dir}-t`} data-sort={d.okAt || ''}>{d.okAt ? ageText(d.okAt, now) : '—'}</td>,
+                    ];
                   })}
-                  <td style={{ whiteSpace: 'normal' }}>{[r.up.state === 'fail' ? `${DIR_ARROW.up} ${r.up.reason || '사유 미상'}` : '', r.down.state === 'fail' ? `${DIR_ARROW.down} ${r.down.reason || '사유 미상'}` : ''].filter(Boolean).join(' · ') || '—'}</td>
+                  <td style={{ whiteSpace: 'normal' }}>{['up', 'down'].filter((dir) => r[dir].state === 'fail').map((dir) => {
+                    const rs = r[dir].reasons?.length ? r[dir].reasons : [r[dir].reason || '사유 미상'];
+                    return `${DIR_ARROW[dir]} ${rs.slice(0, 2).join(' / ')}${rs.length > 2 ? ` 외 ${rs.length - 2}가지` : ''}${r[dir].worstUnverified ? ' (이름 미검증 포함)' : ''}`;
+                  }).join(' · ') || '—'}</td>
                 </tr>
               ))}
             </tbody>

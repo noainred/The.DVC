@@ -36,8 +36,12 @@ export const LANE_NEAR = EDGE_X + EDGE_W + 12;
 export const LANE_FAR = EDGE_X + EDGE_W + 24;
 export const MAIN_X = 1168;
 export const MAIN_W = W - MAIN_X;
-/** MAIN 카드의 최소 높이 — 엣지가 1~2곳이어도 합계·엣지 목록·범례가 잘리지 않게. */
-export const MAIN_MIN_H = 380;
+/** MAIN 카드의 고정 내용(머리·두 방향 합계·목록 머리·범례) 높이와 엣지 목록 한 행 높이.
+ *  v2.591 검토(Chromium 실측): 예전엔 최소 380px 고정이라 엣지 3~4곳에서 목록 마지막 행이 **조용히 잘렸다**
+ *  (목록 칸이 overflow:hidden). 카드 높이는 max(엣지 행 높이 합, 고정 내용 + 엣지 수 × 행 높이) 다. */
+export const MAIN_BASE_H = 390;
+export const MAIN_ROW_H = 18;
+export const MAIN_MIN_H = MAIN_BASE_H;
 /** 한 엣지의 위·아래 두 가닥 사이 간격(px) — 같은 높이에 겹치지 않게 벌린다. */
 const PAIR = 4;
 
@@ -59,20 +63,35 @@ const cubic = (x1, y1, x2, y2, bend = 0.5) => {
  * ⚠ 방향에 기록된 연결이 하나도 없으면 state 는 'none' 이다(0 건을 '정상' 으로 읽지 않는다).
  */
 export function edgeDirections(edgeId, links = [], routesById = new Map()) {
-  const blank = () => ({ state: 'none', ok: 0, stale: 0, fail: 0, links: 0, okAt: 0, lastAt: 0, failAt: 0, reason: '' });
+  const blank = () => ({ state: 'none', ok: 0, stale: 0, fail: 0, links: 0, okAt: 0, lastAt: 0, failAt: 0, reason: '', reasons: [], worstOkAt: 0, worstUnverified: 0, _l: [] });
   const out = { up: blank(), down: blank() };
   for (const l of links) {
     if (l.edge !== edgeId) continue;
     const k = routesById.get(l.route)?.kind;
     const d = UP_KINDS.includes(k) ? out.up : DOWN_KINDS.includes(k) ? out.down : null;
     if (!d) continue;
-    d.links += 1;
+    d.links += 1; d._l.push(l);
     if (STATES.includes(l.state)) d[l.state] += 1;
     if ((RANK[l.state] || 0) > RANK[d.state]) d.state = l.state;
     const ok = Number(l.okAt) || 0, last = Number(l.lastAt) || 0, fail = Number(l.failAt) || 0;
     if (ok > d.okAt) d.okAt = ok;
     if (last > d.lastAt) d.lastAt = last;
     if (l.state === 'fail' && fail >= d.failAt) { d.failAt = fail; d.reason = typeof l.reason === 'string' ? l.reason : ''; }
+  }
+  for (const d of [out.up, out.down]) {
+    // v2.591 검토: '마지막 성공' 을 방향 전체의 최댓값으로만 두면, 낡은 연결이 있어도 다른 연결의 30초 전 성공이 보여
+    // **주황 점 옆에 '30초'** 라는 모순이 된다. 그래서 가장 나쁜 상태의 연결들 중 **가장 오래된 성공**(worstOkAt)을 따로 든다.
+    const worst = d._l.filter((l) => l.state === d.state);
+    const oks = worst.map((l) => Number(l.okAt) || 0);
+    d.worstOkAt = oks.length && oks.every((x) => x > 0) ? Math.min(...oks) : 0;
+    d.worstUnverified = worst.filter((l) => l.unverified).length;
+    // 실패 사유는 하나만 보여주면 '그것만 고치면 된다' 로 읽힌다 — 서로 다른 사유를 최근 순으로 전부 든다.
+    const seen = new Set();
+    for (const l of [...worst].filter((x) => x.state === 'fail').sort((a, b) => (Number(b.failAt) || 0) - (Number(a.failAt) || 0))) {
+      const r = typeof l.reason === 'string' && l.reason ? l.reason : '사유 미상';
+      if (!seen.has(r)) { seen.add(r); d.reasons.push(r); }
+    }
+    delete d._l;
   }
   return out;
 }
@@ -94,11 +113,16 @@ export function mainSummary(data = {}) {
  * @param data  서버 응답(routes·cats·edges·links)
  * @param sel   null | {type:'cat'|'edge'|'main', id}
  */
-export function layoutDataFlow(data = {}, sel = null) {
+export function layoutDataFlow(data = {}, selIn = null) {
   const cats = data.cats || [];
   const routes = data.routes || [];
   const edges = data.edges || [];
   const links = data.links || [];
+  // v2.591 검토: 고른 엣지·종류가 다음 조회에서 사라지면 상단은 '선택 없음' 인데 선은 전부 흐린 채 남았다 — 선택을 버린다.
+  const sel = !selIn ? null
+    : selIn.type === 'edge' && !edges.some((e) => e.id === selIn.id) ? null
+    : selIn.type === 'cat' && !cats.some((c) => c.id === selIn.id) ? null
+    : selIn;
 
   const catPos = new Map();
   cats.forEach((c, i) => catPos.set(c.id, { x: CAT_X, y: TOP + i * (CAT_H + CAT_GAP), w: CAT_W, h: CAT_H }));
@@ -114,7 +138,7 @@ export function layoutDataFlow(data = {}, sel = null) {
   const edgeBottom = TOP + edgeRows * (EDGE_H + EDGE_GAP_Y);
   // MAIN 카드는 마지막 행 **아래 간격까지** 내려온다 — 마지막 행 왼쪽 열 선이 그 간격으로 MAIN 에 닿는다
   // (v2.591 자체 테스트가 잡았다: 간격을 빼면 그 두 가닥이 카드 아래 허공에 꽂혔다).
-  const mainH = Math.max(MAIN_MIN_H, edgeRows * (EDGE_H + EDGE_GAP_Y));
+  const mainH = Math.max(MAIN_BASE_H + edges.length * MAIN_ROW_H, edgeRows * (EDGE_H + EDGE_GAP_Y));
   const main = { x: MAIN_X, y: TOP, w: MAIN_W, h: mainH };
 
   const height = Math.max(catBottom, edgeBottom, TOP + mainH + 16, TOP + routes.length * 8 + 40) + 24;
@@ -180,7 +204,7 @@ export function layoutDataFlow(data = {}, sel = null) {
 
   const ticks = routes.map((r) => ({ id: r.id, y: tickY.get(r.id), state: r.state, cat: r.cat }));
   return {
-    width: W, height, catPos, edgePos, ticks, inLines, outLines, mainLines, main, summary,
+    width: W, height, catPos, edgePos, ticks, inLines, outLines, mainLines, main, summary, sel,
     bus: { x: BUS_X, w: BUS_W, top: busTop - 8, bottom: busBottom + 8 },
   };
 }

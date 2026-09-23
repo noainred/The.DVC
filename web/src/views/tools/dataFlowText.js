@@ -141,15 +141,38 @@ export function dirCellText(d = {}, now = Date.now()) {
   const state = d.state || 'none';
   const counts = `정상 ${d.ok || 0} · 낡음 ${d.stale || 0} · 실패 ${d.fail || 0}`;
   if (state === 'none' || !d.links) return { text: '—', short: '—', title: '이 방향으로 오간 기록이 없습니다(정상이라는 뜻이 아닙니다).', state: 'none' };
-  const okPart = d.okAt ? `마지막 성공 ${ageText(d.okAt, now)}` : '성공 기록 없음';
+  const recent = d.okAt ? `가장 최근 성공 ${ageText(d.okAt, now)}` : '성공 기록 없음';
+  const unv = d.worstUnverified ? ` · 그중 ${d.worstUnverified}개는 이름 미검증(요청이 주장한 이름)` : '';
   if (state === 'fail') {
-    const why = d.reason ? ` · 사유 ${d.reason}` : '';
-    return { text: '실패', short: '실패', title: `실패 ${ageText(d.failAt || d.lastAt, now)}${why} · ${okPart} · 연결 ${d.links}개(${counts})`, state };
+    const rs = Array.isArray(d.reasons) && d.reasons.length ? d.reasons : (d.reason ? [d.reason] : []);
+    const why = rs.length ? ` · 사유 ${rs.slice(0, 3).join(' / ')}${rs.length > 3 ? ` 외 ${rs.length - 3}가지` : ''}` : '';
+    return { text: '실패', short: '실패', title: `실패 ${d.fail || 0}개(마지막 ${ageText(d.failAt || d.lastAt, now)})${why}${unv} · ${recent} · 연결 ${d.links}개(${counts})`, state };
+  }
+  if (state === 'stale') {
+    // 낡음 칸의 시각은 **낡은 연결의 마지막 성공**이다 — 다른 연결의 최근 성공을 보이면 주황 점 옆에 '30초' 가 뜬다.
+    const at = d.worstOkAt || 0;
+    const text = at ? ageText(at, now) : '—';
+    return { text, short: text.replace(/\s*전$/, ''), title: `낡음 ${d.stale || 0}개 · 낡은 연결의 마지막 성공 ${at ? ageText(at, now) : '없음'}${unv} · ${recent} · 연결 ${d.links}개(${counts})`, state };
   }
   const at = d.okAt || d.lastAt;
   const text = at ? ageText(at, now) : '—';
   // short — MAIN 카드의 좁은 칸용(열 머리가 '경과' 라 '전' 을 뺀다: '12초 전' → '12초').
-  return { text, short: text.replace(/\s*전$/, ''), title: `${STATE_LABEL[state] || state} · ${okPart} · 연결 ${d.links}개(${counts})`, state };
+  return { text, short: text.replace(/\s*전$/, ''), title: `${STATE_LABEL[state] || state} · ${recent} · 연결 ${d.links}개(${counts})`, state };
+}
+
+/**
+ * MAIN 카드 엣지 목록의 짧은 이름(v2.591 검토). 칸이 좁아 앞부분만 쓰면 'LGES-HG01'·'LGES-HG02' 가 둘 다 'LGES-HG…' 로
+ * 보여 어느 엣지가 실패인지 알 수 없다(v2.511 WWN labelMap 과 같은 유형). 앞부분이 겹치는 것만 **뒷부분**으로 바꾸고,
+ * 그래도 겹치면 원래 이름(말줄임은 화면이 한다)을 쓴다. 전체 이름은 title 로 남긴다.
+ */
+export function shortEdgeLabels(names = [], max = 10) {
+  const head = (n) => (n.length <= max ? n : `${n.slice(0, max - 1)}…`);
+  const tail = (n) => (n.length <= max ? n : `…${n.slice(-(max - 1))}`);
+  const count = (arr) => arr.reduce((m, x) => m.set(x, (m.get(x) || 0) + 1), new Map());
+  const h = names.map(head); const hc = count(h);
+  const t = names.map((n, i) => (hc.get(h[i]) > 1 ? tail(n) : h[i]));
+  const tc = count(t);
+  return names.map((n, i) => (tc.get(t[i]) > 1 ? n : t[i]));
 }
 
 /** MAIN 카드 합계 한 줄(엣지 수 기준). */
