@@ -6,6 +6,7 @@ import { Loading, ErrorBox, ResultCount, SearchBox } from '../../components/ui.j
 import { Card, fmtWatts } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
+import { dayStamp } from '../../dayStamp.js';
 
 
 /** Generic on-demand fetch hook (runs when params change). */
@@ -143,7 +144,7 @@ export function FleetInventory({ isAdmin }) {
     const body = [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `fleet-${view}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href = url; a.download = `fleet-${view}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
   };
 
   return (

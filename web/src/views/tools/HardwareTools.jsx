@@ -10,6 +10,7 @@ import EscClose from '../../components/EscClose.jsx';
 import { IdracDetailModal } from '../idrac/IdracDetailModal.jsx';
 import { Card, tempColor, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
+import { dayStamp } from '../../dayStamp.js';
 
 
 export function Hardware({ scope }) {
@@ -337,7 +338,7 @@ function ServerListBody({ corpName, model, servers, onRow }) {
     for (const s of rows) lines.push([s.name || s.id, s.model || model || '', s.type === 'ome' ? 'OME' : 'iDRAC', String(s.host || '').replace(/^https?:\/\//, ''), s.serviceTag || '', s._vc || '', s.enabled === false ? '중지' : '수집'].map(esc).join(','));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href = url; a.download = `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
   };
   return (
     <>
@@ -419,7 +420,7 @@ function PartsInventory({ vc, onServer }) {
     const csv = ['분류,파트,상세,수량,서버수', ...rows.map((b) => [b.catName, b.label, b.detail, b.count, b.serverCount].map(esc).join(','))].join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
-    a.download = `hardware-parts-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `hardware-parts-${dayStamp()}.csv`;
     a.click(); URL.revokeObjectURL(a.href);
   };
   const th = (key, label) => (

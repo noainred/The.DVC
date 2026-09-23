@@ -103,3 +103,14 @@ describe('edgeReportNotes (v2.581 BUG-D)', () => {
     expect(edgeReportNotes(null)).toEqual([]);
   });
 });
+
+describe('edgeIntervalText (v2.582 BUG-4)', () => {
+  it('서버가 준 값만 쓴다 — 분 단위면 분, 아니면 초, 없으면 미상', async () => {
+    const { edgeIntervalText } = await import('./storageListText.js');
+    expect(edgeIntervalText({ ms: 300_000, source: 'default' })).toBe('5분');
+    expect(edgeIntervalText({ ms: 90_000, source: 'central' })).toBe('90초');
+    expect(edgeIntervalText(null)).toBe('미상');
+    expect(edgeIntervalText({ ms: 0 })).toBe('미상');
+    expect(edgeIntervalText({ ms: 'x' })).toBe('미상');
+  });
+});

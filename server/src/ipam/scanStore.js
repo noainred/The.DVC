@@ -14,6 +14,7 @@ import { DEFAULT_PORTS, isIpv4 } from './scan.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { getOverrides } from './overrides.js';
 import { getPolicies, isCoveredByAnyPolicy } from './rangePolicies.js';
+import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 
@@ -80,9 +81,8 @@ function ensureExitFlush() {
   if (_exitHooked) return; _exitHooked = true;
   // v2.447(감사 I3): 시그널에서는 flush 만 — process.exit 를 부르면 index.js 의 정상 종료가
   // 실행되지 못한다(진행 중 HTTP 응답이 끊김). 'exit' 훅이 있어 flush 자체는 보장된다.
-  for (const ev of ['exit', 'SIGINT', 'SIGTERM', 'beforeExit']) {
-    try { process.once(ev, () => { flushAllNow(); }); } catch { /* */ }
-  }
+  // v2.582 ARCH-4: 공용 레지스트리(util/exitFlush.js) — 시그널 훅은 index.js gracefulExit 이 process.exit 으로 exit 를 낸다.
+  registerExitFlush('ipam/scanStore', flushAllNow);
 }
 
 function normalizeCfg(p = {}) {

@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'ipam-vcenter-ranges.json');
 
@@ -25,7 +25,7 @@ function read() {
   try {
     const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     cache = j && typeof j.vcenters === 'object' ? j : { vcenters: {} };
-  } catch { cache = { vcenters: {} }; }
+  } catch (e) { preserveCorrupt(FILE, e.message); cache = { vcenters: {} }; }
   cacheMtime = mtime;
   return cache;
 }

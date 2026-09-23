@@ -7,6 +7,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
+import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
 const FILE = path.join(config.configDir, 'idrac-inventory.json');
 
@@ -27,11 +29,12 @@ function persistSoon() {
     persistTimer = null;
     try {
       fs.mkdirSync(path.dirname(FILE), { recursive: true });
-      fs.writeFileSync(FILE, JSON.stringify(Object.fromEntries(cache)), { mode: 0o600 });
+      atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(cache)), { mode: 0o600 });
     } catch { /* best effort */ }
   }, 10_000);
   persistTimer.unref?.();
 }
+registerExitFlush('idrac/invCache', () => { if (!persistTimer) return; clearTimeout(persistTimer); persistTimer = null; atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(cache)), { mode: 0o600 }); });
 
 export function setInventory(serverId, inv) {
   cache.set(serverId, inv);

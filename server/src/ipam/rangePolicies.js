@@ -13,7 +13,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { STATUSES, DEVICE_TYPES } from './overrides.js';
 
 const FILE = path.join(config.configDir, 'ipam-range-policies.json');
@@ -65,7 +65,7 @@ function load() {
       const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       if (j && Array.isArray(j.policies)) cache = { policies: j.policies };
     }
-  } catch { cache = { policies: [] }; }
+  } catch (e) { preserveCorrupt(FILE, e.message); cache = { policies: [] }; }
   return cache;
 }
 

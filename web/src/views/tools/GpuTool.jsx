@@ -7,6 +7,7 @@ import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../co
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { Card, fmtTrendTick, saveResponseAsFile, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
+import { dayStamp } from '../../dayStamp.js';
 
 
 const GPU_MODE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], vsga: ['vSGA', 'blue'] };
@@ -89,7 +90,7 @@ export function Gpu({ scope }) {
     const vc = vcId ?? scope;
     const q = vc ? `?vcenterId=${encodeURIComponent(vc)}` : '';
     const res = await fetch(`/api/tools/gpu.${fmt}${q}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
-    await saveResponseAsFile(res, `gpu-${new Date().toISOString().slice(0, 10)}.${fmt}`);
+    await saveResponseAsFile(res, `gpu-${dayStamp()}.${fmt}`);
   };
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [view, setView] = useHashTab({ base: ['tools', 'gpu'], valid: ['host', 'cluster', 'vc', 'model'], fallback: 'host' });
@@ -365,7 +366,7 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
     params.set('range', range);
     if (range === 'days') params.set('days', String(days));
     const res = await fetch(`/api/tools/gpu/export.${fmt}?${params.toString()}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
-    await saveResponseAsFile(res, `gpu-history-${range}-${new Date().toISOString().slice(0, 10)}.${fmt}`);
+    await saveResponseAsFile(res, `gpu-history-${range}-${dayStamp()}.${fmt}`);
   };
   return (
     <Modal title="GPU 데이터 내보내기" onClose={onClose} width={560}>

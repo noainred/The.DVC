@@ -6,6 +6,7 @@ import { DataTable, Loading, ErrorBox, Modal, SearchBox, VmLink } from '../../co
 import { Card, useTool } from './shared.jsx';
 import { csvCell as esc } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
+import { dayStamp } from '../../dayStamp.js';
 
 
 export function GuestOs({ scope }) {
@@ -128,7 +129,7 @@ export function GuestOsVmsModal({ label, params, onClose }) {
     for (const r of items) lines.push([r.name, r.vcenterId, r.cluster, r.host, r.cpu, r.memGB, r.diskGB, r.ip, r.powerState === 'POWERED_ON' ? 'On' : 'Off'].map(esc).join(','));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `guestos-${String(label).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href = url; a.download = `guestos-${String(label).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
   };
   const cols = [
     { key: 'name', label: 'VM', render: (r) => <VmLink name={r.name} vcenterId={r.vcenterId} label={r.name} /> },
@@ -196,7 +197,7 @@ export function RealOs({ scope }) {
     const qs = new URLSearchParams({ ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) }).toString();
     const res = await fetch(`/api/admin/os-scan/results.csv${qs ? `?${qs}` : ''}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
     const blob = await res.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `real-os-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href = url; a.download = `real-os-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
   };
 
   const sum = st.summary || {};

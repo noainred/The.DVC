@@ -23,7 +23,11 @@ import { config } from '../config.js';
 import { dbFileName } from '../metrics/vmperfDb.js';
 
 const DIR = process.env.VMSERIES_DB_DIR || path.join(config.dbDir || config.configDir, 'vmseries');
-const MAX_OPEN = Math.max(2, Math.min(32, Number(process.env.VMSERIES_MAX_OPEN_DB) || 8));
+// v2.582 TUNE-4: 파일은 vCenter 마다 하나(운영 28 · 30+ 예정)라 상한이 그보다 작으면 주기마다 LRU 스래싱이다
+// (v2.581 TUNE-D `metrics/vmperfDb.js` 와 같은 구조 — 거기서 실측 openFile 68회/분). 예전 기본 8 · 하드캡 32 는
+// 33 vCenter 현장에서 env 로도 넘을 수 없었다. 기본 48 · 상한 256. 이 수집은 50분 주기라 비용은 vmperf 보다 작다.
+export const VMSERIES_MAX_OPEN_DEFAULT = 48;
+const MAX_OPEN = Math.max(2, Math.min(256, Number(process.env.VMSERIES_MAX_OPEN_DB) || 48)); // = VMSERIES_MAX_OPEN_DEFAULT(env-doc 가 숫자를 읽게 풀어 씀)
 const HOUR = 3_600_000;
 
 const open = new Map(); // file -> { db, st, usedAt, file }

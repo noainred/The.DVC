@@ -6,7 +6,7 @@ import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
 import { columnsFor, cellValue, sortValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
-import { emptyListText, conflictText, edgeReportNotes } from './storageListText.js';
+import { emptyListText, conflictText, edgeReportNotes, edgeIntervalText } from './storageListText.js';
 import { STable } from '../../components/STable.jsx';
 import { collectMethodView } from './storageMethodText.js';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
@@ -566,9 +566,13 @@ export default function StorageMonTool() {
       const r = await postJson('/tools/storage/collect-all', {});
       if (r.ok) {
         const res = r.result || {};
+        // v2.582 BUG-2: 엣지 위임 장비도 재수집 요청이 등록된다(SAN 스위치와 같은 규약) — '요청 N건' 으로 나눠 말한다.
+        const edgeText = r.edge
+          ? ` · 엣지 ${r.edge}대는 요청 등록 ${r.requested ?? 0}건${r.alreadyQueued ? `(이미 대기 ${r.alreadyQueued}건)` : ''} — 다음 설정 pull 때 수집·push`
+          : '';
         setMsg(res.skipped
-          ? `이미 수집이 진행 중입니다 — 잠시 후 반영됩니다 (엣지 ${r.edge}대는 다음 주기)`
-          : `중앙 ${r.central}대 재수집 완료(성공 ${res.ok || 0}·실패 ${res.fail || 0}) · 엣지 ${r.edge}대는 다음 주기 반영`);
+          ? `이미 수집이 진행 중입니다 — 잠시 후 반영됩니다${edgeText}`
+          : `중앙 ${r.central}대 재수집 완료(성공 ${res.ok || 0}·실패 ${res.fail || 0})${edgeText}`);
       } else setMsg(r.reason || '새로고침 실패');
       await load();
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
@@ -600,7 +604,7 @@ export default function StorageMonTool() {
         {/* 전체 새로고침(v2.315, 사용자 요구) — 중앙 직접 장비 즉시 재수집 + 화면 갱신(엣지는 다음 주기). */}
         <span style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 2px' }} />
         <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} disabled={busy}
-          title="중앙 직접 수집 장비를 지금 다시 수집하고 화면을 갱신합니다(엣지 위임 장비는 다음 주기에 반영)"
+          title="중앙 직접 수집 장비를 지금 다시 수집하고 화면을 갱신합니다(엣지 위임 장비는 재수집 요청을 등록 — 다음 설정 pull 때 수집)"
           onClick={refreshAll}>🔄 전체 새로고침</button>
         {/* 용량 단위(v2.406, 사용자 요구) — 자동(PB 접기)은 1.30→1.31 PB 처럼 소수 둘째 자리에서만
             움직여 하루치 증가(수 TB)가 묻힌다. TB/GB 로 고정하면 증가가 그대로 드러난다.
@@ -731,7 +735,7 @@ export default function StorageMonTool() {
         </div>
       ))}
       <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
-        수집 주기 {Math.round((d.poller?.intervalMs || 0) / 60000)}분 · 엣지 장비는 config pull(≤5분) 후 현지 수집 → 중앙 push(≤5분).
+        수집 주기 {Math.round((d.poller?.intervalMs || 0) / 60000)}분 · 엣지 장비는 설정 pull(≤{edgeIntervalText(d.edgeIntervals?.configPull)}) 후 현지 수집 → 중앙 push(≤{edgeIntervalText(d.edgeIntervals?.push)}){d.edgeIntervals && (d.edgeIntervals.configPull?.source === 'default' || d.edgeIntervals.push?.source === 'default') ? ' — 기본값 기준(현장 portal.env 로 바꾼 엣지는 그 값)' : ''}.
         확장 로드맵(카탈로그): {(d.types || []).filter((t) => !t.implemented).map((t) => t.label).join(' · ')} — 수집기 구현 시 이 화면 변경 없이 표시됩니다.
       </div>
 

@@ -19,7 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = () => path.join(config.configDir, 'partfault-settings.json');
 const t = (v) => String(v ?? '').trim();
@@ -32,7 +32,7 @@ export function loadPartFaultSettings() {
   try {
     const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     _cache = { ...DEFAULTS, ...(j && typeof j === 'object' ? j : {}) };
-  } catch { _cache = { ...DEFAULTS }; }   // 설정 파일 — 손상이면 기본값(꺼짐)으로 시작. 켜진 척하지 않는다.
+  } catch (e) { if (fs.existsSync(FILE())) preserveCorrupt(FILE(), e.message); _cache = { ...DEFAULTS }; }   // 설정 파일 — 손상이면 기본값(꺼짐)으로 시작. 켜진 척하지 않는다.
   if (!_cache.edges || typeof _cache.edges !== 'object') _cache.edges = {};
   return _cache;
 }

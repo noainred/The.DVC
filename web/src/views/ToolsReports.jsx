@@ -11,6 +11,7 @@ import { csvCell } from '../util/csv.js'; // 수식 인젝션 가드 포함 공�
 
 const fmtDate = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 import { STable } from '../components/STable.jsx';
+import { dayStamp } from '../dayStamp.js';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`);
 
@@ -19,7 +20,7 @@ function exportCsv(name, head, rows) {
   const csv = [head.map(csvCell).join(','), ...rows.map((r) => r.map(csvCell).join(','))].join('\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+  const a = document.createElement('a'); a.href = url; a.download = `${name}-${dayStamp()}.csv`; a.click();
   URL.revokeObjectURL(url);
 }
 
@@ -81,7 +82,7 @@ export function DailyHealth({ scope, isAdmin }) {
             <span className="muted">시</span>
             <input className="input" type="number" min="0" max="59" style={{ width: 64 }} value={sched.minute}
               onChange={(e) => setSched({ ...sched, minute: e.target.value })} onBlur={() => saveSched({})} />
-            <span className="muted">분 · 알림 채널(Slack/Teams/웹훅)로 발송 · 마지막 발송: {fmtDate(sched.lastRunTs)}</span>
+            <span className="muted">분{sched.tzOffsetMin != null ? ` (UTC${sched.tzOffsetMin >= 0 ? '+' : '-'}${Math.abs(sched.tzOffsetMin) / 60} 기준 — 서버 시간대와 무관)` : ''} · 알림 채널(Slack/Teams/웹훅)로 발송 · 마지막 발송: {fmtDate(sched.lastRunTs)}</span>
             <button className="logout-btn" onClick={runNow}>지금 발송(테스트)</button>
             {saving && <span className="muted" style={{ fontSize: 12 }}>{saving}</span>}
           </div>

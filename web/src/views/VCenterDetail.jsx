@@ -19,6 +19,7 @@ import {
   USAGE_DAYS, DEFAULT_USAGE_DAYS, normUsageDays, usageDaysLabel, usageKey,
   visibleTreeVmIds, visibleHostVmIds, pendingIds, mergeUsage, usageText, usageTitle, usagePctColor, noSampleLabel,
 } from './vcdUsage.js';
+import { dayStamp } from '../dayStamp.js';
 
 const VIEWS = [
   { k: 'hosts', label: '호스트 및 클러스터', icon: '🖥️' },
@@ -333,7 +334,7 @@ export default function VCenterDetail({ site, onBack }) {
     const a = document.createElement('a');
     a.href = url;
     // 파일명에 Off VM 포함 여부를 남긴다 — 가상화율 기준이 다른 두 파일을 나중에 구분하려면 필요.
-    a.download = `vcenter-overview-${String(vcenterId).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${inclPoweredOff ? 'all' : 'poweredon'}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `vcenter-overview-${String(vcenterId).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${inclPoweredOff ? 'all' : 'poweredon'}-${dayStamp()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };

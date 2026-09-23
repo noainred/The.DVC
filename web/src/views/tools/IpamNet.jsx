@@ -7,6 +7,7 @@ import { DEVTYPE_LABEL, MGMT, MgmtBadge } from './ipamShared.jsx';
 import { ScanProgressBar } from './IpamSettings.jsx';
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
+import { dayStamp } from '../../dayStamp.js';
 
 
 /** vCenter별 IP 대역 저장 + 주기 스캔 + 스캔결과(첨부) 다운로드. */
@@ -47,7 +48,7 @@ export function IpamRanges() {
   const downloadReport = async () => {
     const res = await fetch('/api/tools/ipam/scan-report.csv', { headers: authHdr() });
     const blob = await res.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `ip-scan-report-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href = url; a.download = `ip-scan-report-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
   };
   if (error && !data) return <ErrorBox message={error} />; // v2.478(감사 B15): 데이터 보유 중 일시 오류는 화면 유지(아래 배너)
   if (!data) return <Loading />;

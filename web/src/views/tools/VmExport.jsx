@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, getToken } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge } from '../../components/ui.jsx';
 import { Card } from './shared.jsx';
+import { dayStamp } from '../../dayStamp.js';
 
 
 /**
@@ -28,7 +29,7 @@ export function VmExport({ scope }) {
   const download = async () => {
     const res = await fetch(`/api/tools/vm-export.csv?vcenterId=${encodeURIComponent(scope)}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
     const blob = await res.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `vm-export-${scope}-${new Date().toISOString().slice(0, 10)}.csv`; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement('a'); a.href = url; a.download = `vm-export-${scope}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
   };
 
   if (!scope) return <div className="card"><span className="muted">위 <b>범위</b>에서 vCenter 를 선택하세요 — 그 vCenter 의 모든 VM 상세(호스트·클러스터·NIC·디스크·데이터스토어·게스트 파티션 등)를 미리보고 CSV 로 내려받습니다.</span></div>;

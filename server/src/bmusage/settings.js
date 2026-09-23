@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = () => path.join(config.configDir, 'bmusage-settings.json');
 
@@ -87,7 +87,7 @@ function readFile() {
   try {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     return raw && typeof raw === 'object' ? raw : {};
-  } catch { return {}; }        // 없거나 손상 = 기본값(재생성 가능한 설정 — preserveCorrupt 대상 아님)
+  } catch (e) { if (fs.existsSync(FILE())) preserveCorrupt(FILE(), e.message); return {}; } // v2.582 ARCH-1: 손상이면 보존 후 기본값 — 법인 opt-in·Enterprise 동의 기록(누가·언제)이 든 사용자 설정이라 조용히 버리지 않는다
 }
 
 /** 정규화(순수) — 테스트가 하한·상한을 고정한다. */

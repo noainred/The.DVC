@@ -9,6 +9,7 @@ import { sendMaybeZip } from '../../util/zip.js';
 import { getGuestGpuVms } from '../../gpu/store.js';
 import { enqueuePing, getPingResults, setPingResults } from '../../central/pingJobs.js';
 import { pingMany } from '../../util/ping.js';
+import { todayStamp } from "../../util/dayKey.js";
 
 
 // GPU inventory per host + aggregate counts by model and vCenter.
@@ -108,7 +109,7 @@ async function gpuSeriesExportCsvStream(req, res) {
   const CHUNK = 50_000;
   const normPct = (v) => { const n = Number(v); if (!Number.isFinite(n)) return 0; const p = n > 100 ? n / 100 : n; return Math.max(0, Math.min(100, Math.round(p))); };
   const esc = (v) => { const t = guardCell(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; }; // guardCell: 수식 인젝션 방어
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = todayStamp();
   const sinceIso = meta.firstTs ? new Date(meta.firstTs).toISOString() : '없음';
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -203,7 +204,7 @@ async function gpuSeriesExport(req, res, fmt) {
     if (chunk.length < CHUNK) break;
     await new Promise((r) => setImmediate(r)); // 청크 사이 이벤트 루프 양보
   }
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = todayStamp();
   const sinceIso = meta.firstTs ? new Date(meta.firstTs).toISOString() : '없음';
   if (fmt === 'json') {
     const body = JSON.stringify({
@@ -298,7 +299,7 @@ api.get('/tools/gpu.json', requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const data = buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const body = JSON.stringify({ generatedAt: new Date().toISOString(), vcenterId: req.query.vcenterId || null, ...data }, null, 2);
-  sendMaybeZip(res, `gpu-${new Date().toISOString().slice(0, 10)}.json`, body, 'application/json; charset=utf-8');
+  sendMaybeZip(res, `gpu-${todayStamp()}.json`, body, 'application/json; charset=utf-8');
 });
 
 // GPU 사용량/인벤토리 CSV export — 호스트별 한 행(모델·장수·모드·사용률·할당 VM).
@@ -313,7 +314,7 @@ api.get('/tools/gpu.csv', requirePerm('tools'), (req, res) => {
     lines.push([r.host, r.vcenterId, r.cluster, r.model, r.count, r.memGB, r.mode, breakdown,
       r.utilPct == null ? '' : r.utilPct, r.utilSource || '', r.assignedVms].map(esc).join(','));
   }
-  sendMaybeZip(res, `gpu-${new Date().toISOString().slice(0, 10)}.csv`, '﻿' + lines.join('\r\n'), 'text/csv; charset=utf-8'); // BOM for Excel
+  sendMaybeZip(res, `gpu-${todayStamp()}.csv`, '﻿' + lines.join('\r\n'), 'text/csv; charset=utf-8'); // BOM for Excel
 });
 
 // GPU 사용률 시계열 수집 메타 — '언제부터 데이터가 쌓였는지'(수집 시작/마지막/샘플 수).

@@ -481,7 +481,7 @@ async function rightsizeReportsFor(snap, targets, days) {
   const analyze = (vm, fetched) => {
     const report = analyzeRightsize({
       vm, hostMhzPerCore: mhzOf(vm), intervalSec: fetched.intervalSec, days, series: fetched.series,
-      missing: fetched.missing, empty: fetched.empty, noData: fetched.noData, policy: rightsizePolicy(), now: end, realtime: fetched.realtime || null,
+      missing: fetched.missing, empty: fetched.empty, noData: fetched.noData, policy: rightsizePolicy(), now: end, realtime: fetched.realtime || null, levels: fetched.levels || null,
     });
     return { ...report, series: fetched.series, realtime: fetched.realtime || null, synthesized: !!fetched.synthesized };
   };
@@ -1021,6 +1021,7 @@ api.get('/tools/rightsize', requirePerm('tools'), async (req, res) => {
     missing: fetched.missing, empty: fetched.empty, noData: fetched.noData,
     policy: rightsizePolicy(), now: end, // v2.481: window.start/end 가 실제 vCenter 조회 창과 같게
     realtime: fetched.realtime || null,   // v2.481: 이력에 active 가 없을 때 실시간 active 최대를 워킹셋 하한에 반영
+    levels: fetched.levels || null, // v2.582 ARCH-5
   });
   // realtime: 이력 롤업에 안 잡힌 level-2 mem 카운터의 실시간(최근 1시간) 현재값(참고). 감축 하한엔 미반영.
   const out = { ...report, series: fetched.series, realtime: fetched.realtime || null, synthesized: !!fetched.synthesized };
@@ -1131,8 +1132,9 @@ api.post('/tools/vm-finder', requirePerm('tools'), async (req, res) => {
 
 // 서버 온도(v2.512, 구 ESXi 온도) — iDRAC 수집 온도 + 물리/가상화 구분 + 법인별 평균, ESXi 는 보완.
 // 경로/툴키(esxitemp)는 그대로 둔다 — 권한 매핑(auth/toolAccess.js)·해시탭·북마크 호환.
-api.get('/tools/esxi-temp', requirePerm('tools'), async (req, res) => {
-  const snap = store.get();
+// v2.582 TUNE-3: 화면을 열 때마다 시계열 DB 3회 + 온도 보고서 조립(in-process p50 17ms · 306KB)을 다시 했다.
+// memoJson(TTL 12초 · 세대·범위·URL 키)로 같은 스냅샷 세대 안의 재요청은 재사용하고 304 는 본문 없이 답한다.
+api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, res, 'tools-esxi-temp', async (snap) => {
   const vcId = req.query.vcenterId;
   const allowed = scopedVcenterIds(req.user, snap);
   const hosts = (snap.hosts || []).filter((h) => (!allowed || allowed.has(h.vcenterId)) && (!vcId || h.vcenterId === vcId) && h.tempC != null);
@@ -1207,7 +1209,7 @@ api.get('/tools/esxi-temp', requirePerm('tools'), async (req, res) => {
     idrac = { enabled: false, rows: [], summary: null, byDatacenter: [], counts: null, reason: `iDRAC 온도 조회 실패: ${e?.message || e}` };
   }
 
-  res.json({
+  return {
     scope: vcId || 'all',
     reportingHosts: hosts.length,
     totalHosts: (snap.hosts || []).filter((h) => (!allowed || allowed.has(h.vcenterId)) && (!vcId || h.vcenterId === vcId)).length,
@@ -1221,8 +1223,8 @@ api.get('/tools/esxi-temp', requirePerm('tools'), async (req, res) => {
     }).sort((a, b) => b.curC - a.curC),
     clusters: grp((h) => `${h.vcenterId}|${h.cluster || 'standalone'}`, avg5Cluster),
     vcenters: grp((h) => h.vcenterId, avg5Vc),
-  });
-});
+  };
+}, { extraKey: scopeKey(req.user, store.get()) }));
 
 // Temperature history (5년까지). level=host|cluster|vc, key=대상키, days=기간.
 api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {

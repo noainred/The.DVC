@@ -6,6 +6,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
+import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
 const STATE = path.join(config.configDir, 'net-issues-state.json');
 const FILE = path.join(config.configDir, 'net-issues.ndjson');
@@ -20,8 +22,12 @@ function load() {
   if (!issues) { issues = []; try { for (const l of fs.readFileSync(FILE, 'utf8').split('\n')) if (l.trim()) issues.push(JSON.parse(l)); } catch { issues = []; } }
 }
 let t1 = null, t2 = null;
-function persistState() { if (t1) return; t1 = setTimeout(() => { t1 = null; try { fs.writeFileSync(STATE, JSON.stringify(last), { mode: 0o600 }); } catch { /* */ } }, 3000); t1.unref?.(); }
-function persistIssues() { if (t2) return; t2 = setTimeout(() => { t2 = null; const cut = Date.now() - RETAIN_MS; issues = issues.filter((r) => r.ts >= cut).slice(-MAX); try { fs.writeFileSync(FILE, issues.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } }, 3000); t2.unref?.(); }
+function persistState() { if (t1) return; t1 = setTimeout(() => { t1 = null; try { atomicWriteFileSync(STATE, JSON.stringify(last), { mode: 0o600 }); } catch { /* */ } }, 3000); t1.unref?.(); }
+function persistIssues() { if (t2) return; t2 = setTimeout(() => { t2 = null; const cut = Date.now() - RETAIN_MS; issues = issues.filter((r) => r.ts >= cut).slice(-MAX); try { atomicWriteFileSync(FILE, issues.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } }, 3000); t2.unref?.(); }
+registerExitFlush('security/netIssueStore', () => {
+  if (t1) { clearTimeout(t1); t1 = null; try { atomicWriteFileSync(STATE, JSON.stringify(last), { mode: 0o600 }); } catch { /* */ } }
+  if (t2) { clearTimeout(t2); t2 = null; try { atomicWriteFileSync(FILE, issues.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } }
+});
 
 /** 한 VM 스캔 결과를 반영 → 새 이슈 배열 반환. threshold: 인터벌 내 신규 드롭+에러 합. */
 export function recordNetScan({ vcenterId = '', vm = '', os = '' } = {}, ifaces = [], { threshold = 1 } = {}) {

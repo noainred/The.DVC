@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { keepMappedMeasured } from './attribution.js';
 
 const FILE = path.join(config.configDir, 'power-settings.json');
@@ -23,7 +23,7 @@ export function loadPowerSettings() {
   cache = { ...DEFAULTS };
   try {
     if (fs.existsSync(FILE)) cache = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) };
-  } catch { /* defaults */ }
+  } catch (e) { preserveCorrupt(FILE, e.message); /* defaults */ }
   return cache;
 }
 

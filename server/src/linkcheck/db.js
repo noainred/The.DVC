@@ -34,14 +34,12 @@ import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'link-check.db');
-export const DAY_OFFSET_MIN = Number(process.env.LINKCHECK_TZ_OFFSET_MIN) || 9 * 60;
+// 날짜 경계 코어는 `util/dayKey.js` 하나다(v2.582 ARCH-2). import 뒤 export(v2.575 재수출 규약).
+import { DAY_OFFSET_MIN, dayKey } from "../util/dayKey.js";
+export { DAY_OFFSET_MIN, dayKey };
 const COUNT_CACHE_MS = Math.max(0, Number(process.env.LINKCHECK_COUNT_CACHE_MS) || 60_000);
 /** 상세 원문 1건의 상한 — 넘으면 자르고 **잘렸다고 밝힌다**(조용한 상한 금지). */
 export const DETAIL_MAX_BYTES = Math.max(1_000, Number(process.env.LINKCHECK_DETAIL_MAX) || 8_000);
-
-export function dayKey(ts, offsetMin = DAY_OFFSET_MIN) {
-  return new Date(Number(ts) + offsetMin * 60_000).toISOString().slice(0, 10);
-}
 
 let _db = null; let _tried = false; let _opening = null; let _tick = 0; let _counts = null;
 
