@@ -26,6 +26,7 @@ import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { ensureNsxDial } from './proxy.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 import { createAuthGuard } from '../util/authGuard.js';
+import { effectiveRequestTimeoutMs } from '../vcenter/soapParse.js'; // v2.598 T2598-03 — 옛 저장값의 시한 상한
 
 /**
  * NSX 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F1, 계정 잠금 경로). 예전에는 `client.node()` 가 401/403 으로
@@ -68,7 +69,7 @@ export class NsxClient {
       : norm(mgr.host);
     this.viaProxy = !!(dial?.proxyHost && dial?.publicPort);
     this.auth = 'Basic ' + Buffer.from(`${mgr.username}:${mgr.password}`).toString('base64');
-    this.timeoutMs = mgr.timeoutMs > 0 ? mgr.timeoutMs : 20_000;
+    this.timeoutMs = effectiveRequestTimeoutMs(mgr.timeoutMs, 20_000); // v2.598 T2598-03: 2^31ms 이상 저장값이 1ms abort 가 되지 않게
   }
 
   async #get(pathname) {

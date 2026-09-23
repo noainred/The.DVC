@@ -258,3 +258,48 @@ test('INJ-05 — 사용자명의 $` $\' $& 가 필터 조각을 끌어오지 않
     '(|(sAMAccountName=bob)(upn=x{user}))', '앞 치환값 안의 {user} 를 다시 치환하지 않는다');
   assert.equal(buildUserFilter(F, 'u', 'a*(b)'), '(&(objectClass=user)(userPrincipalName=a\\2a\\28b\\29))', '이스케이프는 그대로');
 });
+
+/* ── 후속 ② /api/svcmon/diag 의 log.lastError ── */
+test('AUTHZ-2598-04 후속 — /diag 의 로그 라이터 실패 원문은 비-admin 에게 가린다', async () => {
+  const csv = await import('../src/svcmon/csvlog.js');
+  const { getLogSettings, setLogSettings } = await import('../src/svcmon/logsettings.js');
+  setLogSettings({ enabled: true, mode: 'all' });
+  const { svcmonRouter } = await import('../src/routes/svcmon.js');
+  // 로그 라이터 오류를 실제로 만든다 — 로그 디렉터리 자리에 **파일**을 두면 mkdir 이 실패하고 원문(경로 포함)이 lastError 에 남는다.
+  const cfgL = getLogSettings();
+  const dir = cfgL.dirPath || path.join(CFG, cfgL.dirName);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.writeFileSync(dir, 'x');
+  try {
+    csv.appendResult({ ts: 1_700_000_000_000, target: { id: 't', name: 'n', host: 'h' }, test: { id: 'x', type: 'ping' }, result: { status: 'ok' }, changed: true });
+    csv.closeCsvLog();
+    assert.ok(csv.logStats().lastError, '실패 원문이 생겼다(전제)');
+    const o = await call('/api/svcmon', svcmonRouter, OPERATOR, 'GET', '/diag');
+    assert.equal(o.status, 200);
+    assert.equal(o.body.log.lastError, '(관리자만 확인)');
+    assert.equal(o.body.poller.log.lastError, '(관리자만 확인)', 'poller 안의 같은 필드도');
+    { const j = JSON.stringify(o.body); const i = j.indexOf(CFG); assert.ok(i < 0, '경로가 응답에 없다: ' + j.slice(Math.max(0, i - 200), i + 80)); }
+    const a = await call('/api/svcmon', svcmonRouter, ADMIN, 'GET', '/diag');
+    assert.equal(a.body.log.lastError, csv.logStats().lastError, 'admin 은 원문');
+  } finally { fs.rmSync(dir, { force: true }); }
+});
+
+/* ── 후속 ③ activityLog 파일 경로를 싣는 라우트 전수 ── */
+test('AUTHZ-2598-04 후속 — 라우트가 작업 로그 파일 경로(*LogInfo()·.FILE)를 실으면 scopeFilePaths 를 거친다', async () => {
+  const { stripComments } = await import('./_stripComments.js');
+  const root = path.resolve(import.meta.dirname, '../src/routes');
+  const walk = (d, out = []) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p, out); else if (e.name.endsWith('.js')) out.push(p); } return out; };
+  const bad = [];
+  let seen = 0;
+  for (const f of walk(root)) {
+    const src = stripComments(fs.readFileSync(f, 'utf8'));
+    for (const m of src.matchAll(/\b\w+LogInfo\(\)|\bFILE\b/g)) {
+      seen++;
+      const line = src.slice(src.lastIndexOf('\n', m.index) + 1, src.indexOf('\n', m.index));
+      if (/^\s*import\b/.test(line)) continue;
+      if (!/scopeFilePaths\(/.test(line)) bad.push(`${path.relative(root, f)}: ${line.trim()}`);
+    }
+  }
+  assert.ok(seen > 0, '스윕이 대상(bmUsageLogInfo)을 한 번은 봐야 한다');
+  assert.deepEqual(bad, [], `경로를 가리지 않고 싣는 곳:\n${bad.join('\n')}`);
+});

@@ -47,7 +47,7 @@ export async function collectAreasOnce(device, { signal } = {}) {
   const areas = enabledAreas();
   let notTried = 0;
   for (const area of areas) {
-    if (stopped) { notTried++; summary.push({ area: area.key, ok: 0, failed: 0, skipped: true, error: STOP_TEXT[stopped] }); continue; }
+    if (stopped) { notTried++; summary.push({ area: area.key, ok: 0, failed: 0, skipped: true, notTried: true, error: STOP_TEXT[stopped] }); continue; }
     let okCnt = 0, failCnt = 0, firstErr = '';
     for (const ep of area.endpoints) {
       if (signal?.aborted) { stopped = 'deadline'; break; }

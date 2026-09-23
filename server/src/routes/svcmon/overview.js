@@ -27,7 +27,7 @@ import { getResults, getLastSweep, runNow, pollerStats } from '../../svcmon/poll
 import { ROTATE_UNITS, ROTATE_LABEL } from '../../svcmon/logsettings.js';
 import { logStats } from '../../svcmon/csvlog.js';
 import { canEdit, adminOnly } from './shared.js';
-import { redactEdgeSummary, redactPushStatus } from '../../auth/scopeStatus.js';
+import { redactEdgeSummary, redactPushStatus, ADMIN_ONLY_TEXT } from '../../auth/scopeStatus.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store as _storeForScope } from '../../store.js';
 // v2.595: 엣지 주소는 admin + 전체 범위만(auth/scopeStatus.redactEdgeSummary).
@@ -35,6 +35,12 @@ const fullAddr = (req) => req.user?.role === 'admin' && !scopedVcenterIds(req.us
 
 // 상태 판정·요약 키는 svcmon/status.js 하나에서만 정의한다(라우트·화면·테스트 공용).
 const statusOf = (t, x, results, now) => testState(t, x, results, now);
+
+/** v2.598: 로그 라이터 상태 — 실패 원문(lastError)은 admin 에게만(ADMIN_ONLY_TEXT, auth/scopeStatus.js). */
+function logStatsFor(user) {
+  const st = logStats();
+  return user?.role === 'admin' || !st.lastError ? st : { ...st, lastError: ADMIN_ONLY_TEXT };
+}
 
 export function registerOverview(svcmonRouter) {
 
@@ -94,7 +100,8 @@ svcmonRouter.get('/state', (req, res) => {
 svcmonRouter.get('/diag', canEdit, (req, res) => {
   res.json({
     // v2.598(감사 AUTHZ-2598-04 후속): 로그 라이터 실패 원문(fs 오류 — 경로를 담는다)은 admin 만(logs.js logStatusFor 와 같은 기준).
-    poller: pollerStats(), log: req.user?.role === 'admin' || !logStats().lastError ? logStats() : { ...logStats(), lastError: '(관리자만 확인)' },
+    //   ⚠ pollerStats() 안에도 같은 log 가 들어 있다 — 두 곳 다 가린다(한쪽만 가리면 형제 필드가 우회로다).
+    poller: { ...pollerStats(), log: logStatsFor(req.user) }, log: logStatsFor(req.user),
     targets: listTargetsCopy().length, tests: totalTests(),
     // 엣지 위임 진단 — 이 서버가 받는 쪽(edges)인지 보내는 쪽(push)인지 함께 보인다.
     edges: redactEdgeSummary(edgeSummary(), fullAddr(req)), push: redactPushStatus(svcmonPushStatus(), req.user), silence: silenceStatus(),

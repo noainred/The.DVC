@@ -266,3 +266,89 @@ test('VC2598-08 전력 카운터 -1 은 powerWatts 미수집(undefined), 측정 
   assert.equal(a.vcPowerWatts, undefined);
   assert.equal(b.powerWatts, 0, '받은 0 은 측정값이다');
 });
+
+/* ═════════ 추가 절(배정 밖으로 적었던 형제 지점) ═════════ */
+
+/* ───────── VC2598-03 형제: /tools/insights 의 GPU 낭비 표 ───────── */
+test('VC2598-03 /tools/insights gpuWaste.idle 의 할당 VM 수가 다른 vCenter 동명 호스트와 섞이지 않는다', async () => {
+  const express = (await import('express')).default;
+  const { registerToolsAnalytics } = await import('../src/routes/api/toolsAnalytics.js');
+  const { store } = await import('../src/store.js');
+  const prev = store.snapshot;
+  store.snapshot = {
+    source: 'live', generatedAt: '2026-09-23T03:30:00.000Z', vcenters: [{ id: 'vcA' }, { id: 'vcB' }],
+    hosts: [
+      { id: 'vcA:host-1', name: 'esx01', vcenterId: 'vcA', gpus: [{ model: 'A100' }], gpuUtilPct: 2 },
+      { id: 'vcB:host-1', name: 'esx01', vcenterId: 'vcB', gpus: [{ model: 'T4' }], gpuUtilPct: 3 },
+    ],
+    vms: [
+      { id: 'vcA:vm-1', vcenterId: 'vcA', host: 'esx01', powerState: 'POWERED_ON', gpu: { passthrough: 1 } },
+      { id: 'vcB:vm-1', vcenterId: 'vcB', host: 'esx01', powerState: 'POWERED_ON', gpu: { vgpu: 1 } },
+      { id: 'vcB:vm-2', vcenterId: 'vcB', host: 'esx01', powerState: 'POWERED_ON', gpu: { vgpu: 1 } },
+    ],
+    datastores: [], networks: [], alarms: [], collectionErrors: [],
+  };
+  try {
+    const router = express.Router();
+    registerToolsAnalytics(router);
+    const app = express();
+    app.use((req, _res, next) => { req.user = { username: 'admin', role: 'admin', scope: null }; next(); });
+    app.use('/api', router);
+    const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+    closers.push(() => new Promise((r) => srv.close(r)));
+    const res = await fetch(`http://127.0.0.1:${srv.address().port}/api/tools/insights`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const idle = body.gpuWaste?.list || [];
+    const byVc = Object.fromEntries(idle.map((x) => [x.vcenterId, x.assignedVms]));
+    assert.deepEqual(byVc, { vcA: 1, vcB: 2 }, '예전: 둘 다 3(이름 단독 키)');
+  } finally { store.snapshot = prev; }
+});
+
+/* ───────── VC2598-06 형제: VM 사양 변경 대상 · Tools 업그레이드 ───────── */
+test('VC2598-06 resolveVmTarget·upgradeVcOf 가 콜론 포함 vCenter id 를 스냅샷 vcenterId 로 푼다', async () => {
+  const vcReg = await import('../src/vcenter/registry.js');
+  const r = vcReg.addVcenter({ id: 'apac:vc01', name: 'APAC', host: 'https://10.1.0.5', username: 'u', password: 'p' });
+  assert.equal(r.ok, true, r.reason);
+  const { store } = await import('../src/store.js');
+  const prev = store.snapshot;
+  store.snapshot = { source: 'live', vms: [{ id: 'apac:vc01:vm-12', vcenterId: 'apac:vc01', name: 'x' }], hosts: [], vcenters: [] };
+  try {
+    const { resolveVmTarget } = await import('../src/routes/admin/collectorsDc.js');
+    const t = resolveVmTarget('apac:vc01:vm-12');
+    assert.equal(t.error, undefined, t.error);       // 예전: vCenter 'apac' 없음 → 400
+    assert.equal(t.vc.id, 'apac:vc01');
+    assert.equal(t.moref, 'vm-12');
+    const { upgradeVcOf } = await import('../src/routes/api/toolsInfo.js');
+    const vcOf = upgradeVcOf(store.snapshot);
+    assert.equal(vcOf('apac:vc01:vm-12'), 'apac:vc01');   // 예전: 'apac' — 범위 판정·그룹핑이 엉뚱한 vCenter
+    assert.equal(vcOf('nope:vm-1'), null, '스냅샷에 없는 id 는 vCenter 를 모른다');
+  } finally { store.snapshot = prev; }
+  const { stripComments } = await import('./_stripComments.js');
+  for (const f of ['../src/routes/admin/collectorsDc.js', '../src/routes/api/toolsInfo.js']) {
+    const src = stripComments(fs.readFileSync(new URL(f, import.meta.url), 'utf8'));
+    assert.equal((src.match(/\.indexOf\(':'\)/g) || []).length, 0, `${f} 에 첫 콜론 분해가 남아 있다`);
+  }
+});
+
+/* ───────── T2598-03 형제: REST·NSX·Horizon 실행 시점 시한 ───────── */
+async function slowJson(delayMs, body) {
+  const srv = http.createServer((req, res) => { setTimeout(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); }, delayMs); });
+  const port = await new Promise((r) => srv.listen(0, '127.0.0.1', () => r(srv.address().port)));
+  closers.push(() => new Promise((r) => { srv.closeAllConnections?.(); srv.close(r); }));
+  return `http://127.0.0.1:${port}`;
+}
+test('T2598-03 옛 저장값(timeoutMs 3e9)도 REST·NSX 요청이 1ms 에 abort 되지 않는다', async () => {
+  process.removeAllListeners('warning');   // TimeoutOverflowWarning 출력 억제(수정 전 판본에서만 난다)
+  const host = await slowJson(60, 'session-token');
+  const { VCenterClient } = await import('../src/vcenter/restClient.js');
+  const c = new VCenterClient({ id: 'vc-old', host, username: 'u', password: 'p', timeoutMs: 3e9 });
+  await c.login();   // 예전: AbortSignal.timeout(3e9) → 1ms → TimeoutError
+  const { NsxClient } = await import('../src/nsx/client.js');
+  assert.equal(new NsxClient({ host: 'https://10.0.0.1', username: 'a', password: 'b', timeoutMs: 3e9 }).timeoutMs, 600000);
+  assert.equal(new NsxClient({ host: 'https://10.0.0.1', username: 'a', password: 'b' }).timeoutMs, 20000);
+  const hz = await import('../src/horizon/horizon.js');
+  const hzHost = await slowJson(60, { access_token: 'a', refresh_token: 'r' });
+  const got = await hz.withHorizonSession({ host: hzHost, username: 'u', password: 'p', domain: 'd', timeoutMs: 3e9 }, async (_get, tok) => tok.access_token);
+  assert.equal(got, 'a', 'Horizon 로그인도 옛 저장값 시한으로 즉시 끊기지 않는다');
+});

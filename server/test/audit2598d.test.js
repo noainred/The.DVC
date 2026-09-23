@@ -186,3 +186,57 @@ test('T2598-04 adaptiveTimer — 실행 중 주기 변경이 두 번째 동시 �
   assert.equal(maxRun, 1, `동시 실행 ${maxRun}`);
   assert.ok(runs >= 1);
 });
+
+/* ── T2598-02 완결: 가짜 SOAP 서버로 abort 가 소켓을 실제로 끊는지 본다 ───────── */
+function fakeSoap(hangOn) {
+  const seen = []; const closed = [];
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', (d) => { b += d; });
+    req.on('end', () => {
+      const op = (/<(\w+) xmlns="urn:vim25"/.exec(b) || [])[1] || '?';
+      seen.push(op);
+      const send = (x) => { res.setHeader('Content-Type', 'text/xml'); res.end(`<soapenv:Envelope><soapenv:Body>${x}</soapenv:Body></soapenv:Envelope>`); };
+      if (op === hangOn) { res.on('close', () => closed.push({ op, at: Date.now() })); return; } // 응답하지 않는다
+      if (op === 'RetrieveServiceContent') return send('<returnval><propertyCollector>pc</propertyCollector><rootFolder>rf</rootFolder><viewManager>vm</viewManager><sessionManager>sm</sessionManager><eventManager>em</eventManager><about><version>8.0</version></about></returnval>');
+      if (op === 'Login') { res.setHeader('Set-Cookie', 'vmware_soap_session=x'); return send('<returnval><key>s</key></returnval>'); }
+      if (op === 'CreateCollectorForEvents') return send('<returnval type="EventHistoryCollector">session[1]col</returnval>');
+      return send('<returnval></returnval>');
+    });
+  });
+  return { srv, seen, closed };
+}
+
+test('T2598-02 collectVCenterEvents — 데드라인 abort 가 진행 중인 ReadNextEvents 소켓을 끊고, DestroyCollector·Logout 은 보낸다', async () => {
+  const { srv, seen, closed } = fakeSoap('ReadNextEvents');
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    const { collectVCenterEvents } = await import('../src/vcenter/soapClient.js');
+    const { vcLogWithDeadline } = await import('../src/logs/poller.js');
+    const vc = { id: 'vcx', host: `http://127.0.0.1:${srv.address().port}`, username: 'u', password: 'p', timeoutMs: 20_000 };
+    const t0 = Date.now();
+    await assert.rejects(vcLogWithDeadline(vc, (signal) => collectVCenterEvents(vc, { sinceTs: NOW - DAY, signal }), 300), /데드라인/);
+    for (let i = 0; i < 50 && !(closed.length && seen.includes('Logout')); i++) await new Promise((r) => setTimeout(r, 40));
+    assert.equal(closed.length, 1, '매달린 ReadNextEvents 소켓이 끊겨야 한다(건별 시한 20초가 아니라)');
+    assert.ok(closed[0].at - t0 < 3000, `끊긴 시각 ${closed[0].at - t0}ms`);
+    assert.ok(seen.includes('DestroyCollector'), `정리 호출 ${seen.join(',')}`);
+    assert.ok(seen.includes('Logout'));
+    assert.equal(seen.filter((o) => o === 'ReadNextEvents').length, 1, 'abort 뒤 다음 페이지를 읽지 않는다');
+  } finally { srv.close(); srv.closeAllConnections?.(); }
+});
+
+test('T2598-02 collectDetails — 게스트 디스크 시한 abort 가 속성 조회 소켓을 끊고 Logout 은 보낸다', async () => {
+  const { srv, seen, closed } = fakeSoap('RetrieveProperties');
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    const { collectDetails } = await import('../src/vcenter/vmExport.js');
+    const { withTimeout } = await import('../src/guestdisk/service.js');
+    const vc = { id: 'vcy', host: `http://127.0.0.1:${srv.address().port}`, username: 'u', password: 'p', timeoutMs: 20_000 };
+    const t0 = Date.now();
+    await assert.rejects(withTimeout((signal) => collectDetails(vc, ['vm-1'], { signal }), 300, 'x'), /타임아웃/);
+    for (let i = 0; i < 50 && !(closed.length && seen.includes('Logout')); i++) await new Promise((r) => setTimeout(r, 40));
+    assert.ok(seen.includes('RetrieveProperties'), `호출 ${seen.join(',')}`);
+    assert.equal(closed.length, 1, '매달린 조회 소켓이 끊겨야 한다');
+    assert.ok(closed[0].at - t0 < 3000);
+    assert.ok(seen.includes('Logout'));
+  } finally { srv.close(); srv.closeAllConnections?.(); }
+});

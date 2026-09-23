@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { countText, durationText, strField } from './agentScanText.js';
 
 describe('agentScanText (v2.598 CENTRAL-03)', () => {
@@ -24,7 +25,7 @@ describe('agentScanText (v2.598 CENTRAL-03)', () => {
     expect(strField(7)).toBe('');
   });
   it('AgentScans.jsx 가 스캔 수치를 헬퍼 없이 그리지 않는다', () => {
-    const src = fs.readFileSync(path.join(__dirname, 'AgentScans.jsx'), 'utf8');
+    const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'AgentScans.jsx'), 'utf8');
     for (const k of ['foundCount', 'scanned', 'unreachable', 'notIdrac', 'authFailed']) {
       expect(src).not.toMatch(new RegExp(`\\{r\\.${k}\\}`));
       expect(src).toMatch(new RegExp(`countText\\(r\\.${k}\\)`));

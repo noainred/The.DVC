@@ -197,7 +197,7 @@ function WindowsUsersPanel({ scope }) {
       {/* 사용자 목록 */}
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ fontWeight: 700 }}>로그인한 사용자 {(agg.names || []).length}명</span>
+          <span style={{ fontWeight: 700 }}>로그인한 사용자 {agg.users == null ? '—' : `${(agg.names || []).length}명`}</span>
           <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} onClick={() => setShowNames(!showNames)}>
             {showNames ? '계정명 숨기기' : '계정명 보기'}
           </button>

@@ -478,7 +478,8 @@ export class VimSoapClient {
   }
 
   /** Send a raw vim25 SOAP body (public wrapper around the internal caller). */
-  async callRaw(body) { return this.#call(body); }
+  // v2.598 T2598-02: ignoreExternal — 바깥 신호가 abort 된 뒤에도 정리 호출(DestroyCollector 등)은 끝까지 보낸다(logout 과 같은 규칙).
+  async callRaw(body, { ignoreExternal = false } = {}) { return this.#call(body, { ignoreExternal }); }
 
   /** Licenses assigned in this vCenter (LicenseManager.licenses). */
   async retrieveLicenses() {
@@ -1255,8 +1256,10 @@ export async function upgradeVmTools(vc, morefs) {
  * 생성해 beginTime(sinceTs) 이후 이벤트를 페이지 단위로 읽는다. max 상한까지.
  * 반환: [{ key, ts, type, severity, user, entity, message }] (오래된 → 최신).
  */
-export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_000, max = 5000, pageSize = 200 } = {}) {
-  const c = new VimSoapClient(vc);
+export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_000, max = 5000, pageSize = 200, signal = null } = {}) {
+  // v2.598 T2598-02: 폴러의 데드라인 신호를 SOAP 요청에 건다 — 예전엔 데드라인이 결과만 포기해 버려진 세션이
+  // ReadNextEvents 를 끝까지 돌았다(v2.417 '세션을 실제로 끊는다' 규약). 정리(DestroyCollector·Logout)는 신호와 무관하게 보낸다.
+  const c = new VimSoapClient(vc, { signal });
   await c.login();
   let collector = null;
   const out = [];
@@ -1271,6 +1274,7 @@ export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_0
     const cRef = escXml(collector);
     // ReadNextEvents 로 forward 읽기(오래된→최신). 빈 페이지 또는 max 도달 시 종료.
     for (let guard = 0; guard < 200 && out.length < max; guard++) {
+      if (signal?.aborted) throw new Error('이벤트 수집 중단(데드라인)');
       const xml = await c.callRaw(
         `<ReadNextEvents xmlns="urn:vim25"><_this type="EventHistoryCollector">${cRef}</_this><maxCount>${Math.min(pageSize, max - out.length)}</maxCount></ReadNextEvents>`);
       const events = parseEventsXml(xml);
@@ -1278,7 +1282,7 @@ export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_0
       out.push(...events);
     }
   } finally {
-    if (collector) await c.callRaw(`<DestroyCollector xmlns="urn:vim25"><_this type="EventHistoryCollector">${escXml(collector)}</_this></DestroyCollector>`).catch(() => {});
+    if (collector) await c.callRaw(`<DestroyCollector xmlns="urn:vim25"><_this type="EventHistoryCollector">${escXml(collector)}</_this></DestroyCollector>`, { ignoreExternal: true }).catch(() => {});
     await c.logout().catch(() => {});
   }
   return out;
