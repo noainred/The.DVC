@@ -981,7 +981,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/vms/:id/console` | 권한 `vm.console` | [server/src/routes/api/vmMetrics.js:103](../server/src/routes/api/vmMetrics.js#L103) |
 | GET | `/vms/:id/metrics` | 권한 `inv.vms` | [server/src/routes/api/vmMetrics.js:45](../server/src/routes/api/vmMetrics.js#L45) |
 | GET | `/vms/lookup` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:311](../server/src/routes/api/inventory.js#L311) |
-| POST | `/vms/upgrade-tools` | 역할 `admin/operator` · 권한 `tools` · `auditMiddleware` · `async` | [server/src/routes/api/toolsInfo.js:190](../server/src/routes/api/toolsInfo.js#L190) |
+| POST | `/vms/upgrade-tools` | 역할 `admin/operator` · 권한 `tools` · `auditMiddleware` | [server/src/routes/api/toolsInfo.js:191](../server/src/routes/api/toolsInfo.js#L191) |
 | POST | `/vms/usage` | 권한 `inv.vms` | [server/src/routes/api/toolsCapacity.js:260](../server/src/routes/api/toolsCapacity.js#L260) |
 
 ## `/dl`
@@ -1012,9 +1012,6 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `ownerIfAutoCentralToken` | 2 | 요청이 `autoCentralToken` 옵션을 쓸 때만 **설정 소유자**를 요구한다(평문 CENTRAL_TOKEN 을 원격 호스트에 기록하는 경로라 백업과 같은 등급). |
 | `requireOwnOtp` | 2 | **본인 OTP 재인증**(1회용·실패 잠금). 호스트 접근 제어 적용·확정처럼 되돌리기 어려운 동작에 붙는다. |
 | `express.raw` | 2 | 원시 바디 버퍼(업그레이드 번들 등). ⚠ 게이트가 아니다 — 인증을 이 앞에 두어 미인증 요청이 대용량 바디를 적재하지 못하게 한다. |
-| `async` | 1 | ⚠ **이 생성기가 뜻을 모르는 이름입니다** — 소스를 열어 확인하고 `scripts/api-doc.mjs` 의 `GUARD_NOTE` 에 추가하세요. |
-
-> ⚠ 뜻을 모르는 게이트 **1개**: `async` — 문서가 이 사실을 숨기지 않습니다.
 
 ---
 

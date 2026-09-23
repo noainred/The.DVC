@@ -187,8 +187,8 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
 });
 
 // Trigger VMware Tools upgrade on one or more VMs. Body: { ids:[vmId,...] }.
-api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), requirePerm('tools'), auditMiddleware, // v2.590 D1: 역할 게이트 복구(viewer+tools 로 게스트 재부팅 유발 작업이 열려 있었다)
-   async (req, res) => { // v2.478(감사 S15): 게스트 재부팅 유발 작업 감사
+// v2.590 D1: 역할 게이트 복구 — requirePerm('tools') 만으로는 viewer+tools 가 게스트 재부팅 유발 작업을 실행할 수 있었다.
+api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), requirePerm('tools'), auditMiddleware, async (req, res) => { // v2.478(감사 S15): 게스트 재부팅 유발 작업 감사
   let ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '대상 VM이 없습니다.' });
   const snap = store.get();
