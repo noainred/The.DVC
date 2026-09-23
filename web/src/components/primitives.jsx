@@ -314,7 +314,10 @@ export function Loading({ label = '' } = {}) {
  * (permissionInfoFor)로 판정한다 — `message` 가 문자열이라는 기존 계약을 깨지 않기 위한 통로다.
  * `info` 를 직접 넘기면(권장) 사이드 채널 없이도 동작한다.
  */
-export function ErrorBox({ message, info = null }) {
+export function ErrorBox({ message: msgProp, error, info = null }) {
+  // v2.589: 26곳이 `error=` 로 넘기는데 이 컴포넌트는 `message` 만 읽어 **빈 '오류:'** 가 떴다
+  // (403 안내·일시적 미가용 안내도 함께 사라졌다). 둘 다 받는다 — 판정은 아래 한 곳 그대로.
+  const message = msgProp ?? error ?? null;
   const perm = info || permissionInfoFor(message);
   if (perm) return <AccessDenied info={perm} message={message} />;
   // v2.459: 5xx·네트워크 실패는 '오류'가 아니라 **일시적 미가용**(업그레이드 중 재시작 포함)이다.

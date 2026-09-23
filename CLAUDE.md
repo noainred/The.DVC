@@ -3099,6 +3099,39 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       pull·push 는 '이름 미검증' 이고 일부 push 가 실제로 거부되어 빨간 선이 됐다(제품 동작 그대로). 실엣지 28곳
       규모(세로 약 2,000px)는 보지 못했다.
 
+  - ⚠⚠ **v2.589 — 5축 병렬 감사 확정분**(사용자 요청 "아키텍처 점검 개선 버그패치 업그레이드 보안점검" · 선택: 병렬 에이전트
+    5개 · 전체 검증 · 확정분 전부 수정. 회귀는 `test/audit2589.test.js` 11건 — 변이 검증: 수정 전 코드로 5건 실패 ·
+    웹 `components/errorBoxProps.test.js`):
+    - ⚠⚠ **인증에 실패한 요청의 이름을 계측 키로 쓰지 말 것**(`routes/central.js` GET 훅 + `central/pullStats.js
+      PULL_UNAUTH_KEY`): v2.587 이 막힌 pull 도 세겠다며 `?agent=`/`X-Agent-Name` 을 믿었더니 **토큰 없는 요청 하나로
+      실제 엣지의 기록에 실패가 합쳐졌다**(개별 토큰 엣지면 '검증됨' 행이라 지도에 거짓 장애) · 이름 500개로 LRU 가 실제
+      기록을 밀어냈다. 버그·보안·아키텍처 **3축이 독립 재현**했다. 인증 실패는 `(인증 실패)` 한 칸 · 상한 초과 때 검증된
+      행은 밀지 않는다. v2.570 `ingestReject` 는 이미 `unverified` 로 분리돼 있었는데 GET 계측만 그 규약을 놓쳤다
+      (형제 비대칭 — 새 계측기를 만들 때 **인증 실패 경로의 키**를 먼저 정할 것).
+    - ⚠⚠ **IPv4 허용 판정은 '정규형만' 이다**(`util/ipv4.js strictIpv4Num`·`cidrMatch`): v2.586 통합에서 빠진 사본 3벌
+      (`rma/commands.js targetAllowed`·`security/credentialStore.js hostAllowed`·`rma/settings.js ipAllowed`)이
+      `'010.0.0.5'` 를 10.0.0.5 로 허용했는데 실제 접속의 `dns.lookup`(glibc inet_aton)은 **8진수 8.0.0.5** 로 해석한다
+      — RMA SSH 명령·볼트 비밀이 허용 대역 밖으로 나갈 수 있었다. 목록 항목(관리자 입력)은 느슨히 읽고, **접속 대상은
+      비정규 표기면 거부**한다. ⚠ 손 grep 스윕(v2.586)은 `ipToInt`·`isIpv4` 이름만 봤다 — 이번 테스트는
+      `split('.').map(Number)` 형태를 소스에서 금지한다.
+    - ⚠ **`ErrorBox` 는 `message`·`error` 둘 다 받는다**(`components/primitives.jsx`): 26곳이 `error=` 로 넘겨 **빈
+      '오류:'** 가 떴고 403 권한 안내·업그레이드 중 '잠시 후 다시' 안내까지 함께 사라졌다(v2.398·v2.459 의 단일 지점
+      처리가 그 화면들에서 통째로 무력했다). **`.btn`·`.banner` 는 v2.588 까지 CSS 규칙이 없었다**(37·11곳) — 브라우저
+      기본 버튼·맨 글자. 둘 다 새 화면에서 계속 쓰이던 클래스라 **수치로는 안 잡히고 스크린샷으로만** 보인다.
+    - **svcmon 파일명·버킷 경계는 포탈 오프셋**(`util/dayKey.js portalParts`·`portalMs`) — 로컬 getter 금지(v2.582
+      규약의 누락 지점). KST 호스트는 파일명이 한 글자도 바뀌지 않고 UTC 호스트만 전환 시 1회 불연속이 생긴다
+      (v2.586 `slotKey` 와 같은 판단). 테스트의 기준 시각 헬퍼도 같은 기준으로 바꿨다(`svcmonAnalyze.test.js L`).
+    - **로그 분석 합산에서 `Object.keys(x).length` 를 루프 안에서 세지 말 것** — 168버킷 × 키 700개에서 1,682ms 로
+      이벤트 루프를 막았다(A/B 실측 → 65ms). 오래된 버킷의 `http` 도 상위 100개로 줄인다(무인증 404 경로가 들어온다).
+    - 그 밖: 통신 지도 수신 행은 **마지막 수신이 가장 늦은 행**(바이트 순 첫 행 금지) · 삭제된 vCenter 명시 지정은 귀속
+      아님(`matchedBy.explicitStale`) · `dayKey` 범위 밖 값은 `''` · 통신 점검의 중앙→엣지 호출도 `recordOutbound` ·
+      curuser `overLimit`·`push` 는 범위 계정에 null · `VMSERIES_MIN_FREE_GB` 빈 값은 기본 5GB.
+    - 의존성: express 4.22.3 · ws 8.21.3(patch, lockfile 만). `--omit=dev` 신규 critical/high 0. dev 전용 잔여에 **vite high**
+      가 있다(dev 서버 전용 — 위 의존성 줄의 수용 목록에 없던 이름이라 적어 둔다).
+    - ⚠ 정직 기록: 성능 에이전트는 운영 규모(`MOCK_SCALE=3`) 폴링 라우트 p50 ≤ 1ms · 3단 지도 조립기 선형(30×4,000 에서
+      14~17ms)으로 **고칠 것이 없다**고 보고했다 — 없는 결함을 만들지 않았다. 확인 못 한 것: 실엣지 규모의 지도 라우트,
+      express·ws patch 의 changelog(전량 테스트로만 확인).
+
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
 서버 보안 불변조건(전역 TLS·RBAC·토큰 검증·scope·OTP·WS 게이트웨이 등 전 항목)은

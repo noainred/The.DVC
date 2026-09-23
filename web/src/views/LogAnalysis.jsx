@@ -184,7 +184,7 @@ export default function LogAnalysis() {
           <Card label="개선점 · 낮음/정보" value={k.minor} />
           <Card label="경고 · 오류 줄" value={k.hasLevels ? `${k.warn.toLocaleString()} · ${k.error.toLocaleString()}` : '—'}
             sub={k.hasLevels ? '' : '이 원천에는 로그 수준이 없습니다(문구로 추정한 것은 미분류에 표시)'} />
-          <Card label="서버 오류 응답(5xx)" value={k.http5xx.toLocaleString()} color={k.http5xx ? 'var(--red)' : undefined} />
+          <Card label="서버 오류 응답(5xx)" value={k.http5xx == null ? '—' : k.http5xx.toLocaleString()} color={k.http5xx ? 'var(--red)' : undefined} />
         </div>
 
         <div className="flex gap wrap" style={{ marginBottom: 10, alignItems: 'center' }}>

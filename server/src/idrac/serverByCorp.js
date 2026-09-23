@@ -135,6 +135,9 @@ export function serversByCorp(servers = [], hosts = [], opts = {}) {
 
     // ── ② 법인 귀속(신호 순서는 전력 귀속과 같다: 명시 → 호스트명 → 서비스태그) ──
     let vc = String(s.vcenterId || '').trim();
+    // v2.589: 삭제된 vCenter 를 가리키는 명시 지정은 귀속이 아니다 — 그대로 두면 어느 표 행에도 없는
+    //   키로 세어 'KPI 합계 = 표 합계' 가 깨졌다(지정·DataCenter 단계는 이미 isKnown 으로 거른다).
+    if (vc && !isKnown(vc)) { vc = ''; out.matchedBy.explicitStale = (out.matchedBy.explicitStale || 0) + 1; }
     if (vc) out.matchedBy.explicit += 1;
     if (!vc && hostHit) {
       // 이름으로 찾았는지 태그로 찾았는지는 위 루프가 이미 결정했다 — 어느 쪽이었는지만 센다.

@@ -28,9 +28,11 @@ import { collectVcenterSpikes } from './collect.js';
 import { commitVmSeries, loadCursors, pruneVmSeries, vmSeriesFreeBytes, setVmSeriesMeta, vmSeriesDiskUsage } from './db.js';
 import { pushVmSeriesSlice, vmSeriesPushEnabled } from '../agent/vmSeriesPush.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
+import { numOrNull } from '../util/numOrNull.js';
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.VMSERIES_CONCURRENCY) || 4));
-const MIN_FREE_BYTES = Math.max(0, Number(process.env.VMSERIES_MIN_FREE_GB ?? 5)) * 1024 ** 3;
+// v2.589: 빈 값·'abc' 가 Number() 로 0·NaN 이 되어 디스크 가드가 꺼졌다 — 못 읽으면 기본 5GB(명시적 0 만 '끔').
+const MIN_FREE_BYTES = Math.max(0, numOrNull(process.env.VMSERIES_MIN_FREE_GB) ?? 5) * 1024 ** 3;
 const PRUNE_EVERY_RUNS = 12;                 // 50분 × 12 ≈ 10시간
 const FIRST_DELAY_MS = Number(process.env.VMSERIES_FIRST_DELAY_MS) || 180_000; // 첫 인벤토리 수집이 자리잡은 뒤
 

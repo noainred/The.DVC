@@ -33,7 +33,7 @@ import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, agentOfReq
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
 import { upsertCollectorFromAgent, ssrfBlockReasonResolved, verifyDerivedCollectorUrl } from '../collector/registry.js';
 import { recordIngest, noteInventoryCompression } from '../central/ingestStats.js';
-import { recordPull } from '../central/pullStats.js';
+import { recordPull, PULL_UNAUTH_KEY } from '../central/pullStats.js';
 // v2.570: 거부된 push 를 기록한다 — 아래 집계는 4xx/5xx 를 빼므로, 그것만으로는 '안 보냈다' 와
 //         '보냈는데 막혔다' 가 화면에서 똑같이 보인다(조치가 정반대다).
 import { recordReject, REJECT_KIND } from '../central/ingestReject.js';
@@ -105,8 +105,14 @@ centralRouter.use((req, res, next) => {
         const ep = req.route?.path || (declaredGetPaths().has(req.path) ? req.path : '');
         if (!ep) return;
         const auth = req.centralAuth;
-        const agent = String(auth?.agent || req.query?.agent || req.get('X-Agent-Name') || '').trim() || '(unknown)';
-        recordPull(agent, ep, { status: res.statusCode, bytes: Number(res.get('content-length')) || 0, verified: auth?.mode === 'agent' });
+        // v2.589 — **인증에 실패한 요청의 이름은 믿지 않는다.** 예전에는 토큰 없이 ?agent=<실제 엣지> 만
+        //   보내도 그 실패가 실제 엣지의 기록에 합쳐져(개별 토큰 엣지면 '검증됨' 행에) 지도에 거짓 장애가
+        //   떴고, 이름 500개로 LRU 가 실제 기록을 밀어냈다(감사 3축이 독립 재현). 인증 실패는 이름을
+        //   버리고 **한 칸**(PULL_UNAUTH_KEY)에만 센다 — 막힌 pull 이 있었다는 사실은 남긴다.
+        const agent = auth?.ok
+          ? (String(auth.agent || req.query?.agent || req.get('X-Agent-Name') || '').trim() || '(unknown)')
+          : PULL_UNAUTH_KEY;
+        recordPull(agent, ep, { status: res.statusCode, bytes: Number(res.get('content-length')) || 0, verified: !!auth?.ok && auth.mode === 'agent' });
       } catch { /* 진단은 best-effort */ }
     });
   }

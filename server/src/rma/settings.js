@@ -2,6 +2,7 @@
  * RMA 분배 설정(중앙) — `rma-settings.json` { version, defaultMode, agents: { name: { mode, primary } } }.
  * 비밀 없음(봉인 대상 아님). 원자적 쓰기 + 로드 손상 preserveCorrupt(설정 파일 공통 규약).
  */
+import { strictIpv4Num, cidrMatch } from '../util/ipv4.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -94,15 +95,12 @@ export function accessFor(agent) {
 export function ipAllowed(ip, list) {
   if (!list || !list.length) return true;
   const raw = String(ip || '').replace(/^::ffff:/, '');
-  const toN = (s) => { const p = s.split('.').map(Number); return p.length === 4 && p.every((x) => x >= 0 && x <= 255) ? ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0 : null; };
-  const n = toN(raw);
+  // v2.589: '10..0.5'·'010.0.0.5' 같은 비정규 표기를 CIDR 안으로 읽지 않는다(util/ipv4 단일 소스).
+  const n = strictIpv4Num(raw);
   for (const e of list) {
     const [base, bits] = String(e).split('/');
     if (bits == null) { if (raw === base) return true; continue; }
-    const bn = toN(base); const b = Number(bits);
-    if (n == null || bn == null || !(b >= 0 && b <= 32)) continue;
-    const mask = b === 0 ? 0 : (0xffffffff << (32 - b)) >>> 0;
-    if ((n & mask) === (bn & mask)) return true;
+    if (typeof n === 'number' && cidrMatch(n, e) === true) return true;
   }
   return false;
 }

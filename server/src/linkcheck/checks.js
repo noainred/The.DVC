@@ -12,6 +12,7 @@
  * ⚠ 응답 본문은 **조각만**(`BODY_SNIP`) 남긴다 — 전량을 로그에 담으면 DB 가 폭발하고
  *   자격증명이 섞여 들어올 수 있다.
  */
+import { recordOutbound } from '../util/outboundStats.js';
 import net from 'node:net';
 import tls from 'node:tls';
 import dns from 'node:dns/promises';
@@ -151,10 +152,14 @@ export async function stepHttp({ url, ip, headers = {}, timeoutMs = 15_000, iden
     const cause = e?.cause?.message ? ` — ${e.cause.message}` : '';
     const msg = `${String(e?.message || e)}${cause}`;
     out.http = { ok: false, ms: ms(t0), failKind: failKindOfCode(e?.code || e?.cause?.code, msg), error: msg.slice(0, 200) };
+    recordOutbound(url, { error: msg.slice(0, 200), method, ms: ms(t0) });
     return out;
   }
   const httpMs = ms(t0);
   const status = res.status;
+  // v2.589 (감사 ARCH-A4): 이 점검은 전역 fetch 라 resilientFetch 의 기록을 타지 않아 데이터 흐름 지도의
+  //   중앙→엣지 /ping 이 5분 점검과 무관하게 회색이었다. 포탈 사이 경로(/api/collector·/api/central)만 기록된다.
+  recordOutbound(url, { status, bytes: body.length, method, ms: httpMs });
   const snippet = body.slice(0, BODY_SNIP);
   const common = { status, ms: httpMs, contentType: t(res.headers.get('content-type')), bodySnippet: snippet, bytes: body.length };
 

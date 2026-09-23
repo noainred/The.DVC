@@ -20,7 +20,7 @@ import BoldText from '../../components/boldText.jsx';
 import { layoutDataFlow, W, BUS_X, BUS_W } from './dataFlowLayout.js';
 import {
   STATE_LABEL, STATE_COLOR, STATE_DOT, KIND_LABEL, KIND_SHORT, CAT_COLOR, TONE_HEAD,
-  routePath, sinceNote, linkText, edgeBadge, edgeLasts, innerItemText, LEGEND, ageText, spanText, bytesText,
+  routePath, sinceNote, linkText, edgeBadge, edgeLasts, innerItemText, legendLines, ageText, spanText, bytesText,
 } from './dataFlowText.js';
 import { fetchResultText, statusSummary, groupStatus } from './edgeLogText.js';
 
@@ -254,7 +254,7 @@ export default function DataFlow() {
             <span>기록 없는 경로</span><span style={{ color: '#d7dbe3', textAlign: 'right' }}>{tot.routesNone} / {tot.routes}</span>
           </div>
           <ul style={{ margin: '10px 0 0', paddingLeft: 16, fontFamily: 'inherit', color: '#8a93a6', fontSize: 11.5, lineHeight: 1.55 }}>
-            {LEGEND.map((s) => <li key={s} style={{ fontFamily: "'IBM Plex Sans KR', sans-serif" }}><BoldText text={s} /></li>)}
+            {legendLines(data.rules).map((s) => <li key={s} style={{ fontFamily: "'IBM Plex Sans KR', sans-serif" }}><BoldText text={s} /></li>)}
           </ul>
         </div>
       </div>

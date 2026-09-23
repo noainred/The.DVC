@@ -150,18 +150,22 @@ export function mergeState(a, b) {
     const t = own(a.tags, k) || (a.tags[k] = { n: 0, warn: 0, error: 0 });
     t.n += v.n || 0; t.warn += v.warn || 0; t.error += v.error || 0;
   }
+  // v2.589 (감사 ARCH-A3): 키마다 Object.keys(...).length 를 다시 세면 버킷 수 × 키 수 × 키 수 라 7일 합산이
+  //   이벤트 루프를 ~1.5초 막았다(실측) — 개수는 지역 변수로 센다.
+  let nTmpl = Object.keys(a.tmpl).length;
   for (const [k0, v] of Object.entries(b.tmpl || {})) {
     const k = safeKey(k0);
     const t = own(a.tmpl, k);
     if (t) { t.n += v.n || 0; if (v.level === 'error' || (v.level === 'warn' && t.level !== 'error')) t.level = v.level; }
-    else if (Object.keys(a.tmpl).length < CAPS.tmpl) a.tmpl[k] = { ...v };
+    else if (nTmpl < CAPS.tmpl) { a.tmpl[k] = { ...v }; nTmpl += 1; }
     else a.overflow.tmpl += v.n || 0;
   }
+  let nProb = Object.keys(a.prob).length;
   for (const [k0, v] of Object.entries(b.prob || {})) {
     const k = safeKey(k0);
     const t = own(a.prob, k);
     if (t) t.n += v.n || 0;
-    else if (Object.keys(a.prob).length < CAPS.prob) a.prob[k] = { ...v };
+    else if (nProb < CAPS.prob) { a.prob[k] = { ...v }; nProb += 1; }
     else a.overflow.prob += v.n || 0;
   }
   for (const [k0, v] of Object.entries(b.rules || {})) {
@@ -170,19 +174,21 @@ export function mergeState(a, b) {
     t.n += v.n || 0;
     if (v.first != null && (t.first == null || v.first < t.first)) { t.first = v.first; t.firstRaw = v.firstRaw || ''; }
     if (v.last != null && (t.last == null || v.last >= t.last)) { t.last = v.last; t.lastRaw = v.lastRaw || ''; }
+    let nEnt = Object.keys(t.ent).length;
     for (const [n0, n] of Object.entries(v.ent || {})) {
       const name = safeKey(n0);
       if (own(t.ent, name) != null) t.ent[name] += n;
-      else if (Object.keys(t.ent).length < CAPS.ent) t.ent[name] = n;
+      else if (nEnt < CAPS.ent) { t.ent[name] = n; nEnt += 1; }
       else a.overflow.ent += n;
     }
     for (const s of v.samples || []) if (t.samples.length < CAPS.samples) t.samples.push(s);
   }
+  let nHttp = Object.keys(a.http).length;
   for (const [k0, v] of Object.entries(b.http || {})) {
     const k = safeKey(k0);
     const t = own(a.http, k);
     if (t) { t.n += v.n; t.sumMs += v.sumMs; t.slow += v.slow; if (v.maxMs > t.maxMs) { t.maxMs = v.maxMs; t.rid = v.rid || t.rid; } }
-    else if (Object.keys(a.http).length < CAPS.http) a.http[k] = { ...v };
+    else if (nHttp < CAPS.http) { a.http[k] = { ...v }; nHttp += 1; }
     else a.overflow.http += v.n || 0;
   }
   for (const k of Object.keys(a.overflow)) a.overflow[k] = addNum(a.overflow[k], b.overflow?.[k]);
@@ -191,7 +197,7 @@ export function mergeState(a, b) {
 }
 
 /** 오래된 버킷을 줄인다(상위 N 만 남긴다) — 영속 크기 유계. */
-export function compactState(st, { tmpl = 60, prob = 30, ent = 30 } = {}) {
+export function compactState(st, { tmpl = 60, prob = 30, ent = 30, http = 100 } = {}) {
   const top = (obj, n) => Object.fromEntries(Object.entries(obj || {}).sort((x, y) => (y[1].n || 0) - (x[1].n || 0)).slice(0, n));
   const cut = (obj, n) => {
     const kept = top(obj, n);
@@ -201,6 +207,8 @@ export function compactState(st, { tmpl = 60, prob = 30, ent = 30 } = {}) {
   let lost;
   [st.tmpl, lost] = cut(st.tmpl, tmpl); st.overflow.tmpl += lost;
   [st.prob, lost] = cut(st.prob, prob); st.overflow.prob += lost;
+  // v2.589: http 키는 무인증 404 경로까지 들어온다(외부 스캐너가 버킷마다 수백 개를 채울 수 있다) — 오래된 버킷은 상위 N 만.
+  if (st.http) { [st.http, lost] = cut(st.http, http); st.overflow.http = (st.overflow.http || 0) + lost; }
   for (const r of Object.values(st.rules || {})) {
     const ents = Object.entries(r.ent || {}).sort((x, y) => y[1] - x[1]);
     r.ent = Object.fromEntries(ents.slice(0, ent));

@@ -25,7 +25,7 @@
  * - **p95 는 근사**: 버킷당 ms 전량 보관은 메모리가 터진다(버킷 하나에 수백만 행 가능).
  *   고정 경계 히스토그램(0-1,…,10,20,50,…,10000+ ms)으로 근사하고 approx:true 를 명시한다.
  *
- * 시간대 주의: csvlog.periodKey 는 **로컬 시간** 기준이므로 파일명 기간 복원·버킷 경계도
+ * 시간대 주의: csvlog.periodKey 는 **포탈 오프셋**(util/dayKey.js, v2.589 — 예전엔 로컬 시간) 기준이므로 파일명 기간 복원·버킷 경계도
  * 로컬 시간 Date 생성자로 계산한다(행의 시각 필드는 ISO/UTC — Date.parse 로 ms epoch 비교).
  */
 
@@ -34,6 +34,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { logDir } from './logsettings.js';
 import { periodKey } from './csvlog.js';
+import { portalParts, portalMs } from '../util/dayKey.js';
 
 const BOM = '﻿';
 const HEADER_FIRST = '시각';        // 헤더 행 식별(파트 파일마다 헤더가 붙는다)
@@ -71,31 +72,29 @@ export function parseLogFileName(name) {
   if ((g = /^(\d{4})(\d{2})(\d{2})-(\d{2})$/.exec(key))) {           // hour: YYYYMMDD-HH
     const [y, mo, d, h] = g.slice(1).map(Number);
     if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23) return null;
-    return { rotate: 'hour', key, from: new Date(y, mo - 1, d, h).getTime(), to: new Date(y, mo - 1, d, h + 1).getTime() };
+    return { rotate: 'hour', key, from: portalMs(y, mo - 1, d, h), to: portalMs(y, mo - 1, d, h + 1) };
   }
   if ((g = /^(\d{4})(\d{2})(\d{2})$/.exec(key))) {                    // day: YYYYMMDD
     const [y, mo, d] = g.slice(1).map(Number);
     if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
-    return { rotate: 'day', key, from: new Date(y, mo - 1, d).getTime(), to: new Date(y, mo - 1, d + 1).getTime() };
+    return { rotate: 'day', key, from: portalMs(y, mo - 1, d), to: portalMs(y, mo - 1, d + 1) };
   }
   if ((g = /^(\d{4})-W(\d{2})$/.exec(key))) {                         // week: YYYY-Www (ISO)
     const y = Number(g[1]); const w = Number(g[2]);
     if (w < 1 || w > 53) return null;
     // ISO 주 1 = 1월 4일이 속한 주. 그 주의 월요일부터 7일.
-    const jan4 = new Date(y, 0, 4);
-    const dow = jan4.getDay() || 7;
-    const start = new Date(y, 0, 4 - (dow - 1) + (w - 1) * 7);
-    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
-    return { rotate: 'week', key, from: start.getTime(), to: end.getTime() };
+    const dow = new Date(Date.UTC(y, 0, 4)).getUTCDay() || 7;
+    const startDay = 4 - (dow - 1) + (w - 1) * 7;
+    return { rotate: 'week', key, from: portalMs(y, 0, startDay), to: portalMs(y, 0, startDay + 7) };
   }
   if ((g = /^(\d{4})(\d{2})$/.exec(key))) {                           // month: YYYYMM
     const y = Number(g[1]); const mo = Number(g[2]);
     if (mo < 1 || mo > 12) return null;
-    return { rotate: 'month', key, from: new Date(y, mo - 1, 1).getTime(), to: new Date(y, mo, 1).getTime() };
+    return { rotate: 'month', key, from: portalMs(y, mo - 1, 1), to: portalMs(y, mo, 1) };
   }
   if ((g = /^(\d{4})Q([1-4])$/.exec(key))) {                          // quarter: YYYYQn
     const y = Number(g[1]); const q = Number(g[2]) - 1;
-    return { rotate: 'quarter', key, from: new Date(y, q * 3, 1).getTime(), to: new Date(y, q * 3 + 3, 1).getTime() };
+    return { rotate: 'quarter', key, from: portalMs(y, q * 3, 1), to: portalMs(y, q * 3 + 3, 1) };
   }
   return null;
 }
@@ -169,39 +168,31 @@ function csvStateFinish(st) {
 
 /** ts 가 속한 버킷의 key/from/to(로컬 시간 경계). hour~quarter 표기는 periodKey 와 동일. */
 function bucketRange(ts, bucket) {
-  const d = new Date(ts);
-  const y = d.getFullYear();
+  const p = portalParts(ts); // v2.589: 포탈 오프셋 기준(csvlog.periodKey 와 같은 기준 — 둘이 어긋나면 파일 선별이 틀린다)
+  const y = p.y;
   switch (bucket) {
     case 'hour':
-      return {
-        key: periodKey(ts, 'hour'),
-        from: new Date(y, d.getMonth(), d.getDate(), d.getHours()).getTime(),
-        to: new Date(y, d.getMonth(), d.getDate(), d.getHours() + 1).getTime(),
-      };
+      return { key: periodKey(ts, 'hour'), from: portalMs(y, p.mo, p.d, p.h), to: portalMs(y, p.mo, p.d, p.h + 1) };
     case 'week': {
-      const dow = d.getDay() || 7;
-      const start = new Date(y, d.getMonth(), d.getDate() - (dow - 1));
-      return {
-        key: periodKey(ts, 'week'),
-        from: start.getTime(),
-        to: new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7).getTime(),
-      };
+      const dow = p.dow || 7;
+      const startDay = p.d - (dow - 1);
+      return { key: periodKey(ts, 'week'), from: portalMs(y, p.mo, startDay), to: portalMs(y, p.mo, startDay + 7) };
     }
     case 'month':
-      return { key: periodKey(ts, 'month'), from: new Date(y, d.getMonth(), 1).getTime(), to: new Date(y, d.getMonth() + 1, 1).getTime() };
+      return { key: periodKey(ts, 'month'), from: portalMs(y, p.mo, 1), to: portalMs(y, p.mo + 1, 1) };
     case 'quarter': {
-      const q = Math.floor(d.getMonth() / 3);
-      return { key: periodKey(ts, 'quarter'), from: new Date(y, q * 3, 1).getTime(), to: new Date(y, q * 3 + 3, 1).getTime() };
+      const q = Math.floor(p.mo / 3);
+      return { key: periodKey(ts, 'quarter'), from: portalMs(y, q * 3, 1), to: portalMs(y, q * 3 + 3, 1) };
     }
     case 'half': {
-      const h = d.getMonth() < 6 ? 0 : 1;
-      return { key: `${y}-H${h + 1}`, from: new Date(y, h * 6, 1).getTime(), to: new Date(y, h * 6 + 6, 1).getTime() };
+      const h = p.mo < 6 ? 0 : 1;
+      return { key: `${y}-H${h + 1}`, from: portalMs(y, h * 6, 1), to: portalMs(y, h * 6 + 6, 1) };
     }
     case 'year':
-      return { key: String(y), from: new Date(y, 0, 1).getTime(), to: new Date(y + 1, 0, 1).getTime() };
+      return { key: String(y), from: portalMs(y, 0, 1), to: portalMs(y + 1, 0, 1) };
     case 'day':
     default:
-      return { key: periodKey(ts, 'day'), from: new Date(y, d.getMonth(), d.getDate()).getTime(), to: new Date(y, d.getMonth(), d.getDate() + 1).getTime() };
+      return { key: periodKey(ts, 'day'), from: portalMs(y, p.mo, p.d), to: portalMs(y, p.mo, p.d + 1) };
   }
 }
 
