@@ -239,7 +239,10 @@ export function parseSfpShow(text) {
     const l = raw.trim();
     let m;
     if ((m = l.match(/^(?:Slot\s+(\d+)\s*\/\s*)?Port\s+(\d+)\s*:/i))) {
-      const idx = Number(m[2]);
+      // v2.595(감사 C2595-03): 디렉터는 슬롯마다 Port 0 부터 다시 센다 — 포트 번호만 키로 쓰면 'Slot 1/Port 0' 과
+      //   'Slot 2/Port 0' 이 한 항목에 덮이고, switchshow 의 전역 Index 로 조회하면 **다른 포트의 광량**이 붙었다.
+      //   슬롯이 있으면 'slot/port'(switchshow slotPort 와 같은 표기)로, 없으면 예전대로 포트 번호로 둔다.
+      const idx = m[1] != null ? `${Number(m[1])}/${Number(m[2])}` : Number(m[2]);
       cur = out[idx] = out[idx] || { slot: m[1] != null ? Number(m[1]) : null };
       continue;
     }

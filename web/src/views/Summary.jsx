@@ -89,10 +89,10 @@ function CapacityBar({ label, usedLabel, totalLabel, pct }) {
   return (
     <div className="card">
       <div className="flex between" style={{ marginBottom: 8 }}>
-        <b>{label}</b><span className="tabular" style={{ color: usageColor(pct), fontWeight: 700 }}>{pct}%</span>
+        <b>{label}</b><span className="tabular" style={{ color: usageColor(pct ?? 0), fontWeight: 700 }}>{pct == null ? '—' : `${pct}%`}</span>
       </div>
       <div className="usage-bar" style={{ height: 12 }}>
-        <span style={{ width: `${Math.min(pct, 100)}%`, background: usageColor(pct) }} />
+        <span style={{ width: `${pct == null ? 0 : Math.min(pct, 100)}%`, background: usageColor(pct ?? 0) }} />
       </div>
       <div className="flex between meta" style={{ marginTop: 8, color: 'var(--text-dim)' }}>
         <span>사용 {usedLabel}</span><span>총 {totalLabel}</span>

@@ -56,10 +56,29 @@ export function isRuntimeStateFile(name) {
 }
 
 /** 설정 파일 묶음의 지문 — 상태·캐시 파일은 뺀다. 'change' 백업이 직전 백업과 같은 내용이면 만들지 않는 데 쓴다. */
+/**
+ * 설정과 실행 결과가 한 파일에 섞인 스토어(v2.595, 감사 FS-1): 폴러가 매 실행마다 `last*` 를 써서 '변경 시 자동 백업' 이
+ * 주기마다 생기고 자동 사유 보관 슬롯(10)의 실제 설정 변경 백업을 밀어냈다. 파일째 상태로 분류하면 설정 편집도 백업되지 않으므로
+ * **지문에서만** `last*` 키를 빼고 본다(번들 내용은 그대로 — 복원 가능).
+ */
+export const MIXED_STATE_FILES = new Set(['capture-monitors.json', 'os-scan.json', 'guest-scans.json', 'vm-clone.json']);
+function stripRunFields(v) {
+  if (Array.isArray(v)) return v.map(stripRunFields);
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const [k, x] of Object.entries(v)) if (!/^last[A-Z]/.test(k)) o[k] = stripRunFields(x);
+    return o;
+  }
+  return v;
+}
+function fingerprintContent(name, content) {
+  if (!MIXED_STATE_FILES.has(name)) return String(content);
+  try { return JSON.stringify(stripRunFields(JSON.parse(String(content)))); } catch { return String(content); }
+}
 export function settingsFingerprint(files) {
   const h = crypto.createHash('sha1');
   for (const name of Object.keys(files || {}).filter((n) => n !== REDACTED_META && n !== SKIPPED_META && !isRuntimeStateFile(n)).sort()) {
-    h.update(name); h.update('\0'); h.update(String(files[name])); h.update('\0');
+    h.update(name); h.update('\0'); h.update(fingerprintContent(name, files[name])); h.update('\0');
   }
   return h.digest('hex');
 }

@@ -27,6 +27,11 @@ import { getResults, getLastSweep, runNow, pollerStats } from '../../svcmon/poll
 import { ROTATE_UNITS, ROTATE_LABEL } from '../../svcmon/logsettings.js';
 import { logStats } from '../../svcmon/csvlog.js';
 import { canEdit, adminOnly } from './shared.js';
+import { redactEdgeSummary } from '../../auth/scopeStatus.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
+import { store as _storeForScope } from '../../store.js';
+// v2.595: 엣지 주소는 admin + 전체 범위만(auth/scopeStatus.redactEdgeSummary).
+const fullAddr = (req) => req.user?.role === 'admin' && !scopedVcenterIds(req.user, _storeForScope.get());
 
 // 상태 판정·요약 키는 svcmon/status.js 하나에서만 정의한다(라우트·화면·테스트 공용).
 const statusOf = (t, x, results, now) => testState(t, x, results, now);
@@ -76,7 +81,7 @@ svcmonRouter.get('/state', (req, res) => {
     scopeCount: inScope.length,
     targetCount: all.length,
     // 엣지 위임 요약 — 이 포탈이 직접 실행한 것 외에, 원격 법인 엣지가 보고한 현황.
-    edges: edgeSummary(now),
+    edges: redactEdgeSummary(edgeSummary(now), fullAddr(req)), ...(fullAddr(req) ? {} : { addressHidden: true }),
     edgeTotals: edgeTotals(now),
     testTypes: TEST_TYPES,
     rotateUnits: ROTATE_UNITS,
@@ -91,7 +96,7 @@ svcmonRouter.get('/diag', canEdit, (req, res) => {
     poller: pollerStats(), log: logStats(),
     targets: listTargetsCopy().length, tests: totalTests(),
     // 엣지 위임 진단 — 이 서버가 받는 쪽(edges)인지 보내는 쪽(push)인지 함께 보인다.
-    edges: edgeSummary(), push: svcmonPushStatus(), silence: silenceStatus(),
+    edges: redactEdgeSummary(edgeSummary(), fullAddr(req)), push: svcmonPushStatus(), silence: silenceStatus(),
   });
 });
 

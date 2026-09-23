@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **167개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **173개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-23)
@@ -34,6 +34,7 @@
 | `bm-storage.json` | 설정 | 베어메탈 스토리지 서버 목록 + 설정(v2.340). | ✅ | ✅ | ✅ | bmstor/registry.js |
 | `bm-usage.db` | DB | 베어메탈 사용률 DB(v2.550). 파일: `<dbDir>/bm-usage.db` |  |  | ✅ | bmusage/db.js |
 | `bmstor-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bmstor/poller.js |
+| `bmusage-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | bmusage/activityLog.js |
 | `bmusage-alert-state.json` | 설정 | 임계 초과 알림 발송 + **상태 영속**(v2.551). | ✅ |  | ✅ | bmusage/notify.js |
 | `bmusage-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bmusage/poller.js |
 | `bmusage-settings.json` | 설정 | 베어메탈 사용률 수집 설정(v2.550). | ✅ | ✅ | ✅ | bmusage/settings.js |
@@ -55,16 +56,17 @@
 | `collectors.json` | 설정 | 원격 수집 서버(엣지) 목록과 토큰 | ✅ | ✅ | ✅ | collector/registry.js |
 | `credentials-usage.json` | 설정 | 통합 계정 관리 저장소(v2.419) — RMA 가 엣지 망 안의 서버에 SSH 로 점검·명령을 실행할 때 쓰는 | ✅ | ✅ | ✅ | security/credentialStore.js |
 | `credentials.json` | 설정 | 통합 계정(장비 SSH/API 자격증명) | ✅ | ✅ | ✅ | security/credentialStore.js |
+| `curuser-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | curuser/activityLog.js |
 | `curuser-settings.json` | 설정 | '현재 사용자' 수집 설정(v2.520). | ✅ | ✅ | ✅ | curuser/settings.js |
 | `curuser.db` | DB | '현재 사용자' 전용 시계열 DB(v2.520). |  |  | ✅ | curuser/db.js |
-| `daily-report.json` | 설정 | 일일 헬스체크 리포트 발송 스케줄러 — 매일 지정 시각(HH:MM)에 computeHealthReport 결과를 | ✅ |  | ✅ | reports/dailyReport.js |
+| `daily-report.json` | 설정 | 일일 헬스체크 리포트 발송 스케줄러 — 매일 지정 시각(HH:MM)에 computeHealthReport 결과를 | ✅ | ✅ | ✅ | reports/dailyReport.js |
 | `datacenters.json` | 설정 | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | ✅ | ✅ |  | datacenter/store.js |
 | `db-location.json` | 설정 | 시계열 DB 저장 경로(dbDir) |  |  |  | insights/dbLocation.js |
 | `dirusage.db` | DB | 폴더 사용량 스캔 이력 DB (`dirusage.db`, v2.454). |  |  | ✅ | dirusage/db.js |
 | `dirusage.json` | 설정 | 폴더 사용량 리포트 설정 (`dirusage.json`, v2.454). | ✅ | ✅ | ✅ | dirusage/settings.js |
 | `download` | 디렉터리 | iDRAC-scan collector agent auto-deploy. The central portal pushes its offline |  |  | ✅ | agent/deploy.js |
 | `emergency-stop.json` | 설정 | 긴급중단(Emergency Stop) — 2인 승인(관리자 2명 OTP)으로만 켜고/끄는 전역 수집 정지 스위치. | ✅ | ✅ | ✅ | security/emergencyStop.js |
-| `finops.json` | 설정 | FinOps — 전력 수집(iDRAC/OME/원격) 데이터를 kWh·전기요금·CO2로 환산해 vCenter/지역별로 | ✅ |  |  | insights/finops.js |
+| `finops.json` | 설정 | FinOps — 전력 수집(iDRAC/OME/원격) 데이터를 kWh·전기요금·CO2로 환산해 vCenter/지역별로 | ✅ | ✅ |  | insights/finops.js |
 | `fleet-assign.json` | 설정 | 통합 서버 인벤토리 — 베어메탈/물리 서버의 '소속 법인(vCenter)' 수동 등록 저장. | ✅ | ✅ |  | insights/fleetAssign.js |
 | `fleet-tags.json` | 설정 | 통합 서버 인벤토리 — 수동 분류 예외(override) 저장. | ✅ | ✅ |  | insights/fleetTags.js |
 | `gpu-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | gpu/sshCollect.js |
@@ -75,6 +77,7 @@
 | `guest-scans.json` | 설정 | 게스트 조사 스케줄러 — 사용자가 지정한 주기로 게스트 OS를 조사해 기록·저장한다. | ✅ |  | ✅ | security/guestScanScheduler.js |
 | `guestscan-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | security/guestScanScheduler.js |
 | `horizon-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | horizon/sessionPoller.js |
+| `horizon-session-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | horizon/sessionActivityLog.js |
 | `horizon-sessions.db` | DB | Horizon 실시간 사용자 전용 DB(v2.525). |  |  | ✅ | horizon/sessionDb.js |
 | `horizon-sessions.json` | 설정 | Horizon 실시간 사용자 수집 설정(v2.525). | ✅ | ✅ | ✅ | horizon/sessionSettings.js |
 | `horizon.json` | 설정 | Horizon Connection Server 연동 — 라이선스 만료일 확인 전용(가벼운 통합). | ✅ | ✅ | ✅ | horizon/horizon.js |
@@ -147,10 +150,12 @@
 | `rma-tests.db` | DB | 원격 점검(RMA) 결과 이력 |  |  | ✅ | rma/testResults.js |
 | `runtime.json` | 설정 | Runtime-adjustable settings that can be changed from the portal UI (and | ✅ | ✅ | ✅ | runtime-settings.js |
 | `san-health.db` | DB | SAN 점검 결과 이력 + **최근 N회 비교**(v2.522). |  |  | ✅ | sanswitch/healthHistory.js |
+| `sanswitch-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | sanswitch/activityLog.js |
 | `sanswitch-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | sanswitch/poller.js |
 | `sanswitch-devices.json` | 설정 | SAN 스위치 등록부(v2.410). | ✅ | ✅ | ✅ | sanswitch/registry.js |
 | `sanswitch-err-baseline.json` | 설정 | 포트 에러 카운터 **월 기준선**(v2.519). | ✅ | ✅ | ✅ | sanswitch/errBaseline.js |
 | `sanswitch-latest.json` | 설정 | 이 노드가 수집한 최신 스냅샷 보관(v2.410, storage/store.js 와 동일 철학). | ✅ |  | ✅ | sanswitch/store.js |
+| `sanswitch-perf-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | sanswitch/perfActivityLog.js |
 | `sanswitch-perf-push.json` | 설정 | 엣지 → 중앙 포트 사용량(portperfshow) 시계열 중계(v2.423, 사용자 요구 '연결은 됐는데 데이터 | ✅ |  | ✅ | sanswitch/perfPush.js |
 | `sanswitch-perf-settings.json` | 설정 | 포트 사용량(portperfshow) 수집 설정(v2.411, 사용자 요구 | ✅ | ✅ | ✅ | sanswitch/perfSettings.js |
 | `sanswitch-perf.db` | DB | SAN 스위치 포트 처리량(누적 카운터 델타) |  |  | ✅ | sanswitch/perfDb.js |
@@ -158,6 +163,7 @@
 | `secrets-policy.json` | 설정 | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | ✅ | ✅ | ✅ | security/secretVault.js |
 | `security-session.json` | 설정 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ | ✅ | ✅ | security/securitySettings.js |
+| `storage-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | storage/activityLog.js |
 | `storage-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | storage/authGuard.js |
 | `storage-devices.json` | 설정 | 스토리지 장비 등록부(v2.302). | ✅ | ✅ | ✅ | storage/registry.js |
 | `storage-growth-settings.json` | 설정 | 스토리지 사용량 보존 설정(v2.531). | ✅ | ✅ | ✅ | storage/growthSettings.js |

@@ -314,6 +314,18 @@ export function parseJsonLoose(text) {
  * 사람이 읽는 용량 문자열 → 바이트. '1.5 TB', '1536G', '12345678' 모두 처리.
  * 단위가 없으면 바이트로 본다(장비 CLI 는 대개 바이트 또는 단위 표기 둘 중 하나다).
  */
+/**
+ * 사용량처럼 **못 읽은 것과 0 을 구분해야 하는 값**(v2.595, 감사 C2595-01): toBytes 는 빈 값·'N/A'·형식 불명을
+ * 0 으로 돌려준다(전체 용량 판정에는 '0 이면 건너뜀' 으로 안전하다). 사용량에 그대로 쓰면 '비었다' 는 거짓이
+ * DB 에 적재된다. 숫자로 시작하는 0 표기('0', '0.0T', '0 (0.0T)')만 0 이고 나머지 0 은 null 이다.
+ */
+export function toBytesOrNull(v) {
+  const s = String(v ?? '').trim().replace(/,/g, '');
+  const r = toBytes(s);
+  if (r !== 0) return r;
+  return /^0+(\.0+)?(\s|$|[kKmMgGtTpPeE(])/.test(s) ? 0 : null;
+}
+
 export function toBytes(v) {
   const s = String(v ?? '').trim().replace(/,/g, '');
   if (!s || s === '-' || /^(n\/?a|none|unknown)$/i.test(s)) return 0;

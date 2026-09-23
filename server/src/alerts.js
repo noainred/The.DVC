@@ -82,7 +82,8 @@ export function saveAlertConfig(body = {}) {
     },
     rules: { ...cur.rules, ...(body.rules || {}) },
     cooldownMin: Math.max(1, Number(body.cooldownMin) || cur.cooldownMin),
-    intervalSec: Math.max(15, Number(body.intervalSec) || cur.intervalSec),
+    // v2.595(감사 T2595-01): 상한 1일 — 24.8일을 넘기면 setInterval 이 1ms 틱이 되고 저장값이라 재시작해도 남는다.
+    intervalSec: Math.min(ALERT_INTERVAL_MAX_SEC, Math.max(15, Number(body.intervalSec) || cur.intervalSec)),
     suppressWindowMin: Math.max(0, body.suppressWindowMin != null ? Number(body.suppressWindowMin) || 0 : (cur.suppressWindowMin ?? 5)),
   };
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
@@ -336,7 +337,13 @@ let vmPowerPrev = null;      // vmId -> powerState (직전 스냅샷, 동시 다
 
 function pushRecent(entry) { recent.unshift(entry); if (recent.length > 200) recent.pop(); }
 
+let _ticking = false;   // v2.595: 재진입 가드(짧은 주기에서 평가가 겹치지 않게 — 폴러 규약)
 async function tick() {
+  if (_ticking) return;
+  _ticking = true;
+  try { return await tickInner(); } finally { _ticking = false; }
+}
+async function tickInner() {
   const cfg = loadAlertConfig();
   if (!cfg.channels.slack?.enabled && !cfg.channels.webhook?.enabled && !cfg.channels.teams?.enabled && !cfg.channels.email?.enabled) { // still track state for UI (v2.479: email 포함)
     refreshState(cfg, false);
@@ -389,9 +396,11 @@ export function alertStatus() {
   };
 }
 
+export const ALERT_INTERVAL_MAX_SEC = 86_400;
+
 export function startAlertEngine() {
   const cfg = loadAlertConfig();
-  const iv = Math.max(15, cfg.intervalSec || 60) * 1000;
+  const iv = Math.min(ALERT_INTERVAL_MAX_SEC, Math.max(15, cfg.intervalSec || 60)) * 1000;
   setTimeout(() => tick().catch(() => {}), 8000).unref?.();
   timer = setInterval(() => tick().catch(() => {}), iv);
   timer.unref?.();
@@ -402,7 +411,7 @@ export function startAlertEngine() {
 function rescheduleAlertEngine() {
   if (!timer) return;
   clearInterval(timer);
-  const iv = Math.max(15, loadAlertConfig().intervalSec || 60) * 1000;
+  const iv = Math.min(ALERT_INTERVAL_MAX_SEC, Math.max(15, loadAlertConfig().intervalSec || 60)) * 1000;
   timer = setInterval(() => tick().catch(() => {}), iv);
   timer.unref?.();
 }

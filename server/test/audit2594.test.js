@@ -176,7 +176,8 @@ test('LO-2 — 선행 0 표기로 저장해도 정규 키로 붙고 유령 키�
 /* ── DATA2594-03 vmtrack — 첫 수집 중인 vCenter 가 있으면 슬롯 기록을 미룬다 ── */
 test('DATA2594-03 — vmtrack 폴러는 pending vCenter 가 있으면 대기 상한까지 기다리고, 결과에 빠진 vCenter 를 싣는다', () => {
   const p = read('vmtrack/poller.js');
-  assert.match(p, /if \(pending && Date\.now\(\) - slotStartMs\(cur\) < PENDING_WAIT_MS\)/);
+  // v2.595(R2595-03): 기준은 슬롯 시작이 아니라 pending 을 처음 본 시각이다.
+  assert.match(p, /if \(Date\.now\(\) - first < PENDING_WAIT_MS\)/);
   assert.match(read('vmtrack/service.js'), /skippedVcenters/);
 });
 

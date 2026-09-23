@@ -27,6 +27,19 @@ import { localReportFor, topSpikers } from '../../vmseries/query.js';
 import { vmSeriesPushStatus } from '../../agent/vmSeriesPush.js';
 import { mockLocalReport } from '../../vmseries/mock.js';
 import { memoJson, scopeKey } from './shared.js';
+/**
+ * v2.595(감사 AUTHZ-2595-02): push 상태도 범위로 거른다 — status 만 거르고 push.last 로 범위 밖 vCenter id·오류 문구·
+ * centralUrl 이 나갔다(v2.574 SEC-07 과 같은 우회). 범위 계정은 자기 범위 vCenter 의 마지막 보고만, centralUrl·오류 원문은 admin 만.
+ */
+function scopeVmSeriesPush(p, allowed, user) {
+  if (!p || typeof p !== 'object') return p;
+  const admin = user?.role === 'admin';
+  const last = p.last && (!allowed || !p.last.vcenterId || allowed.has(p.last.vcenterId)) ? p.last : null;
+  const out = { ...p, last: last && !admin ? { ...last, error: last.error ? '(관리자만 확인)' : last.error } : last };
+  if (!admin) out.centralUrl = null;
+  if (allowed && p.last && !last) out.lastHidden = true;
+  return out;
+}
 
 const morefOf = (id, vcId) => String(id || '').slice(String(vcId || '').length + 1);
 
@@ -83,7 +96,7 @@ api.get('/tools/vmseries/settings', requirePerm('tools'), (req, res) => {
     settings: { ...s, targets: safeTargets }, limits: VMSERIES_LIMITS, vcenters, resolved, usage,
     totalBytes: usage.reduce((a, u) => a + u.bytes, 0), freeBytes: vmSeriesFreeBytes(),
     // ⚠ v2.574 SEC-07 — `status` 도 거른다. 옆 필드들만 거르고 이것을 그대로 두면 우회로가 남는다.
-    status: scopeVmSeriesStatus(vmSeriesPollerStatus(), allowed), push: vmSeriesPushStatus(), mock: snap.source === 'mock',
+    status: scopeVmSeriesStatus(vmSeriesPollerStatus(), allowed), push: scopeVmSeriesPush(vmSeriesPushStatus(), allowed, req.user), mock: snap.source === 'mock',
   });
 });
 
@@ -137,7 +150,7 @@ api.get('/tools/vmseries/scope-data', requirePerm('tools'), (req, res) => {
 //   `errors[].vcenterId`·`skipped[].vcenterId` 로 범위 밖 vCenter id 와 실패 메시지가 나갔다.
 api.get('/tools/vmseries/status', requirePerm('tools'), (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
-  res.json({ ok: true, ...scopeVmSeriesStatus(vmSeriesPollerStatus(), allowed), push: vmSeriesPushStatus() });
+  res.json({ ok: true, ...scopeVmSeriesStatus(vmSeriesPollerStatus(), allowed), push: scopeVmSeriesPush(vmSeriesPushStatus(), allowed, req.user) });
 });
 
 api.post('/tools/vmseries/run', requireRole('admin'), async (req, res) => {

@@ -1,4 +1,5 @@
 // IPAM 조회/쓰기 + VM 전체 export — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
+import { canonIp } from '../../util/ipv4.js';
 import { requirePerm, requireRole } from '../../auth/auth.js';
 // v2.590 D1: 상태변경 라우트는 역할 게이트가 **먼저**다(server/CLAUDE.md '상태변경 라우트 RBAC 은 requirePerm 만으로
 // 대체되지 않는다'). viewer 에게 tools 만 줘도 IPAM 예약·상태·정책을 바꾸고 지울 수 있었다 — 2026-06-27 감사가 고쳤다고
@@ -47,9 +48,14 @@ const isKnownVcenter = (id) => { if (!id) return true; try { return (loadVcenter
  *  · IP 가 vCenter 에 귀속(owners): 그 vCenter 중 하나라도 allowed 면 허용.
  *  · 미귀속 IP(스캔/예약): claimedVcenterId 가 있고 allowed 에 있을 때만 허용(전역 예약은 범위 계정이 못 만듦).
  */
-const ipInWriteScope = (allowed, owners, ip, claimed) => {
+export const ipInWriteScope = (allowed, owners, ip, claimed) => {
   if (!allowed) return true;
-  const own = owners.get(ip);
+  // v2.595(감사 R2595-01 — 재현): 소유 맵은 정규형 IP 키다. 원문으로 찾으면 '010.37.0.1' 이 '미귀속' 이 되어
+  //   claimed 만으로 통과하고, 저장은 정규 키로 되어 범위 밖 IP 의 실제 행에 override·메모가 붙었다.
+  //   정규화할 수 없는 표기는 거부(쓰기 대상이 아니다).
+  const key = canonIp(ip);
+  if (!key) return false;
+  const own = owners.get(key);
   if (own && own.size) return [...own].some((v) => allowed.has(v));
   return claimed ? allowed.has(claimed) : false;
 };

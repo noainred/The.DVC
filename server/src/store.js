@@ -540,10 +540,14 @@ function rollupsOf(snap, { scoped = false } = {}) {
     cpuCores: hc.cores,
     cpuTotalGhz: round(cpuTotalMhz / 1000, 1),
     cpuUsedGhz: round(cpuUsedMhz / 1000, 1),
-    cpuUsagePct: pct(cpuUsedMhz, hc.cpuTR),
+    cpuUsagePct: pctOrNull(cpuUsedMhz, hc.cpuTR),
     memTotalGB: round(memTotalMB / 1024, 0),
     memUsedGB: round(memUsedMB / 1024, 0),
-    memUsagePct: pct(memUsedMB, hc.memTR),
+    memUsagePct: pctOrNull(memUsedMB, hc.memTR),
+    // v2.595(감사 R2595-04·05): 사용률에서 뺀 호스트 수·그 기준 용량 — 화면이 used/total 과 % 의 차이를 설명한다.
+    hostsUsageExcluded: snap.hosts.length - snap.hosts.filter(usageReadable).length,
+    cpuTotalReadableGhz: round(hc.cpuTR / 1000, 1),
+    memTotalReadableGB: round(hc.memTR / 1024, 0),
     storageTotalTB: round(storCapGB / 1024, 1),
     storageUsedTB: round(storUsedGB / 1024, 1),
     storageUsagePct: pct(storUsedGB, storCapGB),
@@ -597,8 +601,9 @@ function rollupsOf(snap, { scoped = false } = {}) {
         hosts: h.length,
         vms: v.length,
         vmsPoweredOn: v.filter((x) => x.powerState === 'POWERED_ON').length,
-        cpuUsagePct: pct(cpuU, cpuTR),
-        memUsagePct: pct(memU, memTR),
+        cpuUsagePct: pctOrNull(cpuU, cpuTR),
+        memUsagePct: pctOrNull(memU, memTR),
+        hostsUsageExcluded: h.length - hR.length,
         storageUsagePct: pct(stU, stC),
         storageTotalTB: round(stC / 1024, 1),
         // 사용량/전체 병기용(v2.232) — %만으로는 규모가 안 보인다(카드에서 "63% · 69/110 TB" 표기).
@@ -626,6 +631,8 @@ function rollupsOf(snap, { scoped = false } = {}) {
 
 const round = (v, d) => Number(v.toFixed(d));
 const pct = (used, total) => (total > 0 ? Math.round((used / total) * 100) : 0);
+// v2.595(감사 WT-01): 사용량을 읽을 수 있는 호스트가 하나도 없으면 사용률은 '0%' 가 아니라 모른다(null).
+const pctOrNull = (used, total) => (total > 0 ? Math.round((used / total) * 100) : null);
 
 export const store = new Store();
 

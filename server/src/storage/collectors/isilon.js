@@ -71,6 +71,10 @@ export function normalizeIsilon(device, raw) {
     // /statistics/current 응답: { stats: [{ key, value }] } — ifs.bytes.* 키가 클러스터 용량.
     const byKey = Object.fromEntries((raw.stats.stats || []).map((s) => [s.key, Number(s.value) || 0]));
     const total = byKey['ifs.bytes.total'] || 0;
+    // v2.595(감사 C2595-05): 전체 용량 키가 없으면 '정상 · 0 TB' 가 아니라 섹션 오류다(받은 키를 밝힌다).
+    if (!(total > 0)) {
+      snap.sections.capacity = `오류: ifs.bytes.total 없음(받은 키 ${Object.keys(byKey).slice(0, 8).join(', ') || '없음'})`;
+    }
     // v2.593(감사 DATA-01): 사용량을 못 읽으면 0 이 아니라 null — 0 은 '비었다' 는 거짓이고 증가량에 거짓 급변을 만든다(v2.561 규약).
     const usedRaw = (raw.stats.stats || []).find((s) => s.key === 'ifs.bytes.used');
     const availRaw = (raw.stats.stats || []).find((s) => s.key === 'ifs.bytes.avail');
@@ -92,7 +96,7 @@ export function normalizeIsilon(device, raw) {
       hdd: mk(Math.max(0, total - ssdTotal), used == null ? null : Math.max(0, used - ssdUsed)),
       ssd: mk(ssdTotal, ssdUsed),
     };
-    snap.sections.capacity = 'ok';
+    if (total > 0) snap.sections.capacity = 'ok';
   }
   if (raw.nodes) {
     const list = raw.nodes.nodes || [];

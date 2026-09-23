@@ -10,7 +10,7 @@
  */
 
 import { emptySnapshot } from '../types.js';
-import { runCliSession, parseKeyValueBlocks, toBytes, sshFailureSnapshot } from './cliSsh.js';
+import { runCliSession, parseKeyValueBlocks, toBytes, toBytesOrNull, sshFailureSnapshot } from './cliSsh.js';
 import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
 
 const wrap = (cmd) => [cmd, `xmcli -c "${cmd}"`];
@@ -76,16 +76,18 @@ export function normalizeXtremioSsh(device, out) {
   const info = parseTable(out.clustersInfo || out.clusters || '');
   const pools = [];
   let total = 0;
-  let used = 0;
+  let used = 0; let usedUnknown = 0;
   for (const c of info) {
     const t = toBytes(pick(c, 'Physical-Space', 'Total-Physical-Space', 'UD-SSD-Space', 'Total-Space'));
-    const u = toBytes(pick(c, 'Physical-Space-In-Use', 'UD-SSD-Space-In-Use', 'Space-In-Use', 'Used-Space'));
+    const u = toBytesOrNull(pick(c, 'Physical-Space-In-Use', 'UD-SSD-Space-In-Use', 'Space-In-Use', 'Used-Space'));   // v2.595: 결측은 null
     if (!t) continue;
-    total += t; used += u;
-    pools.push({ name: pick(c, 'Name', 'Cluster-Name') || `cluster${pools.length + 1}`, totalBytes: t, usedBytes: u, pct: Math.round((u / t) * 1000) / 10 });
+    total += t; if (u == null) usedUnknown += 1; else used += u;
+    pools.push({ name: pick(c, 'Name', 'Cluster-Name') || `cluster${pools.length + 1}`, totalBytes: t, usedBytes: u, pct: u == null ? null : Math.round((u / t) * 1000) / 10 });
   }
   if (total) {
-    snap.capacity = { totalBytes: total, usedBytes: used, pct: Math.round((used / total) * 1000) / 10 };
+    const usedAll = usedUnknown ? null : used;   // 부분 합을 전체라 말하지 않는다
+    snap.capacity = { totalBytes: total, usedBytes: usedAll, pct: usedAll == null ? null : Math.round((usedAll / total) * 1000) / 10 };
+    if (usedUnknown) snap.extra.poolsUsedUnreadable = usedUnknown;
     snap.pools = pools.slice(0, 32);
     snap.sections.capacity = 'ok';
   }

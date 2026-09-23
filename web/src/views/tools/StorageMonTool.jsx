@@ -1578,7 +1578,7 @@ function StorageTrendPanel({ devices }) {
         <div className="flex gap wrap" style={{ fontSize: 12.5, marginBottom: 8 }}>
           <span className="muted">최근 사용 <b style={{ color: 'var(--text)' }}>{tbFmt(last.used)}</b></span>
           <span className="muted">전체 <b style={{ color: 'var(--text)' }}>{tbFmt(last.total)}</b></span>
-          {last.total > 0 && <span className="muted">사용률 <b style={{ color: 'var(--text)' }}>{Math.round((last.used / last.total) * 100)}%</b></span>}
+          {last.total > 0 && <span className="muted">사용률 <b style={{ color: 'var(--text)' }}>{last.used != null ? `${Math.round((last.used / last.total) * 100)}%` : '—'}</b>{last.used == null && last.usedUnknown ? ` (사용량 미확인 ${last.usedUnknown}대)` : ''}</span>}
           {!target && last.devices != null && <span className="muted">수집 장비 <b style={{ color: 'var(--text)' }}>{last.devices}</b>대</span>}
         </div>
       )}

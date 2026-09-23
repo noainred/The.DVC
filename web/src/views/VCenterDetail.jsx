@@ -1,3 +1,4 @@
+import { unitText } from './unitText.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, usePolling } from '../api.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
@@ -602,7 +603,7 @@ export default function VCenterDetail({ site, onBack }) {
               {hm.slice(0, SEARCH_CAP).map((h) => (
                 <Leaf key={`h:${h.id}`} icon="🖥️" onClick={() => setSel({ type: 'host', item: h })}
                   label={<Highlight text={h.name} tokens={tokens} />} badge={<StateBadge state={h.connectionState} />}
-                  sub={`🧩 ${h.cluster || 'standalone'} · CPU ${h.cpuUsagePct ?? '-'}% · MEM ${h.memUsagePct ?? '-'}% · VM ${hostVmCount(h) ?? '-'}`} />
+                  sub={`🧩 ${h.cluster || 'standalone'} · CPU ${unitText(h.cpuUsagePct, '%')} · MEM ${unitText(h.memUsagePct, '%')} · VM ${hostVmCount(h) ?? '-'}`} />
               ))}
               {matches.slice(0, SEARCH_CAP).map(({ v: vm, viaNotes, token }) => (
                 <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}

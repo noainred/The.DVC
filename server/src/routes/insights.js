@@ -3,6 +3,7 @@
  * 토폴로지, 인시던트 타임라인, ChatOps. /api 하위(로그인 필요)에 마운트. 설정 변경은 admin.
  */
 
+import { pageArgs } from '../util/pageArgs.js';
 import { Router } from 'express';
 import { requireRole } from '../auth/auth.js';
 import { store } from '../store.js';
@@ -266,7 +267,7 @@ insightsRouter.get('/graph', async (req, res) => {
 // --- 인시던트 타임라인 ---
 // scope 필수: 알람 상세·vCenter 수집 실패에 타 사이트 엔티티명이 들어간다(incidents.js 주석).
 insightsRouter.get('/incidents', (req, res) => res.json(getIncidents({
-  limit: Number(req.query.limit) || 200,
+  limit: pageArgs(req.query, { def: 200, max: 1000 }).limit,   // v2.595(감사 DEPS2595-02): 음수·거대값 하한·상한
   allowed: scopedVcenterIds(req.user, store.get()),
 })));
 

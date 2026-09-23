@@ -96,12 +96,17 @@ const jobDevOf = (j) => ({ id: `gscan|${j.id}`, username: j.guestUser, password:
 
 async function runJob(j, { manual = false } = {}) {
   const vc = (loadVcenterConfig().vcenters || []).find((v) => v.id === j.vcenterId);
-  if (!vc) { j.lastRun = Date.now(); j.lastErr = 'vCenter 설정 없음(live 필요)'; persist(); return; }
+  if (!vc) { const cur = (load() || []).find((x) => x.id === j.id) || j; cur.lastRun = j.lastRun = Date.now(); cur.lastErr = j.lastErr = 'vCenter 설정 없음(live 필요)'; persist(); return; }
   const jobCreds = !!(j.guestUser && j.guestPass);
   const lastAuth = { at: Date.now(), manual, vcStopped: null, jobStopped: null, vmStopped: 0, vmSkipped: 0, breaker: null };
   const finish = (found, errs) => {
     const any = lastAuth.vcStopped || lastAuth.jobStopped || lastAuth.vmStopped || lastAuth.vmSkipped || lastAuth.breaker;
-    j.lastRun = Date.now(); j.lastFound = found; j.lastErr = errs.slice(0, 5).join(' · '); j.lastAuth = any ? lastAuth : null; persist();
+    // v2.595(감사 FS-3): 실행 중 편집으로 캐시 항목이 새 객체가 됐으면 **현재 항목**에 쓴다(옛 객체에 쓰면 lastRun 이 사라져 곧바로 재실행).
+    const fields = { lastRun: Date.now(), lastFound: found, lastErr: errs.slice(0, 5).join(' · '), lastAuth: any ? lastAuth : null };
+    Object.assign(j, fields);
+    const cur = (load() || []).find((x) => x.id === j.id);
+    if (cur && cur !== j) Object.assign(cur, fields);
+    if (cur) persist();
   };
   // v2.591(감사 F1): 인벤토리 수집과 같은 vCenter 계정 — 멈춰 있으면 **주기 실행**은 로그인하지 않는다(읽기 전용 조회 —
   //   해제는 주 폴러·연결 테스트만). 수동 '지금 실행' 은 막지 않는다.

@@ -81,13 +81,13 @@ export function expectationFor(field, { types = [], agents = [], datacenters = [
     case 'enabled': return { kind: 'enum', values: ['true', 'false'], hint: 'true 또는 false' };
     case 'agent': return { kind: 'enum', values: ['', ...agents], hint: '엣지 이름(비우면 중앙 직접 수집)' };
     case 'datacenter': return { kind: 'enum', values: datacenters, hint: '법인 이름 또는 ID' };
-    case 'host': return { kind: 'format', hint: 'IP 또는 호스트명만 — 공백·URL(http://)·포트(:443)·선행 `-` 는 넣지 않습니다' };
+    case 'host': return { kind: 'format', hint: 'IP 또는 호스트명만 — 공백·URL(http://)·포트(:443)·선행 ‘-’ 는 넣지 않습니다' };
     case 'name': return { kind: 'format', hint: `1~64자, < > " ' 는 쓸 수 없습니다` };
     case 'username': return { kind: 'format', hint: '접속 계정(비울 수 없습니다)' };
     case 'password': return { kind: 'format', hint: '한 줄 문자열 — 개행·탭이 섞이지 않게(붙여넣기 확인). 비우면 기존 비밀번호를 유지합니다' };
     case 'sshPort': return { kind: 'format', hint: '1~65535 정수 — 비우면 기본 22' };
     case 'httpsPort': return { kind: 'format', hint: '1~65535 정수 — 비우면 기본 443(REST 수집일 때만 씁니다)' };
-    case 'vfId': return { kind: 'format', hint: '선택 항목입니다 — Virtual Fabric 을 쓰지 않으면 **CSV 는 칸을 비우고(`,,`)**, **자유텍스트는 `-`** 를 적습니다. 쓰면 1~128 정수(0 은 안 됩니다)' };
+    case 'vfId': return { kind: 'format', hint: '선택 항목입니다 — Virtual Fabric 을 쓰지 않으면 **CSV 는 칸을 비우고(‘,,’)**, **자유텍스트는 ‘-’** 를 적습니다. 쓰면 1~128 정수(0 은 안 됩니다)' };
     default: return { kind: 'none', hint: '' };
   }
 }
@@ -131,7 +131,7 @@ export function adviseRow(row, issue, { lineText = '', order = [], format = 'tex
   // 위치 안내 — 형식(csv/text)과 토큰 형태에 따라 말이 달라진다. 특정 못 하면 말하지 않는다.
   let where;
   if (!field) where = `${row?._line ?? '?'}줄`;
-  else if (token?.form === 'keyed') where = `${row._line}줄의 \`${field}=\` 값`;
+  else if (token?.form === 'keyed') where = `${row._line}줄의 ‘${field}=’ 값`;
   else if (token?.form === 'missing') where = format === 'csv' ? `${row._line}줄의 '${field}' 열(값이 비어 있습니다)` : `${row._line}줄 — '${field}' 항목이 아예 없습니다(${token.col}번째 항목)`;
   else if (token?.form === 'positional') where = format === 'csv' ? `${row._line}줄의 '${field}' 열` : `${row._line}줄의 ${token.col}번째 항목`;
   else where = format === 'csv' ? `${row._line}줄의 '${field}' 열` : `${row._line}줄의 '${field}'`;
@@ -143,11 +143,11 @@ export function adviseRow(row, issue, { lineText = '', order = [], format = 'tex
       advice: `${row?._line ?? '?'}줄: ${special}`, token: null, expected: { kind: 'none', hint: '' }, current: '' };
   }
 
-  const nowPart = field ? (current ? ` 현재 값은 \`${current}\` 입니다.` : ' 현재 값이 비어 있습니다.') : '';
+  const nowPart = field ? (current ? ` 현재 값은 ‘${current}’ 입니다.` : ' 현재 값이 비어 있습니다.') : '';
   let fixPart = '';
   if (expected.kind === 'enum' && expected.values?.length) {
     const shown = expected.values.filter((v) => v !== '').slice(0, 8);
-    fixPart = ` ${expected.hint}${euRo(expected.hint)} 고치세요 — ${shown.map((v) => `\`${v}\``).join(' · ')}${expected.values.length > shown.length + (expected.values.includes('') ? 1 : 0) ? ' …' : ''}`;
+    fixPart = ` ${expected.hint}${euRo(expected.hint)} 고치세요 — ${shown.map((v) => `‘${v}’`).join(' · ')}${expected.values.length > shown.length + (expected.values.includes('') ? 1 : 0) ? ' …' : ''}`;
   } else if (expected.hint) {
     fixPart = ` ${expected.hint}.`;
   } else {

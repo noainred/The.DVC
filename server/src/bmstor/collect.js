@@ -19,7 +19,8 @@ export const MOUNT_RE = /^\/[A-Za-z0-9._\/-]*$/;
 export function sanitizeMounts(input) {
   const raw = Array.isArray(input) ? input : String(input || '').split(/[\n,;]/);
   const mounts = []; const errors = []; const seen = new Set();
-  for (const m of raw.map((s) => String(s).trim()).filter(Boolean)) {
+  // v2.595(감사 C2595-04): 끝의 '/' 는 떼어 저장한다 — df 는 '/data' 로 답하는데 '/data/' 로 대조하면 영원히 '못 찾음' 이었다.
+  for (const m of raw.map((s) => String(s).trim()).map((s) => (s.length > 1 ? s.replace(/\/+$/, '') : s)).filter(Boolean)) {
     if (!MOUNT_RE.test(m)) { errors.push(`허용되지 않는 마운트 경로: ${m} (절대경로 + 영숫자/._-/ 만)`); continue; }
     if (m.length > 256) { errors.push(`마운트 경로가 너무 김: ${m.slice(0, 40)}…`); continue; }
     if (!seen.has(m)) { seen.add(m); mounts.push(m); }

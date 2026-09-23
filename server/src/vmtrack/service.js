@@ -13,6 +13,9 @@ import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, read
  * 등록 해제된(스냅샷에 없는) vCenter 의 로스터는 삭제해, 재등록 시 전량 '신규'로 잡히는 오탐을
  * 막고(그 vCenter 는 다시 baseline 부터) 잔여 행이 남지 않게 한다.
  */
+// v2.595(감사 WT-06): 사용량이나 용량을 모르면 사용률은 0% 가 아니라 null — 같은 파일의 증감 계산·diff.js 와 같은 규칙.
+const dsPct = (used, cap) => (cap > 0 && used != null ? Math.round((Number(used) / cap) * 1000) / 10 : null);
+
 export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date() } = {}) {
   if (!vmtrackStatus().available) {
     // getDb() 는 poller/route 에서 먼저 호출되므로 여기 도달 시 실제 불가 상태.
@@ -203,7 +206,7 @@ export async function vmtrackDsList({ scopeIds = null, vcenterId = '' } = {}) {
     .map((r) => ({
       dsId: r.ds_id, vcenterId: r.vcenter_id, name: r.name || r.ds_id, type: r.type || '',
       capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
-      usagePct: r.cap_gb ? Math.round(((r.used_gb || 0) / r.cap_gb) * 1000) / 10 : 0,
+      usagePct: dsPct(r.used_gb, r.cap_gb),
       firstSeen: r.first_seen,
     }))
     .sort((a, b) => b.usedGB - a.usedGB);
@@ -282,7 +285,7 @@ export async function vmtrackDsSeriesAll({ days = 30, vcenterId = '', scopeIds =
     items.push({
       dsId: r.ds_id, vcenterId: r.vcenter_id, name: r.name || r.ds_id, type: r.type || '',
       capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
-      usagePct: r.cap_gb ? Math.round(((r.used_gb || 0) / r.cap_gb) * 1000) / 10 : 0,
+      usagePct: dsPct(r.used_gb, r.cap_gb),
       deltaGB,
       points: stepFill(slots, carryIn, rows),
     });
@@ -371,7 +374,7 @@ export async function vmtrackDsPivot({ days = 30, vcenterId = '', scopeIds = nul
     items.push({
       dsId: r.ds_id, name: r.name || r.ds_id, vcenterId: r.vcenter_id, type: r.type || '',
       capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
-      usagePct: r.cap_gb ? Math.round(((r.used_gb || 0) / r.cap_gb) * 1000) / 10 : 0,
+      usagePct: dsPct(r.used_gb, r.cap_gb),
       cumGB, slots,
     });
   }
@@ -400,7 +403,7 @@ export async function vmtrackDsTop({ days = 30, vcenterId = '', scopeIds = null,
     items.push({
       dsId: r.ds_id, vcenterId: r.vcenter_id, name: r.name || r.ds_id, type: r.type || '',
       capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
-      usagePct: r.cap_gb ? Math.round(((r.used_gb || 0) / r.cap_gb) * 1000) / 10 : 0,
+      usagePct: dsPct(r.used_gb, r.cap_gb),
       deltaGB,
     });
   }

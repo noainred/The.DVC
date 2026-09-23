@@ -27,6 +27,13 @@ export function parseSize(s) {
   if (!m) return 0;
   return Math.round(Number(m[1]) * (m[2] ? SIZE_UNIT[m[2]] : 1));
 }
+/** 사용량처럼 결측과 0 을 구분해야 하는 값 — 형식이 맞지 않으면 null(v2.595). */
+export function parseSizeOrNull(s) {
+  const m = /^([\d.]+)\s*([kKMGTP])?$/.exec(String(s ?? '').trim());
+  if (!m) return null;
+  const n = Math.round(Number(m[1]) * (m[2] ? SIZE_UNIT[m[2]] : 1));
+  return Number.isFinite(n) ? n : null;
+}
 // 네트워크 처리량(260k·2.2M bps): 10진 접두(관례) — 1000 거듭제곱.
 const BPS_UNIT = { k: 1e3, K: 1e3, M: 1e6, G: 1e9 };
 export function parseBps(s) {
@@ -77,7 +84,8 @@ export function parseIsiStatus(text) {
   const used = twoCols('Used');
   const [hddPct, ssdPct] = pct('Used');
   if (size) {
-    const mk = (sz, us, p) => { const t = parseSize(sz); return t > 0 ? { sizeBytes: t, usedBytes: parseSize(us || '0'), usedPct: p } : null; };
+    // v2.595(감사 C2595-01): Used 칸을 못 읽으면 사용량은 null(예전 parseSize(us||'0') 은 0 — '비었다' 는 거짓).
+    const mk = (sz, us, p) => { const t = parseSize(sz); return t > 0 ? { sizeBytes: t, usedBytes: parseSizeOrNull(us), usedPct: p } : null; };
     out.hdd = mk(size[0], used?.[0], hddPct);
     out.ssd = mk(size[1], used?.[1], ssdPct);
   }
@@ -156,12 +164,14 @@ export function normalizeIsiStatus(device, parsed, { version = '', users = null 
   const snap = emptySnapshot(device);
   if (parsed.name) { snap.name = parsed.name; snap.sections.config = 'ok'; }
   snap.version = version;
-  const mk = (p) => (p ? { totalBytes: p.sizeBytes, usedBytes: p.usedBytes, pct: p.usedPct ?? (p.sizeBytes ? Math.round((p.usedBytes / p.sizeBytes) * 1000) / 10 : null) } : null);
+  const mk = (p) => (p ? { totalBytes: p.sizeBytes, usedBytes: p.usedBytes ?? null, pct: p.usedPct ?? (p.sizeBytes && p.usedBytes != null ? Math.round((p.usedBytes / p.sizeBytes) * 1000) / 10 : null) } : null);
   if (parsed.hdd || parsed.ssd) {
     snap.media = { hdd: mk(parsed.hdd), ssd: mk(parsed.ssd) };
     const t = (parsed.hdd?.sizeBytes || 0) + (parsed.ssd?.sizeBytes || 0);
-    const u = (parsed.hdd?.usedBytes || 0) + (parsed.ssd?.usedBytes || 0);
-    snap.capacity = { totalBytes: t, usedBytes: u, pct: t ? Math.round((u / t) * 1000) / 10 : null };
+    // v2.595: 있는 풀 중 하나라도 사용량을 못 읽었으면 합계 사용량은 null(부분 합 금지).
+    const present = [parsed.hdd, parsed.ssd].filter(Boolean);
+    const u = present.some((p) => p.usedBytes == null) ? null : present.reduce((a, p) => a + p.usedBytes, 0);
+    snap.capacity = { totalBytes: t, usedBytes: u, pct: t && u != null ? Math.round((u / t) * 1000) / 10 : null };
     snap.sections.capacity = 'ok';
   }
   if (parsed.nodes.length) {

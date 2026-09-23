@@ -105,7 +105,7 @@ export function buildPendingRemedy(ctx = {}) {
   steps.push({ text: '엣지 포탈을 재시작합니다(설정은 기동 시 읽습니다).', cmd: 'systemctl restart vmware-portal' });
   // ④ 검증 — 고쳤는지 스스로 확인할 수 있어야 조치가 끝난다.
   steps.push({ text: '엣지 로그에 스캔 에이전트 기동 줄이 보이는지 확인합니다.', cmd: `journalctl -u vmware-portal -n 50 | grep idrac-scan-agent` });
-  steps.push({ text: `기대 출력: \`[idrac-scan-agent] started (central=…, name=${agent})\`. 이 줄이 나오면 5초 안에 이 화면의 '현재 폴링 중인 에이전트' 목록에 '${agent}' 가 나타납니다.` });
+  steps.push({ text: `기대 출력: ‘[idrac-scan-agent] started (central=…, name=${agent})’. 이 줄이 나오면 5초 안에 이 화면의 '현재 폴링 중인 에이전트' 목록에 '${agent}' 가 나타납니다.` });
 
   const links = [
     { label: '스캔 방식 바꾸기(대역 설정)', hash: '#/settings/idrac-admin' },
@@ -140,7 +140,7 @@ export function buildPushErrorRemedy({ agent = '', httpStatus = 0, error = '', c
   if (st === 401) {
     return {
       title: `'${agent}' 엣지에 PUSH 스캔 기능이 없습니다 (HTTP 401)`,
-      why: '401 은 토큰이 틀린 것이 아니라 **그 경로가 없어서** 요청이 collector 라우터를 지나 일반 인증 미들웨어로 떨어진 것입니다. 토큰이 틀렸다면 403 이 옵니다. 즉 이 엣지가 구버전이라 `/api/collector/idrac-scan` 을 아직 갖고 있지 않습니다.',
+      why: '401 은 토큰이 틀린 것이 아니라 **그 경로가 없어서** 요청이 collector 라우터를 지나 일반 인증 미들웨어로 떨어진 것입니다. 토큰이 틀렸다면 403 이 옵니다. 즉 이 엣지가 구버전이라 ‘/api/collector/idrac-scan’ 을 아직 갖고 있지 않습니다.',
       steps: [
         { text: "**설정 › 수집 서버(원격)** 에서 이 엣지의 '버전' 열을 중앙 버전과 비교하세요. 낮으면 그 행의 [업그레이드]를 누르면 됩니다.", when: 'now' },
         { text: '업그레이드가 어려우면 **스캔 방식을 에이전트 폴링으로** 바꾸세요(엣지에 CENTRAL_URL·CENTRAL_TOKEN 이 있어야 합니다).' },
