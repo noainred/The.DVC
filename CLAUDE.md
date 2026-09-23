@@ -3225,6 +3225,114 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `crypto.generateKeyPairSync('ec', {namedCurve:'prime256v1'})` 의 **SEC1 PEM** 은 5,000회 0회다(`credentials`·
       `sanSwitchTest2421` 은 RSA PKCS1 PEM — 역시 안전). 제품 코드는 이 생성기를 쓰지 않는다(grep 0건).
 
+  - ⚠⚠ **v2.591 — 7축 병렬 감사(3차 점검) 확정분**(사용자 요청 "한번더" = v2.589·v2.590 과 같은 "아키텍처 점검 개선 버그패치
+    업그레이드 보안점검" · 같은 릴리스에 "데이터 흐름 지도 메인 연결 만들어줘". 회귀는 `test/audit2591.test.js` 33건 — **변이 검증 21/21**
+    (수정을 하나씩 되돌리면 그 테스트가 실패한다) + `test/authStop2591.test.js` 24건(변이 24종 중 23종) ·
+    웹 `consoleData.test.js`·`dataFlow.test.js`·`collectDropText.test.js`·`emptyInvText.test.js`):
+    - ⚠⚠ **v2.590 P16 claim→ack 큐는 두 시계를 비교하고 있었다 — 기준선은 '엣지가 보낸 마지막 collectedAt' 이다**
+      (`util/collectRequestQueue.js`, R-Q1·PR-3): 완료 판정이 `collectedAt(엣지 시계) >= takenAt(중앙 시계)` 라 엣지 시계가
+      60초 넘게 늦으면 요청마다 장비를 두 번 수집하고 결국 조용히 폐기했다. 이제 인출 시점에 **그 장비의 마지막 collectedAt**
+      을 기준선으로 잡고 **그보다 새 수집**만 완료로 본다(시계를 섞지 않는다). 중앙 재시작 직후에는 보관 중인 엣지 스냅샷의
+      수집 시각(`baseOf` — 엣지 수신 모듈이 `set*BaseResolver` 로 등록. 순환 import 를 피하려고 주입한다)이 기준선이다.
+      · **인출은 엣지 처리량만큼**(`TAKE_MAX` 20 — 엣지 설정 pull 이 20대만 처리한다). 넘겨 인출하면 나머지가 시도 없이 시한을 먹었다.
+      · **시한은 개수에 비례**(`ackMs + n × perItemMs`, perItem = 그 도구의 장비 시한) — 순차 수집 5대 × 3분이 10분 시한을 넘겼다.
+      · 폐기는 `drops`(최근 20)로 남고 목록 라우트 3종이 `collectDrops` 로 싣는다 — 화면이 '결과 없이 폐기됨(수집됐다는 뜻이
+        아니다)' 를 말한다(`web/src/views/tools/collectDropText.js`). v2.590 은 `lastDropped` 를 만들고 **아무 데도 노출하지 않았다**.
+    - ⚠⚠ **수신 집계의 이름은 인증된 agent 가 먼저다**(`routes/central.js` POST 훅 · `central/ingestStats.js`, PR-1·PR-2):
+      본문 `agent` 를 그대로 Map 키로 써서 ① 인증된 엣지 하나가 긴 문자열로 중앙 메모리를 밀어 올렸고(데이터 흐름 지도가 10초 정지
+      뒤 500) ② 개별 토큰 엣지도 '(unknown)'·남의 이름으로 그려졌다. 개별 토큰이면 `auth.agent`, 공유 토큰이면 주장된 이름을
+      64자로 자르고 `verified:false`. 라우트별 요약은 `res.locals.ingestSummary` 로 넘긴다(라우트가 recordIngest 를 두 번 부르지 않게).
+      v2.589 GET 계측(`PULL_UNAUTH_KEY`)과 같은 판단의 POST 쪽 누락이었다.
+    - **본문 파서 413·400 도 거부 기록에 남긴다**(`index.js` 전역 오류 처리기 → `recordReject`, `too-large` 종류 — PR-6).
+      '보냈는데 막혔다' 가 중앙 어디에도 안 보이던 경로다. 위임 워커 3종(ping·capture·bmstor)은 **HTTP 오류 응답**도
+      `_last` + 콘솔에 남긴다(`httpFail`·`postResult` — v2.574 IMP-07 은 catch 경로만 고쳤다, PR-5). 설정 pull 6종·capacityPush 의
+      403 도 콘솔에 남긴다(`util/logThrottle.js createChangeLogger` — 같은 사유는 10분에 1줄, PR-7).
+    - **svcmon 메타 구멍**(PR-4): sig 가 같으면 메타를 다시 요청하지 않아, 청크 유실로 일부 행의 메타가 비면 영원히 비었다 —
+      행 중 메타 없는 것이 하나라도 있으면 `needMeta`.
+    - ⚠⚠ **'못 읽은 값' 을 정상·0 으로 칠하지 않는다 — 이번에도 네 곳**:
+      · 개요 물리 서버(C4): `physical`(iDRAC 대수·코어·메모리)이 범위 계정에도 **함대 전체 값**이었다(같은 화면이 70대와 9대를
+        동시에 말했다). `serversByCorp(…, { onAttributed })` 로 **같은 귀속 판정**을 받아 허용 vCenter 귀속 서버만 다시 집계한다
+        (판정을 호출부에 복제하지 말 것). `matchedBy` 는 범위 계정에 null, `disabled` 는 범위 안에서 다시 센다.
+      · V4·관제 콘솔 SAN(C9)·스토리지(P2): 수집 실패 스냅샷의 `ports`·`capacity` 는 emptySnapshot 초기값(0)이다 — 초록 '0/0'·
+        '0.0 TB · 노드 0' 이 됐다. 실패는 `failed` 로 따로 세고(`sanTotals.failed`) 용량은 전체가 양수일 때만 싣는다.
+      · 데이터 흐름 '내부 수집'(C1): 최상위 `{at, ok:false, reason}` 모양(selfRegister·pdu push)을 못 봐 실패가 초록이었다.
+        ISO `generatedAt` 도 읽는다(⚠ 숫자 문자열은 Date.parse 에 넘기지 않는다 — v2.562).
+      · 빈 인벤토리(C8): `storeStatus` 의 vCenter 별 호스트·VM 이 **항상 null** 이었고 웹이 0 으로 합산해 '빈 vCenter — 이상이
+        아닙니다' 로 **확신 판정**했다. 스냅샷 원소로 세고, 하나라도 모르면 판정 보류(⑨).
+    - **epoch ms 숫자를 Date.parse 에 넘기지 말 것**(C2, `consoleData.tsMs`): 스토리지 `collectedAt` 은 숫자인데 `ageText` 가
+      `Date.parse` 만 받아 방금 수집한 장비가 '—'(미수집)였고 정렬도 무효였다.
+    - **물리 메모리 'GB' 는 vCenter 카드와 같은 이진 단위**(C6): vCenter 의 'GB' 는 실제로 GiB 인데 물리는 10진으로 바꿔 같은
+      카드의 두 값이 7.4% 어긋났다(주석은 '같은 단위' 라 적었다 — 반대였다).
+    - **VM 상세 ping 은 만료를 볼 때까지 폴링한다**(C7): 웹이 33초에 폴링을 끊어 서버의 90초 `expired`(v2.590 P11)를 볼 수 없었다.
+      전부 끝난 상태(up·down·error·expired)가 되면 멈추고 최대 2분. 요청 직후의 `unknown` 은 15초 동안 '확인 중' 이다.
+    - ⚠⚠ **lifecycle 축(21분 장시간 실측 · 누수 없음) 확정분**:
+      · 스토리지 단건 수집(L1)은 같은 장비가 수집 중이면 **새 세션을 열지 않는다**(SAN·PDU 는 이미 그랬다 — 형제 비대칭).
+        라우트는 409 `busy`. 예전 주석 '1대 한정이라 안전' 은 틀렸다(같은 어레이에 세션 2개 · 옛 결과가 새 스냅샷을 덮음).
+      · ⚠⚠ **setInterval/setTimeout 은 24.8일(2^31−1ms)을 넘으면 1ms 가 된다**(L2·L3): 백업 '매 30일' 이 3초 만에 보관 슬롯
+        30개를 같은 내용으로 교체했고, 업그레이드 확인 주기 43,200분이 2초에 원격 확인 1,331회를 냈다. 긴 주기는
+        `util/longTimer.js every()`(조각 타이머) · 업그레이드 주기는 1분~7일 클램프 + tick 재진입 가드. **사용자가 정하는 주기를
+        setInterval 에 넣을 때는 상한을 먼저 볼 것.**
+      · 자동 백업 성공이 '건너뜀' 으로 기록됐다(L5 — v2.590 회귀): `createBackup` 의 `skipped` 는 성공에서도 **배열**(D5)인데
+        `if (m.skipped)` 로 판정했다 → lastRun 이 영원히 비고 서비스 점검이 '백업 없음'. 생략은 `m.skipped === true` 뿐.
+      · 호스트 접근 자동 되돌림(L6): 확정이 진행 중이면 revert 가 busy `{ok:false}` 를 **반환**(throw 아님)해 조용히 버려졌다 —
+        pending 이 남아 있으면 2초 뒤 다시 본다.
+      · svcmon CSV 종료 flush(L7): 스트림이 없으면 대기 행을 버렸고(첫 flush 전 100행 → 파일 없음), 있으면 write 직후 exit 해
+        백프레셔 조각이 잘렸다(60,000행 → 573행). 스트림이 없으면 동기로 붙이고, 정상 종료는 `closeCsvLogAsync` 로 finish 를 기다린다.
+      · `central-fleet.json`(L8) 주기 저장이 대상 파일 직접 쓰기였다 — tmp + rename, 쓰는 중 종료도 동기 원자 flush.
+      · 기동 스태거 전 reschedule(L9)이 만든 interval 이 start* 에서 고아가 됐다(metrics·gpu-guest·ipscan) — start* 가 먼저 지운다.
+      · SAN 사용량·베어메탈 사용률·HAProxy 경로 점검 폴러(L10)에 설정 변경 리스너가 없어 주기를 줄여도 옛 주기(최대 6시간)가
+        지나야 먹었다(v2.409 규약의 누락 — vmseries·curuser 는 있었다).
+    - ⚠⚠ **보안 축**: ChatOps(S1)가 `inv.*` 권한 없이 원본 VM 객체·호스트·DS·경보 이름을 줬다 — v2.583 `/search/nl` 게이트의
+      형제 누락. 결과 종류→권한 표는 `llm/nlSearch.js NL_ENTITY_PERM` **하나**가 소유하고 두 곳이 쓴다(표가 두 벌이면 한쪽에만
+      종류가 는다). 권한 없는 종류는 `search.withheld` 로 밝히고, 컨텍스트의 이름은 '(권한 없음 — 이름 생략)' 이다(개수는 대시보드 수준).
+      로그 분석 붙여넣기(S2)가 이벤트 루프를 24초 멈췄다 — 템플릿 정규식의 무제한 앞보기(`(?=[\w.-]*\d)`)가 단어 경계마다 끝까지
+      훑어 O(n²) 였다(`{0,80}` 로 묶어 4,000자 23ms → 2.5ms, 결과 동일). 분석 루프도 줄 수만이 아니라 **시간(25ms)** 으로 양보한다.
+      **정규식에 무제한 `[…]*` 앞보기를 쓰지 말 것** — 경계마다 재시작하는 패턴이면 곧 초선형이다.
+    - 회귀 방지 기록: `R-B1` 실제 설정 파일 2개(`svcmon-log.json`·`agent-assignments.json`)가 v2.590 에 '상태 파일' 로 분류돼
+      편집해도 변경 백업이 안 생겼다(`SETTINGS_NOT_STATE`) · `R-D1` 정합성 점검을 생략한 DB 를 '정상' KPI 로 셌다(`uncheckedCount`) ·
+      `R-G1` 게스트 디스크 carry-in 이 **제거된 파티션**을 되살려 '축소 후보(safe)' 를 냈다(`currentPartPaths` → `removed`) ·
+      `R-H1` 지표 샘플러 점검이 주기 30분 초과 설정에서 거짓 warn · `R-P1` 점검중(maintenance) 위임 vCenter 를 ping 이 '직접 수집' 으로 오판.
+    - ⚠⚠ **packaging 축**(게시된 v2.590 자산으로 재현):
+      · **Windows 패키지가 `DEFAULT_ADMIN_PASSWORD=admin123` 을 배포했다**(P1 high) — 리눅스는 2026-06-27 H4 에 고쳤는데 Windows
+        예제만 남았다(형제 비대칭). 인바운드 4000 을 여는 수집기라 정당한 관리자보다 먼저 로그인한 사람이 자기 OTP 를 등록해
+        계정을 가져갈 수 있었다. 예제는 주석 처리한 빈 값이고 `config.js` 기본값도 `''` 다(ENV.md 에 그대로 실린다).
+      · **Windows 빌드가 빌드 머신의 `server/config` 를 통째로 담았다**(P2) — 게시된 zip 에 CI 의 `auth-secret`·`audit.ndjson`·
+        내부 IP 가 있었다. CONFIG_DIR 없이 앱 폴더에서 실행하면 그 공개 키로 세션 토큰을 위조할 수 있다. offline 빌드의 L-9
+        정리와 같은 `find` 를 넣었다. **새 패키지 빌드 스크립트를 만들면 이 정리부터 복사할 것.**
+      · push 경로의 `X-Bundle-Sha256` 은 **자기신고 해시**다(P6) — 손상·잘림만 잡고 토큰 탈취·중간자는 못 막는다. 주석·
+        server/CLAUDE.md 의 과장된 주장을 정정했다(진짜 무결성은 수신측 키 서명 — 별건).
+      · in-app 업그레이드가 **하드링크를 버리고 모드를 0644 로** 썼다(P4 — `sshcrypto.node` 소실 → ssh2 가 JS 폴백). 하드링크는
+        앞서 나온 대상의 사본, 실행 비트만 옮긴다. ⚠ **심링크는 계속 건너뛴다** — 심링크 뒤에 그 아래 경로의 파일이 오면
+        `path.resolve` 검사를 통과한 채 스테이징 밖에 쓴다(zip slip 의 심링크 변형).
+      · 스테이징 쓰기 실패가 `.new.<ts>` 를 남겨 자동 적용 재시도마다 디스크 부족이 악화됐다(P7) · install.sh(초)와 in-app(ms)
+        백업 시각을 그대로 비교해 가장 최근 수동 재설치 백업이 먼저 지워졌다(P8 — 11자리 미만은 초로 본다) · 오프라인
+        패키지에 `otp-enroll.sh` 가 없어 문서의 잠금 복구 도구가 설치되지 않았다(P5).
+    - **데이터 흐름 지도 MAIN 연결**(`dataFlowLayout.js mainSummary·edgeDirections` + `DataFlow.jsx`, 사용자 요청 "데이터 흐름
+      지도 메인 연결 만들어줘" — 선택: **데이터 방향** · 전체 검증 · v2.591 에 함께):
+      · 방향은 **데이터가 가는 쪽**이다 — 엣지 → 메인 = push·결과 회신·**메인이 가져옴(cpull)**, 메인 → 엣지 = 설정·자료 pull·
+        작업 인출·메인이 보냄(cpush). 시안은 cpull 을 '메인 → 엣지' 에 두었는데 사용자가 고른 기준으로 옮겼다. 엣지 카드의
+        '↑ 올림 · ↓ 가져감 · ⇄ 중앙 호출' 은 **요청한 쪽** 기준이라 축이 다르다 — 범례가 그 차이를 말한다(합치지 말 것).
+      · 선 색 = 그 방향 연결 중 가장 나쁜 상태, **기록이 없으면 회색 점선**(정상 아님). 판정은 `edgeDirections` 하나이고 카드·선·
+        상세 표가 같은 값을 쓴다. `UP_KINDS ∪ DOWN_KINDS` 는 서버 KINDS 6종과 같아야 한다(테스트 고정 — 종류를 늘리면 여기도).
+      · 엣지는 **2열**이다. 오른쪽 열은 곧은 선, 왼쪽 열은 열 사이 통로(NEAR·FAR)로 내려가 **그 카드 아래 행 간격**을 지난다 —
+        테스트가 1·7·8·28곳에서 선이 어떤 카드도 가로지르지 않음과 통로 세로선이 겹치지 않음을 선분 단위로 고정한다.
+        ⚠ MAIN 카드는 **마지막 행 아래 간격까지** 내려와야 한다 — 자체 테스트가 잡았다(빼면 마지막 행 왼쪽 선이 허공에 꽂혔다).
+      · ⚠ flex 안의 점(`Dot`)에 `flexShrink:0` 이 없으면 좁은 칸에서 **세로 막대로 찌그러진다**(v2.591 스크린샷 판독에서 발견 —
+        수치로는 안 잡혔다). MAIN 카드 칸은 '전' 을 뺀 짧은 표기(`12초`)이고 열 머리가 '경과' 다.
+      · ⚠ 정직 기록: Chromium 검증은 **실제 경로 목록 + 합성 엣지 1·8·28곳**(route 가로채기)로 했다 — 실엣지 규모의 실제
+        링크 분포는 보지 못했다.
+    - ⚠⚠ **인증 실패 정지 가드 확장**(authguard-rest 축 F1~F7 + R-N1·R-BM1·R-BM2, 상세는 `server/CLAUDE.md` 'v2.541' 절 — 회귀
+      `test/authStop2591.test.js` 24건이 가짜 vCenter·Redfish·SSH·SMTP 로 **실제 로그인 시도 수**를 센다): vCenter 보조 수집기 7종이
+      주 폴러 정지를 **읽기만** 하고 · 게스트 계정 거부는 vCenter 거부가 **아니며** · 여러 대상을 같은 계정으로 도는 조사는
+      **회로 차단기**(연속 3회) · iDRAC 대역 스캔·SMTP·네트워크 모니터도 멈춘다. ⚠ v2.590 이 '가드 없음' 목록에 넣은 `metrics` 는
+      오탐이었다(스냅샷만 읽는다) — 목록을 쓸 때 **로그인 호출이 실제로 있는지 import 부터** 볼 것.
+    - **iDRAC 인증 캐시**(L4, `idrac/redfish.js`): 512 **FIFO** 라 대상이 그보다 많으면 순차 폴링에서 전부 밀려났고, 세션 전용 iDRAC 에
+      매 주기 새 세션을 만들고 지우지 않았다(재현: 600대 → 회차마다 600개). **LRU**(조회 성공도 뒤로) · 상한 `IDRAC_AUTH_CACHE_MAX`
+      기본 4096 · 밀려나거나 바뀐 세션은 **DELETE**. ⚠ 크기 상한이 있는 캐시는 **등록 규모와 비교해** 정할 것(v2.503 snapCache ·
+      v2.581 vmperf 와 같은 교훈의 네 번째).
+    - **RMA 결과 회신**(PR-9): `resilientFetch` 는 비-2xx 를 throw 하지 않는다 — `.catch` 만 두면 413·403 이 무음이다(형제 워커 3종은
+      v2.591 PR-5 가 고쳤다). `/api/central/rma-result` 도 BIG_JSON 에 등록했다. **`resilientFetch` 결과는 `r.ok` 를 볼 것.**
+
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
 서버 보안 불변조건(전역 TLS·RBAC·토큰 검증·scope·OTP·WS 게이트웨이 등 전 항목)은
