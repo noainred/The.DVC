@@ -335,13 +335,15 @@ export function requestStatus(rids = [], { user = '', isAdmin = false } = {}) {
     if (!mine(owner)) continue;
     const ageMs = Math.round(now - r.t0);
     const prev = live.get(r.rid);
-    if (!prev || prev.serverMs < ageMs) live.set(r.rid, { state: 'processing', serverMs: ageMs, method: r.method, route: routeKeyOf({ path: r.path }) });
+    // v2.585 — 요청자(로그인 계정)를 싣는다. 사용자 요청: "요청자 ID 가 포탈 내부에서 쓰는 ID 말고 job 을 실행한
+    // 사용자 ID 로 표시". 소유자 검사를 통과한 항목만 여기 오므로 본인이거나(일반) 관리자가 보는 남의 요청이다.
+    if (!prev || prev.serverMs < ageMs) live.set(r.rid, { state: 'processing', serverMs: ageMs, method: r.method, route: routeKeyOf({ path: r.path }), user: owner });
   }
   for (const rid of want) {
     if (live.has(rid)) { out[rid] = live.get(rid); continue; }
     const d = recentDone.get(rid);
     if (d && mine(d.user)) {
-      out[rid] = { state: 'done', serverMs: d.ms, status: d.status, method: d.method, route: d.route, endedAgoMs: Math.max(0, Date.now() - d.endedAt) };
+      out[rid] = { state: 'done', serverMs: d.ms, status: d.status, method: d.method, route: d.route, endedAgoMs: Math.max(0, Date.now() - d.endedAt), user: String(d.user || '') };
       continue;
     }
     out[rid] = { state: 'unknown' };

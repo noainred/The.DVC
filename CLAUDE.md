@@ -3002,6 +3002,20 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ 정직 기록: Chromium 검증은 **중앙+엣지 목 스택 2대**(실제 pull·push·거부가 오갔다)로 했고 실장비 엣지 28곳
       규모의 라벨 겹침은 보지 못했다 — 바깥 노드 72개 초과면 라벨을 끄고 그 사실을 밝힌다(`labelsHidden`).
 
+  - **로딩 표시의 '요청자' 는 서버가 기록한 로그인 계정이 먼저다**(v2.585, `perfClientLogic.requesterText` +
+    `TaskWho.jsx`, 사용자 요청 "요청자 ID 가 포탈 내부에서 사용하는 ID 말고 job 을 실행한 사용자 ID 로 표시"):
+    `GET /perf/req-status` 가 소유자 검사를 통과한 항목에 `user` 를 싣고, 서버 확인 전에는 이 브라우저의 로그인
+    계정을 쓴다(요청은 이 탭이 보냈다). 둘 다 없으면 이름을 지어내지 않는다. ⚠ 내부 추적 ID(`w…-…`)는 **대체가
+    아니라 보조**다 — 서버 성능 측정·라이브 로그와 대조하는 유일한 열쇠라 작게 남긴다(지우지 말 것).
+  - **스토리지 표 '버전' 열은 빈 이유를 말한다**(v2.585, `storageVersionText.versionCellInfo` +
+    `unitySsh.versionAttemptsOf` — 사용자 신고 "Unity 버전명 안나오는거 개선", 2.583 캡처 18대 전부 `—`):
+    로컬 재현으로 파서·`stripUemcliBanner` 는 정상이었다(svc_diag 표본 → `5.4.0.0.5.094`) — 남은 원인은 장비
+    출력 자체(비-PTY exec 의 `svc_diag` 응답·`/sys/general show -detail` 의 키)라 **원인을 화면에 드러내는 것**을
+    택했다: 사유 + 후보별 시도(성공/값 없음/시한 초과/실패·소요·앞 160자)를 `?` 툴팁으로. 후보 셋째
+    `uemcli /sys/soft/ver show` 는 **Type=Installed 만** 읽는다(Candidate 이미지 버전을 현재 버전이라 말하면
+    오류 없이 틀린 값). 시한 17초 = 예산 산수(필수 135초 + 3×17 ≤ 187.5초, `unitySshBudget2528.test.js`).
+    ⚠ 실장비 출력을 받으면 후보를 좁힐 것 — 이 릴리스는 원인 확정이 아니다.
+
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
 서버 보안 불변조건(전역 TLS·RBAC·토큰 검증·scope·OTP·WS 게이트웨이 등 전 항목)은

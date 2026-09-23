@@ -68,7 +68,7 @@ test('★ 명령 수 × 명령당 시한이 세션 예산 안에 들어간다 �
  */
 test('후보 체인은 버전 항목만 — 용량·상태 경로는 항목당 명령 1개다', () => {
   for (const s of SPECS) {
-    const max = s.key === 'version' ? 2 : 1;
+    const max = s.key === 'version' ? 3 : 1; // v2.585: /sys/soft/ver show 후보 추가(시한 20초 — 아래 산수가 본다)
     assert.ok(s.cmds.length <= max,
       `${s.key}: 후보가 ${s.cmds.length}개다(허용 ${max}) — 실패 시 시한을 그만큼 더 쓴다`);
     if (s.cmds.length > 1) {

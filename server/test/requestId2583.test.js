@@ -39,6 +39,7 @@ test('② ③ requestStatus — processing/done/unknown · 소유자만', () => 
   const p = M.requestStatus(['wtest1-a', 'nope-1234', 'bad id'], { user: 'alice' });
   assert.equal(p['wtest1-a'].state, 'processing');
   assert.equal(p['wtest1-a'].method, 'GET');
+  assert.equal(p['wtest1-a'].user, 'alice', 'v2.585: 요청자(로그인 계정)를 싣는다');
   assert.ok(p['wtest1-a'].serverMs >= 0);
   assert.equal(p['nope-1234'].state, 'unknown');
   assert.ok(!('bad id' in p), '형식이 틀린 ID 는 응답에 싣지 않는다');
@@ -48,6 +49,7 @@ test('② ③ requestStatus — processing/done/unknown · 소유자만', () => 
   const d = M.requestStatus(['wtest1-a'], { user: 'alice' })['wtest1-a'];
   assert.equal(d.state, 'done');
   assert.equal(d.status, 200);
+  assert.equal(d.user, 'alice', 'v2.585: 완료 기록에도 요청자');
   assert.equal(d.serverMs, 6100);
   assert.equal(M.requestStatus(['wtest1-a'], { user: 'bob' })['wtest1-a'].state, 'unknown');
 });

@@ -36,6 +36,8 @@
  */
 import { runCliSession, sshFailureSnapshot } from './cliSsh.js';
 import { stripUemcliBanner } from '../../proxy/sshExec.js';
+import { versionAttemptsOf } from './cliSsh.js'; // v2.585 — 실패 스냅샷(cliSsh)도 같은 요약을 싣는다. ⚠ import+export(재수출 전용 문법은 이 파일 안에서 이름을 만들지 않는다 — v2.575)
+export { versionAttemptsOf };
 import { emptySnapshot } from '../types.js';
 import { parsePools, parseSystemSpace, checkSpaceIdentity, parseUemcli } from './uemcliParse.js';
 import { versionFromUemcli, versionFromSvcDiag, mergeVersionInfo } from './unityVersion.js';
@@ -64,7 +66,12 @@ export const SPECS = [
   { key: 'version',
     answered: true,
     rules: ['pager', 'certAccept'],
-    timeoutMs: 20_000,
+    /*
+     * v2.585 — 후보가 셋이 되며 17초로 줄였다: `unitySshBudget2528.test.js` 의 산수(전체 최악 합 ≤ 예산 × 1.25 =
+     * 187.5초)에서 필수 3항목 135초 + 3 × 17초 = 186초. 실측 svc_diag 11초·uemcli 4초라 여유는 있지만 20초보다
+     * 좁다 — 시한에 걸리면 `versionAttempts` 의 `timedOut` 이 그 사실을 열에 밝힌다(조용히 비지 않는다).
+     */
+    timeoutMs: 17_000,
     /*
      * ⚠⚠ **순서가 바뀌었다(v2.545)** — `svc_diag` 가 먼저다.
      * v2.544 는 `uemcli /sys/general show -detail` 를 앞에 뒀는데 **이 장비의 그 출력을 한 번도
@@ -72,7 +79,15 @@ export const SPECS = [
      * '못 본 형식을 앞에 두는 것' 이 v2.525·2.526·2.529·2.530 네 번의 헛수정을 만든 원인이다 —
      * **확인한 것을 먼저 쓴다.**
      */
-    cmds: ['svc_diag', 'uemcli /sys/general show -detail'],
+    /*
+     * v2.585 — 세 번째 후보 `uemcli /sys/soft/ver show`(Dell Unity CLI 가이드의 '시스템 소프트웨어 버전').
+     * 사용자 신고(2026-09-23 캡처): 2.583 에서도 Unity 18대 전부 버전 열이 `—` 였다. 로컬 재현으로 파서·배너
+     * 제거는 정상이었으므로(svc_diag 표본 → 5.4.0.0.5.094) 남은 원인은 **장비 출력 자체**다 — 비-PTY exec 에서
+     * `svc_diag` 가 다르게 답하거나, `/sys/general show -detail` 에 버전 키가 없는 경우. 그래서 ① 후보를 하나 더
+     * 두고 ② **시도 결과를 열에 직접 밝힌다**(`extra.versionAttempts` — 명령·성공/실패·소요·끊김·앞 160자).
+     * ⚠ 후보 이미지 버전 오인은 `versionFromUemcli` 가 막는다(Type=Installed 우선). 실장비 출력을 받으면 좁힐 것.
+     */
+    cmds: ['svc_diag', 'uemcli /sys/general show -detail', 'uemcli /sys/soft/ver show'],
     /*
      * ⚠⚠ **성공 조건은 '오류가 없다' 가 아니라 '버전이나 모델을 읽었다' 다**(v2.545 —
      * 사용자 신고 "아직 버전명이 나오지 않네"). v2.544 는 첫 후보가 오류만 안 내면 거기서
@@ -294,6 +309,8 @@ export async function collectViaSsh(device) {
     //   되돌리지 말 것: '성공했다고 표시됐는데 값이 비었다' 는 경우를 볼 수 없게 된다.
     snap.extra.cliRaw = raw;
     snap.extra.cliRawMode = 'all';
+    // v2.585 — 버전이 왜 비었는지를 표의 열이 바로 말할 수 있게 시도 결과를 따로 싣는다(원문 상세를 열지 않아도).
+    snap.extra.versionAttempts = versionAttemptsOf(raw);
     return snap;
   } catch (e) {
     return sshFailureSnapshot(device, e, raw);

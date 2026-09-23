@@ -22,6 +22,7 @@ import { healthBadge, sectionBadge, cliCutText } from './storageNodeText.js';   
 import { authFailInfo } from './storageAuthText.js';  // v2.528: 401 진단 문구(순수)
 import { capacityRows, srpRows, subscribedNote, usageTrust } from './powermaxCapacityText.js'; // v2.534: 구독/할당/실제기록(순수)
 import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
+import { versionCellInfo } from './storageVersionText.js';
 import { unitText } from '../unitText.js';
 
 /**
@@ -356,12 +357,16 @@ function Cell({ col, r, ctx }) {
        * ⚠ 표시값은 빌드 문자열에서 뽑은 점 버전이다(`5.4.0.0.5.094`). **원문을 title 로 남긴다** —
        * 추출이 다른 장비에서 빗나갈 수 있으므로 사용자가 대조할 수 있어야 한다(v2.544).
        */
-      return (
-        <td className="muted" style={{ fontSize: 12 }}
-          title={s?.extra?.versionRaw ? `원문 ${s.extra.versionRaw}${s.extra.versionSource ? ` · 출처 ${s.extra.versionSource}` : ''}` : undefined}>
-          {s?.version || '—'}
-        </td>
-      );
+      {
+        // v2.585 — 빈 값의 **이유**를 열이 말한다(사용자 신고 "Unity 버전명 안나오는거 개선"). 판정·문구는 storageVersionText 하나.
+        const vi = versionCellInfo(s);
+        return (
+          <td className="muted" style={{ fontSize: 12 }} title={vi.title || undefined}>
+            {vi.text}
+            {vi.mark ? <span style={{ marginLeft: 4, color: vi.kind === 'timeout' ? 'var(--amber)' : 'var(--text-dim)', cursor: 'help' }} aria-label="버전이 비어 있는 이유">{vi.mark}</span> : null}
+          </td>
+        );
+      }
     case 'usage':
       return (
         <td style={{ minWidth: col.minWidth }}>
