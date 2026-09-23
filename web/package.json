@@ -1,6 +1,6 @@
 {
   "name": "vmware-portal-web",
-  "version": "2.583.0",
+  "version": "2.584.0",
   "private": true,
   "type": "module",
   "scripts": {
