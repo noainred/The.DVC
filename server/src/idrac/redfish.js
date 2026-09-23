@@ -40,12 +40,44 @@ const basicHeader = (username, password) => 'Basic ' + Buffer.from(`${username}:
 // 호스트별 '성공한 인증 방식' 캐시 — 한 iDRAC에 여러 번 GET(probe 2회, fetchPower 다수)할 때
 // 매번 Basic-401 왕복/세션 재생성을 피한다. 세션 토큰은 iDRAC idle 타임아웃(기본 30분)보다 짧게
 // 재사용(20분). basic/digest/session 중 무엇이 통했는지 기억.
-const AUTH_CACHE = new Map(); // `${base}\0${username}\0${pwFp}` -> { mode, challenge?, token?, at }
+const AUTH_CACHE = new Map(); // `${base}\0${username}\0${pwFp}` -> { mode, challenge?, token?, location?, base?, at }
 const AUTH_TTL_MS = 20 * 60_000;
-function touchAuthCache(key, val) {
-  AUTH_CACHE.set(key, { ...val, at: Date.now() });
-  if (AUTH_CACHE.size > 512) { const k = AUTH_CACHE.keys().next().value; AUTH_CACHE.delete(k); }
+// v2.591(감사 L4 — 재현): 예전 상한은 512 **FIFO** 였다. 같은 키를 다시 set 해도 순서가 안 바뀌어, 순차 폴링 대상이
+// 512 를 넘으면(이 현장 iDRAC 등록 ~965대) 매 주기 전부 밀려났고, Basic 을 끈(세션 전용) iDRAC 은 **주기마다 새
+// Redfish 세션을 만들고 지우지 않았다**(재현: 400대 → 2회차 새 세션 0 · 600대 → 매 회차 600개). 세션은 idle
+// 만료(기본 30분)까지 남아 iDRAC 세션 상한에 닿으면 로그인 실패가 된다(⚠ 상한 수치·이 현장 Basic 비활성 여부는 미확인).
+// 이제 ① **LRU**(조회 성공·갱신 때 뒤로 옮긴다) ② 상한은 등록 규모보다 넉넉히(`IDRAC_AUTH_CACHE_MAX`, 기본 4096)
+// ③ 세션 항목이 밀려나거나 새 토큰으로 바뀌면 **옛 세션을 DELETE** 한다(best-effort — 실패해도 idle 만료로 사라진다).
+const AUTH_CACHE_MAX = Math.max(64, Number(process.env.IDRAC_AUTH_CACHE_MAX) || 4096);
+const SESSION_PATH_RE = /^\/redfish\/v1\/SessionService\/Sessions\/[^/?#\s]+$/;
+/** 캐시에서 빠지는 세션 항목의 iDRAC 세션을 닫는다(응답을 기다리지 않는다). 같은 base 의 세션 경로만. */
+function closeSession(v) {
+  if (!v || v.mode !== 'session' || !v.token || !v.base) return;
+  let loc = String(v.location || '');
+  try { if (/^https?:\/\//i.test(loc)) { const u = new URL(loc); if (`${u.protocol}//${u.host}` !== new URL(v.base).origin) return; loc = u.pathname; } } catch { return; }
+  if (!SESSION_PATH_RE.test(loc)) return;
+  fetch(`${v.base}${loc}`, { method: 'DELETE', headers: { 'X-Auth-Token': v.token }, signal: AbortSignal.timeout(10_000), dispatcher })
+    .then((r) => r.body?.cancel?.()).catch(() => { /* idle 만료로 사라진다 */ });
 }
+function touchAuthCache(key, val) {
+  const prev = AUTH_CACHE.get(key);
+  if (prev && prev.token && prev.token !== val.token) closeSession(prev);
+  AUTH_CACHE.delete(key); // LRU — 다시 넣어 맨 뒤로
+  AUTH_CACHE.set(key, { ...val, at: Date.now() });
+  while (AUTH_CACHE.size > AUTH_CACHE_MAX) {
+    const k = AUTH_CACHE.keys().next().value;
+    closeSession(AUTH_CACHE.get(k));
+    AUTH_CACHE.delete(k);
+  }
+}
+/** 조회 성공 — 만료 시각(at)은 그대로 두고 LRU 순서만 뒤로 옮긴다(토큰 재사용 기한은 발급 시각 기준). */
+function bumpAuthCache(key) {
+  const v = AUTH_CACHE.get(key);
+  if (!v) return;
+  AUTH_CACHE.delete(key); AUTH_CACHE.set(key, v);
+}
+/** 테스트 전용 — 캐시 크기·상한 · 키의 계정 부분(LRU 순서, 앞이 먼저 밀려난다). */
+export function authCacheInfo() { return { size: AUTH_CACHE.size, max: AUTH_CACHE_MAX, order: [...AUTH_CACHE.keys()].map((k) => k.split('\0')[1]) }; }
 // 비밀번호 지문(비-암호 djb2) — 캐시 키에 포함해, 같은 호스트/계정을 '다른 비밀번호'로 시도할 때
 // 이전(정확한 비번)의 세션 토큰이 잘못 재사용되지 않게 한다(평문은 키에 담지 않음).
 function pwFingerprint(pw) {
@@ -77,11 +109,11 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
   if (cached && Date.now() - cached.at < AUTH_TTL_MS) {
     if (cached.mode === 'session' && cached.token) {
       const r = await doFetch({ 'X-Auth-Token': cached.token });
-      if (r.status !== 401) return r;
-      AUTH_CACHE.delete(key); await drain(r); // 토큰 만료 → 아래에서 재수립
+      if (r.status !== 401) { bumpAuthCache(key); return r; }
+      AUTH_CACHE.delete(key); await drain(r); // 토큰 만료 → 아래에서 재수립(이미 무효라 DELETE 하지 않는다)
     } else if (cached.mode === 'digest' && cached.challenge) {
       const r = await doFetch({ Authorization: buildDigestHeader({ username, password, method: 'GET', uri: pathname, challenge: cached.challenge }) });
-      if (r.status !== 401) return r;
+      if (r.status !== 401) { bumpAuthCache(key); return r; }
       AUTH_CACHE.delete(key); await drain(r);
     }
   }
@@ -92,7 +124,11 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
 
   // 2) Digest 챌린지면 Digest
   const challenge = parseDigestChallenge(res.headers.get('www-authenticate'));
-  await drain(res); // Basic 401 본문 소진(undici 소켓 반환) — 챌린지 유무 관계없이.
+  // Basic 401 본문 소진(undici 소켓 반환) — 챌린지 유무 관계없이. v2.591(감사 F3 부수): 버리지 않고 **읽어서** 응답에
+  //   붙인다 — 스캔(probeIdrac)이 그 본문으로 iDRAC 의 오류 메시지를 읽으면 원인 진단용 **추가 인증 1회**가 사라진다
+  //   (IP 당 3~4회 → 2~3회). 본문은 작다(Redfish 오류 JSON). 읽기 실패는 빈 문자열(예전 drain 과 같은 효과).
+  const basicAuthBody = await res.text().catch(() => '');
+  try { Object.defineProperty(res, 'basicAuthBody', { value: basicAuthBody, enumerable: false }); } catch { /* 응답 객체가 막혀 있으면 예전처럼 재요청으로 읽는다 */ }
   if (challenge) {
     const r = await doFetch({ Authorization: buildDigestHeader({ username, password, method: 'GET', uri: pathname, challenge }) });
     if (r.ok) { touchAuthCache(key, { mode: 'digest', challenge }); return r; }
@@ -105,9 +141,10 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
   try {
     const sres = await doFetch({}, 'POST', '/redfish/v1/SessionService/Sessions', JSON.stringify({ UserName: username, Password: password }));
     const token = sres.headers.get('x-auth-token');
+    const location = sres.headers.get('location') || '';
     await drain(sres);
     if ((sres.status === 201 || sres.ok) && token) {
-      touchAuthCache(key, { mode: 'session', token });
+      touchAuthCache(key, { mode: 'session', token, location, base });
       return await doFetch({ 'X-Auth-Token': token });
     }
   } catch { /* 세션 생성 실패 → 아래에서 원래 401 반환 */ }
@@ -161,13 +198,19 @@ async function readIdracAuthMessage(base, pathname, username, password, timeoutM
       headers: { Authorization: basicHeader(username, password), Accept: 'application/json' },
       signal: AbortSignal.timeout(timeoutMs), dispatcher,
     });
-    const body = await res.json().catch(() => null);
-    const err = body?.error;
-    const info = err?.['@Message.ExtendedInfo'];
-    let msg = (Array.isArray(info) && info[0]?.Message) || err?.message || '';
-    msg = String(msg).replace(/\s+/g, ' ').trim();
-    return msg ? msg.slice(0, 160) : '';
+    return idracAuthMessageFrom(await res.text().catch(() => ''));
   } catch { return ''; }
+}
+
+/** Redfish 오류 본문(문자열)에서 iDRAC 메시지를 뽑는다(순수 — v2.591). JSON 이 아니면 빈 문자열. */
+export function idracAuthMessageFrom(text) {
+  let body = null;
+  try { body = JSON.parse(String(text || '')); } catch { return ''; }
+  const err = body?.error;
+  const info = err?.['@Message.ExtendedInfo'];
+  let msg = (Array.isArray(info) && info[0]?.Message) || err?.message || '';
+  msg = String(msg).replace(/\s+/g, ' ').trim();
+  return msg ? msg.slice(0, 160) : '';
 }
 
 /**
@@ -258,7 +301,10 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
     if (sres.status === 401) {
       // Basic·Digest·세션 토큰 모두 거부됨 → iDRAC이 준 실제 오류 메시지를 캡처해 원인을 구분한다
       // (잘못된 자격증명 vs 계정 잠금 vs 로그인 권한 없음). iDRAC 메시지가 있으면 그대로 노출.
-      const idracMsg = await readIdracAuthMessage(base, '/redfish/v1/Systems', username, password, timeoutMs);
+      // v2.591: rawGet 이 이미 받은 Basic 401 본문을 쓴다 — 없을 때만(예전 경로) 한 번 더 요청한다.
+      const idracMsg = typeof sres.basicAuthBody === 'string'
+        ? idracAuthMessageFrom(sres.basicAuthBody)
+        : await readIdracAuthMessage(base, '/redfish/v1/Systems', username, password, timeoutMs);
       const lockish = /lock|attempt|exceed|잠금|blocked|denied/i.test(idracMsg);
       const privish = /privile|permission|not allow|권한|access/i.test(idracMsg);
       authHint = idracMsg
@@ -1032,9 +1078,12 @@ export async function fetchUsage(entry, { full = false, allowList = true } = {})
       }
     } catch (e) {
       const msg = String(e?.message || e);
-      // 401/403 은 자격증명이라 단독 경로도 같은 결과다 — 바로 알린다(반복 시도 금지 — 계정 잠금).
-      if (/\b40[13]\b/.test(msg)) return { ok: false, kind: 'auth', error: msg.slice(0, 300) };
-      /* 그 밖(404·타임아웃)은 단독 경로로 내려간다 */
+      // 401 은 자격증명이라 단독 경로도 같은 결과다 — 바로 알린다(반복 시도 금지 — 계정 잠금).
+      // v2.591(감사 R-BM2): **403 은 자격증명 거부가 아니다**(인증은 통했고 그 자원이 허락되지 않았다 — 라이선스·
+      //   권한 부족일 수 있다). 403 을 'auth' 로 두면 bmusage 가 **자격증명과 무관하게** 텔레메트리 주기 수집을
+      //   영구 정지하고 대체 경로(Enterprise)까지 막는다. 그래서 403 은 단독 경로로 내려가 스스로 판정한다.
+      if (e?.status === 401 || e?.authFailed === true || /\b401\b/.test(msg)) return { ok: false, kind: 'auth', error: msg.slice(0, 300) };
+      /* 그 밖(403·404·타임아웃)은 단독 경로로 내려간다 */
     }
     const fb = await fetchUsage(entry, { full: false });
     return { ...fb, fullTried: true };
@@ -1044,8 +1093,13 @@ export async function fetchUsage(entry, { full = false, allowList = true } = {})
     rep = await get(base, '/redfish/v1/TelemetryService/MetricReports/SystemUsage', entry.username, entry.password);
   } catch (e) {
     const msg = String(e?.message || e);
-    // 404 는 '이 iDRAC 에 그 리포트가 없다'(라이선스·버전), 401/403 은 자격증명이다 — 조치가 다르다.
-    const kind = /\b404\b/.test(msg) ? 'no-telemetry' : (/\b40[13]\b/.test(msg) ? 'auth' : 'unreachable');
+    // 404 는 '이 iDRAC 에 그 리포트가 없다'(라이선스·버전), 401 은 자격증명이다 — 조치가 다르다.
+    // v2.591(감사 R-BM2): 403 은 **'forbidden'** 이다 — 인증은 통했고 그 리포트가 허락되지 않았다(라이선스·계정 권한).
+    //   'auth' 로 두면 bmusage 가 자격증명과 무관하게 주기 수집을 정지하고 비밀번호를 고치라는 틀린 조치를 준다.
+    //   자격증명 거부(401)는 get() 이 status·authFailed 를 싣는다 — 문구보다 그것을 먼저 본다.
+    const kind = /\b404\b/.test(msg) ? 'no-telemetry'
+      : (e?.status === 401 || e?.authFailed === true || /\b401\b/.test(msg)) ? 'auth'
+        : (e?.status === 403 || /\b403\b/.test(msg)) ? 'forbidden' : 'unreachable';
     return { ok: false, kind, error: msg.slice(0, 300) };
   }
   const vals = Array.isArray(rep?.MetricValues) ? rep.MetricValues : [];
@@ -1169,7 +1223,12 @@ export async function fetchUsageSensors(entry, { allowProbe = true } = {}) {
     } catch (e) {
       const msg = String(e?.message || e);
       // ⚠ 401/403 은 캐시하지 않는다 — 비밀번호를 고치면 바로 되어야 한다.
-      const kind = /\b40[13]\b/.test(msg) ? 'auth' : (/\b404\b/.test(msg) ? 'absent' : 'unreachable');
+      // v2.591(감사 R-BM2 — 형제 경로): 텔레메트리(fetchUsage)와 같은 규칙 — **401 만 자격증명 거부('auth')** 이고
+      //   403 은 'forbidden'(인증은 통했고 그 자원이 허락되지 않았다)이다. 403 을 'auth' 로 두면 bmusage 가 대체 경로의
+      //   인증 실패 정지를 걸어 비밀번호와 무관하게 수집이 멈춘다.
+      const kind = /\b404\b/.test(msg) ? 'absent'
+        : (e?.status === 401 || e?.authFailed === true || /\b401\b/.test(msg)) ? 'auth'
+          : (e?.status === 403 || /\b403\b/.test(msg)) ? 'forbidden' : 'unreachable';
       if (kind === 'absent') {
         _sensorPaths.set(key, { absent: true, reason: 'Sensors 경로가 없습니다(404).', seen: [], at: Date.now() });
       }

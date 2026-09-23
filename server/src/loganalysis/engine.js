@@ -217,12 +217,20 @@ export function compactState(st, { tmpl = 60, prob = 30, ent = 30, http = 100 } 
   return st;
 }
 
-/** 항목 배열을 청크로 분석(2,000줄마다 양보). */
-export async function analyzeItems(items, rules, { chunk = 2000, state = newState() } = {}) {
+/**
+ * 항목 배열을 청크로 분석한다. v2.591 S2: 줄 수(2,000)만으로 양보하면 줄 하나가 무거울 때(긴 줄·많은 규칙) 한 청크가
+ * 수 초를 잡는다(실측: 붙여넣기 6MB 에 `/api/health` 24.6초 지연). **시간(sliceMs)** 으로도 양보해 이벤트 루프 정지를
+ * 짧게 묶는다 — 결과는 같고 순서도 같다.
+ */
+export async function analyzeItems(items, rules, { chunk = 2000, sliceMs = 25, state = newState() } = {}) {
   const idx = indexRules(rules);
+  let t = Date.now();
   for (let i = 0; i < items.length; i += 1) {
     addItem(state, items[i], idx);
-    if (i && i % chunk === 0) await new Promise((r) => setImmediate(r));
+    if ((i && i % chunk === 0) || Date.now() - t >= sliceMs) {
+      await new Promise((r) => setImmediate(r));
+      t = Date.now();
+    }
   }
   return state;
 }

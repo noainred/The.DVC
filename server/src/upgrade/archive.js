@@ -21,11 +21,23 @@ function cstr(buf, start, len) {
   return buf.toString('utf8', start, end);
 }
 
-/** Parse a USTAR/GNU tar buffer into [{name, type, data}] (regular files only). */
+/**
+ * Parse a USTAR/GNU tar buffer into [{name, data}] (regular files + hard links).
+ *
+ * v2.591(감사 P4 — 게시 번들로 재현): 예전엔 일반 파일(typeflag 0)만 남기고 **하드링크(1)** 를 버려, npm 이
+ * 하드링크로 담는 `ssh2/.../build/Release/sshcrypto.node` 가 in-app 업그레이드마다 사라졌다(ssh2 네이티브 crypto →
+ * JS 폴백으로 조용히 성능 저하 · 새 설치(cp -a)와 결과가 달라짐). 이제 하드링크는 **앞서 나온 대상 파일의 사본**으로
+ * 풀고, 실행 비트는 `data.exec`(Buffer 속성)로 싣는다(applyPackage 가 0755/0644 로 쓴다 — setuid 등 다른 비트는
+ * 옮기지 않는다).
+ * ⚠ 심링크(2)는 **계속 건너뛴다** — 심링크 멤버 뒤에 그 아래 경로의 파일이 오면 `path.resolve` 검사를 통과한 채
+ *   스테이징 **밖**에 쓰게 된다(zip slip 의 심링크 변형). 빠지는 것은 node_modules/.bin 편의 링크뿐이다.
+ */
 export function parseTar(buf) {
   const entries = [];
+  const byName = new Map();
   let offset = 0;
   let longName = null;
+  let longLink = null;
 
   while (offset + 512 <= buf.length) {
     const block = buf.subarray(offset, offset + 512);
@@ -35,7 +47,9 @@ export function parseTar(buf) {
     if (allZero) break;
 
     const name = cstr(block, 0, 100);
+    const mode = parseInt((cstr(block, 100, 8).trim() || '0'), 8) || 0;
     const size = parseInt((cstr(block, 124, 12).trim() || '0'), 8) || 0;
+    const linkName = cstr(block, 157, 100);
     const typeflag = block[156] === 0 ? '0' : String.fromCharCode(block[156]);
     const prefix = cstr(block, 345, 155);
     offset += 512;
@@ -47,12 +61,31 @@ export function parseTar(buf) {
       longName = data.toString('utf8').replace(/\0+$/, '');
       continue;
     }
+    if (typeflag === 'K') {                 // GNU long link-name extension
+      longLink = data.toString('utf8').replace(/\0+$/, '');
+      continue;
+    }
     if (typeflag === 'x' || typeflag === 'g') continue; // PAX headers — skip
 
     const fullName = longName || (prefix ? `${prefix}/${name}` : name);
-    longName = null;
-    const type = typeflag === '0' ? 'file' : typeflag === '5' ? 'dir' : 'other';
-    if (type === 'file') entries.push({ name: fullName, data: Buffer.from(data) });
+    const target = longLink || linkName;
+    longName = null; longLink = null;
+    if (typeflag === '0' || typeflag === '7') {
+      const b = Buffer.from(data);
+      if (mode & 0o111) b.exec = true;
+      entries.push({ name: fullName, data: b });
+      byName.set(fullName, b);
+    } else if (typeflag === '1') {
+      // 하드링크 — 대상은 이 아카이브에서 **앞서 나온** 일반 파일이어야 한다(없으면 버린다: 밖을 가리킬 수 없다).
+      const src = byName.get(target);
+      if (src) {
+        const b = Buffer.from(src);
+        if (src.exec || (mode & 0o111)) b.exec = true;
+        entries.push({ name: fullName, data: b });
+        byName.set(fullName, b);
+      }
+    }
+    // '2'(심링크)·'5'(디렉터리)·그 밖은 건너뛴다 — 위 머리말 참조.
   }
   return entries;
 }

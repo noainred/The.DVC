@@ -29,6 +29,8 @@ import { commitVmSeries, loadCursors, pruneVmSeries, vmSeriesFreeBytes, setVmSer
 import { pushVmSeriesSlice, vmSeriesPushEnabled } from '../agent/vmSeriesPush.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { numOrNull } from '../util/numOrNull.js';
+import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
+import { authStopView } from '../util/authGuard.js';
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.VMSERIES_CONCURRENCY) || 4));
 // v2.589: 빈 값·'abc' 가 Number() 로 0·NaN 이 되어 디스크 가드가 꺼졌다 — 못 읽으면 기본 5GB(명시적 0 만 '끔').
@@ -110,6 +112,12 @@ export async function runVmSeriesNow(trigger = 'manual') {
       if (vc.collectMode === 'site') { skipped.push({ vcenterId: vc.id, why: 'site' }); return false; }     // 엣지가 push
       if (vc.mock === true || isMockVcenter(vc)) { skipped.push({ vcenterId: vc.id, why: 'mock' }); return false; }
       if (!vcenterSelected({ ...settings, enabled: true }, vc.id)) { skipped.push({ vcenterId: vc.id, why: 'not-selected' }); return false; }
+      // v2.591(감사 F1): 인벤토리 수집과 같은 계정 — 인증 실패로 멈춰 있으면 주기 수집은 로그인하지 않는다(읽기 전용
+      //   조회. 해제는 주 폴러·연결 테스트만). 수동 실행은 막지 않는다. 사유를 skipped 에 싣는다(조용히 빼지 않는다).
+      if (trigger !== 'manual') {
+        const st = vcAuthGuard.peekAuthStop(vc);
+        if (st) { skipped.push({ vcenterId: vc.id, why: 'auth-stopped', authStopped: authStopView(st) }); return false; }
+      }
       return true;
     });
     const results = await pool(vcs, CONCURRENCY, (vc) => withJob(`vmseries.collect:${vc.id}`, () => collectOne(vc, snap, settings)));
@@ -119,7 +127,9 @@ export async function runVmSeriesNow(trigger = 'manual') {
       const vc = vcs[i];
       if (!r.ok) {
         const d = describeError(r.error);
-        errors.push({ vcenterId: vc.id, error: d.message, hint: d.hint || '' });
+        // v2.591: 로그인 거부면 주 폴러와 같은 정지 기록에 시도를 올린다(화면의 시도 횟수가 정직해지게).
+        const rec = isVcAuthError(r.error) ? vcAuthGuard.markAuthStopped(vc.id, vc, d.message) : null;
+        errors.push({ vcenterId: vc.id, error: d.message, hint: d.hint || '', ...(rec ? { authStopped: authStopView(rec) } : {}) });
         console.error(`[vmseries] ${vc.id} (${vc.name}) 수집 실패: ${d.message}${d.hint ? ` — ${d.hint}` : ''}`);
         return;
       }

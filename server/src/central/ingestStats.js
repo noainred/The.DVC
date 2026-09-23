@@ -17,8 +17,10 @@ function ewma(prev, sample, alpha = 0.3) { return prev == null ? sample : prev *
  * @param wireBytes 와이어 바이트(Content-Length; gzip이면 압축 크기)
  * @param summary   페이로드 요약(선택) { vcenterId, hosts, vms, datastores, networks, alarms, gzip }
  */
-export function recordIngest(agent, endpoint, { wireBytes = 0, summary = null } = {}) {
-  const key = String(agent || '(unknown)');
+export function recordIngest(agent, endpoint, { wireBytes = 0, summary = null, verified = false } = {}) {
+  // v2.591(PR-1): 키 길이 상한 — 호출부도 자르지만 저장소가 스스로 지킨다(본문 문자열이 Map 키가 되던 결함).
+  const key = String(agent || '(unknown)').slice(0, 64) || '(unknown)';
+  const ep = String(endpoint || '').slice(0, 200);
   const now = Date.now();
   let a = byAgent.get(key);
   if (!a) {
@@ -26,17 +28,21 @@ export function recordIngest(agent, endpoint, { wireBytes = 0, summary = null } 
       let oldest = null; for (const [k, v] of byAgent) if (!oldest || v.lastAt < oldest[1].lastAt) oldest = [k, v];
       if (oldest) byAgent.delete(oldest[0]);
     }
-    a = { agent: key, firstAt: now, lastAt: now, pushes: 0, wireBytes: 0, intervalMsEwma: null, byEndpoint: new Map(), last: null };
+    a = { agent: key, firstAt: now, lastAt: now, pushes: 0, verifiedPushes: 0, wireBytes: 0, intervalMsEwma: null, byEndpoint: new Map(), last: null };
     byAgent.set(key, a);
   }
   if (a.lastAt && now > a.lastAt) a.intervalMsEwma = ewma(a.intervalMsEwma, now - a.lastAt);
   a.lastAt = now; a.pushes++; a.wireBytes += wireBytes;
-  let e = a.byEndpoint.get(endpoint);
-  if (!e) { e = { endpoint, count: 0, wireBytes: 0, firstAt: now, lastAt: 0, lastBytes: 0, intervalMsEwma: null }; a.byEndpoint.set(endpoint, e); }
+  if (verified) a.verifiedPushes = (a.verifiedPushes || 0) + 1; // 개별 토큰으로 온 push — 데이터 흐름 지도가 '이름 검증됨' 을 가른다
+  let e = a.byEndpoint.get(ep);
+  if (!e) {
+    if (a.byEndpoint.size >= 200) return; // 경로 수 상한(라우터 선언 경로 수보다 넉넉하게) — 그 이상은 세지 않는다
+    e = { endpoint: ep, count: 0, wireBytes: 0, firstAt: now, lastAt: 0, lastBytes: 0, intervalMsEwma: null }; a.byEndpoint.set(ep, e);
+  }
   // v2.587 — 경로별 간격(데이터 흐름 지도의 '낡음' 경계). 에이전트 전체 간격은 경로가 섞여 짧게 나온다.
   if (e.lastAt && now > e.lastAt) e.intervalMsEwma = ewma(e.intervalMsEwma, now - e.lastAt);
   e.count++; e.wireBytes += wireBytes; e.lastAt = now; e.lastBytes = wireBytes;
-  if (summary) a.last = { at: now, endpoint, wireBytes, ...summary };
+  if (summary) a.last = { at: now, endpoint: ep, wireBytes, ...summary };
 }
 
 /** 에이전트별 수신 통계(와이어 바이트 내림차순). UI/진단용. */
@@ -48,6 +54,7 @@ export function getIngestStats() {
     rows.push({
       agent: a.agent,
       pushes: a.pushes,
+      verified: (a.verifiedPushes || 0) > 0,
       wireBytes: a.wireBytes,
       avgBytes: Math.round(a.wireBytes / a.pushes),
       bytesPerSec: Math.round(a.wireBytes / spanSec),  // 추적기간 평균 수신율

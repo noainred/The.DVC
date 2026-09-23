@@ -48,4 +48,7 @@ set IDRAC_POLL_INTERVAL_MS=60000
 rem --- Auth (set AUTH_ENABLED=false to disable login) ---
 set AUTH_ENABLED=true
 rem set AUTH_SECRET=
-set DEFAULT_ADMIN_PASSWORD=admin123
+rem v2.591 (security P1): do NOT ship a fixed default password. Leave empty - on first start the
+rem portal generates a random admin password and writes it to %CONFIG_DIR%\initial-admin-password.txt
+rem (same as the Linux package). Set a strong value here only for unattended installs.
+rem set DEFAULT_ADMIN_PASSWORD=

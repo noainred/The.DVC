@@ -3,6 +3,7 @@ import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
 import { ErrorBox, Modal } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import { netmonStopBadge } from './authSkipText.js'; // v2.591(감사 F5): SSH 인증 실패로 주기 실행을 멈춘 쪽
 
 const DOT = { ok: '#22c55e', warning: '#f59e0b', error: '#ef4444' };
 const SevDot = ({ s }) => <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: '50%', background: DOT[s] || '#64748b', marginRight: 7 }} />;
@@ -78,7 +79,8 @@ function Monitors() {
               <td><b>{m.name}</b></td><td style={{ fontSize: 12 }}>{m.mode === 'dual' ? '동시' : '단일'}</td>
               <td style={{ fontSize: 12 }}>{m.hostA} ↔ {m.hostB}</td><td style={{ fontSize: 12 }}>{m.intervalMin}분</td>
               <td className="muted" style={{ fontSize: 11 }}>{m.lastRun ? `${fmtTime(m.lastRun)} · ${m.lastDetail}` : '—'}</td>
-              <td>{m.enabled ? worstBadge(m.lastWorst || 'ok') : <span className="badge gray">중지</span>}</td>
+              <td>{m.enabled ? worstBadge(m.lastWorst || 'ok') : <span className="badge gray">중지</span>}
+                {netmonStopBadge(m.authStopped) && <span className="badge red" style={{ marginLeft: 4, whiteSpace: 'nowrap' }} title={netmonStopBadge(m.authStopped).title}>{netmonStopBadge(m.authStopped).label}</span>}</td>
               <td><div className="flex gap">
                 <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => run(m.id)}>지금</button>
                 <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => toggle(m)}>{m.enabled ? '중지' : '시작'}</button>

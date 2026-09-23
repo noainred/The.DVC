@@ -178,6 +178,8 @@ collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req
       ips, username, password,
       noRegister: !!b.noRegister, vcenterId: String(b.vcenterId || '').trim(),
       datacenterId: String(b.datacenterId || '').trim(), mode: b.mode || 'merge',
+      // v2.591(감사 F3): 주기 스캔만 인증 정지 IP 를 건너뛴다 — 값이 없으면(구버전 중앙) 수동으로 본다(전부 시도, 안전한 쪽).
+      trigger: b.trigger === 'periodic' ? 'periodic' : 'manual', rangeId: String(b.rangeId || '').slice(0, 128),
     });
     logAudit({ user: 'central-portal', action: '중앙 PUSH iDRAC 스캔', target: String(b.datacenterId || '') || '(대역)', detail: `발견 ${r.foundCount || 0} · 등록 ${r.registered || 0}`, ip: req.ip || '' });
     res.json({ ok: true, ...r });

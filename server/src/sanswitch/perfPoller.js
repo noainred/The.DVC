@@ -17,7 +17,7 @@ import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { getSnapshot } from './store.js';
 import { parsePortPerfShow } from './collectors/fosParse.js';
 import { savePerfSample } from './perfDb.js';
-import { loadPerfSettings } from './perfSettings.js';
+import { loadPerfSettings, onPerfSettingsChange } from './perfSettings.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { config } from '../config.js';
 import { pushPerfNow } from './perfPush.js';
@@ -145,7 +145,7 @@ export function startSanSwitchPerfPoller() {
   _timer = startAdaptiveTimer(perfIntervalMs, async () => {
     if (!loadPerfSettings().enabled) return;   // 꺼져 있으면 틱만 돌고 아무것도 하지 않는다
     await pollPerfOnce();
-  }, { firstDelayMs: 70_000, name: 'SAN 포트 사용량 수집' });
+  }, { firstDelayMs: 70_000, name: 'SAN 포트 사용량 수집', subscribe: onPerfSettingsChange });
 }
 
 export function sanSwitchPerfStatus() {

@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { ackCollect } from '../pdu/collectRequests.js';
+import { ackCollect, setCollectBaseResolver } from '../pdu/collectRequests.js';
 
 const FILE = path.join(config.configDir, 'central-pdu.json');
 // 엣지가 오래 조용하면 낡은 값을 '현재'처럼 보여주지 않도록 만료시킨다(정직 표기).
@@ -30,6 +30,12 @@ function load() {
   } catch (e) { preserveCorrupt(FILE, e.message); _map = new Map(); }
   return _map;
 }
+
+// v2.591: '지금 수집' 요청 큐의 기준선 — 보관 중인 엣지 스냅샷의 수집 시각(엣지 시계 값).
+setCollectBaseResolver((id) => {
+  for (const e of load().values()) for (const s of e?.snapshots || []) if (String(s?.id) === String(id)) return Number(s.collectedAt) || null;
+  return null;
+});
 
 function persist() {
   try { atomicWriteFileSync(FILE, JSON.stringify({ edges: [...load().values()] }, null, 2), { mode: 0o600 }); }

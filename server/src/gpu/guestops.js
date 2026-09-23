@@ -45,6 +45,27 @@ function cleanGuestError(msg) {
   return m.slice(0, 160);
 }
 
+/**
+ * 게스트 계정 거부(`InvalidGuestLogin`)인가 — v2.591(감사 F2).
+ * **fault 타입으로 판정한다**(soapClient 가 `err.fault` 로 싣는다). 문구(faultstring)는 로캘·버전마다 달라
+ * 보조로만 본다. ⚠ `cleanGuestError` 의 넓은 `authentication` 정규식을 여기 쓰지 말 것 — 요약용이다.
+ */
+export function isGuestLoginFault(e) {
+  if (!e) return false;
+  if (e.guestAuth === true) return true;
+  if (e.fault === 'InvalidGuestLogin') return true;
+  return /InvalidGuestLogin/.test(String(e.message || ''));
+}
+/**
+ * 오류에 **게스트 계정 거부** 표시를 출처에서 붙인다(v2.591). `authFailed` 는 공용 판정(`isGpuAuthError`)이
+ * 보는 플래그이고, `guestAuth` 는 **vCenter 계정 거부와 구분**하는 표지다 — `vcenter/restClient.js isVcAuthError`
+ * 가 `guestAuth` 를 제외한다(게스트 오류가 vCenter 주기 수집을 멈추면 안 된다).
+ */
+function tagGuestAuth(err, cause) {
+  if (isGuestLoginFault(cause) || isGuestLoginFault(err)) { err.authFailed = true; err.guestAuth = true; }
+  return err;
+}
+
 // 단계별 trace 기록기 — 게스트 작업의 명령/로그를 UI로 노출하기 위해 결과에 함께 담는다.
 // tr이 null이면 무시(폴러 등 trace 불필요 경로). 비밀번호/티켓은 절대 담지 않는다.
 const tlog = (tr, msg) => { if (tr) tr.push({ t: Date.now(), msg: String(msg) }); };
@@ -110,7 +131,7 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
   } catch (e) {
     console.warn(`[gpu-guest]     [${tag}] InitiateFileTransferFromGuest 실패: ${e.message}`);
     tlog(tr, `  ✗ 파일전송요청 실패: ${cleanGuestError(e.message)}`);
-    return { text: '', error: `파일전송요청 실패: ${cleanGuestError(e.message)}` };
+    return { text: '', error: `파일전송요청 실패: ${cleanGuestError(e.message)}`, ...(isGuestLoginFault(e) ? { authFailed: true } : {}) };
   }
   // ⭐ 근본 원인 수정: SOAP 응답의 <url>은 XML이라 '&'가 '&amp;'로 인코딩되어 온다.
   // 디코딩하지 않으면 URL이 'id=N&amp;token=T'가 되어 token 파라미터가 깨지고 → ESXi가
@@ -194,7 +215,7 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
     `<spec xsi:type="GuestProgramSpec"><programPath>${esc(prog.path)}</programPath><arguments>${esc(prog.args)}</arguments></spec></StartProgramInGuest>`;
   let startRes;
   try { startRes = await c.callRaw(startXml); }
-  catch (e) { tlog(tr, `✗ StartProgramInGuest SOAP 실패: ${cleanGuestError(e.message)}`); throw new Error(`StartProgramInGuest SOAP 실패: ${cleanGuestError(e.message)} | raw: ${String(e.message).slice(0, 200)}`); }
+  catch (e) { tlog(tr, `✗ StartProgramInGuest SOAP 실패: ${cleanGuestError(e.message)}`); throw tagGuestAuth(new Error(`StartProgramInGuest SOAP 실패: ${cleanGuestError(e.message)} | raw: ${String(e.message).slice(0, 200)}`), e); }
   const pid = /<returnval>(\d+)<\/returnval>/.exec(startRes)?.[1];
   if (!pid) {
     const fault = /<faultstring>([^<]*)<\/faultstring>/.exec(startRes)?.[1] || startRes.slice(0, 200);
@@ -322,7 +343,7 @@ async function writeGuestFile(c, fileManager, vmRef, auth, guestPath, content, {
   try {
     xml = await c.callRaw(`<InitiateFileTransferToGuest xmlns="urn:vim25"><_this type="GuestFileManager">${fileManager}</_this>${vmRef}${auth}` +
       `<guestFilePath>${esc(guestPath)}</guestFilePath>${attrs}<fileSize>${bytes}</fileSize><overwrite>true</overwrite></InitiateFileTransferToGuest>`);
-  } catch (e) { return { ok: false, error: `업로드요청 실패: ${cleanGuestError(e.message)}` }; }
+  } catch (e) { return { ok: false, error: `업로드요청 실패: ${cleanGuestError(e.message)}`, ...(isGuestLoginFault(e) ? { authFailed: true } : {}) }; }
   const url = URL_DECODE(/<returnval[^>]*>([^<]+)<\/returnval>/.exec(xml)?.[1] || '');
   if (!url) return { ok: false, error: '업로드 URL을 반환하지 않음' };
   const tries = [];
@@ -345,14 +366,17 @@ export async function runGuestScript(c, vmMoref, creds, scriptText, { isWindows 
   const scriptPath = isWindows ? `C:\\Windows\\Temp\\portal-acct-${ts}.bat` : `/tmp/portal-acct-${ts}.sh`;
   const outFile = isWindows ? `C:\\Windows\\Temp\\portal-acct-${ts}.out` : `/tmp/portal-acct-${ts}.out`;
   const errFile = isWindows ? `C:\\Windows\\Temp\\portal-acct-${ts}.err` : `/tmp/portal-acct-${ts}.err`;
-  for (const f of files) { const w = await writeGuestFile(c, fileManager, vmRef, auth, f.path, f.content, { posixPerm: f.perm ?? 0o600, isWindows, preferHosts: dlHosts }); if (!w.ok) throw new Error(`파일 업로드 실패(${f.path}): ${w.error}`); }
+  // v2.591: 업로드 요청이 게스트 계정 거부면 그 표시를 오류에 싣는다(호출부가 VM 단위 정지·회로 차단기를 건다).
+  const upErr = (msg, w) => { const e = new Error(msg); if (w?.authFailed) { e.authFailed = true; e.guestAuth = true; } return e; };
+  for (const f of files) { const w = await writeGuestFile(c, fileManager, vmRef, auth, f.path, f.content, { posixPerm: f.perm ?? 0o600, isWindows, preferHosts: dlHosts }); if (!w.ok) throw upErr(`파일 업로드 실패(${f.path}): ${w.error}`, w); }
   const ws = await writeGuestFile(c, fileManager, vmRef, auth, scriptPath, scriptText, { posixPerm: 0o600, isWindows, preferHosts: dlHosts });
-  if (!ws.ok) throw new Error(`스크립트 업로드 실패: ${ws.error}`);
+  if (!ws.ok) throw upErr(`스크립트 업로드 실패: ${ws.error}`, ws);
   const prog = isWindows
     ? { path: 'C:\\Windows\\System32\\cmd.exe', args: `/c "${scriptPath}" 1>"${outFile}" 2>"${errFile}"` }
     : { path: '/bin/sh', args: `-c "sh ${scriptPath} 1>${outFile} 2>${errFile}"` };
   const startXml = await c.callRaw(`<StartProgramInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}` +
-    `<spec xsi:type="GuestProgramSpec"><programPath>${esc(prog.path)}</programPath><arguments>${esc(prog.args)}</arguments></spec></StartProgramInGuest>`);
+    `<spec xsi:type="GuestProgramSpec"><programPath>${esc(prog.path)}</programPath><arguments>${esc(prog.args)}</arguments></spec></StartProgramInGuest>`)
+    .catch((e) => { throw tagGuestAuth(e, e); });
   const pid = /<returnval>(\d+)<\/returnval>/.exec(startXml)?.[1];
   if (!pid) { const fault = /<faultstring>([^<]*)<\/faultstring>/.exec(startXml)?.[1] || startXml.slice(0, 160); throw new Error(`StartProgramInGuest 실패: ${cleanGuestError(fault)}`); }
   const deadline = Date.now() + timeoutMs; let exitCode = null, ended = false;

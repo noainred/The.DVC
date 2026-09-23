@@ -66,6 +66,15 @@ APP="$STAGE/app"
 mkdir -p "$APP/server" "$APP/web"
 cp -r "$REPO_ROOT/server/src" "$APP/server/src"
 cp -r "$REPO_ROOT/server/config" "$APP/server/config"
+# 보안(v2.591 P2 — offline build-package.sh 의 L-9 와 같은 규칙): 빌드 호스트의 '런타임' config
+# (테스트·개발 중 생긴 auth-secret·DB·감사 로그·내부 IP 가 담긴 수집 설정)를 공개 릴리스 자산에 싣지 않는다.
+# v2.590 의 Windows zip 에는 CI 머신의 auth-secret·audit.ndjson·ping-targets.json 이 실제로 들어 있었다 —
+# CONFIG_DIR 없이 앱 폴더에서 실행하면 그 공개 서명키로 세션 토큰을 위조할 수 있다. 예제만 남긴다.
+find "$APP/server/config" -mindepth 1 -maxdepth 1 \
+  \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.ndjson' \
+     -o -name 'ipam-scan.json' -o -name 'portal.env' -o -name 'secrets-key' -o -name 'auth-secret' \
+     -o -name '*.txt' -o -name '*.corrupt.*' -o -type d \
+     -o \( -name '*.json' ! -name '*.example.json' \) \) -exec rm -rf {} + 2>/dev/null || true
 cp "$REPO_ROOT/server/package.json" "$APP/server/"
 [[ -d "$REPO_ROOT/server/node_modules" ]] || { echo "server/node_modules 필요 ('npm run install:all')" >&2; exit 1; }
 cp -a "$REPO_ROOT/server/node_modules" "$APP/server/node_modules"

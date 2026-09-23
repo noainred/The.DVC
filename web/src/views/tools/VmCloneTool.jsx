@@ -3,6 +3,7 @@ import { fetchJson, postJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { unitText } from '../unitText.js';
+import { cloneRunMark } from '../authSkipText.js'; // v2.591(감사 F1): 인증 정지로 건너뛴 실행은 실패도 성공도 아니다
 
 /**
  * 특수기능 › VM 복제(백업)(v2.299, admin 전용) — 사용자 요구사항:
@@ -74,7 +75,7 @@ export default function VmCloneTool() {
                 <td className="muted" style={{ fontSize: 11.5 }}>{j.dest.type === 'datastore' ? `${(j.clones || []).length}개${(j.clones || []).length ? ` · 최신 ${(j.clones[j.clones.length - 1] || {}).name || ''}` : ''}` : 'NFS 디렉터리 참조'}</td>
                 <td style={{ fontSize: 11.5 }}>
                   {j.lastRun
-                    ? <span style={{ color: j.lastRun.ok ? 'var(--green)' : 'var(--red)' }} title={j.lastRun.detail}>{j.lastRun.ok ? '✅' : '⛔'} {new Date(j.lastRun.at).toLocaleString('ko-KR')} · {Math.round((j.lastRun.ms || 0) / 1000)}s<div className="muted" style={{ fontSize: 10.5, maxWidth: 260, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.lastRun.detail}</div></span>
+                    ? <span style={{ color: `var(--${cloneRunMark(j.lastRun).tone})` }} title={j.lastRun.detail}>{cloneRunMark(j.lastRun).icon} {new Date(j.lastRun.at).toLocaleString('ko-KR')} · {Math.round((j.lastRun.ms || 0) / 1000)}s<div className="muted" style={{ fontSize: 10.5, maxWidth: 260, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{j.lastRun.detail}</div></span>
                     : <span className="muted">—</span>}
                 </td>
                 <td className="right" style={{ whiteSpace: 'nowrap' }}>

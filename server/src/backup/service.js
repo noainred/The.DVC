@@ -36,14 +36,22 @@ const FILE_SIZE_CAP = 8 * 1024 * 1024; // 파일당 8MB 상한(대용량 데이�
 export const RUNTIME_STATE_NAMES = new Set([
   'backup.json', 'central-agent-config.json', 'central-inventory.json', 'central-fleet.json', 'central-pdu.json',
   'central-agent-storage.json', 'central-agent-sanswitch.json', 'central-agent-sanswitch-perf.json',
-  'central-agent-gpu-guest.json', 'central-unsupported-servers.json', 'agent-assignments.json', 'agent-results.json',
+  'central-agent-gpu-guest.json', 'central-unsupported-servers.json', 'agent-results.json',
   'active-sessions.json', 'sanswitch-perf-push.json', 'ipam-scan-history.json', 'ipam-scan-results.json',
 ]);
 // 이름 규약으로 드러나는 상태 파일(-latest·-activity·-history·-results·-runs·-log·-state·-usage·-stats·-stops·-inventory·-cache).
 // ⚠ 'vcenter-logs.json'(설정)·'dirusage.json'(설정)은 하이픈 뒤 정확한 단어가 아니라 걸리지 않는다 — 테스트가 고정한다.
 const RUNTIME_STATE_RE = /-(latest|activity|history|results|runs|log|state|usage|stats|stops|inventory|cache)\.json$/i;
+/**
+ * v2.591(3차 감사 R-B1): 이름 규약에 걸리지만 **사람이 편집하는 설정**인 파일 — 상태로 분류하면 편집해도 '변경 시 자동 백업' 이
+ * 생기지 않았다(재현: 편집 후 change 백업 `skipped: unchanged`). `svcmon-log.json` 은 성능점검 로그 **정책**(-log 규약에 걸림),
+ * `agent-assignments.json` 은 에이전트 스캔 할당(관리자 CRUD 로만 쓰인다 — 결과는 agent-results.json 이다) 이라 v2.590 목록에서 뺐다.
+ * CONFIG-FILES.md 는 JSON 대부분을 '설정' 으로 묶어 기계 대조가 안 된다 — 이름 규약에 걸리는 파일 29개를 하나씩 보고 정했다.
+ */
+export const SETTINGS_NOT_STATE = new Set(['svcmon-log.json', 'agent-assignments.json']);
 export function isRuntimeStateFile(name) {
   const b = path.basename(String(name || ''));
+  if (SETTINGS_NOT_STATE.has(b)) return false;
   return DENY_NAMES.has(b) || RUNTIME_STATE_NAMES.has(b) || RUNTIME_STATE_RE.test(b);
 }
 

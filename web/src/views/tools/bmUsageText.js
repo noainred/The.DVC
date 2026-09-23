@@ -186,6 +186,8 @@ export function detailNotes(detail = {}) {
     const k = t(detail.idracKind);
     out.push(k === 'no-telemetry' ? telemetryMissingText(detail)
       : k === 'auth' ? 'iDRAC 계정·비밀번호를 확인하세요(반복 시도해도 결과는 같습니다).'
+        // v2.591(감사 R-BM2): 403 은 자격증명 거부가 아니다 — 로그인은 됐고 그 리포트가 허락되지 않았다.
+        : k === 'forbidden' ? 'iDRAC 이 텔레메트리 조회를 **거부했습니다(403)** — 라이선스(Datacenter)나 계정 권한 문제일 수 있습니다. 비밀번호 문제가 아니므로 주기 수집을 멈추지 않습니다.'
         : k === 'empty-report' ? 'iDRAC 텔레메트리 리포트가 비어 있습니다 — 텔레메트리가 켜져 있지 않을 수 있습니다.'
           : k === 'ids-unmatched' ? `iDRAC 응답에서 **아는 메트릭 id 를 찾지 못했습니다** — 이 환경의 id 를 확인해야 합니다${(detail.idracSeenIds || []).length ? `(응답 id ${detail.idracSeenIds.length}개)` : ''}.`
             : `iDRAC 수집 실패: ${t(detail.idracError)}`);
@@ -215,7 +217,7 @@ export function authStopNote(stops = [], { now = Date.now() } = {}) {
   return `**${list.length}대는 인증 실패로 주기 수집이 정지됐습니다**(${names.join(' · ')}${more})`
     + `${oldest ? ` — 가장 오래된 정지는 ${ageText(oldest, now)}입니다` : ''}.`
     + ' 반복 시도는 결과가 같고 **계정만 잠급니다** — 비밀번호를 고치면 자동으로 재개합니다.'
-    + " '지금 수집' 은 정지와 무관하게 동작하니 고친 뒤 눌러 확인하세요.";
+    + " '지금 수집' 은 정지와 무관하게 동작하니 고친 뒤 눌러 확인하세요 — 같은 계정으로 성공하면 정지가 풀립니다(iDRAC 은 주 전력 수집의 정지도 함께 풀립니다).";
 }
 
 /**
@@ -495,7 +497,9 @@ export function entDetailNotes(detail = {}) {
   }
   const kind = t(detail.entKind);
   if (kind) {
-    out.push(kind === 'auth' ? '대체 경로: iDRAC 계정·비밀번호가 거부됐습니다(401/403) — **반복 시도하지 않습니다**(계정이 잠깁니다).'
+    out.push(kind === 'auth' ? '대체 경로: iDRAC 계정·비밀번호가 거부됐습니다(401) — **반복 시도하지 않습니다**(계정이 잠깁니다).'
+      // v2.591(감사 R-BM2): 403 은 로그인은 됐고 그 자원이 허락되지 않은 것 — 잠금 경로가 아니다.
+      : kind === 'forbidden' ? '대체 경로: iDRAC 이 센서 조회를 **거부했습니다(403)** — 계정 권한 문제일 수 있습니다. 비밀번호 문제가 아니므로 수집을 멈추지 않습니다.'
       : kind === 'ssh-auth' ? '대체 경로: iDRAC **SSH 로그인**이 거부됐습니다 — 반복 시도하지 않습니다(계정이 잠깁니다).'
         : kind === 'auth-stopped' ? `대체 경로가 **인증 실패로 정지**됐습니다 — ${t(detail.entError)}`
           : kind === 'unparsed' ? '대체 경로: **racadm 출력 형식을 읽지 못했습니다** — 아래 원문을 보고 알려 주시면 파서를 맞추겠습니다(이 현장 출력을 확인한 적이 없습니다).'

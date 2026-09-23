@@ -10,7 +10,7 @@ import { loadVcenterConfig } from '../config.js';
 import { collectDetails } from '../vcenter/vmExport.js';
 import { parseGuestDisks } from '../vcenter/soapParse.js';
 import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor } from './analyze.js';
-import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter } from './db.js';
+import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter, currentPartPaths } from './db.js';
 import { datacenterOfVcenter, listDatacenters } from '../datacenter/store.js';
 
 /** vCenterId → { corpId, corpName, region } 매핑(법인=DataCenter 할당 + 스냅샷 region). */
@@ -164,7 +164,7 @@ export async function vmDetail(vmId, { flatPerDayGB = 0.1, days = 0, usageFactor
   const uf = normUsageFactor(usageFactor);   // v2.482: 목록과 같은 배율로 파티션/VM 여유 계산
   const d = Number(days);
   const sinceTs = Number.isFinite(d) && d > 0 ? Date.now() - d * 86_400_000 : 0;
-  const [vs0, ps] = await Promise.all([vmSeries(vmId, sinceTs), partSeries(vmId, sinceTs)]);
+  const [vs0, ps, curPaths] = await Promise.all([vmSeries(vmId, sinceTs), partSeries(vmId, sinceTs), currentPartPaths(vmId)]);
   // v2.590 P3: diff-저장은 '안 바뀐 동안' 행이 없다 — 마지막 점 이후 최신 수집 시각까지 값이 유지됐다는 사실을 끝점으로
   // 이어 준다(추이 판정·차트가 '마지막 변화 시점에서 끊긴 선' 이 아니라 지금까지의 평탄선을 본다).
   const tail = (pts, pick) => (pts.length && latest.ts && latest.ts > pts[pts.length - 1].ts ? [...pts, { ...pick(pts[pts.length - 1]), ts: latest.ts, carried: true }] : pts);
@@ -177,7 +177,16 @@ export async function vmDetail(vmId, { flatPerDayGB = 0.1, days = 0, usageFactor
     e.points.push({ ts: r.ts, usedGB: r.usedGB, capGB: r.capGB });
     e.capGB = r.capGB; e.usedGB = r.usedGB; // 최신값(ORDER BY path,ts)
   }
+  // v2.591(3차 감사 R-G1): 현재 파티션 목록(part_last)에 없는 경로는 **제거된 파티션**이다 — 끝점 연장을 하지 않고
+  // 회수 권고에서 뺀다(예전엔 언마운트된 /data 가 '축소 후보(사용량 평탄)' 로 권고됐다). 목록을 모르면(null·빈 Set) 판정하지 않는다.
+  const knownCur = curPaths && curPaths.size > 0 ? curPaths : null;
   const partitions = [...byPath.values()].map((e) => {
+    const removed = !!(knownCur && !knownCur.has(e.path));
+    if (removed) {
+      const trend = usageTrend(e.points, { flatPerDayGB });
+      return { path: e.path, capGB: e.capGB, usedGB: e.usedGB, freeGB: null, trend, removed: true, lastSeenTs: e.points[e.points.length - 1]?.ts ?? null,
+        advice: { safe: false, label: '제거됨(최근 수집에 없음) — 회수 대상 아님' } };
+    }
     const freeGB = Math.round(Math.max(0, e.capGB - e.usedGB * uf) * 10) / 10;
     const trend = usageTrend(tail(e.points, (p) => ({ usedGB: p.usedGB, capGB: p.capGB })), { flatPerDayGB });
     return { path: e.path, capGB: e.capGB, usedGB: e.usedGB, freeGB, trend, advice: reclaimAdvice(freeGB, trend.trend) };

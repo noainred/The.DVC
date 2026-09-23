@@ -179,7 +179,10 @@ export async function inspectMany(absPaths, { full = false } = {}) {
   return {
     generatedAt: Date.now(), mode: full ? 'full' : 'quick',
     count: results.length,
-    okCount: results.filter((r) => r.ok).length,
+    // v2.591(3차 감사 R-D1): 정합성 점검을 **생략한**(unchecked) 파일은 '정상' 에 세지 않는다 — v2.590 P7 이 큰 DB 의
+    // quick_check 를 생략하게 하면서 그 파일이 초록 '정상' KPI 에 들어갔다(운영 metrics DB 는 항상 생략 대상이다).
+    okCount: results.filter((r) => r.ok && !r.unchecked).length,
+    uncheckedCount: results.filter((r) => r.ok && r.unchecked).length,
     failCount: results.filter((r) => !r.ok).length,
     warningCount: warnings,
     results,

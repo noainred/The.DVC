@@ -269,6 +269,8 @@ export function rescheduleGpuGuestPoller() {
 export function startGpuGuestPoller() {
   setTimeout(() => pollOnce().catch((e) => console.error('[gpu-guest] 폴 실패:', e.message)), 18_000).unref?.();
   const { pollIntervalMs } = loadGpuGuestSettings();
+  // v2.591 L9: 기동 스태거 전 reschedule 이 먼저 왔으면 그 interval 을 지운다(게스트 로그인 주기가 두 벌이 되지 않게).
+  if (timer) clearInterval(timer);
   timer = setInterval(() => pollOnce().catch(() => {}), pollIntervalMs);
   timer.unref?.();
   console.log(`[gpu-guest] poller started (every ${Math.round(pollIntervalMs / 1000)}s)`);

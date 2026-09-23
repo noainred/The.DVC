@@ -64,6 +64,11 @@
 - **RDP 자격증명은 티켓으로**: RDP WS 게이트웨이는 username/password/domain을 URL 쿼리스트링에 싣지 않는다 — `proxy/rdpTicket.js`의 1회용 단기 티켓(`POST /api/remote/rdp-ticket`)으로 발급받아 쿼리엔 티켓 ID만 싣고 게이트웨이가 인메모리에서 조회한다(쿼리스트링은 상위 프록시 액세스 로그·브라우저 히스토리에 남음).
 - **업그레이드 번들 sha256 필수**: 자체 업그레이드·엣지 푸시 양쪽 모두 검증하고, 부재도 거부(`UPGRADE_ALLOW_UNVERIFIED`만 예외). 한쪽만 검증하면 함대 확산 경로가 뚫린다.
   - ⚠️ v2.480 정직 기록: 이 규칙은 v2.479 까지 **문서만** 있었다 — 엣지 `/api/upgrade/bundle`·수집기 `/api/collector/upgrade` 는 sha 를 받지도 검증하지도 않았다. 이제 중앙 push(`upgrade.js pushBundleToEdge`·`collector/upgradePush.js`)가 `X-Bundle-Sha256` 헤더를 보내고 수신측이 `upgrade/upgrade.js bundleShaIssue` 로 검증한다(`test/audit2480.test.js`). 헤더를 없애거나 검증을 빼면 이 규칙이 다시 문서만 남는다.
+  - ⚠⚠ **v2.591 정직 정정(감사 P6 — 재현)**: push 경로의 `X-Bundle-Sha256` 은 **같은 요청이 스스로 신고한 해시**라
+    전송 중 손상·잘림만 잡는다. 악성 번들의 sha 를 계산해 헤더에 실으면 통과한다 — **토큰 탈취·http 중간자 방어가 아니다.**
+    실제 방어는 토큰 + TLS(`upgradeAgent`·https 엣지)이고, 이 검사를 근거로 그 둘을 약화하지 말 것. 원격 다운로드
+    (`verifyBundleSha`)는 sha 를 별도 TLS 채널(versions.json)에서 받으므로 건전하다. 진짜 push 무결성은 수신측 키 서명
+    (rma/signing.js HMAC 패턴)이 필요하다 — 별건.
   - **연결 테스트는 저장 비밀번호를 물려받을 때 host/url 도 저장값으로 고정**(v2.480): vCenter·NSX·Horizon·iDRAC `testConnection`/`testServer`·수집 서버 `/collectors/test`·SMTP·PDU·베어메탈·GPU 게스트 테스트 전부 `{...saved, ...body}` 병합에서 host/url/ip 를 요청값으로 두면 저장 비밀번호가 공격자 호스트로 평문 전송된다(uagmon M3 클래스). 새 "저장 항목 테스트" 를 만들 때 같은 규칙.
 - **SSRF 가드**: 외부 입력 host를 네트워크로 찌르는 신규 기능은 `collector/registry.js ssrfBlockReason`(또는 async `ssrfBlockReasonResolved`)를 통과시킨다. RFC1918은 사내망 대상이라 허용, 링크로컬/루프백/우회표기(IPv4-mapped·10/16/8진수)는 차단.
 - **셸 명령 조립**: 사용자·원격 출력 값은 화이트리스트 정규식으로 검증 후에만 삽입(선행 `-` 차단 포함). 원격 명령의 출력(유닛명·경로)도 신뢰하지 말고 재검증한다.
@@ -690,8 +695,32 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
   · 정지된 vCenter 는 재시작 직후에도 `pending` 이 아니라 `unreachable + authStopped` 로 보인다(기다리면 된다는 거짓 금지).
   · **저장 비밀번호로 한 연결 테스트가 성공하면 정지를 푼다**(`authStopCleared`). 수동 실행은 막지 않는다.
   · 정지 파일 7종은 `.gitignore` 에 등록했다(`*-auth-stops.json`).
-  ⚠ **아직 연결하지 않은 vCenter 주기 수집기**(v2.590 정직 기록): `curuser`·`vmseries`·`osScanner`·
-  `guestScanScheduler`·`metrics`. 전부 같은 vCenter 계정으로 로그인하므로, 붙일 때 `vcAuthGuard` 의 **읽기 전용
-  조회(`peekAuthStop`)** 로 주 폴러의 정지를 따를 것(각자 기록을 만들면 정지가 두 벌이 된다).
+  ✅ **v2.591 — v2.590 이 '아직 연결하지 않은 vCenter 주기 수집기' 로 적은 것들이 가드를 받았다**(회귀는
+  `test/authStop2591.test.js` 24건 — 가짜 vCenter·Redfish·SSH·SMTP 로 **실제 로그인 시도 수**를 센다. 변이 24종 중 23종 검출):
+  · `curuser`·`vmseries`·`osScanner`·`guestScanScheduler` + **guestdisk·VM 복제 스케줄·성능 조회(`/vms/:id/metrics`)** 가
+    `vcAuthGuard.peekAuthStop` 으로 주 폴러의 정지를 **읽기만** 하고, 로그인이 거부되면 **같은 기록**에 올린다(정지가 두 벌이면
+    한쪽을 풀어도 다른 쪽이 계속 로그인한다). 성능 조회는 멈춘 vCenter 에 로그인하지 않고 **409 `authStopped`** 를 주고,
+    화면(`VmMetrics.jsx`)은 20초 자동 갱신을 멈춘다 — '다시 조회' 는 `manual=1` 로 1회 시도(502 는 재시도 대상이라 쓰지 않는다).
+  · ⚠ v2.590 목록의 `metrics` 는 **오탐**이었다 — 샘플러·vmperf 는 스냅샷만 읽고 vCenter 에 로그인하지 않는다(감사 F7, import 확인).
+  · ⚠⚠ **게스트 계정 거부는 vCenter 거부가 아니다** — `gpu/guestops.js` 가 `InvalidGuestLogin` 에 `authFailed+guestAuth` 를
+    붙이고 `isVcAuthError` 가 `guestAuth` 를 **제외**한다. 이 제외를 지우면 게스트 비밀번호 하나가 멀쩡한 vCenter 수집을 멈춘다.
+  · ⚠⚠ **여러 대상을 같은 계정으로 도는 조사는 회로 차단기(`util/authGuard.js createAuthBreaker`)** — 연속 거부 3회에서 끊고,
+    첫 성공 전에는 하나씩, **인증과 무관한 실패는 `neutral()`**(ok 로 세면 차단기가 무력해진다 — 구현 중 실제로 그랬다).
+    공용 계정이면 계정 단위 정지(`acct|…`)까지 남긴다 — VM 단위만 두면 주기마다 아직 안 멈춘 VM 3대로 3회씩 쌓인다.
+    남는 상한(정직 기록): 인증과 무관한 실패로 순차 단계가 끝난 뒤에는 최대 `임계 + 동시수 − 1`(동시 4 → 6회)까지 시도할 수 있다.
+  · iDRAC **대역 스캔**(`idrac/scanAuth.js`, 정지 파일 `idrac-scan-auth-stops.json` — 주 폴러와 분리)은 주기 스캔만 건너뛰고
+    건너뛴 개수를 밝힌다. ⚠ 건너뛴 IP 가 있으면 **replace 를 merge 로 낮춘다**(중앙·엣지 둘 다) — 건너뛴 등록 서버가 지워지지 않게.
+  · SMTP 535/534 는 출처에서 인증 실패로 못 박는다(`mail-auth-stops.json`). 정지 중 자동 발송은 건너뛰고 이력에 사유,
+    테스트 발송은 허용·성공 시 해제. ⚠ 메일 속도 제한은 **시도**를 센다 — 예전엔 성공만 세어 비밀번호가 틀리면 '릴레이 보호'
+    한도가 오히려 풀려 AUTH 가 무제한이었다(F4).
+  · 네트워크 연속 모니터는 A/B 쪽별(`netmon-auth-stops.json`), 게스트 조사 작업 계정은 작업 단위(`guestscan-auth-stops.json`).
+  · 텔레메트리 **403 은 `forbidden`**(auth 아님 — 주기 정지 대상이 아니다, R-BM2). NSX 는 저장 비밀번호 연결 테스트 성공으로
+    풀린다(R-N1 — v2.590 은 화면과 이 문서가 '풀린다' 고 적어 놓고 실제로는 풀리지 않았다). bmusage 수동 수집 성공은 **같은
+    자격증명일 때만** 주 iDRAC 정지도 푼다(R-BM1).
   ⚠ GPU 게스트는 VM 단위로 멈추므로 **첫 실패 주기에는 VM 마다 1회씩 실패**한다 — 공용 도메인 계정이면 그 합이
-  잠금 임계에 닿을 수 있다(정직 기록). bmstor 와 bmusage 의 OS 계정 정지 기록은 공유하지 않는다.
+  잠금 임계에 닿을 수 있다(정직 기록 — GPU 폴러는 VM 마다 로컬 계정일 수 있어 계정 단위 정지를 보지 않는다).
+  bmstor 와 bmusage 의 OS 계정 정지 기록은 공유하지 않는다.
+  ⚠ 정직 기록(v2.591): 실장비 응답(게스트 fault 전달·iDRAC 401 본문·SMTP 530 변형 문구·실제 AD 잠금 임계)은 확인하지 못했다 ·
+  vmseries **수동** 경로의 거부 기록은 실행해 보지 않았다 · 엣지 `agent/scanner.js` 의 인증 건너뜀 개수는 중앙 `/result` 로
+  가지 않는다(엣지 상태·콘솔에만). 새 정지 파일 4종은 `config-doc.mjs` 가 `createAuthGuard({file})` 형태를 못 읽어
+  CONFIG-FILES.md 에 없다(v2.590 의 7종도 같다 — 생성기 결함, 별건).

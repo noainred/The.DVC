@@ -100,7 +100,21 @@ export async function applyHostAccess(input, { requesterIp = '', by = '' } = {})
 
 function armRevertTimer(deadline) {
   if (revertTimer) clearTimeout(revertTimer);
-  revertTimer = setTimeout(() => { revertTimer = null; revertHostAccess({ by: 'auto-timeout' }).catch((e) => console.error('[host-access] 자동 되돌림 실패:', e.message)); }, Math.max(0, deadline - Date.now()));
+  revertTimer = setTimeout(async () => {
+    revertTimer = null;
+    try {
+      // 확정이 끝나 pending 이 없으면 되돌릴 것이 없다(확정 성공 경로는 이 타이머를 지운다 — 이것은 재무장분의 방어선).
+      if (!loadHostAccess().pending) return;
+      const r = await revertHostAccess({ by: 'auto-timeout' });
+      // v2.591 L6: revert 는 busy 면 throw 가 아니라 `{ok:false}` 를 **반환**한다 — 예전에는 그 값을 보지 않아 기한 직전 확정이
+      //   진행 중이면 자동 되돌림이 조용히 버려지고, 그 확정이 실패하면 기한 뒤에도 런타임 규칙이 남았다(재현: --reload 0회).
+      //   진행 중인 작업이 끝난 뒤 다시 본다.
+      if (r && r.ok === false && loadHostAccess().pending) {
+        console.warn(`[host-access] 자동 되돌림 보류 — ${(r.errors || []).join(' ') || '진행 중인 작업'} · 2초 뒤 다시 시도합니다`);
+        armRevertTimer(Date.now() + 2000);
+      }
+    } catch (e) { console.error('[host-access] 자동 되돌림 실패:', e.message); }
+  }, Math.max(0, deadline - Date.now()));
   revertTimer.unref?.();
 }
 

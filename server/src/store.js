@@ -636,6 +636,13 @@ export function storeStatus() {
   const snap = store.snapshot || {};
   const all = Array.isArray(snap.vcenters) ? snap.vcenters : [];
   const MAX = 64;
+  // v2.591(3차 감사 C8): vCenter 항목에는 hosts·hostCount 가 **없다**(스냅샷은 호스트·VM 을 최상위 배열로 둔다) — 예전엔 항상
+  //   null 이었고 웹 '빈 인벤토리' 진단이 그 null 을 0 으로 더해 **데이터가 있는 엣지를 '빈 vCenter — 이상이 아닙니다' 로 확신 판정**했다.
+  //   최상위 배열을 vcenterId 로 한 번씩 센다(O(N)).
+  const hostN = new Map(); const vmN = new Map();
+  if (Array.isArray(snap.hosts)) for (const h of snap.hosts) if (h?.vcenterId != null) hostN.set(h.vcenterId, (hostN.get(h.vcenterId) || 0) + 1);
+  if (Array.isArray(snap.vms)) for (const v of snap.vms) if (v?.vcenterId != null) vmN.set(v.vcenterId, (vmN.get(v.vcenterId) || 0) + 1);
+  const haveArrays = Array.isArray(snap.hosts) && Array.isArray(snap.vms);
   const counts = { total: all.length, ok: 0, pending: 0, unreachable: 0, disabled: 0, mock: 0, site: 0, other: 0 };
   for (const vc of all) {
     if (vc.mock === true) counts.mock += 1;
@@ -659,8 +666,8 @@ export function storeStatus() {
     omitted: Math.max(0, all.length - MAX),
     vcenters: all.slice(0, MAX).map((vc) => ({
       id: vc.id, name: vc.name || '', status: vc.status || 'ok',
-      hosts: Array.isArray(vc.hosts) ? vc.hosts.length : (vc.hostCount ?? null),
-      vms: Array.isArray(vc.vms) ? vc.vms.length : (vc.vmCount ?? null),
+      hosts: haveArrays ? (hostN.get(vc.id) || 0) : null,   // 배열 자체가 없으면 '모름'(null) — 0 을 지어내지 않는다
+      vms: haveArrays ? (vmN.get(vc.id) || 0) : null,
       mock: vc.mock === true,
       collectMode: vc.collectMode || vc.collectSource || '',
       error: vc.error || '', code: vc.code || '', hint: vc.hint || '',

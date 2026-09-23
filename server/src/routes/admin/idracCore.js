@@ -4,7 +4,7 @@ import { listUnsupportedServers } from '../../central/unsupportedServers.js'; //
 import { logAudit } from '../../audit.js';
 import { listPhysical } from '../../gpu/physicalRegistry.js';
 import { listRegistry as listServers, addServer, testServer, loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
-import { getPollerStatus, pollNow, idracAuthStops } from '../../idrac/poller.js';
+import { getPollerStatus, pollNow, pollNowManual, idracAuthStops } from '../../idrac/poller.js';
 import { purgeStalePower, measuredPowerBreakdown } from '../../idrac/service.js';
 import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
@@ -108,8 +108,12 @@ adminRouter.post('/idrac/test', adminOnly, async (req, res) => {
 });
 
 // Trigger an immediate poll of all servers.
+// v2.590: 수동 실행은 인증 실패 정지 서버도 1회 시도한다.
+// v2.591(감사 P1): 재진입 가드에 막히면(busy) 직전 결과를 '이번 수집' 인 척 돌려주지 않고, 긴급중단(stopped)도
+//   '성공 0 · 실패 0' 이 아니라 그 사실을 싣는다 — 화면(IdracAdmin)이 셋을 나눠 말한다. 재진입 가드는 유지.
 adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
-  res.json({ ok: true, lastRun: await pollNow({ manual: true }) }); // v2.590: 수동 실행은 인증 실패 정지 서버도 1회 시도한다
+  const r = await pollNowManual();
+  res.json({ ok: r.ran, ran: r.ran, busy: r.busy, stopped: r.stopped, lastRun: r.lastRun });
 });
 
 // 전력 집계 표시 설정 — excludeUnmapped: vCenter 미매핑 측정 전력을 총합/보고/목록에서 제외.

@@ -6,7 +6,7 @@
  */
 export {
   WARN_PCT, CRIT_PCT, LEVEL_LABEL, REGION_COLORS, DOMAIN_LABEL,
-  levelOf, fmtInt, fmtPct, fmtTB, fmtBytesTB, ageText, domainOf, sevRank, severityCounts, alarmCountsByDomain, sortAlarms,
+  levelOf, fmtInt, fmtPct, fmtTB, fmtBytesTB, ageText, tsMs, domainOf, sevRank, severityCounts, alarmCountsByDomain, sortAlarms,
   attentionList, correlateAlarms, siteRows, regionCounts, clusterRows, clusterCountByVc, capacityAdvice, datastoreTypeCounts,
   datastoresOver, ipamTop, ipamStats, svcmonLevel, hostFacilityRows, storageRows, sanCells, sanTotals, pduSummary,
   nsxManagerRows, networkTypeCounts, buildDomainTiles, rowMatches,

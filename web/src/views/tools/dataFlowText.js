@@ -90,12 +90,24 @@ export function innerItemText(it = {}, now = Date.now()) {
   // 모듈마다 '마지막 실행' 을 담는 자리가 다르다(v2.587 실측: last · lastRun · lastResult · at · lastRunTs …).
   const rec = [v.last, v.lastRun, v.lastResult].find((x) => x && typeof x === 'object') || {};
   // ⚠ 시각은 숫자이거나 숫자 문자열일 때만 — '' 를 0 시각으로 읽지 않는다(Number('') === 0).
-  const tsOf = (x) => (typeof x === 'number' || (typeof x === 'string' && x.trim() !== '')) && Number(x) > 1e12 ? Number(x) : 0;
-  const at = [rec.at, v.at, v.lastAt, v.lastRunTs, v.lastRunAt, v.lastTickAt, v.lastTick, v.lastPollAt, v.finishedAt].map(tsOf).find((x) => x) || 0;
+  //   v2.591 C1: ISO 문자열(`generatedAt` — 인벤토리 폴러)도 받는다. 단 **숫자 문자열은 Date.parse 에 넘기지
+  //   않는다**(`Date.parse('12345')` 는 연도 12345 — v2.562 규약). ISO 날짜 꼴일 때만 해석한다.
+  const tsOf = (x) => {
+    if (typeof x === 'number') return x > 1e12 ? x : 0;
+    if (typeof x !== 'string' || x.trim() === '') return 0;
+    if (/^\d+$/.test(x.trim())) return Number(x) > 1e12 ? Number(x) : 0;
+    if (!/^\d{4}-\d{2}-\d{2}T/.test(x.trim())) return 0;
+    const t = Date.parse(x);
+    return Number.isFinite(t) && t > 1e12 ? t : 0;
+  };
+  const at = [rec.at, v.at, v.lastAt, v.lastRunTs, v.lastRunAt, v.lastTickAt, v.lastTick, v.lastPollAt, v.finishedAt, v.generatedAt].map(tsOf).find((x) => x) || 0;
   const str = (x) => (typeof x === 'string' ? x : '');
+  const failText = (o) => str(o.reason) || str(o.error) || (o.status ? `HTTP ${o.status}` : '실패');
+  // v2.591 C1: 최상위 `{at, ok:false, reason}` 모양(selfRegister·pdu push·pdu 설정 pull)도 실패다 — 예전에는
+  //   rec(last/lastRun/lastResult) 의 ok 만 봐서 실패한 push 가 초록 '마지막 N분 전' 으로 보였다.
   const err = str(v.lastPollError?.detail) || str(v.lastError?.detail) || str(v.lastError) || str(v.lastErr) || str(v.error) ||
     str(rec.error) || (Array.isArray(rec.errors) && rec.errors.length ? `오류 ${rec.errors.length}건` : '') ||
-    (rec.ok === false ? (str(rec.reason) || (rec.status ? `HTTP ${rec.status}` : '실패')) : '') || str(v.pushError);
+    (rec.ok === false ? failText(rec) : '') || (v.ok === false ? failText(v) : '') || str(v.pushError);
   const bits = [];
   if (v.running === true || v.inFlight === true || v.busy === true) bits.push('실행 중');
   if (at) bits.push(`마지막 ${ageText(at, now)}`);
@@ -109,11 +121,72 @@ export function innerItemText(it = {}, now = Date.now()) {
   return { tone: 'ok', text: [...bits, ...(note ? [note.slice(0, 80)] : [])].join(' · ') };
 }
 
+/**
+ * 엣지 ↔ MAIN 두 가닥(v2.591) — **데이터가 가는 방향**이다(사용자 선택). 누가 요청했는지가 아니다:
+ * 메인이 엣지에서 가져온 자료(cpull)는 엣지 → 메인, 엣지가 메인에서 가져간 설정(pull)은 메인 → 엣지다.
+ * 방향별 종류 집합은 `dataFlowLayout.js UP_KINDS·DOWN_KINDS` 가 소유한다.
+ */
+export const DIR_LABEL = Object.freeze({ up: '엣지 → 메인', down: '메인 → 엣지' });
+export const DIR_ARROW = Object.freeze({ up: '↑', down: '↓' });
+export const DIR_KINDS_TEXT = Object.freeze({
+  up: 'push · 결과 회신 · 메인이 가져옴',
+  down: '설정·자료 가져감 · 작업 인출 · 메인이 보냄',
+});
+
+/**
+ * MAIN 카드·상세 표의 방향 칸 — `edgeDirections()` 결과 하나를 짧은 글자와 긴 설명으로.
+ * ⚠ 기록이 없으면 '—' 이고 정상이라 말하지 않는다. 실패는 '실패' 와 사유(설명)로 — 시각만 보여주면 초록처럼 읽힌다.
+ */
+export function dirCellText(d = {}, now = Date.now()) {
+  const state = d.state || 'none';
+  const counts = `정상 ${d.ok || 0} · 낡음 ${d.stale || 0} · 실패 ${d.fail || 0}`;
+  if (state === 'none' || !d.links) return { text: '—', short: '—', title: '이 방향으로 오간 기록이 없습니다(정상이라는 뜻이 아닙니다).', state: 'none' };
+  const recent = d.okAt ? `가장 최근 성공 ${ageText(d.okAt, now)}` : '성공 기록 없음';
+  const unv = d.worstUnverified ? ` · 그중 ${d.worstUnverified}개는 이름 미검증(요청이 주장한 이름)` : '';
+  if (state === 'fail') {
+    const rs = Array.isArray(d.reasons) && d.reasons.length ? d.reasons : (d.reason ? [d.reason] : []);
+    const why = rs.length ? ` · 사유 ${rs.slice(0, 3).join(' / ')}${rs.length > 3 ? ` 외 ${rs.length - 3}가지` : ''}` : '';
+    return { text: '실패', short: '실패', title: `실패 ${d.fail || 0}개(마지막 ${ageText(d.failAt || d.lastAt, now)})${why}${unv} · ${recent} · 연결 ${d.links}개(${counts})`, state };
+  }
+  if (state === 'stale') {
+    // 낡음 칸의 시각은 **낡은 연결의 마지막 성공**이다 — 다른 연결의 최근 성공을 보이면 주황 점 옆에 '30초' 가 뜬다.
+    const at = d.worstOkAt || 0;
+    const text = at ? ageText(at, now) : '—';
+    return { text, short: text.replace(/\s*전$/, ''), title: `낡음 ${d.stale || 0}개 · 낡은 연결의 마지막 성공 ${at ? ageText(at, now) : '없음'}${unv} · ${recent} · 연결 ${d.links}개(${counts})`, state };
+  }
+  const at = d.okAt || d.lastAt;
+  const text = at ? ageText(at, now) : '—';
+  // short — MAIN 카드의 좁은 칸용(열 머리가 '경과' 라 '전' 을 뺀다: '12초 전' → '12초').
+  return { text, short: text.replace(/\s*전$/, ''), title: `${STATE_LABEL[state] || state} · ${recent} · 연결 ${d.links}개(${counts})`, state };
+}
+
+/**
+ * MAIN 카드 엣지 목록의 짧은 이름(v2.591 검토). 칸이 좁아 앞부분만 쓰면 'LGES-HG01'·'LGES-HG02' 가 둘 다 'LGES-HG…' 로
+ * 보여 어느 엣지가 실패인지 알 수 없다(v2.511 WWN labelMap 과 같은 유형). 앞부분이 겹치는 것만 **뒷부분**으로 바꾸고,
+ * 그래도 겹치면 원래 이름(말줄임은 화면이 한다)을 쓴다. 전체 이름은 title 로 남긴다.
+ */
+export function shortEdgeLabels(names = [], max = 10) {
+  const head = (n) => (n.length <= max ? n : `${n.slice(0, max - 1)}…`);
+  const tail = (n) => (n.length <= max ? n : `…${n.slice(-(max - 1))}`);
+  const count = (arr) => arr.reduce((m, x) => m.set(x, (m.get(x) || 0) + 1), new Map());
+  const h = names.map(head); const hc = count(h);
+  const t = names.map((n, i) => (hc.get(h[i]) > 1 ? tail(n) : h[i]));
+  const tc = count(t);
+  return names.map((n, i) => (tc.get(t[i]) > 1 ? n : t[i]));
+}
+
+/** MAIN 카드 합계 한 줄(엣지 수 기준). */
+export function dirSumText(s = {}) {
+  return `정상 ${s.ok || 0} · 낡음 ${s.stale || 0} · 실패 ${s.fail || 0} · 없음 ${s.none || 0}`;
+}
+
 export const LEGEND = Object.freeze([
   '선은 **기록이 있는 연결만** 그립니다. 굵은 빨간 선은 마지막 실패가 마지막 성공보다 뒤인 연결, 주황은 관측 간격의 {factor}배(하한 {min})를 넘겨 새 기록이 없는 연결입니다.',
   '가운데 버스의 눈금 하나가 경로 하나입니다. 회색 눈금은 중앙이 기록을 한 번도 받지 못한 경로입니다 — 쓰지 않는 기능일 수도, 막혀 있을 수도 있습니다.',
   '거부된 요청의 엣지 이름은 요청이 주장한 값이라 **검증되지 않았습니다**. 공유 토큰으로 가져간 pull 도 같습니다.',
   '엣지 **안의** 수집 상태는 엣지 카드의 ‘내부 수집’ 버튼을 누를 때만 그 엣지에서 가져옵니다.',
+  '엣지와 **MAIN** 사이 두 가닥은 **데이터가 가는 방향**입니다 — 메인을 향하는 화살표는 push·결과 회신·메인이 가져간 자료, 엣지를 향하는 화살표는 엣지가 가져간 설정·자료·작업과 메인이 보낸 명령입니다. 선 색은 그 방향 연결 중 가장 나쁜 상태이고, 기록이 없으면 회색 점선입니다.',
+  '엣지 카드의 ‘↑ 올림 · ↓ 가져감 · ⇄ 중앙 호출’ 은 **요청한 쪽** 기준이라 MAIN 선의 방향과 축이 다릅니다 — 메인이 엣지에서 가져온 자료는 카드에서는 ‘중앙 호출’, 선에서는 메인을 향합니다.',
 ]);
 
 /**

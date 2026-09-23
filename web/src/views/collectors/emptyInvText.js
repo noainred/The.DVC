@@ -149,16 +149,21 @@ export function diagnoseEmptyInventory({ push = null, statusItems = null } = {})
   }
 
   // ⑧ 접속은 되는데 호스트·VM 이 0 — **이상이 아닐 수 있다**(빈 vCenter).
+  // v2.591(3차 감사 C8): 개수를 **모르는**(null) vCenter 가 있으면 판정하지 않는다 — 예전엔 null 을 0 으로 더해
+  //   데이터가 있는 엣지를 '빈 vCenter — 이상이 아닙니다' 로 **확신** 판정했다(구버전 엣지는 이 값을 언제나 null 로 보낸다).
   const live = (inv.vcenters || []).filter((v) => !['unreachable', 'disabled'].includes(t(v.status).toLowerCase()));
+  const countsKnown = live.length > 0 && live.every((v) => n(v.hosts) != null && n(v.vms) != null);
   const sumH = live.reduce((a, v) => a + (n(v.hosts) || 0), 0);
   const sumV = live.reduce((a, v) => a + (n(v.vms) || 0), 0);
-  if (live.length > 0 && sumH === 0 && sumV === 0) {
+  if (countsKnown && sumH === 0 && sumV === 0) {
     ev.push('엣지의 vCenter 는 정상인데 호스트·VM 이 0개입니다.');
     return { kind: CAUSE.EMPTY_VCENTER, waiting: false, confident: true, evidence: ev };
   }
 
   // ⑨ 엣지에는 데이터가 있는데 중앙은 0 을 받았다 — 설명되지 않는다. 단정하지 않는다.
-  ev.push(`엣지는 호스트 ${sumH}·VM ${sumV} 를 갖고 있는데 중앙이 받은 push 는 호스트 ${n(push?.hosts) ?? '?'}·VM ${n(push?.vms) ?? '?'} 입니다.`);
+  ev.push(countsKnown
+    ? `엣지는 호스트 ${sumH}·VM ${sumV} 를 갖고 있는데 중앙이 받은 push 는 호스트 ${n(push?.hosts) ?? '?'}·VM ${n(push?.vms) ?? '?'} 입니다.`
+    : `엣지가 vCenter 별 호스트·VM 개수를 보고하지 않았습니다(구버전 엣지일 수 있습니다) — 중앙이 받은 push 는 호스트 ${n(push?.hosts) ?? '?'}·VM ${n(push?.vms) ?? '?'} 입니다.`);
   return { kind: CAUSE.UNKNOWN, waiting: false, confident: false, evidence: ev };
 }
 

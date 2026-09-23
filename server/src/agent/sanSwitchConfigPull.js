@@ -5,6 +5,7 @@
  */
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../sanswitch/registry.js';
 import { dropSnapshot } from '../sanswitch/store.js';
@@ -20,6 +21,8 @@ export const configPullMs = () => Math.max(60_000, Number(process.env.SANSW_CONF
 let _timer = null;
 let _lastSig = '';
 let _last = null;
+// v2.591(3차 감사 PR-7): 실패를 상태뿐 아니라 콘솔에도(같은 사유는 10분에 한 번) — 403·5xx 가 저널 어디에도 안 남았다.
+const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 // 재진입 가드(single-flight) — 수동 실행 API 도 같은 함수를 부르므로 가드를 공유한다.
 let running = false;
 
@@ -54,7 +57,7 @@ async function _pull() {
     const wants = Array.isArray(body?.collectNow) ? body.collectNow.slice(0, 20) : [];
     let collected = 0;
     for (const id of wants) {
-      try { await collectDeviceNow(id); collected++; } catch (e) { console.warn(`[sanswitch-config] 재수집 실패 ${id}: ${e.message}`); }
+      try { if (await collectDeviceNow(id)) collected++; else console.log(`[sanswitch-config] ${id} 는 이미 수집 중 — 그 결과로 대신합니다`); } catch (e) { console.warn(`[sanswitch-config] 재수집 실패 ${id}: ${e.message}`); }
     }
     if (collected) await pushSanSwitchNow().catch(() => {}); // 결과를 push 주기까지 기다리지 않게
     // 연결 테스트 대행(v2.421): 중앙 등록 화면의 테스트를 현지에서 실행하고 결과(추적 로그 포함)를 회신한다.
@@ -83,6 +86,7 @@ async function _pull() {
     return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied, perfCollect };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };
+    if (_logChange('pull', e.message)) console.warn(`[sanswitch-config] 중앙 설정 pull 실패: ${e.message}`);
     return { ok: false, reason: e.message };
   }
 }

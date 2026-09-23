@@ -2,7 +2,7 @@
  * relaycheck/poller.js — HAProxy 경로 주기 점검(v2.429). CLAUDE.md 폴러 규약: 재진입 가드 + 동시 점검 제한 + 대상당 타임아웃 +
  * startAdaptiveTimer(설정 변경이 재시작 없이 먹음). 상태 전이(정상↔실패, 연속 failStreak 회)에 알림 채널 발화 + 해결방안 동봉.
  */
-import { loadSettings, KINDS } from './settings.js';
+import { loadSettings, KINDS, onRelayCheckSettingsChange } from './settings.js';
 import { runCheck } from './checks.js';
 import { remedyFor } from './remedy.js';
 import { loadCollectors } from '../collector/registry.js';
@@ -110,6 +110,6 @@ export function relayCheckStatus() {
 
 export function startRelayCheckPoller() {
   if (_timer) return;
-  _timer = startAdaptiveTimer(() => loadSettings().intervalMs, async () => { if (loadSettings().enabled) await runRelayChecks(); }, { firstDelayMs: 90_000, name: 'HAProxy 경로 점검' });
+  _timer = startAdaptiveTimer(() => loadSettings().intervalMs, async () => { if (loadSettings().enabled) await runRelayChecks(); }, { firstDelayMs: 90_000, name: 'HAProxy 경로 점검', subscribe: onRelayCheckSettingsChange });
 }
 export function _resetForTest() { _state.clear(); _last = { at: 0, total: 0, ok: 0, fail: 0 }; }

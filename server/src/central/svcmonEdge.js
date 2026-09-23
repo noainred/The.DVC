@@ -188,8 +188,13 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   }
 
   // metaSig 가 중앙 보유분과 다르거나 메타가 비면 다음 push 에 동봉을 요청한다.
+  // v2.591(3차 감사 PR-4): **결과 행은 있는데 메타가 없는 id** 가 하나라도 있으면 요청한다. 예전엔 '메타가 비었거나
+  //   sig 가 다를 때' 만 봐서 ① 메타 동봉 push 때 아직 결과가 없던 항목(완결 GC 가 그 메타를 지웠다)과 ② 청크 하나가
+  //   실패해 그 메타가 빠진 항목이 **영구히** 경로·대상·점검명이 빈 채 남았고, 주기를 몰라(기본 60초) 거짓 '오래됨' 으로 셌다.
   const wantSig = text(body?.metaSig, 64);
-  const needMeta = !meta && (!!wantSig && wantSig !== a.metaSig || a.meta.size === 0) && a.rows.size > 0;
+  let metaHole = false;
+  if (!meta) for (const id of a.rows.keys()) if (!a.meta.has(id)) { metaHole = true; break; }
+  const needMeta = !meta && a.rows.size > 0 && ((!!wantSig && wantSig !== a.metaSig) || a.meta.size === 0 || metaHole);
 
   return { ok: true, needMeta, accepted, dropped, reason: dropped ? '일부 행이 상한/형식으로 버려졌습니다.' : undefined };
 }

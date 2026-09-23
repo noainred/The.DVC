@@ -11,6 +11,7 @@
 
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../pdu/registry.js';
 import { collectDeviceNow } from '../pdu/poller.js';
@@ -21,6 +22,8 @@ const configPullMs = () => runtimeIntervals().configPullMs;
 let _timer = null;
 let _lastSig = '';
 let _last = null;
+// v2.591(3차 감사 PR-7): 실패를 상태뿐 아니라 콘솔에도(같은 사유는 10분에 한 번) — 403·5xx 가 저널 어디에도 안 남았다.
+const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 // 재진입 가드 — 이전 pull 이 간격을 넘기면(고RTT) 다음 틱이 겹쳐 돌아 연결이 누적된다.
 let running = false;
 
@@ -70,6 +73,7 @@ async function _pull() {
     return { ok: true, ...(_last) };
   } catch (e) {
     _last = { at: Date.now(), ok: false, reason: e.message };
+    if (_logChange('pull', e.message)) console.warn(`[pdu-config] 중앙 설정 pull 실패: ${e.message}`);
     return { ok: false, reason: e.message };
   }
 }

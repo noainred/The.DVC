@@ -3,7 +3,7 @@
  * 사용자 요구: '발견(xx대)' 표기 + 성공/실패 표시. 위임 스캔이 결과를 못 보여주던 회귀를 고정한다.
  */
 import { describe, it, expect } from 'vitest';
-import { describeScanRun } from './scanRunText.js';
+import { describeScanRun, scanLastRunSummary } from './scanRunText.js';
 
 describe('describeScanRun', () => {
   it('기록이 없으면 —', () => {
@@ -103,5 +103,34 @@ describe('metrics — 등록 수량 강조(v2.442, 사용자 요구)', () => {
   it('실패·대기에는 metrics 가 없다(색 강조 대상이 아니다)', () => {
     expect(describeScanRun({ at: 1, error: 'x' }).metrics).toBe(undefined);
     expect(describeScanRun({ at: 1, delegated: true, pending: true }).metrics).toBe(undefined);
+  });
+});
+
+describe('v2.591 — 인증 실패와 인증 정지 건너뜀(감사 C5·F3·C3)', () => {
+  it('발견 0대인데 인증 실패가 있으면 성공이 아니라 확인 필요(호박색) — 빈 대역과 구분한다', () => {
+    const d = describeScanRun({ at: 1, ok: true, found: 0, registered: 0, scanned: 10, authFailed: 10 });
+    expect(d.badge).toBe('확인 필요');
+    expect(d.tone).toBe('amber');
+    expect(d.text).toContain('인증실패 10');
+    // 인증 문제가 없는 빈 대역은 그대로 '성공'(회색)
+    const e = describeScanRun({ at: 1, ok: true, found: 0, registered: 0, scanned: 10 });
+    expect(e.badge).toBe('성공');
+    expect(e.tone).toBe('muted');
+  });
+
+  it('인증 정지로 건너뛴 IP 는 개수를 밝힌다(조용한 제외 금지)', () => {
+    const d = describeScanRun({ at: 1, ok: true, found: 2, registered: 2, scanned: 8, authSkipped: 5 });
+    expect(d.text).toContain('인증정지 건너뜀 5');
+    expect(d.badge).toBe('성공'); // 발견이 있으면 성공
+    const z = describeScanRun({ at: 1, ok: true, found: 0, scanned: 0, authSkipped: 3 });
+    expect(z.badge).toBe('확인 필요');
+  });
+
+  it('최근 전체 스캔 요약은 서버 키 datacenters 를 읽는다(구버전 vcenters 도) · 단위는 대역', () => {
+    expect(scanLastRunSummary(null)).toBe('');
+    expect(scanLastRunSummary({ found: 1 })).toBe('');
+    expect(scanLastRunSummary({ datacenters: 3, found: 5, registered: 4 })).toBe('대역 3개 · 발견 5 · 등록 4');
+    expect(scanLastRunSummary({ vcenters: 2, found: 0 })).toBe('대역 2개 · 발견 0 · 등록 0');
+    expect(scanLastRunSummary({ datacenters: 1, found: 0, delegated: 1, authSkipped: 2 })).toContain('인증정지 건너뜀 2');
   });
 });

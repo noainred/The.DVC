@@ -39,6 +39,7 @@ import {
 import { CurrentUsersSettings } from './CurrentUsersSettings.jsx';
 import HorizonSessionsPanel from './HorizonSessionsPanel.jsx';
 import { combinedNote, partialNote, SOURCE_STATE_LABEL } from './horizonSessionText.js';
+import { vcAuthSkipNote } from '../authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
 
 const DAYS = [1, 7, 30, 90];
 
@@ -136,6 +137,8 @@ function WindowsUsersPanel({ scope }) {
       <div style={{ border: `1px solid ${TONE_COLOR[note.tone]}`, borderRadius: 8, padding: '10px 12px', background: 'var(--panel)' }}>
         <div style={{ fontWeight: 700, color: TONE_COLOR[note.tone], marginBottom: note.body ? 4 : 0 }}>{note.title}</div>
         {note.body && <div style={{ fontSize: 12.5, color: 'var(--text-dim)', whiteSpace: 'normal', lineHeight: 1.55 }}><BoldText text={note.body} /></div>}
+        {vcAuthSkipNote(data?.poller?.lastResult?.skippedVcenters, { what: '현재 사용자 수집', manual: '지금 수집' })
+          && <div style={{ fontSize: 12.5, color: 'var(--red)', whiteSpace: 'normal', lineHeight: 1.55, marginTop: 4 }}><BoldText text={vcAuthSkipNote(data?.poller?.lastResult?.skippedVcenters, { what: '현재 사용자 수집', manual: '지금 수집' })} /></div>}
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>

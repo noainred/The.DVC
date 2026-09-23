@@ -60,12 +60,35 @@ export function describeScanRun(r, now = Date.now()) {
   if (r.authFailed) extra.push(`인증실패 ${r.authFailed}`);
   // v2.537: 차단 대역(루프백·링크로컬)이라 찌르지 않은 IP — 빼 놓고 말하지 않으면 '전부 스캔' 으로 읽힌다.
   if (r.blocked) extra.push(`차단대역 제외 ${r.blocked}`);
+  // v2.591(감사 F3): 주기 스캔이 인증 실패 정지로 시도하지 않은 IP — 같은 이유로 개수를 말한다.
+  if (r.authSkipped) extra.push(`인증정지 건너뜀 ${r.authSkipped}`);
   const d = dur(r.durationMs);
+  // v2.591(감사 C5): 발견 0대인데 인증 실패가 있으면 '성공' 이 아니라 '확인 필요' 다 — 예전에는 중앙 직접
+  //   스캔이 authFailed 를 싣지 않아 비밀번호가 틀려도 '성공 · 발견 0대' 로 보였다(빈 대역과 구분 불가).
+  const authOnly = found === 0 && (Number(r.authFailed) > 0 || Number(r.authSkipped) > 0);
   return {
-    state: 'ok', badge: '성공', tone: found > 0 ? 'green' : 'muted',
+    state: 'ok', badge: authOnly ? '확인 필요' : '성공', tone: found > 0 ? 'green' : (authOnly ? 'amber' : 'muted'),
     metrics, extra,
     text: `${parts.join(' · ')}${extra.length ? ` (${extra.join(' · ')})` : ''}`,
     title: `${who}${d ? ` · 소요 ${d}` : ''}${extra.length ? ` · ${extra.join(' · ')}` : ''}`,
     when,
   };
+}
+
+/**
+ * '최근 전체/주기 스캔' 한 줄 요약(순수, v2.591 — 감사 C3).
+ *
+ * 서버 `idrac/scanPoller.js lastRun` 의 개수 키는 **`datacenters`** 다(스캔 대역 항목 수 — 법인·서비스 단위).
+ * 화면이 예전 주석을 믿고 `vcenters` 만 읽어 이 요약이 **항상 빠졌다**. 두 키를 다 읽고(구·신 서버 호환)
+ * 단위도 'vCenter' 가 아니라 '대역' 으로 말한다(대역은 vCenter 에 매이지 않는다).
+ * @returns {string} 요약이 없으면 ''
+ */
+export function scanLastRunSummary(lr) {
+  if (!lr) return '';
+  const n = lr.datacenters ?? lr.vcenters;
+  if (n == null) return '';
+  const parts = [`대역 ${n}개`, `발견 ${lr.found ?? 0}`, `등록 ${lr.registered ?? 0}`];
+  if (lr.delegated) parts.push(`위임 ${lr.delegated}`);
+  if (lr.authSkipped) parts.push(`인증정지 건너뜀 ${lr.authSkipped}`);
+  return parts.join(' · ');
 }

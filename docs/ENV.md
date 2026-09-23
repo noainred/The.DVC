@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **484개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **485개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-23)
@@ -270,7 +270,7 @@
 | `STORAGE_CLI_TIMEOUT_MS` | `45000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_CONFIG_PULL_MS` | `5 * 60_000` |  | storage/intervals.js |
 | `STORAGE_DAILY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
-| `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/poller.js |
+| `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/collectRequests.js, storage/poller.js |
 | `STORAGE_HISTORY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
 | `STORAGE_HTTP_TIMEOUT_MS` | `15000` |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
@@ -439,7 +439,7 @@
 | `AD_USER_FILTER` |  |  | auth/ad.js |
 | `AD_VIEWER_GROUP` | `''` |  | auth/ad.js |
 | `AUTH_DISABLED_ROLE` |  |  | auth/auth.js |
-| `DEFAULT_ADMIN_PASSWORD` | `'admin123'` | ✅ | auth/auth.js, config.js |
+| `DEFAULT_ADMIN_PASSWORD` | `''` | ✅ | auth/auth.js, config.js |
 | `OTP_ROLE_ENFORCE` | `기본 적용('false' 로 끄기)` |  | auth/auth.js |
 
 ## 중계 경로 점검 (1)
@@ -559,13 +559,14 @@
 | `HZSESS_DB_PATH` |  |  | horizon/sessionDb.js |
 | `HZSESS_FIRST_DELAY_MS` | `60000` |  | horizon/sessionPoller.js |
 
-## iDRAC/전력 (10)
+## iDRAC/전력 (11)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BMUSAGE_MAX_REPORTS` | `6` |  | idrac/redfish.js |
 | `BMUSAGE_REPORT_TTL_MS` | `6` |  | idrac/redfish.js |
 | `BMUSAGE_SENSOR_TTL_MS` | `6` |  | idrac/redfish.js |
+| `IDRAC_AUTH_CACHE_MAX` | `4096` |  | idrac/redfish.js |
 | `IDRAC_SENSOR_SAMPLES` | `1440` |  | idrac/sensorStore.js |
 | `IDRAC_TEMP_SERIES` | `기본 적용('false' 로 끄기)` |  | idrac/serverTempSeries.js |
 | `IDRAC_TEMP_SERIES_DETAIL` | `기본 아님('true' 일 때만 적용)` |  | idrac/serverTempSeries.js |
@@ -608,7 +609,7 @@
 | `PDU_CONCURRENCY` | `4` |  | pdu/poller.js |
 | `PDU_CONFIG_PULL_MS` | `5 * 60_000` |  | pdu/intervals.js |
 | `PDU_DB` |  |  | pdu/db.js |
-| `PDU_DEVICE_TIMEOUT_MS` | `90000` |  | pdu/poller.js |
+| `PDU_DEVICE_TIMEOUT_MS` | `90000` |  | pdu/collectRequests.js, pdu/poller.js |
 | `PDU_INTERVALS_LOCAL` | `기본 아님('1' 일 때만 적용)` |  | pdu/intervals.js |
 | `PDU_POLL_MS` | `5 * 60_000` |  | pdu/intervals.js |
 | `PDU_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | pdu/push.js |
@@ -626,7 +627,7 @@
 | `SANSW_CLI_RAW_LIMIT` | `4000` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CLI_TIMEOUT_MS` | `45000` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CONCURRENCY` | `4` |  | sanswitch/poller.js |
-| `SANSW_DEVICE_TIMEOUT_MS` | `120000` |  | sanswitch/poller.js |
+| `SANSW_DEVICE_TIMEOUT_MS` | `120000` |  | sanswitch/collectRequests.js, sanswitch/poller.js |
 | `SANSW_HTTP_TIMEOUT_MS` | `20000` |  | sanswitch/collectors/fosRest.js |
 | `SANSW_PERF_ACTIVITY_MAX` | `500` |  | sanswitch/perfActivityLog.js |
 | `SANSW_PERF_CONCURRENCY` | `2` |  | sanswitch/perfPoller.js |
@@ -663,4 +664,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 484
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 485

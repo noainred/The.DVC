@@ -13,7 +13,7 @@
  */
 const vcOf = (x) => String(x?.vcenterId ?? x?.deviceId ?? x?.id ?? '');
 
-export function scopePollerStatus(st, allowed, { lists = ['errors', 'skippedVcenters', 'per', 'skipped'], keep = ['at', 'trigger', 'ms', 'mock', 'paused'] } = {}) {
+export function scopePollerStatus(st, allowed, { lists = ['errors', 'skippedVcenters', 'per', 'skipped', 'authStopped'], keep = ['at', 'trigger', 'ms', 'mock', 'paused'] } = {}) {
   if (!st || typeof st !== 'object' || !allowed) return st;
   const out = { ...st, scoped: true };
   if (Array.isArray(st.inFlight)) out.inFlight = st.inFlight.filter((x) => allowed.has(vcOf(x)));

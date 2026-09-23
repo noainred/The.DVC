@@ -24,6 +24,15 @@ import { createAuthGuard } from '../util/authGuard.js';
  *   그 뒤로는 VM 마다 0회다. 예전에는 1분마다 VM 수 × 방식 수(auto 는 2)였다.
  */
 export const gpuAuthGuard = createAuthGuard({ file: 'gpu-auth-stops.json' });
+/**
+ * **계정 단위** 정지 id(v2.591 — 감사 F2). 게스트를 **많이 도는** 조사(OS 판별 스캐너·게스트 조사 공용 계정)가
+ * 한 실행에서 같은 계정의 연속 거부로 회로 차단기를 끊으면 이 기록을 남긴다. VM 단위(`vm|…`)만 두면 다음 주기가
+ * **아직 멈추지 않은 다른 VM 3대**로 다시 시도해 주기마다 3회씩 실패 로그온이 쌓인다(5분 주기면 30분에 18회 —
+ * AD 잠금 임계를 넘는다). 계정·비밀번호를 고치면 credHash 가 달라져 자동 재개하고, 그 계정으로 한 번 통하면 푼다.
+ * ⚠ GPU 폴러는 이 기록을 보지 않는다(VM 마다 로컬 계정일 수 있어 VM 단위 — 위 머리말). 차단기가 끊은 계정만 대상이다.
+ */
+export const guestAccountStopDev = (vcId, creds) => ({ id: `acct|${vcId}|${String(creds?.username || '')}`, username: creds?.username, password: creds?.password });
+
 /** 정지 기록 → 화면·API 용(해시 제외). */
 export const gpuStopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
 /** 게스트 작업(VMware Tools) 또는 SSH 의 **자격증명 거부**인가. */

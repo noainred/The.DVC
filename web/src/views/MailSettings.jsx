@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, sendJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import BoldText from '../components/boldText.jsx';
+import { mailAuthStopText } from './authSkipText.js'; // v2.591(감사 F4): SMTP 인증 실패로 자동 발송을 멈춘 사실
 
 /**
  * 설정 › 메일 발송(v2.454, admin 조회 / 저장·테스트는 설정 소유자).
@@ -183,9 +185,14 @@ export default function MailSettings() {
       {/* ── 발송 이력 ────────────────────────────────────────── */}
       <h4 style={{ margin: '22px 0 8px', fontSize: 14 }}>최근 발송</h4>
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
-        최근 1시간 {st.sentLastHour ?? 0}건{st.rateLimitPerHour ? ` / 한도 ${st.rateLimitPerHour}건` : ''}
+        최근 1시간 {st.sentLastHour ?? 0}건{st.attemptsLastHour != null && st.attemptsLastHour !== st.sentLastHour ? ` (시도 ${st.attemptsLastHour}건)` : ''}{st.rateLimitPerHour ? ` / 한도 ${st.rateLimitPerHour}건(시도 기준)` : ''}
         {st.lastError && <span style={{ color: '#f0a' }}> · 최근 오류: {st.lastError}</span>}
       </div>
+      {st.authStopped && (
+        <div className="card" style={{ padding: '9px 12px', marginBottom: 8, fontSize: 12.5, borderColor: 'var(--red)', whiteSpace: 'normal', lineHeight: 1.55 }}>
+          <BoldText text={mailAuthStopText(st.authStopped)} />
+        </div>
+      )}
       {(st.history || []).length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>아직 발송 기록이 없습니다.</div>}
       {(st.history || []).length > 0 && (
         <STable style={{ width: '100%', fontSize: 12 }}>

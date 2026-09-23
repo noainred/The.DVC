@@ -75,8 +75,20 @@ function moduleSummary(text) {
 }
 
 const files = new Map(); // fileName -> { modules:Set, atomic:bool, preserve:bool, mode600:bool, summary }
+// v2.591: 인증 실패 정지 파일은 `createAuthGuard({ file: '<name>' })` 로 만든다 — 위 두 패턴이 못 읽어 v2.590 의 7종과
+// v2.591 의 4종이 이 문서에 **하나도 없었다**(그런데 --check 는 통과했다). 쓰기 속성은 호출 모듈이 아니라 공용 코어
+// (util/authGuard.js)의 것이므로 거기서 읽는다(주석 속 낱말이 아니라 **호출 꼴**로 — 그 머리말이 preserveCorrupt 를
+// '하지 않는다' 고 적고 있다).
+const GUARD_TEXT = fs.readFileSync(path.join(SRC, 'util/authGuard.js'), 'utf8');
+const GUARD_FLAGS = { atomic: /atomicWriteFileSync\(/.test(GUARD_TEXT), preserve: /preserveCorrupt\(/.test(GUARD_TEXT), mode600: /0o600/.test(GUARD_TEXT) };
 for (const f of walk(SRC)) {
   const text = fs.readFileSync(f, 'utf8');
+  for (const m of text.matchAll(/createAuthGuard\(\s*\{\s*file:\s*'([^']+)'/g)) {
+    const name = m[1];
+    const cur = files.get(name) || { modules: new Set(), ...GUARD_FLAGS, summary: '인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js' };
+    cur.modules.add(path.relative(SRC, f).replace(/\\/g, '/'));
+    files.set(name, cur);
+  }
   const rel = path.relative(SRC, f).replace(/\\/g, '/');
   const summary = moduleSummary(text);
   // ① `path.join(<...DIR...>, 'name')` ② `dbFile('name.db')` 같은 헬퍼 호출.

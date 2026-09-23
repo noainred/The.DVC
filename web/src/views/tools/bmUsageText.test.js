@@ -440,3 +440,25 @@ describe('v2.554 — iDRAC 라이선스 인식과 Enterprise 대체 수집', () 
     for (const s of all) expect(String(s)).not.toContain('`');
   });
 });
+
+describe('v2.591 — 403 은 자격증명 거부가 아니다(감사 R-BM2)', () => {
+  it('텔레메트리 forbidden 은 비밀번호 문제가 아니라고 말하고 auth 문구와 다르다', () => {
+    const f = detailNotes({ idracKind: 'forbidden' }).join(' ');
+    expect(f).toContain('403');
+    expect(f).toContain('멈추지 않습니다');
+    expect(f).not.toContain('계정·비밀번호를 확인하세요');
+    expect(detailNotes({ idracKind: 'auth' }).join(' ')).toContain('계정·비밀번호를 확인하세요');
+  });
+
+  it('대체 경로 auth 는 401 만 · forbidden 은 권한 문제로 따로 말한다', () => {
+    expect(entDetailNotes({ entTried: ['api'], entKind: 'auth' }).join(' ')).toContain('(401)');
+    expect(entDetailNotes({ entTried: ['api'], entKind: 'auth' }).join(' ')).not.toContain('401/403');
+    const f = entDetailNotes({ entTried: ['api'], entKind: 'forbidden' }).join(' ');
+    expect(f).toContain('403');
+    expect(f).toContain('멈추지 않습니다');
+  });
+
+  it('정지 안내는 수동 성공이 주 전력 수집 정지도 푼다는 사실을 말한다', () => {
+    expect(authStopNote([{ key: 'a', since: 1 }], { now: 10 })).toContain('주 전력 수집의 정지도 함께 풀립니다');
+  });
+});

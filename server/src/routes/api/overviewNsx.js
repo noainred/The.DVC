@@ -58,10 +58,16 @@ function corpAttribution(vcenters) {
   return { opts: { fleetAssign, dcVcenters, knownVcenters: known }, dcNames };
 }
 
-function physicalByCorp(hosts, allowed, vcenters = []) {
+// v2.591 C4: `sink` 를 주면 범위 계정의 **허용 vCenter 에 귀속된 서버**를 담아 돌려준다 —
+//   개요의 물리 용량(`physical`)이 같은 귀속 판정으로 다시 집계되게(함대 전체 70대와 범위 9대를 한 화면에서
+//   동시에 말하던 결함).
+function physicalByCorp(hosts, allowed, vcenters = [], sink = null) {
   try {
     const { opts, dcNames } = corpAttribution(vcenters);
-    const r0 = serversByCorp(allPhysicalServers(), hosts, opts);
+    const inScope = [];
+    const onAttributed = allowed ? (s, vc) => { if (vc && allowed.has(vc)) inScope.push(s); } : null;
+    const r0 = serversByCorp(allPhysicalServers(), hosts, { ...opts, onAttributed });
+    if (sink) sink.servers = inScope;
     // 법인 이름표 — 미배치 행에 나오는 법인만(전체 목록을 싣지 않는다).
     const r = { ...r0, datacenterNames: Object.fromEntries(Object.keys(r0.unplacedByDatacenter || {}).map((id) => [id, dcNames[id] || id])) };
     if (!allowed) return r;
@@ -87,6 +93,10 @@ function physicalByCorp(hosts, allowed, vcenters = []) {
       matchedCount: sum(byVcenterMatched),
       physicalOnly: sum(byVcenterPhysicalOnly),
       union: sum(byVcenterUnion),
+      // v2.591 C4: 등록 비활성·귀속 경로 집계도 함대 전체 값이었다 — 범위 안에서 다시 센다(disabled) /
+      //   귀속 경로 분포는 범위 밖 서버의 판정 근거라 주지 않는다(matchedBy).
+      disabled: inScope.filter((s) => s.enabled === false).length,
+      matchedBy: null,
       // 귀속되지 않은 서버는 어느 법인 것인지 모르므로 범위 계정에 주지 않는다(대수 유출 차단).
       unassigned: null,
       physicalOnlyUnassigned: null,
@@ -104,9 +114,9 @@ function physicalByCorp(hosts, allowed, vcenters = []) {
   }
 }
 
-function physicalCapacity() {
+function physicalCapacity(servers = null) {
   try {
-    return aggregatePhysical(allPhysicalServers(), invForServer);
+    return aggregatePhysical(servers || allPhysicalServers(), invForServer);
   } catch (e) {
     return { servers: 0, withInventory: 0, withCores: 0, withMemory: 0, cores: 0, threads: 0, sockets: 0, memGiB: 0, memGB: 0, error: e?.message || String(e) };
   }
@@ -195,12 +205,18 @@ api.get('/overview', (req, res) => memoJson(req, res, 'overview', (snap) => {
   }
   for (const v of snap.vms) if (v.gpu && (!allowed || allowed.has(v.vcenterId))) gpuVms++;
   const gpuUtilPct = utilN ? Math.round(utilSum / utilN) : 0;
+  // v2.526: 법인(vCenter)별 물리 서버 수 — 화면이 사이트별 호스트·VM 과 나란히 보여준다.
+  const sink = {};
+  const pbc = physicalByCorp(snap.hosts.filter(hostInScope), allowed, snap.vcenters || [], sink);
+  // v2.591 C4: 범위 계정의 물리 용량은 허용 vCenter 귀속 서버만으로 다시 집계한다(귀속을 못 한 서버는
+  //   어느 법인 것인지 모르므로 넣지 않는다). 귀속 판정 자체가 실패했으면 null — 함대 값을 내보내지 않는다.
+  const physical = !allowed ? physicalCapacity()
+    : (Array.isArray(sink.servers) ? { ...physicalCapacity(sink.servers), scoped: true } : null);
   return {
     generatedAt: snap.generatedAt, source: snap.source, ...rollups,
     gpuCards, gpuVms, gpuUtilPct, gpuUtilHosts: utilN,
-    physical: physicalCapacity(),
-    // v2.526: 법인(vCenter)별 물리 서버 수 — 화면이 사이트별 호스트·VM 과 나란히 보여준다.
-    physicalByCorp: physicalByCorp(snap.hosts.filter(hostInScope), allowed, snap.vcenters || []),
+    physical,
+    physicalByCorp: pbc,
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 

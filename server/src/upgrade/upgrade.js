@@ -130,13 +130,22 @@ export function applyPackage(members, installDir) {
   const backup = `${target}.bak.${ts}`;
 
   fs.rmSync(staging, { recursive: true, force: true });
-  for (const [rel, data] of members) {
-    const dst = path.join(staging, rel);
-    if (!path.resolve(dst).startsWith(path.resolve(staging) + path.sep)) {
-      throw new Error(`unsafe member path: ${rel}`); // defense in depth
+  try {
+    for (const [rel, data] of members) {
+      const dst = path.join(staging, rel);
+      if (!path.resolve(dst).startsWith(path.resolve(staging) + path.sep)) {
+        throw new Error(`unsafe member path: ${rel}`); // defense in depth
+      }
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      // v2.591 P4: 실행 비트만 옮긴다(archive.js parseTar 가 `exec` 로 싣는다). 예전엔 전부 0644 라 pyportal/run.sh 등이
+      // 새 설치(cp -a)와 달리 실행 비트를 잃었다.
+      fs.writeFileSync(dst, data, { mode: data?.exec ? 0o755 : 0o644 });
     }
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    fs.writeFileSync(dst, data);
+  } catch (err) {
+    // v2.591 P7(재현 — ENOSPC): 스테이징 쓰기가 실패하면 부분 `.new.<ts>` 가 남았다. 정리는 다음 **성공** 업그레이드
+    // 에서만 돌아, 자동 적용이 폴링마다 재시도하면 디스크 부족이 스스로 악화됐다. 실패 즉시 지운다.
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch { /* best effort */ }
+    throw err;
   }
 
   const hadOld = fs.existsSync(target);
@@ -166,9 +175,13 @@ function pruneOldBackups(target, keep = 2) {
     const base = path.basename(target);
     const bakPrefix = `${base}.bak.`;
     const newPrefix = `${base}.new.`;
+    // v2.591 P8(재현): install.sh 는 초(`date +%s`), in-app 업그레이드는 ms 로 찍는다. 그대로 비교하면 초 단위
+    // 값(1.79e9)이 ms(1.79e12) 옆에서 언제나 가장 작아 **가장 최근의 수동 재설치 백업이 먼저 지워졌다**.
+    // 11자리 미만(= 2001-09-09 이후의 ms 가 아닌 값)은 초로 보고 ms 로 맞춘다.
+    const bakMs = (n) => { const v = Number(n.slice(bakPrefix.length)); return v < 1e11 ? v * 1000 : v; };
     const baks = fs.readdirSync(dir)
       .filter((n) => n.startsWith(bakPrefix) && /^\d+$/.test(n.slice(bakPrefix.length)))
-      .sort((a, b) => Number(b.slice(bakPrefix.length)) - Number(a.slice(bakPrefix.length)));
+      .sort((a, b) => bakMs(b) - bakMs(a));
     for (const n of baks.slice(keep)) fs.rmSync(path.join(dir, n), { recursive: true, force: true });
     // 이 함수는 스왑 성공 직후(동기) 호출되므로 남아있는 .new.*는 전부 과거 실패의 잔재다.
     for (const n of fs.readdirSync(dir)) {
@@ -422,8 +435,13 @@ export async function upgradeFromRemote(baseUrl, installDir, currentVersion, des
  *  대용량 번들+고RTT를 고려해 타임아웃을 넉넉히 둔다. 재시도는 적용하지 않는다(적용=재시작이라 경합 오탐 위험). */
 /**
  * 수신측 번들 무결성 판정(v2.480, 3차 감사 코어2 S1 — server/CLAUDE.md "자체 업그레이드·엣지 푸시 양쪽 모두 검증" 규약).
- * 예전엔 엣지 /api/upgrade/bundle·수집기 /api/collector/upgrade 가 sha256 을 받지도 검증하지도 않아, 토큰 탈취/http 중간자가
- * 임의 tar.gz 를 설치·재시작시킬 수 있었다. 헤더 부재는 UPGRADE_ALLOW_UNVERIFIED=true 일 때만 통과(자체 업그레이드와 같은 예외).
+ * 예전엔 엣지 /api/upgrade/bundle·수집기 /api/collector/upgrade 가 sha256 을 받지도 검증하지도 않았다. 헤더 부재는
+ * UPGRADE_ALLOW_UNVERIFIED=true 일 때만 통과(자체 업그레이드와 같은 예외).
+ * ⚠⚠ v2.591 정직 정정(감사 P6 — 재현 확인): 이 sha 는 **같은 요청이 스스로 신고한 해시**라 **전송 중 손상·잘림만** 잡는다.
+ *   토큰을 가진 공격자나 http 중간자는 번들과 헤더를 함께 바꿀 수 있으므로(악성 번들의 sha 를 계산해 실으면 통과한다)
+ *   **토큰 탈취·중간자 방어가 아니다.** 실제 방어는 토큰 + TLS(`upgradeAgent`·https 엣지)다 — 이 검사를 믿고 그 둘을
+ *   약화하지 말 것. 원격 다운로드 경로(`verifyBundleSha`)는 sha 를 별도 TLS 채널(versions.json)에서 받으므로 건전하다.
+ *   push 무결성을 실제로 보장하려면 수신측이 가진 키로 서명해야 한다(rma/signing.js HMAC 패턴) — 별건.
  * @returns {string|null} 거부 사유(null 이면 통과)
  */
 export function bundleShaIssue(headerSha, bytes, { allowUnverified = String(process.env.UPGRADE_ALLOW_UNVERIFIED || '').toLowerCase() === 'true' } = {}) {

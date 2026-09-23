@@ -7,7 +7,7 @@ import { putJson, postJson } from '../../api.js';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx';
 import { STable } from '../../components/STable.jsx';
-import { describeScanRun } from './scanRunText.js';
+import { describeScanRun, scanLastRunSummary } from './scanRunText.js';
 
 // ---- vCenter별 iDRAC 스캔 대역(주기 자동 발견) ------------------------------
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
@@ -301,7 +301,7 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
       {st.lastRun && !st.running && (
         <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
           최근 전체 스캔: {st.lastRun.at ? new Date(st.lastRun.at).toLocaleString('ko-KR') : ''}
-          {st.lastRun.vcenters != null && ` — ${st.lastRun.vcenters} vCenter · 발견 ${st.lastRun.found ?? 0} · 등록 ${st.lastRun.registered ?? 0}${st.lastRun.delegated ? ` · 위임 ${st.lastRun.delegated}` : ''}`}
+          {scanLastRunSummary(st.lastRun) && ` — ${scanLastRunSummary(st.lastRun)}`}
           {st.lastRun.errors?.length ? <span style={{ color: '#f87171' }}> · 오류 {st.lastRun.errors.length}건</span> : ''}
           {st.lastRun.skipped && ` — ${st.lastRun.skipped}`}
         </div>

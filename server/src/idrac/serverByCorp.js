@@ -76,6 +76,9 @@ export function serversByCorp(servers = [], hosts = [], opts = {}) {
   const dcVcenters = opts?.dcVcenters instanceof Map ? opts.dcVcenters : new Map();
   const knownVc = opts?.knownVcenters instanceof Set ? opts.knownVcenters : null;
   const isKnown = (id) => !!id && (!knownVc || knownVc.has(id));
+  // v2.591 C4: 서버별 귀속 결과를 호출부가 받을 수 있게 한다(범위 계정의 물리 용량 재집계용).
+  //   귀속 판정을 호출부가 다시 구현하면 두 판정이 갈라진다 — 판정은 여기 하나다.
+  const onAttributed = typeof opts?.onAttributed === 'function' ? opts.onAttributed : null;
   // 호스트 이름·서비스태그 → vCenter id 색인(한 번만 만든다 — 서버마다 전체 순회하면 O(N×M)).
   const byName = new Map();
   const byTag = new Map();
@@ -163,6 +166,7 @@ export function serversByCorp(servers = [], hosts = [], opts = {}) {
     }
 
     if (vc) bump(out.byVcenter, vc); else { out.unassigned += 1; out.matchedBy.none += 1; }
+    if (onAttributed) onAttributed(s, vc);
 
     if (hostHit) {
       out.matchedCount += 1;

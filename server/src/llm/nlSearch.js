@@ -148,6 +148,12 @@ function fallbackParse(query) {
 }
 
 /** Main entry: translate `query` and run it. Returns the interpreted query + results. */
+/**
+ * 자연어 검색 결과 종류 → 그 결과를 볼 조회 권한(inv.* — v2.536 집행과 같은 축). v2.583 `/search/nl` 이 먼저 썼고
+ * v2.591 S1 에 ChatOps 가 같은 표를 쓴다 — 두 곳이 각자 표를 들면 한쪽에만 종류가 늘어 다시 우회로가 된다.
+ */
+export const NL_ENTITY_PERM = Object.freeze({ vm: 'inv.vms', host: 'inv.hosts', datastore: 'inv.datastores', network: 'inv.networks' });
+
 export async function nlSearch(query, allowed = null) {
   const cfg = loadLlmConfig();
   let q, source;

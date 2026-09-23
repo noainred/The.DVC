@@ -11,6 +11,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { scanForIdracs } from '../idrac/scan.js';
 import { registerScanned } from '../idrac/registry.js';
 import { pollNow } from '../idrac/poller.js';
+import { makeScanAuthPolicy } from '../idrac/scanAuth.js';
 
 let timer = null;
 let last = null; // { at, agent, scanned, foundCount, registered, error }
@@ -41,7 +42,11 @@ export async function runAgentScan() {
     const a = await pullAssignment();
     if (!a?.assigned) { last = { at: Date.now(), agent: config.agent.name, assigned: false }; return last; }
 
-    const scan = await scanForIdracs({ ips: a.ips, username: a.username, password: a.password });
+    // v2.591(감사 F3): 이 경로는 타이머만 부른다(수동 진입점 없음 — grep 확인) → 주기 스캔 규칙을 적용한다.
+    //   직전 인증 실패 IP·주 폴러가 같은 계정으로 이미 멈춘 등록 서버는 건너뛰고 개수를 `last` 에 남긴다.
+    //   중앙 /result 는 authSkipped 를 받지 않으므로(구 계약) 엣지 로그 화면(collect.agentScan)이 그 사실을 말한다.
+    const authPolicy = makeScanAuthPolicy({ rangeId: 'assign', username: a.username, password: a.password, periodic: true });
+    const scan = await scanForIdracs({ ips: a.ips, username: a.username, password: a.password, authPolicy });
 
     let registered = 0;
     if (config.agent.autoRegister && scan.found.length) {
@@ -60,8 +65,8 @@ export async function runAgentScan() {
       durationMs: Date.now() - started,
     }).catch(() => {});
 
-    last = { at: Date.now(), agent: config.agent.name, assigned: true, scanned: scan.scanned, foundCount: scan.foundCount, registered };
-    console.log(`[agent] 스캔 완료: ${config.agent.name} — ${scan.foundCount}/${scan.scanned} iDRAC, ${registered} 등록`);
+    last = { at: Date.now(), agent: config.agent.name, assigned: true, scanned: scan.scanned, foundCount: scan.foundCount, registered, authFailed: scan.authFailed || 0, authSkipped: scan.authSkipped || 0 };
+    console.log(`[agent] 스캔 완료: ${config.agent.name} — ${scan.foundCount}/${scan.scanned} iDRAC, ${registered} 등록${scan.authSkipped ? ` · 인증 실패 정지로 ${scan.authSkipped}개 IP 건너뜀(계정을 고치면 자동 재개)` : ''}`);
     return last;
   } catch (err) {
     last = { at: Date.now(), agent: config.agent.name, error: err.message };

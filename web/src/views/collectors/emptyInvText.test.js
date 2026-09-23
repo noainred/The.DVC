@@ -116,11 +116,11 @@ describe('null 을 0 으로 뭉개지 않는다', () => {
       push: { hosts: 0, vms: 0 },
       statusItems: stItems(inv({ registered: 1, counts: { ok: 1, pending: 0, unreachable: 0, mock: 0, disabled: 0 }, vcenters: [{ id: 'A', status: 'ok', hosts: null, vms: null }] })),
     });
-    // 합이 0 이라 EMPTY_VCENTER 로 떨어진다 — 그 판정은 confident 이지만 문구가 '이상이 아닐 수
-    // 있다' 라고 말하므로 거짓 경보가 되지 않는다. 이 동작을 고정한다(0 과 null 을 섞어 '장애'
-    // 라고 말하지 않는 것이 핵심이다).
-    expect(d.kind).toBe(CAUSE.EMPTY_VCENTER);
-    expect(CAUSE_FIX[d.kind].join(' ')).toContain('조치가 필요하지 않습니다');
+    // v2.591 C8: 예전에는 null 을 0 으로 합산해 EMPTY_VCENTER(confident — '이상이 아닙니다')로 단정했다. 실제로는
+    // storeStatus 가 호스트·VM 을 **항상 null** 로 주던 결함 때문에 데이터가 있는 엣지도 그렇게 판정됐다. 개수를 모르면
+    // '빈 vCenter' 라고 말할 근거가 없다 — 판정 보류(⑨)다.
+    expect(d.kind).toBe(CAUSE.UNKNOWN);
+    expect(d.confident).not.toBe(true);
   });
   it('등록 수가 없으면 ? 로 적는다(0개라고 단정하지 않는다)', () => {
     const d = diagnoseEmptyInventory({ push: {}, statusItems: stItems(inv({ registered: null, counts: { ok: 1 } })) });

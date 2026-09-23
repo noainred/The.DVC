@@ -7,7 +7,7 @@
  */
 
 import crypto from 'node:crypto';
-import { withSsh } from '../proxy/sshExec.js';
+import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
 
 const PEERRE = /^[a-zA-Z0-9._:][a-zA-Z0-9._:-]*$/;  // IP/호스트명 — 셸 메타문자 + 선행 '-' 차단(tcpdump 플래그 주입 방지, 감사 L1)
 const IFRE = /^[a-zA-Z0-9._][a-zA-Z0-9._-]*$/;      // 인터페이스명 — 선행 '-' 차단
@@ -146,8 +146,10 @@ export async function runDualCapture({ hostA, hostB, iface = 'any', seconds = 10
     runTrafficCapture({ hostA, peer: peerForA, iface, seconds, maxPackets, useSudo }),
     runTrafficCapture({ hostA: hostB, peer: peerForB, iface, seconds, maxPackets, useSudo }),
   ]);
-  const a = ra.status === 'fulfilled' ? ra.value : { ok: false, reason: ra.reason?.message || '캡처 실패', captured: 0 };
-  const b = rb.status === 'fulfilled' ? rb.value : { ok: false, reason: rb.reason?.message || '캡처 실패', captured: 0 };
+  // v2.591(감사 F5): 어느 쪽이 **SSH 자격증명 거부**였는지 싣는다 — 문자열로 바꾸면 ssh2 의 `level` 이 사라져
+  //   연속 모니터가 그 쪽만 멈출 수 없다(한쪽 비밀번호가 틀려도 다른 쪽은 계속 잰다).
+  const a = ra.status === 'fulfilled' ? ra.value : { ok: false, reason: ra.reason?.message || '캡처 실패', captured: 0, authFailed: isSshAuthError(ra.reason) };
+  const b = rb.status === 'fulfilled' ? rb.value : { ok: false, reason: rb.reason?.message || '캡처 실패', captured: 0, authFailed: isSshAuthError(rb.reason) };
   return { ok: true, dual: true, hostA: peerForB, hostB: peerForA, a, b, comparison: compareDual(a, b) };
 }
 

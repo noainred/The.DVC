@@ -83,7 +83,8 @@ async function runIdracScanWorkerInner() {
           postProgress(job.reqId, scanned, total, found);
         };
         // 스캔+현지등록 코어는 PUSH 엔드포인트와 공유(runLocalIdracScan). durationMs는 헬퍼가 계산.
-        const scan = await runLocalIdracScan({ ips: job.ips, username: job.username, password: job.password, noRegister: job.noRegister, vcenterId: job.vcenterId || '', datacenterId: job.datacenterId || '', mode: job.mode || 'merge', onProgress });
+        // v2.591(감사 F3): 중앙이 싣는 trigger·rangeId — 주기 잡이면 인증 정지 IP 를 건너뛴다(구버전 중앙은 필드가 없어 수동=전부 시도).
+        const scan = await runLocalIdracScan({ ips: job.ips, username: job.username, password: job.password, noRegister: job.noRegister, vcenterId: job.vcenterId || '', datacenterId: job.datacenterId || '', mode: job.mode || 'merge', onProgress, trigger: job.trigger === 'periodic' ? 'periodic' : 'manual', rangeId: String(job.rangeId || '') });
         await postResult({ reqId: job.reqId, agent: config.agent.name, ...scan });
         last = { at: Date.now(), reqId: job.reqId, foundCount: scan.foundCount, registered: scan.registered };
         console.log(`[idrac-scan-agent] ${config.agent.name}: ${scan.foundCount}/${scan.scanned} iDRAC, ${scan.registered} 현지 등록${job.noRegister ? ' (등록 보류)' : ''}`);

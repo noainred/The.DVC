@@ -123,13 +123,14 @@ export function deleteJob(id) {
 }
 
 /** 실행 결과 반영(runner 전용) — clones 원장 갱신 + lastRun. */
-export function recordRun(id, { ok, detail, ms, addClone = null, removeCloneRefs = [] }) {
+export function recordRun(id, { ok, detail, ms, addClone = null, removeCloneRefs = [], skipped = '', authStopped = null }) {
   const db = load();
   const j = db.jobs.find((x) => x.id === id);
   if (!j) return;
   if (addClone) j.clones.push(addClone);
   if (removeCloneRefs.length) j.clones = j.clones.filter((c) => !removeCloneRefs.includes(c.ref));
-  j.lastRun = { at: Date.now(), ok: !!ok, detail: String(detail || '').slice(0, 400), ms: ms || 0 };
+  // v2.591: 건너뛴 실행은 사유(skipped)·정지 기록(authStopped)을 함께 남긴다 — 화면이 '실패' 와 구분해 말한다.
+  j.lastRun = { at: Date.now(), ok: !!ok, detail: String(detail || '').slice(0, 400), ms: ms || 0, ...(skipped ? { skipped: String(skipped).slice(0, 40) } : {}), ...(authStopped ? { authStopped } : {}) };
   persist();
 }
 

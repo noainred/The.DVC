@@ -167,10 +167,16 @@ export async function pollStorageOnce() {
   } finally { _busy = false; }
 }
 
-/** 단일 장비 즉시 수집(등록 화면 '연결 테스트'/'지금 수집') — 폴러 가드와 독립(1대 한정이라 안전). */
+/**
+ * 단일 장비 즉시 수집(등록 화면 '지금 수집' · 엣지 재수집 요청).
+ * v2.591 L1: 같은 장비가 이미 수집 중이면(주기 수집·다른 요청) **시작하지 않고 false** 를 돌린다 — SAN(`sanswitch/poller.js`)·
+ *   PDU 와 같은 규약. 예전 주석은 '1대 한정이라 안전' 이라 적었지만 같은 어레이에 세션이 2개 열리고(Unity 는 세션당 최대 150초),
+ *   늦게 끝난 옛 결과가 최신 스냅샷을 덮고, 먼저 끝난 쪽이 in-flight 를 지워 화면 '진행중' 에서 사라졌다(재현: 동시 요청 2개).
+ */
 export async function collectDeviceNow(id) {
   const dev = getDeviceWithSecret(id);
   if (!dev) throw new Error('장비를 찾을 수 없습니다.');
+  if (_inFlight.has(dev.id)) return false;
   await collectOne(dev);
   return true;
 }

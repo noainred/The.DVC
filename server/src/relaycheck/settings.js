@@ -71,9 +71,15 @@ export function loadSettings() {
   _cache = normalizeSettings(raw);
   return loadSettings();
 }
+// v2.591 L10: 값이 바뀌면 무장된 타이머를 즉시 재무장하게 알린다(v2.409 '값 변경 시 즉시 재무장' 규약 — vmseries·curuser 와 같은 형태).
+//   없으면 주기를 길게 둔 뒤 줄여도 옛 주기(최대 6시간)가 지나야 새 주기가 먹었다.
+const _listeners = new Set();
+export function onRelayCheckSettingsChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }
+function notifyChange() { for (const cb of _listeners) { try { cb(); } catch { /* 리스너 실패가 저장을 막지 않는다 */ } } }
 export function saveSettings(input = {}) {
   _cache = normalizeSettings(input);
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
+  notifyChange();
   return loadSettings();
 }
 export function _resetForTest() { _cache = null; }

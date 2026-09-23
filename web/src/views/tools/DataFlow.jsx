@@ -11,6 +11,8 @@
  *  · 기록 없는 연결은 **그리지 않는다**(정상으로 칠하지 않는다). 회색 눈금 = 기록이 없는 경로.
  *  · 그래프는 고정폭(약 1370px)이고 좁은 화면에서는 **그 상자만** 가로로 스크롤한다(페이지는 밀리지 않는다).
  *  · 엣지 내부 수집은 `POST /tools/edge-log/fetch`(v2.549) 재사용 — 28곳에 상시로 나가지 않는다.
+ *  · v2.591: 오른쪽에 **MAIN(중앙 포탈)** 카드와 엣지 ↔ 메인 두 가닥(데이터가 가는 방향 — 사용자 선택). 선 색은
+ *    그 방향 연결 중 가장 나쁜 상태이고 기록이 없으면 회색 점선이다. 판정은 `dataFlowLayout.mainSummary` 하나.
  */
 import React, { useMemo, useState } from 'react';
 import { usePolling, postJson } from '../../api.js';
@@ -21,6 +23,7 @@ import { layoutDataFlow, W, BUS_X, BUS_W } from './dataFlowLayout.js';
 import {
   STATE_LABEL, STATE_COLOR, STATE_DOT, KIND_LABEL, KIND_SHORT, CAT_COLOR, TONE_HEAD,
   routePath, sinceNote, linkText, edgeBadge, edgeLasts, innerItemText, legendLines, ageText, spanText, bytesText,
+  DIR_LABEL, DIR_ARROW, DIR_KINDS_TEXT, dirCellText, dirSumText, shortEdgeLabels,
 } from './dataFlowText.js';
 import { fetchResultText, statusSummary, groupStatus } from './edgeLogText.js';
 
@@ -28,10 +31,20 @@ const MONO = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 const PANEL = { background: '#13161c', border: '1px solid #1f242e', borderRadius: 6, padding: '10px 12px', minWidth: 0 };
 const CAP = { fontFamily: MONO, fontSize: 10, color: '#6b7384', letterSpacing: '0.08em', marginBottom: 6 };
 const TONE_TEXT = { ok: '#aab1bf', bad: '#f08a8d', warn: '#e0a43a', muted: '#8a93a6' };
+/** 상태 열 정렬 — 심각도 순(실패 먼저). 기록 없음은 빈 값이라 방향과 무관하게 뒤로 간다(STable 규칙). */
+const SEVERITY_SORT = Object.freeze({ fail: 0, stale: 1, ok: 2, none: '' });
 
 function Dot({ state, dashed }) {
-  return <i aria-hidden="true" style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', marginRight: 4, boxSizing: 'border-box',
+  return <i aria-hidden="true" style={{ display: 'inline-block', width: 7, height: 7, flexShrink: 0, borderRadius: '50%', marginRight: 4, boxSizing: 'border-box',
     background: dashed ? 'transparent' : STATE_DOT[state], border: dashed ? '1px dashed #5b6272' : 'none' }} />;
+}
+
+/** 방향 칸 — 점 + 짧은 글자, 긴 설명은 title. */
+function DirCell({ d, now }) {
+  const x = dirCellText(d, now);
+  return <span title={x.title} style={{ display: 'flex', alignItems: 'center', minWidth: 0, whiteSpace: 'nowrap', color: x.state === 'fail' ? '#f08a8d' : undefined }}>
+    <Dot state={x.state} dashed={x.state === 'none'} /><span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{x.short}</span>
+  </span>;
 }
 
 function Bar({ ok = 0, stale = 0, fail = 0, total = 0, h = 6 }) {
@@ -56,9 +69,16 @@ export default function DataFlow() {
   if (!data || !lay) return <Loading />;
   const now = Date.now();
   const toggle = (type, id) => setSel((s) => (s && s.type === type && s.id === id ? null : { type, id }));
-  const selEdge = sel?.type === 'edge' ? edgesById.get(sel.id) : null;
-  const selCat = sel?.type === 'cat' ? (data.cats || []).find((c) => c.id === sel.id) : null;
+  // 배치가 정규화한 선택(다음 조회에서 사라진 엣지·종류는 버린다 — 선만 흐린 채 남지 않게).
+  const cur = lay.sel;
+  const selEdge = cur?.type === 'edge' ? edgesById.get(cur.id) : null;
+  const selCat = cur?.type === 'cat' ? (data.cats || []).find((c) => c.id === cur.id) : null;
+  const selMain = cur?.type === 'main';
   const tot = data.totals || {};
+  const ms = lay.summary;
+  const mainRowOf = new Map(ms.rows.map((r) => [r.edge, r]));
+  const mainLabels = shortEdgeLabels(ms.rows.map((r) => r.name), 9); // 칸 폭(약 64px)에 모노 글꼴 9자 — 10자면 CSS 가 한 번 더 자른다(v2.591 판독)
+  const mainAria = `MAIN 중앙 포탈 — 엣지 ${ms.rows.length}곳. ${DIR_LABEL.up}: ${dirSumText(ms.upSum)}. ${DIR_LABEL.down}: ${dirSumText(ms.downSum)}. 누르면 엣지별 상세를 아래에 엽니다.`;
 
   async function fetchInner(e) {
     setInner((m) => ({ ...m, [e.id]: { busy: true } }));
@@ -81,7 +101,7 @@ export default function DataFlow() {
         <span>엣지 <b style={{ color: '#d7dbe3' }}>{(data.edges || []).length}</b></span>
         <span>관측된 연결 <b style={{ color: '#d7dbe3' }}>{tot.links}</b></span>
         <span>기록 없는 경로 <b style={{ color: '#d7dbe3' }}>{tot.routesNone}</b></span>
-        <span>선택 <b style={{ color: '#e0a43a' }}>{selEdge ? selEdge.name : selCat ? selCat.label : '없음'}</b></span>
+        <span>선택 <b style={{ color: '#e0a43a' }}>{selEdge ? selEdge.name : selCat ? selCat.label : selMain ? '메인' : '없음'}</b></span>
         <span style={{ flexGrow: 1 }} />
         <span>조회 {ageText(data.generatedAt, now)}</span>
       </div>
@@ -91,6 +111,14 @@ export default function DataFlow() {
       <div style={{ overflowX: 'auto', background: '#0d0f13', border: '1px solid #1f242e', borderRadius: 6 }}>
         <div style={{ position: 'relative', width: W + 24, height: lay.height, padding: '0 12px' }}>
           <svg width={W} height={lay.height} style={{ position: 'absolute', left: 12, top: 0 }} aria-hidden="true">
+            <defs>
+              {/* 화살촉은 선의 strokeOpacity 를 물려받지 않는다(SVG marker) — 흐린 선에는 흐린 화살촉을 따로 쓴다(v2.591 검토). */}
+              {Object.keys(STATE_DOT).flatMap((st) => [false, true].map((dim) => (
+                <marker key={`${st}${dim ? '-dim' : ''}`} id={`df-mk-${st}${dim ? '-dim' : ''}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
+                  <path d="M0 0 L10 5 L0 10 z" fill={STATE_DOT[st]} fillOpacity={dim ? 0.12 : 1} />
+                </marker>
+              )))}
+            </defs>
             {lay.inLines.map((l) => (
               <path key={l.key} d={l.d} fill="none" stroke={l.state === 'none' ? STATE_COLOR.none : CAT_COLOR[l.cat] || '#6b7384'}
                 strokeWidth={l.hot ? 1.6 : 1.1} strokeOpacity={l.dim ? 0.07 : 0.7} strokeDasharray={l.state === 'none' ? '3 3' : undefined} />
@@ -107,10 +135,15 @@ export default function DataFlow() {
               </rect>
             ))}
             <text x={BUS_X + BUS_W / 2} y={lay.height - 10} fill="#6b7384" fontSize={9} fontFamily={MONO} textAnchor="middle">포탈 경로 버스 · 눈금 1개 = 경로 1개</text>
+            {lay.mainLines.map((m) => (
+              <path key={m.key} d={m.d} fill="none" stroke={STATE_DOT[m.state]} strokeLinejoin="round"
+                strokeWidth={m.hot ? 2 : 1.5} strokeOpacity={m.dim ? 0.12 : 0.95}
+                strokeDasharray={m.state === 'none' ? '3 3' : undefined} markerEnd={`url(#df-mk-${m.state}${m.dim ? '-dim' : ''})`} />
+            ))}
           </svg>
 
           {(data.cats || []).map((c) => {
-            const p = lay.catPos.get(c.id); const on = sel?.type === 'cat' && sel.id === c.id;
+            const p = lay.catPos.get(c.id); const on = cur?.type === 'cat' && cur.id === c.id;
             return (
               <button type="button" key={c.id} onClick={() => toggle('cat', c.id)} aria-pressed={on}
                 title={`${c.label} — 경로 ${c.routes}개 · 클릭하면 이 종류의 선만 강조`}
@@ -128,7 +161,7 @@ export default function DataFlow() {
           })}
 
           {(data.edges || []).map((e) => {
-            const p = lay.edgePos.get(e.id); const on = sel?.type === 'edge' && sel.id === e.id;
+            const p = lay.edgePos.get(e.id); const on = cur?.type === 'edge' && cur.id === e.id;
             const b = edgeBadge(e); const last = edgeLasts(e.id, data.links, routesById);
             return (
               <button type="button" key={e.id} onClick={() => toggle('edge', e.id)} aria-pressed={on}
@@ -149,6 +182,42 @@ export default function DataFlow() {
               </button>
             );
           })}
+
+          <button type="button" onClick={() => toggle('main', 'main')} aria-pressed={selMain} aria-label={mainAria}
+            title="MAIN(중앙 포탈) — 클릭하면 엣지 ↔ 메인 선만 강조하고 아래에 엣지별 방향 상태"
+            style={{ position: 'absolute', left: 12 + lay.main.x, top: lay.main.y, width: lay.main.w, height: lay.main.h, padding: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'stretch',
+              border: `1px solid ${selMain ? '#5fd4c4' : '#2b4f4b'}`, background: '#12181b', borderRadius: 6, textAlign: 'left', cursor: 'pointer', color: '#d7dbe3', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, padding: '6px 10px', background: '#1f5a54', fontSize: 12.5, fontWeight: 600, color: '#f4f6f9' }}>
+              <span style={{ whiteSpace: 'nowrap' }}>MAIN · 중앙 포탈</span>
+              <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 500, whiteSpace: 'nowrap' }}>엣지 {ms.rows.length}</span>
+            </div>
+            <div style={{ padding: '9px 10px 10px', display: 'flex', flexDirection: 'column', gap: 9, fontFamily: MONO, fontSize: 10.5, color: '#8a93a6', flexGrow: 1, minHeight: 0 }}>
+              {['up', 'down'].map((dir) => (
+                <div key={dir} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <span style={{ color: '#c9ced8' }}>{DIR_ARROW[dir]} {DIR_LABEL[dir]}</span>
+                  <span style={{ fontFamily: "'IBM Plex Sans KR', sans-serif", lineHeight: 1.4 }}>{DIR_KINDS_TEXT[dir]}</span>
+                  <span title="그 방향 선이 이 색인 엣지 수">{dirSumText(dir === 'up' ? ms.upSum : ms.downSum)}</span>
+                </div>
+              ))}
+              <div style={{ borderTop: '1px solid #232833', paddingTop: 7, display: 'flex', flexDirection: 'column', gap: 4, minHeight: 0, overflow: 'hidden' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 42px 42px', gap: 4, color: '#6b7384', fontSize: 9.5 }}>
+                  <span>엣지</span><span title="엣지 → 메인 마지막 성공 뒤 지난 시간">↑ 경과</span><span title="메인 → 엣지 마지막 성공 뒤 지난 시간">↓ 경과</span>
+                </div>
+                {ms.rows.length === 0 && <span style={{ fontFamily: "'IBM Plex Sans KR', sans-serif" }}>엣지가 없습니다.</span>}
+                {ms.rows.map((r, i) => (
+                  <div key={r.edge} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 42px 42px', gap: 4, alignItems: 'center', color: '#aab1bf', minWidth: 0 }}>
+                    <span title={r.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mainLabels[i]}</span>
+                    <DirCell d={r.up} now={now} />
+                    <DirCell d={r.down} now={now} />
+                  </div>
+                ))}
+              </div>
+              <div style={{ flexGrow: 1 }} />
+              <div style={{ borderTop: '1px solid #232833', paddingTop: 7, fontFamily: "'IBM Plex Sans KR', sans-serif", lineHeight: 1.5, color: '#6b7384' }}>
+                화살표는 데이터가 가는 방향입니다. 선 색은 그 방향 연결 중 가장 나쁜 상태이고, 기록이 없으면 회색 점선입니다.
+              </div>
+            </div>
+          </button>
         </div>
       </div>
 
@@ -165,6 +234,16 @@ export default function DataFlow() {
             </button>
             <button type="button" className="btn" onClick={() => setSel(null)}>선택 해제</button>
           </div>
+          {mainRowOf.get(selEdge.id) && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px', fontSize: 12, color: '#aab1bf' }}>
+              <span style={{ color: '#8a93a6' }}>메인 연결</span>
+              {['up', 'down'].map((dir) => {
+                const d = mainRowOf.get(selEdge.id)[dir]; const x = dirCellText(d, now);
+                // title 이 상태 낱말로 시작한다(dirCellText) — 앞에 STATE_LABEL 을 또 붙이면 '정상 · 정상' 이 된다.
+                return <span key={dir}>{DIR_ARROW[dir]} {DIR_LABEL[dir]} <Dot state={x.state} dashed={x.state === 'none'} />{x.title}</span>;
+              })}
+            </div>
+          )}
           <InnerStatus st={inner[selEdge.id]} now={now} groupLabel={data.innerGroupLabel || {}} />
           <STable minWidth={900}>
             <thead><tr><th>데이터 종류</th><th>경로</th><th>방향</th><th>상태</th><th>마지막</th><th>간격</th><th>횟수</th><th>최근 크기</th><th>사유·표시</th></tr></thead>
@@ -188,6 +267,44 @@ export default function DataFlow() {
             </tbody>
           </STable>
           {!selEdge.used && <div className="muted">이 엣지와 오간 기록이 아직 없습니다 — 중앙이 시작된 뒤 통신이 없었거나 이름이 다르게 보고되고 있습니다.</div>}
+        </div>
+      )}
+
+      {selMain && (
+        <div style={{ ...PANEL, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', alignItems: 'center' }}>
+            <b style={{ fontSize: 14 }}>MAIN · 중앙 포탈</b><span className="muted">엣지 {ms.rows.length}곳과의 두 방향</span>
+            <span style={{ flexGrow: 1 }} />
+            <button type="button" className="btn" onClick={() => { window.location.hash = '#/tools/device-flow'; }} title="장비 → 엣지 → 메인 3단 지도(메인이 직접 수집하는 장비 포함)">3단 지도 열기</button>
+            <button type="button" className="btn" onClick={() => { window.location.hash = '#/tools/comm-map'; }} title="중앙 ↔ 엣지 통신 판정(사유·조치)">통신 지도 열기</button>
+            <button type="button" className="btn" onClick={() => setSel(null)}>선택 해제</button>
+          </div>
+          <div style={{ fontSize: 12, color: '#8a93a6', lineHeight: 1.6 }}>
+            <BoldText text={`**${DIR_LABEL.up}** = ${DIR_KINDS_TEXT.up} · **${DIR_LABEL.down}** = ${DIR_KINDS_TEXT.down}. 상태는 그 방향 연결 중 가장 나쁜 것이고, 연결 수는 그 방향으로 기록이 있는 경로 수입니다. 메인이 직접 수집하는 장비(담당 엣지 없음)는 포탈 사이 통신이 아니라 이 지도에 없습니다 — 3단 지도에서 봅니다.`} />
+          </div>
+          <STable minWidth={980}>
+            <thead><tr><th>엣지</th><th>{DIR_ARROW.up} 상태</th><th>{DIR_ARROW.up} 연결</th><th>{DIR_ARROW.up} 마지막 성공</th><th>{DIR_ARROW.down} 상태</th><th>{DIR_ARROW.down} 연결</th><th>{DIR_ARROW.down} 마지막 성공</th><th>실패 사유</th></tr></thead>
+            <tbody>
+              {ms.rows.map((r) => (
+                <tr key={r.edge}>
+                  <td>{r.name}{!r.registered ? ' (등록부에 없음)' : ''}{!r.enabled ? ' (비활성)' : ''}</td>
+                  {/* ⚠ Fragment 로 감싸지 말 것 — 표 정렬(sortableText.cellText)이 Fragment 를 펼치지 않아 열이 어긋난다(v2.591 검토). */}
+                  {['up', 'down'].flatMap((dir) => {
+                    const d = r[dir]; const x = dirCellText(d, now);
+                    return [
+                      <td key={`${dir}-s`} data-sort={SEVERITY_SORT[d.state]} title={x.title}><Dot state={d.state} dashed={d.state === 'none'} />{STATE_LABEL[d.state]}</td>,
+                      <td key={`${dir}-n`} className="right" data-sort={d.links || ''}>{d.links ? `${d.links} (정상 ${d.ok} · 낡음 ${d.stale} · 실패 ${d.fail})` : '—'}</td>,
+                      <td key={`${dir}-t`} data-sort={d.okAt || ''}>{d.okAt ? ageText(d.okAt, now) : '—'}</td>,
+                    ];
+                  })}
+                  <td style={{ whiteSpace: 'normal' }}>{['up', 'down'].filter((dir) => r[dir].state === 'fail').map((dir) => {
+                    const rs = r[dir].reasons?.length ? r[dir].reasons : [r[dir].reason || '사유 미상'];
+                    return `${DIR_ARROW[dir]} ${rs.slice(0, 2).join(' / ')}${rs.length > 2 ? ` 외 ${rs.length - 2}가지` : ''}${r[dir].worstUnverified ? ' (이름 미검증 포함)' : ''}`;
+                  }).join(' · ') || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </STable>
         </div>
       )}
 

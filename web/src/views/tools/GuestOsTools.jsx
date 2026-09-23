@@ -7,6 +7,8 @@ import { Card, useTool } from './shared.jsx';
 import { csvCell as esc } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
+import BoldText from '../../components/boldText.jsx';
+import { guestAuthLines } from '../authSkipText.js'; // v2.591(감사 F2): 게스트 계정 인증 실패 정지·차단기
 
 
 export function GuestOs({ scope }) {
@@ -237,6 +239,11 @@ export function RealOs({ scope }) {
           {st.lastErr ? <span className="muted" style={{ fontSize: 12, color: 'var(--amber)' }}>최근 오류: {st.lastErr.slice(0, 60)}</span> : null}
           {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
         </div>
+        {guestAuthLines(st.lastAuth).length > 0 && (
+          <div style={{ fontSize: 12, marginTop: 10, whiteSpace: 'normal', lineHeight: 1.55 }}>
+            {guestAuthLines(st.lastAuth).map((t, i) => <div key={i} className="muted"><BoldText text={t} /></div>)}
+          </div>
+        )}
       </div>
 
       <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>

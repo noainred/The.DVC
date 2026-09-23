@@ -105,10 +105,17 @@ export function authFailInfo(snap, row = {}, now = Date.now()) {
 }
 
 /** 주제 조사 — 마지막 글자가 한글 받침이면 '은', 그 밖(받침 없음·영문·숫자)은 '는'. */
-function topicOf(word) {
+export function topicOf(word) {
   const s = String(word || '');
   const code = s.charCodeAt(s.length - 1) - 0xAC00;
   return code >= 0 && code < 11172 && code % 28 !== 0 ? '은' : '는';
+}
+
+/** 목적격 조사 — 마지막 글자가 한글 받침이면 '을', 그 밖은 '를'(v2.591). */
+function objectOf(word) {
+  const s = String(word || '');
+  const code = s.charCodeAt(s.length - 1) - 0xAC00;
+  return code >= 0 && code < 11172 && code % 28 !== 0 ? '을' : '를';
 }
 
 /**
@@ -127,7 +134,7 @@ function topicOf(word) {
  * @returns {null | {title:string, short:string, text:string, detail:string, attempts:number|null}}
  *   `text` 는 BoldText 로 그린다(강조는 별표 두 개). ⚠ 백틱 금지(BoldText 는 강조만 해석한다).
  */
-export function authStopInfo(stop, { what = '이 대상', manual = '', now = Date.now() } = {}) {
+export function authStopInfo(stop, { what = '이 대상', manual = '', now = Date.now(), activity = '주기 수집' } = {}) {
   if (!stop || typeof stop !== 'object' || Array.isArray(stop)) return null;
   const since = agoText(stop.since, now);
   const last = agoText(stop.at, now);
@@ -141,7 +148,8 @@ export function authStopInfo(stop, { what = '이 대상', manual = '', now = Dat
   const detail = facts.join(' · ');
   // 수동 실행은 막지 않는다 — 그리고 그 실행이 저장된 자격증명으로 성공하면 정지가 풀린다(서버가 기록을 지운다).
   const manualNote = manual ? ` '${manual}'${topicOf(manual)} 막지 않습니다(1회만 시도) — 고친 뒤 눌러 확인하세요. 성공하면 정지가 풀립니다.` : '';
-  const text = `**인증 실패로 ${what}의 주기 수집을 멈췄습니다**${detail ? `(${detail})` : ''}.`
+  // v2.591: activity — 멈춘 것이 '주기 수집' 이 아닌 도구(메일 '자동 발송'·네트워크 모니터 '주기 실행')가 같은 문장 규칙을 쓴다.
+  const text = `**인증 실패로 ${what}의 ${activity}${objectOf(activity)} 멈췄습니다**${detail ? `(${detail})` : ''}.`
     + ' 같은 계정으로 반복 로그인하면 **계정이 잠기기 때문**입니다. 비밀번호(계정)를 고치면 자동으로 다시 시작합니다.'
     + manualNote
     + (reason ? ` 사유: ${reason}` : '');

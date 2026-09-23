@@ -248,7 +248,10 @@ test('⚠⚠ 왕복 예산 — 목록 캐시와 주기당 예산이 둘 다 있�
 test('전수 모드가 실패하면 SystemUsage 단독 경로로 떨어진다 (개선이 퇴행이 되지 않게)', () => {
   const rf = bare('idrac/redfish.js');
   assert.match(rf, /const fb = await fetchUsage\(entry, \{ full: false \}\)/, '폴백이 있어야 한다');
-  assert.match(rf, /if \(\/\\b40\[13\]\\b\/\.test\(msg\)\) return \{ ok: false, kind: 'auth'/, '401·403 은 폴백하지 않는다(계정 잠금)');
+  // v2.591(감사 R-BM2): 폴백하지 않는 것은 **401(자격증명 거부)** 뿐이다 — 반복하면 계정이 잠긴다.
+  //   403 은 인증이 통한 뒤의 권한·라이선스 거부라 잠금 경로가 아니고 'auth' 로 세면 주기 수집이 영구 정지된다.
+  assert.match(rf, /if \(e\?\.status === 401 \|\| e\?\.authFailed === true \|\| \/\\b401\\b\/\.test\(msg\)\) return \{ ok: false, kind: 'auth'/, '401 은 폴백하지 않는다(계정 잠금)');
+  assert.doesNotMatch(rf, /\\b40\[13\]\\b\/\.test\(msg\)\) return \{ ok: false, kind: 'auth'/, '403 을 자격증명 거부(auth)로 세지 않는다');
 });
 
 test('알림 상태는 파일에 남긴다 — 인메모리면 재시작마다 알림이 폭주한다', () => {

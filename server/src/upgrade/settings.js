@@ -32,9 +32,19 @@ export function loadSettings() {
   return eff;
 }
 
+export const POLL_MIN_MS = 60_000;
+export const POLL_MAX_MS = 7 * 86_400_000;
+export function clampPollMs(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(POLL_MAX_MS, Math.max(POLL_MIN_MS, Math.round(n)));
+}
+
 function coerce(field, v) {
   if (field === 'enabled' || field === 'autoApply') return Boolean(v);
-  if (field === 'pollIntervalMs') return Math.max(0, Number(v) || 0);
+  // v2.591 L3: 0 = 끔. 그 밖은 1분~7일로 클램프한다 — 상한이 없어 24.8일(2^31−1ms)을 넘기면 setInterval 이 1ms 로 바뀌어
+  //   원격 릴리스 소스에 초당 수백 요청이 나갔다(재현: 43,200분 저장 → 2초에 1,331회).
+  if (field === 'pollIntervalMs') return clampPollMs(v);
   return typeof v === 'string' ? v.trim() : v;
 }
 

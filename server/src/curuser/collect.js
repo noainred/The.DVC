@@ -16,6 +16,7 @@
  *   결과를 '사용자 0명' 으로 만들지 않는다(레코드가 아예 없는 것과 0명은 다르다).
  */
 import { VimSoapClient } from '../vcenter/soapClient.js';
+import { isVcAuthError } from '../vcenter/restClient.js';
 import { morefOf } from '../vcenter/registry.js';
 import { parseExtraConfig, readGuestInfo, PREFIX } from './guestinfoSource.js';
 
@@ -38,7 +39,9 @@ export async function collectVcenterCurUsers(vc, targets, { now = Date.now(), st
 
   // 시한은 vc 객체의 timeoutMs 로 전달된다(`VimSoapClient.#call` 이 AbortSignal.timeout 에 쓴다).
   const c = new VimSoapClient({ ...vc, timeoutMs: Math.max(10_000, Number(timeoutMs) || 60_000) });
-  try { await c.login(); } catch (e) { return { records: [], error: `vCenter 로그인 실패: ${String(e.message || e).slice(0, 200)}`, morefs: 0, ms: Date.now() - t0 }; }
+  // v2.591(감사 F1): 로그인 거부 표시(`authFailed`)를 문자열로 바꾸며 버리지 않는다 — 폴러가 그것을 보고
+  //   주 폴러와 **같은 정지 기록**(vcAuthGuard)에 시도 횟수를 올린다. 예전에는 문자열만 남아 분류할 수 없었다.
+  try { await c.login(); } catch (e) { return { records: [], error: `vCenter 로그인 실패: ${String(e.message || e).slice(0, 200)}`, authFailed: isVcAuthError(e), morefs: 0, ms: Date.now() - t0 }; }
 
   const byMoref = new Map();
   for (const t of list) byMoref.set(morefOf(t.vmId, vc.id), t);

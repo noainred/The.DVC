@@ -24,17 +24,29 @@ const norm = (s) => String(s || '').trim().toLowerCase();
 let cache = Object.create(null); // agent -> { at, generatedAt, baremetal: [...] }
 try {
   if (fs.existsSync(FILE)) { const p = JSON.parse(fs.readFileSync(FILE, 'utf8')); if (p && typeof p === 'object') cache = Object.assign(Object.create(null), p.fleet || {}); }
-} catch { cache = Object.create(null); }
+} catch (e) { cache = Object.create(null); console.warn(`[central-fleet] ${path.basename(FILE)} 를 읽지 못해 빈 캐시로 시작합니다(엣지의 다음 push 로 채워집니다): ${e.message}`); }
 
 let writeTimer = null;
+let writing = false;   // 비동기 원자 쓰기 진행 중
+let dirty = false;     // 마지막 쓰기 이후 바뀐 것이 있다(종료 flush 판정)
 function persistSoon() {
+  dirty = true;
   if (writeTimer) return;
   writeTimer = setTimeout(() => {
     writeTimer = null;
-    try {
-      fs.mkdirSync(path.dirname(FILE), { recursive: true });
-      fs.promises.writeFile(FILE, JSON.stringify({ fleet: cache }), { mode: 0o600 }).catch(() => {});
-    } catch { /* best effort */ }
+    // v2.591 L8: 대상 파일에 직접 비동기 쓰기였다(v2.582 ARCH-3 주석은 '원자 쓰기' 라 적었다) — 쓰는 중 종료되면 절단본이
+    //   남아 재기동 시 JSON 무효 → 빈 함대로 시작했다(재현: 1MB 시점 exit). 임시 파일에 쓰고 rename 한다(루프를 막지 않게 비동기).
+    if (writing) { persistSoon(); return; }
+    writing = true; dirty = false;
+    const tmp = `${FILE}.tmp-${process.pid}`;
+    (async () => {
+      try {
+        await fs.promises.mkdir(path.dirname(FILE), { recursive: true });
+        await fs.promises.writeFile(tmp, JSON.stringify({ fleet: cache }), { mode: 0o600 });
+        await fs.promises.rename(tmp, FILE);
+      } catch { dirty = true; try { await fs.promises.unlink(tmp); } catch { /* */ } }
+      finally { writing = false; }
+    })();
   }, 5_000);
   writeTimer.unref?.();
 }
@@ -43,12 +55,15 @@ function persistSoon() {
 // 윈도우 유실 방지. 중앙 역할일 때만 핸들러 등록(테스트/엣지에서 부작용·중복 쓰기 방지).
 export function flushEdgeFleetNow() {
   if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+  dirty = false;
   try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify({ fleet: cache }), { mode: 0o600 }); } catch { /* best-effort */ }
 }
 if (config.central?.token && !config.agent?.centralUrl) {
   // v2.582 ARCH-4: 자체 exit 훅 대신 공용 레지스트리(util/exitFlush.js). 시그널 훅은 두지 않는다 — index.js
   // gracefulExit 이 process.exit 을 부르므로 exit 훅 하나로 flush 가 보장된다(v2.447 판단 그대로).
-  registerExitFlush('central/fleet', () => { if (writeTimer) flushEdgeFleetNow(); });
+  // v2.591 L8: 비동기 쓰기가 진행 중이거나(writing) 그 뒤 바뀐 것이 있으면(dirty) 동기 원자 쓰기로 마무리한다 —
+  //   예전에는 writeTimer 가 있을 때만 flush 해 '쓰는 중' 종료를 건너뛰었다.
+  registerExitFlush('central/fleet', () => { if (writeTimer || writing || dirty) flushEdgeFleetNow(); });
   // v2.447(감사 I3): 종료 결정은 index.js gracefulExit 한 곳에만 둔다 — 여기서 process.exit 을 부르지 말 것.
 }
 
@@ -56,7 +71,8 @@ if (config.central?.token && !config.agent?.centralUrl) {
 export function setEdgeFleet(agent, baremetal, generatedAt) {
   const a = String(agent || '').trim();
   if (!a) return;
-  const list = Array.isArray(baremetal) ? baremetal.slice(0, 50_000).map((b) => ({
+  // v2.591(3차 감사 PR-8): null·문자열 원소는 건너뛴다(v2.548 S1 규약) — `{"baremetal":[null]}` 가 TypeError → 500 이었다.
+  const list = Array.isArray(baremetal) ? baremetal.slice(0, 50_000).filter((b) => b && typeof b === 'object' && !Array.isArray(b)).map((b) => ({
     fleetId: String(b.fleetId || b.serviceTag || b.serverId || '').slice(0, 256),
     name: String(b.name || '').slice(0, 256),
     model: String(b.model || '').slice(0, 256),

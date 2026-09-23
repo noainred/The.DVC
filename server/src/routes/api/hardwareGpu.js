@@ -3,7 +3,7 @@ import { requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { guardCell } from '../../util/csv.js';
 import { store } from '../../store.js';
-import { config } from '../../config.js';
+import { config, loadVcenterConfig } from '../../config.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { sendMaybeZip } from '../../util/zip.js';
 import { getGuestGpuVms } from '../../gpu/store.js';
@@ -237,7 +237,10 @@ async function pingLocallyAndStore(vcenterId, ips, { direct = false } = {}) {
 /** 이 vCenter 가 엣지 위임(site)인가 — 스냅샷 항목의 수집 방식으로 판정한다(store.js 가 같은 필드를 쓴다). */
 function isSiteVcenter(snap, vcenterId) {
   const vc = (snap?.vcenters || []).find((v) => v.id === vcenterId);
-  return !!vc && (vc.collectMode === 'site' || vc.collectSource === 'site');
+  if (vc && (vc.collectMode === 'site' || vc.collectSource === 'site')) return true;
+  // v2.591(3차 감사 R-P1): 점검중(maintenance)인 위임 vCenter 는 스냅샷 항목에 collectMode 가 실리지 않는다 —
+  //   그러면 엣지 큐에 넣지 않고 중앙 ping 무응답을 전부 'down' 으로 저장했다. 스냅샷에서 모르면 **등록부**로 판정한다.
+  try { return (loadVcenterConfig().vcenters || []).some((v) => v.id === vcenterId && v.collectMode === 'site'); } catch { return false; }
 }
 
 export function registerHardwareGpu(api) {

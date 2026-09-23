@@ -12,6 +12,8 @@ import { fetchJson, putJson, postJson, sendJson } from '../api.js';
 import { STable } from '../components/STable.jsx';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { fmtBytes, intervalWarning, thresholdText, scopeSummaryText, lastRunText } from './vmSeriesText.js';
+import BoldText from '../components/boldText.jsx';
+import { vcAuthSkipNote } from './authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
 
 const EMPTY_T = () => ({ clusters: [], folders: [], hosts: [], vms: [] });
 
@@ -270,6 +272,8 @@ export default function VmSeriesSettings() {
         <div className="muted" style={{ fontSize: 12.5, marginTop: 6, lineHeight: 1.7, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
           {st.running ? '🔄 지금 수집 중… ' : ''}마지막 수집: {lastRunText(st.lastResult)}
           <br />적용 주기 <b style={{ color: 'var(--text)' }}>{Math.round((st.intervalMs || 0) / 60_000)}분</b> · 동시 vCenter <b style={{ color: 'var(--text)' }}>{st.concurrency}</b> · 디스크 여유 가드 <b style={{ color: 'var(--text)' }}>{fmtBytes(st.minFreeBytes)}</b>
+          {vcAuthSkipNote(st.lastResult?.skipped, { what: '실시간 스파이크 수집', manual: '지금 수집' })
+            && <><br /><span style={{ color: 'var(--red)' }}><BoldText text={vcAuthSkipNote(st.lastResult?.skipped, { what: '실시간 스파이크 수집', manual: '지금 수집' })} /></span></>}
           {d.push?.enabled && <><br />엣지 → 중앙 push: 켜짐 ({d.push.centralUrl}){d.push.last ? ` · 마지막 ${new Date(d.push.last.at).toLocaleString('ko-KR')} ${d.push.last.error ? `실패: ${d.push.last.error}` : `${d.push.last.chunks}청크 ${fmtBytes(d.push.last.gzBytes)}`}` : ''}</>}
         </div>
         {(st.lastResult?.errors || []).length > 0 && (

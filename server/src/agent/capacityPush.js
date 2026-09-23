@@ -11,6 +11,7 @@
 
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { collectSnapshot, hostMeta } from '../capacity/sampler.js';
 
@@ -18,6 +19,8 @@ let timer = null;
 let running = false;
 let unsupportedUntil = 0;
 let last = null;
+// v2.591(3차 감사 PR-7): 실패를 상태뿐 아니라 콘솔에도(같은 사유는 10분에 한 번) — 403·5xx 가 저널 어디에도 안 남았다.
+const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 
 export async function pushCapacityNow() {
   if (!config.capacity.enabled || !config.capacity.push) return { ok: false, reason: '비활성(CAPACITY_MON_ENABLED/CAPACITY_PUSH)' };
@@ -48,9 +51,11 @@ export async function pushCapacityNow() {
     let data = null;
     try { data = await res.json(); } catch { /* 본문 없는 응답 허용 */ }
     last = { at: Date.now(), ms: Date.now() - startedAt, status: res.status, ok: res.ok, rows: snap.rows.length, reason: data?.reason || '' };
+    if (!res.ok && _logChange('push', `${res.status} ${last.reason}`)) console.warn(`[capacity-push] 중앙 보고 실패: HTTP ${res.status}${last.reason ? ` — ${last.reason}` : ''}`);
     return { ok: res.ok, ...last };
   } catch (e) {
     last = { at: Date.now(), ms: Date.now() - startedAt, status: 0, ok: false, rows: 0, reason: e?.message || String(e) };
+    if (_logChange('push', last.reason)) console.warn(`[capacity-push] 중앙 보고 실패: ${last.reason}`);
     return { ok: false, ...last };
   } finally {
     running = false;

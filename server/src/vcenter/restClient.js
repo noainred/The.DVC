@@ -23,7 +23,9 @@ export const vcAuthGuard = createAuthGuard({ file: 'vcenter-auth-stops.json' });
  * `#call`(SOAP)과 `#request`(REST)가 `authFailed=true` 를 붙인다.
  */
 export function isVcAuthError(err) {
-  return !!(err && err.authFailed === true);
+  // v2.591: 게스트 계정 거부(InvalidGuestLogin — gpu/guestops.js 가 `authFailed`+`guestAuth` 로 표시)는
+  //   **vCenter 계정 문제가 아니다**. 게스트 오류가 이 판정에 흘러들면 멀쩡한 vCenter 계정의 주기 수집이 멈춘다.
+  return !!(err && err.authFailed === true && err.guestAuth !== true);
 }
 
 /** 수집 1회용 신호 — 건별 시한과 외부(데드라인) 신호를 함께 건다(v2.590 — 감사 F7, v2.417 규약). */
