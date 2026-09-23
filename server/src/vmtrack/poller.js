@@ -10,14 +10,14 @@
  */
 
 import { store } from '../store.js';
-import { slotKey, slotStartMs } from './diff.js';
+import { slotKey } from './diff.js';
 import { takeVmSnapshot } from './service.js';
 import { lastSnapshotSlot, pruneVmtrack, getDb } from './db.js';
 
 const TICK_MS = 60_000;
 let running = false;      // 재진입 가드(폴러 + 수동 실행 공유)
 let lastResult = null;    // { at, slot, vcenters, added, removed, ms, trigger }
-let lastPruneAt = 0;
+let lastPruneAt = Date.now();   // v2.595(감사 T2595-04): 기동 첫 틱에 prune 하지 않는다(v2.453 규약)
 const PRUNE_EVERY_MS = 12 * 3_600_000; // 하루 2회 정도면 충분(행이 작아 정리 비용 무의미)
 export const PENDING_WAIT_MS = 30 * 60_000;   // 첫 수집 대기 상한(v2.594)
 let waiting = null;   // { at, slot, pending } — 첫 수집 대기로 이번 슬롯 기록을 미룬 사실
@@ -59,7 +59,12 @@ export function startVmtrackPoller() {
       //   그 부분 합이 '전 함대 합계' 로 기록돼 차트에 **거짓 하락**이 찍혔다. 첫 수집이 끝날 때까지(최대 PENDING_WAIT_MS)
       //   기다린다 — 슬롯은 12시간 단위라 몇 분 늦게 채워도 누락이 아니다. 그 뒤에도 남으면 기록하되 빠진 수를 남긴다.
       const pending = snap.vcenters.filter((v) => v.status === 'pending').length;
-      if (pending && Date.now() - slotStartMs(cur) < PENDING_WAIT_MS) { waiting = { at: Date.now(), slot: cur, pending }; return; }
+      // v2.595(감사 R2595-03): 대기 기준은 슬롯 시작이 아니라 **이 슬롯에서 첫 수집 중(pending)을 처음 본 시각**이다 —
+      //   슬롯 시작 30분 뒤 재시작하면 대기 없이 부분 합이 기록됐다(업그레이드·장애 복구가 흔히 그렇다).
+      if (pending) {
+        const first = waiting?.slot === cur ? waiting.firstSeenAt : Date.now();
+        if (Date.now() - first < PENDING_WAIT_MS) { waiting = { at: Date.now(), firstSeenAt: first, slot: cur, pending }; return; }
+      }
       waiting = null;
       await runVmtrackNow('slot');
       if (Date.now() - lastPruneAt > PRUNE_EVERY_MS) { lastPruneAt = Date.now(); pruneVmtrack().catch(() => {}); }

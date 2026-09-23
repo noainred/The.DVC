@@ -16,6 +16,11 @@ import {
 } from '../../central/svcmonAssign.js';
 import { svcmonConfigPullStatus, pullSvcmonConfigNow } from '../../agent/svcmonConfigPull.js';
 import { canEdit } from './shared.js';
+import { redactEdgeSummary } from '../../auth/scopeStatus.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
+import { store as _storeForScope } from '../../store.js';
+// v2.595: 엣지 주소는 admin + 전체 범위만(auth/scopeStatus.redactEdgeSummary).
+const fullAddr = (req) => req.user?.role === 'admin' && !scopedVcenterIds(req.user, _storeForScope.get());
 
 export function registerEdge(svcmonRouter) {
 
@@ -114,7 +119,7 @@ svcmonRouter.post('/config-pull-now', canEdit, async (req, res) => {
 svcmonRouter.get('/edges', (req, res) => {
   const now = Date.now();
   res.json({
-    edges: edgeSummary(now),
+    edges: redactEdgeSummary(edgeSummary(now), fullAddr(req)), ...(fullAddr(req) ? {} : { addressHidden: true }),
     totals: edgeTotals(now),
     limits: { maxAgents: MAX_AGENTS, maxRowsPerAgent: MAX_ROWS_PER_AGENT },
     silence: silenceStatus(),
@@ -153,7 +158,7 @@ svcmonRouter.delete('/edges/:agent', canEdit, (req, res) => {
   if (!forgetAgent(req.params.agent, req.user?.username)) {
     return res.status(404).json({ error: '그 엣지를 찾을 수 없습니다.' });
   }
-  res.json({ ok: true, edges: edgeSummary() });
+  res.json({ ok: true, edges: redactEdgeSummary(edgeSummary(), fullAddr(req)), ...(fullAddr(req) ? {} : { addressHidden: true }) });
 });
 
 /** 이 서버가 엣지일 때 — 즉시 1회 보고(진단용). 재진입 가드는 push 모듈이 공유한다. */

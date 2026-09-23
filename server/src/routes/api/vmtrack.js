@@ -34,7 +34,9 @@ export function registerVmTrack(api) {
       // 폴러 상태의 lastResult 는 전 vCenter 합계(total/added/removed)라 범위 제한 계정에 노출하면
       // scope 우회다 — 범위 제한 계정에는 running 플래그만 준다(합계는 allowed=null=전체 권한일 때만).
       const pstat = vmtrackPollerStatus();
-      res.json({ ok: true, ...series, vcenterList: vcenters, ...info, poller: allowed ? { running: pstat.running } : pstat });
+      // v2.595(감사 AUTHZ-2595-03): DB 절대 경로는 admin 에게만(형제 bm-usage·curUser 와 같게) · 범위 계정에는 전 함대 행 수(meta)를 주지 않는다.
+      const status = info.status && req.user?.role !== 'admin' ? (({ dbPath, ...r }) => (void dbPath, r))(info.status) : info.status;
+      res.json({ ok: true, ...series, vcenterList: vcenters, status, meta: allowed ? null : info.meta, poller: allowed ? { running: pstat.running } : pstat });
     } catch (e) {
       res.status(500).json({ ok: false, reason: e.message });
     }

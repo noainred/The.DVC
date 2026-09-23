@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { store } from '../store.js';
 import { sendText } from '../alerts.js';
@@ -38,7 +38,11 @@ export function loadDailyReportSettings() {
         lastRunTs: Number(s.lastRunTs) || 0,
       };
     }
-  } catch { /* defaults */ }
+  } catch (e) {
+    // v2.595(감사 FS-4): 손상을 조용히 기본값으로 넘기면 다음 저장이 원본을 덮는다 — 원본을 보존하고 알린다.
+    preserveCorrupt(FILE, e?.message);
+    console.warn(`[daily-report] 설정 파일을 읽지 못해 기본값으로 시작합니다(원본 보존): ${e?.message}`);
+  }
   return cache;
 }
 

@@ -5,6 +5,7 @@
 //  · gpu-guest/PhysicalGpuManager.jsx : 물리 GPU 서버(베어메탈 — 별개 백엔드 도메인)
 //  · gpu-guest/VmCredManager.jsx      : VM별 계정·테스트 러너(이 화면 기능 커밋 최다 지점)
 //  · gpu-guest/shared.jsx             : Field·fmtAgo(셸·하위가 공용 — 복제 금지)
+import { unitText } from './unitText.js';
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
@@ -271,7 +272,7 @@ function QuickSshTest() {
               <>
                 <span className={`badge ${res.login ? 'green' : 'red'}`}>로그인 {res.login ? 'OK' : '실패'}</span>
                 <span className={`badge ${res.read ? 'green' : 'gray'}`}>읽기 {res.read ? 'OK' : '실패'}</span>
-                {res.sample && <span className="badge teal">GPU {res.sample.gpus} · 사용률 {res.sample.utilPct}% · mem {res.sample.memUsedPct ?? '-'}%</span>}
+                {res.sample && <span className="badge teal">GPU {res.sample.gpus} · 사용률 {res.sample.utilNA ? 'N/A(MIG)' : unitText(res.sample.utilPct, '%')} · mem {unitText(res.sample.memUsedPct, '%')}</span>}
                 {!res.read && res.error && <span className="muted" style={{ fontSize: 12 }}>{res.error}</span>}
               </>
             )}

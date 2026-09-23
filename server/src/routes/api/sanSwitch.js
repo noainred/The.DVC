@@ -6,6 +6,7 @@
  *    노출하지 않는다('vCenter 귀속 없는 데이터는 범위 계정에 노출 금지' — server/CLAUDE.md).
  *  - 변경(등록/수정/삭제/테스트/수집): adminOnly + 감사로그.
  */
+import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
@@ -408,7 +409,7 @@ api.get('/tools/sanswitch/devices/:id/healthcheck', toolsPerm, fullScopeOnly, as
     problemPorts: zoned.rows,
     zoningNote: zoned.note,
     problemPortsOmitted: Math.max(0, portCheck.rows.filter((r) => r.verdict === 'bad' || r.verdict === 'warn').length - problem.length),
-    history: { ...hist, recorded: rec, compare: compareRuns(hist.runs), db: await healthHistoryStatus() },
+    history: { ...hist, recorded: rec, compare: compareRuns(hist.runs), db: scopeDbStatus(await healthHistoryStatus(), req.user) },
   });
 });
 
@@ -420,7 +421,7 @@ api.get('/tools/sanswitch/devices/:id/healthcheck/history', toolsPerm, fullScope
   const dev = listDevices().find((d) => d.id === req.params.id);
   if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
   const hist = await listRuns(req.params.id, Number(req.query.limit) || 10);
-  res.json({ ok: true, deviceId: req.params.id, name: dev.name || dev.host, ...hist, maxRuns: MAX_RUNS, compare: compareRuns(hist.runs), db: await healthHistoryStatus() });
+  res.json({ ok: true, deviceId: req.params.id, name: dev.name || dev.host, ...hist, maxRuns: MAX_RUNS, compare: compareRuns(hist.runs), db: scopeDbStatus(await healthHistoryStatus(), req.user) });
 });
 
 /**
@@ -453,7 +454,7 @@ api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, async (req
     results: results.map((r) => ({ ...r, datacenterName: dcNameOf(r.datacenterId) })),
     missing, items: CHECK_ITEMS, baselines: listBaselines(),
     // 이력 기록 결과 — '몇 건이 새로 기록되고 몇 건이 같은 스냅샷이어서 건너뛰었나'.
-    recordedRuns: recStats, historyDb: await healthHistoryStatus(),
+    recordedRuns: recStats, historyDb: scopeDbStatus(await healthHistoryStatus(), req.user),
   });
 });
 

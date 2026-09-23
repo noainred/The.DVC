@@ -21,7 +21,7 @@ const CONCURRENCY = Math.max(1, Number(process.env.GUESTDISK_CONCURRENCY) || 4);
 let running = false;       // 재진입 가드(폴러 + 수동 실행 공유)
 let lastResult = null;     // { at, trigger, vcenters, vms, vmSeriesRows, partSeriesRows, ms, errors }
 let lastRunTs = 0;
-let lastPruneTs = 0;       // 보존 prune 스로틀(수집 enabled 와 무관하게 돈다 — 데이터가 push 로도 들어옴)
+let lastPruneTs = Date.now();   // v2.595(감사 T2595-04): 기동 첫 틱에 prune 하지 않는다(v2.453 규약)       // 보존 prune 스로틀(수집 enabled 와 무관하게 돈다 — 데이터가 push 로도 들어옴)
 const PRUNE_EVERY_MS = 6 * 3_600_000; // 6h
 
 export function guestDiskPollerStatus() { return { running, lastResult, lastRunTs }; }

@@ -67,6 +67,17 @@ function load() {
 }
 // 원자적 쓰기 — 크래시/정전 중 부분기록으로 파일이 깨지면 load가 []를 반환하고 다음 persist가
 // 빈 목록으로 덮어써 전 모니터 정의(자격증명 포함)가 사라진다. tmp+fsync+rename으로 방지.
+/**
+ * 실행 결과 기록(v2.595, 감사 FS-2 — 재현): 실행 중에 모니터를 편집하면 saveMonitor 가 캐시 항목을 **새 객체로 바꾼다** —
+ * 인자로 받은 옛 객체에 쓰면 결과가 사라지고(lastRun 없음) 다음 틱에 곧바로 다시 실행됐다. id 로 현재 항목을 찾아 쓴다
+ * (삭제됐으면 버린다 — vmclone/store.recordRun 과 같은 패턴).
+ */
+function recordRun(m, fields) {
+  const cur = (load() || []).find((x) => x.id === m.id);
+  Object.assign(m, fields);
+  if (cur && cur !== m) Object.assign(cur, fields);
+  if (cur) persist();
+}
 function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(cache), null, 2), { mode: 0o600 }); } catch { /* */ } } // 암호화 모드면 password/privateKey 봉인
 
 const redact = (m) => ({ useSudo: m.useSudo !== false,
@@ -166,13 +177,12 @@ async function runMonitor(m, { manual = false } = {}) {
       noteSide(m, 'A', { ok: true });
     }
     const rec = recordCapture(result, { source: 'monitor', monitorName: m.name, via: 'central', hostA: m.hostA?.host, peer: m.peer });
-    m.lastRun = Date.now(); m.lastWorst = rec.worst; m.lastDetail = (rec.issues[0]?.title) || '정상';
-    persist();
+    recordRun(m, { lastRun: Date.now(), lastWorst: rec.worst, lastDetail: (rec.issues[0]?.title) || '정상' });
     if (rec.worst !== 'ok') {
       notify({ key: `netmon:${m.id}`, severity: rec.worst === 'error' ? 'critical' : 'warning', title: `네트워크 모니터 '${m.name}' 이슈`, detail: `${m.hostA?.host} ↔ ${m.mode === 'dual' ? m.hostB?.host : m.peer}: ${rec.issues.map((i) => i.title).join(', ')}` }).catch(() => {});
     }
   } catch (e) {
-    m.lastRun = Date.now(); m.lastWorst = 'error'; m.lastDetail = `실행 실패: ${e.message}`.slice(0, 120); persist();
+    recordRun(m, { lastRun: Date.now(), lastWorst: 'error', lastDetail: `실행 실패: ${e.message}`.slice(0, 120) });
   }
   return { skipped: '' };
 }

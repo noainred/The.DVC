@@ -66,7 +66,7 @@ export default function ConsoleOverview({ tiles, global: g, ov, sitesAll, alarms
             {g && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
                 {[
-                  ['CPU', `${fmtInt(g.cpuUsedGhz)} / ${fmtInt(g.cpuTotalGhz)} GHz · ${fmtInt(g.cpuCores)} cores`, g.cpuUsagePct],
+                  ['CPU', `${fmtInt(g.cpuUsedGhz)} / ${fmtInt(g.cpuTotalGhz)} GHz · ${fmtInt(g.cpuCores)} cores${g.hostsUsageExcluded ? ` · 끊긴 호스트 ${fmtInt(g.hostsUsageExcluded)}대 사용률 제외` : ''}`, g.cpuUsagePct],
                   ['메모리', `${fmtInt(g.memUsedGB)} / ${fmtInt(g.memTotalGB)} GB`, g.memUsagePct],
                   ['스토리지', `${g.storageUsedTB} / ${g.storageTotalTB} TB · ${fmtInt(g.datastores)} DS`, g.storageUsagePct],
                 ].map(([label, meta, pct]) => (

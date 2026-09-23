@@ -18,6 +18,7 @@
  * ⚠ 계정명은 개인정보성이다. 사용자 선택(2026-09-16)대로 **목록 기본 표시는 가림**이고
  *   `settings.showNamesInList` 가 정한다 — 화면이 그 사실을 밝힌다.
  */
+import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { logAudit } from '../../audit.js';
@@ -80,7 +81,7 @@ api.get('/tools/horizon-sessions', requirePerm('tools'), async (req, res) => {
       showNamesInList: s.showNamesInList, maxUsers: s.maxUsers, maxPages: s.maxPages, pageSize: s.pageSize,
     },
     poller: hzSessionPollerStatus(),
-    db: await hzSessionDbStatus(),
+    db: scopeDbStatus(await hzSessionDbStatus(), req.user),   // v2.595(감사 AUTHZ-2595-04): DB 경로는 admin 에게만
     mock: store.get()?.source === 'mock',
   });
 });
@@ -97,7 +98,7 @@ api.get('/tools/horizon-sessions/history', requirePerm('tools'), async (req, res
     // ⚠ `span.first` 는 '수집 시작' 이 아니라 **max(수집 시작, 보존 경계)** 다 — 화면이
     //   '기다리면 채워진다' 고 단정하지 않도록 보존일·주기를 함께 내려준다.
     retentionDays: s.retentionDays, intervalMs: s.intervalMs,
-    db: await hzSessionDbStatus(),
+    db: scopeDbStatus(await hzSessionDbStatus(), req.user),   // v2.595(감사 AUTHZ-2595-04): DB 경로는 admin 에게만
   });
 });
 
@@ -123,7 +124,7 @@ api.get('/tools/horizon-sessions/settings', requirePerm('tools'), async (req, re
     limits: LIMITS,
     servers: listHorizon().map((x) => ({ id: x.id, name: x.name || x.id, host: x.host, enabled: x.enabled !== false, hasPassword: !!x.hasPassword })),
     poller: hzSessionPollerStatus(),
-    db: await hzSessionDbStatus(),
+    db: scopeDbStatus(await hzSessionDbStatus(), req.user),   // v2.595(감사 AUTHZ-2595-04): DB 경로는 admin 에게만
     mock: store.get()?.source === 'mock',
   });
 });

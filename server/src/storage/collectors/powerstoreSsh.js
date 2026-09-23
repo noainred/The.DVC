@@ -10,7 +10,7 @@
  */
 
 import { emptySnapshot } from '../types.js';
-import { runCliSession, parseCsv, parseJsonLoose, toBytes, sshFailureSnapshot } from './cliSsh.js';
+import { runCliSession, parseCsv, parseJsonLoose, toBytes, toBytesOrNull, sshFailureSnapshot } from './cliSsh.js';
 import { numOrNull } from '../../util/numOrNull.js';
 
 const SPECS = [
@@ -63,9 +63,9 @@ export function normalizePowerstoreSsh(device, out) {
   const pt = pts.length ? pts[pts.length - 1] : null;
   if (pt) {
     const total = toBytes(pick(pt, 'physical_total'));
-    const used = toBytes(pick(pt, 'physical_used'));
+    const used = toBytesOrNull(pick(pt, 'physical_used'));   // v2.595: 못 읽은 사용량은 null(0 이 아니다)
     if (total) {
-      snap.capacity = { totalBytes: total, usedBytes: used, pct: Math.round((used / total) * 1000) / 10 };
+      snap.capacity = { totalBytes: total, usedBytes: used, pct: used == null ? null : Math.round((used / total) * 1000) / 10 };
       snap.sections.capacity = 'ok';
       const num = numOrNull;   // v2.561: 공용 판정(Number(null)===0 함정)
       snap.extra.space = {

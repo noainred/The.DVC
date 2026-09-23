@@ -1,3 +1,4 @@
+import { unitText } from '../views/unitText.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps';
 import geoData from 'world-atlas/countries-110m.json';
@@ -207,9 +208,9 @@ export default function WorldMap({ sites = [], onSelect, height = 320, onResizeE
           <div className="t-row"><span>상태</span><b>{tip.site.status}</b></div>
           <div className="t-row"><span>호스트</span><b>{tip.site.metrics?.hosts ?? '-'}</b></div>
           <div className="t-row"><span>VM</span><b>{tip.site.metrics?.vms ?? '-'} ({tip.site.metrics?.vmsPoweredOn ?? 0} on)</b></div>
-          <div className="t-row"><span>CPU</span><b>{tip.site.metrics?.cpuUsagePct ?? '-'}%</b></div>
-          <div className="t-row"><span>메모리</span><b>{tip.site.metrics?.memUsagePct ?? '-'}%</b></div>
-          <div className="t-row"><span>스토리지</span><b>{tip.site.metrics?.storageUsagePct ?? '-'}%</b></div>
+          <div className="t-row"><span>CPU</span><b>{unitText(tip.site.metrics?.cpuUsagePct, '%')}</b></div>
+          <div className="t-row"><span>메모리</span><b>{unitText(tip.site.metrics?.memUsagePct, '%')}</b></div>
+          <div className="t-row"><span>스토리지</span><b>{unitText(tip.site.metrics?.storageUsagePct, '%')}</b></div>
           {(tip.site.metrics?.alarmsCritical > 0 || tip.site.metrics?.alarmsWarning > 0) && (
             <div className="t-row"><span>알람</span><b>{tip.site.metrics?.alarmsCritical || 0} 위험 / {tip.site.metrics?.alarmsWarning || 0} 경고</b></div>
           )}
@@ -234,9 +235,9 @@ export default function WorldMap({ sites = [], onSelect, height = 320, onResizeE
               {row('버전', picked.version || '-')}
               {row('호스트', m.hosts ?? '-')}
               {row('VM', `${m.vms ?? '-'} (${m.vmsPoweredOn ?? 0} on)`)}
-              {row('CPU 사용률', `${m.cpuUsagePct ?? '-'}%`)}
-              {row('메모리 사용률', `${m.memUsagePct ?? '-'}%`)}
-              {row('스토리지 사용률', `${m.storageUsagePct ?? '-'}%`)}
+              {row('CPU 사용률', unitText(m.cpuUsagePct, '%'))}
+              {row('메모리 사용률', unitText(m.memUsagePct, '%'))}
+              {row('스토리지 사용률', unitText(m.storageUsagePct, '%'))}
               {m.powerKw > 0 && row('소비전력', `${m.powerKw} kW`)}
               {row('알람', `위험 ${m.alarmsCritical || 0} · 경고 ${m.alarmsWarning || 0}`)}
             </div>

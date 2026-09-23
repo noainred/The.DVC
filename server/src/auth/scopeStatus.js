@@ -36,3 +36,15 @@ export function scopeDbStatus(db, user) {
   void path;
   return rest;
 }
+
+/**
+ * 엣지 주소 가림(v2.595, 감사 AUTHZ-2595-01): svcmon 엣지 요약의 `sourceIp`·`portalPort`(전 법인 엣지의 출발 IP·포트)는
+ * admin + 전체 범위 계정에게만 준다 — v2.574 `/ping/edge/overview` 가 택한 기준과 같다(routes/ping.js redactEdgeAddresses).
+ * 라우트를 막지 않고 주소만 비우며, 가린 사실을 호출부가 `addressHidden` 으로 밝힌다.
+ * @param {Array} edges edgeSummary() 결과
+ * @param {boolean} full admin 이면서 전체 범위인가
+ */
+export function redactEdgeSummary(edges, full) {
+  if (full || !Array.isArray(edges)) return edges;
+  return edges.map((e) => (e && typeof e === 'object' ? { ...e, sourceIp: null, portalPort: null } : e));
+}

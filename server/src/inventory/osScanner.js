@@ -4,6 +4,7 @@
  * 설정: CONFIG_DIR/os-scan.json.
  */
 
+import { clampSetting } from '../util/clampSetting.js';
 import fs from 'node:fs';
 import { morefOf } from '../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import path from 'node:path';
@@ -56,7 +57,8 @@ export function loadOsScanSettings() {
   };
   return cache;
 }
-function clamp(v, mn, mx, d) { const n = Number(v); return Number.isFinite(n) ? Math.max(mn, Math.min(mx, Math.round(n))) : d; }
+// v2.595(감사 DEPS2595-01): 빈 칸('')은 0 이 아니라 미지정 — 이전 값을 유지한다(util/clampSetting.js).
+function clamp(v, mn, mx, d) { return clampSetting(v, { min: mn, max: mx, def: d }); }
 
 export function saveOsScanSettings(body = {}) {
   const cur = loadOsScanSettings();

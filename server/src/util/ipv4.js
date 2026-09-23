@@ -62,3 +62,14 @@ export function cidrMatch(n, entry) {
   const mask = k === 0 ? 0 : (0xffffffff << (32 - k)) >>> 0;
   return ((n & mask) >>> 0) === ((bn & mask) >>> 0);
 }
+
+/**
+ * 정규형 IPv4 문자열(v2.595 — v2.594 에 ipam/overrides.js·annotations.js 두 곳에 있던 것을 코어로 올렸다).
+ * 파서는 선행 0('010.39.0.1')을 10진으로 받지만(v2.586 호환) 원장·소유 맵은 **문자열**로 대조한다 — 저장과 판정이
+ * 같은 키를 쓰려면 둘 다 이 함수를 거쳐야 한다(v2.595 R2595-01: 저장만 정규화하고 범위 판정은 원문으로 해서
+ * 범위 계정이 선행 0 표기로 범위 밖 IP 에 쓸 수 있었다). IPv4 가 아니면 null.
+ */
+export function canonIp(s) {
+  const n = ipToNum(String(s ?? '').trim());
+  return n == null ? null : numToIp(n);
+}

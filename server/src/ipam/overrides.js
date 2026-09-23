@@ -21,14 +21,8 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { isIpv4 } from './scan.js';
-import { ipToNum, numToIp } from '../util/ipv4.js';
+import { canonIp } from '../util/ipv4.js';
 
-/**
- * 저장 키 정규형(v2.594, 감사 LO-2 — 재현): 파서는 선행 0('010.39.0.1')을 10진수로 받지만(v2.586 호환) 원장은
- * 문자열로 대조한다 — 원문 키로 저장하면 실제 VM 행에 붙지 않고 유령 수동 행·유령 '/24' 시트가 생겼다.
- * 받은 표기와 무관하게 정규형('10.39.0.1')으로 저장·조회한다.
- */
-export const canonIp = (s) => { const n = ipToNum(String(s || '').trim()); return n == null ? null : numToIp(n); };
 
 const FILE = path.join(config.configDir, 'ipam-overrides.json');
 const MAX_BATCH = 10_000; // 일괄 적용 IP 상한(대량 입력 DoS/오염 방지)

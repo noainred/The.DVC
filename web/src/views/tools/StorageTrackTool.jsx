@@ -230,7 +230,7 @@ export default function StorageTrackTool() {
                         <td style={{ textAlign: 'right' }}>{tb(v.usedGB).toLocaleString()} TB</td>
                         <td style={{ textAlign: 'right' }} className="muted">{tb(v.capGB).toLocaleString()} TB</td>
                         <td style={{ textAlign: 'right' }} className="muted">{tb(v.freeGB).toLocaleString()} TB</td>
-                        <td style={{ textAlign: 'right', color: pctColor(v.usagePct) }}><b>{v.usagePct}%</b></td>
+                        <td style={{ textAlign: 'right', color: pctColor(v.usagePct) }}><b>{v.usagePct == null ? '—' : `${v.usagePct}%`}</b></td>
                         <td style={{ textAlign: 'right' }}>
                           {v.deltaGB ? (
                             <button className="tab" style={{ padding: '2px 8px', fontSize: 12, color: v.deltaGB > 0 ? 'var(--amber)' : 'var(--green)' }}
@@ -446,7 +446,7 @@ function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
                     {!vcenterId && <td className="muted" style={{ fontSize: 11.5 }}>{d.vcenterId}</td>}
                     <td className="muted" style={{ fontSize: 11.5 }}>{d.type || '—'}</td>
                     <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{gbTb(d.usedGB)} / {gbTb(d.capGB)}</td>
-                    <td style={{ textAlign: 'right', color: pctColor(d.usagePct || 0) }}>{d.usagePct}%</td>
+                    <td style={{ textAlign: 'right', color: pctColor(d.usagePct || 0) }}>{d.usagePct == null ? '—' : `${d.usagePct}%`}</td>
                     {(pivot.slotCols || []).map((c) => {
                       const cell = d.slots?.[c.slot];
                       if (cell == null) return <td key={c.slot} style={{ textAlign: 'right' }} className="muted">—</td>;
@@ -557,7 +557,7 @@ function DsMiniChart({ item, days }) {
         <span className="muted" style={{ fontSize: 11 }}>{item.type || '—'}</span>
       </div>
       <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
-        사용 {gbTb(item.usedGB)} / {gbTb(item.capGB)} · <b style={{ color: pctColor(item.usagePct || 0) }}>{item.usagePct}%</b>
+        사용 {gbTb(item.usedGB)} / {gbTb(item.capGB)} · <b style={{ color: pctColor(item.usagePct || 0) }}>{item.usagePct == null ? '—' : `${item.usagePct}%`}</b>
         {' · '}{days}일 증감 {item.deltaGB
           ? <b style={{ color: item.deltaGB > 0 ? 'var(--amber)' : 'var(--green)' }}>{item.deltaGB > 0 ? '+' : ''}{gbTb(item.deltaGB)}</b>
           : <span>0</span>}
@@ -649,7 +649,7 @@ function DsPerStore({ days, vcenterId }) {
             <option value="">데이터스토어 선택{list ? ` (${filtered.length}개)` : ''}</option>
             {filtered.map((d) => (
               <option key={d.dsId} value={d.dsId}>
-                {d.name} · {d.vcenterId} · {gbTb(d.usedGB)}/{gbTb(d.capGB)} ({d.usagePct}%)
+                {d.name} · {d.vcenterId} · {gbTb(d.usedGB)}/{gbTb(d.capGB)} ({d.usagePct == null ? '—' : `${d.usagePct}%`})
               </option>
             ))}
           </select>
@@ -720,7 +720,7 @@ function DsPerStore({ days, vcenterId }) {
                     <td className="muted" style={{ fontSize: 11.5 }}>{d.type || '—'}</td>
                     <td style={{ textAlign: 'right' }}>{gbTb(d.usedGB)}</td>
                     <td style={{ textAlign: 'right' }} className="muted">{gbTb(d.capGB)}</td>
-                    <td style={{ textAlign: 'right', color: pctColor(d.usagePct || 0) }}>{d.usagePct}%</td>
+                    <td style={{ textAlign: 'right', color: pctColor(d.usagePct || 0) }}>{d.usagePct == null ? '—' : `${d.usagePct}%`}</td>
                     <td style={{ textAlign: 'right', color: d.deltaGB > 0 ? 'var(--amber)' : d.deltaGB < 0 ? 'var(--green)' : undefined }}>
                       <b>{d.deltaGB > 0 ? '+' : ''}{gbTb(d.deltaGB)}</b>
                     </td>

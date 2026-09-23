@@ -3408,6 +3408,35 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ 정직 기록: Chromium 은 목 스택으로 개요·스토리지(장비 0대)·중계 토폴로지(admin)·VM 상세 모달 1440/400 을 봤다 — 비-admin 가림
       화면과 사용량 결측 장비가 있는 스토리지 표는 **화면으로 보지 못했다**(단위·합계 로직은 테스트로 고정).
 
+  - ⚠⚠ **v2.595 — 7축 병렬 감사(6차 점검) 확정분**("세번 더 수행" 2회차. 확정 31 · 가능성 8 · 반증 1, 고침 32. 회귀는
+    `test/audit2595.test.js` 17건 — **변이 검증 34/34**. 상세 `docs/AUDIT-2026-09-24c.md`):
+    - ⚠⚠ **키를 정규화했으면 그 키로 하는 판정도 전부 같은 정규화를 거칠 것**(R2595-01 — **v2.594 가 만든 범위 우회**, 재현):
+      v2.594 가 IPAM 저장 키를 정규형으로 바꾸고 범위 판정(`ipInWriteScope`)은 원문으로 소유자를 찾아, 범위 계정이 선행 0 표기로
+      범위 밖 IP 에 썼다. 예전에는 원문 키로 저장돼 유령 행만 생겼다 — **고친 것이 더 위험한 결함을 만든 사례**다. 정규형은
+      `util/ipv4.js canonIp` 하나다(v2.594 의 두 벌을 올렸다).
+    - ⚠⚠ **REST 를 고쳤으면 SSH 형제도**(C2595-01): v2.593 DATA-01 은 REST 수집기 5종만 고쳤고 PowerStore·XtremIO·Isilon **SSH** 가
+      'N/A' 사용량을 0 으로 적재했다. 전체 용량은 `toBytes`(0 이면 건너뜀) · **사용량은 `toBytesOrNull`/`parseSizeOrNull`** 이다.
+    - **텔레메트리 퍼센트는 `redfish.js pctFromMetric`**(C2595-02) — 숫자만 뽑는 `replace(/[^\d.]/g,'')` 는 null·'N/A' → 0, '-1' → 1 이다.
+    - **디렉터 sfpshow 는 `slot/port` 키**(C2595-03) — 슬롯마다 Port 0 부터 다시 세므로 포트 번호 키는 덮어쓰고, 전역 Index 로 찾으면
+      **다른 포트의 광량**이 붙는다. ⚠ porterrshow 의 디렉터 행 형식은 여전히 실장비로 보지 못했다.
+    - ⚠ **응답 필드 누출은 '상태 객체' 를 싣는 곳에서 난다**(AUTHZ-2595-01~04): svcmon 엣지 `sourceIp`·`portalPort`(→
+      `auth/scopeStatus.redactEdgeSummary`, admin + 전체 범위만) · vmseries `push.last`(범위 밖 vCenter id·오류 원문·centralUrl) ·
+      DB 절대 경로(vmtrack·Horizon 세션·SAN 점검 이력 — `scopeDbStatus`). v2.550.3 `status.last` · v2.574 SEC-07 과 같은 계열이다.
+    - **사용률 기준은 `store.usageReadable` 하나**(R2595-04·05·WT-01): 읽을 호스트가 없으면 `null`('0%' 아님) · `hostsUsageExcluded`
+      (NOT_RESPONDING 포함 — `hostsDisconnected` 는 그것을 세지 않는다) · vCenter 카드·관제 콘솔·Summary 가 같은 기준을 쓴다.
+      ⚠ 공개 API `/inventory/summary` 의 합계(used/total)는 **대조 계약** 때문에 전 호스트 그대로다 — 사용률(%)만 바뀌었다.
+    - **설정·실행 결과가 섞인 파일의 백업 지문은 `last*` 를 뺀다**(`backup/service.js MIXED_STATE_FILES`, FS-1) · 실행 결과는 **id 로 찾은
+      현재 항목**에 쓴다(FS-2·3 — 편집이 캐시 항목을 새 객체로 바꾼다) · finops·일일 보고 로드도 `preserveCorrupt`(FS-4 — arch2582
+      allowlist 에서 뺐다). ⚠ 정직 기록: 암호화 모드에서 봉인 값이 저장마다 달라지면 FS-1 지문이 여전히 바뀔 수 있다(확인 못 함).
+    - **사용자 주기 → setInterval 은 상한부터**(T2595-01 — 알림 엔진, 상한 1일 + 재진입 가드. v2.591 L2·L3 의 형제 누락) ·
+      '기다림' 의 기준 시각은 **그 상태를 처음 본 시각**이다(R2595-03 — vmtrack 이 슬롯 시작을 기준으로 재서 늦은 재시작에 대기가 0).
+    - **숫자 설정의 빈 칸은 `util/clampSetting.js`**(DEPS2595-01 — OS 스캔: 빈 칸 저장이 주기 720→5분·재스캔 30일→0). 같은 모양의
+      사본이 17벌 있다고 보고됐다 — 이번에는 재현된 OS 스캔만 옮겼고 나머지는 **다음 점검 후보**다.
+    - 그 밖: 서버 문구(bulkAdvice·scanRemedy) 백틱 → ‘ ’ · GPU 게스트 연결 테스트 MIG · 센서 빈 상태 주기 · '-%' · DS 추이 사용률 null ·
+      인시던트 limit(`pageArgs`) · CONFIG-FILES 생성기가 `createActivityLog({fileName})` 를 읽는다(6종 추가) · portalDb 유령 파일명 7개.
+    - 남긴 것(정보·가능성): 죽은 export 56개(판정 사본 `isMonitored`·`isVcenterGpuMonitored` 는 오인 위험) · adaptiveTimer 재무장 중 두 번째
+      실행(가능성) · SAN rates 빈 목록 주기(가능성) · uemcli 부분 번호(가능성) · sfpshow uW 단위(가능성) · clamp 사본 16벌.
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

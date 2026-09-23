@@ -82,8 +82,8 @@ function fmtMem(usedGB, totalGB) {
 function Bar({ label, pct, detail }) {
   return (
     <div className="vc-metric">
-      <div className="vc-mlabel"><span>{label}</span><b>{pct}%{detail ? ` · ${detail}` : ''}</b></div>
-      <div className="usage-bar"><span style={{ width: `${Math.min(pct, 100)}%`, background: usageColor(pct) }} /></div>
+      <div className="vc-mlabel"><span>{label}</span><b>{pct == null ? '—' : `${pct}%`}{detail ? ` · ${detail}` : ''}</b></div>
+      <div className="usage-bar"><span style={{ width: `${pct == null ? 0 : Math.min(pct, 100)}%`, background: usageColor(pct ?? 0) }} /></div>
     </div>
   );
 }
@@ -203,8 +203,8 @@ export default function VCenters({ onSelectSite, resetSignal }) {
                     <div className="vc-count"><b>{m.vms}</b><span>VM ({m.vmsPoweredOn} on)</span></div>
                     <div className="vc-count"><b style={{ color: m.alarmsCritical ? 'var(--red)' : m.alarmsWarning ? 'var(--amber)' : 'var(--green)' }}>{(m.alarmsCritical || 0) + (m.alarmsWarning || 0)}</b><span>알람</span></div>
                   </div>
-                  <Bar label="CPU" pct={m.cpuUsagePct || 0} detail={m.cpuTotalGhz ? `${m.cpuUsedGhz}/${m.cpuTotalGhz} GHz` : undefined} />
-                  <Bar label="메모리" pct={m.memUsagePct || 0} detail={fmtMem(m.memUsedGB, m.memTotalGB)} />
+                  <Bar label="CPU" pct={m.cpuUsagePct ?? null} detail={m.cpuTotalGhz ? `${m.cpuUsedGhz}/${m.cpuTotalGhz} GHz${m.hostsUsageExcluded ? ` · 끊긴 호스트 ${m.hostsUsageExcluded}대 사용률 제외` : ''}` : undefined} />
+                  <Bar label="메모리" pct={m.memUsagePct ?? null} detail={fmtMem(m.memUsedGB, m.memTotalGB)} />
                   <Bar label="스토리지" pct={m.storageUsagePct || 0} detail={m.storageUsedTB != null ? `${m.storageUsedTB}/${m.storageTotalTB} TB` : `${m.storageTotalTB || 0} TB`} />
                 </>
               )}

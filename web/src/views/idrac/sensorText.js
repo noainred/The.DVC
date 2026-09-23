@@ -33,15 +33,20 @@ export function maxTempText(sensors) {
  * 주기는 **API 가 알려주는 실제 값**(intervalMs, 기본 60초·설정 가능)을 쓴다 — 예전에는 '1분 간격'
  * 이 화면에 하드코딩돼 있어 주기를 바꾸면 문구가 사실과 달라졌다.
  */
+/** 주기 표기(v2.595 — 두 문구가 같은 값을 쓰게 헬퍼로). 값이 없으면 null. */
+export function intervalText(intervalMs, suffix = '') {
+  const ms = Number(intervalMs);
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const base = ms % 60_000 === 0 ? `${ms / 60_000}분` : `${Math.round(ms / 1000)}초`;
+  return suffix ? `${base} ${suffix}` : base;
+}
+
 export function sampleCountText(sensors) {
   if (sensors && sensors.seriesAvailable === false) {
     const at = sensors.syncedAt ? new Date(sensors.syncedAt).toLocaleString('ko-KR') : '—';
     return `위임 수집(엣지) · 최신값 동기화 ${at} · 중앙 이력 없음`;
   }
-  const ms = Number(sensors?.intervalMs);
-  const every = Number.isFinite(ms) && ms > 0
-    ? (ms % 60_000 === 0 ? `${ms / 60_000}분 간격` : `${Math.round(ms / 1000)}초 간격`)
-    : '수집 주기 미확인';
+  const every = intervalText(sensors?.intervalMs, '간격') || '수집 주기 미확인';
   return `${every} · 최근 ${sensors?.count || 0}샘플 · 30초마다 갱신`;
 }
 
@@ -65,7 +70,9 @@ export function emptyNote(sensors) {
       : '위임 법인(엣지)에서 아직 센서 값을 보내지 않았습니다. 엣지 포탈의 iDRAC 수집 상태를 확인하세요.';
   }
   if (!sensors.samples?.length) {
-    return '아직 수집된 센서 샘플이 없습니다. 센서 시계열은 메모리에 보관되어 포탈 재시작 후 비므로, 첫 수집(1분 주기) 뒤에 표시됩니다.';
+    // v2.595(감사 WT-05): 주기는 설정 가능하다(IDRAC_POLL_INTERVAL_MS) — '1분' 을 박지 않고 응답 값을 쓴다.
+    const iv = intervalText(sensors.intervalMs);
+    return `아직 수집된 센서 샘플이 없습니다. 센서 시계열은 메모리에 보관되어 포탈 재시작 후 비므로, 첫 수집(${iv ? `${iv} 주기` : '수집 주기 미확인'}) 뒤에 표시됩니다.`;
   }
   return null;
 }

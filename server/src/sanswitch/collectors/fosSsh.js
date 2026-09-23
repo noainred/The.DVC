@@ -269,7 +269,7 @@ export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}) {
 
   const list = sw.ports.slice(0, MAX_PORTS).map((p) => {
     const e = errs[p.index] || {};
-    const s = sfps[p.index] || {};
+    const s = (p.slot != null ? sfps[p.slotPort] : sfps[p.index]) || {};   // v2.595: 디렉터는 slot/port 키
     return {
       index: p.index, slot: p.slot, slotPort: p.slotPort, address: p.address,
       state: p.state, stateRaw: p.stateRaw, speed: p.speed, portType: p.portType,

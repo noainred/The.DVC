@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { ipToNum, numToIp } from '../util/ipv4.js';
+import { canonIp } from '../util/ipv4.js';
 
 const FILE = path.join(config.configDir, 'ipam-annotations.json');
 
@@ -28,7 +28,7 @@ function load() {
 export function getAnnotations() { return load(); }
 
 /** One IP's annotation, or null. */
-export function getAnnotation(ip) { const d = load(); const n = ipToNum(String(ip || '').trim()); return (n != null && d[numToIp(n)]) || d[String(ip)] || null; }
+export function getAnnotation(ip) { const d = load(); const c = canonIp(ip); return (c && d[c]) || d[String(ip)] || null; }
 
 const cleanTags = (v) => (Array.isArray(v) ? v : String(v || '').split(/[,\n]/))
   .map((s) => String(s).trim()).filter(Boolean).slice(0, 20);
@@ -38,8 +38,7 @@ export function setAnnotation(ip, { memo = '', tags = [] } = {}, user) {
   const raw = String(ip || '').trim();
   if (!raw) return { ok: false, reason: 'IP가 필요합니다.' };
   // v2.594(감사 LO-2): IPv4 로 읽히면 정규형 키로 저장한다(선행 0 표기가 원장 행과 어긋나 유령이 되던 것).
-  const n = ipToNum(raw);
-  const key = n == null ? raw : numToIp(n);
+  const key = canonIp(raw) || raw;
   const data = load();
   if (raw !== key && data[raw]) delete data[raw];
   const m = String(memo || '').trim().slice(0, 2000);

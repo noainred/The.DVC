@@ -79,6 +79,19 @@ function bumpAuthCache(key) {
   AUTH_CACHE.delete(key); AUTH_CACHE.set(key, v);
 }
 /** 테스트 전용 — 캐시 크기·상한 · 키의 계정 부분(LRU 순서, 앞이 먼저 밀려난다). */
+/**
+ * 텔레메트리 MetricValue → 퍼센트(v2.595, 감사 C2595-02). 예전 `Number(String(v).replace(/[^\d.]/g,''))` 는
+ * null·'N/A'·빈 값을 **0%**, '-1'(센서 없음 관례)을 **1%** 로 만들었다 — 주석은 '못 뽑으면 만들지 않는다' 였다.
+ * 숫자이거나 '37' · '37 %' · '37.5%' 꼴만 받고 0~100 밖은 퍼센트가 아니다(null).
+ */
+export function pctFromMetric(v) {
+  if (v == null) return null;
+  let n;
+  if (typeof v === 'number') n = v;
+  else { const m = /^\s*(\d+(?:\.\d+)?)\s*%?\s*$/.exec(String(v)); if (!m) return null; n = Number(m[1]); }
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
+}
+
 export function authCacheInfo() { return { size: AUTH_CACHE.size, max: AUTH_CACHE_MAX, order: [...AUTH_CACHE.keys()].map((k) => k.split('\0')[1]) }; }
 // 비밀번호 지문(비-암호 djb2) — 캐시 키에 포함해, 같은 호스트/계정을 '다른 비밀번호'로 시도할 때
 // 이전(정확한 비번)의 세션 토큰이 잘못 재사용되지 않게 한다(평문은 키에 담지 않음).
@@ -970,8 +983,8 @@ export async function fetchSensors(entry) {
     for (const v of rep.MetricValues || []) {
       const id = String(v.MetricId || '');
       if (/^(SystemBoardCPUUsage|CPUUsage)$/i.test(id)) {
-        const n = Number(String(v.MetricValue).replace(/[^\d.]/g, ''));
-        if (Number.isFinite(n)) { cpuUsagePct = Math.round(n); break; }
+        const n = pctFromMetric(v.MetricValue);   // v2.595: null·'N/A' → 0, '-1' → 1 이 되던 것
+        if (n != null) { cpuUsagePct = Math.round(n); break; }
       }
     }
   } catch { /* telemetry optional/unlicensed */ }
@@ -1140,8 +1153,8 @@ export async function fetchUsage(entry, { full = false, allowList = true } = {})
     for (const c of cands) {
       if (!byId.has(c.toLowerCase())) continue;
       // `37` · `37 %` · `37.5` 형태가 섞여 온다 — 숫자만 뽑는다. 못 뽑으면 **그 필드를 만들지 않는다**.
-      const n = Number(String(byId.get(c.toLowerCase())).replace(/[^\d.]/g, ''));
-      if (!Number.isFinite(n)) continue;
+      const n = pctFromMetric(byId.get(c.toLowerCase()));
+      if (n == null) continue;
       out[field] = Math.round(n * 10) / 10;
       out.usedIds[field] = c;
       break;

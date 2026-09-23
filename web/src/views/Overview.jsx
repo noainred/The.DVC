@@ -49,8 +49,8 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   const g = ov.global;
   // v2.593(감사 DATA-05): 분모가 0 이면(호스트·데이터스토어 0 — 범위 계정의 vCenter 가 전부 연결 불가일 때 등) 서버 pct() 가
   //   0 을 준다. 그것을 '사용률 0%' 로 그리면 '비어 있다' 는 거짓이 된다 — 측정할 대상이 없으면 '—'.
-  const cpuPct = g.hosts > 0 && Number(g.cpuTotalGhz) > 0 ? g.cpuUsagePct : null;
-  const memPct = g.hosts > 0 && Number(g.memTotalGB) > 0 ? g.memUsagePct : null;
+  const cpuPct = g.hosts > 0 && Number(g.cpuTotalGhz) > 0 ? (g.cpuUsagePct ?? null) : null;
+  const memPct = g.hosts > 0 && Number(g.memTotalGB) > 0 ? (g.memUsagePct ?? null) : null;
   const stoPct = g.datastores > 0 && Number(g.storageTotalTB) > 0 ? g.storageUsagePct : null;
   const regions = ov.byRegion || [];
   const sites = ov.sites || [];
@@ -162,11 +162,11 @@ export default function Overview({ onSelectSite, onGotoTab }) {
             코어·메모리 합계 — 출처가 달라 나란히 표기한다(물리 합계로 %를 다시 계산하지 않음: 베어메탈은 사용률 자료가 없다). */}
         <Kpi label="CPU 사용률" value={unitText(cpuPct, '%')} pct={cpuPct ?? undefined} meta={<>
           {g.cpuUsedGhz} / {g.cpuTotalGhz} GHz · ESXi {fmt(g.cpuCores)} cores
-          {g.hostsDisconnected > 0 && <span title="연결이 끊긴 호스트는 사용량을 알 수 없어 사용률 계산에서 뺐습니다(용량 합계에는 포함)"> · 끊긴 호스트 {fmt(g.hostsDisconnected)}대 사용률 제외</span>}
+          {(g.hostsUsageExcluded ?? g.hostsDisconnected) > 0 && <span title="연결이 끊긴 호스트는 사용량을 알 수 없어 사용률 계산에서 뺐습니다(용량 합계에는 포함)"> · 끊긴 호스트 {fmt(g.hostsUsageExcluded ?? g.hostsDisconnected)}대 사용률 제외</span>}
           {ov.physical?.servers > 0 && <><br />물리 서버 코어 <b>{fmt(ov.physical.cores)}</b> · iDRAC {fmt(ov.physical.servers)}대{ov.physical.withCores < ov.physical.servers ? ` (코어 정보 ${fmt(ov.physical.withCores)}대)` : ''}</>}
         </>} />
         <Kpi label="메모리 사용률" value={unitText(memPct, '%')} pct={memPct ?? undefined} meta={<>
-          {fmt(g.memUsedGB)} / {fmt(g.memTotalGB)} GB (ESXi){g.hostsDisconnected > 0 ? ` · 끊긴 호스트 ${fmt(g.hostsDisconnected)}대 사용률 제외` : ''}
+          {fmt(g.memUsedGB)} / {fmt(g.memTotalGB)} GB (ESXi){(g.hostsUsageExcluded ?? g.hostsDisconnected) > 0 ? ` · 끊긴 호스트 ${fmt(g.hostsUsageExcluded ?? g.hostsDisconnected)}대 사용률 제외` : ''}
           {ov.physical?.servers > 0 && <><br />물리 메모리 <b>{fmt(ov.physical.memGB)}</b> GB · iDRAC {fmt(ov.physical.servers)}대{ov.physical.withMemory < ov.physical.servers ? ` (메모리 정보 ${fmt(ov.physical.withMemory)}대)` : ''}</>}
         </>} />
         <Kpi label="스토리지 사용률" value={unitText(stoPct, '%')} pct={stoPct ?? undefined} meta={`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${g.datastores} DS`} onClick={() => onGotoTab?.('datastores')} />

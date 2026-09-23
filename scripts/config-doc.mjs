@@ -81,8 +81,17 @@ const files = new Map(); // fileName -> { modules:Set, atomic:bool, preserve:boo
 // '하지 않는다' 고 적고 있다).
 const GUARD_TEXT = fs.readFileSync(path.join(SRC, 'util/authGuard.js'), 'utf8');
 const GUARD_FLAGS = { atomic: /atomicWriteFileSync\(/.test(GUARD_TEXT), preserve: /preserveCorrupt\(/.test(GUARD_TEXT), mode600: /0o600/.test(GUARD_TEXT) };
+// v2.595(감사 FS-6): 작업 로그 링버퍼는 `createActivityLog({ fileName: '<name>' })` 로 만든다 — 같은 이유로 6종이 빠져 있었다.
+const ACT_TEXT = fs.readFileSync(path.join(SRC, 'util/activityLog.js'), 'utf8');
+const ACT_FLAGS = { atomic: /atomicWriteFileSync\(/.test(ACT_TEXT), preserve: /preserveCorrupt\(/.test(ACT_TEXT), mode600: /0o600/.test(ACT_TEXT) };
 for (const f of walk(SRC)) {
   const text = fs.readFileSync(f, 'utf8');
+  for (const m of text.matchAll(/createActivityLog\(\s*\{\s*fileName:\s*'([^']+)'/g)) {
+    const name = m[1];
+    const cur = files.get(name) || { modules: new Set(), ...ACT_FLAGS, summary: '수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js' };
+    cur.modules.add(path.relative(SRC, f).replace(/\\/g, '/'));
+    files.set(name, cur);
+  }
   for (const m of text.matchAll(/createAuthGuard\(\s*\{\s*file:\s*'([^']+)'/g)) {
     const name = m[1];
     const cur = files.get(name) || { modules: new Set(), ...GUARD_FLAGS, summary: '인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js' };

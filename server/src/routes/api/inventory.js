@@ -2,7 +2,8 @@
 import { requirePerm, requireRole } from '../../auth/auth.js';
 import { userHasPermission } from '../../auth/permissions.js'; // v2.583: /top 의 inv.* 집행
 import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth/scope.js';
-import { store } from '../../store.js';
+import { store, usageReadable } from '../../store.js';
+const pctOrNullR = (u, t) => (t > 0 ? Math.round((u / t) * 100) : null);
 import { browseDatastore } from '../../vcenter/dsBrowse.js';
 import { listMutes, addMute, removeMute, muteCreateIssue, muteDeleteIssue, visibleMutes } from '../../alarm-mutes.js';
 import { auditMiddleware } from '../../audit.js'; // v2.478(감사 S15): 알람 음소거는 무기록이었다
@@ -64,6 +65,11 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   const cpuUsedMhz = sum(hosts, (h) => h.cpuUsageMhz);
   const memTotalMB = sum(hosts, (h) => h.memTotalMB);
   const memUsedMB = sum(hosts, (h) => h.memUsageMB);
+  // v2.595(감사 R2595-04): 사용률은 개요·vCenter 카드와 같은 기준 — 사용량을 읽을 수 있는 호스트만(store.usageReadable).
+  //   합계(Used/Total GHz·GB)는 공개 API /inventory/summary 와의 대조 계약 때문에 전 호스트 그대로 둔다.
+  const hostsR = hosts.filter(usageReadable);
+  const cpuPctR = pctOrNullR(sum(hostsR, (h) => h.cpuUsageMhz), sum(hostsR, (h) => h.cpuTotalMhz));
+  const memPctR = pctOrNullR(sum(hostsR, (h) => h.memUsageMB), sum(hostsR, (h) => h.memTotalMB));
   const storCapGB = sum(datastores, (d) => d.capacityGB);
   const storUsedGB = sum(datastores, (d) => d.usedGB);
 
@@ -148,10 +154,11 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
       cpuCores,
       cpuTotalGhz: round(cpuTotalMhz / 1000, 1),
       cpuUsedGhz: round(cpuUsedMhz / 1000, 1),
-      cpuUsagePct: pct(cpuUsedMhz, cpuTotalMhz),
+      cpuUsagePct: cpuPctR,
       memTotalGB: round(memTotalMB / 1024),
       memUsedGB: round(memUsedMB / 1024),
-      memUsagePct: pct(memUsedMB, memTotalMB),
+      memUsagePct: memPctR,
+      hostsUsageExcluded: hosts.length - hostsR.length,
     },
     storage: {
       capacityTB: round(storCapGB / 1024, 1),
