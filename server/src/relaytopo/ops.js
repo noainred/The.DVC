@@ -159,14 +159,25 @@ export function lastResult(dc, { full = false } = {}) { const r = _last.get(dc);
  * 원격 `haproxy.cfg` 전문·`portal.env` 발췌·노드 IP/커널이 그대로 나갔다. haproxy.cfg 에는 `stats auth`·
  * `insecure-password` 같은 자격증명이 관행적으로 들어간다. 조회 권한이 낮은 경로에는 **요약만** 준다.
  */
+/*
+ * v2.594(감사 R2594-04 — 재현): v2.593 AUTHZ-01 이 토폴로지 본체만 가렸고 **이 결과 경로**로 접속 host·port·
+ * 오류 문구(주소 포함)·IRS 점검 문구(주소 포함)·서비스 대조 행의 기대/실제 백엔드 host 가 그대로 나갔다.
+ * 비-admin 결과는 주소가 들어가는 칸을 전부 비우고, 문구 목록은 개수만 준다(maskedAddress 로 그 사실을 밝힌다).
+ */
 function stripCfg(r) {
   if (!r) return r;
-  const node = (n) => (n ? { ...n, haproxy: n.haproxy ? { ...n.haproxy, cfg: '', cfgBytes: (n.haproxy.cfg || '').length } : n.haproxy,
+  const node = (n) => (n ? { ...n, host: '', port: 0, via: '', source: '', error: n.error ? '(관리자만 확인)' : '',
+    haproxy: n.haproxy ? { ...n.haproxy, cfg: '', cfgBytes: (n.haproxy.cfg || '').length } : n.haproxy,
     portal: n.portal ? { units: n.portal.units, env: [], envCount: (n.portal.env || []).length } : n.portal,
     node: n.node ? { hostname: n.node.hostname } : n.node } : n);
-  return { ...r, edge: node(r.edge), irs: node(r.irs) };
+  const hp = (x) => (x ? { ...x, host: '' } : x);
+  const rows = Array.isArray(r.rows) ? r.rows.map((x) => ({ ...x, expected: hp(x.expected), actual: hp(x.actual), issue: x.issue ? '(관리자만 확인)' : x.issue, fix: '' })) : r.rows;
+  const irsIssues = Array.isArray(r.irsIssues) ? r.irsIssues : [];
+  return { ...r, reason: r.reason ? '(관리자만 확인)' : r.reason, edge: node(r.edge), irs: node(r.irs), rows, irsIssues: [], irsIssueCount: irsIssues.length, maskedAddress: true };
 }
 export function _resetForTest() { _last.clear(); _busy.clear(); }
+/** 테스트 전용 — 결과 1건을 심는다(비-admin 가림 회귀 고정용, v2.594). */
+export function _setResultForTest(dc, r) { _last.set(dc, r); }
 
 /**
  * 관리 블록 적용: 현재 cfg 가져오기 → 병합 → 임시 파일 → haproxy -c 검증 → 백업 → 교체 → reload(실패 시 restart) → 리스너 확인.

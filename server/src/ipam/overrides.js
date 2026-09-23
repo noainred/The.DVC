@@ -21,6 +21,14 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { isIpv4 } from './scan.js';
+import { ipToNum, numToIp } from '../util/ipv4.js';
+
+/**
+ * 저장 키 정규형(v2.594, 감사 LO-2 — 재현): 파서는 선행 0('010.39.0.1')을 10진수로 받지만(v2.586 호환) 원장은
+ * 문자열로 대조한다 — 원문 키로 저장하면 실제 VM 행에 붙지 않고 유령 수동 행·유령 '/24' 시트가 생겼다.
+ * 받은 표기와 무관하게 정규형('10.39.0.1')으로 저장·조회한다.
+ */
+export const canonIp = (s) => { const n = ipToNum(String(s || '').trim()); return n == null ? null : numToIp(n); };
 
 const FILE = path.join(config.configDir, 'ipam-overrides.json');
 const MAX_BATCH = 10_000; // 일괄 적용 IP 상한(대량 입력 DoS/오염 방지)
@@ -43,7 +51,7 @@ function load() {
 export function getOverrides() { return load(); }
 
 /** 한 IP의 override, 없으면 null. */
-export function getOverride(ip) { return load()[String(ip)] || null; }
+export function getOverride(ip) { const d = load(); return d[canonIp(ip) || String(ip)] || d[String(ip)] || null; }
 
 function clean(partial = {}) {
   const out = {};
@@ -84,10 +92,12 @@ function persist(data) {
  * 모든 필드가 비면 레코드 삭제. { ok, override } 반환.
  */
 export function setOverride(ip, partial = {}, user) {
-  const key = String(ip || '').trim();
-  if (!isIpv4(key)) return { ok: false, reason: '유효한 IPv4 주소가 아닙니다.' };
+  const raw = String(ip || '').trim();
+  const key = canonIp(raw);
+  if (!key) return { ok: false, reason: '유효한 IPv4 주소가 아닙니다.' };
   const data = load();
-  const prev = data[key] || {};
+  const prev = data[key] || (raw !== key ? data[raw] : null) || {};
+  if (raw !== key && data[raw]) delete data[raw];   // 예전에 원문 키로 저장된 유령 항목을 정규 키로 옮긴다
   const next = { ...prev, ...clean(partial) };
   delete next.updatedAt; delete next.updatedBy;
   if (isEmpty(next)) {
@@ -103,9 +113,12 @@ export function setOverride(ip, partial = {}, user) {
 
 /** 한 IP의 override 완전 삭제. */
 export function clearOverride(ip) {
-  const key = String(ip || '').trim();
+  const raw = String(ip || '').trim();
+  const key = canonIp(raw) || raw;
   const data = load();
-  if (data[key]) { delete data[key]; persist(data); }
+  let hit = false;
+  for (const k of new Set([raw, key])) if (data[k]) { delete data[k]; hit = true; }
+  if (hit) persist(data);
   return { ok: true };
 }
 
@@ -115,7 +128,7 @@ export function clearOverride(ip) {
  */
 export function setOverrideBatch(ips, partial = {}, user) {
   const raw = (Array.isArray(ips) ? ips : String(ips || '').split(/[\s,]+/)).map((s) => String(s).trim()).filter(Boolean);
-  const list = [...new Set(raw.filter(isIpv4))]; // 유효 IPv4만, 중복 제거
+  const list = [...new Set(raw.map(canonIp).filter(Boolean))]; // 유효 IPv4만(정규형 — v2.594), 중복 제거
   if (!list.length) return { ok: false, reason: '유효한 대상 IP가 없습니다.' };
   if (list.length > MAX_BATCH) return { ok: false, reason: `한 번에 ${MAX_BATCH}개까지만 일괄 적용할 수 있습니다.` };
   const data = load();

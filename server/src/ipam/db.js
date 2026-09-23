@@ -141,7 +141,9 @@ async function syncViaWorker(rows, updatedAt) {
   const done = new Promise((resolve, reject) => writePending.set(id, { resolve, reject }));
   writeWorker.ref();
   try {
-    writeWorker.postMessage({ id, rows, updatedAt });
+    // v2.594(감사 PERF-2594-01): 행 객체 전체를 구조화 복제하면 워커가 쓰지 않는 키까지 복사한다(원장이 바뀐 틱마다
+    //   메인 스레드 약 30ms). 워커가 쓰는 레코드 배열(컬럼 순서 값)만 보낸다 — toRecord 는 두 쪽이 같은 모듈을 쓴다.
+    writeWorker.postMessage({ id, records: rows.map((r) => toRecord(r, updatedAt)) });
     return await done;
   } catch (err) {
     writePending.delete(id);

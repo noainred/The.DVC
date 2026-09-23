@@ -162,10 +162,11 @@ export default function Overview({ onSelectSite, onGotoTab }) {
             코어·메모리 합계 — 출처가 달라 나란히 표기한다(물리 합계로 %를 다시 계산하지 않음: 베어메탈은 사용률 자료가 없다). */}
         <Kpi label="CPU 사용률" value={unitText(cpuPct, '%')} pct={cpuPct ?? undefined} meta={<>
           {g.cpuUsedGhz} / {g.cpuTotalGhz} GHz · ESXi {fmt(g.cpuCores)} cores
+          {g.hostsDisconnected > 0 && <span title="연결이 끊긴 호스트는 사용량을 알 수 없어 사용률 계산에서 뺐습니다(용량 합계에는 포함)"> · 끊긴 호스트 {fmt(g.hostsDisconnected)}대 사용률 제외</span>}
           {ov.physical?.servers > 0 && <><br />물리 서버 코어 <b>{fmt(ov.physical.cores)}</b> · iDRAC {fmt(ov.physical.servers)}대{ov.physical.withCores < ov.physical.servers ? ` (코어 정보 ${fmt(ov.physical.withCores)}대)` : ''}</>}
         </>} />
         <Kpi label="메모리 사용률" value={unitText(memPct, '%')} pct={memPct ?? undefined} meta={<>
-          {fmt(g.memUsedGB)} / {fmt(g.memTotalGB)} GB (ESXi)
+          {fmt(g.memUsedGB)} / {fmt(g.memTotalGB)} GB (ESXi){g.hostsDisconnected > 0 ? ` · 끊긴 호스트 ${fmt(g.hostsDisconnected)}대 사용률 제외` : ''}
           {ov.physical?.servers > 0 && <><br />물리 메모리 <b>{fmt(ov.physical.memGB)}</b> GB · iDRAC {fmt(ov.physical.servers)}대{ov.physical.withMemory < ov.physical.servers ? ` (메모리 정보 ${fmt(ov.physical.withMemory)}대)` : ''}</>}
         </>} />
         <Kpi label="스토리지 사용률" value={unitText(stoPct, '%')} pct={stoPct ?? undefined} meta={`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${g.datastores} DS`} onClick={() => onGotoTab?.('datastores')} />

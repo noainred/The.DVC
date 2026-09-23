@@ -62,7 +62,7 @@ function VcDiag({ d, failOnly }) {
       case 'vm': return String(r.vm || '').toLowerCase();
       case 'host': return String(r.host || '').toLowerCase();
       case 'os': return String(r.os || '').toLowerCase();
-      case 'result': return r.ok ? (Number(r.util) || 0) : -1; // 성공=사용률순 · 실패=-1(한데 모임)
+      case 'result': return r.ok ? (r.util == null ? -0.5 : Number(r.util)) : -1; // 성공=사용률순 · 실패=-1(한데 모임)
       default: return '';
     }
   };
@@ -116,7 +116,7 @@ function VcDiag({ d, failOnly }) {
                   )}
                   <td style={{ fontSize: 12 }}>
                     {r.ok
-                      ? <span className="badge green">✓ util {r.util}% · mem {r.mem ?? '-'}% · {r.gpus}GPU</span>
+                      ? <span className="badge green">✓ util {r.utilNA ? 'N/A(MIG)' : r.util == null ? '—' : `${r.util}%`} · mem {r.mem ?? '-'}% · {r.gpus}GPU</span>
                       : <span className="badge red" style={{ whiteSpace: 'normal' }}>{r.authStopped ? '인증 실패 정지 · ' : '✗ '}{r.error}</span>}
                   </td>
                 </tr>

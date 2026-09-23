@@ -3376,6 +3376,38 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ 정직 기록: 실장비(iDRAC 동시 세션 한도·Redfish 세션 DELETE 동작·실 Unity/Isilon 결측 응답·MIG nvidia-smi 출력)로는 확인하지
       못했다 — 전부 가짜 서버·합성 입력 재현이다. 웹 전수(90카드·43설정·206로드)는 UI 축이 목 스택에서 봤다.
 
+  - ⚠⚠ **v2.594 — 7축 병렬 감사(5차 점검) 확정분**(사용자 요청 "세번 더 수행" 의 1회차 — 선택은 v2.593 과 같다. 확정 19 · 가능성 5 ·
+    반증 5, 고침 22. 회귀는 `test/audit2594.test.js` 16건 — **변이 검증 21/21**. 상세 `docs/AUDIT-2026-09-24b.md`):
+    - ⚠⚠ **결측을 null 로 바꿨으면 그 값을 소비하는 곳을 전부 따라갈 것**(R2594-01·02·03·05 — v2.593 DATA-01 의 재발): 수집기가 null 을
+      내도 ① 정규화(`powermax.js normalizePowermax` 의 `|| 0`) ② 파생 계산(Isilon `max(0, null − ssd) = 0`) ③ 화면 합산(`a + (x || 0)`)
+      ④ SQL `SUM`(NULL 을 건너뛰어 분자만 줄어든다) 이 **각자** 0 으로 되돌렸다. 화면 합계는 `storageUnits.capacityTotals` 하나 —
+      사용률은 **사용량을 읽은 장비끼리만**, 뺀 대수는 `unknownUsed`. `formatBytes(null)` 은 이제 `'—'` 다(예전 `0.0 TB`).
+      통합 추이 SQL 은 결측 장비가 있는 버킷의 사용량을 NULL 로 두고 `used_unknown` 을 준다(부분 합 = 거짓 하락).
+    - ⚠⚠ **역할별 가림은 '그 데이터가 응답에 실리는 경로 전부' 에 — 한 곳을 가리면 형제 경로가 우회로다**(R2594-04 — v2.593 AUTHZ-01 의
+      우회. v2.550.3 `status.last` 와 같은 교훈): 토폴로지 본체를 가린 뒤에도 `lastResults` 로 IP·오류 문구·대조 백엔드·IRS 점검 문구가
+      나갔다. 비-admin 결과는 `stripCfg` 가 주소 칸을 비우고 문구는 개수만(`irsIssueCount`·`maskedAddress`). 가린 뒤 화면이 판정에
+      쓰던 값이 사라지는지도 볼 것 — 'IRS 있는 사이트' 가 항상 0 이 됐다(`present` 불리언, R2594-06).
+    - ⚠⚠ **페이징 인자는 `util/pageArgs.js` 하나 + DB 헬퍼의 `clampPage`**(SEC-2594-01~03): `Math.min(1000, Number(limit) || 200)` 은
+      **하한이 없다** — SQLite 는 `LIMIT -1` 을 '제한 없음' 으로 읽고, 배열은 `slice(o, o−1)` 로 거의 전량이다. 실수·1e20 은 바인드
+      datatype mismatch(500). **새 페이징 라우트는 이 헬퍼를 쓸 것.** 응답 헤더 파일명에 요청값을 넣지 말 것(SEC-2594-04).
+    - **연결 끊긴 호스트는 사용률 계산에서 빠진다**(`store.js usageReadable` — v2.593 이 판단을 남긴 DATA-03). 용량 합계(GHz·GB)에는
+      남고 사용량·사용률만 뺀다(개요 KPI 가 뺀 대수를 적는다). ⚠ 정직 기록: 실 vCenter 가 끊긴 호스트의 `summary.hardware` 를 계속
+      주는지 확인하지 못했다 — 주지 않으면 원래 영향이 없었다(재현은 목 생성기·합성 스냅샷).
+    - **보고 부속 객체에도 크기 상한**(EDGE2-01 — svcmon 엣지 `poller`·`caps`·`log`, 16KB 초과면 `{dropped, bytes}`) · 상한 퇴출 Map 은
+      **지우고 다시 넣어야** 최근 항목이 뒤로 간다(EDGE2-02) · 병합에서 버린 원소를 병합 수로 보고하지 말 것(EDGE2-03) · 진행 보고도
+      무음 실패 금지(EDGE2-04 — 형제 회신은 v2.591 에 고쳤는데 진행 보고만 남았다).
+    - **IPAM 저장 키는 정규형**(`ipam/overrides.js canonIp` · annotations 도 같다, LO-2 — 재현): 파서가 선행 0 을 받는 것(v2.586 호환)과
+      원장이 **문자열로** 대조하는 것이 만나 유령 행·유령 /24 시트가 생겼다. 받는 표기는 넓게, 저장은 정규형 하나.
+    - **VM 수량 추이는 첫 수집 중인 vCenter 가 있으면 슬롯 기록을 미룬다**(`vmtrack/poller.js PENDING_WAIT_MS` 30분, DATA2594-03). 그래도
+      빠지면 결과가 `skippedVcenters` 로 밝힌다. ⚠ 수집 실패(unreachable) vCenter 가 빠진 슬롯은 여전히 부분 합이다(스키마에 표식 없음 — 별건).
+    - 그 밖: PDU 데이지체인은 **E1xx 만** '유닛 없음' 이다(그 밖의 실패는 `unitsIncomplete` + 노트) · GPU 진단의 MIG 는 `N/A(MIG)` ·
+      상세 모달 그리드는 `repeat(auto-fit, minmax(min(260px,100%),1fr))`(v2.576 `.vc-grid` 와 같은 결함 — Modal 이 overflow:hidden 이라
+      잘렸다) · IPAM 쓰기 워커에는 레코드 배열만 보낸다 · 서버 문자열도 BoldText 로 그려지면 **백틱 금지**(PowerMax 용량 설명).
+    - ⚠ 반증·재판정: 손 풀 7곳·버전 비교 사본 3곳은 입력이 고정·검증돼 **결함이 아니다**(v2.593 '남긴 것' 목록에서 뺀다) · VM 사용률
+      결측(rightsizing 'idle' 오판)은 현 수집기로 **도달 불가**. 남은 판단: PERF-1(원장 30초 재구성 — 사용자 결정) · EDGE-3(v2.583 설계).
+    - ⚠ 정직 기록: Chromium 은 목 스택으로 개요·스토리지(장비 0대)·중계 토폴로지(admin)·VM 상세 모달 1440/400 을 봤다 — 비-admin 가림
+      화면과 사용량 결측 장비가 있는 스토리지 표는 **화면으로 보지 못했다**(단위·합계 로직은 테스트로 고정).
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

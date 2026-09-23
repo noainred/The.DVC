@@ -9,6 +9,7 @@
 
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { runLocalIdracScan } from '../idrac/localScan.js';
 import { registerScanned } from '../idrac/registry.js';
 import { pollNow } from '../idrac/poller.js';
@@ -35,11 +36,23 @@ async function postResult(payload) {
   }
 }
 
+// v2.594(감사 EDGE2-04): 진행 보고의 거부(HTTP 오류)·실패를 삼키지 않는다 — 첫 진행 보고가 중앙에서는 인출 확인(ack)이라
+//   조용히 실패하면 화면이 '대기' 로 남는 이유를 알 수 없다. 같은 사유는 10분에 한 줄(스캔 중 반복 호출).
+const _progressLog = createChangeLogger({ windowMs: 10 * 60_000 });
+const progressWarn = (sig, msg) => { if (_progressLog('progress', sig)) console.warn(`[idrac-scan-agent] ${msg}`); };
 async function postProgress(reqId, scanned, total, found) {
-  await resilientFetch(`${config.agent.centralUrl}/api/central/idrac-scan-progress`, {
-    method: 'POST', headers: headers(), body: JSON.stringify({ reqId, scanned, total, found }), timeoutMs: 10_000, retries: 2,
-  }).catch(() => {});
+  try {
+    const r = await resilientFetch(`${config.agent.centralUrl}/api/central/idrac-scan-progress`, {
+      method: 'POST', headers: headers(), body: JSON.stringify({ reqId, scanned, total, found }), timeoutMs: 10_000, retries: 2,
+    });
+    if (!r.ok) { _progressError = `진행 보고 거부(HTTP ${r.status})`; progressWarn(`progress-${r.status}`, `진행 보고 거부 HTTP ${r.status} (reqId=${reqId})`); }
+    else _progressError = null;
+  } catch (e) {
+    _progressError = `진행 보고 실패: ${e.message}`;
+    progressWarn('progress-fail', `진행 보고 실패: ${e.message} (reqId=${reqId})`);
+  }
 }
+let _progressError = null;
 
 let running = false; // 재진입 방지(긴 Redfish 스캔이 다음 폴 틱과 겹쳐 별개 잡이 동시 실행되는 것 차단)
 export async function runIdracScanWorkerOnce() {
@@ -113,7 +126,7 @@ function noteFail(kind, detail) {
 
 export function getIdracScanWorkerStatus() {
   // lastPollAt: 마지막 성공 인출 · lastPollError: 마지막 실패(성공하면 null · streak 는 연속 실패 수)
-  return { name: config.agent.name, centralUrl: config.agent.centralUrl || null, pollMs: POLL_MS, last, lastPollAt: lastPollAt || null, lastPollError };
+  return { name: config.agent.name, centralUrl: config.agent.centralUrl || null, pollMs: POLL_MS, last, lastPollAt: lastPollAt || null, lastPollError, progressError: _progressError };
 }
 
 export function startIdracScanWorker() {

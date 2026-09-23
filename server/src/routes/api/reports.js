@@ -1,4 +1,5 @@
 // 일일 리포트(헬스·스냅샷 나이·좀비·인증서·라이트사이징 등) — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
+import { pageArgs } from '../../util/pageArgs.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4): /tools 조회 tools 권한
 import { store } from '../../store.js';
@@ -136,8 +137,7 @@ api.get('/tools/report/changes', requirePerm('tools'), async (req, res) => {
     const SCAN_MAX = 20_000;
     const rows = db.query(f, SCAN_MAX, 0);
     const changes = filterChangeEvents(rows, { category: req.query.category || '', user: req.query.user || '', entity: req.query.entity || '' });
-    const limit = Math.min(1000, Number(req.query.limit) || 300);
-    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const { limit, offset } = pageArgs(req.query, { def: 300, max: 1000 });   // v2.594: limit=-1 → slice(o, o-1) 전량이었다
     res.json({
       total: changes.length, scanned: rows.length, truncated: rows.length >= SCAN_MAX,
       days, categories: CHANGE_CATEGORIES,

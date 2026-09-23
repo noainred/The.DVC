@@ -142,7 +142,7 @@ export default function RelayTopoTool() {
         </div>
       )}
       <div className="kpis" style={{ marginBottom: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
-        <Kpi label="사이트" value={form.sites.length} meta={`IRS 있는 사이트 ${form.sites.filter((s) => s.irs?.privateIp || s.irs?.publicIp).length}`} />
+        <Kpi label="사이트" value={form.sites.length} meta={`IRS 있는 사이트 ${form.sites.filter((s) => s.irs?.privateIp || s.irs?.publicIp || s.irs?.present).length}`} />
         <Kpi label="서비스" value={form.services.filter((s) => s.enabled !== false).length} meta={form.services.filter((s) => s.enabled !== false).map((s) => s.listenPort).join(' · ')} />
         {data?.addressHidden
           ? <Kpi label="표 점검" value="—" meta={`관리자만 상세 확인 · ${data.issueCount || 0}건`} />
@@ -288,7 +288,7 @@ export default function RelayTopoTool() {
             <div className="card" key={s.dc} style={{ marginBottom: 12 }}>
               <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
                 <b style={{ fontSize: 15 }}>{s.dc}</b>
-                <span className="muted" style={{ fontSize: 12 }}>Edge {s.edge?.publicIp || s.edge?.privateIp || '—'} · IRS {s.irs?.privateIp || s.irs?.publicIp || '없음'}</span>
+                <span className="muted" style={{ fontSize: 12 }}>Edge {s.edge?.publicIp || s.edge?.privateIp || '—'} · IRS {s.irs?.privateIp || s.irs?.publicIp || (s.irs?.present ? '있음(주소 가림)' : '없음')}</span>
                 {r?.ok && <span className={`badge ${r.summary.edgeFailed ? 'red' : r.summary.bad ? 'amber' : 'green'}`}>{r.summary.edgeFailed ? 'Edge 접속 실패' : r.summary.bad ? `문제 ${r.summary.bad}건` : '모두 정상'}</span>}
                 {r && !r.ok && <span className="badge red">{r.reason}</span>}
                 {r && <span className="muted" style={{ fontSize: 11 }}>{ago(r.at)}</span>}
@@ -326,7 +326,8 @@ export default function RelayTopoTool() {
                     </STable>
                   )}
                   {r.irsIssues?.length > 0 && <ul style={{ fontSize: 12, marginTop: 8 }}>{r.irsIssues.map((i, k) => <li key={k}><span className={`badge ${LEVEL[i.level]?.[1]}`}>{LEVEL[i.level]?.[0]}</span> {i.text} <span className="muted">— {i.fix}</span></li>)}</ul>}
-                  {r.edge.ok && r.edge.haproxy.hasCfg && <details style={{ marginTop: 6 }}><summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>현재 haproxy.cfg 전문</summary><pre style={{ fontSize: 11, maxHeight: 320, overflow: 'auto' }}>{r.edge.haproxy.cfg}</pre></details>}
+                  {r.maskedAddress && r.irsIssueCount > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>IRS 점검 {r.irsIssueCount}건 — 문구에 주소가 들어 있어 관리자만 확인할 수 있습니다.</div>}
+                  {r.edge.ok && r.edge.haproxy?.hasCfg && <details style={{ marginTop: 6 }}><summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>현재 haproxy.cfg 전문</summary><pre style={{ fontSize: 11, maxHeight: 320, overflow: 'auto' }}>{r.edge.haproxy.cfg}</pre></details>}
                 </>
               )}
               {r?.ok && !r.edge.ok && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>Edge 접속 실패: {r.edge.error}</div>}

@@ -50,7 +50,8 @@ api.get('/tools/relaytopo', toolsPerm, (req, res) => {
   });
 });
 /** 비-admin 응답용 — 노드의 주소·SSH 계정명을 비운다(구조·서비스 구성·DC 이름은 남긴다). */
-const maskNode = (n) => (n ? { ...n, privateIp: '', publicIp: '', vcenterIp: '', ssh: { ...(n.ssh || {}), username: '' } } : n);
+// v2.594(감사 R2594-06): 주소를 비우면 화면이 'IRS 있음' 을 판정할 수 없다 — 존재 여부만 불리언으로 남긴다.
+const maskNode = (n) => (n ? { ...n, privateIp: '', publicIp: '', vcenterIp: '', present: !!(n.privateIp || n.publicIp), ssh: { ...(n.ssh || {}), username: '' } } : n);
 function maskTopology(t) {
   return { ...t, main: maskNode(t.main), sites: (t.sites || []).map((s) => ({ ...s, edge: maskNode(s.edge), irs: maskNode(s.irs), sshTargetId: '' })) };
 }

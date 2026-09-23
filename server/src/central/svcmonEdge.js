@@ -32,6 +32,14 @@ import { logAudit } from '../audit.js';
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
+/** 보고 부속 객체의 직렬화 크기 상한(16KB). 넘으면 원본 대신 {dropped, bytes} 로 그 사실을 남긴다. */
+export const EDGE_AUX_MAX_BYTES = 16 * 1024;
+function boundedObj(o) {
+  let len = 0;
+  try { len = JSON.stringify(o).length; } catch { return { dropped: true, reason: 'unserializable' }; }
+  return len > EDGE_AUX_MAX_BYTES ? { dropped: true, bytes: len } : o;
+}
+
 export const MAX_AGENTS = envNum('SVCMON_EDGE_MAX_AGENTS', 64);
 export const MAX_ROWS_PER_AGENT = envNum('SVCMON_EDGE_MAX_ROWS', 20000);
 /** 시계 오차 경고 임계 — 넘어도 결과를 버리지 않는다(경고만). */
@@ -113,13 +121,16 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   if (Number.isFinite(Number(body?.expectMs)) && Number(body.expectMs) > 0) a.expectMs = Number(body.expectMs);
   if (Number.isFinite(Number(body?.items))) a.items = num(body.items);
   if (Number.isFinite(Number(body?.reported))) a.reported = num(body.reported);
-  if (body?.poller && typeof body.poller === 'object') a.poller = body.poller;
+  // v2.594(감사 EDGE2-01): poller·caps·log 는 엣지가 보낸 객체를 그대로 상주시키고 edgeSummary 로 되돌려 줬다 —
+  //   크기 상한이 없어 한 엣지가 수 MB 를 반복해 중앙 메모리·화면 응답을 부풀릴 수 있었다. 직렬화 크기 상한을 넘으면
+  //   버리고 그 사실만 남긴다(partFaultEdge SCANNED_MAX_BYTES 와 같은 방식 — 조용히 자르지 않는다).
+  if (body?.poller && typeof body.poller === 'object') a.poller = boundedObj(body.poller);
   if (body?.caps && typeof body.caps === 'object') {
-    a.caps = body.caps;
+    a.caps = boundedObj(body.caps);
     const p = Number(body.caps.portalPort);
     if (Number.isFinite(p) && p >= 1 && p <= 65535) a.portalPort = Math.round(p);
   }
-  if (body?.log && typeof body.log === 'object') a.log = body.log;
+  if (body?.log && typeof body.log === 'object') a.log = boundedObj(body.log);
   if (net?.sourceIp) a.sourceIp = text(net.sourceIp, 64);
 
   let accepted = 0;

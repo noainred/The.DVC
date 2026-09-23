@@ -270,7 +270,7 @@ export function normalizePowermax(device, raw) {
     snap.extra.arrays = arrays.slice(0, 8).map((a) => ({ id: a.symmetrixId, model: a.model }));
     snap.sections.config = 'ok';
 
-    let total = 0; let used = 0;
+    let total = 0; let used = 0; let usedUnknown = 0;
     const pools = [];
     const bases = new Set();
     let suspect = false; let undocumented = false;
@@ -301,7 +301,8 @@ export function normalizePowermax(device, raw) {
       let t = null; let u = null; let basis = null;
       if (c) {
         t = c.totalBytes != null ? Number(c.totalBytes) : (Number(c.usable_total_tb) || 0) * TB;
-        u = c.usedBytes != null ? Number(c.usedBytes) : (Number(c.usable_used_tb) || 0) * TB;
+        // v2.594(감사 R2594-01): 사용량을 못 읽었으면 null 을 유지한다 — `|| 0` 이 v2.593 DATA-01 수정을 되돌렸다.
+        u = c.usedBytes !== undefined ? numOrNull(c.usedBytes) : (numOrNull(c.usable_used_tb) == null ? null : numOrNull(c.usable_used_tb) * TB);
         basis = c.basis || null;
         if (c.detail) {
           add('subscribedTb', c.detail.subscribedTb); add('allocatedTb', c.detail.allocatedTb);
@@ -320,13 +321,17 @@ export function normalizePowermax(device, raw) {
       }
       if (!(t > 0)) continue;              // 용량을 못 읽은 어레이는 0 으로 채우지 않고 뺀다
       if (basis) bases.add(basis);
-      total += t; used += u;
-      pools.push({ name: a.symmetrixId, totalBytes: t, usedBytes: u, pct: Math.round((u / t) * 1000) / 10 });
+      total += t;
+      if (u == null) usedUnknown += 1; else used += u;
+      pools.push({ name: a.symmetrixId, totalBytes: t, usedBytes: u, pct: u == null ? null : Math.round((u / t) * 1000) / 10 });
     }
 
     snap.pools = pools;
     if (total > 0) {
-      snap.capacity = { totalBytes: total, usedBytes: used, pct: Math.round((used / total) * 1000) / 10 };
+      // 한 어레이라도 사용량을 못 읽었으면 합계 사용량은 null — 부분 합을 전체라 말하지 않는다(xtremio 와 같은 규칙).
+      const usedAll = usedUnknown ? null : used;
+      snap.capacity = { totalBytes: total, usedBytes: usedAll, pct: usedAll == null ? null : Math.round((usedAll / total) * 1000) / 10 };
+      if (usedUnknown) snap.extra.poolsUsedUnreadable = usedUnknown;
       snap.sections.capacity = 'ok';
       if (bases.size) snap.extra.capacityBasis = [...bases].join(', ');
       // ⚠ 프로비저닝(씬 약속치)은 **용량이 아니다** — 화면이 섞지 않도록 별도 키로만 싣는다.
@@ -343,10 +348,10 @@ export function normalizePowermax(device, raw) {
       // ★ 문서화되지 않은 필드로 읽었고 used==total 이면 **화면이 경고해야 한다**.
       if (suspect) snap.extra.capacitySuspect = true;
       snap.extra.capacityBasisNote = suspect
-        ? '이 장비의 사용량은 **실제 기록량이 아닐 수 있습니다** — Dell 스펙에 설명이 없는 `physicalCapacity` 필드로 읽었고 사용 == 전체로 보고됩니다(확인한 VMAX 표본들이 그랬습니다). 실제 기록량은 `system_capacity.usable_used_tb` 또는 SRP 조회가 있어야 나옵니다.'
+        ? '이 장비의 사용량은 **실제 기록량이 아닐 수 있습니다** — Dell 스펙에 설명이 없는 ‘physicalCapacity’ 필드로 읽었고 사용 == 전체로 보고됩니다(확인한 VMAX 표본들이 그랬습니다). 실제 기록량은 ‘system_capacity.usable_used_tb’ 또는 SRP 조회가 있어야 나옵니다.'
         : undocumented
-          ? '전체·사용 용량을 Dell 스펙에 설명이 없는 `physicalCapacity` 필드로 읽었습니다 — 값은 정상 범위로 보이나 의미가 문서로 확인되지 않았습니다.'
-          : '사용 용량은 **데이터 감축 적용 후 실제로 기록된 양**입니다(Dell 스펙 `usable_used_tb`). 구독(호스트에 약속한 씬 크기)·할당은 뜻이 달라 따로 표시합니다.';
+          ? '전체·사용 용량을 Dell 스펙에 설명이 없는 ‘physicalCapacity’ 필드로 읽었습니다 — 값은 정상 범위로 보이나 의미가 문서로 확인되지 않았습니다.'
+          : '사용 용량은 **데이터 감축 적용 후 실제로 기록된 양**입니다(Dell 스펙 ‘usable_used_tb’). 구독(호스트에 약속한 씬 크기)·할당은 뜻이 달라 따로 표시합니다.';
     }
   }
   if (raw.alertCount != null) { snap.alerts.unresolved = Number(raw.alertCount) || 0; snap.sections.alerts = 'ok'; }

@@ -491,19 +491,27 @@ export function scopedRollups(snap, allowed) {
   return rollupsOf(view, { scoped: true });
 }
 
+/**
+ * v2.594(감사 LO-1 = v2.593 DATA-03): 연결 끊긴 호스트의 사용량은 **모른다** — 수집기가 빈 quickStats 를 0 으로
+ * 싣는데 용량은 남아, 사용률(%)의 분모만 커져 전체 CPU·MEM 사용률이 낮게 보였다(합성 스냅샷 80% → 40%).
+ * 사용률의 분모·분자는 사용량을 읽을 수 있는 호스트만 쓴다. **전체 용량(GHz·GB) 합계는 그대로** 모든 호스트다 —
+ * 끊긴 호스트도 설치된 용량이고, 빠진 대수는 hostsDisconnected 가 이미 밝힌다.
+ */
+export const usageReadable = (h) => h.connectionState !== 'DISCONNECTED' && h.connectionState !== 'NOT_RESPONDING';
+
 function rollupsOf(snap, { scoped = false } = {}) {
   const sum = (arr, fn) => arr.reduce((a, x) => a + (fn(x) || 0), 0);
 
   // 전역 카운터 단일 루프(v2.343 #10): 종전엔 filter/sum 으로 호스트 8회·VM 2회·알람 2회·DS 2회
   // 전체 재순회했다(6.5천 객체 × ~12패스, 매 30초). 값은 종전과 동일 — 패스 수만 통합.
-  const hc = { connected: 0, maintenance: 0, disconnected: 0, cores: 0, cpuT: 0, cpuU: 0, memT: 0, memU: 0, powerW: 0, powerReporting: 0 };
+  const hc = { connected: 0, maintenance: 0, disconnected: 0, cores: 0, cpuT: 0, cpuU: 0, memT: 0, memU: 0, cpuTR: 0, memTR: 0, powerW: 0, powerReporting: 0 };
   for (const h of snap.hosts) {
     if (h.connectionState === 'CONNECTED') hc.connected++;
     else if (h.connectionState === 'MAINTENANCE') hc.maintenance++;
     else if (h.connectionState === 'DISCONNECTED') hc.disconnected++;
     hc.cores += h.cpuCores || 0;
-    hc.cpuT += h.cpuTotalMhz || 0; hc.cpuU += h.cpuUsageMhz || 0;
-    hc.memT += h.memTotalMB || 0; hc.memU += h.memUsageMB || 0;
+    hc.cpuT += h.cpuTotalMhz || 0; hc.memT += h.memTotalMB || 0;
+    if (usageReadable(h)) { hc.cpuU += h.cpuUsageMhz || 0; hc.memU += h.memUsageMB || 0; hc.cpuTR += h.cpuTotalMhz || 0; hc.memTR += h.memTotalMB || 0; }
     hc.powerW += h.powerWatts || 0;
     if (h.powerWatts > 0) hc.powerReporting++;
   }
@@ -532,10 +540,10 @@ function rollupsOf(snap, { scoped = false } = {}) {
     cpuCores: hc.cores,
     cpuTotalGhz: round(cpuTotalMhz / 1000, 1),
     cpuUsedGhz: round(cpuUsedMhz / 1000, 1),
-    cpuUsagePct: pct(cpuUsedMhz, cpuTotalMhz),
+    cpuUsagePct: pct(cpuUsedMhz, hc.cpuTR),
     memTotalGB: round(memTotalMB / 1024, 0),
     memUsedGB: round(memUsedMB / 1024, 0),
-    memUsagePct: pct(memUsedMB, memTotalMB),
+    memUsagePct: pct(memUsedMB, hc.memTR),
     storageTotalTB: round(storCapGB / 1024, 1),
     storageUsedTB: round(storUsedGB / 1024, 1),
     storageUsagePct: pct(storUsedGB, storCapGB),
@@ -578,8 +586,10 @@ function rollupsOf(snap, { scoped = false } = {}) {
       const v = pick(vmsByVc, ids);
       const d = pick(dsByVc, ids);
       const a = pick(alarmsByVc, ids);
-      const cpuT = sum(h, (x) => x.cpuTotalMhz), cpuU = sum(h, (x) => x.cpuUsageMhz);
-      const memT = sum(h, (x) => x.memTotalMB), memU = sum(h, (x) => x.memUsageMB);
+      const hR = h.filter(usageReadable);   // v2.594: 사용량·사용률은 사용량을 읽을 수 있는 호스트만(용량 합계는 전부)
+      const cpuT = sum(h, (x) => x.cpuTotalMhz), cpuU = sum(hR, (x) => x.cpuUsageMhz);
+      const memT = sum(h, (x) => x.memTotalMB), memU = sum(hR, (x) => x.memUsageMB);
+      const cpuTR = sum(hR, (x) => x.cpuTotalMhz), memTR = sum(hR, (x) => x.memTotalMB);
       const stC = sum(d, (x) => x.capacityGB), stU = sum(d, (x) => x.usedGB);
       return {
         key: k,
@@ -587,8 +597,8 @@ function rollupsOf(snap, { scoped = false } = {}) {
         hosts: h.length,
         vms: v.length,
         vmsPoweredOn: v.filter((x) => x.powerState === 'POWERED_ON').length,
-        cpuUsagePct: pct(cpuU, cpuT),
-        memUsagePct: pct(memU, memT),
+        cpuUsagePct: pct(cpuU, cpuTR),
+        memUsagePct: pct(memU, memTR),
         storageUsagePct: pct(stU, stC),
         storageTotalTB: round(stC / 1024, 1),
         // 사용량/전체 병기용(v2.232) — %만으로는 규모가 안 보인다(카드에서 "63% · 69/110 TB" 표기).

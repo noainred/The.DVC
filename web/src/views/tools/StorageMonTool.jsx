@@ -5,7 +5,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
 import { columnsFor, cellValue, sortValue } from './storageColumns.js';
-import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit } from './storageUnits.js';
+import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit, capacityTotals } from './storageUnits.js';
 import { emptyListText, conflictText, edgeReportNotes, edgeIntervalText } from './storageListText.js';
 import { collectDropNote } from './collectDropText.js';
 import { STable } from '../../components/STable.jsx';
@@ -48,7 +48,7 @@ const tbFmt = (bytes) => formatBytes(bytes, ACTIVE_UNIT);
 // bps 표기(isi status 스타일 — k/M/G). null 은 '—'(수집 실패를 0 으로 위장하지 않음).
 const bps = (v) => (v == null ? '—' : v >= 1e9 ? `${(v / 1e9).toFixed(1)}G` : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(Math.round(v)));
 // 미디어 풀 셀(HDD/SSD 공용) — 사용/전체(%). null = 해당 미디어 없음(무디스크 노드 등).
-const MediaCell = ({ m }) => (m ? <span title={`${tbFmt(m.usedBytes)} / ${tbFmt(m.totalBytes)}`}><UsageCell pct={m.pct ?? 0} /><span className="muted" style={{ fontSize: 10.5, display: 'block' }}>{tbFmt(m.usedBytes)}/{tbFmt(m.totalBytes)}</span></span> : <span className="muted">—</span>);
+const MediaCell = ({ m }) => (m ? <span title={`${tbFmt(m.usedBytes)} / ${tbFmt(m.totalBytes)}`}>{m.pct != null ? <UsageCell pct={m.pct} /> : <span className="muted">—</span>}<span className="muted" style={{ fontSize: 10.5, display: 'block' }}>{tbFmt(m.usedBytes)}/{tbFmt(m.totalBytes)}</span></span> : <span className="muted">—</span>);
 const ago = (ts) => {
   if (!ts) return '—';
   const s = Math.round((Date.now() - ts) / 1000);
@@ -518,9 +518,13 @@ export default function StorageMonTool() {
   const typeLabel = (t) => ((d.types || []).find((x) => x.type === t)?.label || t);
   const sum = (list, f) => list.reduce((a, x) => a + (f(x) || 0), 0);
   const withSnap = rows.filter((r) => r.snap);
+  // v2.594(감사 R2594-02): 사용률은 사용량을 읽은 장비끼리만 — 결측을 0 으로 더하면 사용률이 과소로 보인다.
+  const capAll = capacityTotals(withSnap, (r) => r.snap.capacity);
   const totals = {
-    total: sum(withSnap, (r) => r.snap.capacity?.totalBytes),
-    used: sum(withSnap, (r) => r.snap.capacity?.usedBytes),
+    total: capAll.total,
+    used: capAll.used,
+    usedPct: capAll.pct,
+    unknownUsed: capAll.unknownUsed,
     fail: rows.filter((r) => r.snap && !r.snap.ok).length + rows.filter((r) => !r.snap).length,
     alerts: sum(withSnap, (r) => r.snap.alerts?.unresolved),
   };
@@ -556,12 +560,13 @@ export default function StorageMonTool() {
   const dcSummary = (list) => {
     const ok = list.filter((r) => r.snap && r.snap.ok);
     const fail = list.filter((r) => !r.snap || !r.snap.ok).length;
-    const total = sum(ok, (r) => r.snap.capacity?.totalBytes);
-    const used = sum(ok, (r) => r.snap.capacity?.usedBytes);
-    const pct = total ? Math.round((used / total) * 100) : 0;
+    const cap = capacityTotals(ok, (r) => r.snap.capacity);
+    const total = cap.total;
+    const used = cap.used;
+    const pct = cap.pct ?? 0;   // 점 색 판정용 — 읽은 장비가 없으면 색 기준만 정상으로 둔다
     const alerts = sum(ok, (r) => r.snap.alerts?.unresolved);
     const dot = fail ? 'var(--red)' : alerts ? 'var(--amber)' : usageColor(pct);
-    return { fail, total, used, pct, alerts, dot };
+    return { fail, total, used, pct, pctKnown: cap.pct, unknownUsed: cap.unknownUsed, alerts, dot };
   };
 
 
@@ -642,7 +647,8 @@ export default function StorageMonTool() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 14 }}>
         <Kpi label="장비" value={rows.length} meta={`수집됨 ${withSnap.length}`} />
         <Kpi label="총 용량" value={tbFmt(totals.total)} />
-        <Kpi label="사용" value={tbFmt(totals.used)} pct={totals.total ? Math.round((totals.used / totals.total) * 100) : 0} />
+        <Kpi label="사용" value={tbFmt(totals.used)} pct={totals.usedPct ?? undefined}
+          meta={totals.unknownUsed ? `사용량 미확인 ${totals.unknownUsed}대 제외` : undefined} />
         <Kpi label="수집 실패/대기" value={totals.fail} accent={totals.fail ? 'var(--red)' : 'var(--green)'} />
         <Kpi label="미해결 경보" value={totals.alerts} accent={totals.alerts ? 'var(--amber)' : undefined} />
       </div>
@@ -663,7 +669,7 @@ export default function StorageMonTool() {
             return {
               dot: g.dot,
               bad: !!g.fail,
-              title: `${list.length}대 · ${tbFmt(g.used)} / ${tbFmt(g.total)}${g.total ? ` (${g.pct}%)` : ''}`
+              title: `${list.length}대 · ${tbFmt(g.used)} / ${tbFmt(g.total)}${g.pctKnown != null ? ` (${g.pctKnown}%)` : ''}${g.unknownUsed ? ` · 사용량 미확인 ${g.unknownUsed}대` : ''}`
                 + `${g.fail ? ` · 수집 실패/대기 ${g.fail}` : ''}${g.alerts ? ` · 미해결 경보 ${g.alerts}` : ''}`,
             };
           }} />
@@ -707,11 +713,11 @@ export default function StorageMonTool() {
           여기는 검색을 적용하지 않는다(전체 합산 차트라 부분집합이면 '전체'가 거짓이 된다). */}
       {view === 'trend' && <StorageTrendPanel devices={rows} />}
       {view === 'dc' && dcGroups.map(([dc, list]) => {
-        const t = sum(list.filter((r) => r.snap), (r) => r.snap.capacity?.totalBytes);
-        const u = sum(list.filter((r) => r.snap), (r) => r.snap.capacity?.usedBytes);
+        const cg = capacityTotals(list.filter((r) => r.snap), (r) => r.snap.capacity);
+        const t = cg.total; const u = cg.used;
         return (
           <div key={dc} style={{ marginBottom: 14 }}>
-            <div className="section-title" style={{ fontSize: 14 }}>🏢 {dc} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>— 장비 {list.length} · {tbFmt(u)} / {tbFmt(t)}{t ? ` (${Math.round((u / t) * 100)}%)` : ''}</span></div>
+            <div className="section-title" style={{ fontSize: 14 }}>🏢 {dc} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>— 장비 {list.length} · {tbFmt(u)} / {tbFmt(t)}{cg.pct != null ? ` (${cg.pct}%)` : ''}{cg.unknownUsed ? ` · 사용량 미확인 ${cg.unknownUsed}대 제외` : ''}</span></div>
             <DeviceTable list={list} ctx={cellCtx} typeLabel={typeLabel} />
           </div>
         );
@@ -1006,7 +1012,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                   <div className="muted" style={{ fontSize: 12 }}>{lb}</div>
                   {m ? <>
                     <div style={{ fontSize: 15, fontWeight: 700 }}>{tbFmt(m.usedBytes)} <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>/ {tbFmt(m.totalBytes)}</span></div>
-                    <UsageCell pct={m.pct ?? 0} />
+                    {m.pct != null ? <UsageCell pct={m.pct} /> : <span className="muted">—</span>}
                   </> : <div className="muted">없음</div>}
                 </div>
               ))}
@@ -1051,8 +1057,8 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                         {ncol.io && <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.inBps)}</td>}
                         {ncol.io && <td style={{ textAlign: 'right', fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{bps(n.outBps)}</td>}
                         {/* 'No Storage HDDs' 는 isilon(isi status) 전용 문구 — 타 타입의 hdd null 은 '—' */}
-                        {ncol.hdd && <td style={{ whiteSpace: 'nowrap' }}>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)} (${n.hdd.pct}%)` : <span className="muted">{r.type === 'isilon' ? 'No Storage HDDs' : '—'}</span>}</td>}
-                        {ncol.ssd && <td style={{ whiteSpace: 'nowrap' }}>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)} (${n.ssd.pct}%)` : n.l3Bytes > 0 ? <span className="muted">L3: {tbFmt(n.l3Bytes)}</span> : <span className="muted">—</span>}</td>}
+                        {ncol.hdd && <td style={{ whiteSpace: 'nowrap' }}>{n.hdd ? `${tbFmt(n.hdd.usedBytes)}/${tbFmt(n.hdd.totalBytes)}${n.hdd.pct != null ? ` (${n.hdd.pct}%)` : ''}` : <span className="muted">{r.type === 'isilon' ? 'No Storage HDDs' : '—'}</span>}</td>}
+                        {ncol.ssd && <td style={{ whiteSpace: 'nowrap' }}>{n.ssd ? `${tbFmt(n.ssd.usedBytes)}/${tbFmt(n.ssd.totalBytes)}${n.ssd.pct != null ? ` (${n.ssd.pct}%)` : ''}` : n.l3Bytes > 0 ? <span className="muted">L3: {tbFmt(n.l3Bytes)}</span> : <span className="muted">—</span>}</td>}
                       </tr>
                     ))}
                   </tbody>
@@ -1541,8 +1547,10 @@ function StorageTrendPanel({ devices }) {
   const pts = (d?.points || []).map((p) => ({
     t: fmtTrendTs(p.ts, range),
     used: p.used_bytes, total: p.total_bytes,
-    hddUsed: p.hdd_used, ssdUsed: p.ssd_used, devices: p.devices,
+    hddUsed: p.hdd_used, ssdUsed: p.ssd_used, devices: p.devices, usedUnknown: p.used_unknown || 0,
   }));
+  // v2.594: 사용량을 못 읽은 장비가 있던 구간은 서버가 사용량을 비운다(부분 합은 거짓 하락이다).
+  const usedGapPts = pts.filter((p) => p.usedUnknown > 0).length;
   const hasHdd = pts.some((p) => p.hddUsed != null && p.hddUsed > 0);
   const hasSsd = pts.some((p) => p.ssdUsed != null && p.ssdUsed > 0);
   // 부분 수집 구간 경고 — 점마다 장비 수가 다르면 합산선이 계단처럼 보인다(데이터 특성).
@@ -1602,6 +1610,7 @@ function StorageTrendPanel({ devices }) {
               <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.7 }}>
                 점선(회색) = 전체 용량 · 실선 = 사용량. 데이터는 스토리지 전용 DB(storage-history.db)에 적재됩니다.
                 {(d.bucketMs || 0) > 0 ? ` 집계 단위 ${(d.bucketMs >= 86_400_000 ? `${Math.round(d.bucketMs / 86_400_000)}일` : `${Math.round(d.bucketMs / 60_000)}분`)} 평균 ·` : ' 원본 값 ·'} 표본 {pts.length}점
+                {usedGapPts ? <><br /><b style={{ color: 'var(--amber)' }}>주의</b> {usedGapPts}개 구간은 사용량을 읽지 못한 장비가 있어 사용량 선을 비웠습니다(부분 합을 전체처럼 그리지 않습니다).</> : null}
                 {partial ? <><br /><b style={{ color: 'var(--amber)' }}>주의</b> 구간에 따라 수집된 장비 수가 다릅니다({devCounts.sort((a, b) => a - b).join('·')}대) — 합계선의 급변이 실제 용량 변화가 아닐 수 있습니다. 장비를 선택해 개별 추이로 확인하세요.</> : null}
               </div>
             </>

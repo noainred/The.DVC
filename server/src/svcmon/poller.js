@@ -214,5 +214,5 @@ export function startSvcmonPoller() {
   timer = setInterval(() => { sweep().catch(() => {}); }, TICK_MS);
   timer.unref?.();
   const p = poolStats();
-  console.log(`[svcmon] 성능점검 폴러 시작 (tick ${TICK_MS}ms · 워커 ${p.workers} × 동시 ${p.perWorkerConcurrency} · 틱당 최대 ${MAX_PER_TICK})`);
+  console.log(`[svcmon] 성능점검 폴러 시작 (tick ${TICK_MS}ms · 워커 ${p.workers} · 소켓 상한 ${p.sockLimit ?? '-'} · 틱당 최대 ${MAX_PER_TICK})`);
 }

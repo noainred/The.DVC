@@ -46,6 +46,7 @@ export function summarize(snap) {
   const humVals = sensors.map((s) => s.humidityPct).filter((v) => v != null);
   return {
     units: units.length,
+    ...(snap.unitsIncomplete ? { unitsIncomplete: true } : {}),   // v2.594: 합계 전력이 부분 합임을 밝힌다
     sensors: sensors.length,
     powerW: powerVals.length ? powerVals.reduce((a, b) => a + b, 0) : null,
     energyKwh: energyVals.length ? Math.round(energyVals.reduce((a, b) => a + b, 0) * 100) / 100 : null,

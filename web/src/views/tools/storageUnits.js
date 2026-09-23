@@ -36,7 +36,10 @@ export const normalizeUnit = (u) => (VALID.has(String(u)) ? String(u) : 'auto');
  * PB 는 2자리(1.31 PB). 천 단위 구분자를 넣어 큰 수를 눈으로 비교할 수 있게 한다.
  */
 export function formatBytes(bytes, unit = 'auto') {
-  const n = Number(bytes) || 0;
+  // v2.594(감사 R2594-02): 못 읽은 값(null·빈 값·숫자 아님)은 '—' — '0.0 TB' 는 '비었다' 는 거짓이다.
+  // v2.593 에 REST 수집기 5종이 사용량 결측을 0 대신 null 로 내기 시작해 이 경로가 실제로 쓰인다.
+  if (bytes == null || bytes === '' || !Number.isFinite(Number(bytes))) return '—';
+  const n = Number(bytes);
   const tb = n / TB;
   const u = normalizeUnit(unit);
   if (u === 'gb') return `${Math.round(tb * 1024).toLocaleString()} GB`;
@@ -55,4 +58,29 @@ export function loadUnit() {
 export function saveUnit(u) {
   try { localStorage.setItem(KEY, normalizeUnit(u)); } catch { /* 사생활 보호 모드 등 — 무시 */ }
   return normalizeUnit(u);
+}
+
+/**
+ * 용량 합계(v2.594, 감사 R2594-02) — **사용량을 읽은 장비끼리만** 사용률을 계산한다.
+ * 예전 화면은 `a + (used || 0)` 로 사용량 결측을 0 으로 더하면서 그 장비의 전체 용량은 분모에 남겨
+ * 사용률을 **과소**로 보여줬다(오류 없이 틀린 값). 전체 용량 합계(total)는 그대로 모든 장비를 더하고,
+ * 사용률은 사용량을 읽은 장비의 (used / 그 장비들의 total) 이며, 뺀 대수를 `unknownUsed` 로 밝힌다.
+ * @param list 장비 목록
+ * @param pick (r) => r.snap?.capacity (없으면 건너뛴다)
+ */
+export function capacityTotals(list, pick) {
+  let total = 0; let used = 0; let usedBase = 0; let unknownUsed = 0; let counted = 0;
+  const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  for (const r of Array.isArray(list) ? list : []) {
+    const c = pick(r);
+    if (!c) continue;
+    const t = num(c.totalBytes);
+    if (t == null || !(t > 0)) continue;
+    counted += 1; total += t;
+    const u = num(c.usedBytes);
+    if (u == null) { unknownUsed += 1; continue; }
+    used += u; usedBase += t;
+  }
+  const pct = usedBase > 0 ? Math.round((used / usedBase) * 100) : null;
+  return { total, used: usedBase > 0 ? used : (counted ? null : 0), usedBase, unknownUsed, counted, pct };
 }
