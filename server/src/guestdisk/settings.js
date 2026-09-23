@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'guest-disk.json');
 
@@ -22,8 +23,9 @@ export const DEFAULTS = Object.freeze({
   minReclaimGB: 0,         // 기본 0 = 전체 표시(회수 여유가 작아도 보이게). 필요 시 올려서 좁힌다.
 });
 
+// v2.596(감사 CLAMP2596-03 — 재현): 빈 칸('')이 Number('')=0 → 하한 1시간이 되어 12시간 주기가 1시간이 됐다(게스트 수집 12배).
 const clampNum = (v, lo, hi, dflt) => {
-  const n = Number(v);
+  const n = numOrNull(v) ?? NaN;
   if (!Number.isFinite(n)) return dflt;
   return Math.min(hi, Math.max(lo, n));
 };

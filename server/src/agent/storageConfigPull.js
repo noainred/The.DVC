@@ -10,6 +10,7 @@ import { config } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../storage/registry.js';
+import { dropSnapshot } from '../storage/store.js';
 import { collectDeviceNow } from '../storage/poller.js';
 import { pushStorageNow } from '../storage/push.js';
 import { runtimeIntervals, applyCentralIntervals, startAdaptiveTimer } from '../storage/intervals.js';
@@ -49,7 +50,9 @@ async function _pullStorageConfigNow() {
     const sig = crypto.createHash('sha1').update(JSON.stringify(devices)).digest('hex');
     let applied = false;
     if (sig !== _lastSig) {
-      applyPulledDevices(devices);
+      const ap = applyPulledDevices(devices);
+      for (const id of ap?.removed || []) dropSnapshot(id);   // v2.596(EF-3): 빠진 장비의 스냅샷은 push 에서 빠져야 한다
+      if (ap?.removed?.length) console.log(`[storage-config] 이 엣지에서 빠진 장비 ${ap.removed.length}대의 로컬 스냅샷을 지웠습니다`);
       _lastSig = sig;
       applied = true;
       console.log(`[storage-config] 중앙 배포 장비 적용: agent=${config.agent.name} 장비 ${devices.length}대`);

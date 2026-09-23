@@ -462,3 +462,11 @@ describe('v2.591 — 403 은 자격증명 거부가 아니다(감사 R-BM2)', ()
     expect(authStopNote([{ key: 'a', since: 1 }], { now: 10 })).toContain('주 전력 수집의 정지도 함께 풀립니다');
   });
 });
+
+describe('csvOf 수식 가드(v2.596 SECWEB-01)', () => {
+  it('서버 이름이 = + - @ 로 시작하면 엑셀 수식이 되지 않게 막는다 · 빈 값은 빈 칸', () => {
+    const out = csvOf([{ name: '=cmd|calc!A1', paths: ['os'], src: {} }]);
+    expect(out).toContain("'=cmd|calc!A1");
+    expect(out).not.toMatch(/(^|,)=cmd/m);
+  });
+});

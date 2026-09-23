@@ -213,17 +213,17 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
 | GET | `/assign` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:30](../server/src/routes/svcmon/edge.js#L30) |
-| DELETE | `/assign/:agent` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:102](../server/src/routes/svcmon/edge.js#L102) |
-| PUT | `/assign/:agent` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:60](../server/src/routes/svcmon/edge.js#L60) |
+| DELETE | `/assign/:agent` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:103](../server/src/routes/svcmon/edge.js#L103) |
+| PUT | `/assign/:agent` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:61](../server/src/routes/svcmon/edge.js#L61) |
 | GET | `/batches` | 역할 `admin/operator` | [server/src/routes/svcmon/generate.js:173](../server/src/routes/svcmon/generate.js#L173) |
 | DELETE | `/batches/:id` | 역할 `admin/operator` | [server/src/routes/svcmon/generate.js:188](../server/src/routes/svcmon/generate.js#L188) |
 | POST | `/batches/:id/rollback` | 역할 `admin/operator` | [server/src/routes/svcmon/generate.js:175](../server/src/routes/svcmon/generate.js#L175) |
-| POST | `/config-pull-now` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:110](../server/src/routes/svcmon/edge.js#L110) |
+| POST | `/config-pull-now` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:111](../server/src/routes/svcmon/edge.js#L111) |
 | GET | `/diag` | 역할 `admin/operator` | [server/src/routes/svcmon/overview.js:94](../server/src/routes/svcmon/overview.js#L94) |
-| GET | `/edge-state` | — | [server/src/routes/svcmon/edge.js:132](../server/src/routes/svcmon/edge.js#L132) |
-| GET | `/edges` | — | [server/src/routes/svcmon/edge.js:119](../server/src/routes/svcmon/edge.js#L119) |
-| DELETE | `/edges/:agent` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:157](../server/src/routes/svcmon/edge.js#L157) |
-| POST | `/edges/:agent/probe` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:147](../server/src/routes/svcmon/edge.js#L147) |
+| GET | `/edge-state` | — | [server/src/routes/svcmon/edge.js:133](../server/src/routes/svcmon/edge.js#L133) |
+| GET | `/edges` | — | [server/src/routes/svcmon/edge.js:120](../server/src/routes/svcmon/edge.js#L120) |
+| DELETE | `/edges/:agent` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:161](../server/src/routes/svcmon/edge.js#L161) |
+| POST | `/edges/:agent/probe` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:148](../server/src/routes/svcmon/edge.js#L148) |
 | POST | `/flush` | 역할 `admin` | [server/src/routes/svcmon/overview.js:109](../server/src/routes/svcmon/overview.js#L109) |
 | POST | `/folders` | 역할 `admin/operator` | [server/src/routes/svcmon/tree.js:23](../server/src/routes/svcmon/tree.js#L23) |
 | POST | `/folders/delete` | 역할 `admin/operator` | [server/src/routes/svcmon/tree.js:57](../server/src/routes/svcmon/tree.js#L57) |
@@ -235,11 +235,11 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/log/files/:name` | 역할 `admin/operator` | [server/src/routes/svcmon/logs.js:37](../server/src/routes/svcmon/logs.js#L37) |
 | POST | `/log/prune` | 역할 `admin` | [server/src/routes/svcmon/logs.js:84](../server/src/routes/svcmon/logs.js#L84) |
 | GET | `/log/windows` | — | [server/src/routes/svcmon/logs.js:47](../server/src/routes/svcmon/logs.js#L47) |
-| POST | `/push-now` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:165](../server/src/routes/svcmon/edge.js#L165) |
+| POST | `/push-now` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:169](../server/src/routes/svcmon/edge.js#L169) |
 | POST | `/refresh` | 역할 `admin/operator` | [server/src/routes/svcmon/overview.js:103](../server/src/routes/svcmon/overview.js#L103) |
 | PUT | `/reorder/folders` | 역할 `admin/operator` | [server/src/routes/svcmon/tree.js:52](../server/src/routes/svcmon/tree.js#L52) |
 | PUT | `/reorder/targets` | 역할 `admin/operator` | [server/src/routes/svcmon/tree.js:47](../server/src/routes/svcmon/tree.js#L47) |
-| POST | `/silence-check` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:172](../server/src/routes/svcmon/edge.js#L172) |
+| POST | `/silence-check` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:176](../server/src/routes/svcmon/edge.js#L176) |
 | PUT | `/sort` | 역할 `admin/operator` | [server/src/routes/svcmon/tree.js:67](../server/src/routes/svcmon/tree.js#L67) |
 | GET | `/state` | — | [server/src/routes/svcmon/overview.js:42](../server/src/routes/svcmon/overview.js#L42) |
 | POST | `/targets` | 역할 `admin/operator` | [server/src/routes/svcmon/tree.js:73](../server/src/routes/svcmon/tree.js#L73) |

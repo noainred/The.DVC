@@ -8,6 +8,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { listManagedUsers } from '../auth/auth.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'security-session.json');
 // 설정 소유 계정을 '파일/환경변수'로도 지정할 수 있게 하는 경로(운영자가 직접 편집).
@@ -38,7 +39,8 @@ function normPolicy(v) { return LOGIN_POLICIES.includes(v) ? v : null; }
 const DEMO_SESSION_MODES = ['allow', 'single'];
 function normDemoSession(v) { return DEMO_SESSION_MODES.includes(v) ? v : null; }
 
-function clamp(v, min, max, dflt) { const n = Number(v); return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : dflt; }
+// v2.596(감사 CLAMP2596-01): 빈 칸은 미지정(이전 값) — Number('')=0 이 하한·'무제한' 으로 둔갑하지 않게.
+function clamp(v, min, max, dflt) { const n = numOrNull(v); return n != null ? Math.max(min, Math.min(max, Math.round(n))) : dflt; }
 
 /** 사용자명 목록 정규화 — 공백 제거·중복 제거·형식 검증·최대 20개. 비면 null(호출부에서 거부). */
 function normOwners(arr) {
@@ -265,7 +267,8 @@ export function saveSessionSecurity(partial = {}) {
     sessionWarnMin: partial.sessionWarnMin !== undefined ? clamp(partial.sessionWarnMin, 1, 120, cur.sessionWarnMin) : cur.sessionWarnMin,
     sessionExtendMin: partial.sessionExtendMin !== undefined ? clamp(partial.sessionExtendMin, 5, 720, cur.sessionExtendMin) : cur.sessionExtendMin,
     sessionMaxHours: partial.sessionMaxHours !== undefined
-      ? ((Number(partial.sessionMaxHours) === 0 || partial.sessionMaxHours === '') ? 0 : clamp(partial.sessionMaxHours, 0, 720, cur.sessionMaxHours))
+      // 빈 칸은 이전 값 유지(예전엔 '' → 0 = 무제한이라 8시간 강제 로그아웃이 조용히 풀렸다). 명시적 0 만 무제한.
+      ? (numOrNull(partial.sessionMaxHours) === 0 ? 0 : clamp(partial.sessionMaxHours, 0, 720, cur.sessionMaxHours))
       : cur.sessionMaxHours,
   };
   // 원자적 쓰기 — settingsOwners(설정 편집 권한)를 담는 권한 config. 부분기록으로 손상되면

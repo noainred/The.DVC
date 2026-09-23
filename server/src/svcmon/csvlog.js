@@ -15,6 +15,7 @@
  * 파일명: results-YYYYMMDD[-HH][-pNN].csv · week=YYYY-Www · month=YYYYMM · quarter=YYYYQn
  */
 
+import { guardCell } from '../util/csv.js';
 import { portalParts } from '../util/dayKey.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -56,8 +57,7 @@ export function fileNameFor(ts, rotate, part = 1) {
 }
 
 function cell(v) {
-  let s = String(v ?? '');
-  if (/^[=+\-@]/.test(s)) s = `'${s}`;                       // 엑셀 수식 인젝션 방어
+  let s = guardCell(v);   // v2.596(감사 SECWEB-03): 수식 가드는 util/csv.js 하나(앞의 탭·CR 도 막는다)
   if (/[",\n\r]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;  // RFC 4180
   return s;
 }

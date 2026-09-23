@@ -37,6 +37,7 @@ svcmonRouter.get('/assign', canEdit, (req, res) => {
     // 자유 입력을 없애는 근거: 토큰의 agent 이름과 대소문자 하나만 달라도 엣지 pull 이
     // 영원히 '배정 없음'을 받는다(조회 키 불일치) — 오타가 무음 공백이 된다.
     reporting: edgeSummary().map((e) => e.agent),
+    ...(fullAddr(req) ? {} : { addressHidden: true }),
     candidates: (() => {
       const seen = new Map();
       for (const t of listAgentTokens()) seen.set(t.agent, { agent: t.agent, hasToken: true, lastUsedAt: t.lastUsedAt, note: t.note, reporting: false });
@@ -44,7 +45,7 @@ svcmonRouter.get('/assign', canEdit, (req, res) => {
         const cur = seen.get(e.agent) || { agent: e.agent, hasToken: false, lastUsedAt: null, note: '', reporting: false };
         cur.reporting = !e.silent;
         cur.lastReportAt = e.lastAt;
-        cur.sourceIp = e.sourceIp;
+        cur.sourceIp = fullAddr(req) ? e.sourceIp : null;   // v2.595 가림의 형제 경로(v2.596 R2596-01)
         seen.set(e.agent, cur);
       }
       return [...seen.values()].sort((a, b) => a.agent.localeCompare(b.agent));
@@ -150,7 +151,10 @@ svcmonRouter.post('/edges/:agent/probe', canEdit, async (req, res) => {
     user: req.user?.username, action: 'svcmon.edge.probe', target: req.params.agent,
     detail: r.ok ? `${r.sourceIp} · ping ${r.ping?.status}/${r.ping?.ms}ms${r.tcp ? ` · tcp:${r.portalPort} ${r.tcp.status}/${r.tcp.ms}ms` : ''}` : (r.reason || '실패'),
   });
-  res.status(r.ok ? 200 : 400).json(r);
+  // v2.596(감사 R2596-01 — 재현): 가림(v2.595)이 /edges 에만 걸려 이 응답으로 출발 IP·포트가 그대로 나갔다.
+  //   진단은 그대로 돌리고 주소만 비운다(감사 로그에는 주소가 남는다 — 관리자 확인용).
+  const out = fullAddr(req) ? r : { ...r, sourceIp: r.sourceIp ? null : r.sourceIp, portalPort: r.portalPort ? null : r.portalPort, addressHidden: true };
+  res.status(r.ok ? 200 : 400).json(out);
 });
 
 /** 유령 엣지 정리(이름 변경·오타로 남은 항목). 대상 정의는 엣지가 갖고 있으므로 영향 없음. */

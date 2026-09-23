@@ -101,8 +101,13 @@ async function openDb() {
      *   `CREATE TABLE IF NOT EXISTS` 는 **이미 있는 표의 열을 늘리지 않는다** — 이 한 줄이
      *   없으면 업그레이드한 현장에서 `no such column: ms_n` 으로 적재가 통째로 죽는다.
      */
-    try { conn.exec('ALTER TABLE link_daily ADD COLUMN ms_n INTEGER NOT NULL DEFAULT 0'); }
-    catch { /* 이미 있는 열 — 정상 */ }
+    // v2.596(감사 DB-3 — 재현): 열이 **새로 생긴** 경우 구 행의 ms_sum 은 ms_n=0 과 짝이 맞지 않는다 — 전환일에 새 표본이
+    //   더해지면 옛 합(수십~수백 표본분)을 새 개수로 나눠 평균이 수십~수백 배로 부푼다. 새로 만든 경우에만 구 행의 합을 비운다
+    //   (구 행은 이미 평균을 내지 않는다 — 표시가 바뀌지 않는다).
+    try {
+      conn.exec('ALTER TABLE link_daily ADD COLUMN ms_n INTEGER NOT NULL DEFAULT 0');
+      try { conn.exec('UPDATE link_daily SET ms_sum = 0 WHERE ms_n = 0'); } catch { /* 비어 있으면 무관 */ }
+    } catch { /* 이미 있는 열 — 정상 */ }
     _db = conn;
   } catch (e) {
     console.warn('[linkcheck-db] 사용 불가(DB 없이 동작):', e?.message);

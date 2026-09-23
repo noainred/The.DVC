@@ -12,11 +12,15 @@ import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
 
 
+// 한 번에 그리는 IPAM 목록 행 상한(v2.596) — 정렬은 전체 기준, 그리기만 자른다.
+const IPAM_ROW_LIMIT = 1000;
+
 /**
  * 상단 'IP관리' 탭 진입용 단독 래퍼(v2.274 — 특수 기능 카드에서 승격). ToolPanel 밖이라
  * vCenter 범위 선택자를 자체 제공한다. App.jsx 가 lazy named import 로 가져간다
  * (Ipam 본체·하위 컴포넌트가 이 파일의 헬퍼들에 얽혀 있어 코드 이동 대신 래퍼 export).
  */
+
 export function IpamStandalone() {
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
@@ -87,8 +91,10 @@ function Ipam({ scope, onScope }) {
 
   // Always keep the subnet list in sync with the vCenter scope (for counts/chips).
   useEffect(() => {
+    let active = true;   // v2.596(감사 WS-3): 늦게 온 이전 범위 응답이 pickBase 로 새 시트를 덮지 않게
     const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
-    fetchJson(`/tools/ipam/subnets${q}`).then((r) => { setSubnets(r.subnets); if (view === 'sheet' && r.subnets[0]) pickBase(r.subnets[0].base, scope); }).catch(() => setSubnets([]));
+    fetchJson(`/tools/ipam/subnets${q}`).then((r) => { if (!active) return; setSubnets(r.subnets); if (view === 'sheet' && r.subnets[0]) pickBase(r.subnets[0].base, scope); }).catch(() => { if (active) setSubnets([]); });
+    return () => { active = false; };
     // eslint-disable-next-line
   }, [scope]);
 
@@ -363,7 +369,10 @@ function Ipam({ scope, onScope }) {
             {canManage && <button className="logout-btn" style={{ flex: 'none', padding: '5px 11px', fontSize: 12 }} title="수동으로 IP를 등록하거나 한 대역을 일괄 관리(예약 등)" onClick={() => setEditOv({ ip: '', __new: true })}>＋ IP 수동 등록 / 일괄 관리</button>}
           </div>
           <ResultCount total={data.rows.length} shown={rows.length} label="IP" filtered={!!term || !!reconFilter} />
-          <DataTable columns={cols} rows={rows} initialSort={{ key: 'ip', dir: 'asc' }} />
+          {/* v2.596(감사 PERFWEB-01 — 실측): 8,028행 전량을 DOM 에 그려 첫 로드에 메인 스레드가 12.5초 멈췄다. 정렬 뒤 상위 N행만
+              그리고(DataTable limit — 정렬 뒤 자른다, v2.556 규약) 뺀 개수를 밝힌다. 검색·필터로 좁히면 전부 보인다. */}
+          <DataTable columns={cols} rows={rows} initialSort={{ key: 'ip', dir: 'asc' }} limit={IPAM_ROW_LIMIT}
+            footer={rows.length > IPAM_ROW_LIMIT ? `${rows.length.toLocaleString()}행 중 ${IPAM_ROW_LIMIT.toLocaleString()}행만 표시합니다 — 검색·필터로 좁히면 나머지도 보입니다(정렬은 전체 기준).` : null} />
         </>
       )}
       {db && (

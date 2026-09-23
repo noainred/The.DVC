@@ -205,7 +205,7 @@ export async function vmtrackDsList({ scopeIds = null, vcenterId = '' } = {}) {
     .filter((r) => (!vcenterId || r.vcenter_id === vcenterId) && (!scopeIds || scopeIds.has(r.vcenter_id)))
     .map((r) => ({
       dsId: r.ds_id, vcenterId: r.vcenter_id, name: r.name || r.ds_id, type: r.type || '',
-      capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
+      capGB: r.cap_gb || 0, usedGB: r.used_gb ?? null,   // v2.596: 모르면 null(사용률과 같은 규칙)
       usagePct: dsPct(r.used_gb, r.cap_gb),
       firstSeen: r.first_seen,
     }))
@@ -284,7 +284,7 @@ export async function vmtrackDsSeriesAll({ days = 30, vcenterId = '', scopeIds =
     const { carryIn, rows } = await readDsSeries({ dsId: r.ds_id, sinceTs });
     items.push({
       dsId: r.ds_id, vcenterId: r.vcenter_id, name: r.name || r.ds_id, type: r.type || '',
-      capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
+      capGB: r.cap_gb || 0, usedGB: r.used_gb ?? null,   // v2.596: 모르면 null(사용률과 같은 규칙)
       usagePct: dsPct(r.used_gb, r.cap_gb),
       deltaGB,
       points: stepFill(slots, carryIn, rows),
@@ -373,7 +373,7 @@ export async function vmtrackDsPivot({ days = 30, vcenterId = '', scopeIds = nul
     if (changedOnly && !any && !cumGB) continue;
     items.push({
       dsId: r.ds_id, name: r.name || r.ds_id, vcenterId: r.vcenter_id, type: r.type || '',
-      capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
+      capGB: r.cap_gb || 0, usedGB: r.used_gb ?? null,   // v2.596: 모르면 null(사용률과 같은 규칙)
       usagePct: dsPct(r.used_gb, r.cap_gb),
       cumGB, slots,
     });
@@ -402,7 +402,7 @@ export async function vmtrackDsTop({ days = 30, vcenterId = '', scopeIds = null,
     const deltaGB = Math.round((r.used_gb - startVal) * 10) / 10;
     items.push({
       dsId: r.ds_id, vcenterId: r.vcenter_id, name: r.name || r.ds_id, type: r.type || '',
-      capGB: r.cap_gb || 0, usedGB: r.used_gb || 0,
+      capGB: r.cap_gb || 0, usedGB: r.used_gb ?? null,   // v2.596: 모르면 null(사용률과 같은 규칙)
       usagePct: dsPct(r.used_gb, r.cap_gb),
       deltaGB,
     });

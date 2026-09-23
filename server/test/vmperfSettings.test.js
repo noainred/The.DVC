@@ -20,7 +20,8 @@ test('기본값 — 수집 on, 보존 90일, 전체 대상', () => {
 test('보존기간 클램프 — 음수/초과/문자 방어', () => {
   assert.equal(m.saveVmperfSettings({ retentionDays: -5 }).retentionDays, 0, '음수 → 0(무제한)');
   assert.equal(m.saveVmperfSettings({ retentionDays: 99999 }).retentionDays, 1830, '상한 5년');
-  assert.equal(m.saveVmperfSettings({ retentionDays: 'abc' }).retentionDays, 0, '문자 → 0');
+  // v2.596(CLAMP2596-05): 숫자가 아닌 값은 0(=무제한)으로 둔갑하지 않고 이전 값을 유지한다.
+  assert.equal(m.saveVmperfSettings({ retentionDays: 'abc' }).retentionDays, 1830, '문자 → 이전 값 유지');
   assert.equal(m.saveVmperfSettings({ retentionDays: 45.9 }).retentionDays, 45, '소수 내림');
 });
 

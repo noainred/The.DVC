@@ -92,7 +92,8 @@ function prepare(db) {
     firstCover: db.prepare('SELECT MIN(h) AS mn, MAX(h) AS mx FROM cover WHERE kind=? AND ref=?'),
     firstAny: db.prepare('SELECT MIN(h) AS mn, MAX(h) AS mx FROM cover'),
     stats: db.prepare('SELECT (SELECT COUNT(*) FROM spikes) AS spikeRows, (SELECT COALESCE(SUM(n),0) FROM spikes) AS moments, (SELECT COUNT(*) FROM cover) AS coverRows'),
-    pruneSpikes: db.prepare('DELETE FROM spikes WHERE t1 < ?'),
+    // v2.596(감사 DB-4): 인덱스는 t0 에만 있다 — t0 ≤ t1 이므로 't0 < before' 를 함께 걸어 idx_spikes_t0 를 타게 한다(결과 동일).
+    pruneSpikes: db.prepare('DELETE FROM spikes WHERE t0 < ? AND t1 < ?'),
     pruneCover: db.prepare('DELETE FROM cover WHERE h < ?'),
     getMeta: db.prepare('SELECT v FROM meta WHERE k=?'),
     setMeta: db.prepare('INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v'),
@@ -230,7 +231,7 @@ export async function pruneVmSeries(vcenterId, retentionDays) {
   if (!x) return 0;
   const before = Date.now() - days * 86_400_000;
   let n = 0;
-  try { n = x.st.pruneSpikes.run(before)?.changes ?? 0; } catch { /* */ }
+  try { n = x.st.pruneSpikes.run(before, before)?.changes ?? 0; } catch { /* */ }
   try { x.st.pruneCover.run(before - HOUR); } catch { /* */ }
   return n;
 }

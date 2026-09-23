@@ -161,9 +161,13 @@ export function applyPulledDevices(list) {
   const db = load();
   const mine = String(config.agent.name || '').toLowerCase();
   const keep = db.devices.filter((d) => String(d.agent || '').toLowerCase() !== mine); // 남의 것/로컬은 보존
+  const before = new Set(db.devices.filter((d) => String(d.agent || '').toLowerCase() === mine).map((d) => String(d.id)));
   db.devices = [...keep, ...(list || []).map((d) => ({ ...d, pulled: true }))];
   persist();
-  return db.devices.length;
+  // v2.596(감사 EF-3 — 재현): 이 엣지에서 빠진 장비(삭제·다른 엣지로 이동)의 id 를 돌려준다 — 호출부가 로컬 스냅샷을 지워야
+  //   다음 push 에 유령 장비로 실리지 않는다(SAN 스위치와 같은 규칙).
+  const now = new Set((list || []).map((d) => String(d.id)));
+  return { count: db.devices.length, removed: [...before].filter((id) => !now.has(id)) };
 }
 
 export function _resetForTest() { _db = null; }
