@@ -105,6 +105,10 @@ export default function PduCharts({ devices = [], thresholds = {} }) {
       )}
       {busy && !power && <Loading />}
 
+      {/* v2.598: 데이지체인 유닛 중 하나라도 전력을 못 읽은 시각은 합계가 부분 합이라 서버가 뺐다(pdu/db.js partialSamples) — 조용히 빼지 않는다. */}
+      {partialSamplesNote(power?.partialSamples) && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{partialSamplesNote(power.partialSamples)}</div>
+      )}
       <Chart title="전력 (W)" rows={powerRows} series={power?.series} nameOf={nameOf} hours={hours} unit="W"
         refs={[
           { y: thresholds.powerWarnW, label: '경고', color: '#f59e0b' },
@@ -124,6 +128,16 @@ export default function PduCharts({ devices = [], thresholds = {} }) {
         ]} />
     </div>
   );
+}
+
+/**
+ * 전력 추이에서 뺀 시각 수 안내(v2.598). 한 수집 시각에 유닛 전력을 하나라도 못 읽으면 그 시각의 장비 합은
+ * 부분 합(거짓 하락)이라 서버가 평균·최대에서 뺀다. 0·결측이면 말하지 않는다.
+ */
+export function partialSamplesNote(n) {
+  const v = Number(n);
+  if (n == null || n === '' || !Number.isFinite(v) || v <= 0) return '';
+  return `유닛 일부 미수집 ${v}개 시각 제외 — 그 시각의 장비 합계는 부분 합이라 평균·최대에서 뺐습니다(0 W 가 아닙니다).`;
 }
 
 /** 시리즈 배열 → recharts 가 먹는 행 배열. 값 없는 칸은 null 로 남긴다(선 끊김). */

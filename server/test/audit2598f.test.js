@@ -169,3 +169,22 @@ test('INJ-07 svcmon 로그 분석: 탭으로 시작하는 대상도 필터가 �
   const r = await analyzeLog({ from: portalMs(2026, 6, 1, 0), to: portalMs(2026, 6, 2, 0), bucket: 'day', target: '\tweb' });
   assert.equal(r.totals.rows, 1);
 });
+
+test('WEBUI-2598-02 후속: 추이 조회는 확인 서버 0대 주기(vms_ok=0)의 수치를 null 로 낸다(저장 0 → 응답 null)', async () => {
+  const { commitCurUser, seriesRange } = await import('../src/curuser/db.js');
+  const T0 = 1_800_000_000_000;
+  const unknown = { vcenterId: '', ...cuSeriesRow(aggregate([{ vmId: 'v', ok: false }])) };
+  const known = { vcenterId: '', ...cuSeriesRow(aggregate([{ vmId: 'v', ok: true, users: [{ name: 'a', kind: 'active' }] }])) };
+  const zero = { vcenterId: '', ...cuSeriesRow(aggregate([{ vmId: 'v', ok: true, users: [] }])) };
+  const w1 = await commitCurUser({ ts: T0, series: [unknown] });
+  if (!w1.ok) { assert.ok(/sqlite/i.test(String(w1.reason)), w1.reason); return; }   // node:sqlite 없는 환경
+  await commitCurUser({ ts: T0 + 60_000, series: [known] });
+  await commitCurUser({ ts: T0 + 120_000, series: [zero] });
+  const r = await seriesRange('', T0 - 1, T0 + 200_000);
+  assert.equal(r.rows.length, 3);
+  assert.equal(r.rows[0].users, null);
+  assert.equal(r.rows[0].sessions, null);
+  assert.equal(r.rows[1].users, 1);
+  assert.equal(r.rows[2].users, 0);            // 확인했는데 0명은 값이다
+  assert.equal(r.unknownRows, 1);
+});

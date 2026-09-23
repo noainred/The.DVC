@@ -35,3 +35,14 @@ describe('JSX 문장 사이 공백', () => {
     expect(gluedLines("  <div>\n    보냅니다.{' '}\n    <b>상태</b>\n  </div>")).toEqual([]);
   });
 });
+
+// v2.598(후속): PDU 전력 추이에서 뺀 시각 수(pdu/db.js partialSamples)를 화면이 밝힌다.
+import { partialSamplesNote } from './PduCharts.jsx';
+describe('PDU 추이 partialSamples 안내', () => {
+  it('뺀 시각이 있으면 개수를 말하고, 0·결측이면 말하지 않는다', () => {
+    expect(partialSamplesNote(3)).toContain('유닛 일부 미수집 3개 시각 제외');
+    expect(partialSamplesNote(0)).toBe('');
+    expect(partialSamplesNote(null)).toBe('');
+    expect(partialSamplesNote(undefined)).toBe('');
+  });
+});

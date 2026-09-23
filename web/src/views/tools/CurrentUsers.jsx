@@ -285,6 +285,11 @@ function WindowsUsersPanel({ scope }) {
         </div>
         {histErr && <ErrorBox error={histErr} inline />}
         {since && <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginBottom: 6, whiteSpace: 'normal' }}><BoldText text={since.text} /></div>}
+        {hist?.unknownRows > 0 && (
+          <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginBottom: 6, whiteSpace: 'normal' }}>
+            확인한 서버가 0대였던 시각 {hist.unknownRows}개는 선을 끊었습니다 — 0명이 아니라 확인 불가입니다.
+          </div>
+        )}
         {hist?.rows?.length ? (
           <div style={{ height: 240 }}>
             <ResponsiveContainer>
