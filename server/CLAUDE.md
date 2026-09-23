@@ -680,7 +680,18 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
   어느 단계에서 거부됐는지(공개키/비밀번호/키보드 인터랙티브)가 진단이다. `isilonSsh.js` 는
   자체 조립 5줄을 버리고 이 함수에 위임한다(CLAUDE.md '코어는 하나다' — 복제해 두면 분류 수정이
   한쪽에만 들어간다). 테스트가 소스를 검사해 고정한다.
-- ⚠ **아직 가드가 없는 주기 SSH 수집기**(v2.541 전수 스윕 결과 — 붙일 때 UI 표시를 **함께** 해야
-  한다. 화면이 말하지 않는 정지는 규칙 1 위반이라 가드만 넣으면 더 나쁘다):
-  `sanswitch/poller.js` · `sanswitch/perfPoller.js` · `pdu/poller.js` · `gpu/sshCollect.js` ·
-  `bmstor/collect.js`. 전부 저장된 자격증명으로 주기 로그인한다.
+- ✅ **v2.541 에 '아직 가드가 없다' 고 적은 주기 SSH 수집기 5종은 v2.590 에 가드를 받았다**
+  (`sanswitch/poller.js`·`perfPoller.js`(같은 기록 공유) · `pdu/poller.js` · `gpu/sshCollect.js`(VM 단위) ·
+  `bmstor/collect.js` — 전부 UI 표시와 함께. 회귀는 `test/authStop2590.test.js` 가 **실제 로그인 시도 수**로 고정).
+  같은 릴리스에서 **vCenter(SOAP `InvalidLogin`·REST 로그인 401)·iDRAC(Redfish 401)·NSX(신원 확인 401/403)** 도
+  받았다 — v2.590 감사 전까지 **목록에조차 없었다**(가장 많이 로그인하는 수집기였다). 규칙:
+  · **자격증명 거부만 멈춘다** — vCenter 는 로그인 호출의 거부뿐이고 로그인 뒤 401/403 은 멈추지 않는다.
+    `InvalidLogin` 이면 REST 폴백도 하지 않는다(주기당 실패 로그인 2회 → 1회).
+  · 정지된 vCenter 는 재시작 직후에도 `pending` 이 아니라 `unreachable + authStopped` 로 보인다(기다리면 된다는 거짓 금지).
+  · **저장 비밀번호로 한 연결 테스트가 성공하면 정지를 푼다**(`authStopCleared`). 수동 실행은 막지 않는다.
+  · 정지 파일 7종은 `.gitignore` 에 등록했다(`*-auth-stops.json`).
+  ⚠ **아직 연결하지 않은 vCenter 주기 수집기**(v2.590 정직 기록): `curuser`·`vmseries`·`osScanner`·
+  `guestScanScheduler`·`metrics`. 전부 같은 vCenter 계정으로 로그인하므로, 붙일 때 `vcAuthGuard` 의 **읽기 전용
+  조회(`peekAuthStop`)** 로 주 폴러의 정지를 따를 것(각자 기록을 만들면 정지가 두 벌이 된다).
+  ⚠ GPU 게스트는 VM 단위로 멈추므로 **첫 실패 주기에는 VM 마다 1회씩 실패**한다 — 공용 도메인 계정이면 그 합이
+  잠금 임계에 닿을 수 있다(정직 기록). bmstor 와 bmusage 의 OS 계정 정지 기록은 공유하지 않는다.

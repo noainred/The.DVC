@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **482개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **484개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-23)
@@ -269,9 +269,9 @@
 | `STORAGE_CLI_SESSION_BUDGET_MS` | `150000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_CLI_TIMEOUT_MS` | `45000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_CONFIG_PULL_MS` | `5 * 60_000` |  | storage/intervals.js |
-| `STORAGE_DAILY_KEEP_DAYS` |  |  | storage/db.js |
+| `STORAGE_DAILY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
 | `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/poller.js |
-| `STORAGE_HISTORY_KEEP_DAYS` |  |  | storage/db.js |
+| `STORAGE_HISTORY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
 | `STORAGE_HTTP_TIMEOUT_MS` | `15000` |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
 | `STORAGE_ISILON_PORT` | `8080` |  | storage/collectors/isilon.js |
@@ -410,13 +410,14 @@
 | `SSH_PTY_ROWS` | `200` |  | proxy/sshExec.js |
 | `SSH_READY_TIMEOUT_MS` | `60000` |  | proxy/sshExec.js, proxy/sshGateway.js |
 
-## 인사이트 (6)
+## 인사이트 (7)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `CONFIG_DIR` |  | ✅ | config.js, insights/dbLocation.js 외 1 |
 | `DB_HEALTH_COUNT_MAX_BYTES` | `512` |  | insights/dbHealth.js |
 | `DB_HEALTH_FULL_MAX_BYTES` | `256` |  | insights/dbHealth.js |
+| `DB_HEALTH_QUICK_MAX_BYTES` | `512` |  | insights/dbHealth.js |
 | `PORTAL_DB_MIN_FORECAST_MS` | `3600000` |  | insights/portalDb.js |
 | `PORTAL_DB_SAMPLE_MS` | `10` |  | insights/portalDb.js |
 | `SERIAL_INDEX_CACHE_MS` | `30000` |  | insights/serialLookup.js |
@@ -454,7 +455,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (34)
+## 중앙(위임 수집) (35)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -484,6 +485,7 @@
 | `PARTFAULT_EDGE_MAX_DEVICES` | `5000` |  | central/partFaultEdge.js |
 | `PARTFAULT_EDGE_REPORT_PART_MAX` | `50000` |  | central/partFaultEdge.js |
 | `PING_ACK_TIMEOUT_MS` | `30000` |  | central/pingJobs.js |
+| `PING_PENDING_TTL_MS` | `90000` |  | central/pingJobs.js |
 | `PORTALCHECK_PULL_STALE_MS` | `30` |  | central/tokenCheckPull.js |
 | `PORTALCHECK_PULL_TIMEOUT_MS` | `20000` |  | central/tokenCheckPull.js |
 | `SVCMON_EDGE_MAX_AGENTS` |  |  | central/svcmonEdge.js |
@@ -661,4 +663,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 482
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 484

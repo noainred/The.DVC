@@ -3178,6 +3178,21 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       것(P17) · DB 점검 quick_check 가 512MB 초과 파일에서 루프를 막던 것 → 생략하고 밝힌다 + 동시 점검 가드(P7) ·
       Horizon 이름 목록 절단 시 전체 사용자 **하한값**(F8) · Isilon 경보 절단·이벤트 절 부재(F10) · 베어메탈 NIC·HBA 사용률
       방향별 최대(F9 — rx+tx 합을 한 방향 속도로 나눠 최대 2배) · `/proc/stat` guest 이중 계수(F11) · HAProxy 백업 파일명(D9).
+    - ⚠⚠ **인증 실패 정지 가드가 vCenter·iDRAC·NSX 에 없었다 — 가장 많이 로그인하는 수집기였다**(수집기 축 F1 high ·
+      `vcenter/restClient.js vcAuthGuard`·`idrac/poller.js`·`nsx/client.js` + SSH 5종. 상세·남은 것은 `server/CLAUDE.md`):
+      server/CLAUDE.md 가 v2.541 에 '아직 가드가 없다' 고 적은 목록에 **이 셋은 들어 있지도 않았다**. 28개 vCenter 계정이
+      30초마다 로그인하므로 비밀번호가 바뀐 구간에 **서비스 계정이 잠긴다**. 회귀 테스트는 가짜 vCenter(SOAP
+      InvalidLogin + REST 401)·Redfish·NSX·ssh2 서버로 **실제 로그인 시도 수**를 센다(다음 주기 0회 · 자격증명 변경 시
+      재개 · 수동 실행은 시도 · 연결 거부는 멈추지 않음). 변이 14종 중 13종 검출(나머지 1종은 문구 기반 이중 방어).
+      · 함께 드러난 결함: `redfish.get` 의 401 문구에 숫자가 없어 bmusage 가 **401 을 '연결 불가' 로 분류**했다.
+    - **vCenter 수집 데드라인이 세션을 실제로 끊는다**(docs F7 — v2.417 규약의 vCenter 누락. PERF-AUDIT-2026-09-13 §4 미해결):
+      `store.collectWithDeadline` 이 AbortController 로 abort 하고 SOAP·REST 요청 신호는 `AbortSignal.any([건별 시한,
+      외부 신호])` 다. 예전 `Promise.race` 는 결과만 버리고 남은 SOAP 왕복을 계속해 다음 주기가 같은 vCenter 에 두 번째
+      세션을 열었다. 로그아웃은 외부 신호를 무시하고 끝까지 정리한다. 테스트가 서버 쪽 소켓이 약 300ms 에 끊기는 것을 본다.
+    - **iDRAC 센서 실패가 '표본 0' 으로 숨던 것**(F7): `fetchSensors` 가 모든 실패를 삼켜 v2.493 센서 진단·v2.548 팬 컬렉션
+      실패 표시가 도달 불가였다 → Chassis 루트 실패는 던지고 Thermal 전부 실패면 `thermalOk:false` + `sensorError`.
+    - **SAN '헬스 경보 없음' 은 상태를 읽었을 때만**(F6): 못 읽으면 `health.alerts` 가 0 이 아니라 null 이고 KPI 가
+      '헬스 상태 미확인 N대' 를 말한다(REST 는 상태를 조회하지 않아 **언제나** 0 이었다).
     - **웹 전수(159경로 × 1440/400 · admin·operator·viewer, 약 400회 로드) 확정 8건**:
       · ⚠⚠ **W1 폴러 상태의 `lastRun`·`lastCheck` 는 `{ at, … }` 객체다**(metrics·ipscan·gpu·upgrade) — `health/services.js` 가
         숫자로 빼 `최근 NaN분 전` 이었고, **`NaN > 30분` 이 항상 거짓이라 지표 샘플러가 멈춰도 '정상'** 이었다(`atOf`).
@@ -3192,6 +3207,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
         특수 기능 카테고리 오른쪽 패널이 **폭 2px 로 사라지던 것**(`.toolcat-grid` 좁은 폭 1열 — 넘침 0 이라 수치로는 안 잡혔다).
       · W8 NIC 속도·모델 '대상' 이 **수집된 행 수**라 `대상 0 · 수집됨 0 · 미수집 204` 로 스스로 모순 → `collected + missing`
         (필터 버튼의 행 수는 `rowCount`).
+    - **런타임·의존성**(15분 장시간 실행 · 운영 규모 `MOCK_SCALE=3` · 힙 스냅샷 비교 — **누수 없음**(9분 +0.2MB), `.db` 핸들
+      47 고정): ⚠ **30초마다 `store.refresh` 에서 200~360ms 정지** 원인은 `ledgerSignature` 의 문자 단위 djb2 JS 루프였다
+      (내용이 그대로여도 매 틱 전량) → 네이티브 sha1(43ms → 13~26ms). 더 줄이려면 '수집 변동 없는 틱은 syncLedger 생략' 이
+      있지만 외부 ipam.db 리더의 신선도 계약을 바꾸므로 **사용자 결정 사항**이다(측정하지 않았다). ⚠ **CI 는 root 를 audit 하지
+      않는다** — root `concurrently` 9.2.1 이 `shell-quote` critical 2 를 핀하고 있었고 아무도 몰랐다(9.2.4 로 0). 새 dev
+      도구를 root 에 넣으면 `npm audit`(root)도 볼 것. 범위 안 전이 업데이트는 사본에서 테스트·빌드·Chromium A/B 로 확인 후 적용했다
+      (three 0.184→0.186 은 semver 를 따르지 않는다 — 3D 화면은 1회 렌더 확인까지만). `ldapjs`(AD 로그인)는 상류가 **decommissioned**
+      로 표시했다(정보 — 보안 수정이 더 나오지 않는다).
     - ⚠ **API 문서 생성기는 '선언 줄 끝의 주석 + 다음 줄 핸들러' 를 게이트로 읽는다** — 이번에 `async` 가 '뜻 모르는 게이트' 로
       실렸다. 라우트 선언에 주석을 붙이려면 **선언 위 줄**에 둘 것.
     - 문서: 이미 고친 것을 '아직'·'후속' 으로 적은 줄 2개 정정 · AUDIT-2026-09-21 표 누락(BUG-17·18·21)·SEC-12 분류 정정 ·
