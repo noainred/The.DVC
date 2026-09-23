@@ -303,8 +303,12 @@ export function parseNvidiaSmiCsv(text) {
   if (!gpus.length) return null;
   const avg = (arr) => Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
   const known = gpus.map((g) => g.utilPct).filter((v) => v != null);
-  const memUsed = gpus.reduce((a, g) => a + (g.memUsedMB || 0), 0);
-  const memTotal = gpus.reduce((a, g) => a + (g.memTotalMB || 0), 0);
+  // v2.597(감사 C2597-06 — 재현): 사용량·전체를 **둘 다** 읽은 GPU 만 더한다 — 사용량이 N/A 인 GPU 를 분모에만 넣으면
+  //   사용률이 과소 계산된다(v2.593 DATA-04 는 utilPct 만 고쳤다). 뺀 GPU 수는 memPartial 로 밝힌다.
+  const memBoth = gpus.filter((g) => g.memUsedMB != null && g.memTotalMB > 0);
+  const memUsed = memBoth.reduce((a, g) => a + g.memUsedMB, 0);
+  const memTotal = memBoth.reduce((a, g) => a + g.memTotalMB, 0);
+  const memPartial = gpus.length - memBoth.length;
   const migCount = gpus.filter((g) => g.mig === 'enabled').length;
   // 사용률을 아는 GPU가 하나도 없음 = MIG로 GPU 단위 사용률 미제공(인스턴스 미생성=유휴).
   // 이 경우 0%(유휴)로 보고하되 utilNA 플래그로 'N/A(MIG)'임을 구분 가능하게 한다.
@@ -314,6 +318,7 @@ export function parseNvidiaSmiCsv(text) {
     utilPct: known.length ? avg(known) : 0,
     utilNA,
     memUsedPct: memTotal ? Math.round((memUsed / memTotal) * 100) : null,
+    ...(memPartial ? { memPartial } : {}),
     migEnabled: migCount,
     gpus,
   };

@@ -69,7 +69,8 @@ export function normalizeIsilon(device, raw) {
   }
   if (raw.stats) {
     // /statistics/current 응답: { stats: [{ key, value }] } — ifs.bytes.* 키가 클러스터 용량.
-    const byKey = Object.fromEntries((raw.stats.stats || []).map((s) => [s.key, Number(s.value) || 0]));
+    // v2.597(감사 C2597-03 — 재현): 값이 null·'' 인 키를 0 으로 넣지 않는다 — 넣으면 '읽었다' 가 되어 SSD 0% · HDD 에 SSD 분 포함.
+    const byKey = Object.fromEntries((raw.stats.stats || []).map((s) => [s.key, numOrNull(s.value)]).filter(([, v]) => v != null));
     const total = byKey['ifs.bytes.total'] || 0;
     // v2.595(감사 C2595-05): 전체 용량 키가 없으면 '정상 · 0 TB' 가 아니라 섹션 오류다(받은 키를 밝힌다).
     if (!(total > 0)) {
@@ -87,13 +88,15 @@ export function normalizeIsilon(device, raw) {
     // ifs.ssd.bytes.* 가 0 또는 부재일 수 있어 그 경우 media.ssd 는 0 으로, HDD=전체가 된다
     // (실장비 검증 전 가정 — 값이 이상하면 섹션 상태/실측으로 보정할 것, 은폐하지 않음).
     const ssdTotal = byKey['ifs.ssd.bytes.total'] || 0;
-    const ssdUsed = byKey['ifs.ssd.bytes.used'] || (ssdTotal && byKey['ifs.ssd.bytes.avail'] ? ssdTotal - byKey['ifs.ssd.bytes.avail'] : 0);
+    // SSD 사용량: used → (total − avail) → SSD 풀이 없으면 0, 있는데 못 읽으면 null(HDD 사용량도 null — 부분 차감 금지).
+    const ssdUsed = byKey['ifs.ssd.bytes.used'] != null ? byKey['ifs.ssd.bytes.used']
+      : (ssdTotal && byKey['ifs.ssd.bytes.avail'] != null ? ssdTotal - byKey['ifs.ssd.bytes.avail'] : (ssdTotal > 0 ? null : 0));
     // total 0 인 미디어는 null — '풀 없음'(SSD 메타 전용/무SSD 구성)을 0TB 로 오표시하지 않는다.
     // v2.594(감사 R2594-03): 사용량을 못 읽었으면(used null) HDD 사용량·% 도 null — max(0, null − x) 는 0 이 되어
     // '비었다' 는 거짓이 DB hdd_used 에 적재됐다.
     const mk = (t, u) => (t > 0 ? { totalBytes: t, usedBytes: u, pct: u == null ? null : Math.round((u / t) * 1000) / 10 } : null);
     snap.media = {
-      hdd: mk(Math.max(0, total - ssdTotal), used == null ? null : Math.max(0, used - ssdUsed)),
+      hdd: mk(Math.max(0, total - ssdTotal), used == null || ssdUsed == null ? null : Math.max(0, used - ssdUsed)),
       ssd: mk(ssdTotal, ssdUsed),
     };
     if (total > 0) snap.sections.capacity = 'ok';
@@ -111,7 +114,9 @@ export function normalizeIsilon(device, raw) {
     for (const r of (raw.nodeStats?.stats || [])) {
       if (r.devid == null) continue;
       if (!perNode.has(r.devid)) perNode.set(r.devid, {});
-      perNode.get(r.devid)[r.key] = Number(r.value) || 0;
+      // v2.597(감사 C2597-04 — 재현): null 값은 키를 넣지 않는다 — has() 가 '읽었다' 를 뜻하게(0 bps·사용량 0 거짓 방지).
+      const v = numOrNull(r.value);
+      if (v != null) perNode.get(r.devid)[r.key] = v;
     }
     const mkPool = (t, u) => (t > 0 ? { totalBytes: t, usedBytes: u, pct: u == null ? null : Math.round((u / t) * 1000) / 10 } : null); // total 0 = 무디스크(No Storage HDDs)
     const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
@@ -125,7 +130,8 @@ export function normalizeIsilon(device, raw) {
         inBps: st['node.net.ext.bytes.in.rate'] ?? null,
         outBps: st['node.net.ext.bytes.out.rate'] ?? null,
         hdd: mkPool(Math.max(0, (st['node.ifs.bytes.total'] || 0) - (st['node.ifs.ssd.bytes.total'] || 0)),
-                    has(st, 'node.ifs.bytes.used') ? Math.max(0, st['node.ifs.bytes.used'] - (st['node.ifs.ssd.bytes.used'] || 0)) : null),
+                    has(st, 'node.ifs.bytes.used') && (has(st, 'node.ifs.ssd.bytes.used') || !((st['node.ifs.ssd.bytes.total'] || 0) > 0))
+                      ? Math.max(0, st['node.ifs.bytes.used'] - (st['node.ifs.ssd.bytes.used'] || 0)) : null),
         ssd: mkPool(st['node.ifs.ssd.bytes.total'] || 0, has(st, 'node.ifs.ssd.bytes.used') ? st['node.ifs.ssd.bytes.used'] : null),
       };
     });

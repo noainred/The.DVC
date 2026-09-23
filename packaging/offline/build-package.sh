@@ -108,7 +108,10 @@ cp -r "$REPO_ROOT/server/config" "$APP/server/config"
 find "$APP/server/config" -mindepth 1 -maxdepth 1 \
   \( -name '*.db' -o -name '*.db-wal' -o -name '*.db-shm' -o -name '*.ndjson' \
      -o -name 'ipam-scan.json' -o -name 'portal.env' -o -name 'secrets-key' -o -name 'auth-secret' \
+     -o -name '*.txt' -o -name '*.corrupt.*' -o -type d \
      -o \( -name '*.json' ! -name '*.example.json' \) \) -exec rm -rf {} + 2>/dev/null || true
+# v2.597(감사 DEPS2597-01): Windows 빌드(v2.591 P2)와 같은 식 — initial-admin-password.txt·*.corrupt.*·backups/ 등
+#   하위 폴더가 남지 않게. 두 빌드의 find 식은 같아야 한다(test/audit2597.test.js 가 대조).
 cp "$REPO_ROOT/server/package.json" "$REPO_ROOT/server/package-lock.json" "$APP/server/"
 cp "$REPO_ROOT/package.json" "$APP/"
 # OTP 콘솔 등록 래퍼(v2.591 P5): install.sh 가 이 파일이 있을 때만 /usr/local/bin/vmware-portal-otp 를 건다.

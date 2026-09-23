@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **173개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **174개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-23)
@@ -24,6 +24,7 @@
 | `agent-deploy-targets.json` | 설정 | Edge 노드 설치 대상(SSH 접속 정보) | ✅ | ✅ | ✅ | agent/deployRegistry.js |
 | `agent-results.json` | 설정 | Central store for per-agent scan assignments and the results agents report | ✅ | ✅ | ✅ | central/assignments.js |
 | `alarm-mutes.json` | 설정 | 알람 음소거 규칙 | ✅ | ✅ | ✅ | alarm-mutes.js |
+| `alerts-state.json` | 설정 | Alerting — evaluates threshold/condition rules against the current snapshot on | ✅ | ✅ | ✅ | alerts.js |
 | `alerts.json` | 설정 | Alerting — evaluates threshold/condition rules against the current snapshot on | ✅ | ✅ | ✅ | alerts.js |
 | `api-keys.json` | 설정 | 외부 연동 API 키 저장소 (v2.562) — 다른 포탈이 이 포탈의 조회 API 를 읽을 수 있게 하는 인증. | ✅ | ✅ | ✅ | publicapi/keys.js |
 | `audit.ndjson` | 로그(NDJSON) | 감사 로그(상태 변경 기록) | ✅ |  | ✅ | audit.js |

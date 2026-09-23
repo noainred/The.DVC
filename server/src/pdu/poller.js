@@ -184,5 +184,11 @@ export function pduPollerStatus() {
 
 /** 이 노드가 들고 있는 최근 스냅샷(중앙 직접 수집분 + 엣지 로컬분). */
 export function localSnapshots() { return [..._snapshots.values()]; }
+/** v2.597(L2597-05): 설정 pull 로 빠진 장비의 스냅샷·알림 상태를 즉시 지운다(다음 수집까지 push 되지 않게). */
+export function forgetDevices(ids) {
+  const gone = (ids || []).map(String).filter((id) => _snapshots.delete(id) || true);
+  if (gone.length) forgetDeviceAlerts(gone);
+  return gone.length;
+}
 export function getLocalSnapshot(id) { return _snapshots.get(id) || null; }
 export function _resetForTest() { _snapshots.clear(); _running = false; _last = { at: null, ok: 0, fail: 0, durationMs: null }; authGuard._resetForTest(); }

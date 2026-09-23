@@ -77,21 +77,31 @@ let _pruneTick = 0;
 // 사이에서 두 번째 호출이 들어오면 같은 파일에 `DatabaseSync` 가 **둘** 만들어지고 첫 핸들이 새어
 // 나갔다(v2.580 재현: 동시 2호출 → 같은 파일 fd 2개). `bmusage/db.js`(v2.550)와 같은 패턴이다.
 let _opening = null;
+// v2.597(감사 L2597-02 — 재현): 첫 open 에서 다른 프로세스가 잠금을 쥐고 있으면('database is locked') 예전에는
+// 'unavailable' 로 래치해 **프로세스 수명 동안** 시계열 저장이 꺼졌다. 잠금은 일시적이므로 래치하지 않고 30초 뒤 다시 연다.
+let _retryAt = 0;
+export function isSqliteLockError(e) {
+  const code = e && (e.errcode ?? e.errno);
+  return code === 5 || code === 6 || /database is (locked|busy)|SQLITE_(BUSY|LOCKED)/i.test(String(e?.message || ''));
+}
 async function open() {
   if (_db) return _db === 'unavailable' ? null : _db;
+  if (_retryAt && Date.now() < _retryAt) return null;
   if (_opening) return _opening;
   _opening = openInner().finally(() => { _opening = null; });
   return _opening;
 }
 async function openInner() {
   if (_db) return _db === 'unavailable' ? null : _db;
+  let conn = null;
   try {
     const { DatabaseSync } = await import('node:sqlite');
-    const conn = new DatabaseSync(FILE());
+    conn = new DatabaseSync(FILE());
     // v2.447(감사 S4): DB 파일 권한 0600 — 다른 DB 모듈(idrac/metrics/logs/ipam/vmtrack/capacity/ping)은
     // 전부 적용돼 있는데 이 파일만 빠져 있었다. 같은 호스트의 다른 로컬 사용자가 읽을 수 있었다.
     try { fs.chmodSync(FILE(), 0o600); } catch { /* best effort */ }
-    conn.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;
+    conn.exec('PRAGMA busy_timeout=3000;'); // 먼저 — journal_mode 전환도 잠금을 기다리게(L2597-02)
+    conn.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;
       CREATE TABLE IF NOT EXISTS api_latest (
         device_id TEXT NOT NULL, area TEXT NOT NULL, endpoint TEXT NOT NULL,
         ts INTEGER NOT NULL, ok INTEGER NOT NULL, bytes INTEGER NOT NULL,
@@ -227,6 +237,12 @@ async function openInner() {
     };
     return _db;
   } catch (e) {
+    if (isSqliteLockError(e)) {
+      try { conn?.close(); } catch { /* */ } // 다시 열 것이므로 이 핸들은 닫는다(fd 누수 방지)
+      _retryAt = Date.now() + 30_000;
+      console.warn(`[storage-db] SQLite 잠금(${e.message}) — 30초 뒤 다시 엽니다(비활성으로 고정하지 않음)`);
+      return null;
+    }
     console.warn(`[storage-db] SQLite 비활성(${e.message}) — API 원문/시계열 DB 저장 없이 동작(최신 스냅샷만)`);
     _db = 'unavailable';
     return null;

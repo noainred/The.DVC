@@ -58,9 +58,14 @@ const rangeMsOf = (q, def = '1d') => RANGES[String(q || def)] || RANGES[def];
 function vcScope(req) {
   const allowed = scopedVcenterIds(req.user, store.get()); // null = 전체 허용
   const vcIdOf = (id) => (String(id).startsWith('vc_') ? String(id).slice(3) : null);
+  // v2.597(감사 AUTHZ-2597-01): 대상 객체에 vcenterId 가 있으면 그것이 귀속이다 — id 접두('vc_')만 보면 vcenterId 만
+  //   가진 대상(수동 등록 등)이 범위 밖인데도 이름·관리 IP·RTT 가 보였다.
+  let byId = null;
+  const targetOf = (id) => { if (!byId) byId = new Map(listTargets().map((t) => [String(t.id), t])); return byId.get(String(id)); };
+  const vcOfTarget = (t, id) => (t && t.vcenterId ? String(t.vcenterId) : vcIdOf(id));
   return {
     all: !allowed,
-    okId: (id) => { if (!allowed) return true; const v = vcIdOf(id); return v == null || allowed.has(v); },
+    okId: (id, t = targetOf(id)) => { if (!allowed) return true; const v = vcOfTarget(t, id); return v == null || allowed.has(v); },
     okVcenterId: (vcId) => !allowed || allowed.has(String(vcId)),
   };
 }

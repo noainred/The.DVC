@@ -291,9 +291,9 @@ export async function collect(device, { signal = null } = {}) {
         try {
           const { points: pts } = await fetchSpaceMetrics({ post, csrf, get, rawGet, entity: 'space_metrics_by_appliance', entityId: a.id });
           const pt = pickLatestSpacePoint(pts);
-          const t = Number(pt?.physical_total) || 0;
-          const u = Number(pt?.physical_used) || 0;
-          if (t) pools.push({ name: a.name || a.id || '', totalBytes: t, usedBytes: u, pct: Math.round((u / t) * 1000) / 10 });
+          const t = numOrNull(pt?.physical_total) || 0;
+          const u = numOrNull(pt?.physical_used); // v2.597(감사 C2597-05): 결측을 0 으로 두지 않는다(v2.593 DATA-01 누락 지점)
+          if (t) pools.push({ name: a.name || a.id || '', totalBytes: t, usedBytes: u, pct: u == null ? null : Math.round((u / t) * 1000) / 10 });
         } catch { /* 어플라이언스 1대 실패가 전체 수집을 망치지 않게 */ }
       }
       if (pools.length) raw.appliancePools = pools;

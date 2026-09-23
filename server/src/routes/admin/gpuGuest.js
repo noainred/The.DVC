@@ -10,7 +10,7 @@ import { testVmGuest, VimSoapClient } from '../../gpu/guestops.js';
 import { testVmGuestSsh, detectPhysicalGpu, guestIps, gpuAuthGuard } from '../../gpu/sshCollect.js';
 import { listPhysical, addPhysical, updatePhysical, removePhysical, getPhysicalRaw, findPhysicalByHost } from '../../gpu/physicalRegistry.js';
 import { getAllPhysicalGpu } from '../../gpu/physicalStore.js';
-import { physicalPollerStatus, pollPhysicalOnce } from '../../gpu/physicalPoller.js';
+import { physicalPollerStatus, pollPhysicalOnce, reschedulePhysicalPoller } from '../../gpu/physicalPoller.js';
 import { getGuestGpuVms } from '../../gpu/store.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import { getAssignedGpuGuest, setAssignedGpuGuest, listAssignedGpuGuestAgents, redactAssignedGpuGuest } from '../../central/agentGpuGuestConfig.js';
@@ -53,6 +53,7 @@ adminRouter.get('/gpu-guest/settings', adminOnly, (_req, res) => {
 adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
   const settings = saveGpuGuestSettings(req.body || {});
   rescheduleGpuGuestPoller();
+  reschedulePhysicalPoller();   // v2.597(LC2597-02): 같은 주기 설정을 쓰는 물리 GPU 폴러도
   res.json({ ok: true, settings: redactGpuGuestSettings(settings), status: gpuGuestStatus() });
 });
 

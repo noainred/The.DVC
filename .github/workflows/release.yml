@@ -46,6 +46,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false  # v2.597(DEPS2597-05): gh 는 GH_TOKEN 을 쓴다 — git 자격증명을 작업 트리에 남기지 않는다
 
       - name: Setup Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
@@ -53,7 +55,11 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Install dependencies (root + server + web)
-        run: npm run install:all
+        # v2.597(DEPS2597-06): CI 가 검증한 것과 같은 잠금 파일 그대로(npm ci) — npm install 은 범위 안에서 다른 버전을 풀 수 있다.
+        run: |
+          npm ci --no-audit --no-fund
+          npm --prefix server ci --no-audit --no-fund
+          npm --prefix web ci --no-audit --no-fund
 
       - name: Unit tests
         run: npm test
@@ -256,6 +262,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false  # v2.597(DEPS2597-05): gh 는 GH_TOKEN 을 쓴다 — git 자격증명을 작업 트리에 남기지 않는다
 
       - name: Setup Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4

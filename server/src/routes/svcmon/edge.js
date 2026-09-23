@@ -153,7 +153,10 @@ svcmonRouter.post('/edges/:agent/probe', canEdit, async (req, res) => {
   });
   // v2.596(감사 R2596-01 — 재현): 가림(v2.595)이 /edges 에만 걸려 이 응답으로 출발 IP·포트가 그대로 나갔다.
   //   진단은 그대로 돌리고 주소만 비운다(감사 로그에는 주소가 남는다 — 관리자 확인용).
-  const out = fullAddr(req) ? r : { ...r, sourceIp: r.sourceIp ? null : r.sourceIp, portalPort: r.portalPort ? null : r.portalPort, addressHidden: true };
+  const out = fullAddr(req) ? r : { ...r, sourceIp: r.sourceIp ? null : r.sourceIp, portalPort: r.portalPort ? null : r.portalPort,
+    // v2.597(감사 RECENT-03 — 재현): 점검 문구(reply)에 포트·주소가 들어간다('포트 4000 연결 실패') — 상태·시간만 남긴다.
+    ping: r.ping ? { status: r.ping.status, ms: r.ping.ms } : r.ping, tcp: r.tcp ? { status: r.tcp.status, ms: r.tcp.ms } : r.tcp,
+    addressHidden: true };
   res.status(r.ok ? 200 : 400).json(out);
 });
 

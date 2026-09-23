@@ -266,12 +266,13 @@ async function collectFromVCenterRest(vc, { signal = null } = {}) {
       datastores: datastores.map((d) => {
         // 사용량/사용률은 '바이트' 기준으로 먼저 계산한 뒤 GB로 반올림한다 — capacity·free를 각각
         // GB로 반올림한 뒤 빼면 반올림 오차가 usedGB/usagePct에 누적된다.
+        // v2.597(감사 C2597-08): free_space 가 없으면 사용량을 계산하지 않는다 — 0 으로 두면 사용률 100% 라는 거짓이 된다.
         const capBytes = d.capacity || 0;
-        const freeBytes = d.free_space || 0;
-        const usedBytes = Math.max(0, capBytes - freeBytes);
+        const freeBytes = d.free_space == null ? null : Number(d.free_space);
+        const usedBytes = freeBytes == null || !Number.isFinite(freeBytes) ? null : Math.max(0, capBytes - freeBytes);
         const capacityGB = Math.round(capBytes / 1024 ** 3);
-        const freeGB = Math.round(freeBytes / 1024 ** 3);
-        const usedGB = Math.round(usedBytes / 1024 ** 3);
+        const freeGB = usedBytes == null ? null : Math.round(freeBytes / 1024 ** 3);
+        const usedGB = usedBytes == null ? null : Math.round(usedBytes / 1024 ** 3);
         return {
           id: `${vc.id}:${d.datastore}`,
           vcenterId: vc.id,
@@ -280,8 +281,8 @@ async function collectFromVCenterRest(vc, { signal = null } = {}) {
           capacityGB,
           freeGB,
           usedGB,
-          usagePct: capBytes > 0 ? Math.round((usedBytes / capBytes) * 100) : 0,
-          accessible: true,
+          usagePct: capBytes > 0 && usedBytes != null ? Math.round((usedBytes / capBytes) * 100) : null,
+          accessible: typeof d.accessible === 'boolean' ? d.accessible : true, // REST 목록에 있으면 그 값(없으면 예전대로)
         };
       }),
       networks: networks.map((n) => ({

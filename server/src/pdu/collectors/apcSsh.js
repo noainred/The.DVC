@@ -82,6 +82,15 @@ export async function collect(device, { signal = undefined, onTrace = null } = {
         phases: [],
       };
 
+      // v2.597(감사 C2597-01 — 코드 확인): bkReading/phReading 명령에는 **유닛 축이 없다** — 유닛 2 이상에서 같은 명령을
+      //   다시 보내면 유닛 1 값이 복제돼 unit=i 행으로 적재됐다(오류 없이 틀린 값). 유닛 지정 문법을 실장비로 확인하기
+      //   전에는 유닛 1 에서만 읽고, 뒤 유닛은 '뱅크·상 미수집' 을 밝힌다.
+      if (i > 1) {
+        if (i === 2) snap.notes.push('데이지체인 유닛 2 이상의 뱅크·상 값은 수집하지 않습니다(명령에 유닛 지정이 없어 유닛 1 값이 복제됩니다).');
+        unit.banksNotCollected = true;
+        snap.units.push(unit);
+        continue;
+      }
       // 뱅크별 부하(A) — 사용자 요구 '뱅크별 소요 전력'. 있는 만큼만.
       for (let b = 1; b <= MAX_BANKS; b++) {
         const cur = await read(cmd.bank(b, 'current'));

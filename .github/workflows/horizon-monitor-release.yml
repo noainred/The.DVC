@@ -21,6 +21,8 @@ jobs:
         working-directory: horizon-uag-monitor
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false  # v2.597(DEPS2597-05): gh 는 GH_TOKEN 을 쓴다 — git 자격증명을 작업 트리에 남기지 않는다
 
       - uses: actions/setup-dotnet@v4
         with:

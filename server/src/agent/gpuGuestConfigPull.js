@@ -46,6 +46,9 @@ async function _pullGpuGuestConfigNow() {
     const sig = crypto.createHash('sha1').update(JSON.stringify(body.settings)).digest('hex');
     if (sig === lastSig) { last = { at: Date.now(), applied: false, reason: '변경 없음', srvAt: body.at || 0 }; return { ok: true, applied: false, unchanged: true }; }
     saveGpuGuestSettings(body.settings); // 로컬 gpu-guest.json에 병합
+    // v2.597(LC2597-02): 중앙이 바꾼 주기를 두 폴러에 즉시 적용 — 예전에는 파일만 바뀌고 재시작 전까지 옛 주기로 돌았다.
+    try { (await import('../gpu/poller.js')).rescheduleGpuGuestPoller?.(); } catch (e) { console.warn(`[gpu-guest-config] 폴러 재무장 실패: ${e.message}`); }
+    try { (await import('../gpu/physicalPoller.js')).reschedulePhysicalPoller?.(); } catch (e) { console.warn(`[gpu-guest-config] 물리 GPU 폴러 재무장 실패: ${e.message}`); }
     lastSig = sig;
     last = { at: Date.now(), applied: true, srvAt: body.at || 0 };
     console.log(`[gpu-guest-config] 중앙 배포 설정 적용: agent=${config.agent.name} vcenters=${Object.keys(body.settings.vcenters || {}).length}`);

@@ -25,28 +25,31 @@ function initSqlite() {
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
     const db = new DatabaseSync(DB_PATH);
+    try { db.exec('PRAGMA busy_timeout=3000;'); } catch { /* */ } // 먼저 — WAL 전환도 잠금을 기다리게(v2.597 L2597-02)
     // WAL + synchronous=NORMAL: 커밋당 fsync 2회(DELETE 저널) → 배치화(단건 insert 5ms→0.01ms 실측).
     // busy_timeout: 동시 접근 시 즉시 SQLITE_BUSY 실패 대신 대기.
     try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS samples (
-        metric TEXT NOT NULL, k TEXT NOT NULL, v REAL NOT NULL, ts INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_samples_mkt ON samples (metric, k, ts);
-      CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples (ts); -- prune(ts<?)가 풀스캔 없이 타도록
-      -- historyAll(패밀리 전 키 일괄 버킷)이 '해당 패밀리의 창 구간'만 읽도록.
-      -- (metric,k,ts)로는 ts 선탐색이 안 돼 패밀리 전체(보존기간 전부)를 스캔하게 된다.
-      -- 기존 대형 DB는 업그레이드 후 첫 기동에서 1회 생성 비용(규모에 따라 수십 초)이 든다.
-      CREATE INDEX IF NOT EXISTS idx_samples_mt ON samples (metric, ts);
-      -- 시간당 롤업: 60분+ 버킷 조회(용량예측 등 장기 윈도우)가 원본 대신 시간당 1행을 읽는다.
-      -- 적재와 '같은 트랜잭션'에서 upsert 해 원본과 어긋나지 않게 한다. prune 도 함께 지운다.
-      CREATE TABLE IF NOT EXISTS samples_hourly (
-        metric TEXT NOT NULL, k TEXT NOT NULL, h INTEGER NOT NULL,
-        n INTEGER NOT NULL, sum REAL NOT NULL, mn REAL NOT NULL, mx REAL NOT NULL,
-        PRIMARY KEY (metric, k, h)
-      );
-      CREATE INDEX IF NOT EXISTS idx_hourly_h ON samples_hourly (h); -- prune(h<?)용
-    `);
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS samples (
+          metric TEXT NOT NULL, k TEXT NOT NULL, v REAL NOT NULL, ts INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_samples_mkt ON samples (metric, k, ts);
+        CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples (ts); -- prune(ts<?)가 풀스캔 없이 타도록
+        -- historyAll(패밀리 전 키 일괄 버킷)이 '해당 패밀리의 창 구간'만 읽도록.
+        -- (metric,k,ts)로는 ts 선탐색이 안 돼 패밀리 전체(보존기간 전부)를 스캔하게 된다.
+        -- 기존 대형 DB는 업그레이드 후 첫 기동에서 1회 생성 비용(규모에 따라 수십 초)이 든다.
+        CREATE INDEX IF NOT EXISTS idx_samples_mt ON samples (metric, ts);
+        -- 시간당 롤업: 60분+ 버킷 조회(용량예측 등 장기 윈도우)가 원본 대신 시간당 1행을 읽는다.
+        -- 적재와 '같은 트랜잭션'에서 upsert 해 원본과 어긋나지 않게 한다. prune 도 함께 지운다.
+        CREATE TABLE IF NOT EXISTS samples_hourly (
+          metric TEXT NOT NULL, k TEXT NOT NULL, h INTEGER NOT NULL,
+          n INTEGER NOT NULL, sum REAL NOT NULL, mn REAL NOT NULL, mx REAL NOT NULL,
+          PRIMARY KEY (metric, k, h)
+        );
+        CREATE INDEX IF NOT EXISTS idx_hourly_h ON samples_hourly (h); -- prune(h<?)용
+      `);
+    } catch (e) { try { db.close(); } catch { /* */ } throw e; } // 잠금으로 실패하면 핸들을 닫고 재시도(L2597-02)
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
     const ins = db.prepare('INSERT INTO samples (metric, k, v, ts) VALUES (?, ?, ?, ?)');
     const latestAll = db.prepare(`SELECT s.k AS k, s.v AS v, s.ts AS ts FROM samples s
@@ -252,9 +255,25 @@ function initJson() {
 
 const round1 = (x) => (x == null ? null : Number(x.toFixed(1)));
 
+/*
+ * v2.597(감사 L2597-02 — 재현): 첫 open 이 일시 잠금('database is locked')에 걸리면 예전에는 곧바로 NDJSON 으로 폴백해
+ * 프로세스 수명 동안 SQLite 이력을 쓰지 않았다(두 저장소가 갈라진다). 잠금이면 몇 번 기다렸다 다시 연다.
+ * NDJSON 폴백은 node:sqlite 자체가 없거나 잠금이 아닌 오류일 때만이다.
+ */
+const LOCK_RE = /database is (locked|busy)|SQLITE_(BUSY|LOCKED)/i;
+async function initSqliteRetrying(tries = 5, waitMs = 3_000) {
+  for (let i = 1; ; i++) {
+    try { return await initSqlite(); } catch (e) {
+      if (i >= tries || !(e?.errcode === 5 || e?.errcode === 6 || LOCK_RE.test(String(e?.message || '')))) throw e;
+      console.warn(`[metrics] SQLite 잠금(${e.message}) — ${waitMs / 1000}초 뒤 다시 엽니다(${i}/${tries})`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+}
+
 export async function getMetricsDb() {
   if (impl) return impl;
-  if (!ready) ready = initSqlite().catch((err) => { console.warn(`[metrics] node:sqlite 불가(${err.code || err.message}); NDJSON 폴백.`); return initJson(); });
+  if (!ready) ready = initSqliteRetrying().catch((err) => { console.warn(`[metrics] node:sqlite 불가(${err.code || err.message}); NDJSON 폴백.`); return initJson(); });
   impl = await ready;
   return impl;
 }

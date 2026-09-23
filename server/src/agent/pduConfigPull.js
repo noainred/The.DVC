@@ -14,7 +14,7 @@ import { config } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../pdu/registry.js';
-import { collectDeviceNow } from '../pdu/poller.js';
+import { collectDeviceNow, forgetDevices } from '../pdu/poller.js';
 import { pushPduNow } from '../pdu/push.js';
 import { runtimeIntervals, applyCentralIntervals, startAdaptiveTimer } from '../pdu/intervals.js';
 
@@ -53,7 +53,8 @@ async function _pull() {
     const sig = crypto.createHash('sha1').update(JSON.stringify(devices)).digest('hex');
     let applied = false;
     if (sig !== _lastSig) {
-      applyPulledDevices(devices);
+      const ap = applyPulledDevices(devices);
+      if (ap?.removed?.length) forgetDevices(ap.removed);
       _lastSig = sig;
       applied = true;
       console.log(`[pdu-config] 중앙 배포 장비 적용: agent=${config.agent.name} PDU ${devices.length}대`);

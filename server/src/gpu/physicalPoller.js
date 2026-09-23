@@ -82,8 +82,11 @@ export function physicalPollerStatus() {
   return { intervalMs: pollIntervalMs, servers: loadPhysical().length, lastRun, overlay: physicalGpuCounts() };
 }
 
+// v2.597(감사 LC2597-02 — 코드 확인): 이 함수를 부르는 곳이 없어 주기 변경이 재시작 전까지 먹지 않았는데 상태는 새 주기를
+//   보고했다. 설정 저장(PUT /gpu-guest/settings)·엣지 설정 pull 적용이 부른다. 시작 전이면 아무것도 하지 않는다(start 가 무장).
 export function reschedulePhysicalPoller() {
-  if (timer) clearInterval(timer);
+  if (!timer) return null;
+  clearInterval(timer);
   const { pollIntervalMs } = loadGpuGuestSettings();
   timer = setInterval(() => pollPhysicalOnce().catch(() => {}), pollIntervalMs);
   timer.unref?.();
@@ -93,6 +96,7 @@ export function reschedulePhysicalPoller() {
 export function startPhysicalGpuPoller() {
   setTimeout(() => pollPhysicalOnce().catch((e) => console.error('[gpu-physical] 폴 실패:', e.message)), 20_000).unref?.();
   const { pollIntervalMs } = loadGpuGuestSettings();
+  if (timer) clearInterval(timer);   // 이중 시작이 고아 타이머를 남기지 않게(v2.591 L9 와 같은 가드)
   timer = setInterval(() => pollPhysicalOnce().catch(() => {}), pollIntervalMs);
   timer.unref?.();
   console.log(`[gpu-physical] poller started (every ${Math.round(pollIntervalMs / 1000)}s)`);

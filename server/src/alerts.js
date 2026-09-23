@@ -21,6 +21,7 @@ import { ssrfBlockReasonResolved } from './collector/registry.js';
 import { Agent as UndiciAgent } from 'undici';
 import { ssrfLookup } from './util/ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
 import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.454)
+import { registerExitFlush } from './util/exitFlush.js';
 
 const FILE = path.join(config.configDir, 'alerts.json');
 
@@ -331,6 +332,44 @@ export async function sendText(text, title = 'VMware Portal 리포트', kind = '
 
 // --- Engine state ---
 const firing = new Map();   // key -> { alert, since, lastNotified }
+/*
+ * v2.597(감사 LC2597-01 — 재현): 발생 중 알림의 since·lastNotified 를 파일에 남긴다. 인메모리뿐이라 재시작(업그레이드 포함)
+ * 마다 발생 중인 알림 **전부**가 쿨다운과 무관하게 다시 발송됐다(첫 평가 8초 뒤). bmusage(v2.551)·파트 장애(v2.548)와
+ * 같은 이유다. 기동 시 복원하고, 해소되면 지운다. 저장은 디바운스 + 종료 flush.
+ */
+const STATE_FILE = path.join(config.configDir, 'alerts-state.json');
+const STATE_MAX = 5000;
+let _restored = null;   // key -> { since, lastNotified } (첫 평가에서 소비)
+function loadAlertState() {
+  if (_restored) return _restored;
+  _restored = new Map();
+  try {
+    const j = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    for (const [k, v] of Object.entries(j?.firing || {})) {
+      if (v && Number.isFinite(v.since)) _restored.set(k, { since: v.since, lastNotified: Number(v.lastNotified) || 0 });
+    }
+  } catch (e) {
+    if (e?.code !== 'ENOENT') { preserveCorrupt(STATE_FILE, e.message); console.warn(`[alerts] 상태 파일 손상(${e.message}) — 보존 후 빈 상태로 시작`); }
+  }
+  return _restored;
+}
+let _stateTimer = null;
+function writeAlertStateNow() {
+  clearTimeout(_stateTimer); _stateTimer = null;
+  const out = {};
+  let n = 0;
+  for (const [k, st] of firing) { if (n++ >= STATE_MAX) break; out[k] = { since: st.since, lastNotified: st.lastNotified || 0 }; }
+  for (const [k, r] of (_restored || new Map())) { if (n++ >= STATE_MAX) break; if (!out[k]) out[k] = { since: r.since, lastNotified: r.lastNotified || 0 }; }
+  try { atomicWriteFileSync(STATE_FILE, JSON.stringify({ version: 1, at: Date.now(), firing: out })); } catch (e) { console.warn(`[alerts] 상태 저장 실패: ${e.message}`); }
+}
+function saveAlertStateSoon() {
+  if (_stateTimer) return;
+  _stateTimer = setTimeout(writeAlertStateNow, 3_000);
+  _stateTimer.unref?.();
+}
+registerExitFlush('alerts-state', () => { if (_stateTimer) writeAlertStateNow(); });
+export function _resetAlertStateForTest() { firing.clear(); _restored = null; clearTimeout(_stateTimer); _stateTimer = null; }
+export { refreshState as _refreshStateForTest, writeAlertStateNow as _writeAlertStateForTest };
 const recent = [];          // recent notifications (in-memory, newest first)
 let timer = null;
 let vmPowerPrev = null;      // vmId -> powerState (직전 스냅샷, 동시 다운 감지용)
@@ -367,23 +406,34 @@ async function refreshState(cfg, sendEnabled) {
   const now = Date.now();
   const cooldownMs = (cfg.cooldownMin || 60) * 60_000;
   const seen = new Set();
+  const restored = loadAlertState();
+  let changed = false;
   for (const a of active) {
     seen.add(a.key);
     const prev = firing.get(a.key);
     if (!prev) {
-      firing.set(a.key, { alert: a, since: now, lastNotified: 0 });
+      const r = restored.get(a.key);   // 재시작 전에 이미 발생·발송된 알림이면 그 시각을 이어받는다
+      firing.set(a.key, { alert: a, since: r ? r.since : now, lastNotified: r ? r.lastNotified : 0 });
+      changed = true;
     }
     const st = firing.get(a.key);
     st.alert = a;
     if (sendEnabled && now - (st.lastNotified || 0) >= cooldownMs) {
       st.lastNotified = now;
+      changed = true;
       notify(a, cfg).then((res) => { pushRecent({ at: new Date().toISOString(), ...a, channels: res }); }).catch(() => {});
     }
   }
   // resolve
   for (const [key, st] of [...firing.entries()]) {
-    if (!seen.has(key)) { firing.delete(key); pushRecent({ at: new Date().toISOString(), key, title: `해소: ${st.alert.title}`, severity: 'resolved' }); }
+    if (!seen.has(key)) { firing.delete(key); changed = true; pushRecent({ at: new Date().toISOString(), key, title: `해소: ${st.alert.title}`, severity: 'resolved' }); }
   }
+  // 복원 목록은 **쿨다운이 남은 동안만** 들고 있는다 — 기동 직후에는 스냅샷이 아직 비어(첫 수집 중) 활성 목록이 0 이라
+  // 첫 평가에서 비우면 수집이 끝난 뒤 전부 다시 발송된다. 쿨다운이 지난 항목은 어차피 재발송 대상이라 버린다.
+  for (const [k, r] of restored) {
+    if (firing.has(k) || now - (r.lastNotified || 0) >= cooldownMs) { restored.delete(k); changed = true; }
+  }
+  if (changed) saveAlertStateSoon();
 }
 
 export function alertStatus() {

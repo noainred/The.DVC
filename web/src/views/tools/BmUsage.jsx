@@ -276,12 +276,12 @@ export function BmUsage() {
           query={q} onQuery={setQ} typeLabel={pathTypeLabel}
         />
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '8px 0' }}>
-          <button onClick={exportCsv} disabled={!shown.length}>CSV 내보내기</button>
-          <button onClick={collectNow} disabled={busy || !data?.enabled} title={data?.enabled ? '' : '수집이 꺼져 있습니다'}>
+          <button className="btn" onClick={exportCsv} disabled={!shown.length}>CSV 내보내기</button>
+          <button className="btn" onClick={collectNow} disabled={busy || !data?.enabled} title={data?.enabled ? '' : '수집이 꺼져 있습니다'}>
             {busy ? '수집 중…' : '지금 수집'}
           </button>
-          <button onClick={load}>새로고침</button>
-          <button onClick={() => setShowSettings((v) => !v)}>{showSettings ? '설정 닫기' : '설정'}</button>
+          <button className="btn" onClick={load}>새로고침</button>
+          <button className="btn" onClick={() => setShowSettings((v) => !v)}>{showSettings ? '설정 닫기' : '설정'}</button>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>
             마지막 수집 {ageText(st.last?.at)} · 주기 {st.intervalMs ? `${Math.round(st.intervalMs / 60000)}분` : '—'} · 동시 {st.concurrency ?? '—'}
             {st.last?.alerts && (st.last.alerts.sent > 0 || st.last.alerts.over > 0) && (
@@ -465,7 +465,7 @@ export function BmUsage() {
                           <td data-sort={r.version || ''}>{r.version || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                           <td data-sort={r.snapAt || 0}>{r.snapAt ? ageText(r.snapAt) : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                           <td>
-                            <button onClick={() => pullEdge(r.agent)} disabled={!!pulling || r.enabled === false || !r.hasUrl}
+                            <button className="btn btn-sm" onClick={() => pullEdge(r.agent)} disabled={!!pulling || r.enabled === false || !r.hasUrl}
                               title={r.enabled === false ? '중앙에서 비활성으로 두었습니다' : (!r.hasUrl ? 'URL 이 없습니다' : '')}>
                               {pulling === r.agent ? '가져오는 중…' : '지금 가져오기'}
                             </button>

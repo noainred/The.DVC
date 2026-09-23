@@ -131,9 +131,12 @@ function initSqlite() {
     for (const col of ['ds_cap_gb', 'ds_used_gb']) { // v2.348 — 용량은 REAL
       try { db.exec(`ALTER TABLE snaps ADD COLUMN ${col} REAL NOT NULL DEFAULT 0`); } catch { /* 이미 존재 */ }
     }
+    // v2.597(감사 L2597-01 — 재현): 합계 행에서 빠진 vCenter 수(수집 실패·첫 수집 중). 0 이 아니면 그 슬롯 합계는 부분 합이다.
+    try { db.exec('ALTER TABLE snaps ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 존재 */ }
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
 
     const st = {
+      setSkipped: db.prepare("UPDATE snaps SET skipped = ? WHERE slot = ? AND vcenter_id = ''"),
       insSnap: db.prepare(`INSERT INTO snaps (slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off,
           ds_count, ds_cap_gb, ds_used_gb, baseline)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -210,7 +213,7 @@ function initSqlite() {
           storage_gb=excluded.storage_gb, guest_os=excluded.guest_os`),
       delRoster: db.prepare('DELETE FROM roster WHERE vcenter_id=? AND vm_id=?'),
       delRosterVc: db.prepare('DELETE FROM roster WHERE vcenter_id=?'),
-      series: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline
+      series: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline, skipped
         FROM snaps WHERE vcenter_id=? AND ts>=? ORDER BY ts`),
       seriesAllVc: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline
         FROM snaps WHERE vcenter_id<>'' AND ts>=? ORDER BY ts`),
@@ -266,6 +269,7 @@ export async function commitSnapshot({ slot, ts, perVc, totalRow }) {
     st.insSnap.run(slot, ts, '', totalRow.total, totalRow.onCount, totalRow.added, totalRow.removed,
       totalRow.poweredOn || 0, totalRow.poweredOff || 0,
       totalRow.dsCount || 0, totalRow.dsCapGB || 0, totalRow.dsUsedGB || 0, totalRow.baseline ? 1 : 0);
+    st.setSkipped.run(Math.max(0, Number(totalRow.skipped) || 0), slot);
     for (const vc of perVc) {
       const ds = vc.ds || null; // { count, capGB, usedGB, added:[], removed:[], changed:[] }
       st.insSnap.run(slot, ts, vc.vcenterId, vc.total, vc.onCount, vc.added.length, vc.removed.length,

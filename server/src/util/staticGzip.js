@@ -18,6 +18,19 @@ const TYPES = { '.js': 'application/javascript; charset=utf-8', '.css': 'text/cs
 const NAME_RE = /^[\w.-]+$/;
 export const STATIC_GZIP_MAX_BYTES = 96 * 1024 * 1024;   // 압축본 합계 상한
 
+/** Accept-Encoding 에 gzip 이 q>0 으로 있는가(`*` 도 인정하되 gzip;q=0 이 명시되면 거부). */
+export function acceptsGzip(header) {
+  let star = null, gz = null;
+  for (const part of String(header || '').split(',')) {
+    const [name, ...params] = part.trim().toLowerCase().split(';');
+    let q = 1;
+    for (const p of params) { const m = /^\s*q\s*=\s*([0-9.]+)\s*$/.exec(p); if (m) q = Number(m[1]); }
+    if (name === 'gzip') gz = q; else if (name === '*') star = q;
+  }
+  if (gz != null) return gz > 0;
+  return star != null && star > 0;
+}
+
 export function createStaticGzip(distDir) {
   const assets = path.join(distDir, 'assets');
   const cache = new Map();        // name -> { mtimeMs, buf, size }
@@ -40,7 +53,8 @@ export function createStaticGzip(distDir) {
       if (!m || !NAME_RE.test(m[1]) || m[1].includes('..')) return next();
       const ext = path.extname(m[1]).toLowerCase();
       if (!TYPES[ext]) return next();
-      if (!/\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) return next();
+      // v2.597(감사 RECENT-02 — 재현): 'gzip;q=0'(거부)·'x-gzip' 까지 gzip 으로 보냈다 — q 값을 본다.
+      if (!acceptsGzip(req.headers['accept-encoding'])) return next();
       const file = path.join(assets, m[1]);
       let st;
       try { st = await fs.promises.stat(file); } catch { return next(); }

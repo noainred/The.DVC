@@ -28,6 +28,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { startAdaptiveTimer as baseAdaptiveTimer } from '../util/adaptiveTimer.js';
+import { agentValueOf } from '../util/agentKey.js';
 
 /** 조정 가능한 주기 항목. min/def 는 서버가 단일 소스 — UI 가 이 표를 받아 폼을 그린다. */
 export const INTERVAL_SPEC = [
@@ -188,7 +189,7 @@ export function saveIntervalConfig({ global = {}, agents = {} } = {}) {
  */
 export function intervalsForAgent(agent) {
   const d = load();
-  return { ...d.global, ...(d.agents[String(agent || '')] || {}) };
+  return { ...d.global, ...(agentValueOf(d.agents, agent) || {}) };
 }
 
 /**

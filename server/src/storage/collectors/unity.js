@@ -24,17 +24,22 @@ export function normalizeUnity(device, raw) {
   if (sw) snap.version = sw.version || '';
   const cap = entries(raw.cap)[0];
   if (cap) {
-    const total = Number(cap.sizeTotal) || 0;
+    // v2.597(감사 C2597-02 — 재현): 전체 용량을 못 읽으면 '정상 · 0 바이트' 가 아니라 섹션 오류다(Isilon C2595-05 와 같은 처리).
+    const total = numOrNull(cap.sizeTotal) || 0;
     // v2.593(감사 DATA-01): 사용량을 못 읽으면 0 이 아니라 null — 0 은 '비었다' 는 거짓이고 증가량에 거짓 급변을 만든다(v2.561 규약).
     const used = numOrNull(cap.sizeUsed);
-    snap.capacity = { totalBytes: total, usedBytes: used, pct: total && used != null ? Math.round((used / total) * 1000) / 10 : null };
-    snap.sections.capacity = 'ok';
+    if (total > 0) {
+      snap.capacity = { totalBytes: total, usedBytes: used, pct: used != null ? Math.round((used / total) * 1000) / 10 : null };
+      snap.sections.capacity = 'ok';
+    } else {
+      snap.sections.capacity = `오류: sizeTotal 없음(받은 키 ${Object.keys(cap).slice(0, 8).join(', ') || '없음'})`;
+    }
   }
   const pools = entries(raw.pools);
   if (pools.length) {
     snap.pools = pools.slice(0, 32).map((p) => {
-      const t = Number(p.sizeTotal) || 0, u = numOrNull(p.sizeUsed);
-      return { name: p.name || '', totalBytes: t, usedBytes: u, pct: t && u != null ? Math.round((u / t) * 1000) / 10 : null };
+      const t = numOrNull(p.sizeTotal), u = numOrNull(p.sizeUsed);
+      return { name: p.name || '', totalBytes: t, usedBytes: u, pct: t > 0 && u != null ? Math.round((u / t) * 1000) / 10 : null };
     });
   }
   const sps = entries(raw.sps);

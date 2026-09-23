@@ -135,8 +135,12 @@ export function devicesForAgent(agentName) {
 /** 엣지가 중앙에서 받은 목록으로 로컬 파일을 교체(pull 적용). */
 export function applyPulledDevices(list) {
   if (!Array.isArray(list)) return { ok: false, reason: '목록이 배열이 아닙니다.' };
-  save(list.map((d) => normalize(d)));
-  return { ok: true, count: list.length };
+  // v2.597(감사 L2597-05 — 재현): 이번 목록에서 빠진 id 를 돌려준다 — 엣지가 그 스냅샷을 바로 지우게(storage EF-3 형제).
+  const before = new Set(load().devices.map((d) => String(d.id)));
+  const next = list.map((d) => normalize(d));
+  save(next);
+  const now = new Set(next.map((d) => String(d.id)));
+  return { ok: true, count: list.length, removed: [...before].filter((id) => !now.has(id)) };
 }
 
 export function _resetForTest() { _cache = null; }
