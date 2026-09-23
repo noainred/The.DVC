@@ -11,6 +11,7 @@
 
 import { emptySnapshot } from '../types.js';
 import { runCliSession, parseKeyValueBlocks, toBytes, sshFailureSnapshot } from './cliSsh.js';
+import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
 
 const wrap = (cmd) => [cmd, `xmcli -c "${cmd}"`];
 
@@ -95,7 +96,8 @@ export function normalizeXtremioSsh(device, out) {
       const state = (pick(n, 'State', 'Status', 'Health-State') || '').toLowerCase();
       return {
         id: i + 1, ip: pick(n, 'IP-Address', 'Mgmt-IP') || '',
-        health: state ? (/ok|healthy|normal|connected/.test(state) ? 'ok' : state) : 'unknown',
+        // v2.586 — 'disconnected' 가 'connected' 부분 일치로 **정상**이 되던 결함. 판정은 healthWord 하나.
+        health: state ? (healthWord(state) === 'ok' ? 'ok' : healthWord(state) === 'unknown' ? 'unknown' : state) : 'unknown',
         inBps: null, outBps: null, hdd: null, ssd: null, l3Bytes: 0,
         name: pick(n, 'Name', 'SC-Name') || `SC${i + 1}`,
       };

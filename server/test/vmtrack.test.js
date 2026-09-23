@@ -5,16 +5,36 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { slotKey, slotStartMs, normalizeVm, diffVcenter, totalsOf, normalizeDs, diffDatastores } from '../src/vmtrack/diff.js';
 
-test('slotKey: 00~11시 → T00, 12~23시 → T12(로컬 기준)', () => {
-  assert.equal(slotKey(new Date(2026, 7, 21, 0, 0)), '2026-08-21T00');
-  assert.equal(slotKey(new Date(2026, 7, 21, 11, 59)), '2026-08-21T00');
-  assert.equal(slotKey(new Date(2026, 7, 21, 12, 0)), '2026-08-21T12');
-  assert.equal(slotKey(new Date(2026, 7, 21, 23, 59)), '2026-08-21T12');
-  assert.equal(slotKey(new Date(2026, 0, 5, 9, 30)), '2026-01-05T00', '월/일 zero-pad');
+test('slotKey: 포탈 오프셋(KST) 기준 00~11시 → T00, 12~23시 → T12 — 프로세스 TZ 와 무관(v2.586)', () => {
+  const kst = (y, mo, d, h, mi) => new Date(Date.UTC(y, mo, d, h, mi) - 540 * 60_000); // KST 벽시계 → 절대시각
+  assert.equal(slotKey(kst(2026, 7, 21, 0, 0)), '2026-08-21T00');
+  assert.equal(slotKey(kst(2026, 7, 21, 11, 59)), '2026-08-21T00');
+  assert.equal(slotKey(kst(2026, 7, 21, 12, 0)), '2026-08-21T12');
+  assert.equal(slotKey(kst(2026, 7, 21, 23, 59)), '2026-08-21T12');
+  assert.equal(slotKey(kst(2026, 0, 5, 9, 30)), '2026-01-05T00', '월/일 zero-pad');
+  // UTC 00:30 = KST 09:30 — 예전(프로세스 TZ=UTC)에는 T00 이 전날로 갈렸던 경계
+  assert.equal(slotKey(new Date(Date.UTC(2026, 7, 20, 15, 30))), '2026-08-21T00', 'UTC 15:30 = KST 다음날 00:30');
+  assert.equal(slotKey(Date.UTC(2026, 7, 21, 3, 0)), '2026-08-21T12', '숫자 ts 도 받는다(KST 12:00)');
+  assert.equal(slotKey(new Date(Date.UTC(2026, 7, 21, 3, 0)), 0), '2026-08-21T00', '오프셋 0 = UTC');
+});
+
+test('slotKey: TZ=Asia/Seoul 프로세스에서는 예전 로컬 계산과 한 글자도 다르지 않다(마이그레이션 불필요)', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const script = `
+    const { slotKey } = await import(${JSON.stringify(new URL('../src/vmtrack/diff.js', import.meta.url).href)});
+    const pad = (n) => String(n).padStart(2, '0');
+    const legacy = (d) => \`\${d.getFullYear()}-\${pad(d.getMonth() + 1)}-\${pad(d.getDate())}T\${d.getHours() < 12 ? '00' : '12'}\`;
+    let diff = 0; const t0 = Date.UTC(2026, 0, 1);
+    for (let i = 0; i < 24 * 400; i++) { const d = new Date(t0 + i * 3_600_000 + 1_800_000); if (slotKey(d) !== legacy(d)) diff++; }
+    console.log(diff);
+  `;
+  const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...process.env, TZ: 'Asia/Seoul' }, encoding: 'utf8' });
+  assert.equal(out.trim(), '0');
 });
 
 test('slotStartMs: 슬롯 시작 시각(차트 x축 정렬) · 잘못된 키는 null', () => {
-  assert.equal(slotStartMs('2026-08-21T12'), new Date(2026, 7, 21, 12, 0, 0, 0).getTime());
+  assert.equal(slotStartMs('2026-08-21T12'), Date.UTC(2026, 7, 21, 12, 0, 0, 0) - 540 * 60_000, 'KST 12:00 의 절대시각');
+  assert.equal(slotKey(slotStartMs('2026-08-21T12')), '2026-08-21T12', '왕복');
   assert.equal(slotStartMs('2026-08-21T06'), null);
   assert.equal(slotStartMs(''), null);
 });

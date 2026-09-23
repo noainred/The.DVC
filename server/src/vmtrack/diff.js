@@ -2,26 +2,38 @@
  * vmtrack/diff.js — VM 수량 추이의 순수 로직(v2.345): 슬롯 키 계산 + 스냅샷 diff.
  * DB·시각 의존성을 배제해 단위테스트로 고정한다(now 주입 가능).
  *
- * 슬롯: 사용자 요구 "매일 00시·12시 기준" — 로컬 시간대의 00:00 / 12:00 두 슬롯.
+ * 슬롯: 사용자 요구 "매일 00시·12시 기준" — 포탈 시간대(기본 KST)의 00:00 / 12:00 두 슬롯(v2.586).
  *   키는 'YYYY-MM-DDT00' | 'YYYY-MM-DDT12'. 같은 슬롯에 두 번 수집되면 DB 가 UPSERT 로
  *   덮어써 중복 행이 생기지 않는다(수동 스냅샷도 같은 슬롯이면 최신 값으로 갱신).
  */
 import { numOrNull } from '../util/numOrNull.js';
+import { DAY_OFFSET_MIN } from '../util/dayKey.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 
-/** 로컬 시각 → 슬롯 키. 00:00~11:59 → …T00, 12:00~23:59 → …T12. */
-export function slotKey(now = new Date()) {
-  const d = now instanceof Date ? now : new Date(now);
-  const half = d.getHours() < 12 ? '00' : '12';
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${half}`;
+/**
+ * 시각 → 슬롯 키. 00:00~11:59 → …T00, 12:00~23:59 → …T12.
+ *
+ * ⚠ v2.586 — **포탈 오프셋(`util/dayKey.js DAY_OFFSET_MIN`, 기본 KST)으로 자른다.** 예전에는 `getHours()`·
+ *   `getDate()`(프로세스 TZ)였는데 패키지 유닛(`vmware-portal.service`)은 TZ 를 지정하지 않아, 호스트가 UTC 면
+ *   사용자 요구 "매일 00시·12시" 가 **KST 09시·21시**가 됐다(v2.583 이 '별건' 으로 적어 둔 것).
+ *   · 호스트 TZ 가 이미 KST 면 **결과가 한 글자도 바뀌지 않는다**(마이그레이션 불필요 — 테스트가 고정).
+ *   · 호스트가 UTC 였던 현장은 교체 순간 한 번 불연속이 생긴다: 옛 키는 UTC 기준이라 차트 x(`slotStartMs`)가
+ *     9시간 앞당겨 보이고, 교체 시각에 따라 같은 문자열의 슬롯 1개가 새 수집으로 덮일 수 있다(UPSERT).
+ *     키 형식이 날짜 문자열뿐이라 옛 행이 어느 TZ 로 만들어졌는지 알 길이 없다 — 지어내 보정하지 않는다.
+ */
+export function slotKey(now = new Date(), offsetMin = DAY_OFFSET_MIN) {
+  const t = now instanceof Date ? now.getTime() : Number(now);
+  const d = new Date(t + offsetMin * 60_000); // 포탈 벽시계를 UTC 필드로 읽는다
+  const half = d.getUTCHours() < 12 ? '00' : '12';
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${half}`;
 }
 
-/** 슬롯 키 → 그 슬롯의 시작 시각(ms). 차트 x축 정렬용(수집이 몇 분 늦어도 눈금은 일정). */
-export function slotStartMs(slot) {
+/** 슬롯 키 → 그 슬롯의 시작 시각(ms, 포탈 오프셋 기준). 차트 x축 정렬용(수집이 몇 분 늦어도 눈금은 일정). */
+export function slotStartMs(slot, offsetMin = DAY_OFFSET_MIN) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(00|12)$/.exec(String(slot || ''));
   if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), 0, 0, 0).getTime();
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), 0, 0, 0) - offsetMin * 60_000;
 }
 
 /**

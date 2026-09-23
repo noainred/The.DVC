@@ -9,14 +9,13 @@
  * 증감이 null 이면 '—' 로 둔다(직전 관측이 없다는 뜻이며 0 으로 채우지 않는다).
  */
 import { humanBytes, deltaMap, removedEntries } from './scan.js';
+import { localStamp } from '../util/dayKey.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const fmtTs = (ts) => {
-  const d = new Date(Number(ts) || Date.now());
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-};
+// v2.586 — 포탈 시각(KST)으로 적는다. 로컬 getter 는 프로세스 TZ(패키지 unit 은 UTC)를 따라 9시간 어긋났다.
+//   시각이 없으면 '지금' 을 지어내지 않고 '—' 다('수집: <지금>' 은 수집 시각의 거짓이다).
+const fmtTs = (ts) => localStamp(ts) || '—';
 
 /** 증감 표기 — 양수는 +, null 은 '—'(신규는 '신규'). */
 function fmtDelta(d) {
@@ -34,7 +33,7 @@ export function renderSubject(template, { root, agent, ts, topN }) {
     .replace(/\{root\}/g, String(root || ''))
     .replace(/\{agent\}/g, String(agent || ''))
     .replace(/\{topN\}/g, String(topN ?? ''))
-    .replace(/\{date\}/g, fmtTs(ts).slice(0, 10));
+    .replace(/\{date\}/g, (localStamp(ts) || localStamp(Date.now())).slice(0, 10));
 }
 
 /**

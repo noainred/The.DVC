@@ -15,17 +15,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { migrationInventory, defaultDbDir, dbDir, MIGRATABLE, MIGRATABLE_DIRS } from './dbLocation.js';
+import { fileStamp, localStamp } from '../util/dayKey.js';
 
 /** 스크립트를 저장할 디렉터리 — CONFIG_DIR/migrations (권한 0700). */
 export function migrationsDir() {
   return path.join(defaultDbDir(), 'migrations');
 }
 
-const stamp = (ts) => {
-  const d = new Date(ts);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-};
+// v2.586 — 파일명·README 시각은 포탈 시각(KST). 초 단위는 같은 분에 두 번 만들 때 이름이 겹치지 않게 유지한다.
+const stamp = (ts) => `${fileStamp(ts)}${String(Math.floor(((Number(ts) || 0) % 60_000) / 1000)).padStart(2, '0')}`;
 
 /** 셸 인용 — 경로에 공백/특수문자가 있어도 안전하게. 단일 인용부호를 '\'' 로 이스케이프. */
 const q = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
@@ -223,7 +221,7 @@ function renderReadme({ srcDir, targetDir, inv, service, scriptName, ts }) {
   const rows = inv.files.map((f) => `| ${f.file || `${f.dir}/`} | ${f.label} | ${(f.bytes / 1048576).toFixed(1)} MB |`).join('\n');
   return `# DB 저장 경로 마이그레이션 안내
 
-- 생성 시각: ${new Date(ts).toLocaleString('ko-KR')}
+- 생성 시각: ${localStamp(ts)}
 - 현재 경로: \`${srcDir}\`
 - 새 경로: \`${targetDir}\`
 - 대상 총 용량: **${(inv.totalBytes / 1048576).toFixed(1)} MB**

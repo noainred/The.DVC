@@ -112,7 +112,8 @@ export function healthStringState(raw) {
   if (!s) return { state: PART_STATE.unknown, raw: '' };
   const r = String(raw).trim();
   if (s === 'UNKNOWN') return { state: PART_STATE.unknown, raw: r };
-  if (/^(OK|HEALTHY|NORMAL|GOOD|ONLINE|UP|ATTENTION_NONE)/.test(s)) return { state: PART_STATE.ok, raw: r };
+  // v2.586 — 끝에 \b: 예전엔 접두 일치라 'UPGRADE_FAILED'·'OKAY_NOT' 류가 ^UP·^OK 로 **정상**이 됐다.
+  if (/^(OK|HEALTHY|NORMAL|GOOD|ONLINE|UP|ATTENTION_NONE)\b/.test(s)) return { state: PART_STATE.ok, raw: r };
   if (/^(REMOVED|EMPTY|ABSENT|NOT[_ ]?PRESENT|UNCONFIGURED)/.test(s)) return { state: PART_STATE.absent, raw: r };
   if (/^(DEGRADED|WARNING|MINOR|ATTN|NON[-_ ]?CRITICAL|PARTIAL)/.test(s)) return { state: PART_STATE.warn, raw: r };
   return { state: PART_STATE.fault, raw: r };

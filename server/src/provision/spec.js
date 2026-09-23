@@ -1,17 +1,12 @@
+import { ipToNum, numToIp } from '../util/ipv4.js';
 /**
  * VM provisioning spec — expand a "create many similar VMs" request into a
  * concrete per-VM list. Supports a naming pattern with {n} (zero-paddable),
  * a matching guest hostname pattern, and auto-incrementing static IPs.
  */
 
-export function ipToNum(s) {
-  const p = String(s || '').trim().split('.').map(Number);
-  return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)
-    ? (((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) : null;
-}
-export function numToIp(n) {
-  return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
-}
+// v2.586 — IPv4 파싱은 util/ipv4.js 하나. 호출부(svcmon/genspec.js) 호환을 위해 재수출한다.
+export { ipToNum, numToIp };
 
 const applyPattern = (pat, n, pad) => {
   const num = pad > 0 ? String(n).padStart(pad, '0') : String(n);

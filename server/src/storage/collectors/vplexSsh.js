@@ -14,6 +14,7 @@
 
 import { emptySnapshot } from '../types.js';
 import { runCliSession, parseKeyValueBlocks, sshFailureSnapshot, firstLine } from './cliSsh.js';
+import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
 
 const wrap = (cmd) => [cmd, `vplexcli -c "${cmd}"`];
 
@@ -89,7 +90,7 @@ export function normalizeVplexSsh(device, out) {
       const st = (pick(d, 'operational-status', 'health-state', 'Status') || '').toLowerCase();
       return {
         id: i + 1, ip: pick(d, 'management-ip', 'IP') || '',
-        health: st ? (/ok|healthy|online|normal/.test(st) ? 'ok' : st) : 'unknown',
+        health: st ? (healthWord(st) === 'ok' ? 'ok' : healthWord(st) === 'unknown' ? 'unknown' : st) : 'unknown', // v2.586 — healthWord 하나
         inBps: null, outBps: null, hdd: null, ssd: null, l3Bytes: 0,
         name: pick(d, 'Name', 'director-id') || `director${i + 1}`,
       };

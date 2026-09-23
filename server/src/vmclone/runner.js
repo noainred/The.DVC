@@ -30,15 +30,13 @@ import {
   destroyClone, vmFilePaths, parseDsPath, backupFileFilter, datacenterPathOf, downloadDsFile,
 } from './vsphere.js';
 import { getMount, mountedSet, mountPointOf } from '../system/nfsMounts.js';
-import { morefOf } from '../vcenter/registry.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
+import { morefOf } from '../vcenter/registry.js';
+import { fileStamp } from '../util/dayKey.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
 
 // v2.447(감사 B1): 로컬 split(':') 헬퍼 제거 — vcenterId 에 콜론이 있으면 잘못된 MoRef 로
 // 스냅샷/클론을 시도하게 된다. 공용 morefOf(id, vcenterId) 사용.
-const stamp = () => {
-  const d = new Date();
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
-};
+// v2.586 — vCenter 에 남는 클론·스냅샷 이름의 시각은 포탈 시각(KST). 프로세스 TZ(UTC)를 따르면 9시간 어긋난다.
+const stamp = () => fileStamp(Date.now());
 
 // 전역 실행 큐 — 한 번에 1개(스케줄·수동 공용). 대기 중 목록은 상태 API 로 노출.
 let _chain = Promise.resolve();

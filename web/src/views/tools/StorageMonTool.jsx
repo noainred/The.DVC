@@ -406,7 +406,16 @@ function Cell({ col, r, ctx }) {
         </td>
       );
     case 'health':
-      return <td>{v ? <span className={`badge ${/ok|healthy|normal/i.test(String(v)) ? 'green' : 'red'}`}>{v}</span> : dash}</td>;
+      {
+        /*
+         * ⚠ v2.586 — 예전 인라인 판정 `/ok|healthy|normal/i` 는 **앵커가 없어** 'Broken'·'Not OK' 의
+         *   부분 문자열 'ok' 에 걸려 **초록**으로 칠했고, 'unknown' 은 빨강이었다(색과 글자가 반대말 —
+         *   v2.526 이 상세 배지에서 고친 것과 같은 결함이 표 열에 남아 있었다). 판정은 `healthBadge` 하나.
+         */
+        if (!v) return <td>{dash}</td>;
+        const hb = healthBadge(v);
+        return <td><span className={`badge ${hb.tone}`} title={hb.title}>{v}</span></td>;
+      }
     case 'status':
       return (
         <td>
@@ -429,7 +438,9 @@ function Cell({ col, r, ctx }) {
                   title={`부분 실패 — 접속은 됐지만 일부 섹션을 수집하지 못했습니다:\n${partialReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
                   부분 <span aria-hidden="true">ⓘ</span>
                 </button>
-              : <span className="badge green">정상</span>
+              : <span className="badge green" title={s?.nodes?.unhealthy
+                  ? `수집 성공 — 이 표지는 수집 성패이고 장비 헬스와 별개입니다. 이 장비는 비정상 노드가 ${s.nodes.unhealthy}대 있습니다(노드 열의 ⚠ 표지를 누르세요).`
+                  : '수집 성공 — 이 표지는 수집 성패이고 장비 헬스와 별개입니다(헬스·노드 열을 보세요).'}>정상</span>
           ) : (
             <button type="button" className="badge red fail-badge" onClick={() => setDetail(r.id)}
               title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>

@@ -117,13 +117,16 @@ export default function V4App({ user, health, healthError, onExit }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [q, region, focusVc, vcRegion]);
 
+  const phase = loadPhase({ health, healthError, poll: ov });
+  const phaseText = loadText(phase, { health, pollError: ov.error });
   const alarmsAll = useMemo(() => al.data?.items || [], [al.data]);
   const dsOver = ds.data ? ds.data.items.filter((d) => d.usagePct >= 90).length : null;
   const tiles = useMemo(() => buildDomainTiles({
     global, alarms: alarmsAll, nsx: nsx.data, svcmon: svc.data, pdu: pdu.data, idracPoller: idrac.data?.poller || null,
     dsOver, storageDevices: stor.data ? stor.data.devices.length : null,
     permission: { idrac: isAdmin, pdu: canPdu, svcmon: canSvcmon },
-  }), [global, alarmsAll, nsx.data, svc.data, pdu.data, idrac.data, dsOver, stor.data, isAdmin, canPdu, canSvcmon]);
+    waitMeta: phaseText.short, // v2.586 — 고정 '수집 대기' 대신 '첫 수집 중(3/28)'·'vCenter 2개 연결 실패' 등
+  }), [global, alarmsAll, nsx.data, svc.data, pdu.data, idrac.data, dsOver, stor.data, isAdmin, canPdu, canSvcmon, phaseText.short]);
   const sev = severityCounts(alarmsAll);
   const spec = modeSpec(mode);
 
@@ -155,8 +158,6 @@ export default function V4App({ user, health, healthError, onExit }) {
   const updated = health?.generatedAt ? new Date(health.generatedAt).toLocaleTimeString('ko-KR') : '—';
   // 화면이 비어 있을 때 **왜** 비었는지(v2.509). 셸에서 한 번만 판정해 9화면이 공유한다 —
   // 각 화면이 따로 판정하면 같은 상황을 다르게 말하게 된다. 기준은 셸의 대표 폴(/overview)이다.
-  const phase = loadPhase({ health, healthError, poll: ov });
-  const phaseText = loadText(phase, { health, pollError: ov.error });
   const progress = collectProgress(health);
   const overviewSub = global ? `${fmtInt(sitesAll.length)}개 vCenter · 물리 서버 ${fmtInt(ov.data?.physical?.servers || global.hosts)} · VM ${fmtInt(global.vms)} · 15초 수집` : phaseText.short;
   const pageProps = {

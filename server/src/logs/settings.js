@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'vcenter-logs.json');
 
@@ -35,8 +36,10 @@ export function saveLogSettings(body = {}) {
     // Number(undefined)=NaN이고 NaN ?? x = NaN(??는 null/undefined만 잡음) → 부분 수정(예:
     // enabled만 토글) 시 보관기간/용량이 NaN→null로 영속화돼 prune·용량제한이 조용히 영구
     // 정지, DB 무한 증식. 유한 숫자일 때만 채택하고 아니면 기존값 유지.
-    retentionDays: Math.max(0, Math.min(3650, Number.isFinite(Number(body.retentionDays)) ? Number(body.retentionDays) : cur.retentionDays)),
-    maxSizeMB: Math.max(0, Math.min(1024 * 1024, Number.isFinite(Number(body.maxSizeMB)) ? Number(body.maxSizeMB) : cur.maxSizeMB)),
+    // v2.586 — 빈 칸('')·null 도 '미지정' 이다. `Number('') === 0` 이고 0 은 **무제한**이라, 칸을 비우고
+    //   저장하면 prune·용량 상한이 화면의 '저장됨' 과 함께 조용히 멈췄다. 명시적 0 만 무제한이다.
+    retentionDays: Math.max(0, Math.min(3650, numOrNull(body.retentionDays) ?? cur.retentionDays)),
+    maxSizeMB: Math.max(0, Math.min(1024 * 1024, numOrNull(body.maxSizeMB) ?? cur.maxSizeMB)),
     maxPerPoll: Math.max(100, Math.min(50000, Number(body.maxPerPoll) || cur.maxPerPoll)),
     minSeverity: ['info', 'warning', 'error'].includes(body.minSeverity) ? body.minSeverity : cur.minSeverity,
     storagePath: typeof body.storagePath === 'string' ? body.storagePath.trim() : cur.storagePath,

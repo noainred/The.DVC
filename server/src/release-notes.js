@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { atomicWriteFileSync, preserveCorrupt } from './util/atomicWrite.js';
+import { todayStamp } from './util/dayKey.js';
 
 const BUILTIN = path.join(path.dirname(fileURLToPath(import.meta.url)), 'release-notes.json');
 const USER_FILE = path.join(config.configDir, 'release-notes.json');
@@ -40,7 +41,7 @@ export function saveNote({ version, date, title, notes } = {}) {
   const list = readJson(USER_FILE).filter((n) => n.version !== version);
   list.push({
     version,
-    date: date || new Date().toISOString().slice(0, 10),
+    date: date || todayStamp(),
     title: title || '',
     notes: Array.isArray(notes) ? notes.filter(Boolean) : String(notes || '').split('\n').map((s) => s.trim()).filter(Boolean),
   });

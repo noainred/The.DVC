@@ -20,6 +20,17 @@ import { redactLogLine } from '../edgelog/redact.js';
 
 export const CAPS = { tmpl: 3000, prob: 500, ent: 200, http: 600, samples: 3, sampleLen: 300 };
 
+
+/*
+ * v2.586 — 로그 문자열이 곧 맵 키다. `[__proto__] …` 한 줄이 `st.tags['__proto__']` 로 **Object.prototype 을
+ * 오염**시켰다(실측 `({}).n === NaN`) — 실시간 분석은 콘솔 전 줄을 받으므로 한 줄로 프로세스 전체가 오염된다.
+ * `toString`·`constructor` 같은 이름은 `||` 조회가 상속 함수를 돌려줘 엉뚱한 곳에 더한다.
+ * 키는 `safeKey` 로 바꾸고 조회는 `own()`(자기 속성만)으로 한다.
+ */
+const RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
+export const safeKey = (k) => { const s = String(k); return RESERVED.has(s) ? `(${s})` : s; };
+const own = (obj, k) => (Object.hasOwn(obj, k) ? obj[k] : undefined);
+
 export function newState() {
   return {
     lines: 0, levels: { info: 0, warn: 0, error: 0, unknown: 0 },
@@ -57,7 +68,8 @@ export function addItem(state, item, idx) {
       if (st.last == null || ts >= st.last) { st.last = ts; st.lastRaw = item.tsRaw || ''; }
     }
     const tag = tagOf(msg);
-    const t = st.tags[tag || '(태그 없음)'] || (st.tags[tag || '(태그 없음)'] = { n: 0, warn: 0, error: 0 });
+    const tk = safeKey(tag || '(태그 없음)');
+    const t = own(st.tags, tk) || (st.tags[tk] = { n: 0, warn: 0, error: 0 });
     t.n += 1; if (lv === 'warn') t.warn += 1; if (lv === 'error') t.error += 1;
 
     // HTTP 요청 줄 — 라우트·상태 단위로만 센다(템플릿·규칙 대상 아님).
@@ -65,7 +77,7 @@ export function addItem(state, item, idx) {
       const h = parseHttp(msg);
       if (h) {
         const key = `${h.method} ${h.route} ${h.status}`;
-        let e = st.http[key];
+        let e = own(st.http, key);
         if (!e) {
           if (Object.keys(st.http).length >= CAPS.http) { st.overflow.http += 1; return; }
           e = st.http[key] = { method: h.method, route: h.route, status: h.status, n: 0, sumMs: 0, maxMs: 0, slow: 0, rid: '' };
@@ -83,15 +95,15 @@ export function addItem(state, item, idx) {
       if (m) { hit = r; break; }
     }
     if (hit) {
-      const e = st.rules[hit.id] || (st.rules[hit.id] = { n: 0, first: null, last: null, firstRaw: '', lastRaw: '', ent: {}, samples: [] });
+      const e = own(st.rules, hit.id) || (st.rules[hit.id] = { n: 0, first: null, last: null, firstRaw: '', lastRaw: '', ent: {}, samples: [] });
       e.n += 1;
       if (ts != null) {
         if (e.first == null || ts < e.first) { e.first = ts; e.firstRaw = item.tsRaw || ''; }
         if (e.last == null || ts >= e.last) { e.last = ts; e.lastRaw = item.tsRaw || ''; }
       }
       if (hit.entity && m[hit.entity]) {
-        const name = String(m[hit.entity]).trim().slice(0, 120);
-        if (e.ent[name] != null) e.ent[name] += 1;
+        const name = safeKey(String(m[hit.entity]).trim().slice(0, 120));
+        if (own(e.ent, name) != null) e.ent[name] += 1;
         else if (Object.keys(e.ent).length < CAPS.ent) e.ent[name] = 1;
         else st.overflow.ent += 1;
       }
@@ -100,7 +112,7 @@ export function addItem(state, item, idx) {
 
     // 템플릿(반복 문장)
     const key = `${tag}|${templateOf(msg)}`;
-    let te = st.tmpl[key];
+    let te = own(st.tmpl, key);
     if (!te) {
       if (Object.keys(st.tmpl).length >= CAPS.tmpl) st.overflow.tmpl += 1;
       else te = st.tmpl[key] = { n: 0, tag, level: lv, sample: sample(msg), rule: hit ? hit.id : '' };
@@ -111,7 +123,7 @@ export function addItem(state, item, idx) {
     if (!hit) {
       const problem = lv === 'warn' || lv === 'error' || (lv === 'unknown' && looksProblem(msg));
       if (problem) {
-        let pe = st.prob[key];
+        let pe = own(st.prob, key);
         if (!pe) {
           if (Object.keys(st.prob).length >= CAPS.prob) st.overflow.prob += 1;
           else pe = st.prob[key] = { n: 0, tag, level: lv, guessed: lv === 'unknown', sample: sample(msg) };
@@ -133,36 +145,42 @@ export function mergeState(a, b) {
   for (const k of Object.keys(a.levels)) a.levels[k] += (b.levels?.[k] || 0);
   if (b.first != null && (a.first == null || b.first < a.first)) { a.first = b.first; a.firstRaw = b.firstRaw || ''; }
   if (b.last != null && (a.last == null || b.last >= a.last)) { a.last = b.last; a.lastRaw = b.lastRaw || ''; }
-  for (const [k, v] of Object.entries(b.tags || {})) {
-    const t = a.tags[k] || (a.tags[k] = { n: 0, warn: 0, error: 0 });
+  for (const [k0, v] of Object.entries(b.tags || {})) {
+    const k = safeKey(k0);
+    const t = own(a.tags, k) || (a.tags[k] = { n: 0, warn: 0, error: 0 });
     t.n += v.n || 0; t.warn += v.warn || 0; t.error += v.error || 0;
   }
-  for (const [k, v] of Object.entries(b.tmpl || {})) {
-    const t = a.tmpl[k];
+  for (const [k0, v] of Object.entries(b.tmpl || {})) {
+    const k = safeKey(k0);
+    const t = own(a.tmpl, k);
     if (t) { t.n += v.n || 0; if (v.level === 'error' || (v.level === 'warn' && t.level !== 'error')) t.level = v.level; }
     else if (Object.keys(a.tmpl).length < CAPS.tmpl) a.tmpl[k] = { ...v };
     else a.overflow.tmpl += v.n || 0;
   }
-  for (const [k, v] of Object.entries(b.prob || {})) {
-    const t = a.prob[k];
+  for (const [k0, v] of Object.entries(b.prob || {})) {
+    const k = safeKey(k0);
+    const t = own(a.prob, k);
     if (t) t.n += v.n || 0;
     else if (Object.keys(a.prob).length < CAPS.prob) a.prob[k] = { ...v };
     else a.overflow.prob += v.n || 0;
   }
-  for (const [k, v] of Object.entries(b.rules || {})) {
-    const t = a.rules[k] || (a.rules[k] = { n: 0, first: null, last: null, firstRaw: '', lastRaw: '', ent: {}, samples: [] });
+  for (const [k0, v] of Object.entries(b.rules || {})) {
+    const k = safeKey(k0);
+    const t = own(a.rules, k) || (a.rules[k] = { n: 0, first: null, last: null, firstRaw: '', lastRaw: '', ent: {}, samples: [] });
     t.n += v.n || 0;
     if (v.first != null && (t.first == null || v.first < t.first)) { t.first = v.first; t.firstRaw = v.firstRaw || ''; }
     if (v.last != null && (t.last == null || v.last >= t.last)) { t.last = v.last; t.lastRaw = v.lastRaw || ''; }
-    for (const [name, n] of Object.entries(v.ent || {})) {
-      if (t.ent[name] != null) t.ent[name] += n;
+    for (const [n0, n] of Object.entries(v.ent || {})) {
+      const name = safeKey(n0);
+      if (own(t.ent, name) != null) t.ent[name] += n;
       else if (Object.keys(t.ent).length < CAPS.ent) t.ent[name] = n;
       else a.overflow.ent += n;
     }
     for (const s of v.samples || []) if (t.samples.length < CAPS.samples) t.samples.push(s);
   }
-  for (const [k, v] of Object.entries(b.http || {})) {
-    const t = a.http[k];
+  for (const [k0, v] of Object.entries(b.http || {})) {
+    const k = safeKey(k0);
+    const t = own(a.http, k);
     if (t) { t.n += v.n; t.sumMs += v.sumMs; t.slow += v.slow; if (v.maxMs > t.maxMs) { t.maxMs = v.maxMs; t.rid = v.rid || t.rid; } }
     else if (Object.keys(a.http).length < CAPS.http) a.http[k] = { ...v };
     else a.overflow.http += v.n || 0;
