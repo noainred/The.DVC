@@ -1,7 +1,7 @@
 // v2.583 — '불러오는 중' 의 지연 주체(요청 ID · 서버 상태) 표시 회귀 고정.
 // 사용자 요청: "불러오는 중… 이라는 메시지 나올 때 누가 이 메시지의 지연을 발생시켰는지 ID 도 같이 보여줘".
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { statusPollTargets, serverStateText, stallPayload } from './perfClientLogic.js';
+import { statusPollTargets, serverStateText, stallPayload, requesterText } from './perfClientLogic.js';
 import { taskRows } from './components/taskLabel.js';
 import { startReq, endReq, ridOf, inflightSnapshot, pollServerStatus, _resetPerfClient } from './perfClient.js';
 
@@ -76,5 +76,16 @@ describe('요청 ID (v2.583)', () => {
       endReq(id);
       expect(inflightSnapshot(1)).toEqual([]);
     } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('요청자 표시 (v2.585)', () => {
+  it('서버가 답한 소유자가 먼저이고, 없으면 로그인 계정, 둘 다 없으면 지어내지 않는다', () => {
+    expect(requesterText({ state: 'processing', user: 'alice' }, { username: 'alice' })).toEqual({ name: 'alice', source: 'server', mine: true });
+    expect(requesterText({ state: 'done', user: 'bob' }, { username: 'alice' })).toEqual({ name: 'bob', source: 'server', mine: false });
+    expect(requesterText(null, { username: 'alice' })).toEqual({ name: 'alice', source: 'session', mine: true });
+    expect(requesterText({ state: 'unknown' }, { username: ' carol ' })).toEqual({ name: 'carol', source: 'session', mine: true });
+    expect(requesterText(null, null)).toEqual({ name: '', source: null, mine: false });
+    expect(requesterText({ state: 'processing', user: '' }, {})).toEqual({ name: '', source: null, mine: false });
   });
 });

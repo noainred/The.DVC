@@ -133,6 +133,22 @@ export function statusPollTargets(inflight = [], { detailMs = 3_000, limit = 5 }
  * 숫자가 없으면 단위를 붙이지 않는다(v2.575 규약).
  * @returns {{tone:'busy'|'done'|'unknown'|'pending', text:string}}
  */
+/**
+ * 요청자 표시(v2.585, 순수). 사용자 요청: "요청자 ID 가 포탈 내부에서 사용하는 ID 말고 job 을 실행한 사용자 ID 로 표시".
+ *  · 서버가 답한 요청자(`server.user`, 소유자 검사를 통과한 값)가 있으면 그것이 **사실**이다(`source:'server'`).
+ *  · 아직 서버가 답하지 않았으면 이 브라우저의 로그인 계정이 곧 요청자다(`source:'session'`) — 요청은 이 탭이 보냈다.
+ *  · 둘 다 없으면(인증 꺼짐·로그인 전) 이름을 지어내지 않는다(`name:''`).
+ * `mine` 은 표시된 요청자가 현재 로그인 계정과 같은지 — 관리자가 남의 요청을 볼 때 구분한다.
+ * ⚠ 내부 추적 ID(`w…-…`)는 대체가 아니라 **보조**다 — 로그·성능 측정과 대조하는 유일한 열쇠라 지우지 않는다.
+ */
+export function requesterText(server, currentUser) {
+  const me = currentUser && typeof currentUser === 'object' ? String(currentUser.username || '').trim() : '';
+  const fromServer = server && typeof server === 'object' ? String(server.user || '').trim() : '';
+  if (fromServer) return { name: fromServer, source: 'server', mine: !!me && fromServer === me };
+  if (me) return { name: me, source: 'session', mine: true };
+  return { name: '', source: null, mine: false };
+}
+
 export function serverStateText(server) {
   const s = server && typeof server === 'object' ? server : null;
   const sec = (ms) => {

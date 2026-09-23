@@ -361,9 +361,22 @@ function scale(n, unit) {
  * ⚠ 원문을 지우지 말 것 — 뒤에 그대로 붙인다. '인증 실패' 라고만 하면 어느 단계에서
  * 거부됐는지(공개키/비밀번호/키보드 인터랙티브)를 사용자가 알 수 없다.
  */
+/**
+ * 버전 항목의 후보별 시도 요약(순수, v2.585) — 화면의 '버전' 열이 빈 이유를 말하는 재료.
+ * 원문 앞 160자만 싣는다(전체는 `cliRaw` 에 있다). 시도가 없으면 빈 배열(예산으로 건너뛴 경우 — `errors.version` 이 말한다).
+ */
+export function versionAttemptsOf(raw = []) {
+  return (Array.isArray(raw) ? raw : []).filter((x) => x && x.key === 'version').map((x) => ({
+    cmd: String(x.cmd || ''), ok: !!x.ok, ms: Number.isFinite(Number(x.ms)) ? Number(x.ms) : null,
+    ...(x.timedOut ? { timedOut: true } : {}), ...(x.truncated ? { truncated: true } : {}),
+    ...(x.aborted ? { aborted: String(x.abortReason || x.aborted) } : {}),
+    head: String(x.sample || '').slice(0, 160),
+  }));
+}
+
 export function sshFailureSnapshot(device, err, raw = []) {
   const snap = emptySnapshot(device);
-  snap.extra = { collectMethod: 'ssh', cliRaw: raw };
+  snap.extra = { collectMethod: 'ssh', cliRaw: raw, versionAttempts: versionAttemptsOf(raw) };
   const msg = err?.message || err;
   snap.error = isSshAuthError(err)
     ? `SSH 인증 실패: ${msg} — 계정·비밀번호(또는 개인키)를 확인하세요.`

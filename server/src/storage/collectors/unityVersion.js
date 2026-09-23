@@ -49,7 +49,19 @@ function pick(records, keys) {
  * @param {Array<Record<string,string>>} records
  */
 export function versionFromUemcli(records) {
-  const v = pick(records, VERSION_KEYS);
+  /*
+   * v2.585 — `uemcli /sys/soft/ver show` 는 **설치본과 후보(업그레이드 대기) 이미지를 함께** 나열한다
+   * (`Type = Installed` / `Candidate`). 후보 이미지의 버전을 현재 버전이라 말하면 **오류 없이 틀린 값**이다 —
+   * `Type` 이 있는 레코드는 설치본을 앞으로, 후보(Candidate/Upgrade)는 **아예 뺀다**. ⚠ 이 명령의 실장비
+   * 출력은 아직 보지 못했다(Dell Unity CLI 가이드 기준) — 어느 키를 읽었는지는 `usedKey` 가 밝힌다.
+   */
+  const list = (Array.isArray(records) ? records : []).filter((r) => r && typeof r === 'object');
+  const typed = list.filter((r) => r.Type != null);
+  const ordered = typed.length
+    ? [...typed.filter((r) => /install/i.test(String(r.Type))), ...list.filter((r) => r.Type == null)]
+    : list;
+  const v = pick(ordered, VERSION_KEYS);
+  records = ordered;
   const m = pick(records, MODEL_KEYS);
   const s = pick(records, SERIAL_KEYS);
   return {
