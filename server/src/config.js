@@ -285,7 +285,7 @@ export const config = {
     // Token lifetime, e.g. "8h", "30m", "7d", or seconds.
     tokenTtl: process.env.AUTH_TOKEN_TTL || '8h',
     // Default seed admin password when no users.json exists (demo convenience).
-    defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || 'admin123',
+    defaultAdminPassword: process.env.DEFAULT_ADMIN_PASSWORD || '', // v2.591 P1: 고정 기본값 없음(비면 auth.js 가 임의 생성)
     // Issuer label shown in Google Authenticator when enrolling TOTP.
     totpIssuer: process.env.TOTP_ISSUER || 'VMware Portal',
   },

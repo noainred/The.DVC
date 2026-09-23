@@ -121,11 +121,49 @@ export function innerItemText(it = {}, now = Date.now()) {
   return { tone: 'ok', text: [...bits, ...(note ? [note.slice(0, 80)] : [])].join(' · ') };
 }
 
+/**
+ * 엣지 ↔ MAIN 두 가닥(v2.591) — **데이터가 가는 방향**이다(사용자 선택). 누가 요청했는지가 아니다:
+ * 메인이 엣지에서 가져온 자료(cpull)는 엣지 → 메인, 엣지가 메인에서 가져간 설정(pull)은 메인 → 엣지다.
+ * 방향별 종류 집합은 `dataFlowLayout.js UP_KINDS·DOWN_KINDS` 가 소유한다.
+ */
+export const DIR_LABEL = Object.freeze({ up: '엣지 → 메인', down: '메인 → 엣지' });
+export const DIR_ARROW = Object.freeze({ up: '↑', down: '↓' });
+export const DIR_KINDS_TEXT = Object.freeze({
+  up: 'push · 결과 회신 · 메인이 가져옴',
+  down: '설정·자료 가져감 · 작업 인출 · 메인이 보냄',
+});
+
+/**
+ * MAIN 카드·상세 표의 방향 칸 — `edgeDirections()` 결과 하나를 짧은 글자와 긴 설명으로.
+ * ⚠ 기록이 없으면 '—' 이고 정상이라 말하지 않는다. 실패는 '실패' 와 사유(설명)로 — 시각만 보여주면 초록처럼 읽힌다.
+ */
+export function dirCellText(d = {}, now = Date.now()) {
+  const state = d.state || 'none';
+  const counts = `정상 ${d.ok || 0} · 낡음 ${d.stale || 0} · 실패 ${d.fail || 0}`;
+  if (state === 'none' || !d.links) return { text: '—', short: '—', title: '이 방향으로 오간 기록이 없습니다(정상이라는 뜻이 아닙니다).', state: 'none' };
+  const okPart = d.okAt ? `마지막 성공 ${ageText(d.okAt, now)}` : '성공 기록 없음';
+  if (state === 'fail') {
+    const why = d.reason ? ` · 사유 ${d.reason}` : '';
+    return { text: '실패', short: '실패', title: `실패 ${ageText(d.failAt || d.lastAt, now)}${why} · ${okPart} · 연결 ${d.links}개(${counts})`, state };
+  }
+  const at = d.okAt || d.lastAt;
+  const text = at ? ageText(at, now) : '—';
+  // short — MAIN 카드의 좁은 칸용(열 머리가 '경과' 라 '전' 을 뺀다: '12초 전' → '12초').
+  return { text, short: text.replace(/\s*전$/, ''), title: `${STATE_LABEL[state] || state} · ${okPart} · 연결 ${d.links}개(${counts})`, state };
+}
+
+/** MAIN 카드 합계 한 줄(엣지 수 기준). */
+export function dirSumText(s = {}) {
+  return `정상 ${s.ok || 0} · 낡음 ${s.stale || 0} · 실패 ${s.fail || 0} · 없음 ${s.none || 0}`;
+}
+
 export const LEGEND = Object.freeze([
   '선은 **기록이 있는 연결만** 그립니다. 굵은 빨간 선은 마지막 실패가 마지막 성공보다 뒤인 연결, 주황은 관측 간격의 {factor}배(하한 {min})를 넘겨 새 기록이 없는 연결입니다.',
   '가운데 버스의 눈금 하나가 경로 하나입니다. 회색 눈금은 중앙이 기록을 한 번도 받지 못한 경로입니다 — 쓰지 않는 기능일 수도, 막혀 있을 수도 있습니다.',
   '거부된 요청의 엣지 이름은 요청이 주장한 값이라 **검증되지 않았습니다**. 공유 토큰으로 가져간 pull 도 같습니다.',
   '엣지 **안의** 수집 상태는 엣지 카드의 ‘내부 수집’ 버튼을 누를 때만 그 엣지에서 가져옵니다.',
+  '엣지와 **MAIN** 사이 두 가닥은 **데이터가 가는 방향**입니다 — 메인을 향하는 화살표는 push·결과 회신·메인이 가져간 자료, 엣지를 향하는 화살표는 엣지가 가져간 설정·자료·작업과 메인이 보낸 명령입니다. 선 색은 그 방향 연결 중 가장 나쁜 상태이고, 기록이 없으면 회색 점선입니다.',
+  '엣지 카드의 ‘↑ 올림 · ↓ 가져감 · ⇄ 중앙 호출’ 은 **요청한 쪽** 기준이라 MAIN 선의 방향과 축이 다릅니다 — 메인이 엣지에서 가져온 자료는 카드에서는 ‘중앙 호출’, 선에서는 메인을 향합니다.',
 ]);
 
 /**

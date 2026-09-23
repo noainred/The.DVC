@@ -111,6 +111,9 @@ find "$APP/server/config" -mindepth 1 -maxdepth 1 \
      -o \( -name '*.json' ! -name '*.example.json' \) \) -exec rm -rf {} + 2>/dev/null || true
 cp "$REPO_ROOT/server/package.json" "$REPO_ROOT/server/package-lock.json" "$APP/server/"
 cp "$REPO_ROOT/package.json" "$APP/"
+# OTP 콘솔 등록 래퍼(v2.591 P5): install.sh 가 이 파일이 있을 때만 /usr/local/bin/vmware-portal-otp 를 건다.
+# 예전 스테이징은 이것을 복사하지 않아 문서(INSTALL.md·README)가 안내하는 잠금 복구 도구가 설치본에 없었다.
+cp "$REPO_ROOT/otp-enroll.sh" "$APP/otp-enroll.sh" && chmod 0755 "$APP/otp-enroll.sh"
 cp -r "$REPO_ROOT/web/dist" "$APP/web/dist"
 # 서비스 바로가기 허브(별도 페이지·별도 프로세스, Python 표준 라이브러리 전용).
 # 포탈 본체와 무관하게 동작하므로 소스만 담고 기동은 운영자가 systemd 로 켠다.

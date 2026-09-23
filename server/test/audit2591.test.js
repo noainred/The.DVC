@@ -345,3 +345,95 @@ test('★ S2: 템플릿 정규식은 긴 줄에서 선형 · 분석 루프는 �
   await analyzeItems(items, [], { chunk: 1e9, sliceMs: 0 });
   assert.ok(interleaved >= 10, `분석 중 다른 작업이 끼어들지 못했다(양보 ${interleaved}회)`);
 });
+
+// ── packaging 축(P1·P2·P4·P5·P6·P7·P8) ─────────────────────────────────────────────
+const ROOT = path.resolve(HERE, '../..');
+const repoText = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+
+test('★ P1: Windows 패키지는 고정 기본 비밀번호를 싣지 않는다(리눅스와 같이 임의 생성)', () => {
+  const bat = repoText('packaging/windows/portal.env.example.bat');
+  const live = bat.split(/\r?\n/).filter((l) => /^\s*set\s+DEFAULT_ADMIN_PASSWORD\s*=/i.test(l));
+  assert.deepEqual(live, [], `주석이 아닌 DEFAULT_ADMIN_PASSWORD 설정이 있다: ${live.join(' | ')}`);
+  assert.doesNotMatch(bat, /admin123/);
+  assert.doesNotMatch(src('config.js'), /'admin123'/, 'config.js 기본값도 알려진 비밀번호면 안 된다(ENV.md 에 그대로 실린다)');
+  assert.match(repoText('packaging/windows/README-WINDOWS.md'), /initial-admin-password\.txt/);
+});
+
+test('★ P2: Windows 빌드는 빌드 머신의 런타임 config(auth-secret·DB·감사 로그)를 싣지 않는다', () => {
+  const sh = repoText('packaging/windows/build-collector-win.sh').replace(/^\s*#.*$/gm, '');
+  const cp = sh.indexOf('cp -r "$REPO_ROOT/server/config" "$APP/server/config"');
+  const clean = sh.indexOf('find "$APP/server/config"');
+  const zip = sh.indexOf('zip -qr');
+  assert.ok(cp > 0 && clean > cp && clean < zip, 'config 복사 뒤·zip 앞에 정리가 있어야 한다');
+  const block = sh.slice(clean, sh.indexOf('\n', sh.indexOf('-exec rm', clean)));
+  for (const k of ["'auth-secret'", "'*.db'", "'*.ndjson'", "'secrets-key'", "! -name '*.example.json'"]) assert.ok(block.includes(k), `정리 대상에 ${k} 가 없다`);
+});
+
+test('★ P5: 오프라인 패키지가 OTP 콘솔 래퍼(otp-enroll.sh)를 담는다', () => {
+  const sh = repoText('packaging/offline/build-package.sh').replace(/^\s*#.*$/gm, '');
+  assert.match(sh, /cp "\$REPO_ROOT\/otp-enroll\.sh" "\$APP\/otp-enroll\.sh"/);
+  assert.match(repoText('packaging/offline/install.sh'), /-x "\$APP_DST\/otp-enroll\.sh"/, 'install.sh 는 이 파일이 있을 때만 링크를 건다');
+});
+
+test('★ P6: push sha 를 토큰 탈취·중간자 방어라 주장하지 않는다(자기신고 해시)', () => {
+  const raw = fs.readFileSync(path.join(SRC, 'upgrade/upgrade.js'), 'utf8');
+  const doc = raw.slice(raw.indexOf('수신측 번들 무결성 판정'), raw.indexOf('export function bundleShaIssue'));
+  assert.doesNotMatch(doc, /토큰 탈취\/http 중간자가\s*\n?\s*\*?\s*임의 tar\.gz 를 설치/, '예전의 과장된 방어 주장이 남아 있다');
+  assert.match(doc, /중간자 방어가 아니다/);
+});
+
+test('★ P4: 업그레이드가 하드링크를 사본으로 풀고 실행 비트를 지킨다 · 심링크는 건너뛴다', async (t) => {
+  const { execFileSync } = await import('node:child_process');
+  const work = fs.mkdtempSync(path.join(TMP, 'tar-'));
+  const pkg = path.join(work, 'vmware-portal');
+  fs.mkdirSync(path.join(pkg, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ version: '9.9.1' }));
+  fs.writeFileSync(path.join(pkg, 'bin', 'run.sh'), '#!/bin/sh\necho hi\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(pkg, 'native.node'), 'BINARY');
+  fs.linkSync(path.join(pkg, 'native.node'), path.join(pkg, 'bin', 'native-link.node'));
+  fs.symlinkSync('/etc', path.join(pkg, 'escape'));
+  const tgz = path.join(work, 'b.tar.gz');
+  try { execFileSync('tar', ['-C', work, '-czf', tgz, 'vmware-portal']); } catch (e) { t.skip(`tar 없음: ${e.message}`); return; }
+  const { parseTarGz } = await import('../src/upgrade/archive.js');
+  const ents = parseTarGz(fs.readFileSync(tgz));
+  const names = ents.map((e) => e.name.replace(/^\.?\/?/, ''));
+  assert.ok(names.some((n) => n.endsWith('bin/native-link.node')), `하드링크가 버려졌다: ${names.join(',')}`);
+  assert.equal(ents.find((e) => e.name.endsWith('bin/native-link.node')).data.toString(), 'BINARY');
+  assert.ok(!names.some((n) => n.endsWith('/escape')), '심링크는 스테이징 밖 쓰기 경로라 건너뛴다');
+  assert.equal(ents.find((e) => e.name.endsWith('bin/run.sh')).data.exec, true);
+  const { readBundleBytes, applyPackage } = await import('../src/upgrade/upgrade.js');
+  const members = readBundleBytes(fs.readFileSync(tgz), 'vmware-portal');
+  const dst = path.join(work, 'install', 'app');
+  applyPackage(members, dst);
+  assert.notEqual(fs.statSync(path.join(dst, 'bin', 'run.sh')).mode & 0o100, 0, '실행 비트가 있던 파일은 실행 가능해야 한다');
+  assert.equal(fs.statSync(path.join(dst, 'native.node')).mode & 0o111, 0, '실행 비트가 없던 파일에 붙이지 않는다');
+  assert.equal(fs.readFileSync(path.join(dst, 'bin', 'native-link.node'), 'utf8'), 'BINARY');
+});
+
+test('★ P7: 스테이징 쓰기 실패 시 부분 .new.<ts> 를 남기지 않는다', async () => {
+  const { applyPackage } = await import('../src/upgrade/upgrade.js');
+  const base = fs.mkdtempSync(path.join(TMP, 'stg-'));
+  const target = path.join(base, 'app');
+  // 'a' 를 파일로 쓴 뒤 'a/b' 를 쓰면 mkdir 이 ENOTDIR 로 실패한다.
+  const members = new Map([['package.json', Buffer.from('{"version":"9.9.2"}')], ['a', Buffer.from('x')], ['a/b', Buffer.from('y')]]);
+  assert.throws(() => applyPackage(members, target));
+  const left = fs.readdirSync(base).filter((n) => n.startsWith('app.new.'));
+  assert.deepEqual(left, [], `실패한 스테이징이 남았다: ${left.join(',')}`);
+  assert.equal(fs.existsSync(target), false, '원본이 없었으면 여전히 없다(반쯤 적용 금지)');
+});
+
+test('★ P8: 백업 정리는 install.sh(초)·in-app(ms) 시각을 같은 단위로 비교한다', async () => {
+  const { applyPackage } = await import('../src/upgrade/upgrade.js');
+  const base = fs.mkdtempSync(path.join(TMP, 'bak-'));
+  const target = path.join(base, 'app');
+  fs.mkdirSync(target); fs.writeFileSync(path.join(target, 'package.json'), '{"version":"1.0.0"}');
+  const nowS = Math.floor(Date.now() / 1000);
+  // 옛 ms 백업 2개(과거) + 방금 한 수동 재설치(초 단위, 가장 최근)
+  fs.mkdirSync(path.join(base, `app.bak.${(nowS - 86_400 * 3) * 1000}`));
+  fs.mkdirSync(path.join(base, `app.bak.${(nowS - 86_400 * 2) * 1000}`));
+  fs.mkdirSync(path.join(base, `app.bak.${nowS - 60}`));
+  applyPackage(new Map([['package.json', Buffer.from('{"version":"2.0.0"}')]]), target);
+  const baks = fs.readdirSync(base).filter((n) => n.startsWith('app.bak.'));
+  assert.equal(baks.length, 2, baks.join(','));
+  assert.ok(baks.includes(`app.bak.${nowS - 60}`), `가장 최근의 초 단위 백업이 지워졌다: ${baks.join(',')}`);
+});

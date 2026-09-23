@@ -64,6 +64,11 @@
 - **RDP 자격증명은 티켓으로**: RDP WS 게이트웨이는 username/password/domain을 URL 쿼리스트링에 싣지 않는다 — `proxy/rdpTicket.js`의 1회용 단기 티켓(`POST /api/remote/rdp-ticket`)으로 발급받아 쿼리엔 티켓 ID만 싣고 게이트웨이가 인메모리에서 조회한다(쿼리스트링은 상위 프록시 액세스 로그·브라우저 히스토리에 남음).
 - **업그레이드 번들 sha256 필수**: 자체 업그레이드·엣지 푸시 양쪽 모두 검증하고, 부재도 거부(`UPGRADE_ALLOW_UNVERIFIED`만 예외). 한쪽만 검증하면 함대 확산 경로가 뚫린다.
   - ⚠️ v2.480 정직 기록: 이 규칙은 v2.479 까지 **문서만** 있었다 — 엣지 `/api/upgrade/bundle`·수집기 `/api/collector/upgrade` 는 sha 를 받지도 검증하지도 않았다. 이제 중앙 push(`upgrade.js pushBundleToEdge`·`collector/upgradePush.js`)가 `X-Bundle-Sha256` 헤더를 보내고 수신측이 `upgrade/upgrade.js bundleShaIssue` 로 검증한다(`test/audit2480.test.js`). 헤더를 없애거나 검증을 빼면 이 규칙이 다시 문서만 남는다.
+  - ⚠⚠ **v2.591 정직 정정(감사 P6 — 재현)**: push 경로의 `X-Bundle-Sha256` 은 **같은 요청이 스스로 신고한 해시**라
+    전송 중 손상·잘림만 잡는다. 악성 번들의 sha 를 계산해 헤더에 실으면 통과한다 — **토큰 탈취·http 중간자 방어가 아니다.**
+    실제 방어는 토큰 + TLS(`upgradeAgent`·https 엣지)이고, 이 검사를 근거로 그 둘을 약화하지 말 것. 원격 다운로드
+    (`verifyBundleSha`)는 sha 를 별도 TLS 채널(versions.json)에서 받으므로 건전하다. 진짜 push 무결성은 수신측 키 서명
+    (rma/signing.js HMAC 패턴)이 필요하다 — 별건.
   - **연결 테스트는 저장 비밀번호를 물려받을 때 host/url 도 저장값으로 고정**(v2.480): vCenter·NSX·Horizon·iDRAC `testConnection`/`testServer`·수집 서버 `/collectors/test`·SMTP·PDU·베어메탈·GPU 게스트 테스트 전부 `{...saved, ...body}` 병합에서 host/url/ip 를 요청값으로 두면 저장 비밀번호가 공격자 호스트로 평문 전송된다(uagmon M3 클래스). 새 "저장 항목 테스트" 를 만들 때 같은 규칙.
 - **SSRF 가드**: 외부 입력 host를 네트워크로 찌르는 신규 기능은 `collector/registry.js ssrfBlockReason`(또는 async `ssrfBlockReasonResolved`)를 통과시킨다. RFC1918은 사내망 대상이라 허용, 링크로컬/루프백/우회표기(IPv4-mapped·10/16/8진수)는 차단.
 - **셸 명령 조립**: 사용자·원격 출력 값은 화이트리스트 정규식으로 검증 후에만 삽입(선행 `-` 차단 포함). 원격 명령의 출력(유닛명·경로)도 신뢰하지 말고 재검증한다.
