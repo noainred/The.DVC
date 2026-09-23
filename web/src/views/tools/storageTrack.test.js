@@ -4,7 +4,7 @@
 //     과대 계상된다 → vCenter 단위 첫/마지막.
 //  2) 일평균을 '슬롯 수 ÷ 2'로 나누면 폴러가 멈춘 구간에서 왜곡된다 → 수집 시각 차이.
 import { describe, it, expect } from 'vitest';
-import { tb, gbTb, perVcSummary, growth, hasDsData } from './storageTrack.js';
+import { tb, gbTb, perVcSummary, growth, hasDsData, dsUnknownNote } from './storageTrack.js';
 
 const DAY = 86_400_000;
 
