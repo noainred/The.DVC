@@ -91,8 +91,18 @@ remoteRouter.post('/probe', requirePerm('remote.access'), async (req, res) => {
 });
 
 // vCenter → proxy assignments (any authenticated user; secrets redacted for admin view).
-remoteRouter.get('/proxies', requirePerm('remote.access'), (_req, res) => { // v2.480(3차 감사): 중계 주소는 원격접속 권한자에게만
-  res.json({ proxies: listProxies().map((p) => ({ id: p.id, name: p.name, proxyHost: p.proxyHost, vcenterIds: p.vcenterIds, guacdConfigured: !!p.guacd?.host })) });
+remoteRouter.get('/proxies', requirePerm('remote.access'), (req, res) => { // v2.480(3차 감사): 중계 주소는 원격접속 권한자에게만
+  const all = listProxies().map((p) => ({ id: p.id, name: p.name, proxyHost: p.proxyHost, vcenterIds: p.vcenterIds || [], guacdConfigured: !!p.guacd?.host }));
+  // v2.598(감사 AUTHZ-2598-02): 범위 계정에는 **자기 vCenter 가 배정된 프록시**와 기본 프록시(배정 없음 —
+  //   범위 안 vCenter 도 여기로 떨어진다)만 준다. vcenterIds 도 범위 안으로 자른다. 뺀 개수는 밝힌다.
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (!allowed) return res.json({ proxies: all });
+  const proxies = [];
+  for (const p of all) {
+    const ids = p.vcenterIds.filter((v) => allowed.has(String(v)));
+    if (p.id === 'default' || ids.length) proxies.push({ ...p, vcenterIds: ids });
+  }
+  res.json({ proxies, omittedOutOfScope: all.length - proxies.length, scoped: true });
 });
 
 // Candidate targets from vCenter: VMs that have at least one IP, with all IPs

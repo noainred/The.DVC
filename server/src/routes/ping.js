@@ -99,7 +99,15 @@ pingRouter.get('/series', async (req, res) => {
   // 범위 밖 vCenter 대상은 404(존재 은닉 — 단건 라우트 규약).
   if (!vcScope(req).okId(id)) return res.status(404).json({ ok: false, reason: '없는 대상' });
   const points = Math.max(30, Math.min(1000, Number(req.query.points) || 240));
-  try { const r = await seriesOf(id, { rangeMs: rangeMsOf(req.query.range, '6h'), points }); res.status(r.ok ? 200 : 404).json(r); }
+  try {
+    const r = await seriesOf(id, { rangeMs: rangeMsOf(req.query.range, '6h'), points });
+    // v2.598(감사 AUTHZ-2598-01): 엣지 대상은 /edge/overview 와 **같은 판정**으로 주소를 가린다 —
+    //   id 만 알면 이 단건 경로로 엣지 포탈의 host·port 가 그대로 나갔다(SEC-06 우회).
+    if (r.ok && r.target && isEdgeTarget(id) && !canSeeEdgeAddress(req)) {
+      return res.json({ ...r, target: { ...r.target, host: null, port: null }, addressHidden: true });
+    }
+    res.status(r.ok ? 200 : 404).json(r);
+  }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
@@ -138,10 +146,14 @@ pingRouter.post('/seed-vcenters', adminOnly, (_req, res) => {
  *   것과 같은 방식이다("역할별 축약은 응답을 스프레드하지 말고 전용 모듈에서").
  * ⚠ 가린 사실을 **숨기지 않는다**(`addressHidden`) — 화면이 '왜 주소가 비었나' 를 말할 수 있게.
  */
+export function canSeeEdgeAddress(req) {
+  return req.user?.role === 'admin' && !scopedVcenterIds(req.user, store.get());
+}
+const isEdgeTarget = (id) => listTargets().some((t) => String(t.id) === String(id) && t.source === 'edge');
+
 function redactEdgeAddresses(out, req) {
-  const isAdmin = req.user?.role === 'admin';
-  const fullScope = !scopedVcenterIds(req.user, store.get());
-  if (isAdmin && fullScope) return out;
+  // v2.598: 판정은 canSeeEdgeAddress 하나 — /series 와 갈라지지 않게.
+  if (canSeeEdgeAddress(req)) return out;
   const groups = (out?.groups || []).map((g) => ({
     ...g,
     items: (g.items || []).map(({ host, port, ...rest }) => ({ ...rest, host: null, port: null })),

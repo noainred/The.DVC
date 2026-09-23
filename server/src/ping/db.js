@@ -39,7 +39,10 @@ function initSqlite() {
     // baseline 산출용: 최근 OK 샘플 rtt N개(중앙값은 JS에서)
     const recentOk = db.prepare('SELECT rtt FROM samples WHERE target=? AND ok=1 AND rtt IS NOT NULL ORDER BY ts DESC LIMIT ?');
     // 시간 버킷 다운샘플: avg/min/max rtt + 손실률(무응답 비율). DESC+LIMIT로 최근 버킷 우선 후 JS에서 되돌림.
-    const bucket = db.prepare(`SELECT (ts/?)*? AS b,
+    // ⚠ node:sqlite 는 JS number 를 REAL 로 바인딩한다 — (ts/?)*? 는 실수 나눗셈이라 버킷이 묶이지 않고
+    // 표본 1건 = 1버킷이 되어 LIMIT 이 최근 몇 시간만 남기고 손실률도 0/1 로 떨어졌다(v2.598 DB2598-01).
+    // metrics/db.js 와 같은 CAST(… AS INTEGER) 형태로 정수 버킷을 만든다.
+    const bucket = db.prepare(`SELECT CAST(ts/? AS INTEGER)*? AS b,
         AVG(CASE WHEN ok=1 THEN rtt END) avg, MIN(CASE WHEN ok=1 THEN rtt END) min, MAX(CASE WHEN ok=1 THEN rtt END) max,
         SUM(CASE WHEN ok=1 THEN 0 ELSE 1 END) fail, COUNT(*) n
       FROM samples WHERE target=? AND ts>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
