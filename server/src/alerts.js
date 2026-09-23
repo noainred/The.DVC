@@ -19,7 +19,8 @@ import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
 import { ssrfBlockReasonResolved } from './collector/registry.js';
 import { Agent as UndiciAgent } from 'undici';
-import { ssrfLookup } from './util/ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
+import { ssrfLookup } from './util/ssrfLookup.js';
+import { numOrNull } from './util/numOrNull.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
 import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.454)
 import { registerExitFlush } from './util/exitFlush.js';
 
@@ -93,9 +94,15 @@ export function saveAlertConfig(body = {}) {
   return next;
 }
 
+/** 값을 못 읽어 판정 보류된 발생 알림을 유지하는 최대 시간(v2.598) — 넘으면 해소 알림 없이 끊는다. */
+export const HELD_MAX_MS = 6 * 3600_000;
+
 /** Evaluate rules against a snapshot → array of { key, severity, title, detail }. */
 export function evaluate(snap, cfg = loadAlertConfig()) {
   const out = [];
+  // 판정 보류 키(값을 못 읽음) — 발생 중이면 해소하지 않는다. 배열 원소가 아니라 숨은 속성이다(기존 소비처·비교 무변경).
+  const held = new Set();
+  Object.defineProperty(out, 'held', { value: held, enumerable: false });
   const R = cfg.rules;
   if (R.criticalAlarms?.enabled) {
     for (const a of (snap.alarms || []).filter((x) => x.severity === 'critical').slice(0, 100)) {
@@ -114,7 +121,11 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   }
   if (R.datastorePct?.enabled) {
     const th = Number(R.datastorePct.threshold) || 90;
-    for (const d of (snap.datastores || []).filter((x) => (x.usagePct || 0) >= th).slice(0, 200)) {
+    // v2.598(감사 RECENT2598-03 — 재현): vCenter REST 폴백은 사용량을 못 읽은 DS 를 usagePct:null 로 준다(v2.597 C2597-08).
+    // 예전 `(x.usagePct || 0) >= th` 는 그것을 0% 로 읽어 **발생 중이던 용량 알림을 '해소' 로 보냈다**. 못 읽은 값은 초과도
+    // 정상도 아니다 — 판정 보류(held)로 두고 tick 이 해소하지 않는다(bmusage·PDU F5 와 같은 규약).
+    for (const d of snap.datastores || []) if (numOrNull(d.usagePct) == null && d.id != null) held.add(`ds:${d.id}`);
+    for (const d of (snap.datastores || []).filter((x) => numOrNull(x.usagePct) != null && Number(x.usagePct) >= th).slice(0, 200)) {
       out.push({ key: `ds:${d.id}`, vcenterId: d.vcenterId || '', severity: d.usagePct >= 95 ? 'critical' : 'warning', title: `데이터스토어 용량 ${d.usagePct}%: ${d.name}`, detail: `${d.vcenterId} · 여유 ${d.freeGB}GB` });
     }
   }
@@ -395,6 +406,8 @@ async function refreshState(cfg, sendEnabled) {
   let active = [];
   const snap = store.get();
   try { active = evaluate(snap, cfg); } catch { active = []; }
+  // 판정 보류 키는 아래 concat(새 배열) 전에 잡아 둔다 — 숨은 속성은 concat 으로 옮겨지지 않는다.
+  const held = active.held instanceof Set ? active.held : new Set();
   // 동시 다운 감지: 직전 스냅샷과 비교(전이). 규칙 켜져 있을 때만 알림에 포함하되,
   // 직전상태 맵은 항상 갱신해 다음 주기 비교를 유지한다.
   try {
@@ -426,7 +439,15 @@ async function refreshState(cfg, sendEnabled) {
   }
   // resolve
   for (const [key, st] of [...firing.entries()]) {
-    if (!seen.has(key)) { firing.delete(key); changed = true; pushRecent({ at: new Date().toISOString(), key, title: `해소: ${st.alert.title}`, severity: 'resolved' }); }
+    if (seen.has(key)) { if (st.heldSince) { st.heldSince = 0; changed = true; } continue; }
+    // v2.598 RECENT2598-03: 값을 못 읽은 항목은 해소가 아니다 — 발생 상태를 유지한다. 오래(HELD_MAX_MS) 못 읽으면 알림 없이
+    // 끊는다(복구가 아니라 **모르는 것**이다 — '해소' 알림을 내지 않는다).
+    if (held.has(key)) {
+      if (!st.heldSince) { st.heldSince = now; changed = true; }
+      if (now - st.heldSince < HELD_MAX_MS) continue;
+      firing.delete(key); changed = true; continue;
+    }
+    firing.delete(key); changed = true; pushRecent({ at: new Date().toISOString(), key, title: `해소: ${st.alert.title}`, severity: 'resolved' });
   }
   // 복원 목록은 **쿨다운이 남은 동안만** 들고 있는다 — 기동 직후에는 스냅샷이 아직 비어(첫 수집 중) 활성 목록이 0 이라
   // 첫 평가에서 비우면 수집이 끝난 뒤 전부 다시 발송된다. 쿨다운이 지난 항목은 어차피 재발송 대상이라 버린다.

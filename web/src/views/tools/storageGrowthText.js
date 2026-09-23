@@ -117,6 +117,12 @@ export function headline(data, unitKey = 'auto') {
       body: '이 서버에서 SQLite 를 열지 못해 사용량 이력이 **저장되지 않고 있습니다**. 증가량은 이력이 있어야 계산할 수 있습니다.' };
   }
   const n = data.devices?.length || 0;
+  // v2.598 WEBUI-2598-05: 등록된 장비 자체가 0대면 '기다리면 쌓인다' 가 거짓이다(기다려도 안 쌓인다).
+  //   noHistory 가 배열로 왔을 때만 단정한다(필드가 없으면 모른다 — 기존 '대기' 문구로 둔다).
+  if (!n && Array.isArray(data.noHistory) && !data.noHistory.length) {
+    return { kind: 'no-devices', title: '등록된 스토리지 장비가 없습니다',
+      body: '증가량은 등록된 장비의 수집 이력으로 계산합니다 — **특수 기능 › 스토리지 모니터링** 에서 장비를 먼저 등록하세요.' };
+  }
   if (!n) {
     return { kind: 'empty', title: '아직 집계할 이력이 없습니다',
       body: '스토리지 수집이 한 번이라도 성공하면 그날부터 하루 1행씩 쌓입니다. **기간 비교는 그 기간만큼 지나야** 나옵니다.' };

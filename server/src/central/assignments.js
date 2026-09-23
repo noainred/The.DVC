@@ -13,6 +13,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 import { parseCsvRows } from '../util/csv.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
 const FILE = path.join(config.configDir, 'agent-assignments.json');
@@ -154,11 +155,55 @@ export function importAssignments(incoming, mode = 'merge') {
 
 // ---- results --------------------------------------------------------------
 
+/**
+ * 엣지 스캔 결과 본문 정제(순수 — v2.598, 감사 CENTRAL-03).
+ * 예전 라우트는 `b.scanned || 0` 처럼 **값을 그대로** 저장해 `{"scanned":{"a":1}}` 같은 객체가 '에이전트 작업'
+ * 화면에 그대로 렌더돼 React #31 로 화면이 죽었다(저장형 — 파일에 남아 재시작 뒤에도 계속 죽는다).
+ * 수치는 유한한 0 이상 수만, 없거나 못 읽은 값은 **null**(0 으로 채우면 '미응답 0' 이라는 거짓이 된다).
+ * `found` 는 객체 원소만·아는 문자열 필드만(길이 상한) 담는다.
+ */
+const FOUND_MAX = 5000;
+const cnt = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? n : null; };
+const fstr = (v, n = 200) => (typeof v === 'string' ? v.slice(0, n) : (typeof v === 'number' && Number.isFinite(v) ? String(v) : ''));
+export function sanitizeScanResult(b) {
+  const body = b && typeof b === 'object' && !Array.isArray(b) ? b : {};
+  const raw = Array.isArray(body.found) ? body.found : [];
+  const found = raw.slice(0, FOUND_MAX)
+    .filter((f) => f && typeof f === 'object' && !Array.isArray(f))
+    .map((f) => ({ ip: fstr(f.ip, 64), serviceTag: fstr(f.serviceTag, 64), model: fstr(f.model), manufacturer: fstr(f.manufacturer), hostName: fstr(f.hostName, 255) }));
+  return {
+    scanned: cnt(body.scanned),
+    foundCount: cnt(body.foundCount) ?? found.length,
+    found,
+    ...(raw.length > found.length ? { foundOmitted: raw.length - found.length } : {}),
+    unreachable: cnt(body.unreachable),
+    notIdrac: cnt(body.notIdrac),
+    authFailed: cnt(body.authFailed),
+    durationMs: cnt(body.durationMs),
+  };
+}
+
 // Object.create(null): 에이전트가 보낸 이름이 '__proto__' 등 프로토타입 키여도 오염되지 않게
 // (inventory.js/fleet.js와 동일한 방어 — 일반 {}는 results['__proto__'] 대입이 조용히 유실된다).
 let results = Object.create(null);
 // 결과 파일도 동일 규칙 — 손상 시 보존 후 빈 값(다음 저장이 원본을 소거하지 않게).
-try { if (fs.existsSync(RESULT_FILE)) results = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(RESULT_FILE, 'utf8')) || {}); }
+// v2.598(감사 CENTRAL-03): 이미 저장된 오염 행도 로드 시 같은 정제를 거친다(운영 파일은 우리가 고칠 수 없다 —
+//   쓰기만 고치면 이미 저장된 줄이 계속 화면을 죽인다. v2.569 감사 로그와 같은 판단).
+//   ⚠ 정제 헬퍼(const)는 이 로드보다 **위에** 있어야 한다 — 아래로 옮기면 TDZ 로 로드가 던지고, catch 가
+//   멀쩡한 파일을 손상으로 보존(preserveCorrupt)해 결과가 전부 사라진다(v2.566 TDZ 교훈).
+function loadResultsFile() {
+  const raw = JSON.parse(fs.readFileSync(RESULT_FILE, 'utf8')) || {};
+  const out = Object.create(null);
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const k of Object.keys(raw)) {
+      const v = raw[k];
+      if (!v || typeof v !== 'object') continue;
+      out[k] = { at: numOrNull(v.at), ...sanitizeScanResult(v) };
+    }
+  }
+  return out;
+}
+try { if (fs.existsSync(RESULT_FILE)) results = loadResultsFile(); }
 catch (err) { preserveCorrupt(RESULT_FILE, err.message); console.error(`[central] agent-results.json 파싱 실패: ${err.message}`); results = Object.create(null); }
 
 let persistTimer = null;
@@ -178,7 +223,7 @@ function persistResults() {
 registerExitFlush('central/assignments.results', () => { if (!persistTimer) return; clearTimeout(persistTimer); persistTimer = null; atomicWriteFileSync(RESULT_FILE, JSON.stringify(results), { mode: 0o600 }); });
 
 export function setResult(agent, data) {
-  results[String(agent)] = { at: Date.now(), ...data };
+  results[String(agent)] = { at: Date.now(), ...sanitizeScanResult(data) };
   persistResults();
 }
 

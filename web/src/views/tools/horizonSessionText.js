@@ -174,7 +174,8 @@ export function unionNote(total) {
 
 /** 두 출처 합집합(전체 탭) 문구. */
 export function combinedNote(c) {
-  if (!c) return '';
+  // v2.598: 읽은 출처가 없으면 합집합은 null 이다 — '**null명**' 이나 '0명' 을 말하지 않는다.
+  if (!c || c.union == null) return '';
   const parts = [`전체 고유 사용자 **${c.union}명** = Windows 서버 ∪ Horizon(VDI)`];
   if (c.both > 0) parts.push(`양쪽에 동시에 있는 사람 **${c.both}명**(단순 합 ${c.sum}명에서 중복을 뺐습니다)`);
   else if (c.sum !== c.union) parts.push(`단순 합 ${c.sum}명`);

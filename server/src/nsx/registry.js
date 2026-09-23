@@ -17,6 +17,7 @@ import { retryTransient } from '../util/resilientFetch.js';
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 
 const FILE = path.join(config.configDir, 'nsx.json');
+import { normRequestTimeoutMs } from '../vcenter/soapParse.js'; // v2.598 T2598-03: 요청 시한 [1초, 10분] (0 = 기본값)
 import { REGIONS } from '../util/regions.js'; // v2.575 IMP-10 — 단일 소스
 
 export function loadRegistry() {
@@ -70,7 +71,7 @@ function normalize(body, existing = null) {
   const intRaw = body.pollIntervalSec ?? e.pollIntervalSec;
   const toRaw = body.timeoutMs ?? e.timeoutMs;
   const pollIntervalSec = intRaw != null && intRaw !== '' ? Math.max(0, Math.round(Number(intRaw) || 0)) : 0;
-  const timeoutMs = toRaw != null && toRaw !== '' ? Math.max(0, Math.round(Number(toRaw) || 0)) : 0;
+  const timeoutMs = normRequestTimeoutMs(toRaw); // v2.598 T2598-03: 상한 없으면 2^31ms 이상에서 요청이 1ms 에 abort
   const enabled = body.enabled !== undefined ? body.enabled !== false : (e.enabled !== false);
 
   const entry = {

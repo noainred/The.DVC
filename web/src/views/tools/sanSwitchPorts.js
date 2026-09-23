@@ -73,7 +73,9 @@ export function errorLevel(port) {
 
 /** 포트 사용률 → 색 등급. 여유 포트가 적을수록 증설 판단이 급해진다. */
 export function capacityLevel(usedPct) {
-  const p = Number(usedPct) || 0;
+  // v2.598 WEBUI-2598-07: 사용률을 모르면(null) 판정하지 않는다 — 0% 로 읽어 '여유 있음' 이라 말하지 않게.
+  if (numOrNull(usedPct) == null) return 'unknown';
+  const p = Number(usedPct);
   if (p >= 90) return 'bad';
   if (p >= 75) return 'warn';
   return 'ok';
@@ -102,8 +104,24 @@ export function aggregate(rows = []) {
     const al = s.health?.alerts;
     if (typeof al === 'number' && Number.isFinite(al)) { a.alerts += al; a.alertsKnown++; } else a.alertsUnknown++;
   }
-  a.usedPct = a.licensed ? Math.round((a.online / a.licensed) * 1000) / 10 : 0;
+  // v2.598 WEBUI-2598-07: 라이선스 포트가 0이면(스위치 0대·전부 실패 포함) 사용률은 **모른다**(null) — 0% 가 아니다.
+  a.usedPct = a.licensed ? Math.round((a.online / a.licensed) * 1000) / 10 : null;
   return a;
+}
+
+/** 사용률 표기 — 모르면 단위 없이 '—'. */
+export function usedPctText(pct) {
+  return numOrNull(pct) == null ? '—' : `${pct}%`;
+}
+
+/**
+ * 스위치 KPI 의 한 줄(v2.598 WEBUI-2598-07). 0대에서 '전부 수집 정상' 이라 말하지 않는다.
+ */
+export function switchesMeta(agg = {}) {
+  const n = Number(agg.switches) || 0;
+  if (!n) return '등록된 스위치 없음';
+  if (Number(agg.failed) > 0) return `수집 실패 ${agg.failed}대`;
+  return '전부 수집 정상';
 }
 
 /**

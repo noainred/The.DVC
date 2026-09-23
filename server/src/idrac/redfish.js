@@ -18,6 +18,7 @@ import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';
 import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
+import { pctFromMetric } from '../bmusage/parse/idracTelemetry.js';
 
 // Dedicated dispatcher so iDRAC self-signed certs / legacy TLS always work,
 // regardless of the global vCenter dispatcher.
@@ -83,14 +84,11 @@ function bumpAuthCache(key) {
  * 텔레메트리 MetricValue → 퍼센트(v2.595, 감사 C2595-02). 예전 `Number(String(v).replace(/[^\d.]/g,''))` 는
  * null·'N/A'·빈 값을 **0%**, '-1'(센서 없음 관례)을 **1%** 로 만들었다 — 주석은 '못 뽑으면 만들지 않는다' 였다.
  * 숫자이거나 '37' · '37 %' · '37.5%' 꼴만 받고 0~100 밖은 퍼센트가 아니다(null).
+ * v2.598(감사 IDRAC-2598-02): 정의는 순수 파서 `bmusage/parse/idracTelemetry.js` 로 옮겼다 — 전수 모드 파서도
+ *   같은 판정을 써야 하는데 그 파서가 이 파일을 import 하면 순환이 된다. 여기서는 재수출만 한다
+ *   (⚠ `export { x } from` 은 이 파일 스코프에 이름을 만들지 않으므로 import + export 두 줄이다 — v2.575).
  */
-export function pctFromMetric(v) {
-  if (v == null) return null;
-  let n;
-  if (typeof v === 'number') n = v;
-  else { const m = /^\s*(\d+(?:\.\d+)?)\s*%?\s*$/.exec(String(v)); if (!m) return null; n = Number(m[1]); }
-  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : null;
-}
+export { pctFromMetric };
 
 export function authCacheInfo() { return { size: AUTH_CACHE.size, max: AUTH_CACHE_MAX, order: [...AUTH_CACHE.keys()].map((k) => k.split('\0')[1]) }; }
 // 비밀번호 지문(비-암호 djb2) — 캐시 키에 포함해, 같은 호스트/계정을 '다른 비밀번호'로 시도할 때
@@ -1058,13 +1056,16 @@ async function fetchTelemetryReports(entry, { allowList = true } = {}) {
     _reportList.set(key, { ids, at: Date.now() });
     listedNow = true;
   }
-  const { isWantedReport, buildIdracUsage } = await import('../bmusage/parse/idracTelemetry.js');
+  const { pickReports, buildIdracUsage } = await import('../bmusage/parse/idracTelemetry.js');
   const idOf = (u) => u.split('/').filter(Boolean).pop() || '';
-  const wanted = ids.filter((u) => isWantedReport(idOf(u))).slice(0, MAX_REPORTS_PER_DEVICE);
+  // v2.598(감사 IDRAC-2598-01): 목록 순서 앞 N개가 아니라 **종류별 우선순위**(SystemUsage → NIC → FC → …)로 고른다.
+  const { wanted, skipped } = pickReports(ids, MAX_REPORTS_PER_DEVICE, idOf);
   const reports = wanted.length ? await getReports(G, wanted) : [];
   const built = buildIdracUsage(reports, ids.map(idOf));
   built.listedNow = listedNow;
   built.reportsRequested = wanted.length;
+  // 상한으로 읽지 않은 리포트 수 — 조용히 자르지 않는다(화면·진단이 밝힌다).
+  built.skippedReports = skipped;
   return built;
 }
 
@@ -1103,7 +1104,25 @@ export async function fetchUsage(entry, { full = false, allowList = true } = {})
       const r = await fetchTelemetryReports(entry, { allowList });
       // 보드 지표를 하나라도 읽었으면 전수 결과를 쓴다. 아무것도 못 읽었으면 단독 경로가 더 낫다.
       if (r && (r.cpuPct != null || r.memPct != null || r.nics.length || r.fcs.length || r.disks.length)) {
-        return { ...r, ok: true, full: true, at: r.at || Date.now() };
+        const res = { ...r, ok: true, full: true, at: r.at || Date.now() };
+        /*
+         * v2.598(감사 IDRAC-2598-01): 전수 결과에 보드 CPU·메모리가 없으면 `SystemUsage` 단독 조회로 **빈 칸만** 채운다.
+         * 예전에는 NIC·스토리지 값 하나만 있어도 여기서 끝나 CPU·메모리가 영원히 비었다(그러면서 ok 라 폴백도 없었다).
+         * 단독 조회가 실패하면 그 사유를 `boardFallback` 으로 싣는다 — 전수 결과는 그대로 쓴다.
+         */
+        if (res.cpuPct == null && res.memPct == null) {
+          const fb = await fetchUsage(entry, { full: false });
+          if (fb.ok) {
+            for (const f of ['cpuPct', 'memPct', 'ioPct', 'sysPct']) {
+              if (res[f] == null && fb[f] != null) { res[f] = fb[f]; res.usedIds = { ...(res.usedIds || {}), [f]: fb.usedIds?.[f] || 'SystemUsage' }; }
+            }
+            if ((res.cpuPct != null || res.memPct != null) && !res.read.includes('cpumem')) res.read = [...res.read, 'cpumem'];
+            res.boardFallback = 'ok';
+          } else {
+            res.boardFallback = fb.kind || 'failed';
+          }
+        }
+        return res;
       }
       if (r) {
         // 리포트는 열거했는데 아는 것이 없었다 — 그 사실을 실어 단독 경로로 내려간다.

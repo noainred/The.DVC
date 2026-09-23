@@ -191,12 +191,22 @@ export async function powerSeries(deviceIds = [], opts = {}) {
   if (!db) return { buckets: [], series: [], unavailable: true };
   const { since, until, bucketMs } = rangeOf(opts);
   const where = deviceIds.length ? `AND device_id IN (${deviceIds.map(() => '?').join(',')})` : '';
+  // v2.598 DB2598-03: 데이지체인 PDU 는 한 수집 시각(ts)에 유닛마다 한 행이다. 예전에는 행을 그대로
+  // 버킷 평균해 **유닛 평균**(1,000W+500W → 750W)을 장비 전력이라 보여줬다. 안쪽에서 (장비, ts)별로
+  // 유닛을 **합산**한 뒤 버킷을 만든다. 그 시각에 전력을 못 읽은 유닛이 하나라도 있으면 합은 부분 합
+  // (= 거짓 하락)이므로 NULL 로 두고 평균·최대에서 빼며, 뺀 시각 수를 partialSamples 로 밝힌다.
   const rows = db.conn.prepare(
-    `SELECT device_id, (ts/${bucketMs}) AS b, AVG(power_w) AS avg_w, MAX(power_w) AS max_w
-       FROM pdu_sample WHERE ts >= ? AND ts <= ? ${where}
+    `SELECT device_id, (ts/${bucketMs}) AS b, AVG(tot) AS avg_w, MAX(tot) AS max_w,
+            SUM(CASE WHEN tot IS NULL THEN 1 ELSE 0 END) AS partial
+       FROM (SELECT device_id, ts,
+                    CASE WHEN COUNT(power_w) = COUNT(*) THEN SUM(power_w) END AS tot
+               FROM pdu_sample WHERE ts >= ? AND ts <= ? ${where}
+              GROUP BY device_id, ts)
       GROUP BY device_id, b ORDER BY b ASC`,
   ).all(since, until, ...deviceIds.map(String));
-  return shape(rows, bucketMs, 'avg_w', 'max_w');
+  const out = shape(rows, bucketMs, 'avg_w', 'max_w');
+  out.partialSamples = rows.reduce((a, r) => a + Number(r.partial || 0), 0);
+  return out;
 }
 
 /** 온도/습도 시계열 — 센서 단위. */

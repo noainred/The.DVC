@@ -38,6 +38,7 @@ async function pullOne(c) {
   const ts = Date.now();
   clearCollectorHosts(c.id);
   let hosts = 0;
+  let dupSkipped = 0; // 이미 적재한 ts 의 재전송(엣지가 새 표본을 아직 만들지 않았다) — 이중 계수 방지로 건너뜀
   // 출처 서버 단위로 한 번만 집계하기 위한 set(구버전 수집기가 별칭별 중복 행을 보내도 중앙이 흡수).
   const seenServers = new Set();
   const samples = []; // 호스트별 개별 INSERT(각각 자체 커밋+fsync) 대신 한 트랜잭션으로 배치 적재
@@ -53,8 +54,15 @@ async function pullOne(c) {
     const sTs = (Number.isFinite(h.ts) && h.ts > 0 && h.ts <= ts + 5 * 60_000) ? h.ts : ts;
     const sample = { watts, ts: sTs, datacenter: data.datacenter || c.datacenter, collectorId: c.id, serverName: h.serverName, serverId: h.serverId, serviceTag: h.serviceTag || '', model: h.model || '', vcenterId: c.vcenterId || '', source: 'remote' };
     setRemoteHost(host, sample);
-    samples.push({ serverId: `rmt:${host}`, watts, ts: sTs });
     hosts++;
+    // v2.598 DB2598-02: 엣지 export 는 서버별 **최신 표본 1건**을 매 pull(60초)마다 같은 ts 로 다시 준다.
+    // 그대로 적재하면 power_hourly 의 sum/cnt 가 pull 횟수만큼 이중 계수되고(엣지 수집 주기와 무관하게
+    // 60초마다 1표본), 멈춘 서버의 마지막 값이 계속 쌓여 시간 평균을 끌고 간다. DB 가 이미 가진 최신 ts
+    // (withLatestCache — 재시작 뒤에도 DB 에서 시드된다) 이하인 표본은 건너뛰고 개수를 상태에 밝힌다.
+    const serverId = `rmt:${host}`;
+    const prevTs = typeof db.latest === 'function' ? db.latest(serverId)?.ts : null;
+    if (prevTs != null && sTs <= prevTs) { dupSkipped++; continue; }
+    samples.push({ serverId, watts, ts: sTs });
   }
   try { if (db.insertMany) db.insertMany(samples); else for (const sm of samples) db.insert(sm.serverId, sm.watts, sm.ts); }
   catch (e) { console.warn(`[collector] ${c.id} 원격 전력 적재 실패:`, e.message); }
@@ -63,7 +71,7 @@ async function pullOne(c) {
   setCollectorServers(c.id, data.datacenter || c.datacenter, Array.isArray(data.servers) ? data.servers : []);
   const identity = identityIssue(c, data, loadCollectors().map((x) => x.id));
   if (identity) console.warn(`[collector] ${c.id} 정체 불일치: ${identity.reason}`);
-  return { hosts, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity, mock: data.mock === true };
+  return { hosts, duplicateSkipped: dupSkipped, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity, mock: data.mock === true };
 }
 
 let pulling = false; // 재진입 가드 — 저하된 수집기(재시도 포함 60초+)가 있으면 주기가 겹쳐
@@ -91,7 +99,7 @@ export async function pullCollectorByAgent(agentName) {
   try {
     const r = await pullOne(c);
     fails.set(c.id, 0);
-    setCollectorStatus(c.id, { ok: true, hosts: r.hosts, version: r.version, datacenter: r.datacenter, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null });
+    setCollectorStatus(c.id, { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null });
     return true;
   } catch (err) {
     // 실패해도 다음 주기 폴러가 재시도 — 여기선 조용히 로그만(즉시 반영은 best-effort).
@@ -110,7 +118,7 @@ async function pullNowInner() {
     try {
       const r = await pullOne(c);
       fails.set(c.id, 0);
-      setCollectorStatus(c.id, { ok: true, hosts: r.hosts, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock });
+      setCollectorStatus(c.id, { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock });
     } catch (err) {
       const d = describeError(err);
       const isAuth = /인증 실패|토큰/.test(d.message);

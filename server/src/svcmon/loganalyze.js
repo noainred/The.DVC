@@ -35,6 +35,7 @@ import readline from 'node:readline';
 import { logDir } from './logsettings.js';
 import { periodKey } from './csvlog.js';
 import { portalParts, portalMs } from '../util/dayKey.js';
+import { unguardCell } from '../util/csv.js';
 
 const BOM = '﻿';
 const HEADER_FIRST = '시각';        // 헤더 행 식별(파트 파일마다 헤더가 붙는다)
@@ -54,8 +55,12 @@ const HIST_BINS = HIST_EDGES.length + 1;
 
 const round2 = (v) => Math.round(v * 100) / 100;
 
-/** 수식가드 해제 — csvlog.cell 이 `= + - @` 앞에 붙인 ' 를 벗겨서 비교한다. */
-const unguard = (s) => (/^'[=+\-@]/.test(s) ? s.slice(1) : s);
+/**
+ * 수식가드 해제 — csvlog.cell 이 붙인 ' 를 벗겨서 비교한다.
+ * ⚠ v2.598 INJ-07: 쓰기(`guardCell`)는 v2.596 부터 앞의 **탭·CR** 에도 ' 를 붙인다 — 해제도 같은 규칙이어야 한다
+ *   (예전 사본은 `= + - @` 만 벗겨 탭으로 시작하는 대상·테스트 이름이 필터와 영원히 어긋났다). 쌍은 util/csv.js 하나다.
+ */
+const unguard = (s) => unguardCell(s);
 
 /* ── 파일명 → 기간 복원 ─────────────────────────────────────────────── */
 

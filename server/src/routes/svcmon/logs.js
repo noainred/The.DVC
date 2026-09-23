@@ -10,11 +10,20 @@ import { analyzeLog, listLogWindows, ANALYZE_BUCKETS } from '../../svcmon/logana
 import { getLogSettings, setLogSettings, logDir } from '../../svcmon/logsettings.js';
 import { logStatus, logFilePath, pruneOld } from '../../svcmon/csvlog.js';
 import { canEdit, adminOnly } from './shared.js';
+import { scopeFilePaths } from '../../auth/scopeStatus.js';
+
+// v2.598(감사 AUTHZ-2598-04): 로그 디렉터리 절대 경로는 admin 만(이름만 남기고 pathHidden 으로 밝힌다).
+//   실패 원문(stats.lastError — fs 오류는 경로를 담는다)도 같은 이유로 가린다.
+export function logStatusFor(user) {
+  const st = scopeFilePaths(logStatus(), user, ['dir', 'dirPath']);
+  if (user?.role === 'admin' || !st?.stats?.lastError) return st;
+  return { ...st, stats: { ...st.stats, lastError: '(관리자만 확인)' } };
+}
 
 export function registerLogs(svcmonRouter) {
 
 /* ── 로그 설정/파일 ── */
-svcmonRouter.get('/log', (req, res) => res.json(logStatus()));
+svcmonRouter.get('/log', (req, res) => res.json(logStatusFor(req.user)));
 
 svcmonRouter.put('/log', adminOnly, (req, res) => {
   try {

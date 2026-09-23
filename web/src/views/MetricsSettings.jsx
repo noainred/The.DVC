@@ -68,10 +68,16 @@ export default function MetricsSettings() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const ms = Math.max(limits.minIntervalMs, Math.min(limits.maxIntervalMs, intervalSec * 1000));
-      const r = await putJson('/admin/metrics/settings', { sampleIntervalMs: ms, retentionDays: Number(retentionDays) || 0, rawRetentionDays: Number(rawRetentionDays) || 0, gpuUtilEnabled: gpuEnabled, gpuUtilIntervalSec: Number(gpuSec) || 60 });
+      // v2.598 L2598-02: 빈 칸은 보내지 않는다(blankOr) — `Number('') || 0` 이 보존 기간을 0(=무제한)으로 만들었다.
+      const sec = blankOr(intervalSec);
+      const ms = sec == null ? undefined : Math.max(limits.minIntervalMs, Math.min(limits.maxIntervalMs, sec * 1000));
+      const r = await putJson('/admin/metrics/settings', { sampleIntervalMs: ms, retentionDays: blankOr(retentionDays), rawRetentionDays: blankOr(rawRetentionDays), gpuUtilEnabled: gpuEnabled, gpuUtilIntervalSec: blankOr(gpuSec) });
       setData(r);
+      // 저장된 값으로 칸을 되돌린다 — 비운 칸이 빈 채로 남으면 '0 으로 저장됐나' 로 읽힌다.
       setIntervalSec(Math.round(r.settings.sampleIntervalMs / 1000));
+      setRetentionDays(r.settings.retentionDays ?? '');
+      setRawRetentionDays(r.settings.rawRetentionDays ?? '');
+      setGpuSec(r.settings.gpuUtilIntervalSec ?? '');
       setMsg('저장되었습니다. 새 주기가 즉시 적용됩니다.');
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
@@ -92,27 +98,27 @@ export default function MetricsSettings() {
         <label className="muted" style={{ fontSize: 12 }}>수집 주기</label>
         <div className="flex gap wrap" style={{ margin: '6px 0 10px' }}>
           {PRESETS.map((p) => (
-            <button key={p.ms} className={intervalSec * 1000 === p.ms ? 'login-btn' : 'tab'}
+            <button key={p.ms} className={Number(intervalSec) * 1000 === p.ms ? 'login-btn' : 'tab'}
               style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setIntervalSec(p.ms / 1000)}>{p.label}</button>
           ))}
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           <input className="input" type="number" min={minSec} max={maxSec} value={intervalSec}
-            onChange={(e) => setIntervalSec(Number(e.target.value))} style={{ width: 120 }} />
+            onChange={(e) => setIntervalSec(e.target.value)} style={{ width: 120 }} />
           <span className="muted">초 ({minSec}~{maxSec}초 허용)</span>
         </div>
 
         <label className="muted" style={{ fontSize: 12, display: 'block', marginTop: 16 }}>보존 기간 (일, 0=무제한)</label>
         <div className="flex gap" style={{ alignItems: 'center', marginTop: 6 }}>
           <input className="input" type="number" min={0} value={retentionDays}
-            onChange={(e) => setRetentionDays(Number(e.target.value))} style={{ width: 120 }} />
+            onChange={(e) => setRetentionDays(e.target.value)} style={{ width: 120 }} />
           <span className="muted">일 (기본 1830일 ≈ 5년) — <b>시간당 롤업</b>(평균·최소·최대) 기준</span>
         </div>
 
         <label className="muted" style={{ fontSize: 12, display: 'block', marginTop: 12 }}>원본(분 단위) 보존 기간 (일, 0=위 보존기간과 동일)</label>
         <div className="flex gap" style={{ alignItems: 'center', marginTop: 6 }}>
           <input className="input" type="number" min={0} value={rawRetentionDays}
-            onChange={(e) => setRawRetentionDays(Number(e.target.value))} style={{ width: 120 }} />
+            onChange={(e) => setRawRetentionDays(e.target.value)} style={{ width: 120 }} />
           <span className="muted">일 (기본 0 = 끔)</span>
         </div>
         <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.6 }}>
@@ -141,7 +147,7 @@ export default function MetricsSettings() {
           <div className="flex gap" style={{ alignItems: 'center', marginTop: 8 }}>
             <span className="muted" style={{ fontSize: 12 }}>GPU 사용률 수집 주기</span>
             <input className="input" type="number" min={20} max={86400} value={gpuSec} disabled={!gpuEnabled}
-              onChange={(e) => setGpuSec(Number(e.target.value))} style={{ width: 110 }} />
+              onChange={(e) => setGpuSec(e.target.value)} style={{ width: 110 }} />
             <span className="muted">초 (20초~24시간)</span>
           </div>
           <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>GPU 호스트만 대상이며, vGPU/vSGA는 ESXi가 사용률을 보고합니다. 패스쓰루는 게스트 수집(설정 › GPU 게스트 수집)으로 보완됩니다. GPU 인벤토리 화면의 <b>‘지금 수집’</b>으로 즉시 1회 수집도 가능합니다.</div>

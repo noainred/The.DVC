@@ -18,14 +18,14 @@ test('getTopTools: 사용 횟수 내림차순 상위 N개', () => {
 });
 
 test('동률은 최근 사용이 우선', () => {
-  recordToolUse('a');
-  recordToolUse('b');
-  recordToolUse('a'); // a=2(나중), b=1
-  recordToolUse('b'); // b=2(가장 나중)
+  recordToolUse('pdu');
+  recordToolUse('ipam');
+  recordToolUse('pdu'); // pdu=2(나중), ipam=1 — v2.598: 서버가 아는 도구 키만 받는다
+  recordToolUse('ipam'); // b=2(가장 나중)
   // a=2, b=2 동률 → 마지막으로 기록된 b가 앞.
   const top = getTopTools(2);
-  assert.equal(top[0].k, 'b');
-  assert.equal(top[1].k, 'a');
+  assert.equal(top[0].k, 'ipam');
+  assert.equal(top[1].k, 'pdu');
 });
 
 test('잘못된 키는 무시', () => {
@@ -36,7 +36,7 @@ test('잘못된 키는 무시', () => {
 });
 
 test('resetToolUsage: 초기화', () => {
-  recordToolUse('x');
+  recordToolUse('gpu');
   assert.equal(getTopTools(3).length, 1);
   resetToolUsage();
   assert.equal(getTopTools(3).length, 0);

@@ -12,7 +12,6 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
-import { isSealed, openSecretIfCached } from '../security/secretVault.js';
 import { redactEnvSecrets, mergeRedactedEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 
@@ -78,23 +77,20 @@ function stripRunFields(v) {
 }
 /*
  * v2.596(감사 R2596-02 — 재현): 암호화 모드에서는 저장할 때마다 봉인 값의 salt·iv 가 새로 뽑혀 **내용이 같아도 암호문이
- * 달라진다** — 지문이 매번 바뀌어 v2.595 의 수정이 통째로 무력했다. JSON 은 봉인을 열어 평문 기준으로 지문을 낸다
- * (메모리에서 해시에만 쓰고 어디에도 남기지 않는다).
+ * 달라졌다** — 그래서 v2.596·v2.597 은 봉인을 열어(v2.597 부터는 파생키가 캐시에 있을 때만) 평문 기준으로 지문을 냈다.
+ * v2.598(감사 RECENT2598-01 — 재현): 그 방식은 지문이 **파생키 캐시 상태**에 따라 달라졌다 — 기동 백업은 레지스트리를
+ * 읽기 전이라 봉인 값이 전부 '캐시 없음' 표식이고, 레지스트리가 로드된 뒤에는 평문이 되어 내용 변화 없이 change 백업이 생겼다
+ * (kdfCache 가 넘쳐 비워질 때도 같다). 이제 secretVault.sealSecretsDeep 이 **평문이 같은 값은 기존 암호문을 재사용**하므로
+ * (L2598-01) 설정을 안 바꾼 저장은 봉인 값이 글자 그대로 같다 → 지문은 봉인 원문을 그대로 쓴다. 봉인을 열지 않으므로
+ * scrypt 도, 캐시 의존도 없다(v2.597 RECENT-01 규약). 재사용 기억이 밀려 새로 봉인되면 지문이 한 번 달라질 뿐이다(백업을
+ * 더 만드는 쪽 — 안전).
  */
-function walkSealed(v, fn) {
-  if (Array.isArray(v)) return v.map((x) => walkSealed(x, fn));
-  if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) o[k] = walkSealed(x, fn); return o; }
-  return isSealed(v) ? fn(v) : v;
-}
 function fingerprintContent(name, content) {
   if (!/\.json$/i.test(name)) return String(content);
+  if (!MIXED_STATE_FILES.has(name)) return String(content);
   let obj;
   try { obj = JSON.parse(String(content)); } catch { return String(content); }
-  // v2.597(감사 RECENT-01): openSecretsDeep 은 캐시에 없는 값마다 scryptSync 를 돌려 백업 1회에 수~수십 초 루프를 막았다.
-  // 파생키가 캐시에 있을 때만 열고(이 프로세스가 읽거나 봉인한 값 — 거의 전부), 없으면 고정 표식으로 둔다.
-  // 표식이 바뀌면 지문이 한 번 달라질 뿐이다(백업을 더 만드는 쪽 — 안전). 평문은 해시에만 쓰고 남기지 않는다.
-  obj = walkSealed(obj, (v) => { const p = openSecretIfCached(v); return p == null ? '\u0000sealed-uncached' : p; });
-  return JSON.stringify(MIXED_STATE_FILES.has(name) ? stripRunFields(obj) : obj);
+  return JSON.stringify(stripRunFields(obj));
 }
 export function settingsFingerprint(files) {
   const h = crypto.createHash('sha1');

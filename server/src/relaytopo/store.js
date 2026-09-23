@@ -39,7 +39,12 @@ export const SSH_SECRETS = ['password', 'privateKey', 'passphrase'];
 
 const ip = (v) => { const s = String(v || '').trim(); return RE_IP.test(s) ? s : ''; };
 const port = (v, def) => { const n = Number(v); return Number.isInteger(n) && n > 0 && n <= 65535 ? n : def; };
-const str = (v, n) => String(v ?? '').trim().slice(0, n);
+// ⚠ v2.598 INJ-02: 이 파일의 문자열 필드(dc·label·name·note·username …)는 전부 **한 줄** 값이고 HAProxy 설정의
+//   주석·이름에 그대로 들어간다(`haproxy.js renderManagedBlock`). 개행이 남으면 dc 이름 하나로 설정에 임의 줄
+//   (listen/server 지시어)을 끼워 넣을 수 있었다 — 제어 문자는 공백으로 바꾼다(저장·로드 모두 이 함수를 거친다).
+// eslint-disable-next-line no-control-regex
+const CTRL_RE = /[\u0000-\u001f\u007f\u2028\u2029]/g;
+const str = (v, n) => String(v ?? '').replace(CTRL_RE, ' ').trim().slice(0, n);
 
 /** SSH 자격증명 정규화. prev 가 있으면 빈 비밀은 이전 값을 잇는다(화면은 비밀을 되돌려 보내지 않음). clear* 플래그로 명시 삭제. */
 function normSsh(input, prev) {

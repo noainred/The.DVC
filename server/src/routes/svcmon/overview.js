@@ -27,7 +27,7 @@ import { getResults, getLastSweep, runNow, pollerStats } from '../../svcmon/poll
 import { ROTATE_UNITS, ROTATE_LABEL } from '../../svcmon/logsettings.js';
 import { logStats } from '../../svcmon/csvlog.js';
 import { canEdit, adminOnly } from './shared.js';
-import { redactEdgeSummary } from '../../auth/scopeStatus.js';
+import { redactEdgeSummary, redactPushStatus } from '../../auth/scopeStatus.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store as _storeForScope } from '../../store.js';
 // v2.595: 엣지 주소는 admin + 전체 범위만(auth/scopeStatus.redactEdgeSummary).
@@ -96,7 +96,7 @@ svcmonRouter.get('/diag', canEdit, (req, res) => {
     poller: pollerStats(), log: logStats(),
     targets: listTargetsCopy().length, tests: totalTests(),
     // 엣지 위임 진단 — 이 서버가 받는 쪽(edges)인지 보내는 쪽(push)인지 함께 보인다.
-    edges: redactEdgeSummary(edgeSummary(), fullAddr(req)), push: svcmonPushStatus(), silence: silenceStatus(),
+    edges: redactEdgeSummary(edgeSummary(), fullAddr(req)), push: redactPushStatus(svcmonPushStatus(), req.user), silence: silenceStatus(),
   });
 });
 

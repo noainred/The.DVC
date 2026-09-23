@@ -20,6 +20,7 @@ import { normalizeAddresses } from '../util/smtp.js';
 import { KINDS, isKind } from './kinds.js';
 
 import { ssrfBlockReason } from '../collector/registry.js';   // v2.575 SEC-15
+import { clampSetting } from '../util/clampSetting.js';
 const FILE = path.join(config.configDir, 'mail.json');
 
 export const DEFAULTS = Object.freeze({
@@ -37,9 +38,11 @@ export const DEFAULTS = Object.freeze({
 
 let cache = null;
 
+// v2.598 L2598-03: 빈 칸('')·null 은 '미지정'(def = 이전 값) — 예전 `Math.floor(Number(''))` 는 0 이라 칸을 비우면
+// 시간당 발송 한도 0(=제한 없음) · SMTP 포트 1 · 시한 1초로 **조용히 저장됐다**. 판정은 util/clampSetting.js 하나(v2.595).
 const clamp = (v, lo, hi, def) => {
-  const n = Math.floor(Number(v));
-  return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : def;
+  const n = clampSetting(v, { min: lo, max: hi, def: null, round: false });
+  return n == null ? def : Math.floor(n);
 };
 
 function normKinds(raw) {
@@ -127,8 +130,8 @@ export function save(body = {}) {
   }
   if (body.defaultTo != null) next.defaultTo = normalizeAddresses(body.defaultTo).ok;
   if (body.kinds && typeof body.kinds === 'object') next.kinds = normKinds(body.kinds);
-  if (body.rateLimitPerHour != null) next.rateLimitPerHour = clamp(body.rateLimitPerHour, 0, 10000, DEFAULTS.rateLimitPerHour);
-  if (body.historyMax != null) next.historyMax = clamp(body.historyMax, 20, 2000, DEFAULTS.historyMax);
+  if (body.rateLimitPerHour != null) next.rateLimitPerHour = clamp(body.rateLimitPerHour, 0, 10000, cur.rateLimitPerHour ?? DEFAULTS.rateLimitPerHour);
+  if (body.historyMax != null) next.historyMax = clamp(body.historyMax, 20, 2000, cur.historyMax ?? DEFAULTS.historyMax);
 
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 });
   cache = next;

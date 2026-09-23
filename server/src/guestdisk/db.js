@@ -266,8 +266,17 @@ export async function prune(retentionDays = 180) {
   const db = await getDb();
   if (!db) return { ok: false };
   const cut = Date.now() - Math.max(1, retentionDays) * 86_400_000;
-  const a = db.prepare('DELETE FROM vm_series WHERE ts<?').run(cut);
-  const b = db.prepare('DELETE FROM part_series WHERE ts<?').run(cut);
+  // ⚠ v2.598 DB2598-04: diff-저장이라 값이 안 바뀌는 VM·파티션은 **첫 관측 1행뿐**이다. 그 행이 보존 기간을 넘었다고
+  //   지우면 아래 기준(vm_last·part_last)까지 지워져 다음 수집(기본 12시간)까지 상세 추이·현재 파티션 목록이 비었다
+  //   (vmtrack v2.590 P4 와 같은 결함). 그래서 **지금 존재하는 키의 마지막 행**은 남긴다 — 존재 판정은
+  //   vm_latest(이번 목록의 VM) · part_last(현재 파티션)다. 사라진 VM·경로의 행은 예전처럼 보존 기간 뒤 지운다(무한 누적 방지).
+  //   상관 서브쿼리는 (vm_id,ts)·(vm_id,path,ts) 인덱스로 키마다 MAX 를 찾고, 후보는 ts 단독 인덱스로 좁힌다.
+  const a = db.prepare(`DELETE FROM vm_series WHERE ts<? AND NOT (
+      vm_id IN (SELECT vm_id FROM vm_latest)
+      AND ts = (SELECT MAX(q.ts) FROM vm_series q WHERE q.vm_id = vm_series.vm_id))`).run(cut);
+  const b = db.prepare(`DELETE FROM part_series WHERE ts<? AND NOT (
+      EXISTS (SELECT 1 FROM part_last l WHERE l.vm_id = part_series.vm_id AND l.path = part_series.path)
+      AND ts = (SELECT MAX(q.ts) FROM part_series q WHERE q.vm_id = part_series.vm_id AND q.path = part_series.path))`).run(cut);
   // ⚠ v2.590 P3: 행을 다 지운 키의 diff 기준(vm_last·part_last)도 지운다. 남겨 두면 값이 안 바뀌는 VM 은 기준선이
   //   '이미 기록됨' 이라 다음 수집에서도 행을 쓰지 않아 **영원히 추이·파티션이 비었다**(목록은 파티션 N개라 말한다).
   //   기준을 지우면 다음 수집이 첫 관측으로 다시 기록한다. 기준 행 수 = VM·파티션 수라 EXISTS(인덱스)로 가볍다.

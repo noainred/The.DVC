@@ -3,6 +3,7 @@ import { fetchJson, postJson, sendJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
+import { blankOr } from './blankOr.js'; // v2.598 L2598-03: 빈 숫자 칸은 보내지 않는다
 import { mailAuthStopText } from './authSkipText.js'; // v2.591(감사 F4): SMTP 인증 실패로 자동 발송을 멈춘 사실
 
 /**
@@ -58,12 +59,18 @@ export default function MailSettings() {
       for (const [id, v] of Object.entries(kinds)) outKinds[id] = { enabled: v.enabled, to: split(v.to), cc: split(v.cc) };
       const r = await sendJson('/admin/mail', 'PUT', {
         enabled, defaultTo: split(defaultTo), kinds: outKinds,
-        rateLimitPerHour: Number(rateLimit) || 0,
-        smtp: { ...smtp, password: smtp.password || undefined },   // 비우면 서버가 기존 값 유지
+        // v2.598 L2598-03: `Number('') || 0` 은 한도 0(=제한 없음)이었다 — 빈 칸은 보내지 않는다(서버가 이전 값 유지).
+        rateLimitPerHour: blankOr(rateLimit),
+        smtp: { ...smtp, port: blankOr(smtp.port), timeoutMs: blankOr(smtp.timeoutMs), password: smtp.password || undefined },   // 비우면 서버가 기존 값 유지
       });
       setMsg('저장되었습니다.');
       setSmtp((s) => ({ ...s, password: '' }));
-      if (r?.settings) setD((prev) => ({ ...prev, settings: r.settings }));
+      if (r?.settings) {
+        setD((prev) => ({ ...prev, settings: r.settings }));
+        // 비운 칸을 저장된 값으로 되돌린다(빈 채로 두면 '0 으로 저장됐나' 로 읽힌다).
+        setRateLimit(r.settings.rateLimitPerHour ?? '');
+        setSmtp((p) => ({ ...p, port: r.settings.smtp?.port ?? p.port, timeoutMs: r.settings.smtp?.timeoutMs ?? p.timeoutMs }));
+      }
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -108,7 +115,7 @@ export default function MailSettings() {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10 }}>
         <Field label="서버 주소"><input className="input" value={smtp.host} placeholder="relay.corp.local" onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} /></Field>
-        <Field label="포트"><input className="input" type="number" min={1} max={65535} value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: Number(e.target.value) })} /></Field>
+        <Field label="포트"><input className="input" type="number" min={1} max={65535} value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: e.target.value })} /></Field>
         <Field label="보내는 사람(From)"><input className="input" value={smtp.from} placeholder="vmware-portal@corp.local" onChange={(e) => setSmtp({ ...smtp, from: e.target.value })} /></Field>
         <Field label="보내는 사람 표시 이름"><input className="input" value={smtp.fromName || ''} placeholder="VMware Portal" onChange={(e) => setSmtp({ ...smtp, fromName: e.target.value })} /></Field>
         <Field label="계정 (선택)"><input className="input" value={smtp.user} onChange={(e) => setSmtp({ ...smtp, user: e.target.value })} /></Field>
@@ -168,7 +175,7 @@ export default function MailSettings() {
 
       <Field label="시간당 발송 한도 (0 = 제한 없음)">
         <input className="input" type="number" min={0} max={10000} style={{ width: 120 }} value={rateLimit}
-          onChange={(e) => setRateLimit(Number(e.target.value))} />
+          onChange={(e) => setRateLimit(e.target.value)} />
         <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>
           알림 폭주(수십 대 동시 다운)로 릴레이가 우리를 차단하는 것을 막습니다.
         </span>

@@ -35,6 +35,22 @@ const num = (v) => {
 const t = (v) => String(v ?? '').trim();
 
 /**
+ * 텔레메트리 퍼센트 값 → 0~100 숫자 또는 `null`(단일 소스 — `idrac/redfish.js` 가 재수출한다).
+ * v2.595(감사 C2595-02): 숫자만 뽑는 `replace(/[^\d.]/g,'')` 는 null·'N/A' → 0, '-1' → 1 이 됐다.
+ * v2.598(감사 IDRAC-2598-02): 전수 모드의 보드 퍼센트(cpu·mem·io·sys)는 이 판정을 거치지 않고 `num()` 만 써서
+ *   '-1'·'150' 이 그대로 사용률로 적재됐다(형제 누락). 범위 밖·파싱 불가면 null 이다.
+ * ⚠ 이 함수가 여기 사는 이유: redfish.js 가 이 파서를 동적 import 하므로 반대 방향 import 는 순환이 된다
+ *   (arch2579 가 동적 import 도 edge 로 센다). 순수 파서 쪽에 두고 redfish.js 가 가져다 쓴다.
+ */
+export function pctFromMetric(v) {
+  if (v == null) return null;
+  let x;
+  if (typeof v === 'number') x = v;
+  else { const m = /^\s*(\d+(?:\.\d+)?)\s*%?\s*$/.exec(String(v)); if (!m) return null; x = Number(m[1]); }
+  return Number.isFinite(x) && x >= 0 && x <= 100 ? x : null;
+}
+
+/**
  * 리포트 **이름 패턴**. 정확한 id 를 모르므로 소문자화한 id 에 대해 부분 일치로 찾는다.
  * ⚠ 한 리포트가 두 종류에 걸릴 수 있으므로 판정은 **첫 일치**가 아니라 전부 본다(집합).
  */
@@ -55,6 +71,38 @@ export function reportKinds(id) {
 
 /** 우리가 읽을 가치가 있는 리포트인가. */
 export function isWantedReport(id) { return reportKinds(id).length > 0; }
+
+/** 종류별 우선순위 — 보드(SystemUsage)가 먼저다. CPU·메모리를 잃으면 전수 모드가 퇴행이 된다. */
+export const REPORT_PRIORITY = Object.freeze(['system', 'nic', 'fc', 'cpumem', 'storage']);
+
+/**
+ * 읽을 리포트를 **종류별 우선순위로** 고른다(순수, v2.598 감사 IDRAC-2598-01).
+ *
+ * 예전에는 `ids.filter(isWantedReport).slice(0, max)` 라 **장비 목록 순서**로 앞 6개를 읽었다. 목록 앞쪽에
+ * 스토리지·집계 리포트가 몰린 장비는 `SystemUsage`·NIC 리포트가 잘려 CPU·메모리·네트워크가 비는데, 스토리지
+ * 값 하나만 읽혀도 결과가 `ok` 라 단독 경로 폴백도 Enterprise 대체 경로도 걸리지 않았다.
+ * 이제 종류마다 1개씩(우선순위 순) 먼저 넣고, 남는 자리를 목록 순서로 채운다. 상한으로 뺀 개수를 돌려준다.
+ *
+ * @param {string[]} urls   리포트 URL(또는 id) 목록 — 장비가 준 순서
+ * @param {number} max      장비당 상한
+ * @param {(u:string)=>string} [idOf]  URL → 리포트 id
+ * @returns {{ wanted:string[], skipped:number, matched:number }}
+ */
+export function pickReports(urls = [], max = 6, idOf = (u) => String(u || '').split('/').filter(Boolean).pop() || '') {
+  const cand = (urls || []).filter((u) => isWantedReport(idOf(u)));
+  const lim = Math.max(1, Math.floor(Number(max) || 1));
+  const picked = [];
+  const has = new Set();
+  for (const k of REPORT_PRIORITY) {
+    const u = cand.find((x) => !has.has(x) && reportKinds(idOf(x)).includes(k));
+    if (u != null && picked.length < lim) { picked.push(u); has.add(u); }
+  }
+  for (const u of cand) {
+    if (picked.length >= lim) break;
+    if (!has.has(u)) { picked.push(u); has.add(u); }
+  }
+  return { wanted: picked, skipped: cand.length - picked.length, matched: cand.length };
+}
 
 /**
  * 한 MetricValue 에서 **장치 식별자**를 뽑는다.
@@ -111,6 +159,7 @@ export function parseReport(rep = {}) {
   const board = {};
   const seenIds = [];
   let at = null;
+  let boardRejected = 0;
   for (const mv of (rep.MetricValues || [])) {
     const mid = t(mv.MetricId);
     if (mid) seenIds.push(mid);
@@ -118,18 +167,31 @@ export function parseReport(rep = {}) {
     if (Number.isFinite(ts) && (at == null || ts > at)) at = ts;
     const field = matchField(mid);
     if (!field) continue;
+    // 보드 단위 지표(CPU·MEM·IO·SYS)는 장치 축이 없다.
+    // v2.598(감사 IDRAC-2598-02): 퍼센트는 **범위 검사**를 거친다 — '-1'·'150' 을 사용률로 쓰지 않는다.
+    if (field.endsWith('Pct')) {
+      const pv = pctFromMetric(mv.MetricValue);
+      if (pv == null) { if (t(mv.MetricValue)) boardRejected += 1; continue; }
+      if (board[field] == null) board[field] = pv;
+      continue;
+    }
     const v = num(mv.MetricValue);
     if (v == null) continue;
-    // 보드 단위 지표(CPU·MEM·IO·SYS)는 장치 축이 없다.
-    if (field.endsWith('Pct')) { board[field] = v; continue; }
     const dev = deviceIdOf(mv) || '(미상)';
     const cur = devices.get(dev) || { device: dev };
     // ⚠ 같은 장치·같은 필드가 여러 번 오면 **가장 큰 값**을 쓴다(누적 카운터는 단조 증가라
     //   더 늦은 표본이 더 크다 — Timestamp 파싱에 의존하지 않는 안전한 선택).
     cur[field] = cur[field] == null ? v : Math.max(cur[field], v);
+    // v2.598(감사 IDRAC-2598-03): 장치별 **리포트 표본 시각**을 싣는다 — 환산(usage.js)이 '리포트가 갱신됐는가' 를
+    //   이것으로 본다. 폴러 시계로만 나누면 갱신되지 않은 리포트를 두 번 읽은 주기가 0 B/s('트래픽 없음')가 된다.
+    if (Number.isFinite(ts) && (cur.at == null || ts > cur.at)) cur.at = ts;
     devices.set(dev, cur);
   }
-  return { kind, id, devices, board, seenIds: [...new Set(seenIds)], at };
+  // 메트릭별 Timestamp 가 없으면 리포트 자체의 Timestamp 를 쓴다(Redfish MetricReport 의 최상위 필드).
+  const repTs = Date.parse(t(rep.Timestamp));
+  if (at == null && Number.isFinite(repTs)) at = repTs;
+  for (const d of devices.values()) if (d.at == null && at != null) d.at = at;
+  return { kind, id, devices, board, seenIds: [...new Set(seenIds)], at, boardRejected };
 }
 
 /**
@@ -146,6 +208,8 @@ export function buildIdracUsage(reports = [], seenReports = []) {
     nics: [], fcs: [], disks: [],
     usedIds: {}, usedReports: [], seenReports: [...new Set(seenReports.map(t).filter(Boolean))],
     read: [], absent: [], at: null,
+    // v2.598(감사 IDRAC-2598-02): 범위 밖(-1·150 등)이라 버린 보드 퍼센트 개수 — 조용히 버리지 않는다.
+    boardRejected: 0,
   };
   const nicMap = new Map();
   const fcMap = new Map();
@@ -157,6 +221,7 @@ export function buildIdracUsage(reports = [], seenReports = []) {
     if (!p.id) continue;
     out.usedReports.push(p.id);
     seenIds.push(...p.seenIds);
+    out.boardRejected += p.boardRejected || 0;
     if (p.at != null && (out.at == null || p.at > out.at)) out.at = p.at;
     for (const [field, v] of Object.entries(p.board)) {
       if (out[field] == null) { out[field] = v; out.usedIds[field] = p.id; }
@@ -176,6 +241,7 @@ export function buildIdracUsage(reports = [], seenReports = []) {
       iface: x.device,
       rxBytes: x.rxBytes ?? null,
       txBytes: x.txBytes ?? null,
+      at: x.at ?? null,
       // Mbps → bit/s. ⚠ 0 은 '모른다' 다(카운터 기본값) — v2.550 winPerf 와 같은 규약.
       bitsPerSec: x.linkMbps != null && x.linkMbps > 0 ? x.linkMbps * 1e6 : null,
     });
@@ -185,7 +251,7 @@ export function buildIdracUsage(reports = [], seenReports = []) {
     const rx = x.rxBytes ?? (x.rxKb != null ? x.rxKb * 1024 : null);
     const tx = x.txBytes ?? (x.txKb != null ? x.txKb * 1024 : null);
     out.fcs.push({
-      host: x.device, rxBytes: rx, txBytes: tx,
+      host: x.device, rxBytes: rx, txBytes: tx, at: x.at ?? null,
       bitsPerSec: x.linkMbps != null && x.linkMbps > 0 ? x.linkMbps * 1e6 : null,
     });
   }

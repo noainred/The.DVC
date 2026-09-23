@@ -171,20 +171,94 @@ function masterKey() {
 const PREFIX = 'enc$1$';
 export const isSealed = (v) => typeof v === 'string' && v.startsWith(PREFIX);
 
-// scrypt 파생키 캐시 — salt 가 값마다 달라 캐시 키는 (alg|logN|salt). 마이그레이션처럼 수백
-// 값을 한 번에 봉인/복호할 때 같은 salt 재사용은 없지만(봉인마다 새 salt), 복호는 값별 1회라
-// 캐시 이득이 제한적 — 상한을 둬 메모리 누수를 막는다.
+// scrypt 파생키 캐시 — 캐시 키는 (alg|logN|salt). 복호는 salt 마다 1회 유도하고 여기 둔다.
+// v2.598(감사 L2598-01): 예전에는 2,000개를 넘으면 **통째로 비웠다**(clear) — 그 순간 이 프로세스가 연 값 전부가
+// 다시 scrypt 대상이 됐다. 이제 LRU 다(조회 성공도 뒤로 보내고, 넘치면 오래된 1/4 만 버린다).
 const kdfCache = new Map();
+const KDF_CACHE_MAX = 2000;
+const sessionKeyByCk = new Map();  // ck → 세션 키(아래 sessionKey) — 복호·openSecretIfCached 가 kdfCache LRU 와 무관하게 찾는다
+let _scryptCalls = 0;               // 테스트용 계측(_vaultStats)
+function kdfGet(ck) {
+  const k = kdfCache.get(ck);
+  if (k) { kdfCache.delete(ck); kdfCache.set(ck, k); }
+  return k || sessionKeyByCk.get(ck) || null;
+}
+function kdfPut(ck, k) {
+  kdfCache.set(ck, k);
+  if (kdfCache.size > KDF_CACHE_MAX) {
+    let drop = Math.ceil(KDF_CACHE_MAX / 4);
+    for (const key of kdfCache.keys()) { if (drop-- <= 0) break; kdfCache.delete(key); }
+  }
+}
+const ckOf = (alg, logN, saltB64u) => `${alg}|${Number(logN)}|${saltB64u}`;
 function deriveKey(alg, logN, salt) {
-  const ck = `${alg}|${logN}|${salt.toString('base64url')}`;
-  let k = kdfCache.get(ck);
+  const ck = ckOf(alg, logN, salt.toString('base64url'));
+  let k = kdfGet(ck);
   if (!k) {
-    k = crypto.scryptSync(masterKey(), salt, ALGOS[alg], { N: 2 ** logN, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
-    if (kdfCache.size > 2000) kdfCache.clear();
-    kdfCache.set(ck, k);
+    k = crypto.scryptSync(masterKey(), salt, ALGOS[alg], { N: 2 ** logN, r: 8, p: 1, maxmem: 256 * 1024 * 1024 }); _scryptCalls += 1;
+    kdfPut(ck, k);
   }
   return k;
 }
+
+/*
+ * v2.598(감사 L2598-01 — 재현: 40대 등록부에서 1대를 고쳐 저장하면 3.8~4.1초 이벤트 루프 정지):
+ * 예전에는 봉인마다 새 salt 를 뽑아 **값마다 scryptSync(N=2^15, 약 100ms)** 를 메인 스레드에서 돌렸고, save 는 파일의
+ * 전 비밀을 다시 봉인하므로 한 대 수정이 N×0.1초가 됐다. 두 가지로 고쳤다 — 봉인 형식(자기서술 enc$1$…)은 그대로다.
+ *
+ * ① **세션 키**: 새로 봉인하는 값은 (alg,logN) 마다 이 프로세스에서 한 번 뽑은 salt·키를 쓰고 **값마다 IV 만 새로** 뽑는다.
+ *    GCM/ChaCha20-Poly1305 는 무작위 96-bit IV 로 같은 키에 2^32 회까지 안전하다(여기서는 2^20 회에서 교체한다).
+ *    salt 를 값마다 두던 이득은 '키 파일 없이 암호문만 유출됐을 때의 대입 비용' 인데, 전 값이 같은 마스터 키에서
+ *    나오므로 하나를 깨면 전부 깨진다 — 값마다 다른 salt 는 대입 비용을 늘리지 않는다. 기존 암호문은 각자의 salt 로 그대로 열린다.
+ * ② **평문이 같은 값은 기존 암호문을 재사용**한다(`sealSecretsDeep`). 로드(openSecretsDeep)와 봉인이 '문맥 + 평문' 의 HMAC →
+ *    암호문을 기억해 두고, 다음 저장에서 같은 문맥·같은 평문이면 그 암호문을 그대로 쓴다. 그래서 설정을 안 바꾼 저장은 파일의
+ *    봉인 값이 **글자 그대로 같다** — 백업 지문(backup/service.js)이 봉인을 열지 않고 원문으로 비교할 수 있다(RECENT2598-01).
+ *    ⚠ 문맥(필드 이름 + 그 객체의 식별 필드)을 키에 넣는다 — 평문만으로 재사용하면 **서로 다른 장비의 같은 비밀번호가 같은
+ *    암호문**이 되어 파일에서 '비밀번호가 같다' 는 사실이 드러난다(무작위 봉인이 지키던 성질). 평문은 저장하지 않는다(HMAC 만).
+ */
+const SESSION_ROTATE = 2 ** 20;
+const sessionKeys = new Map();     // `${alg}|${logN}` → { salt, key, ck, n }
+function sessionKey(alg, logN) {
+  const sk = `${alg}|${logN}`;
+  let s = sessionKeys.get(sk);
+  if (!s || s.n >= SESSION_ROTATE) {
+    const salt = crypto.randomBytes(16);
+    const key = crypto.scryptSync(masterKey(), salt, ALGOS[alg], { N: 2 ** logN, r: 8, p: 1, maxmem: 256 * 1024 * 1024 }); _scryptCalls += 1;
+    const ck = ckOf(alg, logN, salt.toString('base64url'));
+    // 교체된 세션 키도 지우지 않는다 — 그 키로 봉인한 값이 이 프로세스 안에서 아직 열려야 한다(교체는 2^20 회마다라 몇 개뿐).
+    s = { salt, key, ck, n: 0 };
+    sessionKeys.set(sk, s); sessionKeyByCk.set(ck, key);
+  }
+  s.n += 1;
+  return s;
+}
+
+/* 재사용 기억: HMAC(문맥 + 평문) → 암호문. 상한을 둔 LRU. */
+const REUSE_MAX = 20000;
+const reuse = new Map();
+let _hmacKey = null;
+function reuseKey(ctx, plain) {
+  if (!_hmacKey) _hmacKey = crypto.createHash('sha256').update('secretVault-reuse\0').update(masterKey()).digest();
+  return crypto.createHmac('sha256', _hmacKey).update(ctx).update('\0').update(plain, 'utf8').digest('base64url');
+}
+function reusePut(rk, sealed) {
+  reuse.delete(rk); reuse.set(rk, sealed);
+  if (reuse.size > REUSE_MAX) { let drop = Math.ceil(REUSE_MAX / 4); for (const k of reuse.keys()) { if (drop-- <= 0) break; reuse.delete(k); } }
+}
+// 식별 필드 — 같은 등록부를 로드할 때와 저장할 때 모양(배열/래퍼 객체)이 달라도 문맥이 같게, 경로가 아니라 **그 비밀을 담은
+// 객체의 식별자**로 문맥을 만든다. 식별자가 바뀌면(이름 변경) 새로 봉인할 뿐이다(백업이 한 번 더 생기는 쪽 — 안전).
+const ID_FIELDS = ['id', 'name', 'host', 'agent', 'agentName', 'url', 'username', 'user'];
+function ctxOf(parent, k) {
+  const ids = [];
+  if (parent && typeof parent === 'object' && !Array.isArray(parent)) for (const f of ID_FIELDS) { const x = parent[f]; if (typeof x === 'string' || typeof x === 'number') ids.push(`${f}=${x}`); }
+  return `${k}\0${ids.join('\0')}`;
+}
+// 봉인 문자열의 (alg, logN) — 재사용은 현재 정책과 같을 때만(레벨·알고리즘을 바꾸면 새 정책으로 다시 봉인해야 한다).
+function sealedParams(v) { const [alg, logN] = v.slice(PREFIX.length).split('$'); return { alg, logN: Number(logN) }; }
+function policyParams(pol) { const lv = LEVELS[pol.level] || LEVELS[2]; return { alg: pol.algorithm || lv.alg, logN: lv.logN }; }
+
+/** 테스트·진단용 — scrypt 호출 수와 캐시 크기. */
+export function _vaultStats() { return { scryptCalls: _scryptCalls, kdfCache: kdfCache.size, reuse: reuse.size, sessionKeys: sessionKeys.size }; }
 
 /** 평문 → 암호문(현재 정책). mode=plain 이면 평문 그대로, 이미 봉인된 값은 그대로(이중 봉인 방지). */
 export function sealSecret(plain, pol = policy()) {
@@ -192,9 +266,8 @@ export function sealSecret(plain, pol = policy()) {
   if (pol.mode !== 'encrypted') return plain;
   const lv = LEVELS[pol.level] || LEVELS[2];
   const alg = pol.algorithm || lv.alg;
-  const salt = crypto.randomBytes(16);
-  const iv = crypto.randomBytes(12);                       // GCM/ChaCha20-Poly1305 표준 96-bit nonce
-  const key = deriveKey(alg, lv.logN, salt);
+  const { salt, key } = sessionKey(alg, lv.logN);           // v2.598 L2598-01: 프로세스당 1회 유도 — 값마다 scrypt 하지 않는다
+  const iv = crypto.randomBytes(12);                       // GCM/ChaCha20-Poly1305 표준 96-bit nonce(값마다 새로)
   const cipher = crypto.createCipheriv(alg, key, iv, { authTagLength: 16 });
   const ct = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -236,7 +309,7 @@ export function openSecretIfCached(v) {
   try {
     const [alg, logN, salt, iv, tag, ct] = v.slice(PREFIX.length).split('$');
     if (!Object.prototype.hasOwnProperty.call(ALGOS, alg)) return null;
-    const key = kdfCache.get(`${alg}|${Number(logN)}|${Buffer.from(salt, 'base64url').toString('base64url')}`);
+    const key = kdfGet(ckOf(alg, logN, Buffer.from(salt, 'base64url').toString('base64url')));
     if (!key) return null;
     const d = crypto.createDecipheriv(alg, key, Buffer.from(iv, 'base64url'), { authTagLength: 16 });
     d.setAuthTag(Buffer.from(tag, 'base64url'));
@@ -259,7 +332,24 @@ function walk(obj, fn) {
 
 /** 로드 경계용 — 봉인 포맷인 문자열을 **키 이름과 무관하게** 전부 복호(과거 필드 개명에도 안전). in-place. */
 export function openSecretsDeep(obj) {
-  return walk(obj, (_k, v) => (isSealed(v) ? openSecret(v) : undefined));
+  return walkCtx(obj, (k, v, parent) => {
+    if (!isSealed(v)) return undefined;
+    const plain = openSecret(v);
+    // v2.598 L2598-01: 연 값의 암호문을 기억해 다음 저장에서 재사용한다(평문이 안 바뀐 값은 파일이 글자 그대로 같게).
+    if (plain !== '' && k && SECRET_FIELDS.has(k)) reusePut(reuseKey(ctxOf(parent, k), plain), v);
+    return plain;
+  });
+}
+// walk 와 같되 부모 객체를 함께 넘긴다(재사용 문맥용).
+function walkCtx(obj, fn) {
+  if (Array.isArray(obj)) { obj.forEach((v, i) => { const r = fn(null, v, obj); if (r !== undefined) obj[i] = r; else walkCtx(v, fn); }); return obj; }
+  if (obj && typeof obj === 'object') {
+    for (const k of Object.keys(obj)) {
+      const r = fn(k, obj[k], obj);
+      if (r !== undefined) obj[k] = r; else walkCtx(obj[k], fn);
+    }
+  }
+  return obj;
 }
 
 /**
@@ -270,7 +360,18 @@ export function openSecretsDeep(obj) {
 export function sealSecretsDeep(obj, pol = policy()) {
   if (pol.mode !== 'encrypted') return obj;               // 평문 모드 — 복제 비용도 생략
   const clone = structuredClone(obj);
-  return walk(clone, (k, v) => (k && SECRET_FIELDS.has(k) && typeof v === 'string' && v !== '' ? sealSecret(v, pol) : undefined));
+  const want = policyParams(pol);
+  return walkCtx(clone, (k, v, parent) => {
+    if (!(k && SECRET_FIELDS.has(k) && typeof v === 'string' && v !== '')) return undefined;
+    if (isSealed(v)) return v;                             // 이미 봉인(이중 봉인 방지 — 예전과 같다)
+    // v2.598 L2598-01: 같은 문맥·같은 평문을 이미 봉인했거나 읽은 적이 있고 현재 정책과 같으면 그 암호문을 그대로 쓴다.
+    const rk = reuseKey(ctxOf(parent, k), v);
+    const prev = reuse.get(rk);
+    if (prev) { const p = sealedParams(prev); if (p.alg === want.alg && p.logN === want.logN) { reusePut(rk, prev); return prev; } }
+    const sealed = sealSecret(v, pol);
+    if (isSealed(sealed)) reusePut(rk, sealed);
+    return sealed;
+  });
 }
 
 /* ── 모드 전환 마이그레이션 ───────────────────────────────────────────────── */

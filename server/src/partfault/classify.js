@@ -22,6 +22,8 @@
  */
 
 import { PART_STATE } from './types.js';
+import { healthWord } from '../storage/healthWord.js';
+import { unityHealthWord } from '../storage/collectors/unity.js';
 
 const up = (v) => String(v ?? '').trim().toUpperCase();
 
@@ -107,14 +109,33 @@ export function sanPartState(v, raw = '') {
  * 수집기들이 이미 쓰는 기준과 같다(`isilon.js:92`·`unity.js:42`:
  * `st !== 'unknown' && !/ok|healthy/`) — 다만 **거기서 빠진 `absent` 를 여기서 살린다**.
  */
+/** 경고 등급 단어 — 문자열 **어디에** 있어도 본다('OK-degraded'·'Up (degraded)'). 'MINOR-FAILURE' 는 통째로 경고다. */
+const WARN_WORDS = /\b(MINOR[-_ ]FAILURE|DEGRADED|WARNING|MINOR|ATTN\w*|NON[-_ ]?CRITICAL|PARTIAL)\b/;
+const WARN_WORDS_ALL = new RegExp(WARN_WORDS.source, 'g');
+/** 경고 단어와 함께 와도 fault 로 보는 **명백한** 이상어('FAILED (degraded)'). 숫자·부품명 같은 나머지는 경고를 유지한다. */
+const HARD_BAD = /\b(FAIL\w*|ERROR\w*|FAULT\w*|CRITICAL|BROKEN|OFFLINE|DOWN|DISCONNECTED|UNHEALTHY|MAJOR|NON[ _]?RECOVERABLE|SMARTFAIL\w*|(NOT|NO|NON)[ _]*(OK|HEALTHY|NORMAL|ONLINE|UP|GOOD))\b/;
+
 export function healthStringState(raw) {
   const s = up(raw);
   if (!s) return { state: PART_STATE.unknown, raw: '' };
   const r = String(raw).trim();
-  if (s === 'UNKNOWN') return { state: PART_STATE.unknown, raw: r };
-  // v2.586 — 끝에 \b: 예전엔 접두 일치라 'UPGRADE_FAILED'·'OKAY_NOT' 류가 ^UP·^OK 로 **정상**이 됐다.
-  if (/^(OK|HEALTHY|NORMAL|GOOD|ONLINE|UP|ATTENTION_NONE)\b/.test(s)) return { state: PART_STATE.ok, raw: r };
+  // 구버전 Unity REST 수집기는 열거값을 'health:N' 으로 실었다 — 같은 번역표(unity.js)로 읽는다(v2.598 IDRAC-2598-05).
+  const hm = /^HEALTH:(\d+)$/.exec(s);
+  if (hm) {
+    const w = unityHealthWord(Number(hm[1]));
+    // 번역표에 없는 값은 원문 그대로 fault 다(예전과 같다 — 모르는 값을 정상이라 말하지 않는다).
+    return /^health:/.test(w) ? { state: PART_STATE.fault, raw: r } : { ...healthStringState(w), raw: r };
+  }
+  // v2.598(감사 IDRAC-2598-06): 정상어 접두를 **먼저** 보면 'OK-degraded'·'Up (degraded)' 가 ok 가 됐다.
+  //   순서: unknown → absent → 경고 단어(나머지에 명백한 이상어가 있으면 fault) → 공용 판정(storage/healthWord.js)
+  //   의 ok/bad. 부정·이상어('not ok'·'UPGRADE_FAILED')는 공용 판정이 정상어보다 먼저 본다(v2.586).
+  if (healthWord(r) === 'unknown') return { state: PART_STATE.unknown, raw: r };
   if (/^(REMOVED|EMPTY|ABSENT|NOT[_ ]?PRESENT|UNCONFIGURED)/.test(s)) return { state: PART_STATE.absent, raw: r };
-  if (/^(DEGRADED|WARNING|MINOR|ATTN|NON[-_ ]?CRITICAL|PARTIAL)/.test(s)) return { state: PART_STATE.warn, raw: r };
+  if (WARN_WORDS.test(s)) {
+    const rest = s.replace(WARN_WORDS_ALL, ' ').replace(/[^A-Z0-9]+/g, ' ').trim();
+    // 경고 단어를 뺀 나머지에 명백한 이상어가 남으면('FAILED (degraded)') fault, 아니면 경고다('OK-degraded'·'DEGRADED 3/4').
+    return { state: HARD_BAD.test(rest) ? PART_STATE.fault : PART_STATE.warn, raw: r };
+  }
+  if (healthWord(r) === 'ok') return { state: PART_STATE.ok, raw: r };
   return { state: PART_STATE.fault, raw: r };
 }

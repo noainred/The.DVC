@@ -25,7 +25,8 @@
  */
 import { userKey, splitAccount } from './aggregate.js';
 
-export const NAME_FORM_NOTE = '계정 비교는 **도메인 접두를 보존**합니다 — 같은 사람이 `CORP\\aaa` 와 `aaa` 로 나오면 2명으로 셉니다(다른 사람을 한 명으로 합치는 것보다 안전한 쪽을 택했습니다).';
+// ⚠ v2.598 WEBUI-2598-04: 이 문구는 화면이 BoldText 로 그린다 — 백틱은 해석되지 않고 **글자로 샌다**. 값 인용은 ‘ ’.
+export const NAME_FORM_NOTE = '계정 비교는 **도메인 접두를 보존**합니다 — 같은 사람이 ‘CORP\\aaa’ 와 ‘aaa’ 로 나오면 2명으로 셉니다(다른 사람을 한 명으로 합치는 것보다 안전한 쪽을 택했습니다).';
 
 /**
  * @param {object} p
@@ -60,6 +61,13 @@ export function combineSources({ windows = {}, vdi = {} } = {}) {
   const okSrcs = srcs.filter((s) => s.state === 'ok');
   const missingSources = srcs.filter((s) => s.state !== 'ok')
     .map((s) => ({ key: s.key, label: s.label, state: s.state || 'unavailable', reason: s.reason || '' }));
+  // v2.598: 읽은 출처가 하나도 없으면 수치는 **모른다**(null) — 0 은 '지금 아무도 없다' 는 거짓이다.
+  if (!okSrcs.length) {
+    return {
+      union: null, sum: null, both: null, onlyWindows: null, onlyVdi: null,
+      partial: true, missingSources, sidOnly: 0, names: [], nameFormNote: NAME_FORM_NOTE,
+    };
+  }
   return {
     union: names.length,
     // 단순 합 — 겹침을 두 번 센 값. **'전체' 로 쓰지 말 것**(비교용으로만 표시한다).

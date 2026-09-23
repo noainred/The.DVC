@@ -19,24 +19,52 @@ import { saveAreaResults } from './db.js';
 
 const yieldLoop = () => new Promise((r) => setImmediate(r));
 
-/** 한 장비의 전 영역 수집 → DB 저장 → 요약 반환 [{area, label, ok, endpoints, failed, error?}] */
-export async function collectAreasOnce(device) {
+/** 연속 전송 실패(HTTP 응답 자체가 없음) 이 횟수면 나머지 영역을 시도하지 않는다(v2.598 T2598-01). */
+export const TRANSPORT_FAIL_LIMIT = 3;
+
+/** 멈춘 뒤 시도하지 않은 영역에 붙이는 사유(화면이 그대로 보여준다). */
+const STOP_TEXT = {
+  auth: '인증 실패로 나머지 영역을 시도하지 않았습니다(계정 잠금 예방)',
+  deadline: '영역 수집 시한 초과로 이번 주기에는 시도하지 않았습니다',
+  transport: `장비 응답 없음(연속 ${TRANSPORT_FAIL_LIMIT}회)으로 이번 주기에는 시도하지 않았습니다`,
+};
+
+/**
+ * 한 장비의 전 영역 수집 → DB 저장 → 요약 반환 [{area, label, ok, endpoints, failed, error?}]
+ *
+ * ⚠ v2.598 T2598-01: 예전엔 시한·signal 없이 66개 엔드포인트를 직렬로 불러, 장비가 응답하지 않으면 건별 시한(15초)
+ * × 66 ≈ 16.5분 동안 스토리지 폴러의 재진입 가드(_busy)를 붙잡았다(그동안 다른 장비 수집이 전부 밀린다).
+ * 이제 ① `signal`(폴러의 withDeadline)이 끊으면 거기서 멈추고 ② HTTP 응답 없는 실패가 연속
+ * TRANSPORT_FAIL_LIMIT 회면 나머지를 시도하지 않는다(v2.591 회로 차단기와 같은 판단). 멈춘 이유와 시도하지 않은
+ * 영역은 요약에 **밝힌다**(`stopped`·`notTried` — 조용한 생략 금지). 모은 결과는 멈춰도 저장한다(던지지 않는다).
+ */
+export async function collectAreasOnce(device, { signal } = {}) {
   const results = [];   // DB 저장용(엔드포인트 단위)
   const summary = [];   // push/화면용(영역 단위)
   let authDead = false;
-  for (const area of enabledAreas()) {
-    if (authDead) break;
+  let stopped = null;   // null | 'auth' | 'deadline' | 'transport'
+  let transportFails = 0;
+  const areas = enabledAreas();
+  let notTried = 0;
+  for (const area of areas) {
+    if (stopped) { notTried++; summary.push({ area: area.key, ok: 0, failed: 0, skipped: true, error: STOP_TEXT[stopped] }); continue; }
     let okCnt = 0, failCnt = 0, firstErr = '';
     for (const ep of area.endpoints) {
+      if (signal?.aborted) { stopped = 'deadline'; break; }
       try {
-        const data = await get(device, ep);
+        const data = await get(device, ep, { signal });
         results.push({ area: area.key, endpoint: ep, ok: true, data });
         okCnt++;
+        transportFails = 0;
       } catch (e) {
+        if (signal?.aborted) { stopped = 'deadline'; break; }   // 시한이 끊은 요청은 그 엔드포인트의 실패가 아니다
         results.push({ area: area.key, endpoint: ep, ok: false, error: e.message });
         failCnt++;
         if (!firstErr) firstErr = e.message;
-        if (/401|인증 실패/.test(e.message)) { authDead = true; break; } // 잠금 예방 — 즉시 중단
+        if (/401|인증 실패/.test(e.message)) { authDead = true; stopped = 'auth'; break; } // 잠금 예방 — 즉시 중단
+        // HTTP 상태를 받은 실패(404 등 — 버전별 경로 차이)는 장비가 살아 있다는 뜻이라 세지 않는다.
+        if (/^HTTP \d+/.test(e.message)) transportFails = 0;
+        else if (++transportFails >= TRANSPORT_FAIL_LIMIT) { stopped = 'transport'; break; }
       }
       await yieldLoop();
     }
@@ -47,5 +75,5 @@ export async function collectAreasOnce(device) {
     summary.push({ area: a.key, ok: 0, failed: 0, skipped: true, error: a.reason });
   }
   try { await saveAreaResults(device.id, results); } catch (e) { console.warn(`[storage-areas] DB 저장 실패(${device.id}): ${e.message}`); }
-  return { summary, authDead, endpoints: results.length };
+  return { summary, authDead, stopped, notTried, endpoints: results.length };
 }

@@ -14,6 +14,13 @@ import { STable } from '../components/STable.jsx';
  */
 // 셀 컴포넌트는 **렌더 함수 밖**에 둔다 — 안에서 정의하면 매 렌더마다 새 타입이 되어 <select> 가
 // 언마운트/재마운트되고 값을 고른 직후 포커스를 잃는다(v2.416 리뷰 확정).
+// v2.598 WEBUI-2598-09: 중앙(직접 수집) 행은 엣지가 아니다 — 상속 끝의 값은 '엣지 로컬' 이 아니라 중앙 자신의
+//   env·기본값이고, 중앙은 자기에게 push·설정 pull 을 하지 않으므로 그 두 칸은 적용 대상이 아니다.
+const CENTRAL_NA_KEYS = new Set(['pushMs', 'configPullMs']);
+function inheritTail(target) {
+  return target === '' ? '중앙 기본(env)' : '엣지 로컬';
+}
+
 function Cell({ target, form, s, globalForm, setCell }) {
   const inheritedFrom = target === '__global__' ? null : globalForm[s.key];
   const cur = form[s.key] ?? '';
@@ -28,7 +35,7 @@ function Cell({ target, form, s, globalForm, setCell }) {
       <option value="">
         {target === '__global__'
           ? '미지정(엣지 로컬)'
-          : `상속(${inheritedFrom ? msLabel(Number(inheritedFrom)) : '엣지 로컬'})`}
+          : `상속(${inheritedFrom ? msLabel(Number(inheritedFrom)) : inheritTail(target)})`}
       </option>
       {[...extra, ...presets].map((p) => <option key={p.ms} value={String(p.ms)}>{p.label}</option>)}
     </select>
@@ -125,14 +132,16 @@ export default function StorageIntervals() {
               return (
                 <tr key={t.key || '__central__'}>
                   <td><b>{t.label}</b><div className="muted" style={{ fontSize: 11 }}>{t.hint}</div></td>
-                  {spec.map((s) => (
+                  {spec.map((s) => (t.key === '' && CENTRAL_NA_KEYS.has(s.key)
+                    ? <td key={s.key} className="muted" style={{ fontSize: 12 }} title="중앙은 자기 자신에게 push·설정 pull 을 하지 않습니다.">해당 없음</td>
+                    : (
                     <td key={s.key}>
                       <Cell target={t.key} form={form} s={s} globalForm={globalForm} setCell={setCell} />
                       <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                        {sourceOf(s.key, globalForm, form) === 'inherit' ? '엣지 로컬' : `→ ${msLabel(Number(eff[s.key]))}`}
+                        {sourceOf(s.key, globalForm, form) === 'inherit' ? inheritTail(t.key) : `→ ${msLabel(Number(eff[s.key]))}`}
                       </div>
                     </td>
-                  ))}
+                  )))}
                   <td className="muted">{lagText(eff, envDefaults, { isEdge: t.key !== '' })}</td>
                 </tr>
               );

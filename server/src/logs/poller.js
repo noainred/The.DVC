@@ -51,6 +51,21 @@ function synthEvents(vcId, sinceTs, n) {
   return out;
 }
 
+// ⚠ setTimeout 은 2^31−1ms 를 넘으면 1ms 가 된다(v2.591 L2·L3) — 옛 저장값의 거대한 timeoutMs 가 데드라인을 즉시 발화시키지 않게 자른다.
+export const vcLogDeadlineMs = (vc) => Math.min(2_147_000_000, Math.max(60_000, (vc?.timeoutMs > 0 ? vc.timeoutMs : 30_000) * 2));
+// v2.598 T2598-02: 데드라인이 **결과만 포기**하던 것(Promise.race)에 AbortController 를 더한다 — 시한이 되면
+// signal 을 abort 해 수집기가 남은 SOAP 왕복(ReadNextEvents…)을 멈출 수 있게 한다(store.collectWithDeadline ·
+// v2.417 '세션을 실제로 끊는다' 규약). race 는 남긴다 — 신호를 아직 읽지 않는 수집기도 결과는 기다리지 않는다.
+export function vcLogWithDeadline(vc, run, ms = vcLogDeadlineMs(vc)) {
+  const ac = new AbortController();
+  let timer;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => { ac.abort(); reject(new Error(`수집 데드라인 초과(${Math.round(ms / 1000)}초)`)); }, ms);
+    timer.unref?.();
+  });
+  return Promise.race([run(ac.signal), guard]).finally(() => clearTimeout(timer));
+}
+
 /**
  * @param {{manual?: boolean}} [opts] manual — 관리자 '지금 수집'. v2.590: 인증 실패로 멈춘 vCenter 는
  *   **주기 수집에서만** 건너뛴다(store 와 같은 정지 기록 — 같은 계정이다. 로그 폴러가 따로 로그인하면
@@ -74,15 +89,6 @@ export async function pollLogsOnce({ manual = false } = {}) {
     // 훌쩍 넘고, 이벤트가 많아 readNext 가 여러 번 돌면 수십 초까지 늘어났다. '수집은 병렬 + per-vCenter
     // 타임아웃, 느린 1개가 전체를 막지 않게' 라는 CLAUDE.md 불변조건이 이 폴러에만 빠져 있었다.
     // DB 적재는 수집이 끝난 뒤 메인에서 한 번에 한다(동시 write 로 SQLITE_BUSY 를 만들지 않게).
-    const deadlineMs = (vc) => Math.max(60_000, (vc?.timeoutMs > 0 ? vc.timeoutMs : 30_000) * 2);
-    const withDeadline = (vc, p) => {
-      let timer;
-      const guard = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`수집 데드라인 초과(${Math.round(deadlineMs(vc) / 1000)}초)`)), deadlineMs(vc));
-        timer.unref?.();
-      });
-      return Promise.race([p, guard]).finally(() => clearTimeout(timer));
-    };
     const perVc = [];
     await poolRun(vcs, LOG_CONCURRENCY, async (vc) => {
       if (!mock && !manual && vcAuthGuard.authStopFor(vc)) { authStopped.push(vc.id); return; }
@@ -91,7 +97,7 @@ export async function pollLogsOnce({ manual = false } = {}) {
         const sinceTs = last ? last + 1 : Date.now() - 7 * DAY; // 첫 수집은 최근 7일
         const events = mock
           ? synthEvents(vc.id, sinceTs, 25)
-          : await withDeadline(vc, collectVCenterEvents(vc, { sinceTs, max: s.maxPerPoll }));
+          : await vcLogWithDeadline(vc, (signal) => collectVCenterEvents(vc, { sinceTs, max: s.maxPerPoll, signal }));
         const rows = events
           .filter((e) => (SEV_RANK[e.severity] || 0) >= minRank)
           .map((e) => ({ vcenterId: vc.id, key: e.key, ts: e.ts, severity: e.severity, type: e.type, user: e.user, entity: e.entity, message: e.message }));

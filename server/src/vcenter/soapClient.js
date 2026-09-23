@@ -12,7 +12,7 @@
 import tls from 'node:tls';
 import { config } from '../config.js';
 import { loadMetricsSettings } from '../metrics/settings.js';
-import { parseObjectContent, xmlUnescape, snapshotInfo } from './soapParse.js';
+import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs } from './soapParse.js';
 import { vcDispatcher, vcRequestSignal } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
 import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v2.492: 다중 VM 기간 사용률(엔티티별 파싱)
@@ -124,7 +124,8 @@ export class VimSoapClient {
         ...(this.cookie ? { Cookie: this.cookie } : {}),
       },
       body: ENVELOPE(body),
-      signal: vcRequestSignal(this.vc?.timeoutMs > 0 ? this.vc.timeoutMs : 30_000, ignoreExternal ? null : this.signal),
+      // v2.598 T2598-03: 옛 저장값이 2^31ms 이상이면 AbortSignal.timeout 이 1ms 가 된다 — 상한으로 자른다.
+      signal: vcRequestSignal(effectiveRequestTimeoutMs(this.vc?.timeoutMs, 30_000), ignoreExternal ? null : this.signal),
     });
     const setCookie = res.headers.get('set-cookie');
     if (setCookie) this.cookie = setCookie.split(';')[0];
@@ -284,7 +285,8 @@ export class VimSoapClient {
       // 이전의 이중 <value> 정규식은 계열 래퍼가 <value xsi:type="PerfMetricIntSeries">처럼 속성을
       // 가지는 vCenter 버전에서 매칭 실패 → 전력 0W가 되던 취약점이 있었다. maxSample=1이라 샘플은 1개.
       const val = [...blk.matchAll(/<value>(-?\d+)<\/value>/g)].pop()?.[1];
-      if (ent && val != null) out.set(ent, Number(val));
+      // v2.598 VC2598-08: -1 은 vCenter 의 '그 시각 값 없음' 표식이다 — 넣으면 powerWatts=-1 이 저장·합산된다.
+      if (ent && val != null && Number(val) >= 0) out.set(ent, Number(val));
     }
     return out;
   }
@@ -892,6 +894,43 @@ export function parsePerfMultiXml(xml, counterIds = []) {
 }
 
 export const PERF_INTERVALS = { realtime: 20, day: 300, week: 1800, month: 7200, year: 86400 };
+
+/**
+ * 파생 알람의 '발생 시각'(v2.598 VC2598-05). 이 수집기가 만드는 알람(호스트 끊김·고사용률·DS 사용률)은
+ * vCenter 이벤트가 아니라 **매 수집마다 다시 계산**하므로, 예전에는 time 이 매 수집 시각이라 사흘째 끊긴
+ * 호스트도 '방금 발생' 으로 보였다. 알람 id → 처음 관측한 시각을 들고 있다가 그 값을 time 으로 쓴다.
+ * 이번 수집에 없는 id 는 지운다(해소 → 다시 생기면 새 발생). ⚠ 인메모리라 **프로세스 재시작 시 초기화**된다 —
+ * 그래서 `timeBasis:'first-seen'` 과 `lastSeen` 을 함께 실어 화면이 '포탈이 처음 본 시각' 임을 밝힐 수 있게 한다.
+ * 크기는 현재 알람 수로 묶인다(vCenter 별로 정리).
+ */
+const _alarmFirstSeen = new Map(); // vcId -> Map<alarmId, epochMs>
+export function stampAlarmFirstSeen(vcId, alarms, now, store = _alarmFirstSeen) {
+  const prev = store.get(vcId) || new Map();
+  const next = new Map();
+  const lastSeen = new Date(now).toISOString();
+  for (const a of alarms || []) {
+    const first = prev.get(a.id) ?? next.get(a.id) ?? now;
+    next.set(a.id, first);
+    a.time = new Date(first).toISOString();
+    a.lastSeen = lastSeen;
+    a.timeBasis = 'first-seen';
+  }
+  if (next.size) store.set(vcId, next); else store.delete(vcId);
+  return alarms;
+}
+
+/**
+ * QueryPerf 표본 → 차트 점(v2.598 VC2598-02). vCenter 는 그 시각의 값을 모르면 **-1** 을 준다(수집 공백·
+ * 호스트 재부팅·VM 꺼짐 구간). 예전에는 `Math.max(0, v)` 로 **0 으로 그려** '부하 없음' 이라는 거짓이 됐다 —
+ * 결측은 `null` 로 두어 차트가 선을 끊고, 평균·스파크라인 소비처는 이미 null 을 걸러 쓴다.
+ */
+export function entityMetricPoints(raw, div = 1) {
+  return (raw || []).map((p) => {
+    const v = Number(p?.v);
+    if (!Number.isFinite(v) || v < 0) return { t: p?.t, v: null };
+    return { t: p.t, v: div > 1 ? Math.round((v / div) * 10) / 10 : v };
+  });
+}
 const PERF_COUNTERS = {
   cpu: { key: 'cpu.usage.average', unit: '%', div: 100 },
   mem: { key: 'mem.usage.average', unit: '%', div: 100 },
@@ -919,7 +958,7 @@ export async function fetchEntityMetric(vc, entityType, moref, type, interval, {
     const endTime = end ? new Date(end).toISOString() : null;
     const maxSample = (!startTime && interval === 'realtime') ? 180 : 0;
     const raw = await c.queryEntityPerf(entityType, moref, counterId, intervalId, maxSample, { startTime, endTime });
-    const points = raw.map((p) => ({ t: p.t, v: cfg.div > 1 ? Math.round((Math.max(0, p.v) / cfg.div) * 10) / 10 : Math.max(0, p.v) }));
+    const points = entityMetricPoints(raw, cfg.div);
     return { ok: true, type, interval, unit: cfg.unit, points, start: startTime, end: endTime };
   } finally {
     await c.logout();
@@ -1422,10 +1461,13 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         if (counterId) {
           const powerMap = await c.queryHostPower(counterId, need);
           for (const ref of need) {
+            // v2.598 VC2598-08: 표본이 없거나 결측(-1)이면 **미수집(undefined)** 으로 둔다. 예전 `|| 0` 은 값을
+            // 못 받은 호스트를 '측정 0W' 로 지어냈다. 받은 0 은 그대로 '수집됨(0W)' 이다.
+            if (!powerMap.has(ref)) continue;
             const host = hostByRef.get(ref);
-            const w = powerMap.get(ref) || 0;
+            const w = powerMap.get(ref);
             host.powerWatts = w;
-            host.vcPowerWatts = w; // 카운터 존재 → 0이라도 '수집됨(0W)'으로 구분(undefined=미수집)
+            host.vcPowerWatts = w;
           }
         } else {
           console.warn(`[collect] ${vc.id} 호스트 전력 미수집: IPMI 'Pwr Consumption' 센서도, power.power.average 카운터도 없음(${need.length}대)`);
@@ -1548,8 +1590,12 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
     const datastores = objs.filter((x) => x.type === 'Datastore').map((o) => {
       const p = o.props;
       const capacityGB = Math.round(num(p['summary.capacity']) / 1024 ** 3);
-      const freeGB = Math.round(num(p['summary.freeSpace']) / 1024 ** 3);
-      const usedGB = Math.max(0, capacityGB - freeGB);
+      // v2.598 VC2598-07: freeSpace 가 없으면(접근 불가 DS 등) 예전엔 여유 0 → 사용량 = 전체 = **100% · critical
+      // 알람**이 됐다. 못 읽은 여유는 null 이고 사용량·사용률도 null 이다(REST 폴백 v2.597 C2597-08 과 같은 규칙).
+      const freeRaw = p['summary.freeSpace'];
+      const freeKnown = freeRaw != null && freeRaw !== '' && Number.isFinite(Number(freeRaw));
+      const freeGB = freeKnown ? Math.round(Number(freeRaw) / 1024 ** 3) : null;
+      const usedGB = freeKnown ? Math.max(0, capacityGB - freeGB) : null;
       return {
         id: `${vc.id}:${o.ref}`,
         vcenterId: vc.id,
@@ -1558,7 +1604,7 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
         capacityGB,
         freeGB,
         usedGB,
-        usagePct: pct(usedGB, capacityGB),
+        usagePct: usedGB == null || !(capacityGB > 0) ? null : pct(usedGB, capacityGB),
         accessible: p['summary.accessible'] !== 'false',
         ...parseDatastoreStorage(p['info'], p['summary.type']),
       };
@@ -1569,8 +1615,11 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
       vcenterId: vc.id,
       name: o.props.name,
       type: o.type === 'DistributedVirtualPortgroup' ? 'DISTRIBUTED_PORTGROUP' : 'STANDARD_PORTGROUP',
-      hostCount: hosts.length,
-      vmCount: 0,
+      // v2.598 VC2598-04: 예전 값은 지어낸 것이었다 — hostCount 는 **vCenter 전체 호스트 수**, vmCount 는 항상 0.
+      // 이 수집은 네트워크의 host·vm 속성을 조회하지 않는다(포트그룹마다 호스트·VM 참조 배열이라 매 주기 응답이
+      // 커진다 — 측정 전에는 넣지 않는다). 모르는 값은 null(화면 '—')이다.
+      hostCount: null,
+      vmCount: null,
     }));
 
     // Build host/datastore-derived alarms (high usage / connection issues).
@@ -1578,9 +1627,10 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
     // id는 (vCenter, 대상, 알람 종류)로 안정적이어야 한다 — 배열 인덱스를 넣으면 앞의 알람 하나가
     // 생기고 사라질 때마다 뒤쪽 id가 전부 밀려, 알림 엔진의 firing 추적 키가 바뀌며 60분 쿨다운이
     // 무력화되고(즉시 재발송) 가짜 '해소' 이력이 쌓인다.
+    const collectedAt = Date.now();
     const mkAlarm = (entity, entityType, severity, message, kind) => alarms.push({
       id: `${vc.id}:${entityType}:${entity}:${kind}`, vcenterId: vc.id, entity, entityType,
-      severity, message, time: new Date().toISOString(), acknowledged: false,
+      severity, message, time: new Date(collectedAt).toISOString(), acknowledged: false,
     });
     for (const h of hosts) {
       if (h.connectionState === 'DISCONNECTED') mkAlarm(h.name, 'host', 'critical', 'Host disconnected from vCenter', 'disconnected');
@@ -1589,8 +1639,11 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
       else if (h.memUsagePct > 92) mkAlarm(h.name, 'host', 'warning', `High memory usage (${h.memUsagePct}%)`, 'high-mem');
     }
     for (const d of datastores) {
+      // v2.598 VC2598-07: 접근 불가 DS 는 사용률 대신 그 사실을 알린다(사용률은 못 읽었다 — null).
+      if (!d.accessible) { mkAlarm(d.name, 'datastore', 'warning', 'Datastore inaccessible (usage unknown)', 'inaccessible'); continue; }
       if (d.usagePct > 90) mkAlarm(d.name, 'datastore', d.usagePct > 95 ? 'critical' : 'warning', `Datastore usage at ${d.usagePct}%`, 'high-usage');
     }
+    stampAlarmFirstSeen(vc.id, alarms, collectedAt);
 
     // Installed solutions / plug-ins + licenses (best-effort) — 병렬로 조회해 고RTT에서 두 호출이
     // 직렬로 합산(최대 2×timeout)되어 다음 폴 주기를 밀어내는 것을 방지.

@@ -48,3 +48,45 @@ export function redactEdgeSummary(edges, full) {
   if (full || !Array.isArray(edges)) return edges;
   return edges.map((e) => (e && typeof e === 'object' ? { ...e, sourceIp: null, portalPort: null } : e));
 }
+
+/**
+ * 작업 로그 파일 경로 가림(v2.598, 감사 AUTHZ-2598-04): `scopeDbStatus` 와 같은 기준 — 절대 경로는 admin 에게만.
+ * 그 밖에는 파일 이름만 남기고(무엇을 쓰는지는 말한다) `pathHidden:true` 로 가린 사실을 밝힌다.
+ * @param {object} info 경로 필드를 가진 상태 객체(예: `{ max, file }`)
+ * @param {object} user req.user
+ * @param {string[]} keys 경로가 담긴 필드 이름
+ */
+export function scopeFilePaths(info, user, keys = ['file']) {
+  if (!info || typeof info !== 'object' || user?.role === 'admin') return info;
+  const out = { ...info };
+  let hid = false;
+  for (const k of keys) {
+    if (typeof out[k] === 'string' && out[k]) {
+      out[k] = out[k].split(/[\\/]/).filter(Boolean).pop() || null;
+      hid = true;
+    }
+  }
+  if (hid) out.pathHidden = true;
+  return out;
+}
+
+/**
+ * 엣지 → 중앙 push·pull 상태 축약(v2.598, 감사 AUTHZ-2598-03 — v2.595 vmseries `scopeVmSeriesPush` 의 형제).
+ * `centralUrl`(중앙 주소)과 실패 원문(`last.error`·`last.errors[]` — 주소·경로가 섞인다)은 admin 에게만 준다.
+ * 성패·시각·개수는 그대로 둔다(화면이 '보고가 되는가' 를 말하는 근거다). 가린 사실은 `addressHidden`.
+ * ⚠ `centralUrl` 을 담는 다른 *Status(inventoryPush·idracScanWorker·scanner …)를 라우트에 실을 때도 이 헬퍼를 쓸 것.
+ */
+export const ADMIN_ONLY_TEXT = '(관리자만 확인)';
+export function redactPushStatus(p, user) {
+  if (!p || typeof p !== 'object' || user?.role === 'admin') return p;
+  const out = { ...p, centralUrl: null, addressHidden: true };
+  const l = p.last;
+  if (l && typeof l === 'object') {
+    out.last = {
+      ...l,
+      ...(l.error ? { error: ADMIN_ONLY_TEXT } : {}),
+      ...(Array.isArray(l.errors) ? { errors: l.errors.map(() => ADMIN_ONLY_TEXT) } : {}),
+    };
+  }
+  return out;
+}

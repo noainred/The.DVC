@@ -24,6 +24,7 @@ import { publicTarget, NO_PATH_REASON } from '../../bmusage/targets.js';
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor } from '../../bmusage/poller.js';
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
+import { scopeFilePaths } from '../../auth/scopeStatus.js';   // v2.598 AUTHZ-2598-04: log.file 절대 경로는 admin 만
 import { config } from '../../config.js';
 
 const toolsPerm = requirePerm('tools');
@@ -140,7 +141,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
        *   범위 계정에는 보이는 대상만.
        */
       authStops: applyScope(authStopsFor(tg.targets), allowed),
-      log: bmUsageLogInfo(),
+      log: scopeFilePaths(bmUsageLogInfo(), req.user),
     });
   } catch (e) {
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
@@ -213,7 +214,7 @@ api.get('/tools/bm-usage/activity', toolsPerm, async (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   const events = bmUsageEvents(Number(req.query.limit) || 100);
   if (!allowed) {
-    return res.json({ ok: true, poller: bmUsageStatus(), events, log: bmUsageLogInfo() });
+    return res.json({ ok: true, poller: bmUsageStatus(), events, log: scopeFilePaths(bmUsageLogInfo(), req.user) });
   }
   let keys = new Set();
   try {
@@ -228,7 +229,7 @@ api.get('/tools/bm-usage/activity', toolsPerm, async (req, res) => {
     // 조용히 빼지 않는다 — 몇 건이 범위 밖이라 빠졌는지 화면이 말할 수 있게.
     omittedOutOfScope: Math.max(0, (events || []).length - shown.length),
     scoped: true,
-    log: bmUsageLogInfo(),
+    log: scopeFilePaths(bmUsageLogInfo(), req.user),
   });
 });
 

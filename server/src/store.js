@@ -16,6 +16,7 @@ import { buildIpamRows } from './ipam/ledger.js';
 import { syncLedger } from './ipam/db.js';
 import { getInventory, pruneInventory } from './central/inventory.js';
 import { isStopped } from './security/emergencyStop.js';
+import { effectiveRequestTimeoutMs } from './vcenter/soapParse.js'; // v2.598 T2598-03 — 옛 저장값의 시한 상한
 import { poolSettled } from './util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
 /**
@@ -241,7 +242,6 @@ class Store {
       // 느린 1곳이 이미 끝난 27곳의 신규 데이터 게시까지 막고 재진입 가드로 폴 주기가 늘어졌다.
       // vCenter 하나를 max(건별타임아웃×3, 90초)로 감싸 초과 시 실패로 떨어뜨린다(#2 lastGood 이월로
       // 인벤토리는 유지). '느린 1개가 전체 폴링을 막지 않게' 라는 CLAUDE.md 불변조건을 합산 경로에 적용.
-      const vcDeadlineMs = (vc) => Math.max(90_000, (vc?.timeoutMs > 0 ? vc.timeoutMs : 30_000) * 3);
       const withDeadline = (vc) => collectWithDeadline(vc, vcDeadlineMs(vc));
       const results = await collectPool(due, COLLECT_CONCURRENCY, (vc) => withDeadline(vc));
       results.forEach((r, i) => {
@@ -403,6 +403,13 @@ class Store {
 }
 
 /**
+ * vCenter 1곳 수집 데드라인 = max(건별 시한 × 3, 90초).
+ * v2.598 T2598-03: 시한은 상한(10분)으로 자른 값으로 곱한다 — 옛 저장값이 715,827,883ms 이상이면 ×3 이
+ * 2^31 을 넘어 setTimeout 이 1ms 로 바뀌고 데드라인이 즉시 발화해 그 vCenter 수집이 영원히 실패했다.
+ */
+export const vcDeadlineMs = (vc) => Math.max(90_000, effectiveRequestTimeoutMs(vc?.timeoutMs, 30_000) * 3);
+
+/**
  * vCenter 1곳 수집 + 데드라인(v2.590 — 감사 F7, v2.417 규약).
  *
  * 예전에는 `Promise.race([collectFromVCenter(vc), guard])` 로 **결과만 포기**했다 — 버려진 수집이 남은
@@ -515,8 +522,8 @@ function rollupsOf(snap, { scoped = false } = {}) {
     hc.powerW += h.powerWatts || 0;
     if (h.powerWatts > 0) hc.powerReporting++;
   }
-  let vmsOn = 0;
-  for (const v of snap.vms) if (v.powerState === 'POWERED_ON') vmsOn++;
+  let vmsOn = 0, templates = 0;
+  for (const v of snap.vms) { if (v.powerState === 'POWERED_ON') vmsOn++; if (v.template) templates++; }
   let alCrit = 0, alWarn = 0;
   for (const a of snap.alarms) {
     if (a.severity === 'critical') alCrit++;
@@ -537,6 +544,10 @@ function rollupsOf(snap, { scoped = false } = {}) {
     vms: snap.vms.length,
     vmsPoweredOn: vmsOn,
     vmsPoweredOff: snap.vms.length - vmsOn,
+    // v2.598 VC2598-09: vms·vmsPoweredOff 에는 **템플릿이 포함**된다(템플릿은 항상 꺼짐). 다른 리포트(샘플러·
+    // rightsizing·좀비 등)는 템플릿을 빼므로 숫자가 다를 수 있다 — 정의는 바꾸지 않고(공개 API 대조 계약·화면
+    // 전반이 이 값에 묶여 있다) 포함된 개수를 밝혀 화면이 차이를 설명하게 한다.
+    templates,
     cpuCores: hc.cores,
     cpuTotalGhz: round(cpuTotalMhz / 1000, 1),
     cpuUsedGhz: round(cpuUsedMhz / 1000, 1),
@@ -601,6 +612,7 @@ function rollupsOf(snap, { scoped = false } = {}) {
         hosts: h.length,
         vms: v.length,
         vmsPoweredOn: v.filter((x) => x.powerState === 'POWERED_ON').length,
+        templates: v.filter((x) => x.template).length,   // v2.598 VC2598-09 — vms 에 포함된 템플릿 수
         cpuUsagePct: pctOrNull(cpuU, cpuTR),
         memUsagePct: pctOrNull(memU, memTR),
         hostsUsageExcluded: h.length - hR.length,

@@ -44,8 +44,10 @@ export function buildGraph(snap, { vms = false, vcenterId = null, host = null, a
   const vcAgent = new Map();
   for (const inv of listInventory()) if (inv.agent) vcAgent.set(inv.vcenterId, inv.agent);
   for (const a of getAllGpuGuestDiag()) {
-    if (!a.agent) continue;
-    for (const vc of a.vcenters || []) if (vc.vcId) vcAgent.set(vc.vcId, a.agent);
+    // v2.598(감사 CENTRAL-02): 저장값이 오염돼도(비배열·null 원소) 그래프 전체가 500 이 되지 않게 형식을 본다.
+    //   routes/api/checksLogs.js 의 로그 연합 소스와 **같은 규칙**이다(한쪽만 고치면 형제로 재발).
+    if (!a || !a.agent || !Array.isArray(a.vcenters)) continue;
+    for (const vc of a.vcenters) if (vc && vc.vcId) vcAgent.set(vc.vcId, a.agent);
   }
   // 표시되는 vCenter를 담당하는 에이전트만(포커스 시 관련 엣지만).
   const agents = new Set();

@@ -6,6 +6,7 @@ import { loadVcenterConfig } from '../../config.js';
 import { hostPower } from '../../idrac/service.js';
 import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, getVmConsole } from '../../vcenter/soapClient.js';
 import { vcAuthGuard, isVcAuthError } from '../../vcenter/restClient.js';
+import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론 포함 vCenter id 안전한 moref 추출
 
 /**
  * 성능 모달의 **실시간 자동 갱신(20초)** 이 vCenter 인증 실패 정지를 따른다(v2.591 — 감사 F6).
@@ -61,6 +62,12 @@ function synthMetric(vm, type, interval, range = {}) {
   return { ok: true, type, interval, unit: METRIC_UNIT[type], points, mock: true, start: range.start || null, end: range.end || null };
 }
 
+/** 스냅샷 객체(VM·호스트) → { vcId, moref }. id 를 첫 콜론에서 자르지 않는다(v2.598 VC2598-06 — registry.morefOf 규약). */
+export function vcRefOf(obj) {
+  const vcId = String(obj?.vcenterId || '');
+  return { vcId, moref: morefOf(obj?.id, vcId) };
+}
+
 export function registerVmMetrics(api) {
 
 // On-demand VM performance time-series — NOT collected by the regular poll.
@@ -82,9 +89,9 @@ api.get('/vms/:id/metrics', requirePerm('inv.vms'), async (req, res) => {
 
   if (snap.source === 'mock') return res.json(synthMetric(vm, type, interval, { start, end }));
 
-  const sep = id.indexOf(':');
-  const vcId = sep >= 0 ? id.slice(0, sep) : id;
-  const moref = sep >= 0 ? id.slice(sep + 1) : '';
+  // v2.598 VC2598-06: vCenter id 에 콜론이 있을 수 있다(registry 가 허용) — 첫 콜론에서 자르면 `apac:vc01:vm-1`
+  // 이 vCenter 'apac' 으로 읽혀 '설정을 찾을 수 없습니다' 가 됐다. 스냅샷 객체의 vcenterId 로 자른다(morefOf).
+  const { vcId, moref } = vcRefOf(vm);
   const vc = loadVcenterConfig().vcenters.find((v) => v.id === vcId);
   if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
   if (metricAuthStopped(req, res, vc)) return;
@@ -111,9 +118,7 @@ api.get('/hosts/:id/metrics', requirePerm('inv.hosts'), async (req, res) => {
 
   if (snap.source === 'mock') return res.json(synthMetric(host, type, interval, { start, end }));
 
-  const sep = id.indexOf(':');
-  const vcId = sep >= 0 ? id.slice(0, sep) : id;
-  const moref = sep >= 0 ? id.slice(sep + 1) : '';
+  const { vcId, moref } = vcRefOf(host);   // v2.598 VC2598-06 — 콜론 포함 vCenter id 안전
   const vc = loadVcenterConfig().vcenters.find((v) => v.id === vcId);
   if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
   if (metricAuthStopped(req, res, vc)) return;
@@ -138,9 +143,7 @@ api.get('/vms/:id/console', requirePerm('vm.console'), async (req, res) => {
   if (snap.source === 'mock') {
     return res.json({ ok: true, mock: true, vmName: vm.name, reason: '데모 모드입니다. 실제 vCenter(live) 연결 시 VMRC/웹 콘솔 링크가 생성됩니다.' });
   }
-  const sep = id.indexOf(':');
-  const vcId = sep >= 0 ? id.slice(0, sep) : id;
-  const moref = sep >= 0 ? id.slice(sep + 1) : '';
+  const { vcId, moref } = vcRefOf(vm);   // v2.598 VC2598-06 — 콜론 포함 vCenter id 안전
   const vc = loadVcenterConfig().vcenters.find((v) => v.id === vcId);
   if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
   try {

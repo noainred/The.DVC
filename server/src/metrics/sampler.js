@@ -6,6 +6,7 @@
  */
 
 import { config } from '../config.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 import { store } from './../store.js';
 import { getMetricsDb } from './db.js';
@@ -98,11 +99,16 @@ export function vmAllocRows(snap, settings) {
   // 디스크(데이터스토어) vCenter 합계(v2.377) — Platform 추이 차트의 'disk 사용 vs 용량'.
   // ds_usedgb 는 데이터스토어 **개별 키**로만 쌓여 vCenter 단위 추이를 만들 수 없었다.
   // 여기서 vCenter(+전체) 합계를 별도 계열로 적재한다. 용량(capacity)이 CPU/MEM 의 '할당'에 대응.
+  // v2.598(감사 RECENT2598-03 — 재현: ds1 1000/800 + ds2 1000/사용량 미상 → 용량 2000 · 사용 800 = 40%. 실제는 판단 불가):
+  // vCenter REST 폴백은 사용량을 못 읽은 DS 를 usedGB:null 로 준다(v2.597 C2597-08). 그것을 0 으로 더하면 사용량 계열이
+  // 과소가 된다. 사용량을 못 읽은 DS 는 **용량·사용량 둘 다에서 빼고**(비율이 읽은 DS 끼리 맞게) 뺀 개수를 밝힌다.
+  let dsUsedUnknown = 0;
   for (const d of snap.datastores || []) {
     if (!vmperfTracks(d.vcenterId, settings)) continue;
     const cap = Number(d.capacityGB) || 0;
-    const used = Number(d.usedGB) || 0;
     if (cap <= 0) continue;                       // 용량 미상 데이터스토어는 집계 제외(추정 금지)
+    const used = numOrNull(d.usedGB);
+    if (used == null) { dsUsedUnknown += 1; continue; }
     for (const id of (settings.trackTotal ? [d.vcenterId, ''] : [d.vcenterId])) {
       const e = bucket(id);
       e.dsCap += cap; e.dsUsed += used;
@@ -137,10 +143,12 @@ export function vmAllocRows(snap, settings) {
     }
     if (rows.length) out.set(k, rows);
   }
+  out.dsUsedUnknown = dsUsedUnknown;             // 사용량을 못 읽어 디스크 합계에서 뺀 DS 수(lastRun 에 싣는다)
   return out;
 }
 
 async function sampleOnceInner() {
+  let dsUsedUnknown = 0; // v2.598 RECENT2598-03 — vmAllocRows 가 센 '사용량 미상으로 뺀 DS' 수
   const snap = store.get();
   const db = await getMetricsDb();
   const ts = Date.now();
@@ -196,6 +204,7 @@ async function sampleOnceInner() {
     if (vmperfCfg.enabled) {
       // 이름 주의: 이 함수 위쪽 온도 집계에도 byVc 가 있어 혼동을 막으려 vmperfByVc 로 둔다.
       const vmperfByVc = vmAllocRows(snap, vmperfCfg);
+      dsUsedUnknown = vmperfByVc.dsUsedUnknown || 0;
       for (const [vcId, vcRows] of vmperfByVc) {
         try { await insertVmperf(vcId, vcRows, ts); } catch (e) { console.warn(`[vmperf] ${vcId || '(전체)'} insert 실패: ${e.message}`); }
       }
@@ -260,7 +269,7 @@ async function sampleOnceInner() {
       console.warn(`[metrics] prune 실패: ${e.message}`);
     }
   }
-  lastRun = { at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length };
+  lastRun = { at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length, ...(dsUsedUnknown ? { dsUsedUnknown } : {}) };
 }
 
 const round1 = (x) => (x == null ? null : Number(x.toFixed(1)));

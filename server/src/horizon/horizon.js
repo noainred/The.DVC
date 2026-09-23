@@ -18,6 +18,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; /
 import { describeError } from '../util/errors.js';
 import { ssrfBlockReason, ssrfBlockReasonResolved } from '../collector/registry.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
+import { normRequestTimeoutMs } from '../vcenter/soapParse.js'; // v2.598 T2598-03: 요청 시한 [1초, 10분]
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 
 const FILE = path.join(config.configDir, 'horizon.json');
@@ -82,7 +83,8 @@ function normalize(body, existing = null) {
     id, name, host, username, domain,
     password: body.password ? String(body.password) : e.password || '',
     enabled: body.enabled !== undefined ? body.enabled !== false : (e.enabled !== false),
-    timeoutMs: Math.max(0, Math.round(Number(body.timeoutMs ?? e.timeoutMs) || 0)) || 15_000,
+    // v2.598 T2598-03: 상한 없으면 2^31ms 이상에서 AbortSignal.timeout 이 1ms 가 되어 모든 요청이 즉시 끊긴다.
+    timeoutMs: normRequestTimeoutMs(body.timeoutMs ?? e.timeoutMs) || 15_000,
   };
   if (!entry.password) return [null, 'password는 필수입니다.'];
 

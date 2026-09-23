@@ -89,6 +89,20 @@ export async function collectDeviceNow(deviceId, { onTrace = null, periodic = fa
   } finally { _inFlight.delete(dev.id); }
 }
 
+/**
+ * 연결 테스트의 유닛 요약(v2.598 RECENT2598-04). 데이지체인 유닛 2 이상은 뱅크·상을 **읽지 않으므로**
+ * (`apcSsh.js` banksNotCollected — v2.597 C2597-01) 개수를 0 이 아니라 **null** 로 둔다 —
+ * '뱅크 0 · 상 0' 은 '뱅크가 없다' 는 거짓이 된다. 화면은 null 을 '미수집' 으로 쓴다.
+ */
+export function detectedUnits(snap) {
+  return (snap?.units || []).map((u) => ({
+    index: u.index, powerW: u.powerW,
+    banks: u.banksNotCollected ? null : (u.banks || []).length,
+    phases: u.banksNotCollected ? null : (u.phases || []).length,
+    ...(u.banksNotCollected ? { banksNotCollected: true } : {}),
+  }));
+}
+
 /** 등록 화면 '연결 테스트' — 저장 전 임의 입력으로도 동작(레지스트리를 거치지 않는다). */
 export async function testDeviceConnection(device, { timeoutMs = 60_000, onTrace = null } = {}) {
   const t0 = Date.now();
@@ -101,7 +115,7 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000, onTrace
       summary: summarize(snap), notes: snap.notes,
       // 자동 탐지 결과를 그대로 보여준다 — '몇 대/몇 개를 찾았는지'가 이 테스트의 핵심 가치.
       detected: {
-        units: snap.units.map((u) => ({ index: u.index, powerW: u.powerW, banks: u.banks.length, phases: u.phases.length })),
+        units: detectedUnits(snap),
         sensors: snap.sensors.map((s) => ({ index: s.index, name: s.name, tempC: s.tempC, humidityPct: s.humidityPct })),
       },
     };

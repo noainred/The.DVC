@@ -16,7 +16,7 @@ import {
 } from '../../central/svcmonAssign.js';
 import { svcmonConfigPullStatus, pullSvcmonConfigNow } from '../../agent/svcmonConfigPull.js';
 import { canEdit } from './shared.js';
-import { redactEdgeSummary } from '../../auth/scopeStatus.js';
+import { redactEdgeSummary, redactPushStatus } from '../../auth/scopeStatus.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store as _storeForScope } from '../../store.js';
 // v2.595: 엣지 주소는 admin + 전체 범위만(auth/scopeStatus.redactEdgeSummary).
@@ -50,7 +50,8 @@ svcmonRouter.get('/assign', canEdit, (req, res) => {
       }
       return [...seen.values()].sort((a, b) => a.agent.localeCompare(b.agent));
     })(),
-    pull: svcmonConfigPullStatus(),
+    // v2.598(감사 AUTHZ-2598-03): centralUrl·실패 원문은 admin 만(auth/scopeStatus.redactPushStatus).
+    pull: redactPushStatus(svcmonConfigPullStatus(), req.user),
   });
 });
 
@@ -125,7 +126,7 @@ svcmonRouter.get('/edges', (req, res) => {
     limits: { maxAgents: MAX_AGENTS, maxRowsPerAgent: MAX_ROWS_PER_AGENT },
     silence: silenceStatus(),
     // 이 서버가 **엣지로서** 중앙에 보고 중인지도 함께(한 포탈이 양쪽 역할을 겸할 수 있다).
-    push: svcmonPushStatus(),
+    push: redactPushStatus(svcmonPushStatus(), req.user),   // v2.598 AUTHZ-2598-03
   });
 });
 

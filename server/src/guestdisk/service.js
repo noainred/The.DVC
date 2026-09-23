@@ -12,6 +12,7 @@ import { parseGuestDisks } from '../vcenter/soapParse.js';
 import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor } from './analyze.js';
 import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter, currentPartPaths } from './db.js';
 import { datacenterOfVcenter, listDatacenters } from '../datacenter/store.js';
+import { csvLine } from '../util/csv.js';
 
 /** vCenterId → { corpId, corpName, region } 매핑(법인=DataCenter 할당 + 스냅샷 region). */
 function buildVcMeta() {
@@ -28,10 +29,13 @@ function buildVcMeta() {
 
 const COLLECT_TIMEOUT_MS = Number(process.env.GUESTDISK_TIMEOUT_MS) || 120_000; // vCenter 1대 조회 상한
 
-function withTimeout(promise, ms, label) {
+// v2.598 T2598-02: 시한이 되면 결과를 포기하는 것에 더해 signal 을 abort 한다 — 조회가 신호를 받으면 남은 SOAP
+// 왕복을 멈춘다(v2.417 규약). race 는 남긴다(신호를 읽지 않는 조회도 결과를 기다리지 않게).
+export function withTimeout(run, ms, label) {
+  const ac = new AbortController();
   let t;
-  const timeout = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${label} 타임아웃(${ms}ms)`)), ms); });
-  return Promise.race([promise.finally(() => clearTimeout(t)), timeout]);
+  const timeout = new Promise((_, rej) => { t = setTimeout(() => { ac.abort(); rej(new Error(`${label} 타임아웃(${ms}ms)`)); }, ms); });
+  return Promise.race([run(ac.signal).finally(() => clearTimeout(t)), timeout]);
 }
 
 /**
@@ -48,7 +52,7 @@ export async function collectVcenterGuestDisk(vcenterId) {
   const vms = (snap.vms || []).filter((v) => v.vcenterId === vcenterId);
   const morefs = vms.map((v) => v.id.slice(vcenterId.length + 1)).filter(Boolean);
   if (!morefs.length) return { vcenterId, vcenterName: vcName, vms: [], total: 0, withGuest: 0 };
-  const details = await withTimeout(collectDetails(vcCfg, morefs), COLLECT_TIMEOUT_MS, `게스트 디스크 조회(${vcName})`);
+  const details = await withTimeout((signal) => collectDetails(vcCfg, morefs, { signal }), COLLECT_TIMEOUT_MS, `게스트 디스크 조회(${vcName})`);
   const out = [];
   for (const vm of vms) {
     const props = details.get(vm.id.slice(vcenterId.length + 1)) || {};
@@ -204,13 +208,9 @@ export function reclaimCsv(rows) {
     ['allocGB', '할당(GB)'], ['usedGB', '사용(GB)'], ['neededGB', '필요=사용×배율(GB)'],
     ['freeGB', '회수가능(GB)'], ['ratioPct', '사용률(%)'], ['partCount', '파티션수'],
   ];
-  const esc = (v) => {
-    let s = v == null ? '' : String(v);
-    if (/^[=+\-@]/.test(s)) s = `'${s}`;         // 엑셀 수식 인젝션 가드
-    if (/[",\n]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
-  const head = cols.map((c) => esc(c[1])).join(',');
-  const body = rows.map((r) => cols.map((c) => esc(r[c[0]])).join(',')).join('\n');
+  // v2.598 INJ-03: 수식 가드·따옴표는 util/csv.js csvLine 하나다 — 예전 사본은 앞의 탭·CR 가드가 없고
+  //   단독 CR 을 따옴표로 감싸지 않았다(셀 경계가 깨진다). null 은 빈 칸(csvLine 의 guardCell 이 '' 로 만든다).
+  const head = csvLine(cols.map((c) => c[1]));
+  const body = rows.map((r) => csvLine(cols.map((c) => r[c[0]]))).join('\n');
   return `﻿${head}\n${body}\n`;
 }

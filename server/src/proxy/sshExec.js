@@ -258,6 +258,32 @@ export const PROMPT_RULES = Object.freeze({
  * ⚠ 배너(`Storage system address:` · `Remote certificate:` 블록)도 지운다 — 남겨 두면
  *   `Issuer: CN=…` 같은 줄이 **알맹이 없는 레코드**가 되어 '없는 장비' 로 보인다(v2.525 실제 사고).
  */
+/**
+ * 인증서 블록 — `Remote certificate:` 줄부터 뒤따르는 첫 `[3]` 선택지 줄까지 지운다(v2.598 INJ-06, O(n)).
+ * 블록은 실장비에서 수십 줄이다 — `CERT_BLOCK_MAX_LINES` 안에 `[3]` 이 없으면 블록으로 보지 않고 남긴다
+ * (예전 정규식은 거리 제한이 없었지만, 수백 줄 떨어진 `[3]` 까지 지우면 데이터를 먹는다).
+ */
+const CERT_BLOCK_MAX_LINES = 80;
+function stripCertBlocks(text) {
+  const lines = text.split('\n');
+  // 뒤에서부터 '다음 [3] 줄' 위치를 한 번에 계산한다.
+  const next3 = new Array(lines.length);
+  let nx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^\s*\[3\]/.test(lines[i])) nx = i;
+    next3[i] = nx;
+  }
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith('Remote certificate:')) {
+      const j = next3[i];
+      if (j >= 0 && j - i <= CERT_BLOCK_MAX_LINES) { i = j; continue; }
+    }
+    out.push(lines[i]);
+  }
+  return out.join('\n');
+}
+
 export function stripUemcliBanner(text) {
   return String(text || '')
     /*
@@ -280,7 +306,9 @@ export function stripUemcliBanner(text) {
     .replace(/^Storage system (address|port):.*$/gm, '')
     .replace(/^HTTPS connection\s*$/gm, '')
     // 인증서 블록 — `Remote certificate:` 부터 선택지 마지막 줄까지
-    .replace(/^Remote certificate:[\s\S]*?^\s*\[3\][^\n]*\n?/gm, '')
+    // ⚠ v2.598 INJ-06: 예전 `/^Remote certificate:[\s\S]*?^\s*\[3\].../gm` 는 `[3]` 줄이 없는 출력에서
+    //   'Remote certificate:' 줄마다 끝까지 훑어 O(n²) 였다(실측 800KB → 7.9초 루프 정지). 줄 단위 O(n) 으로 바꿨다.
+    .replace(/[\s\S]*/, stripCertBlocks)
     .replace(/^(Issuer|Subject|Valid from|Valid to|Serial|Id):[^\n]*\n?/gm, '')
     .replace(/^Would you like to:\s*\n?/gm, '')
     .replace(/^\s*\[[123]\][^\n]*\n?/gm, '');
