@@ -4,6 +4,7 @@
 import React, { useState } from 'react';
 import { ScanJobLogModal } from './ScanJobLogModal.jsx';
 import { STable } from '../../components/STable.jsx';
+import { scanLastRunSummary } from './scanRunText.js'; // v2.591(감사 C3): lastRun 키는 datacenters — 요약 판정은 한 곳
 
 // ---- 스캔 현황(주기 스캐너 + 진행 중/최근 위임 잡) --------------------------
 // iDRAC 스캔이 지금 어디까지 진행됐는지 어디서든 한눈에 확인. 주기 스캐너 상태 + 진행 중·최근
@@ -144,7 +145,7 @@ export function IdracScanJobs({ data, vcenters, datacenters = [], busy, onRefres
       {st.lastRun && !pollerRunning && (
         <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
           최근 주기 스캔: {st.lastRun.at ? new Date(st.lastRun.at).toLocaleString('ko-KR') : ''}
-          {st.lastRun.vcenters != null ? ` — ${st.lastRun.vcenters} vCenter · 발견 ${st.lastRun.found ?? 0} · 등록 ${st.lastRun.registered ?? 0}${st.lastRun.delegated ? ` · 위임 ${st.lastRun.delegated}` : ''}` : ''}
+          {scanLastRunSummary(st.lastRun) ? ` — ${scanLastRunSummary(st.lastRun)}` : ''}
           {st.lastRun.skipped ? ` — ${st.lastRun.skipped}` : ''}
         </div>
       )}

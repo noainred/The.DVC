@@ -35,6 +35,8 @@ import { aggregateAll, seriesRow } from './aggregate.js';
 import { recordCurUserActivity } from './activityLog.js';
 import { pushCurUserRecords, curUserPushEnabled } from '../agent/curUserPush.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
+import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
+import { authStopView } from '../util/authGuard.js';
 
 const CONCURRENCY_CAP = 8;
 const PRUNE_EVERY_RUNS = 6;                       // 10분 × 6 = 1시간에 1회
@@ -114,6 +116,13 @@ export async function runCurUserNow(trigger = 'manual') {
       if (vc.enabled === false || vc.maintenance) { skippedVc.push({ vcenterId: vcId, why: vc.maintenance ? 'maintenance' : 'disabled' }); continue; }
       if (vc.collectMode === 'site') { skippedVc.push({ vcenterId: vcId, why: 'site' }); continue; }   // 엣지가 push
       if (vc.mock === true || isMockVcenter(vc)) { skippedVc.push({ vcenterId: vcId, why: 'mock' }); continue; }
+      // v2.591(감사 F1): 인벤토리 수집(store)과 **같은 vCenter 계정**이다. 그 계정이 인증 실패로 멈춰 있으면 주기
+      //   수집은 로그인하지 않는다(읽기 전용 조회 — 해제는 주 폴러·연결 테스트만 한다). 수동 실행은 막지 않는다.
+      //   조용히 빼지 않는다 — 사유 'auth-stopped' 와 정지 기록(시각·횟수)을 결과에 싣는다.
+      if (trigger !== 'manual') {
+        const st = vcAuthGuard.peekAuthStop(vc);
+        if (st) { skippedVc.push({ vcenterId: vcId, why: 'auth-stopped', authStopped: authStopView(st) }); continue; }
+      }
       jobs.push({ vcId, vc, targets, mock: false });
     }
 
@@ -141,12 +150,18 @@ export async function runCurUserNow(trigger = 'manual') {
       const j = jobs[i];
       if (!r?.ok) {
         const d = describeError(r?.error);
-        errors.push({ vcenterId: j.vcId, error: d.message, hint: d.hint || '' });
+        const rec = (!j.mock && isVcAuthError(r?.error)) ? vcAuthGuard.markAuthStopped(j.vc.id, j.vc, d.message) : null;
+        errors.push({ vcenterId: j.vcId, error: d.message, hint: d.hint || '', ...(rec ? { authStopped: authStopView(rec) } : {}) });
         recordCurUserActivity({ deviceId: j.vcId, name: j.vc.name || j.vcId, source: 'central', ok: false, durationMs: null, error: d.message, vms: null, users: null });
         return;
       }
       const v = r.value;
-      if (v.error) errors.push({ vcenterId: j.vcId, error: v.error });
+      if (v.error) {
+        // v2.591: 로그인 거부면 주 폴러와 같은 기록에 시도를 올린다 — 화면의 '정지(N회)' 가 실제 실패 로그인 수와 맞게.
+        const rec = (!j.mock && v.authFailed) ? vcAuthGuard.markAuthStopped(j.vc.id, j.vc, v.error) : null;
+        errors.push({ vcenterId: j.vcId, error: v.error, ...(rec ? { authStopped: authStopView(rec) } : {}) });
+        if (rec) console.warn(`[curuser] ${j.vcId}: vCenter 인증 실패 — 주기 수집 정지(${rec.attempts}회). 비밀번호를 고치면 자동 재개합니다`);
+      }
       if (v.records.length) { records.push(...v.records); collectedVc.push(j.vcId); }
     });
 

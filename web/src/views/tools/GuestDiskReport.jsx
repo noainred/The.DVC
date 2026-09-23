@@ -12,6 +12,8 @@ import { fetchJson, putJson, postJson, downloadFile } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import GuestDiskDetailModal from './GuestDiskDetailModal.jsx';
+import BoldText from '../../components/boldText.jsx';
+import { vcAuthSkipNote } from '../authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
 
 // ── 단위 변환(값은 GB 기준) ──────────────────────────────────────────────
 const UNIT_DIV = { GB: 1, TB: 1024, PB: 1024 * 1024 };
@@ -289,6 +291,9 @@ export default function GuestDiskReport({ scope = '' }) {
         </div>
       )}
 
+      {vcAuthSkipNote(poller.lastResult?.authStopped, { what: '게스트 디스크 수집', manual: '지금 수집' }) && (
+        <div className="gd-warn"><BoldText text={vcAuthSkipNote(poller.lastResult?.authStopped, { what: '게스트 디스크 수집', manual: '지금 수집' })} /></div>
+      )}
       {poller.lastResult?.errors?.length > 0 && (
         <div className="gd-warn">최근 수집에서 {poller.lastResult.errors.length}개 vCenter 조회 실패(엣지 수집 vCenter는 중앙에서 직접 접속이 안 될 수 있습니다).</div>
       )}

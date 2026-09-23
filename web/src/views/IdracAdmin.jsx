@@ -21,6 +21,7 @@ import { IdracScanJobs } from './idrac/IdracScanJobs.jsx';
 import { IdracScanRanges } from './idrac/IdracScanRanges.jsx';
 import BoldText from '../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { manualPollMessage } from './idrac/manualPollText.js'; // v2.591(감사 P1): 진행 중·긴급중단을 '성공' 으로 말하지 않는다
 
 export default function IdracAdmin() {
   const [data, setData] = useState(null);
@@ -143,8 +144,7 @@ export default function IdracAdmin() {
     setBusy(true); setImportMsg(null);
     try {
       const r = await postJson('/admin/idrac/poll', {});
-      const lr = r?.lastRun || {};
-      setImportMsg({ ok: !lr.failed, text: `수동 1회 수집 — 성공 ${lr.ok ?? 0} · 실패 ${lr.failed ?? 0}${lr.authStopped ? ` · 인증 실패 정지 ${lr.authStopped}` : ''}` });
+      setImportMsg(manualPollMessage(r));
       await load();
     } catch (err) { setImportMsg({ ok: false, text: err.message }); }
     finally { setBusy(false); }
@@ -174,7 +174,7 @@ export default function IdracAdmin() {
       {/* 스캔/삭제 등 결과 배너 — 이전에는 setImportMsg만 하고 렌더 JSX가 없어
           "비밀번호 미설정"·"이미 스캔 중" 같은 실패가 화면에 안 나오고 무음이었다. */}
       {importMsg && (
-        <div className="card" style={{ marginBottom: 10, padding: '9px 13px', fontSize: 13, color: importMsg.ok ? 'var(--green)' : 'var(--red)' }}>
+        <div className="card" style={{ marginBottom: 10, padding: '9px 13px', fontSize: 13, color: importMsg.tone === 'amber' ? 'var(--amber)' : (importMsg.ok ? 'var(--green)' : 'var(--red)') }}>
           {importMsg.text}
         </div>
       )}

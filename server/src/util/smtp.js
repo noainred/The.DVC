@@ -181,10 +181,42 @@ function converse(sock, line, timeoutMs, { redact = false, as = null, trace = nu
   });
 }
 
-/** 2xx/3xx 가 아니면 오류. 인증 단계는 명령을 가려서 비밀번호가 로그에 남지 않게 한다. */
-function expect(reply, okCodes, what) {
-  if (!okCodes.includes(reply.code)) throw new Error(`${what} 실패 — 서버 응답 ${reply.code}: ${reply.lines[reply.lines.length - 1] || ''}`);
+/**
+ * AUTH 단계 응답이 **자격증명 거부**인가(순수, v2.591 — 감사 F4).
+ * 535(자격증명 무효)·534(인증 방식이 약함 — 앱 비밀번호 요구 등, 같은 계정으로 다시 해도 결과가 같다)·
+ * 530(인증 필요). ⚠ 530 이 **STARTTLS/TLS 를 먼저 하라**는 뜻이면 자격증명 문제가 아니다 — 계정을 멈추면
+ * 비밀번호가 멀쩡한데도 메일이 영구 정지된다(authGuard 규칙 4). 그래서 문구에 STARTTLS·TLS 가 있으면 제외한다.
+ * @param {{code:number, lines?:string[]}} reply
+ */
+export function isSmtpAuthRejection(reply) {
+  const code = Number(reply?.code);
+  if (code === 535 || code === 534) return true;
+  if (code === 530) return !/starttls|\btls\b|encrypt/i.test((reply?.lines || []).join(' '));
+  return false;
+}
+
+/**
+ * 2xx/3xx 가 아니면 오류. 인증 단계는 명령을 가려서 비밀번호가 로그에 남지 않게 한다.
+ * v2.591(감사 F4): `auth:true` 인 단계(AUTH 명령·계정·비밀번호)의 자격증명 거부면 `err.authFailed = true` 를
+ *   **출처에서** 붙인다 — 메일 서비스가 그것으로 자동 발송을 멈춘다(문구 추측이 아니라 SMTP 코드로 판정).
+ */
+function expect(reply, okCodes, what, { auth = false } = {}) {
+  if (!okCodes.includes(reply.code)) {
+    const err = new Error(`${what} 실패 — 서버 응답 ${reply.code}: ${reply.lines[reply.lines.length - 1] || ''}`);
+    if (auth && isSmtpAuthRejection(reply)) { err.authFailed = true; err.smtpCode = reply.code; }
+    throw err;
+  }
   return reply;
+}
+
+/**
+ * TLS SNI 값 — IP 면 **넣지 않는다**(v2.591 — 감사 F4 부수). RFC 6066 이 IP 를 SNI 로 쓰는 것을 금지하고
+ * Node 는 `DEP0123` 경고를 내며 앞으로 무시한다(linkcheck/checks.js v2.553 과 같은 판단). 인증서 대조는
+ * `host`(IP) 로 그대로 한다 — tls.connect 가 servername 이 없으면 host 로 검증한다.
+ */
+export function sniFor(host) {
+  const h = String(host || '').trim();
+  return h && !net.isIP(h) ? h : undefined;
 }
 
 /**
@@ -216,7 +248,7 @@ export async function sendMail(cfg, msg, opts = {}) {
   const sock = await new Promise((resolve, reject) => {
     const onErr = (e) => reject(new Error(`SMTP 접속 실패(${host}:${port}): ${e.message}`));
     const s = cfg.secure
-      ? tls.connect({ host, port, servername: host, rejectUnauthorized: cfg.rejectUnauthorized !== false }, () => resolve(s))
+      ? tls.connect({ host, port, ...(sniFor(host) ? { servername: sniFor(host) } : {}), rejectUnauthorized: cfg.rejectUnauthorized !== false }, () => resolve(s))
       : net.connect({ host, port }, () => resolve(s));
     s.setTimeout(timeoutMs, () => { s.destroy(new Error('연결 유휴 시간 초과')); });
     s.once('error', onErr);
@@ -253,7 +285,8 @@ export async function sendMail(cfg, msg, opts = {}) {
     if (wantTls && advertised) {
       expect(await converse(sk, 'STARTTLS', timeoutMs, T), [220], 'STARTTLS');
       sk = await new Promise((resolve, reject) => {
-        const up = tls.connect({ socket: sock, servername: host, rejectUnauthorized: cfg.rejectUnauthorized !== false },
+        // host 를 함께 준다 — SNI 를 뺀 경우(IP) 인증서 대조에 쓰인다(socket 이 있으므로 새로 접속하지 않는다).
+        const up = tls.connect({ socket: sock, host, ...(sniFor(host) ? { servername: sniFor(host) } : {}), rejectUnauthorized: cfg.rejectUnauthorized !== false },
           () => resolve(up));
         up.once('error', (e) => reject(new Error(`STARTTLS 협상 실패: ${e.message}`)));
       });
@@ -277,11 +310,11 @@ export async function sendMail(cfg, msg, opts = {}) {
       const b64 = (s) => Buffer.from(String(s), 'utf8').toString('base64');
       if (mech === 'PLAIN') {
         const tok = Buffer.from(`\0${cfg.user}\0${cfg.password || ''}`, 'utf8').toString('base64');
-        expect(await converse(sk, `AUTH PLAIN ${tok}`, timeoutMs, { ...T, redact: true, as: 'AUTH PLAIN <redacted>' }), [235], 'SMTP 인증');
+        expect(await converse(sk, `AUTH PLAIN ${tok}`, timeoutMs, { ...T, redact: true, as: 'AUTH PLAIN <redacted>' }), [235], 'SMTP 인증', { auth: true });
       } else {
-        expect(await converse(sk, 'AUTH LOGIN', timeoutMs, { ...T, redact: true, as: 'AUTH LOGIN' }), [334], 'SMTP 인증');
-        expect(await converse(sk, b64(cfg.user), timeoutMs, { ...T, redact: true, as: '<계정 base64>' }), [334], 'SMTP 인증(계정)');
-        expect(await converse(sk, b64(cfg.password || ''), timeoutMs, { ...T, redact: true, as: '<비밀번호 base64 — 기록하지 않음>' }), [235], 'SMTP 인증(비밀번호)');
+        expect(await converse(sk, 'AUTH LOGIN', timeoutMs, { ...T, redact: true, as: 'AUTH LOGIN' }), [334], 'SMTP 인증', { auth: true });
+        expect(await converse(sk, b64(cfg.user), timeoutMs, { ...T, redact: true, as: '<계정 base64>' }), [334], 'SMTP 인증(계정)', { auth: true });
+        expect(await converse(sk, b64(cfg.password || ''), timeoutMs, { ...T, redact: true, as: '<비밀번호 base64 — 기록하지 않음>' }), [235], 'SMTP 인증(비밀번호)', { auth: true });
       }
     }
 

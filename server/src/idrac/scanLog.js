@@ -70,6 +70,11 @@ export function appendIdracScanLog(rec = {}) {
     found: n(rec.found),
     registered: n(rec.registered),
     durationMs: n(rec.durationMs),
+    // v2.591(감사 C5·F3): 무응답·인증실패·인증 정지로 건너뜀 — 예전 로그는 '발견 0' 만 남아 비밀번호가 틀린
+    //   스캔과 빈 대역을 구분할 수 없었다. 옛 기록(필드 없음)은 null 이다 — 0 으로 채우지 않는다.
+    unreachable: n(rec.unreachable),
+    authFailed: n(rec.authFailed),
+    authSkipped: n(rec.authSkipped),
     error: rec.error ? s(rec.error, 500) : null,
     stopped: rec.stopped ? true : undefined,
   };

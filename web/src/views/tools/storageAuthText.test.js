@@ -173,3 +173,14 @@ describe('authStopSummary(v2.590)', () => {
     expect(authStopSummary([{ id: 'x' }], { unit: '곳', what: 'vCenter' })).toMatch(/vCenter 1곳은/);
   });
 });
+
+describe('v2.591 — authStopInfo activity(메일 자동 발송·모니터 주기 실행)', () => {
+  it('기본은 예전 문장 그대로(주기 수집을) · activity 를 주면 그 활동을 멈췄다고 말한다(조사 을/를)', () => {
+    const s = { since: 1, at: 2, attempts: 1 };
+    expect(authStopInfo(s, { what: '장비', now: 10 }).text).toContain('장비의 주기 수집을 멈췄습니다');
+    expect(authStopInfo(s, { what: '메일', activity: '자동 발송', now: 10 }).text).toContain('메일의 자동 발송을 멈췄습니다');
+    expect(authStopInfo(s, { what: 'A 서버', activity: '주기 실행', now: 10 }).text).toContain('A 서버의 주기 실행을 멈췄습니다');
+    expect(authStopInfo(s, { what: 'X', activity: '폴링', now: 10 }).text).toContain('X의 폴링을 멈췄습니다');
+    expect(authStopInfo(s, { what: 'X', activity: '수집 루프', now: 10 }).text).toContain('X의 수집 루프를 멈췄습니다');
+  });
+});

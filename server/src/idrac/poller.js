@@ -52,6 +52,19 @@ const stopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.a
  */
 export function idracAuthStopFor(entry) { return authGuard.peekAuthStop(entry); }
 
+/**
+ * 다른 경로가 **같은 서버·같은 자격증명**으로 로그인에 성공했을 때 이 폴러의 정지를 푼다(v2.591 — 감사 R-BM1).
+ * 베어메탈 사용률의 '지금 수집'(수동)이 같은 iDRAC 계정으로 텔레메트리를 읽었다면 그 계정은 맞다 — 그런데 이 폴러는
+ * 정지된 서버를 주기에서 건너뛰므로 **스스로는 영원히 풀리지 않는다**(비밀번호가 iDRAC 쪽에서 되돌려진 경우 포탈
+ * 값이 그대로라 credHash 자동 재개도 없다). ⚠ 기록의 자격증명(credHash)이 넘긴 값과 **같을 때만** 푼다 — 다른
+ * 계정의 성공은 저장값이 맞다는 증거가 아니다.
+ * @returns {boolean} 풀었으면 true
+ */
+export function releaseIdracAuthStop(entry) {
+  if (!entry?.id || !authGuard.peekAuthStop(entry)) return false;
+  return authGuard.clearAuthStop(entry.id);
+}
+
 /** 등록부 전체의 정지 기록(id → 보기용). 화면이 서버 행마다 '멈췄다' 를 말하게 한다. */
 export function idracAuthStops(registry = null) {
   const out = new Map();
@@ -73,9 +86,10 @@ let timer = null;
 let lastRun = null; // { at, ok, failed, results: [{id, watts?, devices?, error?}] }
 let running = false; // 재진입 방지(이전 폴이 끝나기 전 다음 틱이 겹쳐 도는 것 차단)
 let pruneTick = 0; // retention prune 스로틀(10틱마다 1회)
+const BUSY = Symbol('idrac-poll-busy'); // v2.591(감사 P1): 재진입 가드에 막혔다는 표지(수동 응답이 말하게)
 
 async function pollOnce({ manual = false } = {}) {
-  if (running) return; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
+  if (running) return BUSY; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
   running = true;
   try {
     return await withJob('idrac.poll', () => pollOnceInner({ manual }));
@@ -252,6 +266,23 @@ export function getPollerStatus() {
 export async function pollNow({ manual = false } = {}) {
   try { await pollOnce({ manual }); } catch (err) { console.error('[idrac] pollNow 실패:', err.message); }
   return lastRun;
+}
+
+/**
+ * 수동 '지금 수집' 전용(v2.591 — 감사 P1). `pollNow` 는 재진입 가드에 막혀도 **직전 lastRun** 을 돌려줘
+ * 화면이 '수동 1회 수집 — 성공 N' 이라 말했고(이번에 수집한 것이 아니다), 긴급중단이면 `skipped` 를
+ * 무시하고 '성공 0 · 실패 0' 이라 했다. 이 함수는 **무엇이 일어났는지**를 나눠 돌려준다.
+ * 재진입 가드는 그대로다(동시 실행 금지 — 같은 iDRAC 에 세션이 두 배로 열린다).
+ * @returns {Promise<{ran:boolean, busy:boolean, stopped:boolean, lastRun:object|null}>}
+ *   busy — 다른 수집(주기 또는 다른 사람의 수동)이 진행 중이라 이번 요청은 **실행하지 않았다**(lastRun 은 직전 것)
+ *   stopped — 긴급중단 중이라 수집하지 않았다
+ */
+export async function pollNowManual() {
+  let r;
+  try { r = await pollOnce({ manual: true }); } catch (err) { console.error('[idrac] 수동 수집 실패:', err.message); }
+  if (r === BUSY) return { ran: false, busy: true, stopped: false, lastRun };
+  const stopped = lastRun?.skipped === '긴급중단';
+  return { ran: !stopped, busy: false, stopped, lastRun };
 }
 
 export function startIdracPoller() {

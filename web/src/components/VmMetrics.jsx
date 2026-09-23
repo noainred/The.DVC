@@ -4,6 +4,8 @@ import {
 } from 'recharts';
 import { fetchJson } from '../api.js';
 import EscClose from './EscClose.jsx';
+import BoldText from './boldText.jsx';
+import { metricErrorState, metricAuthStopText } from './vmMetricsText.js';
 
 const TYPES = [
   { k: 'cpu', label: 'CPU 사용률', color: '#3b82f6' },
@@ -64,24 +66,33 @@ function MetricModal({ metricsPath, name, onClose }) {
   const [range, setRange] = useState({ start: '', end: '' }); // applied range
   const [draft, setDraft] = useState({ start: '', end: '' });  // date-picker inputs
   const [state, setState] = useState({ loading: true });
+  const [retry, setRetry] = useState(0);   // '다시 조회'(수동) 횟수 — 바뀌면 manual=1 로 1회 조회한다
 
   useEffect(() => {
     let active = true;
-    const params = { type, interval, ...(range.start ? { start: range.start } : {}), ...(range.end ? { end: range.end } : {}) };
-    const fetchOnce = () => {
-      fetchJson(metricsPath, params)
+    let timer = null;
+    const base = { type, interval, ...(range.start ? { start: range.start } : {}), ...(range.end ? { end: range.end } : {}) };
+    const fetchOnce = (manual) => {
+      fetchJson(metricsPath, manual ? { ...base, manual: '1' } : base)
         .then((d) => { if (active) setState({ loading: false, data: d }); })
-        .catch((e) => { if (active) setState({ loading: false, error: e.message }); });
+        .catch((e) => {
+          if (!active) return;
+          // v2.591(감사 F6): vCenter 가 인증 실패로 멈춰 있으면 자동 갱신을 멈춘다 — 20초마다 같은 계정으로 로그인하면
+          //   계정이 잠긴다. 사유를 말하고 사람이 누르는 '다시 조회' 만 남긴다.
+          const st = metricErrorState(e);
+          if (st.authStopped && timer) { clearInterval(timer); timer = null; }
+          setState({ loading: false, error: st.message, authStopped: st.authStopped });
+        });
     };
     setState({ loading: true });
-    fetchOnce();
+    fetchOnce(retry > 0);
     // 실시간 + 기간 미지정일 때만 20초마다 자동 갱신
     const live = interval === 'realtime' && !range.start && !range.end;
-    const timer = live ? setInterval(fetchOnce, 20_000) : null;
+    timer = live ? setInterval(() => fetchOnce(false), 20_000) : null;
     return () => { active = false; if (timer) clearInterval(timer); };
-  }, [metricsPath, type, interval, range.start, range.end]);
+  }, [metricsPath, type, interval, range.start, range.end, retry]);
 
-  const { loading, data, error } = state;
+  const { loading, data, error, authStopped } = state;
   const cfg = TYPES.find((t) => t.k === type);
   const pts = (data?.points || []).map((p) => ({ t: p.t, v: p.v }));
   const last = pts.length ? pts[pts.length - 1].v : null;
@@ -133,7 +144,13 @@ function MetricModal({ metricsPath, name, onClose }) {
 
         <div style={{ height: 340 }}>
           {loading && <div className="muted" style={{ padding: 40, textAlign: 'center' }}>vCenter에서 불러오는 중…</div>}
-          {error && <div className="error-box" style={{ margin: 8 }}>조회 실패: {error}</div>}
+          {error && !authStopped && <div className="error-box" style={{ margin: 8 }}>조회 실패: {error}</div>}
+          {authStopped && (
+            <div className="error-box" style={{ margin: 8 }}>
+              <BoldText text={metricAuthStopText(authStopped)} />
+              <div style={{ marginTop: 8 }}><button className="tab" onClick={() => setRetry((n) => n + 1)}>다시 조회</button></div>
+            </div>
+          )}
           {!loading && !error && pts.length === 0 && <div className="muted" style={{ padding: 40, textAlign: 'center' }}>데이터가 없습니다.</div>}
           {!loading && !error && pts.length > 0 && (
             <ResponsiveContainer width="100%" height="100%">
@@ -155,7 +172,7 @@ function MetricModal({ metricsPath, name, onClose }) {
           )}
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-          이 데이터는 평소 수집하지 않으며, 이 창을 열 때 vCenter에서 직접 조회합니다. 실시간은 20초마다 자동 갱신됩니다.
+          이 데이터는 평소 수집하지 않으며, 이 창을 열 때 vCenter에서 직접 조회합니다. 실시간은 20초마다 자동 갱신됩니다{authStopped ? '(인증 실패로 멈춤)' : ''}.
         </div>
       </div>
     </div>

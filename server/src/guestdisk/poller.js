@@ -11,6 +11,9 @@ import { load as loadSettings } from './settings.js';
 import { collectAndStore } from './service.js';
 import { prune, getDb } from './db.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
+import { loadVcenterConfig } from '../config.js';
+import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
+import { authStopView } from '../util/authGuard.js';
 
 const TICK_MS = 60_000;
 const CONCURRENCY = Math.max(1, Number(process.env.GUESTDISK_CONCURRENCY) || 4);
@@ -25,7 +28,8 @@ export function guestDiskPollerStatus() { return { running, lastResult, lastRunT
 
 // v2.579(ARCH-01): 풀 스캐폴드는 util/pool.js 하나다 — 항목별 결과 모양(예전 그대로)만 여기서 입힌다.
 async function pool(items, n, fn) {
-  return (await poolSettled(items, n, fn)).map((r) => (r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message || r.reason) }));
+  // v2.591: 로그인 거부 표시(authFailed)를 문자열로 바꾸며 버리지 않는다 — 아래에서 정지 기록에 올린다.
+  return (await poolSettled(items, n, fn)).map((r) => (r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message || r.reason), authFailed: isVcAuthError(r.reason) }));
 }
 
 /** 전체 vCenter 수집 1회(수동/자동 공용). 진행 중이면 skipped. */
@@ -43,25 +47,47 @@ export async function runGuestDiskNow(trigger = 'manual') {
     // site 모드(엣지 위임) vCenter 는 중앙이 직접 SOAP 를 못 건다 — 라이브 조회하면 매번
     // 실패/타임아웃해 오류만 쌓인다. 그런 vCenter 의 게스트 디스크는 엣지가 /central/guest-disk 로
     // push 한다(agent/guestDiskPush.js). 여기서는 중앙이 직접 수집하는 vCenter 만 조회한다.
-    const vcs = allVcs.filter((v) => v.collectSource !== 'site').map((v) => v.id);
-    const siteDelegated = allVcs.length - vcs.length;
+    const direct = allVcs.filter((v) => v.collectSource !== 'site').map((v) => v.id);
+    const siteDelegated = allVcs.length - direct.length;
+    // v2.591(감사 F1): 인벤토리 수집(store)과 같은 vCenter 계정이다 — 그 계정이 인증 실패로 멈춰 있으면 주기 수집은
+    //   로그인하지 않는다(읽기 전용 조회 — 해제는 주 폴러·연결 테스트만). 수동 실행은 막지 않는다. 건너뛴 vCenter 는
+    //   `authStopped` 로 결과에 싣는다(조용히 빼지 않는다).
+    let regById = new Map();
+    try { regById = new Map((loadVcenterConfig().vcenters || []).map((v) => [v.id, v])); } catch { /* 등록부 없음 — 판정 불가, 그대로 진행 */ }
+    const authStopped = [];
+    const vcs = direct.filter((id) => {
+      if (trigger === 'manual') return true;
+      const cfg = regById.get(id);
+      const st = cfg ? vcAuthGuard.peekAuthStop(cfg) : null;
+      if (st) { authStopped.push({ vcenterId: id, ...authStopView(st) }); return false; }
+      return true;
+    });
     if (!vcs.length) {
       lastRunTs = Date.now();
-      lastResult = { at: lastRunTs, trigger, vcenters: 0, siteDelegated, vms: 0, vmSeriesRows: 0, partSeriesRows: 0, ms: Date.now() - started, errors: [] };
-      return { ok: true, ...lastResult, note: `중앙 직접 수집 vCenter 없음 — site 위임 ${siteDelegated}개는 엣지 push 로 수신합니다.` };
+      lastResult = { at: lastRunTs, trigger, vcenters: 0, siteDelegated, vms: 0, vmSeriesRows: 0, partSeriesRows: 0, ms: Date.now() - started, errors: [], ...(authStopped.length ? { authStopped } : {}) };
+      const note = authStopped.length
+        ? `인증 실패로 주기 수집이 멈춘 vCenter ${authStopped.length}곳을 건너뛰었습니다.`
+        : `중앙 직접 수집 vCenter 없음 — site 위임 ${siteDelegated}개는 엣지 push 로 수신합니다.`;
+      return { ok: true, ...lastResult, note };
     }
     let vms = 0; let vmSeriesRows = 0; let partSeriesRows = 0; const errors = [];
     const res = await pool(vcs, CONCURRENCY, (id) => collectAndStore(id, { changeThresholdGB: s.changeThresholdGB }));
     for (let k = 0; k < res.length; k++) {
       const r = res[k];
-      if (!r || r.error) { errors.push({ vcenterId: vcs[k], error: r?.error || '알 수 없음' }); continue; }
+      if (!r || r.error) {
+        // v2.591: 로그인 거부면 주 폴러와 같은 정지 기록에 시도를 올린다(화면의 시도 횟수가 정직해지게).
+        const cfg = regById.get(vcs[k]);
+        const rec = (r?.authFailed && cfg) ? vcAuthGuard.markAuthStopped(cfg.id, cfg, r.error) : null;
+        errors.push({ vcenterId: vcs[k], error: r?.error || '알 수 없음', ...(rec ? { authStopped: authStopView(rec) } : {}) });
+        continue;
+      }
       vms += r.withGuest;
       vmSeriesRows += r.commit?.vmSeriesRows || 0;
       partSeriesRows += r.commit?.partSeriesRows || 0;
     }
     await prune(s.retentionDays);
     lastRunTs = Date.now();
-    lastResult = { at: lastRunTs, trigger, vcenters: vcs.length, siteDelegated, vms, vmSeriesRows, partSeriesRows, ms: Date.now() - started, errors };
+    lastResult = { at: lastRunTs, trigger, vcenters: vcs.length, siteDelegated, vms, vmSeriesRows, partSeriesRows, ms: Date.now() - started, errors, ...(authStopped.length ? { authStopped } : {}) };
     return { ok: true, ...lastResult };
   } finally {
     running = false;

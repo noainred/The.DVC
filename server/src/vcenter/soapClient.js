@@ -143,6 +143,10 @@ export class VimSoapClient {
         ? `vCenter 인증 실패(InvalidLogin) — ${fault ? xmlUnescape(fault[1]) : `HTTP ${res.status}`}`
         : `SOAP ${res.status}: ${fault ? fault[1] : text.slice(0, 160)}`);
       if (invalidLogin) { err.authFailed = true; err.status = res.status; }
+      // v2.591: fault 상세 타입을 싣는다(`<detail><XxxFault xsi:type="Xxx">`). 게스트 계정 거부(`InvalidGuestLogin`)를
+      //   문구(faultstring)가 아니라 **타입으로** 가르기 위해서다 — gpu/guestops.js 가 이 값을 본다.
+      const ft = /<detail>[\s\S]*?xsi:type="(?:[\w-]+:)?([\w]+)"/.exec(text)?.[1] || /<detail>\s*<(?:[\w-]+:)?([\w]+?)(?:Fault)?[\s>]/.exec(text)?.[1] || '';
+      if (ft) err.fault = ft;
       throw err;
     }
     return text;

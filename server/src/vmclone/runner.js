@@ -32,6 +32,8 @@ import {
 import { getMount, mountedSet, mountPointOf } from '../system/nfsMounts.js';
 import { morefOf } from '../vcenter/registry.js';
 import { fileStamp } from '../util/dayKey.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
+import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
+import { authStopView } from '../util/authGuard.js';
 
 // v2.447(감사 B1): 로컬 split(':') 헬퍼 제거 — vcenterId 에 콜론이 있으면 잘못된 MoRef 로
 // 스냅샷/클론을 시도하게 된다. 공용 morefOf(id, vcenterId) 사용.
@@ -81,8 +83,27 @@ async function runJob(jobId, trigger) {
 
     const vmRef = morefOf(job.vmId, job.vcenterId);
     if (!vmRef) throw new Error('VM MoRef 해석 실패');
+    // v2.591(감사 F1): 인벤토리 수집과 같은 vCenter 계정이다. 그 계정이 인증 실패로 멈춰 있으면 **스케줄 실행**은
+    //   로그인하지 않는다(읽기 전용 조회 — 해제는 주 폴러·연결 테스트만). 수동 '지금 실행' 은 막지 않는다.
+    //   조용히 건너뛰지 않는다 — 실행 기록(lastRun)에 사유·정지 기록을 남긴다(다음 스케줄은 평소대로 도래한다).
+    if (trigger === 'schedule') {
+      const st = vcAuthGuard.peekAuthStop(vcCfg);
+      if (st) {
+        const detail = `건너뜀 — vCenter 인증 실패로 주기 수집이 멈춰 있어 스케줄 실행을 하지 않았습니다(실패 ${st.attempts}회). 비밀번호를 고치거나 설정 › vCenter 의 연결 테스트가 성공하면 다시 실행합니다. '지금 실행' 은 막지 않습니다.`;
+        recordRun(jobId, { ok: false, detail, ms: Date.now() - t0, skipped: 'auth-stopped', authStopped: authStopView(st) });
+        logAudit({ user: `vm-clone(${trigger})`, action: 'VM 복제 건너뜀(인증 정지)', target: `${job.vcenterId}/${job.vmName}`, detail: detail.slice(0, 200) });
+        console.warn(`[vmclone] ${job.vcenterId}/${job.vmName}: vCenter 인증 실패 정지 — 스케줄 실행 건너뜀(${st.attempts}회)`);
+        _running.jobId = null; _running.phase = '';
+        return;
+      }
+    }
     const c = new VimSoapClient(vcCfg);
-    await c.login();
+    try { await c.login(); }
+    catch (e) {
+      // v2.591: 로그인 거부면 주 폴러와 같은 정지 기록에 시도를 올린다(화면의 시도 횟수가 정직해지게).
+      if (isVcAuthError(e)) vcAuthGuard.markAuthStopped(vcCfg.id, vcCfg, e.message);
+      throw e;
+    }
     let snapRef = null;
     let snapCleanupErr = '';
     try {

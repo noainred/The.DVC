@@ -10,7 +10,7 @@ import { config } from '../config.js';
 import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 시 SSRF 정적 가드
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
-import { NsxClient } from './client.js';
+import { NsxClient, nsxAuthGuard } from './client.js';
 import { ensureNsxDial } from './proxy.js';
 import { describeError } from '../util/errors.js';
 import { retryTransient } from '../util/resilientFetch.js';
@@ -127,10 +127,16 @@ export function removeManager(id) {
 /** Test connectivity to an NSX Manager (login). Uses the stored password when omitted. */
 export async function testConnection(body) {
   let entry = body;
+  // v2.591(감사 R-N1): 저장된 비밀번호로 한 테스트가 성공하면 인증 실패 정지를 푼다 — vCenter testConnection 과
+  //   같은 모양(`authStopCleared`). NSX 쪽에서 잠금이 풀린 경우 포탈 비밀번호는 그대로라 credHash 자동 재개가 걸리지
+  //   않고, 수동 수집 경로도 없어 **이것이 유일한 복구 경로**다(화면 문구가 이미 그렇게 안내하고 있었다).
+  //   입력한 새 비밀번호·다른 계정으로 성공한 것은 **저장값이 맞다는 증거가 아니므로** 풀지 않는다.
+  let savedEntry = null;
   if (!entry.password && entry.id) {
     const saved = loadRegistry().find((m) => m.id === entry.id);
-    if (saved) entry = { ...saved, ...body, password: saved.password, host: saved.host }; // v2.480(3차 감사 S6): 저장 비밀번호를 물려받는 테스트는 host 도 저장값으로 고정 — body.host 만 공격자 IP 로 바꿔 평문 비밀번호를 받는 경로 차단(PDU S-1 과 같은 규칙)
+    if (saved) { savedEntry = saved; entry = { ...saved, ...body, password: saved.password, host: saved.host }; } // v2.480(3차 감사 S6): 저장 비밀번호를 물려받는 테스트는 host 도 저장값으로 고정 — body.host 만 공격자 IP 로 바꿔 평문 비밀번호를 받는 경로 차단(PDU S-1 과 같은 규칙)
   }
+  const usedSaved = !!savedEntry && String(entry.username || '') === String(savedEntry.username || '');
   if (!entry.host || !entry.username || !entry.password) {
     return { ok: false, reason: 'host/username/password가 필요합니다.' };
   }
@@ -143,7 +149,8 @@ export async function testConnection(body) {
       await client.ping();
       return !!dial;
     });
-    return { ok: true, ms: Date.now() - started, viaProxy };
+    const authStopCleared = usedSaved ? nsxAuthGuard.clearAuthStop(savedEntry.id) : false;
+    return { ok: true, ms: Date.now() - started, viaProxy, ...(authStopCleared ? { authStopCleared: true } : {}) };
   } catch (err) {
     const d = describeError(err);
     return { ok: false, reason: d.message, hint: d.hint, code: d.code, ms: Date.now() - started };

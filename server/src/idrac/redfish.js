@@ -92,7 +92,11 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
 
   // 2) Digest 챌린지면 Digest
   const challenge = parseDigestChallenge(res.headers.get('www-authenticate'));
-  await drain(res); // Basic 401 본문 소진(undici 소켓 반환) — 챌린지 유무 관계없이.
+  // Basic 401 본문 소진(undici 소켓 반환) — 챌린지 유무 관계없이. v2.591(감사 F3 부수): 버리지 않고 **읽어서** 응답에
+  //   붙인다 — 스캔(probeIdrac)이 그 본문으로 iDRAC 의 오류 메시지를 읽으면 원인 진단용 **추가 인증 1회**가 사라진다
+  //   (IP 당 3~4회 → 2~3회). 본문은 작다(Redfish 오류 JSON). 읽기 실패는 빈 문자열(예전 drain 과 같은 효과).
+  const basicAuthBody = await res.text().catch(() => '');
+  try { Object.defineProperty(res, 'basicAuthBody', { value: basicAuthBody, enumerable: false }); } catch { /* 응답 객체가 막혀 있으면 예전처럼 재요청으로 읽는다 */ }
   if (challenge) {
     const r = await doFetch({ Authorization: buildDigestHeader({ username, password, method: 'GET', uri: pathname, challenge }) });
     if (r.ok) { touchAuthCache(key, { mode: 'digest', challenge }); return r; }
@@ -161,13 +165,19 @@ async function readIdracAuthMessage(base, pathname, username, password, timeoutM
       headers: { Authorization: basicHeader(username, password), Accept: 'application/json' },
       signal: AbortSignal.timeout(timeoutMs), dispatcher,
     });
-    const body = await res.json().catch(() => null);
-    const err = body?.error;
-    const info = err?.['@Message.ExtendedInfo'];
-    let msg = (Array.isArray(info) && info[0]?.Message) || err?.message || '';
-    msg = String(msg).replace(/\s+/g, ' ').trim();
-    return msg ? msg.slice(0, 160) : '';
+    return idracAuthMessageFrom(await res.text().catch(() => ''));
   } catch { return ''; }
+}
+
+/** Redfish 오류 본문(문자열)에서 iDRAC 메시지를 뽑는다(순수 — v2.591). JSON 이 아니면 빈 문자열. */
+export function idracAuthMessageFrom(text) {
+  let body = null;
+  try { body = JSON.parse(String(text || '')); } catch { return ''; }
+  const err = body?.error;
+  const info = err?.['@Message.ExtendedInfo'];
+  let msg = (Array.isArray(info) && info[0]?.Message) || err?.message || '';
+  msg = String(msg).replace(/\s+/g, ' ').trim();
+  return msg ? msg.slice(0, 160) : '';
 }
 
 /**
@@ -258,7 +268,10 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
     if (sres.status === 401) {
       // Basic·Digest·세션 토큰 모두 거부됨 → iDRAC이 준 실제 오류 메시지를 캡처해 원인을 구분한다
       // (잘못된 자격증명 vs 계정 잠금 vs 로그인 권한 없음). iDRAC 메시지가 있으면 그대로 노출.
-      const idracMsg = await readIdracAuthMessage(base, '/redfish/v1/Systems', username, password, timeoutMs);
+      // v2.591: rawGet 이 이미 받은 Basic 401 본문을 쓴다 — 없을 때만(예전 경로) 한 번 더 요청한다.
+      const idracMsg = typeof sres.basicAuthBody === 'string'
+        ? idracAuthMessageFrom(sres.basicAuthBody)
+        : await readIdracAuthMessage(base, '/redfish/v1/Systems', username, password, timeoutMs);
       const lockish = /lock|attempt|exceed|잠금|blocked|denied/i.test(idracMsg);
       const privish = /privile|permission|not allow|권한|access/i.test(idracMsg);
       authHint = idracMsg
@@ -1032,9 +1045,12 @@ export async function fetchUsage(entry, { full = false, allowList = true } = {})
       }
     } catch (e) {
       const msg = String(e?.message || e);
-      // 401/403 은 자격증명이라 단독 경로도 같은 결과다 — 바로 알린다(반복 시도 금지 — 계정 잠금).
-      if (/\b40[13]\b/.test(msg)) return { ok: false, kind: 'auth', error: msg.slice(0, 300) };
-      /* 그 밖(404·타임아웃)은 단독 경로로 내려간다 */
+      // 401 은 자격증명이라 단독 경로도 같은 결과다 — 바로 알린다(반복 시도 금지 — 계정 잠금).
+      // v2.591(감사 R-BM2): **403 은 자격증명 거부가 아니다**(인증은 통했고 그 자원이 허락되지 않았다 — 라이선스·
+      //   권한 부족일 수 있다). 403 을 'auth' 로 두면 bmusage 가 **자격증명과 무관하게** 텔레메트리 주기 수집을
+      //   영구 정지하고 대체 경로(Enterprise)까지 막는다. 그래서 403 은 단독 경로로 내려가 스스로 판정한다.
+      if (e?.status === 401 || e?.authFailed === true || /\b401\b/.test(msg)) return { ok: false, kind: 'auth', error: msg.slice(0, 300) };
+      /* 그 밖(403·404·타임아웃)은 단독 경로로 내려간다 */
     }
     const fb = await fetchUsage(entry, { full: false });
     return { ...fb, fullTried: true };
@@ -1044,8 +1060,13 @@ export async function fetchUsage(entry, { full = false, allowList = true } = {})
     rep = await get(base, '/redfish/v1/TelemetryService/MetricReports/SystemUsage', entry.username, entry.password);
   } catch (e) {
     const msg = String(e?.message || e);
-    // 404 는 '이 iDRAC 에 그 리포트가 없다'(라이선스·버전), 401/403 은 자격증명이다 — 조치가 다르다.
-    const kind = /\b404\b/.test(msg) ? 'no-telemetry' : (/\b40[13]\b/.test(msg) ? 'auth' : 'unreachable');
+    // 404 는 '이 iDRAC 에 그 리포트가 없다'(라이선스·버전), 401 은 자격증명이다 — 조치가 다르다.
+    // v2.591(감사 R-BM2): 403 은 **'forbidden'** 이다 — 인증은 통했고 그 리포트가 허락되지 않았다(라이선스·계정 권한).
+    //   'auth' 로 두면 bmusage 가 자격증명과 무관하게 주기 수집을 정지하고 비밀번호를 고치라는 틀린 조치를 준다.
+    //   자격증명 거부(401)는 get() 이 status·authFailed 를 싣는다 — 문구보다 그것을 먼저 본다.
+    const kind = /\b404\b/.test(msg) ? 'no-telemetry'
+      : (e?.status === 401 || e?.authFailed === true || /\b401\b/.test(msg)) ? 'auth'
+        : (e?.status === 403 || /\b403\b/.test(msg)) ? 'forbidden' : 'unreachable';
     return { ok: false, kind, error: msg.slice(0, 300) };
   }
   const vals = Array.isArray(rep?.MetricValues) ? rep.MetricValues : [];
@@ -1169,7 +1190,12 @@ export async function fetchUsageSensors(entry, { allowProbe = true } = {}) {
     } catch (e) {
       const msg = String(e?.message || e);
       // ⚠ 401/403 은 캐시하지 않는다 — 비밀번호를 고치면 바로 되어야 한다.
-      const kind = /\b40[13]\b/.test(msg) ? 'auth' : (/\b404\b/.test(msg) ? 'absent' : 'unreachable');
+      // v2.591(감사 R-BM2 — 형제 경로): 텔레메트리(fetchUsage)와 같은 규칙 — **401 만 자격증명 거부('auth')** 이고
+      //   403 은 'forbidden'(인증은 통했고 그 자원이 허락되지 않았다)이다. 403 을 'auth' 로 두면 bmusage 가 대체 경로의
+      //   인증 실패 정지를 걸어 비밀번호와 무관하게 수집이 멈춘다.
+      const kind = /\b404\b/.test(msg) ? 'absent'
+        : (e?.status === 401 || e?.authFailed === true || /\b401\b/.test(msg)) ? 'auth'
+          : (e?.status === 403 || /\b403\b/.test(msg)) ? 'forbidden' : 'unreachable';
       if (kind === 'absent') {
         _sensorPaths.set(key, { absent: true, reason: 'Sensors 경로가 없습니다(404).', seen: [], at: Date.now() });
       }

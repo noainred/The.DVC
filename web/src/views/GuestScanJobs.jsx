@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson, delJson, usePolling } from '../api.js';
 import { STable } from '../components/STable.jsx';
+import BoldText from '../components/boldText.jsx';
+import { guestAuthLines } from './authSkipText.js'; // v2.591(감사 F2): 게스트 계정 인증 실패 정지·차단기
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const TYPE_LBL = { 'login-fails': '로그인 실패', 'net-issues': '네트워크 이슈' };
@@ -33,7 +35,8 @@ export default function GuestScanJobs({ type }) {
               <td><b>{j.name}</b></td><td style={{ fontSize: 12 }}>{j.vcenterId || '—'}</td><td style={{ fontSize: 12 }}>{j.os}</td><td style={{ fontSize: 12 }}>{j.intervalMin}분</td>
               <td className="muted" style={{ fontSize: 11 }}>{fmtTime(j.lastRun)}{j.lastErr ? ` · ${j.lastErr.slice(0, 30)}` : ''}</td>
               <td style={{ textAlign: 'right' }}>{j.lastFound ?? '—'}</td>
-              <td>{j.enabled ? <span className="badge green">동작</span> : <span className="badge gray">중지</span>}</td>
+              <td>{j.enabled ? <span className="badge green">동작</span> : <span className="badge gray">중지</span>}
+                {j.lastAuth?.jobStopped && <span className="badge red" style={{ marginLeft: 4, whiteSpace: 'nowrap' }}>인증 실패 정지</span>}</td>
               <td><div className="flex gap">
                 <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => run(j.id)}>지금</button>
                 <button className="tab" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => toggle(j)}>{j.enabled ? '중지' : '시작'}</button>
@@ -42,6 +45,12 @@ export default function GuestScanJobs({ type }) {
             </tr>
           ))}</tbody></STable></div>
       )}
+      {(jobs || []).filter((j) => guestAuthLines(j.lastAuth).length).map((j) => (
+        <div key={`auth-${j.id}`} style={{ fontSize: 12, marginTop: 8, whiteSpace: 'normal', lineHeight: 1.55 }}>
+          <b>{j.name}</b>
+          {guestAuthLines(j.lastAuth, { manual: '지금' }).map((t, i) => <div key={i} className="muted"><BoldText text={t} /></div>)}
+        </div>
+      ))}
       {form && (
         <div className="card" style={{ padding: 12, marginTop: 10, border: '1px solid var(--accent,#2563eb)' }}>
           <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>

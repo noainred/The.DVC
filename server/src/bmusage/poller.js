@@ -31,7 +31,7 @@ import { insertUsage, pruneUsage } from './db.js';
 import { recordBmUsage } from './activityLog.js';
 import { runBmUsageAlerts, alertStateInfo } from './notify.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
-import { idracAuthStopFor } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
+import { idracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 
 const CONCURRENCY = Math.max(1, Number(process.env.BMUSAGE_CONCURRENCY) || 4);
 const DEVICE_TIMEOUT_MS = Math.max(20_000, Number(process.env.BMUSAGE_DEVICE_TIMEOUT_MS) || 60_000);
@@ -235,6 +235,14 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
     console.warn(`[bmusage] ${target.name}: iDRAC 인증 실패로 텔레메트리 주기 수집 정지(${rec.attempts}회)`);
   } else if (entDev && idrac?.ok) {
     guard.clearAuthStop(entDev.id);
+    // v2.591(감사 R-BM1): 수동 '지금 수집' 이 **같은 regId·같은 자격증명**으로 텔레메트리를 읽었다면 계정은 맞다 —
+    //   주 iDRAC 폴러의 정지도 푼다. 그 폴러는 정지된 서버를 주기에서 건너뛰므로 스스로는 풀리지 않고, 그대로 두면
+    //   다음 주기에 이 도구도 주 폴러 정지를 따라 다시 멈춘다(화면 문구 '고친 뒤 지금 수집으로 확인' 이 거짓이 된다).
+    //   주기 수집은 주 폴러 정지 중에는 텔레메트리를 시도하지 않으므로(위 entStopped) 이 분기는 사실상 수동 전용이다.
+    const i = target.idrac;
+    if (trigger === 'manual' && i?.regId && releaseIdracAuthStop({ id: i.regId, username: i.username, password: i.password })) {
+      console.log(`[bmusage] ${target.name}: 수동 수집이 같은 iDRAC 계정으로 성공 — 주 iDRAC 폴러의 인증 실패 정지를 풀었습니다`);
+    }
   }
 
   /*

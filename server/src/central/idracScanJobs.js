@@ -106,7 +106,7 @@ function newReqId() {
 }
 
 /** UI가 위임 스캔 요청 → reqId 반환. noRegister=true면 에이전트가 스캔만 하고 등록은 보류(UI 확인 후 등록). */
-export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, service = '', trigger = 'manual' }) {
+export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, service = '', trigger = 'manual', rangeId = '' }) {
   gc();
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return null;
@@ -129,9 +129,13 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
       if (String(jj.username || '') !== String(username || '') || String(jj.password || '') !== String(password || '')
         || !!jj.noRegister !== !!noRegister || String(jj.vcenterId || '') !== String(vcenterId || '')) {
         jj.username = username; jj.password = password; jj.noRegister = !!noRegister; jj.vcenterId = vcenterId;
+        // v2.591: 주기/수동 구분도 가장 최근 의도로 — 수동 '지금 스캔' 이 대기 중인 주기 잡에 병합되면
+        //   엣지가 그것을 주기로 보고 인증 정지 IP 를 건너뛴다(수동은 전부 시도해야 한다).
+        if (trigger === 'manual') jj.trigger = 'manual';
         addEvent(jj, '동일 대상의 대기 중 스캔 잡을 새 자격증명/옵션으로 갱신했습니다.');
         return rid;
       }
+      if (trigger === 'manual') jj.trigger = 'manual'; // v2.591: 위와 같은 이유 — 수동 요청이 병합되면 수동으로 올린다
       addEvent(jj, '동일 대상의 대기 중 스캔 잡이 있어 새 요청을 이 잡으로 병합했습니다(중복 방지).');
       return rid;
     }
@@ -141,7 +145,7 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   // 총 IP 수를 미리 계산해 UI가 진행률 분모를 바로 표시할 수 있게 한다(스캔 max=2048 반영).
   let total = 0;
   try { total = Math.min(expandIpList(ips).ips.length, 2048); } catch { total = 0; }
-  const j = { reqId, agent, action: 'scan', ips, username, password, vcenterId, datacenterId, service, trigger, noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } };
+  const j = { reqId, agent, action: 'scan', ips, username, password, vcenterId, datacenterId, service, trigger, rangeId: String(rangeId || ''), noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } };
   addEvent(j, `스캔 잡 생성 — 에이전트 '${agent}'${datacenterId ? ` · 법인 ${datacenterId}` : ''} · 대상 IP ${total}개. 에이전트 인출 대기 중.`);
   // 사용된 자격증명 지문(평문 아님) — 법인 간 비교로 "이 법인만 인증 실패" 원인 파악용.
   addEvent(j, `사용 자격증명: ${credFingerprint(username, password)} (평문 미기록 — 정상 법인과 계정/길이/지문 비교하세요)`);
@@ -157,7 +161,7 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
  * 폴링 큐(byAgent)에는 넣지 않는다 — 에이전트 인출 대상이 아님.
  * @returns reqId 또는 null(대기 한도 초과)
  */
-export function createPushScanJob(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge', edgeUrl = '', service = '', trigger = 'manual' }) {
+export function createPushScanJob(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge', edgeUrl = '', service = '', trigger = 'manual', rangeId = '' }) {
   gc();
   // 인메모리 잡 총량 상한(폴링 큐와 별개) — 남용/누수 방지.
   if (jobs.size >= MAX_PENDING * 20) return null;
@@ -167,7 +171,7 @@ export function createPushScanJob(agent, { ips, username, password, vcenterId = 
   const now = Date.now();
   const j = {
     reqId, agent, action: 'scan', dispatch: 'push', edgeUrl,
-    ips, username, password, vcenterId, datacenterId, service, trigger, noRegister: !!noRegister, mode: mode || 'merge',
+    ips, username, password, vcenterId, datacenterId, service, trigger, rangeId: String(rangeId || ''), noRegister: !!noRegister, mode: mode || 'merge',
     state: 'running', createdAt: now, takenAt: now, progress: { scanned: 0, total, at: now },
   };
   addEvent(j, `중앙→엣지 직접 전송(PUSH) 스캔 시작 — 에이전트 '${agent}'${datacenterId ? ` · 법인 ${datacenterId}` : ''} · 대상 IP ${total}개 · 엣지 ${edgeUrl || '(URL 미상)'}. 엣지 폴링 없이 중앙이 직접 실행합니다.`);
@@ -212,7 +216,9 @@ export function takeIdracScanJobs(agentName) {
     j.claims = (j.claims || 0) + 1;
     j.claimDeadline = j.takenAt + ACK_TIMEOUT_MS;
     addEvent(j, `에이전트 '${j.agent}'가 잡을 인출 — 현지 스캔 시작(대기 ${Math.round((j.takenAt - j.createdAt) / 1000)}초, 시도 ${j.claims}/${MAX_CLAIMS}).`);
-    out.push({ reqId, action: j.action || 'scan', ips: j.ips, username: j.username, password: j.password, vcenterId: j.vcenterId || '', datacenterId: j.datacenterId || '', noRegister: !!j.noRegister, found: j.found || undefined, mode: j.mode || 'merge' });
+    // v2.591(감사 F3): trigger·rangeId 를 싣는다 — 엣지가 '주기 스캔이면 인증 정지 IP 를 건너뛴다' 를 판정한다.
+    //   구버전 엣지는 두 필드를 모르므로 예전처럼 전부 시도한다(안전한 쪽).
+    out.push({ reqId, action: j.action || 'scan', ips: j.ips, username: j.username, password: j.password, vcenterId: j.vcenterId || '', datacenterId: j.datacenterId || '', noRegister: !!j.noRegister, found: j.found || undefined, mode: j.mode || 'merge', trigger: j.trigger === 'periodic' ? 'periodic' : 'manual', rangeId: j.rangeId || '' });
   }
   byAgent.delete(key);
   return out;
@@ -310,6 +316,8 @@ export function setIdracScanResult(reqId, data = {}) {
     addEvent(j, `완료 — 스캔 ${data.scanned || 0}개 · iDRAC ${data.foundCount ?? (Array.isArray(data.found) ? data.found.length : 0)}대 발견 · 현지 등록 ${data.registered || 0}대 · 무응답 ${data.unreachable || 0} · 비iDRAC ${data.notIdrac || 0} · 인증실패 ${af}${data.durationMs ? ` · 소요 ${Math.round(data.durationMs / 1000)}초` : ''}`);
     // 인증실패가 있으면 원인을 별도 경고 이벤트로 남긴다('계정 맞는데 401'의 실제 이유).
     if (af > 0 && data.authFailReason) addEvent(j, `인증실패 원인: ${data.authFailReason}`, 'warn');
+    // v2.591(감사 F3): 주기 스캔이 인증 실패 정지로 건너뛴 IP — 조용히 빼면 '전부 스캔했다' 는 거짓이 된다.
+    if (Number(data.authSkipped) > 0) addEvent(j, `인증 실패 정지로 이번 주기에 시도하지 않은 IP ${Number(data.authSkipped)}개${Number(data.authSkippedRegistered) > 0 ? `(그중 ${Number(data.authSkippedRegistered)}개는 등록 서버의 전력 수집이 같은 계정으로 이미 정지)` : ''} — 계정을 고치면 자동 재개되고, '지금 스캔'(수동)은 전부 시도합니다.`, 'warn');
     // v2.537: 차단 대역(루프백·링크로컬)이라 찌르지 않은 IP — 조용히 빼면 '전부 스캔했다' 는 거짓이 된다.
     if (Number(data.blocked) > 0) addEvent(j, `차단 대역이라 스캔하지 않은 IP ${Number(data.blocked)}개${Array.isArray(data.blockedIps) && data.blockedIps.length ? `: ${data.blockedIps.slice(0, 10).join(', ')}${data.blockedIps.length > 10 ? ' …' : ''}` : ''}`, 'warn');
     // '계정 맞는데 막힌' IP 목록을 이벤트에 남긴다(어느 iDRAC을 점검할지 — 처음 몇 개는 인라인, 전체는 result).
@@ -328,6 +336,7 @@ export function setIdracScanResult(reqId, data = {}) {
       scanned: data.scanned ?? null, found: data.error ? null : foundN, registered: data.error ? null : (data.registered || 0),
       unreachable: data.unreachable ?? null, authFailed: data.authFailed ?? null,
       blocked: data.blocked ?? null, // v2.537
+      authSkipped: Number(data.authSkipped) || 0, // v2.591(감사 F3)
       durationMs: data.durationMs ?? null, error: data.error || null,
     });
   } catch { /* 기록 실패가 결과 처리를 막지 않는다 */ }
@@ -339,6 +348,8 @@ export function setIdracScanResult(reqId, data = {}) {
     unreachable: data.unreachable || 0,
     notIdrac: data.notIdrac || 0,
     blocked: Number(data.blocked) || 0, // v2.537
+    authSkipped: Number(data.authSkipped) || 0, // v2.591(감사 F3)
+    authSkippedRegistered: Number(data.authSkippedRegistered) || 0,
     authFailed: af,
     authFailReason: data.authFailReason || null,
     authFailedIps: Array.isArray(data.authFailedIps) ? data.authFailedIps.slice(0, 200) : [],
@@ -375,6 +386,7 @@ export function setIdracScanResult(reqId, data = {}) {
       dispatch: j.dispatch === 'push' ? 'push' : 'poll', reqId,
       scanned: data.scanned ?? null, found: j.result.foundCount, registered: data.registered ?? null,
       durationMs: data.durationMs ?? null, error: data.error || null,
+      unreachable: data.unreachable ?? null, authFailed: data.authFailed ?? null, authSkipped: Number(data.authSkipped) || 0,
     });
   }
   return true;

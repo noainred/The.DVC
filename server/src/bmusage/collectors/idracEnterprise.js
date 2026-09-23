@@ -115,8 +115,10 @@ export async function collectEnterpriseUsage(entry, {
           out.apiKind = r.kind || '';
           out.apiError = r.error || '';
           /*
-           * ⚠⚠ **401/403 은 SSH 로 폴백하지 않는다.** 같은 계정이라 결과가 같고, 반복 시도가
+           * ⚠⚠ **401(자격증명 거부)은 SSH 로 폴백하지 않는다.** 같은 계정이라 결과가 같고, 반복 시도가
            *   **iDRAC 계정을 잠근다**(v2.535 `authGuard` · `bulkRun.js` '자동 재시도 금지' 와 같은 사고).
+           *   v2.591(감사 R-BM2): 403 은 `forbidden` 이다(로그인은 통했다 — 잠금 경로가 아니다) — SSH(racadm)는
+           *   Redfish 자원 권한과 별개라 폴백한다.
            */
           if (r.kind === 'auth') {
             return { ...out, ok: false, kind: 'auth', error: r.error || 'iDRAC 인증 거부(401/403)', ms: Date.now() - t0 };

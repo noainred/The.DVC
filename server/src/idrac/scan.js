@@ -8,7 +8,13 @@ import { expandIpList } from './iprange.js';
 import { probeIdrac } from './redfish.js';
 import { ipBlockReason } from '../collector/registry.js'; // v2.537: 차단 대역은 스캔하지 않는다
 
-export async function scanForIdracs({ ips, username, password, concurrency = 32, perHostTimeout = 3000, max = 2048, onProgress = null, shouldAbort = null }) {
+/**
+ * @param {object} p
+ * @param {object|null} [p.authPolicy] v2.591(감사 F3) — `idrac/scanAuth.js makeScanAuthPolicy` 의 결과. 주기 스캔이면
+ *   직전 인증 실패 IP·주 폴러 정지 서버를 **건너뛰고**(`authSkipped*` 로 밝힌다), 수동이면 전부 시도하되 결과를 기록한다.
+ *   없으면(예전 호출부) 예전 동작 그대로다.
+ */
+export async function scanForIdracs({ ips, username, password, concurrency = 32, perHostTimeout = 3000, max = 2048, onProgress = null, shouldAbort = null, authPolicy = null }) {
   const { ips: list, errors, truncated } = expandIpList(ips);
   // v2.537: 차단 대역(루프백·링크로컬·우회표기)은 **찌르지 않는다**. lookup 훅(util/ssrfLookup.js)은
   // IP 리터럴에는 불리지 않으므로(v2.506 문서의 한계) 스캐너는 정적으로 걸러야 한다.
@@ -51,12 +57,25 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
   // (done, total, found) — found는 지금까지 발견한 iDRAC 수(진행 창의 '발견 N대' 표시용).
   const report = () => { if (onProgress) { try { onProgress(done, total, found.length); } catch { /* ignore */ } } };
 
+  // v2.591(감사 F3): 인증 실패 정지로 건너뛴 IP — 조용히 빼면 '전부 스캔했다' 는 거짓이 된다.
+  let authSkipped = 0; let authSkippedRegistered = 0;
+  const authSkippedIps = [];
+  const MAX_AUTHSKIP_IPS = 200;
   let aborted = false;
   async function worker() {
     while (idx < targets.length) {
       // 사용자 '스캔 중지' — 진행 중인 probe는 마치되 새 IP는 시작하지 않는다.
       if (shouldAbort && shouldAbort()) { aborted = true; break; }
       const ip = targets[idx++];
+      const why = authPolicy ? authPolicy.skip(ip) : null;
+      if (why) {
+        authSkipped++;
+        if (why === 'registered') authSkippedRegistered++;
+        if (authSkippedIps.length < MAX_AUTHSKIP_IPS) authSkippedIps.push(ip);
+        done++;
+        if (done % step === 0) report();
+        continue;
+      }
       const r = await probeIdrac(ip, username, password, perHostTimeout);
       if (!r.ok) unreachable++;
       // v2.495: 비-Dell Redfish 장비는 '인증실패'·'비iDRAC' 카운터 앞에서 분리한다 — Dell 계정으로
@@ -67,15 +86,17 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
         authFailed++;
         if (r.authHint) authHints.set(r.authHint, (authHints.get(r.authHint) || 0) + 1);
         if (authFailedIps.length < MAX_AUTHFAIL_IPS) authFailedIps.push(ip); // 막힌 IP 기록
-      } else if (r.isIdrac) found.push({ ip, serviceTag: r.serviceTag || '', model: r.model || '', manufacturer: r.manufacturer || '', hostName: r.hostName || '' });
-      else notIdrac++;
+        authPolicy?.noteAuthFailed(ip, r.authHint);
+      } else if (r.isIdrac) { found.push({ ip, serviceTag: r.serviceTag || '', model: r.model || '', manufacturer: r.manufacturer || '', hostName: r.hostName || '' }); authPolicy?.noteOk(ip); }
+      else { notIdrac++; authPolicy?.noteOk(ip); }
       done++;
       if (done % step === 0) report();
     }
   }
 
   const workers = Array.from({ length: Math.min(concurrency, targets.length || 1) }, worker);
-  await Promise.all(workers);
+  try { await Promise.all(workers); }
+  finally { authPolicy?.flush(); }   // 지연 기록을 실행 끝에 한 번 쓴다(건마다 쓰면 파일 전체를 수천 번 다시 쓴다)
   report(); // 최종 100%
 
   found.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true }));
@@ -104,5 +125,10 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
     blocked,
     blockedIps,
     blockedTruncated: blocked > blockedIps.length,
+    // v2.591(감사 F3): 인증 실패 정지로 시도하지 않은 IP(주기 스캔만) — registered 는 주 전력 폴러 정지를 따른 것.
+    authSkipped,
+    authSkippedRegistered,
+    authSkippedIps: authSkippedIps.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    authSkippedTruncated: authSkipped > authSkippedIps.length,
   };
 }

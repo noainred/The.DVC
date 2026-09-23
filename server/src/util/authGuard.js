@@ -24,6 +24,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from './atomicWrite.js';
 import { credFingerprintParts } from './credFingerprint.js';
+import { poolRun } from './pool.js';
 
 /**
  * 문구가 '인증 실패' 인가(순수).
@@ -85,9 +86,15 @@ export function createAuthGuard({ file }) {
     catch { /* 정지 상태를 못 써도 수집은 계속돼야 한다 */ }
   };
 
+  // v2.591: 한 번의 실행에서 기록이 수백~수천 건 바뀌는 호출자(iDRAC 대역 스캔 — 대역당 최대 2,048 IP)를 위한
+  //   **지연 기록**. 건마다 persist 하면 파일 전체를 매번 다시 쓴다(N건 × 파일 크기 — 2,048건이면 수백 MB·
+  //   fsync 2,048회). `{ defer: true }` 로 메모리만 바꾸고 실행 끝에 `flush()` 를 한 번 부른다.
+  let _dirty = false;
+  const save = (defer) => { if (defer) { _dirty = true; return; } _dirty = false; persist(); };
+
   return {
     /** 정지 기록. 같은 자격증명으로 반복 실패해도 `since` 는 **처음 시각**을 유지한다. */
-    markAuthStopped(id, dev, reason) {
+    markAuthStopped(id, dev, reason, { defer = false } = {}) {
       const db = load();
       const credHash = credHashOf(dev);
       const prev = db[id];
@@ -98,17 +105,19 @@ export function createAuthGuard({ file }) {
         attempts: (prev && prev.credHash === credHash ? prev.attempts || 0 : 0) + 1,
         reason: String(reason || '인증 실패').slice(0, 200),
       };
-      _mem = db; persist();
+      _mem = db; save(defer);
       return db[id];
     },
     /** 성공했거나 사용자가 해제 — 기록 제거. */
-    clearAuthStop(id) {
+    clearAuthStop(id, { defer = false } = {}) {
       const db = load();
       if (!db[id]) return false;
       delete db[id];
-      _mem = db; persist();
+      _mem = db; save(defer);
       return true;
     },
+    /** `defer` 로 미룬 변경을 한 번에 쓴다(변경이 없으면 쓰지 않는다). */
+    flush() { if (_dirty) { _dirty = false; persist(); } },
     /**
      * 주기 수집에서 이 대상을 건너뛸 것인가.
      * @returns {null | {since:number, at:number, attempts:number, reason:string}}
@@ -133,7 +142,78 @@ export function createAuthGuard({ file }) {
       if (!rec || rec.credHash !== credHashOf(dev)) return null;
       return { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason };
     },
-    _resetForTest() { _mem = null; try { fs.rmSync(FILE()); } catch { /* 없음 */ } },
+    _resetForTest() { _mem = null; _dirty = false; try { fs.rmSync(FILE()); } catch { /* 없음 */ } },
     _fileForTest() { return FILE(); },
   };
+}
+
+/** 정지 기록 → 화면·API 용(자격증명 해시 제외). */
+export const authStopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+
+/**
+ * **한 실행 안의 회로 차단기**(v2.591 — 감사 F2). 대상마다 멈추는 정지 기록(`createAuthGuard`)만으로는
+ * '계정 하나로 수백~수천 대를 도는' 실행의 **첫 실행**을 막지 못한다 — 도메인 계정이 틀리면 그 한 번에
+ * 대상 수만큼 실패 로그온이 쌓이고, AD 잠금 임계(보통 5~10회)는 첫 실행에서 넘는다(게스트 조사 기본
+ * 100대·최대 2,000대). 그래서 **같은 자격증명(credHash)의 거부가 연속 `threshold` 회**면 그 실행에서 그
+ * 자격증명의 남은 대상을 **시작하지 않는다**.
+ *
+ * ⚠ '연속' 이다 — 한 번이라도 그 자격증명으로 로그인이 통하면(성공) 카운터를 0 으로 되돌린다. 게스트마다
+ *   로컬 계정이 따로인 환경에서 몇 대만 비밀번호가 다른 것은 정상 구성이라, 누적으로 세면 멀쩡한 실행을
+ *   끊는다.
+ * ⚠ 조용히 끊지 않는다 — `tripped()`·`skipped` 를 호출자가 결과·화면에 싣는다(authGuard 규칙 1).
+ * ⚠ 동시 실행(풀) 중이면 이미 시작한 대상은 끝까지 간다 — 그래서 호출자는 **첫 성공 전까지는 하나씩**
+ *   돌려야 상한이 `threshold` 로 지켜진다(`warmupSequential`).
+ * ⚠ **인증과 무관한 실패는 성공이 아니다**(`neutral`) — 게스트 작업은 첫 호출(파일 전송 요청)이 인증을 겸하므로
+ *   'VMware Tools 미동작'·시한 초과로 끝난 VM 은 계정이 맞는지 **확인하지 못한 것**이다. `ok` 로 세면 연속 카운터가
+ *   리셋돼 차단기가 무력해진다. 대신 워밍업(하나씩)이 그런 VM 들 때문에 실행 시간을 N배로 늘리지 않게,
+ *   무관한 실패가 `threshold` 회 쌓이면 워밍업을 끝낸다 — 그 경우의 상한은 `threshold + 동시수 − 1` 이다(정직 기록).
+ */
+export function createAuthBreaker({ threshold = 3 } = {}) {
+  const consecutive = new Map();   // credHash → 연속 거부 수
+  const tripped = new Map();       // credHash → { at, fails, user }
+  let skipped = 0;
+  let confirmed = false;           // 이번 실행에서 로그인이 한 번이라도 통했나(워밍업 해제 신호)
+  let neutrals = 0;                // 인증과 무관한 실패 수(워밍업 해제의 두 번째 신호)
+  return {
+    /** 이 자격증명의 대상을 시작해도 되나. 끊겼으면 건너뛴 수를 센다. */
+    allow(dev) {
+      if (tripped.has(credHashOf(dev))) { skipped += 1; return false; }
+      return true;
+    },
+    /** 로그인이 통했다(그 뒤 단계가 실패해도 자격증명은 맞다). */
+    ok(dev) { consecutive.set(credHashOf(dev), 0); confirmed = true; },
+    /** 인증과 무관한 실패 — 계정이 맞는지 모른다. 카운터는 건드리지 않는다(위 머리말). */
+    neutral() { neutrals += 1; },
+    /** 자격증명 거부. 임계에 닿으면 true(이번 호출로 끊겼다). */
+    fail(dev) {
+      const h = credHashOf(dev);
+      const n = (consecutive.get(h) || 0) + 1;
+      consecutive.set(h, n);
+      if (n >= threshold && !tripped.has(h)) {
+        tripped.set(h, { at: Date.now(), fails: n, user: credFingerprintParts(dev?.username, dev?.password).user });
+        return true;
+      }
+      return false;
+    },
+    isTripped(dev) { return tripped.has(credHashOf(dev)); },
+    /** 첫 성공 전인가 — 호출자는 이때 대상을 하나씩 돌린다(동시 실행 중인 대상이 임계를 넘겨 새지 않게). */
+    warmupSequential() { return !confirmed && neutrals < threshold; },
+    summary() {
+      return { threshold, tripped: [...tripped.values()].map((t) => ({ user: t.user, fails: t.fails, at: t.at })), skipped };
+    },
+  };
+}
+
+/**
+ * 워밍업 풀 — 첫 로그인 성공(`breaker.ok`) 전까지는 **하나씩**, 그 뒤로는 `concurrency` 로 돈다.
+ * 회로 차단기의 상한(`threshold`)이 동시 실행으로 새지 않게 하는 실행기다. 결과 모양은 `util/pool.js poolRun`
+ * 과 같다(첫 rejection 을 올린다 — 호출자 fn 이 항목별로 잡는 것이 이 저장소의 관례다).
+ */
+export async function runWithBreakerWarmup(items, concurrency, breaker, fn) {
+  const list = Array.isArray(items) ? items : [];
+  let i = 0;
+  while (i < list.length && breaker.warmupSequential()) { await fn(list[i], i); i += 1; }
+  if (i >= list.length) return;
+  const rest = list.slice(i);
+  await poolRun(rest, Math.max(1, concurrency), (it, k) => fn(it, i + k));
 }
