@@ -22,10 +22,10 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **828개** |
+| 엔드포인트 | **829개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 77개 |
-| GET | 432개 |
+| 라우트 파일 | 78개 |
+| GET | 433개 |
 | POST | 263개 |
 | PUT | 85개 |
 | PATCH | 2개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 325 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 326 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -705,7 +705,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/capacity` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:40](../server/src/routes/api/toolsCapacity.js#L40) |
 | GET | `/tools/capacity-forecast` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1492](../server/src/routes/api/toolsCapacity.js#L1492) |
 | GET | `/tools/capacity/disk-history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1397](../server/src/routes/api/toolsCapacity.js#L1397) |
-| GET | `/tools/comm-map` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/commMap.js:60](../server/src/routes/api/commMap.js#L60) |
+| GET | `/tools/comm-map` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/commMap.js:92](../server/src/routes/api/commMap.js#L92) |
 | GET | `/tools/credentials` | 역할 `admin` | [server/src/routes/api/credentials.js:42](../server/src/routes/api/credentials.js#L42) |
 | POST | `/tools/credentials` | 역할 `admin` · `reauth` | [server/src/routes/api/credentials.js:52](../server/src/routes/api/credentials.js#L52) |
 | DELETE | `/tools/credentials/:id` | 역할 `admin` · `reauth` | [server/src/routes/api/credentials.js:72](../server/src/routes/api/credentials.js#L72) |
@@ -720,8 +720,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/curuser/history` | 권한 `tools` | [server/src/routes/api/curUser.js:77](../server/src/routes/api/curUser.js#L77) |
 | GET | `/tools/curuser/settings` | 권한 `tools` | [server/src/routes/api/curUser.js:132](../server/src/routes/api/curUser.js#L132) |
 | PUT | `/tools/curuser/settings` | 역할 `admin` | [server/src/routes/api/curUser.js:171](../server/src/routes/api/curUser.js#L171) |
-| GET | `/tools/data-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/dataFlow.js:46](../server/src/routes/api/dataFlow.js#L46) |
+| GET | `/tools/data-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/dataFlow.js:62](../server/src/routes/api/dataFlow.js#L62) |
 | POST | `/tools/deep-search` | 권한 `tools` | [server/src/routes/api/checksLogs.js:39](../server/src/routes/api/checksLogs.js#L39) |
+| GET | `/tools/device-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/deviceFlow.js:29](../server/src/routes/api/deviceFlow.js#L29) |
 | GET | `/tools/duplicate-ips` | 권한 `tools` | [server/src/routes/api/vcTools.js:23](../server/src/routes/api/vcTools.js#L23) |
 | GET | `/tools/edge-log` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:110](../server/src/routes/api/edgeLog.js#L110) |
 | GET | `/tools/edge-log-local` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:122](../server/src/routes/api/edgeLog.js#L122) |
@@ -1000,7 +1001,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
-| `fullScopeOnly` | 62 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
+| `fullScopeOnly` | 63 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
 | `requireSettingsOwner` | 34 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
 | `guarded` | 8 | 공개 API 전용 래퍼 — 허용 목록 검사 + 스냅샷 준비 + async throw 안전 처리. 미들웨어가 아니라 핸들러를 감싼 것이다. |
 | `authMiddleware` | 7 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |

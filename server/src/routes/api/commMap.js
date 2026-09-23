@@ -56,35 +56,43 @@ function sanReportsOf(snaps) {
   return [...m.values()].map((r) => ({ ...r, at: r.at || null }));
 }
 
+/**
+ * 통신 지도 입력을 모은다 — 3단 지도(v2.588 `device-flow`)가 같은 입력을 재사용한다(판정 복제 금지).
+ * 왕복 0: 등록부·인메모리 통계·link_latest SELECT 1회뿐이다.
+ */
+export async function gatherCommInputs(snap, sourceErrors) {
+  // vCenter 별 호스트·VM 수(스냅샷 1회 순회 — O(N))
+  const vcCounts = new Map();
+  for (const h of snap.hosts || []) { const c = vcCounts.get(h.vcenterId) || { hosts: 0, vms: 0 }; c.hosts += 1; vcCounts.set(h.vcenterId, c); }
+  for (const v of snap.vms || []) { const c = vcCounts.get(v.vcenterId) || { hosts: 0, vms: 0 }; c.vms += 1; vcCounts.set(v.vcenterId, c); }
+  return {
+    now: Date.now(),
+    collectors: safeList(listCollectors, sourceErrors, 'collectors'),
+    status: allCollectorStatus(),
+    ingest: getIngestStats(),
+    rejects: rejectStats(),
+    latestLinks: await latestAll().catch(() => []),
+    edgeReports: allEdgeLinkReports(),
+    vcenters: safeList(listVcenters, sourceErrors, 'vcenters'),
+    snapVcenters: snap.vcenters || [],
+    vcCounts,
+    storage: safeList(listStorage, sourceErrors, 'storage'),
+    sanswitch: safeList(listSanSwitch, sourceErrors, 'sanswitch'),
+    pdu: safeList(listPdu, sourceErrors, 'pdu'),
+    storageReports: safeList(edgeStorageReports, sourceErrors, 'storage-edge'),
+    pduReports: safeList(edgePduStatus, sourceErrors, 'pdu-edge'),
+    sanReports: sanReportsOf(safeList(edgeSanSwitchSnapshots, sourceErrors, 'sanswitch-edge')),
+    pullIntervalMs: config.collector.pullIntervalMs,
+    siteStaleMs: SITE_STALE_MS,
+    linkCheckEnabled: linkCheckEnabled(),
+  };
+}
+
 export function registerCommMap(api) {
   api.get('/tools/comm-map', adminOnly, fullScopeOnly, async (req, res) => {
     await memoJson(req, res, 'comm-map', async (snap) => {
       const sourceErrors = [];
-      // vCenter 별 호스트·VM 수(스냅샷 1회 순회 — O(N))
-      const vcCounts = new Map();
-      for (const h of snap.hosts || []) { const c = vcCounts.get(h.vcenterId) || { hosts: 0, vms: 0 }; c.hosts += 1; vcCounts.set(h.vcenterId, c); }
-      for (const v of snap.vms || []) { const c = vcCounts.get(v.vcenterId) || { hosts: 0, vms: 0 }; c.vms += 1; vcCounts.set(v.vcenterId, c); }
-      const map = buildCommMap({
-        now: Date.now(),
-        collectors: safeList(listCollectors, sourceErrors, 'collectors'),
-        status: allCollectorStatus(),
-        ingest: getIngestStats(),
-        rejects: rejectStats(),
-        latestLinks: await latestAll().catch(() => []),
-        edgeReports: allEdgeLinkReports(),
-        vcenters: safeList(listVcenters, sourceErrors, 'vcenters'),
-        snapVcenters: snap.vcenters || [],
-        vcCounts,
-        storage: safeList(listStorage, sourceErrors, 'storage'),
-        sanswitch: safeList(listSanSwitch, sourceErrors, 'sanswitch'),
-        pdu: safeList(listPdu, sourceErrors, 'pdu'),
-        storageReports: safeList(edgeStorageReports, sourceErrors, 'storage-edge'),
-        pduReports: safeList(edgePduStatus, sourceErrors, 'pdu-edge'),
-        sanReports: sanReportsOf(safeList(edgeSanSwitchSnapshots, sourceErrors, 'sanswitch-edge')),
-        pullIntervalMs: config.collector.pullIntervalMs,
-        siteStaleMs: SITE_STALE_MS,
-        linkCheckEnabled: linkCheckEnabled(),
-      });
+      const map = buildCommMap(await gatherCommInputs(snap, sourceErrors));
       return {
         ok: true, ...map,
         central: { version: currentVersion(), agentName: config.agent?.name || '', centralTokenSet: !!config.central?.token, dataSource: snap.source || '', generatedAt: snap.generatedAt || null },

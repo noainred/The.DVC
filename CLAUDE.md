@@ -3074,6 +3074,31 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `capacity-report`·`svcmon-report` 는 '개별 토큰만 허용' 으로 **실제로 거부**되어 빨간 선으로 보였다(제품 동작 그대로).
       시안의 '중앙 직접' 노드는 포탈 사이 통신이 아니라 구현에서 뺐다. 실엣지 28곳 규모의 선 겹침은 보지 못했다.
 
+  - ⚠⚠ **3단 지도(v2.588) — 장비 → 엣지 → 메인. 새 판정을 만들지 않고 두 지도의 조립기를 묶는다**
+    (`server/src/devflow/build.js`(순수) + `routes/api/deviceFlow.js` + 웹 `views/tools/DeviceFlow.jsx`·
+    `deviceFlowLayout.js`·`deviceFlowText.js`, 사용자 요청 "엣지와 main 이 통신하는것도 표시해줘 · 3단계로 만들어줘,
+    장비-edge-main". 선택: 장비는 **종류별 묶음 + 펼치기** · 특수기능 **별도 화면**. 회귀는 `test/devFlow2588.test.js`
+    + 웹 `deviceFlow.test.js`):
+    - **판정 복제 금지** — 장비 귀속·상태는 `buildCommMap`, 엣지 ↔ 메인은 `buildDataFlow` 의 결과를 그대로 쓴다.
+      두 라우트의 입력 수집을 `gatherCommInputs(snap, errs)`·`gatherFlowInputs(errs)` 로 떼어 셋이 같은 입력을 본다
+      (따로 모으면 세 화면이 다른 말을 한다). 새 입력은 iDRAC 뿐 — 중앙 등록부(OME 제외) → 메인 직접, 엣지 export
+      (`allRemoteServers().collectorId`) → 그 엣지. 담당을 모르면 `unassigned`(지어낸 노드에 붙이지 않는다).
+    - ⚠ **`buildCommMap` 의 종류별 상한(40·60)은 통신 지도 전용이다** — 3단 지도는 `resMax/directMax: Infinity` 로
+      전량을 받아 **개수는 전량**, 펼침 목록만 `ITEM_MAX`(80)로 자르고 `omitted` 로 밝힌다. 상한 걸린 목록으로 개수를
+      세면 '40대' 라는 거짓이 된다. 기본값(인자 없음)은 예전 그대로 40 — 테스트가 고정한다.
+    - ⚠⚠ **등록만 알고 판정하지 않은 묶음은 `neutral`(회색)이다** — iDRAC·스토리지·SAN·PDU 는 이 화면이 장비별
+      수집 성패를 모른다(`registered`). 초록으로 칠하면 '전부 정상' 이라는 거짓이다. 묶음 상세가 그 사실을 적는다.
+    - **채널 넷**(`up`=push·회신 · `down`=pull·작업 · `cpull` · `cpush`)은 데이터 흐름 방향 여섯을 접은 것이다. 선 색 =
+      **기록이 있는** 방향 중 가장 나쁜 것, 전부 없으면 `none`(회색 점선). 엣지 카드의 상태 글자는 통신 지도 판정(수신
+      기준)이라 선 색과 **축이 다르다** — 범례가 그 사실을 말한다(한쪽으로 합치지 말 것).
+    - ⚠ **`REASON_TEXT` 값은 `{title, fix}` 객체다** — 그대로 렌더하면 `[object Object]`(v2.588 스크린샷 판독에서
+      발견). `reasonText(code)` 를 쓴다. ⚠ 화면 이동 버튼을 `<a className="btn">` 로 두면 파란 밑줄 글자로 샌다 —
+      `button` + `window.location.hash`.
+    - 권한 adminOnly + fullScopeOnly · 왕복 0 · memoJson 12초 · 응답에 토큰·URL 경로·iDRAC 비밀번호 0(테스트 고정).
+    - ⚠ 정직 기록: 검증은 **중앙+엣지 목 스택 2대**(+ 없는 포트를 가리키는 엣지 1곳)로 했다. 공유 토큰이라 목 엣지의
+      pull·push 는 '이름 미검증' 이고 일부 push 가 실제로 거부되어 빨간 선이 됐다(제품 동작 그대로). 실엣지 28곳
+      규모(세로 약 2,000px)는 보지 못했다.
+
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
 서버 보안 불변조건(전역 TLS·RBAC·토큰 검증·scope·OTP·WS 게이트웨이 등 전 항목)은

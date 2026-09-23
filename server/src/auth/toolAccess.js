@@ -62,6 +62,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'portal-check': 'portal-check',    // PortalCheck.jsx 전용(v2.560) — 토큰 점검(adminOnly+fullScope)
   'comm-map': 'comm-map',            // CommMap.jsx 전용(v2.584) — 통신 지도(중앙↔엣지 시각화, adminOnly+fullScope)
   'data-flow': 'data-flow',          // DataFlow.jsx 전용(v2.587) — 데이터 흐름 지도(포탈 사이 전 경로, adminOnly+fullScope)
+  'device-flow': 'device-flow',      // DeviceFlow.jsx 전용(v2.588) — 3단 지도(장비 → 엣지 → 메인, adminOnly+fullScope)
   'service-check': 'davinci-svc',    // DavinciChecks.jsx ServiceCheck 전용
   'vmware-config': 'vmware-backup',  // DavinciChecks.jsx VmwareConfigBackup 전용
   pdu: 'pdu',

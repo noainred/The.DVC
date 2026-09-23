@@ -136,8 +136,12 @@ function capList(list, max) {
  * @param {number} p.pullIntervalMs   config.collector.pullIntervalMs (0 = 폴러 꺼짐)
  * @param {number} p.siteStaleMs      store.SITE_STALE_MS
  * @param {boolean} p.linkCheckEnabled
+ * @param {number} [p.resMax]    엣지 자원 종류별 상한(기본 RES_MAX_PER_KIND — 3단 지도는 전량을 받아 자기 상한을 쓴다)
+ * @param {number} [p.directMax] 중앙 직접 자원 종류별 상한(기본 DIRECT_MAX_PER_KIND)
  */
 export function buildCommMap(p = {}) {
+  const resMax = typeof p.resMax === 'number' && p.resMax > 0 ? p.resMax : RES_MAX_PER_KIND;
+  const directMax = typeof p.directMax === 'number' && p.directMax > 0 ? p.directMax : DIRECT_MAX_PER_KIND;
   const now = num(p.now) ?? Date.now();
   const collectors = Array.isArray(p.collectors) ? p.collectors : [];
   const status = p.status && typeof p.status === 'object' ? p.status : {};
@@ -262,7 +266,7 @@ export function buildCommMap(p = {}) {
     const res = perEdge.get(id);
     const resources = {}; let resTotal = 0; let resOmitted = 0;
     for (const k of RES_KINDS) {
-      const { items, omitted } = capList(res[k], RES_MAX_PER_KIND);
+      const { items, omitted } = capList(res[k], resMax);
       resources[k] = { items, total: res[k].length, omitted };
       resTotal += res[k].length; resOmitted += omitted;
     }
@@ -306,7 +310,7 @@ export function buildCommMap(p = {}) {
   // 중앙 직접 자원(허브에 붙는다)
   const hubDirect = {}; let directTotal = 0;
   for (const k of RES_KINDS) {
-    const { items, omitted } = capList(direct[k], DIRECT_MAX_PER_KIND);
+    const { items, omitted } = capList(direct[k], directMax);
     hubDirect[k] = { items, total: direct[k].length, omitted };
     directTotal += direct[k].length;
   }

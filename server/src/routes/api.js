@@ -30,6 +30,7 @@ import { registerLinkCheck } from './api/linkCheck.js'; // 통신 점검(중앙�
 import { registerPortalCheck } from './api/portalCheck.js'; // 포탈 점검 › 토큰 점검(v2.560)
 import { registerCommMap } from './api/commMap.js'; // 통신 지도(중앙↔엣지 통신 시각화, v2.584)
 import { registerDataFlow } from './api/dataFlow.js'; // 데이터 흐름 지도(포탈 사이 전 경로, v2.587)
+import { registerDeviceFlow } from './api/deviceFlow.js'; // 3단 지도(장비 → 엣지 → 메인, v2.588)
 import { registerPdu } from './api/pdu.js';               // PDU 정보(APC Rack PDU 2G, v2.424)
 import { registerSerialLookup } from './api/serialLookup.js'; // 시리얼 통합 조회(v2.412)
 import { registerRma } from './api/rma.js';                   // 원격 명령 실행(RMA, v2.416)
@@ -101,6 +102,7 @@ registerLinkCheck(api);
 registerPortalCheck(api);
 registerCommMap(api);
 registerDataFlow(api);
+registerDeviceFlow(api);
 registerPdu(api);
 registerSerialLookup(api);
 registerRma(api);
