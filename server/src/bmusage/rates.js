@@ -89,3 +89,13 @@ export function sumStrict(list = []) {
   for (const v of list) { const n = fin(v); if (n == null) return null; acc += n; seen += 1; }
   return seen ? acc : null;
 }
+
+/**
+ * v2.590 F9: 전이중 회선(이더넷·FC)의 사용률은 **방향별**이다 — 방향마다 링크 속도만큼 쓸 수 있으므로 rx+tx 합을
+ * 한 방향 속도로 나누면 최대 2배로 부푼다(각 방향 48% 가 96%, 양방향 60% 가 '포화 100%' 로 클램프됐다).
+ * sar·nicstat 의 전이중 계산처럼 max(rx, tx) 를 쓴다. 한쪽이라도 모르면 null(합과 같은 엄격 규칙).
+ */
+export function maxStrict(list = []) {
+  if (!list.length || list.some((v) => v == null || !Number.isFinite(Number(v)))) return null;
+  return Math.max(...list.map(Number));
+}

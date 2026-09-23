@@ -656,8 +656,12 @@ test('collectRequests — 등록·agent 별 one-shot 인출·멱등·타 엣지 
   assert.equal(cr.hasPendingRequest('dev-1'), true);
   const mine = cr.takeRequestsForAgent('WA-EDGE').sort();
   assert.deepEqual(mine, ['dev-1', 'dev-2'], '내 몫만, 대소문자 무시');
-  // one-shot: 인출 즉시 큐에서 제거 — 다음 pull 에 중복 수집되지 않는다.
+  // 인출한 요청은 다음 pull 에 다시 나가지 않는다(중복 수집 없음).
   assert.deepEqual(cr.takeRequestsForAgent('WA-Edge'), []);
+  // v2.590 P16: claim→ack — 인출 뒤에도 결과가 올 때까지 '대기' 로 남는다(예전 one-shot 은 여기서 false 였다 —
+  // 응답이 엣지에 닿지 않으면 요청이 사라졌는데 배지는 '처리됨' 처럼 꺼졌다). 결과 도착(ack) 뒤에 꺼진다.
+  assert.equal(cr.hasPendingRequest('dev-1'), true);
+  assert.equal(cr.ackCollect('dev-1', Date.now()), true);
   assert.equal(cr.hasPendingRequest('dev-1'), false);
   // 타 엣지 몫은 그대로 남아 있다.
   assert.deepEqual(cr.takeRequestsForAgent('other'), ['dev-3']);

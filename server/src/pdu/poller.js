@@ -17,7 +17,7 @@ import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { recordSnapshot } from './db.js';
 import { pollMs, startAdaptiveTimer } from './intervals.js';
 import { emptySnapshot, summarize } from './types.js';
-import { evaluateSnapshot, diffAlerts, loadThresholds, forgetDeviceAlerts } from './thresholds.js';
+import { evaluateSnapshot, diffAlerts, loadThresholds, forgetDeviceAlerts, readAlertKeys } from './thresholds.js';
 import { loadAlertConfig, notify } from '../alerts.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
@@ -115,12 +115,15 @@ async function evaluateAndNotify() {
     if (th.enabled === false) return;
     const violations = [];
     const heldDeviceIds = [];
+    const readKeys = new Set();
     for (const s of _snapshots.values()) {
       if (s && s.ok === false) { heldDeviceIds.push(s.id); continue; }   // 못 읽은 장비는 판정 보류(v2.583)
       violations.push(...evaluateSnapshot(s, th));
+      for (const k of readAlertKeys(s)) readKeys.add(k);                  // v2.590 F5: 값을 읽은 항목만 해소 판정
     }
     const cfg = loadAlertConfig();
-    const { fire, resolve } = diffAlerts(violations, { cooldownMs: (cfg.cooldownMin || 60) * 60_000, heldDeviceIds });
+    const { fire, resolve, dropped } = diffAlerts(violations, { cooldownMs: (cfg.cooldownMin || 60) * 60_000, heldDeviceIds, readKeys });
+    if (dropped?.length) console.warn(`[pdu] 값을 오래 읽지 못한 경보 ${dropped.length}건을 해소 알림 없이 끊었습니다(복구가 아니라 확인 불가): ${dropped.slice(0, 5).join(', ')}`);
     for (const a of [...fire, ...resolve]) {
       await notify(a, cfg).catch(() => {}); // 알림 실패가 수집을 막지 않는다
     }

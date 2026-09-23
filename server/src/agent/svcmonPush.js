@@ -97,6 +97,20 @@ function capabilities(p) {
   };
 }
 
+/**
+ * 행·메타를 청크로 나눈다(순수 — v2.590 D2, 테스트가 고정). 행이 0개여도 봉투 1개(하트비트)이고, 메타는 **청크마다
+ * 나눠** 싣는다(전 메타를 첫 청크에 몰면 항목이 많은 엣지는 첫 청크가 영원히 413 이다).
+ */
+export function splitSvcmonChunks(rows = [], metaAll = null, size = 1000) {
+  const sz = Math.max(1, Math.floor(Number(size) || 1));
+  const n = Math.max(1, Math.ceil(rows.length / sz), metaAll ? Math.ceil(metaAll.length / sz) : 0);
+  const out = [];
+  for (let k = 0; k < n; k += 1) {
+    out.push({ rows: rows.slice(k * sz, (k + 1) * sz), meta: metaAll ? metaAll.slice(k * sz, (k + 1) * sz) : null });
+  }
+  return out;
+}
+
 export async function pushSvcmonNow() {
   if (!ENABLED) return { ok: false, reason: 'SVCMON_PUSH=false' };
   if (!config.agent.centralUrl) return { ok: false, reason: 'CENTRAL_URL 미설정' };
@@ -117,56 +131,67 @@ export async function pushSvcmonNow() {
 
     // rows 를 청크로 나눈다. 행이 0개(항목 0개·아직 미실행)여도 **봉투 1개는 보낸다** —
     // 그래야 중앙이 '항목 없음'과 '엣지 죽음'을 구별할 수 있다(하트비트).
-    const chunks = [];
-    if (snap.rows.length === 0) chunks.push([]);
-    else for (let i = 0; i < snap.rows.length; i += chunkRows) chunks.push(snap.rows.slice(i, i + chunkRows));
-    // 메타는 첫 청크에만 싣는다(중복 전송 방지).
+    // ⚠⚠ v2.590 D2: 메타도 **청크마다 나눠** 싣는다. 예전에는 전 항목의 메타를 첫 청크에 몰아 실어, 항목이 약
+    //   5,500개를 넘는 엣지는 행을 최소(250)로 줄여도 첫 청크가 1MB 를 넘어 매 주기 413 이었고, 중앙은 메타가 비어
+    //   있으니 다음 주기에도 needMeta 를 요청해 **영원히** 반복됐다. 중앙 `putSvcmonReport` 는 메타를 id 단위로
+    //   병합(a.meta.set)하므로 나눠 보내도 된다.
     const metaSig = snap.metaSig;
+    const metaAll = needMeta && Array.isArray(snap.meta) ? snap.meta : null;
+    const buildChunks = (size) => splitSvcmonChunks(snap.rows, metaAll, size);
 
     let accepted = 0;
     let dropped = 0;
     let wire = 0;
     let bytes = 0;
     let nextNeedMeta = false;
-    const errors = [];
+    let errors = [];
+    let chunks = buildChunks(chunkRows);
 
-    for (let idx = 0; idx < chunks.length; idx += 1) {
-      const envelope = {
-        v: 1,
-        snapId,
-        seq: idx + 1,
-        total: chunks.length,
-        sentAt: Date.now(),
-        expectMs: INTERVAL_MS,
-        items: snap.items,
-        reported: snap.reported,
-        poller: {
-          tickMs: p.tickMs, maxPerTick: p.maxPerTick, lastSweepMs: p.lastSweepMs,
-          lastCount: p.lastCount, overdueSkipped: p.overdueSkipped, maxLagMs: p.maxLagMs,
-        },
-        caps: capabilities(p),
-        log: logStats(),
-        metaSig,
-        meta: idx === 0 && needMeta ? snap.meta : null,
-        rows: chunks[idx],
-      };
-      let r = await postChunk(envelope);
-      // 413 은 재시도 대상이 아니다 — 청크를 줄여 즉시 1회 재시도한다.
-      if (r.status === 413 && chunkRows > CHUNK_MIN) {
-        chunkRows = Math.max(CHUNK_MIN, Math.floor(chunkRows / 2));
-        console.warn(`[svcmon-push] 413 — 청크를 ${chunkRows}행으로 줄여 재시도합니다.`);
-        envelope.rows = envelope.rows.slice(0, chunkRows);
-        r = await postChunk(envelope);
+    // ⚠ v2.590 D2: 413 이면 청크를 줄여 **스냅샷 전체를 다시 나눠** 처음부터 보낸다. 예전에는 그 청크의 앞부분만
+    //   남기고(`rows.slice(0, chunkRows)`) 뒷부분을 오류도 없이 버렸다. 이미 받은 청크의 재전송은 중앙이 측정 시각으로
+    //   걸러 멱등이다.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      accepted = 0; dropped = 0; nextNeedMeta = false; errors = [];
+      let shrink = false;
+      for (let idx = 0; idx < chunks.length; idx += 1) {
+        const envelope = {
+          v: 1,
+          snapId,
+          seq: idx + 1,
+          total: chunks.length,
+          sentAt: Date.now(),
+          expectMs: INTERVAL_MS,
+          items: snap.items,
+          reported: snap.reported,
+          poller: {
+            tickMs: p.tickMs, maxPerTick: p.maxPerTick, lastSweepMs: p.lastSweepMs,
+            lastCount: p.lastCount, overdueSkipped: p.overdueSkipped, maxLagMs: p.maxLagMs,
+          },
+          caps: capabilities(p),
+          log: logStats(),
+          metaSig,
+          meta: chunks[idx].meta,
+          rows: chunks[idx].rows,
+        };
+        const r = await postChunk(envelope);
+        if (r.status === 413 && chunkRows > CHUNK_MIN) {
+          chunkRows = Math.max(CHUNK_MIN, Math.floor(chunkRows / 2));
+          console.warn(`[svcmon-push] 413 — 청크를 ${chunkRows}행으로 줄여 스냅샷 전체를 다시 나눠 보냅니다.`);
+          shrink = true;
+          break;
+        }
+        if (r.status === 404) {
+          unsupportedUntil = Date.now() + 3_600_000;
+          return { ok: false, reason: '중앙이 /api/central/svcmon-report 를 지원하지 않습니다(1시간 후 재시도).' };
+        }
+        bytes += r.bytes; wire += r.wire;
+        if (!r.ok) { errors.push(`청크 ${idx + 1}/${chunks.length} → ${r.status}${r.data?.reason ? ` (${r.data.reason})` : ''}`); continue; }
+        accepted += Number(r.data?.accepted) || 0;
+        dropped += Number(r.data?.dropped) || 0;
+        if (r.data?.needMeta) nextNeedMeta = true;
       }
-      if (r.status === 404) {
-        unsupportedUntil = Date.now() + 3_600_000;
-        return { ok: false, reason: '중앙이 /api/central/svcmon-report 를 지원하지 않습니다(1시간 후 재시도).' };
-      }
-      bytes += r.bytes; wire += r.wire;
-      if (!r.ok) { errors.push(`청크 ${idx + 1}/${chunks.length} → ${r.status}${r.data?.reason ? ` (${r.data.reason})` : ''}`); continue; }
-      accepted += Number(r.data?.accepted) || 0;
-      dropped += Number(r.data?.dropped) || 0;
-      if (r.data?.needMeta) nextNeedMeta = true;
+      if (!shrink) break;
+      chunks = buildChunks(chunkRows);
     }
 
     if (needMeta && !errors.length) sentMetaSig = metaSig;

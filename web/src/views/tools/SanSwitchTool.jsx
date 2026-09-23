@@ -7,7 +7,7 @@ import { statusText, traceText, isActive, phaseLabel } from './sanSwitchTestText
 import SanZoningPanel from './SanZoningPanel.jsx';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
-  throughputText, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
+  throughputText, throughputTitle, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
   toChartRows, topSeries, bps, sortPorts, nextSort, sortRows, seriesStats,
   RX_WARN_DBM, RX_BAD_DBM } from './sanSwitchPorts.js';
 import { STable } from '../../components/STable.jsx';
@@ -1359,7 +1359,7 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
                         {p.rxPowerDbm ?? '—'} / {p.txPowerDbm ?? '—'}{oh.level === 'bad' || oh.level === 'warn' ? ' ⚠' : ''}
                       </td>
                       <td className="muted">{p.sfpTempC != null ? `${p.sfpTempC}℃` : '—'}</td>
-                      <td>{throughputText(p, unit)}</td>
+                      <td title={throughputTitle(p)}>{throughputText(p, unit)}</td>
                     </tr>
                   );
                 })}

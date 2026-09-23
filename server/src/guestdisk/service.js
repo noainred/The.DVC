@@ -164,7 +164,11 @@ export async function vmDetail(vmId, { flatPerDayGB = 0.1, days = 0, usageFactor
   const uf = normUsageFactor(usageFactor);   // v2.482: 목록과 같은 배율로 파티션/VM 여유 계산
   const d = Number(days);
   const sinceTs = Number.isFinite(d) && d > 0 ? Date.now() - d * 86_400_000 : 0;
-  const [vs, ps] = await Promise.all([vmSeries(vmId, sinceTs), partSeries(vmId, sinceTs)]);
+  const [vs0, ps] = await Promise.all([vmSeries(vmId, sinceTs), partSeries(vmId, sinceTs)]);
+  // v2.590 P3: diff-저장은 '안 바뀐 동안' 행이 없다 — 마지막 점 이후 최신 수집 시각까지 값이 유지됐다는 사실을 끝점으로
+  // 이어 준다(추이 판정·차트가 '마지막 변화 시점에서 끊긴 선' 이 아니라 지금까지의 평탄선을 본다).
+  const tail = (pts, pick) => (pts.length && latest.ts && latest.ts > pts[pts.length - 1].ts ? [...pts, { ...pick(pts[pts.length - 1]), ts: latest.ts, carried: true }] : pts);
+  const vs = tail(vs0, (p) => ({ allocGB: p.allocGB, usedGB: p.usedGB }));
   // 파티션별로 점을 모아 추이 판정.
   const byPath = new Map();
   for (const r of ps) {
@@ -175,7 +179,7 @@ export async function vmDetail(vmId, { flatPerDayGB = 0.1, days = 0, usageFactor
   }
   const partitions = [...byPath.values()].map((e) => {
     const freeGB = Math.round(Math.max(0, e.capGB - e.usedGB * uf) * 10) / 10;
-    const trend = usageTrend(e.points, { flatPerDayGB });
+    const trend = usageTrend(tail(e.points, (p) => ({ usedGB: p.usedGB, capGB: p.capGB })), { flatPerDayGB });
     return { path: e.path, capGB: e.capGB, usedGB: e.usedGB, freeGB, trend, advice: reclaimAdvice(freeGB, trend.trend) };
   });
   const vmTrend = usageTrend(vs.map((p) => ({ ts: p.ts, usedGB: p.usedGB })), { flatPerDayGB });

@@ -339,7 +339,7 @@ export function BmUsage() {
           <p key={i} style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={f} /></p>
         ))}
         <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
-          <BoldText text={'‘—’ 는 **못 읽은 것**이고 0% 가 아닙니다. 디스크·네트워크·HBA 의 값은 그 서버에서 **가장 높은 장치·회선** 기준입니다(평균을 쓰면 한 디스크가 가득 찬 서버가 낮게 보입니다).'.replace(/`/g, '')} />
+          <BoldText text={'‘—’ 는 **못 읽은 것**이고 0% 가 아닙니다. 디스크·네트워크·HBA 의 값은 그 서버에서 **가장 높은 장치·회선** 기준입니다(평균을 쓰면 한 디스크가 가득 찬 서버가 낮게 보입니다). 네트워크·HBA 사용률(%)은 전이중이라 **방향별(수신·송신 중 큰 쪽)** ÷ 링크 속도이고, 처리량(B/s)은 두 방향의 합입니다.'.replace(/`/g, '')} />
         </p>
       </div>
 

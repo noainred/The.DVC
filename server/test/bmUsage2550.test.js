@@ -272,9 +272,10 @@ test('Linux 둘째 주기 — 산수가 맞는다', () => {
   const b = buildUsage({ target: TG, os: { ...os1, counters: C2 }, prev: a.next, now: 2_000 });
   assert.equal(b.row.cpu_pct, 20, '(1000 총증가 - 800 idle증가)/1000');
   assert.equal(b.row.disk_busy_pct, 50, '500ms busy / 1000ms 경과');
-  assert.equal(b.row.net_pct, 10, '125MB/s × 8 / 10Gb');
-  assert.equal(b.row.net_bps, 125_000_000);
-  assert.equal(b.row.hba_pct, 10, '200MB/s × 8 / 16Gb');
+  // v2.590 F9: 사용률은 전이중 방향별 max(rx, tx) ÷ 링크 속도 — rx·tx 가 반씩이면 합(125MB/s)이 아니라 62.5MB/s 기준.
+  assert.equal(b.row.net_pct, 5, 'max(rx,tx)=62.5MB/s × 8 / 10Gb');
+  assert.equal(b.row.net_bps, 125_000_000, '처리량은 여전히 rx+tx 합');
+  assert.equal(b.row.hba_pct, 5, 'max(rx,tx)=100MB/s × 8 / 16Gb');
   assert.equal(b.row.src, 'os');
 });
 

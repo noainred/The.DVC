@@ -26,6 +26,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { recordActivity } from '../sanswitch/perfActivityLog.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { ackPerfCollect } from '../sanswitch/collectRequests.js';
 
 const FILE = path.join(config.configDir, 'central-agent-sanswitch-perf.json');
 const MAX_DEVICES_PER_AGENT = 300;
@@ -78,6 +79,7 @@ export function saveEdgePerfStatus(agent, status, { owned = null, names = null }
   if (owned) st.devices = st.devices.filter((d) => owned.has(String(d.id)));
   const m = load();
   m.set(a, { at: Date.now(), status: st });
+  ackPerfCollect(a); // v2.590 P16: 사용량 '지금 수집' 요청의 완료 확인(엣지가 상태를 올렸다)
   if (m.size > MAX_AGENTS) for (const k of [...m.keys()].slice(0, m.size - MAX_AGENTS)) m.delete(k);
   try { atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(m)), { mode: 0o600 }); }
   catch { /* 영속 실패는 무시 — 인메모리는 유지 */ }

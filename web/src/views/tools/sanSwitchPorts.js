@@ -110,6 +110,12 @@ export function throughputText(port, unit) {
   if (numOrNull(port?.inFps) == null && numOrNull(port?.outFps) == null) return '—';
   return `${num(port.inFps)} / ${num(port.outFps)} f/s`;
 }
+
+/** 처리량 칸이 '—' 인 이유(v2.590 F3) — 축약 카운터는 기다려도 채워지지 않는다(첫 수집과 구분). */
+export function throughputTitle(port) {
+  if (port?.fpsHeld === 'approx') return '스위치가 프레임 카운터를 k/m/g 로 줄여(반올림해) 보여 줘 두 수집의 차이로 초당 프레임을 셀 수 없습니다.';
+  return undefined;
+}
 const num = (n) => (numOrNull(n) == null ? '—' : Number(n).toLocaleString());
 export function bps(v) {
   const n = numOrNull(v);   // null/'' 을 0 으로 보지 않는다(위 numOrNull 머리말 참조)

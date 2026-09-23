@@ -60,7 +60,7 @@ function safeBackup(reason) {
     // v2.590 P1: 'change' 는 설정 내용이 직전 백업과 같으면 만들지 않는다(상태 파일만 바뀐 경우). 건너뛴 사실은 lastSkip 으로 남긴다.
     const m = createBackup(reason, { retention: loadBackupSettings().retention, skipIfUnchanged: reason === 'change' });
     if (m.skipped) { lastSkip = { at: Date.now(), reason, why: m.why }; return null; }
-    lastRun = { at: Date.now(), reason, name: m.name, size: m.size }; return m;
+    lastRun = { at: Date.now(), reason, name: m.name, size: m.size, skipped: m.skipped?.length || 0 }; return m;
   }
   catch (e) { console.warn(`[backup] ${reason} 백업 실패: ${e.message}`); return null; }
 }

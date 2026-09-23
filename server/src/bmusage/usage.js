@@ -19,7 +19,7 @@
  *   말해야 한다(v2.517 규약: '기다리면 되는지' 를 말한다).
  *   Windows 경로는 `Win32_PerfFormattedData_*` 가 순간값이라 첫 주기부터 나온다 — 그 차이도 밝힌다.
  */
-import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict } from './rates.js';
+import { perSecond, cpuPctFromJiffies, busyPct, linkPct, maxOrNull, sumStrict, maxStrict } from './rates.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 const n = numOrNull;   // v2.561: 공용 판정
@@ -88,7 +88,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       const rx = perSecond(p?.rxBytes, x.rxBytes, pAt, now);
       const tx = perSecond(p?.txBytes, x.txBytes, pAt, now);
       const bps = sumStrict([rx, tx]);
-      return { iface: x.iface, bps, pct: linkPct(bps, x.bitsPerSec), state: x.state, bitsPerSec: x.bitsPerSec };
+      return { iface: x.iface, bps, pct: linkPct(maxStrict([rx, tx]), x.bitsPerSec), state: x.state, bitsPerSec: x.bitsPerSec };
     });
     const np = maxOrNull(perIf.map((x) => x.pct));
     if (np != null) { out.net_pct = np; srcOf.net = 'os'; }
@@ -103,7 +103,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       const rx = perSecond(p?.rxBytes, x.rxBytes, pAt, now);
       const tx = perSecond(p?.txBytes, x.txBytes, pAt, now);
       const bps = sumStrict([rx, tx]);
-      return { host: x.host, bps, pct: linkPct(bps, x.bitsPerSec), state: x.state, speedRaw: x.speedRaw };
+      return { host: x.host, bps, pct: linkPct(maxStrict([rx, tx]), x.bitsPerSec), state: x.state, speedRaw: x.speedRaw };
     });
     const hp = maxOrNull(perFc.map((x) => x.pct));
     if (hp != null) { out.hba_pct = hp; srcOf.hba = 'os'; }
@@ -135,7 +135,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
         const rx = perSecond(p?.rxBytes, x.rxBytes, pAtOf(prev), now);
         const tx = perSecond(p?.txBytes, x.txBytes, pAtOf(prev), now);
         const bps = sumStrict([rx, tx]);
-        return { iface: x.iface, bps, pct: linkPct(bps, x.bitsPerSec), bitsPerSec: x.bitsPerSec, src: 'idrac' };
+        return { iface: x.iface, bps, pct: linkPct(maxStrict([rx, tx]), x.bitsPerSec), bitsPerSec: x.bitsPerSec, src: 'idrac' };
       });
       const np = maxOrNull(idracIf.map((x) => x.pct));
       if (out.net_pct == null && np != null) { out.net_pct = np; srcOf.net = 'idrac'; }
@@ -148,7 +148,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
         const rx = perSecond(p?.rxBytes, x.rxBytes, pAtOf(prev), now);
         const tx = perSecond(p?.txBytes, x.txBytes, pAtOf(prev), now);
         const bps = sumStrict([rx, tx]);
-        return { host: x.host, bps, pct: linkPct(bps, x.bitsPerSec), bitsPerSec: x.bitsPerSec, src: 'idrac' };
+        return { host: x.host, bps, pct: linkPct(maxStrict([rx, tx]), x.bitsPerSec), bitsPerSec: x.bitsPerSec, src: 'idrac' };
       });
       const hp = maxOrNull(idracFc.map((x) => x.pct));
       if (out.hba_pct == null && hp != null) { out.hba_pct = hp; srcOf.hba = 'idrac'; }

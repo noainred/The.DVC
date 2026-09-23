@@ -50,7 +50,7 @@ export function isRuntimeStateFile(name) {
 /** 설정 파일 묶음의 지문 — 상태·캐시 파일은 뺀다. 'change' 백업이 직전 백업과 같은 내용이면 만들지 않는 데 쓴다. */
 export function settingsFingerprint(files) {
   const h = crypto.createHash('sha1');
-  for (const name of Object.keys(files || {}).filter((n) => n !== REDACTED_META && !isRuntimeStateFile(n)).sort()) {
+  for (const name of Object.keys(files || {}).filter((n) => n !== REDACTED_META && n !== SKIPPED_META && !isRuntimeStateFile(n)).sort()) {
     h.update(name); h.update('\0'); h.update(String(files[name])); h.update('\0');
   }
   return h.digest('hex');
@@ -71,6 +71,8 @@ function ensureDir() { fs.mkdirSync(BACKUP_DIR, { recursive: true }); }
 
 /** 번들 파일 맵 안의 메타 키 — 가린 env 키 목록 `{ 'portal.env': ['AUTH_SECRET', …] }`. 파일이 아니다. */
 export const REDACTED_META = '__redacted__';
+/** 크기 상한으로 뺀 파일 `[{name,size}]`(v2.590 D5). 메타 키이고 파일이 아니다. */
+export const SKIPPED_META = '__skipped__';
 /** CONFIG_DIR(비재귀)에서 설정 파일들을 { name: content(utf8) }로 수집. */
 export function collectConfigDir(dir = CONFIG_DIR) {
   const out = {};
@@ -83,7 +85,9 @@ export function collectConfigDir(dir = CONFIG_DIR) {
     if (!ALLOW_EXT.has(path.extname(name).toLowerCase())) continue;
     try {
       const st = fs.statSync(path.join(dir, name));
-      if (st.size > FILE_SIZE_CAP) continue;
+      // v2.590 D5: 상한 초과 파일을 **조용히** 빼지 않는다 — 대규모 svcmon.json(실측 16.4MB)이 빠진 채 '백업 완료' 로
+      // 보고되어 그 백업으로 복원하면 성능점검 대상 전량이 사라졌다. 뺀 파일을 결과·번들에 싣고 화면이 말한다.
+      if (st.size > FILE_SIZE_CAP) { (out[SKIPPED_META] ||= []).push({ name, size: st.size }); continue; }
       let content = fs.readFileSync(path.join(dir, name), 'utf8');
       // v2.538: .env 의 서명 키·봉인 키·토큰은 번들에 싣지 않는다(util/envRedact.js 머리말). 가린 개수는
       // `out[REDACTED_META]` 로 돌려 화면·결과가 말한다 — 조용히 빼면 복원 뒤 '왜 키가 사라졌나' 를 모른다.
@@ -103,10 +107,11 @@ export function createBackup(reason = 'manual', { retention = 30, skipIfUnchange
   ensureDir();
   const files = collectConfigDir();
   const redactedMeta = files[REDACTED_META] || null; delete files[REDACTED_META];
+  const skippedFiles = files[SKIPPED_META] || []; delete files[SKIPPED_META];
   const fp = settingsFingerprint(files);
   // v2.590 P1: 변경 감시가 깨웠는데 설정 내용이 직전 백업과 같으면(상태 파일만 바뀜) 만들지 않는다 — 사유를 돌려 호출부가 기록한다.
   if (skipIfUnchanged && _lastFingerprint && fp === _lastFingerprint) return { skipped: true, reason, why: 'unchanged' };
-  const central = { version: currentVersion(), files, redacted: redactedMeta };
+  const central = { version: currentVersion(), files, redacted: redactedMeta, skipped: skippedFiles.length ? skippedFiles : undefined };
   const edges = getAllAgentConfigs();
   const archive = { v: 1, createdAt: Date.now(), reason, central, edges };
   const gz = zlib.gzipSync(Buffer.from(JSON.stringify(archive)));
@@ -118,7 +123,7 @@ export function createBackup(reason = 'manual', { retention = 30, skipIfUnchange
   pruneBackups(retention);
   const edgeAgents = Object.keys(edges);
   const redacted = redactedMeta ? Object.values(redactedMeta).reduce((n, ks) => n + ks.length, 0) : 0;
-  return { name, size: gz.length, createdAt: archive.createdAt, reason, centralFiles: Object.keys(central.files).length, edges: edgeAgents.length, edgeAgents, redacted };
+  return { name, size: gz.length, createdAt: archive.createdAt, reason, centralFiles: Object.keys(central.files).length, edges: edgeAgents.length, edgeAgents, redacted, skipped: skippedFiles, sizeCapBytes: FILE_SIZE_CAP };
 }
 
 /** 보관 개수 초과분(오래된 것)을 삭제. */
@@ -194,7 +199,7 @@ export function restoreCentral(archive, { retention = 30 } = {}) {
   let envRestored = 0; const envDropped = [];
   for (const [name, content0] of Object.entries(archive.central.files)) {
     const base = path.basename(name);
-    if (base === REDACTED_META) continue; // 메타 키는 파일이 아니다
+    if (base === REDACTED_META || base === SKIPPED_META) continue; // 메타 키는 파일이 아니다
     if (DENY_NAMES.has(base) || !ALLOW_EXT.has(path.extname(base).toLowerCase())) continue;
     let content = content0;
     // v2.538: 번들의 .env 는 키·토큰이 가려져 있다 — 현재 파일의 값으로 되살리고, 없으면 그 줄을 버린다

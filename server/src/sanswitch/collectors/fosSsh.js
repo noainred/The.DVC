@@ -31,6 +31,17 @@ import { applyRates } from '../rates.js';
 import * as P from './fosParse.js';
 import { zoningFromText } from '../zoningCollect.js';
 
+
+/** porterrshow 열 이름 → 포트 행 필드(축약 표시용, v2.590 F3). */
+const ERR_FIELD_OF = { crc_err: 'errCrc', enc_in: 'errEncIn', enc_out: 'errEncOut', link_fail: 'errLinkFail',
+  loss_sync: 'errLossSync', loss_sig: 'errLossSig', disc_c3: 'discC3' };
+function approxFields(approx) {
+  if (!Array.isArray(approx) || !approx.length) return {};
+  const errApprox = approx.map((k) => ERR_FIELD_OF[k]).filter(Boolean);
+  const framesApprox = approx.includes('frames_rx') || approx.includes('frames_tx');
+  return { ...(errApprox.length ? { errApprox } : {}), ...(framesApprox ? { framesApprox: true } : {}) };
+}
+
 const RAW_LIMIT = Number(process.env.SANSW_CLI_RAW_LIMIT) || 4000;
 const CMD_TIMEOUT_MS = Number(process.env.SANSW_CLI_TIMEOUT_MS) || 45_000;
 
@@ -269,6 +280,8 @@ export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}) {
       errCrc: e.crc_err ?? null, errEncIn: e.enc_in ?? null, errEncOut: e.enc_out ?? null, errLinkFail: e.link_fail ?? null,
       errLossSync: e.loss_sync ?? null, errLossSig: e.loss_sig ?? null, discC3: e.disc_c3 ?? null,
       inFrames: e.frames_rx ?? null, outFrames: e.frames_tx ?? null,
+      // v2.590 F3: k/m/g 로 축약된(반올림된) 카운터 — 판정이 증분(당월 신규·f/s)을 보류한다.
+      ...approxFields(e._approx),
       inBytes: null, outBytes: null,   // SSH porterrshow 는 옥텟을 주지 않는다 → bps 대신 fps
       sfpTempC: s.tempC ?? null, sfpVoltageMv: s.voltageMv ?? null,
       txPowerDbm: s.txPowerDbm ?? null, rxPowerDbm: s.rxPowerDbm ?? null,

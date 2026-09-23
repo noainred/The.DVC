@@ -12,41 +12,34 @@
  * 최악 대기: pull 주기(≤5분) + 수집 시간 — 기존 '다음 폴링 주기(≤10분) + push(≤5분)' 대비 단축.
  *
  * 의미론:
- *  - one-shot: 엣지에 서빙되는 순간 큐에서 제거(전달 보장 아님 — 엣지가 그 직후 죽으면 유실.
+ *  - ⚠ v2.590 P16: 아래 one-shot 은 **claim→ack 로 바뀌었다**(util/collectRequestQueue.js). 기록으로 남긴다.
+ *  - (옛) one-shot: 엣지에 서빙되는 순간 큐에서 제거(전달 보장 아님 — 엣지가 그 직후 죽으면 유실.
  *    수동 재시도 버튼 용도라 재클릭으로 충분, 영속/재전송 복잡도를 들이지 않는다. 정직 표기).
  *  - TTL 15분: 엣지가 오랫동안 pull 하지 않으면 요청을 폐기(낡은 요청이 몇 시간 뒤 갑자기
  *    실행되는 놀람 방지). 인메모리 — 중앙 재시작 시 소실(동일 이유로 수용).
  *  - 같은 장비 재클릭은 requestedAt 갱신(중복 항목 없음 — 멱등).
  */
 
-const TTL_MS = 15 * 60_000;
-const _pending = new Map(); // deviceId → { agent(소문자), requestedAt }
+import { createCollectRequestQueue } from '../util/collectRequestQueue.js';
 
-function prune() {
-  const cut = Date.now() - TTL_MS;
-  for (const [id, r] of _pending) if (r.requestedAt < cut) _pending.delete(id);
-}
+// v2.590 P16: 인출 즉시 지우던 one-shot 을 claim→ack 로 바꿨다(코어 util/collectRequestQueue.js 머리말 참조).
+// 엣지가 인출한 뒤에도 그 장비의 새 수집 결과가 올 때까지 '요청 대기' 가 유지되고, 결과가 없으면 한 번 재인출한다.
+const TTL_MS = 15 * 60_000;
+const Q = createCollectRequestQueue({ ttlMs: TTL_MS });
 
 /** 수집 요청 등록(중앙에서 '수집' 클릭). agent 는 그 장비의 위임 엣지 이름. */
-export function requestCollect(deviceId, agent) {
-  prune();
-  _pending.set(String(deviceId), { agent: String(agent || '').toLowerCase(), requestedAt: Date.now() });
-  return { pending: _pending.size };
-}
+export function requestCollect(deviceId, agent) { const r = Q.request(deviceId, agent); return { pending: r.pending }; }
 
-/** 이 엣지 몫 요청을 꺼내며 큐에서 제거(one-shot — config 서빙 시 호출). */
-export function takeRequestsForAgent(agentName) {
-  prune();
-  const me = String(agentName || '').toLowerCase();
-  const ids = [];
-  for (const [id, r] of _pending) {
-    if (r.agent === me) { ids.push(id); _pending.delete(id); }
-  }
-  return ids;
-}
+/** 이 엣지 몫 요청을 인출(config 서빙 시 호출) — 지우지 않고 진행 중으로 옮긴다(결과 도착 시 ackCollect). */
+export function takeRequestsForAgent(agentName) { return Q.take(agentName); }
 
-/** 장비별 대기 중 요청 여부(UI 배지·중복 안내용). */
-export function hasPendingRequest(deviceId) { prune(); return _pending.has(String(deviceId)); }
+/** 엣지 push 로 그 장비의 새 수집 결과가 도착했다 — 인출 이후 수집이면 요청 완료. */
+export function ackCollect(deviceId, collectedAt = null) { return Q.ack(deviceId, collectedAt); }
+
+/** 장비별 대기·진행 중 요청 여부(UI 배지·중복 안내용). 결과가 올 때까지 true. */
+export function hasPendingRequest(deviceId) { return Q.has(deviceId); }
+export function requestState(deviceId) { return Q.state(deviceId); }
+export function lastDroppedRequest() { return Q.lastDropped(); }
 
 /* ── 포트 사용량(portperfshow) '지금 수집' 위임 큐(v2.517) ─────────────────────────
  * 왜 별도 큐인가: 위 큐의 항목은 엣지에서 **기본 수집**(`collectDeviceNow`)으로 실행된다. 사용량
@@ -63,35 +56,24 @@ export function hasPendingRequest(deviceId) { prune(); return _pending.has(Strin
  * 인메모리(중앙 재시작 시 소실 — 수동 버튼용). 단위는 **엣지 단위**다(엣지의 `pollPerfOnce` 는
  * 자기 몫 전체를 한 주기에 수집하므로 장비별로 나눠 요청할 이유가 없다).
  */
-const _perfPending = new Map(); // agent(소문자) → requestedAt
+// v2.590 P16: 사용량 요청도 claim→ack — 엣지가 사용량 상태를 올리면(sanSwitchPerfEdge 수신) 완료.
+const PQ = createCollectRequestQueue({ ttlMs: TTL_MS });
 
-function prunePerf() {
-  const cut = Date.now() - TTL_MS;
-  for (const [a, at] of _perfPending) if (at < cut) _perfPending.delete(a);
-}
-
-/** 사용량 재수집 요청 등록. 반환 `{ duplicate }` — 이미 대기 중이면 true(화면이 그대로 말한다). */
+/** 사용량 재수집 요청 등록. 반환 `{ duplicate }` — 이미 대기·진행 중이면 true(화면이 그대로 말한다). */
 export function requestPerfCollect(agent) {
-  prunePerf();
   const a = String(agent || '').toLowerCase();
-  if (!a) return { duplicate: false, pending: _perfPending.size };
-  const duplicate = _perfPending.has(a);
-  _perfPending.set(a, Date.now());
-  return { duplicate, pending: _perfPending.size };
+  if (!a) return { duplicate: false, pending: PQ.pendingCount() };
+  const duplicate = PQ.has(a);
+  PQ.request(a, a);
+  return { duplicate, pending: PQ.pendingCount() };
 }
 
-/** 이 엣지 몫 요청을 꺼내며 제거(one-shot — config 서빙 시 호출). */
-export function takePerfRequestForAgent(agentName) {
-  prunePerf();
-  const a = String(agentName || '').toLowerCase();
-  if (!a || !_perfPending.has(a)) return false;
-  _perfPending.delete(a);
-  return true;
-}
+/** 이 엣지 몫 요청을 인출(config 서빙 시 호출) — 진행 중으로 옮긴다. */
+export function takePerfRequestForAgent(agentName) { return PQ.take(agentName).length > 0; }
 
-export function hasPendingPerfRequest(agent) {
-  prunePerf();
-  return _perfPending.has(String(agent || '').toLowerCase());
-}
+/** 엣지가 사용량 상태를 올렸다 — 인출 이후면 완료. */
+export function ackPerfCollect(agent, at = null) { return PQ.ack(String(agent || '').toLowerCase(), at); }
 
-export function _resetForTest() { _pending.clear(); _perfPending.clear(); }
+export function hasPendingPerfRequest(agent) { return PQ.has(String(agent || '').toLowerCase()); }
+
+export function _resetForTest() { Q._reset(); PQ._reset(); }

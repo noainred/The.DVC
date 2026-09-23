@@ -175,7 +175,17 @@ export function parseCounter(raw) {
 }
 
 /**
+ * 축약 표기(k/m/g/t 접미사)인가(v2.590 F3). `1.2m` 은 유효숫자 2자리로 **반올림된** 값이라 두 수집의
+ * 차이를 '새로 생긴 에러'·'초당 프레임' 으로 쓰면 틀린다 — `1.2m → 1.2m` 이면 실제로 수만 건이 늘어도
+ * 차이는 0 이다(월간 점검이 '신규 없음(정상)' 이라 말했다). 판정 쪽이 이 표시를 보고 증분을 보류한다.
+ */
+export function isAbbreviatedCounter(raw) {
+  return /^[\d.]+\s*[kmgt]$/i.test(String(raw ?? '').trim());
+}
+
+/**
  * porterrshow → { <portIndex>: {frames_tx, frames_rx, crc_err, enc_out, link_fail, ...} }.
+ * 축약 표기로 읽은 열 이름은 `_approx`(배열)로 함께 싣는다 — 값 자체는 그대로 쓴다(누적 표시는 맞다).
  *
  * ⚠ 컬럼 구성이 FOS 버전마다 다르다(c3timeout·pcs_err 는 신형에만 있다). 그래서 **머리글
  *   2줄을 읽어 이름을 만들고**, 이름을 못 만들면 아래 정규 순서로 폴백한다. 값 개수가
@@ -201,7 +211,12 @@ export function parsePortErrShow(text) {
     const idx = Number(t[0].replace(':', ''));
     const vals = t.slice(1);
     const rec = {};
-    for (let i = 0; i < Math.min(names.length, vals.length); i++) rec[names[i]] = parseCounter(vals[i]);
+    const approx = [];
+    for (let i = 0; i < Math.min(names.length, vals.length); i++) {
+      rec[names[i]] = parseCounter(vals[i]);
+      if (isAbbreviatedCounter(vals[i])) approx.push(names[i]);
+    }
+    if (approx.length) rec._approx = approx;
     out[idx] = rec;
   }
   return out;

@@ -9,6 +9,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { recordActivity } from '../sanswitch/activityLog.js';
+import { ackCollect } from '../sanswitch/collectRequests.js';
 
 const FILE = path.join(config.configDir, 'central-agent-sanswitch.json');
 const MAX_DEVICES_PER_AGENT = 300;
@@ -42,6 +43,7 @@ export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1 } = {}
   // ⚠ 엣지는 문제 포트만 올리므로(push.js slimSnapshot) 포트 요약 수치는 전체 기준을 쓴다.
   for (const dv of list) {
     const ca = Number(dv.collectedAt) || 0;
+    ackCollect(dv.deviceId, ca || null); // v2.590 P16: 위임 '지금 수집' 요청의 완료 확인
     if (ca && _lastRec.get(dv.deviceId) === ca) continue;
     if (ca) _lastRec.set(dv.deviceId, ca);
     try {

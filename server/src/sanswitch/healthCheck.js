@@ -91,15 +91,41 @@ const num = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+/** REST 수집기가 '조회하지 않는 항목' 에 싣는 섹션 값(v2.590 F4). */
+export const REST_NOT_COLLECTED = 'rest-not-collected';
+
+/**
+ * REST 스냅샷의 섹션 키를 점검 판정이 보는 키(SSH 기준)로 맞춘다(v2.590 F4, 순수 — 테스트가 고정).
+ * REST 는 같은 데이터를 ‘stats’(= porterrshow 카운터)·‘media’(= sfpshow 광량)·‘fan’/‘psu’ 로 싣는다 —
+ * 판정이 SSH 키만 보면 **이미 수집한 광량·에러를 보지 않고** '확인 불가' 로 떨어졌다(장애 수준 광량 포트가 있어도
+ * 종합 '정상(일부 미확인)'). REST 로 원래 얻지 않는 항목은 {@link REST_NOT_COLLECTED} 로 표시해 사유를 구분한다.
+ */
+export function restHealthSections(sections = {}) {
+  const s = sections || {};
+  const out = { ...s };
+  if (out.counters == null) out.counters = s.stats ?? REST_NOT_COLLECTED;
+  if (out.sfp == null) out.sfp = s.media ?? REST_NOT_COLLECTED;
+  if (out.chassis == null) out.chassis = (s.fan === 'ok' || s.psu === 'ok') ? 'ok' : (s.fan ?? s.psu ?? REST_NOT_COLLECTED);
+  for (const k of ['health', 'sensors', 'bottleneck', 'raslog', 'isl', 'trunk', 'lsan']) {
+    if (out[k] == null) out[k] = REST_NOT_COLLECTED;
+  }
+  // REST 의 ‘fabric’ 키는 fabric-switch 조회 성패라 SSH fabricshow(구성원 목록)와 뜻이 다르다 — 구성원을 만들지
+  // 않으므로 '출력 형식을 읽지 못했다' 가 아니라 '조회하지 않는다' 다.
+  out.fabric = REST_NOT_COLLECTED;
+  return out;
+}
+
 /**
  * 섹션 미수집 사유를 사람 문구로. `sections` 값은 'ok' | 'skip' | 오류 문구다(fosSsh.buildSnapshot).
  * ⚠ 'skip' 과 오류를 구분한다 — 전자는 '이 장비/계정에 명령이 없다', 후자는 '실행이 실패했다' 다.
  */
 export function uncheckedWhy(sectionValue, cmd) {
   const v = String(sectionValue || '');
-  if (!v || v === 'skip') return `이 스위치에서 \`${cmd}\` 를 수집하지 못했습니다(명령이 없거나 계정 권한이 없습니다).`;
-  if (v === 'ok') return `\`${cmd}\` 출력 형식을 읽지 못했습니다(수집은 됐습니다).`;
-  return `\`${cmd}\` 실행 실패: ${v.slice(0, 200)}`;
+  // v2.590 F4: REST 수집 스위치는 그 정보를 **조회하지 않는** 것이다 — '명령이 없거나 권한이 없다' 는 틀린 조치를 준다.
+  if (v === REST_NOT_COLLECTED) return `REST 수집 방식은 ‘${cmd}’ 에 해당하는 정보를 조회하지 않습니다 — 이 항목을 확인하려면 스위치를 SSH 방식으로 등록하세요(명령·권한 문제가 아닙니다).`;
+  if (!v || v === 'skip') return `이 스위치에서 ‘${cmd}’ 를 수집하지 못했습니다(명령이 없거나 계정 권한이 없습니다).`;
+  if (v === 'ok') return `‘${cmd}’ 출력 형식을 읽지 못했습니다(수집은 됐습니다).`;
+  return `‘${cmd}’ 실행 실패: ${v.slice(0, 200)}`;
 }
 
 /** 점검 항목 키 → 그 항목을 채우는 **수집 명령 키**(`usedCmds` 조회용). */
@@ -150,7 +176,8 @@ export function errorDelta(cur, base) {
 /** 한 스위치 점검. `snap` 은 수집 스냅샷, `baseline` 은 `{ at, ports: {idx: {...}} }` 또는 null. */
 export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad = RX_BAD_DBM } = {}) {
   if (!snap) return null;
-  const sec = snap.sections || {};
+  // v2.590 F4: REST 스냅샷은 섹션 키가 다르다 — 판정 전에 SSH 키로 맞춘다(구버전 엣지 스냅샷도 여기서 고쳐진다).
+  const sec = snap.extra?.collectMethod === 'rest' ? restHealthSections(snap.sections || {}) : (snap.sections || {});
   // **무엇으로 확인했는가**(v2.522) — 대체 명령을 썼으면 항목에 그 사실을 붙인다.
   // 수집기가 항목 키(`optical`)가 아니라 명령 키(`sfpshow`)로 남기므로 여기서 매핑한다.
   const used = snap.extra?.usedCmds || {};
@@ -196,7 +223,7 @@ export function checkDevice(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad
       ].filter(Boolean).join(' · ');
       // ⚠ `sensorshow` 가 없어 `tempshow` 로 대체했으면 **전압은 보지 못했다** — 그 사실을 적는다.
       //   적지 않으면 '온도·전압 센서 정상' 이라는 거짓이 된다(v2.522).
-      const alt = used.sensorshow?.alt ? ` ⚠ \`${used.sensorshow.cmd}\` 로 대체 확인 — **전압은 확인하지 못했습니다**(이 명령은 온도만 줍니다).` : '';
+      const alt = used.sensorshow?.alt ? ` ⚠ ‘${used.sensorshow.cmd}’ 로 대체 확인 — **전압은 확인하지 못했습니다**(이 명령은 온도만 줍니다).` : '';
       if (bad.length) items.push(mk('sensors', 'bad', `${info} · 이상 ${bad.length}개${alt}`, { evidence: bad.map((x) => x.raw) }));
       else if (unk.length) items.push(mk('sensors', 'warn', `${info} · 상태를 읽지 못한 센서 ${unk.length}개${alt}`, { evidence: unk.map((x) => x.raw) }));
       else if (alt) items.push(mk('sensors', 'warn', `${info} (임계 판정은 스위치 센서 상태 기준)${alt}`, { evidence: [] }));
@@ -347,7 +374,7 @@ function fruItem(key, fru, section, cmd) {
   if (!fru) return mk(key, 'unknown', uncheckedWhy(section, cmd));
   const total = num(fru.total);
   const ok = fru.ok;
-  if (ok == null) return mk(key, 'unknown', `${total ?? '?'}개가 장착돼 있다는 것만 확인했습니다 — 정상 여부는 \`${cmd}\` 가 없어 알 수 없습니다.`);
+  if (ok == null) return mk(key, 'unknown', `${total ?? '?'}개가 장착돼 있다는 것만 확인했습니다 — 정상 여부는 ‘${cmd}’ 가 없어 알 수 없습니다.`);
   if (total != null && ok < total) return mk(key, 'bad', `${ok}/${total} 정상 — ${total - ok}개 이상`);
   return mk(key, 'ok', `${ok}/${total ?? ok} 정상`);
 }
@@ -362,18 +389,23 @@ function portErrorItem(ports, sec, baseline) {
   const bp = baseline?.ports || null;
   const rows = [];
   let anyCounter = false;
+  // v2.590 F3: k/m/g 로 축약된(반올림된) 카운터는 증분을 셀 수 없다 — '신규 0' 이 아니라 **보류**다.
+  const approxPorts = new Set();
   for (const p of ports) {
     const cur = {}; const dlt = {};
     let curSum = 0; let dltSum = 0; let dltKnown = false;
+    const curAp = Array.isArray(p.errApprox) ? p.errApprox : [];
+    const baseAp = bp && Array.isArray(bp[String(p.index)]?._approx) ? bp[String(p.index)]._approx : [];
     for (const k of ERROR_KEYS) {
       const v = num(p[k]);
       if (v != null) { anyCounter = true; cur[k] = v; curSum += v; }
+      if (bp && (curAp.includes(k) || baseAp.includes(k))) { if (v != null) approxPorts.add(p.index); continue; }
       const d = errorDelta(p[k], bp ? bp[String(p.index)]?.[k] : null);
       if (d != null) { dlt[k] = d; dltSum += d; dltKnown = true; }
     }
     if (curSum > 0 || dltSum > 0) rows.push({ index: p.index, name: p.attachedName || '', cur, dlt, curSum, dltSum, dltKnown });
   }
-  if (!anyCounter) return mk('portErrors', 'unknown', '`porterrshow` 에서 카운터 값을 읽지 못했습니다.');
+  if (!anyCounter) return mk('portErrors', 'unknown', '‘porterrshow’ 에서 카운터 값을 읽지 못했습니다.');
 
   const label = ERROR_KEYS.map((k) => ERROR_CAUSE[k].label);
   const ev = rows.sort((a, b) => (b.dltKnown ? b.dltSum : b.curSum) - (a.dltKnown ? a.dltSum : a.curSum)).slice(0, 20)
@@ -394,11 +426,18 @@ function portErrorItem(ports, sec, baseline) {
   }
   const newRows = rows.filter((r) => r.dltSum > 0);
   const causes = errorCauses(newRows, { basis: 'dlt' });
-  if (!newRows.length) return mk('portErrors', 'ok', '기준선 이후 새로 발생한 에러가 없습니다.', { evidence: ev.slice(0, 5), columns: label, causes: [] });
+  const approxNote = approxPorts.size
+    ? ` 단, 포트 ${approxPorts.size}개는 카운터가 k/m/g 로 축약(반올림)돼 있어 **증분을 셀 수 없어 판정하지 않았습니다**(예: 1.2m → 1.2m 이어도 수만 건이 늘었을 수 있습니다).`
+    : '';
+  if (!newRows.length) {
+    // 축약 포트가 있으면 '신규 없음' 이라고 단정하지 않는다 — 확인하지 못한 것을 정상으로 칠하지 않는다(v2.519).
+    if (approxPorts.size) return mk('portErrors', 'unknown', `셀 수 있는 포트에서는 기준선 이후 새 에러가 없습니다.${approxNote}`, { evidence: ev.slice(0, 5), columns: label, causes: [], approxPorts: approxPorts.size });
+    return mk('portErrors', 'ok', '기준선 이후 새로 발생한 에러가 없습니다.', { evidence: ev.slice(0, 5), columns: label, causes: [] });
+  }
   const heavy = newRows.filter((r) => r.dltSum >= 100);
   return mk('portErrors', heavy.length ? 'bad' : 'warn',
-    `기준선 이후 신규 에러가 있는 포트 ${newRows.length}개${heavy.length ? ` (100건 이상 ${heavy.length}개)` : ''} — ${causeSentence(causes)}`,
-    { evidence: ev, columns: label, causes });
+    `기준선 이후 신규 에러가 있는 포트 ${newRows.length}개${heavy.length ? ` (100건 이상 ${heavy.length}개)` : ''} — ${causeSentence(causes)}${approxNote ? `.${approxNote}` : ''}`,
+    { evidence: ev, columns: label, causes, ...(approxPorts.size ? { approxPorts: approxPorts.size } : {}) });
 }
 
 /**
@@ -440,7 +479,7 @@ export function causeSentence(causes) {
  *   `complete:false` 로 '전 포트를 본 것이 아니다' 를 밝힌다.
  */
 export function checkPorts(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad = RX_BAD_DBM } = {}) {
-  const sec = snap?.sections || {};
+  const sec = snap?.extra?.collectMethod === 'rest' ? restHealthSections(snap?.sections || {}) : (snap?.sections || {});   // v2.590 F4
   const list = (snap?.ports && snap.ports.list) || [];
   const bp = baseline?.ports || null;
   const rows = list.map((p) => {
@@ -457,15 +496,21 @@ export function checkPorts(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad 
 
     const cur = {}; const dlt = {};
     let curSum = 0; let dltSum = 0; let dltKnown = false;
+    // v2.590 F3: 축약(k/m/g) 카운터는 증분을 셀 수 없다 — portErrorItem 과 같은 기준으로 보류한다.
+    const curAp = Array.isArray(p.errApprox) ? p.errApprox : [];
+    const baseAp = bp && Array.isArray(bp[String(p.index)]?._approx) ? bp[String(p.index)]._approx : [];
+    let approxHeld = false;
     for (const k of ERROR_KEYS) {
       const v = num(p[k]);
       if (v != null) { cur[k] = v; curSum += v; }
+      if (bp && (curAp.includes(k) || baseAp.includes(k))) { if (v != null) approxHeld = true; continue; }
       const d = errorDelta(p[k], bp ? bp[String(p.index)]?.[k] : null);
       if (d != null) { dlt[k] = d; dltSum += d; dltKnown = true; }
     }
     let errors = 'unknown';
     if (sec.counters !== 'ok') errors = 'unknown';
     else if (!Object.keys(cur).length) errors = 'unknown';
+    else if (bp && approxHeld && dltSum === 0) { errors = 'unknown'; reasons.push('카운터가 k/m/g 로 축약돼 신규 에러를 셀 수 없습니다'); }
     else if (bp && dltKnown) {
       if (dltSum >= 100) { errors = 'bad'; reasons.push(`기준선 이후 신규 에러 ${dltSum}건`); }
       else if (dltSum > 0) { errors = 'warn'; reasons.push(`기준선 이후 신규 에러 ${dltSum}건`); }

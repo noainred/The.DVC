@@ -38,6 +38,7 @@ export function applyRates(deviceId, ports = [], now = Date.now()) {
     cur.ports.set(String(p.index), {
       inFrames: p.inFrames ?? null, outFrames: p.outFrames ?? null,
       inBytes: p.inBytes ?? null, outBytes: p.outBytes ?? null,
+      framesApprox: !!p.framesApprox,
     });
   }
   _prev.set(deviceId, cur);
@@ -58,6 +59,9 @@ export function applyRates(deviceId, ports = [], now = Date.now()) {
     // 옥텟(바이트)이 있으면 bps 로, 없으면(SSH porterrshow) 프레임/초로 — 둘 다 정직하게 구분 표기.
     p.inBps = toBps(old.inBytes, p.inBytes);
     p.outBps = toBps(old.outBytes, p.outBytes);
+    // v2.590 F3: 프레임 카운터가 k/m/g 로 축약(반올림)돼 있으면 두 값의 차이는 트래픽이 아니다 —
+    //   `4.1g → 4.1g` 는 0 f/s, `4.1g → 4.2g` 는 33만 f/s 계단이 된다. 모르는 것으로 둔다.
+    if (p.framesApprox || old.framesApprox) { p.inFps = null; p.outFps = null; p.fpsHeld = 'approx'; continue; }
     p.inFps = rate(old.inFrames, p.inFrames, sec);
     p.outFps = rate(old.outFrames, p.outFrames, sec);
   }

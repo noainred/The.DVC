@@ -159,8 +159,12 @@ export function diffDatastores(datastores, prevRoster) {
   for (const d of live) {
     const prev = baseline ? null : prevRoster.get(d.dsId);
     if (!prev) { series.push(d); continue; } // 첫 관측(기준선 포함) — 시계열의 시작점
-    const prevUsed = num(prev.used_gb);
-    const prevCap = num(prev.cap_gb);
+    // v2.590 P4/P5: 로더가 '마지막으로 기록한 값' 을 붙여 주면(series_known) 그것과 비교한다 — 로스터(직전 슬롯)와
+    // 비교하면 슬롯당 임계 미만의 꾸준한 증가가 영원히 기록되지 않는다. 기록이 없으면(prune 뒤) 첫 관측으로 다시 쓴다.
+    if (prev.series_known === false) { series.push(d); continue; }
+    const hasSeries = prev.series_known === true;
+    const prevUsed = num(hasSeries ? prev.series_used_gb : prev.used_gb);
+    const prevCap = num(hasSeries ? prev.series_cap_gb : prev.cap_gb);
     // 직전 값이 없다가 생긴 것도 '변화'로 기록(Infinity ≥ 임계). 양쪽 다 없으면 판단 불가 → 스킵.
     const dU = (d.usedGB != null && prevUsed != null) ? Math.abs(d.usedGB - prevUsed) : (d.usedGB != null ? Infinity : 0);
     const dC = (d.capGB != null && prevCap != null) ? Math.abs(d.capGB - prevCap) : (d.capGB != null ? Infinity : 0);

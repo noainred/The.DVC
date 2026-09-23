@@ -1147,9 +1147,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       (`edge-log-result`)만 등록해 빠져 있었다. 실측: 500행(`checksLogs.js` 의 limit 상한) ×
       vCenter 이벤트 message **1,900자 = 981KB** 로 기본 1MB 에 닿고 2,000자면 1,079KB 로 넘는다.
       413 은 재시도 대상이 아니라 **그 조회 결과의 조용한 전량 소실**이다.
-    - ⚠ **아직 같은 상태인 위임 워커**(v2.561 시점): `pingWorker` · `captureWorker` ·
-      `bmstorWorker`. 붙일 때 **UI 표시(spec 표 등재)를 함께** 해야 한다 — 화면이 말하지 않는
-      상태는 없는 것과 같다.
+    - ✅ **v2.561 시점에 같은 상태였던 위임 워커**(`pingWorker` · `captureWorker` · `bmstorWorker`)는
+      v2.574 IMP-07 에 `_last` + `console.warn` 을 받았다(`edgeSweep2574` 가 고정 — v2.590 에 이 줄을 정정).
+      새 워커도 **UI 표시(spec 표 등재)를 함께** 해야 한다 — 화면이 말하지 않는 상태는 없는 것과 같다.
   - ⚠⚠ **토큰 점검 — 중앙이 평문으로 가진 토큰은 두 가지뿐이고, 나머지는 엣지가 스스로 말해야 한다**
     (`util/tokenFingerprint.js` · `portalcheck/{tokenScan,tokenProbe,tokenFindings,edgeReport}.js` ·
     `central/tokenCheckPull.js` · `routes/api/portalCheck.js` + 웹 `views/tools/PortalCheck.jsx`·
@@ -3045,8 +3045,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `loadState` 판정을 받는다(V4·관제 콘솔 양쪽). 위 v2.509·v2.583·v2.578·v2.579 의 '남은 것' 줄도 함께 정정했다 —
       **문서의 '남아 있다' 는 다음 점검의 첫 후보이고, 고친 뒤에는 그 줄을 반드시 고칠 것**(이번에 4줄이 이미 고쳐진
       결함을 '남아 있다' 로 적고 있었다).
-    - ⚠ 확인하지 못한 것(정직 기록): `curUser /settings` 가 범위 계정에 함대 전체 `overLimit`·`push.last.records` 를 줄
-      수 있다는 스윕 후보는 curuser 를 켜고 대상이 `maxVms` 를 넘어야 재현돼 **재현하지 못했다**(후속).
+    - ✅ (당시 확인하지 못한 것) `curUser /settings` 가 범위 계정에 함대 전체 `overLimit`·`push.last.records` 를 줄
+      수 있다는 스윕 후보는 **v2.589 SEC-2589-02 에 고쳤다**(범위 계정에 null — v2.590 에 이 줄을 정정).
 
   - ⚠⚠ **데이터 흐름 지도(v2.587) — 경로는 라우터 선언에서 읽고, 계측이 없는 방향은 계측부터 만든다**
     (`server/src/dataflow/build.js`(순수) + `central/pullStats.js` + `util/outboundStats.js` + `routes/api/dataFlow.js` +
