@@ -112,8 +112,11 @@ test('B7·SEC-02 — 디스크 가드 기본값·curuser 범위 계정 필드(�
 test('ARCH-A3 — 로그 분석 합산은 선형이고 오래된 버킷의 http 키를 줄인다', async () => {
   const { newState, mergeState, compactState } = await import('../src/loganalysis/engine.js');
   const mk = (seed) => { const st = newState(); for (let i = 0; i < 700; i++) st.http[`GET /x${seed}-${i}`] = { n: 1, sumMs: 1, slow: 0, maxMs: 1, rid: '' }; return st; };
-  const t0 = performance.now(); const acc = newState();
-  for (let i = 0; i < 168; i++) mergeState(acc, mk(i));
+  // v2.590 TEST-1: 입력 생성(168×700 객체)을 측정 구간 밖으로 뺐다 — 안에 두면 콜드 실행·머신 부하에서 벽시계가
+  //   부풀어 전량 병렬 실행 중 621ms 로 실패한 적이 있다(제품 결함 아님). 재는 것은 합산 루프뿐이다.
+  const inputs = Array.from({ length: 168 }, (_, i) => mk(i));
+  const acc = newState(); const t0 = performance.now();
+  for (const st of inputs) mergeState(acc, st);
   assert.ok(performance.now() - t0 < 600, `합산이 너무 느리다(예전 ~1.7초): ${Math.round(performance.now() - t0)}ms`);
   const c = compactState(mk(0));
   assert.ok(Object.keys(c.http).length <= 100); assert.ok(c.overflow.http >= 600);

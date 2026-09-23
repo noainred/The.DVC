@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { config, loadVcenterConfig , secretsReady } from './config.js';
 import { withJob } from './perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 import { generateSnapshot } from './mock/generator.js';
@@ -41,27 +42,29 @@ const COLLECT_CONCURRENCY = Math.max(1, Number(process.env.COLLECT_CONCURRENCY) 
  */
 const collectPool = poolSettled;
 
-// IP 대장의 '내용' 지문(djb2). generatedAt 같은 비본질 변화는 제외하고 외부 DB에 반영할
+// IP 대장의 '내용' 지문. generatedAt 같은 비본질 변화는 제외하고 외부 DB에 반영할
 // 실제 변동(IP·소유자·전원·관리상태 등)만 감지해 불필요한 SQLite 재기록을 막는다.
-function ledgerSignature(rows) {
-  let h = 5381;
-  const mix = (s) => { const str = String(s ?? ''); for (let i = 0; i < str.length; i++) h = (((h << 5) + h) ^ str.charCodeAt(i)) >>> 0; };
-  mix(rows.length);
+// ⚠ v2.590 RT-1: 예전에는 필드마다 문자 단위 JS 루프로 djb2 를 돌려 운영 규모(8천 행)에서 매 폴링(30초) 43ms+ 를
+//   메인 스레드에서 썼다(내용이 그대로여도 — '변화 없음' 판정 비용이 매 틱 전량). 행 문자열을 만들어 네이티브 sha1 에
+//   넣는다(실측 43.3ms → 13.3ms). 비교 대상 컬럼은 **그대로**다 — 줄이면 외부 ipam.db 가 stale 로 남는다(아래 주석).
+export function ledgerSignature(rows) {
+  const h = crypto.createHash('sha1');
+  const f = (v) => (v == null ? '' : String(v));
+  h.update(String(rows.length));
   // db.js toRecord가 ipam.db에 쓰는 '모든' 식별/귀속/관리 컬럼을 지문에 포함한다(타임스탬프
   // firstSeen/lastSeen/updatedAt만 제외). 이전엔 7개 필드만 해시해, label·owner·deviceType·
   // vcenter·host·guestOS·os·cluster·scope·multiHomed 등만 바뀌면 재기록이 스킵되어 외부
   // ipam.db가 stale로 남던 버그가 있었다.
   for (const r of rows) {
-    mix(r.ip); mix('|'); mix(r.ipNum); mix('|'); mix(r.vcenterId); mix('|'); mix(r.vcenterName); mix('|');
-    mix(r.ownerType); mix('|'); mix(r.serverType); mix('|'); mix(r.ownerName); mix('|');
-    mix(r.powerState); mix('|'); mix(r.guestOS); mix('|'); mix(r.osName); mix('|'); mix(r.osVersion); mix('|');
-    mix(r.hostName); mix('|'); mix(r.cluster); mix('|'); mix(r.scope); mix('|');
-    mix(r.multiHomed ? 1 : 0); mix('|'); mix(r.duplicate ? 1 : 0); mix('|');
-    mix(r.discovery); mix('|'); mix(r.reconcile); mix('|'); mix(r.mgmtStatus); mix('|'); mix(r.owner_); mix('|');
-    mix(r.label); mix('|'); mix(r.deviceType); mix('|'); mix(r.usageStatus); mix('|');
-    mix(r.appliedBy); mix('|'); mix(r.rangePolicySpec); mix(';');
+    h.update([
+      r.ip, r.ipNum, r.vcenterId, r.vcenterName, r.ownerType, r.serverType, r.ownerName,
+      r.powerState, r.guestOS, r.osName, r.osVersion, r.hostName, r.cluster, r.scope,
+      r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0,
+      r.discovery, r.reconcile, r.mgmtStatus, r.owner_, r.label, r.deviceType, r.usageStatus,
+      r.appliedBy, r.rangePolicySpec,
+    ].map(f).join('|') + ';');
   }
-  return h;
+  return h.digest('hex');
 }
 
 // 등록된 iDRAC 서버 수(OME 자동발견 엔트리 제외). best-effort.
