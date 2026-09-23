@@ -2970,6 +2970,38 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       실제로 확인했다(권한·저널 없음·journalctl 없음). 코드 스캔 규칙 118개는 표본이 합성이고 **실제 운영 로그로 맞춰 보지
       못했다** — 첫 실사용에서 '미분류' 탭에 남는 문장을 보고 규칙을 더할 것.
 
+  - ⚠⚠ **통신 지도(v2.584) — 중앙이 이미 가진 값만 조합하고, '기록 없음' 을 정상으로 칠하지 않는다**
+    (`server/src/commmap/build.js`(순수) + `routes/api/commMap.js` + 웹 `views/tools/CommMap.jsx`·`commMapLayout.js`·
+    `commMapText.js`, 사용자 요청 "이런 방식으로 메인과 edge 가 통신하는 것을 비주얼하게 보여주는 dashboard" +
+    라디얼 그래프 캡처. 선택: 특수기능 새 화면 · 위임 자원 외곽 링까지 · 전체 검증):
+    - **왕복 0** — 등록부·`allCollectorStatus`·`getIngestStats`·`rejectStats`·`link_latest`·엣지 보고 저장소만 읽는다.
+      15초 폴링 화면이라 장비·엣지에 나가는 순간 그 자체가 부하다. 서버 `memoJson` 12초.
+    - **판정은 서버가 `state`+`reasons`(코드)로, 문장은 웹 `REASON_TEXT` 가** — 키 집합 1:1 을 서버 테스트가 대조한다
+      (v2.553 규약). pull·push 기록이 둘 다 없으면 `unknown`(중앙 재시작 직후가 그렇다 — 두 통계 모두 인메모리) ·
+      push 낡음 경계 = `max(siteStaleMs, 관측 push 간격 × 3)`(숫자를 박으면 주기가 긴 법인이 영원히 낡음) ·
+      거부는 **마지막 정상 수신보다 뒤일 때만** `push-rejected`(v2.570 순서) 이고 이름은 `unverified`.
+    - **위임 자원 담당은 등록값(`remoteAgent`·`agent`)이 먼저, 관측 pusher(`collectedBy`)가 다르면 둘 다 싣고
+      `agentMismatch`**(v2.542 배지 규약). 등록부의 어느 엣지와도 안 맞는 이름은 **지어낸 노드에 붙이지 않고**
+      `unassigned` 목록으로. 등록부에 없는 스냅샷 vCenter(목 폴백)는 `registryMissing` 으로 밝힌다.
+    - ⚠ **실패 중인 엣지의 `status.at` 은 마지막 시도가 아니라 마지막 성공 pull 시각이다** — `puller.js` 가 실패를
+      직전 상태 위에 덮고(v2.548 H5) `state.js` 의 `{ at: Date.now(), ...s }` 에서 스프레드가 `at` 을 되돌린다.
+      화면 라벨을 '마지막 pull' 로 두면 60초마다 재시도 중인 사실과 어긋난다 → '마지막 정상 pull'. 이 의미는
+      파트장애 `classifyEdges` 의 stale 판정이 의존하므로 **state.js 를 고치지 말 것**.
+    - **입자(흐름)는 마지막 두 조회 사이의 관측만**(`activityOf` — pull `at` 변화 · pushes 증가). 첫 조회는 전부
+      false 다. 점이 없다고 통신이 없다는 뜻이 아니라는 각주를 지우지 말 것. 애니메이션은 SVG SMIL
+      (`animateMotion`+`mpath`) 이고 JS 프레임 루프가 없다. 허브 맥동은 요소 하나뿐.
+    - ⚠ **ResizeObserver 는 데이터가 온 뒤에 붙여야 한다** — 래퍼 div 는 `Loading` 뒤에 렌더되므로 마운트 1회
+      효과(`[]`)로는 ref 가 null 이라 영영 안 붙고, 400px 에서 2열 그리드가 남아 **카드가 18px 로 접혔다**(Chromium
+      실측 넘침 229px). 의존성에 `!!data` 를 둔다.
+    - ⚠ **`STable` 의 최소폭은 `minWidth` prop 이다** — `style={{minWidth}}` 로 주면 스크롤 래퍼가 안 생겨 페이지가
+      가로로 밀린다(같은 실측). v2.575 규약의 실제 재발.
+    - ⚠ **기간(길이)에 `elapsedText` 를 쓰지 말 것** — '15초 전' 이 된다(스크린샷 판독에서 발견). 주기·경계는
+      `spanText`('15초'). 시점만 `ageText`.
+    - 권한 adminOnly + fullScopeOnly(엣지 출처·호스트명·장비 이름 전 법인분). URL 은 **origin 만**(경로·쿼리에
+      토큰이 실릴 수 있다 — 테스트가 응답에 토큰 문자열 0 을 고정).
+    - ⚠ 정직 기록: Chromium 검증은 **중앙+엣지 목 스택 2대**(실제 pull·push·거부가 오갔다)로 했고 실장비 엣지 28곳
+      규모의 라벨 겹침은 보지 못했다 — 바깥 노드 72개 초과면 라벨을 끄고 그 사실을 밝힌다(`labelsHidden`).
+
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
 서버 보안 불변조건(전역 TLS·RBAC·토큰 검증·scope·OTP·WS 게이트웨이 등 전 항목)은
