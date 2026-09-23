@@ -3,7 +3,7 @@
  * 이 규칙들이 틀리면 운영자가 **정상 포트를 장애로, 장애 포트를 정상으로** 본다.
  */
 import { describe, it, expect } from 'vitest';
-import { opticalHealth, errorLevel, capacityLevel, aggregate, alertsMeta, throughputText, bps, filterPorts, stateLabel, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText, toChartRows, topSeries, sortPorts, nextSort, sortRows, seriesStats }
+import { opticalHealth, errorLevel, capacityLevel, aggregate, alertsMeta, usedPctText, switchesMeta, throughputText, bps, filterPorts, stateLabel, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText, toChartRows, topSeries, sortPorts, nextSort, sortRows, seriesStats }
   from './sanSwitchPorts.js';
 
 describe('opticalHealth', () => {
@@ -58,7 +58,8 @@ describe('aggregate', () => {
     expect(a.licensed).toBe(48);
     expect(a.usedPct).toBe(50);
   });
-  it('라이선스 포트가 0이면 사용률 0(0 나눗셈 방지)', () => expect(aggregate([]).usedPct).toBe(0));
+  // v2.598 WEBUI-2598-07: 라이선스 포트 0(스위치 0대 포함)이면 사용률은 0% 가 아니라 **모른다**(null).
+  it('라이선스 포트가 0이면 사용률 null(0% 라 말하지 않는다)', () => expect(aggregate([]).usedPct).toBe(null));
 });
 
 describe('throughputText / bps', () => {
@@ -252,5 +253,23 @@ describe('aggregate · alertsMeta(v2.590)', () => {
     expect(alertsMeta(aggregate([sw(0), sw(null)]))).toBe('확인한 1대 경보 없음 · 헬스 상태 미확인 1대');
     expect(alertsMeta(aggregate([sw(3), sw(null)]))).toBe('헬스 경보 3 · 헬스 상태 미확인 1대');
     expect(alertsMeta(aggregate([{ snap: { ok: false } }]))).toBe('—');   // 수집 성공 0대 — 말할 근거가 없다
+  });
+});
+
+describe('v2.598 WEBUI-2598-07 — 스위치 0대·라이선스 0', () => {
+  it('사용률 표기는 모르면 단위 없이 —', () => {
+    expect(usedPctText(null)).toBe('—');
+    expect(usedPctText(42.5)).toBe('42.5%');
+    expect(usedPctText(0)).toBe('0%');
+  });
+  it('capacityLevel(null) 은 판정하지 않는다(여유 있음 아님)', () => {
+    expect(capacityLevel(null)).toBe('unknown');
+    expect(capacityLevel(0)).toBe('ok');
+    expect(capacityLevel(95)).toBe('bad');
+  });
+  it('스위치 0대에서 "전부 수집 정상" 이라 말하지 않는다', () => {
+    expect(switchesMeta(aggregate([]))).toBe('등록된 스위치 없음');
+    expect(switchesMeta({ switches: 2, failed: 1 })).toBe('수집 실패 1대');
+    expect(switchesMeta({ switches: 2, failed: 0 })).toBe('전부 수집 정상');
   });
 });

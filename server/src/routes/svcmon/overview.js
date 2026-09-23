@@ -93,7 +93,8 @@ svcmonRouter.get('/state', (req, res) => {
 /** 운영 진단 — 워커/폴러/로그 라이터 상태(부하 점검용). */
 svcmonRouter.get('/diag', canEdit, (req, res) => {
   res.json({
-    poller: pollerStats(), log: logStats(),
+    // v2.598(감사 AUTHZ-2598-04 후속): 로그 라이터 실패 원문(fs 오류 — 경로를 담는다)은 admin 만(logs.js logStatusFor 와 같은 기준).
+    poller: pollerStats(), log: req.user?.role === 'admin' || !logStats().lastError ? logStats() : { ...logStats(), lastError: '(관리자만 확인)' },
     targets: listTargetsCopy().length, tests: totalTests(),
     // 엣지 위임 진단 — 이 서버가 받는 쪽(edges)인지 보내는 쪽(push)인지 함께 보인다.
     edges: redactEdgeSummary(edgeSummary(), fullAddr(req)), push: redactPushStatus(svcmonPushStatus(), req.user), silence: silenceStatus(),

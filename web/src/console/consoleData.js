@@ -334,6 +334,26 @@ export function networkTypeCounts(items) {
 }
 
 /**
+ * vCenter 별 포트그룹 집계(v2.598 VC2598-04). 수집기가 네트워크별 VM 수를 **모르면 null** 을 준다(SOAP 수집은
+ * 네트워크의 vm 속성을 조회하지 않는다 — 예전엔 항상 0 을 지어냈다). `n.vmCount || 0` 으로 더하면 그 vCenter 가
+ * 'VM 0대' 로 보인다. VM 수를 읽은 네트워크가 **하나도 없으면 vms 는 null**(화면 '—'), 일부만 읽었으면 읽은 것의
+ * 합이고 `vmsUnknown` 으로 모르는 개수를 밝힌다.
+ */
+export function portgroupsByVc(items) {
+  const byVc = new Map();
+  for (const n of items || []) {
+    const row = byVc.get(n.vcenterId) || { vcenterId: n.vcenterId, total: 0, distributed: 0, standard: 0, vms: null, vmsUnknown: 0, vlans: new Set() };
+    row.total += 1;
+    if (n.type === 'DISTRIBUTED_PORTGROUP') row.distributed += 1; else if (n.type === 'STANDARD_PORTGROUP') row.standard += 1;
+    const v = num(n.vmCount);
+    if (v == null) row.vmsUnknown += 1; else row.vms = (row.vms ?? 0) + v;
+    if (n.vlanId != null) row.vlans.add(n.vlanId);
+    byVc.set(n.vcenterId, row);
+  }
+  return [...byVc.values()];
+}
+
+/**
  * 전사 현황 도메인 타일 6개. 입력은 각 API 원본(없으면 null) — 없는 데이터는 '—'/미수집으로 표시하고
  * 레벨을 지어내지 않는다(level null = 판정 불가, 회색).
  */

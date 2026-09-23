@@ -79,6 +79,7 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
     added: totalRow.added, removed: totalRow.removed,
     poweredOn: totalRow.poweredOn, poweredOff: totalRow.poweredOff,
     dsCount: totalRow.dsCount, dsCapGB: totalRow.dsCapGB, dsUsedGB: totalRow.dsUsedGB,
+    ...(totalRow.dsUsedUnknown ? { dsUsedUnknown: totalRow.dsUsedUnknown } : {}),
     baseline: totalRow.baseline,
     ...(skippedVcenters.length ? { skippedVcenters: skippedVcenters.slice(0, 64), skippedCount: skippedVcenters.length } : {}),
   };
@@ -102,7 +103,7 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
         added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off,
         dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
         dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
-        baseline: !!r.baseline })),
+        baseline: !!r.baseline, dsUsedUnknown: r.ds_used_unknown || 0 })),
       vcenters: [vcenterId],
     };
   }
@@ -118,7 +119,7 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
         added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off,
         dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
         dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
-        baseline: !!r.baseline, skipped: r.skipped || 0 })),
+        baseline: !!r.baseline, skipped: r.skipped || 0, dsUsedUnknown: r.ds_used_unknown || 0 })),
       vcenters: vcs,
       bySlotVc: groupBySlot(perVcRows),
     };
@@ -127,11 +128,12 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
   const bySlot = new Map();
   for (const r of perVcRows) {
     let a = bySlot.get(r.slot);
-    if (!a) bySlot.set(r.slot, a = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts, total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, dsCount: 0, dsCapGB: 0, dsUsedGB: 0, dsUsagePct: 0, baseline: true });
+    if (!a) bySlot.set(r.slot, a = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts, total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, dsCount: 0, dsCapGB: 0, dsUsedGB: 0, dsUsagePct: 0, dsUsedUnknown: 0, baseline: true });
     a.total += r.total; a.onCount += r.on_count; a.offCount += (r.total - r.on_count);
     a.added += r.added; a.removed += r.removed;
     a.poweredOn += (r.powered_on || 0); a.poweredOff += (r.powered_off || 0);
     a.dsCount += (r.ds_count || 0); a.dsCapGB += (r.ds_cap_gb || 0); a.dsUsedGB += (r.ds_used_gb || 0);
+    a.dsUsedUnknown += (r.ds_used_unknown || 0);
     if (!r.baseline) a.baseline = false;
   }
   // v2.598(감사 RECENT2598-02 — 재현: a 5대 + b 7대 → 다음 슬롯 b 수집 실패 · 범위 a,b 계정은 12→5 를 배지 없이 봤다):
@@ -173,7 +175,7 @@ function groupBySlot(rows) {
       poweredOn: r.powered_on || 0, poweredOff: r.powered_off || 0,
       dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
       dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
-      baseline: !!r.baseline });
+      baseline: !!r.baseline, dsUsedUnknown: r.ds_used_unknown || 0 });
   }
   return m;
 }

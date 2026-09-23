@@ -223,3 +223,10 @@ describe('보조 문구', () => {
     expect(NAME_MASK_NOTE).toContain('개인정보');
   });
 });
+
+describe('v2.598 — 읽은 출처가 없으면 합집합 문구를 만들지 않는다', () => {
+  it('union null → 빈 문구(null명·0명 금지)', () => {
+    expect(combinedNote({ union: null, sum: null, both: null, sidOnly: 0 })).toBe('');
+    expect(combinedNote({ union: 3, sum: 3, both: 0, sidOnly: 0 })).toContain('3명');
+  });
+});

@@ -202,3 +202,22 @@ describe('buildDomainTiles — 서비스 점검 타일의 원인 표시(v2.506)'
     expect(t.meta).toMatch(/실패 1/);
   });
 });
+
+describe('portgroupsByVc (v2.598 VC2598-04)', () => {
+  it('VM 수를 모르는(null) 네트워크를 0 으로 더하지 않는다', async () => {
+    const { portgroupsByVc } = await import('./consoleData.js');
+    const rows = portgroupsByVc([
+      { vcenterId: 'a', type: 'DISTRIBUTED_PORTGROUP', vmCount: null },
+      { vcenterId: 'a', type: 'STANDARD_PORTGROUP', vmCount: null, vlanId: 10 },
+      { vcenterId: 'b', type: 'STANDARD_PORTGROUP', vmCount: 3 },
+      { vcenterId: 'b', type: 'STANDARD_PORTGROUP' },
+    ]);
+    const a = rows.find((r) => r.vcenterId === 'a');
+    const b = rows.find((r) => r.vcenterId === 'b');
+    expect(a.vms).toBe(null);            // 예전: 0 → 'VM 0대'
+    expect(a.vmsUnknown).toBe(2);
+    expect(a.total).toBe(2); expect(a.distributed).toBe(1); expect(a.vlans.size).toBe(1);
+    expect(b.vms).toBe(3);
+    expect(b.vmsUnknown).toBe(1);
+  });
+});

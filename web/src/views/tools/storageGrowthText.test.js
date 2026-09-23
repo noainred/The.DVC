@@ -119,6 +119,15 @@ describe('표제 문구', () => {
     expect(h.body).toContain('기간 비교는');
   });
 
+  it('v2.598 WEBUI-2598-05: 등록 장비가 0대면 "기다리면 쌓인다" 가 아니라 등록을 안내한다', () => {
+    const h = headline({ db: true, devices: [], noHistory: [], totals: {} });
+    expect(h.kind).toBe('no-devices');
+    expect(h.body).toContain('스토리지 모니터링');
+    expect(h.body).not.toContain('기간 비교는');
+    // 등록은 됐는데 이력이 없으면 예전 대기 문구
+    expect(headline({ db: true, devices: [], noHistory: [{ id: 'a' }], totals: {} }).kind).toBe('empty');
+  });
+
   it('사용량을 읽지 못한 장비가 있으면 합계에서 뺐다고 적는다', () => {
     const h = headline({ db: true, asOfLabel: '2026-09-16', devices: [{}, {}],
       totals: { usedBytes: TB, totalBytes: 2 * TB, pct: 50, unknownUsed: 1 } });

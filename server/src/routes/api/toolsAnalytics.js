@@ -7,6 +7,7 @@ import { getClassifier } from '../../ipam/settings.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { nsxStore } from '../../nsx/store.js';
 import { memoJson, hash, scopeSlice, scopeKey } from './shared.js';
+import { gpuHostKey } from './hardwareGpu.js'; // v2.598 VC2598-03 — (vCenter, 호스트) 키
 
 
 // 위협 탐지 — (A) 텔레메트리 기반 + (B) NSX 분산 IDS 이벤트. 자사 인프라 방어 목적.
@@ -80,10 +81,11 @@ api.get('/tools/insights', requirePerm('tools'), (req, res) => memoJson(req, res
 
   // ⑩ GPU 유휴/낭비 (ESXi 보고 사용률 기준)
   const gpuHosts = hosts.filter((h) => (h.gpus || []).length);
-  const gpuVmByHost = {};
-  for (const v of vms) if (v.gpu && v.host) gpuVmByHost[v.host] = (gpuVmByHost[v.host] || 0) + 1;
+  // v2.598 VC2598-03: 호스트 이름 단독 키는 다른 vCenter 의 같은 이름 호스트 VM 을 섞는다 — (vCenter, 이름).
+  const gpuVmByHost = new Map();
+  for (const v of vms) if (v.gpu && v.host) { const k = gpuHostKey(v.vcenterId, v.host); gpuVmByHost.set(k, (gpuVmByHost.get(k) || 0) + 1); }
   const idleGpu = gpuHosts.filter((h) => h.gpuUtilPct != null && h.gpuUtilPct < 10)
-    .map((h) => ({ host: h.name, vcenterId: h.vcenterId, model: h.gpus[0].model, count: h.gpus.length, util: h.gpuUtilPct, assignedVms: gpuVmByHost[h.name] || 0 }))
+    .map((h) => ({ host: h.name, vcenterId: h.vcenterId, model: h.gpus[0].model, count: h.gpus.length, util: h.gpuUtilPct, assignedVms: gpuVmByHost.get(gpuHostKey(h.vcenterId, h.name)) || 0 }))
     .sort((a, b) => a.util - b.util);
   const gpuWaste = {
     totalGpuHosts: gpuHosts.length, totalGpus: gpuHosts.reduce((a, h) => a + h.gpus.length, 0),

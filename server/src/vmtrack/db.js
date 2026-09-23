@@ -133,13 +133,15 @@ function initSqlite() {
     }
     // v2.597(감사 L2597-01 — 재현): 합계 행에서 빠진 vCenter 수(수집 실패·첫 수집 중). 0 이 아니면 그 슬롯 합계는 부분 합이다.
     try { db.exec('ALTER TABLE snaps ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 존재 */ }
+    // v2.598(감사 RECENT2598-03): 사용량을 못 읽어 ds_cap_gb·ds_used_gb 합계에서 뺀 DS 수. 0 이 아니면 그 슬롯 사용률은 읽은 DS 끼리의 비율이다.
+    try { db.exec('ALTER TABLE snaps ADD COLUMN ds_used_unknown INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 존재 */ }
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
 
     const st = {
       setSkipped: db.prepare("UPDATE snaps SET skipped = ? WHERE slot = ? AND vcenter_id = ''"),
       insSnap: db.prepare(`INSERT INTO snaps (slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off,
-          ds_count, ds_cap_gb, ds_used_gb, baseline)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ds_count, ds_cap_gb, ds_used_gb, baseline, ds_used_unknown)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(slot, vcenter_id) DO UPDATE SET
           ts=excluded.ts, total=excluded.total, on_count=excluded.on_count,
           -- 같은 슬롯 재실행(수동 스냅샷)은 이미 갱신된 로스터를 기준으로 diff 하므로 증감이 0 으로
@@ -148,7 +150,7 @@ function initSqlite() {
           added=MAX(added, excluded.added), removed=MAX(removed, excluded.removed),
           powered_on=MAX(powered_on, excluded.powered_on), powered_off=MAX(powered_off, excluded.powered_off),
           ds_count=excluded.ds_count, ds_cap_gb=excluded.ds_cap_gb, ds_used_gb=excluded.ds_used_gb,
-          baseline=excluded.baseline`),
+          baseline=excluded.baseline, ds_used_unknown=excluded.ds_used_unknown`),
       delDsChangesOfSnap: db.prepare('DELETE FROM ds_changes WHERE snap_id=?'),
       insDsChange: db.prepare(`INSERT INTO ds_changes
         (snap_id, ts, vcenter_id, kind, ds_id, name, type, cap_gb, used_gb, free_gb, usage_pct, prev_used_gb, delta_gb)
@@ -213,9 +215,9 @@ function initSqlite() {
           storage_gb=excluded.storage_gb, guest_os=excluded.guest_os`),
       delRoster: db.prepare('DELETE FROM roster WHERE vcenter_id=? AND vm_id=?'),
       delRosterVc: db.prepare('DELETE FROM roster WHERE vcenter_id=?'),
-      series: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline, skipped
+      series: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline, skipped, ds_used_unknown
         FROM snaps WHERE vcenter_id=? AND ts>=? ORDER BY ts`),
-      seriesAllVc: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline
+      seriesAllVc: db.prepare(`SELECT id, slot, ts, vcenter_id, total, on_count, added, removed, powered_on, powered_off, ds_count, ds_cap_gb, ds_used_gb, baseline, ds_used_unknown
         FROM snaps WHERE vcenter_id<>'' AND ts>=? ORDER BY ts`),
       // vcenter_id 를 반드시 SELECT 한다 — service 의 scope 필터(!r.vcenter_id||scopeIds.has)가
       // 이 값 없이는 undefined 로 흘러 '전부 통과'가 돼 snapId 로 범위 밖 vCenter 열람이 가능했다.
@@ -268,13 +270,13 @@ export async function commitSnapshot({ slot, ts, perVc, totalRow }) {
     // 전체 합계 행(vcenter_id='') — 차트 상단 라인.
     st.insSnap.run(slot, ts, '', totalRow.total, totalRow.onCount, totalRow.added, totalRow.removed,
       totalRow.poweredOn || 0, totalRow.poweredOff || 0,
-      totalRow.dsCount || 0, totalRow.dsCapGB || 0, totalRow.dsUsedGB || 0, totalRow.baseline ? 1 : 0);
+      totalRow.dsCount || 0, totalRow.dsCapGB || 0, totalRow.dsUsedGB || 0, totalRow.baseline ? 1 : 0, totalRow.dsUsedUnknown || 0);
     st.setSkipped.run(Math.max(0, Number(totalRow.skipped) || 0), slot);
     for (const vc of perVc) {
       const ds = vc.ds || null; // { count, capGB, usedGB, added:[], removed:[], changed:[] }
       st.insSnap.run(slot, ts, vc.vcenterId, vc.total, vc.onCount, vc.added.length, vc.removed.length,
         (vc.poweredOn || []).length, (vc.poweredOff || []).length,
-        ds?.count || 0, ds?.capGB || 0, ds?.usedGB || 0, vc.baseline ? 1 : 0);
+        ds?.count || 0, ds?.capGB || 0, ds?.usedGB || 0, vc.baseline ? 1 : 0, ds?.usedUnknown || 0);
       const row = st.snapId.get(slot, vc.vcenterId);
       const snapId = row?.id;
       if (snapId == null) continue;

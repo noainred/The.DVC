@@ -9,7 +9,7 @@ export {
   levelOf, fmtInt, fmtPct, fmtTB, fmtBytesTB, ageText, tsMs, domainOf, sevRank, severityCounts, alarmCountsByDomain, sortAlarms,
   attentionList, correlateAlarms, siteRows, regionCounts, clusterRows, clusterCountByVc, capacityAdvice, datastoreTypeCounts,
   datastoresOver, ipamTop, ipamStats, svcmonLevel, hostFacilityRows, storageRows, sanCells, sanTotals, pduSummary,
-  nsxManagerRows, networkTypeCounts, buildDomainTiles, rowMatches,
+  nsxManagerRows, networkTypeCounts, portgroupsByVc, buildDomainTiles, rowMatches,
 } from '../console/consoleData.js';
 
 /** 아트보드 색(라이트 테마 텍스트/막대). 0 정상 · 1 주의 · 2 위험 · null 판정 불가. */

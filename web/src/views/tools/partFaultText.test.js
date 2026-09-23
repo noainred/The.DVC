@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  historyEmptyText, kpiValue, kpiAccent,
   ageText, intervalText, scanNote, emptyDiag, edgeNote,
   keyKindNote, holdText, holdNote, eventText, notifyNote, lastRunText, toneVar,
   deviceKeyNote, tableFootnotes, keyKindMark, deviceKeyMark, edgeScanTotals, resetNote, pushNote, EDGE_KIND_LABEL, EDGE_KIND_TONE,
@@ -397,5 +398,39 @@ describe('pushNote / eventText / holdText — H6·C5·H7', () => {
     for (const k of ['unassigned', 'no-report', 'edge-stale', 'edge-legacy']) expect(holdText(k)).toContain('판정 보류');
     const n = holdNote([{ holdReason: 'edge-stale' }, { holdReason: 'edge-legacy' }, { holdReason: 'unassigned' }, { holdReason: 'no-report' }]);
     expect(n).toContain('보류 4건'); expect(n).toContain('오래됨'); expect(n).toContain('구버전'); expect(n).toContain("'닫기'");
+  });
+});
+
+describe('v2.598 WEBUI-2598-03 — 이력이 비었을 때', () => {
+  const NOW = 1_800_000_000_000;
+  it('점검이 한 번도 돌지 않았으면 "변화 없음" 이라 말하지 않는다', () => {
+    const r = historyEmptyText({ poller: { enabled: true, last: null }, db: { openParts: 0, rows: 0 }, days: 30, now: NOW });
+    expect(r.kind).toBe('never');
+    expect(r.text).toContain('변화가 없었다는 뜻이 아닙니다');
+    expect(historyEmptyText({ poller: { enabled: false }, db: null, now: NOW }).text).toContain('꺼짐');
+  });
+  it('재시작으로 poller.last 가 비어도 DB 흔적이 있으면 "한 번도 안 했다" 고 단정하지 않는다', () => {
+    expect(historyEmptyText({ poller: { enabled: true }, db: { openParts: 12, rows: 0 }, now: NOW }).kind).toBe('nochange');
+  });
+  it('마지막 점검이 조회 기간 이전이면 그 사실을 말한다', () => {
+    const r = historyEmptyText({ poller: { last: { at: NOW - 40 * 86_400_000 } }, days: 30, now: NOW });
+    expect(r.kind).toBe('before');
+    expect(r.text).toContain('최근 30일');
+  });
+  it('기간 안에 점검이 돌았으면 예전 문구(변화 없음)', () => {
+    expect(historyEmptyText({ poller: { last: { at: NOW - 3600_000 } }, days: 30, now: NOW }).kind).toBe('nochange');
+  });
+});
+
+describe('v2.598 WEBUI-2598-06 — KPI 0·결측', () => {
+  it('요약이 없으면 0 이 아니라 —', () => {
+    expect(kpiValue(null, 'fault')).toBe('—');
+    expect(kpiValue({ fault: 0 }, 'fault')).toBe(0);
+    expect(kpiValue({ fault: 3 }, 'fault')).toBe(3);
+  });
+  it('0·결측은 경고색을 쓰지 않는다', () => {
+    expect(kpiAccent(0, 'var(--red)')).toBe(undefined);
+    expect(kpiAccent('—', 'var(--red)')).toBe(undefined);
+    expect(kpiAccent(2, 'var(--red)')).toBe('var(--red)');
   });
 });

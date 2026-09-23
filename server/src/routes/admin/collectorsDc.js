@@ -26,14 +26,15 @@ import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner } from './sh
 
 // ── VM 사양 변경(ReconfigVM) — vCPU/RAM/디스크 증설·추가, NIC 추가/삭제 (관리자) ──────────
 // vmId 형식 '<vcId>:<moref>'. 스냅샷으로 VM 존재·vCenter 자격증명을 확인한 뒤 SOAP 실행.
-function resolveVmTarget(vmId) {
+export function resolveVmTarget(vmId) {
   const snap = store.get();
   const vm = (snap.vms || []).find((v) => v.id === vmId);
   if (!vm) return { error: 'VM을 찾을 수 없습니다(현재 스냅샷에 없음 — 해당 vCenter 연결이 끊겼거나 폴링 전일 수 있습니다).', code: 404 };
   if (snap.source === 'mock') return { error: '데모(mock) 모드에서는 사양 변경을 사용할 수 없습니다.', code: 400 };
-  const sep = String(vmId).indexOf(':');
-  const vcId = sep >= 0 ? vmId.slice(0, sep) : vmId;
-  const moref = sep >= 0 ? vmId.slice(sep + 1) : '';
+  // v2.598 VC2598-06: id 를 첫 콜론에서 자르지 않는다 — vCenter id 에 콜론이 있으면(registry 가 허용) 엉뚱한 vCenter 를
+  // 찾았다. 스냅샷 VM 의 vcenterId 로 자른다(morefOf).
+  const vcId = String(vm.vcenterId || '');
+  const moref = morefOf(vmId, vcId);
   const vc = (loadVcenterConfig().vcenters || []).find((v) => v.id === vcId);
   // vCenter가 이 포탈에 직접 등록돼 있지 않으면(위임/엣지 수집 vCenter) 자격증명이 없어 사양 변경 불가.
   if (!vc) return { error: `이 VM의 vCenter('${vcId}')가 이 포탈에 등록되어 있지 않아 사양 변경을 할 수 없습니다(위임/엣지 수집 vCenter). 해당 vCenter가 직접 등록된 포탈에서 변경하세요.`, code: 400 };

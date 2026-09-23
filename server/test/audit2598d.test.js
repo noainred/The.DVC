@@ -175,9 +175,13 @@ test('T2598-04 adaptiveTimer — 실행 중 주기 변경이 두 번째 동시 �
     await new Promise((r) => setTimeout(r, 1600));
     running--;
   }, { firstDelayMs: 0, subscribe: (cb) => { cbs.push(cb); return () => {}; } });
+  // 첫 틱은 하한 1초 뒤에 시작해 1.6초 돈다(1.0~2.6초). 그 사이(1.3초)에 주기를 1초로 줄인다 —
+  // 예전 코드는 즉시 재무장해 2.3초에 두 번째 fn 을 겹쳐 실행했다.
+  const t0 = Date.now();
+  while (running === 0 && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 20));
   await new Promise((r) => setTimeout(r, 300));
   ms = 1000; cbs.forEach((c) => c());
-  await new Promise((r) => setTimeout(r, 1900));
+  await new Promise((r) => setTimeout(r, 1700));
   t.stop();
   assert.equal(maxRun, 1, `동시 실행 ${maxRun}`);
   assert.ok(runs >= 1);

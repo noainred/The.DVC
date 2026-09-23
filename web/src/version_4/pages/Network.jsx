@@ -5,7 +5,7 @@ import { usePolling, toolAllowed } from '../../api.js';
 import { StateBadge } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { Panel, Kpi, Bar, PollState, Empty } from '../ui.jsx';
-import { nsxManagerRows, networkTypeCounts, ipamTop, ipamStats, fmtInt, fmtPct, textColor, rowMatches, REGION_COLORS } from '../data.js';
+import { nsxManagerRows, networkTypeCounts, portgroupsByVc, ipamTop, ipamStats, fmtInt, fmtPct, textColor, rowMatches, REGION_COLORS } from '../data.js';
 
 export default function Network({ global: g, sitesAll, scope, polls, phase, phaseText, health }) {
   // 수집이 끝나기 전 KPI 메타 문구(v2.509) — 예전에는 전부 '수집 대기' 라 **기다리면 되는 상황과
@@ -24,15 +24,10 @@ export default function Network({ global: g, sitesAll, scope, polls, phase, phas
   const subnets = ipam.data?.subnets || [];
   const ist = ipamStats(subnets);
   const top = ipamTop(subnets.filter((s) => rowMatches(s, scope.q)), 6);
-  const byVc = new Map();
-  for (const n of netItems) {
-    const row = byVc.get(n.vcenterId) || { vcenterId: n.vcenterId, total: 0, distributed: 0, standard: 0, vms: 0, vlans: new Set() };
-    row.total += 1; if (n.type === 'DISTRIBUTED_PORTGROUP') row.distributed += 1; else if (n.type === 'STANDARD_PORTGROUP') row.standard += 1;
-    row.vms += n.vmCount || 0; if (n.vlanId != null) row.vlans.add(n.vlanId);
-    byVc.set(n.vcenterId, row);
-  }
+  // v2.598 VC2598-04: VM 수를 모르는 네트워크(null)를 0 으로 더하지 않는다 — portgroupsByVc 가 판정한다.
+  const byVc = portgroupsByVc(netItems);
   const siteOf = new Map(sitesAll.map((s) => [s.id, s]));
-  const pgRows = [...byVc.values()].map((x) => ({ ...x, vlans: x.vlans.size, name: siteOf.get(x.vcenterId)?.name || x.vcenterId, region: siteOf.get(x.vcenterId)?.region || '' })).filter((x) => rowMatches(x, scope.q)).sort((a, b) => b.total - a.total);
+  const pgRows = byVc.map((x) => ({ ...x, vlans: x.vlans.size, name: siteOf.get(x.vcenterId)?.name || x.vcenterId, region: siteOf.get(x.vcenterId)?.region || '' })).filter((x) => rowMatches(x, scope.q)).sort((a, b) => b.total - a.total);
 
   return (
     <>
@@ -88,7 +83,7 @@ export default function Network({ global: g, sitesAll, scope, polls, phase, phas
                       {pgRows.map((x) => (
                         <tr key={x.vcenterId}>
                           <td><div className="v3-mono" style={{ fontSize: 12, fontWeight: 600 }}>{x.name}</div><div className="v3-cellsub" style={{ color: REGION_COLORS[x.region] || '#68738a' }}>{x.region}</div></td>
-                          <td className="num">{x.total}</td><td className="num v3-dim">{x.distributed}</td><td className="num v3-dim">{x.standard}</td><td className="num v3-dim">{x.vlans}</td><td className="num">{fmtInt(x.vms)}</td>
+                          <td className="num">{x.total}</td><td className="num v3-dim">{x.distributed}</td><td className="num v3-dim">{x.standard}</td><td className="num v3-dim">{x.vlans}</td><td className="num" title={x.vmsUnknown ? `VM 수를 수집하지 않은 포트그룹 ${x.vmsUnknown}개 — 합계에 넣지 않았습니다(0 이 아니라 모름)` : undefined}>{fmtInt(x.vms)}</td>
                         </tr>
                       ))}
                     </tbody>
