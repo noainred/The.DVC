@@ -18,6 +18,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
 
 const FILE = path.join(config.configDir, 'vmperf.json');
+import { numOrNull } from '../util/numOrNull.js';
 const FIELDS = ['enabled', 'retentionDays', 'vcenterIds', 'trackTotal'];
 
 // 가드레일: 보존기간은 0(무제한)~5년. UI 오입력·손상 파일이 그대로 prune 에 흘러가지 않게 한다.
@@ -57,7 +58,12 @@ export function loadVmperfSettings() {
 /** 부분 업데이트 저장 후 유효 설정 반환. */
 export function saveVmperfSettings(partial = {}) {
   const next = readFile();
-  for (const f of FIELDS) if (partial[f] !== undefined) next[f] = coerce(f, partial[f]);
+  for (const f of FIELDS) {
+    if (partial[f] === undefined) continue;
+    // v2.596(감사 CLAMP2596-05): 보존일 빈 칸('')은 0(=무제한)이 아니라 미지정 — 이전 값 유지. 명시적 0 만 무제한.
+    if (f === 'retentionDays' && numOrNull(partial[f]) == null) continue;
+    next[f] = coerce(f, partial[f]);
+  }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   return loadVmperfSettings();

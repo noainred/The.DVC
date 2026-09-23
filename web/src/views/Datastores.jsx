@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { usePolling } from '../api.js';
 import { DataTable, UsageCell, Kpi, Loading, ErrorBox, ResultCount, EntityDetail } from '../components/ui.jsx';
 import IpmsMatches from '../components/IpmsMatches.jsx';
-import DsTrendModal from './tools/DsTrendModal.jsx'; // 개별 DS 사용량 추이 모달(v2.354)
+// 개별 DS 사용량 추이 모달(v2.354). v2.596(감사 PERFWEB-03): recharts 를 끌고 오므로 모달을 열 때만 받는다.
+const DsTrendModal = lazy(() => import('./tools/DsTrendModal.jsx'));
 
 export default function Datastores({ filters }) {
   // 이름 클릭 → 상세 모달(할당 VM·파일 브라우즈 포함, v2.276). 훅은 조기 return 위에 선언.
@@ -49,8 +50,8 @@ export default function Datastores({ filters }) {
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'usagePct', dir: 'desc' }} />
       <IpmsMatches filters={filters} />
       {sel && <EntityDetail type="datastore" item={sel} onClose={() => setSel(null)} />}
-      {trend && <DsTrendModal dsId={trend.id || `${trend.vcenterId}:${trend.name}`} name={trend.name}
-        vcenterId={trend.vcenterId} type={trend.type} onClose={() => setTrend(null)} />}
+      {trend && <Suspense fallback={<Loading />}><DsTrendModal dsId={trend.id || `${trend.vcenterId}:${trend.name}`} name={trend.name}
+        vcenterId={trend.vcenterId} type={trend.type} onClose={() => setTrend(null)} /></Suspense>}
     </>
   );
 }

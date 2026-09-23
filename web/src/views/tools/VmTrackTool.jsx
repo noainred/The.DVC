@@ -112,7 +112,7 @@ export default function VmTrackTool() {
       {error && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {error}</div>}
       {data.status && !data.status.available && (
         <div className="card" style={{ padding: 10, marginBottom: 10, borderLeft: '3px solid var(--red)', fontSize: 12.5 }}>
-          ⚠ 추적 DB를 열 수 없어 기능이 비활성입니다{data.status.error ? ` — ${data.status.error}` : ''}. (경로: {data.status.dbPath})
+          ⚠ 추적 DB를 열 수 없어 기능이 비활성입니다{data.status.error ? ` — ${data.status.error}` : ''}. {data.status.dbPath ? ` (경로: ${data.status.dbPath})` : ''}
         </div>
       )}
 
@@ -125,7 +125,7 @@ export default function VmTrackTool() {
         <Kpi label="현재 켜짐/꺼짐" value={last ? `${last.onCount.toLocaleString()} / ${(last.offCount ?? (last.total - last.onCount)).toLocaleString()}` : '—'}
           meta={last ? `켜짐 ${last.total ? Math.round((last.onCount / last.total) * 100) : 0}%` : ''} />
         <Kpi label={`${days}일 전원 On/Off 전환`} value={`↑${sumOn.toLocaleString()} / ↓${sumOff.toLocaleString()}`}
-          meta={data.poller?.lastResult ? `최근 스냅샷 ${fmtAgo(data.poller.lastResult.at)}` : `스냅샷 ${(data.meta?.n || 0).toLocaleString()}건`} />
+          meta={data.poller?.lastResult ? `최근 스냅샷 ${fmtAgo(data.poller.lastResult.at)}` : (data.meta ? `스냅샷 ${(data.meta.n || 0).toLocaleString()}건` : '범위 계정에는 전체 스냅샷 건수를 표시하지 않습니다')} />
         {/* 데이터스토어 사용량(v2.348) — DS 데이터가 있는 마지막 스냅샷 기준(구버전 행 제외) */}
         <Kpi label="데이터스토어 사용량" value={dsLast ? `${tb(dsLast.dsUsedGB)} / ${tb(dsLast.dsCapGB)} TB` : '—'}
           pct={dsLast ? Math.round(dsLast.dsUsagePct || 0) : undefined}

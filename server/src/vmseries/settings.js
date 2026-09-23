@@ -19,6 +19,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { DEFAULT_THRESHOLDS } from './counters.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'vmseries.json');
 const FIELDS = ['enabled', 'intervalMin', 'retentionDays', 'thresholds', 'scope', 'targets'];
@@ -89,7 +90,20 @@ export function loadVmSeriesSettings() {
 /** 부분 업데이트 저장 후 유효 설정 반환 + 리스너 통지. */
 export function saveVmSeriesSettings(partial = {}) {
   const next = readFile();
-  for (const f of FIELDS) if (partial[f] !== undefined) next[f] = coerce(f, partial[f]);
+  // v2.596(감사 CLAMP2596-02 — 재현): 화면이 빈 칸('')을 보내면 Number('')=0 이 되어 임계가 꺼지고(0) 보존일이 무제한(0)이
+  //   됐다. 빈 값은 '미지정' 이다 — 그 필드·그 임계는 이전 값을 유지하고, 명시적 0 만 값으로 받는다(util/numOrNull).
+  const cur = loadVmSeriesSettings();
+  for (const f of FIELDS) {
+    if (partial[f] === undefined) continue;
+    if ((f === 'intervalMin' || f === 'retentionDays') && numOrNull(partial[f]) == null) continue;
+    if (f === 'thresholds' && partial[f] && typeof partial[f] === 'object') {
+      const t = { ...(cur.thresholds || {}) };
+      for (const [k, x] of Object.entries(partial[f])) if (numOrNull(x) != null) t[k] = x;
+      next[f] = coerce(f, t);
+      continue;
+    }
+    next[f] = coerce(f, partial[f]);
+  }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   const eff = loadVmSeriesSettings();

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ScatterChart } from './NetworkCheck.jsx';
@@ -16,7 +16,9 @@ export default function VcenterPorts() {
   const [msg, setMsg] = useState(null);
   const [portInput, setPortInput] = useState('');
 
-  const load = () => { setError(null); fetchJson('/ping/vcport/overview', { range }).then((d) => { setData(d); if (portInput === '') setPortInput((d.ports || []).join(', ')); }).catch((e) => setError(e.message)); };
+  // v2.596(감사 WS-4): 마지막 요청만 반영한다(늦게 온 이전 기간 응답이 현재 것을 덮지 않게).
+  const loadGen = useRef(0);
+  const load = () => { const g = ++loadGen.current; setError(null); fetchJson('/ping/vcport/overview', { range }).then((d) => { if (g !== loadGen.current) return; setData(d); if (portInput === '') setPortInput((d.ports || []).join(', ')); }).catch((e) => { if (g === loadGen.current) setError(e.message); }); };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [range]);
   useEffect(() => { fetchJson('/auth/me').then((r) => setIsAdmin(r.user?.role === 'admin')).catch(() => {}); }, []);
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4000); };

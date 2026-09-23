@@ -456,11 +456,11 @@ export default function VCenterDetail({ site, onBack }) {
             {!inclPoweredOff && <span style={{ color: 'var(--green)', fontSize: 11 }}> On</span>}
           </span>
           <span className="muted flex gap" style={{ alignItems: 'center', gap: 5 }}>
-            CPU <b style={{ color: 'var(--text)' }}>{m.cpuUsagePct ?? 0}%</b>
+            CPU <b style={{ color: 'var(--text)' }}>{unitText(m.cpuUsagePct, '%')}</b>
             <MiniTrend points={miniHist?.points} field="cpuPct" color="#60a5fa" label="CPU" />
           </span>
           <span className="muted flex gap" style={{ alignItems: 'center', gap: 5 }}>
-            메모리 <b style={{ color: 'var(--text)' }}>{m.memUsagePct ?? 0}%</b>
+            메모리 <b style={{ color: 'var(--text)' }}>{unitText(m.memUsagePct, '%')}</b>
             <MiniTrend points={miniHist?.points} field="memPct" color="#4ade80" label="메모리" />
           </span>
           {/* 디스크는 상단 KPI 에 숫자가 없어 스파크라인만 — 자세한 값은 📈 추이 탭. */}

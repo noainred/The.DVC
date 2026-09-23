@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { fetchJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 
@@ -58,7 +58,9 @@ export default function NetworkCheck() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
-  const load = () => { setError(null); fetchJson('/ping/edge/overview', { range }).then(setData).catch((e) => setError(e.message)); };
+  // v2.596(감사 WS-4): 기간을 빠르게 바꾸면 늦게 온 이전 기간 응답이 현재 것을 덮었다 — 마지막 요청만 반영한다.
+  const loadGen = useRef(0);
+  const load = () => { const g = ++loadGen.current; setError(null); fetchJson('/ping/edge/overview', { range }).then((d) => { if (g === loadGen.current) setData(d); }).catch((e) => { if (g === loadGen.current) setError(e.message); }); };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [range]);
   useEffect(() => { fetchJson('/auth/me').then((r) => setIsAdmin(r.user?.role === 'admin')).catch(() => {}); }, []);
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4000); };

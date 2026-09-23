@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import { usePolling, fetchJson } from '../api.js';
 import { growth, hasDsData, tb, gbTb } from './tools/storageTrack.js'; // 추이 KPI(v2.358) 계산 재사용
 import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../components/ui.jsx';
-import VCenterDetail from './VCenterDetail.jsx';
+// v2.596(감사 PERFWEB-04): 상세는 recharts 를 쓴다 — 목록 화면이 그 청크를 받지 않게 상세를 열 때만 받는다.
+const VCenterDetail = lazy(() => import('./VCenterDetail.jsx'));
 import { vcCardState } from './vcCardText.js';
 import BoldText from '../components/boldText.jsx';
 
@@ -113,7 +114,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
 
   const sites = data || [];
   const openSite = sites.find((s) => s.id === openId);
-  if (openSite) return <VCenterDetail site={openSite} onBack={() => setOpenId(null)} />;
+  if (openSite) return <Suspense fallback={<Loading />}><VCenterDetail site={openSite} onBack={() => setOpenId(null)} /></Suspense>;
   // 공백 구분 다중 키워드 AND — 이름·id·도시·국가·리전·버전에서 검색(허브 검색과 같은 규칙).
   const keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
   const shown = keywords.length === 0 ? sites : sites.filter((s) => {

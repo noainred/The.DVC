@@ -66,9 +66,11 @@ export default function Upgrade() {
         installDir: form.installDir.trim(),
         watchDir: form.watchDir.trim(),
         remoteBase: form.remoteBase.trim(),
-        pollIntervalMs: Math.max(0, Number(form.pollMinutes) || 0) * 60000,
         autoApply: form.autoApply,
       };
+      // v2.596(감사 CLAMP2596-06): 빈 칸('')은 0(=확인 끔)이 아니라 미지정 — 보내지 않으면 서버가 이전 값을 유지한다.
+      //   명시적 0 만 '끔' 으로 보낸다.
+      if (String(form.pollMinutes ?? '').trim() !== '' && Number.isFinite(Number(form.pollMinutes))) body.pollIntervalMs = Math.max(0, Number(form.pollMinutes)) * 60000;
       if (form.token) body.token = form.token;
       const r = await putJson('/upgrade/settings', body);
       setMsg({ action: 'save', r: { ok: r.ok, version: undefined } });

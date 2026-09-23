@@ -34,9 +34,14 @@ export default function VmProvision() {
   const [jobId, setJobId] = useState(null);
 
   // Placement options (cluster/host/datastore/folder/pool/profile) for the 법인.
+  // v2.596(감사 WS-1·WS-2): vCenter 를 바꾸면 ① 이전 목록을 비우고 ② 늦게 도착한 이전 vCenter 응답은 버리며
+  //   ③ 이전 vCenter 의 배치 선택은 **칩을 누를 때** 지운다(효과에서 지우면 저장 작업 불러오기의 배치까지 지워진다).
   useEffect(() => {
+    let active = true;
+    setPlacement(null);
     const q = form.vcenterId ? `?vcenterId=${encodeURIComponent(form.vcenterId)}` : '';
-    fetchJson(`/provision/placement${q}`).then(setPlacement).catch(() => setPlacement(null));
+    fetchJson(`/provision/placement${q}`).then((r) => { if (active) setPlacement(r); }).catch(() => { if (active) setPlacement(null); });
+    return () => { active = false; };
   }, [form.vcenterId]);
 
   // Load clonable templates/VMs for the selected 법인(vCenter), prefix-filtered by
@@ -141,10 +146,10 @@ export default function VmProvision() {
         {/* 법인(vCenter) 칩 — 클릭 시 해당 법인의 템플릿/VM 목록 */}
         <div className="flex gap wrap" style={{ margin: '10px 0' }}>
           <span className="badge gray" style={{ ...chipStyle, ...(form.vcenterId === '' ? chipActive : {}) }}
-            onClick={() => setForm((f) => ({ ...f, vcenterId: '', sourceId: '' }))}>전체</span>
+            onClick={() => setForm((f) => ({ ...f, vcenterId: '', sourceId: '', placement: structuredClone(EMPTY.placement) }))}>전체</span>
           {(vcenters || []).map((v) => (
             <span key={v.id} className="badge gray" style={{ ...chipStyle, ...(form.vcenterId === v.id ? chipActive : {}) }}
-              onClick={() => setForm((f) => ({ ...f, vcenterId: v.id, sourceId: '' }))}>{v.name}</span>
+              onClick={() => setForm((f) => (f.vcenterId === v.id ? f : { ...f, vcenterId: v.id, sourceId: '', placement: structuredClone(EMPTY.placement) }))}>{v.name}</span>
           ))}
         </div>
 

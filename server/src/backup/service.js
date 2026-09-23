@@ -12,6 +12,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { openSecretsDeep } from '../security/secretVault.js';
 import { redactEnvSecrets, mergeRedactedEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 
@@ -61,19 +62,31 @@ export function isRuntimeStateFile(name) {
  * 주기마다 생기고 자동 사유 보관 슬롯(10)의 실제 설정 변경 백업을 밀어냈다. 파일째 상태로 분류하면 설정 편집도 백업되지 않으므로
  * **지문에서만** `last*` 키를 빼고 본다(번들 내용은 그대로 — 복원 가능).
  */
-export const MIXED_STATE_FILES = new Set(['capture-monitors.json', 'os-scan.json', 'guest-scans.json', 'vm-clone.json']);
+export const MIXED_STATE_FILES = new Set(['capture-monitors.json', 'os-scan.json', 'guest-scans.json', 'vm-clone.json',
+  // v2.596(감사 R2596-03 — 재현): 엣지 pull 마다 lastUsedAt(엣지당 60초) · 연동 키 useCount · 일일 보고 lastRunTs 를 쓴다.
+  'central-agent-tokens.json', 'api-keys.json', 'daily-report.json']);
+// 실행 필드 — last* 와 사용 횟수(useCount). 설정이 아니다.
+const RUN_FIELD_RE = /^(last[A-Z]|useCount$)/;
 function stripRunFields(v) {
   if (Array.isArray(v)) return v.map(stripRunFields);
   if (v && typeof v === 'object') {
     const o = {};
-    for (const [k, x] of Object.entries(v)) if (!/^last[A-Z]/.test(k)) o[k] = stripRunFields(x);
+    for (const [k, x] of Object.entries(v)) if (!RUN_FIELD_RE.test(k)) o[k] = stripRunFields(x);
     return o;
   }
   return v;
 }
+/*
+ * v2.596(감사 R2596-02 — 재현): 암호화 모드에서는 저장할 때마다 봉인 값의 salt·iv 가 새로 뽑혀 **내용이 같아도 암호문이
+ * 달라진다** — 지문이 매번 바뀌어 v2.595 의 수정이 통째로 무력했다. JSON 은 봉인을 열어 평문 기준으로 지문을 낸다
+ * (메모리에서 해시에만 쓰고 어디에도 남기지 않는다).
+ */
 function fingerprintContent(name, content) {
-  if (!MIXED_STATE_FILES.has(name)) return String(content);
-  try { return JSON.stringify(stripRunFields(JSON.parse(String(content)))); } catch { return String(content); }
+  if (!/\.json$/i.test(name)) return String(content);
+  let obj;
+  try { obj = JSON.parse(String(content)); } catch { return String(content); }
+  try { obj = openSecretsDeep(obj); } catch { /* 열지 못하면 원문 기준 — 지문이 달라질 뿐 백업은 안전한 쪽(더 만든다) */ }
+  return JSON.stringify(MIXED_STATE_FILES.has(name) ? stripRunFields(obj) : obj);
 }
 export function settingsFingerprint(files) {
   const h = crypto.createHash('sha1');

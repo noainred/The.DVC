@@ -1,3 +1,4 @@
+import { csvCell } from '../../util/csv.js';
 /**
  * views/tools/bmUsageText.js — 베어메탈 사용률 화면의 **판정과 문구**(순수, v2.550).
  *
@@ -330,10 +331,8 @@ export const CSV_COLS = Object.freeze([
  * ⚠ 자격증명·호스트 주소는 담지 않는다(응답에 이미 없지만 열 정의에서도 배제한다).
  */
 export function csvOf(rows = []) {
-  const esc = (v) => {
-    const s = v == null ? '' : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
+  // v2.596(감사 SECWEB-01): 공용 csvCell(수식 가드 포함)을 쓴다 — 서버 이름이 '=' 로 시작하면 엑셀에서 수식이 됐다. 빈 값은 그대로 빈 칸.
+  const esc = (v) => (v == null ? '' : csvCell(v));
   const cell = (r, key) => {
     if (key === 'server') return t(r.name);
     if (key === 'paths') return (r.paths || []).map((p) => (p === 'os' ? 'OS' : 'iDRAC')).join('+');

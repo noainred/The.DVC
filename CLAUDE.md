@@ -3437,6 +3437,30 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 남긴 것(정보·가능성): 죽은 export 56개(판정 사본 `isMonitored`·`isVcenterGpuMonitored` 는 오인 위험) · adaptiveTimer 재무장 중 두 번째
       실행(가능성) · SAN rates 빈 목록 주기(가능성) · uemcli 부분 번호(가능성) · sfpshow uW 단위(가능성) · clamp 사본 16벌.
 
+  - ⚠⚠ **v2.596 — 7축 병렬 감사(7차 점검) 확정분**("세번 더 수행" 3회차. 확정 24 · 가능성 9 · 반증 5, 고침 27. 회귀는
+    `test/audit2596.test.js` 12건 — **변이 검증 15/15**. 상세 `docs/AUDIT-2026-09-24d.md`):
+    - ⚠⚠ **가림은 그 값을 싣는 응답 전부에 — v2.595 도 형제 경로를 놓쳤다**(R2596-01 — 재현): svcmon 엣지 주소 가림을 `/edges`·
+      `/state`·`/diag` 에 걸고 `/edges/:agent/probe`·`/assign` 은 놓쳤다. **가림을 추가할 때는 그 필드를 grep 해 모든 응답을 볼 것.**
+    - ⚠⚠ **지문(fingerprint)을 낼 때 암호화 모드를 잊지 말 것**(R2596-02 — 재현): 봉인 값은 저장마다 salt·iv 가 새로 뽑혀 내용이 같아도
+      암호문이 다르다. `backup/service.js fingerprintContent` 가 JSON 을 `openSecretsDeep` 으로 연 뒤 비교한다(해시에만 쓰고 남기지 않는다).
+      실행 필드는 `last*`·`useCount`(`RUN_FIELD_RE`) · 대상 파일은 `MIXED_STATE_FILES`(엣지 토큰·연동 키·일일 보고를 더했다).
+    - ⚠⚠ **숫자 설정의 빈 칸은 서버·웹 둘 다 '미지정'**(CLAMP2596-01~06 — v2.595 가 1곳만 고친 계열의 5곳): 세션 총 상한·스파이크
+      임계/보존일·게스트 디스크 주기·VM 성능 보존일·업그레이드 확인 주기. 서버는 `numOrNull` 로 빈 값을 걸러 이전 값을 유지하고
+      (명시적 0 만 값), 웹은 `views/blankOr.js` 로 빈 칸을 **보내지 않는다**. ⚠ '0 = 무제한/끔' 인 필드가 가장 위험하다 — 빈 칸이
+      '끔' 이 되면 오류 없이 정책이 풀린다. 새 숫자 설정을 만들면 두 쪽 다 이 규칙을 따를 것.
+    - **엣지 pull 은 '빠진 것' 도 정리한다**(EF-2·3): svcmon 배정 해제(명시적 200 + assigned:false)면 `central:` 배치를 지우고,
+      스토리지 `applyPulledDevices` 가 빠진 id(`removed`)를 돌려줘 스냅샷을 지운다(SAN 스위치 `onRemoved` 와 같은 규칙).
+      ⚠ PDU 의 같은 경로는 이번에 보지 않았다(다음 후보).
+    - **큰 목록은 정렬 뒤 자른다**(PERFWEB-01 — IPAM 8,028행 전량 렌더 12.5초 정지 실측 → `DataTable limit` 1,000 + 뺀 개수) ·
+      **정적 해시 자산은 `util/staticGzip.js`**(파일마다 한 번 비동기 gzip · 캐시 상한 · 작은 파일·gzip 미지원은 원본) —
+      ⚠ `index.js` 첫 import 는 여전히 `logbuffer.js` 다(테스트가 고정) · 모달·상세 전용 차트는 `lazy()` 로(Datastores·VCenters).
+    - **늦게 온 이전 응답은 버린다**(WS-1~4): vCenter·범위·기간을 바꾸는 화면의 fetch 는 `active` 플래그나 세대 ref 를 둔다.
+      ⚠ VM 프로비저닝의 배치 초기화는 **칩을 누를 때** 한다 — 효과(useEffect)에서 하면 저장 작업 불러오기의 배치까지 지운다.
+    - 그 밖: CSV 수식 가드는 웹 `util/csv.js csvCell` · 서버 `util/csv.js guardCell` 하나(bmUsage·svcmon 사본을 옮겼다) · 알림 폴링은
+      401/403 이면 10분 쉰다 · 통신 점검 `ms_n` 열 추가 시 구 행 합을 비운다 · prune 은 인덱스 열로 거른다(`t0 < ? AND t1 < ?`).
+    - 남긴 것: SQLite open 일시 잠금 래치(`metrics/db.js`·`storage/db.js` — 가능성) · 엣지별 설정 조회 대소문자(가능성) · PRAGMA 묶음 exec
+      (가능성) · `/vcenters` 중복 요청(정보) · 스파이크·현재 사용자 설정 전량 배포는 **설계**(반증).
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

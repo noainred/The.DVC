@@ -7,6 +7,7 @@
  * 화면 규약(CLAUDE.md): 훅은 조기 return 위 · 표는 STable · 주기/버퍼/임계 숫자는 서버 값으로 문구 생성 ·
  * 예상 크기는 지어내지 않고 **실측 DB 크기와 마지막 수집 결과**만 보인다(임계 이상 표본 수는 워크로드 의존).
  */
+import { blankOr } from './blankOr.js';
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, putJson, postJson, sendJson } from '../api.js';
 import { STable } from '../components/STable.jsx';
@@ -149,7 +150,7 @@ export default function VmSeriesSettings() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson('/tools/vmseries/settings', { enabled, intervalMin: Number(intervalMin), retentionDays: Number(retentionDays), thresholds: { cpuPct: Number(thr.cpuPct), memPct: Number(thr.memPct), readyPct: Number(thr.readyPct) }, scope, targets, dropExcluded });
+      const r = await putJson('/tools/vmseries/settings', { enabled, intervalMin: blankOr(intervalMin), retentionDays: blankOr(retentionDays), thresholds: { cpuPct: blankOr(thr.cpuPct), memPct: blankOr(thr.memPct), readyPct: blankOr(thr.readyPct) }, scope, targets, dropExcluded });
       if (r && r.ok === false) throw new Error(r.reason || '저장 실패');
       setMsg(`저장되었습니다.${(r.dropped || []).length ? ` 제외된 ${r.dropped.length}개 vCenter 의 DB 파일을 삭제했습니다.` : ''} 주기·범위 변경은 다음 틱부터 즉시 반영됩니다.`);
       await load();

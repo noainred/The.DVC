@@ -1,4 +1,5 @@
 import './logbuffer.js'; // first: capture console output into the ring buffer
+import { createStaticGzip } from './util/staticGzip.js';
 import { pushLog } from './logbuffer.js';
 
 // 단일 폴러/요청의 예기치 못한 예외가 프로세스 전체를 죽이지 않도록(크래시 루프 방지).
@@ -398,6 +399,8 @@ if (fs.existsSync(config.introDir)) {
 
 // Serve the built web client when it exists (production single-port mode).
 if (fs.existsSync(config.webDist)) {
+  // v2.596(감사 PERFWEB-02): 해시 자산(JS·CSS)은 gzip 으로 보낸다 — 파일마다 한 번 비동기 압축 후 재사용(util/staticGzip.js).
+  app.use(createStaticGzip(config.webDist));
   // Hashed assets can cache forever; index.html must never be cached so the
   // browser always picks up new asset hashes after an upgrade.
   app.use(express.static(config.webDist, {

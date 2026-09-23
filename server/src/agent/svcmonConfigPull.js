@@ -101,7 +101,16 @@ export async function pullSvcmonConfigNow() {
       return { ok: false, reason };
     }
     const d = await res.json();
-    if (!d?.assigned) { last = { at: Date.now(), assigned: false }; return { ok: true, assigned: false }; }
+    if (!d?.assigned) {
+      // v2.596(감사 EF-2 — 재현): 중앙이 배정을 지우면(명시적 200 + assigned:false) 중앙이 배포한 central:* 배치를 지운다 —
+      //   예전엔 상태만 적고 끝나 엣지가 지워진 배정의 점검을 계속 돌렸다. 404·5xx 는 여기 오지 않는다(위에서 실패로 반환).
+      //   사용자가 직접 만든 배치(다른 접두)는 건드리지 않는다.
+      let removed = 0;
+      for (const tag of [...batchCounts().keys()].filter((b) => b.startsWith(CENTRAL_BATCH_PREFIX))) removed += deleteTargetsByBatch(tag).removed || 0;
+      if (removed) { appliedSig = ''; console.log(`[svcmon-pull] 중앙 배정이 해제돼 중앙 배포 점검 대상 ${removed}개를 지웠습니다`); }
+      last = { at: Date.now(), assigned: false, ...(removed ? { removed } : {}) };
+      return { ok: true, assigned: false, removed };
+    }
     if (d.unchanged) { last = { at: Date.now(), assigned: true, unchanged: true, sig: d.sig }; return { ok: true, unchanged: true, sig: d.sig }; }
 
     const targets = Array.isArray(d.targets) ? d.targets : [];

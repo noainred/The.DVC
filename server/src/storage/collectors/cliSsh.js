@@ -323,7 +323,7 @@ export function toBytesOrNull(v) {
   const s = String(v ?? '').trim().replace(/,/g, '');
   const r = toBytes(s);
   if (r !== 0) return r;
-  return /^0+(\.0+)?(\s|$|[kKmMgGtTpPeE(])/.test(s) ? 0 : null;
+  return /^0+(\.0+)?(\s|$|[kKmMgGtTpPeEbB(])/.test(s) ? 0 : null;   // v2.596: '0B' 도 0
 }
 
 export function toBytes(v) {
