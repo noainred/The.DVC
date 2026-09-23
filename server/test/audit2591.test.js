@@ -437,3 +437,11 @@ test('★ P8: 백업 정리는 install.sh(초)·in-app(ms) 시각을 같은 단�
   assert.equal(baks.length, 2, baks.join(','));
   assert.ok(baks.includes(`app.bak.${nowS - 60}`), `가장 최근의 초 단위 백업이 지워졌다: ${baks.join(',')}`);
 });
+
+test('★ PR-9: RMA 결과 회신의 비-2xx 가 로그에 남고, rma-result 는 대용량 본문 게이트에 등록돼 있다', () => {
+  const a = src('rma/agent.js');
+  const body = a.slice(a.indexOf('async function postResult'), a.indexOf('export async function handleJob'));
+  assert.match(body, /r\.ok === false/, '응답 상태를 보지 않으면 413·403 이 무음이다');
+  assert.match(body, /HTTP \$\{r\.status\}/);
+  assert.match(src('index.js'), /app\.use\('\/api\/central\/rma-result', BIG_JSON\)/);
+});

@@ -106,9 +106,20 @@ function info() {
 }
 
 async function postResult(reqId, result) {
-  await resilientFetch(`${CENTRAL_URL}/api/central/rma-result`, {
-    method: 'POST', headers: headers(), body: JSON.stringify({ agent: AGENT, instance: INSTANCE, reqId, result }), timeoutMs: 20_000, retries: 3,
-  }).catch((e) => log(`결과 회신 실패 reqId=${reqId}: ${e.message}`));
+  // v2.591 PR-9(재현): resilientFetch 는 비-2xx 를 throw 하지 않고 응답을 돌려준다 — 예전엔 .catch 만 있어 413·403·500 이
+  // 로그 한 줄 없이 사라졌고, 중앙은 그 잡을 '미회신' 으로 종결했다(MAX_CLAIMS=1 — 재실행 없음). 상태 코드도 남긴다.
+  try {
+    const r = await resilientFetch(`${CENTRAL_URL}/api/central/rma-result`, {
+      method: 'POST', headers: headers(), body: JSON.stringify({ agent: AGENT, instance: INSTANCE, reqId, result }), timeoutMs: 20_000, retries: 3,
+    });
+    if (r && r.ok === false) {
+      const hint = r.status === 413 ? ' — 결과 본문이 중앙 한도를 넘었습니다(출력 상한 RMA_MAX_OUTPUT·중앙 JSON_BODY_LIMIT 확인)'
+        : r.status === 403 ? ' — 중앙이 이 엣지의 토큰을 거부했습니다(개별 토큰 전용)' : '';
+      log(`결과 회신 실패 reqId=${reqId}: HTTP ${r.status}${hint}`);
+    }
+  } catch (e) {
+    log(`결과 회신 실패 reqId=${reqId}: ${e.message}`);
+  }
 }
 
 /** 잡 1건 처리 — 검증 실패도 결과로 회신한다(중앙 UI 가 즉시 사유를 본다). */

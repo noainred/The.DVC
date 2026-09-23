@@ -439,7 +439,7 @@
 | `AD_USER_FILTER` |  |  | auth/ad.js |
 | `AD_VIEWER_GROUP` | `''` |  | auth/ad.js |
 | `AUTH_DISABLED_ROLE` |  |  | auth/auth.js |
-| `DEFAULT_ADMIN_PASSWORD` | `'admin123'` | ✅ | auth/auth.js, config.js |
+| `DEFAULT_ADMIN_PASSWORD` | `''` | ✅ | auth/auth.js, config.js |
 | `OTP_ROLE_ENFORCE` | `기본 적용('false' 로 끄기)` |  | auth/auth.js |
 
 ## 중계 경로 점검 (1)
