@@ -105,6 +105,9 @@ jobs:
           echo '=== critical 차단 ===';
           npm --prefix server audit --omit=dev --audit-level=critical
           npm --prefix web audit --omit=dev --audit-level=critical
+          # v2.593(감사 DEPS-05): 루트(개발 도구 concurrently 등)는 예전엔 아예 보지 않았다 — v2.590 에 shell-quote critical 2 를
+          # 아무도 모른 채 핀하고 있었다. 루트는 전부 개발 의존성이라 --omit=dev 없이 본다.
+          echo '=== root (개발 도구) ==='; npm audit --audit-level=critical
 
   pyportal:
     timeout-minutes: 20

@@ -52,7 +52,7 @@ export const NAV_GROUPS = [
   ] },
   { id: 'ops', label: '운영', items: [
     { id: 'remote', name: '원격 명령', hash: '#/tools/rma', admin: true },
-    { id: 'deploy', name: '대량 배포', hash: '#/tools/massdeploy', admin: true },
+    { id: 'deploy', name: '대량 배포 (준비 중)', hash: '#/tools/massdeploy', admin: true }, // v2.593: 아직 없는 기능이라는 사실을 메뉴가 먼저 말한다
     { id: 'collectors', name: '컬렉터', hash: '#/settings/collectors', admin: true },
   ] },
   { id: 'admin', label: '관리', items: [

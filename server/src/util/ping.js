@@ -5,6 +5,7 @@
 
 import { execFile } from 'node:child_process';
 import net from 'node:net';
+import { poolRun } from './pool.js';
 
 const isWin = process.platform === 'win32';
 let pingMissing = false; // ping CLI가 없는 환경(컨테이너 등)에서 TCP 폴백으로 전환
@@ -93,22 +94,17 @@ export function tcpConnect(host, port = 443, timeoutMs = 2500) {
 
 /** 여러 {host,port,...meta} 동시(제한) TCP 프로브. 반환은 입력 + {alive,rttMs}. */
 export async function tcpProbeMany(targets = [], { timeoutMs = 2500, concurrency = 10 } = {}) {
-  const out = [];
-  let i = 0;
-  async function worker() {
-    while (i < targets.length) { const t = targets[i++]; const r = await tcpConnect(t.host, t.port || 443, timeoutMs); out.push({ ...t, ...r }); }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, targets.length) }, worker));
+  // v2.593(감사 DEPS-01): 손으로 쓴 풀은 concurrency 0 이면 워커 0개로 **아무것도 재지 않고 빈 결과**를 돌려줬다
+  //   (v2.579 ③-b 와 같은 결함). 공용 poolRun 은 최소 1 워커다. 결과는 입력 순서다(예전은 완료 순서 — 호출부는 순서를 쓰지 않는다).
+  const list = Array.isArray(targets) ? targets : [];
+  const out = new Array(list.length);
+  await poolRun(list, concurrency, async (t, i) => { out[i] = { ...t, ...(await tcpConnect(t.host, t.port || 443, timeoutMs)) }; });
   return out;
 }
 
 export async function pingMany(ips = [], { timeoutMs = 1500, concurrency = 8 } = {}) {
   const list = [...new Set(ips.map((s) => String(s).trim()).filter(Boolean))];
-  const out = [];
-  let i = 0;
-  async function worker() {
-    while (i < list.length) { const ip = list[i++]; out.push(await pingOne(ip, { timeoutMs })); }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, worker));
+  const out = new Array(list.length); // v2.593(DEPS-01): 공용 풀 — concurrency 0 도 최소 1 워커
+  await poolRun(list, concurrency, async (ip, i) => { out[i] = await pingOne(ip, { timeoutMs }); });
   return out;
 }

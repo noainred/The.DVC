@@ -196,6 +196,8 @@
   대상 목록·접속 경로는 `req.user?.role === 'admin'`(**거부 기본값**)일 때만 싣는다(`ops.stripCfg`).
   `render/:dc` 는 관리 블록에 전 사이트 내부 IP 가 들어가므로 adminOnly. `stripCfg` 를 다시 항등함수로
   되돌리지 말 것.
+  ⚠ **v2.593(AUTHZ-01)**: 그 축약이 **토폴로지 본체**에는 없었다 — 비-admin 에게 전 사이트 사설·공인 IP·vCenter IP·SSH 계정명이
+  그대로 나갔다. `maskTopology` 가 주소·계정을 비우고 점검 결과(issues)는 문구에 주소가 들어가 개수만 준다(`addressHidden`·`issueCount`).
 - **원격 haproxy.cfg 교체 3규칙**(`ops.js applySite`): ① `systemctl is-active` 는 **마지막 줄 정확 비교**
   (`isActiveOut`) — `/active$/` 는 'inactive' 에 매치돼 장애를 성공으로 보고하고 롤백을 건너뛴다.
   ② 백업(`cp -a`) 실패 시 **원본을 건드리지 않고 중단**(`set -e` + 종료코드 91/92/93) — `;` 로 이으면

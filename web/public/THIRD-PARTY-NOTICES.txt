@@ -250,7 +250,7 @@ depd@2.0.0  —  MIT  [server]
 destroy@1.2.0  —  MIT  [server]
 dijkstrajs@1.0.3  —  MIT  [web]
 dom-helpers@5.2.1  —  MIT  [web]
-dompurify@3.4.15  —  (MPL-2.0 OR Apache-2.0)  [web]
+dompurify@3.4.16  —  (MPL-2.0 OR Apache-2.0)  [web]
 dunder-proto@1.0.1  —  MIT  [server]
 duplexer2@0.1.4  —  BSD-3-Clause  [server]
 ee-first@1.1.1  —  MIT  [server]
@@ -2947,7 +2947,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-적용 패키지 (1): dompurify@3.4.15
+적용 패키지 (1): dompurify@3.4.16
 ==============================================================================
 
 Apache License
@@ -3153,7 +3153,7 @@ Apache License
    limitations under the License.
 
 ==============================================================================
-적용 패키지 (1): dompurify@3.4.15
+적용 패키지 (1): dompurify@3.4.16
 ==============================================================================
 
 Mozilla Public License Version 2.0

@@ -35,8 +35,13 @@ api.get('/tools/relaytopo', toolsPerm, (req, res) => {
   const raw = loadTopologyRaw();
   const access = Object.fromEntries(raw.sites.map((s) => [s.dc, { edge: accessView(raw, s, 'edge'), irs: accessView(raw, s, 'irs') }]));
   access._main = { main: accessView(raw, null, 'main') };
+  // v2.593(감사 AUTHZ-01 — 재현): tools 권한(operator 기본 보유)만으로 전 사이트 Main/Edge/IRS 의 사설·공인 IP·
+  //   vCenter IP·SSH 계정명이 그대로 나갔다(카드는 adminOnly 지만 API 는 아니었다 — v2.555 '표시 관례 ≠ 접근제어').
+  //   비-admin 에는 **주소·계정을 가리고** 그 사실을 밝힌다(v2.500 D/M1 relaycheck · v2.574 ping overview 와 같은 방식).
+  //   점검 결과(issues)는 문구에 주소가 들어가므로 개수만 준다.
   res.json({
-    ok: true, admin, topology: topo, issues,
+    ok: true, admin, topology: admin ? topo : maskTopology(topo), issues: admin ? issues : [],
+    ...(admin ? {} : { addressHidden: true, issueCount: issues.length }),
     results: lastResults({ full: admin }),                       // 비-admin 에는 cfg/env 본문 제거
     access: admin ? access : {},                                 // 접속 경로·자격증명 출처는 admin 만
     targets: TARGETS, defaultServices: DEFAULT_SERVICES,
@@ -44,6 +49,11 @@ api.get('/tools/relaytopo', toolsPerm, (req, res) => {
     kinds: topo.services.map((s) => ({ key: s.key, kind: kindForService(s, topo.main) })),
   });
 });
+/** 비-admin 응답용 — 노드의 주소·SSH 계정명을 비운다(구조·서비스 구성·DC 이름은 남긴다). */
+const maskNode = (n) => (n ? { ...n, privateIp: '', publicIp: '', vcenterIp: '', ssh: { ...(n.ssh || {}), username: '' } } : n);
+function maskTopology(t) {
+  return { ...t, main: maskNode(t.main), sites: (t.sites || []).map((s) => ({ ...s, edge: maskNode(s.edge), irs: maskNode(s.irs), sshTargetId: '' })) };
+}
 function accessView(raw, site, role) { const a = resolveNodeAccess(raw, site, role); return { host: a.host || '', port: a.port || 0, via: a.via || '', source: a.source || '', error: a.error || '' }; }
 
 api.put('/tools/relaytopo', adminOnly, (req, res) => {

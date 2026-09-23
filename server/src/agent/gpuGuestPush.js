@@ -35,7 +35,7 @@ export async function pushGpuGuestNow(...args) {
 async function _pushGpuGuestNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'push 비활성화(CENTRAL_URL/TOKEN 미설정)' };
   const hosts = [...getGuestGpuAllHosts().entries()].map(([hostId, v]) => ({ hostId, utilPct: v.utilPct }));
-  const vms = getGuestGpuVms().map((v) => ({ vmId: v.vmId, utilPct: v.utilPct, memUsedPct: v.memUsedPct ?? null, host: v.host, vcenterId: v.vcenterId }));
+  const vms = getGuestGpuVms().map((v) => ({ vmId: v.vmId, utilPct: v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, host: v.host, vcenterId: v.vcenterId }));
   const diag = getGpuGuestDiag(); // 선별 깔때기 + VM별 성공/실패(웹 '수집 진단'에서 표시)
   // 진단은 데이터가 없어도(=어디서 막혔는지가 핵심) 항상 보낸다.
   try {

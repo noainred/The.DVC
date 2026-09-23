@@ -455,6 +455,14 @@ function ToolPanel({ tool, onBack, isAdmin }) {
           </label>
         )}
       </div>
+      {/* v2.593(감사 UI-2593-01): '준비 중' 도구(diskadd·backup·massdeploy)를 주소로 열면 본문이 비어 있었다 — 무엇도
+          말하지 않는 빈 화면은 '고장' 으로 읽힌다. 카드 목록과 같은 사실(아직 없다)을 말한다. */}
+      {TOOLS.find((t) => t.k === tool)?.comingSoon && (
+        <div className="card" style={{ padding: 20, fontSize: 14 }}>
+          <b>{TOOLS.find((t) => t.k === tool).label}</b>은(는) 아직 준비 중인 기능입니다 — 이 화면에서 할 수 있는 작업이 없습니다.
+          <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>특수 기능 목록에서 다른 기능을 고르세요.</div>
+        </div>
+      )}
       {tool === 'aisearch' && <AiSearch />}
       {tool === 'explore' && <Explore />}
       {tool === 'insights' && <Insights scope={scope} />}

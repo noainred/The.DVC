@@ -28,9 +28,17 @@ async function pullAssignment() {
   return res.json();
 }
 
+/**
+ * 스캔 결과 회신. 실패 사유 문자열 또는 null(성공).
+ * v2.593(감사 EDGE-2): 예전엔 결과를 버리고 호출부가 `.catch(() => {})` 로 삼켜, 중앙이 403·413·5xx 로 거부해도
+ * 상태(last)는 성공 모양이고 콘솔은 '스캔 완료' 였다(`resilientFetch` 는 비-2xx 를 throw 하지 않는다 — v2.591 PR-9).
+ */
 async function postResult(payload) {
   const url = `${config.agent.centralUrl}/api/central/result`;
-  await resilientFetch(url, { method: 'POST', headers: headers(), body: JSON.stringify(payload), timeoutMs: 30_000, retries: 2 });
+  try {
+    const r = await resilientFetch(url, { method: 'POST', headers: headers(), body: JSON.stringify(payload), timeoutMs: 30_000, retries: 2 });
+    return r.ok ? null : `결과 회신 거부(HTTP ${r.status})`;
+  } catch (e) { return `결과 회신 실패: ${e?.message || e}`; }
 }
 
 export async function runAgentScan() {
@@ -54,7 +62,7 @@ export async function runAgentScan() {
       if (r.ok) { registered = (r.added || 0) + (r.updated || 0); pollNow().catch(() => {}); }
     }
 
-    await postResult({
+    const postErr = await postResult({
       agent: config.agent.name,
       scanned: scan.scanned,
       foundCount: scan.foundCount,
@@ -63,9 +71,10 @@ export async function runAgentScan() {
       notIdrac: scan.notIdrac,
       authFailed: scan.authFailed,
       durationMs: Date.now() - started,
-    }).catch(() => {});
+    });
 
-    last = { at: Date.now(), agent: config.agent.name, assigned: true, scanned: scan.scanned, foundCount: scan.foundCount, registered, authFailed: scan.authFailed || 0, authSkipped: scan.authSkipped || 0 };
+    last = { at: Date.now(), agent: config.agent.name, assigned: true, scanned: scan.scanned, foundCount: scan.foundCount, registered, authFailed: scan.authFailed || 0, authSkipped: scan.authSkipped || 0, ...(postErr ? { postError: postErr } : {}) };
+    if (postErr) console.warn(`[agent] 스캔은 끝났지만 중앙에 결과를 보내지 못했습니다: ${postErr}`);
     console.log(`[agent] 스캔 완료: ${config.agent.name} — ${scan.foundCount}/${scan.scanned} iDRAC, ${registered} 등록${scan.authSkipped ? ` · 인증 실패 정지로 ${scan.authSkipped}개 IP 건너뜀(계정을 고치면 자동 재개)` : ''}`);
     return last;
   } catch (err) {

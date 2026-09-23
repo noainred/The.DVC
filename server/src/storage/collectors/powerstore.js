@@ -65,8 +65,9 @@ export function normalizePowerstore(device, raw) {
     const keys = Object.keys(m).filter((k) => k !== 'entity' && k !== 'entity_id').slice(0, 12).join(',');
     snap.sections.capacity = `오류: 공간 지표 점 ${Array.isArray(raw.metrics) ? raw.metrics.length : 1}개 중 physical_total 이 있는 점이 없음(필드: ${keys || '없음'})`;
   } else if (m) {
-    const used = Number(m.physical_used) || 0;
-    snap.capacity = { totalBytes: total, usedBytes: used, pct: total ? Math.round((used / total) * 1000) / 10 : null };
+    // v2.593(감사 DATA-01): 사용량을 못 읽으면 0 이 아니라 null — 0 은 '비었다' 는 거짓이고 증가량에 거짓 급변을 만든다(v2.561 규약).
+    const used = numOrNull(m.physical_used);
+    snap.capacity = { totalBytes: total, usedBytes: used, pct: total && used != null ? Math.round((used / total) * 1000) / 10 : null };
     snap.sections.capacity = 'ok';
     // 물리 사용량의 맥락(논리 사용량·데이터 감축률·절감) — 상세 화면에서 '실제 디스크를 얼마나
     // 쓰는지'와 '논리적으로 얼마를 할당했는지'를 함께 보기 위해 extra 로 싣는다(스키마 확장 금지 규칙).

@@ -18,6 +18,7 @@ import { emptySnapshot } from '../types.js';
 // v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 — restCommon 과 같은 규약.
 import { describeFetchError, isTransportError } from './netError.js';
 import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
+import { numOrNull } from '../../util/numOrNull.js';
 
 // Isilon 전용 로컬 TLS 디스패처 — 사내 자체서명 장비 한정(다른 fetch 에 주입 금지).
 // 보안(M-4): STORAGE_TLS_VERIFY=true 면 인증서 검증을 켠다(기본은 기존대로 해제).
@@ -70,8 +71,12 @@ export function normalizeIsilon(device, raw) {
     // /statistics/current 응답: { stats: [{ key, value }] } — ifs.bytes.* 키가 클러스터 용량.
     const byKey = Object.fromEntries((raw.stats.stats || []).map((s) => [s.key, Number(s.value) || 0]));
     const total = byKey['ifs.bytes.total'] || 0;
-    const used = byKey['ifs.bytes.used'] || (total && byKey['ifs.bytes.avail'] ? total - byKey['ifs.bytes.avail'] : 0);
-    snap.capacity = { totalBytes: total, usedBytes: used, pct: total ? Math.round((used / total) * 1000) / 10 : null };
+    // v2.593(감사 DATA-01): 사용량을 못 읽으면 0 이 아니라 null — 0 은 '비었다' 는 거짓이고 증가량에 거짓 급변을 만든다(v2.561 규약).
+    const usedRaw = (raw.stats.stats || []).find((s) => s.key === 'ifs.bytes.used');
+    const availRaw = (raw.stats.stats || []).find((s) => s.key === 'ifs.bytes.avail');
+    const usedN = numOrNull(usedRaw?.value), availN = numOrNull(availRaw?.value);
+    const used = usedN != null ? usedN : (total && availN != null ? total - availN : null);
+    snap.capacity = { totalBytes: total, usedBytes: used, pct: total && used != null ? Math.round((used / total) * 1000) / 10 : null };
     // 미디어(디스크 풀) 분리(v2.303, 사용자 요구 — isi status 의 HDD/SSD 컬럼): OneFS 통계 키
     // ifs.ssd.bytes.* 가 SSD 풀 전용 카운터이고, ifs.bytes.* 는 클러스터 전체(HDD+SSD 스토리지)
     // 합이다 — HDD = 전체 − SSD 로 산출한다. ⚠ SSD 가 메타데이터 전용(L3/VHS)인 구성에서는
@@ -128,8 +133,8 @@ export function normalizeIsilon(device, raw) {
     snap.pools = (raw.pools.storagepools || raw.pools.nodepools || []).slice(0, 32).map((p) => {
       const u = p.usage || {};
       const total = Number(u.total_bytes ?? u.usable_bytes) || 0;
-      const used = Number(u.used_bytes) || 0;
-      return { name: p.name || '', totalBytes: total, usedBytes: used, pct: total ? Math.round((used / total) * 1000) / 10 : null };
+      const used = numOrNull(u.used_bytes);
+      return { name: p.name || '', totalBytes: total, usedBytes: used, pct: total && used != null ? Math.round((used / total) * 1000) / 10 : null };
     });
     snap.sections.pools = 'ok';
   }

@@ -135,10 +135,18 @@ export default function RelayTopoTool() {
         <div className="muted" style={{ marginTop: 4 }}>정직한 한계: SSH 자격증명(노드에 입력한 ID/비밀번호/키 또는 배포 대상)이 있는 노드만 가져오기/적용이 됩니다. IRS 는 중앙에서 직접 닿지 않으므로 중계 엣지의 SSH 서비스 포트(기본 :4067)를 경유합니다. 적용은 관리 블록(# BEGIN/END vmware-portal-relay)만 바꾸며 그 밖의 haproxy.cfg 내용은 손대지 않습니다. 비밀은 봉인 저장되고 어떤 응답·내보내기에도 포함되지 않습니다.</div>
       </div>
 
+      {data?.addressHidden && (
+        <div className="card" style={{ marginBottom: 12, fontSize: 13, borderColor: 'var(--amber)' }}>
+          관리자 계정이 아니라서 <b>주소·SSH 계정명을 가렸습니다</b>(사설·공인 IP · vCenter IP). 구성·서비스 목록만 보입니다.
+          표 점검 결과는 문구에 주소가 들어 있어 개수만 알립니다 — {data.issueCount || 0}건. 저장·가져오기·적용은 관리자만 할 수 있습니다.
+        </div>
+      )}
       <div className="kpis" style={{ marginBottom: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
         <Kpi label="사이트" value={form.sites.length} meta={`IRS 있는 사이트 ${form.sites.filter((s) => s.irs?.privateIp || s.irs?.publicIp).length}`} />
         <Kpi label="서비스" value={form.services.filter((s) => s.enabled !== false).length} meta={form.services.filter((s) => s.enabled !== false).map((s) => s.listenPort).join(' · ')} />
-        <Kpi label="표 점검" value={issues.filter((i) => i.level === 'error').length} meta={`오류 · 경고 ${issues.filter((i) => i.level === 'warn').length}`} accent={issues.some((i) => i.level === 'error') ? 'var(--red)' : 'var(--green)'} />
+        {data?.addressHidden
+          ? <Kpi label="표 점검" value="—" meta={`관리자만 상세 확인 · ${data.issueCount || 0}건`} />
+          : <Kpi label="표 점검" value={issues.filter((i) => i.level === 'error').length} meta={`오류 · 경고 ${issues.filter((i) => i.level === 'warn').length}`} accent={issues.some((i) => i.level === 'error') ? 'var(--red)' : 'var(--green)'} />}
         <Kpi label="가져온 사이트" value={Object.values(results).filter((r) => r.ok && r.edge?.ok).length} meta={badSites ? `문제 ${badSites} 사이트` : Object.keys(results).length ? '문제 없음' : '아직 없음'} accent={badSites ? 'var(--amber)' : undefined} />
       </div>
 
