@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { formatBytes, normalizeUnit, UNIT_OPTIONS } from './storageUnits.js';
+import { formatBytes, capacityTotals, normalizeUnit, UNIT_OPTIONS } from './storageUnits.js';
 
 const TB = 1024 ** 4;
 
@@ -48,10 +48,30 @@ describe('formatBytes', () => {
     expect(formatBytes(a, 'gb')).not.toBe(formatBytes(b, 'gb'));
   });
 
-  it('0/널/NaN 은 0 으로 표기(호출부가 값 유무를 이미 판단한다)', () => {
+  it('0 은 0, 널/빈 값/숫자 아님은 — (v2.594 — 못 읽은 값을 0 으로 그리지 않는다)', () => {
     expect(formatBytes(0, 'tb')).toBe('0.0 TB');
-    expect(formatBytes(null, 'tb')).toBe('0.0 TB');
-    expect(formatBytes('x', 'gb')).toBe('0 GB');
+    expect(formatBytes(null, 'tb')).toBe('—');
+    expect(formatBytes(undefined, 'tb')).toBe('—');
+    expect(formatBytes('', 'tb')).toBe('—');
+    expect(formatBytes('x', 'gb')).toBe('—');
+  });
+
+  it('capacityTotals — 사용량 결측 장비는 사용률 분모에서 빼고 개수를 밝힌다(v2.594)', () => {
+    const rows = [
+      { c: { totalBytes: 100, usedBytes: 80 } },
+      { c: { totalBytes: 100, usedBytes: null } },
+      { c: null },
+      { c: { totalBytes: 0, usedBytes: 0 } },
+    ];
+    const t = capacityTotals(rows, (r) => r.c);
+    expect(t.total).toBe(200);
+    expect(t.used).toBe(80);
+    expect(t.pct).toBe(80);          // 예전 방식이면 40
+    expect(t.unknownUsed).toBe(1);
+    const none = capacityTotals([{ c: { totalBytes: 50, usedBytes: null } }], (r) => r.c);
+    expect(none.used).toBe(null);
+    expect(none.pct).toBe(null);
+    expect(capacityTotals([], (r) => r.c)).toMatchObject({ total: 0, used: 0, pct: null });
   });
 });
 

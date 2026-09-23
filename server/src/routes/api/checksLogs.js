@@ -1,4 +1,5 @@
 // 심층검색·서비스/네트워크 점검·vCenter 로그 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
+import { pageArgs } from '../../util/pageArgs.js';
 import { requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5)
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { guardCell } from '../../util/csv.js';
@@ -80,7 +81,10 @@ api.get('/tools/vmware-config', requirePerm('tools'), async (req, res) => {
     const data = buildVmwareConfigExport({ vcenterId: reqVc, allowed });
     if (req.query.download === '1') {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const fn = `vmware-config-${data.meta.scope}-${stamp}.json.gz`;
+      // v2.594(감사 SEC-2594-04): scope 는 요청 vcenterId 원문이다 — 따옴표·CRLF·비ASCII 가 헤더에 그대로 들어가
+      //   filename 매개변수 주입 또는 500(잘못된 헤더 문자)이 됐다. 파일명에는 안전한 문자만 남긴다.
+      const safeScope = String(data.meta.scope || 'all').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 64) || 'all';
+      const fn = `vmware-config-${safeScope}-${stamp}.json.gz`;
       res.setHeader('Content-Type', 'application/gzip');
       res.setHeader('Content-Disposition', `attachment; filename="${fn}"`);
       // ⚠ gzipSync 는 수 MB 페이로드(전 함대 호스트·VM·NSX)에서 이벤트 루프를 수백 ms~초 단위로
@@ -164,8 +168,7 @@ api.get('/tools/vclogs', requirePerm('tools'), async (req, res) => {
     const f = { vcenterId: req.query.vcenterId || '', severity: req.query.severity || '', q: req.query.q || '',
       since: req.query.since ? Number(req.query.since) : 0, until: req.query.until ? Number(req.query.until) : 0 };
     const allowed = scopeLogFilter(req, f); // 사용자 scope 화이트리스트를 f.vcenterIds 로 강제(범위 밖 로그 열람 차단)
-    const limit = Math.min(1000, Number(req.query.limit) || 200);
-    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const { limit, offset } = pageArgs(req.query, { def: 200, max: 1000 });   // v2.594: 하한·정수화(limit=-1 → 무제한이었다)
     res.json({ total: db.count(f), rows: db.query(f, limit, offset), meta: scopeLogMeta(db.meta(), allowed), dbKind: db.kind });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

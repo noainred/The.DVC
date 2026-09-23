@@ -58,7 +58,15 @@ export async function collect(device, { signal = undefined, onTrace = null } = {
     // --- PDU 본체(데이지체인) 자동 탐지 ---
     for (let i = 1; i <= MAX_PDU_UNITS; i++) {
       const power = await read(cmd.dev(i, 'power'));
-      if (!power.ok) break;                       // E1xx = 이 인덱스부터 없음 → 탐지 종료
+      if (!power.ok) {
+        // v2.594(감사 DATA2594-05): E1xx 만 '이 인덱스부터 없음' 이다. 그 밖의 실패(명령 실패·형식 미인식)까지 같은
+        //   break 로 받으면 뒤 유닛이 **말없이** 빠져 합계 전력이 부분 합이 됐다. 멈추되 그 사실을 남긴다.
+        if (!/^E1/i.test(String(power.code || '')) && i > 1) {
+          snap.unitsIncomplete = true;
+          snap.notes.push(`PDU 유닛 ${i} 전력을 읽지 못해 그 뒤 유닛 탐지를 멈췄습니다 — 합계 전력은 유닛 1~${i - 1} 기준(부분 합)입니다.`);
+        }
+        break;
+      }
       const [energy, appower, pf] = [
         await read(cmd.dev(i, 'energy')),
         await read(cmd.dev(i, 'appower')),

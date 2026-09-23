@@ -158,9 +158,16 @@ async function openInner() {
       // 안쪽 쿼리에서 (버킷, 장비)별 평균을 구하고(같은 버킷에 여러 샘플이 있을 수 있음)
       // 바깥에서 장비들을 SUM 한다 — 이 순서가 아니면 샘플 수가 많은 장비가 과대 반영된다.
       // CAST 필수(node:sqlite 는 JS 숫자를 REAL 로 바인딩 — selCapBucket 주석과 같은 이유).
-      selCapAllBucket: conn.prepare(`SELECT ts, SUM(total_bytes) AS total_bytes, SUM(used_bytes) AS used_bytes,
-          SUM(hdd_total) AS hdd_total, SUM(hdd_used) AS hdd_used, SUM(ssd_total) AS ssd_total, SUM(ssd_used) AS ssd_used,
-          COUNT(*) AS devices
+      // v2.594(감사 R2594-05): SQL SUM 은 NULL 을 건너뛴다 — 사용량을 못 읽은 장비가 있으면 used 합은
+      // 그 장비를 빼고 total 합은 넣어 **거짓 하락**이 된다. 그 버킷의 사용량은 NULL(선이 끊긴다)이고
+      // 빠진 대수를 used_unknown 으로 준다(화면이 밝힌다). hdd/ssd 도 같은 규칙.
+      selCapAllBucket: conn.prepare(`SELECT ts, SUM(total_bytes) AS total_bytes,
+          CASE WHEN COUNT(used_bytes) = COUNT(*) THEN SUM(used_bytes) END AS used_bytes,
+          SUM(hdd_total) AS hdd_total,
+          CASE WHEN COUNT(hdd_used) = COUNT(hdd_total) THEN SUM(hdd_used) END AS hdd_used,
+          SUM(ssd_total) AS ssd_total,
+          CASE WHEN COUNT(ssd_used) = COUNT(ssd_total) THEN SUM(ssd_used) END AS ssd_used,
+          COUNT(*) AS devices, COUNT(*) - COUNT(used_bytes) AS used_unknown
         FROM (
           SELECT CAST(CAST(ts/? AS INTEGER)*? AS INTEGER) AS ts, device_id,
             AVG(total_bytes) AS total_bytes, AVG(used_bytes) AS used_bytes,

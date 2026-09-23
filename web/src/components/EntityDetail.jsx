@@ -349,7 +349,9 @@ export function EntityDetail({ type, item, onClose }) {
   const [showReport, setShowReport] = useState(false);
   return (
     <Modal title={`${titles[type] || ''} 상세 — ${item.name}`} onClose={onClose} width={640}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 24px' }}>
+      {/* v2.594(감사 UI-2594-01): '1fr 1fr' 트랙은 최소폭이 auto 라 400px 에서 오른쪽 열이 잘렸다(Modal 이 overflow:hidden).
+          좁은 폭은 1열로 떨어지고, 트랙은 minmax(0,…) 로 못 박는다(v2.576 .vc-grid 와 같은 결함). */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))', gap: '0 24px' }}>
         {type === 'vm' && (
           <>
             <DRow label="이름"><b>{item.name}</b></DRow>

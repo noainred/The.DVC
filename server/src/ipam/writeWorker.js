@@ -30,18 +30,20 @@ try { db.exec('PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
 const del = db.prepare('DELETE FROM ip_records');
 const ins = db.prepare(`INSERT INTO ip_records (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map(() => '?').join(', ')})`);
 
-parentPort.on('message', ({ id, rows, updatedAt }) => {
+parentPort.on('message', ({ id, rows, records, updatedAt }) => {
   try {
     db.exec('BEGIN IMMEDIATE');
     try {
       del.run();
-      for (const row of rows) ins.run(...toRecord(row, updatedAt));
+      // v2.594: 메인이 레코드(컬럼 순서 값)를 보낸다. rows 는 예전 호출 호환용.
+      if (Array.isArray(records)) for (const rec of records) ins.run(...rec);
+      else for (const row of rows) ins.run(...toRecord(row, updatedAt));
       db.exec('COMMIT');
     } catch (err) {
       try { db.exec('ROLLBACK'); } catch { /* ignore */ }
       throw err;
     }
-    parentPort.postMessage({ id, ok: true, count: rows.length });
+    parentPort.postMessage({ id, ok: true, count: (records || rows).length });
   } catch (err) {
     parentPort.postMessage({ id, ok: false, error: err.message });
   }

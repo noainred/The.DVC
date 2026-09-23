@@ -10,7 +10,7 @@
  */
 
 import { store } from '../store.js';
-import { slotKey } from './diff.js';
+import { slotKey, slotStartMs } from './diff.js';
 import { takeVmSnapshot } from './service.js';
 import { lastSnapshotSlot, pruneVmtrack, getDb } from './db.js';
 
@@ -19,8 +19,10 @@ let running = false;      // 재진입 가드(폴러 + 수동 실행 공유)
 let lastResult = null;    // { at, slot, vcenters, added, removed, ms, trigger }
 let lastPruneAt = 0;
 const PRUNE_EVERY_MS = 12 * 3_600_000; // 하루 2회 정도면 충분(행이 작아 정리 비용 무의미)
+export const PENDING_WAIT_MS = 30 * 60_000;   // 첫 수집 대기 상한(v2.594)
+let waiting = null;   // { at, slot, pending } — 첫 수집 대기로 이번 슬롯 기록을 미룬 사실
 
-export function vmtrackPollerStatus() { return { running, lastResult }; }
+export function vmtrackPollerStatus() { return { running, lastResult, waiting }; }
 
 /** 스냅샷 1회 실행(수동/자동 공용). 진행 중이면 skipped. */
 export async function runVmtrackNow(trigger = 'manual') {
@@ -53,6 +55,12 @@ export function startVmtrackPoller() {
       }
       const snap = store.get();
       if (!snap?.vcenters?.length) return; // 아직 첫 수집 전 — 다음 틱에 재시도
+      // v2.594(감사 DATA2594-03 — 재현): 재시작 직후 첫 수집 중(pending)인 vCenter 는 VM 0 이라 이번 슬롯에서 빠지고,
+      //   그 부분 합이 '전 함대 합계' 로 기록돼 차트에 **거짓 하락**이 찍혔다. 첫 수집이 끝날 때까지(최대 PENDING_WAIT_MS)
+      //   기다린다 — 슬롯은 12시간 단위라 몇 분 늦게 채워도 누락이 아니다. 그 뒤에도 남으면 기록하되 빠진 수를 남긴다.
+      const pending = snap.vcenters.filter((v) => v.status === 'pending').length;
+      if (pending && Date.now() - slotStartMs(cur) < PENDING_WAIT_MS) { waiting = { at: Date.now(), slot: cur, pending }; return; }
+      waiting = null;
       await runVmtrackNow('slot');
       if (Date.now() - lastPruneAt > PRUNE_EVERY_MS) { lastPruneAt = Date.now(); pruneVmtrack().catch(() => {}); }
     } catch (e) {

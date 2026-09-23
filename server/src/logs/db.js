@@ -4,6 +4,11 @@
  * 중복은 (vcenterId, key)로 제거. 보관기간 초과분은 poller가 prune한다.
  */
 
+// v2.594(감사 SEC-2594-01): 호출부가 무엇을 넘기든 LIMIT 는 1~5만·정수, OFFSET 은 0 이상 정수 — 음수 LIMIT 는 SQLite 에서 '무제한'.
+const clampPage = (l, o) => {
+  const li = Math.trunc(Number(l)); const oi = Math.trunc(Number(o));
+  return [Number.isFinite(li) && li > 0 ? Math.min(li, 50_000) : 200, Number.isFinite(oi) && oi > 0 ? Math.min(oi, Number.MAX_SAFE_INTEGER) : 0];
+};
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -81,7 +86,7 @@ function initSqlite() {
       lastPowerEvents: (vc) => powerStmt.all(String(vc)),   // v2.483: [{entity,type,ts}]
       // rowid 타이브레이커: ts 동률 행이 많은 로그 특성상 ORDER BY ts 만으로는 OFFSET 페이징이
       // 청크 간 중복/누락될 수 있다(정렬이 비결정적) — CSV 청크 내보내기·UI 페이징 안정성용.
-      query: (f = {}, limit = 200, offset = 0) => { const { where, params } = filterSql(f); return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${where} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`).all(...params, limit, offset); },
+      query: (f = {}, limit = 200, offset = 0) => { const { where, params } = filterSql(f); return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${where} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`).all(...params, ...clampPage(limit, offset)); },
       count: (f = {}) => { const { where, params } = filterSql(f); return Number(db.prepare(`SELECT COUNT(*) n FROM events ${where}`).get(...params)?.n || 0); },
       // 행 수만 — `meta()` 는 GROUP BY vcenterId 까지 돌아 **풀스캔이 2회**다. 용량 정리 루프처럼
       // 개수만 필요한 곳이 meta() 를 부르면 그 절반이 순수 낭비다(v2.503).
@@ -134,7 +139,7 @@ function initJson() {
     },
     lastTs: (vc) => rows.reduce((mx, r) => (r.vcenterId === vc && r.ts > mx ? r.ts : mx), 0),
     lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },
-    query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(offset, offset + limit),
+    query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(...((a) => [a[1], a[1] + a[0]])(clampPage(limit, offset))),
     count: (f = {}) => rows.filter((r) => match(r, f)).length,
     meta: () => { const vc = new Map(); let mn = null, mx = null; for (const r of rows) { if (mn == null || r.ts < mn) mn = r.ts; if (mx == null || r.ts > mx) mx = r.ts; const g = vc.get(r.vcenterId) || { vcenterId: r.vcenterId, count: 0, lastTs: 0 }; g.count++; g.lastTs = Math.max(g.lastTs, r.ts); vc.set(r.vcenterId, g); } return { count: rows.length, firstTs: mn, lastTs: mx, vcenters: [...vc.values()] }; },
     prune: (beforeTs) => { const before = rows.length; rows = rows.filter((r) => r.ts >= beforeTs); const removed = before - rows.length; if (removed) rewrite(); return removed; },

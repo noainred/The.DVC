@@ -85,9 +85,11 @@ export function normalizeIsilon(device, raw) {
     const ssdTotal = byKey['ifs.ssd.bytes.total'] || 0;
     const ssdUsed = byKey['ifs.ssd.bytes.used'] || (ssdTotal && byKey['ifs.ssd.bytes.avail'] ? ssdTotal - byKey['ifs.ssd.bytes.avail'] : 0);
     // total 0 인 미디어는 null — '풀 없음'(SSD 메타 전용/무SSD 구성)을 0TB 로 오표시하지 않는다.
-    const mk = (t, u) => (t > 0 ? { totalBytes: t, usedBytes: u, pct: Math.round((u / t) * 1000) / 10 } : null);
+    // v2.594(감사 R2594-03): 사용량을 못 읽었으면(used null) HDD 사용량·% 도 null — max(0, null − x) 는 0 이 되어
+    // '비었다' 는 거짓이 DB hdd_used 에 적재됐다.
+    const mk = (t, u) => (t > 0 ? { totalBytes: t, usedBytes: u, pct: u == null ? null : Math.round((u / t) * 1000) / 10 } : null);
     snap.media = {
-      hdd: mk(Math.max(0, total - ssdTotal), Math.max(0, used - ssdUsed)),
+      hdd: mk(Math.max(0, total - ssdTotal), used == null ? null : Math.max(0, used - ssdUsed)),
       ssd: mk(ssdTotal, ssdUsed),
     };
     snap.sections.capacity = 'ok';
@@ -107,7 +109,8 @@ export function normalizeIsilon(device, raw) {
       if (!perNode.has(r.devid)) perNode.set(r.devid, {});
       perNode.get(r.devid)[r.key] = Number(r.value) || 0;
     }
-    const mkPool = (t, u) => (t > 0 ? { totalBytes: t, usedBytes: u, pct: Math.round((u / t) * 1000) / 10 } : null); // total 0 = 무디스크(No Storage HDDs)
+    const mkPool = (t, u) => (t > 0 ? { totalBytes: t, usedBytes: u, pct: u == null ? null : Math.round((u / t) * 1000) / 10 } : null); // total 0 = 무디스크(No Storage HDDs)
+    const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
     snap.nodes.list = list.slice(0, 64).map((n) => {
       const lnn = n.lnn ?? n.id;
       const st = perNode.get(lnn) || {};
@@ -118,8 +121,8 @@ export function normalizeIsilon(device, raw) {
         inBps: st['node.net.ext.bytes.in.rate'] ?? null,
         outBps: st['node.net.ext.bytes.out.rate'] ?? null,
         hdd: mkPool(Math.max(0, (st['node.ifs.bytes.total'] || 0) - (st['node.ifs.ssd.bytes.total'] || 0)),
-                    Math.max(0, (st['node.ifs.bytes.used'] || 0) - (st['node.ifs.ssd.bytes.used'] || 0))),
-        ssd: mkPool(st['node.ifs.ssd.bytes.total'] || 0, st['node.ifs.ssd.bytes.used'] || 0),
+                    has(st, 'node.ifs.bytes.used') ? Math.max(0, st['node.ifs.bytes.used'] - (st['node.ifs.ssd.bytes.used'] || 0)) : null),
+        ssd: mkPool(st['node.ifs.ssd.bytes.total'] || 0, has(st, 'node.ifs.ssd.bytes.used') ? st['node.ifs.ssd.bytes.used'] : null),
       };
     });
     snap.sections.nodes = 'ok';

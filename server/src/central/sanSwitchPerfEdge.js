@@ -84,6 +84,9 @@ export function saveEdgePerfStatus(agent, status, { owned = null, names = null }
   // 미위임 deviceId 는 버린다 — 남의 스위치 상태 위조 차단(시계열 수신과 같은 규약).
   if (owned) st.devices = st.devices.filter((d) => owned.has(String(d.id)));
   const m = load();
+  // v2.594(감사 EDGE2-02): Map.set 은 기존 키의 삽입 위치를 유지한다 — 지우고 다시 넣어야 '최근 보고' 가 뒤로 가서
+  //   상한 퇴출 때 방금 보고한 엣지가 밀려나지 않는다.
+  m.delete(a);
   m.set(a, { at: Date.now(), status: st });
   // v2.591: 상태의 at(엣지의 마지막 사용량 수집 시각)이 인출 때 기준선보다 새면 완료 — 하트비트 도착만으로 완료하지 않는다.
   // at 이 없으면(아직 한 번도 수집 안 함) 완료로 보지 않는다(요청은 시한 뒤 폐기 목록으로 밝혀진다).

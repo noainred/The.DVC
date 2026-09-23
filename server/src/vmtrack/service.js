@@ -64,6 +64,8 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
   for (const id of await rosterVcenters()) if (!knownIds.has(id)) await dropRoster(id);
 
   const totalRow = totalsOf(perVc);
+  // v2.594: 이번 슬롯에서 빠진 vCenter(수집 실패·첫 수집 중이라 인벤토리 0)를 결과에 밝힌다 — 합계가 부분 합이다.
+  const skippedVcenters = (snap.vcenters || []).filter((vc) => vc.id && !targets.some((t) => t.id === String(vc.id))).map((vc) => ({ id: String(vc.id), status: vc.status || '' }));
   const r = await commitSnapshot({ slot, ts, perVc, totalRow });
   if (!r.ok) return r;
   return {
@@ -74,6 +76,7 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
     poweredOn: totalRow.poweredOn, poweredOff: totalRow.poweredOff,
     dsCount: totalRow.dsCount, dsCapGB: totalRow.dsCapGB, dsUsedGB: totalRow.dsUsedGB,
     baseline: totalRow.baseline,
+    ...(skippedVcenters.length ? { skippedVcenters: skippedVcenters.slice(0, 64), skippedCount: skippedVcenters.length } : {}),
   };
 }
 

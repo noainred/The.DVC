@@ -1399,9 +1399,12 @@ centralRouter.post('/ip-scan-result', (req, res) => {
       if (before !== alive.length) console.warn(`[central] ip-scan-result: ${agent} 배정 범위 밖 IP ${before - alive.length}개 드롭(위조 방지)`);
     }
   }
-  if (alive.length) mergeScanResults(alive, Date.now(), agent);
-  recordAgentReport(agent, { scanned: b.scanned || 0, alive: alive.length, durationMs: b.durationMs || null });
-  res.json({ ok: true, merged: alive.length });
+  // v2.594(감사 EDGE2-03): 형식이 틀린 원소는 병합에서 버려진다 — 버리기 전 개수를 merged·alive 로 보고하면 수치가 부풀었다.
+  const validAlive = alive.filter((h) => h && ipToNum(h.ip) != null);
+  const dropped = alive.length - validAlive.length;
+  if (validAlive.length) mergeScanResults(validAlive, Date.now(), agent);
+  recordAgentReport(agent, { scanned: b.scanned || 0, alive: validAlive.length, durationMs: b.durationMs || null });
+  res.json({ ok: true, merged: validAlive.length, ...(dropped ? { dropped } : {}) });
 });
 
 /*
