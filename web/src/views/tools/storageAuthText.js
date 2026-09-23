@@ -103,3 +103,61 @@ export function authFailInfo(snap, row = {}, now = Date.now()) {
     notes,
   };
 }
+
+/** 주제 조사 — 마지막 글자가 한글 받침이면 '은', 그 밖(받침 없음·영문·숫자)은 '는'. */
+function topicOf(word) {
+  const s = String(word || '');
+  const code = s.charCodeAt(s.length - 1) - 0xAC00;
+  return code >= 0 && code < 11172 && code % 28 !== 0 ? '은' : '는';
+}
+
+/**
+ * 인증 실패로 **주기 수집을 멈춘** 대상의 안내(v2.590 — 도구 공통, 순수).
+ *
+ * 왜 여기인가: 스토리지(v2.528)가 이 규약의 첫 소비자였고 문구 규칙(정지 사실·시점·시도 횟수를 말한다 ·
+ * 원인을 단정하지 않는다 · 수동 실행은 막지 않는다고 말한다)이 이미 이 파일에 있다. v2.590 에 vCenter·iDRAC·
+ * NSX·SAN 스위치·PDU·GPU·베어메탈 스토리지가 같은 정지를 얻었고, 도구마다 문장을 새로 쓰면 갈라진다
+ * (CLAUDE.md '코어는 하나다').
+ *
+ * @param {null|object} stop `{since, at, attempts, reason}` — 서버 `authStopped`
+ * @param {{what?: string, manual?: string, now?: number}} [opts]
+ *   what   — 무엇이 멈췄나('이 vCenter', '이 스위치' …). 조사는 붙이지 않는다(문장이 '…의' 로 잇는다).
+ *   manual — 수동 실행 버튼 이름. 있으면 '그 버튼은 막지 않는다' 를 말하고, 없으면 그 문장을 뺀다
+ *            (수동 버튼이 없는 도구에서 없는 버튼을 말하지 않는다).
+ * @returns {null | {title:string, short:string, text:string, detail:string, attempts:number|null}}
+ *   `text` 는 BoldText 로 그린다(강조는 별표 두 개). ⚠ 백틱 금지(BoldText 는 강조만 해석한다).
+ */
+export function authStopInfo(stop, { what = '이 대상', manual = '', now = Date.now() } = {}) {
+  if (!stop || typeof stop !== 'object' || Array.isArray(stop)) return null;
+  const since = agoText(stop.since, now);
+  const last = agoText(stop.at, now);
+  // ⚠ `Number(null) === 0` — `== null` 과 빈 문자열을 먼저 본다(v2.525 규약). 모르면 횟수를 말하지 않는다.
+  const attempts = stop.attempts == null || stop.attempts === '' || !Number.isFinite(Number(stop.attempts)) ? null : Number(stop.attempts);
+  const reason = String(stop.reason || '').trim();
+  const facts = [];
+  if (since) facts.push(`${since}부터 정지`);
+  if (attempts != null) facts.push(`실패 ${attempts}회`);
+  if (last && last !== since) facts.push(`마지막 시도 ${last}`);
+  const detail = facts.join(' · ');
+  // 수동 실행은 막지 않는다 — 그리고 그 실행이 저장된 자격증명으로 성공하면 정지가 풀린다(서버가 기록을 지운다).
+  const manualNote = manual ? ` '${manual}'${topicOf(manual)} 막지 않습니다(1회만 시도) — 고친 뒤 눌러 확인하세요. 성공하면 정지가 풀립니다.` : '';
+  const text = `**인증 실패로 ${what}의 주기 수집을 멈췄습니다**${detail ? `(${detail})` : ''}.`
+    + ' 같은 계정으로 반복 로그인하면 **계정이 잠기기 때문**입니다. 비밀번호(계정)를 고치면 자동으로 다시 시작합니다.'
+    + manualNote
+    + (reason ? ` 사유: ${reason}` : '');
+  return { title: '인증 실패 — 주기 수집 정지', short: '인증 실패 정지', text, detail, attempts };
+}
+
+/**
+ * 목록에서 정지된 대상 개수·이름 요약(없으면 빈 문자열 — 문구를 만들지 않는다).
+ * @param {Array<{name?:string, id?:string}>} list
+ * @param {{unit?: string, what?: string}} [opts] unit — '대'·'곳'·'개'
+ */
+export function authStopSummary(list = [], { unit = '대', what = '' } = {}) {
+  const arr = Array.isArray(list) ? list.filter(Boolean) : [];
+  if (!arr.length) return '';
+  const names = arr.slice(0, 4).map((x) => String(x.name || x.id || '').trim()).filter(Boolean);
+  const more = arr.length > names.length ? ` 외 ${arr.length - names.length}${unit}` : '';
+  return `**${what ? `${what} ` : ''}${arr.length}${unit}${topicOf(unit)} 인증 실패로 주기 수집을 멈췄습니다**${names.length ? `(${names.join(' · ')}${more})` : ''}.`
+    + ' 반복 로그인은 결과가 같고 **계정만 잠급니다** — 비밀번호를 고치면 자동으로 다시 시작합니다.';
+}

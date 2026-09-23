@@ -19,6 +19,52 @@ import { describeError } from '../util/errors.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { isMockMode, mockIdracPollTick } from '../mock/seed.js';
 import { onSnapshotRefreshed } from '../partfault/hooks.js'; // v2.548: 인벤토리 갱신 직후 파트 장애 판정/push 트리거
+import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
+
+/**
+ * iDRAC·OME 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F1, 계정 잠금 경로).
+ *
+ * 예전에는 자격증명이 거부돼도 다음 1분 틱에 같은 계정으로 다시 로그인했다. `redfish.js rawGet` 은
+ * Basic → Digest → **세션 POST** 3단 폴백을 호출마다 반복하므로 전부 401 인 서버 1대가 **1분에 실패 인증
+ * 6회**(실측 — fetchPower + fetchSensors 의 GET 3회 × 폴백)를 만들었다. iDRAC 의 IP Blocking·계정 잠금이
+ * 켜진 현장이면 전력·온도 수집 자체가 막히고, 같은 계정을 쓰는 다른 수집(베어메탈 사용률)까지 죽는다.
+ * 코어는 `util/authGuard.js` 하나다(v2.535). 규칙: 조용히 멈추지 않는다 · 자격증명이 바뀌면 자동 재개 ·
+ * 수동 실행(`POST /idrac/poll`·연결 테스트)은 막지 않는다 · 자격증명 거부(401/403)만 멈춘다.
+ *
+ * 정지 id 는 이 노드 등록부의 서버 id 다 — 엣지는 자기 등록부·자기 정지 파일을 쓰므로 법인 사이에 충돌하지 않는다.
+ */
+const authGuard = createAuthGuard({ file: 'idrac-auth-stops.json' });
+
+/** 오류가 iDRAC/OME **자격증명 거부**인가 — 출처(redfish.get)가 붙인 플래그를 먼저 본다. */
+export function isIdracAuthError(err) {
+  if (!err) return false;
+  if (err.authFailed === true || err.status === 401 || err.status === 403) return true;
+  // OME(ome.js)는 문구로만 올린다('OME 인증 실패 (사용자/비밀번호 확인)'). 문구 판정은 공용 코어를 쓴다.
+  return isAuthFailureText(err.message || '');
+}
+
+const stopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+
+/**
+ * 이 서버가 인증 실패로 주기 수집이 멈췄는가 — **다른 수집기용 읽기 전용**(베어메탈 사용률이 같은 iDRAC 계정을
+ * 쓰므로 함께 본다). ⚠ 기록을 지우지 않는다(peek) — 해제는 이 폴러만 한다(util/authGuard.js peekAuthStop).
+ * @param {{id:string, username:string, password:string}} entry 등록부 id 와 같은 자격증명
+ */
+export function idracAuthStopFor(entry) { return authGuard.peekAuthStop(entry); }
+
+/** 등록부 전체의 정지 기록(id → 보기용). 화면이 서버 행마다 '멈췄다' 를 말하게 한다. */
+export function idracAuthStops(registry = null) {
+  const out = new Map();
+  let list = registry;
+  if (!list) { try { list = loadRegistry(); } catch { list = []; } }
+  for (const s of list || []) {
+    if (!s?.id) continue;
+    const rec = authGuard.authStopFor(s);
+    if (rec) out.set(String(s.id), stopView(rec));
+  }
+  return out;
+}
+export function _resetIdracAuthForTest() { authGuard._resetForTest(); }
 
 // Hardware inventory is largely static — refresh it at most every 30 minutes.
 const INVENTORY_MAX_AGE_MS = 30 * 60_000;
@@ -28,17 +74,17 @@ let lastRun = null; // { at, ok, failed, results: [{id, watts?, devices?, error?
 let running = false; // 재진입 방지(이전 폴이 끝나기 전 다음 틱이 겹쳐 도는 것 차단)
 let pruneTick = 0; // retention prune 스로틀(10틱마다 1회)
 
-async function pollOnce() {
+async function pollOnce({ manual = false } = {}) {
   if (running) return; // 고RTT iDRAC 다수에서 한 주기가 간격을 넘겨 폴이 중첩되는 것 방지
   running = true;
   try {
-    return await withJob('idrac.poll', pollOnceInner);
+    return await withJob('idrac.poll', () => pollOnceInner({ manual }));
   } finally {
     running = false;
   }
 }
 
-async function pollOnceInner() {
+async function pollOnceInner({ manual = false } = {}) {
   // v2.583: 이 카운터는 v2.548 부터 **pollOnce() 안에** 선언돼 있었다 — 쓰는 곳은 이 함수라 실장비(목 모드가
   // 아닌) 폴마다 마지막 줄에서 ReferenceError 가 났고, pollNow 가 잡아 `[idrac] pollNow 실패: invRefreshed is
   // not defined` 를 **폴마다** 찍었다. 그 결과 v2.548 F7(인벤토리 갱신 즉시 파트 장애 판정) 훅은 한 번도 돌지
@@ -70,7 +116,16 @@ async function pollOnceInner() {
   const results = [];
   const samples = []; // 전력 샘플을 모아 폴 종료 후 단일 트랜잭션으로 적재(서버 수만큼 fsync 방지).
   // 동시성 상한 — 무제한 Promise.all은 수백 대에 동시 TLS를 열어 CPU 스파이크/소켓 고갈.
+  let authSkipped = 0; // v2.590: 인증 실패 정지로 이번 주기에 건너뛴 서버 수(실패로 세지 않는다 — 새 장애처럼 보인다)
   await poolSettled(servers, config.idrac.pollConcurrency, async (s) => {
+    // v2.590: **주기 수집만** 인증 실패 정지 서버를 건너뛴다. 수동 '지금 폴' 은 사람이 1회 누르는 것이라
+    // 잠금 위험이 없고, 비밀번호를 고친 뒤 확인할 길을 없애면 안 된다(authGuard 규칙 3).
+    const stopped = manual ? null : authGuard.authStopFor(s);
+    if (stopped) {
+      authSkipped += 1;
+      results.push({ id: s.id, name: s.name, type: s.type || 'idrac', authStopped: stopView(stopped) });
+      return;
+    }
     try {
       if (s.type === 'ome') {
         // One OME -> many devices. Persist a sample per device + cache for lookups.
@@ -89,6 +144,15 @@ async function pollOnceInner() {
         let powerErr = null;
         const r = await fetchPower(s).catch((e) => { powerErr = e; return null; });
         if (r && r.watts != null) samples.push({ serverId: s.id, watts: r.watts, ts });
+        // v2.590: 자격증명 거부면 **이번 주기의 나머지(센서·인벤토리)도 시도하지 않고** 정지를 기록한다 —
+        // 같은 계정이라 결과가 같고, 폴백 3단(Basic·Digest·세션)이 요청마다 실패 인증을 더한다.
+        if (powerErr && isIdracAuthError(powerErr)) {
+          const rec = authGuard.markAuthStopped(s.id, s, describeError(powerErr).message);
+          console.warn(`[idrac] ${s.name || s.id}: 인증 실패로 주기 수집 정지(${rec.attempts}회) — 비밀번호를 고치면 자동 재개합니다`);
+          results.push({ id: s.id, name: s.name, type: 'idrac', watts: null, error: describeError(powerErr).message, authStopped: stopView(rec) });
+          return;
+        }
+        if (r) authGuard.clearAuthStop(s.id); // 인증이 통했다 — 정지 기록 해제
         // 온도센서 + CPU 사용량을 매 주기(1분) 수집해 시계열에 적재(차트용, 격리).
         // 시계열에는 팬을 {name,rpm}만 싣는다 — 파트 필드(model/partNumber)는 정적 정보라
         // 1440샘플 시계열에 반복 저장하면 메모리만 낭비(인벤토리 갱신 시에만 보관).
@@ -96,12 +160,27 @@ async function pollOnceInner() {
         let sensorErr = null;
         try {
           const sn = await fetchSensors(s);
-          sensorFans = sn.fans;
-          pushSensorSample(s.id, { t: ts, cpuUsagePct: sn.cpuUsagePct, temps: sn.temps, fans: (sn.fans || []).map((f) => ({ name: f.name, rpm: f.rpm })) });
+          // v2.590(감사 F7): Thermal 을 하나도 못 읽었으면 **'읽었고 0개' 가 아니다** — 실패로 기록하고
+          // 팬 컬렉션을 'failed' 로 올린다(파트 장애가 그 종류의 열린 장애를 닫지 않고 보류한다 — v2.548 F1).
+          if (sn.thermalOk === false) sensorErr = new Error(sn.error || 'Thermal 을 읽지 못했습니다');
+          else sensorFans = sn.fans;
+          // 빈 표본은 적재하지 않는다 — 온도도 CPU 도 없는 점을 매 분 쌓으면 센서 탭이 'N샘플' 을 말하며
+          // 정상처럼 보인다. CPU(텔레메트리)만 읽힌 경우는 그 값만 싣는다(온도는 비어 있는 채로 — 지어내지 않는다).
+          if (sn.thermalOk !== false || sn.cpuUsagePct != null) {
+            pushSensorSample(s.id, { t: ts, cpuUsagePct: sn.cpuUsagePct, temps: sn.thermalOk === false ? [] : sn.temps, fans: (sensorFans || []).map((f) => ({ name: f.name, rpm: f.rpm })) });
+          }
         } catch (e) {
           // v2.493: 조용히 삼키지 않는다 — 센서만 실패하는 상황(Thermal 미지원 등)을 진단할 수
           // 있게 사유를 results 에 남긴다(전력 수집과는 무관하게 계속 진행).
           sensorErr = e;
+          // 전력은 통했는데 센서만 자격증명 거부(권한 분리 계정 등) — 같은 계정의 반복이므로 정지한다.
+          if (isIdracAuthError(e) && !r) {
+            const rec = authGuard.markAuthStopped(s.id, s, describeError(e).message);
+            console.warn(`[idrac] ${s.name || s.id}: 인증 실패로 주기 수집 정지(${rec.attempts}회) — 비밀번호를 고치면 자동 재개합니다`);
+            // 인벤토리도 같은 계정이다 — 이번 주기에 더 로그인하지 않는다.
+            results.push({ id: s.id, name: s.name, type: 'idrac', watts: null, error: describeError(e).message, authStopped: stopView(rec) });
+            return;
+          }
         }
         // Refresh rich inventory on a slow cadence (best-effort, non-blocking).
         if (inventoryStale(s.id, INVENTORY_MAX_AGE_MS)) {
@@ -123,6 +202,13 @@ async function pollOnceInner() {
       }
     } catch (err) {
       const d = describeError(err);
+      // OME(fetchOmeDevices)의 자격증명 거부도 같은 규칙으로 멈춘다(v2.590).
+      if (isIdracAuthError(err)) {
+        const rec = authGuard.markAuthStopped(s.id, s, d.message);
+        console.warn(`[idrac] ${s.name || s.id}: 인증 실패로 주기 수집 정지(${rec.attempts}회) — 비밀번호를 고치면 자동 재개합니다`);
+        results.push({ id: s.id, name: s.name, type: s.type || 'idrac', error: d.message, authStopped: stopView(rec) });
+        return;
+      }
       results.push({ id: s.id, name: s.name, type: s.type || 'idrac', error: d.message });
     }
   });
@@ -139,25 +225,32 @@ async function pollOnceInner() {
     } catch (e) { console.warn(`[idrac] prune 실패: ${e.message}`); }
   }
   const failed = results.filter((r) => r.error).length;
-  lastRun = { at: ts, ok: results.length - failed, failed, results, notPolled };
-  if (failed) console.warn(`[idrac] poll: ${results.length - failed}/${results.length} 성공`);
+  // ok 는 '성공' 만 센다 — 정지로 건너뛴 서버(authStopped·error 없음)를 성공으로 세면 거짓이다(v2.590).
+  const okCount = results.filter((r) => !r.error && !r.authStopped).length;
+  lastRun = { at: ts, ok: okCount, failed, results, notPolled, authStopped: results.filter((r) => r.authStopped).length, authSkipped, manual };
+  if (failed) console.warn(`[idrac] poll: ${okCount}/${results.length} 성공${authSkipped ? ` · 인증 실패 정지로 건너뜀 ${authSkipped}` : ''}`);
   // v2.548 F7: 인벤토리가 하나라도 갱신됐으면 파트 장애 판정(중앙)/push(엣지)를 즉시 트리거한다 —
   //   탐지 지연을 '인벤토리 주기 + 몇 초' 로 줄인다(v2.547 은 최대 ~50분). 디바운스는 훅이 한다.
   if (invRefreshed > 0) { try { onSnapshotRefreshed('idrac'); } catch { /* 훅 실패가 폴을 막지 않는다 */ } }
 }
 
 export function getPollerStatus() {
+  let registry = [];
+  try { registry = loadRegistry(); } catch { /* 등록부를 못 읽으면 0 */ }
+  const stops = idracAuthStops(registry);
   return {
     enabled: config.idrac.enabled,
     intervalMs: config.idrac.pollIntervalMs,
-    servers: loadRegistry().length,
+    servers: registry.length,
     lastRun,
+    // v2.590: 인증 실패로 주기 수집이 멈춘 서버 — 재시작 뒤에도(파일) 화면이 말하게 매번 다시 본다.
+    authStops: [...stops.entries()].map(([id, v]) => ({ id, name: registry.find((x) => String(x.id) === id)?.name || id, ...v })),
   };
 }
 
 /** Trigger an immediate poll (e.g. right after a registry change). */
-export async function pollNow() {
-  try { await pollOnce(); } catch (err) { console.error('[idrac] pollNow 실패:', err.message); }
+export async function pollNow({ manual = false } = {}) {
+  try { await pollOnce({ manual }); } catch (err) { console.error('[idrac] pollNow 실패:', err.message); }
   return lastRun;
 }
 

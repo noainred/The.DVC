@@ -17,6 +17,31 @@ import { collectMany } from './collect.js';
 import { enqueueBmstorJob, setBmstorExpireHandler } from './jobs.js';
 import { findCollectorForAgent } from '../central/idracScanPush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { createAuthGuard } from '../util/authGuard.js';
+import { isSshAuthError } from '../proxy/sshExec.js';
+
+/**
+ * 베어메탈 스토리지 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F2, server/CLAUDE.md v2.541 '아직 가드가 없는
+ * 주기 SSH 수집기' 의 `bmstor/collect.js`). 예전에는 틀린 OS 계정으로 주기(기본 10분)마다 SSH 로그인했다.
+ * 정지는 **중앙이 판단한다** — 엣지 위임 서버도 중앙이 잡을 걸거나 PUSH 하므로, 중앙이 대상에서 빼면 엣지도
+ * 로그인하지 않는다(엣지 쪽 코드를 바꾸지 않고 막힌다). 수동 '지금 수집' 은 막지 않는다(authGuard 규칙 3).
+ */
+const authGuard = createAuthGuard({ file: 'bmstor-auth-stops.json' });
+const stopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+/** 결과가 SSH 자격증명 거부인가 — 직접 수집은 플래그, 엣지 회신은 ssh2 정식 문구(플래그가 빠져 온다). */
+const isAuthResult = (r) => !!(r && r.ok === false && (r.authFailed === true || isSshAuthError({ message: r.error || '' })));
+
+/** 결과 1건을 반영하며 정지 기록을 갱신한다(성공이면 해제, 자격증명 거부면 정지). */
+function noteAuth(srv, r) {
+  if (!srv) return r;
+  if (r?.ok) { authGuard.clearAuthStop(srv.id); return r; }
+  if (isAuthResult(r)) {
+    const rec = authGuard.markAuthStopped(srv.id, srv, r.error || 'SSH 인증 실패');
+    console.warn(`[bmstor] ${srv.name || srv.host}: 인증 실패로 주기 수집 정지(${rec.attempts}회) — 비밀번호를 고치면 자동 재개합니다`);
+    return { ...r, authStopped: stopView(rec) };
+  }
+  return r;
+}
 
 const TICK_MS = 30_000;
 const PUSH_TIMEOUT_MS = Number(process.env.BMSTOR_PUSH_TIMEOUT_MS) || 180_000;
@@ -36,15 +61,19 @@ export function bmPollerStatus() { return { running, lastRunAt, lastRunSummary, 
 export function applyBmstorResults(agent, results) {
   const at = Date.now();
   let applied = 0;
+  let byId = null;
   for (const r of Array.isArray(results) ? results : []) {
     if (!r || !r.id) continue;
-    latest.set(String(r.id), {
+    const row = {
       ok: !!r.ok,
       mounts: Array.isArray(r.mounts) ? r.mounts : [],
       missing: Array.isArray(r.missing) ? r.missing : [],
       error: r.error ? String(r.error) : null,
       at, agent: String(agent || ''),
-    });
+    };
+    // v2.590: 엣지 회신의 자격증명 거부도 정지 기록에 반영한다(중앙이 다음 주기의 잡 대상에서 뺀다).
+    if (!byId) { try { byId = new Map(listBmServersRaw().map((s) => [String(s.id), s])); } catch { byId = new Map(); } }
+    latest.set(String(r.id), noteAuth(byId.get(String(r.id)), row));
     applied++;
   }
   return applied;
@@ -83,7 +112,18 @@ export async function bmCollectNow(trigger = 'manual') {
   running = true;
   const started = Date.now();
   try {
-    const servers = listBmServersRaw().filter((s) => s.enabled !== false);
+    const enabled = listBmServersRaw().filter((s) => s.enabled !== false);
+    // v2.590: **주기 수집만** 인증 실패 정지 서버를 뺀다(수동 '지금 수집' 은 막지 않는다). 빠진 서버는 결과에
+    // 정지 사실을 남긴다 — 조용히 빼면 화면이 마지막 값을 지금 값처럼 보여준다.
+    let authStopped = 0;
+    const servers = trigger === 'manual' ? enabled : enabled.filter((s) => {
+      const stop = authGuard.authStopFor(s);
+      if (!stop) return true;
+      authStopped++;
+      const prev = latest.get(s.id);
+      latest.set(s.id, { ...(prev || { mounts: [] }), ok: false, mounts: [], error: `인증 실패로 주기 수집 정지(${stop.attempts}회) — 비밀번호를 고치면 자동 재개합니다`, authStopped: stopView(stop), at: prev?.at || stop.at, agent: s.agent || '' });
+      return false;
+    });
     const central = servers.filter((s) => !String(s.agent || '').trim());
     const pushByAgent = new Map(); // 중앙→엣지 직접(PUSH) — 중앙이 엣지 URL 에 닿을 때
     const pollByAgent = new Map(); // 에이전트 폴링 — NAT 뒤 엣지(iDRAC/IP스캔과 동일, v2.341)
@@ -109,7 +149,7 @@ export async function bmCollectNow(trigger = 'manual') {
     const srvById = new Map(servers.map((s) => [s.id, s])); // O(N²) 방지 — 1,000대 상한에서 find 는 백만 비교(v2.342)
     for (const r of [...centralResults, ...edgeResults.flat()]) {
       const srv = srvById.get(r.id);
-      latest.set(r.id, { ...r, at, agent: srv?.agent || '' });
+      latest.set(r.id, noteAuth(srv, { ...r, at, agent: srv?.agent || '' }));
       if (r.ok) ok++; else errors++;
     }
     // 삭제된 서버의 잔존 결과 정리(유령 표시 방지).
@@ -119,7 +159,7 @@ export async function bmCollectNow(trigger = 'manual') {
     for (const id of [...latest.keys()]) if (!ids.has(id)) latest.delete(id);
     lastRunAt = at;
     // 필드명 okCount — { ok:true, ...summary } 스프레드에서 성공 여부(boolean)를 덮지 않게.
-    lastRunSummary = { at, trigger, servers: servers.length, okCount: ok, errors, queued, ms: at - started };
+    lastRunSummary = { at, trigger, servers: servers.length, okCount: ok, errors, queued, authStopped, ms: at - started };
     return { ok: true, ...lastRunSummary };
   } finally {
     running = false;

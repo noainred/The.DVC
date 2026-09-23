@@ -13,7 +13,7 @@ import tls from 'node:tls';
 import { config } from '../config.js';
 import { loadMetricsSettings } from '../metrics/settings.js';
 import { parseObjectContent, xmlUnescape, snapshotInfo } from './soapParse.js';
-import { vcDispatcher } from './restClient.js';
+import { vcDispatcher, vcRequestSignal } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
 import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v2.492: 다중 VM 기간 사용률(엔티티별 파싱)
 
@@ -99,14 +99,22 @@ const PERF_COUNTER_CACHE = new Map();
 const PERF_COUNTER_TTL_MS = Math.max(60_000, Number(process.env.PERF_COUNTER_TTL_MS) || 6 * 3_600_000);
 
 export class VimSoapClient {
-  constructor(vc) {
+  /**
+   * @param {object} vc
+   * @param {{signal?: AbortSignal}} [opts] signal — 호출자의 데드라인(v2.590 — 감사 F7). 만료되면 **진행 중인
+   *   SOAP 요청을 실제로 끊는다**(v2.417 규약). 예전에는 건별 `AbortSignal.timeout` 만 있어 store 의
+   *   `Promise.race` 데드라인이 결과만 포기하고, 버려진 수집이 남은 왕복(건당 최대 30초 × 9회 이상)을
+   *   계속 돌려 다음 주기가 같은 vCenter 에 **두 번째 세션**을 열었다.
+   */
+  constructor(vc, { signal = null } = {}) {
     this.vc = vc;
     this.url = `${vc.host.replace(/\/+$/, '')}/sdk`;
     this.cookie = null;
     this.sc = null; // service content refs
+    this.signal = signal || null;
   }
 
-  async #call(body) {
+  async #call(body, { ignoreExternal = false, isLogin = false } = {}) {
     const res = await fetch(this.url, {
       method: 'POST',
       dispatcher: vcDispatcher, // vCenter 전용 TLS 정책 — 전역 디스패처 오염 제거(감사 C1/C3)
@@ -116,14 +124,26 @@ export class VimSoapClient {
         ...(this.cookie ? { Cookie: this.cookie } : {}),
       },
       body: ENVELOPE(body),
-      signal: AbortSignal.timeout(this.vc?.timeoutMs > 0 ? this.vc.timeoutMs : 30_000),
+      signal: vcRequestSignal(this.vc?.timeoutMs > 0 ? this.vc.timeoutMs : 30_000, ignoreExternal ? null : this.signal),
     });
     const setCookie = res.headers.get('set-cookie');
     if (setCookie) this.cookie = setCookie.split(';')[0];
     const text = await res.text();
     if (!res.ok) {
       const fault = /<faultstring>([^<]*)<\/faultstring>/.exec(text);
-      throw new Error(`SOAP ${res.status}: ${fault ? fault[1] : text.slice(0, 160)}`);
+      // v2.590(감사 F1): **자격증명 거부는 출처에서 못 박는다**(server/CLAUDE.md v2.541 규약).
+      // vim25 의 로그인 거부는 fault 상세 타입 `InvalidLogin`(faultstring 은 'Cannot complete login due to
+      // an incorrect user name or password.')이다. 이 플래그가 있어야 ① REST 폴백(같은 계정 두 번째 로그인)을
+      // 막고 ② 주기 수집을 멈출 수 있다. 문구 추측이 아니라 fault 타입·HTTP 401 로만 판정한다 —
+      // `NoPermission`(로그인은 됐고 권한이 없다)은 잠금 경로가 아니라 여기서 잡지 않는다.
+      // HTTP 401 은 **Login 호출에서만** 자격증명 거부로 본다 — 로그인 뒤 호출의 401(세션 만료·프록시)은
+      // 계정 문제가 아니라서 주기 수집을 멈추면 일시 장애가 영구 정지가 된다(authGuard 규칙 4).
+      const invalidLogin = /InvalidLogin(?:Fault)?\b/.test(text) || (isLogin && res.status === 401);
+      const err = new Error(invalidLogin
+        ? `vCenter 인증 실패(InvalidLogin) — ${fault ? xmlUnescape(fault[1]) : `HTTP ${res.status}`}`
+        : `SOAP ${res.status}: ${fault ? fault[1] : text.slice(0, 160)}`);
+      if (invalidLogin) { err.authFailed = true; err.status = res.status; }
+      throw err;
     }
     return text;
   }
@@ -160,14 +180,16 @@ export class VimSoapClient {
     if (!this.sc) await this.retrieveServiceContent();
     await this.#call(
       `<Login xmlns="urn:vim25"><_this type="SessionManager">${this.sc.sessionManager}</_this>` +
-      `<userName>${esc(this.vc.username)}</userName><password>${esc(this.vc.password)}</password></Login>`
+      `<userName>${esc(this.vc.username)}</userName><password>${esc(this.vc.password)}</password></Login>`,
+      { isLogin: true },
     );
   }
 
   async logout() {
     if (!this.sc?.sessionManager) return;
     try {
-      await this.#call(`<Logout xmlns="urn:vim25"><_this type="SessionManager">${this.sc.sessionManager}</_this></Logout>`);
+      // 데드라인으로 끊긴 뒤에도 세션은 정리한다(외부 신호 무시 · 건별 시한만, v2.590) — 남기면 세션 수를 먹는다.
+      await this.#call(`<Logout xmlns="urn:vim25"><_this type="SessionManager">${this.sc.sessionManager}</_this></Logout>`, { ignoreExternal: true });
     } catch { /* best effort */ }
   }
 
@@ -1269,8 +1291,8 @@ const pct = (used, total) => (total > 0 ? Math.round((used / total) * 100) : 0);
  * vCenter via SOAP. Throws on connection/login failure so the caller can fall
  * back to the REST collector.
  */
-export async function collectFromVCenterSoap(vc) {
-  const c = new VimSoapClient(vc);
+export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
+  const c = new VimSoapClient(vc, { signal });
   await c.login();
   try {
     const view = await c.createContainerView([

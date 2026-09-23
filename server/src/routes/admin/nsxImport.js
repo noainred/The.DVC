@@ -6,8 +6,8 @@ import { getDataSource } from '../../runtime-settings.js';
 import { importVcenters } from '../../vcenter/registry.js';
 import { geocode } from '../../vcenter/geocode.js';
 import path from 'node:path';
-import { listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx, removeManager as removeNsx, testConnection as testNsx } from '../../nsx/registry.js';
-import { nsxStore } from '../../nsx/store.js';
+import { loadRegistry as loadNsxFull, listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx, removeManager as removeNsx, testConnection as testNsx } from '../../nsx/registry.js';
+import { nsxStore, nsxAuthGuard } from '../../nsx/store.js';
 import { adminOnly, existsFile } from './shared.js';
 
 
@@ -24,7 +24,14 @@ export function registerNsxImport(adminRouter) {
 
 // --- NSX Manager registry (separate from vCenter; managed by NSX Manager) ---
 adminRouter.get('/nsx/managers', adminOnly, (_req, res) => {
-  res.json({ dataSource: getDataSource(), managers: listNsx() });
+  // v2.590: 인증 실패로 주기 수집이 멈춘 매니저를 목록이 말한다(정지 판정에는 복호된 자격증명이 필요 — 응답엔 안 싣는다).
+  let full = new Map();
+  try { full = new Map(loadNsxFull().map((m) => [m.id, m])); } catch { /* 목록은 그대로 */ }
+  const managers = listNsx().map((m) => {
+    const rec = full.has(m.id) ? nsxAuthGuard.authStopFor(full.get(m.id)) : null;
+    return rec ? { ...m, authStopped: { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } } : m;
+  });
+  res.json({ dataSource: getDataSource(), managers });
 });
 adminRouter.post('/nsx/managers', adminOnly, (req, res) => {
   const result = addNsx(req.body || {});

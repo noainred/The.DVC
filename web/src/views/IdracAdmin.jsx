@@ -19,6 +19,8 @@ import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { IdracScanJobs } from './idrac/IdracScanJobs.jsx';
 import { IdracScanRanges } from './idrac/IdracScanRanges.jsx';
+import BoldText from '../components/boldText.jsx';
+import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
 export default function IdracAdmin() {
   const [data, setData] = useState(null);
@@ -135,9 +137,39 @@ export default function IdracAdmin() {
     finally { setBusy(false); }
   };
 
+  // v2.590(감사 F1): 인증 실패로 **주기 수집(전력·센서·인벤토리)을 멈춘** 서버 — 조용히 멈추지 않는다.
+  const authStops = Array.isArray(data?.poller?.authStops) ? data.poller.authStops : [];
+  const pollOnceManual = async () => {
+    setBusy(true); setImportMsg(null);
+    try {
+      const r = await postJson('/admin/idrac/poll', {});
+      const lr = r?.lastRun || {};
+      setImportMsg({ ok: !lr.failed, text: `수동 1회 수집 — 성공 ${lr.ok ?? 0} · 실패 ${lr.failed ?? 0}${lr.authStopped ? ` · 인증 실패 정지 ${lr.authStopped}` : ''}` });
+      await load();
+    } catch (err) { setImportMsg({ ok: false, text: err.message }); }
+    finally { setBusy(false); }
+  };
+
   return (
     <>
       <div className="section-title" style={{ margin: '6px 0' }}>iDRAC 서버 등록 — Dell 베어메탈/물리 서버 (관리자)</div>
+
+      {authStops.length > 0 && (
+        <div className="card" style={{ marginBottom: 10, padding: '10px 14px', fontSize: 13, borderColor: 'var(--red)' }}>
+          <BoldText text={authStopSummary(authStops, { unit: '대', what: 'iDRAC 서버' })} />
+          <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+            계정·비밀번호는 아래 스캔 대역에서 고치고 다시 스캔하면(등록 정보가 갱신되면) 그 서버부터 자동으로 재개합니다.
+            ‘지금 1회 수집’ 은 정지와 무관하게 전 서버를 1회 시도합니다 — 성공한 서버는 정지가 풀립니다.
+          </div>
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12 }}>
+            {authStops.slice(0, 12).map((x) => (
+              <li key={x.id}><b>{x.name || x.id}</b> <span className="muted">— {authStopInfo(x, { what: '이 서버' })?.detail || ''}{x.reason ? ` · ${x.reason}` : ''}</span></li>
+            ))}
+          </ul>
+          {authStops.length > 12 && <div className="muted" style={{ fontSize: 12 }}>외 {authStops.length - 12}대</div>}
+          <button className="logout-btn" style={{ marginTop: 8, padding: '6px 12px' }} disabled={busy} onClick={pollOnceManual}>지금 1회 수집</button>
+        </div>
+      )}
 
       {/* 스캔/삭제 등 결과 배너 — 이전에는 setImportMsg만 하고 렌더 JSX가 없어
           "비밀번호 미설정"·"이미 스캔 중" 같은 실패가 화면에 안 나오고 무음이었다. */}

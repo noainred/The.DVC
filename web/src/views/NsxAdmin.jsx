@@ -3,6 +3,7 @@ import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
+import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
 import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 const EMPTY = { id: '', name: '', host: 'https://', username: '', password: '', vcenterId: '', proxyId: '', enabled: true, pollIntervalSec: '', timeoutMs: '', location: { region: '아시아' } };
@@ -44,7 +45,10 @@ export default function NsxAdmin() {
     setBusy(true); setMsg(null);
     try {
       const r = await postJson('/admin/nsx/managers/test', form);
-      setMsg(r.ok ? { ok: true, text: `연결 성공 (${r.ms}ms)` } : { ok: false, text: `연결 실패: ${r.reason}${r.hint ? ` — ${r.hint}` : ''}` });
+      setMsg(r.ok
+        ? { ok: true, text: `연결 성공 (${r.ms}ms)${r.authStopCleared ? ' — 저장된 비밀번호로 로그인됐으므로 인증 실패로 멈췄던 주기 수집을 다시 시작합니다' : ''}` }
+        : { ok: false, text: `연결 실패: ${r.reason}${r.hint ? ` — ${r.hint}` : ''}` });
+      if (r.ok && r.authStopCleared) load();
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
   const remove = async (m) => {
@@ -77,7 +81,9 @@ export default function NsxAdmin() {
             {list.map((m) => (
               <tr key={m.id}>
                 <td><b>{m.id}</b></td>
-                <td>{m.name}</td>
+                <td>{m.name}
+                  {m.authStopped && <span className="badge red" style={{ marginLeft: 6, fontSize: 10, whiteSpace: 'nowrap' }} title={`${authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || ''} — 비밀번호를 고치면 자동 재개합니다. 저장된 비밀번호로 한 연결 테스트가 성공해도 풀립니다.`}>인증 실패 정지</span>}
+                </td>
                 <td className="muted">{m.host}{m.proxyId && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={`중계 서버(HAProxy) 경유: ${proxies.find((p) => p.id === m.proxyId)?.name || m.proxyId}`}>프록시 경유</span>}</td>
                 <td className="muted">{m.username}</td>
                 <td><span className="badge blue">{m.location?.region || '-'}</span></td>

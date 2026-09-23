@@ -22,6 +22,7 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { config } from '../config.js';
 import { pushPerfNow } from './perfPush.js';
 import { recordActivity, latestEventByDevice } from './perfActivityLog.js';
+import { sanAuthGuard, isSanAuthError } from './poller.js'; // v2.590: 기본 수집과 **같은 장비 계정** — 같은 정지 기록
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.SANSW_PERF_CONCURRENCY) || 2));
@@ -100,10 +101,15 @@ export async function pollPerfOnce({ force = false } = {}) {
   if (_busy) return { ok: false, reason: '이전 수집 진행 중(겹침 방지)' };
   _busy = true;
   const t0 = Date.now();
-  let collected = 0; let failed = 0; const errors = [];
+  let collected = 0; let failed = 0; let authStopped = 0; const errors = [];
   try {
     const devices = devicesForThisNode();
     await pool(devices, CONCURRENCY, async (d) => {
+      // v2.590(감사 F2): 인증 실패로 멈춘 장비는 **주기 수집에서만** 건너뛴다(`force` = 수동 실행 — 막지 않는다).
+      // 기본 수집 폴러와 같은 정지 기록이다 — 그쪽이 멈췄으면 여기서도 같은 계정으로 로그인하지 않는다.
+      // 작업 로그에는 남기지 않는다(정지 중에는 이벤트가 아니다). 정지 사실은 기본 수집 스냅샷이 말한다.
+      const full = getDeviceWithSecret(d.id) || d;
+      if (!force && full.collectMethod !== 'rest' && sanAuthGuard.authStopFor(full)) { authStopped++; return; }
       const t = Date.now();
       _inFlight.set(String(d.id), { id: d.id, name: d.name || d.id, host: d.host || '', startedAt: t });
       try {
@@ -116,6 +122,10 @@ export async function pollPerfOnce({ force = false } = {}) {
         });
       } catch (e) {
         failed++; errors.push(`${d.name || d.id}: ${e.message}`);
+        if (isSanAuthError(e)) {
+          const rec = sanAuthGuard.markAuthStopped(full.id || d.id, full, e.message);
+          console.warn(`[sanswitch-perf] ${d.name || d.id}: 인증 실패로 주기 수집 정지(${rec.attempts}회) — 비밀번호를 고치면 자동 재개합니다`);
+        }
         // ⚠ 실패 이벤트의 수치는 null 이다 — 0 을 실으면 '포트 0개' 라는 거짓이 찍힌다(v2.516 규약).
         recordActivity({
           deviceId: d.id, name: d.name || d.id, host: d.host || '', source: 'central', ok: false,
@@ -123,7 +133,7 @@ export async function pollPerfOnce({ force = false } = {}) {
         });
       } finally { _inFlight.delete(String(d.id)); }
     });
-    _last = { at: Date.now(), collected, failed, durationMs: Date.now() - t0, total: devices.length, errors: errors.slice(0, 5) };
+    _last = { at: Date.now(), collected, failed, authStopped, durationMs: Date.now() - t0, total: devices.length, errors: errors.slice(0, 5) };
     // 엣지(v2.423): 수집 직후 중앙으로 중계 — push 타이머를 기다리면 최대 한 주기(기본 5분)가 더 걸린다.
     if (collected && config.agent.centralUrl && config.agent.centralToken) pushPerfNow().catch(() => {});
     return { ok: true, ..._last };

@@ -13,7 +13,8 @@ import { store } from '../store.js';
 import { loadGpuGuestSettings, resolveVmCreds, resolveVmIp, resolveCollectMethod } from './settings.js';
 import { setGuestGpu, pruneGuestGpu, guestGpuCounts } from './store.js';
 import { collectVmGpu, VimSoapClient } from './guestops.js';
-import { collectVmGpuSsh, guestIps } from './sshCollect.js';
+import { collectVmGpuSsh, guestIps, gpuAuthGuard, gpuStopView, isGpuAuthError } from './sshCollect.js';
+import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
@@ -100,9 +101,20 @@ async function pollLive(snap, vc, s) {
   // (readGuestFile이 마지막 폴백으로 vCenter host를 한 번 더 시도하므로 누락 위험 없음)
   const dlByHost = new Map();
   for (const h of snap.hosts || []) if (h.vcenterId === vc.id) dlByHost.set(h.name, [h.mgmtIp, h.name].filter(Boolean));
+  // v2.590(감사 F1): vCenter 계정이 인증 실패로 멈춰 있으면 로그인하지 않는다 — 인벤토리 수집(store)과 **같은
+  //   계정**이라 여기서 1분마다 따로 로그인하면 store 가 멈춰도 잠금은 그대로다(같은 정지 기록을 본다).
+  const vcStop = vcAuthGuard.authStopFor(vc);
+  if (vcStop) {
+    diag.stage = 'vCenter 인증 실패 정지'; diag.error = vcStop.reason; diag.authStopped = gpuStopView(vcStop);
+    return { hosts: [], vms: [], diag };
+  }
   const c = new VimSoapClient(vc);
   try { await c.login(); }
-  catch (e) { diag.stage = 'vCenter 로그인 실패'; diag.error = e.message; console.warn(`[gpu-guest] ${vc.id} vCenter 로그인 실패: ${e.message}`); return { hosts: [], vms: [], diag }; }
+  catch (e) {
+    diag.stage = 'vCenter 로그인 실패'; diag.error = e.message; console.warn(`[gpu-guest] ${vc.id} vCenter 로그인 실패: ${e.message}`);
+    if (isVcAuthError(e)) diag.authStopped = gpuStopView(vcAuthGuard.markAuthStopped(vc.id, vc, e.message));
+    return { hosts: [], vms: [], diag };
+  }
   diag.stage = '수집';
   console.log(`[gpu-guest] ${vc.id} vCenter 로그인 OK → ${cands.length}개 VM 수집 시작(동시 ${s.concurrency}, 타임아웃 ${Math.round((s.timeoutMs || 20000) / 1000)}s)`);
   const vms = [];
@@ -118,14 +130,25 @@ async function pollLive(snap, vc, s) {
       // VMware Tools 게스트 작업(cmd.exe /c nvidia-smi.exe) 우선(auto)으로 자동 조정(리눅스는 그대로).
       const method = resolveCollectMethod(s.collectMethod, isWindows);
       const winAdjusted = isWindows && (s.collectMethod || 'auto') === 'ssh';
+      // v2.590(감사 F2): 이 VM 의 게스트 계정이 인증 실패로 멈춰 있으면 주기 수집에서 건너뛴다(이 폴러는 주기
+      //   전용이다 — 수동 확인은 설정 화면의 '게스트 테스트'). 비밀번호를 고치면 credHash 가 바뀌어 자동 재개.
+      const guestAuthId = `vm|${vc.id}|${v.id}`;
+      const credDev = { id: guestAuthId, username: creds.username, password: creds.password };
+      const gStop = gpuAuthGuard.authStopFor(credDev);
+      if (gStop) {
+        if (diag.results.length < 200) diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: isWindows ? 'Windows' : 'Linux', account: `${creds.username}(${creds.source})`, ok: false, authStopped: gpuStopView(gStop), error: `인증 실패로 주기 수집 정지(${gStop.attempts}회) — 비밀번호를 고치면 자동 재개합니다` });
+        diag.authStoppedVms = (diag.authStoppedVms || 0) + 1;
+        return;
+      }
       console.log(`[gpu-guest]   → ${v.name} (${moref}) host=${v.host} 계정=${creds.username}(${creds.source}) OS=${isWindows ? 'Windows' : 'Linux'} 방식=${method}${winAdjusted ? '(Windows용 게스트작업 우선 조정)' : ''} dl후보=[${dlHosts.join(', ')}]`);
       let err = null;
+      let authFail = null;   // v2.590: 자격증명 거부(게스트 작업 InvalidGuestLogin · SSH client-authentication)
       // 'ssh'=직접 SSH+nvidia-smi · 'auto'=게스트작업 먼저→실패 시 SSH(+VM별 성공 방식 학습) · 'guestops'=VMware Tools.
       const viaSsh = () => collectVmGpuSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, preferIp: resolveVmIp(s, vc.id, v.id) });
       const viaGuestops = () => collectVmGpu(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts });
       let r = null, usedMethod = method;
       if (method === 'ssh') {
-        r = await viaSsh().catch((e) => { err = e.message; return null; });
+        r = await viaSsh().catch((e) => { err = e.message; if (isGpuAuthError(e)) authFail = e; return null; });
       } else if (method === 'auto') {
         // 직전 성공 방식을 먼저(학습). 처음엔 게스트작업 → 실패하면 SSH 폴백. 추가 설정 없이 자동 수집.
         // Windows는 SSH 폴백이 대개 무의미(무sshd)하므로 항상 게스트작업 우선(학습된 ssh 무시).
@@ -136,19 +159,31 @@ async function pollLive(snap, vc, s) {
         const tried = [];
         for (const m of order) {
           let mErr = '';
-          r = await (m === 'ssh' ? viaSsh() : viaGuestops()).catch((e) => { mErr = e.message; return null; });
+          r = await (m === 'ssh' ? viaSsh() : viaGuestops()).catch((e) => { mErr = e.message; if (isGpuAuthError(e)) authFail = e; return null; });
           if (!(r && r.utilPct != null)) tried.push(`${m === 'ssh' ? 'SSH' : '게스트작업'}: ${mErr || 'nvidia-smi 결과 없음'}`);
           if (r && r.utilPct != null) {
             // 삭제된 VM의 키가 무한 누적되지 않도록 상한 — 넘으면 비우고 다시 학습(무해).
             if (learnedMethod.size > 20000) learnedMethod.clear();
             usedMethod = m; learnedMethod.set(v.id, m); break;
           }
+          // v2.590(감사 F2): **자격증명 거부면 다른 방식으로 폴백하지 않는다** — 두 방식 모두 같은 게스트 계정이라
+          //   결과가 같고, 폴백하면 실패 로그인이 주기마다 두 배가 된다(공용 계정이면 VM 50대 법인에서 1분에 100회).
+          if (authFail) break;
         }
         if (!(r && r.utilPct != null) && tried.length) err = tried.join(' / ');
       } else {
-        r = await viaGuestops().catch((e) => { err = e.message; return null; });
+        r = await viaGuestops().catch((e) => { err = e.message; if (isGpuAuthError(e)) authFail = e; return null; });
       }
       if (!(r && r.utilPct != null) && err) console.warn(`[gpu-guest]   ✗ ${v.name}: ${err}`);
+      // v2.590: 자격증명 거부 → 이 VM 의 주기 수집을 멈춘다(조용히 멈추지 않는다 — 진단 결과에 `authStopped`).
+      let authRec = null;
+      if (authFail && !(r && r.utilPct != null)) {
+        authRec = gpuAuthGuard.markAuthStopped(guestAuthId, credDev, err || authFail.message);
+        diag.authStoppedVms = (diag.authStoppedVms || 0) + 1;
+        console.warn(`[gpu-guest]   ${v.name}: 인증 실패로 주기 수집 정지(${authRec.attempts}회) — 비밀번호를 고치면 자동 재개합니다`);
+      } else if (r && r.utilPct != null) {
+        gpuAuthGuard.clearAuthStop(guestAuthId);
+      }
       // 진단에 시도한 OS/계정·실제 사용 방식도 남긴다(인증 실패 시 식별 — 비번 제외).
       const osLabel = isWindows ? 'Windows' : 'Linux';
       const acct = `${creds.username}(${creds.source})·${usedMethod}`;
@@ -158,7 +193,7 @@ async function pollLive(snap, vc, s) {
         const arr = byHost.get(v.host) || []; arr.push(r.utilPct); byHost.set(v.host, arr);
         if (diag.results.length < 200) diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: true, util: r.utilPct, mem: r.memUsedPct ?? null, gpus: r.count });
       } else if (diag.results.length < 200) {
-        diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: false, error: err || 'nvidia-smi 결과 없음(stdout 비어있음)' });
+        diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: false, error: err || 'nvidia-smi 결과 없음(stdout 비어있음)', ...(authRec ? { authStopped: gpuStopView(authRec) } : {}) });
       }
     });
   } finally { await c.logout().catch(() => {}); }
@@ -207,7 +242,10 @@ async function pollOnce() {
 
     // 3주기 이상 갱신 안 된 항목 정리.
     pruneGuestGpu(s.pollIntervalMs * 3 + 30_000);
-    lastRun = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: enabledIds.length, hosts: collectedHosts, vms: collectedVms, errors, overlay: guestGpuCounts() };
+    // v2.590: 인증 실패로 주기 수집이 멈춘 VM·vCenter 수를 함께 싣는다(설정 화면이 '멈췄다' 를 말한다).
+    const authStoppedVms = diags.reduce((a, d) => a + (d.authStoppedVms || 0), 0);
+    const vcAuthStopped = diags.filter((d) => d.authStopped).map((d) => d.vcId);
+    lastRun = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: enabledIds.length, hosts: collectedHosts, vms: collectedVms, errors, overlay: guestGpuCounts(), authStoppedVms, ...(vcAuthStopped.length ? { vcAuthStopped } : {}) };
     lastDiag = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: diags };
   } finally { running = false; }
 }

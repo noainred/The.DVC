@@ -9,13 +9,14 @@ import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../compo
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
   throughputText, throughputTitle, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
   toChartRows, topSeries, bps, sortPorts, nextSort, sortRows, seriesStats,
-  RX_WARN_DBM, RX_BAD_DBM } from './sanSwitchPorts.js';
+  RX_WARN_DBM, RX_BAD_DBM, alertsMeta } from './sanSwitchPorts.js';
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
 import CollectActivity from './CollectActivity.jsx';
 import { perfDiagText, diagBorder, perfCollectSummary } from './sanPerfDiagText.js';
 import { portsScopeNote } from './sanPortsScopeText.js';
 import { DeviceHealthPanel, AllHealthCheck } from './SanHealthCheck.jsx';
+import { authStopInfo, authStopSummary, credFpText } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -194,7 +195,7 @@ export default function SanSwitchTool() {
         <Kpi label="물리 포트" value={agg.total.toLocaleString()} meta={`라이선스 ${agg.licensed.toLocaleString()}`} />
         <Kpi label="사용 중" value={agg.online.toLocaleString()} pct={agg.usedPct} meta={`포트 사용률 ${agg.usedPct}%`} />
         <Kpi label="여유 포트" value={agg.free.toLocaleString()} meta="라이선스 − 사용중(증설 가능분)" accent={capacityLevel(agg.usedPct) === 'bad' ? 'var(--red)' : capacityLevel(agg.usedPct) === 'warn' ? 'var(--amber)' : undefined} />
-        <Kpi label="장애/비활성 포트" value={`${agg.faulty} / ${agg.disabled}`} meta={agg.alerts ? `헬스 경보 ${agg.alerts}` : '헬스 경보 없음'} accent={agg.faulty ? 'var(--red)' : undefined} />
+        <Kpi label="장애/비활성 포트" value={`${agg.faulty} / ${agg.disabled}`} meta={alertsMeta(agg)} accent={agg.faulty ? 'var(--red)' : undefined} />
       </div>
 
       {/* 법인 필터 + 검색 + 등록 */}
@@ -252,6 +253,14 @@ export default function SanSwitchTool() {
 
       {msg && <div className="muted" style={{ fontSize: 12, margin: '6px 0 10px 2px' }}>{msg}</div>}
 
+      {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** 스위치 — 조용히 멈추지 않는다(authGuard 규칙 1). */}
+      {authStopSummary(rows.filter((r) => r.snap?.extra?.authStopped), { unit: '대', what: 'SAN 스위치' }) && (
+        <div className="card" style={{ marginBottom: 10, padding: '10px 14px', fontSize: 13, borderColor: TONE.bad }}>
+          <BoldText text={authStopSummary(rows.filter((r) => r.snap?.extra?.authStopped), { unit: '대', what: 'SAN 스위치' })} />
+          <span className="muted"> 행의 ‘수집’ 은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다. 포트 사용량 수집도 같은 계정이라 함께 멈춥니다.</span>
+        </div>
+      )}
+
       {/* 스위치 목록 */}
       <div className="table-wrap">
         <STable>
@@ -295,9 +304,11 @@ export default function SanSwitchTool() {
                         // 예전에는 클릭 안 되는 <span title=…> 이라 사유가 툴팁에만 있었다 —
                         // 복사·공유가 안 되고 모바일에서는 볼 수도 없었다. 스토리지 화면은 이미
                         // 버튼이었다(게이팅 비대칭). 상세 창이 수집 오류 원문·섹션별 사유를 보여준다.
-                        <button type="button" className="badge" style={{ background: TONE.bad, color: '#fff', cursor: 'pointer', border: 0 }}
-                          title={`실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전문을 봅니다)`}
-                          onClick={() => openDetail(r)}>실패 ⓘ</button>
+                        <button type="button" className="badge" style={{ background: TONE.bad, color: '#fff', cursor: 'pointer', border: 0, whiteSpace: 'nowrap' }}
+                          title={s?.extra?.authStopped
+                            ? `인증 실패로 주기 수집을 멈췄습니다 — ${authStopInfo(s.extra.authStopped, { what: '이 스위치' })?.detail || ''}\n\n(클릭하면 상세 창에서 사유와 자격증명 지문을 봅니다)`
+                            : `실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전문을 봅니다)`}
+                          onClick={() => openDetail(r)}>{s?.extra?.authStopped ? '인증 실패 정지 ⓘ' : '실패 ⓘ'}</button>
                       )}
                   </td>
                   <td>{s?.ok ? <>{p.online}<span className="muted"> / {p.licensed}</span>{p.noLicense ? <span className="muted" style={{ fontSize: 11 }}> (미라이선스 {p.noLicense})</span> : null}</> : <span className="muted">—</span>}</td>
@@ -1224,6 +1235,18 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
       {d.device?.snap && d.device.snap.ok === false && (
         <div className="card" style={{ padding: 10, marginBottom: 10, borderColor: TONE.bad }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: TONE.bad, marginBottom: 4 }}>수집 오류 원문</div>
+          {d.device.snap.extra?.authStopped && (
+            <div style={{ fontSize: 12.5, marginBottom: 6 }}>
+              <BoldText text={authStopInfo(d.device.snap.extra.authStopped, { what: '이 스위치', manual: '수집' })?.text || ''} />
+              {credFpText(d.device.snap.extra.credFp) && (
+                <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>
+                  {`실제로 쓴 자격증명 지문${d.device.snap.extra.credFpSource ? `(${d.device.snap.extra.credFpSource === 'central' ? '중앙' : `엣지 ${d.device.snap.extra.credFpSource}`})` : ''}: `}
+                  <BoldText text={credFpText(d.device.snap.extra.credFp)} />
+                  {' '}— 등록값과 다르면 배포가 반영되지 않은 것이고, 같으면 장비의 비밀번호가 다를 가능성이 큽니다(짧은 해시라 같아도 단정하지 않습니다).
+                </div>
+              )}
+            </div>
+          )}
           <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11.5, color: TONE.bad }}>{failReason(d.device.snap)}</pre>
           <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
             수집 시각 {ago(d.device.snap.collectedAt)} · 출처 {d.device.snap.agent || '중앙'}

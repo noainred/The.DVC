@@ -25,6 +25,19 @@ import { config } from '../config.js';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { ensureNsxDial } from './proxy.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
+import { createAuthGuard } from '../util/authGuard.js';
+
+/**
+ * NSX 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F1, 계정 잠금 경로). 예전에는 `client.node()` 가 401/403 으로
+ * 던져도 다음 30초 틱에 같은 계정으로 다시 로그인했다(NSX 의 API 잠금 정책에 걸리면 UI 로그인까지 막힌다).
+ * 코어는 `util/authGuard.js` 하나다. 멈추는 것은 **신원 확인 호출(node)의 401/403** 뿐 — 하위 호출의 403 은
+ * 로그인은 된 것(권한 부족)이라 잠금 경로가 아니고 각 절이 이미 빈 값으로 관용한다.
+ * 여기(client.js)에 두는 이유: store.js(주기 수집)와 registry.js(연결 테스트 — 성공 시 해제)가 둘 다 쓰는데
+ * 둘 중 하나에 두면 store ↔ registry 순환이 생긴다.
+ */
+export const nsxAuthGuard = createAuthGuard({ file: 'nsx-auth-stops.json' });
+/** 오류가 NSX **자격증명 거부**인가(출처 `#get` 이 붙인 플래그만 본다). */
+export const isNsxAuthError = (err) => !!(err && err.authFailed === true);
 
 const norm = (s) => String(s || '').replace(/\/+$/, '');
 
@@ -66,13 +79,27 @@ export class NsxClient {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`GET ${pathname} -> ${res.status} ${res.statusText} ${text.slice(0, 160)}`);
+      const err = new Error(`GET ${pathname} -> ${res.status} ${res.statusText} ${text.slice(0, 160)}`);
+      err.status = res.status; // v2.590: 자격증명 거부 판정은 신원 확인 호출(node)만 한다 — 아래 node()
+      throw err;
     }
     const ct = res.headers.get('content-type') || '';
     return ct.includes('application/json') ? res.json() : res.text();
   }
 
-  node() { return this.#get('/api/v1/node'); }
+  /**
+   * 신원 확인 호출 — 수집의 유일한 필수 호출이다. v2.590(감사 F1): 여기의 401·403 만 **자격증명 거부**로
+   * 못 박는다(NSX Manager 는 틀린 Basic 자격증명에 403 "The credentials were incorrect or the account specified
+   * has been locked" 도 준다). 하위 호출의 403 은 로그인은 된 것(권한 부족)이라 잠금 경로가 아니고 각 절이
+   * 빈 값으로 관용한다 — 거기에 플래그를 붙이면 권한만 좁은 계정의 수집이 영구 정지된다.
+   */
+  async node() {
+    try { return await this.#get('/api/v1/node'); }
+    catch (err) {
+      if (err?.status === 401 || err?.status === 403) err.authFailed = true;
+      throw err;
+    }
+  }
   clusterStatus() { return this.#get('/api/v1/cluster/status'); }
   transportNodes() { return this.#get('/api/v1/transport-nodes'); }
   tier0s() { return this.#get('/policy/api/v1/infra/tier-0s'); }

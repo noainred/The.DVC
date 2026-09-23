@@ -9,8 +9,22 @@
  *  · 그 밖       — 연결 실패(오류·힌트를 함께).
  * 배지(StateBadge)가 '대기'·'점검중'·'비활성' 이라고 말하는데 본문이 '연결 불가' 라고 말하면 둘이 서로 모순된다.
  */
-export function vcCardState(s = {}) {
+import { authStopInfo } from './tools/storageAuthText.js';
+
+export function vcCardState(s = {}, now = Date.now()) {
   const st = String(s?.status || '');
+  // v2.590(감사 F1): 인증 실패로 **주기 수집을 멈춘** vCenter 는 '연결할 수 없습니다' 가 아니라 '멈췄다' 를 말한다 —
+  // 조치(비밀번호 수정)와 이유(계정 잠금 방지)가 다르다. 조용히 멈추면 사용자는 수집이 되는 줄 안다(authGuard 규칙 1).
+  // 이월된 마지막 값(stale)이 있으면 지표는 보여 주되 '낡은 값' 임을 같은 문장이 말한다.
+  if (s?.authStopped && st !== 'connected') {
+    const info = authStopInfo(s.authStopped, { what: '이 vCenter', manual: '설정 › vCenter 의 연결 테스트', now });
+    const hasMetricsNow = Number(s?.metrics?.hosts) > 0 || Number(s?.metrics?.vms) > 0;
+    return {
+      showMetrics: hasMetricsNow, tone: 'bad', bold: true, authStopped: true,
+      text: `${info.text}${hasMetricsNow ? ' 아래 값은 정지 전 마지막으로 수집한 인벤토리입니다.' : ''}`,
+      showError: true,
+    };
+  }
   const m = s?.metrics || {};
   const hasMetrics = Number(m.hosts) > 0 || Number(m.vms) > 0;
   if (st === 'connected') return { showMetrics: true, tone: 'ok', text: '' };
