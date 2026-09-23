@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { STATUSES, DEVICE_TYPES } from './overrides.js';
+import { ipToNum } from '../util/ipv4.js'; // v2.586 — 단일 소스
 
 const FILE = path.join(config.configDir, 'ipam-range-policies.json');
 const MAX_POLICIES = 1000;     // 정책 수 상한
@@ -23,7 +24,6 @@ const IGNORE_CAP = 1024;       // status='ignored'(대역 통째 숨김) 허용 
 // 정책 상태 enum = override STATUSES와 동일(일관성). 'static'은 대역 정책에선 큰 의미 없지만 호환 유지.
 export const POLICY_STATUSES = STATUSES;
 
-const ipToNum = (s) => { const p = String(s).split('.').map(Number); return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) ? (((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) : null; };
 
 /** "10.0.0.0/24" | "10.0.0.1-10.0.0.50" | "10.0.0.1-50" | "10.0.0.5" → {lo,hi,size} (없으면 null). scan.js 규칙과 동일. */
 export function specToRange(spec) {

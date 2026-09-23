@@ -9,18 +9,9 @@
 
 const MAX = 4096;
 
-function ipToInt(ip) {
-  const parts = String(ip).trim().split('.');
-  if (parts.length !== 4) return null;
-  let n = 0;
-  for (const o of parts) {
-    if (!/^\d+$/.test(o)) return null;
-    const x = Number(o);
-    if (x < 0 || x > 255) return null;
-    n = n * 256 + x;
-  }
-  return n >>> 0;
-}
+import { ipToNum } from '../util/ipv4.js';
+
+const ipToInt = ipToNum; // v2.586 — util/ipv4.js 하나
 
 function intToIp(n) {
   return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');

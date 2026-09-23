@@ -215,7 +215,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `states{ok,unknown,absent: 키꼬리[]}` + `ok/reason/failedKinds/deviceKey`. v2.547 의 '장애만' 은 실측
       18.3KB/push 라 회선 근거가 없었고 `unknownKeys`·`unknownOmitted`·`unknownTruncated` 3단 우회를 낳았다 —
       전량이면 통째로 사라진다. ⚠ **장애 0건이어도 보낸다**(v2.517 `sendStatusOnly` 규약 — `storage/push.js:30`
-      에는 아직 '0대면 POST 안 함' 결함이 남아 있다). 프로토콜 1 보고는 받되 **`deviceOk=false`**(닫지 않는 쪽).
+      의 '0대면 POST 안 함' 결함은 v2.581 BUG-D 에 고쳤다 — v2.586 정정). 프로토콜 1 보고는 받되 **`deviceOk=false`**(닫지 않는 쪽).
     - **중앙 수신(`central/partFaultEdge.js`)은 인메모리다** — 디스크에 쓰지 않는다(전량 요약이면 12.5MB·74ms/push,
       svcmon 이 실측으로 거부한 방식). 진실의 원천은 `part-faults.db`. 재기동 직후 보고가 없으면 전이가
       `device-failed` 로 보류한다. **agent 는 인증된 값으로 덮어쓴다**(엣지가 법인 귀속을 정하지 못하게, F5).
@@ -1505,6 +1505,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ **표의 `status` 열이 '수집 성패' 라는 사실은 그대로다**(라벨은 `상태` 로 되돌렸다) — 노드가
       고장난 장비의 행이 초록 `정상` 으로 보이는 것은 **v2.566 이전부터의 상태**이고 v2.567 이 만든
       것이 아니다. 별건으로 고칠 때 v2.526 `healthBadge`·v2.542 `sectionBadge` 계열임을 볼 것.
+      ↳ v2.586: 초록 `정상` 배지에 '수집 성패이지 장비 건강이 아니다 + 비정상 노드 N대' 툴팁을 붙였다(판정은 그대로).
+        헬스 열(`case 'health'`)은 `healthBadge` 톤을 쓴다 — 예전 비고정 정규식 `/ok|healthy|normal/` 이
+        `Broken`(**ok** 포함)·`Not OK` 를 **초록**으로 칠했다.
     - ⚠ **이미 게시된 2.567.0 번들은 되돌릴 수 없다** — 릴리스 노트에서 그 항목을 지우지 않고
       '철회됨' 으로 표시했다(v2.565 와 같은 판단).
   - **스토리지 노드 장애 표지는 클릭해 '어느 노드가 왜' 를 본다**(`web/src/views/tools/
@@ -2358,8 +2361,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - **'전체 수집' 은 무엇을 했는지 나눠 말한다**(`/tools/sanswitch/collect-all`, v2.516): 중앙 직접
     장비는 즉시 수집하고 엣지 위임 장비는 **재수집 요청만 등록**한다(중앙은 엣지에 명령을 밀어넣을
     수 없다). 응답·화면이 '즉시 N대 / 요청 M대' 로 나눠 표시해야 한다 — 뭉치면 '전부 지금 수집했다'
-    는 거짓이 된다. 연타는 `hasPendingRequest` 가 막는다. ⚠ 스토리지의 `collect-all` 은 v2.315
-    설계대로 **엣지 요청을 등록하지 않는다**(안내만) — 맞추려면 별건으로 다룰 것.
+    는 거짓이 된다. 연타는 `hasPendingRequest` 가 막는다. ✅ 스토리지의 `collect-all` 도 v2.582 에
+    엣지 재수집 요청을 등록하도록 맞췄다(형제 도구 비대칭 해소 — v2.586 에 이 줄을 정정).
   - **롤업 O(N)**(`withRollups`): 호스트/VM/DS/알람을 vCenter별 1회 그룹핑 후 조회(`pick`). 그룹마다 전체 재순회(O(N×vCenter)) 금지.
   - **시계열 prune 스로틀 + ts 인덱스**: 매 샘플 DELETE 스캔 금지 — N틱마다 1회(store 10틱·metrics 20틱·idrac.poller 10틱). `DELETE WHERE ts<?`는 `ts` 단독 인덱스가 있어야 풀스캔을 피한다(복합 `(server_id,ts)`로는 못 탐).
   - **ETag/304**(`util/compress.js`): res.json 래퍼가 본문 SHA-1로 약한 ETag를 발급하고 If-None-Match 일치 시 304(본문 0바이트). 이 래퍼는 res.end로 직접 종료해 Express 기본 ETag가 동작하지 않으므로, 응답 경로 수정 시 ETag 발급을 없애면 프론트 `pollFetch`의 304 지원이 통째로 죽는다(과거 실제 그 상태였음 — 15초 폴 × 30초 스냅샷이면 절반이 무변동 재전송).
@@ -2770,11 +2773,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **조용한 절단**: `/tools/waste/history` 에 `bucket=hour` 를 손으로 주면 365일 × 1시간 = 8,760점
       > 상한 3,000 이라 `ORDER BY b DESC LIMIT` 이 **최근 ≈125일만** 남긴다. `truncated`·`coveredDays`·
       `limit` 을 실어 화면이 밝힌다(v2.509 규약).
-    - ⚠ **아직 하지 않은 것(정직 기록)**: v2.510 계획의 **6번(vCenter 실측 설정 읽기)** 은
-      `vmseries/collect.js` 가 `PerformanceManager.historicalInterval` 을 이미 읽지만
-      **`perfCounterMap()` 은 여전히 `<level>` 을 버린다**(`soapClient.js:314-319`) — 그래서
-      `soapClient.js` 의 '이 계열은 전부 통계 레벨 1' 주석은 같은 파일 `:941`·v2.481 과 어긋난
-      **낡은 주석**으로 남아 있다. 별건.
+    - ✅ v2.510 계획의 **6번(vCenter 실측 설정 읽기)** 의 남은 절반 — `perfCounterMap()` 이 `<level>` 을
+      버리던 것 — 은 v2.582 에 `perfCounterLevels()` 로 고쳤다(자기모순 주석도 정정. v2.586 에 이 줄을 갱신).
 
   - ⚠⚠ **의존 방향은 한쪽이다 — routes/ 는 index.js 만 import 하고, util/ 은 도메인을 모른다**
     (`test/arch2579.test.js` 가 고정, v2.579 — 사용자 요청 "아키텍처 점검, 버그 수정, 튜닝"):
@@ -2815,8 +2815,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       동시 20 `/api/vms` 벽시계 **89ms** · 루프 프로브 30초 p99 **5.8ms**(72.9ms 스톨 1회) ·
       `/api/hosts` 484KB → gzip **27KB**. 없는 결함을 만들어 고치지 않았다(v2.550.3 규약).
     - ⚠ **정직 기록**: 웹 셸 `console/`(12파일·1,691줄)은 V4 가 `consoleData.js`(순수·import 0)를
-      **재수출**해 쓰는 관계라 중복이 아니고 위치만 어색하다 — 손대지 않았다. 남은 순환 5개(`config ↔
-      secretVault` 등)는 각각 동적 import·지연 평가로 막혀 있고 실측 로드 OK 라 **이번에 풀지 않았다**.
+      **재수출**해 쓰는 관계라 중복이 아니고 위치만 어색하다 — 손대지 않았다. 남은 순환(v2.579 5개 → v2.586 **4개** — ipam
+      settings↔ledger 는 `util/ipv4.js` 로 끊었다. `config ↔ secretVault` 등)은 각각 동적 import·지연 평가로 막혀 있고 실측 로드 OK 라 **이번에 풀지 않았다**.
 
   - ⚠⚠ **SQLite 모듈의 open 은 예외 없이 '진행 중인 시도' 를 공유한다 — 단일 파일이든 파일별 Map 이든**
     (`test/arch2580.test.js` 가 소스 스윕 + fd 실측으로 고정, v2.580 — 사용자 요청 "아키텍처 점검, 버그 수정,
@@ -2959,8 +2959,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **엣지 push 0대**: 위임이 정말 0대면 빈 목록으로 중앙을 비우고, 위임은 있는데 스냅샷이 없으면 보내지 않는다(v2.581
       BUG-D 와 같은 판단 — 빈 목록으로 덮으면 재기동 직후 중앙 화면이 빈다).
     - **시간대**: `toLocaleString('ko-KR')`·`getHours()` 류 로컬 getter 도 프로세스 TZ 를 따른다 — 사람이 읽는 시각은
-      `util/dayKey.js localStamp`, 파일명은 `fileStamp`. ⚠ `vmtrack/diff.js slotKey` 는 **저장되는 키**라 이번에 바꾸지
-      않았다(바꾸면 기존 슬롯과 불연속 — 마이그레이션이 필요한 별건).
+      `util/dayKey.js localStamp`, 파일명은 `fileStamp`. ✅ `vmtrack/diff.js slotKey` 는 v2.586 에 포탈 오프셋으로 옮겼다 —
+      KST 호스트에서는 출력이 **바이트 단위로 같고**(9,600시간 대조 0건), UTC 호스트에서만 전환일에 1회 불연속이 생긴다.
     - **응답 본문 캐시와 제자리 수정**: `util/compress.js` 는 응답 객체 **정체성**으로 본문·ETag 를 캐시한다. 모듈 캐시 원소를
       그대로 `res.json` 하고 나중에 제자리에서 고치면 옛 본문이 나간다(provision saved). **캐시 원소를 응답할 때는 사본**.
     - **화면**: JSX 텍스트 노드의 `**` 는 BoldText 를 안 거친다 — `uiText.test.js` 가 스윕한다(문구 모듈 반환값을 plain 으로
@@ -3016,6 +3016,38 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     오류 없이 틀린 값). 시한 17초 = 예산 산수(필수 135초 + 3×17 ≤ 187.5초, `unitySshBudget2528.test.js`).
     ⚠ 실장비 출력을 받으면 후보를 좁힐 것 — 이 릴리스는 원인 확정이 아니다.
 
+  - ⚠⚠ **v2.586 — 문서의 미해결 기록 정리 + 서버 결함 스윕 확정 5건**(사용자 요청 "버그 아키텍처 개선 수정 등의
+    업그레이드 작업" · 선택 "문서의 미해결 기록 우선 + 전체 검증". 회귀는 `test/audit2586.test.js`·`healthWord2586`·
+    `ipv4_2586`·`vmtrack` · 웹 `consoleData.test.js`):
+    - ⚠⚠ **상태 단어 판정은 `storage/healthWord.js` 하나다(웹 `storageNodeText.nodeHealthKind` 가 같은 정규식을 쓰고
+      테스트가 두 구현을 대조)**. 수집기 3곳(Isilon·VPLEX·XtremIO SSH)이 `/ok|healthy|connected/` 처럼 **경계 없는 부분
+      일치**라 `disconnected` 가 **connected** 로, `Broken`·`Not OK` 가 **ok** 로 읽혀 비정상 노드가 **정상으로 세였다**
+      (오류 없이 틀린 값). 판정 순서: unknown 집합 → 부정(`not ok`·`non-healthy`) → 나쁨 단어 → 좋음 단어(단어 경계) →
+      그 밖은 나쁨(모르는 단어를 정상으로 칠하지 않는다). 파트장애 `healthStringState` 도 `\b` 로 고정했다.
+    - **IPv4 파서는 `util/ipv4.js` 하나다**(6벌 통합). 가장 느슨한 판본(`ipam/scan.js isIpv4` — IPAM 키 검증기)이
+      `Number('') === 0` 으로 `'10..1.1'`·`'10.1.1.'`·16진·지수를 **유효 IP 로 받았다**. ⚠ **선행 0 은 예전 전 판본처럼
+      10진수로 받는다** — 거부로 바꾸면 저장된 스캔 범위·override 키가 깨진다(초판이 그렇게 만들었다가 svcmon T35 가
+      잡았다). 원문 토큰을 접속처로 쓰는 곳은 `numToIp` 로 정규화하거나 `genspec nonCanonicalIp` 처럼 거부한다.
+      부수 효과로 ipam settings↔ledger 정적 순환이 사라져 SCC 5 → 4(`arch2579` 상한도 4).
+    - **숫자 칸 빈 값 두 곳 더**(v2.583 `dropUnspecifiedNumbers` 와 같은 계열): vCenter 로그 보관(`logs/settings.js` —
+      빈 칸이 `0` = **무제한**이 되어 prune·용량 상한이 '저장됨' 과 함께 멈췄다) · 일일 보고(`reports/dailyReport.js` —
+      시각 칸을 비우면 발송이 00:00 으로). 판정은 `numOrNull(v) ?? cur` — **명시적 0 만** 값이다.
+    - ⚠⚠ **로그 문자열을 맵 키로 쓰면 프로토타입 오염이다**(`loganalysis/engine.js safeKey`·`own`): `[__proto__] …`
+      한 줄이 `st.tags['__proto__']` 로 `Object.prototype.n = NaN` 을 만들었다(실측). 실시간 분석은 콘솔 **전 줄**을
+      받는다. 예약 이름은 `(이름)` 으로 바꾸고 조회는 자기 속성만(`toString` 같은 상속 함수에 더하지 않게). 엣지 보고
+      병합(`mergeState`)도 같은 규칙 — 입력이 JSON 이어도 `__proto__` 는 자기 속성으로 들어온다.
+    - **Unity 버전 후보의 성공 조건은 '버전' 이다(모델 아님)**: `accept` 가 모델만 읽어도 참이라 첫 후보(`svc_diag`)가
+      모델만 주는 장비에서 뒤 uemcli 후보 둘이 **한 번도 실행되지 않았다**. 모델은 버리지 않고 원문 표본에서 건진다
+      (`extra.modelSource`). ⚠ v2.585 '18대 전부 —' 의 원인인지는 **확인하지 못했다**(가설 — 실장비 출력 필요).
+    - **사람이 읽는 시각 5곳 더**(v2.583 규약의 누락): 폴더 사용량 메일 제목·수집 줄(시각이 없으면 '지금' 을 지어내던 것도
+      `—` 로) · VM 복제 클론/스냅샷 이름 · DB 이전 스크립트 파일명·README · 배포 성공 힌트 · 릴리스 노트 기본 날짜.
+    - **`vmtrack slotKey` 는 포탈 오프셋이다** — 위 '시간대' 항목의 별건을 닫았다. **도메인 타일 메타**는 `waitMeta` 로
+      `loadState` 판정을 받는다(V4·관제 콘솔 양쪽). 위 v2.509·v2.583·v2.578·v2.579 의 '남은 것' 줄도 함께 정정했다 —
+      **문서의 '남아 있다' 는 다음 점검의 첫 후보이고, 고친 뒤에는 그 줄을 반드시 고칠 것**(이번에 4줄이 이미 고쳐진
+      결함을 '남아 있다' 로 적고 있었다).
+    - ⚠ 확인하지 못한 것(정직 기록): `curUser /settings` 가 범위 계정에 함대 전체 `overLimit`·`push.last.records` 를 줄
+      수 있다는 스윕 후보는 curuser 를 켜고 대상이 `maxVms` 를 넘어야 재현돼 **재현하지 못했다**(후속).
+
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 
 서버 보안 불변조건(전역 TLS·RBAC·토큰 검증·scope·OTP·WS 게이트웨이 등 전 항목)은
@@ -3070,8 +3102,8 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
       `28/28 vCenter OK` 뿐이라 수집 중에도 정상처럼 보였다.
     - 수집 주기·동시성·데드라인 **숫자를 문구에 박지 말 것** — `/health` 가 주는 값만 쓰고
       나머지는 '몇 분' 처럼 범위로 말한다.
-    - ⚠ 남은 것: 도메인 타일 6장의 메타 문구는 `console/consoleData.js buildDomainTiles` 가
-      만들어(관제 콘솔 셸과 공유) 아직 '수집 대기' 다. 배너가 설명하지만 완전히 고친 것은 아니다.
+    - ✅ 도메인 타일 6장의 메타 문구도 v2.586 에 `loadState` 의 짧은 문구(`waitMeta`)를 받는다 — V4 와
+      관제 콘솔 셸 양쪽이 같은 판정을 넘긴다(기본값 '수집 대기' 는 호출부가 안 넘길 때만).
   - **표 머리글에 영문 소문자 단위를 쓰지 말 것**: `.v3-table th` 가 `text-transform: uppercase` 라
     `kWh` 가 **`KWH`** 로 샌다(v2.508 실제 발견 — 스크린샷을 읽어야 잡힌다). 한글 라벨로 쓰고
     단위는 각주에 적는다.

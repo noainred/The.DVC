@@ -17,6 +17,7 @@ import { withSsrfLookup } from '../../util/ssrfLookup.js';
 import { emptySnapshot } from '../types.js';
 // v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 — restCommon 과 같은 규약.
 import { describeFetchError, isTransportError } from './netError.js';
+import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
 
 // Isilon 전용 로컬 TLS 디스패처 — 사내 자체서명 장비 한정(다른 fetch 에 주입 금지).
 // 보안(M-4): STORAGE_TLS_VERIFY=true 면 인증서 검증을 켠다(기본은 기존대로 해제).
@@ -91,7 +92,8 @@ export function normalizeIsilon(device, raw) {
     snap.nodes.count = list.length;
     // OneFS 노드 상태 필드는 버전별 상이(status/health) — 명시적으로 정상 아닌 것만 센다(모르면 0).
     const healthOf = (n) => String(n.status?.health ?? n.status ?? n.health ?? '').toLowerCase() || 'unknown';
-    snap.nodes.unhealthy = list.filter((n) => { const st = healthOf(n); return st !== 'unknown' && !/ok|healthy|up|green/.test(st); }).length;
+    // v2.586 — 판정은 `storage/healthWord.js` 하나(앵커 없는 부분 일치가 'unhealthy'·'broken' 을 정상으로 셌다).
+    snap.nodes.unhealthy = list.filter((n) => healthWord(healthOf(n)) === 'bad').length;
     // 노드별 상세(v2.303) — devid(lnn) 기준으로 노드별 통계를 조인. IP 필드는 버전별 상이라
     // 흔한 후보(ip/ip_address/ip_addresses[0]/ext_ip)를 순서대로 취하고 없으면 ''(정직 표기 — 위조 금지).
     const perNode = new Map(); // devid → { key → value }

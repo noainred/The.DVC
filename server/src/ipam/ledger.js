@@ -8,6 +8,7 @@ import { getAnnotations, annotationsRev } from './annotations.js';
 import { scanResultList, getIpHistoryMap, scanRev } from './scanStore.js';
 import { getOverrides, overridesRev } from './overrides.js';
 import { findPolicy, policiesRev, getPolicies } from './rangePolicies.js';
+import { ipToNum } from '../util/ipv4.js';
 
 // buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override/정책 리비전이면 재계산하지 않는다.
 // (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
@@ -44,11 +45,8 @@ const reconcileOf = (discovery) => (discovery === 'both' ? 'both' : discovery ==
 
 const RESERVE_SOON_MS = 14 * 86_400_000; // 예약 만료 임박 기준(14일)
 
-export function ipToNum(s) {
-  const p = String(s || '').split('.').map(Number);
-  return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)
-    ? (((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) : null;
-}
+// v2.586 — IPv4 파싱은 util/ipv4.js 하나(6벌이 서로 달랐다). 호출부 호환을 위해 재수출한다.
+export { ipToNum };
 
 /** "CentOS 7 (64-bit)" → { osName:'CentOS', osVersion:'7' } 식으로 분리. */
 export function parseOs(guestOS) {

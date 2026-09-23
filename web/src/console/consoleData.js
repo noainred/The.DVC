@@ -313,7 +313,14 @@ export function networkTypeCounts(items) {
  * 전사 현황 도메인 타일 6개. 입력은 각 API 원본(없으면 null) — 없는 데이터는 '—'/미수집으로 표시하고
  * 레벨을 지어내지 않는다(level null = 판정 불가, 회색).
  */
-export function buildDomainTiles({ global: g, alarms, nsx, svcmon, pdu, idracPoller, dsOver, storageDevices, permission = {} }) {
+/**
+ * ⚠ v2.586 — `waitMeta`: 전사 스냅샷(global)이 아직 없을 때 컴퓨트·스토리지 타일이 말할 문구.
+ *   v2.509 가 배너·KPI 는 `loadState` 로 고쳤는데 이 타일 두 장은 여전히 고정 '수집 대기' 였다
+ *   (CLAUDE.md '⚠ 남은 것' 에 적힌 채 77개 릴리스). 그 한 문구가 '첫 수집 중(기다리면 된다)' 과
+ *   'vCenter 연결 실패(기다려도 안 된다)' 를 덮는다. 셸이 `loadText(phase).short` 를 넘기고,
+ *   넘기지 않으면 예전 문구를 쓴다(호출부 호환).
+ */
+export function buildDomainTiles({ global: g, alarms, nsx, svcmon, pdu, idracPoller, dsOver, storageDevices, permission = {}, waitMeta = '수집 대기' }) {
   const dom = alarmCountsByDomain(alarms);
   const ci = (d) => ({ crit: dom[d].critical, warn: dom[d].warning, info: dom[d].info });
   const tiles = [];
@@ -323,12 +330,12 @@ export function buildDomainTiles({ global: g, alarms, nsx, svcmon, pdu, idracPol
     const lvUse = Math.max(levelOf(g.cpuUsagePct) ?? 0, levelOf(g.memUsagePct) ?? 0);
     const level = (g.hostsDisconnected > 0 || unreach > 0) ? 2 : lvUse;
     tiles.push({ page: 'compute', name: '컴퓨트', level, value: `${fmtInt(g.hosts)} / ${fmtInt(g.vms)}`, meta: `호스트 / VM · vCenter ${g.vcentersConnected}/${g.vcenters}${unreach ? ` · 불가 ${unreach}` : ''}${g.hostsDisconnected ? ` · 끊김 ${g.hostsDisconnected}` : ''}`, ...ci('COMPUTE') });
-  } else tiles.push({ page: 'compute', name: '컴퓨트', level: null, value: '—', meta: '수집 대기', ...ci('COMPUTE') });
+  } else tiles.push({ page: 'compute', name: '컴퓨트', level: null, value: '—', meta: waitMeta, ...ci('COMPUTE') });
   // 스토리지 — 전사 사용률 판정 + 임계 초과 DS 수.
   if (g) {
     const arr = storageDevices == null ? '' : ` · 어레이 ${storageDevices}`;
     tiles.push({ page: 'storage', name: '스토리지', level: levelOf(g.storageUsagePct), value: fmtPct(g.storageUsagePct), meta: `${fmtInt(g.datastores)} DS · ${g.storageUsedTB} / ${g.storageTotalTB} TB${dsOver != null ? ` · 임계 초과 ${dsOver}` : ''}${arr}`, ...ci('STORAGE') });
-  } else tiles.push({ page: 'storage', name: '스토리지', level: null, value: '—', meta: '수집 대기', ...ci('STORAGE') });
+  } else tiles.push({ page: 'storage', name: '스토리지', level: null, value: '—', meta: waitMeta, ...ci('STORAGE') });
   // 네트워크 — NSX 매니저 상태로 판정(포트그룹 수는 상태가 없다).
   if (nsx?.rollup) {
     const r = nsx.rollup;

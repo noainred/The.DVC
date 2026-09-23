@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { ipToNum } from './ledger.js';
+import { ipToNum } from '../util/ipv4.js'; // v2.586 — ledger.js 를 import 하던 순환(settings ↔ ledger) 제거
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = path.join(config.configDir, 'ipam-settings.json');

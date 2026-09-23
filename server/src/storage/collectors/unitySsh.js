@@ -96,7 +96,9 @@ export const SPECS = [
      */
     accept: (text) => {
       const v = mergeVersionInfo(versionFromSvcDiag(text), versionFromUemcli(parseUemcli(text)));
-      return !!(v.version || v.model);
+      // v2.586 — 모델만 읽고 끝내면 뒤 uemcli 후보 둘이 **한 번도 실행되지 않아** 버전이 영원히 빈다
+      //   (svc_diag 가 모델 줄만 주는 장비). 모델은 아래 collect 가 원문에서 따로 건진다.
+      return !!v.version;
     } },
 ];
 
@@ -311,6 +313,14 @@ export async function collectViaSsh(device) {
     snap.extra.cliRawMode = 'all';
     // v2.585 — 버전이 왜 비었는지를 표의 열이 바로 말할 수 있게 시도 결과를 따로 싣는다(원문 상세를 열지 않아도).
     snap.extra.versionAttempts = versionAttemptsOf(raw);
+    // v2.586 — 버전은 못 읽었지만 어느 후보가 모델을 줬다면 버리지 않는다(accept 가 버전만 성공으로 본다).
+    if (!snap.extra.model) {
+      for (const x of raw) {
+        if (x?.key !== 'version' || !x.sample) continue;
+        const v = mergeVersionInfo(versionFromSvcDiag(x.sample), versionFromUemcli(parseUemcli(x.sample)));
+        if (v.model) { snap.extra.model = v.model; snap.extra.modelSource = x.cmd; break; }
+      }
+    }
     return snap;
   } catch (e) {
     return sshFailureSnapshot(device, e, raw);

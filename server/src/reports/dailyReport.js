@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { store } from '../store.js';
 import { sendText } from '../alerts.js';
 import { computeHealthReport, buildDailyReportText } from './healthReport.js';
@@ -49,10 +50,12 @@ export function saveDailyReportSettings(body = {}) {
   const cur = loadDailyReportSettings();
   cache = {
     enabled: body.enabled != null ? !!body.enabled : cur.enabled,
-    hour: body.hour != null ? Math.min(23, Math.max(0, Number(body.hour) || 0)) : cur.hour,
-    minute: body.minute != null ? Math.min(59, Math.max(0, Number(body.minute) || 0)) : cur.minute,
-    snapshotAgeDays: body.snapshotAgeDays != null ? Math.min(365, Math.max(1, Number(body.snapshotAgeDays) || 3)) : cur.snapshotAgeDays,
-    dsWarnPct: body.dsWarnPct != null ? Math.min(99, Math.max(50, Number(body.dsWarnPct) || 85)) : cur.dsWarnPct,
+    // v2.586 — 화면은 blur 마다 칸의 원문을 보낸다. 빈 칸('')을 0·기본값으로 읽으면 시각을 지우는 순간
+    //   발송이 00:00 으로 옮겨졌다. 빈 값·숫자 아님은 '미지정' = 현재 값 유지.
+    hour: Math.min(23, Math.max(0, Math.trunc(numOrNull(body.hour) ?? cur.hour))),
+    minute: Math.min(59, Math.max(0, Math.trunc(numOrNull(body.minute) ?? cur.minute))),
+    snapshotAgeDays: Math.min(365, Math.max(1, numOrNull(body.snapshotAgeDays) ?? cur.snapshotAgeDays)),
+    dsWarnPct: Math.min(99, Math.max(50, numOrNull(body.dsWarnPct) ?? cur.dsWarnPct)),
     lastRunTs: cur.lastRunTs,
   };
   persist();

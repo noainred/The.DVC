@@ -82,7 +82,8 @@ test('②-b util/ 이 속한 순환(SCC)이 없다', () => {
   assert.deepEqual(withUtil, [], `util 모듈이 순환에 들어 있다:\n${withUtil.map((c) => c.join(' <-> ')).join('\n')}`);
   // 남은 순환은 전부 '같은 도메인 안' 2-cycle 이고 각 파일이 단독 진입점으로도 로드된다(v2.579 실측).
   // 새 순환이 늘면 여기서 드러난다 — 늘리지 말 것.
-  assert.ok(sccs.length <= 5, `순환 SCC 가 늘었다(${sccs.length}):\n${sccs.map((c) => c.join(' <-> ')).join('\n')}`);
+  // v2.586 — ipam settings↔ledger 순환을 util/ipv4.js 로 끊어 5 → 4.
+  assert.ok(sccs.length <= 4, `순환 SCC 가 늘었다(${sccs.length}):\n${sccs.map((c) => c.join(' <-> ')).join('\n')}`);
 });
 
 // 의도적으로 남긴 전용 실행기 — 두 갈래 큐·건너뛰기 분기가 있어 범용 풀로 환원되지 않는다.

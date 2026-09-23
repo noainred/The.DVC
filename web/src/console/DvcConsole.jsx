@@ -17,6 +17,7 @@ import { hashSegments } from '../hooks/hashTab.js';
 import './console.css';
 import { PAGE_IDS, PAGE_META, GROUP_TILE, visibleGroups } from './nav.js';
 import { buildDomainTiles, severityCounts, siteRows, fmtInt } from './consoleData.js';
+import { loadPhase, loadText } from '../version_4/loadState.js'; // v2.586 — 타일 대기 문구(순수 모듈, import 0)
 import { levelColor } from './ui.jsx';
 import ConsoleOverview from './pages/ConsoleOverview.jsx';
 import ConsoleCompute from './pages/ConsoleCompute.jsx';
@@ -72,12 +73,14 @@ export default function DvcConsole({ user, health, onExit }) {
     [q, region, focusVc, vcRegion]);
 
   const alarmsAll = useMemo(() => al.data?.items || [], [al.data]);
+  const waitMeta = loadText(loadPhase({ health, poll: ov }), { health, pollError: ov.error }).short;
   const dsOver = ds.data ? ds.data.items.filter((d) => d.usagePct >= 90).length : null;
   const tiles = useMemo(() => buildDomainTiles({
     global, alarms: alarmsAll, nsx: nsx.data, svcmon: svc.data, pdu: pdu.data, idracPoller: idrac.data?.poller || null,
     dsOver, storageDevices: stor.data ? stor.data.devices.length : null,
     permission: { idrac: isAdmin, pdu: canPdu, svcmon: canSvcmon },
-  }), [global, alarmsAll, nsx.data, svc.data, pdu.data, idrac.data, dsOver, stor.data, isAdmin, canPdu, canSvcmon]);
+    waitMeta,
+  }), [global, alarmsAll, nsx.data, svc.data, pdu.data, idrac.data, dsOver, stor.data, isAdmin, canPdu, canSvcmon, waitMeta]);
   const sev = severityCounts(alarmsAll);
 
   const counts = { hosts: fmtInt(global?.hosts), datastores: fmtInt(global?.datastores), networks: fmtInt(global?.networks), powerReporting: fmtInt(global?.powerReporting), alarms: al.data ? fmtInt(sev.total) : '' };

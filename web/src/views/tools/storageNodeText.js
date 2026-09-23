@@ -19,11 +19,19 @@ import { numOrNull } from '../../numOrNull.js';
 
 const n0 = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
-/** 노드 상태 문자열 → 'ok' | 'bad' | 'unknown'(수집기 판정 기준과 같게). */
+/**
+ * 노드 상태 문자열 → 'ok' | 'bad' | 'unknown' — **서버 `storage/healthWord.js` 와 같은 규칙**(v2.586, 서버 테스트가
+ * 두 구현을 같은 입력으로 대조한다). 예전 판정은 앵커 없는 `/healthy|online|up\b/` 라 'unhealthy'·'backup' 이 정상이었다.
+ */
+const H_UNKNOWN = new Set(['', 'unknown', 'n/a', 'na', '-', '?', 'none']);
+const H_NEG_OK = /\b(not|no|non)[\s_-]*(ok|healthy|normal|online|connected|up|good)\b/;
+const H_BAD = /\b(unhealthy|disconnected|offline|down|degraded|fail\w*|error\w*|critical|fault\w*|broken|major-failure|minor-failure|smartfail\w*)\b/;
+const H_GOOD = /\b(ok|healthy|normal|up|green|online|connected|good|attention_none)\b/;
 export function nodeHealthKind(health) {
   const s = String(health ?? '').trim().toLowerCase();
-  if (!s || s === 'unknown' || s === 'n/a' || s === '-') return 'unknown';
-  if (/^(ok|healthy|normal|up|green|attention_none)$/.test(s) || /\bok\b|healthy|normal|online|up\b|green/.test(s)) return 'ok';
+  if (H_UNKNOWN.has(s)) return 'unknown';
+  if (H_NEG_OK.test(s) || H_BAD.test(s)) return 'bad';
+  if (H_GOOD.test(s)) return 'ok';
   return 'bad';
 }
 export const NODE_KIND = Object.freeze({

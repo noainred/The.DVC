@@ -9,6 +9,7 @@
 import net from 'node:net';
 import dnsp from 'node:dns/promises';
 import { execFile } from 'node:child_process';
+import { ipToNum, isIpv4 } from '../util/ipv4.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
 export const DEFAULT_PORTS = [22, 80, 443, 445, 3389, 623, 8006, 902, 5985, 5986];
@@ -18,9 +19,8 @@ const SERVICE = {
 };
 export const portService = (p) => SERVICE[p] || String(p);
 
-const ipToNum = (s) => { const p = String(s).split('.').map(Number); return p.length === 4 && p.every((n) => n >= 0 && n <= 255) ? (((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3]) : null; };
-/** 유효한 IPv4 점표기인지(키 오염·잘못된 입력 차단용 공용 검증기). */
-export const isIpv4 = (s) => ipToNum(s) != null;
+// v2.586 — 예전 판본은 '10..1.1'·'10.1.1.' 을 유효로 받았다(빈 옥텟 → 0). 판정은 util/ipv4.js 하나.
+export { isIpv4 };
 const numToIp = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
 
 export const RANGE_CAP = 4096; // spec 1개당 확장 IP 안전 상한

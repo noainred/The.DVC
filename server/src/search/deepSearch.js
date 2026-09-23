@@ -8,24 +8,14 @@ import { loadVcenterConfig } from '../config.js';
 import { morefOf } from '../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import { VimSoapClient, runGuestScript } from '../gpu/guestops.js';
 import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
+import { ipToNum } from '../util/ipv4.js';
 import { poolRun } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
 const has = (s, q) => String(s || '').toLowerCase().includes(String(q).toLowerCase());
 const numOr = (x) => (x === '' || x == null || Number.isNaN(Number(x)) ? null : Number(x));
 
 // 엄격 IPv4 → uint32. 4옥텟·각 0~255가 아니면 null(예: '10/8', '999.1.1.1', IPv6 → 오매칭 방지).
-function ipToInt(a) {
-  const parts = String(a).split('.');
-  if (parts.length !== 4) return null;
-  let acc = 0;
-  for (const p of parts) {
-    if (!/^\d{1,3}$/.test(p)) return null;
-    const n = Number(p);
-    if (n > 255) return null;
-    acc = (acc << 8) + n;
-  }
-  return acc >>> 0;
-}
+const ipToInt = ipToNum; // v2.586 — util/ipv4.js 하나(같은 엄격 규칙)
 function ipInCidr(ip, cidr) {
   try {
     const [net, bitsStr] = String(cidr).split('/');

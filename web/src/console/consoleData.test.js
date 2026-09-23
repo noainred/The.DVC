@@ -133,6 +133,12 @@ describe('도메인 타일', () => {
     expect(t[0].level).toBe(2); expect(t[2].level).toBe(0); expect(t[4]).toMatchObject({ level: 2, value: '90%' }); expect(t[5].level).toBe(2);
   });
   it('전체 데이터 없음(global null)도 크래시 없이 6개', () => expect(buildDomainTiles({ global: null, alarms: [], permission: { idrac: false, pdu: false } }).length).toBe(6));
+  it('v2.586 — global 이 없으면 컴퓨트·스토리지 타일은 셸이 준 대기 문구를 쓴다(기본은 예전 문구)', () => {
+    const t = buildDomainTiles({ global: null, alarms: [], waitMeta: 'vCenter 2개 연결 실패' });
+    expect(t.find((x) => x.page === 'compute').meta).toBe('vCenter 2개 연결 실패');
+    expect(t.find((x) => x.page === 'storage').meta).toBe('vCenter 2개 연결 실패');
+    expect(buildDomainTiles({ global: null, alarms: [] }).find((x) => x.page === 'compute').meta).toBe('수집 대기');
+  });
 });
 
 describe('rowMatches', () => {

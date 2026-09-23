@@ -12,6 +12,7 @@
  * 이 파일의 판정(diffTargets)은 **순수**하다 — 네트워크·SSH·파일 접근 없음(테스트로 고정).
  */
 import { collectorIdFor } from './autoRegister.js';
+import { localStamp } from '../util/dayKey.js';
 
 /** 중앙이 이 대상에 접속할 URL(순수). v2.429 advertiseUrl(중계 엣지 경유)이 있으면 그것이 진실. */
 export function targetUrl(t) {
@@ -37,7 +38,7 @@ export function urlKey(u) {
  */
 export function installedHint(t) {
   const lr = t?.lastResult;
-  if (lr?.ok) return { installed: true, why: `배포 성공 기록(${new Date(lr.at).toISOString().slice(0, 16).replace('T', ' ')})`, at: lr.at || 0 };
+  if (lr?.ok) return { installed: true, why: `배포 성공 기록(${localStamp(lr.at) || '시각 미상'})`, at: lr.at || 0 };
   if (lr && lr.ok === false) return { installed: false, why: `마지막 배포 실패 — ${lr.reason || ''}`.trim(), at: lr.at || 0 };
   return { installed: false, why: '배포 기록 없음(저장만 된 대상)', at: 0 };
 }
