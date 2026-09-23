@@ -16,6 +16,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { mergeGpuGuestSettings, redactGpuGuestSettings } from '../gpu/settings.js';
+import { agentKeyOf } from '../util/agentKey.js';
 
 const FILE = path.join(config.configDir, 'central-agent-gpu-guest.json');
 
@@ -36,7 +37,8 @@ const cleanAgent = (a) => String(a || '').trim();
 /** 지정된 배포 설정(비밀번호 포함) — 엣지 pull이 사용. 없으면 null. */
 export function getAssignedGpuGuest(agent) {
   const a = cleanAgent(agent);
-  return a && byAgent[a] ? byAgent[a] : null;
+  const k = a ? agentKeyOf(byAgent, a) : null; // v2.597 L2597-03 — 대소문자만 다른 이름도 같은 엣지
+  return k != null && byAgent[k] ? byAgent[k] : null;
 }
 
 /** 관리자 저장: partial을 기존 배포 설정에 병합(로컬 저장과 동일 규칙). 반환 병합 결과. */

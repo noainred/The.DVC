@@ -21,7 +21,20 @@ const PUSH_GZIP = process.env.PDU_PUSH_GZIP !== 'false';
 let _timer = null;
 let _last = { at: null, ok: false, count: 0, reason: '' };
 
+// v2.597(감사 L2597-04 — 재현): 재진입 가드 — 타이머 push 와 설정 pull 뒤 push 가 겹치면 늦게 끝난 옛 본문이 새 본문을
+// 덮을 수 있다(storage/push.js 와 같은 규약). 진행 중에 들어온 요청은 끝난 뒤 한 번 더 보낸다(새 수집분을 놓치지 않게).
+let _busy = null;
+let _again = false;
 export async function pushPduNow() {
+  if (_busy) { _again = true; return _busy; }
+  _busy = (async () => {
+    let r;
+    do { _again = false; r = await pushPduOnce(); } while (_again);
+    return r;
+  })().finally(() => { _busy = null; });
+  return _busy;
+}
+async function pushPduOnce() {
   if (!config.agent.centralUrl || !config.agent.centralToken) {
     return { ok: false, reason: 'push 비활성화(CENTRAL_URL/CENTRAL_TOKEN 미설정)' };
   }

@@ -17,6 +17,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { hashPassword } from '../auth/auth.js';
+import { agentKeyOf } from '../util/agentKey.js';
 
 const FILE = path.join(config.configDir, 'central-agent-users.json');
 const VALID_ROLES = ['admin', 'operator', 'viewer'];
@@ -40,7 +41,8 @@ const cleanAgent = (a) => String(a || '').trim();
 /** 특정 대상(agent 또는 '*')에 직접 지정된 사용자 목록(해시 포함). 관리 화면의 대상별 목록용. */
 export function getAgentUsers(agent) {
   const a = cleanAgent(agent);
-  return a && byAgent[a] ? (byAgent[a].users || []) : [];
+  const k = a ? agentKeyOf(byAgent, a) : null; // v2.597 L2597-03 — 대소문자만 다른 이름도 같은 엣지
+  return k != null && byAgent[k] ? (byAgent[k].users || []) : [];
 }
 
 /**

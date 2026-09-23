@@ -127,7 +127,7 @@ export default function SecuritySelfCheck() {
                 <Badge label={statusLabel(c.status)} color={statusColor(c.status)} />
                 <b>{c.title}</b>
                 {(c.rows?.length > 0) && (
-                  <button type="button" className="btn-sm" onClick={() => setOpen((o) => ({ ...o, [c.id]: !o[c.id] }))}>
+                  <button type="button" className="btn btn-sm" onClick={() => setOpen((o) => ({ ...o, [c.id]: !o[c.id] }))}>
                     {open[c.id] ? '상세 접기' : `상세 보기(${c.rows.length})`}
                   </button>
                 )}

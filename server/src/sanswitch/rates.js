@@ -31,11 +31,14 @@ function rate(prevVal, curVal, seconds) {
  * @param now      수집 시각(ms)
  * @returns { computed:boolean, gapSec:number|null } — UI 가 '첫 수집이라 미표시'를 구분할 수 있게
  */
+// v2.597(감사 C2597-07): 디렉터(슬롯이 있는 포트)는 'slot/port' 로 키를 잡는다 — REST 폴백 index('1/10'·'11/0' → 둘 다 110)가
+//   겹치면 두 포트의 카운터가 섞여 처리량이 틀린다. 슬롯 없는 스위치는 예전대로 index(동작 불변).
+const rateKey = (p) => (p.slot != null && p.slotPort ? `s:${p.slotPort}` : String(p.index));
 export function applyRates(deviceId, ports = [], now = Date.now()) {
   const prev = _prev.get(deviceId);
   const cur = { at: now, ports: new Map() };
   for (const p of ports) {
-    cur.ports.set(String(p.index), {
+    cur.ports.set(rateKey(p), {
       inFrames: p.inFrames ?? null, outFrames: p.outFrames ?? null,
       inBytes: p.inBytes ?? null, outBytes: p.outBytes ?? null,
       framesApprox: !!p.framesApprox,
@@ -54,7 +57,7 @@ export function applyRates(deviceId, ports = [], now = Date.now()) {
   //   0'으로 보고**했다(회귀 테스트가 잡음). null 은 끝까지 null 로 흘려야 한다.
   const toBps = (a, b) => { const r = rate(a, b, sec); return r == null ? null : r * 8; };
   for (const p of ports) {
-    const old = prev.ports.get(String(p.index));
+    const old = prev.ports.get(rateKey(p));
     if (!old) { p.inBps = null; p.outBps = null; p.inFps = null; p.outFps = null; continue; }
     // 옥텟(바이트)이 있으면 bps 로, 없으면(SSH porterrshow) 프레임/초로 — 둘 다 정직하게 구분 표기.
     p.inBps = toBps(old.inBytes, p.inBytes);

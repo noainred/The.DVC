@@ -226,6 +226,24 @@ export function openSecret(v) {
   }
 }
 
+/**
+ * v2.597(감사 RECENT-01 — 재현): 파생키가 **이미 캐시에 있을 때만** 연다. 없으면 `null`(scrypt 를 돌리지 않는다).
+ * 백업 지문은 매 백업마다 모든 설정 파일을 훑는데, 캐시에 없는 봉인 값마다 scryptSync(N=2^15, 약 100ms)를 메인
+ * 스레드에서 돌려 값 100개에 10~22초 이벤트 루프가 멈췄다. 경고도 남기지 않는다(지문용 — 복호 실패가 아니다).
+ */
+export function openSecretIfCached(v) {
+  if (!isSealed(v)) return v;
+  try {
+    const [alg, logN, salt, iv, tag, ct] = v.slice(PREFIX.length).split('$');
+    if (!Object.prototype.hasOwnProperty.call(ALGOS, alg)) return null;
+    const key = kdfCache.get(`${alg}|${Number(logN)}|${Buffer.from(salt, 'base64url').toString('base64url')}`);
+    if (!key) return null;
+    const d = crypto.createDecipheriv(alg, key, Buffer.from(iv, 'base64url'), { authTagLength: 16 });
+    d.setAuthTag(Buffer.from(tag, 'base64url'));
+    return Buffer.concat([d.update(Buffer.from(ct, 'base64url')), d.final()]).toString('utf8');
+  } catch { return null; }
+}
+
 /* ── 봉인/복호(객체 깊은 순회) ────────────────────────────────────────────── */
 
 function walk(obj, fn) {

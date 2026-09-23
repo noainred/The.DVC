@@ -160,8 +160,8 @@ export function EdgeLog() {
           <label style={{ fontSize: 12 }}>
             <input type="checkbox" checked={showStatus} onChange={(e) => setShowStatus(e.target.checked)} /> 진행상태 함께
           </label>
-          <button onClick={openLocal} disabled={busyAgent === '__local__'}>{busyAgent === '__local__' ? '읽는 중…' : '이 포탈 로그 보기'}</button>
-          <button onClick={load}>새로고침</button>
+          <button className="btn" onClick={openLocal} disabled={busyAgent === '__local__'}>{busyAgent === '__local__' ? '읽는 중…' : '이 포탈 로그 보기'}</button>
+          <button className="btn" onClick={load}>새로고침</button>
         </div>
 
         {/* ⚠ 표는 **가로 스크롤 컨테이너**로 감싼다 — 없으면 400px 에서 표가 페이지를 밀어낸다(실측 622px). */}
@@ -197,7 +197,7 @@ export function EdgeLog() {
                   </td>
                   <td className="right" data-sort={r.last?.logCount ?? -1}>{r.last?.logCount ?? <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                   <td>
-                    <button onClick={() => fetchEdge(r.agent)} disabled={busyAgent === r.agent || !h.can} title={h.can ? '' : h.text.replace(/\*\*/g, '')}>
+                    <button className="btn btn-sm" onClick={() => fetchEdge(r.agent)} disabled={busyAgent === r.agent || !h.can} title={h.can ? '' : h.text.replace(/\*\*/g, '')}>
                       {busyAgent === r.agent ? '가져오는 중…' : '지금 가져오기'}
                     </button>
                   </td>

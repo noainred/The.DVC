@@ -59,8 +59,14 @@ api.post('/tools/deep-search', requirePerm('tools'), (req, res) => {
 });
 
 // 다빈치 서비스 점검 — 포탈 내부 서비스/수집기 상태 통합.
-api.get('/tools/service-check', requirePerm('tools'), (_req, res) => {
-  try { res.json(getServiceCheck()); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+// v2.597(감사 AUTHZ-2597-02): 세부 문구가 전부 함대 수준 수치(vCenter 연결 n/N·NSX 매니저·활성 알림 수)라 범위 제한 계정에는
+//   상태만 주고 문구를 비운다(형제 /tools/network-check 는 범위로 거른다). 뺀 사실은 scoped 로 밝힌다.
+api.get('/tools/service-check', requirePerm('tools'), (req, res) => {
+  try {
+    const r = getServiceCheck();
+    if (!scopedVcenterIds(req.user, store.get())) return res.json(r);
+    res.json({ ...r, scoped: true, checks: (r.checks || []).map((c) => ({ ...c, detail: '범위 제한 계정 — 함대 수준 세부 수치는 표시하지 않습니다' })) });
+  } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
 // 글로벌 네트워크 점검 — 제어플레인(vCenter/NSX) 도달성·RTT + 네트워크 객체 요약.

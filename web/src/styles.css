@@ -24,6 +24,12 @@
   --panel-deep: #0f1626;    /* 세그먼트·th·더보기 버튼 배경 — --bg-soft 보다 살짝 어둡다 */
   --teal: var(--mint-dim);
   --font-mono: var(--mono);
+  /* v2.597(감사 WEBUI-2597-01·03 — 재현): 104곳이 var(--muted) 를, 3곳이 --hover·--blue 를 fallback 없이 썼는데 정의가 없었다 —
+     미정의 변수는 선언을 무효로 만들어 '측정 없음'·보조 문구가 회색 대신 본문색으로 보였다. 새 hex 를 만들지 않고 기존 값을 가리킨다.
+     cssVars.test.js 가 'fallback 없이 쓰는 변수는 전부 정의돼 있다' 를 고정한다. */
+  --muted: var(--text-dim);
+  --hover: rgba(59, 130, 246, 0.10);
+  --blue: var(--accent);
   --shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
   --radius: 12px;
 }
@@ -103,6 +109,8 @@ body {
 .btn:hover:not(:disabled) { background: var(--panel); border-color: var(--accent); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* v2.597(감사 WEBUI-2597-02 — 재현): .btn-sm 은 규칙이 0건이라 그것만 쓴 버튼이 흰 UA 기본 버튼으로 보였다. */
+.btn.btn-sm { padding: 2px 8px; font-size: 11.5px; }
 .banner {
   padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); border-left: 4px solid var(--accent);
   background: var(--panel); color: var(--text); font-size: 12.5px; line-height: 1.55;

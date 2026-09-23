@@ -10,8 +10,9 @@
 #   - prebuilt web/dist
 #   - start-portal.bat + install-service.ps1 (scheduled-task service)
 #
-# The server deps contain no native addons, so the repo's existing
-# node_modules (from `npm run install:all`) are reused as-is.
+# v2.597(감사 DEPS2597-03 — 정정): 예전 주석은 'no native addons' 라 했지만 사실이 아니다 — ssh2(sshcrypto.node)·
+# cpu-features(cpufeatures.node)는 빌드 호스트(Linux) ELF 로 실린다. Windows 에서는 로드되지 않고 ssh2 가 순수 JS 로
+# 폴백한다(기능은 같고 SSH 암호화가 느리다). 저장소의 node_modules(`npm run install:all`)를 그대로 쓴다.
 #
 # Usage (run on any machine; provide a downloaded Windows Node zip):
 #   packaging/windows/build-collector-win.sh \

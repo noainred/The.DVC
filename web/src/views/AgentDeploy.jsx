@@ -295,7 +295,7 @@ export default function AgentDeploy() {
               {/* v2.500(감사): 다른 화면의 비밀 입력은 전부 type="password" 인데 이 칸만 평문이었다 —
                   화면 공유·어깨너머 노출을 줄인다. 필요할 때 눈 버튼으로 확인한다. */}
               <input className="input" type={showCentralToken ? 'text' : 'password'} value={f.centralToken} onChange={set('centralToken')} placeholder={f.hasCentralToken ? '저장됨 — 비우면 기존 값 유지' : (tokenInfo.hasToken ? '' : '미설정 — 생성 클릭')} />
-              <button type="button" className="btn-sm" onClick={() => setShowCentralToken((v) => !v)} title={showCentralToken ? '가리기' : '보기'}>{showCentralToken ? '🙈' : '👁'}</button>
+              <button type="button" className="btn btn-sm" onClick={() => setShowCentralToken((v) => !v)} title={showCentralToken ? '가리기' : '보기'}>{showCentralToken ? '🙈' : '👁'}</button>
               <button className="logout-btn" type="button" style={{ flex: 'none', padding: '7px 12px', whiteSpace: 'nowrap' }} disabled={genBusy} onClick={genToken}
                 title="없으면 안전한 랜덤 토큰을 생성해 이 포탈(중앙) 환경에 저장하고 채웁니다">{genBusy ? '생성 중…' : (tokenInfo.hasToken ? '현재값' : '생성')}</button>
             </div>

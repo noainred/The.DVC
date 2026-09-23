@@ -3461,6 +3461,37 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 남긴 것: SQLite open 일시 잠금 래치(`metrics/db.js`·`storage/db.js` — 가능성) · 엣지별 설정 조회 대소문자(가능성) · PRAGMA 묶음 exec
       (가능성) · `/vcenters` 중복 요청(정보) · 스파이크·현재 사용자 설정 전량 배포는 **설계**(반증).
 
+  - ⚠⚠ **v2.597 — 7축 병렬 감사(8차 점검) 확정분**("한번 더". 확정 21 · 가능성 9 · 반증 4, 고침 28. 회귀는
+    `test/audit2597.test.js` 22건 — **변이 검증 19/19** + 웹 `cssVars.test.js`. 상세 `docs/AUDIT-2026-09-24e.md`):
+    - ⚠⚠ **지문·해시 경로에서 봉인을 '열지' 말 것 — 캐시에 있을 때만**(RECENT-01 — **v2.596 이 만든 회귀**, 재현): v2.596 이
+      암호화 모드 지문을 맞추려고 `openSecretsDeep` 을 부르자 캐시에 없는 봉인 값마다 `scryptSync`(약 100ms)가 메인 스레드에서
+      돌아 값 100개에 **10~22초** 이벤트 루프가 멈췄다. `secretVault.openSecretIfCached` 는 파생키가 이미 있을 때만 연다(없으면
+      `null` → 고정 표식). **값마다 KDF 를 돌리는 함수를 폴링·백업 경로에서 부르지 말 것.**
+    - ⚠⚠ **결측 → 0 은 REST 수집기에도 남아 있었다**(C2597-02~05): v2.593 DATA-01·v2.595 C2595-01 이 고친 뒤에도 Unity REST
+      `sizeTotal`(없으면 '정상 · 0 바이트')·Isilon `byKey`/노드 통계(`Number(v)||0` 이 **'읽었다' 판정 has() 를 통과**)·
+      PowerStore 어플라이언스 풀이 0 이었다. **`Number(x) || 0` 은 grep 으로 전수를 볼 것** — 이번에도 형제 수집기에서 나왔다.
+    - **PDU 데이지체인 유닛 2 이상은 뱅크·상을 읽지 않는다**(C2597-01): `bkReading`/`phReading` 에는 유닛 축이 없어 유닛마다 같은
+      명령이 나가고 **유닛 1 값이 복제돼** unit=i 로 적재됐다. 실장비 유닛 지정 문법을 확인하기 전까지 `banksNotCollected` 로 밝힌다.
+    - ⚠⚠ **알림 발생 상태는 파일에 남긴다**(LC2597-01, `alerts-state.json`): 인메모리뿐이라 재시작마다 발생 중 알림 전부가 쿨다운과
+      무관하게 재발송됐다. 복원 목록은 **쿨다운이 남은 동안만** 들고 있는다 — 첫 평가에서 비우면 기동 직후 스냅샷이 비어(첫 수집 중)
+      전부 잃고 수집 뒤 다시 보낸다(구현 중 실제로 그렇게 만들었다가 고쳤다).
+    - **재무장 함수를 만들었으면 부르는 곳이 있는지 볼 것**(LC2597-02): `reschedulePhysicalPoller` 는 호출부가 0 이었고 엣지 pull 은
+      `rescheduleGpuGuestPoller` 도 부르지 않았다. 상태 화면은 새 주기를 보고했다(v2.409 규약의 누락).
+    - **SQLite 첫 open 잠금은 래치하지 않는다**(L2597-02): 'database is locked' 를 영구 `unavailable`·NDJSON 폴백으로 굳히지 말 것 —
+      `busy_timeout` 을 **journal_mode 보다 먼저** 걸고, 잠금이면 핸들을 닫고 다시 연다.
+    - **엣지 이름 조회는 `util/agentKey.js`**(L2597-03): 토큰 바인딩·장비 배정은 소문자 비교인데 주기·GPU·사용자 설정은 글자 그대로라
+      같은 응답이 장비는 주고 설정은 빠뜨렸다. 정확히 같은 키 → 대소문자만 다른 키 순서(저장 형식은 그대로).
+    - **디렉터 포트 처리량 키는 slot/port**(C2597-07, `sanswitch/rates.js rateKey`) — REST 폴백 index('1/10'·'11/0' → 110)가 겹쳤다.
+    - **fallback 없는 `var(--x)` 는 정의가 있어야 한다**(WEBUI-01 — `cssVars.test.js` 스윕): `--muted` 104곳이 정의 없이 쓰여 선언이
+      무효가 되고 본문색을 물려받았다. **수치로는 안 잡히고 스크린샷으로만** 보인다(v2.589 `.btn` 과 같은 계열).
+    - 그 밖: vmtrack 부분 합 `skipped` 열 + 배지 · PDU push 재진입 가드·pull 로 빠진 장비 스냅샷 즉시 정리 · GPU 메모리 사용률 부분 결측 ·
+      vCenter REST 폴백 DS free_space 결측 → null · ping 범위는 대상 vcenterId 먼저 · service-check 범위 계정 문구 생략 ·
+      svcmon probe 문구 가림 · staticGzip q=0 · 오프라인 패키지 config 정리를 Windows 와 같은 식(테스트가 두 find 식을 대조) ·
+      루트 `config/` 무시·추적 해제 · 워크플로 `persist-credentials: false`·CI/릴리스 Node 통일·릴리스 `npm ci`.
+    - 남긴 것: Windows 서비스 ACL(DEPS-04 — Windows 환경 없음) · 자산 prune 순서(DEPS-07 — 1000개 상한과 얽힘) ·
+      vCenter REST 폴백 DS 결측이 있으면 스토리지 합계가 부분 합(합계 헬퍼가 null 을 0 으로 더한다 — 폴백 경로 한정).
+    - ⚠ 정직 기록: 실장비(APC 데이지체인 CLI·Isilon/Unity 결측 응답·다중 프로세스 SQLite 잠금)로는 확인하지 못했다 — 합성 입력 재현이다.
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

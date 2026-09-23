@@ -12,7 +12,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
-import { openSecretsDeep } from '../security/secretVault.js';
+import { isSealed, openSecretIfCached } from '../security/secretVault.js';
 import { redactEnvSecrets, mergeRedactedEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 
@@ -81,11 +81,19 @@ function stripRunFields(v) {
  * 달라진다** — 지문이 매번 바뀌어 v2.595 의 수정이 통째로 무력했다. JSON 은 봉인을 열어 평문 기준으로 지문을 낸다
  * (메모리에서 해시에만 쓰고 어디에도 남기지 않는다).
  */
+function walkSealed(v, fn) {
+  if (Array.isArray(v)) return v.map((x) => walkSealed(x, fn));
+  if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) o[k] = walkSealed(x, fn); return o; }
+  return isSealed(v) ? fn(v) : v;
+}
 function fingerprintContent(name, content) {
   if (!/\.json$/i.test(name)) return String(content);
   let obj;
   try { obj = JSON.parse(String(content)); } catch { return String(content); }
-  try { obj = openSecretsDeep(obj); } catch { /* 열지 못하면 원문 기준 — 지문이 달라질 뿐 백업은 안전한 쪽(더 만든다) */ }
+  // v2.597(감사 RECENT-01): openSecretsDeep 은 캐시에 없는 값마다 scryptSync 를 돌려 백업 1회에 수~수십 초 루프를 막았다.
+  // 파생키가 캐시에 있을 때만 열고(이 프로세스가 읽거나 봉인한 값 — 거의 전부), 없으면 고정 표식으로 둔다.
+  // 표식이 바뀌면 지문이 한 번 달라질 뿐이다(백업을 더 만드는 쪽 — 안전). 평문은 해시에만 쓰고 남기지 않는다.
+  obj = walkSealed(obj, (v) => { const p = openSecretIfCached(v); return p == null ? '\u0000sealed-uncached' : p; });
   return JSON.stringify(MIXED_STATE_FILES.has(name) ? stripRunFields(obj) : obj);
 }
 export function settingsFingerprint(files) {
