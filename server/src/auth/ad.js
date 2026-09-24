@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import ldap from 'ldapjs';
 import { config } from '../config.js';
+import { numOrNull } from '../util/numOrNull.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
 
 const FILE = path.join(config.configDir, 'auth.json');
@@ -34,13 +35,26 @@ const ENV_DEFAULTS = {
   groupMatch: process.env.AD_GROUP_MATCH === 'substring' ? 'substring' : 'exact',
   // LDAPS 인증서 검증은 기본 ON(MITM 방지). 내부 자체서명 DC만 AD_TLS_REJECT_UNAUTHORIZED=false로 opt-out.
   tlsRejectUnauthorized: process.env.AD_TLS_REJECT_UNAUTHORIZED !== 'false',
-  timeoutMs: Number(process.env.AD_TIMEOUT_MS) || 8000,
+  timeoutMs: normTimeoutMs(process.env.AD_TIMEOUT_MS) ?? 8000,
 };
+
+/**
+ * v2.601(LO2601-02): AD 타임아웃 → [1초, 60초] 정수 ms, 빈 값·숫자 아님·0 이하면 null(= 미지정).
+ * 예전에는 화면이 보낸 문자열을 그대로 저장해, 칸을 비우면 `''` 가 저장되고 `setTimeout(reject, '')` 가 ~1ms 에
+ * 발화해 **모든 AD 로그인이 'connect timeout'** 으로 실패했다(authenticateAD 가 null 을 돌려 '비밀번호 틀림' 처럼 보인다).
+ */
+function normTimeoutMs(v) {
+  const n = numOrNull(v);
+  if (n == null || n <= 0) return null;
+  return Math.min(60_000, Math.max(1000, Math.round(n)));
+}
 
 export function loadAdConfig() {
   let saved = {};
   try { if (fs.existsSync(FILE)) saved = JSON.parse(fs.readFileSync(FILE, 'utf8'))?.ad || {}; } catch (e) { preserveCorrupt(FILE, e.message); saved = {}; }
   const merged = { ...ENV_DEFAULTS, ...saved };
+  // 이미 저장된 '' · 문자열 · 범위 밖 값도 여기서 복구한다(저장 경로만 고치면 옛 파일이 계속 로그인을 막는다).
+  merged.timeoutMs = normTimeoutMs(merged.timeoutMs) ?? ENV_DEFAULTS.timeoutMs;
   // groupMatch만 env를 우선한다 — UI 저장으로 auth.json에 'exact'가 박히면 긴급 하위호환
   // 스위치(AD_GROUP_MATCH=substring)가 먹지 않아 로그인 역할 매핑을 되돌릴 수 없게 된다.
   if (process.env.AD_GROUP_MATCH) merged.groupMatch = ENV_DEFAULTS.groupMatch;
@@ -52,6 +66,8 @@ export function saveAdConfig(partial) {
   const allowed = ['enabled', 'url', 'domain', 'baseDN', 'userFilter', 'adminGroup', 'operatorGroup', 'viewerGroup', 'defaultRole', 'tlsRejectUnauthorized', 'timeoutMs', 'groupMatch'];
   const next = { ...cur };
   for (const k of allowed) if (partial[k] !== undefined) next[k] = partial[k];
+  // 빈 칸·0 이하는 '미지정' — 이전 값을 유지한다(v2.583 dropUnspecifiedNumbers 규약).
+  next.timeoutMs = normTimeoutMs(partial.timeoutMs) ?? cur.timeoutMs;
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify({ ad: next }, null, 2), { mode: 0o600 });
   try { fs.chmodSync(FILE, 0o600); } catch { /* mode는 신규생성 시에만 적용 — 덮어쓰기에도 0600 보장 */ }
@@ -275,7 +291,9 @@ export async function authenticateAD(username, password) {
 
 /** Connectivity/bind test for the admin UI. Optionally verifies a sample user. */
 export async function testAd(cfg, sampleUser, samplePassword) {
-  const ad = { ...loadAdConfig(), ...(cfg || {}) };
+  const base = loadAdConfig();
+  const ad = { ...base, ...(cfg || {}) };
+  ad.timeoutMs = normTimeoutMs(ad.timeoutMs) ?? base.timeoutMs; // 화면의 빈 칸이 즉시 'connect timeout' 이 되지 않게
   if (!ad.url) return { ok: false, reason: 'AD_URL이 비어 있습니다.' };
   const client = makeClient(ad);
   const started = Date.now();

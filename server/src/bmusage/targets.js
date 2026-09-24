@@ -19,6 +19,7 @@
  *   (`fleetInventory.js:170`) iDRAC 등록이 없다 — 그것을 '주소 없음' 이라 말해야 한다.
  */
 import { licenseFromInventory } from './license.js';
+import { addressMatcher, maskIdentityFields, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
 
 const t = (v) => String(v ?? '').trim();
 const norm = (v) => t(v).toLowerCase();
@@ -202,13 +203,33 @@ function idOf(b) {
  * ⚠ `null`(그 경로가 없다)과 `''`(있지만 가렸다)을 구분해 남긴다 — 화면이 경로 유무를 판정한다.
  * `publicTarget` 의 두 번째 인자로 두지 않은 이유: 호출부가 `.map(publicTarget)` 이라 인덱스가 들어온다.
  */
-export function maskTargetAddress(pt) {
+export function maskTargetAddress(pt, hosts = []) {
   if (!pt || typeof pt !== 'object') return pt;
+  // v2.601 AUTHZ-2601-01: IP 로 등록한 iDRAC 은 serverId·fleetId·key·name 이 곧 그 IP 다 —
+  //   host 칸만 비우면 식별자로 그대로 샜다. 자기 주소 + 등록부 주소 목록과 같거나 IP 인 값을 가린다.
+  const match = addressMatcher([pt.idracHost, pt.osHostName, ...(hosts || [])].filter((h) => typeof h === 'string' && h));
   return {
-    ...pt,
+    ...maskBmIdentity(pt, match),
     idracHost: pt.idracHost == null ? pt.idracHost : '',
     osHostName: pt.osHostName == null ? pt.osHostName : '',
   };
+}
+
+/** 베어메탈 행의 식별 필드(대상·제외·최신값·키 충돌·인증 정지·귀속 없음 표본 공용, v2.601). */
+export const BM_ID_FIELDS = Object.freeze(['serverId', 'fleetId', 'key', 'tagKey', 'deviceId']);
+/**
+ * 식별자가 주소인 베어메탈 행을 가린다(원본 불변). 토큰은 같은 원문이면 같으므로 대상의 `key` 와
+ * 최신값 행의 `key` 가 계속 짝을 이룬다(화면 `byKey` 매칭이 깨지지 않는다).
+ * `names`(키 충돌 목록)와 `reason`·`error`(인증 정지 사유 — 원문 주소가 실린다)도 함께 본다.
+ */
+export function maskBmIdentity(x, match) {
+  if (!x || typeof x !== 'object') return x;
+  const out = maskIdentityFields(x, match, { idFields: BM_ID_FIELDS, nameFields: ['name'] });
+  if (Array.isArray(out.names)) out.names = out.names.map((n) => (match(n) ? maskedAddressName(n) : n));
+  for (const f of ['reason', 'error']) {
+    if (typeof out[f] === 'string') out[f] = out[f].replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, (ip) => maskedIdToken(ip));
+  }
+  return out;
 }
 
 /** 응답용 — 자격증명을 뺀다. ⚠ 라우트는 반드시 이것만 내보낼 것. */

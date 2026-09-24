@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   keyState, expiryNote, scopeText, groupsText, kpisOf, kpiIdentityOk,
   lastUsedText, fullScopeWarning, curlExample, rpmNote, staleGroups,
-  DIRECTION_NOTE, ONCE_NOTE, READONLY_NOTE, KEY_STATES,
+  DIRECTION_NOTE, ONCE_NOTE, READONLY_NOTE, KEY_STATES, ghostVcenters,
 } from './apiKeyText.js';
 
 const NOW = 1_800_000_000_000;   // 고정 기준 시각 — Date.now() 를 쓰면 시각에 따라 깨진다(v2.517 규약)
@@ -184,5 +184,23 @@ describe('curlExample · rpmNote', () => {
     expect(rpmNote(null)).toMatch(/읽지 못했습니다/);
     expect(rpmNote(0)).toMatch(/읽지 못했습니다/);
     expect(rpmNote(120)).toMatch(/분당 120회/);
+  });
+});
+
+// v2.601 WEB2601-04 — 등록돼 있지 않은(삭제·오타) vCenter 로 범위를 둔 키를 '1곳으로 제한' 으로만 말하지 않는다.
+describe('scopeText · ghostVcenters — 존재하지 않는 vCenter 범위(WEB2601-04)', () => {
+  it('전부 없으면 아무것도 조회되지 않는다고 말한다', () => {
+    const t = scopeText(['vc-ghost'], new Set(['vc-a']));
+    expect(t).toContain('전부 등록돼 있지 않음');
+    expect(t).toContain('아무것도 조회되지');
+  });
+  it('일부만 없으면 개수를 밝힌다', () => {
+    expect(scopeText(['vc-a', 'vc-ghost'], ['vc-a'])).toContain('그중 1곳은 등록돼 있지 않음');
+  });
+  it('목록을 모르면(null) 단정하지 않는다 · 빈 범위는 전체', () => {
+    expect(scopeText(['vc-ghost'], null)).toBe('vCenter 1곳으로 제한');
+    expect(ghostVcenters(['vc-ghost'], null)).toBe(null);
+    expect(scopeText([], new Set())).toBe('전체 vCenter (범위 제한 없음)');
+    expect(ghostVcenters(['vc-a', 'x'], new Set(['vc-a']))).toEqual(['x']);
   });
 });

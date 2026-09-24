@@ -17,6 +17,7 @@
  */
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
 import { resilientFetch } from '../util/resilientFetch.js';
+import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { findCollector } from './edgeLogPull.js';
 
 /** 이 엔드포인트를 내주기 시작한 최소 엣지 버전 — 그 아래는 경로가 없다. */
@@ -127,10 +128,10 @@ export async function pullTokenCheck(agent, { selfProbe = true, fetchImpl = resi
 
   let res;
   try {
-    res = await fetchImpl(url, {
+    res = await withOutboundTag(col.id || col.name || agent, () => fetchImpl(url, {
       headers: { Accept: 'application/json', ...(col.token ? { 'X-Collector-Token': col.token } : {}) },
       timeoutMs, retries: 0, // '되는가' 를 보는 점검이라 재시도가 판정을 흐린다
-    });
+    }));
   } catch (e) {
     const msg = String(e?.message || e);
     const kind = /timeout|abort|timed out/i.test(msg) ? 'timeout' : 'unreachable';

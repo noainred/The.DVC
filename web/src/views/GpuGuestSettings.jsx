@@ -13,7 +13,17 @@ import { Field, fmtAgo } from './gpu-guest/shared.jsx';
 import { VmCredManager } from './gpu-guest/VmCredManager.jsx';
 import { PhysicalGpuManager } from './gpu-guest/PhysicalGpuManager.jsx';
 import { STable } from '../components/STable.jsx';
-import { keepIfBlank } from './blankKeep.js';
+import { applyDrafts } from './blankKeep.js';
+
+// v2.601(감사 RECENT2601-05): 숫자 칸의 저장값 변환(하한·초→ms). 입력 중에는 원문(초안)만 들고 있고
+// 저장할 때 한 번만 적용한다 — 입력 중에 걸면 칸을 비울 수 없고 하한이 중간 입력을 망가뜨린다.
+const NUM_MAPS = {
+  pollIntervalMs: (n) => Math.max(10, n) * 1000,
+  concurrency: (n) => n,
+  timeoutMs: (n) => Math.max(3, n) * 1000,
+  maxVmsPerVcenter: (n) => Math.max(1, n),
+  sshPort: (n) => Math.max(1, n),
+};
 
 /**
  * GPU 게스트 수집 설정 — 패스쓰루 GPU는 ESXi에서 사용률을 못 보므로, 선택한 법인의
@@ -26,6 +36,7 @@ export default function GpuGuestSettings() {
   const [vcs, setVcs] = useState([]);       // [{id,name,...}]
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null);   // local editable copy (전역 + 공용 계정)
+  const [drafts, setDrafts] = useState({}); // 숫자 칸 입력 원문(저장 전). 빈 칸이면 저장 시 이전 값
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   // 설정 대상: '' = 이 포탈(로컬 수집), 그 외 = 원격 엣지(agent) 앞으로 배포(엣지가 pull해 적용).
@@ -46,6 +57,7 @@ export default function GpuGuestSettings() {
       setVcs(v.vcenters || []);
       // 대상 전환(force) 시 폼을 새로 채움. 로컬 30초 폴링은 최초 1회만(미저장 입력 보존).
       setForm((cur) => (force || !cur ? toForm(settings || { vcenters: {} }, v.vcenters || []) : cur));
+      if (force) setDrafts({});
       setError(null);
     } catch (e) { setError(e.message); }
   };
@@ -63,15 +75,22 @@ export default function GpuGuestSettings() {
   if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!data || !form) return <Loading />;
 
+  // 숫자 칸: 입력 중에는 원문을 보여 주고(비울 수 있다), 건드리지 않은 칸은 저장값을 보여 준다.
+  const numInput = (key, shown) => ({
+    value: drafts[key] ?? shown,
+    onChange: (e) => { const raw = e.target.value; setDrafts((d) => ({ ...d, [key]: raw })); },
+  });
   const setVc = (id, patch) => setForm((f) => ({ ...f, vcenters: { ...f.vcenters, [id]: { ...f.vcenters[id], ...patch } } }));
 
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson(settingsUrl(deployAgent), form);
-      const settings = deployAgent ? (r.settings || form) : r.settings;
+      const payload = applyDrafts(form, drafts, NUM_MAPS);
+      const r = await putJson(settingsUrl(deployAgent), payload);
+      const settings = deployAgent ? (r.settings || payload) : r.settings;
       if (!deployAgent) setData(r);
-      setForm(toForm(settings, vcs, form));
+      setForm(toForm(settings, vcs, payload));
+      setDrafts({});
       setMsg(deployAgent
         ? `원격 엣지 [${deployAgent}]로 배포 저장됨 — 엣지가 다음 pull 주기(약 1분)에 가져가 적용합니다.`
         : '저장되었습니다. 새 설정이 다음 주기부터 적용됩니다.');
@@ -119,13 +138,13 @@ export default function GpuGuestSettings() {
         </label>
         <div className="flex gap wrap" style={{ marginTop: 12 }}>
           <Field label="수집 주기(초)"><input className="input" type="number" min={10} style={{ width: 100 }}
-            value={Math.round(form.pollIntervalMs / 1000)} onChange={(e) => setForm((f) => ({ ...f, pollIntervalMs: keepIfBlank(e.target.value, f.pollIntervalMs, (n) => Math.max(10, n) * 1000) }))} /></Field>
+            {...numInput('pollIntervalMs', Math.round(form.pollIntervalMs / 1000))} /></Field>
           <Field label="동시 실행 VM 수"><input className="input" type="number" min={1} max={32} style={{ width: 80 }}
-            value={form.concurrency} onChange={(e) => setForm((f) => ({ ...f, concurrency: keepIfBlank(e.target.value, f.concurrency, (n) => n) }))} /></Field>
+            {...numInput('concurrency', form.concurrency)} /></Field>
           <Field label="VM당 타임아웃(초)"><input className="input" type="number" min={3} max={120} style={{ width: 90 }}
-            value={Math.round(form.timeoutMs / 1000)} onChange={(e) => setForm((f) => ({ ...f, timeoutMs: keepIfBlank(e.target.value, f.timeoutMs, (n) => Math.max(3, n) * 1000) }))} /></Field>
+            {...numInput('timeoutMs', Math.round(form.timeoutMs / 1000))} /></Field>
           <Field label="법인당 최대 VM"><input className="input" type="number" min={1} max={100000} style={{ width: 100 }}
-            value={form.maxVmsPerVcenter} onChange={(e) => setForm((f) => ({ ...f, maxVmsPerVcenter: keepIfBlank(e.target.value, f.maxVmsPerVcenter, (n) => Math.max(1, n)) }))} /></Field>
+            {...numInput('maxVmsPerVcenter', form.maxVmsPerVcenter)} /></Field>
           <Field label="수집 방식"><select className="select" style={{ width: 210 }} value={form.collectMethod}
             title="auto(권장)=게스트작업 먼저→실패 시 SSH 자동 폴백(VM별 성공 방식 학습). VMware Tools=게스트작업만. SSH 직접=게스트 IP로 SSH해 nvidia-smi만."
             onChange={(e) => setForm((f) => ({ ...f, collectMethod: e.target.value }))}>
@@ -135,7 +154,7 @@ export default function GpuGuestSettings() {
           </select></Field>
           {form.collectMethod !== 'guestops' && (
             <Field label="SSH 포트"><input className="input" type="number" min={1} max={65535} style={{ width: 80 }}
-              value={form.sshPort} onChange={(e) => setForm((f) => ({ ...f, sshPort: keepIfBlank(e.target.value, f.sshPort, (n) => Math.max(1, n)) }))} /></Field>
+              {...numInput('sshPort', form.sshPort)} /></Field>
           )}
         </div>
         {form.collectMethod === 'ssh' && (

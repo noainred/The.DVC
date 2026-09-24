@@ -20,8 +20,8 @@ import { logAudit } from '../../audit.js';
 import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers } from '../../bmusage/settings.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
-import { publicTarget, maskTargetAddress, NO_PATH_REASON } from '../../bmusage/targets.js';
-import { maskActivityEvents, scrubHosts } from '../../auth/addressMask.js';
+import { publicTarget, maskTargetAddress, maskBmIdentity, NO_PATH_REASON } from '../../bmusage/targets.js';
+import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, resolveMaskedToken } from '../../auth/addressMask.js';
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor } from '../../bmusage/poller.js';
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
@@ -76,6 +76,37 @@ const stripAckBy = (st, isAdmin) => {
   const { enterpriseAckBy: _a, ...rest } = st; void _a; return rest;
 };
 
+/**
+ * 비-admin 가림에 쓸 주소 목록(v2.601 AUTHZ-2601-01) — 대상의 iDRAC·OS 주소 + iDRAC 등록부 주소.
+ * 제외(skipped) 행·귀속 없음 표본에는 주소 칸이 없어 **등록부 주소와 대조**해야 이름=FQDN 인 행을 잡는다.
+ * 등록부를 못 읽어도 IP 판정은 그대로 동작한다(넓게 여는 쪽으로 실패하지 않는다 — IPv4 는 항상 가린다).
+ */
+export async function bmAddressHosts(tg) {
+  const hosts = [];
+  for (const x of (tg?.targets || [])) {
+    if (x?.idrac?.host) hosts.push(x.idrac.host);
+    if (x?.osHost?.host) hosts.push(x.osHost.host);
+    if (x?.idracHost) hosts.push(x.idracHost);
+    if (x?.osHostName) hosts.push(x.osHostName);
+  }
+  try {
+    const { loadRegistry } = await import('../../idrac/registry.js');
+    for (const r of loadRegistry()) if (r?.host) hosts.push(r.host);
+  } catch { /* 등록부를 못 읽으면 IP 판정만 — 아래 addressMatcher 가 IPv4 는 늘 잡는다 */ }
+  return [...new Set(hosts.filter((h) => typeof h === 'string' && h))];
+}
+
+/** 비-admin 응답의 베어메탈 목록 전부를 같은 판정기로 가린다(대상과 최신값 행의 key 토큰이 같게). */
+export function maskBmList(list, match) {
+  return Array.isArray(list) ? list.map((x) => maskBmIdentity(x, match)) : list;
+}
+
+/** 귀속 없음 표본의 key·name 이 주소인 행을 가린다(v2.601 — 전체 범위 비-admin 에게만 나가는 경로). */
+export function maskUnassignedInfo(info, match) {
+  if (!info || typeof info !== 'object' || !Array.isArray(info.samples)) return info;
+  return { ...info, samples: maskBmList(info.samples, match) };
+}
+
 export function registerBmUsage(api) {
 
 /** 주 조회 — 대상·최신값·설정·상태. 장비에 접속하지 않는다. */
@@ -89,8 +120,14 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       dbStatus().catch(() => ({ available: false })),
     ]);
     // v2.600 AUTHZ-2600-08: 비-admin 에는 iDRAC·OS 관리 주소를 가린다(가린 사실은 addressHidden).
-    const targets = applyScope(tg.targets.map(publicTarget).map((x) => (isAdmin ? x : maskTargetAddress(x))), allowed);
-    const skipped = applyScope(tg.skipped, allowed);
+    // v2.601 AUTHZ-2601-01: 주소 칸만이 아니라 **식별자·이름이 주소인 행**(IP 로 등록한 iDRAC)도 가린다 —
+    //   serverId·fleetId·key·name 이 곧 IP 라 host 를 비워도 그대로 샜다. 범위 절단은 원문으로 먼저 한다.
+    const hosts = isAdmin ? [] : await bmAddressHosts(tg);
+    const match = addressMatcher(hosts);
+    const targets0 = applyScope(tg.targets.map(publicTarget), allowed);
+    const targets = isAdmin ? targets0 : targets0.map((x) => maskTargetAddress(x, hosts));
+    const skipped0 = applyScope(tg.skipped, allowed);
+    const skipped = isAdmin ? skipped0 : maskBmList(skipped0, match);
     /*
      * ⚠ **사유별 개수도 scope 를 타야 한다**(v2.550 자체 재검토에서 잡은 결함): 예전에는
      *   `tg.counts.byReason` 을 그대로 내보내 범위 제한 계정이 **다른 법인 서버 대수**를 알 수 있었다
@@ -106,9 +143,10 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
           os: targets.filter((x) => (x.paths || []).includes('os')).length,
           both: targets.filter((x) => (x.paths || []).length > 1).length }
       : tg.counts;
-    const keys = new Set(targets.map((x) => x.key));
+    const keys = new Set(targets0.map((x) => x.key));
     // 최신값은 **대상 목록 안의 것만** 준다(법인을 끄거나 등록이 사라진 서버의 옛 값이 새어 나가지 않게).
-    const rows = latest.filter((r) => keys.has(t(r.key)));
+    const rows0 = latest.filter((r) => keys.has(t(r.key)));
+    const rows = isAdmin ? rows0 : maskBmList(rows0, match);
     res.json({
       ok: true, at: Date.now(),
       enabled: bmUsageEnabled(),
@@ -119,13 +157,13 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       skipped,
       counts,
       /* 키 충돌 — 범위 계정에는 보이는 것만(v2.550.3). 조용히 두면 한 서버 값이 다른 서버로 보인다. */
-      keyConflicts: applyScope(tg.keyConflicts || [], allowed),
+      keyConflicts: (isAdmin ? (x) => x : (l) => maskBmList(l, match))(applyScope(tg.keyConflicts || [], allowed)),
       metrics: METRICS, reasons: NO_PATH_REASON,
       vcenters: applyScope(tg.vcenters.map((v) => ({ ...v, vcenterId: v.id })), allowed),
       isEdge: tg.isEdge,
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
       db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
-      status: stripAckBy(bmUsageStatus(), isAdmin),
+      status: isAdmin ? bmUsageStatus() : maskPollerStatus(stripAckBy(bmUsageStatus(), isAdmin), hosts),
       enterpriseActive: enterpriseActive(),
       licenseLabels: TIER_LABEL,
       /*
@@ -135,14 +173,14 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
        * ⚠ **범위 제한 계정에는 주지 않는다** — 귀속 없는 서버의 이름·서비스태그를 노출하는 것은
        *   '귀속 없는 데이터 미노출' 불변조건 위반이다(server/CLAUDE.md).
        */
-      unassignedInfo: allowed ? null : await unassignedInfoFor(tg),
+      unassignedInfo: allowed ? null : (isAdmin ? await unassignedInfoFor(tg) : maskUnassignedInfo(await unassignedInfoFor(tg), match)),
       unassignedCauses: UNASSIGNED_CAUSE,
       /*
        * ⚠ 인증 실패로 정지된 대상은 **파일 기준으로 다시 센다** — 폴러의 인메모리 맵은 재시작하면
        *   비어서, 그것만 보고 '정지 0건' 이라 말하면 조용한 정지가 된다(v2.528 규약).
        *   범위 계정에는 보이는 대상만.
        */
-      authStops: applyScope(authStopsFor(tg.targets), allowed),
+      authStops: (isAdmin ? (x) => x : (l) => maskBmList(l, match))(applyScope(authStopsFor(tg.targets), allowed)),
       log: scopeFilePaths(bmUsageLogInfo(), req.user),
       ...(isAdmin ? {} : { addressHidden: true }),
     });
@@ -158,7 +196,11 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   try {
     const tg = await currentTargets();
-    const target = tg.targets.find((x) => x.key === key) || null;
+    const isAdmin = req.user?.role === 'admin';
+    // v2.601 AUTHZ-2601-01: 비-admin 은 주소인 key 를 토큰으로 받는다 — 토큰으로도 같은 대상을 찾는다.
+    const realKey = tg.targets.some((x) => x.key === key) ? key
+      : (isAdmin ? null : resolveMaskedToken(key, tg.targets.map((x) => x.key)));
+    const target = realKey ? (tg.targets.find((x) => x.key === realKey) || null) : null;
     // 범위 계정은 자기 법인 서버만 — 없는 것과 구분하지 않고 404(존재 은닉 규약).
     // ⚠⚠ v2.574 SEC-02 — `allowed` 는 **Set 또는 null** 이다(`auth/scope.js:16-26`).
     //   예전 코드는 `allowed.includes(...)` 라 **범위 제한 계정에서 항상 TypeError** 였고,
@@ -176,11 +218,17 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
      */
     const agent = config.agent?.name || '';
     const [raw, daily] = await Promise.all([
-      usageHistory(key, { agent, hours: Number(req.query.hours) || 24 }),
-      usageDaily({ key, agent, days: Number(req.query.days) || 90 }),
+      usageHistory(target.key, { agent, hours: Number(req.query.hours) || 24 }),
+      usageDaily({ key: target.key, agent, days: Number(req.query.days) || 90 }),
     ]);
-    const isAdmin = req.user?.role === 'admin';
-    res.json({ ok: true, key, target: isAdmin ? publicTarget(target) : maskTargetAddress(publicTarget(target)), ...(isAdmin ? {} : { addressHidden: true }), raw: raw.rows, rawTruncated: raw.truncated, daily, metrics: METRICS });
+    if (isAdmin) {
+      return res.json({ ok: true, key, target: publicTarget(target), raw: raw.rows, rawTruncated: raw.truncated, daily, metrics: METRICS });
+    }
+    const hosts = await bmAddressHosts(tg);
+    const match = addressMatcher(hosts);
+    res.json({ ok: true, key, target: maskTargetAddress(publicTarget(target), hosts), addressHidden: true,
+      raw: maskBmList(raw.rows, match), rawTruncated: raw.truncated,
+      daily: Array.isArray(daily) ? maskBmList(daily, match) : daily, metrics: METRICS });
   } catch (e) {
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
   }
@@ -218,17 +266,21 @@ api.get('/tools/bm-usage/activity', toolsPerm, async (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   const events0 = bmUsageEvents(Number(req.query.limit) || 100);
   // v2.600 AUTHZ-2600-08: 작업 로그 이벤트의 host(iDRAC·OS 주소)도 비-admin 에는 가린다.
+  // v2.601 AUTHZ-2601-01: deviceId·name 이 주소인 이벤트(IP 로 등록한 iDRAC)와 스킴 붙은 host 의 오류 문구도.
+  //   ⚠ 범위 절단은 **원문 deviceId** 로 먼저 하고 가림은 그 뒤에 한다(가린 뒤에 대조하면 전부 빠진다).
   const isAdmin = req.user?.role === 'admin';
-  const events = isAdmin ? events0 : maskActivityEvents(events0);
+  let tg = null;
+  try { tg = await currentTargets(); } catch { tg = null; }
+  const hosts = isAdmin ? [] : await bmAddressHosts(tg);
+  const maskEv = (list) => (isAdmin ? list : maskActivityEvents(list, hosts));
   if (!allowed) {
-    return res.json({ ok: true, poller: bmUsageStatus(), events, log: scopeFilePaths(bmUsageLogInfo(), req.user), ...(isAdmin ? {} : { addressHidden: true }) });
+    const poller = isAdmin ? bmUsageStatus() : maskPollerStatus(stripAckBy(bmUsageStatus(), false), hosts);
+    return res.json({ ok: true, poller, events: maskEv(events0), log: scopeFilePaths(bmUsageLogInfo(), req.user), ...(isAdmin ? {} : { addressHidden: true }) });
   }
-  let keys = new Set();
-  try {
-    const tg = await currentTargets();
-    keys = new Set(applyScope(tg.targets || [], allowed).map((x) => t(x.key)));
-  } catch { /* 대상을 못 읽으면 아래에서 전부 걸러진다 — 넓게 여는 쪽으로 실패하지 않는다 */ }
-  const shown = (events || []).filter((e) => keys.has(t(e?.deviceId)) || keys.has(t(e?.key)));
+  // 대상을 못 읽으면 아래에서 전부 걸러진다 — 넓게 여는 쪽으로 실패하지 않는다.
+  const keys = new Set(applyScope(tg?.targets || [], allowed).map((x) => t(x.key)));
+  const events = events0;
+  const shown = maskEv((events || []).filter((e) => keys.has(t(e?.deviceId)) || keys.has(t(e?.key))));
   res.json({
     ok: true,
     poller: { running: bmUsageStatus()?.running ?? null, intervalMs: bmUsageStatus()?.intervalMs ?? null },
@@ -282,12 +334,17 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
      */
     const isAdmin = req.user?.role === 'admin';
     const edgeUrls = cols.map((c) => t(c.url)).filter(Boolean);
+    // v2.601 AUTHZ-2601-01: 엣지 보관분의 대상·최신값·정지 목록도 식별자가 주소인 행을 가린다.
+    const regHosts = isAdmin ? [] : await bmAddressHosts(null);
     const rows0 = cols.filter((c) => t(c.name)).map((c) => {
       const rec = byName.get(t(c.name).toLowerCase()) || null;
       const snap = rec?.snap || null;
       // v2.600 AUTHZ-2600-08: 엣지 보관분의 대상도 비-admin 에는 관리 주소를 가린다.
-      const targets = snap ? applyScope(snap.targets || [], allowed).map((x) => (isAdmin ? x : maskTargetAddress(x))) : [];
-      const keys = new Set(targets.map((x) => t(x.key)));
+      const targets0 = snap ? applyScope(snap.targets || [], allowed) : [];
+      const snapHosts = isAdmin ? [] : [...regHosts, ...targets0.flatMap((x) => [x?.idracHost, x?.osHostName])].filter((h) => typeof h === 'string' && h);
+      const em = addressMatcher(snapHosts);
+      const targets = isAdmin ? targets0 : targets0.map((x) => maskTargetAddress(x, snapHosts));
+      const keys = new Set(targets0.map((x) => t(x.key)));
       return {
         agent: c.name, enabled: c.enabled !== false, hasUrl: !!t(c.url),
         at: rec?.at || null, snapAt: rec?.snapAt || null,
@@ -308,12 +365,12 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
          *   ("scope 를 고칠 때는 그 데이터가 응답에 실리는 경로를 **전부** 찾을 것").
          */
         settings: scopeEdgeSettings(snap?.settings, allowed),
-        targets, rows: snap ? (snap.rows || []).filter((r) => keys.has(t(r.key))) : [],
+        targets, rows: snap ? (isAdmin ? (l) => l : (l) => maskBmList(l, em))((snap.rows || []).filter((r) => keys.has(t(r.key)))) : [],
         counts: snap && !allowed ? (snap.counts || {}) : null,
         skippedCounts: snap && !allowed ? (snap.skippedCounts || {}) : null,
         truncated: snap?.truncated || 0,
         // 정지 목록은 **보이는 대상의 것만** — 키가 곧 범위 밖 서버의 식별자다.
-        authStops: (snap?.authStops || []).filter((a) => !allowed || keys.has(t(a?.key))),
+        authStops: (isAdmin ? (l) => l : (l) => maskBmList(l, em))((snap?.authStops || []).filter((a) => !allowed || keys.has(t(a?.key)))),
       };
     });
     /*

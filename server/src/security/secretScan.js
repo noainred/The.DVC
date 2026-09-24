@@ -153,10 +153,10 @@ async function scanLogFiles() {
       const st = fs.statSync(fp);
       if (!st.isFile() || st.size === 0) continue;
       const start = Math.max(0, st.size - LOG_TAIL_BYTES);
-      const fd = fs.openSync(fp, 'r');
       const buf = Buffer.alloc(Math.min(st.size, LOG_TAIL_BYTES));
-      fs.readSync(fd, buf, 0, buf.length, start);
-      fs.closeSync(fd);
+      const fd = fs.openSync(fp, 'r');
+      // v2.601(감사 TIM2601-01 형제): stat 과 open 사이에 파일이 디렉터리로 바뀌는 등 readSync 가 던지면 fd 가 샜다.
+      try { fs.readSync(fd, buf, 0, buf.length, start); } finally { fs.closeSync(fd); }
       const hits = [];
       const lines = buf.toString('utf8').split('\n');
       for (let i = 0; i < lines.length && hits.length < LOG_MAX_HITS_PER_FILE; i++) {

@@ -9,7 +9,7 @@ import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
 import { collectDetails } from '../vcenter/vmExport.js';
 import { parseGuestDisks } from '../vcenter/soapParse.js';
-import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor } from './analyze.js';
+import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor, sanitizeGuestDiskVms } from './analyze.js';
 import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter, currentPartPaths } from './db.js';
 import { datacenterOfVcenter, listDatacenters } from '../datacenter/store.js';
 import { csvLine } from '../util/csv.js';
@@ -53,7 +53,7 @@ export async function collectVcenterGuestDisk(vcenterId) {
   const morefs = vms.map((v) => v.id.slice(vcenterId.length + 1)).filter(Boolean);
   if (!morefs.length) return { vcenterId, vcenterName: vcName, vms: [], total: 0, withGuest: 0 };
   const details = await withTimeout((signal) => collectDetails(vcCfg, morefs, { signal }), COLLECT_TIMEOUT_MS, `게스트 디스크 조회(${vcName})`);
-  const out = [];
+  const raw = [];
   let partsUnknown = 0;   // v2.600(감사 LO2600-07): 여유 공간을 보고하지 않아 합계에서 뺀 파티션 수(vmSummary 가 센다)
   for (const vm of vms) {
     const props = details.get(vm.id.slice(vcenterId.length + 1)) || {};
@@ -61,12 +61,17 @@ export async function collectVcenterGuestDisk(vcenterId) {
     if (!parts.length) continue; // VMware Tools 미실행/미보고 — 관측 불가, 제외
     const s = vmSummary(parts);
     partsUnknown += s.partsUnknown || 0;
-    out.push({
+    raw.push({
       vmId: vm.id, vmName: vm.name || vm.id,
       allocGB: s.allocGB, usedGB: s.usedGB, freeGB: s.freeGB, ratioPct: s.ratioPct, partCount: s.partCount,
       parts: parts.map((p) => ({ path: p.path, capGB: p.capacityGB, usedGB: p.usedGB })),
     });
   }
+  // ⚠ v2.601(감사 RECENT2601-01): 중앙 수신 경로(routes/central.js /guest-disk)와 **같은 정제**를 거친다. 예전에는
+  //   여유 공간을 보고하지 않은 파티션(usedGB:null — v2.600 LO2600-07)을 그대로 commitCollection 에 넘겼고, part_series.used_gb 가
+  //   NOT NULL 이라 그 파티션 하나가 **그 vCenter 의 전 VM 커밋을 롤백**했다(매 주기). 정제는 그 파티션을 저장하지 않고 개수만
+  //   센다 — VM 합계(allocGB·usedGB)는 vmSummary 가 이미 같은 파티션을 뺐으므로 일관된다. partCount 도 저장한 파티션 수가 된다.
+  const out = sanitizeGuestDiskVms(raw);
   return { vcenterId, vcenterName: vcName, vms: out, total: vms.length, withGuest: out.length, ...(partsUnknown ? { partsUnknown } : {}) };
 }
 

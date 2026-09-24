@@ -10,6 +10,7 @@ import { Loading, ErrorBox, Kpi, VmLink } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { fmtAgo } from '../../util/fmt.js';
 import { hasDsData, dsUnknownNote } from './storageTrack.js';
+import { unitText } from '../unitText.js';
 import { STable } from '../../components/STable.jsx';
 
 const DAY_OPTS = [7, 30, 90, 365];
@@ -53,7 +54,7 @@ export default function VmTrackTool() {
     // 다음 슬롯 증감이 '전체 사용량'으로 잡힌다(실제 발생). null(차트 공백) + 증감 0 처리.
     dsCapTB: hasDsData(p) ? Math.round(((p.dsCapGB || 0) / 1024) * 10) / 10 : null,
     dsUsedTB: hasDsData(p) ? Math.round(((p.dsUsedGB || 0) / 1024) * 10) / 10 : null,
-    dsUsagePct: hasDsData(p) ? (p.dsUsagePct ?? 0) : null,
+    dsUsagePct: hasDsData(p) ? (p.dsUsagePct ?? null) : null,   // v2.601 LO2601-05: 모르는 사용률은 0 이 아니라 null
     // 슬롯 간 사용량 증감(GB) — 첫 점(또는 직전이 구버전 행)은 기준이 없어 0.
     dsDeltaGB: hasDsData(p) && i > 0 && hasDsData(arr[i - 1])
       ? Math.round(((p.dsUsedGB || 0) - (arr[i - 1].dsUsedGB || 0)) * 10) / 10 : 0,
@@ -128,7 +129,7 @@ export default function VmTrackTool() {
           meta={data.poller?.lastResult ? `최근 스냅샷 ${fmtAgo(data.poller.lastResult.at)}` : (data.meta ? `스냅샷 ${(data.meta.n || 0).toLocaleString()}건` : '범위 계정에는 전체 스냅샷 건수를 표시하지 않습니다')} />
         {/* 데이터스토어 사용량(v2.348) — DS 데이터가 있는 마지막 스냅샷 기준(구버전 행 제외) */}
         <Kpi label="데이터스토어 사용량" value={dsLast ? `${tb(dsLast.dsUsedGB)} / ${tb(dsLast.dsCapGB)} TB` : '—'}
-          pct={dsLast ? Math.round(dsLast.dsUsagePct || 0) : undefined}
+          pct={dsLast && dsLast.dsUsagePct != null ? Math.round(dsLast.dsUsagePct) : undefined}
           meta={dsLast ? `${(dsLast.dsCount || 0).toLocaleString()}개 · 가용 ${tb((dsLast.dsCapGB || 0) - (dsLast.dsUsedGB || 0))} TB${dsUnknownNote(dsLast.dsUsedUnknown) ? ` · ${dsUnknownNote(dsLast.dsUsedUnknown).short}` : ''}` : '스냅샷 없음'} />
         <Kpi label={`${days}일 사용량 증감`} value={`${dsNet >= 0 ? '+' : ''}${tb(dsNet)} TB`}
           accent={dsNet > 0 ? 'var(--amber)' : dsNet < 0 ? 'var(--green)' : undefined}
@@ -318,8 +319,8 @@ export default function VmTrackTool() {
                         <td style={{ textAlign: 'right', fontSize: 12 }}>
                           {p.dsCount ? <>{tb(p.dsUsedGB)} / {tb(p.dsCapGB)} TB <span className="muted" style={{ fontSize: 11 }}>({p.dsCount})</span>{dsUnknownNote(p.dsUsedUnknown) && <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }} title={dsUnknownNote(p.dsUsedUnknown).title}>{dsUnknownNote(p.dsUsedUnknown).short}</span>}</> : <span className="muted">—</span>}
                         </td>
-                        <td style={{ textAlign: 'right', fontSize: 12, color: (p.dsUsagePct || 0) >= 90 ? 'var(--red)' : (p.dsUsagePct || 0) >= 75 ? 'var(--amber)' : undefined }}>
-                          {p.dsCount ? `${p.dsUsagePct ?? 0}%` : '—'}
+                        <td style={{ textAlign: 'right', fontSize: 12, color: p.dsUsagePct != null && p.dsUsagePct >= 90 ? 'var(--red)' : p.dsUsagePct != null && p.dsUsagePct >= 75 ? 'var(--amber)' : undefined }}>
+                          {p.dsCount ? unitText(p.dsUsagePct, '%') : '—'}
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {(() => {

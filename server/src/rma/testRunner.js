@@ -206,9 +206,13 @@ export async function runTest(spec, { fileRoots = ['/var/log'], allowCustom = fa
         }
         // text-log: 끝에서 tailLines 줄만 읽어 패턴 일치 수
         const st = fs.statSync(a.path);
+        // v2.601(감사 TIM2601-01 — 재현): 경로가 디렉터리면 openSync 는 성공하고 readSync 가 EISDIR 로 던져 closeSync 에
+        // 닿지 않았다 — 실행마다 fd 1개 누수(50회 21 → 71). 파일이 아니면 읽지 않고 말하고, 읽기는 finally 로 닫는다.
+        if (!st.isFile()) return done(unknown(`파일이 아닙니다(디렉터리 등): ${a.path}`));
         const readBytes = Math.min(st.size, a.tailLines * 512, 8 * 1024 * 1024);
-        const fd = fs.openSync(a.path, 'r'); const buf = Buffer.alloc(readBytes);
-        fs.readSync(fd, buf, 0, readBytes, Math.max(0, st.size - readBytes)); fs.closeSync(fd);
+        const buf = Buffer.alloc(readBytes);
+        const fd = fs.openSync(a.path, 'r');
+        try { fs.readSync(fd, buf, 0, readBytes, Math.max(0, st.size - readBytes)); } finally { fs.closeSync(fd); }
         const lines = buf.toString('utf8').split('\n').slice(-a.tailLines);
         let re; try { re = new RegExp(a.pattern); } catch { return done(unknown('정규식 오류')); }
         const hits = lines.filter((l) => re.test(l));

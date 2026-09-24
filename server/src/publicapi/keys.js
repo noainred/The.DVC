@@ -79,7 +79,27 @@ const clampRpm = (v) => {
  * 입력 정규화(순수). **아는 키만** 남긴다 — 스키마 밖 값이 파일로 유입되지 않게.
  * @returns {{values:object, issues:string[]}}
  */
-export function normalizeKeyInput(input = {}) {
+/*
+ * v2.601 WEB2601-04 — 등록된 vCenter id 집합의 출처(주입). 이 모듈은 `security/secretVault.js` 가 import 하므로
+ * vCenter 등록부(→ secretVault)를 정적으로 import 하면 순환이 된다. 공개 API 라우트가 기동 시 공급자를 넣는다.
+ * 공급자가 없거나 실패하면 `null`(= 모른다) — 그때는 경고하지 않는다(모르는 것을 '삭제됐다' 고 말하지 않는다).
+ */
+let _knownVcenterSource = null;
+export function setKnownVcenterSource(fn) { _knownVcenterSource = typeof fn === 'function' ? fn : null; }
+export function knownVcenterIds() {
+  if (!_knownVcenterSource) return null;
+  try {
+    const ids = _knownVcenterSource();
+    return ids instanceof Set ? ids : (Array.isArray(ids) ? new Set(ids.map(String)) : null);
+  } catch { return null; }
+}
+/** 키 범위 중 지금 등록부·스냅샷에 없는 vCenter id(모르면 null). */
+export function unknownScopeVcenters(vcenters, known = knownVcenterIds()) {
+  if (!(known instanceof Set)) return null;
+  return (vcenters || []).map(String).filter((id) => !known.has(id));
+}
+
+export function normalizeKeyInput(input = {}, { knownVcenters = undefined } = {}) {
   const issues = [];
   const name = String(input.name ?? '').trim().slice(0, 80);
   if (!name) issues.push('이름은 필수입니다 — 어느 포탈이 쓰는 키인지 나중에 알 수 없습니다.');
@@ -98,6 +118,16 @@ export function normalizeKeyInput(input = {}) {
   const vcenters = Array.isArray(input.vcenters)
     ? [...new Set(input.vcenters.map((s) => String(s).trim()).filter(Boolean))].slice(0, 200)
     : [];
+  /*
+   * v2.601 WEB2601-04: 존재하지 않는(오타·삭제된) vCenter 로 범위를 두면 그 키는 **아무것도 보지 못하는데**
+   *   공개 API 는 합계 0 을 ok:true 로 줬다('자원이 0개' 라는 거짓). 저장은 막지 않되(곧 등록할 수도 있다) 경고한다.
+   */
+  const unknownVc = unknownScopeVcenters(vcenters, knownVcenters === undefined ? knownVcenterIds() : knownVcenters);
+  if (unknownVc && unknownVc.length) {
+    issues.push(unknownVc.length === vcenters.length
+      ? `범위의 vCenter ${unknownVc.length}곳이 전부 등록돼 있지 않습니다(${unknownVc.slice(0, 5).join(', ')}) — 이 키로는 아무것도 조회할 수 없고 공개 API 가 scope-empty 로 거절합니다.`
+      : `범위의 vCenter ${unknownVc.length}곳이 등록돼 있지 않습니다(${unknownVc.slice(0, 5).join(', ')}) — 그 곳의 자원은 보이지 않습니다.`);
+  }
 
   let expiresAt = null;
   if (input.expiresAt != null && input.expiresAt !== '') {

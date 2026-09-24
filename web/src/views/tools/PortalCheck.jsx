@@ -27,7 +27,7 @@ import BoldText from '../../components/boldText.jsx';
 import {
   ROW_LABEL, ROW_TONE, rowState, PROBE_LABEL, PROBE_TONE, EDGE_FACT_LABEL, EDGE_FACT_TONE,
   DUP_LABEL, dupText, scopeLabel, findingGroupLine, fpText, bannerText, okRateText,
-  tableFootnotes, runSummary, evidenceText, centralAxisText, mergeRunResult, limitsText,
+  tableFootnotes, runSummary, evidenceText, centralAxisText, mergeRunResult, limitsText, edgeReportCell,
 } from './tokenCheckText.js';
 import {
   INV_STATE_LABEL, INV_STATE_TONE, invRowState, ageText, rowExplain, agentRowExplain,
@@ -229,9 +229,15 @@ function TokenCheckView() {
                           : r.deploy.collectorMatchesRegistry === false ? <Badge text="등록값과 다름" tone="amber" />
                             : <Badge text="비교 불가" tone="gray" />}
                     </td>
-                    <td style={{ fontSize: 11, whiteSpace: 'nowrap' }} data-sort={r.edge?.at || 0}>
-                      {r.edge?.at ? ago(r.edge.at) : (r.capability === 'old-version' ? '구버전' : '없음')}
-                    </td>
+                    {(() => {
+                      // v2.601 WEB2601-03: 받지 못한 보고를 'N초 전' 으로 쓰지 않는다(edgeReportCell).
+                      const ec = edgeReportCell(r.edge, r.capability, ago);
+                      return (
+                        <td style={{ fontSize: 11, whiteSpace: 'nowrap' }} data-sort={ec.sortAt} title={ec.title || undefined}>
+                          {ec.tone === 'gray' ? ec.text : <Badge text={ec.text} tone={ec.tone} />}
+                        </td>
+                      );
+                    })()}
                     <td data-sort={st}><Badge text={ROW_LABEL[st]} tone={ROW_TONE[st]} /></td>
                   </tr>
                 );

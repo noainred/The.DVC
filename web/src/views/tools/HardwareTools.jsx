@@ -11,6 +11,8 @@ import { IdracDetailModal } from '../idrac/IdracDetailModal.jsx';
 import { Card, tempColor, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
+// v2.601(감사 WEB2601-05): 수집 주기를 문구에 박지 않는다(CLAUDE.md v2.493) — 서버가 준 값만 쓰고, 없으면 주기를 말하지 않는다.
+import { intervalText } from './collectActivityText.js';
 
 
 export function Hardware({ scope }) {
@@ -709,7 +711,7 @@ function ServerTempFinder({ vc, onServer }) {
         </div>
       </div>
       {rows.length === 0 ? (
-        <div className="card" style={{ padding: 16 }}><span className="muted">표시할 온도 데이터가 없습니다. 온도는 1분마다 수집되며, 등록된 iDRAC 서버가 켜져 있어야 합니다.</span></div>
+        <div className="card" style={{ padding: 16 }}><span className="muted">표시할 온도 데이터가 없습니다. 온도는 {Number(d.intervalMs) > 0 ? `${intervalText(Number(d.intervalMs))}마다` : 'iDRAC 폴링 주기마다'} 수집되며, 등록된 iDRAC 서버가 켜져 있어야 합니다.</span></div>
       ) : (
         <DataTable
           rows={rows}

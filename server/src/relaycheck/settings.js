@@ -40,6 +40,7 @@ const clamp = (v, l) => { const n = Number(v); return Number.isFinite(n) && n > 
 const RE_HOST = /^[A-Za-z0-9.\-_:[\]]{1,253}$/;
 
 export function normalizeSettings(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) input = {}; // null 은 기본 매개변수가 막지 못한다(TIM2601-03)
   const profile = (Array.isArray(input.profile) ? input.profile : DEFAULT_PROFILE)
     .map((p) => ({ port: Number(p?.port), kind: String(p?.kind || ''), label: String(p?.label || '').slice(0, 40) }))
     .filter((p) => Number.isInteger(p.port) && p.port > 0 && p.port <= 65535 && KINDS[p.kind])
@@ -68,6 +69,10 @@ export function loadSettings() {
   if (_cache) return { ..._cache, profile: _cache.profile.map((p) => ({ ...p })), hosts: _cache.hosts.map((h) => ({ ...h })), exclude: [..._cache.exclude] };
   let raw = {};
   try { if (fs.existsSync(FILE())) raw = JSON.parse(fs.readFileSync(FILE(), 'utf8')); } catch { preserveCorrupt(FILE()); raw = {}; }
+  // v2.601(감사 TIM2601-03 — 재현): 파일 내용이 유효한 JSON 값 null·배열·숫자면 JSON.parse 는 성공해 손상 보존을 건너뛰고
+  // 정규화가 TypeError 로 던졌다(_cache 가 안 채워져 **매 호출** 던진다 → 이 로더를 getMs 로 쓰는 적응 타이머가 멈췄다).
+  // 객체가 아니면 손상으로 보고 보존한 뒤 기본값으로 시작한다(bmusage/settings.js readFile 과 같은 판정).
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { preserveCorrupt(FILE(), '객체가 아닌 JSON 값'); raw = {}; }
   _cache = normalizeSettings(raw);
   return loadSettings();
 }

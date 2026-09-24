@@ -4,7 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import {
-  keyState, KEY_STATES, expiryNote, scopeText, groupsText, kpisOf,
+  keyState, KEY_STATES, expiryNote, scopeText, ghostVcenters, groupsText, kpisOf,
   lastUsedText, fullScopeWarning, curlExample, rpmNote, staleGroups,
   DIRECTION_NOTE, ONCE_NOTE, READONLY_NOTE,
 } from './apiKeyText.js';
@@ -51,7 +51,7 @@ function Badge({ state }) {
 
 /** 발급·수정 폼. 컴포넌트를 렌더 함수 밖에 둔다 — 안에 두면 매 렌더마다 새 타입이 되어
  *  입력이 포커스를 잃는다(v2.416 리뷰 확정). */
-function KeyForm({ form, setForm, groups, endpoints, vcenters, defaults, editing }) {
+function KeyForm({ form, setForm, groups, endpoints, vcenters, knownVc, defaults, editing }) {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const toggle = (arr, v) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const warn = fullScopeWarning(form.vcenters, endpoints);
@@ -95,8 +95,15 @@ function KeyForm({ form, setForm, groups, endpoints, vcenters, defaults, editing
                   onChange={() => set('vcenters', toggle(form.vcenters, v.id))} /> {v.name || v.id}
               </label>
             ))}
+          {/* v2.601 WEB2601-04: 등록돼 있지 않은(삭제된) vCenter 가 범위에 남아 있으면 목록에 없어 해제할 길이
+              없었다 — 따로 보여 주고 해제할 수 있게 한다. */}
+          {(ghostVcenters(form.vcenters, knownVc) || []).map((id) => (
+            <label key={`ghost-${id}`} style={{ display: 'block', fontSize: 12, color: TONE.warn }}>
+              <input type="checkbox" checked onChange={() => set('vcenters', toggle(form.vcenters, id))} /> {id} (등록돼 있지 않음)
+            </label>
+          ))}
         </div>
-        <span className="muted" style={{ fontSize: 11 }}>{scopeText(form.vcenters)}</span>
+        <span className="muted" style={{ fontSize: 11 }}>{scopeText(form.vcenters, knownVc)}</span>
         {warn ? <div style={{ color: TONE.warn, fontSize: 11 }}><BoldText text={warn.text} /></div> : null}
       </div>
 
@@ -138,6 +145,7 @@ export default function ApiKeys() {
   const [editId, setEditId] = useState(null);
   const [issued, setIssued] = useState(null);      // 발급 직후 1회 표시
   const [vcenters, setVcenters] = useState([]);
+  const [vcLoaded, setVcLoaded] = useState(false);   // 목록을 못 읽으면 '등록 안 됨' 을 단정하지 않는다
 
   const load = async () => {
     try {
@@ -148,8 +156,12 @@ export default function ApiKeys() {
   useEffect(() => { load(); }, []);
   useEffect(() => {
     // vCenter 목록은 범위 선택용이다 — 못 읽어도 화면은 동작해야 한다(범위 미지정 = 전체).
-    fetchJson('/vcenters').then((r) => setVcenters(Array.isArray(r) ? r : (r?.vcenters || []))).catch(() => setVcenters([]));
+    fetchJson('/vcenters').then((r) => { setVcenters(Array.isArray(r) ? r : (r?.vcenters || [])); setVcLoaded(true); })
+      .catch(() => { setVcenters([]); setVcLoaded(false); });
   }, []);
+  // 지금 존재하는 vCenter id — 못 읽었으면 null(모른다).
+  const knownVc = useMemo(() => (vcLoaded ? new Set(vcenters.map((v) => String(v.id))) : null), [vcLoaded, vcenters]);
+  const ghostKeys = useMemo(() => (data?.keys || []).filter((k) => !k.revokedAt && (ghostVcenters(k.vcenters, knownVc) || []).length).length, [data, knownVc]);
 
   // ⚠ `data?.keys || []` 를 useMemo 의 의존성에 바로 쓰면 매 렌더마다 새 배열이라 memo 가
   //   무의미해진다(eslint react-hooks/exhaustive-deps 지적) — 원본 참조를 의존성으로 둔다.
@@ -262,7 +274,7 @@ export default function ApiKeys() {
             padding: '8px 10px', overflowX: 'auto', margin: 0, fontSize: 13,
           }}>{issued.plaintext}</pre>
           <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-            지문 {issued.key?.fp || '(읽지 못함)'} · {scopeText(issued.key?.vcenters)} ·{' '}
+            지문 {issued.key?.fp || '(읽지 못함)'} · {scopeText(issued.key?.vcenters, knownVc)} ·{' '}
             <BoldText text={groupsText(issued.key?.groups, data.groups)} />
           </div>
           <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>사용 예시</div>
@@ -282,7 +294,7 @@ export default function ApiKeys() {
       <div className="card" style={{ minWidth: 0 }}>
         <h4 style={{ marginTop: 0 }}>{editId ? '키 수정' : '새 키 발급'}</h4>
         <KeyForm form={form} setForm={setForm} groups={data.groups || []}
-          endpoints={data.endpoints || []} vcenters={vcenters}
+          endpoints={data.endpoints || []} vcenters={vcenters} knownVc={knownVc}
           defaults={data.defaults} editing={!!editId} />
         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
           <button className="btn primary" disabled={busy || !form.name.trim()} onClick={submit}
@@ -333,7 +345,8 @@ export default function ApiKeys() {
                     <td style={{ maxWidth: 210, whiteSpace: 'normal' }}>
                       <BoldText text={groupsText(k.groups, data.groups)} />
                     </td>
-                    <td data-sort={String((k.vcenters || []).length)}>{scopeText(k.vcenters)}</td>
+                    <td data-sort={String((k.vcenters || []).length)}
+                      style={{ color: (ghostVcenters(k.vcenters, knownVc) || []).length ? TONE.warn : undefined }}>{scopeText(k.vcenters, knownVc)}</td>
                     <td data-sort={String(k.expiresAt ?? '')}
                       style={{ color: ex.kind === 'past' ? TONE.bad : ex.kind === 'soon' ? TONE.warn : undefined }}>
                       {ex.kind === 'none' ? '무기한' : `${msToDay(k.expiresAt)} (${ex.text.split(' —')[0]})`}
@@ -363,6 +376,14 @@ export default function ApiKeys() {
           · <b>사용</b>이 ‘아직 사용된 적 없습니다’ 인 것은 이상이 아닙니다 — 발급 직후일 수 있습니다.<br />
           · 상대 포탈은 <b>GET /api/v1/</b> 로 이 키가 쓸 수 있는 목록을,{' '}
           <b>GET /api/v1/openapi.json</b> 으로 규격을 스스로 확인할 수 있습니다.
+          {ghostKeys ? (
+            <>
+              <br />· <span style={{ color: TONE.warn }}>
+                범위에 <b>등록돼 있지 않은 vCenter</b>(삭제됐거나 id 가 틀림)를 가진 키가 {ghostKeys}개 있습니다 — 범위가 전부
+                그런 키는 <b>아무것도 조회할 수 없고</b> 공개 API 가 <b>scope-empty</b>(403)로 거절합니다. 키를 수정해 범위를 고치세요.
+              </span>
+            </>
+          ) : null}
           {staleGroups(keys, data.groups).length ? (
             <>
               <br />· <span style={{ color: TONE.warn }}>

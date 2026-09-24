@@ -463,6 +463,9 @@ export function mergeEdgeReport(scan, reports = []) {
         ...r,
         edge: {
           at: rec.reportAt || rec.at || null,
+          // v2.601(WEB2601-03): `at` 은 보고가 없으면 **마지막 시도 시각**이다(호환 때문에 그대로 둔다).
+          //   '보고를 받은 적 있는가' 는 이 값으로 판정한다 — 화면이 실패 시각을 'N초 전 받음' 으로 읽지 않게.
+          reportAt: rec.reportAt || null,
           ok: !!rec.ok,
           kind: rec.kind || '',
           reason: rec.reason || '',

@@ -153,7 +153,8 @@ export function diffDatastores(datastores, prevRoster) {
     capGB: Math.round(capGB * 10) / 10,
     usedGB: Math.round(usedGB * 10) / 10,
     freeGB: Math.round((capGB - usedGB) * 10) / 10,
-    usagePct: capGB > 0 ? Math.round((usedGB / capGB) * 1000) / 10 : 0,
+    // v2.601(감사 LO2601-05): 사용량을 읽은 DS 가 하나도 없으면(capGB 0) 사용률은 0% 가 아니라 **모른다**(null).
+    usagePct: capGB > 0 ? Math.round((usedGB / capGB) * 1000) / 10 : null,
     live,
   };
   const baseline = !prevRoster || prevRoster.size === 0;

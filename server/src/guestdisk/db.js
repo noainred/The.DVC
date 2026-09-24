@@ -133,12 +133,30 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
   const upPartLast = db.prepare('INSERT OR REPLACE INTO part_last (vm_id,path,vcenter_id,cap_gb,used_gb) VALUES (?,?,?,?,?)');
   const delPartLast = db.prepare('DELETE FROM part_last WHERE vm_id=? AND path=?');
 
+  // ⚠ v2.601(감사 RECENT2601-01) 2차 방어: 사용량·용량이 유한한 숫자가 아닌 파티션·VM 은 적재하지 않는다(개수는 밝힌다).
+  //   used_gb 가 NOT NULL 이라 null 하나가 아래 트랜잭션 전체(= 그 vCenter 의 전 VM)를 매 주기 롤백했다. 호출부(service·
+  //   central 수신)가 sanitizeGuestDiskVms 로 이미 거르지만, 이 함수에 도달하는 새 경로가 그 정제를 빠뜨려도 한 행 때문에
+  //   전체를 잃지 않게 한다. 0 으로 채우지 않는다(모르는 값을 '비어 있음' 으로 적재하지 않는다).
+  const finite = (v) => v != null && v !== '' && Number.isFinite(Number(v));
+  let skippedParts = 0; let skippedVms = 0;
+  const rows = [];
+  for (const vm of vms) {
+    if (!vm || !vm.vmId || !finite(vm.allocGB) || !finite(vm.usedGB)) { skippedVms++; continue; }
+    const parts = [];
+    for (const p of (Array.isArray(vm.parts) ? vm.parts : [])) {
+      if (!p || !finite(p.capGB) || !finite(p.usedGB)) { skippedParts++; continue; }
+      parts.push(p);
+    }
+    rows.push({ ...vm, parts });
+  }
+  if (!rows.length) return { ok: true, vms: 0, vmSeriesRows: 0, partSeriesRows: 0, skippedEmpty: true, ...(skippedVms ? { skippedVms } : {}) };
+
   let vmSeriesRows = 0; let partSeriesRows = 0;
   db.exec('BEGIN');
   try {
     // vm_latest 는 이 vCenter 분을 통째로 교체(변화 없는 VM 도 최신값 유지 + 사라진 VM 제거).
     db.prepare('DELETE FROM vm_latest WHERE vcenter_id=?').run(vcenterId);
-    for (const vm of vms) {
+    for (const vm of rows) {
       insLatest.run(vm.vmId, vcenterId, vcenterName || '', vm.vmName || '', vm.allocGB, vm.usedGB, vm.partCount || 0, ts);
       const lv = vmLast.get(vm.vmId);
       if (!lv || Math.abs(vm.usedGB - lv.used_gb) >= thr || vm.allocGB !== lv.alloc_gb) {
@@ -167,7 +185,8 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
     db.exec('ROLLBACK');
     return { ok: false, reason: String(e.message || e) };
   }
-  return { ok: true, vms: vms.length, vmSeriesRows, partSeriesRows };
+  if (skippedParts || skippedVms) console.warn(`[guestdisk] ${vcenterId}: 값이 숫자가 아니어서 적재하지 않은 파티션 ${skippedParts}개 · VM ${skippedVms}대`);
+  return { ok: true, vms: rows.length, vmSeriesRows, partSeriesRows, ...(skippedParts ? { skippedParts } : {}), ...(skippedVms ? { skippedVms } : {}) };
 }
 
 /** 최신 목록 — 선택 vCenter 로 좁힐 수 있다(scope). vcenterIds=null 이면 전체. */
@@ -277,12 +296,15 @@ export async function prune(retentionDays = 180) {
   //   (vmtrack v2.590 P4 와 같은 결함). 그래서 **지금 존재하는 키의 마지막 행**은 남긴다 — 존재 판정은
   //   vm_latest(이번 목록의 VM) · part_last(현재 파티션)다. 사라진 VM·경로의 행은 예전처럼 보존 기간 뒤 지운다(무한 누적 방지).
   //   상관 서브쿼리는 (vm_id,ts)·(vm_id,path,ts) 인덱스로 키마다 MAX 를 찾고, 후보는 ts 단독 인덱스로 좁힌다.
+  // ⚠ v2.601(감사 DB2601-01): 남기는 행은 키의 '전체 마지막' 이 아니라 **보존 경계 이전의 마지막 행**이다. 최근에 바뀐 키는
+  //   전체 마지막이 경계 뒤라 경계 이전 행이 전부 지워졌고, 그것이 곧 창 시작의 이월(carry-in) 행이라(vmSeries·partSeries)
+  //   창 앞부분이 비고 증가 추이가 평탄으로 오판됐다(10→40GB 증가가 사라짐). 값이 안 바뀐 키는 두 기준이 같은 행이다.
   const a = db.prepare(`DELETE FROM vm_series WHERE ts<? AND NOT (
       vm_id IN (SELECT vm_id FROM vm_latest)
-      AND ts = (SELECT MAX(q.ts) FROM vm_series q WHERE q.vm_id = vm_series.vm_id))`).run(cut);
+      AND ts = (SELECT MAX(q.ts) FROM vm_series q WHERE q.vm_id = vm_series.vm_id AND q.ts < ?))`).run(cut, cut);
   const b = db.prepare(`DELETE FROM part_series WHERE ts<? AND NOT (
       EXISTS (SELECT 1 FROM part_last l WHERE l.vm_id = part_series.vm_id AND l.path = part_series.path)
-      AND ts = (SELECT MAX(q.ts) FROM part_series q WHERE q.vm_id = part_series.vm_id AND q.path = part_series.path))`).run(cut);
+      AND ts = (SELECT MAX(q.ts) FROM part_series q WHERE q.vm_id = part_series.vm_id AND q.path = part_series.path AND q.ts < ?))`).run(cut, cut);
   // ⚠ v2.590 P3: 행을 다 지운 키의 diff 기준(vm_last·part_last)도 지운다. 남겨 두면 값이 안 바뀌는 VM 은 기준선이
   //   '이미 기록됨' 이라 다음 수집에서도 행을 쓰지 않아 **영원히 추이·파티션이 비었다**(목록은 파티션 N개라 말한다).
   //   기준을 지우면 다음 수집이 첫 관측으로 다시 기록한다. 기준 행 수 = VM·파티션 수라 EXISTS(인덱스)로 가볍다.
@@ -290,6 +312,21 @@ export async function prune(retentionDays = 180) {
   if ((a.changes || 0) > 0) vmLastCleared = db.prepare('DELETE FROM vm_last WHERE NOT EXISTS (SELECT 1 FROM vm_series s WHERE s.vm_id = vm_last.vm_id)').run().changes || 0;
   if ((b.changes || 0) > 0) partLastCleared = db.prepare('DELETE FROM part_last WHERE NOT EXISTS (SELECT 1 FROM part_series s WHERE s.vm_id = part_last.vm_id AND s.path = part_last.path)').run().changes || 0;
   return { ok: true, vmSeriesDeleted: a.changes || 0, partSeriesDeleted: b.changes || 0, vmLastCleared, partLastCleared };
+}
+
+/**
+ * v2.601(감사 TIM2601-04): 주어진 vCenter 들의 마지막 적재 시각(vm_latest.ts 최대). 폴러가 재시작 직후 주기를 무시하고
+ * 전량 수집하지 않도록 lastRunTs 를 복원하는 데 쓴다(형제 tools/powerOffPoller 의 lastPowerOffObservationTs 와 같은 방식).
+ * 반환 null = DB 없음·기록 없음·대상 없음.
+ */
+export async function lastCollectTs(vcenterIds) {
+  if (!Array.isArray(vcenterIds) || !vcenterIds.length) return null;
+  const db = await getDb();
+  if (!db) return null;
+  const q = vcenterIds.map(() => '?').join(',');
+  const r = db.prepare(`SELECT MAX(ts) AS mt FROM vm_latest WHERE vcenter_id IN (${q})`).get(...vcenterIds.map(String));
+  const t = Number(r?.mt);
+  return Number.isFinite(t) && t > 0 ? t : null;
 }
 
 export const _DB_PATH = DB_PATH;

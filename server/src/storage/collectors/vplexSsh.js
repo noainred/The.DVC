@@ -39,10 +39,18 @@ export function parseLl(text) {
     const header = lines[sepIdx - 1].trim().split(/\s{2,}/).map((h) => h.trim());
     if (header.length >= 2) {
       const rows = [];
-      for (const line of lines.slice(sepIdx + 1)) {
+      const isSep = (l) => /^[-\s]+$/.test(l) && l.trim().length > 3;
+      const headKey = header.join('\u0001').toLowerCase();
+      const rest = lines.slice(sepIdx + 1);
+      for (let li = 0; li < rest.length; li++) {
+        const line = rest[li];
         if (/^[-\s]+$/.test(line)) continue;
         const cells = line.trim().split(/\s{2,}/).map((c) => c.trim());
         if (cells.length < 2) continue;
+        // v2.601(감사 COL-2601-02): 와일드카드 ll(/engines/*/directors)은 컨텍스트마다 경로 줄 + 머리글 + 구분선을 다시
+        //   찍는다. 예전에는 첫 머리글만 빼 두 번째부터의 머리글이 데이터 행이 되어 이름 'Name' · 상태 'operational status'
+        //   인 **없는 디렉터**(비정상 1대)와 볼륨 수 부풀림이 생겼다. 구분선 바로 앞 줄·머리글과 같은 줄은 행이 아니다.
+        if (isSep(rest[li + 1] || '') || cells.join('\u0001').toLowerCase() === headKey) continue;
         // v2.600(감사 COL-2600-04): 칸 수가 머리글과 다르면(가운데 빈 칸) 머리글 위치로 자른다 — 공백 분할은 뒤 값을 당겨
         //   'operational-status' 같은 상태 열을 엉뚱한 칸에 넣었다(xmcli parseTable 과 같은 코어).
         let row = cells.length !== header.length ? sliceRowByHeader(lines[sepIdx - 1], header, line) : null;

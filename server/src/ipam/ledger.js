@@ -50,7 +50,9 @@ export { ipToNum };
 
 /** "CentOS 7 (64-bit)" → { osName:'CentOS', osVersion:'7' } 식으로 분리. */
 export function parseOs(guestOS) {
-  const s = String(guestOS || '').replace(/\s*\(\d+-bit\)\s*$/i, '').trim();
+  // v2.601(감사 SEC2601-02): 아래 정규식은 게으른 접두·후행 \s* 때문에 긴 숫자/공백 줄에서 O(n²) 다
+  //   (숫자 4,000자 약 77ms). guestFullName 은 실제로 수십 자라 256자로 먼저 자르고, 후행 공백은 trimEnd() 로 뗀다(선형).
+  const s = String(guestOS || '').slice(0, 256).trimEnd().replace(/\(\d+-bit\)$/i, '').trim();
   if (!s) return { osName: '', osVersion: '' };
   const m = s.match(/^(.*?)[\s-]*((?:\d+\.)+\d+|\d{4}|\d+(?:\s*R\d)?)\s*$/);
   if (m && m[2]) return { osName: (m[1] || '').trim() || s, osVersion: m[2].trim() };

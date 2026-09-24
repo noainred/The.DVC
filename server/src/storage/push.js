@@ -19,13 +19,27 @@ const gzipAsync = promisify(zlib.gzip);
 // 그대로 push 타임아웃 여유가 된다. 중앙 express.json 은 Content-Encoding: gzip 을 투명하게 푼다.
 const PUSH_GZIP = process.env.STORAGE_PUSH_GZIP !== 'false';
 let _timer = null;
-let _busy = false;
+let _busy = null;   // 진행 중인 push(프라미스)
+let _again = false; // 진행 중에 들어온 요청 — 끝난 뒤 한 번 더 보낸다
 let _last = null;
 
+/**
+ * v2.601(감사 EDGE2601-06): 재진입 가드는 유지하되, 진행 중에 들어온 요청을 **거절하지 않고 한 번 더 보낸다**
+ *   (pdu/push.js v2.597 와 같은 규약). 예전에는 '지금 수집' 직후의 push 가 주기 push 와 겹치면 `{ok:false}` 로
+ *   조용히 돌아가, 진행 중이던 push 는 **재수집 전 스냅샷**을 보냈고 새 결과는 다음 주기까지 중앙에 없었다.
+ */
 export async function pushStorageNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'push 비활성화(CENTRAL_URL/TOKEN 미설정)' };
-  if (_busy) return { ok: false, reason: '이전 push 진행 중' }; // 재진입 가드
-  _busy = true;
+  if (_busy) { _again = true; return _busy; }
+  _busy = (async () => {
+    let r;
+    do { _again = false; r = await pushStorageOnce(); } while (_again);
+    return r;
+  })().finally(() => { _busy = null; });
+  return _busy;
+}
+
+async function pushStorageOnce() {
   try {
     const devices = localSnapshots();
     if (!devices.length) {
@@ -63,15 +77,32 @@ export async function pushStorageNow() {
       console.warn(`[storage-push] 중앙이 본문 크기를 거부(413). 장비 ${devices.length}대 · JSON ${Math.round(json.length / 1024)}KB — 중앙의 JSON_BODY_LIMIT 또는 수집 장비 수를 확인하세요.`);
     }
     if (!res.ok) throw new Error(`storage-data <- ${res.status}`);
-    _last = { at: Date.now(), sent: devices.length, bytes: json.length, gzip: PUSH_GZIP && hdrs['Content-Encoding'] === 'gzip' };
-    return { ok: true, sent: devices.length };
+    // v2.601(감사 EDGE2601-04): 200 이어도 중앙이 일부 장비를 뺐을 수 있다(소유권·형식·크기) — SAN push(v2.600)와 같이
+    //   응답을 읽어 상태·콘솔에 남긴다. 예전에는 res.ok 만 봐 '보냈다' 고만 말했다(그 장비는 중앙 화면에 없다).
+    const ds = await readDropSummary(res);
+    if (ds?.rejected) console.warn(`[storage-push] 중앙이 장비 ${ds.rejected}대를 받지 않았습니다(${dropText(ds.dropped)}) — 그 장비는 중앙 화면에 나오지 않습니다`);
+    _last = { at: Date.now(), sent: devices.length, bytes: json.length, gzip: PUSH_GZIP && hdrs['Content-Encoding'] === 'gzip', ...(ds?.rejected ? { rejected: ds.rejected, dropped: ds.dropped } : {}) };
+    return { ok: true, sent: devices.length, ...(ds?.rejected ? { rejected: ds.rejected, dropped: ds.dropped } : {}) };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };
     console.warn(`[storage-push] 실패: ${e.message}`); // v2.583(카탈로그 N2): 상태 객체만이 아니라 로그에도 — 로그 분석이 볼 수 있게
     return { ok: false, reason: e.message };
   }
-  finally { _busy = false; }
 }
+
+/**
+ * 중앙 응답의 거절 요약(v2.601 EDGE2601-04 — sanswitch/push.js readDropSummary 와 같은 모양). 본문이 JSON 이 아니면 null.
+ * @returns {Promise<{rejected:number, dropped:object|null}|null>}
+ */
+export async function readDropSummary(res) {
+  try {
+    const j = await res.json();
+    if (!j || typeof j !== 'object') return null;
+    const rejected = Number.isFinite(Number(j.rejected)) ? Number(j.rejected) : 0;
+    return rejected > 0 ? { rejected, dropped: j.dropped && typeof j.dropped === 'object' && !Array.isArray(j.dropped) ? j.dropped : null } : null;
+  } catch { return null; }
+}
+const dropText = (d) => Object.entries(d || {}).filter(([, n]) => Number(n) > 0).map(([k, n]) => `${k} ${n}`).join(' · ') || '사유 미상';
 
 /** 이 노드에 위임된 장비 수(상태 보고용 — 자격증명은 싣지 않는다). 등록부를 못 읽으면 null. */
 function registeredCount() {

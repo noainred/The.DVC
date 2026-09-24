@@ -73,8 +73,24 @@ export async function appendSecretText({ exec, writeFile }, envFile, text) {
   }
 }
 
+/**
+ * v2.601(LO2601-01): env 블록 주입 검사 — `rma/deploy.js ENV_INJECT_RE` 와 같은 규칙(형제 누락이었다).
+ * 값에 개행·CR·NUL 이 있으면 `AGENT_NAME=edge1\nAUTH_ENABLED=false` 처럼 **원격 portal.env 에 새 키 줄**이 생긴다
+ * (CSV 대량 배포에서는 눈으로 확인하기 어렵다). 문제가 있으면 사유 문자열, 없으면 null.
+ */
+const ENV_INJECT_RE = /[\r\n\0]/;
+export function envPairsIssue(pairs) {
+  for (const [k, v] of pairs || []) {
+    if (ENV_INJECT_RE.test(String(k)) || ENV_INJECT_RE.test(String(v))) {
+      return `env 값에 개행·NUL 이 있어 중단했습니다(키 주입 방지): ${String(k).replace(/[\r\n\0]/g, ' ').slice(0, 40)}`;
+    }
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(String(k))) return `env 키 형식 오류: ${String(k).replace(/[\r\n\0]/g, ' ').slice(0, 40)}`;
+  }
+  return null;
+}
+
 // 주입할 env 키/값 쌍(빈 값은 제외). 재배포 시 이 키들을 portal.env에서 교체(upsert)한다.
-function envPairs({ agentName, centralUrl, centralToken, collectorToken, collectorDatacenter, scanIntervalMs, autoUpgrade, upgradeIntervalMs, pushInventory, inventoryIntervalMs, gpuGuest, advertiseUrl }, port) {
+export function envPairs({ agentName, centralUrl, centralToken, collectorToken, collectorDatacenter, scanIntervalMs, autoUpgrade, upgradeIntervalMs, pushInventory, inventoryIntervalMs, gpuGuest, advertiseUrl }, port) {
   const p = [];
   if (port) p.push(['PORT', String(port)]); // 기존 portal.env의 PORT(예: 잘못된 22)도 교체
   // GPU 게스트 수집(또는 사이트 위임)을 하려면 실데이터 수집 모드여야 한다(mock 금지).
@@ -200,6 +216,9 @@ export async function deployAgent(target, { installerPath, port: portIn = 4000 }
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username을 입력하세요.' };
   // 포탈 포트는 숫자로만 — SSH 명령(install.sh --port, ss grep)에 문자열이 그대로 들어가는 것을 차단(명령 주입 방어심층).
   const port = Number.isInteger(Number(portIn)) && Number(portIn) > 0 && Number(portIn) <= 65535 ? Number(portIn) : 4000;
+  // v2.601(LO2601-01): 설치를 시작하기 **전에** 거부한다 — 설치 뒤에 막으면 반쯤 구성된 엣지가 남는다.
+  const envIssue = envPairsIssue(envPairs(target, port));
+  if (envIssue) return { ok: false, reason: envIssue };
   const installer = resolveInstaller(installerPath);
   if (!installer) return { ok: false, reason: '설치 패키지(offline tarball)를 찾을 수 없습니다. download/ 에 두거나 경로를 지정하세요.' };
 
@@ -229,6 +248,8 @@ export async function deployAgent(target, { installerPath, port: portIn = 4000 }
 
       // Inject agent settings into portal.env — upsert(키 교체)로 재배포 시 중복/이전 값 정리.
       const pairs = envPairs(target, port);
+      const lateIssue = envPairsIssue(pairs); // 방어심층 — 위 사전 검사와 같은 판정
+      if (lateIssue) return { ok: false, reason: lateIssue };
       const delScript = pairs.map(([k]) => `/^${k}=/d`).join(';');
       if (delScript) await exec(`sed -i '${delScript}' /etc/vmware-portal/portal.env 2>/dev/null || true`);
       const block = '\n# --- portal agent (auto-deployed) ---\n' + pairs.map(([k, v]) => `${k}=${v}`).join('\n') + '\n';

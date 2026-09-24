@@ -253,6 +253,8 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
   if (parsed) {
     deleteGuestFile(c, fileManager, vmRef, auth, outFile);
     deleteGuestFile(c, fileManager, vmRef, auth, errFile);
+    const lost = gpuLostError(parsed);
+    if (lost) throw lost;
     return parsed;
   }
   // 다운로드가 "도달 불가(timeout 등, HTTP 응답 없음)"면 stderr도 같은 실패 → 빠른 실패.
@@ -276,6 +278,17 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
     : reachable ? `회수 실패(.out/.err 모두 HTTP404 — 파일 비었거나 ESXi가 티켓 거부) · stdout: ${outRes.error}`
       : 'nvidia-smi 출력이 비어 있음(명령은 실행됐으나 stdout 없음)';
   const e = new Error(reason); e.guestDiag = true; throw e;
+}
+
+/**
+ * v2.601(감사 RECENT2601-04): parseNvidiaSmiCsv 가 '전 GPU 오류(개수 0)' 결과를 주면 수집 실패로 바꾼다 — 원인(오류 줄)을
+ * 싣는다. 그 밖이면 null(호출부가 평소대로 진행).
+ */
+export function gpuLostError(parsed) {
+  if (!parsed || parsed.count !== 0 || !parsed.gpuErrors) return null;
+  const e = new Error(`GPU 응답 없음(${parsed.gpuErrors}개 오류 — 드라이버·장치 점검 필요): ${(parsed.gpuErrorLines || [])[0] || ''}`.slice(0, 260));
+  e.guestDiag = true; e.gpuLost = true;
+  return e;
 }
 
 /** "12, 8, 2048, 81920, Enabled" 형식(여러 줄=여러 GPU)을 파싱해 집계. 마지막 컬럼은 MIG 모드(문자열). */
@@ -305,7 +318,13 @@ export function parseNvidiaSmiCsv(text) {
     const mig = /enabled/i.test(migRaw) ? 'enabled' : /disabled/i.test(migRaw) ? 'disabled' : null;
     gpus.push({ utilPct, memUtilPct: num(raw[1]), memUsedMB, memTotalMB, mig });
   }
-  if (!gpus.length) return null;
+  // v2.601(감사 RECENT2601-04): GPU 가 **전부** 오류 문장이면 예전에는 여기서 null 을 돌려 gpuErrors 가 사라졌고, 호출부는
+  //   '출력 파싱 실패'·'stdout 비어 있음' 이라는 **엉뚱한 원인**을 말했다. 개수 0 + gpuErrors 로 밝히고, 수집 경로는
+  //   gpuLostError() 로 'GPU 응답 없음' 실패를 던진다(사용률을 지어내지 않는다 — utilPct null).
+  if (!gpus.length) {
+    if (!errLines.length) return null;
+    return { count: 0, utilPct: null, utilNA: false, memUsedPct: null, migEnabled: 0, gpuErrors: errLines.length, gpuErrorLines: errLines.slice(0, 3), gpus: [] };
+  }
   const avg = (arr) => Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
   const known = gpus.map((g) => g.utilPct).filter((v) => v != null);
   // v2.597(감사 C2597-06 — 재현): 사용량·전체를 **둘 다** 읽은 GPU 만 더한다 — 사용량이 N/A 인 GPU 를 분모에만 넣으면

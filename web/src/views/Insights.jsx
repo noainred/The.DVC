@@ -9,6 +9,7 @@ import {
 // 표시 포맷터는 util/fmt.js 로 통합(v2.319 모듈화 #9 — 본문 동일 이동, 기능 무변)
 import { fmtAgo, num, fmtDate, dec1, fmtW, fmtWh, fmtKg } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
+import { forecastPctText, forecastLimitKind } from './forecastRowText.js';
 
 function Kpi({ label, value, sub, color }) {
   return (
@@ -176,9 +177,15 @@ function Forecast() {
   const dsRow = (x) => (
     <tr key={x.id}>
       <td><b>{x.name}</b></td><td className="muted">{x.vcenterId}</td>
-      <td style={{ textAlign: 'right' }}>{x.usagePct}%</td>
+      <td style={{ textAlign: 'right' }}>{forecastPctText(x.usagePct)}</td>
       <td style={{ textAlign: 'right' }}>{x.slopePerDay > 0 ? '+' : ''}{x.slopePerDay} GB/일</td>
-      <td style={{ textAlign: 'right' }}>{x.daysToLimit == null ? '안정' : <span className={`badge ${x.daysToLimit <= 14 ? 'red' : x.daysToLimit <= 30 ? 'amber' : 'gray'}`}>{x.daysToLimit}일</span>}</td>
+      <td style={{ textAlign: 'right' }}>{(() => {
+        // v2.601 WEB2601-07: 이미 한계에 닿은 DS 를 '안정' 이라 말하지 않는다(forecastRowText.js).
+        const k = forecastLimitKind(x);
+        if (k === 'full') return <span className="badge red" title="최근 사용량이 용량에 닿았습니다(예측할 남은 기간 없음)">포화</span>;
+        if (k === 'stable') return '안정';
+        return <span className={`badge ${x.daysToLimit <= 14 ? 'red' : x.daysToLimit <= 30 ? 'amber' : 'gray'}`}>{x.daysToLimit}일</span>;
+      })()}</td>
       <td className="muted" style={{ fontSize: 12 }}>{x.etaTs ? fmtDate(x.etaTs) : '—'}</td>
     </tr>
   );

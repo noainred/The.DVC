@@ -166,6 +166,17 @@ describe('도메인 타일', () => {
     expect(t.find((x) => x.page === 'storage').meta).toBe('vCenter 2개 연결 실패');
     expect(buildDomainTiles({ global: null, alarms: [] }).find((x) => x.page === 'compute').meta).toBe('수집 대기');
   });
+  it('v2.601 RECENT2601-03 — NSX 목록 조회 실패면 개수는 —, 실패를 밝히고 주의로 올린다', () => {
+    const nsx = { rollup: { managers: 1, managersUp: 1, managersDegraded: 0, segments: null, edgeNodes: null, listsFailed: { segments: 1, transportNodes: 1 } }, collectionErrors: [] };
+    const t = buildDomainTiles({ global: g, alarms: [], nsx }).find((x) => x.page === 'network');
+    expect(t.meta).not.toContain('null');
+    expect(t.meta).toContain('세그먼트 —'); expect(t.meta).toContain('엣지 —');
+    expect(t.meta).toContain('조회 실패: 세그먼트·전송 노드');
+    expect(t.level).toBe(1);
+    // 실패가 없으면 예전 그대로(정상 0 · 개수 표시)
+    const ok = buildDomainTiles({ global: g, alarms: [], nsx: { rollup: { managers: 1, managersUp: 1, managersDegraded: 0, segments: 3, edgeNodes: 0 } } }).find((x) => x.page === 'network');
+    expect(ok.level).toBe(0); expect(ok.meta).toContain('세그먼트 3 · 엣지 0');
+  });
 });
 
 describe('rowMatches', () => {

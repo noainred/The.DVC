@@ -16,6 +16,7 @@
  */
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
 import { resilientFetch } from '../util/resilientFetch.js';
+import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { putEdgeLog } from './edgeLogStore.js';
 
 /** 엣지 로그를 내주기 시작한 최소 버전 — 그 아래는 엔드포인트가 없다. */
@@ -59,10 +60,10 @@ export async function pullEdgeLog(agent, { since = 0, level = '', limit = 0, wit
 
   let res;
   try {
-    res = await resilientFetch(url, {
+    res = await withOutboundTag(col.id || col.name || agent, () => resilientFetch(url, {
       headers: { Accept: 'application/json', ...(col.token ? { 'X-Collector-Token': col.token } : {}) },
       timeoutMs: TIMEOUT_MS, retries: 1,
-    });
+    }));
   } catch (e) {
     const msg = String(e?.message || e);
     const ms = Date.now() - t0;

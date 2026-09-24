@@ -19,7 +19,7 @@
 import { Router } from 'express';
 import { config, loadVcenterConfig, currentVersion } from '../config.js';
 import { instanceId } from '../instanceId.js';
-import { getAssignment, setResult } from '../central/assignments.js';
+import { getAssignment, setResult, listAssignments as listScanAssignments } from '../central/assignments.js';
 import { tokenMatches } from '../util/secureCompare.js';
 import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../central/agentTokens.js';
 import { setInventory, getInventory, listInventory } from '../central/inventory.js';
@@ -442,6 +442,10 @@ centralRouter.post('/result', (req, res) => {
   // 하위호환으로 body.agent 를 쓴다(완전 봉인은 CENTRAL_REQUIRE_AGENT_TOKEN=true).
   const agent = req.centralAuth.agent || String(b.agent && strAgent(b.agent) || ''); // v2.600 CEN2600-10: 글자일 때만(객체면 String() 이 던졌다)
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  // v2.601(감사 CEN2601-04): 결과는 **배정이 있는 agent 만** 저장한다. 엣지는 배정을 받아야 스캔·회신하므로(agent/scanner.js)
+  //   배정 없는 이름의 결과는 정상 경로에서 생기지 않는다 — 예전에는 공유 토큰의 임의 이름 수천 개가 agent-results.json 에
+  //   영속되고 knownAgentNames 로 번져 위임 드롭다운·포탈 점검에 유령 엣지가 떴다. 거절은 사유와 함께(엣지 로그가 남긴다).
+  if (!getAssignment(agent)) return res.status(409).json({ ok: false, reason: `'${agent}' 에 배정된 스캔이 없어 결과를 저장하지 않았습니다.` });
   // v2.598(감사 CENTRAL-03): 본문을 그대로 싣지 않는다 — 정제는 setResult(sanitizeScanResult) 하나가 한다.
   setResult(agent, b);
   res.json({ ok: true });
@@ -932,9 +936,35 @@ centralRouter.post('/fleet', (req, res) => {
   const agent = req.centralAuth.agent || String(b.agent && strAgent(b.agent) || ''); // v2.600 CEN2600-10: 글자일 때만(객체면 String() 이 던졌다)
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const list = Array.isArray(b.baremetal) ? b.baremetal : [];
-  setEdgeFleet(agent, list, b.generatedAt || null);
-  res.json({ ok: true, agent, baremetal: list.length });
+  // v2.601(감사 CEN2601-02·03): ① 원소 vcenterId 는 이 엣지가 소유(인벤토리 기준)한 vCenter 에만 귀속한다 — 예전에는 본문 값을
+  //   그대로 받아 남의 법인 vCenter 로 베어메탈을 귀속시킬 수 있었다(v2.599 CEN-02 는 /inventory 만 묶었다). 소유하지 않은 id 는
+  //   원소를 버리지 않고 **귀속만 비운다**(서버 자체는 실재한다). ② 공유 토큰 + 중앙이 모르는 이름은 '미검증' 이라 이름 수·원소 수를
+  //   작게 묶고, 소유를 증명할 길이 없으므로 귀속도 비운다. 뺀·비운 개수는 응답에 싣는다(조용한 상한 금지).
+  const verified = req.centralAuth.mode === 'agent' || edgeNameKnown(agent);
+  const vcAllowed = verified ? (vc) => agentOwnsVcenter(agent, vc) : () => false;
+  const r = setEdgeFleet(agent, list, b.generatedAt || null, { verified, vcAllowed });
+  res.json({ ok: true, agent, baremetal: r.accepted, ...(r.omitted ? { omitted: r.omitted } : {}), ...(r.vcenterBlanked ? { vcenterBlanked: r.vcenterBlanked } : {}), ...(verified ? {} : { unverifiedAgent: true }) });
 });
+
+/**
+ * v2.601(감사 CEN2601-03): 중앙이 **이미 아는** 엣지 이름인가 — 발급 토큰 · 수집 서버 등록부 · 위임 인벤토리 소유 · 스캔 배정.
+ * 공유 토큰은 본문 agent 를 마음대로 고를 수 있으므로, 여기 없는 이름은 '미검증' 으로 다룬다(5초 캐시 — 푸시마다 파일을 읽지 않게).
+ * ⚠ knownAgentNames() 를 쓰지 않는다 — 그 합집합은 스캔 결과·설정 pull 처럼 **공유 토큰이 이름을 만들어 넣을 수 있는 소스**를 포함한다.
+ */
+let _knownNames = { at: 0, set: null };
+function edgeNameKnown(name) {
+  const now = Date.now();
+  if (!_knownNames.set || now - _knownNames.at > 5_000) {
+    const set = new Set();
+    const add = (v) => { if (typeof v === 'string' && v.trim()) set.add(v.trim().toLowerCase()); };
+    try { for (const t of listAgentTokens()) add(t.agent); } catch { /* 소스 미초기화 */ }
+    try { for (const c of listCollectorsForLinks()) { add(c.id); add(c.name); } } catch { /* */ }
+    try { for (const x of listInventory()) add(x.agent); } catch { /* */ }
+    try { for (const x of listScanAssignments()) add(x.agent); } catch { /* */ }
+    _knownNames = { at: now, set };
+  }
+  return _knownNames.set.has(String(name || '').trim().toLowerCase());
+}
 
 // 위임 iDRAC 스캔: 에이전트가 자기 이름의 온디맨드 스캔 잡을 인출.
 centralRouter.get('/idrac-scan-jobs', (req, res) => {
@@ -1182,6 +1212,7 @@ centralRouter.post('/storage-data', async (req, res) => {
   // 소유권 필터(v2.417, sanswitch-data 와 동일): 개별 토큰 엣지는 자기에게 위임된 deviceId 만,
   // collectedAt 은 수신 시각으로 clamp. 공유 토큰(레거시)은 기존 신뢰 유지.
   let devices = Array.isArray(req.body?.devices) ? req.body.devices : [];
+  let notOwned = 0; // v2.601 EDGE2601-04: 소유권 필터로 뺀 수도 응답에 싣는다(엣지가 상태·콘솔에 남긴다)
   const now = Date.now();
   devices = devices.map((d) => (d && typeof d === 'object' ? { ...d, collectedAt: Math.min(Number(d.collectedAt) || now, now) } : d));
   if (req.centralAuth.mode === 'agent') {
@@ -1189,15 +1220,22 @@ centralRouter.post('/storage-data', async (req, res) => {
     const owned = new Set(devicesForAgent(agent).map((d) => d.id));
     const before = devices.length;
     devices = devices.filter((d) => d && owned.has(d.deviceId));
-    if (before !== devices.length) console.warn(`[central] storage-data: ${agent} 미위임 deviceId ${before - devices.length}건 드롭(위조 방지)`);
+    notOwned = before - devices.length;
+    if (notOwned) console.warn(`[central] storage-data: ${agent} 미위임 deviceId ${notOwned}건 드롭(위조 방지)`);
   }
   // v2.599(CEN-2599-03·04·05): 모듈이 원소를 정리하고(객체 아님·식별자 아님·크기 초과를 빼고 표시 필드의 객체 값은 null)
   //   뺀 개수를 info 에 싣는다 — 응답이 그 사실을 말한다(조용한 제외 금지).
   const info = {};
   const saved = saveEdgeStorage(agent, devices, info);
   if (info.refused) return res.status(429).json({ ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).' });
-  res.json({ ok: true, saved, ...(edgeDropSummary(info)) });
+  res.json({ ok: true, saved, ...(edgeDropSummary(withNotOwned(info, notOwned))) });
 });
+
+/** v2.601(감사 EDGE2601-04): 소유권 필터로 뺀 수를 dropped.notOwned 로 합친다(원 객체는 바꾸지 않는다). */
+function withNotOwned(info, notOwned) {
+  if (!notOwned) return info;
+  return { ...(info || {}), dropped: { ...((info && info.dropped) || {}), notOwned } };
+}
 
 /** v2.599: 엣지 장비 수신 정리 결과를 응답 필드로(뺀 것이 없으면 빈 객체). */
 function edgeDropSummary(info) {
@@ -1241,6 +1279,7 @@ centralRouter.post('/pdu-data', async (req, res) => {
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const { saveEdgePdu } = await import('../central/pduEdge.js');
   let snapshots = Array.isArray(req.body?.snapshots) ? req.body.snapshots : [];
+  let notOwned = 0; // v2.601 EDGE2601-04
   const now = Date.now();
   snapshots = snapshots.map((s) => (s && typeof s === 'object' ? { ...s, collectedAt: Math.min(Number(s.collectedAt) || now, now) } : s));
   if (req.centralAuth.mode === 'agent') {
@@ -1248,12 +1287,13 @@ centralRouter.post('/pdu-data', async (req, res) => {
     const owned = new Set(devicesForAgent(agent).map((d) => d.id));
     const before = snapshots.length;
     snapshots = snapshots.filter((s) => s && owned.has(s.id));
-    if (before !== snapshots.length) console.warn(`[central] pdu-data: ${agent} 미위임 id ${before - snapshots.length}건 드롭(위조 방지)`);
+    notOwned = before - snapshots.length;
+    if (notOwned) console.warn(`[central] pdu-data: ${agent} 미위임 id ${notOwned}건 드롭(위조 방지)`);
   }
   const r = saveEdgePdu(agent, snapshots);
   if (r?.refused) return res.status(429).json({ ok: false, refused: true, reason: r.reason });
   // ⚠ 예전에는 결과 객체 전체를 saved 에 담았다({ok,count}). 하위호환으로 그 모양을 유지하고 뺀 개수를 옆에 싣는다.
-  res.json({ ok: true, saved: r, ...(edgeDropSummary(r)) });
+  res.json({ ok: true, saved: r, ...(edgeDropSummary(withNotOwned(r, notOwned))) });
 });
 
 // ── SAN 스위치 모니터링 위임(v2.410) — 스토리지 위임과 완전히 같은 규약 ──────────
@@ -1441,6 +1481,7 @@ centralRouter.post('/sanswitch-data', async (req, res) => {
   // 스위치 id 로 '정상' 스냅샷을 밀어 실제 장애를 가리는 위조 차단. collectedAt 도 수신 시각으로 clamp
   // (미래 시각으로 '최신 우선' 병합을 항상 이기는 것 방지). 공유 토큰(레거시)은 기존 신뢰 유지.
   let devices = Array.isArray(req.body?.devices) ? req.body.devices : [];
+  let sanNotOwned = 0; // v2.601 EDGE2601-04
   const now = Date.now();
   devices = devices.map((d) => (d && typeof d === 'object' ? { ...d, collectedAt: Math.min(Number(d.collectedAt) || now, now) } : d));
   if (req.centralAuth.mode === 'agent') {
@@ -1448,13 +1489,14 @@ centralRouter.post('/sanswitch-data', async (req, res) => {
     const owned = new Set(devicesForAgent(agent).map((d) => d.id));
     const before = devices.length;
     devices = devices.filter((d) => d && owned.has(d.deviceId));
-    if (before !== devices.length) console.warn(`[central] sanswitch-data: ${agent} 미위임 deviceId ${before - devices.length}건 드롭(위조 방지)`);
+    sanNotOwned = before - devices.length;
+    if (sanNotOwned) console.warn(`[central] sanswitch-data: ${agent} 미위임 deviceId ${sanNotOwned}건 드롭(위조 방지)`);
   }
   const chunk = Math.max(0, Number(req.body?.chunk) || 0), chunks = Math.max(1, Number(req.body?.chunks) || 1);
   const info = {};
   const saved = saveEdgeSanSwitch(agent, devices, { chunk, chunks, info });
   if (info.refused) return res.status(429).json({ ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).' });
-  res.json({ ok: true, saved, ...(edgeDropSummary(info)) });
+  res.json({ ok: true, saved, ...(edgeDropSummary(withNotOwned(info, sanNotOwned))) });
 });
 
 // GET /api/central/users-config?agent=<이름>

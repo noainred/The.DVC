@@ -10,6 +10,7 @@ import {
   EDGE_FACT_LABEL, EDGE_FACT_TONE, DUP_LABEL, dupText, scopeLabel,
   FINDING_TEXT, findingLine, findingGroupLine, agentsText, fpText, fpLimitNote, bannerText, okRateText,
   tableFootnotes, runSummary, evidenceText, centralAxisText, reasonTail, mergeRunResult, limitsText,
+  edgeReportCell,
 } from './tokenCheckText.js';
 
 describe('행 상태는 서버 값을 읽기만 한다', () => {
@@ -317,5 +318,40 @@ describe('v2.600 WEB2600-01·03 — 점검 결과 표시', () => {
   it('limits 가 없으면 단위를 붙이지 않는다(0초·?곳 금지)', () => {
     expect(limitsText(undefined)).toBe('동시 — · 요청 시한 —');
     expect(limitsText({ concurrency: 4, timeoutMs: 8000 })).toBe('동시 4곳 · 요청 시한 8초');
+  });
+});
+
+describe('edgeReportCell (v2.601 WEB2601-03 — 받지 못한 보고를 N초 전 으로 쓰지 않는다)', () => {
+  const ago = (ts) => `${ts}ago`;
+  it('한 번도 받지 못했고 마지막 시도가 실패면 시각 없이 실패', () => {
+    const c = edgeReportCell({ at: 1000, ok: false, kind: 'auth', tokens: null, version: '', said: '',
+      lastAttempt: { at: 1000, ok: false, kind: 'auth', reason: '토큰 불일치' } }, '', ago);
+    expect(c.text).not.toContain('ago');
+    expect(c.text).toContain('토큰 거부');
+    expect(c.sortAt).toBe(0); expect(c.tone).toBe('red');
+  });
+  it('보고를 받은 뒤 실패하면 이전 보고 시각 + 이후 실패', () => {
+    const c = edgeReportCell({ at: 500, ok: false, tokens: {}, version: '2.600.0',
+      lastAttempt: { at: 900, ok: false, kind: 'unreachable', reason: 'ECONNREFUSED' } }, '', ago);
+    expect(c.text).toBe('500ago · 이후 실패(닿지 못함)');
+    expect(c.sortAt).toBe(500);
+  });
+  it('정상 보고는 시각만, 시도 기록이 없으면 없음/구버전', () => {
+    expect(edgeReportCell({ at: 700, ok: true, tokens: {}, lastAttempt: { ok: true } }, '', ago).text).toBe('700ago');
+    expect(edgeReportCell(null, 'old-version', ago).text).toBe('구버전');
+    expect(edgeReportCell(null, '', ago).text).toBe('없음');
+  });
+});
+
+describe('edgeReportCell — 서버 reportAt 을 판정 근거로 (v2.601 WEB2601-03 후속)', () => {
+  const ago = (ts) => `${ts}ago`;
+  it('reportAt 이 null 이면 내용이 남아 있어도 받은 보고가 아니다', () => {
+    const c = edgeReportCell({ at: 900, reportAt: null, ok: false, version: '2.600.0', lastAttempt: { ok: false, kind: 'timeout' } }, '', ago);
+    expect(c.text).toBe('없음 · 실패(시한 초과)');
+  });
+  it('보고 시각은 at(마지막 시도) 이 아니라 reportAt', () => {
+    const c = edgeReportCell({ at: 900, reportAt: 500, ok: false, lastAttempt: { ok: false, kind: 'auth' } }, '', ago);
+    expect(c.text).toBe('500ago · 이후 실패(토큰 거부)');
+    expect(edgeReportCell({ at: 800, reportAt: 800, ok: true, lastAttempt: { ok: true } }, '', ago).text).toBe('800ago');
   });
 });

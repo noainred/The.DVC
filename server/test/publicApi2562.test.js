@@ -169,7 +169,7 @@ test('투사 계약 — 응답 키 집합이 선언 fields 와 정확히 같다(
 
 test('범위 지정 키는 법인 축이 없는 자원에 403 needs-full-scope — 빈 목록을 주지 않는다', () => {
   const r = runLive(`
-    const scoped = keys.issueApiKey({ name: 'sc', groups: ['capacity', 'inventory'], vcenters: ['vc-kr-seoul'] }).plaintext;
+    const scoped = keys.issueApiKey({ name: 'sc', groups: ['capacity', 'inventory'], vcenters: ['vc-ap-northeast'] }).plaintext;
     const full   = keys.issueApiKey({ name: 'fu', groups: ['capacity', 'inventory'] }).plaintext;
     return {
       scopedStorage: await call('/capacity/storage', scoped),
@@ -191,7 +191,7 @@ test('범위 지정 키는 법인 축이 없는 자원에 403 needs-full-scope �
   assert.equal(r.fullDs.body.meta.scopedToVcenters, null, '전체 범위 키의 meta 가 null 이 아닙니다');
   assert.ok(r.fullDs.body.data.length >= r.scopedDs.body.data.length,
     '범위 키가 전체 키보다 많은 행을 받았습니다');
-  assert.ok(r.scopedDs.body.data.every((d) => d.vcenterId === 'vc-kr-seoul'),
+  assert.ok(r.scopedDs.body.data.every((d) => d.vcenterId === 'vc-ap-northeast'),
     '범위 밖 vCenter 의 데이터스토어가 섞였습니다');
 });
 

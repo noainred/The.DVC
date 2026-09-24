@@ -21,7 +21,8 @@ import { powerOffPollerStatus, runPowerOffCheckNow } from '../../tools/powerOffP
 import { diskBreakdown, analyzeDiskTrend, diskTrendPolicyFromEnv } from '../../tools/diskTrend.js';
 import { getMetricsDb } from '../../metrics/db.js';
 // v2.512: '서버 온도' — iDRAC 수집 온도 + 물리/가상화 구분 + 법인별 평균, 5분 평균 창 적응.
-import { buildServerTempReport, avgWindowMs, avgWindowLabel, sparkMetricFor, sparkMetricFallback } from '../../tools/serverTemp.js';
+import { buildServerTempReport, avgWindowMs, avgWindowLabel, sparkMetricFor, sparkMetricFallback, maskIdracTempRows } from '../../tools/serverTemp.js';
+import { isAdminReq, resolveMaskedToken, MASK_TOKEN_PREFIX } from '../../auth/addressMask.js';
 import { analysisServersWithRemote } from '../admin/shared.js';
 import { getSensorSeries } from '../../idrac/sensorStore.js';
 import { listDatacenters } from '../../datacenter/store.js';
@@ -1213,8 +1214,15 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
     idrac = { enabled: false, rows: [], summary: null, byDatacenter: [], counts: null, reason: `iDRAC 온도 조회 실패: ${e?.message || e}` };
   }
 
+  /*
+   * v2.601 AUTHZ-2601-04: 비-admin 에는 iDRAC 행의 관리 주소를 가린다 — `ip` 칸, 그리고 IP 로 등록한 iDRAC 은
+   *   `id`·`name`(= IP)까지. id 는 스파크라인 조회 키라 비우지 않고 불투명 토큰으로 바꾸며 `/esxi-temp/spark` 가
+   *   되돌린다. ⚠ memoJson 캐시가 역할별로 갈라져야 한다(아래 extraKey) — 안 그러면 먼저 연 사람의 판본이 나간다.
+   */
+  if (!isAdminReq(req)) idrac = maskIdracTempRows(idrac, analysisServersWithRemote(req) || []);
   return {
     scope: vcId || 'all',
+    ...(isAdminReq(req) ? {} : { addressHidden: true }),
     reportingHosts: hosts.length,
     totalHosts: (snap.hosts || []).filter((h) => (!allowed || allowed.has(h.vcenterId)) && (!vcId || h.vcenterId === vcId)).length,
     // 평균 창 — 화면이 '5분 평균' 대신 실제 창을 라벨로 쓴다.
@@ -1228,7 +1236,7 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
     clusters: grp((h) => `${h.vcenterId}|${h.cluster || 'standalone'}`, avg5Cluster),
     vcenters: grp((h) => h.vcenterId, avg5Vc),
   };
-}, { extraKey: scopeKey(req.user, store.get()) }));
+}, { extraKey: `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'm'}` }));
 
 // Temperature history (5년까지). level=host|cluster|vc, key=대상키, days=기간.
 api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
@@ -1309,6 +1317,7 @@ api.post('/tools/esxi-temp/spark', requirePerm('tools'), async (req, res) => {
   /* 범위 집합은 **필요할 때만** 만든다 — iDRAC 항목이 없으면 서버 목록을 훑지 않는다
    * (`analysisServersWithRemote` 는 등록부 + 원격 인벤토리를 합친다). */
   let idracIds = null;
+  let idracAll = null;
   const hostVc = new Map((snap.hosts || []).map((h) => [h.id, h.vcenterId]));
   const ownsKey = (source, key) => {
     if (!allowed) return true;                       // 전체 범위 계정 — history 라우트와 같은 기준
@@ -1335,7 +1344,14 @@ api.post('/tools/esxi-temp/spark', requirePerm('tools'), async (req, res) => {
     if (!key) { base.skipped += 1; continue; }
     const metric = sparkMetricFor(source, { detail });
     if (!metric) { base.skipped += 1; base.series[key] = null; continue; }
-    targets.push({ key, source, metric });
+    // v2.601 AUTHZ-2601-04: 비-admin 은 가린 iDRAC id(토큰)를 보낸다 — 원문 id 로 되돌려 조회하고 응답 키는 받은 그대로.
+    let dbKey = key;
+    if (source === 'idrac' && key.startsWith(MASK_TOKEN_PREFIX)) {
+      if (!idracAll) idracAll = (analysisServersWithRemote(req) || []).map((x) => String(x.id));
+      dbKey = resolveMaskedToken(key, idracAll) || '';
+      if (!dbKey) { base.skipped += 1; base.series[key] = null; continue; }
+    }
+    targets.push({ key, dbKey, source, metric });
   }
 
   const since = Date.now() - hours * 3_600_000;
@@ -1345,7 +1361,7 @@ api.post('/tools/esxi-temp/spark', requirePerm('tools'), async (req, res) => {
   }
   const isMock = snap.source === 'mock';
   for (const t of targets) {
-    if (!ownsKey(t.source, t.key)) {
+    if (!ownsKey(t.source, t.dbKey)) {
       // 존재 은닉 — 조회하지 않고 '없음' 으로 답한다(오류가 아니다).
       base.series[t.key] = null;
       base.skipped += 1;
@@ -1355,7 +1371,7 @@ api.post('/tools/esxi-temp/spark', requirePerm('tools'), async (req, res) => {
     let points = [];
     const read = (m) => {
       if (!db) return [];
-      try { return db.history(m, t.key, since, bucketMs, hours + 1) || []; } catch (e) {
+      try { return db.history(m, t.dbKey, since, bucketMs, hours + 1) || []; } catch (e) {
         console.warn('[toolsCapacity] 온도 스파크 조회 실패 — 이 키만 null:', m, e?.message);
         return [];
       }

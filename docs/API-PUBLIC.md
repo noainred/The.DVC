@@ -389,6 +389,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 | 403 | `no-groups` | 키에 허용 분류가 **하나도 없음** | 관리자가 분류를 켜야 합니다 |
 | 403 | `group-denied` | 그 경로의 분류가 이 키에 없음 | 관리자가 그 분류를 켜야 합니다 |
 | 403 | `needs-full-scope` | 범위로 나눌 수 없는 자원(§8) | 범위 없는 키를 쓰거나 그 경로를 포기 |
+| 403 | `scope-empty` | 키의 vCenter 범위가 전부 등록되지 않은(삭제된) vCenter 다(v2.601) — 일부만 없으면 200 + `meta.scopeUnknownVcenters` | 설정 › 연동 키에서 범위를 고친다 |
 | 404 | `unknown-endpoint` | 공개되지 않은 경로 | `GET /api/v1/` 로 목록 확인 |
 | 429 | `rate-limited` | 분당 상한 초과 | `Retry-After` 초 뒤 재시도 |
 | 503 | `not-collected` | 첫 수집 미완료 | **잠시 뒤 재시도**(장애가 아닙니다) |

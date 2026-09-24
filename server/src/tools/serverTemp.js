@@ -28,6 +28,7 @@
  */
 
 import { classifySensor } from '../idrac/roomTemp.js';
+import { addressMatcher, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
 
 const r1 = (x) => (x == null || !Number.isFinite(x) ? null : Number(x.toFixed(1)));
 const lower = (s) => String(s ?? '').trim().toLowerCase();
@@ -251,4 +252,26 @@ export function sparkMetricFor(source, { detail = false } = {}) {
 /** detail 모드에서 흡기 계열이 비었을 때의 대체 메트릭(없으면 null). */
 export function sparkMetricFallback(metric) {
   return metric === 'idractemp_inlet' ? 'idractemp_max' : null;
+}
+
+/* ── 비-admin 주소 가림(v2.601 AUTHZ-2601-04) ───────────────────────────────────── */
+
+/**
+ * iDRAC 행의 관리 주소를 가린다(원본 불변). `ip` 는 비우고(키는 남긴다 — 화면이 '—' 로 그린다),
+ * IP·등록부 주소와 같은 `id`·`name` 은 불투명 토큰·라벨로 바꾼다. ⚠ ESXi 행(`source:'esxi'`)은 건드리지
+ * 않는다 — 호스트 이름은 인벤토리로 이미 보이고 id 는 vCenter moref 다.
+ * `byDatacenter` 는 법인 키·이름만 담으므로 그대로 둔다. `servers` 는 등록부(+원격) 목록 — 주소 대조용.
+ */
+export function maskIdracTempRows(idrac, servers = []) {
+  if (!idrac || typeof idrac !== 'object' || !Array.isArray(idrac.rows)) return idrac;
+  const hosts = (servers || []).flatMap((x) => [x?.host, x?.ip]).filter((h) => typeof h === 'string' && h);
+  const match = addressMatcher(hosts);
+  const rows = idrac.rows.map((r) => {
+    if (!r || typeof r !== 'object' || r.source !== 'idrac') return r;
+    const o = { ...r, ip: r.ip ? '' : r.ip };
+    if (match(o.id)) o.id = maskedIdToken(o.id);
+    if (match(o.name) || (r.ip && o.name === r.ip)) o.name = maskedAddressName(o.name);
+    return o;
+  });
+  return { ...idrac, rows, addressHidden: true };
 }

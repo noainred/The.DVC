@@ -21,7 +21,7 @@ import {
   DEV_KIND_LABEL, DEV_KIND_SHORT, CHANNEL_LABEL, CHANNEL_ICON, CHANNEL_WORD, CH_STATE_LABEL, CH_STATE_COLOR,
   ITEM_STATE_LABEL, ITEM_STATE_COLOR, TONE_LABEL, TONE_COLOR, UNASSIGNED_REASON,
   EDGE_STATE_LABEL, EDGE_STATE_COLOR,
-  groupTitle, countsText, groupNote, itemExtra, channelText, headerNote, reasonText, noEdgesNote, LEGEND, ageText, spanText, bytesText,
+  groupTitle, countsText, groupNote, itemExtra, channelText, headerNote, reasonText, noEdgesNote, LEGEND, ageText, spanText, bytesText, sharedMark,
 } from './deviceFlowText.js';
 
 const MONO = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
@@ -129,6 +129,8 @@ export default function DeviceFlow() {
                   border: `1px solid ${on ? '#e0a43a' : '#232833'}`, borderLeft: `3px solid ${EDGE_STATE_COLOR[e.state] || '#5b6272'}` }}>
                 <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, padding: '5px 9px 2px' }}>
                   <b style={{ fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{e.name}</b>
+                  {/* v2.601 WEB2601-02: 같은 주소를 쓰는 엣지 — 설명은 머리말에 한 번(headerNote) */}
+                  {sharedMark(e) && <span style={{ fontFamily: MONO, fontSize: 10, flexShrink: 0, color: '#f0c46a' }} title={`같은 주소: ${e.sharedUrlWith.join(', ')}`}>{sharedMark(e)}</span>}
                   <span style={{ fontFamily: MONO, fontSize: 10, flexShrink: 0, color: e.registered ? EDGE_STATE_COLOR[e.state] : '#f08a8d' }}>
                     {e.registered ? EDGE_STATE_LABEL[e.state] || e.state : '등록부에 없음'}
                   </span>

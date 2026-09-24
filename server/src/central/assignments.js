@@ -222,8 +222,20 @@ function persistResults() {
 }
 registerExitFlush('central/assignments.results', () => { if (!persistTimer) return; clearTimeout(persistTimer); persistTimer = null; atomicWriteFileSync(RESULT_FILE, JSON.stringify(results), { mode: 0o600 }); });
 
+// v2.601(감사 CEN2601-04): 결과를 가진 agent 수 상한 — 라우트가 배정 없는 이름을 거절하지만(1차 방어), 배정이 지워진 옛 이름·
+//   파일에 이미 쌓인 이름이 무한히 남지 않게 가장 오래된 보고부터 밀어낸다.
+const RESULT_AGENTS_MAX = Number(process.env.CENTRAL_RESULT_AGENTS_MAX) || 500;
 export function setResult(agent, data) {
-  results[String(agent)] = { at: Date.now(), ...sanitizeScanResult(data) };
+  const key = String(agent);
+  if (!(key in results)) {
+    const keys = Object.keys(results);
+    if (keys.length >= RESULT_AGENTS_MAX) {
+      keys.sort((x, y) => (results[x]?.at || 0) - (results[y]?.at || 0));
+      for (const k of keys.slice(0, keys.length - RESULT_AGENTS_MAX + 1)) delete results[k];
+      console.warn(`[central] agent-results: agent 수 상한(${RESULT_AGENTS_MAX}) — 가장 오래된 보고를 밀어냈습니다.`);
+    }
+  }
+  results[key] = { at: Date.now(), ...sanitizeScanResult(data) };
   persistResults();
 }
 

@@ -3576,6 +3576,26 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       NSX 합계는 `nsx/scope.js scopedNsxRollup` 한 벌(실패 목록은 null) · 웹 빈 칸 유지는 `views/blankKeep.js`.
     - 남긴 것: COL-2600-07(Horizon 같은 pod 이중 계수 — 세션 id 저장 여부와 함께 판단) · 엣지 push 게스트 디스크의 `partsUnknown` 중앙 합산.
 
+  - ⚠⚠ **v2.601 — 12차 점검 확정분**("세번더" 2회차. 발견 52 = 확정 43 · SPLIT 3 · 가능성 4 · 반증 2, 고침 48 + 후속 13.
+    회귀 `test/audit2601{a..f}.test.js` 65건 + 웹 vitest. 상세 `docs/AUDIT-2026-09-24i.md`):
+    - ⚠⚠ **결측을 null 로 바꾸면 저장 스키마까지 따라갈 것**(RECENT2601-01 high — **v2.600 이 만든 회귀**): 게스트 파티션 `usedGB` 를 null 로
+      바꾸자 중앙 직접 수집 경로가 `used_gb REAL NOT NULL` 에 넣어 **vCenter 전체 커밋이 매 주기 롤백**됐다. 두 경로(직접·엣지)는
+      `sanitizeGuestDiskVms` 하나를 쓰고, `commitCollection` 은 숫자가 아닌 행을 적재하지 않고 센다.
+    - **보류(withhold)에는 반드시 시한**(RECENT2601-02): 엣지가 불통 vCenter 의 빈 슬라이스를 무기한 보류하면 중앙 HOLD 규칙이 영원히
+      집행되지 않는다. `WITHHOLD_MAX_MS`(= LASTGOOD_HOLD) 뒤에는 보낸다. 점검중(maintenance)도 '못 읽음' 상태다.
+    - **식별자 자체가 주소인 행**(AUTHZ-2601-01~04): iDRAC 은 id·name 이 IP 인 경우가 많다. `addressMask.maskedIdToken`(프로세스별 키 HMAC,
+      `masked-<12자>`)으로 바꾸고 조회 시 `resolveMaskedToken` 으로 되찾는다 — 같은 원문은 같은 토큰이라 표 매칭이 유지된다.
+      ⚠ 캐시(memoJson)의 `extraKey` 에 **역할을 넣을 것** — 없으면 먼저 연 사람의 판본이 다른 역할에 나간다.
+    - **엣지에 내려간 비밀은 중앙에서 지우면 엣지도 지운다**(EDGE2601-01): GPU 게스트 설정 pull 이 병합만 해서 지운 VM 비밀번호가 남았다.
+      `applyPulledGpuGuestSettings`(중앙 사본에 없는 키 삭제 · 엣지 로컬 vCenter 는 보존).
+    - **수신 원소 정제 — 또 두 곳**(CEN2601-01 high: IP 스캔 결과가 IPAM 원장 저장을 매 주기 실패시킴 · CEN2601-02: `/fleet` 귀속은 그 엣지가
+      소유한 vCenter 에만). 공유 토큰 이름·원소 수 상한을 둔다(`omitted` 로 밝힘).
+    - **같은 origin 엣지 구분**(WEB2601-01·02): `util/outboundStats.js withOutboundTag`(AsyncLocalStorage)로 수집 서버 id 를 싣고, 행에 `base`
+      (origin + 경로 접두). 태그 없는 중복 주소 기록은 어느 엣지에도 붙이지 않는다(`sharedUrl`). 새 중앙 → 엣지 호출은 태그로 감쌀 것.
+    - prune 은 키별 마지막(이월) 행 보존(guestdisk·vmtrack) · vCenter 로그 prune 은 `pruneAsync` · zip 은 같은 localOffset 거부 ·
+      AD 타임아웃 빈 칸 = 이전 값 · 설정 파일 JSON null 은 손상 보존 · `getMs()` 예외에도 타이머 재무장.
+    - 남긴 것: VACUUM 동기 · 공유 토큰 사칭 한계 · 태그 없는 중앙 → 엣지 호출 4종(linkcheck·relaycheck·배포 후 검증·자기등록).
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

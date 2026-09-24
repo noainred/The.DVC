@@ -84,7 +84,9 @@ function persistSoon() {
 
 /** 마지막 정상 목록 보존 창 — store.js LASTGOOD_HOLD_MS 와 같은 값·같은 env(순환 import 를 피해 여기서 읽는다). */
 const HOLD_MS = Number(process.env.LASTGOOD_HOLD_MS) || 6 * 3_600_000;
-const UNREAD = new Set(['unreachable', 'pending']);
+// v2.601(감사 EDGE2601-03): maintenance 추가 — 엣지 agent/inventoryPush.js UNREAD_STATUSES 와 같은 집합(한 기준). 캐시 없는
+//   점검중 vCenter(엣지 재시작 직후)의 빈 조각이 마지막 정상 목록을 지우지 않게 상태만 갱신한다(보존은 HOLD_MS 까지).
+const UNREAD = new Set(['unreachable', 'pending', 'maintenance']);
 const hasRows = (a) => Array.isArray(a) && a.length > 0;
 
 /**
@@ -103,10 +105,11 @@ export function setInventory(vcenterId, slice, agent, generatedAt) {
   const st = slice?.vcenter?.status;
   if (prev && UNREAD.has(st) && !hasRows(slice?.hosts) && !hasRows(slice?.vms)
     && (hasRows(prev.data?.hosts) || hasRows(prev.data?.vms)) && now - (Number(prev.at) || 0) <= HOLD_MS) {
-    const pv = prev.data?.vcenter && typeof prev.data.vcenter === 'object' ? prev.data.vcenter : {};
+    const pv0 = prev.data?.vcenter && typeof prev.data.vcenter === 'object' ? prev.data.vcenter : {};
+    const { maintenance: _prevMaint, ...pv } = pv0;   // 점검중 표시는 이번 상태로만 정한다(해제 뒤 남지 않게)
     cache[vcenterId] = {
       ...prev, agent: agent || prev.agent || '', pushAt: now, heldSince: prev.heldSince || now,
-      data: { ...prev.data, vcenter: { ...pv, status: st, ...(typeof slice.vcenter.error === 'string' ? { error: slice.vcenter.error.slice(0, 500) } : {}), held: true } },
+      data: { ...prev.data, vcenter: { ...pv, status: st, ...(st === 'maintenance' ? { maintenance: true } : {}), ...(typeof slice.vcenter.error === 'string' ? { error: slice.vcenter.error.slice(0, 500) } : {}), held: true } },
     };
     persistSoon();
     return { held: true };

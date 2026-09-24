@@ -118,6 +118,8 @@ export function buildDeviceFlow(p = {}) {
 
   const listOf = (res, k) => (res && res[k] && Array.isArray(res[k].items) ? res[k].items : []);
 
+  // v2.601(WEB2601-02): 같은 주소를 쓰는 다른 수집 서버 — 데이터 흐름 판정(dataflow/build.js)이 계산한 값을 싣는다.
+  const sharedOf = new Map((flow.edges || []).filter((fe) => Array.isArray(fe.sharedUrlWith)).map((fe) => [fe.id, fe.sharedUrlWith]));
   // ── 엣지 노드 ──
   const edges = commEdges.map((e) => {
     const channels = channelsOf(e.id, flow);
@@ -139,6 +141,7 @@ export function buildDeviceFlow(p = {}) {
       push: { state: e.push?.state || 'none', lastAt: num(e.push?.lastAt) },
       channels, line: worstChannel(channels), groups,
       deviceTotal: groups.reduce((s, g) => s + g.total, 0),
+      ...(sharedOf.has(e.id) ? { sharedUrlWith: sharedOf.get(e.id) } : {}),
     };
   });
   // ④ 데이터 흐름 기록에만 있는 엣지 이름
@@ -194,5 +197,7 @@ export function buildDeviceFlow(p = {}) {
     rejectsWithoutTime: num(flow.rejectsWithoutTime) || 0,
     // v2.600 WEB2600-04: 인증 실패 집계 칸은 엣지가 아니다 — 노드·합계에서 빠졌고 여기서 개수만 밝힌다.
     unauth: flow.unauth || null,
+    // v2.601(WEB2601-02): 같은 주소를 쓰는 엣지 여럿에 걸려 어느 선에도 올리지 않은 중앙 → 엣지 기록.
+    sharedUrl: Array.isArray(flow.sharedUrl) ? flow.sharedUrl : [],
   };
 }

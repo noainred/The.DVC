@@ -53,10 +53,29 @@ export function expiryNote(expiresAt, now = Date.now()) {
  * 범위 표기. ⚠ **빈 배열은 '전체'** 다 — 도구 권한의 허용목록(빈 배열 = 전면 차단)과
  * **방향이 반대**이므로 화면이 그 차이를 말한다(v2.555 규약을 여기서 뒤집어 쓰면 거짓이 된다).
  */
-export function scopeText(vcenters) {
+export function scopeText(vcenters, known = null) {
   const n = (vcenters || []).length;
   if (!n) return '전체 vCenter (범위 제한 없음)';
+  /*
+   * v2.601 WEB2601-04: 범위에 **지금 등록돼 있지 않은** vCenter(오타·삭제)가 있으면 개수만 말하던 표기가
+   *   거짓이 된다 — 전부 없으면 그 키는 아무것도 볼 수 없다(공개 API 가 scope-empty 로 거절한다).
+   *   `known` 을 모르면(null — 목록을 못 읽음) 단정하지 않고 예전 표기를 쓴다.
+   */
+  const ghost = ghostVcenters(vcenters, known);
+  if (ghost && ghost.length === n) return `vCenter ${n}곳으로 제한 — 전부 등록돼 있지 않음(이 키로는 아무것도 조회되지 않습니다)`;
+  if (ghost && ghost.length) return `vCenter ${n}곳으로 제한 — 그중 ${ghost.length}곳은 등록돼 있지 않음`;
   return `vCenter ${n}곳으로 제한`;
+}
+
+/**
+ * 키 범위 중 지금 등록돼 있지 않은 vCenter id. `known` 이 없으면 **null**(모른다 — '없다' 고 하지 않는다).
+ * @param {string[]} vcenters  키의 범위
+ * @param {Set<string>|string[]|null} known  지금 존재하는 vCenter id
+ */
+export function ghostVcenters(vcenters, known) {
+  if (known == null) return null;
+  const set = known instanceof Set ? known : new Set((known || []).map(String));
+  return (vcenters || []).map(String).filter((id) => !set.has(id));
 }
 
 /**

@@ -9,6 +9,7 @@
  */
 
 import { resilientFetch } from '../util/resilientFetch.js';
+import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { loadCollectors } from '../collector/registry.js';
 import { pullCollectorByAgent } from '../collector/puller.js';
 import { createPushScanJob, setIdracScanResult } from './idracScanJobs.js';
@@ -45,13 +46,13 @@ export function pushIdracScan(agent, { ips, username, password, vcenterId = '', 
   // 백그라운드 전송(요청 즉시 반환 — UI는 reqId로 폴링).
   (async () => {
     try {
-      const r = await resilientFetch(`${edgeUrl}/api/collector/idrac-scan`, {
+      const r = await withOutboundTag(col.id || col.name || agent, () => resilientFetch(`${edgeUrl}/api/collector/idrac-scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(col.token ? { 'X-Collector-Token': col.token } : {}) },
         // v2.591(감사 F3): trigger·rangeId — 엣지가 주기 스캔이면 인증 정지 IP 를 건너뛴다(구버전 엣지는 무시 → 전부 시도).
         body: JSON.stringify({ ips, username, password, noRegister, vcenterId, datacenterId, mode, trigger: trigger === 'periodic' ? 'periodic' : 'manual', rangeId: String(rangeId || '') }),
         timeoutMs: PUSH_TIMEOUT_MS, retries: 1,
-      });
+      }));
       if (!r.ok) {
         // v2.440: 상태코드별로 원인이 갈린다 — 실측으로 확인한 규칙이다.
         //   403 = collector 라우터에 도달했고 **토큰이 틀림**

@@ -24,6 +24,7 @@
  */
 
 import { resilientFetch } from '../util/resilientFetch.js';
+import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { identityIssue } from '../collector/registry.js';
 import { PROBE_STATE, probeState, identityEvidence } from './tokenScan.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
@@ -66,10 +67,10 @@ export async function probeCollectorPing(row, { fetchImpl = resilientFetch, time
 
   let res = null; let errorKind = ''; let reason = '';
   try {
-    res = await fetchImpl(`${url}/api/collector/ping`, {
+    res = await withOutboundTag(row.id || row.agent || '', () => fetchImpl(`${url}/api/collector/ping`, {
       headers: { Accept: 'application/json', 'X-Collector-Token': String(token) },
       timeoutMs, retries: 0,
-    });
+    }));
   } catch (e) {
     errorKind = errorKindOf(e?.message || e);
     reason = String(e?.message || e).slice(0, 300);

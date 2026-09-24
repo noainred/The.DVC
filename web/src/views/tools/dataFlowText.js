@@ -45,6 +45,8 @@ export function sinceNote(data = {}, now = Date.now()) {
   if (data.undeclared?.length) parts.push(`지금 라우터에 없는 경로로 온 기록 ${data.undeclared.length}개(구버전 엣지일 수 있습니다)도 함께 그렸습니다.`);
   const un = unauthNote(data, now);
   if (un) parts.push(un);
+  const sh = sharedUrlNote(data);
+  if (sh) parts.push(sh);
   return parts.join(' ');
 }
 
@@ -59,6 +61,30 @@ export function unauthNote(data = {}, now = Date.now()) {
   const when = u.lastAt ? ` · 마지막 ${ageText(u.lastAt, now)}` : '';
   const routes = Array.isArray(u.routes) ? u.routes.length : 0;
   return `**인증에 실패한 요청 ${cnt}건**(경로 ${routes}개${when})은 엣지로 그리지 않았습니다 — 토큰이 맞지 않아 보낸 쪽을 알 수 없습니다. 포탈 점검 › 토큰 점검에서 각 엣지의 토큰을 대조하세요.`;
+}
+
+/**
+ * v2.601(감사 WEB2601-02): 같은 주소(origin + 경로 접두)를 쓰는 수집 서버가 둘 이상이면 중앙 → 엣지 기록을 주소로는
+ * 가를 수 없다. 서버는 호출부가 수집 서버를 아는 호출(태그)만 엣지별로 나누고, 나머지는 선에 넣지 않은 채
+ * `sharedUrl` 로 밝힌다. 긴 설명은 여기 한 번(머리말), 카드에는 `sharedMark` 짧은 표지만.
+ */
+export function sharedUrlNote(data = {}) {
+  const shared = (data.edges || []).filter((e) => Array.isArray(e.sharedUrlWith) && e.sharedUrlWith.length);
+  if (!shared.length) return '';
+  const labels = shortEdgeLabels(shared.map((e) => String(e.name || e.id)), 16);
+  const names = labels.slice(0, 6).join(', ') + (labels.length > 6 ? ` 외 ${labels.length - 6}곳` : '');
+  const rows = Array.isArray(data.sharedUrl) ? data.sharedUrl : [];
+  const cnt = rows.reduce((a, r) => a + (Number(r.count) || 0), 0);
+  const routes = new Set(rows.flatMap((r) => r.routes || [])).size;
+  const tail = rows.length
+    ? `그 밖의 중앙 → 엣지 호출 ${cnt}회(경로 ${routes}개)는 어느 엣지의 것인지 몰라 선에 넣지 않았습니다.`
+    : '어느 엣지의 것인지 모르는 기록은 지금 없습니다.';
+  return `**같은 주소를 쓰는 엣지 ${shared.length}곳**(${names}) — 중앙이 수집 서버를 알고 부르는 호출(인벤토리 pull 등)은 엣지별로 나눴고, ${tail} 설정 › 수집 서버에서 주소가 맞는지 확인하세요.`;
+}
+
+/** 엣지 카드의 짧은 표지('주소 공유') — 없으면 ''. */
+export function sharedMark(e = {}) {
+  return Array.isArray(e.sharedUrlWith) && e.sharedUrlWith.length ? '주소 공유' : '';
 }
 
 /** 연결 한 줄의 설명. */

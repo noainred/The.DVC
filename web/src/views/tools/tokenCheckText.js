@@ -415,3 +415,43 @@ export function runSummary(resp) {
   if (n(resp.ms) != null) parts.push(`${Math.round(resp.ms / 100) / 10}초`);
   return parts.join(' · ');
 }
+
+/* ── ⑧ '엣지 보고' 열(v2.601 감사 WEB2601-03) ─────────────────────────────────── */
+
+/** 엣지 인출 실패 종류(central/tokenCheckPull.js) → 짧은 라벨. */
+export const EDGE_PULL_FAIL_LABEL = Object.freeze({
+  auth: '토큰 거부', unreachable: '닿지 못함', timeout: '시한 초과', http: '예상 밖 응답',
+  'bad-body': '형식 다름', disabled: '엣지에서 꺼짐', 'old-version': '구버전',
+});
+
+/**
+ * '엣지 보고' 칸. 예전엔 `ago(r.edge.at)` 하나였는데 서버의 `edge.at` 은 **보고가 없으면 마지막 시도 시각**
+ * (`reportAt || at`)이라, 한 번도 받지 못한 엣지(403·닿지 못함)가 '17초 전' — **받은 것처럼** 보였다.
+ * 보고가 있었는지는 보고 내용(tokens·version·자기 이름)으로 판정하고, 마지막 시도가 실패면 그것을 따로 말한다.
+ * @param {object|null} edge  row.edge
+ * @param {string} capability row.capability('old-version' 이면 구버전)
+ * @param {(ts:number)=>string} ago 경과 문구
+ * @returns {{text:string, tone:string, sortAt:number, title:string}}
+ */
+export function edgeReportCell(edge, capability, ago) {
+  const la = edge?.lastAttempt || null;
+  const lastFailed = la ? la.ok === false : edge?.ok === false;
+  const failKind = (la?.kind || edge?.kind || '').trim();
+  const failLabel = EDGE_PULL_FAIL_LABEL[failKind] || failKind || '실패';
+  const failReason = String(la?.reason || edge?.reason || '');
+  // 서버가 reportAt 을 실으면(v2.601~) 그것이 판정 근거다. 없는 응답(구버전 중앙)만 보고 내용으로 추정한다.
+  const hasReportAt = !!edge && Object.prototype.hasOwnProperty.call(edge, 'reportAt');
+  const hasReport = hasReportAt ? Number(edge.reportAt) > 0 : !!(edge && (edge.tokens || edge.version || edge.said));
+  if (!edge || (!hasReport && !lastFailed)) {
+    return { text: capability === 'old-version' ? '구버전' : '없음', tone: 'gray', sortAt: 0, title: '' };
+  }
+  if (!hasReport) {
+    // 받은 보고가 없다 — 시각을 쓰지 않는다('N초 전' 은 받은 것으로 읽힌다).
+    return { text: `없음 · 실패(${failLabel})`, tone: 'red', sortAt: 0, title: failReason };
+  }
+  const at = (hasReportAt ? Number(edge.reportAt) : Number(edge.at)) || 0;
+  if (lastFailed) {
+    return { text: `${ago(at)} · 이후 실패(${failLabel})`, tone: 'amber', sortAt: at, title: `아래 값은 이전 보고입니다. 마지막 시도: ${failReason}` };
+  }
+  return { text: ago(at), tone: 'gray', sortAt: at, title: '' };
+}

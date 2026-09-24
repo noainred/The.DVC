@@ -299,3 +299,28 @@ describe('v2.600 WEB2600-04 — 인증 실패 집계 칸', () => {
     expect(unauthNote({ unauth: { count: 0 } }, now)).toBe('');
   });
 });
+
+const { sharedUrlNote, sharedMark } = await import('./dataFlowText.js');
+const { headerNote } = await import('./deviceFlowText.js');
+describe('같은 주소 엣지 안내 (v2.601 WEB2601-02)', () => {
+  const data = {
+    edges: [{ id: 'a', name: 'edge-a', sharedUrlWith: ['b'] }, { id: 'b', name: 'edge-b', sharedUrlWith: ['a'] }, { id: 'c', name: 'edge-c' }],
+    sharedUrl: [{ origin: 'http://gw', edges: ['a', 'b'], routes: ['/api/collector/token-check', '/api/collector/edge-log'], count: 5 }],
+  };
+  it('머리말 한 번 — 곳 수·이름·선에 넣지 않은 호출 수를 밝힌다', () => {
+    const t = sharedUrlNote(data);
+    expect(t).toContain('같은 주소를 쓰는 엣지 2곳');
+    expect(t).toContain('edge-a, edge-b');
+    expect(t).toContain('5회(경로 2개)');
+    expect(t).not.toContain('`');
+    expect(headerNote(data)).toContain('같은 주소를 쓰는 엣지 2곳');
+  });
+  it('구분 못 한 기록이 없으면 그렇게 말하고, 공유가 없으면 빈 문자열', () => {
+    expect(sharedUrlNote({ ...data, sharedUrl: [] })).toContain('모르는 기록은 지금 없습니다');
+    expect(sharedUrlNote({ edges: [{ id: 'c' }] })).toBe('');
+  });
+  it('카드 표지는 짧게', () => {
+    expect(sharedMark(data.edges[0])).toBe('주소 공유');
+    expect(sharedMark(data.edges[2])).toBe('');
+  });
+});

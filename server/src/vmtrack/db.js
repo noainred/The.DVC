@@ -185,7 +185,11 @@ function initSqlite() {
       dsRosterAll: db.prepare('SELECT vcenter_id, ds_id, name, type, cap_gb, used_gb, free_gb, first_seen FROM ds_roster'),
       // v2.590 P5: ds 별 **마지막 행은 남긴다** — 보존기간보다 오래 안 변한 DS(ISO·템플릿)의 유일한 행을 지우면 그 DS 가
       // 차트에서 '관측 없음' 이 되고 값이 안 바뀌어 다시 기록되지도 않았다. diff-저장이라 행이 적어 GROUP BY 가 가볍다.
-      pruneDsSeries: db.prepare('DELETE FROM ds_series WHERE ts < ? AND rowid NOT IN (SELECT MAX(rowid) FROM ds_series GROUP BY ds_id)'),
+      // ⚠ v2.601(감사 DB2601-02): 남기는 행은 ds 별 '전체 마지막' 이 아니라 **보존 경계 이전의 마지막 행**이다 — 최근에 바뀐 DS 는
+      //   전체 마지막이 경계 뒤라 경계 이전 행이 전부 지워졌고, 그것이 곧 창 시작 이월(dsSeriesPrev·dsSeriesCarry) 행이었다.
+      //   값이 안 바뀐 DS(v2.590 P5)는 두 기준이 같은 행이다. 슬롯은 시간순으로 들어가고 재실행 upsert 는 rowid 를 유지하므로
+      //   경계 이전 행 중 MAX(rowid) 가 곧 경계 이전 마지막 행이다.
+      pruneDsSeries: db.prepare('DELETE FROM ds_series WHERE ts < ? AND rowid NOT IN (SELECT MAX(rowid) FROM ds_series WHERE ts < ? GROUP BY ds_id)'),
       dsSeriesLast: db.prepare('SELECT used_gb, cap_gb FROM ds_series WHERE ds_id=? ORDER BY ts DESC LIMIT 1'),
       // 스토리지 변경 이력(v2.355) — 윈도우 내 변경분 전부를 슬롯과 함께(그룹핑은 서비스에서 1회).
       dsChangesWindow: db.prepare(`SELECT d.kind, d.ds_id, d.name, d.type, d.cap_gb, d.used_gb,
@@ -525,7 +529,7 @@ export async function pruneVmtrack(retentionDays = Number(process.env.VMTRACK_RE
   try {
     st.pruneChanges.run(cut);
     st.pruneDsChanges.run(cut); // v2.348
-    st.pruneDsSeries.run(cut); // v2.353
+    st.pruneDsSeries.run(cut, cut); // v2.353 · v2.601 DB2601-02(경계 이전 마지막 행 보존)
     st.pruneSnaps.run(cut);
     db.exec('COMMIT');
     return { ok: true, cut };

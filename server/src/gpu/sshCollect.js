@@ -9,7 +9,7 @@
  */
 
 import { withSsh, withDeadline, isSshAuthError } from '../proxy/sshExec.js';
-import { parseNvidiaSmiCsv } from './guestops.js';
+import { parseNvidiaSmiCsv, gpuLostError } from './guestops.js';
 import { createAuthGuard } from '../util/authGuard.js';
 
 /**
@@ -118,6 +118,9 @@ export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22
       const out = (r.out || '').trim();
       if (out) {
         const parsed = parseNvidiaSmiCsv(out);
+        // v2.601(RECENT2601-04): 전 GPU 오류면 '파싱 실패' 가 아니라 'GPU 응답 없음' 이다 — 다른 IP 도 같은 게스트라 그대로 던진다.
+        const lost = gpuLostError(parsed);
+        if (lost) { lost.sshConnected = true; throw lost; }
         if (parsed && parsed.utilPct != null) { tlog(trace, `✓ SSH 수집 성공(${ip}) — GPU ${parsed.count}, 사용률 ${parsed.utilNA ? 'N/A(MIG 모드)' : parsed.utilPct + '%'}`); return parsed; }
         lastErr = `nvidia-smi 출력 파싱 실패: ${out.slice(0, 80)}`;
       } else {
@@ -125,6 +128,7 @@ export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22
       }
       tlog(trace, `✗ ${ip}: ${lastErr}`);
     } catch (e) {
+      if (e.gpuLost) throw e; // 접속·명령은 됐다 — 원인은 GPU 쪽(SSH 문구로 다듬지 않는다)
       lastErr = cleanSshErr(e.message);
       tlog(trace, `✗ ${ip}: ${lastErr}`);
       // v2.590(감사 F2): 자격증명 거부면 **다른 IP 를 더 시도하지 않는다** — 같은 게스트의 같은 계정이라 결과가
@@ -142,6 +146,24 @@ export async function collectVmGpuSsh(vm, creds, { timeoutMs = 20_000, port = 22
 }
 
 /**
+ * v2.601(감사 COL-2601-01): `nvidia-smi --query-gpu=name,uuid --format=csv,noheader` 출력에서 GPU 모델명만 뽑는다.
+ * 줄 끝이 `GPU-<uuid>` 인 줄만 GPU 다 — 'No devices were found'·'NVIDIA-SMI has failed …' 같은 오류 문장은 모델이 아니다.
+ * 모델로 세지 않은 줄이 있으면 첫 줄을 note 로 돌려준다(조용히 버리지 않는다).
+ */
+export function parseGpuNameLines(text) {
+  const models = [];
+  let note = '';
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = /^(.+?),\s*(GPU-[0-9A-Fa-f-]{8,})\s*$/.exec(line);
+    if (m && m[1].trim()) models.push(m[1].trim());
+    else if (!note) note = line.slice(0, 160);
+  }
+  return { models, note };
+}
+
+/**
  * 물리 서버 자동 감지 — SSH 접속해 GPU 모델명·호스트명·OS를 한 번에 읽어 자동 등록에 사용.
  * 반환 { reachable, hostname, os, gpuModels:[name…], error }.
  */
@@ -156,7 +178,9 @@ export async function detectPhysicalGpu(host, creds, { timeoutMs = 20_000, port 
     const r = await withDeadline(budget, (signal) => withSsh(
       { host, port, username: creds.username, password: creds.password || '', privateKey: creds.privateKey || undefined, readyTimeout: Math.max(5_000, timeoutMs), signal },
       async (sh) => {
-        const names = await runNvsmi(sh, '--query-gpu=name --format=csv,noheader', left);
+        // v2.601(감사 COL-2601-01): uuid 를 함께 받아 'GPU-…' uuid 가 있는 줄만 GPU 로 센다 — 예전에는 stdout 첫 줄이면
+        //   무엇이든 모델명이 되어 'No devices were found'(exit 6)가 GPU 모델로 등록됐다(GPU 없는 호스트 자동 등록).
+        const names = await runNvsmi(sh, '--query-gpu=name,uuid --format=csv,noheader', left);
         const slot = () => Math.max(1_000, Math.min(10_000, left()));
         const hn = await sh.exec('hostname', slot()).catch(() => ({ stdout: '' }));
         // OS: Linux는 uname, Windows는 'ver'(cmd) — 되는 쪽 사용.
@@ -166,7 +190,9 @@ export async function detectPhysicalGpu(host, creds, { timeoutMs = 20_000, port 
       },
     ), 'SSH 탐지 시간 초과');
     out.reachable = true;
-    out.gpuModels = String(r.names || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    const parsedNames = parseGpuNameLines(r.names);
+    out.gpuModels = parsedNames.models;
+    if (parsedNames.note) out.gpuNote = parsedNames.note; // GPU 없음·nvidia-smi 오류 원문(첫 줄) — 모델로 세지 않은 이유
     // Windows 절대경로 명령으로 GPU를 찾았으면 OS를 windows로 보정.
     if (/nvidia-smi\.exe|ver/i.test(`${r.nvCmd || ''} ${r.os || ''}`)) out.os = out.os || 'Windows';
     out.hostname = String(r.hostname || '').trim().split(/\s+/)[0] || '';

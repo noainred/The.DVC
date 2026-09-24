@@ -35,6 +35,7 @@ import { mergeEdgeReports } from '../../central/partFaultEdge.js';
 import { listCollectors } from '../../collector/registry.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { config, currentVersion } from '../../config.js';
+import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName, scrubHosts } from '../../auth/addressMask.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -119,6 +120,48 @@ function dbView(db, isAdmin) {
   return { ...rest, redacted: ['path'] };
 }
 
+/**
+ * 비-admin 가림용 주소 목록(v2.601 AUTHZ-2601-02) — iDRAC·스토리지·SAN 스위치 등록부의 주소.
+ * 파트 장애 행은 iDRAC 을 IP 로 등록하면 deviceId·deviceKey·deviceName·partKey 가 전부 그 IP 다
+ * (`extract/idrac.js` deviceId = server.id = IP). 등록부를 못 읽어도 IPv4 는 판정기가 늘 잡는다.
+ */
+export async function partFaultHosts() {
+  const hosts = [];
+  const pull = async (mod, fn) => {
+    try { const m = await import(mod); for (const d of (m[fn]?.() || [])) if (d?.host) hosts.push(d.host); } catch { /* 한 등록부 실패가 나머지를 막지 않게 */ }
+  };
+  await pull('../../idrac/registry.js', 'loadRegistry');
+  await pull('../../storage/registry.js', 'listDevicesWithSecrets');
+  await pull('../../sanswitch/registry.js', 'listDevices');
+  return [...new Set(hosts.filter((h) => typeof h === 'string' && h))];
+}
+
+/**
+ * 파트 장애 행(열린 장애·이벤트 공용) 하나를 가린다(순수, 원본 불변). 식별자는 **불투명 토큰**으로 바꿔
+ * 행끼리 구분·React key 가 유지되게 하고, `partKey` 안의 장비 키 조각도 같은 토큰으로 바꾼다
+ * (같은 장비의 파트끼리 같은 접두를 유지한다). 닫기(POST /close)는 adminOnly 라 원문 partKey 가 필요 없다.
+ */
+export function maskPartRow(r, match, hosts = []) {
+  if (!r || typeof r !== 'object') return r;
+  const out = { ...r };
+  const raws = [];
+  for (const f of ['deviceId', 'deviceKey']) {
+    if (match(out[f])) { raws.push(out[f]); out[f] = maskedIdToken(out[f]); }
+  }
+  if (match(out.deviceName)) { raws.push(out.deviceName); out.deviceName = maskedAddressName(out.deviceName); }
+  if (typeof out.partKey === 'string') {
+    // 긴 것부터(10.0.0.50 이 10.0.0.5 에 먹히지 않게). partKey 는 scope:deviceKey:kind:partId.
+    let pk = out.partKey;
+    for (const raw of [...new Set(raws)].sort((a, b) => b.length - a.length)) pk = pk.split(raw).join(maskedIdToken(raw));
+    pk = pk.replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, (ip) => maskedIdToken(ip));
+    out.partKey = pk;
+  }
+  for (const f of ['detail', 'label', 'rawState']) {
+    if (typeof out[f] === 'string') out[f] = scrubHosts(out[f], [...raws, ...hosts]);
+  }
+  return out;
+}
+
 export function registerPartFaults(api) {
 
 /** 열린 장애 + 판정 재료. 화면의 주 조회. */
@@ -131,9 +174,17 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
   const devices = new Set();
   for (const p of open) { if (summary[p.state] != null) summary[p.state] += 1; devices.add(`${p.agent}|${p.scope}|${p.deviceId}`); }
   const role = config.agent.centralUrl ? 'edge' : 'central';
+  // v2.601 AUTHZ-2601-02: 비-admin 에는 IP 로 등록한 iDRAC 의 식별자(deviceId·deviceKey·partKey·이름)를 가린다.
+  let shown = open;
+  if (!isAdmin) {
+    const hosts = await partFaultHosts();
+    const match = addressMatcher(hosts);
+    shown = open.map((p) => maskPartRow(p, match, hosts));
+  }
   res.json({
     ok: true, role, version: currentVersion(),
-    open, summary: { ...summary, devices: devices.size },
+    open: shown, summary: { ...summary, devices: devices.size },
+    ...(isAdmin ? {} : { addressHidden: true }),
     labels: LABELS,
     poller: st ? { enabled: st.enabled, source: st.source, intervalMs: st.intervalMs, busy: st.busy, last: st.last } : null,
     db: dbView(st ? st.db : await partFaultDbStatus().catch(() => null), isAdmin),
@@ -149,10 +200,24 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
 api.get('/tools/part-faults/events', toolsPerm, fullScopeOnly, async (req, res) => {
   const days = Math.min(730, Math.max(1, Number(req.query.days) || 30));
   const limit = Math.min(2_000, Math.max(1, Number(req.query.limit) || 500));
-  const partKey = t(req.query.partKey);
+  let partKey = t(req.query.partKey);
   const agent = t(req.query.agent);
-  const events = await recentEvents({ sinceMs: days * 86_400_000, limit, partKey: partKey ? { agent, partKey } : '' }).catch(() => []);
+  const isAdmin = isAdminReq(req);
+  const hosts = isAdmin ? [] : await partFaultHosts();
+  const match = addressMatcher(hosts);
+  /*
+   * v2.601 AUTHZ-2601-02: 비-admin 은 가린 partKey 를 들고 온다 — 열린 장애에서 같은 가림 결과를 찾아
+   * 원문으로 되돌린다(못 찾으면 그대로 두어 빈 결과가 된다 — 지어내지 않는다).
+   */
+  if (!isAdmin && partKey && partKey.includes('masked-')) {
+    const hit = (await openFaults().catch(() => [])).find((r) => t(r.agent).toLowerCase() === agent.toLowerCase()
+      && maskPartRow(r, match, hosts).partKey === partKey);
+    if (hit) partKey = hit.partKey;
+  }
+  const events0 = await recentEvents({ sinceMs: days * 86_400_000, limit, partKey: partKey ? { agent, partKey } : '' }).catch(() => []);
+  const events = isAdmin ? events0 : events0.map((e) => maskPartRow(e, match, hosts));
   res.json({ ok: true, events, days, limit, labels: LABELS, truncated: events.length >= limit,
+    ...(isAdmin ? {} : { addressHidden: true }),
     db: dbView(await partFaultDbStatus().catch(() => null), req.user?.role === 'admin') });
 });
 
