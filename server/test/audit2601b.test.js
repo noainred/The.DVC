@@ -126,6 +126,7 @@ function runLive(script) {
     const bmDb = await import(${J('bmusage/db.js')});
     const { recordBmUsage } = await import(${J('bmusage/activityLog.js')});
     const pfDb = await import(${J('partfault/db.js')});
+    const { pushSensorSample } = await import(${J('idrac/sensorStore.js')});
     const keys = await import(${J('publicapi/keys.js')});
     const publicApi = (await import(${J('routes/publicApi.js')})).default;
     await store.refresh({ force: true });
@@ -172,8 +173,11 @@ test('실제 라우터 — admin 은 원문, 비-admin 은 가림(bm-usage·파�
     await pfDb.applyTransition({ opened: [{ scope: 'idrac', agent: '', deviceId: IP, deviceKey: IP, deviceKeyKind: 'localId', deviceName: IP,
       partKey: 'idrac:' + IP + ':psu:PSU.Slot.1', kind: 'psu', partId: 'PSU.Slot.1', keyKind: 'fqdd', label: 'PSU 1', detail: '', state: 'fault', rawState: 'Critical' }] }, { now: ${T0} });
 
+    // 서버 온도: IP 로 등록한 iDRAC 의 센서 표본 — 그러면 목 합성 행 대신 실제 행(id·name = IP)이 생긴다
+    pushSensorSample(IP, { t: Date.now(), temps: [{ name: 'System Board Inlet Temp', celsius: 22 }, { name: 'System Board Exhaust Temp', celsius: 35 }] });
     const admin = await start(mk({ username: 'root', role: 'admin', scope: null }));
     const oper = await start(mk({ username: 'op', role: 'operator', scope: null }));
+    const sop = await start(mk({ username: 'sop', role: 'operator', scope: { vcenters: [A] } }));
     const P = ['/api/tools/bm-usage', '/api/tools/bm-usage/activity', '/api/tools/part-faults', '/api/tools/part-faults/events',
       '/api/insights/fleet', '/api/insights/finops', '/api/insights/power-breakdown', '/api/tools/esxi-temp'];
     const res = {};
@@ -192,6 +196,14 @@ test('실제 라우터 — admin 은 원문, 비-admin 은 가림(bm-usage·파�
     const pk = pfO.open?.[0]?.partKey || '';
     const evF = (await req(oper, '/api/tools/part-faults/events?partKey=' + encodeURIComponent(pk) + '&agent=')).body;
 
+    // 서버 온도 스파크: 비-admin 은 가린 id 로 조회해도 같은 행의 추이를 받는다.
+    //   범위 계정으로 본다 — 전체 범위 계정은 소유 검사가 없고 목 데이터가 추이를 합성해 되찾기 실패가 드러나지 않는다.
+    const etO = (await req(oper, '/api/tools/esxi-temp')).body;
+    const etRow = (etO.idrac?.rows || []).find((x) => String(x.id).startsWith('masked-'));
+    const spark = etRow ? (await req(sop, '/api/tools/esxi-temp/spark', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ items: [{ key: etRow.id, source: 'idrac' }] }) })).body : null;
+    const etA = (await req(admin, '/api/tools/esxi-temp')).body;
+
     // 공개 API — 존재하지 않는 vCenter 로만 범위를 둔 키 / 일부만 없는 키
     const papp = express(); papp.use('/api/v1', publicApi); const pub = await start(papp);
     const ghost = keys.issueApiKey({ name: 'g', groups: ['inventory'], vcenters: ['vc-ghost'] });
@@ -201,6 +213,8 @@ test('실제 라우터 — admin 은 원문, 비-admin 은 가림(bm-usage·파�
     const mx = await req(pub, '/api/v1/inventory/summary', H(mixed.plaintext));
     return { add: add.ok, res, tk, hist: { status: hist.status, ip: /10\\.99\\.1\\.\\d+/.test(hist.text) }, rowPaired,
       adminHasTarget: (bmA.targets || []).some((x) => x.key === IP), pk, evCount: (evF.events || []).length,
+      etRowId: etRow?.id || '', etIpsO: (etO.idrac?.rows || []).filter((x) => x.source === 'idrac').map((x) => x.ip),
+      etAdminHasIp: (etA.idrac?.rows || []).some((x) => x.id === IP), sparkOk: !!(spark && spark.series && spark.series[etRow?.id]),
       ghostIssues: ghost.issues, g: { status: g.status, code: g.body?.code }, mx: { status: mx.status, meta: mx.body?.meta } };
   `);
   assert.ok(r.add, 'iDRAC 등록 실패');
@@ -211,7 +225,7 @@ test('실제 라우터 — admin 은 원문, 비-admin 은 가림(bm-usage·파�
     assert.equal(o.ip, false, `비-admin 응답에 IP 가 남았다: ${p}`);
   }
   // admin 은 원문을 받는다 — 가릴 것이 실제로 있던 경로(공허 방지)
-  for (const p of ['/api/tools/bm-usage', '/api/tools/bm-usage/activity', '/api/tools/part-faults', '/api/tools/part-faults/events', '/api/insights/fleet']) {
+  for (const p of ['/api/tools/bm-usage', '/api/tools/bm-usage/activity', '/api/tools/part-faults', '/api/tools/part-faults/events', '/api/insights/fleet', '/api/tools/esxi-temp']) {
     assert.equal(r.res.admin[p].ip, true, `admin 은 원문을 받아야 한다(가릴 대상이 없으면 공허): ${p}`);
   }
   for (const p of ['/api/tools/bm-usage', '/api/tools/part-faults', '/api/tools/part-faults/events', '/api/insights/fleet']) {
@@ -223,6 +237,11 @@ test('실제 라우터 — admin 은 원문, 비-admin 은 가림(bm-usage·파�
   assert.equal(r.hist.ip, false);
   assert.ok(r.rowPaired, '대상의 가린 key 와 최신값 행의 key 가 같아야 한다(표의 값 칸이 빈다)');
   assert.match(r.pk, /masked-/); assert.ok(r.evCount >= 1, '가린 partKey 로 이벤트를 찾아야 한다');
+  // AUTHZ-2601-04 — 서버 온도: admin 은 IP 행, 비-admin 은 토큰 행 · ip 칸 빈 값 · 토큰으로 스파크 조회
+  assert.ok(r.etAdminHasIp, '서버 온도에 IP 등록 iDRAC 행이 없어 테스트가 공허하다');
+  assert.match(r.etRowId, /^masked-/);
+  assert.ok(r.etIpsO.length && r.etIpsO.every((v) => v === ''), JSON.stringify(r.etIpsO));
+  assert.ok(r.sparkOk, '가린 id 로 스파크를 조회할 수 있어야 한다');
   // WEB2601-04
   assert.ok(r.ghostIssues.some((s) => s.includes('scope-empty')), r.ghostIssues.join('|'));
   assert.equal(r.g.status, 403); assert.equal(r.g.code, 'scope-empty');

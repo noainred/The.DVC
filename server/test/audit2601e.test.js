@@ -23,6 +23,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2601e-'));
 process.env.CONFIG_DIR = TMP;
 process.env.CURUSER_DB_PATH = path.join(TMP, 'curuser.db');
 process.env.PRUNE_CHUNK_ROWS = '500';
+process.env.AUTH_ENABLED = 'false';
 
 const T0 = 1_700_000_000_000;   // 고정 기준 시각
 const DAY = 86_400_000;
@@ -293,4 +294,24 @@ test('TIM2601-01(secretScan): 로그 꼬리 읽기가 finally 로 fd 를 닫는�
   const { stripComments } = await import('./_stripComments.js');
   const src = stripComments(fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'security', 'secretScan.js'), 'utf8'));
   assert.match(src, /try\s*\{\s*fs\.readSync\(fd[^}]*\}\s*finally\s*\{\s*fs\.closeSync\(fd\)/);
+});
+
+test('LO2601-01(행 검증): 대량 배포 미리보기·실행은 개행이 든 행을 오류로 뺀다', async () => {
+  const express = (await import('express')).default;
+  const { registerDeployLlm } = await import('../src/routes/admin/deployLlm.js');
+  const app = express(); app.use(express.json({ limit: '2mb' }));
+  const r = express.Router(); registerDeployLlm(r); app.use('/api/admin', r);
+  const srv = app.listen(0, '127.0.0.1'); await new Promise((x) => srv.once('listening', x));
+  const base = `http://127.0.0.1:${srv.address().port}/api/admin`;
+  const post = (p, b) => fetch(`${base}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+  try {
+    const text = '10.20.0.1\tAZ\n';
+    const j = await (await post('/agent-deploy/bulk/preview', { text, defaults: { username: 'root', password: 'pw', collectorDatacenter: 'DC1\rX=1' } })).json();
+    assert.equal(j.ok, true);
+    const row = j.report.find((x) => x.host === '10.20.0.1');
+    assert.equal(row.action, 'error', JSON.stringify(row));
+    assert.match(row.reason, /개행·NUL/);
+    const run = await post('/agent-deploy/bulk/run', { text, defaults: { username: 'root', password: 'pw', collectorDatacenter: 'DC1\rX=1' }, saveTargets: false, registerCollector: false });
+    assert.equal(run.status, 400, '배포 가능한 행이 없어야 한다');
+  } finally { srv.close(); }
 });
