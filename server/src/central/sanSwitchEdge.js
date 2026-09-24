@@ -7,7 +7,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter, isPlainObj } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
+import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter, isPlainObj, scalarizeFields } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
+import { numOrNull } from '../util/numOrNull.js';
+
+/** v2.607(CEN2607-02): SAN 스냅샷 최상위의 추가 표시 필드(목록 표가 그대로 그린다). */
+export const SAN_DISPLAY_KEYS = Object.freeze(['fabricOs', 'domainId', 'switchState', 'switchName']);
+/** v2.607(CEN2607-02): SAN extra 의 표시 글자 필드. */
+export const SAN_EXTRA_DISPLAY_KEYS = Object.freeze(['switchType', 'chassisPartNumber', 'chassisId', 'healthState', 'versionRaw', 'note']);
 
 /**
  * v2.606(감사 CEN2606-03 — 재현): 점검·조닝이 순회하는 중첩 배열 — `ports.list` · `extra.sensors.list` · `zoning.zones` — 을
@@ -25,6 +31,7 @@ export function narrowSanSnapshot(d) {
     return out;
   };
   const o = { ...d };
+  narrowed += scalarizeFields(o, SAN_DISPLAY_KEYS); // v2.607 CEN2607-02
   if (isPlainObj(o.ports) && Object.hasOwn(o.ports, 'list') && o.ports.list != null) o.ports = { ...o.ports, list: objs(o.ports.list) };
   if (o.extra != null && !isPlainObj(o.extra)) { o.extra = null; narrowed += 1; }
   if (isPlainObj(o.extra) && o.extra.sensors != null) {
@@ -39,6 +46,61 @@ export function narrowSanSnapshot(d) {
     if (typeof o.zoning.zones === 'number') o.zoning = { ...o.zoning, zones: [] };
     else o.zoning = { ...o.zoning, zones: objs(o.zoning.zones) };
   }
+  // v2.607(감사 CEN2607-05): 점검·조닝이 순회하는 **나머지** 중첩 배열 — 조닝 멤버·포트 attached(글자 배열),
+  //   extra.{raslog.list, isl.list, lsan.zones, fabricMembers.switches, bottleneck.ports, trunk.groups}(객체 배열).
+  //   예전에는 `isl.list:'x'`·`zones:[{members:{a:1}}]` 가 그대로 저장돼 그 장비의 점검·조닝 라우트가 500 이었다.
+  const strs = (v) => {
+    if (!Array.isArray(v)) { narrowed += 1; return []; }
+    const out = v.filter((x) => typeof x === 'string');
+    narrowed += v.length - out.length;
+    return out;
+  };
+  if (isPlainObj(o.zoning) && Array.isArray(o.zoning.zones)) {
+    o.zoning = { ...o.zoning, zones: o.zoning.zones.map((z) => (Object.hasOwn(z, 'members') && z.members != null && !(Array.isArray(z.members) && z.members.every((m) => typeof m === 'string')) ? { ...z, members: strs(z.members) } : z)) };
+  }
+  if (isPlainObj(o.ports) && Array.isArray(o.ports.list)) {
+    o.ports = { ...o.ports, list: o.ports.list.map((p) => (Object.hasOwn(p, 'attached') && p.attached != null && !(Array.isArray(p.attached) && p.attached.every((w) => typeof w === 'string')) ? { ...p, attached: strs(p.attached) } : p)) };
+  }
+  if (isPlainObj(o.extra)) {
+    const ex = { ...o.extra };
+    let touched = false;
+    const sub = (key, listKey, inner) => {
+      if (ex[key] == null) return;
+      if (!isPlainObj(ex[key])) { ex[key] = null; narrowed += 1; touched = true; return; }
+      const cur = ex[key][listKey];
+      // parsed 인데 목록이 없으면 판정이 목록을 순회한다 — 빈 배열로 둔다.
+      if (cur == null && !ex[key].parsed) return;
+      let list = cur == null ? [] : objs(cur);
+      if (inner) list = list.map(inner);
+      ex[key] = { ...ex[key], [listKey]: list }; touched = true;
+    };
+    const withMembers = (x) => (Array.isArray(x.members) ? { ...x, members: x.members.filter((m) => m != null) } : { ...x, members: [] });
+    sub('raslog', 'list');
+    sub('isl', 'list');
+    sub('lsan', 'zones', withMembers);
+    sub('fabricMembers', 'switches');
+    sub('bottleneck', 'ports');
+    sub('trunk', 'groups', (g) => (Array.isArray(g.members) ? { ...g, members: g.members.filter(isPlainObj) } : { ...g, members: [] }));
+    if (touched) o.extra = ex;
+  }
+  // v2.607(감사 CEN2607-01): health — 시리얼 조회가 psuDetail 을 순회하고 점검이 psus/fans 의 ok·total 을 숫자로 읽는다.
+  //   예전에는 `health.psuDetail:[null]` 하나로 시리얼 조회의 SAN 구획 전체(전 엣지)가 rows 0 이 됐다.
+  if (o.health != null && !isPlainObj(o.health)) { o.health = null; narrowed += 1; }
+  if (isPlainObj(o.health)) {
+    const h = { ...o.health };
+    if (h.psuDetail != null) h.psuDetail = objs(h.psuDetail);
+    for (const k of ['psus', 'fans']) {
+      if (h[k] == null) continue;
+      if (!isPlainObj(h[k])) { h[k] = null; narrowed += 1; continue; }
+      const f = { ...h[k] };
+      for (const n of ['ok', 'total']) if (Object.hasOwn(f, n) && f[n] != null) f[n] = numOrNull(f[n]);
+      h[k] = f;
+    }
+    narrowed += scalarizeFields(h, ['status']);
+    o.health = h;
+  }
+  // v2.607(감사 CEN2607-02): 화면이 글자로 그리는 extra 필드.
+  if (isPlainObj(o.extra)) { const ex = { ...o.extra }; narrowed += scalarizeFields(ex, SAN_EXTRA_DISPLAY_KEYS); o.extra = ex; }
   return { snap: o, narrowed };
 }
 import { recordActivity } from '../sanswitch/activityLog.js';

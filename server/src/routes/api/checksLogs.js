@@ -176,7 +176,13 @@ api.get('/tools/vclogs', requirePerm('tools'), async (req, res) => {
       since: req.query.since ? Number(req.query.since) : 0, until: req.query.until ? Number(req.query.until) : 0 };
     const allowed = scopeLogFilter(req, f); // 사용자 scope 화이트리스트를 f.vcenterIds 로 강제(범위 밖 로그 열람 차단)
     const { limit, offset } = pageArgs(req.query, { def: 200, max: 1000 });   // v2.594: 하한·정수화(limit=-1 → 무제한이었다)
-    res.json({ total: db.count(f), rows: db.query(f, limit, offset), meta: scopeLogMeta(db.meta(), allowed), dbKind: db.kind });
+    // v2.607 DB2607-02: 검색어·심각도 필터는 인덱스 밖이라 정확 COUNT 가 페이지마다 events 전체를 동기로 훑었다
+    // (100만 행 q 무일치 약 0.3초 + 정렬 조회). 필터가 있으면 상한 COUNT 로 세고 닿았으면 totalCapped 로 밝힌다
+    // (total 은 '적어도 이만큼'). 무필터·vCenter·기간만이면 예전대로 정확 COUNT(인덱스로 싸다).
+    const filtered = !!(f.q || f.severity);
+    const counted = filtered && typeof db.countCapped === 'function' ? db.countCapped(f) : { total: db.count(f), capped: false };
+    res.json({ total: counted.total, totalCapped: counted.capped, ...(counted.capped ? { totalCap: counted.total } : {}),
+      rows: db.query(f, limit, offset), meta: scopeLogMeta(db.meta(), allowed), dbKind: db.kind });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 api.get('/tools/vclogs/export.csv', requirePerm('tools'), async (req, res) => {

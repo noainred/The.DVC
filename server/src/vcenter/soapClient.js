@@ -790,8 +790,11 @@ export function parsePowerSensorWatts(xml) {
     const type = (/<sensorType>([^<]*)<\/sensorType>/i.exec(blk)?.[1] || '').trim().toLowerCase();
     const base = (/<baseUnits>([^<]*)<\/baseUnits>/i.exec(blk)?.[1] || '').trim().toLowerCase();
     const isWatt = /watt/.test(base);
-    if (type !== 'power' && !isWatt) continue;            // 전력 센서만(전압/팬 등 제외)
-    if (/volt/.test(base)) continue;                       // Power Supply Voltage 류 제외
+    // v2.607(감사 COL2607-03): type 이 'power' 여도 단위가 와트가 아니면 건너뛴다. 예전에는 volt 만 뺐기 때문에
+    //   'Power Supply N Input Current'(Amps) 같은 전류 센서가 와트로 읽혀 전류 센서만 있는 호스트가 '4W' 로 기록되고
+    //   (vcPowerWatts 가 서므로 power.power.average 카운터 폴백까지 막혔다) 와트 입력 합에도 전류값이 섞였다.
+    if (!isWatt) continue;                                 // 전력(W) 센서만 — 전압·전류·팬 등 제외
+    if (/volt|amp/.test(base)) continue;                   // 'Volt-Amperes'·'Amps' 류 명시 제외
     const name = (/<name>([^<]*)<\/name>/.exec(blk)?.[1] || '').trim();
     const reading = Number(/<currentReading>(-?\d+)<\/currentReading>/.exec(blk)?.[1]);
     const mod = Number(/<unitModifier>(-?\d+)<\/unitModifier>/.exec(blk)?.[1] || 0);

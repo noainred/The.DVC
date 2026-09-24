@@ -30,6 +30,11 @@ function dbPath() {
 //   단독 aggregate(인덱스 끝점 조회 — v2.550.3)로 매번 새로 읽는다.
 const META_TTL_MS = Math.max(1_000, Math.min(1_800_000, Number(process.env.LOGS_META_TTL_MS) || 300_000));
 
+/** v2.607 DB2607-02: 필터 조회의 total 상한(맞는 행을 이만큼까지만 센다). */
+export const COUNT_CAP = 10_000;
+const capOf = (cap) => { const n = Math.trunc(Number(cap)); return Number.isFinite(n) && n >= 1 ? Math.min(n, 1_000_000) : COUNT_CAP; };
+/** v2.607 DB2607-03: LIKE 패턴 이스케이프(\ % _) — ESCAPE '\' 와 짝이다. */
+export const likeEscape = (q) => String(q).replace(/[\\%_]/g, (c) => `\\${c}`);
 let impl = null;
 let ready = null;
 
@@ -93,7 +98,9 @@ function initSqlite() {
       if (f.severity) { w.push('severity=?'); p.push(f.severity); }
       if (f.since) { w.push('ts>=?'); p.push(f.since); }
       if (f.until) { w.push('ts<=?'); p.push(f.until); }
-      if (f.q) { w.push('(message LIKE ? OR entity LIKE ? OR user LIKE ? OR type LIKE ?)'); const like = `%${f.q}%`; p.push(like, like, like, like); }
+      // v2.607 DB2607-03: 검색어는 부분 문자열이다 — '_'·'%' 를 LIKE 와일드카드로 두면 'vm_100' 이 'vm-100' 까지
+      // 맞아 결과·total 이 오류 없이 부풀었다. 이스케이프 + ESCAPE 로 인메모리 폴백(includes)과 같은 뜻으로 맞춘다.
+      if (f.q) { w.push("(message LIKE ? ESCAPE '\\' OR entity LIKE ? ESCAPE '\\' OR user LIKE ? ESCAPE '\\' OR type LIKE ? ESCAPE '\\')"); const like = `%${likeEscape(f.q)}%`; p.push(like, like, like, like); }
       return build(w.length ? `WHERE ${w.join(' AND ')}` : '', p);
     }
     return {
@@ -105,6 +112,9 @@ function initSqlite() {
       // 청크 간 중복/누락될 수 있다(정렬이 비결정적) — CSV 청크 내보내기·UI 페이징 안정성용.
       query: (f = {}, limit = 200, offset = 0) => { const { where, params } = filterSql(f); return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${where} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`).all(...params, ...clampPage(limit, offset)); },
       count: (f = {}) => { const { where, params } = filterSql(f); return Number(db.prepare(`SELECT COUNT(*) n FROM events ${where}`).get(...params)?.n || 0); },
+      // v2.607 DB2607-02: 상한 COUNT — 맞는 행을 cap+1 개까지만 센다. 검색어·심각도 필터는 인덱스 밖이라 정확 COUNT 가
+      // 페이지마다 events 전체를 훑었다. 상한에 닿으면 capped:true 로 밝힌다(조용한 상한 금지).
+      countCapped: (f = {}, cap = COUNT_CAP) => { const c = capOf(cap); const { where, params } = filterSql(f); const n = Number(db.prepare(`SELECT COUNT(*) n FROM (SELECT 1 FROM events ${where} LIMIT ?)`).get(...params, c + 1)?.n || 0); return n > c ? { total: c, capped: true } : { total: n, capped: false }; },
       // 행 수만 — `meta()` 는 GROUP BY vcenterId 까지 돌아 **풀스캔이 2회**다. 용량 정리 루프처럼
       // 개수만 필요한 곳이 meta() 를 부르면 그 절반이 순수 낭비다(v2.503).
       rowCount: () => Number(rowCountStmt.get()?.n || 0),
@@ -181,6 +191,7 @@ function initJson() {
     lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },
     query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(...((a) => [a[1], a[1] + a[0]])(clampPage(limit, offset))),
     count: (f = {}) => rows.filter((r) => match(r, f)).length,
+    countCapped: (f = {}, cap = COUNT_CAP) => { const c = capOf(cap); let n = 0; for (const r of rows) { if (match(r, f) && ++n > c) return { total: c, capped: true }; } return { total: n, capped: false }; },
     meta: () => { const vc = new Map(); let mn = null, mx = null; for (const r of rows) { if (mn == null || r.ts < mn) mn = r.ts; if (mx == null || r.ts > mx) mx = r.ts; const g = vc.get(r.vcenterId) || { vcenterId: r.vcenterId, count: 0, lastTs: 0 }; g.count++; g.lastTs = Math.max(g.lastTs, r.ts); vc.set(r.vcenterId, g); } return { count: rows.length, firstTs: mn, lastTs: mx, vcenters: [...vc.values()] }; },
     prune: (beforeTs) => { const before = rows.length; rows = rows.filter((r) => r.ts >= beforeTs); const removed = before - rows.length; if (removed) rewrite(); return removed; },
     sizeBytes: () => { try { return fs.statSync(file).size; } catch { return 0; } },

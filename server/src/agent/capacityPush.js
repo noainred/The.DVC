@@ -13,13 +13,15 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
-import { collectSnapshot, hostMeta } from '../capacity/sampler.js';
+import { collectSnapshot, createSnapshotState, hostMeta } from '../capacity/sampler.js';
 import { classifyCentral404 } from './central404.js';
 
 let timer = null;
 let running = false;
 let unsupportedUntil = 0;
 let last = null;
+// v2.607(감사 COL2607-01): push 전용 델타 기준선 — 로컬 샘플러의 창을 잘라 먹지 않게(히스토그램도 reset 하지 않는다).
+const pushState = createSnapshotState();
 // v2.591(3차 감사 PR-7): 실패를 상태뿐 아니라 콘솔에도(같은 사유는 10분에 한 번) — 403·5xx 가 저널 어디에도 안 남았다.
 const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 
@@ -33,7 +35,7 @@ export async function pushCapacityNow() {
   running = true;
   const startedAt = Date.now();
   try {
-    const snap = collectSnapshot();
+    const snap = collectSnapshot(pushState, { resetEld: false });
     // 첫 주기는 델타 기준선만 잡혀 비어 있을 수 있다 — 빈 봉투도 보낸다(하트비트: '살아 있음' 신호).
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/capacity-report`, {
       method: 'POST',

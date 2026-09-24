@@ -7,6 +7,7 @@
 import { Client as SSHClient } from 'ssh2';
 import { createRequire } from 'node:module';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
+import { withDeadline, deadlineMs } from '../util/deadline.js';
 // v2.605(감사 TIM2605-04 — 재현): 'Number(env) || 기본값' 은 음수·2^31 초과를 통과시켜 setTimeout 이 1ms 가 됐다 —
 //   SSH_EXEC_TIMEOUT_MS=3000000000 이면 모든 SSH 수집(스토리지·SAN·PDU·베어메탈)의 exec 가 2ms 만에 '타임아웃' 이었다.
 //   [1초, 30분] 에 가둔다(빈 값·0·비숫자는 기본값).
@@ -559,13 +560,8 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
 }
 
 /**
- * 장비당 타임아웃 헬퍼(v2.417) — AbortController 로 signal 을 만들어 fn(signal) 을 돌리고, 기한이
- * 지나면 abort 한다(withSsh 가 세션을 끊는다). 결과만 포기하는 Promise.race 대신 이걸 쓸 것.
+ * 장비당 타임아웃 헬퍼(v2.417) — 코어는 util/deadline.js 하나다(v2.607 TIM2607-02: 시한 단일 관문 [1초, 2시간],
+ * NaN·0 이하는 기본값. 예전엔 여기서 `Math.max(1000, ms)` 하한만 있어 2^31 초과가 1ms 가 됐다). 재수출은
+ * import + export 형태다(`export … from` 은 이 모듈 스코프에 이름을 만들지 않는다 — v2.575).
  */
-export async function withDeadline(ms, fn, label = '타임아웃') {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), Math.max(1000, ms)); // unref 하지 않는다 — 대기 중인 수집을 반드시 끊어야 한다
-  try { return await fn(ac.signal); }
-  catch (e) { if (ac.signal.aborted) throw new Error(`${label}(${Math.round(ms / 1000)}초)`); throw e; }
-  finally { clearTimeout(t); }
-}
+export { withDeadline, deadlineMs };

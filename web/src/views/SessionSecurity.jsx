@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { sessionSecurityBody } from './sessionSecurityBody.js';
 
 /**
  * 설정 → 세션 보안 — 유휴 자동 로그아웃 시간 설정. 변경 시 본인 OTP 재인증이 필요하며,
@@ -21,9 +22,7 @@ export default function SessionSecurity() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const owners = String(s.settingsOwners || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
-      // demoSession(v2.294): null 도 유효한 상태값('전역 따름')이라 항상 전송한다(서버가 정규화).
-      const r = await putJson('/admin/security/session', { idleLogoutEnabled: s.idleLogoutEnabled, idleLogoutMin: Number(s.idleLogoutMin) || 30, settingsOwners: owners, loginPolicy: s.loginPolicy || undefined, singleSession: !!s.singleSession, demoSession: s.demoSession || null, sessionWarnEnabled: !!s.sessionWarnEnabled, sessionWarnMin: Number(s.sessionWarnMin) || 10, sessionExtendMin: Number(s.sessionExtendMin) || 60, sessionMaxHours: s.sessionMaxHours === '' ? 0 : Number(s.sessionMaxHours) || 0, otp: otp.trim() });
+      const r = await putJson('/admin/security/session', sessionSecurityBody(s, otp));
       if (r && r.ok === false) { setMsg(`오류: ${r.reason || '저장 실패'}`); }
       else { const ns = r.settings || s; setS({ ...ns, settingsOwners: (ns.settingsOwners || []).join(', ') }); setOtp(''); setMsg('저장되었습니다. 변경 내역은 감사 로그에 기록됩니다.'); }
     } catch (e) { setMsg(`오류: ${e.message}`); }

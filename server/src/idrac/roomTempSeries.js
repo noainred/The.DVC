@@ -84,7 +84,10 @@ export async function roomTempHistory(db, { kind = 'inlet', group = '', range = 
   try {
     avgPts = db.history(roomTempMetric(k, 'avg'), key, since, bucketMs, limit) || [];
     maxPts = db.history(roomTempMetric(k, 'max'), key, since, bucketMs, limit) || [];
-    meta = db.meta(roomTempMetric(k, 'avg')) || meta;
+    // v2.607 DB2607-01: 그 법인(key)의 첫 관측이다 — meta(metric) 는 k 조건이 없어 계열 전체(전 법인)의
+    // 첫 표본을 돌려줘 2일 전부터 수집된 법인에 '수집 시작: 30일 전' 이 떴다. metaKey 는 롤업 포함·
+    // aggregate 단독이라 파티션 풀스캔도 없다(v2.504). key '' 는 전체 합계 계열의 키다.
+    meta = (typeof db.metaKey === 'function' ? db.metaKey(roomTempMetric(k, 'avg'), key) : null) || meta;
   } catch { /* 시계열 없음 — 빈 결과 */ }
   const byTs = new Map();
   for (const p of avgPts) byTs.set(p.ts, { ts: p.ts, avg: p.avg, max: null });

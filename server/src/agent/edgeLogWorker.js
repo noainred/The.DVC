@@ -63,11 +63,14 @@ export async function runEdgeLogWorkerOnce() {
     const { collectEdgeLog } = await import('../edgelog/collect.js');
     const snap = await collectEdgeLog({ since: job.since, level: job.level, limit: job.limit, withStatus: job.withStatus !== false });
     // gzip — 로그 본문은 반복이 많아 압축비가 크다(CLAUDE.md '새 push 경로는 gzip + BIG_JSON 등록 + 413 로그').
-    const json = JSON.stringify(snap);
+    // v2.607(감사 EDGE2607-01): 공유 토큰 엣지는 중앙이 인증으로 이름을 알 수 없어 **본문 최상위 agent 또는 ?agent=** 를 요구한다
+    //   (routes/central.js edge-log-result). 예전에는 collectEdgeLog 봉투(node.agent 만)를 그대로 보내 공유 토큰 현장에서 회신이
+    //   **항상 400** 이었다 — 인출은 ?agent= 로 성공해 작업은 claimed 로 남고 회신만 실패했다. 둘 다 싣는다(개별 토큰은 인증 이름이 이긴다).
+    const json = JSON.stringify({ ...snap, agent: config.agent.name || '' });
     const hdrs = headers();
     let payload = json;
     try { payload = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { payload = json; }
-    const post = await resilientFetch(`${base}/api/central/edge-log-result`, {
+    const post = await resilientFetch(`${base}/api/central/edge-log-result?agent=${agent}`, {
       method: 'POST', headers: hdrs, body: payload, timeoutMs: 30_000, retries: 2,
     });
     if (post.status === 413) console.warn(`[edgelog-worker] 중앙이 본문 크기를 거부(413) — 로그 ${snap.logs?.count}줄. EDGELOG 한도를 확인하세요.`);

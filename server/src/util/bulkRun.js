@@ -24,6 +24,7 @@
  */
 
 import { poolRun as pool } from './pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
+import { withDeadline, deadlineMs } from './deadline.js'; // v2.607 TIM2607-02: 시한 단일 관문
 
 const TTL_MS = 15 * 60_000;
 const MAX_RUNS = 20;
@@ -51,13 +52,8 @@ function sweep() {
 }
 
 
-/** 시한 — 결과만 포기하지 않도록 testOne 에 signal 을 넘긴다(v2.417 규약). */
-async function withDeadline(ms, fn) {
-  const ac = new AbortController();
-  const t = setTimeout(() => ac.abort(), ms);
-  try { return await fn(ac.signal); }
-  finally { clearTimeout(t); }
-}
+// 시한 — 결과만 포기하지 않도록 testOne 에 signal 을 넘긴다(v2.417 규약). v2.607 TIM2607-02: 여기 있던 사본은
+// 하한조차 없어(음수·2^31 초과·NaN → 1ms) 모든 행이 즉시 '시한 초과' 가 될 수 있었다 — 단일 관문(util/deadline.js)을 쓴다.
 
 /**
  * 연결 테스트 실행 시작(비동기 — 즉시 run id 를 돌려주고 백그라운드로 진행).
@@ -97,7 +93,7 @@ export function startBulkTest({ kind, rows, testOne, skipReason = () => null, us
         slot.status = 'testing';
         const t0 = Date.now();
         try {
-          const r = await withDeadline(timeoutMs, (signal) => testOne(row, signal));
+          const r = await withDeadline(timeoutMs, (signal) => testOne(row, signal), '시한 초과');
           slot.status = r?.ok ? 'ok' : 'fail';
           slot.reason = r?.ok ? (r.detail?.summary || '') : (r?.reason || '알 수 없는 실패');
           if (r?.detail?.phase) slot.phase = r.detail.phase;
@@ -105,7 +101,7 @@ export function startBulkTest({ kind, rows, testOne, skipReason = () => null, us
         } catch (e) {
           slot.status = 'fail';
           // AbortError 는 '시한 초과' 로 사람 말로 바꾼다(원문 'This operation was aborted' 는 무의미).
-          slot.reason = /abort/i.test(String(e?.name || e?.message || '')) ? `시한 초과(${Math.round(timeoutMs / 1000)}초)` : (e?.message || String(e));
+          slot.reason = /abort/i.test(String(e?.name || e?.message || '')) ? `시한 초과(${Math.round(deadlineMs(timeoutMs) / 1000)}초)` : (e?.message || String(e));
         } finally {
           slot.ms = Date.now() - t0;
           run.done++;

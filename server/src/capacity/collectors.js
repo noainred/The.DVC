@@ -105,14 +105,18 @@ export function sumWireNetBytes(txt, classify = sysNetClass) {
     if (!(r.c.device || r.c.bonding) || r.c.masterIsBond) continue;
     rx += r.rx; tx += r.tx; used++;
   }
-  if (classified) return { rx, tx, ifaces: used, mode: 'sys' };
+  // v2.607(감사 COL2607-04): 분류는 됐는데 선로 인터페이스가 0개(device 링크 없는 veth eth0 만 있는 컨테이너 등)면
+  //   예전에는 {rx:0,tx:0} 을 돌려 매 주기 '0 bps(트래픽 없음)' 가 적재됐다. 폴백 규칙으로 넘어가고, 그래도 0개면 null(측정 없음).
+  if (classified && used) return { rx, tx, ifaces: used, mode: 'sys' };
+  const noWire = classified > 0;
   rx = 0; tx = 0; used = 0;
   for (const r of rows) {
     const i = r.iface;
     if (i === 'lo' || i.startsWith('veth') || i.startsWith('docker') || i.startsWith('br-') || i.includes('.')) continue;
     rx += r.rx; tx += r.tx; used++;
   }
-  return { rx, tx, ifaces: used, mode: 'fallback' };
+  if (!used) return null;
+  return { rx, tx, ifaces: used, mode: noWire ? 'fallback-nowire' : 'fallback' };
 }
 
 function procNetBytes() {
@@ -187,7 +191,8 @@ registerCollector({
     const h = ctx.prev.eld;                    // sampler 가 monitorEventLoopDelay 히스토그램을 넣어 준다
     if (!h) return null;
     let p99 = 0;
-    try { p99 = h.percentile(99) / 1e6; h.reset(); } catch { return null; }  // ns → ms, 창마다 리셋
+    // ns → ms, 창마다 리셋 — v2.607 COL2607-01: 리셋은 히스토그램 소유자(로컬 샘플러)만. push 가 리셋하면 로컬 창이 잘린다.
+    try { p99 = h.percentile(99) / 1e6; if (ctx.resetEld !== false) h.reset(); } catch { return null; }
     return Number.isFinite(p99) ? p99 : null;
   },
 });
