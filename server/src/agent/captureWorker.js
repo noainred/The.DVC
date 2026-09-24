@@ -85,8 +85,10 @@ export async function runCaptureWorkerOnce() {
             if (result && typeof result === 'object' && typeof s.host === 'string') result = { ...result, hostA: s.host };
           }
         } catch (e) { result = { ok: false, reason: e.message }; }
-        postErr = (await postResult(`${config.agent.centralUrl}/api/central/capture-result`, JSON.stringify({ reqId: job.reqId, result }), 20_000)) || postErr;
-        console.log(`[capture-agent] 캡처 완료 reqId=${job.reqId}${result?.dual ? ' (dual)' : ''}`);
+        const jobErr = await postResult(`${config.agent.centralUrl}/api/central/capture-result`, JSON.stringify({ reqId: job.reqId, result }), 20_000);
+        postErr = jobErr || postErr;
+        // v2.604(감사 EDGE2604-03): 회신 실패를 같은 줄에 적는다(경고는 10분에 1줄로 묶여 이후엔 '완료' 만 보였다).
+        console.log(`[capture-agent] 캡처 완료 reqId=${job.reqId}${result?.dual ? ' (dual)' : ''}${jobErr ? ' · 결과 회신 실패(중앙이 다시 인출할 때까지 반영되지 않음)' : ''}`);
       }
     }
     _last = postErr ? { at: Date.now(), ok: false, error: postErr } : { at: Date.now(), ok: true };

@@ -17,6 +17,38 @@ import { refreshCerts } from '../../security/certMonitor.js';
 import { adminOnly, requireSettingsOwner } from './shared.js';
 import { todayStamp } from "../../util/dayKey.js";
 
+/*
+ * v2.604 AUTHZ-2604-05: 범위 제한 admin 에게 범위 밖 vCenter 의 발생 중·최근 알림(제목에 VM·호스트·DS 이름)을 주지 않는다 —
+ *   같은 파일의 /os-scan(v2.599 AUTHZ-2599-05)·/tools/report/alerts 와 같은 기준. 귀속을 알 수 없는 항목
+ *   (예: 해소 기록의 host:·ds: 키)은 **빼고 개수를 밝힌다**(범위 밖일 수 있다 — 추측으로 넣지 않는다).
+ *   ⚠ 정직 기록: 전역 채널 설정(config — 웹훅 URL·vCenter별 임계)은 그대로 준다. 저장(PUT)이 전역이라 범위를
+ *   나눌 축이 없고, 가리면 이 화면의 설정 폼이 빈 값으로 덮어쓴다 — 정책 결정 사항이다.
+ */
+export function alertVcenterOf(a, allowed) {
+  if (!a || typeof a !== 'object') return null;
+  if (typeof a.vcenterId === 'string' && a.vcenterId) return a.vcenterId;
+  // vcenterId 필드가 없는 규칙(vc:·ramoc:·vcpuoc:·massoff:)은 키에 vCenter id 가 들어 있다.
+  //   ⚠ 콜론으로 split 하지 않는다(vCenter id 에 콜론이 올 수 있다 — v2.598 VC2598 규약) — 허용 id 로 접두 대조.
+  const key = typeof a.key === 'string' ? a.key : '';
+  for (const pre of ['vc:', 'ramoc:', 'vcpuoc:', 'massoff:']) {
+    if (!key.startsWith(pre)) continue;
+    const rest = key.slice(pre.length);
+    for (const id of allowed) {
+      if (pre === 'vc:' || pre === 'massoff:' ? rest === id : rest.startsWith(`${id}:`)) return id;
+    }
+    return null;
+  }
+  return null;
+}
+export function scopeAlertStatus(st, allowed) {
+  if (!allowed || !st) return st;
+  const keep = (a) => { const vc = alertVcenterOf(a, allowed); return !!vc && allowed.has(vc); };
+  const firing = (st.firing || []).filter(keep);
+  const recent = (st.recent || []).filter(keep);
+  return { ...st, firing, recent, scoped: true,
+    omittedOutOfScope: { firing: (st.firing || []).length - firing.length, recent: (st.recent || []).length - recent.length } };
+}
+
 export function registerOpsSettings(adminRouter) {
 
 // Audit log viewer (누가 언제 무엇을 했는지).
@@ -25,7 +57,7 @@ adminRouter.get('/audit', adminOnly, (req, res) => {
 });
 
 // Alerting: config + current firing/recent, save config, send a test notification.
-adminRouter.get('/alerts', adminOnly, (_req, res) => res.json(alertStatus()));
+adminRouter.get('/alerts', adminOnly, (req, res) => res.json(scopeAlertStatus(alertStatus(), scopedVcenterIds(req.user, store.get()))));
 adminRouter.put('/alerts', adminOnly, async (req, res) => {
   // 웹훅 URL은 서버가 대신 POST하는 주소 — SSRF resolved 가드(DNS 해석 결과까지)로 검증.
   // 루프백/링크로컬로 해석되는 이름을 저장해 두고 알림이 내부를 찌르는 우회를 차단한다.

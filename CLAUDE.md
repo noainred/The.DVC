@@ -3633,6 +3633,22 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ReDoS 5곳(SAN sensorshow 3차 · uemcli 배너 · FC 속도 · Unity 버전 · Isilon 풀) — 성능 수정은 옛 정규식과 **결정적 난수 대조**로 결과 동일성을 함께 고정한다.
     - ⚠ 성능 상한 테스트는 전량 병렬 부하에서 단독의 3~4배가 나온다(v2.602 가림 55~80ms → 260ms). 상한은 **회귀와 확실히 갈리는 값**으로(여기선 1초 vs 5.6초).
 
+  - ⚠⚠ **v2.604 — 15차 점검 확정분**("자세하게 3번 더" 2회차. 발견 39 = 확정 35 · SPLIT 2 · 반증 2, 고침 37 + 후속 9.
+    회귀 `test/audit2604{a..f}.test.js` 51건 + 웹 vitest. 상세 `docs/AUDIT-2026-09-24l.md`):
+    - ⚠⚠ **이름으로 찾는 설정은 저장·조회 둘 다 `util/agentKey.js`**(RECENT2604-01 — **v2.603 이 만든 회귀**): 배정은 쿼리 이름, 결과는 토큰
+      이름으로 대소문자 구분 조회해 스캔 결과가 전량 409. 새 거부(409·403)를 넣으면 **정상 경로가 같은 키로 찾는지**부터 볼 것.
+    - **외부 응답은 `.json()`·`.text()` 를 그대로 쓰지 않는다**(CEN2604-01 high·CEN2604-02) — `readJsonCapped`·`readBodyPrefix`. 두 소스
+      스윕 테스트가 고정한다(허용 목록 사유 포함). 경로를 변수로 조립하는 호출은 스윕이 못 본다(upgrade.js 엣지 push — 다음 후보).
+    - **자기등록은 검증이 아니다**(CEN2604-04): 공유 토큰 자기등록 이름을 '아는 엣지' 로 세면 v2.601 미검증 상한이 우회된다.
+    - **비밀 가림 정규식은 `_PASS`·`_PWD`·`_CREDS` 까지**(SEC2604-01 — `util/envRedact.js`, 밑줄 접두만). 파일별 추가 봉인 필드는
+      `secretVault FILE_EXTRA_SECRET_FIELDS`(alerts.json 의 url — 전역 SECRET_FIELDS 에 url 을 넣으면 접속 주소까지 봉인된다).
+    - **공개 API 는 내부 비-admin 과 같은 가림 함수를 쓴다**(AUTHZ-2604-01·02) — 따로 구현하면 한쪽만 가린다.
+    - **반올림 용량은 적재하되 해상도를 밝힌다**(COL-2604-01 — Isilon SSH `5.0P`, `capacityApprox.resolutionBytes`, 공개 API `resolutionBytes`).
+    - **긴 기간 조회는 롤업**(DB2604-01 — ping `samples_hourly`, 365일 10.6초 → 0.2초).
+    - **존재하지 않는 설정 필드로 분기하지 말 것**(vmclone `config.mode` — 목 모드에서 실제 vCenter 를 탔다). `getDataSource()` 를 쓴다.
+    - ⚠ **병렬 에이전트의 변이 백업 경로는 에이전트별로**(이번 회차 사고 — `mut.bak` 공유로 파일 3개가 잠시 서로 덮였다. 전 변경 파일
+      머리말·삭제 비율·테스트·변이 유효성으로 복구를 확인했다).
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

@@ -54,6 +54,23 @@ export const num = (v) => { if (v == null || v === '') return null; const n = Nu
 
 export const ageText = (ts, now = Date.now()) => agoText(ts, now, { dash: '없음', subMinute: 'seconds' });
 export const durText = (ms) => elapsedText(ms, { dash: '—', subMinute: 'seconds' });
+/**
+ * 상세 패널의 pull 시각 행 — 라벨·값·부가 설명(v2.604 감사 WEB2604-03).
+ * 실패·저하 중인 엣지의 `at` 은 마지막 시도가 아니라 **마지막 정상 pull** 시각이다(v2.548 H5). 한 번도 성공하지
+ * 못한 엣지는 v2.601 부터 at 이 null 이고 `neverOk` 가 붙는다 — 예전 부가 설명 '그 전 성공이 없으면 첫 실패 시각'
+ * 은 더는 일어나지 않는 경우를 말하고 있었다. 그때는 '성공한 pull 없음' 이라고 말한다.
+ */
+export function pullAtRow(pull, now = Date.now()) {
+  const failing = pull?.state === 'fail' || pull?.state === 'degraded';
+  const at = num(pull?.at);
+  const hasAt = at != null && at > 0;
+  if (!failing) return { label: '마지막 pull', value: hasAt ? ageText(at, now) : '기록 없음', note: '' };
+  if (!hasAt) {
+    return { label: '마지막 정상 pull', value: pull?.neverOk ? '성공한 pull 없음' : '기록 없음',
+      note: pull?.neverOk ? '이 엣지에서 pull 이 한 번도 성공하지 않았습니다 · 재시도는 주기마다 계속됩니다' : '재시도는 주기마다 계속됩니다' };
+  }
+  return { label: '마지막 정상 pull', value: ageText(at, now), note: '재시도는 주기마다 계속됩니다' };
+}
 /** 기간(길이) 표기 — ‘N초 전’ 이 아니라 ‘N초’ 다(주기·경계처럼 시점이 아닌 값에 쓴다). null 은 ‘—’. */
 export function spanText(ms) {
   const n = num(ms);

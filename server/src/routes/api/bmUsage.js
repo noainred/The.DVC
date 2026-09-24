@@ -27,12 +27,14 @@ import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
 import { scopeFilePaths } from '../../auth/scopeStatus.js';   // v2.598 AUTHZ-2598-04: log.file 절대 경로는 admin 만
 import { config } from '../../config.js';
+import { strOf } from '../../util/coercionTrap.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
 
-const t = (v) => String(v ?? '').trim();
+// v2.604(감사 CEN2604-03 2중 방어): 엣지 보관분 값이 객체면 String() 이 던져 이 라우트가 500 이었다 — 글자·수·불리언만.
+const t = (v) => strOf(v, 4096).trim();
 
 /** 범위 계정용 절단(순수) — 허용 vCenter 것만, 귀속 없는 것은 숨긴다. */
 export function applyScope(list = [], allowed = null, field = 'vcenterId') {

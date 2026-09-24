@@ -21,7 +21,7 @@ import { layoutCommMap, arcPath, labelAnchor } from './commMapLayout.js';
 import { rejectKindLabel } from './invCheckText.js'; // v2.599: 거부 종류 코드 → 라벨(unknown-route 포함)
 import {
   STATE_LABEL, STATE_COLOR, RES_KIND_LABEL, RES_KIND_ICON, RES_STATE_LABEL, RES_STATE_COLOR,
-  PULL_LABEL, PUSH_LABEL, REASON_TEXT, ageText, spanText, bytesText, edgeSummary, resourceSummary,
+  PULL_LABEL, PUSH_LABEL, REASON_TEXT, ageText, pullAtRow, spanText, bytesText, edgeSummary, resourceSummary,
   headerNote, activityOf, LEGEND_NOTES,
 } from './commMapText.js';
 
@@ -75,9 +75,9 @@ function EdgeDetail({ e, now }) {
       )}
       <div style={{ fontWeight: 600, fontSize: 13, margin: '8px 0 2px' }}>중앙 → 엣지 pull</div>
       <Row k="상태" v={<><Badge color={PULL_COLOR[e.pull?.state] || STATE_COLOR.unknown}>{PULL_LABEL[e.pull?.state] || '—'}</Badge>{e.pull?.fails ? ` 연속 실패 ${e.pull.fails}회` : ''}</>} />
-      {/* ⚠ 실패 중인 엣지의 `at` 은 마지막 시도가 아니라 **마지막 성공 pull 시각**이다(state.js 가 실패를 직전 상태 위에 덮는다 —
-          v2.548 H5). 그 전 성공이 없으면 첫 실패 시각이다. '마지막 pull' 이라 적으면 60초마다 재시도 중인 사실과 어긋난다. */}
-      <Row k={e.pull?.state === 'fail' || e.pull?.state === 'degraded' ? '마지막 정상 pull' : '마지막 pull'} v={<>{ageText(e.pull?.at, now)}{(e.pull?.state === 'fail' || e.pull?.state === 'degraded') ? <span className="muted" style={{ fontSize: 11 }}> (그 전 성공이 없으면 첫 실패 시각 · 재시도는 주기마다 계속됩니다)</span> : null}</>} />
+      {/* ⚠ 실패 중인 엣지의 `at` 은 마지막 시도가 아니라 **마지막 정상 pull 시각**이다(state.js 가 실패를 직전 상태 위에 덮는다 —
+          v2.548 H5). 한 번도 성공하지 못했으면 at 은 null + neverOk 다(v2.601). 라벨·문구는 pullAtRow 하나가 정한다(v2.604). */}
+      {(() => { const pr = pullAtRow(e.pull, now); return <Row k={pr.label} v={<>{pr.value}{pr.note ? <span className="muted" style={{ fontSize: 11 }}> ({pr.note})</span> : null}</>} />; })()}
       {e.pull?.error && <Row k="사유" v={e.pull.error} />}
       {e.pull?.hosts != null && <Row k="export 호스트" v={`${e.pull.hosts}대`} />}
       {e.pull?.identityIssue?.reason && <Row k="정체" v={e.pull.identityIssue.reason} />}

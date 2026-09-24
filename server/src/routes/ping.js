@@ -122,7 +122,8 @@ pingRouter.delete('/targets/:id', adminOnly, async (req, res) => {
     try {
       const db = await getPingDb();
       historyPurge = 'background';
-      db.dropTarget(r.id)
+      // v2.604(감사 RECENT2604-02): 삭제 시각까지의 표본만 지운다 — 삭제가 도는 동안 같은 id 로 다시 만든 대상의 새 표본은 남는다.
+      db.dropTarget(r.id, Date.now())
         .then((x) => { if (x?.deleted) console.log(`[ping] 대상 ${r.id} 이력 ${x.deleted}행 삭제(${x.chunks}청크)`); })
         .catch((e) => console.warn(`[ping] 대상 ${r.id} 이력 삭제 실패: ${e?.message || e}`));
     } catch (e) { historyPurge = 'failed'; console.warn(`[ping] 대상 ${r.id} 이력 삭제 실패: ${e?.message || e}`); }

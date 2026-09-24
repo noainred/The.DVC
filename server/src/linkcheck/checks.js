@@ -23,6 +23,7 @@ import { pinnedLookup } from '../util/ssrfLookup.js';
 import { WAN_TLS_VERIFY } from '../util/resilientFetch.js'; // v2.583: 비밀 헤더를 싣는 점검은 WAN 검증 설정을 따른다
 import { certExpiryStatus } from '../security/certMonitor.js';
 import { failKindOfCode } from './phases.js';
+import { readBodyPrefix } from '../util/readPrefix.js';
 
 const BODY_SNIP = 400;
 const t = (v) => String(v ?? '').trim();
@@ -39,10 +40,13 @@ export async function stepDns(host, { timeoutMs = 5_000 } = {}) {
     return { ok: true, ms: ms(t0), addrs: [h], literal: true };
   }
   try {
+    // v2.604(감사 TIM2604-05): 타임아웃 타이머를 해제한다 — 예전에는 조회가 성공해도 timeoutMs 까지 타이머가 살아 있었다
+    //   (점검마다 하나씩 쌓이고 종료를 그만큼 붙잡았다). svcmon/checker.js runCheck 와 같은 finally 해제.
+    let dnsTimer = null;
     const all = await Promise.race([
       dns.lookup(h, { all: true, verbatim: true }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error(`DNS 조회 타임아웃(${Math.round(timeoutMs / 1000)}초)`)), timeoutMs)),
-    ]);
+      new Promise((_, rej) => { dnsTimer = setTimeout(() => rej(new Error(`DNS 조회 타임아웃(${Math.round(timeoutMs / 1000)}초)`)), timeoutMs); }),
+    ]).finally(() => { if (dnsTimer) clearTimeout(dnsTimer); });
     const addrs = (all || []).map((a) => a.address).filter(Boolean);
     if (!addrs.length) return { ok: false, ms: ms(t0), failKind: 'dns-fail', error: '해석 결과가 없습니다.' };
     // ⚠ **차단 대역을 걸러내고 남은 것만** 쓴다(전부 거부하면 이중스택 이름이 하드 실패 — v2.506 규약).
@@ -129,6 +133,7 @@ export async function stepHttp({ url, ip, headers = {}, timeoutMs = 15_000, iden
   const out = { http: null, auth: null, identity: null };
   let res;
   let body = '';
+  let bodyCapped = false;
   try {
     const { Agent } = await import('undici');
     const u = new URL(url);
@@ -146,7 +151,10 @@ export async function stepHttp({ url, ip, headers = {}, timeoutMs = 15_000, iden
       headersTimeout: timeoutMs, bodyTimeout: timeoutMs,
     });
     res = await fetch(url, { method, headers, dispatcher, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
-    body = (await res.text().catch(() => '')).slice(0, BODY_SNIP * 4);
+    // v2.604(감사 CEN2604-02 — 재현): 예전 `(await res.text()).slice(…)` 는 본문 **전체**를 메모리로 읽고 잘랐다 —
+    //   300MB 공백을 gzip 으로 준 상대 하나에 RSS 375 → 1,303MB(v2.603 SEC2603-03 의 형제 누락). 앞부분만 읽고 끊는다.
+    const pre = await readBodyPrefix(res, BODY_SNIP * 4).catch(() => ({ text: '', capped: false }));
+    body = pre.text; bodyCapped = pre.capped;
   } catch (e) {
     // undici 는 원인을 e.cause 에 둔다('fetch failed' 만으로는 원인을 알 수 없다) — 문구에 원인을 덧붙인다.
     const cause = e?.cause?.message ? ` — ${e.cause.message}` : '';
@@ -161,7 +169,7 @@ export async function stepHttp({ url, ip, headers = {}, timeoutMs = 15_000, iden
   //   중앙→엣지 /ping 이 5분 점검과 무관하게 회색이었다. 포탈 사이 경로(/api/collector·/api/central)만 기록된다.
   recordOutbound(url, { status, bytes: body.length, method, ms: httpMs });
   const snippet = body.slice(0, BODY_SNIP);
-  const common = { status, ms: httpMs, contentType: t(res.headers.get('content-type')), bodySnippet: snippet, bytes: body.length };
+  const common = { status, ms: httpMs, contentType: t(res.headers.get('content-type')), bodySnippet: snippet, bytes: body.length, ...(bodyCapped ? { bodyCapped: true } : {}) };
 
   // ⚠ 401/403/404 는 HTTP 오류가 아니라 **인증 단계**로 가른다 — 조치가 다르다.
   if (status === 401 || status === 403) {

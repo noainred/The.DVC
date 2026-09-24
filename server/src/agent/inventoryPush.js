@@ -102,7 +102,12 @@ export function withholdDecision(snap, vc, now, sinceMap = withholdSince) {
 export async function pushInventoryNow() {
   if (running) return { ok: false, reason: '이전 push 진행 중(겹침 방지)' };
   const snap = store.get();
-  if (!snap?.vcenters?.length) return { ok: false, reason: '수집된 vCenter 없음' };
+  if (!snap?.vcenters?.length) {
+    // v2.604(감사 EDGE2604-02): 조기 반환도 상태를 남긴다 — 예전에는 last 가 갱신되지 않아 엣지 로그 화면이 마지막 성공을
+    //   그대로 보여줬고, '왜 안 보냈는지' 를 말하지 않았다(v2.554 '잴 것 0건이어도 상태를 올린다' 규약).
+    last = { at: Date.now(), sent: 0, errors: [], note: '이 엣지에 수집 대상 vCenter 가 없습니다(보낼 인벤토리 없음)' };
+    return { ok: false, reason: '수집된 vCenter 없음' };
+  }
   running = true;
   let sent = 0; let bytes = 0; let gzBytes = 0; let skippedMock = 0; const errors = []; const withheld = []; const holdExpired = [];
   const now = Date.now();

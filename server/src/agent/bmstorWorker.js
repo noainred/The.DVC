@@ -74,8 +74,11 @@ export async function runBmstorWorkerOnce() {
       // 결과에서 자격증명이 나가지 않게 용량 필드만 회신(collectMany 결과가 이미 그 형태지만 명시 필터).
       const safe = results.map((x) => ({ id: x.id, ok: x.ok, mounts: x.mounts, missing: x.missing, error: x.error }));
       // 회신 실패 시 중앙 reap 이 재인출시킨다(claim→ack 설계 그대로) — 그래도 실패 사실은 상태·콘솔에 남긴다(v2.591 PR-5).
-      postErr = (await postResult(`${config.agent.centralUrl}/api/central/bmstor-result`, JSON.stringify({ reqId: job.reqId, results: safe }), 30_000)) || postErr;
-      console.log(`[bmstor-agent] 수집 완료 reqId=${job.reqId} 서버 ${safe.length}대`);
+      const jobErr = await postResult(`${config.agent.centralUrl}/api/central/bmstor-result`, JSON.stringify({ reqId: job.reqId, results: safe }), 30_000);
+      postErr = jobErr || postErr;
+      // v2.604(감사 EDGE2604-03): 회신이 실패한 잡을 '완료' 한 줄로만 남기지 않는다 — 같은 실패 경고는 10분에 1줄로 묶이므로
+      //   이후 주기에는 이 줄만 보였다. 수집은 끝났지만 중앙에 닿지 않았다는 사실을 같은 줄에 적는다.
+      console.log(`[bmstor-agent] 수집 완료 reqId=${job.reqId} 서버 ${safe.length}대${jobErr ? ' · 결과 회신 실패(중앙이 다시 인출할 때까지 반영되지 않음)' : ''}`);
     }
     _last = postErr ? { at: Date.now(), ok: false, error: postErr } : { at: Date.now(), ok: true };
     return _last;

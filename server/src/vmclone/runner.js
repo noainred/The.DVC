@@ -21,8 +21,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { config, loadVcenterConfig } from '../config.js';
+import { loadVcenterConfig } from '../config.js';
 import { store } from '../store.js';
+import { getDataSource } from '../runtime-settings.js';
 import { logAudit } from '../audit.js';
 import { getJob, recordRun, pruneList } from './store.js';
 import {
@@ -56,7 +57,15 @@ export function enqueueRun(jobId, trigger = 'manual') {
   return { queued: true };
 }
 
+// v2.604(감사 TIM2604-02): 실행 표시(_running)는 스냅샷 삭제(병합)·로그아웃까지 **다 끝난 뒤** 한 번만 내린다.
+//   예전엔 done() 이 내려, 성공 직후 finally 의 스냅샷 병합(최대 수 시간) 동안 상태가 '실행 중 아님' 이었고 그 사이
+//   enqueueRun 의 중복 가드(_running.jobId === jobId)가 풀려 같은 잡이 한 번 더 대기열에 올랐다.
 async function runJob(jobId, trigger) {
+  try { return await runJobBody(jobId, trigger); }
+  finally { if (_running.jobId === jobId) { _running.jobId = null; _running.phase = ''; } }
+}
+
+async function runJobBody(jobId, trigger) {
   const job = getJob(jobId);
   if (!job || !job.enabled) return;
   _running.jobId = jobId; _running.phase = '시작'; _running.startedAt = Date.now();
@@ -64,14 +73,18 @@ async function runJob(jobId, trigger) {
   const done = (ok, detail, extra = {}) => {
     recordRun(jobId, { ok, detail, ms: Date.now() - t0, ...extra });
     logAudit({ user: `vm-clone(${trigger})`, action: ok ? 'VM 복제 성공' : 'VM 복제 실패', target: `${job.vcenterId}/${job.vmName}`, detail: String(detail).slice(0, 200) });
-    _running.jobId = null; _running.phase = '';
+    // _running 은 여기서 내리지 않는다 — runJob 의 finally 가 스냅샷 병합·로그아웃 뒤에 내린다(TIM2604-02).
   };
 
   try {
     const vcCfg = (loadVcenterConfig().vcenters || []).find((v) => v.id === job.vcenterId);
     // mock 모드(개발·데모): 실제 vCenter 없이 성공 시뮬레이션 — 스케줄/보존/UI 흐름 검증용.
-    if (!vcCfg || config.mode === 'mock') {
-      if (config.mode === 'live') throw new Error(`vCenter 설정을 찾을 수 없습니다: ${job.vcenterId}`);
+    // v2.604: 예전 판정 `config.mode` 는 **존재하지 않는 필드**라 항상 거짓이었다 — 목 모드에서도 vCenter 설정이 있으면 실제
+    //   스냅샷·클론을 돌렸고, 반대로 live 에서 vCenter 설정이 없으면 오류 대신 '복제 성공'(시뮬레이션)이 기록됐다.
+    //   판정은 수집(store.js)과 같은 getDataSource() === 'mock' 이다('auto' 는 실수집).
+    const mock = getDataSource() === 'mock';
+    if (!vcCfg || mock) {
+      if (!mock) throw new Error(`vCenter 설정을 찾을 수 없습니다: ${job.vcenterId}`);
       _running.phase = '시뮬레이션(mock)';
       await new Promise((r) => setTimeout(r, 2000));
       const name = `${job.vmName}-bak-${stamp()}`;

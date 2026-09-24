@@ -11,6 +11,7 @@ import { ipBlockReason, ssrfBlockReason, ssrfBlockReasonResolved } from '../util
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { bumpFleetRev } from '../insights/fleetRev.js';
+import { readJsonCapped } from '../util/readCapped.js'; // v2.604 CEN2604-01: 자기등록 검증 ping 응답 크기 상한
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: url 변경 시 저장 토큰 폐기
 
 const FILE = path.join(config.configDir, 'collectors.json');
@@ -124,6 +125,9 @@ async function tokenFetch(u, init) {
  * ① 403 → 그 주소는 다른 엣지(중계/NAT 장비) ② 응답 agent ≠ name → 다른 엣지 ③ 불통 → 중앙이 못 닿는 주소.
  * 반환 { ok:true } | { ok:false, reason }. fetchImpl 은 테스트 주입용.
  */
+/** 자기등록 검증 ping 응답 상한 — ping 본문은 수백 바이트다(v2.604 CEN2604-01). */
+export const VERIFY_PING_MAX_BYTES = 64 * 1024;
+
 export async function verifyDerivedCollectorUrl({ url, name, datacenter = '', token }, fetchImpl = tokenFetch) {
   let why = '';
   try {
@@ -131,9 +135,20 @@ export async function verifyDerivedCollectorUrl({ url, name, datacenter = '', to
     if (pr.status === 403 || pr.status === 401) why = `유도한 주소 ${url} 이(가) 이 엣지의 토큰을 거부(403) — 그 주소는 다른 엣지(중계/NAT 장비)입니다`;
     else if (!pr.ok) why = `유도한 주소 ${url} 응답 HTTP ${pr.status}`;
     else {
-      const j = await pr.json().catch(() => ({}));
-      const iss = identityIssue({ id: name, name, datacenter }, j);
-      if (iss) why = `유도한 주소 ${url} 에 응답한 엣지가 '${iss.agent}' (이 엣지 '${name}' 아님)`;
+      // ⚠ v2.604(감사 CEN2604-01): 응답은 **상한까지만** 읽는다. 예전 `pr.json()` 은 해제 후 크기 상한이 없어 공유 토큰
+      //   보유자가 urlHint 로 gzip 폭탄 주소(사내 대역은 SSRF 가드가 허용한다)를 주면 중앙 RSS 가 수 GB 로 올랐다. 그리고
+      //   JSON 이 아니면 `{}` 로 삼켜 identityIssue 가 null(=일치) → **검증 통과** 가 됐다. 이제 파싱 실패·ok 아님·agent 없음은
+      //   전부 '검증 실패' 다(v2.424 이후의 엣지는 ping 에 agent 를 싣는다).
+      let j = null;
+      try { j = await readJsonCapped(pr, VERIFY_PING_MAX_BYTES, '엣지 ping 응답'); } catch (e) { why = `유도한 주소 ${url} 응답을 읽지 못함(${String(e?.message || e).slice(0, 160)})`; }
+      if (!why) {
+        if (!j || typeof j !== 'object' || Array.isArray(j) || j.ok !== true) why = `유도한 주소 ${url} 응답이 수집 서버 ping 형식이 아닙니다`;
+        else if (typeof j.agent !== 'string' || !j.agent.trim()) why = `유도한 주소 ${url} 에 응답한 엣지가 이름(agent)을 보고하지 않습니다(엣지 업그레이드 필요)`;
+        else {
+          const iss = identityIssue({ id: name, name, datacenter }, j);
+          if (iss) why = `유도한 주소 ${url} 에 응답한 엣지가 '${iss.agent.slice(0, 128)}' (이 엣지 '${name}' 아님)`;
+        }
+      }
     }
   } catch (e) { why = `유도한 주소 ${url} 에 중앙이 닿지 못함(${e.message})`; }
   if (!why) return { ok: true };
@@ -224,7 +239,7 @@ export function updateCollector(id, body, { managed } = {}) {
  * ★ 관리자가 수동 수정(managed=true)한 항목은 URL/토큰을 덮어쓰지 않는다 — 저장한 값이
  *   다음 자기등록 주기에 원복되던 버그 방지. (관리자 편집이 곧 '이 값으로 고정' 의사표시)
  */
-export function upsertCollectorFromAgent({ name, url, token, datacenter = '' } = {}) {
+export function upsertCollectorFromAgent({ name, url, token, datacenter = '', unverified = false, shared = false } = {}) {
   const id = String(name || '').trim();
   if (!id) return { ok: false, reason: 'name(에이전트 이름)은 필수입니다.' };
   const list = loadCollectors();
@@ -233,9 +248,40 @@ export function upsertCollectorFromAgent({ name, url, token, datacenter = '' } =
   const existing = list.find((c) => String(c.id).toLowerCase() === id.toLowerCase());
   if (existing) {
     if (existing.managed) return { ok: true, collector: redact(existing), skipped: 'managed' };
-    return updateCollector(existing.id, { url, token, datacenter: datacenter || existing.datacenter, name: existing.name || existing.id }, { managed: false });
+    const r = updateCollector(existing.id, { url, token, datacenter: datacenter || existing.datacenter, name: existing.name || existing.id }, { managed: false });
+    if (r.ok) markSelfRegVerification(existing.id, unverified);
+    return r;
   }
-  return addCollector({ id, name: id, url, token, datacenter, enabled: true }, { managed: false });
+  // v2.604(감사 CEN2604-04): **공유 토큰**의 새 이름 생성은 개수를 묶는다. 예전에는 상한이 없어 공유 토큰 하나로 수집 서버
+  //   항목 150개를 만들 수 있었다(검증 실패한 urlHint 도 '미검증' 으로 저장). 기존 항목 갱신은 막지 않는다.
+  //   미검증 새 항목은 작게(SELF_REG_UNVERIFIED_MAX), 자기등록 항목 전체는 넉넉히(SELF_REG_MAX — 현장 28곳·30+ 확장).
+  if (shared) {
+    const selfReg = list.filter((c) => !c.managed);
+    if (selfReg.length >= SELF_REG_MAX) return { ok: false, capped: true, reason: `자기등록 수집 서버가 상한(${SELF_REG_MAX}개)에 닿아 새 이름 '${id}' 을 받지 않습니다 — 관리자가 설정 › 수집 서버에서 등록하거나 엣지별 개별 토큰을 쓰세요.` };
+    if (unverified && selfReg.filter((c) => c.selfRegUnverified).length >= SELF_REG_UNVERIFIED_MAX) return { ok: false, capped: true, reason: `검증되지 않은 자기등록이 상한(${SELF_REG_UNVERIFIED_MAX}개)에 닿아 새 이름 '${id}' 을 받지 않습니다 — 등록 URL(EDGE_ADVERTISE_URL)이 이 엣지에 닿는지 확인하거나 관리자가 직접 등록하세요.` };
+  }
+  const r = addCollector({ id, name: id, url, token, datacenter, enabled: true }, { managed: false });
+  if (r.ok) markSelfRegVerification(id, unverified);
+  return r;
+}
+
+/** 자기등록 개수 상한(v2.604 CEN2604-04) — 공유 토큰의 새 이름 생성에만 적용한다. */
+export const SELF_REG_MAX = Math.max(8, Number(process.env.CENTRAL_SELF_REGISTER_MAX) || 256);
+export const SELF_REG_UNVERIFIED_MAX = Math.max(1, Number(process.env.CENTRAL_SELF_REGISTER_UNVERIFIED_MAX) || 16);
+
+/**
+ * 자기등록 검증 결과를 항목에 남긴다(v2.604 CEN2604-04). `selfRegUnverified` 가 있는 항목은 중앙이 '아는 엣지' 로 세지 않는다
+ * (routes/central.js edgeNameKnown) — 공유 토큰이 검증에 실패한 urlHint 로 이름을 만들어 넣고 그 이름으로 v2.601 '미검증 제한'
+ * 을 우회하던 것을 막는다. 검증에 성공하면 표식을 지운다. 이 표식이 없는 옛 항목은 예전처럼 '아는 엣지' 다(호환).
+ */
+function markSelfRegVerification(id, unverified) {
+  const list = loadCollectors();
+  const idx = list.findIndex((c) => c.id === id);
+  if (idx === -1) return;
+  const had = !!list[idx].selfRegUnverified;
+  if (had === !!unverified) return;
+  if (unverified) list[idx].selfRegUnverified = true; else delete list[idx].selfRegUnverified;
+  save(list);
 }
 
 export function removeCollector(id) {

@@ -11,13 +11,18 @@
  *
  * 규칙:
  *  - 키 이름이 SECRET/TOKEN/PASSWORD/PASSWD/PASSPHRASE/PRIVATE_KEY/API_KEY/_KEY 로 끝나면 값을 가린다.
+ *  - v2.604(감사 SEC2604-01): `_PASS`·`_PW`·`_PWD`·`_CRED(S)`·`_CREDENTIAL(S)` 로 끝나는 이름도 가린다.
+ *    `PROXY_SSH_PASS`·`HAPROXY_DATAPLANE_PASS`(proxy/registry.js 가 읽는 실제 portal.env 키 — docs/ENV.md)가
+ *    백업 번들과 엣지→중앙 설정 사본에 **평문**으로 남았다. ⚠ 접미는 **밑줄로 시작**해야 한다 — 이 판정은
+ *    edgelog/redact.js 의 객체 키 가림(isSecretKey)에도 쓰이므로 `pass`(점검 통과 불리언)·`bypass`·`compass`
+ *    같은 식별자를 가리면 진단 값이 `[가림]` 이 된다(v2.549 식별자 오탐 규약).
  *  - 가린 값은 `REDACTED` 표식으로 남긴다(줄을 지우지 않는다 — 복원 시 '어떤 키가 있었는지' 를 알아야
  *    현재 값을 이어 붙일 수 있다). 주석·빈 줄·비밀 아닌 키는 그대로.
  *  - 복원(`mergeRedactedEnv`)은 표식 줄을 **현재 파일의 같은 키 값**으로 되살리고, 현재 파일에 없으면
  *    그 줄을 버린다(빈 값으로 덮어써 서명 키를 지우는 사고 방지).
  */
 export const REDACTED = '<redacted-by-portal-backup>';
-const SECRET_KEY_RE = /(SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|PRIVATE_KEY|API_KEY|_KEY)$/i;
+const SECRET_KEY_RE = /(SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|PRIVATE_KEY|API_KEY|_KEY|_PASS|_PWD?|_CREDS?|_CREDENTIALS?)$/i;
 const LINE_RE = /^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s*=\s*)(.*)$/;
 
 /** 키 이름이 비밀인가(순수). */

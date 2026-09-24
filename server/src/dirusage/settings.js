@@ -19,6 +19,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { TOP_N_MIN, TOP_N_MAX } from './scan.js';
 import { normalizeAddresses } from '../util/smtp.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'dirusage.json');
 
@@ -111,7 +112,9 @@ export function save(body = {}) {
       onlyOnChange: body.mail.onlyOnChange === true,
     };
   }
-  if (body.retentionDays != null) next.retentionDays = clamp(body.retentionDays, 1, 3650, 365);
+  // v2.604(감사 LEFT2604-01 — 재현): 빈 칸('')을 Number 로 읽으면 0 → 하한 1일이 되어 **스캔 이력이 하루치만 남았다**
+  //   (오류 없이 '저장됨'). 빈 값·숫자 아님은 '미지정' = 현재 값 유지. 명시적 숫자만 값이다(v2.596 규약).
+  if (numOrNull(body.retentionDays) != null) next.retentionDays = clamp(body.retentionDays, 1, 3650, cur.retentionDays);
 
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;

@@ -73,7 +73,9 @@ api.get('/tools/storage', toolsPerm, fullScopeOnly, (req, res) => {
     // 엣지 목록: per-agent 토큰뿐 아니라 중앙과 통신 중인 모든 알려진 엣지를 병합(v2.312 —
     // iDRAC 위임과 동일 소스). 토큰 미발급(공유 CENTRAL_TOKEN) 환경에서도 엣지를 고를 수 있다.
     agents: knownAgentNames(),
-    poller: storagePollerStatus(),
+    // v2.604 AUTHZ-2604-03: poller.inFlight 에 진행 중 장비 이름(= 이름을 비워 등록한 장비는 관리 IP)이 실린다 —
+    //   형제 /tools/storage/activity(v2.600)와 같은 maskPollerStatus 로 가린다(v2.550.3 '상태 객체' 규약).
+    poller: admin ? storagePollerStatus() : maskPollerStatus(storagePollerStatus(), listDevices().map((d) => d.host)),
     // v2.591: 엣지가 가져갔지만 새 수집 결과가 오지 않아 재인출 뒤 폐기한 '지금 수집' 요청 — 화면이 말한다(조용한 소실 금지).
     collectDrops: recentCollectDrops(),
     // v2.581(BUG-D): 엣지별 보고 요약 — 장비 보고 시각·대수 + 상태 전용 보고(0대). 화면이 '엣지가 0대라고
@@ -587,6 +589,9 @@ api.get('/tools/storage-growth', toolsPerm, fullScopeOnly, async (req, res) => {
     // 장비 보고 이름도 주소와 같으면 가린다(스냅샷 host 가 없는 수집기라 등록부 주소를 넘긴다).
     const nm = admin ? snap.name : maskSnapAddress({ deviceId: id, type: snap.type, name: snap.name }, hostById.get(id)).name;
     if (nm) meta.set(id, { ...meta.get(id), name: nm });
+    // v2.604(COL-2604-01 후속): 반올림 표기 용량 장비의 해상도 — 이름과 무관하게 싣는다(growth.js 가 증가량에 표지를 단다).
+    const approx = snap.extra?.capacityApprox;
+    if (approx && typeof approx === 'object') meta.set(id, { ...meta.get(id), capacityApprox: approx });
   }
 
   const rows = await dailySeries(null, sinceDay);

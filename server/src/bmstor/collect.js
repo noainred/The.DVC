@@ -50,8 +50,9 @@ export function dfUsedPct(usedBytes, availBytes) {
  * mounted-on 은 마지막 컬럼이므로 공백 포함 경로도 뒤에서부터 안전하게 잡는다.
  * @returns {{mounts:Array<{mount,totalBytes,usedBytes,availBytes,usedPct}>, missing:string[]}}
  */
-export function parseDfOutput(stdout, requestedMounts) {
+export function parseDfOutput(stdout, requestedMounts, stderr = '') {
   const byMount = new Map();
+  const ordered = [];   // v2.604: 출력 순서(= 인자 순서) — 마운트 지점이 아닌 디렉터리 판별에 쓴다
   for (const line of String(stdout || '').split(/\r?\n/).slice(1)) { // 1행 = 헤더
     const t = line.trim();
     if (!t) continue;
@@ -63,18 +64,43 @@ export function parseDfOutput(stdout, requestedMounts) {
     if (!Number.isFinite(totalKb) || !Number.isFinite(usedKb) || !Number.isFinite(availKb)) continue;
     const mount = cols.slice(5).join(' ');
     const totalBytes = totalKb * 1024; const usedBytes = usedKb * 1024; const availBytes = availKb * 1024;
-    byMount.set(mount, {
+    const row = {
       mount, totalBytes, usedBytes, availBytes,
       usedPct: dfUsedPct(usedBytes, availBytes),
-    });
+    };
+    byMount.set(mount, row);
+    ordered.push(row);
   }
-  const mounts = []; const missing = [];
-  for (const m of requestedMounts || []) {
+  /*
+   * v2.604(감사 COL-2604-05): 마운트 지점이 아닌 **디렉터리**(예: '/' 위의 '/var')를 넣으면 df 는 그 디렉터리가 속한
+   *   파일시스템의 줄('/ ')을 찍는다 — Mounted-on 이름으로만 대조하면 '/var' 는 '미발견(미마운트/오타)' 이 되는데 그 말은
+   *   틀리다(경로는 있다). df -P 는 **인자마다 한 줄을 인자 순서대로** 찍고, 없는 경로는 stderr 에 적고 줄을 건너뛴다.
+   *   그래서 stderr 에 나온 경로를 빼고 남은 인자 수가 출력 줄 수와 **정확히 같을 때만** 순서로 짝을 짓는다
+   *   (다르면 판단 근거가 없으므로 예전처럼 이름 대조만 한다). 디렉터리는 그 파일시스템의 용량을 자기 것으로
+   *   보이지 않게 mounts 에 넣지 않고, missing 에 **사유를 붙여** 남긴다(화면이 '미발견' 목록에 그대로 보여 준다).
+   */
+  const req = requestedMounts || [];
+  const errPaths = new Set();
+  for (const l of String(stderr || '').split(/\r?\n/)) {
+    const em = /^df:\s*['‘"]?(\/[^'’":]*)['’"]?:/.exec(l.trim());
+    if (em) errPaths.add(em[1]);
+  }
+  const live = req.filter((m) => !errPaths.has(m));
+  const paired = live.length === ordered.length ? new Map(live.map((m, i) => [m, ordered[i]])) : null;
+  const under = (fs, p) => fs === '/' ? p.startsWith('/') : p.startsWith(`${fs}/`);
+  const mounts = []; const missing = []; const notMountPoints = [];
+  for (const m of req) {
     const hit = byMount.get(m);
-    if (hit) mounts.push(hit);
-    else missing.push(m); // df 가 그 마운트를 못 찾음(미마운트/오타) — 서버 전체 실패로 만들지 않는다
+    if (hit) { mounts.push(hit); continue; }
+    const row = paired?.get(m);
+    if (row && under(row.mount, m)) {
+      notMountPoints.push({ path: m, mount: row.mount });
+      missing.push(`${m} (마운트 지점 아님 — ${row.mount} 파일시스템 안의 디렉터리)`);
+      continue;
+    }
+    missing.push(m); // df 가 그 마운트를 못 찾음(미마운트/오타) — 서버 전체 실패로 만들지 않는다
   }
-  return { mounts, missing };
+  return { mounts, missing, notMountPoints };
 }
 
 /**
@@ -94,7 +120,7 @@ export async function collectServer(server) {
       const out = await exec(`df -P -k -- ${mounts.join(' ')}`);
       return { out };
     });
-    const { mounts: rows, missing } = parseDfOutput(r.out.stdout, mounts);
+    const { mounts: rows, missing } = parseDfOutput(r.out.stdout, mounts, r.out.stderr);
     if (!rows.length) {
       const err = (r.out.stderr || '').trim().split('\n')[0] || 'df 출력에서 요청 마운트를 찾지 못했습니다.';
       return { ok: false, mounts: [], missing, error: err };

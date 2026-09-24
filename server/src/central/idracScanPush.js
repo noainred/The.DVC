@@ -9,6 +9,8 @@
  */
 
 import { resilientFetch } from '../util/resilientFetch.js';
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.604: 엣지 응답 크기 상한
+import { strOf } from '../util/coercionTrap.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { loadCollectors } from '../collector/registry.js';
 import { pullCollectorByAgent } from '../collector/puller.js';
@@ -71,8 +73,10 @@ export function pushIdracScan(agent, { ips, username, password, vcenterId = '', 
         setIdracScanResult(reqId, { error: `엣지 응답 HTTP ${r.status}${hint}`, httpStatus: r.status });
         return;
       }
-      const data = await r.json().catch(() => ({}));
-      if (!data || data.ok === false) { setIdracScanResult(reqId, { error: data?.reason || '엣지 스캔 실패(형식 오류)' }); return; }
+      // v2.604(감사 CEN2604-01 형제): 상한까지만 읽는다. 객체가 아니면 형식 오류, 사유는 글자만.
+      let data = null;
+      try { data = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES, '엣지 스캔 응답'); } catch (e) { setIdracScanResult(reqId, { error: `엣지 스캔 응답을 읽지 못했습니다: ${String(e?.message || e).slice(0, 200)}` }); return; }
+      if (!data || typeof data !== 'object' || Array.isArray(data) || data.ok === false) { setIdracScanResult(reqId, { error: strOf(data?.reason, 500) || '엣지 스캔 실패(형식 오류)' }); return; }
       setIdracScanResult(reqId, data); // { scanned, found, foundCount, registered, ... }
       // 엣지가 현지 등록한 서버를 다음 주기(기본 60초)까지 기다리지 않고 즉시 중앙 인벤토리에 반영.
       // 전력값은 엣지 로컬 폴러가 수집한 뒤라야 나오므로 30초 후 한 번 더 당겨 전력까지 앞당긴다.

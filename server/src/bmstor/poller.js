@@ -17,6 +17,8 @@ import { collectMany } from './collect.js';
 import { enqueueBmstorJob, setBmstorExpireHandler } from './jobs.js';
 import { findCollectorForAgent } from '../central/idracScanPush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.604: 엣지 응답 크기 상한
+import { strOf } from '../util/coercionTrap.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { createAuthGuard } from '../util/authGuard.js';
 import { isSshAuthError } from '../proxy/sshExec.js';
@@ -120,9 +122,11 @@ async function collectViaEdge(agent, servers) {
       body: JSON.stringify({ servers: servers.map((s) => ({ id: s.id, host: s.host, port: s.port, username: s.username, password: s.password, mounts: s.mounts })) }),
       timeoutMs: PUSH_TIMEOUT_MS, retries: 1,
     }));
-    const j = await r.json().catch(() => null);
-    if (!r.ok || !j?.ok || !Array.isArray(j.results)) return fail(`엣지 응답 오류(HTTP ${r.status})${j?.reason ? `: ${j.reason}` : ''}`);
-    const byId = new Map(j.results.map((x) => [x.id, x]));
+    // v2.604(감사 CEN2604-01 형제): 상한까지만 읽는다(해제 후 크기). 결과 원소는 객체만, 사유는 글자만.
+    let j = null;
+    try { j = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES, '엣지 bmstor 응답'); } catch { j = null; }
+    if (!r.ok || !j?.ok || !Array.isArray(j.results)) { const why = strOf(j?.reason, 300); return fail(`엣지 응답 오류(HTTP ${r.status})${why ? `: ${why}` : ''}`); }
+    const byId = new Map(j.results.filter((x) => x && typeof x === 'object' && !Array.isArray(x)).map((x) => [x.id, x]));
     return servers.map((s) => byId.get(s.id) || { id: s.id, ok: false, mounts: [], error: '엣지 응답에 결과 없음' });
   } catch (e) {
     return fail(`엣지 전송 실패: ${e.message}`);

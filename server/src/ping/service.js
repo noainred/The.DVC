@@ -11,7 +11,8 @@
  * baseline은 대상의 수동 baselineMs가 있으면 그 값, 없으면 최근 OK 샘플의 중앙값(자동).
  */
 
-import { getPingDb } from './db.js';
+import { getPingDb, HOUR_MS } from './db.js';
+import { snapMemo } from '../util/snapCache.js';
 import { listTargets, getTarget } from './store.js';
 import { config } from '../config.js';
 
@@ -39,6 +40,25 @@ function classify(rtt, ok, baseline) {
   if (rtt >= baseline * CRIT) return 'crit';
   if (rtt >= baseline * WARN) return 'warn';
   return 'ok';
+}
+
+/**
+ * v2.604(감사 DB2604-01 — 재현: 28대상 × 1분 주기 1년 = 1,470만 행에서 365일 개요가 동기 10.2초, 30일 0.9초).
+ * 버킷이 1시간 이상이면 **시간당 롤업**(ping/db.js samples_hourly)을 읽는다 — 그러려면 버킷이 1시간의 배수여야
+ * 하므로 올림한다(30일 = 2.4h → 3h, 365일 = 29.2h → 30h). 점 수가 조금 줄 뿐이고 실제 버킷은 응답의
+ * `bucketMs` 가 말한다(숫자를 화면에 박지 않는다). 롤업 시드가 끝나지 않았으면 원시로 떨어지고 `source` 가 그렇게 말한다.
+ */
+export function planBuckets(rangeMs, points) {
+  const raw = Math.max(1000, Math.round(rangeMs / points));
+  if (raw < HOUR_MS) return { bucketMs: raw, hourly: false };
+  return { bucketMs: Math.ceil(raw / HOUR_MS) * HOUR_MS, hourly: true };
+}
+function readHistory(db, id, since, plan, points) {
+  if (plan.hourly && db.historyHourly) {
+    const r = db.historyHourly(id, since, plan.bucketMs, points);
+    if (r) return { rows: r, source: 'hourly' };
+  }
+  return { rows: db.history(id, since, plan.bucketMs, points), source: 'raw' };
 }
 
 /** 대상의 현재 상태 요약(대시보드 상단 카드/목록용). sources 지정 시 해당 출처만. */
@@ -73,9 +93,10 @@ export async function seriesOf(id, { rangeMs = 6 * 3_600_000, points = 240 } = {
   const db = await getPingDb();
   const now = Date.now();
   const since = now - rangeMs;
-  // 버킷 크기: 범위/포인트, 최소 1초. 최근 points개 버킷만.
-  const bucketMs = Math.max(1000, Math.round(rangeMs / points));
-  const raw = db.history(t.id, since, bucketMs, points);
+  // 버킷 크기: 범위/포인트, 최소 1초(1시간 이상이면 1시간 배수로 올려 롤업을 읽는다). 최근 points개 버킷만.
+  const plan = planBuckets(rangeMs, points);
+  const { bucketMs } = plan;
+  const { rows: raw, source } = readHistory(db, t.id, since, plan, points);
   const { baseline, auto } = await baselineOf(db, t);
   const series = raw.map((b) => ({
     ts: b.ts, avg: b.avg, min: b.min, max: b.max, loss: b.loss, n: b.n,
@@ -83,7 +104,7 @@ export async function seriesOf(id, { rangeMs = 6 * 3_600_000, points = 240 } = {
   }));
   const meta = db.meta(t.id);
   // v2.575 BUG-16: rangeMs 를 함께 실어 화면이 '마지막 측정이 조회 기간 밖' 을 구분할 수 있게 한다.
-  return { ok: true, target: { id: t.id, name: t.name, host: t.host, port: t.port, kind: t.kind, enabled: t.enabled }, baseline, baselineAuto: auto, bucketMs, rangeMs, series, meta };
+  return { ok: true, target: { id: t.id, name: t.name, host: t.host, port: t.port, kind: t.kind, enabled: t.enabled }, baseline, baselineAuto: auto, bucketMs, rangeMs, series, source, meta };
 }
 
 /**
@@ -94,16 +115,31 @@ export async function seriesOf(id, { rangeMs = 6 * 3_600_000, points = 240 } = {
  * @param groupName (id)=>표시명 리졸버
  * @param groupOrder 그룹 표시 순서(id 배열; 없는 것은 뒤로)
  */
-export async function overviewGrouped(source, groupKey, { rangeMs = 86_400_000, points = 300, groupName = (x) => x, groupOrder = [] } = {}) {
+// 같은 (출처·범위·점 수) 개요는 짧게 공유한다 — 동시 요청·탭이 같은 집계를 반복하지 않게(single-flight + TTL).
+// 결과에는 주소가 들어 있으나 가림은 라우트가 요청자마다 따로 한다(캐시 값은 가리기 전 원본 — 라우트가 복사해 가린다).
+const OVERVIEW_TTL_MS = 10_000;
+export async function overviewGrouped(source, groupKey, opts = {}) {
+  const { rangeMs = 86_400_000, points = 300 } = opts;
+  return snapMemo('ping-overview', `${source}:${groupKey}:${rangeMs}:${points}`, OVERVIEW_TTL_MS, () => overviewGroupedNow(source, groupKey, opts));
+}
+
+async function overviewGroupedNow(source, groupKey, { rangeMs = 86_400_000, points = 300, groupName = (x) => x, groupOrder = [] } = {}) {
   const db = await getPingDb();
   const targets = listTargets(source);
   const now = Date.now();
   const since = now - rangeMs;
-  const bucketMs = Math.max(1000, Math.round(rangeMs / points));
+  const plan = planBuckets(rangeMs, points);
+  const { bucketMs } = plan;
   const groups = new Map();
+  const sources = new Set();
+  let first = true;
   for (const t of targets) {
+    // 대상 사이에 양보한다 — 대상 하나의 조회는 짧아도 28개를 한 턴에 몰면 그만큼 루프가 멈춘다.
+    if (!first) await new Promise((r) => setImmediate(r));
+    first = false;
     const { baseline } = await baselineOf(db, t);
-    const raw = db.history(t.id, since, bucketMs, points);
+    const { rows: raw, source: src } = readHistory(db, t.id, since, plan, points);
+    sources.add(src);
     const latest = db.latest(t.id);
     const series = raw.map((b) => ({ ts: b.ts, rtt: b.avg, loss: b.loss, status: b.loss >= 1 ? 'down' : classify(b.avg, b.avg != null, baseline) }));
     const item = {
@@ -123,5 +159,7 @@ export async function overviewGrouped(source, groupKey, { rangeMs = 86_400_000, 
       const rb = rank.has(b.id) ? rank.get(b.id) : Number.MAX_SAFE_INTEGER;
       return ra - rb || a.name.localeCompare(b.name, 'ko', { numeric: true });
     });
-  return { ok: true, bucketMs, rangeMs, groups: out, total: targets.length };
+  // source: 'hourly'(롤업) · 'raw'(원시) · 'mixed'(롤업 시드 중 일부만) — 대상이 없으면 계획대로.
+  const srcOut = sources.size > 1 ? 'mixed' : (sources.size ? [...sources][0] : (plan.hourly ? 'hourly' : 'raw'));
+  return { ok: true, bucketMs, rangeMs, source: srcOut, groups: out, total: targets.length };
 }

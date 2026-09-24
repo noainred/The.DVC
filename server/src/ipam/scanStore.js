@@ -17,6 +17,7 @@ import { getPolicies, isCoveredByAnyPolicy } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { ipToNum } from '../util/ipv4.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { agentKeyOf, agentValueOf } from '../util/agentKey.js'; // v2.604 RECENT2604-01
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 // v2.603(감사 CEN2603-02): **전체** 상한. MAX_MERGE 는 한 호출에만 걸려, 배정 범위가 없는 토큰이 보고를 반복하면 results·history 가
@@ -138,13 +139,18 @@ function saveAll(all) {
 /** 한 에이전트(기본=로컬)의 설정. */
 export function loadScanSettings(agent = LOCAL) {
   const all = loadAll();
-  return normalizeCfg(all.agents[agent] || {});
+  // v2.604(감사 RECENT2604-01 — 재현): 이름은 **대소문자 무시**로 찾는다(util/agentKey.js — v2.597 L2597-03 과 같은 규칙).
+  //   예전에는 글자 그대로라 설정이 'edge-seoul', 토큰이 'Edge-Seoul' 이면 배정(?agent=)은 200 assigned:true 인데 결과
+  //   (토큰 이름)는 범위 0 → v2.603 의 409 unassigned 로 **스캔은 돌고 결과만 전량 거부**됐다.
+  return normalizeCfg(agentValueOf(all.agents, agent) || {});
 }
 
 /** 에이전트별 설정 저장(부분 업데이트). */
 export function saveScanSettings(agent, partial = {}) {
   const all = loadAll();
-  const cur = normalizeCfg(all.agents[agent] || {});
+  // v2.604 RECENT2604-01: 대소문자만 다른 기존 키가 있으면 그 키를 갱신한다(같은 엣지의 설정이 두 벌로 갈라지지 않게).
+  const key = agentKeyOf(all.agents, agent) ?? agent;
+  const cur = normalizeCfg(all.agents[key] || {});
   const next = { ...cur };
   if (partial.enabled !== undefined) next.enabled = !!partial.enabled;
   if (partial.ranges !== undefined) next.ranges = (Array.isArray(partial.ranges) ? partial.ranges : String(partial.ranges).split(/[\n,]/)).map((s) => String(s).trim()).filter(Boolean);
@@ -155,7 +161,7 @@ export function saveScanSettings(agent, partial = {}) {
   if (partial.reverseDns !== undefined) next.reverseDns = !!partial.reverseDns;
   if (partial.ping !== undefined) next.ping = !!partial.ping; // v2.359 — 누락 시 저장이 조용히 무시됨
   if (partial.retentionDays !== undefined) next.retentionDays = clamp(partial.retentionDays, 0, 3650, DEFAULTS.retentionDays);
-  all.agents[agent] = next;
+  all.agents[key] = next;
   saveAll(all);
   return next;
 }

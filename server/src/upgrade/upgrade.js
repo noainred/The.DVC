@@ -284,19 +284,39 @@ function applyIfNewer(members, installDir, currentVersion, { allowSame = false }
  * Under systemd (INVOCATION_ID set) we simply exit and let the supervisor
  * restart the unit (Restart=always); otherwise we spawn a detached copy with
  * the same argv and exit (works under nohup). Does not return.
+ *
+ * v2.604(감사 TIM2604-01 — 재현): 예전에는 두 경로 모두 `process.exit(0)` 을 **직접** 불러 index.js 의 정상 종료
+ * 경로(gracefulExit)를 건너뛰었다 — RMA 롱폴 해제·진행 중 응답 유예·CSV 결과 로그 finish 대기가 전부 빠졌다
+ * (실측: 전송 중 /api/vms 응답이 있는 상태에서 재시작하면 '[shutdown]' 로그 없이 1초 안에 프로세스가 사라졌다).
+ * 이제 index.js 가 등록한 종료 함수(`setShutdownHandler`)로 **SIGTERM 과 같은 경로**를 탄다. systemd 가 아니면
+ * 새 프로세스는 그 종료가 포트를 닫은 **뒤**(process.exit 직전)에 띄운다 — 먼저 띄우면 옛 프로세스가 포트를 쥐고 있다.
+ * 등록된 종료 함수가 없으면(테스트·단독 import) 예전 동작 그대로다.
  */
-export function restartProcess() {
-  if (process.env.INVOCATION_ID || process.env.NOTIFY_SOCKET) {
-    setTimeout(() => process.exit(0), 100); // systemd will restart the unit
+let _shutdown = null;
+/** index.js 가 gracefulExit 를 넘긴다 — upgrade/ 가 index.js 를 import 하면 순환이 되므로 등록으로 받는다. */
+export function setShutdownHandler(fn) { _shutdown = typeof fn === 'function' ? fn : null; }
+
+export function restartProcess({ spawnFn = spawn, exitFn = (c) => process.exit(c) } = {}) {
+  const systemd = !!(process.env.INVOCATION_ID || process.env.NOTIFY_SOCKET);
+  const relaunch = () => {
+    const child = spawnFn(process.execPath, process.argv.slice(1), {
+      cwd: process.cwd(),
+      detached: true,
+      stdio: 'inherit',
+    });
+    child?.unref?.();
+  };
+  if (_shutdown) {
+    // systemd: 종료만 하면 Restart=always 가 다시 띄운다. 그 밖: 종료 직전에 새 프로세스를 띄운다.
+    _shutdown('upgrade-restart', systemd ? {} : { beforeExit: relaunch });
     return;
   }
-  const child = spawn(process.execPath, process.argv.slice(1), {
-    cwd: process.cwd(),
-    detached: true,
-    stdio: 'inherit',
-  });
-  child.unref();
-  setTimeout(() => process.exit(0), 100);
+  if (systemd) {
+    setTimeout(() => exitFn(0), 100); // systemd will restart the unit
+    return;
+  }
+  relaunch();
+  setTimeout(() => exitFn(0), 100);
 }
 
 /* ----------------------------- remote source ------------------------------ */

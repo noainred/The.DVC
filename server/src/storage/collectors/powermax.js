@@ -72,6 +72,10 @@ const GB = 1e9;  // Unisphere *_gb → 바이트(TB 와 같은 10진 가정)
 const FALLBACK_VERS = ['102', '101', '100', '92', '91', '90'];
 const MAX_VERS = 8;   // 후보가 길면 실패 시 404 왕복만 늘어난다
 const MAX_SRP = 8;    // 어레이당 SRP 조회 상한(보통 1개 — 폭주 방지)
+// v2.604(감사 COL-2604-03): 상세 조회 상한과 **로컬** 어레이 상한을 나눈다. 원격(SRDF 상대) 판정(local===false)은
+//   상세 응답에만 있으므로, 목록을 먼저 8개로 자르면 원격이 앞에 있는 목록에서 로컬 어레이가 조용히 빠졌다.
+const MAX_ARRAY_DETAIL = 32;   // 상세 GET 상한(원격 포함) — 초과분은 로컬 여부를 모른다(arraysUnchecked)
+const MAX_LOCAL_ARRAYS = 8;    // 수집할 로컬 어레이 상한 — 초과분은 합계에서 빠진다(arraysOverCap)
 
 /**
  * 버전 응답 → REST 경로에 쓸 버전 세그먼트 후보(순수 — 테스트가 고정한다).
@@ -305,6 +309,7 @@ export function normalizePowermax(device, raw) {
     const add = (k, v) => { if (v != null) sum[k] = (sum[k] ?? 0) + v; };
     let provTotalTb = 0; let provUsedTb = 0; let provSeen = false;
     const srpList = [];
+    const srpIncomplete = [];   // v2.604(COL-2604-02): SRP 일부를 못 읽은 어레이 — [{array, listed, parsed, failed, unrecognized, omitted}]
 
     for (const a of arrays.slice(0, 32)) {
       const c = raw.caps?.[a.symmetrixId];
@@ -339,8 +344,22 @@ export function normalizePowermax(device, raw) {
       }
       // ★ 문서화되지 않은 `physicalCapacity` 로 읽었는데 SRP 가 실제 기록량을 준다면 **SRP 를 쓴다**.
       //   (10.x 가 정확히 이 경우다 — 어레이 레벨에 usable_* 가 없다.)
-      if (srpSeen && srpTotal > 0 && (!c || c.documented === false)) {
+      // v2.604(감사 COL-2604-02): SRP 목록은 받았는데 **일부 SRP 만** 읽었으면 그 합은 어레이 전체가 아니다.
+      //   구버전 엣지 push 는 srpState 가 없다 → 예전 동작(완전하다고 본다 — 판정 근거가 없다).
+      const st = raw.srpState?.[a.symmetrixId];
+      const srpPartial = !!(st && st.listed > 0 && st.parsed < st.listed);
+      if (srpPartial) srpIncomplete.push({ array: a.symmetrixId, listed: st.listed, parsed: st.parsed, failed: st.failed || 0, unrecognized: st.unrecognized || 0, omitted: st.omitted || 0 });
+      if (srpSeen && srpTotal > 0 && (!c || c.documented === false) && !srpPartial) {
         t = srpTotal; u = srpUsed; basis = mySrps[0]?.basis ? `srp:${mySrps[0].basis}` : 'srp';
+      } else if (srpPartial && (!c || c.documented === false)) {
+        // 부분 SRP 합을 어레이 용량이라 말하지 않는다. 어레이 레벨 값(c)이 있으면 그것을 보여 주되 **측정 기준이 다른**
+        //   값이므로(평소엔 SRP) 그 주기는 증가량에 적재하지 않게 poolsUnreadable 로 센다(v2.546 partial-pools).
+        //   c 도 없으면 이 어레이는 합계에서 빠진다(아래 unreadable 경로).
+        if (c) {
+          if (c.suspect) suspect = true;
+          if (c.documented === false) undocumented = true;
+          unreadable += 1;
+        } else { t = null; }
       } else if (c) {
         if (c.suspect) suspect = true;
         if (c.documented === false) undocumented = true;
@@ -358,7 +377,14 @@ export function normalizePowermax(device, raw) {
     // v2.600(COL-2600-01): 목록에는 있었는데 상세 조회(②)에 실패해 raw.arrays 에 들어오지 못한 어레이도 같은 수에 넣는다.
     const failedIds = Array.isArray(raw.arraysFailed) ? raw.arraysFailed : [];
     unreadable += failedIds.length;
+    // v2.604(COL-2604-03): 상한으로 조회하지 않은 어레이도 합계에서 빠졌을 수 있다 — 같은 수에 더하고 따로 밝힌다.
+    const overCap = Number(raw.arraysOverCap) || 0;
+    const unchecked = Number(raw.arraysUnchecked) || 0;
+    unreadable += overCap + unchecked;
+    if (overCap) snap.extra.arraysOverCap = overCap;
+    if (unchecked) snap.extra.arraysUnchecked = unchecked;
     if (unreadable) snap.extra.poolsUnreadable = unreadable;
+    if (srpIncomplete.length) snap.extra.srpIncomplete = srpIncomplete;
 
     snap.pools = pools;
     if (total > 0) {
@@ -386,6 +412,15 @@ export function normalizePowermax(device, raw) {
         : undocumented
           ? '전체·사용 용량을 Dell 스펙에 설명이 없는 ‘physicalCapacity’ 필드로 읽었습니다 — 값은 정상 범위로 보이나 의미가 문서로 확인되지 않았습니다.'
           : '사용 용량은 **데이터 감축 적용 후 실제로 기록된 양**입니다(Dell 스펙 ‘usable_used_tb’). 구독(호스트에 약속한 씬 크기)·할당은 뜻이 달라 따로 표시합니다.';
+      // v2.604(COL-2604-02·03): 합계가 전체가 아닐 수 있는 사유를 같은 문구에 덧붙인다(증가량 적재는 poolsUnreadable 이 막는다).
+      const tails = [];
+      if (srpIncomplete.length) {
+        const miss = srpIncomplete.reduce((a2, x) => a2 + (x.listed - x.parsed), 0);
+        tails.push(`SRP ${miss}개를 읽지 못해 어레이 ${srpIncomplete.length}대는 SRP 합이 아니라 어레이 레벨 값으로 표시했습니다(이 주기는 증가량에 적재하지 않습니다)`);
+      }
+      if (overCap) tails.push(`로컬 어레이가 ${MAX_LOCAL_ARRAYS}대를 넘어 ${overCap}대는 조회하지 않았습니다(합계에서 빠졌습니다)`);
+      if (unchecked) tails.push(`어레이 목록이 길어 ${unchecked}개는 로컬 여부를 확인하지 못했습니다(합계에서 빠졌을 수 있습니다)`);
+      if (tails.length) snap.extra.capacityBasisNote += ` ${tails.join(' · ')}.`;
     }
   }
   if (raw.alertCount != null) { snap.alerts.unresolved = Number(raw.alertCount) || 0; snap.sections.alerts = 'ok'; }
@@ -417,7 +452,7 @@ function alertsUnknownIfFailed(out) {
 
 export async function collect(device, { signal = null } = {}) {
   const get = makeGetter(device, { port: Number(process.env.STORAGE_UNISPHERE_PORT) || 8443, signal });
-  const raw = { caps: {}, srps: {} };
+  const raw = { caps: {}, srps: {}, srpState: {} };
   const snap = emptySnapshot(device); // 섹션 오류 임시 기록용
   try {
     // ① Unisphere 버전(무버전 경로 — 인증 확인 겸용, 401 이면 즉시 전체 중단).
@@ -435,18 +470,31 @@ export async function collect(device, { signal = null } = {}) {
     } catch (e) { snap.sections.config = `오류: ${e.message}`; if (/401/.test(e.message)) throw e; }
     raw.arrays = [];
     raw.arraysFailed = [];
-    for (const id of ids.slice(0, 8)) {
+    // v2.604(COL-2604-03): 상세를 먼저 읽어 원격을 거른 뒤 **로컬만** 상한으로 자른다(원격이 상한을 먹지 않게).
+    //   상세 상한을 넘은 id 는 로컬인지 모른다 → arraysUnchecked 로 세고, 로컬인데 상한을 넘은 것은 arraysOverCap.
+    //   둘 다 합계에서 빠질 수 있으므로 정규화가 poolsUnreadable 에 더해 capacity_daily 가 부분 합을 적재하지 않게 한다.
+    raw.arraysUnchecked = Math.max(0, ids.length - MAX_ARRAY_DETAIL);
+    raw.arraysOverCap = 0;
+    raw.arraysRemote = 0;
+    for (const id of ids.slice(0, MAX_ARRAY_DETAIL)) {
       try {
         const r = await tryPaths(get, pathsFor(vers, `/system/symmetrix/${encodeURIComponent(id)}`));
         raw.usedPaths.array = r.path;
         const d = r.data;
         const a = Array.isArray(d?.symmetrix) ? d.symmetrix[0] : d?.symmetrix || d;
-        if (a && a.local !== false) raw.arrays.push({ symmetrixId: a.symmetrixId || id, model: a.model, ucode: a.ucode, local: a.local });
+        if (a && a.local === false) { raw.arraysRemote += 1; continue; }
+        if (a && raw.arrays.length >= MAX_LOCAL_ARRAYS) { raw.arraysOverCap += 1; continue; }
+        if (a) raw.arrays.push({ symmetrixId: a.symmetrixId || id, model: a.model, ucode: a.ucode, local: a.local });
       } catch (e) {
         if (/401/.test(e.message)) throw e;
         snap.sections.config = `일부 어레이 오류: ${e.message}`;
         raw.arraysFailed.push(id);   // v2.600(COL-2600-01): 합계에서 빠진 어레이를 세도록 남긴다
       }
+    }
+    // v2.604(COL-2604-03): 목록은 있었는데 로컬 어레이가 하나도 남지 않았으면 **왜** 인지 말한다(예전엔 사유 없이 실패).
+    if (ids.length && !raw.arrays.length && !raw.arraysFailed.length) {
+      snap.sections.config = `오류: 로컬 어레이를 찾지 못했습니다(목록 ${ids.length}개 중 원격(SRDF) ${raw.arraysRemote}개`
+        + (raw.arraysUnchecked ? ` · 상한으로 미확인 ${raw.arraysUnchecked}개` : '') + ')';
     }
     // ③ 어레이별 용량(sloprovisioning). 실패 어레이는 caps 에서 빠져 pools 에도 안 실린다.
     for (const a of raw.arrays) {
@@ -470,13 +518,20 @@ export async function collect(device, { signal = null } = {}) {
         const r = await tryPaths(get, pathsFor(vers, base));
         raw.usedPaths.srpList = r.path;
         const srpIds = Array.isArray(r.data?.srpId) ? r.data.srpId : [];
+        // v2.604(감사 COL-2604-02): SRP 마다 따로 받고 **몇 개를 못 읽었는지** 남긴다. 예전에는 한 try 안이라
+        //   둘째 SRP 가 실패하면 첫 SRP 합만 남아 그것이 어레이 전체 용량으로 쓰였다(오류 없이 틀린 값).
+        const st = { listed: srpIds.length, parsed: 0, failed: 0, unrecognized: 0, omitted: Math.max(0, srpIds.length - MAX_SRP) };
+        raw.srpState[a.symmetrixId] = st;
         for (const sid of srpIds.slice(0, MAX_SRP)) {
-          const r2 = await tryPaths(get, pathsFor(vers, `${base}/${encodeURIComponent(sid)}`));
-          raw.usedPaths.srp = r2.path;
-          const d2 = r2.data;
-          const s = Array.isArray(d2?.srp) ? d2.srp[0] : d2?.srp || d2;
-          const parsed = powermaxSrp(s);
-          if (parsed) (raw.srps[a.symmetrixId] ||= []).push({ ...parsed, id: parsed.id || String(sid) });
+          try {
+            const r2 = await tryPaths(get, pathsFor(vers, `${base}/${encodeURIComponent(sid)}`));
+            raw.usedPaths.srp = r2.path;
+            const d2 = r2.data;
+            const s = Array.isArray(d2?.srp) ? d2.srp[0] : d2?.srp || d2;
+            const parsed = powermaxSrp(s);
+            if (parsed) { st.parsed += 1; (raw.srps[a.symmetrixId] ||= []).push({ ...parsed, id: parsed.id || String(sid) }); }
+            else st.unrecognized += 1;
+          } catch (e2) { if (/401/.test(e2.message)) throw e2; st.failed += 1; raw.srpError = e2.message; }
         }
       } catch (e) { if (/401/.test(e.message)) throw e; raw.srpError = e.message; }
     }

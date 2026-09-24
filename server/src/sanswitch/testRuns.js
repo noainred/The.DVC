@@ -15,6 +15,8 @@
 import crypto from 'node:crypto';
 import { testDeviceConnection } from './poller.js';
 import { classifyFailure } from './testDiag.js';
+import { strOf } from '../util/coercionTrap.js'; // v2.604 CEN2604-05
+import { numOrNull } from '../util/numOrNull.js';
 
 const TTL_MS = 30 * 60_000;
 const MAX_ACTIVE = 10;
@@ -97,9 +99,34 @@ function sanitizeResult(res = {}, ranOn = '') {
   return {
     ok: r.ok === true, ms: Number(r.ms) || 0, reason: r.reason ? String(r.reason).slice(0, 2000) : undefined,
     phase: String(r.phase || '').slice(0, 40), hint: r.hint ? String(r.hint).slice(0, 2000) : undefined,
-    snap: r.snap && typeof r.snap === 'object' ? r.snap : undefined,
+    snap: sanitizeTestSnap(r.snap), // v2.604 CEN2604-05: 원문 그대로 담지 않는다(아래)
     cliRaw: Array.isArray(r.cliRaw) ? r.cliRaw.slice(0, 40).map((x) => ({ key: String(x?.key || ''), cmd: String(x?.cmd || '').slice(0, 300), ok: !!x?.ok, sample: String(x?.sample || '').slice(0, 4000) })) : [],
     ranOn, verbose: !!r.verbose, trace,
+  };
+}
+
+/**
+ * 테스트 요약 스냅샷 정제(v2.604 감사 CEN2604-05). 모양은 `poller.js summary()` 가 정한다 — 그 필드만, 그 타입만.
+ * 예전에는 객체면 원문 그대로 담아 `{name:{evil:1}}` 하나로 모달이 React #31, ports 가 없으면 TypeError 로 죽었다.
+ * 글자는 strOf(객체면 ''), 수치는 numOrNull(못 읽으면 null — 0 으로 두지 않는다), sections 는 글자 값 맵(상한 64).
+ * ports 는 **항상 객체**로 둔다(화면이 `snap.ports.online` 을 가드 없이 읽는다).
+ */
+export function sanitizeTestSnap(snap) {
+  if (!snap || typeof snap !== 'object' || Array.isArray(snap)) return undefined;
+  const p = snap.ports && typeof snap.ports === 'object' && !Array.isArray(snap.ports) ? snap.ports : {};
+  const sections = {};
+  if (snap.sections && typeof snap.sections === 'object' && !Array.isArray(snap.sections)) {
+    for (const k of Object.keys(snap.sections).slice(0, 64)) {
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+      const v = strOf(snap.sections[k], 40);
+      if (v) sections[k.slice(0, 64)] = v;
+    }
+  }
+  return {
+    name: strOf(snap.name, 256), model: strOf(snap.model, 128), fabricOs: strOf(snap.fabricOs, 64), serial: strOf(snap.serial, 128),
+    domainId: numOrNull(snap.domainId), switchState: strOf(snap.switchState, 64),
+    ports: { total: numOrNull(p.total), licensed: numOrNull(p.licensed), online: numOrNull(p.online), free: numOrNull(p.free), usedPct: numOrNull(p.usedPct) },
+    sections,
   };
 }
 

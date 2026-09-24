@@ -19,6 +19,13 @@ import { withSsh } from '../../proxy/sshExec.js';
 import { sshFailureSnapshot } from './cliSsh.js';
 import { emptySnapshot } from '../types.js';
 
+const fmtStep = (b) => {
+  for (const [u, k] of [['PiB', 5], ['TiB', 4], ['GiB', 3], ['MiB', 2], ['KiB', 1]]) {
+    const v = b / 1024 ** k; if (v >= 1) return `${Math.round(v * 10) / 10} ${u}`;
+  }
+  return `${b} B`;
+};
+
 /* ── 단위 파서 ──────────────────────────────────────────────────────────── */
 // 저장 용량(2.5P·55.1T·373G·0): isi 표기는 2진 기반(TiB 등) — 1024 거듭제곱.
 const SIZE_UNIT = { k: 1024, K: 1024, M: 1024 ** 2, G: 1024 ** 3, T: 1024 ** 4, P: 1024 ** 5 };
@@ -34,6 +41,55 @@ export function parseSizeOrNull(s) {
   const n = Math.round(Number(m[1]) * (m[2] ? SIZE_UNIT[m[2]] : 1));
   return Number.isFinite(n) ? n : null;
 }
+/**
+ * v2.604(감사 COL-2604-01): 표기 한 칸의 크기(바이트) — '5.0P' 는 소수 1자리 P 라 0.1 PiB(= 102.4 TiB) 단위로만 움직인다.
+ * isi status 는 사람용 반올림 표기라 이것이 곧 그 값의 해상도다. 읽지 못하면 null.
+ */
+export function sizeStep(s) {
+  const m = /^(\d+)(?:\.(\d+))?\s*([kKMGTP])?$/.exec(String(s ?? '').trim());
+  if (!m) return null;
+  const dec = m[2] ? m[2].length : 0;
+  return Math.pow(10, -dec) * (m[3] ? SIZE_UNIT[m[3]] : 1);
+}
+
+/**
+ * v2.604(감사 COL-2604-01): `isi statistics query current --keys ifs.bytes.* --format json` 출력 → 정확한 바이트.
+ * REST 경로(isilon.js)가 쓰는 것과 **같은 키**다. ⚠ 정직 기록 — 이 CLI 의 JSON 출력을 실장비에서 본 적이 없다.
+ *   그래서 모양을 셋 다 받는다: ① REST 와 같은 [{key,value}] / {stats:[…]} ② 행 객체([{node:'cluster','ifs.bytes.total':N}])
+ *   ③ 그 밖은 못 읽음(null). 값은 **음이 아닌 정수 바이트**일 때만 쓴다 — 단위가 붙은 사람용 표기('5.0P')가 오면
+ *   정밀도가 isi status 와 같아 이득이 없으므로 받지 않는다.
+ * @returns {{total:number, used:number|null, ssdTotal:number|null, ssdUsed:number|null}|null}
+ */
+export function parseIsiStatsBytes(text) {
+  let j;
+  try { j = JSON.parse(String(text || '').trim()); } catch { return null; }
+  const vals = {};
+  const take = (k, v) => {
+    const n = typeof v === 'number' ? v : (typeof v === 'string' && /^\d+$/.test(v.trim()) ? Number(v) : NaN);
+    if (Number.isSafeInteger(n) && n >= 0 && !(k in vals)) vals[k] = n;
+  };
+  const list = Array.isArray(j) ? j : Array.isArray(j?.stats) ? j.stats : null;
+  if (!list) return null;
+  const rows = list.filter((x) => x && typeof x === 'object');
+  if (rows.some((x) => typeof x.key === 'string')) {
+    for (const x of rows) if (typeof x.key === 'string' && (x.devid == null || Number(x.devid) === 0)) take(x.key, x.value);
+  } else {
+    // 행 객체 — 클러스터 합계 행을 쓴다(노드별 행만 있으면 판단하지 않는다).
+    const row = rows.find((x) => String(x.node ?? x.Node ?? '').toLowerCase() === 'cluster') || (rows.length === 1 ? rows[0] : null);
+    if (!row) return null;
+    for (const [k, v] of Object.entries(row)) if (/^ifs\./.test(k)) take(k, v);
+  }
+  const total = vals['ifs.bytes.total'];
+  if (!(total > 0)) return null;
+  return {
+    total,
+    used: vals['ifs.bytes.used'] ?? null,
+    ssdTotal: vals['ifs.ssd.bytes.total'] ?? null,
+    ssdUsed: vals['ifs.ssd.bytes.used'] ?? null,
+  };
+}
+export const ISI_STATS_CMD = 'isi statistics query current --keys ifs.bytes.total,ifs.bytes.used,ifs.ssd.bytes.total,ifs.ssd.bytes.used --format json';
+
 // 네트워크 처리량(260k·2.2M bps): 10진 접두(관례) — 1000 거듭제곱.
 const BPS_UNIT = { k: 1e3, K: 1e3, M: 1e6, G: 1e9 };
 export function parseBps(s) {
@@ -87,7 +143,8 @@ export function parseIsiStatus(text) {
   const [hddPct, ssdPct] = pct('Used');
   if (size) {
     // v2.595(감사 C2595-01): Used 칸을 못 읽으면 사용량은 null(예전 parseSize(us||'0') 은 0 — '비었다' 는 거짓).
-    const mk = (sz, us, p) => { const t = parseSize(sz); return t > 0 ? { sizeBytes: t, usedBytes: parseSizeOrNull(us), usedPct: p } : null; };
+    // v2.604: 표기 해상도(sizeStep/usedStep)도 싣는다 — 정규화가 '이 값은 반올림 표기' 임을 밝히는 근거.
+    const mk = (sz, us, p) => { const t = parseSize(sz); return t > 0 ? { sizeBytes: t, usedBytes: parseSizeOrNull(us), usedPct: p, sizeStep: sizeStep(sz), usedStep: sizeStep(us) } : null; };
     out.hdd = mk(size[0], used?.[0], hddPct);
     out.ssd = mk(size[1], used?.[1], ssdPct);
   }
@@ -162,7 +219,7 @@ export function parseIsiStatus(text) {
 }
 
 /** 파싱 결과 → NormalizedSnapshot(공통 스키마 — API 모드와 동일 화면에 그대로 얹힌다). */
-export function normalizeIsiStatus(device, parsed, { version = '', users = null } = {}) {
+export function normalizeIsiStatus(device, parsed, { version = '', users = null, exact = null } = {}) {
   const snap = emptySnapshot(device);
   if (parsed.name) { snap.name = parsed.name; snap.sections.config = 'ok'; }
   snap.version = version;
@@ -175,6 +232,37 @@ export function normalizeIsiStatus(device, parsed, { version = '', users = null 
     const u = present.some((p) => p.usedBytes == null) ? null : present.reduce((a, p) => a + p.usedBytes, 0);
     snap.capacity = { totalBytes: t, usedBytes: u, pct: t && u != null ? Math.round((u / t) * 1000) / 10 : null };
     snap.sections.capacity = 'ok';
+  }
+  /*
+   * v2.604(감사 COL-2604-01): isi status 의 Size/Used 는 **사람용 반올림 표기**('5.0P')다. 그 값으로 바이트를 만들면
+   *   증가량이 0.1 PiB(= 102.4 TiB) 계단으로만 움직이고, 사용률도 장비가 찍은 %와 어긋난다(예: 1.2P/2.2P = 54.5% vs 장비 56%).
+   *   ① 같은 세션에서 `isi statistics` 로 정확한 바이트를 읽었으면 그것을 쓴다(REST 경로와 같은 키).
+   *   ② 못 읽었으면 값은 그대로 두되 **반올림 표기라는 사실과 해상도**를 밝히고(capacityApprox·capacityBasisNote),
+   *      풀이 하나뿐이면 사용률은 장비가 보고한 %를 쓴다(1% 해상도가 0.1P 해상도보다 곱다).
+   */
+  if (exact && exact.total > 0) {
+    const eu = exact.used;
+    snap.capacity = { totalBytes: exact.total, usedBytes: eu ?? null, pct: eu != null ? Math.round((eu / exact.total) * 1000) / 10 : null };
+    snap.sections.capacity = 'ok';
+    // 매체 분리 — REST(isilon.js)와 같은 규칙: SSD 카운터가 있으면 HDD = 전체 − SSD. 없으면 isi status 의 매체 값을 둔다.
+    if (exact.ssdTotal != null) {
+      const sT = exact.ssdTotal; const sU = exact.ssdUsed;
+      const hT = Math.max(0, exact.total - sT);
+      const hU = eu != null && (sU != null || !(sT > 0)) ? Math.max(0, eu - (sU || 0)) : null;
+      const pctOf = (a, b) => (b > 0 && a != null ? Math.round((a / b) * 1000) / 10 : null);
+      snap.media = { hdd: hT > 0 ? { totalBytes: hT, usedBytes: hU, pct: pctOf(hU, hT) } : null, ssd: sT > 0 ? { totalBytes: sT, usedBytes: sU ?? null, pct: pctOf(sU, sT) } : null };
+    }
+    snap.extra.capacityBasis = 'isi statistics (ifs.bytes.*)';
+  } else if (snap.sections.capacity === 'ok') {
+    const present = [parsed.hdd, parsed.ssd].filter(Boolean);
+    const steps = present.flatMap((p) => [p.sizeStep, p.usedStep]).filter((x) => x != null);
+    const step = steps.length ? Math.max(...steps) : null;
+    snap.extra.capacityBasis = 'isi status (반올림 표기)';
+    snap.extra.capacityApprox = { source: 'isi status', resolutionBytes: step };
+    if (present.length === 1 && present[0].usedPct != null && snap.capacity.usedBytes != null) snap.capacity.pct = present[0].usedPct;
+    const res = step == null ? '' : ` — 한 칸이 약 ${fmtStep(step)} 라 증가량이 그 단위 계단으로만 움직입니다`;
+    snap.extra.capacityBasisNote = `용량은 ‘isi status’ 의 **반올림 표기**로 읽었습니다${res}. 정확한 바이트(‘isi statistics’ ifs.bytes.*)를 이 세션에서 읽지 못했습니다.`
+      + (present.length === 1 && present[0].usedPct != null ? ' 사용률은 장비가 보고한 %입니다.' : '');
   }
   if (parsed.nodes.length) {
     snap.nodes = {
@@ -205,6 +293,7 @@ export function normalizeIsiStatus(device, parsed, { version = '', users = null 
   }
   // isi status 에 없는 부가 정보(사용자 화면의 상단 블록) — extra 로 그대로 노출.
   snap.extra = {
+    ...snap.extra,   // v2.604: 위에서 채운 용량 근거(capacityBasis·capacityApprox·capacityBasisNote)를 덮지 않는다
     collectMethod: 'ssh', clusterHealth: parsed.health,
     dataReduction: parsed.dataReduction, storageEfficiency: parsed.storageEfficiency,
     vhsBytes: parsed.vhsBytes, l3TotalBytes: parsed.l3TotalBytes,
@@ -226,14 +315,16 @@ export async function collectViaSsh(device) {
         // 부가 명령은 각각 best-effort: 버전·계정이 없어도 status 파싱 결과는 살린다.
         const ver = await sh.exec('isi version').catch(() => ({ stdout: '' }));
         const usersRaw = await sh.exec('isi auth users list --format json').catch(() => ({ stdout: '' }));
-        return { status: status.stdout || '', ver: ver.stdout || '', usersRaw: usersRaw.stdout || '' };
+        // v2.604(COL-2604-01): 정확한 용량 바이트(best-effort) — 못 읽으면 isi status 반올림 값을 쓰고 그 사실을 밝힌다.
+        const stats = await sh.exec(ISI_STATS_CMD, 20_000).catch(() => ({ stdout: '' }));
+        return { status: status.stdout || '', ver: ver.stdout || '', usersRaw: usersRaw.stdout || '', stats: stats.stdout || '' };
       },
     );
     const parsed = parseIsiStatus(r.status);
     const version = /OneFS\s*v?([\d.]+)/i.exec(r.ver)?.[1] || '';
     let users = null;
     try { const j = JSON.parse(r.usersRaw); users = Array.isArray(j) ? j : null; } catch { /* 계정 섹션만 생략 */ }
-    const snap = normalizeIsiStatus(device, parsed, { version, users });
+    const snap = normalizeIsiStatus(device, parsed, { version, users, exact: parseIsiStatsBytes(r.stats) });
     if (!users) snap.sections.accounts = r.usersRaw ? '오류: users JSON 파싱 실패' : '오류: isi auth users list 실행 실패';
     return snap;
   } catch (e) {

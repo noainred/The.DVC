@@ -29,6 +29,7 @@ import { endpointAllowed, project, projectAll, ENDPOINTS, GROUPS } from '../publ
 import { buildOpenApi } from '../publicapi/openapi.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { msOrNull } from '../publicapi/time.js';
+import { isAdminReq, addressMatcher, extendMatcher, maskedNameLabel } from '../auth/addressMask.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 export const API_VERSION = 'v1';
@@ -82,6 +83,25 @@ function envelope(res, apiPath, data, meta = {}) {
     data,
     meta,
   });
+}
+
+/**
+ * v2.604 AUTHZ-2604-01: 스토리지 장비 이름이 관리 주소(IP·호스트명)이면 가린다 — 내부 비-admin 라우트
+ * (`/tools/storage` 의 `maskDeviceAddress`, v2.599 AUTHZ-2599-03)와 같은 기준. 키의 합성 사용자는
+ * `role:'viewer'`(publicapi/auth.js)라 비-admin 규칙을 따른다. 이름 대신 `maskedNameLabel`(타입 + 내부 id)이고
+ * 키 집합은 그대로다(투사 계약 — 필드를 지우지 않는다). 등록부를 못 읽으면 IP·IPv6 리터럴 판정만 한다.
+ * @returns {Promise<(row:{deviceId?:string,type?:string,name?:string}) => string|null>} 가린 이름(가릴 필요 없으면 null)
+ */
+async function storageNameMasker() {
+  let devs = [];
+  try { devs = (await import('../storage/registry.js')).listDevices() || []; } catch { devs = []; }
+  const hostById = new Map(devs.filter((d) => d && d.id).map((d) => [String(d.id), typeof d.host === 'string' ? d.host : '']));
+  const base = addressMatcher(devs.map((d) => d?.host).filter((h) => typeof h === 'string' && h));
+  return (row) => {
+    const own = hostById.get(String(row?.deviceId || ''));
+    const match = own ? extendMatcher(base, [own]) : base;
+    return match(row?.name) ? maskedNameLabel({ type: row?.type, deviceId: row?.deviceId }) : null;
+  };
 }
 
 /** 상한 적용 + 잘린 사실 표기. */
@@ -259,7 +279,7 @@ v1.get('/capacity/datastores', guarded('/capacity/datastores', ({ res, snap, inS
   return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta });
 }));
 
-v1.get('/capacity/storage', guarded('/capacity/storage', async ({ res, fields, apiPath }) => {
+v1.get('/capacity/storage', guarded('/capacity/storage', async ({ req, res, fields, apiPath }) => {
   /*
    * ⚠ 목록은 **로컬 + 엣지 push 분** 둘을 합쳐야 한다(`routes/api/storageMon.js:48` 과 같은 조합).
    *   로컬만 쓰면 위임 법인의 장비가 통째로 빠져 '장비가 없다' 는 거짓이 된다.
@@ -271,10 +291,16 @@ v1.get('/capacity/storage', guarded('/capacity/storage', async ({ res, fields, a
   // v2.599(EDGE2599-02): 같은 deviceId 가 로컬·엣지(또는 재배정 직후 두 엣지)에 함께 있으면 **최신 collectedAt 하나**만 —
   //   내부 /tools/storage 와 같은 판정 하나(`storage/latestSnapshots.js`). 예전에는 그대로 이어 붙여 같은 장비가 두 행이었다.
   const { latestByDevice } = await import('../storage/latestSnapshots.js');
+  const hide = !isAdminReq(req);
+  const maskName = hide ? await storageNameMasker() : () => null;
+  let namesHidden = 0;
   const rows = latestByDevice([localSnapshots() || [], edgeStorageSnapshots() || []]).map((s2) => {
     const total = numOrNull(s2.capacity?.totalBytes); const used = numOrNull(s2.capacity?.usedBytes);
+    const name0 = s2.name || s2.deviceId;
+    const masked = maskName({ deviceId: s2.deviceId, type: s2.type, name: name0 });
+    if (masked) namesHidden += 1;
     return {
-      deviceId: s2.deviceId, name: s2.name || s2.deviceId, type: s2.type || null,
+      deviceId: s2.deviceId, name: masked || name0, type: s2.type || null,
       totalBytes: total, usedBytes: used,
       // ⚠ 0 으로 나누지 않고, 사용량이 미상이면 퍼센트도 null 이다(지어내지 않는다).
       usedPct: total != null && total > 0 && used != null ? Math.round((used / total) * 1000) / 10 : null,
@@ -287,13 +313,15 @@ v1.get('/capacity/storage', guarded('/capacity/storage', async ({ res, fields, a
   const unknown = c.rows.filter((r) => r.usedUnknown).length;
   return envelope(res, apiPath, projectAll(c.rows, fields), {
     ...c.meta, usedUnknownCount: unknown,
+    // v2.604 AUTHZ-2604-01: 관리 주소와 같은 이름을 가린 개수 — 조용히 바꾸지 않는다.
+    ...(hide ? { namesHidden } : {}),
     note: unknown
       ? `사용량을 읽지 못한 장비 ${unknown}대는 usedBytes 가 null 입니다 — 0 으로 채우지 않았습니다.`
       : '사용량을 읽지 못한 장비는 usedBytes 가 null 로 나갑니다(0 으로 채우지 않습니다).',
   });
 }));
 
-v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ res, fields, apiPath }) => {
+v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ req, res, fields, apiPath }) => {
   const db = await import('../storage/db.js').catch(() => null);
   const g = await import('../storage/growth.js').catch(() => null);
   if (!db || !g) return res.status(503).json({ ok: false, error: 'unavailable', code: 'unavailable', reason: '증가량 모듈을 불러올 수 없습니다.' });
@@ -305,17 +333,34 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
    */
   const { periods, dropped } = g.normalizePeriods([1, 7, 30]);
   const rows = await db.dailySeries(null, 0);
-  const m = g.growthMatrix(rows, { periods });
+  // v2.604(COL-2604-01 후속): 내부 화면과 같은 기준 — 반올림 표기 용량 장비의 해상도를 meta 로 넘긴다.
+  const meta = new Map();
+  const [st, se] = await Promise.all([import('../storage/store.js').catch(() => null), import('../central/storageEdge.js').catch(() => null)]);
+  for (const s2 of [...(st?.localSnapshots?.() || []), ...(se?.edgeStorageSnapshots?.() || [])]) {
+    const id = s2?.deviceId || s2?.id;
+    if (id && s2.extra?.capacityApprox && typeof s2.extra.capacityApprox === 'object') meta.set(id, { capacityApprox: s2.extra.capacityApprox });
+  }
+  const m = g.growthMatrix(rows, { periods, meta });
+  // v2.604 AUTHZ-2604-01: 같은 장비 이름이 이 경로에도 실린다(형제 경로가 우회로가 되지 않게 — v2.550.3 규약).
+  const hide = !isAdminReq(req);
+  const maskName = hide ? await storageNameMasker() : () => null;
+  let namesHidden = 0;
   const out = (m.devices || []).map((d) => ({
-    deviceId: d.deviceId, name: d.name, usedBytes: d.usedBytes, totalBytes: d.totalBytes,
+    deviceId: d.deviceId,
+    name: (() => { const mk = maskName({ deviceId: d.deviceId, type: d.type, name: d.name }); if (mk) namesHidden += 1; return mk || d.name; })(),
+    usedBytes: d.usedBytes, totalBytes: d.totalBytes,
     observedDays: d.observedDays,
     // 기간별 증가 바이트만 — 내부 growth 객체를 그대로 싣지 않는다(내부 필드가 새지 않게).
     growth: Object.fromEntries(periods.map((p) => [p.key, d.growth?.[p.key]?.bytes ?? null])),
     unknownUsed: d.usedBytes == null,
+    // v2.604: 반올림 표기 용량이면 그 해상도(바이트) — 이보다 작은 증가는 0 이 아니라 '보이지 않는 것'. 정확하면 null.
+    resolutionBytes: d.capacityApprox?.resolutionBytes ?? null,
   }));
   const c = capped(out);
   return envelope(res, apiPath, projectAll(c.rows, fields), {
     ...c.meta, periods: periods.map((p) => p.key), periodsDropped: dropped,
+    approxCount: m.totals?.approxDevices ?? 0,
+    ...(hide ? { namesHidden } : {}),
     unknownUsedCount: m.totals?.unknownUsed ?? null,
     note: '기준선이 없는 기간은 null 입니다 — 관측이 짧은 구간을 추정으로 메우지 않습니다.',
   });
@@ -338,22 +383,43 @@ v1.get('/faults/alarms', guarded('/faults/alarms', ({ res, snap, inScope, fields
   });
 }));
 
-v1.get('/faults/parts', guarded('/faults/parts', async ({ res, fields, apiPath }) => {
+v1.get('/faults/parts', guarded('/faults/parts', async ({ req, res, fields, apiPath }) => {
   const pf = await import('../partfault/db.js').catch(() => null);
   if (!pf?.openFaults) {
     return res.status(503).json({ ok: false, error: 'unavailable', code: 'unavailable', reason: '부품 장애 모듈을 불러올 수 없습니다.' });
   }
-  const open = (await pf.openFaults()) || [];
+  const open0 = (await pf.openFaults()) || [];
+  /*
+   * v2.604 AUTHZ-2604-02: IP 로 등록한 iDRAC 은 deviceKey·partKey 가 곧 관리 IP 다. 내부 `/tools/part-faults` 는
+   *   비-admin 에 `maskPartRow`(v2.601 AUTHZ-2601-02)로 불투명 토큰을 주는데 이 경로는 원문을 그대로 줬다.
+   *   **같은 함수**를 쓴다(판정 복제 금지 — 두 경로의 토큰이 같아야 상대 포탈이 내부 화면과 대조할 수 있다).
+   */
+  const hide = !isAdminReq(req);
+  let open = open0;
+  if (hide) {
+    const { maskPartRow, partFaultHosts } = await import('./api/partFaults.js');
+    const hosts = await partFaultHosts();
+    const match = addressMatcher(hosts);
+    open = open0.map((f) => maskPartRow(f, match, hosts));
+  }
+  /*
+   * v2.604 AUTHZ-2604-06: `partfault/db.js rowToPart` 의 필드는 `firstSeenAt`·`holdReason` 이다 — 예전 투사는
+   *   `opened_at/openedAt`·`reason` 을 읽어 **모든 행에서 항상 null** 이었다(오류 없이 빈 계약 필드).
+   *   옛 이름은 뒤 폴백으로만 남긴다.
+   */
   const rows = open.map((f) => ({
     partKey: f.part_key ?? f.partKey ?? null, agent: f.agent ?? null, scope: f.scope ?? null,
     deviceKey: f.device_key ?? f.deviceKey ?? null, kind: f.kind ?? null, partId: f.part_id ?? f.partId ?? null,
-    state: f.state ?? null, openedAt: msOrNull(f.opened_at ?? f.openedAt),
-    lastSeenAt: msOrNull(f.last_seen_at ?? f.lastSeenAt), reason: f.reason ?? null,
+    state: f.state ?? null, openedAt: msOrNull(f.firstSeenAt ?? f.first_seen ?? f.opened_at ?? f.openedAt),
+    lastSeenAt: msOrNull(f.last_seen_at ?? f.lastSeenAt ?? f.last_seen),
+    reason: f.holdReason ?? f.hold_reason ?? f.reason ?? null,
   }));
   const c = capped(rows);
   return envelope(res, apiPath, projectAll(c.rows, fields), {
     ...c.meta,
-    note: "확인 불가(unknown)·빈 슬롯(absent)은 장애로 세지 않습니다 — state 를 그대로 보세요.",
+    ...(hide ? { addressHidden: true } : {}),
+    note: "확인 불가(unknown)·빈 슬롯(absent)은 장애로 세지 않습니다 — state 를 그대로 보세요."
+      + (hide ? ' 관리 주소(IP)로 된 장비 식별자는 내부 화면과 같은 불투명 토큰(masked-…)으로 가렸습니다(토큰은 포탈 재시작마다 바뀝니다).' : ''),
   });
 }));
 
