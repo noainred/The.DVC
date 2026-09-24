@@ -23,6 +23,7 @@ import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
+import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
 import { registerPartFaults } from './api/partFaults.js'; // 파트 장애(물리 부품 장애 기록·알림, v2.547)
 import { registerEdgeLog } from './api/edgeLog.js'; // 엣지 로그·진행상태(중앙이 당긴다 + 폴백, v2.549)
 import { registerBmUsage } from './api/bmUsage.js'; // 베어메탈 사용률(CPU·MEM·디스크·NET·HBA, v2.550)
@@ -95,6 +96,7 @@ registerInventory(api);
 registerVmClone(api);
 registerStorageMon(api);
 registerSanSwitch(api);
+registerCvp(api);
 registerPartFaults(api);
 registerEdgeLog(api);
 registerBmUsage(api);

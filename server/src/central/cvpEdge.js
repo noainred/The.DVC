@@ -104,7 +104,7 @@ export function cleanDevice(x, now = Date.now(), cnt = { ports: 0 }) {
 
 /**
  * push 본문 정제. owned = 그 엣지에 위임된 CVP id 집합.
- * @returns {{ servers:object[], devicesByCvp:Map<string,object[]>, rows:any[][], deviceKeys:object|null, devicesUnavailable:boolean, dropped:object }}
+ * @returns {{ servers:object[], devicesByCvp:Map<string,object[]>, rows:any[][], touch:any[][], deviceKeys:object|null, devicesUnavailable:boolean, dropped:object }}
  */
 export function sanitizeCvpBody(body, owned, now = Date.now()) {
   const b = isPlainObj(body) ? body : {};
@@ -140,6 +140,14 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
     if (!key || !port || ts == null) { dropped.badRow++; continue; }
     rows.push([r[0], key, port, ts, numOrNull(r[4]), numOrNull(r[5]), numOrNull(r[6]), numOrNull(r[7]), numOrNull(r[8]), numOrNull(r[9])]);
   }
+  const touch = [];
+  for (const t of Array.isArray(b.touch) ? b.touch.slice(0, 20_000) : []) {
+    if (!Array.isArray(t) || t.length < 3) { dropped.badRow++; continue; }
+    if (!own(t[0])) { dropped.notOwned++; continue; }
+    const key = s(t[1], 128); const ts = tsClamp(t[2], now);
+    if (!key || ts == null) { dropped.badRow++; continue; }
+    touch.push([t[0], key, ts]);
+  }
   let deviceKeys = null;
   if (isPlainObj(b.deviceKeys)) {
     deviceKeys = {};
@@ -149,7 +157,7 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
       deviceKeys[cvpId] = keys.filter((k) => typeof k === 'string' && k).slice(0, DEVICE_MAX).map((k) => s(k, 128));
     }
   }
-  return { servers, devicesByCvp, rows, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped };
+  return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped };
 }
 
 /** 청크 0 — 그 엣지의 상태를 통째로 교체. 반환 { ok, refused?, evicted? }. */

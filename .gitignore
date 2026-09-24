@@ -207,6 +207,13 @@ server/config/vcenter-auth-stops.json
 server/config/idrac-auth-stops.json
 server/config/nsx-auth-stops.json
 server/config/sanswitch-auth-stops.json
+# v2.608 Arista CloudVision(CVP) — 등록부(토큰·비밀번호 봉인)·설정·인증 정지·push 커서·전용 DB·중앙 수신 상태
+server/config/cvp-servers.json
+server/config/cvp-settings.json
+server/config/cvp-auth-stops.json
+server/config/cvp-push.json
+server/config/cvp.db
+server/config/central-agent-cvp.json
 server/config/pdu-auth-stops.json
 server/config/gpu-auth-stops.json
 server/config/bmstor-auth-stops.json

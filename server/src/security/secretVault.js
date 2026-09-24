@@ -61,6 +61,7 @@ export const SECRET_FILES = [
   'collectors.json',               // 엣지/수집 서버 접속 토큰
   'storage-devices.json',          // 스토리지 장비(Isilon 등) 접속 비밀번호(v2.302)
   'sanswitch-devices.json',        // SAN 스위치(Brocade FOS) 접속 비밀번호(v2.410)
+  'cvp-servers.json',              // Arista CloudVision(CVP) 서비스 계정 토큰·비밀번호(v2.608)
   'pdu-devices.json',              // PDU(APC Rack PDU 2G) 접속 비밀번호(v2.424)
   'rma-agents.json',               // 엣지 RMA(원격 명령) 서명 비밀번호(v2.416)
   'credentials.json',              // 통합 계정 관리(RMA SSH 계정: 비밀번호/개인키/패스프레이즈, v2.419)

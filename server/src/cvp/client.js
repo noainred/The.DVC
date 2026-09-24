@@ -25,6 +25,7 @@ import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { readTextCapped } from '../util/readCapped.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { poolSettled } from '../util/pool.js';
+import { pushAll } from '../util/pushAll.js';
 import { baseUrlOf } from './registry.js';
 import * as P from './parse.js';
 
@@ -226,7 +227,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
         for (const k of Object.keys(PART_KINDS)) {
           if (left() < MIN_SLICE_MS) { failedKinds.push(k); continue; }
           const r = await readKind(k, serial, (t) => { const x = P.parseParts(t, PART_KINDS[k]); return { value: x.parts, keys: x.keys }; });
-          if (r.value) { anyRead = true; parts.push(...r.value); } else failedKinds.push(k);
+          if (r.value) { anyRead = true; pushAll(parts, r.value); } else failedKinds.push(k);
         }
         dev.parts = anyRead ? parts.slice(0, P.PART_MAX) : null;
         dev.partsAt = now();

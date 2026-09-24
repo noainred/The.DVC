@@ -436,10 +436,13 @@ export function bgpSummary(peers) {
   return { peers: peers.length, established, down, prefixes: pKnown ? pSum : null };
 }
 
-/** 포트 목록 → {total, up, down}(null 이면 null). */
+/**
+ * 포트 목록 → {total, up, down}(null 이면 null). **down 은 '관리상 켜져 있는데 링크가 내려간' 포트만**이다 —
+ * 쓰지 않는(admin down·미연결) 포트까지 세면 정상 장비가 수십 개의 'down' 을 가진 것처럼 보인다. admin 을 모르면 세지 않는다.
+ */
 export function portsSummary(ports) {
   if (!Array.isArray(ports)) return null;
   let up = 0; let down = 0;
-  for (const p of ports) { if (p?.oper === 'up') up++; else if (p?.oper === 'down') down++; }
+  for (const p of ports) { if (p?.oper === 'up') up++; else if (p?.oper === 'down' && p?.admin === 'up') down++; }
   return { total: ports.length, up, down };
 }

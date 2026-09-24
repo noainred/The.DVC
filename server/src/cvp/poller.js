@@ -12,7 +12,7 @@
  *  - 누적 카운터 이전값은 인메모리 — 재시작 뒤 첫 주기는 처리량이 null(첫 표본). 대상에서 빠진 CVP 의 상태는 매 주기 정리한다.
  *  - prune 스로틀 `(++tick % N) === 0`(v2.453 — 기동 첫 틱에 돌지 않게).
  */
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withDeadline } from '../util/deadline.js';
 import { createAuthGuard, authStopView } from '../util/authGuard.js';
@@ -26,7 +26,7 @@ import * as db from './db.js';
 import { putStatus, getStatus, keepOnly } from './store.js';
 
 export const cvpAuthGuard = createAuthGuard({ file: 'cvp-auth-stops.json' });
-const PARTS_EVERY_MS = Math.max(5 * 60_000, Number(process.env.CVP_PARTS_EVERY_MS) || 30 * 60_000);
+const PARTS_EVERY_MS = clampIntervalMs(Number(process.env.CVP_PARTS_EVERY_MS) || 30 * 60_000, 30 * 60_000, 5 * 60_000);
 const warnLog = createChangeLogger({ windowMs: 10 * 60_000, maxKeys: 256 });
 
 /** 정지 판정용 자격증명 모양(평문은 지문 계산에만 — util/credFingerprint). 토큰 모드는 토큰이 '비밀번호' 다. */

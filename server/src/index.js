@@ -106,6 +106,9 @@ import { startPduPush } from './pdu/push.js';                     // 엣지→�
 import { startPduConfigPull } from './agent/pduConfigPull.js';    // 중앙→엣지 PDU 배포 pull(v2.424)
 import { startSanSwitchPush } from './sanswitch/push.js';        // 〃 엣지→중앙 push
 import { startSanSwitchConfigPull } from './agent/sanSwitchConfigPull.js'; // 〃 중앙→엣지 배포 pull
+import { startCvpPoller } from './cvp/poller.js';                  // Arista CloudVision(CVP) 수집(v2.608) — 기본 꺼짐
+import { startCvpPush } from './cvp/push.js';                      // 〃 엣지→중앙 push(gzip·청크·커서)
+import { startCvpConfigPull } from './agent/cvpConfigPull.js';     // 〃 중앙→엣지 배포 pull
 import { startSanSwitchPerfPoller } from './sanswitch/perfPoller.js';    // 〃 포트 사용량(portperfshow) 수집(v2.411)
 import { startSanSwitchPerfPush } from './sanswitch/perfPush.js';        // 〃 엣지→중앙 포트 사용량 시계열 중계(v2.423)
 import { startRelayCheckPoller } from './relaycheck/poller.js';          // HAProxy 경로 점검(v2.429)
@@ -328,6 +331,8 @@ app.use('/api/central/pdu-data', BIG_JSON);
 // 포트 사용량(sanswitch-perf)도 같은 축이라 함께 올린다(v2.517 에 상태 payload 가 더해졌다).
 app.use('/api/central/sanswitch-data', BIG_JSON);
 app.use('/api/central/sanswitch-perf', BIG_JSON);
+// v2.608: CVP push — 장비 레코드(포트 구성·부품·BGP)와 원시 표본이 청크 700KB 로 오지만 해제 후 1MB 를 넘을 수 있다(413 = 조용한 소실).
+app.use('/api/central/cvp-data', BIG_JSON);
 // '현재 사용자' push(v2.520) — 레코드에 계정명 목록이 붙어 대상이 많은 법인은 1MB 기본을 넘을 수
 // 있다. express.json 의 limit 은 **gzip 해제 후 길이**라 gzip 만으로는 413 이 해결되지 않는다.
 app.use('/api/central/curuser', BIG_JSON);
@@ -495,6 +500,7 @@ const stagger = [
   startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
   startSanSwitchPoller, startSanSwitchPush, startSanSwitchConfigPull, // SAN 스위치(v2.410) — 동일 규약(재진입 가드 + 적응형 타이머)
   startPduPoller, startPduPush, startPduConfigPull, // PDU(v2.424) — 동일 규약(자동 센서 탐지 + 재진입 가드 + 적응형 타이머)
+  startCvpPoller, startCvpPush, startCvpConfigPull, // CVP(v2.608) — 기본 꺼짐 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startSanSwitchPerfPoller, // SAN 포트 사용량(v2.411) — 설정에서 꺼져 있으면 틱만 돌고 아무것도 안 한다
   startSanSwitchPerfPush,   // 〃 엣지→중앙 중계(v2.423) — CENTRAL_URL 미설정이면 자기기동 안 함, 커서 방식
   startRelayCheckPoller,    // HAProxy 경로 점검(v2.429) — 설정 꺼짐이면 틱만 돌고 아무것도 안 함

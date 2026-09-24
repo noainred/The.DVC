@@ -56,7 +56,7 @@ async function openInner() {
       CREATE TABLE IF NOT EXISTS port_latest (
         agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, port TEXT NOT NULL, ts INTEGER NOT NULL,
         descr TEXT, speed_bps REAL, oper TEXT, admin TEXT, vlan TEXT, lag TEXT,
-        in_bps REAL, out_bps REAL, in_util REAL, out_util REAL, in_err INTEGER, out_err INTEGER,
+        in_bps REAL, out_bps REAL, in_util REAL, out_util REAL, in_err INTEGER, out_err INTEGER, rate_ts INTEGER,
         PRIMARY KEY (agent, cvp_id, device_key, port));
       CREATE TABLE IF NOT EXISTS port_sample (
         agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, port TEXT NOT NULL, ts INTEGER NOT NULL,
@@ -83,12 +83,22 @@ async function openInner() {
           parts_at=CASE WHEN excluded.parts_at IS NULL THEN device_latest.parts_at ELSE excluded.parts_at END,
           bgp_json=excluded.bgp_json, ports_read=excluded.ports_read, extra_json=excluded.extra_json
         WHERE excluded.ts > device_latest.ts`),
-      upPort: conn.prepare(`INSERT INTO port_latest (agent,cvp_id,device_key,port,ts,descr,speed_bps,oper,admin,vlan,lag,in_bps,out_bps,in_util,out_util,in_err,out_err)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      upPort: conn.prepare(`INSERT INTO port_latest (agent,cvp_id,device_key,port,ts,descr,speed_bps,oper,admin,vlan,lag,in_bps,out_bps,in_util,out_util,in_err,out_err,rate_ts)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(agent,cvp_id,device_key,port) DO UPDATE SET ts=excluded.ts, descr=excluded.descr, speed_bps=excluded.speed_bps, oper=excluded.oper,
-          admin=excluded.admin, vlan=excluded.vlan, lag=excluded.lag, in_bps=excluded.in_bps, out_bps=excluded.out_bps, in_util=excluded.in_util,
-          out_util=excluded.out_util, in_err=excluded.in_err, out_err=excluded.out_err
+          admin=excluded.admin, vlan=excluded.vlan, lag=excluded.lag,
+          in_bps=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.in_bps ELSE excluded.in_bps END,
+          out_bps=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.out_bps ELSE excluded.out_bps END,
+          in_util=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.in_util ELSE excluded.in_util END,
+          out_util=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.out_util ELSE excluded.out_util END,
+          in_err=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.in_err ELSE excluded.in_err END,
+          out_err=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.out_err ELSE excluded.out_err END,
+          rate_ts=MAX(IFNULL(port_latest.rate_ts,0), excluded.rate_ts)
         WHERE excluded.ts > port_latest.ts`),
+      // 원시 표본이 오면 그 포트의 마지막 처리량도 갱신한다(엣지는 구성이 바뀌지 않은 장비 레코드를 매번 보내지 않는다 — push.js).
+      rateFromSample: conn.prepare(`UPDATE port_latest SET in_bps=?, out_bps=?, in_util=?, out_util=?, in_err=?, out_err=?, rate_ts=?
+        WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND IFNULL(rate_ts,0) < ?`),
+      touchDevice: conn.prepare('UPDATE device_latest SET ts=? WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ?'),
       delPortsOld: conn.prepare('DELETE FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ?'),
       insSample: conn.prepare('INSERT OR IGNORE INTO port_sample (agent,cvp_id,device_key,port,ts,in_bps,out_bps,in_util,out_util,in_err,out_err) VALUES (?,?,?,?,?,?,?,?,?,?,?)'),
       upDaily: conn.prepare(`INSERT INTO port_daily (agent,cvp_id,device_key,port,day,samples,in_bps_sum,in_bps_n,in_bps_max,out_bps_sum,out_bps_n,out_bps_max,
@@ -156,7 +166,7 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
           const name = txt(p?.name, 64);
           if (!name) continue;
           st.upPort.run(agent, cvpId, key, name, ts, txt(p.desc, 200), numOrNull(p.speedBps), txt(p.oper, 16), txt(p.admin, 16), txt(p.vlan, 32), txt(p.lag, 64),
-            numOrNull(p.inBps), numOrNull(p.outBps), numOrNull(p.inUtil), numOrNull(p.outUtil), numOrNull(p.inErr), numOrNull(p.outErr));
+            numOrNull(p.inBps), numOrNull(p.outBps), numOrNull(p.inUtil), numOrNull(p.outUtil), numOrNull(p.inErr), numOrNull(p.outErr), ts);
           np++;
           if (samples && sampleWorthy(p)) {
             const r = insertSample(st, [agent, cvpId, key, name, ts, p.inBps, p.outBps, p.inUtil, p.outUtil, p.inErr, p.outErr]);
@@ -196,12 +206,32 @@ export async function importSamples(agent, rows = []) {
   db.conn.exec('BEGIN');
   try {
     for (const r of rows) {
-      if (insertSample(db.st, [agent, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]])) ins++; else dup++;
+      if (insertSample(db.st, [agent, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]])) {
+        ins++;
+        const v = [r[4], r[5], r[6], r[7], r[8], r[9]].map(numOrNull);
+        db.st.rateFromSample.run(...v, r[3], agent, r[0], r[1], r[2], r[3]);
+      } else dup++;
     }
     db.conn.exec('COMMIT');
   } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
   if (ins) _counts = null;
   return { inserted: ins, duplicates: dup };
+}
+
+/**
+ * 중앙: 구성이 바뀌지 않아 레코드 없이 온 장비의 수집 시각만 올린다(엣지 push 의 touch — [cvpId, key, ts]).
+ * ⚠ 호출자가 소유권을 먼저 걸러야 한다.
+ */
+export async function touchDevices(agent, touch = []) {
+  const db = await open();
+  if (!db || !touch.length) return { touched: 0 };
+  let n = 0;
+  db.conn.exec('BEGIN');
+  try {
+    for (const [cvpId, key, ts] of touch) n += Number(db.st.touchDevice.run(ts, agent, cvpId, key, ts).changes);
+    db.conn.exec('COMMIT');
+  } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  return { touched: n };
 }
 
 /**
@@ -249,7 +279,7 @@ export async function listDeviceRows({ agent = null, cvpId = null } = {}) {
   const pw = []; const pa = [];
   if (agent != null) { pw.push('agent=?'); pa.push(agent); }
   if (cvpId != null) { pw.push('cvp_id=?'); pa.push(cvpId); }
-  const ports = db.conn.prepare(`SELECT agent, cvp_id, device_key, COUNT(*) AS total, SUM(oper='up') AS up, SUM(oper='down') AS down FROM port_latest ${pw.length ? `WHERE ${pw.join(' AND ')}` : ''} GROUP BY agent, cvp_id, device_key`).all(...pa);
+  const ports = db.conn.prepare(`SELECT agent, cvp_id, device_key, COUNT(*) AS total, SUM(oper='up') AS up, SUM(oper='down' AND admin='up') AS down FROM port_latest ${pw.length ? `WHERE ${pw.join(' AND ')}` : ''} GROUP BY agent, cvp_id, device_key`).all(...pa);
   const pmap = new Map(ports.map((r) => [`${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`, { total: Number(r.total), up: Number(r.up || 0), down: Number(r.down || 0) }]));
   return { rows: rows.map((r) => rowToDevice(r, pmap.get(`${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`))) };
 }
@@ -279,8 +309,15 @@ export async function deviceDetail(agent, cvpId, key) {
   const ports = db.conn.prepare('SELECT * FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? ORDER BY port LIMIT 4096').all(agent, cvpId, key)
     .map((p) => ({ name: p.port, desc: p.descr || '', speedBps: p.speed_bps, oper: p.oper || 'unknown', admin: p.admin || 'unknown', vlan: p.vlan || '', lag: p.lag || '',
       inBps: p.in_bps, outBps: p.out_bps, inUtil: p.in_util, outUtil: p.out_util, inErr: p.in_err, outErr: p.out_err, ts: Number(p.ts) }));
-  const pSum = { total: ports.length, up: ports.filter((p) => p.oper === 'up').length, down: ports.filter((p) => p.oper === 'down').length };
+  const pSum = { total: ports.length, up: ports.filter((p) => p.oper === 'up').length, down: ports.filter((p) => p.oper === 'down' && p.admin === 'up').length };
   return { device: rowToDevice(r, pSum), ports: r.ports_read === 1 ? ports : null };
+}
+
+/** 그 장비 행을 가진 agent 목록(최신 순) — 화면이 등록부 담당과 맞는 행을 고르는 데 쓴다. */
+export async function agentsForDevice(cvpId, key) {
+  const db = await open();
+  if (!db) return [];
+  return db.conn.prepare('SELECT agent FROM device_latest WHERE cvp_id=? AND device_key=? ORDER BY ts DESC LIMIT 16').all(cvpId, key).map((r) => r.agent);
 }
 
 /** 한 장비의 모든 행(엣지 push 용) — 장비 레코드 모양으로. */

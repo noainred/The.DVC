@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **524개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **535개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-24)
@@ -39,7 +39,7 @@
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (141)
+## 공통 (151)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -90,6 +90,16 @@
 | `CURUSER_DB_PATH` |  |  | curuser/db.js |
 | `CURUSER_FIRST_DELAY_MS` | `120000` |  | curuser/poller.js |
 | `CURUSER_VM_SERIES` | `''` |  | curuser/db.js |
+| `CVP_BODY_MAX_BYTES` | `8` |  | cvp/client.js |
+| `CVP_DEVICE_CONCURRENCY` | `6` |  | cvp/client.js |
+| `CVP_DEVICE_TIMEOUT_MS` |  |  | cvp/collectRequests.js |
+| `CVP_HTTP_TIMEOUT_MS` |  |  | cvp/client.js |
+| `CVP_PARTS_EVERY_MS` | `30` |  | cvp/poller.js |
+| `CVP_PUSH_CHUNK_BYTES` | `700` |  | cvp/push.js |
+| `CVP_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | cvp/push.js |
+| `CVP_PUSH_MS` | `5` |  | cvp/push.js |
+| `CVP_PUSH_ROWS` | `20000` |  | cvp/push.js |
+| `CVP_SETTINGS_LOCAL` | `''` |  | cvp/settings.js |
 | `DATA_SOURCE` |  | ✅ | config.js |
 | `DATACENTER` | `''` |  | config.js |
 | `DIRUSAGE_DB_PATH` |  |  | dirusage/db.js |
@@ -308,7 +318,7 @@
 | `UPGRADE_PACKAGE_MAX_BYTES` |  |  | upgrade/fetchPackage.js |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 
-## 엣지 에이전트 (38)
+## 엣지 에이전트 (39)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -337,6 +347,7 @@
 | `AGENT_VMSERIES_CONFIG_PULL_MS` | `10` |  | agent/vmSeriesConfigPull.js |
 | `AGENT_VMSERIES_PUSH_TIMEOUT_MS` |  |  | agent/vmSeriesPush.js |
 | `CURUSER_LOCAL` | `''` |  | agent/curUserConfigPull.js, curuser/settings.js |
+| `CVP_CONFIG_PULL_MS` | `5` |  | agent/cvpConfigPull.js |
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
 | `LASTGOOD_HOLD_MS` | `6` |  | agent/inventoryPush.js, central/inventory.js 외 1 |
 | `SANSW_CONFIG_PULL_MS` | `5` |  | agent/sanSwitchConfigPull.js |
@@ -703,4 +714,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 524
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 535
