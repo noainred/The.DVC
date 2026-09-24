@@ -12,6 +12,15 @@ import { reqTimeoutMs } from '../agent/envTimeout.js';
 //   [1초, 30분] 에 가둔다(빈 값·0·비숫자는 기본값).
 const SSH_READY_TIMEOUT_MS = reqTimeoutMs(process.env.SSH_READY_TIMEOUT_MS, 60_000);
 const SSH_EXEC_TIMEOUT_MS = reqTimeoutMs(process.env.SSH_EXEC_TIMEOUT_MS, 60_000, { max: 1_800_000 });
+/**
+ * v2.606(TIM2606-03): 호출자가 넘긴 명령 시한의 **단일 관문**. v2.605 는 이 모듈의 env 만 좁혔는데 호출자
+ * (SANSW_CLI_TIMEOUT_MS·STORAGE_CLI_TIMEOUT_MS …)가 2^31 초과·NaN 을 넘기면 `Math.max(1000, v)` 가 그대로
+ * setTimeout 으로 가 1ms 에 '타임아웃' 이 됐다. 호출자 env 를 전부 쫓지 않아도 여기서 [1초, 30분] 에 가둔다
+ * (숫자 아님·0 이하는 SSH_EXEC_TIMEOUT_MS).
+ */
+export function execTimeoutMs(v) {
+  return reqTimeoutMs(v, SSH_EXEC_TIMEOUT_MS, { max: 1_800_000 });
+}
 
 /**
  * 구형 장비 호환 알고리즘(v2.421). ssh2 기본 목록은 현대 알고리즘만 켜 두는데, 구형 Fabric OS/iDRAC 등은
@@ -90,7 +99,8 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
 // 출력 누적 상한(v2.417) — 고장 장비가 타임아웃까지 출력을 흘리면 메모리가 무한히 자란다.
 // 넘치면 채널을 닫고 reject(정직: 절단본을 성공으로 넘기지 않는다). execCapture 는 자체 2MB 캡.
 const EXEC_MAX_OUTPUT = Math.max(64 * 1024, Number(process.env.SSH_EXEC_MAX_OUTPUT) || 4 * 1024 * 1024);
-function exec(conn, command, timeoutMs = SSH_EXEC_TIMEOUT_MS) {
+function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS) {
+  const timeoutMs = execTimeoutMs(rawTimeoutMs);
   return new Promise((resolve, reject) => {
     conn.exec(command, (err, stream) => {
       if (err) return reject(err);
@@ -100,7 +110,7 @@ function exec(conn, command, timeoutMs = SSH_EXEC_TIMEOUT_MS) {
       const timer = setTimeout(() => {
         kill();
         finish(reject, new Error(`SSH exec 타임아웃(${Math.round(timeoutMs / 1000)}s): ${command}`));
-      }, Math.max(1000, timeoutMs));
+      }, timeoutMs);
       timer.unref?.();
       const onChunk = (which) => (d) => {
         bytes += d.length;
@@ -374,11 +384,12 @@ export function stripChoiceLines(text) {
  * 프롬프트가 반복해서 *새로* 나오는 경우는 그대로 동작한다.
  */
 export function execAnswered(conn, command, {
-  timeoutMs = SSH_EXEC_TIMEOUT_MS,
+  timeoutMs: rawTimeoutMs = SSH_EXEC_TIMEOUT_MS,
   maxAnswers = Math.max(1, Number(process.env.SSH_PAGER_MAX_PAGES) || 400),
   rules = ['pager'],
   pty = true,
 } = {}) {
+  const timeoutMs = execTimeoutMs(rawTimeoutMs);   // v2.606 TIM2606-03: 단일 관문
   const active = rules.map((k) => [k, PROMPT_RULES[k]]).filter(([, r]) => r);
   const clean = (t) => String(t).replace(ANSI_RE, '').replace(/\r/g, '').replace(PAGER_STRIP, '');
   return new Promise((resolve, reject) => {
@@ -395,7 +406,7 @@ export function execAnswered(conn, command, {
         // 시한이 되면 모아 둔 출력을 **살려** 돌려준다(일반 exec 은 버린다 — 그러면 이 경로의 존재 이유가 없다).
         truncated = true;
         finish(resolve, out({ code: null, truncated: true, timedOut: true }));
-      }, Math.max(1000, timeoutMs));
+      }, timeoutMs);
       timer.unref?.();
       let answeredUpTo = 0; // 마지막으로 응답했을 때의 stdout 길이 — 그 뒤에 온 출력에서만 프롬프트를 찾는다
       stream.on('data', (d) => {

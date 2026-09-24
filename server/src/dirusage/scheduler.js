@@ -21,10 +21,12 @@ import { load as loadSettings } from './settings.js';
 import { parseDuOutput, buildScanRecord } from './scan.js';
 import { renderReport, renderSubject } from './report.js';
 import { getDb } from './db.js';
+import { clampIntervalMs } from '../config.js';
 import { sendPortalMail } from '../mail/service.js';   // 공용 메일 발송(설정 › 메일 발송)
 
 /** 틱 주기 — 주기 자체는 시간 단위라 1분 간격으로 도래만 확인하면 충분하다. */
-const TICK_MS = Math.max(30_000, Number(process.env.DIRUSAGE_TICK_MS) || 60_000);
+// v2.606 LEFT2606-04: 2^31 초과면 setInterval 이 1ms 루프가 됐다 — clampIntervalMs 로 [30초, MAX_TIMER_MS].
+const TICK_MS = clampIntervalMs(Number(process.env.DIRUSAGE_TICK_MS) || 60_000, 60_000, 30_000);
 /** 잡 타임아웃(엣지가 이 안에 회신해야 한다). du 는 대용량에서 느리다. */
 const JOB_TIMEOUT_MS = Math.max(60_000, Number(process.env.DIRUSAGE_JOB_TIMEOUT_MS) || 900_000);
 

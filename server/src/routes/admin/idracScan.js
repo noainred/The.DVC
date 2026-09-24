@@ -298,7 +298,7 @@ adminRouter.put('/idrac/scan-ranges', adminOnly, (req, res) => {
   const b = req.body || {};
   const dcId = b.datacenterId || b.vcenterId;
   const r = saveScanRanges({ ...b, datacenterId: dcId });
-  if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 저장', target: `${dcId}${r.service ? `/${r.service}` : ''} (대역 ${(r.ranges || []).length}개${r.enabled ? '' : ', 비활성'})` });
+  if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 저장', target: `${dcId}${r.service ? `/${r.service}` : ''} (대역 ${(r.ranges || []).length}개${r.enabled ? '' : ', 비활성'}${r.droppedSecrets?.length ? ', 대역·엣지·계정 변경으로 저장 비밀번호 폐기' : ''})` }); // v2.606 LEFT2606-02
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 삭제. :id = 엔트리 고유키(구버전 마이그레이션분은 id=datacenterId).
@@ -359,7 +359,7 @@ adminRouter.post('/idrac/scan-ranges/import', adminOnly, (req, res) => {
   if (req.body?.dryRun) return res.json({ ok: true, dryRun: true, report, summary, total: rows.length });
 
   const allowOverwrite = req.body?.overwrite === true;
-  let added = 0, overwritten = 0; const failed = []; const skipped = [];
+  let added = 0, overwritten = 0; const failed = []; const skipped = []; const passwordDropped = [];
   const verdictByLine = new Map(report.map((r) => [r.line, r])); // O(rows²) find → O(rows) (v2.342 성능)
   for (const row of rows) {
     const verdict = verdictByLine.get(row._line);
@@ -370,11 +370,15 @@ adminRouter.post('/idrac/scan-ranges/import', adminOnly, (req, res) => {
       username: row.username, agent: row.agent, dispatch: row.dispatch, enabled: row.enabled, mode: row.mode };
     if (row._hasPassword) input.password = row.password; // 비우면 기존 유지(saveScanRanges 규칙)
     const r = saveScanRanges(input);
-    if (r.ok) { if (ids.length === 1) overwritten++; else added++; }
+    if (r.ok) {
+      if (ids.length === 1) overwritten++; else added++;
+      // v2.606 LEFT2606-02: 대역·엣지·계정이 바뀐 덮어쓰기는 저장 비밀번호를 폐기한다 — 그 행을 밝힌다(조용한 폐기 금지)
+      if (r.droppedSecrets?.length) passwordDropped.push({ line: row._line, datacenter: row.datacenter, reason: '저장됨 — 단 스캔 대역·수행 엣지·계정이 바뀌어 저장된 비밀번호를 폐기했습니다. 비밀번호를 다시 입력하세요(그 전까지 스캔 보류).' });
+    }
     else failed.push({ line: row._line, datacenter: row.datacenter, reason: r.reason });
   }
-  logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 CSV 가져오기', detail: `추가 ${added}·덮어쓰기 ${overwritten}·건너뜀 ${skipped.length}·실패 ${failed.length}`, ip: req.ip || '' });
-  res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length });
+  logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 CSV 가져오기', detail: `추가 ${added}·덮어쓰기 ${overwritten}·건너뜀 ${skipped.length}·실패 ${failed.length}${passwordDropped.length ? `·비밀번호 폐기 ${passwordDropped.length}` : ''}`, ip: req.ip || '' });
+  res.json({ ok: true, added, overwritten, skipped, failed, passwordDropped, total: rows.length });
 });
 
 // 지금 스캔(비동기). Body: { id? }(엔트리 하나) | { datacenterId? }(그 법인의 모든 서비스) | {}(전체 enabled).

@@ -76,14 +76,21 @@ function prepare(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_vm_series_ts ON vm_series (ts);
   `);
+  // v2.606 COL2606-01: 발행기가 원문을 잘랐는지(= 그 서버 수치가 하한인지) — 최신값에만 둔다.
+  //   ⚠ table_info 로 없을 때만 추가하고 'duplicate column name' 만 삼킨다(v2.603 DB2603-01 — 잠금을 삼키지 않는다).
+  if (!db.prepare('PRAGMA table_info(latest)').all().some((r) => r.name === 'truncated')) {
+    try { db.exec('ALTER TABLE latest ADD COLUMN truncated INTEGER NOT NULL DEFAULT 0'); } catch (e) {
+      if (!/duplicate column name/i.test(String(e?.message || e))) throw e;
+    }
+  }
   return {
     upLatest: db.prepare(`INSERT INTO latest
-      (vm_id, vcenter_id, name, folder, ts, at, kind, ok, active, disc, other, sessions, users, error, guest_host)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      (vm_id, vcenter_id, name, folder, ts, at, kind, ok, active, disc, other, sessions, users, error, guest_host, truncated)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(vm_id) DO UPDATE SET vcenter_id=excluded.vcenter_id, name=excluded.name, folder=excluded.folder,
         ts=excluded.ts, at=excluded.at, kind=excluded.kind, ok=excluded.ok, active=excluded.active,
         disc=excluded.disc, other=excluded.other, sessions=excluded.sessions, users=excluded.users,
-        error=excluded.error, guest_host=excluded.guest_host`),
+        error=excluded.error, guest_host=excluded.guest_host, truncated=excluded.truncated`),
     delLatestVc: db.prepare('DELETE FROM latest WHERE vcenter_id=?'),
     allLatest: db.prepare('SELECT * FROM latest ORDER BY vcenter_id, name'),
     latestOfVc: db.prepare('SELECT * FROM latest WHERE vcenter_id=? ORDER BY name'),
@@ -178,6 +185,7 @@ export async function commitCurUser({ ts, records = [], series = [], replaceVcen
         r.active == null ? null : Number(r.active), r.disc == null ? null : Number(r.disc),
         r.other == null ? null : Number(r.other), r.sessions == null ? null : Number(r.sessions),
         JSON.stringify((r.users || []).slice(0, 200)), String(r.error || '').slice(0, 300), String(r.guestHost || ''),
+        r.truncated ? 1 : 0,
       );
       if (vmSeriesEnabled() && r.ok) h.st.upVmSeries.run(String(r.vmId), Number(ts), Number(r.sessions) || 0, Number(r.active) || 0);
     }
@@ -209,6 +217,7 @@ export async function latestRecords(vcenterId = null) {
     other: r.other == null ? null : Number(r.other), sessions: r.sessions == null ? null : Number(r.sessions),
     users: (() => { try { return JSON.parse(r.users); } catch { return []; } })(),
     error: r.error || '', guestHost: r.guest_host || '',
+    truncated: !!r.truncated, usersLowerBound: !!r.truncated,
   }));
 }
 

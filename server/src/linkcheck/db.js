@@ -311,25 +311,46 @@ function prunePrepared(db) {
     sample: db.prepare('DELETE FROM link_sample WHERE rowid IN (SELECT rowid FROM link_sample WHERE ts < ? LIMIT ?)'),
     event: db.prepare('DELETE FROM link_event WHERE rowid IN (SELECT rowid FROM link_event WHERE ts < ? LIMIT ?)'),
     daily: db.prepare('DELETE FROM link_daily WHERE rowid IN (SELECT rowid FROM link_daily WHERE day < ? LIMIT ?)'),
+    // v2.606(감사 CEN2606-01): link_latest 는 예전에 정리 대상이 아니었다 — 없어진 링크(엣지 삭제·vCenter 이관)와
+    //   예전에 받던 임의 id 행이 영구히 남아 latestAll(전량) 에 실렸다. 원시 표본 보존일보다 오래 갱신되지 않은 행은
+    //   그 링크의 이력도 이미 지워졌으므로 함께 지운다.
+    latest: db.prepare('DELETE FROM link_latest WHERE rowid IN (SELECT rowid FROM link_latest WHERE ts < ? LIMIT ?)'),
   };
 }
-async function runPrune(db, { sampleDays, eventDays, dailyDays }) {
+/** 최신값 행 중 **현재 링크 집합에 없고** 오래된(기본 1일) 것 — 호출자가 현재 링크 id 목록을 줄 때만(v2.606 CEN2606-01). */
+export const LATEST_ORPHAN_MS = 24 * 3_600_000;
+function pruneOrphanLatest(db, currentIds, olderThanMs = LATEST_ORPHAN_MS, now = Date.now()) {
+  if (!currentIds) return 0;
+  const keep = new Set([...currentIds].map((x) => String(x).toLowerCase()));
+  const cutoff = now - olderThanMs;
+  const del = db.prepare('DELETE FROM link_latest WHERE link_id=?');
+  let n = 0;
+  for (const r of db.prepare('SELECT link_id, ts FROM link_latest WHERE ts < ?').all(cutoff)) {
+    if (keep.has(String(r.link_id).toLowerCase())) continue;
+    n += Number(del.run(r.link_id)?.changes) || 0;
+  }
+  return n;
+}
+async function runPrune(db, { sampleDays, eventDays, dailyDays, currentIds = null }) {
   const st = prunePrepared(db);
   const a = await chunkedDelete(st.sample, [Date.now() - sampleDays * 86_400_000], { label: 'linkcheck.link_sample' });
+  const l = await chunkedDelete(st.latest, [Date.now() - sampleDays * 86_400_000], { label: 'linkcheck.link_latest' });
+  let orphan = 0;
+  try { orphan = pruneOrphanLatest(db, currentIds); } catch { /* 진단성 정리 — 실패해도 보존 집행은 계속 */ }
   const b = await chunkedDelete(st.event, [Date.now() - eventDays * 86_400_000], { label: 'linkcheck.link_event' });
   const c = await chunkedDelete(st.daily, [dayKey(Date.now() - dailyDays * 86_400_000)], { label: 'linkcheck.link_daily' });
-  const del = { sample: a.deleted, event: b.deleted, daily: c.deleted };
-  if (del.sample || del.event || del.daily) _counts = null;
+  const del = { sample: a.deleted, event: b.deleted, daily: c.deleted, latest: l.deleted + orphan };
+  if (del.sample || del.event || del.daily || del.latest) _counts = null;
   // 상한에 걸려 남은 것이 있으면 밝힌다(조용한 상한 금지) — 다음 주기가 이어서 지운다.
-  const done = a.done && b.done && c.done;
+  const done = a.done && b.done && c.done && l.done;
   return { ok: true, ...del, done };
 }
-export async function pruneLinkCheck({ sampleDays = 90, eventDays = 30, dailyDays = 365 * 5, every = 12, force = false } = {}) {
+export async function pruneLinkCheck({ sampleDays = 90, eventDays = 30, dailyDays = 365 * 5, every = 12, force = false, currentIds = null } = {}) {
   const db = await getDb();
   if (!db) return { ok: false };
   if (!force && (++_tick % every) !== 0) return { ok: true, skipped: true };
-  const days = { sampleDays, eventDays, dailyDays };
-  const key = `${sampleDays}|${eventDays}|${dailyDays}`;
+  const days = { sampleDays, eventDays, dailyDays, currentIds };
+  const key = `${sampleDays}|${eventDays}|${dailyDays}|${currentIds ? 'ids' : ''}`;
   return _pruneFlight.run(key, () => runPrune(db, days)
     .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 200) })));
 }
@@ -357,7 +378,9 @@ export async function samplesOf(linkId, { hours = 24, limit = 3_000 } = {}) {
  * 상세 로그 조회 — **이슈 분석의 본체**. 링크·기간·실패종류로 좁힌다.
  * ⚠ `detail` 은 크므로 목록에서는 기본 제외하고(`withDetail`) 단건에서만 준다.
  */
-export async function eventsOf({ linkId = '', hours = 24 * 7, failKind = '', event = '', limit = 300, withDetail = false } = {}) {
+export async function eventsOf({ linkId = '', hours = 24 * 7, failKind = '', event = '', limit: limitIn = 300, withDetail = false } = {}) {
+  // v2.606(DB2606-06): 정수로 — 소수가 'LIMIT ?' 에 바인딩되면 datatype mismatch 다(라우트도 pageArgs 로 좁힌다).
+  const limit = Math.max(1, Math.min(10_000, Math.trunc(Number(limitIn)) || 300));
   const db = await getDb();
   if (!db) return { rows: [], truncated: false };
   const since = Date.now() - Math.max(1, n(hours) || 168) * 3_600_000;

@@ -14,10 +14,14 @@
  */
 import { insertResults } from '../linkcheck/db.js';
 import { PHASES } from '../linkcheck/phases.js';
-import { KIND_KEYS, EDGE_KINDS } from '../linkcheck/links.js';
+import { KIND_KEYS, EDGE_KINDS, linkIdOf } from '../linkcheck/links.js';
+import { capTrim } from '../util/capStr.js';
 
 /** 보고 1건당 링크 상한. 링크 140개 규모를 넉넉히 덮고 폭주는 막는다. */
 export const REPORT_LINK_MAX = Math.max(50, Number(process.env.LINKCHECK_REPORT_LINK_MAX) || 500);
+/** 링크 id·대상 길이 상한(v2.606 CEN2606-01). 중앙이 계산하는 id 는 종류 + 엣지 이름 + vCenter id 라 이 안에 든다. */
+export const LINK_ID_MAX = 256;
+export const LINK_TO_MAX = 128;
 /** 오래된 보고는 '지금 상태' 가 아니다(기본 3시간 — v2.548 규약과 같은 값). */
 export const REPORT_STALE_MS = Math.max(600_000, Number(process.env.LINKCHECK_REPORT_STALE_MS) || 3 * 3_600_000);
 
@@ -77,13 +81,24 @@ export async function putEdgeLinkReport(agent, body = {}) {
      */
     if (!EDGE_KINDS.includes(kind)) { rejected += 1; continue; }
     if (t(link.from).toLowerCase() !== ag.toLowerCase()) { rejected += 1; continue; }
+    /*
+     * ⚠⚠ v2.606(감사 CEN2606-01 — 재현): **id 도 대조한다.** id 는 DB 기본키인데 from 만 보고 받아서, 개별 토큰
+     *   edgeA 가 `{id:'edge->central|edgeB|central', from:'edgeA'}` 를 보내면 **edgeB 의 push 링크 행이 edgeA 의 ok 로
+     *   덮였다** — 죽은 엣지가 '정상' 으로 보인다(이 기능의 존재 이유를 가린다). 또 임의 id 500개가 push 마다
+     *   link_latest 에 새 행으로 쌓였다. id 는 links.js linkIdOf(kind, from, to) 로 결정되므로 **재계산해 같을 때만**
+     *   받는다. 비교는 대소문자 무시다 — from 검사가 대소문자 무시이고 중앙 등록부(remoteAgent) 표기가 엣지 이름과
+     *   대소문자만 다를 수 있다(정상 보고를 거절하지 않게).
+     */
+    const to = t(link.to);
+    if (id.length > LINK_ID_MAX || to.length > LINK_TO_MAX) { rejected += 1; continue; }
+    if (id.toLowerCase() !== linkIdOf(kind, link.from, to).toLowerCase()) { rejected += 1; continue; }
 
     if (r.skipped) { skipped += 1; continue; }        // 점검하지 않은 것은 적재하지 않는다
     const v = (r.verdict && typeof r.verdict === 'object') ? r.verdict : null;
     if (!v) { rejected += 1; continue; }
     const steps = sanitizeSteps(r.steps);
     const safeLink = {
-      id, kind, by: 'edge', from: ag, to: t(link.to).slice(0, 128),
+      id: capTrim(id, LINK_ID_MAX), kind, by: 'edge', from: ag, to: capTrim(to, LINK_TO_MAX),
       host: t(link.host).slice(0, 255), port: iOr(link.port),
     };
     toSave.push({
@@ -104,13 +119,13 @@ export async function putEdgeLinkReport(agent, body = {}) {
   const saved = await insertResults(toSave, { byNode: ag });
   const failed = toSave.filter((x) => !x.verdict.ok).length;
   _reports.set(ag, {
-    at, version: t(body?.version).slice(0, 40),
+    at, version: capTrim(body?.version, 40),
     /*
      * ⚠ v2.554 — **엣지가 '왜 0건인지' 를 말한다.** v2.552~2.553 은 0건이면 push 자체를 하지
      *   않아 중앙이 '첫 보고 대기' 라고만 말했다(기다려도 영원히 안 채워진다). 이제 엣지가
      *   사유(`note`)와 '중앙이 껐다'(`disabled`)를 실어 보내고 화면이 그대로 옮긴다.
      */
-    note: t(body?.note).slice(0, 200), disabledOnCentral: body?.disabled === true,
+    note: capTrim(body?.note, 200), disabledOnCentral: body?.disabled === true,
     links: toSave.length + skipped, ok: toSave.length - failed, failed, skipped,
     rejected, omitted,
     dbOk: saved.ok !== false, dbError: saved.error || '',

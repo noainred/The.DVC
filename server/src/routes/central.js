@@ -78,6 +78,7 @@ import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { stripCoercionTraps, strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';   // v2.600 CEN2600-01·RECENT2600-01 — 엣지가 보낸 수치 좁히기
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.583: 반복 수신 로그 조절
+import { capStr, capTrim } from '../util/capStr.js'; // v2.606 TIM2606-02: 상주 기록 글자 평탄화
 const gpuRecvLog = createChangeLogger();
 export const centralRouter = Router();
 let _getPaths = null;
@@ -183,7 +184,7 @@ centralRouter.use((req, res, next) => {
         // 인벤토리 push는 페이로드 규모(vCenter·호스트·VM 수)도 함께 기록 → '왜 큰지' 바로 파악.
         const b = req.body || {};
         const summary = res.locals?.ingestSummary || (req.path === '/inventory'
-          ? { vcenterId: String(b.vcenterId || '').slice(0, 128), hosts: (b.hosts || []).length, vms: (b.vms || []).length,
+          ? { vcenterId: capStr(b.vcenterId, 128), hosts: (b.hosts || []).length, vms: (b.vms || []).length,
               datastores: (b.datastores || []).length, networks: (b.networks || []).length, alarms: (b.alarms || []).length,
               gzip: (req.get('content-encoding') || '').includes('gzip') }
           : null);
@@ -253,7 +254,9 @@ const requestedAgent = (req) => strAgent(req.query?.agent) || strAgent(req.get('
  * v2.600(감사 CEN2600-10): 요청이 주장한 agent 이름은 **글자일 때만** 쓰고 64자로 자른다(v2.591 PR-1 수신 집계와 같은 상한).
  * 예전에는 `String(b.agent || '')` 라 본문 `agent:{toString:'x'}` 하나로 String() 이 던져 공유 토큰 수신이 500 이었다.
  */
-function strAgent(v) { return typeof v === 'string' ? v.trim().slice(0, 64) : ''; }
+// v2.606(감사 TIM2606-02): `.trim().slice(0, 64)` 는 SlicedString 이라 64자가 본문 원문(최대 16MB)을 붙잡은 채 수신 집계
+//   Map 키로 상주했다(감사 실측: 5MB agent 30개 → 잔존 힙 143MB). capTrim 이 잘라 평탄화한다.
+function strAgent(v) { return typeof v === 'string' ? capTrim(v, 64) : ''; }
 
 // /register-collector 의 실제 저장 키는 body.name 이다 — 바인딩에서 **항상 별도로** 대조한다.
 // ⚠ 보안(H-1, 2026-09-12): 이 값을 requestedAgent 의 OR 체인 끝에 두면, 공격자가 X-Agent-Name

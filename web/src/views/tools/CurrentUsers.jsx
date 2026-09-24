@@ -35,6 +35,7 @@ import { Card } from './shared.jsx';
 import {
   agoText, whenText, intervalText, kindTone, kindLabelOf, kindAdvice, TONE_COLOR,
   collectStateNote, unionNote, sinceNote, skippedSummary, agentGuide, TRUST_NOTE, collectSummary,
+  usersCountText, truncatedNote,
 } from './curUserText.js';
 import { CurrentUsersSettings } from './CurrentUsersSettings.jsx';
 import HorizonSessionsPanel from './HorizonSessionsPanel.jsx';
@@ -153,8 +154,8 @@ function WindowsUsersPanel({ scope }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
         {/* v2.598 WEBUI-2598-02: 확인한 서버가 0대면 서버가 null 을 준다 — '0명' 으로 채우지 않고 '—' + 사유. */}
-        <Card label={picked ? `${cur?.vcenterName || picked} 고유 사용자` : '전체 고유 사용자'} value={agg.users == null ? '—' : `${agg.users}명`}
-          meta={agg.users == null ? (data?.settings?.enabled === false ? '수집 꺼짐 — 확인한 서버 0대' : '확인한 서버 0대 — 0명이 아니라 확인 불가') : `활성 ${agg.usersActive ?? '—'} · 연결끊김 ${agg.usersDisc ?? '—'}`} accent="var(--accent)" />
+        <Card label={picked ? `${cur?.vcenterName || picked} 고유 사용자` : '전체 고유 사용자'} value={usersCountText(agg.users, agg.usersLowerBound)}
+          meta={agg.users == null ? (data?.settings?.enabled === false ? '수집 꺼짐 — 확인한 서버 0대' : '확인한 서버 0대 — 0명이 아니라 확인 불가') : `활성 ${agg.usersActive ?? '—'} · 연결끊김 ${agg.usersDisc ?? '—'}${truncatedNote(agg) ? ` · ${truncatedNote(agg)}` : ''}`} accent="var(--accent)" />
         <Card label="세션" value={agg.sessions == null ? '—' : `${agg.sessions}`} meta={agg.sessions == null ? '확인한 서버 없음' : `활성 ${agg.sessionsActive ?? '—'} · 끊김 ${agg.sessionsDisc ?? '—'}${agg.sessionsOther ? ` · 기타 ${agg.sessionsOther}` : ''}`} />
         <Card label="확인한 서버" value={`${agg.vmsOk ?? 0}대`} meta={`확인 불가 ${agg.vmsFailed ?? 0}대 · 대상 ${data?.targets ?? 0}대`} />
         <Card label="대상 아님" value={`${skip.total}대`} meta={skip.rows.slice(0, 2).map((r) => `${r.short} ${r.n}대`).join(' · ') || '없음'} />
@@ -179,7 +180,7 @@ function WindowsUsersPanel({ scope }) {
             {vcenters.map((v) => (
               <tr key={v.vcenterId} onClick={() => { setPicked(v.vcenterId === picked ? '' : v.vcenterId); setHist(null); }} style={{ cursor: 'pointer', background: v.vcenterId === picked ? 'var(--hover)' : undefined }}>
                 <td>{v.vcenterName || v.vcenterId}</td>
-                <td data-sort={String(v.users ?? -1)}>{v.users == null ? '—' : `${v.users}명`}</td>
+                <td data-sort={String(v.users ?? -1)}>{usersCountText(v.users, v.usersLowerBound)}</td>
                 <td data-sort={String(v.usersActive ?? -1)}>{v.usersActive ?? '—'}</td>
                 <td data-sort={String(v.sessions ?? -1)}>{v.sessions ?? '—'}</td>
                 <td data-sort={String(v.vmsOk)}>{v.vmsOk}</td>
@@ -240,7 +241,7 @@ function WindowsUsersPanel({ scope }) {
                 <td style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>{r.folder || '—'}</td>
                 <td data-sort={`${kindTone(r.kind)}-${r.kind}`}><KindBadge kind={r.kind} labels={labels} /></td>
                 <td data-sort={String(r.ok ? new Set((r.users || []).map((u) => String(u.name).toLowerCase())).size : -1)}>
-                  {r.ok ? `${new Set((r.users || []).map((u) => String(u.name).toLowerCase())).size}명` : '—'}
+                  {r.ok ? usersCountText(new Set((r.users || []).map((u) => String(u.name).toLowerCase())).size, r.truncated) : '—'}
                 </td>
                 <td data-sort={String(r.sessions ?? -1)}>{r.sessions == null ? '—' : r.sessions}</td>
                 <td data-sort={String(r.at || 0)}>{r.at ? agoText(data.now - r.at) : '—'}</td>

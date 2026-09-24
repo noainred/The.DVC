@@ -19,6 +19,10 @@ import { getMapping, getProxyById, touchMapping } from './registry.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { store } from '../store.js';
 import { targetHostScopeIssue } from './targetHostScope.js'; // v2.579: 도메인은 routes 를 import 하지 않는다(ARCH-05)
+import { reqTimeoutMs } from '../agent/envTimeout.js';
+// v2.606 TIM2606-04: sshExec.js 와 **같은 env 를 같은 함수로** 해석한다 — 예전 'Number(env) || 60000' 은 2^31 초과를
+//   통과시켜 ssh2 readyTimeout 이 setTimeout 1ms 가 되고 모든 웹 터미널이 배너 직후 'handshake 시한 초과' 로 끊겼다.
+export const SSH_GATEWAY_READY_TIMEOUT_MS = reqTimeoutMs(process.env.SSH_READY_TIMEOUT_MS, 60_000);
 import { config, clampIntervalMs } from '../config.js';
 
 export function attachSshGateway(server) {
@@ -68,6 +72,15 @@ export function mappingAccessIssue(user, m) {
   if (user.role !== 'admin') {
     if (m.owner !== user.username) return '이 접속 매핑에 대한 권한이 없습니다.'; // 소유자 없는 매핑도 admin 전용
     const scopeIssue = targetHostScopeIssue(store.get(), scopedVcenterIds(user, store.get()), m.targetHost);
+    if (scopeIssue) return scopeIssue;
+    return null;
+  }
+  // v2.606 AUTHZ2606-03: admin 의 면제(소유 무관)는 문서화된 설계라 유지하되, **범위 제한 admin**
+  //   (scopedVcenterIds 가 Set)에는 대상 범위를 본다 — quick-connect 가 403 인 범위 밖 VM 에 WS 로 붙지 못하게.
+  //   전체 범위 admin(null)은 예전 그대로 허용.
+  const allowed = scopedVcenterIds(user, store.get());
+  if (allowed) {
+    const scopeIssue = targetHostScopeIssue(store.get(), allowed, m.targetHost);
     if (scopeIssue) return scopeIssue;
   }
   return null;
@@ -173,7 +186,7 @@ function handleConnection(ws, user) {
         host, port, username: msg.username, password: msg.password,
         tryKeyboard: true, debug: onDebug,
         // 고RTT(800ms+) + 프록시 경유 + keyboard-interactive 인증의 다중 왕복을 고려해 상향(20s→60s).
-        readyTimeout: Number(process.env.SSH_READY_TIMEOUT_MS) || 60000, keepaliveInterval: 15000,
+        readyTimeout: SSH_GATEWAY_READY_TIMEOUT_MS, keepaliveInterval: 15000,
       });
     } else if (msg.type === 'data' && stream) {
       stream.write(msg.data);

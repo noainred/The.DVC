@@ -12,6 +12,7 @@
 
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; // v2.606 EDGE2606-03
 import { getGuestGpuVms, getGuestGpuAllHosts } from '../gpu/store.js';
 import { getGpuGuestDiag, gpuGuestStatus } from '../gpu/poller.js';
 
@@ -70,9 +71,12 @@ async function _pushGpuGuestNow() {
       method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, hosts, vms, diag }), timeoutMs: 30_000, retries: 2,
     });
     if (!res.ok) throw new Error(`gpu-guest -> ${res.status}`);
-    last = { at: Date.now(), hosts: hosts.length, vms: vms.length };
+    // v2.606 EDGE2606-03: 200 이어도 중앙이 미등록 vCenter 항목(unregistered)·상한(omitted)·미검증 이름을 뺄 수 있다 — 상태·콘솔에.
+    const drop = dropSummaryOf(await readCentralReply(res));
+    last = { at: Date.now(), hosts: hosts.length, vms: vms.length, ...(drop ? { centralDropped: drop } : {}) };
     console.log(`[gpu-guest-push] sent → ${config.agent.centralUrl} hosts=${hosts.length} vms=${vms.length}`);
-    return { ok: true, hosts: hosts.length, vms: vms.length };
+    warnDrop('gpu-guest-push', drop);
+    return { ok: true, hosts: hosts.length, vms: vms.length, ...(drop ? { centralDropped: drop } : {}) };
   } catch (e) {
     last = { at: Date.now(), hosts: 0, vms: 0, error: e.message };
     console.warn(`[gpu-guest-push] 실패: ${e.message}`);

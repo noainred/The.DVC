@@ -151,8 +151,9 @@ export class NsxClient {
   policyRules(policyId) { return this.#list(`/policy/api/v1/infra/domains/default/security-policies/${encodeURIComponent(policyId)}/rules`); }
   groups() { return this.#list('/policy/api/v1/infra/domains/default/groups'); }
   // 그룹의 실제(effective) 멤버 — 온디맨드 라이브 조회.
-  groupVmMembers(groupId) { return this.#get(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/virtual-machines`); }
-  groupIpMembers(groupId) { return this.#get(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/ip-addresses`); }
+  // v2.606 COL2606-02: 멤버 목록도 cursor 페이징이다(한 페이지 1,000개) — 형제 목록처럼 #list 로 따라간다.
+  groupVmMembers(groupId) { return this.#list(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/virtual-machines`); }
+  groupIpMembers(groupId) { return this.#list(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/ip-addresses`); }
   // 분산 IDS/IPS — 활성 설정 + 최근 침입 이벤트(베스트에포트; 버전/NAPP에 따라 미지원일 수 있음).
   licenses() { return this.#get('/api/v1/licenses'); } // 라이선스 만료일 확인용(만료 epoch ms)
   idsConfig() { return this.#get('/policy/api/v1/infra/settings/firewall/security/intrusion-services'); }
@@ -431,7 +432,17 @@ export async function fetchGroupMembers(mgr, groupId) {
   }));
   const ips = (ipRes && Array.isArray(ipRes.results)) ? ipRes.results : [];
   if (vmRes?.__err && ipRes?.__err) throw new Error(vmRes.__err);
-  return { vmCount: vms.length, vms: vms.slice(0, 500), ipCount: ips.length, ips: ips.slice(0, 1000) };
+  // v2.606 COL2606-02: ① 개수는 장비가 보고한 전체(result_count)가 받은 것보다 크면 그것을 쓰고, 페이지 상한에
+  //   걸렸으면 truncated 로 밝힌다 ② 한쪽 조회가 실패하면 그 개수는 0 이 아니라 **null + 사유**다('멤버 0' 이라는 거짓 금지).
+  const vmFailed = !!vmRes?.__err; const ipFailed = !!ipRes?.__err;
+  return {
+    vmCount: vmFailed ? null : listCount(vmRes), vms: vms.slice(0, 500),
+    ipCount: ipFailed ? null : listCount(ipRes), ips: ips.slice(0, 1000),
+    vmError: vmFailed ? String(vmRes.__err).slice(0, 300) : '',
+    ipError: ipFailed ? String(ipRes.__err).slice(0, 300) : '',
+    vmTruncated: !vmFailed && !!vmRes?.truncated,
+    ipTruncated: !ipFailed && !!ipRes?.truncated,
+  };
 }
 
 function exprText(e) {

@@ -25,6 +25,7 @@ import path from 'node:path';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { capStr } from '../util/capStr.js'; // v2.606 TIM2606-02
 
 export const RESERVED_IDS = new Set(['__proto__', 'constructor', 'prototype']);
 export const EDGE_DEVICE_MAX_BYTES = Math.max(64 * 1024, Number(process.env.CENTRAL_EDGE_DEVICE_MAX_BYTES) || 1024 * 1024);
@@ -64,7 +65,8 @@ export function scalarizeFields(o, keys = DISPLAY_KEYS, max = STR_MAX) {
     const v = o[k];
     if (v == null) continue;
     if (typeof v === 'object' || typeof v === 'function') { o[k] = null; n += 1; }
-    else if (typeof v === 'string' && v.length > max) o[k] = v.slice(0, max);
+    // v2.606(TIM2606-02): 잘라 평탄화 — `.slice` 는 원문(본문 최대 16MB)을 붙잡는다.
+    else if (typeof v === 'string' && v.length > max) o[k] = capStr(v, max);
   }
   return n;
 }

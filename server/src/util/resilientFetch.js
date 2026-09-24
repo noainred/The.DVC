@@ -164,7 +164,19 @@ export async function resilientFetch(url, opts = {}) {
   }
 }
 
-async function resilientFetchInner(url, { timeoutMs = 20_000, retries = 2, retryBackoffMs = 400, onRetry, dispatcher, ...init } = {}) {
+/**
+ * v2.606(TIM2606-01 2차 방어): 요청 시한을 한 번 더 좁힌다 — 숫자가 아닌 값('60000')은 AbortSignal.timeout 이
+ * ERR_INVALID_ARG_TYPE 을 던지고, 0 이하는 RangeError, 2^31−1 초과는 약 1ms 에 abort 된다. 호출자 설정값을 전부
+ * 쫓지 않아도 되도록 이 관문에서 숫자로 바꾸고 [100ms, 30분] 에 가둔다(숫자가 아니거나 0 이하면 기본 20초).
+ */
+export function normFetchTimeoutMs(v) {
+  const n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+  if (!Number.isFinite(n) || n <= 0) return 20_000;
+  return Math.min(1_800_000, Math.max(100, Math.round(n)));
+}
+
+async function resilientFetchInner(url, { timeoutMs: rawTimeoutMs = 20_000, retries = 2, retryBackoffMs = 400, onRetry, dispatcher, ...init } = {}) {
+  const timeoutMs = normFetchTimeoutMs(rawTimeoutMs);
   let lastErr;
   // dispatcher 옵션: 업그레이드 다운로드처럼 'TLS 검증 강제' 디스패처(upgradeAgent)를 넘겨야 하는
   // 경로는 wanAgent(검증 off) 대신 그 디스패처로 재시도한다(보안 보존).

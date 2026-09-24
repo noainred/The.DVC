@@ -1,7 +1,7 @@
 // 인사이트·위협 탐지·GPU 이력 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { requirePerm } from '../../auth/auth.js'; // v2.479(감사 S-4)
-import { store } from '../../store.js';
+import { store, usageReadable } from '../../store.js';
 import { scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { getClassifier } from '../../ipam/settings.js';
 import { getMetricsDb } from '../../metrics/db.js';
@@ -51,18 +51,23 @@ api.get('/tools/insights', requirePerm('tools'), (req, res) => memoJson(req, res
   const cmap = new Map();
   for (const h of hosts) {
     const k = `${h.vcenterId}|${h.cluster || 'standalone'}`;
-    const g = cmap.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, cpuMhz: 0, cpuUsed: 0, memMB: 0, memUsed: 0, maxCpu: 0, maxMem: 0 };
-    g.hosts++; g.cpuMhz += h.cpuTotalMhz || 0; g.cpuUsed += h.cpuUsageMhz || 0; g.memMB += h.memTotalMB || 0; g.memUsed += h.memUsageMB || 0;
-    g.maxCpu = Math.max(g.maxCpu, h.cpuTotalMhz || 0); g.maxMem = Math.max(g.maxMem, h.memTotalMB || 0);
+    const g = cmap.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, readable: 0, excluded: 0, cpuMhz: 0, cpuUsed: 0, memMB: 0, memUsed: 0, maxCpu: 0, maxMem: 0 };
+    g.hosts++;
     cmap.set(k, g);
+    // v2.606(감사 WEB2606-02): 연결 끊긴·무응답 호스트는 사용량을 읽지 못했고(SOAP 이 0 을 싣는다) 부하를 받아 줄 수도
+    // 없다 — '장애 후 잔여' 용량에 넣으면 N+1 이 여유라고 거짓 판정한다. 판정은 store.usageReadable 하나(v2.594).
+    if (!usageReadable(h)) { g.excluded++; continue; }
+    g.readable++; g.cpuMhz += h.cpuTotalMhz || 0; g.cpuUsed += h.cpuUsageMhz || 0; g.memMB += h.memTotalMB || 0; g.memUsed += h.memUsageMB || 0;
+    g.maxCpu = Math.max(g.maxCpu, h.cpuTotalMhz || 0); g.maxMem = Math.max(g.maxMem, h.memTotalMB || 0);
   }
   const clusters = [...cmap.values()].map((g) => {
     const remCpu = g.cpuMhz - g.maxCpu, remMem = g.memMB - g.maxMem;
     const cpuOkPct = remCpu > 0 ? r0((g.cpuUsed / remCpu) * 100) : 999;
     const memOkPct = remMem > 0 ? r0((g.memUsed / remMem) * 100) : 999;
-    const n1Ok = g.hosts >= 2 && cpuOkPct <= 90 && memOkPct <= 90;
-    return { vcenterId: g.vcenterId, cluster: g.cluster, hosts: g.hosts, n1Ok, cpuAfterFailPct: cpuOkPct, memAfterFailPct: memOkPct,
-      cpuUsagePct: g.cpuMhz ? r0((g.cpuUsed / g.cpuMhz) * 100) : 0, memUsagePct: g.memMB ? r0((g.memUsed / g.memMB) * 100) : 0 };
+    const n1Ok = g.readable >= 2 && cpuOkPct <= 90 && memOkPct <= 90;
+    return { vcenterId: g.vcenterId, cluster: g.cluster, hosts: g.hosts, hostsUsageExcluded: g.excluded, n1Ok, cpuAfterFailPct: cpuOkPct, memAfterFailPct: memOkPct,
+      // 읽을 수 있는 호스트가 없으면 사용률은 null('—') — 0% 는 '부하 없음' 이라는 거짓이다.
+      cpuUsagePct: g.cpuMhz ? r0((g.cpuUsed / g.cpuMhz) * 100) : null, memUsagePct: g.memMB ? r0((g.memUsed / g.memMB) * 100) : null };
   }).sort((a, b) => (a.n1Ok === b.n1Ok ? b.cpuAfterFailPct - a.cpuAfterFailPct : a.n1Ok ? 1 : -1));
 
   // ⑧ 알람 핫스팟

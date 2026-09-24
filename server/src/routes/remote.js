@@ -46,8 +46,12 @@ const mappingProxy = (m) => getProxyById(m.proxyId);
 // Public-ish (any authenticated user): list mappings + how to connect.
 // v2.478(감사 S7): 목록도 remote.access 권한 게이트 — 비-admin 은 자기 소유 매핑만(listMappingsForUser).
 remoteRouter.get('/mappings', requirePerm('remote.access'), (req, res) => {
+  // v2.606 AUTHZ2606-03: 범위 제한 admin 에게는 **범위 안 대상**의 매핑만(전체 범위 admin 은 예전처럼 전부).
+  const all = listMappingsForUser(req.user);
+  const mine = all.filter((m) => !scopedAdminMappingIssue(req.user, m));
   res.json({
-    mappings: listMappingsForUser(req.user).map(({ error, ...m }) => {
+    ...(mine.length !== all.length ? { omittedOutOfScope: all.length - mine.length, scoped: true } : {}),
+    mappings: mine.map(({ error, ...m }) => {
       const p = mappingProxy(m);
       return { ...m, proxyName: p.name, proxyHost: p.proxyHost, guacdConfigured: !!p.guacd?.host };
     }),
@@ -69,6 +73,19 @@ export function vcenterScopeIssue(allowed, vcenterId) {
   const id = vcenterId == null ? '' : String(vcenterId);
   if (!allowed || !id) return null;
   return allowed.has(id) ? null : 'vCenter 를 찾을 수 없습니다.';
+}
+
+/**
+ * v2.606 AUTHZ2606-03: **범위 제한 admin** 의 매핑 범위 판정. admin 의 매핑 전권(소유 무관)은 문서화된 설계라 그대로
+ *   두되(server/CLAUDE.md — mappingAccessIssue 'admin 은 전부'), 범위 admin(scopedVcenterIds 가 Set)에는 quick-connect 와
+ *   같은 대상 범위를 건다 — 예전에는 quick-connect 가 403 인 범위 밖 VM 으로 POST /mappings 가 상시 터널을 만들었다.
+ *   전체 범위 admin·비-admin 은 null(비-admin 은 기존 소유·범위 규칙이 따로 본다).
+ */
+export function scopedAdminMappingIssue(user, m) {
+  if (user?.role !== 'admin') return null;
+  const allowed = scopedVcenterIds(user, store.get());
+  if (!allowed) return null;
+  return targetHostScopeIssue(store.get(), allowed, m?.targetHost) || vcenterScopeIssue(allowed, m?.vcenterId);
 }
 
 // 프록시에서 SSH로 ping/포트체크를 대행 — 내부망 도달성 탐침이므로 admin/operator만(감사 H3/H7).
@@ -145,7 +162,18 @@ remoteRouter.put('/config', adminOnly, (req, res) => {
 });
 
 // --- per-vCenter proxy CRUD (admin) ---
-remoteRouter.get('/proxies/full', adminOnly, (_req, res) => res.json({ proxies: listProxiesSafe() }));
+remoteRouter.get('/proxies/full', adminOnly, (req, res) => {
+  // v2.606 AUTHZ2606-03: 범위 admin 에는 /proxies(v2.598)와 같은 필터 — 자기 vCenter 가 배정된 프록시 + 기본 프록시.
+  const all = listProxiesSafe();
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (!allowed) return res.json({ proxies: all });
+  const proxies = [];
+  for (const p of all) {
+    const ids = (p.vcenterIds || []).filter((v) => allowed.has(String(v)));
+    if (p.id === 'default' || ids.length) proxies.push({ ...p, vcenterIds: ids });
+  }
+  res.json({ proxies, omittedOutOfScope: all.length - proxies.length, scoped: true });
+});
 remoteRouter.post('/proxies', adminOnly, (req, res) => {
   const r = saveProxy(req.body || {});
   res.status(r.ok ? 200 : 400).json(r);
@@ -227,6 +255,15 @@ remoteRouter.post('/deploy', adminOnly, async (req, res) => {
 
 // Create a mapping, then provision it on HAProxy. (admin-created = persistent)
 remoteRouter.post('/mappings', adminOnly, async (req, res) => {
+  {
+    // v2.606 AUTHZ2606-03: 범위 제한 admin 은 quick-connect 와 같은 대상 범위(전체 범위 admin 은 예전 그대로).
+    const allowed = scopedVcenterIds(req.user, store.get());
+    const { targetHost, vcenterId } = req.body || {};
+    const issue = targetHostScopeIssue(store.get(), allowed, targetHost);
+    if (issue) return res.status(403).json({ ok: false, reason: issue });
+    const vcIssue = vcenterScopeIssue(allowed, vcenterId);
+    if (vcIssue) return res.status(404).json({ ok: false, reason: vcIssue });
+  }
   const r = addMapping({ ...(req.body || {}), owner: req.user.username, ephemeral: false });
   if (!r.ok) return res.status(400).json(r);
   await provision(r.mapping);
@@ -268,7 +305,7 @@ remoteRouter.post('/quick-connect', requirePerm('remote.access'), async (req, re
 // Re-apply (e.g. after fixing Data Plane settings).
 remoteRouter.post('/mappings/:id/apply', adminOnly, async (req, res) => {
   const m = getMapping(req.params.id);
-  if (!m) return res.status(404).json({ ok: false, reason: '매핑을 찾을 수 없습니다.' });
+  if (!m || scopedAdminMappingIssue(req.user, m)) return res.status(404).json({ ok: false, reason: '매핑을 찾을 수 없습니다.' });
   try { await applyMapping(mappingProxy(m).dataplane, m); setMappingStatus(m.id, 'active', null); res.json({ ok: true, mapping: getMapping(m.id) }); }
   catch (err) { setMappingStatus(m.id, 'error', err.message); res.status(400).json({ ok: false, reason: err.message }); }
 });
@@ -279,7 +316,8 @@ remoteRouter.post('/mappings/:id/apply', adminOnly, async (req, res) => {
 // (1) requirePerm('remote.access') 게이트 추가, (2) 소유자 없는 매핑은 admin 전용으로 보정.
 remoteRouter.delete('/mappings/:id', requirePerm('remote.access'), async (req, res) => {
   const m = getMapping(req.params.id);
-  if (!m) return res.status(404).json({ ok: false, reason: '매핑을 찾을 수 없습니다.' });
+  // v2.606 AUTHZ2606-03: 범위 admin 에게 범위 밖 매핑은 없는 것(404 — 존재 은닉).
+  if (!m || scopedAdminMappingIssue(req.user, m)) return res.status(404).json({ ok: false, reason: '매핑을 찾을 수 없습니다.' });
   // admin 은 전부, 그 외에는 **자기 소유** 매핑만. 소유자가 없는 매핑은 admin 만(단락 제거).
   if (req.user.role !== 'admin' && m.owner !== req.user.username) {
     return res.status(403).json({ ok: false, reason: '본인 접속 기록만 삭제할 수 있습니다(소유자 없는 매핑은 관리자만).' });
@@ -295,6 +333,7 @@ remoteRouter.delete('/mappings/:id', requirePerm('remote.access'), async (req, r
 remoteRouter.get('/rdp/:id', requirePerm('remote.access'), (req, res) => {
   const m = getMapping(req.params.id);
   if (!m || m.protocol !== 'rdp') return res.status(404).end();
+  if (scopedAdminMappingIssue(req.user, m)) return res.status(404).end(); // v2.606 AUTHZ2606-03
   if (req.user?.role !== 'admin') {
     if (m.owner !== req.user?.username) return res.status(404).end();
     if (targetHostScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), m.targetHost)) return res.status(404).end();

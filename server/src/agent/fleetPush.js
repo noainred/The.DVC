@@ -13,6 +13,7 @@ import { config, loadVcenterConfig } from '../config.js';
 import { reqTimeoutMs } from './envTimeout.js';
 import { store } from '../store.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; // v2.606 EDGE2606-03
 import { getFleetInventory } from '../insights/fleetInventory.js';
 import { UNREAD_STATUSES } from './inventoryPush.js'; // v2.604 EDGE2604-01: '읽지 못한 vCenter' 판정은 인벤토리 push 와 한 기준
 
@@ -57,11 +58,25 @@ let withholdSince = null;
  *  · unread 0 → send(보류 시작 시각을 지운다)
  *  · 보류 시작 후 maxMs 이내 → withhold · 넘으면 partial
  */
-export function fleetWithholdDecision(unread, since, now, maxMs = FLEET_WITHHOLD_MAX_MS) {
+export function fleetWithholdDecision(unread, since, now, maxMs = FLEET_WITHHOLD_MAX_MS, lastFullOkAt = null) {
   if (!Array.isArray(unread) || !unread.length) return { mode: 'send', since: null };
   const s = since || now;
-  return { mode: now - s > maxMs ? 'partial' : 'withhold', since: s };
+  // v2.606 RECENT2606-03: 시한은 '첫 보류 판정' 이 아니라 **마지막 온전한 push** 부터 잰다 — 중앙 TTL 은 마지막 수신부터 흐른다.
+  //   (예전: 주기 10분이면 보류 시작 t=10 → 첫 부분 전송 t=40, 중앙 TTL 30분이 t=30 에 이 엣지 베어메탈을 지워 10분 공백)
+  const base = Number.isFinite(lastFullOkAt) && lastFullOkAt < s ? lastFullOkAt : s;
+  return { mode: now - base > maxMs ? 'partial' : 'withhold', since: s };
 }
+
+/**
+ * v2.606 RECENT2606-03: 실제 보류 상한 — min(FLEET_WITHHOLD_MAX_MS, 중앙 TTL − 2 × push 주기). 주기 입도를 빼지 않으면
+ * '시한을 넘긴 다음 주기' 가 TTL 뒤에 온다. 주기가 TTL 의 절반 이상이면 0(보류하지 않고 곧바로 부분 전송). 순수.
+ */
+export const FLEET_CENTRAL_TTL_MS = Math.max(60_000, Number(process.env.AGENT_FLEET_CENTRAL_TTL_MS) || 30 * 60_000); // 중앙 CENTRAL_FLEET_TTL_MS 기본값과 같게
+export function fleetWithholdMaxMs(intervalMs, ttlMs = FLEET_CENTRAL_TTL_MS, capMs = FLEET_WITHHOLD_MAX_MS) {
+  const iv = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 300_000;
+  return Math.max(0, Math.min(capMs, ttlMs - 2 * iv));
+}
+let lastFullOkAt = null; // 마지막 '온전한'(send 모드) push 성공 시각 — 부분 전송은 기준을 옮기지 않는다(옮기면 보류↔부분이 번갈아 돈다)
 
 /** 부분 전송에서 뺄 항목 — 못 읽은 vCenter 귀속분 + 귀속 없는 항목(순수). 반환 { keep, dropped } */
 export function partialBareMetal(list, unread) {
@@ -93,12 +108,13 @@ export async function pushFleetNow() {
     let registered = [];
     try { registered = loadVcenterConfig()?.vcenters || []; } catch { registered = []; }
     const unread = unreadHostVcenters(snap, registered);
-    const dec = fleetWithholdDecision(unread, withholdSince, Date.now());
+    const maxMs = fleetWithholdMaxMs(config.agent.inventoryIntervalMs || 300_000);
+    const dec = fleetWithholdDecision(unread, withholdSince, Date.now(), maxMs, lastFullOkAt);
     withholdSince = dec.since;
     if (dec.mode === 'withhold') {
       // 조용히 건너뛰지 않는다 — 상태(last)와 콘솔에 사유를 남긴다(v2.549 무음 실패 금지). 중앙은 TTL(기본 30분) 동안만 직전 목록을 유지하므로
       //   보류는 FLEET_WITHHOLD_MAX_MS 까지만 한다(v2.605 RECENT2605-01).
-      const note = `호스트를 아직 읽지 못한 vCenter ${unread.length}개(${unread.slice(0, 5).join(', ')}) — ESXi 를 받치는 iDRAC 이 베어메탈로 잘못 분류되지 않도록 이번 주기는 보내지 않았습니다(최대 ${Math.round(FLEET_WITHHOLD_MAX_MS / 60_000)}분 보류 뒤에는 그 vCenter 귀속분·귀속 없는 항목만 빼고 보냅니다)`;
+      const note = `호스트를 아직 읽지 못한 vCenter ${unread.length}개(${unread.slice(0, 5).join(', ')}) — ESXi 를 받치는 iDRAC 이 베어메탈로 잘못 분류되지 않도록 이번 주기는 보내지 않았습니다(마지막 정상 전송부터 최대 ${Math.round(maxMs / 60_000)}분 보류 뒤에는 그 vCenter 귀속분·귀속 없는 항목만 빼고 보냅니다)`;
       last = { at: Date.now(), sent: 0, error: null, skipped: true, note, unreadVcenters: unread.slice(0, 32), withholdSince };
       console.warn(`[fleet-push] ${note}`);
       return { ok: false, skipped: true, reason: note };
@@ -115,7 +131,7 @@ export async function pushFleetNow() {
       const { keep, dropped } = partialBareMetal(baremetal, unread);
       baremetal = keep;
       partialInfo = { unreadVcenters: unread.slice(0, 32), withheldItems: dropped, withholdSince };
-      console.warn(`[fleet-push] 호스트를 ${Math.round(FLEET_WITHHOLD_MAX_MS / 60_000)}분 넘게 읽지 못한 vCenter ${unread.length}개(${unread.slice(0, 5).join(', ')}) — 그 vCenter 귀속분·귀속 없는 베어메탈 ${dropped}대를 빼고 보냅니다(중앙이 이 엣지 목록을 만료로 지우지 않게)`);
+      console.warn(`[fleet-push] 호스트를 ${Math.round(maxMs / 60_000)}분 넘게 읽지 못한 vCenter ${unread.length}개(${unread.slice(0, 5).join(', ')}) — 그 vCenter 귀속분·귀속 없는 베어메탈 ${dropped}대를 빼고 보냅니다(중앙이 이 엣지 목록을 만료로 지우지 않게)`);
     }
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/fleet`, {
       method: 'POST', headers: headers(),
@@ -123,8 +139,12 @@ export async function pushFleetNow() {
       timeoutMs: reqTimeoutMs(process.env.AGENT_PUSH_TIMEOUT_MS, 60_000), retries: 1,
     });
     if (!res.ok) throw new Error(`fleet -> ${res.status}`);
-    last = { at: Date.now(), sent: baremetal.length, error: null, ...(partialInfo ? { partial: true, ...partialInfo } : {}) };
-    return { ok: true, sent: baremetal.length, ...(partialInfo ? { partial: true, withheldItems: partialInfo.withheldItems } : {}) };
+    if (!partialInfo) lastFullOkAt = Date.now();
+    // v2.606 EDGE2606-03: 200 이어도 중앙이 상한(omitted)·범위 밖 vCenter 귀속 비움(vcenterBlanked)을 할 수 있다 — 상태·콘솔에.
+    const drop = dropSummaryOf(await readCentralReply(res));
+    last = { at: Date.now(), sent: baremetal.length, error: null, ...(partialInfo ? { partial: true, ...partialInfo } : {}), ...(drop ? { centralDropped: drop } : {}) };
+    warnDrop('fleet-push', drop);
+    return { ok: true, sent: baremetal.length, ...(partialInfo ? { partial: true, withheldItems: partialInfo.withheldItems } : {}), ...(drop ? { centralDropped: drop } : {}) };
   } catch (e) {
     last = { at: Date.now(), sent: 0, error: e.message };
     console.warn(`[fleet-push] 실패: ${e.message}`);
@@ -133,7 +153,7 @@ export async function pushFleetNow() {
 }
 
 /** 테스트 전용 — 보류 시작 시각 주입/초기화. */
-export function _setFleetWithholdSinceForTest(v) { withholdSince = v; }
+export function _setFleetWithholdSinceForTest(v, fullOkAt) { withholdSince = v; if (fullOkAt !== undefined) lastFullOkAt = fullOkAt; }
 
 export function fleetPushStatus() {
   return { enabled: !!(config.agent.centralUrl && ENABLED), centralUrl: config.agent.centralUrl, last };

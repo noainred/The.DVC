@@ -17,6 +17,8 @@
  *    NUL 바이트로 들어가 파일이 'data' 로 분류되는 사고가 있었다(루트 CLAUDE.md 주의 항목).
  */
 
+import { usageReadable } from '../store.js'; // v2.606 WEB2606-02: 사용률 판정은 store 하나(v2.594)
+
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 const pct = (used, total) => (total > 0 ? Math.round((used / total) * 1000) / 10 : null);
 const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
@@ -87,7 +89,7 @@ export function clusterMatrix(slice = {}, { maxRows = 200, normalize = false } =
   const rowName = normalize ? stripSitePrefix : nameOf;
   const vcs = (slice.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id }));
   const allowed = new Set(vcs.map((v) => v.id));
-  const mkAcc = () => ({ hosts: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, memTotalMB: 0, memUsedMB: 0, vms: 0, vmsOn: 0, vcpuOn: 0, memAllocOnMB: 0 });
+  const mkAcc = () => ({ hosts: 0, excluded: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuReadMhz: 0, memTotalMB: 0, memUsedMB: 0, memReadMB: 0, vms: 0, vmsOn: 0, vcpuOn: 0, memAllocOnMB: 0 });
   const rows = new Map();     // 행 -> Map<vcId, acc>
   const totals = new Map();   // 행 -> acc(전 vCenter 합)
   const origNames = new Map(); // 행 -> Set<원래 이름>(정규화했을 때 무엇이 합쳐졌는지 밝힌다)
@@ -101,9 +103,13 @@ export function clusterMatrix(slice = {}, { maxRows = 200, normalize = false } =
       a.hosts += 1;
       a.cores += num(h.cpuCores);
       a.cpuTotalMhz += num(h.cpuTotalMhz);
-      a.cpuUsedMhz += num(h.cpuUsageMhz);
       a.memTotalMB += num(h.memTotalMB);
-      a.memUsedMB += num(h.memUsageMB);
+      // v2.606(감사 WEB2606-02): 연결 끊긴·무응답 호스트는 사용량을 읽지 못했다(SOAP 이 0 을 싣는다) — 사용률의 분자·분모
+      // 둘 다에서 빼고(용량 합계에는 남긴다) 뺀 대수를 셀에 싣는다. 넣으면 80% 클러스터가 40% 로 보였다(재현).
+      if (usageReadable(h)) {
+        a.cpuUsedMhz += num(h.cpuUsageMhz); a.cpuReadMhz += num(h.cpuTotalMhz);
+        a.memUsedMB += num(h.memUsageMB); a.memReadMB += num(h.memTotalMB);
+      } else a.excluded += 1;
     }
   }
   for (const v of slice.vms || []) {
@@ -118,8 +124,9 @@ export function clusterMatrix(slice = {}, { maxRows = 200, normalize = false } =
   }
 
   const shape = (a) => ({
-    cpuUsagePct: pct(a.cpuUsedMhz, a.cpuTotalMhz),
-    memUsagePct: pct(a.memUsedMB, a.memTotalMB),
+    cpuUsagePct: pct(a.cpuUsedMhz, a.cpuReadMhz),
+    memUsagePct: pct(a.memUsedMB, a.memReadMB),
+    hostsUsageExcluded: a.excluded,
     vcpuPerCore: a.cores > 0 ? r1(a.vcpuOn / a.cores) : null,
     memOvercommitPct: a.memTotalMB > 0 ? Math.round((a.memAllocOnMB / a.memTotalMB) * 100) : null,
     hosts: a.hosts,

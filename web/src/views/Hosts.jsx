@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { usePolling } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount, EntityDetail } from '../components/ui.jsx';
 import IpmsMatches from '../components/IpmsMatches.jsx';
+import { hostUsagePct } from './vcdOverview.js'; // v2.606 WEB2606-02: 끊긴·무응답 호스트의 0% 는 '못 읽음'(—)
 
 export default function Hosts({ filters }) {
   const { data, error, loading } = usePolling('/hosts', filters, 15_000);
@@ -16,8 +17,8 @@ export default function Hosts({ filters }) {
     { key: 'cluster', label: '클러스터' },
     { key: 'connectionState', label: '상태', render: (h) => <StateBadge state={h.connectionState} /> },
     { key: 'cpuCores', label: 'Cores', align: 'right', render: (h) => h.cpuCores },
-    { key: 'cpuUsagePct', label: 'CPU', render: (h) => <UsageCell pct={h.cpuUsagePct} /> },
-    { key: 'memUsagePct', label: '메모리', render: (h) => <UsageCell pct={h.memUsagePct} /> },
+    { key: 'cpuUsagePct', label: 'CPU', sortValue: (h) => hostUsagePct(h, 'cpuUsagePct'), render: (h) => <UsageCell pct={hostUsagePct(h, 'cpuUsagePct')} /> },
+    { key: 'memUsagePct', label: '메모리', sortValue: (h) => hostUsagePct(h, 'memUsagePct'), render: (h) => <UsageCell pct={hostUsagePct(h, 'memUsagePct')} /> },
     { key: 'memTotalMB', label: 'RAM', align: 'right', render: (h) => (Number.isFinite(h.memTotalMB) ? `${Math.round(h.memTotalMB / 1024)} GB` : '—') }, // REST 폴백 수집엔 메모리 정보 없음 — 'NaN GB' 방지
     { key: 'powerWatts', label: '전력', align: 'right', render: (h) => (h.powerWatts > 0 ? `${(h.powerWatts / 1000).toFixed(2)} kW` : '—') },
     { key: 'vmCount', label: 'VM', align: 'right' },

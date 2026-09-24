@@ -13,6 +13,7 @@ import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor, san
 import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter, currentPartPaths } from './db.js';
 import { datacenterOfVcenter, listDatacenters } from '../datacenter/store.js';
 import { csvLine } from '../util/csv.js';
+import { reqTimeoutMs } from '../agent/envTimeout.js';
 
 /** vCenterId → { corpId, corpName, region } 매핑(법인=DataCenter 할당 + 스냅샷 region). */
 function buildVcMeta() {
@@ -27,7 +28,8 @@ function buildVcMeta() {
   };
 }
 
-const COLLECT_TIMEOUT_MS = Number(process.env.GUESTDISK_TIMEOUT_MS) || 120_000; // vCenter 1대 조회 상한
+// v2.606 LEFT2606-04: 2^31 초과·음수면 setTimeout 이 1ms 가 되어 전 수집이 즉시 타임아웃이었다.
+const COLLECT_TIMEOUT_MS = reqTimeoutMs(process.env.GUESTDISK_TIMEOUT_MS, 120_000, { max: 1_800_000 }); // vCenter 1대 조회 상한
 
 // v2.598 T2598-02: 시한이 되면 결과를 포기하는 것에 더해 signal 을 abort 한다 — 조회가 신호를 받으면 남은 SOAP
 // 왕복을 멈춘다(v2.417 규약). race 는 남긴다(신호를 읽지 않는 조회도 결과를 기다리지 않게).

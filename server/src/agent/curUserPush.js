@@ -23,6 +23,7 @@ import os from 'node:os';
 import { config } from '../config.js';
 import { reqTimeoutMs } from './envTimeout.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { readCentralReply, dropSummaryOf, mergeDrop, warnDrop } from './centralReply.js'; // v2.606 EDGE2606-03
 
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
@@ -81,7 +82,8 @@ async function post(body) {
   });
   if (res.status === 413) throw new Error('curuser -> 413 (중앙 본문 한도 초과 — 청크 크기를 줄이세요. 이 요청은 재시도되지 않으므로 그만큼 소실됩니다)');
   if (!res.ok) throw new Error(`curuser -> ${res.status}`);
-  return { bytes: json.length, gzBytes: payload.length };
+  // v2.606 EDGE2606-03: 200 이어도 중앙이 vCenter 단위로 거부할 수 있다(rejected:[vcenterId] — site 미등록·소유권).
+  return { bytes: json.length, gzBytes: payload.length, drop: dropSummaryOf(await readCentralReply(res)) };
 }
 
 /**
@@ -96,7 +98,7 @@ export async function pushCurUserRecords(records, { generatedAt = Date.now(), cl
   const vcenterIds = [...new Set([...slim.map((r) => r.vcenterId), ...(Array.isArray(clearVcenterIds) ? clearVcenterIds : []).map(String).filter(Boolean)])];
   const chunks = chunkRecords(slim);
   const t0 = Date.now();
-  let bytes = 0; let gzBytes = 0; let sent = 0;
+  let bytes = 0; let gzBytes = 0; let sent = 0; let drop = null;
   try {
     for (let i = 0; i < chunks.length; i++) {
       const r = await post({
@@ -104,16 +106,17 @@ export async function pushCurUserRecords(records, { generatedAt = Date.now(), cl
         ...(i === 0 ? { vcenterIds } : {}),
         records: chunks[i],
       });
-      bytes += r.bytes; gzBytes += r.gzBytes; sent++;
+      bytes += r.bytes; gzBytes += r.gzBytes; sent++; drop = mergeDrop(drop, r.drop);
     }
   } catch (e) {
     // v2.583 감사 #33: 실패도 상태에 남긴다 — 예전에는 `last` 가 **직전 성공**에 머물러 엣지 로그의 push.curUser
     //   항목이 실패 중에도 '정상' 으로 보였다(v2.566 '새 엣지 push 경로는 실패 사유를 상태에 싣는다' — 형제
     //   vmSeriesPush 는 이미 그랬다).
-    last = { at: Date.now(), chunks: chunks.length, sentChunks: sent, records: slim.length, bytes, gzBytes, ms: Date.now() - t0, error: e?.message || String(e) };
+    last = { at: Date.now(), chunks: chunks.length, sentChunks: sent, records: slim.length, bytes, gzBytes, ms: Date.now() - t0, error: e?.message || String(e), ...(drop ? { centralDropped: drop } : {}) };
     console.warn(`[curuser-push] 실패(${sent}/${chunks.length} 청크 전송 후): ${e?.message || e}`);
     throw e;
   }
-  last = { at: Date.now(), chunks: chunks.length, records: slim.length, ...(clearVcenterIds?.length ? { cleared: clearVcenterIds.length } : {}), bytes, gzBytes, ms: Date.now() - t0, error: null };
+  last = { at: Date.now(), chunks: chunks.length, records: slim.length, ...(clearVcenterIds?.length ? { cleared: clearVcenterIds.length } : {}), bytes, gzBytes, ms: Date.now() - t0, error: null, ...(drop ? { centralDropped: drop } : {}) };
+  warnDrop('curuser-push', drop);
   return { ok: true, ...last };
 }

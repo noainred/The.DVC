@@ -36,12 +36,18 @@ import { chatOps } from '../llm/chatops.js';
 import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
+import { fullScopeOnlyWith } from './admin/shared.js';
 export const insightsRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
 // ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
 wrapAsyncRouter(insightsRouter);
 const adminOnly = requireRole('admin');
+// v2.606 AUTHZ2606-01: 통합 서버 인벤토리 **변경**도 GET(/fleet)과 같은 근거로 전체 범위 계정만 —
+//   베어메탈은 귀속 전에는 법인 축이 없어 범위로 나눌 수 없고, 범위 admin 이 다른 법인 서버를 자기
+//   vCenter 로 귀속시키면 bm-usage·전력·개요의 범위 필터가 그 서버를 범위 안으로 본다(쓰기로 읽기 범위가 넓어진다).
+//   PUT /fleet/tag 응답은 전 함대 태그 맵이다(같은 계정의 GET /fleet 은 403).
+const fleetFullScopeOnly = fullScopeOnlyWith('통합 서버 인벤토리 변경은 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다 — 베어메탈은 귀속 전에는 법인 축이 없어 범위로 나눌 수 없습니다.');
 
 /*
  * v2.601 AUTHZ-2601-03 — 비-admin 가림. v2.600 이 `/idrac/host-power` 에 건 주소 가림(maskHostPower)의 형제다:
@@ -152,7 +158,7 @@ insightsRouter.get('/fleet', async (req, res) => {
 });
 // 수동 분류 예외 지정/해제(관리자). body: { key, tag: 'baremetal'|'virtualization'|'exclude'|'auto' }
 // 전체 vCenter 재폴링(store.refresh) 없이 fleetRev만 올려 다음 GET에서 즉시 재계산(고RTT·30개 환경 보호).
-insightsRouter.put('/fleet/tag', adminOnly, (req, res) => {
+insightsRouter.put('/fleet/tag', adminOnly, fleetFullScopeOnly, (req, res) => {
   const r = setFleetTag(req.body?.key, req.body?.tag);
   if (r.ok) logAudit({ user: req.user?.username, action: '플릿 분류 변경', target: String(req.body?.key || ''), detail: String(req.body?.tag || 'auto'), ip: req.ip || '' });
   res.json(r);
@@ -179,7 +185,7 @@ function assignOne({ serverId, serviceTag, key, vcenterId, validIds }) {
   return { ok: true, via: 'assign' };
 }
 
-insightsRouter.put('/fleet/assign', adminOnly, (req, res) => {
+insightsRouter.put('/fleet/assign', adminOnly, fleetFullScopeOnly, (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').trim();
   const validIds = new Set((store.get().vcenters || []).map((v) => v.id));
   if (vcenterId && !validIds.has(vcenterId)) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${vcenterId}` });
@@ -195,7 +201,7 @@ insightsRouter.put('/fleet/assign', adminOnly, (req, res) => {
 // 여러 베어메탈을 한 법인으로 일괄 귀속(관리자). body: { items:[{serverId,serviceTag,key}], vcenterId }.
 // 배치 I/O: 레지스트리 서버는 assignVcenter 1회(전체 1 read+1 write), 나머지는 setFleetAssignMany 1회.
 // (과거: 서버당 updateServer+setFleetAssign → 수천 회 동기 전체파일 쓰기로 이벤트 루프 블로킹)
-insightsRouter.put('/fleet/assign-bulk', adminOnly, (req, res) => {
+insightsRouter.put('/fleet/assign-bulk', adminOnly, fleetFullScopeOnly, (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 5000) : [];
   const vcenterId = String(req.body?.vcenterId || '').trim();
   if (!items.length) return res.status(400).json({ ok: false, reason: 'items가 비었습니다.' });
@@ -229,7 +235,7 @@ insightsRouter.put('/fleet/assign-bulk', adminOnly, (req, res) => {
 // 유령 태그/소속 키 정리(관리자) — 현재 어느 '등록된' 서버/호스트와도 매칭 안 되는 잔재 키 제거.
 // liveKeys는 레지스트리(전원오프 포함)+OME 캐시+호스트에서 직접 산출(전력 DB 미경유) → 등록 서버 보호.
 // body.dryRun=true면 삭제하지 않고 제거 대상 수만 반환(미리보기).
-insightsRouter.post('/fleet/prune', adminOnly, (req, res) => {
+insightsRouter.post('/fleet/prune', adminOnly, fleetFullScopeOnly, (req, res) => {
   try {
     const live = fleetLiveKeys(store.get());
     if (req.body?.dryRun) {

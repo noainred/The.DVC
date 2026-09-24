@@ -109,6 +109,7 @@ export function readGuestInfo(map, { now = Date.now(), staleAfterMs = 30 * 60_00
     kind: 'no-agent', ok: false, at: null, ageMs: null, schema: null,
     active: null, disc: null, other: null, sessions: null,
     users: [], noUsers: false, unknownStates: [], omitted: 0, chunks: 0,
+    truncated: false, usersLowerBound: false,
     guestHost: '', error: '', raw: '',
   };
   const keys = map instanceof Map ? [...map.keys()] : Object.keys(map || {});
@@ -135,15 +136,28 @@ export function readGuestInfo(map, { now = Date.now(), staleAfterMs = 30 * 60_00
     if (!c) return { ...out, kind: 'incomplete', error: `청크 ${i + 1}/${n} 이 비어 있습니다(발행 도중일 수 있습니다).` };
     parts.push(c);
   }
-  const raw = b64(parts.join(''));
+  let raw = b64(parts.join(''));
   if (raw == null) return { ...out, kind: 'unparsed', error: 'base64 디코딩에 실패했습니다.' };
+  // ⚠ v2.606 COL2606-01: 발행기는 원문이 상한(MAX_CHUNKS×CHUNK)을 넘으면 base64 를 **잘라** 싣고
+  //   `omitted=1` 로 밝힌다. 그 사실을 버리면 ① 잘린 마지막 줄이 상태를 못 읽어 가짜 'other' 세션이
+  //   되고 ② 부분 인원이 전체처럼 'ok' 로 세어진다(120세션 → 65명). 마지막 개행 뒤 조각(잘린 줄)은
+  //   버리고, 수치는 **하한**(`truncated`·`usersLowerBound`)으로 밝힌다 — 집계·화면이 '최소 N명' 이라 말한다.
+  const truncated = omitted > 0;
+  if (truncated) {
+    const cut = raw.lastIndexOf('\n');
+    raw = cut >= 0 ? raw.slice(0, cut + 1) : '';
+  }
+  out.truncated = truncated;
+  out.usersLowerBound = truncated;
   out.raw = raw.slice(0, 8000);
 
   const q = parseQuser(raw);
   if (!q.parsed) return { ...out, kind: 'unparsed', error: q.note || 'quser 출력 형식을 읽지 못했습니다.' };
 
   out.active = q.active; out.disc = q.disc; out.other = q.other;
-  out.sessions = q.total; out.noUsers = q.noUsers;
+  out.sessions = q.total;
+  // 잘린 원문에서 세션이 안 보이는 것은 '사용자 없음' 이 아니다(하한 0 일 뿐).
+  out.noUsers = q.noUsers && !truncated;
   out.users = (q.users || []).map((u) => ({ name: u.name, kind: u.kind }));
   out.unknownStates = q.unknownStates || [];
 

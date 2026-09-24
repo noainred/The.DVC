@@ -205,3 +205,19 @@ export function collectSummary(r) {
   if (n0(r.overLimit)) parts.push(`상한 초과 ${n0(r.overLimit)}대 제외`);
   return parts.join(' · ');
 }
+
+/**
+ * v2.606 COL2606-01: 사용자 수 칸 문구. 게스트 발행기가 quser 원문을 상한에서 잘랐으면(omitted)
+ * 그 서버의 세션은 일부만 읽은 것이라 합계는 **하한**이다 — '최소 N명' 으로 말한다(0·빈 값은 '—').
+ */
+export function usersCountText(n, lowerBound = false) {
+  if (n == null || n === '' || !Number.isFinite(Number(n))) return '—';
+  return lowerBound ? `최소 ${Number(n)}명` : `${Number(n)}명`;
+}
+
+/** 원문이 잘린 서버가 있을 때 머리 카드 곁에 붙이는 짧은 설명(없으면 ''). */
+export function truncatedNote(agg) {
+  const n = Number(agg?.vmsTruncated);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return `quser 원문이 발행 상한에서 잘린 서버 ${n}대 — 그 서버의 세션은 일부만 읽어 합계는 최소값입니다.`;
+}

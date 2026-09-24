@@ -111,9 +111,51 @@ pingRouter.get('/series', async (req, res) => {
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
-pingRouter.post('/targets', adminOnly, (req, res) => { const r = addTarget(req.body || {}); res.status(r.ok ? 200 : 400).json(r); });
-pingRouter.put('/targets/:id', adminOnly, (req, res) => { const r = updateTarget(req.params.id, req.body || {}); res.status(r.ok ? 200 : 400).json(r); });
+// v2.606 AUTHZ2606-02: 쓰기에도 조회와 **같은 범위**를 건다. 예전에는 adminOnly 뿐이라 범위 제한 admin 이
+//   목록·/series 에서 404 로 숨겨진 범위 밖 대상을 PUT 으로 vcenterId 를 바꿔 **범위 안으로 끌어와** 주소·이력을
+//   읽거나, DELETE 로 이력째 지울 수 있었다(쓰기가 읽기 범위를 넓혔다). 판정:
+//   · 기존 대상 — okId(id)(조회와 같은 판정) + 목록에 보이는 종류(manual·vcenter)만. 밖이면 404(존재 은닉).
+//   · 새 값 — body.vcenterId·body.id('vc_' 접두)가 범위 안이어야 한다. 밖이면 404 로 같은 은닉.
+//   · 범위 계정은 source 를 manual·vcenter 밖으로 바꾸지 못한다(edge·vcport 는 전 법인 공용 목록이다).
+//   전체 범위 admin 은 예전 그대로(scope.all).
+const LISTED_SOURCES = new Set(['manual', 'vcenter']);
+function scopedWriteDenied(req, { id = null, existing = false } = {}) {
+  const scope = vcScope(req);
+  if (scope.all) return false;
+  const body = req.body || {};
+  if (existing) {
+    const t = listTargets().find((x) => String(x.id) === String(id));
+    if (t && (!LISTED_SOURCES.has(t.source || 'manual') || !scope.okId(id, t))) return true;
+    if (t && body.vcenterId == null && body.source == null) return false;
+    const next = { ...(t || {}), ...(body.vcenterId != null ? { vcenterId: String(body.vcenterId || '') } : {}) };
+    if (body.source != null && !LISTED_SOURCES.has(String(body.source))) return true;
+    return !scope.okId(id, next);
+  }
+  if (body.source != null && !LISTED_SOURCES.has(String(body.source))) return true;
+  const bid = body.id != null ? String(body.id) : '';
+  const cur = bid ? listTargets().find((x) => String(x.id) === bid) : null;
+  if (cur && (!LISTED_SOURCES.has(cur.source || 'manual') || !scope.okId(bid, cur))) return true;   // 범위 밖 기존 id 의 존재를 알리지 않는다
+  if (body.vcenterId != null && String(body.vcenterId) !== '' && !scope.okVcenterId(body.vcenterId)) return true;
+  return !scope.okId(bid || '_new', { vcenterId: body.vcenterId ? String(body.vcenterId) : '' });
+}
+const scopeNotFound = (res) => res.status(404).json({ ok: false, reason: '없는 대상' });
+// 범위 계정에는 전 vCenter·전 대상을 건드리는 일괄 작업을 열지 않는다(seed-vcenters·vcport·poll-now).
+function denyScopedBulk(req, res, what) {
+  if (vcScope(req).all) return false;
+  res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: `${what}은(는) 전 vCenter 대상을 바꿉니다 — 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.` });
+  return true;
+}
+
+pingRouter.post('/targets', adminOnly, (req, res) => {
+  if (scopedWriteDenied(req)) return res.status(404).json({ ok: false, reason: '범위 밖 vCenter 대상은 등록할 수 없습니다.' });
+  const r = addTarget(req.body || {}); res.status(r.ok ? 200 : 400).json(r);
+});
+pingRouter.put('/targets/:id', adminOnly, (req, res) => {
+  if (scopedWriteDenied(req, { id: req.params.id, existing: true })) return scopeNotFound(res);
+  const r = updateTarget(req.params.id, req.body || {}); res.status(r.ok ? 200 : 400).json(r);
+});
 pingRouter.delete('/targets/:id', adminOnly, async (req, res) => {
+  if (scopedWriteDenied(req, { id: req.params.id, existing: true })) return scopeNotFound(res);
   const r = removeTarget(req.params.id);
   // v2.603(감사 DB2603-02 후속): 이력 삭제는 청크로 나눠 **백그라운드**에서 끝까지 돈다(대상 1년치 ≈ 52만 행을 응답 경로에서
   // 기다리지 않는다). 대상은 이미 목록에서 빠졌으므로 화면에 영향이 없고, 실패는 조용히 버리지 않고 콘솔에 남긴다.
@@ -131,12 +173,14 @@ pingRouter.delete('/targets/:id', adminOnly, async (req, res) => {
   res.status(r.ok ? 200 : 400).json(historyPurge ? { ...r, historyPurge } : r);
 });
 
-pingRouter.post('/poll-now', adminOnly, async (_req, res) => {
+pingRouter.post('/poll-now', adminOnly, async (req, res) => {
+  if (denyScopedBulk(req, res, '즉시 전체 측정')) return;
   try { const r = await pollOnce(); res.json({ ok: true, ...(r || {}) }); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
-pingRouter.post('/seed-vcenters', adminOnly, (_req, res) => {
+pingRouter.post('/seed-vcenters', adminOnly, (req, res) => {
+  if (denyScopedBulk(req, res, 'vCenter 자동 등록')) return;
   try { const { vcenters } = loadVcenterConfig(); res.json(seedVcenterTargets(vcenters)); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
@@ -207,11 +251,13 @@ pingRouter.get('/vcport/overview', async (req, res) => {
 pingRouter.get('/vcport/ports', (_req, res) => res.json({ ports: getVcPorts() }));
 
 pingRouter.put('/vcport/ports', adminOnly, (req, res) => {
+  if (denyScopedBulk(req, res, 'vCenter 포트 지정')) return;
   const r = setVcPorts((req.body || {}).ports, vcenterList());
   res.status(r.ok ? 200 : 400).json(r);
 });
 
-pingRouter.post('/vcport/sync', adminOnly, (_req, res) => {
+pingRouter.post('/vcport/sync', adminOnly, (req, res) => {
+  if (denyScopedBulk(req, res, 'vCenter 포트 대상 동기화')) return;
   const r = syncVcPortTargets(vcenterList());
   res.status(r.ok ? 200 : 400).json(r);
 });

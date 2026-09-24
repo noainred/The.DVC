@@ -5,7 +5,7 @@ import { mergeScopedIds, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
 import { logAudit } from '../../audit.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드(단일 소스)
-import { store } from '../../store.js';
+import { store, usageReadable } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { scanOrphanDisks } from '../../vcenter/orphanScan.js';   // v2.505: 고아 VMDK 탐지(라이브)
 import { fetchVmMetric, fetchVmRightsizeSeries, fetchVmsRightsizeBatch, fetchVmsUsageBatch, fetchHostsPerfSeries, PERF_INTERVALS } from '../../vcenter/soapClient.js';
@@ -49,9 +49,15 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
   const key = (h) => `${h.vcenterId}|${h.cluster || 'standalone'}`;
   for (const h of hosts) {
     const k = key(h);
-    const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, memTotalGB: 0, memUsedGB: 0, vcpuOn: 0, vcpuAll: 0, ramOnGB: 0, vmsOn: 0, vms: 0 };
-    c.hosts++; c.cores += h.cpuCores || 0; c.cpuTotalMhz += h.cpuTotalMhz || 0; c.cpuUsedMhz += h.cpuUsageMhz || 0;
-    c.memTotalGB += (h.memTotalMB || 0) / 1024; c.memUsedGB += (h.memUsageMB || 0) / 1024;
+    const c = byCluster.get(k) || { vcenterId: h.vcenterId, cluster: h.cluster || 'standalone', hosts: 0, excluded: 0, cores: 0, cpuTotalMhz: 0, cpuUsedMhz: 0, cpuTR: 0, memTotalGB: 0, memUsedGB: 0, memTR: 0, vcpuOn: 0, vcpuAll: 0, ramOnGB: 0, vmsOn: 0, vms: 0 };
+    c.hosts++; c.cores += h.cpuCores || 0; c.cpuTotalMhz += h.cpuTotalMhz || 0;
+    c.memTotalGB += (h.memTotalMB || 0) / 1024;
+    // v2.606(감사 WEB2606-02): 사용량·사용률은 사용량을 읽을 수 있는 호스트만(용량 합계는 전부) — store.usageReadable(v2.594)
+    // 과 같은 기준. 끊긴 호스트의 총량을 분모에 넣으면 사용률이 그만큼 낮아 보인다.
+    if (usageReadable(h)) {
+      c.cpuUsedMhz += h.cpuUsageMhz || 0; c.cpuTR += h.cpuTotalMhz || 0;
+      c.memUsedGB += (h.memUsageMB || 0) / 1024; c.memTR += (h.memTotalMB || 0) / 1024;
+    } else c.excluded++;
     byCluster.set(k, c);
   }
   for (const v of vms) {
@@ -67,8 +73,9 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
     vcpuAllocated: c.vcpuOn, vcpuTotal: c.vcpuAll, ramAllocatedGB: Math.round(c.ramOnGB),
     vcpuPerCore: c.cores ? r1(c.vcpuOn / c.cores) : 0,
     ramOvercommitPct: c.memTotalGB ? Math.round((c.ramOnGB / c.memTotalGB) * 100) : 0,
-    cpuUsedPct: c.cpuTotalMhz ? Math.round((c.cpuUsedMhz / c.cpuTotalMhz) * 100) : 0,
-    memUsedPct: c.memTotalGB ? Math.round((c.memUsedGB / c.memTotalGB) * 100) : 0,
+    cpuUsedPct: c.cpuTR ? Math.round((c.cpuUsedMhz / c.cpuTR) * 100) : null,
+    memUsedPct: c.memTR ? Math.round((c.memUsedGB / c.memTR) * 100) : null,
+    hostsUsageExcluded: c.excluded,
     ramHeadroomGB: Math.round(c.memTotalGB - c.ramOnGB),
   })).sort((a, b) => b.ramOvercommitPct - a.ramOvercommitPct);
   const sum = (f) => clusters.reduce((a, x) => a + f(x), 0);
@@ -76,7 +83,7 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
     scope: vcId || 'all',
     clusters,
     totals: {
-      clusters: clusters.length, hosts: sum((c) => c.hosts), cores: sum((c) => c.cores),
+      clusters: clusters.length, hosts: sum((c) => c.hosts), hostsUsageExcluded: sum((c) => c.hostsUsageExcluded), cores: sum((c) => c.cores),
       memTotalGB: sum((c) => c.memTotalGB), vcpuAllocated: sum((c) => c.vcpuAllocated), ramAllocatedGB: sum((c) => c.ramAllocatedGB),
       vcpuPerCore: sum((c) => c.cores) ? r1(sum((c) => c.vcpuAllocated) / sum((c) => c.cores)) : 0,
       ramHeadroomGB: sum((c) => c.ramHeadroomGB),
