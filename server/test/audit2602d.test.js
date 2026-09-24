@@ -14,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2602d-'));
 process.env.CONFIG_DIR = TMP;
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
+process.env.DATA_SOURCE = 'live';
 
 const listen = (srv) => new Promise((ok) => srv.listen(0, '127.0.0.1', () => ok(srv.address().port)));
 const json = (r, o, s = 200) => { r.writeHead(s, { 'content-type': 'application/json' }); r.end(JSON.stringify(o)); };
@@ -155,4 +156,28 @@ test('EDGE2602-05: PDU 지금 수집이 실패해도 결과(실패 스냅샷)를
     assert.equal(res.collected, 0);          // 수집은 실패했다(닫힌 포트)
     assert.ok(posts.some((u) => u.startsWith('/api/central/pdu-data')), `push 없음: ${JSON.stringify(posts)}`);
   } finally { Object.assign(config.agent, prev); srv.close(); }
+});
+
+test('LEFT2602-04 후속: iDRAC 폴러는 부분 합 전력을 적재하지 않고 결과·lastRun 에 밝힌다', async () => {
+  const srv = http.createServer((q, r) => {
+    if (q.url === '/redfish/v1/Chassis') return json(r, { Members: [{ '@odata.id': '/redfish/v1/Chassis/A' }, { '@odata.id': '/redfish/v1/Chassis/B' }] });
+    if (q.url === '/redfish/v1/Chassis/A/Power') return json(r, { PowerControl: [{ PowerConsumedWatts: 300 }] });
+    if (q.url === '/redfish/v1/Chassis/B/Power') return json(r, { error: 'x' }, 503);
+    return json(r, {}, 404);
+  });
+  const port = await listen(srv);
+  fs.writeFileSync(path.join(TMP, 'idrac.json'), JSON.stringify({ servers: [
+    { id: 'idr-part', name: 'IDR-PART', type: 'idrac', host: `http://127.0.0.1:${port}`, username: 'root', password: 'pw', enabled: true },
+  ] }));
+  try {
+    const { pollNow } = await import('../src/idrac/poller.js');
+    const { getDb } = await import('../src/idrac/db.js');
+    const last = await pollNow({ manual: true });
+    const r = last.results.find((x) => x.id === 'idr-part');
+    assert.equal(r?.powerPartial, true, JSON.stringify(r));
+    assert.equal(r.powerNotStored, true);
+    assert.equal(last.powerPartial, 1);
+    const db = await getDb();
+    assert.equal(db.latest('idr-part'), null, '부분 합(300W)을 그 서버의 전체 전력으로 적재하면 안 된다');
+  } finally { srv.close(); }
 });

@@ -157,7 +157,9 @@ async function pollOnceInner({ manual = false } = {}) {
         // 종속될 이유는 없다. 실패 사유는 results 에 남겨 '지금 폴' 응답에서 보이게 한다.
         let powerErr = null;
         const r = await fetchPower(s).catch((e) => { powerErr = e; return null; });
-        if (r && r.watts != null) samples.push({ serverId: s.id, watts: r.watts, ts });
+        // v2.602(LEFT2602-04 후속): 섀시 일부의 Power 조회가 실패한 **부분 합**은 적재하지 않는다 — 전력 대시보드·
+        //   시간당 롤업이 그것을 그 서버의 전체 전력으로 그린다(오류 없이 틀린 값). 사실은 results·lastRun 에 밝힌다.
+        if (r && r.watts != null && !r.partial) samples.push({ serverId: s.id, watts: r.watts, ts });
         // v2.590: 자격증명 거부면 **이번 주기의 나머지(센서·인벤토리)도 시도하지 않고** 정지를 기록한다 —
         // 같은 계정이라 결과가 같고, 폴백 3단(Basic·Digest·세션)이 요청마다 실패 인증을 더한다.
         if (powerErr && isIdracAuthError(powerErr)) {
@@ -210,6 +212,7 @@ async function pollOnceInner({ manual = false } = {}) {
         }
         results.push({
           id: s.id, name: s.name, type: 'idrac', watts: r ? r.watts : null,
+          ...(r?.partial ? { powerPartial: true, failedChassis: r.failedChassis, powerPartialReason: r.failedReason || '', powerNotStored: true } : {}),
           ...(powerErr ? { error: describeError(powerErr).message } : {}),
           ...(sensorErr ? { sensorError: describeError(sensorErr).message } : {}),
         });
@@ -241,7 +244,9 @@ async function pollOnceInner({ manual = false } = {}) {
   const failed = results.filter((r) => r.error).length;
   // ok 는 '성공' 만 센다 — 정지로 건너뛴 서버(authStopped·error 없음)를 성공으로 세면 거짓이다(v2.590).
   const okCount = results.filter((r) => !r.error && !r.authStopped).length;
-  lastRun = { at: ts, ok: okCount, failed, results, notPolled, authStopped: results.filter((r) => r.authStopped).length, authSkipped, manual };
+  lastRun = { at: ts, ok: okCount, failed, results, notPolled, authStopped: results.filter((r) => r.authStopped).length, authSkipped, manual,
+    powerPartial: results.filter((r) => r.powerPartial).length };   // v2.602: 부분 합이라 적재하지 않은 서버 수
+  if (lastRun.powerPartial) console.warn(`[idrac] poll: 섀시 일부의 Power 조회 실패로 부분 합이 된 서버 ${lastRun.powerPartial}대 — 전력 적재를 건너뛰었습니다`);
   if (failed) console.warn(`[idrac] poll: ${okCount}/${results.length} 성공${authSkipped ? ` · 인증 실패 정지로 건너뜀 ${authSkipped}` : ''}`);
   // v2.548 F7: 인벤토리가 하나라도 갱신됐으면 파트 장애 판정(중앙)/push(엣지)를 즉시 트리거한다 —
   //   탐지 지연을 '인벤토리 주기 + 몇 초' 로 줄인다(v2.547 은 최대 ~50분). 디바운스는 훅이 한다.

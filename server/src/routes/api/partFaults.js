@@ -35,7 +35,7 @@ import { mergeEdgeReports } from '../../central/partFaultEdge.js';
 import { listCollectors } from '../../collector/registry.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { config, currentVersion } from '../../config.js';
-import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName, scrubHosts } from '../../auth/addressMask.js';
+import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName, scrubberFor } from '../../auth/addressMask.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -156,8 +156,10 @@ export function maskPartRow(r, match, hosts = []) {
     pk = pk.replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, (ip) => maskedIdToken(ip));
     out.partKey = pk;
   }
+  const scrub = scrubberFor(hosts || []);
   for (const f of ['detail', 'label', 'rawState']) {
-    if (typeof out[f] === 'string') out[f] = scrubHosts(out[f], [...raws, ...hosts]);
+    // v2.602 RECENT2602-01: 주소 목록의 치환기는 목록당 한 번(scrubberFor 캐시) — 행의 원문(raws)만 더한다.
+    if (typeof out[f] === 'string') out[f] = scrub(out[f], raws);
   }
   return out;
 }

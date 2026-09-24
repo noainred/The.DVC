@@ -407,6 +407,14 @@ export function normalizePowermax(device, raw) {
   return snap;
 }
 
+/**
+ * v2.602(RECENT2602-02 후속): 경보 조회가 **오류**면 미해결 수는 0 이 아니라 모른다(null) — emptySnapshot 기본값 0 을
+ * 그대로 두면 화면 합계가 '경보 0건' 으로 읽는다. 섹션의 오류 문구는 그대로 둔다(사유).
+ */
+function alertsUnknownIfFailed(out) {
+  if (/^오류/.test(String(out.sections?.alerts || '')) && out.alerts) out.alerts.unresolved = null;
+}
+
 export async function collect(device, { signal = null } = {}) {
   const get = makeGetter(device, { port: Number(process.env.STORAGE_UNISPHERE_PORT) || 8443, signal });
   const raw = { caps: {}, srps: {} };
@@ -489,10 +497,12 @@ export async function collect(device, { signal = null } = {}) {
     const out = normalizePowermax(device, raw);
     out.error = e.message;
     for (const [k, v] of Object.entries(snap.sections)) if (String(v).includes('오류')) out.sections[k] = v;
+    alertsUnknownIfFailed(out);
     return out;
   }
   const out = normalizePowermax(device, raw);
   for (const [k, v] of Object.entries(snap.sections)) if (String(v).includes('오류')) out.sections[k] = v;
+  alertsUnknownIfFailed(out);
   if (raw.srpError) out.extra.srpError = String(raw.srpError).slice(0, 200);
   return out;
 }
