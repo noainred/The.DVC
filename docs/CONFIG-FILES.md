@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **174개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **180개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-24)
@@ -43,6 +43,7 @@
 | `capture-history.json` | 설정 | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 | ✅ |  | ✅ | net/captureHistory.js |
 | `capture-monitors.json` | 설정 | 연속 네트워크 모니터링 — 두 서버 간 캡처를 주기적으로 자동 실행해 이력에 기록하고, 경로 | ✅ |  | ✅ | net/monitor.js |
 | `central-agent-config.json` | 설정 | 엣지 포탈(에이전트) 설정 저장소 — 에이전트가 push한 자기 CONFIG_DIR 설정을 보관한다. |  | ✅ |  | central/agentConfig.js |
+| `central-agent-cvp.json` | 설정 | 엣지가 push 한 CloudVision(CVP) 수집 **상태** 보관 + 수신 정제(v2.608). |  |  |  | central/cvpEdge.js |
 | `central-agent-gpu-guest.json` | 설정 | 중앙에서 지정하는 'agent(엣지)별 GPU 게스트 수집 설정' 저장소. | ✅ | ✅ | ✅ | central/agentGpuGuestConfig.js |
 | `central-agent-sanswitch-perf.json` | 설정 | 엣지가 보고한 **포트 사용량 수집 상태**의 중앙 보관(v2.517, | ✅ | ✅ | ✅ | central/sanSwitchPerfEdge.js |
 | `central-agent-sanswitch.json` | 설정 | 엣지들이 push 한 SAN 스위치 스냅샷의 중앙 보관(v2.410). |  |  |  | central/sanSwitchEdge.js |
@@ -60,6 +61,11 @@
 | `curuser-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | curuser/activityLog.js |
 | `curuser-settings.json` | 설정 | '현재 사용자' 수집 설정(v2.520). | ✅ | ✅ | ✅ | curuser/settings.js |
 | `curuser.db` | DB | '현재 사용자' 전용 시계열 DB(v2.520). |  |  | ✅ | curuser/db.js |
+| `cvp-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | cvp/poller.js |
+| `cvp-push.json` | 설정 | 엣지 → 중앙 CloudVision(CVP) 수집 결과 push(v2.608). | ✅ |  | ✅ | cvp/push.js |
+| `cvp-servers.json` | 설정 | Arista CloudVision(CVP) 서버 등록부(v2.608). | ✅ | ✅ | ✅ | cvp/registry.js |
+| `cvp-settings.json` | 설정 | CloudVision(CVP) 수집 설정(v2.608). 파일: CONFIG_DIR/cvp-settings.json(비밀 없음). | ✅ | ✅ | ✅ | cvp/settings.js |
+| `cvp.db` | DB | CloudVision(CVP) 수집 전용 DB(v2.608, 사용자 요청 "데이터 용량이 많으니까 별도의 DB 로"). |  |  | ✅ | cvp/db.js |
 | `daily-report.json` | 설정 | 일일 헬스체크 리포트 발송 스케줄러 — 매일 지정 시각(HH:MM)에 computeHealthReport 결과를 | ✅ | ✅ | ✅ | reports/dailyReport.js |
 | `datacenters.json` | 설정 | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | ✅ | ✅ |  | datacenter/store.js |
 | `db-location.json` | 설정 | 시계열 DB 저장 경로(dbDir) |  |  |  | insights/dbLocation.js |

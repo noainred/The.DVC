@@ -44,7 +44,8 @@ export const CATS = Object.freeze([
   { id: 'gpu', label: 'GPU', test: /^central:\/gpu-guest-(data|config)$/ },
   { id: 'power', label: '전력·PDU', test: /^central:\/pdu-(data|config)$/ },
   { id: 'storage', label: '스토리지', test: /^central:\/(storage-(data|config)|bmstor-(jobs|result))$|^collector:\/bmstor-collect$/ },
-  { id: 'san', label: 'SAN 스위치', test: /^central:\/sanswitch-(data|config|perf|test-result)$/ },
+  // v2.608: Arista CloudVision(CVP) 도 같은 '스위치' 칸에 둔다(웹 CAT_COLOR 에 새 칸을 만들지 않으려고 — 라벨이 그 사실을 말한다).
+  { id: 'san', label: 'SAN·네트워크 스위치', test: /^central:\/(sanswitch-(data|config|perf|test-result)|cvp-(data|config))$/ },
   { id: 'watch', label: '장애·감시', test: /^central:\/(part-faults|partfault-config|svcmon-(config|config-ack|report)|link-check(-config)?|ping-(jobs|result))$|^collector:\/ping$/ },
   { id: 'users', label: '사용자·세션', test: /^central:\/(curuser(-config)?|users-config)$/ },
   { id: 'ops', label: '운영 작업', test: /^central:\/(capture-(jobs|result)|rma-(poll|result|credential)|log-quer(ies|y-result)|edge-log-(jobs|result)|result)$|^collector:\/edge-log$/ },

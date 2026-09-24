@@ -22,21 +22,21 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **830개** |
+| 엔드포인트 | **844개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 78개 |
-| GET | 433개 |
-| POST | 264개 |
-| PUT | 85개 |
+| 라우트 파일 | 79개 |
+| GET | 440개 |
+| POST | 268개 |
+| PUT | 87개 |
 | PATCH | 2개 |
-| DELETE | 46개 |
+| DELETE | 47개 |
 
 | 그룹 | 엔드포인트 | 설명 |
 |---|---:|---|
 | [`/api/collector`](#apicollector) | 9 | 엣지(수집 서버)가 **자기 데이터를 내주는** 경로. 수집 토큰(`X-Collector-Token`) 게이트이고 사용자 세션을 타지 않는다. |
 | [`/api/capacity`](#apicapacity) | 3 | 리소스 적정성 진단. 라우터가 스스로 `adminOnly` 를 건다. |
 | [`/api/insights`](#apiinsights) | 16 | FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePerm('insights')`. |
-| [`/api/central`](#apicentral) | 49 | 엣지 → 중앙 **push·pull** 경로. 개별/공유 중앙 토큰 게이트이며 라우터 미들웨어가 토큰↔agent 일치를 강제한다. |
+| [`/api/central`](#apicentral) | 51 | 엣지 → 중앙 **push·pull** 경로. 개별/공유 중앙 토큰 게이트이며 라우터 미들웨어가 토큰↔agent 일치를 강제한다. |
 | [`/api/upgrade`](#apiupgrade) | 8 | 자동 업그레이드 제어(번들 수신·적용). |
 | [`/api/remote`](#apiremote) | 19 | 원격 접속(HAProxy/SSH/RDP 중계). |
 | [`/api/svcmon`](#apisvcmon) | 56 | 성능점검(서비스 모니터링). 마운트에서 `requirePerm('svcmon')` — v2.506 에 추가된 게이트다. |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 326 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 338 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -109,38 +109,40 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| POST | `/agent-config` | — | [server/src/routes/central.js:1709](../server/src/routes/central.js#L1709) |
+| POST | `/agent-config` | — | [server/src/routes/central.js:1774](../server/src/routes/central.js#L1774) |
 | GET | `/assignment` | — | [server/src/routes/central.js:375](../server/src/routes/central.js#L375) |
-| GET | `/bmstor-jobs` | — | [server/src/routes/central.js:1791](../server/src/routes/central.js#L1791) |
-| POST | `/bmstor-result` | — | [server/src/routes/central.js:1797](../server/src/routes/central.js#L1797) |
+| GET | `/bmstor-jobs` | — | [server/src/routes/central.js:1856](../server/src/routes/central.js#L1856) |
+| POST | `/bmstor-result` | — | [server/src/routes/central.js:1862](../server/src/routes/central.js#L1862) |
 | POST | `/capacity-report` | — | [server/src/routes/central.js:519](../server/src/routes/central.js#L519) |
-| GET | `/capture-jobs` | — | [server/src/routes/central.js:1770](../server/src/routes/central.js#L1770) |
-| POST | `/capture-result` | — | [server/src/routes/central.js:1776](../server/src/routes/central.js#L1776) |
+| GET | `/capture-jobs` | — | [server/src/routes/central.js:1835](../server/src/routes/central.js#L1835) |
+| POST | `/capture-result` | — | [server/src/routes/central.js:1841](../server/src/routes/central.js#L1841) |
 | POST | `/curuser` | — | [server/src/routes/central.js:911](../server/src/routes/central.js#L911) |
 | GET | `/curuser-config` | — | [server/src/routes/central.js:957](../server/src/routes/central.js#L957) |
+| GET | `/cvp-config` | — | [server/src/routes/central.js:1669](../server/src/routes/central.js#L1669) |
+| POST | `/cvp-data` | — | [server/src/routes/central.js:1690](../server/src/routes/central.js#L1690) |
 | GET | `/edge-log-jobs` | — | [server/src/routes/central.js:1260](../server/src/routes/central.js#L1260) |
 | POST | `/edge-log-result` | — | [server/src/routes/central.js:1269](../server/src/routes/central.js#L1269) |
 | POST | `/fleet` | — | [server/src/routes/central.js:989](../server/src/routes/central.js#L989) |
 | GET | `/gpu-guest-config` | — | [server/src/routes/central.js:1191](../server/src/routes/central.js#L1191) |
 | POST | `/gpu-guest-data` | — | [server/src/routes/central.js:1111](../server/src/routes/central.js#L1111) |
 | POST | `/guest-disk` | — | [server/src/routes/central.js:774](../server/src/routes/central.js#L774) |
-| GET | `/health-probe` | — | [server/src/routes/central.js:1876](../server/src/routes/central.js#L1876) |
+| GET | `/health-probe` | — | [server/src/routes/central.js:1941](../server/src/routes/central.js#L1941) |
 | GET | `/idrac-scan-jobs` | — | [server/src/routes/central.js:1048](../server/src/routes/central.js#L1048) |
 | POST | `/idrac-scan-progress` | — | [server/src/routes/central.js:1056](../server/src/routes/central.js#L1056) |
 | POST | `/idrac-scan-result` | — | [server/src/routes/central.js:1068](../server/src/routes/central.js#L1068) |
 | POST | `/inventory` | — | [server/src/routes/central.js:672](../server/src/routes/central.js#L672) |
-| GET | `/ip-scan-assignment` | — | [server/src/routes/central.js:1814](../server/src/routes/central.js#L1814) |
-| POST | `/ip-scan-result` | — | [server/src/routes/central.js:1825](../server/src/routes/central.js#L1825) |
-| POST | `/link-check` | — | [server/src/routes/central.js:1892](../server/src/routes/central.js#L1892) |
-| GET | `/link-check-config` | — | [server/src/routes/central.js:1922](../server/src/routes/central.js#L1922) |
-| GET | `/log-queries` | — | [server/src/routes/central.js:1740](../server/src/routes/central.js#L1740) |
-| POST | `/log-query-result` | — | [server/src/routes/central.js:1749](../server/src/routes/central.js#L1749) |
+| GET | `/ip-scan-assignment` | — | [server/src/routes/central.js:1879](../server/src/routes/central.js#L1879) |
+| POST | `/ip-scan-result` | — | [server/src/routes/central.js:1890](../server/src/routes/central.js#L1890) |
+| POST | `/link-check` | — | [server/src/routes/central.js:1957](../server/src/routes/central.js#L1957) |
+| GET | `/link-check-config` | — | [server/src/routes/central.js:1987](../server/src/routes/central.js#L1987) |
+| GET | `/log-queries` | — | [server/src/routes/central.js:1805](../server/src/routes/central.js#L1805) |
+| POST | `/log-query-result` | — | [server/src/routes/central.js:1814](../server/src/routes/central.js#L1814) |
 | POST | `/part-faults` | — | [server/src/routes/central.js:1235](../server/src/routes/central.js#L1235) |
 | GET | `/partfault-config` | — | [server/src/routes/central.js:1301](../server/src/routes/central.js#L1301) |
 | GET | `/pdu-config` | — | [server/src/routes/central.js:1390](../server/src/routes/central.js#L1390) |
 | POST | `/pdu-data` | — | [server/src/routes/central.js:1410](../server/src/routes/central.js#L1410) |
-| GET | `/ping-jobs` | — | [server/src/routes/central.js:1678](../server/src/routes/central.js#L1678) |
-| POST | `/ping-result` | — | [server/src/routes/central.js:1688](../server/src/routes/central.js#L1688) |
+| GET | `/ping-jobs` | — | [server/src/routes/central.js:1743](../server/src/routes/central.js#L1743) |
+| POST | `/ping-result` | — | [server/src/routes/central.js:1753](../server/src/routes/central.js#L1753) |
 | POST | `/register-collector` | — | [server/src/routes/central.js:388](../server/src/routes/central.js#L388) |
 | POST | `/result` | — | [server/src/routes/central.js:468](../server/src/routes/central.js#L468) |
 | POST | `/rma-credential` | — | [server/src/routes/central.js:1598](../server/src/routes/central.js#L1598) |
@@ -155,7 +157,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/svcmon-config` | — | [server/src/routes/central.js:563](../server/src/routes/central.js#L563) |
 | POST | `/svcmon-config-ack` | — | [server/src/routes/central.js:579](../server/src/routes/central.js#L579) |
 | POST | `/svcmon-report` | — | [server/src/routes/central.js:494](../server/src/routes/central.js#L494) |
-| GET | `/users-config` | — | [server/src/routes/central.js:1667](../server/src/routes/central.js#L1667) |
+| GET | `/users-config` | — | [server/src/routes/central.js:1732](../server/src/routes/central.js#L1732) |
 | POST | `/vmseries` | — | [server/src/routes/central.js:849](../server/src/routes/central.js#L849) |
 | GET | `/vmseries-config` | — | [server/src/routes/central.js:977](../server/src/routes/central.js#L977) |
 
@@ -721,6 +723,18 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/curuser/history` | 권한 `tools` | [server/src/routes/api/curUser.js:79](../server/src/routes/api/curUser.js#L79) |
 | GET | `/tools/curuser/settings` | 권한 `tools` | [server/src/routes/api/curUser.js:136](../server/src/routes/api/curUser.js#L136) |
 | PUT | `/tools/curuser/settings` | 역할 `admin` | [server/src/routes/api/curUser.js:176](../server/src/routes/api/curUser.js#L176) |
+| GET | `/tools/cvp` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:75](../server/src/routes/api/cvp.js#L75) |
+| POST | `/tools/cvp/collect` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:153](../server/src/routes/api/cvp.js#L153) |
+| GET | `/tools/cvp/device` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:115](../server/src/routes/api/cvp.js#L115) |
+| GET | `/tools/cvp/devices` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:103](../server/src/routes/api/cvp.js#L103) |
+| GET | `/tools/cvp/port-series` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:138](../server/src/routes/api/cvp.js#L138) |
+| GET | `/tools/cvp/servers` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:171](../server/src/routes/api/cvp.js#L171) |
+| POST | `/tools/cvp/servers` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:184](../server/src/routes/api/cvp.js#L184) |
+| DELETE | `/tools/cvp/servers/:id` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:187](../server/src/routes/api/cvp.js#L187) |
+| PUT | `/tools/cvp/servers/:id` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:185](../server/src/routes/api/cvp.js#L185) |
+| POST | `/tools/cvp/servers/:id/test` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:196](../server/src/routes/api/cvp.js#L196) |
+| GET | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:223](../server/src/routes/api/cvp.js#L223) |
+| PUT | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:226](../server/src/routes/api/cvp.js#L226) |
 | GET | `/tools/data-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/dataFlow.js:62](../server/src/routes/api/dataFlow.js#L62) |
 | POST | `/tools/deep-search` | 권한 `tools` | [server/src/routes/api/checksLogs.js:40](../server/src/routes/api/checksLogs.js#L40) |
 | GET | `/tools/device-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/deviceFlow.js:29](../server/src/routes/api/deviceFlow.js#L29) |
@@ -1002,7 +1016,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
-| `fullScopeOnly` | 95 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
+| `fullScopeOnly` | 107 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
 | `requireSettingsOwner` | 34 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
 | `guarded` | 8 | 공개 API 전용 래퍼 — 허용 목록 검사 + 스냅샷 준비 + async throw 안전 처리. 미들웨어가 아니라 핸들러를 감싼 것이다. |
 | `authMiddleware` | 7 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |

@@ -1663,6 +1663,71 @@ centralRouter.post('/sanswitch-data', async (req, res) => {
   res.json({ ok: true, saved, ...(edgeDropSummary(withNotOwned(info, sanNotOwned))) });
 });
 
+// ── Arista CloudVision(CVP) 수집 위임(v2.608) — SAN 스위치와 같은 규약 ───────────────
+// GET /api/central/cvp-config?agent=<이름> — 이 엣지 몫 CVP 목록(자격증명 포함: 엣지가 CVP 에 로그인해야 한다) + 수집 설정 +
+// '지금 수집' 요청(claim→ack). 개별 토큰이면 바인딩 agent 불일치를 거부(자격증명 횡탈 차단).
+centralRouter.get('/cvp-config', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = strAgent(req.query.agent) || strAgent(req.get('X-Agent-Name'));
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
+    return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
+  }
+  const { serversForAgent } = await import('../cvp/registry.js');
+  const { loadSettings } = await import('../cvp/settings.js');
+  const { takeCvpRequests } = await import('../cvp/collectRequests.js');
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, agent, servers: serversForAgent(agent), settings: loadSettings(), collectNow: takeCvpRequests(agent) });
+});
+
+/**
+ * POST /api/central/cvp-data — 엣지가 수집한 CVP 결과(상태·장비 최신·원시 표본) 수신(v2.608).
+ * 저장 키는 **인증된 agent**(개별 토큰이면 바인딩 이름, 공유 토큰이면 본문 이름 — 레거시 신뢰 축과 같다).
+ * **소유 검사는 토큰 종류와 무관하게** 한다 — 그 이름에 위임된 CVP(serversForAgent)의 id 만 받는다(남의 cvp_id·중앙 직접 등록 CVP 거절).
+ * 원소는 central/cvpEdge.js sanitizeCvpBody 가 객체만·아는 필드만 좁힌다. 뺀 개수는 응답의 rejected/dropped 로 밝힌다.
+ */
+centralRouter.post('/cvp-data', async (req, res) => {
+  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
+  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const { serversForAgent } = await import('../cvp/registry.js');
+  const { sanitizeCvpBody, saveEdgeCvpStatus } = await import('../central/cvpEdge.js');
+  const cdb = await import('../cvp/db.js');
+  const owned = new Set(serversForAgent(agent).map((s) => String(s.id)));
+  const clean = sanitizeCvpBody(req.body, owned);
+  if (clean.dropped.notOwned) console.warn(`[central] cvp-data: ${String(agent).slice(0, 64)} 위임되지 않은 CVP 원소 ${clean.dropped.notOwned}건 거절`);
+  const chunk = Math.max(0, Math.floor(numOrNull(req.body?.chunk) ?? 0));
+  const saved = { devices: 0, ports: 0, samples: 0, duplicates: 0, removed: 0 };
+  if (chunk === 0) {
+    const st = saveEdgeCvpStatus(agent, clean.servers, { devicesUnavailable: clean.devicesUnavailable });
+    if (!st.ok) return res.status(429).json({ ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).' });
+    // 장비 목록 정리 — 엣지가 '온전히 읽은' CVP 의 키 목록을 보냈을 때만. 위임에서 빠진 CVP 의 행도 지운다.
+    if (clean.deviceKeys && !clean.devicesUnavailable) {
+      try { saved.removed = (await cdb.pruneDevices(agent, clean.deviceKeys, { cvpIds: [...owned] })).removed; }
+      catch (e) { console.warn(`[central] cvp-data: 장비 정리 실패(${String(agent).slice(0, 64)}): ${e.message}`); }
+    }
+  }
+  try {
+    for (const [cvpId, devices] of clean.devicesByCvp) {
+      const r = await cdb.saveDevices({ agent, cvpId, devices, samples: false });
+      saved.devices += r.devices; saved.ports += r.ports;
+      if (r.unavailable) saved.unavailable = true;
+    }
+    if (clean.touch.length) saved.touched = (await cdb.touchDevices(agent, clean.touch)).touched;
+    if (clean.rows.length) {
+      const r = await cdb.importSamples(agent, clean.rows);
+      saved.samples += r.inserted; saved.duplicates += r.duplicates;
+      if (r.unavailable) saved.unavailable = true;
+    }
+  } catch (e) {
+    console.warn(`[central] cvp-data: 적재 실패(${String(agent).slice(0, 64)}): ${e.message}`);
+    return res.status(500).json({ ok: false, reason: `중앙 DB 적재 실패: ${e.message}` });
+  }
+  res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })) });
+});
+
 // GET /api/central/users-config?agent=<이름>
 centralRouter.get('/users-config', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });

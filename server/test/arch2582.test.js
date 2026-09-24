@@ -87,6 +87,7 @@ test('ARCH-1 스윕 — configDir JSON 을 읽고 원자 쓰기로 저장하는 
     'central/fleet.js',                                   // 엣지 fleet push 캐시
     'metrics/vmperfDb.js', 'vmseries/db.js',              // _index.json(표시용 인덱스)
     'sanswitch/perfPush.js', 'sanswitch/store.js',        // push 커서·스냅샷 캐시
+    'cvp/push.js',                                        // v2.608 CVP push 커서 — 잃으면 처음부터 다시 보내고 중앙이 UNIQUE 로 중복을 거른다
     'idrac/scanLog.js', 'net/captureHistory.js',          // 이력 링버퍼(캐시 성격 — v2.516 활동 로그와 같은 판단)
     'auth/sessions.js',                                   // 세션 — 손상이면 재로그인(v2.580 판단)
     'bmusage/notify.js',                                  // 알림 억제 상태 — 손상이면 재알림 1회

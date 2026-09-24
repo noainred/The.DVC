@@ -36,6 +36,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   // 즉 거부하면 **엉뚱한 화면이 막히고** 정작 `forecast` 는 안 막히는 상태였다.
   'capacity-forecast': 'forecast',
   credentials: 'credentials',
+  cvp: 'cvp',                        // CvpTool.jsx 전용(v2.608) — Arista CloudVision 네트워크 스위치
   curuser: 'curuser',                // '현재 사용자'(v2.520) — CurrentUsers.jsx 전용 엔드포인트
   'deep-search': 'deepsearch',
   'duplicate-ips': 'dupip',
