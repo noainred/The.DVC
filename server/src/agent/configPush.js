@@ -5,14 +5,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { collectConfigDir, REDACTED_META, SKIPPED_META } from '../backup/service.js';
 
 let timer = null;
 let changeTimer = null;
-const PUSH_MS = Number(process.env.AGENT_CONFIG_PUSH_MS) || 1_800_000; // 30분
+const PUSH_MS = clampIntervalMs(Number(process.env.AGENT_CONFIG_PUSH_MS) || 1_800_000, 1_800_000, 60_000); // 30분 · v2.600 EDGE2600-05: 음수·2^31 초과 → 1ms 루프 차단
 
 // 재진입 가드(single-flight) — CLAUDE.md 성능 불변조건: setInterval(()=>asyncFn()) 폴러는
 // 이전 주기가 간격을 넘기면(고RTT·중앙 지연) 다음 틱이 겹쳐 돌아 연결·CPU 가 누적된다.

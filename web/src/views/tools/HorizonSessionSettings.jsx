@@ -17,6 +17,7 @@ import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { blankOr } from '../blankOr.js';
+import { hostText } from './addressHiddenText.js'; // v2.600 AUTHZ-2600-05
 
 const MIN = 60_000;
 
@@ -131,7 +132,7 @@ export function HorizonSessionSettings({ onClose }) {
                       <tr key={x.id}>
                         <td data-sort={on ? 1 : 0}><input type="checkbox" checked={on} onChange={(e) => setServer(x.id, e.target.checked)} /></td>
                         <td><b>{x.name}</b> <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{x.id}</span></td>
-                        <td style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>{x.host}</td>
+                        <td style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>{hostText(x.host)}</td>
                         <td style={{ fontSize: 11.5 }}>{x.enabled ? '활성' : '비활성(Horizon 등록에서 꺼짐)'}{x.hasPassword ? '' : ' · 비밀번호 없음'}</td>
                       </tr>
                     );

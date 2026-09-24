@@ -328,6 +328,22 @@ export function bannerText(scan) {
     return { tone: 'red', text: `${parts.join(' · ')} — 아래 목록의 위쪽부터 고치세요. 수집 토큰이 중앙 토큰과 같은 항목과 여러 엣지가 같은 값을 쓰는 항목이 가장 위험합니다.` };
   }
   if (measured === 0) {
+    /*
+     * v2.600 WEB2600-01: '돌리지 않았다' 와 '돌렸는데 아무도 답하지 않았다' 를 나눈다.
+     *   `measured` 는 **응답을 받은 행**만 세므로(서버 `ANSWERED_STATES`) 전 엣지가 연결 실패·시한
+     *   초과면 0 이다. 그때 '아직 돌리지 않았다' 고 말하면 사용자가 버튼을 다시 누르며 같은 결과를
+     *   되풀이한다. 판정은 서버가 행에 붙인 `probe.state` 를 **세기만** 한다.
+     */
+    const rows = scan?.rows || [];
+    const st = (r) => t(r?.probe?.state);
+    const noAnswer = rows.filter((r) => st(r) === 'unreachable' || st(r) === 'timeout').length;
+    const noToken = rows.filter((r) => st(r) === 'skip-no-token').length;
+    if (noAnswer || noToken) {
+      const parts = [];
+      if (noAnswer) parts.push(`**엣지 ${noAnswer}곳이 응답하지 않았습니다**(연결 실패·시한 초과) — 등록된 주소·포트·방화벽·엣지 기동 여부를 확인하세요`);
+      if (noToken) parts.push(`**${noToken}곳은 중앙에 저장된 수집 토큰이 없어 시도하지 않았습니다** — 설정 › 수집 서버에서 토큰을 저장하세요`);
+      return { tone: 'amber', text: `통신 점검을 돌렸지만 응답을 받은 엣지가 없습니다 — ${parts.join(' · ')}. 응답이 없으면 토큰이 맞는지는 알 수 없습니다(‘정상’ 도 ‘불일치’ 도 아닙니다).` };
+    }
     return { tone: 'gray', text: '아직 통신 점검을 돌리지 않았습니다 — **‘지금 점검’** 을 누르면 중앙에 저장된 토큰으로 각 엣지를 실제로 두드려 봅니다. 그 전까지의 판정은 저장값 대조(중복·값 위생)뿐입니다.' };
   }
   if (n(fc.warn)) {
@@ -368,6 +384,24 @@ export function tableFootnotes(scan, limits) {
     out.push('배포 대상 값은 **저장값끼리만 대조**합니다 — 그 값으로 엣지를 찔러보지 않습니다(틀린 토큰 시도는 엣지의 인증 거부 기록을 채워 실제 침입 흔적을 밀어냅니다).');
   }
   return out;
+}
+
+/**
+ * v2.600 WEB2600-03: 점검·인출(POST) 응답을 화면 데이터에 **덮어 얹는다**. POST 응답은 스캔 결과만
+ * 싣고 `limits`·`centralAuth`·`vocab`·`running` 은 GET 만 준다 — 통째로 바꾸면 그 값들이 사라진다.
+ * ⚠ 응답에 `undefined` 로 실린 키가 이전 값을 지우지 않게 정의된 키만 얹는다.
+ */
+export function mergeRunResult(prev, resp) {
+  const out = { ...(prev || {}) };
+  for (const [k, v] of Object.entries(resp || {})) if (v !== undefined) out[k] = v;
+  return out;
+}
+
+/** 요청 시한·동시성 표기 — 값이 없으면 단위를 붙이지 않는다('0초' 는 0 처럼 읽힌다). */
+export function limitsText(limits) {
+  const c = n(limits?.concurrency);
+  const ms = n(limits?.timeoutMs);
+  return `동시 ${c != null ? `${c}곳` : '—'} · 요청 시한 ${ms != null ? `${Math.round(ms / 1000)}초` : '—'}`;
 }
 
 /** '지금 점검' 응답 요약 — **중앙 즉시분과 건너뛴 것을 나눠** 말한다(v2.516 규약). */

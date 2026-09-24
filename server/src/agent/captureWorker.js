@@ -65,7 +65,9 @@ export async function runCaptureWorkerOnce() {
     const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) return await httpFail('인출', r);
     const { jobs } = await r.json();
-    if (!jobs || !jobs.length) return null;
+    // v2.600 EDGE2600-07: 인출이 성공했으면 잡이 0건이어도 상태를 갱신한다 — 예전에는 `return null` 로 끝나
+    //   한 번 받은 403 상태가 이후 정상 인출이 계속돼도 화면에 남았다(끈적한 오류).
+    if (!jobs || !jobs.length) { _last = { at: Date.now(), ok: true, jobs: 0 }; return null; }
     let postErr = null;
     {
       for (const job of jobs) {
@@ -79,6 +81,8 @@ export async function runCaptureWorkerOnce() {
               hostA: { host: s.host, port: s.port || 22, username: s.username, password: s.password, privateKey: s.privateKey || undefined },
               peer: s.peer, iface: s.iface || 'any', seconds: s.seconds, maxPackets: s.maxPackets, useSudo: s.useSudo !== false,
             });
+            // v2.600 CEN2600-09: 단일 캡처 결과에는 A 호스트가 없다 — 중앙 이력의 hostA 가 항상 빈 값이었다. 실은다.
+            if (result && typeof result === 'object' && typeof s.host === 'string') result = { ...result, hostA: s.host };
           }
         } catch (e) { result = { ok: false, reason: e.message }; }
         postErr = (await postResult(`${config.agent.centralUrl}/api/central/capture-result`, JSON.stringify({ reqId: job.reqId, result }), 20_000)) || postErr;

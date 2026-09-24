@@ -24,11 +24,19 @@ export function startAdaptiveTimer(getMs, fn, { firstDelayMs = 0, name = '', sub
   // 가져 피해는 없었지만, 이 유틸의 약속('틱이 겹쳐 쌓이지 않는다')이 깨져 있었다. 실행 중에는 재무장하지 않고
   // 끝날 때 getMs() 로 새 주기를 잡는다.
   let inFlight = false;
+  let warnedNaN = false;
   const arm = (ms) => {
     clearTimeout(timer);
     // 하한 1초 — 0/음수 주기로 이벤트 루프를 태우지 않게(설정 실수·시계 역행 방어).
     // 상한 약 24.8일 — setTimeout 은 2^31−1ms 를 넘으면 1ms 가 된다(v2.591 L2·L3).
-    timer = setTimeout(tick, Math.min(2_147_000_000, Math.max(1_000, ms)));
+    // v2.600 T2600-04: Math.max(1000, NaN) 은 NaN 이고 setTimeout(NaN) 은 1ms 다 — 하한 가드가 NaN·undefined 를
+    // 막지 못했다(현재 호출부는 전부 클램프해 도달하지 않는다 — 잠재). 숫자가 아니면 60초로 잡고 한 번 알린다.
+    let n = Number(ms);
+    if (!Number.isFinite(n)) {
+      if (!warnedNaN) { warnedNaN = true; console.warn(`[adaptive-timer] ${name || '(이름 없음)'} 주기가 숫자가 아닙니다(${String(ms)}) — 60초로 대신합니다.`); }
+      n = 60_000;
+    }
+    timer = setTimeout(tick, Math.min(2_147_000_000, Math.max(1_000, n)));
     timer.unref?.();
   };
   const tick = async () => {

@@ -27,7 +27,7 @@ import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../sto
 import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgent,
   envIntervals, runtimeIntervalSource, applyOwnIntervals } from '../../storage/intervals.js';
 
-import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents } from '../../auth/addressMask.js';
+import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, maskPollerStatus } from '../../auth/addressMask.js';
 import { latestMapByDevice } from '../../storage/latestSnapshots.js';
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
@@ -175,7 +175,8 @@ api.get('/tools/storage/activity', toolsPerm, fullScopeOnly, (req, res) => {
   // v2.599(AUTHZ-2599-03): 목록과 같은 기준 — 비-admin 에는 작업 로그의 관리 주소도 가린다.
   const admin = isAdminReq(req);
   const events = listActivity(Number(req.query.limit) || 100);
-  res.json({ poller: storagePollerStatus(), events: admin ? events : maskActivityEvents(events), ...(admin ? {} : { addressHidden: true }) });
+  const poller = storagePollerStatus();   // v2.600: poller(inFlight 이름)도 같은 기준으로
+  res.json({ poller: admin ? poller : maskPollerStatus(poller, listDevices().map((d) => d.host)), events: admin ? events : maskActivityEvents(events), ...(admin ? {} : { addressHidden: true }) });
 });
 
 /**
@@ -558,12 +559,21 @@ api.get('/tools/storage-growth', toolsPerm, fullScopeOnly, async (req, res) => {
   // 필요한 만큼만 읽는다 — 가장 긴 기간 + 여유 1일(기준선이 그 날 없을 수 있다).
   const sinceDay = asOfDay - (Math.max(...periods.map((p) => p.days)) + 1);
 
+  // v2.600 AUTHZ-2600-02: 형제 목록(/tools/storage)과 같은 기준으로 비-admin 에게 관리 주소를 가린다
+  // (이름이 주소와 같으면 이름도 — 목록이 쓰는 maskDeviceAddress 하나로). 가린 사실은 addressHidden.
+  const admin = isAdminReq(req);
+  const rawDevices = listDevices();
+  const hostById = new Map(rawDevices.map((d) => [d.id, d.host || '']));
+  const regDevices = admin ? rawDevices : rawDevices.map(maskDeviceAddress);
   const meta = new Map();
-  for (const d of listDevices()) meta.set(d.id, { name: d.name, type: d.type, host: d.host, datacenterId: d.datacenterId });
+  for (const d of regDevices) meta.set(d.id, { name: d.name, type: d.type, host: d.host, datacenterId: d.datacenterId });
   // 장비가 보고한 이름이 있으면 그것을 쓴다(v2.530 '장비' 열 규약과 같은 순서).
   for (const snap of [...localSnapshots(), ...edgeStorageSnapshots()]) {
     const id = snap.deviceId || snap.id;
-    if (id && snap.name && meta.has(id)) meta.set(id, { ...meta.get(id), name: snap.name });
+    if (!id || !meta.has(id)) continue;
+    // 장비 보고 이름도 주소와 같으면 가린다(스냅샷 host 가 없는 수집기라 등록부 주소를 넘긴다).
+    const nm = admin ? snap.name : maskSnapAddress({ deviceId: id, type: snap.type, name: snap.name }, hostById.get(id)).name;
+    if (nm) meta.set(id, { ...meta.get(id), name: nm });
   }
 
   const rows = await dailySeries(null, sinceDay);
@@ -607,7 +617,8 @@ api.get('/tools/storage-growth', toolsPerm, fullScopeOnly, async (req, res) => {
     types: STORAGE_TYPES.map((t) => ({ type: t.type, label: t.label })),
     datacenters: (() => { try { return listDatacenters(); } catch { return []; } })(),
     // 등록돼 있는데 이력이 한 줄도 없는 장비 — 화면이 '빠진 장비' 로 밝힌다(조용히 빼지 않는다).
-    noHistory: listDevices().filter((d) => !m.devices.some((x) => x.deviceId === d.id)).map((d) => ({ id: d.id, name: d.name, host: d.host, type: d.type, enabled: d.enabled !== false })),
+    noHistory: regDevices.filter((d) => !m.devices.some((x) => x.deviceId === d.id)).map((d) => ({ id: d.id, name: d.name, host: d.host, type: d.type, enabled: d.enabled !== false })),
+    ...(admin ? {} : { addressHidden: true }),
   });
 });
 
@@ -647,6 +658,29 @@ api.get('/tools/storage/history', toolsPerm, fullScopeOnly, async (req, res) => 
   const { spanMs, bucketMs, range } = usageRange(req.query);
   // 전체 합산은 버킷이 필수 — 12시간 구간이라도 10분 버킷으로 시각을 정렬한다.
   const b = bucketMs || 600_000;
-  res.json({ db: await dbAvailable(), range, spanMs, bucketMs: b, points: await capacityHistoryAll(Date.now() - spanMs, b) });
+  // v2.600 DB2600-01: 수집 주기(기본 1시간)가 버킷(10분)보다 길어, 버킷마다 관측된 장비만 더하면
+  // 점마다 일부 엣지만 합산된다. 장비마다 **담당 노드의 수집 주기 × 2** 까지 마지막 값을 이어 쓴다
+  // (주기는 중앙 배포값 — 숫자를 박지 않는다). 그보다 오래된 장비는 빠지고 점의 missing 이 밝힌다.
+  const envPoll = Number(envIntervals()?.pollMs) || 3_600_000;
+  const pollOf = new Map();
+  const staleByDevice = new Map();
+  for (const d of listDevices()) {
+    const agent = d.agent || '';
+    if (!pollOf.has(agent)) {
+      let v = null;
+      try { v = Number(intervalsForAgent(agent)?.pollMs); } catch { v = null; }
+      pollOf.set(agent, Number.isFinite(v) && v > 0 ? v : envPoll);
+    }
+    staleByDevice.set(d.id, 2 * pollOf.get(agent));
+  }
+  const now = Date.now();
+  const points = await capacityHistoryAll(now - spanMs, b, { nowMs: now, staleMs: 2 * envPoll, staleByDevice });
+  res.json({
+    db: await dbAvailable(), range, spanMs, bucketMs: b, points,
+    // 이 조회 구간에서 한 번이라도 관측된 장비 수 — 점의 devices 가 이보다 작으면 부분 합이다.
+    expectedDevices: points.expectedDevices ?? null,
+    carryMaxMs: Math.max(2 * envPoll, ...staleByDevice.values()),
+    truncated: points.truncated === true,
+  });
 });
 }

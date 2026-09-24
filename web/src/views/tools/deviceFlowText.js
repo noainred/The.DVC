@@ -6,6 +6,7 @@
  * ⚠ 문구에 백틱 금지(BoldText 는 **강조** 만 해석한다).
  */
 import { ageText, spanText, bytesText, STATE_LABEL as EDGE_STATE_LABEL, STATE_COLOR as EDGE_STATE_COLOR, REASON_TEXT } from './commMapText.js';
+import { unauthNote } from './dataFlowText.js';
 
 export { ageText, spanText, bytesText, EDGE_STATE_LABEL, EDGE_STATE_COLOR, REASON_TEXT };
 
@@ -125,6 +126,8 @@ export function headerNote(data = {}, now = Date.now()) {
   if (unreg) parts.push(`등록부에 없는 이름 ${unreg}개가 통신 기록에 있어 노드로 함께 그렸습니다.`);
   if (tot.unassignedDevices) parts.push(`어느 엣지에도 붙일 수 없는 장비 **${tot.unassignedDevices}대**는 아래에 따로 모았습니다.`);
   if (Number(data.rejectsWithoutTime) > 0) parts.push(`시각을 모르는 거부 ${data.rejectsWithoutTime}건은 선에 넣지 않았습니다.`);
+  const un = unauthNote(data, now);
+  if (un) parts.push(un);
   return parts.join(' ');
 }
 

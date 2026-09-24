@@ -16,6 +16,9 @@ export function nsxLimitNotes(managers = [], segments = []) {
     const name = m?.name || m?.id || '(이름 없음)';
     const lists = (Array.isArray(m?.listsTruncated) ? m.listsTruncated : []).map((k) => LIST_LABEL[k] || k);
     if (lists.length) out.push(`**${name}**: ${lists.join('·')} 목록이 페이지 상한에 걸려 끝까지 받지 못했습니다 — 표시된 개수는 하한입니다.`);
+    // v2.600(감사 COL-2600-06): 조회 자체가 실패한 목록 — 서버가 `listsFailed` 로 싣는다. 그 목록의 0 은 '없음' 이 아니다.
+    const failed = (Array.isArray(m?.listsFailed) ? m.listsFailed : []).map((k) => LIST_LABEL[k] || k);
+    if (failed.length) out.push(`**${name}**: ${failed.join('·')} 목록을 읽지 못했습니다 — 표시된 0 은 '없음' 이 아니라 **확인 불가**입니다(권한·API 버전·매니저 응답 확인).`);
     const fw = m?.firewall || {};
     const omitted = Number(fw.policiesOmitted);
     if (Number.isFinite(omitted) && omitted > 0) {

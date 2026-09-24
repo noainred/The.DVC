@@ -323,14 +323,20 @@ export function parseJsonLoose(text) {
  */
 export function toBytesOrNull(v) {
   const s = String(v ?? '').trim().replace(/,/g, '');
+  if (s.length > TO_BYTES_MAX_LEN) return null;   // v2.600(SEC2600-02): 형식 미상 — 0 이 아니라 '못 읽음'
   const r = toBytes(s);
   if (r !== 0) return r;
   return /^0+(\.0+)?(\s|$|[kKmMgGtTpPeEbB(])/.test(s) ? 0 : null;   // v2.596: '0B' 도 0
 }
 
+// v2.600(감사 SEC2600-02): 용량 셀로 받아들이는 최대 길이. 실제 표기(`117544396521472 (106.9T)`·`Size: 11.0T`)는
+//   30자 안팎이다 — 그보다 훨씬 긴 셀은 형식을 모르는 것(0 = 미상)으로 본다(장비 출력 한 셀로 루프를 멈추지 않게).
+const TO_BYTES_MAX_LEN = 256;
+
 export function toBytes(v) {
   const s = String(v ?? '').trim().replace(/,/g, '');
   if (!s || s === '-' || /^(n\/?a|none|unknown)$/i.test(s)) return 0;
+  if (s.length > TO_BYTES_MAX_LEN) return 0;
 
   // ⚠ v2.525 (사용자 신고 "unity 장비에 ssh 로 접속은 성공했는데, 수집하는 정보가 없어"):
   //   **uemcli 는 바이트와 사람용 표기를 함께 낸다** — `12094627905536 (11.0T)`.
@@ -344,7 +350,9 @@ export function toBytes(v) {
   const m = /^([\d.]+)\s*([kKmMgGtTpPeE])?(?:i?[bB])?$/.exec(s);
   if (!m) {
     // `11.0T (12094627905536)` 처럼 순서가 뒤바뀐 표기, 또는 `Size: 11.0T` 같은 접두가 붙은 값.
-    const any = /([\d.]+)\s*([kKmMgGtTpPeE])(?:i?[bB])?/.exec(s);
+    // ⚠ v2.600(감사 SEC2600-02 — 재현 60,000자 셀 7,979ms): 앵커 없는 `([\d.]+)\s*` 는 단위 없는 긴 숫자열에서
+    //   시작 위치마다 끝까지 다시 훑어 O(n²) 였다. 숫자·공백 길이에 상한을 둬 시작 위치당 작업을 상수로 묶는다.
+    const any = /((?:\d{1,30}(?:\.\d{0,12})?|\.\d{1,12}))\s{0,8}([kKmMgGtTpPeE])(?:i?[bB])?/.exec(s);
     if (!any) {
       const plain = /^(\d+)$/.exec(s);
       return plain ? Number(plain[1]) : 0;

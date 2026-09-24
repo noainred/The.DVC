@@ -19,6 +19,7 @@ import { findCollectorForAgent } from '../central/idracScanPush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { createAuthGuard } from '../util/authGuard.js';
 import { isSshAuthError } from '../proxy/sshExec.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 /**
  * 베어메탈 스토리지 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F2, server/CLAUDE.md v2.541 '아직 가드가 없는
@@ -58,6 +59,27 @@ export function bmPollerStatus() { return { running, lastRunAt, lastRunSummary, 
  * 폴링 위임 결과 반영(v2.341) — 엣지가 POST /api/central/bmstor-result 로 회신한 결과를
  * latest 에 쓴다(라우트가 reqId 소유권 검증 후 호출). 비밀번호는 결과에 없음(용량 수치만).
  */
+/*
+ * ⚠ v2.600 CEN2600-08 — 엣지 회신의 mounts·missing 은 **아는 필드만·상한 안에서** 담는다(v2.598 CENTRAL 규약).
+ * 예전에는 배열인지만 보고 통째로 latest 에 넣어 `usedPct:{x:1}` 같은 객체가 화면으로 가거나 3,000개 마운트가
+ * 그대로 상주했다. 모양은 `collect.js parseDfOutput` 의 행({mount,totalBytes,usedBytes,availBytes,usedPct})이다.
+ */
+const MAX_MOUNTS = 64;
+const mStr = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+export function sanitizeBmMounts(list) {
+  const out = [];
+  if (!Array.isArray(list)) return out;
+  for (const m of list) {
+    if (out.length >= MAX_MOUNTS) break;
+    if (!m || typeof m !== 'object') continue;
+    const mount = mStr(m.mount, 512);
+    if (!mount) continue;
+    out.push({ mount, totalBytes: numOrNull(m.totalBytes), usedBytes: numOrNull(m.usedBytes), availBytes: numOrNull(m.availBytes), usedPct: numOrNull(m.usedPct) });
+  }
+  return out;
+}
+const sanitizeMissing = (list) => (Array.isArray(list) ? list.filter((x) => typeof x === 'string' && x).slice(0, MAX_MOUNTS).map((x) => x.slice(0, 512)) : []);
+
 export function applyBmstorResults(agent, results) {
   const at = Date.now();
   let applied = 0;
@@ -66,9 +88,9 @@ export function applyBmstorResults(agent, results) {
     if (!r || !r.id) continue;
     const row = {
       ok: !!r.ok,
-      mounts: Array.isArray(r.mounts) ? r.mounts : [],
-      missing: Array.isArray(r.missing) ? r.missing : [],
-      error: r.error ? String(r.error) : null,
+      mounts: sanitizeBmMounts(r.mounts),
+      missing: sanitizeMissing(r.missing),
+      error: typeof r.error === 'string' && r.error ? r.error.slice(0, 500) : r.error ? '(형식 오류)' : null,
       at, agent: String(agent || ''),
     };
     // v2.590: 엣지 회신의 자격증명 거부도 정지 기록에 반영한다(중앙이 다음 주기의 잡 대상에서 뺀다).

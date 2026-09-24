@@ -9,7 +9,7 @@ import {
   ROW_STATE, ROW_LABEL, ROW_TONE, rowState, PROBE_LABEL, PROBE_TONE,
   EDGE_FACT_LABEL, EDGE_FACT_TONE, DUP_LABEL, dupText, scopeLabel,
   FINDING_TEXT, findingLine, findingGroupLine, agentsText, fpText, fpLimitNote, bannerText, okRateText,
-  tableFootnotes, runSummary, evidenceText, centralAxisText, reasonTail,
+  tableFootnotes, runSummary, evidenceText, centralAxisText, reasonTail, mergeRunResult, limitsText,
 } from './tokenCheckText.js';
 
 describe('행 상태는 서버 값을 읽기만 한다', () => {
@@ -284,5 +284,38 @@ describe('사유를 이어 붙일 때 문장이 깨지지 않는다', () => {
     expect(reasonTail('')).toBe('.');
     expect(reasonTail(null)).toBe('.');
     expect(centralAxisText({ edge: { fact: 'unknown', selfProbe: {} } })).toBe('확인하지 못했습니다.');
+  });
+});
+
+describe('v2.600 WEB2600-01·03 — 점검 결과 표시', () => {
+  it('점검을 돌렸는데 전부 응답이 없으면 \'돌리지 않았다\' 고 말하지 않는다', () => {
+    const scan = { kpis: { total: 2, measured: 0, fault: 0 }, findingCounts: {},
+      rows: [{ probe: { state: 'unreachable' } }, { probe: { state: 'timeout' } }] };
+    const b = bannerText(scan);
+    expect(b.tone).toBe('amber');
+    expect(b.text).toContain('엣지 2곳이 응답하지 않았습니다');
+    expect(b.text).not.toContain('아직 통신 점검을 돌리지 않았습니다');
+    expect(b.text).not.toContain('정상입니다');
+  });
+  it('토큰이 없어 건너뛴 것도 따로 말한다', () => {
+    const b = bannerText({ kpis: { total: 1, measured: 0 }, findingCounts: {}, rows: [{ probe: { state: 'skip-no-token' } }] });
+    expect(b.text).toContain('수집 토큰이 없어');
+  });
+  it('프로브가 한 번도 없으면 예전처럼 \'지금 점검\' 을 안내한다', () => {
+    const b = bannerText({ kpis: { total: 1, measured: 0 }, findingCounts: {}, rows: [{ probe: { state: 'not-run' } }, {}] });
+    expect(b.tone).toBe('gray');
+    expect(b.text).toContain('지금 점검');
+  });
+  it('POST 응답을 얹어도 GET 이 준 limits·centralAuth 가 남는다', () => {
+    const prev = { rows: [1], limits: { concurrency: 4, timeoutMs: 8000 }, centralAuth: { requireAgentToken: true }, running: '' };
+    const merged = mergeRunResult(prev, { ok: true, probed: 3, rows: [1, 2], limits: undefined });
+    expect(merged.limits).toEqual({ concurrency: 4, timeoutMs: 8000 });
+    expect(merged.centralAuth.requireAgentToken).toBe(true);
+    expect(merged.rows).toEqual([1, 2]);
+    expect(merged.probed).toBe(3);
+  });
+  it('limits 가 없으면 단위를 붙이지 않는다(0초·?곳 금지)', () => {
+    expect(limitsText(undefined)).toBe('동시 — · 요청 시한 —');
+    expect(limitsText({ concurrency: 4, timeoutMs: 8000 })).toBe('동시 4곳 · 요청 시한 8초');
   });
 });

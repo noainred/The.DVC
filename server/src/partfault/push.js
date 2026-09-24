@@ -24,7 +24,7 @@
  */
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import { config, currentVersion } from '../config.js';
+import { config, currentVersion, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { runScan } from './scan.js';
 import { partFaultEnabled } from './settings.js';
@@ -34,7 +34,7 @@ const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.PARTFAULT_PUSH_GZIP !== 'false';
 /** 한 번에 올릴 장비 상한 — 넘치면 **버리지 않고 밝힌다**(조용한 상한 금지). */
 const MAX_DEVICES = Math.max(100, Number(process.env.PARTFAULT_PUSH_MAX_DEVICES) || 5_000);
-const intervalMs = () => Math.max(60_000, Number(process.env.PARTFAULT_PUSH_MS) || 10 * 60_000);
+const intervalMs = () => clampIntervalMs(Number(process.env.PARTFAULT_PUSH_MS) || 10 * 60_000, 10 * 60_000, 60_000); // v2.600 LO2600-04: 상한(2^31 초과 → setInterval 1ms 루프)
 
 let _timer = null;
 let _busy = false;

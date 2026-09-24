@@ -29,6 +29,7 @@ import { getDatacenterAssign } from '../../datacenter/store.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { listAssignments, getResults } from '../../central/assignments.js';
 import { adminOnly, requireSettingsOwner } from './shared.js';
+import { numOrNull } from '../../util/numOrNull.js';
 
 
 // Register iDRACs found by a scan, applying the shared credentials, then poll.
@@ -404,8 +405,9 @@ adminRouter.post('/idrac/scan-ranges/stop', adminOnly, (req, res) => {
 
 // 주기 스캔 간격 설정(시간 단위, 0=주기 끔·수동만). 저장 즉시 타이머 재적용, 업그레이드 후에도 유지.
 adminRouter.put('/idrac/scan-ranges/interval', adminOnly, (req, res) => {
-  const hours = Number(req.body?.hours);
-  if (!Number.isFinite(hours) || hours < 0 || hours > 720) return res.status(400).json({ ok: false, reason: '주기는 0~720 시간이어야 합니다(0=주기 끔).' });
+  // v2.600 LO2600-05: 빈 값·null 은 400 — Number('')===0 이라 빈 칸이 '주기 끔' 으로 저장됐다(명시적 0 만 끔).
+  const hours = numOrNull(req.body?.hours);
+  if (hours == null || hours < 0 || hours > 720) return res.status(400).json({ ok: false, reason: '주기는 0~720 시간이어야 합니다(0=주기 끔).' });
   const r = setIdracScanIntervalMs(Math.round(hours * 3_600_000));
   if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 주기 변경', target: `${hours}시간` });
   res.status(r.ok ? 200 : 500).json({ ...r, status: idracScanStatus() });

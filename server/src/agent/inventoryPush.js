@@ -64,12 +64,19 @@ async function pushVcenter(snap, vc) {
   return { bytes: json.length, gzBytes: body.length };
 }
 
+/** 이 vCenter 가 '수집 실패·대기인데 인벤토리가 비어 있는' 상태인가(보내면 중앙의 정상 목록을 지운다). */
+export function isUnreadEmpty(snap, vc) {
+  if (vc?.status !== 'unreachable' && vc?.status !== 'pending') return false;
+  const has = (arr) => Array.isArray(arr) && arr.some((x) => x && x.vcenterId === vc.id);
+  return !has(snap?.hosts) && !has(snap?.vms);
+}
+
 export async function pushInventoryNow() {
   if (running) return { ok: false, reason: '이전 push 진행 중(겹침 방지)' };
   const snap = store.get();
   if (!snap?.vcenters?.length) return { ok: false, reason: '수집된 vCenter 없음' };
   running = true;
-  let sent = 0; let bytes = 0; let gzBytes = 0; let skippedMock = 0; const errors = [];
+  let sent = 0; let bytes = 0; let gzBytes = 0; let skippedMock = 0; const errors = []; const withheld = [];
   try {
     for (const vc of snap.vcenters) {
       if (!vc.id || vc.status === 'disabled' || vc.collectSource === 'site') continue; // 위임받은 건 재전송 안 함
@@ -83,12 +90,18 @@ export async function pushInventoryNow() {
         skippedMock++;
         continue;
       }
+      // ⚠ v2.600 EDGE2600-04: 인벤토리를 **읽지 못한** vCenter 의 빈 슬라이스는 보내지 않는다. 엣지 재시작 직후에는
+      //   lastGood 이 메모리에 없어 store 가 호스트·VM 을 비운 unreachable(또는 첫 수집 전 pending) 항목을 만드는데,
+      //   중앙 setInventory 는 cache 를 통째로 교체하므로 그 빈 목록이 **중앙의 마지막 정상 인벤토리를 지웠다**.
+      //   보내지 않으면 중앙은 그 vCenter 를 '마지막 push 가 오래됨(stale)' 으로 표시한다 — 모르는 것을 0 대로 칠하지 않는다.
+      if (isUnreadEmpty(snap, vc)) { withheld.push(vc.id); continue; }
       try { const r = await pushVcenter(snap, vc); sent++; bytes += r.bytes || 0; gzBytes += r.gzBytes || 0; }
       catch (e) { errors.push(`${vc.id}: ${e.message}`); console.warn(`[inv-push] ${vc.id} 실패: ${e.message}`); }
     }
   } finally { running = false; }
-  last = { at: Date.now(), sent, errors, bytes, gzBytes, skippedMock, gzip: PUSH_GZIP };
-  return { ok: errors.length === 0, sent, errors, bytes, gzBytes, skippedMock };
+  if (withheld.length) console.warn(`[inv-push] 인벤토리를 읽지 못한 vCenter ${withheld.length}개는 빈 목록으로 중앙을 덮지 않도록 보내지 않았습니다: ${withheld.slice(0, 10).join(', ')}`);
+  last = { at: Date.now(), sent, errors, bytes, gzBytes, skippedMock, withheld, gzip: PUSH_GZIP };
+  return { ok: errors.length === 0, sent, errors, bytes, gzBytes, skippedMock, withheld };
 }
 
 export function inventoryPushStatus() { return { enabled: !!(config.agent.pushInventory && config.agent.centralUrl), centralUrl: config.agent.centralUrl, intervalMs: config.agent.inventoryIntervalMs, last }; }

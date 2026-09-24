@@ -174,6 +174,8 @@ function clusterHealth(status) {
  * 규칙 페이지가 잘렸으면 `rulesPartial`(하한)로 밝힌다 — 부분 합을 전체라 말하지 않는다.
  */
 export function firewallSummary({ pols, dfw, ruleSets = [] }) {
+  // v2.600(감사 COL-2600-06): 정책 목록 조회 자체가 실패했으면 '정책 0개' 가 아니라 **모른다**(null)다.
+  if (pols?.failed) return { policies: null, rules: null, failed: true };
   const all = pols?.results || [];
   const total = listCount(pols);
   const omitted = Math.max(0, total - dfw.length);
@@ -192,6 +194,24 @@ export function firewallSummary({ pols, dfw, ruleSets = [] }) {
 }
 
 /**
+ * 목록 조회 실패의 표식(v2.600 감사 COL-2600-06). 예전에는 `.catch(() => ({ results: [] }))` 라 실패가(2페이지 이후 실패로
+ * 1페이지까지 버려진 경우 포함) **'0개'** 가 됐고 스냅샷에 아무 표시도 없었다 — '실패는 0 이 아니다' 규약 위반.
+ * 빈 결과는 유지하되(하위 map 이 그대로 돈다) `failed`·`error` 를 싣고, 매니저에 `listsFailed` 로 모은다.
+ */
+export function failedList(e) {
+  return { results: [], failed: true, error: String(e?.message || e || '조회 실패').slice(0, 200) };
+}
+
+/** [[이름, 목록]...] 중 실패한 것 — { listsFailed:[이름], listFailReasons:{이름:사유} }. */
+export function listFailures(pairs) {
+  const failed = (pairs || []).filter(([, l]) => l?.failed);
+  return {
+    listsFailed: failed.map(([k]) => k),
+    listFailReasons: Object.fromEntries(failed.map(([k, l]) => [k, l.error || ''])),
+  };
+}
+
+/**
  * Collect a normalized NSX snapshot from one real NSX Manager. Each sub-call is
  * best-effort: a missing/forbidden endpoint degrades that section instead of
  * failing the whole manager. The identity call (node) must succeed.
@@ -204,12 +224,12 @@ export async function collectFromNsx(mgr) {
   const node = await client.node(); // throws if auth/host is wrong → manager unreachable
   const [cluster, tnodes, t0, t1, segs, pols, grps] = await Promise.all([
     client.clusterStatus().catch(() => null),
-    client.transportNodes().catch(() => ({ results: [] })),
-    client.tier0s().catch(() => ({ results: [] })),
-    client.tier1s().catch(() => ({ results: [] })),
-    client.segments().catch(() => ({ results: [] })),
-    client.securityPolicies().catch(() => ({ results: [] })),
-    client.groups().catch(() => ({ results: [] })),
+    client.transportNodes().catch(failedList),
+    client.tier0s().catch(failedList),
+    client.tier1s().catch(failedList),
+    client.segments().catch(failedList),
+    client.securityPolicies().catch(failedList),
+    client.groups().catch(failedList),
   ]);
 
   const tn = (tnodes.results || []).map((n) => ({
@@ -334,12 +354,14 @@ export async function collectFromNsx(mgr) {
       // v2.599(감사 C2599-05): 페이지 상한에 걸려 끝까지 받지 못한 목록 — 그 개수는 하한이다(조용한 상한 금지).
       listsTruncated: [['transportNodes', tnodes], ['tier0s', t0], ['tier1s', t1], ['segments', segs], ['securityPolicies', pols], ['groups', grps]]
         .filter(([, l]) => l?.truncated).map(([k]) => k),
+      // v2.600(감사 COL-2600-06): 조회에 실패한 목록 — 그 개수는 0 이 아니라 확인 불가다.
+      ...listFailures([['transportNodes', tnodes], ['tier0s', t0], ['tier1s', t1], ['segments', segs], ['securityPolicies', pols], ['groups', grps]]),
     },
     gateways: [...mkGw(t0, 'T0'), ...mkGw(t1, 'T1')],
     segments,
     transportNodes: tn,
     firewall,
-    groups: listCount(grps),
+    groups: grps?.failed ? null : listCount(grps),   // v2.600(COL-2600-06): 조회 실패는 0 이 아니라 null
 
     dfw, securityGroups, ids,
   };

@@ -21,6 +21,7 @@ import { fetchJson, postJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox, SearchBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
+import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600-05
 import CollectActivity from './CollectActivity.jsx';
 import { Card } from './shared.jsx';
 import { unitText } from '../unitText.js';
@@ -142,6 +143,7 @@ export default function HorizonSessionsPanel() {
       )}
       <div style={{ fontSize: 11.5, color: 'var(--text-faint)', whiteSpace: 'normal', lineHeight: 1.55 }}>
         <BoldText text={TRUST_NOTE} /><br /><BoldText text={SESSION_PATH_NOTE} />
+        {addressHiddenNote(data) ? <><br />🔒 <BoldText text={addressHiddenNote(data)} /></> : null}
       </div>
 
       {/* Connection Server 별 — 행 클릭으로 전체↔서버 전환, 상태 배지 클릭으로 상세 */}
@@ -162,7 +164,7 @@ export default function HorizonSessionsPanel() {
               {servers.map((s) => (
                 <tr key={s.serverId} style={{ background: s.serverId === serverId ? 'var(--hover)' : undefined }}>
                   <td style={{ cursor: 'pointer' }} onClick={() => { setServerId(s.serverId === serverId ? '' : s.serverId); setHist(null); }}><b>{s.name || s.serverId}</b></td>
-                  <td style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>{s.host || '—'}</td>
+                  <td style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>{hostText(s.host)}</td>
                   <td data-sort={s.kind}>
                     {/* ⚠ 실패 사유를 툴팁에만 두지 말 것(v2.516) — 버튼으로 상세를 연다. */}
                     <button className="tab" style={{ padding: 0, border: 0, background: 'none' }} onClick={() => setDetail(s)}>
@@ -180,7 +182,7 @@ export default function HorizonSessionsPanel() {
               {(data?.pending || []).map((p) => (
                 <tr key={`p-${p.serverId}`}>
                   <td><b>{p.name}</b></td>
-                  <td style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>{p.host}</td>
+                  <td style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>{hostText(p.host)}</td>
                   <td><span style={{ fontSize: 11, color: 'var(--text-faint)' }}>수집 전</span></td>
                   <td colSpan={6} style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>아직 한 번도 수집되지 않았습니다 — '사용자 0명' 이 아닙니다.</td>
                 </tr>

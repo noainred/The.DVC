@@ -23,6 +23,7 @@ import DeviceFacetBar from './DeviceFacetBar.jsx';
 import { facetState, toggleIn } from './deviceFacets.js';
 const BmUsageChart = React.lazy(() => import('./BmUsageChart.jsx'));   // 추이 차트(v2.551)
 import BoldText from '../../components/boldText.jsx';
+import { addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600-08
 import { rangeOf } from './bmUsageChart.js';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark,
@@ -645,6 +646,10 @@ export function BmUsage() {
               {selRow.osHostName ? ` · OS ${selRow.osHostName}` : ''}
             </span>
           </h4>
+          {/* v2.600: 비-admin 에는 iDRAC·OS 주소가 비어 온다 — 왜 없는지 한 번 말한다. */}
+          {addressHiddenNote(data) && (
+            <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}>🔒 <BoldText text={addressHiddenNote(data)} /></p>
+          )}
           {/* iDRAC 이 무엇을 지원하는지 장비별로 밝힌다(v2.551 — 사용자 선택). */}
           {telemetryNote(selRow.detail || {}) && (
             <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={telemetryNote(selRow.detail)} /></p>

@@ -1570,6 +1570,7 @@ function StorageTrendPanel({ devices }) {
     t: fmtTrendTs(p.ts, range),
     used: p.used_bytes, total: p.total_bytes,
     hddUsed: p.hdd_used, ssdUsed: p.ssd_used, devices: p.devices, usedUnknown: p.used_unknown || 0,
+    missing: p.missing || 0, carried: p.carried || 0,
   }));
   // v2.594: 사용량을 못 읽은 장비가 있던 구간은 서버가 사용량을 비운다(부분 합은 거짓 하락이다).
   const usedGapPts = pts.filter((p) => p.usedUnknown > 0).length;
@@ -1577,7 +1578,11 @@ function StorageTrendPanel({ devices }) {
   const hasSsd = pts.some((p) => p.ssdUsed != null && p.ssdUsed > 0);
   // 부분 수집 구간 경고 — 점마다 장비 수가 다르면 합산선이 계단처럼 보인다(데이터 특성).
   const devCounts = [...new Set(pts.map((p) => p.devices).filter((x) => x != null))];
-  const partial = !target && devCounts.length > 1;
+  // v2.600 DB2600-01: 점마다 장비 수가 **같아도** 부분 합일 수 있다(예전 결함 — 점마다 한 엣지 5대씩).
+  // 서버가 이 구간에 관측된 장비 수(expectedDevices)와 점마다 빠진 대수(missing)를 준다.
+  const missingPts = pts.filter((p) => p.missing > 0).length;
+  const partial = !target && (devCounts.length > 1 || missingPts > 0);
+  const carryH = d?.carryMaxMs ? Math.round(d.carryMaxMs / 3_600_000 * 10) / 10 : null;
   const last = pts.length ? pts[pts.length - 1] : null;
 
   return (
@@ -1610,7 +1615,7 @@ function StorageTrendPanel({ devices }) {
           : pts.length === 0 ? (
             <div className="muted" style={{ fontSize: 12.5, padding: 20, textAlign: 'center', lineHeight: 1.8 }}>
               이 기간에 시계열 데이터가 없습니다.<br />
-              용량 추이는 <b>수집이 누적된 시점부터</b> 표시됩니다(수집 주기 10분).
+              용량 추이는 <b>수집이 누적된 시점부터</b> 표시됩니다.
               {d.db === false ? <><br /><b>이 서버에서 시계열 DB(SQLite)를 사용할 수 없습니다</b> — 최신 스냅샷만 동작합니다.</> : null}
             </div>
           ) : (
@@ -1633,7 +1638,8 @@ function StorageTrendPanel({ devices }) {
                 점선(회색) = 전체 용량 · 실선 = 사용량. 데이터는 스토리지 전용 DB(storage-history.db)에 적재됩니다.
                 {(d.bucketMs || 0) > 0 ? ` 집계 단위 ${(d.bucketMs >= 86_400_000 ? `${Math.round(d.bucketMs / 86_400_000)}일` : `${Math.round(d.bucketMs / 60_000)}분`)} 평균 ·` : ' 원본 값 ·'} 표본 {pts.length}점
                 {usedGapPts ? <><br /><b style={{ color: 'var(--amber)' }}>주의</b> {usedGapPts}개 구간은 사용량을 읽지 못한 장비가 있어 사용량 선을 비웠습니다(부분 합을 전체처럼 그리지 않습니다).</> : null}
-                {partial ? <><br /><b style={{ color: 'var(--amber)' }}>주의</b> 구간에 따라 수집된 장비 수가 다릅니다({devCounts.sort((a, b) => a - b).join('·')}대) — 합계선의 급변이 실제 용량 변화가 아닐 수 있습니다. 장비를 선택해 개별 추이로 확인하세요.</> : null}
+                {!target && carryH ? <><br />전체 합계는 장비마다 수집 시각이 달라, 각 점에 장비별 <b>마지막 수집값</b>을 최대 {carryH}시간(수집 주기의 2배)까지 이어 붙여 더합니다.</> : null}
+                {partial ? <><br /><b style={{ color: 'var(--amber)' }}>주의</b> {missingPts ? `${missingPts}개 구간은 이 기간에 관측된 장비 ${d?.expectedDevices ?? '—'}대 중 일부만 합산됐습니다(최근 값이 없는 장비 제외)` : '구간에 따라 합산된 장비 수가 다릅니다'}({[...devCounts].sort((a, b) => a - b).join('·')}대) — 합계선의 급변이 실제 용량 변화가 아닐 수 있습니다. 장비를 선택해 개별 추이로 확인하세요.</> : null}
               </div>
             </>
           )}

@@ -85,7 +85,7 @@ function numericPaths(o) {
  */
 export function sanitizeEdgeDevices(list, { idKey = 'deviceId', altIdKey = '', max = 500, deviceMaxBytes = EDGE_DEVICE_MAX_BYTES, agentMaxBytes = EDGE_AGENT_MAX_BYTES } = {}) {
   const dropped = { notObject: 0, badId: 0, tooLarge: 0, overAgentBytes: 0, overCount: 0 };
-  let coerced = 0; let total = 0;
+  let coerced = 0; let total = 0; let trimmed = 0;
   const devices = [];
   for (const d of Array.isArray(list) ? list : []) {
     if (!isPlainObj(d)) { dropped.notObject += 1; continue; }
@@ -99,12 +99,70 @@ export function sanitizeEdgeDevices(list, { idKey = 'deviceId', altIdKey = '', m
     numericPaths(o);
     let size;
     try { size = JSON.stringify(o).length; } catch { dropped.tooLarge += 1; continue; }
-    if (size > deviceMaxBytes) { dropped.tooLarge += 1; continue; }
+    if (size > deviceMaxBytes) {
+      // v2.600(감사 RECENT2600-02): 큰 장비를 **통째로 버리지 않는다** — 상한을 넘는 주범은 대개 SAN 조닝(zone 4,000 ×
+      //   멤버 · 별칭 8,000)이고 엣지의 문제 포트 축약은 조닝을 줄이지 않는다. 조닝을 잘라 맞추고 limited + 사유·개수를 싣는다.
+      //   그래도 넘으면(조닝 없이도 큰 장비) 그때만 뺀다.
+      const t = trimZoningToFit(o, deviceMaxBytes, { by: 'central' });
+      if (!t) { dropped.tooLarge += 1; continue; }
+      size = t.size; trimmed += 1;
+    }
     if (total + size > agentMaxBytes) { dropped.overAgentBytes += 1; continue; }
     total += size;
     devices.push(o);
   }
-  return { devices, dropped, coerced, bytes: total };
+  return { devices, dropped, coerced, bytes: total, trimmed };
+}
+
+/**
+ * 장비 스냅샷의 조닝(zones 배열·aliases 맵)을 잘라 직렬화 크기를 `maxBytes` 아래로 맞춘다(v2.600 RECENT2600-02 — 순수, `o` 를 제자리에서 고친다).
+ * 앞에서부터 들어가는 만큼 남기고(zone 먼저, 남는 자리에 별칭), `limited:true` + `trimmed{zonesOmitted, aliasesOmitted, by, reason}` 로
+ * **뺀 개수를 밝힌다**(조용한 상한 금지 — 화면 sanZoningView 가 limited 를 읽는다). 조닝을 전부 비워도 넘으면 null(맞출 수 없다).
+ * 조닝이 없거나 이미 맞으면 손대지 않고 `{ size, zonesOmitted:0, aliasesOmitted:0 }`.
+ * @returns {{ size:number, zonesOmitted:number, aliasesOmitted:number } | null}
+ */
+export function trimZoningToFit(o, maxBytes, { by = 'central' } = {}) {
+  const len = (x) => JSON.stringify(x).length;
+  let size;
+  try { size = len(o); } catch { return null; }
+  if (size <= maxBytes) return { size, zonesOmitted: 0, aliasesOmitted: 0 };
+  const z = o?.zoning;
+  if (!isPlainObj(z)) return null;
+  const zones = Array.isArray(z.zones) ? z.zones : [];
+  const aliasEntries = isPlainObj(z.aliases) ? Object.entries(z.aliases) : [];
+  const prevTrim = isPlainObj(z.trimmed) ? z.trimmed : null;
+  const base = { ...z, zones: [], aliases: {}, limited: true, trimmed: { zonesOmitted: 0, aliasesOmitted: 0, by, reason: '' } };
+  o.zoning = base;
+  let baseSize;
+  try { baseSize = len(o); } catch { o.zoning = z; return null; }
+  if (baseSize > maxBytes) { o.zoning = z; return null; }
+  let budget = maxBytes - baseSize - 256; // 사유 문구·쉼표 여유
+  const keptZones = [];
+  for (const row of zones) {
+    let n; try { n = len(row) + 1; } catch { continue; }
+    if (n > budget) break;
+    keptZones.push(row); budget -= n;
+  }
+  const keptAliases = {};
+  let aliasKept = 0;
+  for (const [k, v] of aliasEntries) {
+    let n; try { n = len(k) + len(v) + 2; } catch { continue; }
+    if (n > budget) break;
+    keptAliases[k] = v; budget -= n; aliasKept += 1;
+  }
+  const zonesOmitted = zones.length - keptZones.length + (Number(prevTrim?.zonesOmitted) || 0);
+  const aliasesOmitted = aliasEntries.length - aliasKept + (Number(prevTrim?.aliasesOmitted) || 0);
+  const who = by === 'edge' ? '엣지 전송' : '중앙 수신';
+  o.zoning = {
+    ...base, zones: keptZones, aliases: keptAliases,
+    trimmed: {
+      zonesOmitted, aliasesOmitted, by: prevTrim?.by && prevTrim.by !== by ? `${prevTrim.by}+${by}` : by,
+      reason: `장비 1대 ${who} 상한(${Math.round(maxBytes / 1024)}KB)을 넘어 조닝 일부만 실었습니다 — zone ${zonesOmitted}개 · 별칭 ${aliasesOmitted}개 생략(개수 요약 counts 는 전체 기준)`,
+    },
+  };
+  try { size = len(o); } catch { return null; }
+  if (size > maxBytes) return null;
+  return { size, zonesOmitted, aliasesOmitted };
 }
 
 export const droppedTotal = (d) => Object.values(d || {}).reduce((a, n) => a + (Number(n) || 0), 0);

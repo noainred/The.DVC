@@ -270,7 +270,7 @@ export function normalizePowermax(device, raw) {
     snap.extra.arrays = arrays.slice(0, 8).map((a) => ({ id: a.symmetrixId, model: a.model }));
     snap.sections.config = 'ok';
 
-    let total = 0; let used = 0; let usedUnknown = 0;
+    let total = 0; let used = 0; let usedUnknown = 0; let unreadable = 0;
     const pools = [];
     const bases = new Set();
     let suspect = false; let undocumented = false;
@@ -319,12 +319,20 @@ export function normalizePowermax(device, raw) {
         if (c.suspect) suspect = true;
         if (c.documented === false) undocumented = true;
       }
-      if (!(t > 0)) continue;              // 용량을 못 읽은 어레이는 0 으로 채우지 않고 뺀다
+      // 용량을 못 읽은 어레이는 0 으로 채우지 않고 뺀다.
+      // v2.600(감사 COL-2600-01): 예전에는 **조용히** 뺐다 — 다중 어레이에서 한 대의 용량 조회가 실패하면 나머지 합이
+      //   전체인 척 capacity_daily 에 적재됐다(증가량 화면에 그 날만 거짓 급변). 개수를 poolsUnreadable 로 밝혀
+      //   capacityPointEligible 이 partial-pools 로 막게 한다(풀 목록에는 예전처럼 넣지 않는다 — 0 오표시 방지 계약).
+      if (!(t > 0)) { unreadable += 1; continue; }
       if (basis) bases.add(basis);
       total += t;
       if (u == null) usedUnknown += 1; else used += u;
       pools.push({ name: a.symmetrixId, totalBytes: t, usedBytes: u, pct: u == null ? null : Math.round((u / t) * 1000) / 10 });
     }
+    // v2.600(COL-2600-01): 목록에는 있었는데 상세 조회(②)에 실패해 raw.arrays 에 들어오지 못한 어레이도 같은 수에 넣는다.
+    const failedIds = Array.isArray(raw.arraysFailed) ? raw.arraysFailed : [];
+    unreadable += failedIds.length;
+    if (unreadable) snap.extra.poolsUnreadable = unreadable;
 
     snap.pools = pools;
     if (total > 0) {
@@ -384,6 +392,7 @@ export async function collect(device, { signal = null } = {}) {
       ids = r.data?.symmetrixId || [];
     } catch (e) { snap.sections.config = `오류: ${e.message}`; if (/401/.test(e.message)) throw e; }
     raw.arrays = [];
+    raw.arraysFailed = [];
     for (const id of ids.slice(0, 8)) {
       try {
         const r = await tryPaths(get, pathsFor(vers, `/system/symmetrix/${encodeURIComponent(id)}`));
@@ -391,7 +400,11 @@ export async function collect(device, { signal = null } = {}) {
         const d = r.data;
         const a = Array.isArray(d?.symmetrix) ? d.symmetrix[0] : d?.symmetrix || d;
         if (a && a.local !== false) raw.arrays.push({ symmetrixId: a.symmetrixId || id, model: a.model, ucode: a.ucode, local: a.local });
-      } catch (e) { if (/401/.test(e.message)) throw e; snap.sections.config = `일부 어레이 오류: ${e.message}`; }
+      } catch (e) {
+        if (/401/.test(e.message)) throw e;
+        snap.sections.config = `일부 어레이 오류: ${e.message}`;
+        raw.arraysFailed.push(id);   // v2.600(COL-2600-01): 합계에서 빠진 어레이를 세도록 남긴다
+      }
     }
     // ③ 어레이별 용량(sloprovisioning). 실패 어레이는 caps 에서 빠져 pools 에도 안 실린다.
     for (const a of raw.arrays) {

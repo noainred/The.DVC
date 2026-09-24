@@ -111,6 +111,11 @@ export function unverifiedNote() {
 /* ── 엣지 축 ───────────────────────────────────────────────────────────────── */
 
 export function agentRowExplain(a) {
+  // v2.600 WEB2600-02: 수신 집계에는 없고 거부 기록에만 있는 엣지 — 보냈는데 **전부** 막혔다.
+  if (a?.rejectedOnly) {
+    const what = a?.rejectedInventory ? '인벤토리 push' : 'push';
+    return `**보낸 ${what} 가 전부 거부됐습니다**(${n(a?.rejects?.total) ?? '?'}건 · 마지막 ${rejectKindLabel(a?.rejects?.lastKind)}${t(a?.rejects?.lastReason) ? ` · ${t(a.rejects.lastReason)}` : ''}) — ${unverifiedNote()}.`;
+  }
   if (a?.mockReported) return '**이 엣지가 mock(가짜) 데이터를 자기보고했습니다.**';
   if (a?.sentInventory) {
     return `최근 push: 호스트 ${n(a.lastHosts) ?? '?'}·VM ${n(a.lastVms) ?? '?'}${a?.gzip === false ? ' · **무압축**' : ''}`;
@@ -135,6 +140,8 @@ const FINDING_TEXT = Object.freeze({
   'inv-agent-no-inventory': { title: '위임 담당 엣지가 인벤토리를 보내지 않고 있습니다', fix: '그 엣지의 vCenter 수집 상태·로그를 확인하세요(특수기능 › 엣지 로그).' },
   'inv-agent-mock': { title: '엣지가 mock 데이터로 동작 중입니다', fix: '그 엣지 portal.env 의 DATA_SOURCE 를 live 로 바꾸세요.' },
   'inv-owner-conflict': { title: '같은 vCenter 를 서로 다른 엣지가 번갈아 보내고 있습니다', fix: '두 사이트의 vCenter 등록이 겹치지 않는지 확인하세요.' },
+  'inv-agent-rejected-only': { title: '보낸 push 가 전부 거부돼 수신 기록이 없는 엣지가 있습니다', fix: '엣지별 표의 거부 사유를 확인하세요. 토큰 거부면 포탈 점검 › 토큰 점검에서 대조합니다(엣지 이름은 요청이 주장한 값이라 검증되지 않았습니다).' },
+  'inv-unregistered-vcenter': { title: '등록부에 없는 vCenter 로 인벤토리가 저장돼 있습니다', fix: '어느 화면에도 나오지 않는 데이터입니다. 설정 › vCenter 관리에서 그 id 를 엣지 위임으로 등록하거나, 보내는 엣지의 vCenter 설정을 정리하세요.' },
   'inv-no-site-vcenter': { title: '엣지 위임(collectMode=site) vCenter 가 없습니다', fix: '이 점검은 위임 vCenter 전용입니다 — 대상이 없으면 점검할 것도 없습니다.' },
 });
 
@@ -207,7 +214,14 @@ export function tableFootnotes(scan) {
   if (rows.some((r) => invRowState(r) === INV_STATE.REJECTED)) {
     out.push('거부 기록의 엣지 이름은 요청이 주장한 값이라 **검증되지 않았습니다** — 실제로 그 엣지가 보낸 것인지는 별도로 확인이 필요합니다.');
   }
-  if ((scan?.agents || []).some((a) => !a.sentInventory && !a.knownOwner)) {
+  if ((scan?.agents || []).some((a) => a.rejectedOnly)) {
+    out.push('‘전부 거부됨’ 엣지는 수신 기록이 한 번도 없고 거부 기록에만 있는 이름입니다 — 이름은 요청이 주장한 값이라 **검증되지 않았습니다**.');
+  }
+  // v2.600 WEB2600-02·04: 인증 실패 집계 칸은 엣지가 아니라 행으로 그리지 않는다 — 개수만 밝힌다.
+  if (n(scan?.unauthRejects)) {
+    out.push(`토큰 인증에 실패한 push **${scan.unauthRejects}건**은 보낸 쪽 이름을 믿을 수 없어 표에 넣지 않았습니다 — 포탈 점검 › 토큰 점검에서 각 엣지의 토큰을 대조하세요.`);
+  }
+  if ((scan?.agents || []).some((a) => !a.sentInventory && !a.knownOwner && !a.rejectedOnly)) {
     out.push('‘인벤토리 미전송’ 이 결함으로 표시되지 않은 엣지는 위임 담당으로 학습된 적이 없는 곳입니다 — 스토리지·SAN 등 다른 용도로만 쓰는 엣지는 정상입니다.');
   }
   return out;

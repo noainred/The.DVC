@@ -65,7 +65,7 @@ export async function runBmstorWorkerOnce() {
     const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) return await httpFail('인출', r);
     const { jobs } = await r.json();
-    if (!jobs || !jobs.length) return null;
+    if (!jobs || !jobs.length) { _last = { at: Date.now(), ok: true, jobs: 0 }; return null; } // v2.600 EDGE2600-07: 성공 인출(0건)도 상태 갱신 — 끈적한 오류 방지
     let postErr = null;
     for (const job of jobs) {
       let results;

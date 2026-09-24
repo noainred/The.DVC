@@ -176,6 +176,25 @@ export async function testTarget(target) {
   }
 }
 
+/**
+ * 대상 호스트에 root 소유 0700 임시 디렉터리를 만든다(v2.600 SEC2600-01). `mktemp -d` 는 이름을 예측할 수 없고
+ * O_EXCL 로 만들어 다른 사용자가 먼저 만들어 둔 경로를 쓸 수 없다. 반환값은 명령에 보간되므로 형식을 검증하고,
+ * 소유자(-O)·심링크 아님(! -L)을 한 번 더 확인한다. 실패하면 던진다(고정 경로로 폴백하지 않는다).
+ * @param exec  withSsh 의 exec
+ * @param prefix [a-z-] 접두
+ */
+export async function remoteTmpDir(exec, prefix) {
+  if (!/^[a-z][a-z-]{0,30}$/.test(prefix)) throw new Error('잘못된 임시 디렉터리 접두');
+  const r = await exec(`mktemp -d /tmp/${prefix}.XXXXXXXXXX`);
+  const d = String(r?.stdout || '').trim();
+  if (r?.code !== 0 || !new RegExp(`^/tmp/${prefix}\\.[A-Za-z0-9]{10}$`).test(d)) {
+    throw new Error(`원격 임시 디렉터리를 만들지 못했습니다(mktemp): ${String(r?.stderr || d).slice(0, 200)}`);
+  }
+  const own = await exec(`test -d ${d} && test ! -L ${d} && test -O ${d} && echo ok`);
+  if (String(own?.stdout || '').trim() !== 'ok') throw new Error(`원격 임시 디렉터리 소유자 확인 실패: ${d}`);
+  return d;
+}
+
 /** Deploy/refresh the agent on the target host. */
 export async function deployAgent(target, { installerPath, port: portIn = 4000 } = {}) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username을 입력하세요.' };
@@ -184,8 +203,6 @@ export async function deployAgent(target, { installerPath, port: portIn = 4000 }
   const installer = resolveInstaller(installerPath);
   if (!installer) return { ok: false, reason: '설치 패키지(offline tarball)를 찾을 수 없습니다. download/ 에 두거나 경로를 지정하세요.' };
 
-  const remotePkg = '/tmp/vmportal-agent-pkg.tar.gz';
-  const workDir = '/tmp/vmportal-agent-deploy';
   try {
     return await withSsh(creds(target), async ({ exec, putFile, readFile, writeFile }) => {
       const idu = await exec('id -u');
@@ -195,7 +212,14 @@ export async function deployAgent(target, { installerPath, port: portIn = 4000 }
       const glibc = await probeGlibc(exec);
       if (glibc.ok === false) return { ok: false, reason: glibcHint(glibc), glibc: glibc.version };
 
-      await exec(`rm -rf ${workDir} ${remotePkg} && mkdir -p ${workDir}`);
+      // v2.600 SEC2600-01: 고정 /tmp 경로(/tmp/vmportal-agent-deploy)는 대상 호스트의 로컬 사용자가 먼저 만들어 둘 수
+      // 있었다 — `rm -rf && mkdir -p` 사이에 그 사용자가 디렉터리를 다시 만들면 root 가 **남의 디렉터리**에 풀고
+      // 그 안의 install.sh 를 root 로 실행한다(교체 경합 = root 권한 상승). root 소유 0700 mktemp 디렉터리를 쓴다.
+      const tmp = await remoteTmpDir(exec, 'vmportal-agent');
+      const remotePkg = `${tmp}/pkg.tar.gz`;
+      const workDir = `${tmp}/x`;
+      try {
+      await exec(`mkdir ${workDir}`);
       await putFile(installer, remotePkg);                       // SFTP upload (fastPut)
       const untar = await exec(`tar xzf ${remotePkg} -C ${workDir}`);
       if (untar.code !== 0) return { ok: false, reason: `압축 해제 실패: ${untar.stderr}` };
@@ -230,7 +254,6 @@ export async function deployAgent(target, { installerPath, port: portIn = 4000 }
         const port4000 = await exec(`ss -ltnp 2>/dev/null | grep ":${port} " || true`).catch(() => ({ stdout: '' }));
         log = [st.stdout, '--- journalctl ---', jc.stdout, port4000.stdout ? `--- 포트 ${port} 사용 중 ---\n${port4000.stdout}` : ''].filter(Boolean).join('\n').slice(-4000);
       }
-      await exec(`rm -rf ${workDir} ${remotePkg}`);
       return {
         ok: isActive,
         active: activeState,
@@ -240,6 +263,10 @@ export async function deployAgent(target, { installerPath, port: portIn = 4000 }
         log,
         reason: isActive ? undefined : '서비스가 active 상태가 아닙니다. 아래 로그를 확인하세요.',
       };
+      } finally {
+        // 성공·실패·조기 반환 모두 임시 디렉터리를 지운다(예전엔 압축 해제·install.sh 실패 시 남았다).
+        await exec(`rm -rf ${tmp}`).catch(() => {});
+      }
     });
   } catch (err) {
     return { ok: false, reason: err.message };

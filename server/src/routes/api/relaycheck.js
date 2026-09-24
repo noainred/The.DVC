@@ -6,12 +6,21 @@ import { relayCheckStatus, runRelayChecks, buildTargets } from '../../relaycheck
 import { loadCollectors } from '../../collector/registry.js';
 import { loadTopology } from '../../relaytopo/store.js';
 import { relayCheckView } from '../../relaycheck/view.js';   // v2.500(감사 M1): 역할별 축약을 순수 모듈로
+import { scopedVcenterIds } from '../../auth/scope.js';
+import { store } from '../../store.js';
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
 
 export function registerRelayCheck(api) {
 api.get('/tools/relaycheck', toolsPerm, (_req, res) => {
+  // v2.600 AUTHZ-2600-07: 점검 대상은 **엣지 사이트**라 vCenter 귀속이 없다 — 범위 제한 계정에는
+  // 나눌 축이 없으므로 403(v2.525 규약 · 형제 엣지 화면 edge-log·link-check 와 같은 기준).
+  // 역할별 주소 가림(v2.500 D/M1)은 전체 범위 operator 용으로 그대로 둔다. admin 은 설정 소유라 제외.
+  if (_req.user?.role !== 'admin' && scopedVcenterIds(_req.user, store.get())) {
+    return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true,
+      reason: 'HAProxy 경로 점검은 엣지 사이트 단위라 법인 범위로 나눌 수 없어 전체 범위 계정만 볼 수 있습니다.' });
+  }
   const st = relayCheckStatus();
   // v2.478(감사 S9)은 targets[].host/port 만 가렸는데 `...st` 스프레드로 settings.hosts·
   // results[].target.host/port 가 그대로 나가고, key("host:port")로 복원까지 됐다(v2.500 감사 M1).

@@ -184,6 +184,18 @@ export const CORE_RULES = [
     title: '설정 사본을 중앙에 올리지 못함(엣지)',
     meaning: '엣지가 자기 설정 사본을 중앙에 보내지 못했습니다. 중앙의 엣지 설정 보기·백업에 이 법인의 최신 설정이 없습니다.',
     action: '413 이면 설정 디렉터리에 큰 JSON 이 있는지, 403 이면 중앙 토큰을 확인하세요.' }),
+  // ── 런타임 정보 ──
+  // v2.600 WEB2600-06: Node 22 는 node:sqlite 를 처음 불러올 때 ExperimentalWarning 을 console.error 로 찍는다(기동마다 1줄).
+  //   규칙이 없으면 '규칙에 없는 경고·오류'(medium)로 올라가 조치할 것이 없는 줄이 개선점 목록 위쪽을 차지했다.
+  //   Node 런타임이 내는 문장이라 우리 소스에는 문구가 없다 — probe 는 그 경고를 부르는 코드(import)를 가리킨다.
+  R({ id: 'node-experimental-warning', tag: '', severity: 'info', category: 'noise', entity: 1,
+    re: /^\(node:\d+\) ExperimentalWarning: (\S[^\n]{0,80}?) is an experimental feature|^\(node:\d+\) ExperimentalWarning: /,
+    src: 'server/src/linkcheck/db.js', probe: "import('node:sqlite')",
+    sample: '(node:2372) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use node --trace-warnings ... to show where the warning was created)',
+    title: 'Node 런타임 안내 — 실험 기능 사용(ExperimentalWarning)',
+    meaning: 'Node 22 가 내장 SQLite(node:sqlite) 같은 실험 기능을 처음 쓸 때 기동마다 한 번 찍는 안내입니다. 오류가 아니고 포탈 동작에 영향이 없습니다.',
+    action: '조치할 것이 없습니다. 기동 1회보다 자주 반복되면 프로세스가 재시작되고 있는지 확인하세요.',
+    link: '', linkLabel: '' }),
 ];
 
 /**

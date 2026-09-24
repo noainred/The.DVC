@@ -11,6 +11,8 @@ import { fetchSite, fetchAll, applySite, testNode, lastResults, resolveNodeAcces
 import { loadCollectors } from '../../collector/registry.js';
 import { listTargets } from '../../agent/deployRegistry.js';
 import { todayStamp } from "../../util/dayKey.js";
+import { scopedVcenterIds } from '../../auth/scope.js';
+import { store } from '../../store.js';
 
 const adminOnly = requireRole('admin');
 /**
@@ -30,6 +32,11 @@ const RE_DC = /^[^\s/\\]{1,40}$/;
 export function registerRelayTopo(api) {
 api.get('/tools/relaytopo', toolsPerm, (req, res) => {
   const admin = isAdmin(req);
+  // v2.600 AUTHZ-2600-07: 사이트 구성은 vCenter 귀속이 없다 — 범위 제한(비-admin) 계정에는 403(v2.525 규약).
+  if (!admin && scopedVcenterIds(req.user, store.get())) {
+    return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true,
+      reason: '중계 토폴로지는 엣지 사이트 단위라 법인 범위로 나눌 수 없어 전체 범위 계정만 볼 수 있습니다.' });
+  }
   const topo = loadTopology();
   const issues = validateTopology(topo, loadCollectors());
   const raw = loadTopologyRaw();

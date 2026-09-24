@@ -21,6 +21,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; /
 import { createAuthGuard, authStopView, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { gpuAuthGuard, isGpuAuthError, guestAccountStopDev } from '../gpu/sshCollect.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'guest-scans.json');
 
@@ -57,16 +58,27 @@ function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsD
 const redact = (j) => ({ id: j.id, name: j.name, type: j.type, vcenterId: j.vcenterId, os: j.os, intervalMin: j.intervalMin, days: j.days, maxVms: j.maxVms, enabled: j.enabled, lastRun: j.lastRun || null, lastFound: j.lastFound ?? null, lastErr: j.lastErr || '', lastAuth: j.lastAuth || null });
 export function listGuestScans() { return load().map(redact); }
 
+// 양의 정수 설정 — 빈 값·숫자 아님·0 이하는 def(예전 `Number(x) || def` 와 같이 0 도 '미지정'. 이 필드들은 1 이상만
+// 뜻이 있고 0 을 하한 1 로 올리면 1분 주기가 된다). 값이면 [1, max] 로 자른다.
+function posOr(v, max, def) {
+  const n = numOrNull(v);
+  if (n == null || n <= 0) return def;
+  return Math.max(1, Math.min(max, Math.round(n)));
+}
+
 export function saveGuestScan(body = {}) {
   load();
   const id = body.id || `gscan_${Date.now().toString(36)}`;
+  // v2.600 LO2600-02: 수정 저장의 빈 숫자 칸은 **이전 값 유지**(새 항목일 때만 기본값). 예전 `Number('') || 60` 은
+  // 기존 1440분 주기를 60분으로 되돌려 게스트 로그인 빈도가 24배가 됐다(adminOnly API 직접 호출 경로 — v2.596 규약).
+  const prev = cache.find((x) => x.id === id) || {};
   const j = {
     id, name: String(body.name || '무제 조사').slice(0, 80),
     type: ['login-fails', 'net-issues'].includes(body.type) ? body.type : 'login-fails',
     vcenterId: String(body.vcenterId || ''), os: ['linux', 'windows', 'all'].includes(body.os) ? body.os : 'all',
-    intervalMin: Math.max(1, Math.min(10080, Number(body.intervalMin) || 60)),
-    days: Math.max(1, Math.min(90, Number(body.days) || 7)),
-    maxVms: Math.max(1, Math.min(2000, Number(body.maxVms) || 100)),
+    intervalMin: posOr(body.intervalMin, 10080, posOr(prev.intervalMin, 10080, 60)),
+    days: posOr(body.days, 90, posOr(prev.days, 90, 7)),
+    maxVms: posOr(body.maxVms, 2000, posOr(prev.maxVms, 2000, 100)),
     enabled: body.enabled !== false,
     guestUser: body.guestUser || '', guestPass: body.guestPass || '',
     lastRun: null, lastFound: null, lastErr: '',
