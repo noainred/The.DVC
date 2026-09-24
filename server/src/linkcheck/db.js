@@ -37,7 +37,7 @@ const FILE = () => path.join(config.dbDir || config.configDir, 'link-check.db');
 // 날짜 경계 코어는 `util/dayKey.js` 하나다(v2.582 ARCH-2). import 뒤 export(v2.575 재수출 규약).
 import { DAY_OFFSET_MIN, dayKey } from "../util/dayKey.js";
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
-import { chunkedDelete } from '../util/chunkedPrune.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 const lockRetry = createLockRetry();
 export { DAY_OFFSET_MIN, dayKey };
 const COUNT_CACHE_MS = Math.max(0, Number(process.env.LINKCHECK_COUNT_CACHE_MS) || 60_000);
@@ -287,7 +287,7 @@ export async function insertResults(results = [], { byNode = '' } = {}) {
  * 이고 다음 주기가 잇는다. 정리끼리는 겹치지 않는다 — 같은 보존일이면 진행 중인 것을 공유하고, 보존일이 바뀌었으면
  * 그것이 끝난 뒤 **새 경계로 한 번 더** 돈다(RECENT2603-06 과 같은 판단: 공유만 하면 새 보존일이 그 호출에 안 먹는다).
  */
-let _pruneFlight = null;   // { key, p }
+const _pruneFlight = createPruneFlight();   // 같은 보존일이면 공유, 다르면 끝난 뒤 한 번 더(util/chunkedPrune.js)
 function prunePrepared(db) {
   // 인덱스: idx_lc_sample_ts · idx_lc_event_ts · idx_lc_daily_day 가 서브쿼리의 풀스캔을 막는다.
   return {
@@ -313,14 +313,8 @@ export async function pruneLinkCheck({ sampleDays = 90, eventDays = 30, dailyDay
   if (!force && (++_tick % every) !== 0) return { ok: true, skipped: true };
   const days = { sampleDays, eventDays, dailyDays };
   const key = `${sampleDays}|${eventDays}|${dailyDays}`;
-  if (_pruneFlight && _pruneFlight.key === key) return _pruneFlight.p;
-  const prev = _pruneFlight ? _pruneFlight.p.catch(() => {}) : Promise.resolve();
-  const flight = { key, p: null };
-  flight.p = prev.then(() => runPrune(db, days))
-    .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 200) }))
-    .finally(() => { if (_pruneFlight === flight) _pruneFlight = null; });
-  _pruneFlight = flight;
-  return flight.p;
+  return _pruneFlight.run(key, () => runPrune(db, days)
+    .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 200) })));
 }
 
 /** 화면 표 — 링크별 최신 1건. ⚠ 전용 테이블을 읽는다(GROUP BY 로 되돌리지 말 것). */

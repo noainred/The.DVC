@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { chunkedDelete } from '../util/chunkedPrune.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'rma-history.db');
 const RETENTION_DAYS = Math.max(1, Number(process.env.RMA_HISTORY_DAYS) || 90);
@@ -65,13 +65,10 @@ async function openInner() {
  * v2.603(감사 DB2603-02): 보존 정리는 청크 삭제 + 청크 사이 양보다(util/chunkedPrune.js). 저장 경로를 기다리게 하지
  * 않고, 진행 중이면 겹치지 않는다(보존일은 환경변수라 프로세스 수명 동안 같다 — 공유하면 된다). 실패는 콘솔에 남긴다.
  */
-let _pruning = null;
+const _pruneFlight = createPruneFlight({ covers: () => true });   // 보존일이 env(불변)라 진행 중이면 공유
 function pruneInBackground(db) {
-  if (_pruning) return _pruning;
-  _pruning = chunkedDelete(db.prune, [Date.now() - RETENTION_DAYS * 86400e3], { label: 'rma.history' })
-    .catch((e) => { console.warn(`[rma] 이력 prune 실패: ${e?.message || e}`); return null; })
-    .finally(() => { _pruning = null; });
-  return _pruning;
+  return _pruneFlight.run(0, () => chunkedDelete(db.prune, [Date.now() - RETENTION_DAYS * 86400e3], { label: 'rma.history' })
+    .catch((e) => { console.warn(`[rma] 이력 prune 실패: ${e?.message || e}`); return null; }));
 }
 
 export async function historyAvailable() { return !!(await open()); }

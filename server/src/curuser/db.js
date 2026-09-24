@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
-import { chunkedDelete } from '../util/chunkedPrune.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
 const DB_PATH = () => process.env.CURUSER_DB_PATH
   || path.join(config.dbDir || config.configDir, 'curuser.db');
@@ -253,7 +253,7 @@ export async function vmSeriesRange(vmId, fromTs, toTs) {
  * ⚠ `(++tick % N) === 0` 으로 쓸 것. `tick++ % N === 0`(tick 0 시작)은 **첫 폴에서 즉시 참**이라
  *   보존기간을 줄이고 재시작하면 첫 틱이 그 차액을 한 번에 지운다(v2.453 규칙 · v2.503 재발).
  */
-let _pruneFlight = null;   // { days, p } — 진행 중인 정리(아래)
+const _pruneFlight = createPruneFlight();   // 진행 중인 정리(util/chunkedPrune.js)
 export async function pruneCurUser(retentionDays, { every = 6 } = {}) {
   if ((++tick % Math.max(1, every)) !== 0) return { skipped: true };
   const days = Number(retentionDays) || 0;
@@ -262,22 +262,17 @@ export async function pruneCurUser(retentionDays, { every = 6 } = {}) {
   if (!h) return { skipped: true, reason: 'DB 없음' };
   // v2.603(감사 DB2603-02·RECENT2603-06): 정리끼리는 겹치지 않는다 — 같은 보존일이면 진행 중인 것을 공유하고,
   //   보존일이 바뀌었으면 그것이 끝난 뒤 새 경계로 한 번 더 돈다(공유만 하면 새 보존일이 그 호출에 안 먹는다).
-  if (_pruneFlight && _pruneFlight.days === days) return _pruneFlight.p;
-  const prev = _pruneFlight ? _pruneFlight.p : Promise.resolve();
-  const flight = { days, p: null };
-  flight.p = prev.then(async () => {
+  return _pruneFlight.run(days, async () => {
     const before = Date.now() - days * 86_400_000;
     let s = 0; let v = 0; let done = true;
     try { const r = await chunkedDelete(h.st.pruneSeries, [before], { label: 'curuser.vc_series' }); s = r.deleted; done = done && r.done; } catch (e) { done = false; console.warn(`[curuser] vc_series prune 실패: ${e?.message || e}`); }
     try { const r = await chunkedDelete(h.st.pruneVmSeries, [before], { label: 'curuser.vm_series' }); v = r.deleted; done = done && r.done; } catch (e) { done = false; console.warn(`[curuser] vm_series prune 실패: ${e?.message || e}`); }
     if (s || v) _counts = null;
     return { skipped: false, series: s, vmSeries: v, before, done };
-  }).finally(() => { if (_pruneFlight === flight) _pruneFlight = null; });
-  _pruneFlight = flight;
-  return flight.p;
+  });
 }
 export function _resetForTest() {
   lockRetry.ok();
   try { x?.db?.close?.(); } catch { /* */ }
-  x = null; ready = null; initError = null; tick = 0; _counts = null; _pruneFlight = null;
+  x = null; ready = null; initError = null; tick = 0; _counts = null; _pruneFlight.reset();
 }

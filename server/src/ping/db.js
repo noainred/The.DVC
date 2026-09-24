@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
-import { chunkedDelete } from '../util/chunkedPrune.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 const DB_PATH = config.ping.dbPath;
 
@@ -54,18 +54,12 @@ function initSqlite() {
     const pruneChunk = db.prepare('DELETE FROM samples WHERE rowid IN (SELECT rowid FROM samples WHERE ts < ? LIMIT ?)');
     // 정리끼리는 겹치지 않는다. 같은 경계면 진행 중인 것을 공유하고, 경계가 더 늦으면(보존일을 줄였으면) 끝난 뒤
     // 새 경계로 한 번 더 돈다(RECENT2603-06 과 같은 판단). 호출부(monitor.js)는 기다리지 않으므로 실패는 여기서 남긴다.
-    let pruneFlight = null;   // { cut, p }
+    const pruneFlight = createPruneFlight({ covers: (running, next) => running >= next });   // 키 = 경계(ms)
     const prune = (beforeTs) => {
       const cut = Number(beforeTs);
       if (!Number.isFinite(cut)) return Promise.resolve({ deleted: 0, done: true, chunks: 0 });
-      if (pruneFlight && pruneFlight.cut >= cut) return pruneFlight.p;
-      const prev = pruneFlight ? pruneFlight.p : Promise.resolve();
-      const flight = { cut, p: null };
-      flight.p = prev.then(() => chunkedDelete(pruneChunk, [cut], { label: 'ping.samples' }))
-        .catch((e) => { console.warn(`[ping] prune 실패: ${e?.message || e}`); return { deleted: 0, done: false, chunks: 0, error: String(e?.message || e) }; })
-        .finally(() => { if (pruneFlight === flight) pruneFlight = null; });
-      pruneFlight = flight;
-      return flight.p;
+      return pruneFlight.run(cut, () => chunkedDelete(pruneChunk, [cut], { label: 'ping.samples' })
+        .catch((e) => { console.warn(`[ping] prune 실패: ${e?.message || e}`); return { deleted: 0, done: false, chunks: 0, error: String(e?.message || e) }; }));
     };
     const dropTarget = db.prepare('DELETE FROM samples WHERE target=?');
     return {

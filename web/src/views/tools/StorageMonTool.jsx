@@ -28,6 +28,7 @@ import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } f
 import { versionCellInfo } from './storageVersionText.js';
 import { unitText } from '../unitText.js';
 import { hardwareSummaryParts } from './storageHardwareText.js'; // v2.599 C2599-06: 빈 슬롯·미확인을 이상과 나눠 말한다
+import { volumeProvisionText } from './powerstoreVolumeText.js'; // v2.603 COL-2603-07: 볼륨 size 결측 안내
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -1119,7 +1120,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                 {ex.inventory.volumes && (
                   <span className="muted" title={Object.entries(ex.inventory.volumes.byState || {}).map(([k, v]) => `${k} ${v}`).join(' · ')}>
                     볼륨 <b style={{ color: 'var(--text)' }}>{ex.inventory.volumes.count.toLocaleString()}{ex.inventory.volumes.truncated ? '+' : ''}</b>
-                    {ex.inventory.volumes.provisionedBytes > 0 ? ` · 할당 ${tbFmt(ex.inventory.volumes.provisionedBytes)}` : ''}
+                    {volumeProvisionText(ex.inventory.volumes, tbFmt)}
                   </span>
                 )}
                 {ex.inventory.hosts && <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{ex.inventory.hosts.count}</b></span>}

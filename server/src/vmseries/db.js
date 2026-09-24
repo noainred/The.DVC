@@ -23,7 +23,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { dbFileName } from '../metrics/vmperfDb.js';
 import { openSqlite } from '../util/sqliteOpen.js';
-import { chunkedDelete } from '../util/chunkedPrune.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
 const DIR = process.env.VMSERIES_DB_DIR || path.join(config.dbDir || config.configDir, 'vmseries');
 // v2.582 TUNE-4: 파일은 vCenter 마다 하나(운영 28 · 30+ 예정)라 상한이 그보다 작으면 주기마다 LRU 스래싱이다
@@ -261,26 +261,22 @@ export async function vmSeriesDbStats(vcenterId) {
  * v2.603(감사 DB2603-02·RECENT2603-06): 청크 삭제 + 청크 사이 양보(util/chunkedPrune.js). 파일(vCenter)마다 정리끼리
  * 겹치지 않는다 — 같은 보존일이면 진행 중인 것을 공유하고, 바뀌었으면 끝난 뒤 새 경계로 한 번 더 돈다.
  */
-const pruneFlights = new Map();   // file -> { days, p }
+const pruneFlights = new Map();   // file -> createPruneFlight() (파일=vCenter 마다 하나)
 export async function pruneVmSeries(vcenterId, retentionDays) {
   const days = Number(retentionDays) || 0;
   if (days <= 0) return 0;
   const x = await getVmSeriesDb(vcenterId, { create: false });
   if (!x) return 0;
   const file = dbFileName(vcenterId);
-  const cur = pruneFlights.get(file);
-  if (cur && cur.days === days) return cur.p;
-  const prev = cur ? cur.p : Promise.resolve();
-  const flight = { days, p: null };
-  flight.p = prev.then(async () => {
+  let flight = pruneFlights.get(file);
+  if (!flight) { flight = createPruneFlight(); pruneFlights.set(file, flight); }
+  return flight.run(days, async () => {
     const before = Date.now() - days * 86_400_000;
     let n = 0;
     try { n = (await chunkedDelete(x.st.pruneSpikes, [before, before, before, before], { label: `vmseries.${vcenterId}.spikes` })).deleted; } catch (e) { console.warn(`[vmseries] ${vcenterId} prune 실패: ${e?.message || e}`); }
     try { await chunkedDelete(x.st.pruneCover, [before - HOUR], { label: `vmseries.${vcenterId}.cover` }); } catch (e) { console.warn(`[vmseries] ${vcenterId} cover prune 실패: ${e?.message || e}`); }
     return n;
-  }).finally(() => { if (pruneFlights.get(file) === flight) pruneFlights.delete(file); });
-  pruneFlights.set(file, flight);
-  return flight.p;
+  }).finally(() => { if (!flight.active) pruneFlights.delete(file); });
 }
 
 export function closeVmSeriesDb(vcenterId) {

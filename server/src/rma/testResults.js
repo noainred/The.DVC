@@ -13,7 +13,7 @@ import { config } from '../config.js';
 import { notify } from '../alerts.js';
 
 import { numOrNull } from '../util/numOrNull.js';
-import { chunkedDelete } from '../util/chunkedPrune.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 const FILE = () => path.join(config.dbDir || config.configDir, 'rma-tests.db');
 const RETENTION_DAYS = Math.max(1, Number(process.env.RMA_TEST_HISTORY_DAYS) || 90);
 const REPEAT_LOG_MS = 60 * 60_000;
@@ -55,13 +55,10 @@ async function openInner() {
  * v2.603(감사 DB2603-02): 보존 정리는 청크 삭제 + 청크 사이 양보(util/chunkedPrune.js) — 결과 수신 경로를 기다리게 하지
  * 않는다. 보존일은 환경변수(프로세스 수명 동안 같다)라 진행 중이면 공유한다. 실패는 콘솔에 남긴다.
  */
-let _pruning = null;
+const _pruneFlight = createPruneFlight({ covers: () => true });   // 보존일이 env(불변)라 진행 중이면 공유
 function pruneInBackground(db, now) {
-  if (_pruning) return _pruning;
-  _pruning = chunkedDelete(db.prune, [now - RETENTION_DAYS * 86400e3], { label: 'rma.test_results' })
-    .catch((e) => { console.warn(`[rma] 점검 이력 prune 실패: ${e?.message || e}`); return null; })
-    .finally(() => { _pruning = null; });
-  return _pruning;
+  return _pruneFlight.run(0, () => chunkedDelete(db.prune, [now - RETENTION_DAYS * 86400e3], { label: 'rma.test_results' })
+    .catch((e) => { console.warn(`[rma] 점검 이력 prune 실패: ${e?.message || e}`); return null; }));
 }
 
 const key = (agent, id) => `${String(agent).toLowerCase()}\0${id}`;

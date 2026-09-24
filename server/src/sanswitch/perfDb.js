@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
-import { chunkedDelete } from '../util/chunkedPrune.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 const lockRetry = createLockRetry();
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'sanswitch-perf.db');
@@ -203,15 +203,11 @@ export async function savePerfSample(deviceId, ts, samples = {}, meta = [], rete
 // v2.603(감사 RECENT2603-06 — 재현): 공유는 **같은 보존일일 때만**이다. 예전에는 진행 중인 백그라운드 정리를 무조건
 // 공유해, 보존일을 줄이고 '지금 정리' 를 누르면 옛 경계로 도는 정리의 결과(deleted:0)를 돌려받았다(새 경계보다 오래된 행이
 // 남은 채로 '정리됨'). 보존일이 다르면 진행 중인 것이 끝난 뒤 새 경계로 한 번 더 돈다(끼리 겹치지 않는 규칙은 그대로).
-let _pruning = null;
-let _pruningDays = null;
+const _pruneFlight = createPruneFlight();   // util/chunkedPrune.js — 같은 보존일이면 공유, 다르면 끝난 뒤 한 번 더
 function pruneOld(db, retentionDays) {
   const days = Math.max(1, Number(retentionDays) || 90);
-  if (_pruning && _pruningDays === days) return _pruning;
-  if (_pruning) return _pruning.catch(() => {}).then(() => pruneOld(db, retentionDays));
-  const cut = Date.now() - days * 86400e3;
-  _pruningDays = days;
-  _pruning = (async () => {
+  return _pruneFlight.run(days, async () => {
+    const cut = Date.now() - days * 86400e3;
     // ts 단독 인덱스(idx_pp_ts)가 rowid 서브쿼리의 풀스캔을 막는다
     const stmt = db.conn.prepare('DELETE FROM port_perf WHERE rowid IN (SELECT rowid FROM port_perf WHERE ts < ? LIMIT ?)');
     const r = await chunkedDelete(stmt, [cut], { label: 'sanswitch-perf.port_perf' });
@@ -221,8 +217,7 @@ function pruneOld(db, retentionDays) {
       console.log(`[sanswitch-perf] prune ${r.deleted.toLocaleString()}행 삭제(${r.chunks}청크)${r.done ? '' : ' — 상한 도달, 다음 주기에 계속'} · 메타 ${Number(meta?.changes || 0)}행`);
     }
     return { deleted: r.deleted, done: r.done, metaDeleted: Number(meta?.changes || 0) };
-  })().finally(() => { _pruning = null; _pruningDays = null; });
-  return _pruning;
+  });
 }
 /** 적재 경로용 — 기다리지 않는다. 실패는 콘솔에 남긴다(조용히 삼키지 않는다). */
 function pruneInBackground(db, retentionDays) {
@@ -492,4 +487,4 @@ export async function perfDbStats({ now = Date.now() } = {}) {
   } catch (e) { return { available: true, error: e.message }; }
 }
 
-export function _resetForTest() { lockRetry.ok(); try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; _counts = null; _pruning = null; _pruningDays = null; }
+export function _resetForTest() { lockRetry.ok(); try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; _counts = null; _pruneFlight.reset(); }
