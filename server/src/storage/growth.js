@@ -152,13 +152,15 @@ export function growthMatrix(rows, { periods = DEFAULT_PERIODS, asOfDay, meta = 
      * v2.604(감사 COL-2604-01 후속): 용량이 **반올림 표기**(예: Isilon SSH 'isi status' 의 '5.0P')로 적재된 장비는
      *   증가량이 해상도(0.1 PiB 등) 계단으로만 움직인다. 적재는 막지 않고(이력 소실이 더 나쁘다) 해상도를 싣는다 —
      *   해상도 미만의 변화는 **0 이 아니라 '보이지 않는 것'** 이다(belowResolution). 판정은 여기 하나, 문장은 웹.
+     *   ⚠ 판정은 '반 칸 미만' 이다 — 반올림 값의 차이는 칸의 배수라 실제로는 0 이지만, 부동소수(1.2P−1.1P = 0.0999…P)가
+     *   한 칸 차이를 '해상도 미만' 으로 뒤집지 않게 한다.
      */
     const res = numOrNull(metaOf(id).capacityApprox?.resolutionBytes);
     const approx = res != null && res > 0 ? { resolutionBytes: res } : null;
     if (approx) {
       for (const k of Object.keys(growth)) {
         const g = growth[k];
-        if (g && g.bytes != null) growth[k] = { ...g, resolutionBytes: res, belowResolution: Math.abs(g.bytes) < res };
+        if (g && g.bytes != null) growth[k] = { ...g, resolutionBytes: res, belowResolution: Math.abs(g.bytes) < res / 2 };
       }
     }
 
