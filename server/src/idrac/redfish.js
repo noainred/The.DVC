@@ -19,6 +19,16 @@ import { config } from '../config.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';
 import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
 import { pctFromMetric } from '../bmusage/parse/idracTelemetry.js';
+import { readTextCapped } from '../util/readCapped.js';
+import { readBodyPrefix } from '../util/readPrefix.js';
+
+// v2.606(감사 SEC2606-01): 스캔 대역의 **미등록 호스트**가 주는 본문 상한. 서비스 루트·401 오류 본문은 수백 바이트가
+//   정상이다 — 상한 없이 res.json()/text() 로 읽으면 gzip 폭탄(전송 2.6MB → 해제 2.6GB) 하나로 프로브 1건이 수백 MB 를
+//   먹는다(실측 RSS 640~730MB). 넘으면 그 IP 를 '응답 과대' 로 밝히고 건너뛴다(정상 결과를 지어내지 않는다).
+export const PROBE_ROOT_MAX_BYTES = 64 * 1024;
+export const AUTH_BODY_MAX_BYTES = 16 * 1024;
+export const PROBE_SYSTEMS_MAX_BYTES = 1024 * 1024;
+export const OVERSIZED_REASON = '응답 과대(상한 초과 — 이 IP 는 건너뜀)';
 
 // Dedicated dispatcher so iDRAC self-signed certs / legacy TLS always work,
 // regardless of the global vCenter dispatcher.
@@ -149,8 +159,13 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
   // Basic 401 본문 소진(undici 소켓 반환) — 챌린지 유무 관계없이. v2.591(감사 F3 부수): 버리지 않고 **읽어서** 응답에
   //   붙인다 — 스캔(probeIdrac)이 그 본문으로 iDRAC 의 오류 메시지를 읽으면 원인 진단용 **추가 인증 1회**가 사라진다
   //   (IP 당 3~4회 → 2~3회). 본문은 작다(Redfish 오류 JSON). 읽기 실패는 빈 문자열(예전 drain 과 같은 효과).
-  const basicAuthBody = await res.text().catch(() => '');
-  try { Object.defineProperty(res, 'basicAuthBody', { value: basicAuthBody, enumerable: false }); } catch { /* 응답 객체가 막혀 있으면 예전처럼 재요청으로 읽는다 */ }
+  //   v2.606(SEC2606-01): 앞 16KB 까지만 읽는다 — 넘으면 본문을 버리고 `basicAuthBodyCapped` 로 알린다(잘린 JSON 은 어차피 못 읽는다).
+  const pre = await readBodyPrefix(res, AUTH_BODY_MAX_BYTES).catch(() => ({ text: '', capped: false }));
+  const basicAuthBody = pre.capped ? '' : pre.text;
+  try {
+    Object.defineProperty(res, 'basicAuthBody', { value: basicAuthBody, enumerable: false });
+    Object.defineProperty(res, 'basicAuthBodyCapped', { value: pre.capped === true, enumerable: false });
+  } catch { /* 응답 객체가 막혀 있으면 예전처럼 재요청으로 읽는다 */ }
   if (challenge) {
     const r = await doFetch({ Authorization: buildDigestHeader({ username, password, method: 'GET', uri: pathname, challenge }) });
     if (r.ok) { touchAuthCache(key, { mode: 'digest', challenge }); return r; }
@@ -232,7 +247,9 @@ async function readIdracAuthMessage(base, pathname, username, password, timeoutM
       headers: { Authorization: basicHeader(username, password), Accept: 'application/json' },
       signal: AbortSignal.timeout(timeoutMs), dispatcher,
     });
-    return idracAuthMessageFrom(await res.text().catch(() => ''));
+    // v2.606(SEC2606-01): 앞 16KB 까지만. 넘으면 메시지를 읽지 않는다(잘린 JSON — 지어내지 않는다).
+    const pre = await readBodyPrefix(res, AUTH_BODY_MAX_BYTES).catch(() => ({ text: '', capped: false }));
+    return pre.capped ? '' : idracAuthMessageFrom(pre.text);
   } catch { return ''; }
 }
 
@@ -330,7 +347,13 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
   try {
     const res = await fetch(`${base}/redfish/v1`, opt());
     if (!res.ok && res.status !== 401) return { ok: false, reason: `HTTP ${res.status}` };
-    root = await res.json().catch(() => ({}));
+    // v2.606(SEC2606-01): 64KB 상한. 넘으면 '응답 과대' 로 이 IP 를 건너뛴다. JSON 이 아니면 예전처럼 빈 객체.
+    let text;
+    try { text = await readTextCapped(res, PROBE_ROOT_MAX_BYTES, '서비스 루트'); } catch (e) {
+      if (/상한/.test(String(e?.message))) return { ok: false, reason: OVERSIZED_REASON, oversized: true };
+      text = '';
+    }
+    try { root = JSON.parse(text); } catch { root = {}; }
   } catch (err) {
     return { ok: false, reason: err.name === 'TimeoutError' ? 'timeout' : err.message };
   }
@@ -347,6 +370,10 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
   let model = '', manufacturer = '', serviceTag = '', hostName = '', authHint = '';
   try {
     const sres = await rawGet(base, '/redfish/v1/Systems', username, password, timeoutMs);
+    if (sres.status === 401 && sres.basicAuthBodyCapped) {
+      try { await sres.body?.cancel?.(); } catch { /* */ }
+      return { ok: false, reason: OVERSIZED_REASON, oversized: true };   // v2.606(SEC2606-01)
+    }
     if (sres.status === 401) {
       // Basic·Digest·세션 토큰 모두 거부됨 → iDRAC이 준 실제 오류 메시지를 캡처해 원인을 구분한다
       // (잘못된 자격증명 vs 계정 잠금 vs 로그인 권한 없음). iDRAC 메시지가 있으면 그대로 노출.
@@ -364,12 +391,12 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
       return { ok: true, isIdrac: dell, dell, authFailed: true, authHint, ...vendorFields() };
     }
     if (sres.ok) {
-      const sroot = await sres.json();
+      const sroot = JSON.parse(await readTextCapped(sres, PROBE_SYSTEMS_MAX_BYTES, 'Systems'));   // v2.606: 상한(1MB)
       const first = firstMember(sroot);
       if (first) {
         const s2 = await rawGet(base, first, username, password, timeoutMs);
         if (s2.ok) {
-          const s = await s2.json();
+          const s = JSON.parse(await readTextCapped(s2, PROBE_SYSTEMS_MAX_BYTES, 'System'));   // v2.606: 상한(1MB)
           model = s.Model || ''; manufacturer = s.Manufacturer || '';
           serviceTag = s.SKU || s.SerialNumber || ''; hostName = s.HostName || '';
         }

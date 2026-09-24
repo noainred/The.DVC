@@ -10,7 +10,7 @@ import { computeZombies } from '../../reports/zombies.js';
 import { computeRightsizing } from '../../reports/rightsizing.js';
 import { computeCompliance } from '../../reports/compliance.js';
 import { filterChangeEvents, CHANGE_CATEGORIES } from '../../reports/changes.js';
-import { computeUnprotected, DEFAULT_BACKUP_PATTERNS } from '../../reports/unprotected.js';
+import { computeUnprotected } from '../../reports/unprotected.js';
 import { vmStatsFor, vmStatsMeta } from '../../reports/vmStats.js';
 import { certStatus } from '../../security/certMonitor.js';
 import { dailyReportStatus } from '../../reports/dailyReport.js';
@@ -154,7 +154,7 @@ api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJso
   {
     const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
     const lookbackDays = Math.min(90, Math.max(1, Number(req.query.lookbackDays) || 7));
-    const patterns = String(req.query.patterns || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const patterns = String(req.query.patterns || ''); // v2.606 SEC2606-02: computeUnprotected 가 최대 32개·64자로 자르고 버린 개수를 config.patternsOmitted 로 밝힌다
     // 'Snapshot' 선필터(type LIKE)로 창 내 스냅샷 이벤트만 가져온다. scope 는 post-filter 대신 SQL 로
     // 밀어넣어, 범위 밖 vCenter 스냅샷이 20k 창을 밀어내 in-scope VM 이 '미보호'로 오탐되지 않게 한다.
     const vcParam = req.query.vcenterId || '';
@@ -163,7 +163,7 @@ api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJso
     if (allowed) lf.vcenterIds = vcParam ? (allowed.has(vcParam) ? [vcParam] : []) : [...allowed];
     const ROW_LIMIT = 20_000;
     const rows = db.query(lf, ROW_LIMIT, 0);
-    return computeUnprotected(scoped.vms, rows, { patterns: patterns.length ? patterns : DEFAULT_BACKUP_PATTERNS, lookbackDays, rowLimit: ROW_LIMIT });
+    return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT });
   }
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 }

@@ -49,7 +49,8 @@ const str = (v, n) => String(v ?? '').replace(CTRL_RE, ' ').trim().slice(0, n);
 /** SSH 자격증명 정규화. prev 가 있으면 빈 비밀은 이전 값을 잇는다(화면은 비밀을 되돌려 보내지 않음). clear* 플래그로 명시 삭제. */
 function normSsh(input, prev) {
   const s = input && typeof input === 'object' ? input : {};
-  const out = { port: port(s.port, 22), username: str(s.username, 64) };
+  // v2.606 WEB2606-10: 빈 포트 칸은 이전 값을 잇는다(없으면 22) — 예전에는 비우면 기본 22 로 조용히 되돌아갔다.
+  const out = { port: port(s.port, port(prev?.port, 22)), username: str(s.username, 64) };
   for (const k of SSH_SECRETS) {
     const v = typeof s[k] === 'string' ? s[k] : '';
     const clear = s[`clear${k[0].toUpperCase()}${k.slice(1)}`] === true;
@@ -74,7 +75,7 @@ const hasSecret = (ssh) => SSH_SECRETS.some((k) => !!ssh?.[k]);
 
 export function normalizeTopology(input = {}, prev = null) {
   const mainHostChanged = !!prev?.main && (ip(input.main?.privateIp) !== (prev.main.privateIp || '') || ip(input.main?.publicIp) !== (prev.main.publicIp || ''));
-  const main = { name: str(input.main?.name, 40) || 'Main', privateIp: ip(input.main?.privateIp), publicIp: ip(input.main?.publicIp), portalPort: port(input.main?.portalPort, 4000), ssh: normSsh(input.main?.ssh, mainHostChanged ? null : prev?.main?.ssh) };
+  const main = { name: str(input.main?.name, 40) || 'Main', privateIp: ip(input.main?.privateIp), publicIp: ip(input.main?.publicIp), portalPort: port(input.main?.portalPort, port(prev?.main?.portalPort, 4000)), ssh: normSsh(input.main?.ssh, mainHostChanged ? null : prev?.main?.ssh) };
   // v2.606(감사 WEB2606-10): 버린 서비스 행을 **조용히 지우지 않는다** — 포트 칸을 비우고 저장하면 그 행이 사라졌는데
   // 응답에 흔적이 없었다. 버린 key·사유를 servicesDropped(비열거 — 저장 파일에는 남지 않는다)로 싣고 라우트·화면이 말한다.
   const servicesDropped = [];

@@ -41,7 +41,8 @@ export function remotePowerByHost() {
  * 보고한 호스트가 남아 있으면, 같은 사이트의 새 엣지가 같은 서버를 보고하는 순간 '다른 법인의 다른 서버' 로 판정돼 이력 키가
  * rmt:<host> → rmt:<cid>:<host> 로 바뀌었다. 신선도 기준은 전력 합산과 같은 POWER_CURRENT_STALE_MS(기본 2시간).
  */
-export const REMOTE_FRESH_MS = Number(process.env.POWER_CURRENT_STALE_MS) || 2 * 3_600_000;
+const _freshEnv = Number(process.env.POWER_CURRENT_STALE_MS);
+export const REMOTE_FRESH_MS = Number.isFinite(_freshEnv) && _freshEnv > 0 ? _freshEnv : 2 * 3_600_000;
 const isFresh = (s, now, staleMs) => {
   const t = Number(s?.ts);
   return Number.isFinite(t) && t > 0 && now - t <= staleMs;

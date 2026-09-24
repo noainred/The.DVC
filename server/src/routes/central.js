@@ -989,8 +989,9 @@ centralRouter.post('/fleet', (req, res) => {
   //   작게 묶고, 소유를 증명할 길이 없으므로 귀속도 비운다. 뺀·비운 개수는 응답에 싣는다(조용한 상한 금지).
   const verified = req.centralAuth.mode === 'agent' || edgeNameKnown(agent);
   const vcAllowed = verified ? (vc) => agentOwnsVcenter(agent, vc) : () => false;
-  const r = setEdgeFleet(agent, list, b.generatedAt || null, { verified, vcAllowed });
-  res.json({ ok: true, agent, baremetal: r.accepted, ...(r.omitted ? { omitted: r.omitted } : {}), ...(r.vcenterBlanked ? { vcenterBlanked: r.vcenterBlanked } : {}), ...(verified ? {} : { unverifiedAgent: true }) });
+  // v2.606(RECENT2606-03): 엣지가 일부를 빼고 보낸 목록이면(partial) 그 사실을 저장해 중앙이 밝힌다 — 예전에는 버렸다.
+  const r = setEdgeFleet(agent, list, b.generatedAt || null, { verified, vcAllowed, partial: b });
+  res.json({ ok: true, agent, baremetal: r.accepted, ...(r.omitted ? { omitted: r.omitted } : {}), ...(r.vcenterBlanked ? { vcenterBlanked: r.vcenterBlanked } : {}), ...(verified ? {} : { unverifiedAgent: true }), ...(r.partial ? { partial: r.partial } : {}) });
 });
 
 /**

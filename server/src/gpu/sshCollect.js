@@ -73,6 +73,50 @@ async function runNvsmi(sh, argStr, remainingMs = () => 60_000) {
 const usableIp = (ip) => typeof ip === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)
   && !ip.startsWith('127.') && !ip.startsWith('169.254.') && ip !== '0.0.0.0';
 
+/** VM 이 보고한 IP 집합(ipAddresses ∪ ipAddress). */
+export function knownVmIps(vm) {
+  return new Set([...(Array.isArray(vm?.ipAddresses) ? vm.ipAddresses : []), vm?.ipAddress].filter(Boolean).map((x) => String(x).trim()));
+}
+
+/**
+ * v2.606(LEFT2606-01): 저장 자격증명으로 SSH 할 고정 IP 판정 — **그 VM 이 보고한 IP 일 때만** 쓴다. 연결 테스트
+ * (routes/admin/gpuGuest.js, v2.480 S5)와 주기 폴러가 같은 판정을 쓴다(한쪽만 막으면 저장 한 번으로 지나간다).
+ * @returns {{ok:boolean, ip:string, known:string[]}} ok=false 면 ip 는 '' (핀을 쓰지 않는다)
+ */
+export function pinnedIpCheck(vm, preferIp) {
+  const ip = String(preferIp || '').trim();
+  const known = knownVmIps(vm);
+  if (!ip) return { ok: true, ip: '', known: [...known] };
+  return known.has(ip) ? { ok: true, ip, known: [...known] } : { ok: false, ip: '', known: [...known] };
+}
+
+/**
+ * v2.606(LEFT2606-01): GPU 게스트 설정 저장(PUT /gpu-guest/settings) 요청의 고정 IP(vcenters.<vc>.vmIps.<vm>) 중 **스냅샷에 그 VM 이 있는데 그 VM 이 보고한 IP 가 아닌**
+ * 값을 찾는다(순수). 테스트 라우트만 막으면 저장 한 번으로 지나간다(server/CLAUDE.md). 스냅샷에 VM 이 없으면(엣지 위임 등)
+ * 판정할 근거가 없으므로 받는다 — 폴러가 실행 시점에 같은 판정(pinnedIpCheck)으로 다시 막는다.
+ */
+export function unknownPinnedIps(body, snap, prev = null) {
+  const out = [];
+  const vcs = body && typeof body === 'object' && body.vcenters && typeof body.vcenters === 'object' ? body.vcenters : {};
+  const vms = new Map((snap?.vms || []).filter((v) => v && v.id).map((v) => [String(v.id), v]));
+  for (const [vcId, vc] of Object.entries(vcs)) {
+    const pins = vc && typeof vc.vmIps === 'object' && vc.vmIps ? vc.vmIps : {};
+    for (const [vmId, ip] of Object.entries(pins)) {
+      const t = String(ip ?? '').trim();
+      if (!t) continue;                                   // 빈 값 = 자동 복귀(허용)
+      // 이미 저장돼 있던 값을 그대로 다시 보내는 것은 거부하지 않는다 — 그 뒤 VM IP 가 바뀐 옛 핀 하나가 다른 설정 저장까지
+      //   막으면 안 된다(그 핀은 폴러가 실행 시점에 pinnedIpCheck 로 쓰지 않는다). 막는 것은 **새로 넣거나 바꾼** 값이다.
+      const before = String((((prev?.vcenters || {})[vcId] || {}).vmIps || {})[vmId] ?? '').trim();
+      if (before && before === t) continue;
+      const vm = vms.get(String(vmId));
+      if (!vm || (vm.vcenterId && vm.vcenterId !== vcId)) continue;
+      const pin = pinnedIpCheck(vm, t);
+      if (!pin.ok) out.push({ vcenterId: vcId, vmId: String(vmId), ip: t, known: pin.known });
+    }
+  }
+  return out;
+}
+
 /**
  * VM이 보고한 IP들 중 SSH 시도 가능한 IPv4(루프백/링크로컬 제외).
  * preferIp가 지정되면(사용자가 고른 고정 IP) 그 IP '하나만' 반환한다 — 다중 NIC VM에서

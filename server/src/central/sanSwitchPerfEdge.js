@@ -118,16 +118,8 @@ export function saveEdgePerfStatus(agent, status, { owned = null, names = null }
       });
     } catch { /* 로그 실패가 수신을 막지 않게 */ }
   }
-  // v2.606(감사 TIM2606-05): 중복 제거 Map 은 **보관 중인 장비 id 만** 남긴다 — 예전에는 set 만 하고 지우지 않아 매 push 새
-  //   deviceId 를 보내는 엣지(재등록 반복·오동작·공유 토큰)가 프로세스 수명 내내 키를 쌓았다. 빠진 장비의 키만 지우므로
-  //   dedup 계약(같은 collectedAt 재push 는 기록하지 않는다)은 그대로다.
-  const live = new Set();
-  for (const v of m.values()) for (const d of v?.status?.devices || []) if (d?.id != null) live.add(d.id);
-  for (const k of _lastRec.keys()) if (!live.has(k)) _lastRec.delete(k);
   return { saved: st.devices.length };
 }
-/** 테스트·진단용 — 중복 제거 Map 크기. */
-export function _lastRecSize() { return _lastRec.size; }
 
 /** 전체 엣지 상태 — 설정 화면의 '엣지별 수집 상태' 표. */
 export function listEdgePerfStatus() {

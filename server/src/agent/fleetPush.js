@@ -9,7 +9,7 @@
  * CENTRAL_URL 설정 시 동작(=에이전트). AGENT_PUSH_FLEET=false 로 끌 수 있다.
  */
 
-import { config, loadVcenterConfig } from '../config.js';
+import { config, loadVcenterConfig, clampIntervalMs } from '../config.js';
 import { reqTimeoutMs } from './envTimeout.js';
 import { store } from '../store.js';
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -71,7 +71,7 @@ export function fleetWithholdDecision(unread, since, now, maxMs = FLEET_WITHHOLD
  * v2.606 RECENT2606-03: 실제 보류 상한 — min(FLEET_WITHHOLD_MAX_MS, 중앙 TTL − 2 × push 주기). 주기 입도를 빼지 않으면
  * '시한을 넘긴 다음 주기' 가 TTL 뒤에 온다. 주기가 TTL 의 절반 이상이면 0(보류하지 않고 곧바로 부분 전송). 순수.
  */
-export const FLEET_CENTRAL_TTL_MS = Math.max(60_000, Number(process.env.AGENT_FLEET_CENTRAL_TTL_MS) || 30 * 60_000); // 중앙 CENTRAL_FLEET_TTL_MS 기본값과 같게
+export const FLEET_CENTRAL_TTL_MS = clampIntervalMs(process.env.AGENT_FLEET_CENTRAL_TTL_MS, 30 * 60_000, 60_000); // 중앙 CENTRAL_FLEET_TTL_MS 기본값과 같게
 export function fleetWithholdMaxMs(intervalMs, ttlMs = FLEET_CENTRAL_TTL_MS, capMs = FLEET_WITHHOLD_MAX_MS) {
   const iv = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 300_000;
   return Math.max(0, Math.min(capMs, ttlMs - 2 * iv));

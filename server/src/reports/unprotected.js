@@ -7,11 +7,42 @@
 
 export const DEFAULT_BACKUP_PATTERNS = ['veeam', 'backup', 'commvault', 'netbackup', 'nbu', 'avamar', 'rubrik', 'cohesity', 'networker', 'vranger', 'nakivo'];
 
-/** 이벤트 1건이 '백업 소프트웨어의 스냅샷 작업'인지 — user 또는 message에 패턴 매칭. */
-export function isBackupEvent(row, patterns = DEFAULT_BACKUP_PATTERNS) {
+/**
+ * v2.606(감사 SEC2606-02): 사용자가 주는 패턴 목록 상한. 예전에는 개수·길이 상한이 없어 operator 요청 1건
+ * (패턴 약 5,300개)이 2만 행 × 패턴 수 동기 비교로 이벤트 루프를 약 4.4초 막았다(memo 키가 URL 이라 캐시로 안 막힌다).
+ * 넘친 개수·너무 긴 항목은 **버리고 개수를 밝힌다**(긴 항목을 잘라 쓰면 더 넓게 맞는 다른 패턴이 된다).
+ */
+export const MAX_PATTERNS = 32;
+export const MAX_PATTERN_LEN = 64;
+
+/** 쉼표 문자열 또는 배열 → { patterns(소문자·중복 제거·상한 적용), omitted, tooLong }. */
+export function normalizePatterns(raw) {
+  const list = Array.isArray(raw) ? raw : String(raw ?? '').split(',');
+  const out = [];
+  const seen = new Set();
+  let omitted = 0, tooLong = 0;
+  for (const x of list) {
+    const p = String(x ?? '').trim().toLowerCase();
+    if (!p) continue;
+    if (p.length > MAX_PATTERN_LEN) { tooLong++; continue; }
+    if (seen.has(p)) continue;
+    if (out.length >= MAX_PATTERNS) { omitted++; continue; }
+    seen.add(p); out.push(p);
+  }
+  return { patterns: out, omitted, tooLong };
+}
+
+/** 소문자화가 끝난 패턴 목록으로 판정(내부 — 행마다 패턴을 다시 소문자화하지 않는다, v2.606 SEC2606-02). */
+function matchesLower(row, lowerPatterns) {
   if (!/Snapshot/i.test(row.type || '')) return false;
   const hay = `${row.user || ''} ${row.message || ''}`.toLowerCase();
-  return patterns.some((p) => p && hay.includes(String(p).toLowerCase()));
+  for (const p of lowerPatterns) if (p && hay.includes(p)) return true;
+  return false;
+}
+
+/** 이벤트 1건이 '백업 소프트웨어의 스냅샷 작업'인지 — user 또는 message에 패턴 매칭. */
+export function isBackupEvent(row, patterns = DEFAULT_BACKUP_PATTERNS) {
+  return matchesLower(row, patterns.map((p) => String(p ?? '').toLowerCase()));
 }
 
 /**
@@ -19,8 +50,12 @@ export function isBackupEvent(row, patterns = DEFAULT_BACKUP_PATTERNS) {
  * opts: { patterns, lookbackDays }
  */
 export function computeUnprotected(vms, rows, opts = {}) {
-  const patterns = (opts.patterns && opts.patterns.length ? opts.patterns : DEFAULT_BACKUP_PATTERNS)
-    .map((p) => String(p).trim().toLowerCase()).filter(Boolean);
+  // v2.606(SEC2606-02): 상한을 여기서도 적용한다(라우트 밖 호출부 방어). 버린 개수는 config 에 밝힌다.
+  //   사용자 패턴이 하나도 남지 않으면(비었거나 전부 너무 김) 예전처럼 기본 패턴을 쓴다.
+  const given = normalizePatterns(opts.patterns || []);
+  const norm = given.patterns.length ? given : normalizePatterns(DEFAULT_BACKUP_PATTERNS);
+  const patterns = norm.patterns;
+  const patternsOmitted = given.omitted + given.tooLong;
   const lookbackDays = Number(opts.lookbackDays) || 7;
 
   // (vCenter, VM 이름) → 마지막 백업 이벤트 시각.
@@ -34,7 +69,7 @@ export function computeUnprotected(vms, rows, opts = {}) {
   let backupEvents = 0, nameOnlyEvents = 0;
   const keep = (m, k, r) => { const prev = m.get(k); if (!prev || r.ts > prev.ts) m.set(k, { ts: r.ts, user: r.user || '' }); };
   for (const r of rows || []) {
-    if (!isBackupEvent(r, patterns)) continue;
+    if (!matchesLower(r, patterns)) continue;
     backupEvents++;
     const name = r.entity || '';
     if (!name) continue;
@@ -58,7 +93,7 @@ export function computeUnprotected(vms, rows, opts = {}) {
   protectedList.sort((a, b) => b.lastBackupTs - a.lastBackupTs);
 
   return {
-    config: { patterns, lookbackDays },
+    config: { patterns, lookbackDays, patternsOmitted, maxPatterns: MAX_PATTERNS, maxPatternLen: MAX_PATTERN_LEN },
     summary: {
       scannedVms: unprotectedList.length + protectedList.length,
       protectedCount: protectedList.length,

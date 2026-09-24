@@ -21,6 +21,9 @@
  */
 const t = (v) => String(v ?? '').trim();
 
+/** 한 줄 길이 상한(v2.606 SEC2606-05) — racadm 한 줄은 수십 자다. 넘는 줄은 앞부분만 본다(정규식 비용 한정). */
+export const LINE_MAX = 1000;
+
 /** 지표 키워드 → 우리 필드. ⚠ 한 표기로 굳히지 말 것(버전마다 흔들린다). */
 const METRIC_RE = Object.freeze([
   ['cpuPct', /\bcpu\s*usage\b|\bcpuusage\b|\bsystemboardcpuusage\b/i],
@@ -48,8 +51,10 @@ function pct(v) {
  * 시각(`2026-09-17 08:00:00`)·버전(`5.10.30.00`)처럼 구분자가 붙은 토큰은 제외한다.
  */
 function numbersOf(line) {
-  const s = t(line);
-  const withPct = [...s.matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map((m) => Number(m[1]));
+  const s = t(line).slice(0, LINE_MAX);
+  // v2.606(감사 SEC2606-05): 앞 경계(숫자·점 뒤에서 시작하지 않는다) + 자릿수 한정 — 예전 `(\d+(?:\.\d+)?)\s*%` 는
+  //   숫자열의 모든 시작 위치에서 끝까지 훑어 O(n²) 였다('1'×32,000 한 줄 2.4초). v2.605 nlSearch 수정과 같은 모양.
+  const withPct = [...s.matchAll(/(?<![\d.])(\d{1,6}(?:\.\d{1,3})?)\s*%/g)].map((m) => Number(m[1]));
   if (withPct.length) return { list: withPct, hadPct: true };
   // 날짜·시각·버전 토큰을 지운 뒤 남은 수만.
   const cleaned = s
@@ -81,7 +86,7 @@ export function parseSystemPerf(text = '') {
   const raw = t(text);
   const out = { parsed: false, mode: '', usedStat: {}, found: [], lines: 0 };
   if (!raw) return out;
-  const lines = raw.split(/\r?\n/);
+  const lines = raw.split(/\r?\n/).map((l) => (l.length > LINE_MAX ? l.slice(0, LINE_MAX) : l));   // v2.606 SEC2606-05
   out.lines = lines.length;
 
   /** 값을 넣는다 — **이미 더 좋은 통계(last > avg > peak)로 채워져 있으면 덮지 않는다.** */

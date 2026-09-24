@@ -93,7 +93,7 @@ api.get('/tools/serial-lookup/export.csv', toolsPerm, fullScopeOnly, (req, res) 
     ? searchSerials(idx.rows, q, { kinds, limit: 100_000 }).rows
     : idx.rows.filter((r) => !kindSet || kindSet.has(r.kind));
   logAudit({ user: req.user?.username, action: '시리얼 조회 CSV 내보내기',
-    target: q ? `검색 '${q}'` : '전체', detail: `${rows.length}행` });
+    target: q ? `검색 '${q.length > 100 ? `${q.slice(0, 100)}…(잘림)` : q}'` : '전체', detail: `${rows.length}행` });   // v2.606 SEC2606-06: 형제(toolsCapacity v2.500 L-6)와 같은 100자
   // csvLine 은 수식 인젝션 가드(=,+,-,@ 로 시작하는 셀)를 포함한다 — 시리얼은 대개 안전하지만
   // 장비명·메모가 사용자 입력이라 공용 헬퍼를 쓴다.
   const admin = isAdminReq(req);

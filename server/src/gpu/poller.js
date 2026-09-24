@@ -13,7 +13,7 @@ import { store } from '../store.js';
 import { loadGpuGuestSettings, resolveVmCreds, resolveVmIp, resolveCollectMethod } from './settings.js';
 import { setGuestGpu, pruneGuestGpu, guestGpuCounts } from './store.js';
 import { collectVmGpu, VimSoapClient } from './guestops.js';
-import { collectVmGpuSsh, guestIps, gpuAuthGuard, gpuStopView, isGpuAuthError } from './sshCollect.js';
+import { collectVmGpuSsh, guestIps, gpuAuthGuard, gpuStopView, isGpuAuthError, pinnedIpCheck } from './sshCollect.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
@@ -165,7 +165,14 @@ async function pollLive(snap, vc, s) {
       let err = null;
       let authFail = null;   // v2.590: 자격증명 거부(게스트 작업 InvalidGuestLogin · SSH client-authentication)
       // 'ssh'=직접 SSH+nvidia-smi · 'auto'=게스트작업 먼저→실패 시 SSH(+VM별 성공 방식 학습) · 'guestops'=VMware Tools.
-      const viaSsh = () => collectVmGpuSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, preferIp: resolveVmIp(s, vc.id, v.id) });
+      // v2.606(LEFT2606-01): 저장된 고정 IP 는 그 VM 이 보고한 IP 일 때만 쓴다 — 아니면 핀을 버리고(VM 의 알려진 IP 로만
+      //   시도) 사유를 진단에 남긴다. 저장 자격증명을 VM 이 보고한 적 없는 주소로 보내지 않는다(연결 테스트와 같은 판정).
+      const pin = pinnedIpCheck(v, resolveVmIp(s, vc.id, v.id));
+      if (!pin.ok) {
+        diag.pinRejected = (diag.pinRejected || 0) + 1;
+        console.warn(`[gpu-guest]   ${v.name}: 고정 IP 가 이 VM 의 알려진 IP(${pin.known.join(', ') || '없음'})가 아니라 쓰지 않습니다(저장 자격증명 보호)`);
+      }
+      const viaSsh = () => collectVmGpuSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, preferIp: pin.ip });
       const viaGuestops = () => collectVmGpu(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts });
       let r = null, usedMethod = method;
       if (method === 'ssh') {

@@ -235,7 +235,9 @@ test('이력 DB 는 ts 인덱스·0600·중복 방지를 갖는다', () => {
   assert.match(src, /CREATE INDEX IF NOT EXISTS idx_runs_at ON runs \(at\)/);
   assert.match(src, /chmodSync\(p, 0o600\)/);
   assert.match(src, /Number\(last\.collected_at\) === collectedAt/, '수집 1회 = 기록 1회 규약');
-  assert.match(src, /journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000/);
+  // v2.606(DB2606-03): PRAGMA 는 util/sqliteOpen.js openSqlite 가 건다(busy_timeout 먼저 → WAL + NORMAL). 잠금이면 래치하지 않는다.
+  assert.match(src, /openSqlite\(new DatabaseSync\(p\)\)/);
+  assert.match(src, /createLockRetry\(/);
   assert.match(src, /st\.trim\.run/, '장비당 보관 상한이 없으면 무한히 자란다');
 });
 
