@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **515개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **520개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-24)
@@ -57,7 +57,7 @@
 | `AUTH_TOKEN_TTL` | `'8h'` | ✅ | config.js |
 | `BMUSAGE_ACTIVITY_MAX` | `500` |  | bmusage/activityLog.js |
 | `BMUSAGE_ALERT_MAX` | `40` |  | bmusage/notify.js |
-| `BMUSAGE_CMD_TIMEOUT_MS` | `30000` |  | bmusage/collectors/osSsh.js |
+| `BMUSAGE_CMD_TIMEOUT_MS` |  |  | bmusage/collectors/osSsh.js |
 | `BMUSAGE_CONCURRENCY` | `4` |  | bmusage/poller.js |
 | `BMUSAGE_COUNT_CACHE_MS` | `60000` |  | bmusage/db.js |
 | `BMUSAGE_DEVICE_TIMEOUT_MS` | `60000` |  | bmusage/poller.js |
@@ -70,8 +70,8 @@
 | `BMUSAGE_ENT_SSH_READY_MS` | `12000` |  | bmusage/collectors/idracEnterprise.js |
 | `BMUSAGE_ENTERPRISE` | `''` |  | bmusage/settings.js |
 | `BMUSAGE_LIST_BUDGET` | `20` |  | bmusage/poller.js |
-| `BMUSAGE_SESSION_BUDGET_MS` | `50000` |  | bmusage/collectors/osSsh.js |
-| `BMUSAGE_SSH_TIMEOUT_MS` | `15000` |  | bmusage/collectors/osSsh.js |
+| `BMUSAGE_SESSION_BUDGET_MS` |  |  | bmusage/collectors/osSsh.js |
+| `BMUSAGE_SSH_TIMEOUT_MS` |  |  | bmusage/collectors/osSsh.js |
 | `CAPACITY_DB_PATH` |  |  | config.js |
 | `CAPACITY_MON_ENABLED` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `CAPACITY_PUSH` | `기본 적용('false' 로 끄기)` |  | config.js |
@@ -212,7 +212,7 @@
 | `BMSTOR_ACK_GRACE_MS` | `60000` |  | bmstor/jobs.js |
 | `BMSTOR_CONCURRENCY` | `4` |  | bmstor/collect.js |
 | `BMSTOR_PUSH_TIMEOUT_MS` | `180000` |  | bmstor/poller.js |
-| `BMSTOR_SSH_TIMEOUT_MS` | `15000` |  | bmstor/collect.js |
+| `BMSTOR_SSH_TIMEOUT_MS` |  |  | bmstor/collect.js |
 
 ## 보안 (13)
 
@@ -275,7 +275,7 @@
 | `STORAGE_DAILY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
 | `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/collectRequests.js, storage/poller.js |
 | `STORAGE_HISTORY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
-| `STORAGE_HTTP_TIMEOUT_MS` | `15000` |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
+| `STORAGE_HTTP_TIMEOUT_MS` |  |  | storage/collectors/isilon.js, storage/collectors/restCommon.js |
 | `STORAGE_INTERVALS_LOCAL` | `''` |  | storage/intervals.js |
 | `STORAGE_ISILON_PORT` | `8080` |  | storage/collectors/isilon.js |
 | `STORAGE_POLL_MS` | `60 * 60_000` |  | storage/intervals.js |
@@ -305,7 +305,7 @@
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 
-## 엣지 에이전트 (35)
+## 엣지 에이전트 (37)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -318,6 +318,8 @@
 | `AGENT_DEPLOY_CONCURRENCY` | `2` | ✅ | agent/bulkDeploy.js |
 | `AGENT_DEPLOY_TIMEOUT_MS` |  | ✅ | agent/bulkDeploy.js |
 | `AGENT_EDGELOG_POLL_MS` |  |  | agent/edgeLogWorker.js |
+| `AGENT_FLEET_WITHHOLD_MAX_MS` | `20` |  | agent/fleetPush.js |
+| `AGENT_GPU_GUEST_WITHHOLD_MAX_MS` | `15` |  | agent/gpuGuestPush.js |
 | `AGENT_GUESTDISK_PUSH_TIMEOUT_MS` |  |  | agent/guestDiskPush.js |
 | `AGENT_IDRAC_SCAN_POLL_MS` | `5000` |  | agent/idracScanWorker.js |
 | `AGENT_LINKCHECK` | `''` |  | agent/linkCheckWorker.js |
@@ -345,7 +347,7 @@
 | `VMSERIES_LOCAL_SETTINGS` | `기본 적용('true' 로 끄기)` |  | agent/vmSeriesConfigPull.js |
 | `X` |  |  | agent/envTimeout.js, util/dayKey.js |
 
-## 원격 명령(RMA) (35)
+## 원격 명령(RMA) (37)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -366,10 +368,12 @@
 | `RMA_ENABLED_TESTS` |  | ✅ | rma/agent.js |
 | `RMA_FAILURE_LOG` |  | ✅ | rma/agent.js |
 | `RMA_FILE_ROOTS` |  | ✅ | rma/agent.js |
+| `RMA_HEARTBEAT_PURGE_MS` | `7` |  | rma/jobs.js |
 | `RMA_HEARTBEAT_STALE_MS` | `90000` |  | rma/jobs.js |
 | `RMA_HISTORY_DAYS` | `90` |  | rma/historyDb.js |
 | `RMA_INSTANCE` |  |  | rma/agent.js |
 | `RMA_LONGPOLL_MS` | `20000` | ✅ | rma/agent.js |
+| `RMA_MAX_INSTANCES_PER_AGENT` | `32` |  | rma/jobs.js |
 | `RMA_MAX_OUTPUT` | `256` | ✅ | rma/exec.js, rma/jobs.js |
 | `RMA_OFFLINE_CMD_FAIL` | `''` |  | rma/agent.js |
 | `RMA_OFFLINE_CMD_OK` | `''` | ✅ | rma/agent.js |
@@ -408,7 +412,7 @@
 | `REMOTE_MAPPING_TTL_MS` | `24` |  | proxy/expiry.js |
 | `REMOTE_MAX_SESSIONS` | `80` |  | proxy/sshGateway.js |
 | `SSH_EXEC_MAX_OUTPUT` | `4` |  | proxy/sshExec.js |
-| `SSH_EXEC_TIMEOUT_MS` | `60000` |  | proxy/sshExec.js |
+| `SSH_EXEC_TIMEOUT_MS` |  |  | proxy/sshExec.js |
 | `SSH_LEGACY_FALLBACK` | `기본 적용('0' 로 끄기)` | ✅ | proxy/sshExec.js |
 | `SSH_PAGER_MAX_PAGES` | `400` |  | proxy/sshExec.js |
 | `SSH_PTY_COLS` | `1000` |  | proxy/sshExec.js |
@@ -494,7 +498,7 @@
 | `EDGELOG_SNAP_MAX_BYTES` | `2` |  | central/edgeLogStore.js |
 | `EDGELOG_STATUS_ITEM_CAP` | `200` |  | central/edgeLogStore.js |
 | `EDGELOG_STATUS_MAX_BYTES` | `512` |  | central/edgeLogStore.js |
-| `IDRAC_PUSH_TIMEOUT_MS` | `15` |  | central/idracScanPush.js |
+| `IDRAC_PUSH_TIMEOUT_MS` |  |  | central/idracScanPush.js |
 | `IDRAC_SCAN_ACK_TIMEOUT_MS` | `90000` |  | central/idracScanJobs.js |
 | `INGEST_PLAIN_WARN_BYTES` | `512` |  | central/ingestStats.js |
 | `INGEST_PLAIN_WARN_STREAK` | `3` |  | central/ingestStats.js |
@@ -528,7 +532,7 @@
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `HEALTH_PROBE_TIMEOUT_MS` | `5000` |  | health/network.js |
+| `HEALTH_PROBE_TIMEOUT_MS` |  |  | health/network.js |
 
 ## API 라우트 (31)
 
@@ -612,7 +616,7 @@
 | `IPAM_SCAN_DEADLINE_MS` | `20` |  | ipam/scanRunner.js |
 | `IPAM_SCAN_RESULTS_MAX` |  |  | ipam/scanStore.js |
 | `IPAM_SCAN_WORKER` | `기본 적용('0' 로 끄기)` |  | ipam/scanRunner.js |
-| `IPAM_WRITE_DEBOUNCE_MS` | `1500` |  | ipam/scanStore.js |
+| `IPAM_WRITE_DEBOUNCE_MS` |  |  | ipam/scanStore.js |
 | `IPAM_WRITE_MIN_ROWS` | `500` |  | ipam/db.js |
 | `IPAM_WRITE_WORKER` | `기본 적용('0' 로 끄기)` |  | ipam/db.js |
 
@@ -632,7 +636,7 @@
 | `NSX_LIST_MAX_PAGES` | `20` |  | nsx/client.js |
 | `NSX_TLS_REJECT_UNAUTHORIZED` | `기본 아님('true' 일 때만 적용)` |  | nsx/client.js |
 
-## PDU (9)
+## PDU (10)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -644,6 +648,7 @@
 | `PDU_POLL_MS` | `5 * 60_000` |  | pdu/intervals.js |
 | `PDU_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | pdu/push.js |
 | `PDU_PUSH_MS` | `5 * 60_000` |  | pdu/intervals.js |
+| `PDU_PUSH_WITHHOLD_MAX_MS` | `15` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 
 ## SAN 스위치 (28)
@@ -694,4 +699,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 515
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 520

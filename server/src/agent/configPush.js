@@ -38,6 +38,10 @@ export async function pushConfigNow(...args) {
       let r = await _pushConfigNow(...args);
       while (_again) { _again = false; r = await _pushConfigNow({ onlyIfChanged: true }); }
       return r;
+    } catch (e) {
+      // 무음 실패 금지(v2.549) — 안쪽이 이미 상태를 남기지만, 예상 밖 throw 도 콘솔에 남기고 null 로 끝낸다.
+      console.warn(`[config-push] 실패: ${e?.message || e}`);
+      return null;
     } finally { running = false; }
   })();
   return _busy;
