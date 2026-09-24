@@ -894,6 +894,7 @@ function sanitizeCurUserRecords(b) {
         .map((u) => ({ name: String(u?.name || '').slice(0, 128), kind: ['active', 'disc', 'other'].includes(String(u?.kind)) ? String(u.kind) : 'other' }))
         .filter((u) => u.name),
       error: String(r.error || '').slice(0, 300), guestHost: String(r.guestHost || '').slice(0, 120),
+      truncated: r.truncated === true, // v2.606 COL2606-01: 발행기가 원문을 잘랐다(인원은 하한) — 엣지 위임 경로에서도 표지를 잃지 않게
     });
   }
   return out;

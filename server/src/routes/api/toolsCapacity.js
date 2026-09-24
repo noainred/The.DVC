@@ -851,12 +851,13 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
   //   저장하면 다른 법인이 대상에서 빠지고 그 DB 파일까지 지워졌다. 범위 밖 id 는 직전 값을 보존하고,
   //   범위 밖 DB·전체 합계 DB 는 이 계정의 저장으로 지우지 않는다(trackTotal 은 전 법인 계열이라 보존).
   const allowed = scopedVcenterIds(req.user, snap);
-  let ignoredOutOfScope = [];
+  let ignoredOutOfScope = []; let unapplied = null; let unappliedReason = null;
   const patch = { ...b };
   if (allowed) {
     if (b.vcenterIds !== undefined) {
       const m = mergeScopedIds(before.vcenterIds, b.vcenterIds, allowed, [...validIds]);
       patch.vcenterIds = m.merged; ignoredOutOfScope = m.ignored;
+      if (m.unapplied) { unapplied = m.unapplied; unappliedReason = m.unappliedReason || null; } // v2.606 RECENT2606-04: 적용하지 않은 요청은 사유를 밝힌다
     }
     delete patch.trackTotal;
   }
@@ -885,7 +886,7 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
   });
   // PUT 응답도 GET 과 같은 필터 — 범위 밖 id 를 응답으로 되돌려 주지 않는다.
   const safeNext = allowed ? { ...next, vcenterIds: (next.vcenterIds || []).filter((id) => allowed.has(id)) } : next;
-  res.json({ ok: true, settings: safeNext, dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}) });
+  res.json({ ok: true, settings: safeNext, dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...(unapplied ? { unapplied, unappliedReason } : {}) });
 });
 
 /** 특정 vCenter(또는 전체 합계)의 수집 데이터 삭제 — 용량 회수용. 관리자 전용. */

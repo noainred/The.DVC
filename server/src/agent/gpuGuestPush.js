@@ -64,7 +64,9 @@ async function _pushGpuGuestNow() {
   const wh = gpuGuestPushWithhold(lastRun, _withholdSince, Date.now());
   _withholdSince = wh.since;
   if (wh.withhold) {
-    const note = '게스트 GPU 첫 수집이 아직 끝나지 않아 보내지 않았습니다(빈 목록을 보내면 중앙의 이 엣지 GPU 사용률이 지워집니다)';
+    const note = wh.reason === 'unread-vcenters'
+      ? `게스트 GPU 대상 vCenter ${Array.isArray(wh.unread) ? wh.unread.length : ''}곳을 아직 읽지 못해 보내지 않았습니다(인벤토리 미수집·인증 정지·로그인 실패 — 빈 목록을 보내면 중앙의 이 엣지 GPU 사용률이 지워집니다)`
+      : '게스트 GPU 첫 수집이 아직 끝나지 않아 보내지 않았습니다(빈 목록을 보내면 중앙의 이 엣지 GPU 사용률이 지워집니다)';
     last = { at: Date.now(), hosts: 0, vms: 0, skipped: true, note };
     console.log(`[gpu-guest-push] ${note}`);
     return { ok: false, skipped: true, reason: note };

@@ -81,19 +81,19 @@ export async function putEdgeLinkReport(agent, body = {}) {
      */
     if (!EDGE_KINDS.includes(kind)) { rejected += 1; continue; }
     if (t(link.from).toLowerCase() !== ag.toLowerCase()) { rejected += 1; continue; }
+
+    if (r.skipped) { skipped += 1; continue; }        // 점검하지 않은 것은 적재하지 않는다
     /*
      * ⚠⚠ v2.606(감사 CEN2606-01 — 재현): **id 도 대조한다.** id 는 DB 기본키인데 from 만 보고 받아서, 개별 토큰
      *   edgeA 가 `{id:'edge->central|edgeB|central', from:'edgeA'}` 를 보내면 **edgeB 의 push 링크 행이 edgeA 의 ok 로
      *   덮였다** — 죽은 엣지가 '정상' 으로 보인다(이 기능의 존재 이유를 가린다). 또 임의 id 500개가 push 마다
      *   link_latest 에 새 행으로 쌓였다. id 는 links.js linkIdOf(kind, from, to) 로 결정되므로 **재계산해 같을 때만**
      *   받는다. 비교는 대소문자 무시다 — from 검사가 대소문자 무시이고 중앙 등록부(remoteAgent) 표기가 엣지 이름과
-     *   대소문자만 다를 수 있다(정상 보고를 거절하지 않게).
+     *   대소문자만 다를 수 있다(정상 보고를 거절하지 않게). 점검하지 않은(skipped) 항목은 적재하지 않으므로 이 대조 전에 센다.
      */
     const to = t(link.to);
     if (id.length > LINK_ID_MAX || to.length > LINK_TO_MAX) { rejected += 1; continue; }
     if (id.toLowerCase() !== linkIdOf(kind, link.from, to).toLowerCase()) { rejected += 1; continue; }
-
-    if (r.skipped) { skipped += 1; continue; }        // 점검하지 않은 것은 적재하지 않는다
     const v = (r.verdict && typeof r.verdict === 'object') ? r.verdict : null;
     if (!v) { rejected += 1; continue; }
     const steps = sanitizeSteps(r.steps);
