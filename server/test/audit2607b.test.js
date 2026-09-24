@@ -152,7 +152,7 @@ test('RECENT2607-01: 청크 push 에서 같은 collectedAt 은 작업 로그에 
 });
 
 /* ── CEN2607-03 · CEN2607-06 · EDGE2607-02(ip-scan) ─────────────────────── */
-test('CEN2607-03: 공유 토큰도 중앙 직접 수집·미등록 장비의 스냅샷을 쓸 수 없다(notOwned 로 밝힌다)', async () => {
+test('CEN2607-03: 공유 토큰도 중앙 직접 수집 장비의 스냅샷을 쓸 수 없다(notOwned 로 밝힌다)', async () => {
   const sreg = await import('../src/storage/registry.js');
   const wreg = await import('../src/sanswitch/registry.js');
   const preg = await import('../src/pdu/registry.js');
@@ -172,8 +172,8 @@ test('CEN2607-03: 공유 토큰도 중앙 직접 수집·미등록 장비의 스
     const cap = { totalBytes: 9e15, usedBytes: 1 };
     const s = await post('/storage-data', { agent: 'spoof', devices: [{ deviceId: sDirect, ok: true, capacity: cap }, { deviceId: 'nope', ok: true }, { deviceId: sEdge, ok: true, capacity: { totalBytes: 1e12, usedBytes: 5e11 } }] });
     assert.equal(s.status, 200, JSON.stringify(s.body));
-    assert.equal(s.body.saved, 1);
-    assert.equal(s.body.dropped?.notOwned, 2, JSON.stringify(s.body));
+    assert.equal(s.body.saved, 2, '등록부에 없는 id 는 여기서 거절하지 않는다(고아 TTL)');
+    assert.equal(s.body.dropped?.notOwned, 1, JSON.stringify(s.body));
     const se = await import('../src/central/storageEdge.js');
     assert.ok(!se.edgeStorageSnapshots().some((d) => d.deviceId === sDirect), '중앙 직접 수집 장비를 엣지 값으로 덮으면 안 된다');
     const db = await import('../src/storage/db.js');
@@ -186,14 +186,15 @@ test('CEN2607-03: 공유 토큰도 중앙 직접 수집·미등록 장비의 스
   });
 });
 
-test('CEN2607-06: /inventory 도 direct·미등록 vCenter 는 받지 않는다(mock 판정은 그대로 먼저)', async () => {
+test('CEN2607-06: /inventory 도 중앙 직접 수집(direct) vCenter 는 받지 않는다(mock 판정은 그대로 먼저)', async () => {
   const inv = await import('../src/central/inventory.js');
   await withCentral(async (post) => {
     const vc = (id) => ({ agent: 'edgeX', vcenterId: id, vcenter: { id, name: `real-${id}`, status: 'ok' }, hosts: [], vms: [] });
     const d = await post('/inventory', vc('vc-direct-1'));
     assert.equal(d.status, 403, JSON.stringify(d.body));
+    // 등록부에 없는 id 는 여기서 막지 않는다(형제 판정과 같은 기준 — 등록부 prune 이 정리한다)
     const u = await post('/inventory', vc('vc-unregistered'));
-    assert.equal(u.status, 403);
+    assert.notEqual(u.status, 403, JSON.stringify(u.body));
     assert.ok(!inv.listInventory().some((e) => e.vcenterId === 'vc-direct-1'), 'direct vCenter 인벤토리가 저장되면 안 된다');
     const ok = await post('/inventory', vc('vc-site-1'));
     assert.equal(ok.status, 200, JSON.stringify(ok.body));
