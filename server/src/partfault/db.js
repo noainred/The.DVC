@@ -357,7 +357,9 @@ export async function recentEvents({ sinceMs = 30 * 86_400_000, limit = 500, par
   if (!h) return [];
   const key = typeof partKey === 'object' && partKey ? String(partKey.partKey || '') : String(partKey || '');
   const ag = typeof partKey === 'object' && partKey ? agentOf(partKey) : String(agent || '');
-  const rows = key ? h.st.eventsOfPart.all(ag, key, limit) : h.st.events.all(Date.now() - sinceMs, limit);
+  // v2.607 DB2607-04: node:sqlite 는 JS number 를 REAL 로 바인딩한다 — 소수 limit 은 'datatype mismatch'. 정수 [1, 2000].
+  const lim = Math.max(1, Math.min(2_000, Math.trunc(Number(limit)) || 500));
+  const rows = key ? h.st.eventsOfPart.all(ag, key, lim) : h.st.events.all(Math.trunc(Date.now() - (Number(sinceMs) || 0)), lim);
   return rows.map((r) => ({
     at: r.at, partKey: r.part_key, scope: r.scope, deviceId: r.device_id,
     deviceKey: r.device_key, deviceKeyKind: r.device_key_kind, deviceName: r.device_name,

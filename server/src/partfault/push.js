@@ -26,6 +26,7 @@ import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, currentVersion, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { dropSummaryOf, warnDrop } from '../agent/centralReply.js';
 import { runScan } from './scan.js';
 import { partFaultEnabled } from './settings.js';
 import { PUSH_PROTOCOL, partKeyTail, isBad } from './types.js';
@@ -126,6 +127,8 @@ async function pushOnce(reason) {
       at: Date.now(), ms: Date.now() - t0, reason, ok: true, httpStatus: res.status,
       centralEnabled: typeof ack?.centralEnabled === 'boolean' ? ack.centralEnabled : null,
       rejected: Number(ack?.rejected) || 0,
+      // v2.607(EDGE2607-02): 수신 상한으로 버린 파트 수(중앙이 응답에 실을 때만 — 구버전 중앙은 없다)
+      ...(Number(ack?.partsOmitted) > 0 ? { partsOmitted: Number(ack.partsOmitted) } : {}),
       devices: payload.devices.length, open: openN, omitted: payload.omitted,
       bytes: json.length, gzipBytes: hdrs['Content-Encoding'] === 'gzip' ? body.length : null,
       scanned: scan.scanned,
@@ -133,6 +136,9 @@ async function pushOnce(reason) {
     // ⚠ 성공도 로그를 남긴다 — 기동·실패 로그를 둘 다 두지 않아 "무로그 = 성공·실패 구분 불가" 가 된
     //   `storageConfigPull` 이 이번 조사의 확정 결함이다. 같은 실수 금지.
     console.log(`[partfault-push] ${reason} — 장비 ${payload.devices.length}대(실패 ${scan.scanned.devicesFailed}) · 열린 장애 ${openN}건 · ${Math.round(json.length / 1024)}KB${_last.gzipBytes ? `→gzip ${Math.round(_last.gzipBytes / 1024)}KB` : ''}${payload.omitted ? ` · 상한으로 ${payload.omitted}대 제외` : ''}`);
+    // v2.607(감사 EDGE2607-02): 소유권 불일치로 버린 장비(rejected)는 그 장비의 장애가 중앙에서 열리지도 닫히지도 않는다 —
+    //   예전에는 _last 에만 있고 콘솔 줄은 성공만 말했다. 같은 사유는 10분에 한 줄(centralReply.warnDrop).
+    warnDrop('partfault-push', dropSummaryOf({ rejected: _last.rejected, omitted: _last.partsOmitted || 0 }));
     return { ok: true, devices: payload.devices.length, open: openN, omitted: payload.omitted };
   } catch (e) {
     _last = { at: Date.now(), ms: Date.now() - t0, reason, ok: false, httpStatus: e?.status || null, error: String(e.message || e).slice(0, 200) };

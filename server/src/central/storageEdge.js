@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter, isPlainObj } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
+import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter, isPlainObj, scalarizeFields } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
 import { capStr } from '../util/capStr.js';
 
 /**
@@ -16,12 +16,22 @@ import { capStr } from '../util/capStr.js';
  *   제자리에서 고치지 않고 새 객체를 돌려준다. 좁힌 개수를 돌려준다.
  */
 export const APPLIANCES_MAX = 8;
+/** v2.607(CEN2607-02): 스토리지 extra 의 표시 글자 필드. */
+export const STORAGE_EXTRA_DISPLAY_KEYS = Object.freeze([
+  'healthState', 'clusterHealth', 'alertsNote', 'capacityBasisNote', 'versionRaw', 'versionSource', 'modelSource',
+  'collectMethod', 'dataReduction', 'storageEfficiency',
+]);
 export function narrowStorageSnapshot(d) {
   if (!isPlainObj(d) || !Object.hasOwn(d, 'extra') || d.extra == null) return { snap: d, narrowed: 0 };
   if (!isPlainObj(d.extra)) return { snap: { ...d, extra: null }, narrowed: 1 };
-  if (!Object.hasOwn(d.extra, 'appliances') || d.extra.appliances == null) return { snap: d, narrowed: 0 };
+  // v2.607(감사 CEN2607-02 — 재현): 화면이 글자로 그리는 extra 필드(헬스 배지·경보 문구·용량 기준 설명·버전 원문)가
+  //   객체면 null 로. 예전에는 `extra.alertsNote:{a:1}` 가 그대로 저장돼 상세 모달이 React #31 로 죽었다.
+  const ex0 = { ...d.extra };
+  const sc = scalarizeFields(ex0, STORAGE_EXTRA_DISPLAY_KEYS, 4096); // 긴 설명문은 자르지 않게 상한을 넓힌다
+  if (sc) d = { ...d, extra: ex0 };
+  if (!Object.hasOwn(d.extra, 'appliances') || d.extra.appliances == null) return { snap: d, narrowed: sc };
   const raw = Array.isArray(d.extra.appliances) ? d.extra.appliances : null;
-  let narrowed = raw ? 0 : 1;
+  let narrowed = (raw ? 0 : 1) + sc;
   const apps = [];
   for (const a of raw || []) {
     if (!isPlainObj(a) || apps.length >= APPLIANCES_MAX) { narrowed += 1; continue; }

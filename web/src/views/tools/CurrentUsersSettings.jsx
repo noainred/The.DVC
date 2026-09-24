@@ -19,6 +19,7 @@ import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { blankOr } from '../blankOr.js';
+import { scopeSaveSuffix } from '../scopeSaveText.js';
 import { intervalText } from './curUserText.js';
 
 const MIN = 60_000;
@@ -92,7 +93,7 @@ export function CurrentUsersSettings({ onSaved }) {
     setBusy(true); setMsg('');
     try {
       const r = await sendJson('/tools/curuser/settings', 'PUT', s);
-      setS(r.settings); setMsg('저장했습니다.');
+      setS(r.settings); setMsg(`저장했습니다.${scopeSaveSuffix(r)}`);
       onSaved?.();
     } catch (e) { setMsg(`저장 실패: ${e?.message || e}`); }
     finally { setBusy(false); }

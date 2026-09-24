@@ -100,7 +100,7 @@ export function narrowSanSnapshot(d) {
     o.health = h;
   }
   // v2.607(감사 CEN2607-02): 화면이 글자로 그리는 extra 필드.
-  if (isPlainObj(o.extra)) { const ex = { ...o.extra }; narrowed += scalarizeFields(ex, SAN_EXTRA_DISPLAY_KEYS); o.extra = ex; }
+  if (isPlainObj(o.extra)) { const ex = { ...o.extra }; narrowed += scalarizeFields(ex, SAN_EXTRA_DISPLAY_KEYS, 4096); o.extra = ex; }
   return { snap: o, narrowed };
 }
 import { recordActivity } from '../sanswitch/activityLog.js';
@@ -186,9 +186,15 @@ export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1, info 
   // v2.606(감사 TIM2606-05): 중복 제거 Map 은 **보관 중인 장비 id 만** 남긴다 — 예전에는 set 만 하고 지우지 않아 매 push 새
   //   deviceId 를 보내는 엣지(재등록 반복·오동작·공유 토큰)가 프로세스 수명 내내 키를 쌓았다. 빠진 장비의 키만 지우므로
   //   dedup 계약(같은 collectedAt 재push 는 기록하지 않는다)은 그대로다.
-  const live = new Set();
-  for (const v of load().values()) for (const d of v?.devices || []) if (d?.deviceId) live.add(d.deviceId);
-  for (const k of _lastRec.keys()) if (!live.has(k)) _lastRec.delete(k);
+  // ⚠ v2.607(감사 RECENT2607-01 — 재현): 정리는 **마지막 청크(또는 단일 청크)에서만** 한다. 청크 0 은 목록을 교체하므로
+  //   그 시점에는 아직 도착하지 않은 청크 1+ 장비가 '보관 중이 아니다' 로 보여 키가 지워졌고, 같은 collectedAt 인데도
+  //   매 주기 작업 로그가 다시 기록됐다(v2.516 이 막으려던 현상).
+  const lastChunk = !(Number(chunks) > 1) || Number(chunk) >= Number(chunks) - 1;
+  if (lastChunk) {
+    const live = new Set();
+    for (const v of load().values()) for (const d of v?.devices || []) if (d?.deviceId) live.add(d.deviceId);
+    for (const k of _lastRec.keys()) if (!live.has(k)) _lastRec.delete(k);
+  }
   return list.length;
 }
 /** 테스트·진단용 — 중복 제거 Map 크기. */

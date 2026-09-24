@@ -17,6 +17,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
+import { scopeSaveSuffix } from '../scopeSaveText.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
@@ -195,7 +196,7 @@ export function BmUsage() {
     setSaving(true);
     try {
       const r = await putJson('/tools/bm-usage/settings', patch);
-      setForm(r.settings); setMsg({ tone: 'ok', text: '설정을 저장했습니다.' });
+      setForm(r.settings); { const warn = scopeSaveSuffix(r); setMsg({ tone: warn ? 'bad' : 'ok', text: `설정을 저장했습니다.${warn}` }); }
       load();
     } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }
     finally { setSaving(false); }
