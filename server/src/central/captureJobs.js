@@ -29,6 +29,8 @@
  * 회귀 테스트: server/test/captureJobsClaim.test.js (now 주입으로 시간 제어).
  */
 
+import { sanitizeCaptureResult } from '../net/captureHistory.js';
+
 // ── 상태 저장소 ──
 // jobs: reqId → 잡 전체 상태. state 전이: pending →(claim)→ running →(ack=결과)→ done
 //                                            ↑______(reap: 기한 만료·재시도 남음)______|
@@ -155,7 +157,9 @@ export function setCaptureResult(reqId, result) {
   j.state = 'done';
   j.doneAt = Date.now();
   j.claimDeadline = null; // ack — 재수확 대상 아님
-  j.result = result ?? { ok: false, reason: '에이전트가 빈 결과를 회신했습니다.' };
+  // v2.600 CEN2600-05: 엣지가 올린 결과는 화면이 읽는 필드만·크기 상한 안에서 담는다(객체 peer·90만 자 issue 가
+  //   그대로 UI 폴링으로 나가 React #31·대용량 응답이 됐다). 정제는 이력과 같은 코어(captureHistory.sanitizeCaptureResult).
+  j.result = sanitizeCaptureResult(result, { full: true });
   dropPending(j.agent, reqId); // reap 복귀 직후 늦은 결과가 온 경우, 대기 인덱스 잔여 제거(중복 재인출 방지)
   prune();
   return true;

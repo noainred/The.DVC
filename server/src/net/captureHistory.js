@@ -54,23 +54,36 @@ function cleanStat(st) {
     .filter((p) => p && typeof p === 'object').map((p) => ({ port: str(p.port, 16), packets: numOrNull(p.packets) }));
   return o;
 }
-/** 캡처 결과(단일/dual)를 이력 레코드에 필요한 필드만 남겨 정제한다. 테스트·라우트가 그대로 쓸 수 있게 export. */
-export function sanitizeCaptureResult(result) {
-  if (!result || typeof result !== 'object') return { ok: false };
+/**
+ * 캡처 결과(단일/dual)를 필요한 필드만 남겨 정제한다. 테스트·잡 저장소가 그대로 쓸 수 있게 export.
+ * `full:true` 는 **캡처 화면(NetTrafficAnalysis.jsx SingleResult·DualResult)이 실제로 읽는 필드**까지 담는다 —
+ * reason·warn·sample(원본 패킷 줄)·command·iface·seconds. 이력은 full 없이(요약만) 저장한다.
+ * v2.600 CEN2600-05: 위임 캡처의 인메모리 잡 결과(`central/captureJobs.js setCaptureResult`)도 이 함수를 거친다.
+ */
+export function sanitizeCaptureResult(result, { full = false } = {}) {
+  if (!result || typeof result !== 'object') return { ok: false, reason: full ? '에이전트가 빈 결과를 회신했습니다.' : '' };
+  const extra = (x) => (full ? {
+    reason: str(x.reason, 500), warn: str(x.warn, 300) || null, command: str(x.command, 500), iface: str(x.iface, 32), seconds: numOrNull(x.seconds),
+    sample: (Array.isArray(x.sample) ? x.sample : []).slice(0, 40).filter((l) => typeof l === 'string').map((l) => l.slice(0, 500)),
+  } : {});
+  const single = (x) => {
+    const an = x.analysis && typeof x.analysis === 'object' ? x.analysis : {};
+    return {
+      ok: x.ok === true, hostA: str(x.hostA, 255), peer: str(x.peer, 255), captured: numOrNull(x.captured),
+      analysis: { stat: cleanStat(an.stat), issues: cleanIssues(an.issues) }, ...extra(x),
+    };
+  };
   if (result.dual) {
     const c = result.comparison && typeof result.comparison === 'object' ? result.comparison : {};
-    const side = (x) => (x && typeof x === 'object' ? { captured: numOrNull(x.captured), analysis: { stat: cleanStat(x.analysis?.stat) } } : null);
+    const side = (x) => (x && typeof x === 'object' ? (full ? single(x) : { captured: numOrNull(x.captured), analysis: { stat: cleanStat(x.analysis?.stat) } }) : null);
     return {
       ok: result.ok === true, dual: true, hostA: str(result.hostA, 255), hostB: str(result.hostB, 255),
       a: side(result.a), b: side(result.b),
       comparison: { issues: cleanIssues(c.issues), lossAB: numOrNull(c.lossAB), lossBA: numOrNull(c.lossBA) },
+      ...(full ? { reason: str(result.reason, 500) } : {}),
     };
   }
-  const an = result.analysis && typeof result.analysis === 'object' ? result.analysis : {};
-  return {
-    ok: result.ok === true, hostA: str(result.hostA, 255), peer: str(result.peer, 255), captured: numOrNull(result.captured),
-    analysis: { stat: cleanStat(an.stat), issues: cleanIssues(an.issues) },
-  };
+  return single(result);
 }
 
 function cleanRecord(r) {

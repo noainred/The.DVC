@@ -205,11 +205,20 @@ test('실제 라우터 — admin/operator/범위 operator 응답(RECENT2600-03·
       }
     }
 
+    // 형제 경로(작업 로그·시리얼 색인)에 주소가 실리도록 목 수집을 한 번 돌린다.
+    const swId = sanReg.listDevices()[0].id; const stId = storageReg.listDevices()[0].id;
+    await (await import(${J('sanswitch/poller.js')})).collectDeviceNow(swId).catch(() => {});
+    await (await import(${J('storage/poller.js')})).collectDeviceNow(stId).catch(() => {});
+
     const admin = await start(mk({ username: 'root', role: 'admin', scope: null }));
     const oper = await start(mk({ username: 'op', role: 'operator', scope: null }));
     const sop = await start(mk({ username: 'sop', role: 'operator', scope: { vcenters: [A] } }));
+    // 시리얼 검색어 — admin CSV(전체) 에서 주소가 붙은 첫 행의 시리얼
+    const csvAll = (await req(admin, '/api/tools/serial-lookup/export.csv')).text.split(/\\r?\\n/).slice(1);
+    const withIp = csvAll.find((l) => /\\b10\\.20\\.0\\.\\d+\\b/.test(l)) || '';
+    const q = encodeURIComponent((withIp.split(',')[0] || '0').replace(/^\\uFEFF|"/g, ''));
     const P = ['/api/tools/storage-growth', '/api/tools/sanswitch/perf/storage-summary', '/api/tools/sanswitch/perf/activity',
-      '/api/tools/serial-lookup?q=0', '/api/tools/serial-lookup/export.csv?q=0', '/api/tools/horizon-sessions',
+      '/api/tools/serial-lookup?q=' + q, '/api/tools/serial-lookup/export.csv', '/api/tools/horizon-sessions',
       '/api/tools/horizon-sessions/settings', '/api/tools/horizon-sessions/activity', '/api/tools/bm-usage', '/api/tools/bm-usage/edges',
       '/api/tools/storage/activity', '/api/tools/sanswitch/activity'];
     const res = {};
@@ -227,7 +236,7 @@ test('실제 라우터 — admin/operator/범위 operator 응답(RECENT2600-03·
       relaytopoFull: (await req(oper, '/api/tools/relaytopo')).status,
     };
     const hist = (await req(admin, '/api/tools/storage/history?range=12h')).body;
-    return { hzr: hzr.ok, colr: colr.ok, res, hp: { status: hp.status, body: hp.body }, scoped, hist };
+    return { hzr: hzr.ok, colr: colr.ok, res, hp: { status: hp.status, body: hp.body }, scoped, hist, serialQ: q };
   `);
   assert.ok(r.hzr, 'Horizon 등록 실패'); assert.ok(r.colr, '수집 서버 등록 실패');
   for (const [p, a] of Object.entries(r.res.admin)) assert.equal(a.status, 200, `admin ${p} ${a.status}`);
@@ -237,7 +246,9 @@ test('실제 라우터 — admin/operator/범위 operator 응답(RECENT2600-03·
     if (!p.includes('.csv')) assert.equal(o.hidden, true, `addressHidden 이 없다: ${p}`);
   }
   // 테스트가 공허하지 않은지 — admin 응답에는 주소가 실제로 들어 있다(형제 경로 몇 개로 확인).
-  for (const p of ['/api/tools/storage-growth', '/api/tools/sanswitch/perf/storage-summary', '/api/tools/horizon-sessions']) {
+  for (const p of ['/api/tools/storage-growth', '/api/tools/sanswitch/perf/storage-summary', '/api/tools/horizon-sessions',
+    '/api/tools/horizon-sessions/settings', '/api/tools/bm-usage/edges', '/api/tools/serial-lookup?q=' + r.serialQ,
+    '/api/tools/serial-lookup/export.csv', '/api/tools/storage/activity', '/api/tools/sanswitch/activity']) {
     assert.equal(r.res.admin[p].ip, true, `admin 은 원문을 받아야 한다: ${p}`);
   }
   // RECENT2600-04 — 이름이 주소인 장비는 빈 이름이 아니라 라벨
