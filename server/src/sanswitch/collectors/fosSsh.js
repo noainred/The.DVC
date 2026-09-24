@@ -298,7 +298,7 @@ export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}) {
   const psus = P.parseFruShow(out.psshow || '') || (chassis.psus.length ? { ok: null, total: chassis.psus.length } : null);
   snap.health = {
     status: status.status || (sw.header.switchState || ''),
-    fans, psus, powerWatts: chassis.powerWatts, psuDetail: chassis.psus.slice(0, 8),
+    fans, psus, powerWatts: chassis.powerWatts, powerPartial: chassis.powerPartial, psuDetail: chassis.psus.slice(0, 8), // v2.601 COL-2601-06 — 부분 합 표식
     tempC: Math.max(...list.map((p) => p.sfpTempC ?? -Infinity)) > -Infinity
       ? Math.max(...list.map((p) => p.sfpTempC ?? -Infinity)) : null,
     // v2.590(감사 F6): **상태를 읽었을 때만 숫자**다. switchstatusshow 가 없거나(rbash) 형식을 못 읽어 모니터가

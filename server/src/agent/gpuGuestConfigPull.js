@@ -5,15 +5,17 @@
  * 등)을 아웃바운드 GET으로 주기적으로 가져와 로컬 gpu-guest.json에 병합 적용한다. 폐쇄망/NAT
  * 엣지도 중앙이 직접 push하지 않고 엣지가 pull하므로 동작한다(gpuGuestPush와 대칭).
  *
- * 적용은 saveGpuGuestSettings(=병합)로 하므로 로컬에만 있는 항목은 보존된다. 내용이 바뀌지
- * 않으면(서명 동일) 파일을 다시 쓰지 않는다.
+ * 적용은 applyPulledGpuGuestSettings 로 한다(v2.601 감사 EDGE2601-01): 중앙이 보낸 vCenter 의 VM별 자격증명(vms)·
+ * 고정 IP(vmIps)는 **중앙 사본이 전체**다 — 중앙에서 지운 키는 엣지에서도 지운다(예전 병합은 삭제 표식이 없으면 남겨
+ * 옛 비밀번호로 계속 로그인했다). 빈 비밀번호 = 기존 유지 규칙은 그대로이고, 중앙이 보내지 않은 엣지 로컬 vCenter 는
+ * 보존된다. 내용이 바뀌지 않으면(서명 동일) 파일을 다시 쓰지 않는다.
  */
 
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
-import { saveGpuGuestSettings } from '../gpu/settings.js';
+import { applyPulledGpuGuestSettings } from '../gpu/settings.js';
 
 let timer = null;
 let last = null; // { at, applied, at:서버지정시각, error }
@@ -45,14 +47,14 @@ async function _pullGpuGuestConfigNow() {
     if (!body || !body.assigned || !body.settings) { last = { at: Date.now(), applied: false, reason: '중앙 지정 없음' }; return { ok: true, applied: false }; }
     const sig = crypto.createHash('sha1').update(JSON.stringify(body.settings)).digest('hex');
     if (sig === lastSig) { last = { at: Date.now(), applied: false, reason: '변경 없음', srvAt: body.at || 0 }; return { ok: true, applied: false, unchanged: true }; }
-    saveGpuGuestSettings(body.settings); // 로컬 gpu-guest.json에 병합
+    const { removed } = applyPulledGpuGuestSettings(body.settings); // 중앙이 보낸 vCenter 의 VM별 항목은 중앙 사본으로 맞춘다
     // v2.597(LC2597-02): 중앙이 바꾼 주기를 두 폴러에 즉시 적용 — 예전에는 파일만 바뀌고 재시작 전까지 옛 주기로 돌았다.
     try { (await import('../gpu/poller.js')).rescheduleGpuGuestPoller?.(); } catch (e) { console.warn(`[gpu-guest-config] 폴러 재무장 실패: ${e.message}`); }
     try { (await import('../gpu/physicalPoller.js')).reschedulePhysicalPoller?.(); } catch (e) { console.warn(`[gpu-guest-config] 물리 GPU 폴러 재무장 실패: ${e.message}`); }
     lastSig = sig;
-    last = { at: Date.now(), applied: true, srvAt: body.at || 0 };
-    console.log(`[gpu-guest-config] 중앙 배포 설정 적용: agent=${config.agent.name} vcenters=${Object.keys(body.settings.vcenters || {}).length}`);
-    return { ok: true, applied: true };
+    last = { at: Date.now(), applied: true, srvAt: body.at || 0, removed };
+    console.log(`[gpu-guest-config] 중앙 배포 설정 적용: agent=${config.agent.name} vcenters=${Object.keys(body.settings.vcenters || {}).length}${removed.vms || removed.vmIps ? ` · 중앙에서 지운 VM 자격증명 ${removed.vms}건·고정 IP ${removed.vmIps}건 삭제` : ''}`);
+    return { ok: true, applied: true, removed };
   } catch (e) {
     last = { at: Date.now(), applied: false, error: e.message };
     if (_logChange('pull', e.message)) console.warn(`[gpu-guest-config] 중앙 설정 pull 실패: ${e.message}`);

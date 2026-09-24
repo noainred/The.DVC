@@ -90,6 +90,16 @@ export async function takeVmSnapshot(snap, { trigger = 'manual', now = new Date(
  * 전체 합계도 '허용 vCenter 합'으로 다시 계산해야 범위 밖 수량이 새지 않는다(CLAUDE.md scope 규칙).
  * @param {{days:number, vcenterId:string, scopeIds:Set<string>|null}} opts
  */
+/**
+ * v2.601(감사 LO2601-05): 집계 사용률. 사용량을 읽은 DS 의 용량 합이 0 이면(DS 없음·전부 사용량 미상) 0% 가 아니라 **모른다**(null).
+ * 화면은 null 을 '—'(단위 없이)로 그린다.
+ */
+export function dsAggPct(usedGB, capGB) {
+  const c = Number(capGB); const u = Number(usedGB);
+  if (capGB == null || usedGB == null || !(c > 0) || !Number.isFinite(u)) return null;
+  return Math.round((u / c) * 1000) / 10;
+}
+
 export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null } = {}) {
   const sinceTs = Date.now() - Math.max(1, Math.min(1095, days)) * 86_400_000;
 
@@ -102,7 +112,7 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
         total: r.total, onCount: r.on_count, offCount: r.total - r.on_count,
         added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off,
         dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
-        dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
+        dsUsagePct: dsAggPct(r.ds_used_gb, r.ds_cap_gb),
         baseline: !!r.baseline, dsUsedUnknown: r.ds_used_unknown || 0 })),
       vcenters: [vcenterId],
     };
@@ -118,7 +128,7 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
         total: r.total, onCount: r.on_count, offCount: r.total - r.on_count,
         added: r.added, removed: r.removed, poweredOn: r.powered_on, poweredOff: r.powered_off,
         dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
-        dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
+        dsUsagePct: dsAggPct(r.ds_used_gb, r.ds_cap_gb),
         baseline: !!r.baseline, skipped: r.skipped || 0, dsUsedUnknown: r.ds_used_unknown || 0 })),
       vcenters: vcs,
       bySlotVc: groupBySlot(perVcRows),
@@ -128,7 +138,7 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
   const bySlot = new Map();
   for (const r of perVcRows) {
     let a = bySlot.get(r.slot);
-    if (!a) bySlot.set(r.slot, a = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts, total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, dsCount: 0, dsCapGB: 0, dsUsedGB: 0, dsUsagePct: 0, dsUsedUnknown: 0, baseline: true });
+    if (!a) bySlot.set(r.slot, a = { slot: r.slot, ts: slotStartMs(r.slot) ?? r.ts, collectedAt: r.ts, total: 0, onCount: 0, offCount: 0, added: 0, removed: 0, poweredOn: 0, poweredOff: 0, dsCount: 0, dsCapGB: 0, dsUsedGB: 0, dsUsagePct: null, dsUsedUnknown: 0, baseline: true });
     a.total += r.total; a.onCount += r.on_count; a.offCount += (r.total - r.on_count);
     a.added += r.added; a.removed += r.removed;
     a.poweredOn += (r.powered_on || 0); a.poweredOff += (r.powered_off || 0);
@@ -156,7 +166,7 @@ export async function vmtrackSeries({ days = 30, vcenterId = '', scopeIds = null
   for (const a of bySlot.values()) {
     a.dsCapGB = Math.round(a.dsCapGB * 10) / 10;
     a.dsUsedGB = Math.round(a.dsUsedGB * 10) / 10;
-    a.dsUsagePct = a.dsCapGB > 0 ? Math.round((a.dsUsedGB / a.dsCapGB) * 1000) / 10 : 0;
+    a.dsUsagePct = dsAggPct(a.dsUsedGB, a.dsCapGB);
   }
   return {
     points: [...bySlot.values()].sort((x, y) => x.ts - y.ts),
@@ -174,7 +184,7 @@ function groupBySlot(rows) {
       offCount: r.total - r.on_count, added: r.added, removed: r.removed,
       poweredOn: r.powered_on || 0, poweredOff: r.powered_off || 0,
       dsCount: r.ds_count || 0, dsCapGB: r.ds_cap_gb || 0, dsUsedGB: r.ds_used_gb || 0,
-      dsUsagePct: r.ds_cap_gb ? Math.round((r.ds_used_gb / r.ds_cap_gb) * 1000) / 10 : 0,
+      dsUsagePct: dsAggPct(r.ds_used_gb, r.ds_cap_gb),
       baseline: !!r.baseline, dsUsedUnknown: r.ds_used_unknown || 0 });
   }
   return m;
