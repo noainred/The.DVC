@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { capStr } from '../util/capStr.js';
 
 const FILE = path.join(config.configDir, 'central-agent-tokens.json');
 const sha256 = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest();
@@ -69,7 +70,7 @@ export function issueAgentToken(agent, { note = '' } = {}) {
   const token = crypto.randomBytes(32).toString('base64url'); // 256bit — 공유 토큰보다 강하게
   const list = load();
   const i = list.findIndex((t) => norm(t.agent) === norm(name));
-  const entry = { agent: name, hash: sha256(token).toString('hex'), createdAt: Date.now(), lastUsedAt: null, note: String(note || '').slice(0, 200) };
+  const entry = { agent: name, hash: sha256(token).toString('hex'), createdAt: Date.now(), lastUsedAt: null, note: capStr(note || '', 200) }; // v2.607(TIM2607-01)
   if (i >= 0) list[i] = entry; else list.push(entry);
   save();
   return { ok: true, agent: name, token };

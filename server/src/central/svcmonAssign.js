@@ -32,7 +32,7 @@ export const MAX_TARGETS_PER_AGENT = 20000;
 /** 배포 태그 접두사 + sig 길이 — store 의 batch 40자 상한 안에 반드시 들어가야 한다. */
 export const TAG_PREFIX = 'central:';
 export const SIG_LEN = 16;
-export const batchTag = (sig) => `${TAG_PREFIX}${String(sig || '').slice(0, SIG_LEN)}`;
+export const batchTag = (sig) => `${TAG_PREFIX}${capStr(sig || '', SIG_LEN)}`; // v2.607(TIM2607-01)
 
 /**
  * 엣지에서 실행 의미가 달라지거나 불가능한 유형의 기본 제외 목록.

@@ -22,6 +22,7 @@ import { STable } from '../../components/STable.jsx';
 import {
   diagnoseEmptyInventory, headline, CAUSE_WHY, CAUSE_FIX, CAUSE_WAITING,
   statusValue, relevantLogs,
+  collectModeText,
 } from './emptyInvText.js';
 
 const ago = (ts) => {
@@ -159,7 +160,7 @@ export default function EmptyInvModal({ agent, push, onClose }) {
                       {/* ⚠ null 은 0 이 아니다 — 못 읽은 것을 '0대' 라고 말하지 않는다. */}
                       <td style={{ padding: '2px 8px' }}>{v.hosts == null ? '—' : v.hosts}</td>
                       <td style={{ padding: '2px 8px' }}>{v.vms == null ? '—' : v.vms}</td>
-                      <td style={{ padding: '2px 8px' }}>{v.collectMode || '직접'}</td>
+                      <td style={{ padding: '2px 8px' }}>{collectModeText(v)}</td>
                       <td style={{ padding: '2px 0 2px 8px', whiteSpace: 'normal' }}>{v.error || ''}</td>
                     </tr>
                   ))}

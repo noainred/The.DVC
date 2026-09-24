@@ -78,8 +78,12 @@ test('TIM2607-02 — storage testDeviceConnection: 시한 3e9 가 즉시 "테스
   const { testDeviceConnection } = await import('../src/storage/poller.js');
   // 닫힌 포트 — 수집기는 곧 연결 거부로 끝난다. 예전엔 시한이 1ms 로 접혀 그보다 먼저 '시간 초과' 였다.
   const srv = net.createServer(); await new Promise((r) => srv.listen(0, '127.0.0.1', r)); const port = srv.address().port; await new Promise((r) => srv.close(r));
-  const res = await testDeviceConnection({ id: 't', type: 'isilon', host: '127.0.0.1', port, username: 'u', password: 'p' }, { timeoutMs: 3e9 });
-  assert.ok(!/테스트 시간 초과/.test(String(res.error || '')), `시한이 1ms 로 접혔다: ${res.error}`);
+  void port;
+  // REST 수집기(xtremio·vmax)는 닫힌 443 에서 수 ms 안에 실패 스냅샷을 낸다 — 예전엔 1ms 시한이 먼저 이겼다(변이 확인).
+  for (const type of ['xtremio', 'vmax']) {
+    const res = await testDeviceConnection({ id: 't', type, host: '127.0.0.1', username: 'u', password: 'p' }, { timeoutMs: 3e9 });
+    assert.ok(!/테스트 시간 초과/.test(String(res.error || '')), `${type}: 시한이 1ms 로 접혔다: ${res.error}`);
+  }
 });
 
 function pushServer() {

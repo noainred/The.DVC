@@ -22,8 +22,11 @@ function keyLabel(k) {
 
 /** 단건 저장 응답 → 폐기된 비밀 키 목록(문자열만). */
 export function droppedSecretKeys(r) {
-  const list = r && Array.isArray(r.droppedSecrets) ? r.droppedSecrets : [];
-  return list.filter((x) => typeof x === 'string' && x);
+  if (!r || typeof r !== 'object') return [];
+  // 위치가 두 가지다 — 최상위(vCenter·NSX·iDRAC·PDU·bmstor 등)와 장비 객체 안(스토리지·SAN 스위치: r.device.droppedSecrets).
+  const top = Array.isArray(r.droppedSecrets) ? r.droppedSecrets : [];
+  const dev = r.device && typeof r.device === 'object' && Array.isArray(r.device.droppedSecrets) ? r.device.droppedSecrets : [];
+  return [...new Set([...top, ...dev].filter((x) => typeof x === 'string' && x))];
 }
 
 /** 단건 저장 응답 → 안내 문장('' 이면 폐기 없음). */
@@ -31,7 +34,7 @@ export function droppedSecretNote(r) {
   const keys = droppedSecretKeys(r);
   if (!keys.length) return '';
   const names = [...new Set(keys.map(keyLabel))].join('·');
-  return `저장했습니다 — 단 접속처(주소·계정 등)가 바뀌어 저장된 ${names}을(를) 폐기했습니다. 다시 입력하고 저장하세요(그 전까지 수집·스캔은 인증에 실패합니다).`;
+  return `저장했습니다 — 단 접속처(주소·포트·계정)가 바뀌어 저장된 ${names}을(를) 폐기했습니다. 다시 입력하고 저장하세요(그 전까지 수집·스캔은 인증에 실패합니다).`;
 }
 
 /** CSV 가져오기 응답의 passwordDropped → 줄 목록(각 '줄 N · 이름 — 사유'). */

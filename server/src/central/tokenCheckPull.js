@@ -154,7 +154,8 @@ export async function pullTokenCheck(agent, { selfProbe = true, fetchImpl = resi
   if (res.status === 404) { const k = kindFor404(body); return fail(k.kind, k.reason); }
   if (!res.ok) return fail('http', `HTTP ${res.status}${body?.reason ? ` (${body.reason})` : ''}`);
   if (!body || body.ok === false || !body.node) {
-    return fail('bad-body', body?.reason ? String(body.reason).slice(0, 300) : '응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다).');
+    return fail('bad-body', body?.reason ? (capStr(body.reason, 300) || '(형식 오류)') : // v2.607(TIM2607-01)
+     '응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다).');
   }
   const rec = putEdgeTokenReport(name, { ok: true, ms, report: sanitizeEnvelope(body) });
   return { ok: true, ms, rec };

@@ -8,6 +8,10 @@ describe('droppedSecretText (WEB2607-03 · LEFT2607-07)', () => {
     expect(droppedSecretNote(r)).toMatch(/비밀번호을\(를\) 폐기했습니다/);
     expect(droppedSecretNote(r)).toMatch(/다시 입력/);
   });
+  it('장비 객체 안(r.device.droppedSecrets — 스토리지·SAN)도 본다', () => {
+    expect(droppedSecretKeys({ ok: true, device: { id: 'd1', droppedSecrets: ['password'] } })).toEqual(['password']);
+    expect(droppedSecretNote({ ok: true, device: { id: 'd1' } })).toBe('');
+  });
   it('없거나 비어 있으면 빈 문자열', () => {
     expect(droppedSecretNote({ ok: true })).toBe('');
     expect(droppedSecretNote({ ok: true, droppedSecrets: [] })).toBe('');
