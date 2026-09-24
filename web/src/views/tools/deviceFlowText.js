@@ -6,7 +6,8 @@
  * ⚠ 문구에 백틱 금지(BoldText 는 **강조** 만 해석한다).
  */
 import { ageText, spanText, bytesText, STATE_LABEL as EDGE_STATE_LABEL, STATE_COLOR as EDGE_STATE_COLOR, REASON_TEXT } from './commMapText.js';
-import { unauthNote } from './dataFlowText.js';
+import { unauthNote, sharedUrlNote, sharedMark } from './dataFlowText.js';
+export { sharedMark };
 
 export { ageText, spanText, bytesText, EDGE_STATE_LABEL, EDGE_STATE_COLOR, REASON_TEXT };
 
@@ -128,6 +129,8 @@ export function headerNote(data = {}, now = Date.now()) {
   if (Number(data.rejectsWithoutTime) > 0) parts.push(`시각을 모르는 거부 ${data.rejectsWithoutTime}건은 선에 넣지 않았습니다.`);
   const un = unauthNote(data, now);
   if (un) parts.push(un);
+  const sh = sharedUrlNote(data); // v2.601 WEB2601-02
+  if (sh) parts.push(sh);
   return parts.join(' ');
 }
 

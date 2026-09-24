@@ -14,6 +14,7 @@
  */
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
 import { resilientFetch } from '../util/resilientFetch.js';
+import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { findCollector } from './edgeLogPull.js';
 
 /** 이 엔드포인트를 내주기 시작한 최소 엣지 버전 — 그 아래는 경로가 없다. */
@@ -76,10 +77,10 @@ export async function pullBmUsage(agent, { limit = 0 } = {}) {
 
   let res;
   try {
-    res = await resilientFetch(url, {
+    res = await withOutboundTag(col.id || col.name || agent, () => resilientFetch(url, {
       headers: { Accept: 'application/json', ...(col.token ? { 'X-Collector-Token': col.token } : {}) },
       timeoutMs: TIMEOUT_MS, retries: 1,
-    });
+    }));
   } catch (e) {
     const msg = String(e?.message || e);
     const kind = /timeout|abort|timed out/i.test(msg) ? 'timeout' : 'unreachable';

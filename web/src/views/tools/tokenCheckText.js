@@ -439,7 +439,9 @@ export function edgeReportCell(edge, capability, ago) {
   const failKind = (la?.kind || edge?.kind || '').trim();
   const failLabel = EDGE_PULL_FAIL_LABEL[failKind] || failKind || '실패';
   const failReason = String(la?.reason || edge?.reason || '');
-  const hasReport = !!(edge && (edge.tokens || edge.version || edge.said));
+  // 서버가 reportAt 을 실으면(v2.601~) 그것이 판정 근거다. 없는 응답(구버전 중앙)만 보고 내용으로 추정한다.
+  const hasReportAt = !!edge && Object.prototype.hasOwnProperty.call(edge, 'reportAt');
+  const hasReport = hasReportAt ? Number(edge.reportAt) > 0 : !!(edge && (edge.tokens || edge.version || edge.said));
   if (!edge || (!hasReport && !lastFailed)) {
     return { text: capability === 'old-version' ? '구버전' : '없음', tone: 'gray', sortAt: 0, title: '' };
   }
@@ -447,7 +449,7 @@ export function edgeReportCell(edge, capability, ago) {
     // 받은 보고가 없다 — 시각을 쓰지 않는다('N초 전' 은 받은 것으로 읽힌다).
     return { text: `없음 · 실패(${failLabel})`, tone: 'red', sortAt: 0, title: failReason };
   }
-  const at = Number(edge.at) || 0;
+  const at = (hasReportAt ? Number(edge.reportAt) : Number(edge.at)) || 0;
   if (lastFailed) {
     return { text: `${ago(at)} · 이후 실패(${failLabel})`, tone: 'amber', sortAt: at, title: `아래 값은 이전 보고입니다. 마지막 시도: ${failReason}` };
   }

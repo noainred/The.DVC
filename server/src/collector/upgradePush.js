@@ -47,7 +47,7 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
     });
     const body = await res.json().catch(() => ({}));
     const ok = res.ok && body.ok !== false;
-    recordOutbound(url, { status: ok ? res.status : (res.status < 400 ? 500 : res.status), bytes: bytes?.length || 0, method: 'POST', error: ok ? '' : String(body.reason || body.error || '') });
+    recordOutbound(url, { status: ok ? res.status : (res.status < 400 ? 500 : res.status), bytes: bytes?.length || 0, method: 'POST', error: ok ? '' : String(body.reason || body.error || ''), tag: c.id || c.name || '' }); // v2.601: 수집 서버 태그
     if (ok) return { id: c.id, name: c.name, ok: true, status: res.status, version: body.version };
     // 실패: 상태코드 + 서버 사유 + 점검 힌트를 하나의 reason으로 합쳐 UI/로그에서 바로 원인 파악.
     const serverMsg = body.reason || body.error || '';
@@ -55,7 +55,7 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
     const reason = `HTTP ${res.status}${serverMsg ? ` — ${serverMsg}` : ''}${hint ? ` · ${hint}` : ''}`;
     return { id: c.id, name: c.name, ok: false, status: res.status, reason };
   } catch (err) {
-    recordOutbound(url, { error: String(err?.message || err), method: 'POST' });
+    recordOutbound(url, { error: String(err?.message || err), method: 'POST', tag: c.id || c.name || '' });
     return { id: c.id, name: c.name, ok: false, reason: netFailReason(err.message), netError: true };
   }
 }

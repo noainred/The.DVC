@@ -342,3 +342,16 @@ describe('edgeReportCell (v2.601 WEB2601-03 — 받지 못한 보고를 N초 전
     expect(edgeReportCell(null, '', ago).text).toBe('없음');
   });
 });
+
+describe('edgeReportCell — 서버 reportAt 을 판정 근거로 (v2.601 WEB2601-03 후속)', () => {
+  const ago = (ts) => `${ts}ago`;
+  it('reportAt 이 null 이면 내용이 남아 있어도 받은 보고가 아니다', () => {
+    const c = edgeReportCell({ at: 900, reportAt: null, ok: false, version: '2.600.0', lastAttempt: { ok: false, kind: 'timeout' } }, '', ago);
+    expect(c.text).toBe('없음 · 실패(시한 초과)');
+  });
+  it('보고 시각은 at(마지막 시도) 이 아니라 reportAt', () => {
+    const c = edgeReportCell({ at: 900, reportAt: 500, ok: false, lastAttempt: { ok: false, kind: 'auth' } }, '', ago);
+    expect(c.text).toBe('500ago · 이후 실패(토큰 거부)');
+    expect(edgeReportCell({ at: 800, reportAt: 800, ok: true, lastAttempt: { ok: true } }, '', ago).text).toBe('800ago');
+  });
+});

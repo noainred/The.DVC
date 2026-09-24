@@ -17,6 +17,7 @@ import { collectMany } from './collect.js';
 import { enqueueBmstorJob, setBmstorExpireHandler } from './jobs.js';
 import { findCollectorForAgent } from '../central/idracScanPush.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { createAuthGuard } from '../util/authGuard.js';
 import { isSshAuthError } from '../proxy/sshExec.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -113,12 +114,12 @@ async function collectViaEdge(agent, servers) {
   const fail = (reason) => servers.map((s) => ({ id: s.id, ok: false, mounts: [], error: reason }));
   if (!col || !col.url) return fail(`에이전트 '${agent}' 의 수집 서버(원격) URL 이 없어 위임 수집 불가 — 설정 › 수집 서버(원격)에 등록하세요.`);
   try {
-    const r = await resilientFetch(`${String(col.url).replace(/\/+$/, '')}/api/collector/bmstor-collect`, {
+    const r = await withOutboundTag(col.id || col.name || agent, () => resilientFetch(`${String(col.url).replace(/\/+$/, '')}/api/collector/bmstor-collect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Collector-Token': col.token || '' },
       body: JSON.stringify({ servers: servers.map((s) => ({ id: s.id, host: s.host, port: s.port, username: s.username, password: s.password, mounts: s.mounts })) }),
       timeoutMs: PUSH_TIMEOUT_MS, retries: 1,
-    });
+    }));
     const j = await r.json().catch(() => null);
     if (!r.ok || !j?.ok || !Array.isArray(j.results)) return fail(`엣지 응답 오류(HTTP ${r.status})${j?.reason ? `: ${j.reason}` : ''}`);
     const byId = new Map(j.results.map((x) => [x.id, x]));
