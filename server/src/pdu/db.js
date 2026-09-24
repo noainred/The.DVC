@@ -16,8 +16,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
-import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
-const lockRetry = createLockRetry();
 
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래. env 가 최우선.
 // v2.451: 이 파일만 configDir 에 고정돼 있어, 경로를 옮겨도 PDU 이력은 계속 CONFIG_DIR 에 쌓였다
@@ -37,7 +35,6 @@ let _opening = null;
 async function open() {
   if (_db) return _db;
   if (_unavailable) return null;
-  if (lockRetry.blocked()) return null;   // 잠금 뒤 재시도 대기(매 호출 3초 busy_timeout 을 태우지 않게)
   if (_opening) return _opening;
   _opening = openInner().finally(() => { _opening = null; });
   return _opening;
@@ -45,14 +42,14 @@ async function open() {
 async function openInner() {
   if (_db) return _db;
   if (_unavailable) return null;
-  let conn = null;   // v2.599 DB2599-02: 실패하면 닫는다(잠금이면 래치하지 않고 다시 연다)
   try {
     const { DatabaseSync } = await import('node:sqlite');
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    conn = openSqlite(new DatabaseSync(FILE));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
+    const conn = new DatabaseSync(FILE);
     // v2.447(감사 S4): DB 파일 권한 0600 — 다른 DB 모듈(idrac/metrics/logs/ipam/vmtrack/capacity/ping)은
     // 전부 적용돼 있는데 이 파일만 빠져 있었다. 같은 호스트의 다른 로컬 사용자가 읽을 수 있었다.
     try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
+    conn.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;');
     conn.exec(`
       CREATE TABLE IF NOT EXISTS pdu_sample (
         device_id TEXT NOT NULL,
@@ -95,8 +92,6 @@ async function openInner() {
     };
     return _db;
   } catch (e) {
-    try { conn?.close(); } catch { /* 이미 닫힘 */ }
-    if (lockRetry.onFail(e)) { console.warn(`[pdu-db] ${lockRetry.note()}`); return null; }
     // node:sqlite 미지원 런타임 — 수집 자체는 계속되게 하고 시계열만 포기한다(정직 표기).
     console.error('[pdu-db] 시계열 DB를 열 수 없습니다(시계열 비활성):', e.message);
     _unavailable = true;
@@ -271,4 +266,4 @@ export async function dbStats() {
   return { file: FILE, bytes, retainDays: RETAIN_DAYS, sample: q('pdu_sample'), env: q('pdu_env'), bank: q('pdu_bank') };
 }
 
-export function _resetForTest() { lockRetry.ok(); _db = null; _tick = 0; _unavailable = false; }
+export function _resetForTest() { _db = null; _tick = 0; _unavailable = false; }

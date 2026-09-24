@@ -413,7 +413,7 @@ api.get('/tools/sanswitch/devices/:id/healthcheck', toolsPerm, fullScopeOnly, as
   // v2.599(AUTHZ-2599-03): 점검 결과(result.host)도 목록과 같은 기준 — 비-admin 에는 관리 주소를 가린다.
   const admin = isAdminReq(req);
   res.json({
-    ok: true, result, ...(admin ? {} : { addressHidden: true }),
+    ok: true, result: admin ? result : maskSnapAddress(result), ...(admin ? {} : { addressHidden: true }),
     baseline: publicBaseline(baseline), items: CHECK_ITEMS,
     ports: portCheck,
     problemPorts: zoned.rows,
