@@ -212,3 +212,41 @@ test('SEC2600-01: 배포 코드에 고정 /tmp 경로가 남아 있지 않다(�
   assert.match(agent, /remoteTmpDir\(exec, 'vmportal-agent'\)/);
   assert.match(rma, /remoteTmpDir\(exec, 'vmware-portal-rma'\)/);
 });
+
+// ─────────────── 추가 배정: T2600-01 라우트 상한 · DB2600-02(vmperf) · SEC2600-01(ollama)
+test('T2600-01: /api/auth/login 은 256자 초과 username 을 400 으로 거절하고 잠금·기록에 남기지 않는다', async () => {
+  const express = (await import('express')).default;
+  const { authRouter } = await import('../src/routes/auth.js');
+  rl._resetLoginRateLimitForTest();
+  const app = express();
+  app.use(express.json({ limit: '2mb' }));
+  app.use('/api/auth', authRouter);
+  const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  const url = `http://127.0.0.1:${srv.address().port}/api/auth/login`;
+  const post = (username) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password: 'x' }) });
+  try {
+    const long = await post('a'.repeat(257));
+    assert.equal(long.status, 400);
+    const huge = await post('b'.repeat(900_000));
+    assert.equal(huge.status, 400);
+    assert.equal(rl._attemptKeyCharsForTest().keys, 0, '길이 초과 요청은 잠금 카운터에 기록되지 않는다');
+    const ok256 = await post('c'.repeat(256));   // 경계값은 길이로 거절하지 않는다(자격 실패 401 등)
+    assert.notEqual(ok256.status, 400);
+  } finally { srv.close(); }
+});
+
+test('DB2600-02: vmperfHistory 도 원본 보존이 짧을 때 롤업으로 긴 창을 덮는다', async () => {
+  process.env.VMPERF_DB_DIR = path.join(TMP, 'vmperf');
+  const vp = await import('../src/metrics/vmperfDb.js');
+  for (let d = 200; d >= 1; d--) await vp.insertVmperf('vc-2600e', [{ metric: 'm', k: 'vc-2600e', v: d % 5 + 1 }], T0 - d * DAY + HOUR / 2);
+  const x = await vp.getVmperfDb('vc-2600e');
+  x.db.prepare('DELETE FROM samples WHERE ts < ?').run(T0 - 90 * DAY);   // 원본만 90일로 줄인 상태
+  const pts = await vp.vmperfHistory('vc-2600e', 'm', T0 - 365 * DAY, DAY, 1000);
+  assert.ok(pts.length >= 199, `365일 창 ${pts.length}점`);
+});
+
+test('SEC2600-01: ollama 오프라인 설치도 고정 /tmp 경로를 쓰지 않는다', () => {
+  const src = fs.readFileSync(path.join(SRC, 'llm/ollamaDeploy.js'), 'utf8');
+  assert.equal(/['"`]\/tmp\/ollama-install\.tgz/.test(src), false);
+  assert.match(src, /remoteTmpDir\(exec, 'ollama-install'\)/);
+});

@@ -43,12 +43,18 @@ authRouter.get('/config', (_req, res) => {
   });
 });
 
+const USERNAME_MAX = 256;
 authRouter.post('/login', async (req, res) => {
   const { username, password } = req.body || {};
   // 문자열만 허용 — 객체/배열이 오면 String() 강제변환으로 "[object Object]" 같은 값이 인증에
   // 쓰이는 사고를 막는다(특수문자 자체는 어떤 것이든 그대로 통과).
   if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
     return res.status(400).json({ error: 'username and password are required' });
+  }
+  // v2.600 T2600-01: 계정명 길이 상한 — 무인증 경로라 전역 본문 한도(1MB)까지 받아 900KB 짜리 이름이 잠금 키·
+  // 감사 로그·loginStore 에 그대로 남았다. 인증·잠금·기록 전에 거절한다(AD UPN 도 256자를 넘지 않는다).
+  if (username.length > USERNAME_MAX) {
+    return res.status(400).json({ error: `username too long (max ${USERNAME_MAX})` });
   }
   const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0];
   // 잠금 키의 출발지는 `clientIp(req)` 로 정한다(v2.503, 감사 S2): **`trust proxy` 가 설정된

@@ -149,6 +149,7 @@ function prepare(db) {
     bucketHourly: db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max
       FROM samples_hourly WHERE metric=? AND k=? AND h>=? GROUP BY b ORDER BY b DESC LIMIT ?`),
     hourlyMin: db.prepare('SELECT MIN(h) AS mn FROM samples_hourly WHERE metric=? AND k=?'),
+    rawMin: db.prepare('SELECT MIN(ts) AS mn FROM samples WHERE metric=? AND k=?'), // v2.600 DB2600-02 — aggregate 하나(인덱스 끝점)
     // v2.447(감사 B3): k 필터 추가 — 파일이 한 vCenter 전용이라도, 구버전 충돌 파일이 남아 있으면
     // 남의 행까지 세어 '수집 시작' 이 틀리게 표시됐다.
     meta: db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx, COUNT(*) AS n FROM samples WHERE metric=? AND k=?'),
@@ -223,8 +224,11 @@ export async function vmperfHistory(vcenterId, metric, sinceTs, bucketMs, limit)
   const map = (rows) => rows.reverse().map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) }));
   if (bucketMs >= HOUR && bucketMs % HOUR === 0) {
     const mn = x.st.hourlyMin.get(metric, k)?.mn;
-    // 롤업이 요청 창을 덮을 때만 사용 — 덮지 못하면 원본으로 폴백해 빈 결과를 만들지 않는다.
-    if (mn != null && mn <= sinceTs) return map(x.st.bucketHourly.all(bucketMs, bucketMs, metric, k, sinceTs, limit));
+    // 롤업이 요청 창을 덮거나 **원본만큼 거슬러 올라가면** 사용한다(v2.600 DB2600-02 — metrics/db.js 와 같은 조건).
+    // 예전 '창을 덮을 때만' 이면 원본 보존이 롤업보다 짧을 때 긴 창이 원본으로 떨어져 더 적게 보였다.
+    // 원본이 롤업보다 이르면(업그레이드 이전 데이터) 원본으로 폴백해 빈 결과를 만들지 않는다.
+    const rawFirst = mn != null && mn > sinceTs ? x.st.rawMin.get(metric, k)?.mn : null;
+    if (mn != null && (mn <= sinceTs || rawFirst == null || mn <= rawFirst)) return map(x.st.bucketHourly.all(bucketMs, bucketMs, metric, k, sinceTs, limit));
   }
   return map(x.st.bucket.all(bucketMs, bucketMs, metric, k, sinceTs, limit));
 }

@@ -42,9 +42,34 @@ export function managerInScope(mgr, vcenters, allowedSet) {
  * 게이트웨이/세그먼트/DFW 총계)가 새지 않게, 보이는 것만으로 같은 필드를 다시 센다
  * (필드 구성은 nsx/store.js rollup() 과 동일하게 유지할 것 — UI 가 같은 키를 읽는다).
  */
+/*
+ * v2.600(감사 COL-2600-06 후속): 매니저가 어떤 목록을 **읽지 못했으면**(nsx/client.js `listsFailed`) 그 목록에서 나온
+ * 합계는 '0개' 가 아니라 **모른다**(null)다 — 예전에는 빈 배열 길이·`|| 0` 으로 0 이 더해져 '세그먼트 0' 같은 거짓이 됐다.
+ * 실패한 매니저 수는 `listsFailed`({목록:매니저 수})로 밝힌다(뺀 사실을 숨기지 않는다).
+ */
+const LIST_FIELDS = {
+  transportNodes: ['hostNodes', 'edgeNodes'],
+  tier0s: ['t0'],
+  tier1s: ['t1'],
+  segments: ['segments', 'overlaySegments', 'vlanSegments'],
+  securityPolicies: ['dfwPolicies', 'dfwRules'],
+  groups: ['groups'],
+};
+
+/** 매니저들이 읽지 못한 목록 → { 목록: 매니저 수 }. */
+export function nsxListsFailed(managers) {
+  const out = {};
+  for (const x of managers || []) {
+    for (const k of Array.isArray(x?.listsFailed) ? x.listsFailed : []) out[k] = (out[k] || 0) + 1;
+  }
+  return out;
+}
+
 export function scopedNsxRollup({ managers, gateways, segments, transportNodes }) {
   const g = gateways || [], tn = transportNodes || [], m = managers || [], seg = segments || [];
-  return {
+  // 값이 null 인 매니저가 하나라도 있으면 합계도 null(부분 합을 전체라 말하지 않는다).
+  const sumOrNull = (f) => { let a = 0; for (const x of m) { const v = f(x); if (v == null) return null; a += Number(v) || 0; } return a; };
+  const r = {
     managers: m.length,
     managersUp: m.filter((x) => x.status === 'connected').length,
     managersDegraded: m.filter((x) => x.status === 'degraded').length,
@@ -55,8 +80,15 @@ export function scopedNsxRollup({ managers, gateways, segments, transportNodes }
     vlanSegments: seg.filter((s) => s.type === 'VLAN').length,
     hostNodes: tn.filter((x) => x.type === 'host').length,
     edgeNodes: tn.filter((x) => x.type === 'edge').length,
-    dfwPolicies: m.reduce((a, x) => a + (x.firewall?.policies || 0), 0),
-    dfwRules: m.reduce((a, x) => a + (x.firewall?.rules || 0), 0),
-    groups: m.reduce((a, x) => a + (x.groups || 0), 0),
+    // firewall 이 아예 없는 매니저(구버전 스냅샷)는 예전처럼 0 으로 둔다 — null 은 '조회 실패' 표식일 때만.
+    dfwPolicies: sumOrNull((x) => (x.firewall ? x.firewall.policies : 0)),
+    dfwRules: sumOrNull((x) => (x.firewall ? x.firewall.rules : 0)),
+    groups: sumOrNull((x) => (x.groups === undefined ? 0 : x.groups)),
   };
+  const failed = nsxListsFailed(m);
+  for (const [list, fields] of Object.entries(LIST_FIELDS)) {
+    if (failed[list]) for (const f of fields) r[f] = null;
+  }
+  if (Object.keys(failed).length) r.listsFailed = failed;
+  return r;
 }
