@@ -36,6 +36,8 @@ import { numOrNull } from '../util/numOrNull.js';
 const FILE = () => path.join(config.dbDir || config.configDir, 'link-check.db');
 // 날짜 경계 코어는 `util/dayKey.js` 하나다(v2.582 ARCH-2). import 뒤 export(v2.575 재수출 규약).
 import { DAY_OFFSET_MIN, dayKey } from "../util/dayKey.js";
+import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
+const lockRetry = createLockRetry();
 export { DAY_OFFSET_MIN, dayKey };
 const COUNT_CACHE_MS = Math.max(0, Number(process.env.LINKCHECK_COUNT_CACHE_MS) || 60_000);
 /** 상세 원문 1건의 상한 — 넘으면 자르고 **잘렸다고 밝힌다**(조용한 상한 금지). */
@@ -45,19 +47,20 @@ let _db = null; let _tried = false; let _opening = null; let _tick = 0; let _cou
 
 async function getDb() {
   if (_db) return _db;
+  if (lockRetry.blocked()) return null;   // 잠금 뒤 재시도 대기(매 호출 3초 busy_timeout 을 태우지 않게)
   if (_opening) return _opening;
   if (_tried) return _db;
   _opening = openDb().finally(() => { _opening = null; });
   return _opening;
 }
 async function openDb() {
+  let conn = null;   // v2.599 DB2599-02: 실패하면 닫는다(잠금이면 래치하지 않고 다시 연다)
   try {
     fs.mkdirSync(path.dirname(FILE()), { recursive: true });
     const { DatabaseSync } = await import('node:sqlite');
-    const conn = new DatabaseSync(FILE());
+    conn = openSqlite(new DatabaseSync(FILE()));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
     try { fs.chmodSync(FILE(), 0o600); } catch { /* best effort */ }
-    conn.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;
-      /* ① 주기 요약 — 이 테이블이 가장 크다. 열은 짧게(행 60B 목표). */
+    conn.exec(`/* ① 주기 요약 — 이 테이블이 가장 크다. 열은 짧게(행 60B 목표). */
       CREATE TABLE IF NOT EXISTS link_sample (
         link_id TEXT NOT NULL, ts INTEGER NOT NULL,
         ok INTEGER NOT NULL, phase TEXT, fail_kind TEXT, reached TEXT,
@@ -110,6 +113,8 @@ async function openDb() {
     } catch { /* 이미 있는 열 — 정상 */ }
     _db = conn;
   } catch (e) {
+    try { conn?.close(); } catch { /* 이미 닫힘 */ }
+    if (lockRetry.onFail(e)) { console.warn(`[linkcheck-db] ${lockRetry.note()}`); return null; }
     console.warn('[linkcheck-db] 사용 불가(DB 없이 동작):', e?.message);
     _db = null;
   }
@@ -356,6 +361,7 @@ export async function dailyOf({ linkId = '', days = 90 } = {}) {
 }
 
 export function _resetForTest() {
+  lockRetry.ok();
   try { _db?.close?.(); } catch { /* */ }
   _db = null; _tried = false; _opening = null; _tick = 0; _counts = null;
 }

@@ -20,6 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { isSqliteLockError } from '../util/sqliteOpen.js';
 
 const DB_PATH = () => process.env.HZSESS_DB_PATH
   || path.join(config.dbDir || config.configDir, 'horizon-sessions.db');
@@ -100,10 +101,7 @@ function prepare(db) {
 let lockError = null;
 let retryAt = 0;
 const LOCK_RETRY_MS = 30_000;
-const isLockError = (e) => {
-  const code = e && (e.errcode ?? e.errno);
-  return code === 5 || code === 6 || /database is (locked|busy)|SQLITE_(BUSY|LOCKED)/i.test(String(e?.message || ''));
-};
+const isLockError = isSqliteLockError;   // 판정은 util/sqliteOpen.js 하나
 
 async function open() {
   if (x) return x;

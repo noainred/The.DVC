@@ -410,8 +410,11 @@ api.get('/tools/sanswitch/devices/:id/healthcheck', toolsPerm, fullScopeOnly, as
   //   기록하면 '최근 10회' 가 같은 값 10개가 된다('수집 1회 = 기록 1회', healthHistory.js 머리말).
   const rec = await recordRun(result, { ports: portCheck });
   const hist = await listRuns(req.params.id, Number(req.query.history) || 10);
+  // v2.599(AUTHZ-2599-03): 점검 결과(result.host)도 목록과 같은 기준 — 비-admin 에는 관리 주소를 가린다.
+  const admin = isAdminReq(req);
   res.json({
-    ok: true, result, baseline: publicBaseline(baseline), items: CHECK_ITEMS,
+    ok: true, result, ...(admin ? {} : { addressHidden: true }),
+    baseline: publicBaseline(baseline), items: CHECK_ITEMS,
     ports: portCheck,
     problemPorts: zoned.rows,
     zoningNote: zoned.note,
@@ -428,7 +431,7 @@ api.get('/tools/sanswitch/devices/:id/healthcheck/history', toolsPerm, fullScope
   const dev = listDevices().find((d) => d.id === req.params.id);
   if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
   const hist = await listRuns(req.params.id, Number(req.query.limit) || 10);
-  res.json({ ok: true, deviceId: req.params.id, name: dev.name || dev.host, ...hist, maxRuns: MAX_RUNS, compare: compareRuns(hist.runs), db: scopeDbStatus(await healthHistoryStatus(), req.user) });
+  res.json({ ok: true, deviceId: req.params.id, name: dev.name || (isAdminReq(req) ? dev.host : ''), ...hist, maxRuns: MAX_RUNS, compare: compareRuns(hist.runs), db: scopeDbStatus(await healthHistoryStatus(), req.user) });
 });
 
 /**
@@ -442,7 +445,7 @@ api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, async (req
   const results = []; const missing = []; const recorded = [];
   for (const d of devices) {
     const snap = snapshotFor(d.id);
-    if (!snap) { missing.push({ deviceId: d.id, name: d.name || d.host, agent: d.agent || '', datacenterId: d.datacenterId || '' }); continue; }
+    if (!snap) { missing.push({ deviceId: d.id, name: d.name || (isAdminReq(req) ? d.host : ''), agent: d.agent || '', datacenterId: d.datacenterId || '' }); continue; }
     const r = checkDevice(snap, { baseline: getBaseline(d.id) });
     if (r) {
       results.push({ ...r, datacenterId: d.datacenterId || '' });
@@ -458,7 +461,9 @@ api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, async (req
   res.json({
     ok: true, at: Date.now(),
     summary: { ...summarizeAll(results), missing: missing.length, registered: devices.length },
-    results: results.map((r) => ({ ...r, datacenterName: dcNameOf(r.datacenterId) })),
+    // v2.599(AUTHZ-2599-03): 장비별 결과의 host 도 비-admin 에는 가린다(단건 점검과 같은 기준).
+    results: results.map((r) => ({ ...(isAdminReq(req) ? r : maskSnapAddress(r)), datacenterName: dcNameOf(r.datacenterId) })),
+    ...(isAdminReq(req) ? {} : { addressHidden: true }),
     missing, items: CHECK_ITEMS, baselines: listBaselines(),
     // 이력 기록 결과 — '몇 건이 새로 기록되고 몇 건이 같은 스냅샷이어서 건너뛰었나'.
     recordedRuns: recStats, historyDb: scopeDbStatus(await healthHistoryStatus(), req.user),

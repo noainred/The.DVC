@@ -239,3 +239,137 @@ test('LO2599-01 현재 사용자·Horizon 세션 설정 — 빈 칸은 이전 �
   const b = hs.save({ ...hs.load(), retentionDays: '' });
   assert.equal(b.retentionDays, 3000);
 });
+
+/* ── T2599-02 후속: config.js 밖 주기·시한 env ────────────────────────── */
+
+test('T2599-02 후속 — 워커·폴러·시한 env 가 [하한, 2^31) 에 갇힌다(0=끔 계약은 유지)', () => {
+  const big = '2592000000000';
+  const r = runNode(`
+    const out = {};
+    out.ping = (await import('./src/agent/pingWorker.js')).pingWorkerStatus().pollMs;
+    out.capture = (await import('./src/agent/captureWorker.js')).captureWorkerStatus().pollMs;
+    out.bmstor = (await import('./src/agent/bmstorWorker.js')).bmstorWorkerStatus().pollMs;
+    out.logq = (await import('./src/agent/logQueryWorker.js')).logQueryWorkerStatus().intervalMs;
+    out.idracScan = (await import('./src/agent/idracScanWorker.js')).getIdracScanWorkerStatus().pollMs;
+    out.edgelog = (await import('./src/agent/edgeLogWorker.js')).edgeLogWorkerStatus().intervalMs;
+    out.sansw = (await import('./src/sanswitch/poller.js')).pollMs();
+    out.partfault = (await (await import('./src/partfault/poller.js')).partFaultStatus()).intervalMs;
+    const { config } = await import('./src/config.js');
+    out.idracTimeout = config.idrac.timeoutMs; out.collectorTimeout = config.collector.timeoutMs;
+    console.log(JSON.stringify(out));`, {
+    AGENT_PING_POLL_MS: big, AGENT_CAPTURE_POLL_MS: '-5', AGENT_BMSTOR_POLL_MS: big, AGENT_LOGQ_POLL_MS: big,
+    AGENT_IDRAC_SCAN_POLL_MS: '-1', AGENT_EDGELOG_POLL_MS: big, SANSW_POLL_MS: big, PARTFAULT_POLL_MS: big,
+    IDRAC_TIMEOUT_MS: '-3', COLLECTOR_TIMEOUT_MS: big,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const v = JSON.parse(r.stdout.trim().split('\n').pop());
+  for (const [k, x] of Object.entries(v)) assert.ok(x >= 1_000 && x <= 2 ** 31 - 1, `${k}=${x}`);
+  assert.equal(v.capture, 4_000);        // 음수 → 기본
+  assert.equal(v.idracScan, 5_000);
+  assert.equal(v.idracTimeout, 15_000);
+  // AGENT_EDGELOG_POLL_MS=0 은 '끔' 계약 — 그대로
+  const off = runNode(`console.log((await import('./src/agent/edgeLogWorker.js')).edgeLogWorkerStatus().intervalMs);`, { AGENT_EDGELOG_POLL_MS: '0' });
+  assert.equal(off.stdout.trim().split('\n').pop(), '0');
+  const lag = stripComments(fs.readFileSync(path.join(SRC, 'util/loopLag.js'), 'utf8'));
+  assert.match(lag, /clampIntervalMs\(Number\(process\.env\.LOOP_LAG_INTERVAL_MS\) \|\| 30_000, 30_000, 5_000\)/);
+});
+
+/* ── DB2599-02 후속: 공용 헬퍼 + 폴링 경로 DB 모듈 ─────────────────────── */
+
+test('DB2599-02 헬퍼 — busy_timeout 이 journal_mode 보다 먼저, 실패한 시도의 핸들은 닫힌다', async () => {
+  const { openSqlite, withOpenCleanup, retryOnLock, isSqliteLockError, createLockRetry } = await import('../src/util/sqliteOpen.js');
+  const { DatabaseSync } = await import('node:sqlite');
+  const p = path.join(TMP, 'helper-2599.db');
+  const calls = [];
+  const fake = { exec: (q) => calls.push(q), close() {} };
+  openSqlite(fake);
+  assert.match(calls[0], /^PRAGMA busy_timeout=3000;$/);
+  assert.match(calls[1], /journal_mode=WAL/);
+  let captured = null;
+  await assert.rejects(withOpenCleanup(async () => { captured = openSqlite(new DatabaseSync(p)); throw new Error('boom'); }), /boom/);
+  assert.throws(() => captured.exec('SELECT 1'), /not open/i);   // 닫혔다
+  assert.equal(isSqliteLockError({ errcode: 5 }), true);
+  assert.equal(isSqliteLockError(new Error('no such table')), false);
+  const lr = createLockRetry(1000);
+  assert.equal(lr.onFail(new Error('database is locked'), 0), true);
+  assert.equal(lr.blocked(500), true); assert.equal(lr.blocked(1500), false);
+  assert.equal(lr.onFail(new Error('disk I/O error'), 0), false);
+  let n = 0;
+  const v = await retryOnLock(async () => { n += 1; if (n < 3) throw Object.assign(new Error('database is locked'), { errcode: 5 }); return 'ok'; }, { waitMs: 1 });
+  assert.equal(v, 'ok'); assert.equal(n, 3);
+  await assert.rejects(retryOnLock(async () => { throw new Error('corrupt'); }, { waitMs: 1 }), /corrupt/);
+});
+
+// 모듈마다 자식 프로세스 하나(병렬): 빈 DB 파일에 다른 연결이 EXCLUSIVE 잠금 → 첫 open 실패는 래치하지 않고,
+// 잠금이 풀리고 재시도 대기(30초)가 지나면(Date.now 를 앞당긴다) 다시 열린다.
+const LOCK_CASES = {
+  curuser: { file: 'curuser.db', mod: './src/curuser/db.js', probe: 'async (m) => (await m.curUserDbStatus()).available' },
+  partfault: { file: 'part-faults.db', mod: './src/partfault/db.js', probe: 'async (m) => (await m.partFaultDbStatus()).available' },
+  pdu: { file: 'pdu.db', mod: './src/pdu/db.js', probe: 'async (m) => !(await m.dbStats()).unavailable' },
+  sanperf: { file: 'sanswitch-perf.db', mod: './src/sanswitch/perfDb.js', probe: 'async (m) => m.available()' },
+  linkcheck: { file: 'link-check.db', mod: './src/linkcheck/db.js', probe: 'async (m) => m.available()' },
+  bmusage: { file: 'bm-usage.db', mod: './src/bmusage/db.js', probe: 'async (m) => m.available()' },
+  vmtrack: { file: 'vmtrack.db', env: 'VMTRACK_DB_PATH', mod: './src/vmtrack/db.js', probe: 'async (m) => !!(await m.getDb())' },
+  guestdisk: { file: 'guestdisk.db', env: 'GUESTDISK_DB_PATH', mod: './src/guestdisk/db.js', probe: 'async (m) => !!(await m.getDb())' },
+};
+
+test('DB2599-02 후속 — 폴링 경로 DB 8종: 첫 open 잠금을 래치하지 않는다', async () => {
+  const { spawn } = await import('node:child_process');
+  const run = (name, c) => new Promise((resolve) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `lock2599-${name}-`));
+    const file = path.join(dir, c.file);
+    const env = { ...process.env, CONFIG_DIR: dir, ...(c.env ? { [c.env]: file } : {}), CURUSER_DB_PATH: path.join(dir, 'curuser.db'), PARTFAULT_DB_PATH: path.join(dir, 'part-faults.db'), PDU_DB: path.join(dir, 'pdu.db') };
+    const code = `
+      const fs = await import('node:fs'); const { DatabaseSync } = await import('node:sqlite');
+      const file = ${JSON.stringify(file)};
+      fs.writeFileSync(file, '');
+      const holder = new DatabaseSync(file); holder.exec('BEGIN EXCLUSIVE');
+      const m = await import(${JSON.stringify(c.mod)}); const probe = ${c.probe};
+      const first = await probe(m);
+      holder.exec('COMMIT'); holder.close();
+      const real = Date.now; Date.now = () => real() + 31_000;
+      const second = await probe(m);
+      console.log(JSON.stringify({ first, second }));`;
+    const ch = spawn(process.execPath, ['--input-type=module', '-e', code], { cwd: path.join(HERE, '..'), env });
+    let out = ''; let err = '';
+    ch.stdout.on('data', (d) => { out += d; }); ch.stderr.on('data', (d) => { err += d; });
+    ch.on('close', (st) => resolve({ name, st, out, err }));
+  });
+  const res = await Promise.all(Object.entries(LOCK_CASES).map(([k, c]) => run(k, c)));
+  for (const r of res) {
+    assert.equal(r.st, 0, `${r.name}: ${r.err.slice(-400)}`);
+    const v = JSON.parse(r.out.trim().split('\n').pop());
+    assert.equal(v.first, false, `${r.name}: 잠금 중에는 열리지 않아야 한다`);
+    assert.equal(v.second, true, `${r.name}: 잠금이 풀린 뒤 다시 열려야 한다(래치 금지)`);
+  }
+});
+
+test('DB2599-02 후속 — NDJSON·인메모리 폴백 모듈 4종은 잠금에 폴백하지 않고 기다렸다 SQLite 로 연다', async () => {
+  const { spawn } = await import('node:child_process');
+  const cases = {
+    ping: { f: 'ping-monitor.db', env: 'PING_DB_PATH', code: "(await (await import('./src/ping/db.js')).getPingDb()).kind" },
+    idrac: { f: 'idrac-power.db', env: 'IDRAC_DB_PATH', code: "(await (await import('./src/idrac/db.js')).getDb()).kind" },
+    capacity: { f: 'capacity.db', env: 'CAPACITY_DB_PATH', code: "(await (await import('./src/capacity/db.js')).getCapacityDb()).kind" },
+    logs: { f: 'vcenter-logs.db', env: null, code: "(await (await import('./src/logs/db.js')).getLogsDb()).kind" },
+  };
+  const run = (name, c) => new Promise((resolve) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `lock2599-${name}-`));
+    const file = path.join(dir, c.f);
+    const env = { ...process.env, CONFIG_DIR: dir, ...(c.env ? { [c.env]: file } : {}) };
+    const code = `
+      const fs = await import('node:fs'); const { DatabaseSync } = await import('node:sqlite');
+      const file = ${JSON.stringify(file)}; fs.writeFileSync(file, '');
+      const holder = new DatabaseSync(file); holder.exec('BEGIN EXCLUSIVE');
+      setTimeout(() => { holder.exec('COMMIT'); holder.close(); }, 500);
+      console.log(${c.code});`;
+    const ch = spawn(process.execPath, ['--input-type=module', '-e', code], { cwd: path.join(HERE, '..'), env });
+    let out = ''; let err = '';
+    ch.stdout.on('data', (d) => { out += d; }); ch.stderr.on('data', (d) => { err += d; });
+    ch.on('close', (st) => resolve({ name, st, out, err }));
+  });
+  const res = await Promise.all(Object.entries(cases).map(([k, c]) => run(k, c)));
+  for (const r of res) {
+    assert.equal(r.st, 0, `${r.name}: ${r.err.slice(-400)}`);
+    assert.equal(r.out.trim().split('\n').pop(), 'sqlite', `${r.name}: 잠금이 풀린 뒤 SQLite 로 열려야 한다(폴백 래치 금지)\n${r.err.slice(-300)}`);
+  }
+});

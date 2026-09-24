@@ -62,7 +62,7 @@ export function installerInfo(explicit) {
  *   SFTP `writeFile` 을 주므로 블록을 **0600 임시 파일**로 올린 뒤 cat 으로 붙이고 지운다 — 명령 인자에는 경로만 남는다.
  *   임시 파일은 대상 env 파일과 같은 디렉터리(root 소유)에 무작위 이름으로 둔다. 붙이기가 실패해도 지운다.
  */
-async function appendSecretText({ exec, writeFile }, envFile, text) {
+export async function appendSecretText({ exec, writeFile }, envFile, text) {
   const tmp = `${envFile}.portal-append.${crypto.randomBytes(8).toString('hex')}`;
   try {
     await writeFile(tmp, text, 0o600);

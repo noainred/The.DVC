@@ -152,12 +152,21 @@ test('실제 라우터 — 역할·범위별 응답(01·02·03·04·05·06·EDGE
     const probeIn = await req(sadmin, '/api/remote/probe', { method: 'POST', body: JSON.stringify({ vcenterId: A, targetHost: vmA.name }) });
     const qcOut = await req(sadmin, '/api/remote/quick-connect', { method: 'POST', body: JSON.stringify({ vcenterId: B, targetHost: vmA.name }) });
 
+    // 형제 경로(작업 로그·점검)까지 보려고 목 수집을 한 번 돌린다.
+    const swId = sanReg.listDevices()[0].id; const stId = storageReg.listDevices()[0].id;
+    await (await import(${J('sanswitch/poller.js')})).collectDeviceNow(swId).catch(() => {});
+    await (await import(${J('storage/poller.js')})).collectDeviceNow(stId).catch(() => {});
     const lists = {};
     for (const [who, base] of [['admin', admin], ['oper', oper]]) {
       lists[who] = {
         storage: await req(base, '/api/tools/storage'),
         san: await req(base, '/api/tools/sanswitch'),
         pdu: await req(base, '/api/tools/pdu'),
+        stAct: await req(base, '/api/tools/storage/activity'),
+        swAct: await req(base, '/api/tools/sanswitch/activity'),
+        swPorts: await req(base, '/api/tools/sanswitch/devices/' + swId + '/ports'),
+        swHc: await req(base, '/api/tools/sanswitch/devices/' + swId + '/healthcheck'),
+        swHcAll: await req(base, '/api/tools/sanswitch/healthcheck-all'),
       };
     }
 
@@ -216,6 +225,13 @@ test('실제 라우터 — 역할·범위별 응답(01·02·03·04·05·06·EDGE
     assert.ok(o.body.devices.length >= 1 && o.body.devices[0].name, k + ' 이름·목록은 남는다');
     assert.equal(a.body.addressHidden, undefined);
     assert.match(JSON.stringify(a.body.devices), /10\.20\.0\.5\d/);
+  }
+  // 형제 경로 — 작업 로그·포트 상세·점검 결과도 같은 기준(Chromium 판독에서 작업 로그로 새는 것을 발견했다)
+  for (const k of ['stAct', 'swAct', 'swPorts', 'swHc', 'swHcAll']) {
+    const o = r.lists.oper[k]; const a = r.lists.admin[k];
+    assert.equal(o.status, 200, k + ' ' + JSON.stringify(o.body).slice(0, 200));
+    assert.ok(!/10\.20\.0\.5\d|stadmin|swadmin/.test(JSON.stringify(o.body)), k + ' 주소·계정이 샜다');
+    assert.match(JSON.stringify(a.body), /10\.20\.0\.5\d/, k + ' admin 은 그대로 본다(수집이 돌았는지 확인)');
   }
   // AUTHZ-2599-04 — 범위 키는 범위 vCenter 만 센다
   assert.equal(r.colS.status, 200);

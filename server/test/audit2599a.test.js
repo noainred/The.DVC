@@ -185,3 +185,50 @@ test('SEC2599-05 — portal.env 에 토큰을 붙일 때 exec 명령 문자열�
   assert.match(src, /appendSecretText\(\{\s*exec,\s*writeFile\s*\},\s*'\/etc\/vmware-portal\/portal\.env',\s*block\)/);
   assert.match(src, /appendSecretText\(\{\s*exec,\s*writeFile\s*\},\s*envFile,/);
 });
+
+/* ── SEC2599-02 형제(코디네이터 후속): 장비 출력 파서 전반의 줄끝 공백·게으른 키 정규식 ── */
+test('SEC2599-02 형제 — 공백 3만 자 줄 하나로 장비 파서가 멈추지 않는다(fos·zoning·vplex·xtremio·cliSsh KV·unity svc_diag)', async () => {
+  const fos = await import('../src/sanswitch/collectors/fosParse.js');
+  const { parseCfgShow } = await import('../src/sanswitch/zoning.js');
+  const { parseLl } = await import('../src/storage/collectors/vplexSsh.js');
+  const { parseTable } = await import('../src/storage/collectors/xtremioSsh.js');
+  const { parseKeyValueBlocks } = await import('../src/storage/collectors/cliSsh.js');
+  const { versionFromSvcDiag } = await import('../src/storage/collectors/unityVersion.js');
+  const N = 30_000;
+  const inputs = [' '.repeat(N) + 'x', 'x' + ' '.repeat(N) + 'x', '1 ' + ' '.repeat(N) + 'x', '\t'.repeat(N) + 'x'];
+  const fns = { parseSwitchShow: fos.parseSwitchShow, parseLicenseShow: fos.parseLicenseShow, parseFabricShow: fos.parseFabricShow, parseCfgShow, parseLl, parseTable, parseKeyValueBlocks, versionFromSvcDiag };
+  for (const [name, fn] of Object.entries(fns)) {
+    for (const s of inputs) {
+      const t = process.hrtime.bigint();
+      fn(s);
+      const ms = Number(process.hrtime.bigint() - t) / 1e6;
+      assert.ok(ms < 150, `${name} 공백 ${N}자 줄 ${ms.toFixed(0)}ms — 정규식 O(n²)`);
+    }
+  }
+  // 뜻은 그대로다(대표 입력)
+  assert.deepEqual(parseKeyValueBlocks('Name = spa\nHealth: OK\n\n3:  ID = x'), [{ Name: 'spa', Health: 'OK' }, { ID: 'x' }]);
+  const vr = versionFromSvcDiag('* System Model Number is: Unity 480F\n* Current Software version: c4dev_PIE_8775R-5.4.0.0.5.094-GNOSIS_RETAIL');
+  assert.equal(vr.model, 'Unity 480F');
+  assert.equal(vr.version, '5.4.0.0.5.094');
+});
+
+test('SEC2599-02 스윕 — 서버 소스에 줄끝 공백 정규식 치환(replace(/\\s+$/)·replace(/\\s*$/))이 다시 들어오지 않는다', () => {
+  const hits = [];
+  const walk = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { if (e.name !== 'vendor' && e.name !== 'node_modules') walk(p); continue; }
+      if (!/\.(m?js)$/.test(e.name)) continue;
+      const src = stripComments(fs.readFileSync(p, 'utf8'));
+      src.split('\n').forEach((l, i) => { if (/replace\(\/\\s[+*]\$\/[gimsuy]*\s*,/.test(l)) hits.push(`${path.relative(SRC, p)}:${i + 1}`); });
+    }
+  };
+  walk(SRC);
+  assert.deepEqual(hits, [], 'trimEnd() 를 쓸 것 — 공백 연속마다 끝까지 다시 훑어 O(n²) 다');
+});
+
+test('SEC2599-05 형제 — RMA 배포도 토큰 블록을 printf 인자로 보내지 않는다', () => {
+  const src = read('rma/deploy.js');
+  assert.doesNotMatch(src, /exec\(`printf[^`]*\$\{block/);
+  assert.match(src, /appendSecretText\(\{\s*exec,\s*writeFile\s*\},\s*envFile,\s*block\)/);
+});

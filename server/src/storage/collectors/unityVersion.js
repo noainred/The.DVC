@@ -87,10 +87,17 @@ export function versionFromSvcDiag(text) {
   for (const raw of String(text || '').split(/\r?\n/)) {
     const line = raw.replace(/^\s*\*\s*/, '').trim();
     if (!line) continue;
-    const m = /^(.*?)(?:\s+is)?\s*:\s*(.+)$/.exec(line);
-    if (!m) continue;
-    const k = m[1].trim().toLowerCase();
-    const v = m[2].trim();
+    /*
+     * v2.599(SEC2599-02 형제 — 재현): 예전 `/^(.*?)(?:\s+is)?\s*:\s*(.+)$/` 는 게으른 키가 한 글자씩 늘 때마다 뒤 공백
+     *   연속을 다시 훑어 ':' 없는 긴 공백 줄에서 O(n²) 였다(3만 자 약 1.9초). 같은 뜻을 선형으로 — 첫 ':' 에서 자르고
+     *   키 끝의 `<공백>is` 를 뗀다(줄은 trim 돼 있어 첫 ':' 뒤가 비는 경우는 값이 빈 것뿐이다).
+     */
+    const ci = line.indexOf(':');
+    if (ci < 0) continue;
+    let kk = line.slice(0, ci).trimEnd();
+    if (kk.endsWith('is') && kk.length >= 3 && /\s/.test(kk[kk.length - 3])) kk = kk.slice(0, -2);
+    const k = kk.trim().toLowerCase();
+    const v = line.slice(ci + 1).trim();
     if (k && v && !map.has(k)) map.set(k, v);
   }
   const get = (...keys) => {

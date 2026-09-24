@@ -18,6 +18,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+// v2.599 DB2599-02: 첫 open 잠금은 래치하지 않고 잠시 뒤 다시 연다.
+const lockRetry = createLockRetry();
 
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래. env 가 최우선.
 const DB_PATH = process.env.VMTRACK_DB_PATH
@@ -31,8 +34,7 @@ function initSqlite() {
   // eslint-disable-next-line import/no-unresolved
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    const db = new DatabaseSync(DB_PATH);
-    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
+    const db = openSqlite(new DatabaseSync(DB_PATH));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
     db.exec(`
       CREATE TABLE IF NOT EXISTS snaps (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -239,10 +241,12 @@ function initSqlite() {
 /** DB 준비(1회). 실패 시 available:false 로 남기고 예외를 던지지 않는다. */
 export async function getDb() {
   if (impl) return impl;
+  if (!ready && lockRetry.blocked()) return null;
   if (!ready) {
-    ready = initSqlite()
-      .then((x) => { impl = x; return x; })
+    ready = withOpenCleanup(initSqlite)
+      .then((x) => { impl = x; lockRetry.ok(); return x; })
       .catch((err) => {
+        if (lockRetry.onFail(err)) { console.warn(`[vmtrack] ${lockRetry.note()}`); ready = null; return null; }
         initError = err.message || String(err);
         console.warn(`[vmtrack] DB 초기화 실패 — 기능 비활성: ${initError}`);
         return null;
@@ -252,7 +256,7 @@ export async function getDb() {
 }
 
 export function vmtrackStatus() {
-  return { available: Boolean(impl), dbPath: DB_PATH, error: impl ? null : initError };
+  return { available: Boolean(impl), dbPath: DB_PATH, error: impl ? null : (initError || lockRetry.note() || null) };
 }
 
 /**

@@ -21,6 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
 
 const DB_PATH = () => process.env.CURUSER_DB_PATH
   || path.join(config.dbDir || config.configDir, 'curuser.db');
@@ -31,6 +32,8 @@ export const vmSeriesEnabled = () => String(process.env.CURUSER_VM_SERIES || '')
 let x = null;         // { db, st, path }
 let ready = null;
 let initError = null;
+// v2.599 DB2599-02: 첫 open 이 잠금이면 initError 로 래치하지 않고 잠시 뒤 다시 연다(util/sqliteOpen.js).
+const lockRetry = createLockRetry();
 let tick = 0;
 
 function prepare(db) {
@@ -102,19 +105,19 @@ function prepare(db) {
 async function open() {
   if (x) return x;
   if (initError) return null;
+  if (!ready && lockRetry.blocked()) return null;
   if (!ready) {
-    ready = (async () => {
+    ready = (async () => withOpenCleanup(async () => {
       // eslint-disable-next-line import/no-unresolved
       const { DatabaseSync } = await import('node:sqlite');
       const p = DB_PATH();
       fs.mkdirSync(path.dirname(p), { recursive: true });
-      const db = new DatabaseSync(p);
-      try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
+      const db = openSqlite(new DatabaseSync(p));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
       const st = prepare(db);
       try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
       x = { db, st, path: p };
       return x;
-    })().catch((e) => { initError = e; return null; });
+    }))().catch((e) => { if (lockRetry.onFail(e)) { ready = null; return null; } initError = e; return null; });
   }
   return ready;
 }
@@ -125,7 +128,7 @@ export async function curUserDbStatus() {
   return {
     available: !!h,
     path: h ? h.path : DB_PATH(),
-    error: initError ? String(initError.message || initError).slice(0, 200) : '',
+    error: initError ? String(initError.message || initError).slice(0, 200) : (h ? '' : lockRetry.note()),
     vmSeries: vmSeriesEnabled(),
     ...(h ? h.st.stats.get() : { latestRows: null, seriesRows: null, vmSeriesRows: null }),
   };
@@ -243,6 +246,7 @@ export async function pruneCurUser(retentionDays, { every = 6 } = {}) {
 }
 
 export function _resetForTest() {
+  lockRetry.ok();
   try { x?.db?.close?.(); } catch { /* */ }
   x = null; ready = null; initError = null; tick = 0;
 }
