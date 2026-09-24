@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **513개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **515개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-24)
@@ -252,10 +252,12 @@
 | `SVCMON_TICK_MS` |  |  | svcmon/poller.js |
 | `SVCMON_WORKERS` |  |  | svcmon/capacity.js, svcmon/pool.js |
 
-## 수집 서버 (2)
+## 수집 서버 (4)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `CENTRAL_SELF_REGISTER_MAX` | `256` |  | collector/registry.js |
+| `CENTRAL_SELF_REGISTER_UNVERIFIED_MAX` | `16` |  | collector/registry.js |
 | `COLLECTOR_REMOTE_SERVERS_MAX` | `20000` |  | collector/remoteInventory.js |
 | `EDGE_PUSH_TIMEOUT_MS` | `600000` |  | collector/upgradePush.js, upgrade/upgrade.js |
 
@@ -692,4 +694,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 513
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 515

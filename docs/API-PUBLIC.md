@@ -282,12 +282,14 @@ ISO 문자열이 섞여 나오지 않습니다.
 > 못한 것이지 비어 있는 것이 아닙니다. 합계를 낼 때 **분모에서 빼고 몇 대를 뺐는지
 > 밝히는 것**이 이 포탈의 방식이고, `meta.usedUnknownCount` 가 그 개수입니다.
 > ⚠ 범위 지정 키가 403 인 이유는 §8 에 있습니다.
+> ⚠ (v2.604) 장비 이름이 **관리 주소(IP·등록 host)와 같으면** 이름을 가려 `"<type> <id> (이름 가림)"` 으로 보냅니다.
+> 가린 개수는 `meta.namesHidden` 입니다. `deviceId` 는 그대로이므로 행 매칭에는 `deviceId` 를 쓰세요.
 
 ### 7-6. `GET /capacity/storage-growth` — 스토리지 증가량
 
 분류 `capacity` · **전체 범위 키만** · 배열
 
-필드: `deviceId` `name` `usedBytes` `totalBytes` `observedDays` `growth` `unknownUsed`
+필드: `deviceId` `name` `usedBytes` `totalBytes` `observedDays` `growth` `unknownUsed` `resolutionBytes`
 
 `growth` 는 기간별 증가 **바이트**입니다: `{ "1d": 123456, "7d": null, "30d": null }`
 
@@ -306,6 +308,9 @@ ISO 문자열이 섞여 나오지 않습니다.
 > 관측이 10일뿐인 장비의 30일 증가량은 만들어 내지 않습니다. `observedDays` 로 그 장비의
 > 관측 일수를 확인하세요.
 > ⚠ 증가량이 **음수**로 나올 수 있습니다(실제로 줄어든 것). 0 으로 깎지 않습니다.
+> ⚠ (v2.604) **`resolutionBytes` 가 숫자인 장비는 용량을 반올림 표기로만 읽은 것**입니다(예: Isilon SSH 의 `5.0P` →
+> 해상도 0.1 PiB). 그 장비의 증가량은 **해상도 단위의 계단**이고, 해상도 미만의 변화는 보이지 않습니다 — 0 을 '변화 없음'
+> 으로 읽지 마세요. 정확한 바이트를 읽은 장비는 `null` 입니다. 반올림 장비 수는 `meta.approxCount`. 장비 이름 가림 규칙은 7-5 와 같습니다(`meta.namesHidden`).
 
 ### 7-7. `GET /faults/alarms` — vCenter 알람
 
@@ -341,6 +346,11 @@ ISO 문자열이 섞여 나오지 않습니다.
 | `kind` `partId` | 부품 종류와 그 안의 식별자 |
 | `state` | `fault` / `warn` / **`unknown`**(못 읽음) / **`absent`**(빈 슬롯) |
 | `reason` | 열려 있는 사유(보류 사유 포함) |
+| `openedAt` | 처음 감지된 시각(v2.604 이전에는 필드명 불일치로 **항상 null** 이었습니다 — 고쳤습니다) |
+
+> ⚠ (v2.604) **`deviceKey`·`partKey` 에 iDRAC 관리 IP 가 들어가는 경우 `masked-<12자>` 토큰으로 가립니다**(포탈 내부 비-admin
+> 화면과 같은 규칙). 같은 IP 는 같은 토큰이라 목록 안의 매칭은 되지만, **포탈을 재시작하면 토큰이 바뀝니다** — 토큰을
+> 장기 보관 키로 쓰지 마세요. 가린 사실은 `meta.addressHidden` 으로 알 수 있습니다.
 
 > ⚠⚠ **`unknown`(확인 불가)과 `absent`(빈 슬롯)를 장애로 세지 마세요.** 실제로 겪은 사례가
 > 있습니다 — 정상 장비의 빈 DIMM 슬롯 12칸을 고장으로 세면 **정상 장비에 장애 12건**이 찍힙니다.
