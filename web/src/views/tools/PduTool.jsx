@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { pduTotals, pduTotalNote, pduPowerMark } from './pduTotals.js';
 import { STable } from '../../components/STable.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
@@ -57,18 +58,8 @@ export default function PduTool() {
   useEffect(() => { const t = setInterval(() => load().catch(() => {}), 30_000); return () => clearInterval(t); }, []);
 
   const devices = useMemo(() => data?.devices || [], [data]);
-  const totals = useMemo(() => {
-    let powerW = null, units = 0, sensors = 0, temps = [];
-    for (const d of devices) {
-      const s = d.snapshot;
-      if (!s) continue;
-      units += s.summary?.units || 0;
-      sensors += s.summary?.sensors || 0;
-      if (s.summary?.powerW != null) powerW = (powerW ?? 0) + s.summary.powerW;
-      if (s.summary?.tempMaxC != null) temps.push(s.summary.tempMaxC);
-    }
-    return { powerW, units, sensors, tempMaxC: temps.length ? Math.max(...temps) : null };
-  }, [devices]);
+  // v2.606 WEB2606-05: 부분 합(unitsIncomplete)·전력 미수집 장비를 개수로 함께 낸다(pduTotals.js — vitest 고정).
+  const totals = useMemo(() => pduTotals(devices), [devices]);
 
   if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
@@ -140,7 +131,7 @@ export default function PduTool() {
 
       {/* 요약 카드 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10, marginBottom: 14 }}>
-        <Card label="총 전력" value={fmtW(totals.powerW)} />
+        <Card label="총 전력" value={fmtW(totals.powerW)} sub={pduTotalNote(totals)} />
         <Card label="최고 온도" value={fmtC(totals.tempMaxC)} />
         <Card label="PDU 본체" value={`${totals.units}대`} />
         <Card label="환경 센서" value={`${totals.sensors}개`} />
@@ -217,7 +208,8 @@ export default function PduTool() {
                       <td>{d.agent
                         ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{d.agent}</span>
                         : <span className="muted">중앙 직접</span>}</td>
-                      <td className="right"><b>{fmtW(sum?.powerW)}</b></td>
+                      <td className="right"><b>{fmtW(sum?.powerW)}</b>
+                        {(() => { const m = pduPowerMark(sum); return m ? <span className="badge amber" style={{ marginLeft: 6, whiteSpace: 'nowrap' }} title={m.title}>{m.label}</span> : null; })()}</td>
                       <td className="right">{fmtC(sum?.tempMaxC)}</td>
                       <td className="right">{fmtH(sum?.humidityAvgPct)}</td>
                       <td>{sum ? `${sum.units} / ${sum.sensors}` : '—'}</td>
@@ -247,11 +239,12 @@ export default function PduTool() {
   );
 }
 
-function Card({ label, value }) {
+function Card({ label, value, sub }) {
   return (
-    <div className="card" style={{ padding: 12 }}>
+    <div className="card" style={{ padding: 12, minWidth: 0 }}>
       <div className="muted" style={{ fontSize: 11.5 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4 }}>{value}</div>
+      {sub ? <div className="muted" style={{ fontSize: 11.5, marginTop: 4, color: '#f59e0b' }}>{sub}</div> : null}
     </div>
   );
 }

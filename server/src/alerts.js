@@ -251,7 +251,13 @@ export function saveAnomalySettings(body = {}) {
     const n = Number(v);
     if (Number.isFinite(n) && n >= 1) perVcenter[k] = Math.min(100000, Math.round(n));
   }
-  const rule = { enabled: body.enabled !== false, threshold: Math.max(2, Number(body.threshold) || 10), perVcenter };
+  // v2.606 WEB2606-03: 빈 칸·숫자 아님은 '미지정' — 이전 임계를 유지한다. 예전 'Number(x) || 10' 은 50대 운영 중 칸을
+  //   비우고 저장하면 10대로 저장해 동시 OFF 판정 임계가 5배 낮아졌다(v2.605 알림 화면 수정의 형제 경로).
+  //   명시적 숫자만 값이고 하한 2 는 그대로다.
+  const prevRule = cur.rules?.massVmPowerOff || {};
+  const prevThreshold = numOrNull(prevRule.threshold) ?? 10;
+  const t = numOrNull(body.threshold);
+  const rule = { enabled: body.enabled !== false, threshold: t == null ? prevThreshold : Math.max(2, Math.round(t)), perVcenter };
   saveAlertConfig({ channels: cur.channels, cooldownMin: cur.cooldownMin, intervalSec: cur.intervalSec, rules: { ...cur.rules, massVmPowerOff: rule } });
   return getAnomalySettings();
 }

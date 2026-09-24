@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, sendJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
+import { blankOr } from '../blankOr.js'; // v2.606 WEB2606-01: 빈 숫자 칸은 보내지 않는다(이전 값 유지 — MailSettings 와 같은 규약)
 
 /**
  * 특수 기능 › 메일 진단(v2.455, admin 전용) — 사용자 요구사항:
@@ -45,10 +46,11 @@ export function MailDiag() {
     try {
       const r = await sendJson('/admin/mail', 'PUT', {
         enabled,
-        smtp: { ...smtp, password: smtp.password || undefined },   // 비우면 서버가 기존 값 유지
+        smtp: { ...smtp, port: blankOr(smtp.port), timeoutMs: blankOr(smtp.timeoutMs), password: smtp.password || undefined },   // 비우면 서버가 기존 값 유지
       });
       setMsg('저장되었습니다.');
-      setSmtp((s) => ({ ...s, password: '' }));
+      // 빈 칸으로 저장했으면 서버가 유지한 값을 다시 채운다(칸이 비어 있으면 '무엇으로 저장됐나' 를 알 수 없다).
+      setSmtp((s) => ({ ...s, password: '', port: r?.settings?.smtp?.port ?? s.port, timeoutMs: r?.settings?.smtp?.timeoutMs ?? s.timeoutMs }));
       if (r?.settings) setD((p) => ({ ...p, settings: r.settings }));
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
@@ -86,7 +88,7 @@ export function MailDiag() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10, marginTop: 12 }}>
         <F label="서버 주소"><input className="input" value={smtp.host} placeholder="relay.corp.local" onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} /></F>
-        <F label="포트"><input className="input" type="number" min={1} max={65535} value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: Number(e.target.value) })} /></F>
+        <F label="포트"><input className="input" type="number" min={1} max={65535} value={smtp.port} onChange={(e) => setSmtp({ ...smtp, port: e.target.value })} /></F>
         <F label="보내는 사람(From)"><input className="input" value={smtp.from} placeholder="vmware-portal@corp.local" onChange={(e) => setSmtp({ ...smtp, from: e.target.value })} /></F>
         <F label="표시 이름"><input className="input" value={smtp.fromName || ''} onChange={(e) => setSmtp({ ...smtp, fromName: e.target.value })} /></F>
         <F label="계정 (선택)"><input className="input" value={smtp.user} onChange={(e) => setSmtp({ ...smtp, user: e.target.value })} /></F>
@@ -94,7 +96,7 @@ export function MailDiag() {
           <input className="input" type="password" autoComplete="new-password" value={smtp.password}
             placeholder={d.settings?.smtp?.hasPassword ? '●●●●●●' : ''} onChange={(e) => setSmtp({ ...smtp, password: e.target.value })} />
         </F>
-        <F label="타임아웃(ms)"><input className="input" type="number" min={1000} max={120000} value={smtp.timeoutMs || 20000} onChange={(e) => setSmtp({ ...smtp, timeoutMs: Number(e.target.value) })} /></F>
+        <F label="타임아웃(ms)"><input className="input" type="number" min={1000} max={120000} value={smtp.timeoutMs ?? ''} onChange={(e) => setSmtp({ ...smtp, timeoutMs: e.target.value })} /></F>
       </div>
       <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap', marginTop: 8, fontSize: 12.5 }}>
         <label className="flex gap" style={{ alignItems: 'center' }}><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> <b>메일 발송 사용</b></label>

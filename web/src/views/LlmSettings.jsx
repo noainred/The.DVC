@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { blankOr } from './blankOr.js';
 
 /** 설정 → AI 검색: 자연어 검색용 로컬 LLM(Ollama) 구성 + 연결 테스트. */
 export default function LlmSettings() {
@@ -16,17 +17,19 @@ export default function LlmSettings() {
   if (!cfg) return <Loading />;
 
   const set = (k) => (e) => setCfg((c) => ({ ...c, [k]: e.target.value }));
+  // v2.606 TIM2606-01: 입력칸 값은 문자열이다 — 타임아웃은 숫자로 바꿔 보내고 빈 칸은 보내지 않는다(서버는 이전 값 유지).
+  const body = () => ({ ...cfg, timeoutMs: blankOr(cfg.timeoutMs) });
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 5000); };
 
   const save = async () => {
     setBusy(true);
-    const r = await putJson('/admin/llm-config', cfg).catch((e) => ({ ok: false, reason: e.message }));
+    const r = await putJson('/admin/llm-config', body()).catch((e) => ({ ok: false, reason: e.message }));
     if (r.config) setCfg(r.config);
     flash(!!r.config, r.config ? '저장했습니다.' : (r.reason || '저장 실패')); setBusy(false);
   };
   const test = async () => {
     setBusy(true);
-    const r = await postJson('/admin/llm-test', cfg).catch((e) => ({ ok: false, reason: e.message }));
+    const r = await postJson('/admin/llm-test', body()).catch((e) => ({ ok: false, reason: e.message }));
     flash(r.ok, r.ok ? `연결 성공 (${r.ms}ms) · 모델 ${r.models?.length || 0}개${r.hasModel ? ` · '${cfg.model}' 있음` : ` · '${cfg.model}' 없음(설치 필요)`}` : `실패: ${r.reason}`);
     setBusy(false);
   };

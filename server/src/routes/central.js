@@ -78,6 +78,7 @@ import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { stripCoercionTraps, strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';   // v2.600 CEN2600-01·RECENT2600-01 — 엣지가 보낸 수치 좁히기
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.583: 반복 수신 로그 조절
+import { capStr, capTrim } from '../util/capStr.js'; // v2.606 TIM2606-02: 상주 기록 글자 평탄화
 const gpuRecvLog = createChangeLogger();
 export const centralRouter = Router();
 let _getPaths = null;
@@ -183,7 +184,7 @@ centralRouter.use((req, res, next) => {
         // 인벤토리 push는 페이로드 규모(vCenter·호스트·VM 수)도 함께 기록 → '왜 큰지' 바로 파악.
         const b = req.body || {};
         const summary = res.locals?.ingestSummary || (req.path === '/inventory'
-          ? { vcenterId: String(b.vcenterId || '').slice(0, 128), hosts: (b.hosts || []).length, vms: (b.vms || []).length,
+          ? { vcenterId: capStr(b.vcenterId, 128), hosts: (b.hosts || []).length, vms: (b.vms || []).length,
               datastores: (b.datastores || []).length, networks: (b.networks || []).length, alarms: (b.alarms || []).length,
               gzip: (req.get('content-encoding') || '').includes('gzip') }
           : null);
@@ -253,7 +254,9 @@ const requestedAgent = (req) => strAgent(req.query?.agent) || strAgent(req.get('
  * v2.600(감사 CEN2600-10): 요청이 주장한 agent 이름은 **글자일 때만** 쓰고 64자로 자른다(v2.591 PR-1 수신 집계와 같은 상한).
  * 예전에는 `String(b.agent || '')` 라 본문 `agent:{toString:'x'}` 하나로 String() 이 던져 공유 토큰 수신이 500 이었다.
  */
-function strAgent(v) { return typeof v === 'string' ? v.trim().slice(0, 64) : ''; }
+// v2.606(감사 TIM2606-02): `.trim().slice(0, 64)` 는 SlicedString 이라 64자가 본문 원문(최대 16MB)을 붙잡은 채 수신 집계
+//   Map 키로 상주했다(감사 실측: 5MB agent 30개 → 잔존 힙 143MB). capTrim 이 잘라 평탄화한다.
+function strAgent(v) { return typeof v === 'string' ? capTrim(v, 64) : ''; }
 
 // /register-collector 의 실제 저장 키는 body.name 이다 — 바인딩에서 **항상 별도로** 대조한다.
 // ⚠ 보안(H-1, 2026-09-12): 이 값을 requestedAgent 의 OR 체인 끝에 두면, 공격자가 X-Agent-Name
@@ -891,6 +894,7 @@ function sanitizeCurUserRecords(b) {
         .map((u) => ({ name: String(u?.name || '').slice(0, 128), kind: ['active', 'disc', 'other'].includes(String(u?.kind)) ? String(u.kind) : 'other' }))
         .filter((u) => u.name),
       error: String(r.error || '').slice(0, 300), guestHost: String(r.guestHost || '').slice(0, 120),
+      truncated: r.truncated === true, // v2.606 COL2606-01: 발행기가 원문을 잘랐다(인원은 하한) — 엣지 위임 경로에서도 표지를 잃지 않게
     });
   }
   return out;
@@ -986,8 +990,9 @@ centralRouter.post('/fleet', (req, res) => {
   //   작게 묶고, 소유를 증명할 길이 없으므로 귀속도 비운다. 뺀·비운 개수는 응답에 싣는다(조용한 상한 금지).
   const verified = req.centralAuth.mode === 'agent' || edgeNameKnown(agent);
   const vcAllowed = verified ? (vc) => agentOwnsVcenter(agent, vc) : () => false;
-  const r = setEdgeFleet(agent, list, b.generatedAt || null, { verified, vcAllowed });
-  res.json({ ok: true, agent, baremetal: r.accepted, ...(r.omitted ? { omitted: r.omitted } : {}), ...(r.vcenterBlanked ? { vcenterBlanked: r.vcenterBlanked } : {}), ...(verified ? {} : { unverifiedAgent: true }) });
+  // v2.606(RECENT2606-03): 엣지가 일부를 빼고 보낸 목록이면(partial) 그 사실을 저장해 중앙이 밝힌다 — 예전에는 버렸다.
+  const r = setEdgeFleet(agent, list, b.generatedAt || null, { verified, vcAllowed, partial: b });
+  res.json({ ok: true, agent, baremetal: r.accepted, ...(r.omitted ? { omitted: r.omitted } : {}), ...(r.vcenterBlanked ? { vcenterBlanked: r.vcenterBlanked } : {}), ...(verified ? {} : { unverifiedAgent: true }), ...(r.partial ? { partial: r.partial } : {}) });
 });
 
 /**
@@ -1506,7 +1511,14 @@ centralRouter.post('/rma-poll', async (req, res) => {
     return res.status(403).json({ ok: false, reason: `이 법인의 RMA 접속 허용 IP 목록에 없는 출처(${ip})입니다 — 설정 › 원격 명령 › 접속 허용 IP 를 확인하세요.` });
   }
   const instance = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(b.instance || '')) ? String(b.instance) : 'default';
-  noteRmaHeartbeat(agent, instance, b.info || {}, { ip });
+  // v2.606(감사 RECENT2606-06): 인스턴스 수 상한으로 거절되면 **작업을 배달하지 않고 사유를 돌려준다**. 예전에는 반환값을
+  //   버려 거절된 인스턴스가 온라인 목록·스케줄 배정에는 없으면서 롱폴 작업만 받았고, 엣지는 왜인지 알 길이 없었다.
+  //   403 + reason 이면 엣지 rma/agent.js 가 그 사유를 로그에 적고 백오프한다(200 으로 즉시 돌려주면 엣지가 쉬지 않고 재폴한다).
+  const hb = noteRmaHeartbeat(agent, instance, b.info || {}, { ip });
+  if (hb && hb.refused) {
+    res.locals.ingestReject = { kind: REJECT_KIND.OTHER, reason: hb.reason || 'RMA 인스턴스 수 상한' };
+    return res.status(403).json({ ok: false, refused: true, reason: hb.reason || 'RMA 인스턴스 수 상한으로 이 인스턴스를 받지 않았습니다.', jobs: [] });
+  }
   // 점검 결과 동봉(outbox) — 이 법인의 스케줄에 있는 항목만 반영(남의 항목 id 로 상태 위조 차단).
   const sch = rmaScheduleFor(agent);
   const known = new Set(sch.tests.map((t) => t.id));

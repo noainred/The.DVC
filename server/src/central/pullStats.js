@@ -15,11 +15,12 @@
  *  · 인메모리(재시작 시 초기화). 진실의 원천이 아니라 계측기다 — 화면이 기록 시작 시각을 밝힌다.
  */
 
+import { capTrim } from '../util/capStr.js';
+
 const MAX_AGENTS = 500;
 /** 인증에 실패한 GET 은 주장한 이름 대신 이 한 칸에 센다(v2.589 — 이름 위조·LRU 밀어내기 차단). */
 export const PULL_UNAUTH_KEY = '(인증 실패)';
 const MAX_ENDPOINTS = 64;
-const t = (v) => String(v ?? '').trim();
 const ewma = (prev, sample, a = 0.3) => (prev == null ? sample : prev * (1 - a) + sample * a);
 
 const byAgent = new Map();
@@ -31,8 +32,9 @@ const startedAt = Date.now();
  * @param opts     { status, bytes, verified }
  */
 export function recordPull(agent, endpoint, { status = 0, bytes = 0, verified = false, now = Date.now() } = {}) {
-  const key = (t(agent) || '(unknown)').slice(0, 64);
-  const ep = t(endpoint).slice(0, 128);
+  // v2.606(감사 TIM2606-02): capTrim — `.slice` 는 SlicedString 으로 원문을 붙잡는다.
+  const key = capTrim(agent, 64) || '(unknown)';
+  const ep = capTrim(endpoint, 128);
   if (!ep) return;
   let a = byAgent.get(key);
   if (!a) {

@@ -180,6 +180,9 @@ export async function runHzSessionsNow(trigger = 'manual') {
     lastResult = {
       at: ts, trigger, servers: servers.length, records: records.length,
       users: total?.users ?? null, connected: total?.usersConnected ?? null,
+      // v2.606 COL2606-04: 이 주기의 수치가 하한인가(일부 세션만 읽음·상태 미확인 세션) — 추이에는 적재하지 않았다.
+      usersLowerBound: !!total?.usersLowerBound, connectedLowerBound: !!total?.connectedLowerBound,
+      serversTruncated: total?.serversTruncated ?? 0,
       serversFailed: total?.serversFailed ?? null,
       errors, mock, ms: Date.now() - started, commit,
     };

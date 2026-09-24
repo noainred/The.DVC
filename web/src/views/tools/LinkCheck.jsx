@@ -21,6 +21,7 @@ import { useLatest } from '../../hooks/useLatest.js';
 import { Loading, ErrorBox, SearchBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
+import { linkFormFromSettings, linkSettingsPayload } from './linkCheckForm.js'; // v2.606 WEB2606-10: 빈 숫자 칸 = 이전 값
 import {
   STATE_LABEL, stateTone, rowState, msText, ageText, certText, kpisOf, headerNote,
   runResultText, EVENT_LABEL, eventTone, tableFootnotes, pairNote, trailFromLatest,
@@ -87,7 +88,7 @@ export function LinkCheck() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
-    try { const d = await fetchJson('/tools/link-check'); setData(d); setForm(d.settings); setError(''); }
+    try { const d = await fetchJson('/tools/link-check'); setData(d); setForm(linkFormFromSettings(d.settings)); setError(''); }
     catch (e) { setError(e?.message || String(e)); }
     finally { setLoading(false); }
   }, []);
@@ -148,7 +149,7 @@ export function LinkCheck() {
   };
   const saveSettings = async () => {
     setBusy(true);
-    try { const r = await putJson('/tools/link-check/settings', form); setNote('설정을 저장했습니다.'); setData({ ...data, settings: r.settings, enabled: r.settings.enabled }); }
+    try { const r = await putJson('/tools/link-check/settings', linkSettingsPayload(form)); setNote('설정을 저장했습니다.'); setData({ ...data, settings: r.settings, enabled: r.settings.enabled }); setForm(linkFormFromSettings(r.settings)); }
     catch (e) { setNote(`저장 실패: ${e?.message || e}`); }
     finally { setBusy(false); }
   };
@@ -227,20 +228,20 @@ export function LinkCheck() {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12 }}>
             <label style={{ display: 'grid', gap: 2, minWidth: 0 }}>주기(분)
               <input type="number" min="1" style={{ minWidth: 0, width: 90 }}
-                value={Math.round((form.intervalMs || 0) / 60000)}
-                onChange={(e) => setForm({ ...form, intervalMs: Math.max(1, Number(e.target.value) || 1) * 60000 })} />
+                value={form.intervalMin ?? ''}
+                onChange={(e) => setForm({ ...form, intervalMin: e.target.value })} />
             </label>
             <label style={{ display: 'grid', gap: 2, minWidth: 0 }}>동시 점검 수
               <input type="number" min="1" max="32" style={{ minWidth: 0, width: 90 }}
-                value={form.concurrency || 6} onChange={(e) => setForm({ ...form, concurrency: Number(e.target.value) || 6 })} />
+                value={form.concurrency ?? ''} onChange={(e) => setForm({ ...form, concurrency: e.target.value })} />
             </label>
             <label style={{ display: 'grid', gap: 2, minWidth: 0 }}>표본 보존(일)
               <input type="number" min="7" style={{ minWidth: 0, width: 90 }}
-                value={form.sampleRetentionDays || 90} onChange={(e) => setForm({ ...form, sampleRetentionDays: Number(e.target.value) || 90 })} />
+                value={form.sampleRetentionDays ?? ''} onChange={(e) => setForm({ ...form, sampleRetentionDays: e.target.value })} />
             </label>
             <label style={{ display: 'grid', gap: 2, minWidth: 0 }}>로그 보존(일)
               <input type="number" min="3" style={{ minWidth: 0, width: 90 }}
-                value={form.eventRetentionDays || 30} onChange={(e) => setForm({ ...form, eventRetentionDays: Number(e.target.value) || 30 })} />
+                value={form.eventRetentionDays ?? ''} onChange={(e) => setForm({ ...form, eventRetentionDays: e.target.value })} />
             </label>
           </div>
           <div style={{ display: 'grid', gap: 4 }}>

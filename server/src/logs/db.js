@@ -25,7 +25,10 @@ function dbPath() {
 
 // `meta()`(수집 기간·vCenter별 건수) memo 수명. 이 호출은 풀스캔 2회라 행 수에 비례하고,
 // 로그 화면이 페이지를 넘길 때마다 반복된다(v2.503). 헤더 한 줄이 최대 이만큼 낡을 수 있다.
-const META_TTL_MS = Math.max(1_000, Math.min(300_000, Number(process.env.LOGS_META_TTL_MS) || 30_000));
+// v2.606(DB2606-01): 기본 30초가 설정 화면 상태 폴링(30초)과 같아 다음 요청이 거의 항상 miss 였다(4.5M 행이면 30초마다
+//   약 0.9초 정지). 이제 memo 는 **건수(COUNT·vCenter별 GROUP BY)** 만 들고 기본 5분(상한 30분)이며, 기간(MIN·MAX)은
+//   단독 aggregate(인덱스 끝점 조회 — v2.550.3)로 매번 새로 읽는다.
+const META_TTL_MS = Math.max(1_000, Math.min(1_800_000, Number(process.env.LOGS_META_TTL_MS) || 300_000));
 
 let impl = null;
 let ready = null;
@@ -61,7 +64,9 @@ function initSqlite() {
     // (metrics·idrac·pdu·dirusage 는 v2.453 chunkedPrune 를 쓰는데 logs 만 빠져 있었다). rowid 서브쿼리 + idx_events_ts_only.
     const pruneChunkStmt = db.prepare('DELETE FROM events WHERE rowid IN (SELECT rowid FROM events WHERE ts < ? LIMIT ?)');
     let pruneBg = null;                          // 진행 중인 백그라운드 청크 정리(단일 비행)
-    const metaStmt = db.prepare('SELECT COUNT(*) n, MIN(ts) mn, MAX(ts) mx FROM events');
+    // v2.606(DB2606-01): MIN·MAX 를 한 쿼리에 두면 aggregate 2개라 인덱스를 통째로 훑는다(v2.550.3) — 단독으로 나눈다.
+    const minTsStmt = db.prepare('SELECT MIN(ts) mn FROM events');
+    const maxTsStmt = db.prepare('SELECT MAX(ts) mx FROM events');
     const rowCountStmt = db.prepare('SELECT COUNT(*) n FROM events');
     let metaCache = null;                       // { at, v } — 아래 meta() 주석 참조(v2.503)
     const vcStmt = db.prepare('SELECT vcenterId, COUNT(*) n, MAX(ts) mx FROM events GROUP BY vcenterId');
@@ -113,12 +118,15 @@ function initSqlite() {
        */
       meta: () => {
         const now = Date.now();
-        if (metaCache && now - metaCache.at < META_TTL_MS) return metaCache.v;
-        const r = metaStmt.get();
-        const vcs = vcStmt.all().map((x) => ({ vcenterId: x.vcenterId, count: Number(x.n), lastTs: Number(x.mx) }));
-        const v = { count: Number(r?.n || 0), firstTs: r?.mn || null, lastTs: r?.mx || null, vcenters: vcs };
-        metaCache = { at: now, v };
-        return v;
+        // 기간(첫·마지막 시각)은 단독 MIN/MAX — 인덱스 끝점 조회라 매번 읽어도 0.01ms 수준이다.
+        const firstTs = minTsStmt.get()?.mn ?? null;
+        const lastTs = maxTsStmt.get()?.mx ?? null;
+        if (!metaCache || now - metaCache.at >= META_TTL_MS) {
+          const n = Number(rowCountStmt.get()?.n || 0);
+          const vcs = vcStmt.all().map((x) => ({ vcenterId: x.vcenterId, count: Number(x.n), lastTs: Number(x.mx) }));
+          metaCache = { at: now, n, vcs };
+        }
+        return { count: metaCache.n, firstTs, lastTs, vcenters: metaCache.vcs, countsAt: metaCache.at };
       },
       /**
        * 호출부(poller)는 반환값을 **숫자로** 쓴다(동기 계약). 그래서 첫 청크만 동기로 지우고(≤ PRUNE_CHUNK_ROWS — 한 청크 수십 ms)

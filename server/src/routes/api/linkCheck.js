@@ -32,6 +32,7 @@ import { SETTING_KINDS, SETTING_KIND_KEYS, DEPTH_LABEL, GROUP_ORDER, SETTINGS_PA
 import { configFindings, resultFindings, mergeFindings, hostCountsOf, HOST_FORM, CERT_WARN_DAYS } from '../../linkcheck/remedy.js';
 import { ipBlockReason } from '../../collector/registry.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { pageArgs } from '../../util/pageArgs.js';
 
 const adminOnly = requireRole('admin');
 // v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
@@ -153,7 +154,8 @@ api.get('/tools/link-check/events', adminOnly, fullScopeOnly, async (req, res) =
     hours: Math.min(24 * 90, Math.max(1, num(req.query.hours, 24 * 7))),
     failKind: t(req.query.failKind),
     event: t(req.query.event),
-    limit: Math.min(1_000, Math.max(1, num(req.query.limit, 300))),
+    // v2.606(감사 DB2606-06): pageArgs 로 정수화 — limit=1.5 가 'LIMIT ?' 에 2.5 로 바인딩돼 datatype mismatch 였다.
+    limit: pageArgs(req.query, { def: 300, max: 1_000 }).limit,
   });
   res.json({ ok: true, ...out, at: Date.now() });
 });

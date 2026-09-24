@@ -1,7 +1,7 @@
 // 오프라인 패키지·에이전트 배포·LLM/Ollama·릴리스 노트 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { saveNote, deleteNote } from '../../release-notes.js';
-import { loadLlmConfig, llmUrlIssue, saveLlmConfig } from '../../llm/config.js';
+import { loadLlmConfig, llmUrlIssue, saveLlmConfig, normTimeoutMs } from '../../llm/config.js';
 import { ollamaTest } from '../../llm/ollama.js';
 import { installOllama } from '../../llm/ollamaDeploy.js';
 import { deployAgent, testTarget, installerInfo, checkAgentStatus, envPairs, envPairsIssue } from '../../agent/deploy.js';
@@ -508,7 +508,9 @@ adminRouter.put('/llm-config', adminOnly, (req, res) => {
 });
 adminRouter.post('/llm-test', adminOnly, async (req, res) => {
   // v2.590 D6: 본문 url 로 임의 주소를 찌르지 못하게 같은 검증을 건다(저장값을 쓰든 본문을 쓰든 동일).
-  const cfg = { ...loadLlmConfig(), ...(req.body || {}) };
+  const saved = loadLlmConfig();
+  const cfg = { ...saved, ...(req.body || {}) };
+  cfg.timeoutMs = normTimeoutMs(cfg.timeoutMs) ?? saved.timeoutMs;   // v2.606 TIM2606-01: 저장 전 테스트도 같은 정규화
   const why = llmUrlIssue(cfg.url);
   if (why) return res.status(400).json({ ok: false, reason: why });
   res.json(await ollamaTest(cfg));

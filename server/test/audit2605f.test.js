@@ -229,6 +229,8 @@ test('TIM2605-04: 포탈 DB 샘플러 주기·스토리지 REST 시한·ping 시
 const LB = '하한(Math.max/min)은 있음 — 2^31 초과만 남은 잔여 후보(다음 점검)';
 const RAW = '잔여 후보 — TIM2605-04 배정 밖(다음 점검에서 clampIntervalMs/reqTimeoutMs 로)';
 const FORECAST = '예측 최소 구간(비교용 기간 — 타이머 인자가 아니다)';
+// v2.606(TIM2606-01·03·04·LEFT2606-04): LLM_TIMEOUT_MS·SSH_READY_TIMEOUT_MS(sshGateway)·SANSW_HTTP/CLI_TIMEOUT_MS·
+//   STORAGE_CLI_TIMEOUT_MS·DIRUSAGE_TICK_MS·GUESTDISK_TIMEOUT_MS 를 고치고 목록에서 뺐다(아래 '되돌아가면 안 된다' 에 추가).
 const ENV_MS_OK = {
   'agent/fleetPush.js:AGENT_FLEET_WITHHOLD_MAX_MS': LB,
   'agent/gpuGuestPush.js:AGENT_GPU_GUEST_WITHHOLD_MAX_MS': LB,
@@ -261,10 +263,8 @@ const ENV_MS_OK = {
   'collector/upgradePush.js:EDGE_PUSH_TIMEOUT_MS': RAW,
   'curuser/db.js:CURUSER_COUNT_CACHE_MS': LB,
   'curuser/poller.js:CURUSER_FIRST_DELAY_MS': RAW,
-  'dirusage/scheduler.js:DIRUSAGE_TICK_MS': LB,
   'dirusage/scheduler.js:DIRUSAGE_JOB_TIMEOUT_MS': LB,
   'gpu/store.js:GUEST_GPU_TTL_MS': RAW,
-  'guestdisk/service.js:GUESTDISK_TIMEOUT_MS': RAW,
   'horizon/sessionPoller.js:HZSESS_FIRST_DELAY_MS': RAW,
   'idrac/redfish.js:BMUSAGE_REPORT_TTL_MS': LB,
   'idrac/redfish.js:BMUSAGE_SENSOR_TTL_MS': LB,
@@ -279,7 +279,6 @@ const ENV_MS_OK = {
   'insights/serialLookup.js:SERIAL_INDEX_CACHE_MS': LB,
   'ipam/scanRunner.js:IPAM_SCAN_DEADLINE_MS': LB,
   'linkcheck/db.js:LINKCHECK_COUNT_CACHE_MS': LB,
-  'llm/config.js:LLM_TIMEOUT_MS': RAW,
   'logs/db.js:LOGS_META_TTL_MS': LB,
   'partfault/hooks.js:PARTFAULT_HOOK_DEBOUNCE_MS': LB,
   'partfault/scan.js:PARTFAULT_INV_MAX_AGE_MS': LB,
@@ -290,15 +289,12 @@ const ENV_MS_OK = {
   'portalcheck/tokenProbe.js:PORTALCHECK_TIMEOUT_MS': LB,
   'portalcheck/tokenProbe.js:PORTALCHECK_BUDGET_MS': LB,
   'proxy/expiry.js:REMOTE_MAPPING_TTL_MS': RAW,
-  'proxy/sshGateway.js:SSH_READY_TIMEOUT_MS': RAW,
   'relaytopo/ops.js:RELAYTOPO_SSH_TIMEOUT_MS': LB,
   'rma/jobs.js:RMA_ACK_GRACE_MS': RAW,
   'rma/jobs.js:RMA_HEARTBEAT_STALE_MS': RAW,
   'rma/jobs.js:RMA_HEARTBEAT_PURGE_MS': LB,
   'routes/api/perfClient.js:PERF_CLIENT_COOLDOWN_MS': LB,
   'sanswitch/collectRequests.js:SANSW_DEVICE_TIMEOUT_MS': LB,
-  'sanswitch/collectors/fosRest.js:SANSW_HTTP_TIMEOUT_MS': RAW,
-  'sanswitch/collectors/fosSsh.js:SANSW_CLI_TIMEOUT_MS': RAW,
   'sanswitch/collectors/fosSsh.js:SANSW_CAPS_TTL_MS': LB,
   'sanswitch/perfPoller.js:SANSW_PERF_DEVICE_TIMEOUT_MS': LB,
   'sanswitch/perfPush.js:SANSW_PERF_PUSH_MS': LB,
@@ -312,7 +308,6 @@ const ENV_MS_OK = {
   'security/loginRateLimit.js:OTP_LOCKOUT_MS': RAW,
   'security/loginRateLimit.js:OTP_FAIL_WINDOW_MS': LB,
   'storage/collectRequests.js:STORAGE_DEVICE_TIMEOUT_MS': LB,
-  'storage/collectors/cliSsh.js:STORAGE_CLI_TIMEOUT_MS': RAW,
   'storage/collectors/cliSsh.js:STORAGE_CLI_SESSION_BUDGET_MS': LB,
   'storage/poller.js:STORAGE_DEVICE_TIMEOUT_MS': LB,
   'storage/poller.js:STORAGE_AREAS_TIMEOUT_MS': LB,
@@ -346,7 +341,11 @@ test('TIM2605-04 스윕: 시한·주기 env 의 Number(env)||기본값 형태를
   // 이번에 고친 것은 되돌아가면 안 된다
   for (const k of ['insights/portalDb.js:PORTAL_DB_SAMPLE_MS', 'proxy/sshExec.js:SSH_EXEC_TIMEOUT_MS', 'proxy/sshExec.js:SSH_READY_TIMEOUT_MS',
     'storage/collectors/restCommon.js:STORAGE_HTTP_TIMEOUT_MS', 'bmstor/collect.js:BMSTOR_SSH_TIMEOUT_MS', 'central/idracScanPush.js:IDRAC_PUSH_TIMEOUT_MS',
-    'health/network.js:HEALTH_PROBE_TIMEOUT_MS']) {
+    'health/network.js:HEALTH_PROBE_TIMEOUT_MS',
+    // v2.606
+    'llm/config.js:LLM_TIMEOUT_MS', 'proxy/sshGateway.js:SSH_READY_TIMEOUT_MS', 'sanswitch/collectors/fosRest.js:SANSW_HTTP_TIMEOUT_MS',
+    'sanswitch/collectors/fosSsh.js:SANSW_CLI_TIMEOUT_MS', 'storage/collectors/cliSsh.js:STORAGE_CLI_TIMEOUT_MS',
+    'dirusage/scheduler.js:DIRUSAGE_TICK_MS', 'guestdisk/service.js:GUESTDISK_TIMEOUT_MS']) {
     assert.ok(!found.has(k), `${k} 가 되돌아갔다`);
     assert.ok(!ENV_MS_OK[k], k);
   }

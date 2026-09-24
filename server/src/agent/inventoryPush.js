@@ -16,6 +16,7 @@ import { reqTimeoutMs } from './envTimeout.js';
 import { store } from '../store.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { isMockVcenter } from '../mock/generator.js';
+import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; // v2.606 EDGE2606-03
 
 const gzipAsync = promisify(zlib.gzip);
 // 인벤토리 push 본문 gzip 압축(기본 on). 인벤토리 JSON은 반복 필드가 많아 ~5~10× 줄어 WAN
@@ -62,7 +63,8 @@ async function pushVcenter(snap, vc) {
     timeoutMs: reqTimeoutMs(process.env.AGENT_PUSH_TIMEOUT_MS, 120_000), retries: 1,
   });
   if (!res.ok) throw new Error(`inventory -> ${res.status}`);
-  return { bytes: json.length, gzBytes: body.length };
+  // v2.606 EDGE2606-03: 200 이어도 중앙이 원소를 버리거나(rejected·dropped) 직전 목록을 유지(held)할 수 있다.
+  return { bytes: json.length, gzBytes: body.length, drop: dropSummaryOf(await readCentralReply(res)) };
 }
 
 /**
@@ -109,7 +111,7 @@ export async function pushInventoryNow() {
     return { ok: false, reason: '수집된 vCenter 없음' };
   }
   running = true;
-  let sent = 0; let bytes = 0; let gzBytes = 0; let skippedMock = 0; const errors = []; const withheld = []; const holdExpired = [];
+  let sent = 0; let bytes = 0; let gzBytes = 0; let skippedMock = 0; const errors = []; const withheld = []; const holdExpired = []; const centralDropped = {};
   const now = Date.now();
   // 스냅샷에서 사라진 vCenter 의 보류 기록은 버린다(등록 삭제 뒤 다시 추가되면 새로 센다).
   const liveIds = new Set(snap.vcenters.map((v) => v?.id));
@@ -135,15 +137,19 @@ export async function pushInventoryNow() {
       const wd = withholdDecision(snap, vc, now);
       if (wd.withhold) { withheld.push(vc.id); continue; }
       if (wd.expired) holdExpired.push(vc.id);
-      try { const r = await pushVcenter(snap, vc); sent++; bytes += r.bytes || 0; gzBytes += r.gzBytes || 0; }
+      try {
+        const r = await pushVcenter(snap, vc); sent++; bytes += r.bytes || 0; gzBytes += r.gzBytes || 0;
+        if (r.drop) { centralDropped[vc.id] = r.drop; warnDrop(`inv-push ${String(vc.id).slice(0, 64)}`, r.drop); }
+      }
       catch (e) { errors.push(`${vc.id}: ${e.message}`); console.warn(`[inv-push] ${vc.id} 실패: ${e.message}`); }
     }
   } finally { running = false; }
   if (withheld.length) console.warn(`[inv-push] 인벤토리를 읽지 못한 vCenter ${withheld.length}개는 빈 목록으로 중앙을 덮지 않도록 보내지 않았습니다: ${withheld.slice(0, 10).join(', ')}`);
   if (holdExpired.length) console.warn(`[inv-push] 인벤토리를 ${Math.round(WITHHOLD_MAX_MS / 3_600_000)}시간 넘게 읽지 못한 vCenter ${holdExpired.length}개는 빈 목록을 보냈습니다(중앙이 옛 목록을 계속 세지 않게): ${holdExpired.slice(0, 10).join(', ')}`);
   const withheldSince = Object.fromEntries(withheld.map((id) => [id, withholdSince.get(id) || null]));
-  last = { at: Date.now(), sent, errors, bytes, gzBytes, skippedMock, withheld, withheldSince, holdExpired, withholdMaxMs: WITHHOLD_MAX_MS, gzip: PUSH_GZIP };
-  return { ok: errors.length === 0, sent, errors, bytes, gzBytes, skippedMock, withheld, withheldSince, holdExpired };
+  const dropPart = Object.keys(centralDropped).length ? { centralDropped } : {};
+  last = { at: Date.now(), sent, errors, bytes, gzBytes, skippedMock, withheld, withheldSince, holdExpired, withholdMaxMs: WITHHOLD_MAX_MS, gzip: PUSH_GZIP, ...dropPart };
+  return { ok: errors.length === 0, sent, errors, bytes, gzBytes, skippedMock, withheld, withheldSince, holdExpired, ...dropPart };
 }
 
 export function inventoryPushStatus() { return { enabled: !!(config.agent.pushInventory && config.agent.centralUrl), centralUrl: config.agent.centralUrl, intervalMs: config.agent.inventoryIntervalMs, last }; }

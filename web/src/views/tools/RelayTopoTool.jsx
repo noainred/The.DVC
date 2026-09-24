@@ -4,6 +4,7 @@ import { fetchJson, postJson, putJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { buildGraph, frame3d, COLORS } from './relayTopoLayout.js';
+import { topologyPayload, servicesDroppedText } from './relayTopoForm.js'; // v2.606 WEB2606-10: 빈 포트 칸 · 버린 서비스 행
 
 /**
  * 중계 토폴로지(HAProxy 구성) 도구(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 접속이 필요한 서비스(ssh/vcsa/portal 등)를
@@ -104,7 +105,7 @@ export default function RelayTopoTool() {
   const setMainSsh = (k, v) => setForm((p) => ({ ...p, main: { ...p.main, ssh: { ...(p.main.ssh || EMPTY_SSH), [k]: v } } }));
   const setSvc = (i, k, v) => setForm((p) => ({ ...p, services: p.services.map((s, j) => (j === i ? { ...s, [k]: v } : s)) }));
   const run = async (label, fn) => { setBusy(true); setMsg(null); try { const r = await fn(); if (r && r.ok === false && r.reason) setMsg(`${label} 실패: ${r.reason}`); return r; } catch (e) { setMsg(`${label} 실패: ${e.message}`); return null; } finally { setBusy(false); } };
-  const save = () => run('저장', async () => { const r = await putJson('/tools/relaytopo', form); if (r.ok) { setForm(r.topology); setMsg(`저장되었습니다 — 사이트 ${r.topology.sites.length} · 서비스 ${r.topology.services.length} · 점검 ${r.issues.length}건`); await load(); } return r; });
+  const save = () => run('저장', async () => { const r = await putJson('/tools/relaytopo', topologyPayload(form)); if (r.ok) { setForm(r.topology); const dropTxt = servicesDroppedText(r); setMsg(`저장되었습니다 — 사이트 ${r.topology.sites.length} · 서비스 ${r.topology.services.length} · 점검 ${r.issues.length}건${dropTxt ? ` · ⚠ ${dropTxt}` : ''}`); await load(); } return r; });
   const importPreview = () => run('가져오기 미리보기', async () => { const r = await postJson('/tools/relaytopo/import', { text: importText, replace: importReplace }); if (r.ok) setPreview(r); return r; });
   const importApply = () => run('가져오기 적용', async () => { const r = await postJson('/tools/relaytopo/import', { text: importText, replace: importReplace, apply: true }); if (r.ok) { setForm(r.topology); setPreview(null); setImportText(''); setMsg(`가져오기 완료 — 사이트 ${r.parsedSites}개 인식(건너뜀 ${r.skipped.length}). 저장됨.`); await load(); } return r; });
   const onFile = (e) => { const f = e.target.files?.[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => setImportText(String(rd.result || '')); rd.readAsText(f); e.target.value = ''; };
@@ -176,9 +177,9 @@ export default function RelayTopoTool() {
               <label>이름<input className="input" value={form.main.name || ''} onChange={(e) => setMain('name', e.target.value)} /></label>
               <label>private IP<input className="input" value={form.main.privateIp || ''} onChange={(e) => setMain('privateIp', e.target.value)} placeholder="192.168.20.143" /></label>
               <label>public IP<input className="input" value={form.main.publicIp || ''} onChange={(e) => setMain('publicIp', e.target.value)} placeholder="10.94.40.217" /></label>
-              <label>포탈 포트<input className="input" type="number" value={form.main.portalPort || 4000} onChange={(e) => setMain('portalPort', Number(e.target.value))} /></label>
+              <label>포탈 포트<input className="input" type="number" value={form.main.portalPort ?? ''} onChange={(e) => setMain('portalPort', e.target.value)} /></label>
               <label>SSH ID<input className="input" value={form.main.ssh?.username || ''} onChange={(e) => setMainSsh('username', e.target.value)} placeholder="root" /></label>
-              <label>SSH 포트<input className="input" type="number" value={form.main.ssh?.port || 22} onChange={(e) => setMainSsh('port', Number(e.target.value))} /></label>
+              <label>SSH 포트<input className="input" type="number" value={form.main.ssh?.port ?? ''} onChange={(e) => setMainSsh('port', e.target.value)} /></label>
               <label>SSH 비밀번호 {form.main.ssh?.hasPassword ? '(저장됨 · 비우면 유지)' : ''}<input className="input" type="password" value={form.main.ssh?.password || ''} onChange={(e) => setMainSsh('password', e.target.value)} autoComplete="new-password" /></label>
             </div>
             <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>HQ 서비스(:4001)의 백엔드는 public IP 우선, 없으면 private IP:포탈 포트입니다. Main SSH 는 선택(가져오기 시 중앙 자신의 상태 확인용).</div>
@@ -187,7 +188,7 @@ export default function RelayTopoTool() {
           <div className="card" style={{ marginBottom: 12 }}>
             <div className="flex gap wrap" style={{ alignItems: 'center' }}>
               <b>서비스(중계 엣지 HAProxy listen 포트 → 백엔드)</b><span style={{ flex: 1 }} />
-              <button className="tab" onClick={() => setForm((p) => ({ ...p, services: [...p.services, { key: '', label: '', listenPort: 0, target: 'irs', targetPort: 0, mode: 'tcp', enabled: true }] }))}>+ 서비스 추가</button>
+              <button className="tab" onClick={() => setForm((p) => ({ ...p, services: [...p.services, { key: '', label: '', listenPort: '', target: 'irs', targetPort: '', mode: 'tcp', enabled: true }] }))}>+ 서비스 추가</button>
               <button className="tab" onClick={() => setForm((p) => ({ ...p, services: data.defaultServices.map((s) => ({ ...s })) }))}>기본값 복원</button>
             </div>
             <STable minWidth={900} style={{ marginTop: 6, fontSize: 12 }}>
@@ -197,9 +198,9 @@ export default function RelayTopoTool() {
                   <td><input type="checkbox" checked={s.enabled !== false} onChange={(e) => setSvc(i, 'enabled', e.target.checked)} /></td>
                   <td><input className="input" style={{ minWidth: 90, width: 100 }} value={s.key} onChange={(e) => setSvc(i, 'key', e.target.value)} placeholder="portal" /></td>
                   <td><input className="input" style={{ minWidth: 100, width: 130 }} value={s.label || ''} onChange={(e) => setSvc(i, 'label', e.target.value)} /></td>
-                  <td><input className="input" type="number" style={{ minWidth: 80, width: 90 }} value={s.listenPort || ''} onChange={(e) => setSvc(i, 'listenPort', Number(e.target.value))} /></td>
+                  <td><input className="input" type="number" style={{ minWidth: 80, width: 90 }} value={s.listenPort ?? ''} onChange={(e) => setSvc(i, 'listenPort', e.target.value)} /></td>
                   <td><select className="input" style={{ minWidth: 150 }} value={s.target} onChange={(e) => setSvc(i, 'target', e.target.value)}>{Object.entries(data.targets).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></td>
-                  <td><input className="input" type="number" style={{ minWidth: 80, width: 90 }} value={s.targetPort || ''} onChange={(e) => setSvc(i, 'targetPort', Number(e.target.value))} /></td>
+                  <td><input className="input" type="number" style={{ minWidth: 80, width: 90 }} value={s.targetPort ?? ''} onChange={(e) => setSvc(i, 'targetPort', e.target.value)} /></td>
                   <td><select className="input" style={{ minWidth: 70 }} value={s.mode} onChange={(e) => setSvc(i, 'mode', e.target.value)}><option value="tcp">tcp</option><option value="http">http</option></select></td>
                   <td><button className="tab" onClick={() => setForm((p) => ({ ...p, services: p.services.filter((_, j) => j !== i) }))}>삭제</button></td>
                 </tr>))}</tbody>
@@ -420,7 +421,7 @@ function NodeFields({ title, node, onChange, hint }) {
         <label>public IP<input className="input" style={{ minWidth: 0, width: '100%' }} value={node.publicIp || ''} onChange={(e) => set('publicIp', e.target.value)} /></label>
         <label>vCenter IP<input className="input" style={{ minWidth: 0, width: '100%' }} value={node.vcenterIp || ''} onChange={(e) => set('vcenterIp', e.target.value)} /></label>
         <label>SSH ID<input className="input" style={{ minWidth: 0, width: '100%' }} value={ssh.username || ''} onChange={(e) => setSsh('username', e.target.value)} placeholder="root" autoComplete="off" /></label>
-        <label>SSH 포트<input className="input" type="number" style={{ minWidth: 0, width: '100%' }} value={ssh.port || 22} onChange={(e) => setSsh('port', Number(e.target.value))} /></label>
+        <label>SSH 포트<input className="input" type="number" style={{ minWidth: 0, width: '100%' }} value={ssh.port ?? ''} onChange={(e) => setSsh('port', e.target.value)} /></label>
         <label>비밀번호 {ssh.hasPassword ? <span className="badge green">저장됨</span> : ''}<input className="input" type="password" style={{ minWidth: 0, width: '100%' }} value={ssh.password || ''} onChange={(e) => setSsh('password', e.target.value)} placeholder={ssh.hasPassword ? '비우면 기존 유지' : ''} autoComplete="new-password" />
           {ssh.hasPassword && <label style={{ fontSize: 11 }}><input type="checkbox" checked={!!ssh.clearPassword} onChange={(e) => setSsh('clearPassword', e.target.checked)} /> 저장된 비밀번호 삭제</label>}</label>
       </div>

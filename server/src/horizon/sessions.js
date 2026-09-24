@@ -205,8 +205,14 @@ export function combineServers(results) {
   const union = new Map();       // userKey -> { name, connected, sessions, servers:[] }
   let sessions = 0; let connected = 0; let disconnected = 0; let pending = 0;
   let stateBlind = false;
+  // v2.606 COL2606-04: 페이지 상한(maxPages)에 걸려 **일부 세션만 읽은** 서버 수. 있으면 세션·접속·사용자 합계는 하한이다.
+  let serversTruncated = 0;
+  // v2.606 WEB2606-09: 상태 필드를 못 읽은 세션 수(서버 단위로는 상태 키가 있어도 세션마다 빠질 수 있다).
+  let stateUnknown = 0;
   for (const r of ok) {
     sessions += Number(r.sessions) || 0;
+    if (r.truncated) serversTruncated++;
+    if (r.connected != null && r.stateUnknown != null && Number.isFinite(Number(r.stateUnknown))) stateUnknown += Math.max(0, Number(r.stateUnknown));
     if (r.connected == null) stateBlind = true;
     else { connected += Number(r.connected) || 0; disconnected += Number(r.disconnected) || 0; pending += Number(r.pending) || 0; }
     for (const u of r.names || []) {
@@ -237,9 +243,14 @@ export function combineServers(results) {
       stateBlind: false,
       users: null, usersConnected: null, usersByServerSum: null,
       usersLowerBound: false, usersOmitted: 0,
+      truncated: false, serversTruncated: 0, sessionsLowerBound: false,
+      stateUnknown: null, connectedLowerBound: false,
       names: [],
     };
   }
+  const truncated = serversTruncated > 0;
+  // 접속 중 수는 ① 일부 세션만 읽었거나 ② 상태를 못 읽은 세션이 있으면 하한이다(0 이상 더 있을 수 있다).
+  const connectedLowerBound = !stateBlind && (truncated || stateUnknown > 0);
   return {
     servers: list.length,
     serversOk: ok.length,
@@ -253,8 +264,12 @@ export function combineServers(results) {
     users: lowerBound ? Math.max(names.length, maxServerUsers) : names.length,
     usersConnected: stateBlind ? null : (lowerBound ? Math.max(names.filter((u) => u.connected > 0).length, maxServerConnected) : names.filter((u) => u.connected > 0).length),
     usersByServerSum: ok.reduce((a, r) => a + (Number(r.users) || 0), 0),
-    usersLowerBound: lowerBound,
+    // 이름 목록 절단(usersOmitted)이든 세션 절단(truncated)이든 고유 사용자 수는 하한이다.
+    usersLowerBound: lowerBound || truncated,
     usersOmitted,
+    truncated, serversTruncated, sessionsLowerBound: truncated,
+    stateUnknown: stateBlind ? null : stateUnknown,
+    connectedLowerBound,
     names,
   };
 }
@@ -267,9 +282,16 @@ export function seriesRow(agg) {
     const x = Number(v);
     return Number.isFinite(x) ? x : null;
   };
+  // v2.606 COL2606-04·WEB2606-09: **부분 합을 전체로 적재하지 않는다**(거짓 하락). 일부 세션만 읽은 주기(truncated)는
+  //   수치 전부를, 상태를 못 읽은 세션이 있는 주기는 접속 관련 수치를 NULL 로 둔다 — 차트는 선을 끊고, 하한 값은
+  //   최신 화면(표·KPI)이 '최소 N' 으로 말한다. 서버 레코드(r.truncated·r.stateUnknown)와 합계(combineServers) 둘 다 받는다.
+  const partial = !!agg.truncated;
+  const stateGap = partial || !!agg.connectedLowerBound || (agg.connected != null && Number(agg.stateUnknown) > 0);
+  const whole = (v) => (partial ? null : n(v));
+  const conn = (v) => (stateGap ? null : n(v));
   return {
-    users: n(agg.users), usersConnected: n(agg.usersConnected),
-    sessions: n(agg.sessions), connected: n(agg.connected),
-    disconnected: n(agg.disconnected), pending: n(agg.pending),
+    users: whole(agg.users), usersConnected: conn(agg.usersConnected),
+    sessions: whole(agg.sessions), connected: conn(agg.connected),
+    disconnected: conn(agg.disconnected), pending: conn(agg.pending),
   };
 }

@@ -68,7 +68,8 @@ api.put('/tools/relaytopo', adminOnly, (req, res) => {
   try {
     const saved = saveTopology(req.body || {});
     logAudit({ user: req.user?.username, action: '중계 토폴로지 저장', detail: `sites=${saved.sites.length} services=${saved.services.map((s) => `${s.key}:${s.listenPort}`).join(',')}`, ip: req.ip });
-    res.json({ ok: true, topology: saved, issues: validateTopology(saved, loadCollectors()) });
+    // v2.606 WEB2606-10: 버린 서비스 행(포트 비움·잘못된 key·중복 포트)과 이월하지 않은 비밀을 응답에 싣는다(조용한 축소 금지).
+    res.json({ ok: true, topology: saved, servicesDropped: saved.servicesDropped || [], servicesReset: !!saved.servicesReset, secretsDropped: saved.secretsDropped || [], issues: validateTopology(saved, loadCollectors()) });
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
@@ -86,7 +87,7 @@ api.post('/tools/relaytopo/import', adminOnly, (req, res) => {
     if (!apply) return res.json({ ok: true, preview, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), issues: validateTopology(preview, loadCollectors()) });
     const saved = saveTopology(merged);
     logAudit({ user: req.user?.username, action: '중계 토폴로지 가져오기', detail: `format=${format} sites=${parsed.sites.length} replace=${!!replace} skipped=${parsed.skipped.length}`, ip: req.ip });
-    res.json({ ok: true, topology: saved, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), issues: validateTopology(saved, loadCollectors()) });
+    res.json({ ok: true, topology: saved, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), servicesDropped: saved.servicesDropped || [], servicesReset: !!saved.servicesReset, secretsDropped: saved.secretsDropped || [], issues: validateTopology(saved, loadCollectors()) });
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 

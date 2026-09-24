@@ -15,7 +15,7 @@
  * (auth/toolAccess.js — Optimization 이 이 리포트의 주인).
  */
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
-import { mergeScopedMap, filterScopedMap } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01
+import { mergeScopedMap, filterScopedMap, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.606 AUTHZ2606-05
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
@@ -170,6 +170,8 @@ api.get('/tools/vmseries/status', requirePerm('tools'), (req, res) => {
 });
 
 api.post('/tools/vmseries/run', requireRole('admin'), async (req, res) => {
+  // v2.606 AUTHZ2606-05: 전 법인 vCenter 에 접속하고 lastResult 전체(범위 밖 오류 원문)를 돌려준다 — 형제 guest-disk/run 과 같은 규약.
+  if (denyScopedRun(req, res, 'VM 실시간 스파이크 수동 수집')) return;
   logAudit({ user: req.user?.username, action: 'VM 실시간 스파이크 수동 수집', ip: req.ip || '' });
   res.json(await runVmSeriesNow('manual'));
 });
@@ -214,6 +216,12 @@ api.get('/tools/vmseries/top', requirePerm('tools'), (req, res) => memoJson(req,
 api.delete('/tools/vmseries/data', requireRole('admin'), async (req, res) => {
   if (req.query.vcenterId === undefined) return res.status(400).json({ ok: false, reason: 'vcenterId 를 명시하세요.' });
   const vcId = String(req.query.vcenterId);
+  // v2.606 AUTHZ2606-04: 형제 DELETE /tools/waste/settings/data(v2.605)와 같은 가드 — 범위 제한 admin 은 범위 밖 vCenter 의
+  //   스파이크 DB 를 지울 수 없다(되돌릴 수 없는 삭제).
+  const allowedDel = scopedVcenterIds(req.user, store.get());
+  if (allowedDel && !allowedDel.has(vcId)) {
+    return res.status(403).json({ ok: false, requiredOwner: true, reason: '범위 밖 vCenter 의 데이터는 전체 범위 계정만 지울 수 있습니다.' });
+  }
   const stats = await vmSeriesDbStats(vcId);
   const removed = dropVmSeriesDb(vcId);
   logAudit({ user: req.user?.username, action: 'VM 실시간 스파이크 데이터 삭제', target: vcId, detail: `파일 ${removed}개 · 행 ${stats?.spikeRows ?? '?'}`, ip: req.ip || '' });

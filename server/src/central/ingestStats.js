@@ -5,6 +5,8 @@
  * 트래픽이 비정상적으로 높을 때 '무엇을 보내는지'를 화면에서 바로 확인하기 위함. 인메모리(재시작 시 초기화).
  */
 
+import { capStr, capTrim } from '../util/capStr.js';
+
 const byAgent = new Map(); // agent -> { agent, firstAt, lastAt, pushes, wireBytes, byEndpoint: Map, last }
 const MAX_AGENTS = 500;
 
@@ -19,8 +21,9 @@ function ewma(prev, sample, alpha = 0.3) { return prev == null ? sample : prev *
  */
 export function recordIngest(agent, endpoint, { wireBytes = 0, summary = null, verified = false } = {}) {
   // v2.591(PR-1): 키 길이 상한 — 호출부도 자르지만 저장소가 스스로 지킨다(본문 문자열이 Map 키가 되던 결함).
-  const key = String(agent || '(unknown)').slice(0, 64) || '(unknown)';
-  const ep = String(endpoint || '').slice(0, 200);
+  // v2.606(감사 TIM2606-02): `.slice` 만으로는 SlicedString 이 원문(최대 16MB 본문)을 붙잡는다 — capStr 가 평탄화한다.
+  const key = capTrim(agent, 64) || '(unknown)';
+  const ep = capStr(endpoint, 200);
   const now = Date.now();
   let a = byAgent.get(key);
   if (!a) {

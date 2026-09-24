@@ -21,5 +21,10 @@ export function manualPollMessage(r) {
     return { ok: false, tone: 'amber', text: '긴급중단 중이라 수집하지 않았습니다 — 설정 › 긴급중단에서 해제한 뒤 다시 누르세요.' };
   }
   const auth = lr.authStopped ? ` · 인증 실패 정지 ${lr.authStopped}` : '';
-  return { ok: !lr.failed, tone: lr.failed ? 'red' : 'green', text: `수동 1회 수집 — 성공 ${lr.ok ?? 0} · 실패 ${lr.failed ?? 0}${auth}` };
+  // v2.606(감사 WEB2606-08): 다중 섀시 서버의 일부 섀시 Power 조회가 실패하면 서버는 그 전력을 **부분 합이라 적재하지
+  // 않는다**(v2.602 powerNotStored). '성공' 으로만 세면 그 서버의 전력 이력이 비는 이유를 알 수 없다 — 개수와 함께 amber.
+  const partial = Number(lr.powerPartial) > 0 ? Number(lr.powerPartial) : 0;
+  const part = partial ? ` · 부분 전력(적재 안 함) ${partial}` : '';
+  const tone = lr.failed ? 'red' : (partial ? 'amber' : 'green');
+  return { ok: !lr.failed, tone, text: `수동 1회 수집 — 성공 ${lr.ok ?? 0} · 실패 ${lr.failed ?? 0}${part}${auth}` };
 }

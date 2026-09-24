@@ -13,7 +13,7 @@ import { store } from '../store.js';
 import { loadGpuGuestSettings, resolveVmCreds, resolveVmIp, resolveCollectMethod } from './settings.js';
 import { setGuestGpu, pruneGuestGpu, guestGpuCounts } from './store.js';
 import { collectVmGpu, VimSoapClient } from './guestops.js';
-import { collectVmGpuSsh, guestIps, gpuAuthGuard, gpuStopView, isGpuAuthError } from './sshCollect.js';
+import { collectVmGpuSsh, guestIps, gpuAuthGuard, gpuStopView, isGpuAuthError, pinnedIpCheck } from './sshCollect.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
@@ -74,7 +74,27 @@ function pollMock(snap, vcId) {
 const hashStr = (s) => { let h = 0; for (let i = 0; i < String(s).length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; };
 
 // 라이브(beta): VMware Tools 게스트 작업으로 nvidia-smi 실행. {hosts, vms, diag} 반환.
+/**
+ * v2.606(EDGE2606-01): 이 vCenter 의 인벤토리를 **읽었는가**(순수). 첫 수집 전(emptySnapshot)·대기·연결 실패·점검중이면
+ * 'GPU 호스트 없음' 이 아니라 **모른다** — 그 빈 결과로 엣지가 push 하면 중앙이 그 법인 GPU 사용률을 지운다.
+ * @returns {string} 못 읽은 사유('' = 읽음)
+ */
+export function inventoryUnreadReason(snap, vcId) {
+  const vcs = Array.isArray(snap?.vcenters) ? snap.vcenters : [];
+  const v = vcs.find((x) => x && x.id === vcId);
+  if (!v) return '인벤토리 미수집(스냅샷에 이 vCenter 없음)';
+  const st = String(v.status || '');
+  if (st && st !== 'connected') return `인벤토리 미수집(상태 ${st})`;
+  if (!(snap.hosts || []).some((h) => h && h.vcenterId === vcId)) return '인벤토리 미수집(호스트 0)';
+  return '';
+}
+
 async function pollLive(snap, vc, s) {
+  // v2.606(EDGE2606-01): 인벤토리를 못 읽은 vCenter 는 '읽지 못함'(unread) — 빈 목록을 정상 결과로 내지 않는다.
+  const invUnread = inventoryUnreadReason(snap, vc.id);
+  if (invUnread) {
+    return { hosts: [], vms: [], unread: invUnread, diag: { vcId: vc.id, at: Date.now(), stage: invUnread, counts: {}, results: [], error: null, unread: true } };
+  }
   const hostNames = gpuHostIds(snap, vc.id);
   // 선별 깔때기 — 어느 조건에서 VM이 빠지는지 단계별로 로깅 + 진단 데이터.
   // 대상: GPU(패스쓰루+vGPU) 할당 VM. nvidia-smi는 vGPU 게스트에서도 사용률을 보고한다.
@@ -105,15 +125,16 @@ async function pollLive(snap, vc, s) {
   //   계정**이라 여기서 1분마다 따로 로그인하면 store 가 멈춰도 잠금은 그대로다(같은 정지 기록을 본다).
   const vcStop = vcAuthGuard.authStopFor(vc);
   if (vcStop) {
-    diag.stage = 'vCenter 인증 실패 정지'; diag.error = vcStop.reason; diag.authStopped = gpuStopView(vcStop);
-    return { hosts: [], vms: [], diag };
+    diag.stage = 'vCenter 인증 실패 정지'; diag.error = vcStop.reason; diag.authStopped = gpuStopView(vcStop); diag.unread = true;
+    return { hosts: [], vms: [], diag, unread: 'vCenter 인증 실패 정지' };
   }
   const c = new VimSoapClient(vc);
   try { await c.login(); }
   catch (e) {
     diag.stage = 'vCenter 로그인 실패'; diag.error = e.message; console.warn(`[gpu-guest] ${vc.id} vCenter 로그인 실패: ${e.message}`);
     if (isVcAuthError(e)) diag.authStopped = gpuStopView(vcAuthGuard.markAuthStopped(vc.id, vc, e.message));
-    return { hosts: [], vms: [], diag };
+    diag.unread = true;
+    return { hosts: [], vms: [], diag, unread: 'vCenter 로그인 실패' };
   }
   diag.stage = '수집';
   console.log(`[gpu-guest] ${vc.id} vCenter 로그인 OK → ${cands.length}개 VM 수집 시작(동시 ${s.concurrency}, 타임아웃 ${Math.round((s.timeoutMs || 20000) / 1000)}s)`);
@@ -144,7 +165,14 @@ async function pollLive(snap, vc, s) {
       let err = null;
       let authFail = null;   // v2.590: 자격증명 거부(게스트 작업 InvalidGuestLogin · SSH client-authentication)
       // 'ssh'=직접 SSH+nvidia-smi · 'auto'=게스트작업 먼저→실패 시 SSH(+VM별 성공 방식 학습) · 'guestops'=VMware Tools.
-      const viaSsh = () => collectVmGpuSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, preferIp: resolveVmIp(s, vc.id, v.id) });
+      // v2.606(LEFT2606-01): 저장된 고정 IP 는 그 VM 이 보고한 IP 일 때만 쓴다 — 아니면 핀을 버리고(VM 의 알려진 IP 로만
+      //   시도) 사유를 진단에 남긴다. 저장 자격증명을 VM 이 보고한 적 없는 주소로 보내지 않는다(연결 테스트와 같은 판정).
+      const pin = pinnedIpCheck(v, resolveVmIp(s, vc.id, v.id));
+      if (!pin.ok) {
+        diag.pinRejected = (diag.pinRejected || 0) + 1;
+        console.warn(`[gpu-guest]   ${v.name}: 고정 IP 가 이 VM 의 알려진 IP(${pin.known.join(', ') || '없음'})가 아니라 쓰지 않습니다(저장 자격증명 보호)`);
+      }
+      const viaSsh = () => collectVmGpuSsh(v, creds, { timeoutMs: s.timeoutMs, port: s.sshPort, preferIp: pin.ip });
       const viaGuestops = () => collectVmGpu(c, moref, creds, { isWindows, timeoutMs: s.timeoutMs, dlHosts });
       let r = null, usedMethod = method;
       if (method === 'ssh') {
@@ -226,6 +254,9 @@ async function pollOnce() {
     const reg = mock ? [] : (loadVcenterConfig().vcenters || []);
     let collectedHosts = 0; let collectedVms = 0; let errors = 0;
     const diags = [];
+    // v2.606(EDGE2606-01): 이번 폴에서 **읽지 못한** vCenter(인벤토리 미수집·인증 정지·로그인 실패·미등록·예외).
+    //   엣지 push 보류(gpuGuestPushWithhold)가 이것을 보고 '전부 읽은 폴' 에만 중앙 목록을 교체한다.
+    const unreadVcenters = [];
 
     await poolSettled(enabledIds, Math.min(4, enabledIds.length), async (vcId) => {
       try {
@@ -233,13 +264,14 @@ async function pollOnce() {
         if (mock) result = pollMock(snap, vcId);
         else {
           const vc = reg.find((x) => x.id === vcId);
-          if (!vc) { diags.push({ vcId, at: Date.now(), stage: 'vCenter 미등록(vcenters.json)', counts: {}, results: [], error: '이 agent의 vcenters.json에 해당 id가 없음' }); return; }
+          if (!vc) { unreadVcenters.push({ vcId, reason: 'vCenter 미등록' }); diags.push({ vcId, at: Date.now(), stage: 'vCenter 미등록(vcenters.json)', counts: {}, results: [], error: '이 agent의 vcenters.json에 해당 id가 없음' }); return; }
           result = await pollLive(snap, vc, s);
         }
+        if (result.unread) unreadVcenters.push({ vcId, reason: String(result.unread) });
         setGuestGpu(result);
         if (result.diag) diags.push(result.diag);
         collectedHosts += result.hosts.length; collectedVms += result.vms.length;
-      } catch (e) { errors++; console.warn(`[gpu-guest] ${vcId} 수집 실패: ${e.message}`); diags.push({ vcId, at: Date.now(), stage: '예외', counts: {}, results: [], error: e.message }); }
+      } catch (e) { errors++; console.warn(`[gpu-guest] ${vcId} 수집 실패: ${e.message}`); unreadVcenters.push({ vcId, reason: '예외' }); diags.push({ vcId, at: Date.now(), stage: '예외', counts: {}, results: [], error: e.message }); }
     });
 
     // 3주기 이상 갱신 안 된 항목 정리.
@@ -247,7 +279,7 @@ async function pollOnce() {
     // v2.590: 인증 실패로 주기 수집이 멈춘 VM·vCenter 수를 함께 싣는다(설정 화면이 '멈췄다' 를 말한다).
     const authStoppedVms = diags.reduce((a, d) => a + (d.authStoppedVms || 0), 0);
     const vcAuthStopped = diags.filter((d) => d.authStopped).map((d) => d.vcId);
-    lastRun = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: enabledIds.length, hosts: collectedHosts, vms: collectedVms, errors, overlay: guestGpuCounts(), authStoppedVms, ...(vcAuthStopped.length ? { vcAuthStopped } : {}) };
+    lastRun = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: enabledIds.length, hosts: collectedHosts, vms: collectedVms, errors, overlay: guestGpuCounts(), authStoppedVms, ...(vcAuthStopped.length ? { vcAuthStopped } : {}), unreadVcenters };
     lastDiag = { at: Date.now(), mode: mock ? 'mock' : 'live', vcenters: diags };
   } finally { running = false; }
 }

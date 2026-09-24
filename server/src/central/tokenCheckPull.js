@@ -19,6 +19,7 @@ import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { findCollector } from './edgeLogPull.js';
+import { capTrim } from '../util/capStr.js'; // v2.606 TIM2606-02: 보관 글자는 평탄화(SlicedString 이 응답 원문을 붙잡지 않게)
 
 /** 이 엔드포인트를 내주기 시작한 최소 엣지 버전 — 그 아래는 경로가 없다. */
 export const MIN_EDGE_VERSION = '2.560.0';
@@ -38,10 +39,10 @@ export function sanitizeEnvelope(body) {
   const facts = (o) => ({
     set: o?.set === true,
     // ⚠ 8자만 받는다 — 구버전·변조 엣지가 전체 해시를 실어도 중앙에 남지 않는다(규칙 2).
-    short: t(o?.short).slice(0, 8),
+    short: capTrim(o?.short, 8),
     len: Number(o?.len) > 0 ? Math.round(Number(o.len)) : 0,
     space: o?.space === true,
-    hygiene: Array.isArray(o?.hygiene) ? o.hygiene.map((x) => t(x).slice(0, 16)).slice(0, 8) : [],
+    hygiene: Array.isArray(o?.hygiene) ? o.hygiene.map((x) => capTrim(x, 16)).slice(0, 8) : [],
   });
   const triState = (v) => (v === true ? true : v === false ? false : null); // null = 모른다
   const tok = body?.tokens || {};
@@ -49,11 +50,11 @@ export function sanitizeEnvelope(body) {
   return {
     at: Number(body?.at) || Date.now(),
     node: {
-      agent: t(body?.node?.agent).slice(0, 64),
-      hostname: t(body?.node?.hostname).slice(0, 128),
-      version: t(body?.node?.version).slice(0, 32),
-      datacenter: t(body?.node?.datacenter).slice(0, 64),
-      centralUrl: t(body?.node?.centralUrl).slice(0, 256),
+      agent: capTrim(body?.node?.agent, 64),
+      hostname: capTrim(body?.node?.hostname, 128),
+      version: capTrim(body?.node?.version, 32),
+      datacenter: capTrim(body?.node?.datacenter, 64),
+      centralUrl: capTrim(body?.node?.centralUrl, 256),
     },
     tokens: {
       collector: facts(tok.collector),
@@ -72,12 +73,12 @@ export function sanitizeEnvelope(body) {
       ok: sp.ok === true,
       status: Number(sp.status) || null,
       ms: Number(sp.ms) || 0,
-      kind: t(sp.kind).slice(0, 32),
-      reason: t(sp.reason).slice(0, 300),
-      yourAgent: t(sp.yourAgent).slice(0, 64),
-      tokenMode: t(sp.tokenMode).slice(0, 16),
-      centralVersion: t(sp.centralVersion).slice(0, 32),
-      centralInstance: t(sp.centralInstance).slice(0, 64),
+      kind: capTrim(sp.kind, 32),
+      reason: capTrim(sp.reason, 300),
+      yourAgent: capTrim(sp.yourAgent, 64),
+      tokenMode: capTrim(sp.tokenMode, 16),
+      centralVersion: capTrim(sp.centralVersion, 32),
+      centralInstance: capTrim(sp.centralInstance, 64),
     },
   };
 }

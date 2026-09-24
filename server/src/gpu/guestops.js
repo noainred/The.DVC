@@ -142,6 +142,14 @@ export async function readGuestFileBody(res, sizeHint = null, maxBytes = GUEST_F
   catch (e) { return { text: '', error: String(e?.message || e) }; }
 }
 
+/**
+ * 다운로드 실패 본문 → 로그용 100자 요약(v2.606 감사 SEC2606-04). 앞 2KB 만 보고, 태그 제거는 다음 '<' 에서 멈추는
+ * 한정 정규식으로 한다 — 예전 /<[^>]+>/g 는 '<' 만 반복된 64KB 본문에서 O(n²)(5.8초 정지)였다. 결과는 어차피 100자다.
+ */
+export function failBodySnippet(text) {
+  return String(text ?? '').slice(0, 2048).replace(/<[^<>]{0,200}>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+}
+
 async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, preferHosts = [], tag = '', tr = null) {
   let ftXml;
   try {
@@ -196,7 +204,7 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
       }
       // 404 등 본문에 ESXi가 사유를 담아주므로(예: 파일없음/티켓무효) 일부를 캡처.
       let body = '';
-      try { body = (await readTextCapped(res, 65_536, '오류 본문')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100); } catch { /* */ }
+      try { body = failBodySnippet(await readTextCapped(res, 65_536, '오류 본문')); } catch { /* */ }
       console.warn(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status}${body ? ` body="${body}"` : ''}`);
       tlog(tr, `  ✗ GET ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} (${((Date.now() - t0) / 1000).toFixed(1)}s)${body ? ` "${body.slice(0, 60)}"` : ''}`);
       tries.push(`${candHost}${isOrig ? '(원본)' : ''}=HTTP${res.status}${body ? `(${body})` : ''}`);

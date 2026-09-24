@@ -15,6 +15,7 @@ import { ssrfBlockReasonResolved } from '../../collector/registry.js';
 import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../../reports/dailyReport.js';
 import { refreshCerts } from '../../security/certMonitor.js';
 import { adminOnly, requireSettingsOwner } from './shared.js';
+import { mergeScopedMap, filterScopedMap } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
 import { todayStamp } from "../../util/dayKey.js";
 
 /*
@@ -93,8 +94,31 @@ adminRouter.post('/certs/refresh', adminOnly, async (req, res) => {
 });
 
 // 이상동작 탐지(동시 다운) — vCenter별 임계 설정.
-adminRouter.get('/anomaly', adminOnly, (_req, res) => res.json(getAnomalySettings()));
-adminRouter.put('/anomaly', adminOnly, (req, res) => res.json({ ok: true, settings: saveAnomalySettings(req.body || {}) }));
+// v2.606 AUTHZ2606-07 · LEFT2606-03: perVcenter 는 vCenter 축이 있으므로 범위 제한 admin 에게는 **범위 안 키만** 보이고,
+//   PUT 은 범위 밖 키를 직전 값 그대로 보존한다(mergeScopedMap — v2.605 vmSeries·curUser 와 같은 규약). 예전에는 GET 이
+//   전량을 주고 PUT 이 통째로 교체해 다른 법인 임계가 지워졌다. 전역 enabled·threshold(전 법인 공용)는 범위 계정이
+//   보내도 **바꾸지 않고** 그 사실을 응답에 밝힌다(ignoredGlobal). 전체 범위 admin 은 예전 그대로.
+function scopeAnomaly(st, allowed) {
+  if (!allowed) return st;
+  return { ...st, perVcenter: filterScopedMap(st.perVcenter || {}, allowed), scoped: true };
+}
+adminRouter.get('/anomaly', adminOnly, (req, res) => res.json(scopeAnomaly(getAnomalySettings(), scopedVcenterIds(req.user, store.get()))));
+adminRouter.put('/anomaly', adminOnly, (req, res) => {
+  const allowed = scopedVcenterIds(req.user, store.get());
+  const body = req.body || {};
+  if (!allowed) return res.json({ ok: true, settings: saveAnomalySettings(body) });
+  const before = getAnomalySettings();
+  const m = mergeScopedMap(before.perVcenter, body.perVcenter, allowed);
+  const ignoredGlobal = [];
+  if (body.enabled !== undefined && (body.enabled !== false) !== before.enabled) ignoredGlobal.push('enabled');
+  if (body.threshold !== undefined && body.threshold !== '' && Number(body.threshold) !== before.threshold) ignoredGlobal.push('threshold');
+  const settings = saveAnomalySettings({ enabled: before.enabled, threshold: before.threshold, perVcenter: m.merged });
+  res.json({
+    ok: true, settings: scopeAnomaly(settings, allowed),
+    ...(m.ignored.length ? { ignoredOutOfScope: m.ignored.length } : {}),
+    ...(ignoredGlobal.length ? { ignoredGlobal, ignoredReason: '전역 임계·사용 여부는 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다 — 적용하지 않았습니다.' } : {}),
+  });
+});
 
 // 세션 보안(유휴 자동 로그아웃) — 조회는 자유, 변경은 OTP 재인증 + 감사 기록.
 // 편집 UI에는 '설정된' 소유 계정만(자동 포함된 중앙 배포 admin은 별도 autoOwners로 읽기전용 안내).
@@ -167,13 +191,24 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
 // 실제 OS 인벤토리(게스트에서 읽은 실제 설치 OS) — 조회·설정·즉시 실행·결과·CSV.
 // v2.599(AUTHZ-2599-05 후속): 범위 제한 admin 에게는 요약을 **그 범위 행으로** 다시 세고, 함대 전체 기준인
 //   마지막 실행 결과(탐지 수·오류 문구·인증 정지 목록 — vCenter id 가 들어간다)는 null 로 두고 그 사실을 밝힌다.
-adminRouter.get('/os-scan', adminOnly, (req, res) => {
+// v2.606 AUTHZ2606-06: GET 과 PUT 응답이 **같은 함수**를 쓴다 — 예전 PUT 은 osScanStatus() 전체를 펼쳐 GET 이 가린
+//   lastFound·lastErr(범위 밖 vCenter id·IP)·lastAuth·함대 summary 를 그대로 줬다.
+function scopedOsScanStatus(req) {
   const st = osScanStatus();
   const allowed = scopedVcenterIds(req.user, store.get());
-  if (!allowed) return res.json(st);
-  res.json({ ...st, summary: osSummary((r) => allowed.has(String(r.vcenterId))), lastFound: null, lastErr: null, lastAuth: null, scoped: true, fleetRunHidden: true });
+  if (!allowed) return st;
+  return { ...st, summary: osSummary((r) => allowed.has(String(r.vcenterId))), lastFound: null, lastErr: null, lastAuth: null, scoped: true, fleetRunHidden: true };
+}
+adminRouter.get('/os-scan', adminOnly, (req, res) => res.json(scopedOsScanStatus(req)));
+// v2.606 AUTHZ2606-06: 스캔 설정은 전역이다 — 범위 admin 이 켠 주기 스캔은 전 vCenter 게스트에 로그인한다(v2.599 가 수동
+//   실행에서 막은 것을 설정으로 우회). 범위 계정의 변경은 403(Horizon settings PUT v2.605 와 같은 판단).
+adminRouter.put('/os-scan/settings', adminOnly, (req, res) => {
+  if (scopedVcenterIds(req.user, store.get())) {
+    return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '실제 OS 스캔 설정은 전 법인 공용이고 전 vCenter 게스트에 로그인합니다 — 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' });
+  }
+  const status = scopedOsScanStatus(req);   // 예전과 같은 순서(저장 전 상태 + 저장 결과) — 전체 범위 admin 응답은 그대로
+  res.json({ ok: true, ...status, settings: saveOsScanSettings(req.body || {}) });
 });
-adminRouter.put('/os-scan/settings', adminOnly, (req, res) => res.json({ ok: true, ...osScanStatus(), settings: saveOsScanSettings(req.body || {}) }));
 // v2.599: 범위 제한 admin 의 즉시 스캔은 **범위 안 vCenter 하나**만 — 범위 밖 지정은 404(존재 은닉), 미지정은 400
 //   (미지정이면 전 vCenter 를 돌아 범위 밖 게스트에 로그인한다).
 adminRouter.post('/os-scan/run', adminOnly, async (req, res) => {

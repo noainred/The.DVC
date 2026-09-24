@@ -36,10 +36,24 @@ export function remotePowerByHost() {
   return out;
 }
 
-/** 같은 호스트명을 둘 이상의 수집 서버가 보고하는 경우 — [{ host, collectors:[...] }]. */
-export function remoteHostConflicts() {
+/**
+ * v2.606 RECENT2606-02: 충돌은 **신선한 항목끼리만** 센다. 죽은 엣지(pull 실패는 항목을 지우지 않는다)·비활성 수집기가 마지막으로
+ * 보고한 호스트가 남아 있으면, 같은 사이트의 새 엣지가 같은 서버를 보고하는 순간 '다른 법인의 다른 서버' 로 판정돼 이력 키가
+ * rmt:<host> → rmt:<cid>:<host> 로 바뀌었다. 신선도 기준은 전력 합산과 같은 POWER_CURRENT_STALE_MS(기본 2시간).
+ */
+const _freshEnv = Number(process.env.POWER_CURRENT_STALE_MS);
+export const REMOTE_FRESH_MS = Number.isFinite(_freshEnv) && _freshEnv > 0 ? _freshEnv : 2 * 3_600_000;
+const isFresh = (s, now, staleMs) => {
+  const t = Number(s?.ts);
+  return Number.isFinite(t) && t > 0 && now - t <= staleMs;
+};
+
+/** 같은 호스트명을 둘 이상의 수집 서버가 (신선하게) 보고하는 경우 — [{ host, collectors:[...] }]. */
+export function remoteHostConflicts({ now = Date.now(), staleMs = REMOTE_FRESH_MS, activeIds = null } = {}) {
   const by = new Map();
   for (const s of remoteByKey.values()) {
+    if (!isFresh(s, now, staleMs)) continue;
+    if (activeIds && !activeIds.has(s.collectorId)) continue;
     const set = by.get(s.host) || new Set();
     set.add(s.collectorId);
     by.set(s.host, set);
@@ -47,11 +61,36 @@ export function remoteHostConflicts() {
   return [...by.entries()].filter(([, set]) => set.size > 1).map(([host, set]) => ({ host, collectors: [...set] }));
 }
 
-/** 다른 수집 서버가 지금 보고 중인 호스트명 집합(pull 이 DB 키를 고를 때 쓴다). */
-export function hostsOfOtherCollectors(collectorId) {
+/**
+ * 다른 수집 서버가 **지금**(신선한 ts · activeIds 가 주어지면 그 안의 활성 수집기) 보고 중인 호스트명 집합 — pull 이 DB 키를 고를 때 쓴다.
+ * v2.606 RECENT2606-02: 예전에는 ts·enabled 를 보지 않아 며칠 전 죽은 엣지의 항목도 충돌로 셌다.
+ */
+export function hostsOfOtherCollectors(collectorId, { now = Date.now(), staleMs = REMOTE_FRESH_MS, activeIds = null } = {}) {
   const out = new Set();
-  for (const s of remoteByKey.values()) if (s.collectorId !== collectorId) out.add(s.host);
+  for (const s of remoteByKey.values()) {
+    if (s.collectorId === collectorId) continue;
+    if (!isFresh(s, now, staleMs)) continue;
+    if (activeIds && !activeIds.has(s.collectorId)) continue;
+    out.add(s.host);
+  }
   return out;
+}
+
+/**
+ * v2.606 RECENT2606-02: 원격 전력 DB 계열 키 선택(순수 — `hasSeries(key)` 로 DB 에 계열이 있는지 묻는다).
+ *  ① 이 수집기 전용 계열 `rmt:<cid>:<host>` 가 **이미 DB 에 있으면** 그것을 쓴다 — 충돌 결정은 한 번 나면 영속이다.
+ *     예전에는 인메모리 순서로만 판정해, 중앙 재시작 직후 먼저 pull 을 끝낸 엣지가 매번 옛 키 rmt:<host> 에 1표본을 쓰고
+ *     다음 주기에 새 키로 넘어갔다(어느 엣지가 먼저냐에 따라 옛 계열에 두 서버 값이 섞였다 — CEN2605-03 이 막으려던 현상).
+ *  ② 없으면, 다른 활성 수집기가 같은 호스트명을 신선하게 보고 중일 때만 새 계열로 나눈다.
+ *  ③ 그 밖은 예전 키 `rmt:<host>`(이력 유지).
+ * 반환 { key, conflict }.
+ */
+export function remoteSeriesKey(collectorId, hostLower, otherHosts, hasSeries = () => false) {
+  const split = `rmt:${collectorId}:${hostLower}`;
+  let persisted = false;
+  try { persisted = Boolean(hasSeries(split)); } catch { persisted = false; }
+  if (persisted || otherHosts.has(hostLower)) return { key: split, conflict: true, persisted };
+  return { key: `rmt:${hostLower}`, conflict: false, persisted: false };
 }
 
 /** Drop remote hosts contributed by a collector before re-applying its export. */

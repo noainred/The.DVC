@@ -50,8 +50,22 @@ export function registerPdu(api) {
   api.get('/tools/pdu', toolsPerm, fullScopeOnly, (req, res) => {
     const th = loadThresholds();
     const snaps = new Map(allSnapshots().map((s) => [s.id, s]));
+    // v2.606(감사 CEN2606-02): 장비별로 방어한다 — 한 장비의 깨진 스냅샷(엣지 보고 units:'x' 등)이 목록 전체를 500 으로
+    //   만들지 않게. 실패한 장비는 **숨기지 않고** 스냅샷 형식 오류를 밝힌다(조용한 제외 금지).
     const devices = listDevices().map((d) => {
       const s = snaps.get(d.id) || null;
+      try { return deviceRow(d, s); } catch (e) {
+        return {
+          ...d,
+          snapshot: {
+            ok: false, error: `스냅샷 형식 오류로 이 장비의 값을 표시하지 못했습니다(${String(e?.message || e).slice(0, 120)})`,
+            collectedAt: s?.collectedAt ?? null, agent: typeof s?.agent === 'string' ? s.agent : '',
+            malformed: true, summary: summarize({}), units: [], sensors: [], notes: [], violations: [],
+          },
+        };
+      }
+    });
+    function deviceRow(d, s) {
       return {
         ...d,
         snapshot: s ? {
@@ -69,7 +83,7 @@ export function registerPdu(api) {
           violations: evaluateSnapshot(s, th),
         } : null,
       };
-    });
+    }
     // v2.599(AUTHZ-2599-03): 비-admin 에는 관리 IP·계정명을 가리고 밝힌다(v2.593 relaytopo 와 같은 기준).
     const admin = isAdminReq(req);
     res.json({

@@ -26,6 +26,7 @@
  */
 
 import { withSsh } from '../../proxy/sshExec.js';
+import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { emptySnapshot, summarizePorts, MAX_PORTS } from '../types.js';
 import { applyRates } from '../rates.js';
 import * as P from './fosParse.js';
@@ -43,7 +44,7 @@ function approxFields(approx) {
 }
 
 const RAW_LIMIT = Number(process.env.SANSW_CLI_RAW_LIMIT) || 4000;
-const CMD_TIMEOUT_MS = Number(process.env.SANSW_CLI_TIMEOUT_MS) || 45_000;
+const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.SANSW_CLI_TIMEOUT_MS, 45_000, { max: 1_800_000 });   // v2.606 TIM2606-03
 
 /**
  * 명령 명세. required 인 것이 실패하면 전체 수집 실패.

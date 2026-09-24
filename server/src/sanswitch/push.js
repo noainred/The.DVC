@@ -153,27 +153,55 @@ export async function pushSanSwitchNow() {
     // 청크 전송(chunk/chunks 필드): 첫 청크는 중앙의 내 목록을 교체, 이후 청크는 덧붙인다(중앙 sanSwitchEdge).
     const chunks = chunkDevices(devices);
     let bytes = 0, gzBytes = 0;
-    let rejected = 0; const droppedBy = {}; let centralTrimmed = 0;
-    for (let i = 0; i < chunks.length; i++) {
-      const json = Buffer.from(JSON.stringify({ agent: config.agent.name, devices: chunks[i], chunk: i, chunks: chunks.length }));
-      let body = json;
-      const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
-      if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
-      bytes += json.length; gzBytes += body.length;
-      const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-data`, {
-        method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2,
-      });
-      if (!res.ok) throw new Error(`sanswitch-data <- ${res.status} (청크 ${i + 1}/${chunks.length})`);
-      // v2.600(RECENT2600-02): 200 이어도 중앙이 일부 장비를 뺐을 수 있다(장비 크기·합계 상한 등) — 응답을 읽어 상태·콘솔에 남긴다.
-      const ds = await readDropSummary(res);
-      if (ds?.zoningTrimmed) centralTrimmed += ds.zoningTrimmed;
-      if (ds?.rejected) { rejected += ds.rejected; for (const [k, n] of Object.entries(ds.dropped || {})) droppedBy[k] = (droppedBy[k] || 0) + (Number(n) || 0); }
+    let rejected = 0; let droppedBy = {}; let centralTrimmed = 0;
+    // v2.606 EDGE2606-04: 청크 0 은 중앙 목록을 **즉시 교체**한다 — 뒤 청크가 실패하면 중앙에는 앞 청크 장비만 남아 다음 주기까지
+    //   나머지 스위치가 '사라진' 것으로 보인다(엣지 상태에는 실패만 있었다). 앞 청크가 이미 반영된 실패면 **한 번 전체를 다시** 보내고,
+    //   그래도 실패하면 '중앙 목록이 부분 상태' 임을 상태·콘솔에 밝힌다. 교체/병합 프로토콜 자체는 바꾸지 않는다(구버전 중앙 호환).
+    const sendAll = async () => {
+      bytes = 0; gzBytes = 0; rejected = 0; droppedBy = {}; centralTrimmed = 0;
+      let received = 0; let receivedDevices = 0;
+      for (let i = 0; i < chunks.length; i++) {
+        const json = Buffer.from(JSON.stringify({ agent: config.agent.name, devices: chunks[i], chunk: i, chunks: chunks.length }));
+        let body = json;
+        const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+        if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
+        bytes += json.length; gzBytes += body.length;
+        let res;
+        try {
+          res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-data`, {
+            method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2,
+          });
+        } catch (e) { return { ok: false, error: `${e?.message || e} (청크 ${i + 1}/${chunks.length})`, received, receivedDevices }; }
+        if (!res.ok) return { ok: false, error: `sanswitch-data <- ${res.status} (청크 ${i + 1}/${chunks.length})`, received, receivedDevices };
+        received++; receivedDevices += chunks[i].length;
+        // v2.600(RECENT2600-02): 200 이어도 중앙이 일부 장비를 뺐을 수 있다(장비 크기·합계 상한 등) — 응답을 읽어 상태·콘솔에 남긴다.
+        const ds = await readDropSummary(res);
+        if (ds?.zoningTrimmed) centralTrimmed += ds.zoningTrimmed;
+        if (ds?.rejected) { rejected += ds.rejected; for (const [k, n] of Object.entries(ds.dropped || {})) droppedBy[k] = (droppedBy[k] || 0) + (Number(n) || 0); }
+      }
+      return { ok: true, received, receivedDevices };
+    };
+    let sr = await sendAll();
+    let resent = false;
+    if (!sr.ok && sr.received > 0) {
+      console.warn(`[sanswitch-push] ${sr.error} — 앞 청크 ${sr.received}개가 이미 중앙 목록을 교체했으므로 전체를 한 번 다시 보냅니다`);
+      resent = true;
+      sr = await sendAll();
+    }
+    if (!sr.ok) {
+      const partial = sr.received > 0;
+      const note = partial
+        ? `중앙 목록이 부분 상태입니다 — 청크 ${sr.received}/${chunks.length}(장비 ${sr.receivedDevices}/${devices.length}대)만 반영됐고 나머지 스위치는 다음 성공 push 까지 중앙 화면에 나오지 않습니다`
+        : '첫 청크가 실패해 중앙 목록은 직전 push 그대로입니다';
+      _last = { at: Date.now(), error: `${sr.error}${resent ? ' · 전체 재전송도 실패' : ''} — ${note}`, ...(partial ? { centralPartial: { receivedChunks: sr.received, chunks: chunks.length, receivedDevices: sr.receivedDevices, devices: devices.length } } : {}), resent };
+      console.warn(`[sanswitch-push] 실패: ${_last.error}`);
+      return { ok: false, reason: _last.error, ...(partial ? { centralPartial: _last.centralPartial } : {}) };
     }
     if (rejected) console.warn(`[sanswitch-push] 중앙이 장비 ${rejected}대를 받지 않았습니다(${Object.entries(droppedBy).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(' · ') || '사유 미상'}) — 그 스위치는 중앙 화면에 나오지 않습니다`);
     // 범위·크기를 상태에 남긴다 — '전체로 바꿨는데 회선이 버티나' 를 수치로 확인할 수 있게.
     const downgraded = devices.filter((d) => d.ports?.portsScopeReason).length;
     const zoningTrimmed = devices.filter((d) => d.zoning?.trimmed).length;
-    _last = { at: Date.now(), sent: devices.length, chunks: chunks.length, bytes, gzBytes, gzip: PUSH_GZIP, portsScope: scope, downgraded, zoningTrimmed, ...(centralTrimmed ? { centralZoningTrimmed: centralTrimmed } : {}), ...(rejected ? { rejected, dropped: droppedBy } : {}) };
+    _last = { at: Date.now(), sent: devices.length, chunks: chunks.length, bytes, gzBytes, gzip: PUSH_GZIP, portsScope: scope, ...(resent ? { resent: true } : {}), downgraded, zoningTrimmed, ...(centralTrimmed ? { centralZoningTrimmed: centralTrimmed } : {}), ...(rejected ? { rejected, dropped: droppedBy } : {}) };
     return { ok: true, sent: devices.length, chunks: chunks.length, portsScope: scope, downgraded, zoningTrimmed, ...(rejected ? { rejected, dropped: droppedBy } : {}) };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };

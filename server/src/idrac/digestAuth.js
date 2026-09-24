@@ -10,6 +10,9 @@ import crypto from 'node:crypto';
 
 const md5 = (s) => crypto.createHash('md5').update(s).digest('hex');
 
+/** Digest 챌린지 본문 파싱 상한(v2.606 SEC2606-03). */
+export const DIGEST_BODY_MAX = 4096;
+
 /** WWW-Authenticate: Digest ... 헤더를 파싱해 파라미터 맵으로. Digest가 아니면 null. */
 export function parseDigestChallenge(headerValue) {
   const h = String(headerValue || '');
@@ -17,9 +20,12 @@ export function parseDigestChallenge(headerValue) {
   const idx = h.toLowerCase().indexOf('digest ');
   if (idx === -1) return null;
   const params = {};
-  const body = h.slice(idx + 7);
+  // v2.606(감사 SEC2606-03): 앞 4KB 까지만 본다(정상 챌린지는 수백 바이트) + 키 앞 경계(맨 앞·공백·쉼표)와 길이 한정.
+  //   예전 `(\w+)\s*=` 는 '=' 없는 긴 단어열에서 시작 위치마다 끝까지 훑어 O(n²) 였다(15KB 헤더 → 0.86초 정지).
+  //   정상 챌린지(키가 맨 앞 또는 공백·쉼표 뒤)의 결과는 옛 정규식과 같다 — 테스트가 무작위 대조로 고정한다.
+  const body = h.slice(idx + 7, idx + 7 + DIGEST_BODY_MAX);
   // key=value 또는 key="value" (따옴표 안의 콤마 허용).
-  const re = /(\w+)\s*=\s*(?:"([^"]*)"|([^,\s]+))/g;
+  const re = /(?:^|[\s,])(\w{1,32})\s*=\s*(?:"([^"]{0,1024})"|([^,\s]{1,1024}))/g;
   let m;
   while ((m = re.exec(body))) params[m[1].toLowerCase()] = m[2] !== undefined ? m[2] : m[3];
   return params.nonce ? params : null;

@@ -18,7 +18,7 @@
  */
 import { scopePollerStatus, scopeDbStatus } from '../../auth/scopeStatus.js'; // v2.583
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { mergeScopedMap, filterScopedMap } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01
+import { mergeScopedMap, filterScopedMap, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.606 AUTHZ2606-05
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
@@ -123,6 +123,8 @@ api.get('/tools/curuser/activity', requirePerm('tools'), (req, res) => {
 });
 
 api.post('/tools/curuser/collect', requireRole('admin'), async (req, res) => {
+  // v2.606 AUTHZ2606-05: 전 법인 vCenter 에 접속하고 결과(범위 밖 오류·overLimit·push)를 그대로 준다 — 범위 계정은 403.
+  if (denyScopedRun(req, res, '현재 사용자 수동 수집')) return;
   const r = await runCurUserNow('manual');
   logAudit({
     user: req.user?.username, action: 'curuser.collect', ip: req.ip || '',

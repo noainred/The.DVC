@@ -61,11 +61,13 @@ export function aggregate(records) {
   // 계정 키 → 집계. Map 은 삽입 순서를 지키므로 '처음 만난 원문' 이 표시 이름이 된다.
   const byUser = new Map();
   let sessions = 0; let sa = 0; let sd = 0; let so = 0;
-  let vmsOk = 0; let vmsFailed = 0; let vmsSkipped = 0;
+  let vmsOk = 0; let vmsFailed = 0; let vmsSkipped = 0; let vmsTruncated = 0;
   for (const r of list) {
     if (r.ok === false) { vmsFailed++; continue; }
     if (r.skipped) { vmsSkipped++; continue; }
     vmsOk++;
+    // v2.606 COL2606-01: 발행기가 원문을 잘랐으면 그 서버의 세션은 일부만 읽었다 — 합계는 하한이다.
+    if (r.truncated || r.usersLowerBound) vmsTruncated++;
     for (const u of (r.users || [])) {
       const key = userKey(u.name);
       if (!key) continue;
@@ -97,6 +99,8 @@ export function aggregate(records) {
     sessionsDisc: known ? sd : null,
     sessionsOther: known ? so : null,
     vms: list.length, vmsOk, vmsFailed, vmsSkipped,
+    // 원문이 잘린 서버가 하나라도 있으면 사용자·세션 수는 **최소값**이다(화면이 '최소 N명').
+    vmsTruncated, usersLowerBound: known && vmsTruncated > 0,
     names: names.sort((a, b) => b.sessions - a.sessions || String(a.name).localeCompare(String(b.name), 'ko')),
   };
 }
@@ -123,7 +127,10 @@ export function aggregateAll(records, { vcNameOf = (id) => id } = {}) {
   const readVcs = vcenters.filter((v) => v.users != null);
   const byVcSum = readVcs.length ? readVcs.reduce((a, v) => a + v.users, 0) : null;
   return {
-    total: { ...total, usersUnion: total.users, usersByVcSum: byVcSum },
+    total: {
+      ...total, usersUnion: total.users, usersByVcSum: byVcSum,
+      usersByVcSumLowerBound: readVcs.some((v) => v.usersLowerBound),
+    },
     vcenters,
   };
 }

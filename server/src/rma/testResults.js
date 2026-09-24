@@ -14,6 +14,7 @@ import { notify } from '../alerts.js';
 
 import { numOrNull } from '../util/numOrNull.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
+import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
 import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
 const FILE = () => path.join(config.dbDir || config.configDir, 'rma-tests.db');
 const RETENTION_DAYS = Math.max(1, Number(process.env.RMA_TEST_HISTORY_DAYS) || 90);
@@ -32,24 +33,39 @@ async function open() {
   _opening = openInner().finally(() => { _opening = null; });
   return _opening;
 }
+// v2.606(DB2606-03): 첫 open 이 잠금이면 'unavailable' 로 래치하지 않고 30초 뒤 다시 연다(util/sqliteOpen.js 규약 —
+//   예전: PRAGMA journal_mode 가 busy_timeout 보다 먼저라 잠금에서 즉시 실패했고, 잠금이 풀린 뒤에도 재시작 전까지 꺼져 있었다).
+const _lock = createLockRetry(30_000);
 async function openInner() {
   if (_db) return _db === 'unavailable' ? null : _db;
+  if (_lock.blocked()) return null;
+  let DatabaseSync;
+  try { ({ DatabaseSync } = await import('node:sqlite')); }
+  catch { _db = 'unavailable'; return null; }
   try {
-    const { DatabaseSync } = await import('node:sqlite');
-    const conn = new DatabaseSync(FILE());
+    return await withOpenCleanup(async () => {
+    const conn = openSqlite(new DatabaseSync(FILE()));
     // v2.447(감사 S4): DB 파일 권한 0600 — 다른 DB 모듈(idrac/metrics/logs/ipam/vmtrack/capacity/ping)은
     // 전부 적용돼 있는데 이 파일만 빠져 있었다. 같은 호스트의 다른 로컬 사용자가 읽을 수 있었다.
     try { fs.chmodSync(FILE(), 0o600); } catch { /* best effort */ }
-    conn.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;
+    conn.exec(`
       CREATE TABLE IF NOT EXISTS test_results (agent TEXT NOT NULL, test_id TEXT NOT NULL, instance TEXT, ts INTEGER NOT NULL, status TEXT NOT NULL, reply TEXT, value REAL);
       CREATE INDEX IF NOT EXISTS idx_tr_ts ON test_results (ts);
-      CREATE INDEX IF NOT EXISTS idx_tr_key_ts ON test_results (agent, test_id, ts);`);
+      CREATE INDEX IF NOT EXISTS idx_tr_key_ts ON test_results (agent, test_id, ts);
+      -- v2.606(DB2606-05): 조회는 'agent = ? COLLATE NOCASE' 라 BINARY 인덱스(idx_tr_key_ts)를 못 탄다 — NOCASE 인덱스.
+      CREATE INDEX IF NOT EXISTS idx_tr_key_nc_ts ON test_results (agent COLLATE NOCASE, test_id, ts);`);
     _db = { conn, ins: conn.prepare('INSERT INTO test_results (agent, test_id, instance, ts, status, reply, value) VALUES (?,?,?,?,?,?,?)'),
       hist: conn.prepare('SELECT * FROM test_results WHERE agent = ? COLLATE NOCASE AND test_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?'),
       // v2.603(감사 DB2603-02): 청크 DELETE 형태(LIMIT 은 chunkedDelete 가 붙인다) — idx_tr_ts 가 서브쿼리를 받친다.
       prune: conn.prepare('DELETE FROM test_results WHERE rowid IN (SELECT rowid FROM test_results WHERE ts < ? LIMIT ?)') };
+    _lock.ok();
     return _db;
-  } catch { _db = 'unavailable'; return null; }
+    });
+  } catch (e) {
+    if (_lock.onFail(e)) { console.warn(`[rma] 점검 이력 DB 잠김(${e.message}) — 30초 뒤 다시 엽니다(비활성으로 고정하지 않음)`); return null; }
+    console.warn(`[rma] 점검 이력 DB 열기 실패(${e.message}) — 이력 저장 없이 동작`);
+    _db = 'unavailable'; return null;
+  }
 }
 
 /**
@@ -128,8 +144,10 @@ export function dropResult(agent, id) { latest.delete(key(agent, id)); }
 
 export async function testHistory(agent, id, { hours = 24, limit = 500 } = {}) {
   const db = await open();
-  if (!db) return { unavailable: true, rows: [] };
-  const rows = db.hist.all(String(agent), String(id), Date.now() - Math.max(1, hours) * 3600e3, pageArgs({ limit }, { def: 500, max: 5000 }).limit);
+  if (!db) return { unavailable: true, rows: [], ...(_lock.lastLock() ? { reason: _lock.note() } : {}) };
+  // v2.606(DB2606-05): hours 는 [1시간, 보존일] — 예전엔 하한만 있어 hours=1e6 이면 전 agent·전 점검 범위를 훑었다.
+  const h = Math.min(RETENTION_DAYS * 24, Math.max(1, numOrNull(hours) ?? 24));
+  const rows = db.hist.all(String(agent), String(id), Date.now() - h * 3600e3, pageArgs({ limit }, { def: 500, max: 5000 }).limit);
   return { rows: rows.map((r) => ({ ts: r.ts, status: r.status, reply: r.reply, value: r.value, instance: r.instance })) };
 }
 
@@ -140,4 +158,4 @@ export function summarize(rows = latestResults()) {
   return Object.values(out);
 }
 
-export function _resetTestResults() { latest.clear(); try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _tick = 0; }
+export function _resetTestResults() { latest.clear(); try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _tick = 0; _lock.ok(); }

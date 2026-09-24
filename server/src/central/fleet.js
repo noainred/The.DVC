@@ -14,6 +14,8 @@ import { config } from '../config.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
+import { capStr } from '../util/capStr.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'central-fleet.json');
 const TTL_MS = Number(process.env.CENTRAL_FLEET_TTL_MS) || 30 * 60_000; // 30분 무보고 시 만료
@@ -92,7 +94,20 @@ if (config.central?.token && !config.agent?.centralUrl) {
  *   거짓이면 그 원소를 버리지 않고 **vcenterId 만 비운다**(미귀속) — 서버 자체는 실재하므로 목록에서 사라지게 하지 않는다.
  * @returns {{accepted:number, omitted:number, vcenterBlanked:number}}
  */
-export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, vcAllowed = null } = {}) {
+/**
+ * v2.606(감사 RECENT2606-03·EDGE2606-05 중앙 부분): 엣지가 **일부를 빼고 보낸** 목록(fleetPush partial 모드)이면 그 사실을 보관한다.
+ *   예전에는 본문의 partial·unreadVcenters·withheldItems 를 받지도 저장하지도 않아, 엣지가 뺀 베어메탈 대수가 중앙에서 조용히
+ *   사라졌다(엣지 주석은 '본문·상태·콘솔에 밝힌다' 를 약속했다). 엣지의 보류 판정은 그대로 두고 중앙은 **밝히기만** 한다.
+ *   값은 좁힌다 — vCenter id 는 글자 32개(128자), 개수는 0 이상 정수만(못 읽으면 null — 0 으로 지어내지 않는다).
+ */
+export function sanitizeFleetPartial(p) {
+  if (!p || typeof p !== 'object' || p.partial !== true) return null;
+  const unread = (Array.isArray(p.unreadVcenters) ? p.unreadVcenters : [])
+    .filter((x) => typeof x === 'string' && x.trim()).slice(0, 32).map((x) => capStr(x.trim(), 128));
+  const n = numOrNull(p.withheldItems);
+  return { partial: true, unreadVcenters: unread, withheldItems: n != null && n >= 0 ? Math.round(n) : null };
+}
+export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, vcAllowed = null, partial = null } = {}) {
   const a = String(agent || '').trim();
   if (!a) return { accepted: 0, omitted: 0, vcenterBlanked: 0 };
   // 신규 '미검증' 이름이 상한이면 가장 오래된 미검증 보고를 밀어낸다(검증된 엣지는 건드리지 않는다).
@@ -142,10 +157,11 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
   // 내용 해시(전력 제외 — 미세 변동으로 무효화 폭증 방지). 분류에 영향 주는 필드만.
   const sig = hashList(list);
   const prev = cache[a];
-  cache[a] = { at: Date.now(), generatedAt: typeof generatedAt === 'string' || typeof generatedAt === 'number' ? generatedAt : null, baremetal: list, sig, verified: !!verified, ...(omitted ? { omitted } : {}), ...(vcenterBlanked ? { vcenterBlanked } : {}) };
+  const part = sanitizeFleetPartial(partial);
+  cache[a] = { at: Date.now(), generatedAt: typeof generatedAt === 'string' || typeof generatedAt === 'number' ? generatedAt : null, baremetal: list, sig, verified: !!verified, ...(omitted ? { omitted } : {}), ...(vcenterBlanked ? { vcenterBlanked } : {}), ...(part ? { partial: part } : {}) };
   if (!prev || prev.sig !== sig) bumpFleetRev(); // 내용이 바뀐 경우에만 캐시 무효화
   persistSoon();
-  return { accepted: list.length, omitted, vcenterBlanked };
+  return { accepted: list.length, omitted, vcenterBlanked, ...(part ? { partial: part } : {}) };
 }
 
 // 분류 관련 필드만으로 안정 해시(djb2). 전력(watts)은 remote 경로/TTL로 반영하므로 제외.
@@ -201,7 +217,14 @@ export function listEdgeFleet() {
     agent, at: e.at, generatedAt: e.generatedAt, baremetal: (e.baremetal || []).length,
     // v2.601 CEN2601-02·03: 상한으로 받지 않은 수·귀속을 비운 수·이름 검증 여부를 화면이 말할 수 있게 싣는다.
     omitted: e.omitted || 0, vcenterBlanked: e.vcenterBlanked || 0, verified: e.verified !== false,
+    // v2.606 RECENT2606-03: 엣지가 일부를 빼고 보낸 목록인가(partial) · 못 읽은 vCenter · 뺀 대수.
+    partial: !!e.partial, unreadVcenters: e.partial?.unreadVcenters || [], withheldItems: e.partial ? (e.partial.withheldItems ?? null) : 0,
   })).sort((a, b) => (b.at || 0) - (a.at || 0));
+}
+
+/** 부분 목록으로 보고 중인 엣지(통합 인벤토리 화면 데이터용 — 'N곳의 목록이 일부' 를 말할 수 있게). */
+export function edgeFleetPartials() {
+  return listEdgeFleet().filter((x) => x.partial).map((x) => ({ agent: x.agent, at: x.at, unreadVcenters: x.unreadVcenters, withheldItems: x.withheldItems }));
 }
 
 /** 테스트/관리용 초기화. */

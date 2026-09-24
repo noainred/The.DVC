@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **520개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **523개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-24)
@@ -98,7 +98,7 @@
 | `EDGE_MODE` | `''` | ✅ | config.js |
 | `GUESTDISK_CONCURRENCY` | `4` |  | guestdisk/poller.js |
 | `GUESTDISK_DB_PATH` |  |  | guestdisk/db.js |
-| `GUESTDISK_TIMEOUT_MS` | `120000` |  | guestdisk/service.js |
+| `GUESTDISK_TIMEOUT_MS` |  |  | guestdisk/service.js |
 | `IDRAC_DB_PATH` |  | ✅ | config.js |
 | `IDRAC_ENABLED` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
 | `IDRAC_POLL_CONCURRENCY` |  |  | config.js |
@@ -189,7 +189,7 @@
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `LOGS_META_TTL_MS` | `30000` |  | logs/db.js |
+| `LOGS_META_TTL_MS` | `300000` |  | logs/db.js |
 | `VCLOGS_CONCURRENCY` | `6` |  | logs/poller.js |
 
 ## 메트릭 수집 (8)
@@ -240,7 +240,7 @@
 | `DISKTREND_SNAPSHOT_MAX_HOURS` | `72` |  | tools/diskTrend.js |
 | `DISKTREND_WARN_PCT` | `75` |  | tools/diskTrend.js |
 
-## 서비스 모니터 (7)
+## 서비스 모니터 (8)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -250,9 +250,10 @@
 | `SVCMON_MAX_PER_TICK` |  |  | svcmon/poller.js |
 | `SVCMON_PROC_CONCURRENCY` |  |  | svcmon/pool.js |
 | `SVCMON_TICK_MS` |  |  | svcmon/poller.js |
+| `SVCMON_WARM_MAX_MS` |  |  | svcmon/poller.js |
 | `SVCMON_WORKERS` |  |  | svcmon/capacity.js, svcmon/pool.js |
 
-## 수집 서버 (4)
+## 수집 서버 (5)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -260,6 +261,7 @@
 | `CENTRAL_SELF_REGISTER_UNVERIFIED_MAX` | `16` |  | collector/registry.js |
 | `COLLECTOR_REMOTE_SERVERS_MAX` | `20000` |  | collector/remoteInventory.js |
 | `EDGE_PUSH_TIMEOUT_MS` | `600000` |  | collector/upgradePush.js, upgrade/upgrade.js |
+| `POWER_CURRENT_STALE_MS` | `2` |  | collector/state.js, idrac/service.js |
 
 ## 스토리지 수집 (24)
 
@@ -270,7 +272,7 @@
 | `STORAGE_AREAS_TIMEOUT_MS` | `300000` |  | storage/poller.js |
 | `STORAGE_CLI_RAW_LIMIT` | `4000` |  | storage/collectors/cliSsh.js |
 | `STORAGE_CLI_SESSION_BUDGET_MS` | `150000` |  | storage/collectors/cliSsh.js |
-| `STORAGE_CLI_TIMEOUT_MS` | `45000` |  | storage/collectors/cliSsh.js |
+| `STORAGE_CLI_TIMEOUT_MS` |  |  | storage/collectors/cliSsh.js |
 | `STORAGE_CONFIG_PULL_MS` | `5 * 60_000` |  | storage/intervals.js |
 | `STORAGE_DAILY_KEEP_DAYS` |  |  | storage/db.js, storage/growthSettings.js |
 | `STORAGE_DEVICE_TIMEOUT_MS` | `180000` |  | storage/collectRequests.js, storage/poller.js |
@@ -305,7 +307,7 @@
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 
-## 엣지 에이전트 (37)
+## 엣지 에이전트 (38)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -318,6 +320,7 @@
 | `AGENT_DEPLOY_CONCURRENCY` | `2` | ✅ | agent/bulkDeploy.js |
 | `AGENT_DEPLOY_TIMEOUT_MS` |  | ✅ | agent/bulkDeploy.js |
 | `AGENT_EDGELOG_POLL_MS` |  |  | agent/edgeLogWorker.js |
+| `AGENT_FLEET_CENTRAL_TTL_MS` |  |  | agent/fleetPush.js |
 | `AGENT_FLEET_WITHHOLD_MAX_MS` | `20` |  | agent/fleetPush.js |
 | `AGENT_GPU_GUEST_WITHHOLD_MAX_MS` | `15` |  | agent/gpuGuestPush.js |
 | `AGENT_GUESTDISK_PUSH_TIMEOUT_MS` |  |  | agent/guestDiskPush.js |
@@ -417,7 +420,7 @@
 | `SSH_PAGER_MAX_PAGES` | `400` |  | proxy/sshExec.js |
 | `SSH_PTY_COLS` | `1000` |  | proxy/sshExec.js |
 | `SSH_PTY_ROWS` | `200` |  | proxy/sshExec.js |
-| `SSH_READY_TIMEOUT_MS` | `60000` |  | proxy/sshExec.js, proxy/sshGateway.js |
+| `SSH_READY_TIMEOUT_MS` |  |  | proxy/sshExec.js, proxy/sshGateway.js |
 
 ## 인사이트 (7)
 
@@ -464,7 +467,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (51)
+## 중앙(위임 수집) (52)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -517,6 +520,7 @@
 | `SVCMON_EDGE_MAX_ROWS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_SILENCE_MIN_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_SKEW_WARN_MS` |  |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_WARM_GC_HOLD_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_SILENCE_ALERT` | `기본 적용('false' 로 끄기)` |  | central/svcmonSilence.js |
 | `SVCMON_SILENCE_TICK_MS` |  |  | central/svcmonSilence.js |
 
@@ -590,7 +594,7 @@
 | `HZSESS_DB_PATH` |  |  | horizon/sessionDb.js |
 | `HZSESS_FIRST_DELAY_MS` | `60000` |  | horizon/sessionPoller.js |
 
-## iDRAC/전력 (11)
+## iDRAC/전력 (10)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -602,7 +606,6 @@
 | `IDRAC_TEMP_SERIES` | `기본 적용('false' 로 끄기)` |  | idrac/serverTempSeries.js |
 | `IDRAC_TEMP_SERIES_DETAIL` | `기본 아님('true' 일 때만 적용)` |  | idrac/serverTempSeries.js |
 | `OME_POWER_CONCURRENCY` | `16` |  | idrac/ome.js |
-| `POWER_CURRENT_STALE_MS` | `2` |  | idrac/service.js |
 | `POWER_NDJSON_MAX_ROWS` | `2000000` |  | idrac/db.js |
 | `ROOMTEMP_STALE_MS` | `15` |  | idrac/roomTemp.js |
 
@@ -625,7 +628,7 @@
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `LLM_ENABLED` | `기본 아님('true' 일 때만 적용)` |  | llm/config.js |
-| `LLM_TIMEOUT_MS` | `30000` |  | llm/config.js |
+| `LLM_TIMEOUT_MS` |  |  | llm/config.js |
 | `OLLAMA_MODEL` | `'llama3.1'` |  | llm/config.js |
 | `OLLAMA_URL` | `'http://localhost:11434'` |  | llm/config.js |
 
@@ -660,10 +663,10 @@
 | `SANSW_ALIAS_MAX` | `8000` |  | sanswitch/zoning.js |
 | `SANSW_CAPS_TTL_MS` | `6` |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CLI_RAW_LIMIT` | `4000` |  | sanswitch/collectors/fosSsh.js |
-| `SANSW_CLI_TIMEOUT_MS` | `45000` |  | sanswitch/collectors/fosSsh.js |
+| `SANSW_CLI_TIMEOUT_MS` |  |  | sanswitch/collectors/fosSsh.js |
 | `SANSW_CONCURRENCY` | `4` |  | sanswitch/poller.js |
 | `SANSW_DEVICE_TIMEOUT_MS` | `120000` |  | sanswitch/collectRequests.js, sanswitch/poller.js |
-| `SANSW_HTTP_TIMEOUT_MS` | `20000` |  | sanswitch/collectors/fosRest.js |
+| `SANSW_HTTP_TIMEOUT_MS` |  |  | sanswitch/collectors/fosRest.js |
 | `SANSW_PERF_ACTIVITY_MAX` | `500` |  | sanswitch/perfActivityLog.js |
 | `SANSW_PERF_CONCURRENCY` | `2` |  | sanswitch/perfPoller.js |
 | `SANSW_PERF_DEVICE_TIMEOUT_MS` |  |  | sanswitch/perfPoller.js |
@@ -699,4 +702,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 520
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 523

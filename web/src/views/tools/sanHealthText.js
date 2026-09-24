@@ -503,9 +503,13 @@ export function problemOmittedNote(omitted) {
 
 /** 조닝 정보가 없는 포트의 문구 — 상한으로 건너뛴 문제 포트와 원래 대상이 아닌 포트를 구분한다. */
 export function portZoningFallback(row, zoningNote, omitted) {
+  // v2.606(감사 RECENT2606-05): 서버는 조닝 자체를 수집하지 못했을 때만 zoningNote 를 채운다(routes/api/sanSwitch.js
+  // zoneDetailFor). 그때는 상한을 올려도 영원히 조회되지 않으므로 원인을 '상한' 으로 지목하면 틀린 조치가 된다 —
+  // zoningNote 가 있으면 그것을 먼저 쓴다. 상한 문구는 조닝이 수집된 경우에만.
+  if (zoningNote) return zoningNote;
   const isProblem = row && (row.verdict === 'bad' || row.verdict === 'warn');
   if (isProblem && Number.isFinite(omitted) && omitted > 0) {
     return `이 포트는 문제 포트지만 조닝 상대 조회 상한을 넘어 조회하지 않았습니다(${omitted}개 생략).`;
   }
-  return zoningNote || '이 포트는 이상·주의 목록에 없어 조닝 상대를 조회하지 않았습니다.';
+  return '이 포트는 이상·주의 목록에 없어 조닝 상대를 조회하지 않았습니다.';
 }

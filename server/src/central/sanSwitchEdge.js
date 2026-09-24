@@ -7,7 +7,40 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
+import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter, isPlainObj } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
+
+/**
+ * v2.606(감사 CEN2606-03 — 재현): 점검·조닝이 순회하는 중첩 배열 — `ports.list` · `extra.sensors.list` · `zoning.zones` — 을
+ *   **객체 원소 배열**로 좁힌다. 예전에는 `ports.list:[null]`·`'abc'`·`extra.sensors.list:'x'` 가 그대로 저장돼
+ *   checkDevice·checkPorts 가 던졌고 전체 점검(healthcheck-all)이 500 이었다. 새 객체를 돌려주고 좁힌 개수를 센다.
+ *   ⚠ 배열 길이는 줄이지 않는다(엣지 slim·중앙 trimZoningToFit 의 상한이 이미 있다) — 모양만 본다.
+ */
+export function narrowSanSnapshot(d) {
+  if (!isPlainObj(d)) return { snap: d, narrowed: 0 };
+  let narrowed = 0;
+  const objs = (v) => {
+    if (!Array.isArray(v)) { narrowed += 1; return []; }
+    const out = v.filter(isPlainObj);
+    narrowed += v.length - out.length;
+    return out;
+  };
+  const o = { ...d };
+  if (isPlainObj(o.ports) && Object.hasOwn(o.ports, 'list') && o.ports.list != null) o.ports = { ...o.ports, list: objs(o.ports.list) };
+  if (o.extra != null && !isPlainObj(o.extra)) { o.extra = null; narrowed += 1; }
+  if (isPlainObj(o.extra) && o.extra.sensors != null) {
+    if (!isPlainObj(o.extra.sensors)) { o.extra = { ...o.extra, sensors: null }; narrowed += 1; }
+    else if (Object.hasOwn(o.extra.sensors, 'list') && o.extra.sensors.list != null) o.extra = { ...o.extra, sensors: { ...o.extra.sensors, list: objs(o.extra.sensors.list) } };
+    // parsed 인데 목록이 없으면 판정이 s.list 를 순회한다 — 빈 배열로 둔다(개수는 counts 가 말한다).
+    else if (o.extra.sensors.parsed) o.extra = { ...o.extra, sensors: { ...o.extra.sensors, list: [] } };
+  }
+  if (o.zoning != null && !isPlainObj(o.zoning)) { o.zoning = null; narrowed += 1; }
+  // zones 는 v2.510 까지 숫자(0)였다 — 구버전 엣지의 숫자는 '결함' 으로 세지 않고 빈 배열로만 바꾼다.
+  if (isPlainObj(o.zoning) && o.zoning.zones != null) {
+    if (typeof o.zoning.zones === 'number') o.zoning = { ...o.zoning, zones: [] };
+    else o.zoning = { ...o.zoning, zones: objs(o.zoning.zones) };
+  }
+  return { snap: o, narrowed };
+}
 import { recordActivity } from '../sanswitch/activityLog.js';
 import { ackCollect, setCollectBaseResolver } from '../sanswitch/collectRequests.js';
 
@@ -26,6 +59,8 @@ function load() {
   if (_map) return _map;
   try { _map = new Map(Object.entries(JSON.parse(fs.readFileSync(FILE, 'utf8')))); }
   catch { _map = new Map(); } // 캐시 성격 — 다음 push 가 재구축
+  // v2.606(CEN2606-03): 수정 전에 저장된 원소도 같은 정제를 거친다.
+  for (const [k, v] of _map) if (isPlainObj(v) && Array.isArray(v.devices)) _map.set(k, { ...v, devices: v.devices.map((x) => narrowSanSnapshot(x).snap) });
   return _map;
 }
 
@@ -47,7 +82,9 @@ export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1, info 
   const adm = admitAgent(load(), agent);
   if (!adm.ok) { info.refused = true; console.warn(`[central] sanswitch-data: 엣지 수 상한 — 새 이름 '${String(agent).slice(0, 64)}' 거절(최근 보고한 엣지를 밀어내지 않는다)`); return 0; }
   if (adm.evicted) { info.evicted = adm.evicted; console.warn(`[central] sanswitch-data: 엣지 수 상한 — 오래 조용한 '${adm.evicted}' 보관분을 내렸다`); }
-  let list = clean.map((d) => ({ ...d, agent })); // 엣지가 뭐라 보냈든 인증된 agent 로 덮는다(출처 위조 차단)
+  let narrowed = 0;
+  let list = clean.map((d0) => { const { snap: d, narrowed: n } = narrowSanSnapshot(d0); narrowed += n; return { ...d, agent }; }); // 엣지가 뭐라 보냈든 인증된 agent 로 덮는다(출처 위조 차단)
+  if (narrowed) info.narrowed = narrowed;
   // 청크 병합(v2.417): 첫 청크(0)는 교체, 이후 청크는 deviceId 로 upsert — 한 주기의 push 가 여러
   // 요청으로 나뉘어도(1MB 한도) 중앙 목록이 '마지막 청크만' 으로 줄어들지 않게.
   if (chunk > 0 && chunks > 1) {
@@ -84,8 +121,16 @@ export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1, info 
       });
     } catch { /* 로그 실패가 push 수신을 막지 않게 */ }
   }
+  // v2.606(감사 TIM2606-05): 중복 제거 Map 은 **보관 중인 장비 id 만** 남긴다 — 예전에는 set 만 하고 지우지 않아 매 push 새
+  //   deviceId 를 보내는 엣지(재등록 반복·오동작·공유 토큰)가 프로세스 수명 내내 키를 쌓았다. 빠진 장비의 키만 지우므로
+  //   dedup 계약(같은 collectedAt 재push 는 기록하지 않는다)은 그대로다.
+  const live = new Set();
+  for (const v of load().values()) for (const d of v?.devices || []) if (d?.deviceId) live.add(d.deviceId);
+  for (const k of _lastRec.keys()) if (!live.has(k)) _lastRec.delete(k);
   return list.length;
 }
+/** 테스트·진단용 — 중복 제거 Map 크기. */
+export function _lastRecSize() { return _lastRec.size; }
 
 /** 전 엣지 스냅샷 평탄 목록(중앙 화면이 로컬 수집분과 합쳐 쓴다). */
 export function edgeSanSwitchSnapshots() {

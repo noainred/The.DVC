@@ -77,8 +77,11 @@ export function growthCell(g, unitKey = 'auto') {
   const res = approxResolution(g);
   if (res != null) {
     const r = bytesAuto(res) ?? '—';
-    parts.push(`장비 표시값(반올림)으로 계산해 ±${r} 해상도입니다`);
-    if (g.belowResolution) {
+    // v2.606(RECENT2606-01): mixed — 최신은 정확 값이고 이력에 반올림 주기가 섞였다. 값은 가리지 않고, 기준일이
+    //   반올림 주기였다면 그만큼 다를 수 있다는 사실만 밝힌다(양끝이 정확 값인 칸은 정확하다).
+    if (g.mixed === true) parts.push(`최신 값은 정확하지만 이력에 반올림 주기가 섞여 있어, 기준일이 반올림 주기였다면 ±${r} 만큼 다를 수 있습니다`);
+    else parts.push(`장비 표시값(반올림)으로 계산해 ±${r} 해상도입니다`);
+    if (g.belowResolution && g.mixed !== true) {
       return { text: `±${r} 미만`, tone: 'flat', title: parts.join(' · '), exact: g.exact !== false, approxMark: `약(±${r})` };
     }
     return {
@@ -113,7 +116,7 @@ export function approxFootnote(devices) {
   if (!n) return null;
   // v2.605(RECENT2605-03): mixed = 최신은 정확 값이지만 이력에 반올림 주기가 섞인 장비 — 따로 센다.
   const mixed = (devices || []).filter((d) => d?.capacityApprox?.mixed === true).length;
-  const tail = mixed ? ` 그중 ${mixed}대는 최신 값은 정확하지만 반올림 주기가 섞여 있어 날짜별 기준이 다릅니다.` : '';
+  const tail = mixed ? ` 그중 ${mixed}대는 최신 값은 정확하지만 반올림 주기가 섞여 있어 날짜별 기준이 다릅니다(이 장비들의 값은 가리지 않았습니다 — 기준일이 반올림 주기였다면 그만큼 다를 수 있습니다).` : '';
   return `**약(±해상도)** 표지가 붙은 장비 ${n}대는 용량을 장비의 표시 반올림 값으로 읽었습니다 — 표시 반올림 값이라 해상도 미만 변화는 보이지 않습니다. ‘±해상도 미만’ 은 변화가 없었다는 뜻이 아닙니다.${tail}`;
 }
 

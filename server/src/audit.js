@@ -75,6 +75,17 @@ function auditStr(v) {
   return String(v);
 }
 
+/**
+ * v2.606(감사 SEC2606-06): target·detail 한 칸의 상한. AUDIT_MAX 는 **줄 수** 기준이라, 요청 1건이 16KB 줄을 만들면
+ * 파일이 수백 MB 로 자라고 500건마다 도는 트림(readFileSync+split)이 이벤트 루프를 수 초 막는다. 모든 호출부를 여기서 막는다.
+ * 잘랐다는 사실은 값 끝에 밝힌다(조용한 절단 금지).
+ */
+export const AUDIT_FIELD_MAX = 1000;
+export const AUDIT_TRUNC_MARK = '…(잘림)';
+function auditClip(s) {
+  return s.length > AUDIT_FIELD_MAX ? s.slice(0, AUDIT_FIELD_MAX) + AUDIT_TRUNC_MARK : s;
+}
+
 export function logAudit(opts = {}, ...rest) {
   // ⚠ `logAudit(req, '액션', {...})` 오용 감지 — 조용히 넘기면 위 사고가 반복된다.
   //   express req 는 `method`·`headers` 를 갖는다(감사 옵션 객체에는 없다).
@@ -93,8 +104,8 @@ export function logAudit(opts = {}, ...rest) {
       at: new Date().toISOString(),
       user: auditStr(user) || 'unknown',
       action: auditStr(action),
-      target: auditStr(target),
-      detail: auditStr(detail),
+      target: auditClip(auditStr(target)),
+      detail: auditClip(auditStr(detail)),
       ip: auditStr(ip),
     }) + '\n';
     fs.mkdirSync(path.dirname(FILE), { recursive: true });

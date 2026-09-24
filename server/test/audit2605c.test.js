@@ -207,7 +207,11 @@ test('RECENT2605-03: 반올림 주기를 본 장비는 정확 값 주기에도 �
   const m = growthMatrix(rows, { asOfDay: D0, periods: [{ key: '1d', days: 1, label: '1일' }], meta: new Map([['isi-mix', { capacityApprox: exact.extra.capacityApprox }]]) });
   const d = m.devices[0];
   assert.deepEqual(d.capacityApprox, { resolutionBytes: 0.1 * PiB, mixed: true });
-  assert.equal(d.growth['1d'].belowResolution, true);
+  // v2.606(RECENT2606-01) 정정: capacity_daily 에는 행별 반올림 여부가 없어 mixed 장비의 칸은 **양끝이 정확 값일 수도** 있다 —
+  //   가리면 정확한 1일·7일 증가량까지 사라졌다. mixed 는 값을 보이고 해상도·mixed 표지(각주)만 싣는다.
+  assert.equal(d.growth['1d'].belowResolution, false);
+  assert.equal(d.growth['1d'].mixed, true);
+  assert.equal(d.growth['1d'].resolutionBytes, 0.1 * PiB);
 });
 
 // ── RECENT2605-04 ─────────────────────────────────────────────────────────────

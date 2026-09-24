@@ -164,7 +164,7 @@ export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}
     const seenRemoteOrigin = new Set(); // 같은 수집기의 동일 서버(여러 별칭 보고)를 한 번만 집계
     // v2.605(CEN2605-03): 법인별 항목을 전부 본다 — 같은 호스트명을 두 법인이 보고하면 **둘 다** 다른 서버다. 그 호스트는
     //   호스트명으로 중복 제거하지 않는다(h:esx01 로 묶으면 한 법인 서버가 다시 빠진다) — 서비스태그로만 묶는다.
-    const conflictHosts = new Set(remoteHostConflicts().map((x) => x.host));
+    const conflictHosts = new Set(remoteHostConflicts({ now: nowTs, staleMs: POWER_STALE_MS }).map((x) => x.host)); // v2.606 RECENT2606-02: 신선한 항목끼리만
     for (const r of remotePowerEntries()) {
       const host = r.host;
       if (r.watts == null || !Number.isFinite(r.watts)) continue;

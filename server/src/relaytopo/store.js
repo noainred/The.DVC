@@ -49,7 +49,8 @@ const str = (v, n) => String(v ?? '').replace(CTRL_RE, ' ').trim().slice(0, n);
 /** SSH 자격증명 정규화. prev 가 있으면 빈 비밀은 이전 값을 잇는다(화면은 비밀을 되돌려 보내지 않음). clear* 플래그로 명시 삭제. */
 function normSsh(input, prev) {
   const s = input && typeof input === 'object' ? input : {};
-  const out = { port: port(s.port, 22), username: str(s.username, 64) };
+  // v2.606 WEB2606-10: 빈 포트 칸은 이전 값을 잇는다(없으면 22) — 예전에는 비우면 기본 22 로 조용히 되돌아갔다.
+  const out = { port: port(s.port, port(prev?.port, 22)), username: str(s.username, 64) };
   for (const k of SSH_SECRETS) {
     const v = typeof s[k] === 'string' ? s[k] : '';
     const clear = s[`clear${k[0].toUpperCase()}${k.slice(1)}`] === true;
@@ -74,14 +75,25 @@ const hasSecret = (ssh) => SSH_SECRETS.some((k) => !!ssh?.[k]);
 
 export function normalizeTopology(input = {}, prev = null) {
   const mainHostChanged = !!prev?.main && (ip(input.main?.privateIp) !== (prev.main.privateIp || '') || ip(input.main?.publicIp) !== (prev.main.publicIp || ''));
-  const main = { name: str(input.main?.name, 40) || 'Main', privateIp: ip(input.main?.privateIp), publicIp: ip(input.main?.publicIp), portalPort: port(input.main?.portalPort, 4000), ssh: normSsh(input.main?.ssh, mainHostChanged ? null : prev?.main?.ssh) };
+  const main = { name: str(input.main?.name, 40) || 'Main', privateIp: ip(input.main?.privateIp), publicIp: ip(input.main?.publicIp), portalPort: port(input.main?.portalPort, port(prev?.main?.portalPort, 4000)), ssh: normSsh(input.main?.ssh, mainHostChanged ? null : prev?.main?.ssh) };
+  // v2.606(감사 WEB2606-10): 버린 서비스 행을 **조용히 지우지 않는다** — 포트 칸을 비우고 저장하면 그 행이 사라졌는데
+  // 응답에 흔적이 없었다. 버린 key·사유를 servicesDropped(비열거 — 저장 파일에는 남지 않는다)로 싣고 라우트·화면이 말한다.
+  const servicesDropped = [];
   const services = (Array.isArray(input.services) ? input.services : DEFAULT_SERVICES).map((s) => ({
     key: str(s?.key, 32).toLowerCase(), label: str(s?.label, 40), listenPort: port(s?.listenPort, 0),
     target: TARGETS[s?.target] ? s.target : 'irs', targetPort: port(s?.targetPort, 0), mode: s?.mode === 'http' ? 'http' : 'tcp', enabled: s?.enabled !== false,
-  })).filter((s) => RE_KEY.test(s.key) && s.listenPort && s.targetPort).slice(0, 32);
+  })).filter((s) => {
+    const reason = !RE_KEY.test(s.key) ? 'key' : (!s.listenPort ? 'listen-port' : (!s.targetPort ? 'target-port' : ''));
+    if (reason) servicesDropped.push({ key: s.key, label: s.label, reason });
+    return !reason;
+  });
+  for (const s of services.slice(32)) servicesDropped.push({ key: s.key, label: s.label, reason: 'limit' });
   // listenPort 중복 제거(뒤에 온 것 무시)
   const seenPort = new Set(); const uniq = [];
-  for (const s of services) { if (seenPort.has(s.listenPort)) continue; seenPort.add(s.listenPort); uniq.push(s); }
+  for (const s of services.slice(0, 32)) {
+    if (seenPort.has(s.listenPort)) { servicesDropped.push({ key: s.key, label: s.label, reason: 'duplicate-port' }); continue; }
+    seenPort.add(s.listenPort); uniq.push(s);
+  }
   const prevSites = new Map((prev?.sites || []).map((s) => [s.dc, s]));
   const dropped = [];   // host 가 바뀌어 저장된 비밀을 버린 노드(화면에 알린다 — 조용히 지우면 더 나쁘다)
   const sites = (Array.isArray(input.sites) ? input.sites : []).map((s) => {
@@ -95,6 +107,9 @@ export function normalizeTopology(input = {}, prev = null) {
   const seenDc = new Set(); const uniqSites = sites.filter((s) => (seenDc.has(s.dc) ? false : (seenDc.add(s.dc), true)));
   const out = { main, services: uniq.length ? uniq : DEFAULT_SERVICES.map((x) => ({ ...x })), sites: uniqSites };
   if (dropped.length) Object.defineProperty(out, 'secretsDropped', { value: dropped, enumerable: false });
+  // 전부 버려져 기본 서비스로 되돌아간 경우도 servicesDropped 가 그 사실을 말한다(servicesReset).
+  if (servicesDropped.length) Object.defineProperty(out, 'servicesDropped', { value: servicesDropped, enumerable: false });
+  if (!uniq.length && Array.isArray(input.services) && input.services.length) Object.defineProperty(out, 'servicesReset', { value: true, enumerable: false });
   return out;
 }
 
@@ -115,7 +130,10 @@ export function saveTopology(input = {}) {
   _cache = normalizeTopology(input, loadRaw());
   atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, ..._cache }), null, 2), { mode: 0o600 });
   try { fs.chmodSync(FILE(), 0o600); } catch { /* 신규 생성 외 덮어쓰기에도 0600 */ }
-  return loadTopology();
+  const out = loadTopology();
+  // v2.606 WEB2606-10: 정규화가 버린 것을 호출부(라우트)가 응답에 실을 수 있게 비열거로 넘긴다.
+  for (const k of ['servicesDropped', 'servicesReset', 'secretsDropped']) if (_cache[k] !== undefined) Object.defineProperty(out, k, { value: _cache[k], enumerable: false });
+  return out;
 }
 export function _resetForTest() { _cache = null; }
 

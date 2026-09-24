@@ -18,12 +18,13 @@
  */
 
 import { withSsh, isSshAuthError } from '../../proxy/sshExec.js';
+import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { emptySnapshot } from '../types.js';
 
 /** 캡처할 원문 상한(문자) — 응답/로그가 비대해지지 않게. */
 const RAW_LIMIT = Number(process.env.STORAGE_CLI_RAW_LIMIT) || 4000;
 /** 명령 1개 타임아웃(ms) — CLI 는 로그인 배너·페이지네이션으로 느릴 수 있어 넉넉히. */
-const CMD_TIMEOUT_MS = Number(process.env.STORAGE_CLI_TIMEOUT_MS) || 45_000;
+const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.STORAGE_CLI_TIMEOUT_MS, 45_000, { max: 1_800_000 });   // v2.606 TIM2606-03
 /**
  * 세션 전체 예산(v2.528 — **v2.526 회귀 수정**).
  *

@@ -17,6 +17,7 @@
  */
 
 import { Agent } from 'undici';
+import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { withSsrfLookup } from '../../util/ssrfLookup.js';
 import { emptySnapshot, summarizePorts, MAX_PORTS } from '../types.js';
 import { applyRates } from '../rates.js';
@@ -26,7 +27,7 @@ import { zoningFromRest } from '../zoningCollect.js';   // v2.511: 조닝 — SS
 // 보안(M-4, 2026-09-12): SANSWITCH_TLS_VERIFY=true 면 검증을 켠다(기본은 기존대로 해제 — 자체서명 FOS 대응).
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
 const dispatcher = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: process.env.SANSWITCH_TLS_VERIFY === 'true' }) });
-const TIMEOUT_MS = Number(process.env.SANSW_HTTP_TIMEOUT_MS) || 20_000;
+const TIMEOUT_MS = reqTimeoutMs(process.env.SANSW_HTTP_TIMEOUT_MS, 20_000);   // v2.606 TIM2606-03: 음수·2^31 초과 차단
 
 const RE_HEADER_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/; // eslint-disable-line no-control-regex
 

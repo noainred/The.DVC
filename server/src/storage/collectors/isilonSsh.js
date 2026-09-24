@@ -18,6 +18,7 @@
 import { withSsh } from '../../proxy/sshExec.js';
 import { sshFailureSnapshot } from './cliSsh.js';
 import { emptySnapshot } from '../types.js';
+import { DEFAULT_PERIODS } from '../growth.js';
 
 const fmtStep = (b) => {
   for (const [u, k] of [['PiB', 5], ['TiB', 4], ['GiB', 3], ['MiB', 2], ['KiB', 1]]) {
@@ -314,10 +315,15 @@ export function normalizeIsiStatus(device, parsed, { version = '', users = null,
  *   화면이 해상도를 계속 밝히게 한다(적재는 막지 않는다 — v2.604 결정 '반올림 적재는 막지 않고 해상도를 밝힌다').
  *   ⚠ 인메모리다 — 재시작 직후에는 반올림 주기를 다시 볼 때까지 표지가 없다(정직 기록).
  */
-const _approxSeen = new Map();
+const _approxSeen = new Map();   // deviceId → { step, at(마지막 반올림 주기 시각) }
 const APPROX_SEEN_MAX = 4096;
+/*
+ * v2.606(RECENT2606-01): 표지 시한 — 마지막 반올림 주기 + **가장 긴 기본 비교 기간**(1년) + 1일. 그 뒤로는 어떤 기본
+ *   증가량 칸의 기준일도 반올림 행일 수 없으므로 표지를 지운다(예전엔 삭제 경로가 없어 프로세스 수명 내내 남았다).
+ */
+export const MIXED_HOLD_MS = (Math.max(...DEFAULT_PERIODS.map((p) => p.days)) + 1) * 86_400_000;
 export function _resetApproxSeenForTest() { _approxSeen.clear(); }
-export function markMixedBasis(snap, deviceId) {
+export function markMixedBasis(snap, deviceId, now = Date.now()) {
   const id = String(deviceId || '');
   if (!id || !snap?.extra || snap.sections?.capacity !== 'ok') return snap;
   const ap = snap.extra.capacityApprox;
@@ -325,12 +331,14 @@ export function markMixedBasis(snap, deviceId) {
     const step = Number(ap.resolutionBytes);
     if (Number.isFinite(step) && step > 0) {
       _approxSeen.delete(id);
-      _approxSeen.set(id, step);
+      _approxSeen.set(id, { step, at: now });
       if (_approxSeen.size > APPROX_SEEN_MAX) _approxSeen.delete(_approxSeen.keys().next().value);
     }
     return snap;
   }
-  const seen = _approxSeen.get(id);
+  const rec = _approxSeen.get(id);
+  if (rec && !(now - rec.at <= MIXED_HOLD_MS)) { _approxSeen.delete(id); return snap; }
+  const seen = rec ? rec.step : null;
   if (!ap && seen != null) {
     snap.extra.capacityApprox = { source: 'mixed', mixed: true, resolutionBytes: seen };
     snap.extra.capacityBasisNote = `이번 주기는 정확한 바이트(‘isi statistics’)로 읽었지만, 이 장비는 최근 반올림 표기(‘isi status’) 주기도 있었습니다 — 날마다 기준이 섞여 증가량이 약 ${fmtStep(seen)} 해상도만큼 흔들릴 수 있습니다.`;

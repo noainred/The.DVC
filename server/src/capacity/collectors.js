@@ -65,32 +65,87 @@ function cpuTimesTotal() {
   return { idle, total };
 }
 
-/* ── /proc/net/dev 합산(리눅스) — 루프백 제외 rx/tx 바이트 누적 ── */
-function procNetBytes() {
+/* ── /proc/net/dev 합산(리눅스) ──
+ * v2.606 COL2606-03: 예전에는 lo/veth/docker/br- 만 빼고 **전부** 더해 bond 마스터(bond0)와 그 슬레이브(eno1·eno2),
+ * VLAN 하위(bond0.100)가 같은 바이트를 2~3번 셌다(선로 1Gbps → 3Gbps). 이제 '선로' 인터페이스만 더한다:
+ *   · 물리 NIC(`/sys/class/net/<if>/device` 있음) 또는 bond 마스터(`…/bonding` 있음)
+ *   · 단 **bond 의 슬레이브**(master 가 bond)는 뺀다 — 마스터가 이미 그 바이트를 센다
+ *   · VLAN·가상 인터페이스(device 없음)는 뺀다 — 하위 인터페이스와 같은 바이트다
+ * /sys 가 없어 하나도 분류하지 못하면(컨테이너·비리눅스) 예전 규칙에서 VLAN(`이름.번호`)만 더 빼 합산한다. */
+function sysNetClass(iface) {
+  const base = `/sys/class/net/${iface}`;
   try {
-    const txt = fs.readFileSync('/proc/net/dev', 'utf8');
-    let rx = 0; let tx = 0;
-    for (const line of txt.split('\n')) {
-      const m = line.match(/^\s*([^:]+):\s*(.*)$/);
-      if (!m) continue;
-      const iface = m[1].trim();
-      if (iface === 'lo' || iface.startsWith('veth') || iface.startsWith('docker') || iface.startsWith('br-')) continue;
-      const cols = m[2].trim().split(/\s+/).map(Number);
-      if (cols.length >= 9) { rx += cols[0] || 0; tx += cols[8] || 0; }
-    }
-    return { rx, tx };
+    if (!fs.existsSync(base)) return null;
+    const bonding = fs.existsSync(`${base}/bonding`);
+    const device = fs.existsSync(`${base}/device`);
+    let masterIsBond = false;
+    try {
+      const m = fs.readlinkSync(`${base}/master`).split('/').pop();
+      masterIsBond = !!m && fs.existsSync(`/sys/class/net/${m}/bonding`);
+    } catch { /* master 없음 */ }
+    return { device, bonding, masterIsBond };
   } catch { return null; }
 }
 
-/* ── 디스크 여유(%사용) — capacity.db 가 놓인 파일시스템 ── */
+/** 순수 — /proc/net/dev 원문과 분류 함수로 선로 인터페이스 rx/tx 합계. 분류가 전혀 없으면 폴백 규칙. */
+export function sumWireNetBytes(txt, classify = sysNetClass) {
+  const rows = [];
+  for (const line of String(txt || '').split('\n')) {
+    const m = line.match(/^\s*([^:|]+):\s*(.*)$/);
+    if (!m) continue;
+    const iface = m[1].trim();
+    const cols = m[2].trim().split(/\s+/).map(Number);
+    if (cols.length >= 9) rows.push({ iface, rx: cols[0] || 0, tx: cols[8] || 0 });
+  }
+  let rx = 0; let tx = 0; let classified = 0; let used = 0;
+  const cls = rows.map((r) => ({ ...r, c: r.iface === 'lo' ? null : classify(r.iface) }));
+  for (const r of cls) {
+    if (!r.c) continue;
+    classified++;
+    if (!(r.c.device || r.c.bonding) || r.c.masterIsBond) continue;
+    rx += r.rx; tx += r.tx; used++;
+  }
+  if (classified) return { rx, tx, ifaces: used, mode: 'sys' };
+  rx = 0; tx = 0; used = 0;
+  for (const r of rows) {
+    const i = r.iface;
+    if (i === 'lo' || i.startsWith('veth') || i.startsWith('docker') || i.startsWith('br-') || i.includes('.')) continue;
+    rx += r.rx; tx += r.tx; used++;
+  }
+  return { rx, tx, ifaces: used, mode: 'fallback' };
+}
+
+function procNetBytes() {
+  try {
+    return sumWireNetBytes(fs.readFileSync('/proc/net/dev', 'utf8'));
+  } catch { return null; }
+}
+
+/** 누적 카운터 차분 → bps. ⚠ 음수 델타(카운터 리셋·인터페이스 제거·재부팅)는 0 이 아니라 null(v2.606 COL2606-03 —
+ *  0 은 '트래픽 없음' 이라는 거짓. bmusage/rates.js·sanswitch/rates.js 와 같은 규약). */
+export function counterBps(cur, prev, dtMs) {
+  if (cur == null || prev == null || !(dtMs > 0)) return null;
+  const d = cur - prev;
+  if (!Number.isFinite(d) || d < 0) return null;
+  return d / (dtMs / 1000) * 8;
+}
+
+/* ── 디스크 사용률 — capacity.db 가 놓인 파일시스템 ──
+ * v2.606 COL2606-06: df 정의 used/(used+avail) 다. 예전 (total−bfree)/total 은 루트 예약 블록을 여유로 세어
+ * 비루트 서비스(vmportal)는 이미 쓰기 실패인 디스크가 95% 로 보였다(v2.599 bmstor dfUsedPct 와 같은 식). */
+export function dfUsedPct(s) {
+  if (!s) return null;
+  const blocks = Number(s.blocks); const bfree = Number(s.bfree); const bavail = Number(s.bavail);
+  if (![blocks, bfree, bavail].every(Number.isFinite) || blocks <= 0) return null;
+  const used = blocks - bfree;
+  const denom = used + bavail;
+  if (denom <= 0) return null;
+  return (used / denom) * 100;
+}
 function diskUsedPct() {
   try {
     if (typeof fs.statfsSync !== 'function') return null;
-    const s = fs.statfsSync(config.capacity.dbPath.replace(/[^/]+$/, '') || '.');
-    const total = s.blocks * s.bsize;
-    const free = s.bfree * s.bsize;
-    if (!total) return null;
-    return ((total - free) / total) * 100;
+    return dfUsedPct(fs.statfsSync(config.capacity.dbPath.replace(/[^/]+$/, '') || '.'));
   } catch { return null; }
 }
 
@@ -187,7 +242,7 @@ registerCollector({
     if (!cur || !p || p.rx == null) return null;
     const dtMs = ctx.now - p.t;
     if (dtMs <= 0) return null;
-    return Math.max(0, (cur.rx - p.rx) / (dtMs / 1000) * 8);   // bytes/s → bits/s
+    return counterBps(cur.rx, p.rx, dtMs);   // bytes/s → bits/s (음수 델타는 null)
   },
 });
 registerCollector({
@@ -201,6 +256,6 @@ registerCollector({
     if (!cur || !p || p.tx == null) return null;
     const dtMs = cur.t - p.t;
     if (dtMs <= 0) return null;
-    return Math.max(0, (cur.tx - p.tx) / (dtMs / 1000) * 8);
+    return counterBps(cur.tx, p.tx, dtMs);
   },
 });

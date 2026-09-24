@@ -23,6 +23,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
+import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.606 LEFT2606-02: 대역·엣지·계정이 바뀌면 저장 비밀번호 폐기
 
 const FILE = path.join(config.configDir, 'idrac-scan-ranges.json');
 
@@ -184,11 +185,27 @@ export function saveScanRanges(body = {}) {
     updatedAt: Date.now(),
     lastRun: cur.lastRun || null, // 실행 이력은 보존
   };
+  // v2.606 LEFT2606-02: 스캔의 '접속 대상' 은 ranges 다 — 대역(정규화 집합)·수행 엣지(agent)·계정이 바뀌었는데
+  //   새 비밀번호가 없으면 저장 비밀번호를 승계하지 않는다(v2.503 S-2 secretCarry 규약. 예전에는 대역만 바꿔 저장하면
+  //   다음 스캔이 새 대역의 Redfish 응답 호스트마다 저장 iDRAC 비밀번호를 보냈다). 대역 '추가' 도 대상이다 —
+  //   추가된 대역이 곧 새 접속처다. 폐기 사실은 응답 droppedSecrets·skipped 로 밝힌다(조용히 버리지 않는다).
+  const rangeKey = (r) => [...new Set((r || []).map((x) => String(x).trim().toLowerCase()).filter(Boolean))].sort().join(',');
+  const existed = Boolean(data.entries[id]);
+  const moved = existed && (
+    rangeKey(cur.ranges) !== rangeKey(next.ranges)
+    || accessMoved({ agent: cur.agent || '', username: cur.username || '' }, { agent: next.agent, username: next.username }, ['agent', 'username']));
+  const droppedSecrets = (moved && cur.password) ? dropCarriedSecrets(next, body, ['password']) : [];
+  if (droppedSecrets.length) next.password = ''; // 스키마(빈 문자열 = 비밀번호 없음)는 유지 — enabledScanRanges 가 스캔을 보류한다
   const prevEntries = data.entries;
   data.entries = { ...data.entries, [id]: next };
   const err = write(data);
   if (err) { cache = { ...data, entries: prevEntries }; return { ok: false, reason: `저장 실패(디스크에 쓰지 못해 반영하지 않았습니다): ${err}` }; }
-  return { ok: true, ...redact(id, next) };
+  const out = { ok: true, ...redact(id, next) };
+  if (droppedSecrets.length) {
+    out.droppedSecrets = droppedSecrets;
+    out.skipped = [{ field: 'password', reason: '스캔 대역·수행 엣지·계정이 바뀌어 저장된 비밀번호를 폐기했습니다 — 새 대역에 보낼 비밀번호를 다시 입력하세요(입력 전까지 이 항목의 스캔은 보류됩니다).' }];
+  }
+  return out;
 }
 
 /** 삭제. id로 삭제. */

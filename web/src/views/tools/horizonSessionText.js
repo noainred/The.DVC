@@ -139,12 +139,41 @@ export function collectStateNote(d) {
       text: `${failed}대에서 세션을 읽지 못했습니다 — 아래 수치는 읽어낸 서버만 합친 값이라 **하한**입니다(실제 사용자는 이보다 많을 수 있습니다).`,
       short: `${failed}대 조회 실패` };
   }
+  // v2.606 COL2606-04: 한 서버라도 페이지 상한에 걸려 **일부 세션만** 읽었으면 합계는 하한이다(추이에는 적재하지 않는다).
+  if (Number(d?.total?.serversTruncated) > 0) {
+    return { kind: 'truncated', tone: 'warn', waiting: false,
+      text: `${Number(d.total.serversTruncated)}대에서 페이지 상한에 걸려 세션을 **일부만** 읽었습니다 — 아래 수치는 **최소값**이고 이 주기는 추이에 적재하지 않았습니다(설정에서 페이지 상한을 올리세요).`,
+      short: '일부만 읽음(최소값)' };
+  }
   if (d?.total?.stateBlind) {
     return { kind: 'state-blind', tone: 'warn', waiting: false,
       text: '세션 상태(접속 중/연결 끊김) 필드를 알아보지 못해 **접속 중 인원을 셀 수 없습니다** — 전체 세션 수와 고유 계정 수만 표시합니다.',
       short: '상태 확인 불가' };
   }
   return { kind: 'ok', tone: 'none', waiting: false, text: '', short: '' };
+}
+
+/**
+ * v2.606 COL2606-04·WEB2606-09: 값 앞에 붙일 '최소 ' — 합계(total) 또는 서버 한 대(record)가 하한이면.
+ * field: 'connected'(접속 중 — 세션 절단·상태 미확인 세션도 하한 사유) | 'users'(고유 사용자) | 'sessions'.
+ */
+export function lowerBoundPrefix(t, field = 'users') {
+  if (!t) return '';
+  const cut = !!(t.truncated || t.sessionsLowerBound);
+  if (field === 'sessions') return cut ? '최소 ' : '';
+  if (field === 'connected') {
+    if (t.usersConnected == null) return '';
+    return (t.usersLowerBound || t.connectedLowerBound || cut || Number(t.stateUnknown) > 0) ? '최소 ' : '';
+  }
+  if (t.users == null) return '';
+  return (t.usersLowerBound || cut) ? '최소 ' : '';
+}
+
+/** 상태를 못 읽은 세션이 있으면 한 줄로 밝힌다(없으면 ''). 접속 중 수는 그만큼 모자랄 수 있다. */
+export function stateUnknownNote(t) {
+  const n = Number(t?.stateUnknown);
+  if (t?.stateUnknown == null || t?.stateUnknown === '' || !Number.isFinite(n) || n <= 0) return '';
+  return `상태 미확인 ${n}세션 — 접속 중 수는 최소값입니다`;
 }
 
 /** 접속 중 사용자 수 — 못 셀 때 0 을 쓰지 않는다(규칙 1). */
@@ -167,6 +196,8 @@ export function unionNote(total) {
   // 나왔다 — v2.525 Chromium 판독). 말할 것이 없으면 말하지 않는다.
   if (u === 0) return '';
   // v2.590 F8: 한 서버라도 이름 목록이 상한으로 잘렸으면 합집합은 **하한값**이다 — 정확한 인원이라 말하지 않는다.
+  // v2.606 COL2606-04: 세션 자체를 일부만 읽은 경우(이름 목록 절단 아님)는 원인이 다르다 — 따로 말한다.
+  if (total?.usersLowerBound && !(Number(total.usersOmitted) > 0)) return `일부 서버에서 세션을 페이지 상한까지만 읽어 전체 고유 계정은 **최소 ${u}명**입니다.`;
   if (total?.usersLowerBound) return `서버별 이름 목록이 상한으로 잘려(${Number(total.usersOmitted) || 0}명 생략) 전체 고유 계정은 **최소 ${u}명**입니다 — 정확한 합집합은 계산하지 못했습니다(서버별 고유의 합 ${sum}명이 상한).`;
   if (sum === u) return '서버가 1대이거나 서버 간에 겹치는 계정이 없습니다.';
   return `고유 계정 **${u}명**(합집합)인데 서버별 고유의 합은 **${sum}명** 입니다 — 차이 ${sum - u}명은 **여러 Connection Server 에 동시에 붙은 계정**입니다(같은 계정이면 1명으로 셉니다).`;

@@ -52,6 +52,17 @@ export function clusterAvgPct(list, key) {
   return vals.length ? Math.round(vals.reduce((a, v) => a + v, 0) / vals.length) : null;
 }
 const avgBy = (list, key) => clusterAvgPct(list, key);
+/**
+ * v2.606(감사 WEB2606-06): 전력은 **센서를 읽은 호스트만** 더한다. soapClient 는 전력 센서가 없는 호스트에 powerWatts 를
+ * 싣지 않는데(undefined) 예전 `Number(h.powerWatts) || 0` 은 호스트 행을 '0 W'(측정됨처럼)로, 합계 행을 측정 호스트만의
+ * 부분 합을 전체처럼 보였다. 측정 호스트가 하나도 없으면 null('—'), 일부만이면 측정 대수(powerHosts)를 함께 싣는다.
+ * ⚠ 0 W 보고는 값이다(numOrNull) — 인벤토리 표의 `> 0` 기준과 다르지만 합계에서 0 은 더해도 결과가 같다.
+ */
+export function powerSum(list) {
+  let sum = 0; let n = 0;
+  for (const h of list || []) { const v = num(h?.powerWatts); if (v != null) { sum += v; n += 1; } }
+  return { powerW: n ? sum : null, powerHosts: n };
+}
 const toGb = (mb) => Math.round((Number(mb) || 0) / 1024);
 
 /**
@@ -73,7 +84,7 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
     cpuRatio: ratioText(dc.alloc, dc.cores), vcpuAlloc: dc.alloc, cpuCores: dc.cores,
     cpuThreads: sumBy(hosts, (h) => h.cpuThreads),
     memRatio: ratioText(dc.memAlloc, dc.memPhys), memAllocGB: toGb(dc.memAlloc), memPhysGB: toGb(dc.memPhys),
-    version: '', vendor: '', model: '', powerW: sumBy(hosts, (h) => h.powerWatts), tempC: null,
+    version: '', vendor: '', model: '', ...powerSum(hosts), tempC: null,
   });
 
   for (const [cl, chosts] of groupClusters(hosts)) {
@@ -85,7 +96,7 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
       cpuRatio: ratioText(cv.alloc, cv.cores), vcpuAlloc: cv.alloc, cpuCores: cv.cores,
       cpuThreads: sumBy(chosts, (h) => h.cpuThreads),
       memRatio: ratioText(cv.memAlloc, cv.memPhys), memAllocGB: toGb(cv.memAlloc), memPhysGB: toGb(cv.memPhys),
-      version: '', vendor: '', model: '', powerW: sumBy(chosts, (h) => h.powerWatts), tempC: null,
+      version: '', vendor: '', model: '', ...powerSum(chosts), tempC: null,
     });
     for (const h of [...chosts].sort((a, b) => String(a.name).localeCompare(String(b.name)))) {
       const alloc = vcpu.get(h.name) || 0;
@@ -98,7 +109,7 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
         cpuThreads: Number(h.cpuThreads) || 0,
         memRatio: ratioText(memAlloc, h.memTotalMB), memAllocGB: toGb(memAlloc), memPhysGB: toGb(h.memTotalMB),
         version: h.version || '', vendor: h.vendor || '', model: h.model || '',
-        powerW: Number(h.powerWatts) || 0, tempC: num(h.tempC),
+        powerW: num(h.powerWatts), powerHosts: null, tempC: num(h.tempC),
       });
     }
   }
@@ -127,6 +138,8 @@ export const OVERVIEW_COLUMNS = [
   { key: 'vendor', label: '제조사' },
   { key: 'model', label: '모델' },
   { key: 'powerW', label: '전력(W)', num: true },
+  // v2.606 WEB2606-06: 합계 행의 전력이 몇 대의 측정값인지(호스트수와 다르면 부분 합이다). 호스트 행은 빈 값.
+  { key: 'powerHosts', label: '전력측정호스트', num: true },
   { key: 'tempC', label: '흡기온도(℃)', num: true },
 ];
 

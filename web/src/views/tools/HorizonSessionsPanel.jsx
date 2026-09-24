@@ -27,7 +27,7 @@ import { Card } from './shared.jsx';
 import { unitText } from '../unitText.js';
 import {
   agoText, intervalText, kindTone, kindAdvice, authStopNote, collectStateNote, connectedText,
-  unionNote, provenanceText, sinceNote, NAME_MASK_NOTE, TRUST_NOTE, SESSION_PATH_NOTE,
+  unionNote, lowerBoundPrefix, stateUnknownNote, provenanceText, sinceNote, NAME_MASK_NOTE, TRUST_NOTE, SESSION_PATH_NOTE,
 } from './horizonSessionText.js';
 import { HorizonSessionSettings } from './HorizonSessionSettings.jsx';
 
@@ -124,14 +124,14 @@ export default function HorizonSessionsPanel() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
         <Card label={picked ? `${picked.name || picked.serverId} 접속 중 사용자` : '실시간(접속 중) 사용자'}
-          value={`${!picked && total.usersLowerBound && connectedText(total) !== '—' ? '최소 ' : ''}${connectedText(picked || total)}${connectedText(picked || total) === '—' ? '' : '명'}`}
+          value={`${lowerBoundPrefix(picked || total, 'connected')}${connectedText(picked || total)}${connectedText(picked || total) === '—' ? '' : '명'}`}
           meta={connectedText(picked || total) === '—'
             // v2.598 WEBUI-2598-01: 전 서버 조회 실패면 '상태 필드' 탓이 아니다 — 읽은 서버가 없다.
             ? (!picked && total.servers > 0 && !total.serversOk ? '읽어낸 서버가 없어 확인 불가(0명 아님)' : '상태 필드를 읽지 못했습니다')
-            : '접속 중 세션이 있는 고유 계정'}
+            : (stateUnknownNote(picked || total) || '접속 중 세션이 있는 고유 계정')}
           accent="var(--accent)" />
-        <Card label="고유 사용자(전체 상태)" value={`${!picked && total.usersLowerBound && total.users != null ? '최소 ' : ''}${(picked || total).users ?? '—'}${(picked || total).users == null ? '' : '명'}`}
-          meta={`연결 끊김 포함 · 세션 ${(picked || total).sessions ?? '—'}`} />
+        <Card label="고유 사용자(전체 상태)" value={`${lowerBoundPrefix(picked || total, 'users')}${(picked || total).users ?? '—'}${(picked || total).users == null ? '' : '명'}`}
+          meta={`연결 끊김 포함 · 세션 ${(picked || total).sessions == null ? '—' : `${lowerBoundPrefix(picked || total, 'sessions')}${(picked || total).sessions}`}`} />
         <Card label="세션 상태" value={`${(picked || total).connected ?? '—'}`}
           meta={`끊김 ${(picked || total).disconnected ?? '—'} · 연결 중 ${(picked || total).pending ?? '—'}`} />
         <Card label="서버" value={`${total.serversOk ?? 0}대`}

@@ -18,6 +18,7 @@ import AccessDenied from './AccessDenied.jsx';
 import TaskWho from './TaskWho.jsx';
 import ServiceDown from './ServiceDown.jsx';
 import { serviceDownKind } from './serviceDownText.js';
+import { numOrNull } from '../numOrNull.js';
 
 /** VM GPU 배지 — vGPU/패스쓰루/혼합. Vms.jsx 에 있던 것을 공용으로 옮겼다(상세 화면 단일화). */
 const GPU_TYPE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], mixed: ['혼합', 'purple'] };
@@ -64,12 +65,15 @@ export function Kpi({ label, value, unit, meta, pct, accent, onClick }) {
 }
 
 export function UsageCell({ pct }) {
+  // v2.606(감사 WEB2606-02): 못 읽은 사용률(null·빈 값)은 '—' 다. 예전에는 'null%' 를 그렸고 막대는 폭 없이 남았다.
+  const v = numOrNull(pct);
+  if (v == null) return <span className="nowrap muted" title="사용률을 읽지 못했습니다(연결 끊김·무응답 등)">—</span>;
   return (
     <span className="nowrap">
       <span className="mini-bar">
-        <span style={{ width: `${Math.min(pct, 100)}%`, background: usageColor(pct) }} />
+        <span style={{ width: `${Math.min(v, 100)}%`, background: usageColor(v) }} />
       </span>{' '}
-      <span className="pct tabular">{pct}%</span>
+      <span className="pct tabular">{v}%</span>
     </span>
   );
 }

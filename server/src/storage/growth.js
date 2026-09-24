@@ -159,9 +159,17 @@ export function growthMatrix(rows, { periods = DEFAULT_PERIODS, asOfDay, meta = 
     // v2.605(RECENT2605-03): mixed = 최신은 정확 값이지만 이력에 반올림 주기가 섞였다 — 해상도 표지를 유지한다.
     const approx = res != null && res > 0 ? { resolutionBytes: res, ...(metaOf(id).capacityApprox?.mixed === true ? { mixed: true } : {}) } : null;
     if (approx) {
+      // v2.606(RECENT2606-01): mixed(최신은 정확 값, 이력에 반올림 주기가 섞임)는 **가리지 않는다** — 양끝이 정확 값인
+      //   칸까지 '±해상도 미만' 으로 숨겨 1일·7일 증가량이 사라졌다. 칸별 반올림 여부는 capacity_daily 에 없으므로
+      //   해상도는 싣되(각주·표지) belowResolution 은 전부 반올림 표기인 장비에서만 판정한다.
+      const mixed = approx.mixed === true;
       for (const k of Object.keys(growth)) {
         const g = growth[k];
-        if (g && g.bytes != null) growth[k] = { ...g, resolutionBytes: res, belowResolution: Math.abs(g.bytes) < res / 2 };
+        if (g && g.bytes != null) {
+          growth[k] = mixed
+            ? { ...g, resolutionBytes: res, mixed: true, belowResolution: false }
+            : { ...g, resolutionBytes: res, belowResolution: Math.abs(g.bytes) < res / 2 };
+        }
       }
     }
 

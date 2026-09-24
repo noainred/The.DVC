@@ -7,7 +7,7 @@ import { metricsSamplerStatus, rescheduleMetricsSampler } from '../../metrics/sa
 import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds, resolveCollectMethod } from '../../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller, gpuHostIds, vmUsesGpu, getGpuGuestDiag } from '../../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../../gpu/guestops.js';
-import { testVmGuestSsh, detectPhysicalGpu, guestIps, gpuAuthGuard } from '../../gpu/sshCollect.js';
+import { testVmGuestSsh, detectPhysicalGpu, guestIps, gpuAuthGuard, pinnedIpCheck, unknownPinnedIps } from '../../gpu/sshCollect.js';
 import { listPhysical, addPhysical, updatePhysical, removePhysical, getPhysicalRaw, findPhysicalByHost } from '../../gpu/physicalRegistry.js';
 import { getAllPhysicalGpu } from '../../gpu/physicalStore.js';
 import { physicalPollerStatus, pollPhysicalOnce, reschedulePhysicalPoller } from '../../gpu/physicalPoller.js';
@@ -51,6 +51,10 @@ adminRouter.get('/gpu-guest/settings', adminOnly, (_req, res) => {
   res.json({ settings: redactGpuGuestSettings(loadGpuGuestSettings()), status: gpuGuestStatus() });
 });
 adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
+  const bad = unknownPinnedIps(req.body || {}, store.get(), loadGpuGuestSettings());
+  if (bad.length) {
+    return res.status(400).json({ ok: false, reason: `고정 IP ${bad.length}개가 그 VM 이 보고한 IP 가 아닙니다 — 저장 자격증명을 VM 이 보고한 적 없는 주소로 보내지 않습니다(VM 의 알려진 IP 중에서 고르세요).`, rejected: bad.slice(0, 50) });
+  }
   const settings = saveGpuGuestSettings(req.body || {});
   rescheduleGpuGuestPoller();
   reschedulePhysicalPoller();   // v2.597(LC2597-02): 같은 주기 설정을 쓰는 물리 GPU 폴러도
@@ -307,8 +311,9 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         // v2.480(3차 감사 S5): 요청에 비밀번호를 직접 싣지 않은(공용/저장 자격증명) 테스트는 SSH 대상 IP 를 그 VM 의 알려진 IP 로만 —
         // {vmId, useShared:true, ip:'공격자'} 로 법인 공용 비밀번호를 외부 sshd 에 보내던 경로 차단.
         if (preferIp && !(it.username && it.password)) {
-          const known = new Set([...(v.ipAddresses || []), v.ipAddress].filter(Boolean).map(String));
-          if (!known.has(preferIp)) { results[i] = { vmId: it.vmId, login: false, read: false, error: '요청 IP 가 이 VM 의 알려진 IP 가 아님', trace: [{ t: Date.now(), msg: `✗ 거부 — ${preferIp} 는 VM 의 알려진 IP(${[...known].join(', ') || '없음'})가 아닙니다(저장 자격증명 보호)` }] }; continue; }
+          // v2.606(LEFT2606-01): 폴러와 같은 판정 헬퍼(gpu/sshCollect.js pinnedIpCheck)를 쓴다.
+          const pin = pinnedIpCheck(v, preferIp);
+          if (!pin.ok) { results[i] = { vmId: it.vmId, login: false, read: false, error: '요청 IP 가 이 VM 의 알려진 IP 가 아님', trace: [{ t: Date.now(), msg: `✗ 거부 — ${preferIp} 는 VM 의 알려진 IP(${pin.known.join(', ') || '없음'})가 아닙니다(저장 자격증명 보호)` }] }; continue; }
         }
         const reqMethod = ['guestops', 'ssh', 'auto'].includes(req.body?.method) ? req.body.method : (s.collectMethod || 'guestops');
         // Windows는 기본적으로 sshd가 없어 SSH 단독이면 실패 → VMware Tools 게스트작업 우선(auto)으로 조정.

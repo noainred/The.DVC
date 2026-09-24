@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import { blankOr } from './blankOr.js';
 
 /**
  * 설정 → 이상동작 탐지 — 짧은 시간(직전 수집 주기) 안에 다수 VM이 동시에 전원 OFF 되면
@@ -38,8 +39,11 @@ export default function AnomalyDetection() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson('/admin/anomaly', { enabled: s.enabled, threshold: Number(s.threshold) || 10, perVcenter: s.perVcenter || {} });
-      setS(r.settings || r); setMsg('저장되었습니다. 다음 탐지 주기부터 적용됩니다.');
+      // v2.606 WEB2606-03: 빈 칸은 보내지 않는다(서버가 이전 임계를 유지) — 예전 'Number(x) || 10' 은 비우면 10대로 저장했다.
+      const r = await putJson('/admin/anomaly', { enabled: s.enabled, threshold: blankOr(s.threshold), perVcenter: s.perVcenter || {} });
+      setS(r.settings || r);
+      // v2.606 AUTHZ2606-07: 범위 제한 계정이 보낸 전역 값은 적용되지 않는다 — 그 사실을 말한다.
+      setMsg(r.ignoredReason ? `저장되었습니다(vCenter별 임계). ${r.ignoredReason}` : '저장되었습니다. 다음 탐지 주기부터 적용됩니다.');
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };

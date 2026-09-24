@@ -10,6 +10,7 @@
 // 수출원이라 기능 커밋마다 최다 소비 공유 파일이 diff 에 걸렸다 — 다중 세션 병합 충돌 표면 축소.
 import React, { useState, useEffect } from 'react';
 import { cpuModelCell } from './cpuModelText.js'; // v2.556: CPU 모델명 문구(순수·vitest 고정)
+import { hostUsagePct } from '../views/vcdOverview.js'; // v2.606 WEB2606-02: 끊긴 호스트 사용률은 '—'
 // v2.447(감사 T11): 차트를 쓰는 두 모듈을 lazy 로 — 이 파일은 components/ui.jsx 가 재수출해
 // **앱 entry 그래프에 정적으로 붙어 있어서**, recharts(vendor-charts 496KB)가 차트가 없는
 // 로그인 화면에서까지 modulepreload 됐다(실측). 둘 다 상세 화면에서만 렌더되므로 지연 로드가 맞다.
@@ -410,9 +411,9 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="CPU 모델" full nowrap>
               {(() => { const c = cpuModelCell(item.cpuModel); return <span title={c.title || undefined}>{c.text}</span>; })()}
             </DRow>
-            <DRow label="CPU 사용률"><UsageCell pct={item.cpuUsagePct} /></DRow>
+            <DRow label="CPU 사용률"><UsageCell pct={hostUsagePct(item, 'cpuUsagePct')} /></DRow>
             <DRow label="메모리">{gb(item.memTotalMB)}{item.memUsageMB ? ` · 사용 ${gb(item.memUsageMB)}` : ''}</DRow>
-            <DRow label="메모리 사용률"><UsageCell pct={item.memUsagePct} /></DRow>
+            <DRow label="메모리 사용률"><UsageCell pct={hostUsagePct(item, 'memUsagePct')} /></DRow>
             {item.powerWatts > 0 && <DRow label="소비전력" full nowrap>{(item.powerWatts / 1000).toFixed(2)} kW ({item.powerWatts} W){item.powerSource === 'idrac' ? ' · iDRAC' : (item.idracBacked ? ' · vCenter 추정' : '')}</DRow>}
             {item.idracBacked && item.powerWattsIdrac > 0 && <DRow label="iDRAC 실측" full nowrap>{(item.powerWattsIdrac / 1000).toFixed(2)} kW ({item.powerWattsIdrac} W) <span className="muted" style={{ fontSize: 11 }}>· iDRAC 서버 등록 메뉴 집계</span></DRow>}
             <DRow label="VM 수">{item.vmCount}</DRow>

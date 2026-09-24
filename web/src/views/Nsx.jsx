@@ -259,9 +259,15 @@ function GroupMembers({ group }) {
         <div style={{ marginTop: 8 }}>
           {d.mock && <span className="badge amber" style={{ fontSize: 11, marginBottom: 6, display: 'inline-block' }}>데모 합성</span>}
           <div className="flex gap" style={{ fontSize: 13, marginBottom: 8 }}>
-            <span className="muted">멤버 VM <b style={{ color: 'var(--text)' }}>{d.vmCount ?? 0}</b></span>
-            <span className="muted">멤버 IP <b style={{ color: 'var(--text)' }}>{d.ipCount ?? 0}</b></span>
+            {/* v2.606 COL2606-02: 한쪽 조회 실패는 0 이 아니라 '조회 실패', 페이지 상한에 걸렸으면 일부만 받은 것이다. */}
+            <span className="muted" title={d.vmError || ''}>멤버 VM <b style={{ color: d.vmCount == null ? 'var(--amber)' : 'var(--text)' }}>{d.vmCount == null ? '조회 실패' : d.vmCount}</b>{d.vmTruncated ? ' (일부만 받음)' : ''}</span>
+            <span className="muted" title={d.ipError || ''}>멤버 IP <b style={{ color: d.ipCount == null ? 'var(--amber)' : 'var(--text)' }}>{d.ipCount == null ? '조회 실패' : d.ipCount}</b>{d.ipTruncated ? ' (일부만 받음)' : ''}</span>
           </div>
+          {(d.vmError || d.ipError) && (
+            <div className="muted" style={{ fontSize: 12, marginBottom: 6, whiteSpace: 'normal' }}>
+              {d.vmError ? `VM 멤버 조회 실패: ${d.vmError}` : ''}{d.vmError && d.ipError ? ' · ' : ''}{d.ipError ? `IP 멤버 조회 실패: ${d.ipError}` : ''}
+            </div>
+          )}
           {d.vms?.length > 0 && (
             <div style={{ marginBottom: 8 }}>
               <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>VM</div>
