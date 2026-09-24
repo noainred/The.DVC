@@ -20,8 +20,7 @@ import { logAudit } from '../../audit.js';
 import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers } from '../../bmusage/settings.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
-import { publicTarget, maskTargetAddress, NO_PATH_REASON } from '../../bmusage/targets.js';
-import { maskActivityEvents, scrubHosts } from '../../auth/addressMask.js';
+import { publicTarget, NO_PATH_REASON } from '../../bmusage/targets.js';
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor } from '../../bmusage/poller.js';
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
@@ -88,8 +87,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       latestUsage().catch(() => []),
       dbStatus().catch(() => ({ available: false })),
     ]);
-    // v2.600 AUTHZ-2600-08: 비-admin 에는 iDRAC·OS 관리 주소를 가린다(가린 사실은 addressHidden).
-    const targets = applyScope(tg.targets.map(publicTarget).map((x) => (isAdmin ? x : maskTargetAddress(x))), allowed);
+    const targets = applyScope(tg.targets.map(publicTarget), allowed);
     const skipped = applyScope(tg.skipped, allowed);
     /*
      * ⚠ **사유별 개수도 scope 를 타야 한다**(v2.550 자체 재검토에서 잡은 결함): 예전에는
@@ -144,7 +142,6 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
        */
       authStops: applyScope(authStopsFor(tg.targets), allowed),
       log: scopeFilePaths(bmUsageLogInfo(), req.user),
-      ...(isAdmin ? {} : { addressHidden: true }),
     });
   } catch (e) {
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
@@ -179,8 +176,7 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
       usageHistory(key, { agent, hours: Number(req.query.hours) || 24 }),
       usageDaily({ key, agent, days: Number(req.query.days) || 90 }),
     ]);
-    const isAdmin = req.user?.role === 'admin';
-    res.json({ ok: true, key, target: isAdmin ? publicTarget(target) : maskTargetAddress(publicTarget(target)), ...(isAdmin ? {} : { addressHidden: true }), raw: raw.rows, rawTruncated: raw.truncated, daily, metrics: METRICS });
+    res.json({ ok: true, key, target: publicTarget(target), raw: raw.rows, rawTruncated: raw.truncated, daily, metrics: METRICS });
   } catch (e) {
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
   }
@@ -216,12 +212,9 @@ api.post('/tools/bm-usage/collect', writeRole, toolsPerm, async (req, res) => {
  */
 api.get('/tools/bm-usage/activity', toolsPerm, async (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
-  const events0 = bmUsageEvents(Number(req.query.limit) || 100);
-  // v2.600 AUTHZ-2600-08: 작업 로그 이벤트의 host(iDRAC·OS 주소)도 비-admin 에는 가린다.
-  const isAdmin = req.user?.role === 'admin';
-  const events = isAdmin ? events0 : maskActivityEvents(events0);
+  const events = bmUsageEvents(Number(req.query.limit) || 100);
   if (!allowed) {
-    return res.json({ ok: true, poller: bmUsageStatus(), events, log: scopeFilePaths(bmUsageLogInfo(), req.user), ...(isAdmin ? {} : { addressHidden: true }) });
+    return res.json({ ok: true, poller: bmUsageStatus(), events, log: scopeFilePaths(bmUsageLogInfo(), req.user) });
   }
   let keys = new Set();
   try {
@@ -233,7 +226,6 @@ api.get('/tools/bm-usage/activity', toolsPerm, async (req, res) => {
     ok: true,
     poller: { running: bmUsageStatus()?.running ?? null, intervalMs: bmUsageStatus()?.intervalMs ?? null },
     events: shown,
-    ...(isAdmin ? {} : { addressHidden: true }),
     // 조용히 빼지 않는다 — 몇 건이 범위 밖이라 빠졌는지 화면이 말할 수 있게.
     omittedOutOfScope: Math.max(0, (events || []).length - shown.length),
     scoped: true,
@@ -280,21 +272,15 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
      * ⚠ **등록부를 기준으로 줄을 만든다** — 보관분만 나열하면 '한 번도 당기지 않은 엣지' 가
      *   목록에서 사라져 화면이 '전부 봤다' 는 거짓을 말한다(v2.548 `classifyEdges` 와 같은 판단).
      */
-    const isAdmin = req.user?.role === 'admin';
-    const edgeUrls = cols.map((c) => t(c.url)).filter(Boolean);
-    const rows0 = cols.filter((c) => t(c.name)).map((c) => {
+    const rows = cols.filter((c) => t(c.name)).map((c) => {
       const rec = byName.get(t(c.name).toLowerCase()) || null;
       const snap = rec?.snap || null;
-      // v2.600 AUTHZ-2600-08: 엣지 보관분의 대상도 비-admin 에는 관리 주소를 가린다.
-      const targets = snap ? applyScope(snap.targets || [], allowed).map((x) => (isAdmin ? x : maskTargetAddress(x))) : [];
+      const targets = snap ? applyScope(snap.targets || [], allowed) : [];
       const keys = new Set(targets.map((x) => t(x.key)));
       return {
         agent: c.name, enabled: c.enabled !== false, hasUrl: !!t(c.url),
         at: rec?.at || null, snapAt: rec?.snapAt || null,
-        // 실패 사유 문구에는 엣지 URL 이 실릴 수 있다 — 비-admin 에는 가린다(범위 계정은 아래에서 통째로 비운다).
-        lastAttempt: rec?.lastAttempt
-          ? (isAdmin ? rec.lastAttempt : { ...rec.lastAttempt, reason: scrubHosts(rec.lastAttempt.reason, edgeUrls) })
-          : null,
+        lastAttempt: rec?.lastAttempt || null,
         // ⚠ 엣지가 말한 이름을 **나란히** 둔다(다르면 그 자체가 진단 — v2.548 F5·v2.549 규약).
         reportedAgent: snap?.node?.agent || '', version: snap?.node?.version || '',
         enabledOnEdge: snap ? !!snap.enabled : null,
@@ -316,17 +302,7 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
         authStops: (snap?.authStops || []).filter((a) => !allowed || keys.has(t(a?.key))),
       };
     });
-    /*
-     * v2.600 AUTHZ-2600-07: 엣지는 vCenter 귀속이 없다 — 범위 제한 계정에는 **자기 범위 대상이 보이는
-     *   엣지 행만** 주고, 그 행의 인출 시도 기록(lastAttempt — 엣지 전체의 운영 정보)은 비운다.
-     *   예전에는 대상이 0개인 엣지까지 전 사이트 이름·버전·시도 결과가 그대로 나갔다. 뺀 개수는 밝힌다.
-     */
-    const rows = allowed ? rows0.filter((r) => r.targets.length > 0).map((r) => ({ ...r, lastAttempt: null })) : rows0;
-    res.json({
-      ok: true, at: Date.now(), rows, minEdgeVersion: MIN_EDGE_VERSION, staleMs: STALE_MS,
-      ...(allowed ? { scoped: true, edgesOmitted: rows0.length - rows.length } : {}),
-      ...(isAdmin ? {} : { addressHidden: true }),
-    });
+    res.json({ ok: true, at: Date.now(), rows, minEdgeVersion: MIN_EDGE_VERSION, staleMs: STALE_MS });
   } catch (e) {
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
   }

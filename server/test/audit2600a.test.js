@@ -297,5 +297,5 @@ test('RECENT2600-02 — sanswitch-data 응답이 조닝을 잘라 받은 장비 
   assert.equal(r.body.rejected, undefined, '버린 장비는 없다');
   const { edgeSanSwitchSnapshots } = await import('../src/central/sanSwitchEdge.js');
   const d = (edgeSanSwitchSnapshots?.() || []).find((x) => x.deviceId === 'san-big');
-  if (d) assert.equal(d.zoning.limited, true);
+  assert.ok(d, '장비가 중앙 목록에 남아야 한다'); assert.equal(d.zoning.limited, true);
 });
