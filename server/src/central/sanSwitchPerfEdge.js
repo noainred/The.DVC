@@ -27,6 +27,7 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { recordActivity } from '../sanswitch/perfActivityLog.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { ackPerfCollect, setPerfBaseResolver } from '../sanswitch/collectRequests.js';
+import { admitAgent } from './edgeRecord.js';
 
 const FILE = path.join(config.configDir, 'central-agent-sanswitch-perf.json');
 const MAX_DEVICES_PER_AGENT = 300;
@@ -84,6 +85,14 @@ export function saveEdgePerfStatus(agent, status, { owned = null, names = null }
   // 미위임 deviceId 는 버린다 — 남의 스위치 상태 위조 차단(시계열 수신과 같은 규약).
   if (owned) st.devices = st.devices.filter((d) => owned.has(String(d.id)));
   const m = load();
+  // v2.605(CEN2605-04): 새 이름은 admitAgent 로 받는다(형제 storageEdge 상태 보고와 같은 규약) — 예전에는 무조건 넣고
+  //   삽입순 앞부분을 퇴출해, 공유 토큰으로 임의 이름 200개를 보내면 **최근 보고한 실제 엣지 행이 밀려나** perfDiag 가
+  //   '보고 없음' 으로 오판했다. 이제 오래 조용한 행만 내보내고, 모두 최근이면 새 이름을 거절한다.
+  if (!m.has(a)) {
+    const adm = admitAgent(m, a, { maxAgents: MAX_AGENTS });
+    if (!adm.ok) { console.warn(`[central] sanswitch-perf: 엣지 수 상한 — 새 이름 '${a.slice(0, 64)}' 의 상태를 받지 않았다(최근 보고한 엣지를 밀어내지 않는다)`); return { saved: 0, refused: true }; }
+    if (adm.evicted) console.warn(`[central] sanswitch-perf: 엣지 수 상한 — 오래 조용한 '${adm.evicted}' 상태를 내렸다`);
+  }
   // v2.594(감사 EDGE2-02): Map.set 은 기존 키의 삽입 위치를 유지한다 — 지우고 다시 넣어야 '최근 보고' 가 뒤로 가서
   //   상한 퇴출 때 방금 보고한 엣지가 밀려나지 않는다.
   m.delete(a);

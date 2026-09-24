@@ -15,6 +15,7 @@
  * (auth/toolAccess.js — Optimization 이 이 리포트의 주인).
  */
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
+import { mergeScopedMap, filterScopedMap } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
@@ -119,12 +120,26 @@ api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
     }
   }
   const before = loadVmSeriesSettings();
-  const next = saveVmSeriesSettings(b);
+  // v2.605 AUTHZ2605-01: 범위 제한 admin 은 GET 이 거른 targets 를 되돌려 보낸다 — 전체로 저장하면 다른
+  //   법인이 수집 범위에서 빠졌다. 범위 밖 targets 는 직전 값을 보존하고, 전 법인에 걸친 scope('all'↔
+  //   'selected')는 바꾸지 않으며, 범위 밖 DB 는 dropExcluded 로도 지우지 않는다.
+  const allowed = scopedVcenterIds(req.user, snap);
+  const patch = { ...b };
+  let ignoredOutOfScope = [];
+  if (allowed) {
+    if (b.targets !== undefined) { const m = mergeScopedMap(before.targets, b.targets, allowed); patch.targets = m.merged; ignoredOutOfScope = m.ignored; }
+    delete patch.scope;
+  }
+  const next = saveVmSeriesSettings(patch);
   // 선택 범위에서 빠진 vCenter 의 DB 파일 삭제(용량 즉시 회수) — 요청이 명시할 때만(dropExcluded).
   const dropped = [];
   if (b.dropExcluded === true && next.scope === 'selected') {
     const keep = new Set(Object.keys(next.targets).map((id) => dbFileName(id)));
-    for (const u of vmSeriesDiskUsage()) if (!keep.has(dbFileName(u.vcenterId))) { dropVmSeriesDb(u.vcenterId); dropped.push(u.vcenterId); }
+    const allowedFiles = allowed ? new Set([...allowed].map((id) => dbFileName(id))) : null;
+    for (const u of vmSeriesDiskUsage()) {
+      if (allowedFiles && !allowedFiles.has(dbFileName(u.vcenterId))) continue;   // 범위 밖 DB 는 건드리지 않는다
+      if (!keep.has(dbFileName(u.vcenterId))) { dropVmSeriesDb(u.vcenterId); dropped.push(u.vcenterId); }
+    }
   }
   logAudit({
     user: req.user?.username, action: 'VM 실시간 스파이크 수집 설정 변경',
@@ -132,7 +147,8 @@ api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
     detail: `${before.enabled !== next.enabled ? `enabled ${before.enabled}→${next.enabled} · ` : ''}임계 cpu ${next.thresholds.cpuPct}% mem ${next.thresholds.memPct}% ready ${next.thresholds.readyPct}%${dropped.length ? ` · DB 삭제: ${dropped.join(', ')}` : ''}`,
     ip: req.ip || '',
   });
-  res.json({ ok: true, settings: next, dropped });
+  const safeNext = allowed ? { ...next, targets: filterScopedMap(next.targets, allowed) } : next;
+  res.json({ ok: true, settings: safeNext, dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}) });
 });
 
 /** 범위 선택 트리 데이터 — 한 vCenter 의 클러스터/호스트/폴더/VM(전원 상태 포함, 꺼진 VM 은 표시만). */

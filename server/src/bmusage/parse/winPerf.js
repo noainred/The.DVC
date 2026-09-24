@@ -76,13 +76,20 @@ export function parseWinPerf(text) {
 
   // 디스크 — `DISK=<이름>|<busyPct>|<totalBytes>|<freeBytes>` (없는 값은 빈 칸)
   const disks = [];
+  let busyOutOfRange = 0;
   for (const row of arr(kv.DISK)) {
     const f = String(row).split('|').map((x) => x.trim());
     if (!f[0]) continue;
     const total = num(f[2]); const free = num(f[3]);
+    /*
+     * v2.605(COL2605-02): 사용률은 0~100 이어야 한다. 범위 밖(옛 스크립트의 PercentDiskTime 287 같은 값)은
+     *   **null 로 비우고 개수를 밝힌다** — 100 으로 클램프하면 '포화' 라는 조용한 보정이다(v2.578 D3 규약).
+     */
+    let busyPct = num(f[1]);
+    if (busyPct != null && (busyPct < 0 || busyPct > 100)) { busyPct = null; busyOutOfRange += 1; }
     disks.push({
       name: f[0],
-      busyPct: num(f[1]),
+      busyPct,
       totalBytes: total,
       freeBytes: free,
       // ⚠ 여유 공간을 모르면 사용률도 **모른다** — 100% 라고 말하면 '오류 없이 틀린 값' 이다.
@@ -126,6 +133,7 @@ export function parseWinPerf(text) {
   return {
     osKind: 'windows',
     cpuPct, mem, disks, nics, hbas,
+    busyOutOfRange,
     read, missing,
     hostname: String(kv.HOSTNAME || '').trim() || '',
     osName: String(kv.OS_NAME || '').trim() || '',

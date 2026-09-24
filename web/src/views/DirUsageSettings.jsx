@@ -23,7 +23,7 @@ export default function DirUsageSettings() {
   const [targets, setTargets] = useState([]);
   const [enabled, setEnabled] = useState(false);
   const [mail, setMail] = useState({ enabled: false, to: '', cc: '', subject: '', onlyOnChange: false });
-  const [retentionDays, setRetentionDays] = useState(365);
+  const [retentionDays, setRetentionDays] = useState('365');   // 원문 문자열(빈 칸 = 미지정) — 전송 때 blankOr
   const inited = useRef(false);
 
   const load = async () => {
@@ -40,7 +40,7 @@ export default function DirUsageSettings() {
           enabled: !!s.mail?.enabled, to: (s.mail?.to || []).join(', '), cc: (s.mail?.cc || []).join(', '),
           subject: s.mail?.subject || '', onlyOnChange: !!s.mail?.onlyOnChange,
         });
-        setRetentionDays(s.retentionDays ?? 365);
+        setRetentionDays(String(s.retentionDays ?? 365));
       }
       setErr(null);
     } catch (e) { setErr(e.message); }
@@ -59,13 +59,23 @@ export default function DirUsageSettings() {
     try {
       const body = {
         // v2.604(감사 LEFT2604-01): 빈 칸은 보내지 않는다 — `Number('')||365` 는 저장된 보존일을 365일로 되돌렸다.
-        enabled, targets, retentionDays: blankOr(retentionDays),
+        // v2.605(감사 WEB2605-01): 칸의 **원문 문자열**을 상태에 두고 여기서만 숫자로 바꾼다 — onChange 에서 Number() 를
+        //   하면 빈 칸이 이미 0 이라 blankOr 가 걸러내지 못했다(보존일 1일·주기 1시간으로 저장). 대상 숫자 칸도 같다.
+        enabled,
+        targets: targets.map((t) => ({ ...t, topN: blankOr(t.topN), intervalHours: blankOr(t.intervalHours) })),
+        retentionDays: blankOr(retentionDays),
         mail: { ...mail, to: splitAddr(mail.to), cc: splitAddr(mail.cc) },
       };
       const r = await sendJson('/admin/dir-usage', 'PUT', body);
-      setMsg('저장되었습니다. 다음 틱(최대 1분)부터 적용됩니다.');
+      const sentDays = body.retentionDays;
+      const keptDays = r?.settings?.retentionDays;
+      // 0 이하는 서버가 '미지정' 으로 보고 기존 값을 유지한다(v2.605) — 조용히 무시하지 않고 말한다.
+      const daysNote = sentDays != null && keptDays != null && sentDays !== keptDays
+        ? ` 보존일 ${sentDays} 은(는) 1~3650 밖이라 ${keptDays}일로 저장했습니다.` : '';
+      setMsg(`저장되었습니다. 다음 틱(최대 1분)부터 적용됩니다.${daysNote}`);
       if (r?.settings) setD((prev) => ({ ...prev, settings: r.settings }));
-      if (r?.settings?.retentionDays != null) setRetentionDays(r.settings.retentionDays);   // 빈 칸이면 유지된 값을 다시 보인다
+      if (r?.settings?.retentionDays != null) setRetentionDays(String(r.settings.retentionDays));   // 빈 칸이면 유지된 값을 다시 보인다
+      if (Array.isArray(r?.settings?.targets)) setTargets(r.settings.targets.map((t) => ({ ...t })));   // 대상 빈 칸도 저장된 값으로
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -143,9 +153,9 @@ export default function DirUsageSettings() {
                 <td><input className="input" style={{ width: 200 }} value={t.path} placeholder="/mnt/share"
                   onChange={(e) => setT(i, { path: e.target.value })} /></td>
                 <td><input className="input" type="number" min={1} max={200} style={{ width: 70 }} value={t.topN}
-                  onChange={(e) => setT(i, { topN: Number(e.target.value) })} /></td>
+                  onChange={(e) => setT(i, { topN: e.target.value })} /></td>
                 <td><input className="input" type="number" min={1} max={720} style={{ width: 80 }} value={t.intervalHours}
-                  onChange={(e) => setT(i, { intervalHours: Number(e.target.value) })} /></td>
+                  onChange={(e) => setT(i, { intervalHours: e.target.value })} /></td>
                 <td data-sort={last?.ts || 0} className="muted">
                   {last ? new Date(last.ts).toLocaleString() : '—'}
                   {last && <div style={{ fontSize: 11 }}>폴더 {last.count}개</div>}
@@ -185,7 +195,7 @@ export default function DirUsageSettings() {
       </label>
       <Field label="스캔 이력 보존(일)">
         <input className="input" type="number" min={1} max={3650} style={{ width: 120 }} value={retentionDays}
-          onChange={(e) => setRetentionDays(Number(e.target.value))} />
+          onChange={(e) => setRetentionDays(e.target.value)} />
       </Field>
 
       <div className="muted" style={{ fontSize: 12, marginTop: 12, padding: '9px 11px', borderRadius: 6, background: 'rgba(46,144,250,.08)', border: '1px solid rgba(46,144,250,.3)', lineHeight: 1.7 }}>

@@ -99,7 +99,10 @@ function initSqlite() {
     // 최신 샘플(대상별 1건)
     const latestOne = db.prepare('SELECT rtt, ok, ts FROM samples WHERE target=? ORDER BY ts DESC LIMIT 1');
     // baseline 산출용: 최근 OK 샘플 rtt N개(중앙값은 JS에서)
-    const recentOk = db.prepare('SELECT rtt FROM samples WHERE target=? AND ok=1 AND rtt IS NOT NULL ORDER BY ts DESC LIMIT ?');
+    // v2.605(감사 DB2605-01 — 재현): ok·rtt 는 인덱스 밖 필터라 OK 가 한 번도 없던 대상(ICMP 차단·폐기)은 LIMIT 이
+    //   끝내지 못하고 (target,ts) 인덱스를 이력 끝까지(1년 ≈ 52만 행, 대상당 60~105ms) 훑었다 — /ping/status 15초 폴링마다.
+    //   ts 하한(sinceTs)으로 스캔을 유계로 둔다(호출부 service.js BASELINE_LOOKBACK_MS). 하한이 없으면 예전 동작.
+    const recentOk = db.prepare('SELECT rtt FROM samples WHERE target=? AND ts>=? AND ok=1 AND rtt IS NOT NULL ORDER BY ts DESC LIMIT ?');
     // 시간 버킷 다운샘플: avg/min/max rtt + 손실률(무응답 비율). DESC+LIMIT로 최근 버킷 우선 후 JS에서 되돌림.
     // ⚠ node:sqlite 는 JS number 를 REAL 로 바인딩한다 — (ts/?)*? 는 실수 나눗셈이라 버킷이 묶이지 않고
     // 표본 1건 = 1버킷이 되어 LIMIT 이 최근 몇 시간만 남기고 손실률도 0/1 로 떨어졌다(v2.598 DB2598-01).
@@ -164,7 +167,7 @@ function initSqlite() {
       kind: 'sqlite',
       insertMany: (rows) => { db.exec('BEGIN'); try { for (const r of rows) { ins.run(r.target, r.ts, r.rtt == null ? null : r.rtt, r.ok ? 1 : 0); addHour(r.target, r.ts, r.rtt, r.ok); } db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } },
       latest: (target) => { const r = latestOne.get(target); return r ? { rtt: r.rtt, ok: !!r.ok, ts: r.ts } : null; },
-      recentOkRtt: (target, limit) => recentOk.all(target, limit).map((r) => r.rtt).filter((v) => v != null),
+      recentOkRtt: (target, limit, sinceTs = 0) => recentOk.all(target, Number.isFinite(Number(sinceTs)) ? Number(sinceTs) : 0, limit).map((r) => r.rtt).filter((v) => v != null),
       history: (target, sinceTs, bucketMs, limit) => bucket.all(bucketMs, bucketMs, target, sinceTs, limit).reverse()
         .map((r) => ({ ts: r.b, avg: round2(r.avg), min: round2(r.min), max: round2(r.max), loss: r.n ? Number((r.fail / r.n).toFixed(3)) : 0, n: Number(r.n) })),
       /** 롤업에서 읽는 버킷 — rollupReady 가 아니면 null(호출부가 원시로 떨어진다). bucketMs 는 HOUR_MS 의 배수. */
@@ -191,7 +194,7 @@ function initJson() {
     kind: 'json',
     insertMany: (recs) => { const lines = recs.map((r) => ({ g: r.target, t: r.ts, v: r.rtt == null ? null : r.rtt, o: r.ok ? 1 : 0 })); rows.push(...lines); try { fs.appendFileSync(file, lines.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } },
     latest: (target) => { let best = null; for (const r of rows) if (r.g === target && (!best || r.t > best.t)) best = r; return best ? { rtt: best.v, ok: !!best.o, ts: best.t } : null; },
-    recentOkRtt: (target, limit) => rows.filter((r) => r.g === target && r.o && r.v != null).sort((a, b) => b.t - a.t).slice(0, limit).map((r) => r.v),
+    recentOkRtt: (target, limit, sinceTs = 0) => rows.filter((r) => r.g === target && r.o && r.v != null && r.t >= (Number(sinceTs) || 0)).sort((a, b) => b.t - a.t).slice(0, limit).map((r) => r.v),
     history: (target, sinceTs, bucketMs, limit) => {
       const buckets = new Map();
       for (const r of rows) if (r.g === target && r.t >= sinceTs) {

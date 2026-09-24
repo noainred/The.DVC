@@ -1227,9 +1227,27 @@ const SENSOR_TTL_MS = Math.max(60_000, Number(process.env.BMUSAGE_SENSOR_TTL_MS)
 const SENSOR_PATTERNS = Object.freeze([
   ['cpuPct', /cpu.*usage|usage.*cpu/i],
   ['memPct', /(?:mem|memory).*usage|usage.*(?:mem|memory)/i],
-  ['ioPct', /(?:^|[^a-z])io.*usage|usage.*io(?:[^a-z]|$)/i],
+  // v2.605(COL2605-04): 'SystemBoardIOUsage' 는 IO 앞 글자가 문자('d')라 예전 `(?:^|[^a-z])io` 가 놓치고
+  //   다음의 sys 패턴에 걸렸다(I/O 값이 sysPct 로 저장 · io_pct 영구 null). `board` 뒤의 io 도 받는다.
+  ['ioPct', /(?:^|[^a-z]|board)io.*usage|usage.*io(?:[^a-z]|$)/i],
   ['sysPct', /sys(?:tem)?.*usage|usage.*sys(?:tem)?/i],
 ]);
+/**
+ * 센서 이름 → 필드. **정확한 후보 id(USAGE_IDS)가 먼저**이고, 없을 때만 이름 패턴을 본다(v2.605 COL2605-04).
+ * 한 이름은 한 필드에만 간다 — 예전 루프는 이미 찾은 필드(cpu)의 두 번째 이름을 다음 패턴(sys)으로 흘려 보냈다.
+ */
+export function sensorFieldOf(name) {
+  const low = String(name || '').toLowerCase();
+  if (!low) return null;
+  for (const field of ['cpuPct', 'memPct', 'ioPct', 'sysPct']) {
+    for (const id of USAGE_IDS[field]) {
+      const t = id.toLowerCase();
+      if (low === t || low.endsWith(`_${t}`) || low.endsWith(`.${t}`) || low.endsWith(`/${t}`)) return field;
+    }
+  }
+  for (const [field, re] of SENSOR_PATTERNS) if (re.test(low)) return field;
+  return null;
+}
 /** base|user → { urls:{field:url}, seen:string[], at:number } | { absent:true, reason, at } */
 const _sensorPaths = new Map();
 export function _resetSensorPathsForTest() { _sensorPaths.clear(); }
@@ -1272,11 +1290,8 @@ export async function fetchUsageSensors(entry, { allowProbe = true } = {}) {
           if (!u) continue;
           const name = tailOf(u);
           names.push(name);
-          for (const [field, re] of SENSOR_PATTERNS) {
-            if (found[field] || !re.test(name)) continue;
-            found[field] = u;
-            break;
-          }
+          const field = sensorFieldOf(name);
+          if (field && !found[field]) found[field] = u;
         }
         if (Object.keys(found).length) break;   // 한 섀시에서 찾으면 더 열거하지 않는다
       }

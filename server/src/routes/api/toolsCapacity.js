@@ -1,6 +1,7 @@
 // 용량/낭비/씬/VM파인더/온도/용량예측 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { scopePollerStatus } from '../../auth/scopeStatus.js';
+import { mergeScopedIds } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01: 범위 계정 PUT 은 범위 밖 키를 보존한다
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
 import { logAudit } from '../../audit.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드(단일 소스)
@@ -838,7 +839,21 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
     if (bad.length) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${bad.slice(0, 5).join(', ')}` });
   }
   const before = loadVmperfSettings();
-  const next = saveVmperfSettings(b);
+  // v2.605 AUTHZ2605-01: 범위 제한 admin 은 GET 이 걸러 준 목록을 되돌려 보낸다 — 그것을 전체 목록으로
+  //   저장하면 다른 법인이 대상에서 빠지고 그 DB 파일까지 지워졌다. 범위 밖 id 는 직전 값을 보존하고,
+  //   범위 밖 DB·전체 합계 DB 는 이 계정의 저장으로 지우지 않는다(trackTotal 은 전 법인 계열이라 보존).
+  const allowed = scopedVcenterIds(req.user, snap);
+  let ignoredOutOfScope = [];
+  const patch = { ...b };
+  if (allowed) {
+    if (b.vcenterIds !== undefined) {
+      const m = mergeScopedIds(before.vcenterIds, b.vcenterIds, allowed, [...validIds]);
+      patch.vcenterIds = m.merged; ignoredOutOfScope = m.ignored;
+    }
+    delete patch.trackTotal;
+  }
+  const next = saveVmperfSettings(patch);
+  const allowedFiles = allowed ? new Set([...allowed].map((id) => dbFileName(id))) : null;
   // 대상에서 제외된 vCenter 의 DB 는 파일째 삭제해 **용량을 즉시 회수**한다(분리 아키텍처의 이점).
   // 전체 대상(빈 배열)에서 특정 목록으로 좁힌 경우에도 빠진 vCenter 를 정리한다.
   let dropped = [];
@@ -850,16 +865,19 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
     const keep = new Set(next.vcenterIds.map((id) => dbFileName(id)));
     for (const u of vmperfDiskUsage()) {
       if (u.vcenterId === '') continue;              // 전체 합계는 trackTotal 로 따로 관리
+      if (allowedFiles && !allowedFiles.has(dbFileName(u.vcenterId))) continue;   // 범위 밖 DB 는 건드리지 않는다
       if (!keep.has(dbFileName(u.vcenterId))) { dropVmperfDb(u.vcenterId); dropped.push(u.vcenterId); }
     }
   }
-  if (!next.trackTotal && before.trackTotal) { dropVmperfDb(''); dropped.push('(전체 합계)'); }
+  if (!allowed && !next.trackTotal && before.trackTotal) { dropVmperfDb(''); dropped.push('(전체 합계)'); }
   logAudit({
     user: req.user?.username, action: 'VM 성능 트래킹 설정 변경',
     target: next.enabled ? `보존 ${next.retentionDays}일 · 대상 ${next.vcenterIds.length || '전체'}` : '비활성',
     detail: dropped.length ? `DB 삭제: ${dropped.join(', ')}` : '', ip: req.ip || '',
   });
-  res.json({ ok: true, settings: next, dropped });
+  // PUT 응답도 GET 과 같은 필터 — 범위 밖 id 를 응답으로 되돌려 주지 않는다.
+  const safeNext = allowed ? { ...next, vcenterIds: (next.vcenterIds || []).filter((id) => allowed.has(id)) } : next;
+  res.json({ ok: true, settings: safeNext, dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}) });
 });
 
 /** 특정 vCenter(또는 전체 합계)의 수집 데이터 삭제 — 용량 회수용. 관리자 전용. */
@@ -870,6 +888,11 @@ api.delete('/tools/waste/settings/data', requireRole('admin'), (req, res) => {
     return res.status(400).json({ ok: false, reason: 'vcenterId 를 명시하세요(전체 합계 삭제는 ?all=1).' });
   }
   const vcId = String(req.query.vcenterId ?? '');
+  // v2.605 AUTHZ2605-01: 범위 제한 admin 은 범위 밖 vCenter·전체 합계(전 법인 계열) DB 를 지울 수 없다.
+  const allowedDel = scopedVcenterIds(req.user, store.get());
+  if (allowedDel && (vcId === '' || !allowedDel.has(vcId))) {
+    return res.status(403).json({ ok: false, requiredOwner: true, reason: '범위 밖 vCenter 또는 전체 합계 데이터는 전체 범위 계정만 지울 수 있습니다.' });
+  }
   const removed = dropVmperfDb(vcId);
   logAudit({ user: req.user?.username, action: 'VM 성능 트래킹 데이터 삭제', target: vcId || '(전체 합계)', detail: `파일 ${removed}개`, ip: req.ip || '' });
   res.json({ ok: true, vcenterId: vcId, filesRemoved: removed });

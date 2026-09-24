@@ -159,9 +159,16 @@ export function parseNetInfo(lines = []) {
     const f = String(l).trim().split(/\s+/);
     if (f.length < 2 || !f[0]) continue;
     const mbit = num(f[1]);
+    /*
+     * v2.605(COL2605-01): 넷째 필드 `0` = 물리 장치가 아니다(tun/tap·veth·bridge·vlan). 그 드라이버의 speed 는
+     *   링크 속도가 아니라 고정값이라(tun 은 10Mb/s) 사용률(%)을 내면 거짓 100% 가 된다 → 속도를 null 로 두고
+     *   `virtual` 로 밝힌다(처리량은 그대로 낸다). 넷째 필드가 없는 옛 출력은 예전처럼 속도를 믿는다(판정 근거 없음).
+     */
+    const virtual = f[3] === '0';
     map[f[0]] = {
-      bitsPerSec: mbit != null && mbit > 0 ? mbit * 1e6 : null,
-      state: f[2] || '',
+      bitsPerSec: !virtual && mbit != null && mbit > 0 ? mbit * 1e6 : null,
+      state: f[2] && f[2] !== '-' ? f[2] : '',
+      ...(virtual ? { virtual: true } : {}),
     };
   }
   return map;

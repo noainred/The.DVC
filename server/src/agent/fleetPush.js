@@ -41,6 +41,39 @@ export function unreadHostVcenters(snap, registered = []) {
   return out;
 }
 
+/**
+ * v2.605(감사 RECENT2605-01 — 재현): 보류에는 반드시 시한(v2.601 RECENT2601-02 규약). 중앙 central/fleet.js 는 30분
+ * (CENTRAL_FLEET_TTL_MS) 무보고 엣지 항목을 **지운다** — 못 읽은 vCenter 하나 때문에 매 주기 통째로 보류하면 30분 뒤
+ * 나머지 정상 vCenter 의 베어메탈까지 중앙 통합 인벤토리에서 사라졌다(주석의 '중앙은 직전 목록을 유지' 가 거짓이 됐다).
+ * 보류는 FLEET_WITHHOLD_MAX_MS(기본 20분 — 중앙 TTL 30분보다 짧게)까지만 하고, 넘으면 **못 읽은 vCenter 귀속분과
+ * 귀속 없는 항목만 빼고** 보낸다(그 둘이 ESXi 를 받치는 iDRAC 이 베어메탈로 둔갑할 수 있는 항목이다). 뺀 개수와
+ * 못 읽은 vCenter 는 본문·상태·콘솔에 밝힌다(조용한 축약 금지). ⚠ 뺀 항목은 중앙에서 그 동안 보이지 않는다(정직 기록).
+ */
+export const FLEET_WITHHOLD_MAX_MS = Math.max(60_000, Number(process.env.AGENT_FLEET_WITHHOLD_MAX_MS) || 20 * 60_000);
+let withholdSince = null;
+
+/**
+ * 보류 판정(순수 — now·since 를 주입한다). 반환 { mode:'send'|'withhold'|'partial', since }
+ *  · unread 0 → send(보류 시작 시각을 지운다)
+ *  · 보류 시작 후 maxMs 이내 → withhold · 넘으면 partial
+ */
+export function fleetWithholdDecision(unread, since, now, maxMs = FLEET_WITHHOLD_MAX_MS) {
+  if (!Array.isArray(unread) || !unread.length) return { mode: 'send', since: null };
+  const s = since || now;
+  return { mode: now - s > maxMs ? 'partial' : 'withhold', since: s };
+}
+
+/** 부분 전송에서 뺄 항목 — 못 읽은 vCenter 귀속분 + 귀속 없는 항목(순수). 반환 { keep, dropped } */
+export function partialBareMetal(list, unread) {
+  const bad = new Set(unread || []);
+  const keep = []; let dropped = 0;
+  for (const b of Array.isArray(list) ? list : []) {
+    if (!b || !b.vcenterId || bad.has(b.vcenterId)) { dropped++; continue; }
+    keep.push(b);
+  }
+  return { keep, dropped };
+}
+
 let timer = null;
 let last = null;     // { at, sent, error }
 let running = false;  // single-flight
@@ -60,34 +93,47 @@ export async function pushFleetNow() {
     let registered = [];
     try { registered = loadVcenterConfig()?.vcenters || []; } catch { registered = []; }
     const unread = unreadHostVcenters(snap, registered);
-    if (unread.length) {
-      // 조용히 건너뛰지 않는다 — 상태(last)와 콘솔에 사유를 남긴다(v2.549 무음 실패 금지). 중앙은 직전 목록을 유지한다.
-      const note = `호스트를 아직 읽지 못한 vCenter ${unread.length}개(${unread.slice(0, 5).join(', ')}) — ESXi 를 받치는 iDRAC 이 베어메탈로 잘못 분류되지 않도록 이번 주기는 보내지 않았습니다`;
-      last = { at: Date.now(), sent: 0, error: null, skipped: true, note, unreadVcenters: unread.slice(0, 32) };
+    const dec = fleetWithholdDecision(unread, withholdSince, Date.now());
+    withholdSince = dec.since;
+    if (dec.mode === 'withhold') {
+      // 조용히 건너뛰지 않는다 — 상태(last)와 콘솔에 사유를 남긴다(v2.549 무음 실패 금지). 중앙은 TTL(기본 30분) 동안만 직전 목록을 유지하므로
+      //   보류는 FLEET_WITHHOLD_MAX_MS 까지만 한다(v2.605 RECENT2605-01).
+      const note = `호스트를 아직 읽지 못한 vCenter ${unread.length}개(${unread.slice(0, 5).join(', ')}) — ESXi 를 받치는 iDRAC 이 베어메탈로 잘못 분류되지 않도록 이번 주기는 보내지 않았습니다(최대 ${Math.round(FLEET_WITHHOLD_MAX_MS / 60_000)}분 보류 뒤에는 그 vCenter 귀속분·귀속 없는 항목만 빼고 보냅니다)`;
+      last = { at: Date.now(), sent: 0, error: null, skipped: true, note, unreadVcenters: unread.slice(0, 32), withholdSince };
       console.warn(`[fleet-push] ${note}`);
       return { ok: false, skipped: true, reason: note };
     }
     const inv = await getFleetInventory(snap);
     // 메타만 — 자격증명/전력 제외. 엣지 베어메탈의 전력은 원격 수집(collector pull) 경로로만
     // 중앙에 반영하므로 watts는 보내지 않는다(이중계상 방지). 중앙은 서비스태그로 dedup해 병합한다.
-    const baremetal = (inv.bareMetal || []).map((b) => ({
+    let baremetal = (inv.bareMetal || []).map((b) => ({
       fleetId: b.fleetId, name: b.name, model: b.model, serviceTag: b.serviceTag,
       vcenterId: b.vcenterId, source: b.source,
     }));
+    let partialInfo = null;
+    if (dec.mode === 'partial') {
+      const { keep, dropped } = partialBareMetal(baremetal, unread);
+      baremetal = keep;
+      partialInfo = { unreadVcenters: unread.slice(0, 32), withheldItems: dropped, withholdSince };
+      console.warn(`[fleet-push] 호스트를 ${Math.round(FLEET_WITHHOLD_MAX_MS / 60_000)}분 넘게 읽지 못한 vCenter ${unread.length}개(${unread.slice(0, 5).join(', ')}) — 그 vCenter 귀속분·귀속 없는 베어메탈 ${dropped}대를 빼고 보냅니다(중앙이 이 엣지 목록을 만료로 지우지 않게)`);
+    }
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/fleet`, {
       method: 'POST', headers: headers(),
-      body: JSON.stringify({ agent: config.agent.name, baremetal, generatedAt: snap.generatedAt }),
+      body: JSON.stringify({ agent: config.agent.name, baremetal, generatedAt: snap.generatedAt, ...(partialInfo ? { partial: true, unreadVcenters: partialInfo.unreadVcenters, withheldItems: partialInfo.withheldItems } : {}) }),
       timeoutMs: reqTimeoutMs(process.env.AGENT_PUSH_TIMEOUT_MS, 60_000), retries: 1,
     });
     if (!res.ok) throw new Error(`fleet -> ${res.status}`);
-    last = { at: Date.now(), sent: baremetal.length, error: null };
-    return { ok: true, sent: baremetal.length };
+    last = { at: Date.now(), sent: baremetal.length, error: null, ...(partialInfo ? { partial: true, ...partialInfo } : {}) };
+    return { ok: true, sent: baremetal.length, ...(partialInfo ? { partial: true, withheldItems: partialInfo.withheldItems } : {}) };
   } catch (e) {
     last = { at: Date.now(), sent: 0, error: e.message };
     console.warn(`[fleet-push] 실패: ${e.message}`);
     return { ok: false, reason: e.message };
   } finally { running = false; }
 }
+
+/** 테스트 전용 — 보류 시작 시각 주입/초기화. */
+export function _setFleetWithholdSinceForTest(v) { withholdSince = v; }
 
 export function fleetPushStatus() {
   return { enabled: !!(config.agent.centralUrl && ENABLED), centralUrl: config.agent.centralUrl, last };

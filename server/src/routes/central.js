@@ -607,6 +607,14 @@ const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'v
   'guestOS', 'powerState', 'connectionState', 'toolsStatus', 'toolsVersionStatus', 'ipAddress', 'folder', 'resourcePool', 'notes',
   'hwVersion', 'storageType', 'severity', 'message', 'entity', 'entityType', 'status', 'location', 'overallStatus'];
 /**
+ * 롤업·화면이 수로 계산하는 인벤토리 필드(v2.605 CEN2605-01) — 호스트·VM·DS·네트워크의 수치 필드 합집합.
+ * 정상 엣지(inventoryPush.js)는 숫자를 보내므로 정상 입력에는 무변경이다.
+ */
+const INV_NUM_KEYS = ['cpuCores', 'cpuThreads', 'cpuTotalMhz', 'cpuUsageMhz', 'cpuUsagePct', 'memTotalMB', 'memUsageMB', 'memUsagePct',
+  'vmCount', 'hostCount', 'powerWatts', 'powerWattsIdrac', 'tempC', 'tempMaxC', 'gpuUtilPct', 'uptimeSec',
+  'cpuCount', 'numCpu', 'memMB', 'memoryMB', 'storageGB', 'uncommittedGB', 'snapshotCount', 'snapshotSizeGB',
+  'snapshotOldestTs', 'snapshotNewestTs', 'capacityGB', 'freeGB', 'usedGB', 'usagePct', 'provisionedGB', 'vlanId'];
+/**
  * 인벤토리 조각 원소 정리(v2.599 CEN-2599-01·02·03).
  *  - 평범한 객체만 받는다 — `hosts:[null]` 하나로 store.refresh 가 매 주기 throw 해 **전 함대 스냅샷이 멈췄다**.
  *  - 원소의 vcenterId 는 본문 vcenterId 여야 한다 — 다르면 **뺀다**(예전에는 그대로 병합돼 소유권 검사를 지나 남의 법인
@@ -645,6 +653,13 @@ function sanitizeInventoryList(list, vcId, max, dropped) {
     for (const k of INV_TEXT_KEYS) {
       const v = o[k];
       if (v != null && typeof v === 'object') { o[k] = null; dropped.coerced += 1; }
+    }
+    // v2.605(CEN2605-01): 수치 필드도 좁힌다 — '32' 같은 글자가 오면 store 롤업의 `+=` 가 문자열 연결이 되어 **전 함대**
+    //   KPI(global·byRegion)가 오류 없이 틀린다(cpuCores '3232'). 숫자 글자는 수로, 그 밖(객체·'abc')은 null(읽지 못함).
+    for (const k of INV_NUM_KEYS) {
+      const v = o[k];
+      if (v == null || (typeof v === 'number' && Number.isFinite(v))) continue;
+      o[k] = numOrNull(v); dropped.coerced += 1;
     }
     out.push(o);
   }
@@ -1204,7 +1219,7 @@ centralRouter.post('/part-faults', async (req, res) => {
   try { r = await putEdgeReport(agent, req.body || {}); } catch (e) {
     return res.status(400).json({ ok: false, reason: `본문 형식 오류: ${String(e?.message || e).slice(0, 200)}` });
   }
-  if (!r.ok) return res.status(400).json(r);
+  if (!r.ok) return res.status(r.refused ? 429 : 400).json(r); // v2.605(CEN2605-02): 엣지 수 상한 거절은 429(형제 수신과 같다)
   // 응답에 중앙의 스위치 상태를 실어 보낸다 — 엣지가 '보냈는데 중앙이 꺼져 있다' 를 알 수 있게.
   const { partFaultEnabled } = await import('../partfault/settings.js');
   return res.json({ ok: true, agent, protocol: r.protocol, devices: r.devices, rejected: r.rejected, open: r.open, centralEnabled: partFaultEnabled().enabled });
@@ -1418,15 +1433,21 @@ centralRouter.post('/sanswitch-perf', async (req, res) => {
    * 소유권은 시계열과 같은 규약(위임된 deviceId 만).
    */
   let statusSaved = 0;
-  if (req.body?.status && typeof req.body.status === 'object') {
+  let statusRefused = false;
+  // v2.605(CEN2605-04): 위임 장비가 0대인 **공유 토큰** 이름은 상태를 저장하지 않는다 — 진단(perfDiag)은 위임 장비 단위라 쓸 곳이
+  //   없고, 임의 이름으로 보관 행을 채우는 통로만 된다. 개별 토큰 엣지는 0대여도 저장한다(토큰으로 이름이 검증됐다).
+  const statusAllowed = req.centralAuth?.mode === 'agent' || owned.size > 0;
+  if (statusAllowed && req.body?.status && typeof req.body.status === 'object') {
     try {
       const names = new Map(ownedDevices.map((d) => [String(d.id), d.name || d.host || d.id]));
-      statusSaved = saveEdgePerfStatus(agent, req.body.status, { owned, names }).saved;
+      const sv = saveEdgePerfStatus(agent, req.body.status, { owned, names });
+      statusSaved = sv.saved; statusRefused = !!sv.refused;
     } catch (e) { console.warn(`[central] sanswitch-perf 상태 저장 실패(${agent}): ${e.message}`); }
   }
   // v2.602: 적재에서 버린 메타(포트 범위 밖·빈 장비 id — perfDb.importSamples)와 위임 밖 메타를 **항상** 싣는다 —
   //   엣지(sanswitch/perfPush.js)가 상태·콘솔에 남긴다. 조용히 버리면 포트 이름·WWN 이 왜 비었는지 알 길이 없다.
-  res.json({ ok: true, ...r, metaRejected: r.metaRejected || 0, dropped, metaDropped, statusSaved });
+  res.json({ ok: true, ...r, metaRejected: r.metaRejected || 0, dropped, metaDropped, statusSaved,
+    ...(statusRefused ? { statusRefused: true } : {}), ...(!statusAllowed && req.body?.status ? { statusIgnored: 'no-delegated-devices' } : {}) });
 });
 
 // POST /api/central/sanswitch-test-result — 엣지가 대행한 연결 테스트 결과(추적 로그 포함) 회신(v2.421).

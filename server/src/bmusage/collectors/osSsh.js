@@ -23,9 +23,11 @@ import { withSsh } from '../../proxy/sshExec.js';
 import { sanitizeMounts, parseDfOutput } from '../../bmstor/collect.js';
 import { splitSections, parseProcStat, parseMemInfo, parseDiskstats, parseNetDev, parseNetInfo, parseFcHosts, parseClkTck } from '../parse/linuxProc.js';
 import { parseWinPerf } from '../parse/winPerf.js';
+import { reqTimeoutMs } from '../../agent/envTimeout.js';
 
-const READY_TIMEOUT_MS = Number(process.env.BMUSAGE_SSH_TIMEOUT_MS) || 15_000;
-const CMD_TIMEOUT_MS = Number(process.env.BMUSAGE_CMD_TIMEOUT_MS) || 30_000;
+// v2.605(TIM2605-04): 음수·2^31 초과 env 가 즉시 타임아웃이 되지 않게 [1초, 10분] 으로 정규화한다(agent/envTimeout.js).
+const READY_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_SSH_TIMEOUT_MS, 15_000);
+const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_CMD_TIMEOUT_MS, 30_000);
 /**
  * ⚠⚠ **세션 예산 — 두 번 시도하는 경로는 장비 시한을 넘길 수 있다**(v2.550.3 에 고친 결함.
  *   CLAUDE.md v2.528 이 Unity 에서 겪은 것과 **같은 유형**):
@@ -37,7 +39,7 @@ const CMD_TIMEOUT_MS = Number(process.env.BMUSAGE_CMD_TIMEOUT_MS) || 30_000;
  *   전에 폴러가 먼저 던져 회귀가 그대로 재발한다(`bmUsageBudget2550.test.js` 가 두 숫자를 고정한다).
  * ⚠ 남은 시간이 `MIN_SLICE_MS` 아래면 **시작하지 않는다** — 시작해 놓고 잘리면 그 결과도 버려진다.
  */
-export const SESSION_BUDGET_MS = Math.max(10_000, Number(process.env.BMUSAGE_SESSION_BUDGET_MS) || 50_000);
+export const SESSION_BUDGET_MS = reqTimeoutMs(process.env.BMUSAGE_SESSION_BUDGET_MS, 50_000, { min: 10_000 });
 export const MIN_SLICE_MS = 5_000;
 
 /** 호스트별 OS 판정 캐시(인메모리 — 틀리면 그 주기에 스스로 고친다). */
@@ -55,7 +57,9 @@ export function linuxCommand(mounts = []) {
     "echo '##NET'", 'cat /proc/net/dev 2>/dev/null',
     "echo '##NETINFO'",
     // 인터페이스별 링크 속도(Mbit)와 상태. 속도를 못 읽으면 -1 → 파서가 null 로 다룬다.
-    'for d in /sys/class/net/*; do n=`basename "$d"`; if [ "$n" = lo ]; then continue; fi; s=-1; if [ -r "$d/speed" ]; then s=`cat "$d/speed" 2>/dev/null || echo -1`; fi; st=`cat "$d/operstate" 2>/dev/null`; echo "$n $s $st"; done',
+    // v2.605(COL2605-01): 넷째 필드 = 물리 여부(`device` 링크가 있거나 bonding 마스터면 1, 아니면 0).
+    //   tun/tap·veth·bridge 는 드라이버가 **고정 속도(tun 은 10Mb/s)** 를 보고해 사용률(%)이 거짓 100% 가 된다.
+    'for d in /sys/class/net/*; do n=`basename "$d"`; if [ "$n" = lo ]; then continue; fi; s=-1; if [ -r "$d/speed" ]; then s=`cat "$d/speed" 2>/dev/null || echo -1`; fi; st=`cat "$d/operstate" 2>/dev/null`; p=0; if [ -e "$d/device" ] || [ -d "$d/bonding" ]; then p=1; fi; echo "$n $s ${st:--} $p"; done',
     "echo '##FC'",
     // FC HBA — 속도 원문에 공백이 있어 `|` 로 구분한다.
     'for d in /sys/class/fc_host/*; do if [ ! -d "$d" ]; then continue; fi; h=`basename "$d"`; ps=`cat "$d/port_state" 2>/dev/null`; sp=`cat "$d/speed" 2>/dev/null`; tx=`cat "$d/statistics/tx_words" 2>/dev/null`; rx=`cat "$d/statistics/rx_words" 2>/dev/null`; echo "$h|$ps|$sp|$tx|$rx"; done',
@@ -75,7 +79,9 @@ export const WIN_PS = [
   'try { "OS_NAME=" + (Get-CimInstance Win32_OperatingSystem).Caption } catch {}',
   "try { $c=(Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor | Where-Object {$_.Name -eq '_Total'}).PercentProcessorTime; if ($c -ne $null) { \"CPU_PCT=$c\" } } catch {}",
   'try { $o=Get-CimInstance Win32_OperatingSystem; "MEM_TOTAL_KB=" + $o.TotalVisibleMemorySize; "MEM_FREE_KB=" + $o.FreePhysicalMemory } catch {}',
-  'try { $p=@{}; Get-CimInstance Win32_PerfFormattedData_PerfDisk_LogicalDisk | ForEach-Object { $p[$_.Name]=$_.PercentDiskTime }; Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object { "DISK=" + $_.DeviceID + "|" + $p[$_.DeviceID] + "|" + $_.Size + "|" + $_.FreeSpace } } catch {}',
+  // v2.605(COL2605-02): PercentDiskTime 은 '평균 대기열×100' 이라 100 을 넘는다(Linux %util 과 뜻이 다르다) →
+  //   100 − PercentIdleTime 을 싣는다. 값이 없으면 빈 칸(PowerShell 에서 100-$null 은 100 이 되므로 먼저 검사한다).
+  'try { $p=@{}; Get-CimInstance Win32_PerfFormattedData_PerfDisk_LogicalDisk | ForEach-Object { if ($_.PercentIdleTime -ne $null) { $p[$_.Name]=100-$_.PercentIdleTime } }; Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object { "DISK=" + $_.DeviceID + "|" + $p[$_.DeviceID] + "|" + $_.Size + "|" + $_.FreeSpace } } catch {}',
   "try { Get-CimInstance Win32_PerfFormattedData_Tcpip_NetworkInterface | Where-Object { $_.Name -notmatch 'Loopback|isatap|Teredo|Pseudo' } | ForEach-Object { \"NIC=\" + $_.Name + \"|\" + $_.BytesTotalPersec + \"|\" + $_.CurrentBandwidth + \"|\" + $_.BytesReceivedPersec + \"|\" + $_.BytesSentPersec } } catch {}",
   "try { Get-CimInstance -Namespace 'root\\WMI' -ClassName MSFC_FibrePortHBAAttributes | ForEach-Object { \"HBA=\" + $_.InstanceName + \"|\" + $_.Attributes.PortState + \"|\" + $_.Attributes.PortSpeed } } catch {}",
 ].join('\n');
@@ -135,7 +141,7 @@ export function shapeLinux(stdout, mounts = []) {
     counters: {
       cpu: stat,
       disks: disks || [],
-      nets: (nets || []).map((n) => ({ ...n, bitsPerSec: netInfo[n.iface]?.bitsPerSec ?? null, state: netInfo[n.iface]?.state || '' })),
+      nets: (nets || []).map((n) => ({ ...n, bitsPerSec: netInfo[n.iface]?.bitsPerSec ?? null, state: netInfo[n.iface]?.state || '', ...(netInfo[n.iface]?.virtual ? { virtual: true } : {}) })),
       hbas: fcs || [],
     },
     read, missing, absent,
