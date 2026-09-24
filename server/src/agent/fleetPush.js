@@ -10,6 +10,7 @@
  */
 
 import { config } from '../config.js';
+import { reqTimeoutMs } from './envTimeout.js';
 import { store } from '../store.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { getFleetInventory } from '../insights/fleetInventory.js';
@@ -40,7 +41,7 @@ export async function pushFleetNow() {
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/fleet`, {
       method: 'POST', headers: headers(),
       body: JSON.stringify({ agent: config.agent.name, baremetal, generatedAt: snap.generatedAt }),
-      timeoutMs: Number(process.env.AGENT_PUSH_TIMEOUT_MS) || 60_000, retries: 1,
+      timeoutMs: reqTimeoutMs(process.env.AGENT_PUSH_TIMEOUT_MS, 60_000), retries: 1,
     });
     if (!res.ok) throw new Error(`fleet -> ${res.status}`);
     last = { at: Date.now(), sent: baremetal.length, error: null };

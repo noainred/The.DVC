@@ -82,10 +82,38 @@ function persistSoon() {
   writeTimer.unref?.();
 }
 
-/** 사이트가 push한 한 vCenter의 스냅샷 조각을 저장. */
+/** 마지막 정상 목록 보존 창 — store.js LASTGOOD_HOLD_MS 와 같은 값·같은 env(순환 import 를 피해 여기서 읽는다). */
+const HOLD_MS = Number(process.env.LASTGOOD_HOLD_MS) || 6 * 3_600_000;
+const UNREAD = new Set(['unreachable', 'pending']);
+const hasRows = (a) => Array.isArray(a) && a.length > 0;
+
+/**
+ * 사이트가 push한 한 vCenter의 스냅샷 조각을 저장.
+ *
+ * v2.600(감사 EDGE2600-04 중앙쪽): **인벤토리를 읽지 못한 빈 조각**(vcenter.status 가 unreachable/pending 이고 호스트·VM 0)은
+ * 마지막 정상 목록을 지우지 않는다. 엣지가 재시작 직후 첫 수집에 실패하면 lastGood 이 메모리에 없어 빈 unreachable 조각을
+ * 보냈고(구버전 엣지 — v2.600 엣지는 보내지 않는다), 통째로 교체하던 이 함수가 중앙의 정상 호스트·VM 을 즉시 지웠다.
+ * 이제 목록은 두고 **vcenter 상태만** 갱신하며, `at`(데이터 시각)은 그대로 둬 store 가 '낡음(stale)' 으로 표시한다 —
+ * 모르는 것을 0 대로도, 지금 값으로도 칠하지 않는다. 보존은 LASTGOOD_HOLD 창(기본 6시간)까지이고 넘으면 빈 조각을 받는다.
+ * @returns {{ held: boolean }}
+ */
 export function setInventory(vcenterId, slice, agent, generatedAt) {
-  cache[vcenterId] = { at: Date.now(), agent: agent || '', generatedAt: generatedAt || null, data: slice };
+  const now = Date.now();
+  const prev = cache[vcenterId];
+  const st = slice?.vcenter?.status;
+  if (prev && UNREAD.has(st) && !hasRows(slice?.hosts) && !hasRows(slice?.vms)
+    && (hasRows(prev.data?.hosts) || hasRows(prev.data?.vms)) && now - (Number(prev.at) || 0) <= HOLD_MS) {
+    const pv = prev.data?.vcenter && typeof prev.data.vcenter === 'object' ? prev.data.vcenter : {};
+    cache[vcenterId] = {
+      ...prev, agent: agent || prev.agent || '', pushAt: now, heldSince: prev.heldSince || now,
+      data: { ...prev.data, vcenter: { ...pv, status: st, ...(typeof slice.vcenter.error === 'string' ? { error: slice.vcenter.error.slice(0, 500) } : {}), held: true } },
+    };
+    persistSoon();
+    return { held: true };
+  }
+  cache[vcenterId] = { at: now, pushAt: now, agent: agent || '', generatedAt: generatedAt || null, data: slice };
   persistSoon();
+  return { held: false };
 }
 
 export function getInventory(vcenterId) { return cache[vcenterId] || null; }
@@ -112,6 +140,7 @@ export function setInventoryOwner(vcenterId, agent) {
 export function listInventory() {
   return Object.entries(cache).map(([vcenterId, e]) => ({
     vcenterId, agent: e.agent, at: e.at, generatedAt: e.generatedAt,
+    ...(e.pushAt ? { pushAt: e.pushAt } : {}), ...(e.heldSince ? { heldSince: e.heldSince } : {}),   // v2.600 EDGE2600-04
     hosts: e.data?.hosts?.length || 0, vms: e.data?.vms?.length || 0,
     datastores: e.data?.datastores?.length || 0,
   })).sort((a, b) => (b.at || 0) - (a.at || 0));

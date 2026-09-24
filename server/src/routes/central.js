@@ -637,7 +637,7 @@ centralRouter.post('/inventory', (req, res) => {
     const cur = getInventory(String(b.vcenterId));
     const owner = cur?.agent || '';
     if (owner && owner.toLowerCase() !== agent.toLowerCase()) {
-      const silentMs = Date.now() - (Number(cur.at) || 0);
+      const silentMs = Date.now() - (Number(cur.pushAt || cur.at) || 0); // v2.600: 목록 보존(held) 중에도 엣지는 push 하고 있다 — 마지막 push 시각
       if (INVENTORY_OWNER_HANDOVER_MS > 0 && silentMs > INVENTORY_OWNER_HANDOVER_MS) {
         // v2.599(EDGE2599-03): 소유 엣지가 시한 넘게 조용하다 — 인계한다(감사·콘솔·응답에 남긴다).
         handover = { from: owner, silentMs };
@@ -696,13 +696,14 @@ centralRouter.post('/inventory', (req, res) => {
   };
   const droppedN = dropped.notObject + dropped.otherVcenter + dropped.badId;
   if (droppedN) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 원소 ${droppedN}건 제외(객체 아님 ${dropped.notObject} · 다른 vCenter ${dropped.otherVcenter} · id 형식 ${dropped.badId})`);
-  setInventory(vcId, slice, agent, b.generatedAt || null);
+  const saved = setInventory(vcId, slice, agent, b.generatedAt || null) || {};
+  if (saved.held) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 상태 ${slice.vcenter.status} · 호스트·VM 0 — 마지막 정상 목록을 지우지 않고 상태만 갱신했습니다(엣지가 인벤토리를 읽지 못함)`);
   res.locals.ingestSummary = {
     vcenterId: vcId.slice(0, 128), hosts: slice.hosts.length, vms: slice.vms.length, datastores: slice.datastores.length,
     networks: slice.networks.length, alarms: slice.alarms.length, gzip: (req.get('content-encoding') || '').includes('gzip'),
   };
   res.json({ ok: true, vcenterId: b.vcenterId, hosts: slice.hosts.length, vms: slice.vms.length,
-    ...(droppedN || dropped.coerced ? { rejected: droppedN, dropped } : {}), ...(handover ? { ownerHandover: handover } : {}) });
+    ...(droppedN || dropped.coerced ? { rejected: droppedN, dropped } : {}), ...(handover ? { ownerHandover: handover } : {}), ...(saved.held ? { held: true } : {}) });
 });
 
 // 사이트 위임 게스트 디스크 수신(v2.466) — 엣지가 로컬 vCenter 의 guest.disk 를 수집해 push.
@@ -1569,7 +1570,9 @@ centralRouter.post('/capture-result', (req, res) => {
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   if (reqAgentDenied(req, captureAgentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
   setCaptureResult(String(b.reqId), b.result || { ok: false, reason: '빈 결과' });
-  try { if (b.result?.ok) recordCapture(b.result, { source: 'manual', via: 'agent' }); } catch { /* */ }
+  // v2.600(CEN2600-09): 엣지 워커가 결과에 싣는 A 호스트(잡 spec.host)를 이력의 hostA 로 — 글자만, 제어문자 제거, 255자.
+  const hostA = typeof b.result?.hostA === 'string' ? b.result.hostA.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 255) : '';
+  try { if (b.result?.ok) recordCapture(b.result, { source: 'manual', via: 'agent', ...(hostA ? { hostA } : {}) }); } catch { /* */ }
   res.json({ ok: true });
 });
 

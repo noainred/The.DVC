@@ -181,12 +181,70 @@ test('SEC2600-02: toBytes 는 단위 없는 긴 숫자열에서도 선형이다(
   assert.equal(toBytesOrNull('0'), 0);
 });
 
-test('LO2600-07(보류): freeSpace 가 없는 파티션은 값은 보수적으로 두고 freeUnknown 으로 밝힌다', async () => {
+test('LO2600-07: freeSpace 가 없는 파티션은 사용·여유 null + freeUnknown, 소비처는 할당·사용 양쪽에서 빼고 센다', async () => {
   const { parseGuestDisks } = await import('../src/vcenter/soapParse.js');
   const [p] = parseGuestDisks('<GuestDiskInfo><diskPath>C:</diskPath><capacity>107374182400</capacity></GuestDiskInfo>');
   assert.equal(p.freeUnknown, true);
-  assert.equal(p.usedGB, 100);          // 회수 후보를 과대로 만들지 않는 방향 유지
+  assert.equal(p.usedGB, null);           // 예전: 100(지어낸 '가득 참')
+  assert.equal(p.freeGB, null);
+  assert.equal(p.capacityGB, 100);
   const [q] = parseGuestDisks('<GuestDiskInfo><diskPath>C:</diskPath><capacity>107374182400</capacity><freeSpace>53687091200</freeSpace></GuestDiskInfo>');
   assert.equal(q.freeUnknown, undefined);
   assert.equal(q.usedGB, 50);
+  // 소비처 ① vmSummary — 모르는 파티션을 할당에서도 빼야 '여유 100GB(회수 후보)' 가 생기지 않는다.
+  const { vmSummary, sanitizeGuestDiskVms, rankReclaim } = await import('../src/guestdisk/analyze.js');
+  const s = vmSummary([p, q]);
+  assert.deepEqual([s.allocGB, s.usedGB, s.freeGB, s.partsUnknown, s.partCount], [100, 50, 50, 1, 2]);
+  assert.equal(vmSummary([p]).freeGB, 0);
+  assert.equal(vmSummary([p]).ratioPct, null);
+  assert.equal(rankReclaim([{ vmId: 'v', ...vmSummary([p]) }], { minReclaimGB: 5 }).vmCount, 0, '모르는 파티션이 회수 후보가 됐다');
+  // 소비처 ② sanitize — 사용량 null 파티션을 0 으로 저장하지 않는다.
+  const [vm] = sanitizeGuestDiskVms([{ vmId: 'v1', allocGB: 50, usedGB: 10, parts: [{ path: 'C:', capGB: 100, usedGB: null }, { path: 'D:', capGB: 50, usedGB: 10 }] }]);
+  assert.deepEqual(vm.parts.map((x) => x.path), ['D:']);
+  assert.equal(vm.partsUnknown, 1);
+  // 소비처 ③ vmExport — 사용·여유 합에서 빼고 미보고 개수를 싣는다.
+  const { VM_EXPORT_COLUMNS, guestKnownSum } = await import('../src/vcenter/vmExport.js');
+  const col = (k) => VM_EXPORT_COLUMNS.find((c) => c.key === k).get({}, { guest: [p, q] });
+  assert.equal(col('guestCapacityGB'), 200);
+  assert.equal(col('guestUsedGB'), 50);
+  assert.equal(col('guestFreeGB'), 50);
+  assert.equal(col('guestPartsUnknown'), 1);
+  assert.match(col('guestParts'), /C: \?\/100GB/);
+  assert.equal(guestKnownSum([p], 'usedGB'), '');
+});
+
+test('COL-2600-06 후속: NSX 합계 — 실패한 목록은 0 이 아니라 null + 실패 매니저 수', async () => {
+  const { scopedNsxRollup } = await import('../src/nsx/scope.js');
+  const { merge, rollup } = await import('../src/nsx/store.js');
+  const failedPart = {
+    manager: { id: 'm1', name: 'M1', status: 'connected', listsFailed: ['segments', 'securityPolicies', 'groups'] },
+    gateways: [{ tier: 'T0' }], segments: [], transportNodes: [{ type: 'host' }],
+    firewall: { policies: null, rules: null, failed: true }, groups: null,
+  };
+  const okPart = { manager: { id: 'm2', name: 'M2', status: 'connected' }, gateways: [], segments: [{ type: 'VLAN' }], transportNodes: [], firewall: { policies: 3, rules: 9 }, groups: 2 };
+  const snap = rollup(merge([failedPart, okPart], [], 'real'));
+  assert.equal(snap.managers[0].segments, null, '매니저 행의 세그먼트 수가 0 으로 남았다');
+  assert.equal(snap.managers[0].gateways, 1);
+  assert.equal(snap.managers[1].segments, 1);
+  const r = snap.rollup;
+  assert.equal(r.segments, null);
+  assert.equal(r.overlaySegments, null);
+  assert.equal(r.dfwPolicies, null);
+  assert.equal(r.dfwRules, null);
+  assert.equal(r.groups, null);
+  assert.equal(r.t0, 1);
+  assert.equal(r.hostNodes, 1);
+  assert.deepEqual(r.listsFailed, { segments: 1, securityPolicies: 1, groups: 1 });
+  // 실패가 없으면 예전과 같은 합계(firewall 없는 구버전 매니저는 0 으로).
+  const r2 = scopedNsxRollup({ managers: [okPart.manager && { ...okPart.manager, firewall: okPart.firewall, groups: 2 }, { id: 'old' }], gateways: [], segments: [{ type: 'VLAN' }], transportNodes: [] });
+  assert.deepEqual([r2.segments, r2.dfwPolicies, r2.dfwRules, r2.groups, r2.listsFailed], [1, 3, 9, 2, undefined]);
+});
+
+test('COL-2600-04 후속: vplexcli ll 표도 가운데 빈 칸이 상태 열을 당기지 않는다', async () => {
+  const { parseLl } = await import('../src/storage/collectors/vplexSsh.js');
+  const t = 'Name        management-ip  operational-status\n----------  -------------  ------------------\ndirector-1  10.0.0.1       ok\ndirector-2                 lost-communication';
+  const rows = parseLl(t);
+  assert.equal(rows[1]['operational-status'], 'lost-communication');
+  assert.equal(rows[1]['management-ip'], '');
+  assert.equal(rows[0]['operational-status'], 'ok');
 });

@@ -10,7 +10,7 @@
  */
 
 import { emptySnapshot } from '../types.js';
-import { runCliSession, parseKeyValueBlocks, toBytes, toBytesOrNull, sshFailureSnapshot } from './cliSsh.js';
+import { runCliSession, parseKeyValueBlocks, toBytes, toBytesOrNull, sshFailureSnapshot, sliceRowByHeader } from './cliSsh.js';
 import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
 
 const wrap = (cmd) => [cmd, `xmcli -c "${cmd}"`];
@@ -40,21 +40,13 @@ export function parseTable(text) {
   //   **다르면**(가운데 칸이 비었다) 공백 분할이 뒤 값을 왼쪽으로 당겨 'State' 가 'IP-Address' 칸에 들어갔다
   //   (끊긴 컨트롤러가 상태 미상 → 비정상 0 으로 숨었다). 그때는 머리글 위치로 잘라 읽는다(고정폭 표).
   const headerLine = lines[headerIdx];
-  const starts = [];
-  { let from = 0; for (const h of header) { const at = headerLine.indexOf(h, from); starts.push(at); from = at + h.length; } }
-  const positional = starts.every((x, i) => x >= 0 && (i === 0 || x > starts[i - 1]));
   const rows = [];
   for (const line of lines.slice(sepIdx > 0 ? sepIdx + 1 : headerIdx + 1)) {
     if (/^[-=\s|+]+$/.test(line)) continue;
     const cells = line.trim().split(/\s{2,}/).map((c) => c.trim());
     if (cells.length < 2) continue;
-    const row = {};
-    if (cells.length !== header.length && positional) {
-      header.forEach((h, i) => { row[h] = line.slice(i === 0 ? 0 : starts[i], i + 1 < starts.length ? starts[i + 1] : undefined).trim(); });
-      row._positional = true;   // 공백 분할과 칸 수가 달라 위치로 읽었다(진단용 — pick 대상 키가 아니다)
-    } else {
-      header.forEach((h, i) => { row[h] = cells[i] ?? ''; });
-    }
+    let row = cells.length !== header.length ? sliceRowByHeader(headerLine, header, line) : null;
+    if (!row) { row = {}; header.forEach((h, i) => { row[h] = cells[i] ?? ''; }); }
     rows.push(row);
   }
   return rows.length ? rows : parseKeyValueBlocks(text);

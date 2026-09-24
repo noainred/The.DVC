@@ -22,6 +22,7 @@
  */
 
 import { config, clampIntervalMs } from '../config.js';
+import { reqTimeoutMs } from './envTimeout.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { classifyCentral404 } from './central404.js';
@@ -87,7 +88,7 @@ export async function pullSvcmonConfigNow() {
     const qs = new URLSearchParams({ agent: config.agent.name || '' });
     if (appliedSig) qs.set('sig', appliedSig);
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/svcmon-config?${qs}`, {
-      method: 'GET', headers: headers(), timeoutMs: Math.min(600_000, envNum('SVCMON_PULL_TIMEOUT_MS', 60_000)), retries: 1,
+      method: 'GET', headers: headers(), timeoutMs: reqTimeoutMs(process.env.SVCMON_PULL_TIMEOUT_MS, 60_000), retries: 1,
     });
     if (res.status === 404) {
       // v2.600 EDGE2600-06: 404 본문으로 '중앙이 central 을 끔' 과 '엔드포인트 없음(구버전·잘못된 URL)' 을 가르고

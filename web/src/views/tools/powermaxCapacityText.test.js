@@ -94,6 +94,14 @@ describe('사용량 신뢰 판정', () => {
     expect(usageTrust({ capacityBasis: 'srp:fba_srp_capacity.effective.physical_capacity' }).kind).toBe('ok');
   });
 
+  it('v2.600: 제외된 풀 문구는 벤더 중립이다(PowerMax·XtremIO 에서도 뜬다 — Unity 항목명을 안내하지 않는다)', () => {
+    const t = usageTrust({ poolsUnreadable: 1 });
+    expect(t.kind).toBe('partial');
+    expect(t.text).not.toMatch(/Total space|Current allocation|Remaining space/);
+    expect(t.text).toMatch(/어레이·클러스터/);
+    expect(t.text).not.toMatch(/`/);
+  });
+
   it('extra 가 없어도 터지지 않는다(다른 타입 장비)', () => {
     expect(usageTrust(null).kind).toBe('ok');
     expect(usageTrust(undefined).short).toBe(null);

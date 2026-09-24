@@ -21,6 +21,7 @@ import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import { config } from '../config.js';
+import { reqTimeoutMs } from './envTimeout.js';
 import { store } from '../store.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { isMockVcenter } from '../mock/generator.js';
@@ -66,7 +67,7 @@ async function pushOne(vc) {
   }
   const res = await resilientFetch(`${config.agent.centralUrl}/api/central/guest-disk`, {
     method: 'POST', headers: hdrs, body,
-    timeoutMs: Number(process.env.AGENT_GUESTDISK_PUSH_TIMEOUT_MS) || 120_000, retries: 1,
+    timeoutMs: reqTimeoutMs(process.env.AGENT_GUESTDISK_PUSH_TIMEOUT_MS, 120_000), retries: 1,
   });
   if (!res.ok) throw new Error(`guest-disk -> ${res.status}`);
   return { bytes: json.length, gzBytes: body.length, withGuest: r.withGuest };

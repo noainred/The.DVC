@@ -12,6 +12,7 @@ import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import { config } from '../config.js';
+import { reqTimeoutMs } from './envTimeout.js';
 import { store } from '../store.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { isMockVcenter } from '../mock/generator.js';
@@ -58,7 +59,7 @@ async function pushVcenter(snap, vc) {
   // 대용량 인벤토리 + 고RTT를 고려해 타임아웃을 넉넉히, 일시 오류는 1회 재시도(중복 push는 멱등).
   const res = await resilientFetch(`${config.agent.centralUrl}/api/central/inventory`, {
     method: 'POST', headers: hdrs, body,
-    timeoutMs: Number(process.env.AGENT_PUSH_TIMEOUT_MS) || 120_000, retries: 1,
+    timeoutMs: reqTimeoutMs(process.env.AGENT_PUSH_TIMEOUT_MS, 120_000), retries: 1,
   });
   if (!res.ok) throw new Error(`inventory -> ${res.status}`);
   return { bytes: json.length, gzBytes: body.length };

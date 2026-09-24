@@ -22,6 +22,10 @@ process.env.PARTFAULT_PUSH_MS = '3000000000';
 process.env.SANSW_CONFIG_PULL_MS = '3000000000';
 process.env.SVCMON_CONFIG_PULL_MS = '3000000000';
 process.env.AGENT_PUSH_GZIP = 'true';
+process.env.SVCMON_PUSH_INTERVAL_MS = '3000000000';
+// 추가 배정 ③: 음수 요청 시한은 예전에 요청을 즉시 중단시켰다 — 아래 push 테스트(#7·#8)가 그대로 성공해야 한다.
+process.env.AGENT_PUSH_TIMEOUT_MS = '-1';
+process.env.AGENT_VMSERIES_PUSH_TIMEOUT_MS = '-1';
 
 const T0 = 1_700_000_000_000; // 기준 시각(Date.now 를 쓰지 않는다)
 
@@ -270,4 +274,60 @@ test('EDGE2600-07: 위임 워커는 성공 인출(잡 0건)이면 이전 실패 
     assert.equal(pw.pingWorkerStatus().ok, true);
     assert.equal(pw.pingWorkerStatus().jobs, 0);
   } finally { srv.close(); }
+});
+
+// ── 추가 배정 ① — 위임 캡처의 인메모리 잡 결과 정제 ─────────────────────────────
+test('추가①: setCaptureResult 는 화면이 읽는 필드(sample·warn·command·reason)만 담아 정제한다', async () => {
+  const cj = await import('../src/central/captureJobs.js');
+  const reqId = cj.enqueueCapture('edgeC', { host: '10.1.1.1', peer: '10.2.2.2', seconds: 5 });
+  cj.takeCaptureJobs('edgeC');
+  cj.setCaptureResult(reqId, {
+    ok: true, peer: { evil: 1 }, command: 'tcpdump', iface: 'any', seconds: 5, warn: { o: 1 },
+    sample: ['a'.repeat(5000), { o: 1 }, ...Array.from({ length: 100 }, () => 'l')],
+    analysis: { stat: { packets: 3, topPorts: [{ port: 443, packets: { x: 1 } }] }, issues: [{ sev: 'ok', title: 't', detail: 'd'.repeat(9000) }] },
+    junk: 'x'.repeat(100_000),
+  });
+  const r = cj.getCaptureResult(reqId);
+  assert.equal(r.state, 'done');
+  assert.equal(r.result.peer, '');
+  assert.equal(r.result.warn, null);
+  assert.equal(r.result.command, 'tcpdump');
+  assert.equal(r.result.sample.length, 39, '문자열 줄만·40줄 상한');
+  assert.equal(r.result.sample[0].length, 500);
+  assert.equal(r.result.analysis.stat.packets, 3);
+  assert.equal(r.result.analysis.stat.topPorts[0].port, '443');
+  assert.equal(r.result.analysis.stat.topPorts[0].packets, null);
+  assert.equal(r.result.analysis.issues[0].detail.length, 500);
+  assert.equal('junk' in r.result, false);
+  // 실패 회신은 사유를 유지한다(화면이 ErrorBox 로 보여 준다).
+  const q = cj.enqueueCapture('edgeC', { host: 'h', peer: 'p' });
+  cj.takeCaptureJobs('edgeC');
+  cj.setCaptureResult(q, { ok: false, reason: 'SSH 인증 실패' });
+  assert.equal(cj.getCaptureResult(q).result.reason, 'SSH 인증 실패');
+  // dual 결과의 a·b 도 화면용 필드를 담는다.
+  const d = await import('../src/net/captureHistory.js');
+  const dual = d.sanitizeCaptureResult({ ok: true, dual: true, hostA: 'a', hostB: 'b', a: { ok: true, sample: ['x'], analysis: { stat: { packets: 1 }, issues: [] } }, comparison: { issues: [] } }, { full: true });
+  assert.deepEqual(dual.a.sample, ['x']);
+  assert.equal(dual.b, null);
+});
+
+// ── 추가 배정 ②·③ ─────────────────────────────────────────────────────────────
+test('추가②③: svcmon push 주기 상한 · 엣지 요청 시한 env 는 [1초, 10분]', async () => {
+  const { MAX_TIMER_MS } = await import('../src/config.js');
+  const sp = await import('../src/agent/svcmonPush.js');
+  assert.equal(sp.svcmonPushStatus().intervalMs, MAX_TIMER_MS);
+  const { reqTimeoutMs } = await import('../src/agent/envTimeout.js');
+  assert.equal(reqTimeoutMs('-1', 60_000), 60_000);
+  assert.equal(reqTimeoutMs('', 60_000), 60_000);
+  assert.equal(reqTimeoutMs(undefined, 60_000), 60_000);
+  assert.equal(reqTimeoutMs('3000000000', 60_000), 600_000);
+  assert.equal(reqTimeoutMs('10', 60_000), 1_000);
+  assert.equal(reqTimeoutMs('90000', 60_000), 90_000);
+  // agent/* 안에 `Number(process.env.*TIMEOUT*) ||` 형태가 남아 있지 않다(주석 제외).
+  const dir = new URL('../src/agent/', import.meta.url);
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith('.js')) continue;
+    const src = fs.readFileSync(new URL(f, dir), 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
+    assert.doesNotMatch(src, /Number\(process\.env\.[A-Z_]*TIMEOUT[A-Z_]*\)\s*\|\|/, f);
+  }
 });
