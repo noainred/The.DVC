@@ -48,6 +48,8 @@ export function summarize(snap) {
     units: units.length,
     ...(snap.unitsIncomplete ? { unitsIncomplete: true } : {}),   // v2.594: 합계 전력이 부분 합임을 밝힌다
     sensors: sensors.length,
+    // v2.599(감사 C2599-04): 센서 탐지가 E1xx 아닌 실패로 멈췄으면 센서 수·온도·습도는 부분 집계다.
+    ...(snap.sensorsIncomplete ? { sensorsIncomplete: true } : {}),
     powerW: powerVals.length ? powerVals.reduce((a, b) => a + b, 0) : null,
     energyKwh: energyVals.length ? Math.round(energyVals.reduce((a, b) => a + b, 0) * 100) / 100 : null,
     tempMaxC: tempVals.length ? Math.max(...tempVals) : null,

@@ -115,7 +115,13 @@ export function slopeOf(xs, ys) {
  */
 export function diskBreakdown(vms, datastores, { now = Date.now(), policy: pol } = {}) {
   const policy = { ...DEFAULT_POLICY, ...(pol || {}) };
-  const dss = (datastores || []).filter((d) => num(d.capacityGB) > 0); // 용량 미상은 제외(추정 금지)
+  const withCap = (datastores || []).filter((d) => num(d.capacityGB) > 0); // 용량 미상은 제외(추정 금지)
+  // v2.599 RECENT2599-03: 사용량을 못 읽은 DS(usedGB·freeGB 둘 다 null — v2.598 부터 SOAP 경로도 null 을 낸다)는
+  // 용량·사용량 **양쪽에서** 뺀다. 예전에는 capacity − num(null) = capacity 라 그 DS 가 '100% 사용' 으로 세였다.
+  // vmtrack diffDatastores 와 같은 규칙이고 뺀 개수를 usageUnknown 으로 밝힌다.
+  const usageKnown = (d) => d.usedGB != null || d.freeGB != null;
+  const dss = withCap.filter(usageKnown);
+  const usageUnknown = withCap.length - dss.length;
   const capGB = dss.reduce((a, d) => a + num(d.capacityGB), 0);
   const usedGB = dss.reduce((a, d) => a + (d.usedGB != null ? num(d.usedGB) : Math.max(0, num(d.capacityGB) - num(d.freeGB))), 0);
   const freeGB = Math.max(0, capGB - usedGB);
@@ -149,12 +155,13 @@ export function diskBreakdown(vms, datastores, { now = Date.now(), policy: pol }
   // VM 외 사용량 = 데이터스토어 실제 점유 − (VM+템플릿 커밋). ISO·고아 디스크·vSAN 오버헤드·범위 밖 VM 등.
   // 음수(범위 밖 VM 이 그 DS 를 쓰거나 로컬 DS 가 목록에 없을 때)는 의미가 없으므로 null.
   const otherRaw = usedGB - committedGB - templateGB;
-  const otherGB = capGB > 0 && otherRaw >= 0 ? otherRaw : null;
+  // 사용량을 못 읽은 DS 가 있으면 그 DS 위 VM 커밋은 빼지 못하므로 계산하지 않는다(부분 차이는 거짓).
+  const otherGB = capGB > 0 && otherRaw >= 0 && usageUnknown === 0 ? otherRaw : null;
 
   const top = (arr, fn, n = 10) => [...arr].sort((a, b) => fn(b) - fn(a)).slice(0, n);
   return {
     policy,
-    ds: { count: dss.length, capGB: r1(capGB), usedGB: r1(usedGB), freeGB: r1(freeGB), usagePct: dsUsagePct, warnCount, critCount },
+    ds: { count: dss.length, usageUnknown, capGB: r1(capGB), usedGB: r1(usedGB), freeGB: r1(freeGB), usagePct: dsUsagePct, warnCount, critCount },
     vm: {
       count: real.length, on: on.length, off: off.length, thinCount: thin.length, templates: templates.length,
       provGB: r1(provGB), committedGB: r1(committedGB), uncommittedGB: r1(uncommittedGB), templateGB: r1(templateGB),

@@ -18,6 +18,7 @@ import { portsScopeNote } from './sanPortsScopeText.js';
 import { DeviceHealthPanel, AllHealthCheck } from './SanHealthCheck.jsx';
 import { authStopInfo, authStopSummary, credFpText } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
+import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -262,6 +263,12 @@ export default function SanSwitchTool() {
         </div>
       )}
 
+      {/* v2.599(AUTHZ-2599-03): 비-admin 에는 관리 IP·계정이 가려져 온다 — 빈 칸의 이유를 한 번 말한다 */}
+      {addressHiddenNote(data) && (
+        <div className="card" style={{ marginBottom: 10, padding: '10px 14px', fontSize: 13 }}>
+          🔒 <BoldText text={addressHiddenNote(data)} />
+        </div>
+      )}
       {/* v2.591: 엣지가 가져갔지만 결과가 오지 않아 폐기된 '지금 수집' 요청 — 배지만 조용히 꺼지지 않게 */}
       {(() => {
         const t = collectDropNote(data?.collectDrops, (id) => rows.find((r) => r.id === id)?.name || id);
@@ -298,7 +305,7 @@ export default function SanSwitchTool() {
                         다를 수 있고 그때 어느 장비인지 헷갈린다(사용자 요구). */}
                     <div className="muted" style={{ fontSize: 11 }}>
                       {s?.name && s.name !== r.name ? <><b style={{ fontWeight: 600 }}>{s.name}</b>{' · '}</> : null}
-                      {r.host}{r.vfId ? ` · VF ${r.vfId}` : ''}
+                      {hostText(r.host)}{r.vfId ? ` · VF ${r.vfId}` : ''}
                     </div>
                   </td>
                   <td>{dcName(r.datacenterId)}</td>
@@ -1270,7 +1277,7 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
             {d.model || (d.extra?.switchType
               ? <span title="chassisshow 에서 모델명(Chassis Family)을 읽지 못했습니다. 대신 스위치가 보고한 switchType 원값을 그대로 표시합니다 — 타입 코드를 모델명으로 바꾸는 표는 확실하지 않아 넣지 않았습니다.">switchType {d.extra.switchType}</span>
-              : '모델 미상')} · FOS {d.fabricOs || '—'} · {d.host || ''} · {d.source} · 수집 {ago(d.collectedAt)}
+              : '모델 미상')} · FOS {d.fabricOs || '—'} · {hostText(d.host)} · {d.source} · 수집 {ago(d.collectedAt)}
             {/* v2.517: 엣지 push 기본이 **전체 포트**로 바뀌었다(push.js 머리말 — gzip 실측 근거).
                 그래서 이 배너는 '전체가 오지 않은 경우' 에만 뜨고, 세 원인(구버전 엣지 / 현장
                 되돌림 / 크기 가드)을 **다르게** 안내한다 — 조치가 다르기 때문이다. 판정·문구는

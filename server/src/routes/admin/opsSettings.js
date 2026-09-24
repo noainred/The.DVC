@@ -4,13 +4,13 @@ import { verifyUserOtp } from '../../auth/auth.js';
 import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners } from '../../security/securitySettings.js';
 import { loadSecretsPolicy, saveSecretsPolicy, migrateSecretFiles, SECRET_FILES } from '../../security/secretVault.js';
 import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../../inventory/osScanner.js';
-import { getOsResults } from '../../inventory/osStore.js';
+import { getOsResults, osSummary } from '../../inventory/osStore.js';
 import { listAudit, logAudit } from '../../audit.js';
 import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
 import { createJob as createProvisionJob } from '../../provision/jobs.js';
 import { updateSaved, removeSaved, getSaved } from '../../provision/saved.js';
 import { store } from '../../store.js';
-import { inUserWriteScope } from '../../auth/scope.js';
+import { inUserWriteScope, scopedVcenterIds } from '../../auth/scope.js';
 import { ssrfBlockReasonResolved } from '../../collector/registry.js';
 import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../../reports/dailyReport.js';
 import { refreshCerts } from '../../security/certMonitor.js';
@@ -133,15 +133,41 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
 });
 
 // 실제 OS 인벤토리(게스트에서 읽은 실제 설치 OS) — 조회·설정·즉시 실행·결과·CSV.
-adminRouter.get('/os-scan', adminOnly, (_req, res) => res.json(osScanStatus()));
+// v2.599(AUTHZ-2599-05 후속): 범위 제한 admin 에게는 요약을 **그 범위 행으로** 다시 세고, 함대 전체 기준인
+//   마지막 실행 결과(탐지 수·오류 문구·인증 정지 목록 — vCenter id 가 들어간다)는 null 로 두고 그 사실을 밝힌다.
+adminRouter.get('/os-scan', adminOnly, (req, res) => {
+  const st = osScanStatus();
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (!allowed) return res.json(st);
+  res.json({ ...st, summary: osSummary((r) => allowed.has(String(r.vcenterId))), lastFound: null, lastErr: null, lastAuth: null, scoped: true, fleetRunHidden: true });
+});
 adminRouter.put('/os-scan/settings', adminOnly, (req, res) => res.json({ ok: true, ...osScanStatus(), settings: saveOsScanSettings(req.body || {}) }));
-adminRouter.post('/os-scan/run', adminOnly, async (req, res) => res.json(await runOsScanNow(req.body?.vcenterId || '')));
-adminRouter.get('/os-scan/results', adminOnly, (req, res) => {
+// v2.599: 범위 제한 admin 의 즉시 스캔은 **범위 안 vCenter 하나**만 — 범위 밖 지정은 404(존재 은닉), 미지정은 400
+//   (미지정이면 전 vCenter 를 돌아 범위 밖 게스트에 로그인한다).
+adminRouter.post('/os-scan/run', adminOnly, async (req, res) => {
+  const vcId = String(req.body?.vcenterId || '');
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (allowed) {
+    if (!vcId) return res.status(400).json({ ok: false, reason: '범위가 제한된 계정은 스캔할 vCenter 를 지정해야 합니다.' });
+    if (!allowed.has(vcId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+  }
+  res.json(await runOsScanNow(vcId));
+});
+// v2.599(AUTHZ-2599-05): 범위 제한 admin 에게 범위 밖 vCenter VM 의 실제 OS(이름·호스트·커널)를 주지 않는다 —
+//   요청 필터(?vcenterId)보다 **먼저** 범위 교집합(server/CLAUDE.md 규칙). 뺀 개수는 밝힌다.
+function scopedOsRows(req) {
   const rows = getOsResults({ vcenterId: req.query.vcenterId || '', mismatch: req.query.mismatch === '1' });
-  res.json({ total: rows.length, items: rows.slice(0, 10000) });
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (!allowed) return { rows, omitted: 0, scoped: false };
+  const kept = rows.filter((r) => allowed.has(String(r.vcenterId)));
+  return { rows: kept, omitted: rows.length - kept.length, scoped: true };
+}
+adminRouter.get('/os-scan/results', adminOnly, (req, res) => {
+  const { rows, omitted, scoped } = scopedOsRows(req);
+  res.json({ total: rows.length, items: rows.slice(0, 10000), ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}) });
 });
 adminRouter.get('/os-scan/results.csv', adminOnly, (req, res) => {
-  const rows = getOsResults({ vcenterId: req.query.vcenterId || '', mismatch: req.query.mismatch === '1' });
+  const { rows } = scopedOsRows(req);
   const esc = (v) => {
     let s = String(v ?? '');
     if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;        // 스프레드시트 수식 인젝션 무력화(=,+,-,@ 로 시작)

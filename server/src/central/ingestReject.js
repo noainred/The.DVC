@@ -26,6 +26,9 @@ export const REJECT_KIND = Object.freeze({
   DISABLED: 'disabled',  // 404 중앙 수신 비활성
   SERVER: 'server',      // 5xx 중앙 오류
   TOO_LARGE: 'too-large', // 413 본문이 중앙 파서 한도를 넘음(v2.591 PR-6 — 예전엔 거부 기록에 아예 안 남았다)
+  // v2.599(WEB2599-04): 라우터에 없는 경로로 온 요청(express 기본 404). 예전에는 모든 404 를 DISABLED('수신 꺼짐')로
+  //   적어, 버전이 어긋난 엣지가 새 경로로 보낸 것을 '중앙이 꺼져 있다' 로 안내했다(조치가 다르다 — 중앙 업그레이드).
+  UNKNOWN_ROUTE: 'unknown-route',
   OTHER: 'other',
 });
 

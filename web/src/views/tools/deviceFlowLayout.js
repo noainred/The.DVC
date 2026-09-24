@@ -21,7 +21,9 @@ export const ROW_H = 58;
 export const ROW_GAP = 10;
 export const MAIN_X = 1064;
 export const MAIN_W = 280;
-export const MAIN_MIN_H = 240;
+// v2.599: 240 이면 엣지 0~2곳에서 메인 카드 내용(실측 scrollHeight 256px + 테두리 2px)이 잘려 선 범례의
+//   마지막 줄 '기록 없음' 이 보이지 않았다(Chromium 판독에서 발견 — 수치로는 안 잡혔다). 카드 줄을 늘리면 다시 잴 것.
+export const MAIN_MIN_H = 264;
 
 const curve = (x1, y1, x2, y2) => {
   const mx = (x1 + x2) / 2;
@@ -61,9 +63,16 @@ export function layoutDeviceFlow(data = {}, sel = null) {
   rowOf('main', 'direct', mainGroups, null);
   for (const e of edges) rowOf(`edge:${e.id}`, 'edge', e.groups || [], e);
 
+  /*
+   * v2.599(감사 WEB2599-06): 엣지가 0곳이면 가운데 '② 엣지' 열이 설명 없이 비었다(형제 데이터 흐름 지도는
+   *   '엣지가 없습니다' 를 말한다). 엣지 한 줄 자리에 안내 상자를 둔다 — 줄(rows)로 넣지 않는다(엣지가 아니다).
+   */
+  const emptyEdges = edges.length === 0
+    ? { x: EDGE_X, y: TOP + rows.length * (ROW_H + ROW_GAP), w: EDGE_W, h: ROW_H * 2 }
+    : null;
   const last = rows[rows.length - 1];
-  const bottom = last.y + last.h;
+  const bottom = Math.max(last.y + last.h, emptyEdges ? emptyEdges.y + emptyEdges.h : 0);
   const mainH = Math.max(MAIN_MIN_H, bottom - TOP);
   const height = TOP + mainH + 16;
-  return { width: W, height, rows, main: { x: MAIN_X, y: TOP, w: MAIN_W, h: mainH }, cols: { chips: CHIP_X, edge: EDGE_X, main: MAIN_X } };
+  return { width: W, height, rows, emptyEdges, main: { x: MAIN_X, y: TOP, w: MAIN_W, h: mainH }, cols: { chips: CHIP_X, edge: EDGE_X, main: MAIN_X } };
 }

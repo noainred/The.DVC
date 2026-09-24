@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 const DB_PATH = config.capacity.dbPath;
 const HOUR = 3600_000;
@@ -37,8 +38,7 @@ function initSqlite() {
   // eslint-disable-next-line import/no-unresolved
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    const db = new DatabaseSync(DB_PATH);
-    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
+    const db = openSqlite(new DatabaseSync(DB_PATH));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
     db.exec(`
       CREATE TABLE IF NOT EXISTS samples (
         metric TEXT NOT NULL, k TEXT NOT NULL, v REAL NOT NULL, ts INTEGER NOT NULL
@@ -190,7 +190,7 @@ function initMemory() {
 export async function getCapacityDb() {
   if (impl) return impl;
   if (!ready) {
-    ready = initSqlite().catch((err) => {
+    ready = retryOnLock(initSqlite, { tag: 'capacity' }).catch((err) => {
       console.warn(`[capacity] node:sqlite 불가(${err.code || err.message}); 인메모리 폴백(재시작 시 이력 소실).`);
       return initMemory();
     });

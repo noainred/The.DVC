@@ -8,6 +8,7 @@ import PduCharts from './PduCharts.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
+import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 
 /**
  * 특수 기능 › PDU 정보 — APC Rack PDU 2G(rpdu2g) 전력·뱅크·온도·습도.
@@ -156,6 +157,12 @@ export default function PduTool() {
         </div>
       )}
 
+      {/* v2.599(AUTHZ-2599-03): 비-admin 에는 관리 IP·계정이 가려져 온다 — 빈 칸의 이유를 한 번 말한다 */}
+      {addressHiddenNote(data) && (
+        <div className="card" style={{ padding: 10, marginBottom: 12, fontSize: 13 }}>
+          🔒 <BoldText text={addressHiddenNote(data)} />
+        </div>
+      )}
       {/* v2.591: 엣지가 가져갔지만 결과가 오지 않아 폐기된 '지금 수집' 요청 — 배지만 조용히 꺼지지 않게 */}
       {(() => {
         const t = collectDropNote(data.collectDrops, (id) => devices.find((x) => x.id === id)?.name || id);
@@ -205,7 +212,7 @@ export default function PduTool() {
                           </span>
                         )}
                       </td>
-                      <td className="muted" style={{ fontSize: 12 }}>{d.host}</td>
+                      <td className="muted" style={{ fontSize: 12 }}>{hostText(d.host)}</td>
                       <td>{d.datacenterId || <span className="muted">—</span>}</td>
                       <td>{d.agent
                         ? <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{d.agent}</span>

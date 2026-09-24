@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 const DB_PATH = config.ping.dbPath;
 
@@ -23,8 +24,7 @@ function initSqlite() {
   // eslint-disable-next-line import/no-unresolved
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    const db = new DatabaseSync(DB_PATH);
-    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
+    const db = openSqlite(new DatabaseSync(DB_PATH));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
     db.exec(`
       CREATE TABLE IF NOT EXISTS samples (
         target TEXT NOT NULL, ts INTEGER NOT NULL, rtt REAL, ok INTEGER NOT NULL
@@ -94,7 +94,7 @@ const round2 = (x) => (x == null || !Number.isFinite(x) ? null : Number(x.toFixe
 
 export async function getPingDb() {
   if (impl) return impl;
-  if (!ready) ready = initSqlite().catch((err) => { console.warn(`[ping] node:sqlite 불가(${err.code || err.message}); NDJSON 폴백.`); return initJson(); });
+  if (!ready) ready = retryOnLock(initSqlite, { tag: 'ping' }).catch((err) => { console.warn(`[ping] node:sqlite 불가(${err.code || err.message}); NDJSON 폴백.`); return initJson(); });
   impl = await ready;
   return impl;
 }

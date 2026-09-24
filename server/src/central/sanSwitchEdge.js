@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
 import { recordActivity } from '../sanswitch/activityLog.js';
 import { ackCollect, setCollectBaseResolver } from '../sanswitch/collectRequests.js';
 
@@ -18,6 +18,9 @@ let _map = null;
 // 매번 남기면 한 번의 수집이 여러 건으로 기록돼 로그가 거짓으로 부풀고 상한을 빨리 소진한다
 // (central/storageEdge.js 의 _lastRec 와 같은 규약). deviceId → 마지막 기록한 collectedAt.
 const _lastRec = new Map();
+
+// v2.599(CEN-2599-04): push 마다 전체 맵을 동기로 쓰던 것 → 디바운스 비동기 + 종료 시 동기 flush.
+const writer = createDebouncedWriter(FILE, () => JSON.stringify(Object.fromEntries(load())), { name: 'sanSwitchEdge' });
 
 function load() {
   if (_map) return _map;
@@ -32,18 +35,29 @@ setCollectBaseResolver((id) => {
   return null;
 });
 
-export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1 } = {}) {
-  let list = (Array.isArray(devices) ? devices : []).slice(0, MAX_DEVICES_PER_AGENT)
-    .map((d) => ({ ...d, agent })); // 엣지가 뭐라 보냈든 인증된 agent 로 덮는다(출처 위조 차단)
+/**
+ * @param info (선택) 수신 정리 결과 — `dropped`(사유별 뺀 개수)·`coerced`·`refused`·`evicted`.
+ *   ⚠ v2.599(CEN-2599-03·05): 객체가 아니거나 deviceId 가 식별자가 아닌 원소는 빼고, 표시 필드의 객체 값은 null 로.
+ */
+export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1, info = {} } = {}) {
+  const { devices: clean, dropped, coerced } = sanitizeEdgeDevices(devices, { idKey: 'deviceId', max: MAX_DEVICES_PER_AGENT });
+  info.dropped = dropped; info.coerced = coerced;
+  const adm = admitAgent(load(), agent);
+  if (!adm.ok) { info.refused = true; console.warn(`[central] sanswitch-data: 엣지 수 상한 — 새 이름 '${String(agent).slice(0, 64)}' 거절(최근 보고한 엣지를 밀어내지 않는다)`); return 0; }
+  if (adm.evicted) { info.evicted = adm.evicted; console.warn(`[central] sanswitch-data: 엣지 수 상한 — 오래 조용한 '${adm.evicted}' 보관분을 내렸다`); }
+  let list = clean.map((d) => ({ ...d, agent })); // 엣지가 뭐라 보냈든 인증된 agent 로 덮는다(출처 위조 차단)
   // 청크 병합(v2.417): 첫 청크(0)는 교체, 이후 청크는 deviceId 로 upsert — 한 주기의 push 가 여러
   // 요청으로 나뉘어도(1MB 한도) 중앙 목록이 '마지막 청크만' 으로 줄어들지 않게.
   if (chunk > 0 && chunks > 1) {
     const prev = load().get(agent)?.devices || [];
     const ids = new Set(list.map((d) => d.deviceId));
-    list = [...prev.filter((d) => !ids.has(d.deviceId)), ...list].slice(0, MAX_DEVICES_PER_AGENT);
+    // ⚠ v2.599(CEN-2599-04): 청크 병합은 엣지 하나의 보관분을 요청 한도 너머로 키울 수 있다 — 합친 뒤에도 합계 크기 상한을 다시 건다.
+    const merged = sanitizeEdgeDevices([...prev.filter((d) => !ids.has(d.deviceId)), ...list], { idKey: 'deviceId', max: MAX_DEVICES_PER_AGENT });
+    for (const [k, n] of Object.entries(merged.dropped)) dropped[k] += n;
+    list = merged.devices;
   }
   load().set(agent, { at: Date.now(), devices: list });
-  atomicWriteFileSync(FILE, JSON.stringify(Object.fromEntries(load())), { mode: 0o600 });
+  writer.save();
   // 작업 로그(v2.516) — 중앙 화면의 '수집 작업' 구획이 위임 장비도 보여주려면 push 수신 시
   // 남겨야 한다(엣지의 로컬 로그는 중앙에서 볼 수 없다). 같은 collectedAt 재push 는 건너뛴다.
   // ⚠ 엣지는 문제 포트만 올리므로(push.js slimSnapshot) 포트 요약 수치는 전체 기준을 쓴다.

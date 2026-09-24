@@ -261,3 +261,36 @@ export function unregisteredNote(row = {}) {
   if (!row.unregistered) return '';
   return '설정 › 수집 서버 **등록부에 없는 이름**입니다(등록을 지웠거나 이름이 바뀌었습니다). 보관분만 남아 있어 새로 가져올 수는 없습니다.';
 }
+
+/*
+ * v2.599(감사 WEB2599-03) — 엣지별 진행 표시와 '보던 화면' 보호.
+ *   예전에는 진행 표시가 **문자열 하나**(`busyAgent`)라 A 를 가져오는 중에 B 를 누르면 A 의 잠금이
+ *   B 로 덮였고, 먼저 끝난 A 의 finally 가 B 의 잠금까지 풀었다. 또 늦게 끝난 A 의 응답이 그 사이
+ *   사용자가 연 B 화면을 A 로 바꿨다. 진행 표시는 **엣지별 집합**이고(아래 두 함수는 새 Set 을 돌려준다
+ *   — React 상태는 제자리 수정하면 다시 그려지지 않는다), 화면 반영은 '마지막으로 연 요청' 만 한다.
+ */
+export function busyAdd(set, key) {
+  const s = new Set(set instanceof Set ? set : []);
+  s.add(key);
+  return s;
+}
+export function busyRemove(set, key) {
+  const s = new Set(set instanceof Set ? set : []);
+  s.delete(key);
+  return s;
+}
+
+/**
+ * 보던 화면을 바꾸지 않은 가져오기 결과의 안내 — 그 사이 다른 엣지를 열었으므로 결과는 보관만 됐다.
+ * ⚠ 결과를 조용히 버리지 않는다(사용자는 버튼을 눌렀다) — 어느 엣지가 어떻게 끝났는지 말한다.
+ */
+export function staleFetchNote(agent, res = {}) {
+  const who = t(agent) || '(이름 없음)';
+  const base = res && res.ok
+    ? `**${who}** 가져오기가 끝났습니다(보관했습니다).`
+    : `**${who}** 가져오기는 실패했습니다 — ${t(res?.reason) || t(res?.kind) || '사유 미상'}.`;
+  return {
+    tone: res && res.ok ? 'idle' : 'bad',
+    text: `${base} 그 사이 다른 엣지를 열거나 가져오기를 눌러 **지금 보는 화면은 바꾸지 않았습니다** — 엣지 이름을 누르면 봅니다.`,
+  };
+}

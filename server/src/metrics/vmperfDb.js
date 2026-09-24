@@ -22,6 +22,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { config } from '../config.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
+import { openSqlite } from '../util/sqliteOpen.js';
 
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래 vmperf/.
 // VMPERF_DB_DIR env 가 있으면 그것이 최우선(명시 설정을 덮지 않는다).
@@ -177,10 +178,12 @@ async function openFile(vcenterId, file, mod) {
   fs.mkdirSync(DIR, { recursive: true });
   migrateLegacyFile(vcenterId, file);          // v2.447: 구버전 파일명 → 해시 접미사 이름
   const p = path.join(DIR, `${file}.db`);
-  const db = new mod.DatabaseSync(p);
+  // v2.599 DB2599-02: busy_timeout 먼저(첫 생성 중 다른 연결의 잠금을 기다린다) · 실패하면 핸들을 닫는다(fd 누수 방지 —
+  //   파일별 핸들이라 다음 호출이 다시 연다. 래치 없음).
+  const db = openSqlite(new mod.DatabaseSync(p));
   // 공용 metrics DB 와 같은 PRAGMA — WAL 로 읽기/쓰기 병행, fsync 완화(단건 insert 5ms→0.01ms 실측).
-  try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
-  const st = prepare(db);
+  let st;
+  try { st = prepare(db); } catch (e) { try { db.close(); } catch { /* */ } throw e; }
   try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
   rememberIndex(file, String(vcenterId ?? ''));  // 파일명 역산용(비가역 해시라 인덱스 필요)
   const entry = { db, st, usedAt: Date.now(), file };

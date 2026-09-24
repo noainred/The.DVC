@@ -12,6 +12,11 @@
 import { emptySnapshot } from '../types.js';
 import { runCliSession, parseCsv, parseJsonLoose, toBytes, toBytesOrNull, sshFailureSnapshot } from './cliSsh.js';
 import { numOrNull } from '../../util/numOrNull.js';
+// v2.599(감사 C2599-02·03): 점 선택·미해결 판정은 REST 수집기의 코어를 그대로 쓴다(판정이 두 벌이면 갈라진다).
+import { pickLatestSpacePoint, isActiveAlert } from './powerstoreCore.js';
+
+/** 상태 필터가 없는 알람 폴백 명령(v2.599 C2599-03) — 이 명령의 출력은 CLEARED 까지 담는다. */
+export const ALERT_FALLBACK_CMD = 'pstcli alert show';
 
 const SPECS = [
   { key: 'cluster', section: 'config', required: true, cmds: ['pstcli -output json cluster show', 'pstcli -output csv cluster show', 'pstcli cluster show'] },
@@ -20,7 +25,7 @@ const SPECS = [
   { key: 'space', section: 'capacity', cmds: ['pstcli -output json metrics generate -entity space_metrics_by_cluster', 'pstcli -output json space_metrics_by_cluster show'] },
   { key: 'node', section: 'nodes', cmds: ['pstcli -output json node show', 'pstcli -output csv node show', 'pstcli node show'] },
   { key: 'user', section: 'accounts', cmds: ['pstcli -output json local_user show', 'pstcli local_user show'] },
-  { key: 'alert', section: 'alerts', cmds: ['pstcli -output json alert show -state ACTIVE', 'pstcli alert show'] },
+  { key: 'alert', section: 'alerts', cmds: ['pstcli -output json alert show -state ACTIVE', ALERT_FALLBACK_CMD] },
 ];
 
 /** JSON 우선, 실패 시 CSV — 둘 다 레코드 배열로 통일한다. */
@@ -43,8 +48,11 @@ function pick(rec, ...keys) {
   return '';
 }
 
-/** 원시 출력 → 정규화(순수). */
-export function normalizePowerstoreSsh(device, out) {
+/**
+ * 원시 출력 → 정규화(순수).
+ * meta.alertCmd — 알람 항목을 실제로 읽은 명령(collectViaSsh 가 원문 기록에서 채운다). 폴백이면 화면이 밝힌다.
+ */
+export function normalizePowerstoreSsh(device, out, meta = {}) {
   const snap = emptySnapshot(device);
   snap.extra.collectMethod = 'ssh';
 
@@ -58,9 +66,13 @@ export function normalizePowerstoreSsh(device, out) {
   const sw = records(out.sw || '')[0];
   if (sw) snap.version = pick(sw, 'release_version', 'build_version') || '';
 
-  // 물리 용량 — space_metrics 는 시계열이라 마지막(최신) 점을 쓴다(REST 수집기와 같은 규칙).
+  // 물리 용량 — space_metrics 는 시계열이다. v2.599(감사 C2599-02): 예전 주석은 'REST 와 같은 규칙' 이라며
+  //   배열의 **마지막 점**을 썼는데 REST 규칙은 그 뒤 '물리 총량이 있는 점 중 timestamp 가 가장 큰 것' 으로 바뀌었다
+  //   (정렬 방향이 경로마다 다르고 최신 점은 아직 집계 전일 수 있다). 내림차순 출력이면 가장 오래된 사용량이
+  //   적재됐다. 이제 pickLatestSpacePoint 하나를 쓴다 — 키 대소문자·단위 표기는 pick/toBytes 로 먼저 맞춘다.
   const pts = records(out.space || '');
-  const pt = pts.length ? pts[pts.length - 1] : null;
+  const cands = pts.map((rec) => ({ physical_total: toBytes(pick(rec, 'physical_total')), timestamp: pick(rec, 'timestamp') || '', rec }));
+  const pt = pickLatestSpacePoint(cands)?.rec || null;
   if (pt) {
     const total = toBytes(pick(pt, 'physical_total'));
     const used = toBytesOrNull(pick(pt, 'physical_used'));   // v2.595: 못 읽은 사용량은 null(0 이 아니다)
@@ -108,8 +120,18 @@ export function normalizePowerstoreSsh(device, out) {
   }
 
   if (out.alert != null) {
-    const alerts = records(out.alert || '');
+    // v2.599(감사 C2599-03): 폴백 명령(상태 필터 없음)은 CLEARED 까지 준다 — 예전에는 그것을 전부 미해결로 셌다.
+    //   REST 폴백과 같은 isActiveAlert 로 거른다(state 가 없으면 '확인(acknowledged)된 것만' 뺀다 — 조용한 축소 금지).
+    const all = records(out.alert || '');
+    const alerts = all.filter((a) => isActiveAlert({
+      state: pick(a, 'state'),
+      is_acknowledged: String(pick(a, 'is_acknowledged', 'acknowledged')).trim().toLowerCase() === 'true',
+    }));
     snap.alerts.unresolved = alerts.length;
+    const fallback = meta.alertCmd === ALERT_FALLBACK_CMD;
+    if (fallback || alerts.length !== all.length) {
+      snap.extra.alertsNote = `${fallback ? '상태 필터 없는 명령(pstcli alert show)으로 읽어 ' : ''}전체 ${all.length}건 중 미해결 ${alerts.length}건만 집계(해제·확인 ${all.length - alerts.length}건 제외)`;
+    }
     const bySeverity = {};
     for (const a of alerts) { const k = String(pick(a, 'severity') || 'Unknown'); bySeverity[k] = (bySeverity[k] || 0) + 1; }
     snap.extra.alertsBySeverity = bySeverity;
@@ -126,7 +148,8 @@ export async function collectViaSsh(device) {
   try {
     const r = await runCliSession(device, SPECS);
     raw = r.raw;
-    const snap = normalizePowerstoreSsh(device, r.out);
+    const alertCmd = (r.raw || []).find((x) => x.key === 'alert' && x.ok)?.cmd || '';
+    const snap = normalizePowerstoreSsh(device, r.out, { alertCmd });
     for (const [key, msg] of Object.entries(r.errors)) {
       const sect = SPECS.find((s) => s.key === key)?.section;
       if (sect && snap.sections[sect] !== 'ok') snap.sections[sect] = `오류: ${msg}`;

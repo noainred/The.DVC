@@ -168,14 +168,16 @@ v1.get('/inventory/vcenters', guarded('/inventory/vcenters', ({ res, snap, inSco
   return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta });
 }));
 
-v1.get('/inventory/collection', guarded('/inventory/collection', ({ res, snap, fields, apiPath }) => {
+v1.get('/inventory/collection', guarded('/inventory/collection', ({ res, snap, inScope, fields, scopeMeta, apiPath }) => {
   /*
    * ⚠⚠ '첫 수집 중'(pending)과 '접속 실패'(unreachable)를 **합치지 말 것** — 조치가 정반대다
    *   (v2.509 규약. pending 은 기다리면 되고 unreachable 은 기다려도 안 된다).
    * ⚠ 상태값은 `/health`(`overviewNsx.js:88`)와 **같은 정확 비교**를 쓴다 — 추측 정규식으로
    *   분류하면 두 경로가 다른 수를 말한다.
    */
-  const vcs = snap.vcenters || [];
+  // v2.599(AUTHZ-2599-04): 범위 제한 키에는 **그 범위 vCenter 만** 센다. 예전에는 전 함대 개수·상태 분포를 줬다 —
+  //   내부 /health 는 v2.583 부터 사용자 범위로 센다('같은 기준' 이라는 주석이 거짓이 돼 있었다). meta.scopedToVcenters 가 밝힌다.
+  const vcs = (snap.vcenters || []).filter((v) => inScope(v.id));
   const by = (st) => vcs.filter((v) => v.status === st).length;
   const row = {
     registered: vcs.length,
@@ -188,6 +190,7 @@ v1.get('/inventory/collection', guarded('/inventory/collection', ({ res, snap, f
     intervalMs: numOrNull(config.pollIntervalMs),
   };
   return envelope(res, apiPath, project(row, fields), {
+    ...scopeMeta,
     note: 'pending 은 첫 수집이 끝나지 않은 것이고 unreachable 은 접속 실패입니다 — 조치가 다릅니다.',
   });
 }));
@@ -218,7 +221,10 @@ v1.get('/capacity/storage', guarded('/capacity/storage', async ({ res, fields, a
     import('../storage/store.js'),
     import('../central/storageEdge.js'),
   ]);
-  const rows = [...(localSnapshots() || []), ...(edgeStorageSnapshots() || [])].map((s2) => {
+  // v2.599(EDGE2599-02): 같은 deviceId 가 로컬·엣지(또는 재배정 직후 두 엣지)에 함께 있으면 **최신 collectedAt 하나**만 —
+  //   내부 /tools/storage 와 같은 판정 하나(`storage/latestSnapshots.js`). 예전에는 그대로 이어 붙여 같은 장비가 두 행이었다.
+  const { latestByDevice } = await import('../storage/latestSnapshots.js');
+  const rows = latestByDevice([localSnapshots() || [], edgeStorageSnapshots() || []]).map((s2) => {
     const total = numOrNull(s2.capacity?.totalBytes); const used = numOrNull(s2.capacity?.usedBytes);
     return {
       deviceId: s2.deviceId, name: s2.name || s2.deviceId, type: s2.type || null,

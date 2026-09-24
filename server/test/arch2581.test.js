@@ -34,12 +34,18 @@ test('BUG-D — storage push: 스냅샷 0대면 statusOnly 본문이 중앙에 �
     const r = await m.pushStorageNow();
     assert.equal(r.sent, 0);
     assert.equal(r.statusSent, true, `상태 전용 push 가 성공해야 한다: ${JSON.stringify(r)}`);
-    assert.equal(bodies.length, 1, '중앙으로 요청이 정확히 1건 가야 한다');
+    // v2.599(EDGE2599-01): 빈 CONFIG_DIR = 위임 0대 → 먼저 빈 목록(교체)으로 중앙 보관분을 비우고, 그다음 상태 보고.
+    //   (위임이 있는데 스냅샷이 없을 때는 여전히 상태 보고 1건뿐이다 — audit2599d 가 그 분기를 고정한다.)
+    assert.equal(bodies.length, 2, '위임 0대: 목록 비우기 1건 + 상태 보고 1건');
     assert.equal(bodies[0].url, '/api/central/storage-data');
-    assert.equal(bodies[0].body.statusOnly, true);
     assert.deepEqual(bodies[0].body.devices, []);
-    assert.equal(bodies[0].body.status.reason, 'no-snapshots');
-    assert.ok(Number.isFinite(bodies[0].body.status.at));
+    assert.equal(bodies[0].body.statusOnly, undefined, '첫 요청은 목록 교체');
+    assert.equal(bodies[1].url, '/api/central/storage-data');
+    assert.equal(bodies[1].body.statusOnly, true);
+    assert.deepEqual(bodies[1].body.devices, []);
+    assert.equal(bodies[1].body.status.reason, 'no-snapshots');
+    assert.equal(bodies[1].body.status.registered, 0);
+    assert.ok(Number.isFinite(bodies[1].body.status.at));
     const st = m.storagePushStatus();
     assert.equal(st.statusSent, true);
   } finally {

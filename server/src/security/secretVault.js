@@ -245,13 +245,39 @@ function reusePut(rk, sealed) {
   reuse.delete(rk); reuse.set(rk, sealed);
   if (reuse.size > REUSE_MAX) { let drop = Math.ceil(REUSE_MAX / 4); for (const k of reuse.keys()) { if (drop-- <= 0) break; reuse.delete(k); } }
 }
-// 식별 필드 — 같은 등록부를 로드할 때와 저장할 때 모양(배열/래퍼 객체)이 달라도 문맥이 같게, 경로가 아니라 **그 비밀을 담은
-// 객체의 식별자**로 문맥을 만든다. 식별자가 바뀌면(이름 변경) 새로 봉인할 뿐이다(백업이 한 번 더 생기는 쪽 — 안전).
+// 식별 필드 — 같은 등록부를 로드할 때와 저장할 때 모양(배열/래퍼 객체)이 달라도 문맥이 같게, **그 비밀을 담은 객체의
+// 식별자**를 문맥에 넣는다. 식별자가 바뀌면(이름 변경) 새로 봉인할 뿐이다(백업이 한 번 더 생기는 쪽 — 안전).
 const ID_FIELDS = ['id', 'name', 'host', 'agent', 'agentName', 'url', 'username', 'user'];
 function ctxOf(parent, k) {
   const ids = [];
   if (parent && typeof parent === 'object' && !Array.isArray(parent)) for (const f of ID_FIELDS) { const x = parent[f]; if (typeof x === 'string' || typeof x === 'number') ids.push(`${f}=${x}`); }
   return `${k}\0${ids.join('\0')}`;
+}
+/*
+ * v2.599(감사 RECENT2599-02 = LO2599-02 = SEC2599-01 — 재현): 위 식별 필드만으로는 **맵 키·배열 위치로만 구분되는 대상**
+ *   (gpu-guest.json 의 vcenters[vcId]·vms[vmId], central-agent-gpu-guest.json 의 byAgent[agent], id 없는 배열 원소)이
+ *   같은 문맥이 됐다 — username 이 같으면 서로 다른 vCenter·VM 의 같은 비밀번호가 **같은 암호문**으로 저장되어, 파일을 읽는
+ *   사람에게 '비밀번호가 같다' 는 사실이 드러났다(무작위 봉인이 지키던 성질, 위 ② 주석이 막겠다고 한 바로 그것).
+ *   이제 **경로**(객체 키 · 배열 원소의 강한 식별자 `STRONG_IDS` 또는 위치)를 문맥에 넣는다.
+ *   ⚠ 로드는 파일의 **일부**(예: `parsed.vcenters`)를 열고 저장은 래퍼(`{vcenters: list}`)를 봉인하는 스토어가 대부분이라
+ *     경로가 한 단계 어긋난다 — 저장 쪽은 전체 경로 → 첫 조각을 뗀 경로 순으로 찾는다(`pathCtxs`). 래퍼 깊이는 전 호출부가 1이다.
+ *     못 찾으면 새로 봉인할 뿐이다(안전한 쪽).
+ *   ⚠ 그리고 **한 번의 봉인(sealSecretsDeep) 안에서 같은 암호문을 두 번 내지 않는다** — 경로 문맥이 어떤 이유로 겹쳐도
+ *     한 파일 안에서 같은 암호문은 생기지 않는다(마지막 방어선).
+ */
+const STRONG_IDS = ['id', 'name', 'host', 'agent', 'agentName', 'url'];   // username 은 대상 식별자가 아니다(여러 장비가 root)
+function elemSeg(v, i) {
+  const ids = [];
+  if (v && typeof v === 'object' && !Array.isArray(v)) for (const f of STRONG_IDS) { const x = v[f]; if (typeof x === 'string' || typeof x === 'number') ids.push(`${f}=${x}`); }
+  return ids.length ? `@${ids.join(',')}` : `#${i}`;
+}
+const keySeg = (k) => `.${k}`;
+/** 경로 조각 + 필드 문맥 → 재사용 문맥 후보(전체 경로 먼저, 다음은 래퍼 한 단계를 뗀 경로). */
+function pathCtxs(segs, parent, k) {
+  const tail = ctxOf(parent, k);
+  const out = [`${segs.join('\u0001')}\u0002${tail}`];
+  if (segs.length) out.push(`${segs.slice(1).join('\u0001')}\u0002${tail}`);
+  return out;
 }
 // 봉인 문자열의 (alg, logN) — 재사용은 현재 정책과 같을 때만(레벨·알고리즘을 바꾸면 새 정책으로 다시 봉인해야 한다).
 function sealedParams(v) { const [alg, logN] = v.slice(PREFIX.length).split('$'); return { alg, logN: Number(logN) }; }
@@ -303,6 +329,9 @@ export function openSecret(v) {
  * v2.597(감사 RECENT-01 — 재현): 파생키가 **이미 캐시에 있을 때만** 연다. 없으면 `null`(scrypt 를 돌리지 않는다).
  * 백업 지문은 매 백업마다 모든 설정 파일을 훑는데, 캐시에 없는 봉인 값마다 scryptSync(N=2^15, 약 100ms)를 메인
  * 스레드에서 돌려 값 100개에 10~22초 이벤트 루프가 멈췄다. 경고도 남기지 않는다(지문용 — 복호 실패가 아니다).
+ * v2.599(감사 RECENT2599-04): v2.598 에 백업 지문이 봉인 원문을 그대로 쓰게 되어(암호문 재사용) **제품 코드 호출부는 0 이다.**
+ *   지우지 않고 남긴다 — 폴링·백업 같은 뜨거운 경로에서 봉인 값을 열어야 할 때 **scrypt 없이 여는 유일한 안전한 길**이고,
+ *   `openSecret` 으로 대신하면 v2.597 RECENT-01(10~22초 정지)이 재발한다. 회귀는 audit2597 이 고정한다.
  */
 export function openSecretIfCached(v) {
   if (!isSealed(v)) return v;
@@ -332,21 +361,25 @@ function walk(obj, fn) {
 
 /** 로드 경계용 — 봉인 포맷인 문자열을 **키 이름과 무관하게** 전부 복호(과거 필드 개명에도 안전). in-place. */
 export function openSecretsDeep(obj) {
-  return walkCtx(obj, (k, v, parent) => {
+  const seen = new Set();   // v2.599: 한 파일 안에서 같은 문맥이 두 번 나오면 첫 것만 기억한다(뒤 것이 덮어 엉뚱한 대상에 재사용되지 않게)
+  return walkCtx(obj, (k, v, parent, segs) => {
     if (!isSealed(v)) return undefined;
     const plain = openSecret(v);
     // v2.598 L2598-01: 연 값의 암호문을 기억해 다음 저장에서 재사용한다(평문이 안 바뀐 값은 파일이 글자 그대로 같게).
-    if (plain !== '' && k && SECRET_FIELDS.has(k)) reusePut(reuseKey(ctxOf(parent, k), plain), v);
+    if (plain !== '' && k && SECRET_FIELDS.has(k)) {
+      const rk = reuseKey(pathCtxs(segs, parent, k)[0], plain);
+      if (!seen.has(rk)) { seen.add(rk); reusePut(rk, v); }
+    }
     return plain;
   });
 }
-// walk 와 같되 부모 객체를 함께 넘긴다(재사용 문맥용).
-function walkCtx(obj, fn) {
-  if (Array.isArray(obj)) { obj.forEach((v, i) => { const r = fn(null, v, obj); if (r !== undefined) obj[i] = r; else walkCtx(v, fn); }); return obj; }
+// walk 와 같되 부모 객체와 경로 조각(v2.599)을 함께 넘긴다(재사용 문맥용).
+function walkCtx(obj, fn, segs = []) {
+  if (Array.isArray(obj)) { obj.forEach((v, i) => { const r = fn(null, v, obj, segs); if (r !== undefined) obj[i] = r; else walkCtx(v, fn, [...segs, elemSeg(v, i)]); }); return obj; }
   if (obj && typeof obj === 'object') {
     for (const k of Object.keys(obj)) {
-      const r = fn(k, obj[k], obj);
-      if (r !== undefined) obj[k] = r; else walkCtx(obj[k], fn);
+      const r = fn(k, obj[k], obj, segs);
+      if (r !== undefined) obj[k] = r; else if (obj[k] && typeof obj[k] === 'object') walkCtx(obj[k], fn, [...segs, keySeg(k)]);
     }
   }
   return obj;
@@ -361,15 +394,22 @@ export function sealSecretsDeep(obj, pol = policy()) {
   if (pol.mode !== 'encrypted') return obj;               // 평문 모드 — 복제 비용도 생략
   const clone = structuredClone(obj);
   const want = policyParams(pol);
-  return walkCtx(clone, (k, v, parent) => {
+  const emitted = new Set();   // v2.599: 이 봉인에서 이미 낸 암호문 — 한 파일 안에서 같은 암호문을 두 번 내지 않는다
+  return walkCtx(clone, (k, v, parent, segs) => {
     if (!(k && SECRET_FIELDS.has(k) && typeof v === 'string' && v !== '')) return undefined;
-    if (isSealed(v)) return v;                             // 이미 봉인(이중 봉인 방지 — 예전과 같다)
+    if (isSealed(v)) { emitted.add(v); return v; }        // 이미 봉인(이중 봉인 방지 — 예전과 같다)
     // v2.598 L2598-01: 같은 문맥·같은 평문을 이미 봉인했거나 읽은 적이 있고 현재 정책과 같으면 그 암호문을 그대로 쓴다.
-    const rk = reuseKey(ctxOf(parent, k), v);
-    const prev = reuse.get(rk);
-    if (prev) { const p = sealedParams(prev); if (p.alg === want.alg && p.logN === want.logN) { reusePut(rk, prev); return prev; } }
+    // v2.599: 문맥은 경로를 포함한다 — 전체 경로 먼저, 없으면 래퍼 한 단계를 뗀 경로(로드가 파일의 일부를 연 경우).
+    const [full, ...alts] = pathCtxs(segs, parent, k);
+    const rk = reuseKey(full, v);
+    for (const ctx of [full, ...alts]) {
+      const prev = reuse.get(ctx === full ? rk : reuseKey(ctx, v));
+      if (!prev || emitted.has(prev)) continue;
+      const p = sealedParams(prev);
+      if (p.alg === want.alg && p.logN === want.logN) { reusePut(rk, prev); emitted.add(prev); return prev; }
+    }
     const sealed = sealSecret(v, pol);
-    if (isSealed(sealed)) reusePut(rk, sealed);
+    if (isSealed(sealed)) { reusePut(rk, sealed); emitted.add(sealed); }
     return sealed;
   });
 }

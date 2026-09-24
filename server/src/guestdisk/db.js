@@ -15,6 +15,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+// v2.599 DB2599-02: 첫 open 잠금은 래치하지 않고 잠시 뒤 다시 연다.
+const lockRetry = createLockRetry();
 
 const DB_PATH = process.env.GUESTDISK_DB_PATH
   || path.join(config.dbDir || config.configDir, 'guest-disk.db');
@@ -25,13 +28,12 @@ let initError = null;
 
 function initSqlite() {
   // eslint-disable-next-line import/no-unresolved
-  return import('node:sqlite').then(({ DatabaseSync }) => {
+  return withOpenCleanup(() => import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    const db = new DatabaseSync(DB_PATH);
+    const db = openSqlite(new DatabaseSync(DB_PATH));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
     // v2.503: DB 파일 권한 0600 — v2.447 감사로 12개 DB 모듈에 일괄 적용된 규약인데
     // 이 파일(v2.459 신규)만 빠져 있었다. 게스트 디스크 사용량은 VM 이름·마운트 경로를 담는다.
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* */ }
-    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
     db.exec(`
       CREATE TABLE IF NOT EXISTS vm_latest (
         vm_id TEXT PRIMARY KEY,
@@ -82,17 +84,21 @@ function initSqlite() {
     `);
     impl = db;
     return db;
-  }).catch((e) => { initError = e; impl = null; return null; });
+  })).catch((e) => {
+    if (lockRetry.onFail(e)) { console.warn(`[guestdisk] ${lockRetry.note()}`); ready = null; impl = null; return null; }
+    initError = e; impl = null; return null;
+  });
 }
 
 export function getDb() {
   if (impl) return Promise.resolve(impl);
+  if (!ready && lockRetry.blocked()) return Promise.resolve(null);
   if (!ready) ready = initSqlite();
   return ready;
 }
 
 export function guestDiskDbStatus() {
-  return { available: Boolean(impl), path: DB_PATH, error: initError ? String(initError.message || initError) : null };
+  return { available: Boolean(impl), path: DB_PATH, error: initError ? String(initError.message || initError) : (impl ? null : (lockRetry.note() || null)) };
 }
 
 /**

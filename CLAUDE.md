@@ -3527,6 +3527,33 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ **작업 방식**: 병렬 수정 중 stop hook 때문에 WIP 커밋을 넣으면 HEAD 에 이미 수정이 들어간다 — 변이 검증의 '수정 전' 판본은
       **감사 시작 커밋**(`git show <base>:경로`)으로 할 것(HEAD 로 하면 거짓 통과한다).
 
+  - ⚠⚠ **v2.599 — 10차 점검(v2.598 회귀 우선) 확정분**("더 자세하게, 두번 더" 2회차. 발견 49 = 확정 44 · SPLIT 3 · 가능성 1 · 반증 1,
+    고침 47. 회귀 `test/audit2599{a..f}.test.js` + 웹 vitest 6파일. 상세 `docs/AUDIT-2026-09-24g.md`):
+    - ⚠⚠ **고친 것이 만든 결함이 셋이었다 — 다음 회차도 '직전 diff 회귀' 축을 맨 먼저 둘 것**: ① 베어메탈 알림 지속 판정이 '관측 간격 ≤ 주기×1.5'
+      였는데 **적응 타이머는 수집이 끝난 뒤 재무장**한다 — 간격 = 주기 + 수집 시간이라 서버가 많으면 알림이 영원히 안 울렸다(`runMs` 를 더한다)
+      ② 암호문 재사용 문맥이 부모의 식별 필드만 봤다 — **맵 키로만 구분되는 항목**(gpu-guest vcenters/vms·byAgent)과 id 없는 배열이 충돌해
+      같은 비밀번호가 같은 암호문이 됐다(문맥에 경로) ③ DS 사용량 null 을 한 곳에서 내기 시작하면 **형제 소비처 전부**(diskTrend·compareMatrix·
+      forecast·rollup)가 그 null 을 받는다 — 결측을 새로 만들 때는 소비처를 grep 으로 전수.
+    - ⚠⚠ **엣지가 보낸 배열 원소 하나가 함대 전체를 멈출 수 있다**(CEN-2599-01): `/inventory` 의 null 원소가 저장돼 매 주기 `store.refresh` 가
+      던졌다. 수신 **그리고 병합부** 둘 다에서 객체만 받는다(디스크에 이미 남은 값이 있으므로). 원소 vcenterId 는 본문 vcenterId 에 묶는다
+      (CEN-02 — 남의 법인 주입). 스토리지·PDU·SAN 수신 정제는 `central/edgeRecord.sanitizeEdgeDevices` 하나(v2.598 CENTRAL 규약의 확장).
+    - ⚠⚠ **TOFU 소유권은 관리자가 푼다 — 자동 인계는 기본 꺼짐**(EDGE2599-03): `POST /api/admin/central/inventory/owner`(adminOnly·감사).
+      `CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS` 기본 0 — 켜면 소유 엣지가 오래 조용할 때 다른 개별 토큰 엣지가 넘겨받으므로 **기본값으로 켜지 말 것**.
+    - **관리 주소 가림은 `auth/addressMask.js`**(AUTHZ-2599-03): 스토리지·SAN·PDU 목록뿐 아니라 **작업 로그·점검 이력·포트 상세·PDU 상세**가 같은
+      주소를 싣는다(목록만 가렸을 때 Chromium 하단 표에 IP 가 남아 찾았다). `cliRaw` 원문 속 주소는 가리지 않는다(정직 기록).
+    - **주기 env 는 `config.js clampIntervalMs`/`offOrIntervalMs`**(T2599-02): 2^31 초과·0 이하가 1ms 루프였다. 문서화된 '0 = 끔'
+      (`COLLECTOR_PULL`·`IDRAC_SCAN`·`AGENT_EDGELOG_POLL_MS`)만 0 을 유지한다. 새 주기 env 는 이 헬퍼로.
+    - **SQLite open 은 `util/sqliteOpen.js`**(DB2599-02): busy_timeout 먼저 · 잠금이면 그 시도의 핸들만 닫고 재시도(폴백 모듈 `retryOnLock`,
+      unavailable 모듈 `createLockRetry` 30초). 폴링 경로 15종 적용, 미적용 7종(점검 시에만·ipam 외부 공유·v2.597 기적용)은 그룹 e 보고에 근거.
+    - **장비 출력 정규식은 선형으로**(SEC2599-02): `replace(/\s+$/)` 는 긴 공백 줄에서 O(n²) — `trimEnd()`. 스윕 테스트가 server/src 전체에서 0 을
+      고정하고, 파서 11개가 공백 3만 자에서 150ms 안인지 본다. 남은 후보 `cliSsh.parseJsonLoose`(구조적 O(n²)).
+    - **비밀은 명령 인자로 보내지 않는다**(SEC2599-05): 배포(agent·rma)가 토큰을 `bash -c "printf …"` 로 보내 `ps` 에 보였다 → `appendSecretText`
+      (SFTP 0600 임시 파일 + `cat >>`, finally 삭제). 엣지 로그 가림에 URL 비밀번호·Basic/Digest 추가(SEC-04).
+    - 수집기: Isilon REST 처리량은 **B/s → bps(×8)** · PowerStore SSH 는 REST 와 같은 판정(`powerstoreCore.js` — 순환 회피로 분리) · NSX 는 cursor
+      페이징(상한 20, `listsTruncated`) · 알람 상한은 개수를 밝힌다 · bmstor 사용률은 **df 정의** used/(used+avail).
+    - ⚠ 작업 방식(v2.598 기록의 재확인): 병렬 수정 중 WIP 커밋은 변이 검증 기준을 흐린다 — 감사 기준 커밋을 모든 그룹에 명시했다. 이번에도
+      한 그룹의 변이 도중 WIP 커밋이 '되돌린 판본' 을 담은 적이 있다(다음 커밋에서 바로잡힘) — **변이 검증 중에는 WIP 커밋을 피할 것**.
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

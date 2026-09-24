@@ -34,7 +34,8 @@ export function Forecast({ scope }) {
   const { loading, data, error } = useTool('/tools/capacity-forecast', scope ? { vcenterId: scope } : {});
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
-  const tb2 = (g) => (g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
+  // v2.599 RECENT2599-03: 사용량을 못 읽은 DS 의 여유는 null — 'null GB' 로 새지 않게 '—'.
+  const tb2 = (g) => (g == null ? '—' : g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
   const dlabel = (d) => d == null ? '—' : d > 3650 ? '>10년' : d > 365 ? `${(d / 365).toFixed(1)}년` : `${d}일`;
   const soon = data.items.filter((x) => x.daysToFull != null && x.daysToFull <= 180).length;
   return (

@@ -360,7 +360,8 @@ test('배선: DB 는 ts 단독 인덱스와 0600 권한을 갖는다', () => {
   const d = read('curuser/db.js');
   assert.match(d, /CREATE INDEX IF NOT EXISTS idx_vc_series_ts ON vc_series \(ts\)/);
   assert.match(d, /chmodSync\(p, 0o600\)/);
-  assert.match(d, /journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000/);
+  // v2.599 DB2599-02: WAL·NORMAL·busy_timeout 은 util/sqliteOpen.js openSqlite 가 건다(busy_timeout 먼저 — audit2599e 가 고정).
+  assert.match(d, /openSqlite\(new DatabaseSync\(p\)\)/);
   assert.match(d, /CURUSER_VM_SERIES/, 'VM 단위 시계열은 연 2,100만행 — 옵트인이어야 한다');
 });
 

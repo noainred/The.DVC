@@ -189,9 +189,9 @@ test('M2 정적: /result·/fleet·/ip-scan-result 저장 키가 req.centralAuth.
 
 test('M2 정적: /inventory 소유권(TOFU) 검사 + 출처를 centralAuth.agent 로 기록', () => {
   const inv = centralRoute("centralRouter.post('/inventory'", "centralRouter.post('/fleet'");
-  assert.match(inv, /getInventory\(String\(b\.vcenterId\)\)\?\.agent/);
+  assert.match(inv, /getInventory\(String\(b\.vcenterId\)\)/); // v2.599: 소유 판정이 인계 규칙과 함께 cur 로 읽는다
   assert.match(inv, /소유입니다/);
-  assert.match(inv, /setInventory\(String\(b\.vcenterId\), slice, agent/);
+  assert.match(inv, /setInventory\(vcId, slice, agent/); // v2.599: vcId = String(b.vcenterId)
 });
 
 test('M2 정적: /gpu-guest-data 출처 agent 태깅(provenance)', () => {

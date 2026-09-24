@@ -19,6 +19,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
+const lockRetry = createLockRetry();
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'sanswitch-perf.db');
 const PRUNE_EVERY = 20;      // N회 저장마다 1회만 prune
@@ -31,20 +33,21 @@ let _pruneTick = 0;
 let _opening = null;
 async function open() {
   if (_db) return _db === 'unavailable' ? null : _db;
+  if (lockRetry.blocked()) return null;   // 잠금 뒤 재시도 대기(매 호출 3초 busy_timeout 을 태우지 않게)
   if (_opening) return _opening;
   _opening = openInner().finally(() => { _opening = null; });
   return _opening;
 }
 async function openInner() {
   if (_db) return _db === 'unavailable' ? null : _db;
+  let conn = null;   // v2.599 DB2599-02: 실패하면 닫는다(잠금이면 래치하지 않고 다시 연다)
   try {
     const { DatabaseSync } = await import('node:sqlite');
-    const conn = new DatabaseSync(FILE());
+    conn = openSqlite(new DatabaseSync(FILE()));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
     // v2.447(감사 S4): DB 파일 권한 0600 — 다른 DB 모듈(idrac/metrics/logs/ipam/vmtrack/capacity/ping)은
     // 전부 적용돼 있는데 이 파일만 빠져 있었다. 같은 호스트의 다른 로컬 사용자가 읽을 수 있었다.
     try { fs.chmodSync(FILE(), 0o600); } catch { /* best effort */ }
-    conn.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;
-      CREATE TABLE IF NOT EXISTS port_perf (
+    conn.exec(`CREATE TABLE IF NOT EXISTS port_perf (
         device_id TEXT NOT NULL, ts INTEGER NOT NULL, port INTEGER NOT NULL, bps INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_pp_ts ON port_perf (ts);
@@ -68,6 +71,8 @@ async function openInner() {
     };
     return _db;
   } catch (e) {
+    try { conn?.close(); } catch { /* 이미 닫힘 */ }
+    if (lockRetry.onFail(e)) { console.warn(`[sanswitch-perf] ${lockRetry.note()}`); return null; }
     console.warn(`[sanswitch-perf] DB 사용 불가(수집은 계속, 이력만 비활성): ${e.message}`);
     _db = 'unavailable';
     return null;
@@ -428,4 +433,4 @@ export async function perfDbStats() {
   } catch (e) { return { available: true, error: e.message }; }
 }
 
-export function _resetForTest() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; }
+export function _resetForTest() { lockRetry.ok(); try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; }

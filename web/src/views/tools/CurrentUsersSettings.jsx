@@ -18,13 +18,15 @@ import { fetchJson, sendJson } from '../../api.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
+import { blankOr } from '../blankOr.js';
 import { intervalText } from './curUserText.js';
 
 const MIN = 60_000;
 
 function NumRow({ label, value, onChange, lim, unit = '분', hint }) {
-  const toUnit = (ms) => (unit === '분' ? Math.round(ms / MIN) : ms);
-  const fromUnit = (v) => (unit === '분' ? Math.round(Number(v) * MIN) : Number(v));
+  const toUnit = (ms) => (ms == null ? '' : unit === '분' ? Math.round(ms / MIN) : ms);
+  // v2.599 LO2599-01: 빈 칸은 undefined(보내지 않음) — Number('') 가 0 이 되어 서버가 기본값으로 저장하던 것.
+  const fromUnit = (raw) => { const v = blankOr(raw); return v === undefined ? undefined : unit === '분' ? Math.round(v * MIN) : v; };
   return (
     // ⚠ `minWidth: 0` 이 없으면 라벨 칸이 **설명문의 max-content 폭**으로 자라 옆 칸과 겹친다
     //   (v2.520 스크린샷 판독으로 발견 — 수치로는 안 잡혔다. 숫자 6개가 서로 침범했다).

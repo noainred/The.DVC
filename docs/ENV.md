@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **486개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **493개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-23)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-24)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -456,13 +456,18 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (35)
+## 중앙(위임 수집) (40)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BMUSAGE_PULL_STALE_MS` | `30` |  | central/bmUsageEdgePull.js |
 | `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmUsageEdgePull.js |
 | `CAPTURE_ACK_GRACE_MS` | `60000` |  | central/captureJobs.js |
+| `CENTRAL_AGENT_CONFIG_MAX_BYTES` | `32` |  | central/agentConfig.js |
+| `CENTRAL_EDGE_AGENT_EVICT_MS` | `24` |  | central/edgeRecord.js |
+| `CENTRAL_EDGE_AGENT_MAX_BYTES` | `16` |  | central/edgeRecord.js |
+| `CENTRAL_EDGE_DEVICE_MAX_BYTES` | `1024` |  | central/edgeRecord.js |
+| `CENTRAL_EDGE_MAX_AGENTS` | `128` |  | central/edgeRecord.js |
 | `CENTRAL_FLEET_MAX_AGENTS` | `500` |  | central/fleet.js |
 | `CENTRAL_FLEET_TTL_MS` | `30` |  | central/fleet.js |
 | `CENTRAL_PDU_TTL_MS` | `6` |  | central/pduEdge.js |
@@ -510,10 +515,11 @@
 |---|---|---|---|
 | `HEALTH_PROBE_TIMEOUT_MS` | `5000` |  | health/network.js |
 
-## API 라우트 (30)
+## API 라우트 (31)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS` |  |  | routes/central.js |
 | `CENTRAL_REQUIRE_AGENT_TOKEN` | `기본 아님('true' 일 때만 적용)` |  | routes/central.js |
 | `CENTRAL_VERIFY_SELF_REGISTER` | `기본 적용('false' 로 끄기)` | ✅ | routes/central.js |
 | `COMPARE_MATRIX_MAX_CLUSTERS` | `200` |  | routes/api/compareMatrix.js |
@@ -597,10 +603,11 @@
 | `OLLAMA_MODEL` | `'llama3.1'` |  | llm/config.js |
 | `OLLAMA_URL` | `'http://localhost:11434'` |  | llm/config.js |
 
-## NSX (1)
+## NSX (2)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `NSX_LIST_MAX_PAGES` | `20` |  | nsx/client.js |
 | `NSX_TLS_REJECT_UNAUTHORIZED` | `기본 아님('true' 일 때만 적용)` |  | nsx/client.js |
 
 ## PDU (9)
@@ -665,4 +672,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 486
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 493

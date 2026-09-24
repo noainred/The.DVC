@@ -12,14 +12,15 @@
  * ⚠ **재진입 가드 필수**(CLAUDE.md 성능 불변조건) — 수동 실행 API 와 훅(`hooks.js`)도 같은 가드를 쓴다.
  * ⚠ **엣지 위임 장비의 `deviceOk` 는 엣지가 정한다.** 중앙은 그 장비에 닿지 않으므로 덮으면 안 된다.
  */
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { runScan } from './scan.js';
 import { transition } from './transition.js';
 import { openFaults, applyTransition, partFaultDbStatus, markNotified, resetInfo } from './db.js';
 import { notifyTransition, countDropped } from './notify.js';
 import { partFaultEnabled } from './settings.js';
 
-const intervalMs = () => Math.max(60_000, Number(process.env.PARTFAULT_POLL_MS) || 10 * 60_000);
+// v2.599 T2599-02: 상한도 둔다(2^31 초과 → 1ms 루프).
+const intervalMs = () => clampIntervalMs(Number(process.env.PARTFAULT_POLL_MS) || 10 * 60_000, 10 * 60_000, 60_000);
 const isEdge = () => !!config.agent.centralUrl;
 
 let _timer = null;

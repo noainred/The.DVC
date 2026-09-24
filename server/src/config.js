@@ -35,6 +35,21 @@ const numEnv = (raw, def) => { const n = Number(raw); return Number.isFinite(n) 
 // 문서가 약속한 keep-all 이 조용히 prune 이 됐다(IDRAC/TEMP/PING 3곳 실측). 빈 문자열(`KEY=`)은 0 이 아니라
 // **미지정**이다 — `Number('') === 0` 이라 그대로 두면 빈 줄 하나가 '무제한 보관' 으로 둔갑한다.
 const retentionEnv = (raw, def) => (raw == null || String(raw).trim() === '' ? def : numEnv(raw, def));
+// v2.599 T2599-02: env 주기값은 setInterval 로 곧장 간다 — Node 는 2^31−1ms(약 24.8일)를 넘거나 0 이하·NaN 인 지연을
+// **1ms** 로 바꿔 경고 한 줄만 남기고 루프를 돈다(실측: AGENT_SCAN_INTERVAL_MS=2592000000 → 12초에 중앙 요청 7,752회).
+// 주기 env 는 전부 이 헬퍼로 [min, MAX_TIMER_MS] 에 가둔다. 0 이하·비숫자는 기본값(끄기가 문서화된 키는 offOrIntervalMs).
+export const MAX_TIMER_MS = 2_147_000_000;
+export const clampIntervalMs = (n, def, min = 1_000) => {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return def;
+  return Math.min(MAX_TIMER_MS, Math.max(min, v));
+};
+// '0 이하 = 끔' 이 문서화된 키(COLLECTOR_PULL_INTERVAL_MS · IDRAC_SCAN_INTERVAL_MS) — 0 이하는 0(끔), 양수는 상·하한.
+export const offOrIntervalMs = (n, min = 1_000) => {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  return Math.min(MAX_TIMER_MS, Math.max(min, v));
+};
 
 const EDGE_ALL = (process.env.EDGE_MODE || '').trim().toLowerCase() === 'all';
 const EDGE_TOKEN = process.env.EDGE_TOKEN || process.env.CENTRAL_TOKEN || '';
@@ -80,7 +95,7 @@ export const config = {
   // 설정된 DB 저장 디렉터리(null = configDir 사용). db-location.json 에서 읽는다(v2.379).
   dbDir: DB_DIR,
   // How often (ms) the collector refreshes the aggregated snapshot.
-  pollIntervalMs: Number(process.env.POLL_INTERVAL_MS) || 30_000,
+  pollIntervalMs: clampIntervalMs(Number(process.env.POLL_INTERVAL_MS) || 30_000, 30_000, 5_000),
   // Allow self-signed vCenter certificates (common in private DCs).
   rejectUnauthorized: process.env.VC_TLS_REJECT_UNAUTHORIZED === 'true',
   // TLS compatibility for older vCenter appliances (used when cert verify is off).
@@ -105,13 +120,13 @@ export const config = {
     // in SQLite. The registry (server name, iDRAC host, credentials) lives in
     // CONFIG_DIR/idrac.json. Enabled automatically when any entry is registered.
     enabled: process.env.IDRAC_ENABLED !== 'false',
-    pollIntervalMs: numEnv(process.env.IDRAC_POLL_INTERVAL_MS, 60_000),
+    pollIntervalMs: clampIntervalMs(numEnv(process.env.IDRAC_POLL_INTERVAL_MS, 60_000), 60_000, 5_000),
     // 전력 폴 시 동시에 조회할 iDRAC 수 상한 — 무제한 Promise.all은 자동등록 후 수백 대에
     // 동시 TLS 핸드셰이크를 열어 CPU 스파이크·소켓 고갈을 유발한다(vCenter 수집과 동일 원칙).
     pollConcurrency: Math.max(1, numEnv(process.env.IDRAC_POLL_CONCURRENCY, 16)),
     // vCenter별 IP 대역을 주기적으로 스캔해 iDRAC을 자동 발견·등록하는 주기. 스캔은 무거우므로
     // 기본 6시간. 0 이하면 비활성(주기 스캔 끔, 수동 '지금 스캔'은 가능). IDRAC_SCAN_INTERVAL_MS.
-    scanIntervalMs: numEnv(process.env.IDRAC_SCAN_INTERVAL_MS, 6 * 3_600_000),
+    scanIntervalMs: offOrIntervalMs(numEnv(process.env.IDRAC_SCAN_INTERVAL_MS, 6 * 3_600_000), 60_000),
     // SQLite database file for power samples. Kept in CONFIG_DIR so upgrades
     // preserve history. Override with IDRAC_DB_PATH.
     dbPath: process.env.IDRAC_DB_PATH || dbFile('idrac-power.db'),
@@ -121,7 +136,7 @@ export const config = {
     // 시간당 롤업(power_hourly)은 retentionDays 만큼 남으므로 대시보드 집계는 그대로다.
     rawRetentionDays: Number(process.env.IDRAC_RAW_RETENTION_DAYS) || 0,
     // Per-request timeout to the iDRAC Redfish API.
-    timeoutMs: Number(process.env.IDRAC_TIMEOUT_MS) || 15_000,
+    timeoutMs: clampIntervalMs(Number(process.env.IDRAC_TIMEOUT_MS) || 15_000, 15_000, 1_000),   // v2.599: 음수·초과 시한 차단
     // --- OME (OpenManage Enterprise) tuning ---
     // Power Manager plugin id (constant across OME installs; override if needed).
     omePluginId: process.env.OME_POWER_PLUGIN_ID || '2F6D05BE-EE4B-4B0E-B873-C8D2F64A4625',
@@ -136,7 +151,7 @@ export const config = {
     // ESXi host temperature time-series (SQLite, like iDRAC power). In CONFIG_DIR
     // so it survives upgrades. 5-year retention by default; sampled on an interval.
     dbPath: process.env.TEMP_DB_PATH || dbFile('host-temp.db'),
-    sampleIntervalMs: Number(process.env.TEMP_SAMPLE_INTERVAL_MS) || 60_000,  // 1분 (설정에서 변경 가능)
+    sampleIntervalMs: clampIntervalMs(Number(process.env.TEMP_SAMPLE_INTERVAL_MS) || 60_000, 60_000, 5_000),  // 1분 (설정에서 변경 가능)
     retentionDays: retentionEnv(process.env.TEMP_RETENTION_DAYS, 1830),           // ~5년(시간당 롤업 기준)
     // 원본(분 단위) 보존기간 — 용량의 대부분이 원본이라 짧게 두면, 그 이전 구간은 시간당
     // 롤업(평균·최소·최대)만 남는다. 60분+ 버킷 조회는 이미 롤업을 쓰므로 장기 추이는 그대로다.
@@ -154,7 +169,7 @@ export const config = {
     // CONFIG_DIR에 두어 업그레이드에도 이력이 보존된다. 대상 정의는 CONFIG_DIR/ping-targets.json.
     enabled: process.env.PING_MON_ENABLED !== 'false',
     dbPath: process.env.PING_DB_PATH || dbFile('ping-monitor.db'),
-    pollIntervalMs: Math.max(5_000, numEnv(process.env.PING_MON_INTERVAL_MS, 60_000)), // 기본 1분
+    pollIntervalMs: clampIntervalMs(numEnv(process.env.PING_MON_INTERVAL_MS, 60_000), 60_000, 5_000), // 기본 1분
     timeoutMs: numEnv(process.env.PING_MON_TIMEOUT_MS, 2_500),
     // 동시에 프로브할 대상 수 상한(고RTT·다수 대상에서 이벤트 루프/소켓 폭주 방지).
     concurrency: Math.max(1, numEnv(process.env.PING_MON_CONCURRENCY, 8)),
@@ -175,14 +190,14 @@ export const config = {
     enabled: process.env.CAPACITY_MON_ENABLED !== 'false',
     dbPath: process.env.CAPACITY_DB_PATH || dbFile('capacity.db'),
     // 30초 샘플: 이벤트루프 지연·짧은 CPU 스파이크를 놓치지 않으면서 한 달 원본이 과하지 않게.
-    sampleIntervalMs: Math.max(10_000, numEnv(process.env.CAPACITY_SAMPLE_INTERVAL_MS, 30_000)),
+    sampleIntervalMs: clampIntervalMs(numEnv(process.env.CAPACITY_SAMPLE_INTERVAL_MS, 30_000), 30_000, 10_000),
     // 원본은 3일만(1일 창의 정확한 p95 계산용). 그 이상 창(1주/1달)은 시간당 롤업으로 본다.
     rawRetentionHours: Math.max(24, numEnv(process.env.CAPACITY_RAW_RETENTION_HOURS, 72)),
     // 시간당 롤업은 ~13개월 보존(1달 창 + 여유). 롤업 1행/시간이라 호스트당 연 ~8,760행으로 작다.
     rollupRetentionDays: Math.max(35, numEnv(process.env.CAPACITY_ROLLUP_RETENTION_DAYS, 400)),
     // 엣지 → 중앙 push. 엣지가 CENTRAL_URL·토큰을 갖췄을 때만 실제 기동(그 외 자기 것만 로컬 적재).
     push: process.env.CAPACITY_PUSH !== 'false',
-    pushIntervalMs: Math.max(15_000, numEnv(process.env.CAPACITY_PUSH_INTERVAL_MS, 60_000)),
+    pushIntervalMs: clampIntervalMs(numEnv(process.env.CAPACITY_PUSH_INTERVAL_MS, 60_000), 60_000, 15_000),
   },
   packages: {
     // Where to fetch upgrade/install packages from (GitHub Releases 롤링 'downloads'
@@ -206,9 +221,9 @@ export const config = {
     // Friendly datacenter label advertised by this agent's export.
     datacenter: process.env.COLLECTOR_DATACENTER || process.env.DATACENTER || '',
     // Central portal: pull registered collectors on this interval. 0 disables.
-    pullIntervalMs: numEnv(process.env.COLLECTOR_PULL_INTERVAL_MS, 60_000),
+    pullIntervalMs: offOrIntervalMs(numEnv(process.env.COLLECTOR_PULL_INTERVAL_MS, 60_000), 5_000),
     // Per-request timeout when pulling a remote collector.
-    timeoutMs: Number(process.env.COLLECTOR_TIMEOUT_MS) || 20_000,
+    timeoutMs: clampIntervalMs(Number(process.env.COLLECTOR_TIMEOUT_MS) || 20_000, 20_000, 1_000),   // v2.599: 음수·초과 시한 차단
   },
   // Central orchestration of agent-side scans. The central portal hands out
   // per-agent IP assignments; each agent pulls its assignment by name, scans
@@ -245,7 +260,7 @@ export const config = {
     // 엣지에서는 EDGE_TOKEN 사용 권장(이 인스턴스의 central 엔드포인트를 열지 않음).
     centralToken: process.env.CENTRAL_TOKEN || (EDGE_ALL ? EDGE_TOKEN : ''),
     // How often the agent pulls its assignment and scans (ms).
-    scanIntervalMs: Number(process.env.AGENT_SCAN_INTERVAL_MS) || 3_600_000,
+    scanIntervalMs: clampIntervalMs(Number(process.env.AGENT_SCAN_INTERVAL_MS) || 3_600_000, 3_600_000, 60_000),
     // Auto-register discovered iDRACs into this agent's local registry so it
     // begins collecting their power immediately.
     autoRegister: process.env.AGENT_AUTO_REGISTER !== 'false',
@@ -253,7 +268,7 @@ export const config = {
     // 고RTT 원격 사이트의 vCenter 수집을 현장 서버가 전담하게 해 중앙↔vCenter RTT를 제거.
     // EDGE_MODE=all 이면 기본 on(AGENT_PUSH_INVENTORY=false로 명시적 off 가능).
     pushInventory: EDGE_ALL ? process.env.AGENT_PUSH_INVENTORY !== 'false' : process.env.AGENT_PUSH_INVENTORY === 'true',
-    inventoryIntervalMs: Number(process.env.AGENT_INVENTORY_INTERVAL_MS) || 60_000,
+    inventoryIntervalMs: clampIntervalMs(Number(process.env.AGENT_INVENTORY_INTERVAL_MS) || 60_000, 60_000, 5_000),
     // 게스트 디스크 회수 리포트(v2.466): 중앙은 site 모드 vCenter 에 직접 접속하지 않으므로
     // guest.disk(게스트 파티션 할당/사용)를 라이브 조회할 수 없다. 엣지가 로컬 vCenter 의
     // guest.disk 를 수집해 중앙으로 push 해야 리포트가 site vCenter 도 덮는다.
@@ -263,7 +278,7 @@ export const config = {
     pushGuestDisk: process.env.AGENT_PUSH_GUESTDISK != null
       ? process.env.AGENT_PUSH_GUESTDISK !== 'false'
       : (EDGE_ALL && process.env.AGENT_PUSH_INVENTORY !== 'false'),
-    guestDiskIntervalMs: Number(process.env.AGENT_GUESTDISK_INTERVAL_MS) || 43_200_000, // 12h
+    guestDiskIntervalMs: clampIntervalMs(Number(process.env.AGENT_GUESTDISK_INTERVAL_MS) || 43_200_000, 43_200_000, 60_000), // 12h
     // 실시간 스파이크 수집(v2.510): site 위임 vCenter 의 20초 표본은 엣지만 받을 수 있으므로 엣지의
     // vmseries 폴러가 저장한 같은 주기 결과를 중앙에 push 한다. 게스트 디스크와 같은 기본 규칙
     // (명시 env 최우선, 미지정이면 EDGE_ALL + 인벤토리 push 켜짐일 때만 on). 주기는 vmseries 설정을 따른다.

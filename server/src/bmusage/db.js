@@ -32,6 +32,8 @@ const FILE = () => path.join(config.dbDir || config.configDir, 'bm-usage.db');
 // 날짜 경계 코어는 `util/dayKey.js` 하나다(v2.582 ARCH-2 — 세 벌이던 것을 합쳤다). 여기서는 재수출만.
 // ⚠ `export { x } from` 은 이 모듈 스코프에 이름을 만들지 않는다(v2.575 실제 사고) — import 뒤 export.
 import { DAY_OFFSET_MIN, dayKey } from "../util/dayKey.js";
+import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
+const lockRetry = createLockRetry();
 export { DAY_OFFSET_MIN, dayKey };
 
 /** 우리가 적재하는 지표 열 — 이 목록이 계약이다(화면·롤업·테스트가 같이 쓴다). */
@@ -63,6 +65,7 @@ const COUNT_CACHE_MS = Math.max(0, Number(process.env.BMUSAGE_COUNT_CACHE_MS) ||
  */
 async function getDb() {
   if (_db) return _db;
+  if (lockRetry.blocked()) return null;   // 잠금 뒤 재시도 대기(매 호출 3초 busy_timeout 을 태우지 않게)
   if (_opening) return _opening;
   if (_tried) return _db;          // 열기를 시도했고 실패한 것 — 매 호출 재시도하지 않는다
   _opening = openDb().finally(() => { _opening = null; });
@@ -70,14 +73,14 @@ async function getDb() {
 }
 
 async function openDb() {
+  let conn = null;   // v2.599 DB2599-02: 실패하면 닫는다(잠금이면 래치하지 않고 다시 연다)
   try {
     fs.mkdirSync(path.dirname(FILE()), { recursive: true });
     const { DatabaseSync } = await import('node:sqlite');
-    const conn = new DatabaseSync(FILE());
+    conn = openSqlite(new DatabaseSync(FILE()));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
     // ⚠ 새 DB 모듈은 **열자마자 0600**(v2.535 규약 — 워커까지 포함).
     try { fs.chmodSync(FILE(), 0o600); } catch { /* best effort */ }
-    conn.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;
-      CREATE TABLE IF NOT EXISTS usage_history (
+    conn.exec(`CREATE TABLE IF NOT EXISTS usage_history (
         agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, ts INTEGER NOT NULL,
         name TEXT, vcenter_id TEXT, src TEXT,
         cpu_pct REAL, mem_pct REAL, disk_busy_pct REAL, disk_used_pct REAL,
@@ -130,6 +133,8 @@ async function openDb() {
     }
     _db = conn;
   } catch (e) {
+    try { conn?.close(); } catch { /* 이미 닫힘 */ }
+    if (lockRetry.onFail(e)) { console.warn(`[bmusage-db] ${lockRetry.note()}`); return null; }
     console.warn('[bmusage-db] 사용 불가(DB 없이 동작):', e?.message);
     _db = null;
   }
@@ -328,4 +333,4 @@ export async function usageDaily({ key = '', agent = '', days = 90 } = {}) {
   } catch { return []; }
 }
 
-export function _resetForTest() { try { _db?.close?.(); } catch { /* */ } _db = null; _tried = false; _opening = null; _tick = 0; _counts = null; }
+export function _resetForTest() { lockRetry.ok(); try { _db?.close?.(); } catch { /* */ } _db = null; _tried = false; _opening = null; _tick = 0; _counts = null; }

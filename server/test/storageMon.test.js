@@ -107,7 +107,7 @@ test('normalizeIsilon — 노드별 조인(v2.303): devid↔lnn, 무디스크 �
   assert.equal(n1.ip, '10.94.41.202');
   assert.equal(n1.hdd, null, '전체=SSD 인 노드는 HDD 풀 없음(No Storage HDDs)');
   assert.deepEqual(n1.ssd, { totalBytes: 20, usedBytes: 17, pct: 85 });
-  assert.equal(n1.inBps, 3400000);
+  assert.equal(n1.inBps, 27_200_000, 'v2.599 C2599-01: node.net.ext.bytes.*.rate 는 B/s — bps 칸에는 ×8');
   assert.equal(n5.ip, '10.94.41.206', 'ip_addresses[0] 폴백');
   assert.equal(n5.hdd.totalBytes, 108);
   assert.equal(n5.ssd.totalBytes, 1.5);

@@ -4,7 +4,10 @@
  * 오류 서버는 합계에서 제외하되 개수·사유를 정직하게 노출한다(축소 보고 금지).
  */
 
-const pct = (used, total) => (total > 0 ? Math.round((used / total) * 1000) / 10 : 0);
+// v2.599(감사 C2599-09): 사용률은 df Capacity 와 같은 정의 — used / (used + avail). ext4 예약 블록은 total 에 들어가도
+//   사용자가 쓸 공간이 아니라 used/total 이면 가용 0 인 가득 찬 디스크가 95% 로 보였다. 분모 0 은 0% 가 아니라 null(모름).
+//   마운트 단위(collect.js dfUsedPct)와 같은 식이어야 한다 — 두 곳이 다르면 한 서버의 마운트와 합계가 다른 말을 한다.
+const pct = (used, avail) => (used + avail > 0 ? Math.round((used / (used + avail)) * 1000) / 10 : null);
 const zero = () => ({ totalBytes: 0, usedBytes: 0, availBytes: 0 });
 
 // 서버당 그룹 상한(v2.344, 사용자 요구 — 한 서버가 여러 합산 그룹에 속할 수 있게).
@@ -54,7 +57,7 @@ export function aggregate(servers, latest) {
       groups, group: groups.join(', '), // group(문자열)은 표시/하위호환용 — 진실은 groups 배열
       agent: s.agent || '',
       enabled: s.enabled !== false, mountCount: (s.mounts || []).length,
-      ...sums, usedPct: pct(sums.usedBytes, sums.totalBytes),
+      ...sums, usedPct: pct(sums.usedBytes, sums.availBytes),
       ok: !!r?.ok, error: r?.error || null, missing: r?.missing || [], at: r?.at || null,
       authStopped: r?.authStopped || null,   // v2.590: 인증 실패로 주기 수집이 멈췄다(화면이 말한다)
       mounts: r?.mounts || [],
@@ -81,7 +84,7 @@ export function aggregate(servers, latest) {
   }
 
   const groups = [...groupMap.values()]
-    .map((g) => ({ ...g, usedPct: pct(g.usedBytes, g.totalBytes) }))
+    .map((g) => ({ ...g, usedPct: pct(g.usedBytes, g.availBytes) }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  return { total: { ...total, usedPct: pct(total.usedBytes, total.totalBytes) }, groups, perServer };
+  return { total: { ...total, usedPct: pct(total.usedBytes, total.availBytes) }, groups, perServer };
 }

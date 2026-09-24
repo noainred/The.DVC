@@ -29,6 +29,16 @@ export function sanitizeMounts(input) {
 }
 
 /**
+ * 사용률 — df 의 Capacity 와 같은 정의(v2.599 감사 C2599-09): used / (used + available).
+ * ext4 의 예약 블록(기본 5%)은 root 만 쓸 수 있어 total 에는 들어가도 사용자가 쓸 공간이 아니다 — used/total 로 재면
+ * **가용 0 인 가득 찬 디스크가 95%** 로 보인다. 분모가 0 이면(읽을 수 없는 값) 0 이 아니라 null 이다.
+ */
+export function dfUsedPct(usedBytes, availBytes) {
+  const den = usedBytes + availBytes;
+  return den > 0 ? Math.round((usedBytes / den) * 1000) / 10 : null;
+}
+
+/**
  * `df -P -k` 출력 파싱 → 요청 마운트별 용량(바이트).
  * POSIX -P 는 6컬럼(fs, 1024-blocks, used, available, capacity, mounted-on)을 보장하고,
  * mounted-on 은 마지막 컬럼이므로 공백 포함 경로도 뒤에서부터 안전하게 잡는다.
@@ -49,7 +59,7 @@ export function parseDfOutput(stdout, requestedMounts) {
     const totalBytes = totalKb * 1024; const usedBytes = usedKb * 1024; const availBytes = availKb * 1024;
     byMount.set(mount, {
       mount, totalBytes, usedBytes, availBytes,
-      usedPct: totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 1000) / 10 : 0,
+      usedPct: dfUsedPct(usedBytes, availBytes),
     });
   }
   const mounts = []; const missing = [];

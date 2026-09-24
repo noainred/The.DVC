@@ -32,7 +32,8 @@ const SPECS = [
  * (xtremioSsh 의 parseTable 과 비슷하지만 VPLEX 는 '이름  값' 2열 표가 흔해 별도로 둔다.)
  */
 export function parseLl(text) {
-  const lines = String(text || '').split(/\r?\n/).map((l) => l.replace(/\s+$/, '')).filter((l) => l.trim());
+  // v2.599(SEC2599-02): trimEnd — replace(/\s+$/) 는 공백 연속마다 끝까지 다시 훑어 O(n²)(장비 출력 한 줄로 루프 정지).
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim());
   const sepIdx = lines.findIndex((l) => /^[-\s]+$/.test(l) && l.trim().length > 3);
   if (sepIdx > 0) {
     const header = lines[sepIdx - 1].trim().split(/\s{2,}/).map((h) => h.trim());

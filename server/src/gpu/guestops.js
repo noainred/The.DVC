@@ -102,7 +102,7 @@ export async function testVmGuest(c, vmMoref, creds, { isWindows = false, timeou
   // 2) 데이터 읽기 — nvidia-smi 실행 후 파싱. 실패 시 구체 사유(stderr/다운로드)를 그대로 표시.
   try {
     const r = await collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs, dlHosts, trace: tr });
-    if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, migEnabled: r.migEnabled || 0 }; tlog(tr, `✓ 읽기 성공 — GPU ${r.count}개, 사용률 ${r.utilNA ? 'N/A(MIG 모드)' : r.utilPct + '%'}`); }
+    if (r && r.utilPct != null) { out.read = true; out.sample = { gpus: r.count, utilPct: r.utilPct, utilNA: !!r.utilNA, utilPartial: r.utilPartial || 0, memUsedPct: r.memUsedPct, migEnabled: r.migEnabled || 0 }; tlog(tr, `✓ 읽기 성공 — GPU ${r.count}개, 사용률 ${r.utilNA ? 'N/A(MIG 모드)' : r.utilPct + '%'}${r.utilPartial ? ` (${r.count}개 중 ${r.count - r.utilPartial}개 기준 — MIG ${r.utilPartial}개 제외)` : ''}`); }
     else { out.error = 'nvidia-smi 출력 없음 — 게스트에 NVIDIA 드라이버/nvidia-smi 확인'; tlog(tr, `✗ ${out.error}`); }
   } catch (e) { out.error = e.guestDiag ? e.message : cleanGuestError(e.message); tlog(tr, `✗ 읽기 실패: ${out.error}`); }
   return out;
@@ -313,10 +313,14 @@ export function parseNvidiaSmiCsv(text) {
   // 사용률을 아는 GPU가 하나도 없음 = MIG로 GPU 단위 사용률 미제공(인스턴스 미생성=유휴).
   // 이 경우 0%(유휴)로 보고하되 utilNA 플래그로 'N/A(MIG)'임을 구분 가능하게 한다.
   const utilNA = known.length === 0;
+  // v2.599(감사 C2599-10): MIG 혼합 호스트에서 사용률을 아는 GPU 만 평균했는데 그 사실을 싣지 않았다 — 값이 'N개 중
+  //   M개 기준' 인지 알 길이 없었다(메모리 쪽 memPartial 과 비대칭). 뺀 GPU 수를 utilPartial 로 밝힌다(전부 N/A 면 utilNA).
+  const utilPartial = utilNA ? 0 : gpus.length - known.length;
   return {
     count: gpus.length,
     utilPct: known.length ? avg(known) : 0,
     utilNA,
+    ...(utilPartial ? { utilPartial } : {}),
     memUsedPct: memTotal ? Math.round((memUsed / memTotal) * 100) : null,
     ...(memPartial ? { memPartial } : {}),
     migEnabled: migCount,
@@ -374,28 +378,46 @@ export async function runGuestScript(c, vmMoref, creds, scriptText, { isWindows 
   const errFile = isWindows ? `C:\\Windows\\Temp\\portal-acct-${ts}.err` : `/tmp/portal-acct-${ts}.err`;
   // v2.591: 업로드 요청이 게스트 계정 거부면 그 표시를 오류에 싣는다(호출부가 VM 단위 정지·회로 차단기를 건다).
   const upErr = (msg, w) => { const e = new Error(msg); if (w?.authFailed) { e.authFailed = true; e.guestAuth = true; } return e; };
-  for (const f of files) { const w = await writeGuestFile(c, fileManager, vmRef, auth, f.path, f.content, { posixPerm: f.perm ?? 0o600, isWindows, preferHosts: dlHosts }); if (!w.ok) throw upErr(`파일 업로드 실패(${f.path}): ${w.error}`, w); }
-  const ws = await writeGuestFile(c, fileManager, vmRef, auth, scriptPath, scriptText, { posixPerm: 0o600, isWindows, preferHosts: dlHosts });
-  if (!ws.ok) throw upErr(`스크립트 업로드 실패: ${ws.error}`, ws);
-  const prog = isWindows
-    ? { path: 'C:\\Windows\\System32\\cmd.exe', args: `/c "${scriptPath}" 1>"${outFile}" 2>"${errFile}"` }
-    : { path: '/bin/sh', args: `-c "sh ${scriptPath} 1>${outFile} 2>${errFile}"` };
-  const startXml = await c.callRaw(`<StartProgramInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}` +
-    `<spec xsi:type="GuestProgramSpec"><programPath>${esc(prog.path)}</programPath><arguments>${esc(prog.args)}</arguments></spec></StartProgramInGuest>`)
-    .catch((e) => { throw tagGuestAuth(e, e); });
-  const pid = /<returnval>(\d+)<\/returnval>/.exec(startXml)?.[1];
-  if (!pid) { const fault = /<faultstring>([^<]*)<\/faultstring>/.exec(startXml)?.[1] || startXml.slice(0, 160); throw new Error(`StartProgramInGuest 실패: ${cleanGuestError(fault)}`); }
-  const deadline = Date.now() + timeoutMs; let exitCode = null, ended = false;
-  while (Date.now() < deadline) {
-    await sleep(1000);
-    const listXml = await c.callRaw(`<ListProcessesInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}<pids>${pid}</pids></ListProcessesInGuest>`).catch(() => '');
-    if (/<endTime>/.test(listXml)) { ended = true; const ec = /<exitCode>(-?\d+)<\/exitCode>/.exec(listXml); exitCode = ec ? Number(ec[1]) : null; break; }
+  /*
+   * v2.599(감사 SEC2599-03 — 재현): 삭제가 **정상 경로 끝에만** 있어, 스크립트 업로드 실패·StartProgramInGuest 예외·pid 없음에서
+   *   이미 올린 파일(addGuestUser 의 **평문 비밀번호 파일**·net user 명령이 담긴 .bat)이 게스트 임시 폴더에 남았다.
+   *   이제 올리려 한 경로를 전부 기억해 finally 에서 지운다(없는 파일 삭제는 게스트가 거절할 뿐 — deleteGuestFile 이 삼킨다).
+   *   업로드 도중 실패한 경로도 넣는다 — 전송이 중간에 끊기면 부분 파일이 남을 수 있다.
+   *   ⚠ **게스트 계정 거부로 실패했으면 지우지 않는다** — 삭제도 같은 계정의 게스트 로그온이라 거부가 그만큼 더 쌓이고
+   *     (v2.591 회로 차단기가 세는 '시도'가 두 배가 된다 — 계정 잠금), 거부된 계정으로는 어차피 지울 수 없다.
+   */
+  const cleanup = [];
+  let authRejected = false;
+  try {
+    for (const f of files) { cleanup.push(f.path); const w = await writeGuestFile(c, fileManager, vmRef, auth, f.path, f.content, { posixPerm: f.perm ?? 0o600, isWindows, preferHosts: dlHosts }); if (!w.ok) throw upErr(`파일 업로드 실패(${f.path}): ${w.error}`, w); }
+    cleanup.push(scriptPath);
+    const ws = await writeGuestFile(c, fileManager, vmRef, auth, scriptPath, scriptText, { posixPerm: 0o600, isWindows, preferHosts: dlHosts });
+    if (!ws.ok) throw upErr(`스크립트 업로드 실패: ${ws.error}`, ws);
+    const prog = isWindows
+      ? { path: 'C:\\Windows\\System32\\cmd.exe', args: `/c "${scriptPath}" 1>"${outFile}" 2>"${errFile}"` }
+      : { path: '/bin/sh', args: `-c "sh ${scriptPath} 1>${outFile} 2>${errFile}"` };
+    cleanup.push(outFile, errFile);   // 시작 요청 이후 — 셸이 리다이렉트로 만들었을 수 있다
+    const startXml = await c.callRaw(`<StartProgramInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}` +
+      `<spec xsi:type="GuestProgramSpec"><programPath>${esc(prog.path)}</programPath><arguments>${esc(prog.args)}</arguments></spec></StartProgramInGuest>`)
+      .catch((e) => { throw tagGuestAuth(e, e); });
+    const pid = /<returnval>(\d+)<\/returnval>/.exec(startXml)?.[1];
+    if (!pid) { const fault = /<faultstring>([^<]*)<\/faultstring>/.exec(startXml)?.[1] || startXml.slice(0, 160); throw new Error(`StartProgramInGuest 실패: ${cleanGuestError(fault)}`); }
+    const deadline = Date.now() + timeoutMs; let exitCode = null, ended = false;
+    while (Date.now() < deadline) {
+      await sleep(1000);
+      const listXml = await c.callRaw(`<ListProcessesInGuest xmlns="urn:vim25"><_this type="GuestProcessManager">${processManager}</_this>${vmRef}${auth}<pids>${pid}</pids></ListProcessesInGuest>`).catch(() => '');
+      if (/<endTime>/.test(listXml)) { ended = true; const ec = /<exitCode>(-?\d+)<\/exitCode>/.exec(listXml); exitCode = ec ? Number(ec[1]) : null; break; }
+    }
+    const dl = Math.min(timeoutMs, 8000);
+    const out = await readGuestFile(c, fileManager, vmRef, auth, outFile, dl, dlHosts, vmMoref);
+    const err = await readGuestFile(c, fileManager, vmRef, auth, errFile, dl, dlHosts, `${vmMoref}.err`);
+    return { ok: exitCode === 0 || (exitCode == null && ended), exitCode, ended, stdout: (out.text || '').trim().slice(0, 2000), stderr: (err.text || '').trim().slice(0, 2000) };
+  } catch (e) {
+    if (e?.guestAuth || e?.authFailed) authRejected = true;
+    throw e;
+  } finally {
+    if (!authRejected) for (const p of cleanup) deleteGuestFile(c, fileManager, vmRef, auth, p);
   }
-  const dl = Math.min(timeoutMs, 8000);
-  const out = await readGuestFile(c, fileManager, vmRef, auth, outFile, dl, dlHosts, vmMoref);
-  const err = await readGuestFile(c, fileManager, vmRef, auth, errFile, dl, dlHosts, `${vmMoref}.err`);
-  for (const p of [scriptPath, outFile, errFile, ...files.map((f) => f.path)]) deleteGuestFile(c, fileManager, vmRef, auth, p);
-  return { ok: exitCode === 0 || (exitCode == null && ended), exitCode, ended, stdout: (out.text || '').trim().slice(0, 2000), stderr: (err.text || '').trim().slice(0, 2000) };
 }
 
 const USERRE = /^[a-z_][a-z0-9_-]{0,31}$/; // 안전한 사용자명만(셸 주입 방지)

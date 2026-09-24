@@ -13,6 +13,7 @@ import { shouldStore, policyFromEnv } from '../metrics/deadband.js';   // v2.451
 import path from 'node:path';
 import { config } from '../config.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
+import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 const DB_PATH = config.idrac.dbPath;
 const deadbandPolicy = policyFromEnv();
@@ -24,10 +25,9 @@ function initSqlite() {
   // eslint-disable-next-line import/no-unresolved
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    const db = new DatabaseSync(DB_PATH);
+    const db = openSqlite(new DatabaseSync(DB_PATH));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
     // WAL + synchronous=NORMAL: 커밋당 fsync 2회(DELETE 저널) → 배치화(단건 insert 5ms→0.01ms 실측).
     // busy_timeout: 동시 접근 시 즉시 SQLITE_BUSY 실패 대신 대기.
-    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
     db.exec(`
       CREATE TABLE IF NOT EXISTS power_samples (
         server_id TEXT NOT NULL,
@@ -102,6 +102,10 @@ function initSqlite() {
     const bucketsHourlyStmt = db.prepare('SELECT server_id, hb, sumw, cnt FROM power_hourly WHERE hb >= ?');
     const pruneHourlyStmt = db.prepare('DELETE FROM power_hourly WHERE rowid IN (SELECT rowid FROM power_hourly WHERE hb < ? LIMIT ?)');
     const delOneHourlyStmt = db.prepare('DELETE FROM power_hourly WHERE server_id = ?');
+    // v2.599 DB2599-01: 롤업의 서버별 마지막 관측 시각 — dead-band 로 원시 저장을 건너뛴 표본도 롤업에는 들어가므로
+    // power_samples 의 MAX(ts) 보다 늦을 수 있다. 기동 시드(withLatestCache)가 이 값을 함께 봐야 재시작 직후
+    // 엣지가 같은 ts 로 다시 주는 표본(puller 의 sTs <= prevTs 중복 검사)을 걸러낸다. 최근 구간만 본다(기동 1회).
+    const lastTsHourlyStmt = db.prepare('SELECT server_id, MAX(last_ts) AS ts FROM power_hourly WHERE hb >= ? GROUP BY server_id');
     // dead-band 상태(v2.451): serverId -> 마지막으로 **원본에 저장한** 샘플. 메모리 전용이라
     // 재시작하면 서버당 1행이 한 번 더 저장될 뿐이다. 크기는 등록 서버 수로 유계.
     const lastKeptW = new Map();
@@ -140,6 +144,13 @@ function initSqlite() {
       latestAll: () => {
         const map = new Map();
         for (const r of latestAllStmt.all()) map.set(r.server_id, { watts: r.watts, ts: r.ts });
+        return map;
+      },
+      /** 롤업 기준 서버별 마지막 관측 ts(dead-band 생략분 포함) — withLatestCache 시드 보정용. */
+      lastSeenTsAll: (nowMs = Date.now()) => {
+        const windowMs = Math.max(48 * HOUR_MS, (deadbandPolicy.power?.maxGapMs || 0) + 2 * HOUR_MS);
+        const map = new Map();
+        for (const r of lastTsHourlyStmt.all(Math.floor((nowMs - windowMs) / HOUR_MS))) if (r.ts != null) map.set(r.server_id, r.ts);
         return map;
       },
       history: (serverId, sinceTs, limit) => historyStmt.all(serverId, sinceTs, limit).reverse(),
@@ -263,6 +274,13 @@ function initJsonFallback() {
  */
 function withLatestCache(db) {
   const cache = db.latestAll(); // 시드(기동 시 1회 풀스캔) — 이후 재스캔 없음
+  // v2.599 DB2599-01: 시드는 power_samples 만 보므로 dead-band 로 원시 저장을 건너뛴 마지막 표본의 ts 를 모른다.
+  // 재시작 직후 puller 가 엣지의 같은 표본을 '새 것' 으로 받아 롤업(power_hourly)에 한 번 더 더했다(재현: cnt 2→3).
+  // 롤업의 마지막 관측 ts 가 더 늦으면 ts 만 앞당긴다 — 값(watts)은 생략 판정상 저장값과 dead-band 이내다.
+  try {
+    const seen = typeof db.lastSeenTsAll === 'function' ? db.lastSeenTsAll() : null;
+    if (seen) for (const [id, ts] of seen) { const cur = cache.get(id); if (cur && ts > cur.ts) cache.set(id, { watts: cur.watts, ts }); }
+  } catch (e) { console.warn('[idrac] 최신 캐시 롤업 보정 실패(무시):', e.message); }
   const bump = (serverId, watts, ts) => {
     const cur = cache.get(serverId);
     if (!cur || ts >= cur.ts) cache.set(serverId, { watts, ts });
@@ -289,7 +307,7 @@ let ready = null;
 export async function getDb() {
   if (impl) return impl;
   if (!ready) {
-    ready = initSqlite().then((db) => {
+    ready = retryOnLock(initSqlite, { tag: 'idrac' }).then((db) => {
       impl = withLatestCache(db);
       console.log(`[idrac] power DB: SQLite (${DB_PATH})`);
       return impl;

@@ -5,13 +5,14 @@
  * 잡 spec 의 SSH 자격증명은 이 실행에만 쓰고 저장·로깅하지 않는다.
  */
 
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { collectMany } from '../bmstor/collect.js';
 
 let busy = false;
-const POLL_MS = Number(process.env.AGENT_BMSTOR_POLL_MS) || 10_000;
+// v2.599 T2599-02: 주기 env 도 [하한, MAX_TIMER_MS] 로 가둔다 — 2^31 초과·음수는 setInterval 에서 1ms 루프가 된다.
+const POLL_MS = clampIntervalMs(Number(process.env.AGENT_BMSTOR_POLL_MS) || 10_000, 10_000, 1_000);
 
 /*
  * ⚠⚠ v2.574 IMP-07 — **무음 실패를 만들지 않는다.** v2.573 까지 이 워커는 `catch { return null; }`

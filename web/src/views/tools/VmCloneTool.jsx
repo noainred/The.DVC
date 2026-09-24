@@ -47,7 +47,9 @@ export default function VmCloneTool() {
         <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ vcenterId: '', vmId: '', vmName: '', dest: { type: 'datastore', datastoreName: '' }, schedule: { mode: 'daily', time: '02:00' }, keep: 3, quiesce: false, enabled: true })}>+ 복제 잡 추가</button>
         {running
           ? <span className="badge amber">실행 중 — {d.jobs.find((j) => j.id === running.jobId)?.vmName || running.jobId} · {running.phase}</span>
-          : <span className="muted" style={{ fontSize: 12 }}>유휴 · 대기 {d.status?.queued?.length || 0}건</span>}
+          : d.status?.runningOutOfScope
+            ? <span className="muted" style={{ fontSize: 12 }}>조회 범위 밖 잡이 실행 중 — 복제는 한 번에 1개씩 직렬로 돕니다 · 대기 {d.status?.queued?.length || 0}건</span>
+            : <span className="muted" style={{ fontSize: 12 }}>유휴 · 대기 {d.status?.queued?.length || 0}건</span>}
         {msg && <span className="muted" style={{ fontSize: 12.5 }}>{msg}</span>}
       </div>
 
@@ -58,6 +60,13 @@ export default function VmCloneTool() {
       </div>
 
       {form && <JobForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }} />}
+
+      {/* v2.599(AUTHZ-2599-05): 범위 제한 계정에는 범위 밖 vCenter 의 잡을 빼고 그 개수를 밝힌다 */}
+      {d.omittedOutOfScope > 0 && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          조회 범위 밖 vCenter 의 복제 잡 {d.omittedOutOfScope}개는 표시하지 않았습니다.
+        </div>
+      )}
 
       <div className="table-wrap" style={{ maxHeight: '46vh' }}>
         <STable>

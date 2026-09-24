@@ -8,6 +8,7 @@
  */
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
+import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents } from '../../auth/addressMask.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
@@ -88,7 +89,7 @@ export function registerSanSwitch(api) {
  * 통합 조회 — 이 노드(중앙) 직접 수집분 + 전 엣지 push 분을 합쳐 장비별 최신 스냅샷 반환.
  * 같은 deviceId 가 양쪽에 있으면 최신 collectedAt 우선(스토리지 화면과 동일 규칙).
  */
-api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (_req, res) => {
+api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (req, res) => {
   const byId = new Map();
   for (const s of [...localSnapshots(), ...edgeSanSwitchSnapshots()]) {
     const cur = byId.get(s.deviceId);
@@ -101,8 +102,13 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (_req, res) => {
   const orphanAll = [...byId.values()].filter((s) => !known.has(s.deviceId));
   const orphans = orphanAll.filter((s) => !(s.staleMs > ORPHAN_TTL_MS)).map(listShape);
   const orphansExpired = orphanAll.length - orphans.length;
+  // v2.599(AUTHZ-2599-03): 비-admin 에는 관리 IP·계정명을 가리고 밝힌다(v2.593 relaytopo 와 같은 기준).
+  const admin = isAdminReq(req);
   res.json({
-    devices, orphans, ...(orphansExpired ? { orphansExpired, orphanTtlMs: ORPHAN_TTL_MS } : {}),
+    devices: admin ? devices : devices.map(maskDeviceAddress),
+    orphans: admin ? orphans : orphans.map(maskSnapAddress),
+    ...(admin ? {} : { addressHidden: true }),
+    ...(orphansExpired ? { orphansExpired, orphanTtlMs: ORPHAN_TTL_MS } : {}),
     types: SAN_SWITCH_TYPES.map((t) => ({ ...t, methods: collectMethodsFor(t.type) })),
     datacenters: (() => { try { return listDatacenters(); } catch { return []; } })(),
     agents: knownAgentNames(),
@@ -127,9 +133,10 @@ api.get('/tools/sanswitch/devices/:id/ports', toolsPerm, fullScopeOnly, (req, re
   // 모델/FOS/수집시각만 보내서, 이미 수집해 둔 WWN·Domain·시리얼·팹·존·FRU 상태가
   // 화면에 전혀 쓰이지 않고 버려지고 있었다.
   res.json({
-    ok: true, deviceId: snap.deviceId, name: snap.name, model: snap.model, fabricOs: snap.fabricOs,
+    ok: true, deviceId: snap.deviceId, name: (!isAdminReq(req) && snap.host && snap.name === snap.host) ? '' : snap.name, model: snap.model, fabricOs: snap.fabricOs,
     collectedAt: snap.collectedAt, source: snap === edge ? `엣지(${snap.agent || ''})` : '중앙 직접 수집',
-    host: snap.host || '', agent: snap.agent || '',
+    // v2.599(AUTHZ-2599-03): 목록과 같은 기준 — 비-admin 에는 관리 주소를 비운다.
+    host: isAdminReq(req) ? (snap.host || '') : '', ...(isAdminReq(req) ? {} : { addressHidden: true }), agent: snap.agent || '',
     serial: snap.serial || '', wwn: snap.wwn || '', domainId: snap.domainId ?? null,
     switchState: snap.switchState || '', health: snap.health || null,
     fabric: snap.fabric || null, zoning: snap.zoning || null, licenses: snap.licenses || [],
@@ -403,8 +410,11 @@ api.get('/tools/sanswitch/devices/:id/healthcheck', toolsPerm, fullScopeOnly, as
   //   기록하면 '최근 10회' 가 같은 값 10개가 된다('수집 1회 = 기록 1회', healthHistory.js 머리말).
   const rec = await recordRun(result, { ports: portCheck });
   const hist = await listRuns(req.params.id, Number(req.query.history) || 10);
+  // v2.599(AUTHZ-2599-03): 점검 결과(result.host)도 목록과 같은 기준 — 비-admin 에는 관리 주소를 가린다.
+  const admin = isAdminReq(req);
   res.json({
-    ok: true, result, baseline: publicBaseline(baseline), items: CHECK_ITEMS,
+    ok: true, result: admin ? result : maskSnapAddress(result), ...(admin ? {} : { addressHidden: true }),
+    baseline: publicBaseline(baseline), items: CHECK_ITEMS,
     ports: portCheck,
     problemPorts: zoned.rows,
     zoningNote: zoned.note,
@@ -421,7 +431,7 @@ api.get('/tools/sanswitch/devices/:id/healthcheck/history', toolsPerm, fullScope
   const dev = listDevices().find((d) => d.id === req.params.id);
   if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
   const hist = await listRuns(req.params.id, Number(req.query.limit) || 10);
-  res.json({ ok: true, deviceId: req.params.id, name: dev.name || dev.host, ...hist, maxRuns: MAX_RUNS, compare: compareRuns(hist.runs), db: scopeDbStatus(await healthHistoryStatus(), req.user) });
+  res.json({ ok: true, deviceId: req.params.id, name: dev.name || (isAdminReq(req) ? dev.host : ''), ...hist, maxRuns: MAX_RUNS, compare: compareRuns(hist.runs), db: scopeDbStatus(await healthHistoryStatus(), req.user) });
 });
 
 /**
@@ -435,7 +445,7 @@ api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, async (req
   const results = []; const missing = []; const recorded = [];
   for (const d of devices) {
     const snap = snapshotFor(d.id);
-    if (!snap) { missing.push({ deviceId: d.id, name: d.name || d.host, agent: d.agent || '', datacenterId: d.datacenterId || '' }); continue; }
+    if (!snap) { missing.push({ deviceId: d.id, name: d.name || (isAdminReq(req) ? d.host : ''), agent: d.agent || '', datacenterId: d.datacenterId || '' }); continue; }
     const r = checkDevice(snap, { baseline: getBaseline(d.id) });
     if (r) {
       results.push({ ...r, datacenterId: d.datacenterId || '' });
@@ -451,7 +461,9 @@ api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, async (req
   res.json({
     ok: true, at: Date.now(),
     summary: { ...summarizeAll(results), missing: missing.length, registered: devices.length },
-    results: results.map((r) => ({ ...r, datacenterName: dcNameOf(r.datacenterId) })),
+    // v2.599(AUTHZ-2599-03): 장비별 결과의 host 도 비-admin 에는 가린다(단건 점검과 같은 기준).
+    results: results.map((r) => ({ ...(isAdminReq(req) ? r : maskSnapAddress(r)), datacenterName: dcNameOf(r.datacenterId) })),
+    ...(isAdminReq(req) ? {} : { addressHidden: true }),
     missing, items: CHECK_ITEMS, baselines: listBaselines(),
     // 이력 기록 결과 — '몇 건이 새로 기록되고 몇 건이 같은 스냅샷이어서 건너뛰었나'.
     recordedRuns: recStats, historyDb: scopeDbStatus(await healthHistoryStatus(), req.user),
@@ -486,7 +498,10 @@ api.delete('/tools/sanswitch/devices/:id/err-baseline', adminOnly, (req, res) =>
  * 하나가 두 경로를 그린다. 키 이름을 바꾸면 한쪽이 조용히 빈다(v2.516 규약).
  */
 api.get('/tools/sanswitch/perf/activity', toolsPerm, fullScopeOnly, (req, res) => {
-  res.json({ poller: sanSwitchPerfStatus(), events: listPerfActivity(Number(req.query.limit) || 100) });
+  // v2.599(AUTHZ-2599-03): 목록과 같은 기준 — 비-admin 에는 작업 로그의 관리 주소도 가린다.
+  const admin = isAdminReq(req);
+  const events = listPerfActivity(Number(req.query.limit) || 100);
+  res.json({ poller: sanSwitchPerfStatus(), events: admin ? events : maskActivityEvents(events), ...(admin ? {} : { addressHidden: true }) });
 });
 
 /**
@@ -667,7 +682,10 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
  *   하나로 두 화면을 그린다(views/tools/CollectActivity.jsx). 키 이름을 바꾸면 한쪽이 빈다.
  */
 api.get('/tools/sanswitch/activity', toolsPerm, fullScopeOnly, (req, res) => {
-  res.json({ poller: sanSwitchPollerStatus(), events: listSwActivity(Number(req.query.limit) || 100) });
+  // v2.599(AUTHZ-2599-03): 목록과 같은 기준 — 비-admin 에는 작업 로그의 관리 주소도 가린다.
+  const admin = isAdminReq(req);
+  const events = listSwActivity(Number(req.query.limit) || 100);
+  res.json({ poller: sanSwitchPollerStatus(), events: admin ? events : maskActivityEvents(events), ...(admin ? {} : { addressHidden: true }) });
 });
 
 /**

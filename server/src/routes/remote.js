@@ -62,6 +62,15 @@ const SAFE_HOST = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
 // `targetHostScopeIssue` 는 v2.579 에 `proxy/targetHostScope.js` 로 옮겼다(ARCH-05). 테스트 호환 재수출.
 export { targetHostScopeIssue };
 
+// v2.599(AUTHZ-2599-02): probe·quick-connect 는 body.vcenterId 로 중계 프록시를 고른다(resolveProxy). 그 값을 범위 검사
+//   없이 쓰면 v2.598 이 /proxies 에서 숨긴 범위 밖 프록시의 이름·proxyHost 가 응답으로 새고, 그 중계에 매핑·SSH 탐침이
+//   생긴다. 범위 계정이 범위 밖 vCenter 를 지정하면 404(존재 은닉 — scope 규칙). 비어 있으면 기본 프록시다(/proxies 도 보인다).
+export function vcenterScopeIssue(allowed, vcenterId) {
+  const id = vcenterId == null ? '' : String(vcenterId);
+  if (!allowed || !id) return null;
+  return allowed.has(id) ? null : 'vCenter 를 찾을 수 없습니다.';
+}
+
 // 프록시에서 SSH로 ping/포트체크를 대행 — 내부망 도달성 탐침이므로 admin/operator만(감사 H3/H7).
 remoteRouter.post('/probe', requirePerm('remote.access'), async (req, res) => {
   const { vcenterId, targetHost } = req.body || {};
@@ -71,6 +80,8 @@ remoteRouter.post('/probe', requirePerm('remote.access'), async (req, res) => {
     // v2.320 scope: 범위 계정의 내부망 도달성 스캔 차단(형식 검증만으로는 임의 IP 프로브 가능했음).
     const issue = targetHostScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), targetHost);
     if (issue) return res.status(403).json({ ok: false, reason: issue });
+    const vcIssue = vcenterScopeIssue(scopedVcenterIds(req.user, store.get()), vcenterId);
+    if (vcIssue) return res.status(404).json({ ok: false, reason: vcIssue });
   }
   const proxy = resolveProxy(vcenterId);
   if (!proxy.deploy?.host || !proxy.deploy?.username) {
@@ -235,6 +246,8 @@ remoteRouter.post('/quick-connect', requirePerm('remote.access'), async (req, re
     // v2.320 scope: 범위 계정은 범위 내 인벤토리 대상에만 터널 매핑 생성(범위 밖 피벗 준비 차단).
     const issue = targetHostScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), targetHost);
     if (issue) return res.status(403).json({ ok: false, reason: issue });
+    const vcIssue = vcenterScopeIssue(scopedVcenterIds(req.user, store.get()), vcenterId);
+    if (vcIssue) return res.status(404).json({ ok: false, reason: vcIssue });
   }
 
   // Reuse this user's existing mapping for the same target, else create an

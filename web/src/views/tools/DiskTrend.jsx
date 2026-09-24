@@ -67,7 +67,7 @@ export default function DiskTrend({ scope }) {
 
       {/* KPI */}
       <div className="kpis" style={{ marginBottom: 12 }}>
-        <Card label="데이터스토어 용량 / 사용" value={`${gb(b.ds.capGB)} / ${gb(b.ds.usedGB)}`} meta={`사용률 ${n(b.ds.usagePct, '%')} · 여유 ${gb(b.ds.freeGB)} · DS ${b.ds.count}개`}
+        <Card label="데이터스토어 용량 / 사용" value={`${gb(b.ds.capGB)} / ${gb(b.ds.usedGB)}`} meta={`사용률 ${n(b.ds.usagePct, '%')} · 여유 ${gb(b.ds.freeGB)} · DS ${b.ds.count}개${b.ds.usageUnknown > 0 ? ` · 사용량 미확인 ${b.ds.usageUnknown}개 제외` : ''}`}
           accent={b.ds.usagePct >= policy.critPct ? 'var(--red)' : b.ds.usagePct >= policy.warnPct ? '#fbbf24' : undefined} />
         <Card label="VM 할당(프로비저닝) / 커밋" value={`${gb(b.vm.provGB)} / ${gb(b.vm.committedGB)}`} meta={`할당 ÷ 용량 ${n(b.vm.overcommitPct, '%')} · thin ${b.vm.thinCount}대 · 미커밋 ${gb(b.vm.uncommittedGB)}`}
           accent={b.vm.overcommitPct > 100 ? '#fbbf24' : undefined} />
@@ -159,7 +159,7 @@ export default function DiskTrend({ scope }) {
           <STable>
             <thead><tr><th>항목</th><th>값</th><th>정의 · 해석</th></tr></thead>
             <tbody>
-              <tr><td>용량</td><td data-sort={b.ds.capGB}>{gb1(b.ds.capGB)}</td><td className="muted">데이터스토어 capacity 합 ({b.ds.count}개, 용량 미상 제외)</td></tr>
+              <tr><td>용량</td><td data-sort={b.ds.capGB}>{gb1(b.ds.capGB)}</td><td className="muted">데이터스토어 capacity 합 ({b.ds.count}개, 용량 미상 제외{b.ds.usageUnknown > 0 ? ` · 사용량을 읽지 못한 ${b.ds.usageUnknown}개도 용량·사용 양쪽에서 제외` : ''})</td></tr>
               <tr><td>사용</td><td data-sort={b.ds.usedGB}>{gb1(b.ds.usedGB)} ({n(b.ds.usagePct, '%')})</td><td className="muted">capacity − freeSpace 합. VM 외 파일(ISO·템플릿·고아 디스크·스왑)까지 포함한 실제 점유. 경고 {policy.warnPct}% · 위험 {policy.critPct}% (vCenter 기본 알람) — 개별 DS 경고 {b.ds.warnCount} · 위험 {b.ds.critCount}</td></tr>
               <tr><td>할당(프로비저닝)</td><td data-sort={b.vm.provGB}>{gb1(b.vm.provGB)} ({n(b.vm.overcommitPct, '%')} of 용량)</td><td className="muted">VM committed + uncommitted 합 = VM 이 최대로 커밋할 수 있는 양. 100% 초과 = thin 오버서브스크립션</td></tr>
               <tr><td>VM 커밋</td><td data-sort={b.vm.committedGB}>{gb1(b.vm.committedGB)} ({n(b.vm.committedPctOfCap, '%')} of 용량)</td><td className="muted">VM 이 지금 실제로 점유한 양(스냅샷·스왑 포함). VM {b.vm.count}대(On {b.vm.on} · Off {b.vm.off})</td></tr>

@@ -5,6 +5,7 @@
  */
 
 import fs from 'node:fs';
+import { pipeline } from 'node:stream';
 import { logAudit } from '../../audit.js';
 import { analyzeLog, listLogWindows, ANALYZE_BUCKETS } from '../../svcmon/loganalyze.js';
 import { getLogSettings, setLogSettings, logDir } from '../../svcmon/logsettings.js';
@@ -19,6 +20,8 @@ export function logStatusFor(user) {
   if (user?.role === 'admin' || !st?.stats?.lastError) return st;
   return { ...st, stats: { ...st.stats, lastError: ADMIN_ONLY_TEXT } };
 }
+
+let analyzeRunning = false;   // /log/analyze 동시 1건 가드(T2599-03)
 
 export function registerLogs(svcmonRouter) {
 
@@ -49,7 +52,9 @@ svcmonRouter.get('/log/files/:name', canEdit, (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${req.params.name}"`);
   logAudit({ user: req.user?.username, action: 'svcmon.log.download', target: req.params.name });
-  fs.createReadStream(p).on('error', () => res.end()).pipe(res);
+  // v2.599 T2599-01: .pipe() 는 클라이언트가 끊으면 소스를 unpipe·pause 만 하고 파괴하지 않아 다운로드 중단마다
+  //   fd 가 하나씩 남았다. pipeline 은 어느 쪽이 끝나든(오류·중단 포함) 둘 다 파괴한다.
+  pipeline(fs.createReadStream(p), res, (err) => { if (err && !res.headersSent) res.status(500).end(); });
 });
 
 /** 로그 보유 범위 — 분석 화면이 조회 가능 기간을 먼저 보여줄 때 쓴다. */
@@ -70,6 +75,9 @@ svcmonRouter.get('/log/windows', (req, res) => {
  * canEdit 인 이유: 로그와 같은 데이터(전 대상 호스트·결과)를 읽는 조회다 — /log/files 와 동일.
  */
 svcmonRouter.get('/log/analyze', canEdit, async (req, res) => {
+  // v2.599 T2599-03: 동시 1건 — 일 2GB 로그를 스트리밍하는 분석이 여러 개 겹치면 메모리·루프를 곱한다.
+  if (analyzeRunning) return res.status(409).json({ error: 'busy', reason: '다른 로그 분석이 진행 중입니다. 끝난 뒤 다시 시도하세요.' });
+  analyzeRunning = true;
   try {
     // `|| 기본값` 은 0 을 삼킨다(from=0 이 '최근 7일'로 둔갑해 전 파일이 기간 밖 처리됨 —
     // 스모크에서 실제 발생). 유한성 검사로만 폴백한다.
@@ -87,7 +95,7 @@ svcmonRouter.get('/log/analyze', canEdit, async (req, res) => {
       type: typeof req.query.type === 'string' ? req.query.type : '',
     });
     res.json(r);
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(400).json({ error: e.message }); } finally { analyzeRunning = false; }
 });
 
 svcmonRouter.post('/log/prune', adminOnly, (req, res) => {

@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { dbFileName } from '../metrics/vmperfDb.js';
+import { openSqlite } from '../util/sqliteOpen.js';
 
 const DIR = process.env.VMSERIES_DB_DIR || path.join(config.dbDir || config.configDir, 'vmseries');
 // v2.582 TUNE-4: 파일은 vCenter 마다 하나(운영 28 · 30+ 예정)라 상한이 그보다 작으면 주기마다 LRU 스래싱이다
@@ -121,9 +122,11 @@ async function openFile(vcenterId, file, mod, create) {
   // 조회 경로가 없는 vCenter id 로 파일을 무한 생성하지 않게(toolsCapacity v2.447 교훈) — create=false 면 없으면 null.
   if (!create && !fs.existsSync(p)) return null;
   fs.mkdirSync(DIR, { recursive: true });
-  const db = new mod.DatabaseSync(p);
-  try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
-  const st = prepare(db);
+  // v2.599 DB2599-02: busy_timeout 먼저(첫 생성 중 다른 연결의 잠금을 기다린다) · 실패하면 핸들을 닫는다(fd 누수 방지 —
+  //   파일별 핸들이라 다음 호출이 다시 연다. 래치 없음).
+  const db = openSqlite(new mod.DatabaseSync(p));
+  let st;
+  try { st = prepare(db); } catch (e) { try { db.close(); } catch { /* */ } throw e; }
   try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
   rememberIndex(file, String(vcenterId ?? ''));
   const entry = { db, st, usedAt: Date.now(), file, path: p };

@@ -28,7 +28,8 @@ const SPECS = [
  * 헤더가 없으면 Key=Value 블록으로 폴백한다(show-clusters-info 는 블록형인 버전이 있다).
  */
 export function parseTable(text) {
-  const lines = String(text || '').split(/\r?\n/).map((l) => l.replace(/\s+$/, '')).filter((l) => l.trim());
+  // v2.599(SEC2599-02): trimEnd — replace(/\s+$/) 는 공백 연속마다 끝까지 다시 훑어 O(n²)(장비 출력 한 줄로 루프 정지).
+  const lines = String(text || '').split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim());
   // 구분선(---)이 있으면 그 바로 위가 헤더.
   const sepIdx = lines.findIndex((l) => /^[-=\s|+]+$/.test(l) && l.trim().length > 3);
   let headerIdx = sepIdx > 0 ? sepIdx - 1 : lines.findIndex((l) => /\S\s{2,}\S/.test(l));

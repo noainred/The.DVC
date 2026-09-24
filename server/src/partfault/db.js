@@ -46,6 +46,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
 
 /*
  * ⚠ **`config.dbDir` 을 따른다**(설정 › DB 위치). 경로만 configDir 로 굳히면 사용자가 DB 를
@@ -68,6 +69,8 @@ const RESET_REASON = '파트 키 체계 변경 — 기본키 (agent, part_key) +
 let x = null;
 let ready = null;
 let initError = null;
+// v2.599 DB2599-02: 첫 open 이 잠금이면 initError 로 래치하지 않고 잠시 뒤 다시 연다(util/sqliteOpen.js).
+const lockRetry = createLockRetry();
 let _pruneTick = 0;
 
 /** 두 테이블의 DDL — 재생성 경로와 신규 경로가 **같은 문장**을 쓴다(둘이 갈라지면 재생성 파일만 다른 스키마가 된다). */
@@ -197,21 +200,21 @@ function prepare(db) {
 async function open() {
   if (x) return x;
   if (initError) return null;
+  if (!ready && lockRetry.blocked()) return null;
   if (!ready) {
-    ready = (async () => {
+    ready = (async () => withOpenCleanup(async () => {
       // eslint-disable-next-line import/no-unresolved
       const { DatabaseSync } = await import('node:sqlite');
       const p = DB_PATH();
       fs.mkdirSync(path.dirname(p), { recursive: true });
-      const db = new DatabaseSync(p);
-      try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
+      const db = openSqlite(new DatabaseSync(p));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
       // 버전이 더 높은 파일이면 여기서 던진다 → initError → `available:false`(포탈은 뜬다).
       try { migrate(db, p, Date.now()); } catch (e) { try { db.close(); } catch { /* */ } throw e; }
       const st = prepare(db);
       try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
       x = { db, st, path: p, schemaVersion: SCHEMA_VERSION };
       return x;
-    })().catch((e) => { initError = e; return null; });
+    }))().catch((e) => { if (lockRetry.onFail(e)) { ready = null; return null; } initError = e; return null; });
   }
   return ready;
 }
@@ -241,7 +244,7 @@ export async function partFaultDbStatus() {
     available: !!h, path: h ? h.path : DB_PATH(), retentionDays: RETENTION_DAYS,
     schemaVersion: h ? h.schemaVersion : null,
     reset: h ? readReset(h) : null,
-    error: initError ? String(initError.message || initError).slice(0, 200) : '',
+    error: initError ? String(initError.message || initError).slice(0, 200) : (h ? '' : lockRetry.note()),
     openParts: h ? (h.st.stateStats.get()?.n ?? null) : null,
     ...(h ? h.st.stats.get() : { rows: null, mn: null, mx: null }),
   };
@@ -364,6 +367,7 @@ export async function recentEvents({ sinceMs = 30 * 86_400_000, limit = 500, par
 }
 
 export function _resetForTest() {
+  lockRetry.ok();
   try { x?.db?.close?.(); } catch { /* */ }
   x = null; ready = null; initError = null; _pruneTick = 0;
 }

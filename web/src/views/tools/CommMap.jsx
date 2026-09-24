@@ -18,6 +18,7 @@ import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { layoutCommMap, arcPath, labelAnchor } from './commMapLayout.js';
+import { rejectKindLabel } from './invCheckText.js'; // v2.599: 거부 종류 코드 → 라벨(unknown-route 포함)
 import {
   STATE_LABEL, STATE_COLOR, RES_KIND_LABEL, RES_KIND_ICON, RES_STATE_LABEL, RES_STATE_COLOR,
   PULL_LABEL, PUSH_LABEL, REASON_TEXT, ageText, spanText, bytesText, edgeSummary, resourceSummary,
@@ -85,7 +86,7 @@ function EdgeDetail({ e, now }) {
       <Row k="마지막 수신" v={ageText(e.push?.lastAt, now)} />
       <Row k="수신 누계" v={e.push?.pushes ? `${e.push.pushes}회 · ${bytesText(e.push.wireBytes)}` : '—'} />
       <Row k="평균 간격" v={e.push?.intervalSec != null ? `${spanText(e.push.intervalSec * 1000)} (신선 경계 ${spanText(e.push.freshMs)})` : '—'} />
-      {e.push?.rejects && <Row k="거부" v={<>{e.push.rejects.total}건 · 마지막 {ageText(e.push.rejects.lastAt, now)} · {e.push.rejects.lastKind || '—'} {e.push.rejects.lastReason}<div className="muted" style={{ fontSize: 11 }}>거부된 요청의 엣지 이름은 검증되지 않은 값입니다.</div></>} />}
+      {e.push?.rejects && <Row k="거부" v={<>{e.push.rejects.total}건 · 마지막 {ageText(e.push.rejects.lastAt, now)} · {rejectKindLabel(e.push.rejects.lastKind)} {e.push.rejects.lastReason}<div className="muted" style={{ fontSize: 11 }}>거부된 요청의 엣지 이름은 검증되지 않은 값입니다.</div></>} />}
       {e.push?.endpoints?.length > 0 && (
         <STable minWidth={360} style={{ marginTop: 6 }} className="v3-table">
           <thead><tr><th>경로</th><th className="right">횟수</th><th className="right">바이트</th><th>마지막</th></tr></thead>

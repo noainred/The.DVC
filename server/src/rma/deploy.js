@@ -15,6 +15,7 @@
  * 싣지 않고 SFTP 로 파일에 쓴다(env 파일은 KEY=VALUE 라 `'`·공백·`$` 등은 값에서 배제).
  */
 import { withSsh } from '../proxy/sshExec.js';
+import { appendSecretText } from '../agent/deploy.js';   // v2.599(SEC2599-05): 토큰 블록을 SFTP 임시 파일로 붙인다(코어 하나)
 import { renderUnit, RMA_SUDOERS } from './unitTemplate.js';
 
 export const RE_INSTANCE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -82,7 +83,7 @@ export async function resolveInstall(exec) {
  * 지점**이 갖는 것이 맞다(v2.561 '정직 장치를 무력화하는 강제변환이 가장 위험하다' 와 같은 판단).
  */
 const ENV_INJECT_RE = /[\r\n\0]/;
-async function upsertEnv(exec, envFile, pairs) {
+async function upsertEnv({ exec, writeFile }, envFile, pairs) {
   if (!pairs.length) return;
   for (const [k, v] of pairs) {
     if (ENV_INJECT_RE.test(String(k)) || ENV_INJECT_RE.test(String(v))) {
@@ -93,7 +94,8 @@ async function upsertEnv(exec, envFile, pairs) {
   const delScript = pairs.map(([k]) => `/^${k}=/d`).join(';');
   await exec(`sed -i '${delScript}' ${envFile} 2>/dev/null || true`);
   const block = '\n# --- RMA (auto-deployed) ---\n' + pairs.map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
-  await exec(`printf '%s' '${block.replace(/'/g, "'\\''")}' >> ${envFile}`);
+  // v2.599(SEC2599-05): 블록(CENTRAL_TOKEN 포함)을 printf 인자로 보내면 대상 호스트 ps·/proc/<pid>/cmdline 에 보인다.
+  await appendSecretText({ exec, writeFile }, envFile, block);
 }
 
 /**
@@ -130,7 +132,7 @@ export async function deployRma(target, opts = {}) {
       if (opts.agentName) pairs.push(['AGENT_NAME', String(opts.agentName)]);
       if (opts.centralUrl) pairs.push(['CENTRAL_URL', String(opts.centralUrl).replace(/\/+$/, '')]);
       if (opts.centralToken) pairs.push(['CENTRAL_TOKEN', String(opts.centralToken)]);
-      await upsertEnv(exec, inst.envFile, pairs);
+      await upsertEnv({ exec, writeFile }, inst.envFile, pairs);
       // 3) sudoers(포탈 재시작 프리셋) — 문법 검증 실패 시 설치하지 않는다(sudo 전체가 깨지는 사고 방지).
       const sudoTmp = '/tmp/vmware-portal-rma.sudoers';
       await writeFile(sudoTmp, RMA_SUDOERS(inst.user, { units: listOf(opts.serviceUnits), reboot: !!opts.allowReboot }), 0o440);

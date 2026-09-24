@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   INV_STATE, INV_STATE_LABEL, INV_STATE_TONE, invRowState, ageText, rowExplain,
-  rejectKindLine, unverifiedNote, agentRowExplain, findingLine, findingGroupLine,
+  rejectKindLine, rejectKindLabel, unverifiedNote, agentRowExplain, findingLine, findingGroupLine,
   targetsText, findingCodesDeclared, bannerText, freshRateText, tableFootnotes,
 } from './invCheckText.js';
 
@@ -178,5 +178,17 @@ describe('tableFootnotes — 해당 종류가 있을 때만 만든다(v2.509 규
   it('거부 상태 행이 있으면 이름 미검증 각주', () => {
     const notes = tableFootnotes({ rows: [{ state: 'rejected', owner: 'a' }], agents: [] });
     expect(notes.some((x) => x.includes('검증되지 않았습니다'))).toBe(true);
+  });
+});
+
+describe('v2.599 WEB2599-04 — 거부 종류 unknown-route', () => {
+  it('없는 경로는 수신 꺼짐과 다른 조치를 말한다', () => {
+    const line = rejectKindLine({ kind: 'unknown-route' });
+    expect(line).toContain('없는 경로');
+    expect(line).not.toContain('비활성');
+    expect(rejectKindLabel('unknown-route')).toBe('없는 경로');
+    expect(rejectKindLabel('disabled')).toBe('수신 꺼짐');
+    expect(rejectKindLabel('new-kind')).toBe('new-kind');
+    expect(rejectKindLabel('')).toBe('—');
   });
 });

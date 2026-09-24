@@ -222,7 +222,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 ### 7-3. `GET /inventory/collection` — 수집 상태
 
-분류 `inventory` · 범위 적용 안 함(포탈 전체 상태) · 단건 객체
+분류 `inventory` · **범위 적용**(v2.599 — 범위를 지정한 키는 그 vCenter 들만 셉니다. 범위 미지정 키는 전체) · 단건 객체
 
 ```json
 {
@@ -231,9 +231,13 @@ ISO 문자열이 섞여 나오지 않습니다.
     "pending": 0, "unreachable": 0, "maintenance": 0,
     "generatedAt": 1789727271549, "source": "mock", "intervalMs": 30000
   },
-  "meta": { "note": "pending 은 첫 수집이 끝나지 않은 것이고 unreachable 은 접속 실패입니다 — 조치가 다릅니다." }
+  "meta": { "scopedToVcenters": null, "note": "pending 은 첫 수집이 끝나지 않은 것이고 unreachable 은 접속 실패입니다 — 조치가 다릅니다." }
 }
 ```
+
+> 범위를 지정한 키에서는 `registered`·`connected`·`pending`·`unreachable`·`maintenance` 가 **그 범위의 vCenter 만**
+> 센 값이고, `meta.scopedToVcenters` 에 범위 vCenter 개수가 실립니다(범위 미지정 키는 `null` = 전체).
+> v2.598 까지는 범위 키에도 포탈 전체 개수를 줬습니다 — 내부 `/api/health` 와 같은 기준으로 맞췄습니다.
 
 > ⚠⚠ **`pending` 과 `unreachable` 을 합치지 마세요.** `pending` 은 기다리면 채워지고
 > `unreachable` 은 **기다려도 안 됩니다.** 상대 포탈에서 "N곳 수집 실패" 로 뭉뚱그리면

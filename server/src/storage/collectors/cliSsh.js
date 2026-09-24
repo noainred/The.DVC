@@ -287,10 +287,12 @@ export function parseKeyValueBlocks(text) {
     const idx = /^(\d+):\s*(.*)$/.exec(t);
     const body = idx ? idx[2] : t;
     if (idx) { if (cur && Object.keys(cur).length) blocks.push(cur); cur = {}; }
-    const m = /^([^=:]+?)\s*[=:]\s*(.*)$/.exec(body);
-    if (!m) continue;
+    // v2.599(SEC2599-02): 예전 `/^([^=:]+?)\s*[=:]\s*(.*)$/` 는 게으른 키가 한 글자씩 늘 때마다 뒤 공백 연속을 다시 훑어
+    //   '=' 도 ':' 도 없는 긴 공백 줄에서 O(n²) 였다(3만 자 약 0.8초). 같은 뜻을 선형으로 — 첫 '='/':' 에서 자른다(키는 1자 이상).
+    const sep = body.search(/[=:]/);
+    if (sep < 1) continue;
     if (!cur) cur = {};
-    cur[m[1].trim()] = m[2].trim();
+    cur[body.slice(0, sep).trim()] = body.slice(sep + 1).trim();
   }
   if (cur && Object.keys(cur).length) blocks.push(cur);
   return blocks;

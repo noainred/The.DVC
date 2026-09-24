@@ -120,7 +120,7 @@ export function parseSwitchShow(text) {
   let inTable = false;
 
   for (const raw of lines) {
-    const l = raw.replace(/\s+$/, '');
+    const l = raw.trimEnd();   // v2.599(SEC2599-02): trimEnd — replace(/\s+$/) 는 공백 연속마다 끝까지 다시 훑어 O(n²)(장비 출력 한 줄로 루프 정지).
     if (!inTable) {
       const m = l.match(/^(switchName|switchType|switchState|switchMode|switchRole|switchDomain|switchId|switchWwn|zoning|Fabric Name|switchBeacon):\s*(.+)$/i);
       if (m) { header[m[1].replace(/\s+/g, '')] = m[2].trim(); continue; }
@@ -285,7 +285,7 @@ export function parseLicenseShow(text) {
   const out = [];
   let key = '';
   for (const raw of lines) {
-    const l = raw.replace(/\s+$/, '');
+    const l = raw.trimEnd();   // v2.599(SEC2599-02): trimEnd — replace(/\s+$/) 는 공백 연속마다 끝까지 다시 훑어 O(n²)(장비 출력 한 줄로 루프 정지).
     if (!l.trim()) continue;
     const m = l.match(/^(\S+):\s*$/);
     if (m) { key = m[1]; continue; }
@@ -619,7 +619,8 @@ export function parseFabricShow(text) {
   const list = [];
   let principal = null;
   for (const raw of lines) {
-    const m = raw.match(/^\s*(>?)\s*(\d{1,3})\s*:\s*([0-9a-fA-F]{4,6})\s+([0-9a-fA-F:]{20,23})\s+(\S+)(?:\s+(\S+))?\s*(.*)$/);
+    // v2.599(SEC2599-02): `^\s*(>?)\s*` 는 붙은 두 \s* 가 공백을 나눠 갖는 경우의 수만큼 재시도해 O(n²) 였다 — '>' 가 있을 때만 뒤 공백.
+    const m = raw.match(/^\s*(?:(>)\s*)?(\d{1,3})\s*:\s*([0-9a-fA-F]{4,6})\s+([0-9a-fA-F:]{20,23})\s+(\S+)(?:\s+(\S+))?\s*(.*)$/);
     if (!m) continue;
     let name = String(m[7] || '').trim();
     const q = name.match(/"([^"]*)"/);

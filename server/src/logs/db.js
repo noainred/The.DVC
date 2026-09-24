@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { loadLogSettings } from './settings.js';
+import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 // 저장 위치: 설정의 storagePath(빈값=CONFIG_DIR). 각 포탈이 자기 데이터만 로컬 보관.
 function dbPath() {
@@ -33,10 +34,9 @@ function initSqlite() {
   // eslint-disable-next-line import/no-unresolved
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    const db = new DatabaseSync(DB_PATH);
+    const db = openSqlite(new DatabaseSync(DB_PATH));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
     // WAL + synchronous=NORMAL: 커밋당 fsync 2회(DELETE 저널) → 배치화(단건 insert 5ms→0.01ms 실측).
     // busy_timeout: 동시 접근 시 즉시 SQLITE_BUSY 실패 대신 대기.
-    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
     db.exec(`
       CREATE TABLE IF NOT EXISTS events (
         vcenterId TEXT NOT NULL, k TEXT, ts INTEGER NOT NULL,
@@ -154,7 +154,7 @@ function initJson() {
 
 export async function getLogsDb() {
   if (impl) return impl;
-  if (!ready) ready = initSqlite().catch((err) => { console.warn(`[vclogs] node:sqlite 불가(${err.code || err.message}); NDJSON 폴백.`); return initJson(); });
+  if (!ready) ready = retryOnLock(initSqlite, { tag: 'vclogs' }).catch((err) => { console.warn(`[vclogs] node:sqlite 불가(${err.code || err.message}); NDJSON 폴백.`); return initJson(); });
   impl = await ready;
   return impl;
 }

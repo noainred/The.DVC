@@ -32,10 +32,23 @@ export async function pushStorageNow() {
       // v2.581(BUG-D): **0대여도 상태는 올린다**(v2.517 `sendStatusOnly` 규약 — v2.548 이 "storage/push.js:30 에는
       // 아직 '0대면 POST 안 함' 결함이 남아 있다" 고 기록해 둔 것). 예전에는 여기서 조용히 반환해 중앙은
       // '엣지가 안 보냈다' 와 '보냈는데 장비가 0대다' 를 구분할 수 없었다. 상태 전용 본문은 수백 바이트다.
-      const r = await sendStatusOnly({ reason: 'no-snapshots', registered: registeredCount() });
-      _last = { at: Date.now(), sent: 0, statusSent: r.ok, statusError: r.ok ? null : r.reason };
+      const registered = registeredCount();
+      // v2.599(감사 EDGE2599-01): SAN·PDU(v2.583 #13)와 같은 규약 — 위임 장비가 **정말 0대**면 빈 목록을 보내 중앙의
+      //   이 엣지 보관분을 비운다. 예전에는 상태 전용 보고만 보내 중앙이 마지막 목록을 무기한 들고 있었다(장비를 다른
+      //   엣지로 옮기면 두 엣지 행이 함께 남는 유령·중복 장비). 위임은 있는데 스냅샷이 아직 없거나(재기동 직후)
+      //   등록부를 못 읽으면(null) **비우지 않는다** — 빈 목록으로 덮으면 한 주기 동안 중앙 화면이 빈다(v2.581 BUG-D).
+      //   비운 뒤에도 상태 보고는 보낸다 — 화면이 '위임 0대(정상)' 를 말하는 근거다(상태가 목록보다 나중이어야 보인다).
+      let cleared = false, clearError = null;
+      if (registered === 0) {
+        const c = await sendClearList();
+        cleared = c.ok; clearError = c.ok ? null : c.reason;
+        if (!c.ok) console.warn(`[storage-push] 위임 0대 — 중앙 목록 비우기 실패: ${c.reason}`);
+      }
+      const r = await sendStatusOnly({ reason: 'no-snapshots', registered });
+      _last = { at: Date.now(), sent: 0, statusSent: r.ok, statusError: r.ok ? null : r.reason,
+        ...(registered === 0 ? { cleared, ...(clearError ? { clearError } : {}) } : {}) };
       if (!r.ok) console.warn(`[storage-push] 상태 보고 실패: ${r.reason}`);
-      return { ok: true, sent: 0, statusSent: r.ok };
+      return { ok: true, sent: 0, statusSent: r.ok, ...(registered === 0 ? { cleared } : {}) };
     }
     const json = JSON.stringify({ agent: config.agent.name, devices });
     const hdrs = { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
@@ -63,6 +76,20 @@ export async function pushStorageNow() {
 /** 이 노드에 위임된 장비 수(상태 보고용 — 자격증명은 싣지 않는다). 등록부를 못 읽으면 null. */
 function registeredCount() {
   try { return devicesForThisNode().length; } catch { return null; }
+}
+
+/**
+ * 위임 0대일 때 중앙 목록 비우기(v2.599 EDGE2599-01) — `statusOnly` 가 **없는** 빈 `devices` 본문이다. 중앙
+ * `/storage-data` 는 그것을 이 엣지 목록의 교체로 받는다(saveEdgeStorage — 마지막 상태 보고는 보존된다).
+ */
+async function sendClearList() {
+  try {
+    const json = JSON.stringify({ agent: config.agent.name, devices: [] });
+    const hdrs = { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken };
+    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/storage-data`, { method: 'POST', headers: hdrs, body: json, timeoutMs: 20_000, retries: 1 });
+    if (!res.ok) return { ok: false, reason: `storage-data <- ${res.status}` };
+    return { ok: true };
+  } catch (e) { return { ok: false, reason: e.message }; }
 }
 
 /**

@@ -37,7 +37,7 @@ export function mergeManagedBlock(existing, block) {
   const src = String(existing || '');
   const a = src.indexOf(BEGIN), b = src.indexOf(END);
   if (a >= 0 && b > a) return `${src.slice(0, a)}${block}${src.slice(b + END.length)}`;
-  return `${src.replace(/\s*$/, '')}\n\n${block}\n`;
+  return `${src.trimEnd()}\n\n${block}\n`;   // v2.599(SEC2599-02): replace(/\s*$/) 는 O(n²) — 같은 뜻
 }
 
 /** haproxy.cfg 텍스트 파싱(순수) — listen 과 frontend/backend(default_backend 연결)를 같은 형태로. */

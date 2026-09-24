@@ -17,7 +17,7 @@
  */
 import { gzip } from 'node:zlib';
 import { promisify } from 'node:util';
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 
@@ -26,7 +26,7 @@ const DEFAULT_POLL_MS = 60_000;
 const pollMs = () => {
   const v = Number(process.env.AGENT_EDGELOG_POLL_MS);
   if (Number.isFinite(v) && v === 0) return 0;                 // 0 = 이 엣지에서 폴백 끔
-  return Math.max(10_000, Number.isFinite(v) && v > 0 ? v : DEFAULT_POLL_MS);
+  return clampIntervalMs(v, DEFAULT_POLL_MS, 10_000);          // v2.599 T2599-02: 상한(2^31 초과 → 1ms 루프 방지)
 };
 
 let _timer = null;

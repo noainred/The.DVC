@@ -308,15 +308,19 @@ class Store {
         // 사이트 위임 vCenter: 현장 서버가 push한 인벤토리를 병합(중앙 폴링 없음).
         if (vc.collectMode === 'site') {
           const inv = getInventory(vc.id);
-          if (inv?.data?.vcenter) {
+          const siteVc = inv?.data?.vcenter;
+          if (siteVc && typeof siteVc === 'object' && !Array.isArray(siteVc)) {
             const s = inv.data;
             const stale = Date.now() - inv.at > SITE_STALE_MS;
-            merged.vcenters.push({ ...s.vcenter, collectSource: 'site', collectedBy: inv.agent, receivedAt: inv.at, stale });
-            merged.hosts.push(...(s.hosts || []));
-            merged.vms.push(...(s.vms || []));
-            merged.datastores.push(...(s.datastores || []));
-            merged.networks.push(...(s.networks || []));
-            merged.alarms.push(...(s.alarms || []));
+            merged.vcenters.push({ ...siteVc, id: vc.id, collectSource: 'site', collectedBy: inv.agent, receivedAt: inv.at, stale });
+            // v2.599(CEN-2599-01·02) 2차 방어: 디스크에 이미 저장된 옛 push 에 객체가 아닌 원소나 **다른 vCenter** 의 원소가
+            //   있어도 병합하지 않는다 — null 하나가 rollupsOf 에서 throw 해 전 함대 스냅샷이 매 주기 멈췄다.
+            const own = (a) => (Array.isArray(a) ? a.filter((x) => x && typeof x === 'object' && !Array.isArray(x) && (x.vcenterId == null || String(x.vcenterId) === vc.id)) : []);
+            for (const x of own(s.hosts)) merged.hosts.push(x);
+            for (const x of own(s.vms)) merged.vms.push(x);
+            for (const x of own(s.datastores)) merged.datastores.push(x);
+            for (const x of own(s.networks)) merged.networks.push(x);
+            for (const x of own(s.alarms)) merged.alarms.push(x);
           } else {
             merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'pending', collectSource: 'site', note: '사이트 에이전트 수집 대기' });
           }
@@ -506,6 +510,13 @@ export function scopedRollups(snap, allowed) {
  */
 export const usageReadable = (h) => h.connectionState !== 'DISCONNECTED' && h.connectionState !== 'NOT_RESPONDING';
 
+/**
+ * v2.599 RECENT2599-03: 데이터스토어 사용량을 읽었는가 — usedGB·freeGB 가 둘 다 null 이면 못 읽은 것이다
+ * (v2.598 부터 SOAP 경로도 freeSpace 가 없으면 null 을 낸다). vmtrack diffDatastores 와 같은 규칙.
+ */
+export const dsUsageReadable = (d) => d.usedGB != null || d.freeGB != null;
+const dsUsedOf = (d) => (d.usedGB != null ? d.usedGB : Math.max(0, (d.capacityGB || 0) - d.freeGB));
+
 function rollupsOf(snap, { scoped = false } = {}) {
   const sum = (arr, fn) => arr.reduce((a, x) => a + (fn(x) || 0), 0);
 
@@ -529,8 +540,12 @@ function rollupsOf(snap, { scoped = false } = {}) {
     if (a.severity === 'critical') alCrit++;
     else if (a.severity === 'warning') alWarn++;
   }
-  let storCapGB = 0, storUsedGB = 0;
-  for (const d of snap.datastores) { storCapGB += d.capacityGB || 0; storUsedGB += d.usedGB || 0; }
+  // v2.599 RECENT2599-03: 사용량을 못 읽은 DS 는 용량·사용량 **양쪽에서** 뺀다(부분 합 = 거짓 하락). 개수는 datastoresUsageUnknown.
+  let storCapGB = 0, storUsedGB = 0, dsUsageUnknown = 0;
+  for (const d of snap.datastores) {
+    if (!dsUsageReadable(d)) { if ((d.capacityGB || 0) > 0) dsUsageUnknown++; continue; }
+    storCapGB += d.capacityGB || 0; storUsedGB += dsUsedOf(d);
+  }
   const cpuTotalMhz = hc.cpuT, cpuUsedMhz = hc.cpuU, memTotalMB = hc.memT, memUsedMB = hc.memU;
 
   const global = {
@@ -563,6 +578,7 @@ function rollupsOf(snap, { scoped = false } = {}) {
     storageUsedTB: round(storUsedGB / 1024, 1),
     storageUsagePct: pct(storUsedGB, storCapGB),
     datastores: snap.datastores.length,
+    datastoresUsageUnknown: dsUsageUnknown,
     networks: snap.networks.length,
     alarms: snap.alarms.length,
     alarmsCritical: alCrit,
@@ -605,7 +621,8 @@ function rollupsOf(snap, { scoped = false } = {}) {
       const cpuT = sum(h, (x) => x.cpuTotalMhz), cpuU = sum(hR, (x) => x.cpuUsageMhz);
       const memT = sum(h, (x) => x.memTotalMB), memU = sum(hR, (x) => x.memUsageMB);
       const cpuTR = sum(hR, (x) => x.cpuTotalMhz), memTR = sum(hR, (x) => x.memTotalMB);
-      const stC = sum(d, (x) => x.capacityGB), stU = sum(d, (x) => x.usedGB);
+      const dR = d.filter(dsUsageReadable);  // v2.599 RECENT2599-03 — 사용량을 못 읽은 DS 는 용량·사용 양쪽에서 뺀다
+      const stC = sum(dR, (x) => x.capacityGB), stU = sum(dR, dsUsedOf);
       return {
         key: k,
         vcenters: ids.length,
@@ -624,6 +641,7 @@ function rollupsOf(snap, { scoped = false } = {}) {
         memUsedGB: Math.round(memU / 1024),
         memTotalGB: Math.round(memT / 1024),
         storageUsedTB: round(stU / 1024, 1),
+        datastoresUsageUnknown: d.filter((x) => !dsUsageReadable(x) && (x.capacityGB || 0) > 0).length,
         alarmsCritical: a.filter((x) => x.severity === 'critical').length,
         alarmsWarning: a.filter((x) => x.severity === 'warning').length,
         // 측정 전력을 vCenter 귀속 기준으로 합산(명시 지정·이름·태그). 호스트 미매핑 서버도 그 vCenter에 포함.
