@@ -113,8 +113,8 @@ export function serverState(server, { enabled = true } = {}) {
   }
   if (st.ok === false) return { tone: 'bad', label: '실패', detail: String(st.error || '사유를 받지 못했습니다') };
   const miss = st.missing && typeof st.missing === 'object' ? Object.keys(st.missing).length : 0;
-  if (miss > 0 || st.truncated) {
-    return { tone: 'warn', label: '성공(일부 미확인)', detail: [miss ? `확인하지 못한 항목 ${miss}개` : '', st.truncated ? '상한으로 잘림' : ''].filter(Boolean).join(' · ') };
+  if (miss > 0 || isTruncated(st.truncated)) {
+    return { tone: 'warn', label: '성공(일부 미확인)', detail: [miss ? `확인하지 못한 항목 ${miss}개` : '', isTruncated(st.truncated) ? '상한으로 잘림' : ''].filter(Boolean).join(' · ') };
   }
   return { tone: 'ok', label: '성공', detail: '' };
 }
@@ -364,4 +364,11 @@ export function settingsToForm(s) {
     concurrency: n(o.concurrency),
     deviceTimeoutSec: n(o.deviceTimeoutMs, 1000),
   };
+}
+
+/** 서버 `truncated` 는 `{devices, ports, peers, notTried}` 개수 객체다(불리언을 보내던 판본도 받는다) — 0 만 있으면 잘린 것이 아니다. */
+export function isTruncated(t) {
+  if (t === true) return true;
+  if (!t || typeof t !== 'object') return false;
+  return Object.values(t).some((v) => typeof v === 'number' && v > 0);
 }

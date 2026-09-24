@@ -10,6 +10,7 @@ import {
   missingFootnotes, itemLabel, CANDIDATE_NOTE, partsCell, bgpCell, portsCell, streamingText, filterDevices,
   partState, partCounts, seriesGeometry, seriesSourceNote, collectSummary,
   EMPTY_SERVER, serverToForm, serverPayload, settingsPayload, settingsToForm, SECRET_MASK,
+  isTruncated,
 } from './cvpText.js';
 
 /**
@@ -138,7 +139,7 @@ export default function CvpTool() {
                     <td style={{ fontSize: 12 }}>{s.agent ? `엣지 ${s.agent}` : '중앙 직접'}</td>
                     <td style={{ fontSize: 12 }}>{s.authMode === 'password' ? 'ID/비밀번호' : '토큰'}</td>
                     <td><Badge tone={sv.tone} title={sv.detail}>{sv.label}</Badge>{sv.detail && sv.tone === 'bad' && sv.label === '실패' && <div style={{ fontSize: 11, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{sv.detail}</div>}</td>
-                    <td className="right">{countText(st.deviceCount)}{st.truncated ? ' (잘림)' : ''}</td>
+                    <td className="right">{countText(st.deviceCount)}{isTruncated(st.truncated) ? ' (잘림)' : ''}</td>
                     <td style={{ fontSize: 12 }} data-sort={st.collectedAt || 0}>{agoText(st.collectedAt)}</td>
                     <td style={{ fontSize: 12 }} title={used.map((k) => `${itemLabel(k)}: ${st.usedPaths[k]}`).join('\n')}>
                       {used.length ? `${used.length}개 항목` : '—'}{miss.length ? ` · 미확인 ${miss.length}` : ''}
@@ -318,7 +319,7 @@ function DeviceModal({ target, onClose }) {
                       <td data-sort={p.speedBps ?? ''}>{bpsText(p.speedBps)}</td>
                       <td><Badge tone={p.oper === 'up' ? 'ok' : p.oper ? (p.admin === 'down' ? 'muted' : 'warn') : 'muted'}>{p.oper || '—'}</Badge></td>
                       <td>{p.admin || '—'}</td>
-                      <td>{p.vlan ?? '—'}</td>
+                      <td>{p.vlan == null || p.vlan === '' ? '—' : p.vlan}</td>
                       <td>{p.lag || '—'}</td>
                       <td data-sort={p.inBps ?? ''}>{bpsText(p.inBps)}</td>
                       <td data-sort={p.outBps ?? ''}>{bpsText(p.outBps)}</td>

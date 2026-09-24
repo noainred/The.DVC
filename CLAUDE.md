@@ -3722,6 +3722,24 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ 작업 방식: 수정 도중 세션 사용량 한도로 전 그룹이 중단됐다 — 재개 시 **반쯤 적용된 파일을 기준판으로 되돌리고** 변이 백업을 지운 뒤 처음부터 다시 돌렸다.
       중단된 그룹의 부분 수정을 이어 쓰지 말 것(어디까지 됐는지 알 수 없다).
 
+  - ⚠⚠ **Arista CloudVision(CVP) 수집(v2.608) — 조회 경로는 전부 추정이고, 화면이 그 사실을 말한다**
+    (`server/src/cvp/`{registry,settings,client,parse,db,store,poller,push,collectRequests}.js + `agent/cvpConfigPull.js` + `central/cvpEdge.js` +
+    `routes/api/cvp.js` + 웹 `views/tools/CvpTool.jsx`·`cvpText.js`, 사용자 요청 "arista CVP 에서 네트워크 스위치 정보 가져오는 기능 … CVP 도 Edge 에
+    연결되어 있어 … 데이터 용량이 많으니까 별도의 DB". 선택: 엣지 수집 → 엣지 DB → 변경분 gzip·청크 push → 중앙 DB + 중앙 직접 · 토큰·ID/비밀번호 둘 다 ·
+    전체 검증. 설계·용량 계산·후보 경로는 `docs/CVP.md`. 회귀 `test/cvp2608{a,b}.test.js` — b 는 목 CVP 로 **pollCvpOnce → 엣지 DB → pushCvpNow → 실제
+    centralRouter → 중앙 DB** 를 실제 호출한다):
+    - ⚠⚠ **실장비 CVP 를 본 적이 없다** — Resource API·`/cvpservice/*`·텔레메트리 REST(`/api/v1/rest/{serial}/Sysdb/...`) 경로와 필드명, 로그인 응답
+      (쿠키/sessionId) 모두 추정이다. 그래서 항목마다 **후보 체인**이고 성공 조건은 '2xx' 가 아니라 **파서가 원하는 것을 읽었다**(v2.545 규약).
+      `usedPaths`·`missing`·`seenFields` 를 화면이 그대로 보여 준다 — 첫 실수집에서 이 값을 보고 후보를 좁힐 것(기본값으로 굳히지 말 것).
+    - **DB 는 행 수를 먼저 계산했다**: 원시 `port_sample` 은 **링크가 올라온 포트만**·기본 **7일**(200대 × 64포트 30일이면 약 11GB) + `port_daily`(평균·최대, 730일)
+      + 최신 전용 표 `device_latest`·`port_latest`(GROUP BY MAX 금지). 전체 RIB 는 수집하지 않는다(BGP 는 피어 요약·prefix 수만).
+    - **push 는 구성이 바뀐 장비만 레코드를 보내고 나머지는 수집 시각만(touch)** — 매번 전량이면 5분마다 530KB. 0건이어도 상태 push · 소유 검사는 토큰 종류와
+      무관(남의 cvp_id·중앙 직접 등록은 `rejected`). `cvp-data` 는 BIG_JSON 등록.
+    - `ports.down` 은 **관리상 켜져 있는데 링크가 내려간 포트만**이다(쓰지 않는 포트를 장애로 세지 않는다). 파트 상태는 partfault 와 같은 5종이고 못 읽으면 `null`
+      (빈 배열과 다르다). 텔레메트리 403 은 인증 정지 대상이 아니다.
+    - 서버 `truncated` 는 **개수 객체**다 — 진리값으로 읽으면 0 뿐인데 '(잘림)' 으로 뜬다(v2.608 Chromium 판독에서 발견. `cvpText.isTruncated`).
+    - CVP 는 vCenter 귀속이 없어 범위 계정 403 · 관리 주소는 비-admin 에 가림 · 기본 꺼짐 · 등록·설정은 admin.
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

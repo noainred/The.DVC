@@ -160,3 +160,13 @@ describe('문구 위생', () => {
     for (const s of texts) expect(s).not.toMatch(/`/);
   });
 });
+
+describe('isTruncated (v2.608 Chromium 판독 — 개수 객체가 전부 0 인데 "잘림" 으로 표시)', () => {
+  it('개수 객체는 양수가 있을 때만 잘림', () => {
+    expect(T.isTruncated({ devices: 0, ports: 0, peers: 0, notTried: 0 })).toBe(false);
+    expect(T.isTruncated({ devices: 0, ports: 3 })).toBe(true);
+    expect(T.isTruncated(true)).toBe(true);
+    expect(T.isTruncated(null)).toBe(false);
+    expect(T.isTruncated(false)).toBe(false);
+  });
+});
