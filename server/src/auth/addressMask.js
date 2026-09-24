@@ -212,6 +212,13 @@ export function maskSnapAddress(s, hostHint = '') {
   if (out.errors && typeof out.errors === 'object' && !Array.isArray(out.errors)) {
     out.errors = Object.fromEntries(Object.entries(out.errors).map(([k, v]) => [k, scrub(v, host)]));
   }
+  // v2.605 AUTHZ2605-04: REST 수집기는 부분 실패를 `sections.<키> = '오류: <host>:<port> 응답이 없습니다…'` 로
+  //   남긴다(netError.js describeFetchError · fosRest sections[key]=e.message) — error 만 가리면 옆 칸에서 샌다.
+  //   스킴·포트가 붙은 표기까지 가리도록 변형 치환기를 쓴다.
+  if (out.sections && typeof out.sections === 'object' && !Array.isArray(out.sections) && host) {
+    const sc = makeScrubber([host]);
+    out.sections = Object.fromEntries(Object.entries(out.sections).map(([k, v]) => [k, typeof v === 'string' ? sc(v) : v]));
+  }
   // v2.603 AUTHZ-2603-02: 점검 결과(SAN 월간 점검 `checkDevice`)는 수집 실패 시 snap.error 원문
   //   ('getaddrinfo ENOTFOUND <host>')을 항목마다 `items[].detail` 에 싣는다 — error 만 가리면 그 옆에서 샌다.
   if (Array.isArray(out.items) && host) {

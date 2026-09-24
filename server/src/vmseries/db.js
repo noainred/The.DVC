@@ -24,6 +24,7 @@ import { config } from '../config.js';
 import { dbFileName } from '../metrics/vmperfDb.js';
 import { openSqlite } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
+import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
 
 const DIR = process.env.VMSERIES_DB_DIR || path.join(config.dbDir || config.configDir, 'vmseries');
 // v2.582 TUNE-4: 파일은 vCenter 마다 하나(운영 28 · 30+ 예정)라 상한이 그보다 작으면 주기마다 LRU 스래싱이다
@@ -213,7 +214,7 @@ export async function spikeRowsInWindow(vcenterId, fromTs, toTs) {
 export async function topInWindow(vcenterId, fromTs, toTs, limit = 200) {
   const x = await getVmSeriesDb(vcenterId, { create: false });
   if (!x) return null;
-  return x.st.topInWindow.all(fromTs, toTs, Math.max(1, Math.min(2000, limit))).map((r) => ({
+  return x.st.topInWindow.all(fromTs, toTs, pageArgs({ limit }, { def: 200, max: 2000 }).limit).map((r) => ({
     kind: r.kind, ref: r.ref, rows: Number(r.rows), moments: Number(r.moments), mxcpu: Number(r.mxcpu), mxmem: Number(r.mxmem), firstT: Number(r.firstT), lastT: Number(r.lastT),
   }));
 }

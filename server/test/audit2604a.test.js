@@ -243,11 +243,9 @@ function walk(d) { return fs.readdirSync(d, { withFileTypes: true }).flatMap((e)
  * (목록에 있는데 더 이상 걸리지 않으면 테스트가 실패해 낡은 예외를 지우게 한다).
  * ⚠ 판정 근거는 소스의 '/api/collector/' 글자다 — 경로를 변수로 조립하는 파일(예: upgrade/upgrade.js 의 엣지 push)은 못 본다(한계).
  */
-const JSON_UNCAPPED_ALLOW = {
-  'relaycheck/checks.js': '중계 토폴로지 점검(관리자 수동 실행) — v2.604 범위 밖, 다음 점검 후보',
-  'portalcheck/tokenProbe.js': '토큰 점검 프로브(관리자 수동 실행) — v2.604 범위 밖, 다음 점검 후보',
-  'routes/admin/collectorsDc.js': '수집 서버 연결 테스트·진단(관리자 수동 실행) — v2.604 범위 밖, 다음 점검 후보',
-};
+// v2.605(감사 LEFT2605-01): 남아 있던 세 곳을 전부 readJsonCapped 로 옮겼다. 그중 relaycheck/checks.js 의 사유('관리자 수동 실행')는
+//   사실이 아니었다 — relaycheck/poller.js 가 startAdaptiveTimer 로 주기 실행한다. 허용 목록은 이제 비어 있다.
+const JSON_UNCAPPED_ALLOW = {};
 test('CEN2604-01 형제 스윕: 엣지 응답을 상한 없이 .json() 으로 읽는 곳은 허용 목록(사유)뿐이다', () => {
   const hits = [];
   for (const f of walk(SRC)) {
@@ -257,7 +255,7 @@ test('CEN2604-01 형제 스윕: 엣지 응답을 상한 없이 .json() 으로 �
     if (!code.includes('/api/collector/')) continue;
     if (/\.json\(\)/.test(code.replace(/readJsonCapped/g, ''))) hits.push(rel);
   }
-  for (const rel of ['collector/upgradePush.js', 'central/idracScanPush.js', 'bmstor/poller.js', 'collector/registry.js']) {
+  for (const rel of ['collector/upgradePush.js', 'central/idracScanPush.js', 'bmstor/poller.js', 'collector/registry.js', 'relaycheck/checks.js', 'portalcheck/tokenProbe.js', 'routes/admin/collectorsDc.js']) {
     assert.ok(!hits.includes(rel), `${rel} 는 readJsonCapped 로 옮겼다`);
   }
   const unexpected = hits.filter((h) => !JSON_UNCAPPED_ALLOW[h]);
@@ -316,7 +314,10 @@ test('EDGE2604-01 bmusage: 호스트를 못 읽은 vCenter 로 귀속되거나 �
   const snap = { vcenters: [{ id: 'vc1', status: 'unreachable' }, { id: 'vc2', status: 'ok' }], hosts: [{ vcenterId: 'vc2' }] };
   const r = await p.withholdUnreadBareMetal(snap, bm, reg);
   assert.deepEqual(r.bareMetal.map((b) => b.name), ['db-01']);
-  assert.deepEqual(r.hostsUnread, { vcenters: ['vc1'], dropped: 2 });
+  // v2.605(RECENT2605-01·LEFT2605-05): hostsUnread 에 보류 시한·vCenter 별 뺀 대수가 더해졌다 — 기존 두 필드는 그대로 고정한다.
+  assert.deepEqual(r.hostsUnread.vcenters, ['vc1']);
+  assert.equal(r.hostsUnread.dropped, 2);
+  assert.deepEqual(r.hostsUnread.withheld, ['vc1']);
   // 전부 읽었으면 그대로
   const ok = await p.withholdUnreadBareMetal({ vcenters: [{ id: 'vc1', status: 'ok' }, { id: 'vc2', status: 'ok' }], hosts: [{ vcenterId: 'vc1' }, { vcenterId: 'vc2' }] }, bm, reg);
   assert.equal(ok.bareMetal.length, 3);

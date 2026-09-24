@@ -60,14 +60,14 @@ test('시간당 롤업: 같은 시간버킷은 합산, 통계는 롤업에서 �
   assert.equal(Math.round(rows[1].avg), 600);
 });
 
-test('serverIds/deleteServers: 고아 server_id 삭제(활성 보존)', () => {
+test('serverIds/deleteServers: 고아 server_id 삭제(활성 보존)', async () => {
   const base = 4_000_000_000_000;
   db.insert('keep1', 100, base + 1);
   db.insert('orphanA', 100, base + 1);
   db.insert('orphanB', 100, base + 1);
   const ids = db.serverIds();
   assert.ok(ids.includes('keep1') && ids.includes('orphanA') && ids.includes('orphanB'));
-  const removed = db.deleteServers(['orphanA', 'orphanB']);
+  const removed = await db.deleteServers(['orphanA', 'orphanB']); // v2.605 DB2605-02: 청크·양보 — 비동기가 됐다
   assert.equal(removed >= 2, true);
   const after = db.serverIds();
   assert.ok(after.includes('keep1'));

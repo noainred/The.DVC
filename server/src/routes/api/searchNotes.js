@@ -3,7 +3,7 @@ import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { currentVersion } from '../../config.js';
 import { listNotes } from '../../release-notes.js';
-import { nlSearch, NL_ENTITY_PERM } from '../../llm/nlSearch.js';
+import { nlSearch, NL_ENTITY_PERM, NL_QUERY_MAX } from '../../llm/nlSearch.js';
 import { userHasPermission } from '../../auth/permissions.js';
 
 // v2.583: 자연어 검색 결과 종류 → 필요한 조회 권한(inv.* — v2.536 집행과 같은 축). v2.591: 표는 nlSearch.js 하나가 소유한다.
@@ -13,8 +13,11 @@ export function registerSearchNotes(api) {
 
 // Natural-language search (local LLM interprets → query runs on local data).
 api.post('/search/nl', async (req, res) => {
-  const query = String((req.body || {}).query || '').trim();
+  const raw = (req.body || {}).query;
+  const query = (typeof raw === 'string' ? raw : '').trim();
   if (!query) return res.status(400).json({ error: 'query is required' });
+  // v2.605(감사 SEC2605-01): 길이 상한 — 권한 검사보다 먼저 도는 질의 해석이 긴 입력에 초선형이었다.
+  if (query.length > NL_QUERY_MAX) return res.status(400).json({ error: 'query-too-long', reason: `질의는 최대 ${NL_QUERY_MAX}자입니다.`, max: NL_QUERY_MAX });
   try {
     const out = await nlSearch(query, scopedVcenterIds(req.user, store.get()));
     // v2.583(감사 확정): 결과가 원본 객체 목록이라 inv.* 집행(v2.536)을 우회했다 — 그 종류의 조회 권한이 없으면 403.

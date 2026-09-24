@@ -24,6 +24,7 @@
  */
 import { makePart, partKeyFromTail, PUSH_PROTOCOL, COLLECTION_KINDS } from '../partfault/types.js';
 import { devKeyOf } from '../partfault/scan.js';
+import { admitAgent } from './edgeRecord.js';
 
 const t = (v) => String(v ?? '').trim();
 const s = (v, n) => t(v).slice(0, n);
@@ -39,6 +40,15 @@ const DEVICE_PART_MAX = Math.max(100, Number(process.env.PARTFAULT_EDGE_DEVICE_P
 const REPORT_PART_MAX = Math.max(1_000, Number(process.env.PARTFAULT_EDGE_REPORT_PART_MAX) || 50_000);
 const SCANNED_MAX_BYTES = 32 * 1024;   // scanned 요약(실측 ~1KB)의 상한 — 임의 객체를 그대로 상주시키지 않는다
 const LIST_MAX = 64;                   // failedKinds·notCollected 같은 소형 배열
+/**
+ * v2.605(CEN2605-02): 파트 식별자·종류의 길이 상한. 예전에는 파트 **개수**만 셌고 꼬리 글자 길이는 무제한이라 공유 토큰
+ * 이름 30개 × 5장비 × 2,000꼬리(100자)로 힙 +130MB 였다. 실제 partId 는 FQDD·슬롯/포트·센서 이름(수십 자)이다.
+ * ⚠ **자르지 않고 뺀다** — 잘라 넣으면 다른 파트 키가 되어 가짜 파트가 생긴다. 뺀 것은 omitted 로 세어 그 장비를
+ *   `ok:false`(parts-capped)로 둔다(닫지 않는 쪽 — 위 DEVICE_PART_MAX 와 같은 규칙).
+ */
+const PART_ID_MAX = 200;
+const PART_KIND_MAX = 32;
+const partFieldsOk = (kind, partId) => String(kind ?? '').length <= PART_KIND_MAX && String(partId ?? '').length <= PART_ID_MAX;
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 /** `constructor`·`__proto__` 같은 프로토타입 키로 `owned[scope].has` 가 함수가 아닌 값을 만나지 않게(S1). */
 const ownedSet = (owned, scope) => (Object.hasOwn(owned, scope) && owned[scope] instanceof Set ? owned[scope] : null);
@@ -65,6 +75,12 @@ export async function putEdgeReport(agent, body = {}) {
   const key = t(agent).toLowerCase();
   if (!key) return { ok: false, reason: 'agent 없음', protocol: 0, devices: 0, rejected: 0, open: 0 };
   const protocol = Number(body.v) === PUSH_PROTOCOL ? PUSH_PROTOCOL : 1;
+  // v2.605(CEN2605-02): 보관하는 엣지 수 상한 — 형제 수신(storage·SAN·PDU·agentConfig)의 admitAgent 규약. 예전에는 공유 토큰으로
+  //   이름을 바꿔 가며 보내면 _map 이 무한히 커졌다. 새 이름은 오래 조용한 엣지가 있을 때만 받고, 모두 최근이면 거절한다
+  //   (최근 보고한 실제 엣지를 밀어내지 않는다). ⚠ 공유 토큰으로 **같은 이름**을 사칭해 덮는 것은 문서화된 한계다(v2.601).
+  const adm = admitAgent(_map, key);
+  if (!adm.ok) return { ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).', protocol, devices: 0, rejected: 0, open: 0 };
+  if (adm.evicted) console.warn(`[central] part-faults: 엣지 수 상한 — 오래 조용한 '${adm.evicted}' 보고를 내렸다`);
   const owned = await ownedIdsFor(key);
   const devices = [];
   let rejected = 0;
@@ -88,7 +104,7 @@ export async function putEdgeReport(agent, body = {}) {
       const room = () => parts.length < DEVICE_PART_MAX && totalParts + parts.length < REPORT_PART_MAX;
       for (const p of Array.isArray(d.open) ? d.open : []) {
         if (!isObj(p)) continue;
-        if (!room()) { omitted += 1; continue; }
+        if (!room() || !partFieldsOk(p.kind, p.partId)) { omitted += 1; continue; }
         const part = makePart({ ...base, kind: p.kind, partId: p.partId, keyKind: p.keyKind, state: p.state, rawState: s(p.rawState, 200), label: s(p.label, 200), detail: s(p.detail, 300) });
         if (!part.partId) continue;
         parts.push(part); openN += 1;
@@ -97,7 +113,7 @@ export async function putEdgeReport(agent, body = {}) {
       for (const st of ['ok', 'unknown', 'absent']) {
         for (const tail of Array.isArray(states[st]) ? states[st] : []) {
           if (typeof tail !== 'string') continue;
-          if (!room()) { omitted += 1; continue; }
+          if (!room() || tail.length > PART_KIND_MAX + 1 + PART_ID_MAX) { omitted += 1; continue; }
           const [kind, ...rest] = tail.split(':');
           const partId = rest.join(':');
           if (!kind || !partId) continue;
@@ -120,6 +136,7 @@ export async function putEdgeReport(agent, body = {}) {
     // 그 엣지는 unknown 과 해소를 구분해 줄 수 없으므로 전이가 아무것도 닫지 못하게 한다.
     for (const p of (Array.isArray(body.open) ? body.open : []).slice(0, REPORT_PART_MAX)) {
       if (!isObj(p)) continue;
+      if (!partFieldsOk(p.kind, p.partId) || String(p.deviceId ?? '').length > 200 || String(p.deviceKey ?? '').length > 200) { partsOmitted += 1; continue; }
       const part = makePart({ ...p, agent: key });
       if (!part.partId) continue;
       let dev = devices.find((x) => x.scope === part.scope && x.deviceId === part.deviceId);

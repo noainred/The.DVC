@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { reqTimeoutMs } from './agent/envTimeout.js';   // v2.605 TIM2605-04: 요청 시한 env 정규화(무의존 leaf 모듈)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -170,7 +171,8 @@ export const config = {
     enabled: process.env.PING_MON_ENABLED !== 'false',
     dbPath: process.env.PING_DB_PATH || dbFile('ping-monitor.db'),
     pollIntervalMs: clampIntervalMs(numEnv(process.env.PING_MON_INTERVAL_MS, 60_000), 60_000, 5_000), // 기본 1분
-    timeoutMs: numEnv(process.env.PING_MON_TIMEOUT_MS, 2_500),
+    // v2.605(감사 TIM2605-04): numEnv 는 음수·2^31 초과를 그대로 넘겨 프로브 타이머가 1ms 가 됐다 — [100ms, 60초].
+    timeoutMs: reqTimeoutMs(process.env.PING_MON_TIMEOUT_MS, 2_500, { min: 100, max: 60_000 }),
     // 동시에 프로브할 대상 수 상한(고RTT·다수 대상에서 이벤트 루프/소켓 폭주 방지).
     concurrency: Math.max(1, numEnv(process.env.PING_MON_CONCURRENCY, 8)),
     retentionDays: retentionEnv(process.env.PING_MON_RETENTION_DAYS, 365), // ~1년

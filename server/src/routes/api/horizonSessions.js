@@ -147,6 +147,7 @@ api.get('/tools/horizon-sessions/activity', requirePerm('tools'), (req, res) => 
 });
 
 api.post('/tools/horizon-sessions/collect', requireRole('admin'), async (req, res) => {
+  if (denyScoped(req, res)) return;   // v2.605 AUTHZ2605-02: 조회가 전부 403 인데 실행·설정 변경만 열려 있었다
   const r = await runHzSessionsNow('manual');
   logAudit({
     user: req.user?.username, action: 'horizon.sessions.collect', ip: req.ip || '',
@@ -176,6 +177,7 @@ api.get('/tools/horizon-sessions/settings', requirePerm('tools'), async (req, re
 });
 
 api.put('/tools/horizon-sessions/settings', requireRole('admin'), (req, res) => {
+  if (denyScoped(req, res)) return;   // v2.605 AUTHZ2605-02: 조회가 전부 403 인데 실행·설정 변경만 열려 있었다
   const b = req.body || {};
   if (b.servers !== undefined && (!b.servers || typeof b.servers !== 'object' || Array.isArray(b.servers))) {
     return res.status(400).json({ ok: false, reason: 'servers 는 객체여야 합니다.' });

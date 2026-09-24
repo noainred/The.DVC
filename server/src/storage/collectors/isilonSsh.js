@@ -306,6 +306,38 @@ export function normalizeIsiStatus(device, parsed, { version = '', users = null,
   return snap;
 }
 
+/*
+ * v2.605(감사 RECENT2605-03): ‘isi statistics’(정확 바이트)는 20초 best-effort 라 주기마다 성패가 갈릴 수 있다.
+ *   그러면 capacity_daily 에 정확 값과 반올림 값이 날마다 섞여 증가량에 해상도 반 칸짜리 거짓 급변이 생기는데,
+ *   증가량 화면의 해상도 표지는 **최신 스냅샷** 만 보므로 최신이 정확 값이면 표지가 사라졌다.
+ *   → 이 프로세스에서 한 번이라도 반올림 주기를 본 장비는 정확 값 스냅샷에도 capacityApprox{mixed:true} 를 실어
+ *   화면이 해상도를 계속 밝히게 한다(적재는 막지 않는다 — v2.604 결정 '반올림 적재는 막지 않고 해상도를 밝힌다').
+ *   ⚠ 인메모리다 — 재시작 직후에는 반올림 주기를 다시 볼 때까지 표지가 없다(정직 기록).
+ */
+const _approxSeen = new Map();
+const APPROX_SEEN_MAX = 4096;
+export function _resetApproxSeenForTest() { _approxSeen.clear(); }
+export function markMixedBasis(snap, deviceId) {
+  const id = String(deviceId || '');
+  if (!id || !snap?.extra || snap.sections?.capacity !== 'ok') return snap;
+  const ap = snap.extra.capacityApprox;
+  if (ap && typeof ap === 'object' && !ap.mixed) {
+    const step = Number(ap.resolutionBytes);
+    if (Number.isFinite(step) && step > 0) {
+      _approxSeen.delete(id);
+      _approxSeen.set(id, step);
+      if (_approxSeen.size > APPROX_SEEN_MAX) _approxSeen.delete(_approxSeen.keys().next().value);
+    }
+    return snap;
+  }
+  const seen = _approxSeen.get(id);
+  if (!ap && seen != null) {
+    snap.extra.capacityApprox = { source: 'mixed', mixed: true, resolutionBytes: seen };
+    snap.extra.capacityBasisNote = `이번 주기는 정확한 바이트(‘isi statistics’)로 읽었지만, 이 장비는 최근 반올림 표기(‘isi status’) 주기도 있었습니다 — 날마다 기준이 섞여 증가량이 약 ${fmtStep(seen)} 해상도만큼 흔들릴 수 있습니다.`;
+  }
+  return snap;
+}
+
 export async function collectViaSsh(device) {
   try {
     const r = await withSsh(
@@ -325,6 +357,7 @@ export async function collectViaSsh(device) {
     let users = null;
     try { const j = JSON.parse(r.usersRaw); users = Array.isArray(j) ? j : null; } catch { /* 계정 섹션만 생략 */ }
     const snap = normalizeIsiStatus(device, parsed, { version, users, exact: parseIsiStatsBytes(r.stats) });
+    markMixedBasis(snap, device.id);
     if (!users) snap.sections.accounts = r.usersRaw ? '오류: users JSON 파싱 실패' : '오류: isi auth users list 실행 실패';
     return snap;
   } catch (e) {

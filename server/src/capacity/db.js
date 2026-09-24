@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
 const DB_PATH = config.capacity.dbPath;
 const HOUR = 3600_000;
@@ -70,8 +71,13 @@ function initSqlite() {
     const hourBucket = db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max
       FROM samples_hourly WHERE metric=? AND k=? AND h>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
     const hostsAll = db.prepare('SELECT k, lastTs, meta FROM hosts ORDER BY k');
-    const pruneRaw = db.prepare('DELETE FROM samples WHERE ts < ?');
-    const pruneHour = db.prepare('DELETE FROM samples_hourly WHERE h < ?');
+    // v2.605(감사 DB2605-03 — 재현): 예전 'DELETE … WHERE ts < ?' 한 방은 보존을 줄이고 재시작하면(원본 72→24h,
+    //   중앙 + 엣지 28곳 ≈ 117만 행 중 78만 행) 샘플 틱 안에서 1.4초 동기로 루프를 멈췄다. rowid 서브쿼리 청크 +
+    //   청크 사이 양보(util/chunkedPrune.js) — idx_cap_ts·idx_cap_hourly_h 가 서브쿼리의 풀스캔을 막는다.
+    const pruneRawChunk = db.prepare('DELETE FROM samples WHERE rowid IN (SELECT rowid FROM samples WHERE ts < ? LIMIT ?)');
+    const pruneHourChunk = db.prepare('DELETE FROM samples_hourly WHERE rowid IN (SELECT rowid FROM samples_hourly WHERE h < ? LIMIT ?)');
+    // 정리끼리는 겹치지 않는다(키 = 원본 경계 — 경계가 더 늦으면 끝난 뒤 한 번 더). 호출부(sampler)는 기다리지 않는다.
+    const pruneFlight = createPruneFlight({ covers: (running, next) => running >= next });
 
     return {
       kind: 'sqlite',
@@ -137,10 +143,21 @@ function initSqlite() {
         return hourBucket.all(b, b, metric, k, Math.floor(sinceTs / HOUR) * HOUR, limit).reverse()
           .map((r) => ({ ts: r.b, avg: round2(r.avg), min: round2(r.min), max: round2(r.max) }));
       },
+      /** Promise<{deleted, hourDeleted, done}> — 청크 사이에 양보한다. 실패는 여기서 남긴다(호출부는 기다리지 않는다). */
       prune: (now) => {
-        pruneRaw.run(now - config.capacity.rawRetentionHours * HOUR);
-        try { pruneHour.run(now - config.capacity.rollupRetentionDays * 24 * HOUR); }
-        catch (e) { console.warn(`[capacity] 롤업 prune 실패: ${e.message}`); }
+        const rawCut = Number(now) - config.capacity.rawRetentionHours * HOUR;
+        const hourCut = Number(now) - config.capacity.rollupRetentionDays * 24 * HOUR;
+        if (!Number.isFinite(rawCut)) return Promise.resolve({ deleted: 0, hourDeleted: 0, done: true });
+        return pruneFlight.run(rawCut, async () => {
+          const r = await chunkedDelete(pruneRawChunk, [rawCut], { label: 'capacity.samples' })
+            .catch((e) => { console.warn(`[capacity] 원본 prune 실패: ${e?.message || e}`); return { deleted: 0, done: false }; });
+          let hourDeleted = 0; let hourDone = true;
+          if (Number.isFinite(hourCut)) {
+            try { const h = await chunkedDelete(pruneHourChunk, [hourCut], { label: 'capacity.samples_hourly' }); hourDeleted = h.deleted; hourDone = h.done; }
+            catch (e) { console.warn(`[capacity] 롤업 prune 실패: ${e?.message || e}`); hourDone = false; }
+          }
+          return { deleted: r.deleted, hourDeleted, done: r.done && hourDone };
+        });
       },
     };
   });
@@ -183,6 +200,7 @@ function initMemory() {
       const floor = now - config.capacity.rawRetentionHours * HOUR;
       let i = 0;
       while (i < rows.length && rows.length > 0) { if (rows[i].ts < floor) rows.splice(i, 1); else i += 1; }
+      return Promise.resolve({ deleted: 0, hourDeleted: 0, done: true });
     },
   };
 }

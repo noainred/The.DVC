@@ -15,6 +15,7 @@
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { mergeScopedMap } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers } from '../../bmusage/settings.js';
@@ -109,6 +110,25 @@ export function maskUnassignedInfo(info, match) {
   return { ...info, samples: maskBmList(info.samples, match) };
 }
 
+/**
+ * `hostsUnread`(v2.605 LEFT2605-05) — 범위 계정에는 허용 vCenter 것만 남기고 뺀 대수를 그 범위에서 다시 센다
+ * (귀속 없는 베어메탈 개수는 '귀속 없는 데이터 미노출' 규약에 따라 주지 않는다). 없으면 null.
+ */
+export function scopeHostsUnread(h, allowed) {
+  if (!h || typeof h !== 'object') return null;
+  if (!allowed) return h;
+  const inScope = (l) => (Array.isArray(l) ? l.filter((id) => allowed.has(id)) : []);
+  const byVc = Object.fromEntries(Object.entries(h.droppedByVc || {}).filter(([id]) => id && allowed.has(id)));
+  const vcenters = inScope(h.vcenters);
+  if (!vcenters.length) return null;
+  return {
+    vcenters, withheld: inScope(h.withheld), expired: inScope(h.expired),
+    dropped: Object.values(byVc).reduce((a, n) => a + n, 0), droppedByVc: byVc,
+    since: Object.fromEntries(Object.entries(h.since || {}).filter(([id]) => allowed.has(id))),
+    withholdMaxMs: h.withholdMaxMs ?? null, scoped: true,
+  };
+}
+
 export function registerBmUsage(api) {
 
 /** 주 조회 — 대상·최신값·설정·상태. 장비에 접속하지 않는다. */
@@ -183,6 +203,8 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
        *   범위 계정에는 보이는 대상만.
        */
       authStops: (isAdmin ? (x) => x : (l) => maskBmList(l, match))(applyScope(authStopsFor(tg.targets), allowed)),
+      // v2.605 LEFT2605-05: 호스트를 못 읽은 vCenter 때문에 이번에 뺀 베어메탈 — 화면이 말해야 조용한 제외가 아니다.
+      hostsUnread: scopeHostsUnread(tg.hostsUnread, allowed),
       log: scopeFilePaths(bmUsageLogInfo(), req.user),
       ...(isAdmin ? {} : { addressHidden: true }),
     });
@@ -437,6 +459,14 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
     body.enterpriseAckAt = Date.now();
     body.enterpriseAckBy = String(req.user?.username || '').slice(0, 64);
   }
+  // v2.605 AUTHZ2605-01: 범위 제한 admin 의 GET 은 corps 를 자기 범위로 거른다(scopeMainSettings) —
+  //   그 값을 펼쳐 PUT 하면 다른 법인의 수집이 꺼졌다. 범위 밖 법인은 직전 값을 보존한다.
+  const allowed = scopedVcenterIds(req.user, store.get());
+  let ignoredOutOfScope = [];
+  if (allowed && body.corps !== undefined) {
+    const m = mergeScopedMap(prev.corps, body.corps, allowed); body.corps = m.merged; ignoredOutOfScope = m.ignored;
+  }
+  delete body.corpsScoped;
   const next = saveBmUsageSettings(body);
   logAudit({
     user: req.user?.username, action: 'bm-usage.settings', ip: req.ip || '',
@@ -452,7 +482,8 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
   });
   // v2.583 #36: 비어 있어 **저장하지 않은** 숫자 칸을 밝힌다(조용히 버리면 '저장했는데 왜 그대로지' 가 된다).
   const { dropped } = dropUnspecifiedNumbers(req.body || {});
-  res.json({ ok: true, settings: next, ...(dropped.length ? { ignoredBlank: dropped } : {}) });
+  // PUT 응답도 GET 과 같은 필터(범위 계정에는 자기 범위 corps 만 · 비-admin 가림은 adminOnly 라 해당 없음).
+  res.json({ ok: true, settings: scopeMainSettings(next, allowed, true), ...(dropped.length ? { ignoredBlank: dropped } : {}), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}) });
 });
 
 }

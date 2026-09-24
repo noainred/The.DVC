@@ -607,6 +607,14 @@ const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'v
   'guestOS', 'powerState', 'connectionState', 'toolsStatus', 'toolsVersionStatus', 'ipAddress', 'folder', 'resourcePool', 'notes',
   'hwVersion', 'storageType', 'severity', 'message', 'entity', 'entityType', 'status', 'location', 'overallStatus'];
 /**
+ * 롤업·화면이 수로 계산하는 인벤토리 필드(v2.605 CEN2605-01) — 호스트·VM·DS·네트워크의 수치 필드 합집합.
+ * 정상 엣지(inventoryPush.js)는 숫자를 보내므로 정상 입력에는 무변경이다.
+ */
+const INV_NUM_KEYS = ['cpuCores', 'cpuThreads', 'cpuTotalMhz', 'cpuUsageMhz', 'cpuUsagePct', 'memTotalMB', 'memUsageMB', 'memUsagePct',
+  'vmCount', 'hostCount', 'powerWatts', 'powerWattsIdrac', 'tempC', 'tempMaxC', 'gpuUtilPct', 'uptimeSec',
+  'cpuCount', 'numCpu', 'memMB', 'memoryMB', 'storageGB', 'uncommittedGB', 'snapshotCount', 'snapshotSizeGB',
+  'snapshotOldestTs', 'snapshotNewestTs', 'capacityGB', 'freeGB', 'usedGB', 'usagePct', 'provisionedGB', 'vlanId'];
+/**
  * 인벤토리 조각 원소 정리(v2.599 CEN-2599-01·02·03).
  *  - 평범한 객체만 받는다 — `hosts:[null]` 하나로 store.refresh 가 매 주기 throw 해 **전 함대 스냅샷이 멈췄다**.
  *  - 원소의 vcenterId 는 본문 vcenterId 여야 한다 — 다르면 **뺀다**(예전에는 그대로 병합돼 소유권 검사를 지나 남의 법인
@@ -645,6 +653,13 @@ function sanitizeInventoryList(list, vcId, max, dropped) {
     for (const k of INV_TEXT_KEYS) {
       const v = o[k];
       if (v != null && typeof v === 'object') { o[k] = null; dropped.coerced += 1; }
+    }
+    // v2.605(CEN2605-01): 수치 필드도 좁힌다 — '32' 같은 글자가 오면 store 롤업의 `+=` 가 문자열 연결이 되어 **전 함대**
+    //   KPI(global·byRegion)가 오류 없이 틀린다(cpuCores '3232'). 숫자 글자는 수로, 그 밖(객체·'abc')은 null(읽지 못함).
+    for (const k of INV_NUM_KEYS) {
+      const v = o[k];
+      if (v == null || (typeof v === 'number' && Number.isFinite(v))) continue;
+      o[k] = numOrNull(v); dropped.coerced += 1;
     }
     out.push(o);
   }
@@ -1003,6 +1018,18 @@ function edgeNameKnown(name) {
   return _knownNames.set.has(String(name || '').trim().toLowerCase());
 }
 
+/** v2.605(RECENT2605-02): 수집 서버 등록부에 있는 이름인가(자기등록 미검증 포함) — edge-log-result 의 acked 회신 전용. */
+function edgeNameRegistered(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n) return false;
+  try {
+    for (const c of listCollectorsForLinks()) {
+      if (String(c.id || '').trim().toLowerCase() === n || String(c.name || '').trim().toLowerCase() === n) return true;
+    }
+  } catch { /* 등록부 없음 */ }
+  return false;
+}
+
 // 위임 iDRAC 스캔: 에이전트가 자기 이름의 온디맨드 스캔 잡을 인출.
 centralRouter.get('/idrac-scan-jobs', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
@@ -1204,7 +1231,7 @@ centralRouter.post('/part-faults', async (req, res) => {
   try { r = await putEdgeReport(agent, req.body || {}); } catch (e) {
     return res.status(400).json({ ok: false, reason: `본문 형식 오류: ${String(e?.message || e).slice(0, 200)}` });
   }
-  if (!r.ok) return res.status(400).json(r);
+  if (!r.ok) return res.status(r.refused ? 429 : 400).json(r); // v2.605(CEN2605-02): 엣지 수 상한 거절은 429(형제 수신과 같다)
   // 응답에 중앙의 스위치 상태를 실어 보낸다 — 엣지가 '보냈는데 중앙이 꺼져 있다' 를 알 수 있게.
   const { partFaultEnabled } = await import('../partfault/settings.js');
   return res.json({ ok: true, agent, protocol: r.protocol, devices: r.devices, rejected: r.rejected, open: r.open, centralEnabled: partFaultEnabled().enabled });
@@ -1238,7 +1265,11 @@ centralRouter.post('/edge-log-result', async (req, res) => {
     //   보관분을 덮었다**. 공유 토큰 회신은 ① 중앙이 아는 이름(edgeNameKnown)이고 ② 중앙이 실제로 그 엣지에 요청해 둔
     //   작업(acked)일 때만 저장한다. 개별 토큰은 인증된 이름이므로 예전대로(요청 없는 회신도 버리지 않고 밝힌다).
     const shared = req.centralAuth?.mode !== 'agent';
-    if (shared && !edgeNameKnown(agent)) return res.status(403).json({ ok: false, reason: `중앙이 모르는 엣지 이름(${agent}) — 공유 토큰 회신은 등록된 엣지 이름만 받습니다.`, unverifiedAgent: true });
+    // v2.605(RECENT2605-02): 폴백 큐는 **중앙이 닿지 못하는 엣지**를 위한 경로다 — 그런 공유 토큰 엣지는 자기등록 검증도 pull 성공도
+    //   없어 selfRegUnverified 로 남고 edgeNameKnown 에서 빠진다(v2.604 CEN2604-04). 그래서 회신이 영원히 403 이었다(인출은 되는데
+    //   회신만 거부). 수집 서버 **등록부에 있는 이름**(미검증 포함)이면 받되, ② acked(중앙이 그 이름으로 요청해 둔 작업) 조건은 그대로
+    //   요구한다 — 요청 없이 이름만 골라 보관분을 덮는 길(v2.602)은 계속 막힌다. /fleet 의 미검증 귀속 비움(v2.601)은 건드리지 않는다.
+    if (shared && !edgeNameKnown(agent) && !edgeNameRegistered(agent)) return res.status(403).json({ ok: false, reason: `중앙이 모르는 엣지 이름(${agent}) — 공유 토큰 회신은 등록된 엣지 이름만 받습니다.`, unverifiedAgent: true });
     const { acked } = ackEdgeLogJob(agent);
     if (shared && !acked) return res.json({ ok: true, agent, stored: false, acked, reason: '요청한 적 없는 공유 토큰 회신은 보관하지 않습니다(다른 엣지 보관분을 덮지 못하게).' });
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
@@ -1418,15 +1449,21 @@ centralRouter.post('/sanswitch-perf', async (req, res) => {
    * 소유권은 시계열과 같은 규약(위임된 deviceId 만).
    */
   let statusSaved = 0;
-  if (req.body?.status && typeof req.body.status === 'object') {
+  let statusRefused = false;
+  // v2.605(CEN2605-04): 위임 장비가 0대인 **공유 토큰** 이름은 상태를 저장하지 않는다 — 진단(perfDiag)은 위임 장비 단위라 쓸 곳이
+  //   없고, 임의 이름으로 보관 행을 채우는 통로만 된다. 개별 토큰 엣지는 0대여도 저장한다(토큰으로 이름이 검증됐다).
+  const statusAllowed = req.centralAuth?.mode === 'agent' || owned.size > 0;
+  if (statusAllowed && req.body?.status && typeof req.body.status === 'object') {
     try {
       const names = new Map(ownedDevices.map((d) => [String(d.id), d.name || d.host || d.id]));
-      statusSaved = saveEdgePerfStatus(agent, req.body.status, { owned, names }).saved;
+      const sv = saveEdgePerfStatus(agent, req.body.status, { owned, names });
+      statusSaved = sv.saved; statusRefused = !!sv.refused;
     } catch (e) { console.warn(`[central] sanswitch-perf 상태 저장 실패(${agent}): ${e.message}`); }
   }
   // v2.602: 적재에서 버린 메타(포트 범위 밖·빈 장비 id — perfDb.importSamples)와 위임 밖 메타를 **항상** 싣는다 —
   //   엣지(sanswitch/perfPush.js)가 상태·콘솔에 남긴다. 조용히 버리면 포트 이름·WWN 이 왜 비었는지 알 길이 없다.
-  res.json({ ok: true, ...r, metaRejected: r.metaRejected || 0, dropped, metaDropped, statusSaved });
+  res.json({ ok: true, ...r, metaRejected: r.metaRejected || 0, dropped, metaDropped, statusSaved,
+    ...(statusRefused ? { statusRefused: true } : {}), ...(!statusAllowed && req.body?.status ? { statusIgnored: 'no-delegated-devices' } : {}) });
 });
 
 // POST /api/central/sanswitch-test-result — 엣지가 대행한 연결 테스트 결과(추적 로그 포함) 회신(v2.421).

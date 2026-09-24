@@ -13,7 +13,24 @@
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { getGuestGpuVms, getGuestGpuAllHosts } from '../gpu/store.js';
-import { getGpuGuestDiag } from '../gpu/poller.js';
+import { getGpuGuestDiag, gpuGuestStatus } from '../gpu/poller.js';
+
+/**
+ * v2.605(감사 EDGE2605-02 — 재현): 중앙 setGuestGpu 는 이 엣지의 항목을 **전부 지우고 교체**한다. 예전에는 고정 35초 지연만 두고
+ * 첫 게스트 폴이 끝났는지 보지 않아, 재시작 직후 빈 목록(hosts:[] vms:[] diag:null)을 보내 중앙의 그 법인 GPU 사용률을 지웠다
+ * (인벤토리 v2.600 EDGE2600-04 의 형제). 첫 폴(lastRun) 전에는 보내지 않는다 — 보류에는 시한을 둔다(v2.601 규약).
+ */
+export const GPU_GUEST_PUSH_WITHHOLD_MAX_MS = Math.max(60_000, Number(process.env.AGENT_GPU_GUEST_WITHHOLD_MAX_MS) || 15 * 60_000);
+let _withholdSince = null;
+let _pollerStatus = () => gpuGuestStatus();
+/** 첫 폴 전 보류 판정(순수). 반환 { withhold, since } */
+export function gpuGuestPushWithhold(lastRun, since, now, maxMs = GPU_GUEST_PUSH_WITHHOLD_MAX_MS) {
+  if (lastRun) return { withhold: false, since: null };
+  const s = since || now;
+  return { withhold: now - s <= maxMs, since: s };
+}
+/** 테스트 전용 — 게스트 폴러 상태 주입/복원. */
+export function _setGuestPollerStatusForTest(fn) { _pollerStatus = fn || (() => gpuGuestStatus()); _withholdSince = null; }
 
 let timer = null;
 let last = null; // { at, hosts, vms, error }
@@ -34,6 +51,16 @@ export async function pushGpuGuestNow(...args) {
 
 async function _pushGpuGuestNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'push 비활성화(CENTRAL_URL/TOKEN 미설정)' };
+  let lastRun = null;
+  try { lastRun = _pollerStatus()?.lastRun || null; } catch { lastRun = null; }
+  const wh = gpuGuestPushWithhold(lastRun, _withholdSince, Date.now());
+  _withholdSince = wh.since;
+  if (wh.withhold) {
+    const note = '게스트 GPU 첫 수집이 아직 끝나지 않아 보내지 않았습니다(빈 목록을 보내면 중앙의 이 엣지 GPU 사용률이 지워집니다)';
+    last = { at: Date.now(), hosts: 0, vms: 0, skipped: true, note };
+    console.log(`[gpu-guest-push] ${note}`);
+    return { ok: false, skipped: true, reason: note };
+  }
   const hosts = [...getGuestGpuAllHosts().entries()].map(([hostId, v]) => ({ hostId, utilPct: v.utilPct }));
   const vms = getGuestGpuVms().map((v) => ({ vmId: v.vmId, utilPct: v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, host: v.host, vcenterId: v.vcenterId }));
   const diag = getGpuGuestDiag(); // 선별 깔때기 + VM별 성공/실패(웹 '수집 진단'에서 표시)

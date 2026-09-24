@@ -48,16 +48,25 @@ export const DEFAULTS = Object.freeze({
 
 let cache = null;
 
-function normTarget(t, i) {
+/**
+ * v2.605(감사 WEB2605-01): 대상의 숫자 칸(topN·intervalHours)이 **비어 있으면**(빈 값·숫자 아님) '미지정' 이다 —
+ * 같은 id 의 기존 대상 값을 유지하고, 새 대상이면 기본값. 예전에는 빈 칸이 `Number('')=0` → 하한 1 로 저장돼
+ * 24시간 주기가 1시간(24배 du 스캔)이 됐다. 명시적 숫자만 값이다(v2.596 규약).
+ */
+function blankNum(v) { return numOrNull(v) == null; }
+
+function normTarget(t, i, prev = null) {
   const id = String(t?.id || '').trim() || `t${Date.now().toString(36)}${i}`;
+  const pTopN = prev && Number.isFinite(prev.topN) ? prev.topN : 20;
+  const pHours = prev && Number.isFinite(prev.intervalHours) ? prev.intervalHours : 24;
   return {
     id,
     label: String(t?.label || '').slice(0, 80),
     agent: String(t?.agent || '').trim(),
     instance: String(t?.instance || '').trim(),
     path: String(t?.path || '').trim(),
-    topN: clamp(t?.topN, TOP_N_MIN, TOP_N_MAX, 20),
-    intervalHours: clamp(t?.intervalHours, MIN_INTERVAL_HOURS, MAX_INTERVAL_HOURS, 24),
+    topN: blankNum(t?.topN) ? pTopN : clamp(t?.topN, TOP_N_MIN, TOP_N_MAX, pTopN),
+    intervalHours: blankNum(t?.intervalHours) ? pHours : clamp(t?.intervalHours, MIN_INTERVAL_HOURS, MAX_INTERVAL_HOURS, pHours),
     enabled: t?.enabled !== false,
   };
 }
@@ -75,7 +84,7 @@ export function load() {
     if (fs.existsSync(FILE)) {
       const p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {};
       if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
-      if (Array.isArray(p.targets)) out.targets = p.targets.slice(0, MAX_TARGETS).map(normTarget);
+      if (Array.isArray(p.targets)) out.targets = p.targets.slice(0, MAX_TARGETS).map((t, i) => normTarget(t, i));
       if (p.mail && typeof p.mail === 'object') {
         out.mail = {
           ...out.mail, ...p.mail,
@@ -102,7 +111,10 @@ export function save(body = {}) {
   const cur = load();
   const next = structuredClone(cur);
   if (typeof body.enabled === 'boolean') next.enabled = body.enabled;
-  if (Array.isArray(body.targets)) next.targets = body.targets.slice(0, MAX_TARGETS).map(normTarget);
+  if (Array.isArray(body.targets)) {
+    const prevById = new Map((cur.targets || []).map((t) => [t.id, t]));
+    next.targets = body.targets.slice(0, MAX_TARGETS).map((t, i) => normTarget(t, i, prevById.get(String(t?.id || '').trim()) || null));
+  }
   if (body.mail && typeof body.mail === 'object') {
     next.mail = {
       enabled: body.mail.enabled === true,
@@ -114,7 +126,10 @@ export function save(body = {}) {
   }
   // v2.604(감사 LEFT2604-01 — 재현): 빈 칸('')을 Number 로 읽으면 0 → 하한 1일이 되어 **스캔 이력이 하루치만 남았다**
   //   (오류 없이 '저장됨'). 빈 값·숫자 아님은 '미지정' = 현재 값 유지. 명시적 숫자만 값이다(v2.596 규약).
-  if (numOrNull(body.retentionDays) != null) next.retentionDays = clamp(body.retentionDays, 1, 3650, cur.retentionDays);
+  // v2.605(감사 RECENT2605-06·WEB2605-01 — 재현): **0 이하도 미지정**이다. 0 은 하한 1일로 클램프돼 스캔 이력이
+  //   하루치만 남았다(이 저장소의 다른 설정은 0 = 무제한이 흔해 사용자가 그 뜻으로 넣는다). relaycheck(LEFT2604-02)와 같은 규칙.
+  const rd = numOrNull(body.retentionDays);
+  if (rd != null && rd > 0) next.retentionDays = clamp(rd, 1, 3650, cur.retentionDays);
 
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
@@ -137,9 +152,10 @@ export function targetIssue(t) {
   if (!PATH_RE.test(p)) return '경로는 절대경로여야 하며 따옴표·제어문자·백슬래시를 쓸 수 없습니다.';
   if (p.split('/').includes('..')) return "경로에 '..' 를 쓸 수 없습니다.";
   if (p === '/') return '루트(/) 전체는 스캔하지 않습니다 — 대상 폴더를 지정하세요.';
-  const n = Number(t.topN);
+  // 빈 칸은 '미지정'(저장 시 기존 값·기본값 유지 — normTarget). 명시한 숫자만 범위를 검사한다(v2.605 WEB2605-01).
+  const n = blankNum(t.topN) ? TOP_N_MIN : Number(t.topN);
   if (!Number.isFinite(n) || n < TOP_N_MIN || n > TOP_N_MAX) return `Top N 은 ${TOP_N_MIN}~${TOP_N_MAX} 사이여야 합니다.`;
-  const h = Number(t.intervalHours);
+  const h = blankNum(t.intervalHours) ? MIN_INTERVAL_HOURS : Number(t.intervalHours);
   if (!Number.isFinite(h) || h < MIN_INTERVAL_HOURS || h > MAX_INTERVAL_HOURS) {
     return `주기는 ${MIN_INTERVAL_HOURS}~${MAX_INTERVAL_HOURS}시간 사이여야 합니다(du 는 무거운 작업이라 시간 단위 아래로 내리지 않습니다).`;
   }

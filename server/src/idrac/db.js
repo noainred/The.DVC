@@ -82,8 +82,12 @@ function initSqlite() {
     // 집계(전력 대시보드): 서버별 24h 피크/평균/최소/마지막 + 시간버킷 평균 — SQL GROUP BY로 효율 계산.
     // 비-시간 버킷(예외적)만 원시 테이블에서 계산 — 현재 대시보드는 항상 1시간 버킷이라 롤업 사용.
     const bucketStmt = db.prepare('SELECT server_id, CAST(ts / ? AS INTEGER) AS bk, AVG(watts) AS avgw FROM power_samples WHERE ts >= ? GROUP BY server_id, bk');
-    const idsStmt = db.prepare('SELECT DISTINCT server_id AS id FROM power_samples');
-    const delOneStmt = db.prepare('DELETE FROM power_samples WHERE server_id = ?');
+    // v2.605(DB2605-02): DISTINCT 는 (server_id, ts) 인덱스를 끝까지 훑는다(행 수 비례). 다음 server_id 로 건너뛰는
+    //   skip-scan(서버 수 × log n)으로 같은 목록을 얻는다.
+    const firstIdStmt = db.prepare('SELECT server_id AS id FROM power_samples ORDER BY server_id LIMIT 1');
+    const nextIdStmt = db.prepare('SELECT server_id AS id FROM power_samples WHERE server_id > ? ORDER BY server_id LIMIT 1');
+    // v2.605(DB2605-02): 서버 단위 삭제도 청크로 끊는다(prune 과 같은 이유 — 한 방 DELETE 는 이벤트 루프를 멈춘다).
+    const delChunkStmt = db.prepare('DELETE FROM power_samples WHERE rowid IN (SELECT rowid FROM power_samples WHERE server_id = ? LIMIT ?)');
     // ── 시간당 롤업 문장 ──
     const HOUR_MS = 3_600_000;
     // 증분 upsert: 같은 (server_id, 시간버킷)이면 합/개수 누적, 최대/최소/최근ts 갱신.
@@ -138,8 +142,29 @@ function initSqlite() {
       },
       /** 진단용 — dead-band 로 생략한 누적 샘플 수. */
       deadbandSkipped: () => _skippedW,
-      serverIds: () => idsStmt.all().map((r) => r.id),
-      deleteServers: (ids) => { let n = 0; db.exec('BEGIN'); try { for (const id of ids) { n += delOneStmt.run(id).changes || 0; delOneHourlyStmt.run(id); } db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } return n; },
+      serverIds: () => {
+        const out = [];
+        let r = firstIdStmt.get();
+        while (r && r.id != null) { out.push(r.id); r = nextIdStmt.get(r.id); }
+        return out;
+      },
+      /**
+       * v2.605(DB2605-02): 서버별 전 이력 삭제 — **비동기·청크**. 예전에는 한 BEGIN…COMMIT 안에서 server_id 별 DELETE 를 동기로
+       * 돌아 mode='all' 정리(vc:* 수백 대 + rmt:*)가 수백만 행을 한 번에 지우며 포탈 전체를 멈췄다(감사 실측 60만 행 1.6초 —
+       * 운영 26.9GB 규모는 그 수십 배). 청크 사이에 양보한다. ⚠ 트랜잭션 원자성(원시·롤업 동시 삭제)은 잃는다 — 중간에 멈추면
+       * 일부 서버만 지워질 뿐이고, 다시 누르면 나머지를 지운다(정리 동작이라 부분 완료가 해가 없다).
+       */
+      deleteServers: async (ids) => {
+        let n = 0;
+        for (const id of ids || []) {
+          const r = await chunkedDelete(delChunkStmt, [id], { maxRows: 0, label: 'idrac.deleteServers' });
+          n += r.deleted;
+          delOneHourlyStmt.run(id);
+          lastKeptW.delete(id);
+          await new Promise((res) => setImmediate(res));
+        }
+        return n;
+      },
       latest: (serverId) => latestStmt.get(serverId) || null,
       latestAll: () => {
         const map = new Map();
@@ -293,7 +318,7 @@ function withLatestCache(db) {
       for (const s of samples || []) bump(s.serverId, s.watts, s.ts);
       return n;
     },
-    deleteServers: (ids) => { const n = db.deleteServers(ids); for (const id of ids) cache.delete(id); return n; },
+    deleteServers: async (ids) => { const n = await db.deleteServers(ids); for (const id of ids) cache.delete(id); return n; },
     // prune으로 beforeTs 이전 행이 전부 지워진 서버(죽은 서버)는 캐시에서도 축출한다.
     // 안 그러면 latest/latestAll이 사라진 서버의 낡은 최신값을 영원히 반환한다.
     prune: async (beforeTs, rollupBeforeTs = null) => { const r = await db.prune(beforeTs, rollupBeforeTs); for (const [id, v] of cache) if (v.ts < beforeTs) cache.delete(id); return r; },

@@ -8,7 +8,7 @@
 import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
 import { config } from '../config.js';
 import { loadCollectors } from './registry.js';
-import { setRemoteHost, clearCollectorHosts, setCollectorStatus, getCollectorStatus, clearStaleRemote } from './state.js';
+import { setRemoteHost, clearCollectorHosts, setCollectorStatus, getCollectorStatus, clearStaleRemote, hostsOfOtherCollectors } from './state.js';
 import { setCollectorServers, sanitizeEdgeExport } from './remoteInventory.js';
 import { getDb } from '../idrac/db.js';
 import { describeError } from '../util/errors.js';
@@ -46,6 +46,12 @@ async function pullOne(c) {
   if (!still) return { hosts: 0, skipped: 'removed-or-disabled' };
   const db = await getDb();
   const ts = Date.now();
+  // v2.605(CEN2605-03): 다른 수집 서버가 지금 보고 중인 호스트명 — 같은 이름이면 다른 법인의 다른 서버다.
+  //   그 호스트의 DB 계열 키는 `rmt:<collectorId>:<host>` 로 나눈다(두 법인이 한 계열을 공유하면 서로의 표본을 dupSkipped 로
+  //   건너뛰고 추이가 두 서버의 값을 오간다). ⚠ **충돌이 없는 호스트는 예전 키 `rmt:<host>` 그대로**다 — 키를 전부 바꾸면
+  //   운영 중인 모든 원격 서버의 전력 이력이 끊긴다. 충돌이 처음 생긴 호스트만 그때부터 새 계열로 적재된다(정직 기록).
+  const otherHosts = hostsOfOtherCollectors(c.id);
+  const hostConflicts = [];
   clearCollectorHosts(c.id);
   let hosts = 0;
   let dupSkipped = 0; // 이미 적재한 ts 의 재전송(엣지가 새 표본을 아직 만들지 않았다) — 이중 계수 방지로 건너뜀
@@ -62,14 +68,16 @@ async function pullOne(c) {
     if (h.serverId != null) { if (seenServers.has(h.serverId)) continue; seenServers.add(h.serverId); }
     // 위조/오류 미래 타임스탬프는 거부('최신 ts 승리' 로직을 가리지 못하게) — 5분 skew 초과면 수신 시각 사용.
     const sTs = (Number.isFinite(h.ts) && h.ts > 0 && h.ts <= ts + 5 * 60_000) ? h.ts : ts;
-    const sample = { watts, ts: sTs, datacenter: data.datacenter || c.datacenter, collectorId: c.id, serverName: h.serverName, serverId: h.serverId, serviceTag: h.serviceTag || '', model: h.model || '', vcenterId: c.vcenterId || '', source: 'remote' };
+    const conflict = otherHosts.has(host);
+    if (conflict && hostConflicts.length < 64) hostConflicts.push(host);
+    const serverId = conflict ? `rmt:${c.id}:${host}` : `rmt:${host}`;
+    const sample = { watts, ts: sTs, datacenter: data.datacenter || c.datacenter, collectorId: c.id, serverName: h.serverName, serverId: h.serverId, serviceTag: h.serviceTag || '', model: h.model || '', vcenterId: c.vcenterId || '', source: 'remote', dbKey: serverId, ...(conflict ? { hostConflict: true } : {}) };
     setRemoteHost(host, sample);
     hosts++;
     // v2.598 DB2598-02: 엣지 export 는 서버별 **최신 표본 1건**을 매 pull(60초)마다 같은 ts 로 다시 준다.
     // 그대로 적재하면 power_hourly 의 sum/cnt 가 pull 횟수만큼 이중 계수되고(엣지 수집 주기와 무관하게
     // 60초마다 1표본), 멈춘 서버의 마지막 값이 계속 쌓여 시간 평균을 끌고 간다. DB 가 이미 가진 최신 ts
     // (withLatestCache — 재시작 뒤에도 DB 에서 시드된다) 이하인 표본은 건너뛰고 개수를 상태에 밝힌다.
-    const serverId = `rmt:${host}`;
     const prevTs = typeof db.latest === 'function' ? db.latest(serverId)?.ts : null;
     if (prevTs != null && sTs <= prevTs) { dupSkipped++; continue; }
     samples.push({ serverId, watts, ts: sTs });
@@ -84,7 +92,17 @@ async function pullOne(c) {
   if (serversDropped) console.warn(`[collector] ${c.id} export 서버 원소 ${sd.notObject + sd.badId + sd.overCount}개를 버림(객체 아님 ${sd.notObject} · id 오류 ${sd.badId} · 상한 초과 ${sd.overCount})`);
   const identity = identityIssue(c, data, loadCollectors().map((x) => x.id));
   if (identity) console.warn(`[collector] ${c.id} 정체 불일치: ${identity.reason}`);
-  return { hosts, duplicateSkipped: dupSkipped, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, serversDropped, serversCoerced: data.serversCoerced || 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity, mock: data.mock === true };
+  if (hostConflicts.length) console.warn(`[collector] ${c.id} 다른 수집 서버와 같은 호스트명 ${hostConflicts.length}개(${hostConflicts.slice(0, 5).join(', ')}) — 법인별로 따로 집계하고 전력 이력 키를 나눈다`);
+  return { hosts, duplicateSkipped: dupSkipped, hostConflicts: hostConflicts.length ? hostConflicts : null, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, serversDropped, serversCoerced: data.serversCoerced || 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity, mock: data.mock === true };
+}
+
+/**
+ * v2.605(EDGE2605-03): pull 성공 결과 → 수집 서버 상태. 주기 pull 과 즉시 당김(pullCollectorByAgent)이 **같은 헬퍼**를 쓴다 —
+ * 예전에는 즉시 당김이 mock·authDeny·serversDropped·serversCoerced 를 빼고 상태를 통째로 교체해, 다음 주기까지 통신 지도의
+ * 'mock' 사유와 인증 거부 통계가 사라졌다(v2.548 H5 '통째로 바꾸면 정보가 사라진다' 의 형제 경로).
+ */
+export function statusFromPull(r) {
+  return { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny ?? null, serversDropped: r.serversDropped || null, serversCoerced: r.serversCoerced || 0, hostConflicts: r.hostConflicts || null, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock };
 }
 
 let pulling = false; // 재진입 가드 — 저하된 수집기(재시도 포함 60초+)가 있으면 주기가 겹쳐
@@ -112,7 +130,7 @@ export async function pullCollectorByAgent(agentName) {
   try {
     const r = await pullTagged(c);
     fails.set(c.id, 0);
-    setCollectorStatus(c.id, { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null });
+    setCollectorStatus(c.id, statusFromPull(r));
     return true;
   } catch (err) {
     // 실패해도 다음 주기 폴러가 재시도 — 여기선 조용히 로그만(즉시 반영은 best-effort).
@@ -131,7 +149,7 @@ async function pullNowInner() {
     try {
       const r = await pullTagged(c);
       fails.set(c.id, 0);
-      setCollectorStatus(c.id, { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny, serversDropped: r.serversDropped || null, serversCoerced: r.serversCoerced || 0, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock });
+      setCollectorStatus(c.id, statusFromPull(r));
     } catch (err) {
       const d = describeError(err);
       const isAuth = /인증 실패|토큰/.test(d.message);

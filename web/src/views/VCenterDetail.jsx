@@ -1,4 +1,5 @@
 import { unitText } from './unitText.js';
+import { numOrNull } from '../numOrNull.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, usePolling } from '../api.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
@@ -9,7 +10,7 @@ import { parseTokens, entityMatches, notesSnippet, sumVmResources, fmtGb } from 
 // 가상화율(할당 vCPU/RAM ÷ 물리) 집계도 순수 모듈 — 'Off VM 포함' 필터가 그대로 반영된다(v2.334).
 import { allocByHost, countByHost, virtSum as virtSumOf } from './vcdVirt.js';
 // '전체 현황' 평면 표/CSV — 트리를 펼치지 않고 모든 클러스터·호스트를 한 번에(v2.335).
-import { buildOverviewRows, overviewCsv, OVERVIEW_COLUMNS } from './vcdOverview.js';
+import { buildOverviewRows, overviewCsv, OVERVIEW_COLUMNS, clusterAvgPct, hostUsagePct } from './vcdOverview.js';
 import { STable } from '../components/STable.jsx';
 // v2.499: '비교하기' → 가로 vCenter × 세로 클러스터/스토리지 매트릭스(사용자 요구). 예전 2개 비교 표를 대체한다.
 import CompareMatrix from './CompareMatrix.jsx';
@@ -603,7 +604,7 @@ export default function VCenterDetail({ site, onBack }) {
               {hm.slice(0, SEARCH_CAP).map((h) => (
                 <Leaf key={`h:${h.id}`} icon="🖥️" onClick={() => setSel({ type: 'host', item: h })}
                   label={<Highlight text={h.name} tokens={tokens} />} badge={<StateBadge state={h.connectionState} />}
-                  sub={`🧩 ${h.cluster || 'standalone'} · CPU ${unitText(h.cpuUsagePct, '%')} · MEM ${unitText(h.memUsagePct, '%')} · VM ${hostVmCount(h) ?? '-'}`} />
+                  sub={`🧩 ${h.cluster || 'standalone'} · CPU ${unitText(hostUsagePct(h, 'cpuUsagePct'), '%')} · MEM ${unitText(hostUsagePct(h, 'memUsagePct'), '%')} · VM ${hostVmCount(h) ?? '-'}`} />
               ))}
               {matches.slice(0, SEARCH_CAP).map(({ v: vm, viaNotes, token }) => (
                 <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
@@ -625,9 +626,9 @@ export default function VCenterDetail({ site, onBack }) {
             sub={<UsageBars lead={<span className="muted">{hosts.length} 호스트 · VM {dc.vmc}</span>} cpu={m.cpuUsagePct} mem={m.memUsagePct}
               tail={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><VirtBadge alloc={dc.alloc} base={dc.cores} kind="cpu" /><VirtBadge alloc={dc.memAlloc} base={dc.memPhys} kind="mem" /></span>} />}>
             {clusters.map(([cl, chosts]) => {
-              const n = chosts.length || 1;
-              const avgCpu = Math.round(chosts.reduce((a, h) => a + (h.cpuUsagePct || 0), 0) / n);
-              const avgMem = Math.round(chosts.reduce((a, h) => a + (h.memUsagePct || 0), 0) / n);
+              // v2.605(WEB2605-03): 끊긴·무응답 호스트의 0% 를 평균에 넣지 않는다(서버 usageReadable 과 같은 기준).
+              const avgCpu = clusterAvgPct(chosts, 'cpuUsagePct');
+              const avgMem = clusterAvgPct(chosts, 'memUsagePct');
               const cv = virtSum(chosts);
               return (
               <Tree key={cl} k={`cl:${cl}`} open={open} toggle={toggle} icon="🧩" label={cl}
@@ -636,7 +637,7 @@ export default function VCenterDetail({ site, onBack }) {
                 {chosts.map((h) => (
                   <Tree key={h.id} k={`h:${h.id}`} open={open} toggle={toggle} icon="🖥️"
                     label={<span className="vcd-link" onClick={(e) => { e.stopPropagation(); setSel({ type: 'host', item: h }); }}>{h.name}</span>}
-                    sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={h.cpuUsagePct} mem={h.memUsagePct} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {hostVmCount(h)}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" /></span>} />}>
+                    sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={hostUsagePct(h, 'cpuUsagePct')} mem={hostUsagePct(h, 'memUsagePct')} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {hostVmCount(h)}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" /></span>} />}>
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
                         label={vm.name} badge={<StateBadge state={vm.powerState} />}
@@ -728,6 +729,16 @@ const usageColor = (p) => (p >= 85 ? 'var(--red)' : p >= 60 ? 'var(--amber)' : '
 
 // 한 지표(CPU/MEM)의 인라인 미니 바 + 수치. 트리 한 줄에 들어가도록 inline-flex.
 function MiniBar({ label, pct }) {
+  // v2.605(WEB2605-03): 값이 없으면(끊긴 호스트·읽은 호스트 없는 클러스터) 0% 막대가 아니라 '—'.
+  if (numOrNull(pct) == null) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, verticalAlign: 'middle' }} title={`${label} 사용률을 읽지 못했습니다`}>
+        <span className="muted" style={{ fontSize: 11 }}>{label}</span>
+        <span style={{ display: 'inline-block', width: 92, height: 7, borderRadius: 5, background: 'rgba(148,163,184,.15)', verticalAlign: 'middle' }} />
+        <b className="muted" style={{ fontSize: 12, minWidth: 34, textAlign: 'right' }}>—</b>
+      </span>
+    );
+  }
   const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
   const c = usageColor(p);
   return (

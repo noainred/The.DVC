@@ -18,6 +18,7 @@
  */
 import { scopePollerStatus, scopeDbStatus } from '../../auth/scopeStatus.js'; // v2.583
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { mergeScopedMap, filterScopedMap } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
@@ -181,7 +182,15 @@ api.put('/tools/curuser/settings', requireRole('admin'), (req, res) => {
     if (bad.length) return res.status(400).json({ ok: false, reason: `존재하지 않는 vCenter id: ${bad.slice(0, 5).join(', ')}` });
   }
   const before = loadCurUser();
-  const next = saveCurUser({ ...before, ...b, vcenters: b.vcenters === undefined ? before.vcenters : b.vcenters });
+  // v2.605 AUTHZ2605-01: 범위 제한 admin 이 GET 으로 받은(범위로 걸러진) vcenters 를 되돌려 보내면
+  //   다른 법인의 폴더 설정이 통째로 지워졌다 — 범위 밖 키는 직전 값을 보존한다.
+  const allowed = scopedVcenterIds(req.user, snap);
+  let vcIn = b.vcenters === undefined ? before.vcenters : b.vcenters;
+  let ignoredOutOfScope = [];
+  if (allowed && b.vcenters !== undefined) {
+    const m = mergeScopedMap(before.vcenters, b.vcenters, allowed); vcIn = m.merged; ignoredOutOfScope = m.ignored;
+  }
+  const next = saveCurUser({ ...before, ...b, vcenters: vcIn });
   logAudit({
     user: req.user?.username, action: 'curuser.settings', ip: req.ip || '',
     detail: JSON.stringify({
@@ -189,7 +198,9 @@ api.put('/tools/curuser/settings', requireRole('admin'), (req, res) => {
       vcenters: Object.entries(next.vcenters).filter(([, v]) => v.enabled).map(([id]) => id),
     }).slice(0, 300),
   });
-  res.json({ ok: true, settings: next, limits: LIMITS, staleAfterMs: staleAfterMs(next) });
+  // PUT 응답도 GET 과 같은 필터(범위 밖 vCenter 설정을 되돌려 주지 않는다).
+  const safeNext = allowed ? { ...next, vcenters: filterScopedMap(next.vcenters, allowed) } : next;
+  res.json({ ok: true, settings: safeNext, limits: LIMITS, staleAfterMs: staleAfterMs(next), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}) });
 });
 
 /**

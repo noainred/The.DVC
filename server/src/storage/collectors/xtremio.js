@@ -101,14 +101,16 @@ export function normalizeXtremio(device, raw) {
   return snap;
 }
 
-export async function collect(device) {
+export async function collect(device, { signal = null } = {}) {
   // 수집 방식 분기(v2.405) — 등록 시 고른 collectMethod 로 REST/SSH(xmcli) 를 가른다.
   // isilon.js 와 같은 패턴: 타입 파일이 자기 방식을 안다(poller 는 타입만 안다).
   if (device.collectMethod === 'ssh') {
     const { collectViaSsh } = await import('./xtremioSsh.js');
     return collectViaSsh(device);
   }
-  const get = makeGetter(device, { port: Number(process.env.STORAGE_XMS_PORT) || 443 });
+  // v2.605(TIM2605-02): 장비 시한 signal 을 요청까지 넘긴다 — 예전에는 받지 않아 withDeadline(180초)이 집행되지 않고
+  //   느린 XMS 에서 요청 24개 × 15초가 끝날 때까지 동시성 슬롯을 붙잡았다(형제 unity·powermax 는 넘긴다).
+  const get = makeGetter(device, { port: Number(process.env.STORAGE_XMS_PORT) || 443, signal: signal || device._signal || null });
   const raw = {};
   const snap = emptySnapshot(device); // 섹션 오류 임시 기록용(정규화 후 병합)
   const sect = { clusters: 'config', controllers: 'nodes', users: 'accounts', alerts: 'alerts' };

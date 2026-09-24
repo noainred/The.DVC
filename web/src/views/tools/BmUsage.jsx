@@ -28,7 +28,7 @@ import { rangeOf } from './bmUsageChart.js';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark,
   emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, authStopNote, keyConflictNote,
-  facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote,
+  facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote, hostsUnreadNote,
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes,
   unassignedNote, edgePullState, edgePullNote, blurNumber, BLANK_KEPT_TEXT } from './bmUsageText.js';
@@ -228,6 +228,12 @@ export function BmUsage() {
         {keyConflictNote(data?.keyConflicts || []) && (
           <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('bad') }}>
             <BoldText text={keyConflictNote(data.keyConflicts)} />
+          </p>
+        )}
+        {/* v2.605 LEFT2605-05: 호스트 미수집 vCenter 때문에 뺀 베어메탈 — 조용히 사라지지 않게 말한다. */}
+        {hostsUnreadNote(data?.hostsUnread) && (
+          <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}>
+            <BoldText text={hostsUnreadNote(data.hostsUnread)} />
           </p>
         )}
         {/* ⚠ 인증 실패 정지는 **반드시 화면이 말한다** — 조용히 멈추면 사용자는 수집되는 줄 안다(v2.528). */}

@@ -753,7 +753,7 @@ function parseHbas(xml) {
  * Returns { tempC, tempMaxC, temps:[{name,c}] }. Prefers an ambient/inlet sensor
  * for tempC, else the max.
  */
-function parseTemps(xml) {
+export function parseTemps(xml) {
   if (!xml) return { tempC: null, tempMaxC: null, temps: [] };
   const temps = [];
   for (const blk of xml.split(/<HostNumericSensorInfo(?=[ >])/).slice(1)) {
@@ -762,6 +762,12 @@ function parseTemps(xml) {
     const reading = Number(/<currentReading>(-?\d+)<\/currentReading>/.exec(blk)?.[1]);
     const mod = Number(/<unitModifier>(-?\d+)<\/unitModifier>/.exec(blk)?.[1] || 0);
     if (!Number.isFinite(reading)) continue;
+    /*
+     * v2.605(COL2605-05, 가능성): 판독 0 + healthState unknown 은 BMC 미준비·센서 미장착의 '못 읽음' 이다 —
+     *   그대로 두면 흡기 0℃(급냉)로 채택·적재된다. 이 조합만 건너뛴다(정상 판독 0℃ 는 healthState 가 있다).
+     */
+    const hkey = /<healthState>[\s\S]*?<key>([^<]*)<\/key>/.exec(blk)?.[1] || '';
+    if (reading === 0 && /^unknown$/i.test(hkey.trim())) continue;
     const c = Math.round(reading * (10 ** mod) * 10) / 10;
     if (c > -50 && c < 200) temps.push({ name: name.trim(), c });
   }
@@ -1504,9 +1510,18 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
             const cid = await c.gpuUtilCounterId();
             if (cid) {
               const map = await c.queryHostGpuUtil(cid, stale);
-              // 카운터가 존재(=수집 가능)하면 GPU 호스트는 값이 없어도(유휴) 0으로 기록 → '—' 대신 '0' 표시.
-              for (const ref of stale) _gpuUtilCache.set(`${vc.id}:${ref}`, { pct: map.get(ref) ?? 0, at: now });
-              console.log(`[collect] ${vc.id} vGPU 사용률 수집: 대상 ${stale.length} · 값 ${map.size} (gpu.utilization 카운터 OK)`);
+              /*
+               * v2.605(COL2605-03): 값을 받은 호스트만 사용률을 기록한다. 예전에는 '카운터가 있으면 값이 없어도(유휴) 0' 으로
+               *   적었는데, 표본 없음·-1(그 시각 값 없음)·연결 끊김도 전부 '0%(유휴)' 가 됐다 — v2.598 VC2598-08 전력
+               *   '표본 없음 = 미수집' 과 같은 규칙으로 맞춘다. 유휴 vGPU 는 vCenter 가 0 을 **보고할 때** 0 이다.
+               */
+              let noSample = 0;
+              for (const ref of stale) {
+                const got = map.has(ref);
+                if (!got) noSample += 1;
+                _gpuUtilCache.set(`${vc.id}:${ref}`, { pct: got ? map.get(ref) : null, at: now });
+              }
+              console.log(`[collect] ${vc.id} vGPU 사용률 수집: 대상 ${stale.length} · 값 ${map.size}${noSample ? ` · 표본 없음 ${noSample}(미수집 — 0 으로 채우지 않음)` : ''} (gpu.utilization 카운터 OK)`);
             } else {
               console.warn(`[collect] ${vc.id} gpu.utilization 카운터 없음 — vGPU 사용률 미수집(NVIDIA vGPU Manager VIB/드라이버 또는 vCenter 카운터 확인)`);
             }
@@ -1514,7 +1529,7 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
           // 캐시된 사용률을 GPU 보유 호스트에 적용(throttle 주기 사이에도 마지막 값 유지).
           for (const [ref, host] of hostByRef) {
             const e = _gpuUtilCache.get(`${vc.id}:${ref}`);
-            if (e && (host.gpus || []).length) host.gpuUtilPct = e.pct;
+            if (e && e.pct != null && (host.gpus || []).length) host.gpuUtilPct = e.pct;
           }
         }
       } catch (err) {

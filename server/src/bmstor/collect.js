@@ -8,6 +8,7 @@
  */
 
 import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
+import { reqTimeoutMs } from '../agent/envTimeout.js';
 
 /** 마운트 경로 검증 — 절대경로 + 안전 문자만(공백/따옴표/셸 메타문자 거부 = 명령 주입 방어). */
 export const MOUNT_RE = /^\/[A-Za-z0-9._\/-]*$/;
@@ -115,7 +116,7 @@ export async function collectServer(server) {
     const r = await withSsh({
       host: server.host, port: Number(server.port) || 22,
       username: server.username || 'root', password: server.password || '',
-      readyTimeout: Number(process.env.BMSTOR_SSH_TIMEOUT_MS) || 15000,
+      readyTimeout: reqTimeoutMs(process.env.BMSTOR_SSH_TIMEOUT_MS, 15_000),   // v2.605 TIM2605-04: [1초, 10분]
     }, async ({ exec }) => {
       const out = await exec(`df -P -k -- ${mounts.join(' ')}`);
       return { out };

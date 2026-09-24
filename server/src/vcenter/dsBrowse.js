@@ -63,13 +63,35 @@ async function searchAllFiles(c, browserRef, dsName) {
 const _cache = new Map(); // dsId -> { at(완료 시각, 진행 중엔 0), promise, settled }
 const CACHE_MS = 60_000;
 
+/**
+ * v2.605(감사 TIM2605-01): 완료 항목은 60초가 지나면 **Map 에서 지운다**. 예전에는 '만료' 로 판정만 하고 지우지
+ * 않아(삭제는 실패 경로뿐) 한 번 연 데이터스토어의 결과(최대 1만 파일)가 프로세스 수명 동안 남았다 — 1,100개를
+ * 한 번씩 열면 그만큼 상주한다. 조회 때 만료분을 청소하고, 완료 시 unref 타이머로도 지운다(다시 열지 않는 항목).
+ */
+function sweepExpired(now = Date.now()) {
+  for (const [k, e] of _cache) if (e.settled && now - e.at >= CACHE_MS) _cache.delete(k);
+}
+/** 테스트·진단용 — 캐시 항목 수. */
+export function _dsBrowseCacheSize(now) { sweepExpired(now); return _cache.size; }
+
+/** 파일 목록의 문자열을 원문과 무관한 새 문자열로 만든다(JSON 왕복 — V8 이 새 문자열을 만든다). */
+export function flattenFiles(files) {
+  return JSON.parse(JSON.stringify(files));
+}
+
 export function browseDatastore(dsId) {
+  sweepExpired();
   const hit = _cache.get(dsId);
   if (hit && (!hit.settled || Date.now() - hit.at < CACHE_MS)) return hit.promise;
   const entry = { at: 0, settled: false, promise: null };
   entry.promise = browseFresh(dsId)
-    .then((r) => { entry.settled = true; entry.at = Date.now(); return r; })
-    .catch((e) => { _cache.delete(dsId); throw e; });
+    .then((r) => {
+      entry.settled = true; entry.at = Date.now();
+      const t = setTimeout(() => { if (_cache.get(dsId) === entry) _cache.delete(dsId); }, CACHE_MS);
+      t.unref?.();
+      return r;
+    })
+    .catch((e) => { if (_cache.get(dsId) === entry) _cache.delete(dsId); throw e; });
   _cache.set(dsId, entry);
   return entry.promise;
 }
@@ -117,6 +139,9 @@ async function browseFresh(dsId) {
         ({ files, truncated } = parseDsSearchResults(resultXml, 200_000));
         files.sort((a, b) => b.sizeBytes - a.sizeBytes);
         if (files.length > FILE_CAP) { files = files.slice(0, FILE_CAP); truncated = true; }
+        // v2.605(감사 TIM2605-01): 정규식·split 으로 만든 folder·name·modified 는 V8 SlicedString 이라 1만 개만 남겨도
+        //   원문 SOAP XML(20만 파일이면 약 33MB)을 통째로 붙잡는다. 새 문자열로 평탄화해 원문 참조를 끊는다.
+        files = flattenFiles(files);
       } catch (e) { filesError = e.message; }
     } else {
       filesError = '이 데이터스토어에 브라우저 객체가 없습니다.';

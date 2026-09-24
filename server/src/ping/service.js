@@ -18,7 +18,10 @@ import { config } from '../config.js';
 
 const WARN = 1.2;
 const CRIT = 1.5;
-const BASELINE_SAMPLES = 200; // 자동 baseline 산출에 쓰는 최근 OK 샘플 수(인덱스로 저렴)
+const BASELINE_SAMPLES = 200; // 자동 baseline 산출에 쓰는 최근 OK 샘플 수
+// v2.605(감사 DB2605-01): baseline 은 최근 7일 안의 OK 표본만 본다 — 하한이 없으면 OK 가 없던 대상의 조회가
+// 그 대상 이력 전체를 훑는다(1년 보존 ≈ 52만 행). 7일 동안 OK 가 없으면 baseline 은 null(자동 기준 없음)이다.
+export const BASELINE_LOOKBACK_MS = 7 * 86_400_000;
 
 function median(arr) {
   if (!arr.length) return null;
@@ -29,7 +32,7 @@ function median(arr) {
 
 async function baselineOf(db, target) {
   if (target.baselineMs) return { baseline: target.baselineMs, auto: false };
-  const recent = db.recentOkRtt(target.id, BASELINE_SAMPLES);
+  const recent = db.recentOkRtt(target.id, BASELINE_SAMPLES, Date.now() - BASELINE_LOOKBACK_MS);
   const med = median(recent);
   return { baseline: med == null ? null : Number(med.toFixed(2)), auto: true };
 }
@@ -67,7 +70,12 @@ export async function statusAll(sources = null) {
   const set = Array.isArray(sources) ? new Set(sources) : null;
   const targets = listTargets().filter((t) => (set ? set.has(t.source) : true));
   const rows = [];
+  let first = true;
   for (const t of targets) {
+    // v2.605(감사 DB2605-01): 대상 사이 양보 — 대상마다 동기 SQL 이라 한 턴에 몰리면 루프를 막는다(overviewGroupedNow 와 같게).
+    // await baselineOf 는 마이크로태스크라 양보가 아니다.
+    if (!first) await new Promise((r) => setImmediate(r));
+    first = false;
     const latest = db.latest(t.id);
     const { baseline, auto } = await baselineOf(db, t);
     const status = latest ? classify(latest.rtt, latest.ok, baseline) : 'unknown';

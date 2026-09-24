@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.configDir, 'svcmon-log.json');
 
@@ -53,8 +54,31 @@ export function getLogSettings() {
   return { ...cache };
 }
 
+/** 숫자 설정 키 — 빈 값은 '미지정'(이전 값 유지)이다(v2.605 LEFT2605-02). */
+const NUMERIC_KEYS = ['keepFiles', 'maxFileMB', 'maxTotalMB'];
+
+/**
+ * v2.605(감사 LEFT2605-02 — 재현): 숫자 칸을 비우고 저장하면 웹이 `Number('')=0` 을 보내 보관 파일 수 90 → **1**(회전 시
+ * 옛 로그 89개 삭제 대상)·전체 상한 20000 → **0(무제한)** 이 됐고, API 로 '' 를 보내면 상한이 하한 100 으로 떨어졌다.
+ * 빈 값·숫자 아님은 패치에서 빼 이전 값을 유지한다(v2.596 규약). 숫자 문자열은 숫자로 바꾼다 — `'0'` 이 `=== 0` 판정을
+ * 비껴가 무제한 대신 하한 100 이 되지 않게. 명시적 0 만 maxTotalMB 의 '무제한' 이다.
+ */
+export function cleanLogPatch(patch) {
+  const out = {};
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return out;
+  for (const [k, v] of Object.entries(patch)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    if (NUMERIC_KEYS.includes(k)) {
+      const n = numOrNull(v);
+      if (n == null) continue;
+      out[k] = n;
+    } else out[k] = v;
+  }
+  return out;
+}
+
 export function setLogSettings(patch) {
-  const next = normalize({ ...getLogSettings(), ...(patch || {}) });
+  const next = normalize({ ...getLogSettings(), ...cleanLogPatch(patch) });
   // 절대 경로를 바꾸는 저장은 **실제 쓰기 시험**을 통과해야 한다. 검증 없이 저장하면
   // 오타 경로에서 라이터가 조용히 실패해 로그가 통째로 유실된다(라이터는 best-effort).
   if (next.dirPath) {

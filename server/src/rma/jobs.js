@@ -45,6 +45,23 @@ const ACK_GRACE_MS = Number(process.env.RMA_ACK_GRACE_MS) || 30_000;
 const HISTORY_MAX = 300;
 const HISTORY_OUTPUT_MAX = 16 * 1024;     // 이력에는 출력 앞부분만(잡 본체는 DONE_TTL 동안 전문 보존)
 export const HEARTBEAT_STALE_MS = Number(process.env.RMA_HEARTBEAT_STALE_MS) || 90_000; // 롱폴 20s·재시도 백오프 여유
+/**
+ * v2.605(CEN2605-05·TIM2605-03): 하트비트 보관 상한. 예전에는 삭제 경로가 _resetRma 뿐이라 인스턴스 이름을 바꿔 가며 폴링하면
+ * (또는 호스트명이 바뀐 인스턴스가) 프로세스 수명 내내 쌓였고, 정책 문자열 길이도 무제한이라 원소 4,000자 × 200개로 인스턴스당
+ * 약 0.8MB 가 상주했다(감사 실측 150개 +125MB). ① 원소 글자 200자 ② 법인당 인스턴스 상한(넘치면 가장 오래된 **오프라인**
+ * 인스턴스를 내리고, 전부 온라인이면 새 이름을 받지 않는다 — 살아 있는 인스턴스를 밀어내지 않는다) ③ 오래 무응답(기본 7일)인
+ * 항목은 정리한다.
+ */
+export const HEARTBEAT_ELEM_MAX = 200;
+export const HEARTBEAT_MAX_INSTANCES = Math.max(2, Number(process.env.RMA_MAX_INSTANCES_PER_AGENT) || 32);
+export const HEARTBEAT_PURGE_MS = Math.max(HEARTBEAT_STALE_MS * 2, Number(process.env.RMA_HEARTBEAT_PURGE_MS) || 7 * 86_400_000);
+let _hbSweptAt = 0;
+const _hbRefuseLogAt = new Map();
+function sweepHeartbeats(now) {
+  if (now - _hbSweptAt < 60_000) return;
+  _hbSweptAt = now;
+  for (const [k, h] of heartbeats) if (now - h.lastSeen > HEARTBEAT_PURGE_MS) heartbeats.delete(k);
+}
 
 let seq = 0;
 const newReqId = () => `rma_${Date.now().toString(36)}_${(seq++).toString(36)}`;
@@ -305,7 +322,7 @@ export function noteHeartbeat(agent, instance, info = {}, { ip = '' } = {}) {
     const v = info.policy?.[k];
     if (v == null) return [];
     if (!Array.isArray(v)) { invalid.push(k); return []; }
-    return v.slice(0, n).filter((x) => typeof x === 'string' || typeof x === 'number').map(String);
+    return v.slice(0, n).filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => String(x).slice(0, HEARTBEAT_ELEM_MAX));
   };
   const safe = {
     hostname: String(info.hostname || '').slice(0, 120),
@@ -329,7 +346,25 @@ export function noteHeartbeat(agent, instance, info = {}, { ip = '' } = {}) {
     ip,
   };
   if (safe.policy && invalid.length) safe.policy.policyInvalid = invalid;
-  heartbeats.set(hbKey(a, inst), { agent: a, instance: inst, lastSeen: Date.now(), info: safe });
+  const now = Date.now();
+  sweepHeartbeats(now);
+  const key = hbKey(a, inst);
+  if (!heartbeats.has(key)) {
+    const mine = [];
+    for (const [k, h] of heartbeats) if (lc(h.agent) === lc(a)) mine.push([k, h.lastSeen]);
+    if (mine.length >= HEARTBEAT_MAX_INSTANCES) {
+      mine.sort((x, y) => x[1] - y[1]);
+      const [oldKey, oldSeen] = mine[0];
+      if (now - oldSeen <= HEARTBEAT_STALE_MS) {
+        const lw = _hbRefuseLogAt.get(lc(a)) || 0;   // 로그는 법인당 1분에 1줄(거절이 곧 로그 폭주가 되지 않게 — 법인 수는 개별 토큰 수로 유계)
+        if (now - lw >= 60_000) { _hbRefuseLogAt.set(lc(a), now); console.warn(`[rma] 하트비트: ${a} 인스턴스 수 상한(${HEARTBEAT_MAX_INSTANCES}) — 새 인스턴스 '${inst}' 를 받지 않았다(온라인 인스턴스를 밀어내지 않는다)`); }
+        return { ok: false, refused: true };
+      }
+      heartbeats.delete(oldKey);
+    }
+  }
+  heartbeats.set(key, { agent: a, instance: inst, lastSeen: now, info: safe });
+  return { ok: true };
 }
 
 /** 법인의 온라인 인스턴스 이름 목록(스케줄 배정용). */
@@ -356,4 +391,4 @@ export function listRmaAgents(now = Date.now()) {
 }
 
 /** 테스트용 초기화. */
-export function _resetRma() { jobs.clear(); pendingByAgent.clear(); waiters.clear(); heartbeats.clear(); rr.clear(); history.length = 0; }
+export function _resetRma() { _hbSweptAt = 0; _hbRefuseLogAt.clear(); jobs.clear(); pendingByAgent.clear(); waiters.clear(); heartbeats.clear(); rr.clear(); history.length = 0; }

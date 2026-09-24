@@ -33,13 +33,16 @@ let started = false;
 let dirty = false;
 let saveTimer = null;
 let unTap = null;
+// v2.605(감사 RECENT2605-05): prune 으로 지운 가장 늦은 시간 버킷. 가장 이른 남은 버킷이 창 시작(fromH)과 같아도
+//   그 앞 버킷을 지운 적이 있으면 추적은 창 앞에서 이미 시작된 것이다 — '일부' 가 아니다.
+let prunedThroughH = null;
 const status = { enabled: false, startedAt: null, loadedFrom: null, loadError: null, lastSaveAt: null, lastSaveError: null, ingested: 0 };
 
 export const liveEnabled = () => String(process.env.LOGANALYSIS_LIVE ?? '1') !== '0';
 
 function prune(nowH) {
   for (const h of [...buckets.keys()]) {
-    if (h <= nowH - KEEP_HOURS) buckets.delete(h);
+    if (h <= nowH - KEEP_HOURS) { buckets.delete(h); if (prunedThroughH == null || h > prunedThroughH) prunedThroughH = h; }
     else if (h < nowH && !buckets.get(h).compacted) { compactState(buckets.get(h)); buckets.get(h).compacted = true; }
   }
 }
@@ -68,6 +71,7 @@ function load() {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     if (raw && raw.v === 1 && Array.isArray(raw.buckets)) {
       for (const b of raw.buckets) if (Number.isFinite(b?.h) && b.state) buckets.set(b.h, { ...newState(), ...b.state, compacted: true });
+      if (Number.isFinite(raw.prunedThroughH)) prunedThroughH = raw.prunedThroughH;
       status.loadedFrom = raw.savedAt || null;
     }
   } catch (e) {
@@ -81,7 +85,7 @@ export function saveLive() {
   try {
     const nowH = Math.floor(Date.now() / HOUR);
     prune(nowH);
-    const out = { v: 1, savedAt: Date.now(), buckets: [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([h, state]) => ({ h, state })) };
+    const out = { v: 1, savedAt: Date.now(), prunedThroughH, buckets: [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([h, state]) => ({ h, state })) };
     atomicWriteFileSync(FILE(), JSON.stringify(out));
     dirty = false;
     status.lastSaveAt = Date.now(); status.lastSaveError = null;
@@ -129,6 +133,10 @@ export function liveState(hours = 24, now = Date.now()) {
   const allEarliest = buckets.size ? Math.min(...buckets.keys()) : null;
   const trackingSince = allEarliest == null ? null : bucketStartTs(allEarliest);
   const windowFrom = fromH * HOUR;
+  // v2.605(감사 RECENT2605-05 — 재현): prune 은 h ≤ nowH−168 을 지워 가장 이른 남은 버킷이 168시간 창의 fromH 와 같아진다.
+  //   v2.604 가 trackingSince 를 그 버킷의 실제 첫 줄 시각(정시 이후)으로 바꾸자 10일 켜진 포탈의 7일 보기가 거의 항상
+  //   '일부' 였다. 창 바로 앞 버킷까지 지운 적이 있으면(prunedThroughH ≥ fromH−1) 추적은 창 앞에서 시작된 것이다.
+  const trackedBeforeWindow = prunedThroughH != null && prunedThroughH >= fromH - 1;
   return {
     state: st,
     coverage: {
@@ -138,7 +146,8 @@ export function liveState(hours = 24, now = Date.now()) {
       // v2.604(감사 WEB2604-02): 버킷 시작(정시)이 아니라 가장 이른 버킷에 실제로 처음 들어온 시각이고,
       //   구간과의 비교도 시간 단위가 아니라 ms 로 한다(같은 시간 버킷 안에서 시작한 추적도 '일부' 다).
       trackingSince,
-      partial: trackingSince == null || trackingSince > windowFrom,
+      prunedBefore: prunedThroughH == null ? null : (prunedThroughH + 1) * HOUR,
+      partial: !trackedBeforeWindow && (trackingSince == null || trackingSince > windowFrom),
     },
   };
 }
@@ -159,6 +168,6 @@ export function liveStatus() {
 export function _resetLiveForTest() {
   if (unTap) unTap();
   if (saveTimer) clearInterval(saveTimer);
-  buckets = new Map(); idx = null; started = false; dirty = false; saveTimer = null; unTap = null;
+  buckets = new Map(); idx = null; started = false; dirty = false; saveTimer = null; unTap = null; prunedThroughH = null;
   Object.assign(status, { enabled: false, startedAt: null, loadedFrom: null, loadError: null, lastSaveAt: null, lastSaveError: null, ingested: 0 });
 }

@@ -154,17 +154,38 @@ export async function currentTargets() {
  * 순수에 가깝게 — 등록부만 읽는다(장비 왕복 0).
  */
 const _unreadLog = createChangeLogger({ windowMs: 10 * 60_000 }); // 같은 상태는 10분에 1줄(대상 계산은 화면 조회마다 돈다)
-export async function withholdUnreadBareMetal(snap, bareMetal = [], registered = null) {
-  const [{ unreadHostVcenters }, { loadVcenterConfig }] = await Promise.all([import('../agent/fleetPush.js'), import('../config.js')]);
+/*
+ * v2.605 RECENT2605-01(bmusage 쪽): 보류에는 반드시 시한(v2.601 RECENT2601-02 규약). 인증 정지·점검중+재시작·
+ * 장기 장애 vCenter 는 호스트 0 으로 굳어 **복구될 때까지** unread 이고, 그 동안 귀속 없는 베어메탈과 그 vCenter
+ * 귀속 베어메탈이 무기한 수집에서 빠졌다. 처음 본 시각부터 WITHHOLD_MAX_MS(= LASTGOOD_HOLD, inventoryPush 와 같은
+ * 값)를 넘으면 그 vCenter 로는 더 빼지 않고 `hostsUnread.expired` 로 밝힌다(ESXi 오판 가능성이 있다는 사실도 함께).
+ */
+const _unreadSince = new Map();   // vcenterId → 처음 '못 읽음' 으로 본 시각
+export async function withholdUnreadBareMetal(snap, bareMetal = [], registered = null, { now = Date.now(), sinceMap = _unreadSince } = {}) {
+  const [{ unreadHostVcenters }, { loadVcenterConfig }, { WITHHOLD_MAX_MS }] = await Promise.all([
+    import('../agent/fleetPush.js'), import('../config.js'), import('../agent/inventoryPush.js'),
+  ]);
   let reg = registered;
   if (!Array.isArray(reg)) { try { reg = loadVcenterConfig()?.vcenters || []; } catch { reg = []; } }
   const unread = unreadHostVcenters(snap, reg);
+  const unreadSet = new Set(unread);
+  for (const id of [...sinceMap.keys()]) if (!unreadSet.has(id)) sinceMap.delete(id);   // 복구된 것은 시계를 지운다
   if (!unread.length) return { bareMetal, hostsUnread: null };
-  const u = new Set(unread);
-  const kept = bareMetal.filter((b) => b && b.vcenterId && !u.has(b.vcenterId));
+  for (const id of unread) if (!sinceMap.has(id)) sinceMap.set(id, now);
+  const active = unread.filter((id) => now - sinceMap.get(id) <= WITHHOLD_MAX_MS);
+  const expired = unread.filter((id) => now - sinceMap.get(id) > WITHHOLD_MAX_MS);
+  const u = new Set(active);
+  // 보류 중인 vCenter 가 하나도 없으면(전부 시한 초과) 귀속 없는 베어메탈도 더 빼지 않는다.
+  const kept = active.length ? bareMetal.filter((b) => b && b.vcenterId && !u.has(b.vcenterId)) : bareMetal.slice();
   const dropped = bareMetal.length - kept.length;
-  if (dropped && _unreadLog('bm-unread', `${unread.join(',')}|${dropped}`)) console.warn(`[bmusage] 호스트를 아직 읽지 못한 vCenter ${unread.length}개(${unread.slice(0, 5).join(', ')}) — ESXi 를 받치는 iDRAC 이 베어메탈로 잘못 잡히지 않도록 귀속이 그 vCenter 이거나 없는 베어메탈 ${dropped}대를 이번에는 대상에서 뺐습니다`);
-  return { bareMetal: kept, hostsUnread: { vcenters: unread.slice(0, 32), dropped } };
+  // 범위 계정에 다시 세어 줄 수 있게 뺀 대수를 vCenter 별로 둔다(''=귀속 없음).
+  const keptSet = new Set(kept);
+  const droppedByVc = {};
+  for (const b of bareMetal) if (!keptSet.has(b)) { const k = String(b?.vcenterId || ''); droppedByVc[k] = (droppedByVc[k] || 0) + 1; }
+  if (dropped && _unreadLog('bm-unread', `${active.join(',')}|${dropped}`)) console.warn(`[bmusage] 호스트를 아직 읽지 못한 vCenter ${active.length}개(${active.slice(0, 5).join(', ')}) — ESXi 를 받치는 iDRAC 이 베어메탈로 잘못 잡히지 않도록 귀속이 그 vCenter 이거나 없는 베어메탈 ${dropped}대를 이번에는 대상에서 뺐습니다`);
+  if (expired.length && _unreadLog('bm-unread-expired', expired.join(','))) console.warn(`[bmusage] 호스트를 ${Math.round(WITHHOLD_MAX_MS / 3_600_000)}시간 넘게 읽지 못한 vCenter ${expired.length}개(${expired.slice(0, 5).join(', ')}) — 보류 시한이 지나 베어메탈을 다시 수집합니다(그 vCenter 의 ESXi iDRAC 이 섞일 수 있습니다)`);
+  const since = Object.fromEntries(unread.slice(0, 32).map((id) => [id, sinceMap.get(id)]));
+  return { bareMetal: kept, hostsUnread: { vcenters: unread.slice(0, 32), withheld: active.slice(0, 32), expired: expired.slice(0, 32), dropped, droppedByVc, since, withholdMaxMs: WITHHOLD_MAX_MS } };
 }
 
 /**

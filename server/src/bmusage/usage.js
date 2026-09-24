@@ -56,6 +56,7 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     if (n(os.mem?.usedPct) != null) { out.mem_pct = n(os.mem.usedPct); srcOf.mem = 'os'; }
     const busy = maxOrNull((os.disks || []).map((d) => d.busyPct));
     if (busy != null) { out.disk_busy_pct = busy; srcOf.diskBusy = 'os'; }
+    if (n(os.busyOutOfRange) > 0) notes.push(`디스크 ${os.busyOutOfRange}개의 I/O 사용률이 0~100 범위를 벗어나 비웠습니다(보정하지 않았습니다).`);
     const used = maxOrNull((os.disks || []).map((d) => d.usedPct));
     if (used != null) { out.disk_used_pct = used; srcOf.diskUsed = 'os'; }
     const np = maxOrNull((os.nics || []).map((x) => x.pct));
@@ -88,13 +89,16 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
       const rx = perSecond(p?.rxBytes, x.rxBytes, pAt, now);
       const tx = perSecond(p?.txBytes, x.txBytes, pAt, now);
       const bps = sumStrict([rx, tx]);
-      return { iface: x.iface, bps, pct: linkPct(maxStrict([rx, tx]), x.bitsPerSec), state: x.state, bitsPerSec: x.bitsPerSec };
+      return { iface: x.iface, bps, pct: x.virtual ? null : linkPct(maxStrict([rx, tx]), x.bitsPerSec), state: x.state, bitsPerSec: x.virtual ? null : x.bitsPerSec, ...(x.virtual ? { virtual: true } : {}) };
     });
     const np = maxOrNull(perIf.map((x) => x.pct));
     if (np != null) { out.net_pct = np; srcOf.net = 'os'; }
     const nb = maxOrNull(perIf.map((x) => x.bps));
     if (nb != null) out.net_bps = nb;
-    if (perIf.some((x) => x.bps != null && x.bitsPerSec == null)) {
+    // v2.605(COL2605-01): 가상 인터페이스는 '속도를 못 읽은 것' 이 아니라 **판정 대상이 아닌 것**이다 — 따로 센다.
+    const virtualIf = perIf.filter((x) => x.virtual).length;
+    if (virtualIf) notes.push(`가상 인터페이스(tun/tap·bridge·veth 등) ${virtualIf}개는 보고 속도가 링크 속도가 아니라 사용률(%)에서 뺐습니다(처리량에는 포함).`);
+    if (perIf.some((x) => !x.virtual && x.bps != null && x.bitsPerSec == null)) {
       notes.push('링크 속도를 읽지 못한 인터페이스가 있어 그 회선의 사용률(%)은 내지 않았습니다(처리량만).');
     }
     // HBA — tx/rx words(4바이트) 누적. 속도를 모르면 퍼센트 없음.

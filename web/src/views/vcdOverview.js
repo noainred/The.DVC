@@ -34,8 +34,24 @@ export function groupClusters(hosts) {
 // null 로 오는데 예전 형태는 그것을 **0** 으로 바꿨다 — 실측 재현 `흡기온도 0℃ · CPU 0% · MEM 0%`.
 const num = numOrNull;
 const sumBy = (list, pick) => list.reduce((a, h) => a + (Number(pick(h)) || 0), 0);
-// 클러스터 CPU/MEM 사용률은 트리와 동일하게 호스트 단순 평균(가중 평균이 아님 — 표시값 일치가 우선).
-const avgBy = (list, pick) => (list.length ? Math.round(sumBy(list, pick) / list.length) : 0);
+/**
+ * v2.605(감사 WEB2605-03 — 재현): 연결 끊긴·무응답 호스트는 **사용률을 읽지 못한 것**이다. SOAP 수집은 그 호스트의
+ * quickStats 가 없어 cpuUsagePct·memUsagePct 를 null 이 아니라 **0** 으로 보낸다(soapClient num/pct). 그 0 을 평균에
+ * 넣으면 CONNECTED 80% + DISCONNECTED 1대인 클러스터가 40% 로 보이고, 같은 표의 vCenter 행(서버 롤업 store.usageReadable
+ * — 끊긴 호스트 제외)과 기준이 갈렸다. 판정은 서버 usageReadable 과 같은 조건이다.
+ */
+export const hostUsageReadable = (h) => !!h && h.connectionState !== 'DISCONNECTED' && h.connectionState !== 'NOT_RESPONDING';
+/** 호스트 사용률(%) — 못 읽은 호스트면 null('—'). key 는 'cpuUsagePct' | 'memUsagePct'. */
+export const hostUsagePct = (h, key) => (hostUsageReadable(h) ? num(h?.[key]) : null);
+/**
+ * 클러스터 CPU/MEM 사용률은 트리와 동일하게 호스트 단순 평균(가중 평균이 아님 — 표시값 일치가 우선).
+ * 사용률을 읽은 호스트만 평균에 넣고, 하나도 없으면 null('—' — 0% 는 '부하 없음' 이라는 거짓이다).
+ */
+export function clusterAvgPct(list, key) {
+  const vals = (list || []).map((h) => hostUsagePct(h, key)).filter((v) => v != null);
+  return vals.length ? Math.round(vals.reduce((a, v) => a + v, 0) / vals.length) : null;
+}
+const avgBy = (list, key) => clusterAvgPct(list, key);
 const toGb = (mb) => Math.round((Number(mb) || 0) / 1024);
 
 /**
@@ -65,7 +81,7 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
     rows.push({
       level: '클러스터', vcenter: vcName, cluster: cl, host: '', state: '',
       hostCount: chosts.length, vmCount: cv.vmc,
-      cpuPct: avgBy(chosts, (h) => h.cpuUsagePct), memPct: avgBy(chosts, (h) => h.memUsagePct),
+      cpuPct: avgBy(chosts, 'cpuUsagePct'), memPct: avgBy(chosts, 'memUsagePct'),
       cpuRatio: ratioText(cv.alloc, cv.cores), vcpuAlloc: cv.alloc, cpuCores: cv.cores,
       cpuThreads: sumBy(chosts, (h) => h.cpuThreads),
       memRatio: ratioText(cv.memAlloc, cv.memPhys), memAllocGB: toGb(cv.memAlloc), memPhysGB: toGb(cv.memPhys),
@@ -77,7 +93,7 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
       rows.push({
         level: '호스트', vcenter: vcName, cluster: cl, host: h.name || '', state: stateKo(h.connectionState),
         hostCount: 1, vmCount: vmCountByHost ? vmCountByHost.get(h.name) || 0 : Number(h.vmCount) || 0,
-        cpuPct: num(h.cpuUsagePct), memPct: num(h.memUsagePct),
+        cpuPct: hostUsagePct(h, 'cpuUsagePct'), memPct: hostUsagePct(h, 'memUsagePct'),
         cpuRatio: ratioText(alloc, h.cpuCores), vcpuAlloc: alloc, cpuCores: Number(h.cpuCores) || 0,
         cpuThreads: Number(h.cpuThreads) || 0,
         memRatio: ratioText(memAlloc, h.memTotalMB), memAllocGB: toGb(memAlloc), memPhysGB: toGb(h.memTotalMB),

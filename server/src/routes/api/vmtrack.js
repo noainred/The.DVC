@@ -6,6 +6,7 @@
 // 범위 제한 계정이 전 사이트 수량·VM 목록을 보지 못하게). 수동 스냅샷은 상태 변경이라 admin.
 import { requirePerm, requireRole } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { denyScopedRun } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-02: 전 법인 수동 실행은 범위 계정 403
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { vmtrackSeries, vmtrackChanges, vmtrackDsChanges, vmtrackInfo, vmtrackDsList, vmtrackDsSeries, vmtrackDsSeriesAll, vmtrackDsTop, vmtrackDsChangeLog, vmtrackDsPivot } from '../../vmtrack/service.js';
@@ -176,6 +177,7 @@ export function registerVmTrack(api) {
 
   // 지금 스냅샷(관리자) — 폴러와 재진입 가드를 공유한다(진행 중이면 409).
   api.post('/tools/vm-track/snapshot', requireRole('admin'), async (req, res) => {
+    if (denyScopedRun(req, res, 'VM 수량 스냅샷')) return;
     try {
       await getDb();
       const r = await runVmtrackNow('manual');

@@ -9,6 +9,12 @@ import { instanceId } from '../instanceId.js';
 // v2.506(적대적 검증): 전역 fetch 는 lookup 이 없어 수집 토큰이 리바인딩된 주소로 나갈 수 있었다.
 import { resilientFetch } from '../util/resilientFetch.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';
+import { readJsonCapped } from '../util/readCapped.js';
+
+// v2.605(감사 LEFT2605-01 — 재현): 이 점검은 **주기 폴러**(relaycheck/poller.js startAdaptiveTimer)가 돈다 — 관리자 수동 실행만이 아니다.
+//   ping·health 응답은 수 KB 인데 fetch 의 json 읽기는 해제 후 크기 상한이 없어 150MB 응답에 중앙 RSS 70 → 693MB 였다. 상한까지만 읽는다.
+export const RELAY_PING_MAX_BYTES = 256 * 1024;
+const readPing = (r) => readJsonCapped(r, RELAY_PING_MAX_BYTES, '포탈 응답').then((j) => (j && typeof j === 'object' && !Array.isArray(j) ? j : {})).catch(() => ({}));
 
 function tcp(host, port, timeoutMs) {
   return new Promise((resolve) => {
@@ -45,14 +51,14 @@ async function portalPing(host, port, { token, expectAgent, otherIds = [], timeo
       if (r.status === 403 || r.status === 401) return { ok: false, phase: 'auth', error: 'HTTP 403 토큰 거부', ms: Date.now() - t0 };
       if (r.status === 404) return { ok: false, phase: 'auth', error: 'HTTP 404 — 응답 포탈에 COLLECTOR_TOKEN 미설정(또는 포탈 아님)', ms: Date.now() - t0 };
       if (!r.ok) return { ok: false, phase: 'http', error: `HTTP ${r.status}`, ms: Date.now() - t0 };
-      const j = await r.json().catch(() => ({}));
+      const j = await readPing(r);
       const iss = expectAgent ? identityIssue({ id: expectAgent, name: expectAgent }, j, otherIds) : null;
       if (iss) return { ok: false, phase: 'identity', error: iss.reason, got: { agent: j.agent, hostname: j.hostname }, ms: Date.now() - t0 };
       return { ok: true, detail: `응답 ${j.agent || '(이름 없음)'}${j.hostname ? `(${j.hostname})` : ''} v${j.version || '?'}`, got: { agent: j.agent, hostname: j.hostname }, ms: Date.now() - t0 };
     }
     const r = await resilientFetch(`${base}/api/health`, { headers: { Accept: 'application/json' }, timeoutMs, retries: 0 });
     if (!r.ok) return { ok: false, phase: 'http', error: `HTTP ${r.status}`, ms: Date.now() - t0 };
-    const j = await r.json().catch(() => ({}));
+    const j = await readPing(r);
     return { ok: true, detail: `health 200 v${j.version || '?'}`, got: { instance: j.instance, agent: j.agent }, ms: Date.now() - t0 };
   } catch (e) {
     const code = e?.cause?.code || e?.code || '';

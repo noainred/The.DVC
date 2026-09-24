@@ -282,6 +282,9 @@ export function opticalText(row) {
 /** 에러 셀 문구 — 누적과 기준선 이후 신규를 **나눠서** 말한다. */
 export function errorText(row) {
   if (!row) return '—';
+  // v2.605 WEB2605-04: k/m/g 축약 카운터로 **신규 판정만 보류**한 포트는 누적이 읽혀 있다 — '카운터 없음'
+  //   이라 말하면 사용자가 명령·권한을 의심한다(조치가 다르다).
+  if (row.errors === 'unknown' && row.errHeld === 'approx') return `누적 ${row.errSum ?? '—'} (축약 표기 — 신규 판정 보류)`;
   if (row.errors === 'unknown') return '카운터 없음';
   if (row.errNew != null) return `신규 ${row.errNew} (누적 ${row.errSum})`;
   return `누적 ${row.errSum} (기준선 없음)`;
@@ -485,4 +488,24 @@ export function historyBlocks(history, { maxRows = 10 } = {}) {
     });
   }
   return blocks;
+}
+
+/**
+ * 조닝 상대 조회 상한(v2.605 WEB2605-02). 서버는 문제 포트를 상한(기본 40)까지만 조닝 조회하고 넘친 개수를
+ * `problemPortsOmitted` 로 싣는다 — 그 포트에 '이상·주의 목록에 없다' 고 말하면 거짓이다(실제로는 목록에 있고
+ * 상한 때문에 건너뛰었다).
+ */
+export function problemOmittedNote(omitted) {
+  const n = Number.isFinite(omitted) ? omitted : 0;
+  if (n <= 0) return '';
+  return `문제 포트가 많아 조닝 상대 조회 상한을 넘었습니다 — ${n}개 포트는 조닝 상대를 조회하지 않았습니다.`;
+}
+
+/** 조닝 정보가 없는 포트의 문구 — 상한으로 건너뛴 문제 포트와 원래 대상이 아닌 포트를 구분한다. */
+export function portZoningFallback(row, zoningNote, omitted) {
+  const isProblem = row && (row.verdict === 'bad' || row.verdict === 'warn');
+  if (isProblem && Number.isFinite(omitted) && omitted > 0) {
+    return `이 포트는 문제 포트지만 조닝 상대 조회 상한을 넘어 조회하지 않았습니다(${omitted}개 생략).`;
+  }
+  return zoningNote || '이 포트는 이상·주의 목록에 없어 조닝 상대를 조회하지 않았습니다.';
 }

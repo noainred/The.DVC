@@ -128,13 +128,22 @@ function runQuery(q, allowed = null) {
   return { entity, label: SCHEMA[entity].label, total: items.length, results: items.slice(0, limit) };
 }
 
+/**
+ * v2.605(감사 SEC2605-01): 질의 길이 상한 — 라우트(/search/nl)·ChatOps 가 먼저 거르고, nlSearch 도 스스로 거부한다
+ * (정규식·LLM 프롬프트 모두 길이에 비례해 비싸진다. /api 본문 한도 1MB 를 그대로 받으면 한 요청이 루프를 수십 분 막았다).
+ */
+export const NL_QUERY_MAX = 500;
+
 // --- rule-based fallback (no LLM) ---
+export function _fallbackParseForTest(query) { return fallbackParse(query); }
 function fallbackParse(query) {
   const s = query.toLowerCase();
   const entity = /호스트|host|esxi/.test(s) ? 'host' : /스토리지|데이터스토어|datastore|볼륨/.test(s) ? 'datastore' : /네트워크|network|포트그룹/.test(s) ? 'network' : 'vm';
   const filters = [];
   for (const r of REGIONS) if (query.includes(r)) filters.push({ field: 'region', op: 'eq', value: r });
-  const pct = query.match(/(\d+)\s*%/);
+  // v2.605(감사 SEC2605-01 — 재현): 앵커 없는 /(\d+)\s*%/ 는 숫자열의 모든 시작 위치에서 끝까지 훑어 O(n²) 였다
+  //   ('1'×30,000+'x' 1초 · 120k 16.7초). 뒤보기로 숫자열의 첫 자리에서만 시작하고 자릿수를 묶는다(선형).
+  const pct = query.match(/(?<!\d)(\d{1,6})\s*%/);
   if (pct) {
     const op = /이하|미만|under|낮|적/.test(s) ? 'lte' : 'gt';
     const field = /cpu/.test(s) ? 'cpuUsagePct' : entity === 'datastore' ? 'usagePct' : 'memUsagePct';
@@ -155,6 +164,9 @@ function fallbackParse(query) {
 export const NL_ENTITY_PERM = Object.freeze({ vm: 'inv.vms', host: 'inv.hosts', datastore: 'inv.datastores', network: 'inv.networks' });
 
 export async function nlSearch(query, allowed = null) {
+  if (String(query ?? '').length > NL_QUERY_MAX) {
+    const e = new Error(`질의가 너무 깁니다(최대 ${NL_QUERY_MAX}자).`); e.status = 400; e.code = 'query-too-long'; throw e;
+  }
   const cfg = loadLlmConfig();
   let q, source;
   if (cfg.enabled) {

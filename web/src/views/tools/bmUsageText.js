@@ -222,6 +222,31 @@ export function authStopNote(stops = [], { now = Date.now() } = {}) {
 }
 
 /**
+ * 호스트를 아직 읽지 못한 vCenter 때문에 **이번에 대상에서 뺀 베어메탈** 안내(v2.605 LEFT2605-05).
+ * ESXi 를 받치는 iDRAC 이 베어메탈로 잘못 잡히지 않게 서버가 잠시 빼는데, 말하지 않으면 그 서버들이
+ * 원래 없는 것처럼 보인다(조용한 제외). 보류 시한이 지난 vCenter 는 다시 수집한다는 사실도 함께 말한다.
+ * 뺀 것도 시한 초과도 없으면 **문구를 만들지 않는다**.
+ */
+export function hostsUnreadNote(h = null) {
+  if (!h || typeof h !== 'object') return '';
+  const withheld = Array.isArray(h.withheld) ? h.withheld : (Array.isArray(h.vcenters) ? h.vcenters : []);
+  const expired = Array.isArray(h.expired) ? h.expired : [];
+  const dropped = n(h.dropped);
+  const parts = [];
+  if (withheld.length && dropped) {
+    const names = withheld.slice(0, 4).join(' · ');
+    const more = withheld.length > 4 ? ` 외 ${withheld.length - 4}개` : '';
+    parts.push(`**호스트를 아직 읽지 못한 vCenter ${withheld.length}개**(${names}${more}) — ESXi 를 받치는 iDRAC 이 베어메탈로 잘못 잡히지 않도록 **베어메탈 ${dropped}대를 이번에는 대상에서 뺐습니다**.`
+      + ' 그 vCenter 의 수집이 복구되면 다시 대상이 됩니다(수집 상태는 vCenter 화면에서 보세요).');
+  }
+  if (expired.length) {
+    const hours = n(h.withholdMaxMs) != null ? Math.round(n(h.withholdMaxMs) / 3_600_000) : null;
+    parts.push(`vCenter ${expired.length}개(${expired.slice(0, 4).join(' · ')})는 ${hours != null ? `${hours}시간` : '보류 시한'} 넘게 호스트를 읽지 못해 **보류를 끝내고 다시 수집합니다** — 그 vCenter 의 ESXi 호스트 iDRAC 이 베어메탈로 섞여 보일 수 있습니다.`);
+  }
+  return parts.join(' ');
+}
+
+/**
  * **키 충돌** 안내(v2.550.3). ⚠ 조용히 두면 안 되는 종류다 — DB 기본키가 `(agent, key, ts)` 라
  * 두 서버가 같은 키를 쓰면 **한쪽의 사용률이 다른 서버 값으로 보이고 오류는 나지 않는다**
  * (v2.548 F2 와 같은 유형). 대상에서 빼지 않는 이유도 함께 말한다(어느 쪽을 버릴지 알 수 없다).

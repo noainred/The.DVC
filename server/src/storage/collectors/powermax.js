@@ -235,6 +235,26 @@ export function powermaxSrp(srp) {
 }
 
 /**
+ * v2.605(감사 RECENT2605-04): 용량 블록은 있는데 전체가 **정확히 0** 인 SRP(비어 있는 보조 SRP)인가.
+ *   powermaxSrp 는 total>0 을 요구해 이 SRP 에 null 을 주는데, 그것을 '형식 미인식' 으로 세면 SRP 합이 완전한데도
+ *   그 어레이가 매 주기 partial-pools(증가량 미적재)가 됐다. 빈 SRP 는 합에 0 이라 합의 완전성에 영향이 없다.
+ *   ⚠ 용량 블록이 아예 없는 응답은 여전히 '형식 미인식' 이다(용량을 가진 SRP 를 놓쳤을 수 있다 — 보수적 판정 유지).
+ */
+export function powermaxSrpIsEmpty(srp) {
+  if (!srp || typeof srp !== 'object') return false;
+  const blocks = [srp.srp_capacity, srp.fba_srp_capacity, srp.ckd_srp_capacity].filter((b) => b && typeof b === 'object');
+  if (!blocks.length) return false;
+  let sawZero = false;
+  for (const b of blocks) {
+    const pt = num(b.effective?.physical_capacity?.total_tb);
+    const ut = num(b.usable_total_tb);
+    if ((pt != null && pt > 0) || (ut != null && ut > 0)) return false;
+    if (pt === 0 || ut === 0) sawZero = true;
+  }
+  return sawZero;
+}
+
+/**
  * v2.601(감사 COL-2601-05): 경보 응답 → 미해결(미확인) 개수. { count, basis }.
  *  · `/system/alert?acknowledged=false` 의 alertId 배열 → basis 'unacknowledged'
  *  · 필터 없는 `/system/alert` 의 alertId 배열 → basis 'all'(확인된 경보도 포함 — 과대일 수 있음을 밝힌다)
@@ -310,6 +330,7 @@ export function normalizePowermax(device, raw) {
     let provTotalTb = 0; let provUsedTb = 0; let provSeen = false;
     const srpList = [];
     const srpIncomplete = [];   // v2.604(COL-2604-02): SRP 일부를 못 읽은 어레이 — [{array, listed, parsed, failed, unrecognized, omitted}]
+    const srpWithheldIds = new Set();   // v2.605(RECENT2605-04): 실제로 증가량 적재를 막은(어레이 레벨 값으로 대체한) 어레이
 
     for (const a of arrays.slice(0, 32)) {
       const c = raw.caps?.[a.symmetrixId];
@@ -347,8 +368,13 @@ export function normalizePowermax(device, raw) {
       // v2.604(감사 COL-2604-02): SRP 목록은 받았는데 **일부 SRP 만** 읽었으면 그 합은 어레이 전체가 아니다.
       //   구버전 엣지 push 는 srpState 가 없다 → 예전 동작(완전하다고 본다 — 판정 근거가 없다).
       const st = raw.srpState?.[a.symmetrixId];
-      const srpPartial = !!(st && st.listed > 0 && st.parsed < st.listed);
-      if (srpPartial) srpIncomplete.push({ array: a.symmetrixId, listed: st.listed, parsed: st.parsed, failed: st.failed || 0, unrecognized: st.unrecognized || 0, omitted: st.omitted || 0 });
+      // v2.605(RECENT2605-04): 빈(전체 0) SRP 는 합에 영향이 없으므로 '읽은 것' 과 같이 센다(구버전 엣지는 empty 가 없다 → 0).
+      const stEmpty = Number(st?.empty) || 0;
+      const srpPartial = !!(st && st.listed > 0 && st.parsed + stEmpty < st.listed);
+      // withheld = 이 어레이가 실제로 증가량 적재를 막았는가(문구가 사실과 맞게 — documented 어레이는 어레이 레벨 값을 쓴다).
+      const srpWithheld = srpPartial && (!c || c.documented === false);
+      if (srpPartial) srpIncomplete.push({ array: a.symmetrixId, listed: st.listed, parsed: st.parsed, failed: st.failed || 0, unrecognized: st.unrecognized || 0, omitted: st.omitted || 0, ...(stEmpty ? { empty: stEmpty } : {}) });
+      if (srpWithheld) srpWithheldIds.add(a.symmetrixId);
       if (srpSeen && srpTotal > 0 && (!c || c.documented === false) && !srpPartial) {
         t = srpTotal; u = srpUsed; basis = mySrps[0]?.basis ? `srp:${mySrps[0].basis}` : 'srp';
       } else if (srpPartial && (!c || c.documented === false)) {
@@ -415,8 +441,13 @@ export function normalizePowermax(device, raw) {
       // v2.604(COL-2604-02·03): 합계가 전체가 아닐 수 있는 사유를 같은 문구에 덧붙인다(증가량 적재는 poolsUnreadable 이 막는다).
       const tails = [];
       if (srpIncomplete.length) {
-        const miss = srpIncomplete.reduce((a2, x) => a2 + (x.listed - x.parsed), 0);
-        tails.push(`SRP ${miss}개를 읽지 못해 어레이 ${srpIncomplete.length}대는 SRP 합이 아니라 어레이 레벨 값으로 표시했습니다(이 주기는 증가량에 적재하지 않습니다)`);
+        // v2.605(RECENT2605-04): '적재하지 않습니다' 는 실제로 적재를 막은 어레이(withheld)에만 쓴다 — documented 어레이는
+        //   평소에도 어레이 레벨 값이라 SRP 누락이 합계에 영향이 없고 실제로 적재된다(예전 문구는 거짓이었다).
+        const missOf = (x) => x.listed - x.parsed - (Number(x.empty) || 0);
+        const held = srpIncomplete.filter((x) => srpWithheldIds.has(x.array));
+        const info = srpIncomplete.filter((x) => !srpWithheldIds.has(x.array));
+        if (held.length) tails.push(`SRP ${held.reduce((a2, x) => a2 + missOf(x), 0)}개를 읽지 못해 어레이 ${held.length}대는 SRP 합이 아니라 어레이 레벨 값으로 표시했습니다(이 주기는 증가량에 적재하지 않습니다)`);
+        if (info.length) tails.push(`SRP ${info.reduce((a2, x) => a2 + missOf(x), 0)}개를 읽지 못했습니다(어레이 ${info.length}대 — 용량은 어레이 레벨 값이라 합계에는 영향이 없고 SRP 상세만 빠졌습니다)`);
       }
       if (overCap) tails.push(`로컬 어레이가 ${MAX_LOCAL_ARRAYS}대를 넘어 ${overCap}대는 조회하지 않았습니다(합계에서 빠졌습니다)`);
       if (unchecked) tails.push(`어레이 목록이 길어 ${unchecked}개는 로컬 여부를 확인하지 못했습니다(합계에서 빠졌을 수 있습니다)`);
@@ -520,7 +551,7 @@ export async function collect(device, { signal = null } = {}) {
         const srpIds = Array.isArray(r.data?.srpId) ? r.data.srpId : [];
         // v2.604(감사 COL-2604-02): SRP 마다 따로 받고 **몇 개를 못 읽었는지** 남긴다. 예전에는 한 try 안이라
         //   둘째 SRP 가 실패하면 첫 SRP 합만 남아 그것이 어레이 전체 용량으로 쓰였다(오류 없이 틀린 값).
-        const st = { listed: srpIds.length, parsed: 0, failed: 0, unrecognized: 0, omitted: Math.max(0, srpIds.length - MAX_SRP) };
+        const st = { listed: srpIds.length, parsed: 0, failed: 0, unrecognized: 0, empty: 0, omitted: Math.max(0, srpIds.length - MAX_SRP) };
         raw.srpState[a.symmetrixId] = st;
         for (const sid of srpIds.slice(0, MAX_SRP)) {
           try {
@@ -530,6 +561,7 @@ export async function collect(device, { signal = null } = {}) {
             const s = Array.isArray(d2?.srp) ? d2.srp[0] : d2?.srp || d2;
             const parsed = powermaxSrp(s);
             if (parsed) { st.parsed += 1; (raw.srps[a.symmetrixId] ||= []).push({ ...parsed, id: parsed.id || String(sid) }); }
+            else if (powermaxSrpIsEmpty(s)) st.empty += 1;   // v2.605: 빈 SRP 는 형식 미인식이 아니다
             else st.unrecognized += 1;
           } catch (e2) { if (/401/.test(e2.message)) throw e2; st.failed += 1; raw.srpError = e2.message; }
         }

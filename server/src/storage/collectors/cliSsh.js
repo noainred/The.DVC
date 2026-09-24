@@ -299,15 +299,34 @@ export function parseKeyValueBlocks(text) {
 }
 
 /** 출력에서 첫 JSON 값(객체/배열)을 관대하게 추출 — CLI 가 배너를 함께 찍는 경우 대응. */
+/*
+ * v2.605(감사 LEFT2605-03): 예전 구현은 끝에서 한 글자씩 줄이며 '}'/']' 위치마다 전체 slice 를 JSON.parse 해
+ *   잘린·깨진 JSON 에서 O(n²) 였다(160KB 에 26.7초 — 수집은 메인 스레드라 그동안 포탈 전체가 멈춘다).
+ *   같은 뜻을 선형으로: 첫 '['/'{' 부터 문자열·이스케이프를 인식해 괄호 깊이를 세고, **깊이가 처음 0 으로 돌아오는
+ *   위치** 하나만 JSON.parse 한다. 그 위치가 유일한 후보인 이유 — start 에서 시작하는 유효한 JSON 값이라면 그 값의
+ *   토큰화가 이 스캔과 같고 값의 끝에서만 깊이가 0 이 된다(뒤에 다른 글자가 붙으면 JSON.parse 가 거부한다).
+ *   옛 구현과의 결과 동일성은 audit2605c 테스트가 결정적 난수 입력으로 대조한다.
+ */
 export function parseJsonLoose(text) {
   const s = String(text || '');
   const start = s.search(/[[{]/);
   if (start < 0) return null;
-  for (let end = s.length; end > start; end -= 1) {
-    const slice = s.slice(start, end);
-    const last = slice.trimEnd().slice(-1);
-    if (last !== '}' && last !== ']') continue;
-    try { return JSON.parse(slice); } catch { /* 더 짧게 재시도 */ }
+  let depth = 0; let inStr = false;
+  for (let i = start; i < s.length; i += 1) {
+    const ch = s.charCodeAt(i);
+    if (inStr) {
+      if (ch === 92) i += 1;                 // '\\' — 다음 글자를 건너뛴다
+      else if (ch === 34) inStr = false;     // '"'
+      continue;
+    }
+    if (ch === 34) inStr = true;
+    else if (ch === 91 || ch === 123) depth += 1;           // '[' '{'
+    else if (ch === 93 || ch === 125) {                     // ']' '}'
+      depth -= 1;
+      if (depth === 0) {
+        try { return JSON.parse(s.slice(start, i + 1)); } catch { return null; }
+      }
+    }
   }
   return null;
 }

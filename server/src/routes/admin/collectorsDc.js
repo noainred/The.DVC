@@ -19,6 +19,9 @@ import { agentIdentitySummary } from '../../central/agentIdentity.js';
 import { pullNow } from '../../collector/puller.js';
 import { pushUpgradeToCollectors } from '../../collector/upgradePush.js';
 import { resilientFetch } from '../../util/resilientFetch.js';
+// v2.605(감사 LEFT2605-01 형제): 엣지 응답은 상한까지만 읽는다 — 비밀번호 변경·오류 본문은 작고, export 는 인벤토리 전량이라 큰 상한.
+import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../../util/readCapped.js';
+const EDGE_SMALL_MAX_BYTES = 256 * 1024;
 import { resolveBundleBytes, lastBundleReject } from '../../upgrade/bundleSource.js';
 import { upgradeManager } from '../../upgrade/manager.js';
 import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner } from './shared.js';
@@ -215,7 +218,7 @@ adminRouter.post('/collectors/set-password', adminOnly, requireSettingsOwner, as
         body: JSON.stringify({ username, password }),
         timeoutMs: 15_000, retries: 1,
       });
-      const body = await r.json().catch(() => ({}));
+      const body = await readJsonCapped(r, EDGE_SMALL_MAX_BYTES, '엣지 응답').then((j) => (j && typeof j === 'object' && !Array.isArray(j) ? j : {})).catch(() => ({}));
       if (r.status === 404) return { id: c.id, name: c.name || c.id, ok: false, reason: '엣지가 이 기능을 지원하지 않습니다(v2.107 미만 — 먼저 업그레이드하세요).' };
       if (r.status === 403) return { id: c.id, name: c.name || c.id, ok: false, reason: '토큰 불일치(엣지 COLLECTOR_TOKEN 확인).' };
       return { id: c.id, name: c.name || c.id, ok: r.ok && body.ok !== false, reason: body.reason || (r.ok ? null : `HTTP ${r.status}`), edgeVersion: body.version || null, totpEnabled: body.totpEnabled || false };
@@ -402,7 +405,7 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
     if (!r.ok) {
       // 서버가 준 사유(collector 라우터의 error 필드)와 상태코드별 해결 힌트를 함께 안내한다.
       let serverMsg = '';
-      try { const j = await r.json(); serverMsg = j?.error || j?.reason || ''; } catch { /* 본문 없음/비JSON */ }
+      try { const j = await readJsonCapped(r, EDGE_SMALL_MAX_BYTES, '엣지 오류 응답'); serverMsg = (typeof j?.error === 'string' && j.error) || (typeof j?.reason === 'string' && j.reason) || ''; } catch { /* 본문 없음/비JSON */ }
       const hint = r.status === 404
         ? "수집 서버에 COLLECTOR_TOKEN이 설정되지 않았습니다(export 비활성). 그 에이전트를 'COLLECTOR_TOKEN=<토큰>' 환경변수와 함께 실행/재시작하세요(리눅스: /etc/vmware-portal/portal.env)."
         : (r.status === 403 || r.status === 401)
@@ -417,7 +420,7 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
       steps.push({ msg: `export HTTP ${r.status}${serverMsg ? ` — ${serverMsg}` : ''}`, level: 'error' });
       return res.json({ ok: false, reason: `HTTP ${r.status}${serverMsg ? ` — ${serverMsg}` : ''}${hint ? ` · ${hint}` : ''}${fwdHint}`, status: r.status, steps, ms: Date.now() - started, retried });
     }
-    const data = await r.json();
+    const data = await readJsonCapped(r, EDGE_EXPORT_MAX_BYTES, '엣지 export 응답');
     steps.push({ msg: `export 200 · 응답 엣지 ${data.agent || '(구버전: 이름 없음)'}${data.hostname ? `(${data.hostname})` : ''} · v${data.version || '?'} · DC ${data.datacenter || '—'} · 호스트 ${data.hosts ?? '—'}대`, level: 'info' });
     const identity = identityIssue(entry || { id: String(body.id || body.name || ''), name: body.name, datacenter: body.datacenter }, data);
     if (identity) steps.push({ msg: identity.reason, level: 'warn' });

@@ -24,13 +24,15 @@ export function bytesRateToBps(v) {
   return typeof v === 'number' && Number.isFinite(v) ? v * 8 : null;
 }
 import { numOrNull } from '../../util/numOrNull.js';
+import { reqTimeoutMs } from '../../agent/envTimeout.js';
 
 // Isilon 전용 로컬 TLS 디스패처 — 사내 자체서명 장비 한정(다른 fetch 에 주입 금지).
 // 보안(M-4): STORAGE_TLS_VERIFY=true 면 인증서 검증을 켠다(기본은 기존대로 해제).
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
 const isilonDispatcher = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: process.env.STORAGE_TLS_VERIFY === 'true' }) });
 const PORT = Number(process.env.STORAGE_ISILON_PORT) || 8080;
-const TIMEOUT_MS = Number(process.env.STORAGE_HTTP_TIMEOUT_MS) || 15_000;
+// v2.605(TIM2605-04): 음수·2^31 초과 env 는 AbortSignal.timeout 의 RangeError·즉시 중단이 된다 → [1초, 10분].
+const TIMEOUT_MS = reqTimeoutMs(process.env.STORAGE_HTTP_TIMEOUT_MS, 15_000);
 
 export async function get(device, apiPath, { signal } = {}) { // v2.308: 영역 수집기(areasCollector)가 재사용
   const url = `https://${device.host}:${PORT}${apiPath}`;
@@ -190,7 +192,10 @@ export function normalizeIsilon(device, raw) {
   return snap;
 }
 
-export async function collect(device) {
+export async function collect(device, { signal = null } = {}) {
+  // v2.605(TIM2605-02): 폴러·연결 테스트가 넘기는 opts.signal 도 받는다 — get() 은 device._signal 을 읽으므로
+  //   _signal 없이 opts 로만 온 신호를 거기에 싣는다(형제 unity·powerstore 와 같은 계약).
+  if (signal && !device?._signal) device = { ...device, _signal: signal };
   // 수집 방식 분기(v2.304): 기본 ssh(isi status 파싱 — isilonSsh.js), 'api' 선택 시 아래 REST 경로.
   if (device.collectMethod !== 'api') {
     const { collectViaSsh } = await import('./isilonSsh.js');

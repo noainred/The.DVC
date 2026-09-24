@@ -204,13 +204,27 @@ const _cache = new Map(); // vcenterId -> { startedAt, at(완료 시각, 진행 
 const CACHE_MS = 60_000;
 const PENDING_MAX_MS = 10 * 60_000;
 
+// v2.605(감사 TIM2605-01): 완료 항목은 60초가 지나면 Map 에서 지운다(예전에는 만료 판정만 하고 남겨, vCenter 마다
+//   마지막 export 결과가 프로세스 수명 동안 상주했다). 조회 때 만료분 청소 + 완료 시 unref 타이머.
+function sweepExpired(now = Date.now()) {
+  for (const [k, e] of _cache) if (e.settled && now - e.at >= CACHE_MS) _cache.delete(k);
+}
+/** 테스트·진단용 — 캐시 항목 수. */
+export function _vmExportCacheSize(now) { sweepExpired(now); return _cache.size; }
+
 export function buildVmExport(vcenterId) {
+  sweepExpired();
   const hit = _cache.get(vcenterId);
   const now = Date.now();
   if (hit && (hit.settled ? now - hit.at < CACHE_MS : now - hit.startedAt < PENDING_MAX_MS)) return hit.promise;
   const entry = { startedAt: now, at: 0, settled: false, promise: null };
   entry.promise = buildVmExportFresh(vcenterId)
-    .then((r) => { entry.settled = true; entry.at = Date.now(); return r; })
+    .then((r) => {
+      entry.settled = true; entry.at = Date.now();
+      const t = setTimeout(() => { if (_cache.get(vcenterId) === entry) _cache.delete(vcenterId); }, CACHE_MS);
+      t.unref?.();
+      return r;
+    })
     .catch((e) => { if (_cache.get(vcenterId) === entry) _cache.delete(vcenterId); throw e; });
   _cache.set(vcenterId, entry);
   return entry.promise;

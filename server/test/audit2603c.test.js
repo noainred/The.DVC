@@ -301,16 +301,12 @@ const PRUNE_SINGLE_OK = {
   'vmtrack/db.js:snaps': 'vCenter × 슬롯(2회/일) — 연 2만 행 수준',
   'vmtrack/db.js:ds_series': 'diff 저장 + 경계 이전 마지막 행 보존(NOT IN) — 청크화하면 보존 규칙을 청크마다 다시 계산해야 한다',
   'vmtrack/db.js:changes': 'diff 저장 + 로스터 VM 마지막 전이 보존(v2.603) — 같은 이유',
-  'guestdisk/db.js:vm_series': 'diff 저장 + 키 마지막 행 보존(상관 서브쿼리) — 후속 후보(규모 미측정)',
-  'guestdisk/db.js:part_series': '같은 이유 — 후속 후보(규모 미측정)',
   'sanswitch/perfDb.js:port_meta': '장비×포트 메타 — 상한 4,096행',
   'sanswitch/healthHistory.js:runs': '장비당 점검 이력 상한(SANHEALTH_MAX_RUNS 기본 24)',
   'partfault/db.js:part_event': '전이만 적재(상태가 바뀔 때만) — 유계',
   'storage/db.js:api_history': '후속 후보 — 장비 수 × 수집 주기 규모(미측정)',
   'storage/db.js:capacity_history': '후속 후보 — 장비 수 × 1시간 주기(기본 90일) 규모(미측정)',
   'storage/db.js:capacity_daily': '장비 × 일 1행(5년) — 20대 3.6만 행',
-  'capacity/db.js:samples': '⚠ 후속 후보 — 30초 원본 72시간(호스트 × 지표 수에 비례, 미측정). 보존을 줄이면 한 방 DELETE 가 된다',
-  'capacity/db.js:samples_hourly': '후속 후보 — 시간당 롤업(400일)',
 };
 test('추가①: 시계열 보존 정리에 청크 없는 한 방 DELETE 를 새로 만들지 않는다(허용 목록은 사유와 함께)', async () => {
   const { stripComments } = await import('./_stripComments.js');
@@ -335,7 +331,9 @@ test('추가①: 시계열 보존 정리에 청크 없는 한 방 DELETE 를 새
   assert.deepEqual(stale, [], `허용 목록에 있지만 소스에 없는 항목(청크로 바꿨으면 목록에서 빼라): ${stale.join(', ')}`);
   // 이번에 청크로 바꾼 모듈은 다시 한 방 DELETE 로 돌아가면 안 된다
   for (const k of ['linkcheck/db.js:link_sample', 'ping/db.js:samples', 'curuser/db.js:vc_series', 'horizon/sessionDb.js:hz_series',
-    'vmseries/db.js:spikes', 'vmseries/db.js:cover', 'rma/historyDb.js:rma_history', 'rma/testResults.js:test_results', 'sanswitch/perfDb.js:port_perf']) {
+    'vmseries/db.js:spikes', 'vmseries/db.js:cover', 'rma/historyDb.js:rma_history', 'rma/testResults.js:test_results', 'sanswitch/perfDb.js:port_perf',
+    // v2.605(감사 DB2605-03·04): capacity 원본·롤업과 게스트 디스크 이력도 청크로 바꿨다 — 허용 목록에서 뺐다.
+    'capacity/db.js:samples', 'capacity/db.js:samples_hourly', 'guestdisk/db.js:vm_series', 'guestdisk/db.js:part_series']) {
     assert.ok(!found.includes(k), `${k} 가 한 방 DELETE 로 되돌아갔다`);
     assert.ok(!PRUNE_SINGLE_OK[k], k);
   }
