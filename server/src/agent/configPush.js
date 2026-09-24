@@ -8,6 +8,7 @@ import path from 'node:path';
 import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; // v2.606 EDGE2606-03
 import { collectConfigDir, REDACTED_META, SKIPPED_META, isRuntimeStateFile, settingsFingerprint } from '../backup/service.js';
 
 let timer = null;
@@ -74,8 +75,13 @@ async function _pushConfigNow({ onlyIfChanged = false } = {}) {
     });
     const skippedInfo = skipped.length ? { skipped } : {};
     if (res.ok) {
+      // v2.606 EDGE2606-03: 200 이어도 중앙이 파일을 거부(rejectedFiles — 길이 상한)·상한(omitted)으로 뺄 수 있다 — 상태·콘솔에.
+      const reply = await readCentralReply(res);
+      const drop = dropSummaryOf(reply);
+      const rejectedNames = Array.isArray(reply?.rejectedFiles) ? reply.rejectedFiles.slice(0, 50).map((x) => (x && typeof x === 'object' ? `${String(x.name ?? '').slice(0, 160)}:${String(x.reason ?? '').slice(0, 30)}` : String(x).slice(0, 200))) : [];
       console.log(`[config-push] sent → ${config.agent.centralUrl} (${Object.keys(files).length}개 설정${skipped.length ? ` · 크기 초과 ${skipped.length}개 제외` : ''})`);
-      _last = { at: Date.now(), ok: true, files: Object.keys(files).length, status: res.status, ...skippedInfo };
+      _last = { at: Date.now(), ok: true, files: Object.keys(files).length, status: res.status, ...skippedInfo, ...(drop ? { centralDropped: { ...drop, ...(rejectedNames.length ? { rejectedFileNames: rejectedNames } : {}) } } : {}) };
+      warnDrop('config-push', drop);
       _lastPushedFp = fp;
     } else {
       // v2.583 감사 #34: 403(토큰)·413(본문 한도)을 조용히 false 로 넘기지 않는다 — 상태·콘솔에 남긴다.

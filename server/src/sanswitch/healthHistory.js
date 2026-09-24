@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
 import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
 
 const DB_PATH = () => process.env.SANHEALTH_DB_PATH
@@ -30,6 +31,8 @@ const DB_PATH = () => process.env.SANHEALTH_DB_PATH
 export const MAX_RUNS = Math.max(10, Number(process.env.SANHEALTH_MAX_RUNS) || 24);
 
 let x = null; let ready = null; let initError = null;
+// v2.606(DB2606-03): 첫 open 이 잠금이면 initError 로 래치하지 않고 30초 뒤 다시 연다(util/sqliteOpen.js 규약).
+const _lock = createLockRetry(30_000);
 
 function prepare(db) {
   db.exec(`
@@ -65,20 +68,26 @@ function prepare(db) {
 async function open() {
   if (x) return x;
   if (initError) return null;
-  if (!ready) {
-    ready = (async () => {
-      // eslint-disable-next-line import/no-unresolved
-      const { DatabaseSync } = await import('node:sqlite');
-      const p = DB_PATH();
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      const db = new DatabaseSync(p);
-      try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
+  if (ready) return ready;
+  if (_lock.blocked()) return null;
+  ready = (async () => {
+    // eslint-disable-next-line import/no-unresolved
+    const { DatabaseSync } = await import('node:sqlite');
+    const p = DB_PATH();
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    // busy_timeout 먼저 · 잠금이면 그 시도의 핸들을 닫고 던진다(예전: 실패한 핸들을 닫지도 않았다).
+    return withOpenCleanup(async () => {
+      const db = openSqlite(new DatabaseSync(p));
       const st = prepare(db);
       try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
       x = { db, st, path: p };
+      _lock.ok();
       return x;
-    })().catch((e) => { initError = e; return null; });
-  }
+    });
+  })().catch((e) => {
+    if (_lock.onFail(e)) { console.warn(`[san-health] 이력 DB 잠김(${e.message}) — 30초 뒤 다시 엽니다(비활성으로 고정하지 않음)`); return null; }
+    initError = e; return null;
+  }).finally(() => { ready = null; });
   return ready;
 }
 
@@ -86,7 +95,8 @@ export async function healthHistoryStatus() {
   const h = await open();
   return {
     available: !!h, path: h ? h.path : DB_PATH(), maxRuns: MAX_RUNS,
-    error: initError ? String(initError.message || initError).slice(0, 200) : '',
+    error: initError ? String(initError.message || initError).slice(0, 200) : (h ? '' : _lock.note()),
+    locked: !h && !initError && !!_lock.lastLock(),
     ...(h ? h.st.stats.get() : { rows: null, mn: null, mx: null }),
   };
 }

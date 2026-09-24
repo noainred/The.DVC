@@ -2,6 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import { blankOr } from './blankOr.js';
+
+// v2.606(감사 WEB2606-04): 포트 칸은 원문 문자열 상태로 두고, 보낼 때 빈 칸은 빼서(undefined — JSON 에서 빠진다) 서버가
+// 이전 값을 유지하게 한다. 예전 `Number('')` 는 0 을, 추가 프록시 칸은 '' 를 저장했고 화면은 `|| 22` 로 22 를 보였다.
+const withPorts = (c) => ({
+  ...c,
+  ...(c.publicPortBase !== undefined ? { publicPortBase: blankOr(c.publicPortBase) } : {}),
+  ...(c.deploy ? { deploy: { ...c.deploy, port: blankOr(c.deploy.port) } } : {}),
+  ...(c.guacd ? { guacd: { ...c.guacd, port: blankOr(c.guacd.port) } } : {}),
+});
 
 /** 설정 → 중계 서버(프록시): HAProxy Data Plane / SSH 자동배포 + vCenter별 프록시 할당. */
 export default function ProxySettings() {
@@ -32,7 +42,7 @@ export default function ProxySettings() {
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4500); };
 
   const saveCfg = async () => {
-    const r = await putJson('/remote/config', cfg).catch(() => ({ ok: false }));
+    const r = await putJson('/remote/config', withPorts(cfg)).catch(() => ({ ok: false }));
     if (r.config) setCfg(r.config);
     flash(!!r.config, r.config ? '설정을 저장했습니다.' : '저장 실패');
   };
@@ -41,7 +51,7 @@ export default function ProxySettings() {
     flash(r.ok, r.ok ? `Data Plane 연결 성공 (${r.ms}ms)` : `실패: ${r.reason}`);
   };
   const testDeploy = async () => {
-    const r = await postJson('/remote/deploy/test', { deploy: cfg.deploy }).catch((e) => ({ ok: false, reason: e.message }));
+    const r = await postJson('/remote/deploy/test', { deploy: withPorts({ deploy: cfg.deploy }).deploy }).catch((e) => ({ ok: false, reason: e.message }));
     flash(r.ok, r.ok ? `SSH 접속 성공 · ${r.haproxy || ''} · cfg ${r.configReadable ? '읽기OK' : '없음'}` : `실패: ${r.reason}`);
   };
   const deployNow = async () => {
@@ -76,9 +86,9 @@ export default function ProxySettings() {
           <label>사용자<input className="input" value={cfg.dataplane.username} onChange={(e) => setCfg({ ...cfg, dataplane: { ...cfg.dataplane, username: e.target.value } })} /></label>
           <label>비밀번호<input className="input" type="password" value={cfg.dataplane.password} onChange={(e) => setCfg({ ...cfg, dataplane: { ...cfg.dataplane, password: e.target.value } })} placeholder="********" /></label>
           <label>프록시 공개 주소(사용자 접속/SSH 게이트웨이)<input className="input" value={cfg.proxyHost} onChange={(e) => setCfg({ ...cfg, proxyHost: e.target.value })} placeholder="proxy.corp.com" /></label>
-          <label>공개 포트 시작<input className="input" type="number" value={cfg.publicPortBase} onChange={(e) => setCfg({ ...cfg, publicPortBase: Number(e.target.value) })} /></label>
+          <label>공개 포트 시작<input className="input" type="number" value={cfg.publicPortBase ?? ''} onChange={(e) => setCfg({ ...cfg, publicPortBase: e.target.value })} /></label>
           <label>guacd 호스트(RDP 웹콘솔, 선택)<input className="input" value={cfg.guacd.host} onChange={(e) => setCfg({ ...cfg, guacd: { ...cfg.guacd, host: e.target.value } })} placeholder="(없으면 .rdp 다운로드)" /></label>
-          <label>guacd 포트<input className="input" type="number" value={cfg.guacd.port} onChange={(e) => setCfg({ ...cfg, guacd: { ...cfg.guacd, port: Number(e.target.value) } })} /></label>
+          <label>guacd 포트<input className="input" type="number" value={cfg.guacd.port ?? ''} onChange={(e) => setCfg({ ...cfg, guacd: { ...cfg.guacd, port: e.target.value } })} /></label>
         </div>
         <div className="flex gap" style={{ marginTop: 10 }}>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={saveCfg}>저장</button>
@@ -96,7 +106,7 @@ export default function ProxySettings() {
         <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>프록시 서버에 SSH로 접속해 haproxy.cfg의 관리 블록을 갱신하고 검증(haproxy -c) 후 reload합니다. 원본은 자동 백업됩니다.</div>
         <div className="spec-grid">
           <label>SSH 호스트<input className="input" value={cfg.deploy.host} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, host: e.target.value } })} placeholder="proxy.corp.com" /></label>
-          <label>포트<input className="input" type="number" value={cfg.deploy.port} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, port: Number(e.target.value) } })} /></label>
+          <label>포트<input className="input" type="number" value={cfg.deploy.port ?? ''} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, port: e.target.value } })} /></label>
           <label>사용자<input className="input" value={cfg.deploy.username} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, username: e.target.value } })} placeholder="root" /></label>
           <label>비밀번호<input className="input" type="password" value={cfg.deploy.password} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, password: e.target.value } })} placeholder="********" /></label>
           <label style={{ gridColumn: '1 / -1' }}>개인키(PEM, 선택 — 입력 시 비밀번호 대신 사용)<textarea className="input" rows={2} value={cfg.deploy.privateKey} onChange={(e) => setCfg({ ...cfg, deploy: { ...cfg.deploy, privateKey: e.target.value } })} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 11 }} /></label>
@@ -189,7 +199,7 @@ export function ProxyEditor({ initial, onSave, onClose }) {
   const [p, setP] = useState({ ...initial, vcenterIdsText: (initial.vcenterIds || []).join(', ') });
   const set = (k) => (e) => setP((s) => ({ ...s, [k]: e.target.value }));
   const setSub = (grp, k) => (e) => setP((s) => ({ ...s, [grp]: { ...s[grp], [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value } }));
-  const submit = () => onSave({ ...p, publicPortBase: Number(p.publicPortBase) || 20000, vcenterIds: p.vcenterIdsText.split(',').map((x) => x.trim()).filter(Boolean) });
+  const submit = () => onSave({ ...withPorts(p), vcenterIds: p.vcenterIdsText.split(',').map((x) => x.trim()).filter(Boolean) });
 
   return (
     <Modal title={initial.id ? `프록시 편집 — ${initial.name}` : '프록시 추가'} onClose={onClose} width={620}>
@@ -216,7 +226,7 @@ export function ProxyEditor({ initial, onSave, onClose }) {
         </label>
         <div className="spec-grid">
           <label>SSH 호스트<input className="input" value={p.deploy?.host || ''} onChange={setSub('deploy', 'host')} /></label>
-          <label>포트<input className="input" type="number" value={p.deploy?.port || 22} onChange={setSub('deploy', 'port')} /></label>
+          <label>포트<input className="input" type="number" value={p.deploy?.port ?? ''} onChange={setSub('deploy', 'port')} /></label>
           <label>사용자<input className="input" value={p.deploy?.username || ''} onChange={setSub('deploy', 'username')} /></label>
           <label>비밀번호<input className="input" type="password" value={p.deploy?.password || ''} onChange={setSub('deploy', 'password')} placeholder="********" /></label>
           <label style={{ gridColumn: '1 / -1' }}>haproxy.cfg 경로<input className="input" value={p.deploy?.haproxyConfigPath || ''} onChange={setSub('deploy', 'haproxyConfigPath')} /></label>
@@ -226,7 +236,7 @@ export function ProxyEditor({ initial, onSave, onClose }) {
         <b style={{ fontSize: 13 }}>guacd (RDP 웹콘솔, 선택)</b>
         <div className="spec-grid" style={{ marginTop: 6 }}>
           <label>guacd 호스트<input className="input" value={p.guacd?.host || ''} onChange={setSub('guacd', 'host')} /></label>
-          <label>포트<input className="input" type="number" value={p.guacd?.port || 4822} onChange={setSub('guacd', 'port')} /></label>
+          <label>포트<input className="input" type="number" value={p.guacd?.port ?? ''} onChange={setSub('guacd', 'port')} /></label>
         </div>
       </div>
       <div className="flex gap" style={{ marginTop: 14 }}>

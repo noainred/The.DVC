@@ -86,13 +86,13 @@ function prepare(db) {
     insSpike: db.prepare('INSERT OR REPLACE INTO spikes (kind, ref, t0, t1, n, cols, data, mxcpu, mxmem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
     // 전 VM 순위용 — BLOB 을 풀지 않고 행 단위 집계만(창 안 행 수 × O(1)).
     topInWindow: db.prepare(`SELECT kind, ref, COUNT(*) AS rows, SUM(n) AS moments, MAX(mxcpu) AS mxcpu, MAX(mxmem) AS mxmem, MIN(t0) AS firstT, MAX(t1) AS lastT
-      FROM spikes WHERE t1>=? AND t0<=? GROUP BY kind, ref ORDER BY moments DESC LIMIT ?`),
+      FROM spikes WHERE t0>=? AND t1>=? AND t0<=? GROUP BY kind, ref ORDER BY moments DESC LIMIT ?`),
     upCover: db.prepare('INSERT INTO cover (kind, ref, h, samples) VALUES (?, ?, ?, ?) ON CONFLICT(kind, ref, h) DO UPDATE SET samples = samples + excluded.samples'),
     upCursor: db.prepare('INSERT INTO cursor (kind, ref, last_ts) VALUES (?, ?, ?) ON CONFLICT(kind, ref) DO UPDATE SET last_ts = MAX(last_ts, excluded.last_ts)'),
     getCursor: db.prepare('SELECT last_ts FROM cursor WHERE kind=? AND ref=?'),
     allCursors: db.prepare('SELECT kind, ref, last_ts FROM cursor'),
     spikesOf: db.prepare('SELECT t0, t1, n, cols, data FROM spikes WHERE kind=? AND ref=? AND t1>=? AND t0<=? ORDER BY t0'),
-    spikesInWindow: db.prepare('SELECT kind, ref, t0, t1, n, cols, data FROM spikes WHERE t1>=? AND t0<=? ORDER BY t0'),
+    spikesInWindow: db.prepare('SELECT kind, ref, t0, t1, n, cols, data FROM spikes WHERE t0>=? AND t1>=? AND t0<=? ORDER BY t0'),
     coverOf: db.prepare('SELECT h, samples FROM cover WHERE kind=? AND ref=? AND h>=? AND h<=? ORDER BY h'),
     coverHours: db.prepare('SELECT h, COUNT(*) AS entities, SUM(samples) AS samples FROM cover WHERE kind=? AND h>=? AND h<=? GROUP BY h ORDER BY h'),
     firstCover: db.prepare('SELECT MIN(h) AS mn, MAX(h) AS mx FROM cover WHERE kind=? AND ref=?'),
@@ -203,18 +203,26 @@ export async function spikeRows(vcenterId, kind, ref, fromTs, toTs) {
   return x.st.spikesOf.all(kind, ref, fromTs, toTs);
 }
 
+/**
+ * 스파이크 한 행의 최대 길이(t1 − t0) 상한(v2.606 DB2606-04). 한 행은 수집 1회(실시간 버퍼 maxSample 180 × 20초 = 60분,
+ * vmseries/collect.js)의 순간만 패킹하므로 60분을 넘지 않는다. 창 조회에 't0 >= from − 이 값' 하한을 더해 idx_spikes_t0
+ * 범위 탐색을 타게 한다(예전 't1>=? AND t0<=?' 는 t0 하한이 없어 PK 전체 스캔 + temp b-tree 였다 — 1일 조회도 보존 90일 전량).
+ * 여유를 두어 2시간이다(결과는 같다 — 60분보다 긴 행은 만들어지지 않는다).
+ */
+export const SPIKE_ROW_MAX_SPAN_MS = 2 * 3_600_000;
+
 /** 창 안 모든 엔티티의 스파이크 행(패킹 그대로). */
 export async function spikeRowsInWindow(vcenterId, fromTs, toTs) {
   const x = await getVmSeriesDb(vcenterId, { create: false });
   if (!x) return null;
-  return x.st.spikesInWindow.all(fromTs, toTs);
+  return x.st.spikesInWindow.all(fromTs - SPIKE_ROW_MAX_SPAN_MS, fromTs, toTs);
 }
 
 /** 창 안 엔티티별 행 집계(BLOB 미해제) — 전 VM 순위. */
 export async function topInWindow(vcenterId, fromTs, toTs, limit = 200) {
   const x = await getVmSeriesDb(vcenterId, { create: false });
   if (!x) return null;
-  return x.st.topInWindow.all(fromTs, toTs, pageArgs({ limit }, { def: 200, max: 2000 }).limit).map((r) => ({
+  return x.st.topInWindow.all(fromTs - SPIKE_ROW_MAX_SPAN_MS, fromTs, toTs, pageArgs({ limit }, { def: 200, max: 2000 }).limit).map((r) => ({
     kind: r.kind, ref: r.ref, rows: Number(r.rows), moments: Number(r.moments), mxcpu: Number(r.mxcpu), mxmem: Number(r.mxmem), firstT: Number(r.firstT), lastT: Number(r.lastT),
   }));
 }

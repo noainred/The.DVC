@@ -206,8 +206,8 @@ adminRouter.put('/os-scan/settings', adminOnly, (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) {
     return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '실제 OS 스캔 설정은 전 법인 공용이고 전 vCenter 게스트에 로그인합니다 — 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' });
   }
-  const settings = saveOsScanSettings(req.body || {});
-  res.json({ ok: true, ...scopedOsScanStatus(req), settings });
+  const status = scopedOsScanStatus(req);   // 예전과 같은 순서(저장 전 상태 + 저장 결과) — 전체 범위 admin 응답은 그대로
+  res.json({ ok: true, ...status, settings: saveOsScanSettings(req.body || {}) });
 });
 // v2.599: 범위 제한 admin 의 즉시 스캔은 **범위 안 vCenter 하나**만 — 범위 밖 지정은 404(존재 은닉), 미지정은 400
 //   (미지정이면 전 vCenter 를 돌아 범위 밖 게스트에 로그인한다).

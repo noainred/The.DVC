@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { makeLatestGate } from './latestGate.js';
 import { usePolling, fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
@@ -68,6 +69,8 @@ export default function PingMonitor() {
   const [sel, setSel] = useState(null);        // 선택 대상 id
   const [range, setRange] = useState('6h');
   const [series, setSeries] = useState(null);
+  // v2.606 LEFT2606-05: 늦게 온 이전 응답(다른 대상·기간)을 버린다 — 요청마다 세대를 올리고 도착 시 최신 세대만 반영.
+  const seriesGate = useRef(makeLatestGate()).current;
   const [seriesErr, setSeriesErr] = useState(null);
   const [form, setForm] = useState(null);      // 추가/수정 폼
   const [msg, setMsg] = useState(null);
@@ -81,9 +84,12 @@ export default function PingMonitor() {
   useEffect(() => { if (sel && !targets.some((t) => t.id === sel)) setSel(null); }, [targets, sel]);
 
   const loadSeries = () => {
+    const isCurrent = seriesGate.next();
     if (!sel) { setSeries(null); return; }
     setSeriesErr(null);
-    fetchJson('/ping/series', { id: sel, range }).then((r) => { if (r.ok) setSeries(r); else setSeriesErr(r.reason || '조회 실패'); }).catch((e) => setSeriesErr(e.message));
+    fetchJson('/ping/series', { id: sel, range })
+      .then((r) => { if (!isCurrent()) return; if (r.ok) setSeries(r); else setSeriesErr(r.reason || '조회 실패'); })
+      .catch((e) => { if (isCurrent()) setSeriesErr(e.message); });
   };
   useEffect(() => { loadSeries(); /* eslint-disable-next-line */ }, [sel, range]);
 

@@ -463,15 +463,24 @@ api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, async (req
   const dcs = String(req.query.datacenterId || '').split(',').map((x) => x.trim()).filter(Boolean).map((x) => (x === NONE_DC ? '' : x));
   const dcSet = dcs.length ? new Set(dcs) : null;
   const devices = listDevices().filter((d) => d.enabled !== false && (!dcSet || dcSet.has(String(d.datacenterId || ''))));
-  const results = []; const missing = []; const recorded = [];
+  const results = []; const missing = []; const recorded = []; const failed = [];
   for (const d of devices) {
     const snap = snapshotFor(d.id);
-    if (!snap) { missing.push({ deviceId: d.id, name: d.name || (isAdminReq(req) ? d.host : maskedNameLabel(d)), agent: d.agent || '', datacenterId: d.datacenterId || '' }); continue; }
-    const r = checkDevice(snap, { baseline: getBaseline(d.id) });
-    if (r) {
-      results.push({ ...r, datacenterId: d.datacenterId || '' });
-      // 전체 점검도 기록한다(같은 수집 시각이면 healthHistory 가 스스로 건너뛴다).
-      recorded.push(recordRun(r, { ports: checkPorts(snap, { baseline: getBaseline(d.id) }) }));
+    const nameOf = () => d.name || (isAdminReq(req) ? d.host : maskedNameLabel(d));
+    if (!snap) { missing.push({ deviceId: d.id, name: nameOf(), agent: d.agent || '', datacenterId: d.datacenterId || '' }); continue; }
+    // v2.606(감사 CEN2606-03 — 재현): 장비별로 방어한다. 예전에는 한 장비의 깨진 스냅샷(ports.list:[null] 등)이 던지면
+    //   전 스위치의 월간 점검이 500 으로 사라졌다. 실패한 장비는 빼지 않고 `failed` 로 밝힌다(조용한 제외 금지 — v2.519).
+    try {
+      const r = checkDevice(snap, { baseline: getBaseline(d.id) });
+      if (r) {
+        const portsRes = checkPorts(snap, { baseline: getBaseline(d.id) });
+        results.push({ ...r, datacenterId: d.datacenterId || '' });
+        // 전체 점검도 기록한다(같은 수집 시각이면 healthHistory 가 스스로 건너뛴다).
+        recorded.push(Promise.resolve().then(() => recordRun(r, { ports: portsRes })).catch(() => ({ saved: false, error: true })));
+      }
+    } catch (e) {
+      failed.push({ deviceId: d.id, name: nameOf(), agent: d.agent || '', datacenterId: d.datacenterId || '',
+        reason: `스냅샷 형식 오류로 점검하지 못했습니다(${String(e?.message || e).slice(0, 120)})` });
     }
   }
   const recStats = (await Promise.all(recorded)).reduce((a, x) => { if (x.saved) a.saved++; else a.skipped++; return a; }, { saved: 0, skipped: 0 });
@@ -481,7 +490,7 @@ api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, async (req
   })();
   res.json({
     ok: true, at: Date.now(),
-    summary: { ...summarizeAll(results), missing: missing.length, registered: devices.length },
+    summary: { ...summarizeAll(results), missing: missing.length, failed: failed.length, registered: devices.length },
     // v2.599(AUTHZ-2599-03): 장비별 결과의 host 도 비-admin 에는 가린다(단건 점검과 같은 기준).
     // v2.603 AUTHZ-2603-02: items[].detail 의 오류 원문 주소도 등록부 전 주소로 가린다.
     results: (() => {
@@ -490,7 +499,7 @@ api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, async (req
       return results.map((r) => ({ ...scrubStringsDeep(maskSnapAddress(r), hs), datacenterName: dcNameOf(r.datacenterId) }));
     })(),
     ...(isAdminReq(req) ? {} : { addressHidden: true }),
-    missing, items: CHECK_ITEMS, baselines: listBaselines(),
+    missing, failed, items: CHECK_ITEMS, baselines: listBaselines(),
     // 이력 기록 결과 — '몇 건이 새로 기록되고 몇 건이 같은 스냅샷이어서 건너뛰었나'.
     recordedRuns: recStats, historyDb: scopeDbStatus(await healthHistoryStatus(), req.user),
   });
@@ -647,8 +656,11 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
       totalBytes: snap.capacity?.totalBytes ?? null, usedBytes: snap.capacity?.usedBytes ?? null,
       pct: snap.capacity?.pct ?? null,
     };
-    for (const key of [snap.serial, ...(snap.extra?.appliances || []).map((a) => a.serviceTag)]) {
-      if (key) capBySerial.set(capKey(String(d.datacenterId || ''), norm(key)), info);
+    // v2.606(감사 CEN2606-04): appliances 가 배열이 아니거나 원소가 null 이면 이 요약 전체가 500 이었다 — 객체 원소의 글자만 읽는다.
+    const apps = Array.isArray(snap.extra?.appliances) ? snap.extra.appliances : [];
+    const keys = [snap.serial, ...apps.map((a) => (a && typeof a === 'object' ? a.serviceTag : null))];
+    for (const key of keys) {
+      if (key && (typeof key === 'string' || typeof key === 'number')) capBySerial.set(capKey(String(d.datacenterId || ''), norm(key)), info);
     }
   }
 

@@ -126,7 +126,8 @@ export function clusterMatrix(slice = {}, { maxRows = 200, normalize = false } =
   const shape = (a) => ({
     cpuUsagePct: pct(a.cpuUsedMhz, a.cpuReadMhz),
     memUsagePct: pct(a.memUsedMB, a.memReadMB),
-    hostsUsageExcluded: a.excluded,
+    // 지표가 아니라 설명용 — 있을 때만 싣는다(셀 키 = 지표 키 계약. DATASTORE usageUnknown 과 같은 방식).
+    ...(a.excluded ? { hostsUsageExcluded: a.excluded } : {}),
     vcpuPerCore: a.cores > 0 ? r1(a.vcpuOn / a.cores) : null,
     memOvercommitPct: a.memTotalMB > 0 ? Math.round((a.memAllocOnMB / a.memTotalMB) * 100) : null,
     hosts: a.hosts,

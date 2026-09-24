@@ -15,6 +15,18 @@ import { ipBlockReason } from '../collector/registry.js'; // v2.537: proxyHost �
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
+import { numOrNull } from '../util/numOrNull.js';
+
+/**
+ * v2.606(감사 WEB2606-04): 포트 칸 → 저장값. 1~65535 정수만 받고 **빈 값·숫자 아님·범위 밖은 이전 값 유지**다.
+ * 예전에는 병합만 해서 칸을 비우면 0('' 도) 이 저장됐고, 사용 지점(ssh2 `port || 22`·guacd `|| 4822`)이 조용히
+ * 기본 포트로 되돌렸다 — 비표준 포트(예 2222)를 쓰던 현장이 칸을 비우면 말없이 22 로 접속했다. 99999 도 그대로 저장됐다.
+ */
+export function portOrPrev(v, prev) {
+  if (v === undefined) return prev;
+  const n = numOrNull(v);
+  return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : prev;
+}
 
 const FILE = path.join(config.configDir, 'remote-access.json');
 
@@ -160,17 +172,23 @@ export function saveConfig(partial = {}) {
   }
   if (partial.deploy) {
     const dep = { ...partial.deploy };
+    if ('port' in dep) dep.port = portOrPrev(dep.port, c.deploy?.port); // accessMoved 보다 먼저(빈 칸이 '접속처 변경' 으로 읽히지 않게)
     const moved = accessMoved(c.deploy, dep, DEPLOY_ID_KEYS);
     if (dep.password === REDACT) delete dep.password;
     if (dep.privateKey === REDACT) delete dep.privateKey;
     c.deploy = { ...c.deploy, ...dep };
     if (moved) dropCarriedSecrets(c.deploy, dep, ['password', 'privateKey']);
   }
-  if (partial.guacd) c.guacd = { ...c.guacd, ...partial.guacd };
+  if (partial.guacd) {
+    const g = { ...partial.guacd };
+    if ('port' in g) g.port = portOrPrev(g.port, c.guacd?.port);
+    c.guacd = { ...c.guacd, ...g };
+  }
   // v2.537: proxyHost 는 SSH 게이트웨이가 다이얼하는 주소다 — 루프백·링크로컬 거부(사용자가 접속할
   // 주소이기도 하므로 127.x 는 어차피 동작하지 않는다). 이름은 통과시킨다(접속 시 lookup 훅이 본다).
   { const bad = proxyHostIssue(partial.proxyHost); if (bad) throw new Error(bad); }
-  for (const k of ['proxyHost', 'publicPortBase']) if (partial[k] !== undefined) c[k] = partial[k];
+  if (partial.proxyHost !== undefined) c.proxyHost = partial.proxyHost;
+  if (partial.publicPortBase !== undefined) c.publicPortBase = portOrPrev(partial.publicPortBase, c.publicPortBase);
   persist();
   return getConfigSafe();
 }
@@ -244,15 +262,26 @@ export function saveProxy(body = {}) {
   const existing = body.id ? c.proxies.find((p) => p.id === body.id) : null;
   const base = existing || normalizeProxy({ id: crypto.randomBytes(4).toString('hex') });
   const next = { ...base };
-  for (const k of ['name', 'proxyHost', 'publicPortBase', 'vcenterIds']) if (body[k] !== undefined) next[k] = body[k];
+  for (const k of ['name', 'proxyHost', 'vcenterIds']) if (body[k] !== undefined) next[k] = body[k];
+  if (body.publicPortBase !== undefined) next.publicPortBase = portOrPrev(body.publicPortBase, base.publicPortBase); // v2.606 WEB2606-04
   { const bad = proxyHostIssue(body.proxyHost); if (bad) return { ok: false, reason: bad }; } // v2.537
   if (body.dataplane) {
     const bad = basePathIssue(body.dataplane.basePath) || bindAddressIssue(body.dataplane.bindAddress);
     if (bad) return { ok: false, reason: bad };
     next.dataplane = mergeSecrets(base.dataplane || DEFAULTS.dataplane, { ...body.dataplane }, ['password'], DP_ID_KEYS);
   }
-  if (body.deploy) next.deploy = mergeSecrets(base.deploy || DEFAULTS.deploy, { ...body.deploy }, ['password', 'privateKey'], DEPLOY_ID_KEYS);
-  if (body.guacd) next.guacd = { ...(base.guacd || DEFAULTS.guacd), ...body.guacd };
+  if (body.deploy) {
+    const baseDep = base.deploy || DEFAULTS.deploy;
+    const dep = { ...body.deploy };
+    if ('port' in dep) dep.port = portOrPrev(dep.port, baseDep.port);
+    next.deploy = mergeSecrets(baseDep, dep, ['password', 'privateKey'], DEPLOY_ID_KEYS);
+  }
+  if (body.guacd) {
+    const baseG = base.guacd || DEFAULTS.guacd;
+    const g = { ...body.guacd };
+    if ('port' in g) g.port = portOrPrev(g.port, baseG.port);
+    next.guacd = { ...baseG, ...g };
+  }
   if (existing) c.proxies = c.proxies.map((p) => (p.id === existing.id ? next : p));
   else c.proxies.push(next);
   persist();

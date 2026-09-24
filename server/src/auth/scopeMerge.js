@@ -47,11 +47,25 @@ export function mergeScopedIds(before, body, allowed, allIds) {
   const prevSet = prev.length ? new Set(prev) : new Set(all);
   const ignored = req.filter((id) => !allowed.has(id));
   const inScopeReq = req.filter((id) => allowed.has(id));
-  const inScope = inScopeReq.length ? new Set(inScopeReq) : new Set([...prevSet].filter((id) => allowed.has(id)));
+  const prevInScope = [...prevSet].filter((id) => allowed.has(id));
+  const inScope = inScopeReq.length ? new Set(inScopeReq) : new Set(prevInScope);
   const mergedSet = new Set([...prevSet].filter((id) => !allowed.has(id)));
   for (const id of inScope) mergedSet.add(id);
   const same = mergedSet.size === prevSet.size && [...mergedSet].every((id) => prevSet.has(id));
-  if (same) return { merged: prev, ignored };
+  // 적용하지 않은 요청은 사유를 싣는다(v2.606 RECENT2606-04) — 화면이 '저장됐다' 고만 말하지 않게.
+  const emptyNote = req.length === 0 && prevInScope.length > 0
+    ? '범위 안 vCenter 를 모두 빼는 요청은 적용하지 않았습니다 — 빈 목록은 이 계정에서 \'범위 안은 그대로\' 를 뜻합니다.'
+    : null;
+  if (same) return { merged: prev, ignored, ...(emptyNote && prev.length ? { unapplied: 'empty-in-scope', unappliedReason: emptyNote } : {}) };
+  // v2.606 RECENT2606-04: 직전이 '전체 대상([])' 이면 범위 계정은 그것을 **고정 목록으로 바꾸지 않는다**. 펼쳐 저장하면
+  //   이후 추가되는 vCenter(범위 밖 법인 포함)가 대상에서 조용히 빠져, 전체 범위 admin 이 모르는 사이 전 법인 설정의
+  //   뜻이 바뀐다(AUTHZ2605-01 '범위 밖은 직전 값 그대로' 와 어긋난다). 직전 값을 그대로 두고 사유를 밝힌다.
+  if (!prev.length) {
+    return {
+      merged: prev, ignored, unapplied: 'all-mode',
+      unappliedReason: '대상이 \'전체 vCenter\' 로 설정돼 있어 범위 제한 계정은 목록을 바꿀 수 없습니다 — 전체 범위(vCenter 제한 없는) 계정이 바꿔야 합니다. 적용하지 않았습니다.',
+    };
+  }
   return { merged: [...mergedSet], ignored };
 }
 
