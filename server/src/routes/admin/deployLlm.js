@@ -4,7 +4,7 @@ import { saveNote, deleteNote } from '../../release-notes.js';
 import { loadLlmConfig, llmUrlIssue, saveLlmConfig } from '../../llm/config.js';
 import { ollamaTest } from '../../llm/ollama.js';
 import { installOllama } from '../../llm/ollamaDeploy.js';
-import { deployAgent, testTarget, installerInfo, checkAgentStatus } from '../../agent/deploy.js';
+import { deployAgent, testTarget, installerInfo, checkAgentStatus, envPairs, envPairsIssue } from '../../agent/deploy.js';
 import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../../upgrade/fetchPackage.js';
 import { getPackageSettings, savePackageSettings } from '../../upgrade/packageSettings.js';
 import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult, findTargetByHost, listTargetsRaw } from '../../agent/deployRegistry.js';
@@ -144,6 +144,24 @@ adminRouter.get('/agent-deploy/targets/sample.csv', adminOnly, (_req, res) => {
   res.send(deploySampleCsv());
 });
 
+/**
+ * v2.601(감사 LO2601-01): 행 검증에 env 블록 주입 검사를 더한다 — 값에 개행·NUL 이 있으면 원격 portal.env 에 새 키 줄이
+ * 생긴다(CSV 대량 배포는 눈으로 확인하기 어렵다). 판정은 deploy.js envPairsIssue 하나이고, 여기서는 보고서 항목을 'error' 로
+ * 바꾸고 요약 개수를 옮길 뿐이다(판정을 복제하지 않는다). 배포 실행(deployAgent)도 같은 검사를 한 번 더 한다.
+ */
+function markEnvIssues(rows, report, summary) {
+  const byLine = new Map(report.map((r) => [r.line, r]));
+  for (const row of rows) {
+    const issue = envPairsIssue(envPairs(row, 0));
+    if (!issue) continue;
+    const r = byLine.get(row._line);
+    if (!r || r.action === 'error') continue;
+    if (summary && typeof summary[r.action] === 'number') summary[r.action] -= 1;
+    if (summary && typeof summary.error === 'number') summary.error += 1;
+    r.action = 'error'; r.reason = issue;
+  }
+}
+
 adminRouter.post('/agent-deploy/targets/import', adminOnly, (req, res) => {
   const { rows, error } = parseTargetsCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
@@ -151,6 +169,7 @@ adminRouter.post('/agent-deploy/targets/import', adminOnly, (req, res) => {
 
   const existingId = (host, port, user) => findTargetByHost(host, port, user)?.id;
   const { report, summary } = analyzeTargetsImport(rows, { existingId });
+  markEnvIssues(rows, report, summary);
   if (req.body?.dryRun) return res.json({ ok: true, dryRun: true, report, summary, total: rows.length });
 
   const allowOverwrite = req.body?.overwrite === true;
@@ -253,6 +272,7 @@ adminRouter.post('/agent-deploy/bulk/preview', adminOnly, ownerIfAutoCentralToke
       existingId: (h, p, u) => findTargetByHost(h, p, u)?.id,
       blockReason: (h) => ipBlockReason(h),
     });
+    markEnvIssues(rows, report, summary);
     res.json({ ok: true, report, summary, skipped: skipped.slice(0, 50), header: !!header, columns, total: rows.length });
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
@@ -267,6 +287,7 @@ adminRouter.post('/agent-deploy/bulk/run', adminOnly, ownerIfAutoCentralToken, (
       existingId: (h, p, u) => findTargetByHost(h, p, u)?.id,
       blockReason: (h) => ipBlockReason(h),
     });
+    markEnvIssues(rows, report, null);
     const badLines = new Set(report.filter((r) => r.action === 'error').map((r) => r.line));
     const only = Array.isArray(req.body?.onlyLines) && req.body.onlyLines.length ? new Set(req.body.onlyLines.map(Number)) : null;
     const targets = rows.filter((r) => !badLines.has(r._line) && (!only || only.has(r._line)));

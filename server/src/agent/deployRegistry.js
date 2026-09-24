@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
+import { envPairs, envPairsIssue } from './deploy.js';
 
 const FILE = path.join(config.configDir, 'agent-deploy-targets.json');
 /**
@@ -72,6 +73,10 @@ export function saveTarget(body = {}) {
   const list = load();
   const existing = body.id ? list.find((t) => t.id === body.id) : null;
   const target = existing || { id: crypto.randomBytes(5).toString('hex'), enabled: true };
+  // v2.601(감사 LO2601-01): 저장 시점에 env 블록 주입을 거부한다 — 값에 개행·NUL 이 있으면 배포 때 원격 portal.env 에
+  // 새 키 줄이 생긴다. **병합 전**에 본다(existing 은 캐시 객체라 병합 뒤 거부하면 메모리 값이 이미 바뀐 채 남는다).
+  const envIssue = envPairsIssue(envPairs({ ...(existing || {}), ...body }, 0));
+  if (envIssue) return { ok: false, reason: envIssue };
   // ⚠ 보안(v2.500 감사 H1): SSH 접속처가 바뀌면 승계된 비밀을 버린다 — 판정은 **필드 병합 전**에
   // 해야 한다(병합 후에는 이전 값을 알 수 없다). 이 검사가 없던 v2.339~2.499 는
   // `{id:<기존>, host:'attacker', password:''}` 저장 후 상태확인/배포만 부르면 저장된 root 비밀번호와
