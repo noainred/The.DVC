@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   INV_STATE, INV_STATE_LABEL, INV_STATE_TONE, invRowState, ageText, rowExplain,
   rejectKindLine, rejectKindLabel, unverifiedNote, agentRowExplain, findingLine, findingGroupLine,
-  targetsText, findingCodesDeclared, bannerText, freshRateText, tableFootnotes,
+  targetsText, findingCodesDeclared, bannerText, freshRateText, tableFootnotes, unauthRejectNotes,
 } from './invCheckText.js';
 
 describe('행 상태는 서버 값을 읽기만 한다', () => {
@@ -210,5 +210,26 @@ describe('v2.600 WEB2600-02·05 — 전부 거부된 엣지·등록부 밖 vCent
   it('새 발견 코드 두 개의 문구가 있다', () => {
     expect(findingCodesDeclared()).toEqual(expect.arrayContaining(['inv-agent-rejected-only', 'inv-unregistered-vcenter']));
     expect(findingLine({ code: 'inv-unregistered-vcenter', target: 'vc-x' })).toContain('등록부에 없는');
+  });
+});
+
+describe('v2.602 WEB2602-02 — 인증 전 거부를 종류별로 말한다', () => {
+  it('수신 꺼짐·없는 경로는 토큰 문구로 뭉개지 않는다', () => {
+    const lines = unauthRejectNotes({ unauthRejects: 6, unauthRejectsByKind: { auth: 1, disabled: 3, 'unknown-route': 2 } });
+    expect(lines).toHaveLength(3);
+    expect(lines.filter((x) => x.includes('토큰 점검에서'))).toHaveLength(1);
+    expect(lines.find((x) => x.includes('**1건**'))).toContain('토큰 인증에 실패');
+    expect(lines.find((x) => x.includes('**3건**'))).toContain('수신이 꺼져');
+    expect(lines.find((x) => x.includes('**2건**'))).toContain('없는 경로');
+  });
+  it('전부 disabled 면 토큰 대조를 안내하지 않는다', () => {
+    const f = tableFootnotes({ rows: [], agents: [], unauthRejects: 3, unauthRejectsByKind: { disabled: 3 } });
+    expect(f.some((x) => x.includes('토큰 점검에서'))).toBe(false);
+    expect(f.some((x) => x.includes('3건'))).toBe(true);
+  });
+  it('종류를 모르면 원인을 단정하지 않는다', () => {
+    const [line] = unauthRejectNotes({ unauthRejects: 4 });
+    expect(line).toContain('4건');
+    expect(line).not.toContain('토큰 인증에 실패');
   });
 });

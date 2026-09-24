@@ -15,7 +15,7 @@ import {
   MAX_TARGETS_PER_AGENT, batchTag,
 } from '../../central/svcmonAssign.js';
 import { svcmonConfigPullStatus, pullSvcmonConfigNow } from '../../agent/svcmonConfigPull.js';
-import { canEdit } from './shared.js';
+import { canEdit, fullScopeOnly } from './shared.js';
 import { redactEdgeSummary, redactPushStatus } from '../../auth/scopeStatus.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store as _storeForScope } from '../../store.js';
@@ -59,7 +59,7 @@ svcmonRouter.get('/assign', canEdit, (req, res) => {
  * 배정 저장 — 중앙 트리에서 범위를 잘라 그 엣지 몫으로 굳힌다(스냅샷).
  * `mode:'preview'` 면 저장하지 않고 무엇이 배포될지만 돌려준다.
  */
-svcmonRouter.put('/assign/:agent', canEdit, (req, res) => {
+svcmonRouter.put('/assign/:agent', canEdit, fullScopeOnly, (req, res) => {
   try {
     const agentName = String(req.params.agent || '').trim();
     const kind = KINDS.includes(req.body?.kind) ? req.body.kind : '';
@@ -101,7 +101,7 @@ svcmonRouter.put('/assign/:agent', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.delete('/assign/:agent', canEdit, (req, res) => {
+svcmonRouter.delete('/assign/:agent', canEdit, fullScopeOnly, (req, res) => {
   if (!deleteAssignment(req.params.agent, { user: req.user?.username })) {
     return res.status(404).json({ error: '그 엣지의 배정이 없습니다.' });
   }
@@ -109,7 +109,7 @@ svcmonRouter.delete('/assign/:agent', canEdit, (req, res) => {
 });
 
 /** 이 서버가 엣지일 때 — 정의를 즉시 1회 받아 적용(진단용). */
-svcmonRouter.post('/config-pull-now', canEdit, async (req, res) => {
+svcmonRouter.post('/config-pull-now', canEdit, fullScopeOnly, async (req, res) => {
   const r = await pullSvcmonConfigNow();
   logAudit({ user: req.user?.username, action: 'svcmon.config.pull', detail: r.ok ? `대상 ${r.added ?? '-'} · sig ${r.sig ?? '-'}` : (r.reason || '실패') });
   res.status(r.ok ? 200 : 202).json(r);
@@ -146,7 +146,7 @@ svcmonRouter.get('/edge-state', (req, res) => {
  * 진실의 원천은 '보고가 오는가'다(Active push 는 인바운드를 요구하지 않는다) — 응답에
  * 보고 상태를 함께 싣고, 화면도 그 순서로 보여준다.
  */
-svcmonRouter.post('/edges/:agent/probe', canEdit, async (req, res) => {
+svcmonRouter.post('/edges/:agent/probe', canEdit, fullScopeOnly, async (req, res) => {
   const r = await probeAgent(req.params.agent);
   logAudit({
     user: req.user?.username, action: 'svcmon.edge.probe', target: req.params.agent,
@@ -162,7 +162,7 @@ svcmonRouter.post('/edges/:agent/probe', canEdit, async (req, res) => {
 });
 
 /** 유령 엣지 정리(이름 변경·오타로 남은 항목). 대상 정의는 엣지가 갖고 있으므로 영향 없음. */
-svcmonRouter.delete('/edges/:agent', canEdit, (req, res) => {
+svcmonRouter.delete('/edges/:agent', canEdit, fullScopeOnly, (req, res) => {
   if (!forgetAgent(req.params.agent, req.user?.username)) {
     return res.status(404).json({ error: '그 엣지를 찾을 수 없습니다.' });
   }
@@ -170,13 +170,13 @@ svcmonRouter.delete('/edges/:agent', canEdit, (req, res) => {
 });
 
 /** 이 서버가 엣지일 때 — 즉시 1회 보고(진단용). 재진입 가드는 push 모듈이 공유한다. */
-svcmonRouter.post('/push-now', canEdit, async (req, res) => {
+svcmonRouter.post('/push-now', canEdit, fullScopeOnly, async (req, res) => {
   const r = await pushSvcmonNow();
   logAudit({ user: req.user?.username, action: 'svcmon.push.now', detail: r.ok ? `행 ${r.rows} · 청크 ${r.chunks}` : (r.reason || '실패') });
   res.status(r.ok ? 200 : 202).json(r);
 });
 
 /** 무보고 감시 즉시 1회(진단용). */
-svcmonRouter.post('/silence-check', canEdit, async (req, res) => res.json(await checkSilenceOnce()));
+svcmonRouter.post('/silence-check', canEdit, fullScopeOnly, async (req, res) => res.json(await checkSilenceOnce()));
 
 }

@@ -1,6 +1,7 @@
 // VmExport.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
-import { fetchJson, getToken } from '../../api.js';
+import { fetchJson, downloadFile } from '../../api.js';
+import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, StateBadge } from '../../components/ui.jsx';
 import { Card } from './shared.jsx';
 import { dayStamp } from '../../dayStamp.js';
@@ -15,6 +16,7 @@ export function VmExport({ scope }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [dlMsg, setDlMsg] = useState('');
   useEffect(() => {
     setData(null); setErr(null);
     if (!scope) return undefined;
@@ -26,10 +28,10 @@ export function VmExport({ scope }) {
       .finally(() => { if (!dead) setBusy(false); });
     return () => { dead = true; };
   }, [scope]);
+  // v2.602(감사 WEB2602-01): downloadFile 이 res.ok 를 본다 — 실패(409·403·5xx)의 오류 JSON 을 파일로 저장하지 않고 사유를 화면에 말한다.
   const download = async () => {
-    const res = await fetch(`/api/tools/vm-export.csv?vcenterId=${encodeURIComponent(scope)}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
-    const blob = await res.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `vm-export-${scope}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
+    setDlMsg('');
+    try { await downloadFile(`/tools/vm-export.csv?vcenterId=${encodeURIComponent(scope)}`, `vm-export-${scope}-${dayStamp()}.csv`); } catch (e) { setDlMsg(downloadFailText(e)); }
   };
 
   if (!scope) return <div className="card"><span className="muted">위 <b>범위</b>에서 vCenter 를 선택하세요 — 그 vCenter 의 모든 VM 상세(호스트·클러스터·NIC·디스크·데이터스토어·게스트 파티션 등)를 미리보고 CSV 로 내려받습니다.</span></div>;
@@ -58,6 +60,7 @@ export function VmExport({ scope }) {
         <Card label="컬럼 수" value={(data.columns || []).length} meta="CSV 로 전체 내보내기" />
         <button className="login-btn" style={{ flex: 'none', padding: '10px 20px' }} onClick={download}>⬇ CSV 다운로드 (전체 {data.total}대 · {(data.columns || []).length}컬럼)</button>
       </div>
+      {dlMsg && <div className="banner error" role="alert" style={{ marginBottom: 12 }}>{dlMsg}</div>}
       {!data.enriched && (
         <div className="card" style={{ borderColor: 'var(--amber,#f59e0b)', marginBottom: 12 }}>
           <span style={{ fontSize: 13 }}>⚠ 라이브 상세 보강 없이 스냅샷 필드만 포함됩니다 — {data.enrichError || '사유 미상'}. NIC/디스크별 상세·게스트 파티션 컬럼은 비어 있을 수 있습니다.</span>

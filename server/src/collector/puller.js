@@ -9,7 +9,7 @@ import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../util/readCapped.js'; /
 import { config } from '../config.js';
 import { loadCollectors } from './registry.js';
 import { setRemoteHost, clearCollectorHosts, setCollectorStatus, getCollectorStatus, clearStaleRemote } from './state.js';
-import { setCollectorServers } from './remoteInventory.js';
+import { setCollectorServers, sanitizeEdgeExport } from './remoteInventory.js';
 import { getDb } from '../idrac/db.js';
 import { describeError } from '../util/errors.js';
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -37,7 +37,9 @@ async function pullOne(c) {
   if (res.status === 401 || res.status === 403) throw new Error('수집 서버 토큰 불일치(인증 실패)');
   if (!res.ok) throw new Error(`export -> ${res.status} ${res.statusText}`);
   // v2.583: 해제 후 크기 상한(gzip 폭탄 방어 — util/readCapped.js).
-  const data = await readJsonCapped(res, EDGE_EXPORT_MAX_BYTES, '엣지 export 응답');
+  // v2.602(감사 CEN2602-01 high): 응답을 **쓰는 필드만·아는 타입으로** 좁힌 뒤에 쓴다 — 오염된 원소 하나(예:
+  //   serviceTag:{toString:1})가 함대 전체 물리 서버 집계·온도·3단 지도를 죽이지 못하게(remoteInventory.js 머리말).
+  const data = sanitizeEdgeExport(await readJsonCapped(res, EDGE_EXPORT_MAX_BYTES, '엣지 export 응답'));
   // 응답 대기(재시도 포함 최대 60초+) 중 이 수집기가 삭제/비활성됐을 수 있다 — 그대로 쓰면
   // 관리 라우트의 정리(clear)를 뒤늦게 도착한 이 쓰기가 되돌려 유령 데이터가 재등장한다.
   const still = loadCollectors().find((x) => x.id === c.id && x.enabled !== false);
@@ -76,10 +78,13 @@ async function pullOne(c) {
   catch (e) { console.warn(`[collector] ${c.id} 원격 전력 적재 실패:`, e.message); }
   // 서버 분석용 인벤토리 병합: 엣지가 보낸 서버 목록(자격증명 없음)을 그 수집기 것으로 교체
   // 저장한다. 위임 법인 서버가 중앙 '서버 분석'에 나타난다. 구버전 엣지는 servers가 없어 빈 배열.
-  setCollectorServers(c.id, data.datacenter || c.datacenter, Array.isArray(data.servers) ? data.servers : []);
+  setCollectorServers(c.id, data.datacenter || c.datacenter, data.servers || []);
+  const sd = data.serversDropped;
+  const serversDropped = sd && (sd.notObject + sd.badId + sd.overCount) > 0 ? sd : null;
+  if (serversDropped) console.warn(`[collector] ${c.id} export 서버 원소 ${sd.notObject + sd.badId + sd.overCount}개를 버림(객체 아님 ${sd.notObject} · id 오류 ${sd.badId} · 상한 초과 ${sd.overCount})`);
   const identity = identityIssue(c, data, loadCollectors().map((x) => x.id));
   if (identity) console.warn(`[collector] ${c.id} 정체 불일치: ${identity.reason}`);
-  return { hosts, duplicateSkipped: dupSkipped, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity, mock: data.mock === true };
+  return { hosts, duplicateSkipped: dupSkipped, version: data.version, datacenter: data.datacenter || c.datacenter, servers: Array.isArray(data.servers) ? data.servers.length : 0, serversDropped, serversCoerced: data.serversCoerced || 0, authDeny: data.authDeny || null, agent: data.agent || '', hostname: data.hostname || '', identity, mock: data.mock === true };
 }
 
 let pulling = false; // 재진입 가드 — 저하된 수집기(재시도 포함 60초+)가 있으면 주기가 겹쳐
@@ -126,7 +131,7 @@ async function pullNowInner() {
     try {
       const r = await pullTagged(c);
       fails.set(c.id, 0);
-      setCollectorStatus(c.id, { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock });
+      setCollectorStatus(c.id, { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny, serversDropped: r.serversDropped || null, serversCoerced: r.serversCoerced || 0, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock });
     } catch (err) {
       const d = describeError(err);
       const isAuth = /인증 실패|토큰/.test(d.message);

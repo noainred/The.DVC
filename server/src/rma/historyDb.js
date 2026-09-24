@@ -60,10 +60,13 @@ async function openInner() {
 
 export async function historyAvailable() { return !!(await open()); }
 
-/** 이력 1행 저장. 실패는 조용히 false(폴러 경로를 막지 않는다). */
+/**
+ * 이력 1행 저장. 던지지 않는다(폴러 경로를 막지 않는다). 반환: true 저장 · null DB 없음(open 이 이미 한 번 경고했다) ·
+ * false INSERT 실패(v2.602 CEN2602-03 — 호출자가 경고한다. DB 없음과 구분하지 않으면 매 잡마다 같은 경고가 찍힌다).
+ */
 export async function saveHistoryRow(h) {
   const db = await open();
-  if (!db) return false;
+  if (!db) return null;
   try {
     db.ins.run(h.reqId, h.agent, h.instance || '', h.cmd || '', JSON.stringify(h.args || {}), h.label || '', h.user || '',
       h.createdAt || null, h.takenAt || null, h.doneAt || Date.now(), h.ok ? 1 : 0, h.exitCode ?? null, h.timedOut ? 1 : 0,

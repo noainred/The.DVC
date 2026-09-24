@@ -63,14 +63,23 @@ async function _pull() {
     // '지금 수집' 요청 — 구성이 안 바뀌어도 **매 pull 마다** 처리한다(재수집 요청은 흔하다).
     // 요청 장비를 즉시 수집하고 바로 push 해 push 주기를 기다리지 않게 한다.
     const wants = Array.isArray(body?.collectNow) ? body.collectNow.slice(0, 20) : [];
+    // v2.602(EDGE2602-05): 실패도 **즉시** push 한다(스토리지·SAN 과 같은 규칙) — 예전에는 성공이 1건이라도 있을 때만
+    //   push 해, 실패 스냅샷이 다음 정기 push 까지 중앙에 닿지 않았다(사용자는 '지금 수집' 을 눌렀는데 결과가 안 보인다).
     let collected = 0;
-    for (const id of wants) {
-      const r = await collectDeviceNow(String(id));
-      if (r.ok) collected++;
+    let failed = 0;
+    let pushError = '';
+    if (wants.length) {
+      for (const id of wants) {
+        try {
+          const r = await collectDeviceNow(String(id));
+          if (r?.ok) collected++;
+          else { failed++; if (r?.reason) console.warn(`[pdu-config] 재수집 실패(${id}): ${r.reason}`); }
+        } catch (e) { failed++; console.warn(`[pdu-config] 재수집 실패(${id}): ${e.message}`); }
+      }
+      try { await pushPduNow(); } catch (e) { pushError = String(e?.message || e); console.warn(`[pdu-config] 재수집 push 실패: ${pushError}`); }
     }
-    if (collected) await pushPduNow();
 
-    _last = { at: Date.now(), ok: true, devices: devices.length, applied, intervalsApplied, collected };
+    _last = { at: Date.now(), ok: true, devices: devices.length, applied, intervalsApplied, collected, collectRequested: wants.length, collectFailed: failed, ...(pushError ? { pushError } : {}) };
     return { ok: true, ...(_last) };
   } catch (e) {
     _last = { at: Date.now(), ok: false, reason: e.message };

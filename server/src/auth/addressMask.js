@@ -33,11 +33,79 @@ export function hostVariants(h) {
   return [...new Set([raw, bare].filter(Boolean))];
 }
 
+/*
+ * v2.602 RECENT2602-01: 가림 비용은 '행 수 × 등록 주소 수' 였다. `scrubHosts` 가 부를 때마다 주소 전부의
+ * 표기 변형을 만들고 Set·정렬까지 다시 해, 파트 장애 2,000행 × 주소 1,200개가 **5.6초** 이벤트 루프를
+ * 막았다(비-admin 조회 경로). 이제 변형 목록·정렬·색인은 **주소 목록당 한 번**(`makeScrubber`) 만들고,
+ * 문자열마다 '실제로 들어 있는 주소' 만 색인으로 찾아 예전과 **같은 순서**(긴 것 먼저, 같은 길이는 목록 순)로
+ * 바꾼다 — 결과는 예전 구현과 같다(테스트가 대조한다). 같은 배열을 넘기는 호출은 WeakMap 캐시가 재사용한다.
+ */
+function variantsOf(hosts) { return [...new Set((hosts || []).flatMap(hostVariants))]; }
+function byLengthDesc(list) { return list.sort((a, b) => b.length - a.length); }
+
+/**
+ * 주소 목록 → 치환기 `(v, extraHosts?) => string`. `extraHosts` 는 행마다 다른 소수의 주소(자기 host·식별자
+ * 원문)이고, 예전 `scrubHosts(v, [...extra, ...hosts])` 와 같은 결과를 준다.
+ * 색인은 글자 트라이 하나다 — 접두 몇 글자로 묶으면 'https://' 나 '10.0.' 처럼 공통 접두가 긴 주소가
+ * 한 칸에 수백 개 몰려 다시 느려진다(초판 실측 2,000행 250ms). 트라이는 위치마다 실제로 이어지는 만큼만 걷는다.
+ */
+export function makeScrubber(hosts = []) {
+  const list = byLengthDesc(variantsOf(hosts));
+  const rank = new Map(list.map((h, i) => [h, i]));
+  const root = new Map();
+  for (const h of list) {
+    let node = root;
+    for (let k = 0; k < h.length; k++) {   // UTF-16 단위 — found() 가 v[i] 로 걷는 것과 같은 단위
+      const ch = h[k];
+      let next = node.get(ch);
+      if (!next) { next = new Map(); node.set(ch, next); }
+      node = next;
+    }
+    node.end = h;
+  }
+  /** 문자열에 실제로 들어 있는 목록 주소(목록 순서 그대로). */
+  const found = (v) => {
+    if (!list.length) return [];
+    const hit = new Set();
+    for (let i = 0; i < v.length; i++) {
+      let node = root.get(v[i]);
+      for (let j = i + 1; node; j++) {
+        if (node.end !== undefined) hit.add(node.end);
+        if (j >= v.length) break;
+        node = node.get(v[j]);
+      }
+    }
+    return hit.size ? [...hit].sort((a, b) => rank.get(a) - rank.get(b)) : [];
+  };
+  const fn = (v, extraHosts) => {
+    if (typeof v !== 'string') return v;
+    let hs = found(v);
+    if (extraHosts && extraHosts.length) {
+      // 예전 순서: Set([...extra 변형, ...hosts 변형]) 을 길이 내림차순 안정 정렬 — extra 가 같은 길이에서 앞선다.
+      const ex = variantsOf(extraHosts).filter((h) => v.includes(h));
+      if (ex.length) { const exSet = new Set(ex); hs = byLengthDesc([...ex, ...hs.filter((h) => !exSet.has(h))]); }
+    }
+    return hs.reduce((acc, h) => scrub(acc, h), v);
+  };
+  return fn;
+}
+
+/* 같은 배열을 여러 번 넘기는 호출(행마다 scrubHosts(x, hosts))을 위한 캐시 — 배열 정체성 + 길이로 본다.
+ * ⚠ 호출부가 넘긴 뒤 배열 내용을 바꾸면(같은 길이로) 캐시가 낡는다 — 요청마다 새로 만든 배열만 넘길 것. */
+const SCRUBBER_CACHE = new WeakMap();
+export function scrubberFor(hosts) {
+  if (!Array.isArray(hosts)) return makeScrubber(hosts);
+  const c = SCRUBBER_CACHE.get(hosts);
+  if (c && c.len === hosts.length) return c.fn;
+  const fn = makeScrubber(hosts);
+  SCRUBBER_CACHE.set(hosts, { len: hosts.length, fn });
+  return fn;
+}
+
 /** 문자열 안의 주소 원문 여러 개를 표식으로(긴 것 먼저 — '10.0.0.50' 이 '10.0.0.5' 에 먹히지 않게). */
 export function scrubHosts(v, hosts = []) {
   if (typeof v !== 'string') return v;
-  const hs = [...new Set((hosts || []).flatMap(hostVariants))].sort((a, b) => b.length - a.length);
-  return hs.reduce((acc, h) => scrub(acc, h), v);
+  return scrubberFor(hosts || [])(v);
 }
 
 /**
@@ -90,13 +158,24 @@ const IPV6_LIT = /^\[?[0-9a-f]*:[0-9a-f:.]*:[0-9a-f:.]*\]?$/i;
  */
 export function addressMatcher(hosts = []) {
   const set = new Set((hosts || []).flatMap(hostVariants).map((h) => h.toLowerCase()));
-  return (v) => {
+  const fn = (v) => {
     if (typeof v !== 'string') return false;
     const s = v.trim();
     if (!s) return false;
     if (IPV4_ANY.test(s) || IPV6_LIT.test(s)) return true;
     return set.has(s.toLowerCase());
   };
+  fn.addressSet = set;
+  return fn;
+}
+/**
+ * 미리 만든 판정기 + 행마다 다른 소수의 주소(v2.602 RECENT2602-01) — `addressMatcher([...extra, ...hosts])` 와
+ * 같은 판정을 주소 목록 재구성 없이 한다(행마다 1,200개 변형을 다시 만들던 것).
+ */
+export function extendMatcher(base, extraHosts = []) {
+  const extra = new Set((extraHosts || []).flatMap(hostVariants).map((h) => h.toLowerCase()));
+  if (!extra.size) return base;
+  return (v) => base(v) || (typeof v === 'string' && extra.has(v.trim().toLowerCase()));
 }
 /** 가린 이름의 대체 라벨 — 원문마다 다른 토큰을 붙여 행끼리 구분된다. */
 export function maskedAddressName(v) {
@@ -161,15 +240,18 @@ export function maskDeviceAddress(d) {
  */
 export function maskActivityEvents(events, hosts = []) {
   if (!Array.isArray(events)) return events;
+  // v2.602 RECENT2602-01: 목록 공통 주소로 판정기·치환기를 **한 번** 만들고, 이벤트마다 자기 host 만 더한다.
+  const baseMatch = addressMatcher(hosts || []);
+  const scrubber = makeScrubber(hosts || []);
   return events.map((e) => {
     if (!e || typeof e !== 'object') return e;
     const host = e.host;
     const out = { ...e, host: '' };
     // v2.601 AUTHZ-2601-01: 스킴이 붙은 host('https://10.0.0.5')는 오류 문구의 'connect … 10.0.0.5' 와
     //   글자가 달라 가려지지 않았다 — 표기 변형 전부로 가린다. 이름·deviceId 가 주소 자체인 행도 가린다.
-    const own = [host, ...(hosts || [])].filter(Boolean);
-    if (typeof out.error === 'string') out.error = scrubHosts(out.error, own);
-    const match = addressMatcher(own);
+    const own = host ? [host] : [];
+    if (typeof out.error === 'string') out.error = scrubber(out.error, own);
+    const match = extendMatcher(baseMatch, own);
     if (match(out.deviceId)) out.deviceId = maskedIdToken(out.deviceId);
     if (match(out.key)) out.key = maskedIdToken(out.key);
     if (host && out.name === host) out.name = maskedNameLabel(out);
@@ -188,7 +270,8 @@ export function maskActivityEvents(events, hosts = []) {
 export function maskPollerStatus(poller, hosts = []) {
   if (!poller || typeof poller !== 'object') return poller;
   const hs = [...new Set((hosts || []).flatMap(hostVariants))];
-  const scrubAll = (v) => scrubHosts(v, hs);
+  const hsSet = new Set(hs);
+  const scrubAll = makeScrubber(hs);
   const out = { ...poller };
   if (Array.isArray(out.inFlight)) {
     out.inFlight = out.inFlight.map((e) => {
@@ -196,7 +279,7 @@ export function maskPollerStatus(poller, hosts = []) {
       const o = { ...e };
       if ('host' in o) o.host = '';
       // 이름이 주소와 같으면(자기 host 든, host 없는 폴러라 등록부 주소 목록이든) 라벨로 바꾼다.
-      if ((e.host && o.name === e.host) || (typeof o.name === 'string' && hs.includes(o.name))) o.name = maskedNameLabel(o);
+      if ((e.host && o.name === e.host) || (typeof o.name === 'string' && hsSet.has(o.name))) o.name = maskedNameLabel(o);
       return o;
     });
   }

@@ -1,6 +1,6 @@
 // shared.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
-import { fetchJson } from '../../api.js';
+import { fetchJson, HttpError } from '../../api.js';
 
 
 
@@ -21,7 +21,13 @@ export function itemsOf(data) {
 }
 
 // 응답을 파일로 저장. 서버가 Content-Disposition으로 준 파일명을 우선 사용(>1MB면 .zip).
+// v2.602(감사 WEB2602-01): 성공 응답만 저장한다 — 예전에는 409(export_busy)·403·5xx 의 오류 JSON 을 그대로 파일로 저장했다.
+//   실패는 HttpError(status·서버 사유)로 던지고 호출부가 downloadFailText 로 화면에 말한다.
 export async function saveResponseAsFile(res, fallbackName) {
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new HttpError(data?.reason || data?.error || `HTTP ${res.status}`, { status: res.status, body: data || {} });
+  }
   const cd = res.headers.get('content-disposition') || '';
   const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
   const name = m ? decodeURIComponent(m[1]) : fallbackName;

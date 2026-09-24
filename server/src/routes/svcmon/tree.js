@@ -15,12 +15,12 @@ import {
   addFolder, renameFolder, moveFolder, reorderTargets, reorderFolders, deleteFolder, bulkAddTargets,
   LIMITS,
 } from '../../svcmon/store.js';
-import { canEdit } from './shared.js';
+import { canEdit, fullScopeOnly } from './shared.js';
 
 export function registerTree(svcmonRouter) {
 
 /* ── 폴더 ── */
-svcmonRouter.post('/folders', canEdit, (req, res) => {
+svcmonRouter.post('/folders', canEdit, fullScopeOnly, (req, res) => {
   try {
     const f = addFolder(req.body || {});
     logAudit({ user: req.user?.username, action: 'svcmon.folder.add', target: f.path, detail: f.kind });
@@ -28,7 +28,7 @@ svcmonRouter.post('/folders', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.put('/folders/rename', canEdit, (req, res) => {
+svcmonRouter.put('/folders/rename', canEdit, fullScopeOnly, (req, res) => {
   try {
     const r = renameFolder(req.body || {});
     logAudit({ user: req.user?.username, action: 'svcmon.folder.rename', target: r.path });
@@ -36,7 +36,7 @@ svcmonRouter.put('/folders/rename', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.post('/folders/move', canEdit, (req, res) => {
+svcmonRouter.post('/folders/move', canEdit, fullScopeOnly, (req, res) => {
   try {
     const r = moveFolder(req.body || {});
     logAudit({ user: req.user?.username, action: 'svcmon.folder.move', target: r.path, detail: `이동 ${r.moved}건 (from ${req.body?.path})` });
@@ -44,17 +44,17 @@ svcmonRouter.post('/folders/move', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.put('/reorder/targets', canEdit, (req, res) => {
+svcmonRouter.put('/reorder/targets', canEdit, fullScopeOnly, (req, res) => {
   try { res.json(reorderTargets(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.put('/reorder/folders', canEdit, (req, res) => {
+svcmonRouter.put('/reorder/folders', canEdit, fullScopeOnly, (req, res) => {
   try { res.json(reorderFolders(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.post('/folders/delete', canEdit, (req, res) => {
+svcmonRouter.post('/folders/delete', canEdit, fullScopeOnly, (req, res) => {
   try {
     const r = deleteFolder(req.body || {});
     logAudit({ user: req.user?.username, action: 'svcmon.folder.delete', target: req.body?.path, detail: `대상 ${r.removedTargets}개` });
@@ -64,13 +64,13 @@ svcmonRouter.post('/folders/delete', canEdit, (req, res) => {
   }
 });
 
-svcmonRouter.put('/sort', canEdit, (req, res) => {
+svcmonRouter.put('/sort', canEdit, fullScopeOnly, (req, res) => {
   try { res.json({ sort: setSort(req.body || {}) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 /* ── 대상/점검 ── */
-svcmonRouter.post('/targets', canEdit, (req, res) => {
+svcmonRouter.post('/targets', canEdit, fullScopeOnly, (req, res) => {
   try {
     const t = addTarget(req.body || {});
     logAudit({ user: req.user?.username, action: 'svcmon.target.add', target: t.name, detail: t.host });
@@ -78,7 +78,7 @@ svcmonRouter.post('/targets', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.post('/targets/bulk', canEdit, (req, res) => {
+svcmonRouter.post('/targets/bulk', canEdit, fullScopeOnly, (req, res) => {
   try {
     const rows = Array.isArray(req.body?.targets) ? req.body.targets : [];
     if (rows.length > LIMITS.maxBulkRows) {
@@ -97,7 +97,7 @@ svcmonRouter.post('/targets/bulk', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.put('/targets/:id', canEdit, (req, res) => {
+svcmonRouter.put('/targets/:id', canEdit, fullScopeOnly, (req, res) => {
   try {
     const t = updateTarget(req.params.id, req.body || {});
     if (!t) return res.status(404).json({ error: '대상을 찾을 수 없습니다.' });
@@ -106,13 +106,13 @@ svcmonRouter.put('/targets/:id', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.delete('/targets/:id', canEdit, (req, res) => {
+svcmonRouter.delete('/targets/:id', canEdit, fullScopeOnly, (req, res) => {
   if (!deleteTarget(req.params.id)) return res.status(404).json({ error: '대상을 찾을 수 없습니다.' });
   logAudit({ user: req.user?.username, action: 'svcmon.target.delete', target: req.params.id });
   res.json({ ok: true });
 });
 
-svcmonRouter.post('/targets/:id/tests', canEdit, (req, res) => {
+svcmonRouter.post('/targets/:id/tests', canEdit, fullScopeOnly, (req, res) => {
   try {
     const t = addTest(req.params.id, req.body || {});
     if (!t) return res.status(404).json({ error: '대상을 찾을 수 없습니다.' });
@@ -121,7 +121,7 @@ svcmonRouter.post('/targets/:id/tests', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.put('/targets/:id/tests/:testId', canEdit, (req, res) => {
+svcmonRouter.put('/targets/:id/tests/:testId', canEdit, fullScopeOnly, (req, res) => {
   try {
     const t = updateTest(req.params.id, req.params.testId, req.body || {});
     if (!t) return res.status(404).json({ error: '점검을 찾을 수 없습니다.' });
@@ -130,7 +130,7 @@ svcmonRouter.put('/targets/:id/tests/:testId', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.delete('/targets/:id/tests/:testId', canEdit, (req, res) => {
+svcmonRouter.delete('/targets/:id/tests/:testId', canEdit, fullScopeOnly, (req, res) => {
   if (!deleteTest(req.params.id, req.params.testId)) return res.status(404).json({ error: '점검을 찾을 수 없습니다.' });
   logAudit({ user: req.user?.username, action: 'svcmon.test.delete', target: req.params.testId });
   res.json({ ok: true });

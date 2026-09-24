@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
+import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
 
 const DB_PATH = process.env.DIRUSAGE_DB_PATH
   || path.join(config.dbDir || config.configDir, 'dirusage.db');
@@ -28,8 +29,9 @@ function initSqlite() {
   // eslint-disable-next-line import/no-unresolved
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    const db = new DatabaseSync(DB_PATH);
-    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
+    // v2.602(감사 TIM2602-05): util/sqliteOpen 규약 — busy_timeout 을 먼저 단독으로, 잠금 오류는 삼키지 않는다.
+    // 예전에는 세 PRAGMA 를 한 exec 로 보내 잠금이면 busy_timeout 도 걸리지 않은 채 CREATE 가 즉시 실패했다.
+    const db = openSqlite(new DatabaseSync(DB_PATH));
     db.exec(`
       -- 스캔 1회 = 1행. entries 는 Top-N 만 담은 JSON 배열([{name,bytes}]).
       -- JSON 으로 두는 이유: 항목 수가 N(≤200)으로 유계이고 조회가 항상 '그 스캔 전체'라
@@ -103,17 +105,29 @@ function initSqlite() {
 function safeJson(s) { try { const v = JSON.parse(s); return Array.isArray(v) ? v : []; } catch { return []; } }
 
 /** DB 핸들. node:sqlite 가 없으면 null 을 돌려주고 상태로 정직하게 보고한다. */
+// v2.602(감사 TIM2602-05): 첫 open 이 **잠금**으로 실패하면 래치하지 않는다 — 예전에는 ready 가 null 로 굳어
+// 프로세스 수명 동안 이력 저장이 꺼졌다(v2.597 L2597-02 규약). 잠금이면 30초 뒤 다시 연다(그 사이엔 null).
+const lockRetry = createLockRetry(30_000);
 export async function getDb() {
   if (impl) return impl;
   if (!ready) {
-    ready = initSqlite().then((d) => { impl = d; return d; }).catch((e) => {
+    if (lockRetry.blocked()) return null;
+    ready = withOpenCleanup(initSqlite).then((d) => { impl = d; initError = null; lockRetry.ok(); return d; }).catch((e) => {
       initError = e.message;
+      if (lockRetry.onFail(e)) {
+        console.warn(`[dirusage] SQLite 잠금으로 열지 못했습니다 — 잠시 뒤 다시 엽니다: ${e.message}`);
+        ready = null;   // 래치하지 않는다(다음 호출이 blocked 가 풀린 뒤 다시 시도)
+        return null;
+      }
       console.warn(`[dirusage] SQLite 초기화 실패 — 이력 저장이 비활성됩니다: ${e.message}`);
       return null;
     });
   }
   return ready;
 }
+
+/** 테스트용 — 잠금 재시도 대기를 끝낸다. */
+export function _expireDirusageLockRetry() { lockRetry._expire(); }
 
 export function dbStatus() {
   return { available: !!impl, path: DB_PATH, error: initError };

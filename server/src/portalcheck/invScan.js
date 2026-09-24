@@ -171,9 +171,18 @@ export function scanInventory({
   const seen = new Set(agents.map((a) => low(a.agent)));
   // ⚠ 인증 실패 집계 칸(`PULL_UNAUTH_KEY`)은 엣지가 아니다 — 이름을 버리고 모은 것이라 행으로 만들지 않고 개수만 밝힌다.
   let unauthRejects = 0;
+  // v2.602(감사 WEB2602-02): 이 칸에는 토큰 거부만 들어오지 않는다 — 중앙 수신이 꺼져 있을 때(disabled)·없는 경로
+  //   (unknown-route)도 인증 전에 끝나 같은 칸에 쌓인다. 합계만 넘기면 화면이 전부 '토큰 인증 실패' 라 말했다(조치가
+  //   다르다). 종류별 개수를 함께 넘긴다.
+  const unauthRejectsByKind = {};
   for (const r of rejects?.rows || []) {
     const name = t(r?.agent);
-    if (name === PULL_UNAUTH_KEY) { unauthRejects += num(r?.total) ?? 0; continue; }
+    if (name === PULL_UNAUTH_KEY) {
+      unauthRejects += num(r?.total) ?? 0;
+      const bk = r?.byKind && typeof r.byKind === 'object' ? r.byKind : {};
+      for (const [k, v] of Object.entries(bk)) { const c = num(v); if (c) unauthRejectsByKind[k] = (unauthRejectsByKind[k] || 0) + c; }
+      continue;
+    }
     if (!name || seen.has(low(name))) continue;
     seen.add(low(name));
     const eps = r?.byEndpoint && typeof r.byEndpoint === 'object' ? Object.keys(r.byEndpoint) : [];
@@ -213,7 +222,7 @@ export function scanInventory({
   }
   orphans.sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0) || a.vcenterId.localeCompare(b.vcenterId));
 
-  return { rows, agents, orphans, unauthRejects, kpis: kpisOf(rows), staleMs: stale, at, siteCount: sites.length, vcenterCount: vcenters.length };
+  return { rows, agents, orphans, unauthRejects, unauthRejectsByKind, kpis: kpisOf(rows), staleMs: stale, at, siteCount: sites.length, vcenterCount: vcenters.length };
 }
 
 const STATE_ORDER = Object.freeze({ rejected: 0, never: 1, stale: 2, unknown: 3, ok: 4 });

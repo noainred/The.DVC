@@ -34,9 +34,11 @@ function readFile() {
   try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch (e) { preserveCorrupt(FILE, e.message); return {}; }
 }
 
+// v2.602(감사 TIM2602-02): 빈 값·숫자 아님은 dflt — 예전 Number('') === 0 이 env 빈 값을 보존 0(=무제한)으로 만들었다.
 const clampInt = (v, lo, hi, dflt) => {
-  const n = Math.floor(Number(v));
-  if (!Number.isFinite(n)) return dflt;
+  const n0 = numOrNull(v);
+  if (n0 == null) return dflt;
+  const n = Math.floor(n0);
   return Math.max(lo, Math.min(hi, n));
 };
 const strList = (v, max) => (Array.isArray(v) ? [...new Set(v.map((x) => String(x || '').trim()).filter(Boolean))].slice(0, max) : []);
@@ -64,7 +66,8 @@ function coerce(field, v) {
   const L = VMSERIES_LIMITS;
   if (field === 'enabled') return v === true;
   if (field === 'intervalMin') return clampInt(v, L.minIntervalMin, L.maxIntervalMin, 50);
-  if (field === 'retentionDays') return clampInt(v, 0, L.maxRetentionDays, 60);
+  // 음수 보존일은 무제한(0)이 아니라 미지정 — 기본값(v2.602 TIM2602-02). 저장 경로는 이전 값을 유지한다(saveVmSeriesSettings).
+  if (field === 'retentionDays') return numOrNull(v) != null && numOrNull(v) < 0 ? 60 : clampInt(v, 0, L.maxRetentionDays, 60);
   if (field === 'thresholds') return coerceThresholds(v);
   if (field === 'scope') return v === 'selected' ? 'selected' : 'all';
   if (field === 'targets') return coerceTargets(v);
@@ -77,7 +80,7 @@ export function loadVmSeriesSettings() {
   const eff = {
     enabled: process.env.VMSERIES_ENABLED === 'true',
     intervalMin: clampInt(process.env.VMSERIES_INTERVAL_MIN, L.minIntervalMin, L.maxIntervalMin, 50),
-    retentionDays: clampInt(process.env.VMSERIES_RETENTION_DAYS, 0, L.maxRetentionDays, 60),
+    retentionDays: coerce('retentionDays', process.env.VMSERIES_RETENTION_DAYS),
     thresholds: coerceThresholds({ cpuPct: process.env.VMSERIES_CPU_PCT, memPct: process.env.VMSERIES_MEM_PCT, readyPct: process.env.VMSERIES_READY_PCT }),
     scope: 'all',
     targets: {},
@@ -96,6 +99,7 @@ export function saveVmSeriesSettings(partial = {}) {
   for (const f of FIELDS) {
     if (partial[f] === undefined) continue;
     if ((f === 'intervalMin' || f === 'retentionDays') && numOrNull(partial[f]) == null) continue;
+    if (f === 'retentionDays' && numOrNull(partial[f]) < 0) continue;   // v2.602 TIM2602-02: 음수 = 미지정(이전 값)
     if (f === 'thresholds' && partial[f] && typeof partial[f] === 'object') {
       const t = { ...(cur.thresholds || {}) };
       for (const [k, x] of Object.entries(partial[f])) if (numOrNull(x) != null) t[k] = x;

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, putJson, postJson, usePolling, getToken } from '../api.js';
+import { fetchJson, putJson, postJson, usePolling, downloadFile } from '../api.js';
+import { downloadFailText } from './downloadFailText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 
@@ -101,6 +102,7 @@ function LogViewer() {
   const [mode, setMode] = useState('local');
   // v2.590 P11: 엣지 연합 조회가 끝나지 않은 이유 — 예전에는 13초 뒤 조용히 빈 표로 끝나 '로그가 없다' 처럼 보였다.
   const [fedNote, setFedNote] = useState('');
+  const [dlMsg, setDlMsg] = useState('');   // v2.602 WEB2602-01: CSV 내려받기 실패 사유
   const LIMIT = 200;
   const remoteAgent = (id) => sources.remote.find((r) => r.vcenterId === id)?.agent;
 
@@ -149,8 +151,9 @@ function LogViewer() {
     if (f.vcenterId) qs.set('vcenterId', f.vcenterId);
     if (f.severity) qs.set('severity', f.severity);
     if (f.q) qs.set('q', f.q);
-    const res = await fetch(`/api/tools/vclogs/export.csv?${qs}`, { headers: { Authorization: `Bearer ${getToken()}` } });
-    const blob = await res.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `vcenter-logs.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    // v2.602(감사 WEB2602-01): downloadFile 이 res.ok 를 본다 — 실패(409·403·5xx)의 오류 JSON 을 파일로 저장하지 않고 사유를 화면에 말한다.
+    setDlMsg('');
+    try { await downloadFile(`/tools/vclogs/export.csv?${qs}`, 'vcenter-logs.csv'); } catch (e) { setDlMsg(downloadFailText(e)); }
   };
 
   return (
@@ -173,6 +176,7 @@ function LogViewer() {
           <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={exportCsv} disabled={mode === 'edge'} title={mode === 'edge' ? '엣지 조회는 CSV 미지원(엣지 포탈에서 받으세요)' : ''}>⬇ CSV</button>
         </div>
       </div>
+      {dlMsg && <div className="banner error" role="alert" style={{ marginBottom: 8 }}>{dlMsg}</div>}
       <div className="table-wrap" style={{ maxHeight: '52vh' }}>
         <STable><thead><tr><th>시각</th><th>vCenter</th><th>심각도</th><th>유형</th><th>대상</th><th>사용자</th><th>메시지</th></tr></thead>
           <tbody>

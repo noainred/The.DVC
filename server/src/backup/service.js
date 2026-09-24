@@ -66,7 +66,9 @@ export const MIXED_STATE_FILES = new Set(['capture-monitors.json', 'os-scan.json
   'central-agent-tokens.json', 'api-keys.json', 'daily-report.json',
   // v2.601(감사 LO2601-03 — 재현): iDRAC 대역 스캔 폴러가 엔트리마다 lastRun 을, 원격 접속 게이트웨이가 매 접속마다 매핑의
   // lastUsedAt 을 쓴다(idrac/scanRanges.js recordRun · proxy/registry.js touchMapping) — 실행·사용마다 change 백업이 생겼다.
-  'idrac-scan-ranges.json', 'remote-access.json']);
+  'idrac-scan-ranges.json', 'remote-access.json',
+  // v2.602(감사 LEFT2602-01 — 재현): 엣지 배포 대상도 '상태 확인'·배포 결과마다 lastResult 를 쓴다(agent/deployRegistry.js recordResult).
+  'agent-deploy-targets.json']);
 // 실행 필드 — last* 와 사용 횟수(useCount). 설정이 아니다.
 const RUN_FIELD_RE = /^(last[A-Z]|useCount$)/;
 function stripRunFields(v) {

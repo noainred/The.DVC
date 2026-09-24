@@ -7,6 +7,7 @@
 const LIST_LABEL = {
   transportNodes: '전송 노드', tier0s: 'T0 게이트웨이', tier1s: 'T1 게이트웨이',
   segments: '세그먼트', securityPolicies: 'DFW 정책', groups: '보안그룹',
+  clusterStatus: '클러스터 상태',   // v2.602(COL-2602-01): 실패하면 매니저 상태가 '상태 확인 불가' 다
 };
 
 /** 매니저별 안내 줄. @returns {string[]} */

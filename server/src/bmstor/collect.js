@@ -20,9 +20,15 @@ export function sanitizeMounts(input) {
   const raw = Array.isArray(input) ? input : String(input || '').split(/[\n,;]/);
   const mounts = []; const errors = []; const seen = new Set();
   // v2.595(감사 C2595-04): 끝의 '/' 는 떼어 저장한다 — df 는 '/data' 로 답하는데 '/data/' 로 대조하면 영원히 '못 찾음' 이었다.
-  for (const m of raw.map((s) => String(s).trim()).map((s) => (s.length > 1 ? s.replace(/\/+$/, '') : s)).filter(Boolean)) {
+  // v2.602(SEC2602-03): 길이 검사를 **정규식보다 먼저** 한다 — `replace(/\/+$/)` 는 슬래시가 길게 이어진 입력에서 O(n²)
+  //   (8만 자 ≈ 5초)였다. 끝 슬래시는 정규식 대신 루프로 뗀다(선형).
+  //   예전과 같은 뜻: 두 글자 이상이면 끝 슬래시를 전부 떼고, 그 결과가 비면(슬래시만 있던 값) 버린다.
+  const trimSlash = (s) => { if (s.length <= 1) return s; let e = s.length; while (e > 0 && s.charCodeAt(e - 1) === 47) e -= 1; return s.slice(0, e); };
+  for (const t of raw.map((s) => String(s).trim()).filter(Boolean)) {
+    if (t.length > 256) { errors.push(`마운트 경로가 너무 김: ${t.slice(0, 40)}…`); continue; }
+    const m = trimSlash(t);
+    if (!m) continue;
     if (!MOUNT_RE.test(m)) { errors.push(`허용되지 않는 마운트 경로: ${m} (절대경로 + 영숫자/._-/ 만)`); continue; }
-    if (m.length > 256) { errors.push(`마운트 경로가 너무 김: ${m.slice(0, 40)}…`); continue; }
     if (!seen.has(m)) { seen.add(m); mounts.push(m); }
   }
   return { mounts, errors };

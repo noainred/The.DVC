@@ -235,7 +235,11 @@ function initSqlite() {
         WHERE s.slot=? ORDER BY c.vcenter_id, c.kind, c.name`),
       lastSlot: db.prepare("SELECT slot, MAX(ts) AS ts FROM snaps WHERE vcenter_id='' "),
       pruneSnaps: db.prepare('DELETE FROM snaps WHERE ts < ?'),
-      pruneChanges: db.prepare('DELETE FROM changes WHERE ts < ?'),
+      // v2.602(감사 DB2602-03 — 재현): VM 의 **유일한** 전원 전이 행을 지우면 '꺼진 지 N일' 이 roster.first_seen 폴백으로
+      // 떨어져 과대 표시됐다(재현 1,200일 → 1,500일, 출처 first_seen). ds_series(v2.601 DB2601-02)와 같은 규칙 — 전원 전이는
+      // (vCenter, VM, 종류)별 **보존 경계 이전의 마지막 행**을 남긴다. VM 당 최대 2행이라 유계다. added/removed 는 그대로 지운다.
+      pruneChanges: db.prepare(`DELETE FROM changes WHERE ts < ? AND rowid NOT IN (
+        SELECT MAX(rowid) FROM changes WHERE ts < ? AND kind IN ('powered_off','powered_on') GROUP BY vcenter_id, vm_id, kind)`),
       meta: db.prepare("SELECT COUNT(*) AS n, MIN(ts) AS mn, MAX(ts) AS mx FROM snaps WHERE vcenter_id=''"),
     };
     return { db, st };
@@ -527,7 +531,7 @@ export async function pruneVmtrack(retentionDays = Number(process.env.VMTRACK_RE
   const { db, st } = x;
   db.exec('BEGIN');
   try {
-    st.pruneChanges.run(cut);
+    st.pruneChanges.run(cut, cut);   // v2.602 DB2602-03(전원 전이 마지막 행 보존)
     st.pruneDsChanges.run(cut); // v2.348
     st.pruneDsSeries.run(cut, cut); // v2.353 · v2.601 DB2601-02(경계 이전 마지막 행 보존)
     st.pruneSnaps.run(cut);

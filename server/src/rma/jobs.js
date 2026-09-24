@@ -28,6 +28,7 @@
  */
 import { modeFor } from './settings.js';
 import { saveHistoryRow, listHistoryRows } from './historyDb.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const jobs = new Map();            // reqId -> job
 const pendingByAgent = new Map();  // agentLower -> Set<reqId>
@@ -67,7 +68,10 @@ function pushHistory(j, now) {
   });
   if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
   // 영속 이력(v2.417) — sqlite 가 있으면 함께 저장(재시작 후에도 출력까지 남는다). 실패해도 메모리 링은 유지.
-  saveHistoryRow({ ...history[0], stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), truncated: !!r.truncated }).catch(() => {});
+  // v2.602(CEN2602-03): 적재 실패를 조용히 삼키지 않는다 — saveHistoryRow 는 실패하면 false 를 돌려준다.
+  saveHistoryRow({ ...history[0], stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), truncated: !!r.truncated })
+    .then((okSaved) => { if (okSaved === false) console.warn(`[rma] 명령 이력 영속 적재 실패 reqId=${j.reqId} (DB 없음 또는 INSERT 오류 — 메모리 이력만 남습니다)`); })
+    .catch((e) => console.warn(`[rma] 명령 이력 영속 적재 오류 reqId=${j.reqId}: ${e?.message || e}`));
 }
 
 /** 기한 내 ack 없는 running 잡 → 재인출 없이(비멱등) 오류 종결. now 주입은 테스트용. */
@@ -222,13 +226,44 @@ export function releaseAllWaiters() {
   return n;
 }
 
+// v2.602(감사 CEN2602-03): 엣지 회신 결과는 **아는 필드만, 아는 모양으로** 담는다. 예전에는 원문 객체를 그대로 보관해
+//   ① `reason` 이 객체면 명령 이력 표가 React #31 로 죽었고 ② `exitCode` 가 객체면 영속 이력 INSERT 가 바인드 오류로
+//   **조용히** 실패했다(saveHistoryRow 가 false 만 돌려준다). 개별 토큰 엣지가 자기 잡에만 할 수 있는 일이지만,
+//   화면을 죽이는 값은 수신 지점에서 막는다(v2.598 CENTRAL 규약 — 정제는 저장 함수 안에).
+//   글자 상한은 엣지 출력 상한(RMA_MAX_OUTPUT 기본 256KB)보다 넉넉히 두고, 잘랐으면 truncated 로 밝힌다.
+const RESULT_TEXT_MAX = Math.max(256 * 1024, Number(process.env.RMA_MAX_OUTPUT) || 0) * 2;
+const REASON_MAX = 2000;
+const ARGV_MAX = 64; const ARGV_ITEM_MAX = 1000;
+const str = (v, n) => (typeof v === 'string' ? v : (typeof v === 'number' || typeof v === 'boolean') ? String(v) : '').slice(0, n);
+export function sanitizeRmaResult(result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return { ok: false, reason: '에이전트가 빈 결과를 회신했습니다.' };
+  const r = result;
+  const rawOut = typeof r.stdout === 'string' ? r.stdout : ''; const rawErr = typeof r.stderr === 'string' ? r.stderr : '';
+  const out = {
+    ok: r.ok === true, timedOut: r.timedOut === true, rejected: r.rejected === true, clipped: r.clipped === true,
+    truncated: r.truncated === true || rawOut.length > RESULT_TEXT_MAX || rawErr.length > RESULT_TEXT_MAX,
+    exitCode: numOrNull(r.exitCode), durationMs: numOrNull(r.durationMs),
+    stdout: rawOut.slice(0, RESULT_TEXT_MAX), stderr: rawErr.slice(0, RESULT_TEXT_MAX),
+  };
+  const reason = str(r.reason, REASON_MAX); if (reason) out.reason = reason;
+  if (typeof r.signal === 'string' && r.signal) out.signal = r.signal.slice(0, 32);
+  const cmd = str(r.cmd, 64); if (cmd) out.cmd = cmd;
+  const inst = str(r.instance, 64); if (inst) out.instance = inst;
+  if (Array.isArray(r.argv)) out.argv = r.argv.slice(0, ARGV_MAX).filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => String(x).slice(0, ARGV_ITEM_MAX));
+  if (r.restartSelf === true) out.restartSelf = true;
+  // 원문이 객체·배열이던 필드는 버렸다는 사실을 남긴다(조용히 빼지 않는다).
+  const bad = ['reason', 'exitCode', 'durationMs', 'stdout', 'stderr', 'argv'].filter((k) => r[k] != null && typeof r[k] === 'object' && !(k === 'argv' && Array.isArray(r[k])));
+  if (bad.length) out.invalidFields = bad;
+  return out;
+}
+
 /** ack — 결과 저장. TTL 정리/중복이면 false. */
 export function setJobResult(reqId, result) {
   const j = jobs.get(String(reqId || ''));
   if (!j || j.state === 'done') return false;
   const now = Date.now();
   j.state = 'done'; j.doneAt = now; j.claimDeadline = null;
-  j.result = result && typeof result === 'object' ? result : { ok: false, reason: '에이전트가 빈 결과를 회신했습니다.' };
+  j.result = sanitizeRmaResult(result);
   dropPending(j.agent, reqId);
   pushHistory(j, now);
   prune(now);

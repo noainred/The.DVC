@@ -204,6 +204,29 @@ export function freshRateText(kpis) {
   return r == null ? '—' : `${r}%`;
 }
 
+/**
+ * 인증 전에 막힌 push 의 각주(v2.602 감사 WEB2602-02) — **종류별로** 말한다. 예전에는 합계를 전부 '토큰 인증 실패' 라
+ * 불렀는데, 그 칸에는 중앙 수신이 꺼져 있을 때(disabled)·중앙에 없는 경로(unknown-route)로 온 요청도 쌓인다 —
+ * 토큰을 대조하라는 안내는 그 둘에 틀린 조치다. 종류를 모르는 경우(구버전 중앙)는 원인을 단정하지 않는다.
+ */
+export function unauthRejectNotes(scan) {
+  const total = n(scan?.unauthRejects);
+  if (!total) return [];
+  const by = scan?.unauthRejectsByKind && typeof scan.unauthRejectsByKind === 'object' ? scan.unauthRejectsByKind : null;
+  const head = '보낸 쪽 이름을 믿을 수 없어 표에 넣지 않았습니다';
+  if (!by) return [`인증 전에 막힌 push **${total}건**은 ${head} — 막힌 사유별 내역은 이 중앙이 알려 주지 않았습니다.`];
+  const out = [];
+  const auth = n(by.auth);
+  const disabled = n(by.disabled);
+  const unknownRoute = n(by['unknown-route']);
+  const other = Math.max(0, total - auth - disabled - unknownRoute);
+  if (auth) out.push(`토큰 인증에 실패한 push **${auth}건**은 ${head} — 포탈 점검 › 토큰 점검에서 각 엣지의 토큰을 대조하세요.`);
+  if (disabled) out.push(`중앙 수신이 꺼져 있을 때 온 push **${disabled}건**은 ${head} — 토큰 문제가 아닙니다. 이 중앙의 수신 설정(CENTRAL_TOKEN 등)을 확인하세요.`);
+  if (unknownRoute) out.push(`이 중앙에 없는 경로로 온 push **${unknownRoute}건**은 ${head} — 토큰 문제가 아닙니다. 엣지가 중앙보다 새 버전일 수 있습니다(중앙 업그레이드).`);
+  if (other) out.push(`그 밖의 사유로 인증 전에 막힌 push **${other}건**은 ${head}.`);
+  return out;
+}
+
 /** 표 아래 각주 — 해당 종류가 있을 때만(v2.509 규약). */
 export function tableFootnotes(scan) {
   const out = [];
@@ -218,9 +241,7 @@ export function tableFootnotes(scan) {
     out.push('‘전부 거부됨’ 엣지는 수신 기록이 한 번도 없고 거부 기록에만 있는 이름입니다 — 이름은 요청이 주장한 값이라 **검증되지 않았습니다**.');
   }
   // v2.600 WEB2600-02·04: 인증 실패 집계 칸은 엣지가 아니라 행으로 그리지 않는다 — 개수만 밝힌다.
-  if (n(scan?.unauthRejects)) {
-    out.push(`토큰 인증에 실패한 push **${scan.unauthRejects}건**은 보낸 쪽 이름을 믿을 수 없어 표에 넣지 않았습니다 — 포탈 점검 › 토큰 점검에서 각 엣지의 토큰을 대조하세요.`);
-  }
+  for (const line of unauthRejectNotes(scan)) out.push(line);
   if ((scan?.agents || []).some((a) => !a.sentInventory && !a.knownOwner && !a.rejectedOnly)) {
     out.push('‘인벤토리 미전송’ 이 결함으로 표시되지 않은 엣지는 위임 담당으로 학습된 적이 없는 곳입니다 — 스토리지·SAN 등 다른 용도로만 쓰는 엣지는 정상입니다.');
   }

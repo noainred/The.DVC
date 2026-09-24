@@ -19,7 +19,7 @@ import { getMapping, getProxyById, touchMapping } from './registry.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { store } from '../store.js';
 import { targetHostScopeIssue } from './targetHostScope.js'; // v2.579: 도메인은 routes 를 import 하지 않는다(ARCH-05)
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 
 export function attachSshGateway(server) {
   const wss = new WebSocketServer({ noServer: true });
@@ -76,7 +76,11 @@ export function mappingAccessIssue(user, m) {
 // 동시 원격 SSH 세션 상한 + 유휴 타임아웃 — 무제한 세션이 포탈 서버 메모리/FD를 고갈시켜
 // 리붓되는 것을 막는다. 환경변수로 조정.
 const MAX_SESSIONS = Number(process.env.REMOTE_MAX_SESSIONS) || 80;
-const IDLE_MS = Number(process.env.REMOTE_IDLE_TIMEOUT_MS) || 30 * 60_000;
+// v2.602(감사 TIM2602-03 — Node 동작 재현: setTimeout(3e9) 은 TimeoutOverflowWarning 과 함께 1ms 에 발화한다):
+// 2^31−1ms 초과·음수 env 는 콘솔을 즉시 닫았다. [1분, MAX_TIMER_MS] 로 가두고 0·빈 값·숫자 아님은 기본 30분
+// (0 = 끔은 문서화된 적이 없다 — 예전에도 0 은 기본값이었다).
+export const idleTimeoutMs = (raw) => clampIntervalMs(Number(raw), 30 * 60_000, 60_000);
+const IDLE_MS = idleTimeoutMs(process.env.REMOTE_IDLE_TIMEOUT_MS);
 let activeSessions = 0;
 
 function handleConnection(ws, user) {

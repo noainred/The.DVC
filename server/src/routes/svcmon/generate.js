@@ -14,7 +14,7 @@ import { bulkAddTargets, LIMITS } from '../../svcmon/store.js';
 import { getTemplate, materializeForTarget } from '../../svcmon/templates.js';
 import { expandGenSpec, expandNames } from '../../svcmon/genspec.js';
 import { recordBatch, listBatches, rollbackBatch, deleteBatchRecord } from '../../svcmon/batches.js';
-import { canEdit, dryRunTargets } from './shared.js';
+import { canEdit, fullScopeOnly, dryRunTargets } from './shared.js';
 import { poolRun } from '../../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
 const dnsResolve4 = promisify(dns.resolve4);
@@ -87,7 +87,7 @@ async function resolveDnsHostMap(spec) {
 
 export function registerGenerate(svcmonRouter) {
 
-svcmonRouter.post('/targets/generate', canEdit, async (req, res) => {
+svcmonRouter.post('/targets/generate', canEdit, fullScopeOnly, async (req, res) => {
   let spec = req.body?.spec || {};
   const commit = req.body?.mode === 'apply';
 
@@ -172,7 +172,7 @@ svcmonRouter.post('/targets/generate', canEdit, async (req, res) => {
 
 svcmonRouter.get('/batches', canEdit, (req, res) => res.json({ batches: listBatches() }));
 
-svcmonRouter.post('/batches/:id/rollback', canEdit, (req, res) => {
+svcmonRouter.post('/batches/:id/rollback', canEdit, fullScopeOnly, (req, res) => {
   const r = rollbackBatch(req.params.id, {
     expectedCount: typeof req.body?.expectedCount === 'number' ? req.body.expectedCount : null,
     user: req.user?.username,
@@ -185,7 +185,7 @@ svcmonRouter.post('/batches/:id/rollback', canEdit, (req, res) => {
   res.json({ ...r, batches: listBatches() });
 });
 
-svcmonRouter.delete('/batches/:id', canEdit, (req, res) => {
+svcmonRouter.delete('/batches/:id', canEdit, fullScopeOnly, (req, res) => {
   if (!deleteBatchRecord(req.params.id)) return res.status(404).json({ error: '배치 기록을 찾을 수 없습니다.' });
   logAudit({ user: req.user?.username, action: 'svcmon.batch.record.delete', target: req.params.id, detail: '이력만 삭제(대상 유지)' });
   res.json({ ok: true, batches: listBatches() });

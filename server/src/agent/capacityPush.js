@@ -14,6 +14,7 @@ import { config } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { collectSnapshot, hostMeta } from '../capacity/sampler.js';
+import { classifyCentral404 } from './central404.js';
 
 let timer = null;
 let running = false;
@@ -45,8 +46,14 @@ export async function pushCapacityNow() {
       timeoutMs: 15_000, retries: 1,
     });
     if (res.status === 404) {
-      unsupportedUntil = Date.now() + 3_600_000;
-      return { ok: false, reason: '중앙이 /api/central/capacity-report 를 지원하지 않습니다(1시간 후 재시도).' };
+      // v2.602(감사 EDGE2602-02): 404 는 두 뜻이다 — 중앙의 central 기능이 꺼짐(`{reason:'central 비활성화'}`) /
+      //   엔드포인트 없는 구버전 중앙(express 기본 404). 예전에는 둘 다 '구버전' 으로 읽고 `last` 도 콘솔도 남기지 않아
+      //   상태가 마지막 성공을 계속 보여 줬다(무음 실패). 백오프는 '엔드포인트 없음' 일 때만 — 꺼짐은 중앙이 켜는 즉시 풀려야 한다.
+      const c = await classifyCentral404(res);
+      if (c.kind === 'no-endpoint') unsupportedUntil = Date.now() + 3_600_000;
+      last = { at: Date.now(), ms: Date.now() - startedAt, status: 404, ok: false, rows: snap.rows.length, kind: c.kind, reason: c.reason };
+      if (_logChange('push', `404 ${c.kind}`)) console.warn(`[capacity-push] 중앙 보고 실패: ${c.reason}${c.kind === 'no-endpoint' ? ' (1시간 후 재시도)' : ''}`);
+      return { ok: false, ...last };
     }
     let data = null;
     try { data = await res.json(); } catch { /* 본문 없는 응답 허용 */ }

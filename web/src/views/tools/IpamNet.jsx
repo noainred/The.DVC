@@ -1,6 +1,7 @@
 // IpamNet.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, getToken, downloadFile } from '../../api.js';
+import { downloadFailText } from '../downloadFailText.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { CsvImportModal } from '../../components/CsvBulkModals.jsx';
 import { DEVTYPE_LABEL, MGMT, MgmtBadge } from './ipamShared.jsx';
@@ -45,10 +46,9 @@ export function IpamRanges() {
     if (!window.confirm(`'${id}' 대역을 삭제할까요?`)) return;
     try { await fetch(`/api/admin/ipam/vc-ranges/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHdr() }); await load(); } catch (e) { setMsg({ ok: false, text: e.message }); }
   };
+  // v2.602(감사 WEB2602-01): downloadFile 이 res.ok 를 본다 — 실패(409·403·5xx)의 오류 JSON 을 파일로 저장하지 않고 사유를 화면에 말한다.
   const downloadReport = async () => {
-    const res = await fetch('/api/tools/ipam/scan-report.csv', { headers: authHdr() });
-    const blob = await res.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `ip-scan-report-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
+    try { await downloadFile('/tools/ipam/scan-report.csv', `ip-scan-report-${dayStamp()}.csv`); } catch (e) { setMsg({ ok: false, text: downloadFailText(e) }); }
   };
   if (error && !data) return <ErrorBox message={error} />; // v2.478(감사 B15): 데이터 보유 중 일시 오류는 화면 유지(아래 배너)
   if (!data) return <Loading />;

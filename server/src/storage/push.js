@@ -10,6 +10,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { localSnapshots } from './store.js';
 import { devicesForThisNode } from './registry.js';
 import { runtimeIntervals, startAdaptiveTimer } from './intervals.js';
+import { cmpVersion } from '../util/cmpVersion.js';
 
 // v2.409: 주기는 중앙 배포값(storage/intervals.js)을 매번 조회 — 모듈 로드 시 상수로 굳히지 않는다.
 const pushMs = () => runtimeIntervals().pushMs;
@@ -57,6 +58,17 @@ async function pushStorageOnce() {
         const c = await sendClearList();
         cleared = c.ok; clearError = c.ok ? null : c.reason;
         if (!c.ok) console.warn(`[storage-push] 위임 0대 — 중앙 목록 비우기 실패: ${c.reason}`);
+      }
+      // ⚠ v2.602(감사 EDGE2602-03): 상태 전용 본문(statusOnly)은 **v2.581 이상 중앙만** 안다. v2.580 이하 중앙은 그 플래그를
+      //   무시하고 devices:[] 를 이 엣지 목록의 **교체**로 받아 중앙 스토리지 목록을 비웠다(엣지가 중앙보다 먼저 올라간 현장).
+      //   중앙 버전을 확인할 수 있을 때만 보내고, 모르거나 낮으면 **보내지 않고** 사유를 남긴다(SAN·PDU 는 첫 수집 대기 중
+      //   아무것도 보내지 않는다 — 같은 쪽으로 실패한다). 위임 0대(registered===0)는 위에서 목록 비우기가 정답이라 해당 없음.
+      const cap = await centralStatusOnlySupport();
+      if (!cap.ok) {
+        _last = { at: Date.now(), sent: 0, statusSent: false, statusSkipped: cap.reason, centralVersion: cap.version || null,
+          ...(registered === 0 ? { cleared, ...(clearError ? { clearError } : {}) } : {}) };
+        console.warn(`[storage-push] 상태 보고 생략: ${cap.text}`);
+        return { ok: true, sent: 0, statusSent: false, statusSkipped: cap.reason, ...(registered === 0 ? { cleared } : {}) };
       }
       const r = await sendStatusOnly({ reason: 'no-snapshots', registered });
       _last = { at: Date.now(), sent: 0, statusSent: r.ok, statusError: r.ok ? null : r.reason,
@@ -122,6 +134,41 @@ async function sendClearList() {
     return { ok: true };
   } catch (e) { return { ok: false, reason: e.message }; }
 }
+
+/** statusOnly 를 아는 첫 중앙 버전(v2.581 BUG-D). */
+export const STATUS_ONLY_MIN_CENTRAL = '2.581.0';
+const CAP_TTL_MS = 60 * 60_000;
+const CAP_FAIL_TTL_MS = 5 * 60_000;
+let _cap = null; // { at, ok, reason, version, text }
+
+/**
+ * 중앙이 statusOnly 를 아는가(v2.602 EDGE2602-03) — 경량 `/api/central/health-probe`(v2.552 이상, 응답에 version)로 본다.
+ * 성공은 1시간, 실패는 5분 캐시(주기 push 마다 두드리지 않게). 모르는 것(프로브 실패·버전 형식 불명)은 **지원하지 않는 쪽**이다.
+ * @returns {Promise<{ok:boolean, reason:string, version?:string, text:string}>}
+ */
+export async function centralStatusOnlySupport({ now = Date.now(), fetchImpl = resilientFetch } = {}) {
+  if (_cap && now - _cap.at < (_cap.ok ? CAP_TTL_MS : CAP_FAIL_TTL_MS)) return _cap;
+  let out;
+  try {
+    const res = await fetchImpl(`${config.agent.centralUrl}/api/central/health-probe`, {
+      headers: { Accept: 'application/json', 'X-Central-Token': config.agent.centralToken }, timeoutMs: 10_000, retries: 0,
+    });
+    if (!res.ok) out = { ok: false, reason: 'central-version-unknown', text: `중앙 버전 확인 실패(health-probe HTTP ${res.status}) — 구버전 중앙이면 목록을 비울 수 있어 상태 보고를 보내지 않습니다` };
+    else {
+      const j = await res.json().catch(() => null);
+      const v = typeof j?.version === 'string' ? j.version.slice(0, 32) : '';
+      const c = v ? cmpVersion(v, STATUS_ONLY_MIN_CENTRAL) : null;
+      if (c == null) out = { ok: false, reason: 'central-version-unknown', version: v, text: `중앙 버전을 읽지 못했습니다(${v || '응답에 없음'}) — 상태 보고를 보내지 않습니다` };
+      else if (c < 0) out = { ok: false, reason: 'central-too-old', version: v, text: `중앙 v${v} 는 상태 전용 보고를 모릅니다(v${STATUS_ONLY_MIN_CENTRAL} 이상 필요 — 보내면 중앙의 이 엣지 스토리지 목록이 비워집니다). 중앙을 업그레이드하세요` };
+      else out = { ok: true, reason: '', version: v, text: '' };
+    }
+  } catch (e) {
+    out = { ok: false, reason: 'central-version-unknown', text: `중앙 버전 확인 실패(${String(e?.message || e).slice(0, 120)}) — 상태 보고를 보내지 않습니다` };
+  }
+  _cap = { at: now, ...out };
+  return _cap;
+}
+export function _resetStatusOnlyCapForTest() { _cap = null; }
 
 /**
  * 상태 전용 push(v2.581) — `devices: []` 에 `statusOnly:true` 를 붙인다. 중앙은 보관 중인 장비 목록을

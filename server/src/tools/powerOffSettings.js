@@ -7,12 +7,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'power-off-check.json');
 export const LIMITS = Object.freeze({ minHours: 1, maxHours: 168 });
 export const DEFAULTS = Object.freeze({ enabled: true, intervalHours: 6 });
 
-const clampHours = (v, dflt) => { const n = Number(v); return Number.isFinite(n) ? Math.min(LIMITS.maxHours, Math.max(LIMITS.minHours, Math.round(n))) : dflt; };
+// v2.602(감사 LEFT2602-03): 빈 값은 '미지정' — dflt(이전 값). 예전 Number('') === 0 이 하한 1시간이 됐다.
+const clampHours = (v, dflt) => { const n = numOrNull(v); return n != null ? Math.min(LIMITS.maxHours, Math.max(LIMITS.minHours, Math.round(n))) : dflt; };
 let cache = null;
 
 export function loadPowerOffSettings() {

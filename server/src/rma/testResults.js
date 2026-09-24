@@ -65,13 +65,17 @@ export async function ingestResult(agent, r, { now = Date.now(), alert = true, n
   //   `rma/agent.js:219` 가 실행 오류 시 `value: null` 을 보내고 `rma/tests.js:164` 는 값이
   //   없으면 `?? null` 을 준다. 같은 코드베이스가 `value == null` 을 '값 없음' 으로 정의해 두고
   //   sink 에서 0 으로 바꾸고 있었다.
+  // v2.602(감사 CEN2602-04): name·test·instance 는 **글자로** 좁힌다. 스케줄 이름이 비어 있으면 엣지가 보낸 r.name 이
+  //   그대로 남는데, 그것이 객체면 latestResults 의 localeCompare 가 던져 **재시작 전까지** 점검 결과 조회가 500 이었다
+  //   (prev.name 으로 대물림되므로 다음 정상 보고로도 풀리지 않았다). durationMs 도 측정값이라 numOrNull.
+  const txt = (v, n) => (typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '').slice(0, n);
   const cur = {
-    agent: String(agent), instance: String(r.instance || ''), testId: String(r.id), test: String(r.test || prev?.test || ''), name: name || r.name || prev?.name || '',
-    status, reply: String(r.reply || '').slice(0, 500), value: numOrNull(r.value), at,
+    agent: String(agent), instance: txt(r.instance, 64), testId: String(r.id), test: txt(r.test, 64) || txt(prev?.test, 64), name: txt(name, 80) || txt(r.name, 80) || txt(prev?.name, 80),
+    status, reply: txt(r.reply, 500), value: numOrNull(r.value), at,
     since: prev && prev.status === status ? prev.since : at,
     okAt: status === 'ok' ? at : (prev?.okAt ?? null),
     streak: prev && prev.status === status ? (prev.streak || 1) + 1 : 1,
-    lastLoggedAt: prev?.lastLoggedAt || 0, alerted: prev?.alerted || false, durationMs: r.durationMs ?? null,
+    lastLoggedAt: prev?.lastLoggedAt || 0, alerted: prev?.alerted || false, durationMs: numOrNull(r.durationMs),
   };
   const changed = !prev || prev.status !== status;
   // 이력: 변화 시 + 1시간마다
@@ -105,7 +109,7 @@ export async function evaluateRmaItself(agent, itemId, { online, total, now = Da
 
 export function latestResults({ agent = '' } = {}) {
   const a = String(agent).toLowerCase();
-  return [...latest.values()].filter((x) => !a || x.agent.toLowerCase() === a).sort((x, y) => x.agent.localeCompare(y.agent) || (x.name || x.test).localeCompare(y.name || y.test));
+  return [...latest.values()].filter((x) => !a || x.agent.toLowerCase() === a).sort((x, y) => String(x.agent).localeCompare(String(y.agent)) || String(x.name || x.test || '').localeCompare(String(y.name || y.test || '')));
 }
 export function dropResult(agent, id) { latest.delete(key(agent, id)); }
 

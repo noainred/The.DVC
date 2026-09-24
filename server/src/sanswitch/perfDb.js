@@ -20,12 +20,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
+import { chunkedDelete } from '../util/chunkedPrune.js';
 const lockRetry = createLockRetry();
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'sanswitch-perf.db');
 const PRUNE_EVERY = 20;      // N회 저장마다 1회만 prune
 let _db = null;              // { conn, ... } | 'unavailable'
 let _pruneTick = 0;
+
+// v2.602(감사 CEN2602-05): 엣지가 올리는 포트 번호·메타 문자열의 범위. 포트 번호는 PK 의 일부라 범위가 없으면
+//   port_meta 가 엣지 하나로 무한히 커진다(prune 도 없었다). 디렉터 최대 768포트에 여유를 둔 0~4095.
+export const PORT_MAX = 4095;
+const META_TEXT_MAX = 128;
+const portOk = (p) => Number.isInteger(p) && p >= 0 && p <= PORT_MAX;
+const metaText = (v) => (typeof v === 'string' ? v : (typeof v === 'number') ? String(v) : '').slice(0, META_TEXT_MAX);
 
 // v2.580(BUG-A): **진행 중인 open 을 공유한다** — 예전에는 `_db` 검사와 `await import('node:sqlite')`
 // 사이에서 두 번째 호출이 들어오면 같은 파일에 `DatabaseSync` 가 **둘** 만들어지고 첫 핸들이 새어
@@ -135,29 +143,31 @@ export async function importSamples(rows = [], meta = [], retentionDays = 90) {
   const db = await open();
   if (!db) return { inserted: 0, skipped: 0, unavailable: true };
   const ins = db.conn.prepare('INSERT INTO port_perf (device_id, ts, port, bps) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM port_perf WHERE device_id = ? AND port = ? AND ts = ?)');
-  let inserted = 0, skipped = 0;
+  let inserted = 0, skipped = 0, metaRejected = 0;
   db.conn.exec('BEGIN');
   try {
     for (const r of rows) {
       const d = String(r.d ?? ''), ts = Number(r.ts), p = Number(r.p), b = Math.max(0, Math.round(Number(r.b)));
-      if (!d || !Number.isFinite(ts) || !Number.isInteger(p) || !Number.isFinite(b)) { skipped++; continue; }
+      if (!d || !Number.isFinite(ts) || !portOk(p) || !Number.isFinite(b)) { skipped++; continue; }
       const x = ins.run(d, ts, p, b, d, p, ts);
       if (Number(x.changes) > 0) inserted++; else skipped++;
     }
     for (const m of meta) {
       const d = String(m.d ?? ''); const p = Number(m.p);
-      if (!d || !Number.isInteger(p)) continue;
+      if (!d || !portOk(p)) { metaRejected++; continue; }
       // 더 새로운 메타만 반영(엣지 청크가 순서 없이 와도 최신을 유지)
       // v2.503: 예전에는 이 줄에서 포트마다 `prepare()` 를 새로 만들었다 — 디렉터 1대가 512~768포트라
       // 한 요청에 그만큼 SQL 파싱·계획 수립이 반복됐다(같은 파일의 upMeta 는 이미 초기화 때 준비돼 있다).
       const cur = db.metaTs.get(d, p);
       if (cur && Number(cur.ts) > Number(m.ts)) continue;
-      db.upMeta.run(d, p, Number(m.ts) || Date.now(), String(m.name || ''), String(m.wwn || ''), String(m.speed || ''), String(m.type || ''));
+      db.upMeta.run(d, p, Number(m.ts) || Date.now(), metaText(m.name), metaText(m.wwn), metaText(m.speed), metaText(m.type));
     }
     db.conn.exec('COMMIT');
   } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
-  if (++_pruneTick % PRUNE_EVERY === 0) pruneOld(db, retentionDays);
-  return { inserted, skipped };
+  if (inserted > 0) _counts = null;
+  if (++_pruneTick % PRUNE_EVERY === 0) pruneInBackground(db, retentionDays);
+  // 범위 밖 포트·빈 장비 id 로 버린 메타 개수를 밝힌다(조용히 버리지 않는다).
+  return { inserted, skipped, ...(metaRejected ? { metaRejected } : {}) };
 }
 
 /**
@@ -178,23 +188,51 @@ export async function savePerfSample(deviceId, ts, samples = {}, meta = [], rete
     db.conn.exec('COMMIT');
   } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
 
-  if (++_pruneTick % PRUNE_EVERY === 0) pruneOld(db, retentionDays);
+  if (rows.length) _counts = null;
+  if (++_pruneTick % PRUNE_EVERY === 0) pruneInBackground(db, retentionDays);
   return { saved: rows.length };
 }
 
+/**
+ * v2.602(감사 DB2602-01): prune 은 **청크 DELETE + 청크 사이 양보**다(util/chunkedPrune.js, v2.453 규약).
+ * 예전 `DELETE FROM port_perf WHERE ts < ?` 한 방은 보존일을 줄이거나 '지금 정리' 를 누르면 수백만 행을 동기로 지워
+ * 이벤트 루프가 수 초 멈췄다(감사 재현: 276만 행 5.4초). 청크 사이에 적재가 끼어들 수 있으므로 prune 끼리는 겹치지 않게
+ * 한다(단일 비행 — 진행 중이면 그 프라미스를 공유한다). port_meta 도 같은 보존일로 정리한다(CEN2602-05 — 예전에는
+ * port_perf 만 지워 메타가 영구히 남았다). 메타 ts 는 수집마다 갱신되므로 보존일 동안 갱신이 없던 포트만 지워진다.
+ */
+let _pruning = null;
 function pruneOld(db, retentionDays) {
-  try {
-    const cut = Date.now() - Math.max(1, Number(retentionDays) || 90) * 86400e3;
-    return db.conn.prepare('DELETE FROM port_perf WHERE ts < ?').run(cut); // ts 단독 인덱스로 탐색
-  } catch (e) { console.warn(`[sanswitch-perf] prune 실패: ${e.message}`); return null; }
+  if (_pruning) return _pruning;
+  const cut = Date.now() - Math.max(1, Number(retentionDays) || 90) * 86400e3;
+  _pruning = (async () => {
+    // ts 단독 인덱스(idx_pp_ts)가 rowid 서브쿼리의 풀스캔을 막는다
+    const stmt = db.conn.prepare('DELETE FROM port_perf WHERE rowid IN (SELECT rowid FROM port_perf WHERE ts < ? LIMIT ?)');
+    const r = await chunkedDelete(stmt, [cut], { label: 'sanswitch-perf.port_perf' });
+    const meta = db.conn.prepare('DELETE FROM port_meta WHERE ts < ?').run(cut); // 장비×포트(≤4096) 규모라 한 번에
+    if (r.deleted > 0 || Number(meta?.changes) > 0) {
+      _counts = null;
+      console.log(`[sanswitch-perf] prune ${r.deleted.toLocaleString()}행 삭제(${r.chunks}청크)${r.done ? '' : ' — 상한 도달, 다음 주기에 계속'} · 메타 ${Number(meta?.changes || 0)}행`);
+    }
+    return { deleted: r.deleted, done: r.done, metaDeleted: Number(meta?.changes || 0) };
+  })().finally(() => { _pruning = null; });
+  return _pruning;
+}
+/** 적재 경로용 — 기다리지 않는다. 실패는 콘솔에 남긴다(조용히 삼키지 않는다). */
+function pruneInBackground(db, retentionDays) {
+  pruneOld(db, retentionDays).catch((e) => console.warn(`[sanswitch-perf] prune 실패: ${e.message}`));
 }
 
-/** 보관 기간 즉시 적용(v2.420, 설정 화면 '지금 정리') — 삭제 행 수를 돌려준다. */
+/**
+ * 보관 기간 즉시 적용(v2.420, 설정 화면 '지금 정리') — 삭제 행 수를 돌려준다. 한 번에 상한(PRUNE_MAX_ROWS)까지만
+ * 지우고 남으면 `done:false` 로 밝힌다(다시 누르거나 다음 주기가 이어서 지운다).
+ */
 export async function pruneNow(retentionDays) {
   const db = await open();
   if (!db) return { deleted: 0, unavailable: true };
-  const r = pruneOld(db, retentionDays);
-  return { deleted: Number(r?.changes || 0) };
+  try {
+    const r = await pruneOld(db, retentionDays);
+    return { deleted: r.deleted, done: r.done, metaDeleted: r.metaDeleted };
+  } catch (e) { console.warn(`[sanswitch-perf] prune 실패: ${e.message}`); return { deleted: 0, error: e.message }; }
 }
 
 /**
@@ -418,19 +456,33 @@ export function endpointKind(key, { matched = false } = {}) {
   return s.includes('::') ? 'array' : 'host';
 }
 
-/** 보관 현황(설정 화면 표시용). */
-export async function perfDbStats() {
+/**
+ * 보관 현황(설정 화면 표시용).
+ * v2.602(감사 DB2602-02): 설정 화면이 **20초마다** 이 함수를 부른다(SanSwitchPerf.jsx) — v2.550.3 이 '폴링하지 않는 진단
+ * 경로' 로 제외한 전제가 틀렸다. 예전 `COUNT(*), MIN(ts), MAX(ts)` 한 쿼리(aggregate 셋 → 인덱스 전량 스캔) +
+ * `COUNT(DISTINCT device_id)` 가 300만 행에서 303ms 였다. MIN·MAX 는 **단독 쿼리 둘**(인덱스 양끝 조회)로 나누고,
+ * 행 수·장비 수·24시간 적재 수는 60초 캐시하되 **캐시임을 `countsAt` 으로 밝힌다**(v2.550.3 bmusage 와 같은 규약).
+ * 적재·prune 이 행 수를 바꾸면 캐시를 버린다.
+ */
+const COUNTS_TTL_MS = 60_000;
+let _counts = null;   // { at, rows, devices, rowsLastDay }
+export async function perfDbStats({ now = Date.now() } = {}) {
   const db = await open();
   if (!db) return { available: false };
   try {
-    const r = db.conn.prepare('SELECT COUNT(*) AS n, MIN(ts) AS oldest, MAX(ts) AS newest FROM port_perf').get();
-    const d = db.conn.prepare('SELECT COUNT(DISTINCT device_id) AS n FROM port_perf').get();
-    const day = db.conn.prepare('SELECT COUNT(*) AS n FROM port_perf WHERE ts >= ?').get(Date.now() - 86400e3);
+    const oldest = db.conn.prepare('SELECT MIN(ts) AS v FROM port_perf').get();
+    const newest = db.conn.prepare('SELECT MAX(ts) AS v FROM port_perf').get();
+    if (!_counts || now - _counts.at >= COUNTS_TTL_MS || now < _counts.at) {
+      const n = db.conn.prepare('SELECT COUNT(*) AS n FROM port_perf').get();
+      const d = db.conn.prepare('SELECT COUNT(DISTINCT device_id) AS n FROM port_perf').get();
+      const day = db.conn.prepare('SELECT COUNT(*) AS n FROM port_perf WHERE ts >= ?').get(now - 86400e3);
+      _counts = { at: now, rows: Number(n?.n || 0), devices: Number(d?.n || 0), rowsLastDay: Number(day?.n || 0) };
+    }
     let fileBytes = 0;
     for (const suf of ['', '-wal']) { try { fileBytes += fs.statSync(FILE() + suf).size; } catch { /* */ } }
-    return { available: true, rows: Number(r?.n || 0), oldest: Number(r?.oldest || 0), newest: Number(r?.newest || 0), devices: Number(d?.n || 0), file: FILE(),
-      fileBytes, rowsLastDay: Number(day?.n || 0) };
+    return { available: true, rows: _counts.rows, oldest: Number(oldest?.v || 0), newest: Number(newest?.v || 0), devices: _counts.devices, file: FILE(),
+      fileBytes, rowsLastDay: _counts.rowsLastDay, countsAt: _counts.at };
   } catch (e) { return { available: true, error: e.message }; }
 }
 
-export function _resetForTest() { lockRetry.ok(); try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; }
+export function _resetForTest() { lockRetry.ok(); try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; _counts = null; _pruning = null; }

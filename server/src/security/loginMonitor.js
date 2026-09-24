@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { analyzeLoginFails } from './loginFails.js';
 import { notify } from '../alerts.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'login-monitor.json');
 const DEFAULTS = { enabled: true, intervalMin: 15, days: 7, threshold: 5, windowMin: 10, alert: true };
@@ -26,6 +27,16 @@ function backupCorrupt(err) {
   } catch { /* 보존 실패가 기동을 막지 않게 */ }
 }
 
+const RANGES = { intervalMin: [1, 1440], days: [1, 90], threshold: [2, 1000], windowMin: [1, 1440] };
+function clampNumbers(p) {
+  const out = {};
+  for (const [k, [lo, hi]] of Object.entries(RANGES)) {
+    const n = numOrNull(p?.[k]);
+    out[k] = n == null || n <= 0 ? DEFAULTS[k] : Math.max(lo, Math.min(hi, n));
+  }
+  return out;
+}
+
 let cache = null;
 export function loadLoginMonitor() {
   if (cache) return cache;
@@ -34,7 +45,9 @@ export function loadLoginMonitor() {
     if (fs.existsSync(FILE)) {
       const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아님'); // 형식 불일치도 손상
-      cache = { ...DEFAULTS, ...p };
+      // v2.602(감사 TIM2602-04): 로드에도 저장과 같은 범위를 적용한다. 손으로 고친 파일·복원한 백업의 intervalMin 0·''·음수가
+      // 그대로 setInterval 로 가서 1ms 루프(초당 약 1,000회 runOnce)가 됐다. 범위 밖·숫자 아님은 기본값이다.
+      cache = { ...DEFAULTS, ...p, ...clampNumbers(p) };
     }
   } catch (e) { cache = { ...DEFAULTS }; backupCorrupt(e); }
   return cache;

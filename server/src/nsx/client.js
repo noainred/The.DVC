@@ -159,13 +159,28 @@ export class NsxClient {
   async ping() { await this.node(); }
 }
 
-/** Map an NSX cluster-status payload to a simple connected/degraded label. */
-function clusterHealth(status) {
+/**
+ * Map an NSX cluster-status payload to a simple connected/degraded label.
+ * v2.602(COL-2602-01): 조회가 **실패**했으면(failedList 표식 · null) 'connected' 가 아니라 'unknown'(판정 보류)이다 —
+ *   예전에는 `.catch(() => null)` 뒤 여기서 'connected' 가 되어 모든 목록이 실패한 매니저를 '정상' 이라 말했다.
+ *   응답은 왔는데 상태 필드가 없는 것(구버전 페이로드)은 예전대로 'connected' 다.
+ */
+export function clusterHealth(status) {
+  if (status == null || status.failed) return 'unknown';
   const m = status?.mgmt_cluster_status?.status || status?.detailed_cluster_status?.overall_status;
   const c = status?.control_cluster_status?.status;
   const up = (v) => String(v || '').toUpperCase() === 'STABLE' || String(v || '').toUpperCase() === 'CONNECTED';
   if (m == null && c == null) return 'connected';
   return up(m) && (c == null || up(c)) ? 'connected' : 'degraded';
+}
+
+/**
+ * 관리 클러스터 노드 수(v2.602 COL-2602-01). 조회 실패면 **모른다**(null) — 예전 `|| 1` 은 실패를 '노드 1대' 로 만들었다.
+ * 응답은 왔지만 노드 목록 필드가 없으면(단일 노드 구버전 페이로드) 예전대로 1 이다.
+ */
+export function clusterNodeCount(cluster) {
+  if (cluster == null || cluster.failed) return null;
+  return (cluster?.mgmt_cluster_status?.online_nodes?.length) || (cluster?.detailed_cluster_status?.groups?.length) || 1;
 }
 
 /**
@@ -223,7 +238,7 @@ export async function collectFromNsx(mgr) {
   const client = new NsxClient(mgr, dial);
   const node = await client.node(); // throws if auth/host is wrong → manager unreachable
   const [cluster, tnodes, t0, t1, segs, pols, grps] = await Promise.all([
-    client.clusterStatus().catch(() => null),
+    client.clusterStatus().catch(failedList),   // v2.602(COL-2602-01): 실패는 null 이 아니라 표식 — '정상' 으로 둔갑하지 않게
     client.transportNodes().catch(failedList),
     client.tier0s().catch(failedList),
     client.tier1s().catch(failedList),
@@ -348,14 +363,15 @@ export async function collectFromNsx(mgr) {
     manager: {
       id: mgr.id, name: mgr.name, host: mgr.host, region: mgr.location?.region || '', vcenterId: mgr.vcenterId || '',
       status: clusterHealth(cluster), version: node?.node_version || node?.product_version || 'unknown',
-      nodeCount: (cluster?.mgmt_cluster_status?.online_nodes?.length) || (cluster?.detailed_cluster_status?.groups?.length) || 1,
+      nodeCount: clusterNodeCount(cluster),
       idsEnabled: ids.enabled, idsProfiles: ids.profiles, idsEventCount: ids.events.length,
       licenses, // 만료일 확인용 — store.merge가 manager 필드로 그대로 실어 나른다
       // v2.599(감사 C2599-05): 페이지 상한에 걸려 끝까지 받지 못한 목록 — 그 개수는 하한이다(조용한 상한 금지).
       listsTruncated: [['transportNodes', tnodes], ['tier0s', t0], ['tier1s', t1], ['segments', segs], ['securityPolicies', pols], ['groups', grps]]
         .filter(([, l]) => l?.truncated).map(([k]) => k),
       // v2.600(감사 COL-2600-06): 조회에 실패한 목록 — 그 개수는 0 이 아니라 확인 불가다.
-      ...listFailures([['transportNodes', tnodes], ['tier0s', t0], ['tier1s', t1], ['segments', segs], ['securityPolicies', pols], ['groups', grps]]),
+      //   v2.602(COL-2602-01): 클러스터 상태 조회 실패도 같은 목록으로 밝힌다(화면이 사유를 말할 수 있게).
+      ...listFailures([['clusterStatus', cluster], ['transportNodes', tnodes], ['tier0s', t0], ['tier1s', t1], ['segments', segs], ['securityPolicies', pols], ['groups', grps]]),
     },
     gateways: [...mkGw(t0, 'T0'), ...mkGw(t1, 'T1')],
     segments,

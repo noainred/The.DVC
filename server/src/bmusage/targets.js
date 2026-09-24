@@ -19,7 +19,7 @@
  *   (`fleetInventory.js:170`) iDRAC 등록이 없다 — 그것을 '주소 없음' 이라 말해야 한다.
  */
 import { licenseFromInventory } from './license.js';
-import { addressMatcher, maskIdentityFields, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
+import { addressMatcher, extendMatcher, maskIdentityFields, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
 
 const t = (v) => String(v ?? '').trim();
 const norm = (v) => t(v).toLowerCase();
@@ -203,11 +203,13 @@ function idOf(b) {
  * ⚠ `null`(그 경로가 없다)과 `''`(있지만 가렸다)을 구분해 남긴다 — 화면이 경로 유무를 판정한다.
  * `publicTarget` 의 두 번째 인자로 두지 않은 이유: 호출부가 `.map(publicTarget)` 이라 인덱스가 들어온다.
  */
-export function maskTargetAddress(pt, hosts = []) {
+export function maskTargetAddress(pt, hosts = [], baseMatch = null) {
   if (!pt || typeof pt !== 'object') return pt;
   // v2.601 AUTHZ-2601-01: IP 로 등록한 iDRAC 은 serverId·fleetId·key·name 이 곧 그 IP 다 —
   //   host 칸만 비우면 식별자로 그대로 샜다. 자기 주소 + 등록부 주소 목록과 같거나 IP 인 값을 가린다.
-  const match = addressMatcher([pt.idracHost, pt.osHostName, ...(hosts || [])].filter((h) => typeof h === 'string' && h));
+  // v2.602 RECENT2602-01: 목록 공통 판정기(baseMatch)를 받으면 행마다 주소 목록을 다시 만들지 않는다.
+  const own = [pt.idracHost, pt.osHostName].filter((h) => typeof h === 'string' && h);
+  const match = extendMatcher(baseMatch || addressMatcher((hosts || []).filter((h) => typeof h === 'string' && h)), own);
   return {
     ...maskBmIdentity(pt, match),
     idracHost: pt.idracHost == null ? pt.idracHost : '',

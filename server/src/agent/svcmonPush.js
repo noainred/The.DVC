@@ -32,6 +32,8 @@ import { promisify } from 'node:util';
 import { config, clampIntervalMs } from '../config.js';
 import { reqTimeoutMs } from './envTimeout.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { classifyCentral404Body } from './central404.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { snapshotResults, pollerStats } from '../svcmon/poller.js';
 import { logStats } from '../svcmon/csvlog.js';
 
@@ -56,6 +58,8 @@ let sentMetaSig = '';
 let snapSeq = 0;
 let unsupportedUntil = 0; // 중앙이 404 면 구버전이다 — 1시간 백오프
 let last = null;
+// v2.602(감사 EDGE2602-02): 404 사유를 콘솔에도(같은 사유는 10분에 한 번).
+const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 
 function headers(extra = {}) {
   return {
@@ -183,8 +187,17 @@ export async function pushSvcmonNow() {
           break;
         }
         if (r.status === 404) {
-          unsupportedUntil = Date.now() + 3_600_000;
-          return { ok: false, reason: '중앙이 /api/central/svcmon-report 를 지원하지 않습니다(1시간 후 재시도).' };
+          // v2.602(감사 EDGE2602-02): 404 는 'central 꺼짐' 과 '구버전 중앙' 두 뜻이다 — 본문으로 가르고, `last`·콘솔에 남긴다
+          //   (예전에는 둘 다 '구버전' 으로 읽고 아무것도 남기지 않아 상태가 마지막 성공을 계속 보여 줬다). 백오프는 '엔드포인트 없음' 만.
+          const c = classifyCentral404Body(r.data);
+          if (c.kind === 'no-endpoint') unsupportedUntil = Date.now() + 3_600_000;
+          last = {
+            at: Date.now(), ms: Date.now() - startedAt, snapId, chunks: chunks.length, error: c.reason, kind: c.kind,
+            rows: snap.rows.length, items: snap.items, accepted, dropped, bytes, wire,
+            gzip: PUSH_GZIP, chunkRows, errors: [c.reason], metaSig: sentMetaSig,
+          };
+          if (_logChange('push', `404 ${c.kind}`)) console.warn(`[svcmon-push] 중앙 보고 실패: ${c.reason}${c.kind === 'no-endpoint' ? ' (1시간 후 재시도)' : ''}`);
+          return { ok: false, reason: c.reason, ...last };
         }
         bytes += r.bytes; wire += r.wire;
         if (!r.ok) { errors.push(`청크 ${idx + 1}/${chunks.length} → ${r.status}${r.data?.reason ? ` (${r.data.reason})` : ''}`); continue; }
