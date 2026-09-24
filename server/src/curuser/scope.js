@@ -28,7 +28,7 @@ export function normFolder(p) {
   return String(p ?? '')
     .replace(/\\/g, '/')
     .replace(/\/{2,}/g, '/')
-    .replace(/\s+$/g, '')
+    .trimEnd()   // v2.599(SEC2599-02): replace(/\s+$/g) 는 O(n²)
     .replace(/^\s+/g, '')
     .replace(/\/$/, '')
     .toLowerCase();

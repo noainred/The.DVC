@@ -8,7 +8,7 @@
  */
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { isAdminReq, maskDeviceAddress, maskSnapAddress } from '../../auth/addressMask.js';
+import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents } from '../../auth/addressMask.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
@@ -493,7 +493,10 @@ api.delete('/tools/sanswitch/devices/:id/err-baseline', adminOnly, (req, res) =>
  * 하나가 두 경로를 그린다. 키 이름을 바꾸면 한쪽이 조용히 빈다(v2.516 규약).
  */
 api.get('/tools/sanswitch/perf/activity', toolsPerm, fullScopeOnly, (req, res) => {
-  res.json({ poller: sanSwitchPerfStatus(), events: listPerfActivity(Number(req.query.limit) || 100) });
+  // v2.599(AUTHZ-2599-03): 목록과 같은 기준 — 비-admin 에는 작업 로그의 관리 주소도 가린다.
+  const admin = isAdminReq(req);
+  const events = listPerfActivity(Number(req.query.limit) || 100);
+  res.json({ poller: sanSwitchPerfStatus(), events: admin ? events : maskActivityEvents(events), ...(admin ? {} : { addressHidden: true }) });
 });
 
 /**
@@ -674,7 +677,10 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
  *   하나로 두 화면을 그린다(views/tools/CollectActivity.jsx). 키 이름을 바꾸면 한쪽이 빈다.
  */
 api.get('/tools/sanswitch/activity', toolsPerm, fullScopeOnly, (req, res) => {
-  res.json({ poller: sanSwitchPollerStatus(), events: listSwActivity(Number(req.query.limit) || 100) });
+  // v2.599(AUTHZ-2599-03): 목록과 같은 기준 — 비-admin 에는 작업 로그의 관리 주소도 가린다.
+  const admin = isAdminReq(req);
+  const events = listSwActivity(Number(req.query.limit) || 100);
+  res.json({ poller: sanSwitchPollerStatus(), events: admin ? events : maskActivityEvents(events), ...(admin ? {} : { addressHidden: true }) });
 });
 
 /**

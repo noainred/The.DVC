@@ -13,6 +13,7 @@ import { shouldStore, policyFromEnv } from '../metrics/deadband.js';   // v2.451
 import path from 'node:path';
 import { config } from '../config.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
+import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 const DB_PATH = config.idrac.dbPath;
 const deadbandPolicy = policyFromEnv();
@@ -24,10 +25,9 @@ function initSqlite() {
   // eslint-disable-next-line import/no-unresolved
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    const db = new DatabaseSync(DB_PATH);
+    const db = openSqlite(new DatabaseSync(DB_PATH));   // busy_timeout 먼저 · 잠금이면 닫고 던진다
     // WAL + synchronous=NORMAL: 커밋당 fsync 2회(DELETE 저널) → 배치화(단건 insert 5ms→0.01ms 실측).
     // busy_timeout: 동시 접근 시 즉시 SQLITE_BUSY 실패 대신 대기.
-    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
     db.exec(`
       CREATE TABLE IF NOT EXISTS power_samples (
         server_id TEXT NOT NULL,
@@ -307,7 +307,7 @@ let ready = null;
 export async function getDb() {
   if (impl) return impl;
   if (!ready) {
-    ready = initSqlite().then((db) => {
+    ready = retryOnLock(initSqlite, { tag: 'idrac' }).then((db) => {
       impl = withLatestCache(db);
       console.log(`[idrac] power DB: SQLite (${DB_PATH})`);
       return impl;

@@ -89,9 +89,19 @@ export function rejectKindLine(reject) {
   if (k === 'owner') return `**이 vCenter 는 다른 엣지 소유로 등록돼 있어 거부됐습니다** — ${reason || '두 엣지가 같은 vCenter 를 push 하고 있을 수 있습니다'}`;
   if (k === 'auth') return `**중앙 토큰이 거부됐습니다**(${reason || '토큰 불일치'}) — 포탈 점검 › 토큰 점검에서 이 엣지를 대조하세요`;
   if (k === 'disabled') return '**중앙 수신이 비활성입니다**';
+  // v2.599(WEB2599-04): 라우터에 없는 경로 — '수신 꺼짐' 과 조치가 다르다(버전 차이). 경로 문자열은 한 칸으로 합쳐져 있다.
+  if (k === 'unknown-route') return '**중앙이 이 경로를 모릅니다**(없는 경로) — 엣지가 중앙보다 새 버전이거나 경로가 잘못됐습니다. 중앙을 업그레이드하거나 엣지 버전을 확인하세요';
+  if (k === 'too-large') return `**본문이 중앙 수신 한도를 넘었습니다(413)**${reason ? `(${reason})` : ''} — 중앙의 대용량 수신 등록·상한을 확인하세요`;
   if (k === 'server') return `**중앙 오류로 저장에 실패했습니다**(${reason || '5xx'})`;
   return `**요청이 거부됐습니다**(${reason || '사유 미상'})`;
 }
+
+/** 거부 종류 짧은 라벨(표·상세의 한 칸). 모르는 종류는 원문 코드를 그대로 돌려준다(지어내지 않는다). */
+export const REJECT_KIND_LABEL = Object.freeze({
+  auth: '토큰 거부', mock: 'mock 데이터', owner: '소유권 충돌', 'bad-request': '형식 오류', disabled: '수신 꺼짐',
+  server: '중앙 오류', 'too-large': '크기 초과(413)', 'unknown-route': '없는 경로', other: '기타',
+});
+export const rejectKindLabel = (k) => REJECT_KIND_LABEL[t(k)] || t(k) || '—';
 
 /** 거부 기록 agent 이름의 신뢰 한계 — 지우지 말 것(위조된 이름일 수 있다). */
 export function unverifiedNote() {
@@ -117,7 +127,7 @@ const FINDING_TEXT = Object.freeze({
   'inv-stale': { title: '위임 vCenter 수신이 낡았습니다', fix: '그 엣지가 살아 있는지, 중앙까지 통신이 되는지 확인하세요(특수기능 › 통신 점검).' },
   'inv-never': { title: '위임 vCenter 에 수신 이력이 없습니다', fix: '그 vCenter 담당 엣지가 vCenter 접속에 성공하는지, DATA_SOURCE=live 인지 확인하세요.' },
   'inv-reject-mock': { title: '엣지가 mock 데이터를 보내 거부됐습니다', fix: '그 엣지 portal.env 의 DATA_SOURCE 를 live 로 바꾸고 재시작하세요.' },
-  'inv-reject-owner': { title: '소유권 충돌로 push 가 거부됐습니다', fix: '두 엣지가 같은 vCenter 를 담당하도록 설정돼 있지 않은지 확인하세요.' },
+  'inv-reject-owner': { title: '소유권 충돌로 push 가 거부됐습니다', fix: '두 엣지가 같은 vCenter 를 담당하도록 설정돼 있지 않은지 확인하세요. 담당 엣지를 교체했다면 중앙 관리자가 소유 엣지를 해제·지정합니다(POST /api/admin/central/inventory/owner).' },
   'inv-reject-auth': { title: '토큰 불일치로 push 가 거부됐습니다', fix: '포탈 점검 › 토큰 점검에서 이 엣지의 저장 토큰을 대조하세요.' },
   'inv-reject-other': { title: '중앙이 push 를 거부했습니다', fix: '아래 사유를 확인하세요.' },
   'inv-empty-push': { title: '수신은 정상인데 호스트·VM 이 0입니다', fix: '신규 구축·철거 직후가 아니라면 그 엣지 계정의 조회 권한을 확인하세요.' },

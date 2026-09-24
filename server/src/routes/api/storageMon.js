@@ -27,7 +27,7 @@ import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../sto
 import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgent,
   envIntervals, runtimeIntervalSource, applyOwnIntervals } from '../../storage/intervals.js';
 
-import { isAdminReq, maskDeviceAddress, maskSnapAddress } from '../../auth/addressMask.js';
+import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents } from '../../auth/addressMask.js';
 import { latestMapByDevice } from '../../storage/latestSnapshots.js';
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
@@ -172,7 +172,10 @@ api.delete('/tools/storage/devices/:id', adminOnly, (req, res) => {
  * 조회 전용이라 fullScopeOnly(스토리지는 vCenter 범위 밖 — 다른 스토리지 조회와 동일 게이트).
  */
 api.get('/tools/storage/activity', toolsPerm, fullScopeOnly, (req, res) => {
-  res.json({ poller: storagePollerStatus(), events: listActivity(Number(req.query.limit) || 100) });
+  // v2.599(AUTHZ-2599-03): 목록과 같은 기준 — 비-admin 에는 작업 로그의 관리 주소도 가린다.
+  const admin = isAdminReq(req);
+  const events = listActivity(Number(req.query.limit) || 100);
+  res.json({ poller: storagePollerStatus(), events: admin ? events : maskActivityEvents(events), ...(admin ? {} : { addressHidden: true }) });
 });
 
 /**

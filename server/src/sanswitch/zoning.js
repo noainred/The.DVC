@@ -102,7 +102,7 @@ export function parseCfgShow(text) {
   };
 
   for (const raw of lines) {
-    const line = String(raw).replace(/\s+$/, '');
+    const line = String(raw).trimEnd();   // v2.599(SEC2599-02): trimEnd — replace(/\s+$/) 는 공백 연속마다 끝까지 다시 훑어 O(n²)(장비 출력 한 줄로 루프 정지).
     if (!line.trim()) continue;
     // 페이저 흔적 — 출력이 잘렸다는 사실을 숨기지 않는다.
     if (/^-{2}\s*More\s*-{2}/i.test(line.trim()) || /\(byte\s+\d+\)/i.test(line)) { truncated = true; continue; }

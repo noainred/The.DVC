@@ -13,7 +13,7 @@ import { listAssignments as listIdracAssignments, getResults as getAgentResults 
 import { centralTokenInfo, generateCentralToken, setCentralToken } from '../../central/token.js';
 import { listAgentTokens, issueAgentToken, revokeAgentToken } from '../../central/agentTokens.js';
 import { getCentralAuthStats } from '../central.js';
-import { listInventory } from '../../central/inventory.js';
+import { listInventory, setInventoryOwner } from '../../central/inventory.js';
 import { getIngestStats, resetIngestStats } from '../../central/ingestStats.js';
 import { listCollectors } from '../../collector/registry.js';
 import { adminOnly, requireSettingsOwner } from './shared.js';
@@ -39,6 +39,20 @@ adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, 
 adminRouter.get('/central-token', adminOnly, requireSettingsOwner, (_req, res) => res.json(centralTokenInfo()));
 // 사이트 위임 수집 현황(어떤 vCenter를 어떤 에이전트가 언제 push했는지).
 adminRouter.get('/central/inventory', adminOnly, (_req, res) => res.json({ inventory: listInventory() }));
+// v2.599(EDGE2599-03): 위임(site) vCenter 인벤토리 소유 엣지 해제/지정 — 담당 엣지를 교체하면 새 엣지 push 가 TOFU 소유권에
+//   막혀 영구 403 이었다. 해제(agent 비움)하면 다음 개별 토큰 push 가 새 소유가 되고, 지정하면 그 엣지만 쓸 수 있다.
+//   보안 경계(엣지가 남의 vCenter 를 가로채지 못함)는 그대로다 — 바꾸는 주체는 관리자이고 전부 감사 로그에 남는다.
+// Body: { vcenterId, agent }  (agent 빈 값 = 해제)
+adminRouter.post('/central/inventory/owner', adminOnly, (req, res) => {
+  const vcenterId = String(req.body?.vcenterId || '').trim();
+  const agent = String(req.body?.agent ?? '').trim();
+  if (!vcenterId || vcenterId.length > 128) return res.status(400).json({ ok: false, reason: 'vcenterId 가 필요합니다.' });
+  if (agent && !/^[A-Za-z0-9._-]{1,64}$/.test(agent)) return res.status(400).json({ ok: false, reason: '엣지 이름 형식이 올바르지 않습니다(영숫자·._- 64자 이내).' });
+  const r = setInventoryOwner(vcenterId, agent);
+  if (!r.ok) return res.status(404).json({ ok: false, reason: `vcenterId '${vcenterId}' 의 위임 인벤토리가 없습니다 — 아직 아무 엣지도 push 하지 않았다면 첫 개별 토큰 push 가 소유가 됩니다.` });
+  logAudit({ user: req.user?.username, action: agent ? '위임 인벤토리 소유 엣지 지정' : '위임 인벤토리 소유 엣지 해제', target: vcenterId, detail: `from=${r.from || '(없음)'} to=${r.to || '(해제 — 다음 개별 토큰 push 가 소유)'}`, ip: req.ip || '' });
+  res.json({ ok: true, vcenterId, from: r.from, to: r.to, released: !agent });
+});
 // 에이전트별 수신 트래픽 진단 — 누가 무엇을 얼마나 보내는지(와이어 바이트·push 빈도·페이로드 규모).
 // iftop에서 특정 에이전트 트래픽이 비정상적으로 높을 때 원인(큰 페이로드 vs 잦은 push)을 짚어낸다.
 adminRouter.get('/central/ingest-stats', adminOnly, (_req, res) => res.json({ ok: true, ...getIngestStats() }));

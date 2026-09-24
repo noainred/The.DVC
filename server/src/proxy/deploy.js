@@ -34,7 +34,7 @@ export function spliceConfig(original, block) {
   if (begin !== -1 && end !== -1 && end > begin) {
     return original.slice(0, begin) + block.trimEnd() + '\n' + original.slice(end + END.length).replace(/^\n/, '');
   }
-  return original.replace(/\s*$/, '\n\n') + block;
+  return original.trimEnd() + '\n\n' + block;   // v2.599(SEC2599-02): replace(/\s*$/) 는 O(n²) — 같은 뜻
 }
 
 /** Render what would be deployed without touching the proxy. */

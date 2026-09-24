@@ -57,3 +57,20 @@ export function maskDeviceAddress(d) {
   if (out.snapshot) out.snapshot = maskSnapAddress(out.snapshot, host);
   return out;
 }
+
+/**
+ * 수집 작업 로그 이벤트(`util/activityLog.js` — 공통 필드 at·deviceId·name·host·source·ok·error) —
+ * 목록과 같은 기준으로 host 를 비우고 오류 문구 속 주소를 가린다. v2.599 Chromium 판독에서 목록만 가렸을 때
+ * 화면 하단 '수집 작업' 표가 같은 IP 를 그대로 보여 주는 것을 발견했다(형제 경로가 우회로 — v2.550.3 규약).
+ */
+export function maskActivityEvents(events) {
+  if (!Array.isArray(events)) return events;
+  return events.map((e) => {
+    if (!e || typeof e !== 'object') return e;
+    const host = e.host;
+    const out = { ...e, host: '' };
+    if (typeof out.error === 'string') out.error = scrub(out.error, host);
+    if (host && out.name === host) out.name = '';
+    return out;
+  });
+}

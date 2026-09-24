@@ -515,15 +515,17 @@ centralRouter.post('/svcmon-config-ack', (req, res) => {
 });
 
 /**
- * v2.599(EDGE2599-03): 인벤토리 소유권(TOFU)의 **인계 시한** — 소유 엣지의 마지막 push 가 이보다 오래되면 다른 개별
- * 토큰 엣지가 넘겨받을 수 있다. 0 이면 인계하지 않는다(예전 동작). 예전에는 소유권이 만료되지 않아 **담당 엣지를
+ * v2.599(EDGE2599-03): 인벤토리 소유권(TOFU)의 **자동 인계 시한**(opt-in, 기본 0 = 끔) — 켜면 소유 엣지의 마지막 push 가
+ * 이보다 오래됐을 때 다른 개별 토큰 엣지가 넘겨받을 수 있다. 기본은 관리자 명시 해제/지정 API 가 유일한 경로다. 예전에는 소유권이 만료되지 않아 **담당 엣지를
  * 교체하면 새 엣지의 push 가 영구 403** 이었고, 유일한 해제 방법은 vCenter 를 등록부에서 지웠다 다시 넣는 것이었다.
  * ⚠ 보안 경계는 유지한다: 소유 엣지가 **살아 있는 동안**(시한 안에 push 하는 동안) 다른 엣지는 여전히 덮어쓸 수 없다.
  *   시한이 지난 인계는 그 vCenter 의 스냅샷이 이미 그만큼 낡은 경우뿐이고, 인계는 감사 로그·콘솔·응답에 남긴다.
  */
 const INVENTORY_OWNER_HANDOVER_MS = (() => {
   const v = process.env.CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS;
-  if (v == null || String(v).trim() === '') return 7 * 24 * 3_600_000; // 기본 7일
+  // ⚠ 기본 0(자동 인계 끔) — 자동 인계는 '엣지가 남의 vCenter 를 가로채지 못한다' 를 시한 뒤 약화하므로 현장 opt-in 이다.
+  //   기본 경로는 관리자 명시 해제/지정(POST /api/admin/central/inventory/owner)이다.
+  if (v == null || String(v).trim() === '') return 0;
   const h = Number(v);
   return Number.isFinite(h) && h > 0 ? Math.max(1, h) * 3_600_000 : 0;   // 0·음수 = 인계 안 함
 })();
@@ -583,9 +585,8 @@ centralRouter.post('/inventory', (req, res) => {
       } else {
         const hours = Math.round(INVENTORY_OWNER_HANDOVER_MS / 3_600_000);
         const reason = `vcenterId '${b.vcenterId}'는 '${owner}' 소유입니다(다른 엣지가 덮어쓸 수 없습니다).`
-          + (INVENTORY_OWNER_HANDOVER_MS > 0
-            ? ` 담당 엣지를 교체했다면 옛 엣지의 마지막 push 후 ${hours}시간이 지나면 새 엣지가 넘겨받습니다(CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS). 바로 넘기려면 설정 › vCenter 에서 이 vCenter 를 지웠다가 다시 등록하세요.`
-            : ' 인계가 꺼져 있습니다(CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS=0) — 설정 › vCenter 에서 이 vCenter 를 지웠다가 다시 등록해야 넘어갑니다.');
+          + ` 담당 엣지를 교체했다면 중앙 관리자가 소유 엣지를 해제·지정하세요 — POST /api/admin/central/inventory/owner {vcenterId, agent}(agent 비우면 해제 → 다음 개별 토큰 push 가 소유).`
+          + (INVENTORY_OWNER_HANDOVER_MS > 0 ? ` 또는 옛 엣지의 마지막 push 후 ${hours}시간이 지나면 자동으로 넘겨받습니다(CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS).` : '');
         // v2.570: 거부 기록에 종류를 남긴다 — '소유권' 과 '토큰 불일치' 는 조치가 다르다.
         res.locals.ingestReject = { kind: REJECT_KIND.OWNER, reason, vcenterId: String(b.vcenterId) };
         return res.status(403).json({ ok: false, reason, owner, ownerSilentMs: silentMs, handoverAfterMs: INVENTORY_OWNER_HANDOVER_MS || null });

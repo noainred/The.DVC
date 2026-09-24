@@ -13,6 +13,7 @@ const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2599b-'));
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = TOKEN;
 process.env.DATA_SOURCE = 'live';
+process.env.AUTH_ENABLED = 'true';
 fs.writeFileSync(path.join(CFG, 'vcenters.json'), JSON.stringify({ vcenters: [
   { id: 'vc-site1', name: 'Site1', host: 'https://10.0.0.1', collectMode: 'site' },
   { id: 'vc-other', name: 'Other', host: 'https://10.0.0.2', collectMode: 'site' },
@@ -143,25 +144,40 @@ test('CEN-2599-04 — agent-config 는 엣지당 합계 상한을 넘는 파일�
   assert.deepEqual(Object.keys(getAllAgentConfigs()['edge-cfg'].files).sort(), ['a.json', 'c.json']);
 });
 
-// ── EDGE2599-03: 소유권 인계 ────────────────────────────────────────────────
-test('EDGE2599-03 — 살아 있는 소유 엣지는 여전히 보호되고, 시한 넘게 조용하면 새 엣지가 넘겨받는다(감사·응답에 남김)', async () => {
+// ── EDGE2599-03: 소유권 — 자동 인계 기본 꺼짐 + 관리자 명시 해제/지정 ────────
+test('EDGE2599-03 — 자동 인계는 기본 꺼짐(8일 조용해도 403)이고, 관리자 해제 뒤 다음 개별 토큰 push 가 새 소유가 된다', async () => {
+  const express = (await import('express')).default;
+  const { registerCentralIpam } = await import('../src/routes/admin/centralIpam.js');
   const { issueAgentToken } = await import('../src/central/agentTokens.js');
   const { getInventory } = await import('../src/central/inventory.js');
   const A = issueAgentToken('edgeA').token; const B = issueAgentToken('edgeB').token;
   const body = (hn) => ({ vcenterId: 'vc-other', vcenter: { id: 'vc-other', name: 'Other' }, hosts: [{ id: hn, vcenterId: 'vc-other' }] });
   assert.equal((await post('/inventory', body('ha'), { token: A })).status, 200);
-  const deny = await post('/inventory', body('hb'), { token: B });
-  assert.equal(deny.status, 403, '소유 엣지가 방금 보냈으면 다른 엣지는 덮어쓸 수 없다(보안 경계 유지)');
-  assert.match(deny.body.reason, /넘겨받습니다/, '거부 사유가 인계 방법을 말한다');
   getInventory('vc-other').at -= 8 * 24 * HOUR; // 옛 소유 엣지가 8일 조용했다
+  const deny = await post('/inventory', body('hb'), { token: B });
+  assert.equal(deny.status, 403, '자동 인계는 opt-in — 기본값에서 다른 엣지가 가로챌 수 없다');
+  assert.match(deny.body.reason, /\/api\/admin\/central\/inventory\/owner/, '거부 사유가 관리자 해제 경로를 안내한다');
+  // 관리자 API — 실제 라우터를 띄운다(role 은 앞단 인증 미들웨어가 채우는 req.user 를 흉내낸다)
+  const app = express(); app.use(express.json());
+  app.use((req, _res, next) => { req.user = { username: req.get('X-Test-User'), role: req.get('X-Test-Role') }; next(); });
+  const r = express.Router(); registerCentralIpam(r); app.use('/api/admin', r);
+  const asrv = await new Promise((ok) => { const s2 = app.listen(0, '127.0.0.1', () => ok(s2)); });
+  const call = (role, b) => fetch(`http://127.0.0.1:${asrv.address().port}/api/admin/central/inventory/owner`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Test-Role': role, 'X-Test-User': 'u1' }, body: JSON.stringify(b),
+  }).then(async (x) => ({ status: x.status, body: await x.json() }));
+  try {
+    assert.equal((await call('operator', { vcenterId: 'vc-other', agent: '' })).status, 403, 'admin 전용');
+    assert.equal((await call('admin', { vcenterId: 'nope', agent: '' })).status, 404);
+    assert.equal((await call('admin', { vcenterId: 'vc-other', agent: 'bad name!' })).status, 400);
+    const rel = await call('admin', { vcenterId: 'vc-other', agent: '' });
+    assert.equal(rel.status, 200); assert.equal(rel.body.from, 'edgeA'); assert.equal(rel.body.released, true);
+  } finally { asrv.close(); }
   const ok = await post('/inventory', body('hb'), { token: B });
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
-  assert.equal(ok.body.ownerHandover.from, 'edgeA');
-  assert.equal(getInventory('vc-other').agent, 'edgeB');
+  assert.equal(getInventory('vc-other').agent, 'edgeB', '해제 뒤 다음 개별 토큰 push 가 새 소유');
+  assert.equal((await post('/inventory', body('ha2'), { token: A })).status, 403, '옛 엣지는 다시 덮어쓸 수 없다');
   const audit = fs.readFileSync(path.join(CFG, 'audit.ndjson'), 'utf8');
-  assert.match(audit, /central-inventory-owner-handover/, '인계는 감사 로그에 남는다');
-  // 인계 뒤에는 옛 엣지가 다시 덮어쓸 수 없다
-  assert.equal((await post('/inventory', body('ha2'), { token: A })).status, 403);
+  assert.match(audit, /위임 인벤토리 소유 엣지 해제/, '해제는 감사 로그에 남는다');
 });
 
 // ── WEB2599-01·04: 거부 기록의 이름·경로 ────────────────────────────────────

@@ -271,7 +271,7 @@ export function rowsToFreeText(rows, fields, { header = true, comment = '' } = {
   const table = rows.map((r) => fields.map((f) => cellOf(r, f)));
   const head = header ? [fields.slice()] : [];
   const width = fields.map((f, i) => Math.max(...[...head, ...table].map((row) => (row[i] || '').length), f.length));
-  const fmt = (row) => row.map((c, i) => String(c).padEnd(i === row.length - 1 ? 0 : width[i])).join('  ').replace(/\s+$/, '');
+  const fmt = (row) => row.map((c, i) => String(c).padEnd(i === row.length - 1 ? 0 : width[i])).join('  ').trimEnd();   // v2.599(SEC2599-02): replace(/\s+$/) 는 O(n²)
   const out = [];
   if (comment) for (const l of String(comment).split('\n')) out.push(`# ${l}`);
   if (header) out.push(`# ${fmt(fields)}`);   // 헤더는 주석으로 — 되가져올 때 데이터로 오해되지 않는다

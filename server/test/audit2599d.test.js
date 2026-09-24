@@ -311,3 +311,26 @@ test('EDGE2599-04 — config push: 8MB 초과로 뺀 파일은 파일로 세지 
     assert.deepEqual(st.skipped.map((f) => f.name), ['huge.json']);
   } finally { c.srv.close(); fs.rmSync(path.join(DIR, 'huge.json'), { force: true }); }
 });
+
+// ── 후속(코디네이터 지시): 합계 사용률·PDU 요약 ─────────────────────────────
+test('C2599-09 후속 — bmstor 합계 사용률도 df 정의(used/(used+avail)), 분모 0 은 null', async () => {
+  const { aggregate } = await import('../src/bmstor/agg.js');
+  const GB = 1024 ** 3;
+  const servers = [{ id: 'a', name: 'a', host: '10.0.0.1', group: 'G', mounts: ['/'], enabled: true },
+    { id: 'b', name: 'b', host: '10.0.0.2', group: 'G', mounts: ['/'], enabled: true }];
+  const latest = new Map([
+    ['a', { ok: true, at: 1, mounts: [{ mount: '/', totalBytes: 100 * GB, usedBytes: 95 * GB, availBytes: 0 }] }],
+    ['b', { ok: true, at: 1, mounts: [] }],
+  ]);
+  const { total, groups, perServer } = aggregate(servers, latest);
+  assert.equal(perServer.find((s) => s.id === 'a').usedPct, 100, '가용 0 인 디스크는 df 처럼 100%');
+  assert.equal(perServer.find((s) => s.id === 'b').usedPct, null, '마운트가 없으면 0% 가 아니라 모름');
+  assert.equal(groups[0].usedPct, 100);
+  assert.equal(total.usedPct, 100);
+});
+
+test('C2599-04 후속 — PDU 요약이 센서 부분 집계를 싣는다', async () => {
+  const { summarize } = await import('../src/pdu/types.js');
+  assert.equal(summarize({ units: [], sensors: [{ tempC: 20 }], sensorsIncomplete: true }).sensorsIncomplete, true);
+  assert.equal(summarize({ units: [], sensors: [] }).sensorsIncomplete, undefined);
+});

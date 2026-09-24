@@ -72,6 +72,23 @@ export function setInventory(vcenterId, slice, agent, generatedAt) {
 
 export function getInventory(vcenterId) { return cache[vcenterId] || null; }
 
+/**
+ * v2.599(EDGE2599-03): 관리자 명시 소유 엣지 해제/지정. 인벤토리 소유권은 TOFU(첫 push 한 엣지)이고 만료되지 않아,
+ * 담당 엣지를 교체하면 새 엣지의 push 가 영구 403 이었다. 관리자가 해제(`agent=''`)하면 **다음 개별 토큰 push 가 새 소유**가
+ * 되고, 지정하면 그 엣지만 쓸 수 있다. 저장된 스냅샷(data)은 지우지 않는다 — 새 엣지가 보낼 때까지 마지막 값을 보인다.
+ * @returns {{ ok:boolean, reason?:string, from?:string, to?:string }}
+ */
+export function setInventoryOwner(vcenterId, agent) {
+  const e = cache[vcenterId];
+  if (!e) return { ok: false, reason: 'not-found' };
+  const from = e.agent || '';
+  e.agent = String(agent || '');
+  e.ownerSetAt = Date.now();
+  e.ownerSetBy = e.agent ? 'admin-assign' : 'admin-release';
+  persistSoon();
+  return { ok: true, from, to: e.agent };
+}
+
 /** 운영 화면용 요약(데이터 본문 제외). */
 export function listInventory() {
   return Object.entries(cache).map(([vcenterId, e]) => ({

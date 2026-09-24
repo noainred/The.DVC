@@ -27,6 +27,7 @@ import { capacityRows, srpRows, subscribedNote, usageTrust } from './powermaxCap
 import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
 import { versionCellInfo } from './storageVersionText.js';
 import { unitText } from '../unitText.js';
+import { hardwareSummaryParts } from './storageHardwareText.js'; // v2.599 C2599-06: 빈 슬롯·미확인을 이상과 나눠 말한다
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -1132,7 +1133,9 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                 {ex.inventory.hardware && (
                   <span className="muted" title={Object.entries(ex.inventory.hardware.byType || {}).map(([k, v]) => `${k} ${v}`).join(' · ')}>
                     하드웨어 <b style={{ color: 'var(--text)' }}>{ex.inventory.hardware.total}</b>
-                    {ex.inventory.hardware.unhealthy > 0 ? <b style={{ color: 'var(--red)' }}> · 이상 {ex.inventory.hardware.unhealthy}</b> : ' · 이상 없음'}
+                    {hardwareSummaryParts(ex.inventory.hardware).map((p) => (p.tone === 'red'
+                      ? <b key={p.text} style={{ color: 'var(--red)' }}> · {p.text}</b>
+                      : <span key={p.text}> · {p.text}</span>))}
                   </span>
                 )}
               </div>
