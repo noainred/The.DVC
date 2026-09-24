@@ -15,6 +15,7 @@ import dns from 'node:dns';
 import path from 'node:path';
 import { runCommand, sshExec } from './exec.js';
 import { buildTest, judge } from './tests.js';
+import { readBodyPrefix } from '../util/readPrefix.js';
 
 const unknown = (reply) => ({ status: 'unknown', reply });
 
@@ -51,7 +52,10 @@ function dirSize(p, depth = 0) {
   return n;
 }
 
-async function fetchUrl(url, { timeoutMs, insecure }) {
+/** url 점검이 읽는 본문 앞부분 상한(v2.603) — 'contains' 검사는 이 범위 안에서만 본다. */
+export const URL_BODY_MAX = 256 * 1024;
+
+export async function fetchUrl(url, { timeoutMs, insecure }) {
   const t0 = Date.now();
   let dispatcher;
   // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. 예전에는 insecure 일 때만 dispatcher 를
@@ -64,8 +68,10 @@ async function fetchUrl(url, { timeoutMs, insecure }) {
     dispatcher = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: !insecure }) });
   } catch { /* undici 미탑재 환경 — 전역 fetch 폴백 */ }
   const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), redirect: 'manual', ...(dispatcher ? { dispatcher } : {}) });
-  const body = await res.text().catch(() => '');
-  return { status: res.status, ms: Date.now() - t0, body: body.slice(0, 256 * 1024) };
+  // v2.603(감사 SEC2603-03 후속): 예전에는 본문 **전체**를 읽은 뒤 256KB 로 잘랐다 — 큰 응답 하나가 엣지 메모리를 밀어 올린다.
+  //   앞 256KB 까지만 스트림으로 읽고 취소한다(util/readPrefix.js — svcmon 키워드 검사와 같은 헬퍼).
+  const { text: body, capped } = await readBodyPrefix(res, URL_BODY_MAX).catch(() => ({ text: '', capped: false }));
+  return { status: res.status, ms: Date.now() - t0, body, capped };
 }
 
 function certDays(host, port, timeoutMs = 8000) {
@@ -139,7 +145,7 @@ export async function runTest(spec, { fileRoots = ['/var/log'], allowCustom = fa
         try { r = await fetchUrl(a.url, { timeoutMs: Math.max(a.maxMs * 2, 3000), insecure: a.insecure === 1 }); }
         catch (e) { return done({ status: 'bad', reply: `요청 실패: ${e.cause?.code || e.name || e.message}` }); }
         if (r.status !== a.expectStatus) return done({ status: 'bad', reply: `HTTP ${r.status} ≠ ${a.expectStatus} (${r.ms}ms)`, value: r.ms });
-        if (a.contains && !r.body.includes(a.contains)) return done({ status: 'bad', reply: `본문에 '${a.contains}' 없음 (${r.ms}ms)`, value: r.ms });
+        if (a.contains && !r.body.includes(a.contains)) return done({ status: 'bad', reply: `본문에 '${a.contains}' 없음${r.capped ? `(앞 ${URL_BODY_MAX / 1024}KB 만 확인)` : ''} (${r.ms}ms)`, value: r.ms });
         if (r.ms > a.maxMs) return done({ status: 'warn', reply: `HTTP ${r.status}, ${r.ms}ms > ${a.maxMs}ms`, value: r.ms });
         return done({ status: 'ok', reply: `HTTP ${r.status}, ${r.ms}ms`, value: r.ms });
       }
