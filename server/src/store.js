@@ -516,11 +516,12 @@ export function scopedRollups(snap, allowed) {
   let measuredPower = null;
   if (mp) {
     const byVc = {}; let totalWatts = 0; let servers = mp.countByVc ? 0 : null; // 구 스냅샷(countByVc 없음)은 모른다 — 지어내지 않는다
+    const countByVc = mp.countByVc ? {} : null; // v2.607 WEB2607-05: vCenter 별 측정 대수도 넘긴다(0대면 powerKw null)
     for (const id of allowed) {
       const w = Number(mp.byVc?.[id]) || 0; if (w) { byVc[id] = w; totalWatts += w; }
-      if (servers != null) servers += Number(mp.countByVc[id]) || 0;
+      if (servers != null) { const c = Number(mp.countByVc[id]) || 0; servers += c; if (c) countByVc[id] = c; }
     }
-    measuredPower = { totalWatts: Math.round(totalWatts), servers, byVc };
+    measuredPower = { totalWatts: Math.round(totalWatts), servers, byVc, ...(countByVc ? { countByVc } : {}) };
   }
   const view = {
     vcenters: (snap.vcenters || []).filter((v) => allowed.has(v.id)),
