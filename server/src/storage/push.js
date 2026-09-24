@@ -62,8 +62,9 @@ async function pushStorageOnce() {
       // ⚠ v2.602(감사 EDGE2602-03): 상태 전용 본문(statusOnly)은 **v2.581 이상 중앙만** 안다. v2.580 이하 중앙은 그 플래그를
       //   무시하고 devices:[] 를 이 엣지 목록의 **교체**로 받아 중앙 스토리지 목록을 비웠다(엣지가 중앙보다 먼저 올라간 현장).
       //   중앙 버전을 확인할 수 있을 때만 보내고, 모르거나 낮으면 **보내지 않고** 사유를 남긴다(SAN·PDU 는 첫 수집 대기 중
-      //   아무것도 보내지 않는다 — 같은 쪽으로 실패한다). 위임 0대(registered===0)는 위에서 목록 비우기가 정답이라 해당 없음.
-      const cap = await centralStatusOnlySupport();
+      //   아무것도 보내지 않는다 — 같은 쪽으로 실패한다). 위임 0대(registered===0)는 위에서 이미 목록을 비웠으므로 구버전
+      //   중앙이 devices:[] 를 교체로 받아도 결과가 같다 — 그때는 확인하지 않는다(왕복 절약·기존 동작 유지).
+      const cap = registered === 0 ? { ok: true } : await centralStatusOnlySupport();
       if (!cap.ok) {
         _last = { at: Date.now(), sent: 0, statusSent: false, statusSkipped: cap.reason, centralVersion: cap.version || null,
           ...(registered === 0 ? { cleared, ...(clearError ? { clearError } : {}) } : {}) };

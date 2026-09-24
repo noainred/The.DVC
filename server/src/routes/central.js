@@ -1358,9 +1358,13 @@ centralRouter.post('/sanswitch-perf', async (req, res) => {
   const now = Date.now();
   const rowsIn = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 100_000) : [];
   const metaIn = Array.isArray(req.body?.meta) ? req.body.meta.slice(0, 20_000) : [];
-  const rows = rowsIn.filter((r) => Array.isArray(r) && owned.has(String(r[0]))).map((r) => ({ d: String(r[0]), ts: Math.min(Number(r[1]) || now, now), p: Number(r[2]), b: Number(r[3]) }));
-  const meta = metaIn.filter((m) => Array.isArray(m) && owned.has(String(m[0]))).map((m) => ({ d: String(m[0]), p: Number(m[1]), ts: Math.min(Number(m[2]) || now, now), name: m[3], wwn: m[4], speed: m[5], type: m[6] }));
+  // v2.602: 장비 id·수치는 글자·숫자만 받는다 — 객체면 String()/Number() 가 던졌다(async 핸들러 500).
+  const idOf = (v) => (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v)) ? String(v) : '');
+  const nOf = (v) => (typeof v === 'number' || typeof v === 'string' ? Number(v) : NaN);
+  const rows = rowsIn.filter((r) => Array.isArray(r) && owned.has(idOf(r[0]))).map((r) => ({ d: idOf(r[0]), ts: Math.min(nOf(r[1]) || now, now), p: nOf(r[2]), b: nOf(r[3]) }));
+  const meta = metaIn.filter((m) => Array.isArray(m) && owned.has(idOf(m[0]))).map((m) => ({ d: idOf(m[0]), p: nOf(m[1]), ts: Math.min(nOf(m[2]) || now, now), name: m[3], wwn: m[4], speed: m[5], type: m[6] }));
   const dropped = rowsIn.length - rows.length;
+  const metaDropped = metaIn.length - meta.length;
   if (dropped > 0) console.warn(`[central] sanswitch-perf: ${agent} 미위임 deviceId 표본 ${dropped}건 드롭(위조 방지)`);
   const r = await importSamples(rows, meta, loadPerfSettings().retentionDays);
   /**
@@ -1376,7 +1380,9 @@ centralRouter.post('/sanswitch-perf', async (req, res) => {
       statusSaved = saveEdgePerfStatus(agent, req.body.status, { owned, names }).saved;
     } catch (e) { console.warn(`[central] sanswitch-perf 상태 저장 실패(${agent}): ${e.message}`); }
   }
-  res.json({ ok: true, ...r, dropped, statusSaved });
+  // v2.602: 적재에서 버린 메타(포트 범위 밖·빈 장비 id — perfDb.importSamples)와 위임 밖 메타를 **항상** 싣는다 —
+  //   엣지(sanswitch/perfPush.js)가 상태·콘솔에 남긴다. 조용히 버리면 포트 이름·WWN 이 왜 비었는지 알 길이 없다.
+  res.json({ ok: true, ...r, metaRejected: r.metaRejected || 0, dropped, metaDropped, statusSaved });
 });
 
 // POST /api/central/sanswitch-test-result — 엣지가 대행한 연결 테스트 결과(추적 로그 포함) 회신(v2.421).

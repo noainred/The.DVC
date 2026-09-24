@@ -158,6 +158,8 @@ export async function pushPerfNow() {
     ];
     const chunks = payloads;
     let sent = 0, bytes = 0, gzBytes = 0;
+    // v2.602: 중앙이 받지 않은 것(위임 밖 표본·메타, 적재에서 버린 메타)을 청크별 응답에서 합산해 상태·콘솔에 남긴다.
+    const rej = { dropped: 0, metaDropped: 0, metaRejected: 0 };
     for (let i = 0; i < chunks.length; i++) {
       const c = chunks[i].rows;
       const json = Buffer.from(JSON.stringify({
@@ -175,10 +177,13 @@ export async function pushPerfNow() {
       const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-perf`, { method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2 });
       if (res.status === 404) throw new Error('중앙에 sanswitch-perf 엔드포인트 없음(중앙이 v2.423 미만)');
       if (!res.ok) throw new Error(`sanswitch-perf <- ${res.status} (청크 ${i + 1}/${chunks.length})`);
+      addRejects(rej, await res.json().catch(() => null));
       sent += c.length;
       if (c.length) saveCursor(Number(c[c.length - 1].rowid)); // 청크마다 커서 전진 — 다음 청크가 실패해도 성공분은 재전송하지 않는다
     }
-    _last = { at: Date.now(), sent, chunks: chunks.length, bytes, gzBytes, cursor: lastRowid, more: rows.length >= MAX_ROWS };
+    const rejected = rej.dropped + rej.metaDropped + rej.metaRejected;
+    if (rejected) console.warn(`[sanswitch-perf-push] 중앙이 일부를 받지 않았습니다 — 위임 밖 표본 ${rej.dropped}건 · 위임 밖 메타 ${rej.metaDropped}건 · 적재에서 버린 메타(포트 범위 밖·빈 장비 id) ${rej.metaRejected}건`);
+    _last = { at: Date.now(), sent, chunks: chunks.length, bytes, gzBytes, cursor: lastRowid, more: rows.length >= MAX_ROWS, ...(rejected ? { centralRejected: rej } : {}) };
     // 상한만큼 읽었으면 밀린 표본이 더 있을 수 있다 — 다음 틱을 기다리지 않고 이어서 한 번 더.
     if (rows.length >= MAX_ROWS) setImmediate(() => pushPerfNow().catch(() => {}));
     return { ok: true, sent, chunks: chunks.length };
@@ -193,6 +198,16 @@ export async function pushPerfNow() {
     console.warn(`[sanswitch-perf-push] 중계 실패: ${e.message}`);
     return { ok: false, reason: e.message };
   } finally { _busy = false; }
+}
+
+/** 중앙 응답의 거절 개수를 누적한다(v2.602 — 숫자만, 없으면 0). */
+export function addRejects(acc, j) {
+  if (!j || typeof j !== 'object') return acc;
+  for (const k of ['dropped', 'metaDropped', 'metaRejected']) {
+    const n = typeof j[k] === 'number' && Number.isFinite(j[k]) && j[k] > 0 ? j[k] : 0;
+    acc[k] += n;
+  }
+  return acc;
 }
 
 export function startSanSwitchPerfPush() {

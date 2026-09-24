@@ -237,3 +237,51 @@ test('EDGE2602-03 — 중앙 버전이 statusOnly 를 모르면(v2.580) 상태 �
     central.close();
   }
 });
+
+// ── 추가 배정 — /sanswitch-perf 응답의 metaRejected · 엣지 perfPush 가 상태·콘솔에 남긴다 ─────────────
+test('추가 — /sanswitch-perf 응답은 적재에서 버린 메타(metaRejected)와 위임 밖 메타(metaDropped)를 항상 싣는다', async () => {
+  const { available } = await import('../src/sanswitch/perfDb.js');
+  if (!(await available())) return;
+  const reg = await import('../src/sanswitch/registry.js');
+  reg.applyPulledDevices([{ id: 'sw-own', name: 'SW', host: '10.0.0.7', username: 'u', password: 'p', agent: 'edge-known' }]);
+  const T = 1_800_000_000_000;
+  let r = await post('/sanswitch-perf', { agent: 'edge-known', rows: [], meta: [['sw-own', -5, T, 'bad'], ['sw-own', 3, T, 'ok'], ['sw-other', 1, T, 'x'], [{ toString: 1 }, 1, T]] });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.metaRejected, 1, '포트 범위 밖 메타');
+  assert.equal(r.body.metaDropped, 2, '위임 밖·id 형식 오류 메타');
+  r = await post('/sanswitch-perf', { agent: 'edge-known', rows: [], meta: [] });
+  assert.equal(r.body.metaRejected, 0, '0 이어도 싣는다(엣지가 없는 필드와 0 을 구분하지 않아도 되게)');
+});
+
+test('추가 — perfPush 는 중앙이 받지 않은 개수를 상태(centralRejected)와 콘솔에 남긴다', async () => {
+  const { savePerfSample, available, _resetForTest } = await import('../src/sanswitch/perfDb.js');
+  if (!(await available())) return;
+  _resetForTest();
+  const T = 1_800_000_000_000;
+  await savePerfSample('sw-edge', T - 60_000, { 0: 1000 }, [{ port: 0, attachedName: 'ARR', speed: '16G' }], 3650);
+  await savePerfSample('sw-edge', T, { 0: 1100 }, [], 3650);
+  const central = http.createServer((req, res) => {
+    req.resume(); req.on('end', () => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true, inserted: 0, skipped: 0, metaRejected: 2, dropped: 1, metaDropped: 0 })); });
+  });
+  await new Promise((r) => central.listen(0, '127.0.0.1', r));
+  const { config } = await import('../src/config.js');
+  const prev = { url: config.agent.centralUrl, token: config.agent.centralToken };
+  const warns = []; const ow = console.warn; console.warn = (...a) => { warns.push(a.join(' ')); };
+  try {
+    config.agent.centralUrl = `http://127.0.0.1:${central.address().port}`;
+    config.agent.centralToken = 'tok';
+    const { pushPerfNow, sanSwitchPerfPushStatus, addRejects } = await import('../src/sanswitch/perfPush.js');
+    const r = await pushPerfNow();
+    assert.equal(r.ok, true, r.reason);
+    const st = sanSwitchPerfPushStatus();
+    assert.ok(st.centralRejected, JSON.stringify(st));
+    assert.ok(st.centralRejected.metaRejected >= 2);
+    assert.ok(st.centralRejected.dropped >= 1);
+    assert.ok(warns.some((w) => w.includes('적재에서 버린 메타')), warns.join('\n'));
+    assert.deepEqual(addRejects({ dropped: 0, metaDropped: 0, metaRejected: 0 }, { dropped: { x: 1 }, metaRejected: '3' }), { dropped: 0, metaDropped: 0, metaRejected: 0 }, '숫자만');
+  } finally {
+    console.warn = ow;
+    config.agent.centralUrl = prev.url; config.agent.centralToken = prev.token;
+    central.close();
+  }
+});
