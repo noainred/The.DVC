@@ -39,7 +39,7 @@ const MAX_DEVICES = Math.max(100, Number(process.env.PARTFAULT_EDGE_MAX_DEVICES)
 const DEVICE_PART_MAX = Math.max(100, Number(process.env.PARTFAULT_EDGE_DEVICE_PART_MAX) || 2_000);
 const REPORT_PART_MAX = Math.max(1_000, Number(process.env.PARTFAULT_EDGE_REPORT_PART_MAX) || 50_000);
 const SCANNED_MAX_BYTES = 32 * 1024;   // scanned 요약(실측 ~1KB)의 상한 — 임의 객체를 그대로 상주시키지 않는다
-const LIST_MAX = 64;
+const LIST_MAX = 64;                   // failedKinds·notCollected 같은 소형 배열
 /**
  * v2.605(CEN2605-02): 파트 식별자·종류의 길이 상한. 예전에는 파트 **개수**만 셌고 꼬리 글자 길이는 무제한이라 공유 토큰
  * 이름 30개 × 5장비 × 2,000꼬리(100자)로 힙 +130MB 였다. 실제 partId 는 FQDD·슬롯/포트·센서 이름(수십 자)이다.
@@ -48,7 +48,7 @@ const LIST_MAX = 64;
  */
 const PART_ID_MAX = 200;
 const PART_KIND_MAX = 32;
-const partFieldsOk = (kind, partId) => String(kind ?? '').length <= PART_KIND_MAX && String(partId ?? '').length <= PART_ID_MAX;                   // failedKinds·notCollected 같은 소형 배열
+const partFieldsOk = (kind, partId) => String(kind ?? '').length <= PART_KIND_MAX && String(partId ?? '').length <= PART_ID_MAX;
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 /** `constructor`·`__proto__` 같은 프로토타입 키로 `owned[scope].has` 가 함수가 아닌 값을 만나지 않게(S1). */
 const ownedSet = (owned, scope) => (Object.hasOwn(owned, scope) && owned[scope] instanceof Set ? owned[scope] : null);

@@ -314,7 +314,10 @@ test('EDGE2604-01 bmusage: 호스트를 못 읽은 vCenter 로 귀속되거나 �
   const snap = { vcenters: [{ id: 'vc1', status: 'unreachable' }, { id: 'vc2', status: 'ok' }], hosts: [{ vcenterId: 'vc2' }] };
   const r = await p.withholdUnreadBareMetal(snap, bm, reg);
   assert.deepEqual(r.bareMetal.map((b) => b.name), ['db-01']);
-  assert.deepEqual(r.hostsUnread, { vcenters: ['vc1'], dropped: 2 });
+  // v2.605(RECENT2605-01·LEFT2605-05): hostsUnread 에 보류 시한·vCenter 별 뺀 대수가 더해졌다 — 기존 두 필드는 그대로 고정한다.
+  assert.deepEqual(r.hostsUnread.vcenters, ['vc1']);
+  assert.equal(r.hostsUnread.dropped, 2);
+  assert.deepEqual(r.hostsUnread.withheld, ['vc1']);
   // 전부 읽었으면 그대로
   const ok = await p.withholdUnreadBareMetal({ vcenters: [{ id: 'vc1', status: 'ok' }, { id: 'vc2', status: 'ok' }], hosts: [{ vcenterId: 'vc1' }, { vcenterId: 'vc2' }] }, bm, reg);
   assert.equal(ok.bareMetal.length, 3);
