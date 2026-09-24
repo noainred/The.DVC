@@ -13,6 +13,8 @@ import { collectHorizonLicenses, listHorizon } from '../../horizon/horizon.js';
 import { memoJson, scopeKey, osFamily } from './shared.js';
 import { aggregateGuestOs } from '../../inventory/guestOsAgg.js';
 import { dayKey } from "../../util/dayKey.js";
+import { visibleNsxManagers } from '../../nsx/scope.js';
+import { isAdminReq, scrubHosts } from '../../auth/addressMask.js';
 
 /** VM id → 스냅샷 VM 의 vcenterId(없으면 null). v2.598 VC2598-06 — id 를 첫 콜론에서 자르지 않는다. */
 export function upgradeVcOf(snap) {
@@ -152,9 +154,20 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
       });
     }
   }
-  // NSX 매니저 직수집 라이선스 — vCenter 스코프 필터와 무관하므로 전체 조회에서만 포함.
+  // v2.603 AUTHZ-2603-01: 예전에는 `scoped` 가 ?vcenterId 유무만 봐서 **범위 제한 계정**에도 전 함대 NSX 키·Horizon
+  // 라이선스·오류(호스트명)가 나갔다. 사용자 범위(allowed)도 함께 본다 — NSX 는 형제 라우트(vcTools·health/network)와
+  // 같은 visibleNsxManagers 로 거르고, Horizon 은 vCenter 귀속 축이 없으므로(v2.525) 범위 계정에는 싣지 않는다.
+  // 뺀 것은 omittedOutOfScope 로 밝힌다(조용한 제외 금지).
+  const omittedOutOfScope = { nsxManagers: 0, nsxLicenses: 0, horizon: false };
+  // NSX 매니저 직수집 라이선스 — 특정 vCenter 를 고른 조회에서는 빼고, 전체 조회에서는 사용자 범위 안 매니저만.
   if (!scoped) {
-    for (const m of (nsxStore.get()?.managers || [])) {
+    const allMgrs = nsxStore.get()?.managers || [];
+    const mgrs = visibleNsxManagers(allMgrs, snap.vcenters, allowed);
+    if (allowed) {
+      const seen = new Set(mgrs);
+      for (const m of allMgrs) if (!seen.has(m)) { omittedOutOfScope.nsxManagers += 1; omittedOutOfScope.nsxLicenses += (m.licenses || []).length; }
+    }
+    for (const m of mgrs) {
       for (const l of (m.licenses || [])) {
         const st = licenseExpiryStatus(l.expiry || null, { forcedExpired: l.isExpired });
         items.push({
@@ -170,7 +183,8 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
   }
   // Horizon Connection Server 직수집(등록된 서버가 있을 때만) — vCenter 스코프와 무관.
   const collectionErrors = [];
-  if (!scoped) {
+  if (!scoped && allowed) omittedOutOfScope.horizon = listHorizon().length > 0;
+  if (!scoped && !allowed) {
     try {
       const hz = await collectHorizonLicenses();
       for (const { server: s, lic: l } of hz.rows) {
@@ -184,13 +198,22 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
           status: st.status, daysLeft: st.daysLeft,
         });
       }
-      for (const e of hz.errors) collectionErrors.push(`Horizon ${e.name || e.id}: ${e.reason}`);
-    } catch (e) { collectionErrors.push(`Horizon: ${e.message}`); }
+      // 비-admin 에게는 오류 원문 속 Connection Server 주소를 가린다(ENOTFOUND <host> 등 — v2.599 addressMask 규약).
+      const hzHosts = isAdminReq(req) ? [] : listHorizon().map((s) => s.host).filter(Boolean);
+      const scrub = (t) => (hzHosts.length ? scrubHosts(String(t ?? ''), hzHosts) : String(t ?? ''));
+      for (const e of hz.errors) collectionErrors.push(`Horizon ${e.name || e.id}: ${scrub(e.reason)}`);
+    } catch (e) { collectionErrors.push(`Horizon: ${isAdminReq(req) ? e.message : scrubHosts(String(e.message ?? ''), listHorizon().map((s) => s.host).filter(Boolean))}`); }
   }
   const summary = { expired: 0, expiring: 0, ok: 0, perpetual: 0 };
   for (const it of items) summary[it.status] = (summary[it.status] || 0) + 1;
   const families = [...new Set(items.map((i) => i.family))].sort();
-  res.json({ items, summary, families, total: items.length, collectionErrors, horizonServers: listHorizon().length, generatedAt: snap.generatedAt });
+  res.json({
+    items, summary, families, total: items.length, collectionErrors,
+    // 범위 계정에는 Horizon 등록 대수도 함대 정보라 싣지 않는다(null = 알려주지 않음, 0 과 다르다).
+    horizonServers: allowed ? null : listHorizon().length,
+    scoped: !!allowed, omittedOutOfScope,
+    generatedAt: snap.generatedAt,
+  });
 });
 
 // Trigger VMware Tools upgrade on one or more VMs. Body: { ids:[vmId,...] }.
