@@ -303,13 +303,17 @@ test('TIM2606-02: routes/central.js 의 본문 agent 이름(strAgent)이 원문�
     const H = { 'Content-Type': 'application/json', 'X-Central-Token': 'shared-child' };
     // 워밍업(모듈 지연 로드분이 측정에 섞이지 않게)
     await fetch(b + '/fleet', { method: 'POST', headers: H, body: JSON.stringify({ agent: 'warm', baremetal: [] }) });
+    await fetch(b + '/storage-data', { method: 'POST', headers: H, body: JSON.stringify({ agent: 'warm', devices: [{ deviceId: 'w', ok: false }] }) });
     await new Promise((res) => setTimeout(res, 50));
     const h0 = heap();
     const codes = [];
     for (let i = 0; i < 10; i++) {
       const agent = ('edge' + i + '-').padEnd(2_000_000, String.fromCharCode(97 + i));
+      // /fleet(저장소 키는 객체 속성 — V8 이 내부화해 복사한다)와 /storage-data(Map 키·장비 값에 이름을 그대로 담는다) 둘 다.
       const r = await fetch(b + '/fleet', { method: 'POST', headers: H, body: JSON.stringify({ agent, baremetal: [] }) });
       codes.push(r.status); await r.text();
+      const r2 = await fetch(b + '/storage-data', { method: 'POST', headers: H, body: JSON.stringify({ agent, devices: [{ deviceId: 'd' + i, ok: false }] }) });
+      codes.push(r2.status); await r2.text();
     }
     await new Promise((res) => setTimeout(res, 100));
     const h1 = heap();
@@ -317,7 +321,7 @@ test('TIM2606-02: routes/central.js 의 본문 agent 이름(strAgent)이 원문�
     console.log('@@' + JSON.stringify({ mb: Math.round((h1 - h0) / 1048576), codes }));
   `, { gc: true, env: { CENTRAL_TOKEN: 'shared-child', DATA_SOURCE: 'live' } });
   assert.ok(r.codes.every((c) => c === 200), JSON.stringify(r.codes));
-  // 수정 전: 10 × 2MB 원문이 수신 집계 키·fleet 캐시 키로 상주(약 20MB). 수정 후: 이름 64자만.
+  // 수정 전: 10 × 2MB 원문이 스토리지 엣지 보관 Map 키·장비 값으로 상주(약 20MB). 수정 후: 이름 64자만.
   assert.ok(r.mb < 8, `잔존 힙 ${r.mb}MB`);
 });
 
