@@ -3699,6 +3699,29 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ 작업 방식: 보안 축 재현 검증자가 결과를 쓰지 못하고 끝났다(안전 분류기) — 의도 검증 + 수정 그룹의 기준 커밋 재현으로 확정했다. 보안 재현 스크립트는
       **입력을 작게**(1.6만 자·수 MB) 두도록 지시할 것.
 
+  - ⚠⚠ **v2.607 — 18차 점검 확정분**("자세하게 두번 더" 2회차. 발견 65 = 확정 60 · SPLIT 2 · 가능성 2 · 반증 1, 고유 수정 54 + 통합 2.
+    회귀 `test/audit2607{a..h}.test.js` 66건 + 웹 vitest. 상세 `docs/AUDIT-2026-09-24o.md`):
+    - ⚠⚠ **범위 admin 은 사용자 관리로 자기 범위를 넓힐 수 없다**(AUTHZ2607-01): 새 scope 는 요청자 범위의 부분집합이고, 전체 범위 계정의 생성·수정·
+      비밀번호/OTP 변경·삭제는 거부한다. v2.605 '범위 병합'·v2.606 '쓰기로 읽기 범위를 넓히지 않는다' 의 가장 큰 형제였다 — **권한을 주는 라우트 자체**를
+      먼저 볼 것. 전 법인 데이터·동작 게이트는 `fleetOnly`(감사 로그·중앙 인벤토리·중앙 IPAM) · `fleetWideOnly`(vCenter 등록·데이터 소스·표시 순서).
+      **새 게이트 이름은 `scripts/api-doc.mjs GUARD_NOTE` 에 등록할 것**(없으면 apiDoc2563 이 실패한다).
+    - ⚠⚠ **시한 값은 `util/deadline.js deadlineMs` 하나를 지난다**(TIM2607-02): `withDeadline(3e9)`·NaN·음수가 1ms 시한이 되어 수집·대량 테스트·업그레이드
+      push 가 즉시 실패했다. NaN/≤0 → 기본 60초, [1초, 2시간]. `AbortSignal.timeout`·`setTimeout` 에 설정값을 넣는 곳은 전부 이 관문으로.
+    - ⚠⚠ **상주 레코드의 외부 문자열은 `capStr`/`capTrim`**(TIM2607-01): v2.606 은 계측 Map 키만 고쳤다 — 수신 저장소 레코드(fleet·rma 결과·엣지 로그·
+      진단)도 SlicedString 으로 원문을 붙잡는다. 소스 스윕이 central/*·rma/jobs.js 의 `.slice` 를 허용 목록(사유)과 대조한다.
+    - **REST 폴백 vCenter 는 알람을 모른다**(LEFT2607-04·WEB2607-06): `alarmsUnknown` 이면 알람 칸 '—' · 합계 제외 · 알림 엔진은 해소 판정 보류.
+      `collectMode` 는 site/direct 만이고 REST 여부는 `collectSource` 다(섞으면 빈 인벤토리 판정이 흔들린다).
+    - **중앙 직접 수집 장비는 엣지 push 로 덮이지 않는다**(CEN2607-03 `notOwned`) · SAN 스냅샷 정제는 health·extra 하위 목록까지(CEN2607-01·05) ·
+      통신 점검 엣지 보고는 중앙이 그 agent 에 내려준 링크만(LEFT2607-01).
+    - **비밀 승계는 `accessMoved(host·port·username)` — agent 변경은 승계 유지**(SEC2607-07, 위임 수집에 필요) · 폐기 사실은 `droppedSecrets` 로 응답하고
+      화면은 `views/droppedSecretText.js` 하나로 말한다(수집 서버 PUT 이 그 필드를 버리고 있었다 — INT2607-01).
+    - **재전송 경로는 '첫 시도가 이미 바꾼 것' 을 기억한다**(INT2607-02 · LEFT2607-09): 청크 0 이 교체한 뒤 재전송이 실패하면 중앙은 부분 목록이다 — '직전 그대로' 는 거짓.
+    - 업그레이드·패키지 다운로드는 `util/readBytesCapped.js`(바이트 상한 스트림) · SSH 배너·stderr·WS hostname 채널 상한 · 정규식 수정은 옛 결과와 동일성 대조.
+    - 남긴 것: 미등록 장비·vCenter id 수신(공유 토큰 흐름) · `sftpReadFile` 크기 상한 · 폴러 `*_DEVICE_TIMEOUT_MS` 상한(관문이 자른다) · IPAM import dryRun 의
+      범위 밖 존재 노출 · COL2607-06·08(가능성).
+    - ⚠ 작업 방식: 수정 도중 세션 사용량 한도로 전 그룹이 중단됐다 — 재개 시 **반쯤 적용된 파일을 기준판으로 되돌리고** 변이 백업을 지운 뒤 처음부터 다시 돌렸다.
+      중단된 그룹의 부분 수정을 이어 쓰지 말 것(어디까지 됐는지 알 수 없다).
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는
