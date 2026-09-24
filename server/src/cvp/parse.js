@@ -143,7 +143,7 @@ export function entitiesOf(text) {
     } else if (Array.isArray(v)) {
       format = format || 'array';
       for (const x of v) if (isObj(x)) put(nameOf(x) || String(entities.size), flatten(x));
-    } else if (isObj(v)) {
+    } else if (isObj(v) && Object.keys(v).length) {
       // 평범한 맵 { name: {…} } 또는 개체 하나
       const ents = Object.entries(v).filter(([, x]) => isObj(x));
       if (ents.length && ents.length === Object.keys(v).length) {
@@ -258,8 +258,9 @@ export function partState(flat) {
 export function parseParts(text, kind, { max = PART_MAX } = {}) {
   const { entities, format, keys } = entitiesOf(text);
   if (!format) return { parts: null, keys, truncated: 0 };
-  const parts = []; let truncated = 0;
+  const parts = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
+    if (pick(f, ['state', 'status', 'health', 'operStatus', 'powerSupplyState', 'fanState', 'hwStatus', 'xcvrPresence', 'presence', 'alertRaised', 'alarm', 'overheat', 'critical', 'temperature', 'currentTemperature']) === undefined) { unrecognized++; continue; }
     if (parts.length >= max) { truncated++; continue; }
     const st = partState(f);
     const detailBits = [];
@@ -269,6 +270,7 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
     if (kind === 'temp' && t != null) detailBits.push(`${t}℃`);
     parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200) });
   }
+  if (!parts.length && unrecognized) return { parts: null, keys, truncated: 0 };
   return { parts, keys, truncated };
 }
 
@@ -316,8 +318,10 @@ export function linkWord(v) {
 export function parseInterfaces(text, { max = PORT_MAX } = {}) {
   const { entities, format, keys } = entitiesOf(text);
   if (!format) return { ports: null, keys, truncated: 0 };
-  const ports = []; let truncated = 0;
+  const ports = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
+    // 인터페이스 필드가 하나도 없는 개체(오류 본문 등)는 포트로 세지 않는다 — 없는 포트를 지어내지 않게.
+    if (pick(f, ['operStatus', 'linkStatus', 'oper', 'operState', 'adminStatus', 'enabledState', 'adminEnabled', 'speed', 'bandwidth', 'description']) === undefined) { unrecognized++; continue; }
     if (ports.length >= max) { truncated++; continue; }
     const lagRaw = pick(f, ['lag', 'portChannel', 'lagId', 'membership']);
     const vlanRaw = pick(f, ['vlan', 'accessVlan', 'nativeVlan', 'vlanId']);
@@ -331,6 +335,7 @@ export function parseInterfaces(text, { max = PORT_MAX } = {}) {
       lag: lagRaw == null ? '' : str(lagRaw, 64),
     });
   }
+  if (!ports.length && unrecognized) return { ports: null, keys, truncated: 0 };
   return { ports, keys, truncated };
 }
 
@@ -343,13 +348,16 @@ export function parseCounters(text) {
   if (!format) return { counters: null, keys };
   const counters = new Map();
   for (const [name, f] of entities) {
-    counters.set(str(name, 64), {
+    const c = {
       inOctets: numOrNull(pick(f, ['inOctets', 'inBytes', 'ifInOctets', 'ifHCInOctets'])),
       outOctets: numOrNull(pick(f, ['outOctets', 'outBytes', 'ifOutOctets', 'ifHCOutOctets'])),
       inErrors: numOrNull(pick(f, ['inErrors', 'inErrorsTotal', 'ifInErrors', 'inTotalErrors'])),
       outErrors: numOrNull(pick(f, ['outErrors', 'outErrorsTotal', 'ifOutErrors', 'outTotalErrors'])),
-    });
+    };
+    if (Object.values(c).every((x) => x == null)) continue; // 카운터 필드가 없는 개체는 세지 않는다
+    counters.set(str(name, 64), c);
   }
+  if (!counters.size && entities.size) return { counters: null, keys };
   return { counters, keys };
 }
 
@@ -398,10 +406,12 @@ export function portDelta(prev, cur, speed, intervalMs) {
 export function parseBgp(text, { max = PEER_MAX } = {}) {
   const { entities, format, keys } = entitiesOf(text);
   if (!format) return { peers: null, summary: null, keys, truncated: 0 };
-  const peers = []; let truncated = 0;
+  const peers = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
+    const stateRaw = pick(f, ['bgpPeerState', 'peerState', 'state', 'bgpState']);
+    if (stateRaw === undefined && pick(f, ['bgpPeerAs', 'peerAs', 'remoteAs', 'peerAddress', 'bgpPeerAddr']) === undefined) { unrecognized++; continue; }
     if (peers.length >= max) { truncated++; continue; }
-    const state = str(pick(f, ['bgpPeerState', 'peerState', 'state', 'bgpState']) ?? '', 32);
+    const state = str(stateRaw ?? '', 32);
     peers.push({
       peer: str(pick(f, ['peerAddress', 'bgpPeerAddr', 'peer']) ?? name, 64),
       asn: str(pick(f, ['bgpPeerAs', 'peerAs', 'asn', 'remoteAs']) ?? '', 16),
@@ -410,6 +420,7 @@ export function parseBgp(text, { max = PEER_MAX } = {}) {
       prefixes: numOrNull(pick(f, ['bgpPeerPrefixesReceived', 'prefixesReceived', 'prefixReceived', 'prefixAccepted', 'bgpPeerPrefixAccepted'])),
     });
   }
+  if (!peers.length && unrecognized) return { peers: null, summary: null, keys, truncated: 0 };
   return { peers, summary: bgpSummary(peers), keys, truncated };
 }
 

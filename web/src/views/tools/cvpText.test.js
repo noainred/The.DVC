@@ -140,7 +140,7 @@ describe('폼', () => {
     expect(T.settingsToForm({ intervalMs: 300000 }).intervalMin).toBe('5');
   });
   it('서버 폼: 마스크는 유지로 보내고 쓰지 않는 방식의 비밀은 보내지 않는다', () => {
-    const f = T.serverToForm({ id: 'c1', host: 'cvp', authMode: 'token', token: T.SECRET_MASK, password: T.SECRET_MASK, status: { ok: true } });
+    const f = T.serverToForm({ id: 'c1', name: 'CVP-1', host: 'cvp', authMode: 'token', token: T.SECRET_MASK, password: T.SECRET_MASK, status: { ok: true } });
     expect(f.status).toBeUndefined();
     const { body, issue } = T.serverPayload(f);
     expect(issue).toBe('');
@@ -149,13 +149,14 @@ describe('폼', () => {
     expect(body.id).toBe('c1');
     expect(T.serverPayload({ ...f, authMode: 'password', username: '' }).issue).toContain('계정');
     expect(T.serverPayload({ ...f, host: '' }).issue).toContain('주소');
+    expect(T.serverPayload({ ...f, name: '' }).issue).toContain('표시명');
   });
 });
 
 describe('문구 위생', () => {
   it('모듈의 문자열에 백틱이 없다', () => {
     const texts = [T.CANDIDATE_NOTE, T.authStopText(true), T.collectSummary({ direct: 1, requested: 1 }),
-      T.serverPayload({ host: '' }).issue, T.serverPayload({ host: 'h', authMode: 'token', token: '' }).issue];
+      T.serverPayload({ name: 'n', host: '' }).issue, T.serverPayload({ name: 'n', host: 'h', authMode: 'token', token: '' }).issue];
     for (const s of texts) expect(s).not.toMatch(/`/);
   });
 });

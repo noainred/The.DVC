@@ -321,6 +321,7 @@ export function serverPayload(f, { isNew = false } = {}) {
     datacenterId: s(f.datacenterId), note: s(f.note),
   };
   if (!isNew && f.id) body.id = f.id;
+  if (!body.name) return { body, issue: '표시명을 입력하세요(1~64자).' };
   if (!body.host) return { body, issue: '주소(host)를 입력하세요 — 예: ‘https://cvp.example.local’ 또는 ‘10.0.0.10’' };
   if (body.authMode === 'token') {
     const tok = typeof f.token === 'string' ? f.token : '';

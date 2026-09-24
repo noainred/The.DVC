@@ -47,6 +47,7 @@ const DataFlow = React.lazy(() => import('./tools/DataFlow.jsx'));       // 데�
 const DeviceFlow = React.lazy(() => import('./tools/DeviceFlow.jsx'));   // 3단 지도(장비 → 엣지 → 메인, v2.588)
 const BmStorageTool = React.lazy(() => import('./tools/BmStorageTool.jsx'));
 const SanSwitchTool = React.lazy(() => import('./tools/SanSwitchTool.jsx'));
+const CvpTool = React.lazy(() => import('./tools/CvpTool.jsx'));         // Arista CloudVision(v2.608)
 const PduTool = React.lazy(() => import('./tools/PduTool.jsx'));
 const RemoteCommand = React.lazy(() => import('./tools/RemoteCommand.jsx'));
 const CredentialManager = React.lazy(() => import('./tools/CredentialManager.jsx'));
@@ -483,6 +484,7 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'device-flow' && <DeviceFlow />}
       {tool === 'bm-storage' && <BmStorageTool />}
       {tool === 'san-switch' && <SanSwitchTool />}
+      {tool === 'cvp' && <CvpTool />}
       {tool === 'pdu' && <PduTool />}
       {tool === 'rma' && <RemoteCommand />}
       {tool === 'credentials' && <CredentialManager />}
