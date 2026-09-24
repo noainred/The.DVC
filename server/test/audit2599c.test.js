@@ -99,7 +99,7 @@ test('EDGE2599-02: latestByDevice — 같은 deviceId 는 최신 collectedAt 하
 test('AUTHZ-2599-03: maskDeviceAddress — host·계정·지문 계정명·오류 속 주소를 비우고 원본은 그대로', () => {
   const d = { id: 'x', name: '10.9.9.9', host: '10.9.9.9', username: 'svc', snap: { error: 'connect ECONNREFUSED 10.9.9.9:22', extra: { credFp: { user: 'svc', len: 8, hash: 'abcd' } } } };
   const m = maskDeviceAddress(d);
-  assert.equal(m.host, ''); assert.equal(m.username, ''); assert.equal(m.name, '');
+  assert.equal(m.host, ''); assert.equal(m.username, ''); assert.ok(m.name && !m.name.includes('10.9.9.9'), m.name);
   assert.equal(m.snap.extra.credFp.user, ''); assert.equal(m.snap.extra.credFp.hash, 'abcd');
   assert.ok(!m.snap.error.includes('10.9.9.9'), m.snap.error);
   assert.equal(d.host, '10.9.9.9', '원본을 바꾸면 admin 응답까지 가려진다');

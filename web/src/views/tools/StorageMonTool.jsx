@@ -1639,7 +1639,7 @@ function StorageTrendPanel({ devices }) {
                 {(d.bucketMs || 0) > 0 ? ` 집계 단위 ${(d.bucketMs >= 86_400_000 ? `${Math.round(d.bucketMs / 86_400_000)}일` : `${Math.round(d.bucketMs / 60_000)}분`)} 평균 ·` : ' 원본 값 ·'} 표본 {pts.length}점
                 {usedGapPts ? <><br /><b style={{ color: 'var(--amber)' }}>주의</b> {usedGapPts}개 구간은 사용량을 읽지 못한 장비가 있어 사용량 선을 비웠습니다(부분 합을 전체처럼 그리지 않습니다).</> : null}
                 {!target && carryH ? <><br />전체 합계는 장비마다 수집 시각이 달라, 각 점에 장비별 <b>마지막 수집값</b>을 최대 {carryH}시간(수집 주기의 2배)까지 이어 붙여 더합니다.</> : null}
-                {partial ? <><br /><b style={{ color: 'var(--amber)' }}>주의</b> {missingPts ? `${missingPts}개 구간은 이 기간에 관측된 장비 ${d?.expectedDevices ?? '—'}대 중 일부만 합산됐습니다(최근 값이 없는 장비 제외)` : '구간에 따라 합산된 장비 수가 다릅니다'}({[...devCounts].sort((a, b) => a - b).join('·')}대) — 합계선의 급변이 실제 용량 변화가 아닐 수 있습니다. 장비를 선택해 개별 추이로 확인하세요.</> : null}
+                {partial ? <><br /><b style={{ color: 'var(--amber)' }}>주의</b> {missingPts ? `${missingPts}개 구간은 이 기간에 관측된 장비 ${d?.expectedDevices != null ? `${d.expectedDevices}대` : '—'} 중 일부만 합산됐습니다(최근 값이 없는 장비 제외)` : '구간에 따라 합산된 장비 수가 다릅니다'}({[...devCounts].sort((a, b) => a - b).join('·')}대) — 합계선의 급변이 실제 용량 변화가 아닐 수 있습니다. 장비를 선택해 개별 추이로 확인하세요.</> : null}
               </div>
             </>
           )}

@@ -46,7 +46,7 @@ export function vcCardState(s = {}, now = Date.now()) {
 export function storageBarInfo(m = {}) {
   const pct = typeof m?.storageUsagePct === 'number' && Number.isFinite(m.storageUsagePct) ? m.storageUsagePct : null;
   const unknown = Number(m?.datastoresUsageUnknown) || 0;
-  const detail = m?.storageUsedTB != null ? `${m.storageUsedTB}/${m.storageTotalTB} TB` : `${m?.storageTotalTB ?? '—'} TB`;
+  const detail = m?.storageUsedTB != null ? `${m.storageUsedTB}/${m.storageTotalTB} TB` : (m?.storageTotalTB != null ? `${m.storageTotalTB} TB` : '—');
   const title = unknown
     ? (pct == null
       ? `데이터스토어 ${unknown}개의 사용량을 읽지 못해 사용률을 모릅니다(0% 가 아닙니다)`

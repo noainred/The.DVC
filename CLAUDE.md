@@ -3554,6 +3554,28 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ 작업 방식(v2.598 기록의 재확인): 병렬 수정 중 WIP 커밋은 변이 검증 기준을 흐린다 — 감사 기준 커밋을 모든 그룹에 명시했다. 이번에도
       한 그룹의 변이 도중 WIP 커밋이 '되돌린 판본' 을 담은 적이 있다(다음 커밋에서 바로잡힘) — **변이 검증 중에는 WIP 커밋을 피할 것**.
 
+  - ⚠⚠ **v2.600 — 11차 점검 확정분**("세번더" 1회차. 발견 67 = 확정 51 · SPLIT 5 · 가능성 9 · 반증 2, 고침 62 + 후속 17.
+    회귀 `test/audit2600{a..f}.test.js` 72건 + 웹 vitest. 상세 `docs/AUDIT-2026-09-24h.md`):
+    - ⚠⚠ **엣지 수신 정제는 '객체면 버린다' 가 아니라 '하위 필드를 좁힌다' 다**(RECENT2600-01 — **v2.599 가 만든 회귀**): `vcenter.location` 은
+      원래 객체라 null 로 만들자 위임 vCenter 전부가 지역 'Unknown'·지도 좌표를 잃었다. 정제 대상 필드의 **정상 모양을 먼저 확인**할 것.
+    - ⚠⚠ **크기 상한은 '통째로 버리기' 가 아니라 '잘라서 받고 밝히기'**(RECENT2600-02): 장비당 1MB 상한이 조닝이 큰 SAN 스위치를 전량 버렸고
+      엣지는 응답을 읽지 않아 흔적이 0 이었다. 중앙 `trimZoningToFit`(`limited`·`trimmed`) · 엣지 slim 도 조닝 축약 · push 는 응답의
+      `rejected`·`dropped`·`zoningTrimmed` 를 상태·콘솔에. **새 상한을 넣으면 그 상한에 걸리는 정상 입력의 최대치를 계산할 것.**
+    - **가림 형제 경로 — 이번에도 여덟 곳**(RECENT2600-03·AUTHZ-2600-01~08): storage-growth · 시리얼 조회 JSON/CSV · SAN 사용량 요약·폴러 ·
+      Horizon 세션 · `/idrac/host-power`(권한 게이트 자체가 없었다) · bm-usage 대상. 폴러 상태는 `addressMask.maskPollerStatus`. 이름이 주소라
+      가린 행은 `maskedNameLabel`(빈 문자열 금지). 범위 계정의 중계 점검은 403.
+    - **로그인 잠금 Map**(T2600-01·02): 키 128자 초과는 sha256 으로 접고(자르면 다른 계정이 카운터를 공유) · 하한캡 퇴출은 **잠금 없는 카운터부터**
+      (활성 잠금을 먼저 지우면 분산 실패 요청으로 잠금이 풀린다) · `routes/auth.js` 는 256자 초과 사용자명을 인증 전에 400.
+    - **엣지가 보낸 한 원소가 함대 적재를 롤백시킬 수 있다**(CEN2600-01 — GPU 사용률 객체). 결과 저장소 5곳(ping·캡처·iDRAC 스캔·로그 조회·bmstor)도
+      아는 필드만 담는다(v2.598 CENTRAL 규약의 형제). 엣지는 **중앙 직접 수집 vCenter 에 쓰지 못한다**(`edgeVcWriteDenied`).
+    - **재시작 직후 빈 슬라이스로 중앙을 지우지 않는다**(EDGE2600-04): 엣지는 불통·대기이면서 0개인 vCenter 를 보내지 않고, 중앙은 6시간 안의 직전
+      목록을 유지(`held`, 데이터 시각은 그대로라 낡음으로 보인다). 재전송은 멱등으로(`cover_batch`). 엣지 요청 시한 env 는 `agent/envTimeout.js`.
+    - **버킷 합계는 장비별 마지막 값을 이어 붙인다**(DB2600-01): 10분 버킷에 수집 시각이 다른 엣지 장비가 흩어져 함대 합계가 1/4 로 그려졌다.
+      `storage/db.js sumCapacityBuckets`(한계 = 수집 주기 × 2, `missing`·`carried`). **시간 버킷 SUM 을 새로 만들 때 같은 함정을 볼 것.**
+    - 롤업 폴백은 '원본이 더 많을 때만'(DB2600-02 — metrics·vmperf) · 원격 임시 경로는 `agent/deploy.js remoteTmpDir` · 설정 빈 칸 4곳 더 ·
+      NSX 합계는 `nsx/scope.js scopedNsxRollup` 한 벌(실패 목록은 null) · 웹 빈 칸 유지는 `views/blankKeep.js`.
+    - 남긴 것: COL-2600-07(Horizon 같은 pod 이중 계수 — 세션 id 저장 여부와 함께 판단) · 엣지 push 게스트 디스크의 `partsUnknown` 중앙 합산.
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는
