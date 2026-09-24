@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { nsxLimitNotes, dfwRulesCell } from './nsxLimitText.js';
+import { nsxLimitNotes, dfwRulesCell, nsxCount, nsxAdd, nsxFailedShort } from './nsxLimitText.js';
+import { readFileSync } from 'node:fs';
 
 describe('nsxLimitNotes (v2.599 C2599-05)', () => {
   it('절단·생략·하한을 각각 말한다', () => {
@@ -30,5 +31,31 @@ describe('nsxLimitNotes (v2.599 C2599-05)', () => {
     expect(dfwRulesCell({ firewall: { rules: 5, policiesOmitted: 2 } })).toBe('5+');
     expect(dfwRulesCell({ firewall: { rules: 0, rulesPartial: true } })).toBe('0+');
     expect(dfwRulesCell({})).toBe('—');
+  });
+});
+
+describe('NSX 합계 표기 (v2.600 COL-2600-06 후속)', () => {
+  it('null 은 0 도 null 도 아니라 — 이고, 합은 하나라도 모르면 모른다', () => {
+    expect(nsxCount(null)).toBe('—');
+    expect(nsxCount(undefined)).toBe('—');
+    expect(nsxCount(0)).toBe('0');
+    expect(nsxCount(12)).toBe('12');
+    expect(nsxAdd(3, 4)).toBe(7);
+    expect(nsxAdd(3, null)).toBe(null);
+    expect(nsxCount(nsxAdd(null, 2))).toBe('—');
+  });
+  it('listsFailed 가 있으면 짧은 실패 문구, 없으면 빈 문자열', () => {
+    expect(nsxFailedShort({ listsFailed: { segments: 1, securityPolicies: 2 } })).toBe('조회 실패: 세그먼트·DFW 정책');
+    expect(nsxFailedShort({ segments: 3 })).toBe('');
+    expect(nsxFailedShort(null)).toBe('');
+  });
+  it('세 화면이 null 합계를 직접 더하거나 그대로 찍지 않는다(소스)', () => {
+    for (const f of ['./Nsx.jsx', '../version_4/pages/Network.jsx', '../console/pages/ConsoleNetwork.jsx']) {
+      const src = readFileSync(new URL(f, import.meta.url), 'utf8');
+      expect(src, f).not.toMatch(/r\.hostNodes\s*\+\s*r\.edgeNodes|\(r\.hostNodes \?\? 0\) \+/);
+      expect(src, f).not.toMatch(/Overlay \$\{r\.overlaySegments/);
+      expect(src, f).not.toMatch(/r\.segments \?\? 0|m\.segments \?\? 0/);
+      expect(src, f).toMatch(/nsxFailedShort\(r\)/);
+    }
   });
 });

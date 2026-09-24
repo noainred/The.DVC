@@ -6,6 +6,7 @@ import { StateBadge } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { Panel, Kpi, Bar, PollState, Empty } from '../ui.jsx';
 import { nsxManagerRows, networkTypeCounts, portgroupsByVc, ipamTop, ipamStats, fmtInt, fmtPct, textColor, rowMatches, REGION_COLORS } from '../data.js';
+import { nsxCount, nsxAdd, nsxFailedShort } from '../../views/nsxLimitText.js'; // v2.600 COL-2600-06: 조회 실패 합계(null)를 0·'null' 로 그리지 않는다
 
 export default function Network({ global: g, sitesAll, scope, polls, phase, phaseText, health }) {
   // 수집이 끝나기 전 KPI 메타 문구(v2.509) — 예전에는 전부 '수집 대기' 라 **기다리면 되는 상황과
@@ -33,15 +34,15 @@ export default function Network({ global: g, sitesAll, scope, polls, phase, phas
     <>
       <div className="v3-kpis">
         <Kpi label="포트그룹" value={fmtInt(g?.networks)} accent="#1a2130" meta={nets.data ? `Distributed ${tc.distributed} · Standard ${tc.standard}${tc.other ? ` · 기타 ${tc.other}` : ''}` : waitText} />
-        <Kpi label="NSX" value={r ? `${r.managersUp} / ${r.managers}` : '—'} accent="#7c3aed" meta={r ? `매니저 UP/전체 · T0 ${r.t0} · T1 ${r.t1}${r.managersDegraded ? ` · 저하 ${r.managersDegraded}` : ''}` : 'NSX 수집 대기'} />
-        <Kpi label="세그먼트" value={fmtInt(r?.segments)} accent="#0e7490" meta={r ? `Overlay ${r.overlaySegments} · VLAN ${r.vlanSegments}` : 'NSX 수집 대기'} />
-        <Kpi label="트랜스포트 노드" value={r ? fmtInt(r.hostNodes + r.edgeNodes) : '—'} accent={tnDown ? '#dc2626' : '#16a34a'} meta={r ? `호스트 ${r.hostNodes} · 엣지 ${r.edgeNodes} · DOWN ${tnDown}` : 'NSX 수집 대기'} />
+        <Kpi label="NSX" value={r ? `${r.managersUp} / ${r.managers}` : '—'} accent="#7c3aed" meta={r ? `매니저 UP/전체 · T0 ${nsxCount(r.t0)} · T1 ${nsxCount(r.t1)}${r.managersDegraded ? ` · 저하 ${r.managersDegraded}` : ''}${nsxFailedShort(r) ? ` · ${nsxFailedShort(r)}` : ''}` : 'NSX 수집 대기'} />
+        <Kpi label="세그먼트" value={fmtInt(r?.segments)} accent="#0e7490" meta={r ? `Overlay ${nsxCount(r.overlaySegments)} · VLAN ${nsxCount(r.vlanSegments)}` : 'NSX 수집 대기'} />
+        <Kpi label="트랜스포트 노드" value={r ? fmtInt(nsxAdd(r.hostNodes, r.edgeNodes)) : '—'} accent={tnDown ? '#dc2626' : '#16a34a'} meta={r ? `호스트 ${nsxCount(r.hostNodes)} · 엣지 ${nsxCount(r.edgeNodes)} · DOWN ${tnDown}` : 'NSX 수집 대기'} />
         <Kpi label="IPAM" value={ipam.data ? fmtInt(ist.count) : '—'} accent="#2563eb" meta={ipam.data ? (ist.count ? `대역 · 평균 사용 ${fmtPct(ist.avgPct)} · 90% 초과 ${ist.over90}` : '대역 없음') : canIpam ? waitText : "권한 필요('tools')"} />
       </div>
 
       <div className="v3-grid2 wide">
         <div className="v3-col">
-          <Panel title={`NSX 매니저 · 엣지`} sub={r ? `${r.managers} 매니저 · ${r.edgeNodes} 엣지 · TN = 트랜스포트 노드 UP/DOWN` : ''} bodyPad={false}>
+          <Panel title={`NSX 매니저 · 엣지`} sub={r ? `${r.managers} 매니저 · ${nsxCount(r.edgeNodes)} 엣지 · TN = 트랜스포트 노드 UP/DOWN` : ''} bodyPad={false}>
             <PollState poll={polls.nsx}>
               {managers.length === 0 ? <Empty>{polls.nsx.data?.managers?.length ? '범위 안에 NSX 매니저가 없습니다.' : 'NSX 매니저가 등록되어 있지 않습니다(설정 › NSX 관리).'}</Empty> : (
                 <div className="v3-tablewrap">

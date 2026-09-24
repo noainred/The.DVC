@@ -37,3 +37,25 @@ export function dfwRulesCell(m) {
   if (v == null || v === '') return '—';
   return m.firewall.rulesPartial || Number(m.firewall.policiesOmitted) > 0 ? `${v}+` : String(v);
 }
+
+/*
+ * v2.600(감사 COL-2600-06 후속): 서버 rollup·매니저 행이 **목록 조회 실패**를 null 로 준다(0 은 '없음' 이라는 거짓).
+ * 화면은 null 을 0 으로도 'null' 로도 그리지 않는다 — 판정·문구는 여기 하나(V2 NSX · V4 네트워크 · 관제 콘솔 공용).
+ */
+/** 개수 칸 — null/비숫자는 '—'(단위 없이). */
+export function nsxCount(v) {
+  return v == null || v === '' || !Number.isFinite(Number(v)) ? '—' : String(Number(v));
+}
+
+/** 두 개수의 합 — 하나라도 모르면 null(부분 합을 전체라 말하지 않는다). */
+export function nsxAdd(...vs) {
+  let a = 0;
+  for (const v of vs) { if (v == null || v === '' || !Number.isFinite(Number(v))) return null; a += Number(v); }
+  return a;
+}
+
+/** rollup.listsFailed({목록: 매니저 수}) → 짧은 문구('조회 실패: 세그먼트·DFW 정책'). 없으면 ''. */
+export function nsxFailedShort(r) {
+  const lf = r && typeof r.listsFailed === 'object' && r.listsFailed ? Object.keys(r.listsFailed) : [];
+  return lf.length ? `조회 실패: ${lf.map((k) => LIST_LABEL[k] || k).join('·')}` : '';
+}
