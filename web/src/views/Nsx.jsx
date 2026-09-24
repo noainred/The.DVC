@@ -5,6 +5,7 @@ import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox, VmLink } from '../
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { nsxLimitNotes, dfwRulesCell } from './nsxLimitText.js'; // v2.599 C2599-05: 목록 절단·부분 집계 안내
 
 const MGR_BADGE = { connected: 'green', degraded: 'amber', unreachable: 'red', pending: 'gray', disabled: 'gray' };
 const MGR_LABEL = { connected: '정상', degraded: '저하', unreachable: '연결끊김', pending: '대기', disabled: '비활성' };
@@ -59,6 +60,17 @@ export default function Nsx() {
         </div>
       )}
 
+      {(() => {
+        const notes = nsxLimitNotes(managers, data.segments);
+        return notes.length > 0 && (
+          <div className="card" style={{ marginBottom: 12, borderColor: 'var(--amber)', padding: '10px 14px' }}>
+            <b style={{ color: 'var(--amber)' }}>일부 목록을 끝까지 받지 못했습니다</b>
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12 }} className="muted">
+              {notes.map((t, i) => <li key={i}><BoldText text={t} /></li>)}
+            </ul>
+          </div>
+        );
+      })()}
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Kpi label="NSX Manager" value={r.managers ?? 0} meta={`정상 ${r.managersUp ?? 0}${r.managersDegraded ? ` · 저하 ${r.managersDegraded}` : ''}`} accent={r.managersDegraded ? 'var(--amber)' : undefined} onClick={() => setView('gateways')} />
         <Kpi label="게이트웨이" value={(r.t0 ?? 0) + (r.t1 ?? 0)} meta={`T0 ${r.t0 ?? 0} · T1 ${r.t1 ?? 0}`} onClick={() => setView('gateways')} />
@@ -83,7 +95,7 @@ export default function Nsx() {
                 <td className="right">{m.gateways ?? 0}</td>
                 <td className="right">{m.segments ?? 0}</td>
                 <td className="right">{m.transportNodes ?? 0}</td>
-                <td className="right">{m.firewall?.rules ?? 0}</td>
+                <td className="right">{dfwRulesCell(m)}</td>
               </tr>
             ))}
           </tbody>
@@ -128,7 +140,7 @@ function SegmentTable({ rows, onOpen }) {
     { key: 'connectivity', label: '연결(T1/T0)', render: (s) => <span className="muted">{s.connectivity || '—'}</span> },
     { key: 'vlanIds', label: 'VLAN', render: (s) => (s.vlanIds || []).join(', ') || '—' },
     { key: 'subnets', label: '서브넷', render: (s) => (s.subnets || []).join(', ') || '—' },
-    { key: 'vmCount', label: 'VM(포트)', align: 'right', render: (s) => (s.vmCount == null ? <span className="muted" title="포트 미조회(권한/미지원)">—</span> : <b style={{ color: s.vmCount ? 'var(--text)' : 'var(--text-dim)' }}>{s.vmCount}</b>) },
+    { key: 'vmCount', label: 'VM(포트)', align: 'right', render: (s) => (s.vmCount == null ? <span className="muted" title="포트 미조회(권한/미지원)">—</span> : <b style={{ color: s.vmCount ? 'var(--text)' : 'var(--text-dim)' }} title={s.portsTruncated ? '포트 목록이 페이지 상한에 걸려 이 수는 하한입니다' : undefined}>{s.vmCount}{s.portsTruncated ? '+' : ''}</b>) },
   ];
   return <DataTable columns={cols} rows={rows} initialSort={{ key: 'name', dir: 'asc' }} />;
 }

@@ -108,6 +108,11 @@ describe('안내 문구·툴팁', () => {
     const ds = cellTitle({ rowName: 'SAN', vcName: '한국', metric: sizeMetric, value: 20, cell: { count: 2, capacityTB: 20, freeTB: 4 } });
     expect(ds).toContain('데이터스토어 2개 합산');
     expect(ds).toContain('여유 4 TB');
+    expect(ds).not.toContain('읽지 못한');
+  });
+  it('v2.599 RECENT2599-03 — 사용량을 못 읽어 합계에서 뺀 DS 개수를 밝힌다', () => {
+    const t = cellTitle({ rowName: 'SAN', vcName: '한국', metric: sizeMetric, value: 10, cell: { count: 3, capacityTB: 10, freeTB: 4, usageUnknown: 1 } });
+    expect(t).toContain('사용량을 읽지 못한 데이터스토어 1개');
   });
 });
 

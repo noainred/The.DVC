@@ -7,34 +7,25 @@
 import { emptySnapshot } from '../types.js';
 import { makeGetter, makeRawGetter, makePoster, tryAny } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { healthWord } from '../healthWord.js'; // v2.599(감사 C2599-06) — 상태 판정 단일 소스
+// v2.599(감사 C2599-02·03): 점 선택·미해결 판정은 powerstoreCore.js 로 옮겼다 — SSH 수집기(powerstoreSsh.js)가 같은 코어를
+//   쓰는데, 여기서 import 하면 powerstore.js → (동적) powerstoreSsh.js → powerstore.js 순환이 생긴다(arch2579 SCC 상한).
+import { pickLatestSpacePoint, isActiveAlert } from './powerstoreCore.js';
+export { pickLatestSpacePoint, isActiveAlert };
+
+/** 미해결 알람 조회 상한(v2.599 C2599-08) — 닿으면 '이상' 으로 밝힌다(조용한 상한 금지). */
+export const ALERT_LIMIT = 500;
 
 /**
- * 공간 시계열 응답에서 쓸 점 하나 고르기(순수).
- * PowerStore 는 응답을 배열로 주는데 정렬 방향이 경로마다 다르고(오름/내림), 최신 점이 아직
- * 집계 전이라 physical_total 이 비어 있는 경우도 있다. 그래서 '물리 총량이 있는 점' 중
- * timestamp 가 가장 큰 것을 고르고, timestamp 가 없으면 배열 뒤쪽(대개 최신)을 우선한다.
+ * 하드웨어 lifecycle_state → 'ok' | 'bad' | 'absent' | 'unknown'(순수, v2.599 감사 C2599-06).
+ * 'Empty' 는 빈 슬롯이고 고장이 아니다 — 이상으로 세면 정상 장비에 장애가 찍힌다(v2.526 Unity REMOVED·v2.548 absent 와
+ * 같은 판단). 'Uninitialized'·'Initializing' 은 아직 상태를 모르는 것이다. 나머지는 healthWord 코어가 판정한다.
  */
-export function pickLatestSpacePoint(metrics) {
-  const list = (Array.isArray(metrics) ? metrics : [metrics]).filter(Boolean);
-  const withTotal = list.filter((p) => Number(p.physical_total) > 0);
-  const pool = withTotal.length ? withTotal : list;
-  if (!pool.length) return null;
-  const ts = (p) => Date.parse(p.timestamp || '') || 0;
-  if (pool.some((p) => ts(p))) return pool.reduce((a, b) => (ts(b) >= ts(a) ? b : a));
-  return pool[pool.length - 1];
-}
-
-/**
- * 알람 1건이 '미해결' 인가(순수, v2.513).
- * 폴백 경로(장비가 `state=eq.ACTIVE` 를 못 받는 버전)에서만 쓴다 — 전체를 받아 코드에서 거른다.
- * PowerStore 는 `state` 를 ACTIVE/CLEARED 로 주는데, 버전에 따라 이 필드가 없고
- * `is_acknowledged` 만 있는 응답도 있다. **필드가 없다고 해서 미해결이라고 단정하지 않는다** —
- * 확인(acknowledged)된 것만 제외하고 나머지는 남긴다(건수를 줄여 '조용한 축소' 를 만들지 않기 위함).
- */
-export function isActiveAlert(a) {
-  const s = String(a?.state ?? '').trim().toUpperCase();
-  if (s) return s === 'ACTIVE';
-  return a?.is_acknowledged !== true;
+export function hardwareLifecycleKind(state) {
+  const s = String(state ?? '').trim().toLowerCase();
+  if (s === 'empty') return 'absent';
+  if (s === 'uninitialized' || s === 'initializing') return 'unknown';
+  return healthWord(s);
 }
 
 /** 원시 응답 → 정규화(순수 — storageMon.test.js 픽스처 고정). raw: {cluster,sw,appliances,metrics,appliancePools,nodes,users,alerts} */
@@ -108,6 +99,13 @@ export function normalizePowerstore(device, raw) {
     // ⚠ sections 값에 섞지 말 것 — 화면 배지는 'ok'/'skip' 정확 일치가 아니면 **빨간 '오류'** 로
     //   그린다(StorageMonTool.jsx). 정상 수집을 오류로 표시하는 것은 이 수정의 목적과 반대다.
     if (raw.alertsNote) snap.extra.alertsNote = String(raw.alertsNote);
+    // v2.599(감사 C2599-08): 조회 상한(limit)에 닿았으면 실제 건수는 그 이상이다 — '500건' 이라고 단정하지 않는다.
+    //   (폴백 경로는 해제분까지 받은 뒤 거르므로 미해결 건수도 하한이다.)
+    if (raw.alertsTruncated) {
+      snap.extra.alertsTruncated = true;
+      const cap = `조회 상한(${ALERT_LIMIT}건)에 닿아 미해결 ${raw.alerts.length}건 이상일 수 있습니다(하한)`;
+      snap.extra.alertsNote = snap.extra.alertsNote ? `${snap.extra.alertsNote} · ${cap}` : cap;
+    }
     snap.sections.alerts = 'ok';
   }
 
@@ -118,15 +116,18 @@ export function normalizePowerstore(device, raw) {
   const inv = {};
   if (Array.isArray(raw.hardware)) {
     const byType = {};
-    let unhealthy = 0;
+    let unhealthy = 0, absent = 0, unknown = 0;
     for (const h of raw.hardware) {
       const t = String(h.type || 'Unknown');
       byType[t] = (byType[t] || 0) + 1;
-      // lifecycle_state 가 Healthy 계열이 아니면 이상으로 센다(값을 모르면 세지 않는다 — 정직).
-      const st = String(h.lifecycle_state || '');
-      if (st && !/^(healthy|normal|ok)$/i.test(st)) unhealthy += 1;
+      // v2.599(감사 C2599-06): 빈 슬롯(Empty)·초기화 중은 이상이 아니다 — 따로 세고 이상에는 넣지 않는다
+      //   (값을 모르면 이상으로도 정상으로도 세지 않는다 — v2.523 규약).
+      const k = hardwareLifecycleKind(h.lifecycle_state);
+      if (k === 'bad') unhealthy += 1;
+      else if (k === 'absent') absent += 1;
+      else if (k === 'unknown') unknown += 1;
     }
-    inv.hardware = { total: raw.hardware.length, byType, unhealthy };
+    inv.hardware = { total: raw.hardware.length, byType, unhealthy, absent, unknown };
   }
   if (Array.isArray(raw.volumes)) {
     let provisioned = 0;
@@ -309,12 +310,14 @@ export async function collect(device, { signal = null } = {}) {
      * 거른다(필터 하나 때문에 알람 수집 전체를 잃지 않게). 어느 경로를 썼는지는 화면에 밝힌다. */
     await step('alerts', async () => {
       try {
-        const r = await get('/api/rest/alert?select=id,severity&state=eq.ACTIVE&limit=500');
+        const r = await get(`/api/rest/alert?select=id,severity&state=eq.ACTIVE&limit=${ALERT_LIMIT}`);
         raw.alertsNote = '';
+        raw.alertsTruncated = Array.isArray(r) && r.length >= ALERT_LIMIT; // v2.599 C2599-08
         return r;
       } catch (e) {
         if (/401/.test(e.message) || signal?.aborted) throw e;
-        const all = await get('/api/rest/alert?select=id,severity,state,is_acknowledged&limit=500');
+        const all = await get(`/api/rest/alert?select=id,severity,state,is_acknowledged&limit=${ALERT_LIMIT}`);
+        raw.alertsTruncated = Array.isArray(all) && all.length >= ALERT_LIMIT; // v2.599 C2599-08(해제분 포함 상한)
         raw.alertsNote = `state 필터 미지원(${String(e.message).slice(0, 80)}) — 전체를 받아 미해결만 집계`;
         return Array.isArray(all) ? all.filter(isActiveAlert) : all;
       }

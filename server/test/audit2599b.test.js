@@ -188,6 +188,5 @@ test('WEB2599-04 — 라우터에 없는 경로의 404 는 수신 꺼짐(disable
   assert.equal(row.lastKind, REJECT_KIND.UNKNOWN_ROUTE);
   assert.deepEqual(Object.keys(row.byEndpoint), [UNKNOWN_ROUTE_KEY], '요청자가 고른 경로 문자열을 키로 쓰지 않는다');
   const flow = buildDataFlow({ routes: [{ side: 'central', method: 'POST', path: '/storage-data' }], collectors: [], rejects: rejectStats(), now: Date.now() });
-  assert.deepEqual(flow.unmapped, [], '없는 경로 한 칸은 분류 안 된 선언 경로로 세지 않는다');
-  assert.equal(flow.undeclared.length, 1);
+  assert.deepEqual(flow.undeclared, [`central:POST ${UNKNOWN_ROUTE_KEY}`], '없는 경로는 경로마다가 아니라 한 칸으로 그려진다');
 });
