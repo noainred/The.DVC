@@ -221,3 +221,48 @@ test('EDGE2601-01: applyPulledGpuGuestSettings 가 디스크에 반영한다', (
 });
 
 test.after(() => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* 무시 */ } });
+
+// ── 연결 검증(코디네이터 요청): 실제 pull 경로 · fosSsh 스냅샷 ──
+const http = await import('node:http');
+const { config } = await import('../src/config.js');
+const { pullGpuGuestConfigNow, gpuGuestConfigPullStatus } = await import('../src/agent/gpuGuestConfigPull.js');
+const { buildSnapshot } = await import('../src/sanswitch/collectors/fosSsh.js');
+
+test('EDGE2601-01: 실제 pull 경로(목 중앙)가 중앙에서 지운 VM 자격증명·IP 를 엣지 파일에서 지운다', async () => {
+  saveGpuGuestSettings({ enabled: true, vcenters: {
+    vc9: { enabled: true, username: 'r', password: 'p', vms: { vmA: { username: 'a', password: 'OLD-EDGE' }, vmB: { username: 'b', password: 'bb' } }, vmIps: { vmA: '10.2.2.1' } },
+  } });
+  let hits = 0;
+  const srv = http.createServer((req, res) => {
+    hits++;
+    assert.match(req.url, /^\/api\/central\/gpu-guest-config\?agent=/);
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ ok: true, assigned: true, at: 1, settings: { enabled: true, vcenters: {
+      vc9: { enabled: true, username: 'r', password: 'p', vms: { vmB: { username: 'b', password: 'bb' } }, vmIps: {} },
+    } } }));
+  });
+  const port = await new Promise((r) => srv.listen(0, '127.0.0.1', () => r(srv.address().port)));
+  const saved = { url: config.agent.centralUrl, token: config.agent.centralToken, name: config.agent.name };
+  config.agent.centralUrl = `http://127.0.0.1:${port}`; config.agent.centralToken = 'tok'; config.agent.name = 'edge-t';
+  try {
+    const r = await pullGpuGuestConfigNow();
+    assert.equal(hits, 1);
+    assert.equal(r.applied, true, JSON.stringify(r));
+    assert.deepEqual(r.removed, { vms: 1, vmIps: 1 });
+    assert.deepEqual(gpuGuestConfigPullStatus().last.removed, { vms: 1, vmIps: 1 });
+    const s = loadGpuGuestSettings();
+    assert.equal(s.vcenters.vc9.vms.vmA, undefined, '중앙에서 지운 VM 비밀번호가 엣지에 남으면 안 된다');
+    assert.equal(s.vcenters.vc9.vmIps.vmA, undefined);
+    assert.equal(s.vcenters.vc9.vms.vmB.password, 'bb');
+  } finally {
+    Object.assign(config.agent, { centralUrl: saved.url, centralToken: saved.token, name: saved.name });
+    srv.close();
+  }
+});
+
+test('COL-2601-06: fosSsh 스냅샷 health 에 powerPartial 이 실린다', () => {
+  const chassis = 'POWER SUPPLY  Unit: 1\nPower Usage:            -240\n\nPOWER SUPPLY  Unit: 2\nFactory Serial Num:     PS2\n';
+  const snap = buildSnapshot({ id: 's', name: 's', host: 'h' }, { chassisshow: chassis });
+  assert.equal(snap.health.powerWatts, 240);
+  assert.deepEqual(snap.health.powerPartial, { read: 1, total: 2 });
+});

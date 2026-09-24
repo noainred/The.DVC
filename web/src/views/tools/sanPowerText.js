@@ -7,8 +7,11 @@
  */
 export function powerPartialOf(health) {
   const h = health || {};
-  const p = h.powerPartial;
-  if (p && Number.isFinite(p.read) && Number.isFinite(p.total) && p.read < p.total) return { read: p.read, total: p.total };
+  // 서버(v2.601+)가 powerPartial 을 실었으면(null 포함) 그것이 판정이다 — psuDetail 은 8개로 잘려 있어 폴백일 뿐이다.
+  if (Object.prototype.hasOwnProperty.call(h, 'powerPartial')) {
+    const p = h.powerPartial;
+    return p && Number.isFinite(p.read) && Number.isFinite(p.total) && p.read < p.total ? { read: p.read, total: p.total } : null;
+  }
   const d = Array.isArray(h.psuDetail) ? h.psuDetail : [];
   if (!d.length) return null;
   const read = d.filter((x) => x && x.powerW != null).length;

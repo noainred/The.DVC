@@ -224,3 +224,23 @@ test('TIM2601-04: 게스트 디스크 폴러는 재시작 직후 DB 의 마지�
     assert.equal(poller.guestDiskPollerStatus().lastRunTs, T0);
   } finally { store.snapshot = prev; }
 });
+
+// ── LO2601-05 (추가 배정: vmtrack/service.js) ─────────────────────────────────
+test('LO2601-05: 추이 API 의 집계 사용률도 용량 0(전부 사용량 미상)이면 null', async () => {
+  const svc = await import('../src/vmtrack/service.js');
+  assert.equal(svc.dsAggPct(0, 0), null);
+  assert.equal(svc.dsAggPct(null, 1000), null);
+  assert.equal(svc.dsAggPct(250, 1000), 25);
+  const vt = await import('../src/vmtrack/db.js');
+  const { diffVcenter, diffDatastores, totalsOf } = await import('../src/vmtrack/diff.js');
+  const vc = { vcenterId: 'vc-z', ...diffVcenter([{ id: 'vc-z:vm-1', vcenterId: 'vc-z', name: 'a', powerState: 'poweredOn' }], null),
+    ds: diffDatastores([{ id: 'vc-z:ds1', capacityGB: 1000, usedGB: null }], null) };
+  const r = await vt.commitSnapshot({ slot: 'lo05-slot', ts: NOW - DAY, perVc: [vc], totalRow: totalsOf([vc]) });
+  assert.equal(r.ok, true, r.reason);
+  const all = await svc.vmtrackSeries({ days: 30 });
+  assert.equal(all.points.find((p) => p.slot === 'lo05-slot').dsUsagePct, null, '합계 행');
+  const one = await svc.vmtrackSeries({ days: 30, vcenterId: 'vc-z' });
+  assert.equal(one.points.find((p) => p.slot === 'lo05-slot').dsUsagePct, null, 'vCenter 단건');
+  const scoped = await svc.vmtrackSeries({ days: 30, scopeIds: new Set(['vc-z']) });
+  assert.equal(scoped.points.find((p) => p.slot === 'lo05-slot').dsUsagePct, null, '범위 합산');
+});
