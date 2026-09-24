@@ -1207,6 +1207,7 @@ function edgeDropSummary(info) {
     ...(n ? { rejected: n, dropped: d } : {}),
     ...(info?.coerced ? { coerced: info.coerced } : {}),
     ...(info?.evicted ? { evicted: info.evicted } : {}),
+    ...(info?.trimmed ? { zoningTrimmed: info.trimmed } : {}),   // v2.600 RECENT2600-02 — 조닝을 잘라 받은 장비 수(버린 것 아님)
   };
 }
 

@@ -117,7 +117,8 @@ async function readDropSummary(res) {
     const j = await res.json();
     if (!j || typeof j !== 'object') return null;
     const rejected = Number(j.rejected) || 0;
-    return rejected || j.coerced ? { rejected, dropped: j.dropped && typeof j.dropped === 'object' ? j.dropped : null, coerced: Number(j.coerced) || 0 } : null;
+    const zoningTrimmed = Number(j.zoningTrimmed) || 0;
+    return rejected || j.coerced || zoningTrimmed ? { rejected, dropped: j.dropped && typeof j.dropped === 'object' ? j.dropped : null, coerced: Number(j.coerced) || 0, zoningTrimmed } : null;
   } catch { return null; }
 }
 
@@ -152,7 +153,7 @@ export async function pushSanSwitchNow() {
     // 청크 전송(chunk/chunks 필드): 첫 청크는 중앙의 내 목록을 교체, 이후 청크는 덧붙인다(중앙 sanSwitchEdge).
     const chunks = chunkDevices(devices);
     let bytes = 0, gzBytes = 0;
-    let rejected = 0; const droppedBy = {};
+    let rejected = 0; const droppedBy = {}; let centralTrimmed = 0;
     for (let i = 0; i < chunks.length; i++) {
       const json = Buffer.from(JSON.stringify({ agent: config.agent.name, devices: chunks[i], chunk: i, chunks: chunks.length }));
       let body = json;
@@ -165,13 +166,14 @@ export async function pushSanSwitchNow() {
       if (!res.ok) throw new Error(`sanswitch-data <- ${res.status} (청크 ${i + 1}/${chunks.length})`);
       // v2.600(RECENT2600-02): 200 이어도 중앙이 일부 장비를 뺐을 수 있다(장비 크기·합계 상한 등) — 응답을 읽어 상태·콘솔에 남긴다.
       const ds = await readDropSummary(res);
+      if (ds?.zoningTrimmed) centralTrimmed += ds.zoningTrimmed;
       if (ds?.rejected) { rejected += ds.rejected; for (const [k, n] of Object.entries(ds.dropped || {})) droppedBy[k] = (droppedBy[k] || 0) + (Number(n) || 0); }
     }
     if (rejected) console.warn(`[sanswitch-push] 중앙이 장비 ${rejected}대를 받지 않았습니다(${Object.entries(droppedBy).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(' · ') || '사유 미상'}) — 그 스위치는 중앙 화면에 나오지 않습니다`);
     // 범위·크기를 상태에 남긴다 — '전체로 바꿨는데 회선이 버티나' 를 수치로 확인할 수 있게.
     const downgraded = devices.filter((d) => d.ports?.portsScopeReason).length;
     const zoningTrimmed = devices.filter((d) => d.zoning?.trimmed).length;
-    _last = { at: Date.now(), sent: devices.length, chunks: chunks.length, bytes, gzBytes, gzip: PUSH_GZIP, portsScope: scope, downgraded, zoningTrimmed, ...(rejected ? { rejected, dropped: droppedBy } : {}) };
+    _last = { at: Date.now(), sent: devices.length, chunks: chunks.length, bytes, gzBytes, gzip: PUSH_GZIP, portsScope: scope, downgraded, zoningTrimmed, ...(centralTrimmed ? { centralZoningTrimmed: centralTrimmed } : {}), ...(rejected ? { rejected, dropped: droppedBy } : {}) };
     return { ok: true, sent: devices.length, chunks: chunks.length, portsScope: scope, downgraded, zoningTrimmed, ...(rejected ? { rejected, dropped: droppedBy } : {}) };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };

@@ -278,3 +278,24 @@ test('CEN2600-09 — 위임 단일 캡처 이력의 hostA 를 라우트가 글�
   const r2 = await post('/capture-result', { reqId: reqId2, result: { ok: true, hostA: { x: 1 }, peer: '10.2.2.2', captured: 1, analysis: { issues: [] } } });
   assert.equal(r2.status, 200);
 });
+
+// ── 추가 배정: CEN2600-01 2차 방어(gpu/store.js) · RECENT2600-02 응답의 zoningTrimmed ──
+test('CEN2600-01 2차 — setGuestGpu 는 어느 경로로 와도 유한수 0~100 이 아닌 사용률을 저장하지 않는다', async () => {
+  const g = await import('../src/gpu/store.js');
+  g.setGuestGpu({ hosts: [{ hostId: 'h2-obj', utilPct: { a: 1 } }, { hostId: 'h2-inf', utilPct: Infinity }, { hostId: 'h2-ok', utilPct: '7' }],
+    vms: [{ vmId: 'v2-mem', utilPct: 5, memUsedPct: [9] }] });
+  assert.equal(g.getGuestGpuHost('h2-obj'), null);
+  assert.equal(g.getGuestGpuHost('h2-inf'), null);
+  assert.equal(g.getGuestGpuHost('h2-ok').utilPct, 7);
+  assert.equal(g.getGuestGpuVms().find((v) => v.vmId === 'v2-mem').memUsedPct, null);
+});
+
+test('RECENT2600-02 — sanswitch-data 응답이 조닝을 잘라 받은 장비 수(zoningTrimmed)를 밝힌다(버린 것과 구분)', async () => {
+  const r = await post('/sanswitch-data', { agent: 'edge-san', chunk: 0, chunks: 1, devices: [bigSanDevice(4000, 8000)] });
+  assert.equal(r.status, 200, JSON.stringify(r.body).slice(0, 300));
+  assert.equal(r.body.zoningTrimmed, 1);
+  assert.equal(r.body.rejected, undefined, '버린 장비는 없다');
+  const { edgeSanSwitchSnapshots } = await import('../src/central/sanSwitchEdge.js');
+  const d = (edgeSanSwitchSnapshots?.() || []).find((x) => x.deviceId === 'san-big');
+  if (d) assert.equal(d.zoning.limited, true);
+});

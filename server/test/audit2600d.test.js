@@ -248,3 +248,14 @@ test('COL-2600-04 후속: vplexcli ll 표도 가운데 빈 칸이 상태 열을 
   assert.equal(rows[1]['management-ip'], '');
   assert.equal(rows[0]['operational-status'], 'ok');
 });
+
+test('LO2600-07 후속: 게스트 디스크 수집 결과·폴러 상태가 제외한 파티션 수를 싣는다(소스 — vCenter 없이 실행 불가)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { stripComments } = await import('./_stripComments.js');
+  const svc = stripComments(readFileSync(new URL('../src/guestdisk/service.js', import.meta.url), 'utf8'));
+  assert.match(svc, /partsUnknown \+= s\.partsUnknown/);
+  assert.match(svc, /withGuest: out\.length, \.\.\.\(partsUnknown \? \{ partsUnknown \} : \{\}\)/);
+  const pol = stripComments(readFileSync(new URL('../src/guestdisk/poller.js', import.meta.url), 'utf8'));
+  assert.match(pol, /partsUnknown \+= r\.partsUnknown/);
+  assert.match(pol, /lastResult = \{[^}]*\.\.\.\(partsUnknown \? \{ partsUnknown \} : \{\}\)/);
+});

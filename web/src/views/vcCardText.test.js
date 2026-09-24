@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { vcCardState } from './vcCardText.js';
+import { vcCardState, storageBarInfo } from './vcCardText.js';
 
 describe('vcCardState (v2.583 #39)', () => {
   it('pending 을 연결 실패라 말하지 않는다', () => {
@@ -40,5 +40,25 @@ describe('vcCardState — 인증 실패 정지(v2.590)', () => {
   });
   it('connected 면 정지 기록이 남아 있어도 정상 카드다(방금 로그인됐다)', () => {
     expect(vcCardState({ status: 'connected', authStopped: stop }, NOW).tone).toBe('ok');
+  });
+});
+
+describe('v2.600 LO2600-01 storageBarInfo', () => {
+  it('사용률 null 은 0 이 아니라 null(막대 —) 이고 이유를 말한다', () => {
+    const r = storageBarInfo({ storageUsagePct: null, storageUsedTB: 0, storageTotalTB: 0, datastoresUsageUnknown: 3 });
+    expect(r.pct).toBe(null);
+    expect(r.title).toMatch(/0% 가 아닙니다/);
+  });
+  it('숫자는 그대로', () => {
+    const r = storageBarInfo({ storageUsagePct: 42, storageUsedTB: 1, storageTotalTB: 2 });
+    expect(r.pct).toBe(42);
+    expect(r.detail).toBe('1/2 TB');
+    expect(r.title).toBe(undefined);
+  });
+  it('VCenters.jsx 는 이 헬퍼로 막대를 그린다(|| 0 금지)', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('./VCenters.jsx', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/storageUsagePct \|\| 0/);
+    expect(src).toMatch(/storageBarInfo\(m\)/);
   });
 });

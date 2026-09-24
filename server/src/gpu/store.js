@@ -7,8 +7,19 @@
 let byHost = new Map(); // hostId -> { utilPct, at, source:'guest' }
 let byVm = new Map();   // vmId   -> { utilPct, memUsedPct, at, host, vcenterId }
 
+import { numOrNull } from '../util/numOrNull.js';
+
+/**
+ * v2.600(CEN2600-01 2차 방어): 사용률은 0~100 유한수만 싣는다. 예전에는 원소 값을 그대로 저장해 객체 하나가 지표 샘플러의
+ * 배치 적재(metrics/db.js insertMany — 트랜잭션 1회)를 bind 오류로 **통째로 롤백**시켰다(그 분 전 지표 소실).
+ * 수신 라우트(routes/central.js narrowGpuRow)가 1차로 좁히고, 이 함수가 모든 입력 경로(로컬 폴러 포함)를 다시 좁힌다.
+ */
+export const pctOrNull = (v) => { const n = numOrNull(v); return n != null && n >= 0 && n <= 100 ? n : null; };
+
 export function setGuestGpu({ hosts = [], vms = [], agent = '' }) {
   const now = Date.now();
+  hosts = (Array.isArray(hosts) ? hosts : []).filter((h) => h && typeof h === 'object').map((h) => ({ ...h, utilPct: pctOrNull(h.utilPct) }));
+  vms = (Array.isArray(vms) ? vms : []).filter((v) => v && typeof v === 'object').map((v) => ({ ...v, utilPct: pctOrNull(v.utilPct), memUsedPct: pctOrNull(v.memUsedPct) }));
   // agent = 이 오버레이를 보고한 엣지(출처). 위임(central) 경로에서 어느 엣지가 넣었는지 기록해
   // 사후 추적·향후 scope 필터의 근거로 남긴다. 로컬 폴러 경로는 agent 미지정(빈 값).
   for (const h of hosts) if (h && h.hostId != null && h.utilPct != null) byHost.set(h.hostId, { utilPct: h.utilPct, at: now, source: 'guest', agent });

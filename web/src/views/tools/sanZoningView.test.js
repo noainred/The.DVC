@@ -202,3 +202,20 @@ describe('labelMap — 뒤 4바이트가 겹치면 라벨이 같아 보인다(v2
     expect(labelMap().size).toBe(0);
   });
 });
+
+describe('v2.600 RECENT2600-02 truncationText — 잘린 원인 구분', () => {
+  it('크기 상한으로 잘린 조닝은 수집 상한(SANSW_ZONE_MAX)이라 말하지 않는다', () => {
+    const t = truncationText({ limited: true, zones: new Array(100), counts: { zones: 4000 }, trimmed: { zonesOmitted: 3900, aliasesOmitted: 8000, by: 'central' } });
+    expect(t).toMatch(/중앙 수신 크기 상한/);
+    expect(t).toMatch(/zone 3900개/);
+    expect(t).not.toMatch(/SANSW_ZONE_MAX/);
+  });
+  it('엣지+중앙 · 수집 상한도 함께면 둘 다 말한다', () => {
+    const t = truncationText({ limited: true, zones: new Array(100), counts: { zones: 9000 }, trimmed: { zonesOmitted: 3900, aliasesOmitted: 0, by: 'edge+central' } });
+    expect(t).toMatch(/엣지 전송·중앙 수신/);
+    expect(t).toMatch(/SANSW_ZONE_MAX/);
+  });
+  it('trimmed 없는 limited 는 예전 문구', () => {
+    expect(truncationText({ limited: true })).toMatch(/SANSW_ZONE_MAX/);
+  });
+});
