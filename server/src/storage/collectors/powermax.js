@@ -389,6 +389,12 @@ export function normalizePowermax(device, raw) {
     }
   }
   if (raw.alertCount != null) { snap.alerts.unresolved = Number(raw.alertCount) || 0; snap.sections.alerts = 'ok'; }
+  else if (raw.alertsSection) {
+    // v2.602(RECENT2602-02): 경보 응답은 받았는데 미확인 개수를 못 찾았다 — 'skip'·0(emptySnapshot 기본값)으로 두면
+    //   화면이 '경보 0건' 으로 읽는다. 사유를 섹션에 싣고 개수는 null(합산에서 0 으로 세지 않는다 — 모르는 것이다).
+    snap.sections.alerts = raw.alertsSection;
+    snap.alerts.unresolved = null;
+  }
   // v2.601(COL-2601-05): 필터 없는 목록으로 셌으면 확인된 경보가 섞였다 — 화면·보고가 알 수 있게 근거를 싣는다.
   if (raw.alertsBasis) snap.extra.alertsBasis = raw.alertsBasis;
   // nodes/accounts 는 이번 범위 밖(디렉터·보드 상세는 실장비 확인 후 후속) — 'skip' 정직 표기.
@@ -477,7 +483,7 @@ export async function collect(device, { signal = null } = {}) {
       const a = powermaxAlertCount(r.data, r.path);
       raw.alertCount = a.count;
       raw.alertsBasis = a.basis;
-      if (a.count == null) snap.sections.alerts = '미수집(경보 응답에서 미확인 개수를 찾지 못했습니다)';
+      if (a.count == null) raw.alertsSection = '미수집(경보 응답에서 미확인 개수를 찾지 못했습니다)';
     } catch (e) { if (/401/.test(e.message)) throw e; snap.sections.alerts = `오류: ${e.message}`; }
   } catch (e) {
     const out = normalizePowermax(device, raw);
