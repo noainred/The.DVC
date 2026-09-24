@@ -23,6 +23,8 @@ import { edgeCvpStatuses, edgeCvpSummary } from '../../central/cvpEdge.js';
 import { requestCvpCollect, hasPendingCvpRequest, recentCvpCollectDrops } from '../../cvp/collectRequests.js';
 import { secretProvided } from '../../util/secretCarry.js';
 import { capStr } from '../../util/capStr.js';
+import { listDatacenters } from '../../datacenter/store.js';
+import { pickAgent, pickDatacenter } from '../../cvp/formChoices.js';
 
 const adminOnly = requireRole('admin');
 const writer = requireRole('admin', 'operator');
@@ -169,12 +171,25 @@ api.post('/tools/cvp/collect', writer, toolsPerm, fullScopeOnly, async (req, res
 
 // ── 등록부(adminOnly — 자격증명) ────────────────────────────────────────────
 api.get('/tools/cvp/servers', adminOnly, toolsPerm, fullScopeOnly, (_req, res) => {
-  res.json({ servers: listServers(), agents: knownAgentNames() });
+  res.json({ servers: listServers(), agents: knownAgentNames(), datacenters: dcList() });
 });
+
+// DataCenter 목록 — 폼 드롭다운과 저장 검증이 같은 목록을 본다(v2.609).
+function dcList() {
+  try { return listDatacenters().map((d) => ({ id: String(d.id), name: String(d.name || d.id) })); } catch { return []; }
+}
 
 const saveRoute = (req, res) => {
   try {
     const input = { ...(req.body && typeof req.body === 'object' ? req.body : {}), ...(req.params.id ? { id: req.params.id } : {}) };
+    // 담당 엣지·DataCenter 는 기존 목록의 표기로 맞추고, 목록에 없는 새 값은 거부한다(오타 방지 — v2.609).
+    const prev = req.params.id ? getServer(req.params.id) : null;
+    const ag = pickAgent(input.agent, knownAgentNames(), prev?.agent || '');
+    if (ag.error) return res.status(400).json({ ok: false, reason: ag.error, field: 'agent' });
+    const dc = pickDatacenter(input.datacenterId, dcList(), prev?.datacenterId || '');
+    if (dc.error) return res.status(400).json({ ok: false, reason: dc.error, field: 'datacenterId' });
+    input.agent = ag.value;
+    input.datacenterId = dc.value;
     const saved = saveServer(input);
     logAudit({ user: req.user?.username, action: req.params.id ? 'CVP 서버 수정' : 'CVP 서버 등록', target: `${saved.name}(${saved.host})`,
       detail: `${saved.authMode}${saved.agent ? ` 엣지 ${saved.agent}` : ' 중앙 직접'}${saved.droppedSecrets ? ` · 접속 대상 변경으로 저장 비밀 폐기(${saved.droppedSecrets.join(',')})` : ''}` });

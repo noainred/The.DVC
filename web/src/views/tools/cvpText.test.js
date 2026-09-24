@@ -170,3 +170,18 @@ describe('isTruncated (v2.608 Chromium 판독 — 개수 객체가 전부 0 인�
     expect(T.isTruncated(false)).toBe(false);
   });
 });
+
+describe('choiceOptions (v2.609)', () => {
+  it('문자열 목록과 {id,name} 목록을 같은 모양으로', () => {
+    expect(T.choiceOptions(['a'], '')).toEqual([{ value: 'a', label: 'a' }]);
+    expect(T.choiceOptions([{ id: 'dc1', name: '서울' }], '')).toEqual([{ value: 'dc1', label: '서울' }]);
+  });
+  it('목록에 없는 현재 값은 지우지 않고 표시한다', () => {
+    const o = T.choiceOptions(['a'], 'old');
+    expect(o[0]).toEqual({ value: 'old', label: 'old (목록에 없음)', missing: true });
+    expect(o).toHaveLength(2);
+  });
+  it('대소문자만 다른 현재 값은 목록 항목으로 본다', () => {
+    expect(T.choiceOptions(['Edge-A'], 'edge-a')).toHaveLength(1);
+  });
+});

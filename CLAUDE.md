@@ -3740,6 +3740,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 서버 `truncated` 는 **개수 객체**다 — 진리값으로 읽으면 0 뿐인데 '(잘림)' 으로 뜬다(v2.608 Chromium 판독에서 발견. `cvpText.isTruncated`).
     - CVP 는 vCenter 귀속이 없어 범위 계정 403 · 관리 주소는 비-admin 에 가림 · 기본 꺼짐 · 등록·설정은 admin.
 
+  - **등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다**
+    (`cvp/formChoices.js pickAgent`·`pickDatacenter` + 웹 `cvpText.choiceOptions`, v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를
+    콤보박스로 … 오타/대소문자 방지"):
+    - 화면만 드롭다운으로 바꾸면 CSV·API 직접 호출로 오타가 그대로 들어온다 — 저장 라우트가 **대소문자·공백만 다른 값은 목록 표기로**
+      바꾸고(DataCenter 는 표시명으로 와도 **id** 로 저장) 목록에 없는 새 값은 400(`field`)으로 거부한다.
+    - ⚠ **이미 저장돼 있던 값은 목록에 없어도 통과시킨다**(엣지가 아직 통신 전·DataCenter 삭제). 막으면 다른 칸만 고치는 저장이
+      막히고, 화면이 지우면 그 값이 조용히 바뀐다 — 드롭다운은 그 값을 '(목록에 없음)' 으로 따로 보여 준다.
+    - 목록 원천은 SAN 스위치 폼과 같다(`knownAgentNames()`·`listDatacenters()`). 다른 도구 폼에 같은 요구가 오면 이 모듈을 쓸 것.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는
