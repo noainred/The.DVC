@@ -224,13 +224,15 @@ export function updateCollector(id, body, { managed } = {}) {
   const list = loadCollectors();
   const idx = list.findIndex((c) => c.id === id);
   if (idx === -1) return { ok: false, reason: `없는 수집 서버: ${id}` };
-  const [entry, err] = normalize({ ...body, id }, list[idx]);
+  const [entry, err, droppedSecrets] = normalize({ ...body, id }, list[idx]);
   if (err) return { ok: false, reason: err };
   // managed 명시 시 갱신, 아니면 기존 값 보존(자기등록이 고정 플래그를 지우지 않게).
   entry.managed = managed != null ? Boolean(managed) : Boolean(list[idx].managed);
   list[idx] = entry;
   save(list);
-  return { ok: true, collector: redact(entry) };
+  // v2.607(통합): url 이 바뀌어 저장 토큰을 폐기했으면 그 사실을 응답에 싣는다 — 화면(droppedSecretText)이 '다시 입력' 을 안내한다.
+  //   예전에는 normalize 가 돌려준 목록을 여기서 버려, 다음 pull 이 빈 토큰으로 403 이 될 때까지 아무도 몰랐다.
+  return { ok: true, collector: redact(entry), ...(droppedSecrets?.length ? { droppedSecrets } : {}) };
 }
 
 /**

@@ -313,7 +313,10 @@ test('TIM2607-01: central/* · rma/jobs.js 에 상주 문자열 .slice 절단이
     const lines = stripComments(SRC(f)).split('\n');
     lines.forEach((ln, i) => {
       if (ALLOW_LINE.some((re) => re.test(ln))) return;
-      if (/String\([^;]*?\)\.slice\(0,/.test(ln) || /\?\s*[A-Za-z_$][\w$]*\.slice\(0,\s*[A-Za-z_$\d]/.test(ln) && /typeof [A-Za-z_$][\w$]* === 'string'/.test(ln) || /\bt\([^()]*\)\.slice\(0,/.test(ln)) {
+      if (/String\([^;]*?\)\.slice\(0,/.test(ln) || /\?\s*[A-Za-z_$][\w$]*\.slice\(0,\s*[A-Za-z_$\d]/.test(ln) && /typeof [A-Za-z_$][\w$]* === 'string'/.test(ln) || /\bt\([^()]*\)\.slice\(0,/.test(ln)
+        // 글자 판정 뒤 바로 자르는 형태 · 길이 비교 삼항 형태(edgeLogStore·bmUsageEdgePull 의 옛 모양)
+        || /typeof ([A-Za-z_$][\w$]*) === 'string'\) return \1\.slice\(0,/.test(ln)
+        || /\b([A-Za-z_$][\w$]*)\.length > [\w$]+ \? \1\.slice\(0,/.test(ln)) {
         bad.push({ at: `${f}:${i + 1}`, ln: ln.trim() });
       }
     });
