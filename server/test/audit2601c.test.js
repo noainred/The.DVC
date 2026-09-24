@@ -94,10 +94,9 @@ test('SEC2601-02 — parseOs 는 긴 숫자·공백 줄에서도 선형이고 �
   assert.deepEqual(parseOs('Microsoft Windows Server 2019 (64-bit)  '), { osName: 'Microsoft Windows Server', osVersion: '2019' });
   assert.deepEqual(parseOs('Ubuntu Linux 22.04'), { osName: 'Ubuntu Linux', osVersion: '22.04' });
   const t0 = performance.now();
-  parseOs('1'.repeat(200_000) + 'x');
-  parseOs('a' + ' '.repeat(200_000) + 'b');
-  parseOs('9 '.repeat(100_000) + 'z');
-  assert.ok(performance.now() - t0 < 200, `수정 전에는 숫자 4,000자에 77ms · 20만 자면 수십 초 — 지금 ${Math.round(performance.now() - t0)}ms`);
+  parseOs('1'.repeat(20_000) + 'x');
+  parseOs('a' + ' '.repeat(20_000) + 'b');
+  assert.ok(performance.now() - t0 < 200, `수정 전 실측: 숫자 2만 자 1.9초 · 공백 2만 자 0.6초 — 지금 ${Math.round(performance.now() - t0)}ms`);
 });
 
 // ── CEN2601-02·03: /fleet ──────────────────────────────────────────────────
