@@ -16,6 +16,7 @@
  *   (타임아웃·연결 실패로 멈추면 일시 장애가 수집을 영구 정지시킨다) 자격증명이 바뀌면 자동 재개한다.
  *   **수동 실행은 막지 않는다** — 고쳤는지 확인할 길을 없애면 안 된다.
  */
+import { createChangeLogger } from '../util/logThrottle.js'; // v2.604
 import { config } from '../config.js';
 import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -125,20 +126,45 @@ export async function currentTargets() {
     import('../idrac/invCache.js'),
   ]);
   const fleet = await getFleetInventory(snap).catch(() => ({ bareMetal: [] }));
+  const { bareMetal, hostsUnread } = await withholdUnreadBareMetal(snap, fleet.bareMetal || []);
   const registry = (() => { try { return loadRegistry(); } catch { return []; } })();
   const bmServers = (() => { try { return listBmServersRaw(); } catch { return []; } })();
   const isEdge = !!config.agent?.centralUrl;
   return {
     settings: s,
     ...resolveTargets({
-      bareMetal: fleet.bareMetal || [], registry, bmServers, settings: s,
+      bareMetal, registry, bmServers, settings: s,
       agentName: config.agent?.name || '', isEdge,
       // ⚠ **캐시된** 인벤토리만 읽는다(장비 왕복 0) — 라이선스 등급 판정용(v2.554).
       inventoryOf: (id) => getInventory(id),
     }),
     vcenters: (snap?.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id })),
     isEdge,
+    ...(hostsUnread ? { hostsUnread } : {}),
   };
+}
+
+/**
+ * v2.604(감사 EDGE2604-01 의 bmusage 쪽): 호스트를 아직 읽지 못한 vCenter 가 있으면 베어메탈 판정이 흔들린다 —
+ * classifyFleet 은 스냅샷 호스트와 iDRAC 을 대조하므로 호스트가 비면 **ESXi 를 받치는 iDRAC 이 베어메탈로 둔갑**해
+ * 사용률 수집 대상(= iDRAC·SSH 세션)에 들어간다(부팅 직후 · 재시작 뒤 연결 실패 vCenter).
+ * 그 동안은 **못 읽은 vCenter 로 귀속된 것과 귀속이 없는 것**을 대상에서 뺀다(어느 쪽이 ESXi 인지 알 수 없다).
+ * 다른 vCenter 로 귀속된 베어메탈은 그대로 수집한다. 뺀 사실은 `hostsUnread` 로 밝히고 콘솔에 남긴다(조용한 제외 금지).
+ * '못 읽음' 판정은 fleet push 와 같은 함수(agent/fleetPush.js unreadHostVcenters)다.
+ * 순수에 가깝게 — 등록부만 읽는다(장비 왕복 0).
+ */
+const _unreadLog = createChangeLogger({ windowMs: 10 * 60_000 }); // 같은 상태는 10분에 1줄(대상 계산은 화면 조회마다 돈다)
+export async function withholdUnreadBareMetal(snap, bareMetal = [], registered = null) {
+  const [{ unreadHostVcenters }, { loadVcenterConfig }] = await Promise.all([import('../agent/fleetPush.js'), import('../config.js')]);
+  let reg = registered;
+  if (!Array.isArray(reg)) { try { reg = loadVcenterConfig()?.vcenters || []; } catch { reg = []; } }
+  const unread = unreadHostVcenters(snap, reg);
+  if (!unread.length) return { bareMetal, hostsUnread: null };
+  const u = new Set(unread);
+  const kept = bareMetal.filter((b) => b && b.vcenterId && !u.has(b.vcenterId));
+  const dropped = bareMetal.length - kept.length;
+  if (dropped && _unreadLog('bm-unread', `${unread.join(',')}|${dropped}`)) console.warn(`[bmusage] 호스트를 아직 읽지 못한 vCenter ${unread.length}개(${unread.slice(0, 5).join(', ')}) — ESXi 를 받치는 iDRAC 이 베어메탈로 잘못 잡히지 않도록 귀속이 그 vCenter 이거나 없는 베어메탈 ${dropped}대를 이번에는 대상에서 뺐습니다`);
+  return { bareMetal: kept, hostsUnread: { vcenters: unread.slice(0, 32), dropped } };
 }
 
 /**

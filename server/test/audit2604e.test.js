@@ -242,9 +242,10 @@ test('TIM2604-02: vmclone 은 스냅샷 삭제(병합)가 끝날 때까지 실�
     for (let i = 0; i < 200 && !st.getJob(job.id).lastRun; i++) await new Promise((x) => setTimeout(x, 10));
     await new Promise((x) => setTimeout(x, 50));
     console.log(JSON.stringify({ status: hold.status, dup: hold.dup, after: r.runnerStatus(), lastOk: st.getJob(job.id).lastRun?.ok }));
+    process.exit(0);   // 결함 판본은 중복 대기열로 잡이 끝없이 다시 돈다 — 기다리지 않고 판정한다
   `;
   const r = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--input-type=module', '-e', script],
-    { encoding: 'utf8', env: { ...process.env, CONFIG_DIR: cfg, DATA_SOURCE: 'live' } });
+    { encoding: 'utf8', timeout: 30_000, env: { ...process.env, CONFIG_DIR: cfg, DATA_SOURCE: 'live' } });
   assert.equal(r.status, 0, r.stderr);
   const o = JSON.parse(r.stdout.trim().split('\n').pop());
   assert.equal(o.lastOk, true, '복제 자체는 성공');

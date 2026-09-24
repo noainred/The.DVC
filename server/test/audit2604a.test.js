@@ -230,3 +230,101 @@ test('EDGE2604-02: vCenter 0개로 조기 반환해도 인벤토리·게스트 �
   assert.ok(l2);
   assert.match(l2.note, /vCenter 가 없습니다/);
 });
+
+// ── v2.604 후속(오케스트레이터 지시 ①②④) ─────────────────────────────────────────────
+
+const { stripComments } = await import('./_stripComments.js');
+const SRC = path.resolve(import.meta.dirname, '../src');
+function walk(d) { return fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : [])); }
+
+/*
+ * 중앙 → 엣지(/api/collector/*) 호출 응답을 상한 없이 `.json()` 으로 읽는 곳(v2.604 CEN2604-01 형제 스윕).
+ * agent/ 는 엣지 → 중앙 방향(중앙 응답)이라 대상이 아니다. 남은 파일은 **사유와 함께** 적는다 — 고치면 이 목록에서 뺀다
+ * (목록에 있는데 더 이상 걸리지 않으면 테스트가 실패해 낡은 예외를 지우게 한다).
+ * ⚠ 판정 근거는 소스의 '/api/collector/' 글자다 — 경로를 변수로 조립하는 파일(예: upgrade/upgrade.js 의 엣지 push)은 못 본다(한계).
+ */
+const JSON_UNCAPPED_ALLOW = {
+  'relaycheck/checks.js': '중계 토폴로지 점검(관리자 수동 실행) — v2.604 범위 밖, 다음 점검 후보',
+  'portalcheck/tokenProbe.js': '토큰 점검 프로브(관리자 수동 실행) — v2.604 범위 밖, 다음 점검 후보',
+  'routes/admin/collectorsDc.js': '수집 서버 연결 테스트·진단(관리자 수동 실행) — v2.604 범위 밖, 다음 점검 후보',
+};
+test('CEN2604-01 형제 스윕: 엣지 응답을 상한 없이 .json() 으로 읽는 곳은 허용 목록(사유)뿐이다', () => {
+  const hits = [];
+  for (const f of walk(SRC)) {
+    const rel = path.relative(SRC, f).split(path.sep).join('/');
+    if (rel.startsWith('agent/')) continue;
+    const code = stripComments(fs.readFileSync(f, 'utf8'));
+    if (!code.includes('/api/collector/')) continue;
+    if (/\.json\(\)/.test(code.replace(/readJsonCapped/g, ''))) hits.push(rel);
+  }
+  for (const rel of ['collector/upgradePush.js', 'central/idracScanPush.js', 'bmstor/poller.js', 'collector/registry.js']) {
+    assert.ok(!hits.includes(rel), `${rel} 는 readJsonCapped 로 옮겼다`);
+  }
+  const unexpected = hits.filter((h) => !JSON_UNCAPPED_ALLOW[h]);
+  assert.deepEqual(unexpected, [], `새로 생긴 무상한 .json(): ${unexpected.join(', ')}`);
+  const stale = Object.keys(JSON_UNCAPPED_ALLOW).filter((k) => !hits.includes(k));
+  assert.deepEqual(stale, [], `이미 고쳐진 예외는 목록에서 뺄 것: ${stale.join(', ')}`);
+  // portalcheck/edgeReport.js 는 /api/collector/ 를 부르지 않지만(중앙 health-probe) 같은 규칙으로 옮겼다
+  assert.ok(!/\.json\(\)/.test(stripComments(fs.readFileSync(path.join(SRC, 'portalcheck/edgeReport.js'), 'utf8'))));
+});
+
+test('CEN2604-01 형제: 네 호출부가 큰 응답·객체 사유에서 던지지 않고 실패로 떨어진다', async () => {
+  const big = () => streamResponse(40 * 1048576);
+  // upgradePush — 전역 fetch 경로라 globalThis.fetch 를 잠시 바꾼다
+  const up = await import('../src/collector/upgradePush.js');
+  const orig = globalThis.fetch;
+  let sent;
+  globalThis.fetch = async () => { sent = big(); return sent; };
+  try {
+    const r = await up.pushBundleToCollector({ id: 'e1', url: 'http://10.1.1.1:4000', token: 't' }, Buffer.from('x'));
+    assert.equal(r.ok, true); // 200 이고 본문을 못 읽음 → body {} → ok(엣지가 받았다)
+    assert.ok(sent.sentBytes() < 2 * 1048576, `상한에서 멈춰야 한다(${sent.sentBytes()})`);
+    globalThis.fetch = async () => Response.json({ ok: false, reason: { toString: 1 } }, { status: 500 });
+    const r2 = await up.pushBundleToCollector({ id: 'e1', url: 'http://10.1.1.1:4000', token: 't' }, Buffer.from('x'));
+    assert.equal(r2.ok, false);
+    assert.match(r2.reason, /HTTP 500/);
+  } finally { globalThis.fetch = orig; }
+  // edgeReport(엣지의 중앙 자기확인) — 객체 값은 '' 로
+  const er = await import('../src/portalcheck/edgeReport.js');
+  const { config } = await import('../src/config.js');
+  const prev = [config.agent.centralUrl, config.agent.centralToken];
+  config.agent.centralUrl = 'http://central.example:4000'; config.agent.centralToken = 'tok';
+  try {
+    const fn = er.selfProbeCentral;
+    const r = await fn({ fetchImpl: async () => Response.json({ ok: true, yourAgent: { toString: 1 }, version: '2.604.0' }) });
+    assert.equal(r.ok, true);
+    assert.equal(r.yourAgent, '');
+    assert.equal(r.centralVersion, '2.604.0');
+    const r2 = await fn({ fetchImpl: async () => big() });
+    assert.equal(r2.ok, true); // 200 — 본문 못 읽음 → 값은 빈 칸(던지지 않는다)
+    assert.equal(r2.yourAgent, '');
+  } finally { [config.agent.centralUrl, config.agent.centralToken] = prev; }
+});
+
+test('CEN2604-03 2중 방어: /tools/bm-usage 라우트의 t() 는 객체 값에서 던지지 않는다', async () => {
+  const code = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bmUsage.js'), 'utf8'));
+  assert.match(code, /const t = \(v\) => strOf\(v, \d+\)\.trim\(\);/);
+  const { applyScope } = await import('../src/routes/api/bmUsage.js');
+  assert.doesNotThrow(() => applyScope([{ vcenterId: { toString: 1 } }, { vcenterId: 'vc1' }], new Set(['vc1'])));
+  assert.equal(applyScope([{ vcenterId: { toString: 1 } }, { vcenterId: 'vc1' }], new Set(['vc1'])).length, 1);
+});
+
+test('EDGE2604-01 bmusage: 호스트를 못 읽은 vCenter 로 귀속되거나 귀속이 없는 베어메탈은 그 동안 대상에서 뺀다', async () => {
+  const p = await import('../src/bmusage/poller.js');
+  const bm = [{ name: 'esx-01-idrac', vcenterId: 'vc1' }, { name: 'db-01', vcenterId: 'vc2' }, { name: 'orphan', vcenterId: '' }];
+  const reg = [{ id: 'vc1' }, { id: 'vc2' }];
+  const snap = { vcenters: [{ id: 'vc1', status: 'unreachable' }, { id: 'vc2', status: 'ok' }], hosts: [{ vcenterId: 'vc2' }] };
+  const r = await p.withholdUnreadBareMetal(snap, bm, reg);
+  assert.deepEqual(r.bareMetal.map((b) => b.name), ['db-01']);
+  assert.deepEqual(r.hostsUnread, { vcenters: ['vc1'], dropped: 2 });
+  // 전부 읽었으면 그대로
+  const ok = await p.withholdUnreadBareMetal({ vcenters: [{ id: 'vc1', status: 'ok' }, { id: 'vc2', status: 'ok' }], hosts: [{ vcenterId: 'vc1' }, { vcenterId: 'vc2' }] }, bm, reg);
+  assert.equal(ok.bareMetal.length, 3);
+  assert.equal(ok.hostsUnread, null);
+  // currentTargets 가 실제로 이 가드를 거친다(등록부 vcA · 빈 스냅샷)
+  fs.writeFileSync(path.join(CFG, 'vcenters.json'), JSON.stringify({ vcenters: [{ id: 'vcA', name: 'vcA', host: 'https://10.0.0.1', username: 'u', password: 'p' }] }));
+  try {
+    const tg = await p.currentTargets();
+    assert.deepEqual(tg.hostsUnread?.vcenters, ['vcA']);
+  } finally { fs.writeFileSync(path.join(CFG, 'vcenters.json'), JSON.stringify({ vcenters: [] })); }
+});

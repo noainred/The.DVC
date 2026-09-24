@@ -3,7 +3,7 @@ import BoldText from '../../components/boldText.jsx';   // v2.447: 서버 문구
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { MODES, bucketText, perfQuery, toLocalDt, rangeIssueOf, rangeLabel, RANGE_MAX_DAYS } from './sanSwitchPerfText.js';
-import { statusText, traceText, isActive, phaseLabel } from './sanSwitchTestText.js';
+import { statusText, traceText, isActive, phaseLabel, testSnapView } from './sanSwitchTestText.js';
 import SanZoningPanel from './SanZoningPanel.jsx';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
@@ -487,18 +487,22 @@ function TestResult({ run }) {
           {test.hint && <div className="muted" style={{ marginTop: 4, borderLeft: '3px solid var(--amber)', paddingLeft: 8 }}>💡 <BoldText text={test.hint} /></div>}
         </div>
       )}
-      {!active && test.ok && test.snap && (
-        <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.7 }}>
-          이름 <b>{test.snap.name}</b> · 모델 <b>{test.snap.model || '—'}</b> · FOS <b>{test.snap.fabricOs || '—'}</b>
-          {' · '}Domain {test.snap.domainId ?? '—'} · 시리얼 {test.snap.serial || '—'}
-          <div>포트 {test.snap.ports.online} / {test.snap.ports.licensed} 사용({test.snap.ports.usedPct}%) · 여유 {test.snap.ports.free} · 전체 {test.snap.ports.total}</div>
-          {Object.entries(test.snap.sections || {}).filter(([, v]) => v !== 'ok').length > 0 && (
-            <div className="muted" style={{ marginTop: 4 }}>
-              일부 항목 미수집: {Object.entries(test.snap.sections).filter(([, v]) => v !== 'ok').map(([k, v]) => `${k}(${v})`).join(', ')}
-            </div>
-          )}
-        </div>
-      )}
+      {!active && test.ok && test.snap && (() => {
+        // v2.604(감사 CEN2604-05): 표시 값은 testSnapView 가 좁힌다(객체 값 → React #31, ports 없음 → TypeError 였다).
+        const v = testSnapView(test.snap);
+        return (
+          <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.7 }}>
+            이름 <b>{v.name}</b> · 모델 <b>{v.model}</b> · FOS <b>{v.fabricOs}</b>
+            {' · '}Domain {v.domainId} · 시리얼 {v.serial}
+            <div>포트 {v.online} / {v.licensed} 사용({v.usedPct}) · 여유 {v.free} · 전체 {v.total}</div>
+            {v.missing.length > 0 && (
+              <div className="muted" style={{ marginTop: 4 }}>
+                일부 항목 미수집: {v.missing.join(', ')}
+              </div>
+            )}
+          </div>
+        );
+      })()}
       {/* 단계별 추적 로그 — 실행 중에도 보인다(어디서 기다리는지). */}
       <div className="flex gap" style={{ marginTop: 8, alignItems: 'center' }}>
         <button className="tab" style={{ padding: '2px 8px' }} onClick={() => setTraceOpen(!traceOpen)}
