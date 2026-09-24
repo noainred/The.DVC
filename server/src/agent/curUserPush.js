@@ -49,6 +49,9 @@ export function slimRecord(r) {
     sessions: r.sessions == null ? null : Number(r.sessions),
     users: (r.users || []).slice(0, 200).map((u) => ({ name: String(u.name || '').slice(0, 128), kind: String(u.kind || 'other') })),
     error: String(r.error || '').slice(0, 300), guestHost: String(r.guestHost || '').slice(0, 120),
+    // v2.607(감사 RECENT2607-02): 발행기가 원문을 잘랐다(인원은 하한) — 예전에는 이 화이트리스트에 없어 push 직전에 버려졌고,
+    //   중앙 sanitizeCurUserRecords 의 'truncated === true' 가 늘 거짓이라 위임 법인만 부분 인원을 '정확한 N명' 으로 보였다.
+    truncated: r.truncated === true || r.usersLowerBound === true,
   };
 }
 
@@ -99,24 +102,51 @@ export async function pushCurUserRecords(records, { generatedAt = Date.now(), cl
   const chunks = chunkRecords(slim);
   const t0 = Date.now();
   let bytes = 0; let gzBytes = 0; let sent = 0; let drop = null;
-  try {
+  // v2.607(감사 LEFT2607-09): 청크 0 은 중앙의 그 법인 latest 를 **즉시 교체**한다(vcenterIds). 뒤 청크가 실패하면 다음 주기(기본 10분)까지
+  //   앞 청크분만 '전체' 인 것처럼 남는다. sanswitch/push.js(v2.606 EDGE2606-04)와 같이 앞 청크가 이미 반영된 실패면 **한 번 전체를 다시**
+  //   보내고, 그래도 실패하면 '중앙 목록이 부분 상태' 임을 상태·콘솔에 밝힌다. 교체/병합 프로토콜 자체는 바꾸지 않는다(구버전 중앙 호환).
+  const sendAll = async () => {
+    bytes = 0; gzBytes = 0; sent = 0; drop = null;
+    let receivedRecords = 0;
     for (let i = 0; i < chunks.length; i++) {
-      const r = await post({
-        agent: config.agent.name, generatedAt, chunk: i, chunks: chunks.length,
-        ...(i === 0 ? { vcenterIds } : {}),
-        records: chunks[i],
-      });
-      bytes += r.bytes; gzBytes += r.gzBytes; sent++; drop = mergeDrop(drop, r.drop);
+      let r;
+      try {
+        r = await post({
+          agent: config.agent.name, generatedAt, chunk: i, chunks: chunks.length,
+          ...(i === 0 ? { vcenterIds } : {}),
+          records: chunks[i],
+        });
+      } catch (e) { return { ok: false, error: e, received: sent, receivedRecords }; }
+      bytes += r.bytes; gzBytes += r.gzBytes; sent++; receivedRecords += chunks[i].length; drop = mergeDrop(drop, r.drop);
     }
-  } catch (e) {
+    return { ok: true, received: sent, receivedRecords };
+  };
+  let sr = await sendAll();
+  let resent = false;
+  if (!sr.ok && sr.received > 0) {
+    console.warn(`[curuser-push] ${sr.error?.message || sr.error} (청크 ${sr.received + 1}/${chunks.length}) — 앞 청크 ${sr.received}개가 이미 중앙 목록을 교체했으므로 전체를 한 번 다시 보냅니다`);
+    resent = true;
+    sr = await sendAll();
+  }
+  if (!sr.ok) {
+    const e = sr.error;
+    const partial = sr.received > 0;
+    const note = partial
+      ? `중앙 목록이 부분 상태입니다 — 청크 ${sr.received}/${chunks.length}(서버 ${sr.receivedRecords}/${slim.length}대)만 반영됐고 나머지는 다음 성공 push 까지 중앙 화면에 나오지 않습니다`
+      : '첫 청크가 실패해 중앙 목록은 직전 push 그대로입니다';
     // v2.583 감사 #33: 실패도 상태에 남긴다 — 예전에는 `last` 가 **직전 성공**에 머물러 엣지 로그의 push.curUser
     //   항목이 실패 중에도 '정상' 으로 보였다(v2.566 '새 엣지 push 경로는 실패 사유를 상태에 싣는다' — 형제
     //   vmSeriesPush 는 이미 그랬다).
-    last = { at: Date.now(), chunks: chunks.length, sentChunks: sent, records: slim.length, bytes, gzBytes, ms: Date.now() - t0, error: e?.message || String(e), ...(drop ? { centralDropped: drop } : {}) };
-    console.warn(`[curuser-push] 실패(${sent}/${chunks.length} 청크 전송 후): ${e?.message || e}`);
+    last = {
+      at: Date.now(), chunks: chunks.length, sentChunks: sent, records: slim.length, bytes, gzBytes, ms: Date.now() - t0,
+      error: `${e?.message || String(e)}${resent ? ' · 전체 재전송도 실패' : ''} — ${note}`, resent,
+      ...(partial ? { centralPartial: { receivedChunks: sr.received, chunks: chunks.length, receivedRecords: sr.receivedRecords, records: slim.length } } : {}),
+      ...(drop ? { centralDropped: drop } : {}),
+    };
+    console.warn(`[curuser-push] 실패(${sent}/${chunks.length} 청크 전송 후): ${last.error}`);
     throw e;
   }
-  last = { at: Date.now(), chunks: chunks.length, records: slim.length, ...(clearVcenterIds?.length ? { cleared: clearVcenterIds.length } : {}), bytes, gzBytes, ms: Date.now() - t0, error: null, ...(drop ? { centralDropped: drop } : {}) };
+  last = { at: Date.now(), chunks: chunks.length, records: slim.length, ...(clearVcenterIds?.length ? { cleared: clearVcenterIds.length } : {}), bytes, gzBytes, ms: Date.now() - t0, error: null, ...(resent ? { resent: true } : {}), ...(drop ? { centralDropped: drop } : {}) };
   warnDrop('curuser-push', drop);
   return { ok: true, ...last };
 }
