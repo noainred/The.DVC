@@ -589,6 +589,9 @@ api.get('/tools/storage-growth', toolsPerm, fullScopeOnly, async (req, res) => {
     // 장비 보고 이름도 주소와 같으면 가린다(스냅샷 host 가 없는 수집기라 등록부 주소를 넘긴다).
     const nm = admin ? snap.name : maskSnapAddress({ deviceId: id, type: snap.type, name: snap.name }, hostById.get(id)).name;
     if (nm) meta.set(id, { ...meta.get(id), name: nm });
+    // v2.604(COL-2604-01 후속): 반올림 표기 용량 장비의 해상도 — 이름과 무관하게 싣는다(growth.js 가 증가량에 표지를 단다).
+    const approx = snap.extra?.capacityApprox;
+    if (approx && typeof approx === 'object') meta.set(id, { ...meta.get(id), capacityApprox: approx });
   }
 
   const rows = await dailySeries(null, sinceDay);

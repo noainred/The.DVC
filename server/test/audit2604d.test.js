@@ -154,8 +154,8 @@ test('CEN2604-02: stepHttp 는 압축 폭탄 응답의 앞부분만 읽는다(bo
   void aborted;
 });
 
-test('CEN2604-02: 스윕 — server/src 에서 본문 전체를 읽고 자르는 형태 금지(알려진 잔여 1곳은 사유와 함께)', () => {
-  const KNOWN = new Map([['llm/ollama.js', 'Ollama 오류 본문(관리자 설정 LLM URL) — 그룹 d 배정 밖, 보고서에 추가 수정으로 적음']]);
+test('CEN2604-02: 스윕 — server/src 에서 본문 전체를 읽고 자르는 형태 금지(예외 0)', () => {
+  const KNOWN = new Map(); // v2.604: 마지막 잔여(llm/ollama.js)도 readBodyPrefix 로 옮겼다 — 예외 0
   const bad = [];
   for (const f of walkJs(SRC)) {
     const rel = path.relative(SRC, f).split(path.sep).join('/');
@@ -173,4 +173,22 @@ test('TIM2604-05: stepDns 가 성공한 뒤 타임아웃 타이머를 남기지 
   // localhost 는 루프백이라 차단 대역(dns-blocked)일 수 있다 — 어느 쪽이든 조회(dns.lookup)는 끝났다.
   assert.ok(r.ok || r.failKind === 'dns-blocked', JSON.stringify(r));
   assert.equal(timers(), before0, '타이머가 남았다');
+});
+
+test('CEN2604-02: Ollama 오류 본문도 앞부분만 읽는다(압축 폭탄 500 응답)', async () => {
+  const bomb = zlib.gzipSync(Buffer.alloc(32 * 1024 * 1024, 0x41));
+  const srv = http.createServer((_q, res) => { res.writeHead(500, { 'content-encoding': 'gzip' }); res.end(bomb); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const prev = process.env.SSRF_ALLOW_LOOPBACK; process.env.SSRF_ALLOW_LOOPBACK = 'true';
+  try {
+    const { ollamaGenerate } = await import('../src/llm/ollama.js');
+    await assert.rejects(ollamaGenerate({ url: `http://127.0.0.1:${srv.address().port}`, model: 'm', timeoutMs: 10_000 }, 'p'), (e) => {
+      assert.match(e.message, /^Ollama HTTP 500: A+$/);
+      assert.ok(e.message.length <= 'Ollama HTTP 500: '.length + 200, `길이 ${e.message.length}`);
+      return true;
+    });
+  } finally {
+    if (prev == null) delete process.env.SSRF_ALLOW_LOOPBACK; else process.env.SSRF_ALLOW_LOOPBACK = prev;
+    srv.closeAllConnections?.(); await new Promise((r) => srv.close(r));
+  }
 });

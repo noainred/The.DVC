@@ -333,7 +333,14 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
    */
   const { periods, dropped } = g.normalizePeriods([1, 7, 30]);
   const rows = await db.dailySeries(null, 0);
-  const m = g.growthMatrix(rows, { periods });
+  // v2.604(COL-2604-01 후속): 내부 화면과 같은 기준 — 반올림 표기 용량 장비의 해상도를 meta 로 넘긴다.
+  const meta = new Map();
+  const [st, se] = await Promise.all([import('../storage/store.js').catch(() => null), import('../central/storageEdge.js').catch(() => null)]);
+  for (const s2 of [...(st?.localSnapshots?.() || []), ...(se?.edgeStorageSnapshots?.() || [])]) {
+    const id = s2?.deviceId || s2?.id;
+    if (id && s2.extra?.capacityApprox && typeof s2.extra.capacityApprox === 'object') meta.set(id, { capacityApprox: s2.extra.capacityApprox });
+  }
+  const m = g.growthMatrix(rows, { periods, meta });
   // v2.604 AUTHZ-2604-01: 같은 장비 이름이 이 경로에도 실린다(형제 경로가 우회로가 되지 않게 — v2.550.3 규약).
   const hide = !isAdminReq(req);
   const maskName = hide ? await storageNameMasker() : () => null;
@@ -346,10 +353,13 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
     // 기간별 증가 바이트만 — 내부 growth 객체를 그대로 싣지 않는다(내부 필드가 새지 않게).
     growth: Object.fromEntries(periods.map((p) => [p.key, d.growth?.[p.key]?.bytes ?? null])),
     unknownUsed: d.usedBytes == null,
+    // v2.604: 반올림 표기 용량이면 그 해상도(바이트) — 이보다 작은 증가는 0 이 아니라 '보이지 않는 것'. 정확하면 null.
+    resolutionBytes: d.capacityApprox?.resolutionBytes ?? null,
   }));
   const c = capped(out);
   return envelope(res, apiPath, projectAll(c.rows, fields), {
     ...c.meta, periods: periods.map((p) => p.key), periodsDropped: dropped,
+    approxCount: m.totals?.approxDevices ?? 0,
     ...(hide ? { namesHidden } : {}),
     unknownUsedCount: m.totals?.unknownUsed ?? null,
     note: '기준선이 없는 기간은 null 입니다 — 관측이 짧은 구간을 추정으로 메우지 않습니다.',

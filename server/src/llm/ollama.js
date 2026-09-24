@@ -1,6 +1,7 @@
 /** Minimal Ollama HTTP client (generate + tags). No external deps. */
 
 import { resilientFetch } from '../util/resilientFetch.js';
+import { readBodyPrefix } from '../util/readPrefix.js';
 
 export async function ollamaGenerate(cfg, prompt, { format } = {}) {
   // 원격/고RTT Ollama 서버에서 일시 오류 1회 재시도(추론은 멱등). 큰 모델 대비 기본 타임아웃 확대.
@@ -14,7 +15,8 @@ export async function ollamaGenerate(cfg, prompt, { format } = {}) {
     }),
     timeoutMs: cfg.timeoutMs || 60000, retries: 1,
   });
-  if (!res.ok) throw new Error(`Ollama HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  // v2.604(감사 CEN2604-02 형제): 오류 본문은 앞 200바이트만 읽는다 — 전체를 읽고 자르면 거대(압축) 응답이 메모리를 채운다.
+  if (!res.ok) { const pre = await readBodyPrefix(res, 200).catch(() => ({ text: '' })); throw new Error(`Ollama HTTP ${res.status}: ${pre.text}`); }
   const json = await res.json();
   return json.response || '';
 }
