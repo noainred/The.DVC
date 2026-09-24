@@ -44,8 +44,10 @@ export function normalizeXtremio(device, raw) {
     // v2.593(감사 DATA-01): 한 클러스터라도 사용량을 못 읽으면 합계 사용량은 null(부분 합을 전체라 말하지 않는다).
     // v2.599(감사 LO2599-03): 전체 용량을 못 읽은 클러스터를 0 으로 더하면 사용량만 합계에 들어가 사용률이 과대해진다.
     //   그 클러스터는 total·used 합산에서 **둘 다** 빼고 개수를 poolsUnreadable 로 밝힌다(Unity capacityCounted 규약).
+    // v2.602(COL-2602-04): 합산은 **전체 클러스터**로 한다 — 예전에는 표시 상한(32)의 map 안에서만 더해 33번째
+    //   이후가 합계에서 조용히 빠졌다. 목록 표시만 32개로 자르고 뺀 개수는 poolsOmitted 로 밝힌다.
     let total = 0, used = 0, unreadable = 0;
-    snap.pools = cls.slice(0, 32).map((c) => {
+    const allPools = cls.map((c) => {
       const tn = numOrNull(c['ud-ssd-space']);
       const t = tn == null ? null : tn * KB;
       const un = numOrNull(c['ud-ssd-space-in-use']);
@@ -54,15 +56,21 @@ export function normalizeXtremio(device, raw) {
       else { total += t; used = used == null || u == null ? null : used + u; }
       return { name: c.name || '', totalBytes: t, usedBytes: u, pct: t && u != null ? Math.round((u / t) * 1000) / 10 : null, capacityCounted: t != null };
     });
+    snap.pools = allPools.slice(0, 32);
+    let omitted = allPools.length - snap.pools.length;
     // v2.600(감사 COL-2600-02): 상세 조회에 실패한 클러스터는 raw.clusters 에 없어 위 개수에 잡히지 않았다 —
     //   목록에는 있었는데 합계에서 **조용히** 빠졌다. 풀 항목(용량 null)과 같은 개수로 밝힌다.
     const failedNames = Array.isArray(raw.clustersFailed) ? raw.clustersFailed : [];
     for (const n of failedNames) {
-      if (snap.pools.length >= 32) break;
+      if (snap.pools.length >= 32) { omitted += 1; continue; }
       snap.pools.push({ name: String(n || ''), totalBytes: null, usedBytes: null, pct: null, capacityCounted: false });
     }
     unreadable += failedNames.length;
+    // v2.602(COL-2602-04): 조회 상한(collect 의 8개)으로 **조회하지 않은** 클러스터도 합계에 없다 — 같은 개수로 밝힌다.
+    const notQueried = Math.max(0, Number(raw.clustersNotQueried) || 0);
+    if (notQueried) { unreadable += notQueried; snap.extra.clustersNotQueried = notQueried; }
     if (unreadable) snap.extra.poolsUnreadable = unreadable;
+    if (omitted > 0) snap.extra.poolsOmitted = omitted;
     if (total > 0) {
       snap.capacity = { totalBytes: total, usedBytes: used, pct: used == null ? null : Math.round((used / total) * 1000) / 10 };
       // 전체 플래시 — SSD 풀 = 전체 용량(HDD 없음: null 로 '풀 없음' 표기, isilon 의미와 동일).
@@ -118,7 +126,10 @@ export async function collect(device) {
     raw.clustersFailed = [];
     try {
       const list = await tryAny(get, ['/api/json/v3/types/clusters', '/api/json/v2/types/clusters']);
-      const names = namesOf(list, 'clusters').slice(0, 8); // XMS 다중 클러스터 상한(요약 목적 — 초과분 무시 명시)
+      const allNames = namesOf(list, 'clusters');
+      const names = allNames.slice(0, 8); // XMS 다중 클러스터 상한(요약 목적)
+      // v2.602(COL-2602-04): 상한을 넘은 클러스터는 조회하지 않는다 — 합계에서 빠진 개수를 정규화가 밝히도록 남긴다.
+      raw.clustersNotQueried = allNames.length - names.length;
       for (const n of names) {
         try {
           const d = await tryAny(get, [

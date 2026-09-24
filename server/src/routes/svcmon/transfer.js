@@ -23,7 +23,7 @@ import {
 } from '../../svcmon/formats.js';
 import { getTemplate, materializeForTarget } from '../../svcmon/templates.js';
 import { recordBatch } from '../../svcmon/batches.js';
-import { canEdit, XLSX_MAX_BYTES, dryRunTargets } from './shared.js';
+import { canEdit, fullScopeOnly, XLSX_MAX_BYTES, dryRunTargets } from './shared.js';
 import { todayStamp } from "../../util/dayKey.js";
 
 export function registerTransfer(svcmonRouter) {
@@ -155,7 +155,7 @@ svcmonRouter.get('/targets/csv-schema', canEdit, (req, res) => {
  * 가져오기 — `mode:'preview'` 는 저장하지 않고 판정만, `'add'` 는 커밋한다.
  * 커밋은 all-or-nothing 이며 이미 있는 대상(구분+경로+이름)은 건너뛴다.
  */
-svcmonRouter.post('/targets/import', canEdit, async (req, res) => {
+svcmonRouter.post('/targets/import', canEdit, fullScopeOnly, async (req, res) => {
   const mode = req.body?.mode === 'add' ? 'add' : 'preview';
   // 포맷 결정: format 이 명시되면 그것을, 없고 csv 필드만 오면 csv(구버전 호환).
   const format = FORMATS.includes(req.body?.format) ? req.body.format : 'csv';

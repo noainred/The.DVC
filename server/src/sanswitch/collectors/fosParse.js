@@ -431,6 +431,7 @@ export function parsePortPerfShow(text) {
   const samples = [];
   let cur = null;
   let lastFirst = -1;
+  let unrecognized = 0;
   for (let i = 0; i < lines.length; i++) {
     let hdr = tokens(lines[i]);
     if (!isHeader(hdr)) continue;
@@ -474,6 +475,16 @@ export function parsePortPerfShow(text) {
     }
     if (!vals.length) continue;
 
+    /**
+     * v2.602(감사 COL-2602-03, 가능성): 값 줄에 **카운터 모양이 아닌 토큰**이 섞이면 위치 짝짓기가 어긋난다.
+     * 예: 디렉터가 값 줄 앞에 `slot  1:` 을 붙이는 형식이면 예전에는 `slot`·`1:` 두 칸만큼 밀려 **포트 2 에 포트 0 값**이
+     * 저장되고 slot 2 줄은 통째로 버려졌다(합성 입력 재현 — 실장비 디렉터 출력은 확인하지 못했다). 틀린 값은 빈 값보다
+     * 나쁘므로 그 블록은 저장하지 않고 개수(`unrecognized`)만 밝힌다. 모든 블록이 이러면 ports 가 비어 폴러가
+     * '출력 형식을 읽지 못했습니다' 로 실패를 말한다. 형식을 확인하면 slot/port 키로 읽도록 넓힐 것.
+     */
+    const counterLike = (x) => x === '-' || x === '--' || parseCounter(x) != null;
+    if (!vals.slice(0, hdr.length).every(counterLike)) { unrecognized++; i = j - 1; continue; }
+
     const first = Number(hdr[0]);
     if (!cur || first <= lastFirst) { cur = { ports: {}, total: null }; samples.push(cur); }
     lastFirst = first;
@@ -492,7 +503,7 @@ export function parsePortPerfShow(text) {
     if (n(samples[pick]) < n(samples[pick - 1])) pick -= 1;
   }
   const last = samples[pick] || { ports: {}, total: null };
-  return { ...last, samples: samples.length, partialDropped: pick < samples.length - 1 };
+  return { ...last, samples: samples.length, partialDropped: pick < samples.length - 1, ...(unrecognized ? { unrecognized } : {}) };
 }
 
 /** fanshow / psshow → {ok, total}. 문구가 모델마다 달라 'Ok/Faulty' 단어 수로 센다. */

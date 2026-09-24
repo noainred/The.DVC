@@ -26,7 +26,7 @@ import { svcmonPushStatus } from '../../agent/svcmonPush.js';
 import { getResults, getLastSweep, runNow, pollerStats } from '../../svcmon/poller.js';
 import { ROTATE_UNITS, ROTATE_LABEL } from '../../svcmon/logsettings.js';
 import { logStats } from '../../svcmon/csvlog.js';
-import { canEdit, adminOnly } from './shared.js';
+import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
 import { redactEdgeSummary, redactPushStatus, ADMIN_ONLY_TEXT } from '../../auth/scopeStatus.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store as _storeForScope } from '../../store.js';
@@ -108,7 +108,7 @@ svcmonRouter.get('/diag', canEdit, (req, res) => {
   });
 });
 
-svcmonRouter.post('/refresh', canEdit, async (req, res) => {
+svcmonRouter.post('/refresh', canEdit, fullScopeOnly, async (req, res) => {
   const ran = await runNow();
   res.status(ran ? 200 : 202).json({ ok: true, ran });
 });

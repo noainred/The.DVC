@@ -1,7 +1,8 @@
 // GuestOsTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson, putJson, getToken } from '../../api.js';
+import { fetchJson, postJson, putJson, downloadFile } from '../../api.js';
+import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, Modal, SearchBox, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
 import { csvCell as esc } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
@@ -198,9 +199,8 @@ export function RealOs({ scope }) {
   const runNow = async () => { setBusy('run'); setMsg(null); try { const r = await postJson('/admin/os-scan/run', scope ? { vcenterId: scope } : {}); setMsg(r.ok ? `스캔 완료 — 탐지 ${r.found ?? 0}건` : `오류: ${r.reason || '실패'}`); await loadStatus(); await loadResults(); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
   const exportCsv = async () => {
     const qs = new URLSearchParams({ ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) }).toString();
-    const res = await fetch(`/api/admin/os-scan/results.csv${qs ? `?${qs}` : ''}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
-    const blob = await res.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `real-os-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
+    // v2.602(감사 WEB2602-01): downloadFile 이 res.ok 를 본다 — 실패(409·403·5xx)의 오류 JSON 을 파일로 저장하지 않고 사유를 화면에 말한다.
+    try { await downloadFile(`/admin/os-scan/results.csv${qs ? `?${qs}` : ''}`, `real-os-${dayStamp()}.csv`); } catch (e) { setMsg(downloadFailText(e)); }
   };
 
   const sum = st.summary || {};

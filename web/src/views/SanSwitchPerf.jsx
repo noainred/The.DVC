@@ -6,6 +6,7 @@ import { edgePerfLine, perfCollectSummary } from './tools/sanPerfDiagText.js';
 import { STable } from '../components/STable.jsx';
 // v2.599 LO2599-01: 빈 칸은 보내지 않는다(Number('')=0 → 서버가 기본값으로 저장하던 것 — 보존 3650→90일).
 import { blankOr } from './blankOr.js';
+import { countsAtNote } from './sanPerfDbText.js';
 
 /**
  * 설정 › 수집 서버 › SAN 스위치 포트 사용량 수집(v2.411, 사용자 요구
@@ -155,7 +156,8 @@ export default function SanSwitchPerf() {
           DB: {db.available === false ? <span style={{ color: 'var(--amber)' }}>사용 불가(node:sqlite 미지원 — 수집·화면은 동작하고 이력만 비활성)</span>
             : <>{(db.rows ?? 0).toLocaleString()}행 · 스위치 {db.devices ?? 0}대 · {fmtTs(db.oldest)} ~ {fmtTs(db.newest)}
                 {db.fileBytes != null ? <> · 파일 <b>{bytesText(db.fileBytes)}</b>(WAL 포함)</> : null}
-                {db.rowsLastDay != null ? <> · 최근 24시간 적재 {Number(db.rowsLastDay).toLocaleString()}행</> : null}</>}
+                {db.rowsLastDay != null ? <> · 최근 24시간 적재 {Number(db.rowsLastDay).toLocaleString()}행</> : null}
+                {countsAtNote(db, Date.now()) ? <><br /><span style={{ fontSize: 11 }}>{countsAtNote(db, Date.now())}</span></> : null}</>}
           {db.file ? <><br />파일: <code>{db.file}</code></> : null}
           {st.errors?.length ? <><br /><span style={{ color: 'var(--amber)' }}>최근 오류: {st.errors.join(' / ')}</span></> : null}
         </div>

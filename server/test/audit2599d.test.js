@@ -252,7 +252,12 @@ async function mockCentral() {
   const srv = http.createServer((req, res) => {
     let buf = '';
     req.on('data', (c) => { buf += c; });
-    req.on('end', () => { bodies.push({ url: req.url, body: JSON.parse(buf) }); res.setHeader('Content-Type', 'application/json'); res.end('{"ok":true}'); });
+    req.on('end', () => {
+      res.setHeader('Content-Type', 'application/json');
+      // v2.602(EDGE2602-03): 엣지는 상태 전용 push 전에 중앙 버전을 health-probe 로 확인한다(구버전 중앙은 목록을 비운다).
+      if (req.url.startsWith('/api/central/health-probe')) { res.end('{"ok":true,"version":"2.602.0"}'); return; }
+      bodies.push({ url: req.url, body: JSON.parse(buf) }); res.end('{"ok":true}');
+    });
   });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   return { srv, bodies, url: `http://127.0.0.1:${srv.address().port}` };

@@ -260,9 +260,20 @@ export async function fetchPower(entry) {
   const chassisRoot = await get(base, '/redfish/v1/Chassis', username, password);
   const members = (chassisRoot.Members || []).map((m) => m['@odata.id']).filter(Boolean);
   let watts = null;
+  // v2.602(LEFT2602-04): 섀시 하나의 Power 조회 실패를 삼키면 **부분 합을 전체 전력**으로 보고한다(오류 없이 틀린 값).
+  //   404 는 'Power 가 없는 섀시'(인클로저·백플레인)라 정상적으로 건너뛰고, 401 은 authGuard 가 보도록 다시 던진다.
+  //   그 밖의 실패는 개수를 세어 partial·failedChassis 로 밝힌다(값은 버리지 않는다 — 적재 여부는 호출부가 정한다).
+  let failedChassis = 0;
+  let failedReason = '';
   for (const m of members) {
     let power;
-    try { power = await get(base, `${m}/Power`, username, password); } catch { continue; }
+    try { power = await get(base, `${m}/Power`, username, password); } catch (e) {
+      if (e?.status === 401 || e?.authFailed) throw e;
+      if (e?.status === 404) continue;
+      failedChassis += 1;
+      if (!failedReason) failedReason = String(e?.message || e).slice(0, 200);
+      continue;
+    }
     for (const pc of power.PowerControl || []) {
       const w = num(pc.PowerConsumedWatts);
       if (w != null) watts = (watts || 0) + w;
@@ -282,8 +293,12 @@ export async function fetchPower(entry) {
     }
   } catch { /* identity is optional */ }
 
+  // 조회 자체가 실패해 값이 없으면 '미지원 모델' 이라 추측하지 않는다 — 실패 사유를 그대로 올린다.
+  if (watts == null && failedChassis) throw new Error(`섀시 Power 조회 실패(${failedChassis}/${members.length}): ${failedReason}`);
   if (watts == null) throw new Error('전력 정보를 찾을 수 없습니다 (Redfish Power 미지원 모델일 수 있음).');
-  return { watts: Math.round(watts), model, serviceTag, powerState, chassis: members.length };
+  const out = { watts: Math.round(watts), model, serviceTag, powerState, chassis: members.length };
+  if (failedChassis) { out.partial = true; out.failedChassis = failedChassis; out.failedReason = failedReason; }
+  return out;
 }
 
 // BIOS/CMOS attributes worth surfacing prominently (others are kept as a count).

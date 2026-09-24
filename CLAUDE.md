@@ -3596,6 +3596,24 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       AD 타임아웃 빈 칸 = 이전 값 · 설정 파일 JSON null 은 손상 보존 · `getMs()` 예외에도 타이머 재무장.
     - 남긴 것: VACUUM 동기 · 공유 토큰 사칭 한계 · 태그 없는 중앙 → 엣지 호출 4종(linkcheck·relaycheck·배포 후 검증·자기등록).
 
+  - ⚠⚠ **v2.602 — 13차 점검 확정분**("세번더" 3회차. 발견 47 = 확정 35 · 가능성 3 · 반증 9, 고침 37 + 후속 10.
+    회귀 `test/audit2602{a..f}.test.js` 51건 + 웹 vitest. 상세 `docs/AUDIT-2026-09-24j.md`):
+    - ⚠⚠ **응답마다 도는 가림·정제는 '행 수 × 대상 수' 를 운영 규모로 먼저 계산할 것**(RECENT2602-01 — **v2.601 이 만든 회귀**): 가림 헬퍼가
+      행마다 호스트 1,200개의 변형을 다시 만들어 2,000행에 5.6초 정지. `addressMask.makeScrubber`·`scrubberFor`(목록당 1회 · 트라이) ·
+      `extendMatcher`. 수정 전 구현을 테스트에 옮겨 **결과 동일성**을 대조한다 — 성능 수정은 출력이 같다는 증거와 함께.
+    - **엣지 pull 도 수신이다**(CEN2602-01 high): push 만 정제하고 pull(export)은 원소를 그대로 보관해, 오염된 `serviceTag` 하나가 함대
+      물리 서버 집계를 죽였다. `collector/remoteInventory.js` 정제 · 버린 개수 `serversDropped`. **새 pull 경로도 같은 규칙.**
+    - **svcmon 변경은 전체 범위 계정만**(AUTHZ-2602-01): 변경 라우트 32개 `fullScopeOnly`. 조회 GET 은 그대로(N-2).
+    - **`/\/+$/` 는 O(n²) 이다 — 선형 루프로**(SEC2602-01·04 + normPath): 입력 길이 상한과 함께. 저장소에 남은 `collector/registry.js` 2곳은 다음 후보.
+    - ⚠ **정정**: v2.550.3 이 `sanswitch/perfDb.js perfDbStats` 를 '폴링하지 않는 진단 경로' 로 적은 것은 틀렸다 — 설정 화면이 **20초마다** 부른다.
+      이제 MIN/MAX 단독 + COUNT 60초 캐시(`countsAt`)다. '폴링하지 않는다' 고 적기 전에 화면의 호출 주기를 grep 할 것.
+    - **다운로드는 `res.ok` 를 먼저**(WEB2602-01): 409·403 오류 JSON 이 .xlsx 로 저장되던 8곳 → `api.js downloadFile`·`saveResponseAsFile`.
+      웹 스윕 테스트가 `.blob()` 을 쓰는 화면 파일의 `res.ok` 확인을 고정한다.
+    - **설정 push 감시는 백업과 같은 상태 파일 기준**(EDGE2602-01 — `isRuntimeStateFile` 한 벌 + 설정 지문 무변경 생략).
+    - 부분 합은 **적재하지 않는다**(iDRAC 섀시 일부 Power 실패 → `powerNotStored`) · NSX cluster/status 실패는 unknown · 처리량 분모는 카운터를
+      읽은 시각 · 상태 전용 push 는 중앙 버전 확인 뒤(2.581.0+) · 보존일 음수는 무제한이 아니다 · `VMPERF_RETENTION_DAYS=0` = 무제한.
+    - 남긴 것: svcmon 미등록 agent 이름 거부(공유 토큰 미리 배정 흐름과 충돌 — 판단 필요) · 지표 보존 상한 3650일(제안 1830) · SSH 유휴 하한 1분.
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

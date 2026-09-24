@@ -196,12 +196,21 @@ export function ackAssignment(agent, { sig, applied = {}, removed = 0, errors = 
   const a = db.agents[name];
   if (!a) return { ok: false, reason: '배정이 없습니다.' };
   if (a.sig !== sig) return { ok: false, reason: `sig 불일치(현재 ${a.sig}) — 다시 pull 하세요.`, sig: a.sig };
-  const added = Number(applied.added) || 0;
-  const tests = Number(applied.newTests) || 0;
+  // ⚠ v2.602(감사 CEN2602-06): 회신 본문을 그대로 믿지 않는다 — errors 가 글자면 `.length` 가 **글자 수**라 화면이
+  //   '오류 37' 이라 말했고, slice 가 없는 객체면 동기 throw(500)였다. 배열일 때만 받고 원소는 글자 300자로 좁힌다.
+  //   배열이 아니면 빈 배열 + errorsInvalid 표식(오류가 없었다는 뜻이 아니다 — 형식을 못 읽었다).
+  const ap = applied && typeof applied === 'object' && !Array.isArray(applied) ? applied : {};
+  const cnt = (v) => { const n = typeof v === 'number' || typeof v === 'string' ? Number(v) : NaN; return Number.isFinite(n) ? n : 0; };
+  const added = cnt(ap.added);
+  const tests = cnt(ap.newTests);
+  const errorsInvalid = errors != null && !Array.isArray(errors);
+  const errs = Array.isArray(errors)
+    ? errors.slice(0, 20).map((e) => (typeof e === 'string' ? e : (typeof e === 'number' || typeof e === 'boolean' ? String(e) : '(형식 오류)')).slice(0, 300))
+    : [];
   const want = a.counts || { targets: 0, tests: 0 };
   const exact = added === want.targets && tests === want.tests;
-  a.ack = { at: Date.now(), added, tests, removed: Number(removed) || 0, errors: (errors || []).slice(0, 20), exact };
-  a.state = (errors && errors.length) ? 'error' : (exact ? 'active' : 'mismatch');
+  a.ack = { at: Date.now(), added, tests, removed: cnt(removed), errors: errs, ...(errorsInvalid ? { errorsInvalid: true } : {}), exact };
+  a.state = errs.length ? 'error' : (errorsInvalid ? 'mismatch' : (exact ? 'active' : 'mismatch'));
   save();
   logAudit({
     user: `agent:${name}`, action: 'svcmon.assign.ack', target: name,

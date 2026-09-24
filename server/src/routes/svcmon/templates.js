@@ -17,7 +17,7 @@ import {
   deleteTemplate, applyTemplate, templateUsage,
   MAX_TEMPLATES, MAX_ITEMS, SUBST_VARS,
 } from '../../svcmon/templates.js';
-import { canEdit } from './shared.js';
+import { canEdit, fullScopeOnly } from './shared.js';
 import { todayStamp } from "../../util/dayKey.js";
 
 export function registerTemplates(svcmonRouter) {
@@ -29,7 +29,7 @@ svcmonRouter.get('/templates', (req, res) => {
   res.json({ templates: items, limits: { maxTemplates: MAX_TEMPLATES, maxItems: MAX_ITEMS }, substVars: SUBST_VARS });
 });
 
-svcmonRouter.post('/templates', canEdit, (req, res) => {
+svcmonRouter.post('/templates', canEdit, fullScopeOnly, (req, res) => {
   try {
     const t = addTemplate(req.body || {}, { user: req.user?.username });
     logAudit({
@@ -40,7 +40,7 @@ svcmonRouter.post('/templates', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.put('/templates/:id', canEdit, (req, res) => {
+svcmonRouter.put('/templates/:id', canEdit, fullScopeOnly, (req, res) => {
   try {
     const t = updateTemplate(req.params.id, req.body || {}, { user: req.user?.username });
     if (!t) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
@@ -52,7 +52,7 @@ svcmonRouter.put('/templates/:id', canEdit, (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-svcmonRouter.post('/templates/:id/duplicate', canEdit, (req, res) => {
+svcmonRouter.post('/templates/:id/duplicate', canEdit, fullScopeOnly, (req, res) => {
   try {
     const t = duplicateTemplate(req.params.id, { user: req.user?.username });
     if (!t) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
@@ -62,7 +62,7 @@ svcmonRouter.post('/templates/:id/duplicate', canEdit, (req, res) => {
 });
 
 /** 삭제 — 이미 적용된 점검은 **남긴다**(태그도 유지). 감시를 끊지 않는 쪽이 안전하다. */
-svcmonRouter.delete('/templates/:id', canEdit, (req, res) => {
+svcmonRouter.delete('/templates/:id', canEdit, fullScopeOnly, (req, res) => {
   try {
     const r = deleteTemplate(req.params.id);
     if (!r.removed) return res.status(404).json({ error: '템플릿을 찾을 수 없습니다.' });
@@ -94,7 +94,7 @@ svcmonRouter.get('/templates/sample.csv', canEdit, (req, res) => {
  * preview 는 파싱 수준 검증만이다 — 치환 변수·상한 검증은 addTemplate 안에 있어 등록
  * 시점에 실패할 수 있다(그 한계를 응답 notice 로 명시한다. 과장 금지).
  */
-svcmonRouter.post('/templates/import', canEdit, (req, res) => {
+svcmonRouter.post('/templates/import', canEdit, fullScopeOnly, (req, res) => {
   const csv = typeof req.body?.csv === 'string' ? req.body.csv : '';
   if (!csv.trim()) return res.status(400).json({ error: 'CSV 내용이 비어 있습니다.' });
   // 내보내기 상한(템플릿 100 × 항목 50 = 5,000행)을 자기 가져오기가 못 받는 비대칭을 없앤다.
@@ -125,7 +125,7 @@ svcmonRouter.get('/templates/:id/usage', canEdit, (req, res) => {
 });
 
 /** 적용 — `mode:'preview'` 는 저장하지 않는다. 커밋은 all-or-nothing. */
-svcmonRouter.post('/templates/:id/apply', canEdit, async (req, res) => {
+svcmonRouter.post('/templates/:id/apply', canEdit, fullScopeOnly, async (req, res) => {
   const dryRun = req.body?.mode !== 'apply';
   try {
     const r = await applyTemplate(req.params.id, {

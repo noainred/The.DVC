@@ -175,7 +175,7 @@ async function runSession(device, signal, { trace = null, verbose = false } = {}
     trace, verbose, // 연결 테스트 추적(v2.421) — 폴러는 넘기지 않는다(null)
   };
   return withSsh(creds, async (sh) => {
-    const out = {}; const raw = []; const errors = {};
+    const out = {}; const raw = []; const errors = {}; let countersAt = null;
     // 이 스위치가 실제로 가진 명령 집합을 먼저 조사한다(경로 추측 금지 — 위 머리말).
     trace?.('명령 가용성 조사(echo $PATH; ls) — 캐시 6시간');
     const caps = await probeCommands(sh, `${device.host}|${device.username}`);
@@ -215,6 +215,7 @@ async function runSession(device, signal, { trace = null, verbose = false } = {}
           raw.push({ key: spec.key, cmd: k.cmd, ok: !looksError, paged: !!k.paged, pages: r.pages ?? null, truncated: !!r.truncated, sample: (stdout || stderr).slice(0, RAW_LIMIT) });
           if (looksError) { lastErr = new Error(firstLine(stdout || stderr) || '빈 출력'); continue; }
           out[spec.key] = stdout;
+          if (spec.key === 'porterrshow') countersAt = Date.now();   // v2.602 COL-2602-02: 카운터를 받은 시각
           // **무엇으로 확인했는가** — 대체 명령의 출력은 원 명령과 같지 않을 수 있어 반드시 남긴다.
           usedCmds[spec.key] = { cmd: k.label, alt: k.bin !== spec.cmds[0].bin, paged: !!k.paged, truncated: !!r.truncated, pages: r.pages ?? null };
           done = true; break;
@@ -228,7 +229,7 @@ async function runSession(device, signal, { trace = null, verbose = false } = {}
         if (spec.required) throw new Error(`${spec.key}: ${errors[spec.key]}`);
       }
     }
-    return { out, raw, errors, usedCmds };
+    return { out, raw, errors, usedCmds, countersAt };
   });
 }
 
@@ -239,7 +240,10 @@ const firstLine = (t) => String(t || '').split(/\r?\n/).find((l) => l.trim())?.t
  * @param out    { switchshow, chassisshow, ... } 각 명령의 stdout
  * @param errors { key: 사유 }
  */
-export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}) {
+// v2.602(감사 COL-2602-02): opts.countersAt = porterrshow 를 **받은 시각**. 처리량(f/s)의 분모는 두 주기의 '카운터 읽은
+//   시각' 차이여야 한다 — 예전에는 조립 시각(뒤 명령 10여 개가 끝난 뒤)이라 뒤 단계 소요가 주기마다 흔들리면 오류 없이
+//   틀린 값이 됐다. 값이 없으면 예전처럼 호출 시각(시험·단독 호출 호환). fosRest.js 와 같은 규칙.
+export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}, { countersAt = null } = {}) {
   const snap = emptySnapshot(device);
   const sw = P.parseSwitchShow(out.switchshow || '');
   const chassis = P.parseChassisShow(out.chassisshow || '');
@@ -288,7 +292,7 @@ export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}) {
       sfpVendor: s.vendor || '', sfpSerial: s.serial || '', sfpPartNumber: s.partNumber || '',
     };
   });
-  const rate = applyRates(device.id, list);
+  const rate = applyRates(device.id, list, Number.isFinite(countersAt) ? countersAt : Date.now());
   snap.ports = { ...summarizePorts(list), truncated: sw.ports.length > MAX_PORTS };
   snap.licenses = licenses;
   // FRU 상태는 fanshow/psshow 가 우선(정상/장애 판정이 있다). 그 명령이 없는 장비에서는
@@ -376,6 +380,6 @@ export function buildSnapshot(device, out = {}, errors = {}, usedCmds = {}) {
 export async function collect(device, { withRaw = false, signal, trace = null, verbose = false } = {}) {
   const r = await runSession(device, signal, { trace, verbose });
   trace?.(`출력 해석: 성공 섹션 ${Object.keys(r.out).length}개, 실패 ${Object.keys(r.errors).length}개${Object.keys(r.errors).length ? ` (${Object.keys(r.errors).join(', ')})` : ''}`);
-  const snap = buildSnapshot(device, r.out, r.errors, r.usedCmds || {});
+  const snap = buildSnapshot(device, r.out, r.errors, r.usedCmds || {}, { countersAt: r.countersAt ?? null });
   return withRaw ? { snap, raw: r.raw } : snap;
 }

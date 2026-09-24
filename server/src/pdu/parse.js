@@ -31,7 +31,13 @@
 
 /** 응답 코드 줄 파싱. `E000: Success` → { code:'E000', ok:true } */
 export function parseCode(text) {
-  const m = /^\s*E(\d{3})\s*:\s*(.*)$/m.exec(String(text || ''));
+  // v2.602(SEC2602-02): 예전 `/^\s*E…$/m` 는 m 플래그에서 `\s*` 가 줄을 넘어가 빈 줄이 이어지면 O(n²) 였다
+  //   (빈 줄 8만 개 ≈ 5.8초 — 장비 출력도 외부 입력이다). 줄로 먼저 나누고 각 줄에 앵커 정규식을 한 번씩 건다(선형).
+  let m = null;
+  for (const line of String(text || '').split(/\r?\n/)) {
+    m = /^\s*E(\d{3})\s*:\s*(.*)$/.exec(line);
+    if (m) break;
+  }
   if (!m) return { code: '', ok: false, message: '' };
   return { code: `E${m[1]}`, ok: m[1] === '000', message: (m[2] || '').trim() };
 }

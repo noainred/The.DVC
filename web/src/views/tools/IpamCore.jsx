@@ -1,7 +1,8 @@
 // IpamCore.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, usePolling, getToken } from '../../api.js';
+import { fetchJson, usePolling, downloadFile } from '../../api.js';
+import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, StateBadge, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
 import { DEVTYPE_LABEL, DiscoveryBadge, MGMT, MgmtBadge } from './ipamShared.jsx';
@@ -60,6 +61,7 @@ function Ipam({ scope, onScope }) {
   const [reconFilter, setReconFilter] = useState(''); // '' | vcenter | scan | both | manual | managed
   const [editOv, setEditOv] = useState(null); // IP 관리상태(override) 편집 대상 row
   const [canManage, setCanManage] = useState(false); // operator/admin → 관리상태 편집 가능
+  const [dlMsg, setDlMsg] = useState(''); // v2.602 WEB2602-01: 내려받기 실패 사유(409 export_busy·403) — 오류 JSON 을 파일로 저장하지 않는다
   useEffect(() => { fetchJson('/admin/ipam/db-info').then(setDb).catch(() => setDb(null)); }, []);
   useEffect(() => { fetchJson('/auth/me').then((r) => setCanManage(['admin', 'operator'].includes(r.user?.role))).catch(() => {}); }, []);
 
@@ -77,10 +79,11 @@ function Ipam({ scope, onScope }) {
     const r = await fetchJson(`/tools/ipam/subnets${q}`).catch(() => ({ subnets: [] }));
     setSubnets(r.subnets); if (r.subnets[0]) pickBase(r.subnets[0].base, vc);
   };
+  // v2.602(감사 WEB2602-01): api.js downloadFile 이 res.ok 를 본다 — 예전에는 409(다른 내보내기 진행 중)·403 의
+  //   오류 JSON 이 .xlsx/.csv 로 저장되고 화면은 아무 말도 하지 않았다.
   const blobDownload = async (path, name) => {
-    const res = await fetch(`/api${path}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
-    const blob = await res.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
+    setDlMsg('');
+    try { await downloadFile(path, name); } catch (e) { setDlMsg(downloadFailText(e)); }
   };
   const downloadXlsx = () => blobDownload(`/tools/ipam.xlsx${sp}`, `ip-ledger-${dayStamp()}.xlsx`);
 
@@ -135,15 +138,7 @@ function Ipam({ scope, onScope }) {
   const toggleRowFilter = (k) => { setRowFilter((cur) => (cur === k ? '' : k)); setView('list'); };
   const toggleRecon = (k) => { setReconFilter((cur) => (cur === k ? '' : k)); setView('list'); };
 
-  const downloadCsv = async () => {
-    const res = await fetch(`/api/tools/ipam.csv${scope ? `?vcenterId=${encodeURIComponent(scope)}` : ''}`,
-      { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `ipam-${dayStamp()}.csv`; a.click();
-    URL.revokeObjectURL(url);
-  };
+  const downloadCsv = () => blobDownload(`/tools/ipam.csv${scope ? `?vcenterId=${encodeURIComponent(scope)}` : ''}`, `ipam-${dayStamp()}.csv`);
 
   const link = { background: 'none', border: 'none', color: '#3b82f6', cursor: 'pointer', padding: 0, font: 'inherit' };
   const cols = [
@@ -191,9 +186,9 @@ function Ipam({ scope, onScope }) {
           meta={rowFilter === 'public' ? '공인만 보기 ✓' : rowFilter === 'private' ? '사설만 보기 ✓' : '클릭: 공인/사설 필터'}
           active={rowFilter === 'public' || rowFilter === 'private'}
           onClick={() => toggleRowFilter(rowFilter === 'public' ? 'private' : rowFilter === 'private' ? '' : 'public')} />
-        <Card label="중복 IP" value={data.duplicateIps} accent={data.duplicateIps ? 'var(--red)' : undefined}
+        <Card label="중복 IP" value={(data.duplicateIps ?? 0).toLocaleString()} accent={data.duplicateIps ? 'var(--red)' : undefined}
           meta={rowFilter === 'duplicate' ? '중복만 보기 ✓' : '클릭하여 중복만'} active={rowFilter === 'duplicate'} onClick={() => toggleRowFilter('duplicate')} />
-        <Card label="멀티홈 IP" value={data.multiHomed}
+        <Card label="멀티홈 IP" value={(data.multiHomed ?? 0).toLocaleString()}
           meta={rowFilter === 'multihomed' ? '멀티홈만 보기 ✓' : '클릭하여 멀티홈만'} active={rowFilter === 'multihomed'} onClick={() => toggleRowFilter('multihomed')} />
         <Card label="교차 vCenter 충돌" value={recon.conflict} accent={recon.conflict ? 'var(--red)' : undefined}
           meta={reconFilter === 'conflict' ? '충돌만 보기 ✓' : (recon.conflict ? '클릭: 충돌 IP만' : '둘 이상 vCenter가 같은 IP 주장')}
@@ -241,6 +236,7 @@ function Ipam({ scope, onScope }) {
           <button className="login-btn" style={{ flex: 'none', padding: '9px 14px' }} onClick={downloadXlsx}>엑셀 대장(.xlsx)</button>
         </div>
       </div>
+      {dlMsg && <div className="banner error" role="alert" style={{ marginBottom: 8 }}>{dlMsg} <button className="cell-link" onClick={() => setDlMsg('')}>닫기</button></div>}
 
       {view === 'ranges' ? (
         <IpamRanges />

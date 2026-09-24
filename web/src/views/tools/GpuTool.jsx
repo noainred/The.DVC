@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, getToken } from '../../api.js';
+import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { Card, fmtTrendTick, saveResponseAsFile, useTool } from './shared.jsx';
@@ -349,6 +350,7 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
   const [days, setDays] = useState(30);
   const [vc, setVc] = useState(scope || ''); // 내보낼 vCenter(빈값=전체)
   const [vcs, setVcs] = useState([]);
+  const [dlMsg, setDlMsg] = useState('');
   useEffect(() => { fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => {}); }, []);
   const runMeta = useLatest();   // v2.447: 세대 가드(감사 B16)
   useEffect(() => {
@@ -360,14 +362,16 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
     ? `${fmtTs(meta.collectedSince)} 부터 데이터가 쌓여 있습니다`
     : (meta ? '아직 수집된 GPU 사용률 이력이 없습니다(샘플러가 한 주기 이상 돌면 생성됩니다)' : '확인 중…');
   const daysSince = meta && meta.collectedSince ? Math.max(1, Math.round((Date.now() - meta.collectedSince) / 86_400_000)) : null;
-  const download = async (fmt) => {
+  // v2.602(감사 WEB2602-01): 내려받기 실패(409 동시 내보내기·403)를 파일로 저장하지 않고 여기 말한다(스냅샷 경로 포함).
+  const guarded = async (fn) => { setDlMsg(''); try { await fn(); } catch (e) { setDlMsg(downloadFailText(e)); } };
+  const download = (fmt) => guarded(async () => {
     const params = new URLSearchParams();
     if (vc) params.set('vcenterId', vc);
     params.set('range', range);
     if (range === 'days') params.set('days', String(days));
     const res = await fetch(`/api/tools/gpu/export.${fmt}?${params.toString()}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
     await saveResponseAsFile(res, `gpu-history-${range}-${dayStamp()}.${fmt}`);
-  };
+  });
   return (
     <Modal title="GPU 데이터 내보내기" onClose={onClose} width={560}>
       <div className="card" style={{ padding: 12, marginBottom: 14, borderLeft: '3px solid var(--accent,#2563eb)' }}>
@@ -402,10 +406,11 @@ function GpuExportModal({ scope, onClose, onSnapshot }) {
         <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => download('csv')}>⬇ CSV 내보내기</button>
         <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => download('json')}>⬇ JSON 내보내기</button>
       </div>
+      {dlMsg && <div className="banner error" role="alert" style={{ marginTop: 10 }}>{dlMsg}</div>}
       <div className="muted" style={{ fontSize: 12, marginTop: 12, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 10 }}>
         시계열(샘플마다 한 행)로 내보냅니다. 현재 상태(호스트별 1행 스냅샷)만 필요하면&nbsp;
-        <button className="cell-link" onClick={() => onSnapshot('csv', vc)}>스냅샷 CSV</button> ·&nbsp;
-        <button className="cell-link" onClick={() => onSnapshot('json', vc)}>스냅샷 JSON</button>
+        <button className="cell-link" onClick={() => guarded(() => onSnapshot('csv', vc))}>스냅샷 CSV</button> ·&nbsp;
+        <button className="cell-link" onClick={() => guarded(() => onSnapshot('json', vc))}>스냅샷 JSON</button>
         <div style={{ marginTop: 6 }}>💡 파일 용량이 1MB를 넘으면 자동으로 <b>zip</b>으로 압축해 내려받습니다. · <b>gpu_util_pct</b>=GPU 사용률(0~100%) · <b>epoch_ms</b>=Unix 밀리초(엑셀은 지수표기로 보일 수 있음).</div>
       </div>
     </Modal>

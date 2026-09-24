@@ -11,6 +11,7 @@
  */
 
 import { requireRole } from '../../auth/auth.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
 import { listTargets, planBulkTargets } from '../../svcmon/store.js';
 import { judgeCapacity, suggestIntervalSec } from '../../svcmon/capacity.js';
 
@@ -20,6 +21,15 @@ import { judgeCapacity, suggestIntervalSec } from '../../svcmon/capacity.js';
 // 조회 6개(/state·/edges·/edge-state·/templates·/log·/log/windows)가 다시 무가드가 된다.
 export const canEdit = requireRole('admin', 'operator');
 export const adminOnly = requireRole('admin');
+/*
+ * v2.602 AUTHZ-2602-01: 성능점검의 **상태 변경**(대상 트리·폴더·정렬·템플릿·배치·엣지 배정·즉시 실행)은
+ * 전체 범위 계정만. 성능점검 대상·엣지 배정에는 vCenter 축이 없어 범위 계정의 변경을 그 범위로 좁힐
+ * 방법이 없다 — 범위 operator(scope.vcenters=[한 법인]) 가 **전 법인 공용**의 트리·배정을 바꿀 수 있었다
+ * (재현: PUT /assign/zzz → 200 유령 배정). 조회는 server/CLAUDE.md N-2 대로 그대로 둔다(범위 계정도 본다).
+ * 형제 기준(part-faults·link-check 의 변경은 fullScopeOnly)과 같다. canEdit 뒤에 붙인다.
+ * 제외: POST /targets/hostmap/parse·/targets/hostmap/export.csv 는 저장하지 않는 변환이라 게이트하지 않는다.
+ */
+export const fullScopeOnly = fullScopeOnlyWith('성능점검 설정 변경은 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다 — 대상 트리·엣지 배정은 전 법인 공용이라 범위로 나눌 수 없습니다.');
 
 // XLSX 가져오기 디코딩 크기 상한(압축폭탄 완화). 정상 2,000행 xlsx 는 1MB 미만.
 export const XLSX_MAX_BYTES = Number(process.env.SVCMON_XLSX_MAX_BYTES) || 8_000_000;

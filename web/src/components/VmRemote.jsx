@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { postJson, getToken, can } from '../api.js';
+import { postJson, can, downloadFile } from '../api.js';
+import { downloadFailText } from '../views/downloadFailText.js';
 import { Modal } from './Modal.jsx'; // v2.295: ui.jsx(셸) 역참조 순환 절단 — 구현 파일 직접 import
 import { openRemoteSession } from '../remote/sessions.js';
 
@@ -74,9 +75,9 @@ export function VmRemoteButton({ item }) {
       if (!r.ok) throw new Error(r.reason || '매핑 생성 실패');
       if (protocol === 'rdp' && !r.guacdConfigured) {
         // no guacd → download .rdp pointing at proxy:publicPort
-        const res = await fetch(`/api/remote/rdp/${r.mapping.id}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
-        const blob = await res.blob(); const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = `${item.name}.rdp`; a.click(); URL.revokeObjectURL(url);
+        // v2.602(감사 WEB2602-01): downloadFile 이 res.ok 를 본다 — 실패(409·403·5xx)의 오류 JSON 을 파일로 저장하지 않고 사유를 화면에 말한다.
+        try { await downloadFile(`/remote/rdp/${r.mapping.id}`, `${item.name}.rdp`); }
+        catch (e) { throw new Error(downloadFailText(e)); }
       } else {
         const initialCreds = creds.username
           ? (protocol === 'rdp' ? { username: creds.username, password: creds.password, domain: creds.domain } : { username: creds.username, password: creds.password })

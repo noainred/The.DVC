@@ -59,3 +59,15 @@ describe('NSX 합계 표기 (v2.600 COL-2600-06 후속)', () => {
     }
   });
 });
+
+describe('v2.602 COL-2602-01 — 클러스터 상태 조회 실패', () => {
+  it('listsFailed 의 clusterStatus 를 한글 라벨로 말한다', () => {
+    const notes = nsxLimitNotes([{ name: 'm1', listsFailed: ['clusterStatus'] }]);
+    expect(notes.join('\n')).toMatch(/클러스터 상태 목록을 읽지 못했습니다/);
+    expect(nsxFailedShort({ listsFailed: { clusterStatus: 1 } })).toBe('조회 실패: 클러스터 상태');
+  });
+  it('매니저 상태 unknown 에 라벨이 있다(원문 unknown 을 그대로 찍지 않는다)', () => {
+    const src = readFileSync(new URL('./Nsx.jsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/unknown: '상태 확인 불가'/);
+  });
+});

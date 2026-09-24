@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { openRemoteSession } from '../remote/sessions.js';
-import { fetchJson, postJson, delJson, getToken, usePolling } from '../api.js';
+import { fetchJson, postJson, delJson, usePolling, downloadFile } from '../api.js';
+import { downloadFailText } from './downloadFailText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ProxyEditor, HealthDot } from './ProxySettings.jsx';
 import { STable } from '../components/STable.jsx';
@@ -78,10 +79,9 @@ export default function RemoteAccess() {
       name: f.name || (vm ? `${f.protocol.toUpperCase()} ${vm.name}` : ''),
     }));
   };
+  // v2.602(감사 WEB2602-01): downloadFile 이 res.ok 를 본다 — 실패(409·403·5xx)의 오류 JSON 을 파일로 저장하지 않고 사유를 화면에 말한다.
   const downloadRdp = async (m) => {
-    const res = await fetch(`/api/remote/rdp/${m.id}`, { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
-    const blob = await res.blob(); const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `${m.name}.rdp`; a.click(); URL.revokeObjectURL(url);
+    try { await downloadFile(`/remote/rdp/${m.id}`, `${m.name}.rdp`); } catch (e) { flash(false, downloadFailText(e)); }
   };
 
   return (

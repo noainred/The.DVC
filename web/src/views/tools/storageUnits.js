@@ -84,3 +84,19 @@ export function capacityTotals(list, pick) {
   const pct = usedBase > 0 ? Math.round((used / usedBase) * 100) : null;
   return { total, used: usedBase > 0 ? used : (counted ? null : 0), usedBase, unknownUsed, counted, pct };
 }
+
+/**
+ * 미해결 경보 합계(순수, v2.602 감사 RECENT2602-02 후속). 경보 개수를 **읽지 못한** 장비(unresolved null — 조회 오류·
+ * 응답에서 개수를 못 찾음)는 0 으로 더하지 않고 `unknown` 으로 센다. 예전 `(f(x) || 0)` 은 그 장비를 '경보 0건' 으로 셌다.
+ * @returns {{ total:number, unknown:number, counted:number }}
+ */
+export function alertTotals(list, pick) {
+  let total = 0; let unknown = 0; let counted = 0;
+  for (const r of Array.isArray(list) ? list : []) {
+    const v = pick(r);
+    const n = v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v);
+    if (n == null) { unknown += 1; continue; }
+    counted += 1; total += n;
+  }
+  return { total, unknown, counted };
+}

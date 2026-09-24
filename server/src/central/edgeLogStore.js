@@ -17,7 +17,49 @@ const KEEP = Math.max(2, Number(process.env.EDGELOG_KEEP_PER_AGENT) || 10);
 const LINE_CAP = Math.max(100, Number(process.env.EDGELOG_LINE_CAP) || 1_000);
 const AGENT_CAP = Math.max(10, Number(process.env.EDGELOG_MAX_AGENTS) || 200);
 
-const t = (v) => String(v ?? '').trim();
+// v2.602(감사 CEN2602-02): 줄 길이·상태 항목·스냅샷 크기 상한. 줄 길이는 엣지 수집(edgelog/collect.js LINE_MAX)과 같은 값.
+const LINE_MAX = 2_000;
+const STATUS_ITEM_CAP = Math.max(20, Number(process.env.EDGELOG_STATUS_ITEM_CAP) || 200);
+const STATUS_MAX_BYTES = Math.max(64 * 1024, Number(process.env.EDGELOG_STATUS_MAX_BYTES) || 512 * 1024);
+const SNAP_MAX_BYTES = Math.max(256 * 1024, Number(process.env.EDGELOG_SNAP_MAX_BYTES) || 2 * 1024 * 1024);
+
+// ⚠ `String(v)` 는 toString 이 함수가 아닌 객체에서 던진다 — 글자·숫자만 글자로 받는다.
+const t = (v) => (typeof v === 'string' ? v.trim() : (typeof v === 'number' && Number.isFinite(v) ? String(v) : ''));
+const s = (v, max) => { const x = t(v); return x.length > max ? x.slice(0, max) : x; };
+const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+const bytesOf = (x) => { try { return JSON.stringify(x).length; } catch { return Infinity; } };
+
+/** 노드 신원(edgelog/collect.js nodeInfo 모양)만 받는다 — 모르는 키·객체 값은 버린다. */
+function sanitizeNode(n) {
+  if (!isObj(n)) return null;
+  return {
+    agent: s(n.agent, 128), hostname: s(n.hostname, 128), version: s(n.version, 64), role: s(n.role, 16),
+    datacenter: s(n.datacenter, 128), pid: numOrNull(n.pid), uptimeMs: numOrNull(n.uptimeMs), startedAt: numOrNull(n.startedAt),
+  };
+}
+/** 로그 줄 — 평범한 객체만, msg 는 글자 LINE_MAX 자. */
+function sanitizeLine(e) {
+  if (!isObj(e)) return null;
+  const msg = typeof e.msg === 'string' ? e.msg : '';
+  return { id: numOrNull(e.id), time: typeof e.time === 'string' || typeof e.time === 'number' ? s(e.time, 40) : '', level: s(e.level, 16), msg: msg.length > LINE_MAX ? msg.slice(0, LINE_MAX) : msg };
+}
+/** 상태 항목 — 알려진 키만. value 는 크기 합계 상한 안에서만 남기고 넘치면 null + 개수. */
+function sanitizeStatus(list) {
+  if (!Array.isArray(list)) return { status: null, dropped: 0, valuesDropped: 0 };
+  const out = [];
+  let dropped = 0, valuesDropped = 0, total = 0;
+  for (const x of list) {
+    if (!isObj(x)) { dropped += 1; continue; }
+    if (out.length >= STATUS_ITEM_CAP) { dropped += 1; continue; }
+    const item = { key: s(x.key, 80), label: s(x.label, 120), group: s(x.group, 80), ok: x.ok === true, error: x.error == null ? null : s(x.error, 300), value: null, ...(x.truncated === true ? { truncated: true } : {}) };
+    if (x.value != null) {
+      const b = bytesOf(x.value);
+      if (total + b <= STATUS_MAX_BYTES) { item.value = x.value; total += b; } else { valuesDropped += 1; item.valueDropped = true; }
+    }
+    out.push(item);
+  }
+  return { status: out, dropped, valuesDropped };
+}
 let _map = new Map();       // agentLower -> { agent, snaps: [최신이 뒤] }
 let _sinceAt = Date.now();  // 이 저장소가 시작된 시각(재시작 감지)
 
@@ -30,32 +72,40 @@ export function putEdgeLog(agent, snap = {}) {
   const key = t(agent).toLowerCase();
   if (!key) return null;
   if (!_map.has(key) && _map.size >= AGENT_CAP) return null;   // 엣지 수 상한(무한 증식 방지)
-  const logs = snap.logs && typeof snap.logs === 'object' ? snap.logs : null;
-  const items = Array.isArray(logs?.items) ? logs.items.slice(-LINE_CAP) : [];
+  if (!isObj(snap)) snap = {};
+  const logs = isObj(snap.logs) ? snap.logs : null;
+  const items = Array.isArray(logs?.items) ? logs.items.slice(-LINE_CAP).map(sanitizeLine).filter(Boolean) : [];
   const capped = Array.isArray(logs?.items) && logs.items.length > items.length;
+  const st = sanitizeStatus(snap.status);
+  // 스냅샷 하나의 크기 상한 — 넘치면 **오래된 줄부터** 뺀다(진행상태를 보려는 것이라 방금 줄이 중요 — collect.js 와 같은 방향).
+  let sizeCapped = 0;
+  let lineBytes = items.reduce((a, x) => a + x.msg.length + 64, 0);
+  while (items.length && lineBytes > SNAP_MAX_BYTES - STATUS_MAX_BYTES) { const x = items.shift(); lineBytes -= x.msg.length + 64; sizeCapped += 1; }
   const rec = {
     at: Date.now(),
-    via: t(snap.via) || 'pull',
+    via: s(snap.via, 16) || 'pull',
     ok: snap.ok !== false,
-    error: snap.error ? String(snap.error).slice(0, 300) : null,
+    error: snap.error ? (s(snap.error, 300) || '(형식 오류)') : null,
     // ⚠ v2.574 BUG-06 — `Number(null) === 0` 이라 예전 형태는 **'못 읽음' 을 '0ms(즉시 응답)'**
     //   으로 바꿨다. 측정값 판정은 `numOrNull` 하나가 갖는다(v2.561 규약).
     ms: numOrNull(snap.ms),
-    reportedAt: Number(snap.at) || null,
-    node: snap.node && typeof snap.node === 'object' ? snap.node : null,
+    reportedAt: numOrNull(snap.at),
+    node: sanitizeNode(snap.node),
     logs: logs ? {
-      lastId: Number(logs.lastId) || 0, oldestId: logs.oldestId ?? null,
-      count: items.length, matched: Number(logs.matched) || items.length,
+      lastId: numOrNull(logs.lastId) ?? 0, oldestId: items.length ? items[0].id : numOrNull(logs.oldestId),
+      count: items.length, matched: numOrNull(logs.matched) ?? items.length,
       // 엣지가 자른 것과 중앙이 자른 것을 **구분해 밝힌다** — 조치가 다르다(limit 을 올린다 / 엣지를 본다).
-      truncated: !!logs.truncated, omitted: Number(logs.omitted) || 0, centralCapped: capped,
+      truncated: logs.truncated === true, omitted: numOrNull(logs.omitted) ?? 0, centralCapped: capped || sizeCapped > 0,
+      ...(sizeCapped ? { sizeCapped } : {}),
       items,
     } : null,
-    status: Array.isArray(snap.status) ? snap.status : null,
+    status: st.status,
+    ...(st.dropped || st.valuesDropped ? { statusCapped: { dropped: st.dropped, valuesDropped: st.valuesDropped } } : {}),
     // ⚠⚠ v2.574 BUG-07 — 생산자 `edgelog/collect.js:101` 은 `withStatus=false` 면 **정직하게
     //   `null`** 을 주는데 여기서 0 이 되어 화면이 **"상태 점검 실패 0건"**(= 점검을 안 한 것을
     //   '전부 정상' 으로)이라 말했다. v2.561 이 스토리지 적재에서 겪은 것과 같은 유형이다.
     statusFailed: numOrNull(snap.statusFailed),
-    maskedFields: Number(snap.maskedFields) || 0,
+    maskedFields: numOrNull(snap.maskedFields) ?? 0,
   };
   const cur = _map.get(key) || { agent: t(agent), snaps: [] };
   cur.agent = t(agent) || cur.agent;

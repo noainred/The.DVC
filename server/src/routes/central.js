@@ -254,7 +254,10 @@ function strAgent(v) { return typeof v === 'string' ? v.trim().slice(0, 64) : ''
 // 생략하면 requestedAgent 도 '' 이라 미들웨어 대조가 0건이 된다.
 // 경로를 정규화해 심층 방어하고, **실제 강제는 핸들러 안**(registerBindingDenied)에서 한다 —
 // 경로 문자열에 의존하는 게이트를 다시 만들지 말 것.
-const normPath = (p) => String(p || '').replace(/\/+$/, '').replace(/\/\.$/, '').toLowerCase();
+// v2.602(감사 SEC2602-01): 끝 '/' 는 **루프로** 뗀다 — `/\/+$/` 는 '/' 연속 뒤에 다른 글자가 오면 시작 위치마다 끝까지
+//   훑어 O(n²) 이고, 이 함수는 인증 전 모든 central 요청에서 돈다(헤더 16KB 상한까지 요청당 약 0.2초).
+export const trimTrailingSlashes = (s) => { let e = s.length; while (e > 0 && s.charCodeAt(e - 1) === 47) e--; return e === s.length ? s : s.slice(0, e); };
+export const normPath = (p) => trimTrailingSlashes(typeof p === 'string' ? p : '').replace(/\/\.$/, '').toLowerCase();
 const registerName = (req) => (normPath(req.path) === '/register-collector' ? (typeof req.body?.name === 'string' ? req.body.name.trim() : '') : '');
 
 /**
@@ -364,6 +367,8 @@ centralRouter.get('/assignment', (req, res) => {
 // 엣지 자기등록(EDGE_MODE=all): 부팅한 엣지가 자기 이름/포트/수집토큰을 알리면 수집 서버
 // 목록에 자동 upsert — 관리자의 '수집 서버 추가' 수동 절차가 필요 없어진다.
 // Body: { name, port, collectorToken, datacenter?, urlHint?, version? }
+const REGISTER_URL_MAX = 2048;
+const REGISTER_TOKEN_MAX = 1024;
 centralRouter.post('/register-collector', async (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
@@ -377,8 +382,16 @@ centralRouter.post('/register-collector', async (req, res) => {
     return res.status(403).json({ ok: false, reason: bindDenied });
   }
   if (!b.collectorToken) return res.status(400).json({ ok: false, reason: 'collectorToken이 필요합니다(엣지의 export 인증 토큰).' });
+  // ⚠ v2.602(감사 SEC2602-01): urlHint·collectorToken 은 **글자·길이부터** 본다. 예전에는 길이 상한이 없어 '/' 12만 개 +
+  //   'x' 인 urlHint 하나가 registry.js 의 `/\/+$/`(verifyDerivedCollectorUrl·normalize 두 번)에서 O(n²) 로 돌아 중앙
+  //   이벤트 루프가 23초 멈췄다(동시 /api/auth/config 8.7초). 객체면 String() 이 던졌다.
+  if (b.urlHint != null && typeof b.urlHint !== 'string') return res.status(400).json({ ok: false, reason: 'urlHint는 문자열이어야 합니다.' });
+  if (typeof b.urlHint === 'string' && b.urlHint.length > REGISTER_URL_MAX) return res.status(400).json({ ok: false, reason: `urlHint가 너무 깁니다(${REGISTER_URL_MAX}자 이하).` });
+  if (typeof b.collectorToken !== 'string' || b.collectorToken.length > REGISTER_TOKEN_MAX) return res.status(400).json({ ok: false, reason: `collectorToken은 ${REGISTER_TOKEN_MAX}자 이하 문자열이어야 합니다.` });
   // URL: 엣지가 명시(urlHint)하지 않으면 요청 peer IP + 알린 포트로 유도(NAT 없는 사내망 가정).
-  let url = String(b.urlHint || '').trim();
+  let url = trimTrailingSlashes(String(b.urlHint || '').trim());
+  const regDc = typeof b.datacenter === 'string' ? b.datacenter.slice(0, 128) : '';
+  const regVer = typeof b.version === 'string' ? b.version.slice(0, 32) : '';
   if (!url) {
     const port = Number(b.port);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -406,16 +419,16 @@ centralRouter.post('/register-collector', async (req, res) => {
   const hinted = !!String(b.urlHint || '').trim();
   let unverified = '';
   if (process.env.CENTRAL_VERIFY_SELF_REGISTER !== 'false') {
-    const v = await verifyDerivedCollectorUrl({ url, name, datacenter: String(b.datacenter || ''), token: String(b.collectorToken) });
+    const v = await verifyDerivedCollectorUrl({ url, name, datacenter: regDc, token: b.collectorToken });
     if (!v.ok) {
       // 유도 URL 은 거부(잘못된 항목 생성 방지). 관리자가 지정한 urlHint(EDGE_ADVERTISE_URL)는 등록은 하되 '미검증' 사유를 남긴다(v2.428, 미스매치 #10).
       if (!hinted) { console.warn(`[central] 엣지 자기등록 거부: ${name} — ${v.reason}`); return res.status(400).json({ ok: false, reason: v.reason }); }
       unverified = v.reason;
     }
   }
-  const r = upsertCollectorFromAgent({ name, url, token: String(b.collectorToken), datacenter: String(b.datacenter || '') });
-  if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${b.version ? ` (v${b.version})` : ''}${unverified ? ` ⚠ 미검증: ${unverified}` : ''}`);
-  if (r.ok && (unverified || b.version)) {
+  const r = upsertCollectorFromAgent({ name, url, token: b.collectorToken, datacenter: regDc });
+  if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${regVer ? ` (v${regVer})` : ''}${unverified ? ` ⚠ 미검증: ${unverified}` : ''}`);
+  if (r.ok && (unverified || regVer)) {
     // v2.548: 자기등록이 보낸 버전을 상태에 심어 둔다 — pull 이 한 번도 성공하지 못한 엣지(OC2SDBX 사례)는
     // puller.js:92 경로로 버전이 들어오지 않아 파트 장애 화면이 '버전 미상' 으로만 말했다. 기존 상태는 보존.
     // ⚠ v2.583 감사 #32: '미검증' 분기가 상태를 **통째로 바꿔** version·agent·authDeny·identity 를 지웠고(v2.548 H5
@@ -425,7 +438,7 @@ centralRouter.post('/register-collector', async (req, res) => {
     const id = r.collector?.id || name;
     const prev = getCollectorStatus(id) || {};
     const next = { ...prev };
-    if (b.version && !prev.version) { next.version = String(b.version).slice(0, 32); next.registeredVersion = true; }
+    if (regVer && !prev.version) { next.version = regVer; next.registeredVersion = true; }
     if (unverified) { next.ok = false; next.error = `등록 URL(EDGE_ADVERTISE_URL) 검증 실패: ${unverified}`; next.unverified = true; }
     setCollectorStatus(id, next);
   }
@@ -552,7 +565,7 @@ centralRouter.post('/svcmon-config-ack', (req, res) => {
   }
   const b = req.body || {};
   const r = ackAssignment(req.centralAuth.agent, {
-    sig: String(b.sig || ''), applied: b.applied || {}, removed: b.removed, errors: b.errors,
+    sig: typeof b.sig === 'string' ? b.sig : '', applied: b.applied || {}, removed: b.removed, errors: b.errors, // v2.602 CEN2602-06: 글자일 때만(객체면 String() 이 던졌다)
   });
   res.status(r.ok ? 200 : 409).json(r);
 });
@@ -1177,8 +1190,15 @@ centralRouter.post('/edge-log-result', async (req, res) => {
     const [{ putEdgeLog }, { ackEdgeLogJob }] = await Promise.all([
       import('../central/edgeLogStore.js'), import('../central/edgeLogJobs.js'),
     ]);
-    const rec = putEdgeLog(agent, { ...(req.body || {}), via: 'job', ok: true });
+    // ⚠ v2.602(감사 CEN2602-02): 공유 토큰은 본문 agent 를 마음대로 고를 수 있다 — 예전에는 그 이름으로 **다른 엣지의
+    //   보관분을 덮었다**. 공유 토큰 회신은 ① 중앙이 아는 이름(edgeNameKnown)이고 ② 중앙이 실제로 그 엣지에 요청해 둔
+    //   작업(acked)일 때만 저장한다. 개별 토큰은 인증된 이름이므로 예전대로(요청 없는 회신도 버리지 않고 밝힌다).
+    const shared = req.centralAuth?.mode !== 'agent';
+    if (shared && !edgeNameKnown(agent)) return res.status(403).json({ ok: false, reason: `중앙이 모르는 엣지 이름(${agent}) — 공유 토큰 회신은 등록된 엣지 이름만 받습니다.`, unverifiedAgent: true });
     const { acked } = ackEdgeLogJob(agent);
+    if (shared && !acked) return res.json({ ok: true, agent, stored: false, acked, reason: '요청한 적 없는 공유 토큰 회신은 보관하지 않습니다(다른 엣지 보관분을 덮지 못하게).' });
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const rec = putEdgeLog(agent, { ...body, via: 'job', ok: true });
     // `acked:false` 는 '요청한 적 없는 회신'(기한 초과로 회수됐거나 중앙이 재시작) — 버리지 않고 밝힌다.
     res.json({ ok: true, agent, stored: !!rec, acked });
   } catch (e) {
@@ -1338,9 +1358,13 @@ centralRouter.post('/sanswitch-perf', async (req, res) => {
   const now = Date.now();
   const rowsIn = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 100_000) : [];
   const metaIn = Array.isArray(req.body?.meta) ? req.body.meta.slice(0, 20_000) : [];
-  const rows = rowsIn.filter((r) => Array.isArray(r) && owned.has(String(r[0]))).map((r) => ({ d: String(r[0]), ts: Math.min(Number(r[1]) || now, now), p: Number(r[2]), b: Number(r[3]) }));
-  const meta = metaIn.filter((m) => Array.isArray(m) && owned.has(String(m[0]))).map((m) => ({ d: String(m[0]), p: Number(m[1]), ts: Math.min(Number(m[2]) || now, now), name: m[3], wwn: m[4], speed: m[5], type: m[6] }));
+  // v2.602: 장비 id·수치는 글자·숫자만 받는다 — 객체면 String()/Number() 가 던졌다(async 핸들러 500).
+  const idOf = (v) => (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v)) ? String(v) : '');
+  const nOf = (v) => (typeof v === 'number' || typeof v === 'string' ? Number(v) : NaN);
+  const rows = rowsIn.filter((r) => Array.isArray(r) && owned.has(idOf(r[0]))).map((r) => ({ d: idOf(r[0]), ts: Math.min(nOf(r[1]) || now, now), p: nOf(r[2]), b: nOf(r[3]) }));
+  const meta = metaIn.filter((m) => Array.isArray(m) && owned.has(idOf(m[0]))).map((m) => ({ d: idOf(m[0]), p: nOf(m[1]), ts: Math.min(nOf(m[2]) || now, now), name: m[3], wwn: m[4], speed: m[5], type: m[6] }));
   const dropped = rowsIn.length - rows.length;
+  const metaDropped = metaIn.length - meta.length;
   if (dropped > 0) console.warn(`[central] sanswitch-perf: ${agent} 미위임 deviceId 표본 ${dropped}건 드롭(위조 방지)`);
   const r = await importSamples(rows, meta, loadPerfSettings().retentionDays);
   /**
@@ -1356,7 +1380,9 @@ centralRouter.post('/sanswitch-perf', async (req, res) => {
       statusSaved = saveEdgePerfStatus(agent, req.body.status, { owned, names }).saved;
     } catch (e) { console.warn(`[central] sanswitch-perf 상태 저장 실패(${agent}): ${e.message}`); }
   }
-  res.json({ ok: true, ...r, dropped, statusSaved });
+  // v2.602: 적재에서 버린 메타(포트 범위 밖·빈 장비 id — perfDb.importSamples)와 위임 밖 메타를 **항상** 싣는다 —
+  //   엣지(sanswitch/perfPush.js)가 상태·콘솔에 남긴다. 조용히 버리면 포트 이름·WWN 이 왜 비었는지 알 길이 없다.
+  res.json({ ok: true, ...r, metaRejected: r.metaRejected || 0, dropped, metaDropped, statusSaved });
 });
 
 // POST /api/central/sanswitch-test-result — 엣지가 대행한 연결 테스트 결과(추적 로그 포함) 회신(v2.421).

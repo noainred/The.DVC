@@ -120,7 +120,11 @@ function makeClient(device, signal) {
 }
 
 /** 응답 조각들 → 스냅샷(순수 — 테스트가 네트워크 없이 이 함수만 검증한다). */
-export function buildSnapshot(device, parts = {}) {
+// v2.602(감사 COL-2602-02): opts.countersAt = 누적 카운터(fibrechannel-statistics)를 **받은 시각**. 처리량의 분모는
+//   두 주기의 '카운터 읽은 시각' 차이여야 한다 — 예전에는 스냅샷 조립 시각(뒤 GET 8개가 끝난 뒤)을 써서 뒤 단계 소요가
+//   주기마다 흔들리면 오류 없이 틀린 값이 됐다(감사 재현: 뒤 단계 5초→65초면 17% 과소, 65초→5초면 25% 과다).
+//   값이 없으면 예전처럼 호출 시각이다(시험·단독 호출 호환).
+export function buildSnapshot(device, parts = {}, { countersAt = null } = {}) {
   const snap = emptySnapshot(device);
   const sw = asArray(parts.switch?.['fibrechannel-switch'])[0] || {};
   const chassis = asArray(parts.chassis?.chassis)[0] || {};
@@ -181,7 +185,7 @@ export function buildSnapshot(device, parts = {}) {
       sfpVendor: md['vendor-name'] || '', sfpSerial: md['serial-number'] || '', sfpPartNumber: md['part-number'] || '',
     };
   });
-  const rate = applyRates(device.id, list);
+  const rate = applyRates(device.id, list, Number.isFinite(countersAt) ? countersAt : Date.now());
   snap.ports = { ...summarizePorts(list), truncated: ifaces.length > MAX_PORTS };
   snap.licenses = asArray(parts.license?.license).slice(0, 32)
     .map((l) => ({ key: '', name: l.name || l.feature || '', expires: l['expiration-date'] || '', pod: /ports?\s*on\s*demand|POD/i.test(String(l.name || '')) }));
@@ -210,10 +214,10 @@ export async function collect(device, { signal, trace = null } = {}) {
   trace?.(`REST 로그인 → https://${device.host}:${Number(device.httpsPort) || 443}/rest/login (Basic, 자체서명 허용)`);
   try { await c.login(); trace?.(`REST 로그인 성공 +${Date.now() - t0}ms`); }
   catch (e) { trace?.(`REST 로그인 실패: ${e.message} +${Date.now() - t0}ms`, 'error'); throw e; }
-  const parts = {}; const sections = {};
+  const parts = {}; const sections = {}; const doneAt = {};
   const grab = async (key, modulePath, required = false) => {
     const t1 = Date.now();
-    try { parts[key] = await c.get(modulePath); sections[key] = 'ok'; trace?.(`GET ${modulePath} ok +${Date.now() - t1}ms`); }
+    try { parts[key] = await c.get(modulePath); doneAt[key] = Date.now(); sections[key] = 'ok'; trace?.(`GET ${modulePath} ok +${Date.now() - t1}ms`); }
     catch (e) { sections[key] = e.message; trace?.(`GET ${modulePath} 실패: ${e.message}`, required ? 'error' : 'warn'); if (required) throw e; }
   };
   try {
@@ -234,7 +238,7 @@ export async function collect(device, { signal, trace = null } = {}) {
   } finally {
     await c.logout(); // 세션 반납은 반드시(FOS 동시 REST 세션 수가 매우 적다)
   }
-  const snap = buildSnapshot(device, parts);
+  const snap = buildSnapshot(device, parts, { countersAt: doneAt.stats ?? null });
   snap.sections = sections;
   return snap;
 }

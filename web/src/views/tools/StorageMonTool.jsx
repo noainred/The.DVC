@@ -5,7 +5,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
 import { columnsFor, cellValue, sortValue } from './storageColumns.js';
-import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit, capacityTotals } from './storageUnits.js';
+import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit, capacityTotals, alertTotals } from './storageUnits.js';
 import { emptyListText, conflictText, edgeReportNotes, edgeIntervalText } from './storageListText.js';
 import { collectDropNote } from './collectDropText.js';
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
@@ -519,7 +519,6 @@ export default function StorageMonTool() {
   const rows = d.devices || [];
   const dcName = (id) => ((d.datacenters || []).find((x) => x.id === id)?.name || id || '미지정');
   const typeLabel = (t) => ((d.types || []).find((x) => x.type === t)?.label || t);
-  const sum = (list, f) => list.reduce((a, x) => a + (f(x) || 0), 0);
   const withSnap = rows.filter((r) => r.snap);
   // v2.594(감사 R2594-02): 사용률은 사용량을 읽은 장비끼리만 — 결측을 0 으로 더하면 사용률이 과소로 보인다.
   const capAll = capacityTotals(withSnap, (r) => r.snap.capacity);
@@ -529,7 +528,8 @@ export default function StorageMonTool() {
     usedPct: capAll.pct,
     unknownUsed: capAll.unknownUsed,
     fail: rows.filter((r) => r.snap && !r.snap.ok).length + rows.filter((r) => !r.snap).length,
-    alerts: sum(withSnap, (r) => r.snap.alerts?.unresolved),
+    // v2.602(RECENT2602-02 후속): 경보 개수를 못 읽은 장비(null)는 0 으로 더하지 않고 따로 센다(판정은 alertTotals).
+    ...(() => { const a = alertTotals(withSnap, (r) => r.snap.alerts?.unresolved); return { alerts: a.total, alertsUnknown: a.unknown }; })(),
   };
   /**
    * 빠른 찾기 판정(사용자 요구 2026-09-02) — 검색은 **칩 이름이 아니라 하단 스토리지 목록**을
@@ -567,9 +567,10 @@ export default function StorageMonTool() {
     const total = cap.total;
     const used = cap.used;
     const pct = cap.pct ?? 0;   // 점 색 판정용 — 읽은 장비가 없으면 색 기준만 정상으로 둔다
-    const alerts = sum(ok, (r) => r.snap.alerts?.unresolved);
+    const alertSum = alertTotals(ok, (r) => r.snap.alerts?.unresolved);
+    const alerts = alertSum.total;
     const dot = fail ? 'var(--red)' : alerts ? 'var(--amber)' : usageColor(pct);
-    return { fail, total, used, pct, pctKnown: cap.pct, unknownUsed: cap.unknownUsed, alerts, dot };
+    return { fail, total, used, pct, pctKnown: cap.pct, unknownUsed: cap.unknownUsed, alerts, alertsUnknown: alertSum.unknown, dot };
   };
 
 
@@ -653,7 +654,8 @@ export default function StorageMonTool() {
         <Kpi label="사용" value={tbFmt(totals.used)} pct={totals.usedPct ?? undefined}
           meta={totals.unknownUsed ? `사용량 미확인 ${totals.unknownUsed}대 제외` : undefined} />
         <Kpi label="수집 실패/대기" value={totals.fail} accent={totals.fail ? 'var(--red)' : 'var(--green)'} />
-        <Kpi label="미해결 경보" value={totals.alerts} accent={totals.alerts ? 'var(--amber)' : undefined} />
+        <Kpi label="미해결 경보" value={totals.alerts} accent={totals.alerts ? 'var(--amber)' : undefined}
+          meta={totals.alertsUnknown ? `경보 미확인 ${totals.alertsUnknown}대 제외` : undefined} />
       </div>
 
       {/* 법인 바로가기(사용자 요구 2026-09-02) — Platform 화면의 vCenter 바로가기와 동일한 UX/스타일.
@@ -673,7 +675,7 @@ export default function StorageMonTool() {
               dot: g.dot,
               bad: !!g.fail,
               title: `${list.length}대 · ${tbFmt(g.used)} / ${tbFmt(g.total)}${g.pctKnown != null ? ` (${g.pctKnown}%)` : ''}${g.unknownUsed ? ` · 사용량 미확인 ${g.unknownUsed}대` : ''}`
-                + `${g.fail ? ` · 수집 실패/대기 ${g.fail}` : ''}${g.alerts ? ` · 미해결 경보 ${g.alerts}` : ''}`,
+                + `${g.fail ? ` · 수집 실패/대기 ${g.fail}` : ''}${g.alerts ? ` · 미해결 경보 ${g.alerts}` : ''}${g.alertsUnknown ? ` · 경보 미확인 ${g.alertsUnknown}대` : ''}`,
             };
           }} />
       )}

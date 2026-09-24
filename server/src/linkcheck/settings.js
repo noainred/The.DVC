@@ -10,6 +10,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { KIND_KEYS } from './links.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.configDir, 'linkcheck-settings.json');
 
@@ -38,9 +39,11 @@ export const DEFAULTS = Object.freeze({
 
 const MIN_INTERVAL_MS = 60_000;
 const MAX_INTERVAL_MS = 6 * 3_600_000;
+// v2.602(감사 LEFT2602-02): 빈 값·null 은 '미지정' — dflt 로 둔다. 예전 Number('') === 0 이 하한으로 올라가
+// 보존 90→7일·30→3일·주기→60초로 저장됐다(v2.596 CLAMP 계열). saveLinkCheckSettings 는 빈 숫자 필드를 병합 전에 버린다.
 const clampInt = (v, lo, hi, dflt) => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return dflt;
+  const n = numOrNull(v);
+  if (n == null) return dflt;
   return Math.min(hi, Math.max(lo, Math.round(n)));
 };
 
@@ -97,8 +100,12 @@ export function onLinkCheckSettingsChange(fn) {
   return () => _listeners.delete(fn);
 }
 
+const NUMERIC_KEYS = Object.keys(DEFAULTS).filter((k) => typeof DEFAULTS[k] === 'number');
 export function saveLinkCheckSettings(body = {}) {
   const cur = loadLinkCheckSettings();
+  // 숫자 필드가 비었으면(빈 문자열·null·숫자 아님) 이전 값을 유지한다 — 병합 전에 버린다.
+  body = { ...(body || {}) };
+  for (const k of NUMERIC_KEYS) if (k in body && numOrNull(body[k]) == null) delete body[k];
   const next = normalizeSettings({ ...cur, ...body, kinds: { ...cur.kinds, ...(body?.kinds || {}) } });
   atomicWriteFileSync(FILE(), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
   for (const fn of _listeners) { try { fn(next); } catch { /* 리스너 오류가 저장을 되돌리지 않게 */ } }

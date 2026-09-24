@@ -32,7 +32,13 @@ function readFile() {
 function coerce(field, v) {
   if (field === 'enabled') return v !== false;
   if (field === 'trackTotal') return v !== false;
-  if (field === 'retentionDays') return Math.max(0, Math.min(MAX_RETENTION_DAYS, Math.floor(Number(v) || 0)));
+  // v2.602(감사 TIM2602-02): 음수·빈 값·숫자 아님은 null('미지정') — 호출부가 건너뛴다. 예전 Math.max(0, …) 는 -7 을
+  // 0(= 무제한 보관, prune 정지)으로 저장했다. 명시적 0 만 무제한이다.
+  if (field === 'retentionDays') {
+    const n = numOrNull(v);
+    if (n == null || n < 0) return null;
+    return Math.min(MAX_RETENTION_DAYS, Math.floor(n));
+  }
   if (field === 'vcenterIds') {
     if (!Array.isArray(v)) return [];
     // 중복 제거 + 공백 제거 + 상한(유령 id 대량 입력 방지). 존재 검증은 라우트가 스냅샷으로 한다.
@@ -46,12 +52,18 @@ export function loadVmperfSettings() {
   const eff = {
     enabled: process.env.VMPERF_ENABLED !== 'false',
     // 기본 90일 — 6,000 VM·시간당·2메트릭이면 약 7.4GB(실측 기준). 1년은 30GB 라 기본값으로 두지 않는다.
-    retentionDays: Math.max(0, Math.min(MAX_RETENTION_DAYS, Number(process.env.VMPERF_RETENTION_DAYS) || 90)),
+    // v2.602(감사 LEFT2602-05): '0 = 무제한' — 예전 `Number(env) || 90` 은 0 을 90 으로 바꿨다(config.js retentionEnv 계약).
+    // 빈 값·음수·숫자 아님만 기본 90 이다.
+    retentionDays: coerce('retentionDays', process.env.VMPERF_RETENTION_DAYS) ?? 90,
     vcenterIds: [],
     trackTotal: process.env.VMPERF_TRACK_TOTAL !== 'false',
   };
   const persisted = readFile();
-  for (const f of FIELDS) if (persisted[f] !== undefined) eff[f] = coerce(f, persisted[f]);
+  for (const f of FIELDS) {
+    if (persisted[f] === undefined) continue;
+    const v = coerce(f, persisted[f]);
+    if (v !== null) eff[f] = v;   // 손상·음수 보존일은 기본값 유지
+  }
   return eff;
 }
 
@@ -61,8 +73,10 @@ export function saveVmperfSettings(partial = {}) {
   for (const f of FIELDS) {
     if (partial[f] === undefined) continue;
     // v2.596(감사 CLAMP2596-05): 보존일 빈 칸('')은 0(=무제한)이 아니라 미지정 — 이전 값 유지. 명시적 0 만 무제한.
-    if (f === 'retentionDays' && numOrNull(partial[f]) == null) continue;
-    next[f] = coerce(f, partial[f]);
+    // v2.602(TIM2602-02): 음수도 미지정 — 무제한으로 둔갑시키지 않는다.
+    const v = coerce(f, partial[f]);
+    if (f === 'retentionDays' && v === null) continue;
+    next[f] = v;
   }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });

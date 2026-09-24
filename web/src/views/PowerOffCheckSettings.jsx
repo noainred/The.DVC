@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { blankOr } from './blankOr.js';
 
 const PRESETS = [1, 3, 6, 12, 24];
 const when = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '없음');
@@ -32,7 +33,9 @@ export default function PowerOffCheckSettings() {
   const save = async () => {
     setBusy('save'); setMsg(null);
     try {
-      const h = Math.min(lim.maxHours, Math.max(lim.minHours, Math.round(Number(hours) || 6)));
+      // v2.602(감사 LEFT2602-03): 빈 칸은 보내지 않는다 — 서버가 이전 값을 유지한다(예전 `Number(hours) || 6` 은 기본 6시간으로 저장했다).
+      const raw = blankOr(hours);
+      const h = raw === undefined ? undefined : Math.min(lim.maxHours, Math.max(lim.minHours, Math.round(raw)));
       const r = await putJson('/tools/waste/off-check/settings', { enabled, intervalHours: h });
       setHours(String(r.settings.intervalHours)); setEnabled(r.settings.enabled);
       setMsg({ ok: true, text: `저장됨 — ${r.settings.enabled ? `${r.settings.intervalHours}시간마다 점검` : '점검 꺼짐'}(재시작 없이 다음 틱부터 적용)` });

@@ -125,7 +125,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
     const hosts = isAdmin ? [] : await bmAddressHosts(tg);
     const match = addressMatcher(hosts);
     const targets0 = applyScope(tg.targets.map(publicTarget), allowed);
-    const targets = isAdmin ? targets0 : targets0.map((x) => maskTargetAddress(x, hosts));
+    const targets = isAdmin ? targets0 : targets0.map((x) => maskTargetAddress(x, hosts, match));
     const skipped0 = applyScope(tg.skipped, allowed);
     const skipped = isAdmin ? skipped0 : maskBmList(skipped0, match);
     /*
@@ -343,7 +343,7 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
       const targets0 = snap ? applyScope(snap.targets || [], allowed) : [];
       const snapHosts = isAdmin ? [] : [...regHosts, ...targets0.flatMap((x) => [x?.idracHost, x?.osHostName])].filter((h) => typeof h === 'string' && h);
       const em = addressMatcher(snapHosts);
-      const targets = isAdmin ? targets0 : targets0.map((x) => maskTargetAddress(x, snapHosts));
+      const targets = isAdmin ? targets0 : targets0.map((x) => maskTargetAddress(x, snapHosts, em));
       const keys = new Set(targets0.map((x) => t(x.key)));
       return {
         agent: c.name, enabled: c.enabled !== false, hasUrl: !!t(c.url),

@@ -19,6 +19,7 @@ import { promisify } from 'node:util';
 import { config, currentVersion } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
+import { classifyCentral404 } from './central404.js';
 import { runLink } from '../linkcheck/run.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 
@@ -76,8 +77,11 @@ export async function runLinkCheckWorkerOnce() {
     const r = await resilientFetch(`${base}/api/central/link-check-config?agent=${encodeURIComponent(agent)}`, { headers: headers(), timeoutMs: 15_000, retries: 1 });
     if (r.status === 401 || r.status === 403) throw Object.assign(new Error('중앙이 이 엣지를 거부했습니다(개별 토큰·AGENT_NAME 확인)'), { status: r.status });
     if (r.status === 404) {
-      // ⚠ 404 는 '중앙이 구버전' 이다 — 실패로 적지만 '설정 오류' 라 말하지 않는다(조치가 다르다).
-      _last = { at: Date.now(), ms: Date.now() - t0, ok: true, note: '중앙이 구버전입니다(통신 점검 수신 경로 없음)', links: 0 };
+      // ⚠ 404 는 두 뜻이다(v2.602 감사 EDGE2602-02) — 'central 비활성화' 는 실패로 적는다(중앙을 켜야 한다). 엔드포인트가 없는
+      //   구버전 중앙만 '구버전' 이다 — '설정 오류' 라 말하지 않는다(조치가 다르다).
+      const c = await classifyCentral404(r);
+      if (c.kind !== 'no-endpoint') throw Object.assign(new Error(c.reason), { status: 404, kind: c.kind });
+      _last = { at: Date.now(), ms: Date.now() - t0, ok: true, kind: c.kind, note: '중앙이 구버전입니다(통신 점검 수신 경로 없음)', links: 0 };
       return { ok: true, links: 0 };
     }
     if (!r.ok) throw Object.assign(new Error(`link-check-config <- HTTP ${r.status}`), { status: r.status });
@@ -130,7 +134,7 @@ export async function runLinkCheckWorkerOnce() {
     console.log(`[linkcheck-worker] 링크 ${links.length}개 점검 — 정상 ${measured.length - failed} · 실패 ${failed} · 건너뜀 ${skipped.length} · ${Date.now() - t0}ms`);
     return { ok: true, checked: measured.length, failed };
   } catch (e) {
-    _last = { at: Date.now(), ms: Date.now() - t0, ok: false, httpStatus: e?.status || null, error: String(e?.message || e).slice(0, 300) };
+    _last = { at: Date.now(), ms: Date.now() - t0, ok: false, httpStatus: e?.status || null, ...(e?.kind ? { kind: e.kind } : {}), error: String(e?.message || e).slice(0, 300) };
     console.warn(`[linkcheck-worker] 실패: ${_last.error}`);       // 무음 실패 금지
     return { ok: false, reason: _last.error };
   } finally { _running = false; }

@@ -20,6 +20,7 @@ import { promisify } from 'node:util';
 import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
+import { classifyCentral404 } from './central404.js';
 
 const gzipAsync = promisify(gzip);
 const DEFAULT_POLL_MS = 60_000;
@@ -46,7 +47,14 @@ export async function runEdgeLogWorkerOnce() {
     const agent = encodeURIComponent(config.agent.name || '');
     const r = await resilientFetch(`${base}/api/central/edge-log-jobs?agent=${agent}`, { headers: headers(), timeoutMs: 15_000, retries: 1 });
     if (r.status === 403 || r.status === 401) throw Object.assign(new Error('중앙이 이 엣지를 거부했습니다(토큰·AGENT_NAME 확인)'), { status: r.status });
-    if (r.status === 404) { _last = { at: Date.now(), ms: Date.now() - t0, ok: true, job: false, note: '중앙이 구버전입니다(폴백 경로 없음)' }; return { ok: true, job: false }; }
+    if (r.status === 404) {
+      // v2.602(감사 EDGE2602-02): 404 는 두 뜻이다 — 'central 비활성화' 는 실패(중앙을 켜야 한다)이고, 엔드포인트가 없는 구버전
+      //   중앙만 '폴백 경로 없음' 이다. 예전에는 둘 다 ok:true·'구버전' 으로 적어 꺼진 중앙을 '업그레이드하면 된다' 로 말했다.
+      const c = await classifyCentral404(r);
+      if (c.kind !== 'no-endpoint') throw Object.assign(new Error(c.reason), { status: 404, kind: c.kind });
+      _last = { at: Date.now(), ms: Date.now() - t0, ok: true, job: false, kind: c.kind, note: '중앙이 구버전입니다(폴백 경로 없음)' };
+      return { ok: true, job: false };
+    }
     if (!r.ok) throw Object.assign(new Error(`edge-log-jobs <- HTTP ${r.status}`), { status: r.status });
     const jobBody = await r.json().catch(() => ({}));
     const job = jobBody?.job || null;
@@ -68,7 +76,7 @@ export async function runEdgeLogWorkerOnce() {
     console.log(`[edgelog-worker] 중앙 요청 회신 — 로그 ${snap.logs?.count ?? 0}줄 · 상태 실패 ${snap.statusFailed ?? '?'}건 · ${Date.now() - t0}ms`);
     return { ok: true, job: true };
   } catch (e) {
-    _last = { at: Date.now(), ms: Date.now() - t0, ok: false, httpStatus: e?.status || null, error: String(e?.message || e).slice(0, 300) };
+    _last = { at: Date.now(), ms: Date.now() - t0, ok: false, httpStatus: e?.status || null, ...(e?.kind ? { kind: e.kind } : {}), error: String(e?.message || e).slice(0, 300) };
     console.warn(`[edgelog-worker] 실패: ${_last.error}`);   // 무음 실패 금지
     return { ok: false, reason: _last.error };
   } finally { _running = false; }
