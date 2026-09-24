@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
+import { blankOr } from './blankOr.js';
 
 const ROLES = ['viewer', 'operator', 'admin'];
 
@@ -23,16 +24,19 @@ export default function AdSettings() {
   const set = (k) => (e) => setCfg((c) => ({ ...c, [k]: e.target.value }));
   const setBool = (k) => (e) => setCfg((c) => ({ ...c, [k]: e.target.checked }));
 
+  // v2.601(LO2601-02): 타임아웃 칸을 비우면 보내지 않는다(서버가 이전 값을 유지) — 예전에는 '' 가 저장돼 모든 AD 로그인이 즉시 'connect timeout' 이었다.
+  const payload = () => ({ ...cfg, timeoutMs: blankOr(cfg.timeoutMs) });
+
   const save = async () => {
     setBusy(true); setMsg(null);
-    try { const r = await putJson('/auth/ad-config', cfg); setCfg(r.ad); setMsg({ ok: true, text: '저장되었습니다.' }); }
+    try { const r = await putJson('/auth/ad-config', payload()); setCfg(r.ad); setMsg({ ok: true, text: '저장되었습니다.' }); }
     catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
 
   const test = async () => {
     setBusy(true); setTestRes(null);
     try {
-      const r = await postJson('/auth/ad-test', { config: cfg, username: sample.username || undefined, password: sample.password || undefined });
+      const r = await postJson('/auth/ad-test', { config: payload(), username: sample.username || undefined, password: sample.password || undefined });
       setTestRes(r);
     } catch (e) { setTestRes({ ok: false, reason: e.message }); } finally { setBusy(false); }
   };

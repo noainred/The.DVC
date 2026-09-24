@@ -132,6 +132,37 @@ export function saveGpuGuestSettings(partial) {
   return loadGpuGuestSettings();
 }
 
+/**
+ * v2.601(감사 EDGE2601-01): **중앙 배포 설정 pull 전용** 병합 — 중앙이 보낸 vCenter 의 VM별 자격증명(vms)·고정 IP(vmIps)는
+ * 중앙 사본이 곧 전체다. mergeGpuGuestSettings 는 부분 패치 규칙이라 '입력에 null/빈 값이 있을 때만' 지우는데, 중앙은
+ * override 를 지우면 사본에서 **키를 없앨 뿐 삭제 표식을 보내지 않는다** — 그래서 중앙에서 지운 VM 비밀번호·IP 가 엣지에
+ * **영원히 남아** 계속 그 계정으로 로그인했다. 여기서는 병합(빈 비밀번호 = 기존 유지 규칙 포함) 뒤, 중앙이 보낸 vCenter 에
+ * 대해 중앙 사본에 없는 키를 지운다. 중앙이 보내지 않은 vCenter(엣지 로컬 전용)는 그대로 둔다(중앙에는 vCenter 삭제
+ * 경로가 없어, 보내지 않은 vCenter = 중앙이 관리한 적 없는 것이다). 반환 { next, removed:{vms, vmIps} }.
+ */
+export function mergePulledGpuGuestSettings(cur, pulled = {}) {
+  const next = mergeGpuGuestSettings(cur || {}, pulled || {});
+  const removed = { vms: 0, vmIps: 0 };
+  const src = pulled && typeof pulled.vcenters === 'object' && pulled.vcenters ? pulled.vcenters : {};
+  for (const [id, v] of Object.entries(src)) {
+    const tgt = next.vcenters[id];
+    if (!tgt || !v || typeof v !== 'object') continue;
+    const keepVms = new Set(Object.entries(v.vms && typeof v.vms === 'object' ? v.vms : {}).filter(([, c]) => c && typeof c === 'object').map(([k]) => k));
+    const keepIps = new Set(Object.entries(v.vmIps && typeof v.vmIps === 'object' ? v.vmIps : {}).filter(([, ip]) => String(ip || '').trim()).map(([k]) => k));
+    for (const k of Object.keys(tgt.vms || {})) if (!keepVms.has(k)) { delete tgt.vms[k]; removed.vms++; }
+    for (const k of Object.keys(tgt.vmIps || {})) if (!keepIps.has(k)) { delete tgt.vmIps[k]; removed.vmIps++; }
+  }
+  return { next, removed };
+}
+
+/** 중앙 배포 설정 적용(엣지 pull) — mergePulledGpuGuestSettings 로 병합해 원자 저장. 반환 { settings, removed }. */
+export function applyPulledGpuGuestSettings(pulled) {
+  const { next, removed } = mergePulledGpuGuestSettings(readFile(), pulled);
+  fs.mkdirSync(path.dirname(FILE), { recursive: true });
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 });
+  return { settings: loadGpuGuestSettings(), removed };
+}
+
 /** 비밀번호를 가려 클라이언트로 안전하게 내보낸다(VM별 자격증명 포함). */
 export function redactGpuGuestSettings(s) {
   const vcenters = {};

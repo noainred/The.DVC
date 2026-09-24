@@ -7,8 +7,8 @@
  * 독립 DB 파일에 커밋한다 — 중앙 화면이 '위임 vCenter 는 빈 화면' 이 되지 않게(CLAUDE.md v2.493 규칙).
  *
  * 규약(guestDiskPush 와 동일): gzip(중앙 express.json 이 Content-Encoding 자동 해제) + 청크(요청당 압축 전
- * 700KB — 중앙 BIG_JSON 16MB 한도의 훨씬 아래지만 고RTT 회선에서 한 요청이 길어지지 않게) + 청크 0 이
- * 커서·커버리지를 실어 보내고 이후 청크는 스파이크 행만 추가 upsert. 413 은 재시도 대상이 아니므로
+ * 700KB — 중앙 BIG_JSON 16MB 한도의 훨씬 아래지만 고RTT 회선에서 한 요청이 길어지지 않게) + 스파이크 행을 먼저
+ * 보내고 **마지막 청크**가 커서·커버리지를 싣는다(v2.601 EDGE2601-02 — 예전에는 청크 0). 413 은 재시도 대상이 아니므로
  * 로그에 남긴다(조용한 전량 소실 방지 — guest-disk v2.466 사고).
  */
 import zlib from 'node:zlib';
@@ -79,7 +79,7 @@ async function post(body) {
 
 /**
  * 한 vCenter 의 한 주기 결과를 push. res = collectVcenterSpikes 반환값.
- * 청크 0 = { cover, cursors, stats, historicalInterval, spikes[0..] } · 이후 = { spikes } 만.
+ * 마지막 청크 = { cover, cursors, stats, historicalInterval, spikes[..] } · 그 앞 = { spikes } 만(v2.601).
  */
 export async function pushVmSeriesSlice(vc, res) {
   const started = Date.now();
@@ -95,7 +95,11 @@ export async function pushVmSeriesSlice(vc, res) {
         vcenterId: vc.id, vcenterName: vc.name || vc.id, generatedAt: Date.now(),
         chunk: i, chunks: chunks.length,
         spikes: chunks[i],
-        ...(i === 0 ? { cover: res.cover || [], cursors: res.cursors || [], stats: res.stats || null, historicalInterval: res.historicalInterval || null } : {}),
+        // ⚠ v2.601(감사 EDGE2601-02): 커버리지(cover)·커서·통계는 **마지막 청크**에 싣는다. 예전에는 청크 0 에 실어 중앙이 그 즉시
+        //   '이 시간대를 측정했다' 를 커밋했는데, 뒤 청크가 실패하면(재시도 없음 — 엣지 커서는 이미 전진) 잃은 스파이크가
+        //   중앙 화면에서 **'측정됨 · 스파이크 없음'** 으로 보였다. 마지막 청크까지 도달했을 때만 측정 사실을 올리면 실패는
+        //   정직하게 '미측정' 으로 남는다. 청크가 1개면 예전과 같다(0 = 마지막).
+        ...(i === chunks.length - 1 ? { cover: res.cover || [], cursors: res.cursors || [], stats: res.stats || null, historicalInterval: res.historicalInterval || null } : {}),
       };
       const r = await post(body);
       bytes += r.bytes; gzBytes += r.gzBytes;

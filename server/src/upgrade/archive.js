@@ -126,6 +126,13 @@ export function parseZip(buf) {
   const count = buf.readUInt16LE(p + 10);
   let o = buf.readUInt32LE(p + 16);
   const entries = [];
+  // v2.601(감사 SEC2601-01 — 재현): 엔트리마다 상한(200MB)만 있고 **누적** 상한이 없었다. 중앙 디렉터리의 여러 엔트리가
+  // 같은 로컬 데이터(localOffset)를 가리키는 '겹침 zip 폭탄' 은 8개로 1.68GB(RSS 1.9GB)를 만들었다 — collectMembers 의
+  // 합계 검사는 전부 풀린 **뒤**라 늦다. parseTar account() 와 같은 규칙: 풀면서 세고, 같은 localOffset 은 거부한다.
+  // 각 엔트리의 maxOutputLength 도 **남은 예산**으로 준다(한 엔트리가 예산을 넘는 순간 멈춘다).
+  const seenOffsets = new Set();
+  let total = 0;
+  const tooBig = () => new Error(`아카이브가 너무 큽니다 — 풀린 크기·개수 상한(${MAX_BUNDLE_BYTES}B · ${MAX_MEMBERS}개)을 넘었습니다`);
 
   for (let i = 0; i < count && o + 46 <= buf.length; i++) {
     if (buf.readUInt32LE(o) !== CDH_SIG) break;
@@ -139,17 +146,27 @@ export function parseZip(buf) {
     o += 46 + nameLen + extraLen + commentLen;
 
     if (name.endsWith('/')) continue; // directory entry
-    if (buf.readUInt32LE(localOffset) !== LFH_SIG) continue;
+    if (localOffset + 30 > buf.length || buf.readUInt32LE(localOffset) !== LFH_SIG) continue;
+    if (seenOffsets.has(localOffset)) throw new Error(`ZIP 엔트리가 같은 데이터를 겹쳐 가리킵니다(localOffset ${localOffset}) — 겹침 압축 폭탄으로 보고 거부합니다`);
+    seenOffsets.add(localOffset);
+    if (entries.length >= MAX_MEMBERS) throw tooBig();
     const lNameLen = buf.readUInt16LE(localOffset + 26);
     const lExtraLen = buf.readUInt16LE(localOffset + 28);
     const dataStart = localOffset + 30 + lNameLen + lExtraLen;
     const comp = buf.subarray(dataStart, dataStart + compSize);
 
     let data;
+    const budget = MAX_BUNDLE_BYTES - total;
     if (method === 0) data = Buffer.from(comp);
-    // 보안(L-1): zip 엔트리도 압축 해제 출력 상한을 건다(zip bomb 방어).
-    else if (method === 8) data = zlib.inflateRawSync(comp, { maxOutputLength: MAX_BUNDLE_BYTES });
+    // 보안(L-1): zip 엔트리도 압축 해제 출력 상한을 건다(zip bomb 방어) — v2.601: 남은 누적 예산까지만.
+    else if (method === 8) {
+      if (budget <= 0) throw tooBig();
+      try { data = zlib.inflateRawSync(comp, { maxOutputLength: budget }); }
+      catch (e) { if (e?.code === 'ERR_BUFFER_TOO_LARGE') throw tooBig(); throw e; }
+    }
     else throw new Error(`Unsupported ZIP compression method ${method}`);
+    total += data.length;
+    if (total > MAX_BUNDLE_BYTES) throw tooBig();
     entries.push({ name, data });
   }
   return entries;

@@ -79,6 +79,14 @@ export function catOf(side, path) {
 const t = (v) => String(v ?? '').trim();
 const norm = (v) => t(v).toLowerCase();
 export function originOf(url) { try { return new URL(t(url)).origin; } catch { return ''; } }
+/**
+ * v2.601(감사 WEB2601-01): 수집 서버의 **주소 기준**(origin + 경로 접두, 끝 슬래시 제거). 등록부는
+ * `https://gw/siteA` 같은 경로 접두를 받고 puller 는 `${url}/api/collector/export` 로 부른다 —
+ * origin 만으로 맞추면 한 게이트웨이 뒤의 엣지 여럿이 한 노드로 합쳐진다. outboundStats 행의 `base` 와 비교한다.
+ */
+export function baseOf(url) {
+  try { const u = new URL(t(url)); return `${u.origin}${u.pathname.replace(/\/+$/, '')}`; } catch { return ''; }
+}
 
 /** 한 연결의 상태(규칙 ①~③). okAt/failAt 이 둘 다 없으면 null(연결 없음). */
 export function linkState({ okAt = 0, failAt = 0, intervalMs = null, now = Date.now() } = {}) {
@@ -117,13 +125,23 @@ export function buildDataFlow(p = {}) {
   // ── 엣지 노드(등록부 + 기록에만 있는 이름) ──
   const alias = new Map();
   const edges = new Map();
-  const byOrigin = new Map();
+  // v2.601(감사 WEB2601-02): 주소(base)가 같은 수집 서버가 둘 이상이면 예전엔 **첫 엣지**에 기록을 합치고
+  //   둘째는 '기록 없음' 이었다(매분 403 인 엣지가 회색이 되고 정상 엣지에 실패가 섞였다). 이제 목록으로 들고,
+  //   태그(수집 서버 id — puller 가 붙인다)가 있는 행은 그 엣지에, 없는 행은 **유일할 때만** 붙인다.
+  const byBase = new Map();
+  const byOriginAll = new Map(); // base 가 없는 행(구버전 기록 형식)용 — origin 이 같은 수집 서버 전부
   for (const c of p.collectors || []) {
     const id = t(c?.id || c?.name); if (!id) continue;
     alias.set(norm(id), id); if (t(c?.name)) alias.set(norm(c.name), id);
     const origin = originOf(c?.url);
-    if (origin && !byOrigin.has(origin)) byOrigin.set(origin, id);
+    const base = baseOf(c?.url);
+    if (base) { if (!byBase.has(base)) byBase.set(base, []); byBase.get(base).push(id); }
+    if (origin) { if (!byOriginAll.has(origin)) byOriginAll.set(origin, []); byOriginAll.get(origin).push(id); }
     edges.set(id, { id, name: t(c?.name) || id, registered: true, enabled: c?.enabled !== false, origin, unverifiedOnly: false });
+  }
+  for (const ids of byBase.values()) {
+    if (ids.length < 2) continue;
+    for (const id of ids) edges.get(id).sharedUrlWith = ids.filter((x) => x !== id);
   }
   const edgeOf = (name, { verified = true } = {}) => {
     const n = t(name) || '(unknown)';
@@ -186,10 +204,23 @@ export function buildDataFlow(p = {}) {
     if ((Number(r.at) || 0) > s.failAt) { s.failAt = Number(r.at) || 0; s.reason = t(r.reason) || `거부 ${r.kind || ''}`.trim(); }
     s.failCount += 1; s.unverified = true;
   }
+  const ambiguous = new Map(); // base → { base, edges, routes:Set, count } — 태그 없이 같은 주소를 쓰는 엣지 여럿
   for (const o of p.outbound?.rows || []) {
     const path = t(o.path);
     if (!path.startsWith('/api/collector/')) continue; // 이 노드가 중앙일 때 의미 있는 방향만
-    const e = byOrigin.get(t(o.origin)) || edgeOf(t(o.origin) || '(알 수 없는 주소)');
+    const base = t(o.base) || t(o.origin); // 구버전 행(base 없음)은 origin 으로만 맞춘다
+    const tagged = t(o.tag) ? alias.get(norm(o.tag)) : null;
+    const cands = (t(o.base) ? byBase.get(base) : byOriginAll.get(base)) || [];
+    let e;
+    if (tagged) e = tagged;
+    else if (cands.length === 1) e = cands[0];
+    else if (cands.length > 1) {
+      // 어느 엣지의 호출인지 모른다 — 한쪽에 붙이면 거짓 상태가 된다. 붙이지 않고 개수로 밝힌다.
+      const a = ambiguous.get(base) || { base, edges: cands, routes: new Set(), count: 0 };
+      a.routes.add(path); a.count += (Number(o.count) || 0);
+      ambiguous.set(base, a);
+      continue;
+    } else e = edgeOf(originOf(base) || t(o.origin) || '(알 수 없는 주소)'); // 노드 이름은 origin 만(경로에 비밀이 실릴 수 있다)
     const s = slot(e, ensureRoute('collector', o.method || 'GET', path.slice('/api/collector'.length)));
     s.okAt = Math.max(s.okAt, Number(o.lastOkAt) || 0);
     s.failAt = Math.max(s.failAt, Number(o.lastFailAt) || 0);
@@ -257,6 +288,8 @@ export function buildDataFlow(p = {}) {
     routes: routesOut, cats, edges: edgesOut, links, recent, totals, unauth,
     unmapped: routesOut.filter((r) => r.cat === 'other').map((r) => r.id),
     undeclared: extra,
+    // v2.601(WEB2601-02): 같은 주소를 쓰는 엣지 여럿에 걸려 어느 엣지에도 붙이지 않은 중앙 → 엣지 기록.
+    sharedUrl: [...ambiguous.values()].map((a) => ({ origin: originOf(a.base), edges: a.edges, routes: [...a.routes].sort(), count: a.count })),
     rejectsWithoutTime: Math.max(0, (p.rejects?.rows || []).reduce((a, r) => a + (Number(r.total) || 0), 0) - rejectsPlaced),
     since: sinceVals.length ? Math.min(...sinceVals) : null,
     rules: { staleFactor: STALE_FACTOR, staleMinMs: STALE_MIN_MS },

@@ -65,11 +65,38 @@ async function pushVcenter(snap, vc) {
   return { bytes: json.length, gzBytes: body.length };
 }
 
+/**
+ * 인벤토리를 '읽지 못한' 상태 — 중앙 setInventory 의 UNREAD 와 **같은 집합**이어야 한다(central/inventory.js).
+ * v2.601(감사 EDGE2601-03): maintenance 추가 — 엣지 재시작 직후 점검중 vCenter 는 캐시가 없어 호스트·VM 이 빈 항목이
+ * 되는데(store.js 점검중 분기), 그것을 보내면 중앙이 마지막 정상 목록을 통째로 교체해 지웠다.
+ */
+export const UNREAD_STATUSES = Object.freeze(['unreachable', 'pending', 'maintenance']);
+/** 보류 상한 — store.js LASTGOOD_HOLD_MS·중앙 HOLD_MS 와 같은 값·같은 env(한 기준). */
+export const WITHHOLD_MAX_MS = Number(process.env.LASTGOOD_HOLD_MS) || 6 * 3_600_000;
+
 /** 이 vCenter 가 '수집 실패·대기인데 인벤토리가 비어 있는' 상태인가(보내면 중앙의 정상 목록을 지운다). */
 export function isUnreadEmpty(snap, vc) {
-  if (vc?.status !== 'unreachable' && vc?.status !== 'pending') return false;
+  if (!UNREAD_STATUSES.includes(vc?.status)) return false;
   const has = (arr) => Array.isArray(arr) && arr.some((x) => x && x.vcenterId === vc.id);
   return !has(snap?.hosts) && !has(snap?.vms);
+}
+
+// v2.601(감사 RECENT2601-02): vCenter 별 '빈 슬라이스 보류를 처음 시작한 시각'. 보류에 시간 제한이 없어, 엣지의 lastGood 이
+//   만료(6시간)된 뒤에도 영원히 보류했고 중앙은 **마지막 push 의 호스트·VM 을 영원히** 합계에 셌다(중앙의 HOLD 규칙 —
+//   6시간 뒤 빈 조각을 받는다 — 에 한 번도 도달하지 못했다). 보류가 WITHHOLD_MAX_MS 를 넘으면 빈 슬라이스를 보내
+//   중앙이 같은 기준으로 판단하게 한다. ⚠ 메모리 값이라 엣지가 재시작하면 다시 센다(보류가 그만큼 길어질 뿐 — 정직 기록).
+const withholdSince = new Map();
+
+/**
+ * 이번 주기에 이 vCenter 의 빈 슬라이스를 보류할지(순수 판정 — now 를 주입한다).
+ * 반환: { withhold:boolean, since:number|null, expired:boolean }
+ */
+export function withholdDecision(snap, vc, now, sinceMap = withholdSince) {
+  if (!isUnreadEmpty(snap, vc)) { sinceMap.delete(vc?.id); return { withhold: false, since: null, expired: false }; }
+  let since = sinceMap.get(vc.id);
+  if (!since) { since = now; sinceMap.set(vc.id, since); }
+  const expired = now - since > WITHHOLD_MAX_MS;
+  return { withhold: !expired, since, expired };
 }
 
 export async function pushInventoryNow() {
@@ -77,7 +104,11 @@ export async function pushInventoryNow() {
   const snap = store.get();
   if (!snap?.vcenters?.length) return { ok: false, reason: '수집된 vCenter 없음' };
   running = true;
-  let sent = 0; let bytes = 0; let gzBytes = 0; let skippedMock = 0; const errors = []; const withheld = [];
+  let sent = 0; let bytes = 0; let gzBytes = 0; let skippedMock = 0; const errors = []; const withheld = []; const holdExpired = [];
+  const now = Date.now();
+  // 스냅샷에서 사라진 vCenter 의 보류 기록은 버린다(등록 삭제 뒤 다시 추가되면 새로 센다).
+  const liveIds = new Set(snap.vcenters.map((v) => v?.id));
+  for (const id of [...withholdSince.keys()]) if (!liveIds.has(id)) withholdSince.delete(id);
   try {
     for (const vc of snap.vcenters) {
       if (!vc.id || vc.status === 'disabled' || vc.collectSource === 'site') continue; // 위임받은 건 재전송 안 함
@@ -95,14 +126,19 @@ export async function pushInventoryNow() {
       //   lastGood 이 메모리에 없어 store 가 호스트·VM 을 비운 unreachable(또는 첫 수집 전 pending) 항목을 만드는데,
       //   중앙 setInventory 는 cache 를 통째로 교체하므로 그 빈 목록이 **중앙의 마지막 정상 인벤토리를 지웠다**.
       //   보내지 않으면 중앙은 그 vCenter 를 '마지막 push 가 오래됨(stale)' 으로 표시한다 — 모르는 것을 0 대로 칠하지 않는다.
-      if (isUnreadEmpty(snap, vc)) { withheld.push(vc.id); continue; }
+      //   v2.601(RECENT2601-02): 보류는 WITHHOLD_MAX_MS(= LASTGOOD_HOLD) 까지만 — 넘으면 빈 슬라이스를 보내 중앙 HOLD 규칙이 적용되게 한다.
+      const wd = withholdDecision(snap, vc, now);
+      if (wd.withhold) { withheld.push(vc.id); continue; }
+      if (wd.expired) holdExpired.push(vc.id);
       try { const r = await pushVcenter(snap, vc); sent++; bytes += r.bytes || 0; gzBytes += r.gzBytes || 0; }
       catch (e) { errors.push(`${vc.id}: ${e.message}`); console.warn(`[inv-push] ${vc.id} 실패: ${e.message}`); }
     }
   } finally { running = false; }
   if (withheld.length) console.warn(`[inv-push] 인벤토리를 읽지 못한 vCenter ${withheld.length}개는 빈 목록으로 중앙을 덮지 않도록 보내지 않았습니다: ${withheld.slice(0, 10).join(', ')}`);
-  last = { at: Date.now(), sent, errors, bytes, gzBytes, skippedMock, withheld, gzip: PUSH_GZIP };
-  return { ok: errors.length === 0, sent, errors, bytes, gzBytes, skippedMock, withheld };
+  if (holdExpired.length) console.warn(`[inv-push] 인벤토리를 ${Math.round(WITHHOLD_MAX_MS / 3_600_000)}시간 넘게 읽지 못한 vCenter ${holdExpired.length}개는 빈 목록을 보냈습니다(중앙이 옛 목록을 계속 세지 않게): ${holdExpired.slice(0, 10).join(', ')}`);
+  const withheldSince = Object.fromEntries(withheld.map((id) => [id, withholdSince.get(id) || null]));
+  last = { at: Date.now(), sent, errors, bytes, gzBytes, skippedMock, withheld, withheldSince, holdExpired, withholdMaxMs: WITHHOLD_MAX_MS, gzip: PUSH_GZIP };
+  return { ok: errors.length === 0, sent, errors, bytes, gzBytes, skippedMock, withheld, withheldSince, holdExpired };
 }
 
 export function inventoryPushStatus() { return { enabled: !!(config.agent.pushInventory && config.agent.centralUrl), centralUrl: config.agent.centralUrl, intervalMs: config.agent.inventoryIntervalMs, last }; }

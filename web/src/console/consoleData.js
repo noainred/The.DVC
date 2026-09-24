@@ -9,6 +9,7 @@
  * 임계값은 포탈 공용 usageColor(primitives.jsx)와 같은 75%/90% 를 쓴다 — 디자인 시안의 75/88 대신
  * 기존 화면과 같은 색이 같은 뜻이 되게 맞췄다.
  */
+import { nsxCount, nsxFailedShort } from '../views/nsxLimitText.js';
 
 export const WARN_PCT = 75;
 export const CRIT_PCT = 90;
@@ -383,8 +384,12 @@ export function buildDomainTiles({ global: g, alarms, nsx, svcmon, pdu, idracPol
   // 네트워크 — NSX 매니저 상태로 판정(포트그룹 수는 상태가 없다).
   if (nsx?.rollup) {
     const r = nsx.rollup;
-    const level = r.managers === 0 ? null : r.managersUp < r.managers - r.managersDegraded ? 2 : r.managersDegraded > 0 || (nsx.collectionErrors || []).length ? 1 : 0;
-    tiles.push({ page: 'network', name: '네트워크', level, value: `${fmtInt(g?.networks)}`, meta: `포트그룹 · NSX ${r.managersUp}/${r.managers} · 세그먼트 ${r.segments} · 엣지 ${r.edgeNodes}`, ...ci('NETWORK') });
+    // ⚠ v2.601(감사 RECENT2601-03): 목록 조회 실패(rollup.listsFailed)면 서버가 개수를 null 로 준다(v2.600) —
+    //   그대로 끼우면 '세그먼트 null' 이 되고, 판정도 그 실패를 보지 않아 초록이었다. 개수는 nsxCount('—'),
+    //   실패 사실은 nsxFailedShort 로 밝히고 수준을 주의(1) 이상으로 올린다.
+    const failed = nsxFailedShort(r);
+    const level = r.managers === 0 ? null : r.managersUp < r.managers - r.managersDegraded ? 2 : r.managersDegraded > 0 || (nsx.collectionErrors || []).length || failed ? 1 : 0;
+    tiles.push({ page: 'network', name: '네트워크', level, value: `${fmtInt(g?.networks)}`, meta: `포트그룹 · NSX ${r.managersUp}/${r.managers} · 세그먼트 ${nsxCount(r.segments)} · 엣지 ${nsxCount(r.edgeNodes)}${failed ? ` · ${failed}` : ''}`, ...ci('NETWORK') });
   } else tiles.push({ page: 'network', name: '네트워크', level: null, value: `${fmtInt(g?.networks)}`, meta: '포트그룹 · NSX 수집 대기', ...ci('NETWORK') });
   // 설비·전력 — 서버 측정 전력 합계 + PDU 임계 위반으로 판정(계약 전력 API 없음 → % 미표시).
   {

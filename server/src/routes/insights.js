@@ -33,6 +33,7 @@ import { buildTopology } from '../insights/topology.js';
 import { buildGraph } from '../insights/graph.js';
 import { getIncidents } from '../insights/incidents.js';
 import { chatOps } from '../llm/chatops.js';
+import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 export const insightsRouter = Router();
@@ -41,6 +42,44 @@ export const insightsRouter = Router();
 // ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
 wrapAsyncRouter(insightsRouter);
 const adminOnly = requireRole('admin');
+
+/*
+ * v2.601 AUTHZ-2601-03 — 비-admin 가림. v2.600 이 `/idrac/host-power` 에 건 주소 가림(maskHostPower)의 형제다:
+ * IP 로 등록한 iDRAC 은 서버 이름이 곧 IP 라 `/finops` topHosts·`/power-breakdown` servers·`/fleet` 행으로
+ * 그 IP 가 viewer 에게 그대로 나갔다. ⚠ **ESXi 호스트 이름은 가리지 않는다** — 인벤토리(inv.hosts)로 이미
+ * 보이는 이름이라 가려도 막는 것이 없고, 가리면 두 화면의 같은 호스트가 서로 다른 이름이 된다.
+ * 캐시(snapMemo)는 가리기 전 값을 공유하고 가림은 응답 직전에 새 객체로 한다(캐시 원본을 바꾸지 않는다).
+ */
+function insightsMatcher(snap) {
+  const esxi = new Set((snap?.hosts || []).map((h) => String(h?.name || '').toLowerCase()).filter(Boolean));
+  let hosts = [];
+  try { hosts = loadRegistry().map((r) => r?.host).filter((h) => typeof h === 'string' && h); } catch { hosts = []; }
+  const isAddr = addressMatcher(hosts);
+  return (v) => isAddr(v) && !esxi.has(String(v).trim().toLowerCase());
+}
+export function maskFinopsPayload(p, match) {
+  if (!p || typeof p !== 'object' || !Array.isArray(p.topHosts)) return p;
+  return { ...p, addressHidden: true, topHosts: p.topHosts.map((h) => (h && match(h.host) ? { ...h, host: maskedAddressName(h.host) } : h)) };
+}
+export function maskPowerBreakdownPayload(p, match) {
+  if (!p || typeof p !== 'object' || !Array.isArray(p.servers)) return p;
+  return { ...p, addressHidden: true, servers: p.servers.map((x) => (x && match(x.name) ? { ...x, name: maskedAddressName(x.name) } : x)) };
+}
+export function maskFleetPayload(p, match) {
+  if (!p || typeof p !== 'object') return p;
+  const row = (r) => {
+    if (!r || typeof r !== 'object') return r;
+    const o = { ...r };
+    for (const f of ['serverId', 'fleetId', 'tagKey']) if (match(o[f])) o[f] = maskedIdToken(o[f]);
+    if (match(o.name)) o.name = maskedAddressName(o.name);
+    return o;
+  };
+  return {
+    ...p, addressHidden: true,
+    bareMetal: Array.isArray(p.bareMetal) ? p.bareMetal.map(row) : p.bareMetal,
+    virtualizationHosts: Array.isArray(p.virtualizationHosts) ? p.virtualizationHosts.map(row) : p.virtualizationHosts,
+  };
+}
 
 // --- FinOps: 전력 → kWh·비용·CO2 ---
 insightsRouter.get('/finops', async (req, res) => {
@@ -59,7 +98,8 @@ insightsRouter.get('/finops', async (req, res) => {
       if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
       return computeFinOps(scoped, measured);
     });
-    sendCached(req, res, key, payload);
+    if (isAdminReq(req)) sendCached(req, res, key, payload);
+    else sendCached(req, res, `${key}|masked`, maskFinopsPayload(payload, insightsMatcher(snap)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 insightsRouter.get('/finops/config', (_req, res) => res.json(loadFinopsConfig()));
@@ -84,7 +124,8 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
       if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
       return computePowerBreakdown(scoped, measured, { vcenterId: vc, assign, datacenters });
     });
-    sendCached(req, res, key, payload);
+    if (isAdminReq(req)) sendCached(req, res, key, payload);
+    else sendCached(req, res, `${key}|masked`, maskPowerBreakdownPayload(payload, insightsMatcher(snap)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 insightsRouter.put('/finops/config', adminOnly, (req, res) => res.json(saveFinopsConfig(req.body || {})));
@@ -105,7 +146,8 @@ insightsRouter.get('/fleet', async (req, res) => {
     const key = `${snap.generatedAt}|${fleetRev()}`;
     const full = await snapMemo('fleet', key, 60_000, async () => getFleetInventory(snap));
     const { liveKeys, ...payload } = full; // liveKeys는 prune 내부용 — 응답에서 제외
-    sendCached(req, res, key, payload);
+    if (isAdminReq(req)) sendCached(req, res, key, payload);
+    else sendCached(req, res, `${key}|masked`, maskFleetPayload(payload, insightsMatcher(snap)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 // 수동 분류 예외 지정/해제(관리자). body: { key, tag: 'baremetal'|'virtualization'|'exclude'|'auto' }

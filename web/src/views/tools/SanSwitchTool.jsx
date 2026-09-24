@@ -19,6 +19,7 @@ import { DeviceHealthPanel, AllHealthCheck } from './SanHealthCheck.jsx';
 import { authStopInfo, authStopSummary, credFpText } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
+import { powerText } from './sanPowerText.js';
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -573,7 +574,7 @@ function DeviceInfo({ d }) {
     ['활성 Zone 설정', d.zoning?.effectiveConfig],
     ['팬', h.fans ? (h.fans.ok == null ? `${h.fans.total}개` : `${h.fans.ok}/${h.fans.total} 정상`) : ''],
     ['전원공급장치', h.psus ? (h.psus.ok == null ? `${h.psus.total}개` : `${h.psus.ok}/${h.psus.total} 정상`) : ''],
-    ['소비전력(PSU 합)', h.powerWatts ? `${h.powerWatts} W` : ''],
+    ['소비전력(PSU 합)', powerText(h)], // v2.601 COL-2601-06 — 일부 PSU 값이 없으면 부분 합임을 밝힌다
     ['SFP 최고 온도', h.tempC != null ? `${h.tempC} ℃` : ''],
     ['가동(Time Awake)', d.extra?.awakeDays != null ? `${d.extra.awakeDays}일` : ''],
     ['총 수명(Time Alive)', d.extra?.aliveDays != null ? `${d.extra.aliveDays}일` : ''],

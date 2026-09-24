@@ -16,6 +16,7 @@ import { getOverrides } from './overrides.js';
 import { getPolicies, isCoveredByAnyPolicy } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { ipToNum } from '../util/ipv4.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 
@@ -156,7 +157,52 @@ export function listScanAgents() {
 }
 
 // ---- 결과 ----------------------------------------------------------------
-let results = readJson(RES, {}) || {};
+// v2.601(감사 CEN2601-01): 엣지가 보낸 alive[] 원소는 **아는 필드·타입만** 담는다. 예전에는 openPorts·
+//   services·hostname 을 받은 그대로 저장해, 원소 하나({openPorts:{a:1}, services:'x', hostname:{}})가
+//   대장(ledger.js)의 .join/.map 에서 던져 **매 주기 ipam.db 저장이 실패**하고 /tools/ipam/insights 가 500 이었다.
+//   정제는 저장 함수 안에 둔다(라우트가 아니라 — 디스크에서 읽은 옛 파일도 같은 정제를 거친다. v2.598 CENTRAL 규약).
+const MAX_PORTS = 256, MAX_SERVICES = 64, MAX_SVC_LEN = 64, MAX_HOST_LEN = 255;
+// eslint-disable-next-line no-control-regex
+const CTRL_RE = /[\u0000-\u001f\u007f]/g;
+function cleanPorts(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const p of v) {
+    if (out.length >= MAX_PORTS) break;
+    if (typeof p !== 'number' && typeof p !== 'string') continue;
+    const n = Number(p);
+    if (Number.isInteger(n) && n >= 1 && n <= 65535) out.push(n);
+  }
+  return out;
+}
+function cleanServices(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const s of v) {
+    if (out.length >= MAX_SERVICES) break;
+    if (typeof s !== 'string' && typeof s !== 'number') continue;
+    const t = String(s).replace(CTRL_RE, '').slice(0, MAX_SVC_LEN);
+    if (t) out.push(t);
+  }
+  return out;
+}
+function cleanHostname(v) {
+  return typeof v === 'string' ? v.replace(CTRL_RE, '').slice(0, MAX_HOST_LEN) : '';
+}
+/** alive 원소 하나를 아는 필드로 좁힌다(순수 — 테스트가 직접 부른다). ip 는 호출부가 isIpv4 로 검사한다. */
+export function cleanAliveHost(h) {
+  return { ip: h.ip, openPorts: cleanPorts(h.openPorts), services: cleanServices(h.services), hostname: cleanHostname(h.hostname) };
+}
+function cleanStoredResults(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [ip, r] of Object.entries(raw)) {
+    if (!r || typeof r !== 'object' || !isIpv4(ip)) continue;
+    out[ip] = { ...cleanAliveHost({ ...r, ip }), lastSeen: numOrNull(r.lastSeen) ?? 0, agent: typeof r.agent === 'string' ? r.agent : LOCAL };
+  }
+  return out;
+}
+let results = cleanStoredResults(readJson(RES, {}));
 registerStore(RES, () => results);
 ensureExitFlush();
 
@@ -170,9 +216,10 @@ const sameList = (a, b) => { const x = a || [], y = b || []; return x.length ===
 export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
   let changed = false;
   let n = 0;
-  for (const h of alive) {
+  for (const raw of alive) {
     if (n++ >= MAX_MERGE) break;                 // 대량 주입 상한
-    if (!h || !isIpv4(h.ip)) continue;           // 잘못된/오염 IP 키 차단(__proto__, 333.0.0.0 등)
+    if (!raw || typeof raw !== 'object' || !isIpv4(raw.ip)) continue; // 잘못된/오염 IP 키 차단(__proto__, 333.0.0.0 등)
+    const h = cleanAliveHost(raw);               // v2.601 CEN2601-01: 아는 필드·타입만
     const prev = results[h.ip];
     // 분산 멀티에이전트: 더 오래된(stale) 보고가 최신 관측을 덮어쓰지 않게 한다.
     if (prev && (prev.lastSeen || 0) > ts) { recordSeen(h, ts, agent); continue; }
@@ -307,6 +354,8 @@ registerStore(REP, () => reports);
 
 export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = null } = {}) {
   const name = agent || LOCAL;
+  // v2.601 CEN2601-01: 엣지 본문의 수치를 그대로 저장하지 않는다(객체·문자열이 화면·이력으로 새지 않게).
+  scanned = numOrNull(scanned); alive = numOrNull(alive); durationMs = numOrNull(durationMs);
   reports[name] = { at: Date.now(), scanned, alive };
   scheduleWrite(REP); // 디바운스 원자 기록(에이전트 보고 핫패스 비차단)
   recordRun({ agent: name, scanned, alive, durationMs }); // 완료된 스캔 이력에 추가
@@ -321,7 +370,7 @@ let runs = (() => { const r = readJson(RUNLOG, {}); return Array.isArray(r?.runs
 registerStore(RUNLOG, () => ({ runs }));
 
 export function recordRun({ agent = LOCAL, scanned = 0, alive = 0, durationMs = null } = {}) {
-  runs.unshift({ at: Date.now(), agent, scanned, alive, durationMs });
+  runs.unshift({ at: Date.now(), agent: String(agent), scanned: numOrNull(scanned), alive: numOrNull(alive), durationMs: numOrNull(durationMs) });
   if (runs.length > MAX_RUNS) runs = runs.slice(0, MAX_RUNS);
   scheduleWrite(RUNLOG); // 디바운스 원자 기록
 }

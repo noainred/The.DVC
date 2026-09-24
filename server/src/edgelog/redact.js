@@ -77,9 +77,26 @@ export function redactDeep(input) {
  *   넣은 현장이면 그 비밀번호가 콘솔 링버퍼 → 엣지 로그 화면으로 나간다. 사용자정보는 **비밀번호 쪽만** 가린다
  *   (계정 이름은 진단 정보다). 줄 규칙만 넓힌다 — `isSecretKey`(객체 키)는 그대로 둔다(식별자 오탐 규약).
  */
+/*
+ * v2.601(감사 SEC2601-03): JSON 로 찍힌 줄(`{"password":"…"}`)은 키 뒤에 따옴표가 와서 `KEY\s*[=:]` 규칙을 빠져나갔고,
+ *   SECRET_FIELDS 의 카멜케이스 이름(`vcenterPass`·`guestPass`·`privateKey`)도 목록에 없었다. 둘을 더한다.
+ *   · JSON 꼴은 **키 끝이 비밀 이름**일 때만(`"centralToken"` 은 가리고 `"tokenFp"`·`"deviceKey"`·`"partKey"` 는 두지 않는다 —
+ *     v2.549 식별자 오탐 규약). 따옴표 값은 따옴표를 남기고 안만 가린다(`"[가림]"`) — 줄의 JSON 모양을 깨지 않는다.
+ *   · 따옴표 값 길이는 4,096자로 묶는다(긴 줄에서 정규식이 선형이도록 — v2.598 INJ 규약).
+ *   · 여전히 완전하지 않다(자유 문자열) — 화면의 logRedactNote 는 그대로 둔다.
+ */
+const LOG_SECRET_KEYS = 'token|password|passwd|passphrase|secret|apikey|api_key|private_?key|vcenterPass|guestPass';
+const JSON_SECRET_RE = new RegExp(`(["'][A-Za-z0-9_.-]{0,40}?(?:${LOG_SECRET_KEYS})["']\\s*:\\s*)("(?:[^"\\\\\\n]|\\\\.){0,4096}"|'[^'\\n]{0,4096}'|[^\\s,}\\]]+)`, 'gi');
+const PLAIN_SECRET_RE = new RegExp(`((?:${LOG_SECRET_KEYS})\\s*[=:]\\s*)("(?:[^"\\\\\\n]|\\\\.){0,4096}"|\\S+)`, 'gi');
+const maskValue = (pre, v) => {
+  if (v === 'null' || v === '""' || v === "''") return pre + v; // 빈 값은 그대로 — 그 자체가 진단이다
+  const q = v[0] === '"' || v[0] === "'" ? v[0] : '';
+  return q ? `${pre}${q}${MASK}${q}` : `${pre}${MASK}`;
+};
 export function redactLogLine(line) {
   return String(line == null ? '' : line)
-    .replace(/((?:token|password|passwd|passphrase|secret|apikey|api_key)\s*[=:]\s*)(\S+)/gi, `$1${MASK}`)
+    .replace(JSON_SECRET_RE, (_m, pre, v) => maskValue(pre, v))
+    .replace(PLAIN_SECRET_RE, (_m, pre, v) => maskValue(pre, v))
     .replace(/\b(Bearer\s+)\S+/gi, `$1${MASK}`)
     .replace(/\b((?:Proxy-)?Authorization\s*[=:]\s*(?:Basic|Digest)\s+)\S+/gi, `$1${MASK}`)
     .replace(/(\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s/@:]{1,256}:)[^\s/@]{1,512}@/gi, `$1${MASK}@`)

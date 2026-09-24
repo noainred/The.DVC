@@ -20,6 +20,17 @@ const PUSH_GZIP = process.env.PDU_PUSH_GZIP !== 'false';
 
 let _timer = null;
 let _last = { at: null, ok: false, count: 0, reason: '' };
+const PUSH_MAX = 500;
+
+/** 중앙 응답의 거절 요약(v2.601 EDGE2601-04 — storage/sanswitch push 와 같은 모양. 도메인 간 import 를 피해 여기 둔다). */
+async function readDropSummary(res) {
+  try {
+    const j = await res.json();
+    if (!j || typeof j !== 'object') return null;
+    const rejected = Number.isFinite(Number(j.rejected)) ? Number(j.rejected) : 0;
+    return rejected > 0 ? { rejected, dropped: j.dropped && typeof j.dropped === 'object' && !Array.isArray(j.dropped) ? j.dropped : null } : null;
+  } catch { return null; }
+}
 
 // v2.597(감사 L2597-04 — 재현): 재진입 가드 — 타이머 push 와 설정 pull 뒤 push 가 겹치면 늦게 끝난 옛 본문이 새 본문을
 // 덮을 수 있다(storage/push.js 와 같은 규약). 진행 중에 들어온 요청은 끝난 뒤 한 번 더 보낸다(새 수집분을 놓치지 않게).
@@ -38,7 +49,11 @@ async function pushPduOnce() {
   if (!config.agent.centralUrl || !config.agent.centralToken) {
     return { ok: false, reason: 'push 비활성화(CENTRAL_URL/CENTRAL_TOKEN 미설정)' };
   }
-  const snapshots = localSnapshots().slice(0, 500);
+  // v2.601(감사 EDGE2601-04): 500대 상한은 **밝힌다**(omitted) — 예전에는 조용히 잘라 501번째부터가 중앙에 없는데 상태는 '성공' 이었다.
+  const all = localSnapshots();
+  const snapshots = all.slice(0, PUSH_MAX);
+  const omitted = all.length - snapshots.length;
+  if (omitted) console.warn(`[pdu-push] 스냅샷 ${all.length}건 중 ${omitted}건은 상한(${PUSH_MAX})으로 보내지 않았습니다.`);
   if (!snapshots.length) {
     // v2.583 감사 #13: 위임 PDU 가 **정말 0대**일 때만 빈 목록을 보내 중앙 보관분을 비운다(장비를 뺀 법인의 유령 PDU).
     //   위임 장비는 있는데 스냅샷이 아직 없으면(재기동 직후) 보내지 않는다 — 빈 목록으로 덮으면 중앙 화면이 빈다.
@@ -63,9 +78,13 @@ async function pushPduOnce() {
     if (res.status === 413) {
       console.warn(`[pdu-push] 중앙이 본문 크기를 거부(413). 스냅샷 ${snapshots.length}건 · JSON ${Math.round(json.length / 1024)}KB — 중앙의 JSON_BODY_LIMIT 을 확인하세요.`);
     }
-    _last = { at: Date.now(), ok, count: snapshots.length, bytes: json.length, reason: ok ? (snapshots.length ? '' : '위임 PDU 0대 — 중앙 목록을 비웠습니다') : `HTTP ${res.status}` };
+    // v2.601(감사 EDGE2601-04): 200 이어도 중앙이 일부를 뺐을 수 있다(소유권·형식) — 응답을 읽어 상태·콘솔에 남긴다.
+    const ds = ok ? await readDropSummary(res) : null;
+    if (ds?.rejected) console.warn(`[pdu-push] 중앙이 PDU ${ds.rejected}대를 받지 않았습니다(${Object.entries(ds.dropped || {}).filter(([, n]) => Number(n) > 0).map(([k, n]) => `${k} ${n}`).join(' · ') || '사유 미상'}) — 그 PDU 는 중앙 화면에 나오지 않습니다`);
+    const extra = { ...(omitted ? { omitted } : {}), ...(ds?.rejected ? { rejected: ds.rejected, dropped: ds.dropped } : {}) };
+    _last = { at: Date.now(), ok, count: snapshots.length, bytes: json.length, reason: ok ? (snapshots.length ? '' : '위임 PDU 0대 — 중앙 목록을 비웠습니다') : `HTTP ${res.status}`, ...extra };
     if (!ok && res.status !== 413) console.warn(`[pdu-push] 실패: HTTP ${res.status}`); // v2.583(카탈로그 N2) — 413 은 위에서 크기와 함께 찍었다
-    return { ok, count: snapshots.length };
+    return { ok, count: snapshots.length, ...extra };
   } catch (e) {
     _last = { at: Date.now(), ok: false, count: 0, reason: e.message };
     console.warn(`[pdu-push] 실패: ${e.message}`); // v2.583(카탈로그 N2)

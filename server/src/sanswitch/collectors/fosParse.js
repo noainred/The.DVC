@@ -31,7 +31,7 @@ export function parseFirmwareShow(text) {
  *
  * 소비전력은 FOS 관례상 음수로 찍힌다(-240W = 240W 소비) → 절댓값으로 정규화한다.
  *
- * @returns { model, serial, partNumber, chassisId, fans, psus[], powerWatts, awakeDays, aliveDays }
+ * @returns { model, serial, partNumber, chassisId, fans, psus[], powerWatts, powerPartial, awakeDays, aliveDays }
  */
 export function parseChassisShow(text) {
   const out = { model: '', serial: '', partNumber: '', chassisId: '',
@@ -87,6 +87,9 @@ export function parseChassisShow(text) {
   if (!out.partNumber) out.partNumber = fb.partNumber;
   const watts = out.psus.map((p) => p.powerW).filter((w) => w != null);
   out.powerWatts = watts.length ? watts.reduce((a, b) => a + b, 0) : null;
+  // v2.601(감사 COL-2601-06): 값을 보고한 PSU 만 더한다 — 일부 PSU 값이 없으면 합이 **조용히 낮아졌다**. 부분 합이면
+  //   읽은 수/전체 수를 싣는다(화면이 'N개 중 M개 합' 으로 밝힌다). 전부 없으면 powerWatts 가 이미 null 이다.
+  out.powerPartial = watts.length && watts.length < out.psus.length ? { read: watts.length, total: out.psus.length } : null;
   return out;
 }
 
@@ -143,13 +146,19 @@ export function parseSwitchShow(text) {
     const rest = t.slice(i);
     const portType = rest.find((x) => /-Port$/i.test(x)) || '';
     const attached = rest.filter((x) => /^[0-9a-f]{2}(:[0-9a-f]{2}){7}$/i.test(x));
+    const comment = rest.filter((x) => !/-Port$/i.test(x) && !/^[0-9a-f]{2}(:[0-9a-f]{2}){7}$/i.test(x) && x !== 'FC').join(' ').trim();
+    let state = normalizePortState(stateRaw);
+    // v2.601(감사 COL-2601-03): portdisable 된 포트는 State 가 No_Light/No_Module 이고 'Disabled (Persistent)' 는 Proto 뒤
+    //   **주석 열**에 온다. 예전에는 State 첫 토큰만 봐 비활성 포트가 '비어 있음(offline)' 으로 세였다(disabled 는 항상 0 —
+    //   REST 경로는 is-enabled-state 로 세고 있어 두 경로가 달랐다). 고장(faulty)은 덮지 않는다.
+    if ((state === 'offline' || state === 'unknown') && /^Disabled\b/i.test(comment)) state = 'disabled';
     ports.push({
       index, slot, port,
       slotPort: slot == null ? String(port) : `${slot}/${port}`,
       address, media, speed: normalizeSpeed(speed),
-      state: normalizePortState(stateRaw), stateRaw,
+      state, stateRaw,
       portType, attached,
-      comment: rest.filter((x) => !/-Port$/i.test(x) && !/^[0-9a-f]{2}(:[0-9a-f]{2}){7}$/i.test(x) && x !== 'FC').join(' ').trim(),
+      comment,
     });
   }
   return { header, ports, hasSlot };

@@ -13,7 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { loadLogSettings } from './settings.js';
-import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
+import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
+import { chunkedDelete, PRUNE_CHUNK_ROWS } from '../util/chunkedPrune.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 // 저장 위치: 설정의 storagePath(빈값=CONFIG_DIR). 각 포탈이 자기 데이터만 로컬 보관.
 function dbPath() {
@@ -56,13 +57,24 @@ function initSqlite() {
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* */ }
     const ins = db.prepare('INSERT OR IGNORE INTO events (vcenterId,k,ts,severity,type,user,entity,message) VALUES (?,?,?,?,?,?,?,?)');
     const lastTsStmt = db.prepare('SELECT MAX(ts) mx FROM events WHERE vcenterId=?');
-    const prune = db.prepare('DELETE FROM events WHERE ts < ?');
+    // v2.601(감사 DB2601-03 — 재현): 예전 `DELETE FROM events WHERE ts < ?` 한 방은 183만 행에서 이벤트 루프를 4.8초 멈췄다
+    // (metrics·idrac·pdu·dirusage 는 v2.453 chunkedPrune 를 쓰는데 logs 만 빠져 있었다). rowid 서브쿼리 + idx_events_ts_only.
+    const pruneChunkStmt = db.prepare('DELETE FROM events WHERE rowid IN (SELECT rowid FROM events WHERE ts < ? LIMIT ?)');
+    let pruneBg = null;                          // 진행 중인 백그라운드 청크 정리(단일 비행)
     const metaStmt = db.prepare('SELECT COUNT(*) n, MIN(ts) mn, MAX(ts) mx FROM events');
     const rowCountStmt = db.prepare('SELECT COUNT(*) n FROM events');
     let metaCache = null;                       // { at, v } — 아래 meta() 주석 참조(v2.503)
     const vcStmt = db.prepare('SELECT vcenterId, COUNT(*) n, MAX(ts) mx FROM events GROUP BY vcenterId');
     // 용량 정리 루프가 반복 호출한다 — 매 회 prepare 하면 파싱·계획 수립이 반복된다(v2.503).
     const pruneOldestStmt = db.prepare('DELETE FROM events WHERE rowid IN (SELECT rowid FROM events ORDER BY ts ASC LIMIT ?)');
+    /**
+     * 보관기간 초과분 청크 삭제(비동기, 청크 사이 setImmediate 양보). 상한(PRUNE_MAX_ROWS)에 걸리면 다음 주기가 잇는다.
+     * @returns {Promise<{deleted:number, done:boolean, chunks:number}>}
+     */
+    const pruneAsync = async (beforeTs) => {
+      try { return await chunkedDelete(pruneChunkStmt, [beforeTs], { label: 'vclogs' }); }
+      finally { metaCache = null; }
+    };
     const powerStmt = db.prepare("SELECT entity, type, MAX(ts) AS ts FROM events WHERE vcenterId=? AND type IN ('VmPoweredOffEvent','VmPoweredOnEvent') GROUP BY entity, type"); // idx_events_power
     const build = (where, params) => ({ where, params });
     function filterSql(f) {
@@ -108,11 +120,31 @@ function initSqlite() {
         metaCache = { at: now, v };
         return v;
       },
-      prune: (beforeTs) => { const r = prune.run(beforeTs); metaCache = null; return Number(r?.changes || 0); },
+      /**
+       * 호출부(poller)는 반환값을 **숫자로** 쓴다(동기 계약). 그래서 첫 청크만 동기로 지우고(≤ PRUNE_CHUNK_ROWS — 한 청크 수십 ms)
+       * 남으면 나머지를 백그라운드 청크 정리로 넘긴다(단일 비행 — 겹쳐 돌지 않는다). 나머지 건수는 끝날 때 여기서 로그로 밝힌다.
+       * 반환값은 **이번 호출이 동기로 지운 행 수**다(전체가 아니다 — 나머지는 로그 줄).
+       */
+      prune: (beforeTs) => {
+        if (pruneBg) return 0;                   // 이미 정리 중 — 같은 조건이므로 그쪽이 이어서 지운다
+        const r = pruneChunkStmt.run(beforeTs, PRUNE_CHUNK_ROWS);
+        metaCache = null;
+        const first = Number(r?.changes || 0);
+        if (first >= PRUNE_CHUNK_ROWS) {
+          pruneBg = pruneAsync(beforeTs)
+            .then((x) => { if (x.deleted) console.log(`[vclogs] 보관기간 초과 추가 정리 ${x.deleted}건(청크 ${x.chunks}회${x.done ? '' : ' · 상한에 걸려 다음 주기에 계속'})`); })
+            .catch((e) => console.warn(`[vclogs] 보관기간 정리 실패: ${e.message}`))
+            .finally(() => { pruneBg = null; });
+        }
+        return first;
+      },
+      pruneAsync,
+      pruneInFlight: () => pruneBg,
       // v2.590 P10: 디스크 사용은 본 파일 + -wal 이다. VACUUM 은 WAL 모드에서 새 페이지를 WAL 로 쓰고 체크포인트 뒤에도
       // -wal 파일은 줄지 않아, 본 파일만 재면 상한 1GB 현장의 실제 점유가 약 2GB 였다.
       sizeBytes: () => { let n = 0; for (const f of [DB_PATH, `${DB_PATH}-wal`]) { try { n += fs.statSync(f).size; } catch { /* 없으면 0 */ } } return n; },
-      pruneOldest: (n) => { const r = pruneOldestStmt.run(Math.max(1, n)); metaCache = null; return Number(r?.changes || 0); },
+      // v2.601(DB2601-03): 한 번에 지우는 양을 청크 크기로 묶는다 — 예전에는 전체 행의 10% 를 한 문장으로 지웠다(수십만 행 동기).
+      pruneOldest: (n) => { const r = pruneOldestStmt.run(Math.min(PRUNE_CHUNK_ROWS, Math.max(1, n))); metaCache = null; return Number(r?.changes || 0); },
       vacuum: () => { try { db.exec('VACUUM'); db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch { /* */ } },
       path: DB_PATH,
       close: () => { try { db.close(); } catch { /* */ } },

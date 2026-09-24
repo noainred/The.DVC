@@ -23,6 +23,42 @@ export const configPullMs = () => clampIntervalMs(Number(process.env.SANSW_CONFI
 let _timer = null;
 let _lastSig = '';
 let _last = null;
+let _collectPush = null; // v2.601 EDGE2601-06: '지금 수집' 직후 push 의 결과(상태 화면·엣지 로그용)
+
+/**
+ * v2.601(감사 EDGE2601-06): '지금 수집' 직후 push. 주기 push 가 진행 중이면 `pushSanSwitchNow` 는 `{ok:false,
+ * reason:'이전 push 진행 중'}` 을 **던지지 않고** 돌려주는데, 예전에는 `.catch(() => {})` 만 있어 그 거절이 어디에도 남지
+ * 않았고 진행 중이던 push 는 재수집 **전** 스냅샷을 보냈다(새 결과는 다음 주기까지 중앙에 없다). 진행 중이면 끝날 때까지
+ * 기다렸다가(백그라운드 — pull 을 막지 않는다) 한 번 더 보낸다. 결과는 `_collectPush` 와 콘솔에 남긴다.
+ */
+const BUSY_REASON = '이전 push 진행 중';
+const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); });
+export async function pushAfterCollect({ waitMs = 2_000, maxTries = 90 } = {}) {
+  let r;
+  try { r = await pushSanSwitchNow(); } catch (e) { r = { ok: false, reason: e.message }; }
+  if (r?.ok === false && r.reason === BUSY_REASON) {
+    _collectPush = { at: Date.now(), ok: null, pending: true, reason: '주기 push 가 진행 중 — 끝난 뒤 다시 보냅니다' };
+    const bg = (async () => {
+      let tries = 0;
+      while (tries++ < maxTries) {
+        await sleep(waitMs);
+        let x;
+        try { x = await pushSanSwitchNow(); } catch (e) { x = { ok: false, reason: e.message }; }
+        if (!(x?.ok === false && x.reason === BUSY_REASON)) { recordCollectPush(x, tries); return x; }
+      }
+      recordCollectPush({ ok: false, reason: `주기 push 가 ${Math.round((waitMs * maxTries) / 1000)}초 넘게 끝나지 않아 다시 보내지 못했습니다 — 다음 주기 push 에 실립니다` }, tries);
+      return null;
+    })();
+    bg.catch(() => {}); // recordCollectPush 가 이미 상태·콘솔에 남긴다
+    return { ok: null, pending: true, done: bg };
+  }
+  recordCollectPush(r, 0);
+  return r;
+}
+function recordCollectPush(r, retries) {
+  _collectPush = { at: Date.now(), ok: !!r?.ok, ...(r?.ok ? {} : { reason: r?.reason || '알 수 없음' }), ...(retries ? { retries } : {}) };
+  if (!r?.ok) console.warn(`[sanswitch-config] 재수집 결과 push 실패: ${r?.reason || '알 수 없음'}`);
+}
 // v2.591(3차 감사 PR-7): 실패를 상태뿐 아니라 콘솔에도(같은 사유는 10분에 한 번) — 403·5xx 가 저널 어디에도 안 남았다.
 const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 // 재진입 가드(single-flight) — 수동 실행 API 도 같은 함수를 부르므로 가드를 공유한다.
@@ -67,7 +103,7 @@ async function _pull() {
     for (const id of wants) {
       try { if (await collectDeviceNow(id)) collected++; else console.log(`[sanswitch-config] ${id} 는 이미 수집 중 — 그 결과로 대신합니다`); } catch (e) { console.warn(`[sanswitch-config] 재수집 실패 ${id}: ${e.message}`); }
     }
-    if (collected) await pushSanSwitchNow().catch(() => {}); // 결과를 push 주기까지 기다리지 않게
+    if (collected) await pushAfterCollect(); // 결과를 push 주기까지 기다리지 않게(v2.601 EDGE2601-06: 진행 중이면 끝난 뒤 다시)
     // 연결 테스트 대행(v2.421): 중앙 등록 화면의 테스트를 현지에서 실행하고 결과(추적 로그 포함)를 회신한다.
     // pull 자체를 막지 않도록 비동기로 돌린다(테스트는 최대 60초).
     const tests = Array.isArray(body?.testNow) ? body.testNow.slice(0, 5) : [];
@@ -90,7 +126,7 @@ async function _pull() {
         await pushPerfNow();
       })().catch((e) => console.warn(`[sanswitch-config] 포트 사용량 수집 대행 실패: ${e.message}`));
     }
-    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied, perfCollect };
+    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied, perfCollect, ...(collected && _collectPush ? { collectPush: _collectPush } : {}) };
     return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied, perfCollect };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };
@@ -114,4 +150,4 @@ export function startSanSwitchConfigPull() {
   if (_timer || !config.agent.centralUrl || !config.agent.centralToken) return;
   _timer = startAdaptiveTimer(configPullMs, () => pullSanSwitchConfigNow(), { firstDelayMs: 20_000, name: 'SAN 스위치 설정 pull' });
 }
-export function sanSwitchConfigPullStatus() { return { ..._last, intervalMs: configPullMs() }; }
+export function sanSwitchConfigPullStatus() { return { ..._last, ...(_collectPush ? { collectPush: _collectPush } : {}), intervalMs: configPullMs() }; }

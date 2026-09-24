@@ -14,6 +14,14 @@ import { getDb } from '../idrac/db.js';
 import { describeError } from '../util/errors.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { identityIssue } from './registry.js';
+import { withOutboundTag } from '../util/outboundStats.js';
+
+/**
+ * v2.601(감사 WEB2601-02): 데이터 흐름 지도의 '중앙 → 엣지' 기록은 주소(origin+경로 접두)로 엣지를 찾는다 —
+ * 같은 주소를 두 수집 서버가 쓰면 기록이 첫 엣지에 합쳐졌다. 이 호출이 **어느 수집 서버의 것인지**는 여기서
+ * 알므로 id 를 태그로 붙인다.
+ */
+const pullTagged = (c) => withOutboundTag(c.id, () => pullOne(c));
 
 let timer = null;
 const fails = new Map(); // collectorId -> 연속 실패 사이클 수(상태 깜빡임 방지용)
@@ -97,7 +105,7 @@ export async function pullCollectorByAgent(agentName) {
   if (pulling || inflight.has(c.id)) return false; // 주기 폴/중복과 겹치지 않게
   inflight.add(c.id);
   try {
-    const r = await pullOne(c);
+    const r = await pullTagged(c);
     fails.set(c.id, 0);
     setCollectorStatus(c.id, { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null });
     return true;
@@ -116,7 +124,7 @@ async function pullNowInner() {
   try { clearStaleRemote(new Set(loadCollectors().map((c) => c.id))); } catch { /* 정리 실패는 폴링에 영향 없음 */ }
   await Promise.all(collectors.map(async (c) => {
     try {
-      const r = await pullOne(c);
+      const r = await pullTagged(c);
       fails.set(c.id, 0);
       setCollectorStatus(c.id, { ok: true, hosts: r.hosts, duplicateSkipped: r.duplicateSkipped ?? 0, version: r.version, datacenter: r.datacenter, authDeny: r.authDeny, error: null, agent: r.agent, hostname: r.hostname, identity: r.identity || null, mock: !!r.mock });
     } catch (err) {
@@ -129,8 +137,13 @@ async function pullNowInner() {
       // 실패 상태는 **직전 상태 위에 덮는다**(v2.548 리뷰 H5) — 객체를 통째로 바꾸면 version·agent·hostname 이
       // 사라져 파트 장애 화면의 엣지 분류가 '구버전' 대신 '버전 미상' 으로 떨어진다(조치가 다르다).
       const prevSt = getCollectorStatus(c.id) || {};
-      if (n >= 2 || isAuth) {
-        setCollectorStatus(c.id, { ...prevSt, ok: false, degraded: false, error: d.message, fails: n });
+      // ⚠ v2.601(감사 WEB2601-06): 깜빡임 방지 유예는 '직전까지 정상이던' 엣지에만 준다. 한 번도 성공하지 못한
+      //   엣지(hosts 가 없다 — 성공 경로만 채운다)의 첫 실패를 ok:true(저하)로 두면 닿은 적 없는 엣지가 한 주기
+      //   동안 '정상(저하)' 로 보였다. 그때 `at` 은 null 이다 — state.js 는 at 을 '마지막 정상 pull' 로 두는데
+      //   (v2.548 H5, 통신 지도 라벨) 비워 두지 않으면 실패 시각이 그 자리에 들어간다.
+      const everOk = Number.isFinite(prevSt.hosts);
+      if (n >= 2 || isAuth || !everOk) {
+        setCollectorStatus(c.id, { ...prevSt, ok: false, degraded: false, error: d.message, fails: n, ...(everOk ? {} : { at: null, neverOk: true }) });
       } else {
         setCollectorStatus(c.id, { ...prevSt, ok: true, degraded: true, error: d.message, fails: n });
       }

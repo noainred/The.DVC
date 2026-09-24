@@ -22,6 +22,9 @@ import { store } from '../store.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { config } from '../config.js';
 import { apiKeyAuth } from '../publicapi/auth.js';
+import { setKnownVcenterSource, unknownScopeVcenters } from '../publicapi/keys.js';
+import fs from 'node:fs';
+import path from 'node:path';
 import { endpointAllowed, project, projectAll, ENDPOINTS, GROUPS } from '../publicapi/allowlist.js';
 import { buildOpenApi } from '../publicapi/openapi.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -39,6 +42,36 @@ const v1 = express.Router();
 wrapAsyncRouter(v1);
 
 /* ── 공용 ─────────────────────────────────────────────────────────────────── */
+
+/**
+ * 지금 존재하는 vCenter id — 등록부 ∪ 스냅샷(v2.601 WEB2601-04). 스냅샷만 보면 방금 등록해 아직 수집 전인
+ * vCenter 를 '없다' 고 하고, 등록부만 보면 목(mock) 데이터 모드의 vCenter 를 '없다' 고 한다.
+ * 둘 다 읽지 못하면 null(= 모른다 — 경고·거절하지 않는다).
+ */
+// ⚠ `vcenter/registry.js loadRegistry()` 를 쓰지 않는다 — 매 요청 비밀 복호(openSecretsDeep)·손상 보존까지 한다.
+//   id 만 필요하므로 파일을 읽기 전용으로 파싱하고 mtime 으로 캐시한다(못 읽으면 스냅샷만 — 조용히 넓히지 않는다).
+let _regIds = { mtimeMs: -1, ids: null };
+function registryVcenterIds() {
+  const file = path.join(config.configDir, 'vcenters.json');
+  let st;
+  try { st = fs.statSync(file); } catch { return new Set(); }        // 파일 없음 = 등록 0개(읽은 것이다)
+  if (st.mtimeMs === _regIds.mtimeMs && _regIds.ids) return _regIds.ids;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const ids = new Set((Array.isArray(parsed?.vcenters) ? parsed.vcenters : []).map((v) => String(v?.id || '')).filter(Boolean));
+    _regIds = { mtimeMs: st.mtimeMs, ids };
+    return ids;
+  } catch { return null; }
+}
+export function knownVcenterIdsNow(snap = store.get()) {
+  const ids = new Set();
+  let read = false;
+  const reg = registryVcenterIds();
+  if (reg) { for (const id of reg) ids.add(id); read = true; }
+  if (snap && Array.isArray(snap.vcenters)) { for (const v of snap.vcenters) if (v?.id) ids.add(String(v.id)); read = true; }
+  return read ? ids : null;
+}
+setKnownVcenterSource(() => knownVcenterIdsNow());
 
 function envelope(res, apiPath, data, meta = {}) {
   return res.json({
@@ -79,6 +112,20 @@ function guarded(apiPath, handler) {
     const inScope = (vcId) => allowed == null || allowed.has(vcId);
     const fields = gate.endpoint.fields;
     const scopeMeta = { scopedToVcenters: allowed == null ? null : [...allowed].length };
+    /*
+     * ⚠⚠ v2.601 WEB2601-04 — 범위의 vCenter 가 **전부** 존재하지 않으면(오타·삭제) 그 키는 아무것도 볼 수 없다.
+     *   예전에는 합계 0·빈 목록을 ok:true 로 줘 상대 포탈이 '자원 0개' 로 읽었다(v2.509 '없다' 와 '못 본다' 구분).
+     *   403 `scope-empty` 로 거절한다(키는 유효하고 인가가 빈 것 — no-groups 와 같은 등급). 일부만 없으면 진행하고
+     *   개수를 밝힌다. 존재 여부를 **모르면**(등록부·스냅샷 둘 다 못 읽음) 거절하지 않는다.
+     */
+    if (allowed != null) {
+      const unknown = unknownScopeVcenters([...allowed], knownVcenterIdsNow(snap));
+      if (unknown && allowed.size > 0 && unknown.length === allowed.size) {
+        return res.status(403).json({ ok: false, error: 'scope-empty', code: 'scope-empty', endpoint: apiPath,
+          reason: `이 키의 범위 vCenter ${unknown.length}곳이 전부 등록돼 있지 않습니다(삭제됐거나 id 가 틀렸습니다) — 설정 › 연동 키에서 범위를 고쳐야 합니다.` });
+      }
+      if (unknown && unknown.length) scopeMeta.scopeUnknownVcenters = unknown.length;
+    }
     /*
      * ⚠⚠ **async 핸들러의 throw 를 반드시 잡는다** — express 4 는 그것을 잡지 않아 요청이
      *   응답 없이 **매달린다**(v2.548 S1 에서 실측한 hang). `Promise.resolve().then()` 으로

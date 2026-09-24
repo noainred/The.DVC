@@ -9,7 +9,7 @@
 import { store } from '../store.js';
 import { load as loadSettings } from './settings.js';
 import { collectAndStore } from './service.js';
-import { prune, getDb } from './db.js';
+import { prune, getDb, lastCollectTs } from './db.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { loadVcenterConfig } from '../config.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
@@ -21,6 +21,7 @@ const CONCURRENCY = Math.max(1, Number(process.env.GUESTDISK_CONCURRENCY) || 4);
 let running = false;       // 재진입 가드(폴러 + 수동 실행 공유)
 let lastResult = null;     // { at, trigger, vcenters, vms, vmSeriesRows, partSeriesRows, ms, errors }
 let lastRunTs = 0;
+let restoreTried = false;  // v2.601(TIM2601-04): 재시작 후 lastRunTs 를 DB 에서 한 번 복원했는가
 let lastPruneTs = Date.now();   // v2.595(감사 T2595-04): 기동 첫 틱에 prune 하지 않는다(v2.453 규약)       // 보존 prune 스로틀(수집 enabled 와 무관하게 돈다 — 데이터가 push 로도 들어옴)
 const PRUNE_EVERY_MS = 6 * 3_600_000; // 6h
 
@@ -95,6 +96,17 @@ export async function runGuestDiskNow(trigger = 'manual') {
   }
 }
 
+/** 재시작 직후 1회: DB 의 마지막 적재 시각으로 lastRunTs 를 복원한다(아래 틱 주석 참고). 반환 = 현재 lastRunTs. */
+export async function restoreLastRunTs() {
+  if (lastRunTs || restoreTried) return lastRunTs;
+  const vcsNow = store.get()?.vcenters || [];
+  if (!vcsNow.length) return lastRunTs;
+  restoreTried = true;
+  const t = await lastCollectTs(vcsNow.filter((v) => v.collectSource !== 'site').map((v) => v.id));
+  if (t) lastRunTs = t;
+  return lastRunTs;
+}
+
 export function startGuestDiskPoller() {
   setInterval(async () => {
     if (running) return; // 재진입 가드
@@ -110,6 +122,10 @@ export function startGuestDiskPoller() {
         try { await prune(s.retentionDays); } catch (e) { console.warn(`[guestdisk] prune 실패: ${e.message}`); }
       }
       if (!s.enabled) return;                 // opt-in — 주기 수집은 꺼져 있으면 안 한다(prune 은 위에서 이미 수행)
+      // ⚠ v2.601(감사 TIM2601-04): 재시작 직후 lastRunTs 가 0 이라 주기(기본 12시간)를 무시하고 전량 수집했다(28대 로그인 ·
+      //   SOAP 벌크 조회). 형제 powerOffPoller 처럼 DB 의 마지막 적재 시각으로 복원한다 — 대상은 **중앙 직접 수집** vCenter 만
+      //   (엣지 push 가 채운 site 행의 시각으로 복원하면 직접 수집이 그만큼 밀린다). 스냅샷이 아직 비었으면(첫 수집 전) 다음 틱에 본다.
+      await restoreLastRunTs();
       const dueMs = Math.max(1, s.intervalHours) * 3_600_000;
       if (lastRunTs && Date.now() - lastRunTs < dueMs) return; // 주기 미경과
       await runGuestDiskNow('auto');

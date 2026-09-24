@@ -231,6 +231,32 @@ export function powermaxSrp(srp) {
 }
 
 /**
+ * v2.601(감사 COL-2601-05): 경보 응답 → 미해결(미확인) 개수. { count, basis }.
+ *  · `/system/alert?acknowledged=false` 의 alertId 배열 → basis 'unacknowledged'
+ *  · 필터 없는 `/system/alert` 의 alertId 배열 → basis 'all'(확인된 경보도 포함 — 과대일 수 있음을 밝힌다)
+ *  · alert_summary → `all_unacknowledged_count` **한 필드**만 읽는다(symmAlertSummary 우선, 없으면 serverAlertSummary).
+ *    예전에는 alert_count·critical·warning 을 JSON 전체에서 모두 더해 합계와 그 부분집합이 **이중 계수**됐고, 그 이름의
+ *    필드가 없는 버전에서는 **0 인데 'ok'** 였다. 못 찾으면 count null(0 을 지어내지 않는다).
+ */
+export function powermaxAlertCount(data, path = '') {
+  const d = data || {};
+  if (Array.isArray(d.alertId)) {
+    return { count: d.alertId.length, basis: /acknowledged=false/.test(String(path)) ? 'unacknowledged' : 'all' };
+  }
+  const read = (node) => {
+    const arr = Array.isArray(node) ? node : node && typeof node === 'object' ? [node] : [];
+    const vals = arr.map((x) => (x && typeof x === 'object' ? x.all_unacknowledged_count : undefined))
+      .filter((v) => v != null && v !== '' && Number.isFinite(Number(v)));
+    return vals.length ? vals.reduce((a, v) => a + Number(v), 0) : null;
+  };
+  const symm = read(d.symmAlertSummary);
+  if (symm != null) return { count: symm, basis: 'summary-unacknowledged' };
+  const server = read(d.serverAlertSummary);
+  if (server != null) return { count: server, basis: 'summary-unacknowledged' };
+  return { count: null, basis: null };
+}
+
+/**
  * 후보를 앞에서부터 시도하고 **성공한 경로까지** 돌려준다.
  * `restCommon.tryAny` 는 데이터만 주는데, 버전차 진단에는 '무엇으로 읽었나' 가 데이터만큼
  * 중요하다(v2.522 규약) — 그래서 여기서 따로 쓴다. 401 은 즉시 던진다(계정 잠금 예방).
@@ -363,6 +389,8 @@ export function normalizePowermax(device, raw) {
     }
   }
   if (raw.alertCount != null) { snap.alerts.unresolved = Number(raw.alertCount) || 0; snap.sections.alerts = 'ok'; }
+  // v2.601(COL-2601-05): 필터 없는 목록으로 셌으면 확인된 경보가 섞였다 — 화면·보고가 알 수 있게 근거를 싣는다.
+  if (raw.alertsBasis) snap.extra.alertsBasis = raw.alertsBasis;
   // nodes/accounts 는 이번 범위 밖(디렉터·보드 상세는 실장비 확인 후 후속) — 'skip' 정직 표기.
   snap.extra.collectMethod = 'api';
   // 버전차 진단의 근거 — 화면이 '이 장비는 102 로 읽었다' 를 말할 수 있어야 한다.
@@ -439,16 +467,17 @@ export async function collect(device, { signal = null } = {}) {
       } catch (e) { if (/401/.test(e.message)) throw e; raw.srpError = e.message; }
     }
     // ⑤ 미해결 알람 수 — /system/alert 는 알람 ID 배열을 반환(버전에 따라 alert_summary 폴백).
+    // v2.601(감사 COL-2601-05): '미해결' 이므로 **확인(acknowledged)되지 않은 것만** 센다 — 필터를 먼저 시도하고, 필터를
+    //   받지 않는 버전이면 전체 목록으로 떨어지되 그 사실(alertsBasis)을 싣는다. 판정은 powermaxAlertCount 하나.
     try {
-      const r = await tryPaths(get, [...pathsFor(vers, '/system/alert'), ...pathsFor(vers, '/system/alert_summary')]);
+      const r = await tryPaths(get, [
+        ...pathsFor(vers, '/system/alert?acknowledged=false'), ...pathsFor(vers, '/system/alert'), ...pathsFor(vers, '/system/alert_summary'),
+      ]);
       raw.usedPaths.alerts = r.path;
-      const d = r.data;
-      if (Array.isArray(d?.alertId)) raw.alertCount = d.alertId.length;
-      else if (d?.serverAlertSummary || d?.symmAlertSummary) {
-        // alert_summary 는 구조가 버전마다 달라 숫자 필드 합산으로 방어적으로 센다(정직: 근사치).
-        const nums = JSON.stringify(d).match(/"(?:alert_count|critical|warning)":(\d+)/g) || [];
-        raw.alertCount = nums.reduce((s, m) => s + Number(m.split(':')[1]), 0);
-      }
+      const a = powermaxAlertCount(r.data, r.path);
+      raw.alertCount = a.count;
+      raw.alertsBasis = a.basis;
+      if (a.count == null) snap.sections.alerts = '미수집(경보 응답에서 미확인 개수를 찾지 못했습니다)';
     } catch (e) { if (/401/.test(e.message)) throw e; snap.sections.alerts = `오류: ${e.message}`; }
   } catch (e) {
     const out = normalizePowermax(device, raw);

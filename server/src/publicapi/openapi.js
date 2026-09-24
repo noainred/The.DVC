@@ -38,7 +38,7 @@ const ERROR_SCHEMA = Object.freeze({
 /** 공통 오류 응답 — 코드마다 조치가 다르므로 설명을 붙인다. */
 const COMMON_RESPONSES = Object.freeze({
   401: { description: '키가 없거나(missing-key) 모르거나(unknown-key) 폐기·만료됨(revoked·expired). 같은 값으로 재시도해도 같습니다.', content: { 'application/json': { schema: ERROR_SCHEMA } } },
-  403: { description: '이 키에 그 분류가 없음(group-denied·no-groups) 또는 범위로 나눌 수 없는 자원(needs-full-scope). 관리자가 설정 › 연동 키에서 바꿔야 합니다.', content: { 'application/json': { schema: ERROR_SCHEMA } } },
+  403: { description: '이 키에 그 분류가 없음(group-denied·no-groups), 범위로 나눌 수 없는 자원(needs-full-scope) 또는 범위의 vCenter 가 전부 등록돼 있지 않음(scope-empty). 관리자가 설정 › 연동 키에서 바꿔야 합니다.', content: { 'application/json': { schema: ERROR_SCHEMA } } },
   404: { description: '공개되지 않은 경로(unknown-endpoint). `GET /` 로 목록을 확인하세요.', content: { 'application/json': { schema: ERROR_SCHEMA } } },
   429: { description: '분당 상한 초과(rate-limited). `Retry-After` 초 뒤 재시도.', content: { 'application/json': { schema: ERROR_SCHEMA } } },
   503: { description: '첫 수집 미완료(not-collected) 또는 해당 모듈 사용 불가(unavailable). 빈 데이터와 구분하세요.', content: { 'application/json': { schema: ERROR_SCHEMA } } },

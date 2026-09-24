@@ -122,15 +122,32 @@ async function open() {
   return ready;
 }
 
+/*
+ * v2.601(감사 DB2601-04 — 실측 81~93ms @ vm_series 1천만 행): 행 수 COUNT(*) 3회가 화면 폴링(60초 × 사용자)·
+ * combined·폴러마다 돌았다. 진단·참고값이라 초 단위로 정확할 이유가 없다 — bmusage/db.js(v2.550.3)와 같이 짧게 캐시하고
+ * **캐시라는 사실을 `countsAt` 으로 밝힌다**. 적재·prune 이 행 수를 바꾸면 버린다(방금 쓴 값이 안 보이면 '저장이 안 됐나' 로 읽힌다).
+ */
+let _counts = null;   // { v:{latestRows,seriesRows,vmSeriesRows}, at }
+const COUNT_CACHE_MS = Math.max(0, Number(process.env.CURUSER_COUNT_CACHE_MS) || 60_000);
+
 /** 기능 가용성 — 화면이 '비활성' 사유를 그대로 말한다(조용히 빈 화면을 만들지 않는다). */
 export async function curUserDbStatus() {
   const h = await open();
+  let counts = { latestRows: null, seriesRows: null, vmSeriesRows: null };
+  let countsAt = null;
+  if (h) {
+    if (!_counts || Date.now() - _counts.at > COUNT_CACHE_MS) {
+      try { _counts = { v: { ...h.st.stats.get() }, at: Date.now() }; } catch { _counts = null; }
+    }
+    if (_counts) { counts = _counts.v; countsAt = _counts.at; }
+  }
   return {
     available: !!h,
     path: h ? h.path : DB_PATH(),
     error: initError ? String(initError.message || initError).slice(0, 200) : (h ? '' : lockRetry.note()),
     vmSeries: vmSeriesEnabled(),
-    ...(h ? h.st.stats.get() : { latestRows: null, seriesRows: null, vmSeriesRows: null }),
+    ...counts,
+    countsAt,
   };
 }
 
@@ -169,6 +186,7 @@ export async function commitCurUser({ ts, records = [], series = [], replaceVcen
         Number(s.vmsOk) || 0, Number(s.vmsFailed) || 0);
     }
     h.db.exec('COMMIT');
+    _counts = null; // 행 수가 바뀌었다 — 다음 상태 조회가 다시 센다
   } catch (e) {
     try { h.db.exec('ROLLBACK'); } catch { /* */ }
     return { ok: false, reason: String(e.message || e).slice(0, 200) };
@@ -242,11 +260,12 @@ export async function pruneCurUser(retentionDays, { every = 6 } = {}) {
   let s = 0; let v = 0;
   try { s = h.st.pruneSeries.run(before)?.changes ?? 0; } catch { /* */ }
   try { v = h.st.pruneVmSeries.run(before)?.changes ?? 0; } catch { /* */ }
+  if (s || v) _counts = null;
   return { skipped: false, series: s, vmSeries: v, before };
 }
 
 export function _resetForTest() {
   lockRetry.ok();
   try { x?.db?.close?.(); } catch { /* */ }
-  x = null; ready = null; initError = null; tick = 0;
+  x = null; ready = null; initError = null; tick = 0; _counts = null;
 }

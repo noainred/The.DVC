@@ -141,9 +141,18 @@ export function normalizePowerstore(device, raw) {
   if (Array.isArray(raw.hosts)) inv.hosts = { count: raw.hosts.length };
   if (Array.isArray(raw.hostGroups)) inv.hostGroups = { count: raw.hostGroups.length };
   if (Array.isArray(raw.fileSystems)) {
-    let total = 0, used = 0;
-    for (const f of raw.fileSystems) { total += Number(f.size_total) || 0; used += Number(f.size_used) || 0; }
-    inv.fileSystems = { count: raw.fileSystems.length, totalBytes: total, usedBytes: used };
+    // v2.601(감사 LO2601-06): size_used 를 못 읽은 파일시스템을 0 으로 더하면 '0.00 TB / 1.00 TB'(비어 있음)라는 거짓이 된다.
+    //   하나라도 못 읽었으면 사용량은 null(화면 '—') + usedUnknown 개수로 밝힌다(부분 합을 전체 대비로 보여주지 않는다).
+    let total = 0, used = 0, usedUnknown = 0, totalUnknown = 0;
+    for (const f of raw.fileSystems) {
+      const t = numOrNull(f?.size_total); const u = numOrNull(f?.size_used);
+      if (t == null) totalUnknown++; else total += t;
+      if (u == null) usedUnknown++; else used += u;
+    }
+    inv.fileSystems = {
+      count: raw.fileSystems.length, totalBytes: total, usedBytes: usedUnknown ? null : used,
+      ...(usedUnknown ? { usedUnknown } : {}), ...(totalUnknown ? { totalUnknown } : {}),
+    };
   }
   if (Array.isArray(raw.nasServers)) inv.nasServers = { count: raw.nasServers.length };
   if (Array.isArray(raw.storageContainers)) inv.storageContainers = { count: raw.storageContainers.length };

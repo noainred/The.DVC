@@ -132,7 +132,9 @@ export function sanitizeGuestDiskVms(raw, { maxVms = 200_000, maxParts = 128 } =
     if (!vmId) continue; // 식별 불가 행은 버린다(DB PK)
     const partsSrc = Array.isArray(vm.parts) ? vm.parts.slice(0, maxParts) : [];
     const parts = [];
-    let partsUnknown = 0;
+    // v2.601(RECENT2601-01): 이미 한 번 정제된 행(엣지 직접 수집 → push)은 뺀 파티션을 들고 오지 않으므로 그 개수를 이어받는다.
+    const carried = Number(vm.partsUnknown);
+    let partsUnknown = Number.isInteger(carried) && carried > 0 ? Math.min(carried, maxParts) : 0;
     for (const p of partsSrc) {
       if (!p || typeof p !== 'object') continue;
       const ppath = str(p.path, 1024); const cap = nn(p.capGB);

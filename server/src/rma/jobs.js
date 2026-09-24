@@ -261,6 +261,17 @@ export function noteHeartbeat(agent, instance, info = {}, { ip = '' } = {}) {
   const a = String(agent || '').trim();
   const inst = String(instance || '').trim().slice(0, 64) || 'default';
   if (!a) return;
+  // v2.601(감사 CEN2601-05): 정책 목록은 **배열일 때만** 읽는다. 예전 `(info.policy.enabled || []).map` 은 문자열·객체가 오면
+  //   TypeError → rma-poll 이 매 폴 500 이라 하트비트가 기록되지 않고 작업도 배달되지 않았다. 배열이 아닌 필드는 빈 목록 +
+  //   `policyInvalid` 로 밝힌다(조용히 버리지 않는다). info 자체가 객체가 아니어도 던지지 않게.
+  if (!info || typeof info !== 'object') info = {};
+  const invalid = [];
+  const arr = (k, n) => {
+    const v = info.policy?.[k];
+    if (v == null) return [];
+    if (!Array.isArray(v)) { invalid.push(k); return []; }
+    return v.slice(0, n).filter((x) => typeof x === 'string' || typeof x === 'number').map(String);
+  };
   const safe = {
     hostname: String(info.hostname || '').slice(0, 120),
     version: String(info.version || '').slice(0, 40),
@@ -275,13 +286,14 @@ export function noteHeartbeat(agent, instance, info = {}, { ip = '' } = {}) {
     remoteManage: !!info.remoteManage,
     stats: info.stats && typeof info.stats === 'object' ? { active: Number(info.stats.active) || 0, performed: Number(info.stats.performed) || 0, rejected: Number(info.stats.rejected) || 0, testsRun: Number(info.stats.testsRun) || 0, testsFailed: Number(info.stats.testsFailed) || 0 } : null,
     policy: info.policy && typeof info.policy === 'object' ? {
-      enabled: (info.policy.enabled || []).map(String).slice(0, 200), disabled: (info.policy.disabled || []).map(String).slice(0, 200),
-      enabledTests: (info.policy.enabledTests || []).map(String).slice(0, 200), disabledTests: (info.policy.disabledTests || []).map(String).slice(0, 200),
-      serviceUnits: (info.policy.serviceUnits || []).map(String).slice(0, 100), allowReboot: !!info.policy.allowReboot, fileRoots: (info.policy.fileRoots || []).map(String).slice(0, 20),
+      enabled: arr('enabled', 200), disabled: arr('disabled', 200),
+      enabledTests: arr('enabledTests', 200), disabledTests: arr('disabledTests', 200),
+      serviceUnits: arr('serviceUnits', 100), allowReboot: !!info.policy.allowReboot, fileRoots: arr('fileRoots', 20),
     } : null,
     scheduleVersion: Number(info.scheduleVersion) || 0, scheduledTests: Number(info.scheduledTests) || 0, outbox: Number(info.outbox) || 0,
     ip,
   };
+  if (safe.policy && invalid.length) safe.policy.policyInvalid = invalid;
   heartbeats.set(hbKey(a, inst), { agent: a, instance: inst, lastSeen: Date.now(), info: safe });
 }
 
