@@ -13,6 +13,7 @@ const fmtDate = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR', { dateStyle: 
 import { STable } from '../components/STable.jsx';
 import { dayStamp } from '../dayStamp.js';
 import { dailyReportFailNote } from './dailyReportText.js';
+import { suggestCell, heldNote } from './rightsizeText.js';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`);
 
@@ -260,6 +261,12 @@ export function CertExpiry({ isAdmin }) {
 }
 
 /* ── ⑤ VM 라이트사이징 ─────────────────────────────────────────────── */
+function suggestRender(r, dim) {
+  const c = suggestCell(r, dim);
+  if (c.held) return <span className="badge gray" title={c.title} style={{ whiteSpace: 'nowrap' }}>{c.label}</span>;
+  return <b style={{ color: 'var(--green)' }}>{c.text}</b>;
+}
+
 export function Rightsizing({ scope }) {
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [tab, setTab] = useHashTab({ base: ['tools', 'rightsizing'], valid: ['oversized', 'idle', 'undersized'], fallback: 'oversized' });
@@ -276,8 +283,9 @@ export function Rightsizing({ scope }) {
     { key: 'ramGB', label: 'RAM', align: 'right', render: (r) => `${r.ramGB}GB` },
     pctCol('cpuAvg', 'CPU평균'), pctCol('cpuMax', 'CPU피크'), pctCol('memAvg', 'MEM평균'), pctCol('memMax', 'MEM피크'),
     ...(tab === 'oversized' ? [
-      { key: 'suggestedVcpu', label: '추천 vCPU', align: 'right', render: (r) => <b style={{ color: 'var(--green)' }}>{r.suggestedVcpu}</b> },
-      { key: 'suggestedRamGB', label: '추천 RAM', align: 'right', render: (r) => <b style={{ color: 'var(--green)' }}>{r.suggestedRamGB}GB</b> },
+      // v2.604(감사 RECENT2604-04): 피크를 못 읽어 권고를 보류한 차원(held)은 현재 사양을 초록 '추천' 으로 그리지 않는다.
+      { key: 'suggestedVcpu', label: '추천 vCPU', align: 'right', render: (r) => suggestRender(r, 'cpu') },
+      { key: 'suggestedRamGB', label: '추천 RAM', align: 'right', render: (r) => suggestRender(r, 'mem') },
     ] : []),
     { key: 'samples', label: '관측', align: 'right', render: (r) => (r.samples ? `${r.samples}회` : <span className="badge gray" title="누적 통계가 부족해 순간값으로 판정">순간값</span>) },
   ];
@@ -297,6 +305,7 @@ export function Rightsizing({ scope }) {
       </div>
       <DataTable columns={columns} rows={rows} emptyText="해당 항목이 없습니다." />
       <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>추천 사양은 관측 피크 기준 CPU 60%·RAM 75% 목표 여유로 계산합니다. 서버 재시작 시 관측 통계가 초기화됩니다.</p>
+      {tab === 'oversized' && heldNote(rows) && <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>{heldNote(rows)}</p>}
     </>
   );
 }

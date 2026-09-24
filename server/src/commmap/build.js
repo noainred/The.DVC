@@ -30,10 +30,13 @@
  *     (v2.553 remedy 규약 — 코드 목록과 문구가 1:1 이어야 하고 테스트가 대조한다).
  */
 import { linkIdOf } from '../linkcheck/links.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const t = (v) => String(v ?? '').trim();
 const norm = (v) => t(v).toLowerCase();
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+/** 시각(epoch ms) — 비었거나(null·'') 0 이하이면 null. `num()` 은 null 을 0 으로 읽으므로 시각에 쓰지 않는다. */
+const tsOrNull = (v) => { const n = numOrNull(v); return n != null && n > 0 ? n : null; };
 
 /** 바깥 링 — 엣지당 종류별 상한(넘치면 `omitted`). 28엣지 × 4종 × 40 = 4,480 노드가 상한이다. */
 export const RES_MAX_PER_KIND = 40;
@@ -227,11 +230,16 @@ export function buildCommMap(p = {}) {
 
     // pull(중앙 → 엣지)
     let pull;
+    // v2.604(감사 WEB2604-01): `num()` 은 Number(null)===0 이라 한 번도 성공하지 못한 엣지(at:null — puller v2.601
+    //   neverOk)의 at 이 0(1970년), ageMs 가 now(약 56년)가 됐다. 시각은 양수일 때만 싣는다.
+    const pullAt = st ? tsOrNull(st.at) : null;
+    const pullAge = pullAt != null ? now - pullAt : null;
+    const neverOk = st?.neverOk === true;
     if (!st) pull = { state: 'none', at: null, ageMs: null, error: '', fails: 0 };
-    else if (st.ok === false) pull = { state: 'fail', at: num(st.at), ageMs: num(st.at) != null ? now - st.at : null, error: t(st.error).slice(0, 200), fails: num(st.fails) ?? 0 };
-    else if (st.degraded) pull = { state: 'degraded', at: num(st.at), ageMs: num(st.at) != null ? now - st.at : null, error: t(st.error).slice(0, 200), fails: num(st.fails) ?? 0 };
-    else pull = { state: 'ok', at: num(st.at), ageMs: num(st.at) != null ? now - st.at : null, error: '', fails: 0 };
-    pull.hosts = num(st?.hosts); pull.identityIssue = st?.identity?.issue || st?.identity || null;
+    else if (st.ok === false) pull = { state: 'fail', at: pullAt, ageMs: pullAge, error: t(st.error).slice(0, 200), fails: num(st.fails) ?? 0, ...(neverOk ? { neverOk } : {}) };
+    else if (st.degraded) pull = { state: 'degraded', at: pullAt, ageMs: pullAge, error: t(st.error).slice(0, 200), fails: num(st.fails) ?? 0, ...(neverOk ? { neverOk } : {}) };
+    else pull = { state: 'ok', at: pullAt, ageMs: pullAge, error: '', fails: 0 };
+    pull.hosts = numOrNull(st?.hosts); pull.identityIssue = st?.identity?.issue || st?.identity || null;
     if (pull.identityIssue && typeof pull.identityIssue === 'object' && !pull.identityIssue.reason) pull.identityIssue = null;
 
     // push(엣지 → 중앙)
@@ -265,7 +273,7 @@ export function buildCommMap(p = {}) {
       'central->edge': lk('central->edge', 'central', linkFrom),
       'edge->central': lk('edge->central', linkFrom, 'central'),
       'edge->central-pull': lk('edge->central-pull', linkFrom, 'central'),
-      reportAt: num(rep?.at), reportStale: rep ? !!rep.stale : null, reportVersion: t(rep?.version),
+      reportAt: tsOrNull(rep?.at), reportStale: rep ? !!rep.stale : null, reportVersion: t(rep?.version),
     };
 
     // 자원(바깥 링)
@@ -277,9 +285,9 @@ export function buildCommMap(p = {}) {
       resTotal += res[k].length; resOmitted += omitted;
     }
     const reports = {
-      storage: (() => { const r = reportsOf(p.storageReports, id); return r ? { at: num(r.at), devices: num(r.deviceCount) ?? 0 } : null; })(),
-      sanswitch: (() => { const r = reportsOf(p.sanReports, id); return r ? { at: num(r.at), devices: num(r.devices) ?? 0 } : null; })(),
-      pdu: (() => { const r = reportsOf(p.pduReports, id); return r ? { at: num(r.at), devices: num(r.devices) ?? 0 } : null; })(),
+      storage: (() => { const r = reportsOf(p.storageReports, id); return r ? { at: tsOrNull(r.at), devices: num(r.deviceCount) ?? 0 } : null; })(),
+      sanswitch: (() => { const r = reportsOf(p.sanReports, id); return r ? { at: tsOrNull(r.at), devices: num(r.devices) ?? 0 } : null; })(),
+      pdu: (() => { const r = reportsOf(p.pduReports, id); return r ? { at: tsOrNull(r.at), devices: num(r.devices) ?? 0 } : null; })(),
     };
 
     // 사유

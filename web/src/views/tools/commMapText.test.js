@@ -1,7 +1,7 @@
 /** 통신 지도 문구 회귀 — ‘기록 없음’ 을 정상으로 칠하지 않는다 · 첫 조회는 입자 없음 · null 은 0 이 아니다. */
 import { describe, it, expect } from 'vitest';
 import {
-  STATE_LABEL, STATE_COLOR, REASON_TEXT, RES_STATE_LABEL, RES_STATE_COLOR, bytesText, spanText, headerNote, activityOf, edgeSummary, resourceSummary, LEGEND_NOTES,
+  STATE_LABEL, STATE_COLOR, REASON_TEXT, RES_STATE_LABEL, RES_STATE_COLOR, bytesText, spanText, headerNote, activityOf, edgeSummary, resourceSummary, LEGEND_NOTES, pullAtRow,
 } from './commMapText.js';
 
 const NOW = 1_800_000_000_000;
@@ -52,5 +52,28 @@ describe('commMapText', () => {
     expect(resourceSummary({ kind: 'storage', name: 'S1', state: 'registered', type: 'unity480' })).toBe('스토리지 S1 · 등록됨(등록부 기준) · unity480');
     const vc = resourceSummary({ kind: 'vcenter', name: 'V', state: 'ok', receivedAt: NOW - 60_000, hosts: 2, vms: null, agentMismatch: true, remoteAgent: 'GM1', collectedBy: 'hg' }, NOW);
     expect(vc).toMatch(/호스트 2 · VM —/); expect(vc).toMatch(/‘GM1’ 인데 실제 push 는 ‘hg’/);
+  });
+});
+
+// v2.604 감사 WEB2604-03 — 성공한 적 없는 엣지에 '첫 실패 시각' 이라는 일어나지 않는 설명을 붙이지 않는다.
+describe('pullAtRow', () => {
+  const NOW = Date.parse('2026-01-05T03:45:00Z');
+  it('성공한 적 없으면 성공한 pull 없음', () => {
+    const r = pullAtRow({ state: 'fail', at: null, neverOk: true }, NOW);
+    expect(r.label).toBe('마지막 정상 pull');
+    expect(r.value).toBe('성공한 pull 없음');
+    expect(r.note).toContain('한 번도 성공하지');
+    expect(r.note).not.toContain('첫 실패 시각');
+  });
+  it('실패 중이지만 전에 성공했으면 그 시각', () => {
+    const r = pullAtRow({ state: 'degraded', at: NOW - 120_000 }, NOW);
+    expect(r.value).toMatch(/전$/);
+    expect(r.value).not.toBe('성공한 pull 없음');
+    expect(r.note).not.toContain('첫 실패 시각');
+  });
+  it('정상이면 마지막 pull · 부가 설명 없음', () => {
+    const r = pullAtRow({ state: 'ok', at: NOW - 30_000 }, NOW);
+    expect(r.label).toBe('마지막 pull'); expect(r.note).toBe('');
+    expect(pullAtRow({ state: 'ok', at: 0 }, NOW).value).toBe('기록 없음');
   });
 });

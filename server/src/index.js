@@ -37,6 +37,7 @@ import { pruneMockInventory } from './central/inventory.js';
 import { auditMiddleware } from './audit.js';
 import { upgradeRouter } from './routes/upgrade.js';
 import { upgradeManager } from './upgrade/manager.js';
+import { setShutdownHandler } from './upgrade/upgrade.js';   // v2.604 TIM2604-01: 업그레이드 재시작도 정상 종료 경로로
 import { adminRouter } from './routes/admin.js';
 import { remoteRouter } from './routes/remote.js';
 import { attachSshGateway } from './proxy/sshGateway.js';
@@ -594,7 +595,12 @@ import { releaseAllWaiters as releaseRmaWaiters } from './rma/jobs.js'; // 종�
 
 const SHUTDOWN_GRACE_MS = Math.max(1000, Math.min(60_000, Number(process.env.SHUTDOWN_GRACE_MS) || 8000));
 let shuttingDown = false;
-const gracefulExit = (signal) => {
+// v2.604(감사 TIM2604-01): 앱 내 업그레이드 재시작도 이 경로를 탄다(upgrade.js restartProcess — 등록으로 받는다).
+//   beforeExit 는 process.exit 직전에 부른다(비-systemd 재시작이 새 프로세스를 포트가 닫힌 뒤 띄운다).
+//   이미 종료 중이면 훅만 더한다 — 먼저 온 SIGTERM 때문에 재시작 요청이 사라지지 않게.
+const exitHooks = [];
+const gracefulExit = (signal, { beforeExit } = {}) => {
+  if (typeof beforeExit === 'function') exitHooks.push(beforeExit);
   if (shuttingDown) return;            // 두 번째 시그널은 무시(중복 종료 경로 방지)
   shuttingDown = true;
   console.log(`[shutdown] ${signal} 수신 — 새 연결을 멈추고 진행 중 요청을 마무리합니다(최대 ${Math.round(SHUTDOWN_GRACE_MS / 1000)}초).`);
@@ -603,7 +609,11 @@ const gracefulExit = (signal) => {
   const done = (code) => {
     if (exiting) return;
     exiting = true;
-    closeCsvLogAsync(2000).catch(() => {}).finally(() => { svcmonShutdown(); process.exit(code); });
+    closeCsvLogAsync(2000).catch(() => {}).finally(() => {
+      svcmonShutdown();
+      for (const h of exitHooks) { try { h(); } catch (e) { console.warn(`[shutdown] 종료 훅 실패: ${e?.message || e}`); } }
+      process.exit(code);
+    });
   };
   const timer = setTimeout(() => {
     console.warn('[shutdown] 유예 시간 초과 — 남은 연결을 끊고 종료합니다.');
@@ -626,6 +636,8 @@ const gracefulExit = (signal) => {
     server.closeIdleConnections?.();   // keep-alive 유휴 소켓은 즉시 정리(Node 18.2+)
   } catch { clearTimeout(timer); clearTimeout(hard); done(0); }
 };
+setShutdownHandler(gracefulExit);
+export { gracefulExit };
 process.on('SIGTERM', () => gracefulExit('SIGTERM'));
 process.on('SIGINT', () => gracefulExit('SIGINT'));
 process.on('exit', svcmonShutdown);

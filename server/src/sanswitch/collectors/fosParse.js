@@ -61,7 +61,9 @@ export function parseChassisShow(text) {
       if ((m = l.match(/^Power\s+Source:\s*(.+)$/i))) psu.source = m[1].trim();
       else if ((m = l.match(/^PS\s+Voltage\s+input:\s*(.+)$/i))) psu.voltageV = num(m[1]);
       // -240W = 240W 소비(FOS 표기). 절댓값으로 통일한다.
-      else if ((m = l.match(/^Power\s+Usage:\s*(.+)$/i))) psu.powerW = Math.abs(num(m[1]) ?? 0) || null;
+      // v2.604(감사 COL-2604-04): 읽은 0W 는 값이다 — 예전 `Math.abs(num ?? 0) || null` 은 0 을 null('못 읽음')로 바꿔
+      //   거짓 powerPartial 을 만들었다. 숫자를 못 읽은 경우만 null 이다.
+      else if ((m = l.match(/^Power\s+Usage:\s*(.+)$/i))) { const w = num(m[1]); psu.powerW = w == null || !Number.isFinite(w) ? null : Math.abs(w); }
       else if ((m = l.match(/^Factory\s+Serial\s+Num:\s*(\S+)/i))) psu.serial = m[1];
       else if ((m = l.match(/^Factory\s+Part\s+Num:\s*(\S+)/i))) psu.partNumber = m[1];
       continue;

@@ -55,6 +55,9 @@ export function ingest(item) {
     buckets.set(h, st);
     prune(h);
   }
+  // v2.604(감사 WEB2604-02): 이 버킷에 **실제로** 처음 들어온 시각. 누적 시작을 정시(버킷 시작)로 말하면
+  //   hh:29 에 시작한 추적이 hh:00 부터 본 것처럼 보이고 1시간 창이 '완전' 으로 표시됐다.
+  if (!Number.isFinite(st.firstIngestTs) || ts < st.firstIngestTs) st.firstIngestTs = ts;
   addItem(st, item, idx);
   status.ingested += 1;
   dirty = true;
@@ -124,16 +127,28 @@ export function liveState(hours = 24, now = Date.now()) {
     if (earliest == null || h < earliest) earliest = h;
   }
   const allEarliest = buckets.size ? Math.min(...buckets.keys()) : null;
+  const trackingSince = allEarliest == null ? null : bucketStartTs(allEarliest);
+  const windowFrom = fromH * HOUR;
   return {
     state: st,
     coverage: {
       source: 'live', hours: Number(hours) || 24, bucketsUsed: n,
-      windowFrom: fromH * HOUR, windowTo: now,
+      windowFrom, windowTo: now,
       // 누적이 시작된 시각 — 요청 구간보다 늦으면 '그 앞은 모른다' 를 화면이 말한다.
-      trackingSince: allEarliest == null ? null : allEarliest * HOUR,
-      partial: allEarliest == null || allEarliest > fromH,
+      // v2.604(감사 WEB2604-02): 버킷 시작(정시)이 아니라 가장 이른 버킷에 실제로 처음 들어온 시각이고,
+      //   구간과의 비교도 시간 단위가 아니라 ms 로 한다(같은 시간 버킷 안에서 시작한 추적도 '일부' 다).
+      trackingSince,
+      partial: trackingSince == null || trackingSince > windowFrom,
     },
   };
+}
+
+/** 버킷의 실제 첫 수신 시각. 그 필드가 없는 옛 저장분은 그 버킷의 첫 줄 시각, 그것도 없으면 버킷 시작(정시)이다. */
+function bucketStartTs(h) {
+  const b = buckets.get(h);
+  if (Number.isFinite(b?.firstIngestTs)) return b.firstIngestTs;
+  if (Number.isFinite(b?.first)) return b.first;
+  return h * HOUR;
 }
 
 export function liveStatus() {

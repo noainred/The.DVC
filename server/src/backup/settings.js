@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { createBackup, isRuntimeStateFile } from './service.js';
 import { every as everyLong } from '../util/longTimer.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'backup.json');
 
@@ -24,31 +25,52 @@ const DEFAULTS = {
   retention: 30,        // 보관 개수
 };
 
+/**
+ * v2.604(감사 TIM2604-03): 저장과 로드가 **같은 정규화**를 거친다. 예전엔 저장만 클램프하고 로드는 파일 값을 그대로 펼쳐,
+ * 손으로 고친·옛 파일의 every=-5·0.00001 이 reschedule 의 max(60초, …) 에 걸려 **1분마다 정기 백업**이 돌았고
+ * retention=0 은 createBackup → pruneBackups(0) 으로 **백업을 전부 지울** 수 있었다.
+ * 숫자: 빈 값·0 이하·숫자 아님은 '미지정' = base 값 유지(저장이면 현재 값, 로드면 기본값). 범위는 every 1–1000 · retention 1–500.
+ * unit 은 목록에 있을 때만, 불리언은 불리언일 때만(로드 경로에서 문자열 'false' 가 참으로 읽히지 않게).
+ */
+const pickNum = (v, base, lo, hi) => { const n = numOrNull(v); return n == null || n <= 0 ? base : Math.max(lo, Math.min(hi, n)); };
+export function normalizeBackupSettings(raw = {}, base = DEFAULTS) {
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return {
+    scheduleEnabled: typeof r.scheduleEnabled === 'boolean' ? r.scheduleEnabled : base.scheduleEnabled,
+    every: pickNum(r.every, base.every, 1, 1000),
+    unit: ['minute', 'hour', 'day'].includes(r.unit) ? r.unit : base.unit,
+    autoOnChange: typeof r.autoOnChange === 'boolean' ? r.autoOnChange : base.autoOnChange,
+    retention: Math.round(pickNum(r.retention, base.retention, 1, 500)),
+  };
+}
+
 let cache = null;
 export function loadBackupSettings() {
   if (cache) return cache;
   cache = { ...DEFAULTS };
-  try { if (fs.existsSync(FILE)) cache = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) }; }
+  try { if (fs.existsSync(FILE)) cache = normalizeBackupSettings(JSON.parse(fs.readFileSync(FILE, 'utf8')), DEFAULTS); }
   catch (e) { preserveCorrupt(FILE, e.message); } // v2.479(감사 S-9): 손상 시 조용히 기본값(정기 백업 off)으로 돌아가지 않게 보존+경고
   return cache;
 }
 
 export function saveBackupSettings(body = {}) {
   const cur = loadBackupSettings();
-  const unit = ['minute', 'hour', 'day'].includes(body.unit) ? body.unit : cur.unit;
-  const next = {
-    scheduleEnabled: body.scheduleEnabled != null ? !!body.scheduleEnabled : cur.scheduleEnabled,
-    every: Math.max(1, Math.min(1000, Number(body.every) || cur.every)),
-    unit,
-    autoOnChange: body.autoOnChange != null ? !!body.autoOnChange : cur.autoOnChange,
-    retention: Math.max(1, Math.min(500, Number(body.retention) || cur.retention)),
-  };
+  const b = body && typeof body === 'object' ? body : {};
+  // 화면은 불리언 칸에 !! 를 거쳐 보내 왔다 — 예전처럼 null/undefined 가 아니면 참거짓으로 읽는다.
+  const next = normalizeBackupSettings({
+    ...b,
+    scheduleEnabled: b.scheduleEnabled != null ? !!b.scheduleEnabled : undefined,
+    autoOnChange: b.autoOnChange != null ? !!b.autoOnChange : undefined,
+  }, cur);
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
   reschedule();
   return next;
 }
+
+/** 테스트 전용 — 캐시를 비워 다음 load 가 파일을 다시 읽게 한다. */
+export function _resetBackupSettingsForTest() { cache = null; }
 
 let schedTimer = null;
 let watcher = null;

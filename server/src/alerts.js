@@ -23,8 +23,12 @@ import { ssrfLookup } from './util/ssrfLookup.js';
 import { numOrNull } from './util/numOrNull.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
 import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.454)
 import { registerExitFlush } from './util/exitFlush.js';
+// v2.604(감사 SEC2604-03): 채널 웹훅 URL 은 그 자체가 비밀(경로에 토큰이 들어 있다)이라 암호화 모드에서 봉인한다.
+// 메모리는 평문이다 — 화면·연결 테스트·발송은 예전과 같다. 평문 파일(구버전·평문 모드)은 그대로 읽힌다.
+import { openSecretsDeep, sealSecretsDeep, FILE_EXTRA_SECRET_FIELDS } from './security/secretVault.js';
 
 const FILE = path.join(config.configDir, 'alerts.json');
+const URL_SECRET_FIELDS = FILE_EXTRA_SECRET_FIELDS['alerts.json'];
 
 const DEFAULTS = {
   channels: {
@@ -56,7 +60,7 @@ export function loadAlertConfig() {
   cache = structuredClone(DEFAULTS);
   try {
     if (fs.existsSync(FILE)) {
-      const s = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      const s = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')), URL_SECRET_FIELDS);
       cache = {
         channels: {
           slack: { ...DEFAULTS.channels.slack, ...s.channels?.slack },
@@ -88,8 +92,8 @@ export function saveAlertConfig(body = {}) {
     intervalSec: Math.min(ALERT_INTERVAL_MAX_SEC, Math.max(15, Number(body.intervalSec) || cur.intervalSec)),
     suppressWindowMin: Math.max(0, body.suppressWindowMin != null ? Number(body.suppressWindowMin) || 0 : (cur.suppressWindowMin ?? 5)),
   };
-  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  cache = next;
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next, undefined, URL_SECRET_FIELDS), null, 2), { mode: 0o600 });
+  cache = next; // 메모리는 평문(sealSecretsDeep 는 복제본을 봉인한다)
   rescheduleAlertEngine(); // 주기(intervalSec) 변경 즉시 반영 — 이전엔 재시작 전까지 저장만 되고 무시됐다
   return next;
 }

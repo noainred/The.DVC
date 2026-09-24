@@ -70,6 +70,7 @@ import { buildLinks, publicLink, EDGE_KINDS } from '../linkcheck/links.js';
 // ⚠ **redact 된 목록**을 쓴다 — 링크 계산에 필요한 것은 name·url·host 뿐이고, 이 응답은 엣지로
 //   나간다(비밀이 섞일 여지를 구조적으로 없앤다).
 import { listCollectors as listCollectorsForLinks } from '../collector/registry.js';
+import { allCollectorStatus as allCollectorStatusForKnown } from '../collector/state.js'; // v2.604 CEN2604-04: pull 성공한 자기등록 항목만 '아는 엣지'
 import { listRegistry as listVcentersForLinks } from '../vcenter/registry.js';
 import { loadLinkCheckSettings, linkCheckEnabled } from '../linkcheck/settings.js';
 
@@ -438,7 +439,10 @@ centralRouter.post('/register-collector', async (req, res) => {
       unverified = v.reason;
     }
   }
-  const r = upsertCollectorFromAgent({ name, url, token: b.collectorToken, datacenter: regDc });
+  // v2.604(감사 CEN2604-04): 검증 결과와 토큰 종류를 넘긴다 — 공유 토큰의 새 이름 생성은 개수 상한, 미검증 항목은 '아는 엣지' 가 아니다.
+  const r = upsertCollectorFromAgent({ name, url, token: b.collectorToken, datacenter: regDc, unverified: !!unverified, shared: req.centralAuth?.mode !== 'agent' });
+  if (!r.ok && r.capped) { console.warn(`[central] 엣지 자기등록 상한: ${name} — ${r.reason}`); return res.status(429).json({ ok: false, reason: r.reason, capped: true }); }
+  if (r.ok) _knownNames = { at: 0, set: null }; // 등록부가 바뀌었다 — '아는 엣지' 캐시를 버린다
   if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${regVer ? ` (v${regVer})` : ''}${unverified ? ` ⚠ 미검증: ${unverified}` : ''}`);
   if (r.ok && (unverified || regVer)) {
     // v2.548: 자기등록이 보낸 버전을 상태에 심어 둔다 — pull 이 한 번도 성공하지 못한 엣지(OC2SDBX 사례)는
@@ -983,7 +987,15 @@ function edgeNameKnown(name) {
     const set = new Set();
     const add = (v) => { if (typeof v === 'string' && v.trim()) set.add(v.trim().toLowerCase()); };
     try { for (const t of listAgentTokens()) add(t.agent); } catch { /* 소스 미초기화 */ }
-    try { for (const c of listCollectorsForLinks()) { add(c.id); add(c.name); } } catch { /* */ }
+    // v2.604(감사 CEN2604-04): 수집 서버 등록부는 **관리자 등록(managed)** 이거나 자기등록 검증을 통과한(selfRegUnverified 없음)
+    //   항목, 또는 이 프로세스에서 pull 이 한 번이라도 성공한 항목만 센다. 예전에는 공유 토큰이 검증에 실패한 urlHint 로 만든
+    //   이름까지 '아는 엣지' 가 되어 v2.601 CEN2601-03 의 미검증 제한(/fleet·/gpu-guest-data·log-query-result)을 우회했다.
+    try {
+      const st = allCollectorStatusForKnown();
+      for (const c of listCollectorsForLinks()) {
+        if (c.managed || !c.selfRegUnverified || st[c.id]?.ok === true) { add(c.id); add(c.name); }
+      }
+    } catch { /* */ }
     try { for (const x of listInventory()) add(x.agent); } catch { /* */ }
     try { for (const x of listScanAssignments()) add(x.agent); } catch { /* */ }
     _knownNames = { at: now, set };
@@ -995,7 +1007,8 @@ function edgeNameKnown(name) {
 centralRouter.get('/idrac-scan-jobs', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
-  res.json({ ok: true, jobs: takeIdracScanJobs(req.query.agent) });
+  // v2.604(감사 TIM2604-04): 개별 토큰이면 토큰 이름을 먼저 쓴다(바인딩 검사와 같은 이름). 공유 토큰만 ?agent= 를 쓴다.
+  res.json({ ok: true, jobs: takeIdracScanJobs(req.centralAuth?.mode === 'agent' && req.centralAuth.agent ? req.centralAuth.agent : req.query.agent) });
 });
 
 // 위임 iDRAC 스캔: 에이전트가 스캔 진행률(중간)을 보고. Body: { reqId, scanned, total }
@@ -1707,7 +1720,9 @@ centralRouter.post('/bmstor-result', (req, res) => {
 centralRouter.get('/ip-scan-assignment', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
-  const cfg = loadScanSettings(String(req.query.agent || ''));
+  // v2.604(감사 RECENT2604-01): 개별 토큰이면 **결과 라우트와 같은 키**(토큰 이름)로 찾는다 — 배정과 결과가 서로 다른 이름으로
+  //   설정을 찾으면 '배정됨' 을 받고 스캔한 뒤 결과가 전량 409 가 된다. 조회 자체도 대소문자 무시(scanStore.loadScanSettings).
+  const cfg = loadScanSettings(req.centralAuth?.mode === 'agent' && req.centralAuth.agent ? req.centralAuth.agent : String(req.query.agent || ''));
   if (!cfg.enabled || !cfg.ranges.length) return res.json({ ok: true, assigned: false });
   res.json({ ok: true, assigned: true, ...cfg });
 });

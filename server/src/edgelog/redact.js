@@ -87,7 +87,16 @@ export function redactDeep(input) {
  */
 const LOG_SECRET_KEYS = 'token|password|passwd|passphrase|secret|apikey|api_key|private_?key|vcenterPass|guestPass';
 const JSON_SECRET_RE = new RegExp(`(["'][A-Za-z0-9_.-]{0,40}?(?:${LOG_SECRET_KEYS})["']\\s*:\\s*)("(?:[^"\\\\\\n]|\\\\.){0,4096}"|'[^'\\n]{0,4096}'|[^\\s,}\\]]+)`, 'gi');
-const PLAIN_SECRET_RE = new RegExp(`((?:${LOG_SECRET_KEYS})\\s*[=:]\\s*)("(?:[^"\\\\\\n]|\\\\.){0,4096}"|\\S+)`, 'gi');
+/*
+ * v2.604(감사 SEC2604-02): ① 평문 규칙에 홑따옴표 값 가지를 더한다 — `PASSWORD: 'a b c'` 가 첫 단어만 가려져
+ *   `'[가림]' b c'` 로 **나머지 단어가 샜다**(JSON 규칙은 이미 홑따옴표를 받았다 — 두 규칙의 비대칭).
+ *   ② env 꼴 이름(`PROXY_SSH_PASS=`·`SECRETS_KEY=`·`X_CREDENTIALS=`)은 **대문자 식별자 + `=`** 일 때만 잡는다
+ *   (대소문자 구분). `deviceKey=`·`partKey=`·`pass=`(점검 통과) 같은 소문자·카멜 식별자는 건드리지 않는다 —
+ *   v2.549 '`key$` 를 통째로 넣지 말 것' 은 그 식별자들 때문이고, 대문자 env 이름은 그 규약의 대상이 아니다.
+ *   PEM 본문(여러 줄)은 여전히 못 잡는다 — 줄 단위 가림의 한계(logRedactNote 가 말한다).
+ */
+const PLAIN_SECRET_RE = new RegExp(`((?:${LOG_SECRET_KEYS})\\s*[=:]\\s*)("(?:[^"\\\\\\n]|\\\\.){0,4096}"|'[^'\\n]{0,4096}'|\\S+)`, 'gi');
+const ENV_SECRET_RE = /(\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*_(?:KEY|PASS|PWD?|CREDS?|CREDENTIALS?)\s*=\s*)("(?:[^"\\\n]|\\.){0,4096}"|'[^'\n]{0,4096}'|\S+)/g;
 const maskValue = (pre, v) => {
   if (v === 'null' || v === '""' || v === "''") return pre + v; // 빈 값은 그대로 — 그 자체가 진단이다
   const q = v[0] === '"' || v[0] === "'" ? v[0] : '';
@@ -97,6 +106,7 @@ export function redactLogLine(line) {
   return String(line == null ? '' : line)
     .replace(JSON_SECRET_RE, (_m, pre, v) => maskValue(pre, v))
     .replace(PLAIN_SECRET_RE, (_m, pre, v) => maskValue(pre, v))
+    .replace(ENV_SECRET_RE, (_m, pre, v) => (v === MASK || v.endsWith(`${MASK}"`) || v.endsWith(`${MASK}'`) ? pre + v : maskValue(pre, v)))
     .replace(/\b(Bearer\s+)\S+/gi, `$1${MASK}`)
     .replace(/\b((?:Proxy-)?Authorization\s*[=:]\s*(?:Basic|Digest)\s+)\S+/gi, `$1${MASK}`)
     .replace(/(\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s/@:]{1,256}:)[^\s/@]{1,512}@/gi, `$1${MASK}@`)

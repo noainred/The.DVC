@@ -76,7 +76,11 @@ async function pushOne(vc) {
 export async function pushGuestDiskNow() {
   if (running) return { ok: false, reason: '이전 guest-disk push 진행 중(겹침 방지)' };
   const snap = store.get();
-  if (!snap?.vcenters?.length) return { ok: false, reason: '수집된 vCenter 없음' };
+  if (!snap?.vcenters?.length) {
+    // v2.604(감사 EDGE2604-02): 조기 반환도 상태를 남긴다(inventoryPush 와 같다 — 마지막 성공이 계속 보이지 않게).
+    last = { at: Date.now(), sent: 0, skipped: 0, errors: [], note: '이 엣지에 수집 대상 vCenter 가 없습니다(보낼 게스트 디스크 없음)' };
+    return { ok: false, reason: '수집된 vCenter 없음' };
+  }
   running = true;
   const started = Date.now();
   let sent = 0; let skipped = 0; let bytes = 0; let gzBytes = 0; const errors = [];

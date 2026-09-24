@@ -34,6 +34,19 @@ function dropWaiting(j, reqId) {
   if (pend) { pend.delete(reqId); if (!pend.size) byAgent.delete(key); }
 }
 const agentPolls = new Map(); // agentLower -> 마지막 잡 인출 폴링 시각(ms) — '에이전트가 살아있나' 진단용
+/*
+ * v2.604(감사 TIM2604-04): 폴링 기록은 **이름 길이·개수를 묶는다**. 공유 토큰 호출자는 ?agent= 를 마음대로 고를 수 있어
+ *   예전에는 이름마다 항목이 영원히 쌓였다(삭제·상한 0). 이름은 128자(수집 서버 id 상한과 같다)로 자르고, 상한을 넘으면
+ *   가장 오래 폴링하지 않은 항목부터 버린다(다시 넣을 때 지우고 넣어 최근 항목이 뒤로 간다 — v2.594 EDGE2-02 규약).
+ */
+export const AGENT_POLLS_MAX = 256;
+function notePoll(key) {
+  const k = String(key).slice(0, 128);
+  agentPolls.delete(k);
+  agentPolls.set(k, Date.now());
+  while (agentPolls.size > AGENT_POLLS_MAX) agentPolls.delete(agentPolls.keys().next().value);
+}
+export function _agentPollsSizeForTest() { return agentPolls.size; }
 
 const TTL = 10 * 60_000;   // 완료/오류 잡 보존 10분
 const MAX_PENDING = 50;    // 에이전트당 동시 대기 잡 상한(남용 방지)
@@ -200,7 +213,7 @@ export function takeIdracScanJobs(agentName) {
   reapClaims(); // 만료된 claim을 먼저 재수확 → 되돌아온 잡을 이번 인출에 바로 포함
   const key = String(agentName || '').trim().toLowerCase();
   if (!key) return [];
-  agentPolls.set(key, Date.now()); // 빈 폴링이어도 '에이전트 살아있음'으로 기록(로그창 진단용)
+  notePoll(key); // 빈 폴링이어도 '에이전트 살아있음'으로 기록(로그창 진단용)
   const pend = byAgent.get(key);
   if (!pend || !pend.size) return [];
   const out = [];
@@ -227,7 +240,7 @@ export function takeIdracScanJobs(agentName) {
 
 /** 에이전트의 마지막 잡 인출 폴링 시각(ms). 없으면 null — 로그창에서 '에이전트 미접속' 진단. */
 export function agentLastScanPoll(agentName) {
-  return agentPolls.get(String(agentName || '').trim().toLowerCase()) || null;
+  return agentPolls.get(String(agentName || '').trim().toLowerCase().slice(0, 128)) || null;
 }
 
 /** 최근 withinMs 이내에 잡 인출 폴링한 에이전트 이름(소문자) 목록 — AGENT_NAME 불일치 진단용. */

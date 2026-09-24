@@ -128,7 +128,10 @@ export async function dailyReportTick(nowTs = Date.now(), run = runDailyReportNo
   if (!s.enabled) return { skipped: 'disabled' };
   if (!dailyReportDue(s, nowTs)) return { skipped: 'not-due' };
   if (failState.nextAt != null && nowTs < failState.nextAt) return { skipped: 'backoff', nextAt: failState.nextAt };
-  const r = await run();
+  // v2.604(감사 RECENT2604-03 — 재현): run() 이 던지면(보고서 계산·스냅샷 예외) noteResult 를 건너뛰어 백오프가 걸리지 않고
+  //   매 분 다시 시도했다(v2.603 TIM2603-02 가 만든 백오프의 구멍). 예외도 실패 한 번으로 센다.
+  let r;
+  try { r = await run(); } catch (e) { r = { ok: false, reason: `발송 중 예외: ${e?.message || e}` }; }
   if (r?.reason === '이미 발송이 진행 중입니다.') return { skipped: 'running' };   // 수동 발송과 겹침 — 실패로 세지 않는다
   noteResult(r, nowTs);
   if (r?.ok) console.log('[daily-report] 일일 헬스체크 리포트 발송 완료');

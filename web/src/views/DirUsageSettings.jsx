@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, sendJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import { blankOr } from './blankOr.js';
 
 /**
  * 설정 › 폴더 사용량 리포트(v2.454, admin 전용) — 사용자 요구사항:
@@ -57,12 +58,14 @@ export default function DirUsageSettings() {
     setBusy(true); setMsg(null);
     try {
       const body = {
-        enabled, targets, retentionDays: Number(retentionDays) || 365,
+        // v2.604(감사 LEFT2604-01): 빈 칸은 보내지 않는다 — `Number('')||365` 는 저장된 보존일을 365일로 되돌렸다.
+        enabled, targets, retentionDays: blankOr(retentionDays),
         mail: { ...mail, to: splitAddr(mail.to), cc: splitAddr(mail.cc) },
       };
       const r = await sendJson('/admin/dir-usage', 'PUT', body);
       setMsg('저장되었습니다. 다음 틱(최대 1분)부터 적용됩니다.');
       if (r?.settings) setD((prev) => ({ ...prev, settings: r.settings }));
+      if (r?.settings?.retentionDays != null) setRetentionDays(r.settings.retentionDays);   // 빈 칸이면 유지된 값을 다시 보인다
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };

@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.configDir, 'relaycheck-settings.json');
 
@@ -82,6 +83,15 @@ const _listeners = new Set();
 export function onRelayCheckSettingsChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }
 function notifyChange() { for (const cb of _listeners) { try { cb(); } catch { /* 리스너 실패가 저장을 막지 않는다 */ } } }
 export function saveSettings(input = {}) {
+  // v2.604(감사 LEFT2604-02 — 재현): 저장은 전체 교체라, 화면이 비운 칸(Number('')*1000 = 0)이 **기본값**으로 떨어졌다
+  //   (6시간 주기 → 5분 · 실패 10회 → 2회 · 오류 없이 '저장됨'). 숫자 칸의 빈 값·0 이하·숫자 아님은 '미지정' = **현재 값 유지**
+  //   (세 값 모두 0 이하가 뜻을 갖지 않는다). 양수는 예전처럼 한도로 자른다.
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    const cur = loadSettings();
+    const merged = { ...input };
+    for (const k of Object.keys(LIMITS)) { const n = numOrNull(input[k]); if (n == null || n <= 0) merged[k] = cur[k]; }
+    input = merged;
+  }
   _cache = normalizeSettings(input);
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
   notifyChange();

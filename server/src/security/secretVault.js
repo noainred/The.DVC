@@ -85,7 +85,18 @@ export const SECRET_FILES = [
   // v2.562: 외부 연동 API 키. 값은 sha256 해시만 저장하지만 이름·지문·허용목록이 평문으로
   // 남으므로 `.gitignore` 차단과 **함께** 해야 한다(v2.535 규약 — 둘은 별개 항목).
   'api-keys.json',                 // 외부 포탈용 조회 API 키(publicapi/keys.js)
+  // v2.604(감사 SEC2604-03): Slack·Teams·일반 웹훅 URL 은 경로 자체가 비밀(그 URL 만 있으면 누구나 채널에 글을 쓴다)인데
+  // 필드 이름이 `url` 이라 SECRET_FIELDS(정확 일치)에 걸리지 않아 암호화 모드에서도 평문이었다. `url` 을 전역 필드로
+  // 넣으면 collectors.json 등의 접속 주소까지 봉인되므로, **이 파일에서만** 추가 필드로 봉인한다(FILE_EXTRA_SECRET_FIELDS).
+  'alerts.json',                   // 알림 채널 웹훅 URL(alerts.js — 파일 한정 추가 필드 'url')
 ];
+
+/**
+ * 파일 한정 추가 봉인 필드(v2.604 SEC2604-03). 전역 SECRET_FIELDS 에 넣으면 다른 파일의 같은 이름(접속 주소 `url`)까지
+ * 봉인되어 버리는 이름을 **그 파일에서만** 봉인한다. 해당 파일의 load/save 는 이 집합을 openSecretsDeep/sealSecretsDeep 에
+ * 넘기고, 모드 전환 마이그레이션도 같은 집합을 쓴다(한쪽만 하면 반쪽 상태 — 위 메모 규약).
+ */
+export const FILE_EXTRA_SECRET_FIELDS = Object.freeze({ 'alerts.json': new Set(['url']) });
 
 /* ── 정책(모드·레벨·알고리즘) ─────────────────────────────────────────────── */
 
@@ -360,13 +371,13 @@ function walk(obj, fn) {
 }
 
 /** 로드 경계용 — 봉인 포맷인 문자열을 **키 이름과 무관하게** 전부 복호(과거 필드 개명에도 안전). in-place. */
-export function openSecretsDeep(obj) {
+export function openSecretsDeep(obj, extraFields = null) {
   const seen = new Set();   // v2.599: 한 파일 안에서 같은 문맥이 두 번 나오면 첫 것만 기억한다(뒤 것이 덮어 엉뚱한 대상에 재사용되지 않게)
   return walkCtx(obj, (k, v, parent, segs) => {
     if (!isSealed(v)) return undefined;
     const plain = openSecret(v);
     // v2.598 L2598-01: 연 값의 암호문을 기억해 다음 저장에서 재사용한다(평문이 안 바뀐 값은 파일이 글자 그대로 같게).
-    if (plain !== '' && k && SECRET_FIELDS.has(k)) {
+    if (plain !== '' && k && (SECRET_FIELDS.has(k) || extraFields?.has(k))) {
       const rk = reuseKey(pathCtxs(segs, parent, k)[0], plain);
       if (!seen.has(rk)) { seen.add(rk); reusePut(rk, v); }
     }
@@ -390,13 +401,13 @@ function walkCtx(obj, fn, segs = []) {
  * ⚠ 깊은 복제 후 변환(원본 불변): save 는 메모리 상태를 직렬화하므로 in-place 로 봉인하면
  * 실행 중 메모리가 암호문으로 오염돼 다음 vCenter 로그인부터 전부 실패한다.
  */
-export function sealSecretsDeep(obj, pol = policy()) {
+export function sealSecretsDeep(obj, pol = policy(), extraFields = null) {
   if (pol.mode !== 'encrypted') return obj;               // 평문 모드 — 복제 비용도 생략
   const clone = structuredClone(obj);
   const want = policyParams(pol);
   const emitted = new Set();   // v2.599: 이 봉인에서 이미 낸 암호문 — 한 파일 안에서 같은 암호문을 두 번 내지 않는다
   return walkCtx(clone, (k, v, parent, segs) => {
-    if (!(k && SECRET_FIELDS.has(k) && typeof v === 'string' && v !== '')) return undefined;
+    if (!(k && (SECRET_FIELDS.has(k) || extraFields?.has(k)) && typeof v === 'string' && v !== '')) return undefined;
     if (isSealed(v)) { emitted.add(v); return v; }        // 이미 봉인(이중 봉인 방지 — 예전과 같다)
     // v2.598 L2598-01: 같은 문맥·같은 평문을 이미 봉인했거나 읽은 적이 있고 현재 정책과 같으면 그 암호문을 그대로 쓴다.
     // v2.599: 문맥은 경로를 포함한다 — 전체 경로 먼저, 없으면 래퍼 한 단계를 뗀 경로(로드가 파일의 일부를 연 경우).
@@ -432,16 +443,17 @@ export function migrateSecretFiles(newPolicy) {
       const raw = fs.readFileSync(fp, 'utf8');
       const data = JSON.parse(raw);
       const failBefore = _decryptFailures;
-      openSecretsDeep(data);                               // ① 전부 평문으로
+      const extra = FILE_EXTRA_SECRET_FIELDS[name] || null; // v2.604: 파일 한정 추가 필드(alerts.json 의 url)
+      openSecretsDeep(data, extra);                        // ① 전부 평문으로
       // v2.480(3차 감사 코어2 S2): 이 파일에서 복호 실패가 있었으면 재기록하지 않는다 — 실패값 '' 를 디스크에 쓰면 암호문이
       // 영구 소거된다(키 env 누락 상태에서 '평문 전환' 1회면 전 레지스트리 비밀 유실). 키를 복구한 뒤 다시 전환하면 된다.
       if (_decryptFailures > failBefore) { out.errors.push({ file: name, error: `복호 실패 ${_decryptFailures - failBefore}건 — 암호문 보존을 위해 이 파일은 재기록하지 않음(키 확인 후 재시도)` }); continue; }
       let count = 0;
       walk(data, (k, v) => {                               // ② 대상 필드 수 집계(보고용)
-        if (k && SECRET_FIELDS.has(k) && typeof v === 'string' && v !== '') count += 1;
+        if (k && (SECRET_FIELDS.has(k) || extra?.has(k)) && typeof v === 'string' && v !== '') count += 1;
         return undefined;
       });
-      const next = pol.mode === 'encrypted' ? sealSecretsDeep(data, pol) : data;
+      const next = pol.mode === 'encrypted' ? sealSecretsDeep(data, pol, extra) : data;
       const nextRaw = JSON.stringify(next, null, 2);
       const changed = nextRaw !== raw;
       // 평문→평문 재기록도 무해하지만, 무변경이면 파일 mtime 을 건드리지 않는다(mtime 캐시 스토어 배려).

@@ -112,7 +112,8 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (req, res) => {
     types: SAN_SWITCH_TYPES.map((t) => ({ ...t, methods: collectMethodsFor(t.type) })),
     datacenters: (() => { try { return listDatacenters(); } catch { return []; } })(),
     agents: knownAgentNames(),
-    poller: sanSwitchPollerStatus(),
+    // v2.604 AUTHZ-2604-04: 같은 응답의 devices 는 가리는데 poller.inFlight 의 이름(IP)이 샜다 — 형제 perf/activity 와 같은 기준.
+    poller: admin ? sanSwitchPollerStatus() : maskPollerStatus(sanSwitchPollerStatus(), listDevices().map((d) => d.host)),
     // v2.591: 엣지가 가져갔지만 새 수집 결과가 오지 않아 재인출 뒤 폐기한 '지금 수집' 요청 — 화면이 말한다(조용한 소실 금지).
     collectDrops: recentCollectDrops(),
   });
