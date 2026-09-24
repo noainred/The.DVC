@@ -9,6 +9,7 @@
  */
 
 import { resilientFetch } from '../util/resilientFetch.js';
+import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.604: 엣지 응답 크기 상한
 import { strOf } from '../util/coercionTrap.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
@@ -28,7 +29,8 @@ export function findCollectorForAgent(agent) {
 }
 
 // 대역이 크면 엣지 스캔이 수십 초~수 분 걸린다 — 넉넉한 타임아웃(15분).
-const PUSH_TIMEOUT_MS = Number(process.env.IDRAC_PUSH_TIMEOUT_MS) || 15 * 60_000;
+// v2.605(감사 TIM2605-04): [1초, 2시간] — 음수·2^31 초과가 즉시 중단(1ms)이 되지 않게.
+const PUSH_TIMEOUT_MS = reqTimeoutMs(process.env.IDRAC_PUSH_TIMEOUT_MS, 15 * 60_000, { max: 2 * 3_600_000 });
 
 /**
  * PUSH 스캔 시작. 성공 시 { ok, reqId }를 즉시 반환하고, 실제 전송/결과 반영은 백그라운드에서 진행한다.
