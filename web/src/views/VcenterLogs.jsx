@@ -3,6 +3,7 @@ import { fetchJson, putJson, postJson, usePolling, downloadFile } from '../api.j
 import { downloadFailText } from './downloadFailText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import { vcLogTotalText, vcLogCanLoadMore } from './vcLogPaging.js'; // v2.607: vclogs 상한 COUNT(totalCapped)
 
 /** v2.590 P11: 연합 조회가 끝나지 않은 사유 — 결과 0건('로그 없음')과 구분해 말한다(조치가 다르다). */
 export function fedExpiredText(why) {
@@ -93,6 +94,7 @@ function LogViewer() {
   const [f, setF] = useState({ vcenterId: '', severity: '', q: '' });
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
+  const [totalInfo, setTotalInfo] = useState({ totalCapped: false, totalCap: null, lastBatch: 0 }); // v2.607: 상한 COUNT 표시·더 보기 판정
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
   const [sources, setSources] = useState({ local: [], remote: [] });
@@ -122,7 +124,7 @@ function LogViewer() {
         if (gen !== fedGen.current) return; // 다른 조회로 대체됨 → 이 루프 폐기
         const d = await fetchJson(`/tools/vclogs/federate?reqId=${encodeURIComponent(reqId)}`);
         if (gen !== fedGen.current) return;
-        if (d.state === 'done') { setRows(d.rows || []); setTotal(d.total || 0); setLoading(false); return; }
+        if (d.state === 'done') { setRows(d.rows || []); setTotal(d.total || 0); setTotalInfo({ totalCapped: false, totalCap: null, lastBatch: (d.rows || []).length }); setLoading(false); return; }
         if (d.state === 'expired') { setFedNote(fedExpiredText(d.why)); setLoading(false); return; }
         last = d.state;
       }
@@ -141,7 +143,8 @@ function LogViewer() {
     if (f.q) qs.set('q', f.q);
     fetchJson(`/tools/vclogs?${qs}`).then((d) => {
       if (gen !== fedGen.current) return; // 더 새 조회로 대체됨
-      setTotal(d.total); setRows((prev) => (reset ? d.rows : [...prev, ...d.rows])); setOffset(off + d.rows.length);
+      setTotal(d.total); setTotalInfo({ totalCapped: d.totalCapped === true, totalCap: Number.isFinite(d.totalCap) ? d.totalCap : null, lastBatch: d.rows.length });
+      setRows((prev) => (reset ? d.rows : [...prev, ...d.rows])); setOffset(off + d.rows.length);
     }).catch(() => {}).finally(() => { if (gen === fedGen.current) setLoading(false); });
   };
   useEffect(() => { load(true); /* eslint-disable-next-line */ }, [f.vcenterId, f.severity, sources]);
@@ -172,7 +175,7 @@ function LogViewer() {
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           {mode === 'edge' && <span className="badge amber" title="데이터는 엣지에 보관, 조회만 중계">엣지 조회: {remoteAgent(f.vcenterId) || '?'}</span>}
-          <span className="muted" style={{ fontSize: 12 }}>{fmtNum(total)}건</span>
+          <span className="muted" style={{ fontSize: 12 }} title={totalInfo.totalCapped ? '검색어·심각도 필터가 있으면 건수를 상한까지만 셉니다 — 실제로는 더 있을 수 있습니다' : undefined}>{vcLogTotalText({ total, ...totalInfo }, fmtNum)}</span>
           <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={exportCsv} disabled={mode === 'edge'} title={mode === 'edge' ? '엣지 조회는 CSV 미지원(엣지 포탈에서 받으세요)' : ''}>⬇ CSV</button>
         </div>
       </div>
@@ -197,7 +200,7 @@ function LogViewer() {
             })}
           </tbody></STable>
       </div>
-      {mode === 'local' && rows.length < total && <button className="tab" style={{ marginTop: 10, padding: '7px 16px' }} disabled={loading} onClick={() => load(false)}>{loading ? '불러오는 중…' : `더 보기 (${rows.length}/${fmtNum(total)})`}</button>}
+      {mode === 'local' && vcLogCanLoadMore({ loaded: rows.length, total, totalCapped: totalInfo.totalCapped, lastBatch: totalInfo.lastBatch, limit: LIMIT }) && <button className="tab" style={{ marginTop: 10, padding: '7px 16px' }} disabled={loading} onClick={() => load(false)}>{loading ? '불러오는 중…' : `더 보기 (${rows.length}/${vcLogTotalText({ total, ...totalInfo }, fmtNum)})`}</button>}
       {mode === 'edge' && loading && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>엣지 포탈에 조회 중… (응답 대기)</div>}
       {mode === 'edge' && !loading && fedNote && <div style={{ fontSize: 12, marginTop: 8, color: 'var(--amber)' }}>{fedNote}</div>}
     </div>

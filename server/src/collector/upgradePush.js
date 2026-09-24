@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto';
 import { readJsonCapped } from '../util/readCapped.js'; // v2.604: 엣지 응답 크기 상한
 import { strOf } from '../util/coercionTrap.js';
+import { reqTimeoutMs } from '../agent/envTimeout.js'; // v2.607 TIM2607-02: push 시한 정규화
 /** 업그레이드 응답 상한 — 본문은 {ok, version, reason} 수백 바이트다. */
 const UPGRADE_RESPONSE_MAX_BYTES = 64 * 1024;
 import { loadCollectors } from './registry.js';
@@ -36,7 +37,7 @@ export function netFailReason(msg) {
 
 const _shaCache = new WeakMap(); // 같은 번들 버퍼는 1회만 해시(수집기 수만큼 반복 해시 방지)
 function bundleSha(bytes) { let v = _shaCache.get(bytes); if (!v) { v = createHash('sha256').update(bytes).digest('hex'); _shaCache.set(bytes, v); } return v; }
-export async function pushBundleToCollector(c, bytes, { restart = true, force = false, timeout = Number(process.env.EDGE_PUSH_TIMEOUT_MS) || 600_000 } = {}) {
+export async function pushBundleToCollector(c, bytes, { restart = true, force = false, timeout = process.env.EDGE_PUSH_TIMEOUT_MS } = {}) {
   const url = `${String(c.url).replace(/\/+$/, '')}/api/collector/upgrade?restart=${restart}${force ? '&force=true' : ''}`;
   try {
     const res = await fetch(url, {
@@ -47,7 +48,8 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
       // v2.583(감사 확정): 기본 redirect:'follow' 는 교차 출처에서 X-Collector-Token 을 떼지 않는다(undici 는
       //   authorization·cookie 만 뗀다) — 번들 push 는 리다이렉트될 이유가 없으므로 따라가지 않는다(3xx = 실패).
       redirect: 'manual',
-      signal: AbortSignal.timeout(timeout),
+      // v2.607 TIM2607-02: 'Number(env) || 기본' 은 3e9 를 그대로(→ 1ms abort), 음수는 AbortSignal.timeout 이 ERR_OUT_OF_RANGE 로 던졌다.
+      signal: AbortSignal.timeout(reqTimeoutMs(timeout, 600_000, { max: 7_200_000 })),
     });
     // v2.604(감사 CEN2604-01 형제): 엣지 응답은 상한까지만 읽는다(해제 후 크기 — gzip 폭탄이 중앙 RSS 를 올리지 않게).
     //   객체가 아니거나 못 읽으면 {} — 사유·버전은 글자만(strOf).

@@ -3,6 +3,7 @@ import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { blankOr } from './blankOr.js';
+import { scopeSaveSuffix } from './scopeSaveText.js';
 
 /**
  * 설정 → 이상동작 탐지 — 짧은 시간(직전 수집 주기) 안에 다수 VM이 동시에 전원 OFF 되면
@@ -43,7 +44,7 @@ export default function AnomalyDetection() {
       const r = await putJson('/admin/anomaly', { enabled: s.enabled, threshold: blankOr(s.threshold), perVcenter: s.perVcenter || {} });
       setS(r.settings || r);
       // v2.606 AUTHZ2606-07: 범위 제한 계정이 보낸 전역 값은 적용되지 않는다 — 그 사실을 말한다.
-      setMsg(r.ignoredReason ? `저장되었습니다(vCenter별 임계). ${r.ignoredReason}` : '저장되었습니다. 다음 탐지 주기부터 적용됩니다.');
+      setMsg(`저장되었습니다. 다음 탐지 주기부터 적용됩니다.${scopeSaveSuffix(r)}`);
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };

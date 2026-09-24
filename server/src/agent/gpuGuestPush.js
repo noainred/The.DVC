@@ -13,6 +13,7 @@
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; // v2.606 EDGE2606-03
+import { createChangeLogger } from '../util/logThrottle.js';
 import { getGuestGpuVms, getGuestGpuAllHosts } from '../gpu/store.js';
 import { getGpuGuestDiag, gpuGuestStatus } from '../gpu/poller.js';
 
@@ -31,11 +32,14 @@ let _pollerStatus = () => gpuGuestStatus();
  * 통과하고, 못 읽은 vCenter 가 남으면 같은 시한(maxMs) 동안 보류한다(보류에는 시한 — v2.601). 반환 reason 은 보류 사유.
  */
 export function gpuGuestPushWithhold(lastRun, since, now, maxMs = GPU_GUEST_PUSH_WITHHOLD_MAX_MS) {
-  const unread = lastRun && Array.isArray(lastRun.unreadVcenters) ? lastRun.unreadVcenters.length : 0;
+  const list = lastRun && Array.isArray(lastRun.unreadVcenters) ? lastRun.unreadVcenters : [];
+  const unread = list.length;
   if (lastRun && !unread) return { withhold: false, since: null };
   const s = since || now;
   const out = { withhold: now - s <= maxMs, since: s };
-  return lastRun ? { ...out, reason: 'unread-vcenters', unread } : out;
+  // v2.607(EDGE2607-03): 개수(unread)와 **어느 vCenter 인지**(unreadIds, 앞 10개)를 함께 돌려준다.
+  const unreadIds = list.slice(0, 10).map((x) => String(x ?? '').slice(0, 128));
+  return lastRun ? { ...out, reason: 'unread-vcenters', unread, unreadIds } : out;
 }
 /** 테스트 전용 — 게스트 폴러 상태 주입/복원. */
 export function _setGuestPollerStatusForTest(fn) { _pollerStatus = fn || (() => gpuGuestStatus()); _withholdSince = null; }
@@ -46,6 +50,8 @@ let last = null; // { at, hosts, vms, error }
 // 이전 주기가 간격을 넘기면(고RTT·중앙 지연) 다음 틱이 겹쳐 돌아 연결·CPU 가 누적된다.
 // 수동 실행 API 도 같은 exported 함수를 부르므로 가드를 공유한다(inventoryPush 와 동일 패턴).
 let running = false;
+// v2.607(EDGE2607-03): 보류 로그는 같은 사유면 10분에 한 줄 — 예전에는 push 주기(60초)마다 같은 줄을 반복했다.
+const _withholdLog = createChangeLogger({ windowMs: 10 * 60_000, maxKeys: 8 });
 
 function headers() {
   return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
@@ -65,10 +71,11 @@ async function _pushGpuGuestNow() {
   _withholdSince = wh.since;
   if (wh.withhold) {
     const note = wh.reason === 'unread-vcenters'
-      ? `게스트 GPU 대상 vCenter ${Array.isArray(wh.unread) ? wh.unread.length : ''}곳을 아직 읽지 못해 보내지 않았습니다(인벤토리 미수집·인증 정지·로그인 실패 — 빈 목록을 보내면 중앙의 이 엣지 GPU 사용률이 지워집니다)`
+      // v2.607(EDGE2607-03): unread 는 **숫자**다 — 예전 Array.isArray(wh.unread) 판정은 늘 거짓이라 '대상 vCenter 곳을' 이 됐다.
+      ? `게스트 GPU 대상 vCenter ${wh.unread}곳${wh.unreadIds?.length ? `(${wh.unreadIds.join(', ')}${wh.unread > wh.unreadIds.length ? ` 외 ${wh.unread - wh.unreadIds.length}곳` : ''})` : ''}을 아직 읽지 못해 보내지 않았습니다(인벤토리 미수집·인증 정지·로그인 실패 — 빈 목록을 보내면 중앙의 이 엣지 GPU 사용률이 지워집니다)`
       : '게스트 GPU 첫 수집이 아직 끝나지 않아 보내지 않았습니다(빈 목록을 보내면 중앙의 이 엣지 GPU 사용률이 지워집니다)';
     last = { at: Date.now(), hosts: 0, vms: 0, skipped: true, note };
-    console.log(`[gpu-guest-push] ${note}`);
+    if (_withholdLog('withhold', note)) console.log(`[gpu-guest-push] ${note}`);
     return { ok: false, skipped: true, reason: note };
   }
   const hosts = [...getGuestGpuAllHosts().entries()].map(([hostId, v]) => ({ hostId, utilPct: v.utilPct }));

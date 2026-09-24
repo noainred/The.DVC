@@ -10,6 +10,7 @@
  * 기존 화면과 같은 색이 같은 뜻이 되게 맞췄다.
  */
 import { nsxCount, nsxFailedShort } from '../views/nsxLimitText.js';
+import { alarmsUnknown, isRestFallback } from '../views/restFallbackText.js';
 
 export const WARN_PCT = 75;
 export const CRIT_PCT = 90;
@@ -128,8 +129,11 @@ export function siteRows(sites) {
       lat: s.location?.lat ?? null, lon: s.location?.lon ?? null,
       hosts: num(m.hosts), vms: num(m.vms), vmsOn: num(m.vmsPoweredOn), cpu, mem, sto,
       storageUsedTB: num(m.storageUsedTB), storageTotalTB: num(m.storageTotalTB),
-      powerKw: num(m.powerKw),
+      // v2.607 WEB2607-05: 측정 서버 0대면 0 kW 가 아니라 null — hostFacilityRows 가 호스트 보고 전력으로 폴백한다.
+      powerKw: m.powerServers === 0 ? null : num(m.powerKw),
       alarmsCritical: num(m.alarmsCritical) || 0, alarmsWarning: num(m.alarmsWarning) || 0,
+      // v2.607 WEB2607-06: REST 폴백 vCenter 는 경보를 조회하지 않았다 — 표는 '—' 로 그린다(0건이 아니다).
+      alarmsUnknown: alarmsUnknown(s), restFallback: isRestFallback(s),
       worst: vals.length ? Math.max(...vals) : null,
     };
   }).sort((a, b) => (b.worst ?? -1) - (a.worst ?? -1) || a.id.localeCompare(b.id));

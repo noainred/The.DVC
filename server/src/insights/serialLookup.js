@@ -184,9 +184,13 @@ export function buildSerialIndex(req, { includeSfp = true } = {}) {
   // 5) SAN 스위치 — 스냅샷이 식별을 들고 있지만 등록부로 보강(법인·표시명).
   try {
     const swById = new Map(listSwitchDevices().map((d) => [d.id, d]));
-    let n = 0; let parts = 0;
+    let n = 0; let parts = 0; let bad = 0; let badMsg = '';
+    // v2.607(감사 CEN2607-01): **장비 단위** try — 예전에는 구획 전체를 한 try 로 감싸 엣지 한 곳의 원소 하나
+    //   (health.psuDetail:[null])가 전 엣지·중앙 스위치의 시리얼을 rows 0 으로 지웠다. 실패한 장비만 건너뛰고 개수를 밝힌다.
     for (const s of [...switchLocal(), ...edgeSanSwitchSnapshots()]) {
-      const d = swById.get(s.deviceId) || {};
+      const nBefore = n; const pBefore = parts; const rBefore = rows.length;
+      try {
+      const d = swById.get(s?.deviceId) || {};
       const base = {
         deviceName: d.name || s.name || s.deviceId, hostname: s.name || '',
         host: s.host || d.host || '', model: s.model || (s.extra?.switchType ? `switchType ${s.extra.switchType}` : ''),
@@ -220,8 +224,13 @@ export function buildSerialIndex(req, { includeSfp = true } = {}) {
           }
         }
       }
+      } catch (e) {
+        rows.length = rBefore; n = nBefore; parts = pBefore; bad += 1;
+        if (!badMsg) badMsg = String(e?.message || e).slice(0, 200);
+      }
     }
-    mark('sanswitch', n); mark('sanswitch-part', parts);
+    const badNote = bad ? `장비 ${bad}대의 스냅샷 형식 오류로 건너뜀(${badMsg})` : undefined;
+    mark('sanswitch', n, badNote); mark('sanswitch-part', parts, badNote);
   } catch (e) { mark('sanswitch', 0, e.message); mark('sanswitch-part', 0, e.message); }
 
   // 6) 엣지가 올린 베어메탈 서버(중앙 iDRAC 등록엔 없다)

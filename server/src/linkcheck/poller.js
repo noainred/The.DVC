@@ -95,10 +95,12 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
     let setResults = [];
     let setProblems = [];
     let setSourceErrors = [];
+    let setIds = [];
     if (s.settingsCheck !== false) {
       const built = await buildSettingsTargets();
       setProblems = built.problems;
       setSourceErrors = built.sourceErrors;
+      setIds = built.targets.map((x) => x?.id).filter(Boolean);
       const doable = built.targets.filter((x) => x.enabled !== false && !x.bad
         // 엣지 위임 장비는 중앙에서 닿지 않는 것이 **정상**이다 — 점검해서 '실패' 로 적으면 거짓이다.
         && !(x.agent && node === 'central') && !(node !== 'central' && x.agent && x.agent !== node));
@@ -111,7 +113,15 @@ export async function pollOnce({ trigger = 'timer' } = {}) {
     const saved = await insertResults(measured, { byNode: node });
     // ⚠ 스로틀은 `(++tick % N) === 0` — 기동 첫 틱 즉발 금지(v2.453).
     if ((++tick % 12) === 0) {
-      await pruneLinkCheck({ sampleDays: s.sampleRetentionDays, eventDays: s.eventRetentionDays, dailyDays: s.dailyRetentionDays, force: true });
+      /*
+       * v2.607(감사 LEFT2607-01): 고아 최신값 정리에 **현재 링크 집합**을 넘긴다 — 예전에는 currentIds 없이 불러
+       *   pruneOrphanLatest 가 한 번도 돌지 않았다(엣지 삭제·vCenter 이관으로 사라진 링크가 보존일까지 남았다).
+       *   현재 집합 = 중앙이 계산한 전 링크(엣지가 재는 것 포함) ∪ 설정 전수 대상(set:*). 설정 대상을 다 읽지 못한
+       *   주기(sourceErrors)에는 그 대상의 행을 지우지 않도록 넘기지 않는다(판정 보류). 설정 점검이 꺼져 있으면 set:* 행은
+       *   더 갱신되지 않는 낡은 값이므로 링크 집합만 넘긴다(1일 넘게 갱신되지 않은 것만 지워진다 — db.js LATEST_ORPHAN_MS).
+       */
+      const currentIds = (setSourceErrors && setSourceErrors.length) ? null : [...centralLinks().all.map((l) => l.id), ...setIds];
+      await pruneLinkCheck({ sampleDays: s.sampleRetentionDays, eventDays: s.eventRetentionDays, dailyDays: s.dailyRetentionDays, force: true, currentIds });
     }
 
     const failed = measured.filter((r) => !r.verdict.ok).length;

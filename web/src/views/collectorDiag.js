@@ -221,7 +221,46 @@ export function urlIdentityCard(status) {
   };
 }
 
+/**
+ * pull 로 받은 iDRAC 서버 목록에서 버리거나 고친 원소·다른 엣지와 겹친 호스트명(v2.607, 감사 WEB2607-09).
+ * 서버(collector/puller.js statusFromPull)는 serversDropped{notObject,badId,overCount}·serversCoerced·hostConflicts 를
+ * 상태에 싣는데 화면이 읽지 않아 '정상 · 호스트 N' 만 보였다 — 사라진 서버를 사용자가 알 길이 없었다.
+ */
+export function pullDropCard(status) {
+  if (!status || typeof status !== 'object') return null;
+  const sd = status.serversDropped && typeof status.serversDropped === 'object' ? status.serversDropped : null;
+  const n = (k) => (sd && Number.isFinite(sd[k]) ? sd[k] : 0);
+  const dropped = n('notObject') + n('badId') + n('overCount');
+  const coerced = Number.isFinite(status.serversCoerced) ? status.serversCoerced : 0;
+  const conflicts = Array.isArray(status.hostConflicts) ? status.hostConflicts.filter((x) => typeof x === 'string') : [];
+  if (!dropped && !coerced && !conflicts.length) return null;
+  const parts = [];
+  if (dropped) parts.push(`버린 서버 ${dropped}`);
+  if (coerced) parts.push(`고친 값 ${coerced}`);
+  if (conflicts.length) parts.push(`호스트명 겹침 ${conflicts.length}`);
+  const evidence = [];
+  if (dropped) evidence.push({ k: '버린 서버 원소', v: `객체 아님 ${n('notObject')} · id 오류 ${n('badId')} · 상한 초과 ${n('overCount')}` });
+  if (coerced) evidence.push({ k: '형식을 고쳐 받은 값', v: `${coerced}개(문자열·숫자 형식이 맞지 않아 좁혀 받음)` });
+  if (conflicts.length) evidence.push({ k: '다른 수집 서버와 같은 호스트명', v: `${conflicts.slice(0, 10).join(', ')}${conflicts.length > 10 ? ` 외 ${conflicts.length - 10}개` : ''}` });
+  return {
+    kind: 'pull-drop',
+    badge: parts.join(' · '),
+    tone: 'amber',
+    title: dropped ? '이 엣지가 보낸 서버 목록 일부를 받지 않았습니다' : '이 엣지가 보낸 서버 목록에 주의할 값이 있습니다',
+    summary: dropped
+      ? `엣지 export 의 iDRAC 서버 원소 ${dropped}개가 형식 오류·상한 초과로 버려져 서버 분석·전력 화면에 나오지 않습니다(정상 표시는 나머지 서버 기준입니다).`
+      : '서버 목록은 모두 받았지만 아래 값은 그대로 믿기 어렵습니다.',
+    evidence,
+    steps: [
+      ...(dropped ? ['엣지 포탈의 iDRAC 등록부에서 id·서비스태그가 비었거나 형식이 잘못된 항목을 확인하세요(상한 초과면 등록 수를 확인).'] : []),
+      ...(conflicts.length ? ['같은 호스트명이 다른 법인 엣지에도 있습니다 — 법인별로 따로 집계하고 전력 이력 키를 나눕니다. 실제로 같은 장비면 한쪽 등록을 지우세요.'] : []),
+      ...(coerced && !dropped ? ['엣지를 최신 버전으로 올리면 대부분 사라집니다.'] : []),
+    ],
+    where: ['중앙 로그: [collector] <id> export 서버 원소 …개를 버림 / 다른 수집 서버와 같은 호스트명 …'],
+  };
+}
+
 /** 한 행의 모든 진단 카드(배지 렌더 순서와 동일). */
 export function rowCards(collector, status, ident) {
-  return [urlIdentityCard(status), ...identityCards(collector, ident), denyCard(status)].filter(Boolean);
+  return [urlIdentityCard(status), ...identityCards(collector, ident), denyCard(status), pullDropCard(status)].filter(Boolean);
 }

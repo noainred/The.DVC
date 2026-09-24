@@ -29,6 +29,7 @@
 import { modeFor } from './settings.js';
 import { saveHistoryRow, listHistoryRows } from './historyDb.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { capStr, capTrim } from '../util/capStr.js';
 
 const jobs = new Map();            // reqId -> job
 const pendingByAgent = new Map();  // agentLower -> Set<reqId>
@@ -97,7 +98,7 @@ function pushHistory(j, now) {
     reqId: j.reqId, agent: j.agent, instance: j.instance || j.target || '', cmd: j.spec?.cmd, args: j.spec?.args || {}, label: j.spec?.label || '',
     user: j.user || '', createdAt: j.createdAt, takenAt: j.takenAt, doneAt: now,
     ok: !!r.ok, exitCode: r.exitCode ?? null, timedOut: !!r.timedOut, durationMs: r.durationMs ?? null,
-    reason: r.reason || '', stdout: String(r.stdout || '').slice(0, HISTORY_OUTPUT_MAX), stderr: String(r.stderr || '').slice(0, HISTORY_OUTPUT_MAX),
+    reason: r.reason || '', stdout: capStr(r.stdout || '', HISTORY_OUTPUT_MAX), stderr: capStr(r.stderr || '', HISTORY_OUTPUT_MAX), // v2.607(TIM2607-01): 평탄화
     truncated: !!r.truncated || String(r.stdout || '').length > HISTORY_OUTPUT_MAX,
   });
   if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
@@ -268,7 +269,8 @@ export function releaseAllWaiters() {
 const RESULT_TEXT_MAX = Math.max(256 * 1024, Number(process.env.RMA_MAX_OUTPUT) || 0) * 2;
 const REASON_MAX = 2000;
 const ARGV_MAX = 64; const ARGV_ITEM_MAX = 1000;
-const str = (v, n) => (typeof v === 'string' ? v : (typeof v === 'number' || typeof v === 'boolean') ? String(v) : '').slice(0, n);
+// v2.607(TIM2607-01·LEFT2607-05): capStr — `.slice` 는 결과 본문(최대 수 MB) 원문을 붙잡는다.
+const str = (v, n) => capStr(v, n);
 export function sanitizeRmaResult(result) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return { ok: false, reason: '에이전트가 빈 결과를 회신했습니다.' };
   const r = result;
@@ -277,13 +279,13 @@ export function sanitizeRmaResult(result) {
     ok: r.ok === true, timedOut: r.timedOut === true, rejected: r.rejected === true, clipped: r.clipped === true,
     truncated: r.truncated === true || rawOut.length > RESULT_TEXT_MAX || rawErr.length > RESULT_TEXT_MAX,
     exitCode: numOrNull(r.exitCode), durationMs: numOrNull(r.durationMs),
-    stdout: rawOut.slice(0, RESULT_TEXT_MAX), stderr: rawErr.slice(0, RESULT_TEXT_MAX),
+    stdout: capStr(rawOut, RESULT_TEXT_MAX), stderr: capStr(rawErr, RESULT_TEXT_MAX),
   };
   const reason = str(r.reason, REASON_MAX); if (reason) out.reason = reason;
-  if (typeof r.signal === 'string' && r.signal) out.signal = r.signal.slice(0, 32);
+  if (typeof r.signal === 'string' && r.signal) out.signal = capStr(r.signal, 32);
   const cmd = str(r.cmd, 64); if (cmd) out.cmd = cmd;
   const inst = str(r.instance, 64); if (inst) out.instance = inst;
-  if (Array.isArray(r.argv)) out.argv = r.argv.slice(0, ARGV_MAX).filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => String(x).slice(0, ARGV_ITEM_MAX));
+  if (Array.isArray(r.argv)) out.argv = r.argv.slice(0, ARGV_MAX).filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => capStr(x, ARGV_ITEM_MAX));
   if (r.restartSelf === true) out.restartSelf = true;
   // 원문이 객체·배열이던 필드는 버렸다는 사실을 남긴다(조용히 빼지 않는다).
   const bad = ['reason', 'exitCode', 'durationMs', 'stdout', 'stderr', 'argv'].filter((k) => r[k] != null && typeof r[k] === 'object' && !(k === 'argv' && Array.isArray(r[k])));
@@ -328,7 +330,7 @@ export function listHistory({ agent = '', limit = 100 } = {}) {
 /** 하트비트 기록(폴마다). info 는 에이전트 자기 보고 — 표시·배정용일 뿐 권한 판정에 쓰지 않는다. */
 export function noteHeartbeat(agent, instance, info = {}, { ip = '' } = {}) {
   const a = String(agent || '').trim();
-  const inst = String(instance || '').trim().slice(0, 64) || 'default';
+  const inst = capTrim(instance || '', 64) || 'default';
   if (!a) return;
   // v2.601(감사 CEN2601-05): 정책 목록은 **배열일 때만** 읽는다. 예전 `(info.policy.enabled || []).map` 은 문자열·객체가 오면
   //   TypeError → rma-poll 이 매 폴 500 이라 하트비트가 기록되지 않고 작업도 배달되지 않았다. 배열이 아닌 필드는 빈 목록 +
@@ -339,19 +341,19 @@ export function noteHeartbeat(agent, instance, info = {}, { ip = '' } = {}) {
     const v = info.policy?.[k];
     if (v == null) return [];
     if (!Array.isArray(v)) { invalid.push(k); return []; }
-    return v.slice(0, n).filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => String(x).slice(0, HEARTBEAT_ELEM_MAX));
+    return v.slice(0, n).filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => capStr(x, HEARTBEAT_ELEM_MAX));
   };
   const safe = {
-    hostname: String(info.hostname || '').slice(0, 120),
-    version: String(info.version || '').slice(0, 40),
-    os: String(info.os || '').slice(0, 120),
+    hostname: capStr(info.hostname || '', 120), // v2.607(LEFT2607-05): 평탄화
+    version: capStr(info.version || '', 40),
+    os: capStr(info.os || '', 120),
     pid: Number(info.pid) || null,
     uptimeSec: Number(info.uptimeSec) || 0,
     priority: Number.isFinite(Number(info.priority)) ? Number(info.priority) : 100,
     allowCustom: !!info.allowCustom,
     signed: !!info.signed,
     busy: !!info.busy,
-    comment: String(info.comment || '').slice(0, 200),
+    comment: capStr(info.comment || '', 200),
     remoteManage: !!info.remoteManage,
     stats: info.stats && typeof info.stats === 'object' ? { active: Number(info.stats.active) || 0, performed: Number(info.stats.performed) || 0, rejected: Number(info.stats.rejected) || 0, testsRun: Number(info.stats.testsRun) || 0, testsFailed: Number(info.stats.testsFailed) || 0 } : null,
     policy: info.policy && typeof info.policy === 'object' ? {

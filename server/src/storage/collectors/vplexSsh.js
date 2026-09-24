@@ -75,6 +75,9 @@ function pick(rec, ...keys) {
   return '';
 }
 
+/** 버전 정규식이 보는 앞부분 길이(v2.607 SEC2607-02). */
+export const VPLEX_VERSION_SCAN_MAX = 65_536;
+
 export function normalizeVplexSsh(device, out) {
   const snap = emptySnapshot(device);
   snap.extra.collectMethod = 'ssh';
@@ -82,7 +85,10 @@ export function normalizeVplexSsh(device, out) {
 
   if (out.version) {
     // 'Product Version: 6.2.0.01.00.13' 같은 줄에서 버전을 뽑는다. 못 찾으면 첫 줄을 남긴다.
-    const m = /(?:product\s+version|version)\s*[:=]?\s*([\d][\w.]*)/i.exec(out.version);
+    // v2.607 SEC2607-02: 예전 /(?:product\s+version|version)\s*[:=]?\s*([\d][\w.]*)/i 는 \s*[:=]?\s* 가 모호해
+    //   'Version'+공백 n 에서 O(n²)(16,000자 0.43초 · exec 상한 4MB). 같은 언어를 비모호하게 쓰고, 찾는 범위도
+    //   앞 VPLEX_VERSION_SCAN_MAX 자로 둔다(버전 줄은 출력 맨 앞에 있다).
+    const m = /(?:product\s+version|version)\s*(?:[:=]\s*)?(\d[\w.]*)/i.exec(String(out.version).slice(0, VPLEX_VERSION_SCAN_MAX));
     snap.version = m ? m[1] : firstLine(out.version);
     snap.name = device.name;
     snap.sections.config = 'ok';

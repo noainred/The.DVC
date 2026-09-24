@@ -58,6 +58,25 @@ export function deviceVerdict(r) {
   return { label: STATUS_LABEL.ok, color: 'green', text: `${n0(c.ok)}항목 모두 이상 없음` };
 }
 
+/**
+ * 점검 중 오류로 빠진 스위치 이름 목록(v2.607, 감사 LEFT2607-03). 서버(`/tools/sanswitch/healthcheck-all`)는
+ * checkDevice 가 던진 장비를 결과에서 빼고 `failed[]`·`summary.failed` 로 밝히는데, 화면·PDF 가 그것을 읽지 않아
+ * 실패 장비만 있으면 '이상 0 · 정상 N' 으로 결론이 났다(v2.519 '조용히 빼지 말 것' 위반). 상한 20개 뒤는 개수.
+ */
+export function failedNamesText(failed, max = 20) {
+  const list = (Array.isArray(failed) ? failed : []).filter((x) => x && typeof x === 'object');
+  if (!list.length) return '';
+  const names = list.slice(0, max).map((x) => String(x.name || x.deviceId || '?'));
+  return `${names.join(', ')}${list.length > max ? ` 외 ${list.length - max}대` : ''}`;
+}
+
+/** '전부 이상 없음' 이라고 결론 낼 수 없는 부분이 있는가 — 화면 경고와 PDF note 가 같은 조건을 쓴다. */
+export function hasUncheckedPart(summary) {
+  if (!summary) return false;
+  const b = summary.byOverall || {};
+  return !!(n0(summary.missing) || n0(summary.failed) || n0(b.unknown) || n0(summary.uncheckedItems));
+}
+
 /** 전체 요약 한 줄. */
 export function allSummaryText(summary) {
   if (!summary) return '';
@@ -70,6 +89,7 @@ export function allSummaryText(summary) {
   ];
   if (n0(b.unknown)) parts.push(`판정 불가 ${n0(b.unknown)}`);
   if (n0(summary.missing)) parts.push(`스냅샷 없음 ${n0(summary.missing)}대`);
+  if (n0(summary.failed)) parts.push(`점검 중 오류 ${n0(summary.failed)}대`); // v2.607 LEFT2607-03
   if (n0(summary.uncheckedItems)) parts.push(`확인 불가 항목 합계 ${n0(summary.uncheckedItems)}`);
   return parts.join(' · ');
 }
@@ -200,9 +220,10 @@ export function allReportDoc(payload, { now = Date.now(), maxDetail = 30 } = {})
       { k: '정상', v: `${n0(b.ok)}대`, color: n0(b.ok) ? 'green' : 'muted' },
     ] },
   ];
-  if (n0(summary.missing) || n0(b.unknown) || n0(summary.uncheckedItems)) {
+  if (hasUncheckedPart(summary)) {
     blocks.push({ type: 'note', text: [
       '점검하지 못한 부분',
+      n0(summary.failed) ? `- 점검 중 오류로 빠진 스위치 ${n0(summary.failed)}대${failedNamesText(payload?.failed) ? ` — ${failedNamesText(payload.failed)}` : ''}.` : null,
       n0(summary.missing) ? `- 스냅샷이 없어 점검 대상에서 빠진 스위치 ${n0(summary.missing)}대 — 먼저 수집하세요.` : null,
       n0(b.unknown) ? `- 판정 가능한 항목이 하나도 없던 스위치 ${n0(b.unknown)}대.` : null,
       n0(summary.uncheckedItems) ? `- 확인 불가 항목 합계 ${n0(summary.uncheckedItems)}개(명령 없음·실행 실패·형식 미인식).` : null,

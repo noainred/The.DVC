@@ -231,3 +231,15 @@ export function relevantLogs(items, max = 60) {
   const use = hit.length ? hit : items;
   return use.slice(-max);
 }
+
+/**
+ * '수집 방식' 칸(v2.607, 감사 RECENT2607-08). 서버 storeStatus 는 collectMode 에 등록부 축(site/direct)만 싣고
+ * REST 폴백 여부는 collectSource:'rest' 로 따로 싣는다. 예전에는 REST 폴백 표지가 collectMode 로 새어 이 칸에 'rest' 가
+ * 찍혔다(구버전 엣지가 아직 그렇게 보낼 수 있어 collectMode==='rest' 도 REST 폴백으로 읽는다).
+ */
+export function collectModeText(v) {
+  const x = v && typeof v === 'object' ? v : {};
+  const rest = x.collectSource === 'rest' || x.collectMode === 'rest';
+  const base = x.collectMode === 'site' ? '사이트 위임' : '직접';
+  return rest ? `${base} · REST 폴백(경보·클러스터 미수집)` : base;
+}

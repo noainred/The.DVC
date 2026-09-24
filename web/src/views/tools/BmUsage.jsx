@@ -17,6 +17,8 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
+import { scopeSaveSuffix } from '../scopeSaveText.js';
+import { fleetPartialsNote } from '../fleetPartialText.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
@@ -195,7 +197,7 @@ export function BmUsage() {
     setSaving(true);
     try {
       const r = await putJson('/tools/bm-usage/settings', patch);
-      setForm(r.settings); setMsg({ tone: 'ok', text: '설정을 저장했습니다.' });
+      setForm(r.settings); { const warn = scopeSaveSuffix(r); setMsg({ tone: warn ? 'bad' : 'ok', text: `설정을 저장했습니다.${warn}` }); }
       load();
     } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }
     finally { setSaving(false); }
@@ -235,6 +237,10 @@ export function BmUsage() {
           <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}>
             <BoldText text={hostsUnreadNote(data.hostsUnread)} />
           </p>
+        )}
+        {/* v2.607 LEFT2607-02: 엣지가 일부만 보낸 베어메탈 목록 — 빠진 서버가 조용히 사라지지 않게 말한다. */}
+        {fleetPartialsNote(data?.fleetPartials) && (
+          <p style={{ margin: '0 0 6px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}>{fleetPartialsNote(data.fleetPartials)}</p>
         )}
         {/* ⚠ 인증 실패 정지는 **반드시 화면이 말한다** — 조용히 멈추면 사용자는 수집되는 줄 안다(v2.528). */}
         {authStopNote(data?.authStops || []) && (

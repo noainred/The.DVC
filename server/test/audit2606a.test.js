@@ -55,7 +55,16 @@ function runChild(script, { gc = false, env = {} } = {}) {
 
 /* ── CEN2606-01 ───────────────────────────────────────────────────────────── */
 
-test('CEN2606-01: 엣지는 자기 링크 id 로만 보고할 수 있다 — 남의 링크 id·임의 id·긴 id 는 거절', async () => {
+test('CEN2606-01: 엣지는 자기 링크 id 로만 보고할 수 있다 — 남의 링크 id·임의 id·긴 id 는 거절', async (t) => {
+  // v2.607(LEFT2607-01): 수신은 이제 '중앙이 그 엣지에 내려준 링크 집합' 도 본다 — 그 근거가 되는 등록부(수집 서버·vCenter)를
+  //   이 테스트 동안만 둔다(다른 테스트의 등록부 전제를 바꾸지 않게 끝나면 되돌린다).
+  const colFile = path.join(CFG, 'collectors.json'); const vcFile = path.join(CFG, 'vcenters.json');
+  const vcPrev = fs.readFileSync(vcFile, 'utf8');
+  fs.writeFileSync(colFile, JSON.stringify({ collectors: [
+    { id: 'edgeA', name: 'edgeA', url: 'https://10.9.9.1:4000', token: 't-a' }, { id: 'edgeB', name: 'edgeB', url: 'https://10.9.9.2:4000', token: 't-b' },
+  ] }));
+  fs.writeFileSync(vcFile, JSON.stringify({ vcenters: [{ id: 'vc-1', name: 'vc-1', host: 'vc1.invalid', collectMode: 'site', remoteAgent: 'EdgeA' }] }));
+  t.after(() => { fs.rmSync(colFile, { force: true }); fs.writeFileSync(vcFile, vcPrev); });
   const { putEdgeLinkReport } = await import('../src/central/linkCheckEdge.js');
   const { latestAll } = await import('../src/linkcheck/db.js');
   const v = (ok) => ({ ok, phase: ok ? 'identity' : 'tcp' });

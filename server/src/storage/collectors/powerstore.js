@@ -127,7 +127,7 @@ export function normalizePowerstore(device, raw) {
       else if (k === 'absent') absent += 1;
       else if (k === 'unknown') unknown += 1;
     }
-    inv.hardware = { total: raw.hardware.length, byType, unhealthy, absent, unknown };
+    inv.hardware = { total: raw.hardware.length, byType, unhealthy, absent, unknown, ...(raw.hardwareTruncated ? { truncated: true } : {}) };
   }
   if (Array.isArray(raw.volumes)) {
     // v2.603(감사 COL-2603-07): size 를 못 읽은 볼륨을 0 으로 더하면 할당 합계가 조용히 부분 합이 된다 —
@@ -144,8 +144,10 @@ export function normalizePowerstore(device, raw) {
       ...(sizeUnknown ? { sizeUnknown } : {}),
     };
   }
-  if (Array.isArray(raw.hosts)) inv.hosts = { count: raw.hosts.length };
-  if (Array.isArray(raw.hostGroups)) inv.hostGroups = { count: raw.hostGroups.length };
+  // v2.607 COL2607-05: 상한에 닿은 목록은 truncated:true — 개수·합계는 **하한**이다(화면이 '이상' 으로 표기).
+  const trunc = (k) => (raw[`${k}Truncated`] ? { truncated: true } : {});
+  if (Array.isArray(raw.hosts)) inv.hosts = { count: raw.hosts.length, ...trunc('hosts') };
+  if (Array.isArray(raw.hostGroups)) inv.hostGroups = { count: raw.hostGroups.length, ...trunc('hostGroups') };
   if (Array.isArray(raw.fileSystems)) {
     // v2.601(감사 LO2601-06): size_used 를 못 읽은 파일시스템을 0 으로 더하면 '0.00 TB / 1.00 TB'(비어 있음)라는 거짓이 된다.
     //   하나라도 못 읽었으면 사용량은 null(화면 '—') + usedUnknown 개수로 밝힌다(부분 합을 전체 대비로 보여주지 않는다).
@@ -157,15 +159,15 @@ export function normalizePowerstore(device, raw) {
     }
     inv.fileSystems = {
       count: raw.fileSystems.length, totalBytes: total, usedBytes: usedUnknown ? null : used,
-      ...(usedUnknown ? { usedUnknown } : {}), ...(totalUnknown ? { totalUnknown } : {}),
+      ...(usedUnknown ? { usedUnknown } : {}), ...(totalUnknown ? { totalUnknown } : {}), ...trunc('fileSystems'),
     };
   }
-  if (Array.isArray(raw.nasServers)) inv.nasServers = { count: raw.nasServers.length };
-  if (Array.isArray(raw.storageContainers)) inv.storageContainers = { count: raw.storageContainers.length };
+  if (Array.isArray(raw.nasServers)) inv.nasServers = { count: raw.nasServers.length, ...trunc('nasServers') };
+  if (Array.isArray(raw.storageContainers)) inv.storageContainers = { count: raw.storageContainers.length, ...trunc('storageContainers') };
   if (Array.isArray(raw.replication)) {
     const byState = {};
     for (const r of raw.replication) { const k = String(r.state || 'Unknown'); byState[k] = (byState[k] || 0) + 1; }
-    inv.replicationSessions = { count: raw.replication.length, byState };
+    inv.replicationSessions = { count: raw.replication.length, byState, ...trunc('replication') };
   }
   if (Array.isArray(raw.appliances)) inv.appliances = { count: raw.appliances.length };
   if (Object.keys(inv).length) { snap.extra.inventory = inv; snap.sections.inventory = 'ok'; }
@@ -344,15 +346,20 @@ export async function collect(device, { signal = null } = {}) {
     // ⚠ select 로 필요한 필드만, limit 으로 상한을 둔다 — 볼륨 수천 개의 전체 객체를 받으면
     //   파싱·push·중앙 저장이 모두 무거워진다(요약만 스냅샷에 남는다 — normalize 참고).
     const LIMIT = Math.max(100, Number(process.env.STORAGE_POWERSTORE_LIST_LIMIT) || 2000);
-    await step('hardware', () => get('/api/rest/hardware?select=id,type,name,slot,lifecycle_state&limit=1000'));
-    await step('volumes', () => get(`/api/rest/volume?select=id,size,state&limit=${LIMIT}`));
-    raw.volumesTruncated = Array.isArray(raw.volumes) && raw.volumes.length >= LIMIT;
-    await step('hosts', () => get('/api/rest/host?select=id&limit=1000'));
-    await step('hostGroups', () => get('/api/rest/host_group?select=id&limit=1000'));
-    await step('fileSystems', () => get('/api/rest/file_system?select=id,size_total,size_used&limit=1000'));
-    await step('nasServers', () => get('/api/rest/nas_server?select=id&limit=500'));
-    await step('storageContainers', () => get('/api/rest/storage_container?select=id&limit=500'));
-    await step('replication', () => get('/api/rest/replication_session?select=id,state&limit=500'));
+    // v2.607(감사 COL2607-05): limit 에 닿은 목록은 전부 `<키>Truncated` 로 밝힌다 — 예전에는 볼륨만 표시해
+    //   파일시스템 1,200개 장비의 앞 1,000개 합이 전체처럼, 호스트 수가 1,000 으로 단정됐다(조용한 상한 금지).
+    const listStep = async (key, path, limit) => {
+      await step(key, () => get(`${path}&limit=${limit}`));
+      raw[`${key}Truncated`] = Array.isArray(raw[key]) && raw[key].length >= limit;
+    };
+    await listStep('hardware', '/api/rest/hardware?select=id,type,name,slot,lifecycle_state', 1000);
+    await listStep('volumes', '/api/rest/volume?select=id,size,state', LIMIT);
+    await listStep('hosts', '/api/rest/host?select=id', 1000);
+    await listStep('hostGroups', '/api/rest/host_group?select=id', 1000);
+    await listStep('fileSystems', '/api/rest/file_system?select=id,size_total,size_used', 1000);
+    await listStep('nasServers', '/api/rest/nas_server?select=id', 500);
+    await listStep('storageContainers', '/api/rest/storage_container?select=id', 500);
+    await listStep('replication', '/api/rest/replication_session?select=id,state', 500);
     await step('perf', async () => (await fetchSpaceMetrics({ post, csrf, get, rawGet, entity: 'performance_metrics_by_cluster', entityId: clusterId, intervals: ['Five_Mins', 'One_Hour'], accept: (pts) => (Array.isArray(pts) ? pts.length > 0 : !!pts) })).points);
   } catch (e) {
     const out = normalizePowerstore(device, raw);

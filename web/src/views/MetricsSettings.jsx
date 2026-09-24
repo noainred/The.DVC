@@ -1,4 +1,5 @@
 import { blankOr } from './blankOr.js';
+import { scopeSaveSuffix } from './scopeSaveText.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
@@ -222,7 +223,7 @@ export function VmPerfTrackingSettings() {
         enabled, retentionDays: blankOr(days), vcenterIds: ids, trackTotal,   // v2.596: 빈 칸은 미지정(0=무제한으로 둔갑 금지)
       });
       const dropped = (r.dropped || []).length;
-      setMsg(`저장되었습니다.${dropped ? ` 제외된 ${dropped}개 vCenter 의 데이터를 삭제해 용량을 회수했습니다.` : ''}`);
+      setMsg(`저장되었습니다.${dropped ? ` 제외된 ${dropped}개 vCenter 의 데이터를 삭제해 용량을 회수했습니다.` : ''}${scopeSaveSuffix(r)}`);
       await load();
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }

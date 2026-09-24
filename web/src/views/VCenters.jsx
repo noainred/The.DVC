@@ -6,6 +6,7 @@ import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../compone
 const VCenterDetail = lazy(() => import('./VCenterDetail.jsx'));
 import { vcCardState, storageBarInfo } from './vcCardText.js';
 import BoldText from '../components/boldText.jsx';
+import { alarmsUnknown, alarmTotals, restFallbackBadge } from './restFallbackText.js'; // v2.607 WEB2607-06
 
 /** 미니 스파크라인(v2.358) — recharts 를 끌어오지 않는 순수 SVG(Platform 은 차트 벤더 청크 미로드). */
 function Spark({ points, color }) {
@@ -134,7 +135,9 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   const davinciVms = totalVms - irsVms;
   const irsHosts = irsSum('hosts');
   const davinciHosts = totalHosts - irsHosts;
-  const totalAlarms = sites.reduce((a, s) => a + (s.metrics?.alarmsCritical || 0) + (s.metrics?.alarmsWarning || 0), 0);
+  // v2.607 WEB2607-06: REST 폴백 vCenter 는 경보를 조회하지 않았다 — 합계에서 빼고 개수를 밝힌다.
+  const alarmSum = alarmTotals(sites);
+  const totalAlarms = alarmSum.total;
 
   return (
     <>
@@ -143,7 +146,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
         <div className="card kpi"><div className="label">전체 vCenter</div><div className="value">{sites.length}</div><div className="meta">연결됨 {connected} · 불가 {sites.length - connected}</div></div>
         <div className="card kpi"><div className="label">전체 호스트</div><div className="value">{totalHosts.toLocaleString()}</div><div className="meta">다빈치 {davinciHosts.toLocaleString()}개 · IRS {irsHosts.toLocaleString()}개</div></div>
         <div className="card kpi"><div className="label">전체 VM</div><div className="value">{totalVms.toLocaleString()}</div><div className="meta">다빈치 {davinciVms.toLocaleString()}개 · IRS {irsVms.toLocaleString()}개</div></div>
-        <div className="card kpi"><div className="label">활성 알람</div><div className="value" style={{ color: totalAlarms ? 'var(--amber)' : undefined }}>{totalAlarms}</div></div>
+        <div className="card kpi"><div className="label">활성 알람</div><div className="value" style={{ color: totalAlarms ? 'var(--amber)' : undefined }}>{totalAlarms}</div>{alarmSum.unknown > 0 && <div className="meta" title="REST 폴백으로 수집된 vCenter 는 경보를 조회하지 않았습니다 — 0건이 아닙니다">경보 미조회 vCenter {alarmSum.unknown}개 제외</div>}</div>
         <TrendKpis />
       </div>
 
@@ -185,7 +188,10 @@ export default function VCenters({ onSelectSite, resetSignal }) {
                   <div className="vc-name">{s.name}</div>
                   <div className="vc-loc">📍 {s.location?.city}, {s.location?.country} · {s.location?.region}</div>
                 </div>
-                <StateBadge state={s.status} />
+                <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  {restFallbackBadge(s) && <span className="badge amber" title={restFallbackBadge(s).title}>{restFallbackBadge(s).label}</span>}
+                  <StateBadge state={s.status} />
+                </div>
               </div>
 
               {cs.text && cs.showMetrics && (
@@ -202,7 +208,9 @@ export default function VCenters({ onSelectSite, resetSignal }) {
                   <div className="vc-counts">
                     <div className="vc-count"><b>{m.hosts}</b><span>호스트</span></div>
                     <div className="vc-count"><b>{m.vms}</b><span>VM ({m.vmsPoweredOn} on)</span></div>
-                    <div className="vc-count"><b style={{ color: m.alarmsCritical ? 'var(--red)' : m.alarmsWarning ? 'var(--amber)' : 'var(--green)' }}>{(m.alarmsCritical || 0) + (m.alarmsWarning || 0)}</b><span>알람</span></div>
+                    {alarmsUnknown(s)
+                      ? <div className="vc-count" title="REST 폴백 수집 — 경보를 조회하지 않았습니다(0건이 아닙니다)"><b style={{ color: 'var(--text-dim)' }}>—</b><span>알람(미조회)</span></div>
+                      : <div className="vc-count"><b style={{ color: m.alarmsCritical ? 'var(--red)' : m.alarmsWarning ? 'var(--amber)' : 'var(--green)' }}>{(m.alarmsCritical || 0) + (m.alarmsWarning || 0)}</b><span>알람</span></div>}
                   </div>
                   <Bar label="CPU" pct={m.cpuUsagePct ?? null} detail={m.cpuTotalGhz ? `${m.cpuUsedGhz}/${m.cpuTotalGhz} GHz${m.hostsUsageExcluded ? ' *' : ''}` : undefined}
                     title={m.hostsUsageExcluded ? `* 연결 끊긴 호스트 ${m.hostsUsageExcluded}대는 사용량을 알 수 없어 사용률(%) 계산에서 뺐습니다(GHz 합계에는 포함)` : undefined} />

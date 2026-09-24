@@ -23,6 +23,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { logAudit } from '../audit.js';
+import { capStr } from '../util/capStr.js';
 
 const FILE = () => path.join(config.configDir, 'central-svcmon-assign.json');
 
@@ -31,7 +32,7 @@ export const MAX_TARGETS_PER_AGENT = 20000;
 /** 배포 태그 접두사 + sig 길이 — store 의 batch 40자 상한 안에 반드시 들어가야 한다. */
 export const TAG_PREFIX = 'central:';
 export const SIG_LEN = 16;
-export const batchTag = (sig) => `${TAG_PREFIX}${String(sig || '').slice(0, SIG_LEN)}`;
+export const batchTag = (sig) => `${TAG_PREFIX}${capStr(sig || '', SIG_LEN)}`; // v2.607(TIM2607-01)
 
 /**
  * 엣지에서 실행 의미가 달라지거나 불가능한 유형의 기본 제외 목록.
@@ -116,7 +117,7 @@ export function setAssignment(agent, scope = {}, targets = [], { user = '' } = {
     scope: {
       kind: scope.kind || '', path: scope.path || '',
       includeSub: scope.includeSub !== false, byAgent: scope.byAgent === true,
-      note: String(scope.note || '').slice(0, 200),
+      note: capStr(scope.note || '', 200),
     },
     exceptTypes,
     targets: list,
@@ -205,7 +206,7 @@ export function ackAssignment(agent, { sig, applied = {}, removed = 0, errors = 
   const tests = cnt(ap.newTests);
   const errorsInvalid = errors != null && !Array.isArray(errors);
   const errs = Array.isArray(errors)
-    ? errors.slice(0, 20).map((e) => (typeof e === 'string' ? e : (typeof e === 'number' || typeof e === 'boolean' ? String(e) : '(형식 오류)')).slice(0, 300))
+    ? errors.slice(0, 20).map((e) => (typeof e === 'string' || typeof e === 'number' || typeof e === 'boolean' ? capStr(e, 300) : '(형식 오류)')) // v2.607(TIM2607-01)
     : [];
   const want = a.counts || { targets: 0, tests: 0 };
   const exact = added === want.targets && tests === want.tests;

@@ -183,12 +183,16 @@ export async function pushSanSwitchNow() {
     };
     let sr = await sendAll();
     let resent = false;
+    const first = sr;
     if (!sr.ok && sr.received > 0) {
       console.warn(`[sanswitch-push] ${sr.error} — 앞 청크 ${sr.received}개가 이미 중앙 목록을 교체했으므로 전체를 한 번 다시 보냅니다`);
       resent = true;
       sr = await sendAll();
     }
     if (!sr.ok) {
+      // v2.607(통합 — 그룹 e 가 찾은 형제 구멍): 재전송의 청크 0 이 실패하면 sr.received 는 0 이지만, 중앙에는 **첫 시도**가 교체해 둔
+      //   부분 목록이 남아 있다. '직전 push 그대로' 라고 말하면 거짓이므로 첫 시도의 반영분으로 판정한다(curUserPush 와 같은 보정).
+      if (resent && sr.received === 0 && first.received > 0) sr = { ...sr, received: first.received, receivedDevices: first.receivedDevices };
       const partial = sr.received > 0;
       const note = partial
         ? `중앙 목록이 부분 상태입니다 — 청크 ${sr.received}/${chunks.length}(장비 ${sr.receivedDevices}/${devices.length}대)만 반영됐고 나머지 스위치는 다음 성공 push 까지 중앙 화면에 나오지 않습니다`

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
+import { droppedSecretNote } from './droppedSecretText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
@@ -38,7 +39,9 @@ export default function NsxAdmin() {
     setBusy(true); setMsg(null);
     try {
       const r = editing ? await putJson(`/admin/nsx/managers/${encodeURIComponent(form.id)}`, form) : await postJson('/admin/nsx/managers', form);
-      if (r.ok) { await load(); close(); } else setMsg({ ok: false, text: r.reason });
+      const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03
+      if (r.ok && dropNote) { await load(); setMsg({ ok: false, text: dropNote }); }
+      else if (r.ok) { await load(); close(); } else setMsg({ ok: false, text: r.reason });
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
   const test = async () => {

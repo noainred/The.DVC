@@ -46,9 +46,19 @@ export function hostMeta() {
  * 스냅샷 1회 — 등록된 전 수집기를 돌려 {metric, v} 배열을 만든다. null(미측정)은 제외.
  * 순수 측정만 하고 저장하지 않는다 — 로컬 적재(sampleOnce)와 엣지 push(capacityPush)가 공유한다.
  */
-export function collectSnapshot() {
-  const ctx = { now: Date.now(), cores: os.cpus().length || 1, prev };
-  if (eld) ctx.prev.eld = eld;
+/**
+ * v2.607(감사 COL2607-01): 소비자마다 자기 델타 기준선을 갖는다. 예전에는 모듈 전역 prev 하나를 로컬 샘플러(30초)와
+ * 엣지 push(60초)가 함께 썼다 — push 가 호출되면 prev.cpu·pcpu·net 이 갱신되어 다음 로컬 표본은 push 이후 구간만 봤고
+ * (실측: 3초 창 중 1.5초가 부하였는데 로컬 cpu_process 0.2%), 이벤트 루프 지연 히스토그램도 push 가 reset 해
+ * 그 전 스톨이 로컬 시계열에서 사라졌다. 이제 push 는 `createSnapshotState()` 로 만든 자기 상태를 넘기고
+ * 히스토그램은 **로컬 샘플러만 reset** 한다(push 는 percentile 을 읽기만 — 값은 로컬 창 기준 p99).
+ */
+export function createSnapshotState() { return {}; }
+
+export function collectSnapshot(state = prev, { resetEld = state === prev } = {}) {
+  const st = state && typeof state === 'object' ? state : prev;
+  const ctx = { now: Date.now(), cores: os.cpus().length || 1, prev: st, resetEld: !!resetEld };
+  if (eld) st.eld = eld;
   const rows = [];
   for (const c of collectors()) {
     let v = null;

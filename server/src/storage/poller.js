@@ -23,7 +23,7 @@ import { saveCapacityPoint } from './db.js';
 import { recordActivity } from './activityLog.js';
 import { runtimeIntervals, runtimeIntervalSource, centralIntervalsInfo, startAdaptiveTimer, applyOwnIntervals } from './intervals.js';
 
-import { withDeadline } from '../proxy/sshExec.js';
+import { withDeadline, deadlineMs } from '../proxy/sshExec.js';
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 /** 장비당 수집 타임아웃 — 느린 어레이 1대가 전체 주기를 막지 않게(기본 3분, 하한 30초). */
 const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.STORAGE_DEVICE_TIMEOUT_MS) || 180_000);
@@ -203,14 +203,16 @@ export async function testDeviceConnection(device, { timeoutMs = 60_000 } = {}) 
   if (!fn) return { ok: false, error: `수집기 미구현: ${device.type}`, sections: {}, ms: 0 };
   // v2.421: 결과만 포기하는 race 가 아니라 **signal 로 수집기를 실제로 끊는다**(CLAUDE.md withDeadline 규칙). 예전에는
   // 타임아웃 뒤에도 REST 수집기가 남은 요청(20여 회 × 15초)을 백그라운드에서 이어가 세션·소켓이 수 분간 남았다.
+  // v2.607 TIM2607-02: 시한 단일 관문 — 예전 `Math.max(1000, timeoutMs)` 는 2^31 초과·NaN 을 그대로 넘겨 1ms 에 끊겼다.
+  const effMs = deadlineMs(timeoutMs);
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), Math.max(1000, timeoutMs));
+  const timer = setTimeout(() => ac.abort(), effMs);
   try {
     const snap = await Promise.race([
       // `_test` 는 수집기가 '연결 테스트' 를 구분하는 표시다 — v2.525: Unity SSH 는 이때만
       // 전 명령의 원문(cliRaw)을 담는다(주기 수집에서는 실패한 명령만 — 대역폭).
       fn({ ...device, _signal: ac.signal, _test: true }, { signal: ac.signal }),
-      new Promise((_, reject) => ac.signal.addEventListener('abort', () => reject(new Error(`테스트 시간 초과(${Math.round(timeoutMs / 1000)}초) — 방화벽/포트 또는 장비 응답 지연을 확인하세요.`)), { once: true })),
+      new Promise((_, reject) => ac.signal.addEventListener('abort', () => reject(new Error(`테스트 시간 초과(${Math.round(effMs / 1000)}초) — 방화벽/포트 또는 장비 응답 지연을 확인하세요.`)), { once: true })),
     ]);
     return { ...snap, ms: Date.now() - startedAt };
   } catch (e) {

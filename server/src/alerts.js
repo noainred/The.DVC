@@ -20,6 +20,7 @@ import { resilientFetch } from './util/resilientFetch.js';
 import { ssrfBlockReasonResolved } from './collector/registry.js';
 import { Agent as UndiciAgent } from 'undici';
 import { ssrfLookup } from './util/ssrfLookup.js';
+import { clampSetting } from './util/clampSetting.js'; // v2.607 TIM2607-03
 import { numOrNull } from './util/numOrNull.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
 import { sendPortalMail } from './mail/service.js'; // 공용 메일 발송(v2.454)
 import { registerExitFlush } from './util/exitFlush.js';
@@ -108,9 +109,12 @@ export function loadAlertConfig() {
           email: { ...DEFAULTS.channels.email, ...s.channels?.email }, // v2.479(감사 코어 B-1): 로드에서 탈락돼 메일 알림이 죽어 있었다
         },
         rules: { ...DEFAULTS.rules, ...(s.rules || {}) },
-        cooldownMin: s.cooldownMin ?? DEFAULTS.cooldownMin,
-        intervalSec: s.intervalSec ?? DEFAULTS.intervalSec,
-        suppressWindowMin: s.suppressWindowMin ?? DEFAULTS.suppressWindowMin,
+        // v2.607 TIM2607-03: 로드에서도 저장과 같은 범위로 좁힌다 — 손으로 고친 파일·복원한 백업의 '15s' 가 그대로
+        //   `Math.max(15, '15s' || 60)` = NaN → setInterval(NaN) = **1ms** 주기가 됐다(재현: 'engine started (every NaNs)').
+        //   숫자 아님·빈 값은 기본값(clampSetting — v2.595 규약).
+        cooldownMin: clampSetting(s.cooldownMin, { min: 1, max: 10_080, def: DEFAULTS.cooldownMin }),
+        intervalSec: clampSetting(s.intervalSec, { min: 15, max: ALERT_INTERVAL_MAX_SEC, def: DEFAULTS.intervalSec }),
+        suppressWindowMin: clampSetting(s.suppressWindowMin, { min: 0, max: 10_080, def: DEFAULTS.suppressWindowMin }),
       };
     }
   } catch (e) { preserveCorrupt(FILE, e.message); /* defaults */ }
@@ -129,7 +133,9 @@ export function saveAlertConfig(body = {}) {
     cooldownMin: Math.max(1, Number(body.cooldownMin) || cur.cooldownMin),
     // v2.595(감사 T2595-01): 상한 1일 — 24.8일을 넘기면 setInterval 이 1ms 틱이 되고 저장값이라 재시작해도 남는다.
     intervalSec: Math.min(ALERT_INTERVAL_MAX_SEC, Math.max(15, Number(body.intervalSec) || cur.intervalSec)),
-    suppressWindowMin: Math.max(0, body.suppressWindowMin != null ? Number(body.suppressWindowMin) || 0 : (cur.suppressWindowMin ?? 5)),
+    // v2.607 WEB2607-04: 빈 칸('')은 '미지정' 이다 — 예전 `Number('') || 0` 은 빈 칸 저장을 0(= 억제 끔)으로 바꿨다.
+    //   명시적 0 만 값이다(v2.596 규약: numOrNull(v) ?? cur).
+    suppressWindowMin: Math.max(0, numOrNull(body.suppressWindowMin) ?? (cur.suppressWindowMin ?? 5)),
   };
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next, undefined, URL_SECRET_FIELDS), null, 2), { mode: 0o600 });
   cache = next; // 메모리는 평문(sealSecretsDeep 는 복제본을 봉인한다)
@@ -146,6 +152,11 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   // 판정 보류 키(값을 못 읽음) — 발생 중이면 해소하지 않는다. 배열 원소가 아니라 숨은 속성이다(기존 소비처·비교 무변경).
   const held = new Set();
   Object.defineProperty(out, 'held', { value: held, enumerable: false });
+  // v2.607 LEFT2607-04: REST 폴백으로 수집된 vCenter 는 경보를 **조회하지 않았다**(restClient.js alarmsUnknown:true —
+  //   alarms:[] 는 '경보 0건' 이 아니다). 예전엔 그 vCenter 의 발생 중 위험 알람이 목록에서 빠졌다는 이유로 '해소' 알림이
+  //   나갔다. 그 vCenter 의 경보 해소 판정을 보류한다(tick 이 st.alert.vcenterId 로 본다 — 키에는 vCenter 축이 없다).
+  const alarmsHeldVc = new Set((snap.vcenters || []).filter((v) => v && v.alarmsUnknown === true && v.id != null).map((v) => String(v.id)));
+  Object.defineProperty(out, 'alarmsHeldVcenters', { value: alarmsHeldVc, enumerable: false });
   const R = cfg.rules;
   if (R.criticalAlarms?.enabled) {
     for (const a of (snap.alarms || []).filter((x) => x.severity === 'critical').slice(0, 100)) {
@@ -457,6 +468,7 @@ async function refreshState(cfg, sendEnabled) {
   try { active = evaluate(snap, cfg); } catch { active = []; }
   // 판정 보류 키는 아래 concat(새 배열) 전에 잡아 둔다 — 숨은 속성은 concat 으로 옮겨지지 않는다.
   const held = active.held instanceof Set ? active.held : new Set();
+  const alarmsHeldVc = active.alarmsHeldVcenters instanceof Set ? active.alarmsHeldVcenters : new Set(); // v2.607 LEFT2607-04
   // 동시 다운 감지: 직전 스냅샷과 비교(전이). 규칙 켜져 있을 때만 알림에 포함하되,
   // 직전상태 맵은 항상 갱신해 다음 주기 비교를 유지한다.
   try {
@@ -491,7 +503,8 @@ async function refreshState(cfg, sendEnabled) {
     if (seen.has(key)) { if (st.heldSince) { st.heldSince = 0; changed = true; } continue; }
     // v2.598 RECENT2598-03: 값을 못 읽은 항목은 해소가 아니다 — 발생 상태를 유지한다. 오래(HELD_MAX_MS) 못 읽으면 알림 없이
     // 끊는다(복구가 아니라 **모르는 것**이다 — '해소' 알림을 내지 않는다).
-    if (held.has(key)) {
+    const alarmHeld = key.startsWith('alarm:') && alarmsHeldVc.has(String(st.alert?.vcenterId ?? ''));
+    if (held.has(key) || alarmHeld) {
       if (!st.heldSince) { st.heldSince = now; changed = true; }
       if (now - st.heldSince < HELD_MAX_MS) continue;
       firing.delete(key); changed = true; continue;
@@ -518,9 +531,19 @@ export function alertStatus() {
 
 export const ALERT_INTERVAL_MAX_SEC = 86_400;
 
+/**
+ * 평가 주기(ms) — v2.607 TIM2607-03: 예전 `Math.max(15, v || 60)` 는 '15s' 같은 문자열을 NaN 으로 통과시켜 setInterval 이
+ * 1ms 가 됐다. 유한한 숫자가 아니면 기본 60초, 그 밖은 [15초, 1일].
+ */
+export function alertIntervalMs(v) {
+  const n = numOrNull(v);
+  const sec = n == null || !Number.isFinite(n) ? 60 : Math.min(ALERT_INTERVAL_MAX_SEC, Math.max(15, n));
+  return sec * 1000;
+}
+
 export function startAlertEngine() {
   const cfg = loadAlertConfig();
-  const iv = Math.min(ALERT_INTERVAL_MAX_SEC, Math.max(15, cfg.intervalSec || 60)) * 1000;
+  const iv = alertIntervalMs(cfg.intervalSec);
   setTimeout(() => tick().catch(() => {}), 8000).unref?.();
   timer = setInterval(() => tick().catch(() => {}), iv);
   timer.unref?.();
@@ -531,7 +554,7 @@ export function startAlertEngine() {
 function rescheduleAlertEngine() {
   if (!timer) return;
   clearInterval(timer);
-  const iv = Math.min(ALERT_INTERVAL_MAX_SEC, Math.max(15, loadAlertConfig().intervalSec || 60)) * 1000;
+  const iv = alertIntervalMs(loadAlertConfig().intervalSec);
   timer = setInterval(() => tick().catch(() => {}), iv);
   timer.unref?.();
 }

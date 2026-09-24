@@ -15,6 +15,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; /
 import { parseCsvRows } from '../util/csv.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
+import { capStr } from '../util/capStr.js';
 
 const FILE = path.join(config.configDir, 'agent-assignments.json');
 const RESULT_FILE = path.join(config.configDir, 'agent-results.json');
@@ -164,7 +165,8 @@ export function importAssignments(incoming, mode = 'merge') {
  */
 const FOUND_MAX = 5000;
 const cnt = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? n : null; };
-const fstr = (v, n = 200) => (typeof v === 'string' ? v.slice(0, n) : (typeof v === 'number' && Number.isFinite(v) ? String(v) : ''));
+const fstr = (v, n = 200) => (typeof v === 'string' ? capStr(v, n) : // v2.607(TIM2607-01)
+  (typeof v === 'number' && Number.isFinite(v) ? String(v) : ''));
 export function sanitizeScanResult(b) {
   const body = b && typeof b === 'object' && !Array.isArray(b) ? b : {};
   const raw = Array.isArray(body.found) ? body.found : [];

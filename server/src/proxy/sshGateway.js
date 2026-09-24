@@ -154,9 +154,7 @@ function handleConnection(ws, user) {
         try {
           ssh.exec('hostname', (e, hs) => {
             if (e || !hs) return;
-            let out = '';
-            hs.on('data', (d) => { out += d.toString(); });
-            hs.on('close', () => { const h = out.trim().split(/\s+/)[0]; if (h) send({ type: 'hostname', name: h }); });
+            collectHostnameLabel(hs, (h) => send({ type: 'hostname', name: h }));
           });
         } catch { /* optional */ }
         ssh.shell({ term: 'xterm-256color', cols: msg.cols || 80, rows: msg.rows || 24 }, (err, s) => {
@@ -208,3 +206,33 @@ function handleConnection(ws, user) {
 
 /** 현재 동시 SSH 세션 수(상태/진단용). */
 export function activeSshSessionCount() { return activeSessions; }
+
+/**
+ * 탭 라벨용 `hostname` 채널을 읽는다(v2.607 감사 SEC2607-05). 예전엔 `out += d` 를 close 까지 **무상한·무시한**
+ * 누적했다 — 접속한 VM 이 그 채널에 끝없이 쓰면 WS 세션이 열려 있는 동안 중앙 메모리가 계속 늘었다. 라벨에 쓰는 것은
+ * 첫 단어뿐이므로 {@link HOSTNAME_MAX_CHARS} 자에서 멈추고 채널을 닫으며, {@link HOSTNAME_TIMEOUT_MS} 안에 끝나지
+ * 않아도 닫는다. 결과는 한 번만 보낸다.
+ */
+export const HOSTNAME_MAX_CHARS = 256;
+export const HOSTNAME_TIMEOUT_MS = 5_000;
+export function collectHostnameLabel(hs, onName, { max = HOSTNAME_MAX_CHARS, timeoutMs = HOSTNAME_TIMEOUT_MS } = {}) {
+  let out = '';
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    try { hs.close?.(); } catch { /* */ }
+    const h = out.trim().split(/\s+/)[0];
+    if (h) onName(h.slice(0, max));
+  };
+  const timer = setTimeout(finish, timeoutMs);
+  timer.unref?.();
+  hs.on('data', (d) => {
+    if (done) return;
+    out += String(d).slice(0, max - out.length + 1);
+    if (out.length > max) { out = out.slice(0, max); finish(); }
+  });
+  hs.on('close', finish);
+  hs.on?.('error', finish);
+}

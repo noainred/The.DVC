@@ -799,7 +799,8 @@ export function parseLsanShow(text) {
   for (const raw of s.split(/\r?\n/)) {
     const zn = raw.match(/\b(LSAN[_A-Za-z0-9-]*)\b/);
     const wwn = raw.match(/([0-9a-f]{2}(?::[0-9a-f]{2}){7})/i);
-    const fid = raw.match(/fabric\s*id\s*:?\s*(\d{1,3})/i);
+    // v2.607 LEFT2607-10: 예전 /fabric\s*id\s*:?\s*(\d{1,3})/i 는 \s*:?\s* 가 모호해 O(n²) — 같은 언어를 비모호하게.
+    const fid = raw.match(/fabric\s*id\s*(?::\s*)?(\d{1,3})/i);
     if (zn) { cur = { name: zn[1], fabricId: cur?.fabricId ?? null, members: [] }; zones.push(cur); }
     else if (fid) { if (cur) cur.fabricId = Number(fid[1]); else cur = { name: '', fabricId: Number(fid[1]), members: [] }; }
     if (wwn && cur) cur.members.push(wwn[1].toLowerCase());

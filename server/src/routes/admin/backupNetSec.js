@@ -16,7 +16,8 @@ import { getAllAgentConfigs } from '../../central/agentConfig.js';
 import { recordCapture, listCaptures, getCapture, deleteCapture } from '../../net/captureHistory.js';
 import { listMonitors, saveMonitor, removeMonitor, runMonitorNow } from '../../net/monitor.js';
 import { addUsersToVms } from '../../guest/accountService.js';
-import { inUserWriteScope } from '../../auth/scope.js';
+import { inUserWriteScope, scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { denyScopedRun } from '../../auth/scopeMerge.js';   // v2.607 AUTHZ2607-06
 import { snapshotFilter, slimVm, guestProbe } from '../../search/deepSearch.js';
 import { analyzeLoginFails } from '../../security/loginFails.js';
 import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysisNow } from '../../security/loginMonitor.js';
@@ -24,6 +25,30 @@ import { listGuestScans, saveGuestScan, removeGuestScan, runGuestScanNow } from 
 import { analyzeNetIssues } from '../../security/netIssueStore.js';
 import path from 'node:path';
 import { adminOnly, requireSettingsOwner } from './shared.js';
+
+/*
+ * v2.607 AUTHZ2607-02·06 — 게스트 명령·게스트 조사·로그 분석은 vCenter 축이 있다. 예전에는 adminOnly 뿐이라 범위 제한
+ * admin 이 범위 밖 vCenter 의 VM 에 게스트 명령을 돌리고(deep-search/probe — 형제 /tools/deep-search 는 범위 교집합),
+ * 범위 밖 vCenter 에 게스트 조사 잡을 만들어 결과를 읽었다(같은 파일 /guest/add-user 는 쓰기 범위를 강제한다).
+ */
+/** 분석 GET 의 vcenterId 를 범위로 강제한다. 범위 밖이면 404, 미지정이면 범위가 하나일 때만 그것으로. 응답했으면 undefined. */
+function scopedVcQuery(req, res) {
+  const q = String(req.query.vcenterId || '');
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (!allowed) return q;
+  if (q) {
+    if (!allowed.has(q)) { res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); return undefined; }
+    return q;
+  }
+  if (allowed.size === 1) return [...allowed][0];
+  res.status(400).json({ ok: false, reason: '범위 제한 계정은 vCenter 를 하나 지정해야 합니다 — 전체 합계에는 범위 밖 법인이 섞입니다.', scoped: true });
+  return undefined;
+}
+/** 게스트 조사 잡이 요청자의 쓰기 범위 안인가(vcenterId 비어 있는 잡은 범위 밖으로 본다). */
+function guestScanInScope(user, vcenterId) {
+  const w = writeScopedVcenterIds(user, store.get());
+  return !w || (!!vcenterId && w.has(String(vcenterId)));
+}
 
 export function registerBackupNetSec(adminRouter) {
 
@@ -70,6 +95,7 @@ adminRouter.get('/vclogs/status', adminOnly, async (_req, res) => {
   try { res.json(await logStatus()); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
+  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: 'vCenter 로그 보관 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607
   // v2.480(3차 감사 S4): storagePath 무검증 → 임의 절대경로에 SQLite(+wal/shm) 생성. 절대경로·상위경로·제어문자·시스템 디렉터리 거부.
   const sp = typeof req.body?.storagePath === 'string' ? req.body.storagePath.trim() : '';
   if (sp) {
@@ -85,7 +111,8 @@ adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
   delete s._pathChanged;
   res.json(s);
 });
-adminRouter.post('/vclogs/collect', adminOnly, async (_req, res) => {
+adminRouter.post('/vclogs/collect', adminOnly, async (req, res) => {
+  if (denyScopedRun(req, res, 'vCenter 로그 수동 수집')) return;   // v2.607 AUTHZ2607-06
   try { res.json({ ok: true, ...(await pollLogsOnce({ manual: true })) }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
@@ -151,7 +178,8 @@ adminRouter.delete('/net/monitors/:id', adminOnly, (req, res) => res.json({ ok: 
 adminRouter.post('/net/monitors/:id/run', adminOnly, async (req, res) => { try { res.json(await runMonitorNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 // 로그 자체 분석(장애/이슈 탐지).
 adminRouter.get('/net/log-issues', adminOnly, async (req, res) => {
-  try { res.json(await analyzeLogsForIssues({ vcenterId: req.query.vcenterId || '', days: Number(req.query.days) || 7 })); }
+  const vcenterId = scopedVcQuery(req, res); if (vcenterId === undefined) return;   // v2.607 AUTHZ2607-06
+  try { res.json(await analyzeLogsForIssues({ vcenterId, days: Number(req.query.days) || 7 })); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
@@ -173,8 +201,17 @@ adminRouter.post('/guest/add-user', adminOnly, async (req, res) => {
 adminRouter.post('/deep-search/probe', adminOnly, async (req, res) => {
   const b = req.body || {};
   if (!b.probe?.type) return res.status(400).json({ ok: false, reason: 'probe.type이 필요합니다.' });
+  // v2.607 AUTHZ2607-02: 범위 계정은 쓰기 범위와 교집합(게스트 명령 실행 = 상태 변경 등급). 빈 요청 = 범위 전체,
+  //   범위 밖 지정은 거부(존재 은닉 404). 형제 /tools/deep-search 와 같은 판단.
+  const wAllowed = writeScopedVcenterIds(req.user, store.get());
+  let vcenterIds = Array.isArray(b.vcenterIds) ? b.vcenterIds.map(String) : [];
+  if (wAllowed) {
+    if (vcenterIds.some((id) => !wAllowed.has(id))) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    if (!vcenterIds.length) vcenterIds = [...wAllowed];
+    if (!vcenterIds.length) return res.json({ candidates: 0, matched: [], checked: 0, errors: [], scoped: true });
+  }
   try {
-    const candidates = snapshotFilter(store.get(), { vcenterIds: b.vcenterIds || [], f: b.filters || {} }).map(slimVm);
+    const candidates = snapshotFilter(store.get(), { vcenterIds, f: b.filters || {} }).map(slimVm);
     const r = await guestProbe(candidates, b.probe, { guestUser: b.guestUser || '', guestPass: b.guestPass || '', maxVms: Math.min(500, Number(b.maxVms) || 100) });
     res.json({ candidates: candidates.length, ...r });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
@@ -182,19 +219,43 @@ adminRouter.post('/deep-search/probe', adminOnly, async (req, res) => {
 
 // ───────────────────────── 로그인 실패 분석 ─────────────────────────
 adminRouter.get('/security/login-fails', adminOnly, async (req, res) => {
+  // v2.607 AUTHZ2607-06: 이 분석에는 **포탈 로그인 실패**(전 사용자 계정명·출발 IP)가 vCenter 지정과 무관하게 섞인다 —
+  //   법인 축으로 나눌 수 없으므로 범위 계정 403(v2.525 규약).
+  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '로그인 실패 분석에는 포탈 전체 로그인 실패가 섞여 있어 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });
   try { res.json(await analyzeLoginFails({ vcenterId: req.query.vcenterId || '', days: Number(req.query.days) || loadLoginMonitor().days, threshold: Number(req.query.threshold) || loadLoginMonitor().threshold, windowMin: Number(req.query.windowMin) || loadLoginMonitor().windowMin })); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 adminRouter.get('/security/login-fails/status', adminOnly, (_req, res) => res.json(loginMonitorStatus()));
-adminRouter.put('/security/login-fails/settings', adminOnly, (req, res) => res.json(saveLoginMonitor(req.body || {})));
-adminRouter.post('/security/login-fails/run', adminOnly, async (_req, res) => { try { await runLoginAnalysisNow(); res.json({ ok: true, ...loginMonitorStatus() }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
+adminRouter.put('/security/login-fails/settings', adminOnly, (req, res) => (scopedVcenterIds(req.user, store.get()) ? res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '로그인 실패 감시 설정은 전 법인 공용이라 전체 범위 계정만 바꿀 수 있습니다.' }) : res.json(saveLoginMonitor(req.body || {}))));
+adminRouter.post('/security/login-fails/run', adminOnly, async (req, res) => { if (denyScopedRun(req, res, '로그인 실패 수동 분석')) return; try { await runLoginAnalysisNow(); res.json({ ok: true, ...loginMonitorStatus() }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 
 // 게스트 네트워크 이슈(패킷드랍/에러) 분석.
-adminRouter.get('/security/net-issues', adminOnly, (req, res) => { try { res.json(analyzeNetIssues({ vcenterId: req.query.vcenterId || '', days: Number(req.query.days) || 7 })); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
+adminRouter.get('/security/net-issues', adminOnly, (req, res) => { const vcenterId = scopedVcQuery(req, res); if (vcenterId === undefined) return; try { res.json(analyzeNetIssues({ vcenterId, days: Number(req.query.days) || 7 })); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 
 // 게스트 조사 스케줄(로그인 실패 / 네트워크 이슈) — vCenter별·OS별·주기.
-adminRouter.get('/security/guest-scans', adminOnly, (_req, res) => res.json({ jobs: listGuestScans() }));
-adminRouter.put('/security/guest-scans', adminOnly, (req, res) => res.json(saveGuestScan(req.body || {})));
-adminRouter.delete('/security/guest-scans/:id', adminOnly, (req, res) => res.json({ ok: removeGuestScan(req.params.id) }));
-adminRouter.post('/security/guest-scans/:id/run', adminOnly, async (req, res) => { try { res.json(await runGuestScanNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
+// v2.607 AUTHZ2607-06: 범위 계정은 자기 쓰기 범위 vCenter 의 잡만 보고·만들고·지우고·실행한다(그 밖은 404 — 존재 은닉).
+adminRouter.get('/security/guest-scans', adminOnly, (req, res) => {
+  const all = listGuestScans();
+  if (!scopedVcenterIds(req.user, store.get())) return res.json({ jobs: all });
+  const jobs = all.filter((j) => guestScanInScope(req.user, j.vcenterId));
+  res.json({ jobs, scoped: true, omittedOutOfScope: all.length - jobs.length });
+});
+adminRouter.put('/security/guest-scans', adminOnly, (req, res) => {
+  const b = req.body || {};
+  if (scopedVcenterIds(req.user, store.get())) {
+    const prev = b.id ? listGuestScans().find((j) => j.id === String(b.id)) : null;
+    if (prev && !guestScanInScope(req.user, prev.vcenterId)) return res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' });
+    if (!guestScanInScope(req.user, b.vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다(범위 제한 계정은 자기 범위 vCenter 를 지정해야 합니다).' });
+  }
+  res.json(saveGuestScan(b));
+});
+function denyGuestScanOutOfScope(req, res) {
+  if (!scopedVcenterIds(req.user, store.get())) return false;
+  const j = listGuestScans().find((x) => x.id === String(req.params.id));
+  if (j && guestScanInScope(req.user, j.vcenterId)) return false;
+  res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' });
+  return true;
+}
+adminRouter.delete('/security/guest-scans/:id', adminOnly, (req, res) => { if (denyGuestScanOutOfScope(req, res)) return; res.json({ ok: removeGuestScan(req.params.id) }); });
+adminRouter.post('/security/guest-scans/:id/run', adminOnly, async (req, res) => { if (denyGuestScanOutOfScope(req, res)) return; try { res.json(await runGuestScanNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 }

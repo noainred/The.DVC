@@ -16,6 +16,7 @@ import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 �
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { sanitizeMounts } from './collect.js';
+import { accessMoved } from '../util/secretCarry.js'; // v2.607 LEFT2607-06
 import { normalizeBmGroups, groupsOf } from './agg.js';
 
 const FILE = path.join(config.configDir, 'bm-storage.json');
@@ -101,7 +102,12 @@ export function saveBmServer(body = {}) {
   const existing = body.id ? data.servers.find((s) => s.id === body.id) : null;
   if (!existing && data.servers.length >= 1000) return { ok: false, reason: '서버는 최대 1,000대까지 등록할 수 있습니다.' };
   const server = existing || { id: crypto.randomBytes(5).toString('hex') };
-  const hostChanged = !!existing && existing.host !== host; // v2.479(감사 S-2): host 변경 시 비밀번호 이월 금지
+  const droppedSecrets = [];
+  // v2.479(감사 S-2): host 변경 시 비밀번호 이월 금지. v2.607(감사 LEFT2607-06): host 만 보던 것을 공용 판정
+  //   (host·port·username)으로 — 계정·포트를 바꿔도 옛 비밀번호가 새 계정으로 시도됐다. agent 변경은 승계한다(위임 수집에 필요).
+  const hostChanged = !!existing && accessMoved(
+    { host: existing.host, port: Number(existing.port) || 22, username: existing.username || 'root' },
+    { host, port, username }, ['host', 'port', 'username']);
   server.host = host;
   server.port = port;
   server.username = username;
@@ -122,10 +128,13 @@ export function saveBmServer(body = {}) {
   server.enabled = body.enabled !== false;
   // 빈/마스킹 비밀번호는 기존 유지(편집 시 재입력 강요 안 함) — 신규인데 비었으면 빈 값 저장(무비번 SSH 허용 안 하는 서버는 수집 실패로 표시됨).
   if (body.password !== undefined && body.password !== '' && body.password !== '********') server.password = String(body.password);
-  else if (!existing || hostChanged) server.password = ''; // 신규 또는 host 변경 → 빈 값(재입력 필요)
+  else if (!existing || hostChanged) {                    // 신규 또는 접속처 변경 → 빈 값(재입력 필요)
+    if (existing && server.password) droppedSecrets.push('password');
+    server.password = '';
+  }
   if (!existing) data.servers.push(server);
   persist();
-  return { ok: true, server: redact(server) };
+  return { ok: true, server: redact(server), ...(droppedSecrets.length ? { droppedSecrets } : {}) };
 }
 
 export function removeBmServer(id) {

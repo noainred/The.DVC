@@ -5,6 +5,7 @@
 // — 물리 v2.29~2.32 / 게스트 v2.166~2.170). 분리로 병렬 세션 간 같은 파일 충돌 표면 축소.
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson, delJson } from '../../api.js';
+import { droppedSecretNote } from '../droppedSecretText.js';
 import { Field } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 
@@ -71,7 +72,9 @@ export function PhysicalGpuManager({ vcs }) {
     setBusy(true); setMsg(null);
     try {
       const r = editing ? await putJson(`/admin/gpu-physical/${encodeURIComponent(form.id)}`, form) : await postJson('/admin/gpu-physical', form);
-      if (r.ok) { setForm(null); await load(); } else setMsg(r.reason || '저장 실패');
+      const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03
+      if (r.ok && dropNote) { await load(); setMsg(dropNote); }
+      else if (r.ok) { setForm(null); await load(); } else setMsg(r.reason || '저장 실패');
     } catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };
   const del = async (s) => { if (window.confirm(`'${s.name}' 삭제?`)) { await delJson(`/admin/gpu-physical/${encodeURIComponent(s.id)}`).catch(() => {}); await load(); } };

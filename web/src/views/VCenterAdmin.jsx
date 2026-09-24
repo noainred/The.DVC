@@ -5,6 +5,7 @@ import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { droppedSecretNote } from './droppedSecretText.js'; // v2.607 WEB2607-03
 
 import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 const EMPTY = {
@@ -85,7 +86,10 @@ export default function VCenterAdmin() {
     setBusy(true); setMsg(null);
     try {
       const r = editing ? await putJson(`/admin/vcenters/${encodeURIComponent(form.id)}`, form) : await postJson('/admin/vcenters', form);
-      if (r.ok) { await load(); close(); }
+      // v2.607 WEB2607-03: 접속처가 바뀌어 저장 비밀번호가 폐기됐으면 모달을 닫지 않고 다시 입력하라고 말한다.
+      const dropNote = r.ok ? droppedSecretNote(r) : '';
+      if (r.ok && dropNote) { await load(); setEditing(true); setMsg({ ok: false, text: dropNote }); }
+      else if (r.ok) { await load(); close(); }
       else setMsg({ ok: false, text: r.reason });
     } catch (e) { setMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }

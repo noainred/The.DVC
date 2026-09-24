@@ -36,6 +36,9 @@ export function emptySnapshot(device) {
   };
 }
 
+const sum = (a) => a.reduce((x, y) => x + y, 0);
+const round2 = (v) => Math.round(v * 100) / 100;
+
 /** 스냅샷 요약(목록/카드용). 값이 없으면 null 을 유지한다(0 으로 채우지 않는다). */
 export function summarize(snap) {
   const units = snap.units || [];
@@ -51,7 +54,12 @@ export function summarize(snap) {
     // v2.599(감사 C2599-04): 센서 탐지가 E1xx 아닌 실패로 멈췄으면 센서 수·온도·습도는 부분 집계다.
     ...(snap.sensorsIncomplete ? { sensorsIncomplete: true } : {}),
     powerW: powerVals.length ? powerVals.reduce((a, b) => a + b, 0) : null,
-    energyKwh: energyVals.length ? Math.round(energyVals.reduce((a, b) => a + b, 0) * 100) / 100 : null,
+    // v2.607(감사 COL2607-07): 유닛 일부의 누적 전력량을 못 읽었으면 합계는 부분 합이다 — 전체처럼 내지 않고 null 로 두고
+    //   energyPartial·읽은 유닛 수·부분 합(하한)을 따로 밝힌다(unitsIncomplete·sensorsIncomplete 와 같은 규약).
+    energyKwh: energyVals.length && energyVals.length === units.length ? round2(sum(energyVals)) : null,
+    ...(energyVals.length && energyVals.length < units.length
+      ? { energyPartial: true, energyUnitsRead: energyVals.length, energyKwhPartial: round2(sum(energyVals)) }
+      : {}),
     tempMaxC: tempVals.length ? Math.max(...tempVals) : null,
     tempAvgC: tempVals.length ? Math.round((tempVals.reduce((a, b) => a + b, 0) / tempVals.length) * 10) / 10 : null,
     humidityAvgPct: humVals.length ? Math.round(humVals.reduce((a, b) => a + b, 0) / humVals.length) : null,

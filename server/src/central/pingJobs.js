@@ -30,6 +30,7 @@
  *
  * vCenterId 기준으로 키잉한다(UI는 vcenterId를, 에이전트는 자기 vcenters.json의 id를 앎).
  */
+import { capStr } from '../util/capStr.js';
 
 const pending = new Map();  // vcenterId -> Map<ip, { at, tries }>          (요청됐으나 아직 인출 안 된 IP)
 const inflight = new Map(); // vcenterId -> Map<ip, { deadline, tries }>    (인출됐고 결과(ack) 대기 중인 IP)
@@ -138,7 +139,7 @@ export function setPingResults(vcenterId, rows = []) {
   const now = Date.now();
   for (const r of rows) {
     if (!r || typeof r !== 'object' || (typeof r.ip !== 'string' && typeof r.ip !== 'number')) continue;
-    const key = String(r.ip).slice(0, 64);
+    const key = capStr(r.ip, 64); // v2.607(TIM2607-01)
     if (!key) continue;
     // ack — 이 IP 의 결과가 왔으므로 재수확 대상에서 제외. (요청한 적 없는 IP 보고는 fl 에 없어 무해.)
     if (fl) { fl.delete(key); if (!fl.size) inflight.delete(vcenterId); }

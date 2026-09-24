@@ -15,7 +15,7 @@
  * (auth/toolAccess.js — Optimization 이 이 리포트의 주인).
  */
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
-import { mergeScopedMap, filterScopedMap, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.606 AUTHZ2606-05
+import { mergeScopedMap, filterScopedMap, denyScopedRun, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.606 AUTHZ2606-05 · v2.607 AUTHZ2607-05
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
@@ -124,7 +124,9 @@ api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
   //   법인이 수집 범위에서 빠졌다. 범위 밖 targets 는 직전 값을 보존하고, 전 법인에 걸친 scope('all'↔
   //   'selected')는 바꾸지 않으며, 범위 밖 DB 는 dropExcluded 로도 지우지 않는다.
   const allowed = scopedVcenterIds(req.user, snap);
-  const patch = { ...b };
+  // v2.607 AUTHZ2607-05: 전역 필드(enabled·주기·보존일·임계·scope)는 전 법인 공용 — 범위 계정의 값은 버리고 밝힌다.
+  const kg = keepScopedFields(b, before, allowed, ['targets', 'dropExcluded']);
+  const patch = kg.patch;
   let ignoredOutOfScope = [];
   if (allowed) {
     if (b.targets !== undefined) { const m = mergeScopedMap(before.targets, b.targets, allowed); patch.targets = m.merged; ignoredOutOfScope = m.ignored; }
@@ -148,7 +150,7 @@ api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
     ip: req.ip || '',
   });
   const safeNext = allowed ? { ...next, targets: filterScopedMap(next.targets, allowed) } : next;
-  res.json({ ok: true, settings: safeNext, dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}) });
+  res.json({ ok: true, settings: safeNext, dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
 /** 범위 선택 트리 데이터 — 한 vCenter 의 클러스터/호스트/폴더/VM(전원 상태 포함, 꺼진 VM 은 표시만). */

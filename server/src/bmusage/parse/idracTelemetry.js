@@ -46,7 +46,9 @@ export function pctFromMetric(v) {
   if (v == null) return null;
   let x;
   if (typeof v === 'number') x = v;
-  else { const m = /^\s*(\d+(?:\.\d+)?)\s*%?\s*$/.exec(String(v)); if (!m) return null; x = Number(m[1]); }
+  // v2.607 SEC2607-03·LEFT2607-10: 예전 /^\s*(\d+(?:\.\d+)?)\s*%?\s*$/ 는 뒤쪽 \s*%?\s* 가 모호해 '1'+공백 n+'x' 에서
+  //   O(n²)(16,000자 0.34초 — 메트릭 값마다). 앞뒤 공백은 trim 이 같은 집합(WhiteSpace+LineTerminator)을 떼므로 결과가 같다.
+  else { const m = /^(\d+(?:\.\d+)?)\s*%?$/.exec(String(v).trim()); if (!m) return null; x = Number(m[1]); }
   return Number.isFinite(x) && x >= 0 && x <= 100 ? x : null;
 }
 

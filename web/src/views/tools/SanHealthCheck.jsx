@@ -8,7 +8,7 @@ import { STATUS_LABEL, STATUS_MARK, stageLabel, stamp, deviceVerdict, allSummary
   sortResults, baselineNote, deviceReportDoc, allReportDoc, reportFileName,
   portVerdict, opticalText, errorText, portCheckSummary, portBaselineNote, problemPortText, sideText,
   problemOmittedNote, portZoningFallback,
-  cmdText, cmdNote, changeLabel, compareSummary, recordNote } from './sanHealthText.js';
+  cmdText, cmdNote, changeLabel, compareSummary, recordNote, hasUncheckedPart, failedNamesText } from './sanHealthText.js';
 
 /**
  * 특수기능 › SAN 스위치 모니터링 — **월간 점검**(v2.519, 사용자 제공 Brocade 월간 점검 체크리스트).
@@ -434,9 +434,10 @@ export function AllHealthCheck({ datacenterIds = [] }) {
       {msg && <div className="card muted" style={{ fontSize: 12, padding: 8, marginBottom: 6 }}>{msg}</div>}
 
       {/* '전부 이상 없음' 이라고 말할 수 없는 조건을 **먼저** 밝힌다. */}
-      {(s.missing || b.unknown || s.uncheckedItems) ? (
+      {hasUncheckedPart(s) ? (
         <div className="card" style={{ fontSize: 12, lineHeight: 1.9, borderColor: 'var(--amber)', marginBottom: 8 }}>
           <b>점검하지 못한 부분이 있습니다 — '전부 이상 없음' 으로 결론 내리지 마세요.</b>
+          {s.failed ? <div>· 점검 중 오류(스냅샷 형식 오류)로 빠진 스위치 <b>{s.failed}대</b> — {failedNamesText(data.failed)}</div> : null}
           {s.missing ? <div>· 수집된 스냅샷이 없어 점검 대상에서 빠진 스위치 <b>{s.missing}대</b> — 먼저 수집하세요.</div> : null}
           {b.unknown ? <div>· 판정 가능한 항목이 하나도 없던 스위치 <b>{b.unknown}대</b>.</div> : null}
           {s.uncheckedItems ? <div>· 확인 불가 항목 합계 <b>{s.uncheckedItems}개</b>(명령 없음·실행 실패·형식 미인식).</div> : null}
@@ -471,6 +472,14 @@ export function AllHealthCheck({ datacenterIds = [] }) {
         </STable>
       </div>
 
+      {/* v2.607 LEFT2607-03: 점검 중 오류로 빠진 스위치 — 이름과 사유를 조용히 빼지 않는다. */}
+      {(data.failed || []).length ? (
+        <div style={{ fontSize: 11.5, marginTop: 6, color: 'var(--amber)' }}>
+          점검 실패(오류로 판정 제외):
+          <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>{(data.failed || []).slice(0, 50).map((f, i) => <li key={f.deviceId || i}>{f.name || f.deviceId}{f.reason ? ` — ${f.reason}` : ''}</li>)}</ul>
+          {(data.failed || []).length > 50 ? <div className="muted">외 {(data.failed || []).length - 50}대</div> : null}
+        </div>
+      ) : null}
       {(data.missing || []).length ? (
         <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
           점검 제외(스냅샷 없음): {(data.missing || []).map((m) => m.name || m.deviceId).join(', ')}

@@ -11,6 +11,7 @@ import { fmtAgo } from '../../util/fmt.js';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { droppedSecretNote } from '../droppedSecretText.js';
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
@@ -46,7 +47,9 @@ export default function BmStorageTool() {
     setBusy(true); setMsg(null);
     try {
       const r = await postJson('/tools/bm-storage/servers', { ...form, port: Number(form.port) || 22 });
-      if (r.ok) { setForm(null); refresh(); }
+      const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: 주소·포트·계정 변경으로 저장 비밀번호 폐기 — 폼 유지
+      if (r.ok && dropNote) { setForm((f) => ({ ...f, password: '' })); refresh(); setMsg(dropNote); }
+      else if (r.ok) { setForm(null); refresh(); }
       else setMsg(r.reason);
     } catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };

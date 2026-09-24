@@ -3,6 +3,7 @@ import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
+import { droppedSecretNote } from '../droppedSecretText.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
 import { columnsFor, cellValue, sortValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit, capacityTotals, alertTotals } from './storageUnits.js';
@@ -1418,7 +1419,8 @@ function DeviceForm({ d, form, setForm, onSaved, onShowConflict }) {
     setConflict(null);
     try {
       const r = await postJson('/tools/storage/devices', form);
-      if (r.ok === false) { setErr(r.reason); setConflict(r.conflict || null); } else onSaved();
+      const dropNote = r.ok === false ? '' : droppedSecretNote(r); // v2.607 WEB2607-03: 접속처 변경으로 저장 비밀번호 폐기 — 모달 유지
+      if (r.ok === false) { setErr(r.reason); setConflict(r.conflict || null); } else if (dropNote) setErr(dropNote); else onSaved();
     } catch (e) {
       // ⚠ 400 은 api.js 가 HttpError 로 **던진다** — 여기서 conflict 를 읽지 않으면 사유
       //   한 줄만 남고 '어느 장비인지' 가 다시 사라진다(v2.522 실측으로 잡은 경로).

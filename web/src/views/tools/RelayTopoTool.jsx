@@ -5,6 +5,7 @@ import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { buildGraph, frame3d, COLORS } from './relayTopoLayout.js';
 import { topologyPayload, servicesDroppedText } from './relayTopoForm.js'; // v2.606 WEB2606-10: 빈 포트 칸 · 버린 서비스 행
+import { relaySecretsDroppedText } from '../droppedSecretText.js'; // v2.607 WEB2607-03
 
 /**
  * 중계 토폴로지(HAProxy 구성) 도구(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 접속이 필요한 서비스(ssh/vcsa/portal 등)를
@@ -105,9 +106,9 @@ export default function RelayTopoTool() {
   const setMainSsh = (k, v) => setForm((p) => ({ ...p, main: { ...p.main, ssh: { ...(p.main.ssh || EMPTY_SSH), [k]: v } } }));
   const setSvc = (i, k, v) => setForm((p) => ({ ...p, services: p.services.map((s, j) => (j === i ? { ...s, [k]: v } : s)) }));
   const run = async (label, fn) => { setBusy(true); setMsg(null); try { const r = await fn(); if (r && r.ok === false && r.reason) setMsg(`${label} 실패: ${r.reason}`); return r; } catch (e) { setMsg(`${label} 실패: ${e.message}`); return null; } finally { setBusy(false); } };
-  const save = () => run('저장', async () => { const r = await putJson('/tools/relaytopo', topologyPayload(form)); if (r.ok) { setForm(r.topology); const dropTxt = servicesDroppedText(r); setMsg(`저장되었습니다 — 사이트 ${r.topology.sites.length} · 서비스 ${r.topology.services.length} · 점검 ${r.issues.length}건${dropTxt ? ` · ⚠ ${dropTxt}` : ''}`); await load(); } return r; });
+  const save = () => run('저장', async () => { const r = await putJson('/tools/relaytopo', topologyPayload(form)); if (r.ok) { setForm(r.topology); const dropTxt = servicesDroppedText(r); const secTxt = relaySecretsDroppedText(r); setMsg(`저장되었습니다 — 사이트 ${r.topology.sites.length} · 서비스 ${r.topology.services.length} · 점검 ${r.issues.length}건${dropTxt ? ` · ⚠ ${dropTxt}` : ''}${secTxt ? ` · ⚠ ${secTxt}` : ''}`); await load(); } return r; });
   const importPreview = () => run('가져오기 미리보기', async () => { const r = await postJson('/tools/relaytopo/import', { text: importText, replace: importReplace }); if (r.ok) setPreview(r); return r; });
-  const importApply = () => run('가져오기 적용', async () => { const r = await postJson('/tools/relaytopo/import', { text: importText, replace: importReplace, apply: true }); if (r.ok) { setForm(r.topology); setPreview(null); setImportText(''); setMsg(`가져오기 완료 — 사이트 ${r.parsedSites}개 인식(건너뜀 ${r.skipped.length}). 저장됨.`); await load(); } return r; });
+  const importApply = () => run('가져오기 적용', async () => { const r = await postJson('/tools/relaytopo/import', { text: importText, replace: importReplace, apply: true }); if (r.ok) { setForm(r.topology); setPreview(null); setImportText(''); { const dropTxt = servicesDroppedText(r); const secTxt = relaySecretsDroppedText(r); setMsg(`가져오기 완료 — 사이트 ${r.parsedSites}개 인식(건너뜀 ${r.skipped.length}). 저장됨.${dropTxt ? ` ⚠ ${dropTxt}` : ''}${secTxt ? ` ⚠ ${secTxt}` : ''}`); } await load(); } return r; });
   const onFile = (e) => { const f = e.target.files?.[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => setImportText(String(rd.result || '')); rd.readAsText(f); e.target.value = ''; };
   const exportAs = (fmt) => run('내보내기', () => downloadFile(`/tools/relaytopo/export?format=${fmt}`));
   const fetchOne = (dc) => run(`${dc} 가져오기`, async () => { const r = await postJson(`/tools/relaytopo/fetch/${encodeURIComponent(dc)}`, {}); if (r.ok) { setResults((p) => ({ ...p, [dc]: r })); setMsg(r.edge.ok ? `${dc}: 서비스 ${r.summary.total}개 대조 — 문제 ${r.summary.bad}건${r.irs ? (r.irs.ok ? ' · IRS 확인됨' : ` · IRS 접속 실패(${r.irs.error})`) : ''}` : `${dc}: Edge 접속 실패 — ${r.edge.error}`); } return r; });

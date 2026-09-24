@@ -13,6 +13,12 @@ import { getPackageBaseUrl, getPackageDir } from './packageSettings.js';
 import { upgradeAgent } from './upgradeAgent.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
+import { readBytesCapped } from '../util/readBytesCapped.js';
+
+// v2.607 SEC2607-06: 설치 패키지 다운로드의 바이트 상한 — 예전엔 상한 자체가 없어 원격 소스(사내 미러·중간자)가
+//   거대 본문을 주면 sha256 검증 전에 전량을 메모리에 받았다. 오프라인 설치 패키지(노드 런타임 포함)는 수백 MB 라
+//   번들 상한(200MB)보다 넉넉히 둔다. 빈 값·비숫자는 기본값.
+export const PACKAGE_MAX_BYTES = (() => { const n = Number(process.env.UPGRADE_PACKAGE_MAX_BYTES); return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1536 * 1024 * 1024; })();
 
 const trim = (u) => String(u || '').replace(/\/+$/, '');
 
@@ -70,7 +76,9 @@ export async function downloadPackage({ kind = 'installer', version, baseUrl, di
   // 대용량 다운로드(수십~수백MB)도 고RTT/일시 끊김 시 재시도(체크섬으로 무결성 검증되므로 안전).
   const res = await resilientFetch(`${trim(baseUrl)}/${safeName}`, { dispatcher: upgradeAgent, timeoutMs: 600000, retries: 2, retryBackoffMs: 2000 });
   if (!res.ok) return { ok: false, reason: `다운로드 실패 HTTP ${res.status}` };
-  const buf = Buffer.from(await res.arrayBuffer());
+  const rd = await readBytesCapped(res, PACKAGE_MAX_BYTES);
+  if (!rd.ok) return { ok: false, reason: `다운로드가 크기 상한(${Math.round(PACKAGE_MAX_BYTES / 1048576)}MB)을 넘어 중단했습니다 — 원격 소스를 확인하세요(UPGRADE_PACKAGE_MAX_BYTES).` };
+  const buf = rd.buf;
   const got = crypto.createHash('sha256').update(buf).digest('hex');
   // 무결성 검증 — upgrade.js downloadArchive와 동일 정책으로 통일. 여기 저장된 파일은 설치/
   // 업그레이드에 그대로 쓰여 코드로 실행되므로, sha 부재를 '경고 후 저장'으로 흘리면 미검증

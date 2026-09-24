@@ -54,6 +54,9 @@ export function registerOpsSettings(adminRouter) {
 
 // Audit log viewer (누가 언제 무엇을 했는지).
 adminRouter.get('/audit', adminOnly, (req, res) => {
+  // v2.607 AUTHZ2607-07: 감사 로그는 전 사용자·전 법인 작업 기록이고 target 에 vCenter 축이 없는 항목이 많아 나눌 수
+  //   없다 — 범위 계정 403(v2.525 규약. 같은 파일 /alerts 는 범위로 거른다).
+  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '감사 로그는 전 사용자·전 법인 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });
   res.json(listAudit({ limit: req.query.limit, offset: req.query.offset, user: req.query.user, q: req.query.q }));
 });
 

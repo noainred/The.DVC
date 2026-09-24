@@ -7,6 +7,7 @@ import { Card, fmtWatts } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
+import { fleetPartialsNote } from '../fleetPartialText.js'; // v2.607 LEFT2607-02
 
 
 /** Generic on-demand fetch hook (runs when params change). */
@@ -184,6 +185,8 @@ export function FleetInventory({ isAdmin }) {
       </div>
 
       {err && d && <div className="card flex between gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--red)', fontSize: 13, alignItems: 'center' }}><span>⚠ {err}</span><button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setErr(null)}>✕</button></div>}
+      {/* v2.607 LEFT2607-02: 엣지 베어메탈 목록 부분 전송·상한 제외·귀속 비움 */}
+      {d && fleetPartialsNote(d.fleetPartials) && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ {fleetPartialsNote(d.fleetPartials)}</div>}
       {notice && <div className="card flex between gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--green)', fontSize: 13, alignItems: 'center' }}><span>✓ {notice}</span><button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setNotice('')}>✕</button></div>}
       {isAdmin && s.ghostKeys > 0 && (
         <div className="card flex between wrap gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', alignItems: 'center' }}>

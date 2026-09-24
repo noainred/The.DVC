@@ -1,7 +1,7 @@
 // 용량/낭비/씬/VM파인더/온도/용량예측 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { scopePollerStatus } from '../../auth/scopeStatus.js';
-import { mergeScopedIds, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01: 범위 계정 PUT 은 범위 밖 키를 보존한다
+import { mergeScopedIds, denyScopedRun, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01: 범위 계정 PUT 은 범위 밖 키를 보존한다 · v2.607 AUTHZ2607-05 전역 필드
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
 import { logAudit } from '../../audit.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드(단일 소스)
@@ -565,9 +565,12 @@ api.get('/tools/waste/off-check', requirePerm('tools'), (req, res) => {
   res.json({ ok: true, ...scopePollerStatus(powerOffPollerStatus(), allowed), limits: POWEROFF_LIMITS });
 });
 api.put('/tools/waste/off-check/settings', requireRole('admin'), (req, res) => {
-  const next = savePowerOffSettings(req.body || {});
-  logAudit({ user: req.user?.username, action: '전원 꺼짐 점검 설정 변경', detail: `enabled=${next.enabled} interval=${next.intervalHours}h`, ip: req.ip || '' });
-  res.json({ ok: true, settings: next });
+  // v2.607 AUTHZ2607-05: 이 설정은 전부 전 법인 공용(사용 여부·주기) — 범위 계정의 값은 적용하지 않고 밝힌다.
+  const allowed = scopedVcenterIds(req.user, store.get());
+  const kg = keepScopedFields(req.body || {}, loadPowerOffSettings(), allowed, []);
+  const next = allowed ? loadPowerOffSettings() : savePowerOffSettings(kg.patch);
+  if (!allowed) logAudit({ user: req.user?.username, action: '전원 꺼짐 점검 설정 변경', detail: `enabled=${next.enabled} interval=${next.intervalHours}h`, ip: req.ip || '' });
+  res.json({ ok: true, settings: next, ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 api.post('/tools/waste/off-check/run', requireRole('admin'), async (req, res) => {
   if (denyScopedRun(req, res, '전원 꺼짐 수동 점검')) return;
@@ -852,7 +855,10 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
   //   범위 밖 DB·전체 합계 DB 는 이 계정의 저장으로 지우지 않는다(trackTotal 은 전 법인 계열이라 보존).
   const allowed = scopedVcenterIds(req.user, snap);
   let ignoredOutOfScope = []; let unapplied = null; let unappliedReason = null;
-  const patch = { ...b };
+  // v2.607 AUTHZ2607-05: 전역 필드(enabled·retentionDays·trackTotal 등)는 전 법인 공용 — 범위 계정의 값은 버리고 밝힌다
+  //   (예전에는 범위 admin 이 보존일을 1일로 내려 전 법인 VM 성능 이력을 prune 시켰다).
+  const kg = keepScopedFields(b, before, allowed, ['vcenterIds']);
+  const patch = kg.patch;
   if (allowed) {
     if (b.vcenterIds !== undefined) {
       const m = mergeScopedIds(before.vcenterIds, b.vcenterIds, allowed, [...validIds]);
@@ -886,7 +892,7 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
   });
   // PUT 응답도 GET 과 같은 필터 — 범위 밖 id 를 응답으로 되돌려 주지 않는다.
   const safeNext = allowed ? { ...next, vcenterIds: (next.vcenterIds || []).filter((id) => allowed.has(id)) } : next;
-  res.json({ ok: true, settings: safeNext, dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...(unapplied ? { unapplied, unappliedReason } : {}) });
+  res.json({ ok: true, settings: safeNext, dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...(unapplied ? { unapplied, unappliedReason } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
 /** 특정 vCenter(또는 전체 합계)의 수집 데이터 삭제 — 용량 회수용. 관리자 전용. */

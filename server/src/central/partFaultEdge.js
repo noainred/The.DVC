@@ -25,9 +25,10 @@
 import { makePart, partKeyFromTail, PUSH_PROTOCOL, COLLECTION_KINDS } from '../partfault/types.js';
 import { devKeyOf } from '../partfault/scan.js';
 import { admitAgent } from './edgeRecord.js';
+import { capStr } from '../util/capStr.js';
 
 const t = (v) => String(v ?? '').trim();
-const s = (v, n) => t(v).slice(0, n);
+const s = (v, n) => capStr(t(v), n); // v2.607(TIM2607-01): 평탄화 — `.slice` 는 본문 원문을 붙잡는다
 const MAX_DEVICES = Math.max(100, Number(process.env.PARTFAULT_EDGE_MAX_DEVICES) || 5_000);
 /**
  * 파트 배열 상한(v2.548 보안 리뷰 S2). 수신부가 장비 **수**만 제한하면 장비 1개에 키 꼬리 120만 개를 실은

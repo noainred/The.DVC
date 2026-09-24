@@ -9,6 +9,7 @@
  *
  * 순수: 네트워크·파일 접근 없음. 입력(잡 상태 + 폴링 중인 이름 목록 + 배포 대상 정보)만으로 판정한다.
  */
+import { capStr } from '../util/capStr.js';
 
 /** 편집 거리(Levenshtein). 이름이 짧아 O(n·m) 로 충분하다. 오타/접미사 누락 후보를 고르는 데 쓴다. */
 export function editDistance(a, b) {
@@ -176,7 +177,7 @@ export function buildPushErrorRemedy({ agent = '', httpStatus = 0, error = '', c
   }
   return {
     title: `'${agent}' PUSH 스캔 실패`,
-    why: `엣지가 예상치 못한 응답을 했습니다${st ? ` (HTTP ${st})` : ''} — ${String(error).slice(0, 200)}`,
+    why: `엣지가 예상치 못한 응답을 했습니다${st ? ` (HTTP ${st})` : ''} — ${capStr(String(error), 200)}`, // v2.607(TIM2607-01): 조합 문자열도 잘린 조각을 붙잡는다
     steps: [
       { text: '수집 서버 목록에서 이 엣지가 정상(연결됨)인지 먼저 확인하세요.', when: 'now' },
       { text: '엣지 로그에서 그 시각의 오류를 봅니다.', cmd: 'journalctl -u vmware-portal -n 100' },

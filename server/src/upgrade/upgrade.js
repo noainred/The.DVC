@@ -19,6 +19,8 @@ import { parseTarGz, parseZip, MAX_BUNDLE_BYTES, MAX_MEMBERS } from './archive.j
 import { upgradeAgent } from './upgradeAgent.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { readJsonCapped } from '../util/readCapped.js';
+import { readBytesCapped } from '../util/readBytesCapped.js'; // v2.607 SEC2607-06: 크기 상한을 사후가 아니라 읽는 중에
+import { reqTimeoutMs } from '../agent/envTimeout.js'; // v2.607 TIM2607-02: push 시한 정규화
 
 const ARCHIVE_RE = /vmware-portal-(\d+)\.(\d+)\.(\d+)\.(?:tar\.gz|tgz|zip)$/;
 
@@ -412,8 +414,10 @@ export async function downloadArchive(url, destDir, { token, timeout = 120_000, 
   try {
     const res = await resilientFetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: timeout, retries: 2, retryBackoffMs: 2000 });
     if (!res.ok) return { ok: false, reason: `download HTTP ${res.status}` };
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > maxBytes) return { ok: false, reason: `download too large (>${maxBytes} bytes)` };
+    // v2.607 SEC2607-06: 예전엔 전량을 메모리에 받은 뒤 비교했다 — 상한을 넘는 순간 읽기를 멈춘다.
+    const rd = await readBytesCapped(res, maxBytes);
+    if (!rd.ok) return { ok: false, reason: `download too large (>${maxBytes} bytes)` };
+    const buf = rd.buf;
     // 무결성 검증: versions.json의 sha256과 대조(TLS 미검증 미러/변조 번들 차단).
     // 보안(H2): sha256이 없으면 기본적으로 '검증 불가'로 설치를 거부한다(공식 릴리스는 항상 sha256 제공).
     // 서명 없는 사내 미러 등 부득이한 경우만 UPGRADE_ALLOW_UNVERIFIED=true로 우회(비권장).
@@ -484,7 +488,7 @@ export function bundleShaIssue(headerSha, bytes, { allowUnverified = String(proc
 /** 엣지 업그레이드 응답 상한 — 작은 JSON 이다(해제 후 크기). */
 export const EDGE_UPGRADE_RESPONSE_MAX_BYTES = 256 * 1024;
 
-export async function pushBundleToEdge(edge, archivePath, { timeout = Number(process.env.EDGE_PUSH_TIMEOUT_MS) || 600_000 } = {}) {
+export async function pushBundleToEdge(edge, archivePath, { timeout = process.env.EDGE_PUSH_TIMEOUT_MS } = {}) {
   const data = fs.readFileSync(archivePath);
   const sha = crypto.createHash('sha256').update(data).digest('hex'); // v2.480: 수신측 검증용
   // restart=true 필수 — 없으면 엣지는 설치 디렉터리만 교체하고 구버전 프로세스가 계속 돈다.
@@ -505,7 +509,8 @@ export async function pushBundleToEdge(edge, archivePath, { timeout = Number(pro
       dispatcher: upgradeAgent,
       // v2.583(감사 확정 — upgradePush 의 형제): 리다이렉트를 따라가지 않는다(토큰·번들을 제3 출처로 다시 보내지 않게).
       redirect: 'manual',
-      signal: AbortSignal.timeout(timeout),
+      // v2.607 TIM2607-02: 'Number(env) || 기본' 은 3e9 를 그대로(→ 1ms abort), 음수는 AbortSignal.timeout 이 ERR_OUT_OF_RANGE 로 던졌다.
+      signal: AbortSignal.timeout(reqTimeoutMs(timeout, 600_000, { max: 7_200_000 })),
     });
     // v2.605(감사 LEFT2605-04 = SEC2605-02 — 재현): 예전 { ok: res.ok, status, ...body } 는 엣지 본문이 ok·status 를 덮었다(500 + {ok:true,status:200}
     //   → 성공으로 보고). 아는 필드만 글자로 담고 판정은 상태코드가 먼저다(collector/upgradePush.js 와 같은 형태). 본문은 상한까지만 읽는다.

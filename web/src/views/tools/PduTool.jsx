@@ -3,6 +3,7 @@ import { pduTotals, pduTotalNote, pduPowerMark } from './pduTotals.js';
 import { STable } from '../../components/STable.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
+import { droppedSecretNote } from '../droppedSecretText.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import PduCharts from './PduCharts.jsx';
@@ -73,7 +74,9 @@ export default function PduTool() {
     setBusy(true); setMsg(null);
     try {
       const r = await postJson('/tools/pdu/devices', form);
-      if (r.ok) { await load(); close(); } else setMsg({ ok: false, text: r.reason });
+      const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03
+      if (r.ok && dropNote) { await load(); setMsg({ ok: false, text: dropNote }); }
+      else if (r.ok) { await load(); close(); } else setMsg({ ok: false, text: r.reason });
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
   const runTest = async () => {

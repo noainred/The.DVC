@@ -19,7 +19,7 @@ import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { findCollector } from './edgeLogPull.js';
-import { capTrim } from '../util/capStr.js'; // v2.606 TIM2606-02: 보관 글자는 평탄화(SlicedString 이 응답 원문을 붙잡지 않게)
+import { capTrim, capStr } from '../util/capStr.js'; // v2.606 TIM2606-02: 보관 글자는 평탄화(SlicedString 이 응답 원문을 붙잡지 않게)
 
 /** 이 엔드포인트를 내주기 시작한 최소 엣지 버전 — 그 아래는 경로가 없다. */
 export const MIN_EDGE_VERSION = '2.560.0';
@@ -108,7 +108,7 @@ export function _resetForTest() { _store.clear(); }
 
 /** 404 본문으로 '구버전' 과 '엣지에서 꺼짐' 을 가른다(둘은 조치가 정반대다 — v2.549 규약). */
 function kindFor404(body) {
-  if (body && typeof body === 'object' && body.reason) return { kind: 'disabled', reason: String(body.reason).slice(0, 300) };
+  if (body && typeof body === 'object' && body.reason) return { kind: 'disabled', reason: capStr(body.reason, 300) || '(형식 오류)' }; // v2.607(TIM2607-01)
   return { kind: 'old-version', reason: `이 엣지에 /api/collector/token-check 가 없습니다 — v${MIN_EDGE_VERSION} 이상으로 업그레이드해야 엣지 저장 토큰을 확인할 수 있습니다.` };
 }
 
@@ -154,7 +154,8 @@ export async function pullTokenCheck(agent, { selfProbe = true, fetchImpl = resi
   if (res.status === 404) { const k = kindFor404(body); return fail(k.kind, k.reason); }
   if (!res.ok) return fail('http', `HTTP ${res.status}${body?.reason ? ` (${body.reason})` : ''}`);
   if (!body || body.ok === false || !body.node) {
-    return fail('bad-body', body?.reason ? String(body.reason).slice(0, 300) : '응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다).');
+    return fail('bad-body', body?.reason ? (capStr(body.reason, 300) || '(형식 오류)') : // v2.607(TIM2607-01)
+     '응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다).');
   }
   const rec = putEdgeTokenReport(name, { ok: true, ms, report: sanitizeEnvelope(body) });
   return { ok: true, ms, rec };

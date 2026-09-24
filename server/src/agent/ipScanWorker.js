@@ -9,6 +9,7 @@
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { runScan } from '../ipam/scanRunner.js';
+import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js';
 
 let timer = null;
 let last = null;
@@ -39,7 +40,11 @@ export async function runIpScanAgentOnce() {
     // 결과 POST 응답을 검사한다 — 검사하지 않으면 403/거부(토큰 만료·에이전트명 불일치)도
     // '성공 보고'로 기록돼, 실제로는 중앙에 병합되지 않은 스캔을 정상으로 오인한다.
     if (!rRes.ok) throw new Error(`result ${rRes.status}`);
-    last = { at: Date.now(), assigned: true, scanned, alive: alive.length };
+    // v2.607(감사 EDGE2607-02): 200 이어도 중앙은 전체 상한(capped)·형식 오류(dropped)·절단(omitted)으로 일부를 받지 않을 수 있다 —
+    //   예전에는 r.ok 만 보고 '성공 alive N' 으로 적어, 중앙 IP 대장에 없는데 엣지 로그 화면은 성공이었다(v2.606 EDGE2606-03 의 형제 누락).
+    const drop = ipScanDropOf(await readCentralReply(rRes));
+    last = { at: Date.now(), assigned: true, scanned, alive: alive.length, ...(drop ? { centralDropped: drop } : {}) };
+    warnDrop('ipscan-agent', drop);
     return last;
   } catch (e) {
     // v2.583 감사 #34: 무음 실패 금지(v2.549·v2.561 규약) — 상태에 남기고(엣지 로그 표에 등재) 콘솔에도 적는다.
@@ -53,6 +58,13 @@ export async function runIpScanAgentOnce() {
 }
 
 let streak = 0;
+
+/** ip-scan-result 응답 → 거절 요약(순수). capped(전체 상한)·omitted(절단)는 '상한 초과로 제외', dropped(형식 오류)는 '거부'. */
+export function ipScanDropOf(j) {
+  if (!j || typeof j !== 'object') return null;
+  const n = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+  return dropSummaryOf({ rejected: n(j.dropped), omitted: n(j.capped) + n(j.omitted) });
+}
 /** 엣지 로그 화면용 상태(edgelog/spec.js) — 실패 사유·연속 횟수를 담는다. */
 export function ipScanAgentStatus() {
   return { enabled: !!config.agent.centralUrl, running, intervalMs: config.agent.scanIntervalMs, last };

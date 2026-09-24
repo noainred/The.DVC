@@ -24,6 +24,7 @@ import { getFleetInventory, fleetLiveKeys } from '../insights/fleetInventory.js'
 import { setFleetTag, pruneFleetTags, loadFleetTags, applyFleetExclude } from '../insights/fleetTags.js';
 import { setFleetAssign, setFleetAssignMany, applyFleetAssign, pruneFleetAssign, loadFleetAssign } from '../insights/fleetAssign.js';
 import { fleetRev } from '../insights/fleetRev.js';
+import { fleetPartialsSummary } from '../central/fleet.js'; // v2.607 LEFT2607-02
 import { loadRegistry, updateServer, assignVcenter } from '../idrac/registry.js';
 import { logAudit } from '../audit.js';
 import { detectAnomalies } from '../insights/anomaly.js';
@@ -151,9 +152,14 @@ insightsRouter.get('/fleet', async (req, res) => {
     // 캐시 키: 스냅샷 생성시각 + 플릿 리비전(태그/소속/레지스트리 변경 시 즉시 +1). 매 요청 파일 읽기 없음.
     const key = `${snap.generatedAt}|${fleetRev()}`;
     const full = await snapMemo('fleet', key, 60_000, async () => getFleetInventory(snap));
-    const { liveKeys, ...payload } = full; // liveKeys는 prune 내부용 — 응답에서 제외
-    if (isAdminReq(req)) sendCached(req, res, key, payload);
-    else sendCached(req, res, `${key}|masked`, maskFleetPayload(payload, insightsMatcher(snap)));
+    const { liveKeys, ...payload0 } = full; // liveKeys는 prune 내부용 — 응답에서 제외
+    // v2.607(감사 LEFT2607-02): 엣지 부분 목록·상한 제외·귀속 비움 요약. 이 라우트는 범위 계정에 403 이라(위) 여기서는 늘 싣는다.
+    //   부분 상태는 fleetRev 를 올리지 않을 수 있어(목록 내용이 같으면) ETag 키에 요약을 함께 넣는다.
+    const fleetPartials = fleetPartialsSummary();
+    const payload = { ...payload0, fleetPartials };
+    const fpKey = `${key}|fp:${JSON.stringify(fleetPartials)}`;
+    if (isAdminReq(req)) sendCached(req, res, fpKey, payload);
+    else sendCached(req, res, `${fpKey}|masked`, maskFleetPayload(payload, insightsMatcher(snap)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 // 수동 분류 예외 지정/해제(관리자). body: { key, tag: 'baremetal'|'virtualization'|'exclude'|'auto' }

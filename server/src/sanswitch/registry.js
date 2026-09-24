@@ -21,6 +21,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 import { isKnownType, isImplementedType, normalizeCollectMethod } from './types.js';
+import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.607 SEC2607-07
 
 const FILE = path.join(config.configDir, 'sanswitch-devices.json');
 const MAX_DEVICES = 300;
@@ -101,10 +102,24 @@ export function saveDevice(input = {}) {
 
   const existing = input.id ? db.devices.find((d) => d.id === input.id) : null;
   const dev = existing || { id: `sw-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
-  const hostChanged = existing && existing.host !== host;
+  // v2.607(감사 SEC2607-07·LEFT2607-06): host 만 보던 것을 공용 판정(host·username·SSH 포트·REST 포트)으로 — 계정·포트를
+  //   바꿔도 옛 비밀번호가 새 접속처로 시도됐다. agent(수집 엣지) 변경은 승계한다(위임 수집에 필요, 장비는 같다).
+  //   포트는 그 포트를 **이전·새 수집 방식이 둘 다 쓸 때만** 비교한다(CSV 내보내기는 REST 가 아니면 httpsPort 를 비운다 —
+  //   bulk.js — 쓰지 않는 포트의 기본값 복원으로 비밀을 버리면 거짓 폐기다).
+  const newMethod = normalizeCollectMethod(type, String(input.collectMethod || ''));
+  const oldRest = existing?.collectMethod === 'rest'; const newRest = newMethod === 'rest';
+  const bothSsh = !!existing && !oldRest && !newRest; const bothRest = !!existing && oldRest && newRest;
+  const moved = !!existing && accessMoved(
+    { host: existing.host, username: existing.username || '',
+      port: bothSsh ? (existing.sshPort || 22) : '', httpsPort: bothRest ? (existing.httpsPort || 443) : '' },
+    { host, username,
+      port: bothSsh ? Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22)) : '',
+      httpsPort: bothRest ? Math.max(1, Math.min(65535, Math.floor(Number(input.httpsPort)) || 443)) : '' },
+    ['host', 'username', 'port', 'httpsPort']);
   const password = String(input.password ?? '');
+  let droppedSecrets = [];
   if (password) dev.password = password;
-  else if (hostChanged) delete dev.password; // host 변경 시 비번 이월 금지
+  else if (moved) droppedSecrets = dropCarriedSecrets(dev, input, ['password']); // 접속처 변경 시 비번 이월 금지
   const collectMethod = normalizeCollectMethod(type, String(input.collectMethod || ''));
   const sshPort = Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22));
   // REST 포트 — 기본 443. NAT/포트포워딩 뒤의 스위치를 위해 지정할 수 있게 둔다.
@@ -120,7 +135,7 @@ export function saveDevice(input = {}) {
   }
   persist();
   const { password: _p, ...safe } = dev;
-  return { ...safe, hasPassword: !!dev.password };
+  return { ...safe, hasPassword: !!dev.password, ...(droppedSecrets.length ? { droppedSecrets } : {}) };
 }
 
 export function deleteDevice(id) {

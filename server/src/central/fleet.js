@@ -132,20 +132,21 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
   const omitted = Math.max(0, valid.length - room);
   let vcenterBlanked = 0;
   const vcOf = (b) => {
-    const v = typeof b.vcenterId === 'string' || typeof b.vcenterId === 'number' ? String(b.vcenterId).slice(0, 128) : '';
+    const v = typeof b.vcenterId === 'string' || typeof b.vcenterId === 'number' ? capStr(b.vcenterId, 128) : '';
     if (v && typeof vcAllowed === 'function' && !vcAllowed(v)) { vcenterBlanked++; return ''; }
     return v;
   };
   const list = valid.slice(0, room).map((b) => ({
-    fleetId: String(b.fleetId || b.serviceTag || b.serverId || '').slice(0, 256),
-    name: String(b.name || '').slice(0, 256),
-    model: String(b.model || '').slice(0, 256),
-    serviceTag: String(b.serviceTag || '').slice(0, 128),
+    // v2.607(TIM2607-01): 상주 레코드 문자열은 capStr — `.slice` 는 본문 원문(최대 1MB)을 붙잡는다.
+    fleetId: capStr(b.fleetId || b.serviceTag || b.serverId || '', 256),
+    name: capStr(b.name || '', 256),
+    model: capStr(b.model || '', 256),
+    serviceTag: capStr(b.serviceTag || '', 128),
     // 엣지 push는 '전력 미보고 베어메탈' 메타 전용(설계). 전력은 원격 수집(collector pull) 경로로만
     // 중앙에 반영되므로 엣지 watts는 항상 null로 정규화 — fleet KPI와 FinOps/PowerMap의 이중계상 차단.
     watts: null,
     vcenterId: vcOf(b),
-    source: String(b.source || '').slice(0, 32),
+    source: capStr(b.source || '', 32),
   }));
   if (omitted) console.warn(`[central-fleet] '${a}' 베어메탈 ${valid.length}대 중 ${omitted}대를 상한으로 받지 않았습니다(에이전트당 ${PER_AGENT_MAX} · 전체 ${TOTAL_MAX}${verified ? '' : ` · 미검증 이름 합 ${UNVERIFIED_TOTAL_MAX}`}).`);
   if (vcenterBlanked) console.warn(`[central-fleet] '${a}' 가 소유하지 않은 vCenter 로 귀속된 베어메탈 ${vcenterBlanked}대 — 귀속(vcenterId)을 비웠습니다.`);
@@ -225,6 +226,22 @@ export function listEdgeFleet() {
 /** 부분 목록으로 보고 중인 엣지(통합 인벤토리 화면 데이터용 — 'N곳의 목록이 일부' 를 말할 수 있게). */
 export function edgeFleetPartials() {
   return listEdgeFleet().filter((x) => x.partial).map((x) => ({ agent: x.agent, at: x.at, unreadVcenters: x.unreadVcenters, withheldItems: x.withheldItems }));
+}
+
+/**
+ * v2.607(감사 LEFT2607-02): 화면 응답용 요약 — 부분 목록 엣지 + 상한으로 받지 않은 수(omitted)·귀속을 비운 수(vcenterBlanked) 합계.
+ *   v2.601·v2.606 이 저장만 하고 **응답에 싣는 라우트가 0개**였다(화면이 '일부 목록' 을 말할 길이 없었다).
+ *   범위 제한 계정에는 호출부가 null 을 준다(엣지는 vCenter 귀속이 아니라 나눌 축이 없다 — v2.525 규약).
+ */
+export function fleetPartialsSummary() {
+  const all = listEdgeFleet();
+  const partials = all.filter((x) => x.partial).map((x) => ({ agent: x.agent, at: x.at, unreadVcenters: x.unreadVcenters, withheldItems: x.withheldItems }));
+  let omitted = 0; let vcenterBlanked = 0; let withheldItems = 0; let withheldUnknown = 0;
+  for (const x of all) {
+    omitted += Number(x.omitted) || 0; vcenterBlanked += Number(x.vcenterBlanked) || 0;
+    if (x.partial) { if (x.withheldItems == null) withheldUnknown += 1; else withheldItems += Number(x.withheldItems) || 0; }
+  }
+  return { edges: all.length, partialEdges: partials.length, partials, withheldItems, withheldUnknown, omitted, vcenterBlanked };
 }
 
 /** 테스트/관리용 초기화. */

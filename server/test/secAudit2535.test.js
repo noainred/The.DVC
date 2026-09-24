@@ -113,8 +113,9 @@ test('★ 모든 SQLite 모듈은 파일 권한 0600 을 건다(v2.503 S-5 규�
  */
 test('★ SSH 장비 등록부 3종은 host 변경 시 저장 비밀번호를 버린다', () => {
   const cases = [
-    ['storage/registry.js', /hostChanged[\s\S]{0,200}delete dev\.password/],
-    ['sanswitch/registry.js', /hostChanged[\s\S]{0,200}delete dev\.password/],
+    // v2.607(SEC2607-07): 판정이 공용 accessMoved(host·username·port) + dropCarriedSecrets 로 넓어졌다 — host 가 키 목록에 있어야 한다.
+    ['storage/registry.js', /accessMoved\([\s\S]{0,400}\['host',[\s\S]{0,200}dropCarriedSecrets\(dev,/],
+    ['sanswitch/registry.js', /accessMoved\([\s\S]{0,600}\['host',[\s\S]{0,200}dropCarriedSecrets\(dev,/],
     // PDU 는 normalize() 안에서 처리한다 — host 가 바뀌면 '' 로 만든다.
     ['pdu/registry.js', /input\.host[\s\S]{0,160}e\.host[\s\S]{0,40}\?\s*''/],
   ];

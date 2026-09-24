@@ -29,15 +29,32 @@ function tcp(host, port, timeoutMs) {
   });
 }
 
+/** SSH 배너 수신 상한(v2.607 SEC2607-01) — RFC 4253 배너 줄은 255자 이하이고 그 앞 안내 줄도 짧다. */
+export const SSH_BANNER_MAX_BYTES = 2048;
+
 function sshBanner(host, port, timeoutMs) {
   return new Promise((resolve) => {
     const t0 = Date.now();
     // v2.506: DNS 리바인딩 차단(util/ssrfLookup.js) — 중계 점검도 외부 입력 host 로 붙는다.
     const sock = net.connect({ host, port, lookup: ssrfLookup });
     let done = false; let buf = '';
-    const fin = (r) => { if (done) return; done = true; try { sock.destroy(); } catch { /* */ } resolve({ ...r, ms: Date.now() - t0 }); };
-    sock.setTimeout(timeoutMs, () => fin({ ok: false, phase: buf ? 'banner' : 'timeout', error: buf ? `SSH 배너가 아님: ${buf.slice(0, 40)}` : 'TCP/배너 타임아웃' }));
-    sock.on('data', (d) => { buf += d.toString('latin1'); if (buf.includes('\n')) fin(buf.startsWith('SSH-') ? { ok: true, detail: buf.trim().slice(0, 60) } : { ok: false, phase: 'banner', error: `SSH 배너가 아님: ${buf.trim().slice(0, 40)}` }); });
+    const fin = (r) => { if (done) return; done = true; clearTimeout(hard); try { sock.destroy(); } catch { /* */ } resolve({ ...r, ms: Date.now() - t0 }); };
+    const onTimeout = () => fin({ ok: false, phase: buf ? 'banner' : 'timeout', error: buf ? `SSH 배너가 아님: ${buf.slice(0, 40)}` : 'TCP/배너 타임아웃' });
+    // v2.607 SEC2607-01: sock.setTimeout 은 **유휴** 시한이라 대상이 개행 없이 계속 보내면 발화하지 않았다(재현: 1초 시한이
+    //   12MB 동안 4초, 계속 보내면 끝나지 않음). 절대 시한을 따로 건다 — 주기 폴러의 재진입 가드가 영원히 잡히지 않게.
+    const hard = setTimeout(onTimeout, timeoutMs);
+    hard.unref?.();
+    sock.setTimeout(timeoutMs, onTimeout);
+    // v2.607 SEC2607-01: 수신 상한(SSH_BANNER_MAX_BYTES) + 개행은 **새 청크에서만** 찾는다 — 예전엔 buf 를 무상한으로 쌓고
+    //   청크마다 전체를 다시 훑었다(O(n²) · 48MB 에 RSS 70 → 311MB). RFC 4253 의 배너 줄은 255자 이하다.
+    sock.on('data', (d) => {
+      if (done) return;
+      const s = d.toString('latin1', 0, Math.min(d.length, SSH_BANNER_MAX_BYTES - buf.length + 1));
+      const nl = s.indexOf('\n');
+      buf += nl >= 0 ? s.slice(0, nl + 1) : s;
+      if (nl >= 0) return fin(buf.startsWith('SSH-') ? { ok: true, detail: buf.trim().slice(0, 60) } : { ok: false, phase: 'banner', error: `SSH 배너가 아님: ${buf.trim().slice(0, 40)}` });
+      if (buf.length > SSH_BANNER_MAX_BYTES) fin({ ok: false, phase: 'banner', error: `SSH 배너가 아님(개행 없이 ${SSH_BANNER_MAX_BYTES}B 초과): ${buf.slice(0, 40)}` });
+    });
     sock.once('error', (e) => fin({ ok: false, phase: e.code === 'ECONNREFUSED' ? 'refused' : 'timeout', error: `${e.code || e.message}` }));
   });
 }

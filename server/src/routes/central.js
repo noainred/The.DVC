@@ -723,6 +723,15 @@ centralRouter.post('/inventory', (req, res) => {
     res.locals.ingestReject = { kind: REJECT_KIND.MOCK, reason, vcenterId: String(b.vcenterId || '') };
     return res.status(400).json({ ok: false, reason, mockBlocked: true, by: mockByFlag ? 'flag' : 'content' });
   }
+  // v2.607(감사 CEN2607-06 — 재현): 형제(guest-disk·vmseries·curuser·ping)와 같이 중앙 직접 수집(direct) vCenter 는 받지 않는다.
+  //   예전에는 엣지가 중앙 직접 수집 vCenter id 로 인벤토리를 저장하고 소유자로 기록돼, curuser-config·vmseries-config 가
+  //   그 vCenter 의 설정을 엣지로 내려보냈다. ⚠ mock 판정 **뒤**에 둔다 — 목 폴백 거부의 종류(MOCK)가 바뀌지 않게(v2.570).
+  //   등록부에 없는 id 는 여기서 막지 않는다(형제 판정·기존 흐름과 같은 기준 — 위임 인벤토리 캐시가 등록부에 없는 id 를 매 주기 지운다).
+  const invDeny = edgeVcWriteDenied(b.vcenterId);
+  if (invDeny) {
+    res.locals.ingestReject = { kind: REJECT_KIND.OWNER, reason: invDeny, vcenterId: String(b.vcenterId).slice(0, 128) };
+    return res.status(403).json({ ok: false, reason: invDeny });
+  }
   // v2.428(미스매치 #6/#7): 같은 vcenterId 를 다른 agent 가 번갈아 push 하거나, 같은 agent 이름이 다른 hostname 에서 오면 충돌로 기록.
   noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: false, peer: req.socket?.remoteAddress || '', verified: req.centralAuth.mode === 'agent' || edgeNameKnown(agent) }); // v2.603 CEN2603-04: 미검증 이름은 작은 링
   noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
@@ -1239,7 +1248,8 @@ centralRouter.post('/part-faults', async (req, res) => {
   if (!r.ok) return res.status(r.refused ? 429 : 400).json(r); // v2.605(CEN2605-02): 엣지 수 상한 거절은 429(형제 수신과 같다)
   // 응답에 중앙의 스위치 상태를 실어 보낸다 — 엣지가 '보냈는데 중앙이 꺼져 있다' 를 알 수 있게.
   const { partFaultEnabled } = await import('../partfault/settings.js');
-  return res.json({ ok: true, agent, protocol: r.protocol, devices: r.devices, rejected: r.rejected, open: r.open, centralEnabled: partFaultEnabled().enabled });
+  // v2.607(감사 EDGE2607-02): 상한으로 버린 파트 수도 돌려준다 — 예전에는 중앙 보관분에만 있어 엣지가 알 수 없었다.
+  return res.json({ ok: true, agent, protocol: r.protocol, devices: r.devices, rejected: r.rejected, open: r.open, ...(r.partsOmitted ? { partsOmitted: r.partsOmitted } : {}), centralEnabled: partFaultEnabled().enabled });
 });
 
 /**
@@ -1315,13 +1325,18 @@ centralRouter.post('/storage-data', async (req, res) => {
   let notOwned = 0; // v2.601 EDGE2601-04: 소유권 필터로 뺀 수도 응답에 싣는다(엣지가 상태·콘솔에 남긴다)
   const now = Date.now();
   devices = devices.map((d) => (d && typeof d === 'object' ? { ...d, collectedAt: Math.min(Number(d.collectedAt) || now, now) } : d));
+  {
+    const r = await onlyDelegated(devices, (d) => d.deviceId ?? d.id, '../storage/registry.js'); // v2.607 CEN2607-03
+    devices = r.list; notOwned += r.denied;
+    if (r.denied) console.warn(`[central] storage-data: ${String(agent).slice(0, 64)} 중앙 직접 수집 장비 ${r.denied}건 거절`);
+  }
   if (req.centralAuth.mode === 'agent') {
     const { devicesForAgent } = await import('../storage/registry.js');
     const owned = new Set(devicesForAgent(agent).map((d) => d.id));
     const before = devices.length;
     devices = devices.filter((d) => d && owned.has(d.deviceId));
-    notOwned = before - devices.length;
-    if (notOwned) console.warn(`[central] storage-data: ${agent} 미위임 deviceId ${notOwned}건 드롭(위조 방지)`);
+    notOwned += before - devices.length;
+    if (before - devices.length) console.warn(`[central] storage-data: ${agent} 미위임 deviceId ${notOwned}건 드롭(위조 방지)`);
   }
   // v2.599(CEN-2599-03·04·05): 모듈이 원소를 정리하고(객체 아님·식별자 아님·크기 초과를 빼고 표시 필드의 객체 값은 null)
   //   뺀 개수를 info 에 싣는다 — 응답이 그 사실을 말한다(조용한 제외 금지).
@@ -1330,6 +1345,26 @@ centralRouter.post('/storage-data', async (req, res) => {
   if (info.refused) return res.status(429).json({ ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).' });
   res.json({ ok: true, saved, ...(edgeDropSummary(withNotOwned(info, notOwned))) });
 });
+
+/**
+ * v2.607(감사 CEN2607-03 — 재현): 엣지 장비 수신은 **토큰 종류와 무관하게** 중앙 직접 수집 장비(등록부에 있고 agent 가
+ *   빈 장비)를 거절한다 — v2.600 edgeVcWriteDenied(requireSite 없이)와 같은 판단(소유권이 아니라 대상의 구조적 성질: 엣지는
+ *   그 장비를 수집하지 않는다). 예전에는 공유 토큰 발신자가 중앙 직접 수집 Unity 의 deviceId 로 9 PB 를 보내 목록과 용량
+ *   이력(capacity_history)을 덮을 수 있었다. 등록부에 없는 id 는 형제 /inventory 와 같이 여기서 거절하지 않는다(목록의
+ *   고아 TTL 이 정리한다 — 정직 기록: 그 id 의 스냅샷은 보관된다). 공유 토큰의 이름 좁히기는 하지 않는다(레거시 신뢰 유지).
+ *   원소가 객체가 아니거나 id 가 없으면 여기서 판정하지 않고 뒤의 수신 정리(sanitizeEdgeDevices)가 센다.
+ * @returns {Promise<{ list: any[], denied: number }>}
+ */
+async function onlyDelegated(list, idOf, registryPath) {
+  const reg = await import(registryPath);
+  const direct = new Set(reg.listDevices().filter((d) => d && d.id != null && !String(d.agent || '').trim()).map((d) => String(d.id)));
+  if (!direct.size) return { list, denied: 0 };
+  const kept = list.filter((d) => {
+    const id = d && typeof d === 'object' ? idOf(d) : null;
+    return !((typeof id === 'string' || typeof id === 'number') && direct.has(String(id)));
+  });
+  return { list: kept, denied: list.length - kept.length };
+}
 
 /** v2.601(감사 EDGE2601-04): 소유권 필터로 뺀 수를 dropped.notOwned 로 합친다(원 객체는 바꾸지 않는다). */
 function withNotOwned(info, notOwned) {
@@ -1382,13 +1417,18 @@ centralRouter.post('/pdu-data', async (req, res) => {
   let notOwned = 0; // v2.601 EDGE2601-04
   const now = Date.now();
   snapshots = snapshots.map((s) => (s && typeof s === 'object' ? { ...s, collectedAt: Math.min(Number(s.collectedAt) || now, now) } : s));
+  {
+    const r = await onlyDelegated(snapshots, (x) => x.id, '../pdu/registry.js'); // v2.607 CEN2607-03
+    snapshots = r.list; notOwned += r.denied;
+    if (r.denied) console.warn(`[central] pdu-data: ${String(agent).slice(0, 64)} 중앙 직접 수집 장비 ${r.denied}건 거절`);
+  }
   if (req.centralAuth.mode === 'agent') {
     const { devicesForAgent } = await import('../pdu/registry.js');
     const owned = new Set(devicesForAgent(agent).map((d) => d.id));
     const before = snapshots.length;
     snapshots = snapshots.filter((s) => s && owned.has(s.id));
-    notOwned = before - snapshots.length;
-    if (notOwned) console.warn(`[central] pdu-data: ${agent} 미위임 id ${notOwned}건 드롭(위조 방지)`);
+    notOwned += before - snapshots.length;
+    if (before - snapshots.length) console.warn(`[central] pdu-data: ${agent} 미위임 id ${notOwned}건 드롭(위조 방지)`);
   }
   const r = saveEdgePdu(agent, snapshots);
   if (r?.refused) return res.status(429).json({ ok: false, refused: true, reason: r.reason });
@@ -1603,13 +1643,18 @@ centralRouter.post('/sanswitch-data', async (req, res) => {
   let sanNotOwned = 0; // v2.601 EDGE2601-04
   const now = Date.now();
   devices = devices.map((d) => (d && typeof d === 'object' ? { ...d, collectedAt: Math.min(Number(d.collectedAt) || now, now) } : d));
+  {
+    const r = await onlyDelegated(devices, (d) => d.deviceId, '../sanswitch/registry.js'); // v2.607 CEN2607-03
+    devices = r.list; sanNotOwned += r.denied;
+    if (r.denied) console.warn(`[central] sanswitch-data: ${String(agent).slice(0, 64)} 중앙 직접 수집 장비 ${r.denied}건 거절`);
+  }
   if (req.centralAuth.mode === 'agent') {
     const { devicesForAgent } = await import('../sanswitch/registry.js');
     const owned = new Set(devicesForAgent(agent).map((d) => d.id));
     const before = devices.length;
     devices = devices.filter((d) => d && owned.has(d.deviceId));
-    sanNotOwned = before - devices.length;
-    if (sanNotOwned) console.warn(`[central] sanswitch-data: ${agent} 미위임 deviceId ${sanNotOwned}건 드롭(위조 방지)`);
+    sanNotOwned += before - devices.length;
+    if (before - devices.length) console.warn(`[central] sanswitch-data: ${agent} 미위임 deviceId ${sanNotOwned}건 드롭(위조 방지)`);
   }
   const chunk = Math.max(0, Number(req.body?.chunk) || 0), chunks = Math.max(1, Number(req.body?.chunks) || 1);
   const info = {};
@@ -1802,6 +1847,9 @@ centralRouter.post('/ip-scan-result', (req, res) => {
       return res.status(409).json({ ok: false, reason: `엣지 '${agent}' 에 배정된 스캔 범위가 없습니다 — 설정 › IPAM › 스캔에서 이 엣지의 범위를 지정하세요.`, unassigned: true });
     }
   }
+  // v2.607(감사 EDGE2607-02): 8,000 초과분은 예전에 개수도 밝히지 않고 버렸다 — 응답에 omitted 로 싣고 콘솔에 남긴다.
+  const aliveOmitted = Array.isArray(b.alive) ? Math.max(0, b.alive.length - 8000) : 0;
+  if (aliveOmitted) console.warn(`[central] ip-scan-result: ${String(agent).slice(0, 64)} alive ${b.alive.length}개 중 상한 8000 초과분 ${aliveOmitted}개를 받지 않았습니다`);
   // v2.594(감사 EDGE2-03): 형식이 틀린 원소는 병합에서 버려진다 — 버리기 전 개수를 merged·alive 로 보고하면 수치가 부풀었다.
   const validAlive = alive.filter((h) => h && ipToNum(h.ip) != null);
   const dropped = alive.length - validAlive.length;
@@ -1809,7 +1857,7 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   const capped = mr?.capped || 0;
   recordAgentReport(agent, { scanned: b.scanned || 0, alive: validAlive.length, durationMs: b.durationMs || null });
   // v2.603 CEN2603-02: 전체 상한으로 받지 않은 새 IP 수를 밝힌다(merged 는 받은 것만).
-  res.json({ ok: true, merged: validAlive.length - capped, ...(dropped ? { dropped } : {}), ...(capped ? { capped } : {}) });
+  res.json({ ok: true, merged: validAlive.length - capped, ...(dropped ? { dropped } : {}), ...(capped ? { capped } : {}), ...(aliveOmitted ? { omitted: aliveOmitted } : {}) });
 });
 
 /*

@@ -28,6 +28,7 @@ import { recordActivity } from '../sanswitch/perfActivityLog.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { ackPerfCollect, setPerfBaseResolver } from '../sanswitch/collectRequests.js';
 import { admitAgent } from './edgeRecord.js';
+import { capStr } from '../util/capStr.js';
 
 const FILE = path.join(config.configDir, 'central-agent-sanswitch-perf.json');
 const MAX_DEVICES_PER_AGENT = 300;
@@ -53,11 +54,11 @@ setPerfBaseResolver((a) => {
 export function normalizeEdgePerfStatus(input = {}) {
   const devices = (Array.isArray(input.devices) ? input.devices : []).slice(0, MAX_DEVICES_PER_AGENT)
     .map((d) => ({
-      id: String(d?.id || ''),
+      id: capStr(d?.id || '', 128), // v2.607(TIM2607-01·LEFT2607-05): 평탄화 + 길이 상한
       ok: d?.ok === true,
       at: numOrNull(d?.at),
       // 오류 문구는 300자로 자른다(SSH 추적·스택이 통째로 온다 — 작업 로그와 같은 상한).
-      error: d?.error ? String(d.error).slice(0, 300) : null,
+      error: d?.error ? (capStr(d.error, 300) || null) : null,
       ports: numOrNull(d?.ports),
     }))
     .filter((d) => d.id);
@@ -71,8 +72,8 @@ export function normalizeEdgePerfStatus(input = {}) {
     total: numOrNull(input.total),
     pushAt: numOrNull(input.pushAt),
     // 엣지의 마지막 중계 실패 사유(v2.566). 300자 상한은 작업 로그와 같다.
-    pushError: input.pushError ? String(input.pushError).slice(0, 300) : null,
-    version: input.version ? String(input.version).slice(0, 40) : null,
+    pushError: input.pushError ? (capStr(input.pushError, 300) || null) : null,
+    version: input.version ? (capStr(input.version, 40) || null) : null,
     devices,
   };
 }

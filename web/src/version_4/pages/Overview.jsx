@@ -171,7 +171,9 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
                       <td data-sort={s.cpu ?? ''}><PctCell pct={s.cpu} /></td>
                       <td data-sort={s.sto ?? ''}><PctCell pct={s.sto} /></td>
                       <td className="num" style={{ color: '#b45309' }} data-sort={s.powerKw ?? ''}>{s.powerKw != null ? `${s.powerKw}kW` : '—'}</td>
-                      <td className="num" data-sort={s.alarmsCritical + s.alarmsWarning} style={{ color: alarmCountColor(s.alarmsCritical + s.alarmsWarning) }}>{s.alarmsCritical + s.alarmsWarning}</td>
+                      {s.alarmsUnknown
+                        ? <td className="num" data-sort="" style={{ color: '#6b7280' }} title="REST 폴백 수집 — 경보를 조회하지 않았습니다(0건이 아닙니다)">— <span style={{ fontSize: 10 }}>REST 폴백</span></td>
+                        : <td className="num" data-sort={s.alarmsCritical + s.alarmsWarning} style={{ color: alarmCountColor(s.alarmsCritical + s.alarmsWarning) }}>{s.alarmsCritical + s.alarmsWarning}</td>}
                       <td><StateBadge state={s.status} /></td>
                     </tr>
                   ))}

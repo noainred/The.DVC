@@ -61,6 +61,7 @@ const t = (v) => String(v ?? '').trim();
 // `2.5` 를 '버전 미상' 으로 만들었다(tokenScan 사본은 숫자를 돌려줬다 — 같은 입력, 다른 결론).
 // ⚠ 재수출(`export … from`)은 이 스코프에 이름을 만들지 않는다 — import 후 export 한다.
 import { cmpVersion } from '../../util/cmpVersion.js';
+import { pageArgs } from '../../util/pageArgs.js';   // v2.607 DB2607-04
 
 export { cmpVersion };
 
@@ -221,7 +222,8 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
 /** 전이 이력(열림/변화/해소). **전이만** 기록되므로 그대로 시간순 목록이다. */
 api.get('/tools/part-faults/events', toolsPerm, fullScopeOnly, async (req, res) => {
   const days = Math.min(730, Math.max(1, Number(req.query.days) || 30));
-  const limit = Math.min(2_000, Math.max(1, Number(req.query.limit) || 500));
+  // v2.607 DB2607-04: 정수화·하한 — limit=1.5 가 REAL 로 바인딩돼 'datatype mismatch' 가 났고 아래 .catch 가 빈 이력으로 삼켰다.
+  const { limit } = pageArgs(req.query, { def: 500, max: 2_000 });
   let partKey = t(req.query.partKey);
   const agent = t(req.query.agent);
   const isAdmin = isAdminReq(req);
@@ -236,9 +238,13 @@ api.get('/tools/part-faults/events', toolsPerm, fullScopeOnly, async (req, res) 
       && maskPartRow(r, match, hosts).partKey === partKey);
     if (hit) partKey = hit.partKey;
   }
-  const events0 = await recentEvents({ sinceMs: days * 86_400_000, limit, partKey: partKey ? { agent, partKey } : '' }).catch(() => []);
+  // v2.607 DB2607-04: 조회 실패를 빈 배열로 삼키면 화면이 '전이 이력 없음' 이라 말한다 — 사유를 응답에 싣는다.
+  let eventsError = null;
+  const events0 = await recentEvents({ sinceMs: days * 86_400_000, limit, partKey: partKey ? { agent, partKey } : '' })
+    .catch((e) => { eventsError = String(e?.message || e).slice(0, 200); return []; });
   const events = isAdmin ? events0 : events0.map((e) => maskPartRow(e, match, hosts));
   res.json({ ok: true, events, days, limit, labels: LABELS, truncated: events.length >= limit,
+    ...(eventsError ? { eventsError } : {}),
     ...(isAdmin ? {} : { addressHidden: true }),
     db: dbView(await partFaultDbStatus().catch(() => null), req.user?.role === 'admin') });
 });
