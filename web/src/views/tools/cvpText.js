@@ -372,3 +372,22 @@ export function isTruncated(t) {
   if (!t || typeof t !== 'object') return false;
   return Object.values(t).some((v) => typeof v === 'number' && v > 0);
 }
+
+/**
+ * 등록 폼 드롭다운 항목(v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를 콤보박스로 … 오타/대소문자 방지").
+ * 목록에 없는 현재 값(엣지가 아직 통신한 적이 없거나 DataCenter 가 삭제된 경우)은 **지우지 않고** 따로 표시한다 —
+ * 지우면 다른 칸만 고쳐 저장해도 그 값이 조용히 바뀐다.
+ * @param {Array<string|{id:string,name?:string}>} list
+ * @param {string} current
+ * @returns {{value:string,label:string,missing?:boolean}[]}
+ */
+export function choiceOptions(list, current) {
+  const items = (Array.isArray(list) ? list : []).map((x) => (typeof x === 'string'
+    ? { value: x, label: x }
+    : { value: String(x && x.id != null ? x.id : ''), label: String((x && (x.name || x.id)) ?? '') })).filter((o) => o.value);
+  const cur = String(current ?? '').trim();
+  if (cur && !items.some((o) => o.value.trim().toLowerCase() === cur.toLowerCase())) {
+    items.unshift({ value: cur, label: `${cur} (목록에 없음)`, missing: true });
+  }
+  return items;
+}

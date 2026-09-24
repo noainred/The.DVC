@@ -9,7 +9,7 @@ import {
   agoText, spanText, countText, bpsText, pctText, kpiItems, serverState, authStopText, isAuthStopped,
   missingFootnotes, itemLabel, CANDIDATE_NOTE, partsCell, bgpCell, portsCell, streamingText, filterDevices,
   partState, partCounts, seriesGeometry, seriesSourceNote, collectSummary,
-  EMPTY_SERVER, serverToForm, serverPayload, settingsPayload, settingsToForm, SECRET_MASK,
+  EMPTY_SERVER, serverToForm, serverPayload, choiceOptions, settingsPayload, settingsToForm, SECRET_MASK,
   isTruncated,
 } from './cvpText.js';
 
@@ -452,6 +452,7 @@ function PortChart({ target, port, onClose }) {
 
 function AdminPanel({ onChanged }) {
   const [list, setList] = useState(null);
+  const [choices, setChoices] = useState({ agents: [], datacenters: [] });
   const [err, setErr] = useState(null);
   const [form, setForm] = useState(null);
   const [formNote, setFormNote] = useState(null);
@@ -464,6 +465,7 @@ function AdminPanel({ onChanged }) {
     try {
       const [sv, st] = await Promise.all([fetchJson('/tools/cvp/servers'), fetchJson('/tools/cvp/settings')]);
       setList(Array.isArray(sv) ? sv : Array.isArray(sv && sv.servers) ? sv.servers : []);
+      setChoices({ agents: Array.isArray(sv && sv.agents) ? sv.agents : [], datacenters: Array.isArray(sv && sv.datacenters) ? sv.datacenters : [] });
       setSform(settingsToForm(st && st.settings ? st.settings : st));
       setErr(null);
     } catch (e) { setErr(e); }
@@ -574,7 +576,13 @@ function AdminPanel({ onChanged }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(220px,100%),1fr))', gap: 8 }}>
               <label style={LBL}>표시명<input className="input" value={form.name} onChange={set('name')} placeholder="예: CVP-HQ" /></label>
               <label style={LBL}>주소<input className="input" value={form.host} onChange={set('host')} placeholder="https://cvp.example.local 또는 10.0.0.10" /></label>
-              <label style={LBL}>수집 엣지(빈 칸 = 중앙 직접)<input className="input" value={form.agent} onChange={set('agent')} placeholder="엣지 이름" /></label>
+              <label style={LBL}>수집 주체
+                <select className="input" value={form.agent} onChange={set('agent')}
+                  title="CVP 가 중앙에서 닿지 않으면 그 사이트의 엣지를 고르세요. 목록은 중앙과 통신한 적이 있는 엣지입니다.">
+                  <option value="">중앙이 직접 수집</option>
+                  {choiceOptions(choices.agents, form.agent).map((o) => <option key={o.value} value={o.value}>{o.missing ? o.label : `엣지 ${o.label}`}</option>)}
+                </select>
+              </label>
               <label style={LBL}>인증 방식
                 <select className="input" value={form.authMode} onChange={set('authMode')}>
                   <option value="token">서비스 계정 토큰</option>
@@ -589,7 +597,13 @@ function AdminPanel({ onChanged }) {
                   <label style={LBL}>비밀번호<input className="input" type="password" autoComplete="new-password" value={form.password} onChange={set('password')} /></label>
                 </>
               )}
-              <label style={LBL}>DataCenter(선택)<input className="input" value={form.datacenterId} onChange={set('datacenterId')} /></label>
+              <label style={LBL}>DataCenter(선택)
+                <select className="input" value={form.datacenterId} onChange={set('datacenterId')}
+                  title="설정 › DataCenter(법인) 에 등록된 목록입니다.">
+                  <option value="">(미지정)</option>
+                  {choiceOptions(choices.datacenters, form.datacenterId).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </label>
               <label style={LBL}>메모<input className="input" value={form.note} onChange={set('note')} /></label>
             </div>
             <div style={ROW}>
