@@ -75,3 +75,30 @@ export async function chunkedDelete(stmt, args = [], opt = {}) {
   }
   return { deleted, done: false, chunks };
 }
+
+/**
+ * 보존 정리의 '진행 공유' — v2.603(감사 DB2603-02·RECENT2603-06). 정리끼리는 겹치지 않게 한다(청크 사이에 적재·다른 정리가
+ * 끼어들 수 있다). 규칙은 둘이다:
+ *   · 진행 중인 정리가 **이번 요청을 덮으면**(같은 보존일, 또는 더 늦은 경계) 그 약속을 공유한다.
+ *   · 덮지 못하면(보존일을 줄였다 — 경계가 더 늦다) **그것이 끝난 뒤 새 경계로 한 번 더** 돈다. 공유만 하면 새 보존일이
+ *     그 호출에 적용되지 않고 옛 경계의 결과(deleted:0)를 돌려받는다 — RECENT2603-06 재현.
+ * 모듈마다 복제하지 말 것(v2.603 초판이 6벌이었다). 파일별 DB 는 파일마다 하나씩 만든다.
+ *
+ * @param {{covers?:(runningKey:any, newKey:any)=>boolean}} [opt]  기본은 키가 같을 때만 공유
+ * @returns {{run:(key:any, fn:()=>Promise<any>)=>Promise<any>, readonly active:boolean, reset:()=>void}}
+ */
+export function createPruneFlight({ covers = (a, b) => a === b } = {}) {
+  let cur = null;   // { key, p }
+  return {
+    run(key, fn) {
+      if (cur && covers(cur.key, key)) return cur.p;
+      const prev = cur ? cur.p.catch(() => {}) : Promise.resolve();
+      const flight = { key, p: null };
+      flight.p = prev.then(() => fn()).finally(() => { if (cur === flight) cur = null; });
+      cur = flight;
+      return flight.p;
+    },
+    get active() { return cur != null; },
+    reset() { cur = null; },
+  };
+}

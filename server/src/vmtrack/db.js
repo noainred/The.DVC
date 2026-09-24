@@ -19,8 +19,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+import { numOrNull } from '../util/numOrNull.js';
 // v2.599 DB2599-02: 첫 open 잠금은 래치하지 않고 잠시 뒤 다시 연다.
 const lockRetry = createLockRetry();
+
+/** 없는 열만 추가한다(v2.603). 'duplicate column name'(동시 추가 경합)만 삼키고 잠금·그 밖의 오류는 던진다. @returns {string[]} 추가한 열 */
+export function addMissingColumns(db, table, cols) {
+  const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((r) => r.name));
+  const added = [];
+  for (const [col, decl] of cols) {
+    if (have.has(col)) continue;
+    try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`); added.push(col); }
+    catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; }
+  }
+  return added;
+}
 
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래. env 가 최우선.
 const DB_PATH = process.env.VMTRACK_DB_PATH
@@ -125,18 +138,16 @@ function initSqlite() {
         PRIMARY KEY (vcenter_id, vm_id)
       );
     `);
-    // v2.346 에서 만들어진 기존 DB 에는 전원 전환 열이 없다 — 있으면 무해하게 실패하는 ALTER 로
-    // 1회 마이그레이션(SQLite 는 IF NOT EXISTS 를 컬럼 추가에 지원하지 않아 try/catch 가 정석).
-    for (const col of ['powered_on', 'powered_off', 'ds_count']) {
-      try { db.exec(`ALTER TABLE snaps ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`); } catch { /* 이미 존재 */ }
-    }
-    for (const col of ['ds_cap_gb', 'ds_used_gb']) { // v2.348 — 용량은 REAL
-      try { db.exec(`ALTER TABLE snaps ADD COLUMN ${col} REAL NOT NULL DEFAULT 0`); } catch { /* 이미 존재 */ }
-    }
-    // v2.597(감사 L2597-01 — 재현): 합계 행에서 빠진 vCenter 수(수집 실패·첫 수집 중). 0 이 아니면 그 슬롯 합계는 부분 합이다.
-    try { db.exec('ALTER TABLE snaps ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 존재 */ }
-    // v2.598(감사 RECENT2598-03): 사용량을 못 읽어 ds_cap_gb·ds_used_gb 합계에서 뺀 DS 수. 0 이 아니면 그 슬롯 사용률은 읽은 DS 끼리의 비율이다.
-    try { db.exec('ALTER TABLE snaps ADD COLUMN ds_used_unknown INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 존재 */ }
+    // 구버전 DB 에 뒤늦게 추가된 snaps 열(v2.346 전원 전환 · v2.348 DS 용량(REAL) · v2.597 skipped · v2.598 ds_used_unknown).
+    // v2.603(감사 — ipam DB2603-01 과 같은 패턴): 예전 `try { ALTER } catch { /* 이미 존재 */ }` 는 **모든** 오류를 '이미 있음' 으로
+    //   삼켜, 다른 연결이 잠금을 쥔 순간(SQLITE_BUSY)의 실패도 넘어갔다 — 열이 없는 채로 아래 prepare 가 'no such column' 으로
+    //   던지고 그 실패가 initError('기능 비활성')로 굳었다(잠금 재시도 경로를 타지 못한다). 이제 table_info 로 **없는 열만**
+    //   추가하고 'duplicate column name' 만 삼킨다. 잠금은 그대로 던져 getDb 의 lockRetry 가 잠시 뒤 다시 연다.
+    addMissingColumns(db, 'snaps', [
+      ['powered_on', 'INTEGER NOT NULL DEFAULT 0'], ['powered_off', 'INTEGER NOT NULL DEFAULT 0'], ['ds_count', 'INTEGER NOT NULL DEFAULT 0'],
+      ['ds_cap_gb', 'REAL NOT NULL DEFAULT 0'], ['ds_used_gb', 'REAL NOT NULL DEFAULT 0'],
+      ['skipped', 'INTEGER NOT NULL DEFAULT 0'], ['ds_used_unknown', 'INTEGER NOT NULL DEFAULT 0'],
+    ]);
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
 
     const st = {
@@ -238,8 +249,16 @@ function initSqlite() {
       // v2.602(감사 DB2602-03 — 재현): VM 의 **유일한** 전원 전이 행을 지우면 '꺼진 지 N일' 이 roster.first_seen 폴백으로
       // 떨어져 과대 표시됐다(재현 1,200일 → 1,500일, 출처 first_seen). ds_series(v2.601 DB2601-02)와 같은 규칙 — 전원 전이는
       // (vCenter, VM, 종류)별 **보존 경계 이전의 마지막 행**을 남긴다. VM 당 최대 2행이라 유계다. added/removed 는 그대로 지운다.
+      // v2.603(감사 RECENT2603-03 — 재현): 위 규칙은 **지금 있는 VM** 을 위한 것인데 로스터 조건이 없어 삭제된 VM 의 전이 행도
+      // 영원히 남았다(VM 교체가 잦으면 무한 증가 — 재현: 28 vCenter · VM 11,200대 중 삭제 5,348대 → 남은 행 22,400 → 로스터 기준 11,704).
+      // 이제 남기는 것은 **로스터에 있는 VM** 의 마지막 행뿐이다. 로스터가 비어 있는 vCenter(첫 스냅샷 전·등록 해제)는
+      // '지금 있는가' 를 판정할 수 없으므로 예전처럼 남긴다(지우는 쪽으로 추측하지 않는다). 성능(재현 60만 행): 정상 상태
+      // prune 44ms → 39ms — 서브쿼리는 여전히 idx_changes_vc_kind 커버링 스캔이고 로스터는 PK 탐색이다(DB2603-05 는 개선 불필요).
       pruneChanges: db.prepare(`DELETE FROM changes WHERE ts < ? AND rowid NOT IN (
-        SELECT MAX(rowid) FROM changes WHERE ts < ? AND kind IN ('powered_off','powered_on') GROUP BY vcenter_id, vm_id, kind)`),
+        SELECT MAX(c.rowid) FROM changes c WHERE c.ts < ? AND c.kind IN ('powered_off','powered_on')
+          AND (EXISTS (SELECT 1 FROM roster r WHERE r.vcenter_id = c.vcenter_id AND r.vm_id = c.vm_id)
+               OR NOT EXISTS (SELECT 1 FROM roster r2 WHERE r2.vcenter_id = c.vcenter_id))
+        GROUP BY c.vcenter_id, c.vm_id, c.kind)`),
       meta: db.prepare("SELECT COUNT(*) AS n, MIN(ts) AS mn, MAX(ts) AS mx FROM snaps WHERE vcenter_id=''"),
     };
     return { db, st };
@@ -523,8 +542,19 @@ export async function vmtrackMeta() {
   return x.st.meta.get() || { n: 0, mn: null, mx: null };
 }
 
-/** 보존기간 정리(기본 1,095일 = 3년 — 행이 작아 넉넉히). */
+/**
+ * 보존기간 정리(기본 1,095일 = 3년 — 행이 작아 넉넉히).
+ * v2.603(감사 DB2603-03): 음수 보존일은 경계를 **미래**로 옮겨 이력 전체를 지웠다(`Number(-1) || 1095` 는 -1 이다 —
+ * '경계 이전 마지막 행 보존' 규칙까지 무력화). 양의 유한수가 아니면 **지우지 않고** 사유를 돌려준다(오설정을 파괴로
+ * 해석하지 않는다). 0 은 기존 표현식에서 이미 기본값(1,095일)이다.
+ */
 export async function pruneVmtrack(retentionDays = Number(process.env.VMTRACK_RETENTION_DAYS) || 1095) {
+  const days = numOrNull(retentionDays);
+  if (days == null || !(days > 0)) {
+    console.warn(`[vmtrack] 보존일이 올바르지 않아 정리를 건너뜁니다(${String(retentionDays).slice(0, 40)}) — VMTRACK_RETENTION_DAYS 는 양수여야 합니다`);
+    return { ok: false, skipped: true, reason: 'invalid-retention' };
+  }
+  retentionDays = days;
   const x = await getDb();
   if (!x) return { ok: false };
   const cut = Date.now() - retentionDays * 86_400_000;

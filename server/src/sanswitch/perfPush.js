@@ -32,7 +32,8 @@ const PUSH_GZIP = process.env.SANSW_PUSH_GZIP !== 'false';
 export const perfPushMs = () => Math.max(60_000, Number(process.env.SANSW_PERF_PUSH_MS) || loadPerfSettings().intervalMs);
 
 let _timer = null;
-let _busy = false;
+let _busy = null;   // 진행 중인 push(프라미스) — v2.603 EDGE2603-03
+let _again = false; // 진행 중에 들어온 요청 — 끝난 뒤 한 번 더 보낸다
 const _hbLog = createChangeLogger({ windowMs: 10 * 60_000 });
 let _last = null;
 
@@ -111,10 +112,29 @@ async function sendStatusOnly(status) {
   } catch (e) { return { ok: false, reason: e.message }; }
 }
 
+/**
+ * v2.603(감사 EDGE2603-03): 재진입 가드는 유지하되 진행 중에 들어온 요청을 **거절하지 않고 끝난 뒤 한 번 더** 보낸다
+ *   (storage/push.js·pdu/push.js 와 같은 규약). 예전에는 '지금 수집' 대행(`agent/sanSwitchConfigPull.js`) 직후의 push 가
+ *   주기 push 와 겹치면 `{ok:false,'이전 push 진행 중'}` 을 받고 그 반환값을 아무도 보지 않아 **무음**이었다 — 진행 중이던
+ *   push 는 캡처 **전** 커서까지만 읽었으므로 새 표본은 다음 주기까지 중앙에 없었다(커서라 유실은 아니고 지연이다).
+ *   상한(MAX_ROWS)만큼 읽어 밀린 표본이 더 있을 때도 같은 반복으로 이어서 보낸다(예전 setImmediate 재호출 대신 — 그 호출은
+ *   finally 와 경쟁했다). 한 호출의 반복은 상한을 둔다(남은 것은 다음 주기).
+ */
+const MAX_ROUNDS = 20;
 export async function pushPerfNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'push 비활성화(CENTRAL_URL/TOKEN 미설정)' };
-  if (_busy) return { ok: false, reason: '이전 push 진행 중' };
-  _busy = true;
+  if (_busy) { _again = true; return _busy; }
+  _busy = (async () => {
+    let r; let rounds = 0;
+    do { _again = false; r = await pushPerfOnce(); rounds++; } while ((_again || r?.more) && rounds < MAX_ROUNDS);
+    if (_again || r?.more) console.warn(`[sanswitch-perf-push] 한 번에 ${MAX_ROUNDS}회를 보냈습니다 — 남은 표본·요청은 다음 주기 push 에 실립니다`);
+    _again = false;
+    return r;
+  })().finally(() => { _busy = null; });
+  return _busy;
+}
+
+async function pushPerfOnce() {
   try {
     let from = loadCursor();
     const max = await maxRowid();
@@ -132,9 +152,12 @@ export async function pushPerfNow() {
     const status = await statusPayload();
     if (unavailable) {
       // DB 를 못 열면 표본은 영원히 0건이다 — 그 사실도 중앙이 알아야 한다(아래 하트비트로 보고).
-      await sendStatusOnly(status).catch(() => {});
-      _last = { at: Date.now(), sent: 0, reason: 'DB 비활성', statusSent: true };
-      return { ok: false, reason: 'DB 비활성' };
+      // v2.603(감사 EDGE2603-02): `sendStatusOnly` 는 던지지 않고 `{ok:false}` 를 돌려준다 — 예전엔 `.catch(() => {})` 뒤에
+      //   `statusSent: true` 를 고정으로 적어 **보고가 실패해도(403 등) '보냈다'** 고 기록했다(무음). 아래 0건 분기와 같은 형태로.
+      const r = await sendStatusOnly(status);
+      _last = { at: Date.now(), sent: 0, reason: 'DB 비활성', statusSent: r.ok, statusError: r.ok ? null : r.reason };
+      if (!r.ok && _hbLog('status', r.reason)) console.warn(`[sanswitch-perf-push] 상태 보고 실패(DB 비활성): ${r.reason}`);
+      return { ok: false, reason: 'DB 비활성', statusSent: r.ok };
     }
     if (!rows.length) {
       /**
@@ -184,9 +207,8 @@ export async function pushPerfNow() {
     const rejected = rej.dropped + rej.metaDropped + rej.metaRejected;
     if (rejected) console.warn(`[sanswitch-perf-push] 중앙이 일부를 받지 않았습니다 — 위임 밖 표본 ${rej.dropped}건 · 위임 밖 메타 ${rej.metaDropped}건 · 적재에서 버린 메타(포트 범위 밖·빈 장비 id) ${rej.metaRejected}건`);
     _last = { at: Date.now(), sent, chunks: chunks.length, bytes, gzBytes, cursor: lastRowid, more: rows.length >= MAX_ROWS, ...(rejected ? { centralRejected: rej } : {}) };
-    // 상한만큼 읽었으면 밀린 표본이 더 있을 수 있다 — 다음 틱을 기다리지 않고 이어서 한 번 더.
-    if (rows.length >= MAX_ROWS) setImmediate(() => pushPerfNow().catch(() => {}));
-    return { ok: true, sent, chunks: chunks.length };
+    // 상한만큼 읽었으면 밀린 표본이 더 있을 수 있다 — 다음 틱을 기다리지 않고 이어서 한 번 더(pushPerfNow 의 반복이 한다).
+    return { ok: true, sent, chunks: chunks.length, more: rows.length >= MAX_ROWS };
   } catch (e) {
     /*
      * ⚠ **여기를 조용히 두지 말 것**(v2.549·v2.561 규약). 호출부는 전부
@@ -197,7 +219,7 @@ export async function pushPerfNow() {
     _last = { at: Date.now(), error: e.message };
     console.warn(`[sanswitch-perf-push] 중계 실패: ${e.message}`);
     return { ok: false, reason: e.message };
-  } finally { _busy = false; }
+  }
 }
 
 /** 중앙 응답의 거절 개수를 누적한다(v2.602 — 숫자만, 없으면 0). */

@@ -28,6 +28,7 @@ import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } f
 import { versionCellInfo } from './storageVersionText.js';
 import { unitText } from '../unitText.js';
 import { hardwareSummaryParts } from './storageHardwareText.js'; // v2.599 C2599-06: 빈 슬롯·미확인을 이상과 나눠 말한다
+import { volumeProvisionText } from './powerstoreVolumeText.js'; // v2.603 COL-2603-07: 볼륨 size 결측 안내
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -1119,7 +1120,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
                 {ex.inventory.volumes && (
                   <span className="muted" title={Object.entries(ex.inventory.volumes.byState || {}).map(([k, v]) => `${k} ${v}`).join(' · ')}>
                     볼륨 <b style={{ color: 'var(--text)' }}>{ex.inventory.volumes.count.toLocaleString()}{ex.inventory.volumes.truncated ? '+' : ''}</b>
-                    {ex.inventory.volumes.provisionedBytes > 0 ? ` · 할당 ${tbFmt(ex.inventory.volumes.provisionedBytes)}` : ''}
+                    {volumeProvisionText(ex.inventory.volumes, tbFmt)}
                   </span>
                 )}
                 {ex.inventory.hosts && <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{ex.inventory.hosts.count}</b></span>}
@@ -1359,7 +1360,12 @@ function TestResult({ r }) {
           {r.version && <span className="muted">버전 <b style={{ color: 'var(--text)' }}>{r.version}</b></span>}
           {r.serial && <span className="muted">시리얼 <b style={{ color: 'var(--text)' }}>{r.serial}</b></span>}
           {cap && <span className="muted">용량 <b style={{ color: 'var(--text)' }}>{cap}</b></span>}
-          {r.counts && <span className="muted">노드 {r.counts.nodes} · 풀 {r.counts.pools} · 계정 {r.counts.accounts} · 경보 {r.counts.alerts}</span>}
+          {/* v2.603 RECENT2603-04: 노드·경보 수를 못 읽었으면 서버가 null 을 준다 — 0 이 아니라 '—'(사유는 아래 섹션 배지) */}
+          {r.counts && (
+            <span className="muted" title={(r.counts.nodes == null || r.counts.alerts == null) ? '— 는 이번 테스트에서 개수를 읽지 못한 항목입니다(0 이 아닙니다) — 아래 섹션 상태를 보세요.' : undefined}>
+              노드 {r.counts.nodes ?? '—'} · 풀 {r.counts.pools} · 계정 {r.counts.accounts} · 경보 {r.counts.alerts ?? '—'}
+            </span>
+          )}
         </div>
       )}
       {sections.length > 0 && (

@@ -6,6 +6,7 @@ import { StateBadge } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { Panel, Kpi, Bar, PollState, Empty } from '../ui.jsx';
 import { nsxManagerRows, networkTypeCounts, portgroupsByVc, ipamTop, ipamStats, fmtInt, fmtPct, textColor, rowMatches, REGION_COLORS } from '../data.js';
+import { nsxManagerBadge } from '../../console/consoleData.js'; // v2.603 RECENT2603-01 — 순수 판정(V4 data.js 는 재수출만 한다)
 import { nsxCount, nsxAdd, nsxFailedShort } from '../../views/nsxLimitText.js'; // v2.600 COL-2600-06: 조회 실패 합계(null)를 0·'null' 로 그리지 않는다
 
 export default function Network({ global: g, sitesAll, scope, polls, phase, phaseText, health }) {
@@ -60,7 +61,7 @@ export default function Network({ global: g, sitesAll, scope, polls, phase, phas
                           <td className="num">{fmtInt(m.segments)}</td>
                           <td className="num" data-sort={m.nodes.down}><span style={{ color: '#15803d' }}>{m.nodes.up}</span> / <span style={{ color: m.nodes.down ? '#dc2626' : '#68738a' }}>{m.nodes.down}</span></td>
                           <td className="num">{fmtInt(m.firewall?.rules)}</td>
-                          <td><StateBadge state={m.status} />{m.collectError && <span className="v3-badge lv1" style={{ marginLeft: 6 }}>수집 오류</span>}</td>
+                          <td>{/* v2.603 RECENT2603-01: 'unknown'·'degraded' 는 공용 StateBadge 표에 없어 원문이 샜다 */}{(() => { const b = nsxManagerBadge(m); return b ? <span className={`badge ${b.cls}`} title={b.title}>{b.label}</span> : <StateBadge state={m.status} />; })()}{m.collectError && <span className="v3-badge lv1" style={{ marginLeft: 6 }}>수집 오류</span>}</td>
                         </tr>
                       ))}
                     </tbody>

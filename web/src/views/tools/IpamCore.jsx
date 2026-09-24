@@ -22,6 +22,17 @@ const IPAM_ROW_LIMIT = 1000;
  * (Ipam 본체·하위 컴포넌트가 이 파일의 헬퍼들에 얽혀 있어 코드 이동 대신 래퍼 export).
  */
 
+/**
+ * v2.603(감사 WEB2603-01): 서브넷 대장 범위 인자 판정. 문자열(vCenter id)·null('전체 — 스캔 칩')은 그대로,
+ * 없거나(undefined) 객체(React 클릭 이벤트가 onClick 에서 직접 넘어온 경우)면 현재 범위 scope 를 쓴다.
+ * 예전에는 이벤트가 그대로 vc 가 되어 `?vcenterId=[object Object]` 로 대장이 통째로 비었다.
+ */
+export function sheetScopeArg(vc, scope) {
+  if (vc === null) return null;
+  if (typeof vc === 'string') return vc;
+  return scope;
+}
+
 export function IpamStandalone() {
   const [scope, setScope] = useState('');
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
@@ -73,11 +84,18 @@ function Ipam({ scope, onScope }) {
     const r = await fetchJson(`/tools/ipam/sheet?base=${b}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).catch(() => null);
     if (gen === sheetGen.current) setSheet(r);
   };
-  const openSheets = async (vc = scope) => {
+  // v2.603(감사 WEB2603-01): '서브넷 대장' 버튼이 `onClick={openSheets}` 로 React 클릭 이벤트를 vc 로 넘겨
+  //   `?vcenterId=[object Object]` → 대장이 통째로 비었다. 호출부를 고치고, 객체(이벤트)가 와도 현재 범위로 좁힌다
+  //   (null 은 '전체' 라는 뜻이므로 그대로 둔다 — 스캔 칩이 그렇게 부른다).
+  const subnetGen = useRef(0); // 늦게 온 이전 범위의 서브넷 목록이 새 목록을 덮지 않게(고RTT)
+  const openSheets = async (vcArg) => {
+    const vc = sheetScopeArg(vcArg, scope);
+    const gen = ++subnetGen.current;
     setView('sheet');
     const q = vc ? `?vcenterId=${encodeURIComponent(vc)}` : '';
     const r = await fetchJson(`/tools/ipam/subnets${q}`).catch(() => ({ subnets: [] }));
-    setSubnets(r.subnets); if (r.subnets[0]) pickBase(r.subnets[0].base, vc);
+    if (gen !== subnetGen.current) return;
+    setSubnets(r.subnets || []); if (r.subnets?.[0]) pickBase(r.subnets[0].base, vc);
   };
   // v2.602(감사 WEB2602-01): api.js downloadFile 이 res.ok 를 본다 — 예전에는 409(다른 내보내기 진행 중)·403 의
   //   오류 JSON 이 .xlsx/.csv 로 저장되고 화면은 아무 말도 하지 않았다.
@@ -95,8 +113,9 @@ function Ipam({ scope, onScope }) {
   // Always keep the subnet list in sync with the vCenter scope (for counts/chips).
   useEffect(() => {
     let active = true;   // v2.596(감사 WS-3): 늦게 온 이전 범위 응답이 pickBase 로 새 시트를 덮지 않게
+    const gen = ++subnetGen.current; // v2.603: openSheets 와 같은 세대 — 둘 중 나중 요청만 목록을 쓴다
     const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
-    fetchJson(`/tools/ipam/subnets${q}`).then((r) => { if (!active) return; setSubnets(r.subnets); if (view === 'sheet' && r.subnets[0]) pickBase(r.subnets[0].base, scope); }).catch(() => { if (active) setSubnets([]); });
+    fetchJson(`/tools/ipam/subnets${q}`).then((r) => { if (!active || gen !== subnetGen.current) return; setSubnets(r.subnets); if (view === 'sheet' && r.subnets[0]) pickBase(r.subnets[0].base, scope); }).catch(() => { if (active) setSubnets([]); });
     return () => { active = false; };
     // eslint-disable-next-line
   }, [scope]);
@@ -219,7 +238,7 @@ function Ipam({ scope, onScope }) {
       <div className="flex between wrap gap" style={{ marginBottom: 8, alignItems: 'center' }}>
         <div className="flex gap wrap" style={{ alignItems: 'center', minWidth: 0 }}>
           <button className={view === 'list' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('list')}>목록</button>
-          <button className={view === 'sheet' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={openSheets}>서브넷 대장(엑셀형)</button>
+          <button className={view === 'sheet' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => openSheets()}>서브넷 대장(엑셀형)</button>
           <button className={view === 'insights' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('insights')} title="유명 IPAM 솔루션 대표 기능 30선을 수집 데이터로 계산">🧠 추천 기능 30선</button>
           <button className={view === 'ranges' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('ranges')} title="vCenter별 IP 대역을 저장하고 주기적으로 스캔 + 결과 다운로드">🗂️ 대역·스캔</button>
           <button className={view === 'netmap' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('netmap')} title="대역 선택 → OS별·시간대별 사용/미사용 네트워크 맵">🗺️ 네트워크 맵</button>

@@ -58,13 +58,14 @@ test('RECENT2602-01: scrubHosts 결과는 수정 전 구현과 같다(긴 것 �
   assert.equal(scrubHosts(42, hosts), 42);
 });
 
-test('RECENT2602-01: 파트 장애 2,000행 × 주소 1,200개 가림이 200ms 안에 끝나고 결과는 예전과 같다', () => {
+test('RECENT2602-01: 파트 장애 2,000행 × 주소 1,200개 가림이 1초 안에 끝나고 결과는 예전과 같다', () => {
   const rows = partRows(2000);
   const match = addressMatcher(HOSTS);
   const t0 = performance.now();
   const out = rows.map((r) => maskPartRow(r, match, HOSTS));
   const ms = performance.now() - t0;
-  assert.ok(ms < 200, `가림 ${ms.toFixed(0)}ms — 200ms 이내여야 한다(수정 전 약 5.6초)`);
+  // v2.603: 전량 병렬 실행(CI·npm test)에서 260ms 가 관측됐다 — 단독 55~80ms. 상한은 회귀(5.6초)를 확실히 가르는 1초로 둔다.
+  assert.ok(ms < 1000, `가림 ${ms.toFixed(0)}ms — 1초 이내여야 한다(수정 전 약 5.6초)`);
   // 결과 동일성 — 앞 50행을 예전 식(행마다 [...raws, ...hosts])으로 다시 계산해 대조한다.
   for (let i = 0; i < 50; i++) {
     const r = rows[i]; const raws = [r.deviceId, r.deviceKey, r.deviceName];
@@ -73,7 +74,7 @@ test('RECENT2602-01: 파트 장애 2,000행 × 주소 1,200개 가림이 200ms �
   }
 });
 
-test('RECENT2602-01: 작업 로그·폴러 상태·베어메탈 대상 가림도 목록당 한 번 — 2,000건 200ms 이내 · 결과 동일', () => {
+test('RECENT2602-01: 작업 로그·폴러 상태·베어메탈 대상 가림도 목록당 한 번 — 2,000건 1초 이내 · 결과 동일', () => {
   const events = [];
   for (let i = 0; i < 2000; i++) {
     const h = HOSTS[i % HOSTS.length];
@@ -82,7 +83,7 @@ test('RECENT2602-01: 작업 로그·폴러 상태·베어메탈 대상 가림도
   let t0 = performance.now();
   const ev = maskActivityEvents(events, HOSTS);
   let ms = performance.now() - t0;
-  assert.ok(ms < 200, `작업 로그 가림 ${ms.toFixed(0)}ms`);
+  assert.ok(ms < 1000, `작업 로그 가림 ${ms.toFixed(0)}ms`);
   for (let i = 0; i < 30; i++) {
     const e = events[i];
     assert.equal(ev[i].error, oldScrubHosts(e.error, [e.host, ...HOSTS]));
@@ -92,7 +93,7 @@ test('RECENT2602-01: 작업 로그·폴러 상태·베어메탈 대상 가림도
   t0 = performance.now();
   const p = maskPollerStatus(poller, HOSTS);
   ms = performance.now() - t0;
-  assert.ok(ms < 200, `폴러 가림 ${ms.toFixed(0)}ms`);
+  assert.ok(ms < 1000, `폴러 가림 ${ms.toFixed(0)}ms`);
   assert.equal(p.errors[5], oldScrubHosts(poller.errors[5], HOSTS));
   assert.notEqual(p.inFlight[0].name, HOSTS[1], '등록 주소와 같은 이름은 라벨로 바뀐다');
 
@@ -101,7 +102,7 @@ test('RECENT2602-01: 작업 로그·폴러 상태·베어메탈 대상 가림도
   t0 = performance.now();
   const masked = targets.map((x) => maskTargetAddress(x, HOSTS, match));
   ms = performance.now() - t0;
-  assert.ok(ms < 200, `베어메탈 대상 가림 ${ms.toFixed(0)}ms`);
+  assert.ok(ms < 1000, `베어메탈 대상 가림 ${ms.toFixed(0)}ms`);
   // 판정기를 넘기지 않은 예전 호출 형태와 같은 결과
   for (let i = 0; i < 20; i++) assert.deepEqual(masked[i], maskTargetAddress(targets[i], HOSTS));
   assert.equal(masked[3].idracHost, '');

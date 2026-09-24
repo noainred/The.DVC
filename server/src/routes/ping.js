@@ -115,8 +115,19 @@ pingRouter.post('/targets', adminOnly, (req, res) => { const r = addTarget(req.b
 pingRouter.put('/targets/:id', adminOnly, (req, res) => { const r = updateTarget(req.params.id, req.body || {}); res.status(r.ok ? 200 : 400).json(r); });
 pingRouter.delete('/targets/:id', adminOnly, async (req, res) => {
   const r = removeTarget(req.params.id);
-  if (r.ok) { try { (await getPingDb()).dropTarget(r.id); } catch { /* 이력 삭제 실패는 무시 */ } }
-  res.status(r.ok ? 200 : 400).json(r);
+  // v2.603(감사 DB2603-02 후속): 이력 삭제는 청크로 나눠 **백그라운드**에서 끝까지 돈다(대상 1년치 ≈ 52만 행을 응답 경로에서
+  // 기다리지 않는다). 대상은 이미 목록에서 빠졌으므로 화면에 영향이 없고, 실패는 조용히 버리지 않고 콘솔에 남긴다.
+  let historyPurge;
+  if (r.ok) {
+    try {
+      const db = await getPingDb();
+      historyPurge = 'background';
+      db.dropTarget(r.id)
+        .then((x) => { if (x?.deleted) console.log(`[ping] 대상 ${r.id} 이력 ${x.deleted}행 삭제(${x.chunks}청크)`); })
+        .catch((e) => console.warn(`[ping] 대상 ${r.id} 이력 삭제 실패: ${e?.message || e}`));
+    } catch (e) { historyPurge = 'failed'; console.warn(`[ping] 대상 ${r.id} 이력 삭제 실패: ${e?.message || e}`); }
+  }
+  res.status(r.ok ? 200 : 400).json(historyPurge ? { ...r, historyPurge } : r);
 });
 
 pingRouter.post('/poll-now', adminOnly, async (_req, res) => {

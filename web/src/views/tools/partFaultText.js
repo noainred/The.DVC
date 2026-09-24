@@ -156,6 +156,15 @@ export function emptyDiag({ open = [], poller = null, db = null, edges = null, r
       tone: 'warn', waiting: false,
     };
   }
+  // v2.603 EDGE2603-05: 중앙 설정으로 끈 엣지('off')는 원인을 안다 — '보고가 없다' 로 추측하지 않는다.
+  const offEdges = num(c.off);
+  if (sn && sn.devices === 0 && edgeRows && !freshEdges && offEdges >= edgeRows) {
+    return {
+      kind: 'edges-off',
+      text: `중앙이 직접 수집하는 장비는 없고, 엣지 ${edgeRows}곳 **모두 중앙 설정에서 파트 장애 기능을 꺼 두었습니다**. 판정한 부품이 없으므로 **'장애 없음' 이 아니라 '점검 안 함'** 입니다. 켜려면 파트 장애 스위치를 확인하세요.`,
+      tone: 'muted', waiting: false,
+    };
+  }
   if (sn && sn.devices === 0 && edgeRows && !freshEdges) {
     return {
       kind: 'edges-not-fresh',
@@ -180,6 +189,7 @@ export function emptyDiag({ open = [], poller = null, db = null, edges = null, r
   if (num(c['old-version'])) extra.push(`구버전 엣지 ${num(c['old-version'])}곳`);
   if (num(c.legacy)) extra.push(`구 프로토콜 엣지 ${num(c.legacy)}곳`);
   if (num(c.silent)) extra.push(`보고가 없는 엣지 ${num(c.silent)}곳`);
+  if (num(c.off)) extra.push(`중앙 설정으로 파트 장애를 끈 엣지 ${num(c.off)}곳`);
   if (num(c.stale)) extra.push(`보고가 오래된 엣지 ${num(c.stale)}곳`);
   if (num(c['unknown-version'])) extra.push(`버전 미상 엣지 ${num(c['unknown-version'])}곳`);
   if (extra.length) {
@@ -196,9 +206,10 @@ export function emptyDiag({ open = [], poller = null, db = null, edges = null, r
 export const EDGE_KIND_LABEL = Object.freeze({
   fresh: '정상 보고', stale: '보고 오래됨', legacy: '구 프로토콜(v2.547)',
   'old-version': '구버전(보고 불가)', silent: '보고 없음', 'unknown-version': '버전 미상',
+  off: '꺼짐(중앙 설정)',   // v2.603 EDGE2603-05 — 중앙이 이 엣지에 꺼짐을 내려보낸다(원인을 안다)
 });
 export const EDGE_KIND_TONE = Object.freeze({
-  fresh: 'ok', stale: 'warn', legacy: 'warn', 'old-version': 'warn', silent: 'warn', 'unknown-version': 'muted',
+  fresh: 'ok', stale: 'warn', legacy: 'warn', 'old-version': 'warn', silent: 'warn', 'unknown-version': 'muted', off: 'muted',
 });
 
 /**
@@ -217,6 +228,7 @@ export function edgeNote(edges) {
   if (num(c['old-version'])) bits.push(`**구버전 ${num(c['old-version'])}곳**(${edges.minVersion || ''} 미만 — 업그레이드 전까지 그 법인 부품은 보이지 않습니다)`);
   if (num(c.legacy)) bits.push(`구 프로토콜 ${num(c.legacy)}곳(장애는 보이지만 **해소를 판정하지 못합니다** — 업그레이드 필요)`);
   if (num(c.silent)) bits.push(`보고 없음 ${num(c.silent)}곳(꺼져 있거나 첫 push 대기 — '장애 없음' 이 아니라 '모름')`);
+  if (num(c.off)) bits.push(`꺼짐 ${num(c.off)}곳(중앙 설정에서 파트 장애를 끔 — 그 법인 부품은 판정하지 않습니다)`);
   if (num(c.stale)) bits.push(`보고 오래됨 ${num(c.stale)}곳(그 장비의 장애를 해소로 처리하지 않습니다)`);
   if (num(c['unknown-version'])) bits.push(`버전 미상 ${num(c['unknown-version'])}곳`);
   const rejected = rows.reduce((a, r) => a + num(r.rejected), 0);
@@ -226,7 +238,8 @@ export function edgeNote(edges) {
   if (partsOmitted) bits.push(`**수신 상한으로 잘린 파트 ${partsOmitted}개**(그 장비의 장애는 해소로 처리하지 않습니다 — 엣지 보고가 비정상적으로 큽니다)`);
   const scannedDropped = rows.filter((r) => r.scannedDropped).length;
   if (scannedDropped) bits.push(`요약(scanned)이 너무 커서 버린 엣지 ${scannedDropped}곳`);
-  const notFresh = total - num(c.fresh);
+  // v2.603: 중앙이 일부러 끈 엣지는 '주의' 대상이 아니다(조치할 것이 없다) — 개수는 위 문구가 밝힌다.
+  const notFresh = total - num(c.fresh) - num(c.off);
   return { text: bits.join(' · '), tone: notFresh ? 'warn' : 'ok', total, notFresh, counts: c };
 }
 

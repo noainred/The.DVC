@@ -434,3 +434,35 @@ describe('v2.598 WEBUI-2598-06 — KPI 0·결측', () => {
     expect(kpiAccent(2, 'var(--red)')).toBe('var(--red)');
   });
 });
+
+describe("v2.603 EDGE2603-05 — 중앙 설정으로 끈 엣지('off')", () => {
+  const NOW = 1_800_000_000_000;
+  const p = (local) => poller({ last: { at: NOW - 60_000, ms: 1, stats: {}, local } });
+  const none = scanned({ idrac: { devices: 0, ok: 0, failed: 0, parts: 0, capped: 0 }, storage: { devices: 0, ok: 0, failed: 0, parts: 0, notCollected: {} }, summary: { total: 0 } });
+  it('라벨·톤이 있다(원문 off 를 그대로 보이지 않는다)', () => {
+    expect(EDGE_KIND_LABEL.off).toBe('꺼짐(중앙 설정)');
+    expect(EDGE_KIND_TONE.off).toBe('muted');
+  });
+  it('edgeNote 는 개수를 밝히고 notFresh(주의)에서 뺀다', () => {
+    const n = edgeNote({ rows: [{ agent: 'A', kind: 'fresh' }, { agent: 'B', kind: 'off' }], counts: { fresh: 1, off: 1 }, minVersion: '2.548.0' });
+    expect(n.text).toContain('꺼짐 1곳');
+    expect(n.notFresh).toBe(0);
+    expect(n.tone).toBe('ok');
+    const m = edgeNote({ rows: [{ kind: 'off' }, { kind: 'silent' }], counts: { off: 1, silent: 1 }, minVersion: '2.548.0' });
+    expect(m.notFresh).toBe(1);
+    expect(m.tone).toBe('warn');
+  });
+  it('빈 상태 — 일부 off 면 전부 정상이라 말하지 않고 개수를 적는다', () => {
+    const d = emptyDiag({ now: NOW, open: [], db: { available: true }, poller: p(scanned()), edges: { rows: [{ agent: 'A', kind: 'fresh' }, { agent: 'B', kind: 'off' }], counts: { fresh: 1, off: 1 } } });
+    expect(d.kind).toBe('partial');
+    expect(d.text).toContain('중앙 설정으로 파트 장애를 끈 엣지 1곳');
+  });
+  it('빈 상태 — 직접 장비가 없고 엣지가 전부 off 면 "모두 보고 없음(bad)" 이 아니라 "점검 안 함"', () => {
+    const d = emptyDiag({ now: NOW, open: [], db: { available: true }, poller: p(none), edges: { rows: [{ agent: 'A', kind: 'off' }, { agent: 'B', kind: 'off' }], counts: { off: 2 } } });
+    expect(d.kind).toBe('edges-off');
+    expect(d.tone).toBe('muted');
+    expect(d.text).toContain('점검 안 함');
+    const e = emptyDiag({ now: NOW, open: [], db: { available: true }, poller: p(none), edges: { rows: [{ kind: 'off' }, { kind: 'silent' }], counts: { off: 1, silent: 1 } } });
+    expect(e.kind).toBe('edges-not-fresh');
+  });
+});

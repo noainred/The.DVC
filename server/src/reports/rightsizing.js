@@ -5,16 +5,22 @@
  * 순수 함수 — statsFor(vmId)를 주입받아 테스트 가능.
  */
 
-const r1 = (n) => Math.round((n || 0) * 10) / 10;
+// v2.603(감사 LEFT2603-03 후속): 못 읽은 값은 null 로 남긴다 — 예전 `(n || 0)` 은 결측을 '0%' 로 표시했다(화면은 null 을 '—' 로 그린다).
+const r1 = (n) => (n == null || n === '' || !Number.isFinite(Number(n)) ? null : Math.round(Number(n) * 10) / 10);
 
 /**
  * 추천 vCPU: 피크 사용률 기준 60% 목표 여유. 추천 RAM: 피크 기준 75% 목표.
  * suggested < current 일 때만 축소 후보.
  */
 export function suggestSize(vcpu, ramGB, cpuMaxPct, memMaxPct) {
-  const sVcpu = Math.max(1, Math.ceil((vcpu * (cpuMaxPct / 100)) / 0.6));
-  const sRam = Math.max(1, Math.ceil((ramGB * (memMaxPct / 100)) / 0.75));
-  return { suggestedVcpu: Math.min(sVcpu, vcpu), suggestedRamGB: Math.min(sRam, ramGB) };
+  // v2.603(감사 LEFT2603-03 후속): 피크를 **읽지 못한** 차원은 권고를 보류한다(현재 사양 유지 + `held` 로 밝힘).
+  //   예전에는 null 이 `null/100 = 0` 으로 계산돼 1 vCPU·1 GB 로 줄이라는 권고가 나갔다 — 모르는 것을 '안 쓴다' 로 읽은 것이다.
+  const known = (v) => v != null && v !== '' && Number.isFinite(Number(v));
+  const held = [];
+  let sVcpu = vcpu; let sRam = ramGB;
+  if (known(cpuMaxPct)) sVcpu = Math.max(1, Math.ceil((vcpu * (Number(cpuMaxPct) / 100)) / 0.6)); else held.push('cpu');
+  if (known(memMaxPct)) sRam = Math.max(1, Math.ceil((ramGB * (Number(memMaxPct) / 100)) / 0.75)); else held.push('mem');
+  return { suggestedVcpu: Math.min(sVcpu, vcpu), suggestedRamGB: Math.min(sRam, ramGB), ...(held.length ? { held } : {}) };
 }
 
 /**
@@ -37,8 +43,8 @@ export function computeRightsizing(vms, statsFor, opts = {}) {
     if (hasStats) observed++; else instantOnly++;
     const cpuAvg = hasStats ? st.cpuAvg : (v.cpuUsagePct ?? null);
     const memAvg = hasStats ? st.memAvg : (v.memUsagePct ?? null);
-    const cpuMax = hasStats ? st.cpuMax : (v.cpuUsagePct ?? 0);
-    const memMax = hasStats ? st.memMax : (v.memUsagePct ?? 0);
+    const cpuMax = hasStats ? st.cpuMax : (v.cpuUsagePct ?? null);   // v2.603: 결측은 0 이 아니라 null(권고 보류)
+    const memMax = hasStats ? st.memMax : (v.memUsagePct ?? null);
     if (cpuAvg == null && memAvg == null) continue;
     const ramGB = Math.round((v.memMB || 0) / 1024);
     const base = {

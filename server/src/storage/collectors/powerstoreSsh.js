@@ -36,6 +36,21 @@ export function records(text) {
   return parseCsv(text);
 }
 
+/**
+ * 알람 출력이 '읽지 못한 것' 인가(v2.603 COL-2603-01) — 레코드 0건일 때만 부른다.
+ * 빈 출력·JSON 빈 배열/객체·'No alerts' 류 문구·머리글만 있는 표는 정상 0건이다. 그 밖에 글자가 있는데 0건이면 형식 미인식이다.
+ */
+export function alertOutputUnread(text) {
+  const t = String(text ?? '').trim();
+  if (!t) return false;
+  const j = parseJsonLoose(t);
+  if (Array.isArray(j) || (j && typeof j === 'object')) return false;
+  if (/^(no\s+(alerts?|records?|items?|results?)\b|0\s+(alerts?|records?)\b)/im.test(t)) return false;
+  // 머리글 한 줄뿐(구분선 제외)이면 행이 없는 표다 — 0건으로 본다. 두 줄 이상인데 0건이면 형식을 못 읽은 것이다.
+  const lines = t.split('\n').map((l) => l.trim()).filter((l) => l && !/^[-+=|\s]+$/.test(l));
+  return lines.length > 1;
+}
+
 function pick(rec, ...keys) {
   for (const k of keys) {
     for (const actual of Object.keys(rec || {})) {
@@ -123,19 +138,26 @@ export function normalizePowerstoreSsh(device, out, meta = {}) {
     // v2.599(감사 C2599-03): 폴백 명령(상태 필터 없음)은 CLEARED 까지 준다 — 예전에는 그것을 전부 미해결로 셌다.
     //   REST 폴백과 같은 isActiveAlert 로 거른다(state 가 없으면 '확인(acknowledged)된 것만' 뺀다 — 조용한 축소 금지).
     const all = records(out.alert || '');
-    const alerts = all.filter((a) => isActiveAlert({
-      state: pick(a, 'state'),
-      is_acknowledged: String(pick(a, 'is_acknowledged', 'acknowledged')).trim().toLowerCase() === 'true',
-    }));
-    snap.alerts.unresolved = alerts.length;
-    const fallback = meta.alertCmd === ALERT_FALLBACK_CMD;
-    if (fallback || alerts.length !== all.length) {
-      snap.extra.alertsNote = `${fallback ? '상태 필터 없는 명령(pstcli alert show)으로 읽어 ' : ''}전체 ${all.length}건 중 미해결 ${alerts.length}건만 집계(해제·확인 ${all.length - alerts.length}건 제외)`;
+    // v2.603(감사 COL-2603-01): 출력이 있는데 레코드가 0건이면 '미해결 0건' 이 아니라 '못 읽음' 이다
+    //   (폴백 명령의 사람용 표 출력은 JSON·CSV 어느 쪽으로도 읽히지 않는다). 빈 JSON 배열·'없음' 문구는 정상 0건이다.
+    if (!all.length && alertOutputUnread(out.alert)) {
+      snap.alerts.unresolved = null;
+      snap.sections.alerts = '미수집: 알람 출력 형식을 읽지 못했습니다(경보 수를 모릅니다 — 연결 테스트의 원문 확인)';
+    } else {
+      const alerts = all.filter((a) => isActiveAlert({
+        state: pick(a, 'state'),
+        is_acknowledged: String(pick(a, 'is_acknowledged', 'acknowledged')).trim().toLowerCase() === 'true',
+      }));
+      snap.alerts.unresolved = alerts.length;
+      const fallback = meta.alertCmd === ALERT_FALLBACK_CMD;
+      if (fallback || alerts.length !== all.length) {
+        snap.extra.alertsNote = `${fallback ? '상태 필터 없는 명령(pstcli alert show)으로 읽어 ' : ''}전체 ${all.length}건 중 미해결 ${alerts.length}건만 집계(해제·확인 ${all.length - alerts.length}건 제외)`;
+      }
+      const bySeverity = {};
+      for (const a of alerts) { const k = String(pick(a, 'severity') || 'Unknown'); bySeverity[k] = (bySeverity[k] || 0) + 1; }
+      snap.extra.alertsBySeverity = bySeverity;
+      snap.sections.alerts = 'ok';
     }
-    const bySeverity = {};
-    for (const a of alerts) { const k = String(pick(a, 'severity') || 'Unknown'); bySeverity[k] = (bySeverity[k] || 0) + 1; }
-    snap.extra.alertsBySeverity = bySeverity;
-    snap.sections.alerts = 'ok';
   }
 
   snap.ok = snap.sections.config === 'ok' || snap.sections.capacity === 'ok';

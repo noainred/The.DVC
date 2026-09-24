@@ -29,7 +29,7 @@ import { PART_STATE_LABEL, PART_STATE_TONE, PART_KIND_LABEL, SCOPE_LABEL, SCOPES
 import { openFaults, recentEvents, partFaultDbStatus, resetInfo } from '../../partfault/db.js';
 import { runPartFaultsNow, partFaultStatus } from '../../partfault/poller.js';
 import { partFaultPushStatus, pushPartFaultsNow } from '../../partfault/push.js';
-import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled } from '../../partfault/settings.js';
+import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled, settingsForAgent } from '../../partfault/settings.js';
 import { hookStatus } from '../../partfault/hooks.js';
 import { mergeEdgeReports } from '../../central/partFaultEdge.js';
 import { listCollectors } from '../../collector/registry.js';
@@ -71,7 +71,7 @@ export { cmpVersion };
  * @param {Object} p.status     `allCollectorStatus()` — `{[collectorId]: {version,...}}`
  * @param {Array} p.reports     `mergeEdgeReports().agents`
  */
-export function classifyEdges({ collectors = [], status = {}, reports = [], minVersion = MIN_EDGE_VERSION } = {}) {
+export function classifyEdges({ collectors = [], status = {}, reports = [], minVersion = MIN_EDGE_VERSION, edgeSwitch = null } = {}) {
   const byAgent = new Map(reports.map((r) => [t(r.agent).toLowerCase(), r]));
   const rows = [];
   const seen = new Set();
@@ -82,12 +82,23 @@ export function classifyEdges({ collectors = [], status = {}, reports = [], minV
     const version = t(st?.version);
     const r = byAgent.get(key) || null;
     let kind;
-    if (r) kind = r.legacy ? 'legacy' : (r.stale ? 'stale' : 'fresh');
+    /*
+     * v2.603(감사 EDGE2603-05): 중앙이 이 엣지에 **꺼짐을 내려보내고 있으면** 보고가 없는(또는 오래된) 것은 원인을 안다 —
+     *   'off'. 예전에는 엣지별 off·전역 off 모두 'silent'(주의색, '꺼져 있거나 첫 push 대기')로 분류해, 중앙이 스스로 정한
+     *   사실을 추측으로 말했다(v2.554 '근거가 있으면 말해야 한다'). 신선한 보고가 있으면 그대로 fresh 다(엣지 env 강제 켜짐 —
+     *   `PARTFAULT_ENABLED=true` 는 중앙 설정을 이긴다). ⚠ 반대 방향(중앙은 켜짐, 엣지 env 가 강제 끔)은 중앙이 알 수 없어 silent 로 남는다.
+     */
+    const sw = typeof edgeSwitch === 'function' ? edgeSwitch(name) : null;
+    const off = sw && sw.enabled === false;
+    if (r && !r.legacy && !r.stale) kind = 'fresh';
+    else if (off) kind = 'off';
+    else if (r) kind = r.legacy ? 'legacy' : 'stale';
     else if (!version) kind = 'unknown-version';
     else if (cmpVersion(version, minVersion) != null && cmpVersion(version, minVersion) < 0) kind = 'old-version';
     else kind = 'silent';
     rows.push({
       agent: name, enabled: c.enabled !== false, version: version || null, kind,
+      ...(kind === 'off' ? { offSource: sw.source || null } : {}),
       at: r?.at || null, ageMs: r?.ageMs ?? null, protocol: r?.protocol || null,
       devices: r?.devices ?? null, devicesFailed: r?.devicesFailed ?? null, open: r?.open ?? null,
       rejected: r?.rejected || 0, omitted: r?.omitted || 0, partsOmitted: r?.partsOmitted || 0, scannedDropped: !!r?.scannedDropped,
@@ -105,11 +116,20 @@ export function classifyEdges({ collectors = [], status = {}, reports = [], minV
   return { rows, counts, minVersion };
 }
 
-function edgesNow() {
+export function edgesNow() {
   const collectors = (() => { try { return listCollectors(); } catch { return []; } })();
   const status = (() => { try { return allCollectorStatus(); } catch { return {}; } })();
   const merged = mergeEdgeReports();
-  return classifyEdges({ collectors, status, reports: merged.agents });
+  // v2.603 EDGE2603-05: 중앙이 각 엣지에 내려보내는 스위치(엣지별 off > 전역) — 'off' 분류의 근거.
+  const edgeSwitch = (name) => {
+    try {
+      const s = loadPartFaultSettings();
+      const k = String(name || '').trim().toLowerCase();
+      const own = Object.hasOwn(s.edges || {}, k) && typeof s.edges[k]?.enabled === 'boolean';
+      return { enabled: settingsForAgent(name).enabled, source: own ? 'edge' : 'global' };
+    } catch { return null; }
+  };
+  return classifyEdges({ collectors, status, reports: merged.agents, edgeSwitch });
 }
 
 /** DB 상태 — **파일 경로는 admin 에게만**(operator 는 tools 기본 보유 — v2.500 D/M1 '거부 기본값'). */

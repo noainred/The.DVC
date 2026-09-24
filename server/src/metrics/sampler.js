@@ -20,6 +20,7 @@ import { roomTempRows } from '../idrac/roomTempSeries.js';
 import { serverTempRows } from '../idrac/serverTempSeries.js';   // v2.504: 서버별 온도 추이(아래 주석)
 
 let timer = null;
+import { pushAll } from '../util/pushAll.js';
 let lastRun = null;
 let _pruneTicks = 0; // retention prune 주기 카운터(매 샘플 DELETE 스캔 방지)
 let _vmperfPruneTicks = 0; // vmperf(vCenter별 DB) prune 카운터 — DB 개수만큼 DELETE 라 더 드물게
@@ -227,7 +228,7 @@ async function sampleOnceInner() {
   // 메트릭: roomtemp_{inlet|exhaust|cpu}_{avg|max} (키 = 법인 id, ''=전체)
   // 이 계열이 있어야 '흡기/배기/CPU 를 눌러 1일~1년 추이' 를 볼 수 있다(그 전에는 데이터 자체가
   // 없어 24시간을 넘는 기간을 그릴 방법이 없었다 — 화면이 수집 시작 시각을 함께 표기한다).
-  try { rows.push(...roomTempRows()); } catch { /* 집계 실패가 샘플링을 막지 않게 */ }
+  try { pushAll(rows, roomTempRows()); } catch { /* 집계 실패가 샘플링을 막지 않게 */ }
 
   // 서버별 iDRAC 온도(v2.504, 사용자 요청 "idrac 에서 조사하는 온도를 차트로 보이게 해줘").
   //
@@ -239,11 +240,11 @@ async function sampleOnceInner() {
   // IDRAC_TEMP_SERIES=false. 이 계열이 있어야 **위임(엣지) 수집 서버**도 추이 차트를 갖는다
   // (엣지는 최신 스냅샷만 export 하므로 중앙에 이력이 0 이었다 — v2.493 이 '중앙 이력 없음' 으로
   // 정직하게 표기한 그 공백을 이 계열이 채운다).
-  try { rows.push(...serverTempRows()); } catch { /* 집계 실패가 샘플링을 막지 않게 */ }
+  try { pushAll(rows, serverTempRows()); } catch { /* 집계 실패가 샘플링을 막지 않게 */ }
 
   // 포탈 자신의 프로세스 메모리(누수 추적) — 인벤토리 유무와 무관하게 항상 샘플하고,
   // 시간당 1줄 상태 로그(링 버퍼·journal)도 여기서 남긴다. 실패가 본 샘플링을 막지 않게 격리.
-  try { rows.push(...memSampleRows()); maybeLogMem(ts); } catch { /* */ }
+  try { pushAll(rows, memSampleRows()); maybeLogMem(ts); } catch { /* */ }
 
   if (rows.length) { try { db.insertMany(rows, ts); } catch (e) { console.warn('[metrics] insert 실패:', e.message); } }
 

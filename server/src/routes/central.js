@@ -26,7 +26,7 @@ import { setInventory, getInventory, listInventory } from '../central/inventory.
 import { noteAgentIdentity, noteVcenterOwner } from '../central/agentIdentity.js';
 import { isMockVcenter } from '../mock/generator.js';
 import { setEdgeFleet } from '../central/fleet.js';
-import { setGuestGpu } from '../gpu/store.js';
+import { setGuestGpu, withGpuTrust } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, agentOfReq } from '../central/idracScanJobs.js';
@@ -74,6 +74,7 @@ import { listRegistry as listVcentersForLinks } from '../vcenter/registry.js';
 import { loadLinkCheckSettings, linkCheckEnabled } from '../linkcheck/settings.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
+import { stripCoercionTraps, strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';   // v2.600 CEN2600-01·RECENT2600-01 — 엣지가 보낸 수치 좁히기
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.583: 반복 수신 로그 조절
 const gpuRecvLog = createChangeLogger();
@@ -102,6 +103,17 @@ export const UNKNOWN_ROUTE_KEY = '(없는 경로)';
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
 // ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
 wrapAsyncRouter(centralRouter);
+
+// v2.603(감사 CEN2603-05): 본문 객체의 자기 속성 toString/valueOf 를 입구에서 지운다 — `{"toString":1}` 한 값이 String()/`${}`/
+//   Number()/배열 join 에서 던져 수신 경로 16곳이 500 이었다(util/coercionTrap.js). 필드마다 고치면 다음 필드에서 또 난다.
+//   모든 라우트보다 앞(인증·집계 미들웨어 포함 — 그쪽도 본문 agent 를 글자로 바꾼다).
+centralRouter.use((req, _res, next) => {
+  if (req.body && typeof req.body === 'object') {
+    const n = stripCoercionTraps(req.body);
+    if (n) req.coercionTrapsRemoved = n;
+  }
+  next();
+});
 
 // 수신 트래픽 진단 — 에이전트→중앙 POST의 와이어 바이트(Content-Length)·페이로드 요약을 에이전트·
 // 엔드포인트별로 집계한다(특정 에이전트가 무엇을 얼마나 보내는지 화면에서 확인). 응답 완료 시 1회 기록.
@@ -680,7 +692,7 @@ centralRouter.post('/inventory', (req, res) => {
   const mockByFlag = b.source === 'mock' || b.mock === true;
   const mockByContent = isMockVcenter(b.vcenter) || isMockVcenter({ id: String(b.vcenterId || ''), name: b.vcenter?.name });
   if (mockByFlag || mockByContent) {
-    noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: true, peer: req.socket?.remoteAddress || '' });
+    noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: true, peer: req.socket?.remoteAddress || '', verified: req.centralAuth.mode === 'agent' || edgeNameKnown(agent) });
     const why = mockByFlag
       ? `엣지가 스스로 mock 임을 알렸습니다(source=${b.source || 'mock'})`
       : `보낸 vCenter '${b.vcenterId}' 가 데모 생성기의 가짜 사이트와 id·이름이 같습니다(DATA_SOURCE=auto 로 접속 실패 시 목 데이터로 폴백했거나, 엣지가 구버전이라 mock 표시를 못 보냅니다)`;
@@ -690,7 +702,7 @@ centralRouter.post('/inventory', (req, res) => {
     return res.status(400).json({ ok: false, reason, mockBlocked: true, by: mockByFlag ? 'flag' : 'content' });
   }
   // v2.428(미스매치 #6/#7): 같은 vcenterId 를 다른 agent 가 번갈아 push 하거나, 같은 agent 이름이 다른 hostname 에서 오면 충돌로 기록.
-  noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: false, peer: req.socket?.remoteAddress || '' });
+  noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: false, peer: req.socket?.remoteAddress || '', verified: req.centralAuth.mode === 'agent' || edgeNameKnown(agent) }); // v2.603 CEN2603-04: 미검증 이름은 작은 링
   noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
   const vcId = String(b.vcenterId);
   const dropped = { notObject: 0, otherVcenter: 0, badId: 0, coerced: 0 };
@@ -1092,12 +1104,31 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
     const dropped = (hBefore - hosts.length) + (vBefore - vms.length);
     if (dropped) console.warn(`[central] gpu-guest-data: ${agent} 가 소유하지 않은 vCenter 항목 ${dropped}개 드롭(위조 방지)`);
   }
-  setGuestGpu({ hosts, vms, agent });
+  // v2.603(감사 CEN2603-01): 식별자의 vCenter 접두는 **등록부에 사이트 위임(site)으로 등록된 id** 여야 한다(토큰 종류 무관 —
+  //   대상의 구조적 성질이다. v2.600 edgeVcWriteDenied requireSite 와 같은 판단). 예전에는 등록되지 않은 접두를 TOFU 로 받아
+  //   접두를 바꿔 가며 항목을 무한히 만들 수 있었다. 등록부를 읽지 못하면 판정하지 않는다(설정 문제가 수신을 끊지 않게).
+  const modes = vcCollectModes();
+  let unregistered = 0;
+  if (modes) {
+    const siteIds = [...modes].filter(([, m]) => m === 'site').map(([id]) => id);
+    const onSite = (id) => { const s = String(id || ''); return siteIds.some((vc) => s === vc || s.startsWith(`${vc}:`)); };
+    const hB = hosts.length; const vB = vms.length;
+    hosts = hosts.filter((h) => onSite(h.hostId));
+    vms = vms.filter((v) => onSite(v.vmId));
+    unregistered = (hB - hosts.length) + (vB - vms.length);
+    if (unregistered) console.warn(`[central] gpu-guest-data: ${agent} 등록되지 않은 vCenter 의 항목 ${unregistered}개 드롭`);
+  }
+  const verifiedGpu = req.centralAuth.mode === 'agent' || edgeNameKnown(agent);
+  const put = withGpuTrust(verifiedGpu, () => setGuestGpu({ hosts, vms, agent })); // 미검증 이름은 작은 상한(gpu/store.js)
+  const omitted = (put.omittedHosts || 0) + (put.omittedVms || 0);
+  if (omitted) console.warn(`[central] gpu-guest-data: ${agent} 상한 초과로 ${omitted}개를 받지 않았습니다(호스트 ${put.omittedHosts} · VM ${put.omittedVms})`);
   if (b.diag) setGpuGuestDiag(agent, b.diag, { hosts: hosts.length, vms: vms.length }); // 수집 진단 보관
   // v2.583: 엣지마다 인벤토리 주기로 찍혀 저널을 덮었다(28곳 × 60초 ≈ 하루 4만 줄) — 값이 바뀔 때와
   //   1시간마다만 찍는다(util/logThrottle.js). 문구 형식은 그대로다(로그 분석 규칙이 이 형식을 읽는다).
   if (gpuRecvLog(agent, `${hosts.length}/${vms.length}`)) console.log(`[central] gpu-guest-data 수신: agent=${agent} hosts=${hosts.length} vms=${vms.length}`);
-  res.json({ ok: true, agent, hosts: hosts.length, vms: vms.length });
+  res.json({ ok: true, agent, hosts: put.hosts, vms: put.vms,
+    ...(omitted ? { omitted: { hosts: put.omittedHosts, vms: put.omittedVms } } : {}),
+    ...(unregistered ? { unregistered } : {}), ...(verifiedGpu ? {} : { unverifiedAgent: true }) });
 });
 
 // 중앙→엣지 GPU 게스트 설정 배포(pull): 엣지가 자기 이름으로 배포 설정을 가져가 로컬 적용.
@@ -1551,15 +1582,18 @@ centralRouter.post('/ping-result', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
-  if (!b.vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
+  const vcId = strOf(b.vcenterId, 256); // v2.603 CEN2603-05: 글자·수만(객체면 String() 이 던졌다)
+  if (!vcId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다(글자).' });
   // 개별 토큰은 자기 소유 vCenter 의 도달성만 보고(남의 사이트 상태 위조 차단).
-  if (req.centralAuth.mode === 'agent' && !agentOwnsVcenter(req.centralAuth.agent, b.vcenterId)) {
-    return res.status(403).json({ ok: false, reason: `vcenterId '${b.vcenterId}'는 '${req.centralAuth.agent}' 소유가 아닙니다.` });
+  if (req.centralAuth.mode === 'agent' && !agentOwnsVcenter(req.centralAuth.agent, b.vcenterId)) { // vcId 검사로 b.vcenterId 는 글자·수다
+    return res.status(403).json({ ok: false, reason: `vcenterId '${vcId.slice(0, 128)}'는 '${req.centralAuth.agent}' 소유가 아닙니다.` });
   }
   // v2.600(CEN2600-02): direct vCenter 의 도달성은 중앙이 직접 잰다(v2.590 P11 — 엣지 큐에 올리지 않는다) — 엣지 보고는 위조다.
-  const pingDeny = edgeVcWriteDenied(b.vcenterId);
+  // v2.603(감사 CEN2603-06): **사이트 위임으로 등록된 vCenter 만** 받는다(requireSite). 예전에는 등록되지 않은 id 도 받아
+  //   새 id 를 연달아 보내면 결과 Map 의 256개 상한에서 실제 vCenter 의 결과가 밀려났다(pingJobs.sweepResults).
+  const pingDeny = edgeVcWriteDenied(vcId, { requireSite: true });
   if (pingDeny) return res.status(403).json({ ok: false, reason: pingDeny });
-  setPingResults(String(b.vcenterId), Array.isArray(b.results) ? b.results.slice(0, 200) : []);
+  setPingResults(vcId, Array.isArray(b.results) ? b.results.slice(0, 200) : []);
   res.json({ ok: true, count: Array.isArray(b.results) ? b.results.length : 0 });
 });
 
@@ -1692,18 +1726,26 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   // 부르면 8,000개 보고에 동기 read 8,000회로 이벤트 루프가 막힌다(CLAUDE.md 논블로킹 불변조건).
   if (req.centralAuth.mode === 'agent') {
     const bounds = ((loadScanSettings(agent)?.ranges) || []).map(specToRange).filter(Boolean);
-    if (bounds.length) {   // ranges 미설정이면 전량 통과(TOFU) — 기존 동작 유지
+    if (bounds.length) {
       const before = alive.length;
       alive = alive.filter((h) => { const n = h && ipToNum(h.ip); return n != null && bounds.some((r) => n >= r.lo && n <= r.hi); });
       if (before !== alive.length) console.warn(`[central] ip-scan-result: ${agent} 배정 범위 밖 IP ${before - alive.length}개 드롭(위조 방지)`);
+    } else {
+      // v2.603(감사 CEN2603-02): 배정 범위가 없는 개별 토큰은 거부한다(/result 의 CEN2601-04 와 같은 판단). 예전에는 전량 통과(TOFU)라
+      //   개별 토큰 하나가 임의 IP 를 무한히 쌓았다. 정상 엣지는 배정(ranges)이 있을 때만 스캔·보고한다(agent/ipScanWorker.js —
+      //   ip-scan-assignment 가 assigned:false 면 보고하지 않는다). 공유 토큰은 이름을 가릴 수 없어 전체 상한(scanStore)이 막는다.
+      console.warn(`[central] ip-scan-result: ${agent} 는 스캔 배정 범위가 없습니다 — 결과를 받지 않습니다`);
+      return res.status(409).json({ ok: false, reason: `엣지 '${agent}' 에 배정된 스캔 범위가 없습니다 — 설정 › IPAM › 스캔에서 이 엣지의 범위를 지정하세요.`, unassigned: true });
     }
   }
   // v2.594(감사 EDGE2-03): 형식이 틀린 원소는 병합에서 버려진다 — 버리기 전 개수를 merged·alive 로 보고하면 수치가 부풀었다.
   const validAlive = alive.filter((h) => h && ipToNum(h.ip) != null);
   const dropped = alive.length - validAlive.length;
-  if (validAlive.length) mergeScanResults(validAlive, Date.now(), agent);
+  const mr = validAlive.length ? mergeScanResults(validAlive, Date.now(), agent) : { merged: 0, capped: 0 };
+  const capped = mr?.capped || 0;
   recordAgentReport(agent, { scanned: b.scanned || 0, alive: validAlive.length, durationMs: b.durationMs || null });
-  res.json({ ok: true, merged: validAlive.length, ...(dropped ? { dropped } : {}) });
+  // v2.603 CEN2603-02: 전체 상한으로 받지 않은 새 IP 수를 밝힌다(merged 는 받은 것만).
+  res.json({ ok: true, merged: validAlive.length - capped, ...(dropped ? { dropped } : {}), ...(capped ? { capped } : {}) });
 });
 
 /*

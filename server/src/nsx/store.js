@@ -14,6 +14,7 @@ import { collectFromNsx } from './client.js';
 import { generateNsxSnapshot, generateNsxForManager } from './mock.js';
 import { nsxAuthGuard, isNsxAuthError } from './client.js'; // v2.590: 인증 실패 정지(정의는 client.js — 순환 방지)
 export { nsxAuthGuard };
+import { pushAll } from '../util/pushAll.js';
 const stopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
 
 class NsxStore {
@@ -135,12 +136,12 @@ export function merge(parts, errors, source) {
       segments: lf.has('segments') ? null : p.segments.length,
       transportNodes: lf.has('transportNodes') ? null : p.transportNodes.length,
       firewall: p.firewall, groups: p.groups });
-    snap.gateways.push(...p.gateways);
-    snap.segments.push(...p.segments);
-    snap.transportNodes.push(...p.transportNodes);
-    snap.dfw.push(...(p.dfw || []));
-    snap.securityGroups.push(...(p.securityGroups || []));
-    snap.idsEvents.push(...(p.ids?.events || []));
+    pushAll(snap.gateways, p.gateways);
+    pushAll(snap.segments, p.segments);
+    pushAll(snap.transportNodes, p.transportNodes);
+    pushAll(snap.dfw, (p.dfw || []));
+    pushAll(snap.securityGroups, (p.securityGroups || []));
+    pushAll(snap.idsEvents, (p.ids?.events || []));
   }
   snap.generatedAt = new Date().toISOString();
   return snap;

@@ -37,6 +37,7 @@ const FILE = () => path.join(config.dbDir || config.configDir, 'link-check.db');
 // 날짜 경계 코어는 `util/dayKey.js` 하나다(v2.582 ARCH-2). import 뒤 export(v2.575 재수출 규약).
 import { DAY_OFFSET_MIN, dayKey } from "../util/dayKey.js";
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 const lockRetry = createLockRetry();
 export { DAY_OFFSET_MIN, dayKey };
 const COUNT_CACHE_MS = Math.max(0, Number(process.env.LINKCHECK_COUNT_CACHE_MS) || 60_000);
@@ -52,6 +53,22 @@ async function getDb() {
   if (_tried) return _db;
   _opening = openDb().finally(() => { _opening = null; });
   return _opening;
+}
+/** link_daily.ms_n 이 없을 때만 추가 + 구 행 합 비우기(한 트랜잭션). @returns {boolean} 추가했으면 true */
+export function migrateLinkDailyMsN(conn) {
+  const have = conn.prepare('PRAGMA table_info(link_daily)').all().some((r) => r.name === 'ms_n');
+  if (have) return false;
+  conn.exec('BEGIN IMMEDIATE');
+  try {
+    conn.exec('ALTER TABLE link_daily ADD COLUMN ms_n INTEGER NOT NULL DEFAULT 0');
+    try { conn.exec('UPDATE link_daily SET ms_sum = 0 WHERE ms_n = 0'); } catch (e) { e.message = `구 행 합 비우기 실패(열 추가도 되돌린다): ${e.message}`; throw e; }
+    conn.exec('COMMIT');
+    return true;
+  } catch (e) {
+    try { conn.exec('ROLLBACK'); } catch { /* 이미 끝남 */ }
+    if (/duplicate column name/i.test(String(e?.message || ''))) return false;
+    throw e;
+  }
 }
 async function openDb() {
   let conn = null;   // v2.599 DB2599-02: 실패하면 닫는다(잠금이면 래치하지 않고 다시 연다)
@@ -107,10 +124,11 @@ async function openDb() {
     // v2.596(감사 DB-3 — 재현): 열이 **새로 생긴** 경우 구 행의 ms_sum 은 ms_n=0 과 짝이 맞지 않는다 — 전환일에 새 표본이
     //   더해지면 옛 합(수십~수백 표본분)을 새 개수로 나눠 평균이 수십~수백 배로 부푼다. 새로 만든 경우에만 구 행의 합을 비운다
     //   (구 행은 이미 평균을 내지 않는다 — 표시가 바뀌지 않는다).
-    try {
-      conn.exec('ALTER TABLE link_daily ADD COLUMN ms_n INTEGER NOT NULL DEFAULT 0');
-      try { conn.exec('UPDATE link_daily SET ms_sum = 0 WHERE ms_n = 0'); } catch { /* 비어 있으면 무관 */ }
-    } catch { /* 이미 있는 열 — 정상 */ }
+    // v2.603(감사 — ipam DB2603-01 과 같은 패턴): 예전 `try { ALTER } catch { /* 이미 있는 열 */ }` 는 잠금(SQLITE_BUSY)도
+    //   '이미 있음' 으로 삼켰다 — 열 없이 열려 적재가 'no such column: ms_n' 으로 죽었다. 이제 table_info 로 없을 때만 추가하고,
+    //   열 추가와 구 행 합 비우기를 **한 트랜잭션**으로 묶는다(추가만 되고 비우기가 실패하면 다음 open 은 열이 있다고 보고
+    //   비우기를 영영 건너뛴다 — 평균이 부푼다). 'duplicate column name'(경합)만 삼키고 잠금은 던져 lockRetry 가 다시 연다.
+    migrateLinkDailyMsN(conn);
     _db = conn;
   } catch (e) {
     try { conn?.close(); } catch { /* 이미 닫힘 */ }
@@ -277,19 +295,43 @@ export async function insertResults(results = [], { byNode = '' } = {}) {
   return { ok: true, inserted, events, duplicates, truncated: truncatedN };
 }
 
-/** 보존 집행. ⚠ 스로틀은 `(++tick % N) === 0`(기동 첫 틱 즉발 금지 — v2.453). */
+/**
+ * 보존 집행. ⚠ 스로틀은 `(++tick % N) === 0`(기동 첫 틱 즉발 금지 — v2.453).
+ *
+ * v2.603(감사 DB2603-02 — 재현): 예전 `DELETE FROM link_sample WHERE ts < ?` 한 방은 보존일을 설정 화면에서 줄이면
+ * 수백만 행을 동기로 지워 이벤트 루프를 멈췄다(감사 재현: 300만 행 3.9초 · 최대 루프 공백 3.9초). logs(v2.601)·metrics 와
+ * 같은 규약 — rowid 서브쿼리 청크 DELETE + 청크 사이 setImmediate 양보(util/chunkedPrune.js). 상한에 걸리면 `done:false`
+ * 이고 다음 주기가 잇는다. 정리끼리는 겹치지 않는다 — 같은 보존일이면 진행 중인 것을 공유하고, 보존일이 바뀌었으면
+ * 그것이 끝난 뒤 **새 경계로 한 번 더** 돈다(RECENT2603-06 과 같은 판단: 공유만 하면 새 보존일이 그 호출에 안 먹는다).
+ */
+const _pruneFlight = createPruneFlight();   // 같은 보존일이면 공유, 다르면 끝난 뒤 한 번 더(util/chunkedPrune.js)
+function prunePrepared(db) {
+  // 인덱스: idx_lc_sample_ts · idx_lc_event_ts · idx_lc_daily_day 가 서브쿼리의 풀스캔을 막는다.
+  return {
+    sample: db.prepare('DELETE FROM link_sample WHERE rowid IN (SELECT rowid FROM link_sample WHERE ts < ? LIMIT ?)'),
+    event: db.prepare('DELETE FROM link_event WHERE rowid IN (SELECT rowid FROM link_event WHERE ts < ? LIMIT ?)'),
+    daily: db.prepare('DELETE FROM link_daily WHERE rowid IN (SELECT rowid FROM link_daily WHERE day < ? LIMIT ?)'),
+  };
+}
+async function runPrune(db, { sampleDays, eventDays, dailyDays }) {
+  const st = prunePrepared(db);
+  const a = await chunkedDelete(st.sample, [Date.now() - sampleDays * 86_400_000], { label: 'linkcheck.link_sample' });
+  const b = await chunkedDelete(st.event, [Date.now() - eventDays * 86_400_000], { label: 'linkcheck.link_event' });
+  const c = await chunkedDelete(st.daily, [dayKey(Date.now() - dailyDays * 86_400_000)], { label: 'linkcheck.link_daily' });
+  const del = { sample: a.deleted, event: b.deleted, daily: c.deleted };
+  if (del.sample || del.event || del.daily) _counts = null;
+  // 상한에 걸려 남은 것이 있으면 밝힌다(조용한 상한 금지) — 다음 주기가 이어서 지운다.
+  const done = a.done && b.done && c.done;
+  return { ok: true, ...del, done };
+}
 export async function pruneLinkCheck({ sampleDays = 90, eventDays = 30, dailyDays = 365 * 5, every = 12, force = false } = {}) {
   const db = await getDb();
   if (!db) return { ok: false };
   if (!force && (++_tick % every) !== 0) return { ok: true, skipped: true };
-  try {
-    const a = db.prepare('DELETE FROM link_sample WHERE ts < ?').run(Date.now() - sampleDays * 86_400_000);
-    const b = db.prepare('DELETE FROM link_event WHERE ts < ?').run(Date.now() - eventDays * 86_400_000);
-    const c = db.prepare('DELETE FROM link_daily WHERE day < ?').run(dayKey(Date.now() - dailyDays * 86_400_000));
-    const del = { sample: Number(a?.changes) || 0, event: Number(b?.changes) || 0, daily: Number(c?.changes) || 0 };
-    if (del.sample || del.event || del.daily) _counts = null;
-    return { ok: true, ...del };
-  } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 200) }; }
+  const days = { sampleDays, eventDays, dailyDays };
+  const key = `${sampleDays}|${eventDays}|${dailyDays}`;
+  return _pruneFlight.run(key, () => runPrune(db, days)
+    .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 200) })));
 }
 
 /** 화면 표 — 링크별 최신 1건. ⚠ 전용 테이블을 읽는다(GROUP BY 로 되돌리지 말 것). */

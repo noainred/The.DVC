@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **503개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **513개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-24)
@@ -458,7 +458,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (48)
+## 중앙(위임 수집) (51)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -466,6 +466,8 @@
 | `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmUsageEdgePull.js |
 | `CAPTURE_ACK_GRACE_MS` | `60000` |  | central/captureJobs.js |
 | `CENTRAL_AGENT_CONFIG_MAX_BYTES` | `32` |  | central/agentConfig.js |
+| `CENTRAL_AGENT_IDENTITY_MAX` |  |  | central/agentIdentity.js |
+| `CENTRAL_AGENT_IDENTITY_UNVERIFIED_MAX` |  |  | central/agentIdentity.js |
 | `CENTRAL_EDGE_AGENT_EVICT_MS` | `24` |  | central/edgeRecord.js |
 | `CENTRAL_EDGE_AGENT_MAX_BYTES` | `16` |  | central/edgeRecord.js |
 | `CENTRAL_EDGE_DEVICE_MAX_BYTES` | `1024` |  | central/edgeRecord.js |
@@ -480,6 +482,7 @@
 | `CENTRAL_RESULT_AGENTS_MAX` | `500` |  | central/assignments.js |
 | `CENTRAL_SANSW_ORPHAN_TTL_MS` | `7` |  | central/sanSwitchEdge.js |
 | `CENTRAL_TOKEN` | `''` | ✅ | central/token.js, config.js 외 1 |
+| `CENTRAL_VCENTER_OWNER_NOTE_MAX` |  |  | central/agentIdentity.js |
 | `EDGELOG_ACK_TIMEOUT_MS` | `60000` |  | central/edgeLogJobs.js |
 | `EDGELOG_KEEP_PER_AGENT` | `10` |  | central/edgeLogStore.js |
 | `EDGELOG_LINE_CAP` | `1000` |  | central/edgeLogStore.js |
@@ -561,10 +564,15 @@
 | `WASTE_EXPORT_MAX_REPORTS` | `200` |  | routes/api/toolsCapacity.js |
 | `WASTE_SPARK_MAX_VMS` | `24` |  | routes/api/toolsCapacity.js |
 
-## GPU (1)
+## GPU (6)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `GPU_GUEST_FILE_MAX_BYTES` | `8` |  | gpu/guestops.js |
+| `GUEST_GPU_MAX_HOSTS` |  |  | gpu/store.js |
+| `GUEST_GPU_MAX_HOSTS_PER_AGENT` |  |  | gpu/store.js |
+| `GUEST_GPU_MAX_VMS` |  |  | gpu/store.js |
+| `GUEST_GPU_MAX_VMS_PER_AGENT` |  |  | gpu/store.js |
 | `GUEST_GPU_TTL_MS` | `30` |  | gpu/store.js |
 
 ## Horizon (4)
@@ -592,13 +600,15 @@
 | `POWER_NDJSON_MAX_ROWS` | `2000000` |  | idrac/db.js |
 | `ROOMTEMP_STALE_MS` | `15` |  | idrac/roomTemp.js |
 
-## IP 관리 (7)
+## IP 관리 (9)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `IPAM_DB_LOCK_RETRY_MS` |  |  | ipam/db.js |
 | `IPAM_FPING` | `기본 아님('0' 일 때만 적용)` |  | ipam/scan.js |
 | `IPAM_PING_CONCURRENCY` | `8` |  | ipam/scan.js |
 | `IPAM_SCAN_DEADLINE_MS` | `20` |  | ipam/scanRunner.js |
+| `IPAM_SCAN_RESULTS_MAX` |  |  | ipam/scanStore.js |
 | `IPAM_SCAN_WORKER` | `기본 적용('0' 로 끄기)` |  | ipam/scanRunner.js |
 | `IPAM_WRITE_DEBOUNCE_MS` | `1500` |  | ipam/scanStore.js |
 | `IPAM_WRITE_MIN_ROWS` | `500` |  | ipam/db.js |
@@ -682,4 +692,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 503
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 513

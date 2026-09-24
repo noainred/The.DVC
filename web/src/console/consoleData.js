@@ -309,6 +309,16 @@ export function pduSummary(pdu) {
   return out;
 }
 
+/**
+ * v2.603: NSX 매니저 한 대의 수준(0 정상 · 1 주의 · 2 위험). 타일과 표 행이 같은 기준을 쓴다 —
+ * connected 는 수집 오류·DOWN 노드가 없으면 0, 있으면 1 · degraded·unknown 은 1 · 그 밖(unreachable·pending·disabled)은 2.
+ */
+export function nsxManagerLevel(status, collectError = false, nodeDown = false) {
+  if (status === 'connected') return collectError || nodeDown ? 1 : 0;
+  if (status === 'degraded' || status === 'unknown') return 1;
+  return 2;
+}
+
 /** NSX 매니저 표 행 + 트랜스포트 노드 UP/DOWN 집계. */
 export function nsxManagerRows(nsx) {
   const tn = nsx?.transportNodes || [];
@@ -322,8 +332,23 @@ export function nsxManagerRows(nsx) {
   const errs = new Set((nsx?.collectionErrors || []).map((e) => e.managerId));
   return (nsx?.managers || []).map((m) => ({
     ...m, nodes: st.get(m.id) || { up: 0, down: 0, other: 0 }, collectError: errs.has(m.id),
-    level: m.status === 'connected' && !errs.has(m.id) && !(st.get(m.id)?.down) ? 0 : m.status === 'connected' ? 1 : 2,
+    // v2.603(RECENT2603-01): 'unknown'(판정 보류)·'degraded'(저하)는 행도 주의(1) — 타일(buildDomainTiles)과 같은 기준.
+    //   다운(2)은 연결 끊김·대기·비활성 등 그 밖의 상태뿐이다. 판정은 nsxManagerLevel 하나.
+    level: nsxManagerLevel(m.status, errs.has(m.id), !!st.get(m.id)?.down),
   })).sort((a, b) => b.level - a.level || a.name.localeCompare(b.name));
+}
+
+/**
+ * v2.603(RECENT2603-01): NSX 매니저 상태 배지. 공용 StateBadge 표에는 'unknown'·'degraded' 가 없어 원문('unknown')이
+ * 회색으로 그대로 새고 있었다 — NSX 화면(Nsx.jsx MGR_LABEL)과 같은 라벨을 준다. 그 밖의 상태는 null(StateBadge 로 폴백).
+ */
+export function nsxManagerBadge(m) {
+  if (m?.status === 'unknown') {
+    const why = m.listFailReasons?.clusterStatus;
+    return { cls: 'gray', label: '상태 확인 불가', title: `클러스터 상태 조회 실패: ${why || '사유 미상'} — 정상도 저하도 아닙니다(판정 보류).` };
+  }
+  if (m?.status === 'degraded') return { cls: 'amber', label: '저하', title: undefined };
+  return null;
 }
 
 export function networkTypeCounts(items) {
@@ -388,7 +413,10 @@ export function buildDomainTiles({ global: g, alarms, nsx, svcmon, pdu, idracPol
     //   그대로 끼우면 '세그먼트 null' 이 되고, 판정도 그 실패를 보지 않아 초록이었다. 개수는 nsxCount('—'),
     //   실패 사실은 nsxFailedShort 로 밝히고 수준을 주의(1) 이상으로 올린다.
     const failed = nsxFailedShort(r);
-    const level = r.managers === 0 ? null : r.managersUp < r.managers - r.managersDegraded ? 2 : r.managersDegraded > 0 || (nsx.collectionErrors || []).length || failed ? 1 : 0;
+    // v2.603(RECENT2603-01): 상태 'unknown'(클러스터 상태 조회 실패 — 판정 보류)은 다운(2)이 아니라 주의(1)다.
+    //   구버전 서버 응답에는 managersUnknown 이 없으므로 매니저 목록에서 센다.
+    const unknownN = r.managersUnknown ?? (nsx.managers || []).filter((m) => m?.status === 'unknown').length;
+    const level = r.managers === 0 ? null : r.managersUp < r.managers - r.managersDegraded - unknownN ? 2 : r.managersDegraded > 0 || unknownN > 0 || (nsx.collectionErrors || []).length || failed ? 1 : 0;
     tiles.push({ page: 'network', name: '네트워크', level, value: `${fmtInt(g?.networks)}`, meta: `포트그룹 · NSX ${r.managersUp}/${r.managers} · 세그먼트 ${nsxCount(r.segments)} · 엣지 ${nsxCount(r.edgeNodes)}${failed ? ` · ${failed}` : ''}`, ...ci('NETWORK') });
   } else tiles.push({ page: 'network', name: '네트워크', level: null, value: `${fmtInt(g?.networks)}`, meta: '포트그룹 · NSX 수집 대기', ...ci('NETWORK') });
   // 설비·전력 — 서버 측정 전력 합계 + PDU 임계 위반으로 판정(계약 전력 API 없음 → % 미표시).

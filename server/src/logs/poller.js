@@ -3,7 +3,7 @@
  * 누적하고, 보관기간 초과분을 정리한다. mock 모드에서는 합성 이벤트로 UI를 채운다.
  */
 
-import { config, loadVcenterConfig } from '../config.js';
+import { config, loadVcenterConfig, clampIntervalMs } from '../config.js';
 import { poolRun } from '../util/pool.js';   // v2.447: vCenter 병렬 수집(감사 T2) · v2.579: routes 의존 제거
 import { store } from '../store.js';
 import { collectVCenterEvents } from '../vcenter/soapClient.js';
@@ -159,7 +159,10 @@ function schedule() {
   if (timer) { clearInterval(timer); timer = null; }
   const s = loadLogSettings();
   if (!s.enabled) return;
-  timer = setInterval(() => pollLogsOnce().catch((e) => console.warn(`[vclogs] poll 오류: ${e.message}`)), s.pollIntervalMin * 60_000);
+  // v2.603(감사 TIM2603-01) 2차 방어 — 설정 로드가 이미 1~1440분으로 자르지만, 캐시가 다른 경로로 바뀌어도 0·NaN·음수·2^31 초과가
+  // setInterval 에 가서 1ms 루프가 되지 않게 여기서도 [1분, 1일] 로 묶는다(숫자 아님은 기본 10분).
+  const everyMs = Math.min(86_400_000, clampIntervalMs(Number(s.pollIntervalMin) * 60_000, 600_000, 60_000));
+  timer = setInterval(() => pollLogsOnce().catch((e) => console.warn(`[vclogs] poll 오류: ${e.message}`)), everyMs);
   timer.unref?.();
 }
 

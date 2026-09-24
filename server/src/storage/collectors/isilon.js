@@ -119,7 +119,7 @@ export function normalizeIsilon(device, raw) {
     const healthOf = (n) => (word(n.status?.health) || word(n.status) || word(n.health)).toLowerCase() || 'unknown';
     // v2.586 — 판정은 `storage/healthWord.js` 하나(앵커 없는 부분 일치가 'unhealthy'·'broken' 을 정상으로 셌다).
     snap.nodes.unhealthy = list.filter((n) => healthWord(healthOf(n)) === 'bad').length;
-    // 노드별 상세(v2.303) — devid(lnn) 기준으로 노드별 통계를 조인. IP 필드는 버전별 상이라
+    // 노드별 상세(v2.303) — devid(= 노드 id) 기준으로 노드별 통계를 조인. IP 필드는 버전별 상이라
     // 흔한 후보(ip/ip_address/ip_addresses[0]/ext_ip)를 순서대로 취하고 없으면 ''(정직 표기 — 위조 금지).
     const perNode = new Map(); // devid → { key → value }
     for (const r of (raw.nodeStats?.stats || [])) {
@@ -133,7 +133,10 @@ export function normalizeIsilon(device, raw) {
     const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
     snap.nodes.list = list.slice(0, 64).map((n) => {
       const lnn = n.lnn ?? n.id;
-      const st = perNode.get(lnn) || {};
+      // v2.603(감사 COL-2603-02): 통계의 devid 는 노드 **장치 번호(= /cluster/nodes 의 id)** 이고 lnn(논리 번호)과
+      //   다를 수 있다(노드 교체 뒤). lnn 으로 찾으면 다른 노드의 값이 오류 없이 붙는다. id 로 조인하고,
+      //   id 가 없는 응답에서만 lnn 으로 찾는다(표시 id 는 예전처럼 lnn). ⚠ 실장비 devid≠lnn 응답은 확인하지 못했다.
+      const st = (n.id != null ? perNode.get(n.id) : perNode.get(lnn)) || {};
       return {
         id: lnn,
         ip: String(n.ip || n.ip_address || (Array.isArray(n.ip_addresses) ? n.ip_addresses[0] : '') || n.ext_ip || ''),

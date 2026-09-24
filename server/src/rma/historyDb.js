@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'rma-history.db');
 const RETENTION_DAYS = Math.max(1, Number(process.env.RMA_HISTORY_DAYS) || 90);
@@ -48,7 +49,9 @@ async function openInner() {
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
       byAgent: conn.prepare('SELECT * FROM rma_history WHERE agent = ? COLLATE NOCASE ORDER BY done_at DESC LIMIT ?'),
       all: conn.prepare('SELECT * FROM rma_history ORDER BY done_at DESC LIMIT ?'),
-      prune: conn.prepare('DELETE FROM rma_history WHERE done_at < ?'),
+      // v2.603(감사 DB2603-02): 청크 DELETE 형태(LIMIT 은 chunkedDelete 가 붙인다) — 행마다 출력이 최대 64KB×2 라
+      //   한 방 DELETE 는 수백 MB 를 동기로 지운다. idx_rma_done 이 서브쿼리를 받친다.
+      prune: conn.prepare('DELETE FROM rma_history WHERE rowid IN (SELECT rowid FROM rma_history WHERE done_at < ? LIMIT ?)'),
     };
     return _db;
   } catch (e) {
@@ -56,6 +59,16 @@ async function openInner() {
     _db = 'unavailable';
     return null;
   }
+}
+
+/**
+ * v2.603(감사 DB2603-02): 보존 정리는 청크 삭제 + 청크 사이 양보다(util/chunkedPrune.js). 저장 경로를 기다리게 하지
+ * 않고, 진행 중이면 겹치지 않는다(보존일은 환경변수라 프로세스 수명 동안 같다 — 공유하면 된다). 실패는 콘솔에 남긴다.
+ */
+const _pruneFlight = createPruneFlight({ covers: () => true });   // 보존일이 env(불변)라 진행 중이면 공유
+function pruneInBackground(db) {
+  return _pruneFlight.run(0, () => chunkedDelete(db.prune, [Date.now() - RETENTION_DAYS * 86400e3], { label: 'rma.history' })
+    .catch((e) => { console.warn(`[rma] 이력 prune 실패: ${e?.message || e}`); return null; }));
 }
 
 export async function historyAvailable() { return !!(await open()); }
@@ -72,7 +85,7 @@ export async function saveHistoryRow(h) {
       h.createdAt || null, h.takenAt || null, h.doneAt || Date.now(), h.ok ? 1 : 0, h.exitCode ?? null, h.timedOut ? 1 : 0,
       h.durationMs ?? null, h.reason || '', String(h.stdout || '').slice(0, OUTPUT_MAX), String(h.stderr || '').slice(0, OUTPUT_MAX),
       (h.truncated || String(h.stdout || '').length > OUTPUT_MAX) ? 1 : 0);
-    if (++_tick % PRUNE_EVERY === 0) db.prune.run(Date.now() - RETENTION_DAYS * 86400e3);
+    if (++_tick % PRUNE_EVERY === 0) pruneInBackground(db);
     return true;
   } catch { return false; }
 }

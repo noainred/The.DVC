@@ -42,13 +42,15 @@ export function parseBps(s) {
   return Math.round(Number(m[1]) * (m[2] ? BPS_UNIT[m[2]] : 1));
 }
 
-/** "2.0T/ 107T( 2%)" → {usedBytes,totalBytes,pct} · "(No Storage HDDs)" → null · "L3: 373G" → {l3Bytes} */
-function parsePoolCell(s) {
+/** (export — v2.603 테스트용) "2.0T/ 107T( 2%)" → {usedBytes,totalBytes,pct} · "(No Storage HDDs)" → null · "L3: 373G" → {l3Bytes} */
+export function parsePoolCell(s) {
   const t = String(s || '').trim();
   if (!t || /no storage/i.test(t)) return null;
   const l3 = /L3:\s*([\d.]+[kKMGTP]?)/.exec(t);
   if (l3) return { l3Bytes: parseSize(l3[1]) };
-  const m = /([\d.]+[kKMGTP]?)\s*\/\s*([\d.]+[kKMGTP]?)\s*\(\s*([\d.]+)%\s*\)/.exec(t);
+  // v2.603(감사 SEC2603-05): 숫자·점 구간의 시작에서만 시도한다(뒤보기) — 예전 정규식은 구간 안의 모든 위치에서
+  //   끝까지 다시 훑어 긴 셀에서 O(n²) 였다. 가장 왼쪽 매치는 언제나 구간 시작이라 결과(캡처 포함)는 같다.
+  const m = /(?<![\d.])([\d.]+[kKMGTP]?)\s*\/\s*([\d.]+[kKMGTP]?)\s*\(\s*([\d.]+)%\s*\)/.exec(t);
   if (!m) return null;
   return { usedBytes: parseSize(m[1]), totalBytes: parseSize(m[2]), pct: Number(m[3]) };
 }

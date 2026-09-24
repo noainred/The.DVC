@@ -212,6 +212,12 @@ export function maskSnapAddress(s, hostHint = '') {
   if (out.errors && typeof out.errors === 'object' && !Array.isArray(out.errors)) {
     out.errors = Object.fromEntries(Object.entries(out.errors).map(([k, v]) => [k, scrub(v, host)]));
   }
+  // v2.603 AUTHZ-2603-02: 점검 결과(SAN 월간 점검 `checkDevice`)는 수집 실패 시 snap.error 원문
+  //   ('getaddrinfo ENOTFOUND <host>')을 항목마다 `items[].detail` 에 싣는다 — error 만 가리면 그 옆에서 샌다.
+  if (Array.isArray(out.items) && host) {
+    const sc = makeScrubber([host]);
+    out.items = out.items.map((it) => (it && typeof it === 'object' && typeof it.detail === 'string' ? { ...it, detail: sc(it.detail) } : it));
+  }
   if ('host' in out) out.host = '';
   if (host && out.name === host) out.name = maskedNameLabel(out);
   const fp = out.extra?.credFp;
@@ -287,4 +293,24 @@ export function maskPollerStatus(poller, hosts = []) {
   if (typeof out.error === 'string') out.error = scrubAll(out.error);
   if (typeof out.lastError === 'string') out.lastError = scrubAll(out.lastError);
   return out;
+}
+
+/**
+ * 객체 트리 안의 **모든 문자열**에서 등록부 주소를 가린다(v2.603 AUTHZ-2603-02). SAN 점검 이력(`listRuns` ·
+ * `compareRuns`)은 항목 detail 이 runs[].items[] · changes[] · newProblems[] 등 여러 곳에 복사돼 있어 필드를
+ * 하나씩 고르면 다음 필드가 우회로가 된다(v2.550.3 규약). 원본을 바꾸지 않는다. 깊이 8·일반 객체/배열만 걷는다.
+ */
+export function scrubStringsDeep(v, hosts = []) {
+  const sc = makeScrubber(hosts || []);
+  const walk = (x, depth) => {
+    if (typeof x === 'string') return sc(x);
+    if (!x || typeof x !== 'object' || depth > 8) return x;
+    if (Array.isArray(x)) return x.map((y) => walk(y, depth + 1));
+    const proto = Object.getPrototypeOf(x);
+    if (proto !== Object.prototype && proto !== null) return x;
+    const out = {};
+    for (const [k, y] of Object.entries(x)) out[k] = walk(y, depth + 1);
+    return out;
+  };
+  return walk(v, 0);
 }

@@ -27,6 +27,8 @@ import { ensureNsxDial } from './proxy.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 import { createAuthGuard } from '../util/authGuard.js';
 import { effectiveRequestTimeoutMs } from '../vcenter/soapParse.js'; // v2.598 T2598-03 — 옛 저장값의 시한 상한
+import { numOrNull } from '../util/numOrNull.js';
+import { pushAll } from '../util/pushAll.js';
 
 /**
  * NSX 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F1, 계정 잠금 경로). 예전에는 `client.node()` 가 401/403 으로
@@ -50,6 +52,8 @@ const norm = (s) => String(s || '').replace(/\/+$/, '');
 export const NSX_LIST_MAX_PAGES = Math.max(1, Number(process.env.NSX_LIST_MAX_PAGES) || 20);
 /** 규칙을 조회하는 DFW 정책 수 상한(정책마다 GET 1회 — 고RTT 매니저 부하). 넘으면 개수를 밝힌다. */
 export const NSX_DFW_POLICY_MAX = 60;
+/** IDS 이벤트는 한 페이지(이 개수)만 받는다 — 닿으면 idsEventsTruncated 로 밝힌다(v2.603 COL-2603-05). */
+export const IDS_EVENT_MAX = 200;
 
 /**
  * cursor 페이징을 따라 목록 전체를 모은다(순수 — 페이지 조회 함수를 주입받는다).
@@ -64,7 +68,7 @@ export async function listAllPages(getPage, pathname, { maxPages = NSX_LIST_MAX_
     const sep = pathname.includes('?') ? '&' : '?';
     const page = await getPage(cursor ? `${pathname}${sep}cursor=${encodeURIComponent(cursor)}` : pathname);
     pages += 1;
-    if (Array.isArray(page?.results)) results.push(...page.results);
+    if (Array.isArray(page?.results)) pushAll(results, page.results);
     const rc = Number(page?.result_count);
     if (count == null && page?.result_count != null && Number.isFinite(rc) && rc >= 0) count = rc;
     cursor = page?.cursor ? String(page.cursor) : null;
@@ -153,7 +157,7 @@ export class NsxClient {
   licenses() { return this.#get('/api/v1/licenses'); } // 라이선스 만료일 확인용(만료 epoch ms)
   idsConfig() { return this.#get('/policy/api/v1/infra/settings/firewall/security/intrusion-services'); }
   idsProfiles() { return this.#get('/policy/api/v1/infra/intrusion-service-profiles'); }
-  idsEvents() { return this.#get('/api/v1/intrusion-detection-system-events?page_size=200'); }
+  idsEvents() { return this.#get(`/api/v1/intrusion-detection-system-events?page_size=${IDS_EVENT_MAX}`); }
 
   /** Login check — cheapest authenticated call. */
   async ping() { await this.node(); }
@@ -196,6 +200,14 @@ export function firewallSummary({ pols, dfw, ruleSets = [] }) {
   const omitted = Math.max(0, total - dfw.length);
   let rules = dfw.reduce((a, p) => a + (p.ruleCount || 0), 0);
   let partial = !!ruleSets.truncated || !!pols?.truncated || total > all.length;
+  // v2.603(감사 COL-2603-04): 규칙 조회에 실패한 정책(ruleSets[i] === null) — rule_count 가 없으면 그 정책의 규칙 수를 모른다
+  //   (0 으로 더하면 부분 합을 전체라 말한다). 실패 개수는 rule_count 유무와 상관없이 밝힌다(규칙 표가 비어 있다).
+  let rulesFailed = 0;
+  for (let i = 0; i < dfw.length; i += 1) {
+    if (ruleSets[i] !== null || !dfw[i]?.rulesFailed) continue;
+    rulesFailed += 1;
+    if (!dfw[i].ruleCountKnown) partial = true;
+  }
   for (const p of all.slice(dfw.length)) {
     const rc = Number(p?.rule_count);
     if (p?.rule_count != null && Number.isFinite(rc)) rules += rc; else partial = true;
@@ -204,6 +216,7 @@ export function firewallSummary({ pols, dfw, ruleSets = [] }) {
     policies: total, rules,
     ...(omitted ? { policiesOmitted: omitted, policiesRuleLimit: NSX_DFW_POLICY_MAX } : {}),
     ...(partial ? { rulesPartial: true } : {}),
+    ...(rulesFailed ? { rulesFailed } : {}),
     ...(pols?.truncated ? { truncated: true } : {}),
   };
 }
@@ -312,9 +325,13 @@ export async function collectFromNsx(mgr) {
       sequence: r.sequence_number ?? null,
       notes: r.notes || '',
     }));
+    // v2.603(감사 COL-2603-04): 규칙 조회 실패는 '규칙 0개' 가 아니다 — rulesFailed 로 밝히고, rule_count 도 없으면 수는 null.
+    const failed = ruleSets[i] === null;
+    const known = p.rule_count != null && Number.isFinite(Number(p.rule_count));
     return {
       id: `${mgr.id}:${p.id}`, managerId: mgr.id, name: p.display_name || p.id,
-      category: p.category || '', ruleCount: p.rule_count ?? rules.length, rules,
+      category: p.category || '', ruleCount: known ? Number(p.rule_count) : (failed ? null : rules.length), rules,
+      ...(failed ? { rulesFailed: true, ruleCountKnown: known } : {}),
     };
   });
   const firewall = firewallSummary({ pols, dfw, ruleSets });
@@ -329,9 +346,10 @@ export async function collectFromNsx(mgr) {
   // 분산 IDS/IPS(베스트에포트) — 활성 여부 + 프로파일 수 + 최근 침입 이벤트. 라이선스도 함께.
   const [idsCfg, idsProf, idsEv, licRes] = await Promise.all([
     client.idsConfig().catch(() => null),
-    client.idsProfiles().catch(() => ({ results: [] })),
-    client.idsEvents().catch(() => ({ results: [] })),
-    client.licenses().catch(() => ({ results: [] })),
+    // v2.603(감사 COL-2603-05): 실패는 빈 목록이 아니라 표식이다(failedList — listsFailed 로 밝힌다).
+    client.idsProfiles().catch(failedList),
+    client.idsEvents().catch(failedList),
+    client.licenses().catch(failedList),
   ]);
   // NSX 라이선스(만료일) — 특수기능 '라이선스 만료일 확인'용. 키는 마스킹해 저장.
   const licenses = (licRes?.results || []).map((l) => {
@@ -345,10 +363,16 @@ export async function collectFromNsx(mgr) {
       capacityType: l.capacity_type || '',
     };
   });
+  // v2.603(감사 COL-2603-05): 이벤트는 page_size=200 한 페이지뿐이다 — 200건에 닿았거나 전체 수가 더 크면 하한이다.
+  const evRaw = idsEv?.results || [];
+  const evTotal = numOrNull(idsEv?.result_count);
+  const idsEventsTruncated = !idsEv?.failed && (evRaw.length >= IDS_EVENT_MAX || (evTotal != null && evTotal > Math.min(evRaw.length, IDS_EVENT_MAX)));
   const ids = {
     enabled: idsCfg ? (idsCfg.ids_enabled ?? idsCfg.enabled ?? null) : null,
-    profiles: (idsProf?.results || []).length,
-    events: (idsEv?.results || []).slice(0, 200).map((e) => ({
+    profiles: idsProf?.failed ? null : (idsProf?.results || []).length,
+    ...(idsEv?.failed ? { eventsFailed: true } : {}),
+    ...(idsEventsTruncated ? { eventsTruncated: true, eventsLimit: IDS_EVENT_MAX, ...(evTotal != null ? { eventsTotal: evTotal } : {}) } : {}),
+    events: evRaw.slice(0, IDS_EVENT_MAX).map((e) => ({
       id: `${mgr.id}:${e.id || e.event_id || Math.random().toString(36).slice(2)}`,
       managerId: mgr.id, managerName: mgr.name,
       signature: e.signature_name || e.signature_id || e.title || '(시그니처 미상)',
@@ -364,14 +388,16 @@ export async function collectFromNsx(mgr) {
       id: mgr.id, name: mgr.name, host: mgr.host, region: mgr.location?.region || '', vcenterId: mgr.vcenterId || '',
       status: clusterHealth(cluster), version: node?.node_version || node?.product_version || 'unknown',
       nodeCount: clusterNodeCount(cluster),
-      idsEnabled: ids.enabled, idsProfiles: ids.profiles, idsEventCount: ids.events.length,
+      idsEnabled: ids.enabled, idsProfiles: ids.profiles, idsEventCount: idsEv?.failed ? null : ids.events.length,
+      ...(idsEventsTruncated ? { idsEventsTruncated: true } : {}),
       licenses, // 만료일 확인용 — store.merge가 manager 필드로 그대로 실어 나른다
       // v2.599(감사 C2599-05): 페이지 상한에 걸려 끝까지 받지 못한 목록 — 그 개수는 하한이다(조용한 상한 금지).
       listsTruncated: [['transportNodes', tnodes], ['tier0s', t0], ['tier1s', t1], ['segments', segs], ['securityPolicies', pols], ['groups', grps]]
         .filter(([, l]) => l?.truncated).map(([k]) => k),
       // v2.600(감사 COL-2600-06): 조회에 실패한 목록 — 그 개수는 0 이 아니라 확인 불가다.
       //   v2.602(COL-2602-01): 클러스터 상태 조회 실패도 같은 목록으로 밝힌다(화면이 사유를 말할 수 있게).
-      ...listFailures([['clusterStatus', cluster], ['transportNodes', tnodes], ['tier0s', t0], ['tier1s', t1], ['segments', segs], ['securityPolicies', pols], ['groups', grps]]),
+      ...listFailures([['clusterStatus', cluster], ['transportNodes', tnodes], ['tier0s', t0], ['tier1s', t1], ['segments', segs], ['securityPolicies', pols], ['groups', grps],
+        ['idsProfiles', idsProf], ['idsEvents', idsEv], ['licenses', licRes]]),
     },
     gateways: [...mkGw(t0, 'T0'), ...mkGw(t1, 'T1')],
     segments,

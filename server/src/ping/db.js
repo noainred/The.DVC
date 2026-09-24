@@ -13,7 +13,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
+import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 const DB_PATH = config.ping.dbPath;
 
@@ -47,8 +48,22 @@ function initSqlite() {
         SUM(CASE WHEN ok=1 THEN 0 ELSE 1 END) fail, COUNT(*) n
       FROM samples WHERE target=? AND ts>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
     const metaStmt = db.prepare('SELECT MIN(ts) mn, MAX(ts) mx, COUNT(*) n FROM samples WHERE target=?');
-    const prune = db.prepare('DELETE FROM samples WHERE ts < ?');
-    const dropTarget = db.prepare('DELETE FROM samples WHERE target=?');
+    // v2.603(감사 DB2603-02 — 재현): 예전 `DELETE FROM samples WHERE ts < ?` 한 방은 보존일을 줄인 뒤 첫 정리에서
+    // 515만 행을 동기로 지워 이벤트 루프를 5.6초 멈췄다(ping 은 가장 큰 테이블이다). rowid 서브쿼리 청크 DELETE +
+    // 청크 사이 양보(util/chunkedPrune.js, v2.453·v2.601 규약) — idx_ping_ts 가 서브쿼리의 풀스캔을 막는다.
+    const pruneChunk = db.prepare('DELETE FROM samples WHERE rowid IN (SELECT rowid FROM samples WHERE ts < ? LIMIT ?)');
+    // 정리끼리는 겹치지 않는다. 같은 경계면 진행 중인 것을 공유하고, 경계가 더 늦으면(보존일을 줄였으면) 끝난 뒤
+    // 새 경계로 한 번 더 돈다(RECENT2603-06 과 같은 판단). 호출부(monitor.js)는 기다리지 않으므로 실패는 여기서 남긴다.
+    const pruneFlight = createPruneFlight({ covers: (running, next) => running >= next });   // 키 = 경계(ms)
+    const prune = (beforeTs) => {
+      const cut = Number(beforeTs);
+      if (!Number.isFinite(cut)) return Promise.resolve({ deleted: 0, done: true, chunks: 0 });
+      return pruneFlight.run(cut, () => chunkedDelete(pruneChunk, [cut], { label: 'ping.samples' })
+        .catch((e) => { console.warn(`[ping] prune 실패: ${e?.message || e}`); return { deleted: 0, done: false, chunks: 0, error: String(e?.message || e) }; }));
+    };
+    // v2.603(감사 DB2603-02 후속): 대상 삭제도 그 대상의 전 이력(1분 주기 1년 ≈ 52만 행)을 한 방에 지우면 루프가 멈춘다 —
+    // 청크 삭제 + 양보(idx_ping_tgt_ts 가 서브쿼리를 받친다). 대상 하나는 끝까지 지운다(상한 0 — 남기면 고아 이력이 된다).
+    const dropTargetChunk = db.prepare('DELETE FROM samples WHERE rowid IN (SELECT rowid FROM samples WHERE target=? LIMIT ?)');
     return {
       kind: 'sqlite',
       insertMany: (rows) => { db.exec('BEGIN'); try { for (const r of rows) ins.run(r.target, r.ts, r.rtt == null ? null : r.rtt, r.ok ? 1 : 0); db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } },
@@ -57,8 +72,8 @@ function initSqlite() {
       history: (target, sinceTs, bucketMs, limit) => bucket.all(bucketMs, bucketMs, target, sinceTs, limit).reverse()
         .map((r) => ({ ts: r.b, avg: round2(r.avg), min: round2(r.min), max: round2(r.max), loss: r.n ? Number((r.fail / r.n).toFixed(3)) : 0, n: Number(r.n) })),
       meta: (target) => { const r = metaStmt.get(target); return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) }; },
-      prune: (beforeTs) => prune.run(beforeTs),
-      dropTarget: (target) => dropTarget.run(target),
+      prune,   // Promise<{deleted, done, chunks}> — 청크 사이에 양보한다
+      dropTarget: (target) => chunkedDelete(dropTargetChunk, [String(target)], { label: 'ping.dropTarget', maxRows: 0 }),   // Promise<{deleted, done, chunks}>
     };
   });
 }
@@ -86,7 +101,7 @@ function initJson() {
     },
     meta: (target) => { let mn = null, mx = null, n = 0; for (const r of rows) if (r.g === target) { n++; if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx, count: n }; },
     prune: (beforeTs) => { const n = rows.filter((r) => r.t >= beforeTs); if (n.length !== rows.length) { rows = n; try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } } },
-    dropTarget: (target) => { const n = rows.filter((r) => r.g !== target); if (n.length !== rows.length) { rows = n; try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } } },
+    dropTarget: async (target) => { const n = rows.filter((r) => r.g !== target); const deleted = rows.length - n.length; if (deleted) { rows = n; try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } } return { deleted, done: true, chunks: 1 }; },
   };
 }
 

@@ -22,6 +22,9 @@ import { Agent } from 'undici';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { pingOne } from '../util/ping.js';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
+// v2.603(SEC2603-03): 본문 앞부분 읽기는 util 하나(rma/testRunner.js 도 같은 헬퍼) — 재수출은 import+export 형태(v2.575)
+import { readBodyPrefix } from '../util/readPrefix.js';
+export { readBodyPrefix };
 
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher. 저장 시점 ssrfBlockReason·실행 시점 ssrfBlockReasonResolved 는 **해석한 IP 로 접속하지 않으므로** 리바인딩 창이 남는다.
 const insecureAgent = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: false }) });
@@ -54,6 +57,14 @@ export const DEFAULT_PORTS = {
 // 두어 정상 점검은 건드리지 않되, 어떤 이유로든 내부 Promise 가 결말나지 않으면 여기서 끊는다.
 // traceroute(execFile 25초)·domain(whois 다단) 이 가장 길어 45초로 잡았다.
 const RUNCHECK_HARD_TIMEOUT_MS = 45_000;
+
+/** 키워드 검사가 읽는 본문 앞부분 상한(v2.603 SEC2603-03) — 넘는 부분은 읽지 않는다. */
+export const KEYWORD_SCAN_BYTES = 256 * 1024;
+
+/** 응답 본문을 버린다(읽지 않고 연결 정리). 실패는 무시 — 이미 소비됐거나 본문이 없다. */
+function cancelBody(res) {
+  try { res?.body?.cancel?.().catch?.(() => {}); } catch { /* */ }
+}
 
 /**
  * 단일 점검 실행 → { status:'ok'|'warn'|'bad', reply, ms }.
@@ -132,11 +143,15 @@ async function runCheckInner(test, host) {
         });
         const ms = Date.now() - started;
         const okStatus = test.expectStatus ? res.status === test.expectStatus : res.status < 500;
-        if (!okStatus) return { status: 'bad', reply: `HTTP ${res.status}`, ms };
+        if (!okStatus) { cancelBody(res); return { status: 'bad', reply: `HTTP ${res.status}`, ms }; }
         if (test.keyword) {
-          const body = (await res.text()).slice(0, 262144);   // 256KB 상한 — 대용량 응답 방어
-          if (!body.includes(test.keyword)) return { status: 'warn', reply: `HTTP ${res.status} · 키워드 없음`, ms };
-        }
+          // v2.603(감사 SEC2603-03): 예전에는 res.text() 로 본문 **전체**를 메모리로 읽은 뒤 잘랐다
+          //   (실측 400MB 응답 한 번에 RSS 74 → 1,359MB). 이제 앞 256KB 까지만 스트림으로 읽고 끊는다 — 주석과 사실이 같다.
+          const { text: body, capped } = await readBodyPrefix(res, KEYWORD_SCAN_BYTES);
+          if (!body.includes(test.keyword)) {
+            return { status: 'warn', reply: `HTTP ${res.status} · 키워드 없음${capped ? `(앞 ${Math.round(KEYWORD_SCAN_BYTES / 1024)}KB 만 확인)` : ''}`, ms };
+          }
+        } else cancelBody(res);   // 본문을 쓰지 않으면 읽지 않는다(연결만 정리)
         if (test.warnMs && ms > test.warnMs) return { status: 'warn', reply: `HTTP ${res.status} · ${ms}ms(느림)`, ms };
         return { status: 'ok', reply: `HTTP ${res.status} · ${ms}ms`, ms };
       }

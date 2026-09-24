@@ -13,6 +13,9 @@ import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { config } from '../config.js';
 import { COLUMNS, toRecord } from './record.js';
+import { createLockRetry, openSqlite, withOpenCleanup } from '../util/sqliteOpen.js';
+import { createChangeLogger } from '../util/logThrottle.js';
+const saveWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 });
 
 const DB_PATH = config.ipam.dbPath;
 
@@ -24,15 +27,37 @@ const MIN_OFFLOAD_ROWS = Number(process.env.IPAM_WRITE_MIN_ROWS || 500);
 // 0 이면 오프로딩 완전 비활성(항상 인라인).
 const OFFLOAD_ENABLED = process.env.IPAM_WRITE_WORKER !== '0';
 
+// v2.603(감사 DB2603-01): 뒤늦게 추가된 열. 예전에는 열마다 `try { ALTER } catch { /* already present */ }` 로 **모든** 오류를
+//   '이미 있음' 으로 삼켜, 외부 리더가 잠금을 쥔 순간(SQLITE_BUSY)에 ALTER 가 실패하면 열이 없는 채로 INSERT prepare 가
+//   'no such column' 으로 던지고 그 실패가 NDJSON 폴백으로 **프로세스 수명 동안 굳었다**(경고 문구도 'node:sqlite 사용 불가' 라는
+//   틀린 원인). 이제 ① table_info 로 **없는 열만** ALTER 하고 ② 'duplicate column name' 만 삼키며 ③ 잠금이면 다시 던져
+//   getImpl 이 래치하지 않고 잠시 뒤 다시 연다(util/sqliteOpen.js 규약 — ipam.db 는 외부 리더 공유라 WAL 전환은 하지 않는다).
+export const MIGRATE_COLUMNS = ['scope', 'server_type', 'os_name', 'os_version', 'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner',
+  'label', 'device_type', 'first_seen', 'last_seen', 'usage_status', 'applied_by', 'range_policy_spec'];
+
+/** 없는 열만 추가한다. 잠금·그 밖의 오류는 던진다('이미 있음' 경합만 삼킨다). @returns {string[]} 추가한 열 */
+export function migrateIpRecordColumns(db) {
+  const have = new Set(db.prepare('PRAGMA table_info(ip_records)').all().map((r) => r.name));
+  const added = [];
+  for (const col of MIGRATE_COLUMNS) {
+    if (have.has(col)) continue;
+    try { db.exec(`ALTER TABLE ip_records ADD COLUMN ${col} TEXT`); added.push(col); }
+    catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; }
+  }
+  return added;
+}
+
+const lockRetry = createLockRetry(Number(process.env.IPAM_DB_LOCK_RETRY_MS) > 0 ? Number(process.env.IPAM_DB_LOCK_RETRY_MS) : 30_000);
+
 function initSqlite() {
+  // 시도가 실패하면 그 시도에서 연 핸들을 닫는다(withOpenCleanup — 잠금 재시도가 핸들을 쌓지 않게).
   // eslint-disable-next-line import/no-unresolved
-  return import('node:sqlite').then(({ DatabaseSync }) => {
+  return withOpenCleanup(() => import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    const db = new DatabaseSync(DB_PATH);
     // ipam.db는 외부 프로그램이 직접 읽는 공유 파일 — WAL(-wal/-shm 파일 필요)은 외부 리더
     // 호환이 불확실해 저널 모드는 기본(DELETE) 유지, busy_timeout만 적용(리더 락 시 즉시
     // SQLITE_BUSY 실패 대신 3초 대기 — store의 서명 재시도 로직과 결합돼 유실 방지).
-    try { db.exec('PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
+    const db = openSqlite(new DatabaseSync(DB_PATH), { wal: false, busyMs: 3000 });
     db.exec(`
       CREATE TABLE IF NOT EXISTS ip_records (
         ip TEXT NOT NULL,
@@ -56,14 +81,7 @@ function initSqlite() {
       CREATE INDEX IF NOT EXISTS idx_ip_records_ip ON ip_records (ip);
       CREATE INDEX IF NOT EXISTS idx_ip_records_vc ON ip_records (vcenter_id);
     `);
-    // Migrate older DBs that predate newer columns (best-effort; ignore if present).
-    try { db.exec('ALTER TABLE ip_records ADD COLUMN scope TEXT'); } catch { /* already present */ }
-    try { db.exec('ALTER TABLE ip_records ADD COLUMN server_type TEXT'); } catch { /* already present */ }
-    try { db.exec('ALTER TABLE ip_records ADD COLUMN os_name TEXT'); } catch { /* already present */ }
-    try { db.exec('ALTER TABLE ip_records ADD COLUMN os_version TEXT'); } catch { /* already present */ }
-    for (const col of ['discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'first_seen', 'last_seen', 'usage_status', 'applied_by', 'range_policy_spec']) {
-      try { db.exec(`ALTER TABLE ip_records ADD COLUMN ${col} TEXT`); } catch { /* already present */ }
-    }
+    migrateIpRecordColumns(db); // 구버전 DB 의 열 추가(없는 열만 · 잠금은 던진다)
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
     const del = db.prepare('DELETE FROM ip_records');
     const ins = db.prepare(`INSERT INTO ip_records (${COLUMNS.join(', ')}) VALUES (${COLUMNS.map(() => '?').join(', ')})`);
@@ -92,7 +110,7 @@ function initSqlite() {
       syncInline,
       info: () => { const r = countStmt.get(); return { count: r?.n || 0, updatedAt: r?.at || null }; },
     };
-  });
+  }));
 }
 
 // ── 쓰기 워커 ────────────────────────────────────────────────────────────────
@@ -175,8 +193,16 @@ function initJsonFallback() {
 
 async function getImpl() {
   if (impl) return impl;
+  // v2.603 DB2603-01: 잠금으로 실패한 직후에는 매 호출마다 3초 busy_timeout 을 태우지 않는다 — 재시도 시각까지 이번 동기화는 실패로 둔다
+  //   (store 는 서명을 성공 뒤에만 기록하므로 다음 주기에 다시 쓴다). NDJSON 으로 굳히지 않는다.
+  if (!ready && lockRetry.blocked()) throw Object.assign(new Error(lockRetry.note() || 'ipam.db 잠김'), { ipamLocked: true });
   if (!ready) {
-    ready = initSqlite().catch((err) => {
+    ready = initSqlite().then((v) => { lockRetry.ok(); return v; }, (err) => {
+      if (lockRetry.onFail(err)) {
+        ready = null; // 래치하지 않는다 — 재시도 시각 뒤 다시 연다
+        console.warn(`[ipam] ipam.db 가 잠겨 있어 열지 못했습니다(${err.message}) — NDJSON 으로 바꾸지 않고 잠시 뒤 다시 엽니다.`);
+        throw Object.assign(new Error(lockRetry.note() || 'ipam.db 잠김'), { ipamLocked: true });
+      }
       console.warn(`[ipam] node:sqlite 사용 불가(${err.code || err.message}); NDJSON 폴백 사용.`);
       return initJsonFallback();
     });
@@ -194,13 +220,19 @@ export async function syncLedger(rows) {
     await i.sync(rows, new Date().toISOString());
     return true;
   } catch (err) {
-    console.warn(`[ipam] 레저 저장 실패: ${err.message}`);
+    // v2.603: 잠금 재시도 중에는 매 주기(30초) 같은 줄이 찍힌다 — 같은 사유는 1시간에 1줄(상태는 store.ledgerSync 가 든다).
+    if (saveWarnLog('save', err.ipamLocked ? 'locked' : String(err.message))) console.warn(`[ipam] 레저 저장 실패: ${err.message}`);
     return false;
   }
 }
 
 /** DB location + record count, for the admin UI. */
 export async function ledgerInfo() {
-  const i = await getImpl();
+  let i;
+  try { i = await getImpl(); } catch (e) {
+    // 잠금으로 아직 열지 못했다 — 개수를 지어내지 않는다(null) · 사유를 싣는다.
+    if (e?.ipamLocked) return { path: DB_PATH, kind: 'sqlite', count: null, updatedAt: null, locked: true, note: String(e.message || '') };
+    throw e;
+  }
   return { path: i.kind === 'sqlite' ? DB_PATH : DB_PATH.replace(/\.db$/, '') + '.ndjson', kind: i.kind, ...i.info() };
 }

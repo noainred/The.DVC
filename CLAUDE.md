@@ -3614,6 +3614,25 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       읽은 시각 · 상태 전용 push 는 중앙 버전 확인 뒤(2.581.0+) · 보존일 음수는 무제한이 아니다 · `VMPERF_RETENTION_DAYS=0` = 무제한.
     - 남긴 것: svcmon 미등록 agent 이름 거부(공유 토큰 미리 배정 흐름과 충돌 — 판단 필요) · 지표 보존 상한 3650일(제안 1830) · SSH 유휴 하한 1분.
 
+  - ⚠⚠ **v2.603 — 14차 점검 확정분**("자세하게 3번 더" 1회차. 발견 47 = 확정 34 · SPLIT 6 · 가능성 2 · 반증 5, 고침 40 + 후속 17.
+    회귀 `test/audit2603{a..f}.test.js` 73건 + 웹 vitest. 상세 `docs/AUDIT-2026-09-24k.md`):
+    - ⚠⚠ **반증 기록은 '그 근거로는 결함이 아니다' 이지 '결함이 없다' 가 아니다**: v2.601·v2.602 에서 반증한 두 건(현재 사용자 0건 ·
+      파트 장애 꺼짐)을 v2.603 이 **새 근거**(latest 표 무기한 잔존 · 중앙이 꺼짐을 스스로 내려보내 원인을 안다)로 뒤집었다. 반증할 때
+      근거를 함께 적어야 다음 감사가 다른 각도로 다시 볼 수 있다. 파트 장애는 kind `off`(+`offSource`).
+    - **수신 저장소는 전부 개수 상한**(CEN2603-01 high — GPU byVm·byHost 180만 항목 +486MB · scanStore · agentIdentity): 검증된 엣지는
+      밀지 않고 새 항목을 거절하며 `omitted` 로 밝힌다. 미등록 vCenter 로 온 원소는 버린다.
+    - **`push(...큰배열)` 금지 — `util/pushAll.js`**(CEN2603-03 — 14만 행 RangeError). 스윕 테스트가 허용 목록 밖 0건을 고정한다.
+    - **본문 객체의 toString/valueOf 는 입구에서 지운다**(`util/coercionTrap.js`, CEN2603-05 — 16개 경로 500).
+    - **ALTER TABLE 은 table_info 로 없는 열만, 'duplicate column name' 만 삼킨다**(DB2603-01 — 잠금을 '열 있음' 으로 삼켜 ipam 원장이
+      프로세스 끝까지 NDJSON 폴백). ipam.db 는 여전히 WAL 금지.
+    - **시계열 보존 DELETE 는 `util/chunkedPrune.js createPruneFlight`**(진행 공유 한 벌) — 스윕 테스트가 한 방 DELETE 를 허용 목록(사유)과 대조한다.
+      허용 목록의 '후속 후보'(capacity samples 등)는 규모를 재지 않았다.
+    - **본문 상한은 스트림으로**(`util/readPrefix.js` — svcmon·RMA 가 전체를 읽은 뒤 잘랐다. 주석의 '256KB' 가 사실이 아니었다).
+    - **호스트:포트는 `util/hostPort.js splitHostPort`**(IPv6 대괄호) · HAProxy 줄은 `haproxyAddress`(`ipv6@` — ⚠ `haproxy -c` 미확인).
+    - **이벤트 핸들러에 기본 인자 함수를 그대로 넘기지 말 것**(WEB2603-01 high — 클릭 이벤트가 vCenter id 가 되어 IPAM 서브넷 대장이 빔). 웹 스윕이 0건을 고정한다.
+    - ReDoS 5곳(SAN sensorshow 3차 · uemcli 배너 · FC 속도 · Unity 버전 · Isilon 풀) — 성능 수정은 옛 정규식과 **결정적 난수 대조**로 결과 동일성을 함께 고정한다.
+    - ⚠ 성능 상한 테스트는 전량 병렬 부하에서 단독의 3~4배가 나온다(v2.602 가림 55~80ms → 260ms). 상한은 **회귀와 확실히 갈리는 값**으로(여기선 1초 vs 5.6초).
+
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

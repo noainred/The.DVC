@@ -11,6 +11,7 @@
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { isAdminReq, maskDeviceAddress, maskSnapAddress } from '../../auth/addressMask.js';
 import { requireSettingsOwner } from '../admin/shared.js';
+import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import {
@@ -95,6 +96,17 @@ export function registerPdu(api) {
     res.json({ ok: true, thresholds: next });
   });
 
+  // v2.603 AUTHZ-2603-03: 예전에는 이 라우트가 `/tools/pdu/:id` **뒤**에 있어 도달 불가였다(:id 가 'db-stats' 를
+  //   잡아 404 '수집된 데이터가 없습니다'). 정적 경로이므로 :id 앞에 둔다. 살리면서 DB 절대 경로(`file`)는
+  //   admin 에게만 준다(scopeDbStatus 규약 — pdu/db.js dbStats 는 경로 키가 `path` 가 아니라 `file` 이라 여기서 뺀다).
+  api.get('/tools/pdu/db-stats', toolsPerm, fullScopeOnly, async (req, res) => {
+    const st = await dbStats();
+    if (isAdminReq(req) || !st || typeof st !== 'object') return res.json({ ok: true, stats: st });
+    const { file, ...rest } = st;
+    void file;
+    res.json({ ok: true, stats: scopeDbStatus(rest, req.user), pathHidden: true });
+  });
+
   api.get('/tools/pdu/:id', toolsPerm, fullScopeOnly, (req, res) => {
     const s = allSnapshots().find((x) => x.id === req.params.id) || getLocalSnapshot(req.params.id);
     if (!s) return res.status(404).json({ ok: false, reason: '수집된 데이터가 없습니다.' });
@@ -125,10 +137,6 @@ export function registerPdu(api) {
       to: req.query.to ? Number(req.query.to) : null,
     });
     res.json({ ok: true, ...r });
-  });
-
-  api.get('/tools/pdu/db-stats', toolsPerm, fullScopeOnly, async (_req, res) => {
-    res.json({ ok: true, stats: await dbStats() });
   });
 
   // ---- 등록/수정/삭제 -------------------------------------------------------

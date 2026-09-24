@@ -126,7 +126,9 @@ export function versionFromSvcDiag(text) {
 export function shortVersion(raw) {
   const s = String(raw ?? '').trim();
   if (!s) return '';
-  const m = /\d+(?:\.\d+){2,}/.exec(s);
+  // v2.603(감사 SEC2603-05): 숫자 구간의 시작에서만 시도한다(뒤보기) — 예전 정규식은 긴 숫자열에서 O(n²) 였다
+  //   ('0' 4만 자에 수 초). 가장 왼쪽 매치는 언제나 숫자 구간의 시작이므로 결과는 같다.
+  const m = /(?<!\d)\d+(?:\.\d+){2,}/.exec(s);
   return m ? m[0] : s;
 }
 

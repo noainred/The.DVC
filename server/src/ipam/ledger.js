@@ -228,8 +228,10 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
     else r.reconcile = reconcileOf(r.discovery);
     applied.push(r);
   }
+  // v2.603(감사 CEN2603-03): push(...applied) 는 원소 수만큼 인자를 만든다 — 약 13만 행을 넘으면 RangeError(Maximum call stack
+  //   size exceeded)로 원장 계산 전체가 던졌다(/api/tools/ipam 500 · ipam.db 동기화 정지). 원소 수와 무관한 반복으로 옮긴다.
   rows.length = 0;
-  rows.push(...applied);
+  for (const r of applied) rows.push(r);
 
   // 중복 여부는 '가시 행'(ignored 게이트로 숨겨진 행 제외) 기준으로 재계산한다 — 원본 count는
   // 숨김 이전 값이라, 한쪽이 정책/override로 숨겨지면 살아남은 유일 행이 duplicate로 오표시됐다.

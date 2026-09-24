@@ -8,7 +8,7 @@
  */
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, maskPollerStatus, maskedNameLabel } from '../../auth/addressMask.js';
+import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, maskPollerStatus, maskedNameLabel, scrubStringsDeep } from '../../auth/addressMask.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
@@ -412,14 +412,18 @@ api.get('/tools/sanswitch/devices/:id/healthcheck', toolsPerm, fullScopeOnly, as
   const hist = await listRuns(req.params.id, Number(req.query.history) || 10);
   // v2.599(AUTHZ-2599-03): 점검 결과(result.host)도 목록과 같은 기준 — 비-admin 에는 관리 주소를 가린다.
   const admin = isAdminReq(req);
+  // v2.603 AUTHZ-2603-02: result.items[].detail · history(runs[].items[].detail · compare.changes[].detail …)에
+  //   snap.error 원문 속 관리 주소가 실린다 — 등록부 전 주소로 문자열 전부를 가린다(목록·작업 로그와 같은 기준).
+  const hideAll = admin ? (x) => x : (() => { const hs = listDevices().map((d) => d.host).filter(Boolean); return (x) => scrubStringsDeep(x, hs); })();
+  const history = { ...hist, recorded: rec, compare: compareRuns(hist.runs), db: scopeDbStatus(await healthHistoryStatus(), req.user) };
   res.json({
-    ok: true, result: admin ? result : maskSnapAddress(result), ...(admin ? {} : { addressHidden: true }),
+    ok: true, result: admin ? result : hideAll(maskSnapAddress(result)), ...(admin ? {} : { addressHidden: true }),
     baseline: publicBaseline(baseline), items: CHECK_ITEMS,
     ports: portCheck,
     problemPorts: zoned.rows,
     zoningNote: zoned.note,
     problemPortsOmitted: Math.max(0, portCheck.rows.filter((r) => r.verdict === 'bad' || r.verdict === 'warn').length - problem.length),
-    history: { ...hist, recorded: rec, compare: compareRuns(hist.runs), db: scopeDbStatus(await healthHistoryStatus(), req.user) },
+    history: hideAll(history),
   });
 });
 
@@ -431,7 +435,11 @@ api.get('/tools/sanswitch/devices/:id/healthcheck/history', toolsPerm, fullScope
   const dev = listDevices().find((d) => d.id === req.params.id);
   if (!dev) return res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' });
   const hist = await listRuns(req.params.id, Number(req.query.limit) || 10);
-  res.json({ ok: true, deviceId: req.params.id, name: dev.name || (isAdminReq(req) ? dev.host : maskedNameLabel(dev)), ...hist, maxRuns: MAX_RUNS, compare: compareRuns(hist.runs), db: scopeDbStatus(await healthHistoryStatus(), req.user) });
+  const admin = isAdminReq(req);
+  // v2.603 AUTHZ-2603-02: 이력 detail(200자)에 snap.error 원문 주소가 저장돼 있다 — 비-admin 은 문자열 전부를 가린다.
+  const body = { ...hist, compare: compareRuns(hist.runs) };
+  const shown = admin ? body : scrubStringsDeep(body, listDevices().map((d) => d.host).filter(Boolean));
+  res.json({ ok: true, deviceId: req.params.id, name: dev.name || (admin ? dev.host : maskedNameLabel(dev)), ...shown, maxRuns: MAX_RUNS, ...(admin ? {} : { addressHidden: true }), db: scopeDbStatus(await healthHistoryStatus(), req.user) });
 });
 
 /**
@@ -462,7 +470,12 @@ api.get('/tools/sanswitch/healthcheck-all', toolsPerm, fullScopeOnly, async (req
     ok: true, at: Date.now(),
     summary: { ...summarizeAll(results), missing: missing.length, registered: devices.length },
     // v2.599(AUTHZ-2599-03): 장비별 결과의 host 도 비-admin 에는 가린다(단건 점검과 같은 기준).
-    results: results.map((r) => ({ ...(isAdminReq(req) ? r : maskSnapAddress(r)), datacenterName: dcNameOf(r.datacenterId) })),
+    // v2.603 AUTHZ-2603-02: items[].detail 의 오류 원문 주소도 등록부 전 주소로 가린다.
+    results: (() => {
+      if (isAdminReq(req)) return results.map((r) => ({ ...r, datacenterName: dcNameOf(r.datacenterId) }));
+      const hs = listDevices().map((d) => d.host).filter(Boolean);
+      return results.map((r) => ({ ...scrubStringsDeep(maskSnapAddress(r), hs), datacenterName: dcNameOf(r.datacenterId) }));
+    })(),
     ...(isAdminReq(req) ? {} : { addressHidden: true }),
     missing, items: CHECK_ITEMS, baselines: listBaselines(),
     // 이력 기록 결과 — '몇 건이 새로 기록되고 몇 건이 같은 스냅샷이어서 건너뛰었나'.

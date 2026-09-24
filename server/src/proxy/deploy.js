@@ -7,6 +7,7 @@
 
 import { withSsh } from './sshExec.js';
 import { fileStamp } from '../util/dayKey.js';
+import { haproxyAddress } from '../util/hostPort.js';
 
 const BEGIN = '# >>> portal-remote-access (auto-generated — do not edit) >>>';
 const END = '# <<< portal-remote-access (auto-generated) <<<';
@@ -20,7 +21,7 @@ export function buildConfigBlock(mappings, { bindAddress = '*' } = {}) {
       `    bind ${bindAddress}:${m.publicPort}`,
       '    mode tcp',
       '    option tcplog',
-      `    server target ${m.targetHost}:${m.targetPort}`,
+      `    server target ${haproxyAddress(m.targetHost, m.targetPort)}`,   // v2.603: IPv6 는 ipv6@ 접두(포트 = 마지막 콜론 뒤)
       '');
   }
   lines.push(END);

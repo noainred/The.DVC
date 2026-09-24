@@ -15,10 +15,12 @@ import { loadMetricsSettings } from '../metrics/settings.js';
 import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs } from './soapParse.js';
 import { vcDispatcher, vcRequestSignal } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
+import { splitHostPort } from '../util/hostPort.js';   // v2.603(LEFT2603-02): IPv6 host:port 분리
 import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v2.492: 다중 VM 기간 사용률(엔티티별 파싱)
 
 // soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
 export { parseObjectContent, xmlUnescape };
+import { pushAll } from '../util/pushAll.js';
 
 // 호스트 GPU 사용률 캐시(주기 throttle용). key=`${vcId}:${ref}` → { pct, at }.
 const _gpuUtilCache = new Map();
@@ -51,8 +53,10 @@ function getThumbprint(host, port = 443) {
  */
 export async function getVmConsole(vc, moref, vmName) {
   const hostNoScheme = vc.host.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-  const hostOnly = hostNoScheme.split(':')[0];
-  const port = Number(hostNoScheme.split(':')[1]) || 443;
+  // v2.603(LEFT2603-02): ':' 로 자르면 IPv6(`[2001:db8::10]`)의 host 가 '[2001' 이 되어 thumbprint 를 못 얻는다.
+  const hp = splitHostPort(hostNoScheme);
+  const hostOnly = hp ? hp.host : hostNoScheme;
+  const port = hp ? hp.port : 443;
   const c = new VimSoapClient(vc);
   await c.login();
   try {
@@ -244,7 +248,7 @@ export class VimSoapClient {
         `<RetrieveProperties xmlns="urn:vim25"><_this type="PropertyCollector">${this.sc.propertyCollector}</_this>` +
         `<specSet><propSet><type>${type}</type>${paths.map((p) => `<pathSet>${p}</pathSet>`).join('')}</propSet>` +
         `${objectSets}</specSet></RetrieveProperties>`;
-      out.push(...parseObjectContent(await this.#call(body)));
+      pushAll(out, parseObjectContent(await this.#call(body)));
     }
     return out;
   }
@@ -1279,7 +1283,7 @@ export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_0
         `<ReadNextEvents xmlns="urn:vim25"><_this type="EventHistoryCollector">${cRef}</_this><maxCount>${Math.min(pageSize, max - out.length)}</maxCount></ReadNextEvents>`);
       const events = parseEventsXml(xml);
       if (!events.length) break;
-      out.push(...events);
+      pushAll(out, events);
     }
   } finally {
     if (collector) await c.callRaw(`<DestroyCollector xmlns="urn:vim25"><_this type="EventHistoryCollector">${escXml(collector)}</_this></DestroyCollector>`, { ignoreExternal: true }).catch(() => {});

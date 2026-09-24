@@ -311,7 +311,44 @@ export function stripUemcliBanner(text) {
     .replace(/[\s\S]*/, stripCertBlocks)
     .replace(/^(Issuer|Subject|Valid from|Valid to|Serial|Id):[^\n]*\n?/gm, '')
     .replace(/^Would you like to:\s*\n?/gm, '')
-    .replace(/^\s*\[[123]\][^\n]*\n?/gm, '');
+    .replace(/[\s\S]*/, stripChoiceLines);
+}
+
+/**
+ * 선택지 줄(`[1]`·`[2]`·`[3]`)과 그 **바로 앞의 공백뿐인 줄**을 지운다(순수·O(n) — v2.603 감사 SEC2603-02).
+ * 예전 `/^\s*\[[123]\][^\n]*\n?/gm` 은 `\s*` 가 개행을 넘어, 빈 줄이 이어진 출력에서 줄 시작마다 그 빈 구간을
+ * 끝까지 다시 훑어 O(n²) 였다(v2.598 INJ-06 은 인증서 블록만 선형으로 바꿨다 — 빈 줄 10만 개에 수 초).
+ * 결과는 예전 정규식과 **같다**(테스트가 결정적 난수 입력으로 대조한다):
+ *  · 매치는 '줄 시작'(문자열 처음 또는 줄 끝 문자 \n·\r·U+2028·U+2029 바로 뒤 — JS `m` 플래그의 `^`)에서만 시작하고,
+ *  · 거기서 공백(`\s`, 개행 포함)을 건너뛴 첫 글자가 `[1]`~`[3]` 이면
+ *  · 그 뒤 첫 `\n` 까지(포함, 없으면 끝까지)를 지운다. 공백 건너뛰기는 뒤에서 한 번 계산한 표로 O(1) 이다.
+ */
+export function stripChoiceLines(text) {
+  const n = text.length;
+  if (!n) return text;
+  // nextNonWs[i] = i 이상에서 처음 나오는 \s 아닌 글자 위치(없으면 n)
+  const nextNonWs = new Int32Array(n + 1);
+  nextNonWs[n] = n;
+  for (let i = n - 1; i >= 0; i--) nextNonWs[i] = /\s/.test(text[i]) ? nextNonWs[i + 1] : i;
+  const isLT = (c) => c === '\n' || c === '\r' || c === '\u2028' || c === '\u2029';
+  let out = '';
+  let keepFrom = 0;
+  let i = 0;
+  while (i < n) {
+    if (i === 0 || isLT(text[i - 1])) {
+      const j = nextNonWs[i];
+      if (text[j] === '[' && (text[j + 1] === '1' || text[j + 1] === '2' || text[j + 1] === '3') && text[j + 2] === ']') {
+        const nl = text.indexOf('\n', j + 3);
+        const end = nl < 0 ? n : nl + 1;
+        out += text.slice(keepFrom, i);
+        keepFrom = end;
+        i = end;
+        continue;
+      }
+    }
+    i++;
+  }
+  return out + text.slice(keepFrom);
 }
 
 /**

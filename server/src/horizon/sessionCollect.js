@@ -18,6 +18,7 @@
 import { withHorizonSession } from './horizon.js';
 import { describeError } from '../util/errors.js';
 import { normalizeSessions, SESSION_PATH, PAGE_SIZE_MAX } from './sessions.js';
+import { pushAll } from '../util/pushAll.js';
 
 const HAS_MORE_HEADERS = ['has_more_records', 'hasmorerecords', 'x-has-more-records'];
 
@@ -58,7 +59,7 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
           e.kind = 'unparsed';
           throw e;
         }
-        acc.push(...body);
+        pushAll(acc, body);
         pages = page;
         const more = headerSaysMore(r);
         if (more === false) break;

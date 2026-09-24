@@ -14,6 +14,7 @@ import { splitByDeadband, policyFromEnv } from './deadband.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
 import path from 'node:path';
 import { config } from '../config.js';
+import { pushAll } from '../util/pushAll.js';
 
 const DB_PATH = config.temp.dbPath; // reuse the temp/metrics DB path
 
@@ -219,7 +220,7 @@ function initJson() {
   try { for (const l of fs.readFileSync(file, 'utf8').split('\n')) { if (l.trim()) { const r = JSON.parse(l); rows.push(r); } } } catch { /* */ }
   return {
     kind: 'json',
-    insertMany: (recs, ts) => { const lines = recs.map((r) => ({ m: r.metric, k: r.k, v: r.v, t: ts })); rows.push(...lines); try { fs.appendFileSync(file, lines.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } },
+    insertMany: (recs, ts) => { const lines = recs.map((r) => ({ m: r.metric, k: r.k, v: r.v, t: ts })); pushAll(rows, lines); try { fs.appendFileSync(file, lines.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } },
     latestAll: (metric) => { const map = new Map(); for (const r of rows) if (r.m === metric) { const c = map.get(r.k); if (!c || r.t > c.ts) map.set(r.k, { v: r.v, ts: r.t }); } return map; },
     history: (metric, k, sinceTs, bucketMs, limit) => {
       const buckets = new Map();

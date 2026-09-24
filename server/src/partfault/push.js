@@ -37,7 +37,8 @@ const MAX_DEVICES = Math.max(100, Number(process.env.PARTFAULT_PUSH_MAX_DEVICES)
 const intervalMs = () => clampIntervalMs(Number(process.env.PARTFAULT_PUSH_MS) || 10 * 60_000, 10 * 60_000, 60_000); // v2.600 LO2600-04: 상한(2^31 초과 → setInterval 1ms 루프)
 
 let _timer = null;
-let _busy = false;
+let _busy = null;   // 진행 중인 push(프라미스) — v2.603 EDGE2603-01
+let _again = false; // 진행 중에 들어온 요청 — 끝난 뒤 한 번 더 스캔·전송한다
 let _last = null;
 
 /** 스캔 결과 → 프로토콜 2 본문(순수). 테스트가 모양을 고정한다. */
@@ -63,6 +64,14 @@ export function buildPayload(scan, { agent = config.agent.name, version = curren
   };
 }
 
+/**
+ * v2.603(감사 EDGE2603-01): 재진입 가드는 유지하되, 진행 중에 들어온 요청을 **거절하지 않고 끝난 뒤 한 번 더**
+ *   스캔·전송한다(storage/push.js·pdu/push.js 와 같은 규약). 예전에는 즉시 트리거(`hooks.js onSnapshotRefreshed` —
+ *   iDRAC 인벤토리 갱신 직후)가 주기 push 와 겹치면 `{ok:false,'이전 push 진행 중'}` 을 받고 그 결과를 hooks 의
+ *   `_last` 에만 적었다(재시도·콘솔 없음). 진행 중이던 push 의 `runScan` 이 인벤토리 갱신 **전**에 시작했다면
+ *   새 장애는 다음 주기(기본 10분)까지 중앙에 가지 않았다 — '파트당 1건 즉시 알림'(v2.548 F7)과 어긋난다.
+ *   합류한 호출자는 **다시 보낸 결과**를 받는다(hooks 가 그 결과를 기록한다). 다시 보낼 때의 사유는 `reason+again`.
+ */
 export async function pushPartFaultsNow({ reason = 'timer' } = {}) {
   if (!config.agent.centralUrl || !config.agent.centralToken) {
     return { ok: false, reason: 'push 비활성화(CENTRAL_URL/TOKEN 미설정)' };
@@ -72,8 +81,22 @@ export async function pushPartFaultsNow({ reason = 'timer' } = {}) {
     _last = { at: Date.now(), skipped: true, reason: `꺼짐(${en.source})` };
     return { ok: false, reason: `파트 장애 기능이 꺼져 있습니다(${en.source})` };
   }
-  if (_busy) return { ok: false, reason: '이전 push 진행 중' }; // 재진입 가드(CLAUDE.md 필수)
-  _busy = true;
+  if (_busy) { // 재진입 가드(CLAUDE.md 필수) — 거절하지 않고 끝난 뒤 한 번 더
+    if (!_again) console.log(`[partfault-push] ${reason} — 이전 push 진행 중, 끝난 뒤 한 번 더 스캔·전송합니다`);
+    _again = true;
+    return _busy;
+  }
+  _busy = (async () => {
+    let r; let why = reason; let rounds = 0;
+    do { _again = false; r = await pushOnce(why); why = `${reason}+again`; rounds++; } while (_again && rounds < 5);
+    if (_again) { _again = false; console.warn('[partfault-push] 재전송 요청이 5회 연속 겹쳤습니다 — 남은 요청은 다음 주기 push 에 실립니다'); }
+    return r;
+  })().finally(() => { _busy = null; });
+  return _busy;
+}
+
+async function pushOnce(reason) {
+  if (!partFaultEnabled().enabled) return { ok: false, reason: '파트 장애 기능이 꺼져 있습니다' }; // 재전송 사이에 꺼졌을 수 있다
   const t0 = Date.now();
   try {
     const scan = await runScan();
@@ -115,7 +138,7 @@ export async function pushPartFaultsNow({ reason = 'timer' } = {}) {
     _last = { at: Date.now(), ms: Date.now() - t0, reason, ok: false, httpStatus: e?.status || null, error: String(e.message || e).slice(0, 200) };
     console.warn(`[partfault-push] 실패: ${_last.error}`);   // 실패도 반드시 로그(무음 실패 금지)
     return { ok: false, reason: _last.error };
-  } finally { _busy = false; }
+  }
 }
 
 export function startPartFaultPush() {

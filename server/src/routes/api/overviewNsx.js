@@ -136,6 +136,30 @@ function healthScopedGlobal(snap, allowed) {
   return g;
 }
 
+/**
+ * v2.603 LEFT2603-01: 스냅샷 그룹 id(`${mgr.id}:${rawId}` — nsx/client.js)를 매니저 id 와 원 그룹 id 로 나눈다.
+ * 예전에는 **첫 콜론**에서 잘라, 매니저 id 에 콜론이 있으면('kr:nsx01' — nsx/registry.js normalize 는 콜론을 허용한다)
+ * 엉뚱한 원 그룹 id('nsx01:grp-web')로 라이브 조회했다(VC2598 vcRefOf/morefOf 의 NSX 형제 누락).
+ *  ① managerId 가 주어지고 groupId 가 `${managerId}:` 로 시작하면 그 접두만 뗀다(morefOf 와 같은 규칙).
+ *  ② managerId 가 주어졌는데 접두가 없으면 groupId 가 이미 원 id 인 경우다 — 콜론이 없을 때만 그대로 쓰고,
+ *     콜론이 있으면 예전처럼 첫 콜론에서 자른다(구버전 호출 호환).
+ *  ③ managerId 가 없으면 등록된 매니저 id 중 **가장 긴** 접두 일치를 쓰고, 없을 때만 첫 콜론으로 떨어진다.
+ * @returns {{managerId:string, rawId:string}}
+ */
+export function splitNsxGroupId(groupId, managerId, registryIds = []) {
+  const full = String(groupId || '');
+  const mid = typeof managerId === 'string' ? managerId : '';
+  const sep = full.indexOf(':');
+  if (mid) {
+    if (full.startsWith(`${mid}:`)) return { managerId: mid, rawId: full.slice(mid.length + 1) };
+    return { managerId: mid, rawId: sep > 0 ? full.slice(sep + 1) : full };
+  }
+  const hit = (registryIds || []).filter((id) => typeof id === 'string' && id && full.startsWith(`${id}:`))
+    .sort((a, b) => b.length - a.length)[0];
+  if (hit) return { managerId: hit, rawId: full.slice(hit.length + 1) };
+  return { managerId: sep > 0 ? full.slice(0, sep) : '', rawId: sep > 0 ? full.slice(sep + 1) : full };
+}
+
 export function registerOverviewNsx(api) {
 
 api.get('/health', (req, res) => {
@@ -264,10 +288,7 @@ api.get('/nsx', invNsx, (req, res) => {
 
 // NSX 보안그룹 라이브 멤버 조회(온디맨드). groupId는 스냅샷의 "managerId:rawId" 형식.
 api.get('/nsx/group-members', invNsx, async (req, res) => {
-  const full = String(req.query.groupId || '');
-  const sep = full.indexOf(':');
-  const managerId = req.query.managerId || (sep > 0 ? full.slice(0, sep) : '');
-  const rawId = sep > 0 ? full.slice(sep + 1) : full;
+  const { managerId, rawId } = splitNsxGroupId(req.query.groupId, req.query.managerId, loadNsxRegistry().map((m) => m.id));
   if (!managerId || !rawId) return res.status(400).json({ error: 'managerId/groupId가 필요합니다.' });
   if (nsxStore.get().source === 'mock') {
     // 데모: 합성 멤버.

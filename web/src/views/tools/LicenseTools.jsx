@@ -5,6 +5,7 @@ import { DataTable, Loading, ErrorBox, UsageCell } from '../../components/ui.jsx
 import { Card, useTool } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
+import { licenseScopeNote } from './licenseScopeText.js'; // v2.603: 범위 밖 제외 안내
 import BulkDeviceIo from './BulkDeviceIo.jsx';   // v2.525: Horizon 서버 CSV·자유텍스트 대량 등록(스토리지·SAN 과 같은 공용 모달)
 
 
@@ -194,6 +195,10 @@ export function LicenseExpiry({ scope, isAdmin }) {
         <Card label="전체 라이선스" value={data.total} meta={scope ? '선택 vCenter' : `vCenter+NSX+Horizon${data.horizonServers ? `(${data.horizonServers})` : ''}`} />
         {STATUS.map(([k, l]) => <Card key={k} label={l} value={data.summary?.[k] || 0} />)}
       </div>
+
+      {licenseScopeNote(data) && (
+        <div className="muted" style={{ marginBottom: 10, fontSize: 12 }}>ⓘ {licenseScopeNote(data)}</div>
+      )}
 
       {(data.collectionErrors || []).length > 0 && (
         <div style={{ marginBottom: 10, padding: '8px 12px', borderRadius: 8, fontSize: 12, background: 'rgba(251,191,36,.1)', color: 'var(--amber)' }}>

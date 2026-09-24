@@ -7,17 +7,16 @@
 
 import { getProxyById, listMappings, addMapping } from '../proxy/registry.js';
 import { provision } from '../proxy/provision.js';
+import { splitHostPort } from '../util/hostPort.js';
 
-/** "https://nsx.corp:443/..." → { hostname, port }. 포트 미지정 시 443. */
-function parseHostPort(host) {
-  try {
-    const u = new URL(/^https?:\/\//.test(host) ? host : `https://${host}`);
-    return { hostname: u.hostname, port: Number(u.port) || 443 };
-  } catch {
-    const h = String(host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-    const [name, p] = h.split(':');
-    return { hostname: name, port: Number(p) || 443 };
-  }
+/**
+ * "https://nsx.corp:443/..." → { hostname, port }. 포트 미지정 시 443.
+ * v2.603(LEFT2603-02): 예전 구현은 IPv6 를 '[fd00::1]'(대괄호 포함)로 돌려 addMapping 의 SAFE_TARGET_HOST 가
+ * 거부했고 조용히 직접 연결로 떨어졌다. 공용 파서로 대괄호 없는 주소를 준다(HAProxy 설정 줄은 deploy.js 가 ipv6@ 로 쓴다).
+ */
+export function parseHostPort(host) {
+  const hp = splitHostPort(host);
+  return hp ? { hostname: hp.host, port: hp.port } : { hostname: '', port: 443 };
 }
 
 /**
