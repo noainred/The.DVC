@@ -365,3 +365,42 @@ test('추가②: 로그 폴러는 캐시에 잘못된 주기가 들어가도 set
   assert.equal(seen.length, 6);
   for (const ms of seen) assert.ok(ms >= 60_000 && ms <= 86_400_000, `간격 ${ms}`);
 });
+
+// ── 추가 ⑤: 라이트사이징 — 피크를 못 읽은 차원은 권고 보류 ─────────────────
+test('추가⑤: 메모리 피크를 못 읽은 VM 에 1GB 로 줄이라고 권하지 않는다(권고 보류 · held 로 밝힘)', async () => {
+  const { suggestSize, computeRightsizing } = await import('../src/reports/rightsizing.js');
+  const s = suggestSize(8, 32, 20, null);
+  assert.equal(s.suggestedVcpu, 3);
+  assert.equal(s.suggestedRamGB, 32, '메모리는 현재 사양 유지');
+  assert.deepEqual(s.held, ['mem']);
+  assert.equal(suggestSize(8, 32, 20, 30).held, undefined);
+  const vms = [{ id: 'a', name: 'a', powerState: 'POWERED_ON', cpuCount: 8, memMB: 32 * 1024 }];
+  const stats = { a: { samples: 20, cpuAvg: 5.5, memAvg: null, cpuMax: 20, memMax: null, sinceTs: 1 } };
+  const r = computeRightsizing(vms, (id) => stats[id]);
+  const o = r.oversized.find((x) => x.id === 'a');
+  assert.ok(o, '과대 후보');
+  assert.equal(o.suggestedRamGB, 32);
+  assert.equal(o.reclaimRamGB, 0);
+  assert.deepEqual(o.held, ['mem']);
+  assert.equal(o.memMax, null, '못 읽은 피크를 0% 로 표시하지 않는다');
+  assert.equal(o.memAvg, null);
+});
+
+// ── 추가 ⑥: ping 대상 삭제 이력 청크화 ─────────────────────────────────────
+test('추가⑥: ping 대상 삭제는 그 대상 이력을 청크로 끝까지 지우고 다른 대상은 건드리지 않는다', async () => {
+  const { getPingDb } = await import('../src/ping/db.js');
+  const db = await getPingDb();
+  db.insertMany(Array.from({ length: 3000 }, (_, i) => ({ target: 'drop-me', ts: Date.parse('2030-01-01T00:00:00Z') + i, rtt: 1, ok: true })));
+  db.insertMany([{ target: 'keep-me', ts: Date.parse('2030-01-01T00:00:00Z'), rtt: 1, ok: true }]);
+  const p = db.dropTarget('drop-me');
+  assert.ok(p && typeof p.then === 'function', 'dropTarget 은 약속을 돌려줘야 한다');
+  const { r, yields } = await yieldsWhile(p);
+  assert.equal(r.deleted, 3000);
+  assert.equal(r.done, true);
+  assert.ok(yields >= 3, `양보 ${yields}회`);
+  assert.equal(db.meta('drop-me').count, 0);
+  assert.equal(db.meta('keep-me').count, 1);
+  const route = fs.readFileSync(new URL('../src/routes/ping.js', import.meta.url), 'utf8');
+  assert.match(route, /historyPurge = 'background'/, '라우트는 이력 삭제를 응답 경로에서 기다리지 않는다');
+  assert.doesNotMatch(route, /await getPingDb\(\)\)\.dropTarget/);
+});
