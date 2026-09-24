@@ -12,6 +12,7 @@
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks';
 // v2.498: 창 요약을 성능 측정기에 넘겨 24시간 추이·hang 이벤트(로그 파일)로 남긴다. 여기 로직은 그대로.
 import { recordLoopWindow } from '../perf/monitor.js';
+import { clampIntervalMs } from '../config.js';
 
 let started = false;
 
@@ -22,7 +23,7 @@ export function startLoopLagMonitor() {
   started = true;
   try {
     const warnMs = Math.max(50, Number(process.env.LOOP_LAG_WARN_MS) || 500);        // 이 이상 멈추면 로깅
-    const everyMs = Math.max(5_000, Number(process.env.LOOP_LAG_INTERVAL_MS) || 30_000);
+    const everyMs = clampIntervalMs(Number(process.env.LOOP_LAG_INTERVAL_MS) || 30_000, 30_000, 5_000);   // v2.599 T2599-02: 상한 포함
     const h = monitorEventLoopDelay({ resolution: 20 });
     h.enable();
     // 이벤트 루프 이용률(ELU) 델타의 기준점 — 루프가 '막혔는지' 와 '바쁜지' 는 다르다.

@@ -74,6 +74,8 @@ export default function BmStorageTool() {
     const c = cfgOf(s.id);
     setForm({ ...EMPTY, ...c, password: '', mounts: (c?.mounts || []).join('\n'), groups: (c?.groups || []).join(', ') });
   };
+  // v2.599(C2599-09): 사용률은 서버가 df 와 같은 정의로 주고, 분모 0(마운트 미수집)이면 null 이다 — 'null%'·0% 로 그리지 않는다.
+  const pctCell = (p) => (p == null ? <span className="muted">—</span> : <>{bar(p)} <b style={{ fontSize: 12, color: pctColor(p) }}>{p}%</b></>);
   const bar = (p) => (
     <span style={{ display: 'inline-block', position: 'relative', width: 90, height: 7, borderRadius: 5, background: 'rgba(148,163,184,.15)', overflow: 'hidden', verticalAlign: 'middle' }}>
       <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.min(100, p)}%`, background: pctColor(p), borderRadius: 5 }} />
@@ -144,7 +146,7 @@ export default function BmStorageTool() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 14 }}>
         <Kpi label="서버" value={`${total.servers}대`} meta={`정상 ${total.ok} · 오류 ${total.errors}${total.pending ? ` · 미수집 ${total.pending}` : ''}`} accent={total.errors ? 'var(--red)' : undefined} />
         <Kpi label="총 용량" value={fmtBytes(total.totalBytes)} />
-        <Kpi label="사용량" value={fmtBytes(total.usedBytes)} pct={Math.round(total.usedPct)} />
+        <Kpi label="사용량" value={fmtBytes(total.usedBytes)} pct={total.usedPct == null ? undefined : Math.round(total.usedPct)} />
         <Kpi label="사용 가능" value={fmtBytes(total.availBytes)} />
       </div>
 
@@ -164,7 +166,7 @@ export default function BmStorageTool() {
                     <td style={{ textAlign: 'right' }}>{fmtBytes(g.totalBytes)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtBytes(g.usedBytes)}</td>
                     <td style={{ textAlign: 'right' }}>{fmtBytes(g.availBytes)}</td>
-                    <td>{bar(g.usedPct)} <b style={{ fontSize: 12, color: pctColor(g.usedPct) }}>{g.usedPct}%</b></td>
+                    <td>{pctCell(g.usedPct)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -196,7 +198,7 @@ export default function BmStorageTool() {
                     <td style={{ textAlign: 'right' }}>{s.ok ? fmtBytes(s.totalBytes) : '—'}</td>
                     <td style={{ textAlign: 'right' }}>{s.ok ? fmtBytes(s.usedBytes) : '—'}</td>
                     <td style={{ textAlign: 'right' }}>{s.ok ? fmtBytes(s.availBytes) : '—'}</td>
-                    <td>{s.ok ? <>{bar(s.usedPct)} <b style={{ fontSize: 12, color: pctColor(s.usedPct) }}>{s.usedPct}%</b></>
+                    <td>{s.ok ? pctCell(s.usedPct)
                       : s.authStopped ? <span className="badge red" style={{ fontSize: 11 }} title={s.error || ''}>인증 실패 정지{s.authStopped.attempts != null ? ` · ${s.authStopped.attempts}회` : ''}</span>
                       : s.error ? <span style={{ color: 'var(--red)', fontSize: 11.5 }} title={s.error}>⚠ {s.error.slice(0, 40)}{s.error.length > 40 ? '…' : ''}</span>
                         : <span className="muted" style={{ fontSize: 12 }}>수집 대기</span>}</td>

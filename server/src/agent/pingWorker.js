@@ -6,14 +6,15 @@
  * 응답성을 위해 짧은 주기(기본 4s)로 폴링하되, 대기 작업이 없으면 ping을 돌리지 않는다.
  */
 
-import { config, loadVcenterConfig } from '../config.js';
+import { config, clampIntervalMs, loadVcenterConfig } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { pingMany } from '../util/ping.js';
 
 let timer = null;
 let running = false; // 재진입 방지(긴 ping이 다음 4s 틱과 겹쳐 중복 인출/실행되는 것 차단)
-const POLL_MS = Number(process.env.AGENT_PING_POLL_MS) || 4_000;
+// v2.599 T2599-02: 주기 env 도 [하한, MAX_TIMER_MS] 로 가둔다 — 2^31 초과·음수는 setInterval 에서 1ms 루프가 된다.
+const POLL_MS = clampIntervalMs(Number(process.env.AGENT_PING_POLL_MS) || 4_000, 4_000, 1_000);
 
 /*
  * ⚠⚠ v2.574 IMP-07 — **무음 실패를 만들지 않는다.** v2.573 까지 이 워커는 `catch { return null; }`

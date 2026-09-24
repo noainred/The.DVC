@@ -4,13 +4,14 @@
  * 조회 결과(페이지)만 중계된다. 응답성을 위해 짧은 주기로 폴링한다.
  */
 
-import { config, loadVcenterConfig } from '../config.js';
+import { config, clampIntervalMs, loadVcenterConfig } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { getLogsDb } from '../logs/db.js';
 
 let timer = null;
 let running = false; // 재진입 방지
-const POLL_MS = Number(process.env.AGENT_LOGQ_POLL_MS) || 4_000;
+// v2.599 T2599-02: 주기 env 도 [하한, MAX_TIMER_MS] 로 가둔다 — 2^31 초과·음수는 setInterval 에서 1ms 루프가 된다.
+const POLL_MS = clampIntervalMs(Number(process.env.AGENT_LOGQ_POLL_MS) || 4_000, 4_000, 1_000);
 
 /*
  * ⚠⚠ **무음 실패 금지**(v2.561 — v2.549 가 `edgeLogWorker` 에만 적용한 규약을 여기에도).

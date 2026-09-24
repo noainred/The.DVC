@@ -136,7 +136,7 @@ export const config = {
     // 시간당 롤업(power_hourly)은 retentionDays 만큼 남으므로 대시보드 집계는 그대로다.
     rawRetentionDays: Number(process.env.IDRAC_RAW_RETENTION_DAYS) || 0,
     // Per-request timeout to the iDRAC Redfish API.
-    timeoutMs: Number(process.env.IDRAC_TIMEOUT_MS) || 15_000,
+    timeoutMs: clampIntervalMs(Number(process.env.IDRAC_TIMEOUT_MS) || 15_000, 15_000, 1_000),   // v2.599: 음수·초과 시한 차단
     // --- OME (OpenManage Enterprise) tuning ---
     // Power Manager plugin id (constant across OME installs; override if needed).
     omePluginId: process.env.OME_POWER_PLUGIN_ID || '2F6D05BE-EE4B-4B0E-B873-C8D2F64A4625',
@@ -223,7 +223,7 @@ export const config = {
     // Central portal: pull registered collectors on this interval. 0 disables.
     pullIntervalMs: offOrIntervalMs(numEnv(process.env.COLLECTOR_PULL_INTERVAL_MS, 60_000), 5_000),
     // Per-request timeout when pulling a remote collector.
-    timeoutMs: Number(process.env.COLLECTOR_TIMEOUT_MS) || 20_000,
+    timeoutMs: clampIntervalMs(Number(process.env.COLLECTOR_TIMEOUT_MS) || 20_000, 20_000, 1_000),   // v2.599: 음수·초과 시한 차단
   },
   // Central orchestration of agent-side scans. The central portal hands out
   // per-agent IP assignments; each agent pulls its assignment by name, scans

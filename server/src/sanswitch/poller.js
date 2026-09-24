@@ -8,7 +8,7 @@
  *  - **주기는 상수로 굳히지 않는다** — startAdaptiveTimer 로 매 회 다시 읽어 재무장한다
  *    (setInterval 은 생성 시 간격에 묶여 설정 변경이 재시작 전까지 안 먹는다).
  */
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { putSnapshot, getSnapshot } from './store.js';
 import { recordActivity } from './activityLog.js';
@@ -27,7 +27,8 @@ const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.SANSW_CONCURRENC
 const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.SANSW_DEVICE_TIMEOUT_MS) || 120_000);
 
 /** 주기(ms) — 포트 상태는 스토리지 용량보다 자주 봐야 해 기본 5분. 하한 60초. */
-export const pollMs = () => Math.max(60_000, Number(process.env.SANSW_POLL_MS) || 5 * 60_000);
+// v2.599 T2599-02: 상한도 둔다(2^31 초과 → setTimeout 1ms 루프).
+export const pollMs = () => clampIntervalMs(Number(process.env.SANSW_POLL_MS) || 5 * 60_000, 5 * 60_000, 60_000);
 
 let _timer = null;
 let _busy = false;

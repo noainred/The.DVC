@@ -7,7 +7,7 @@
  * 응답성을 위해 짧은 주기(기본 5s)로 폴링하되, 대기 잡이 없으면 스캔하지 않는다.
  */
 
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { runLocalIdracScan } from '../idrac/localScan.js';
@@ -16,7 +16,8 @@ import { pollNow } from '../idrac/poller.js';
 
 let timer = null;
 let last = null;
-const POLL_MS = Number(process.env.AGENT_IDRAC_SCAN_POLL_MS) || 5_000;
+// v2.599 T2599-02: 주기 env 도 [하한, MAX_TIMER_MS] 로 가둔다 — 2^31 초과·음수는 setInterval 에서 1ms 루프가 된다.
+const POLL_MS = clampIntervalMs(Number(process.env.AGENT_IDRAC_SCAN_POLL_MS) || 5_000, 5_000, 1_000);
 
 function headers() {
   return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
