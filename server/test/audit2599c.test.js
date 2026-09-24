@@ -148,6 +148,10 @@ test('실제 라우터 — 역할·범위별 응답(01·02·03·04·05·06·EDGE
     const osSB = await req(sadmin, '/api/admin/os-scan/results?vcenterId=' + encodeURIComponent(B));
     const osF = await req(admin, '/api/admin/os-scan/results');
 
+    const osStS = await req(sadmin, '/api/admin/os-scan');
+    const osStF = await req(admin, '/api/admin/os-scan');
+    const osRunOut = await req(sadmin, '/api/admin/os-scan/run', { method: 'POST', body: JSON.stringify({ vcenterId: B }) });
+    const osRunNone = await req(sadmin, '/api/admin/os-scan/run', { method: 'POST', body: JSON.stringify({}) });
     const probeOut = await req(sadmin, '/api/remote/probe', { method: 'POST', body: JSON.stringify({ vcenterId: B, targetHost: vmA.name }) });
     const probeIn = await req(sadmin, '/api/remote/probe', { method: 'POST', body: JSON.stringify({ vcenterId: A, targetHost: vmA.name }) });
     const qcOut = await req(sadmin, '/api/remote/quick-connect', { method: 'POST', body: JSON.stringify({ vcenterId: B, targetHost: vmA.name }) });
@@ -189,6 +193,7 @@ test('실제 라우터 — 역할·범위별 응답(01·02·03·04·05·06·EDGE
     return {
       A, B, jobB, hijack, afterHijack, moveVc, editOk, vmMismatch,
       cloneListS: cloneListS.body, cloneListF: cloneListF.body,
+      osStS: osStS.body, osStF: osStF.body, osRunOut, osRunNone,
       osS: osS.body, osSB: osSB.body, osF: osF.body,
       probeOut, probeIn, qcOut, lists, colS, colF, vcCount: vcs.length, localCount, cap,
     };
@@ -209,6 +214,13 @@ test('실제 라우터 — 역할·범위별 응답(01·02·03·04·05·06·EDGE
   assert.equal(r.osS.omittedOutOfScope, 1);
   assert.equal(r.osSB.items.length, 0, '?vcenterId 로 범위 밖을 지정해도 안 나온다');
   assert.equal(r.osF.items.length, 2);
+  // 후속: os-scan 상태 요약은 범위 기준, 함대 실행 결과는 가림 · 즉시 스캔은 범위 안 하나만
+  assert.equal(r.osStS.summary.scanned, 1);
+  assert.equal(r.osStF.summary.scanned, 2);
+  assert.equal(r.osStS.fleetRunHidden, true);
+  assert.equal(r.osStS.lastAuth, null);
+  assert.equal(r.osRunOut.status, 404, JSON.stringify(r.osRunOut.body));
+  assert.equal(r.osRunNone.status, 400);
   // AUTHZ-2599-02 — 범위 밖 vCenter 지정은 404, 프록시 이름이 응답에 없다
   assert.equal(r.probeOut.status, 404, JSON.stringify(r.probeOut.body));
   assert.equal(r.probeOut.body.proxyName, undefined);
@@ -244,4 +256,19 @@ test('실제 라우터 — 역할·범위별 응답(01·02·03·04·05·06·EDGE
   const rows = r.cap.body.data.filter((x) => x.name === 'ST1');
   assert.equal(rows.length, 1, JSON.stringify(r.cap.body.data));
   assert.equal(rows[0].usedBytes, 20);
+});
+
+test('AUTHZ-2599-05 후속: scopeCloneStatus — running·queued 잡 id 를 보이는 잡으로 좁힌다', async () => {
+  const { scopeCloneStatus } = await import('../src/routes/api/vmClone.js');
+  const all = [{ id: 'a' }, { id: 'b' }];
+  const vis = [{ id: 'a' }];
+  const st = { lastTick: 1, running: { jobId: 'b', phase: '복제' }, queued: ['a', 'b'] };
+  const out = scopeCloneStatus(st, vis, all);
+  assert.equal(out.running, null);
+  assert.equal(out.runningOutOfScope, true);
+  assert.deepEqual(out.queued, ['a']);
+  assert.equal(out.queuedOutOfScope, 1);
+  assert.equal(scopeCloneStatus(st, all, all), st, '전체 범위는 그대로');
+  const own = scopeCloneStatus({ running: { jobId: 'a' }, queued: [] }, vis, all);
+  assert.equal(own.running.jobId, 'a'); assert.equal(own.runningOutOfScope, false);
 });

@@ -67,9 +67,10 @@ export function getOsResults({ vcenterId = '', mismatch = false } = {}) {
 export function getScannedIds() { load(); return new Set(map.keys()); }
 export function getScanInfo(vmId) { load(); return map.get(vmId) || null; }
 
-export function osSummary() {
+/** @param {(r:object)=>boolean} [keep] 행 필터(v2.599 — 범위 계정 요약은 그 범위 행으로만 센다). */
+export function osSummary(keep = null) {
   load();
-  const rows = [...map.values()];
+  const rows = keep ? [...map.values()].filter(keep) : [...map.values()];
   const byFamily = {};
   for (const r of rows) { const f = r.family || '미상'; byFamily[f] = (byFamily[f] || 0) + 1; }
   return {

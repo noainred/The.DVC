@@ -237,6 +237,7 @@ export function RealOs({ scope }) {
         <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy === 'save'} onClick={saveSettings}>설정 저장</button>
           <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'run'} onClick={runNow}>{busy === 'run' ? '스캔 중…' : `지금 스캔 (${scope || '전체 vCenter'})`}</button>
+          {st.fleetRunHidden ? <span className="muted" style={{ fontSize: 12 }}>마지막 실행 결과(탐지 수·오류·인증 정지)는 전 vCenter 기준이라 범위가 제한된 계정에는 표시하지 않습니다.</span> : null}
           {st.lastErr ? <span className="muted" style={{ fontSize: 12, color: 'var(--amber)' }}>최근 오류: {st.lastErr.slice(0, 60)}</span> : null}
           {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}
         </div>

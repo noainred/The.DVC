@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
+import { hostText } from './addressHiddenText.js'; // v2.599: 비-admin 에는 관리 주소가 가려져 온다 — 빈 칸 대신 '—'
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -450,7 +451,7 @@ export function AllHealthCheck({ datacenterIds = [] }) {
               return (
                 <React.Fragment key={r.deviceId}>
                   <tr>
-                    <td style={{ whiteSpace: 'nowrap' }}><b>{r.name}</b><div className="muted" style={{ fontSize: 10.5 }}>{r.host}{r.agent ? ` · 엣지 ${r.agent}` : ''}</div></td>
+                    <td style={{ whiteSpace: 'nowrap' }}><b>{r.name}</b><div className="muted" style={{ fontSize: 10.5 }}>{hostText(r.host)}{r.agent ? ` · 엣지 ${r.agent}` : ''}</div></td>
                     <td className="muted">{r.datacenterName || '—'}</td>
                     {/* 종합 판정은 deviceVerdict 의 라벨·색을 쓴다 — '정상(일부 미확인)' 을 초록으로
                         보여주지 않기 위해서다. 정렬 키는 등급+미확인 여부(정상끼리도 갈린다). */}

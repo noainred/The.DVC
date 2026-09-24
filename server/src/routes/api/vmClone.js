@@ -14,6 +14,18 @@ import { listMounts } from '../../system/nfsMounts.js';
 
 const adminOnly = requireRole('admin');
 
+/**
+ * v2.599(AUTHZ-2599-05 후속): 실행 상태의 running·queued 잡 id 도 목록과 같은 범위로 — 보이는 잡만 남기고
+ * 범위 밖 실행 중이면 id·단계 대신 `runningOutOfScope: true` 로 '다른 잡이 도는 중' 만 밝힌다(직렬 큐라 대기 이유가 된다).
+ */
+export function scopeCloneStatus(st, visibleJobs, allJobs) {
+  if (visibleJobs === allJobs || !st) return st;
+  const ids = new Set(visibleJobs.map((j) => j.id));
+  const queued = (st.queued || []).filter((id) => ids.has(id));
+  const run = st.running && !ids.has(st.running.jobId) ? null : st.running;
+  return { ...st, running: run, queued, runningOutOfScope: !!(st.running && !run), queuedOutOfScope: (st.queued || []).length - queued.length };
+}
+
 export function registerVmClone(api) {
 
 /** 잡 목록 + 실행 상태 + NFS 마운트 요약(대상 선택 드롭다운용). */
@@ -26,7 +38,7 @@ api.get('/tools/vm-clone', adminOnly, (req, res) => {
   res.json({
     jobs,
     ...(allowed ? { scoped: true, omittedOutOfScope: all.length - jobs.length } : {}),
-    status: schedulerStatus(),
+    status: scopeCloneStatus(schedulerStatus(), jobs, all),
     mounts: listMounts().map((m) => ({ id: m.id, server: m.server, exportPath: m.exportPath, mounted: m.mounted, mountPoint: m.mountPoint })),
   });
 });
