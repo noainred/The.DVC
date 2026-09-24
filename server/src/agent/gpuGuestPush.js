@@ -34,7 +34,8 @@ export function gpuGuestPushWithhold(lastRun, since, now, maxMs = GPU_GUEST_PUSH
   const unread = lastRun && Array.isArray(lastRun.unreadVcenters) ? lastRun.unreadVcenters.length : 0;
   if (lastRun && !unread) return { withhold: false, since: null };
   const s = since || now;
-  return { withhold: now - s <= maxMs, since: s, reason: lastRun ? 'unread-vcenters' : 'first-poll', unread };
+  const out = { withhold: now - s <= maxMs, since: s };
+  return lastRun ? { ...out, reason: 'unread-vcenters', unread } : out;
 }
 /** 테스트 전용 — 게스트 폴러 상태 주입/복원. */
 export function _setGuestPollerStatusForTest(fn) { _pollerStatus = fn || (() => gpuGuestStatus()); _withholdSince = null; }
