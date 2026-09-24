@@ -216,6 +216,10 @@ test('엣지 보고는 자기 것만 받는다(남의 법인·중앙 측정분 �
   dbm._resetForTest();
   const { putEdgeLinkReport, edgeLinkReport, _resetEdgeLinkReportsForTest } = await import('../src/central/linkCheckEdge.js');
   _resetEdgeLinkReportsForTest();
+  // v2.607(LEFT2607-01): 수신은 '중앙이 그 엣지에 내려준 링크 집합' 도 본다 — 근거인 수집 서버 등록부를 이 테스트 동안만 둔다.
+  const colFile = path.join(process.env.CONFIG_DIR, 'collectors.json');
+  fs.writeFileSync(colFile, JSON.stringify({ collectors: [{ id: 'GM1', name: 'GM1', url: 'https://10.1.1.1:4000', token: 'x' }, { id: 'HB', name: 'HB', url: 'https://10.1.1.2:4000', token: 'y' }] }));
+  try {
   const mk = (id, kind, from) => ({ link: { id, kind, from, to: 'central', host: 'c', port: 443 }, verdict: { ok: true, phase: 'ok', totalMs: 5 }, steps: { tcp: { ok: true, ms: 2 } }, summary: 'x' });
   const out = await putEdgeLinkReport('GM1', { results: [
     mk('edge->central|GM1|central', 'edge->central', 'GM1'),
@@ -233,6 +237,7 @@ test('엣지 보고는 자기 것만 받는다(남의 법인·중앙 측정분 �
   // agent 를 본문에서 읽지 않는다(v2.548 F5)
   const src = stripComments(SRC('central/linkCheckEdge.js'));
   assert.ok(!/body\.agent|body\?\.agent/.test(src), '본문 agent 를 쓰지 말 것');
+  } finally { fs.rmSync(colFile, { force: true }); }
   dbm._resetForTest();
 });
 
