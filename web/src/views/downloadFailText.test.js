@@ -57,7 +57,7 @@ describe('다운로드 헬퍼는 실패 응답을 저장하지 않는다 (WEB260
     expect(res.blobCalls).toBe(0);
   });
   it('소스 스윕 — res.blob() 를 직접 부르는 화면 파일은 res.ok 를 확인한다(api.js 제외)', () => {
-    const root = path.resolve(__dirname, '..');
+    const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
     const bad = [];
     const walk = (d) => {
       for (const n of fs.readdirSync(d)) {

@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **499개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **503개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-24)
@@ -252,10 +252,11 @@
 | `SVCMON_TICK_MS` |  |  | svcmon/poller.js |
 | `SVCMON_WORKERS` |  |  | svcmon/capacity.js, svcmon/pool.js |
 
-## 수집 서버 (1)
+## 수집 서버 (2)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `COLLECTOR_REMOTE_SERVERS_MAX` | `20000` |  | collector/remoteInventory.js |
 | `EDGE_PUSH_TIMEOUT_MS` | `600000` |  | collector/upgradePush.js, upgrade/upgrade.js |
 
 ## 스토리지 수집 (24)
@@ -367,7 +368,7 @@
 | `RMA_HISTORY_DAYS` | `90` |  | rma/historyDb.js |
 | `RMA_INSTANCE` |  |  | rma/agent.js |
 | `RMA_LONGPOLL_MS` | `20000` | ✅ | rma/agent.js |
-| `RMA_MAX_OUTPUT` | `256` | ✅ | rma/exec.js |
+| `RMA_MAX_OUTPUT` | `256` | ✅ | rma/exec.js, rma/jobs.js |
 | `RMA_OFFLINE_CMD_FAIL` | `''` |  | rma/agent.js |
 | `RMA_OFFLINE_CMD_OK` | `''` | ✅ | rma/agent.js |
 | `RMA_OFFLINE_MINUTES` | `0` | ✅ | rma/agent.js |
@@ -401,7 +402,7 @@
 | `PROXY_SSH_PORT` | `22` |  | proxy/registry.js |
 | `PROXY_SSH_USER` | `''` |  | proxy/registry.js |
 | `PROXY_VALIDATE_CMD` | `'haproxy -c -f {file}'` |  | proxy/registry.js |
-| `REMOTE_IDLE_TIMEOUT_MS` | `30` |  | proxy/sshGateway.js |
+| `REMOTE_IDLE_TIMEOUT_MS` |  |  | proxy/sshGateway.js |
 | `REMOTE_MAPPING_TTL_MS` | `24` |  | proxy/expiry.js |
 | `REMOTE_MAX_SESSIONS` | `80` |  | proxy/sshGateway.js |
 | `SSH_EXEC_MAX_OUTPUT` | `4` |  | proxy/sshExec.js |
@@ -457,7 +458,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (45)
+## 중앙(위임 수집) (48)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -485,6 +486,9 @@
 | `EDGELOG_MAX_AGENTS` | `200` |  | central/edgeLogStore.js |
 | `EDGELOG_PULL_TIMEOUT_MS` | `20000` |  | central/edgeLogPull.js |
 | `EDGELOG_REQ_TTL_MS` | `10` |  | central/edgeLogJobs.js |
+| `EDGELOG_SNAP_MAX_BYTES` | `2` |  | central/edgeLogStore.js |
+| `EDGELOG_STATUS_ITEM_CAP` | `200` |  | central/edgeLogStore.js |
+| `EDGELOG_STATUS_MAX_BYTES` | `512` |  | central/edgeLogStore.js |
 | `IDRAC_PUSH_TIMEOUT_MS` | `15` |  | central/idracScanPush.js |
 | `IDRAC_SCAN_ACK_TIMEOUT_MS` | `90000` |  | central/idracScanJobs.js |
 | `INGEST_PLAIN_WARN_BYTES` | `512` |  | central/ingestStats.js |
@@ -678,4 +682,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 499
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 503

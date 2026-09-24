@@ -128,7 +128,10 @@ test('M-R2: RDP 클라이언트가 티켓 실패 시 중단(쿼리 자격증명 
 test('M-R4: /register-collector 가 해석형 SSRF 가드로 저장 전 검증', () => {
   const src = read('../src/routes/central.js');
   assert.match(src, /ssrfBlockReasonResolved/);
-  const h = src.slice(src.indexOf("centralRouter.post('/register-collector'"), src.indexOf("centralRouter.post('/register-collector'") + 2400);
+  // v2.602 SEC2602-01 이 입력 길이·타입 검사를 앞에 더해 핸들러가 길어졌다 — 고정 길이 창 대신 다음 라우트 선언까지를 본다.
+  const at = src.indexOf("centralRouter.post('/register-collector'");
+  const next = src.indexOf('centralRouter.', at + 10);
+  const h = src.slice(at, next > at ? next : at + 6000);
   assert.match(h, /await ssrfBlockReasonResolved\(String\(url\)\)/);
 });
 
