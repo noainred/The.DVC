@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
 // DB 저장 경로 설정(v2.379)을 따른다 — dbLocation 이 지정한 dbDir 아래, 없으면 configDir.
 // (vmperf/vmtrack 과 동일 규약. MIGRATABLE 에 이 파일이 있어 미적용 시 마이그레이션 후
@@ -228,8 +229,10 @@ async function openInner() {
       metaSet: conn.prepare('INSERT INTO storage_meta (k, v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v = excluded.v'),
       delCapDev: conn.prepare('DELETE FROM capacity_history WHERE device_id = ?'),
       delDailyDev: conn.prepare('DELETE FROM capacity_daily WHERE device_id = ?'),
-      prune1: conn.prepare('DELETE FROM api_history WHERE ts < ?'),
-      prune2: conn.prepare('DELETE FROM capacity_history WHERE ts < ?'),
+      // v2.606(DB2606-02): 한 방 DELETE 는 보존일을 줄인 직후 130만 행을 약 1초 동기로 지웠다 — rowid 청크(idx_apih_ts·
+      //   capacity_history ts 인덱스)로 끊고 청크 사이에 양보한다(util/chunkedPrune.js).
+      prune1: conn.prepare('DELETE FROM api_history WHERE rowid IN (SELECT rowid FROM api_history WHERE ts < ? LIMIT ?)'),
+      prune2: conn.prepare('DELETE FROM capacity_history WHERE rowid IN (SELECT rowid FROM capacity_history WHERE ts < ? LIMIT ?)'),
       prune3: conn.prepare('DELETE FROM capacity_daily WHERE day < ?'),
     };
     return _db;
@@ -285,21 +288,35 @@ export async function saveAreaResults(deviceId, results) {
  */
 function maybePrune(db, every = 10) {
   if ((++_pruneTick % every) !== 0) return false;
-  const { raw, daily } = keepDays();
-  const cut = Date.now() - raw * DAY_MS;
-  db.prune1.run(cut);
-  db.prune2.run(cut);
-  db.prune3.run(dayIndex(Date.now()) - daily);
+  // v2.606(DB2606-02): 적재 경로(엣지 push 처리 중일 수 있다)에서는 기다리지 않는다 — 백그라운드 청크 정리(단일 비행).
+  runPrune(db).catch((e) => console.warn(`[storage-db] 보존 정리 실패: ${e.message}`));
   return true;
 }
 
-/** 강제 prune(설정 저장 직후 즉시 반영용 — 스로틀을 건너뛴다). */
+// 진행 공유 — 더 늦은 경계(보존일이 더 짧다)로 도는 정리는 이른 경계 요청을 덮는다. 덮지 못하면 끝난 뒤 한 번 더 돈다.
+const _pruneFlight = createPruneFlight({ covers: (run, next) => run.cut >= next.cut && run.dayCut >= next.dayCut });
+
+/**
+ * 보존 정리 본체(v2.606 DB2606-02). api_history·capacity_history 는 청크(chunkedDelete), capacity_daily 는 장비 × 일 1행이라
+ * 한 문장으로 둔다(audit2603c 허용 목록 사유). 반환: 지운 행 수·상한에 걸려 남았는지.
+ * @returns {Promise<{apiHistory:number, capacityHistory:number, capacityDaily:number, done:boolean}>}
+ */
+function runPrune(db) {
+  const { raw, daily } = keepDays();
+  const key = { cut: Date.now() - raw * DAY_MS, dayCut: dayIndex(Date.now()) - daily };
+  return _pruneFlight.run(key, async () => {
+    const a = await chunkedDelete(db.prune1, [key.cut], { label: 'storage api_history' });
+    const c = await chunkedDelete(db.prune2, [key.cut], { label: 'storage capacity_history' });
+    const d = Number(db.prune3.run(key.dayCut)?.changes || 0);
+    return { apiHistory: a.deleted, capacityHistory: c.deleted, capacityDaily: d, done: a.done && c.done };
+  });
+}
+
+/** 강제 prune(설정 저장 직후 즉시 반영용 — 스로틀을 건너뛴다). 청크로 지우며 끝날 때까지 기다린다. */
 export async function pruneNow() {
   const db = await open();
   if (!db) return false;
-  const { raw, daily } = keepDays();
-  const cut = Date.now() - raw * DAY_MS;
-  db.prune1.run(cut); db.prune2.run(cut); db.prune3.run(dayIndex(Date.now()) - daily);
+  await runPrune(db);
   return true;
 }
 
@@ -651,4 +668,4 @@ export async function capacityResets() {
   return out;
 }
 
-export function _resetForTest() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; }
+export function _resetForTest() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; _pruneFlight.reset(); }

@@ -8,7 +8,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
-import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
 import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'rma-history.db');
@@ -28,22 +27,15 @@ async function open() {
   _opening = openInner().finally(() => { _opening = null; });
   return _opening;
 }
-// v2.606(DB2606-03): 첫 open 이 잠금이면 'unavailable' 로 래치하지 않고 30초 뒤 다시 연다(util/sqliteOpen.js 규약 —
-//   예전: PRAGMA journal_mode 가 busy_timeout 보다 먼저라 잠금에서 즉시 실패했고, 잠금이 풀린 뒤에도 재시작 전까지 꺼져 있었다).
-const _lock = createLockRetry(30_000);
 async function openInner() {
   if (_db) return _db === 'unavailable' ? null : _db;
-  if (_lock.blocked()) return null;
-  let DatabaseSync;
-  try { ({ DatabaseSync } = await import('node:sqlite')); }
-  catch (e) { console.warn(`[rma] 이력 DB 비활성(node:sqlite 없음: ${e.message}) — 메모리 링으로 대체`); _db = 'unavailable'; return null; }
   try {
-    return await withOpenCleanup(async () => {
-    const conn = openSqlite(new DatabaseSync(FILE()));
+    const { DatabaseSync } = await import('node:sqlite');
+    const conn = new DatabaseSync(FILE());
     // v2.447(감사 S4): DB 파일 권한 0600 — 다른 DB 모듈(idrac/metrics/logs/ipam/vmtrack/capacity/ping)은
     // 전부 적용돼 있는데 이 파일만 빠져 있었다. 같은 호스트의 다른 로컬 사용자가 읽을 수 있었다.
     try { fs.chmodSync(FILE(), 0o600); } catch { /* best effort */ }
-    conn.exec(`
+    conn.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;
       CREATE TABLE IF NOT EXISTS rma_history (
         req_id TEXT PRIMARY KEY, agent TEXT NOT NULL, instance TEXT, cmd TEXT, args TEXT, label TEXT, user TEXT,
         created_at INTEGER, taken_at INTEGER, done_at INTEGER NOT NULL,
@@ -51,9 +43,7 @@ async function openInner() {
         stdout TEXT, stderr TEXT, truncated INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_rma_done ON rma_history (done_at);
-      CREATE INDEX IF NOT EXISTS idx_rma_agent_done ON rma_history (agent, done_at);
-      -- v2.606(DB2606-05): 조회는 'agent = ? COLLATE NOCASE' 라 BINARY 인덱스를 못 타고 idx_rma_done 으로 테이블 끝까지 훑었다.
-      CREATE INDEX IF NOT EXISTS idx_rma_agent_nc_done ON rma_history (agent COLLATE NOCASE, done_at);`);
+      CREATE INDEX IF NOT EXISTS idx_rma_agent_done ON rma_history (agent, done_at);`);
     _db = {
       conn,
       ins: conn.prepare(`INSERT OR REPLACE INTO rma_history (req_id, agent, instance, cmd, args, label, user, created_at, taken_at, done_at, ok, exit_code, timed_out, duration_ms, reason, stdout, stderr, truncated)
@@ -64,12 +54,9 @@ async function openInner() {
       //   한 방 DELETE 는 수백 MB 를 동기로 지운다. idx_rma_done 이 서브쿼리를 받친다.
       prune: conn.prepare('DELETE FROM rma_history WHERE rowid IN (SELECT rowid FROM rma_history WHERE done_at < ? LIMIT ?)'),
     };
-    _lock.ok();
     return _db;
-    });
   } catch (e) {
-    if (_lock.onFail(e)) { console.warn(`[rma] 이력 DB 잠김(${e.message}) — 30초 뒤 다시 엽니다(그동안 메모리 링 사용 · 비활성으로 고정하지 않음)`); return null; }
-    console.warn(`[rma] 이력 DB 열기 실패(${e.message}) — 메모리 링으로 대체`);
+    console.warn(`[rma] 이력 DB 비활성(node:sqlite 없음 또는 열기 실패: ${e.message}) — 메모리 링으로 대체`);
     _db = 'unavailable';
     return null;
   }
@@ -120,4 +107,4 @@ export async function listHistoryRows({ agent = '', limit = 100 } = {}) {
   return rows.map(rowOut);
 }
 
-export function _resetHistoryDb() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _tick = 0; _lock.ok(); }
+export function _resetHistoryDb() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _tick = 0; }
