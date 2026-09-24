@@ -281,3 +281,118 @@ test('SEC2603-06: 게스트 결과 파일은 상한까지만 — 크기 힌트�
   const ok = await readGuestFileBody(new Response('GPU 0, 45 %'), '11', 65_536);
   assert.deepEqual(ok, { text: 'GPU 0, 45 %', error: null });
 });
+
+/* ════ 추가 수정(코디네이터 요청) — 배정 밖으로 보고했던 5건 ════════════════════════════════ */
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { parsePoolCell } from '../src/storage/collectors/isilonSsh.js';
+import { fetchUrl, URL_BODY_MAX } from '../src/rma/testRunner.js';
+
+const SRC2 = path.join(here, '../src');
+const J2 = (p) => JSON.stringify(path.join(SRC2, p));
+
+function runLive(script) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2603d-'));
+  const boot = `
+    const express = (await import('express')).default;
+    const { store } = await import(${J2('store.js')});
+    const { api } = await import(${J2('routes/api.js')});
+    const { nsxStore } = await import(${J2('nsx/store.js')});
+    await store.refresh({ force: true });
+    const snap = store.get();
+    const mk = (user) => { const app = express(); app.use(express.json()); app.use((req, _r, next) => { req.user = user; next(); }); app.use('/api', api); return app; };
+    const servers = [];
+    const start = async (app) => { const s = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); }); servers.push(s); return 'http://127.0.0.1:' + s.address().port; };
+    const req = async (base, p) => { const r = await fetch(base + p); const text = await r.text(); let b = null; try { b = JSON.parse(text); } catch {} return { status: r.status, body: b, text }; };
+    const out = await (async () => { ${script} })();
+    for (const s of servers) s.close();
+    console.log('@@' + JSON.stringify(out));
+    process.exit(0);
+  `;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', boot], {
+    env: { ...process.env, CONFIG_DIR: dir, DATA_SOURCE: 'mock', AUTH_ENABLED: 'false' }, encoding: 'utf8', cwd: path.resolve(SRC2, '..'), timeout: 180_000,
+  });
+  assert.equal(r.status, 0, `자식 프로세스 실패: ${r.stderr?.slice(-2000)}`);
+  const line = r.stdout.split('\n').find((l) => l.startsWith('@@'));
+  assert.ok(line, `출력 없음: ${r.stdout.slice(-1500)} ${r.stderr?.slice(-1500)}`);
+  return JSON.parse(line.slice(2));
+}
+
+test('추가 ①② 실제 라우터 — threats 의 IDS 조회 실패는 null · license-expiry 가 NSX 라이선스 조회 실패를 밝힌다', () => {
+  const r = runLive(`
+    nsxStore.snapshot = { ...nsxStore.get(), managers: [
+      { id: 'm-f', vcenterId: snap.vcenters[0].id, name: 'nsx-failed', idsEnabled: true, idsProfiles: null, idsEventCount: null,
+        licenses: [], listsFailed: ['idsProfiles', 'idsEvents', 'licenses'], listFailReasons: { licenses: 'HTTP 503 from nsxsecret.invalid' } },
+      { id: 'm-o', vcenterId: snap.vcenters[0].id, name: 'nsx-ok', idsEnabled: true, idsProfiles: 2, idsEventCount: 0, licenses: [{ key: 'K', description: 'NSX', quantity: 1 }] },
+    ] };
+    const admin = await start(mk({ username: 'root', role: 'admin', scope: null }));
+    const oper = await start(mk({ username: 'op', role: 'operator', scope: null }));
+    const t = await req(admin, '/api/tools/threats');
+    const la = await req(admin, '/api/tools/license-expiry');
+    const lo = await req(oper, '/api/tools/license-expiry');
+    return { ids: t.body?.ids?.managers, la: la.body?.collectionErrors, lo: lo.body?.collectionErrors, loText: lo.text };
+  `);
+  const f = r.ids.find((m) => m.name === 'nsx-failed');
+  const o = r.ids.find((m) => m.name === 'nsx-ok');
+  assert.equal(f.profiles, null);
+  assert.equal(f.events, null);
+  assert.equal(o.profiles, 2);
+  assert.equal(o.events, 0);
+  const aErr = r.la.find((e) => e.startsWith('NSX nsx-failed'));
+  assert.ok(aErr && /확인 불가/.test(aErr) && /HTTP 503/.test(aErr), JSON.stringify(r.la));
+  assert.ok(!r.la.some((e) => e.startsWith('NSX nsx-ok')));
+  const oErr = r.lo.find((e) => e.startsWith('NSX nsx-failed'));
+  assert.ok(oErr && /확인 불가/.test(oErr));
+  assert.ok(!r.loText.includes('nsxsecret'), '비-admin 에게 사유 원문(주소)을 싣지 않는다');
+});
+
+const oldPool = (s) => {
+  const t = String(s || '').trim();
+  if (!t || /no storage/i.test(t)) return null;
+  const l3 = /L3:\s*([\d.]+[kKMGTP]?)/.exec(t);
+  if (l3) return { l3: l3[1] };
+  const m = /([\d.]+[kKMGTP]?)\s*\/\s*([\d.]+[kKMGTP]?)\s*\(\s*([\d.]+)%\s*\)/.exec(t);
+  return m ? [m[1], m[2], m[3]] : null;
+};
+
+test('추가 ③ Isilon parsePoolCell — 긴 셀이 150ms 안 + 결과가 예전과 같다', () => {
+  for (const s of ['0.'.repeat(20000) + 'x', '1'.repeat(40000) + '/', '2.0T/ ' + '1'.repeat(40000) + '( x']) {
+    const { ms } = timed(() => parsePoolCell(s));
+    assert.ok(ms < LIMIT_MS, `${ms.toFixed(1)}ms`);
+  }
+  const fixedPairs = ['2.0T/ 107T( 2%)', '55.1T / 107T (51%)', '(No Storage HDDs)', 'L3: 373G', '1.5k/2.0M(75%)', '', 'x 1.2.3T/4G(5%)'];
+  const r = rng(26036);
+  const cells = [...fixedPairs];
+  for (let i = 0; i < 3000; i++) cells.push(randText(r, ['1', '2', '.', 'T', 'G', 'k', '/', ' ', '(', ')', '%', '5'], 1 + Math.floor(r() * 18)));
+  for (const c of cells) {
+    const o = oldPool(c);
+    const n = parsePoolCell(c);
+    if (o == null) { assert.equal(n, null, JSON.stringify(c)); continue; }
+    if (o.l3) { assert.ok(n && 'l3Bytes' in n, JSON.stringify(c)); continue; }
+    // 옛 캡처로 같은 계산을 해 새 결과와 비교
+    assert.equal(n?.pct, Number(o[2]), JSON.stringify(c));
+    const ref = parsePoolCell(`${o[0]}/${o[1]}(${o[2]}%)`);
+    assert.deepEqual(n, ref, JSON.stringify(c));
+  }
+});
+
+test('추가 ④ RMA url 점검 — 본문은 앞 256KB 까지만 읽고 끊는다', async () => {
+  let sent = 0, closed = false;
+  const srv = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    const chunk = Buffer.alloc(1024 * 1024, 'b');
+    const pump = () => { while (sent < 200 * 1024 * 1024) { sent += chunk.length; if (!res.write(chunk)) { res.once('drain', pump); return; } } res.end(); };
+    res.on('close', () => { closed = true; });
+    pump();
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    const x = await fetchUrl(`http://127.0.0.1:${srv.address().port}/`, { timeoutMs: 10_000, insecure: false });
+    assert.equal(x.status, 200);
+    assert.equal(Buffer.byteLength(x.body), URL_BODY_MAX);
+    assert.equal(x.capped, true);
+    await new Promise((r) => setTimeout(r, 200));
+    assert.ok(sent < 64 * 1024 * 1024, `서버 송신 ${sent}B`);
+    assert.equal(closed, true);
+  } finally { srv.close(); }
+});

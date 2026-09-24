@@ -268,3 +268,100 @@ test('LEFT2603-03: VM 통계 평균의 분모에 못 읽은 표본을 넣지 않
   assert.equal(b.cpuMax, 30);
   vs._resetVmStats();
 });
+
+// ── 추가 ①: 진행 공유 헬퍼 + 시계열 prune 한 방 DELETE 스윕 ─────────────────
+test('추가①: createPruneFlight — 같은 키는 공유, 다른 키는 끝난 뒤 한 번 더, 실패는 다음 실행을 막지 않는다', async () => {
+  const { createPruneFlight } = await import('../src/util/chunkedPrune.js');
+  const f = createPruneFlight();
+  const order = [];
+  let release; const gate = new Promise((r) => { release = r; });
+  const a = f.run(90, async () => { order.push('a-start'); await gate; order.push('a-end'); return 'a'; });
+  const a2 = f.run(90, async () => { order.push('dup'); return 'dup'; });
+  const b = f.run(30, async () => { order.push('b'); return 'b'; });
+  assert.equal(a, a2, '같은 키는 같은 약속');
+  assert.equal(f.active, true);
+  release();
+  assert.deepEqual(await Promise.all([a, b]), ['a', 'b']);
+  assert.deepEqual(order, ['a-start', 'a-end', 'b'], '다른 키는 앞 정리가 끝난 뒤에 돈다(겹치지 않는다)');
+  assert.equal(f.active, false);
+  const bad = f.run(1, async () => { throw new Error('x'); });
+  await assert.rejects(bad);
+  assert.equal(await f.run(2, async () => 'ok'), 'ok', '앞 실패가 다음 정리를 막지 않는다');
+  const g = createPruneFlight({ covers: (run, next) => run >= next });
+  let rel2; const gate2 = new Promise((r) => { rel2 = r; });
+  const x = g.run(200, () => gate2.then(() => 'x'));
+  assert.equal(g.run(100, async () => 'y'), x, '더 늦은 경계로 도는 정리는 이른 경계 요청을 덮는다');
+  rel2(); await x;
+});
+
+// 한 번에 지우는 보존 DELETE 가 허용되는 곳 — 사유와 함께. 새 항목을 여기 넣기 전에 청크(chunkedDelete)를 먼저 볼 것.
+const PRUNE_SINGLE_OK = {
+  'vmseries/db.js:cover_batch': '엣지 청크 재전송 표식 — 10분만 보관(행 수 = 최근 청크 수)',
+  'vmtrack/db.js:ds_changes': 'diff 저장(변경분만) · 한 트랜잭션 정리 — DB2603-05 실측 정상 상태 39ms',
+  'vmtrack/db.js:snaps': 'vCenter × 슬롯(2회/일) — 연 2만 행 수준',
+  'vmtrack/db.js:ds_series': 'diff 저장 + 경계 이전 마지막 행 보존(NOT IN) — 청크화하면 보존 규칙을 청크마다 다시 계산해야 한다',
+  'vmtrack/db.js:changes': 'diff 저장 + 로스터 VM 마지막 전이 보존(v2.603) — 같은 이유',
+  'guestdisk/db.js:vm_series': 'diff 저장 + 키 마지막 행 보존(상관 서브쿼리) — 후속 후보(규모 미측정)',
+  'guestdisk/db.js:part_series': '같은 이유 — 후속 후보(규모 미측정)',
+  'sanswitch/perfDb.js:port_meta': '장비×포트 메타 — 상한 4,096행',
+  'sanswitch/healthHistory.js:runs': '장비당 점검 이력 상한(SANHEALTH_MAX_RUNS 기본 24)',
+  'partfault/db.js:part_event': '전이만 적재(상태가 바뀔 때만) — 유계',
+  'storage/db.js:api_history': '후속 후보 — 장비 수 × 수집 주기 규모(미측정)',
+  'storage/db.js:capacity_history': '후속 후보 — 장비 수 × 1시간 주기(기본 90일) 규모(미측정)',
+  'storage/db.js:capacity_daily': '장비 × 일 1행(5년) — 20대 3.6만 행',
+  'capacity/db.js:samples': '⚠ 후속 후보 — 30초 원본 72시간(호스트 × 지표 수에 비례, 미측정). 보존을 줄이면 한 방 DELETE 가 된다',
+  'capacity/db.js:samples_hourly': '후속 후보 — 시간당 롤업(400일)',
+};
+test('추가①: 시계열 보존 정리에 청크 없는 한 방 DELETE 를 새로 만들지 않는다(허용 목록은 사유와 함께)', async () => {
+  const { stripComments } = await import('./_stripComments.js');
+  const root = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src');
+  const files = [];
+  const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (e.name.endsWith('.js')) files.push(p); } };
+  walk(root);
+  const found = [];
+  for (const f of files) {
+    const src = stripComments(fs.readFileSync(f, 'utf8'));
+    for (const m of src.matchAll(/DELETE FROM (\w+) WHERE \(?\s*(\w+)\s*<\s*\?/g)) {
+      const tail = src.slice(m.index, m.index + 400);
+      const end = tail.search(/['"`]/);
+      const stmt = end >= 0 ? tail.slice(0, end) : tail;
+      if (/rowid IN \(SELECT rowid/i.test(stmt)) continue;   // 청크 형태
+      found.push(`${path.relative(root, f).split(path.sep).join('/')}:${m[1]}`);
+    }
+  }
+  const unknown = [...new Set(found)].filter((k) => !PRUNE_SINGLE_OK[k]);
+  assert.deepEqual(unknown, [], `청크 없는 보존 DELETE(허용 목록 밖): ${unknown.join(', ')}`);
+  const stale = Object.keys(PRUNE_SINGLE_OK).filter((k) => !found.includes(k));
+  assert.deepEqual(stale, [], `허용 목록에 있지만 소스에 없는 항목(청크로 바꿨으면 목록에서 빼라): ${stale.join(', ')}`);
+  // 이번에 청크로 바꾼 모듈은 다시 한 방 DELETE 로 돌아가면 안 된다
+  for (const k of ['linkcheck/db.js:link_sample', 'ping/db.js:samples', 'curuser/db.js:vc_series', 'horizon/sessionDb.js:hz_series',
+    'vmseries/db.js:spikes', 'vmseries/db.js:cover', 'rma/historyDb.js:rma_history', 'rma/testResults.js:test_results', 'sanswitch/perfDb.js:port_perf']) {
+    assert.ok(!found.includes(k), `${k} 가 한 방 DELETE 로 되돌아갔다`);
+    assert.ok(!PRUNE_SINGLE_OK[k], k);
+  }
+});
+
+// ── 추가 ②: logs/poller.js schedule 2차 방어 ──────────────────────────────────
+test('추가②: 로그 폴러는 캐시에 잘못된 주기가 들어가도 setInterval 간격을 1분~1일로 묶는다', async () => {
+  const ls = await import('../src/logs/settings.js');
+  const lp = await import('../src/logs/poller.js');
+  const orig = globalThis.setInterval;
+  const seen = [];
+  globalThis.setInterval = (fn, ms, ...a) => { if (String(fn).includes('pollLogsOnce')) seen.push(ms); const t = orig(fn, 1e9, ...a); return t; };
+  try {
+    for (const bad of [0, Number.NaN, -5, 40000, 2 ** 40, '']) {
+      ls._resetLogSettingsForTest();
+      const cache = ls.loadLogSettings();
+      cache.enabled = true;
+      cache.pollIntervalMin = bad;           // 로드 검증을 거치지 않은 값(다른 경로로 바뀐 캐시)
+      lp.rescheduleLogPoller();
+    }
+  } finally {
+    globalThis.setInterval = orig;
+    ls._resetLogSettingsForTest();
+    const c = ls.loadLogSettings(); c.enabled = false; lp.rescheduleLogPoller();   // 타이머 정리
+    ls._resetLogSettingsForTest();
+  }
+  assert.equal(seen.length, 6);
+  for (const ms of seen) assert.ok(ms >= 60_000 && ms <= 86_400_000, `간격 ${ms}`);
+});
