@@ -56,7 +56,15 @@ export function enqueueRun(jobId, trigger = 'manual') {
   return { queued: true };
 }
 
+// v2.604(감사 TIM2604-02): 실행 표시(_running)는 스냅샷 삭제(병합)·로그아웃까지 **다 끝난 뒤** 한 번만 내린다.
+//   예전엔 done() 이 내려, 성공 직후 finally 의 스냅샷 병합(최대 수 시간) 동안 상태가 '실행 중 아님' 이었고 그 사이
+//   enqueueRun 의 중복 가드(_running.jobId === jobId)가 풀려 같은 잡이 한 번 더 대기열에 올랐다.
 async function runJob(jobId, trigger) {
+  try { return await runJobBody(jobId, trigger); }
+  finally { if (_running.jobId === jobId) { _running.jobId = null; _running.phase = ''; } }
+}
+
+async function runJobBody(jobId, trigger) {
   const job = getJob(jobId);
   if (!job || !job.enabled) return;
   _running.jobId = jobId; _running.phase = '시작'; _running.startedAt = Date.now();
@@ -64,7 +72,7 @@ async function runJob(jobId, trigger) {
   const done = (ok, detail, extra = {}) => {
     recordRun(jobId, { ok, detail, ms: Date.now() - t0, ...extra });
     logAudit({ user: `vm-clone(${trigger})`, action: ok ? 'VM 복제 성공' : 'VM 복제 실패', target: `${job.vcenterId}/${job.vmName}`, detail: String(detail).slice(0, 200) });
-    _running.jobId = null; _running.phase = '';
+    // _running 은 여기서 내리지 않는다 — runJob 의 finally 가 스냅샷 병합·로그아웃 뒤에 내린다(TIM2604-02).
   };
 
   try {
