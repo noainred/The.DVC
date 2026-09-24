@@ -77,6 +77,56 @@ async function writeSeries(ts, s, vcNameOf) {
   return { series: series.length, users: agg.total.users };
 }
 
+/**
+ * v2.603(감사 EDGE2603-04): 이번 주기에 **대상이 0이 된** vCenter 의 latest 를 비운다.
+ *   예전에는 대상이 있는(byVc) 법인만 `replaceVcenters` 에 넣고, 대상이 전부 빠지면 위에서 조기 반환했으며, push 도
+ *   레코드가 있을 때만·레코드에서 뽑은 vCenter 목록으로 보냈다 — 폴더 범위를 바꾸거나 중앙 설정에서 그 법인을 빼면
+ *   **옛 latest 행이 엣지·중앙 양쪽에 무기한** 남았다(latest 는 prune 대상이 아니다). 화면은 그 행을 `stale` 로 다시
+ *   판정하므로 사용자 수를 부풀리지는 않지만, '확인하지 못한 서버 N대' 로 영원히 남아 **대상 아님을 확인 불가라 말한다**.
+ *
+ * 비우는 조건(전부 참일 때만 — 모르는 것을 지우지 않는다):
+ *  ① 이 노드가 **수집하는** 법인(중앙: 직접 수집 · 엣지: 자기 등록부) — site 위임·비활성·점검중·mock 은 건드리지 않는다
+ *     (중앙의 site 법인 latest 는 엣지 push 가 소유한다)
+ *  ② 이번 스냅샷에 그 법인의 VM 이 **있다** — 인벤토리를 못 읽어 VM 이 0으로 보인 것을 '대상 0' 으로 읽지 않는다
+ *  ③ 이번 주기 대상이 0 이고 latest 에 행이 남아 있다
+ * 비운 법인은 중앙 push 가 성공할 때까지 `_pendingClear` 로 들고 있다(로컬만 지우고 push 가 실패하면 중앙이 영영 모른다).
+ */
+const _pendingClear = new Set();
+async function emptiedVcenters({ snap, s, mock, reg, byVc }) {
+  let rows;
+  try { rows = await latestRecords(); } catch { return []; }
+  const withRows = new Set((rows || []).map((r) => String(r?.vcenterId || '')).filter(Boolean));
+  if (!withRows.size) return [];
+  const present = new Set((snap.vms || []).map((v) => String(v?.vcenterId || '')).filter(Boolean));
+  const collectable = (id) => {
+    if (mock) return true;
+    const vc = reg.find((x) => x.id === id);
+    if (!vc) return false;
+    if (vc.enabled === false || vc.maintenance || vc.collectMode === 'site') return false;
+    return !(vc.mock === true || isMockVcenter(vc));
+  };
+  return [...withRows].filter((id) => !byVc.has(id) && present.has(id) && collectable(id));
+}
+async function clearEmptied({ snap, s, mock, reg, byVc }) {
+  const emptied = await emptiedVcenters({ snap, s, mock, reg, byVc });
+  if (emptied.length) {
+    const ts = Date.now();
+    const commit = await commitCurUser({ ts, records: [], series: [], replaceVcenters: emptied });
+    if (!commit.ok) return { clearError: commit.reason || 'DB 커밋 실패' };
+    if (!mock && curUserPushEnabled()) for (const id of emptied) _pendingClear.add(id);
+    await writeSeries(ts, s, (id) => (snap.vcenters || []).find((v) => v.id === id)?.name || id);
+  }
+  let pushed = null;
+  const clearPush = mock ? [] : [..._pendingClear];
+  if (clearPush.length && curUserPushEnabled()) {
+    try {
+      pushed = await pushCurUserRecords([], { generatedAt: Date.now(), clearVcenterIds: clearPush });
+      if (pushed?.ok) for (const id of clearPush) _pendingClear.delete(id);
+    } catch (e) { pushed = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
+  }
+  return { ...(emptied.length ? { clearedVcenters: emptied } : {}), ...(pushed ? { pushed } : {}) };
+}
+
 /** 수집 1회(자동·수동 공용 — 같은 재진입 가드). */
 export async function runCurUserNow(trigger = 'manual') {
   if (running) return { ok: false, skipped: true, reason: '이미 수집이 진행 중입니다.' };
@@ -92,14 +142,16 @@ export async function runCurUserNow(trigger = 'manual') {
     const snap = store.get();
     if (!snap?.vms?.length) return { ok: false, reason: '수집된 VM 스냅샷이 없습니다(첫 인벤토리 폴링 전).' };
     const scope = resolveTargets(snap.vms || [], s);
+    const mock = snap.source === 'mock';
+    const reg = mock ? [] : (loadVcenterConfig().vcenters || []);
     if (!scope.targets.length) {
+      // v2.603(감사 EDGE2603-04): 대상이 전부 빠졌어도 **이 노드가 수집하던 법인의 latest 는 비운다**(아래 clearEmptied).
+      const cleared = await clearEmptied({ snap, s, mock, reg, byVc: new Map() });
       lastRunTs = Date.now();
-      lastResult = { at: lastRunTs, trigger, vcenters: 0, targets: 0, records: 0, skipped: scope.skipped.length, errors: [], ms: Date.now() - started };
+      lastResult = { at: lastRunTs, trigger, vcenters: 0, targets: 0, records: 0, skipped: scope.skipped.length, errors: [], ms: Date.now() - started, ...cleared };
       return { ok: true, ...lastResult, reason: '대상 VM 이 없습니다(설정에서 폴더를 지정하고 켜세요).' };
     }
 
-    const mock = snap.source === 'mock';
-    const reg = mock ? [] : (loadVcenterConfig().vcenters || []);
     const vcNameOf = (id) => (snap.vcenters || []).find((v) => v.id === id)?.name || id;
     const byVc = new Map();
     for (const t of scope.targets) {
@@ -166,15 +218,22 @@ export async function runCurUserNow(trigger = 'manual') {
     });
 
     const ts = Date.now();
+    // 대상이 0이 된 법인(폴더 범위에서 빠짐·중앙 설정에서 빠짐)은 레코드가 없어도 latest 를 비운다(v2.603 EDGE2603-04).
+    const emptied = await emptiedVcenters({ snap, s, mock, reg, byVc });
     // 이번 주기에 **실제로 읽은** 법인만 교체한다 — 실패한 법인의 직전 값을 지우면 화면이
     // '발행기 없음' 으로 뒤바뀐다(수집 실패와 값 없음은 다르다).
-    const commit = await commitCurUser({ ts, records, series: [], replaceVcenters: collectedVc });
+    const commit = await commitCurUser({ ts, records, series: [], replaceVcenters: [...collectedVc, ...emptied] });
     const ser = commit.ok ? await writeSeries(ts, s, vcNameOf) : { series: 0, users: null };
+    if (commit.ok && !mock && curUserPushEnabled()) for (const id of emptied) _pendingClear.add(id);
+    for (const id of byVc.keys()) _pendingClear.delete(id);   // 대상이 돌아온 법인은 일반 교체가 맡는다
 
     let pushed = null;
-    if (!mock && curUserPushEnabled() && records.length) {
-      try { pushed = await pushCurUserRecords(records, { generatedAt: ts }); }
-      catch (e) { pushed = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
+    const clearPush = mock ? [] : [..._pendingClear];
+    if (!mock && curUserPushEnabled() && (records.length || clearPush.length)) {
+      try {
+        pushed = await pushCurUserRecords(records, { generatedAt: ts, clearVcenterIds: clearPush });
+        if (pushed?.ok) for (const id of clearPush) _pendingClear.delete(id);
+      } catch (e) { pushed = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     }
 
     if ((++tick % PRUNE_EVERY_RUNS) === 0) { try { await pruneCurUser(s.retentionDays, { every: 1 }); } catch { /* */ } }
@@ -184,6 +243,7 @@ export async function runCurUserNow(trigger = 'manual') {
       at: ts, trigger, vcenters: jobs.length, targets: scope.targets.length, records: records.length,
       skipped: scope.skipped.length, skippedVcenters: skippedVc, overLimit: scope.overLimit,
       users: ser.users, errors, pushed, mock, ms: Date.now() - started, commit,
+      ...(emptied.length ? { clearedVcenters: emptied } : {}),
     };
     return { ok: errors.length === 0, ...lastResult };
   } finally { running = false; }

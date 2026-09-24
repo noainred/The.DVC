@@ -25,18 +25,22 @@ export const pctOrNull = (v) => { const n = numOrNull(v); return n != null && n 
  *     (조용한 상한 금지 — 호출부가 응답·로그에 싣는다). 검증되지 않은 이름(공유 토큰 + 중앙이 모르는 이름)은 더 작은 상한.
  *  ③ 로컬 폴러(agent='')는 vCenter 단위로 나눠 부르므로 교체하지 않는다(기존 upsert) — 전체 상한만 적용한다.
  */
-const envInt = (k, d) => { const n = numOrNull(process.env[k]); return n != null && n > 0 ? Math.floor(n) : d; };
+const envInt = (v, d) => { const n = numOrNull(v); return n != null && n > 0 ? Math.floor(n) : d; };
 export const GPU_LIMITS = {
-  vmsTotal: envInt('GUEST_GPU_MAX_VMS', 50_000),
-  hostsTotal: envInt('GUEST_GPU_MAX_HOSTS', 10_000),
-  vmsPerAgent: envInt('GUEST_GPU_MAX_VMS_PER_AGENT', 20_000),
-  hostsPerAgent: envInt('GUEST_GPU_MAX_HOSTS_PER_AGENT', 4_000),
+  vmsTotal: envInt(process.env.GUEST_GPU_MAX_VMS, 50_000),
+  hostsTotal: envInt(process.env.GUEST_GPU_MAX_HOSTS, 10_000),
+  vmsPerAgent: envInt(process.env.GUEST_GPU_MAX_VMS_PER_AGENT, 20_000),
+  hostsPerAgent: envInt(process.env.GUEST_GPU_MAX_HOSTS_PER_AGENT, 4_000),
   unverifiedFactor: 10, // 미검증 이름은 엣지별 상한의 1/10
 };
 const agentKeyOf = (a) => String(a || '').trim().toLowerCase();
 
+let _trust = true;
+/** 이 호출 동안의 출처 신뢰(미검증 이름이면 false) — 수신 라우트가 감싼다. 동기 호출 전용. */
+export function withGpuTrust(verified, fn) { const prev = _trust; _trust = !!verified; try { return fn(); } finally { _trust = prev; } }
+
 /** @returns {{hosts:number, vms:number, omittedHosts:number, omittedVms:number}} 실제로 넣은 개수 · 상한으로 뺀 개수 */
-export function setGuestGpu({ hosts = [], vms = [], agent = '', verified = true }) {
+export function setGuestGpu({ hosts = [], vms = [], agent = '', verified = _trust }) {
   const now = Date.now();
   hosts = (Array.isArray(hosts) ? hosts : []).filter((h) => h && typeof h === 'object').map((h) => ({ ...h, utilPct: pctOrNull(h.utilPct) }));
   vms = (Array.isArray(vms) ? vms : []).filter((v) => v && typeof v === 'object').map((v) => ({ ...v, utilPct: pctOrNull(v.utilPct), memUsedPct: pctOrNull(v.memUsedPct) }));

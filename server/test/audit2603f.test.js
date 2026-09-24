@@ -198,6 +198,7 @@ test('EDGE2603-04 엣지 — 대상이 0이 된 법인은 레코드 없이도 �
   // 직전 주기에 수집해 둔 latest(엣지 로컬)
   await cudb.commitCurUser({ ts: 1_700_000_000_000, records: [{ vmId: 'corp:vc01:vm-1', vcenterId: 'corp:vc01', name: 'w1', at: 1_700_000_000_000, kind: 'ok', ok: true, users: [] }], series: [], replaceVcenters: [] });
   const c = await mockCentral({ status: 500 });   // 첫 push 는 실패 — 다음 주기에 다시 보내야 한다
+  let c2 = null;
   const prev = store.snapshot;
   const prevPush = config.agent.pushCurUser;
   try {
@@ -214,21 +215,21 @@ test('EDGE2603-04 엣지 — 대상이 0이 된 법인은 레코드 없이도 �
     assert.deepEqual(posts1[0].body.vcenterIds, ['corp:vc01']);
     assert.deepEqual(posts1[0].body.records, []);
     assert.equal(posts1[0].body.chunk, 0);
-    await c.close();
 
     // 다음 주기 — 로컬에는 이미 행이 없지만, 중앙에 못 알렸으므로 다시 보낸다
-    const c2 = await mockCentral({ status: 200 });
+    c2 = await mockCentral({ status: 200 });
     config.agent.centralUrl = c2.url;
-    try {
-      await runCurUserNow('manual');
-      const p2 = c2.got.filter((g) => g.url === '/api/central/curuser');
-      assert.equal(p2.length, 1);
-      assert.deepEqual(p2[0].body.vcenterIds, ['corp:vc01']);
-      // 성공 뒤에는 더 보내지 않는다
-      await runCurUserNow('manual');
-      assert.equal(c2.got.filter((g) => g.url === '/api/central/curuser').length, 1);
-    } finally { await c2.close(); }
-  } finally { store.snapshot = prev; config.agent.pushCurUser = prevPush; }
+    await runCurUserNow('manual');
+    const p2 = c2.got.filter((g) => g.url === '/api/central/curuser');
+    assert.equal(p2.length, 1);
+    assert.deepEqual(p2[0].body.vcenterIds, ['corp:vc01']);
+    // 성공 뒤에는 더 보내지 않는다
+    await runCurUserNow('manual');
+    assert.equal(c2.got.filter((g) => g.url === '/api/central/curuser').length, 1);
+  } finally {
+    store.snapshot = prev; config.agent.pushCurUser = prevPush;
+    await c.close(); if (c2) await c2.close();   // 단언이 실패해도 서버를 닫는다(열어 두면 테스트 프로세스가 끝나지 않는다)
+  }
 });
 
 // ── EDGE2603-05 ─────────────────────────────────────────────────────────────────

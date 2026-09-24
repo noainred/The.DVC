@@ -23,10 +23,10 @@ const CONFLICT_WINDOW_MS = 30 * 60_000;
  *  · owners(vcenterId 키)는 상한을 넘으면 가장 오래 갱신되지 않은 것부터 밀어낸다(실제 vCenter 는 매 주기 갱신되어 뒤에 있다).
  */
 const TXT_MAX = 128;
-const envInt = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.floor(n) : d; };
-const AGENTS_MAX = envInt('CENTRAL_AGENT_IDENTITY_MAX', 2_000);
-const UNVERIFIED_MAX = envInt('CENTRAL_AGENT_IDENTITY_UNVERIFIED_MAX', 64);
-const OWNERS_MAX = envInt('CENTRAL_VCENTER_OWNER_NOTE_MAX', 4_096);
+const envInt = (v, d) => { const n = v == null || v === '' ? NaN : Number(v); return Number.isFinite(n) && n > 0 ? Math.floor(n) : d; };
+const AGENTS_MAX = envInt(process.env.CENTRAL_AGENT_IDENTITY_MAX, 2_000);
+const UNVERIFIED_MAX = envInt(process.env.CENTRAL_AGENT_IDENTITY_UNVERIFIED_MAX, 64);
+const OWNERS_MAX = envInt(process.env.CENTRAL_VCENTER_OWNER_NOTE_MAX, 4_096);
 const txt = (v) => (typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : '')).slice(0, TXT_MAX);
 let omitted = { agents: 0, unverifiedEvicted: 0, owners: 0 };
 

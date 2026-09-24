@@ -26,7 +26,7 @@ import { setInventory, getInventory, listInventory } from '../central/inventory.
 import { noteAgentIdentity, noteVcenterOwner } from '../central/agentIdentity.js';
 import { isMockVcenter } from '../mock/generator.js';
 import { setEdgeFleet } from '../central/fleet.js';
-import { setGuestGpu } from '../gpu/store.js';
+import { setGuestGpu, withGpuTrust } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, agentOfReq } from '../central/idracScanJobs.js';
@@ -1119,7 +1119,7 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
     if (unregistered) console.warn(`[central] gpu-guest-data: ${agent} 등록되지 않은 vCenter 의 항목 ${unregistered}개 드롭`);
   }
   const verifiedGpu = req.centralAuth.mode === 'agent' || edgeNameKnown(agent);
-  const put = setGuestGpu({ hosts, vms, agent, verified: verifiedGpu });
+  const put = withGpuTrust(verifiedGpu, () => setGuestGpu({ hosts, vms, agent })); // 미검증 이름은 작은 상한(gpu/store.js)
   const omitted = (put.omittedHosts || 0) + (put.omittedVms || 0);
   if (omitted) console.warn(`[central] gpu-guest-data: ${agent} 상한 초과로 ${omitted}개를 받지 않았습니다(호스트 ${put.omittedHosts} · VM ${put.omittedVms})`);
   if (b.diag) setGpuGuestDiag(agent, b.diag, { hosts: hosts.length, vms: vms.length }); // 수집 진단 보관
@@ -1726,17 +1726,16 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   // 부르면 8,000개 보고에 동기 read 8,000회로 이벤트 루프가 막힌다(CLAUDE.md 논블로킹 불변조건).
   if (req.centralAuth.mode === 'agent') {
     const bounds = ((loadScanSettings(agent)?.ranges) || []).map(specToRange).filter(Boolean);
-    // v2.603(감사 CEN2603-02): 배정 범위가 없는 개별 토큰은 거부한다(/result 의 CEN2601-04 와 같은 판단). 예전에는 전량 통과(TOFU)라
-    //   개별 토큰 하나가 임의 IP 를 무한히 쌓았다. 정상 엣지는 배정(ranges)이 있을 때만 스캔·보고한다(agent/ipScanWorker.js —
-    //   ip-scan-assignment 가 assigned:false 면 보고하지 않는다). 공유 토큰은 이름을 가릴 수 없어 전체 상한(scanStore)이 막는다.
-    if (!bounds.length) {
-      console.warn(`[central] ip-scan-result: ${agent} 는 스캔 배정 범위가 없습니다 — 결과를 받지 않습니다`);
-      return res.status(409).json({ ok: false, reason: `엣지 '${agent}' 에 배정된 스캔 범위가 없습니다 — 설정 › IPAM › 스캔에서 이 엣지의 범위를 지정하세요.`, unassigned: true });
-    }
-    {
+    if (bounds.length) {
       const before = alive.length;
       alive = alive.filter((h) => { const n = h && ipToNum(h.ip); return n != null && bounds.some((r) => n >= r.lo && n <= r.hi); });
       if (before !== alive.length) console.warn(`[central] ip-scan-result: ${agent} 배정 범위 밖 IP ${before - alive.length}개 드롭(위조 방지)`);
+    } else {
+      // v2.603(감사 CEN2603-02): 배정 범위가 없는 개별 토큰은 거부한다(/result 의 CEN2601-04 와 같은 판단). 예전에는 전량 통과(TOFU)라
+      //   개별 토큰 하나가 임의 IP 를 무한히 쌓았다. 정상 엣지는 배정(ranges)이 있을 때만 스캔·보고한다(agent/ipScanWorker.js —
+      //   ip-scan-assignment 가 assigned:false 면 보고하지 않는다). 공유 토큰은 이름을 가릴 수 없어 전체 상한(scanStore)이 막는다.
+      console.warn(`[central] ip-scan-result: ${agent} 는 스캔 배정 범위가 없습니다 — 결과를 받지 않습니다`);
+      return res.status(409).json({ ok: false, reason: `엣지 '${agent}' 에 배정된 스캔 범위가 없습니다 — 설정 › IPAM › 스캔에서 이 엣지의 범위를 지정하세요.`, unassigned: true });
     }
   }
   // v2.594(감사 EDGE2-03): 형식이 틀린 원소는 병합에서 버려진다 — 버리기 전 개수를 merged·alive 로 보고하면 수치가 부풀었다.

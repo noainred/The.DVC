@@ -35,3 +35,14 @@ export function splitHostPort(raw, defPort = 443) {
   const ipv6 = bracketed.startsWith('[');
   return { host, port, hostPort: `${ipv6 ? `[${host}]` : host}:${port}`, ipv6 };
 }
+
+/**
+ * v2.603(LEFT2603-02 후속): HAProxy 설정 줄(`server <name> <주소>:<포트>`)의 주소 표기.
+ * HAProxy 는 포트를 **마지막 콜론** 뒤로 읽는다 — IPv6 는 `ipv6@` 접두로 주소 체계를 명시해
+ * `ipv6@2001:db8::10:443` 으로 쓴다(문서화된 형식. 대괄호 표기는 쓰지 않는다). IPv4·이름은 예전 그대로.
+ * 호스트에 대괄호가 남아 있으면 떼고 판단한다.
+ */
+export function haproxyAddress(host, port) {
+  const h = String(host ?? '').replace(/^\[|\]$/g, '');
+  return h.includes(':') ? `ipv6@${h}:${port}` : `${h}:${port}`;
+}

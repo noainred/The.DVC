@@ -38,3 +38,16 @@ describe('RECENT2603-01 매니저 표 행·배지', () => {
     expect(nsxManagerBadge(null)).toBeNull();
   });
 });
+
+describe('v2.603 degraded 행 수준 = 타일 수준(1)', () => {
+  it('degraded 행은 1, connected+DOWN 노드는 1, pending 은 2', () => {
+    const rows = nsxManagerRows({
+      managers: [mgr('degraded'), { ...mgr('connected'), id: 'm2', name: 'b' }, { ...mgr('pending'), id: 'm3', name: 'c' }],
+      transportNodes: [{ managerId: 'm2', status: 'DOWN' }],
+    });
+    expect(rows.find((r) => r.id === 'm1').level).toBe(1);
+    expect(rows.find((r) => r.id === 'm2').level).toBe(1);
+    expect(rows.find((r) => r.id === 'm3').level).toBe(2);
+    expect(net({ managers: [mgr('degraded')], rollup: { managers: 1, managersUp: 0, managersDegraded: 1, managersUnknown: 0 } }).level).toBe(1);
+  });
+});

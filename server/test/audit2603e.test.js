@@ -91,3 +91,28 @@ test('LEFT2603-02 소스 — 세 호출부가 공용 파서를 쓰고 ":" split 
     assert.doesNotMatch(s, /(?:clean|hostNoScheme)\.split\(':'\)/, f);
   }
 });
+
+/* ── LEFT2603-02 후속: NSX 프록시 매핑 · HAProxy 설정 줄 ────────────── */
+
+test('LEFT2603-02 nsx/proxy parseHostPort — IPv6 는 대괄호 없이(SAFE_TARGET_HOST 통과), IPv4·이름은 예전 그대로', async () => {
+  const { parseHostPort } = await import('../src/nsx/proxy.js');
+  assert.deepEqual(parseHostPort('https://[2001:db8::10]:8443/api'), { hostname: '2001:db8::10', port: 8443 });
+  assert.deepEqual(parseHostPort('https://nsx.corp.local'), { hostname: 'nsx.corp.local', port: 443 });
+  assert.deepEqual(parseHostPort('10.1.2.3:444'), { hostname: '10.1.2.3', port: 444 });
+  // 매핑 저장 형식 검사(proxy/registry.js SAFE_TARGET_HOST 와 같은 정규식)를 통과해야 한다 — 예전 '[2001:db8::10]' 은 거부됐다.
+  assert.match(parseHostPort('https://[2001:db8::10]').hostname, /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/);
+});
+
+test('LEFT2603-02 HAProxy 설정 줄 — IPv6 대상은 ipv6@<주소>:<포트>(포트 = 마지막 콜론 뒤), IPv4 는 예전 그대로', async () => {
+  const { buildConfigBlock } = await import('../src/proxy/deploy.js');
+  const { haproxyAddress } = await import('../src/util/hostPort.js');
+  const block = buildConfigBlock([
+    { id: 'a', name: 'NSX v6', protocol: 'nsx', publicPort: 20001, targetHost: '2001:db8::10', targetPort: 443 },
+    { id: 'b', name: 'NSX v4', protocol: 'nsx', publicPort: 20002, targetHost: '10.1.2.3', targetPort: 443 },
+  ]);
+  assert.match(block, /^ {4}server target ipv6@2001:db8::10:443$/m);
+  assert.match(block, /^ {4}server target 10\.1\.2\.3:443$/m);
+  assert.doesNotMatch(block, /server target 2001:db8/);   // 접두 없는 IPv6(모호한 표기) 금지
+  assert.equal(haproxyAddress('[fd00::1]', 8443), 'ipv6@fd00::1:8443');
+  assert.equal(haproxyAddress('proxy.corp', 22), 'proxy.corp:22');
+});

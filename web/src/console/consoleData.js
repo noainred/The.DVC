@@ -309,6 +309,16 @@ export function pduSummary(pdu) {
   return out;
 }
 
+/**
+ * v2.603: NSX 매니저 한 대의 수준(0 정상 · 1 주의 · 2 위험). 타일과 표 행이 같은 기준을 쓴다 —
+ * connected 는 수집 오류·DOWN 노드가 없으면 0, 있으면 1 · degraded·unknown 은 1 · 그 밖(unreachable·pending·disabled)은 2.
+ */
+export function nsxManagerLevel(status, collectError = false, nodeDown = false) {
+  if (status === 'connected') return collectError || nodeDown ? 1 : 0;
+  if (status === 'degraded' || status === 'unknown') return 1;
+  return 2;
+}
+
 /** NSX 매니저 표 행 + 트랜스포트 노드 UP/DOWN 집계. */
 export function nsxManagerRows(nsx) {
   const tn = nsx?.transportNodes || [];
@@ -322,8 +332,9 @@ export function nsxManagerRows(nsx) {
   const errs = new Set((nsx?.collectionErrors || []).map((e) => e.managerId));
   return (nsx?.managers || []).map((m) => ({
     ...m, nodes: st.get(m.id) || { up: 0, down: 0, other: 0 }, collectError: errs.has(m.id),
-    // v2.603(RECENT2603-01): 'unknown'(판정 보류)은 행도 주의(1) — 다운(2)과 같은 색으로 칠하지 않는다.
-    level: m.status === 'connected' && !errs.has(m.id) && !(st.get(m.id)?.down) ? 0 : (m.status === 'connected' || m.status === 'unknown') ? 1 : 2,
+    // v2.603(RECENT2603-01): 'unknown'(판정 보류)·'degraded'(저하)는 행도 주의(1) — 타일(buildDomainTiles)과 같은 기준.
+    //   다운(2)은 연결 끊김·대기·비활성 등 그 밖의 상태뿐이다. 판정은 nsxManagerLevel 하나.
+    level: nsxManagerLevel(m.status, errs.has(m.id), !!st.get(m.id)?.down),
   })).sort((a, b) => b.level - a.level || a.name.localeCompare(b.name));
 }
 

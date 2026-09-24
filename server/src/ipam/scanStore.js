@@ -19,13 +19,6 @@ import { ipToNum } from '../util/ipv4.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
-// v2.603(감사 CEN2603-02): **전체** 상한. MAX_MERGE 는 한 호출에만 걸려, 배정 범위가 없는 토큰이 보고를 반복하면 results·history 가
-//   무한히 쌓였다(그 IP 들이 원장 행이 되어 CEN2603-03 RangeError 로 이어졌다). 기본 262,144 = /14 한 개 분량. 넘치면 **새 IP 만**
-//   받지 않고 개수를 돌려준다 — 이미 있는 IP(다른 엣지 것 포함)는 밀어내지 않는다(조용한 상한 금지 — 호출부가 응답·로그에 싣는다).
-const _capEnv = numOrNull(process.env.IPAM_SCAN_RESULTS_MAX);
-export const MAX_SCAN_IPS = _capEnv != null && _capEnv > 0 ? Math.floor(_capEnv) : 262_144;
-let _resultCount = 0;   // Object.keys(results).length 를 매 원소 세지 않게(v2.589 규약) — 새 IP 를 넣을 때만 늘린다
-let _histCount = 0;
 
 // v2.593(감사 DEPS-03): 손으로 쓴 사본이 '10..1.1'·'0x0a.1.1.1' 을 받았다 — IPv4 파서는 util/ipv4.js 하나다(v2.586).
 const _ipNum = ipToNum;
@@ -210,7 +203,6 @@ function cleanStoredResults(raw) {
   return out;
 }
 let results = cleanStoredResults(readJson(RES, {}));
-_resultCount = Object.keys(results).length;
 registerStore(RES, () => results);
 ensureExitFlush();
 
@@ -221,19 +213,14 @@ export function scanResultList() { return Object.values(results).sort((a, b) => 
 
 const sameList = (a, b) => { const x = a || [], y = b || []; return x.length === y.length && x.every((v, i) => v === y[i]); };
 
-/** @returns {{merged:number, capped:number}} 병합한 IP 수 · 전체 상한(MAX_SCAN_IPS)으로 받지 않은 새 IP 수 */
 export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
   let changed = false;
-  let n = 0; let merged = 0; let capped = 0;
+  let n = 0;
   for (const raw of alive) {
     if (n++ >= MAX_MERGE) break;                 // 대량 주입 상한
     if (!raw || typeof raw !== 'object' || !isIpv4(raw.ip)) continue; // 잘못된/오염 IP 키 차단(__proto__, 333.0.0.0 등)
     const h = cleanAliveHost(raw);               // v2.601 CEN2601-01: 아는 필드·타입만
     const prev = results[h.ip];
-    // v2.603 CEN2603-02: 새 IP 는 전체 상한 안에서만 받는다(결과·이력 둘 다 — 이력만 넘쳐도 새 이력 항목이 생기지 않게).
-    if (!prev && (_resultCount >= MAX_SCAN_IPS || (!history[h.ip] && _histCount >= MAX_SCAN_IPS))) { capped++; continue; }
-    if (!prev) _resultCount++;
-    merged++;
     // 분산 멀티에이전트: 더 오래된(stale) 보고가 최신 관측을 덮어쓰지 않게 한다.
     if (prev && (prev.lastSeen || 0) > ts) { recordSeen(h, ts, agent); continue; }
     // 실제 내용(포트/서비스/호스트명/에이전트) 변화가 있을 때만 리비전을 올린다(불필요한 대장 재계산 방지).
@@ -246,17 +233,13 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
   scheduleWrite(RES);   // 디바운스 원자 기록(동기 블로킹 제거)
   persistHist();
   if (changed) scanRevN++;
-  if (capped) console.warn(`[ipam] 스캔 결과 전체 상한(${MAX_SCAN_IPS}개) — ${agent} 보고의 새 IP ${capped}개를 받지 않았습니다(IPAM_SCAN_RESULTS_MAX)`);
-  return { merged, capped };
 }
-
 
 // ---- IP 사용 이력 ----------------------------------------------------------
 // 어떤 IP가 "사용 시작(up) → 미사용(down)"으로 바뀌는 전이를 기록해 대장에서 추이를 본다.
 // up 전이: 스캔에서 새로 보이거나, down 이후 다시 보일 때 기록.
 // down 전이: sweepReleases()가 일정 시간 미응답 IP를 '해제'로 마킹할 때 기록.
 let history = readJson(HIST, {}) || {};
-_histCount = Object.keys(history).length;
 // 두 관심사를 분리한다:
 //  histDirty      = 대장(ledger)에 영향 있는 이력 변화(신규 IP / up·down 전이) → scanRev 증가 유발.
 //  histPersistDirty = 디스크 기록만 필요한 변화(안정 IP 의 lastSeen 전진) → scanRev 는 올리지 않는다.
@@ -274,7 +257,6 @@ function recordSeen(h, ts, agent) {
   const ip = h.ip;
   let e = history[ip];
   if (!e) {
-    _histCount++;
     e = history[ip] = { ip, firstSeen: ts, lastSeen: ts, status: 'up', agent, events: [] };
     pushEvent(e, { ts, type: 'up', hostname: h.hostname || '', ports: h.openPorts || [], agent });
     histDirty = true;
@@ -317,7 +299,7 @@ export function sweepReleases(idleMs, opts = {}) {
     }
     // 아주 오래 안 보인 IP의 이력은 정리(무한 증식 방지). 단, 운영자가 관리(override/대역정책)하는
     // IP는 사용 추이를 계속 보존한다(관리 대상의 이력 손실 방지).
-    if ((e.lastSeen || 0) < now - HISTORY_RETENTION_MS && !isManaged(e.ip)) { delete history[e.ip]; _histCount--; changed++; }
+    if ((e.lastSeen || 0) < now - HISTORY_RETENTION_MS && !isManaged(e.ip)) { delete history[e.ip]; changed++; }
   }
   if (changed) { histDirty = true; persistHist(); scanRevN++; }
   return changed;
@@ -355,7 +337,7 @@ export function pruneScanResults(retentionDays) {
   let changed = false;
   const isManaged = managedChecker();
   // 관리(override/대역정책) IP의 스캔 결과는 보존(보존기간 초과여도 운영 가시성 유지).
-  for (const [ip, r] of Object.entries(results)) if ((r.lastSeen || 0) < cut && !isManaged(ip)) { delete results[ip]; _resultCount--; changed = true; }
+  for (const [ip, r] of Object.entries(results)) if ((r.lastSeen || 0) < cut && !isManaged(ip)) { delete results[ip]; changed = true; }
   if (changed) { scheduleWrite(RES); scanRevN++; }
 }
 
@@ -363,7 +345,7 @@ export function scanInfo() {
   const list = scanResultList();
   const byAgent = {};
   for (const r of list) byAgent[r.agent || LOCAL] = (byAgent[r.agent || LOCAL] || 0) + 1;
-  return { count: list.length, max: MAX_SCAN_IPS, lastSeen: list.reduce((m, r) => Math.max(m, r.lastSeen || 0), 0) || null, byAgent };
+  return { count: list.length, lastSeen: list.reduce((m, r) => Math.max(m, r.lastSeen || 0), 0) || null, byAgent };
 }
 
 // ---- 에이전트별 보고 기록(마지막 보고 시각·스캔/응답 수) ----------------------
