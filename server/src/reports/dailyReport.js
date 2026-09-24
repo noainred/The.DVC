@@ -132,8 +132,8 @@ export async function dailyReportTick(nowTs = Date.now(), run = runDailyReportNo
   if (r?.reason === '이미 발송이 진행 중입니다.') return { skipped: 'running' };   // 수동 발송과 겹침 — 실패로 세지 않는다
   noteResult(r, nowTs);
   if (r?.ok) console.log('[daily-report] 일일 헬스체크 리포트 발송 완료');
-  // ⚠ 로그 문장 끝의 '(다음 틱에 재시도)' 는 로그 분석 카탈로그의 probe 다(loganalysis/catalog.js) — 간격은 사유 안에 적는다.
-  else console.warn(`[daily-report] 발송 실패 — ${r?.reason || '알 수 없는 오류'} · 연속 실패 ${failState.streak}회, ${Math.round(dailyReportBackoffMs(failState.streak) / 60_000)}분 뒤 (다음 틱에 재시도)`);
+  // ⚠ 문장 형식은 로그 분석 카탈로그(loganalysis/catalog.js 'daily-report-fail')의 정규식·probe 와 짝이다 — 바꾸면 함께 바꿀 것.
+  else console.warn(`[daily-report] 발송 실패 — ${r?.reason || '알 수 없는 오류'} · 연속 실패 ${failState.streak}회 (${Math.round(dailyReportBackoffMs(failState.streak) / 60_000)}분 뒤 다시 시도)`);
   return { ran: true, ok: !!r?.ok };
 }
 const tick = () => dailyReportTick();

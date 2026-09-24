@@ -12,6 +12,7 @@ import { csvCell } from '../util/csv.js'; // 수식 인젝션 가드 포함 공�
 const fmtDate = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 import { STable } from '../components/STable.jsx';
 import { dayStamp } from '../dayStamp.js';
+import { dailyReportFailNote } from './dailyReportText.js';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`);
 
@@ -59,6 +60,8 @@ export function DailyHealth({ scope, isAdmin }) {
     setSaving('발송 중…');
     try { const r = await postJson('/admin/report/daily/run', {}); setSaving(r.ok ? `발송 완료 (${(r.results || []).join(', ') || '채널 미설정'})` : `실패: ${(r.results || []).join(', ') || r.reason}`); }
     catch (e) { setSaving(`실패: ${e.message}`); }
+    // 수동 성공은 서버의 연속 실패 기록을 지운다 — 안내가 옛 값으로 남지 않게 다시 읽는다(v2.603).
+    fetchJson('/admin/report/daily').then(setSched).catch(() => {});
   };
   return (
     <>
@@ -86,6 +89,7 @@ export function DailyHealth({ scope, isAdmin }) {
             <button className="logout-btn" onClick={runNow}>지금 발송(테스트)</button>
             {saving && <span className="muted" style={{ fontSize: 12 }}>{saving}</span>}
           </div>
+          {(() => { const n = dailyReportFailNote(sched); return n ? <div style={{ marginTop: 8, fontSize: 12, color: 'var(--amber)', overflowWrap: 'anywhere' }}>⚠ {n.text}</div> : null; })()}
         </div>
       )}
       {data.sections.map((s) => (

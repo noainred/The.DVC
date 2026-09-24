@@ -944,11 +944,12 @@ export const CATALOG_RULES = [
     action: "설정 디렉터리의 손상본이나 포탈 백업으로 복구하세요. 복구하기 전에 메일 설정 화면에서 저장하면 원본을 덮어씁니다.",
     link: "#/settings/mail", linkLabel: "메일 발송" }),
   C({ id: "daily-report-fail", tag: "daily-report", severity: "medium", category: "stability", entity: 1, entityLabel: "실패 사유",
-    re: "발송 실패 — (.+) \\(다음 틱에 재시도\\)",
-    src: "server/src/reports/dailyReport.js", probe: "다음 틱에 재시도",
-    sample: "[daily-report] 발송 실패 — 수신자가 없습니다 (다음 틱에 재시도)",
+    // v2.603(TIM2603-02): 재시도 간격이 1분 → 15·30·60분으로 바뀌었다. 옛 판본 로그(다음 틱에 재시도)도 함께 받는다.
+    re: "발송 실패 — (.+?)(?: · 연속 실패 \\d+회)? \\((?:다음 틱에 재시도|\\d+분 뒤 다시 시도)\\)",
+    src: "server/src/reports/dailyReport.js", probe: "분 뒤 다시 시도",
+    sample: "[daily-report] 발송 실패 — 수신자가 없습니다 · 연속 실패 2회 (30분 뒤 다시 시도)",
     title: "일일 헬스체크 리포트 발송이 실패했습니다",
-    meaning: "일일 헬스체크 리포트 발송이 실패했습니다. 1분마다 다시 시도하므로 원인이 해결될 때까지 같은 줄이 반복됩니다.",
+    meaning: "일일 헬스체크 리포트 발송이 실패했습니다. 실패가 이어지면 15분·30분·60분 간격으로 다시 시도하므로(2.603 이전 판본은 1분마다) 원인이 해결될 때까지 같은 줄이 반복됩니다.",
     action: "설정 › 알림에서 일일 리포트 수신자를, 설정 › 메일 발송에서 SMTP 설정을 확인하세요.",
     link: "#/settings/alerts", linkLabel: "알림" }),
 ];
