@@ -236,3 +236,45 @@ test('RECENT2600-02 — 엣지 scopeSnapshot 도 포트 축약 뒤 조닝을 잘
   assert.equal(small.ports.portsScope, 'full');
   assert.equal(small.zoning.trimmed, undefined);
 });
+
+// ── EDGE2600-04(중앙쪽 · 그룹 c 에서 이관) ────────────────────────────────────
+test('EDGE2600-04 — 인벤토리를 읽지 못한 빈 조각(unreachable·호스트/VM 0)은 중앙의 마지막 정상 목록을 지우지 않는다', async () => {
+  const inv = await import('../src/central/inventory.js');
+  const good = { vcenter: { id: 'vc-site1', name: 'Site1', status: 'connected', location: REG_LOC },
+    hosts: [{ id: 'h1', name: 'esx1', vcenterId: 'vc-site1' }], vms: [{ id: 'v1', name: 'vm1', vcenterId: 'vc-site1' }], datastores: [], networks: [], alarms: [] };
+  const r0 = await post('/inventory', { agent: 'edge-a', vcenterId: 'vc-site1', ...good });
+  assert.equal(r0.status, 200, JSON.stringify(r0.body));
+  const at0 = inv.getInventory('vc-site1').at;
+  // 구버전 엣지: 재시작 직후 첫 수집 실패 → 빈 unreachable 조각
+  const r1 = await post('/inventory', { agent: 'edge-a', vcenterId: 'vc-site1',
+    vcenter: { id: 'vc-site1', name: 'Site1', status: 'unreachable', error: 'connect ETIMEDOUT' }, hosts: [], vms: [], datastores: [], networks: [], alarms: [] });
+  assert.equal(r1.status, 200);
+  assert.equal(r1.body.held, true);
+  const e = inv.getInventory('vc-site1');
+  assert.deepEqual(e.data.hosts.map((h) => h.id), ['h1'], '마지막 정상 호스트 목록이 남아야 한다');
+  assert.deepEqual(e.data.vms.map((v) => v.id), ['v1']);
+  assert.equal(e.data.vcenter.status, 'unreachable', '상태는 갱신한다(지금 값인 척하지 않는다)');
+  assert.equal(e.data.vcenter.error, 'connect ETIMEDOUT');
+  assert.equal(e.at, at0, '데이터 시각은 그대로 — store 가 stale 로 표시한다');
+  assert.ok(e.pushAt >= at0, 'push 시각은 갱신(엣지는 살아 있다)');
+  // 목록이 실제로 0 인 정상 조각은 그대로 받는다(회귀 없음)
+  const r2 = await post('/inventory', { agent: 'edge-a', vcenterId: 'vc-site1', vcenter: { id: 'vc-site1', status: 'connected' }, hosts: [], vms: [] });
+  assert.equal(r2.body.held, undefined);
+  assert.equal(inv.getInventory('vc-site1').data.hosts.length, 0);
+});
+
+// ── CEN2600-09 마무리(그룹 c 에서 이관) ──────────────────────────────────────
+test('CEN2600-09 — 위임 단일 캡처 이력의 hostA 를 라우트가 글자·제어문자 제거·길이 제한으로 넘긴다', async () => {
+  const { enqueueCapture } = await import('../src/central/captureJobs.js');
+  const { listCaptures } = await import('../src/net/captureHistory.js');
+  const reqId = enqueueCapture('edge-cap', { host: '10.1.1.1', peer: '10.2.2.2', seconds: 5 });
+  const r = await post('/capture-result', { reqId, result: { ok: true, hostA: '10.1.1.1\n\u001b[31mX', peer: '10.2.2.2', captured: 3, analysis: { stat: { packets: 3 }, issues: [] } } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  const rec = listCaptures({ limit: 5 }).find((x) => x.via === 'agent');
+  assert.ok(rec, '이력이 기록돼야 한다');
+  assert.equal(rec.hostA, '10.1.1.1[31mX', `제어문자는 지운다: ${JSON.stringify(rec.hostA)}`);
+  // 객체 hostA 는 넘기지 않는다(글자만)
+  const reqId2 = enqueueCapture('edge-cap', { host: '10.1.1.1', peer: '10.2.2.2', seconds: 5 });
+  const r2 = await post('/capture-result', { reqId: reqId2, result: { ok: true, hostA: { x: 1 }, peer: '10.2.2.2', captured: 1, analysis: { issues: [] } } });
+  assert.equal(r2.status, 200);
+});
