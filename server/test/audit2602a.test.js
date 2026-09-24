@@ -70,7 +70,7 @@ test('CEN2602-01 — 오염된 serviceTag 가 담긴 export 를 pull 해도 원�
     let list;
     assert.doesNotThrow(() => { list = remoteServersResolved(); }, '함대 공용 집계 경로가 던지면 로컬 iDRAC 까지 사라진다');
     const s1 = list.find((x) => x.id === '10.0.0.1');
-    assert.equal(s1.serviceTag, null, '객체는 null(지어낸 글자를 넣지 않는다)');
+    assert.equal(s1.serviceTag ?? null, null, '객체는 null(지어낸 글자를 넣지 않는다)');
     assert.equal(s1.inv.system.model, null);
     assert.equal(s1.inv.system.serviceTag, 'ABC');
     assert.equal(s1.inv.gpus.length, 1);
@@ -178,6 +178,14 @@ test('SEC2602-01 — register-collector 의 긴 urlHint 는 정규식 전에 400
   const t1 = performance.now();
   trimTrailingSlashes(`${'/'.repeat(200_000)}x`);
   assert.ok(performance.now() - t1 < 50);
+  // 추가 배정 — normPath(인증 전 모든 central 요청)도 선형이고, 경로 변형 정규화(v2.500 C-1)는 그대로다.
+  const { normPath } = await import('../src/routes/central.js');
+  assert.equal(normPath('/Register-Collector//'), '/register-collector');
+  assert.equal(normPath('/register-collector/.'), '/register-collector');
+  assert.equal(normPath({ toString: 1 }), '');
+  const t2 = performance.now();
+  normPath(`${'/'.repeat(100_000)}x`);
+  assert.ok(performance.now() - t2 < 50, 'normPath 가 O(n²) 로 돌면 인증 전 요청 하나가 이벤트 루프를 잡는다');
   const src = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
   assert.equal(src.includes(String.raw`.replace(/\/+$/`), false, 'central.js 에 끝 슬래시 정규식을 되살리지 않는다');
 });
@@ -198,7 +206,7 @@ test('EDGE2602-03 — 중앙 버전이 statusOnly 를 모르면(v2.580) 상태 �
   await new Promise((r) => central.listen(0, '127.0.0.1', r));
   const prev = { url: config.agent.centralUrl, token: config.agent.centralToken };
   // 위임 장비 1대(스냅샷 없음) — 목록 비우기가 아니라 상태 전용 경로를 탄다.
-  fs.writeFileSync(path.join(CFG, 'storage-devices.json'), JSON.stringify({ devices: [{ id: 'st-1', name: 'u1', type: 'unity480', host: '10.0.0.5', username: 'a', password: 'b', agent: '' }] }));
+  fs.writeFileSync(path.join(CFG, 'storage-devices.json'), JSON.stringify({ devices: [{ id: 'st-1', name: 'u1', type: 'unity480', host: '10.0.0.5', username: 'a', password: 'b', agent: config.agent.name }] }));
   try {
     config.agent.centralUrl = `http://127.0.0.1:${central.address().port}`;
     config.agent.centralToken = 'tok';
@@ -214,11 +222,10 @@ test('EDGE2602-03 — 중앙 버전이 statusOnly 를 모르면(v2.580) 상태 �
     push._resetStatusOnlyCapForTest();
     const r2 = await push.pushStorageNow();
     const sent = hits.filter((h) => h.url.startsWith('/api/central/storage-data'));
-    if (r2.cleared === undefined) {
-      assert.equal(r2.statusSent, true);
-      assert.equal(sent.length, 1);
-      assert.equal(JSON.parse(sent[0].body).statusOnly, true);
-    }
+    assert.equal(r2.cleared, undefined, '위임 1대 — 목록 비우기 경로가 아니다');
+    assert.equal(r2.statusSent, true);
+    assert.equal(sent.length, 1);
+    assert.equal(JSON.parse(sent[0].body).statusOnly, true);
     // 버전을 모르면 보내지 않는다
     version = 'dev';
     push._resetStatusOnlyCapForTest();

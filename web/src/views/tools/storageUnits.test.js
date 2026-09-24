@@ -82,3 +82,18 @@ describe('normalizeUnit', () => {
     for (const u of UNIT_OPTIONS) expect(normalizeUnit(u.value)).toBe(u.value);
   });
 });
+
+describe('alertTotals (v2.602 RECENT2602-02 후속)', () => {
+  it('경보 개수를 못 읽은 장비(null)는 0 으로 더하지 않고 unknown 으로 센다', async () => {
+    const { alertTotals } = await import('./storageUnits.js');
+    const rows = [{ a: 3 }, { a: null }, { a: 0 }, { a: undefined }, { a: '' }];
+    expect(alertTotals(rows, (r) => r.a)).toEqual({ total: 3, unknown: 3, counted: 2 });
+    expect(alertTotals([], (r) => r.a)).toEqual({ total: 0, unknown: 0, counted: 0 });
+  });
+  it('화면은 (f(x) || 0) 합산을 쓰지 않고 미확인 대수를 KPI 에 밝힌다(소스)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./StorageMonTool.jsx', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/f\(x\) \|\| 0/);
+    expect(src).toMatch(/경보 미확인 \$\{totals\.alertsUnknown\}대/);
+  });
+});

@@ -114,11 +114,12 @@ test('RECENT2602-02: PowerMax 경보 개수를 못 찾으면 섹션 사유가 �
   fs.mkdirSync(dir, { recursive: true });
   execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes', '-days', '1',
     '-subj', '/CN=localhost', '-keyout', path.join(dir, 'k.pem'), '-out', path.join(dir, 'c.pem')], { stdio: 'ignore' });
+  let alertFail = false;
   const srv = https.createServer({ key: fs.readFileSync(path.join(dir, 'k.pem')), cert: fs.readFileSync(path.join(dir, 'c.pem')) }, (q, r) => {
     const u = q.url;
     if (u === '/univmax/restapi/version') return json(r, { version: 'V10.0.0.0' });
     if (/\/system\/symmetrix$/.test(u)) return json(r, { symmetrixId: [] });
-    if (/\/system\/alert/.test(u)) return json(r, { symmAlertSummary: [{ alert_count: 5 }] });   // 미확인 개수 없음
+    if (/\/system\/alert/.test(u)) return alertFail ? json(r, { error: 'boom' }, 500) : json(r, { symmAlertSummary: [{ alert_count: 5 }] });   // 미확인 개수 없음
     return json(r, {}, 404);
   });
   const port = await listen(srv);
@@ -128,6 +129,10 @@ test('RECENT2602-02: PowerMax 경보 개수를 못 찾으면 섹션 사유가 �
     const out = await collect({ id: 'pm', type: 'powermax', host: '127.0.0.1', username: 'u', password: 'p' });
     assert.match(String(out.sections.alerts), /^미수집/);
     assert.equal(out.alerts.unresolved, null);
+    alertFail = true;   // 경보 조회 오류 — 0 이 아니라 모른다
+    const out2 = await collect({ id: 'pm', type: 'powermax', host: '127.0.0.1', username: 'u', password: 'p' });
+    assert.match(String(out2.sections.alerts), /^오류/);
+    assert.equal(out2.alerts.unresolved, null);
   } finally { srv.close(); delete process.env.STORAGE_UNISPHERE_PORT; }
 });
 

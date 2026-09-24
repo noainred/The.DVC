@@ -257,7 +257,7 @@ function strAgent(v) { return typeof v === 'string' ? v.trim().slice(0, 64) : ''
 // v2.602(감사 SEC2602-01): 끝 '/' 는 **루프로** 뗀다 — `/\/+$/` 는 '/' 연속 뒤에 다른 글자가 오면 시작 위치마다 끝까지
 //   훑어 O(n²) 이고, 이 함수는 인증 전 모든 central 요청에서 돈다(헤더 16KB 상한까지 요청당 약 0.2초).
 export const trimTrailingSlashes = (s) => { let e = s.length; while (e > 0 && s.charCodeAt(e - 1) === 47) e--; return e === s.length ? s : s.slice(0, e); };
-const normPath = (p) => trimTrailingSlashes(typeof p === 'string' ? p : '').replace(/\/\.$/, '').toLowerCase();
+export const normPath = (p) => trimTrailingSlashes(typeof p === 'string' ? p : '').replace(/\/\.$/, '').toLowerCase();
 const registerName = (req) => (normPath(req.path) === '/register-collector' ? (typeof req.body?.name === 'string' ? req.body.name.trim() : '') : '');
 
 /**
