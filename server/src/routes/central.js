@@ -1018,6 +1018,18 @@ function edgeNameKnown(name) {
   return _knownNames.set.has(String(name || '').trim().toLowerCase());
 }
 
+/** v2.605(RECENT2605-02): 수집 서버 등록부에 있는 이름인가(자기등록 미검증 포함) — edge-log-result 의 acked 회신 전용. */
+function edgeNameRegistered(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n) return false;
+  try {
+    for (const c of listCollectorsForLinks()) {
+      if (String(c.id || '').trim().toLowerCase() === n || String(c.name || '').trim().toLowerCase() === n) return true;
+    }
+  } catch { /* 등록부 없음 */ }
+  return false;
+}
+
 // 위임 iDRAC 스캔: 에이전트가 자기 이름의 온디맨드 스캔 잡을 인출.
 centralRouter.get('/idrac-scan-jobs', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
@@ -1253,7 +1265,11 @@ centralRouter.post('/edge-log-result', async (req, res) => {
     //   보관분을 덮었다**. 공유 토큰 회신은 ① 중앙이 아는 이름(edgeNameKnown)이고 ② 중앙이 실제로 그 엣지에 요청해 둔
     //   작업(acked)일 때만 저장한다. 개별 토큰은 인증된 이름이므로 예전대로(요청 없는 회신도 버리지 않고 밝힌다).
     const shared = req.centralAuth?.mode !== 'agent';
-    if (shared && !edgeNameKnown(agent)) return res.status(403).json({ ok: false, reason: `중앙이 모르는 엣지 이름(${agent}) — 공유 토큰 회신은 등록된 엣지 이름만 받습니다.`, unverifiedAgent: true });
+    // v2.605(RECENT2605-02): 폴백 큐는 **중앙이 닿지 못하는 엣지**를 위한 경로다 — 그런 공유 토큰 엣지는 자기등록 검증도 pull 성공도
+    //   없어 selfRegUnverified 로 남고 edgeNameKnown 에서 빠진다(v2.604 CEN2604-04). 그래서 회신이 영원히 403 이었다(인출은 되는데
+    //   회신만 거부). 수집 서버 **등록부에 있는 이름**(미검증 포함)이면 받되, ② acked(중앙이 그 이름으로 요청해 둔 작업) 조건은 그대로
+    //   요구한다 — 요청 없이 이름만 골라 보관분을 덮는 길(v2.602)은 계속 막힌다. /fleet 의 미검증 귀속 비움(v2.601)은 건드리지 않는다.
+    if (shared && !edgeNameKnown(agent) && !edgeNameRegistered(agent)) return res.status(403).json({ ok: false, reason: `중앙이 모르는 엣지 이름(${agent}) — 공유 토큰 회신은 등록된 엣지 이름만 받습니다.`, unverifiedAgent: true });
     const { acked } = ackEdgeLogJob(agent);
     if (shared && !acked) return res.json({ ok: true, agent, stored: false, acked, reason: '요청한 적 없는 공유 토큰 회신은 보관하지 않습니다(다른 엣지 보관분을 덮지 못하게).' });
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};

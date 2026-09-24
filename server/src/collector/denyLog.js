@@ -42,6 +42,24 @@ export function _resetCollectorDenyStats() {
   denyRecent.length = 0; denyBySrc.clear(); _denyLogAt.clear();
 }
 const _denyLogAt = new Map();
+/**
+ * v2.605(TIM2605-05): 로그 스로틀 맵에도 상한 — 예전에는 denyBySrc 만 백스톱이 있고 이 맵은 `${endpoint}:${ip}` 가 무한히 쌓였다
+ * (IPv6 출처·XFF 를 바꿔 가며 거부되면 20만 출처에 힙 +52MB). 넘치면 30초 창이 지난 항목을 청소하고, 그래도 넘치면
+ * 가장 먼저 들어온 항목을 내린다(스로틀이 풀려 로그 한 줄이 더 찍힐 뿐 — 통계에는 영향 없다).
+ */
+export const DENY_LOG_KEYS_MAX = 2_048;
+const DENY_LOG_WINDOW_MS = 30_000;
+let _denyLogSweptAt = 0;
+function noteDenyLogAt(key, now) {
+  _denyLogAt.delete(key);   // 다시 넣어 삽입 순서 = 최근성
+  if (_denyLogAt.size >= DENY_LOG_KEYS_MAX) {
+    // 청소는 1초에 한 번만(포화 상태에서 요청마다 2천 항목을 훑지 않게).
+    if (now - _denyLogSweptAt >= 1_000) { _denyLogSweptAt = now; for (const [k, at] of _denyLogAt) if (now - at >= DENY_LOG_WINDOW_MS) _denyLogAt.delete(k); }
+    while (_denyLogAt.size >= DENY_LOG_KEYS_MAX) _denyLogAt.delete(_denyLogAt.keys().next().value);
+  }
+  _denyLogAt.set(key, now);
+}
+export const _denyLogKeyCount = () => _denyLogAt.size;
 export function logCollectorDeny(req, endpoint) {
   const ip = req.ip || req.socket?.remoteAddress || '?';
   const provided = req.get('X-Collector-Token') || (req.get('Authorization') || '').replace(/^Bearer\s+/i, '');
@@ -79,7 +97,7 @@ export function logCollectorDeny(req, endpoint) {
   }
   src.count++; src.lastAt = now; src.lastWhy = why; src.lastEndpoint = endpoint;
   const key = `${endpoint}:${ip}`;
-  if (now - (_denyLogAt.get(key) || 0) < 30_000) return;
-  _denyLogAt.set(key, now);
+  if (now - (_denyLogAt.get(key) || 0) < DENY_LOG_WINDOW_MS) return;
+  noteDenyLogAt(key, now);
   console.warn(`[collector] 인증 거부(${endpoint}) — src=${ip} · ${logWhy} · 요청토큰=${provided ? `제공됨(len=${provided.length})` : '없음'}`);
 }

@@ -133,6 +133,10 @@ api.get('/tools/sanswitch/devices/:id/ports', toolsPerm, fullScopeOnly, (req, re
   // 장비 일반 정보(v2.411, 사용자 요구 '장비 일반 정보 표시')를 함께 내려준다 — 예전에는
   // 모델/FOS/수집시각만 보내서, 이미 수집해 둔 WWN·Domain·시리얼·팹·존·FRU 상태가
   // 화면에 전혀 쓰이지 않고 버려지고 있었다.
+  // v2.605 AUTHZ2605-04: sections(섹션별 오류 문구)는 목록과 같은 maskSnapAddress 를 거친다 — 스냅샷에 host 가
+  //   없는 엣지 사본도 등록부 주소로 가린다.
+  const regHost = listDevices().find((d) => d.id === req.params.id)?.host || '';
+  const shownSections = isAdminReq(req) ? (snap.sections || {}) : (maskSnapAddress({ ...snap, sections: snap.sections || {} }, regHost).sections || {});
   res.json({
     ok: true, deviceId: snap.deviceId, name: (!isAdminReq(req) && snap.host && snap.name === snap.host) ? maskedNameLabel(snap) : snap.name, model: snap.model, fabricOs: snap.fabricOs,
     collectedAt: snap.collectedAt, source: snap === edge ? `엣지(${snap.agent || ''})` : '중앙 직접 수집',
@@ -141,7 +145,7 @@ api.get('/tools/sanswitch/devices/:id/ports', toolsPerm, fullScopeOnly, (req, re
     serial: snap.serial || '', wwn: snap.wwn || '', domainId: snap.domainId ?? null,
     switchState: snap.switchState || '', health: snap.health || null,
     fabric: snap.fabric || null, zoning: snap.zoning || null, licenses: snap.licenses || [],
-    ports: snap.ports || { list: [] }, sections: snap.sections || {}, extra: snap.extra || {},
+    ports: snap.ports || { list: [] }, sections: shownSections, extra: snap.extra || {},
   });
 });
 
@@ -158,10 +162,16 @@ api.get('/tools/sanswitch/devices/:id/zoning', toolsPerm, fullScopeOnly, (req, r
   const snap = (!local || (edge && (edge.collectedAt || 0) > (local.collectedAt || 0))) ? edge : local;
   if (!snap) return res.status(404).json({ ok: false, reason: '수집된 스냅샷이 없습니다.' });
   const z = snap.zoning || null;
+  // v2.605 AUTHZ2605-04: 형제 /ports 처럼 비-admin 에는 이름=주소·섹션 오류 속 주소를 가린다.
+  const zAdmin = isAdminReq(req);
+  const zRegHost = listDevices().find((d) => d.id === req.params.id)?.host || '';
+  const zHost = snap.host || zRegHost;
+  const zMasked = zAdmin ? null : maskSnapAddress({ ...snap, host: zHost, sections: { zoning: snap.sections?.zoning || 'skip' } }, zRegHost);
   const base = {
-    ok: true, deviceId: snap.deviceId, name: snap.name, collectedAt: snap.collectedAt,
+    ok: true, deviceId: snap.deviceId, name: zAdmin ? snap.name : ((zHost && snap.name === zHost) ? maskedNameLabel(snap) : snap.name), collectedAt: snap.collectedAt,
     source: snap === edge ? `엣지(${snap.agent || ''})` : '중앙 직접 수집',
-    section: snap.sections?.zoning || 'skip',
+    section: zAdmin ? (snap.sections?.zoning || 'skip') : zMasked.sections.zoning,
+    ...(zAdmin ? {} : { addressHidden: true }),
     zoning: z ? { effectiveConfig: z.effectiveConfig || '', source: z.source || 'none', available: !!z.available,
       reason: z.reason || '', counts: z.counts || null, zoneCount: z.zoneCount || 0, truncated: !!z.truncated, limited: !!z.limited } : null,
   };
@@ -440,7 +450,9 @@ api.get('/tools/sanswitch/devices/:id/healthcheck/history', toolsPerm, fullScope
   // v2.603 AUTHZ-2603-02: 이력 detail(200자)에 snap.error 원문 주소가 저장돼 있다 — 비-admin 은 문자열 전부를 가린다.
   const body = { ...hist, compare: compareRuns(hist.runs) };
   const shown = admin ? body : scrubStringsDeep(body, listDevices().map((d) => d.host).filter(Boolean));
-  res.json({ ok: true, deviceId: req.params.id, name: dev.name || (admin ? dev.host : maskedNameLabel(dev)), ...shown, maxRuns: MAX_RUNS, ...(admin ? {} : { addressHidden: true }), db: scopeDbStatus(await healthHistoryStatus(), req.user) });
+  // v2.605 AUTHZ2605-04: 이름을 IP 로 등록한 장비는 dev.name === dev.host 다 — 그때도 라벨로 가린다.
+  const histName = admin ? (dev.name || dev.host) : ((dev.name && dev.name !== dev.host) ? dev.name : maskedNameLabel(dev));
+  res.json({ ok: true, deviceId: req.params.id, name: histName, ...shown, maxRuns: MAX_RUNS, ...(admin ? {} : { addressHidden: true }), db: scopeDbStatus(await healthHistoryStatus(), req.user) });
 });
 
 /**
@@ -554,10 +566,16 @@ async function perfDiagFor(deviceId, r) {
 }
 
 /** 시계열이 비었으면 진단을 붙인다(있으면 붙이지 않는다 — 위 머리말). */
-async function withPerfDiag(deviceId, r) {
+async function withPerfDiag(deviceId, r, req = null) {
   const empty = !(r?.series || []).length;
   if (!empty) return r;
-  return { ...r, diag: await perfDiagFor(deviceId, r) };
+  const diag = await perfDiagFor(deviceId, r);
+  // v2.605 AUTHZ2605-03: diag.facts.error 는 작업 로그·엣지 보고의 오류 원문('connect ETIMEDOUT 10.x:22')이다 —
+  //   형제 /perf/activity 처럼 비-admin 에는 등록부 주소를 가린다(형제 경로가 우회로 — v2.550.3 규약).
+  if (diag && req && !isAdminReq(req)) {
+    return { ...r, diag: scrubStringsDeep(diag, listDevices().map((d) => d.host)), addressHidden: true };
+  }
+  return { ...r, diag };
 }
 
 api.get('/tools/sanswitch/devices/:id/perf', toolsPerm, fullScopeOnly, async (req, res) => {
@@ -566,14 +584,14 @@ api.get('/tools/sanswitch/devices/:id/perf', toolsPerm, fullScopeOnly, async (re
   //   ports 미지정이 '포트 0 만' 으로 둔갑한다(v2.416 리뷰 확정 결함).
   const ports = parsePortsParam(req.query.ports);
   const r = await portSeries(req.params.id, { hours, from, to, ports: ports.length ? ports : null });
-  res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...(await withPerfDiag(req.params.id, r)) });
+  res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...(await withPerfDiag(req.params.id, r, req)) });
 });
 
 /** 연결 장비(스토리지 어레이)별 합산 시계열 — 포트가 아니라 '어느 스토리지가 얼마나 쓰이나'. */
 api.get('/tools/sanswitch/devices/:id/perf/storage', toolsPerm, fullScopeOnly, async (req, res) => {
   const { hours, from, to, issue } = rangeParams(req.query);
   const r = await storageSeries(req.params.id, { hours, from, to });
-  res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...(await withPerfDiag(req.params.id, r)) });
+  res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...(await withPerfDiag(req.params.id, r, req)) });
 });
 
 /**

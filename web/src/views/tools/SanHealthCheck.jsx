@@ -7,6 +7,7 @@ import { STable } from '../../components/STable.jsx';
 import { STATUS_LABEL, STATUS_MARK, stageLabel, stamp, deviceVerdict, allSummaryText,
   sortResults, baselineNote, deviceReportDoc, allReportDoc, reportFileName,
   portVerdict, opticalText, errorText, portCheckSummary, portBaselineNote, problemPortText, sideText,
+  problemOmittedNote, portZoningFallback,
   cmdText, cmdNote, changeLabel, compareSummary, recordNote } from './sanHealthText.js';
 
 /**
@@ -109,7 +110,7 @@ function ItemTable({ items }) {
  *   '전 포트를 봤다' 는 거짓이 된다). 신고된 거짓 경보(-27 dBm 인데 빈 포트)의 원인이었다.
  * ⚠ 훅은 조기 return 위에(React #310).
  */
-function PortCheckTable({ pc, problems, zoningNote }) {
+function PortCheckTable({ pc, problems, zoningNote, omitted }) {
   const [open, setOpen] = useState(null);
   const [onlyBad, setOnlyBad] = useState(true);
   const probByIndex = useMemo(() => new Map((problems || []).map((p) => [p.index, p])), [problems]);
@@ -129,6 +130,7 @@ function PortCheckTable({ pc, problems, zoningNote }) {
         <div className="muted" style={{ fontSize: 11.5 }}>{portCheckSummary(pc)}</div>
       </div>
       <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}><BoldText text={portBaselineNote(pc)} /></div>
+      {problemOmittedNote(omitted) && <div style={{ fontSize: 11.5, marginBottom: 6, color: COLOR.amber }}>⚠ {problemOmittedNote(omitted)}</div>}
       <div className="table-wrap">
         <STable className="v3-table">
           <thead>
@@ -153,7 +155,7 @@ function PortCheckTable({ pc, problems, zoningNote }) {
                 {open === r.index && (
                   <tr>
                     <td colSpan={7} style={{ background: 'var(--panel)' }}>
-                      <PortDetail row={r} prob={probByIndex.get(r.index)} zoningNote={zoningNote} />
+                      <PortDetail row={r} prob={probByIndex.get(r.index)} zoningNote={zoningNote} omitted={omitted} />
                     </td>
                   </tr>
                 )}
@@ -168,7 +170,7 @@ function PortCheckTable({ pc, problems, zoningNote }) {
 }
 
 /** 포트 1개의 판정 근거 + **어떤 서버인지 · 어디와 조닝되어 있는지**(v2.521 사용자 요청). */
-function PortDetail({ row, prob, zoningNote }) {
+function PortDetail({ row, prob, zoningNote, omitted }) {
   return (
     <div style={{ display: 'grid', gap: 8, padding: '8px 4px', minWidth: 0 }}>
       {!!row.reasons?.length && (
@@ -189,7 +191,7 @@ function PortDetail({ row, prob, zoningNote }) {
       )}
       <div>
         <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 3 }}>연결 장비 · 조닝</div>
-        {!prob && <div className="muted" style={{ fontSize: 12 }}>{zoningNote || '이 포트는 이상·주의 목록에 없어 조닝 상대를 조회하지 않았습니다.'}</div>}
+        {!prob && <div className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>{portZoningFallback(row, zoningNote, omitted)}</div>}
         {prob && (
           <>
             <div className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>{problemPortText(prob, zoningNote)}</div>
@@ -384,7 +386,7 @@ export function DeviceHealthPanel({ deviceId, deviceName }) {
       </div>
       {error && <ErrorBox message={error} />}
       <ItemTable items={r?.items || []} />
-      <PortCheckTable pc={data.ports} problems={data.problemPorts} zoningNote={data.zoningNote} />
+      <PortCheckTable pc={data.ports} problems={data.problemPorts} zoningNote={data.zoningNote} omitted={data.problemPortsOmitted} />
       <HistoryPanel history={data.history} />
     </div>
   );

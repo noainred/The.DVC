@@ -508,9 +508,10 @@ export function checkPorts(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad 
       if (d != null) { dlt[k] = d; dltSum += d; dltKnown = true; }
     }
     let errors = 'unknown';
+    let errHeldApprox = false;
     if (sec.counters !== 'ok') errors = 'unknown';
     else if (!Object.keys(cur).length) errors = 'unknown';
-    else if (bp && approxHeld && dltSum === 0) { errors = 'unknown'; reasons.push('카운터가 k/m/g 로 축약돼 신규 에러를 셀 수 없습니다'); }
+    else if (bp && approxHeld && dltSum === 0) { errors = 'unknown'; errHeldApprox = true; reasons.push('카운터가 k/m/g 로 축약돼 신규 에러를 셀 수 없습니다'); }
     else if (bp && dltKnown) {
       if (dltSum >= 100) { errors = 'bad'; reasons.push(`기준선 이후 신규 에러 ${dltSum}건`); }
       else if (dltSum > 0) { errors = 'warn'; reasons.push(`기준선 이후 신규 에러 ${dltSum}건`); }
@@ -527,11 +528,14 @@ export function checkPorts(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad 
     const causes = errorCauses([{ index: p.index, cur, dlt }], { basis: bp && dltKnown ? 'dlt' : 'cur' });
     const verdict = worst([state === 'idle' ? 'ok' : state, optical, errors]);
     return {
-      index: p.index, name: p.attachedName || p.attached || '', state: p.state, stateRaw: p.stateRaw || '',
+      // v2.605 WEB2605-07: 디렉터는 슬롯마다 포트 0 부터 — 화면이 '(슬롯/포트)' 를 붙이려면 행에 있어야 한다.
+      index: p.index, slotPort: p.slotPort ?? null, name: p.attachedName || p.attached || '', state: p.state, stateRaw: p.stateRaw || '',
       linked, speed: p.speed || '', portType: p.portType || '', wwn: String(p.attached || ''),
       rxPowerDbm: rx, txPowerDbm: num(p.txPowerDbm), sfpTempC: num(p.sfpTempC),
       optical, errors, verdict, reasons,
       errCur: cur, errDelta: bp ? dlt : null, errSum: curSum, errNew: bp && dltKnown ? dltSum : null,
+      // v2.605 WEB2605-04: 축약 카운터로 신규 판정만 보류한 경우 — 화면이 '카운터 없음' 과 구분한다.
+      errHeld: errHeldApprox ? 'approx' : null,
       causes,
     };
   });

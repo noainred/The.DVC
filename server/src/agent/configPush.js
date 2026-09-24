@@ -23,10 +23,22 @@ function headers() {
   return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
+// v2.605(감사 EDGE2605-04): 진행 중에 들어온 요청을 버리지 않는다 — 예전에는 `if (running) return false;` 라 주기 push 가 고RTT 로
+//   도는 사이 설정 변경 감시가 부른 push 가 조용히 사라지고(진행 중 push 는 변경 전 파일을 이미 읽었다) 변경분이 최대 30분 늦게
+//   중앙 백업에 반영됐다. 형제 push(pdu/storage — v2.597 L2597-04)와 같은 '끝난 뒤 한 번 더' 규약이다. 추가 push 는
+//   onlyIfChanged 라 내용이 같으면 보내지 않는다(v2.602 EDGE2602-01 지문 생략과 충돌하지 않는다).
+let _busy = null;
+let _again = false;
+let _lastDeferredAt = null;
 export async function pushConfigNow(...args) {
-  if (running) return false;
+  if (_busy) { _again = true; _lastDeferredAt = Date.now(); return _busy; }
   running = true;
-  try { return await _pushConfigNow(...args); } finally { running = false; }
+  _busy = (async () => {
+    let r = await _pushConfigNow(...args);
+    while (_again) { _again = false; r = await _pushConfigNow({ onlyIfChanged: true }); }
+    return r;
+  })().finally(() => { _busy = null; running = false; });
+  return _busy;
 }
 
 // v2.602(감사 EDGE2602-01): 마지막으로 **성공한** push 의 설정 지문(상태·캐시 파일·last* 실행 필드 제외 — backup 과 같은 기준).
@@ -90,7 +102,7 @@ let _last = null;
 let _lastSkippedAt = null;
 /** 엣지 로그 화면용 상태(edgelog/spec.js). 설정 내용·토큰은 담지 않는다(개수·상태코드뿐). */
 export function configPushStatus() {
-  return { enabled: !!config.agent.centralUrl, running, intervalMs: PUSH_MS, last: _last, lastUnchangedSkipAt: _lastSkippedAt };
+  return { enabled: !!config.agent.centralUrl, running, intervalMs: PUSH_MS, last: _last, lastUnchangedSkipAt: _lastSkippedAt, lastDeferredAt: _lastDeferredAt };
 }
 
 /**
@@ -107,7 +119,7 @@ export function configWatchRelevant(filename) {
 }
 
 /** 테스트 전용 — 모듈 상태 초기화. */
-export function _resetConfigPush() { _last = null; _lastSkippedAt = null; _lastPushedFp = null; }
+export function _resetConfigPush() { _last = null; _lastSkippedAt = null; _lastPushedFp = null; _lastDeferredAt = null; }
 
 export function startConfigPush() {
   if (!config.agent.centralUrl) return; // 중앙 미설정 → 에이전트 아님

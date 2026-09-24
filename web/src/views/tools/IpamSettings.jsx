@@ -4,6 +4,7 @@ import { fetchJson, postJson, putJson, getToken } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { DEVTYPE_LABEL, MGMT } from './ipamShared.jsx';
 import { STable } from '../../components/STable.jsx';
+import { intervalMinText, scanSettingsBody } from './ipamScanForm.js';
 
 
 /** Per-IP user memo + tags editor (separate from vCenter notes). */
@@ -294,7 +295,7 @@ export function IpScanSettings({ onClose }) {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson('/admin/ipam/scan/settings', { ...s, agent });
+      const r = await putJson('/admin/ipam/scan/settings', scanSettingsBody(s, agent));
       setS(r.settings); setStatus(r.status);
       const cfg = r.settings || s;
       const mins = Math.max(1, Math.round((cfg.intervalMs || 3_600_000) / 60000));
@@ -322,7 +323,7 @@ export function IpScanSettings({ onClose }) {
     setBusy(true); setMsg(`입력한 대역(${nRanges}개)을 저장하고 스캔을 시작하는 중…`);
     try {
       // 입력한 대역을 먼저 저장한 뒤 스캔(미저장 입력이 무시되어 첫 대역만 스캔되던 문제 방지).
-      const sv = await putJson('/admin/ipam/scan/settings', { ...s, agent });
+      const sv = await putJson('/admin/ipam/scan/settings', scanSettingsBody(s, agent));
       if (sv?.settings) setS(sv.settings);
       const r = await postJson('/admin/ipam/scan/run', {});
       if (r.status) setStatus(r.status); if (r.info) setInfo(r.info);
@@ -364,15 +365,15 @@ export function IpScanSettings({ onClose }) {
           style={{ width: '100%', boxSizing: 'border-box' }} />
         <label style={{ fontWeight: 600, paddingTop: 9 }}>주기 / 동시성 / 타임아웃</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-          <input className="input" type="number" min={1} style={{ width: 90 }} value={Math.round(s.intervalMs / 60000)} onChange={(e) => setS({ ...s, intervalMs: Math.max(1, Number(e.target.value) || 60) * 60000 })} /><span className="muted">분</span>
-          <input className="input" type="number" min={1} max={1024} style={{ width: 80 }} value={s.concurrency} onChange={(e) => setS({ ...s, concurrency: Number(e.target.value) || 128 })} /><span className="muted">동시</span>
-          <input className="input" type="number" min={100} max={10000} style={{ width: 90 }} value={s.timeoutMs} onChange={(e) => setS({ ...s, timeoutMs: Number(e.target.value) || 700 })} /><span className="muted">ms</span>
+          <input className="input" type="number" min={1} style={{ width: 90 }} value={intervalMinText(s)} onChange={(e) => setS({ ...s, intervalMin: e.target.value })} /><span className="muted">분</span>
+          <input className="input" type="number" min={1} max={1024} style={{ width: 80 }} value={s.concurrency} onChange={(e) => setS({ ...s, concurrency: e.target.value })} /><span className="muted">동시</span>
+          <input className="input" type="number" min={100} max={10000} style={{ width: 90 }} value={s.timeoutMs} onChange={(e) => setS({ ...s, timeoutMs: e.target.value })} /><span className="muted">ms</span>
         </div>
         <label style={{ fontWeight: 600, paddingTop: 9 }}>역DNS / 보존</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <label className="flex gap" style={{ alignItems: 'center' }}><input type="checkbox" checked={s.reverseDns} onChange={(e) => setS({ ...s, reverseDns: e.target.checked })} /> 역DNS 호스트명</label>
           <label className="flex gap" style={{ alignItems: 'center' }} title="TCP 포트가 전부 닫힌 서버도 ICMP 응답으로 '사용 중' 감지. 기본 꺼짐 — 큰 대역에서는 ping 프로세스 부하가 있으니 필요한 대역에만 켜세요(동시 실행은 소수로 제한됨)."><input type="checkbox" checked={s.ping === true} onChange={(e) => setS({ ...s, ping: e.target.checked })} /> ICMP ping 병행 <span className="muted" style={{ fontSize: 11 }}>(기본 꺼짐)</span></label>
-          <input className="input" type="number" min={0} style={{ width: 80 }} value={s.retentionDays} onChange={(e) => setS({ ...s, retentionDays: Number(e.target.value) || 0 })} /><span className="muted">일 보존</span>
+          <input className="input" type="number" min={0} style={{ width: 80 }} value={s.retentionDays} onChange={(e) => setS({ ...s, retentionDays: e.target.value })} /><span className="muted">일 보존</span>
         </div>
       </div>
 

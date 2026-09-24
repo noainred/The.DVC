@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
+import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'rma-history.db');
 const RETENTION_DAYS = Math.max(1, Number(process.env.RMA_HISTORY_DAYS) || 90);
@@ -101,7 +102,7 @@ const rowOut = (r) => ({
 export async function listHistoryRows({ agent = '', limit = 100 } = {}) {
   const db = await open();
   if (!db) return null;
-  const n = Math.max(1, Math.min(1000, limit));
+  const n = pageArgs({ limit }, { def: 100, max: 1000 }).limit;
   const rows = agent ? db.byAgent.all(String(agent), n) : db.all.all(n);
   return rows.map(rowOut);
 }

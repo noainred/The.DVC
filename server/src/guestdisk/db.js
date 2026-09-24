@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 // v2.599 DB2599-02: 첫 open 잠금은 래치하지 않고 잠시 뒤 다시 연다.
 const lockRetry = createLockRetry();
 
@@ -286,6 +287,25 @@ export async function latestOne(vmId) {
   return { vmId: r.vm_id, vcenterId: r.vcenter_id, vcenterName: r.vcenter_name, vmName: r.vm_name, allocGB: r.alloc_gb, usedGB: r.used_gb, partCount: r.part_count, ts: r.ts };
 }
 
+// v2.605(감사 DB2605-04): 청크 삭제문(후보 rowid 를 LIMIT 으로 고른다 — 후보는 ts 단독 인덱스로 좁힌다).
+let _pruneStmts = null;
+let _pruneStmtsDb = null;
+function pruneStmts(db) {
+  if (_pruneStmts && _pruneStmtsDb === db) return _pruneStmts;
+  _pruneStmtsDb = db;
+  _pruneStmts = {
+    vm: db.prepare(`DELETE FROM vm_series WHERE rowid IN (SELECT s.rowid FROM vm_series s WHERE s.ts<? AND NOT (
+      s.vm_id IN (SELECT vm_id FROM vm_latest)
+      AND s.ts = (SELECT MAX(q.ts) FROM vm_series q WHERE q.vm_id = s.vm_id AND q.ts < ?)) LIMIT ?)`),
+    part: db.prepare(`DELETE FROM part_series WHERE rowid IN (SELECT s.rowid FROM part_series s WHERE s.ts<? AND NOT (
+      EXISTS (SELECT 1 FROM part_last l WHERE l.vm_id = s.vm_id AND l.path = s.path)
+      AND s.ts = (SELECT MAX(q.ts) FROM part_series q WHERE q.vm_id = s.vm_id AND q.path = s.path AND q.ts < ?)) LIMIT ?)`),
+  };
+  return _pruneStmts;
+}
+// 정리끼리는 겹치지 않는다(키 = 경계 — 경계가 더 늦으면 끝난 뒤 새 경계로 한 번 더).
+const pruneFlight = createPruneFlight({ covers: (running, next) => running >= next });
+
 /** 보존 기간 밖 추이 행 삭제(ts 단독 인덱스로 풀스캔 회피). */
 export async function prune(retentionDays = 180) {
   const db = await getDb();
@@ -299,19 +319,22 @@ export async function prune(retentionDays = 180) {
   // ⚠ v2.601(감사 DB2601-01): 남기는 행은 키의 '전체 마지막' 이 아니라 **보존 경계 이전의 마지막 행**이다. 최근에 바뀐 키는
   //   전체 마지막이 경계 뒤라 경계 이전 행이 전부 지워졌고, 그것이 곧 창 시작의 이월(carry-in) 행이라(vmSeries·partSeries)
   //   창 앞부분이 비고 증가 추이가 평탄으로 오판됐다(10→40GB 증가가 사라짐). 값이 안 바뀐 키는 두 기준이 같은 행이다.
-  const a = db.prepare(`DELETE FROM vm_series WHERE ts<? AND NOT (
-      vm_id IN (SELECT vm_id FROM vm_latest)
-      AND ts = (SELECT MAX(q.ts) FROM vm_series q WHERE q.vm_id = vm_series.vm_id AND q.ts < ?))`).run(cut, cut);
-  const b = db.prepare(`DELETE FROM part_series WHERE ts<? AND NOT (
-      EXISTS (SELECT 1 FROM part_last l WHERE l.vm_id = part_series.vm_id AND l.path = part_series.path)
-      AND ts = (SELECT MAX(q.ts) FROM part_series q WHERE q.vm_id = part_series.vm_id AND q.path = part_series.path AND q.ts < ?))`).run(cut, cut);
-  // ⚠ v2.590 P3: 행을 다 지운 키의 diff 기준(vm_last·part_last)도 지운다. 남겨 두면 값이 안 바뀌는 VM 은 기준선이
-  //   '이미 기록됨' 이라 다음 수집에서도 행을 쓰지 않아 **영원히 추이·파티션이 비었다**(목록은 파티션 N개라 말한다).
-  //   기준을 지우면 다음 수집이 첫 관측으로 다시 기록한다. 기준 행 수 = VM·파티션 수라 EXISTS(인덱스)로 가볍다.
-  let vmLastCleared = 0; let partLastCleared = 0;
-  if ((a.changes || 0) > 0) vmLastCleared = db.prepare('DELETE FROM vm_last WHERE NOT EXISTS (SELECT 1 FROM vm_series s WHERE s.vm_id = vm_last.vm_id)').run().changes || 0;
-  if ((b.changes || 0) > 0) partLastCleared = db.prepare('DELETE FROM part_last WHERE NOT EXISTS (SELECT 1 FROM part_series s WHERE s.vm_id = part_last.vm_id AND s.path = part_last.path)').run().changes || 0;
-  return { ok: true, vmSeriesDeleted: a.changes || 0, partSeriesDeleted: b.changes || 0, vmLastCleared, partLastCleared };
+  // v2.605(감사 DB2605-04 — 재현): 예전에는 두 표를 한 문장씩(상관 서브쿼리) 한 방에 지워 보존일을 줄인 뒤 첫 정리에서
+  //   행당 약 4µs × 수십만 행 동안 루프를 멈췄다(36만 행 중 32만 행 1.27초). 후보 rowid 를 청크로 골라 지우고 청크 사이에
+  //   양보한다(util/chunkedPrune.js). 보존 조건은 행 단위이고 남기는 행(키의 경계 이전 마지막 행)은 삭제 대상이 아니므로
+  //   청크마다 다시 계산해도 결과가 한 방 DELETE 와 같다 — 지우는 행의 ts 는 그 키의 MAX 보다 작아 MAX 를 바꾸지 않는다.
+  const stmts = pruneStmts(db);
+  return pruneFlight.run(cut, async () => {
+    const a = await chunkedDelete(stmts.vm, [cut, cut], { label: 'guestdisk.vm_series' });
+    const b = await chunkedDelete(stmts.part, [cut, cut], { label: 'guestdisk.part_series' });
+    // ⚠ v2.590 P3: 행을 다 지운 키의 diff 기준(vm_last·part_last)도 지운다. 남겨 두면 값이 안 바뀌는 VM 은 기준선이
+    //   '이미 기록됨' 이라 다음 수집에서도 행을 쓰지 않아 **영원히 추이·파티션이 비었다**(목록은 파티션 N개라 말한다).
+    //   기준을 지우면 다음 수집이 첫 관측으로 다시 기록한다. 기준 행 수 = VM·파티션 수라 EXISTS(인덱스)로 가볍다.
+    let vmLastCleared = 0; let partLastCleared = 0;
+    if (a.deleted > 0) vmLastCleared = db.prepare('DELETE FROM vm_last WHERE NOT EXISTS (SELECT 1 FROM vm_series s WHERE s.vm_id = vm_last.vm_id)').run().changes || 0;
+    if (b.deleted > 0) partLastCleared = db.prepare('DELETE FROM part_last WHERE NOT EXISTS (SELECT 1 FROM part_series s WHERE s.vm_id = part_last.vm_id AND s.path = part_last.path)').run().changes || 0;
+    return { ok: true, vmSeriesDeleted: a.deleted, partSeriesDeleted: b.deleted, vmLastCleared, partLastCleared, done: a.done && b.done };
+  });
 }
 
 /**

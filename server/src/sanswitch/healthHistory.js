@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
 
 const DB_PATH = () => process.env.SANHEALTH_DB_PATH
   || path.join(config.dbDir || config.configDir, 'san-health.db');
@@ -140,7 +141,7 @@ export async function recordRun(result, { ports = null } = {}) {
 export async function listRuns(deviceId, limit = 10) {
   const h = await open();
   if (!h) return { available: false, runs: [] };
-  const n = Math.max(1, Math.min(MAX_RUNS, Number(limit) || 10));
+  const n = pageArgs({ limit }, { def: 10, max: MAX_RUNS }).limit;
   const rows = h.st.listOf.all(String(deviceId), n).map((r) => ({
     id: r.id, at: Number(r.at), collectedAt: r.collected_at == null ? null : Number(r.collected_at),
     overall: r.overall, counts: { ok: r.ok, warn: r.warn, bad: r.bad, unknown: r.unknown },

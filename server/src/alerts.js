@@ -54,6 +54,45 @@ const DEFAULTS = {
   suppressWindowMin: 5,
 };
 
+/**
+ * v2.605(감사 WEB2605-05 — 재현): 규칙 임계치의 범위. 예전 저장은 body.rules 를 **검증 없이** 병합해, 칸을 비우면
+ * `Number('')=0` 이 그대로 저장·표시됐는데 평가는 `Number(0)||90` 이라 실제 기준은 90 이었다(화면 ≠ 실제). 음수(-5)는
+ * 그대로 쓰여 전 데이터스토어가 발화했다. 규칙: 빈 값·숫자 아님·0 이하는 **미지정**(이전 값 유지), 그 밖은 범위로 자른다.
+ */
+export const RULE_THRESHOLD_RANGE = Object.freeze({
+  datastorePct: { min: 1, max: 100 },
+  ramOvercommitPct: { min: 1, max: 10000 },
+  vcpuPerCore: { min: 0.1, max: 1000, float: true },
+  massVmPowerOff: { min: 1, max: 100000 },
+});
+
+/** 임계치 1개 정규화(순수). 미지정이면 prev 를 돌려준다. */
+export function normalizeRuleThreshold(rule, v, prev) {
+  const n = numOrNull(v);
+  if (n == null || n <= 0) return prev;
+  const r = RULE_THRESHOLD_RANGE[rule] || { min: 0, max: Infinity, float: true };
+  const x = r.float ? n : Math.round(n);
+  return Math.max(r.min, Math.min(r.max, x));
+}
+
+/** body.rules 를 현재 규칙 위에 병합 — 객체가 아닌 규칙은 버리고, threshold 는 normalizeRuleThreshold 로 좁힌다. */
+export function mergeRules(curRules = {}, bodyRules = {}) {
+  const out = { ...curRules };
+  if (!bodyRules || typeof bodyRules !== 'object' || Array.isArray(bodyRules)) return out;
+  for (const [k, v] of Object.entries(bodyRules)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+    const prev = curRules[k] && typeof curRules[k] === 'object' ? curRules[k] : (DEFAULTS.rules[k] || {});
+    const merged = { ...prev, ...v };
+    if ('threshold' in v || 'threshold' in prev) {
+      const prevTh = numOrNull(prev.threshold) != null && Number(prev.threshold) > 0 ? Number(prev.threshold) : DEFAULTS.rules[k]?.threshold;
+      merged.threshold = 'threshold' in v ? normalizeRuleThreshold(k, v.threshold, prevTh) : prevTh;
+    }
+    out[k] = merged;
+  }
+  return out;
+}
+
 let cache = null;
 export function loadAlertConfig() {
   if (cache) return cache;
@@ -86,7 +125,7 @@ export function saveAlertConfig(body = {}) {
       teams: { enabled: !!body.channels?.teams?.enabled, url: body.channels?.teams?.url ?? (cur.channels.teams?.url || '') },
       email: { enabled: !!body.channels?.email?.enabled }, // v2.479: 저장에서도 탈락(웹 체크박스가 저장 직후 풀리던 원인)
     },
-    rules: { ...cur.rules, ...(body.rules || {}) },
+    rules: mergeRules(cur.rules, body.rules),
     cooldownMin: Math.max(1, Number(body.cooldownMin) || cur.cooldownMin),
     // v2.595(감사 T2595-01): 상한 1일 — 24.8일을 넘기면 setInterval 이 1ms 틱이 되고 저장값이라 재시작해도 남는다.
     intervalSec: Math.min(ALERT_INTERVAL_MAX_SEC, Math.max(15, Number(body.intervalSec) || cur.intervalSec)),

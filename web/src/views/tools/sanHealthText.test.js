@@ -203,3 +203,21 @@ describe('v2.521 전 포트 점검 문구', () => {
     expect(JSON.stringify(b)).toContain('6포트는 생략');
   });
 });
+
+// v2.605 WEB2605-02·04 — 조닝 조회 상한 생략 · 축약 카운터 보류 문구
+import { problemOmittedNote as _pon, portZoningFallback as _pzf, errorText as _et } from './sanHealthText.js';
+describe('v2.605 WEB2605-02/04', () => {
+  it('상한으로 건너뛴 문제 포트에 "이상·주의 목록에 없다" 고 말하지 않는다', () => {
+    expect(_pzf({ verdict: 'bad' }, '', 5)).toMatch(/상한/);
+    expect(_pzf({ verdict: 'bad' }, '', 5)).not.toMatch(/목록에 없어/);
+    expect(_pzf({ verdict: 'ok' }, '', 5)).toMatch(/목록에 없어/);
+    expect(_pzf({ verdict: 'bad' }, '', 0)).toMatch(/목록에 없어/);
+    expect(_pon(5)).toMatch(/5개/);
+    expect(_pon(0)).toBe('');
+    expect(_pon(undefined)).toBe('');
+  });
+  it('축약 카운터 보류는 "카운터 없음" 이 아니라 누적과 보류를 말한다', () => {
+    expect(_et({ errors: 'unknown', errHeld: 'approx', errSum: 1200000 })).toMatch(/누적 1200000.*보류/);
+    expect(_et({ errors: 'unknown', errHeld: null, errSum: 0 })).toBe('카운터 없음');
+  });
+});

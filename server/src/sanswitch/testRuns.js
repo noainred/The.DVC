@@ -111,6 +111,7 @@ function sanitizeResult(res = {}, ranOn = '') {
  * 글자는 strOf(객체면 ''), 수치는 numOrNull(못 읽으면 null — 0 으로 두지 않는다), sections 는 글자 값 맵(상한 64).
  * ports 는 **항상 객체**로 둔다(화면이 `snap.ports.online` 을 가드 없이 읽는다).
  */
+const SECTION_VALUE_MAX = 2000;
 export function sanitizeTestSnap(snap) {
   if (!snap || typeof snap !== 'object' || Array.isArray(snap)) return undefined;
   const p = snap.ports && typeof snap.ports === 'object' && !Array.isArray(snap.ports) ? snap.ports : {};
@@ -118,7 +119,11 @@ export function sanitizeTestSnap(snap) {
   if (snap.sections && typeof snap.sections === 'object' && !Array.isArray(snap.sections)) {
     for (const k of Object.keys(snap.sections).slice(0, 64)) {
       if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
-      const v = strOf(snap.sections[k], 40);
+      // v2.605(감사 RECENT2605-07): 값은 'ok'|'skip' 만이 아니라 **실패 사유 문자열**이다(fosSsh v2.522 — 'rbash: sensorshow:
+      //   command not found' 등). 40자로 말없이 잘라 엣지 실행 결과만 사유가 중간에서 끊겼다. 2,000자(reason·hint 와 같은 상한)
+      //   로 두고, 그래도 넘으면 잘랐다는 표식을 붙인다.
+      const full = strOf(snap.sections[k], SECTION_VALUE_MAX + 1);
+      const v = full.length > SECTION_VALUE_MAX ? `${full.slice(0, SECTION_VALUE_MAX)}…(잘림)` : full;
       if (v) sections[k.slice(0, 64)] = v;
     }
   }

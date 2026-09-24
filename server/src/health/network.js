@@ -10,6 +10,7 @@ import { loadVcenterConfig } from '../config.js';
 import { nsxStore } from '../nsx/store.js';
 import { listRegistry as listNsxRegistry } from '../nsx/registry.js';
 import { tcpProbeMany } from '../util/ping.js';
+import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { visibleNsxManagers } from '../nsx/scope.js';
 
 const hostOf = (u) => String(u || '').replace(/^https?:\/\//, '').replace(/[/:].*$/, '');
@@ -33,7 +34,7 @@ export async function getNetworkCheck(allowed = null) {
   for (const m of nsxMgrs) { const h = hostOf(m.host); if (h && m.enabled !== false) targets.push({ kind: 'nsx', id: m.id, name: m.name || h, host: h, port: 443, region: m.region || '' }); }
 
   // 고RTT(800ms+) 사이트는 왕복+재전송 여유를 위해 5s. 짧으면 살아있는 vCenter도 'unreachable' 오판.
-  const probed = await tcpProbeMany(targets, { timeoutMs: Number(process.env.HEALTH_PROBE_TIMEOUT_MS) || 5000, concurrency: 12 });
+  const probed = await tcpProbeMany(targets, { timeoutMs: reqTimeoutMs(process.env.HEALTH_PROBE_TIMEOUT_MS, 5000, { min: 100, max: 60_000 }), concurrency: 12 }   /* v2.605 TIM2605-04 */);
   const endpoints = probed.map((t) => ({
     kind: t.kind, id: t.id, name: t.name, host: t.host, region: t.region || '',
     reachable: t.alive, rttMs: t.rttMs, grade: rttGrade(t.rttMs),

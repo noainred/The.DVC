@@ -3,7 +3,7 @@
 // 화면에서 보던 항목(호스트수·VM수·CPU/MEM 사용률·CPU/MEM 가상화율 + 근거 수치)이 CSV 에도
 // 그대로 들어간다. 'Off VM 포함' 해제 시 가상화율이 트리 배지와 같은 값으로 내려가야 한다.
 import { describe, it, expect } from 'vitest';
-import { buildOverviewRows, overviewCsv, ratioText, groupClusters, stateKo, OVERVIEW_COLUMNS } from './vcdOverview.js';
+import { buildOverviewRows, overviewCsv, ratioText, groupClusters, stateKo, OVERVIEW_COLUMNS, hostUsageReadable, hostUsagePct, clusterAvgPct } from './vcdOverview.js';
 import { countByHost } from './vcdVirt.js';
 
 const SITE = { id: 'oc2', name: 'OC2' };
@@ -151,5 +151,34 @@ describe('overviewCsv', () => {
       { key: 'level', label: '구분' }, { key: 'host', label: '호스트' }, { key: 'tempC', label: '흡기온도(℃)' },
     ]);
     expect(csv.split('\r\n')[1]).toBe('호스트,,');
+  });
+});
+
+// v2.605(감사 WEB2605-03 — 재현): 끊긴·무응답 호스트는 SOAP 수집에서 사용률 0 으로 온다. 그 0 을 클러스터 평균에 넣으면
+// CONNECTED 80% + DISCONNECTED 1대가 40% 로 보였다(같은 표의 vCenter 행은 서버 usageReadable 로 80%).
+describe('WEB2605-03 끊긴 호스트는 사용률 계산에서 빠진다', () => {
+  const hosts = [
+    { name: 'h1', cluster: 'C', connectionState: 'CONNECTED', cpuUsagePct: 80, memUsagePct: 70 },
+    { name: 'h2', cluster: 'C', connectionState: 'DISCONNECTED', cpuUsagePct: 0, memUsagePct: 0 },
+    { name: 'h3', cluster: 'D', connectionState: 'NOT_RESPONDING', cpuUsagePct: 0, memUsagePct: 0 },
+  ];
+  const rows = buildOverviewRows({ site: SITE, hosts, metrics: { cpuUsagePct: 80, memUsagePct: 70 } });
+  it('클러스터 평균은 읽은 호스트만(40 이 아니라 80)', () => {
+    const c = rows.find((r) => r.level === '클러스터' && r.cluster === 'C');
+    expect([c.cpuPct, c.memPct]).toEqual([80, 70]);
+  });
+  it('읽은 호스트가 없는 클러스터는 0% 가 아니라 null', () => {
+    const d = rows.find((r) => r.level === '클러스터' && r.cluster === 'D');
+    expect([d.cpuPct, d.memPct]).toEqual([null, null]);
+  });
+  it('끊긴 호스트 행의 사용률은 null(0% 는 부하 없음이라는 거짓)', () => {
+    const h2 = rows.find((r) => r.host === 'h2');
+    expect([h2.cpuPct, h2.memPct]).toEqual([null, null]);
+    expect(h2.state).toBe('끊김');
+  });
+  it('헬퍼: 점검(MAINTENANCE)은 읽은 것으로 본다(서버 usageReadable 과 같은 기준)', () => {
+    expect(hostUsageReadable({ connectionState: 'MAINTENANCE' })).toBe(true);
+    expect(hostUsagePct({ connectionState: 'CONNECTED', cpuUsagePct: null }, 'cpuUsagePct')).toBe(null);
+    expect(clusterAvgPct([], 'cpuUsagePct')).toBe(null);
   });
 });

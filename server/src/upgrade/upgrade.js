@@ -18,6 +18,7 @@ import { spawn } from 'node:child_process';
 import { parseTarGz, parseZip, MAX_BUNDLE_BYTES, MAX_MEMBERS } from './archive.js';
 import { upgradeAgent } from './upgradeAgent.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { readJsonCapped } from '../util/readCapped.js';
 
 const ARCHIVE_RE = /vmware-portal-(\d+)\.(\d+)\.(\d+)\.(?:tar\.gz|tgz|zip)$/;
 
@@ -480,6 +481,9 @@ export function bundleShaIssue(headerSha, bytes, { allowUnverified = String(proc
   return null;
 }
 
+/** 엣지 업그레이드 응답 상한 — 작은 JSON 이다(해제 후 크기). */
+export const EDGE_UPGRADE_RESPONSE_MAX_BYTES = 256 * 1024;
+
 export async function pushBundleToEdge(edge, archivePath, { timeout = Number(process.env.EDGE_PUSH_TIMEOUT_MS) || 600_000 } = {}) {
   const data = fs.readFileSync(archivePath);
   const sha = crypto.createHash('sha256').update(data).digest('hex'); // v2.480: 수신측 검증용
@@ -503,8 +507,14 @@ export async function pushBundleToEdge(edge, archivePath, { timeout = Number(pro
       redirect: 'manual',
       signal: AbortSignal.timeout(timeout),
     });
-    const body = await res.json().catch(() => ({}));
-    return { edge: edge.url, ok: res.ok, status: res.status, ...body };
+    // v2.605(감사 LEFT2605-04 = SEC2605-02 — 재현): 예전 { ok: res.ok, status, ...body } 는 엣지 본문이 ok·status 를 덮었다(500 + {ok:true,status:200}
+    //   → 성공으로 보고). 아는 필드만 글자로 담고 판정은 상태코드가 먼저다(collector/upgradePush.js 와 같은 형태). 본문은 상한까지만 읽는다.
+    let body = {};
+    try { const j = await readJsonCapped(res, EDGE_UPGRADE_RESPONSE_MAX_BYTES, '엣지 업그레이드 응답'); if (j && typeof j === 'object' && !Array.isArray(j)) body = j; } catch { body = {}; }
+    const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+    const ok = res.ok && body.ok !== false;
+    const reason = str(body.reason, 500) || str(body.error, 500) || (ok ? '' : `HTTP ${res.status}`);
+    return { edge: edge.url, ok, status: res.status, ...(reason ? { reason } : {}), ...(str(body.version, 32) ? { version: str(body.version, 32) } : {}) };
   } catch (err) {
     return { edge: edge.url, ok: false, reason: err.message };
   }

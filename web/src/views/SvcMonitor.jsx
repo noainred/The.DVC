@@ -10,6 +10,7 @@ import EscClose from '../components/EscClose.jsx';
 import { STATUS, METHOD, statusOf, methodText } from './svcmon/constants.js';
 import { buildTree, statsOf, matchNode, summarize } from './svcmon/tree.js';
 import { TestWizard } from './svcmon/TestWizard.jsx';
+import { blankOr } from './blankOr.js';
 
 /**
  * 성능점검 — Claude Design 핸드오프(design_handoff_perf_check) 기준 구현.
@@ -411,8 +412,9 @@ export default function SvcMonitor() {
     try {
       const r = await putJson('/svcmon/log', {
         enabled: logCfg.enabled, mode: logCfg.mode, rotate: logCfg.rotate,
-        keepFiles: Number(logCfg.keepFiles), maxFileMB: Number(logCfg.maxFileMB),
-        maxTotalMB: Number(logCfg.maxTotalMB),
+        // v2.605(감사 LEFT2605-02): 빈 칸은 보내지 않는다(blankOr) — Number('')=0 이 보관 1개·상한 0(무제한)이 됐다.
+        keepFiles: blankOr(logCfg.keepFiles), maxFileMB: blankOr(logCfg.maxFileMB),
+        maxTotalMB: blankOr(logCfg.maxTotalMB),
       });
       setLogCfg(r);
     } catch (e) { window.alert(e.message); } finally { setBusy(false); }

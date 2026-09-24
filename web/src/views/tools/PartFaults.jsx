@@ -54,8 +54,13 @@ export function PartFaults() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    if (tab !== 'events') return;
-    fetchJson('/tools/part-faults/events', { days }).then(setEvents).catch((e) => setEvents({ error: e.message }));
+    if (tab !== 'events') return undefined;
+    // v2.605(감사 WEB2605-08): 기간을 빠르게 바꾸면 늦게 온 이전 기간 응답이 새 기간 선택을 덮었다 — 이 효과가 정리되면 버린다.
+    let active = true;
+    fetchJson('/tools/part-faults/events', { days })
+      .then((r) => { if (active) setEvents(r); })
+      .catch((e) => { if (active) setEvents({ error: e.message }); });
+    return () => { active = false; };
   }, [tab, days]);
 
   const labels = data?.labels || {};

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
+import { blankOr } from '../blankOr.js';
 
 /**
  * 성능점검 로그 설정 — 저장 경로·분할 단위·보관 기간·용량 상한.
@@ -49,8 +50,9 @@ export default function LogSettingsTab({ isAdmin }) {
     try {
       const r = await putJson('/svcmon/log', {
         enabled: cfg.enabled, mode: cfg.mode, rotate: cfg.rotate,
-        keepFiles: Number(cfg.keepFiles), maxFileMB: Number(cfg.maxFileMB),
-        maxTotalMB: Number(cfg.maxTotalMB), dirPath: String(cfg.dirPath || '').trim(),
+        // v2.605(감사 LEFT2605-02): 빈 칸은 보내지 않는다(blankOr) — Number('')=0 이 보관 1개·상한 0(무제한)이 됐다.
+        keepFiles: blankOr(cfg.keepFiles), maxFileMB: blankOr(cfg.maxFileMB),
+        maxTotalMB: blankOr(cfg.maxTotalMB), dirPath: String(cfg.dirPath || '').trim(),
       });
       if (r.error) { setErr(r.error); return; }
       setCfg(r);

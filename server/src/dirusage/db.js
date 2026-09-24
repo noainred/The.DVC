@@ -17,6 +17,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
 
 const DB_PATH = process.env.DIRUSAGE_DB_PATH
   || path.join(config.dbDir || config.configDir, 'dirusage.db');
@@ -89,7 +90,7 @@ function initSqlite() {
       last(targetId) { return hydrate(lastFor.get(String(targetId))); },
       /** ts 직전 스캔 — 증감 계산의 기준선. */
       prev(targetId, ts) { return hydrate(prevFor.get(String(targetId), Number(ts))); },
-      list(targetId, limit = 50) { return listFor.all(String(targetId), Math.max(1, Math.min(1000, limit))).map(hydrate); },
+      list(targetId, limit = 50) { return listFor.all(String(targetId), pageArgs({ limit }, { def: 50, max: 1000 }).limit).map(hydrate); },
       get(id) { return hydrate(byId.get(Number(id))); },
       latestAll() { return latestAll.all().map(hydrate); },
       markMailed(id, state, note = '') { setMail.run(Number(state) || 0, String(note || '').slice(0, 500), Number(id)); },

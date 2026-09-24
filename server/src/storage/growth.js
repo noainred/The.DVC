@@ -156,7 +156,8 @@ export function growthMatrix(rows, { periods = DEFAULT_PERIODS, asOfDay, meta = 
      *   한 칸 차이를 '해상도 미만' 으로 뒤집지 않게 한다.
      */
     const res = numOrNull(metaOf(id).capacityApprox?.resolutionBytes);
-    const approx = res != null && res > 0 ? { resolutionBytes: res } : null;
+    // v2.605(RECENT2605-03): mixed = 최신은 정확 값이지만 이력에 반올림 주기가 섞였다 — 해상도 표지를 유지한다.
+    const approx = res != null && res > 0 ? { resolutionBytes: res, ...(metaOf(id).capacityApprox?.mixed === true ? { mixed: true } : {}) } : null;
     if (approx) {
       for (const k of Object.keys(growth)) {
         const g = growth[k];

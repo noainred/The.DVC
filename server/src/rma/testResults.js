@@ -14,6 +14,7 @@ import { notify } from '../alerts.js';
 
 import { numOrNull } from '../util/numOrNull.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
+import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
 const FILE = () => path.join(config.dbDir || config.configDir, 'rma-tests.db');
 const RETENTION_DAYS = Math.max(1, Number(process.env.RMA_TEST_HISTORY_DAYS) || 90);
 const REPEAT_LOG_MS = 60 * 60_000;
@@ -128,7 +129,7 @@ export function dropResult(agent, id) { latest.delete(key(agent, id)); }
 export async function testHistory(agent, id, { hours = 24, limit = 500 } = {}) {
   const db = await open();
   if (!db) return { unavailable: true, rows: [] };
-  const rows = db.hist.all(String(agent), String(id), Date.now() - Math.max(1, hours) * 3600e3, Math.max(1, Math.min(5000, limit)));
+  const rows = db.hist.all(String(agent), String(id), Date.now() - Math.max(1, hours) * 3600e3, pageArgs({ limit }, { def: 500, max: 5000 }).limit);
   return { rows: rows.map((r) => ({ ts: r.ts, status: r.status, reply: r.reply, value: r.value, instance: r.instance })) };
 }
 

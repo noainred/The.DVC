@@ -1,7 +1,7 @@
 // 용량/낭비/씬/VM파인더/온도/용량예측 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { scopePollerStatus } from '../../auth/scopeStatus.js';
-import { mergeScopedIds } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01: 범위 계정 PUT 은 범위 밖 키를 보존한다
+import { mergeScopedIds, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01: 범위 계정 PUT 은 범위 밖 키를 보존한다
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
 import { logAudit } from '../../audit.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드(단일 소스)
@@ -563,6 +563,7 @@ api.put('/tools/waste/off-check/settings', requireRole('admin'), (req, res) => {
   res.json({ ok: true, settings: next });
 });
 api.post('/tools/waste/off-check/run', requireRole('admin'), async (req, res) => {
+  if (denyScopedRun(req, res, '전원 꺼짐 수동 점검')) return;
   logAudit({ user: req.user?.username, action: '전원 꺼짐 수동 점검', ip: req.ip || '' });
   res.json(await runPowerOffCheckNow('manual'));
 });

@@ -470,3 +470,19 @@ describe('csvOf 수식 가드(v2.596 SECWEB-01)', () => {
     expect(out).not.toMatch(/(^|,)=cmd/m);
   });
 });
+
+// v2.605 LEFT2605-05 — 호스트 미수집 vCenter 때문에 뺀 베어메탈 안내
+import { hostsUnreadNote as _hun } from './bmUsageText.js';
+describe('v2.605 hostsUnreadNote', () => {
+  it('뺀 대수와 vCenter 를 말하고, 없으면 문구를 만들지 않는다', () => {
+    expect(_hun(null)).toBe('');
+    expect(_hun({ vcenters: [], withheld: [], expired: [], dropped: 0 })).toBe('');
+    const t = _hun({ vcenters: ['vcD'], withheld: ['vcD'], expired: [], dropped: 2 });
+    expect(t).toMatch(/vCenter 1개/);
+    expect(t).toMatch(/베어메탈 2대/);
+    expect(t).not.toMatch(/`/);
+    const e = _hun({ vcenters: ['vcD'], withheld: [], expired: ['vcD'], dropped: 0, withholdMaxMs: 6 * 3_600_000 });
+    expect(e).toMatch(/6시간/);
+    expect(e).toMatch(/다시 수집/);
+  });
+});

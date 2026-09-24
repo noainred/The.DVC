@@ -111,7 +111,10 @@ function approxResolution(g) {
 export function approxFootnote(devices) {
   const n = (devices || []).filter((d) => d?.capacityApprox).length;
   if (!n) return null;
-  return `**약(±해상도)** 표지가 붙은 장비 ${n}대는 용량을 장비의 표시 반올림 값으로 읽었습니다 — 표시 반올림 값이라 해상도 미만 변화는 보이지 않습니다. ‘±해상도 미만’ 은 변화가 없었다는 뜻이 아닙니다.`;
+  // v2.605(RECENT2605-03): mixed = 최신은 정확 값이지만 이력에 반올림 주기가 섞인 장비 — 따로 센다.
+  const mixed = (devices || []).filter((d) => d?.capacityApprox?.mixed === true).length;
+  const tail = mixed ? ` 그중 ${mixed}대는 최신 값은 정확하지만 반올림 주기가 섞여 있어 날짜별 기준이 다릅니다.` : '';
+  return `**약(±해상도)** 표지가 붙은 장비 ${n}대는 용량을 장비의 표시 반올림 값으로 읽었습니다 — 표시 반올림 값이라 해상도 미만 변화는 보이지 않습니다. ‘±해상도 미만’ 은 변화가 없었다는 뜻이 아닙니다.${tail}`;
 }
 
 /**

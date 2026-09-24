@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
+import { blankOr } from './blankOr.js';
 
 const RULE_LABEL = {
   criticalAlarms: '위험(critical) 알람 발생',
@@ -25,7 +26,16 @@ export default function Alerts2() {
   const flash = (ok, t) => { setMsg({ ok, t }); setTimeout(() => setMsg(null), 4000); };
   const setCh = (ch, k, v) => setD({ ...d, config: { ...c, channels: { ...c.channels, [ch]: { ...c.channels[ch], [k]: v } } } });
   const setRule = (r, k, v) => setD({ ...d, config: { ...c, rules: { ...c.rules, [r]: { ...c.rules[r], [k]: v } } } });
-  const save = async () => { const r = await putJson('/admin/alerts', c).catch((e) => ({ error: e.message })); if (r.config) { await load(); flash(true, '저장했습니다.'); } else flash(false, r.error || '저장 실패'); };
+  // v2.605(감사 WEB2605-05): 숫자 칸은 **원문 문자열**을 상태에 두고 전송 때만 blankOr — 빈 칸은 보내지 않는다(서버가 이전 값 유지).
+  //   예전 onChange 의 Number() 는 빈 칸을 0 으로 저장·표시했고 평가는 기본값(90 등)으로 판정해 화면과 실제 기준이 달랐다.
+  const toBody = (cfg) => ({
+    ...cfg,
+    rules: Object.fromEntries(Object.entries(cfg.rules || {}).map(([k, v]) => [k,
+      v && typeof v === 'object' && 'threshold' in v ? { ...v, threshold: blankOr(v.threshold) } : v])),
+    cooldownMin: blankOr(cfg.cooldownMin),
+    intervalSec: blankOr(cfg.intervalSec),
+  });
+  const save = async () => { const r = await putJson('/admin/alerts', toBody(c)).catch((e) => ({ error: e.message })); if (r.config) { await load(); flash(true, '저장했습니다.'); } else flash(false, r.error || '저장 실패'); };
   const test = async () => { const r = await postJson('/admin/alerts/test', {}).catch((e) => ({ ok: false, results: [e.message] })); flash(r.ok, `테스트 발송: ${(r.results || []).join(', ') || '활성 채널 없음'}`); };
 
   return (
@@ -61,16 +71,16 @@ export default function Alerts2() {
                 <input type="checkbox" checked={!!c.rules[r]?.enabled} onChange={(e) => setRule(r, 'enabled', e.target.checked)} /> {RULE_LABEL[r]}
               </label>
               {'threshold' in (c.rules[r] || {}) && (
-                <input className="input" type="number" style={{ maxWidth: 100 }} value={c.rules[r].threshold} onChange={(e) => setRule(r, 'threshold', Number(e.target.value))} />
+                <input className="input" type="number" style={{ maxWidth: 100 }} value={c.rules[r].threshold} onChange={(e) => setRule(r, 'threshold', e.target.value)} />
               )}
             </div>
           ))}
         </div>
         <div className="flex gap wrap" style={{ marginTop: 10, alignItems: 'flex-end' }}>
-          <label style={{ fontSize: 12 }}>재통지 쿨다운(분)<input className="input" type="number" style={{ maxWidth: 110 }} value={c.cooldownMin} onChange={(e) => setD({ ...d, config: { ...c, cooldownMin: Number(e.target.value) } })} /></label>
-          <label style={{ fontSize: 12 }}>평가 주기(초)<input className="input" type="number" style={{ maxWidth: 110 }} value={c.intervalSec} onChange={(e) => setD({ ...d, config: { ...c, intervalSec: Number(e.target.value) } })} /></label>
+          <label style={{ fontSize: 12 }}>재통지 쿨다운(분)<input className="input" type="number" style={{ maxWidth: 110 }} value={c.cooldownMin} onChange={(e) => setD({ ...d, config: { ...c, cooldownMin: e.target.value } })} /></label>
+          <label style={{ fontSize: 12 }}>평가 주기(초)<input className="input" type="number" style={{ maxWidth: 110 }} value={c.intervalSec} onChange={(e) => setD({ ...d, config: { ...c, intervalSec: e.target.value } })} /></label>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save}>저장</button>
-          <span className="muted" style={{ fontSize: 11 }}>주기 변경은 서버 재시작 후 적용됩니다.</span>
+          <span className="muted" style={{ fontSize: 11 }}>저장하면 바로 적용됩니다(재시작 불필요). 빈 칸은 이전 값을 유지합니다.</span>
         </div>
       </div>
 

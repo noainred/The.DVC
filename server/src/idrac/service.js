@@ -8,7 +8,7 @@ import { loadRegistry, matchKeys } from './registry.js';
 import { getDb } from './db.js';
 import { allOmeDevices, dbKey, clearOmeExcept } from './omeCache.js';
 import { getInventory } from './invCache.js';
-import { remotePowerByHost, clearStaleRemote } from '../collector/state.js';
+import { remotePowerByHost, remotePowerEntries, remoteHostConflicts, clearStaleRemote } from '../collector/state.js';
 import { loadCollectors } from '../collector/registry.js';
 import { loadPowerSettings } from './powerSettings.js';
 
@@ -162,7 +162,11 @@ export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}
       tryAdd({ serverId: key, serverName: device.name, watts: sample.watts, ts: sample.ts, host: st || norm(device.name), hostNames, model: (device.model || '').trim(), serviceTag: device.serviceTag || '', vcenterId: omeEntryVc.get(entryId) || '', source: 'ome' }, device.serviceTag, dedupHosts);
     }
     const seenRemoteOrigin = new Set(); // 같은 수집기의 동일 서버(여러 별칭 보고)를 한 번만 집계
-    for (const [host, r] of remotePowerByHost()) {
+    // v2.605(CEN2605-03): 법인별 항목을 전부 본다 — 같은 호스트명을 두 법인이 보고하면 **둘 다** 다른 서버다. 그 호스트는
+    //   호스트명으로 중복 제거하지 않는다(h:esx01 로 묶으면 한 법인 서버가 다시 빠진다) — 서비스태그로만 묶는다.
+    const conflictHosts = new Set(remoteHostConflicts().map((x) => x.host));
+    for (const r of remotePowerEntries()) {
+      const host = r.host;
       if (r.watts == null || !Number.isFinite(r.watts)) continue;
       // v2.583 감사 #30: 위임(엣지) 전력도 v2.287 #13 의 신선도 컷을 따른다. 엣지가 죽으면 puller 는 직전 값을
       //   지우지 않으므로(실패 시 보존) 그 법인의 마지막 샘플이 **무기한** '현재 전력' 으로 합산됐다.
@@ -175,7 +179,7 @@ export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}
       }
       const id = `remote:${r.collectorId}:${r.serverId != null ? r.serverId : host}`;
       const hostNames = [norm(host)];
-      tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', vcenterId: r.vcenterId || '', datacenterId: r.datacenterId || '', collectorId: r.collectorId || '', datacenterLabel: r.datacenter || '', source: 'remote' }, r.serviceTag, [host].filter(Boolean));
+      tryAdd({ serverId: id, serverName: r.serverName || host, watts: r.watts, ts: r.ts, host: norm(host), hostNames, model: (r.model || '').trim(), serviceTag: r.serviceTag || '', vcenterId: r.vcenterId || '', datacenterId: r.datacenterId || '', collectorId: r.collectorId || '', datacenterLabel: r.datacenter || '', source: 'remote', dbKey: r.dbKey || `rmt:${norm(host)}`, ...(conflictHosts.has(host) ? { hostConflict: true } : {}) }, r.serviceTag, conflictHosts.has(host) ? [] : [host].filter(Boolean));
     }
   };
 
@@ -237,7 +241,7 @@ export async function measuredPowerBreakdown({ hosts = [] } = {}) {
   // 수집서버별: 원격 호스트 수 + 등록 여부.
   const activeCollectors = new Map(loadCollectors().map((c) => [c.id, c]));
   const remoteByCol = new Map(); // collectorId -> hosts
-  for (const [, r] of remotePowerByHost()) remoteByCol.set(r.collectorId, (remoteByCol.get(r.collectorId) || 0) + 1);
+  for (const r of remotePowerEntries()) remoteByCol.set(r.collectorId, (remoteByCol.get(r.collectorId) || 0) + 1);
   const collectors = [...remoteByCol.entries()].map(([collectorId, hosts]) => ({
     collectorId, name: activeCollectors.get(collectorId)?.name || collectorId,
     registered: activeCollectors.has(collectorId), hosts,
@@ -247,7 +251,7 @@ export async function measuredPowerBreakdown({ hosts = [] } = {}) {
   return {
     total: measured.length, bySource, registeredIdrac,
     ome: { entries: omeEntries, cachedEntries: omeByEntry.size, cachedDevices: allOmeDevices().length },
-    remote: { collectors, hosts: remotePowerByHost().size },
+    remote: { collectors, hosts: remotePowerEntries().length, hostConflicts: remoteHostConflicts() },
   };
 }
 
@@ -275,7 +279,7 @@ export async function purgeStalePower(opts = {}) {
   const active = new Set(idracIds); // 등록 iDRAC은 항상 보존
   if (mode !== 'all') {
     for (const { entryId, device } of allOmeDevices()) active.add(dbKey(entryId, device)); // 잔여 활성 OME 디바이스 키
-    for (const host of remotePowerByHost().keys()) active.add(`rmt:${host}`);               // 잔여 활성 원격 호스트 키
+    for (const r of remotePowerEntries()) active.add(r.dbKey || `rmt:${r.host}`);            // 잔여 활성 원격 호스트 키(v2.605: 법인 축 키 포함)
   }
   let dbRemoved = 0;
   try {
@@ -285,7 +289,7 @@ export async function purgeStalePower(opts = {}) {
       // (vc:* 키)은 iDRAC/OME/원격 '등록'과 무관하게 vCenter 폴이 적재하는 활성 시계열이므로,
       // active 집합에 없더라도 stale 모드에서는 삭제하지 않는다(대시보드 24h 통계 소실 방지).
       const orphans = db.serverIds().filter((id) => !active.has(id) && (mode === 'all' || !String(id).startsWith('vc:')));
-      dbRemoved = db.deleteServers(orphans);
+      dbRemoved = await db.deleteServers(orphans); // v2.605(DB2605-02): 청크·양보(비동기)
       // (v2.292) aggCache.clear() 제거 — 캐시 자체가 buildPowerDashboard(죽은 코드)와 함께 삭제됨.
     }
   } catch { /* best effort */ }
@@ -358,7 +362,7 @@ export async function hostPower(hostName, { hours = 24, limit = 1000, serviceTag
       source: 'remote',
       server: { id: `remote:${r.collectorId}`, name: r.serverName || hostName, host: `(수집서버 ${r.datacenter || r.collectorId})`, datacenter: r.datacenter, enabled: true },
       current: r.watts != null ? { watts: r.watts, ts: r.ts } : null,
-      history: db.history(`rmt:${norm(hostName)}`, since, limit),
+      history: db.history(r.dbKey || `rmt:${norm(hostName)}`, since, limit), // v2.605: 충돌 호스트는 법인 축 키
     };
   }
 
@@ -375,7 +379,7 @@ export async function hostPower(hostName, { hours = 24, limit = 1000, serviceTag
       // 그대로 조회하면 항상 miss → 추이 그래프가 빈 점선이 됐다(현재값은 m.watts 인메모리 폴백으로
       // 떠서 '현재만 있고 이력 없음'이 됐음). 이름 매칭 분기(432행)·전력 대시보드(340행)와 동일하게
       // 원격이면 rmt: 키로 조회한다.
-      const powerKey = (m.source === 'remote' && m.host) ? `rmt:${norm(m.host)}` : m.serverId;
+      const powerKey = (m.source === 'remote' && m.host) ? (m.dbKey || `rmt:${norm(m.host)}`) : m.serverId;
       const latest = db.latest(powerKey) || (m.watts != null ? { watts: m.watts, ts: m.ts } : null);
       return {
         matched: true,

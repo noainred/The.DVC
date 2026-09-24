@@ -18,6 +18,19 @@ import { resolveBundleBytes } from './bundleSource.js';
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';
 import { loadCollectors } from '../collector/registry.js';
 
+
+const originOf = (u) => { try { return new URL(String(u)).origin; } catch { return ''; } }; // 경로·쿼리에 비밀이 실릴 수 있어 origin 만
+/**
+ * 엣지 번들 push 결과 요약(순수 — v2.605 LEFT2605-04). 실패 목록은 주소·사유(글자)만, 최대 20건.
+ * @returns {{ total:number, ok:number, failed:{edge:string,status:number|null,reason:string}[] }}
+ */
+export function summarizeEdgePush(results) {
+  const list = Array.isArray(results) ? results.filter((r) => r && typeof r === 'object') : [];
+  const failed = list.filter((r) => r.ok !== true).slice(0, 20)
+    .map((r) => ({ edge: originOf(r.edge), status: Number.isFinite(r.status) ? r.status : null, reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : '' }));
+  return { total: list.length, ok: list.filter((r) => r.ok === true).length, failed };
+}
+
 class UpgradeManager {
   constructor() {
     this.settings = loadSettings();
@@ -100,7 +113,10 @@ class UpgradeManager {
 
     this.lastResult = { at: Date.now(), source, ...res };
     if (res.ok) {
-      await this.pushToEdges(res.appliedArchive).catch(() => {});
+      // v2.605(감사 LEFT2605-04): 엣지 push 결과를 버리지 않는다 — 예전에는 .catch(() => {}) 로 통째로 버려 실패한 엣지가 구버전으로 남아도
+      //   흔적이 없었다(형제 pushToCollectors 는 '성공 n/m' 을 찍는다). 요약을 lastResult 에 싣고 콘솔에도 남긴다(pushToEdges 안).
+      const edgePush = await this.pushToEdges(res.appliedArchive).catch((e) => { console.warn(`[upgrade] 엣지 업그레이드 푸시 실패: ${e?.message || e}`); return null; });
+      if (Array.isArray(edgePush) && edgePush.length) this.lastResult.edgePush = summarizeEdgePush(edgePush);
       await this.pushToCollectors().catch(() => {});
       if (restart) { setTimeout(() => restartProcess(), 250); res.restarting = true; }
     }
@@ -127,7 +143,11 @@ class UpgradeManager {
     let bundle = archivePath;
     if (!bundle && s.watchDir) bundle = findNewerArchive(s.watchDir, '0.0.0')?.path;
     if (!bundle) return [];
-    return Promise.all(s.edges.map((e) => pushBundleToEdge(e, bundle)));
+    const results = await Promise.all(s.edges.map((e) => pushBundleToEdge(e, bundle)));
+    const sum = summarizeEdgePush(results);
+    if (results.length) console.log(`[upgrade] 엣지 업그레이드 푸시: ${sum.ok}/${sum.total} 성공`);
+    for (const f of sum.failed) console.warn(`[upgrade] 엣지 업그레이드 푸시 실패 ${f.edge}: ${f.reason}`);
+    return results;
   }
 
   #restartTimer() {

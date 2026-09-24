@@ -6,6 +6,12 @@
 
 import { Client as SSHClient } from 'ssh2';
 import { createRequire } from 'node:module';
+import { reqTimeoutMs } from '../agent/envTimeout.js';
+// v2.605(감사 TIM2605-04 — 재현): 'Number(env) || 기본값' 은 음수·2^31 초과를 통과시켜 setTimeout 이 1ms 가 됐다 —
+//   SSH_EXEC_TIMEOUT_MS=3000000000 이면 모든 SSH 수집(스토리지·SAN·PDU·베어메탈)의 exec 가 2ms 만에 '타임아웃' 이었다.
+//   [1초, 30분] 에 가둔다(빈 값·0·비숫자는 기본값).
+const SSH_READY_TIMEOUT_MS = reqTimeoutMs(process.env.SSH_READY_TIMEOUT_MS, 60_000);
+const SSH_EXEC_TIMEOUT_MS = reqTimeoutMs(process.env.SSH_EXEC_TIMEOUT_MS, 60_000, { max: 1_800_000 });
 
 /**
  * 구형 장비 호환 알고리즘(v2.421). ssh2 기본 목록은 현대 알고리즘만 켜 두는데, 구형 Fabric OS/iDRAC 등은
@@ -23,7 +29,7 @@ const LEGACY_ALGOS = (() => {
 })();
 const NO_MATCH = /no matching (key exchange|host key|cipher|MAC|compression)|Handshake failed/i;
 
-function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = Number(process.env.SSH_READY_TIMEOUT_MS) || 60000, signal, trace = null, verbose = false, _legacy = false }) {
+function connect({ host, port = 22, username, password, privateKey, passphrase, readyTimeout = SSH_READY_TIMEOUT_MS, signal, trace = null, verbose = false, _legacy = false }) {
   const say = (msg, level) => { try { trace?.(msg, level); } catch { /* */ } };
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('SSH 접속 취소(타임아웃)'));
@@ -84,7 +90,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
 // 출력 누적 상한(v2.417) — 고장 장비가 타임아웃까지 출력을 흘리면 메모리가 무한히 자란다.
 // 넘치면 채널을 닫고 reject(정직: 절단본을 성공으로 넘기지 않는다). execCapture 는 자체 2MB 캡.
 const EXEC_MAX_OUTPUT = Math.max(64 * 1024, Number(process.env.SSH_EXEC_MAX_OUTPUT) || 4 * 1024 * 1024);
-function exec(conn, command, timeoutMs = Number(process.env.SSH_EXEC_TIMEOUT_MS) || 60000) {
+function exec(conn, command, timeoutMs = SSH_EXEC_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     conn.exec(command, (err, stream) => {
       if (err) return reject(err);
@@ -368,7 +374,7 @@ export function stripChoiceLines(text) {
  * 프롬프트가 반복해서 *새로* 나오는 경우는 그대로 동작한다.
  */
 export function execAnswered(conn, command, {
-  timeoutMs = Number(process.env.SSH_EXEC_TIMEOUT_MS) || 60000,
+  timeoutMs = SSH_EXEC_TIMEOUT_MS,
   maxAnswers = Math.max(1, Number(process.env.SSH_PAGER_MAX_PAGES) || 400),
   rules = ['pager'],
   pty = true,

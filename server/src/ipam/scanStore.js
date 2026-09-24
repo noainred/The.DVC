@@ -9,7 +9,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
+import { clampSetting } from '../util/clampSetting.js';
 import { DEFAULT_PORTS, isIpv4 } from './scan.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { getOverrides } from './overrides.js';
@@ -77,7 +78,12 @@ function readJson(file, dflt) {
 // 동기 직렬화·기록 → 이벤트 루프 블로킹(고RTT 환경 취약). 대신 dirty 플래그를 세우고 짧게
 // 디바운스해 '한 번'만 atomicWriteFileSync(임시파일+rename)로 기록한다. 프로세스 종료 시
 // flushAllNow()로 잔여 dirty를 동기 보존(데이터 유실 방지).
-const WRITE_DEBOUNCE_MS = Number(process.env.IPAM_WRITE_DEBOUNCE_MS) || 1500;
+// v2.605(감사 TIM2605-04): env 를 그대로 setTimeout 에 넣으면 음수·2^31 초과가 **1ms** 가 되어 디바운스가 사라진다
+//   (버스트마다 대형 JSON 동기 직렬화 — 위 블로킹 사고가 되살아난다). [100ms, 10분] 에 가둔다(종료 시 flush 가 있으니 상한은 유실이 아니라 지연).
+export function writeDebounceMsFromEnv(raw) {
+  return Math.min(600_000, clampIntervalMs(raw == null || String(raw).trim() === '' ? NaN : Number(raw), 1500, 100));
+}
+const WRITE_DEBOUNCE_MS = writeDebounceMsFromEnv(process.env.IPAM_WRITE_DEBOUNCE_MS);
 const _stores = new Map(); // file -> { getData, dirty, timer }
 
 function registerStore(file, getData) { _stores.set(file, { getData, dirty: false, timer: null }); }
@@ -155,12 +161,15 @@ export function saveScanSettings(agent, partial = {}) {
   if (partial.enabled !== undefined) next.enabled = !!partial.enabled;
   if (partial.ranges !== undefined) next.ranges = (Array.isArray(partial.ranges) ? partial.ranges : String(partial.ranges).split(/[\n,]/)).map((s) => String(s).trim()).filter(Boolean);
   if (partial.ports !== undefined) { const arr = (Array.isArray(partial.ports) ? partial.ports : String(partial.ports).split(/[\s,]+/)).map(Number).filter((n) => n > 0 && n < 65536); if (arr.length) next.ports = arr; }
-  if (partial.intervalMs !== undefined) next.intervalMs = clamp(partial.intervalMs, 60_000, 7 * 86_400_000, DEFAULTS.intervalMs);
-  if (partial.concurrency !== undefined) next.concurrency = clamp(partial.concurrency, 1, 1024, DEFAULTS.concurrency);
-  if (partial.timeoutMs !== undefined) next.timeoutMs = clamp(partial.timeoutMs, 100, 10_000, DEFAULTS.timeoutMs);
+  // v2.605(감사 LEFT2605-06 — 재현): 숫자 칸의 빈 값·숫자 아님은 **미지정**(이전 값 유지)이다. 예전 clamp(Number('')=0) 는
+  //   주기 12시간 → 1분(전 대역 스캔이 1분마다) · 동시성 → 1 · 보존 90일 → 0(정리 안 함)이 됐다(오류 없이 '저장됨').
+  //   명시적 숫자만 값이다(명시적 0 보존일 = 정리 안 함 — 화면 min={0} 으로 허용된 값). util/clampSetting.js(v2.595).
+  if (partial.intervalMs !== undefined) next.intervalMs = clampSetting(partial.intervalMs, { min: 60_000, max: 7 * 86_400_000, def: cur.intervalMs });
+  if (partial.concurrency !== undefined) next.concurrency = clampSetting(partial.concurrency, { min: 1, max: 1024, def: cur.concurrency });
+  if (partial.timeoutMs !== undefined) next.timeoutMs = clampSetting(partial.timeoutMs, { min: 100, max: 10_000, def: cur.timeoutMs });
   if (partial.reverseDns !== undefined) next.reverseDns = !!partial.reverseDns;
   if (partial.ping !== undefined) next.ping = !!partial.ping; // v2.359 — 누락 시 저장이 조용히 무시됨
-  if (partial.retentionDays !== undefined) next.retentionDays = clamp(partial.retentionDays, 0, 3650, DEFAULTS.retentionDays);
+  if (partial.retentionDays !== undefined) next.retentionDays = clampSetting(partial.retentionDays, { min: 0, max: 3650, def: cur.retentionDays });
   all.agents[key] = next;
   saveAll(all);
   return next;

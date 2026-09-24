@@ -56,6 +56,7 @@ export const HEARTBEAT_ELEM_MAX = 200;
 export const HEARTBEAT_MAX_INSTANCES = Math.max(2, Number(process.env.RMA_MAX_INSTANCES_PER_AGENT) || 32);
 export const HEARTBEAT_PURGE_MS = Math.max(HEARTBEAT_STALE_MS * 2, Number(process.env.RMA_HEARTBEAT_PURGE_MS) || 7 * 86_400_000);
 let _hbSweptAt = 0;
+const _hbRefuseLogAt = new Map();
 function sweepHeartbeats(now) {
   if (now - _hbSweptAt < 60_000) return;
   _hbSweptAt = now;
@@ -355,7 +356,8 @@ export function noteHeartbeat(agent, instance, info = {}, { ip = '' } = {}) {
       mine.sort((x, y) => x[1] - y[1]);
       const [oldKey, oldSeen] = mine[0];
       if (now - oldSeen <= HEARTBEAT_STALE_MS) {
-        console.warn(`[rma] 하트비트: ${a} 인스턴스 수 상한(${HEARTBEAT_MAX_INSTANCES}) — 새 인스턴스 '${inst}' 를 받지 않았다(온라인 인스턴스를 밀어내지 않는다)`);
+        const lw = _hbRefuseLogAt.get(lc(a)) || 0;   // 로그는 법인당 1분에 1줄(거절이 곧 로그 폭주가 되지 않게 — 법인 수는 개별 토큰 수로 유계)
+        if (now - lw >= 60_000) { _hbRefuseLogAt.set(lc(a), now); console.warn(`[rma] 하트비트: ${a} 인스턴스 수 상한(${HEARTBEAT_MAX_INSTANCES}) — 새 인스턴스 '${inst}' 를 받지 않았다(온라인 인스턴스를 밀어내지 않는다)`); }
         return { ok: false, refused: true };
       }
       heartbeats.delete(oldKey);
@@ -389,4 +391,4 @@ export function listRmaAgents(now = Date.now()) {
 }
 
 /** 테스트용 초기화. */
-export function _resetRma() { _hbSweptAt = 0; jobs.clear(); pendingByAgent.clear(); waiters.clear(); heartbeats.clear(); rr.clear(); history.length = 0; }
+export function _resetRma() { _hbSweptAt = 0; _hbRefuseLogAt.clear(); jobs.clear(); pendingByAgent.clear(); waiters.clear(); heartbeats.clear(); rr.clear(); history.length = 0; }

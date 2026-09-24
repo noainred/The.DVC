@@ -5,6 +5,7 @@
  * 않는다(보안 불변조건). 상태변경(설정 저장·수동 수집)은 requireRole('admin').
  */
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { denyScopedRun } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-02: 전 법인 수동 실행은 범위 계정 403
 import { scopePollerStatus, scopeDbStatus } from '../../auth/scopeStatus.js'; // v2.583
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): 조회는 tools 권한
 import { logAudit } from '../../audit.js';
@@ -68,6 +69,7 @@ export function registerToolsGuestDisk(api) {
 
   // 수동 수집 1회 — admin. 재진입 가드 공유(진행 중이면 skipped).
   api.post('/tools/guest-disk/run', requireRole('admin'), async (req, res) => {
+    if (denyScopedRun(req, res, '게스트 디스크 수동 수집')) return;
     logAudit({ user: req.user?.username, action: '게스트 디스크 수동 수집', ip: req.ip || '' });
     const r = await runGuestDiskNow('manual');
     res.json(r);

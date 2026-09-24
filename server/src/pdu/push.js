@@ -42,7 +42,7 @@ export const PDU_PUSH_WITHHOLD_MAX_MS = Math.max(60_000, Number(process.env.PDU_
 
 /**
  * 이번 push 를 보류할지(순수 — v2.605 EDGE2605-01).
- *  · assignedIds null(등록부 못 읽음) + 스냅샷 0 → 보류(비우지 않는다 — v2.583 #13)
+ *  · assignedIds null(등록부 못 읽음) + 스냅샷 0 → 보류(비우지 않는다 — v2.583 #13) · 위임이 있는데 스냅샷 0 → 보류
  *  · 위임 0대 → 보냄(빈 목록으로 중앙 보관분을 비운다 — 장비를 뺀 법인의 유령 PDU)
  *  · 스냅샷이 없는 위임 장비가 있고 첫 주기(pollOnce)가 아직 안 끝났으면 → 보류(시한 maxMs 까지)
  *  · 첫 주기 이후의 누락(인증 정지·추가 직후)은 보내되 개수(missing)를 밝힌다
@@ -56,9 +56,8 @@ export function pduPushWithhold({ assignedIds, snapshotIds = [], firstPollDone =
   const have = new Set(snapshotIds);
   const missing = assignedIds.filter((id) => !have.has(id)).length;
   if (!missing) return { withhold: false, since: null, missing: 0, reason: '' };
-  if (!snapshotIds.length && firstPollDone === false) {
-    // v2.583 #13 과 같은 경우 — 첫 수집 대기
-  }
+  // v2.583 #13: 위임 장비는 있는데 스냅샷이 하나도 없으면 언제나 보내지 않는다(빈 목록으로 덮으면 중앙 화면이 빈다).
+  if (!snapshotIds.length) return { withhold: true, since: null, missing, reason: `위임 PDU ${assignedIds.length}대 — 아직 수집된 스냅샷이 없습니다(첫 수집 대기)` };
   if (firstPollDone) return { withhold: false, since: null, missing, reason: '' };
   const s = since || now;
   if (now - s > maxMs) return { withhold: false, since: s, missing, reason: '' };
@@ -91,7 +90,7 @@ async function pushPduOnce() {
   _withholdSince = wh.since;
   if (wh.withhold) {
     _last = { at: Date.now(), ok: true, count: 0, reason: wh.reason, withheld: true, ...(wh.missing ? { missing: wh.missing } : {}) };
-    if (wh.missing) console.warn(`[pdu-push] ${wh.reason}`);
+    if (wh.missing && all.length) console.warn(`[pdu-push] ${wh.reason}`); // 스냅샷 0건(첫 수집 대기)은 예전처럼 상태에만
     return { ok: true, count: 0, withheld: true, reason: wh.reason };
   }
   const missingNote = wh.missing ? { missing: wh.missing } : {};
