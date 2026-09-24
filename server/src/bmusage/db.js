@@ -33,6 +33,7 @@ const FILE = () => path.join(config.dbDir || config.configDir, 'bm-usage.db');
 // ⚠ `export { x } from` 은 이 모듈 스코프에 이름을 만들지 않는다(v2.575 실제 사고) — import 뒤 export.
 import { DAY_OFFSET_MIN, dayKey } from "../util/dayKey.js";
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
+import { chunkedDelete } from '../util/chunkedPrune.js';
 const lockRetry = createLockRetry();
 export { DAY_OFFSET_MIN, dayKey };
 
@@ -271,15 +272,23 @@ export async function pruneUsage({ rawDays = 90, dailyDays = 365 * 5, every = 12
   const db = await getDb();
   if (!db) return { ok: false };
   if (!force && (++_tick % every) !== 0) return { ok: true, skipped: true };
+  // v2.602(감사 DB2602-01): 청크 DELETE + 청크 사이 양보(util/chunkedPrune.js, v2.453 규약). 예전 단일 DELETE 는 보존일을
+  //   줄이면 수백만 행을 동기로 지워 이벤트 루프가 멈췄다(감사 재현: 184만 행 3.2초). prune 끼리는 겹치지 않게 진행 중인
+  //   작업을 공유한다(청크 사이에 다음 주기·수동 호출이 끼어들 수 있다). 상한에 걸린 나머지는 다음 주기가 잇는다(done:false).
+  if (_pruning) return _pruning;
   const rawCut = Date.now() - rawDays * 86_400_000;
   const dayCut = dayKey(Date.now() - dailyDays * 86_400_000);
-  try {
-    const a = db.prepare('DELETE FROM usage_history WHERE ts < ?').run(rawCut);
-    const b = db.prepare('DELETE FROM usage_daily WHERE day < ?').run(dayCut);
-    if (Number(a?.changes) || Number(b?.changes)) _counts = null;
-    return { ok: true, rawDeleted: Number(a?.changes) || 0, dailyDeleted: Number(b?.changes) || 0 };
-  } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 200) }; }
+  _pruning = (async () => {
+    try {
+      const a = await chunkedDelete(db.prepare('DELETE FROM usage_history WHERE rowid IN (SELECT rowid FROM usage_history WHERE ts < ? LIMIT ?)'), [rawCut], { label: 'bmusage.usage_history' });
+      const b = await chunkedDelete(db.prepare('DELETE FROM usage_daily WHERE rowid IN (SELECT rowid FROM usage_daily WHERE day < ? LIMIT ?)'), [dayCut], { label: 'bmusage.usage_daily' });
+      if (a.deleted || b.deleted) _counts = null;
+      return { ok: true, rawDeleted: a.deleted, dailyDeleted: b.deleted, done: a.done && b.done };
+    } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 200) }; }
+  })().finally(() => { _pruning = null; });
+  return _pruning;
 }
+let _pruning = null;
 
 /**
  * 최신 1건씩(화면 표) — 서버별 마지막 관측.

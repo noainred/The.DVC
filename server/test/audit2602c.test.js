@@ -182,3 +182,51 @@ test('COL-2602-03 — slot 접두 값 줄을 두 칸 밀어 읽지 않는다(틀
   assert.equal(ok.total, 3000);
   assert.equal(ok.unrecognized, undefined);
 });
+
+// ── 추가 배정 ① COL-2602-02(SSH): porterrshow 수신 시각이 분모 ─────────────────
+test('COL-2602-02(SSH) — fosSsh 처리량(f/s)은 porterrshow 를 받은 시각 차이로 나눈다', async () => {
+  const { buildSnapshot } = await import('../src/sanswitch/collectors/fosSsh.js');
+  const SW = 'switchName:\tS1\nswitchType:\t118.1\nswitchState:\tOnline\n\nIndex Port Address  Media Speed   State       Proto\n==================================================\n  0   0   010000   id    16G    Online      FC  F-Port  50:00:00:00:00:00:00:01\n';
+  const pe = (f) => `          frames      enc    crc    crc    too    too    bad    enc   disc   link   loss   loss   frjt   fbsy  c3timeout    pcs    uncor\n       tx     rx      in    err    g_eof  shrt   long   eof     out   c3    fail    sync   sig                       tx    rx     err    err\n  0:   ${f}  ${f}   0      0      0      0      0      0      0      0      0      0      0      0      0      0      0      0      0\n`;
+  const dev = { id: 'ssh-2602c', name: 'S1', host: 'h' };
+  buildSnapshot(dev, { switchshow: SW, porterrshow: pe(0) }, {}, {}, { countersAt: T0 });
+  const s = buildSnapshot(dev, { switchshow: SW, porterrshow: pe(300000) }, {}, {}, { countersAt: T0 + 300_000 });
+  const p = s.ports.list.find((x) => Number(x.index) === 0);
+  assert.ok(p, JSON.stringify(s.ports.list?.slice(0, 2)));
+  assert.equal(s.extra.rateGapSec, 300);
+  assert.equal(p.inFps, 1000);
+  const src = fs.readFileSync(path.join(import.meta.dirname, '../src/sanswitch/collectors/fosSsh.js'), 'utf8');
+  assert.match(src, /\{ countersAt: r\.countersAt \?\? null \}/, 'collect 가 수신 시각을 넘긴다');
+  assert.match(src, /spec\.key === 'porterrshow'\) countersAt = Date\.now\(\)/);
+});
+
+// ── 추가 배정 ② DB2602-01(bmusage): pruneUsage 청크화 ─────────────────────────
+test('DB2602-01(bmusage) — pruneUsage 는 청크로 지우며 양보하고, 진행 중 호출은 같은 작업을 공유한다', async () => {
+  const bm = await import('../src/bmusage/db.js');
+  const { DatabaseSync } = await import('node:sqlite');
+  await bm.dbStatus();   // 파일·스키마 생성
+  const now = Date.now();
+  const c = new DatabaseSync(path.join(CFG, 'bm-usage.db'));
+  c.exec('BEGIN');
+  const ins = c.prepare('INSERT INTO usage_history (agent, key, ts) VALUES (?,?,?)');
+  for (let i = 0; i < 3000; i++) ins.run('', `k${i % 7}`, now - 200 * 86400e3 + i);
+  for (let i = 0; i < 5; i++) ins.run('', 'recent', now - i * 1000);
+  c.exec('COMMIT'); c.close();
+  let ticks = 0; let stop = false;
+  const probe = () => { if (stop) return; ticks++; setImmediate(probe); };
+  setImmediate(probe);
+  const p1 = bm.pruneUsage({ rawDays: 90, force: true });
+  const p2 = bm.pruneUsage({ rawDays: 90, force: true });
+  const [r1, r2] = await Promise.all([p1, p2]);
+  stop = true;
+  assert.equal(r1.ok, true, JSON.stringify(r1));
+  assert.equal(r1.rawDeleted, 3000);
+  assert.deepEqual(r2, r1, '진행 중이면 같은 작업을 공유(두 번 지우지 않는다)');
+  assert.ok(ticks >= 5, `청크 사이 양보 ${ticks}회`);
+  const c2 = new DatabaseSync(path.join(CFG, 'bm-usage.db'));
+  assert.equal(c2.prepare('SELECT COUNT(*) n FROM usage_history').get().n, 5);
+  c2.close();
+  const { stripComments } = await import('./_stripComments.js');
+  const src = stripComments(fs.readFileSync(path.join(import.meta.dirname, '../src/bmusage/db.js'), 'utf8'));
+  assert.equal(/DELETE FROM usage_history WHERE ts\s*</.test(src), false);
+});
