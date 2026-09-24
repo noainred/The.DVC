@@ -1247,7 +1247,8 @@ centralRouter.post('/part-faults', async (req, res) => {
   if (!r.ok) return res.status(r.refused ? 429 : 400).json(r); // v2.605(CEN2605-02): 엣지 수 상한 거절은 429(형제 수신과 같다)
   // 응답에 중앙의 스위치 상태를 실어 보낸다 — 엣지가 '보냈는데 중앙이 꺼져 있다' 를 알 수 있게.
   const { partFaultEnabled } = await import('../partfault/settings.js');
-  return res.json({ ok: true, agent, protocol: r.protocol, devices: r.devices, rejected: r.rejected, open: r.open, centralEnabled: partFaultEnabled().enabled });
+  // v2.607(감사 EDGE2607-02): 상한으로 버린 파트 수도 돌려준다 — 예전에는 중앙 보관분에만 있어 엣지가 알 수 없었다.
+  return res.json({ ok: true, agent, protocol: r.protocol, devices: r.devices, rejected: r.rejected, open: r.open, ...(r.partsOmitted ? { partsOmitted: r.partsOmitted } : {}), centralEnabled: partFaultEnabled().enabled });
 });
 
 /**
@@ -1823,7 +1824,11 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   const b = req.body || {};
   const agent = req.centralAuth.agent || String(b.agent && strAgent(b.agent) || ''); // v2.600 CEN2600-10: 글자일 때만(객체면 String() 이 던졌다)
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  let alive = Array.isArray(b.alive) ? b.alive.slice(0, 8000) : [];
+  // v2.607(감사 EDGE2607-02): 8,000 초과분은 예전에 개수도 밝히지 않고 버렸다 — 응답에 omitted 로 싣는다.
+  const ALIVE_MAX = 8000;
+  const aliveOmitted = Array.isArray(b.alive) ? Math.max(0, b.alive.length - ALIVE_MAX) : 0;
+  if (aliveOmitted) console.warn(`[central] ip-scan-result: ${String(agent).slice(0, 64)} alive ${b.alive.length}개 중 상한 ${ALIVE_MAX} 초과분 ${aliveOmitted}개를 받지 않았습니다`);
+  let alive = Array.isArray(b.alive) ? b.alive.slice(0, ALIVE_MAX) : [];
   // 개별 토큰은 자기 배정 스캔 ranges 안의 IP 만 보고할 수 있다(범위 밖 임의 IP 의 열린포트·소유
   // agent 위조 차단 — gpu-guest-data 소유권 필터와 동일 모델). ranges 미설정 agent 는 통과(TOFU).
   // ⚠️ ranges 는 **필터 진입 전 1회 로드·컴파일**한다 — IP 마다 loadScanSettings(무캐시 파일 읽기)를
@@ -1849,7 +1854,7 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   const capped = mr?.capped || 0;
   recordAgentReport(agent, { scanned: b.scanned || 0, alive: validAlive.length, durationMs: b.durationMs || null });
   // v2.603 CEN2603-02: 전체 상한으로 받지 않은 새 IP 수를 밝힌다(merged 는 받은 것만).
-  res.json({ ok: true, merged: validAlive.length - capped, ...(dropped ? { dropped } : {}), ...(capped ? { capped } : {}) });
+  res.json({ ok: true, merged: validAlive.length - capped, ...(dropped ? { dropped } : {}), ...(capped ? { capped } : {}), ...(aliveOmitted ? { omitted: aliveOmitted } : {}) });
 });
 
 /*

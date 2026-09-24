@@ -16,7 +16,18 @@ import { getCentralAuthStats } from '../central.js';
 import { listInventory, setInventoryOwner } from '../../central/inventory.js';
 import { getIngestStats, resetIngestStats } from '../../central/ingestStats.js';
 import { listCollectors } from '../../collector/registry.js';
-import { adminOnly, requireSettingsOwner } from './shared.js';
+import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+import { store } from '../../store.js';
+import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+
+// v2.607 AUTHZ2607-04·07: 위임 인벤토리 현황·소유 엣지·IP 스캔 결과·설정은 법인 축으로 나눌 수 없거나(엣지·스캔 대역 전체)
+//   전 법인에 걸친 동작이라 범위 계정 403(v2.525 규약). vCenter별 스캔 대역은 쓰기 범위 밖이면 404(존재 은닉) —
+//   GET(/tools/ipam/vc-ranges)은 범위로 거르는데 쓰기가 무스코프라 범위 admin 이 보이지 않는 법인 대역을 덮어쓰고 지웠다.
+const fleetOnly = fullScopeOnlyWith('이 기능은 전 법인(엣지·스캔 전체)에 걸친 데이터·동작이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
+function vcRangeWritable(user, vcenterId) {
+  const w = writeScopedVcenterIds(user, store.get());
+  return !w || w.has(String(vcenterId || ''));
+}
 
 export function registerCentralIpam(adminRouter) {
 
@@ -38,12 +49,12 @@ adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, 
 // UI 는 설정 탭(App.jsx ownerOnly) 안의 AgentDeploy 에서만 쓰므로 화면 영향 없음.
 adminRouter.get('/central-token', adminOnly, requireSettingsOwner, (_req, res) => res.json(centralTokenInfo()));
 // 사이트 위임 수집 현황(어떤 vCenter를 어떤 에이전트가 언제 push했는지).
-adminRouter.get('/central/inventory', adminOnly, (_req, res) => res.json({ inventory: listInventory() }));
+adminRouter.get('/central/inventory', adminOnly, fleetOnly, (_req, res) => res.json({ inventory: listInventory() }));
 // v2.599(EDGE2599-03): 위임(site) vCenter 인벤토리 소유 엣지 해제/지정 — 담당 엣지를 교체하면 새 엣지 push 가 TOFU 소유권에
 //   막혀 영구 403 이었다. 해제(agent 비움)하면 다음 개별 토큰 push 가 새 소유가 되고, 지정하면 그 엣지만 쓸 수 있다.
 //   보안 경계(엣지가 남의 vCenter 를 가로채지 못함)는 그대로다 — 바꾸는 주체는 관리자이고 전부 감사 로그에 남는다.
 // Body: { vcenterId, agent }  (agent 빈 값 = 해제)
-adminRouter.post('/central/inventory/owner', adminOnly, (req, res) => {
+adminRouter.post('/central/inventory/owner', adminOnly, fleetOnly, (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').trim();
   const agent = String(req.body?.agent ?? '').trim();
   if (!vcenterId || vcenterId.length > 128) return res.status(400).json({ ok: false, reason: 'vcenterId 가 필요합니다.' });
@@ -112,13 +123,13 @@ adminRouter.get('/ipam/scan/settings', adminOnly, (req, res) => {
     reports: getAgentReports(),               // 에이전트별 마지막 보고
   });
 });
-adminRouter.put('/ipam/scan/settings', adminOnly, (req, res) => {
+adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => {
   const agent = (req.body && req.body.agent) || LOCAL;
   const settings = saveScanSettings(agent, req.body || {});
   if (agent === LOCAL) rescheduleScanPoller(); // 로컬 설정만 이 포탈 폴러에 적용
   res.json({ ok: true, agent, settings, status: scanStatus() });
 });
-adminRouter.post('/ipam/scan/run', adminOnly, (_req, res) => {
+adminRouter.post('/ipam/scan/run', adminOnly, fleetOnly, (_req, res) => {
   const r = startScan({ manual: true }); // 비동기 시작 — 즉시 반환(백그라운드 실행, 창 닫아도 지속)
   res.json({ ...r, status: scanStatus(), info: scanInfo() });
 });
@@ -126,22 +137,24 @@ adminRouter.post('/ipam/scan/run', adminOnly, (_req, res) => {
 adminRouter.get('/ipam/scan/status', adminOnly, (_req, res) => {
   res.json({ status: scanStatus(), info: scanInfo(), runs: getScanRuns(50), reports: getAgentReports() });
 });
-adminRouter.get('/ipam/scan/results', adminOnly, (_req, res) => {
+adminRouter.get('/ipam/scan/results', adminOnly, fleetOnly, (_req, res) => {
   res.json({ results: scanResultList().slice(0, 5000), info: scanInfo() });
 });
 
 // vCenter별 스캔 대역 저장/삭제 + 즉시 스캔(주기 스캔이 이 대역들을 함께 스캔).
 adminRouter.put('/ipam/vc-ranges', adminOnly, (req, res) => {
   const b = req.body || {};
+  if (!vcRangeWritable(req.user, b.vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); // v2.607 AUTHZ2607-04
   const r = saveVcRanges(b.vcenterId, { ranges: b.ranges, enabled: b.enabled });
   if (r.ok) { try { rescheduleScanPoller(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.delete('/ipam/vc-ranges/:vcenterId', adminOnly, (req, res) => {
+  if (!vcRangeWritable(req.user, req.params.vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); // v2.607 AUTHZ2607-04
   const r = removeVcRanges(req.params.vcenterId);
   res.status(r.ok ? 200 : 404).json(r);
 });
-adminRouter.post('/ipam/vc-ranges/scan', adminOnly, (_req, res) => {
+adminRouter.post('/ipam/vc-ranges/scan', adminOnly, fleetOnly, (_req, res) => {
   const r = startScan({ manual: true });
   res.json({ ...r, status: scanStatus() });
 });
@@ -173,14 +186,19 @@ adminRouter.post('/ipam/vc-ranges/import', adminOnly, (req, res) => {
   };
   const existing = new Set(listVcRanges().map((e) => e.vcenterId));
   const { report, summary } = analyzeVcRangesImport(rows, { resolveVc, hasExisting: (id) => existing.has(id) });
-  if (req.body?.dryRun) return res.json({ ok: true, dryRun: true, report, summary, total: rows.length });
+  if (req.body?.dryRun) {
+    const oos = report.filter((r) => r.vcId && r.action !== 'error' && !vcRangeWritable(req.user, r.vcId)).length;
+    return res.json({ ok: true, dryRun: true, report, summary, total: rows.length, ...(oos ? { outOfScope: oos, outOfScopeReason: '범위 밖(또는 조회 전용) vCenter 행은 가져오기에서 건너뜁니다.' } : {}) });
+  }
 
   const allowOverwrite = req.body?.overwrite === true;
-  let added = 0, overwritten = 0; const failed = []; const skipped = [];
+  let added = 0, overwritten = 0, outOfScope = 0; const failed = []; const skipped = [];
   const verdictByLine = new Map(report.map((r) => [r.line, r]));
   for (const row of rows) {
     const verdict = verdictByLine.get(row._line);
     if (verdict?.action === 'error') { failed.push({ line: verdict.line, vcenter: row.vcenter, reason: verdict.reason }); continue; }
+    // v2.607 AUTHZ2607-04: 범위 계정은 자기 쓰기 범위 vCenter 행만 저장한다 — 나머지는 건너뛰고 개수를 밝힌다.
+    if (!vcRangeWritable(req.user, verdict.vcId)) { outOfScope++; continue; }
     if (verdict.action === 'overwrite' && !allowOverwrite) { skipped.push({ line: row._line, vcenter: row.vcenter, reason: '기존 항목 — 덮어쓰기 미허용(overwrite 확인 필요)' }); continue; }
     const r = saveVcRanges(verdict.vcId, { ranges: row.ranges, enabled: row.enabled });
     if (r.ok) { if (verdict.action === 'overwrite') overwritten++; else added++; }
@@ -188,6 +206,6 @@ adminRouter.post('/ipam/vc-ranges/import', adminOnly, (req, res) => {
   }
   if (added || overwritten) { try { rescheduleScanPoller(); } catch { /* */ } }
   logAudit({ user: req.user?.username, action: 'IPAM 스캔 대역 CSV 가져오기', detail: `추가 ${added}·덮어쓰기 ${overwritten}·건너뜀 ${skipped.length}·실패 ${failed.length}`, ip: req.ip || '' });
-  res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length });
+  res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length, ...(outOfScope ? { skippedOutOfScope: outOfScope, skippedOutOfScopeReason: '범위 밖(또는 조회 전용) vCenter 행은 저장하지 않았습니다.' } : {}) });
 });
 }

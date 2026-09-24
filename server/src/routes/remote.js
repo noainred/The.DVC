@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { store } from '../store.js';
 import { requireRole, requirePerm } from '../auth/auth.js';
 import { scopedVcenterIds } from '../auth/scope.js';
+import { mergeScopedList } from '../auth/scopeMerge.js';   // v2.607 RECENT2607-03
 import {
   getConfig, getConfigSafe, saveConfig,
   listMappings, listMappingsForUser, getMapping, addMapping, removeMapping, setMappingStatus, touchMapping,
@@ -155,6 +156,7 @@ remoteRouter.get('/targets', requirePerm('remote.access'), (req, res) => {
 remoteRouter.get('/config', adminOnly, (_req, res) => res.json({ config: getConfigSafe() }));
 
 remoteRouter.put('/config', adminOnly, (req, res) => {
+  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '기본 중계 서버 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 RECENT2607-03
   // v2.537: saveConfig 가 proxyHost 차단(루프백·링크로컬)을 throw 로 알린다 — 500 으로 흘리면 사용자는
   // '서버 오류' 로만 보고 무엇을 고칠지 모른다. 400 + reason 으로 돌려준다.
   try { res.json({ ok: true, config: saveConfig(req.body || {}) }); }
@@ -174,11 +176,65 @@ remoteRouter.get('/proxies/full', adminOnly, (req, res) => {
   }
   res.json({ proxies, omittedOutOfScope: all.length - proxies.length, scoped: true });
 });
+/*
+ * v2.607 RECENT2607-03 — /proxies/full(v2.606)이 범위 admin 에게 vcenterIds 를 범위로 잘라 주는데 저장은 통째로
+ * 교체라, 범위 admin 이 이름·포트만 고쳐 저장해도 다른 법인 vCenter 가 그 프록시 배정에서 빠져 **기본 프록시로
+ * 떨어졌다**(원격 접속·HAProxy 매핑 경로가 조용히 바뀐다). 범위 계정의 저장은:
+ *   · vcenterIds 를 범위 밖은 직전 값 그대로, 범위 안은 요청대로 병합한다(mergeScopedList — 빈 배열 = '없음').
+ *   · 범위 밖 vCenter 도 배정된 **공유 프록시**의 주소·포트·자동 구성(dataplane·deploy·guacd)·이름 변경과 삭제는 403
+ *     (다른 법인의 접속 경로다). 범위 안 vCenter 가 하나도 없는 프록시는 존재를 숨긴다(404).
+ *   · 기본 프록시는 전 법인 공용이라 범위 계정이 바꾸지 못한다(PUT /config 도 같다).
+ */
+function proxyScopeOf(allowed, id) {
+  const prev = id ? listProxiesSafe().find((p) => p.id === String(id)) : null;
+  const ids = prev ? (prev.vcenterIds || []).map(String) : [];
+  return { prev, inScope: ids.filter((v) => allowed.has(v)), outScope: ids.filter((v) => !allowed.has(v)) };
+}
+function sameLoose(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return a == null && b == null;
+  if (typeof a !== 'object' || typeof b !== 'object') return String(a) === String(b);
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+}
+function sharedProxyChanges(prev, body) {
+  const changed = [];
+  for (const k of ['name', 'proxyHost', 'publicPortBase']) if (body[k] !== undefined && !sameLoose(body[k], prev[k])) changed.push(k);
+  for (const k of ['dataplane', 'deploy', 'guacd']) {
+    const b = body[k];
+    if (!b || typeof b !== 'object') continue;
+    if (Object.entries(b).some(([kk, v]) => !sameLoose(v, (prev[k] || {})[kk]))) changed.push(k);
+  }
+  return changed;
+}
+const SHARED_PROXY_REASON = '이 중계 서버에는 범위 밖 법인의 vCenter 도 배정돼 있어 범위 제한 계정은 주소·포트·자동 구성·이름을 바꾸거나 삭제할 수 없습니다(다른 법인의 접속 경로입니다) — 자기 범위 vCenter 배정만 바꿀 수 있습니다.';
 remoteRouter.post('/proxies', adminOnly, (req, res) => {
-  const r = saveProxy(req.body || {});
-  res.status(r.ok ? 200 : 400).json(r);
+  const body = { ...(req.body || {}) };
+  const allowed = scopedVcenterIds(req.user, store.get());
+  let ignoredOutOfScope = 0;
+  if (allowed) {
+    if (String(body.id || '') === 'default') return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '기본 중계 서버는 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' });
+    const { prev, inScope, outScope } = proxyScopeOf(allowed, body.id);
+    if (prev && !inScope.length && outScope.length) return res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.' });
+    if (prev && outScope.length) {
+      const changed = sharedProxyChanges(prev, body);
+      if (changed.length) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SHARED_PROXY_REASON, changedFields: changed });
+    }
+    if (body.vcenterIds !== undefined) {
+      const m = mergeScopedList(prev ? prev.vcenterIds : [], body.vcenterIds, allowed);
+      body.vcenterIds = m.merged; ignoredOutOfScope = m.ignored.length;
+    }
+  }
+  const r = saveProxy(body);
+  if (r.ok && allowed && r.proxy) r.proxy = { ...r.proxy, vcenterIds: (r.proxy.vcenterIds || []).filter((v) => allowed.has(String(v))) };
+  res.status(r.ok ? 200 : 400).json({ ...r, ...(ignoredOutOfScope ? { ignoredOutOfScope } : {}) });
 });
 remoteRouter.delete('/proxies/:id', adminOnly, (req, res) => {
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (allowed) {
+    const { prev, inScope, outScope } = proxyScopeOf(allowed, req.params.id);
+    if (prev && !inScope.length && outScope.length) return res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.' });
+    if (prev && outScope.length) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SHARED_PROXY_REASON });
+  }
   const r = removeProxy(req.params.id);
   res.status(r.ok ? 200 : 400).json(r);
 });

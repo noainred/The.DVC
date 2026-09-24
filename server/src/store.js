@@ -318,7 +318,11 @@ class Store {
             // v2.600(감사 RECENT2600-01) 2차 방어: 엣지가 보낸 location 이 객체가 아니면(v2.599 수신이 null 로 만든 옛 push 포함)
             //   등록부의 위치로 채운다 — 없으면 지역 롤업이 'Unknown' 으로 묶이고 지도 좌표가 사라진다.
             const siteLoc = siteVc.location && typeof siteVc.location === 'object' && !Array.isArray(siteVc.location) ? siteVc.location : (vc.location ?? siteVc.location ?? null);
-            merged.vcenters.push({ ...siteVc, location: siteLoc, id: vc.id, collectSource: 'site', collectedBy: inv.agent, receivedAt: inv.at, stale });
+            // v2.607 LEFT2607-04·WEB2607-06: collectSource 는 여기서 'site'(수집 경로)로 덮인다 — 엣지가 SOAP 대신 REST 목록으로
+            //   받은 저품질 스냅샷이면 그 표지(collectSource:'rest')가 사라지므로 **collectMethod** 로 보존한다(화면이 경보 미조회를 말한다).
+            const siteMethod = typeof siteVc.collectMethod === 'string' && siteVc.collectMethod ? siteVc.collectMethod
+              : (typeof siteVc.collectSource === 'string' && siteVc.collectSource && siteVc.collectSource !== 'site' ? siteVc.collectSource : undefined);
+            merged.vcenters.push({ ...siteVc, location: siteLoc, id: vc.id, collectSource: 'site', ...(siteMethod ? { collectMethod: siteMethod.slice(0, 16) } : {}), collectedBy: inv.agent, receivedAt: inv.at, stale });
             // v2.599(CEN-2599-01·02) 2차 방어: 디스크에 이미 저장된 옛 push 에 객체가 아닌 원소나 **다른 vCenter** 의 원소가
             //   있어도 병합하지 않는다 — null 하나가 rollupsOf 에서 throw 해 전 함대 스냅샷이 매 주기 멈췄다.
             const own = (a) => (Array.isArray(a) ? a.filter((x) => x && typeof x === 'object' && !Array.isArray(x) && (x.vcenterId == null || String(x.vcenterId) === vc.id)) : []);
@@ -670,10 +674,22 @@ function rollupsOf(snap, { scoped = false } = {}) {
         alarmsCritical: a.filter((x) => x.severity === 'critical').length,
         alarmsWarning: a.filter((x) => x.severity === 'warning').length,
         // 측정 전력을 vCenter 귀속 기준으로 합산(명시 지정·이름·태그). 호스트 미매핑 서버도 그 vCenter에 포함.
-        powerKw: round(ids.reduce((acc, id) => acc + (snap.measuredPower?.byVc?.[id] || 0), 0) / 1000, 1),
+        // v2.607 WEB2607-05: 측정 서버가 0대인 묶음은 0 kW 가 아니라 **모른다**(null) — 0 을 주면 화면이 호스트 보고 전력
+        //   폴백을 타지 않고 '0 kW'(= 소비 없음이라는 거짓)를 그린다. 측정 대수는 powerServers 로 함께 싣는다.
+        //   (countByVc 가 없는 옛 스냅샷은 대수를 모르므로 합이 0 일 때만 null 로 본다.)
+        ...powerOf(ids),
       };
     });
   };
+
+  function powerOf(ids) {
+    const mp = snap.measuredPower;
+    if (!mp) return { powerKw: null, powerServers: 0 };
+    const w = ids.reduce((acc, id) => acc + (Number(mp.byVc?.[id]) || 0), 0);
+    const n = mp.countByVc ? ids.reduce((acc, id) => acc + (Number(mp.countByVc[id]) || 0), 0) : null;
+    const known = n == null ? w > 0 : n > 0;
+    return { powerKw: known ? round(w / 1000, 1) : null, powerServers: n };
+  }
 
   // byKey('vcenter')는 호스트/VM/DS 전체를 재순회하므로 vCenter 수만큼 호출하면 O(N²).
   // 한 번만 계산해 Map으로 조회한다.
@@ -741,7 +757,10 @@ export function storeStatus() {
       hosts: haveArrays ? (hostN.get(vc.id) || 0) : null,   // 배열 자체가 없으면 '모름'(null) — 0 을 지어내지 않는다
       vms: haveArrays ? (vmN.get(vc.id) || 0) : null,
       mock: vc.mock === true,
-      collectMode: vc.collectMode || vc.collectSource || '',
+      // v2.607 RECENT2607-08: collectMode 는 등록부 축(site/direct)만 — REST 폴백 표지(collectSource:'rest')가 여기로 새면
+      //   화면 '수집 방식' 칸에 'rest' 가 찍혔다. REST 여부는 collectSource 로 따로 싣는다.
+      collectMode: vc.collectMode === 'site' || vc.collectSource === 'site' ? 'site' : 'direct',
+      collectSource: vc.collectSource === 'rest' || vc.collectMethod === 'rest' ? 'rest' : '',
       error: vc.error || '', code: vc.code || '', hint: vc.hint || '',
     })),
   };

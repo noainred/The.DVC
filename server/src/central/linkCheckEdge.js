@@ -14,8 +14,11 @@
  */
 import { insertResults } from '../linkcheck/db.js';
 import { PHASES } from '../linkcheck/phases.js';
-import { KIND_KEYS, EDGE_KINDS, linkIdOf } from '../linkcheck/links.js';
-import { capTrim } from '../util/capStr.js';
+import { KIND_KEYS, EDGE_KINDS, linkIdOf, buildLinks } from '../linkcheck/links.js';
+import { loadCollectors } from '../collector/registry.js';
+import { listRegistry as listVcenters } from '../vcenter/registry.js';
+import { loadLinkCheckSettings } from '../linkcheck/settings.js';
+import { capTrim, capStr } from '../util/capStr.js';
 
 /** 보고 1건당 링크 상한. 링크 140개 규모를 넉넉히 덮고 폭주는 막는다. */
 export const REPORT_LINK_MAX = Math.max(50, Number(process.env.LINKCHECK_REPORT_LINK_MAX) || 500);
@@ -39,16 +42,16 @@ function sanitizeSteps(raw) {
     out[ph] = {
       ok: s.ok === true,
       ms: iOr(s.ms),
-      ...(s.failKind ? { failKind: t(s.failKind).slice(0, 40) } : {}),
-      ...(s.error ? { error: t(s.error).slice(0, 300) } : {}),
+      ...(s.failKind ? { failKind: capTrim(s.failKind, 40) } : {}),
+      ...(s.error ? { error: capTrim(s.error, 300) } : {}),
       ...(s.status != null ? { status: iOr(s.status) } : {}),
       ...(s.certDaysLeft != null ? { certDaysLeft: iOr(s.certDaysLeft) } : {}),
-      ...(s.certStatus ? { certStatus: t(s.certStatus).slice(0, 20) } : {}),
-      ...(s.subject ? { subject: t(s.subject).slice(0, 120) } : {}),
-      ...(s.issuer ? { issuer: t(s.issuer).slice(0, 120) } : {}),
-      ...(s.protocol ? { protocol: t(s.protocol).slice(0, 20) } : {}),
-      ...(s.bodySnippet ? { bodySnippet: t(s.bodySnippet).slice(0, 400) } : {}),
-      ...(Array.isArray(s.addrs) ? { addrs: s.addrs.filter((a) => typeof a === 'string').slice(0, 8).map((a) => a.slice(0, 64)) } : {}),
+      ...(s.certStatus ? { certStatus: capTrim(s.certStatus, 20) } : {}),
+      ...(s.subject ? { subject: capTrim(s.subject, 120) } : {}),
+      ...(s.issuer ? { issuer: capTrim(s.issuer, 120) } : {}),
+      ...(s.protocol ? { protocol: capTrim(s.protocol, 20) } : {}),
+      ...(s.bodySnippet ? { bodySnippet: capTrim(s.bodySnippet, 400) } : {}),
+      ...(Array.isArray(s.addrs) ? { addrs: s.addrs.filter((a) => typeof a === 'string').slice(0, 8).map((a) => capStr(a, 64)) } : {}),
     };
   }
   return out;
@@ -59,9 +62,26 @@ function sanitizeSteps(raw) {
  * @param {string} agent  **인증된** agent 이름(`req.centralAuth.agent`)
  * @param {object} body   `{ at, version, results:[{ link, verdict, steps, summary, skipped }] }`
  */
+/**
+ * v2.607(감사 LEFT2607-01 — 재현): 중앙이 **그 agent 에게 내려준 링크 id 집합**(link-check-config 와 같은 계산 —
+ *   buildLinks 중 EDGE_KINDS · from === agent). id 재계산 대조(CEN2606-01)는 엣지가 준 `to` 로 다시 계산하므로 `to` 를
+ *   바꾸면 임의 id 가 그대로 통과해 link_latest 에 행이 쌓였다. 등록부를 읽지 못하면 null(판정하지 않는다 — 설정 파일
+ *   문제가 모든 엣지 보고를 끊지 않게, v2.600 edgeVcWriteDenied 와 같은 판단). enabled 는 보지 않는다(끈 직후 도착한 보고).
+ */
+export function assignedEdgeLinkIds(agent) {
+  const ag = String(agent || '').toLowerCase();
+  try {
+    const st = loadLinkCheckSettings();
+    const { links } = buildLinks({ collectors: loadCollectors(), vcenters: listVcenters(), pairs: st.pairs, settings: st });
+    return new Set(links.filter((l) => EDGE_KINDS.includes(l.kind) && String(l.from || '').toLowerCase() === ag).map((l) => String(l.id).toLowerCase()));
+  } catch { return null; }
+}
+
 export async function putEdgeLinkReport(agent, body = {}) {
   const ag = t(agent);
   if (!ag) return { ok: false, reason: 'agent 를 확인할 수 없습니다.' };
+  const assigned = assignedEdgeLinkIds(ag);
+  let notAssigned = 0;
   const at = Date.now();
   const raw = Array.isArray(body?.results) ? body.results : [];
   const omitted = Math.max(0, raw.length - REPORT_LINK_MAX);
@@ -94,23 +114,24 @@ export async function putEdgeLinkReport(agent, body = {}) {
     const to = t(link.to);
     if (id.length > LINK_ID_MAX || to.length > LINK_TO_MAX) { rejected += 1; continue; }
     if (id.toLowerCase() !== linkIdOf(kind, link.from, to).toLowerCase()) { rejected += 1; continue; }
+    if (assigned && !assigned.has(id.toLowerCase())) { rejected += 1; notAssigned += 1; continue; } // v2.607 LEFT2607-01
     const v = (r.verdict && typeof r.verdict === 'object') ? r.verdict : null;
     if (!v) { rejected += 1; continue; }
     const steps = sanitizeSteps(r.steps);
     const safeLink = {
       id: capTrim(id, LINK_ID_MAX), kind, by: 'edge', from: ag, to: capTrim(to, LINK_TO_MAX),
-      host: t(link.host).slice(0, 255), port: iOr(link.port),
+      host: capTrim(link.host, 255), port: iOr(link.port),
     };
     toSave.push({
       link: safeLink,
       ts: (() => { const n = iOr(r.ts); return (n && n > 0 && n <= at + 5 * 60_000) ? n : at; })(),
       verdict: {
         ok: v.ok === true,
-        phase: t(v.phase).slice(0, 20), failKind: t(v.failKind).slice(0, 40),
-        reached: t(v.reached).slice(0, 80), totalMs: iOr(v.totalMs),
+        phase: capTrim(v.phase, 20), failKind: capTrim(v.failKind, 40),
+        reached: capTrim(v.reached, 80), totalMs: iOr(v.totalMs),
       },
       steps,
-      summary: t(r.summary).slice(0, 300),
+      summary: capTrim(r.summary, 300),
       detail: { steps, link: safeLink, byEdge: ag },
       byNode: ag,
     });
@@ -127,12 +148,12 @@ export async function putEdgeLinkReport(agent, body = {}) {
      */
     note: capTrim(body?.note, 200), disabledOnCentral: body?.disabled === true,
     links: toSave.length + skipped, ok: toSave.length - failed, failed, skipped,
-    rejected, omitted,
+    rejected, omitted, notAssigned,
     dbOk: saved.ok !== false, dbError: saved.error || '',
   });
   return {
     ok: true, stored: toSave.length, events: saved.events || 0,
-    skipped, rejected, omitted,
+    skipped, rejected, omitted, ...(notAssigned ? { notAssigned } : {}),
     // ⚠ 엣지가 '중앙이 받았는가' 를 화면에 말할 수 있게 그대로 되돌려 준다(v2.548 H6).
     centralEnabled: true,
   };

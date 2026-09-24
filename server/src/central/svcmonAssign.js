@@ -23,6 +23,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { logAudit } from '../audit.js';
+import { capStr } from '../util/capStr.js';
 
 const FILE = () => path.join(config.configDir, 'central-svcmon-assign.json');
 
@@ -116,7 +117,7 @@ export function setAssignment(agent, scope = {}, targets = [], { user = '' } = {
     scope: {
       kind: scope.kind || '', path: scope.path || '',
       includeSub: scope.includeSub !== false, byAgent: scope.byAgent === true,
-      note: String(scope.note || '').slice(0, 200),
+      note: capStr(scope.note || '', 200),
     },
     exceptTypes,
     targets: list,
@@ -205,7 +206,7 @@ export function ackAssignment(agent, { sig, applied = {}, removed = 0, errors = 
   const tests = cnt(ap.newTests);
   const errorsInvalid = errors != null && !Array.isArray(errors);
   const errs = Array.isArray(errors)
-    ? errors.slice(0, 20).map((e) => (typeof e === 'string' ? e : (typeof e === 'number' || typeof e === 'boolean' ? String(e) : '(형식 오류)')).slice(0, 300))
+    ? errors.slice(0, 20).map((e) => (typeof e === 'string' || typeof e === 'number' || typeof e === 'boolean' ? capStr(e, 300) : '(형식 오류)')) // v2.607(TIM2607-01)
     : [];
   const want = a.counts || { targets: 0, tests: 0 };
   const exact = added === want.targets && tests === want.tests;

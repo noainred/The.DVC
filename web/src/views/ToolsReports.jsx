@@ -13,6 +13,8 @@ const fmtDate = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR', { dateStyle: 
 import { STable } from '../components/STable.jsx';
 import { dayStamp } from '../dayStamp.js';
 import { dailyReportFailNote } from './dailyReportText.js';
+import { alertChannelsBody } from './alertChannelsBody.js';
+import { unprotectedPatternNote } from './unprotectedPatternText.js';
 import { suggestCell, heldNote } from './rightsizeText.js';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`);
@@ -362,7 +364,7 @@ export function AlertChannels({ isAdmin }) {
   if (error && !data) return <ErrorBox message={error} />;
   const save = async () => {
     setMsg('저장 중…');
-    try { const r = await putJson('/admin/alerts', cfg); if (r && r.ok === false) throw new Error(r.reason || '저장 실패'); setMsg('저장됨'); } // v2.479: sendJson 은 400 을 throw 하지 않는다(웹 B-1)
+    try { const r = await putJson('/admin/alerts', alertChannelsBody(cfg)); if (r && r.ok === false) throw new Error(r.reason || '저장 실패'); setMsg('저장됨'); } // v2.479: sendJson 은 400 을 throw 하지 않는다(웹 B-1)
     catch (e) { setMsg(`실패: ${e.message}`); }
   };
   const test = async () => {
@@ -401,7 +403,7 @@ export function AlertChannels({ isAdmin }) {
             <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
               <span className="muted">중복 억제 창(분)</span>
               <input className="input" type="number" min="0" style={{ width: 80 }} value={cfg.suppressWindowMin ?? 5}
-                onChange={(e) => setCfg({ ...cfg, suppressWindowMin: Number(e.target.value) || 0 })} />
+                onChange={(e) => setCfg({ ...cfg, suppressWindowMin: e.target.value })} /* v2.607 WEB2607-04: 원문 유지, 전송 때 blankOr */ />
             </label>
             <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save}>저장</button>
             <button className="logout-btn" onClick={test}>테스트 발송</button>
@@ -618,6 +620,8 @@ export function UnprotectedVms({ scope }) {
             <span className="muted nowrap">백업 계정 패턴</span>
             <SearchBox className="input" style={{ flex: 1 }} placeholder={(data.config.patterns || []).join(', ')} value={patterns} onChange={setPatterns} />
           </label>
+          {/* v2.607 WEB2607-07: 상한을 넘어 버린 패턴 · 실제 판정에 쓴 패턴 */}
+          {unprotectedPatternNote(data.config) && <div style={{ flexBasis: '100%', fontSize: 12, color: 'var(--amber)' }}>⚠ {unprotectedPatternNote(data.config)}</div>}
           <button className="logout-btn" onClick={() => exportCsv('unprotected-vms', ['VM', 'vCenter', '클러스터', 'OS', '디스크GB'],
             (data.unprotected || []).map((r) => [r.name, r.vcenterId, r.cluster, r.guestOS, r.storageGB]))}>CSV</button>
         </div>

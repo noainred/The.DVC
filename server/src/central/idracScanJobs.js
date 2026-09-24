@@ -21,6 +21,7 @@ import { buildPendingRemedy, buildPushErrorRemedy } from './scanRemedy.js';
 // 두 벌로 두면 표기가 갈라져 '법인 간 눈으로 대조' 라는 이 기능의 목적이 깨진다.
 import { credFingerprint } from '../util/credFingerprint.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { capStr } from '../util/capStr.js';
 
 
 const jobs = new Map();    // reqId -> { reqId, agent, ips, username, password, state, createdAt, takenAt, result, doneAt, progress, events }
@@ -41,7 +42,7 @@ const agentPolls = new Map(); // agentLower -> 마지막 잡 인출 폴링 시�
  */
 export const AGENT_POLLS_MAX = 256;
 function notePoll(key) {
-  const k = String(key).slice(0, 128);
+  const k = capStr(key, 128); // v2.607(TIM2607-01)
   agentPolls.delete(k);
   agentPolls.set(k, Date.now());
   while (agentPolls.size > AGENT_POLLS_MAX) agentPolls.delete(agentPolls.keys().next().value);
@@ -59,7 +60,7 @@ const MAX_CLAIMS = 3;      // 재인출 한도(초과 시 오류 종결)
 /** 잡 이벤트 로그 한 줄 추가(로그창용 타임라인). level: info|warn|error */
 function addEvent(j, msg, level = 'info') {
   if (!j.events) j.events = [];
-  j.events.push({ ts: Date.now(), level, msg: String(msg).slice(0, 300) });
+  j.events.push({ ts: Date.now(), level, msg: capStr(msg, 300) }); // v2.607(TIM2607-01)
   if (j.events.length > MAX_EVENTS) j.events.splice(0, j.events.length - MAX_EVENTS);
 }
 
@@ -322,7 +323,8 @@ export function setIdracScanProgress(reqId, { scanned, total, found } = {}) {
  * (`IdracScanJobs.jsx` 의 `(j.result?.error || '').slice`)이 TypeError 로 죽거나 객체가 텍스트 자식으로 가 React #31 이 됐다.
  * 정제는 저장 함수 안에 둔다(라우트·push 경로 어느 쪽으로 와도 같다).
  */
-const scanStr = (v, n) => (typeof v === 'string' ? v.slice(0, n) : typeof v === 'number' && Number.isFinite(v) ? String(v) : null);
+const scanStr = (v, n) => (typeof v === 'string' ? capStr(v, n) : // v2.607(TIM2607-01)
+  typeof v === 'number' && Number.isFinite(v) ? String(v) : null);
 /** 음이 아닌 개수 — 못 읽으면 null(아래 기존 `?? `·`|| 0` 폴백이 그대로 동작한다). */
 const scanCnt = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? Math.floor(n) : null; };
 const scanIps = (v, max) => (Array.isArray(v) ? v.slice(0, max).map((x) => scanStr(x, 64)).filter(Boolean) : undefined);

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../api.js';
 import { Modal, Loading } from '../components/ui.jsx';
+import BoldText from '../components/boldText.jsx';
+import { releaseLineText } from './releaseNoteText.js';
 
 /** 버전 배지 클릭 시 열리는 릴리즈 노트(변경 이력) 모달. 관리자는 기록 추가 가능. */
 export default function ReleaseNotes({ isAdmin, onClose }) {
@@ -66,7 +68,7 @@ export default function ReleaseNotes({ isAdmin, onClose }) {
                   </span>
                 </div>
                 <ul style={{ margin: '6px 0 0', paddingLeft: 20, fontSize: 13, lineHeight: 1.7 }}>
-                  {(n.notes || []).map((line, i) => <li key={i}>{line}</li>)}
+                  {(n.notes || []).map((line, i) => <li key={i}><BoldText text={releaseLineText(line)} /></li>)}{/* v2.607 WEB2607-08 */}
                 </ul>
               </div>
             ))}

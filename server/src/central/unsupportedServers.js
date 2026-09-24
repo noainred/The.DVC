@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { capStr, capTrim } from '../util/capStr.js';
 
 const FILE = path.join(config.configDir, 'central-unsupported-servers.json');
 const MAX_PER_KEY = 200;   // 스캔 결과 상한과 동일(중앙 회신 본문 1MB 안)
@@ -45,15 +46,15 @@ function persist() {
 }
 
 const clean = (x) => ({
-  ip: String(x?.ip || '').trim(),
+  ip: capTrim(x?.ip || '', 64), // v2.607(TIM2607-01): 평탄화 + 길이 상한(예전엔 상한도 없었다)
   // v2.500(감사 L-5): 형제 필드는 모두 절단되는데 이 둘만 무제한이었다(엣지가 보고하는 값이다).
-  vendor: String(x?.vendor || 'unknown').slice(0, 60),
-  vendorLabel: String(x?.vendorLabel || '').slice(0, 60),
-  evidence: String(x?.evidence || '').slice(0, 200),
-  product: String(x?.product || '').slice(0, 120),
-  model: String(x?.model || '').slice(0, 120),
-  manufacturer: String(x?.manufacturer || '').slice(0, 120),
-  hostName: String(x?.hostName || '').slice(0, 120),
+  vendor: capStr(x?.vendor, 60) || 'unknown',
+  vendorLabel: capStr(x?.vendorLabel || '', 60),
+  evidence: capStr(x?.evidence || '', 200),
+  product: capStr(x?.product || '', 120),
+  model: capStr(x?.model || '', 120),
+  manufacturer: capStr(x?.manufacturer || '', 120),
+  hostName: capStr(x?.hostName || '', 120),
   authFailed: !!x?.authFailed,
   at: Number(x?.at) || Date.now(),
 });

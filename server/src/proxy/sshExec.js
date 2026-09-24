@@ -7,7 +7,6 @@
 import { Client as SSHClient } from 'ssh2';
 import { createRequire } from 'node:module';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
-import { withDeadline, deadlineMs } from '../util/deadline.js';
 // v2.605(감사 TIM2605-04 — 재현): 'Number(env) || 기본값' 은 음수·2^31 초과를 통과시켜 setTimeout 이 1ms 가 됐다 —
 //   SSH_EXEC_TIMEOUT_MS=3000000000 이면 모든 SSH 수집(스토리지·SAN·PDU·베어메탈)의 exec 가 2ms 만에 '타임아웃' 이었다.
 //   [1초, 30분] 에 가둔다(빈 값·0·비숫자는 기본값).
@@ -137,35 +136,28 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS) {
  * ⚠ 일반 명령에는 쓰지 말 것 — 정상 종료를 기다리지 않고 잘라내므로, 끝이 있는 명령에 쓰면
  *   출력이 중간에 끊긴 것을 성공으로 오인한다.
  */
-const CAPTURE_STDERR_MAX = 64 * 1024;
 function execCapture(conn, command, captureMs) {
   return new Promise((resolve, reject) => {
     conn.exec(command, { pty: false }, (err, stream) => {
       if (err) return reject(err);
-      let stdout = ''; let stderr = ''; let done = false; let stderrTruncated = false;
+      let stdout = ''; let stderr = ''; let done = false;
       const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); fn(arg); };
       const stop = () => {
         try { stream.close?.(); } catch { /* */ }
         try { stream.destroy?.(); } catch { /* */ }
-        finish(resolve, { command, code: null, stdout, stderr, captured: true, ...(stderrTruncated ? { stderrTruncated } : {}) });
+        finish(resolve, { command, code: null, stdout, stderr, captured: true });
       };
-      const timer = setTimeout(stop, deadlineMs(captureMs)); // v2.607 TIM2607-02: 단일 관문(2^31 초과·NaN → 1ms 방지)
+      const timer = setTimeout(stop, Math.max(1000, captureMs));
       timer.unref?.();
       stream.on('data', (d) => {
         stdout += d.toString();
         // 폭주 방어 — 갱신형 명령이 예상보다 빨리 그리면 메모리가 부풀 수 있다.
         if (stdout.length > 2_000_000) stop();
       });
-      // v2.607 SEC2607-04: stderr 도 상한 — 예전엔 stdout 만 2MB 에서 멈추고 stderr 는 캡처 시간 내내 무한히 쌓였다.
-      //   캡처 경로는 stdout 이 본체라 stderr 는 앞 64KB 만 남기고 나머지는 버린다(버린 사실은 stderrTruncated).
-      stream.stderr.on('data', (d) => {
-        if (stderr.length >= CAPTURE_STDERR_MAX) { stderrTruncated = true; return; }
-        stderr += d.toString();
-        if (stderr.length > CAPTURE_STDERR_MAX) { stderr = stderr.slice(0, CAPTURE_STDERR_MAX); stderrTruncated = true; }
-      });
+      stream.stderr.on('data', (d) => { stderr += d.toString(); });
       stream.on('error', (e) => finish(reject, e));
       stream.stderr.on('error', () => { /* 비치명 */ });
-      stream.on('close', (code) => finish(resolve, { command, code, stdout, stderr, captured: false, ...(stderrTruncated ? { stderrTruncated } : {}) }));
+      stream.on('close', (code) => finish(resolve, { command, code, stdout, stderr, captured: false }));
     });
   });
 }
@@ -449,13 +441,7 @@ export function execAnswered(conn, command, {
         answeredUpTo = stdout.length;
         try { stream.write(rule.answer); } catch { /* */ }
       });
-      // v2.607 SEC2607-04: stderr 도 stdout 과 **합산**해 EXEC_MAX_OUTPUT 을 본다(exec() 의 onChunk 와 같은 규칙).
-      //   예전엔 stdout 만 세어 장비가 stderr 로 흘리면 시한(최대 30분)까지 무한히 쌓였다(감사 재현 24MB).
-      stream.stderr.on('data', (d) => {
-        bytes += d.length;
-        if (bytes > EXEC_MAX_OUTPUT) { kill(); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(EXEC_MAX_OUTPUT / 1024)}KB) 초과: ${command}`)); }
-        stderr += d.toString();
-      });
+      stream.stderr.on('data', (d) => { stderr += d.toString(); });
       stream.on('error', (e) => finish(reject, e));
       stream.stderr.on('error', () => { /* 비치명 */ });
       stream.on('close', (code) => finish(resolve, out({ code })));
@@ -573,10 +559,13 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
 }
 
 /**
- * 장비당 타임아웃 헬퍼(v2.417) — 코어는 util/deadline.js 하나다(v2.607 TIM2607-02: 시한 단일 관문 [1초, 2시간],
- * NaN·0 이하는 기본값. 예전엔 여기서 `Math.max(1000, ms)` 하한만 있어 2^31 초과가 1ms 가 됐다). 재수출은
- * import + export 형태다(`export … from` 은 이 모듈 스코프에 이름을 만들지 않는다 — v2.575).
+ * 장비당 타임아웃 헬퍼(v2.417) — AbortController 로 signal 을 만들어 fn(signal) 을 돌리고, 기한이
+ * 지나면 abort 한다(withSsh 가 세션을 끊는다). 결과만 포기하는 Promise.race 대신 이걸 쓸 것.
  */
-export { withDeadline, deadlineMs };
-/** 테스트 전용 — 내보내지 않는 캡처 경로의 상한을 가짜 채널로 확인한다(v2.607 SEC2607-04). */
-export const _sshExecInternals = { execCapture };
+export async function withDeadline(ms, fn, label = '타임아웃') {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), Math.max(1000, ms)); // unref 하지 않는다 — 대기 중인 수집을 반드시 끊어야 한다
+  try { return await fn(ac.signal); }
+  catch (e) { if (ac.signal.aborted) throw new Error(`${label}(${Math.round(ms / 1000)}초)`); throw e; }
+  finally { clearTimeout(t); }
+}

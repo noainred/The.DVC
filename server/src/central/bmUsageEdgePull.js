@@ -18,6 +18,7 @@ import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02
 import { findCollector } from './edgeLogPull.js';
 import { strOf } from '../util/coercionTrap.js'; // v2.604 CEN2604-03: 엣지 본문의 글자 필드는 타입부터 좁힌다
 import { numOrNull } from '../util/numOrNull.js';
+import { capStr } from '../util/capStr.js';
 
 /** 이 엔드포인트를 내주기 시작한 최소 엣지 버전 — 그 아래는 경로가 없다. */
 export const MIN_EDGE_VERSION = '2.554.0';
@@ -67,7 +68,7 @@ const FIELD_MAX = 64;
 const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 function prim(v) {
-  if (typeof v === 'string') return v.slice(0, 512);
+  if (typeof v === 'string') return capStr(v, 512); // v2.607(TIM2607-01)
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v === 'boolean' || v === null) return v;
   return undefined;

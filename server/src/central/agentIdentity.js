@@ -9,6 +9,7 @@
  * 근거가 툴팁 한 줄뿐이라 어느 장비·어느 IP 인지 알 수 없었다. 충돌 기록에 **양쪽의 hostname·peer(출처 IP)·시각**과
  * 관측 횟수를 남겨 화면에서 상세로 펼칠 수 있게 한다.
  */
+import { capStr } from '../util/capStr.js';
 const agents = new Map();   // agentLower → { agent, hostname, peer, mock, at, seen, verified, conflict:{...} | null }
 const owners = new Map();   // vcenterId → { agent, peer, at, seen, conflict:{...} | null }
 const CONFLICT_WINDOW_MS = 30 * 60_000;
@@ -27,7 +28,7 @@ const envInt = (v, d) => { const n = v == null || v === '' ? NaN : Number(v); re
 const AGENTS_MAX = envInt(process.env.CENTRAL_AGENT_IDENTITY_MAX, 2_000);
 const UNVERIFIED_MAX = envInt(process.env.CENTRAL_AGENT_IDENTITY_UNVERIFIED_MAX, 64);
 const OWNERS_MAX = envInt(process.env.CENTRAL_VCENTER_OWNER_NOTE_MAX, 4_096);
-const txt = (v) => (typeof v === 'string' ? v : (typeof v === 'number' && Number.isFinite(v) ? String(v) : '')).slice(0, TXT_MAX);
+const txt = (v) => capStr(v, TXT_MAX); // v2.607(TIM2607-01): `.slice` 는 원문을 붙잡는다 — 평탄화(불리언은 글자로)
 let omitted = { agents: 0, unverifiedEvicted: 0, owners: 0 };
 
 function evictOldestUnverified() {

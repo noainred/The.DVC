@@ -132,7 +132,7 @@ export function saveEdgeStorageStatus(agent, status) {
   const rec = load().get(agent) || { at: 0, devices: [] };
   const registered = Number(src.registered);
   rec.status = {
-    reason: String(src.reason || 'unknown').slice(0, 64),
+    reason: capStr(src.reason, 64) || 'unknown', // v2.607(TIM2607-01)
     registered: Number.isFinite(registered) ? registered : null,
     at: Date.now(),
   };

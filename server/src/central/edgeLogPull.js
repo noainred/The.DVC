@@ -18,6 +18,7 @@ import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
 import { putEdgeLog } from './edgeLogStore.js';
+import { capStr } from '../util/capStr.js';
 
 /** 엣지 로그를 내주기 시작한 최소 버전 — 그 아래는 엔드포인트가 없다. */
 export const MIN_EDGE_VERSION = '2.549.0';
@@ -94,7 +95,8 @@ export async function pullEdgeLog(agent, { since = 0, level = '', limit = 0, wit
     return rec;
   }
   if (!body || body.ok === false || !body.node) {
-    const rec = { ok: false, kind: 'bad-body', reason: body?.reason ? String(body.reason).slice(0, 300) : '응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다).', ms };
+    const rec = { ok: false, kind: 'bad-body', reason: body?.reason ? (capStr(body.reason, 300) || '(형식 오류)') : // v2.607(TIM2607-01)
+      '응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다).', ms };
     putEdgeLog(col.name || agent, { via: 'pull', ok: false, error: rec.reason, ms });
     return rec;
   }
