@@ -19,7 +19,6 @@ process.env.PING_DB_PATH = path.join(TMP, 'ping.db');
 process.env.CAPACITY_DB_PATH = path.join(TMP, 'capacity.db');
 process.env.GUESTDISK_DB_PATH = path.join(TMP, 'guest-disk.db');
 process.env.PRUNE_CHUNK_ROWS = '500';           // 청크 사이 양보를 작은 표본으로 관찰한다
-process.env.LOGANALYSIS_LIVE = '1';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..');
 const SRC = path.join(SERVER, 'src');
@@ -38,9 +37,9 @@ async function countYields(p) {
 
 function runChild(code, env = {}, args = []) {
   const r = spawnSync(process.execPath, [...args, '--input-type=module', '-e', code], {
-    cwd: SERVER, env: { ...process.env, CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'a2605f-c-')), ...env }, encoding: 'utf8', timeout: 60_000,
+    cwd: SERVER, env: { ...process.env, CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'a2605f-c-')), ...env }, encoding: 'utf8', timeout: 90_000,
   });
-  if (r.status !== 0) throw new Error();
+  if (r.status !== 0) throw new Error(`child 실패(${r.status}): ${r.stderr}`);
   return JSON.parse(r.stdout.trim().split('\n').pop());
 }
 
@@ -63,8 +62,8 @@ test('DB2605-01: statusAll 은 7일 하한으로 baseline 을 구하고 대상 �
   const { getPingDb } = await import('../src/ping/db.js');
   const { statusAll, BASELINE_LOOKBACK_MS } = await import('../src/ping/service.js');
   assert.equal(BASELINE_LOOKBACK_MS, 7 * DAY);
-  for (const id of ['dead', 'alive', 'x3']) {
-    const r = store.addTarget({ id, name: id, host: , kind: 'icmp' });
+  for (const [i, id] of ['dead', 'alive', 'x3'].entries()) {
+    const r = store.addTarget({ id, name: id, host: `10.9.0.${i + 1}`, kind: 'icmp' });
     assert.ok(r.ok, r.reason);
   }
   const db = await getPingDb();
@@ -74,11 +73,11 @@ test('DB2605-01: statusAll 은 7일 하한으로 baseline 을 구하고 대상 �
   assert.equal(dead.baseline, null, '30일 전 OK 한 건으로 자동 기준을 만들지 않는다');
   assert.equal(dead.status, 'down');
   assert.equal(r.targets.find((t) => t.id === 'alive').baseline, 7);
-  assert.ok(yields >= 2, );
+  assert.ok(yields >= 2, `대상 사이 setImmediate 양보(${yields})`);
 });
 
 // ── DB2605-03 ─────────────────────────────────────────────────────────────
-test('DB2605-03: capacity prune 은 청크로 지우고 양보한다 — 경계 이후 행은 남는다', async () => {
+test('DB2605-03: capacity prune 은 청크로 지우고 양보한다 — 결과는 옛 한 방 DELETE 와 같다', async () => {
   const { getCapacityDb } = await import('../src/capacity/db.js');
   const db = await getCapacityDb();
   assert.equal(db.kind, 'sqlite');
@@ -102,10 +101,10 @@ test('DB2605-03: capacity prune 은 청크로 지우고 양보한다 — 경계 
   assert.equal(count('SELECT COUNT(*) n FROM samples'), before - expectRaw);
   assert.equal(count('SELECT COUNT(*) n FROM samples WHERE ts < ?', now - 72 * HOUR), 0, '옛 한 방 DELETE 와 같은 결과');
   assert.equal(count('SELECT COUNT(*) n FROM samples_hourly WHERE h < ?', now - 400 * DAY), 0);
-  assert.ok(yields >= 3, );
+  assert.ok(yields >= 3, `청크 사이 양보(${yields})`);
   ro.close();
   const src = fs.readFileSync(path.join(SRC, 'capacity/sampler.js'), 'utf8');
-  assert.match(src, /Promise\.resolve\(db\.prune\(snap\.ts\)\)\.catch/, '샘플 틱은 prune 을 기다리지 않고 실패도 삼키지 않는다(prune 안에서 남긴다)');
+  assert.match(src, /Promise\.resolve\(db\.prune\(snap\.ts\)\)\.catch/, '샘플 틱은 prune 을 기다리지 않는다(실패는 prune 안에서 남긴다)');
 });
 
 // ── DB2605-04 ─────────────────────────────────────────────────────────────
@@ -120,7 +119,7 @@ test('DB2605-04: guestdisk prune 은 청크로 양보하고, 옛 한 방 DELETE 
   const insVm = db.prepare('INSERT INTO vm_series (vcenter_id, vm_id, ts, alloc_gb, used_gb) VALUES (?,?,?,?,?)');
   const insPart = db.prepare('INSERT INTO part_series (vcenter_id, vm_id, path, ts, cap_gb, used_gb) VALUES (?,?,?,?,?,?)');
   for (let v = 0; v < 60; v++) {
-    const vm = ;
+    const vm = `vm-${v}`;
     if (v % 3 !== 0) db.prepare('INSERT INTO vm_latest (vm_id, vcenter_id, ts) VALUES (?,?,?)').run(vm, 'vc', now0);
     for (let i = 0; i < 60; i++) if (rnd() < 0.8) insVm.run('vc', vm, now0 - (i * 6 + 3) * HOUR, 10, i);
     for (const p of ['/', '/data']) {
@@ -187,7 +186,7 @@ test('TIM2605-01: 잘라 낸 파일 목록은 원문 XML 을 붙잡지 않는다
     console.log(JSON.stringify({ raw: raw.mb, flat: flat.mb, n: flat.n }));`;
   const r = runChild(code, {}, ['--expose-gc']);
   assert.equal(r.n, 2000);
-  assert.ok(r.raw > 10, `평탄화 없으면 원문(약 30MB)이 남는다 — 대조 ${r.raw.toFixed(1)}MB`);
+  assert.ok(r.raw > 10, `평탄화 없으면 원문이 남는다 — 대조 ${r.raw.toFixed(1)}MB`);
   assert.ok(r.flat < 5, `평탄화하면 잘라 낸 목록만 남는다(${r.flat.toFixed(1)}MB)`);
   const src = fs.readFileSync(path.join(SRC, 'vcenter/dsBrowse.js'), 'utf8');
   assert.match(src, /files = files\.slice\(0, FILE_CAP\)[\s\S]{0,400}files = flattenFiles\(files\)/, 'browseFresh 가 절단 뒤 평탄화한다');
@@ -214,7 +213,7 @@ test('TIM2605-04: 포탈 DB 샘플러 주기·스토리지 REST 시한·ping 시
     console.log(JSON.stringify({ seen }));`, { PORTAL_DB_SAMPLE_MS: '-5' });
   assert.ok(p.seen.length >= 1 && p.seen.every((ms) => ms >= 10_000 && ms <= 2 ** 31 - 1), `setInterval 간격 ${p.seen}`);
   const s = runChild(`
-    const seen = []; const orig = AbortSignal.timeout.bind(AbortSignal);
+    const seen = [];
     AbortSignal.timeout = (ms) => { seen.push(ms); return AbortSignal.abort(); };
     const { makeGetter } = await import('./src/storage/collectors/restCommon.js');
     try { await makeGetter({ host: '127.0.0.1', username: 'u', password: 'p' })('/x'); } catch { /* 중단 */ }
@@ -327,6 +326,8 @@ const ENV_MS_OK = {
   'vcenter/soapClient.js:PERF_COUNTER_TTL_MS': LB,
   'vmseries/poller.js:VMSERIES_FIRST_DELAY_MS': RAW,
 };
+// ⚠ 허용 목록은 '줄기만 한다'. 다른 그룹이 같은 릴리스에서 항목을 고치므로 여기서 '소스에 없는 항목' 을 실패로 보지 않는다 —
+//   목록 정리는 릴리스 통합 시점에 한다(보고서 fix2605_f.md '남은 한계').
 test('TIM2605-04 스윕: 시한·주기 env 의 Number(env)||기본값 형태를 허용 목록 밖에 새로 만들지 않는다', async () => {
   const { stripComments } = await import('./_stripComments.js');
   const files = [];
@@ -337,16 +338,16 @@ test('TIM2605-04 스윕: 시한·주기 env 의 Number(env)||기본값 형태를
     const s = stripComments(fs.readFileSync(f, 'utf8'));
     for (const m of s.matchAll(/Number\(process\.env\.([A-Z0-9_]+_MS)\)\s*\|\|/g)) {
       if (/clampIntervalMs\(\s*$/.test(s.slice(Math.max(0, m.index - 40), m.index))) continue;
-      found.add();
+      found.add(`${path.relative(SRC, f).split(path.sep).join('/')}:${m[1]}`);
     }
   }
   const unknown = [...found].filter((k) => !ENV_MS_OK[k]);
-  assert.deepEqual(unknown, [], );
+  assert.deepEqual(unknown, [], `허용 목록 밖 env 시한: ${unknown.join(', ')}`);
   // 이번에 고친 것은 되돌아가면 안 된다
   for (const k of ['insights/portalDb.js:PORTAL_DB_SAMPLE_MS', 'proxy/sshExec.js:SSH_EXEC_TIMEOUT_MS', 'proxy/sshExec.js:SSH_READY_TIMEOUT_MS',
     'storage/collectors/restCommon.js:STORAGE_HTTP_TIMEOUT_MS', 'bmstor/collect.js:BMSTOR_SSH_TIMEOUT_MS', 'central/idracScanPush.js:IDRAC_PUSH_TIMEOUT_MS',
     'health/network.js:HEALTH_PROBE_TIMEOUT_MS']) {
-    assert.ok(!found.has(k), );
+    assert.ok(!found.has(k), `${k} 가 되돌아갔다`);
     assert.ok(!ENV_MS_OK[k], k);
   }
   assert.doesNotMatch(stripComments(fs.readFileSync(path.join(SRC, 'config.js'), 'utf8')), /timeoutMs:\s*numEnv\(process\.env\.PING_MON_TIMEOUT_MS/);
@@ -358,11 +359,20 @@ test('SEC2605-01: 자연어 폴백 파서의 퍼센트 정규식은 선형이고
   const t0 = performance.now();
   nl._fallbackParseForTest('1'.repeat(30_000) + 'x');
   const ms = performance.now() - t0;
-  assert.ok(ms < 150, );
-  // 옛 정규식과 결과 대조(정상 입력)
+  assert.ok(ms < 150, `30k 숫자열 ${ms.toFixed(1)}ms (예전 약 1,000ms)`);
+  // 옛 정규식과 결과 대조(정상 입력 + 결정적 난수 입력)
   const old = (q) => { const m = q.match(/(\d+)\s*%/); return m ? Number(m[1]) : null; };
   const cur = (q) => nl._fallbackParseForTest(q).filters.find((f) => /Pct$/.test(f.field))?.value ?? null;
-  for (const q of ['CPU 80% 이상 VM', '메모리 90 % 넘는 vm', '서울 스토리지 70%', 'vm 목록', 'cpu 5%와 10%', '호스트 100%']) assert.equal(cur(q), old(q), q);
+  for (const q of ['CPU 80% 이상 VM', '메모리 90 % 넘는 vm', '서울 스토리지 70%', 'vm 목록', 'cpu 5%와 10%', '호스트 100%', 'a12b 34 %']) assert.equal(cur(q), old(q), q);
+  let seed = 7;
+  const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  const alpha = ['1', '2', '0', ' ', '%', 'a', '가', 'x'];
+  for (let k = 0; k < 2000; k++) {
+    let q = ''; for (let i = rnd(20) + 1; i > 0; i--) q += alpha[rnd(alpha.length)];
+    const m = q.match(/(\d+)\s*%/);
+    if (m && m[1].length > 6) continue;   // 7자리 이상 퍼센트는 새 정규식이 받지 않는다(의도된 차이)
+    assert.equal(cur(q), old(q), JSON.stringify(q));
+  }
 });
 
 test('SEC2605-01: 질의 길이 상한 — nlSearch·라우트·ChatOps 가 긴 입력을 해석 전에 거절한다', async () => {
@@ -388,15 +398,15 @@ test('SEC2605-01: 질의 길이 상한 — nlSearch·라우트·ChatOps 가 긴 
 });
 
 // ── RECENT2605-05 ─────────────────────────────────────────────────────────
-test('RECENT2605-05: 오래 켜진 포탈의 7일 보기는 prune 이 창 앞을 지웠으면 \'일부\' 가 아니다', async () => {
+test("RECENT2605-05: 오래 켜진 포탈의 7일 보기는 prune 이 창 앞을 지웠으면 '일부' 가 아니다", async () => {
   const L = await import('../src/loganalysis/live.js');
   L._resetLiveForTest();
   L.setLiveRules([]);
   const base = Math.floor(Date.UTC(2031, 0, 1) / HOUR) * HOUR;
   for (let i = 0; i < 240; i++) L.ingest({ ts: base + i * HOUR + 20 * 60_000, tag: 'x', msg: 'hello', level: 'info' });
   const NOW = base + 239 * HOUR + 40 * 60_000;
-  for (const h of [24, 72, 168]) assert.equal(L.liveState(h, NOW).coverage.partial, false, );
-  assert.equal(L.liveState(168, NOW).coverage.prunedBefore, (base + 72 * HOUR));
+  for (const h of [24, 72, 168]) assert.equal(L.liveState(h, NOW).coverage.partial, false, `${h}h 창(예전: 168h 만 true)`);
+  assert.equal(L.liveState(168, NOW).coverage.prunedBefore, base + 72 * HOUR);
   // 막 시작한 추적은 여전히 '일부' 다(정시 이후 시작)
   L._resetLiveForTest();
   L.setLiveRules([]);

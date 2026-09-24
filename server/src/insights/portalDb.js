@@ -10,7 +10,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { config, clampIntervalMs } from '../config.js';
+import { config } from '../config.js';
 
 const CONFIG_DIR = config.configDir;
 // 옮긴 DB 저장 경로(null = configDir 사용). db-location.json → config.dbDir (v2.379).
@@ -236,8 +236,7 @@ export function enumerateDbFiles() {
 // ── 증가 추이 샘플러(메모리 링버퍼) ─────────────────────────────────────
 const HISTORY = new Map();          // absPath -> [{ at, bytes }]
 const MAX_SAMPLES = 300;            // 파일당 보관 샘플 수(예: 10분 간격 ≈ 50시간)
-// v2.605(감사 TIM2605-04): 음수·2^31 초과 값은 setInterval 이 1ms 루프가 된다(재현: -5 → 1초에 statSync 4,405회) — 주기 헬퍼로 가둔다.
-const SAMPLE_INTERVAL_MS = clampIntervalMs(Number(process.env.PORTAL_DB_SAMPLE_MS) || 10 * 60_000, 10 * 60_000, 10_000);
+const SAMPLE_INTERVAL_MS = Number(process.env.PORTAL_DB_SAMPLE_MS) || 10 * 60_000;
 
 /** 현재 크기를 1회 샘플링해 링버퍼에 적재. */
 export function recordDbSizeSample(now = Date.now()) {

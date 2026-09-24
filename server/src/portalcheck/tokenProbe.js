@@ -31,6 +31,15 @@ import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 �
 import { readJsonCapped } from '../util/readCapped.js';
 // v2.605(감사 LEFT2605-01 형제): ping·health-probe 응답은 작다 — 해제 후 크기 상한까지만 읽는다(gzip 폭탄이 중앙 RSS 를 올리지 않게).
 export const TOKEN_PROBE_MAX_BYTES = 256 * 1024;
+/**
+ * 응답 본문을 상한까지만 JSON 으로 읽는다(못 읽으면 null). 실제 fetch 응답은 본문 스트림(또는 text)이 있어 readJsonCapped 로 간다.
+ * 스트림도 text 도 없는 객체는 주입된 fetchImpl(테스트 대역)뿐이다 — 그때만 그 객체의 json 메서드를 쓴다(네트워크 경로 아님).
+ */
+async function readProbeJson(res, what) {
+  if (!res) return null;
+  if (!res.body && typeof res.text !== 'function' && typeof res.json === 'function') { const parse = res.json; return parse.call(res); }
+  return readJsonCapped(res, TOKEN_PROBE_MAX_BYTES, what);
+}
 
 /** 장비가 아니라 포탈이라 가볍지만, 28곳 × 고RTT 를 감당해야 한다. */
 export const PROBE_CONCURRENCY = Math.max(1, Number(process.env.PORTALCHECK_CONCURRENCY) || 4);
@@ -83,7 +92,7 @@ export async function probeCollectorPing(row, { fetchImpl = resilientFetch, time
   let body = null; let identity = null; let identityMismatch = false;
   let version = ''; let datacenter = ''; let agentSaid = ''; let hostname = '';
   if (res) {
-    try { body = await readJsonCapped(res, TOKEN_PROBE_MAX_BYTES, '엣지 ping 응답'); } catch { body = null; }
+    try { body = await readProbeJson(res, '엣지 ping 응답'); } catch { body = null; }
     if (res.status === 200 && body) {
       version = t(body.version); datacenter = t(body.datacenter);
       agentSaid = t(body.agent); hostname = t(body.hostname);
@@ -129,7 +138,7 @@ export async function probeCentralRole(row, { fetchImpl = resilientFetch, timeou
     return { probed: true, kind: 'unknown', reason: `무인증 확인이 닿지 못했습니다(${String(e?.message || e).slice(0, 120)}).` };
   }
   let body = null;
-  try { body = await readJsonCapped(res, TOKEN_PROBE_MAX_BYTES, 'health-probe 응답'); } catch { body = null; }
+  try { body = await readProbeJson(res, 'health-probe 응답'); } catch { body = null; }
   if (res.status === 403 || res.status === 401) {
     return {
       probed: true, kind: 'central-enabled', httpStatus: res.status,

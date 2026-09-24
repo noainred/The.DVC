@@ -312,3 +312,14 @@ describe('v2.604 반올림 표기 용량(COL-2604-01 후속)', () => {
     expect(t).not.toMatch(/`/);
   });
 });
+
+describe('v2.605 RECENT2605-03 — 정확/반올림 혼재(mixed) 장비 각주', () => {
+  it('mixed 장비 수를 따로 말하고, 없으면 예전 문구 그대로', () => {
+    const plain = approxFootnote([{ capacityApprox: { resolutionBytes: 1 } }]);
+    expect(plain).not.toMatch(/섞여/);
+    const t = approxFootnote([{ capacityApprox: { resolutionBytes: 1 } }, { capacityApprox: { resolutionBytes: 1, mixed: true } }]);
+    expect(t).toMatch(/2대/);
+    expect(t).toMatch(/그중 1대는 최신 값은 정확하지만 반올림 주기가 섞여/);
+    expect(t).not.toMatch(/`/);
+  });
+});

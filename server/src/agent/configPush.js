@@ -31,13 +31,15 @@ let _busy = null;
 let _again = false;
 let _lastDeferredAt = null;
 export async function pushConfigNow(...args) {
-  if (_busy) { _again = true; _lastDeferredAt = Date.now(); return _busy; }
+  if (running) { _again = true; _lastDeferredAt = Date.now(); return _busy; }
   running = true;
   _busy = (async () => {
-    let r = await _pushConfigNow(...args);
-    while (_again) { _again = false; r = await _pushConfigNow({ onlyIfChanged: true }); }
-    return r;
-  })().finally(() => { _busy = null; running = false; });
+    try {
+      let r = await _pushConfigNow(...args);
+      while (_again) { _again = false; r = await _pushConfigNow({ onlyIfChanged: true }); }
+      return r;
+    } finally { running = false; }
+  })();
   return _busy;
 }
 
