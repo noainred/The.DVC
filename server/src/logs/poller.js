@@ -111,8 +111,11 @@ export async function pollLogsOnce({ manual = false } = {}) {
     // 기동 30초 뒤 첫 폴이 수백만 행 삭제 + VACUUM 을 동기로 돈다). 전위 증가로 바꾼다.
     if ((++tick % PRUNE_EVERY) === 0) {
       if (s.retentionDays > 0) {
-        const removed = db.prune(Date.now() - s.retentionDays * DAY);
-        if (removed) console.log(`[vclogs] 보관기간(${s.retentionDays}일) 초과 ${removed}건 정리`);
+        // v2.601(감사 DB2601-03): 한 방 DELETE(183만 행 4.8초 정지)가 아니라 청크 + 양보로 지우고, 보고 건수는 실제 전체다.
+        //   상한(PRUNE_MAX_ROWS)에 걸리면 남은 분은 다음 prune 주기가 잇는다 — 그 사실을 로그에 적는다.
+        const before = Date.now() - s.retentionDays * DAY;
+        const r = typeof db.pruneAsync === 'function' ? await db.pruneAsync(before) : { deleted: db.prune(before), done: true };
+        if (r.deleted) console.log(`[vclogs] 보관기간(${s.retentionDays}일) 초과 ${r.deleted}건 정리${r.done === false ? ' — 상한에 걸려 다음 주기에 계속' : ''}`);
       }
       // 용량 제한: DB가 maxSizeMB를 넘으면 오래된 것부터 삭제. VACUUM(전체 재작성, 동기)은
       // 삭제 루프 '밖'에서 1회만 — 루프 안에서 매 회 VACUUM하면 이벤트 루프가 초~분 단위로 멈춘다.
@@ -127,7 +130,16 @@ export async function pollLogsOnce({ manual = false } = {}) {
         let cnt = typeof db.rowCount === 'function' ? db.rowCount() : db.meta().count;
         while (size > limit && guard++ < 50) {
           if (cnt <= 0) break;
-          const n = db.pruneOldest(Math.max(500, Math.floor(cnt * 0.1)));
+          // v2.601(DB2601-03): 한 단계(행 수의 10%)를 청크(pruneOldest 가 PRUNE_CHUNK_ROWS 로 묶는다)로 나눠 지우고
+          //   청크마다 이벤트 루프에 양보한다 — 예전에는 10% 를 한 문장으로 최대 50회 연달아 동기로 지웠다.
+          const want = Math.max(500, Math.floor(cnt * 0.1));
+          let n = 0;
+          while (n < want) {
+            const k = db.pruneOldest(want - n);
+            if (!k) break;
+            n += k;
+            await new Promise((res) => setImmediate(res));
+          }
           if (!n) break;
           dropped += n; cnt -= n; size -= n * 220; // 행당 대략치로 추정(매 회 statSync/ VACUUM 회피)
         }
