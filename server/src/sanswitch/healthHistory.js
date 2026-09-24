@@ -238,5 +238,5 @@ export async function listHistoryDevices() {
 
 export function _resetForTest() {
   try { x?.db?.close?.(); } catch { /* */ }
-  x = null; ready = null; initError = null;
+  x = null; ready = null; initError = null; _lock.ok();
 }

@@ -7,7 +7,28 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
+import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter, isPlainObj } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
+import { capStr } from '../util/capStr.js';
+
+/**
+ * v2.606(감사 CEN2606-04 — 재현): `extra.appliances` 를 객체 배열(상한 8 — 수집기와 같은 값)로 좁히고 원소 필드를 글자로.
+ *   예전에는 그대로 저장돼 `appliances:'x'`·`[null]` 하나가 SAN '스토리지 용량 요약' 전체를 500 으로 만들었다.
+ *   제자리에서 고치지 않고 새 객체를 돌려준다. 좁힌 개수를 돌려준다.
+ */
+export const APPLIANCES_MAX = 8;
+export function narrowStorageSnapshot(d) {
+  if (!isPlainObj(d) || !Object.hasOwn(d, 'extra') || d.extra == null) return { snap: d, narrowed: 0 };
+  if (!isPlainObj(d.extra)) return { snap: { ...d, extra: null }, narrowed: 1 };
+  if (!Object.hasOwn(d.extra, 'appliances') || d.extra.appliances == null) return { snap: d, narrowed: 0 };
+  const raw = Array.isArray(d.extra.appliances) ? d.extra.appliances : null;
+  let narrowed = raw ? 0 : 1;
+  const apps = [];
+  for (const a of raw || []) {
+    if (!isPlainObj(a) || apps.length >= APPLIANCES_MAX) { narrowed += 1; continue; }
+    apps.push({ name: capStr(a.name, 128), model: capStr(a.model, 128), serviceTag: capStr(a.serviceTag, 64) });
+  }
+  return { snap: { ...d, extra: { ...d.extra, appliances: apps } }, narrowed };
+}
 import { recordActivity } from '../storage/activityLog.js';
 import { saveCapacityPoint } from '../storage/db.js';
 import { ackCollect, setCollectBaseResolver } from '../storage/collectRequests.js';
@@ -26,6 +47,8 @@ function load() {
   if (_map) return _map;
   try { _map = new Map(Object.entries(JSON.parse(fs.readFileSync(FILE, 'utf8')))); }
   catch { _map = new Map(); } // 캐시 성격 — 다음 push 가 재구축
+  // v2.606(CEN2606-04): 수정 전에 저장된 원소도 같은 정제를 거친다.
+  for (const [k, v] of _map) if (isPlainObj(v) && Array.isArray(v.devices)) _map.set(k, { ...v, devices: v.devices.map((x) => narrowStorageSnapshot(x).snap) });
   return _map;
 }
 
@@ -46,7 +69,9 @@ export function saveEdgeStorage(agent, devices, info = {}) {
   const adm = admitAgent(load(), agent);
   if (!adm.ok) { info.refused = true; console.warn(`[central] storage-data: 엣지 수 상한 — 새 이름 '${String(agent).slice(0, 64)}' 거절(최근 보고한 엣지를 밀어내지 않는다)`); return 0; }
   if (adm.evicted) { info.evicted = adm.evicted; console.warn(`[central] storage-data: 엣지 수 상한 — 오래 조용한 '${adm.evicted}' 보관분을 내렸다`); }
-  const list = clean.map((d) => ({ ...d, agent })); // 표시용 출처 각인(엣지가 뭐라 보냈든 인증된 agent 로 덮음)
+  let narrowed = 0;
+  const list = clean.map((d0) => { const { snap: d, narrowed: n } = narrowStorageSnapshot(d0); narrowed += n; return { ...d, agent }; }); // 표시용 출처 각인(엣지가 뭐라 보냈든 인증된 agent 로 덮음)
+  if (narrowed) info.narrowed = narrowed;
   const prev = load().get(agent);
   load().set(agent, { at: Date.now(), devices: list, ...(prev?.status ? { status: prev.status } : {}) });
   writer.save();
@@ -74,8 +99,19 @@ export function saveEdgeStorage(agent, devices, info = {}) {
       });
     } catch { /* 로그 실패가 push 수신을 막지 않게 */ }
   }
+  // v2.606(감사 TIM2606-05): 중복 제거 Map 은 **보관 중인 장비 id 만** 남긴다 — 예전에는 set 만 하고 지우지 않아 매 push 새
+  //   deviceId 를 보내는 엣지(재등록 반복·오동작·공유 토큰)가 프로세스 수명 내내 키를 쌓았다. 빠진 장비의 키만 지우므로
+  //   dedup 계약(같은 collectedAt 재push 는 기록하지 않는다)은 그대로다.
+  pruneLastRec();
   return list.length;
 }
+function pruneLastRec() {
+  const live = new Set();
+  for (const v of load().values()) for (const d of v?.devices || []) { const k = d?.deviceId || d?.id; if (k) live.add(k); }
+  for (const k of _lastRec.keys()) if (!live.has(k)) _lastRec.delete(k);
+}
+/** 테스트·진단용 — 중복 제거 Map 크기. */
+export function _lastRecSize() { return _lastRec.size; }
 
 /**
  * v2.581(BUG-D): 엣지의 상태 전용 보고 — 장비 목록(`devices`·`at`)은 그대로 두고 `status` 만 기록한다.

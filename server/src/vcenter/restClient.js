@@ -232,12 +232,20 @@ async function collectFromVCenterRest(vc, { signal = null } = {}) {
       client.listClusters().catch(() => []),
     ]);
 
-    const clusterName = (ref) =>
-      clusters.find((c) => c.cluster === ref)?.name || ref || 'standalone';
+    // v2.606 COL2606-05: REST 목록(Summary)에는 호스트의 cluster·VM 의 host·경보가 **없다**. 예전에는 그 빈자리를
+    //   'standalone'·vmCount 0·경보 0 이라는 **확정값**으로 채워 '클러스터 없음 · 호스트당 VM 0 · 경보 0' 이 정상
+    //   수집처럼 보였다. 모르는 것은 null 로 두고, 스냅샷 vcenter 에 저품질 폴백 표지(collectSource·restUnknown)를 싣는다.
+    //   ⚠ 표지 이름을 collectMode 로 쓰지 말 것 — 등록부의 direct|site 필드와 이름이 겹친다.
+    const clusterName = (ref) => (ref ? (clusters.find((c) => c.cluster === ref)?.name || ref) : null);
+    const vmHostKnown = vms.some((m) => m.host);
     const vmCountByHost = vms.reduce((acc, m) => {
       if (m.host) acc[m.host] = (acc[m.host] || 0) + 1;
       return acc;
     }, {});
+    const restUnknown = [];
+    if (hosts.some((h) => !h.cluster)) restUnknown.push('cluster');
+    if (!vmHostKnown) restUnknown.push('vmPlacement');
+    restUnknown.push('alarms');
 
     return {
       vcenter: {
@@ -246,6 +254,9 @@ async function collectFromVCenterRest(vc, { signal = null } = {}) {
         location: vc.location,
         status: 'connected',
         version: vc.version || 'unknown',
+        collectSource: 'rest',            // SOAP 대신 REST 목록 API 로 받은 저품질 스냅샷
+        restUnknown,                      // 이 수집에서 모르는 필드(화면이 '미수집' 으로 말한다)
+        alarmsUnknown: true,              // 경보는 조회하지 않았다 — alarms:[] 는 '경보 0건' 이 아니다
       },
       hosts: hosts.map((h) => ({
         id: `${vc.id}:${h.host}`,
@@ -254,7 +265,7 @@ async function collectFromVCenterRest(vc, { signal = null } = {}) {
         cluster: clusterName(h.cluster),
         connectionState: (h.connection_state || '').toUpperCase() || 'CONNECTED',
         powerState: h.power_state,
-        vmCount: vmCountByHost[h.host] || 0,
+        vmCount: vmHostKnown ? (vmCountByHost[h.host] || 0) : null,
       })),
       vms: vms.map((m) => ({
         id: `${vc.id}:${m.vm}`,

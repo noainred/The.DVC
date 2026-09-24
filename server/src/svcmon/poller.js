@@ -58,6 +58,26 @@ let timer = null;
 export function getResults() { return results; }
 
 /**
+ * v2.606 EDGE2606-02: 재시작 직후 '예열' 판정. results 는 인메모리라 재시작하면 비고, 첫 sweep 은 배치 전체가 끝나야 반영된다 —
+ * 그 사이 push 는 '행 0(또는 일부)' 완결 스냅샷이 되어 중앙이 재시작 전 행·메타를 GC 했다. 전 항목이 한 번 결과를 가질 때까지
+ * (또는 WARM_MAX_MS 까지 — 굶는 항목이 있어도 영원히 예열이 아니게) 엣지는 `warmingUp` 을 싣고 중앙은 그 완결의 GC 를 건너뛴다.
+ */
+export const WARM_MAX_MS = Math.max(60_000, envNum('SVCMON_WARM_MAX_MS', 15 * 60_000));
+let pollerStartedAt = Date.now();
+let covered = false;
+/** 순수 판정 — 테스트가 고정. */
+export function warmingUpOf({ covered: cov, items, reported, startedAt, now, maxMs = WARM_MAX_MS }) {
+  if (cov) return false;
+  if (!(items > 0)) return false;
+  if (reported >= items) return false;
+  return now - startedAt < maxMs;
+}
+/** 테스트 전용 — 실행 인덱스·결과·기동 시각 주입. */
+export function _setPollerStateForTest({ items = [], res = [], startedAt = Date.now(), isCovered = false } = {}) {
+  index = items; results.clear(); for (const [k, v] of res) results.set(k, v); pollerStartedAt = startedAt; covered = isCovered;
+}
+
+/**
  * 엣지 push 용 스냅샷 — 실행 인덱스 전량을 **구간값**으로 직렬화한다.
  *
  * 절대 시각을 싣지 않는 이유: 엣지 시계가 틀리면 중앙 판정이 통째로 흔들린다. 중앙은
@@ -89,7 +109,9 @@ export function snapshotResults({ withMeta = false, replyMax = 120 } = {}) {
       meta.push({ i: test.id, p: target.path, n: target.name, h: target.host, t: test.name, y: test.type, iv: test.intervalSec });
     }
   }
-  return { rows, items: index.length, reported: rows.length, metaSig: `r${indexRev}-${index.length}`, meta };
+  if (!covered && index.length && rows.length >= index.length) covered = true; // 한 번 전 항목을 덮으면 이후로는 예열이 아니다
+  const warmingUp = warmingUpOf({ covered, items: index.length, reported: rows.length, startedAt: pollerStartedAt, now: at });
+  return { rows, items: index.length, reported: rows.length, metaSig: `r${indexRev}-${index.length}`, meta, warmingUp };
 }
 export function getLastSweep() { return lastSweepTs; }
 export function pollerStats() {
@@ -210,6 +232,7 @@ export function startSvcmonPoller() {
       + '(정의를 엣지에 배포하고 결과만 수신합니다).');
     return;
   }
+  pollerStartedAt = Date.now(); covered = false; // v2.606 EDGE2606-02: 예열 기준 시각
   sweep().catch(() => {});
   timer = setInterval(() => { sweep().catch(() => {}); }, TICK_MS);
   timer.unref?.();

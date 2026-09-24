@@ -169,6 +169,8 @@ export async function pushSvcmonNow() {
           expectMs: INTERVAL_MS,
           items: snap.items,
           reported: snap.reported,
+          // v2.606 EDGE2606-02: 재시작 직후 첫 sweep 이 전 항목을 덮기 전 — 중앙이 이 완결로 재시작 전 행·메타를 GC 하지 않게.
+          ...(snap.warmingUp ? { warmingUp: true } : {}),
           poller: {
             tickMs: p.tickMs, maxPerTick: p.maxPerTick, lastSweepMs: p.lastSweepMs,
             lastCount: p.lastCount, overdueSkipped: p.overdueSkipped, maxLagMs: p.maxLagMs,
@@ -215,7 +217,7 @@ export async function pushSvcmonNow() {
     last = {
       at: Date.now(), ms: Date.now() - startedAt, snapId, chunks: chunks.length,
       rows: snap.rows.length, items: snap.items, accepted, dropped, bytes, wire,
-      gzip: PUSH_GZIP, chunkRows, errors, metaSig: sentMetaSig,
+      gzip: PUSH_GZIP, chunkRows, errors, metaSig: sentMetaSig, ...(snap.warmingUp ? { warmingUp: true } : {}),
     };
     if (errors.length) console.warn(`[svcmon-push] 일부 실패: ${errors.join(' · ')}`);
     return { ok: errors.length === 0, ...last };

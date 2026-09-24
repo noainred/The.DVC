@@ -72,6 +72,7 @@ export default function GuestDiskReport({ scope = '' }) {
   const [page, setPage] = useState(0);              // 0-based
   const [detailVm, setDetailVm] = useState(null);   // { id, name } — 추이 상세 팝업 대상
   const [form, setForm] = useState(null);
+  const reqGen = useRef(0);   // v2.606 WEB2606-07: 마지막 reload 세대
 
   const reload = useCallback(async (mrStr = minReclaimStr, ratioStr = maxRatioStr, fStr = factorStr) => {
     setError(null);
@@ -80,11 +81,15 @@ export default function GuestDiskReport({ scope = '' }) {
     if (ratioStr !== '' && Number.isFinite(Number(ratioStr))) params.maxRatioPct = Number(ratioStr);
     if (fStr !== '' && Number.isFinite(Number(fStr)) && Number(fStr) > 0 && Number(fStr) !== 1) params.usageFactor = Number(fStr);
     if (scopeRef.current) params.vcenterId = scopeRef.current;
+    // v2.606(감사 WEB2606-07): 세대 ref — vCenter·필터를 바꿔 reload 가 겹치면 **마지막 요청의 응답만** 반영한다.
+    // 느린 '전체' 응답이 뒤에 오면 선택은 vCenter X 인데 표는 전 법인이 됐다(v2.596 WS 규약의 누락).
+    const gen = ++reqGen.current;
     try {
       const r = await fetchJson('/tools/guest-disk', params);
+      if (gen !== reqGen.current) return;
       setData(r);
       setForm({ enabled: !!r.settings?.enabled, intervalHours: r.settings?.intervalHours ?? 12 });
-    } catch (e) { setError(e.message); }
+    } catch (e) { if (gen === reqGen.current) setError(e.message); }
   }, [minReclaimStr, maxRatioStr, factorStr]);
 
   useEffect(() => { fetchJson('/auth/me').then((m) => setIsAdmin(m?.user?.role === 'admin')).catch(() => {}); }, []);

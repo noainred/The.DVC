@@ -25,10 +25,16 @@ export const GPU_GUEST_PUSH_WITHHOLD_MAX_MS = Math.max(60_000, Number(process.en
 let _withholdSince = null;
 let _pollerStatus = () => gpuGuestStatus();
 /** 첫 폴 전 보류 판정(순수). 반환 { withhold, since } */
+/*
+ * v2.606(EDGE2606-01): '첫 폴이 끝났다' 만으로는 부족했다 — 인벤토리 첫 수집 전(빈 스냅샷)·인증 정지·로그인 실패로 돈 폴도
+ * lastRun 을 찍어 빈 목록이 나갔다. 이제 **모든 대상 vCenter 를 읽은 폴**(lastRun.unreadVcenters 가 비어 있음)에만
+ * 통과하고, 못 읽은 vCenter 가 남으면 같은 시한(maxMs) 동안 보류한다(보류에는 시한 — v2.601). 반환 reason 은 보류 사유.
+ */
 export function gpuGuestPushWithhold(lastRun, since, now, maxMs = GPU_GUEST_PUSH_WITHHOLD_MAX_MS) {
-  if (lastRun) return { withhold: false, since: null };
+  const unread = lastRun && Array.isArray(lastRun.unreadVcenters) ? lastRun.unreadVcenters.length : 0;
+  if (lastRun && !unread) return { withhold: false, since: null };
   const s = since || now;
-  return { withhold: now - s <= maxMs, since: s };
+  return { withhold: now - s <= maxMs, since: s, reason: lastRun ? 'unread-vcenters' : 'first-poll', unread };
 }
 /** 테스트 전용 — 게스트 폴러 상태 주입/복원. */
 export function _setGuestPollerStatusForTest(fn) { _pollerStatus = fn || (() => gpuGuestStatus()); _withholdSince = null; }

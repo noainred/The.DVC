@@ -57,6 +57,23 @@ export const HEARTBEAT_MAX_INSTANCES = Math.max(2, Number(process.env.RMA_MAX_IN
 export const HEARTBEAT_PURGE_MS = Math.max(HEARTBEAT_STALE_MS * 2, Number(process.env.RMA_HEARTBEAT_PURGE_MS) || 7 * 86_400_000);
 let _hbSweptAt = 0;
 const _hbRefuseLogAt = new Map();
+/**
+ * v2.606(감사 RECENT2606-06): 상한으로 거절한 인스턴스 — 법인(소문자) → { count, lastAt, byInstance: Map(instance → lastAt) }.
+ *   예전에는 콘솔 1분 1줄뿐이라 설정 화면이 '거절된 인스턴스가 있다' 를 말하지 못했다. 인스턴스 이름은 법인당
+ *   REFUSED_TRACK_MAX 개까지만 기억한다(이름을 바꿔 가며 보내도 메모리가 자라지 않게 — 법인 수는 개별 토큰 수로 유계).
+ */
+const _hbRefused = new Map();
+const REFUSED_TRACK_MAX = 64;
+export const HEARTBEAT_REFUSED_REASON = `이 법인의 RMA 인스턴스 수 상한(${HEARTBEAT_MAX_INSTANCES}, RMA_MAX_INSTANCES_PER_AGENT)에 닿아 이 인스턴스를 받지 않았습니다 — 작업이 배달되지 않습니다. 쓰지 않는 인스턴스를 정리하거나(오프라인 90초 뒤 자리가 납니다) 상한을 올리세요.`;
+function noteRefused(agent, inst, now) {
+  const k = lc(agent);
+  const r = _hbRefused.get(k) || { count: 0, lastAt: 0, byInstance: new Map() };
+  r.count += 1; r.lastAt = now;
+  r.byInstance.delete(inst);
+  r.byInstance.set(inst, now);
+  while (r.byInstance.size > REFUSED_TRACK_MAX) r.byInstance.delete(r.byInstance.keys().next().value);
+  _hbRefused.set(k, r);
+}
 function sweepHeartbeats(now) {
   if (now - _hbSweptAt < 60_000) return;
   _hbSweptAt = now;
@@ -358,7 +375,8 @@ export function noteHeartbeat(agent, instance, info = {}, { ip = '' } = {}) {
       if (now - oldSeen <= HEARTBEAT_STALE_MS) {
         const lw = _hbRefuseLogAt.get(lc(a)) || 0;   // 로그는 법인당 1분에 1줄(거절이 곧 로그 폭주가 되지 않게 — 법인 수는 개별 토큰 수로 유계)
         if (now - lw >= 60_000) { _hbRefuseLogAt.set(lc(a), now); console.warn(`[rma] 하트비트: ${a} 인스턴스 수 상한(${HEARTBEAT_MAX_INSTANCES}) — 새 인스턴스 '${inst}' 를 받지 않았다(온라인 인스턴스를 밀어내지 않는다)`); }
-        return { ok: false, refused: true };
+        noteRefused(a, inst, now);
+        return { ok: false, refused: true, reason: HEARTBEAT_REFUSED_REASON };
       }
       heartbeats.delete(oldKey);
     }
@@ -386,9 +404,13 @@ export function listRmaAgents(now = Date.now()) {
     const online = g.instances.filter((i) => i.online);
     g.instances.sort((a, b) => (a.priority - b.priority) || a.instance.localeCompare(b.instance));
     const primary = cfg.mode === 'active-backup' ? pickInstance(g.agent, 'active-backup', { primary: cfg.primary, now }) : '';
-    return { ...g, mode: cfg.mode, modeExplicit: !!cfg.explicit, primary: cfg.primary || '', activePrimary: primary || '', onlineCount: online.length, pending: pendingByAgent.get(lc(g.agent))?.size || 0, lastSeen: Math.max(...g.instances.map((i) => i.lastSeen)) };
+    // v2.606(RECENT2606-06): 상한으로 거절한 인스턴스 수(최근 = 온라인 판정 창 안) — 조용한 거절 금지.
+    const rf = _hbRefused.get(lc(g.agent));
+    const refusedRecent = rf ? [...rf.byInstance.entries()].filter(([, at]) => now - at <= HEARTBEAT_STALE_MS).map(([inst]) => inst) : [];
+    return { ...g, mode: cfg.mode, modeExplicit: !!cfg.explicit, primary: cfg.primary || '', activePrimary: primary || '', onlineCount: online.length, pending: pendingByAgent.get(lc(g.agent))?.size || 0, lastSeen: Math.max(...g.instances.map((i) => i.lastSeen)),
+      refusedCount: rf?.count || 0, refusedLastAt: rf?.lastAt || null, refusedRecent: refusedRecent.length, refusedInstances: refusedRecent.slice(0, 16), maxInstances: HEARTBEAT_MAX_INSTANCES };
   }).sort((a, b) => a.agent.localeCompare(b.agent));
 }
 
 /** 테스트용 초기화. */
-export function _resetRma() { _hbSweptAt = 0; _hbRefuseLogAt.clear(); jobs.clear(); pendingByAgent.clear(); waiters.clear(); heartbeats.clear(); rr.clear(); history.length = 0; }
+export function _resetRma() { _hbSweptAt = 0; _hbRefuseLogAt.clear(); _hbRefused.clear(); jobs.clear(); pendingByAgent.clear(); waiters.clear(); heartbeats.clear(); rr.clear(); history.length = 0; }

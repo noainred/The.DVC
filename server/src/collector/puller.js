@@ -8,7 +8,7 @@
 import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
 import { config } from '../config.js';
 import { loadCollectors } from './registry.js';
-import { setRemoteHost, clearCollectorHosts, setCollectorStatus, getCollectorStatus, clearStaleRemote, hostsOfOtherCollectors } from './state.js';
+import { setRemoteHost, clearCollectorHosts, setCollectorStatus, getCollectorStatus, clearStaleRemote, hostsOfOtherCollectors, remoteSeriesKey } from './state.js';
 import { setCollectorServers, sanitizeEdgeExport } from './remoteInventory.js';
 import { getDb } from '../idrac/db.js';
 import { describeError } from '../util/errors.js';
@@ -50,7 +50,10 @@ async function pullOne(c) {
   //   그 호스트의 DB 계열 키는 `rmt:<collectorId>:<host>` 로 나눈다(두 법인이 한 계열을 공유하면 서로의 표본을 dupSkipped 로
   //   건너뛰고 추이가 두 서버의 값을 오간다). ⚠ **충돌이 없는 호스트는 예전 키 `rmt:<host>` 그대로**다 — 키를 전부 바꾸면
   //   운영 중인 모든 원격 서버의 전력 이력이 끊긴다. 충돌이 처음 생긴 호스트만 그때부터 새 계열로 적재된다(정직 기록).
-  const otherHosts = hostsOfOtherCollectors(c.id);
+  // v2.606 RECENT2606-02: 충돌은 신선한 항목 + **현재 활성(enabled)** 수집기끼리만 — 죽은·비활성 엣지의 잔재로 키를 바꾸지 않는다.
+  const activeIds = new Set(loadCollectors().filter((x) => x.enabled !== false).map((x) => x.id));
+  const otherHosts = hostsOfOtherCollectors(c.id, { now: ts, activeIds });
+  const hasSeries = (k) => (typeof db.latest === 'function' ? db.latest(k) != null : false); // 충돌 결정 영속: 전용 계열이 DB 에 있으면 계속 그 키
   const hostConflicts = [];
   clearCollectorHosts(c.id);
   let hosts = 0;
@@ -68,9 +71,8 @@ async function pullOne(c) {
     if (h.serverId != null) { if (seenServers.has(h.serverId)) continue; seenServers.add(h.serverId); }
     // 위조/오류 미래 타임스탬프는 거부('최신 ts 승리' 로직을 가리지 못하게) — 5분 skew 초과면 수신 시각 사용.
     const sTs = (Number.isFinite(h.ts) && h.ts > 0 && h.ts <= ts + 5 * 60_000) ? h.ts : ts;
-    const conflict = otherHosts.has(host);
+    const { key: serverId, conflict } = remoteSeriesKey(c.id, host, otherHosts, hasSeries);
     if (conflict && hostConflicts.length < 64) hostConflicts.push(host);
-    const serverId = conflict ? `rmt:${c.id}:${host}` : `rmt:${host}`;
     const sample = { watts, ts: sTs, datacenter: data.datacenter || c.datacenter, collectorId: c.id, serverName: h.serverName, serverId: h.serverId, serviceTag: h.serviceTag || '', model: h.model || '', vcenterId: c.vcenterId || '', source: 'remote', dbKey: serverId, ...(conflict ? { hostConflict: true } : {}) };
     setRemoteHost(host, sample);
     hosts++;

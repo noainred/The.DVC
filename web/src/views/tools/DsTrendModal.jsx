@@ -17,10 +17,14 @@ export default function DsTrendModal({ dsId, name, vcenterId, type, onClose }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   useEffect(() => {
+    // v2.606(감사 WEB2606-07): 기간을 바꾸면 이전 요청의 늦은 응답이 새 선택을 덮지 않게 한다(v2.596 WS 규약) —
+    // 365일 → 7일로 바꾸면 느린 365일 응답이 뒤에 와 '7일' 버튼 아래 365일 곡선이 그려졌다.
+    let active = true;
     setData(null);
     fetchJson('/tools/vm-track/ds-series', { dsId, days })
-      .then((d) => { setData(d); setErr(null); })
-      .catch((e) => setErr(e.message));
+      .then((d) => { if (active) { setData(d); setErr(null); } })
+      .catch((e) => { if (active) setErr(e.message); });
+    return () => { active = false; };
   }, [dsId, days]);
 
   const pts = data?.points || [];

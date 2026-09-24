@@ -1509,7 +1509,14 @@ centralRouter.post('/rma-poll', async (req, res) => {
     return res.status(403).json({ ok: false, reason: `이 법인의 RMA 접속 허용 IP 목록에 없는 출처(${ip})입니다 — 설정 › 원격 명령 › 접속 허용 IP 를 확인하세요.` });
   }
   const instance = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(b.instance || '')) ? String(b.instance) : 'default';
-  noteRmaHeartbeat(agent, instance, b.info || {}, { ip });
+  // v2.606(감사 RECENT2606-06): 인스턴스 수 상한으로 거절되면 **작업을 배달하지 않고 사유를 돌려준다**. 예전에는 반환값을
+  //   버려 거절된 인스턴스가 온라인 목록·스케줄 배정에는 없으면서 롱폴 작업만 받았고, 엣지는 왜인지 알 길이 없었다.
+  //   403 + reason 이면 엣지 rma/agent.js 가 그 사유를 로그에 적고 백오프한다(200 으로 즉시 돌려주면 엣지가 쉬지 않고 재폴한다).
+  const hb = noteRmaHeartbeat(agent, instance, b.info || {}, { ip });
+  if (hb && hb.refused) {
+    res.locals.ingestReject = { kind: REJECT_KIND.OTHER, reason: hb.reason || 'RMA 인스턴스 수 상한' };
+    return res.status(403).json({ ok: false, refused: true, reason: hb.reason || 'RMA 인스턴스 수 상한으로 이 인스턴스를 받지 않았습니다.', jobs: [] });
+  }
   // 점검 결과 동봉(outbox) — 이 법인의 스케줄에 있는 항목만 반영(남의 항목 id 로 상태 위조 차단).
   const sch = rmaScheduleFor(agent);
   const known = new Set(sch.tests.map((t) => t.id));

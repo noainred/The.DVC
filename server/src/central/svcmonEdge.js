@@ -41,6 +41,8 @@ function boundedObj(o) {
 }
 
 export const MAX_AGENTS = envNum('SVCMON_EDGE_MAX_AGENTS', 64);
+/** v2.606 EDGE2606-02: 예열 완결의 GC 보류 상한(엣지 SVCMON_WARM_MAX_MS 기본 15분보다 길게). */
+export const WARM_GC_HOLD_MS = envNum('SVCMON_EDGE_WARM_GC_HOLD_MS', 30 * 60_000);
 export const MAX_ROWS_PER_AGENT = envNum('SVCMON_EDGE_MAX_ROWS', 20000);
 /** 시계 오차 경고 임계 — 넘어도 결과를 버리지 않는다(경고만). */
 export const SKEW_WARN_MS = envNum('SVCMON_EDGE_SKEW_WARN_MS', 60_000);
@@ -187,9 +189,18 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   //   못한다(사실상 이번 것만 유지). 반드시 **직전 완결 id 를 따로 기억해** 비교한다.
   //   또 snapId 가 역행하는 보고(엣지 재시작·시계 점프·위조)에서는 GC 를 건너뛴다 —
   //   낮은 id 기준으로 지우면 정상 행이 대량 삭제된다.
+  // v2.606 EDGE2606-02: 엣지가 재시작 직후 예열 중(첫 sweep 이 전 항목을 덮기 전)이면 '행 0(또는 일부)' 완결이 온다 — 그것으로 GC 하면
+  //   재시작 전 행·메타가 전부 사라진다(코드 주석이 말하는 '즉시 지우면 모름' 그대로). `warmingUp` 이거나(v2.606 엣지) 구버전 엣지가
+  //   '항목은 있는데 보고 0' 을 보내면 GC 를 건너뛴다. 보류는 WARM_GC_HOLD_MS 까지만 — 넘으면 예전대로 정리한다(시한 없는 보류 금지).
+  const warm = seq >= total && (body?.warmingUp === true || (num(body?.items) > 0 && Number.isFinite(Number(body?.reported)) && num(body.reported) === 0));
+  if (warm) {
+    if (!a.warmHoldSince) a.warmHoldSince = recvAt;
+  } else if (seq >= total) a.warmHoldSince = 0;
+  const warmHold = warm && recvAt - a.warmHoldSince < WARM_GC_HOLD_MS;
+  if (warmHold) a.counters.warmGcSkipped = (a.counters.warmGcSkipped || 0) + 1;
   if (seq >= total) {
     a.complete = true;
-    if (snapId >= a.prevCompleteSnapId) {
+    if (!warmHold && snapId >= a.prevCompleteSnapId) {
       for (const [id, row] of a.rows) {
         if (row.snapId !== snapId && row.snapId !== a.prevCompleteSnapId) a.rows.delete(id);
       }
