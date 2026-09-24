@@ -305,3 +305,68 @@ test('DB2603-01 — migrateIpRecordColumns: 없는 열만 추가 · 이미 있�
   assert.throws(() => migrateIpRecordColumns(noTable), /no such table/);
   mem.close(); noTable.close();
 });
+
+// ── 추가 배정: 원장 동기화 무음 실패 · 전개 push 스윕 ──────────────────────────
+test('추가 — store.syncLedger 가 원장 계산 실패를 삼키지 않는다(상태 기록 + 같은 사유는 1줄)', async () => {
+  const { store, storeStatus } = await import('../src/store.js');
+  const saved = store.snapshot;
+  store.snapshot = { hosts: 5, vms: {}, vcenters: [] }; // buildIpamRows 가 던지는 모양
+  const orig = console.warn; const warns = [];
+  console.warn = (...a) => { warns.push(a.join(' ')); };
+  try { store.syncLedger(); store.syncLedger(); } finally { console.warn = orig; store.snapshot = saved; }
+  const ls = storeStatus().ledgerSync;
+  assert.equal(ls.ok, false);
+  assert.equal(ls.stage, 'build');
+  assert.equal(ls.streak, 2);
+  assert.ok(ls.error.length > 0);
+  assert.equal(warns.filter((w) => w.includes('IP 원장(ipam.db) 동기화 실패')).length, 1, '같은 사유는 스로틀');
+});
+
+test('추가 — pushAll 은 30만 원소도 붙인다(전개 push 는 RangeError)', async () => {
+  const { pushAll } = await import('../src/util/pushAll.js');
+  const big = new Array(300_000).fill(1);
+  assert.throws(() => [].push(...big), RangeError, '전제: 전개 push 는 이 크기에서 던진다');
+  const t = [0];
+  assert.equal(pushAll(t, big).length, 300_001);
+  assert.equal(pushAll(t, null).length, 300_001);
+});
+
+test('추가 — 스윕: 인벤토리 규모 배열에 push(...) 가 없다(작은 고정 배열만 허용 목록)', async () => {
+  const { stripComments } = await import('./_stripComments.js');
+  const root = new URL('../src/', import.meta.url);
+  // 원소 수가 인벤토리 규모에 닿지 않는 곳 — 사유와 함께(새로 늘리지 말 것).
+  const ALLOW = {
+    'backup/service.js': '복원 env 의 버려진 키 목록(수십 개)',
+    'bmusage/collectors/idracEnterprise.js': '장비 1대의 absent 목록',
+    'bmusage/parse/idracTelemetry.js': '리포트 1개의 메트릭 id',
+    'idrac/redfish.js': '서버 1대의 NIC 포트 링크',
+    'insights/serialLookup.js': '서버 1대의 부품 행',
+    'inventory/osScanner.js': 'vCenter 1개의 오류·차단 목록',
+    'logs/db.js': 'SQL 바인드 인자(vCenter 수)',
+    'pdu/poller.js': 'PDU 1대의 임계 위반',
+    'ping/db.js': 'NDJSON 폴백 적재(1회 표본 — 다른 그룹 수정 중이라 이번 범위 밖)',
+    'routes/svcmon/generate.js': '생성 요청 1건의 오류 문구',
+    'sanswitch/collectors/fosParse.js': '출력 한 줄의 토큰',
+    'sanswitch/zoning.js': 'zone 1개의 멤버',
+    'storage/intervals.js': '설정 점검 문구',
+    'svcmon/pool.js': '청크 1개의 결과(청크 크기 상한)',
+    'svcmon/templates.js': '템플릿 추가분(slice 로 상한)',
+  };
+  const found = new Map();
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { if (e.name !== 'node_modules' && e.name !== 'vendor') walk(p); continue; }
+      if (!p.endsWith('.js')) continue;
+      const src = stripComments(fs.readFileSync(p, 'utf8'));
+      const n = (src.match(/\.push\(\s*\.\.\./g) || []).length;
+      if (n) found.set(path.relative(fileURLToPath(root), p).split(path.sep).join('/'), n);
+    }
+  };
+  walk(fileURLToPath(root));
+  const bad = [...found.keys()].filter((f) => !Object.hasOwn(ALLOW, f));
+  assert.deepEqual(bad, [], `인벤토리 규모 배열은 util/pushAll.js 를 쓸 것: ${bad.join(', ')}`);
+  for (const f of ['store.js', 'nsx/store.js', 'nsx/client.js', 'vcenter/soapClient.js', 'horizon/sessionCollect.js', 'curuser/poller.js', 'metrics/db.js', 'metrics/sampler.js', 'ipam/ledger.js']) {
+    assert.equal(found.get(f) || 0, 0, f);
+  }
+});

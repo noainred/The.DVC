@@ -20,6 +20,7 @@ import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v
 
 // soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
 export { parseObjectContent, xmlUnescape };
+import { pushAll } from '../util/pushAll.js';
 
 // 호스트 GPU 사용률 캐시(주기 throttle용). key=`${vcId}:${ref}` → { pct, at }.
 const _gpuUtilCache = new Map();
@@ -247,7 +248,7 @@ export class VimSoapClient {
         `<RetrieveProperties xmlns="urn:vim25"><_this type="PropertyCollector">${this.sc.propertyCollector}</_this>` +
         `<specSet><propSet><type>${type}</type>${paths.map((p) => `<pathSet>${p}</pathSet>`).join('')}</propSet>` +
         `${objectSets}</specSet></RetrieveProperties>`;
-      out.push(...parseObjectContent(await this.#call(body)));
+      pushAll(out, parseObjectContent(await this.#call(body)));
     }
     return out;
   }
@@ -1282,7 +1283,7 @@ export async function collectVCenterEvents(vc, { sinceTs = Date.now() - 86_400_0
         `<ReadNextEvents xmlns="urn:vim25"><_this type="EventHistoryCollector">${cRef}</_this><maxCount>${Math.min(pageSize, max - out.length)}</maxCount></ReadNextEvents>`);
       const events = parseEventsXml(xml);
       if (!events.length) break;
-      out.push(...events);
+      pushAll(out, events);
     }
   } finally {
     if (collector) await c.callRaw(`<DestroyCollector xmlns="urn:vim25"><_this type="EventHistoryCollector">${escXml(collector)}</_this></DestroyCollector>`, { ignoreExternal: true }).catch(() => {});

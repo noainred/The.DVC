@@ -404,3 +404,56 @@ test('추가⑥: ping 대상 삭제는 그 대상 이력을 청크로 끝까지 
   assert.match(route, /historyPurge = 'background'/, '라우트는 이력 삭제를 응답 경로에서 기다리지 않는다');
   assert.doesNotMatch(route, /await getPingDb\(\)\)\.dropTarget/);
 });
+
+// ── 추가: 열 추가 마이그레이션이 잠금을 '이미 있음' 으로 삼키지 않는다(vmtrack·linkcheck) ──
+function lockedPair(name, ddl) {
+  const f = path.join(DIR, `${name}.db`);
+  const a = new DatabaseSync(f); a.exec(`PRAGMA journal_mode=WAL; ${ddl}`);
+  const holder = new DatabaseSync(f); holder.exec('PRAGMA busy_timeout=0; BEGIN IMMEDIATE');   // 쓰기 잠금을 쥔다
+  a.exec('PRAGMA busy_timeout=50');
+  return { a, holder };
+}
+test('추가: vmtrack 열 추가 — 없는 열만 추가하고, 잠금은 던지고, 이미 있는 열은 건드리지 않는다', async () => {
+  const { addMissingColumns } = await import('../src/vmtrack/db.js');
+  assert.equal(typeof addMissingColumns, 'function');
+  const { a, holder } = lockedPair('vt-mig', 'CREATE TABLE snaps (id INTEGER PRIMARY KEY, powered_on INTEGER NOT NULL DEFAULT 0);');
+  assert.throws(() => addMissingColumns(a, 'snaps', [['powered_on', 'INTEGER NOT NULL DEFAULT 0'], ['skipped', 'INTEGER NOT NULL DEFAULT 0']]),
+    /locked|busy/i, '잠금을 열 이미 있음으로 삼키면 열 없이 열린다');
+  holder.exec('ROLLBACK'); holder.close();
+  assert.deepEqual(addMissingColumns(a, 'snaps', [['powered_on', 'INTEGER NOT NULL DEFAULT 0'], ['skipped', 'INTEGER NOT NULL DEFAULT 0']]), ['skipped']);
+  assert.deepEqual(addMissingColumns(a, 'snaps', [['skipped', 'INTEGER NOT NULL DEFAULT 0']]), [], '두 번째는 아무것도 안 한다');
+  a.close();
+});
+test('추가: linkcheck ms_n — 잠금이면 던지고, 추가와 구 행 합 비우기는 함께 된다', async () => {
+  const { migrateLinkDailyMsN } = await import('../src/linkcheck/db.js');
+  assert.equal(typeof migrateLinkDailyMsN, 'function');
+  const { a, holder } = lockedPair('lc-mig', "CREATE TABLE link_daily (link_id TEXT, day TEXT, ms_sum INTEGER NOT NULL DEFAULT 0); INSERT INTO link_daily VALUES ('l','2026-01-01',500);");
+  assert.throws(() => migrateLinkDailyMsN(a), /locked|busy/i);
+  assert.equal(a.prepare('PRAGMA table_info(link_daily)').all().some((r) => r.name === 'ms_n'), false);
+  holder.exec('ROLLBACK'); holder.close();
+  assert.equal(migrateLinkDailyMsN(a), true);
+  assert.equal(Number(a.prepare('SELECT ms_sum FROM link_daily').get().ms_sum), 0, '새로 만든 경우 구 행 합을 비운다');
+  a.exec("UPDATE link_daily SET ms_sum = 7");
+  assert.equal(migrateLinkDailyMsN(a), false, '이미 있으면 건드리지 않는다');
+  assert.equal(Number(a.prepare('SELECT ms_sum FROM link_daily').get().ms_sum), 7);
+  a.close();
+});
+
+// ── 추가 ④: 일일 보고 실패 로그 ↔ 로그 분석 카탈로그 ─────────────────────────
+test('추가④: 실제로 찍히는 일일 보고 실패 줄을 카탈로그 규칙이 잡는다(옛 판본 줄도)', async () => {
+  const dr = await import('../src/reports/dailyReport.js');
+  const cat = await import('../src/loganalysis/catalog.js');
+  const rules = Object.values(cat).find((v) => Array.isArray(v) && v.some((r) => r?.id === 'daily-report-fail'));
+  const rule = rules.find((r) => r.id === 'daily-report-fail');
+  const re = rule.re instanceof RegExp ? rule.re : new RegExp(rule.re);
+  dr._resetDailyReportForTest();
+  dr.saveDailyReportSettings({ enabled: true, hour: 0, minute: 0 });
+  const lines = [];
+  const warn = console.warn; console.warn = (m) => lines.push(String(m));
+  try { await dr.dailyReportTick(Date.parse('2026-09-24T01:00:00Z'), async () => ({ ok: false, reason: '수신자가 없습니다' })); }
+  finally { console.warn = warn; dr._resetDailyReportForTest(); }
+  const line = lines.find((l) => l.includes('[daily-report]'));
+  assert.ok(line, '실패 줄이 찍혀야 한다');
+  assert.equal(line.match(re)?.[1], '수신자가 없습니다', `카탈로그가 실제 줄을 못 잡는다: ${line}`);
+  assert.equal('[daily-report] 발송 실패 — 옛 사유 (다음 틱에 재시도)'.match(re)?.[1], '옛 사유', '2.603 이전 판본 줄도 잡는다');
+});

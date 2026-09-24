@@ -14,6 +14,8 @@ import { Worker } from 'node:worker_threads';
 import { config } from '../config.js';
 import { COLUMNS, toRecord } from './record.js';
 import { createLockRetry, openSqlite, withOpenCleanup } from '../util/sqliteOpen.js';
+import { createChangeLogger } from '../util/logThrottle.js';
+const saveWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 });
 
 const DB_PATH = config.ipam.dbPath;
 
@@ -218,7 +220,8 @@ export async function syncLedger(rows) {
     await i.sync(rows, new Date().toISOString());
     return true;
   } catch (err) {
-    console.warn(`[ipam] 레저 저장 실패: ${err.message}`);
+    // v2.603: 잠금 재시도 중에는 매 주기(30초) 같은 줄이 찍힌다 — 같은 사유는 1시간에 1줄(상태는 store.ledgerSync 가 든다).
+    if (saveWarnLog('save', err.ipamLocked ? 'locked' : String(err.message))) console.warn(`[ipam] 레저 저장 실패: ${err.message}`);
     return false;
   }
 }

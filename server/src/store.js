@@ -26,6 +26,9 @@ import { poolSettled } from './util/pool.js'; // v2.575 IMP-08 — 동시성 풀
  *   바꿨을 때 **인벤토리 점검 화면이 store 와 다른 기준으로 '낡음' 을 세면서도 오류가 없다**.
  */
 export const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
+import { pushAll } from './util/pushAll.js';
+import { createChangeLogger } from './util/logThrottle.js';
+const ledgerWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 }); // v2.603: 같은 동기화 실패 사유는 1시간에 1줄
 // 수집 실패 시 마지막 정상 수집(lastGood)을 이월해 서빙하는 최대 시간(v2.279). 이 창 안에서는
 // 일시 실패(고RTT 타임아웃 등)로 vCenter 인벤토리가 스냅샷에서 사라지지 않는다(호스트/VM 소실·
 // ipam.db 대량 재기록·알람 전원 해소→재발송 방지). 이 창을 넘겨 계속 실패하면 진짜 장기 장애로
@@ -295,11 +298,11 @@ class Store {
           if (c?.ok) {
             const s = c.data;
             merged.vcenters.push({ ...s.vcenter, status: 'maintenance', maintenance: true });
-            merged.hosts.push(...s.hosts);
-            merged.vms.push(...s.vms);
-            merged.datastores.push(...s.datastores);
-            merged.networks.push(...s.networks);
-            merged.alarms.push(...s.alarms);
+            pushAll(merged.hosts, s.hosts);
+            pushAll(merged.vms, s.vms);
+            pushAll(merged.datastores, s.datastores);
+            pushAll(merged.networks, s.networks);
+            pushAll(merged.alarms, s.alarms);
           } else {
             merged.vcenters.push({ id: vc.id, name: vc.name, location: vc.location, status: 'maintenance', maintenance: true });
           }
@@ -336,11 +339,11 @@ class Store {
         if (c?.ok) {
           const s = c.data;
           merged.vcenters.push(s.vcenter);
-          merged.hosts.push(...s.hosts);
-          merged.vms.push(...s.vms);
-          merged.datastores.push(...s.datastores);
-          merged.networks.push(...s.networks);
-          merged.alarms.push(...s.alarms);
+          pushAll(merged.hosts, s.hosts);
+          pushAll(merged.vms, s.vms);
+          pushAll(merged.datastores, s.datastores);
+          pushAll(merged.networks, s.networks);
+          pushAll(merged.alarms, s.alarms);
         } else if (c && !c.ok) {
           merged.collectionErrors.push({ vcenterId: vc.id, name: vc.name, ...c.err, at: c.at, fallback: isAuto, ...(authStop ? { authStopped: authStop } : {}) });
           if (c.lastGood?.vcenter && (Date.now() - (c.lastGoodAt || 0)) <= LASTGOOD_HOLD_MS) {
@@ -348,11 +351,11 @@ class Store {
             // 데이터임을 알리되, 인벤토리·알람은 유지해 소실 플랩·ipam.db 재기록·알람 재발송을 막는다.
             const s = c.lastGood;
             merged.vcenters.push({ ...s.vcenter, status: 'unreachable', stale: true, staleSince: c.lastGoodAt, error: c.err.message, hint: c.err.hint, code: c.err.code, ...(authStop ? { authStopped: authStop } : {}) });
-            merged.hosts.push(...s.hosts);
-            merged.vms.push(...s.vms);
-            merged.datastores.push(...s.datastores);
-            merged.networks.push(...s.networks);
-            merged.alarms.push(...s.alarms);
+            pushAll(merged.hosts, s.hosts);
+            pushAll(merged.vms, s.vms);
+            pushAll(merged.datastores, s.datastores);
+            pushAll(merged.networks, s.networks);
+            pushAll(merged.alarms, s.alarms);
           } else if (isAuto && pushSite(merged, getMock(), vc.id, { mock: true })) {
             // auto 폴백: 목 데이터에 이 vc.id가 있으면 그걸로 채운다.
             // v2.443: 채운 vCenter 에 mock 표시를 남긴다 — 이 데이터는 가짜라서 중앙에 push 하면
@@ -393,8 +396,27 @@ class Store {
       if (sig === this._lastLedgerSig) return; // 내용 변동 없음 → 쓰기 생략
       // 서명은 쓰기 '성공 후'에 기록 — 외부 리더의 락 등으로 쓰기가 실패했는데 서명만 갱신되면
       // 내용이 실제로 바뀔 때까지 재시도가 영영 없어 ipam.db가 낡은 채 남는다.
-      syncLedger(rows).then((ok) => { if (ok) this._lastLedgerSig = sig; });
-    } catch { /* best effort */ }
+      syncLedger(rows).then((ok) => {
+        if (ok) { this._lastLedgerSig = sig; this._noteLedger(true, null, rows.length); }
+        else this._noteLedger(false, { stage: 'write', message: 'ipam.db 쓰기 실패(사유는 [ipam] 로그)' }, rows.length);
+      }, (e) => this._noteLedger(false, { stage: 'write', message: String(e?.message || e) }, rows.length));
+    } catch (e) {
+      // v2.603(감사 CEN2603-03 후속): 예전에는 `catch { /* best effort */ }` 라 원장 계산이 던지면(예: 전개 push RangeError)
+      //   ipam.db 동기화가 **로그 한 줄 없이** 멈췄다. 상태에 남기고(storeStatus().ledgerSync) 콘솔에도 적는다(같은 사유는 1시간에 1줄).
+      this._noteLedger(false, { stage: 'build', message: String(e?.message || e) }, null);
+    }
+  }
+
+  /** 원장 동기화 결과 기록 + 스로틀 경고(v2.603). */
+  _noteLedger(ok, err, rows) {
+    const prev = this.ledgerSync;
+    const now = Date.now();
+    if (ok) { this.ledgerSync = { ok: true, at: now, rows, lastOkAt: now, streak: 0 }; return; }
+    const streak = prev && !prev.ok ? (prev.streak || 0) + 1 : 1;
+    this.ledgerSync = { ok: false, at: now, rows, stage: err.stage, error: err.message.slice(0, 300), streak, lastOkAt: prev?.lastOkAt || null };
+    if (ledgerWarnLog('ledger', `${err.stage}|${err.message}`, now)) {
+      console.warn(`[store] IP 원장(ipam.db) 동기화 실패(${err.stage === 'build' ? '원장 계산' : '저장'} · 연속 ${streak}회): ${err.message.slice(0, 300)}`);
+    }
   }
 
   start() {
@@ -452,11 +474,11 @@ function authStopView(rec) {
 function pushSite(target, source, vcId, mark = null) {
   const vc = source.vcenters.find((v) => v.id === vcId);
   if (vc) target.vcenters.push(mark ? { ...vc, ...mark } : vc);
-  target.hosts.push(...source.hosts.filter((h) => h.vcenterId === vcId));
-  target.vms.push(...source.vms.filter((v) => v.vcenterId === vcId));
-  target.datastores.push(...source.datastores.filter((d) => d.vcenterId === vcId));
-  target.networks.push(...source.networks.filter((n) => n.vcenterId === vcId));
-  target.alarms.push(...source.alarms.filter((a) => a.vcenterId === vcId));
+  pushAll(target.hosts, source.hosts.filter((h) => h.vcenterId === vcId));
+  pushAll(target.vms, source.vms.filter((v) => v.vcenterId === vcId));
+  pushAll(target.datastores, source.datastores.filter((d) => d.vcenterId === vcId));
+  pushAll(target.networks, source.networks.filter((n) => n.vcenterId === vcId));
+  pushAll(target.alarms, source.alarms.filter((a) => a.vcenterId === vcId));
   return !!vc;
 }
 
@@ -708,6 +730,7 @@ export function storeStatus() {
     registered: all.length,
     generatedAt: snap.generatedAt || null,
     lastError: store.lastError || null,
+    ledgerSync: store.ledgerSync || null, // v2.603: IP 원장(ipam.db) 마지막 동기화 결과(실패 사유·연속 횟수)
     refreshing: store._refreshing === true,
     intervalMs: config.pollIntervalMs,
     counts,

@@ -37,6 +37,7 @@ import { pushCurUserRecords, curUserPushEnabled } from '../agent/curUserPush.js'
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { authStopView } from '../util/authGuard.js';
+import { pushAll } from '../util/pushAll.js';
 
 const CONCURRENCY_CAP = 8;
 const PRUNE_EVERY_RUNS = 6;                       // 10분 × 6 = 1시간에 1회
@@ -214,7 +215,7 @@ export async function runCurUserNow(trigger = 'manual') {
         errors.push({ vcenterId: j.vcId, error: v.error, ...(rec ? { authStopped: authStopView(rec) } : {}) });
         if (rec) console.warn(`[curuser] ${j.vcId}: vCenter 인증 실패 — 주기 수집 정지(${rec.attempts}회). 비밀번호를 고치면 자동 재개합니다`);
       }
-      if (v.records.length) { records.push(...v.records); collectedVc.push(j.vcId); }
+      if (v.records.length) { pushAll(records, v.records); collectedVc.push(j.vcId); }
     });
 
     const ts = Date.now();

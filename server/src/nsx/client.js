@@ -28,6 +28,7 @@ import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 �
 import { createAuthGuard } from '../util/authGuard.js';
 import { effectiveRequestTimeoutMs } from '../vcenter/soapParse.js'; // v2.598 T2598-03 — 옛 저장값의 시한 상한
 import { numOrNull } from '../util/numOrNull.js';
+import { pushAll } from '../util/pushAll.js';
 
 /**
  * NSX 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F1, 계정 잠금 경로). 예전에는 `client.node()` 가 401/403 으로
@@ -67,7 +68,7 @@ export async function listAllPages(getPage, pathname, { maxPages = NSX_LIST_MAX_
     const sep = pathname.includes('?') ? '&' : '?';
     const page = await getPage(cursor ? `${pathname}${sep}cursor=${encodeURIComponent(cursor)}` : pathname);
     pages += 1;
-    if (Array.isArray(page?.results)) results.push(...page.results);
+    if (Array.isArray(page?.results)) pushAll(results, page.results);
     const rc = Number(page?.result_count);
     if (count == null && page?.result_count != null && Number.isFinite(rc) && rc >= 0) count = rc;
     cursor = page?.cursor ? String(page.cursor) : null;

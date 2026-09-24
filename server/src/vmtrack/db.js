@@ -23,6 +23,18 @@ import { numOrNull } from '../util/numOrNull.js';
 // v2.599 DB2599-02: 첫 open 잠금은 래치하지 않고 잠시 뒤 다시 연다.
 const lockRetry = createLockRetry();
 
+/** 없는 열만 추가한다(v2.603). 'duplicate column name'(동시 추가 경합)만 삼키고 잠금·그 밖의 오류는 던진다. @returns {string[]} 추가한 열 */
+export function addMissingColumns(db, table, cols) {
+  const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((r) => r.name));
+  const added = [];
+  for (const [col, decl] of cols) {
+    if (have.has(col)) continue;
+    try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${decl}`); added.push(col); }
+    catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; }
+  }
+  return added;
+}
+
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래. env 가 최우선.
 const DB_PATH = process.env.VMTRACK_DB_PATH
   || path.join(config.dbDir || config.configDir, 'vm-track.db');
@@ -126,18 +138,16 @@ function initSqlite() {
         PRIMARY KEY (vcenter_id, vm_id)
       );
     `);
-    // v2.346 에서 만들어진 기존 DB 에는 전원 전환 열이 없다 — 있으면 무해하게 실패하는 ALTER 로
-    // 1회 마이그레이션(SQLite 는 IF NOT EXISTS 를 컬럼 추가에 지원하지 않아 try/catch 가 정석).
-    for (const col of ['powered_on', 'powered_off', 'ds_count']) {
-      try { db.exec(`ALTER TABLE snaps ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`); } catch { /* 이미 존재 */ }
-    }
-    for (const col of ['ds_cap_gb', 'ds_used_gb']) { // v2.348 — 용량은 REAL
-      try { db.exec(`ALTER TABLE snaps ADD COLUMN ${col} REAL NOT NULL DEFAULT 0`); } catch { /* 이미 존재 */ }
-    }
-    // v2.597(감사 L2597-01 — 재현): 합계 행에서 빠진 vCenter 수(수집 실패·첫 수집 중). 0 이 아니면 그 슬롯 합계는 부분 합이다.
-    try { db.exec('ALTER TABLE snaps ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 존재 */ }
-    // v2.598(감사 RECENT2598-03): 사용량을 못 읽어 ds_cap_gb·ds_used_gb 합계에서 뺀 DS 수. 0 이 아니면 그 슬롯 사용률은 읽은 DS 끼리의 비율이다.
-    try { db.exec('ALTER TABLE snaps ADD COLUMN ds_used_unknown INTEGER NOT NULL DEFAULT 0'); } catch { /* 이미 존재 */ }
+    // 구버전 DB 에 뒤늦게 추가된 snaps 열(v2.346 전원 전환 · v2.348 DS 용량(REAL) · v2.597 skipped · v2.598 ds_used_unknown).
+    // v2.603(감사 — ipam DB2603-01 과 같은 패턴): 예전 `try { ALTER } catch { /* 이미 존재 */ }` 는 **모든** 오류를 '이미 있음' 으로
+    //   삼켜, 다른 연결이 잠금을 쥔 순간(SQLITE_BUSY)의 실패도 넘어갔다 — 열이 없는 채로 아래 prepare 가 'no such column' 으로
+    //   던지고 그 실패가 initError('기능 비활성')로 굳었다(잠금 재시도 경로를 타지 못한다). 이제 table_info 로 **없는 열만**
+    //   추가하고 'duplicate column name' 만 삼킨다. 잠금은 그대로 던져 getDb 의 lockRetry 가 잠시 뒤 다시 연다.
+    addMissingColumns(db, 'snaps', [
+      ['powered_on', 'INTEGER NOT NULL DEFAULT 0'], ['powered_off', 'INTEGER NOT NULL DEFAULT 0'], ['ds_count', 'INTEGER NOT NULL DEFAULT 0'],
+      ['ds_cap_gb', 'REAL NOT NULL DEFAULT 0'], ['ds_used_gb', 'REAL NOT NULL DEFAULT 0'],
+      ['skipped', 'INTEGER NOT NULL DEFAULT 0'], ['ds_used_unknown', 'INTEGER NOT NULL DEFAULT 0'],
+    ]);
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
 
     const st = {

@@ -54,6 +54,22 @@ async function getDb() {
   _opening = openDb().finally(() => { _opening = null; });
   return _opening;
 }
+/** link_daily.ms_n 이 없을 때만 추가 + 구 행 합 비우기(한 트랜잭션). @returns {boolean} 추가했으면 true */
+export function migrateLinkDailyMsN(conn) {
+  const have = conn.prepare('PRAGMA table_info(link_daily)').all().some((r) => r.name === 'ms_n');
+  if (have) return false;
+  conn.exec('BEGIN IMMEDIATE');
+  try {
+    conn.exec('ALTER TABLE link_daily ADD COLUMN ms_n INTEGER NOT NULL DEFAULT 0');
+    try { conn.exec('UPDATE link_daily SET ms_sum = 0 WHERE ms_n = 0'); } catch (e) { e.message = `구 행 합 비우기 실패(열 추가도 되돌린다): ${e.message}`; throw e; }
+    conn.exec('COMMIT');
+    return true;
+  } catch (e) {
+    try { conn.exec('ROLLBACK'); } catch { /* 이미 끝남 */ }
+    if (/duplicate column name/i.test(String(e?.message || ''))) return false;
+    throw e;
+  }
+}
 async function openDb() {
   let conn = null;   // v2.599 DB2599-02: 실패하면 닫는다(잠금이면 래치하지 않고 다시 연다)
   try {
@@ -108,10 +124,11 @@ async function openDb() {
     // v2.596(감사 DB-3 — 재현): 열이 **새로 생긴** 경우 구 행의 ms_sum 은 ms_n=0 과 짝이 맞지 않는다 — 전환일에 새 표본이
     //   더해지면 옛 합(수십~수백 표본분)을 새 개수로 나눠 평균이 수십~수백 배로 부푼다. 새로 만든 경우에만 구 행의 합을 비운다
     //   (구 행은 이미 평균을 내지 않는다 — 표시가 바뀌지 않는다).
-    try {
-      conn.exec('ALTER TABLE link_daily ADD COLUMN ms_n INTEGER NOT NULL DEFAULT 0');
-      try { conn.exec('UPDATE link_daily SET ms_sum = 0 WHERE ms_n = 0'); } catch { /* 비어 있으면 무관 */ }
-    } catch { /* 이미 있는 열 — 정상 */ }
+    // v2.603(감사 — ipam DB2603-01 과 같은 패턴): 예전 `try { ALTER } catch { /* 이미 있는 열 */ }` 는 잠금(SQLITE_BUSY)도
+    //   '이미 있음' 으로 삼켰다 — 열 없이 열려 적재가 'no such column: ms_n' 으로 죽었다. 이제 table_info 로 없을 때만 추가하고,
+    //   열 추가와 구 행 합 비우기를 **한 트랜잭션**으로 묶는다(추가만 되고 비우기가 실패하면 다음 open 은 열이 있다고 보고
+    //   비우기를 영영 건너뛴다 — 평균이 부푼다). 'duplicate column name'(경합)만 삼키고 잠금은 던져 lockRetry 가 다시 연다.
+    migrateLinkDailyMsN(conn);
     _db = conn;
   } catch (e) {
     try { conn?.close(); } catch { /* 이미 닫힘 */ }
