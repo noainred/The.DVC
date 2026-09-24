@@ -5,6 +5,10 @@
  */
 
 import { createHash } from 'node:crypto';
+import { readJsonCapped } from '../util/readCapped.js'; // v2.604: 엣지 응답 크기 상한
+import { strOf } from '../util/coercionTrap.js';
+/** 업그레이드 응답 상한 — 본문은 {ok, version, reason} 수백 바이트다. */
+const UPGRADE_RESPONSE_MAX_BYTES = 64 * 1024;
 import { loadCollectors } from './registry.js';
 import { setCollectorStatus, getCollectorStatus } from './state.js';
 import { _internals as _rf } from '../util/resilientFetch.js';
@@ -45,12 +49,15 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
       redirect: 'manual',
       signal: AbortSignal.timeout(timeout),
     });
-    const body = await res.json().catch(() => ({}));
+    // v2.604(감사 CEN2604-01 형제): 엣지 응답은 상한까지만 읽는다(해제 후 크기 — gzip 폭탄이 중앙 RSS 를 올리지 않게).
+    //   객체가 아니거나 못 읽으면 {} — 사유·버전은 글자만(strOf).
+    let body = {};
+    try { const j = await readJsonCapped(res, UPGRADE_RESPONSE_MAX_BYTES, '엣지 업그레이드 응답'); if (j && typeof j === 'object' && !Array.isArray(j)) body = j; } catch { body = {}; }
     const ok = res.ok && body.ok !== false;
-    recordOutbound(url, { status: ok ? res.status : (res.status < 400 ? 500 : res.status), bytes: bytes?.length || 0, method: 'POST', error: ok ? '' : String(body.reason || body.error || ''), tag: c.id || c.name || '' }); // v2.601: 수집 서버 태그
-    if (ok) return { id: c.id, name: c.name, ok: true, status: res.status, version: body.version };
+    const serverMsg = strOf(body.reason, 500) || strOf(body.error, 500);
+    recordOutbound(url, { status: ok ? res.status : (res.status < 400 ? 500 : res.status), bytes: bytes?.length || 0, method: 'POST', error: ok ? '' : serverMsg, tag: c.id || c.name || '' }); // v2.601: 수집 서버 태그
+    if (ok) return { id: c.id, name: c.name, ok: true, status: res.status, version: strOf(body.version, 32) || undefined };
     // 실패: 상태코드 + 서버 사유 + 점검 힌트를 하나의 reason으로 합쳐 UI/로그에서 바로 원인 파악.
-    const serverMsg = body.reason || body.error || '';
     const hint = httpFailHint(res.status);
     const reason = `HTTP ${res.status}${serverMsg ? ` — ${serverMsg}` : ''}${hint ? ` · ${hint}` : ''}`;
     return { id: c.id, name: c.name, ok: false, status: res.status, reason };

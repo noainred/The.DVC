@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2604c-'));
 process.env.CONFIG_DIR = TMP;
@@ -231,3 +231,70 @@ test('COL-2604-01 후속: 증가량 매트릭스가 반올림 장비의 해상�
   const m2 = growthMatrix(rows, { asOfDay: D0, periods, meta: new Map([['isi', { capacityApprox: { resolutionBytes: '' } }]]) });
   assert.equal(m2.devices.find((x) => x.deviceId === 'isi').capacityApprox, undefined);
 });
+
+test('COL-2604-01 후속: 실제 라우터 — 내부 증가량·공개 API 응답에 해상도 표지가 실리고 공개 키 집합 == 선언 fields', () => {
+  const HERE = path.dirname(new URL(import.meta.url).pathname);
+  const SRC = path.resolve(HERE, '../src');
+  const J = (rel) => JSON.stringify(path.join(SRC, rel));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2604c-route-'));
+  // ⚠ 증가량 라우트는 '오늘' 을 dayIndex(Date.now()) 로 잡는다 — 표본 시각은 그 일 인덱스의 정오로 둔다
+  //   (날 경계에서 12시간 떨어뜨림 — v2.517 규약: 경계에서 떨어뜨려 고정).
+  const boot = `
+    const express = (await import('express')).default;
+    const { api } = await import(${J('routes/api.js')});
+    const v1 = (await import(${J('routes/publicApi.js')})).default;
+    const keys = await import(${J('publicapi/keys.js')});
+    const { ENDPOINT_BY_PATH } = await import(${J('publicapi/allowlist.js')});
+    const reg = await import(${J('storage/registry.js')});
+    const st = await import(${J('storage/store.js')});
+    const db = await import(${J('storage/db.js')});
+    const { store } = await import(${J('store.js')});
+    await store.refresh({ force: true });
+    reg.saveDevice({ type: 'isilon', collectMethod: 'ssh', name: 'SYNTH-ISI', host: 'isi.example.invalid', username: 'u', password: 'p' });
+    reg.saveDevice({ type: 'isilon', collectMethod: 'api', name: 'SYNTH-EXACT', host: 'isi2.example.invalid', username: 'u', password: 'p' });
+    const [a, b] = reg.listDevices();
+    const PiB = 1024 ** 5;
+    const today = db.dayIndex(Date.now());
+    const mk = (d, day, approx) => ({ deviceId: d.id, type: 'isilon', name: d.name, ok: true, collectedAt: db.dayStartMs(day) + 12 * 3600e3,
+      capacity: { totalBytes: 2.2 * PiB, usedBytes: 1.2 * PiB, pct: 54.5 }, sections: { capacity: 'ok' },
+      extra: approx ? { capacityApprox: { source: 'isi status', resolutionBytes: 0.1 * PiB } } : {} });
+    for (const day of [today - 7, today]) { await db.saveCapacityPoint(mk(a, day, true)); await db.saveCapacityPoint(mk(b, day, false)); }
+    st.putSnapshot(mk(a, today, true)); st.putSnapshot(mk(b, today, false));
+    const app = express();
+    app.use('/api', api); app.use('/api/v1', v1);
+    const srv = await new Promise((res) => { const s = app.listen(0, '127.0.0.1', () => res(s)); });
+    const base = 'http://127.0.0.1:' + srv.address().port;
+    const key = keys.issueApiKey({ name: 'k', groups: ['capacity'] }).plaintext;
+    const internal = await (await fetch(base + '/api/tools/storage-growth?periods=7')).json();
+    const pub = await (await fetch(base + '/api/v1/capacity/storage-growth', { headers: { 'X-Api-Key': key } })).json();
+    srv.close();
+    console.log('@@' + JSON.stringify({ internal, pub, ids: [a.id, b.id], fields: ENDPOINT_BY_PATH['/capacity/storage-growth'].fields }));
+    process.exit(0);
+  `;
+  const r0 = spawnSyncJson(boot, dir);
+  const [idA, idB] = r0.ids;
+  const devA = r0.internal.devices.find((x) => x.deviceId === idA);
+  const devB = r0.internal.devices.find((x) => x.deviceId === idB);
+  assert.ok(devA, JSON.stringify(r0.internal).slice(0, 400));
+  assert.equal(devA.capacityApprox?.resolutionBytes, 0.1 * PiB);
+  const g7 = Object.values(devA.growth).find((g) => g && g.bytes != null);
+  assert.equal(g7.belowResolution, true);
+  assert.equal(devB.capacityApprox, undefined);
+  const pa = r0.pub.data.find((x) => x.deviceId === idA);
+  const pb = r0.pub.data.find((x) => x.deviceId === idB);
+  assert.equal(pa.resolutionBytes, 0.1 * PiB);
+  assert.equal(pb.resolutionBytes, null);
+  for (const x of r0.pub.data) assert.deepEqual(Object.keys(x).sort(), [...r0.fields].sort(), '키 집합 == 선언 fields');
+  assert.equal(r0.pub.meta.approxCount, 1);
+});
+
+function spawnSyncJson(boot, dir) {
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', boot], {
+    env: { ...process.env, CONFIG_DIR: dir, AUTH_ENABLED: 'false', DATA_SOURCE: 'mock' },
+    encoding: 'utf8', cwd: path.resolve(path.dirname(new URL(import.meta.url).pathname), '..'), timeout: 180_000,
+  });
+  assert.equal(r.status, 0, `자식 프로세스 실패: ${r.stderr?.slice(-2000)}`);
+  const line = r.stdout.split('\n').find((l) => l.startsWith('@@'));
+  assert.ok(line, `출력 없음: ${r.stdout.slice(-1000)} ${r.stderr?.slice(-800)}`);
+  return JSON.parse(line.slice(2));
+}

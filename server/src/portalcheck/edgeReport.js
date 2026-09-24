@@ -29,8 +29,11 @@ import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { tokenFingerprintParts, sameToken } from '../util/tokenFingerprint.js';
 import { hygieneOf } from './tokenScan.js';
+import { readJsonCapped } from '../util/readCapped.js'; // v2.604: 응답 크기 상한
+import { strOf } from '../util/coercionTrap.js';
 
-const t = (v) => String(v ?? '').trim();
+// v2.604: 응답 값이 객체면 String() 이 던진다 — 글자·수·불리언만(strOf).
+const t = (v) => strOf(v, 4096).trim();
 
 /** 자기보고에 담는 토큰 1건의 공개 형태 — **평문·전체 해시 없음**. */
 export function tokenFacts(raw) {
@@ -70,7 +73,9 @@ export async function selfProbeCentral({ fetchImpl = null, timeoutMs = 10_000 } 
   }
   const ms = Date.now() - t0;
   let body = null;
-  try { body = await res.json(); } catch { body = null; }
+  // v2.604(감사 CEN2604-01 형제): 중앙 응답도 상한까지만 읽는다(health-probe 본문은 수백 바이트).
+  try { body = await readJsonCapped(res, 64 * 1024, '중앙 health-probe 응답'); } catch { body = null; }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) body = null;
   if (res.status === 403 || res.status === 401) {
     return { ran: true, ok: false, ms, status: res.status, kind: 'rejected', reason: t(body?.reason) || '중앙이 이 엣지의 토큰을 거부했습니다.' };
   }
