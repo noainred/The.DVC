@@ -21,8 +21,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { config, loadVcenterConfig } from '../config.js';
+import { loadVcenterConfig } from '../config.js';
 import { store } from '../store.js';
+import { getDataSource } from '../runtime-settings.js';
 import { logAudit } from '../audit.js';
 import { getJob, recordRun, pruneList } from './store.js';
 import {
@@ -78,8 +79,12 @@ async function runJobBody(jobId, trigger) {
   try {
     const vcCfg = (loadVcenterConfig().vcenters || []).find((v) => v.id === job.vcenterId);
     // mock 모드(개발·데모): 실제 vCenter 없이 성공 시뮬레이션 — 스케줄/보존/UI 흐름 검증용.
-    if (!vcCfg || config.mode === 'mock') {
-      if (config.mode === 'live') throw new Error(`vCenter 설정을 찾을 수 없습니다: ${job.vcenterId}`);
+    // v2.604: 예전 판정 `config.mode` 는 **존재하지 않는 필드**라 항상 거짓이었다 — 목 모드에서도 vCenter 설정이 있으면 실제
+    //   스냅샷·클론을 돌렸고, 반대로 live 에서 vCenter 설정이 없으면 오류 대신 '복제 성공'(시뮬레이션)이 기록됐다.
+    //   판정은 수집(store.js)과 같은 getDataSource() === 'mock' 이다('auto' 는 실수집).
+    const mock = getDataSource() === 'mock';
+    if (!vcCfg || mock) {
+      if (!mock) throw new Error(`vCenter 설정을 찾을 수 없습니다: ${job.vcenterId}`);
       _running.phase = '시뮬레이션(mock)';
       await new Promise((r) => setTimeout(r, 2000));
       const name = `${job.vmName}-bak-${stamp()}`;

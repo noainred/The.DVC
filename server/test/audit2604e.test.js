@@ -275,3 +275,58 @@ test('TIM2604-03: 백업 설정은 로드 경로에서도 클램프한다(-5·0.
   m._resetBackupSettingsForTest();
   fs.rmSync(path.join(TMP, 'backup.json'), { force: true });
 });
+
+// ── 추가: vmclone 목 판정 · 중계 점검 화면 빈 칸 ─────────────────────────────
+function runVmcloneChild({ dataSource, withVc }) {
+  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2604e-mode-'));
+  if (withVc) fs.writeFileSync(path.join(cfg, 'vcenters.json'), JSON.stringify({ vcenters: [{ id: 'vc1', host: 'https://127.0.0.1:1', username: 'u', password: 'p' }] }));
+  const u = (p) => pathToFileURL(path.join(SRC, p)).href;
+  const script = `
+    import { mock } from 'node:test';
+    const calls = { snap: 0 };
+    mock.module(${JSON.stringify(u('vmclone/vsphere.js'))}, { namedExports: {
+      VimSoapClient: class { async login() {} async logout() {} },
+      createSnapshot: async () => { calls.snap++; return 'snapshot-1'; }, removeSnapshot: async () => {},
+      parentFolderOf: async () => 'group-v1', cloneFromSnapshot: async () => 'vm-99', destroyClone: async () => {},
+      vmFilePaths: async () => ({ vmx: null, files: [] }), parseDsPath: () => null, backupFileFilter: () => true,
+      datacenterPathOf: async () => null, downloadDsFile: async () => 0,
+    } });
+    mock.module(${JSON.stringify(u('store.js'))}, { namedExports: { store: { get: () => ({ datastores: [{ vcenterId: 'vc1', name: 'ds1', id: 'vc1:datastore-1' }] }) } } });
+    const st = await import(${JSON.stringify(u('vmclone/store.js'))});
+    const job = st.saveJob({ vcenterId: 'vc1', vmId: 'vc1:vm-1', vmName: 'web01', dest: { type: 'datastore', datastoreName: 'ds1' }, keep: 3 });
+    const r = await import(${JSON.stringify(u('vmclone/runner.js'))});
+    r.enqueueRun(job.id, 'manual');
+    for (let i = 0; i < 400 && !st.getJob(job.id).lastRun; i++) await new Promise((x) => setTimeout(x, 10));
+    const lr = st.getJob(job.id).lastRun;
+    console.log(JSON.stringify({ snap: calls.snap, ok: lr?.ok, detail: lr?.detail }));
+    process.exit(0);
+  `;
+  const r = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--input-type=module', '-e', script],
+    { encoding: 'utf8', timeout: 30_000, env: { ...process.env, CONFIG_DIR: cfg, DATA_SOURCE: dataSource } });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout.trim().split('\n').pop());
+}
+
+test('추가: vmclone 은 목 모드면 vCenter 설정이 있어도 실제 스냅샷을 만들지 않고, live 에서 설정이 없으면 성공이라 기록하지 않는다', () => {
+  const m = runVmcloneChild({ dataSource: 'mock', withVc: true });
+  assert.equal(m.snap, 0, '목 모드에서 실제 vCenter 경로(스냅샷)를 타지 않는다');
+  assert.equal(m.ok, true);
+  assert.match(m.detail, /mock/);
+  const l = runVmcloneChild({ dataSource: 'live', withVc: false });
+  assert.equal(l.snap, 0);
+  assert.equal(l.ok, false, 'live 에서 vCenter 설정이 없으면 시뮬레이션 성공이 아니라 실패');
+  assert.match(l.detail, /vCenter 설정을 찾을 수 없습니다/);
+  const lv = runVmcloneChild({ dataSource: 'live', withVc: true });
+  assert.equal(lv.snap, 1, 'live + 설정 있음은 실경로');
+  const src = stripComments(fs.readFileSync(path.join(SRC, 'vmclone/runner.js'), 'utf8'));
+  assert.doesNotMatch(src, /config\.mode/, '존재하지 않는 필드로 판정하지 않는다');
+});
+
+test('추가: 중계 점검 화면은 빈 숫자 칸을 0 으로 바꿔 보내지 않는다', () => {
+  const web = fs.readFileSync(path.join(HERE, '..', '..', 'web/src/views/tools/RelayCheckTool.jsx'), 'utf8');
+  assert.doesNotMatch(web, /Number\(e\.target\.value\)/, 'Number(\'\') 는 0 이다');
+  assert.match(web, /set\('intervalMs', secToMs\(e\.target\.value\)\)/);
+  assert.match(web, /set\('timeoutMs', secToMs\(e\.target\.value\)\)/);
+  assert.match(web, /set\('failStreak', blankOr\(e\.target\.value\)\)/);
+  assert.match(web, /import \{ blankOr \} from '\.\.\/blankOr\.js'/);
+});

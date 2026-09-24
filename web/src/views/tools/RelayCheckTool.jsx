@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import { blankOr } from '../blankOr.js';
 
 /**
  * HAProxy 경로 점검(v2.429, 사용자 요구 '특수기능에 haproxy 설정을 주기적으로 점검해서 알람으로 알려주고 해결방안도 제시').
@@ -32,6 +33,10 @@ export default function RelayCheckTool() {
   if (!data || !form) return <Loading />;
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  // v2.604(감사 LEFT2604-02): 빈 칸은 보내지 않는다(undefined → JSON 에서 빠진다) — `Number('')*1000 = 0` 이 저장값을
+  //   기본값으로 떨어뜨렸다. 서버도 빈 값·0 을 '미지정(이전 값 유지)' 으로 받는다.
+  const secToMs = (v) => { const n = blankOr(v); return n == null ? undefined : n * 1000; };
+  const secText = (ms) => (ms == null ? '' : Math.round(ms / 1000));
   const save = async () => {
     setBusy(true); setMsg(null);
     try { const r = await putJson('/tools/relaycheck/settings', form); if (r.ok === false) throw new Error(r.reason); setForm(r.settings); setMsg('저장되었습니다. 다음 점검부터 적용됩니다.'); await load(); }
@@ -72,9 +77,9 @@ export default function RelayCheckTool() {
           <span className="muted" style={{ fontSize: 12 }}>(꺼도 '지금 점검'은 됩니다)</span>
         </label>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
-          <label style={{ fontSize: 12 }}>점검 주기(초)<input className="input" type="number" min={L.intervalMs.min / 1000} max={L.intervalMs.max / 1000} value={Math.round(form.intervalMs / 1000)} onChange={(e) => set('intervalMs', Number(e.target.value) * 1000)} /></label>
-          <label style={{ fontSize: 12 }}>대상당 타임아웃(초)<input className="input" type="number" min={L.timeoutMs.min / 1000} max={L.timeoutMs.max / 1000} value={Math.round(form.timeoutMs / 1000)} onChange={(e) => set('timeoutMs', Number(e.target.value) * 1000)} /></label>
-          <label style={{ fontSize: 12 }} title="이 횟수만큼 연속 실패해야 알림을 보냅니다(일시적 흔들림 무시).">알림 연속 실패 횟수<input className="input" type="number" min={L.failStreak.min} max={L.failStreak.max} value={form.failStreak} onChange={(e) => set('failStreak', Number(e.target.value))} /></label>
+          <label style={{ fontSize: 12 }}>점검 주기(초)<input className="input" type="number" min={L.intervalMs.min / 1000} max={L.intervalMs.max / 1000} value={secText(form.intervalMs)} onChange={(e) => set('intervalMs', secToMs(e.target.value))} /></label>
+          <label style={{ fontSize: 12 }}>대상당 타임아웃(초)<input className="input" type="number" min={L.timeoutMs.min / 1000} max={L.timeoutMs.max / 1000} value={secText(form.timeoutMs)} onChange={(e) => set('timeoutMs', secToMs(e.target.value))} /></label>
+          <label style={{ fontSize: 12 }} title="이 횟수만큼 연속 실패해야 알림을 보냅니다(일시적 흔들림 무시).">알림 연속 실패 횟수<input className="input" type="number" min={L.failStreak.min} max={L.failStreak.max} value={form.failStreak ?? ''} onChange={(e) => set('failStreak', blankOr(e.target.value))} /></label>
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={form.autoHosts} onChange={(e) => set('autoHosts', e.target.checked)} />수집 서버 URL 호스트 자동 포함</label>
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={form.alerts} onChange={(e) => set('alerts', e.target.checked)} />상태 전이 알림 발화</label>
         </div>
