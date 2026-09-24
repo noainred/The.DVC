@@ -257,7 +257,7 @@ test('실패 스냅샷의 수치를 0 으로 싣지 않는다(폴러·엣지 수
 test('사용량 작업 로그 라우트는 기본 수집과 같은 응답 형태를 쓴다', () => {
   const src = read('../src/routes/api/sanSwitch.js');
   assert.match(src, /'\/tools\/sanswitch\/perf\/activity'/);
-  assert.match(src, /poller: sanSwitchPerfStatus\(\), events: listPerfActivity/);
+  assert.match(src, /poller: sanSwitchPerfStatus\(\), events: admin \? events : maskActivityEvents\(events\)/); // v2.599: 비-admin 주소 가림
   // '지금 수집' 은 즉시분과 요청분을 나눠 말한다(뭉치면 '전부 지금 수집했다' 는 거짓).
   assert.match(src, /requested, alreadyQueued/);
   // 설정 응답은 중앙 폴러 상태와 엣지 보고를 따로 싣는다.

@@ -149,7 +149,7 @@ adminRouter.post('/os-scan/run', adminOnly, async (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   if (allowed) {
     if (!vcId) return res.status(400).json({ ok: false, reason: '범위가 제한된 계정은 스캔할 vCenter 를 지정해야 합니다.' });
-    if (false) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    if (!allowed.has(vcId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
   }
   res.json(await runOsScanNow(vcId));
 });

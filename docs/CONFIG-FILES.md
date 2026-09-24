@@ -3,7 +3,7 @@
 포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **174개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-23)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-24)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -42,16 +42,16 @@
 | `capacity.db` | DB | 리소스 적정성(용량) 샘플 시계열 |  |  |  | config.js |
 | `capture-history.json` | 설정 | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 | ✅ |  | ✅ | net/captureHistory.js |
 | `capture-monitors.json` | 설정 | 연속 네트워크 모니터링 — 두 서버 간 캡처를 주기적으로 자동 실행해 이력에 기록하고, 경로 | ✅ |  | ✅ | net/monitor.js |
-| `central-agent-config.json` | 설정 | 엣지 포탈(에이전트) 설정 저장소 — 에이전트가 push한 자기 CONFIG_DIR 설정을 보관한다. | ✅ | ✅ | ✅ | central/agentConfig.js |
+| `central-agent-config.json` | 설정 | 엣지 포탈(에이전트) 설정 저장소 — 에이전트가 push한 자기 CONFIG_DIR 설정을 보관한다. |  | ✅ |  | central/agentConfig.js |
 | `central-agent-gpu-guest.json` | 설정 | 중앙에서 지정하는 'agent(엣지)별 GPU 게스트 수집 설정' 저장소. | ✅ | ✅ | ✅ | central/agentGpuGuestConfig.js |
 | `central-agent-sanswitch-perf.json` | 설정 | 엣지가 보고한 **포트 사용량 수집 상태**의 중앙 보관(v2.517, | ✅ | ✅ | ✅ | central/sanSwitchPerfEdge.js |
-| `central-agent-sanswitch.json` | 설정 | 엣지들이 push 한 SAN 스위치 스냅샷의 중앙 보관(v2.410). | ✅ |  | ✅ | central/sanSwitchEdge.js |
-| `central-agent-storage.json` | 설정 | 엣지들이 push 한 스토리지 스냅샷의 중앙 보관(v2.302). | ✅ |  | ✅ | central/storageEdge.js |
+| `central-agent-sanswitch.json` | 설정 | 엣지들이 push 한 SAN 스위치 스냅샷의 중앙 보관(v2.410). |  |  |  | central/sanSwitchEdge.js |
+| `central-agent-storage.json` | 설정 | 엣지들이 push 한 스토리지 스냅샷의 중앙 보관(v2.302). |  |  |  | central/storageEdge.js |
 | `central-agent-tokens.json` | 설정 | 엣지 에이전트별 개별 토큰 | ✅ |  | ✅ | central/agentTokens.js |
 | `central-agent-users.json` | 설정 | 중앙에서 지정하는 'agent(엣지)별 배포 사용자' 저장소. | ✅ | ✅ | ✅ | central/agentUsers.js |
 | `central-fleet.json` | 설정 | 엣지 베어메탈 집계 — 중앙(OC2) 측 캐시. | ✅ |  | ✅ | central/fleet.js |
 | `central-inventory.json` | 설정 | 위임 사이트가 push 한 인벤토리 캐시 | ✅ |  | ✅ | central/inventory.js |
-| `central-pdu.json` | 설정 | 엣지가 push 한 PDU 스냅샷의 중앙 보관소(v2.424). | ✅ | ✅ | ✅ | central/pduEdge.js |
+| `central-pdu.json` | 설정 | 엣지가 push 한 PDU 스냅샷의 중앙 보관소(v2.424). |  | ✅ |  | central/pduEdge.js |
 | `central-svcmon-assign.json` | 설정 | 성능점검 배정 — 중앙이 관리하는 '어느 엣지가 어느 대상을 점검하는가'. | ✅ | ✅ |  | central/svcmonAssign.js |
 | `central-unsupported-servers.json` | 설정 | iDRAC 스캔이 발견한 **비-Dell(미지원) 서버**의 중앙 보관소(v2.495). | ✅ | ✅ | ✅ | central/unsupportedServers.js |
 | `collectors.json` | 설정 | 원격 수집 서버(엣지) 목록과 토큰 | ✅ | ✅ | ✅ | collector/registry.js |

@@ -19,7 +19,7 @@ export function nsxLimitNotes(managers = [], segments = []) {
     const fw = m?.firewall || {};
     const omitted = Number(fw.policiesOmitted);
     if (Number.isFinite(omitted) && omitted > 0) {
-      out.push(`**${name}**: DFW 정책 ${fw.policies}개 중 ${omitted}개는 규칙 목록을 조회하지 않았습니다(정책당 조회 상한 ${fw.policiesRuleLimit ?? '—'}개) — 규칙 표에는 앞 정책들의 규칙만 있습니다.`);
+      out.push(`**${name}**: DFW 정책 ${fw.policies}개 중 ${omitted}개는 규칙 목록을 조회하지 않았습니다${fw.policiesRuleLimit != null ? `(정책당 조회 상한 ${fw.policiesRuleLimit}개)` : ''} — 규칙 표에는 앞 정책들의 규칙만 있습니다.`);
     }
     if (fw.rulesPartial) out.push(`**${name}**: DFW 규칙 수는 하한입니다(규칙 수를 알 수 없는 정책이 있거나 규칙 목록이 잘렸습니다).`);
   }
