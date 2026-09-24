@@ -74,6 +74,7 @@ import { listRegistry as listVcentersForLinks } from '../vcenter/registry.js';
 import { loadLinkCheckSettings, linkCheckEnabled } from '../linkcheck/settings.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
+import { stripCoercionTraps, strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';   // v2.600 CEN2600-01·RECENT2600-01 — 엣지가 보낸 수치 좁히기
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.583: 반복 수신 로그 조절
 const gpuRecvLog = createChangeLogger();
@@ -102,6 +103,17 @@ export const UNKNOWN_ROUTE_KEY = '(없는 경로)';
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
 // ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
 wrapAsyncRouter(centralRouter);
+
+// v2.603(감사 CEN2603-05): 본문 객체의 자기 속성 toString/valueOf 를 입구에서 지운다 — `{"toString":1}` 한 값이 String()/`${}`/
+//   Number()/배열 join 에서 던져 수신 경로 16곳이 500 이었다(util/coercionTrap.js). 필드마다 고치면 다음 필드에서 또 난다.
+//   모든 라우트보다 앞(인증·집계 미들웨어 포함 — 그쪽도 본문 agent 를 글자로 바꾼다).
+centralRouter.use((req, _res, next) => {
+  if (req.body && typeof req.body === 'object') {
+    const n = stripCoercionTraps(req.body);
+    if (n) req.coercionTrapsRemoved = n;
+  }
+  next();
+});
 
 // 수신 트래픽 진단 — 에이전트→중앙 POST의 와이어 바이트(Content-Length)·페이로드 요약을 에이전트·
 // 엔드포인트별로 집계한다(특정 에이전트가 무엇을 얼마나 보내는지 화면에서 확인). 응답 완료 시 1회 기록.
@@ -1570,15 +1582,18 @@ centralRouter.post('/ping-result', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
-  if (!b.vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
+  const vcId = strOf(b.vcenterId, 256); // v2.603 CEN2603-05: 글자·수만(객체면 String() 이 던졌다)
+  if (!vcId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다(글자).' });
   // 개별 토큰은 자기 소유 vCenter 의 도달성만 보고(남의 사이트 상태 위조 차단).
-  if (req.centralAuth.mode === 'agent' && !agentOwnsVcenter(req.centralAuth.agent, b.vcenterId)) {
-    return res.status(403).json({ ok: false, reason: `vcenterId '${b.vcenterId}'는 '${req.centralAuth.agent}' 소유가 아닙니다.` });
+  if (req.centralAuth.mode === 'agent' && !agentOwnsVcenter(req.centralAuth.agent, b.vcenterId)) { // vcId 검사로 b.vcenterId 는 글자·수다
+    return res.status(403).json({ ok: false, reason: `vcenterId '${vcId.slice(0, 128)}'는 '${req.centralAuth.agent}' 소유가 아닙니다.` });
   }
   // v2.600(CEN2600-02): direct vCenter 의 도달성은 중앙이 직접 잰다(v2.590 P11 — 엣지 큐에 올리지 않는다) — 엣지 보고는 위조다.
-  const pingDeny = edgeVcWriteDenied(b.vcenterId);
+  // v2.603(감사 CEN2603-06): **사이트 위임으로 등록된 vCenter 만** 받는다(requireSite). 예전에는 등록되지 않은 id 도 받아
+  //   새 id 를 연달아 보내면 결과 Map 의 256개 상한에서 실제 vCenter 의 결과가 밀려났다(pingJobs.sweepResults).
+  const pingDeny = edgeVcWriteDenied(vcId, { requireSite: true });
   if (pingDeny) return res.status(403).json({ ok: false, reason: pingDeny });
-  setPingResults(String(b.vcenterId), Array.isArray(b.results) ? b.results.slice(0, 200) : []);
+  setPingResults(vcId, Array.isArray(b.results) ? b.results.slice(0, 200) : []);
   res.json({ ok: true, count: Array.isArray(b.results) ? b.results.length : 0 });
 });
 

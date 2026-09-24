@@ -492,4 +492,4 @@ export async function perfDbStats({ now = Date.now() } = {}) {
   } catch (e) { return { available: true, error: e.message }; }
 }
 
-export function _resetForTest() { lockRetry.ok(); try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; _counts = null; _pruning = null; }
+export function _resetForTest() { lockRetry.ok(); try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; _counts = null; _pruning = null; _pruningDays = null; }

@@ -99,8 +99,9 @@ function prepare(db) {
     stats: db.prepare('SELECT (SELECT COUNT(*) FROM spikes) AS spikeRows, (SELECT COALESCE(SUM(n),0) FROM spikes) AS moments, (SELECT COUNT(*) FROM cover) AS coverRows'),
     // v2.596(감사 DB-4): 인덱스는 t0 에만 있다 — t0 ≤ t1 이므로 't0 < before' 를 함께 걸어 idx_spikes_t0 를 타게 한다(결과 동일).
     // v2.603(감사 DB2603-02): 청크 DELETE 형태(LIMIT 은 chunkedDelete 가 붙인다) — 한 방 DELETE 는 보존일을 줄이면
-    //   BLOB 행 수십만 개를 동기로 지워 이벤트 루프를 멈췄다. 서브쿼리는 idx_spikes_t0·idx_cover_h 를 탄다.
-    pruneSpikes: db.prepare('DELETE FROM spikes WHERE rowid IN (SELECT rowid FROM spikes WHERE t0 < ? AND t1 < ? LIMIT ?)'),
+    //   BLOB 행 수십만 개를 동기로 지워 이벤트 루프를 멈췄다. 서브쿼리는 idx_spikes_t0·idx_cover_h 를 탄다(바깥의 같은
+    //   조건은 결과가 같고 v2.596 DB-4 의 't0 인덱스' 형태를 남긴다 — 인자는 경계 4개 + LIMIT).
+    pruneSpikes: db.prepare('DELETE FROM spikes WHERE t0 < ? AND t1 < ? AND rowid IN (SELECT rowid FROM spikes WHERE t0 < ? AND t1 < ? LIMIT ?)'),
     pruneCover: db.prepare('DELETE FROM cover WHERE rowid IN (SELECT rowid FROM cover WHERE h < ? LIMIT ?)'),
     getMeta: db.prepare('SELECT v FROM meta WHERE k=?'),
     setMeta: db.prepare('INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v'),
@@ -274,7 +275,7 @@ export async function pruneVmSeries(vcenterId, retentionDays) {
   flight.p = prev.then(async () => {
     const before = Date.now() - days * 86_400_000;
     let n = 0;
-    try { n = (await chunkedDelete(x.st.pruneSpikes, [before, before], { label: `vmseries.${vcenterId}.spikes` })).deleted; } catch (e) { console.warn(`[vmseries] ${vcenterId} prune 실패: ${e?.message || e}`); }
+    try { n = (await chunkedDelete(x.st.pruneSpikes, [before, before, before, before], { label: `vmseries.${vcenterId}.spikes` })).deleted; } catch (e) { console.warn(`[vmseries] ${vcenterId} prune 실패: ${e?.message || e}`); }
     try { await chunkedDelete(x.st.pruneCover, [before - HOUR], { label: `vmseries.${vcenterId}.cover` }); } catch (e) { console.warn(`[vmseries] ${vcenterId} cover prune 실패: ${e?.message || e}`); }
     return n;
   }).finally(() => { if (pruneFlights.get(file) === flight) pruneFlights.delete(file); });
