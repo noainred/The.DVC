@@ -73,6 +73,9 @@ export function scopedNsxRollup({ managers, gateways, segments, transportNodes }
     managers: m.length,
     managersUp: m.filter((x) => x.status === 'connected').length,
     managersDegraded: m.filter((x) => x.status === 'degraded').length,
+    // v2.603(RECENT2603-01): 'unknown'(v2.602 — 클러스터 상태 조회 실패, 판정 보류)은 정상도 저하도 아니다.
+    //   따로 세지 않으면 타일이 '정상도 저하도 아닌 매니저 = 다운' 으로 읽어 연결 끊김과 같은 위험(2)이 된다.
+    managersUnknown: m.filter((x) => x.status === 'unknown').length,
     t0: g.filter((x) => x.tier === 'T0').length,
     t1: g.filter((x) => x.tier === 'T1').length,
     segments: seg.length,

@@ -29,6 +29,17 @@ import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgen
 
 import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, maskPollerStatus } from '../../auth/addressMask.js';
 import { latestMapByDevice } from '../../storage/latestSnapshots.js';
+import { numOrNull } from '../../util/numOrNull.js';
+/**
+ * 연결 테스트 응답의 개수 요약(v2.603 RECENT2603-04). 노드·경보는 수집기가 못 읽으면 null 이다 — 0 으로 바꾸지 않는다
+ * (0 은 '경보 없음' 이라는 거짓). 풀·계정은 배열 길이라 빈 배열이면 0 이 맞다.
+ */
+export function testCounts(snap) {
+  return {
+    nodes: numOrNull(snap?.nodes?.count), pools: (snap?.pools || []).length,
+    accounts: (snap?.accounts || []).length, alerts: numOrNull(snap?.alerts?.unresolved),
+  };
+}
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
 // v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
@@ -139,7 +150,9 @@ api.post('/tools/storage/test', adminOnly, async (req, res) => {
     version: snap.version || '',
     serial: snap.serial || '',
     capacity: snap.capacity || null,
-    counts: { nodes: snap.nodes?.count ?? 0, pools: (snap.pools || []).length, accounts: (snap.accounts || []).length, alerts: snap.alerts?.unresolved ?? 0 },
+    // v2.603 RECENT2603-04: 노드·경보 수를 읽지 못한 수집기(PowerMax 경보 미수집 — v2.602 가 null 로 둔다)의 null 을
+    //   `?? 0` 이 다시 0 으로 바꿔 화면이 '경보 0' 이라 했다. 못 읽은 값은 null 그대로 두고 화면이 '—' 로 그린다.
+    counts: testCounts(snap),
     sections: snap.sections || {},
     // SSH CLI 수집기(pstcli·uemcli·xmcli·vplexcli)는 각 명령의 원문 앞부분을 남긴다(v2.405).
     // 이 CLI 들의 출력 형식은 버전마다 달라 파싱이 빗나갈 수 있는데, 원문을 못 보면 원격 장비의

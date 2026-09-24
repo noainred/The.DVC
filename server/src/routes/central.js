@@ -680,7 +680,7 @@ centralRouter.post('/inventory', (req, res) => {
   const mockByFlag = b.source === 'mock' || b.mock === true;
   const mockByContent = isMockVcenter(b.vcenter) || isMockVcenter({ id: String(b.vcenterId || ''), name: b.vcenter?.name });
   if (mockByFlag || mockByContent) {
-    noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: true, peer: req.socket?.remoteAddress || '' });
+    noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: true, peer: req.socket?.remoteAddress || '', verified: req.centralAuth.mode === 'agent' || edgeNameKnown(agent) });
     const why = mockByFlag
       ? `엣지가 스스로 mock 임을 알렸습니다(source=${b.source || 'mock'})`
       : `보낸 vCenter '${b.vcenterId}' 가 데모 생성기의 가짜 사이트와 id·이름이 같습니다(DATA_SOURCE=auto 로 접속 실패 시 목 데이터로 폴백했거나, 엣지가 구버전이라 mock 표시를 못 보냅니다)`;
@@ -690,7 +690,7 @@ centralRouter.post('/inventory', (req, res) => {
     return res.status(400).json({ ok: false, reason, mockBlocked: true, by: mockByFlag ? 'flag' : 'content' });
   }
   // v2.428(미스매치 #6/#7): 같은 vcenterId 를 다른 agent 가 번갈아 push 하거나, 같은 agent 이름이 다른 hostname 에서 오면 충돌로 기록.
-  noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: false, peer: req.socket?.remoteAddress || '' });
+  noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: false, peer: req.socket?.remoteAddress || '', verified: req.centralAuth.mode === 'agent' || edgeNameKnown(agent) }); // v2.603 CEN2603-04: 미검증 이름은 작은 링
   noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
   const vcId = String(b.vcenterId);
   const dropped = { notObject: 0, otherVcenter: 0, badId: 0, coerced: 0 };
@@ -1092,12 +1092,31 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
     const dropped = (hBefore - hosts.length) + (vBefore - vms.length);
     if (dropped) console.warn(`[central] gpu-guest-data: ${agent} 가 소유하지 않은 vCenter 항목 ${dropped}개 드롭(위조 방지)`);
   }
-  setGuestGpu({ hosts, vms, agent });
+  // v2.603(감사 CEN2603-01): 식별자의 vCenter 접두는 **등록부에 사이트 위임(site)으로 등록된 id** 여야 한다(토큰 종류 무관 —
+  //   대상의 구조적 성질이다. v2.600 edgeVcWriteDenied requireSite 와 같은 판단). 예전에는 등록되지 않은 접두를 TOFU 로 받아
+  //   접두를 바꿔 가며 항목을 무한히 만들 수 있었다. 등록부를 읽지 못하면 판정하지 않는다(설정 문제가 수신을 끊지 않게).
+  const modes = vcCollectModes();
+  let unregistered = 0;
+  if (modes) {
+    const siteIds = [...modes].filter(([, m]) => m === 'site').map(([id]) => id);
+    const onSite = (id) => { const s = String(id || ''); return siteIds.some((vc) => s === vc || s.startsWith(`${vc}:`)); };
+    const hB = hosts.length; const vB = vms.length;
+    hosts = hosts.filter((h) => onSite(h.hostId));
+    vms = vms.filter((v) => onSite(v.vmId));
+    unregistered = (hB - hosts.length) + (vB - vms.length);
+    if (unregistered) console.warn(`[central] gpu-guest-data: ${agent} 등록되지 않은 vCenter 의 항목 ${unregistered}개 드롭`);
+  }
+  const verifiedGpu = req.centralAuth.mode === 'agent' || edgeNameKnown(agent);
+  const put = setGuestGpu({ hosts, vms, agent, verified: verifiedGpu });
+  const omitted = (put.omittedHosts || 0) + (put.omittedVms || 0);
+  if (omitted) console.warn(`[central] gpu-guest-data: ${agent} 상한 초과로 ${omitted}개를 받지 않았습니다(호스트 ${put.omittedHosts} · VM ${put.omittedVms})`);
   if (b.diag) setGpuGuestDiag(agent, b.diag, { hosts: hosts.length, vms: vms.length }); // 수집 진단 보관
   // v2.583: 엣지마다 인벤토리 주기로 찍혀 저널을 덮었다(28곳 × 60초 ≈ 하루 4만 줄) — 값이 바뀔 때와
   //   1시간마다만 찍는다(util/logThrottle.js). 문구 형식은 그대로다(로그 분석 규칙이 이 형식을 읽는다).
   if (gpuRecvLog(agent, `${hosts.length}/${vms.length}`)) console.log(`[central] gpu-guest-data 수신: agent=${agent} hosts=${hosts.length} vms=${vms.length}`);
-  res.json({ ok: true, agent, hosts: hosts.length, vms: vms.length });
+  res.json({ ok: true, agent, hosts: put.hosts, vms: put.vms,
+    ...(omitted ? { omitted: { hosts: put.omittedHosts, vms: put.omittedVms } } : {}),
+    ...(unregistered ? { unregistered } : {}), ...(verifiedGpu ? {} : { unverifiedAgent: true }) });
 });
 
 // 중앙→엣지 GPU 게스트 설정 배포(pull): 엣지가 자기 이름으로 배포 설정을 가져가 로컬 적용.

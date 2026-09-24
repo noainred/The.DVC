@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+import { numOrNull } from '../util/numOrNull.js';
 // v2.599 DB2599-02: 첫 open 잠금은 래치하지 않고 잠시 뒤 다시 연다.
 const lockRetry = createLockRetry();
 
@@ -238,8 +239,16 @@ function initSqlite() {
       // v2.602(감사 DB2602-03 — 재현): VM 의 **유일한** 전원 전이 행을 지우면 '꺼진 지 N일' 이 roster.first_seen 폴백으로
       // 떨어져 과대 표시됐다(재현 1,200일 → 1,500일, 출처 first_seen). ds_series(v2.601 DB2601-02)와 같은 규칙 — 전원 전이는
       // (vCenter, VM, 종류)별 **보존 경계 이전의 마지막 행**을 남긴다. VM 당 최대 2행이라 유계다. added/removed 는 그대로 지운다.
+      // v2.603(감사 RECENT2603-03 — 재현): 위 규칙은 **지금 있는 VM** 을 위한 것인데 로스터 조건이 없어 삭제된 VM 의 전이 행도
+      // 영원히 남았다(VM 교체가 잦으면 무한 증가 — 재현: 28 vCenter · VM 11,200대 중 삭제 5,348대 → 남은 행 22,400 → 로스터 기준 11,704).
+      // 이제 남기는 것은 **로스터에 있는 VM** 의 마지막 행뿐이다. 로스터가 비어 있는 vCenter(첫 스냅샷 전·등록 해제)는
+      // '지금 있는가' 를 판정할 수 없으므로 예전처럼 남긴다(지우는 쪽으로 추측하지 않는다). 성능(재현 60만 행): 정상 상태
+      // prune 44ms → 39ms — 서브쿼리는 여전히 idx_changes_vc_kind 커버링 스캔이고 로스터는 PK 탐색이다(DB2603-05 는 개선 불필요).
       pruneChanges: db.prepare(`DELETE FROM changes WHERE ts < ? AND rowid NOT IN (
-        SELECT MAX(rowid) FROM changes WHERE ts < ? AND kind IN ('powered_off','powered_on') GROUP BY vcenter_id, vm_id, kind)`),
+        SELECT MAX(c.rowid) FROM changes c WHERE c.ts < ? AND c.kind IN ('powered_off','powered_on')
+          AND (EXISTS (SELECT 1 FROM roster r WHERE r.vcenter_id = c.vcenter_id AND r.vm_id = c.vm_id)
+               OR NOT EXISTS (SELECT 1 FROM roster r2 WHERE r2.vcenter_id = c.vcenter_id))
+        GROUP BY c.vcenter_id, c.vm_id, c.kind)`),
       meta: db.prepare("SELECT COUNT(*) AS n, MIN(ts) AS mn, MAX(ts) AS mx FROM snaps WHERE vcenter_id=''"),
     };
     return { db, st };
@@ -523,8 +532,19 @@ export async function vmtrackMeta() {
   return x.st.meta.get() || { n: 0, mn: null, mx: null };
 }
 
-/** 보존기간 정리(기본 1,095일 = 3년 — 행이 작아 넉넉히). */
+/**
+ * 보존기간 정리(기본 1,095일 = 3년 — 행이 작아 넉넉히).
+ * v2.603(감사 DB2603-03): 음수 보존일은 경계를 **미래**로 옮겨 이력 전체를 지웠다(`Number(-1) || 1095` 는 -1 이다 —
+ * '경계 이전 마지막 행 보존' 규칙까지 무력화). 양의 유한수가 아니면 **지우지 않고** 사유를 돌려준다(오설정을 파괴로
+ * 해석하지 않는다). 0 은 기존 표현식에서 이미 기본값(1,095일)이다.
+ */
 export async function pruneVmtrack(retentionDays = Number(process.env.VMTRACK_RETENTION_DAYS) || 1095) {
+  const days = numOrNull(retentionDays);
+  if (days == null || !(days > 0)) {
+    console.warn(`[vmtrack] 보존일이 올바르지 않아 정리를 건너뜁니다(${String(retentionDays).slice(0, 40)}) — VMTRACK_RETENTION_DAYS 는 양수여야 합니다`);
+    return { ok: false, skipped: true, reason: 'invalid-retention' };
+  }
+  retentionDays = days;
   const x = await getDb();
   if (!x) return { ok: false };
   const cut = Date.now() - retentionDays * 86_400_000;

@@ -528,6 +528,21 @@ export function parseFruShow(text) {
  * ══════════════════════════════════════════════════════════════════════════════ */
 
 /**
+ * 센서 이름 = 첫 'is' 단어 앞(끝의 공백·쉼표/세미콜론 하나 제거). 순수·선형(v2.603 감사 SEC2603-01).
+ * 예전 `rest.replace(/\s*[,;]?\s*\bis\b.*$/i, '')` 는 'is' 가 없고 긴 공백 양쪽에 글자가 있는 줄에서
+ * 시작 위치마다 공백 구간을 다시 훑어 3차로 늘었다(공백 3,000자 한 줄에 수 초). 결과는 같다 —
+ * 가장 왼쪽 매치는 언제나 첫 'is' 앞 공백·구두점 구간에서 시작한다.
+ */
+export function sensorNameOf(rest) {
+  const s = String(rest || '');
+  const i = s.search(/\bis\b/i);
+  if (i < 0) return s.trim();
+  let head = s.slice(0, i).trimEnd();
+  if (head.endsWith(',') || head.endsWith(';')) head = head.slice(0, -1).trimEnd();
+  return head.trim();
+}
+
+/**
  * `sensorshow` → 전압·온도·팬 센서.
  *
  * 관용 매칭: `sensor  N: (종류) 이름 is 상태[, value is N C | speed is N RPM]`
@@ -545,7 +560,7 @@ export function parseSensorShow(text) {
     // `... is Ok, value is 31 C` / `... is Ok,speed is 7050 RPM` / `... is Absent`
     const st = rest.match(/\bis\s+([A-Za-z-]+)/);
     const val = rest.match(/(?:value|speed)\s+is\s+(-?[\d.]+)\s*([A-Za-z]+)?/i);
-    const name = rest.replace(/\s*[,;]?\s*\bis\b.*$/i, '').trim();
+    const name = sensorNameOf(rest);
     const state = st ? st[1] : '';
     list.push({
       n: Number(m[1]),

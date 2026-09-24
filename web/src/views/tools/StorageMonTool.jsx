@@ -1359,7 +1359,12 @@ function TestResult({ r }) {
           {r.version && <span className="muted">버전 <b style={{ color: 'var(--text)' }}>{r.version}</b></span>}
           {r.serial && <span className="muted">시리얼 <b style={{ color: 'var(--text)' }}>{r.serial}</b></span>}
           {cap && <span className="muted">용량 <b style={{ color: 'var(--text)' }}>{cap}</b></span>}
-          {r.counts && <span className="muted">노드 {r.counts.nodes} · 풀 {r.counts.pools} · 계정 {r.counts.accounts} · 경보 {r.counts.alerts}</span>}
+          {/* v2.603 RECENT2603-04: 노드·경보 수를 못 읽었으면 서버가 null 을 준다 — 0 이 아니라 '—'(사유는 아래 섹션 배지) */}
+          {r.counts && (
+            <span className="muted" title={(r.counts.nodes == null || r.counts.alerts == null) ? '— 는 이번 테스트에서 개수를 읽지 못한 항목입니다(0 이 아닙니다) — 아래 섹션 상태를 보세요.' : undefined}>
+              노드 {r.counts.nodes ?? '—'} · 풀 {r.counts.pools} · 계정 {r.counts.accounts} · 경보 {r.counts.alerts ?? '—'}
+            </span>
+          )}
         </div>
       )}
       {sections.length > 0 && (

@@ -11,6 +11,7 @@ import https from 'node:https';
 import http from 'node:http';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
+import { splitHostPort } from '../util/hostPort.js';   // v2.603(LEFT2603-02): IPv6 host:port 분리
 
 function tcpStep(host, port, timeoutMs) {
   return new Promise((resolve) => {
@@ -147,8 +148,11 @@ export function buildVerdict({ port, steps, tlsCause }) {
 /** host(스킴 제거), port(기본 443)에 대해 3단계 테스트. timeoutMs는 단계별 상한. */
 export async function probeRelayPath(rawHost, { timeoutMs = 6000 } = {}) {
   const clean = String(rawHost || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
-  const host = clean.split(':')[0];
-  const port = Number(clean.split(':')[1]) || 443;
+  // v2.603(LEFT2603-02): ':' 로 자르면 IPv6(`[2001:db8::10]:443`)의 host 가 '[2001' 이 된다 — 공용 파서로.
+  //   접속에는 대괄호 없는 host, SSRF 검사에는 대괄호 붙인 host:port 를 쓴다.
+  const hp = splitHostPort(clean);
+  const host = hp ? hp.host : clean;
+  const port = hp ? hp.port : 443;
   const steps = { tcp: null, tls: null, http: null, plain: null };
 
   // SSRF/내부 포트스캔 방어 — 이 함수는 임의 host:port로 TCP/TLS/HTTP를 찔러 보고 단계별
@@ -157,7 +161,7 @@ export async function probeRelayPath(rawHost, { timeoutMs = 6000 } = {}) {
   // 호출부(admin.js)를 건드리지 않기 위해 여기서 기존 반환 형태(verdict)로 즉시 반환한다.
   // 이 함수는 이미 async라 DNS 해석까지 검사하는 resolved 가드를 쓴다 — 169.254.169.254로
   // 해석되는 '이름'을 통한 우회(동기 가드는 IP 리터럴만 검사)를 차단한다.
-  const blocked = await ssrfBlockReasonResolved(clean);
+  const blocked = await ssrfBlockReasonResolved(hp ? hp.hostPort : clean);
   if (blocked) {
     return { host, port, steps, blocked: true, reason: blocked, verdict: { state: 'blocked', text: `진단을 수행할 수 없는 주소입니다 — ${blocked}` } };
   }

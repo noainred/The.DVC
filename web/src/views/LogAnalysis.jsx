@@ -145,7 +145,8 @@ export default function LogAnalysis() {
           </select>
         )}
         {source !== 'paste' && (
-          <button className="tab" style={{ padding: '6px 12px' }} disabled={busy || (source === 'edge' && !agent)} onClick={() => run()}>
+          // v2.603(감사 WEB2603-02): 주 실행 버튼이 전역 .tab(테두리·배경 없음)이라 맨 글자로 보였다 — 주 동작은 login-btn.
+          <button className="login-btn" style={{ flex: 'none', width: 'auto', marginTop: 0, padding: '6px 14px', fontSize: 13 }} disabled={busy || (source === 'edge' && !agent)} onClick={() => run()}>
             {busy ? '분석 중…' : source === 'journal' ? '저널 읽고 분석' : '분석'}
           </button>
         )}
@@ -160,7 +161,7 @@ export default function LogAnalysis() {
           <textarea className="input" style={{ width: '100%', minHeight: 160, fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 12 }}
             placeholder="journalctl 또는 tail 출력을 붙여넣으세요(최대 8MB)" value={text} onChange={(e) => setText(e.target.value)} />
           <div className="flex gap wrap" style={{ marginTop: 6, alignItems: 'center' }}>
-            <button className="tab" style={{ padding: '6px 12px' }} disabled={busy || !text.trim()} onClick={() => run('paste')}>{busy ? '분석 중…' : '붙여넣은 로그 분석'}</button>
+            <button className="login-btn" style={{ flex: 'none', width: 'auto', marginTop: 0, padding: '6px 14px', fontSize: 13 }} disabled={busy || !text.trim()} onClick={() => run('paste')}>{busy ? '분석 중…' : '붙여넣은 로그 분석'}</button>
             <span className="muted" style={{ fontSize: 11.5 }}>{(new Blob([text]).size / 1048576).toFixed(2)} MB</span>
           </div>
           <details style={{ marginTop: 6 }}>

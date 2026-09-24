@@ -37,6 +37,7 @@ const FILE = () => path.join(config.dbDir || config.configDir, 'link-check.db');
 // 날짜 경계 코어는 `util/dayKey.js` 하나다(v2.582 ARCH-2). import 뒤 export(v2.575 재수출 규약).
 import { DAY_OFFSET_MIN, dayKey } from "../util/dayKey.js";
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
+import { chunkedDelete } from '../util/chunkedPrune.js';
 const lockRetry = createLockRetry();
 export { DAY_OFFSET_MIN, dayKey };
 const COUNT_CACHE_MS = Math.max(0, Number(process.env.LINKCHECK_COUNT_CACHE_MS) || 60_000);
@@ -277,19 +278,49 @@ export async function insertResults(results = [], { byNode = '' } = {}) {
   return { ok: true, inserted, events, duplicates, truncated: truncatedN };
 }
 
-/** 보존 집행. ⚠ 스로틀은 `(++tick % N) === 0`(기동 첫 틱 즉발 금지 — v2.453). */
+/**
+ * 보존 집행. ⚠ 스로틀은 `(++tick % N) === 0`(기동 첫 틱 즉발 금지 — v2.453).
+ *
+ * v2.603(감사 DB2603-02 — 재현): 예전 `DELETE FROM link_sample WHERE ts < ?` 한 방은 보존일을 설정 화면에서 줄이면
+ * 수백만 행을 동기로 지워 이벤트 루프를 멈췄다(감사 재현: 300만 행 3.9초 · 최대 루프 공백 3.9초). logs(v2.601)·metrics 와
+ * 같은 규약 — rowid 서브쿼리 청크 DELETE + 청크 사이 setImmediate 양보(util/chunkedPrune.js). 상한에 걸리면 `done:false`
+ * 이고 다음 주기가 잇는다. 정리끼리는 겹치지 않는다 — 같은 보존일이면 진행 중인 것을 공유하고, 보존일이 바뀌었으면
+ * 그것이 끝난 뒤 **새 경계로 한 번 더** 돈다(RECENT2603-06 과 같은 판단: 공유만 하면 새 보존일이 그 호출에 안 먹는다).
+ */
+let _pruneFlight = null;   // { key, p }
+function prunePrepared(db) {
+  // 인덱스: idx_lc_sample_ts · idx_lc_event_ts · idx_lc_daily_day 가 서브쿼리의 풀스캔을 막는다.
+  return {
+    sample: db.prepare('DELETE FROM link_sample WHERE rowid IN (SELECT rowid FROM link_sample WHERE ts < ? LIMIT ?)'),
+    event: db.prepare('DELETE FROM link_event WHERE rowid IN (SELECT rowid FROM link_event WHERE ts < ? LIMIT ?)'),
+    daily: db.prepare('DELETE FROM link_daily WHERE rowid IN (SELECT rowid FROM link_daily WHERE day < ? LIMIT ?)'),
+  };
+}
+async function runPrune(db, { sampleDays, eventDays, dailyDays }) {
+  const st = prunePrepared(db);
+  const a = await chunkedDelete(st.sample, [Date.now() - sampleDays * 86_400_000], { label: 'linkcheck.link_sample' });
+  const b = await chunkedDelete(st.event, [Date.now() - eventDays * 86_400_000], { label: 'linkcheck.link_event' });
+  const c = await chunkedDelete(st.daily, [dayKey(Date.now() - dailyDays * 86_400_000)], { label: 'linkcheck.link_daily' });
+  const del = { sample: a.deleted, event: b.deleted, daily: c.deleted };
+  if (del.sample || del.event || del.daily) _counts = null;
+  // 상한에 걸려 남은 것이 있으면 밝힌다(조용한 상한 금지) — 다음 주기가 이어서 지운다.
+  const done = a.done && b.done && c.done;
+  return { ok: true, ...del, done };
+}
 export async function pruneLinkCheck({ sampleDays = 90, eventDays = 30, dailyDays = 365 * 5, every = 12, force = false } = {}) {
   const db = await getDb();
   if (!db) return { ok: false };
   if (!force && (++_tick % every) !== 0) return { ok: true, skipped: true };
-  try {
-    const a = db.prepare('DELETE FROM link_sample WHERE ts < ?').run(Date.now() - sampleDays * 86_400_000);
-    const b = db.prepare('DELETE FROM link_event WHERE ts < ?').run(Date.now() - eventDays * 86_400_000);
-    const c = db.prepare('DELETE FROM link_daily WHERE day < ?').run(dayKey(Date.now() - dailyDays * 86_400_000));
-    const del = { sample: Number(a?.changes) || 0, event: Number(b?.changes) || 0, daily: Number(c?.changes) || 0 };
-    if (del.sample || del.event || del.daily) _counts = null;
-    return { ok: true, ...del };
-  } catch (e) { return { ok: false, error: String(e?.message || e).slice(0, 200) }; }
+  const days = { sampleDays, eventDays, dailyDays };
+  const key = `${sampleDays}|${eventDays}|${dailyDays}`;
+  if (_pruneFlight && _pruneFlight.key === key) return _pruneFlight.p;
+  const prev = _pruneFlight ? _pruneFlight.p.catch(() => {}) : Promise.resolve();
+  const flight = { key, p: null };
+  flight.p = prev.then(() => runPrune(db, days))
+    .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 200) }))
+    .finally(() => { if (_pruneFlight === flight) _pruneFlight = null; });
+  _pruneFlight = flight;
+  return flight.p;
 }
 
 /** 화면 표 — 링크별 최신 1건. ⚠ 전용 테이블을 읽는다(GROUP BY 로 되돌리지 말 것). */

@@ -13,7 +13,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
+import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';
+import { chunkedDelete } from '../util/chunkedPrune.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
 
 const DB_PATH = config.ping.dbPath;
 
@@ -47,7 +48,25 @@ function initSqlite() {
         SUM(CASE WHEN ok=1 THEN 0 ELSE 1 END) fail, COUNT(*) n
       FROM samples WHERE target=? AND ts>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
     const metaStmt = db.prepare('SELECT MIN(ts) mn, MAX(ts) mx, COUNT(*) n FROM samples WHERE target=?');
-    const prune = db.prepare('DELETE FROM samples WHERE ts < ?');
+    // v2.603(감사 DB2603-02 — 재현): 예전 `DELETE FROM samples WHERE ts < ?` 한 방은 보존일을 줄인 뒤 첫 정리에서
+    // 515만 행을 동기로 지워 이벤트 루프를 5.6초 멈췄다(ping 은 가장 큰 테이블이다). rowid 서브쿼리 청크 DELETE +
+    // 청크 사이 양보(util/chunkedPrune.js, v2.453·v2.601 규약) — idx_ping_ts 가 서브쿼리의 풀스캔을 막는다.
+    const pruneChunk = db.prepare('DELETE FROM samples WHERE rowid IN (SELECT rowid FROM samples WHERE ts < ? LIMIT ?)');
+    // 정리끼리는 겹치지 않는다. 같은 경계면 진행 중인 것을 공유하고, 경계가 더 늦으면(보존일을 줄였으면) 끝난 뒤
+    // 새 경계로 한 번 더 돈다(RECENT2603-06 과 같은 판단). 호출부(monitor.js)는 기다리지 않으므로 실패는 여기서 남긴다.
+    let pruneFlight = null;   // { cut, p }
+    const prune = (beforeTs) => {
+      const cut = Number(beforeTs);
+      if (!Number.isFinite(cut)) return Promise.resolve({ deleted: 0, done: true, chunks: 0 });
+      if (pruneFlight && pruneFlight.cut >= cut) return pruneFlight.p;
+      const prev = pruneFlight ? pruneFlight.p : Promise.resolve();
+      const flight = { cut, p: null };
+      flight.p = prev.then(() => chunkedDelete(pruneChunk, [cut], { label: 'ping.samples' }))
+        .catch((e) => { console.warn(`[ping] prune 실패: ${e?.message || e}`); return { deleted: 0, done: false, chunks: 0, error: String(e?.message || e) }; })
+        .finally(() => { if (pruneFlight === flight) pruneFlight = null; });
+      pruneFlight = flight;
+      return flight.p;
+    };
     const dropTarget = db.prepare('DELETE FROM samples WHERE target=?');
     return {
       kind: 'sqlite',
@@ -57,7 +76,7 @@ function initSqlite() {
       history: (target, sinceTs, bucketMs, limit) => bucket.all(bucketMs, bucketMs, target, sinceTs, limit).reverse()
         .map((r) => ({ ts: r.b, avg: round2(r.avg), min: round2(r.min), max: round2(r.max), loss: r.n ? Number((r.fail / r.n).toFixed(3)) : 0, n: Number(r.n) })),
       meta: (target) => { const r = metaStmt.get(target); return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) }; },
-      prune: (beforeTs) => prune.run(beforeTs),
+      prune,   // Promise<{deleted, done, chunks}> — 청크 사이에 양보한다
       dropTarget: (target) => dropTarget.run(target),
     };
   });

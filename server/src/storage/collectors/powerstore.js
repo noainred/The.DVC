@@ -130,13 +130,19 @@ export function normalizePowerstore(device, raw) {
     inv.hardware = { total: raw.hardware.length, byType, unhealthy, absent, unknown };
   }
   if (Array.isArray(raw.volumes)) {
-    let provisioned = 0;
+    // v2.603(감사 COL-2603-07): size 를 못 읽은 볼륨을 0 으로 더하면 할당 합계가 조용히 부분 합이 된다 —
+    //   파일시스템(LO2601-06)과 같은 규칙으로 하나라도 모르면 합계는 null(화면은 표시하지 않는다) + sizeUnknown 개수.
+    let provisioned = 0, sizeUnknown = 0;
     const byState = {};
     for (const v of raw.volumes) {
-      provisioned += Number(v.size) || 0;
-      const k = String(v.state || 'Unknown'); byState[k] = (byState[k] || 0) + 1;
+      const sz = numOrNull(v?.size);
+      if (sz == null) sizeUnknown += 1; else provisioned += sz;
+      const k = String(v?.state || 'Unknown'); byState[k] = (byState[k] || 0) + 1;
     }
-    inv.volumes = { count: raw.volumes.length, provisionedBytes: provisioned, byState, truncated: !!raw.volumesTruncated };
+    inv.volumes = {
+      count: raw.volumes.length, provisionedBytes: sizeUnknown ? null : provisioned, byState, truncated: !!raw.volumesTruncated,
+      ...(sizeUnknown ? { sizeUnknown } : {}),
+    };
   }
   if (Array.isArray(raw.hosts)) inv.hosts = { count: raw.hosts.length };
   if (Array.isArray(raw.hostGroups)) inv.hostGroups = { count: raw.hostGroups.length };

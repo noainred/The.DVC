@@ -55,6 +55,49 @@ export const DEFAULT_PORTS = {
 // traceroute(execFile 25초)·domain(whois 다단) 이 가장 길어 45초로 잡았다.
 const RUNCHECK_HARD_TIMEOUT_MS = 45_000;
 
+/** 키워드 검사가 읽는 본문 앞부분 상한(v2.603 SEC2603-03) — 넘는 부분은 읽지 않는다. */
+export const KEYWORD_SCAN_BYTES = 256 * 1024;
+
+/** 응답 본문을 버린다(읽지 않고 연결 정리). 실패는 무시 — 이미 소비됐거나 본문이 없다. */
+function cancelBody(res) {
+  try { res?.body?.cancel?.().catch?.(() => {}); } catch { /* */ }
+}
+
+/**
+ * 본문을 **앞 maxBytes 까지만** 스트림으로 읽는다(순수 I/O 헬퍼 — v2.603 SEC2603-03). 넘으면 거기서 취소하고
+ * `capped:true` 로 알린다(던지지 않는다 — 키워드 검사는 앞부분만 보면 된다). 압축 응답도 해제된 바이트로 센다.
+ */
+export async function readBodyPrefix(res, maxBytes) {
+  const max = Math.max(1, Number(maxBytes) || 0);
+  if (!res?.body || typeof res.body.getReader !== 'function') {
+    const t = String(await res.text());
+    const b = Buffer.from(t, 'utf8');
+    return b.length > max ? { text: b.subarray(0, max).toString('utf8'), capped: true } : { text: t, capped: false };
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let n = 0, capped = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const room = max - n;
+    if (value.byteLength >= room) {
+      chunks.push(Buffer.from(value.buffer, value.byteOffset, room));
+      n = max;
+      capped = value.byteLength > room;
+      if (!capped) {   // 정확히 상한에 닿았다 — 뒤에 더 있는지 한 번만 본다
+        const nx = await reader.read();
+        capped = !nx.done;
+      }
+      if (capped) { try { await reader.cancel(); } catch { /* */ } }
+      break;
+    }
+    chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+    n += value.byteLength;
+  }
+  return { text: Buffer.concat(chunks).toString('utf8'), capped };
+}
+
 /**
  * 단일 점검 실행 → { status:'ok'|'warn'|'bad', reply, ms }.
  * ⚠ CRITICAL 회귀 방지(v2.279): 개별 점검이 소켓/Promise 를 결말짓지 못하면(과거 banner/ldapBind 의
@@ -132,11 +175,15 @@ async function runCheckInner(test, host) {
         });
         const ms = Date.now() - started;
         const okStatus = test.expectStatus ? res.status === test.expectStatus : res.status < 500;
-        if (!okStatus) return { status: 'bad', reply: `HTTP ${res.status}`, ms };
+        if (!okStatus) { cancelBody(res); return { status: 'bad', reply: `HTTP ${res.status}`, ms }; }
         if (test.keyword) {
-          const body = (await res.text()).slice(0, 262144);   // 256KB 상한 — 대용량 응답 방어
-          if (!body.includes(test.keyword)) return { status: 'warn', reply: `HTTP ${res.status} · 키워드 없음`, ms };
-        }
+          // v2.603(감사 SEC2603-03): 예전에는 res.text() 로 본문 **전체**를 메모리로 읽은 뒤 잘랐다
+          //   (실측 400MB 응답 한 번에 RSS 74 → 1,359MB). 이제 앞 256KB 까지만 스트림으로 읽고 끊는다 — 주석과 사실이 같다.
+          const { text: body, capped } = await readBodyPrefix(res, KEYWORD_SCAN_BYTES);
+          if (!body.includes(test.keyword)) {
+            return { status: 'warn', reply: `HTTP ${res.status} · 키워드 없음${capped ? `(앞 ${Math.round(KEYWORD_SCAN_BYTES / 1024)}KB 만 확인)` : ''}`, ms };
+          }
+        } else cancelBody(res);   // 본문을 쓰지 않으면 읽지 않는다(연결만 정리)
         if (test.warnMs && ms > test.warnMs) return { status: 'warn', reply: `HTTP ${res.status} · ${ms}ms(느림)`, ms };
         return { status: 'ok', reply: `HTTP ${res.status} · ${ms}ms`, ms };
       }

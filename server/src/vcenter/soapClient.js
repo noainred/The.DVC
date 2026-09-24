@@ -15,6 +15,7 @@ import { loadMetricsSettings } from '../metrics/settings.js';
 import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs } from './soapParse.js';
 import { vcDispatcher, vcRequestSignal } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
+import { splitHostPort } from '../util/hostPort.js';   // v2.603(LEFT2603-02): IPv6 host:port 분리
 import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v2.492: 다중 VM 기간 사용률(엔티티별 파싱)
 
 // soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
@@ -51,8 +52,10 @@ function getThumbprint(host, port = 443) {
  */
 export async function getVmConsole(vc, moref, vmName) {
   const hostNoScheme = vc.host.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-  const hostOnly = hostNoScheme.split(':')[0];
-  const port = Number(hostNoScheme.split(':')[1]) || 443;
+  // v2.603(LEFT2603-02): ':' 로 자르면 IPv6(`[2001:db8::10]`)의 host 가 '[2001' 이 되어 thumbprint 를 못 얻는다.
+  const hp = splitHostPort(hostNoScheme);
+  const hostOnly = hp ? hp.host : hostNoScheme;
+  const port = hp ? hp.port : 443;
   const c = new VimSoapClient(vc);
   await c.login();
   try {

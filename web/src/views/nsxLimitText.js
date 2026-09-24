@@ -8,6 +8,8 @@ const LIST_LABEL = {
   transportNodes: '전송 노드', tier0s: 'T0 게이트웨이', tier1s: 'T1 게이트웨이',
   segments: '세그먼트', securityPolicies: 'DFW 정책', groups: '보안그룹',
   clusterStatus: '클러스터 상태',   // v2.602(COL-2602-01): 실패하면 매니저 상태가 '상태 확인 불가' 다
+  // v2.603(감사 COL-2603-05): IDS·라이선스 조회 실패도 같은 목록으로 온다
+  idsProfiles: 'IDS 프로파일', idsEvents: 'IDS 이벤트', licenses: '라이선스',
 };
 
 /** 매니저별 안내 줄. @returns {string[]} */
@@ -25,6 +27,11 @@ export function nsxLimitNotes(managers = [], segments = []) {
     if (Number.isFinite(omitted) && omitted > 0) {
       out.push(`**${name}**: DFW 정책 ${fw.policies}개 중 ${omitted}개는 규칙 목록을 조회하지 않았습니다${fw.policiesRuleLimit != null ? `(정책당 조회 상한 ${fw.policiesRuleLimit}개)` : ''} — 규칙 표에는 앞 정책들의 규칙만 있습니다.`);
     }
+    // v2.603(감사 COL-2603-04): 규칙 목록 조회에 실패한 정책 — 그 정책의 규칙 표가 비어 있는 것은 '규칙 0개' 가 아니다.
+    const rf = Number(fw.rulesFailed);
+    if (Number.isFinite(rf) && rf > 0) out.push(`**${name}**: DFW 정책 ${rf}개의 규칙 목록을 읽지 못했습니다 — 그 정책의 빈 규칙 표는 '규칙 0개' 가 아니라 **확인 불가**입니다.`);
+    // v2.603(감사 COL-2603-05): IDS 이벤트는 한 페이지만 받는다 — 상한에 닿았으면 표시된 이벤트는 최근 일부다.
+    if (m?.idsEventsTruncated) out.push(`**${name}**: IDS 이벤트가 조회 상한에 닿아 일부만 받았습니다 — 표시된 이벤트 수는 하한입니다.`);
     if (fw.rulesPartial) out.push(`**${name}**: DFW 규칙 수는 하한입니다(규칙 수를 알 수 없는 정책이 있거나 규칙 목록이 잘렸습니다).`);
   }
   const cut = (Array.isArray(segments) ? segments : []).filter((s) => s?.portsTruncated).length;

@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+import { chunkedDelete } from '../util/chunkedPrune.js';
 
 const DB_PATH = () => process.env.CURUSER_DB_PATH
   || path.join(config.dbDir || config.configDir, 'curuser.db');
@@ -96,8 +97,10 @@ function prepare(db) {
     seriesSpan: db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx, COUNT(*) AS n FROM vc_series WHERE vcenter_id=?'),
     upVmSeries: db.prepare('INSERT INTO vm_series (vm_id, ts, sessions, active) VALUES (?,?,?,?) ON CONFLICT(vm_id, ts) DO UPDATE SET sessions=excluded.sessions, active=excluded.active'),
     vmSeriesOf: db.prepare('SELECT ts, sessions, active FROM vm_series WHERE vm_id=? AND ts>=? AND ts<=? ORDER BY ts'),
-    pruneSeries: db.prepare('DELETE FROM vc_series WHERE ts < ?'),
-    pruneVmSeries: db.prepare('DELETE FROM vm_series WHERE ts < ?'),
+    // v2.603(감사 DB2603-02): 청크 DELETE 형태(LIMIT 은 chunkedDelete 가 붙인다) — 한 방 DELETE 는 보존일을 줄이면
+    //   수십만~수백만 행을 동기로 지워 이벤트 루프를 멈췄다. idx_vc_series_ts·idx_vm_series_ts 가 서브쿼리를 받친다.
+    pruneSeries: db.prepare('DELETE FROM vc_series WHERE rowid IN (SELECT rowid FROM vc_series WHERE ts < ? LIMIT ?)'),
+    pruneVmSeries: db.prepare('DELETE FROM vm_series WHERE rowid IN (SELECT rowid FROM vm_series WHERE ts < ? LIMIT ?)'),
     stats: db.prepare('SELECT (SELECT COUNT(*) FROM latest) AS latestRows, (SELECT COUNT(*) FROM vc_series) AS seriesRows, (SELECT COUNT(*) FROM vm_series) AS vmSeriesRows'),
   };
 }
@@ -250,22 +253,31 @@ export async function vmSeriesRange(vmId, fromTs, toTs) {
  * ⚠ `(++tick % N) === 0` 으로 쓸 것. `tick++ % N === 0`(tick 0 시작)은 **첫 폴에서 즉시 참**이라
  *   보존기간을 줄이고 재시작하면 첫 틱이 그 차액을 한 번에 지운다(v2.453 규칙 · v2.503 재발).
  */
+let _pruneFlight = null;   // { days, p } — 진행 중인 정리(아래)
 export async function pruneCurUser(retentionDays, { every = 6 } = {}) {
   if ((++tick % Math.max(1, every)) !== 0) return { skipped: true };
   const days = Number(retentionDays) || 0;
   if (days <= 0) return { skipped: true, reason: '무제한' };
   const h = await open();
   if (!h) return { skipped: true, reason: 'DB 없음' };
-  const before = Date.now() - days * 86_400_000;
-  let s = 0; let v = 0;
-  try { s = h.st.pruneSeries.run(before)?.changes ?? 0; } catch { /* */ }
-  try { v = h.st.pruneVmSeries.run(before)?.changes ?? 0; } catch { /* */ }
-  if (s || v) _counts = null;
-  return { skipped: false, series: s, vmSeries: v, before };
+  // v2.603(감사 DB2603-02·RECENT2603-06): 정리끼리는 겹치지 않는다 — 같은 보존일이면 진행 중인 것을 공유하고,
+  //   보존일이 바뀌었으면 그것이 끝난 뒤 새 경계로 한 번 더 돈다(공유만 하면 새 보존일이 그 호출에 안 먹는다).
+  if (_pruneFlight && _pruneFlight.days === days) return _pruneFlight.p;
+  const prev = _pruneFlight ? _pruneFlight.p : Promise.resolve();
+  const flight = { days, p: null };
+  flight.p = prev.then(async () => {
+    const before = Date.now() - days * 86_400_000;
+    let s = 0; let v = 0; let done = true;
+    try { const r = await chunkedDelete(h.st.pruneSeries, [before], { label: 'curuser.vc_series' }); s = r.deleted; done = done && r.done; } catch (e) { done = false; console.warn(`[curuser] vc_series prune 실패: ${e?.message || e}`); }
+    try { const r = await chunkedDelete(h.st.pruneVmSeries, [before], { label: 'curuser.vm_series' }); v = r.deleted; done = done && r.done; } catch (e) { done = false; console.warn(`[curuser] vm_series prune 실패: ${e?.message || e}`); }
+    if (s || v) _counts = null;
+    return { skipped: false, series: s, vmSeries: v, before, done };
+  }).finally(() => { if (_pruneFlight === flight) _pruneFlight = null; });
+  _pruneFlight = flight;
+  return flight.p;
 }
-
 export function _resetForTest() {
   lockRetry.ok();
   try { x?.db?.close?.(); } catch { /* */ }
-  x = null; ready = null; initError = null; tick = 0; _counts = null;
+  x = null; ready = null; initError = null; tick = 0; _counts = null; _pruneFlight = null;
 }

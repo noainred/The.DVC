@@ -167,6 +167,17 @@ export function parseGpuNameLines(text) {
  * 물리 서버 자동 감지 — SSH 접속해 GPU 모델명·호스트명·OS를 한 번에 읽어 자동 등록에 사용.
  * 반환 { reachable, hostname, os, gpuModels:[name…], error }.
  */
+/**
+ * 탐지 OS 표기(순수, v2.603 감사 COL-2603-06). uname·ver 출력 첫 줄이 있으면 그것이고, 둘 다 비었는데
+ * Windows 절대경로 nvidia-smi(.exe)로 GPU 를 찾았으면 'Windows' 로 보정한다. 예전에는 보정 줄 **바로 다음 줄**이
+ * out.os 를 무조건 다시 대입해 보정이 도달 불가였다.
+ */
+export function physicalOsOf(nvCmd, osRaw) {
+  const first = String(osRaw || '').trim().split(/\r?\n/).filter(Boolean)[0] || '';
+  if (first) return first;
+  return /nvidia-smi\.exe/i.test(String(nvCmd || '')) ? 'Windows' : '';
+}
+
 export async function detectPhysicalGpu(host, creds, { timeoutMs = 20_000, port = 22 } = {}) {
   const out = { reachable: false, hostname: '', os: '', gpuModels: [], error: null };
   try {
@@ -193,10 +204,8 @@ export async function detectPhysicalGpu(host, creds, { timeoutMs = 20_000, port 
     const parsedNames = parseGpuNameLines(r.names);
     out.gpuModels = parsedNames.models;
     if (parsedNames.note) out.gpuNote = parsedNames.note; // GPU 없음·nvidia-smi 오류 원문(첫 줄) — 모델로 세지 않은 이유
-    // Windows 절대경로 명령으로 GPU를 찾았으면 OS를 windows로 보정.
-    if (/nvidia-smi\.exe|ver/i.test(`${r.nvCmd || ''} ${r.os || ''}`)) out.os = out.os || 'Windows';
     out.hostname = String(r.hostname || '').trim().split(/\s+/)[0] || '';
-    out.os = String(r.os || '').trim().split(/\r?\n/).filter(Boolean)[0] || '';
+    out.os = physicalOsOf(r.nvCmd, r.os);
   } catch (e) { out.error = cleanSshErr(e.message); }
   return out;
 }

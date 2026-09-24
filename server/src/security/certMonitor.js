@@ -13,6 +13,7 @@ import { loadRegistry as loadVcRegistry } from '../vcenter/registry.js';
 import { loadRegistry as loadNsxRegistry } from '../nsx/registry.js';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';   // v2.506: DNS 리바인딩(TOCTOU) 차단
+import { splitHostPort } from '../util/hostPort.js';   // v2.603(LEFT2603-02): IPv6 host:port 분리
 
 const INTERVAL_MS = 12 * 3600_000;
 const TIMEOUT_MS = 8000;
@@ -62,14 +63,15 @@ function probeCert(host, port = 443, timeoutMs = TIMEOUT_MS) {
 function targets() {
   const out = [];
   for (const vc of loadVcRegistry()) {
-    const clean = String(vc.host || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    if (!clean) continue;
-    out.push({ kind: 'vcenter', id: vc.id, name: vc.name || vc.id, host: clean.split(':')[0], port: Number(clean.split(':')[1]) || 443 });
+    // v2.603(LEFT2603-02): ':' 로 자르면 IPv6 등록(https://[2001:db8::10])이 '[2001' 이 된다 — 공용 파서로.
+    const hp = splitHostPort(vc.host);
+    if (!hp) continue;
+    out.push({ kind: 'vcenter', id: vc.id, name: vc.name || vc.id, host: hp.host, port: hp.port, hostPort: hp.hostPort });
   }
   for (const nx of loadNsxRegistry()) {
-    const clean = String(nx.host || '').replace(/^https?:\/\//, '').replace(/\/+$/, '');
-    if (!clean) continue;
-    out.push({ kind: 'nsx', id: nx.id, name: nx.name || nx.id, host: clean.split(':')[0], port: Number(clean.split(':')[1]) || 443 });
+    const hp = splitHostPort(nx.host);
+    if (!hp) continue;
+    out.push({ kind: 'nsx', id: nx.id, name: nx.name || nx.id, host: hp.host, port: hp.port, hostPort: hp.hostPort });
   }
   return out;
 }
@@ -85,8 +87,8 @@ export async function refreshCerts() {
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, list.length) }, async () => {
       while (idx < list.length) {
         const i = idx++;
-        const t = list[i];
-        const blocked = await ssrfBlockReasonResolved(`${t.host}:${t.port}`);
+        const { hostPort, ...t } = list[i];   // hostPort 는 검사용 — 응답 항목 형태는 예전 그대로
+        const blocked = await ssrfBlockReasonResolved(hostPort);
         if (blocked) { items[i] = { ...t, status: 'blocked', error: blocked, daysLeft: null }; continue; }
         const r = await probeCert(t.host, t.port);
         items[i] = r.ok

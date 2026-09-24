@@ -13,6 +13,7 @@ import { config } from '../config.js';
 import { notify } from '../alerts.js';
 
 import { numOrNull } from '../util/numOrNull.js';
+import { chunkedDelete } from '../util/chunkedPrune.js';
 const FILE = () => path.join(config.dbDir || config.configDir, 'rma-tests.db');
 const RETENTION_DAYS = Math.max(1, Number(process.env.RMA_TEST_HISTORY_DAYS) || 90);
 const REPEAT_LOG_MS = 60 * 60_000;
@@ -44,9 +45,23 @@ async function openInner() {
       CREATE INDEX IF NOT EXISTS idx_tr_key_ts ON test_results (agent, test_id, ts);`);
     _db = { conn, ins: conn.prepare('INSERT INTO test_results (agent, test_id, instance, ts, status, reply, value) VALUES (?,?,?,?,?,?,?)'),
       hist: conn.prepare('SELECT * FROM test_results WHERE agent = ? COLLATE NOCASE AND test_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?'),
-      prune: conn.prepare('DELETE FROM test_results WHERE ts < ?') };
+      // v2.603(감사 DB2603-02): 청크 DELETE 형태(LIMIT 은 chunkedDelete 가 붙인다) — idx_tr_ts 가 서브쿼리를 받친다.
+      prune: conn.prepare('DELETE FROM test_results WHERE rowid IN (SELECT rowid FROM test_results WHERE ts < ? LIMIT ?)') };
     return _db;
   } catch { _db = 'unavailable'; return null; }
+}
+
+/**
+ * v2.603(감사 DB2603-02): 보존 정리는 청크 삭제 + 청크 사이 양보(util/chunkedPrune.js) — 결과 수신 경로를 기다리게 하지
+ * 않는다. 보존일은 환경변수(프로세스 수명 동안 같다)라 진행 중이면 공유한다. 실패는 콘솔에 남긴다.
+ */
+let _pruning = null;
+function pruneInBackground(db, now) {
+  if (_pruning) return _pruning;
+  _pruning = chunkedDelete(db.prune, [now - RETENTION_DAYS * 86400e3], { label: 'rma.test_results' })
+    .catch((e) => { console.warn(`[rma] 점검 이력 prune 실패: ${e?.message || e}`); return null; })
+    .finally(() => { _pruning = null; });
+  return _pruning;
 }
 
 const key = (agent, id) => `${String(agent).toLowerCase()}\0${id}`;
@@ -81,7 +96,7 @@ export async function ingestResult(agent, r, { now = Date.now(), alert = true, n
   // 이력: 변화 시 + 1시간마다
   if (changed || now - cur.lastLoggedAt >= REPEAT_LOG_MS) {
     const db = await open();
-    if (db) { try { db.ins.run(cur.agent, cur.testId, cur.instance, at, status, cur.reply, cur.value); if (++_tick % PRUNE_EVERY === 0) db.prune.run(now - RETENTION_DAYS * 86400e3); } catch { /* */ } }
+    if (db) { try { db.ins.run(cur.agent, cur.testId, cur.instance, at, status, cur.reply, cur.value); if (++_tick % PRUNE_EVERY === 0) pruneInBackground(db, now); } catch { /* */ } }
     cur.lastLoggedAt = now;
   }
   // 알림: 실패 연속 N회 → 1회 발화, 복구 시 해소

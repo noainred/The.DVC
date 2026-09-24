@@ -23,6 +23,26 @@ let cache = null;
 let timer = null;
 let running = false;
 
+/**
+ * v2.603(감사 TIM2603-02): 전 채널이 실패하거나 채널이 없으면 lastRunTs 를 갱신하지 않으므로(v2.447 B6 — '그날 다시 시도하지
+ * 않던' 결함의 수정) 예전에는 **1분 틱마다** 다시 보냈다 — 웹훅이 계속 실패하는 현장이면 하루 최대 1,440회 발송 시도·로그다.
+ * 재시도는 유지하되(조용히 그날을 건너뛰지 않는다) 간격을 늘린다: 연속 실패 1회 뒤 15분 → 30분 → 60분(상한). 성공하면
+ * 초기화한다. **수동 발송(runDailyReportNow)은 막지 않는다** — 설정을 고친 뒤 바로 확인할 길이 있어야 한다.
+ * 인메모리다(재시작하면 첫 틱에 한 번 더 시도한다 — 재시작 횟수만큼이라 유계다).
+ */
+const FAIL_BACKOFF_BASE_MS = 15 * 60_000;
+const FAIL_BACKOFF_MAX_MS = 60 * 60_000;
+let failState = { streak: 0, lastFailAt: null, nextAt: null, lastReason: '' };
+export function dailyReportBackoffMs(streak) {
+  const n = Math.max(1, Math.floor(Number(streak) || 1));
+  return Math.min(FAIL_BACKOFF_MAX_MS, FAIL_BACKOFF_BASE_MS * 2 ** Math.min(10, n - 1));
+}
+function noteResult(r, nowTs = Date.now()) {
+  if (r?.ok) { failState = { streak: 0, lastFailAt: null, nextAt: null, lastReason: '' }; return; }
+  const streak = failState.streak + 1;
+  failState = { streak, lastFailAt: nowTs, nextAt: nowTs + dailyReportBackoffMs(streak), lastReason: String(r?.reason || '').slice(0, 300) };
+}
+
 export function loadDailyReportSettings() {
   if (cache) return cache;
   cache = { ...DEFAULTS };
@@ -84,7 +104,7 @@ export async function runDailyReportNow() {
       return { ok: false, reason: '알림 채널이 설정되지 않았습니다 — 설정 › 알림 에서 Slack/Teams/이메일을 먼저 등록하세요.', results, issues: report.summary.issues };
     }
     const anyOk = results.some((r) => /:(2\d\d)/.test(r));
-    if (anyOk) { cache.lastRunTs = Date.now(); persist(); }
+    if (anyOk) { cache.lastRunTs = Date.now(); persist(); failState = { streak: 0, lastFailAt: null, nextAt: null, lastReason: '' }; }
     return { ok: anyOk, results, issues: report.summary.issues, ...(anyOk ? {} : { reason: '모든 알림 채널 전송에 실패했습니다 — 다음 주기에 재시도합니다.' }) };
   } finally {
     running = false;
@@ -102,18 +122,27 @@ export function dailyReportDue(s, nowTs = Date.now()) {
   return true;
 }
 
-async function tick() {
+/** 테스트에서 틱을 직접 돌리게 export 한다. nowTs·run 은 테스트 주입용. */
+export async function dailyReportTick(nowTs = Date.now(), run = runDailyReportNow) {
   const s = loadDailyReportSettings();
-  if (!s.enabled) return;
-  if (!dailyReportDue(s)) return;
-  const r = await runDailyReportNow();
+  if (!s.enabled) return { skipped: 'disabled' };
+  if (!dailyReportDue(s, nowTs)) return { skipped: 'not-due' };
+  if (failState.nextAt != null && nowTs < failState.nextAt) return { skipped: 'backoff', nextAt: failState.nextAt };
+  const r = await run();
+  if (r?.reason === '이미 발송이 진행 중입니다.') return { skipped: 'running' };   // 수동 발송과 겹침 — 실패로 세지 않는다
+  noteResult(r, nowTs);
   if (r?.ok) console.log('[daily-report] 일일 헬스체크 리포트 발송 완료');
-  else console.warn(`[daily-report] 발송 실패 — ${r?.reason || '알 수 없는 오류'} (다음 틱에 재시도)`);
+  // ⚠ 로그 문장 끝의 '(다음 틱에 재시도)' 는 로그 분석 카탈로그의 probe 다(loganalysis/catalog.js) — 간격은 사유 안에 적는다.
+  else console.warn(`[daily-report] 발송 실패 — ${r?.reason || '알 수 없는 오류'} · 연속 실패 ${failState.streak}회, ${Math.round(dailyReportBackoffMs(failState.streak) / 60_000)}분 뒤 (다음 틱에 재시도)`);
+  return { ran: true, ok: !!r?.ok };
 }
+const tick = () => dailyReportTick();
 
 export function dailyReportStatus() {
   const s = loadDailyReportSettings();
-  return { ...s, running, schedulerOn: !!timer, tzOffsetMin: DAY_OFFSET_MIN };
+  // v2.603(TIM2603-02): 연속 실패·다음 자동 시도 시각을 함께 준다(재시도 간격을 늘린 사실을 숨기지 않는다).
+  return { ...s, running, schedulerOn: !!timer, tzOffsetMin: DAY_OFFSET_MIN,
+    failStreak: failState.streak, lastFailAt: failState.lastFailAt, nextRetryAt: failState.nextAt, lastFailReason: failState.lastReason };
 }
 
 export function startDailyReport() {
@@ -121,3 +150,6 @@ export function startDailyReport() {
   timer.unref?.();
   console.log('[daily-report] 스케줄러 시작 (1분 틱)');
 }
+
+/** 테스트 전용. */
+export function _resetDailyReportForTest() { cache = null; running = false; failState = { streak: 0, lastFailAt: null, nextAt: null, lastReason: '' }; }

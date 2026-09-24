@@ -180,7 +180,10 @@ export function parseFcHosts(lines = []) {
     const f = s.split(/\|/);                       // 속도 원문에 공백이 있어 `|` 로 구분해 받는다
     if (f.length < 5) continue;
     const [host, state, speedRaw, txw, rxw] = f.map((x) => String(x).trim());
-    const gb = /([\d.]+)\s*gbit/i.exec(speedRaw);
+    // v2.603(감사 SEC2603-04): 숫자·점 구간의 **시작에서만** 매치를 시도한다(뒤보기). 예전 `/([\d.]+)\s*gbit/i` 는
+    //   구간 안의 모든 위치에서 끝까지 다시 훑어 O(n²) 였다('0.' 2만 번에 수 초). 결과는 같다 — 가장 왼쪽 매치는
+    //   언제나 구간의 시작이다(중간에서 매치되면 시작에서도 같은 끝으로 매치된다).
+    const gb = /(?<![\d.])([\d.]+)\s*gbit/i.exec(speedRaw);
     out.push({
       host,
       state: state || '',

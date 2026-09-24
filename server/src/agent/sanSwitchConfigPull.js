@@ -23,6 +23,7 @@ export const configPullMs = () => clampIntervalMs(Number(process.env.SANSW_CONFI
 let _timer = null;
 let _lastSig = '';
 let _last = null;
+let _perfCollectPush = null; // v2.603 EDGE2603-03: 포트 사용량 '지금 수집' 대행 뒤 push 의 결과
 let _collectPush = null; // v2.601 EDGE2601-06: '지금 수집' 직후 push 의 결과(상태 화면·엣지 로그용)
 
 /**
@@ -123,7 +124,12 @@ async function _pull() {
       (async () => {
         const r = await pollPerfOnce({ force: true });
         console.log(`[sanswitch-config] 중앙 요청 포트 사용량 수집: ${r.ok ? `성공 ${r.collected}대 / 실패 ${r.failed}대` : `건너뜀(${r.reason})`}`);
-        await pushPerfNow();
+        // v2.603(감사 EDGE2603-03): push 결과를 버리지 않는다 — 예전엔 반환값을 보지 않아 거절·실패가 무음이었다.
+        //   pushPerfNow 는 이제 진행 중인 주기 push 가 끝난 뒤 한 번 더 보내고 그 결과를 돌려준다.
+        let p;
+        try { p = await pushPerfNow(); } catch (e) { p = { ok: false, reason: e.message }; }
+        _perfCollectPush = { at: Date.now(), ok: !!p?.ok, ...(p?.ok ? { sent: p.sent ?? 0 } : { reason: p?.reason || '알 수 없음' }) };
+        if (!p?.ok) console.warn(`[sanswitch-config] 포트 사용량 수집 결과 push 실패: ${p?.reason || '알 수 없음'}`);
       })().catch((e) => console.warn(`[sanswitch-config] 포트 사용량 수집 대행 실패: ${e.message}`));
     }
     _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied, perfCollect, ...(collected && _collectPush ? { collectPush: _collectPush } : {}) };
@@ -150,4 +156,4 @@ export function startSanSwitchConfigPull() {
   if (_timer || !config.agent.centralUrl || !config.agent.centralToken) return;
   _timer = startAdaptiveTimer(configPullMs, () => pullSanSwitchConfigNow(), { firstDelayMs: 20_000, name: 'SAN 스위치 설정 pull' });
 }
-export function sanSwitchConfigPullStatus() { return { ..._last, ...(_collectPush ? { collectPush: _collectPush } : {}), intervalMs: configPullMs() }; }
+export function sanSwitchConfigPullStatus() { return { ..._last, ...(_collectPush ? { collectPush: _collectPush } : {}), ...(_perfCollectPush ? { perfCollectPush: _perfCollectPush } : {}), intervalMs: configPullMs() }; }

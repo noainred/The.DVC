@@ -311,7 +311,33 @@ export function stripUemcliBanner(text) {
     .replace(/[\s\S]*/, stripCertBlocks)
     .replace(/^(Issuer|Subject|Valid from|Valid to|Serial|Id):[^\n]*\n?/gm, '')
     .replace(/^Would you like to:\s*\n?/gm, '')
-    .replace(/^\s*\[[123]\][^\n]*\n?/gm, '');
+    .replace(/[\s\S]*/, stripChoiceLines);
+}
+
+/**
+ * 선택지 줄(`[1]`·`[2]`·`[3]`)과 그 **바로 앞의 공백뿐인 줄**을 지운다(순수·줄 단위 O(n) — v2.603 감사 SEC2603-02).
+ * 예전 `/^\s*\[[123]\][^\n]*\n?/gm` 은 `\s*` 가 개행을 넘어, 빈 줄이 이어진 출력에서 줄 시작마다 그 빈 구간을
+ * 끝까지 다시 훑어 O(n²) 였다(v2.598 INJ-06 은 인증서 블록만 선형으로 바꿨다 — 빈 줄 10만 개에 수 초).
+ * 결과는 예전과 같다: 매치는 줄 시작에서만 시작하고 `\s*` 가 공백뿐인 줄들을 삼켜 선택지 줄까지 닿았으므로,
+ * 선택지 줄 앞에 이어진 공백뿐인 줄이 함께 지워지고 그 앞의 글자 있는 줄(과 그 개행)은 남는다.
+ */
+export function stripChoiceLines(text) {
+  const lines = text.split('\n');
+  const out = [];
+  let blankRun = 0;          // out 끝에 쌓인 '공백뿐인 줄' 개수(선택지 줄을 만나면 함께 버린다)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*\[[123]\]/.test(line)) {
+      out.length -= blankRun; blankRun = 0;
+      // 원래 규칙은 이 줄과 **뒤의 개행 하나**를 지운다 — 마지막 줄이면 앞 줄의 개행은 남는다(아래 join 이 재현).
+      if (i === lines.length - 1) out.push(null);
+      continue;
+    }
+    out.push(line);
+    blankRun = /^\s*$/.test(line) ? blankRun + 1 : 0;
+  }
+  // null = '개행 없이 끝난 선택지 줄' 자리 — 앞 줄의 개행은 남고 이 줄은 빈 문자열이 된다.
+  return out.map((l) => (l == null ? '' : l)).join('\n');
 }
 
 /**

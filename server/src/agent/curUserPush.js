@@ -88,10 +88,12 @@ async function post(body) {
  * 한 주기 결과 push. 청크 0 이 **그 엣지가 담당한 vCenter 목록**을 함께 실어 중앙이 해당
  * 법인의 latest 를 교체할 수 있게 한다(대상에서 빠진 VM 의 낡은 값이 남지 않게).
  */
-export async function pushCurUserRecords(records, { generatedAt = Date.now() } = {}) {
+export async function pushCurUserRecords(records, { generatedAt = Date.now(), clearVcenterIds = [] } = {}) {
   if (!curUserPushEnabled()) return { ok: false, reason: 'push 비활성' };
   const slim = (records || []).map(slimRecord).filter((r) => r.vmId && r.vcenterId);
-  const vcenterIds = [...new Set(slim.map((r) => r.vcenterId))];
+  // v2.603(감사 EDGE2603-04): `clearVcenterIds` — 이번 주기에 대상이 **0이 된** vCenter. 레코드 없이 목록에만 실어 중앙이
+  //   그 법인의 latest 를 비우게 한다(예전엔 레코드에서만 목록을 뽑아, 대상이 빠진 법인의 옛 행이 중앙에 무기한 남았다).
+  const vcenterIds = [...new Set([...slim.map((r) => r.vcenterId), ...(Array.isArray(clearVcenterIds) ? clearVcenterIds : []).map(String).filter(Boolean)])];
   const chunks = chunkRecords(slim);
   const t0 = Date.now();
   let bytes = 0; let gzBytes = 0; let sent = 0;
@@ -112,6 +114,6 @@ export async function pushCurUserRecords(records, { generatedAt = Date.now() } =
     console.warn(`[curuser-push] 실패(${sent}/${chunks.length} 청크 전송 후): ${e?.message || e}`);
     throw e;
   }
-  last = { at: Date.now(), chunks: chunks.length, records: slim.length, bytes, gzBytes, ms: Date.now() - t0, error: null };
+  last = { at: Date.now(), chunks: chunks.length, records: slim.length, ...(clearVcenterIds?.length ? { cleared: clearVcenterIds.length } : {}), bytes, gzBytes, ms: Date.now() - t0, error: null };
   return { ok: true, ...last };
 }

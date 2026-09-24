@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { isSqliteLockError } from '../util/sqliteOpen.js';
+import { chunkedDelete } from '../util/chunkedPrune.js';
 
 const DB_PATH = () => process.env.HZSESS_DB_PATH
   || path.join(config.dbDir || config.configDir, 'horizon-sessions.db');
@@ -89,7 +90,8 @@ function prepare(db) {
         pending=excluded.pending, servers_ok=excluded.servers_ok, servers_failed=excluded.servers_failed`),
     seriesOf: db.prepare('SELECT * FROM hz_series WHERE server_id=? AND ts>=? AND ts<=? ORDER BY ts'),
     seriesSpan: db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx, COUNT(*) AS n FROM hz_series WHERE server_id=?'),
-    pruneSeries: db.prepare('DELETE FROM hz_series WHERE ts < ?'),
+    // v2.603(감사 DB2603-02): 청크 DELETE 형태(LIMIT 은 chunkedDelete 가 붙인다) — ts 단독 인덱스가 서브쿼리를 받친다.
+    pruneSeries: db.prepare('DELETE FROM hz_series WHERE rowid IN (SELECT rowid FROM hz_series WHERE ts < ? LIMIT ?)'),
     stats: db.prepare('SELECT (SELECT COUNT(*) FROM latest) AS latestRows, (SELECT COUNT(*) FROM hz_series) AS seriesRows'),
   };
 }
@@ -239,16 +241,26 @@ export async function hzSeriesRange(serverId, fromTs, toTs) {
  * 보존기간 prune — **N주기에 1회만**.
  * ⚠ `(++tick % N) === 0` 으로 쓸 것(`tick++ % N === 0` 은 첫 폴에서 즉시 참 — v2.453).
  */
+let _pruneFlight = null;   // { days, p } — 진행 중인 정리
 export async function pruneHzSessions(retentionDays, { every = 12 } = {}) {
   if ((++tick % Math.max(1, every)) !== 0) return { skipped: true };
   const days = Number(retentionDays) || 0;
   if (days <= 0) return { skipped: true, reason: '무제한' };
   const h = await open();
   if (!h) return { skipped: true, reason: 'DB 없음' };
-  const before = Date.now() - days * 86_400_000;
-  let s = 0;
-  try { s = h.st.pruneSeries.run(before)?.changes ?? 0; } catch { /* */ }
-  return { skipped: false, series: s, before };
+  // v2.603(감사 DB2603-02·RECENT2603-06): 청크 삭제 + 청크 사이 양보. 같은 보존일이면 진행 중인 것을 공유하고,
+  //   바뀌었으면 끝난 뒤 새 경계로 한 번 더 돈다.
+  if (_pruneFlight && _pruneFlight.days === days) return _pruneFlight.p;
+  const prev = _pruneFlight ? _pruneFlight.p : Promise.resolve();
+  const flight = { days, p: null };
+  flight.p = prev.then(async () => {
+    const before = Date.now() - days * 86_400_000;
+    let s = 0; let done = true;
+    try { const r = await chunkedDelete(h.st.pruneSeries, [before], { label: 'horizon.hz_series' }); s = r.deleted; done = r.done; } catch (e) { done = false; console.warn(`[horizon-sessions] prune 실패: ${e?.message || e}`); }
+    return { skipped: false, series: s, before, done };
+  }).finally(() => { if (_pruneFlight === flight) _pruneFlight = null; });
+  _pruneFlight = flight;
+  return flight.p;
 }
 
 /** 테스트 전용 — 잠금 재시도 대기(30초)를 건너뛴다. */
@@ -256,5 +268,5 @@ export function _expireLockRetryForTest() { retryAt = 0; }
 
 export function _resetForTest() {
   try { x?.db?.close?.(); } catch { /* */ }
-  x = null; ready = null; initError = null; lockError = null; retryAt = 0; tick = 0;
+  x = null; ready = null; initError = null; lockError = null; retryAt = 0; tick = 0; _pruneFlight = null;
 }

@@ -18,6 +18,7 @@
 import crypto from 'node:crypto';
 import { VimSoapClient } from '../vcenter/soapClient.js';
 import { vcDispatcher } from '../vcenter/restClient.js';
+import { readTextCapped } from '../util/readCapped.js';
 
 // mig.mode.current(Enabled/Disabled/N/A)를 마지막 컬럼으로 추가 수집 → MIG(분할 GPU) 가시화.
 // 문자열 컬럼이므로 파서에서 원본 문자열로 별도 처리(숫자 변환 금지).
@@ -121,6 +122,26 @@ function authXml(creds) {
 // 깨지지 않게 정규식으로 스킴 다음 호스트만 바꾼다('*' 호스트도 포함).
 const swapHost = (u, host) => u.replace(/^(https?:\/\/)[^/]+/, `$1${host}`);
 
+/**
+ * 게스트 결과 파일 본문 상한(v2.603 감사 SEC2603-06). nvidia-smi 출력은 수 KB 인데 예전에는 `res.text()` 로 **상한 없이**
+ * 읽어, 게스트가 만든(또는 바꿔치기한) 큰 파일이 중앙 메모리로 통째로 들어올 수 있었다. `GPU_GUEST_FILE_MAX_BYTES`.
+ */
+export const GUEST_FILE_MAX_BYTES = Math.max(65_536, Number(process.env.GPU_GUEST_FILE_MAX_BYTES) || 8 * 1048576);
+
+/**
+ * 파일 전송 응답 본문을 상한까지만 읽는다 — 넘으면 `{ text:'', error }`(던지지 않는다 — 호출부의 실패 경로 그대로).
+ * `sizeHint` 는 InitiateFileTransferFromGuest 의 `<size>` 다 — 이미 상한을 넘으면 받지 않는다(다운로드 0).
+ */
+export async function readGuestFileBody(res, sizeHint = null, maxBytes = GUEST_FILE_MAX_BYTES) {
+  const sz = sizeHint == null || sizeHint === '' ? NaN : Number(sizeHint);
+  if (Number.isFinite(sz) && sz > maxBytes) {
+    try { await res?.body?.cancel?.(); } catch { /* */ }
+    return { text: '', error: `결과 파일이 상한(${Math.round(maxBytes / 1048576)}MB)을 넘어 받지 않았습니다(size=${sz}B)` };
+  }
+  try { return { text: await readTextCapped(res, maxBytes, '결과 파일'), error: null }; }
+  catch (e) { return { text: '', error: String(e?.message || e) }; }
+}
+
 async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, preferHosts = [], tag = '', tr = null) {
   let ftXml;
   try {
@@ -146,6 +167,11 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
   // InitiateFileTransferFromGuest 응답의 <size> = 게스트 파일 크기. 0이면 nvidia-smi가
   // stdout을 안 낸 것(드라이버/PATH 문제) → ESXi가 빈 파일 전송에 404를 줄 수 있다.
   const size = /<size>(\d+)<\/size>/.exec(ftXml)?.[1];
+  // v2.603(SEC2603-06): 게스트가 알린 크기가 이미 상한을 넘으면 어느 후보에서도 받지 않는다.
+  if (size != null && Number(size) > GUEST_FILE_MAX_BYTES) {
+    tlog(tr, `  ✗ 결과 파일이 상한(${Math.round(GUEST_FILE_MAX_BYTES / 1048576)}MB)을 넘어 받지 않았습니다(size=${size}B)`);
+    return { text: '', error: `결과 파일이 상한(${Math.round(GUEST_FILE_MAX_BYTES / 1048576)}MB)을 넘어 받지 않았습니다(size=${size}B)` };
+  }
   // 토큰을 가린 URL(로그용). guestFile 티켓이 노출되지 않게 token/id/value를 마스킹.
   const redact = (u) => String(u).replace(/(([?&])(?:token|id|value)=)[^&]+/gi, '$1***');
   const vcHost = (c.vc.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
@@ -166,11 +192,11 @@ async function readGuestFile(c, fileManager, vmRef, auth, guestPath, timeoutMs, 
       if (res.ok) {
         console.log(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} ✓`);
         tlog(tr, `  ✓ GET ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
-        return { text: await res.text(), error: null };
+        return await readGuestFileBody(res, size);   // v2.603(SEC2603-06): 상한까지만 읽는다
       }
       // 404 등 본문에 ESXi가 사유를 담아주므로(예: 파일없음/티켓무효) 일부를 캡처.
       let body = '';
-      try { body = (await res.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100); } catch { /* */ }
+      try { body = (await readTextCapped(res, 65_536, '오류 본문')).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100); } catch { /* */ }
       console.warn(`[gpu-guest]     [${tag}] 다운로드 ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status}${body ? ` body="${body}"` : ''}`);
       tlog(tr, `  ✗ GET ${candHost}${isOrig ? '(원본)' : ''} → HTTP ${res.status} (${((Date.now() - t0) / 1000).toFixed(1)}s)${body ? ` "${body.slice(0, 60)}"` : ''}`);
       tries.push(`${candHost}${isOrig ? '(원본)' : ''}=HTTP${res.status}${body ? `(${body})` : ''}`);

@@ -20,11 +20,42 @@ const DEFAULTS = {
   storagePath: '',         // 저장 디렉터리(빈값=CONFIG_DIR). 각 포탈(엣지/중앙)이 자기 데이터만 로컬 보관
 };
 
+/**
+ * v2.603(감사 TIM2603-01 — 재현): 로드 경로에도 저장과 **같은 범위**를 적용한다. 예전에는 파일 값을 그대로 펼쳐서, 손으로
+ * 고친 파일·복원한 백업의 `pollIntervalMin` 0·''·'abc'·음수·거대값이 `logs/poller.js schedule()` 의 setInterval 로 가
+ * **1ms 루프**가 됐다(Node 는 0·NaN·음수·2^31 초과를 1ms 로 본다 — 재현: 0 → 0ms, 'abc' → NaN, -5 → -300000,
+ * 40000 → 2400000000). v2.602 loginMonitor(TIM2602-04)와 같은 규칙: 숫자 아님·빈 값은 기본값, 범위 밖은 자른다.
+ * 보존일·용량은 0 이 '무제한' 이라는 뜻이므로 0 은 그대로 두고, 음수는 0 이 아니라 **기본값**이다(오설정을 '무제한' 으로
+ * 넓히지 않는다).
+ */
+function normalizeLoaded(p) {
+  const num = (v, d, lo, hi, { zeroOk = false } = {}) => {
+    const n = numOrNull(v);
+    if (n == null || n < 0 || (n === 0 && !zeroOk)) return d;
+    return Math.max(lo, Math.min(hi, n));
+  };
+  return {
+    enabled: p.enabled != null ? !!p.enabled : DEFAULTS.enabled,
+    pollIntervalMin: num(p.pollIntervalMin, DEFAULTS.pollIntervalMin, 1, 1440),
+    retentionDays: num(p.retentionDays, DEFAULTS.retentionDays, 0, 3650, { zeroOk: true }),
+    maxSizeMB: num(p.maxSizeMB, DEFAULTS.maxSizeMB, 0, 1024 * 1024, { zeroOk: true }),
+    maxPerPoll: num(p.maxPerPoll, DEFAULTS.maxPerPoll, 100, 50000),
+    minSeverity: ['info', 'warning', 'error'].includes(p.minSeverity) ? p.minSeverity : DEFAULTS.minSeverity,
+    storagePath: typeof p.storagePath === 'string' ? p.storagePath.trim() : DEFAULTS.storagePath,
+  };
+}
+
 let cache = null;
 export function loadLogSettings() {
   if (cache) return cache;
   cache = { ...DEFAULTS };
-  try { if (fs.existsSync(FILE)) cache = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) }; } catch (e) { preserveCorrupt(FILE, e.message); /* */ }
+  try {
+    if (fs.existsSync(FILE)) {
+      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아님');   // 형식 불일치도 손상
+      cache = normalizeLoaded(p);
+    }
+  } catch (e) { cache = { ...DEFAULTS }; preserveCorrupt(FILE, e.message); /* */ }
   return cache;
 }
 
@@ -49,3 +80,6 @@ export function saveLogSettings(body = {}) {
   cache = next;
   return { ...next, _pathChanged: pathChanged };
 }
+
+/** 테스트 전용 — 로드 캐시를 비워 다음 load 가 파일을 다시 읽게 한다. */
+export function _resetLogSettingsForTest() { cache = null; }
