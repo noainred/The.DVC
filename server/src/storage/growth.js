@@ -128,7 +128,8 @@ export function growthFor(entry, latestDay, days) {
  * @param {object}   opts
  * @param {object[]} opts.periods  `normalizePeriods()` 결과
  * @param {number}   opts.asOfDay  '오늘'의 일 인덱스(테스트가 고정할 수 있게 주입받는다)
- * @param {Map|object} [opts.meta] deviceId → {name, type, host, datacenterId} 표시용
+ * @param {Map|object} [opts.meta] deviceId → {name, type, host, datacenterId, capacityApprox?} 표시용
+ *   (capacityApprox = 스냅샷 extra.capacityApprox — 반올림 표기 장비의 해상도. v2.604)
  * @returns {{devices:object[], totals:object, periods:object[], asOfDay:number}}
  */
 export function growthMatrix(rows, { periods = DEFAULT_PERIODS, asOfDay, meta = null } = {}) {
@@ -147,6 +148,19 @@ export function growthMatrix(rows, { periods = DEFAULT_PERIODS, asOfDay, meta = 
     const totalBytes = numOrNull(latest.total_bytes);
     const growth = {};
     for (const p of per) growth[p.key] = growthFor(entry, latestDay, p.days);
+    /*
+     * v2.604(감사 COL-2604-01 후속): 용량이 **반올림 표기**(예: Isilon SSH 'isi status' 의 '5.0P')로 적재된 장비는
+     *   증가량이 해상도(0.1 PiB 등) 계단으로만 움직인다. 적재는 막지 않고(이력 소실이 더 나쁘다) 해상도를 싣는다 —
+     *   해상도 미만의 변화는 **0 이 아니라 '보이지 않는 것'** 이다(belowResolution). 판정은 여기 하나, 문장은 웹.
+     */
+    const res = numOrNull(metaOf(id).capacityApprox?.resolutionBytes);
+    const approx = res != null && res > 0 ? { resolutionBytes: res } : null;
+    if (approx) {
+      for (const k of Object.keys(growth)) {
+        const g = growth[k];
+        if (g && g.bytes != null) growth[k] = { ...g, resolutionBytes: res, belowResolution: Math.abs(g.bytes) < res };
+      }
+    }
 
     devices.push({
       deviceId: id,
@@ -167,6 +181,7 @@ export function growthMatrix(rows, { periods = DEFAULT_PERIODS, asOfDay, meta = 
       growth,
       // 소진 예상(규칙 ⑤) — 증가 중 + 전체 용량을 알 때만.
       daysToFull: daysToFullFor(totalBytes, usedBytes, growth, per),
+      ...(approx ? { capacityApprox: approx } : {}),
     });
   }
   devices.sort((a, b) => (b.usedBytes ?? -1) - (a.usedBytes ?? -1) || String(a.name).localeCompare(String(b.name), 'ko'));
@@ -205,6 +220,8 @@ export function totalsOf(devices, periods) {
     pct: totalBytes && usedBytes != null ? Math.round((usedBytes / totalBytes) * 1000) / 10 : null,
     // 수치를 못 읽은 장비 수 — 합계가 '전 장비' 인지 화면이 판단하는 근거.
     unknownUsed: devices.filter((d) => d.usedBytes == null).length,
+    // v2.604: 반올림 표기 용량 장비 수 — 합계에 그 해상도만큼의 불확실성이 섞였음을 화면이 밝히는 근거.
+    approxDevices: devices.filter((d) => d.capacityApprox).length,
     growth,
   };
 }

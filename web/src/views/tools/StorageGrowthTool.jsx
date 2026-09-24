@@ -6,7 +6,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import {
   GROWTH_UNITS, bytesAuto, bytesIn, growthCell, totalCell,
-  fullEtaText, headline, missingNote, heat, maxAbsFor,
+  fullEtaText, headline, missingNote, heat, maxAbsFor, approxFootnote,
   growthPct, growthPctText, aggregateGrowth, historyResetNote } from './storageGrowthText.js';
 import { facetState, toggleIn, groupBy } from './deviceFacets.js';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
@@ -82,6 +82,7 @@ export default function StorageGrowthTool() {
   }), [d, dcSel, typeSel, query, dcName, typeLabel]);
   const head = useMemo(() => headline(d, unit), [d, unit]);
   const miss = useMemo(() => missingNote(d?.noHistory), [d]);
+  const approxNote = useMemo(() => approxFootnote(facets.shown), [facets.shown]);
   const cols = d?.periods || [];
   // 열마다 따로 정규화한다 — 1일 증가량과 1년 증가량을 같은 척도로 칠하면 1일 열이 전부 하얘진다.
   const maxAbs = useMemo(() => {
@@ -287,6 +288,7 @@ export default function StorageGrowthTool() {
         <SectionTitle n="03" title="이 보고서가 말하지 않는 것"
           sub="수치를 결재 근거로 쓰기 전에 함께 보셔야 하는 전제입니다." />
         <ul className="muted" style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.85, whiteSpace: 'normal' }}>
+          {approxNote && <li><BoldText text={approxNote} /></li>}
           {miss && <li><BoldText text={miss.text} />{miss.names?.length ? <> <span style={{ opacity: 0.8 }}>({miss.names.join(', ')}{miss.omitted ? ` 외 ${miss.omitted}대` : ''})</span></> : null}</li>}
           <li><BoldText text={`증가량은 **하루 1행으로 요약한 값**(그 날의 마지막 관측)을 비교합니다 — 하루 안의 등락은 보이지 않습니다.`} /></li>
           <li><BoldText text={`요청한 날짜에 수집이 없으면 **그 이전 가장 가까운 날**과 비교하고, 그 칸의 설명에 실제 구간을 적습니다.`} /></li>
@@ -367,6 +369,8 @@ function GrowthCell({ g, unit, heatRatio, latestUsed }) {
         {c.text}
         {c.tone !== 'none' && c.exact === false ? <sup style={{ color: 'var(--amber)', marginLeft: 2 }}>≈</sup> : null}
       </div>
+      {/* v2.604: 반올림 표기 용량 — 짧은 표지만 두고 설명은 각주 1회(v2.509 규약) */}
+      {c.approxMark ? <div className="muted" style={{ fontSize: 10, fontWeight: 400, lineHeight: 1.2, whiteSpace: 'nowrap' }}>{c.approxMark}</div> : null}
     </td>
   );
 }

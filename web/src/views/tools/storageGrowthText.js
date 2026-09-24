@@ -73,12 +73,45 @@ export function growthCell(g, unitKey = 'auto') {
   if (g.spanDays != null) parts.push(`실제 구간 ${g.spanDays}일`);
   if (g.exact === false) parts.push('요청한 날짜에 관측이 없어 그 이전 가장 가까운 날과 비교했습니다');
   if (g.perDayBytes != null) parts.push(`하루 평균 ${bytesIn(g.perDayBytes, unitKey) ?? '—'}`);
+  // v2.604(COL-2604-01 후속): 반올림 표기 용량 장비 — 해상도 미만 변화는 **0 이 아니라 보이지 않는 것**이다.
+  const res = approxResolution(g);
+  if (res != null) {
+    const r = bytesAuto(res) ?? '—';
+    parts.push(`장비 표시값(반올림)으로 계산해 ±${r} 해상도입니다`);
+    if (g.belowResolution) {
+      return { text: `±${r} 미만`, tone: 'flat', title: parts.join(' · '), exact: g.exact !== false, approxMark: `약(±${r})` };
+    }
+    return {
+      text: `${sign}${body}`,
+      tone: n > 0 ? 'up' : n < 0 ? 'down' : 'flat',
+      title: parts.join(' · '),
+      exact: g.exact !== false,
+      approxMark: `약(±${r})`,
+    };
+  }
   return {
     text: n === 0 ? '0' : `${sign}${body}`,
     tone: n > 0 ? 'up' : n < 0 ? 'down' : 'flat',
     title: parts.join(' · '),
     exact: g.exact !== false,
   };
+}
+
+/** 증가량 칸의 해상도(바이트) — 서버 growth.js 가 반올림 표기 장비에만 싣는다. 없으면 null. */
+function approxResolution(g) {
+  const v = g?.resolutionBytes;
+  if (v == null || v === '' || typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return null;
+  return v;
+}
+
+/**
+ * v2.604: 반올림 표기 용량 장비가 있으면 각주 한 번(행마다 반복하지 않는다 — v2.509 규약). 없으면 null.
+ * @param {object[]} devices growthMatrix 의 devices(필터 적용 뒤)
+ */
+export function approxFootnote(devices) {
+  const n = (devices || []).filter((d) => d?.capacityApprox).length;
+  if (!n) return null;
+  return `**약(±해상도)** 표지가 붙은 장비 ${n}대는 용량을 장비의 표시 반올림 값으로 읽었습니다 — 표시 반올림 값이라 해상도 미만 변화는 보이지 않습니다. ‘±해상도 미만’ 은 변화가 없었다는 뜻이 아닙니다.`;
 }
 
 /**

@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import {
   GROWTH_UNITS, bytesAuto, bytesIn, growthCell, totalCell,
   fullEtaText, headline, missingNote, heat, maxAbsFor,
-  growthPct, growthPctText, aggregateGrowth, historyResetNote } from './storageGrowthText.js';
+  growthPct, growthPctText, aggregateGrowth, historyResetNote, approxFootnote } from './storageGrowthText.js';
 
 const TB = 1024 ** 4;
 const GB = 1024 ** 3;
@@ -281,5 +281,34 @@ describe('historyResetNote — 정리 종류 구분(v2.541)', () => {
   it('시각이 없으면 배지를 만들지 않는다', () => {
     expect(historyResetNote(null)).toBe(null);
     expect(historyResetNote({ rows: 3 })).toBe(null);
+  });
+});
+
+describe('v2.604 반올림 표기 용량(COL-2604-01 후속)', () => {
+  const PB = 1024 ** 5;
+  it('해상도 미만(0)은 0 이 아니라 ±해상도 미만으로 말한다', () => {
+    const c = growthCell({ bytes: 0, resolutionBytes: 0.1 * PB, belowResolution: true, spanDays: 7 });
+    expect(c.text).toBe('±102.4 TB 미만');
+    expect(c.text).not.toBe('0');
+    expect(c.approxMark).toBe('약(±102.4 TB)');
+    expect(c.tone).toBe('flat');
+  });
+  it('해상도 이상 변화는 값을 그대로 쓰고 약(±) 표지만 붙인다', () => {
+    const c = growthCell({ bytes: 0.1 * PB, resolutionBytes: 0.1 * PB, belowResolution: false });
+    expect(c.text).toBe('+102.4 TB');
+    expect(c.approxMark).toBe('약(±102.4 TB)');
+    expect(c.title).toMatch(/해상도/);
+  });
+  it('해상도가 없는 장비는 예전 그대로다', () => {
+    const c = growthCell({ bytes: 0 });
+    expect(c.text).toBe('0');
+    expect(c.approxMark).toBeUndefined();
+  });
+  it('각주는 반올림 장비가 있을 때만 한 번, 백틱 없이', () => {
+    expect(approxFootnote([{ deviceId: 'a' }])).toBeNull();
+    const t = approxFootnote([{ capacityApprox: { resolutionBytes: 1 } }, { deviceId: 'b' }]);
+    expect(t).toMatch(/1대/);
+    expect(t).toMatch(/해상도 미만 변화는 보이지 않습니다/);
+    expect(t).not.toMatch(/`/);
   });
 });

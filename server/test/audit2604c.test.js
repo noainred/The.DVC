@@ -207,3 +207,27 @@ test('EDGE2604-03: 결과 회신이 실패하면 "수집 완료" 줄이 그 사�
   const cl = logs.find((l) => l.includes('[capture-agent] 캡처 완료 reqId=rq2'));
   assert.ok(cl && /결과 회신 실패/.test(cl), JSON.stringify(logs));
 });
+
+test('COL-2604-01 후속: 증가량 매트릭스가 반올림 장비의 해상도를 싣고, 해상도 미만은 0 이 아니라 belowResolution 이다', async () => {
+  const { growthMatrix } = await import('../src/storage/growth.js');
+  const D0 = 20000;   // 고정 일 인덱스(Date.now 금지)
+  const row = (id, day, used) => ({ device_id: id, day, last_ts: day * 86_400_000, total_bytes: 2.2 * PiB, used_bytes: used, max_used: used, samples: 4 });
+  const rows = [row('isi', D0 - 7, 1.2 * PiB), row('isi', D0, 1.2 * PiB), row('isi', D0 - 30, 1.1 * PiB),
+    row('pm', D0 - 7, 100), row('pm', D0, 100)];
+  const periods = [{ key: '7d', days: 7, label: '1주' }, { key: '30d', days: 30, label: '1달' }];
+  const meta = new Map([['isi', { name: 'isi', capacityApprox: { source: 'isi status', resolutionBytes: 0.1 * PiB } }], ['pm', { name: 'pm' }]]);
+  const m = growthMatrix(rows, { asOfDay: D0, periods, meta });
+  const isi = m.devices.find((x) => x.deviceId === 'isi');
+  const pm = m.devices.find((x) => x.deviceId === 'pm');
+  assert.deepEqual(isi.capacityApprox, { resolutionBytes: 0.1 * PiB });
+  assert.equal(isi.growth['7d'].bytes, 0);
+  assert.equal(isi.growth['7d'].belowResolution, true);
+  assert.equal(isi.growth['7d'].resolutionBytes, 0.1 * PiB);
+  assert.equal(isi.growth['30d'].belowResolution, false);
+  assert.equal(pm.capacityApprox, undefined);                    // 정확한 장비에는 붙지 않는다
+  assert.equal(pm.growth['7d'].belowResolution, undefined);
+  assert.equal(m.totals.approxDevices, 1);
+  // 해상도가 이상한 값이면 붙이지 않는다(지어내지 않는다)
+  const m2 = growthMatrix(rows, { asOfDay: D0, periods, meta: new Map([['isi', { capacityApprox: { resolutionBytes: '' } }]]) });
+  assert.equal(m2.devices.find((x) => x.deviceId === 'isi').capacityApprox, undefined);
+});
