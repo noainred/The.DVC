@@ -113,7 +113,10 @@ export function normalizeIsilon(device, raw) {
     const list = raw.nodes.nodes || [];
     snap.nodes.count = list.length;
     // OneFS 노드 상태 필드는 버전별 상이(status/health) — 명시적으로 정상 아닌 것만 센다(모르면 0).
-    const healthOf = (n) => String(n.status?.health ?? n.status ?? n.health ?? '').toLowerCase() || 'unknown';
+    // v2.600(감사 COL-2600-05): status 가 health 키 없는 **객체**면 String() 이 '[object object]' 를 만들고, healthWord 가
+    //   모르는 단어를 나쁨으로 봐 **전 노드가 비정상**이 됐다(위 주석 '모르면 0' 과 반대). 문자열(또는 숫자)일 때만 쓴다.
+    const word = (v) => (typeof v === 'string' || typeof v === 'number' ? String(v) : '');
+    const healthOf = (n) => (word(n.status?.health) || word(n.status) || word(n.health)).toLowerCase() || 'unknown';
     // v2.586 — 판정은 `storage/healthWord.js` 하나(앵커 없는 부분 일치가 'unhealthy'·'broken' 을 정상으로 셌다).
     snap.nodes.unhealthy = list.filter((n) => healthWord(healthOf(n)) === 'bad').length;
     // 노드별 상세(v2.303) — devid(lnn) 기준으로 노드별 통계를 조인. IP 필드는 버전별 상이라
@@ -163,7 +166,20 @@ export function normalizeIsilon(device, raw) {
     snap.sections.pools = 'ok';
   }
   if (raw.events) {
-    snap.alerts.unresolved = Number(raw.events.total ?? (raw.events.eventgroups || []).length) || 0;
+    // v2.600(감사 COL-2600-09): 조회가 `limit=1` 이라 목록 길이는 **전체 건수가 아니다**(최대 1). 예전에는 total 이 없으면
+    //   그 길이를 전체로 썼고, v1 폴백(`/platform/1/event/events`)의 `events` 키는 읽지 않아 0 이 됐다.
+    //   total 이 있으면 그것, 없고 목록이 비었으면 0(확정), 목록에 항목이 있으면 **하한**(1건 이상)으로 밝힌다.
+    const ev = raw.events;
+    const total = numOrNull(ev.total);
+    const list = Array.isArray(ev.eventgroups) ? ev.eventgroups : Array.isArray(ev.events) ? ev.events : [];
+    if (total != null) snap.alerts.unresolved = total;
+    else {
+      snap.alerts.unresolved = list.length;
+      if (list.length) {
+        snap.extra.alertsLowerBound = true;
+        snap.extra.alertsNote = `장비가 전체 건수(total)를 주지 않아 미해결 경보는 ${list.length}건 이상입니다(조회 상한 기준 하한값).`;
+      }
+    }
     snap.sections.alerts = 'ok';
   }
   // 성공 판정: 최소한 config 또는 capacity 를 읽었으면 '수집됨'(부분 실패는 sections 가 설명).

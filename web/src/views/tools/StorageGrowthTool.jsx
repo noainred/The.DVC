@@ -10,6 +10,7 @@ import {
   growthPct, growthPctText, aggregateGrowth, historyResetNote } from './storageGrowthText.js';
 import { facetState, toggleIn, groupBy } from './deviceFacets.js';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
+import { addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600-02
 
 /**
  * 특수기능 › 스토리지 증가량(v2.531) — **임원 보고서 형태**.
@@ -152,6 +153,7 @@ export default function StorageGrowthTool() {
       {cols.some((p) => t.growth?.[p.key]?.partial) && (
         <Note tone="warn" text={`**합계가 전 장비 기준이 아닙니다.** 기간별로 기준선(비교 시작일)이 없는 장비는 그 열의 합계에서 빠졌습니다 — 각 칸에 마우스를 올리면 몇 대를 더했는지 나옵니다. 관측이 그 기간만큼 쌓이면 자동으로 포함됩니다.`} />
       )}
+      {addressHiddenNote(d) && <Note text={addressHiddenNote(d)} />}
       {t.unknownUsed > 0 && (
         <Note tone="warn" text={`**사용량을 읽지 못한 장비 ${t.unknownUsed}대**가 합계에서 빠졌습니다 — 0 으로 채우지 않았습니다(‘용량 0’ 이라는 거짓을 만들지 않기 위해서입니다).`} />
       )}

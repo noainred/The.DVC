@@ -54,18 +54,20 @@ export async function collectVcenterGuestDisk(vcenterId) {
   if (!morefs.length) return { vcenterId, vcenterName: vcName, vms: [], total: 0, withGuest: 0 };
   const details = await withTimeout((signal) => collectDetails(vcCfg, morefs, { signal }), COLLECT_TIMEOUT_MS, `게스트 디스크 조회(${vcName})`);
   const out = [];
+  let partsUnknown = 0;   // v2.600(감사 LO2600-07): 여유 공간을 보고하지 않아 합계에서 뺀 파티션 수(vmSummary 가 센다)
   for (const vm of vms) {
     const props = details.get(vm.id.slice(vcenterId.length + 1)) || {};
     const parts = parseGuestDisks(props['guest.disk']);
     if (!parts.length) continue; // VMware Tools 미실행/미보고 — 관측 불가, 제외
     const s = vmSummary(parts);
+    partsUnknown += s.partsUnknown || 0;
     out.push({
       vmId: vm.id, vmName: vm.name || vm.id,
       allocGB: s.allocGB, usedGB: s.usedGB, freeGB: s.freeGB, ratioPct: s.ratioPct, partCount: s.partCount,
       parts: parts.map((p) => ({ path: p.path, capGB: p.capacityGB, usedGB: p.usedGB })),
     });
   }
-  return { vcenterId, vcenterName: vcName, vms: out, total: vms.length, withGuest: out.length };
+  return { vcenterId, vcenterName: vcName, vms: out, total: vms.length, withGuest: out.length, ...(partsUnknown ? { partsUnknown } : {}) };
 }
 
 /** 한 vCenter 수집 + DB 커밋(폴러/수동 공용). */

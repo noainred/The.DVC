@@ -14,6 +14,7 @@
  *
  * 보안: 자격증명은 실행 중 클로저에만 있고 **잡 상태·응답 어디에도 남기지 않는다**(auth 방식만 표시).
  */
+import { reqTimeoutMs } from './envTimeout.js';
 import { deployAgent } from './deploy.js';
 import { saveTarget, findTargetByHost, recordResult } from './deployRegistry.js';
 import { autoRegisterCollector } from './autoRegister.js';
@@ -21,7 +22,7 @@ import { ipBlockReason } from '../collector/registry.js';
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.AGENT_DEPLOY_CONCURRENCY) || 2));
-const NODE_TIMEOUT_MS = Math.max(60_000, Number(process.env.AGENT_DEPLOY_TIMEOUT_MS) || 900_000); // 기본 15분(SFTP + install.sh)
+const NODE_TIMEOUT_MS = reqTimeoutMs(process.env.AGENT_DEPLOY_TIMEOUT_MS, 900_000, { min: 60_000, max: 2 * 3_600_000 }); // 기본 15분(SFTP + install.sh)
 const KEEP_RUNS = 5;
 
 const _runs = new Map();   // runId → run

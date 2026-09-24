@@ -192,3 +192,23 @@ describe('v2.599 WEB2599-04 — 거부 종류 unknown-route', () => {
     expect(rejectKindLabel('')).toBe('—');
   });
 });
+
+describe('v2.600 WEB2600-02·05 — 전부 거부된 엣지·등록부 밖 vCenter', () => {
+  it('전부 거부된 엣지는 거부 사유와 미검증 사실을 말한다', () => {
+    const line = agentRowExplain({ rejectedOnly: true, rejectedInventory: true, rejects: { total: 4, lastKind: 'bad-request', lastReason: 'vcenterId 없음' } });
+    expect(line).toContain('전부 거부');
+    expect(line).toContain('4건');
+    expect(line).toContain('형식 오류');
+    expect(line).toContain(unverifiedNote());
+  });
+  it('각주 — 전부 거부·인증 실패 칸을 밝히고, 거부 엣지를 \'다른 용도 엣지\' 로 설명하지 않는다', () => {
+    const f = tableFootnotes({ rows: [], agents: [{ rejectedOnly: true, sentInventory: false, knownOwner: false }], unauthRejects: 7 });
+    expect(f.some((x) => x.includes('전부 거부됨'))).toBe(true);
+    expect(f.some((x) => x.includes('7건'))).toBe(true);
+    expect(f.some((x) => x.includes('다른 용도로만'))).toBe(false);
+  });
+  it('새 발견 코드 두 개의 문구가 있다', () => {
+    expect(findingCodesDeclared()).toEqual(expect.arrayContaining(['inv-agent-rejected-only', 'inv-unregistered-vcenter']));
+    expect(findingLine({ code: 'inv-unregistered-vcenter', target: 'vc-x' })).toContain('등록부에 없는');
+  });
+});

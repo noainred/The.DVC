@@ -86,3 +86,12 @@ describe('reasonText', () => {
     expect(typeof reasonText('mock')).toBe('string');
   });
 });
+
+describe('v2.600 WEB2600-04 — 3단 지도 머리말', () => {
+  it('인증 실패 칸은 등록부 밖 엣지로 세지 않고 따로 밝힌다', () => {
+    const now = Date.UTC(2026, 8, 24, 2, 30, 0);
+    const t = headerNote({ edges: [{ registered: true }], totals: {}, unauth: { count: 3, routes: [{}] } }, now);
+    expect(t).toContain('인증에 실패한 요청 3건');
+    expect(t).not.toContain('등록부에 없는 이름');
+  });
+});

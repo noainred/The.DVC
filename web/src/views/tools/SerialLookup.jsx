@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, downloadFile } from '../../api.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
+import BoldText from '../../components/boldText.jsx';
+import { addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600-01
 
 /**
  * 특수기능 › 시리얼 조회(v2.412, 사용자 요구 '서버·스토리지·네트워크·SAN switch 등 등록되고
@@ -55,6 +57,12 @@ export default function SerialLookup() {
           • 한 장비가 서비스 태그·시리얼·자산 태그로 여러 줄에 나올 수 있습니다.
         </div>
       </div>
+
+      {addressHiddenNote(data) && (
+        <div className="card" style={{ marginBottom: 12, fontSize: 12.5, borderLeft: '3px solid var(--border)' }}>
+          🔒 <BoldText text={addressHiddenNote(data)} />
+        </div>
+      )}
 
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <SearchBox className="input" style={{ maxWidth: 420, minWidth: 260, fontSize: 15 }}

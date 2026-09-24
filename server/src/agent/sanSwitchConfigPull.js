@@ -4,8 +4,9 @@
  * 아웃바운드 GET 으로 주기 수집해 로컬 레지스트리에 반영한다(폐쇄망/NAT 엣지 동작).
  */
 import crypto from 'node:crypto';
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
+import { classifyCentral404 } from './central404.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyPulledDevices } from '../sanswitch/registry.js';
 import { dropSnapshot } from '../sanswitch/store.js';
@@ -15,8 +16,9 @@ import { pushSanSwitchNow } from '../sanswitch/push.js';
 import { pollPerfOnce } from '../sanswitch/perfPoller.js';
 import { pushPerfNow } from '../sanswitch/perfPush.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
+const _log404 = createChangeLogger({ windowMs: 10 * 60_000 }); // v2.600 EDGE2600-06
 
-export const configPullMs = () => Math.max(60_000, Number(process.env.SANSW_CONFIG_PULL_MS) || 5 * 60_000);
+export const configPullMs = () => clampIntervalMs(Number(process.env.SANSW_CONFIG_PULL_MS) || 5 * 60_000, 5 * 60_000, 60_000); // v2.600 EDGE2600-05: 상태 보고 주기도 실제(상한 적용) 값
 
 let _timer = null;
 let _lastSig = '';
@@ -37,7 +39,13 @@ async function _pull() {
   try {
     const url = `${config.agent.centralUrl}/api/central/sanswitch-config?agent=${encodeURIComponent(config.agent.name || '')}`;
     const res = await resilientFetch(url, { method: 'GET', headers: { 'X-Central-Token': config.agent.centralToken }, timeoutMs: 20_000, retries: 2 });
-    if (res.status === 404) return { ok: false, reason: '중앙에 SAN 스위치 배포 엔드포인트 없음(중앙 버전이 낮음)' };
+    // v2.600 EDGE2600-06: 404 본문으로 '중앙이 central 을 끔' 과 '엔드포인트 없음' 을 가르고 상태·콘솔에 남긴다(예전엔 값만 돌려줬다).
+    if (res.status === 404) {
+      const c = await classifyCentral404(res);
+      _last = { ...(_last || {}), at: Date.now(), ok: false, error: c.reason, kind: c.kind };
+      if (_log404(c.kind, c.reason)) console.warn(`[sanswitch-config] ${c.reason}`);
+      return { ok: false, reason: c.reason, kind: c.kind };
+    }
     if (!res.ok) throw new Error(`sanswitch-config <- ${res.status}`);
     const body = await res.json();
     const devices = body?.devices || [];

@@ -43,6 +43,11 @@ const MAX_IPS = 64;            // 한 vCenter당 동시 대기 IP 상한(남용 
 // 에이전트가 '요청한 적 없는' IP 를 대량 보고하면 TTL(5분) 만료 전까지 맵이 무한 증식한다(메모리 남용).
 // 상한 초과 시 가장 오래된 항목부터 축출한다(감사 L17).
 const MAX_RESULT_IPS = 512;
+// v2.600 CEN2600-04: 바깥 Map(vcenterId 키)의 상한·키 길이. 안쪽 Map 만 상한이 있고 바깥은 퇴출이 없어, 인증된 엣지가
+// 서로 다른 vcenterId(각 2,000자) 3,000개를 보고하면 힙이 3.7→65.5MB 로 늘고 TTL 이 지나도 내려가지 않았다(검증 실측).
+// 운영 28개(30+ 예정) vCenter 의 여유 있는 배수로 잡는다. 초과 시 가장 오래 보고되지 않은 vCenter 부터 축출한다.
+const MAX_RESULT_VCS = 256;
+const MAX_VC_ID_LEN = 128;
 // 인출(claim) 후 결과(ack) 기한 — 근거는 파일 헤더 주석(최악 ~12초 실행 + 회신의 2배 이상 여유).
 const ACK_TIMEOUT_MS = Number(process.env.PING_ACK_TIMEOUT_MS) || 30_000;
 // IP당 재인출 한도 — 초과 시 폐기(UI는 unknown). ping 은 저비용·멱등이라 2회면 충분하고,
@@ -125,20 +130,25 @@ export function takePingJobs(vcenterIds = [], now = Date.now()) {
 
 /** 에이전트가 ping 결과 보고. results: [{ ip, alive, rttMs }]. 보고된 IP는 in-flight 에서 제거(= IP별 ack). */
 export function setPingResults(vcenterId, rows = []) {
-  if (!vcenterId) return;
+  // v2.600 CEN2600-04: id 는 문자열·길이 상한(초과면 버린다 — 잘라 쓰면 다른 vCenter 와 섞일 수 있다).
+  if (typeof vcenterId !== 'string' || !vcenterId || vcenterId.length > MAX_VC_ID_LEN) return;
+  if (!Array.isArray(rows)) rows = [];
   const m = results.get(vcenterId) || new Map();
   const fl = inflight.get(vcenterId);
   const now = Date.now();
   for (const r of rows) {
-    if (!r || !r.ip) continue;
-    const key = String(r.ip);
+    if (!r || typeof r !== 'object' || (typeof r.ip !== 'string' && typeof r.ip !== 'number')) continue;
+    const key = String(r.ip).slice(0, 64);
+    if (!key) continue;
     // ack — 이 IP 의 결과가 왔으므로 재수확 대상에서 제외. (요청한 적 없는 IP 보고는 fl 에 없어 무해.)
     if (fl) { fl.delete(key); if (!fl.size) inflight.delete(vcenterId); }
     const prev = m.get(key);
     // 도달성은 'OR' — 한 vantage point(중앙/다른 망 에이전트)라도 최근에 응답했으면 up 유지.
     // 다른 곳에서 못 닿아 down을 보고해도 신선한 up을 덮어쓰지 않는다(녹↔적 깜빡임 방지).
     if (!r.alive && prev && prev.alive && (now - prev.at) < UP_STICKY_MS) continue;
-    m.set(key, { alive: !!r.alive, rttMs: r.rttMs ?? null, at: now });
+    // rttMs 는 유한한 수만(객체·문자열 원문을 화면으로 흘리지 않는다 — v2.598 CENTRAL 규약).
+    const rtt = typeof r.rttMs === 'number' && Number.isFinite(r.rttMs) ? r.rttMs : null;
+    m.set(key, { alive: !!r.alive, rttMs: rtt, at: now });
   }
   // TTL 만료 정리
   for (const [ip, v] of m) if (now - v.at > RESULT_TTL) m.delete(ip);
@@ -147,8 +157,24 @@ export function setPingResults(vcenterId, rows = []) {
     const oldest = [...m.entries()].sort((a, b) => a[1].at - b[1].at);
     for (let i = 0; i < oldest.length && m.size > MAX_RESULT_IPS; i++) m.delete(oldest[i][0]);
   }
-  results.set(vcenterId, m);
+  // v2.600 CEN2600-04: 빈 Map 은 저장하지 않는다(예전에는 빈 보고도 바깥 키를 만들었다). 지우고 다시 넣어 최근 보고가 뒤로 가게.
+  results.delete(vcenterId);
+  if (m.size) results.set(vcenterId, m);
+  sweepResults(now);
 }
+
+/** 바깥 결과 Map 정리 — 만료된 vCenter 항목 삭제 + 개수 상한(가장 오래 보고되지 않은 것부터 축출). */
+function sweepResults(now = Date.now()) {
+  for (const [vc, m] of results) {
+    for (const [ip, v] of m) if (now - v.at > RESULT_TTL) m.delete(ip);
+    if (!m.size) results.delete(vc);
+  }
+  // Map 은 삽입 순서를 지키고 setPingResults 가 지우고 다시 넣으므로 앞쪽이 가장 오래 보고되지 않은 vCenter 다.
+  while (results.size > MAX_RESULT_VCS) results.delete(results.keys().next().value);
+}
+
+/** 테스트용: 바깥 결과 Map 크기. */
+export function _pingResultVcCount() { return results.size; }
 
 /**
  * UI가 결과 조회 — { ip: { alive, rttMs, at, ageMs } }. 미수행 IP는 결과 없음(pending 여부 포함).
@@ -157,6 +183,7 @@ export function setPingResults(vcenterId, rows = []) {
  */
 export function getPingResults(vcenterId, ips = []) {
   reapPingClaims(); // 만료 in-flight 가 'pending' 으로 영원히 보이지 않게 조회 시에도 정리
+  sweepResults();
   const m = results.get(vcenterId) || new Map();
   const pend = pending.get(vcenterId) || new Map();
   const fl = inflight.get(vcenterId) || new Map();

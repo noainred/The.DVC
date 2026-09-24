@@ -17,6 +17,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
+import { chunkedDelete } from '../util/chunkedPrune.js';
 const lockRetry = createLockRetry();
 
 // DB 저장 경로 설정(v2.379)을 따른다 — config.dbDir 이 있으면 그 아래. env 가 최우선.
@@ -129,17 +130,26 @@ export async function recordSnapshot(snap) {
     return false;
   }
   // prune 은 스로틀 — 매 적재마다 DELETE 스캔하면 폴링이 그만큼 느려진다.
-  if (++_tick % PRUNE_EVERY === 0) pruneOld(db);
+  if (++_tick % PRUNE_EVERY === 0) pruneOld(db).catch((e) => console.error('[pdu-db] prune 실패:', e.message));
   return true;
 }
 
-function pruneOld(db) {
+// v2.600 DB2600-04: 청크 + 양보(v2.453 규약). 예전에는 표마다 DELETE 한 방이라 PDU_RETAIN_DAYS 를 줄이고 재시작하면
+// 쌓인 차액을 동기로 한 번에 지워 그동안 이벤트 루프가 멈췄다. 상한에 걸린 나머지는 다음 주기가 이어서 지운다.
+// 청크 사이에 적재가 끼어들 수 있으므로 prune 끼리는 겹치지 않게 한다(적재는 동기 트랜잭션이라 청크와 섞이지 않는다).
+let _pruning = false;
+async function pruneOld(db) {
+  if (_pruning) return;
+  _pruning = true;
   const cut = Date.now() - RETAIN_DAYS * 86_400_000;
   try {
     for (const t of ['pdu_sample', 'pdu_bank', 'pdu_phase', 'pdu_env']) {
-      db.conn.prepare(`DELETE FROM ${t} WHERE ts < ?`).run(cut); // ts 단독 인덱스가 있어야 풀스캔을 피한다
+      // ts 단독 인덱스가 있어야 rowid 서브쿼리가 풀스캔을 피한다
+      const stmt = db.conn.prepare(`DELETE FROM ${t} WHERE rowid IN (SELECT rowid FROM ${t} WHERE ts < ? LIMIT ?)`);
+      const r = await chunkedDelete(stmt, [cut], { label: `pdu.${t}` });
+      if (r.deleted > 0) console.log(`[pdu-db] ${t} prune ${r.deleted.toLocaleString()}행 삭제(${r.chunks}청크)${r.done ? '' : ' — 상한 도달, 다음 주기에 계속'}`);
     }
-  } catch (e) { console.error('[pdu-db] prune 실패:', e.message); }
+  } finally { _pruning = false; }
 }
 
 /** 조회 창의 상한 — 보존 기간을 넘겨 물어도 의미가 없다(그 뒤엔 prune 돼 행이 없다). */

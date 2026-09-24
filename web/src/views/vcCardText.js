@@ -38,3 +38,19 @@ export function vcCardState(s = {}, now = Date.now()) {
   if (st === 'disabled') return { showMetrics: false, tone: 'off', text: '수집이 꺼져 있습니다(설정 › vCenter 에서 켤 수 있습니다).' };
   return { showMetrics: false, tone: 'bad', text: '이 vCenter에 연결할 수 없습니다.', showError: true };
 }
+
+/**
+ * v2.600(LO2600-01): 스토리지 막대 값. 서버가 사용량을 읽은 데이터스토어가 하나도 없으면 사용률을 null 로 준다 —
+ * 예전 `m.storageUsagePct || 0` 은 그것을 **0% 막대**(= '비어 있다')로 그렸다. null 이면 막대는 '—' 이고 툴팁이 이유를 말한다.
+ */
+export function storageBarInfo(m = {}) {
+  const pct = typeof m?.storageUsagePct === 'number' && Number.isFinite(m.storageUsagePct) ? m.storageUsagePct : null;
+  const unknown = Number(m?.datastoresUsageUnknown) || 0;
+  const detail = m?.storageUsedTB != null ? `${m.storageUsedTB}/${m.storageTotalTB} TB` : (m?.storageTotalTB != null ? `${m.storageTotalTB} TB` : '—');
+  const title = unknown
+    ? (pct == null
+      ? `데이터스토어 ${unknown}개의 사용량을 읽지 못해 사용률을 모릅니다(0% 가 아닙니다)`
+      : `사용량을 읽지 못한 데이터스토어 ${unknown}개는 사용률 계산에서 뺐습니다`)
+    : undefined;
+  return { pct, detail, title };
+}

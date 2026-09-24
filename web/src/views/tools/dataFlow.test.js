@@ -4,7 +4,7 @@ import {
 } from './dataFlowLayout.js';
 import {
   edgeBadge, innerItemText, sinceNote, linkText, routePath, edgeLasts, LEGEND, legendLines, KIND_LABEL, STATE_LABEL,
-  dirCellText, dirSumText, DIR_LABEL, DIR_KINDS_TEXT, shortEdgeLabels,
+  dirCellText, dirSumText, DIR_LABEL, DIR_KINDS_TEXT, shortEdgeLabels, unauthNote,
 } from './dataFlowText.js';
 
 const data = {
@@ -282,5 +282,20 @@ describe('v2.591 검토 반영', () => {
     for (const v of x) expect(v.length).toBeLessThanOrEqual(10);
     // 뒷부분까지 같으면 원래 이름(말줄임은 화면이 한다) — 지어낸 구분을 만들지 않는다.
     expect(shortEdgeLabels(['AAAAAAAAAAAAAXYZ', 'AAAAAAAAAAAAAXYZ'], 10)).toEqual(['AAAAAAAAAAAAAXYZ', 'AAAAAAAAAAAAAXYZ']);
+  });
+});
+
+describe('v2.600 WEB2600-04 — 인증 실패 집계 칸', () => {
+  const now = Date.UTC(2026, 8, 24, 2, 30, 0);
+  it('있으면 개수·경로 수를 말하고 토큰 점검을 가리킨다', () => {
+    const t = unauthNote({ unauth: { count: 7, lastAt: now - 60_000, routes: [{}, {}] } }, now);
+    expect(t).toContain('인증에 실패한 요청 7건');
+    expect(t).toContain('경로 2개');
+    expect(t).toContain('토큰 점검');
+    expect(sinceNote({ since: now - 3_600_000, unauth: { count: 7, routes: [] } }, now)).toContain('인증에 실패한 요청 7건');
+  });
+  it('없으면 빈 문자열', () => {
+    expect(unauthNote({}, now)).toBe('');
+    expect(unauthNote({ unauth: { count: 0 } }, now)).toBe('');
   });
 });

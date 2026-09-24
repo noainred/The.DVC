@@ -312,7 +312,10 @@ class Store {
           if (siteVc && typeof siteVc === 'object' && !Array.isArray(siteVc)) {
             const s = inv.data;
             const stale = Date.now() - inv.at > SITE_STALE_MS;
-            merged.vcenters.push({ ...siteVc, id: vc.id, collectSource: 'site', collectedBy: inv.agent, receivedAt: inv.at, stale });
+            // v2.600(감사 RECENT2600-01) 2차 방어: 엣지가 보낸 location 이 객체가 아니면(v2.599 수신이 null 로 만든 옛 push 포함)
+            //   등록부의 위치로 채운다 — 없으면 지역 롤업이 'Unknown' 으로 묶이고 지도 좌표가 사라진다.
+            const siteLoc = siteVc.location && typeof siteVc.location === 'object' && !Array.isArray(siteVc.location) ? siteVc.location : (vc.location ?? siteVc.location ?? null);
+            merged.vcenters.push({ ...siteVc, location: siteLoc, id: vc.id, collectSource: 'site', collectedBy: inv.agent, receivedAt: inv.at, stale });
             // v2.599(CEN-2599-01·02) 2차 방어: 디스크에 이미 저장된 옛 push 에 객체가 아닌 원소나 **다른 vCenter** 의 원소가
             //   있어도 병합하지 않는다 — null 하나가 rollupsOf 에서 throw 해 전 함대 스냅샷이 매 주기 멈췄다.
             const own = (a) => (Array.isArray(a) ? a.filter((x) => x && typeof x === 'object' && !Array.isArray(x) && (x.vcenterId == null || String(x.vcenterId) === vc.id)) : []);
@@ -576,7 +579,7 @@ function rollupsOf(snap, { scoped = false } = {}) {
     memTotalReadableGB: round(hc.memTR / 1024, 0),
     storageTotalTB: round(storCapGB / 1024, 1),
     storageUsedTB: round(storUsedGB / 1024, 1),
-    storageUsagePct: pct(storUsedGB, storCapGB),
+    storageUsagePct: pctOrNull(storUsedGB, storCapGB),   // v2.600 LO2600-01 — CPU·메모리와 같은 기준(읽은 DS 0 이면 null)
     datastores: snap.datastores.length,
     datastoresUsageUnknown: dsUsageUnknown,
     networks: snap.networks.length,
@@ -633,7 +636,7 @@ function rollupsOf(snap, { scoped = false } = {}) {
         cpuUsagePct: pctOrNull(cpuU, cpuTR),
         memUsagePct: pctOrNull(memU, memTR),
         hostsUsageExcluded: h.length - hR.length,
-        storageUsagePct: pct(stU, stC),
+        storageUsagePct: pctOrNull(stU, stC),   // v2.600 LO2600-01 — 사용량을 읽은 DS 가 없으면 0% 가 아니라 모른다(null)
         storageTotalTB: round(stC / 1024, 1),
         // 사용량/전체 병기용(v2.232) — %만으로는 규모가 안 보인다(카드에서 "63% · 69/110 TB" 표기).
         cpuUsedGhz: round(cpuU / 1000, 1),
@@ -660,7 +663,6 @@ function rollupsOf(snap, { scoped = false } = {}) {
 }
 
 const round = (v, d) => Number(v.toFixed(d));
-const pct = (used, total) => (total > 0 ? Math.round((used / total) * 100) : 0);
 // v2.595(감사 WT-01): 사용량을 읽을 수 있는 호스트가 하나도 없으면 사용률은 '0%' 가 아니라 모른다(null).
 const pctOrNull = (used, total) => (total > 0 ? Math.round((used / total) * 100) : null);
 

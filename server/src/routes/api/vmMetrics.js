@@ -6,6 +6,7 @@ import { loadVcenterConfig } from '../../config.js';
 import { hostPower } from '../../idrac/service.js';
 import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, getVmConsole } from '../../vcenter/soapClient.js';
 import { vcAuthGuard, isVcAuthError } from '../../vcenter/restClient.js';
+import { isAdminReq } from '../../auth/addressMask.js';
 import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론 포함 vCenter id 안전한 moref 추출
 
 /**
@@ -66,6 +67,31 @@ function synthMetric(vm, type, interval, range = {}) {
 export function vcRefOf(obj) {
   const vcId = String(obj?.vcenterId || '');
   return { vcId, moref: morefOf(obj?.id, vcId) };
+}
+
+/*
+ * v2.600 AUTHZ-2600-06 — 권한 게이트가 없어 viewer 도 iDRAC 관리 URL(server.host)·iDRAC 네트워크
+ * 식별(info.network 의 IP·FQDN)을 받았다. 형제 `/hosts/:id/metrics` 와 같은 `inv.hosts` 게이트를 걸고,
+ * 비-admin 에는 관리 주소를 가린다(전력·하드웨어 정보는 그대로). iDRAC 등록부는 id 를 IP 문자열로
+ * 발급하므로(`idrac/registry.js`) id 도 주소면 비운다. 가린 사실은 addressHidden.
+ */
+const IPV4_ID = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+export function maskHostPower(r) {
+  if (!r || typeof r !== 'object') return r;
+  const out = { ...r, addressHidden: true };
+  if (out.server && typeof out.server === 'object') {
+    const s = { ...out.server };
+    const bare = String(s.host || '').replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/[/:].*$/, '');
+    // '(via OME)'·'(수집서버 …)' 같은 출처 표식은 주소가 아니라 그대로 둔다.
+    if (typeof s.host === 'string' && !/^\(.*\)$/.test(s.host)) s.host = '';
+    if (typeof s.id === 'string' && (IPV4_ID.test(s.id) || (bare && s.id === bare))) s.id = '';
+    if (typeof s.name === 'string' && bare && (s.name === r.server.host || s.name === bare)) s.name = '(이름 가림)';
+    out.server = s;
+  }
+  if (out.info && typeof out.info === 'object' && Array.isArray(out.info.network)) {
+    out.info = { ...out.info, network: out.info.network.map((n) => (n && typeof n === 'object' ? { ...n, ipv4: '', hostName: '', fqdn: '' } : n)) };
+  }
+  return out;
 }
 
 export function registerVmMetrics(api) {
@@ -160,7 +186,7 @@ api.get('/vms/:id/console', requirePerm('vm.console'), async (req, res) => {
 // 위반 시 404 를 반환하는데 이 라우트만 name→hostPower 직행이라, scope 제한 계정이 범위 밖
 // ESXi 호스트명을 알면 전력·하드웨어 메타를 조회할 수 있었다. 스냅샷에서 name 으로 호스트를
 // 찾아 소유 vCenter 가 범위 밖이면 존재를 숨기고 404(server/CLAUDE.md id 단건 scope 규칙).
-api.get('/idrac/host-power', async (req, res) => {
+api.get('/idrac/host-power', requirePerm('inv.hosts'), async (req, res) => {
   const name = req.query.name;
   if (!name) return res.status(400).json({ matched: false, reason: 'name이 필요합니다.' });
   const snap = store.get();
@@ -177,7 +203,8 @@ api.get('/idrac/host-power', async (req, res) => {
     // 전력·하드웨어 인벤토리 조회 차단). 전체 범위 계정은 기존 동작(요청 태그 허용) 유지.
     const scoped = !!scopedVcenterIds(req.user, snap);
     const serviceTag = scoped ? (host?.serviceTag ? String(host.serviceTag) : '') : (req.query.serviceTag ? String(req.query.serviceTag) : '');
-    res.json(await hostPower(String(name), { hours, serviceTag }));
+    const r = await hostPower(String(name), { hours, serviceTag });
+    res.json(isAdminReq(req) ? r : maskHostPower(r));
   } catch (err) {
     res.status(500).json({ matched: false, reason: err.message });
   }

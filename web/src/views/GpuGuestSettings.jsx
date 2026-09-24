@@ -13,6 +13,7 @@ import { Field, fmtAgo } from './gpu-guest/shared.jsx';
 import { VmCredManager } from './gpu-guest/VmCredManager.jsx';
 import { PhysicalGpuManager } from './gpu-guest/PhysicalGpuManager.jsx';
 import { STable } from '../components/STable.jsx';
+import { keepIfBlank } from './blankKeep.js';
 
 /**
  * GPU 게스트 수집 설정 — 패스쓰루 GPU는 ESXi에서 사용률을 못 보므로, 선택한 법인의
@@ -118,13 +119,13 @@ export default function GpuGuestSettings() {
         </label>
         <div className="flex gap wrap" style={{ marginTop: 12 }}>
           <Field label="수집 주기(초)"><input className="input" type="number" min={10} style={{ width: 100 }}
-            value={Math.round(form.pollIntervalMs / 1000)} onChange={(e) => setForm((f) => ({ ...f, pollIntervalMs: Math.max(10, Number(e.target.value) || 60) * 1000 }))} /></Field>
+            value={Math.round(form.pollIntervalMs / 1000)} onChange={(e) => setForm((f) => ({ ...f, pollIntervalMs: keepIfBlank(e.target.value, f.pollIntervalMs, (n) => Math.max(10, n) * 1000) }))} /></Field>
           <Field label="동시 실행 VM 수"><input className="input" type="number" min={1} max={32} style={{ width: 80 }}
-            value={form.concurrency} onChange={(e) => setForm((f) => ({ ...f, concurrency: Number(e.target.value) || 4 }))} /></Field>
+            value={form.concurrency} onChange={(e) => setForm((f) => ({ ...f, concurrency: keepIfBlank(e.target.value, f.concurrency, (n) => n) }))} /></Field>
           <Field label="VM당 타임아웃(초)"><input className="input" type="number" min={3} max={120} style={{ width: 90 }}
-            value={Math.round(form.timeoutMs / 1000)} onChange={(e) => setForm((f) => ({ ...f, timeoutMs: Math.max(3, Number(e.target.value) || 20) * 1000 }))} /></Field>
+            value={Math.round(form.timeoutMs / 1000)} onChange={(e) => setForm((f) => ({ ...f, timeoutMs: keepIfBlank(e.target.value, f.timeoutMs, (n) => Math.max(3, n) * 1000) }))} /></Field>
           <Field label="법인당 최대 VM"><input className="input" type="number" min={1} max={100000} style={{ width: 100 }}
-            value={form.maxVmsPerVcenter} onChange={(e) => setForm((f) => ({ ...f, maxVmsPerVcenter: Math.max(1, Number(e.target.value) || 1000) }))} /></Field>
+            value={form.maxVmsPerVcenter} onChange={(e) => setForm((f) => ({ ...f, maxVmsPerVcenter: keepIfBlank(e.target.value, f.maxVmsPerVcenter, (n) => Math.max(1, n)) }))} /></Field>
           <Field label="수집 방식"><select className="select" style={{ width: 210 }} value={form.collectMethod}
             title="auto(권장)=게스트작업 먼저→실패 시 SSH 자동 폴백(VM별 성공 방식 학습). VMware Tools=게스트작업만. SSH 직접=게스트 IP로 SSH해 nvidia-smi만."
             onChange={(e) => setForm((f) => ({ ...f, collectMethod: e.target.value }))}>
@@ -134,7 +135,7 @@ export default function GpuGuestSettings() {
           </select></Field>
           {form.collectMethod !== 'guestops' && (
             <Field label="SSH 포트"><input className="input" type="number" min={1} max={65535} style={{ width: 80 }}
-              value={form.sshPort} onChange={(e) => setForm((f) => ({ ...f, sshPort: Math.max(1, Number(e.target.value) || 22) }))} /></Field>
+              value={form.sshPort} onChange={(e) => setForm((f) => ({ ...f, sshPort: keepIfBlank(e.target.value, f.sshPort, (n) => Math.max(1, n)) }))} /></Field>
           )}
         </div>
         {form.collectMethod === 'ssh' && (

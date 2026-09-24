@@ -70,7 +70,7 @@ export async function runGuestDiskNow(trigger = 'manual') {
         : `중앙 직접 수집 vCenter 없음 — site 위임 ${siteDelegated}개는 엣지 push 로 수신합니다.`;
       return { ok: true, ...lastResult, note };
     }
-    let vms = 0; let vmSeriesRows = 0; let partSeriesRows = 0; const errors = [];
+    let vms = 0; let vmSeriesRows = 0; let partSeriesRows = 0; let partsUnknown = 0; const errors = [];
     const res = await pool(vcs, CONCURRENCY, (id) => collectAndStore(id, { changeThresholdGB: s.changeThresholdGB }));
     for (let k = 0; k < res.length; k++) {
       const r = res[k];
@@ -82,12 +82,13 @@ export async function runGuestDiskNow(trigger = 'manual') {
         continue;
       }
       vms += r.withGuest;
+      partsUnknown += r.partsUnknown || 0;   // v2.600(LO2600-07): 합계에서 뺀 '여유 미보고' 파티션 수
       vmSeriesRows += r.commit?.vmSeriesRows || 0;
       partSeriesRows += r.commit?.partSeriesRows || 0;
     }
     await prune(s.retentionDays);
     lastRunTs = Date.now();
-    lastResult = { at: lastRunTs, trigger, vcenters: vcs.length, siteDelegated, vms, vmSeriesRows, partSeriesRows, ms: Date.now() - started, errors, ...(authStopped.length ? { authStopped } : {}) };
+    lastResult = { at: lastRunTs, trigger, vcenters: vcs.length, siteDelegated, vms, vmSeriesRows, partSeriesRows, ...(partsUnknown ? { partsUnknown } : {}), ms: Date.now() - started, errors, ...(authStopped.length ? { authStopped } : {}) };
     return { ok: true, ...lastResult };
   } finally {
     running = false;

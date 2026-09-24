@@ -54,6 +54,14 @@ export function normalizeXtremio(device, raw) {
       else { total += t; used = used == null || u == null ? null : used + u; }
       return { name: c.name || '', totalBytes: t, usedBytes: u, pct: t && u != null ? Math.round((u / t) * 1000) / 10 : null, capacityCounted: t != null };
     });
+    // v2.600(감사 COL-2600-02): 상세 조회에 실패한 클러스터는 raw.clusters 에 없어 위 개수에 잡히지 않았다 —
+    //   목록에는 있었는데 합계에서 **조용히** 빠졌다. 풀 항목(용량 null)과 같은 개수로 밝힌다.
+    const failedNames = Array.isArray(raw.clustersFailed) ? raw.clustersFailed : [];
+    for (const n of failedNames) {
+      if (snap.pools.length >= 32) break;
+      snap.pools.push({ name: String(n || ''), totalBytes: null, usedBytes: null, pct: null, capacityCounted: false });
+    }
+    unreadable += failedNames.length;
     if (unreadable) snap.extra.poolsUnreadable = unreadable;
     if (total > 0) {
       snap.capacity = { totalBytes: total, usedBytes: used, pct: used == null ? null : Math.round((used / total) * 1000) / 10 };
@@ -107,6 +115,7 @@ export async function collect(device) {
     //    건너뛰고 sections.config 가 'skip' 으로 남았다(정직 표기 계약 위반). powerstore 와
     //    동일하게: 비-401 은 섹션 오류 기록 후 계속, 401 만 전체 중단(장비 계정 잠금 예방).
     raw.clusters = [];
+    raw.clustersFailed = [];
     try {
       const list = await tryAny(get, ['/api/json/v3/types/clusters', '/api/json/v2/types/clusters']);
       const names = namesOf(list, 'clusters').slice(0, 8); // XMS 다중 클러스터 상한(요약 목적 — 초과분 무시 명시)
@@ -117,7 +126,12 @@ export async function collect(device) {
             `/api/json/v2/types/clusters?name=${encodeURIComponent(n)}`,
           ]);
           if (d?.content) raw.clusters.push(d.content);
-        } catch (e) { if (/401/.test(e.message)) throw e; snap.sections.config = `일부 클러스터 오류: ${e.message}`; }
+          else raw.clustersFailed.push(n);   // v2.600(COL-2600-02): 응답은 왔지만 content 가 없다 — 역시 못 읽었다
+        } catch (e) {
+          if (/401/.test(e.message)) throw e;
+          snap.sections.config = `일부 클러스터 오류: ${e.message}`;
+          raw.clustersFailed.push(n);        // v2.600(COL-2600-02): 합계에서 빠진 클러스터를 세도록 이름을 남긴다
+        }
       }
     } catch (e) { snap.sections.config = `오류: ${e.message}`; if (/401/.test(e.message)) throw e; }
     // ③ 스토리지 컨트롤러(노드 상당) — full=1&prop 으로 목록+필드 한 번에(요청 수 절감).

@@ -27,7 +27,7 @@ import BoldText from '../../components/boldText.jsx';
 import {
   ROW_LABEL, ROW_TONE, rowState, PROBE_LABEL, PROBE_TONE, EDGE_FACT_LABEL, EDGE_FACT_TONE,
   DUP_LABEL, dupText, scopeLabel, findingGroupLine, fpText, bannerText, okRateText,
-  tableFootnotes, runSummary, evidenceText, centralAxisText,
+  tableFootnotes, runSummary, evidenceText, centralAxisText, mergeRunResult, limitsText,
 } from './tokenCheckText.js';
 import {
   INV_STATE_LABEL, INV_STATE_TONE, invRowState, ageText, rowExplain, agentRowExplain,
@@ -99,7 +99,12 @@ function TokenCheckView() {
     try {
       const r = await postJson(path, {});
       setNote(runSummary(r));
-      setData(r);
+      /*
+       * v2.600 WEB2600-03: 점검·인출 응답은 **스캔 결과만** 싣는다 — `limits`·`centralAuth`·`vocab`·
+       *   `running` 은 GET 만 준다. 통째로 바꾸면 '동시 ?곳 · 요청 시한 0초' 가 되고 중복 설명이
+       *   `requireAgentToken` 을 잃는다. 이전 값 위에 덮는다.
+       */
+      setData((d) => mergeRunResult(d, r));
     } catch (e) { setNote(`${label} 실패: ${e?.message || e}`); }
     finally { setBusy(''); }
   };
@@ -156,7 +161,8 @@ function TokenCheckView() {
         </label>
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>
           {/* ⚠ 숫자를 문구에 박지 않는다 — 서버가 준 값만 쓴다. */}
-          동시 {data?.limits?.concurrency ?? '?'}곳 · 요청 시한 {Math.round((data?.limits?.timeoutMs || 0) / 1000)}초
+          {/* 값이 없으면 단위를 붙이지 않는다(0초·?곳 은 0 처럼 읽힌다 — v2.575 unitText 규약). */}
+          {limitsText(data?.limits)}
         </span>
       </div>
 
@@ -372,7 +378,7 @@ function InventoryCheckView() {
     const all = data?.agents || [];
     const needle = String(q || '').trim().toLowerCase();
     return all.filter((a) => {
-      if (onlyBad && (a.sentInventory || !a.knownOwner) && !a.mockReported) return false;
+      if (onlyBad && (a.sentInventory || !a.knownOwner) && !a.mockReported && !a.rejectedOnly) return false;
       if (!needle) return true;
       return String(a.agent || '').toLowerCase().includes(needle);
     });
@@ -467,9 +473,12 @@ function InventoryCheckView() {
             <tbody>
               {agents.map((a) => (
                 <tr key={a.agent}>
-                  <td style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.agent}</td>
+                  <td style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.verified === false ? `${a.agent} — 요청이 주장한 이름(미검증)` : a.agent}>
+                    {a.agent}{a.verified === false && <span style={{ color: 'var(--muted)', fontSize: 11 }}> (미검증)</span>}
+                  </td>
                   <td data-sort={a.sentInventory ? 1 : 0}>
                     {a.mockReported ? <Badge text="mock" tone="red" />
+                      : a.rejectedOnly ? <Badge text="전부 거부됨" tone="red" />
                       : a.sentInventory ? <Badge text="전송 중" tone="green" />
                         : <Badge text="미전송" tone={a.knownOwner ? 'red' : 'gray'} />}
                   </td>

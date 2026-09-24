@@ -13,7 +13,7 @@
  */
 
 import { emptySnapshot } from '../types.js';
-import { runCliSession, parseKeyValueBlocks, sshFailureSnapshot, firstLine } from './cliSsh.js';
+import { runCliSession, parseKeyValueBlocks, sshFailureSnapshot, firstLine, sliceRowByHeader } from './cliSsh.js';
 import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
 
 const wrap = (cmd) => [cmd, `vplexcli -c "${cmd}"`];
@@ -43,8 +43,10 @@ export function parseLl(text) {
         if (/^[-\s]+$/.test(line)) continue;
         const cells = line.trim().split(/\s{2,}/).map((c) => c.trim());
         if (cells.length < 2) continue;
-        const row = {};
-        header.forEach((h, i) => { row[h] = cells[i] ?? ''; });
+        // v2.600(감사 COL-2600-04): 칸 수가 머리글과 다르면(가운데 빈 칸) 머리글 위치로 자른다 — 공백 분할은 뒤 값을 당겨
+        //   'operational-status' 같은 상태 열을 엉뚱한 칸에 넣었다(xmcli parseTable 과 같은 코어).
+        let row = cells.length !== header.length ? sliceRowByHeader(lines[sepIdx - 1], header, line) : null;
+        if (!row) { row = {}; header.forEach((h, i) => { row[h] = cells[i] ?? ''; }); }
         rows.push(row);
       }
       if (rows.length) return rows;

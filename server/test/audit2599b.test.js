@@ -190,7 +190,9 @@ test('WEB2599-01 — 무토큰 거부 POST 의 주장 이름은 기록되지 않
   const names = rejectStats().rows.map((r) => r.agent);
   assert.deepEqual(names, [PULL_UNAUTH_KEY], `주장한 이름이 기록됐다: ${names}`);
   const flow = buildDataFlow({ routes: [{ side: 'central', method: 'POST', path: '/storage-data' }], collectors: [], rejects: rejectStats(), now: Date.now() });
-  assert.equal(flow.edges.length, 1, `가짜 엣지가 이름마다 생겼다: ${flow.edges.map((e) => e.name)}`);
+  // v2.600 WEB2600-04: 인증 실패 칸은 엣지로 그리지 않고 unauth 로만 밝힌다.
+  assert.equal(flow.edges.length, 0, `가짜 엣지가 생겼다: ${flow.edges.map((e) => e.name)}`);
+  assert.ok(flow.unauth && flow.unauth.count >= 1, `인증 실패가 unauth 로 드러나야 한다: ${JSON.stringify(flow.unauth)}`);
 });
 
 test('WEB2599-04 — 라우터에 없는 경로의 404 는 수신 꺼짐(disabled)이 아니라 unknown-route 이고 경로는 한 칸이다', async () => {

@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { withSsh } from '../proxy/sshExec.js';
+import { remoteTmpDir } from '../agent/deploy.js';
 import { saveLlmConfig } from './config.js';
 
 const SERVICE = `[Unit]
@@ -84,9 +85,15 @@ export async function installOllama(target, { mode = 'online', binaryPath, model
       await exec('id ollama >/dev/null 2>&1 || useradd -r -s /bin/false -m -d /usr/share/ollama ollama');
 
       if (mode === 'offline') {
-        const remote = '/tmp/ollama-install.tgz';
-        await putFile(binaryPath, remote);
-        const x = await exec(`tar -C /usr -xzf ${remote} && rm -f ${remote}`);
+        // v2.600 SEC2600-01: 고정 /tmp/ollama-install.tgz 는 대상 호스트 로컬 사용자가 선점·교체할 수 있었다 — root 가
+        // 그 파일을 /usr 에 풀면 곧 root 권한 상승이다. root 소유 0700 mktemp 디렉터리에 올리고 끝나면 지운다.
+        const tmp = await remoteTmpDir(exec, 'ollama-install');
+        const remote = `${tmp}/ollama.tgz`;
+        let x;
+        try {
+          await putFile(binaryPath, remote);
+          x = await exec(`tar -C /usr -xzf ${remote}`);
+        } finally { await exec(`rm -rf ${tmp}`).catch(() => {}); }
         if (x.code !== 0) return { ok: false, reason: `압축 해제 실패: ${x.stderr}` };
         await writeFile('/etc/systemd/system/ollama.service', SERVICE, 0o644);
         const up = await exec('systemctl daemon-reload && systemctl enable --now ollama');

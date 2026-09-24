@@ -19,6 +19,7 @@
  *   `settings.showNamesInList` 가 정한다 — 화면이 그 사실을 밝힌다.
  */
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
+import { isAdminReq, maskActivityEvents, maskPollerStatus, scrubHosts } from '../../auth/addressMask.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { logAudit } from '../../audit.js';
@@ -57,6 +58,31 @@ async function currentReport() {
   return { rows, latestTs: latestTs || null, total: combineServers(fresh), freshCount: fresh.length };
 }
 
+/*
+ * v2.600 AUTHZ-2600-05 — 비-admin 에는 Connection Server 주소를 가린다. 등록 목록 자체는 adminOnly 인데
+ * (설정 › Horizon 등록) 이 조회들은 `tools` 권한이면 열려 pending·servers·작업 로그·폴러 오류 문구로
+ * 같은 주소가 나갔다(v2.599 AUTHZ-2599-03 과 같은 계열). 가린 사실은 addressHidden 이 말한다.
+ */
+function hzHosts() { try { return listHorizon().map((x) => x.host); } catch { return []; } }
+function maskHzRows(rows, hosts) {
+  return (rows || []).map((r) => {
+    if (!r || typeof r !== 'object') return r;
+    const out = { ...r, host: '' };
+    for (const k of ['error', 'hint']) if (typeof out[k] === 'string') out[k] = scrubHosts(out[k], hosts);
+    if (typeof out.name === 'string' && scrubHosts(out.name, hosts) !== out.name) out.name = `Horizon${r.serverId ? ` ${r.serverId}` : ''} (이름 가림)`;
+    return out;
+  });
+}
+function maskHzPoller(poller, hosts) {
+  const p = maskPollerStatus(poller, hosts);
+  if (p?.lastResult && Array.isArray(p.lastResult.errors)) {
+    p.lastResult = { ...p.lastResult, errors: p.lastResult.errors.map((e) => (e && typeof e === 'object'
+      ? { ...e, error: scrubHosts(e.error, hosts), hint: scrubHosts(e.hint, hosts) } : scrubHosts(e, hosts))) };
+  }
+  if (typeof p?.lastResult?.reason === 'string') p.lastResult = { ...p.lastResult, reason: scrubHosts(p.lastResult.reason, hosts) };
+  return p;
+}
+
 export function registerHorizonSessions(api) {
 
 api.get('/tools/horizon-sessions', requirePerm('tools'), async (req, res) => {
@@ -64,14 +90,19 @@ api.get('/tools/horizon-sessions', requirePerm('tools'), async (req, res) => {
   const s = loadHzSettings();
   const registered = listHorizon();
   const { rows, latestTs, total } = await currentReport();
+  const admin = isAdminReq(req);
+  const hosts = registered.map((r) => r.host);
+  const pending = registered.filter((r) => r.enabled !== false && !rows.some((x) => x.serverId === r.id))
+    .map((r) => ({ serverId: r.id, name: r.name || r.id, host: r.host }));
+  const poller = hzSessionPollerStatus();
   res.json({
     now: Date.now(),
     lastReadAt: latestTs,
     total,
-    servers: rows,
+    servers: admin ? rows : maskHzRows(rows, hosts),
     // 등록돼 있는데 아직 한 번도 수집되지 않은 서버 — '사용자 0명' 이 아니라 '수집 전' 이다.
-    pending: registered.filter((r) => r.enabled !== false && !rows.some((x) => x.serverId === r.id))
-      .map((r) => ({ serverId: r.id, name: r.name || r.id, host: r.host })),
+    pending: admin ? pending : maskHzRows(pending, hosts),
+    ...(admin ? {} : { addressHidden: true }),
     registered: registered.length,
     targets: targetServers(s).length,
     kindLabels: KIND_LABEL,
@@ -80,7 +111,7 @@ api.get('/tools/horizon-sessions', requirePerm('tools'), async (req, res) => {
       enabled: s.enabled, intervalMs: s.intervalMs, retentionDays: s.retentionDays,
       showNamesInList: s.showNamesInList, maxUsers: s.maxUsers, maxPages: s.maxPages, pageSize: s.pageSize,
     },
-    poller: hzSessionPollerStatus(),
+    poller: admin ? poller : maskHzPoller(poller, hosts),
     db: scopeDbStatus(await hzSessionDbStatus(), req.user),   // v2.595(감사 AUTHZ-2595-04): DB 경로는 admin 에게만
     mock: store.get()?.source === 'mock',
   });
@@ -104,7 +135,15 @@ api.get('/tools/horizon-sessions/history', requirePerm('tools'), async (req, res
 
 api.get('/tools/horizon-sessions/activity', requirePerm('tools'), (req, res) => {
   if (denyScoped(req, res)) return;
-  res.json({ poller: hzSessionPollerStatus(), events: listHzSessionActivity(Number(req.query.limit) || 100) });
+  const admin = isAdminReq(req);
+  const hosts = hzHosts();
+  const poller = hzSessionPollerStatus();
+  const events = listHzSessionActivity(Number(req.query.limit) || 100);
+  res.json({
+    poller: admin ? poller : maskHzPoller(poller, hosts),
+    events: admin ? events : maskActivityEvents(events).map((e) => (e && typeof e === 'object' ? { ...e, error: scrubHosts(e.error, hosts) } : e)),
+    ...(admin ? {} : { addressHidden: true }),
+  });
 });
 
 api.post('/tools/horizon-sessions/collect', requireRole('admin'), async (req, res) => {
@@ -119,11 +158,18 @@ api.post('/tools/horizon-sessions/collect', requireRole('admin'), async (req, re
 api.get('/tools/horizon-sessions/settings', requirePerm('tools'), async (req, res) => {
   if (denyScoped(req, res)) return;
   const s = loadHzSettings();
+  const admin = isAdminReq(req);
+  const hosts = hzHosts();
+  const poller = hzSessionPollerStatus();
   res.json({
     settings: s,
     limits: LIMITS,
-    servers: listHorizon().map((x) => ({ id: x.id, name: x.name || x.id, host: x.host, enabled: x.enabled !== false, hasPassword: !!x.hasPassword })),
-    poller: hzSessionPollerStatus(),
+    servers: (() => {
+      const list = listHorizon().map((x) => ({ serverId: x.id, id: x.id, name: x.name || x.id, host: x.host, enabled: x.enabled !== false, hasPassword: !!x.hasPassword }));
+      return (admin ? list : maskHzRows(list, hosts)).map(({ serverId, ...x }) => x);
+    })(),
+    ...(admin ? {} : { addressHidden: true }),
+    poller: admin ? poller : maskHzPoller(poller, hosts),
     db: scopeDbStatus(await hzSessionDbStatus(), req.user),   // v2.595(감사 AUTHZ-2595-04): DB 경로는 admin 에게만
     mock: store.get()?.source === 'mock',
   });

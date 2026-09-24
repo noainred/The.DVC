@@ -228,7 +228,7 @@ function ServerInfoByVcenter({ vc, onServer }) {
   const groups = new Map();
   for (const s of rows) { const id = dcOf(s) || '__unmapped__'; if (!groups.has(id)) groups.set(id, []); groups.get(id).push(s); }
   const groupList = [...groups.entries()]
-    .map(([id, list]) => ({ id, name: id === '__unmapped__' ? '⚠ 미지정(법인 없음)' : (dcName.get(id) || id), list }))
+    .map(([id, list]) => ({ id, name: id === '__unmapped__' ? '미지정(법인 없음)' /* ⚠ 아이콘은 제목 접두가 붙인다(v2.600 WEB2600-07 — 두 번 찍혔다) */ : (dcName.get(id) || id), list }))
     .sort((a, b) => (a.id === '__unmapped__' ? 1 : 0) - (b.id === '__unmapped__' ? 1 : 0) || b.list.length - a.list.length || String(a.name).localeCompare(String(b.name)));
   const corpCount = groupList.filter((g) => g.id !== '__unmapped__').length;
   return (

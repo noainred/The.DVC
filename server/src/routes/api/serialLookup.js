@@ -14,6 +14,7 @@ import { KINDS, serialIndex, searchSerials } from '../../insights/serialLookup.j
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { todayStamp } from "../../util/dayKey.js";
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { isAdminReq } from '../../auth/addressMask.js';
 
 const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
 // v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
@@ -25,6 +26,28 @@ const CSV_COLS = [
   ['model', '모델'], ['vendor', '제조사'], ['part', '부품'], ['partModel', '부품 모델'],
   ['partLocation', '위치'], ['datacenterId', '법인'], ['vcenterId', 'vCenter'], ['agent', '수집'],
 ];
+
+/*
+ * v2.600 AUTHZ-2600-01 — 비-admin 에는 관리 주소를 가린다. 카드는 adminOnly 표시지만(표시 관례일 뿐 —
+ * v2.555) API 는 `tools` 권한이면 열리므로 operator 가 iDRAC 관리 URL·스토리지·SAN 주소를 받았다.
+ * ⚠ iDRAC 등록부는 id 를 **IP 문자열**로 발급한다(`idrac/registry.js`) — 그래서 deviceId 와
+ *   deviceName(이름이 비면 host/id 로 떨어진다)도 주소면 함께 가린다. host 에는 스킴이 붙어 있을 수
+ *   있어(`https://10.0.0.1`) 스킴·포트를 뗀 형태도 대조한다(v2.550 targets.hostKey 와 같은 함정).
+ */
+const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/;
+function bareHost(h) {
+  return String(h || '').trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/\/.*$/, '').replace(/^\[|\](?::\d+)?$/g, '').replace(/:\d+$/, '');
+}
+export function maskSerialRow(x) {
+  if (!x || typeof x !== 'object') return x;
+  const hide = new Set([x.host, bareHost(x.host)].filter(Boolean));
+  const isAddr = (v) => typeof v === 'string' && v !== '' && (hide.has(v) || hide.has(bareHost(v)) || IPV4_RE.test(bareHost(v)));
+  const out = { ...x, host: '' };
+  if (isAddr(out.deviceId)) out.deviceId = '';
+  if (isAddr(out.deviceName)) out.deviceName = `${x.kindLabel || x.kind || '장비'} (이름 가림)`;
+  if (isAddr(out.hostname)) out.hostname = '';
+  return out;
+}
 
 export function registerSerialLookup(api) {
 
@@ -47,11 +70,16 @@ api.get('/tools/serial-lookup', toolsPerm, fullScopeOnly, (req, res) => {
     // '행 수 = 장비 수'가 아니다. 오해하지 않도록 둘 다 준다.
     uniqueSerials: new Set(idx.rows.map((r) => r.key)).size,
   };
+  const admin = isAdminReq(req);
+  if (!admin) base.addressHidden = true;
   if (!q) return res.json({ ...base, query: '', rows: [], matched: 0 });
 
   const r = searchSerials(idx.rows, q, { kinds, limit: 500 });
   res.json({ ...base, query: q, matched: r.total, truncated: r.truncated,
-    rows: r.rows.map((x) => ({ ...x, kindLabel: labelOf.get(x.kind) || x.kind })) });
+    rows: r.rows.map((x) => {
+      const row = { ...x, kindLabel: labelOf.get(x.kind) || x.kind };
+      return admin ? row : maskSerialRow(row);
+    }) });
 });
 
 /** 검색 결과 CSV 내보내기(자산 대조·RMA 목록 작성용). 감사로그를 남긴다. */
@@ -68,8 +96,11 @@ api.get('/tools/serial-lookup/export.csv', toolsPerm, fullScopeOnly, (req, res) 
     target: q ? `검색 '${q}'` : '전체', detail: `${rows.length}행` });
   // csvLine 은 수식 인젝션 가드(=,+,-,@ 로 시작하는 셀)를 포함한다 — 시리얼은 대개 안전하지만
   // 장비명·메모가 사용자 입력이라 공용 헬퍼를 쓴다.
+  const admin = isAdminReq(req);
   const lines = [csvLine(CSV_COLS.map(([, h]) => h))];
-  for (const r of rows) {
+  for (const r0 of rows) {
+    // 비-admin 은 '주소' 열이 비고 주소로 떨어진 장비명도 가린다(화면과 같은 기준).
+    const r = admin ? r0 : maskSerialRow({ ...r0, kindLabel: labelOf.get(r0.kind) || r0.kind });
     lines.push(csvLine(CSV_COLS.map(([k]) => (k === 'kindLabel' ? (labelOf.get(r.kind) || r.kind) : (r[k] ?? '')))));
   }
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');

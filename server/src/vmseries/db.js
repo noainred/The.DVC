@@ -18,6 +18,7 @@
  * 5,850 행 이상이 한 트랜잭션에 몰리지 않는다(vCenter 별 파일이므로 구조적으로 그렇다).
  */
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { config } from '../config.js';
 import { dbFileName } from '../metrics/vmperfDb.js';
@@ -76,6 +77,8 @@ function prepare(db) {
     CREATE INDEX IF NOT EXISTS idx_cover_h ON cover (h);
     CREATE TABLE IF NOT EXISTS cursor (kind TEXT NOT NULL, ref TEXT NOT NULL, last_ts INTEGER NOT NULL, PRIMARY KEY (kind, ref));
     CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS cover_batch (hash TEXT PRIMARY KEY, at INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS idx_cover_batch_at ON cover_batch (at);
   `);
   return {
     insSpike: db.prepare('INSERT OR REPLACE INTO spikes (kind, ref, t0, t1, n, cols, data, mxcpu, mxmem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
@@ -98,6 +101,9 @@ function prepare(db) {
     pruneCover: db.prepare('DELETE FROM cover WHERE h < ?'),
     getMeta: db.prepare('SELECT v FROM meta WHERE k=?'),
     setMeta: db.prepare('INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v'),
+    // v2.600(EDGE2600-03): 같은 엣지 청크의 재전송 표식 — cover 는 가산(upsert samples+=)이라 재전송이 두 번 센다.
+    insBatch: db.prepare('INSERT OR IGNORE INTO cover_batch (hash, at) VALUES (?, ?)'),
+    pruneBatch: db.prepare('DELETE FROM cover_batch WHERE at < ?'),
   };
 }
 
@@ -139,21 +145,41 @@ async function openFile(vcenterId, file, mod, create) {
  * 한 vCenter 의 한 주기 결과를 적재(트랜잭션 1회).
  * rows: { spikes:[{kind,ref,t0,t1,n,cols,buf}], cover:[{kind,ref,h,samples}], cursors:[{kind,ref,lastTs}] }
  */
-export async function commitVmSeries(vcenterId, rows) {
+/** 재전송 판정 보관 기간 — 엣지 재시도(resilientFetch)는 분 단위이고 수집 주기는 20~60분이라 하루면 충분하다. */
+const BATCH_KEEP_MS = 2 * 86_400_000;
+/**
+ * cover 배치 지문(v2.600 EDGE2600-03) — 엣지 한 청크의 cover 내용 + (있으면) 엣지가 붙인 식별(generatedAt·chunk).
+ * 서로 다른 주기는 커서로 창이 겹치지 않아 (ref, h, samples) 집합이 같을 수 없다 — 같으면 **같은 청크의 재전송**이다.
+ */
+export function coverBatchHash(cover, tag = '') {
+  return crypto.createHash('sha1').update(String(tag)).update('\n').update(JSON.stringify(cover || [])).digest('hex');
+}
+
+/**
+ * @param opts.dedupeTag 주면(중앙 수신 경로) 같은 tag+cover 의 재적재에서 cover 가산을 건너뛴다 — spikes(INSERT OR REPLACE)·
+ *   cursor(MAX)는 원래 멱등이라 그대로 적재한다. 로컬 폴러는 재전송이 없으므로 주지 않는다(예전 동작).
+ */
+export async function commitVmSeries(vcenterId, rows, { dedupeTag = null } = {}) {
   const x = await getVmSeriesDb(vcenterId);
   if (!x) return { ok: false, reason: 'node:sqlite 없음' };
   const t = Date.now();
+  let coverDuplicate = false;
   x.db.exec('BEGIN');
   try {
     for (const s of rows.spikes || []) x.st.insSpike.run(s.kind, s.ref, s.t0, s.t1, s.n, JSON.stringify(s.cols), s.buf, Number.isFinite(s.mxcpu) ? s.mxcpu : -1, Number.isFinite(s.mxmem) ? s.mxmem : -1);
-    for (const c of rows.cover || []) x.st.upCover.run(c.kind, c.ref, c.h, c.samples);
+    const cover = rows.cover || [];
+    if (dedupeTag != null && cover.length) {
+      x.st.pruneBatch.run(t - BATCH_KEEP_MS);
+      coverDuplicate = (x.st.insBatch.run(coverBatchHash(cover, dedupeTag), t)?.changes ?? 1) === 0;
+    }
+    if (!coverDuplicate) for (const c of cover) x.st.upCover.run(c.kind, c.ref, c.h, c.samples);
     for (const c of rows.cursors || []) x.st.upCursor.run(c.kind, c.ref, c.lastTs);
     x.db.exec('COMMIT');
   } catch (e) {
     try { x.db.exec('ROLLBACK'); } catch { /* */ }
     throw e;
   }
-  return { ok: true, spikes: (rows.spikes || []).length, cover: (rows.cover || []).length, ms: Date.now() - t };
+  return { ok: true, spikes: (rows.spikes || []).length, cover: coverDuplicate ? 0 : (rows.cover || []).length, ...(coverDuplicate ? { coverDuplicate: true } : {}), ms: Date.now() - t };
 }
 
 /** 겹침 중복 방지 커서 전체(Map<`${kind}|${ref}`, lastTs>). */

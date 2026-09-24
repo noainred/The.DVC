@@ -21,6 +21,7 @@ import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import { config } from '../config.js';
+import { reqTimeoutMs } from './envTimeout.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 
 const gzipAsync = promisify(zlib.gzip);
@@ -76,7 +77,7 @@ async function post(body) {
   }
   const res = await resilientFetch(`${config.agent.centralUrl}/api/central/curuser`, {
     method: 'POST', headers, body: payload,
-    timeoutMs: Number(process.env.AGENT_CURUSER_PUSH_TIMEOUT_MS) || 60_000, retries: 1,
+    timeoutMs: reqTimeoutMs(process.env.AGENT_CURUSER_PUSH_TIMEOUT_MS, 60_000), retries: 1,
   });
   if (res.status === 413) throw new Error('curuser -> 413 (중앙 본문 한도 초과 — 청크 크기를 줄이세요. 이 요청은 재시도되지 않으므로 그만큼 소실됩니다)');
   if (!res.ok) throw new Error(`curuser -> ${res.status}`);

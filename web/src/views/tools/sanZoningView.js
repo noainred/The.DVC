@@ -84,7 +84,18 @@ export function sourceText(z) {
 export function truncationText(z) {
   const parts = [];
   if (z?.truncated) parts.push('스위치 출력이 페이저(--More--)로 잘렸습니다 — 일부 zone 이 빠졌을 수 있습니다.');
-  if (z?.limited) parts.push('zone/별칭이 수집 상한을 넘어 일부만 저장했습니다(설정 SANSW_ZONE_MAX).');
+  // v2.600(RECENT2600-02): '수집 상한'(SANSW_ZONE_MAX) 과 '전송·수신 크기 상한'(장비 1대 크기)은 원인도 조치도 다르다.
+  const tr = z?.trimmed && typeof z.trimmed === 'object' ? z.trimmed : null;
+  if (tr) {
+    const by = String(tr.by || '');
+    const where = by.includes('edge') && by.includes('central') ? '엣지 전송·중앙 수신' : by.includes('edge') ? '엣지 전송' : '중앙 수신';
+    const zo = Number(tr.zonesOmitted) || 0; const ao = Number(tr.aliasesOmitted) || 0;
+    parts.push(`장비 1대의 ${where} 크기 상한을 넘어 zone ${zo}개 · 별칭 ${ao}개를 빼고 보냈습니다(개수 요약은 전체 기준).`);
+    // 잘린 뒤 남은 수 + 뺀 수보다 전체가 크면 수집 상한도 걸린 것이다.
+    const total = Number(z.counts?.zones);
+    const kept = Array.isArray(z.zones) ? z.zones.length : null;
+    if (Number.isFinite(total) && kept != null && total > kept + zo) parts.push('zone 이 수집 상한도 넘었습니다(설정 SANSW_ZONE_MAX).');
+  } else if (z?.limited) parts.push('zone/별칭이 수집 상한을 넘어 일부만 저장했습니다(설정 SANSW_ZONE_MAX).');
   return parts.join(' ');
 }
 

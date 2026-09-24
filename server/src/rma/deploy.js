@@ -15,7 +15,7 @@
  * 싣지 않고 SFTP 로 파일에 쓴다(env 파일은 KEY=VALUE 라 `'`·공백·`$` 등은 값에서 배제).
  */
 import { withSsh } from '../proxy/sshExec.js';
-import { appendSecretText } from '../agent/deploy.js';   // v2.599(SEC2599-05): 토큰 블록을 SFTP 임시 파일로 붙인다(코어 하나)
+import { appendSecretText, remoteTmpDir } from '../agent/deploy.js';   // v2.599(SEC2599-05): 토큰 블록을 SFTP 임시 파일로 붙인다(코어 하나)
 import { renderUnit, RMA_SUDOERS } from './unitTemplate.js';
 
 export const RE_INSTANCE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -134,9 +134,16 @@ export async function deployRma(target, opts = {}) {
       if (opts.centralToken) pairs.push(['CENTRAL_TOKEN', String(opts.centralToken)]);
       await upsertEnv({ exec, writeFile }, inst.envFile, pairs);
       // 3) sudoers(포탈 재시작 프리셋) — 문법 검증 실패 시 설치하지 않는다(sudo 전체가 깨지는 사고 방지).
-      const sudoTmp = '/tmp/vmware-portal-rma.sudoers';
-      await writeFile(sudoTmp, RMA_SUDOERS(inst.user, { units: listOf(opts.serviceUnits), reboot: !!opts.allowReboot }), 0o440);
-      const vis = await exec(`visudo -cf ${sudoTmp} >/dev/null 2>&1 && install -m 0440 ${sudoTmp} /etc/sudoers.d/vmware-portal-rma && echo ok || echo fail; rm -f ${sudoTmp}`);
+      // v2.600 SEC2600-01: 고정 경로(/tmp/vmware-portal-rma.sudoers)는 대상 호스트의 로컬 사용자가 미리 만들어 두고
+      // visudo 검사와 install 사이에 내용을 바꿔 **자기 sudoers 를 root 로 설치**시킬 수 있었다. root 소유 0700
+      // mktemp 디렉터리 안에서 검증·설치하고 끝나면 지운다.
+      const sudoDir = await remoteTmpDir(exec, 'vmware-portal-rma');
+      const sudoTmp = `${sudoDir}/sudoers`;
+      let vis;
+      try {
+        await writeFile(sudoTmp, RMA_SUDOERS(inst.user, { units: listOf(opts.serviceUnits), reboot: !!opts.allowReboot }), 0o440);
+        vis = await exec(`visudo -cf ${sudoTmp} >/dev/null 2>&1 && install -m 0440 ${sudoTmp} /etc/sudoers.d/vmware-portal-rma && echo ok || echo fail`);
+      } finally { await exec(`rm -rf ${sudoDir}`).catch(() => {}); }
       const sudoers = vis.stdout.trim() === 'ok';
       // 4) 인스턴스별 env + 기동
       await exec('systemctl daemon-reload');

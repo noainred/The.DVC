@@ -282,11 +282,16 @@ export async function collectVmGpu(c, vmMoref, creds, { isWindows, timeoutMs = 2
 export function parseNvidiaSmiCsv(text) {
   if (!text || !text.trim()) return null;
   const gpus = [];
+  // v2.600(감사 COL-2600-08): nvidia-smi 는 고장·분실 GPU 를 CSV 행 대신 오류 문장으로 낸다
+  //   ('Unable to determine the device handle for GPU…: Unknown Error'). 예전에는 `raw.length < 4` 로 **조용히** 버려
+  //   고장 GPU 가 개수에서 사라졌다. 세어서 gpuErrors 로 밝힌다(앞 3줄은 원문 그대로 — 어느 GPU 인지가 진단이다).
+  const errLines = [];
   // '[N/A]' / 'N/A' / 빈값 → null. nounits라도 MIG 모드면 사용률이 '[N/A]'로 온다.
   // v2.593(감사 DATA-04): 빈 칸을 먼저 본다 — Number('') === 0 이라 빈 값이 '0%·utilNA=false' 로 읽혔다(주석과 반대).
   const num = (s) => { const t = String(s ?? '').replace(/[[\]]/g, '').trim(); if (!t) return null; const v = Number(t); return Number.isFinite(v) ? v : null; };
   for (const line of text.trim().split(/\r?\n/)) {
     if (!line.trim()) continue; // 빈 줄 건너뜀
+    if (/unable to determine|unknown error|gpu is lost|requires reset|gpu has fallen off/i.test(line)) { errLines.push(line.trim().slice(0, 200)); continue; }
     const raw = line.split(',').map((x) => String(x).trim());
     if (raw.length < 4) continue; // 데이터 행 아님(헤더/잡음)
     const utilPct = num(raw[0]);     // MIG Enabled면 [N/A] → null(아래서 유휴 0% 처리)
@@ -324,6 +329,7 @@ export function parseNvidiaSmiCsv(text) {
     memUsedPct: memTotal ? Math.round((memUsed / memTotal) * 100) : null,
     ...(memPartial ? { memPartial } : {}),
     migEnabled: migCount,
+    ...(errLines.length ? { gpuErrors: errLines.length, gpuErrorLines: errLines.slice(0, 3) } : {}),
     gpus,
   };
 }

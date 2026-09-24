@@ -21,9 +21,11 @@
  * 그래서 결과를 중앙에 ack 로 회신하고, 중앙은 수가 일치할 때만 `active` 로 전이한다.
  */
 
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
+import { reqTimeoutMs } from './envTimeout.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { classifyCentral404 } from './central404.js';
 import { bulkAddTargets, deleteTargetsByBatch, batchCounts, LIMITS } from '../svcmon/store.js';
 
 // 중앙 배포 배치 태그 접두사 — central/svcmonAssign.js TAG_PREFIX 와 같은 프로토콜 계약이다.
@@ -32,7 +34,8 @@ const CENTRAL_BATCH_PREFIX = 'central:';
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
-const INTERVAL_MS = Math.max(30_000, envNum('SVCMON_CONFIG_PULL_MS', 300_000));   // 기본 5분
+// v2.600 EDGE2600-05: 상한도 둔다(2^31 초과 → setInterval 1ms 루프). 요청 시한도 10분으로 묶는다.
+const INTERVAL_MS = clampIntervalMs(envNum('SVCMON_CONFIG_PULL_MS', 300_000), 300_000, 30_000);   // 기본 5분
 const ENABLED = process.env.SVCMON_CONFIG_PULL !== 'false';
 
 let timer = null;
@@ -85,11 +88,18 @@ export async function pullSvcmonConfigNow() {
     const qs = new URLSearchParams({ agent: config.agent.name || '' });
     if (appliedSig) qs.set('sig', appliedSig);
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/svcmon-config?${qs}`, {
-      method: 'GET', headers: headers(), timeoutMs: envNum('SVCMON_PULL_TIMEOUT_MS', 60_000), retries: 1,
+      method: 'GET', headers: headers(), timeoutMs: reqTimeoutMs(process.env.SVCMON_PULL_TIMEOUT_MS, 60_000), retries: 1,
     });
     if (res.status === 404) {
-      unsupportedUntil = Date.now() + 3_600_000;
-      return { ok: false, reason: '중앙이 /api/central/svcmon-config 를 지원하지 않습니다(1시간 후 재시도).' };
+      // v2.600 EDGE2600-06: 404 본문으로 '중앙이 central 을 끔' 과 '엔드포인트 없음(구버전·잘못된 URL)' 을 가르고
+      //   **상태와 콘솔에 남긴다**(예전엔 last 도 로그도 없이 1시간 백오프만 했다). 꺼짐은 켜면 바로 되도록 10분 뒤 재시도.
+      const c = await classifyCentral404(res);
+      const backoff = c.kind === 'no-endpoint' ? 3_600_000 : 600_000;
+      unsupportedUntil = Date.now() + backoff;
+      const reason = `${c.reason} (${Math.round(backoff / 60_000)}분 후 재시도)`;
+      last = { at: Date.now(), error: reason, kind: c.kind };
+      if (_logChange('pull404', c.reason)) console.warn(`[svcmon-pull] ${reason}`);
+      return { ok: false, reason, kind: c.kind };
     }
     if (!res.ok) {
       // v2.591(PR-7): 예전엔 상태(last)에도 안 남았다 — svcmon-config 는 개별 토큰 전용이라 공유 토큰 엣지는 **영구 403** 인데 흔적이 없었다.

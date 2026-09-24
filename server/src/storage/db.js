@@ -171,21 +171,18 @@ async function openInner() {
       // v2.594(감사 R2594-05): SQL SUM 은 NULL 을 건너뛴다 — 사용량을 못 읽은 장비가 있으면 used 합은
       // 그 장비를 빼고 total 합은 넣어 **거짓 하락**이 된다. 그 버킷의 사용량은 NULL(선이 끊긴다)이고
       // 빠진 대수를 used_unknown 으로 준다(화면이 밝힌다). hdd/ssd 도 같은 규칙.
-      selCapAllBucket: conn.prepare(`SELECT ts, SUM(total_bytes) AS total_bytes,
-          CASE WHEN COUNT(used_bytes) = COUNT(*) THEN SUM(used_bytes) END AS used_bytes,
-          SUM(hdd_total) AS hdd_total,
-          CASE WHEN COUNT(hdd_used) = COUNT(hdd_total) THEN SUM(hdd_used) END AS hdd_used,
-          SUM(ssd_total) AS ssd_total,
-          CASE WHEN COUNT(ssd_used) = COUNT(ssd_total) THEN SUM(ssd_used) END AS ssd_used,
-          COUNT(*) AS devices, COUNT(*) - COUNT(used_bytes) AS used_unknown
-        FROM (
-          SELECT CAST(CAST(ts/? AS INTEGER)*? AS INTEGER) AS ts, device_id,
+      // v2.600 DB2600-01: 장비별 버킷 평균만 SQL 이 하고, **합산은 JS 가 carry-forward 로** 한다
+      // (sumCapacityBuckets). 예전 selCapAllBucket 은 버킷 안에 관측이 있는 장비만 SUM 했다 —
+      // 수집 주기가 1시간(v2.531)인데 12h·24h 추이는 10분 버킷이라, 엣지 4곳이 서로 다른 분에
+      // 수집하면 **점마다 한 엣지 장비만** 합산돼 합계가 실제의 1/4 로 그려졌다(재현: 20대 → 점마다 5대).
+      // 점마다 장비 수가 같아서(5·5·5…) 화면의 '구간마다 장비 수가 다르다' 경고도 뜨지 않았다.
+      selCapDevBucket: conn.prepare(`SELECT CAST(CAST(ts/? AS INTEGER)*? AS INTEGER) AS ts, device_id,
             AVG(total_bytes) AS total_bytes, AVG(used_bytes) AS used_bytes,
             AVG(hdd_total) AS hdd_total, AVG(hdd_used) AS hdd_used,
             AVG(ssd_total) AS ssd_total, AVG(ssd_used) AS ssd_used
           FROM capacity_history WHERE ts >= ?
           GROUP BY CAST(ts/? AS INTEGER), device_id
-        ) GROUP BY ts ORDER BY ts LIMIT 2000`),
+          ORDER BY 1 LIMIT 400000`),
       // 일 롤업 upsert — **더 늦은 관측만** last_* 를 갱신한다(엣지 push 가 순서대로 오지 않을 수
       // 있다). max_used 는 항상 최대를 유지하고 samples 는 누적한다.
       /*
@@ -434,20 +431,90 @@ export async function capacityHistory(deviceId, sinceMs, bucketMs = 0) {
   if (b > 0) return db.selCapBucket.all(b, b, deviceId, sinceMs, b);
   return db.selCap.all(deviceId, sinceMs);
 }
+/** 장비 한 개의 기본 신선도 한계 — 기본 수집 주기(1시간, storage/intervals.js)의 2배. */
+export const CAPACITY_CARRY_DEFAULT_MS = 2 * 3_600_000;
+const CAP_ALL_POINT_MAX = 2000;
+
 /**
- * 전체 장비 합산 용량 시계열(v2.380) — 목록 화면 통합 추이.
- * bucketMs 는 필수다(장비별 수집 시각이 달라 버킷 없이는 합산 시점을 맞출 수 없다).
- * 반환 각 점의 devices 는 그 버킷에 데이터가 있던 장비 수 — 일부 장비만 수집된 구간을
- * '전체 감소'로 오독하지 않게 화면에 함께 보여준다.
+ * (순수) 장비별 버킷 평균 행 → 전체 합계 점. v2.600 DB2600-01.
+ *
+ * 각 버킷에서 장비마다 **그 시각까지의 마지막 관측**(신선도 한계 안)을 끌어와 더한다(carry-forward).
+ * 한계를 넘긴 장비는 그 점에서 빠지고, 빠진 대수는 `missing`(= 이 조회에서 한 번이라도 관측된
+ * 장비 수 − 그 점의 장비 수)으로 밝힌다 — 부분 합을 전체처럼 그리지 않게 화면이 경고한다.
+ * 사용량 규칙은 v2.594 그대로: 합에 든 장비 중 하나라도 사용량을 못 읽었으면 그 점 사용량은 null.
+ *
+ * @param {Array<{ts:number, device_id:string, total_bytes:number, used_bytes:?number,
+ *   hdd_total:?number, hdd_used:?number, ssd_total:?number, ssd_used:?number}>} rows ts 오름차순
+ * @param {{sinceMs:number, nowMs:number, bucketMs:number, staleMs?:number,
+ *   staleByDevice?:Map<string,number>|object}} opts
  */
-export async function capacityHistoryAll(sinceMs, bucketMs) {
+export function sumCapacityBuckets(rows, { sinceMs, nowMs, bucketMs, staleMs = CAPACITY_CARRY_DEFAULT_MS, staleByDevice = null } = {}) {
+  const b = Math.max(60_000, Number(bucketMs) || 3_600_000);
+  const staleOf = (id) => {
+    const v = staleByDevice instanceof Map ? staleByDevice.get(id) : staleByDevice?.[id];
+    return Number.isFinite(v) && v > 0 ? v : staleMs;
+  };
+  const list = Array.isArray(rows) ? rows.filter((r) => r && r.device_id != null && Number.isFinite(Number(r.ts))) : [];
+  const expected = new Set(list.map((r) => String(r.device_id)));
+  const first = Math.floor(Number(sinceMs) / b) * b;
+  const lastBucket = Math.floor(Number(nowMs) / b) * b;
+  let grid = [];
+  for (let t = first; t <= lastBucket; t += b) grid.push(t);
+  if (grid.length > CAP_ALL_POINT_MAX) grid = grid.slice(-CAP_ALL_POINT_MAX);
+  const latest = new Map();   // device_id → 마지막으로 본 버킷 행
+  const out = [];
+  let i = 0;
+  const addNull = (acc, v) => (v == null ? acc : (acc ?? 0) + Number(v));
+  for (const t of grid) {
+    while (i < list.length && Number(list[i].ts) <= t) { latest.set(String(list[i].device_id), list[i]); i += 1; }
+    let devices = 0; let carried = 0; let usedUnknown = 0;
+    let total = null; let used = 0; let hddT = null; let hddU = 0; let hddMiss = false; let ssdT = null; let ssdU = 0; let ssdMiss = false;
+    let hddAny = false; let ssdAny = false;
+    for (const [id, r] of latest) {
+      if (t - Number(r.ts) > staleOf(id)) continue;
+      devices += 1;
+      if (Number(r.ts) !== t) carried += 1;
+      total = addNull(total, r.total_bytes);
+      if (r.used_bytes == null) usedUnknown += 1; else used += Number(r.used_bytes);
+      if (r.hdd_total != null) { hddT = addNull(hddT, r.hdd_total); if (r.hdd_used == null) hddMiss = true; }
+      if (r.hdd_used != null) { hddU += Number(r.hdd_used); hddAny = true; }
+      if (r.ssd_total != null) { ssdT = addNull(ssdT, r.ssd_total); if (r.ssd_used == null) ssdMiss = true; }
+      if (r.ssd_used != null) { ssdU += Number(r.ssd_used); ssdAny = true; }
+    }
+    if (!devices) continue;
+    out.push({
+      ts: t, total_bytes: total,
+      used_bytes: usedUnknown ? null : used,
+      hdd_total: hddT, hdd_used: hddMiss || !hddAny ? null : hddU,
+      ssd_total: ssdT, ssd_used: ssdMiss || !ssdAny ? null : ssdU,
+      devices, carried, used_unknown: usedUnknown,
+      missing: Math.max(0, expected.size - devices),
+    });
+  }
+  return { points: out, expectedDevices: expected.size, truncated: false };
+}
+
+/**
+ * 전체 장비 합산 용량 시계열(v2.380 · v2.600 carry-forward) — 목록 화면 통합 추이.
+ * 신선도 한계만큼 앞에서부터 읽어 첫 점에도 이전 관측이 이어지게 한다.
+ * 반환은 점 배열이고 배열에 `expectedDevices`·`truncated` 를 속성으로 붙인다(기존 호출부 호환).
+ */
+export async function capacityHistoryAll(sinceMs, bucketMs, opts = {}) {
   const db = await open();
   if (!db) return [];
   const b = Math.max(60_000, Number(bucketMs) || 3_600_000);
-  // ⚠ 다른 함수처럼 문(statement)은 db 의 평면 속성이다(db.selCapBucket 등). db.st 는
-  //   존재하지 않아 TypeError → catch 가 삼켜 전체 합산 추이가 항상 빈 배열이었다(v2.386 수정).
-  try { return db.selCapAllBucket.all(b, b, Number(sinceMs) || 0, b); }
-  catch (e) { console.warn(`[storage-db] capacityHistoryAll 실패: ${e.message}`); return []; }
+  const staleMs = Number.isFinite(opts.staleMs) && opts.staleMs > 0 ? opts.staleMs : CAPACITY_CARRY_DEFAULT_MS;
+  const sb = opts.staleByDevice;
+  const maxStale = Math.max(staleMs, ...(sb instanceof Map ? [...sb.values()] : Object.values(sb || {})).filter((v) => Number.isFinite(v)));
+  const since = Number(sinceMs) || 0;
+  try {
+    const rows = db.selCapDevBucket.all(b, b, since - maxStale, b);
+    const r = sumCapacityBuckets(rows, { sinceMs: since, nowMs: Number(opts.nowMs) || Date.now(), bucketMs: b, staleMs, staleByDevice: sb });
+    const pts = r.points;
+    pts.expectedDevices = r.expectedDevices;
+    pts.truncated = rows.length >= 400000;
+    return pts;
+  } catch (e) { console.warn(`[storage-db] capacityHistoryAll 실패: ${e.message}`); return []; }
 }
 
 /* ── 측정 기준 변경에 따른 이력 재시작(v2.534) ────────────────────────────────

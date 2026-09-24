@@ -201,9 +201,22 @@ export function parsePortErrShow(text) {
   if (!rows.length) return {};
   const valueCount = rows[0].trim().split(/\s+/).length - 1;
   let names = PORTERR_CANONICAL;
-  if (valueCount > PORTERR_CANONICAL.length) {
+  // v2.600(감사 COL-2600-10): 위 주석은 '머리글로 이름을 만든다' 고 했지만 코드는 고정 순서만 썼다 — `crc g_eof` 열이 없는
+  //   구형 FOS(값 14개)에서 뒤 열이 전부 한 칸씩 밀려 enc_out 이 bad_eof 로 읽혔다(오류 없이 틀린 값).
+  //   머리글을 읽을 수 있으면 g_eof 유무로 이름을 정하고, 머리글도 없고 값이 정규 순서보다 적으면 **형식 미인식**으로
+  //   카운터를 비운다(잘못된 열을 CRC 로 보고하는 것보다 비우는 것이 낫다 — 판정은 null 을 '보류' 로 다룬다).
+  const firstRow = lines.indexOf(rows[0]);
+  const headerText = lines.slice(Math.max(0, firstRow - 3), firstRow).join(' ');
+  const hasHeader = /\bframes\b/i.test(headerText) && /\bcrc\b/i.test(headerText);
+  if (hasHeader && !/g_eof/i.test(headerText)) names = PORTERR_CANONICAL.filter((n) => n !== 'crc_g_eof');
+  if (!hasHeader && valueCount < PORTERR_CANONICAL.length) {
+    const out = {};
+    for (const l of rows) out[Number(l.trim().split(/\s+/)[0].replace(':', ''))] = { _format: 'unrecognized' };
+    return out;
+  }
+  if (valueCount > names.length) {
     // 신형 추가 열(c3timeout tx/rx, pcs_err …) — 정규 이름 뒤에 익명 열을 붙여 자리만 맞춘다.
-    names = [...PORTERR_CANONICAL, ...Array.from({ length: valueCount - PORTERR_CANONICAL.length }, (_, i) => `extra_${i + 1}`)];
+    names = [...names, ...Array.from({ length: valueCount - names.length }, (_, i) => `extra_${i + 1}`)];
   }
   const out = {};
   for (const l of rows) {

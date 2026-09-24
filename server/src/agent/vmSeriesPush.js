@@ -15,6 +15,7 @@ import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import os from 'node:os';
 import { config } from '../config.js';
+import { reqTimeoutMs } from './envTimeout.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 
 const gzipAsync = promisify(zlib.gzip);
@@ -37,12 +38,25 @@ function headers(extra = {}) {
   };
 }
 
-/** 스파이크 행을 요청당 CHUNK_BYTES 이하로 나눈다(base64 BLOB 크기 기준, 대략). */
-export function chunkSpikeRows(rows, limitBytes = CHUNK_BYTES) {
+/*
+ * ⚠⚠ v2.600 EDGE2600-01 — **청크 크기는 실제로 보낼 base64 길이로 잰다.** 예전에는 `r.buf?.length` 로 쟀는데
+ * pushVmSeriesSlice 가 행을 `{…, data: base64}` 로 바꾼 **뒤에** 이 함수를 불러 buf 가 늘 없었다 — 행마다 120B 로
+ * 계산돼 분할이 한 번도 일어나지 않았다(재현: 스파이크 4행 1.6MB 가 청크 1개). 중앙은 청크당 20,000행에서 자르므로
+ * (routes/central.js /vmseries) 행 수 상한도 함께 지킨다 — 넘기면 뒷부분이 조용히 버려진다.
+ */
+export const CHUNK_MAX_ROWS = 20_000;
+function rowBytes(r) {
+  const b64 = typeof r?.data === 'string' ? r.data.length : Math.ceil(((r?.buf?.length || 0) * 4) / 3);
+  const cols = Array.isArray(r?.cols) ? r.cols.reduce((a, c) => a + String(c).length + 3, 0) : 0;
+  return 120 + b64 + cols + String(r?.ref ?? '').length;
+}
+/** 스파이크 행을 요청당 CHUNK_BYTES 이하·CHUNK_MAX_ROWS 행 이하로 나눈다(보낼 base64 길이 기준). */
+export function chunkSpikeRows(rows, limitBytes = CHUNK_BYTES, maxRows = CHUNK_MAX_ROWS) {
   const chunks = [[]]; let cur = 0;
   for (const r of rows) {
-    const est = 120 + Math.ceil(((r.buf?.length || 0) * 4) / 3);
-    if (cur + est > limitBytes && chunks[chunks.length - 1].length) { chunks.push([]); cur = 0; }
+    const est = rowBytes(r);
+    const tail = chunks[chunks.length - 1];
+    if (tail.length && (cur + est > limitBytes || tail.length >= maxRows)) { chunks.push([]); cur = 0; }
     chunks[chunks.length - 1].push(r); cur += est;
   }
   return chunks;
@@ -56,7 +70,7 @@ async function post(body) {
   }
   const res = await resilientFetch(`${config.agent.centralUrl}/api/central/vmseries`, {
     method: 'POST', headers: hdrs, body: payload,
-    timeoutMs: Number(process.env.AGENT_VMSERIES_PUSH_TIMEOUT_MS) || 120_000, retries: 1,
+    timeoutMs: reqTimeoutMs(process.env.AGENT_VMSERIES_PUSH_TIMEOUT_MS, 120_000), retries: 1,
   });
   if (res.status === 413) throw new Error('vmseries -> 413 (중앙 본문 한도 초과 — 청크 크기를 줄이세요)');
   if (!res.ok) throw new Error(`vmseries -> ${res.status}`);
@@ -69,7 +83,9 @@ async function post(body) {
  */
 export async function pushVmSeriesSlice(vc, res) {
   const started = Date.now();
-  const rows = (res.spikes || []).map((s) => ({ kind: s.kind, ref: s.ref, t0: s.t0, t1: s.t1, n: s.n, cols: s.cols, data: s.buf.toString('base64') }));
+  // v2.600 EDGE2600-02: mxcpu·mxmem(행 단위 최대 — 전 VM 순위가 BLOB 을 풀지 않고 쓴다)도 싣는다. 예전에는 버려져
+  //   중앙이 -1 로 저장했고 위임 vCenter 의 최대 CPU/MEM 이 언제나 '—' 였다(수신측은 이미 받게 되어 있다).
+  const rows = (res.spikes || []).map((s) => ({ kind: s.kind, ref: s.ref, t0: s.t0, t1: s.t1, n: s.n, cols: s.cols, data: s.buf.toString('base64'), mxcpu: s.mxcpu, mxmem: s.mxmem }));
   const chunks = chunkSpikeRows(rows);
   let bytes = 0; let gzBytes = 0;
   try {

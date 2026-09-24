@@ -10,6 +10,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // 자격증명 파일 규칙(v2.322): 원자적 쓰기 + 로드 손상 보존
+import { clampSetting } from '../util/clampSetting.js';
 
 const FILE = path.join(config.configDir, 'gpu-guest.json');
 
@@ -58,6 +59,13 @@ function clamp(v, min, max, dflt) {
   return Math.max(min, Math.min(max, n));
 }
 
+// v2.600 T2600-05: 부분 패치의 숫자 칸 — 빈 값·null·숫자 아님은 **미지정**(이전 값 유지). 예전 clamp 는
+// Number('')===0 을 하한으로 올려 빈 칸 하나가 주기 10초·sshPort 1·timeout 3초·maxVms 1 이 됐다(v2.596 규약).
+// 명시적 0 은 값이다(하한으로 올라간다). 반올림하지 않는다(예전 clamp 와 같다).
+function patchNum(v, min, max, prev) {
+  return clampSetting(v, { min, max, def: prev, round: false });
+}
+
 /**
  * 현재 설정(cur)에 partial을 병합해 새 설정 객체를 반환한다(순수 함수 — 디스크 접근 없음).
  * 로컬 저장(saveGpuGuestSettings)과 중앙의 'agent별 배포 설정' 저장이 동일 병합 규칙을 공유한다.
@@ -65,12 +73,12 @@ function clamp(v, min, max, dflt) {
 export function mergeGpuGuestSettings(cur, partial = {}) {
   const next = { ...DEFAULTS, ...cur };
   if (partial.enabled !== undefined) next.enabled = Boolean(partial.enabled);
-  if (partial.pollIntervalMs !== undefined) next.pollIntervalMs = clamp(partial.pollIntervalMs, 10_000, 86_400_000, DEFAULTS.pollIntervalMs);
-  if (partial.concurrency !== undefined) next.concurrency = clamp(partial.concurrency, 1, 32, DEFAULTS.concurrency);
-  if (partial.timeoutMs !== undefined) next.timeoutMs = clamp(partial.timeoutMs, 3_000, 120_000, DEFAULTS.timeoutMs);
-  if (partial.maxVmsPerVcenter !== undefined) next.maxVmsPerVcenter = clamp(partial.maxVmsPerVcenter, 1, 100_000, DEFAULTS.maxVmsPerVcenter);
+  next.pollIntervalMs = patchNum(partial.pollIntervalMs, 10_000, 86_400_000, next.pollIntervalMs);
+  next.concurrency = patchNum(partial.concurrency, 1, 32, next.concurrency);
+  next.timeoutMs = patchNum(partial.timeoutMs, 3_000, 120_000, next.timeoutMs);
+  next.maxVmsPerVcenter = patchNum(partial.maxVmsPerVcenter, 1, 100_000, next.maxVmsPerVcenter);
   if (partial.collectMethod !== undefined) next.collectMethod = ['guestops', 'ssh', 'auto'].includes(partial.collectMethod) ? partial.collectMethod : DEFAULTS.collectMethod;
-  if (partial.sshPort !== undefined) next.sshPort = clamp(partial.sshPort, 1, 65_535, DEFAULTS.sshPort);
+  next.sshPort = patchNum(partial.sshPort, 1, 65_535, next.sshPort);
   next.vcenters = { ...(cur.vcenters || {}) };
   if (partial.vcenters && typeof partial.vcenters === 'object') {
     for (const [id, v] of Object.entries(partial.vcenters)) {

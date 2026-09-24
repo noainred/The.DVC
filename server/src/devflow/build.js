@@ -192,5 +192,7 @@ export function buildDeviceFlow(p = {}) {
     totals: { edges: edges.length, edgeDevices, mainDevices, unassignedDevices, devices: edgeDevices + mainDevices + unassignedDevices, byEdgeState, byLine, byKind },
     since: num(flow.since),
     rejectsWithoutTime: num(flow.rejectsWithoutTime) || 0,
+    // v2.600 WEB2600-04: 인증 실패 집계 칸은 엣지가 아니다 — 노드·합계에서 빠졌고 여기서 개수만 밝힌다.
+    unauth: flow.unauth || null,
   };
 }

@@ -159,9 +159,15 @@ export function parseGuestDisks(guestDiskXml) {
   for (const blk of guestDiskXml.split(/<GuestDiskInfo(?=[ >])/).slice(1)) {
     const path = xmlUnescape(/<diskPath>([^<]*)<\/diskPath>/.exec(blk)?.[1] || '');
     const cap = Number(/<capacity>(\d+)<\/capacity>/.exec(blk)?.[1] || 0);
-    const free = Number(/<freeSpace>(\d+)<\/freeSpace>/.exec(blk)?.[1] || 0);
+    const freeM = /<freeSpace>(\d+)<\/freeSpace>/.exec(blk);
     if (!path && !cap) continue;
     const gb = (n) => Math.round((n / 1024 ** 3) * 10) / 10;
+    // v2.600(감사 LO2600-07): freeSpace 가 없으면 예전에는 여유 0 · 사용 = 용량(100%)으로 읽혔다(지어낸 값).
+    //   여유·사용은 **모른다**(null)이고 `freeUnknown` 으로 밝힌다. 소비처(guestdisk/analyze.vmSummary·
+    //   sanitizeGuestDiskVms · vmExport)는 이 파티션을 할당·사용 합계 **양쪽에서** 빼고 개수를 밝힌다 —
+    //   한쪽(사용)만 빼면 '전부 비었다'(회수 후보 과대)가 된다.
+    if (!freeM) { out.push({ path, capacityGB: gb(cap), freeGB: null, usedGB: null, freeUnknown: true }); continue; }
+    const free = Number(freeM[1]);
     out.push({ path, capacityGB: gb(cap), freeGB: gb(free), usedGB: gb(Math.max(0, cap - free)) });
   }
   return out;

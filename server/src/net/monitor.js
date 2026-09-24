@@ -15,6 +15,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; /
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
 import { createAuthGuard, authStopView } from '../util/authGuard.js';
 import { isSshAuthError } from '../proxy/sshExec.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 /**
  * 연속 모니터의 **SSH 인증 실패 정지**(v2.591 — 감사 F5). 모니터는 주기(최소 1분)마다 캡처 호스트에 SSH 로그인한다 —
@@ -90,14 +91,24 @@ const redact = (m) => ({ useSudo: m.useSudo !== false,
 
 export function listMonitors() { return load().map(redact); }
 
+// 양수 설정 — 빈 값·숫자 아님·0 이하는 def(예전 `Number(x) || def` 처럼 0 도 '미지정'), 값이면 [min, max].
+function posOr(v, min, max, def) {
+  const n = numOrNull(v);
+  if (n == null || n <= 0) return def;
+  return Math.max(min, Math.min(max, Math.round(n)));
+}
+
 export function saveMonitor(body = {}) {
   load();
   const id = body.id || `mon_${Date.now().toString(36)}`;
+  // v2.600 LO2600-03: 수정 저장의 빈 숫자 칸은 **이전 값 유지**(새 항목만 기본값). 예전 `Number('') || 10` 은 기존
+  // 1440분 주기를 10분으로 되돌려 SSH 캡처가 144배가 됐다(adminOnly API 직접 호출 경로 — v2.596 규약).
+  const was = cache.find((x) => x.id === id) || {};
   const m = {
     id, name: String(body.name || '무제 모니터').slice(0, 80),
     enabled: body.enabled !== false, mode: body.mode === 'dual' ? 'dual' : 'single',
-    intervalMin: Math.max(1, Math.min(1440, Number(body.intervalMin) || 10)),
-    iface: body.iface || 'any', seconds: Math.min(60, Math.max(1, Number(body.seconds) || 10)), maxPackets: Math.min(20000, Math.max(10, Number(body.maxPackets) || 1000)),
+    intervalMin: posOr(body.intervalMin, 1, 1440, posOr(was.intervalMin, 1, 1440, 10)),
+    iface: body.iface || 'any', seconds: posOr(body.seconds, 1, 60, posOr(was.seconds, 1, 60, 10)), maxPackets: posOr(body.maxPackets, 10, 20000, posOr(was.maxPackets, 10, 20000, 1000)),
     hostA: body.hostA || {}, hostB: body.hostB || {}, peer: body.peer || '',
     // v2.478(감사 B7): 시작/중지 토글처럼 useSudo 를 안 보내면 기존 값을 유지(예전엔 true 로 되돌아가 sudo -n 막힌
     // 서버에서 매 주기 캡처 실패). redact 도 useSudo 를 내려 프론트가 복원할 수 있게 한다.

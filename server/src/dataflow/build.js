@@ -23,6 +23,16 @@
  *   `/tools/edge-log/fetch` 로 그 엣지 한 곳만 당긴다(v2.549 경로 재사용).
  */
 
+import { PULL_UNAUTH_KEY } from '../central/pullStats.js';
+
+/**
+ * v2.600 WEB2600-04: 인증에 실패한 요청을 모은 **집계 칸**(`PULL_UNAUTH_KEY`, v2.589·v2.599)의 내부 id.
+ * ⚠ 이 칸은 엣지가 아니다 — 이름을 버리고 한 곳에 센 것이라 '등록부에 없는 엣지' 로 그리면 엣지 수가
+ *   하나 늘고, 누르면 '등록부에 없음' 이라는 **틀린 조치**가 뜬다. 노드·선·합계에서 빼고 `unauth` 로 밝힌다.
+ */
+export const UNAUTH_EDGE_ID = '!unauth';
+export { PULL_UNAUTH_KEY };
+
 export const STALE_FACTOR = 3;
 export const STALE_MIN_MS = 10 * 60_000;
 export const RECENT_MAX = 40;
@@ -117,6 +127,7 @@ export function buildDataFlow(p = {}) {
   }
   const edgeOf = (name, { verified = true } = {}) => {
     const n = t(name) || '(unknown)';
+    if (n === PULL_UNAUTH_KEY) return UNAUTH_EDGE_ID; // 엣지 노드를 만들지 않는다(위 UNAUTH_EDGE_ID 설명)
     const id = alias.get(norm(n));
     if (id) return id;
     const key = `?${n}`;
@@ -189,11 +200,24 @@ export function buildDataFlow(p = {}) {
 
   // ── 판정 ──
   const links = [];
+  const unauthRows = [];
   for (const s of acc.values()) {
+    if (s.edge === UNAUTH_EDGE_ID) {
+      // 인증 실패는 경로 상태·엣지 합계에 넣지 않는다 — 실제 엣지의 선을 빨갛게 만들면 거짓 장애다(v2.589).
+      const route = routeBy.get(s.route);
+      unauthRows.push({ route: s.route, side: route?.side || '', method: route?.method || '', path: route?.path || '',
+        count: s.count + s.failCount, lastAt: Math.max(s.okAt, s.failAt), reason: s.reason });
+      continue;
+    }
     const state = linkState({ okAt: s.okAt, failAt: s.failAt, intervalMs: s.intervalMs, now });
     if (!state) continue;
     links.push({ ...s, state, lastAt: Math.max(s.okAt, s.failAt) });
   }
+  unauthRows.sort((a, b) => b.lastAt - a.lastAt || b.count - a.count);
+  const unauth = unauthRows.length
+    ? { key: PULL_UNAUTH_KEY, reason: 'unauth-bucket', count: unauthRows.reduce((a, r) => a + r.count, 0),
+      lastAt: unauthRows[0].lastAt || null, routes: unauthRows }
+    : null;
   links.sort((a, b) => (a.edge < b.edge ? -1 : a.edge > b.edge ? 1 : a.route < b.route ? -1 : 1));
 
   const zero = () => ({ ok: 0, stale: 0, fail: 0 });
@@ -230,7 +254,7 @@ export function buildDataFlow(p = {}) {
 
   const sinceVals = [p.ingestSince, p.pulls?.since, p.outbound?.since].map(Number).filter((v) => v > 0);
   return {
-    routes: routesOut, cats, edges: edgesOut, links, recent, totals,
+    routes: routesOut, cats, edges: edgesOut, links, recent, totals, unauth,
     unmapped: routesOut.filter((r) => r.cat === 'other').map((r) => r.id),
     undeclared: extra,
     rejectsWithoutTime: Math.max(0, (p.rejects?.rows || []).reduce((a, r) => a + (Number(r.total) || 0), 0) - rejectsPlaced),

@@ -83,14 +83,44 @@ export function takeLogQueries(vcenterIds = []) {
   return out;
 }
 
+/*
+ * ⚠⚠ v2.600 CEN2600-07 — **엣지가 올린 조회 결과는 로컬 로그 DB 행 모양으로 투사한다**(v2.598 CENTRAL 규약).
+ * 예전에는 rows 원소·total·dbKind 를 원문 그대로 저장해 `{message:{evil:true}}` 가 vCenter 로그 화면의 텍스트 자식으로
+ * 가 React #31 로 죽었다. 행은 `logs/db.js query()` 의 SELECT 열(vcenterId·ts·severity·type·user·entity·message)만 남기고
+ * 문자열은 자르며, 수치는 numOrNull(못 읽으면 null — 0 이 아니다).
+ */
+const LOG_ROW_MAX = 2000;
+const lqStr = (v, n) => (typeof v === 'string' ? v.slice(0, n) : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
+function lqNum(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
+  return null;
+}
+export function sanitizeLogRow(r) {
+  if (!r || typeof r !== 'object') return null;
+  return {
+    vcenterId: lqStr(r.vcenterId, 128), ts: lqNum(r.ts), severity: lqStr(r.severity, 16), type: lqStr(r.type, 128),
+    user: lqStr(r.user, 128), entity: lqStr(r.entity, 256), message: lqStr(r.message, 2000),
+  };
+}
+
 export function setLogQueryResult(reqId, payload = {}) {
-  const b = reqVc.get(String(reqId)) || {};
-  results.set(reqId, {
-    at: Date.now(), vcenterId: payload.vcenterId || '', total: payload.total || 0,
-    rows: Array.isArray(payload.rows) ? payload.rows.slice(0, 2000) : [], dbKind: payload.dbKind || '',
+  const id = String(reqId);
+  const b = reqVc.get(id);
+  // 발급하지 않은(또는 만료된) reqId 의 결과는 받지 않는다 — 결과 폴링은 바인딩이 없으면 거부하므로(#35) 저장해도
+  // 아무도 못 읽고, 받아 두면 공유 토큰 엣지가 임의 reqId 로 결과 Map 을 부풀릴 수 있다(v2.600 CEN2600-07).
+  if (!b) return false;
+  const p = payload && typeof payload === 'object' ? payload : {};
+  const rows = [];
+  if (Array.isArray(p.rows)) for (const r of p.rows) { if (rows.length >= LOG_ROW_MAX) break; const x = sanitizeLogRow(r); if (x) rows.push(x); }
+  const total = lqNum(p.total);
+  results.set(id, {
+    at: Date.now(), vcenterId: lqStr(p.vcenterId, 128), total: total != null && total >= 0 ? total : null,
+    rows, dbKind: lqStr(p.dbKind, 16),
     owner: b.owner || '', reqVcenterId: b.vcenterId || '', // 바인딩을 결과와 함께 든다(#35)
   });
   pruneResults();
+  return true;
 }
 
 export function getLogQueryResult(reqId, now = Date.now()) {

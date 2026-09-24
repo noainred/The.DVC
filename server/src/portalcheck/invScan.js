@@ -27,6 +27,8 @@
  *   그 사실을 `owner:null` 로 밝히고 추측하지 않는다.
  */
 
+import { PULL_UNAUTH_KEY } from '../central/pullStats.js';
+
 /** 행 상태 — **겹치지 않는다**(합계 = ok + stale + never + rejected + unknown). */
 export const INV_STATE = Object.freeze({
   OK: 'ok',              // 신선한 수신이 있다
@@ -50,6 +52,10 @@ export const INV_FINDING = Object.freeze({
   AGENT_MOCK: 'inv-agent-mock',
   OWNER_CONFLICT: 'inv-owner-conflict',
   NO_SITE_VCENTER: 'inv-no-site-vcenter',
+  // v2.600 WEB2600-02: push 가 전부 거부돼 수신 집계에 한 번도 오르지 않은 엣지(이름은 미검증).
+  AGENT_REJECTED_ONLY: 'inv-agent-rejected-only',
+  // v2.600 WEB2600-05: 등록부에 없는 vCenter id 로 인벤토리가 저장돼 있다(어느 화면에도 행이 없다).
+  UNREGISTERED_VCENTER: 'inv-unregistered-vcenter',
 });
 
 export const INV_GRADE = Object.freeze({ FAULT: 'fault', WARN: 'warn', INFO: 'info' });
@@ -155,9 +161,59 @@ export function scanInventory({
       // 이 엣지가 위임 vCenter 의 담당으로 **학습된 적이 있나** — 없으면 인벤토리 담당이 아닐 수 있다.
       knownOwner: ownerSet.has(low(name)),
     };
-  }).sort((a, b) => Number(a.sentInventory) - Number(b.sentInventory) || (b.wireBytes - a.wireBytes));
+  });
+  /*
+   * ⚠ v2.600 WEB2600-02: **전부 거부된 엣지도 행을 만든다.** 수신 집계(`ingestStats`)는 거부된 요청을
+   *   세지 않으므로(`routes/central.js` 가 거부 뒤 `recordIngest` 전에 끝낸다) 모든 push 가 막힌 엣지는
+   *   위 목록에 한 번도 나오지 않았다 — 이 표가 가장 보여줘야 할 엣지가 빠진 것이다.
+   *   ⚠ 이름은 요청이 주장한 값이라 **검증되지 않았다**(`verified:false`) — 조치 근거로 쓰지 않는다.
+   */
+  const seen = new Set(agents.map((a) => low(a.agent)));
+  // ⚠ 인증 실패 집계 칸(`PULL_UNAUTH_KEY`)은 엣지가 아니다 — 이름을 버리고 모은 것이라 행으로 만들지 않고 개수만 밝힌다.
+  let unauthRejects = 0;
+  for (const r of rejects?.rows || []) {
+    const name = t(r?.agent);
+    if (name === PULL_UNAUTH_KEY) { unauthRejects += num(r?.total) ?? 0; continue; }
+    if (!name || seen.has(low(name))) continue;
+    seen.add(low(name));
+    const eps = r?.byEndpoint && typeof r.byEndpoint === 'object' ? Object.keys(r.byEndpoint) : [];
+    agents.push({
+      agent: name,
+      pushes: 0,
+      wireBytes: 0,
+      lastAt: null,
+      sentInventory: false,
+      lastEndpoint: null,
+      lastVcenterId: t(r?.lastVcenterId) || null,
+      lastHosts: null,
+      lastVms: null,
+      gzip: null,
+      rejects: { total: num(r?.total) ?? 0, lastAt: num(r?.lastAt), lastKind: r?.lastKind || '', lastReason: r?.lastReason || '', byKind: r?.byKind || {} },
+      mockReported: !!(identity?.byAgent || {})[low(name)]?.mock,
+      knownOwner: ownerSet.has(low(name)),
+      rejectedOnly: true,
+      verified: false,
+      // 거부된 요청 중 인벤토리 경로가 있었나 — 없으면 이 엣지는 다른 데이터를 보내다 막힌 것이다.
+      rejectedInventory: eps.some((e) => t(e).replace(/^\//, '') === 'inventory'),
+    });
+  }
+  agents.sort((a, b) => Number(!a.rejectedOnly) - Number(!b.rejectedOnly)
+    || Number(a.sentInventory) - Number(b.sentInventory) || (b.wireBytes - a.wireBytes));
 
-  return { rows, agents, kpis: kpisOf(rows), staleMs: stale, at, siteCount: sites.length, vcenterCount: vcenters.length };
+  /*
+   * ⚠ v2.600 WEB2600-05: 등록부에 **없는** vCenter id 로 저장된 인벤토리. 중앙 수신은 등록 여부를 보지
+   *   않고 저장하는데(`routes/central.js` — TOFU 소유권·mock 만 본다) 위 행은 등록부의 site 만 만들므로
+   *   그 데이터는 **어느 화면에도 나오지 않았다**. 조용히 두지 않고 목록으로 밝힌다(삭제·자동 등록은 안 한다).
+   */
+  const known = new Set(vcenters.map((v) => low(v?.id)).filter(Boolean));
+  const orphans = [];
+  for (const [id, e] of invBy) {
+    if (known.has(low(id))) continue;
+    orphans.push({ vcenterId: id, agent: t(e?.agent) || null, lastAt: num(e?.at), hosts: num(e?.hosts), vms: num(e?.vms) });
+  }
+  orphans.sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0) || a.vcenterId.localeCompare(b.vcenterId));
+
+  return { rows, agents, orphans, unauthRejects, kpis: kpisOf(rows), staleMs: stale, at, siteCount: sites.length, vcenterCount: vcenters.length };
 }
 
 const STATE_ORDER = Object.freeze({ rejected: 0, never: 1, stale: 2, unknown: 3, ok: 4 });
@@ -215,7 +271,13 @@ export function findingsOf(scan) {
     // ⚠ '인벤토리를 안 보낸 엣지' 는 **위임 담당으로 학습된 적이 있을 때만** 결함이다.
     //   그 밖의 엣지(스토리지·svcmon 전용 등)는 인벤토리를 보내지 않는 것이 **정상**이다 —
     //   전부 결함으로 올리면 화면이 정상 구성을 결함이라 말한다(v2.560 오탐과 같은 유형).
+    // 전부 거부된 엣지 — 이름은 미검증이라 **주의**로 올린다(누가 보냈는지 확정할 수 없다).
+    else if (a.rejectedOnly) push(INV_FINDING.AGENT_REJECTED_ONLY, INV_GRADE.WARN, a.agent, { total: a.rejects?.total || 0, lastKind: a.rejects?.lastKind || '', lastReason: a.rejects?.lastReason || '', inventory: !!a.rejectedInventory, unverified: true });
     else if (!a.sentInventory && a.knownOwner) push(INV_FINDING.AGENT_NO_INVENTORY, INV_GRADE.FAULT, a.agent, { pushes: a.pushes, lastEndpoint: a.lastEndpoint || '' });
+  }
+
+  for (const o of scan?.orphans || []) {
+    push(INV_FINDING.UNREGISTERED_VCENTER, INV_GRADE.WARN, o.vcenterId, { agent: o.agent || '', lastAt: o.lastAt ?? 0 });
   }
 
   if ((scan?.siteCount || 0) === 0) push(INV_FINDING.NO_SITE_VCENTER, INV_GRADE.INFO, '', { vcenterCount: scan?.vcenterCount || 0 });

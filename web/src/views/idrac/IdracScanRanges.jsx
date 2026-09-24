@@ -4,6 +4,7 @@
 // 주기 저장(saveInterval)·스캔 중지(stopScan)는 이 컴포넌트가 자체 소유(원본과 동일) — putJson/postJson 직접 사용.
 import React, { useState } from 'react';
 import { putJson, postJson } from '../../api.js';
+import { blankOr } from '../blankOr.js';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -75,8 +76,9 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
   const [ivEdit, setIvEdit] = useState(null); // null=보기 모드, 문자열=편집 중 값
   const [ivMsg, setIvMsg] = useState(null);
   const saveInterval = async () => {
-    const hours = Number(ivEdit);
-    if (!Number.isFinite(hours) || hours < 0) { setIvMsg('0 이상 숫자(시간)를 입력하세요.'); return; }
+    // v2.600 LO2600-05: 빈 칸은 저장하지 않는다 — Number('')===0 이라 빈 칸이 '0=주기 끔' 으로 저장됐다(명시적 0 만 끔).
+    const hours = blankOr(ivEdit);
+    if (hours === undefined || hours < 0) { setIvMsg('0 이상 숫자(시간)를 입력하세요. 주기 스캔을 끄려면 0 을 입력합니다.'); return; }
     try {
       const r = await putJson('/admin/idrac/scan-ranges/interval', { hours });
       // 서버가 하한(10분) 등으로 클램프할 수 있으므로 실제 적용된 값으로 안내한다.

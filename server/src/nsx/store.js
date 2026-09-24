@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { getDataSource } from '../runtime-settings.js';
 import { describeError } from '../util/errors.js';
 import { loadRegistry } from './registry.js';
+import { scopedNsxRollup } from './scope.js'; // v2.600: rollup 단일 소스(scope.js 는 import 가 없어 순환 없음)
 import { collectFromNsx } from './client.js';
 import { generateNsxSnapshot, generateNsxForManager } from './mock.js';
 import { nsxAuthGuard, isNsxAuthError } from './client.js'; // v2.590: 인증 실패 정지(정의는 client.js — 순환 방지)
@@ -122,12 +123,18 @@ function empty() {
   return { generatedAt: new Date().toISOString(), source: getDataSource(), managers: [], gateways: [], segments: [], transportNodes: [], dfw: [], securityGroups: [], idsEvents: [], collectionErrors: [], rollup: null };
 }
 
-function merge(parts, errors, source) {
+export function merge(parts, errors, source) {
   const snap = empty();
   snap.source = source;
   snap.collectionErrors = errors;
   for (const p of parts) {
-    snap.managers.push({ ...p.manager, gateways: p.gateways.length, segments: p.segments.length, transportNodes: p.transportNodes.length, firewall: p.firewall, groups: p.groups });
+    // v2.600(COL-2600-06 후속): 조회에 실패한 목록의 개수는 0 이 아니라 null(빈 배열 길이를 쓰지 않는다).
+    const lf = new Set(Array.isArray(p.manager?.listsFailed) ? p.manager.listsFailed : []);
+    snap.managers.push({ ...p.manager,
+      gateways: lf.has('tier0s') || lf.has('tier1s') ? null : p.gateways.length,
+      segments: lf.has('segments') ? null : p.segments.length,
+      transportNodes: lf.has('transportNodes') ? null : p.transportNodes.length,
+      firewall: p.firewall, groups: p.groups });
     snap.gateways.push(...p.gateways);
     snap.segments.push(...p.segments);
     snap.transportNodes.push(...p.transportNodes);
@@ -139,23 +146,10 @@ function merge(parts, errors, source) {
   return snap;
 }
 
-function rollup(snap) {
-  const g = snap.gateways, tn = snap.transportNodes;
-  snap.rollup = {
-    managers: snap.managers.length,
-    managersUp: snap.managers.filter((m) => m.status === 'connected').length,
-    managersDegraded: snap.managers.filter((m) => m.status === 'degraded').length,
-    t0: g.filter((x) => x.tier === 'T0').length,
-    t1: g.filter((x) => x.tier === 'T1').length,
-    segments: snap.segments.length,
-    overlaySegments: snap.segments.filter((s) => s.type === 'OVERLAY').length,
-    vlanSegments: snap.segments.filter((s) => s.type === 'VLAN').length,
-    hostNodes: tn.filter((x) => x.type === 'host').length,
-    edgeNodes: tn.filter((x) => x.type === 'edge').length,
-    dfwPolicies: snap.managers.reduce((a, m) => a + (m.firewall?.policies || 0), 0),
-    dfwRules: snap.managers.reduce((a, m) => a + (m.firewall?.rules || 0), 0),
-    groups: snap.managers.reduce((a, m) => a + (m.groups || 0), 0),
-  };
+// v2.600(감사 COL-2600-06 후속): 전 함대 rollup 도 범위 rollup 과 **같은 함수**로 센다 — 두 벌이던 합계가
+//   목록 조회 실패(listsFailed)를 각자 0 으로 더하고 있었다. 필드 구성은 그대로다.
+export function rollup(snap) {
+  snap.rollup = scopedNsxRollup(snap);
   return snap;
 }
 

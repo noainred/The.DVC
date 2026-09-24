@@ -75,6 +75,8 @@ function initSqlite() {
     // 그 metric 파티션 전체를 훑는다(감사 P2 #11). MIN/MAX 만이면 PK/인덱스 양끝 seek 로 끝난다.
     // 용도: '수집 시작 이전' 을 화면이 소급 표시하지 않게 하는 기준선(v2.351 '+2만 TB' 오표시 교훈).
     const keyMinMax = db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx FROM samples WHERE metric=? AND k=?');
+    // v2.600 DB2600-02: history() 의 롤업 선택용 — 원본의 첫 표본. aggregate 하나라 인덱스 끝점 탐색이다(v2.550.3).
+    const rawMin = db.prepare('SELECT MIN(ts) AS mn FROM samples WHERE metric=? AND k=?');
     const keyHourMinMax = db.prepare('SELECT MIN(h) AS mn, MAX(h) AS mx FROM samples_hourly WHERE metric=? AND k=?');
     const pruneHourly = db.prepare('DELETE FROM samples_hourly WHERE rowid IN (SELECT rowid FROM samples_hourly WHERE h < ? LIMIT ?)');
     // ⚠ 키별 상한을 **SQL 에서** 적용한다(2026-08-13 감사 '성능 잔여 A'). 과거에는 창 전체를
@@ -135,8 +137,12 @@ function initSqlite() {
         // 60분+ 정배수 버킷이고 롤업이 요청 창을 덮으면 시간당 롤업에서 집계(원본 스캔 제거).
         // 업그레이드 이전 데이터(롤업 없음)가 창에 걸리면 원본으로 폴백해 빈 결과를 만들지 않는다.
         if (bucketMs >= HOUR && bucketMs % HOUR === 0) {
+          // v2.600 DB2600-02: '롤업이 sinceTs 를 덮을 때만' 이면, 원본 보존(기본 90일)이 롤업 보존(5년)보다 짧을 때
+          // 데이터 나이보다 긴 창(365일)이 원본으로 떨어져 **긴 창이 더 적게**(90일) 보였다. 롤업이 원본만큼
+          // 거슬러 올라가면(롤업 첫 시간 ≤ 원본 첫 표본) 롤업을 쓴다. 원본이 더 이르면(업그레이드 이전) 원본 폴백.
           const mn = hourlyMin.get(metric, k)?.mn;
-          if (mn != null && mn <= sinceTs) {
+          const rawFirst = mn != null && mn > sinceTs ? rawMin.get(metric, k)?.mn : null;
+          if (mn != null && (mn <= sinceTs || rawFirst == null || mn <= rawFirst)) {
             return bucketHourly.all(bucketMs, bucketMs, metric, k, sinceTs, limit).reverse()
               .map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) }));
           }

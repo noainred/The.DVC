@@ -132,11 +132,26 @@ export function basePathIssue(v) {
   return null;
 }
 
+/**
+ * HAProxy `bind` 주소 검증(v2.600, 감사 LO2600-06 — v2.598 INJ-02 의 형제). 이 값은 `proxy/deploy.js` 가
+ * `bind ${bindAddress}:${port}` 로 **HAProxy 설정 파일에 그대로 보간**한다 — 개행이 들어가면 관리 블록 안에 임의의
+ * listen 섹션이 생긴다. `*`·IPv4·IPv6(대괄호 선택)·호스트 이름 글자만 받는다. 빈 값은 '미지정'(기본 `*`). 순수 함수.
+ */
+export function bindAddressIssue(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const s = String(v);
+  if (s.length > 253) return 'bindAddress 가 너무 깁니다.';
+  if (s === '*') return null;
+  if (/^[A-Za-z0-9.-]+$/.test(s)) return null;                 // IPv4 · 호스트 이름
+  if (/^\[?[0-9A-Fa-f:.]+\]?$/.test(s) && s.includes(':')) return null; // IPv6
+  return "bindAddress 는 '*' · IP 주소 · 호스트 이름만 쓸 수 있습니다(공백·제어문자·기호 불가).";
+}
+
 export function saveConfig(partial = {}) {
   const c = load();
   if (partial.dataplane) {
     const dp = partial.dataplane;
-    const bad = basePathIssue(dp.basePath);
+    const bad = basePathIssue(dp.basePath) || bindAddressIssue(dp.bindAddress);
     if (bad) { const e = new Error(bad); e.status = 400; throw e; }
     const moved = accessMoved(c.dataplane, dp, DP_ID_KEYS);
     if (dp.password === REDACT) delete dp.password; // keep existing when redacted placeholder sent
@@ -232,7 +247,7 @@ export function saveProxy(body = {}) {
   for (const k of ['name', 'proxyHost', 'publicPortBase', 'vcenterIds']) if (body[k] !== undefined) next[k] = body[k];
   { const bad = proxyHostIssue(body.proxyHost); if (bad) return { ok: false, reason: bad }; } // v2.537
   if (body.dataplane) {
-    const bad = basePathIssue(body.dataplane.basePath);
+    const bad = basePathIssue(body.dataplane.basePath) || bindAddressIssue(body.dataplane.bindAddress);
     if (bad) return { ok: false, reason: bad };
     next.dataplane = mergeSecrets(base.dataplane || DEFAULTS.dataplane, { ...body.dataplane }, ['password'], DP_ID_KEYS);
   }

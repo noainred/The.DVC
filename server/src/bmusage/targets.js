@@ -195,6 +195,22 @@ function idOf(b) {
   };
 }
 
+/**
+ * 비-admin 응답용 — 관리 주소를 가린다(v2.600 AUTHZ-2600-08). `publicTarget` 은 자격증명만 빼고
+ * iDRAC 관리 주소(`idracHost`)와 OS SSH 주소(`osHostName` — adminOnly 인 베어메탈 스토리지 등록부의 값)를
+ * 그대로 실어 `tools` 권한(operator 기본 보유)에 나갔다(v2.599 AUTHZ-2599-03 과 같은 계열).
+ * ⚠ `null`(그 경로가 없다)과 `''`(있지만 가렸다)을 구분해 남긴다 — 화면이 경로 유무를 판정한다.
+ * `publicTarget` 의 두 번째 인자로 두지 않은 이유: 호출부가 `.map(publicTarget)` 이라 인덱스가 들어온다.
+ */
+export function maskTargetAddress(pt) {
+  if (!pt || typeof pt !== 'object') return pt;
+  return {
+    ...pt,
+    idracHost: pt.idracHost == null ? pt.idracHost : '',
+    osHostName: pt.osHostName == null ? pt.osHostName : '',
+  };
+}
+
 /** 응답용 — 자격증명을 뺀다. ⚠ 라우트는 반드시 이것만 내보낼 것. */
 export function publicTarget(x = {}) {
   const { idrac, osHost, ...rest } = x;

@@ -68,13 +68,14 @@ export async function runPingWorkerOnce() {
 
 async function runPingWorkerInner() {
   const vcIds = (loadVcenterConfig().vcenters || []).map((v) => v.id).filter(Boolean);
-  if (!vcIds.length) return null;
+  // v2.600 EDGE2600-07: '잴 것 0건' 도 상태로 남긴다(logQueryWorker 와 같은 규약).
+  if (!vcIds.length) { _last = { at: Date.now(), ok: true, jobs: 0, note: '이 엣지에 등록된 vCenter 가 없습니다.' }; return null; }
   try {
     const url = `${config.agent.centralUrl}/api/central/ping-jobs?vcenters=${encodeURIComponent(vcIds.join(','))}`;
     const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) return await httpFail('인출', r);
     const { jobs } = await r.json();
-    if (!jobs || !Object.keys(jobs).length) return null;
+    if (!jobs || !Object.keys(jobs).length) { _last = { at: Date.now(), ok: true, jobs: 0 }; return null; } // v2.600 EDGE2600-07: 성공 인출(0건)도 상태 갱신 — 끈적한 오류 방지
     let postErr = null;
     for (const [vcenterId, ips] of Object.entries(jobs)) {
       if (!Array.isArray(ips) || !ips.length) continue;

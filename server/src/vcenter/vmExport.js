@@ -38,6 +38,11 @@ const iso = (v) => { const t = Date.parse(v || ''); return Number.isFinite(t) ? 
 const isoTs = (t) => (Number.isFinite(t) && t ? new Date(t).toISOString() : '');
 const yn = (v) => (v === true || v === 'true' ? 'Y' : v === false || v === 'false' ? 'N' : '');
 const join = (arr) => (arr && arr.length ? arr.join('; ') : '');
+/** v2.600(LO2600-07): 게스트 파티션의 사용·여유 합 — 값을 모르는 파티션(null)은 빼고, 아는 것이 하나도 없으면 ''. */
+export function guestKnownSum(guest, key) {
+  const known = (guest || []).filter((x) => x && x[key] != null);
+  return known.length ? Math.round(known.reduce((s, x) => s + x[key], 0) * 10) / 10 : '';
+}
 
 /**
  * 디스크 슬롯 컬럼(v2.278, 사용자 확정 템플릿) — VM 당 1행을 유지한 채 '디스크1~7'을
@@ -145,17 +150,24 @@ export const VM_EXPORT_COLUMNS = [
     label: '게스트 디스크 총량(GB)',
     get: (vm, d) => (d.guest.length ? Math.round(d.guest.reduce((s, x) => s + x.capacityGB, 0) * 10) / 10 : ''),
   },
+  // v2.600(감사 LO2600-07): 여유를 보고하지 않은 파티션(usedGB·freeGB null)은 사용·여유 합계에서 빼고 개수를 따로 싣는다 —
+  //   예전에는 사용 = 용량(100%)으로 지어낸 값이 합계에 들어갔다. 그 파티션뿐이면 합계는 빈 칸('모른다')이다.
   {
     key: 'guestUsedGB',
     label: '게스트 사용량(GB)',
-    get: (vm, d) => (d.guest.length ? Math.round(d.guest.reduce((s, x) => s + x.usedGB, 0) * 10) / 10 : ''),
+    get: (vm, d) => guestKnownSum(d.guest, 'usedGB'),
   },
   {
     key: 'guestFreeGB',
     label: '게스트 여유(GB)',
-    get: (vm, d) => (d.guest.length ? Math.round(d.guest.reduce((s, x) => s + x.freeGB, 0) * 10) / 10 : ''),
+    get: (vm, d) => guestKnownSum(d.guest, 'freeGB'),
   },
-  { key: 'guestParts', label: '게스트 파티션 상세', get: (vm, d) => join(d.guest.map((x) => `${x.path} ${x.usedGB}/${x.capacityGB}GB`)) },
+  {
+    key: 'guestPartsUnknown',
+    label: '게스트 여유 미보고 파티션 수',
+    get: (vm, d) => (d.guest.length ? d.guest.filter((x) => x.usedGB == null).length : ''),
+  },
+  { key: 'guestParts', label: '게스트 파티션 상세', get: (vm, d) => join(d.guest.map((x) => `${x.path} ${x.usedGB == null ? '?' : x.usedGB}/${x.capacityGB}GB`)) },
   { key: 'snapshotCount', label: '스냅샷 수', get: (vm) => vm.snapshotCount ?? 0 },
   { key: 'snapshotSizeGB', label: '스냅샷 크기(GB)', get: (vm) => vm.snapshotSizeGB ?? '' },
   { key: 'snapshotOldest', label: '스냅샷 최초 생성', get: (vm) => isoTs(vm.snapshotOldestTs) },

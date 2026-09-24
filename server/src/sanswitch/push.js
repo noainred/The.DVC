@@ -32,6 +32,7 @@ import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { localSnapshots } from './store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
+import { trimZoningToFit } from '../central/edgeRecord.js'; // v2.600 RECENT2600-02 — 중앙 수신과 같은 조닝 축약(순수)
 
 export const pushMs = () => Math.max(60_000, Number(process.env.SANSW_PUSH_MS) || 5 * 60_000);
 /** 중앙으로 올릴 포트 상한 — 문제 포트 우선. */
@@ -97,13 +98,28 @@ export function scopeSnapshot(snap, { scope = 'full', maxBytes = DEVICE_MAX_BYTE
   const size = Buffer.byteLength(JSON.stringify(full));
   if (size <= maxBytes) return full;
   const slim = slimSnapshot(snap, limit);
-  return {
+  const out = {
     ...slim,
     ports: {
       ...slim.ports,
       portsScopeReason: `전체 포트가 1회 전송 상한(${Math.round(maxBytes / 1024)}KB)을 넘어(${Math.round(size / 1024)}KB) 문제 포트만 보냈습니다`,
     },
   };
+  // v2.600(감사 RECENT2600-02): 포트를 줄여도 넘으면 주범은 조닝(zone 수천 × 멤버 · 별칭 수천)이다. 예전에는 그대로 보내
+  //   중앙의 장비당 상한(1MB)에서 **장비째 버려졌다**(화면에서 그 스위치가 사라진다). 조닝을 잘라 맞추고 뺀 개수를 밝힌다.
+  if (Buffer.byteLength(JSON.stringify(out)) > maxBytes) trimZoningToFit(out, maxBytes, { by: 'edge' });
+  return out;
+}
+
+/** 중앙 응답의 거절 요약을 읽는다(v2.600 RECENT2600-02) — 본문이 JSON 이 아니면 null. */
+async function readDropSummary(res) {
+  try {
+    const j = await res.json();
+    if (!j || typeof j !== 'object') return null;
+    const rejected = Number(j.rejected) || 0;
+    const zoningTrimmed = Number(j.zoningTrimmed) || 0;
+    return rejected || j.coerced || zoningTrimmed ? { rejected, dropped: j.dropped && typeof j.dropped === 'object' ? j.dropped : null, coerced: Number(j.coerced) || 0, zoningTrimmed } : null;
+  } catch { return null; }
 }
 
 export async function pushSanSwitchNow() {
@@ -137,6 +153,7 @@ export async function pushSanSwitchNow() {
     // 청크 전송(chunk/chunks 필드): 첫 청크는 중앙의 내 목록을 교체, 이후 청크는 덧붙인다(중앙 sanSwitchEdge).
     const chunks = chunkDevices(devices);
     let bytes = 0, gzBytes = 0;
+    let rejected = 0; const droppedBy = {}; let centralTrimmed = 0;
     for (let i = 0; i < chunks.length; i++) {
       const json = Buffer.from(JSON.stringify({ agent: config.agent.name, devices: chunks[i], chunk: i, chunks: chunks.length }));
       let body = json;
@@ -147,11 +164,17 @@ export async function pushSanSwitchNow() {
         method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2,
       });
       if (!res.ok) throw new Error(`sanswitch-data <- ${res.status} (청크 ${i + 1}/${chunks.length})`);
+      // v2.600(RECENT2600-02): 200 이어도 중앙이 일부 장비를 뺐을 수 있다(장비 크기·합계 상한 등) — 응답을 읽어 상태·콘솔에 남긴다.
+      const ds = await readDropSummary(res);
+      if (ds?.zoningTrimmed) centralTrimmed += ds.zoningTrimmed;
+      if (ds?.rejected) { rejected += ds.rejected; for (const [k, n] of Object.entries(ds.dropped || {})) droppedBy[k] = (droppedBy[k] || 0) + (Number(n) || 0); }
     }
+    if (rejected) console.warn(`[sanswitch-push] 중앙이 장비 ${rejected}대를 받지 않았습니다(${Object.entries(droppedBy).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(' · ') || '사유 미상'}) — 그 스위치는 중앙 화면에 나오지 않습니다`);
     // 범위·크기를 상태에 남긴다 — '전체로 바꿨는데 회선이 버티나' 를 수치로 확인할 수 있게.
     const downgraded = devices.filter((d) => d.ports?.portsScopeReason).length;
-    _last = { at: Date.now(), sent: devices.length, chunks: chunks.length, bytes, gzBytes, gzip: PUSH_GZIP, portsScope: scope, downgraded };
-    return { ok: true, sent: devices.length, chunks: chunks.length, portsScope: scope, downgraded };
+    const zoningTrimmed = devices.filter((d) => d.zoning?.trimmed).length;
+    _last = { at: Date.now(), sent: devices.length, chunks: chunks.length, bytes, gzBytes, gzip: PUSH_GZIP, portsScope: scope, downgraded, zoningTrimmed, ...(centralTrimmed ? { centralZoningTrimmed: centralTrimmed } : {}), ...(rejected ? { rejected, dropped: droppedBy } : {}) };
+    return { ok: true, sent: devices.length, chunks: chunks.length, portsScope: scope, downgraded, zoningTrimmed, ...(rejected ? { rejected, dropped: droppedBy } : {}) };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };
     console.warn(`[sanswitch-push] 실패: ${e.message}`); // v2.583(카탈로그 N2)

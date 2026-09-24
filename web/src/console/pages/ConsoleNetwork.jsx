@@ -6,6 +6,7 @@ import { StateBadge } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { Panel, KpiCard, Bar, PollState, Empty } from '../ui.jsx';
 import { nsxManagerRows, networkTypeCounts, portgroupsByVc, ipamTop, ipamStats, fmtInt, fmtPct, colorOf, rowMatches, REGION_COLORS } from '../consoleData.js';
+import { nsxCount, nsxAdd, nsxFailedShort } from '../../views/nsxLimitText.js'; // v2.600 COL-2600-06: 조회 실패 합계(null)를 0·'null' 로 그리지 않는다
 
 export default function ConsoleNetwork({ global: g, sitesAll, scope, polls }) {
   const nets = usePolling('/networks', {}, 60_000);
@@ -29,9 +30,9 @@ export default function ConsoleNetwork({ global: g, sitesAll, scope, polls }) {
     <>
       <div className="dvc-kpis">
         <KpiCard label="포트그룹" value={fmtInt(g?.networks)} accent="#0f172a" meta={nets.data ? `Distributed ${tc.distributed} · Standard ${tc.standard}${tc.other ? ` · 기타 ${tc.other}` : ''}` : '수집 대기'} />
-        <KpiCard label="NSX 매니저" value={r ? `${r.managersUp} / ${r.managers}` : '—'} accent="#7c3aed" meta={r ? `T0 ${r.t0} · T1 ${r.t1}${r.managersDegraded ? ` · 저하 ${r.managersDegraded}` : ''}${(polls.nsx.data.collectionErrors || []).length ? ` · 수집 오류 ${polls.nsx.data.collectionErrors.length}` : ''}` : 'NSX 수집 대기'} />
-        <KpiCard label="세그먼트" value={fmtInt(r?.segments)} accent="#0891b2" meta={r ? `Overlay ${r.overlaySegments} · VLAN ${r.vlanSegments}` : 'NSX 수집 대기'} />
-        <KpiCard label="트랜스포트 노드" value={r ? fmtInt(r.hostNodes + r.edgeNodes) : '—'} accent={tnDown ? '#ef4444' : '#22c55e'} meta={r ? `호스트 ${r.hostNodes} · 엣지 ${r.edgeNodes} · DOWN ${tnDown}` : 'NSX 수집 대기'} />
+        <KpiCard label="NSX 매니저" value={r ? `${r.managersUp} / ${r.managers}` : '—'} accent="#7c3aed" meta={r ? `T0 ${nsxCount(r.t0)} · T1 ${nsxCount(r.t1)}${r.managersDegraded ? ` · 저하 ${r.managersDegraded}` : ''}${nsxFailedShort(r) ? ` · ${nsxFailedShort(r)}` : ''}${(polls.nsx.data.collectionErrors || []).length ? ` · 수집 오류 ${polls.nsx.data.collectionErrors.length}` : ''}` : 'NSX 수집 대기'} />
+        <KpiCard label="세그먼트" value={fmtInt(r?.segments)} accent="#0891b2" meta={r ? `Overlay ${nsxCount(r.overlaySegments)} · VLAN ${nsxCount(r.vlanSegments)}` : 'NSX 수집 대기'} />
+        <KpiCard label="트랜스포트 노드" value={r ? fmtInt(nsxAdd(r.hostNodes, r.edgeNodes)) : '—'} accent={tnDown ? '#ef4444' : '#22c55e'} meta={r ? `호스트 ${nsxCount(r.hostNodes)} · 엣지 ${nsxCount(r.edgeNodes)} · DOWN ${tnDown}` : 'NSX 수집 대기'} />
         <KpiCard label="IPAM /24 대역" value={ipam.data ? fmtInt(ist.count) : '—'} accent="#3b82f6" meta={ipam.data ? (ist.count ? `평균 사용 ${fmtPct(ist.avgPct)} · 90% 초과 ${ist.over90}` : '대역 없음') : canIpam ? '수집 대기' : "권한 필요('tools')"} />
       </div>
 

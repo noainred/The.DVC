@@ -40,8 +40,10 @@ setCollectBaseResolver((id) => {
  *   ⚠ v2.599(CEN-2599-03·05): 객체가 아니거나 deviceId 가 식별자가 아닌 원소는 빼고, 표시 필드의 객체 값은 null 로.
  */
 export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1, info = {} } = {}) {
-  const { devices: clean, dropped, coerced } = sanitizeEdgeDevices(devices, { idKey: 'deviceId', max: MAX_DEVICES_PER_AGENT });
+  const { devices: clean, dropped, coerced, trimmed } = sanitizeEdgeDevices(devices, { idKey: 'deviceId', max: MAX_DEVICES_PER_AGENT });
   info.dropped = dropped; info.coerced = coerced;
+  // v2.600(RECENT2600-02): 장비 크기 상한을 넘어 **조닝을 잘라 받은** 장비 수 — 버린 것(dropped)과 구분해 밝힌다.
+  if (trimmed) { info.trimmed = trimmed; console.warn(`[central] sanswitch-data: agent=${String(agent).slice(0, 64)} 장비 ${trimmed}대의 조닝이 중앙 수신 상한을 넘어 일부만 저장했습니다`); }
   const adm = admitAgent(load(), agent);
   if (!adm.ok) { info.refused = true; console.warn(`[central] sanswitch-data: 엣지 수 상한 — 새 이름 '${String(agent).slice(0, 64)}' 거절(최근 보고한 엣지를 밀어내지 않는다)`); return 0; }
   if (adm.evicted) { info.evicted = adm.evicted; console.warn(`[central] sanswitch-data: 엣지 수 상한 — 오래 조용한 '${adm.evicted}' 보관분을 내렸다`); }

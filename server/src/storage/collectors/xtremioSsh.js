@@ -10,7 +10,7 @@
  */
 
 import { emptySnapshot } from '../types.js';
-import { runCliSession, parseKeyValueBlocks, toBytes, toBytesOrNull, sshFailureSnapshot } from './cliSsh.js';
+import { runCliSession, parseKeyValueBlocks, toBytes, toBytesOrNull, sshFailureSnapshot, sliceRowByHeader } from './cliSsh.js';
 import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
 
 const wrap = (cmd) => [cmd, `xmcli -c "${cmd}"`];
@@ -36,13 +36,17 @@ export function parseTable(text) {
   if (headerIdx < 0) return parseKeyValueBlocks(text);
   const header = lines[headerIdx].trim().split(/\s{2,}/).map((h) => h.trim());
   if (header.length < 2) return parseKeyValueBlocks(text);
+  // v2.600(감사 COL-2600-04): 머리글 각 열의 시작 위치. 칸 수가 머리글과 같으면 예전처럼 공백 2칸으로 가르고,
+  //   **다르면**(가운데 칸이 비었다) 공백 분할이 뒤 값을 왼쪽으로 당겨 'State' 가 'IP-Address' 칸에 들어갔다
+  //   (끊긴 컨트롤러가 상태 미상 → 비정상 0 으로 숨었다). 그때는 머리글 위치로 잘라 읽는다(고정폭 표).
+  const headerLine = lines[headerIdx];
   const rows = [];
   for (const line of lines.slice(sepIdx > 0 ? sepIdx + 1 : headerIdx + 1)) {
     if (/^[-=\s|+]+$/.test(line)) continue;
     const cells = line.trim().split(/\s{2,}/).map((c) => c.trim());
     if (cells.length < 2) continue;
-    const row = {};
-    header.forEach((h, i) => { row[h] = cells[i] ?? ''; });
+    let row = cells.length !== header.length ? sliceRowByHeader(headerLine, header, line) : null;
+    if (!row) { row = {}; header.forEach((h, i) => { row[h] = cells[i] ?? ''; }); }
     rows.push(row);
   }
   return rows.length ? rows : parseKeyValueBlocks(text);
@@ -77,14 +81,19 @@ export function normalizeXtremioSsh(device, out) {
   const info = parseTable(out.clustersInfo || out.clusters || '');
   const pools = [];
   let total = 0;
-  let used = 0; let usedUnknown = 0;
+  let used = 0; let usedUnknown = 0; let unreadable = 0;
   for (const c of info) {
     const t = toBytes(pick(c, 'Physical-Space', 'Total-Physical-Space', 'UD-SSD-Space', 'Total-Space'));
     const u = toBytesOrNull(pick(c, 'Physical-Space-In-Use', 'UD-SSD-Space-In-Use', 'Space-In-Use', 'Used-Space'));   // v2.595: 결측은 null
-    if (!t) continue;
+    const name = pick(c, 'Name', 'Cluster-Name') || `cluster${pools.length + 1}`;
+    // v2.600(감사 COL-2600-03): 전체 용량을 못 읽은 클러스터를 **조용히 건너뛰었다** — REST(xtremio.js, v2.599 LO2599-03)만
+    //   개수를 셌다. 합계에서 빼는 것은 같지만 개수를 poolsUnreadable 로 밝히고 풀 항목도 남긴다
+    //   (capacityPointEligible 이 partial-pools 로 그 주기의 증가량 적재를 막는다).
+    if (!t) { unreadable += 1; pools.push({ name, totalBytes: null, usedBytes: u, pct: null, capacityCounted: false }); continue; }
     total += t; if (u == null) usedUnknown += 1; else used += u;
-    pools.push({ name: pick(c, 'Name', 'Cluster-Name') || `cluster${pools.length + 1}`, totalBytes: t, usedBytes: u, pct: u == null ? null : Math.round((u / t) * 1000) / 10 });
+    pools.push({ name, totalBytes: t, usedBytes: u, pct: u == null ? null : Math.round((u / t) * 1000) / 10, capacityCounted: true });
   }
+  if (unreadable && total) snap.extra.poolsUnreadable = unreadable;
   if (total) {
     const usedAll = usedUnknown ? null : used;   // 부분 합을 전체라 말하지 않는다
     snap.capacity = { totalBytes: total, usedBytes: usedAll, pct: usedAll == null ? null : Math.round((usedAll / total) * 1000) / 10 };

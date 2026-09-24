@@ -20,6 +20,7 @@ import { buildPendingRemedy, buildPushErrorRemedy } from './scanRemedy.js';
 // 자격증명 지문은 공용 모듈 하나가 소유한다(v2.528) — 스토리지 401 진단이 같은 표기를 쓴다.
 // 두 벌로 두면 표기가 갈라져 '법인 간 눈으로 대조' 라는 이 기능의 목적이 깨진다.
 import { credFingerprint } from '../util/credFingerprint.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 
 const jobs = new Map();    // reqId -> { reqId, agent, ips, username, password, state, createdAt, takenAt, result, doneAt, progress, events }
@@ -302,8 +303,49 @@ export function setIdracScanProgress(reqId, { scanned, total, found } = {}) {
   return true;
 }
 
+/*
+ * ⚠⚠ v2.600 CEN2600-06 — **엣지가 올린 스캔 결과는 아는 필드·타입만 담는다**(v2.598 CENTRAL 규약).
+ * 예전에는 `error`·`authFailReason`·수치(`foundCount` 등)를 원문 그대로 저장해, `error:{a:1}` 하나로 스캔 작업 화면
+ * (`IdracScanJobs.jsx` 의 `(j.result?.error || '').slice`)이 TypeError 로 죽거나 객체가 텍스트 자식으로 가 React #31 이 됐다.
+ * 정제는 저장 함수 안에 둔다(라우트·push 경로 어느 쪽으로 와도 같다).
+ */
+const scanStr = (v, n) => (typeof v === 'string' ? v.slice(0, n) : typeof v === 'number' && Number.isFinite(v) ? String(v) : null);
+/** 음이 아닌 개수 — 못 읽으면 null(아래 기존 `?? `·`|| 0` 폴백이 그대로 동작한다). */
+const scanCnt = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? Math.floor(n) : null; };
+const scanIps = (v, max) => (Array.isArray(v) ? v.slice(0, max).map((x) => scanStr(x, 64)).filter(Boolean) : undefined);
+const FOUND_KEYS = ['ip', 'serviceTag', 'model', 'manufacturer', 'hostName'];
+const UNSUP_KEYS = ['ip', 'vendor', 'vendorLabel', 'evidence', 'product', 'model', 'manufacturer', 'hostName'];
+function scanObjs(v, keys, max) {
+  if (!Array.isArray(v)) return undefined;
+  const out = [];
+  for (const x of v) {
+    if (out.length >= max) break;
+    if (!x || typeof x !== 'object') continue;
+    const o = {};
+    for (const k of keys) o[k] = scanStr(x[k], 200) ?? '';
+    if (!o.ip) continue;
+    if ('authFailed' in x) o.authFailed = x.authFailed === true;
+    if ('at' in x) o.at = numOrNull(x.at);
+    out.push(o);
+  }
+  return out;
+}
+export function sanitizeIdracScanData(raw) {
+  const d = raw && typeof raw === 'object' ? raw : {};
+  const o = {
+    error: scanStr(d.error, 500), authFailReason: scanStr(d.authFailReason, 500),
+    found: scanObjs(d.found, FOUND_KEYS, 5000), unsupported: scanObjs(d.unsupported, UNSUP_KEYS, 200),
+    authFailedIps: scanIps(d.authFailedIps, 200), blockedIps: scanIps(d.blockedIps, 50),
+    authFailedIpsTruncated: d.authFailedIpsTruncated === true, unsupportedTruncated: d.unsupportedTruncated === true,
+    truncated: d.truncated === true, aborted: d.aborted === true,
+  };
+  for (const k of ['scanned', 'foundCount', 'registered', 'unreachable', 'notIdrac', 'authFailed', 'authSkipped', 'authSkippedRegistered', 'blocked', 'unsupportedCount', 'durationMs', 'httpStatus']) o[k] = scanCnt(d[k]);
+  return o;
+}
+
 /** 에이전트가 스캔 결과 보고. */
-export function setIdracScanResult(reqId, data = {}) {
+export function setIdracScanResult(reqId, rawData = {}) {
+  const data = sanitizeIdracScanData(rawData);
   const j = jobs.get(reqId);
   if (!j) return false;
   j.acked = true; j.claimDeadline = null; // 결과 회신 = ack

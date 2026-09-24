@@ -323,14 +323,40 @@ export function parseJsonLoose(text) {
  */
 export function toBytesOrNull(v) {
   const s = String(v ?? '').trim().replace(/,/g, '');
+  if (s.length > TO_BYTES_MAX_LEN) return null;   // v2.600(SEC2600-02): 형식 미상 — 0 이 아니라 '못 읽음'
   const r = toBytes(s);
   if (r !== 0) return r;
   return /^0+(\.0+)?(\s|$|[kKmMgGtTpPeEbB(])/.test(s) ? 0 : null;   // v2.596: '0B' 도 0
 }
 
+/**
+ * 공백 정렬 표(xmcli·vplexcli `ll`)의 행을 **머리글 열 위치로** 자른다(v2.600 감사 COL-2600-04 — 두 파서 공용).
+ * 공백 2칸 분할은 가운데 칸이 비면 뒤 값을 왼쪽으로 당긴다(끊긴 컨트롤러의 'disconnected' 가 IP 칸에 들어가
+ * 상태 미상 → 비정상 0 으로 숨었다). 칸 수가 머리글과 같은 행은 예전 분할을 그대로 쓰고, **다를 때만** 이것을 쓴다.
+ * @returns {Record<string,string>|null} 머리글 위치를 확정하지 못하면 null(호출부가 예전 방식으로)
+ */
+export function sliceRowByHeader(headerLine, header, line) {
+  const starts = [];
+  let from = 0;
+  for (const h of header) {
+    const at = String(headerLine).indexOf(h, from);
+    if (at < 0 || (starts.length && at <= starts[starts.length - 1])) return null;
+    starts.push(at); from = at + h.length;
+  }
+  const row = {};
+  header.forEach((h, i) => { row[h] = String(line).slice(i === 0 ? 0 : starts[i], i + 1 < starts.length ? starts[i + 1] : undefined).trim(); });
+  row._positional = true;   // 위치로 읽었다(진단용 — pick 대상 키가 아니다)
+  return row;
+}
+
+// v2.600(감사 SEC2600-02): 용량 셀로 받아들이는 최대 길이. 실제 표기(`117544396521472 (106.9T)`·`Size: 11.0T`)는
+//   30자 안팎이다 — 그보다 훨씬 긴 셀은 형식을 모르는 것(0 = 미상)으로 본다(장비 출력 한 셀로 루프를 멈추지 않게).
+const TO_BYTES_MAX_LEN = 256;
+
 export function toBytes(v) {
   const s = String(v ?? '').trim().replace(/,/g, '');
   if (!s || s === '-' || /^(n\/?a|none|unknown)$/i.test(s)) return 0;
+  if (s.length > TO_BYTES_MAX_LEN) return 0;
 
   // ⚠ v2.525 (사용자 신고 "unity 장비에 ssh 로 접속은 성공했는데, 수집하는 정보가 없어"):
   //   **uemcli 는 바이트와 사람용 표기를 함께 낸다** — `12094627905536 (11.0T)`.
@@ -344,7 +370,9 @@ export function toBytes(v) {
   const m = /^([\d.]+)\s*([kKmMgGtTpPeE])?(?:i?[bB])?$/.exec(s);
   if (!m) {
     // `11.0T (12094627905536)` 처럼 순서가 뒤바뀐 표기, 또는 `Size: 11.0T` 같은 접두가 붙은 값.
-    const any = /([\d.]+)\s*([kKmMgGtTpPeE])(?:i?[bB])?/.exec(s);
+    // ⚠ v2.600(감사 SEC2600-02 — 재현 60,000자 셀 7,979ms): 앵커 없는 `([\d.]+)\s*` 는 단위 없는 긴 숫자열에서
+    //   시작 위치마다 끝까지 다시 훑어 O(n²) 였다. 숫자·공백 길이에 상한을 둬 시작 위치당 작업을 상수로 묶는다.
+    const any = /((?:\d{1,30}(?:\.\d{0,12})?|\.\d{1,12}))\s{0,8}([kKmMgGtTpPeE])(?:i?[bB])?/.exec(s);
     if (!any) {
       const plain = /^(\d+)$/.exec(s);
       return plain ? Number(plain[1]) : 0;

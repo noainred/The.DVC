@@ -5,7 +5,7 @@ import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox, VmLink } from '../
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
-import { nsxLimitNotes, dfwRulesCell } from './nsxLimitText.js'; // v2.599 C2599-05: 목록 절단·부분 집계 안내
+import { nsxLimitNotes, dfwRulesCell, nsxCount, nsxAdd, nsxFailedShort } from './nsxLimitText.js'; // v2.599 C2599-05: 목록 절단·부분 집계 안내
 
 const MGR_BADGE = { connected: 'green', degraded: 'amber', unreachable: 'red', pending: 'gray', disabled: 'gray' };
 const MGR_LABEL = { connected: '정상', degraded: '저하', unreachable: '연결끊김', pending: '대기', disabled: '비활성' };
@@ -72,11 +72,11 @@ export default function Nsx() {
         );
       })()}
       <div className="kpis" style={{ marginBottom: 14 }}>
-        <Kpi label="NSX Manager" value={r.managers ?? 0} meta={`정상 ${r.managersUp ?? 0}${r.managersDegraded ? ` · 저하 ${r.managersDegraded}` : ''}`} accent={r.managersDegraded ? 'var(--amber)' : undefined} onClick={() => setView('gateways')} />
-        <Kpi label="게이트웨이" value={(r.t0 ?? 0) + (r.t1 ?? 0)} meta={`T0 ${r.t0 ?? 0} · T1 ${r.t1 ?? 0}`} onClick={() => setView('gateways')} />
-        <Kpi label="세그먼트" value={r.segments ?? 0} meta={`Overlay ${r.overlaySegments ?? 0} · VLAN ${r.vlanSegments ?? 0}`} onClick={() => setView('segments')} />
-        <Kpi label="전송 노드" value={(r.hostNodes ?? 0) + (r.edgeNodes ?? 0)} meta={`Host ${r.hostNodes ?? 0} · Edge ${r.edgeNodes ?? 0}`} onClick={() => setView('nodes')} />
-        <Kpi label="분산 방화벽(DFW)" value={r.dfwRules ?? 0} meta={`정책 ${r.dfwPolicies ?? 0} · 그룹 ${r.groups ?? 0}`} onClick={() => setView('dfw')} />
+        <Kpi label="NSX Manager" value={r.managers ?? 0} meta={`정상 ${r.managersUp ?? 0}${r.managersDegraded ? ` · 저하 ${r.managersDegraded}` : ''}${nsxFailedShort(r) ? ` · ${nsxFailedShort(r)}` : ''}`} accent={r.managersDegraded || nsxFailedShort(r) ? 'var(--amber)' : undefined} onClick={() => setView('gateways')} />
+        <Kpi label="게이트웨이" value={nsxCount(nsxAdd(r.t0, r.t1))} meta={`T0 ${nsxCount(r.t0)} · T1 ${nsxCount(r.t1)}`} onClick={() => setView('gateways')} />
+        <Kpi label="세그먼트" value={nsxCount(r.segments)} meta={`Overlay ${nsxCount(r.overlaySegments)} · VLAN ${nsxCount(r.vlanSegments)}`} onClick={() => setView('segments')} />
+        <Kpi label="전송 노드" value={nsxCount(nsxAdd(r.hostNodes, r.edgeNodes))} meta={`Host ${nsxCount(r.hostNodes)} · Edge ${nsxCount(r.edgeNodes)}`} onClick={() => setView('nodes')} />
+        <Kpi label="분산 방화벽(DFW)" value={nsxCount(r.dfwRules)} meta={`정책 ${nsxCount(r.dfwPolicies)} · 그룹 ${nsxCount(r.groups)}`} onClick={() => setView('dfw')} />
       </div>
 
       <div className="table-wrap" style={{ marginBottom: 14 }}>
@@ -92,9 +92,9 @@ export default function Nsx() {
                 <td className="muted">{m.version || '—'}</td>
                 <td><span className="badge blue">{m.region || '—'}</span></td>
                 <td className="muted">{m.vcenterId || '—'}</td>
-                <td className="right">{m.gateways ?? 0}</td>
-                <td className="right">{m.segments ?? 0}</td>
-                <td className="right">{m.transportNodes ?? 0}</td>
+                <td className="right">{nsxCount(m.gateways)}</td>
+                <td className="right">{nsxCount(m.segments)}</td>
+                <td className="right">{nsxCount(m.transportNodes)}</td>
                 <td className="right">{dfwRulesCell(m)}</td>
               </tr>
             ))}

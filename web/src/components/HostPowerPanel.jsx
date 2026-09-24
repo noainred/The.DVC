@@ -34,7 +34,7 @@ export default function HostPowerPanel({ hostName, serviceTag }) {
     <div style={{ marginTop: 16, borderTop: '1px solid rgba(36,48,73,.6)', paddingTop: 12 }}>
       <div className="flex between" style={{ marginBottom: 8 }}>
         <b style={{ fontSize: 13 }}>⚡ 서버 소비전력 (Dell iDRAC)</b>
-        {data?.server && <span className="muted" style={{ fontSize: 12 }}>{data.server.name} · {data.server.host?.replace(/^https?:\/\//, '')}</span>}
+        {data?.server && <span className="muted" style={{ fontSize: 12 }}>{data.server.name}{data.server.host ? ` · ${data.server.host.replace(/^https?:\/\//, '')}` : ''}</span>}
       </div>
 
       {loading && <div className="muted" style={{ fontSize: 12, padding: '6px 0' }}>불러오는 중…</div>}

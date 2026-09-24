@@ -43,7 +43,22 @@ export function sinceNote(data = {}, now = Date.now()) {
   if (Number(data.rejectsWithoutTime) > 0) parts.push(`거부 ${data.rejectsWithoutTime}건은 원문이 밀려나 시각을 몰라 선에 넣지 않았습니다(개수만 압니다).`);
   if (data.unmapped?.length) parts.push(`**분류되지 않은 경로 ${data.unmapped.length}개**가 있습니다 — ‘분류 안 됨’ 종류에 모았습니다.`);
   if (data.undeclared?.length) parts.push(`지금 라우터에 없는 경로로 온 기록 ${data.undeclared.length}개(구버전 엣지일 수 있습니다)도 함께 그렸습니다.`);
+  const un = unauthNote(data, now);
+  if (un) parts.push(un);
   return parts.join(' ');
+}
+
+/**
+ * v2.600 WEB2600-04: 인증에 실패한 요청 집계 칸의 안내(없으면 ''). 이 칸은 엣지가 아니라 이름을 버리고 모은
+ * 것이라 노드로 그리지 않는다 — 누가 보냈는지는 알 수 없고, 조치는 토큰 대조다.
+ */
+export function unauthNote(data = {}, now = Date.now()) {
+  const u = data?.unauth;
+  const cnt = Number(u?.count) || 0;
+  if (!u || cnt <= 0) return '';
+  const when = u.lastAt ? ` · 마지막 ${ageText(u.lastAt, now)}` : '';
+  const routes = Array.isArray(u.routes) ? u.routes.length : 0;
+  return `**인증에 실패한 요청 ${cnt}건**(경로 ${routes}개${when})은 엣지로 그리지 않았습니다 — 토큰이 맞지 않아 보낸 쪽을 알 수 없습니다. 포탈 점검 › 토큰 점검에서 각 엣지의 토큰을 대조하세요.`;
 }
 
 /** 연결 한 줄의 설명. */

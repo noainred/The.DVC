@@ -4,7 +4,7 @@ import { growth, hasDsData, tb, gbTb, dsUnknownNote } from './tools/storageTrack
 import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../components/ui.jsx';
 // v2.596(감사 PERFWEB-04): 상세는 recharts 를 쓴다 — 목록 화면이 그 청크를 받지 않게 상세를 열 때만 받는다.
 const VCenterDetail = lazy(() => import('./VCenterDetail.jsx'));
-import { vcCardState } from './vcCardText.js';
+import { vcCardState, storageBarInfo } from './vcCardText.js';
 import BoldText from '../components/boldText.jsx';
 
 /** 미니 스파크라인(v2.358) — recharts 를 끌어오지 않는 순수 SVG(Platform 은 차트 벤더 청크 미로드). */
@@ -207,7 +207,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
                   <Bar label="CPU" pct={m.cpuUsagePct ?? null} detail={m.cpuTotalGhz ? `${m.cpuUsedGhz}/${m.cpuTotalGhz} GHz${m.hostsUsageExcluded ? ' *' : ''}` : undefined}
                     title={m.hostsUsageExcluded ? `* 연결 끊긴 호스트 ${m.hostsUsageExcluded}대는 사용량을 알 수 없어 사용률(%) 계산에서 뺐습니다(GHz 합계에는 포함)` : undefined} />
                   <Bar label="메모리" pct={m.memUsagePct ?? null} detail={fmtMem(m.memUsedGB, m.memTotalGB)} />
-                  <Bar label="스토리지" pct={m.storageUsagePct || 0} detail={m.storageUsedTB != null ? `${m.storageUsedTB}/${m.storageTotalTB} TB` : `${m.storageTotalTB || 0} TB`} />
+                  <Bar label="스토리지" {...storageBarInfo(m)} />
                 </>
               )}
 

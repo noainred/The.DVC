@@ -13,6 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { isMockVcenter } from '../mock/generator.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { registerExitFlush } from '../util/exitFlush.js';
 
 const FILE = path.join(config.configDir, 'central-inventory.json');
 
@@ -35,6 +37,21 @@ try {
 
 let writeTimer = null;
 let writing = false; // 쓰기 중 재진입 방지 — tmp 충돌 및 늦게 끝난 이전 본문이 최신본을 덮는 것 차단
+// v2.600(감사 T2600-03): 동기 저장 세대 — 비동기 쓰기가 도는 사이 동기 저장(소유권 변경·종료 flush)이 끼면, 늦게 끝난
+//   비동기 rename 이 **더 오래된 본문**으로 동기 저장본을 덮는다. 세대가 바뀌었으면 그 rename 을 버린다.
+let syncGen = 0;
+
+/**
+ * 즉시 동기 원자 저장(v2.600 T2600-03). 관리자 소유권 해제·지정은 **다음 push 가 재구축하지 않는 의도**라 디바운스 5초 창에
+ * 재시작이 끼면 사라졌다(해제한 소유권이 되살아나 새 엣지가 계속 403). 대기 중 디바운스는 이 저장이 흡수한다.
+ */
+function persistNowSync() {
+  if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+  syncGen += 1;
+  atomicWriteFileSync(FILE, JSON.stringify({ inventory: cache }), { mode: 0o600 });
+}
+// 종료 시 대기 중(또는 진행 중)인 디바운스 저장을 동기로 끝낸다 — 캐시 본문도 마지막 5초 창을 잃지 않는다.
+registerExitFlush('central/inventory', () => { if (writeTimer || writing) persistNowSync(); });
 function persistSoon() {
   // 인벤토리는 수MB가 될 수 있으므로 디스크 쓰기를 비동기 + 디바운스(이벤트 루프 비차단).
   if (writeTimer) return;
@@ -55,8 +72,9 @@ function persistSoon() {
       // 다음 push로 즉시 복구되는 캐시라 허용).
       const tmp = `${FILE}.tmp-${process.pid}`;
       writing = true;
+      const gen = syncGen;
       fs.promises.writeFile(tmp, body, { mode: 0o600 })
-        .then(() => fs.promises.rename(tmp, FILE))
+        .then(() => (gen === syncGen ? fs.promises.rename(tmp, FILE) : fs.promises.unlink(tmp))) // 그 사이 동기 저장이 더 새 본문을 썼다
         .catch(() => fs.promises.unlink(tmp).catch(() => {}))
         .finally(() => { writing = false; });
     } catch { /* best effort — 쓰기 실패가 수집을 막지 않게 */ }
@@ -64,10 +82,38 @@ function persistSoon() {
   writeTimer.unref?.();
 }
 
-/** 사이트가 push한 한 vCenter의 스냅샷 조각을 저장. */
+/** 마지막 정상 목록 보존 창 — store.js LASTGOOD_HOLD_MS 와 같은 값·같은 env(순환 import 를 피해 여기서 읽는다). */
+const HOLD_MS = Number(process.env.LASTGOOD_HOLD_MS) || 6 * 3_600_000;
+const UNREAD = new Set(['unreachable', 'pending']);
+const hasRows = (a) => Array.isArray(a) && a.length > 0;
+
+/**
+ * 사이트가 push한 한 vCenter의 스냅샷 조각을 저장.
+ *
+ * v2.600(감사 EDGE2600-04 중앙쪽): **인벤토리를 읽지 못한 빈 조각**(vcenter.status 가 unreachable/pending 이고 호스트·VM 0)은
+ * 마지막 정상 목록을 지우지 않는다. 엣지가 재시작 직후 첫 수집에 실패하면 lastGood 이 메모리에 없어 빈 unreachable 조각을
+ * 보냈고(구버전 엣지 — v2.600 엣지는 보내지 않는다), 통째로 교체하던 이 함수가 중앙의 정상 호스트·VM 을 즉시 지웠다.
+ * 이제 목록은 두고 **vcenter 상태만** 갱신하며, `at`(데이터 시각)은 그대로 둬 store 가 '낡음(stale)' 으로 표시한다 —
+ * 모르는 것을 0 대로도, 지금 값으로도 칠하지 않는다. 보존은 LASTGOOD_HOLD 창(기본 6시간)까지이고 넘으면 빈 조각을 받는다.
+ * @returns {{ held: boolean }}
+ */
 export function setInventory(vcenterId, slice, agent, generatedAt) {
-  cache[vcenterId] = { at: Date.now(), agent: agent || '', generatedAt: generatedAt || null, data: slice };
+  const now = Date.now();
+  const prev = cache[vcenterId];
+  const st = slice?.vcenter?.status;
+  if (prev && UNREAD.has(st) && !hasRows(slice?.hosts) && !hasRows(slice?.vms)
+    && (hasRows(prev.data?.hosts) || hasRows(prev.data?.vms)) && now - (Number(prev.at) || 0) <= HOLD_MS) {
+    const pv = prev.data?.vcenter && typeof prev.data.vcenter === 'object' ? prev.data.vcenter : {};
+    cache[vcenterId] = {
+      ...prev, agent: agent || prev.agent || '', pushAt: now, heldSince: prev.heldSince || now,
+      data: { ...prev.data, vcenter: { ...pv, status: st, ...(typeof slice.vcenter.error === 'string' ? { error: slice.vcenter.error.slice(0, 500) } : {}), held: true } },
+    };
+    persistSoon();
+    return { held: true };
+  }
+  cache[vcenterId] = { at: now, pushAt: now, agent: agent || '', generatedAt: generatedAt || null, data: slice };
   persistSoon();
+  return { held: false };
 }
 
 export function getInventory(vcenterId) { return cache[vcenterId] || null; }
@@ -85,14 +131,16 @@ export function setInventoryOwner(vcenterId, agent) {
   e.agent = String(agent || '');
   e.ownerSetAt = Date.now();
   e.ownerSetBy = e.agent ? 'admin-assign' : 'admin-release';
-  persistSoon();
-  return { ok: true, from, to: e.agent };
+  // v2.600(T2600-03): 관리자 의도는 즉시 디스크에 — 실패하면 호출자에게 밝힌다(메모리에는 반영됐고 다음 저장이 다시 시도한다).
+  try { persistNowSync(); } catch (err) { persistSoon(); return { ok: true, from, to: e.agent, persisted: false, persistError: String(err?.message || err) }; }
+  return { ok: true, from, to: e.agent, persisted: true };
 }
 
 /** 운영 화면용 요약(데이터 본문 제외). */
 export function listInventory() {
   return Object.entries(cache).map(([vcenterId, e]) => ({
     vcenterId, agent: e.agent, at: e.at, generatedAt: e.generatedAt,
+    ...(e.pushAt ? { pushAt: e.pushAt } : {}), ...(e.heldSince ? { heldSince: e.heldSince } : {}),   // v2.600 EDGE2600-04
     hosts: e.data?.hosts?.length || 0, vms: e.data?.vms?.length || 0,
     datastores: e.data?.datastores?.length || 0,
   })).sort((a, b) => (b.at || 0) - (a.at || 0));

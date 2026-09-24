@@ -17,6 +17,8 @@
  *  - OTP_RATELIMIT_DISABLED=true         : OTP 잠금만 비활성화(비권장)
  */
 
+import crypto from 'node:crypto';
+
 const MAX_FAILS = Number(process.env.LOGIN_MAX_FAILS) || 8;
 const LOCKOUT_MS = Number(process.env.LOGIN_LOCKOUT_MS) || 15 * 60_000;
 const WINDOW_MS = Number(process.env.LOGIN_FAIL_WINDOW_MS) || 15 * 60_000;
@@ -24,7 +26,20 @@ const DISABLED = process.env.LOGIN_RATELIMIT_DISABLED === 'true';
 
 const attempts = new Map(); // key -> { count, first, lockUntil }
 
-const keyOf = (ip, username) => `${String(ip || '?')}|${String(username || '?').toLowerCase()}`;
+/**
+ * 키에 넣는 계정명·출발지(v2.600 T2600-01). 로그인은 무인증 경로이고 전역 본문 한도가 1MB 라, 예전에는 900KB 짜리
+ * username 을 그대로 소문자로 바꿔 Map 키로 썼다 — 실패 1회마다 그 크기의 키 2개가 창(15분) 동안 남아 무인증 요청만으로
+ * 메모리가 고갈됐다. 짧은 값은 그대로 쓰고(로그·진단에서 읽을 수 있게) 긴 값은 **해시로 접는다** — 자르면 앞이 같은
+ * 다른 계정명이 한 카운터를 공유해 남의 계정을 잠글 수 있다. 해시는 충돌하지 않으므로 계정 구분은 그대로다.
+ */
+const KEY_PART_MAX = 128;
+function keyPart(v) {
+  const s = String(v || '?').toLowerCase();
+  if (s.length <= KEY_PART_MAX) return s;
+  return `#${crypto.createHash('sha256').update(s).digest('hex')}`;
+}
+
+const keyOf = (ip, username) => `${keyPart(ip)}|${keyPart(username)}`;
 
 // 계정 전역(모든 IP 합산) 분산 브루트포스 방어 레이어. per-IP 키(<ip>|<user>)는 IP 로테이션으로
 // 우회되므로, 계정 단위로도 실패를 합산한다 — 특히 OTP 전용 계정은 로그인 credential 이 6자리
@@ -34,7 +49,7 @@ const keyOf = (ip, username) => `${String(ip || '?')}|${String(username || '?').
 // 계정 전역 잠금은 진짜 분산 공격(다수 IP)에서만 발동하게 한다(pyportal SessionStore 와 동형).
 const GLOBAL_FACTOR = Number(process.env.LOGIN_GLOBAL_FACTOR) || 10;
 const ACCT_MAX_FAILS = MAX_FAILS * GLOBAL_FACTOR;
-const acctKeyOf = (username) => `acct:${String(username || '?').toLowerCase()}`; // ':' 라 per-IP('|') 키와 불충돌
+const acctKeyOf = (username) => `acct:${keyPart(username)}`; // ':' 라 per-IP('|') 키와 불충돌
 
 /**
  * 출발지 전용(계정 무관) 레이어 — v2.500(감사 M-1).
@@ -65,18 +80,40 @@ const acctKeyOf = (username) => `acct:${String(username || '?').toLowerCase()}`;
 const IP_FACTOR = Number(process.env.LOGIN_IP_FACTOR) || 6;
 const IP_MAX_FAILS = MAX_FAILS * IP_FACTOR;
 const IP_LOCKOUT_MS = Math.max(1_000, Number(process.env.LOGIN_IP_LOCKOUT_MS) || 60_000);
-const ipKeyOf = (ip) => `ip:${String(ip || '?')}`;                               // ':' 접두 — 위 두 키와 불충돌
+const ipKeyOf = (ip) => `ip:${keyPart(ip)}`;                               // ':' 접두 — 위 두 키와 불충돌
 
+/**
+ * 메모리 상한 방어. v2.600 T2600-02: 2차 하드캡이 `first` 오름차순으로 지웠는데, `bump()` 가 잠글 때 `first=now` 로
+ * 되돌리므로 **활성 잠금이 뒤따른 폭주 항목보다 오래돼 먼저 지워졌다** — 여러 출발지에서 실패를 흘려 보내면 로그인·OTP
+ * 잠금이 풀렸다(잠금 해제 우회). 이제 **잠금이 살아 있는 항목은 하드캡에서 지우지 않고** 잠금 없는 카운터만 오래된
+ * 순서로 지운다. 잠금 항목만으로 상한을 넘으면(각 잠금은 실패 수십 번이 필요하고 키 길이가 제한된다) 절대 상한
+ * `LOCKED_HARD_MAX` 까지 둔다. 그마저 넘으면 **가장 먼저 풀릴 잠금**부터 지우고 경고한다(무제한 메모리보다는 낫다).
+ */
+const SOFT_MAX = 5000;
+const SOFT_TARGET = 4000;
+const LOCKED_HARD_MAX = 50_000;
+let _lastPruneWarn = 0;
 function prune(now) {
-  if (attempts.size < 5000) return;            // 메모리 상한 방어
+  if (attempts.size < SOFT_MAX) return;            // 메모리 상한 방어
   // 1차: 창 만료 + 잠금 해제된 항목 정리.
   for (const [k, v] of attempts) {
     if ((v.lockUntil || 0) < now && (now - (v.first || 0)) > WINDOW_MS) attempts.delete(k);
   }
-  // 2차(하드캡): 분산 공격으로 모두 활성 창이라 1차로 안 줄면, 가장 오래된 것부터 강제 제거.
-  if (attempts.size >= 5000) {
-    const oldest = [...attempts.entries()].sort((a, b) => (a[1].first || 0) - (b[1].first || 0));
-    for (let i = 0; i < oldest.length && attempts.size >= 4000; i++) attempts.delete(oldest[i][0]);
+  if (attempts.size < SOFT_MAX) return;
+  // 2차(하드캡): 잠금 없는 카운터만 오래된 것부터.
+  const unlocked = [];
+  for (const e of attempts) if (!((e[1].lockUntil || 0) > now)) unlocked.push(e);
+  unlocked.sort((a, b) => (a[1].first || 0) - (b[1].first || 0));
+  for (let i = 0; i < unlocked.length && attempts.size >= SOFT_TARGET; i++) attempts.delete(unlocked[i][0]);
+  // 3차: 활성 잠금만으로 절대 상한을 넘을 때만 — 가장 먼저 풀릴 잠금부터.
+  if (attempts.size >= LOCKED_HARD_MAX) {
+    const locked = [...attempts.entries()].sort((a, b) => (a[1].lockUntil || 0) - (b[1].lockUntil || 0));
+    const before = attempts.size;
+    for (let i = 0; i < locked.length && attempts.size >= LOCKED_HARD_MAX - (SOFT_MAX - SOFT_TARGET); i++) attempts.delete(locked[i][0]);
+    if (now - _lastPruneWarn > 60_000) {
+      _lastPruneWarn = now;
+      console.warn(`[login-ratelimit] 활성 잠금이 상한(${LOCKED_HARD_MAX})을 넘어 곧 풀릴 잠금 ${before - attempts.size}건을 지웠습니다 — 대규모 분산 로그인 공격 가능성`);
+    }
   }
 }
 
@@ -137,7 +174,7 @@ const OTP_LOCKOUT_MS = Number(process.env.OTP_LOCKOUT_MS) || 10 * 60_000;
 const OTP_WINDOW_MS = Math.min(Number(process.env.OTP_FAIL_WINDOW_MS) || 10 * 60_000, OTP_LOCKOUT_MS);
 const OTP_DISABLED = DISABLED || process.env.OTP_RATELIMIT_DISABLED === 'true';
 
-const otpKeyOf = (username) => `otp:${String(username || '?').toLowerCase()}`;
+const otpKeyOf = (username) => `otp:${keyPart(username)}`;
 
 /** OTP 검증 전 호출. 잠금 중이면 { blocked:true, retryAfterSec }. */
 export function checkOtpAllowed(username, now = Date.now()) {
@@ -172,3 +209,7 @@ export function recordOtpSuccess(username) {
   if (OTP_DISABLED) return;
   attempts.delete(otpKeyOf(username));
 }
+
+/** 테스트 전용 — 상태 초기화와 키 길이 합(v2.600 T2600-01 회귀: 키가 입력 길이에 비례하지 않는지). */
+export function _resetLoginRateLimitForTest() { attempts.clear(); _lastPruneWarn = 0; }
+export function _attemptKeyCharsForTest() { let n = 0; for (const k of attempts.keys()) n += k.length; return { keys: attempts.size, chars: n }; }

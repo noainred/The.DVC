@@ -12,7 +12,7 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (23)
+## 공용 유틸 (22)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -38,9 +38,8 @@
 | `WAN_CONNECT_TIMEOUT_MS` | `20000` |  | util/resilientFetch.js |
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
-| `X` |  |  | util/dayKey.js |
 
-## 공통 (141)
+## 공통 (140)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -109,7 +108,6 @@
 | `IDRAC_TIMEOUT_MS` | `15000` |  | config.js |
 | `IPAM_DB_PATH` |  |  | config.js |
 | `JSON_BODY_LIMIT` | `'16mb'` |  | index.js |
-| `LASTGOOD_HOLD_MS` | `6` |  | store.js |
 | `LINKCHECK_COUNT_CACHE_MS` | `60000` |  | linkcheck/db.js |
 | `LINKCHECK_DETAIL_MAX` | `8000` |  | linkcheck/db.js |
 | `LINKCHECK_ENABLED` | `''` |  | linkcheck/settings.js |
@@ -303,7 +301,7 @@
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 
-## 엣지 에이전트 (33)
+## 엣지 에이전트 (34)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -312,11 +310,11 @@
 | `AGENT_CONFIG_PUSH_MS` | `1800000` |  | agent/configPush.js |
 | `AGENT_CURUSER_CHUNK_BYTES` | `700000` |  | agent/curUserPush.js |
 | `AGENT_CURUSER_CONFIG_PULL_MS` | `10` |  | agent/curUserConfigPull.js |
-| `AGENT_CURUSER_PUSH_TIMEOUT_MS` | `60000` |  | agent/curUserPush.js |
+| `AGENT_CURUSER_PUSH_TIMEOUT_MS` |  |  | agent/curUserPush.js |
 | `AGENT_DEPLOY_CONCURRENCY` | `2` | ✅ | agent/bulkDeploy.js |
-| `AGENT_DEPLOY_TIMEOUT_MS` | `900000` | ✅ | agent/bulkDeploy.js |
+| `AGENT_DEPLOY_TIMEOUT_MS` |  | ✅ | agent/bulkDeploy.js |
 | `AGENT_EDGELOG_POLL_MS` |  |  | agent/edgeLogWorker.js |
-| `AGENT_GUESTDISK_PUSH_TIMEOUT_MS` | `120000` |  | agent/guestDiskPush.js |
+| `AGENT_GUESTDISK_PUSH_TIMEOUT_MS` |  |  | agent/guestDiskPush.js |
 | `AGENT_IDRAC_SCAN_POLL_MS` | `5000` |  | agent/idracScanWorker.js |
 | `AGENT_LINKCHECK` | `''` |  | agent/linkCheckWorker.js |
 | `AGENT_LOGQ_POLL_MS` | `4000` |  | agent/logQueryWorker.js |
@@ -324,10 +322,10 @@
 | `AGENT_PING_POLL_MS` | `4000` |  | agent/pingWorker.js |
 | `AGENT_PUSH_FLEET` | `기본 적용('false' 로 끄기)` |  | agent/fleetPush.js |
 | `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/curUserPush.js, agent/guestDiskPush.js 외 2 |
-| `AGENT_PUSH_TIMEOUT_MS` | `60000` |  | agent/fleetPush.js, agent/inventoryPush.js |
+| `AGENT_PUSH_TIMEOUT_MS` |  |  | agent/fleetPush.js, agent/inventoryPush.js |
 | `AGENT_VMSERIES_CHUNK_BYTES` | `700000` |  | agent/vmSeriesPush.js |
 | `AGENT_VMSERIES_CONFIG_PULL_MS` | `10` |  | agent/vmSeriesConfigPull.js |
-| `AGENT_VMSERIES_PUSH_TIMEOUT_MS` | `120000` |  | agent/vmSeriesPush.js |
+| `AGENT_VMSERIES_PUSH_TIMEOUT_MS` |  |  | agent/vmSeriesPush.js |
 | `CURUSER_LOCAL` | `''` |  | agent/curUserConfigPull.js, curuser/settings.js |
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
 | `SANSW_CONFIG_PULL_MS` | `5` |  | agent/sanSwitchConfigPull.js |
@@ -340,6 +338,7 @@
 | `SVCMON_PUSH_INTERVAL_MS` |  |  | agent/svcmonPush.js |
 | `SVCMON_PUSH_TIMEOUT_MS` |  |  | agent/svcmonPush.js |
 | `VMSERIES_LOCAL_SETTINGS` | `기본 적용('true' 로 끄기)` |  | agent/vmSeriesConfigPull.js |
+| `X` |  |  | agent/envTimeout.js, util/dayKey.js |
 
 ## 원격 명령(RMA) (35)
 
@@ -456,7 +455,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (40)
+## 중앙(위임 수집) (41)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -485,6 +484,7 @@
 | `INGEST_PLAIN_WARN_STREAK` | `3` |  | central/ingestStats.js |
 | `INGEST_REJECT_KEEP` | `50` |  | central/ingestReject.js |
 | `INGEST_REJECT_MAX_AGENTS` | `500` |  | central/ingestReject.js |
+| `LASTGOOD_HOLD_MS` | `6` |  | central/inventory.js, store.js |
 | `LINKCHECK_REPORT_LINK_MAX` | `500` |  | central/linkCheckEdge.js |
 | `LINKCHECK_REPORT_STALE_MS` | `3` |  | central/linkCheckEdge.js |
 | `PARTFAULT_EDGE_DEVICE_PART_MAX` | `2000` |  | central/partFaultEdge.js |

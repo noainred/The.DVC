@@ -29,7 +29,8 @@
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
+import { reqTimeoutMs } from './envTimeout.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { snapshotResults, pollerStats } from '../svcmon/poller.js';
 import { logStats } from '../svcmon/csvlog.js';
@@ -39,7 +40,8 @@ const gzipAsync = promisify(zlib.gzip);
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
 /** push 주기(ms). 기본 60초 — 중앙의 무보고 판정(3배)과 맞물린다. */
-const INTERVAL_MS = Math.max(15_000, envNum('SVCMON_PUSH_INTERVAL_MS', 60_000));
+// v2.600: 상한도 둔다(2^31 초과 → setInterval 1ms 루프 — v2.599 T2599-02 형제 누락).
+const INTERVAL_MS = clampIntervalMs(envNum('SVCMON_PUSH_INTERVAL_MS', 60_000), 60_000, 15_000);
 /** 청크당 행 수. 행당 약 65B 실측 → 2,000행 ≈ 130KB(기본 1MB 한도에 여유). */
 const CHUNK_START = Math.max(100, envNum('SVCMON_PUSH_CHUNK', 2000));
 const CHUNK_MIN = 250;
@@ -75,7 +77,7 @@ async function postChunk(payload) {
   }
   const res = await resilientFetch(`${config.agent.centralUrl}/api/central/svcmon-report`, {
     method: 'POST', headers: hdrs, body,
-    timeoutMs: envNum('SVCMON_PUSH_TIMEOUT_MS', 30_000), retries: 1,
+    timeoutMs: reqTimeoutMs(process.env.SVCMON_PUSH_TIMEOUT_MS, 30_000), retries: 1,
   });
   let data = null;
   try { data = await res.json(); } catch { /* 본문 없는 응답 허용 */ }

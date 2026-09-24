@@ -11,12 +11,15 @@
  *    통째로 덮어쓰는 사고를 막는 storage/intervals.js v2.409 규약과 같은 방향).
  *  · 실패는 조용히 다음 주기(로그 1줄) — 설정이 안 내려와도 로컬 설정으로 계속 수집한다.
  */
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
+import { classifyCentral404 } from './central404.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyCentral } from '../curuser/settings.js';
 import { curUserPushEnabled } from './curUserPush.js';
+const _log404 = createChangeLogger({ windowMs: 10 * 60_000 }); // v2.600 EDGE2600-06: 같은 404 사유는 10분에 한 줄
 
-const PULL_MS = Number(process.env.AGENT_CURUSER_CONFIG_PULL_MS) || 10 * 60_000;
+const PULL_MS = clampIntervalMs(Number(process.env.AGENT_CURUSER_CONFIG_PULL_MS) || 10 * 60_000, 10 * 60_000, 60_000); // v2.600 EDGE2600-05
 let timer = null; let running = false; let last = null;
 
 export function curUserConfigPullStatus() { return { enabled: enabled(), intervalMs: PULL_MS, last }; }
@@ -31,7 +34,13 @@ export async function pullCurUserConfigNow() {
       method: 'GET', timeoutMs: 30_000, retries: 1,
       headers: { 'X-Agent-Name': config.agent.name, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) },
     });
-    if (res.status === 404) { last = { at: Date.now(), ok: true, applied: false, note: '중앙에 설정 없음(구버전 중앙)' }; return last; }
+    // v2.600 EDGE2600-06: 404 본문을 읽어 '중앙이 central 을 끔'(ok:false — 설정을 못 받는다)과 '엔드포인트 없음'을 가른다.
+    if (res.status === 404) {
+      const c = await classifyCentral404(res);
+      last = { at: Date.now(), ok: c.kind === 'no-endpoint', applied: false, kind: c.kind, note: c.reason };
+      if (_log404(c.kind, c.reason)) console.warn(`[curuser-pull] ${c.reason}`);
+      return last;
+    }
     if (!res.ok) throw new Error(`curuser-config -> ${res.status}`);
     const body = await res.json();
     const s = body?.settings;

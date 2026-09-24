@@ -19,18 +19,28 @@
  *  - 추이는 관측 시작 이후만. 표본이 정책 하한(점 수)을 못 넘으면 증가율을 계산하지 않고 null.
  */
 
-/** 파티션 배열 → VM 요약. parts: [{path, capacityGB, usedGB}] */
+/** 사용량을 모르는 파티션인가(v2.600 LO2600-07 — soapParse 가 freeSpace 없는 파티션을 usedGB:null 로 준다). */
+export function partUsedUnknown(p) {
+  return !!p && (p.freeUnknown === true || p.usedGB == null || p.usedGB === '');
+}
+
+/**
+ * 파티션 배열 → VM 요약. parts: [{path, capacityGB, usedGB}]
+ * v2.600(감사 LO2600-07): 사용량을 모르는 파티션은 할당·사용 **양쪽에서** 빼고 `partsUnknown` 으로 센다 —
+ *   사용만 0 으로 더하면 그 용량 전부가 '여유(회수 후보)' 로 둔갑한다. partCount 는 관측한 전체 파티션 수다.
+ */
 export function vmSummary(parts) {
   const list = Array.isArray(parts) ? parts : [];
-  let alloc = 0; let used = 0;
+  let alloc = 0; let used = 0; let unknown = 0;
   for (const p of list) {
+    if (partUsedUnknown(p)) { unknown += 1; continue; }
     alloc += Number(p.capacityGB) || 0;
     used += Number(p.usedGB) || 0;
   }
   alloc = round1(alloc); used = round1(used);
   const free = round1(Math.max(0, alloc - used));
   const ratioPct = alloc > 0 ? Math.round((used / alloc) * 1000) / 10 : null;
-  return { allocGB: alloc, usedGB: used, freeGB: free, ratioPct, partCount: list.length };
+  return { allocGB: alloc, usedGB: used, freeGB: free, ratioPct, partCount: list.length, ...(unknown ? { partsUnknown: unknown } : {}) };
 }
 
 /**
@@ -122,10 +132,14 @@ export function sanitizeGuestDiskVms(raw, { maxVms = 200_000, maxParts = 128 } =
     if (!vmId) continue; // 식별 불가 행은 버린다(DB PK)
     const partsSrc = Array.isArray(vm.parts) ? vm.parts.slice(0, maxParts) : [];
     const parts = [];
+    let partsUnknown = 0;
     for (const p of partsSrc) {
       if (!p || typeof p !== 'object') continue;
       const ppath = str(p.path, 1024); const cap = nn(p.capGB);
       if (!ppath && !cap) continue; // 경로·용량 모두 없는 잡음 파티션은 버린다(parseGuestDisks 와 동일)
+      // v2.600(감사 LO2600-07): 사용량을 모르는 파티션은 저장하지 않는다 — nn(null) 이 0 이 되어 '비어 있는 파티션' 으로
+      //   적재·추이에 남았다. VM 합계(allocGB·usedGB)도 vmSummary 가 같은 파티션을 뺐으므로 일관된다. 개수는 밝힌다.
+      if (p.usedGB == null || p.usedGB === '') { partsUnknown += 1; continue; }
       parts.push({ path: ppath, capGB: cap, usedGB: nn(p.usedGB) });
     }
     out.push({
@@ -138,6 +152,7 @@ export function sanitizeGuestDiskVms(raw, { maxVms = 200_000, maxParts = 128 } =
       // 정상 엣지는 partCount==parts.length 라 무손실이고, 잡음/초과분만 조여진다.
       partCount: parts.length,
       parts,
+      ...(partsUnknown ? { partsUnknown } : {}),
     });
   }
   return out;
