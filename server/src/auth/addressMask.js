@@ -10,7 +10,8 @@
  * 규칙(relaytopo 와 같다):
  *  - admin 판정은 `req.user?.role === 'admin'` 하나(거부 기본값 — user 가 없으면 가린다).
  *  - 키를 지우지 않고 빈 문자열로 둔다(화면이 '—' 로 그린다). 가렸다는 사실은 응답의 `addressHidden` 이 말한다.
- *  - 이름이 비어 주소로 떨어진 경우(`name === host`)도 같은 값이므로 함께 비운다.
+ *  - 이름이 비어 주소로 떨어진 경우(`name === host`)도 같은 값이므로 함께 가린다 — 빈 문자열이 아니라
+ *    `maskedNameLabel`(타입 + 내부 id)로 둔다(v2.600 — 빈 이름은 화면에서 라벨 없는 행이 된다).
  *  - 엣지가 실제로 쓴 자격증명 지문(`extra.credFp`)의 **계정명**도 비운다(길이·해시는 비밀번호를
  *    복원할 수 없는 16비트 지문이라 남긴다 — 인증 실패 진단 문구가 그 값으로 '바뀌었는지' 를 말한다).
  */
@@ -18,6 +19,18 @@
 export const isAdminReq = (req) => req?.user?.role === 'admin';
 
 const HIDDEN = '(주소 가림)';
+
+/**
+ * 이름이 주소와 같아 가린 행의 대체 라벨(v2.600 RECENT2600-04). 빈 문자열로 두면 화면의
+ * `reported || name || host` 가 전부 비어 **이름 없는 행·라벨 없는 버튼**이 된다. 식별자가 아닌
+ * 라벨(타입 + 포탈 내부 id — id 는 무작위 생성이라 주소를 담지 않는다)을 쓴다. 둘 다 없으면 고정 표식.
+ */
+export function maskedNameLabel(d) {
+  const type = typeof d?.type === 'string' ? d.type : '';
+  const id = [d?.id, d?.deviceId].find((v) => typeof v === 'string' && v) || '';
+  const lab = [type, id].filter(Boolean).join(' ');
+  return lab ? `${lab} (이름 가림)` : '(이름 가림)';
+}
 /** 문자열 안의 주소 원문을 표식으로 바꾼다(오류 문구가 'connect ECONNREFUSED 10.0.0.5:22' 처럼 주소를 싣는다). */
 function scrub(v, host) {
   if (!host || typeof v !== 'string' || !v.includes(host)) return v;
@@ -38,7 +51,7 @@ export function maskSnapAddress(s, hostHint = '') {
     out.errors = Object.fromEntries(Object.entries(out.errors).map(([k, v]) => [k, scrub(v, host)]));
   }
   if ('host' in out) out.host = '';
-  if (host && out.name === host) out.name = '';
+  if (host && out.name === host) out.name = maskedNameLabel(out);
   const fp = out.extra?.credFp;
   if (fp && typeof fp === 'object') out.extra = { ...out.extra, credFp: { ...fp, user: '' } };
   return out;
@@ -52,7 +65,7 @@ export function maskDeviceAddress(d) {
   if (!d || typeof d !== 'object') return d;
   const host = d.host;
   const out = { ...d, host: '', username: '' };
-  if (host && out.name === host) out.name = '';
+  if (host && out.name === host) out.name = maskedNameLabel(out);
   if (out.snap) out.snap = maskSnapAddress(out.snap, host);
   if (out.snapshot) out.snapshot = maskSnapAddress(out.snapshot, host);
   return out;
@@ -70,7 +83,7 @@ export function maskActivityEvents(events) {
     const host = e.host;
     const out = { ...e, host: '' };
     if (typeof out.error === 'string') out.error = scrub(out.error, host);
-    if (host && out.name === host) out.name = '';
+    if (host && out.name === host) out.name = maskedNameLabel(out);
     return out;
   });
 }
