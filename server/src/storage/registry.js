@@ -23,6 +23,7 @@ import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 import { isKnownType, isImplementedType, normalizeCollectMethod } from './types.js';
 import { duplicateIssue } from './duplicate.js';
+import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.607 SEC2607-07
 
 const FILE = path.join(config.configDir, 'storage-devices.json');
 const MAX_DEVICES = 500;
@@ -98,11 +99,22 @@ export function saveDevice(input = {}) {
 
   const existing = input.id ? db.devices.find((d) => d.id === input.id) : null;
   const dev = existing || { id: `st-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
-  // host 변경 시 비번 이월 금지(uagmon M3) — 새 비번을 명시해야 저장된다.
-  const hostChanged = existing && existing.host !== host;
+  // 접속처 변경 시 비번 이월 금지(uagmon M3) — 새 비번을 명시해야 저장된다.
+  // v2.607(감사 SEC2607-07·LEFT2607-06): 예전에는 host 만 봤다 — username·SSH 포트를 바꿔도 옛 비밀번호가 새 계정·포트로
+  //   로그인 시도됐다(계정 잠금 위험). 공용 판정 accessMoved(host·username·port)를 쓴다. ⚠ agent(수집 엣지) 변경은
+  //   승계한다 — 위임 수집에 비밀번호가 필요하고 접속처(장비)는 같다. 버린 키는 droppedSecrets 로 응답에 싣는다.
+  //   SSH 포트는 **이전·새 수집 방식이 둘 다 ssh 일 때만** 비교한다 — CSV 내보내기는 ssh 가 아니면 포트 칸을 비워
+  //   (csv.js exportedSshPort) 왕복만으로 포트가 기본값으로 바뀌어 보이고, 그때 쓰지 않는 포트로 비밀을 버리면 거짓 폐기다.
+  const sshPortIn = Math.max(1, Math.min(65535, Math.floor(Number(input.sshPort)) || 22));
+  const bothSsh = !!existing && existing.collectMethod === 'ssh'
+    && normalizeCollectMethod(type, String(input.collectMethod || '')) === 'ssh';
+  const moved = !!existing && accessMoved(
+    { host: existing.host, username: existing.username || '', port: bothSsh ? (existing.sshPort || 22) : '' },
+    { host, username, port: bothSsh ? sshPortIn : '' }, ['host', 'username', 'port']);
   const password = String(input.password ?? '');
+  let droppedSecrets = [];
   if (password) dev.password = password;
-  else if (hostChanged) delete dev.password;
+  else if (moved) droppedSecrets = dropCarriedSecrets(dev, input, ['password']);
   // 수집 방식(v2.405): 타입별 허용 목록은 types.js COLLECT_METHODS 단일 소스다. 예전에는
   // 여기에 'isilon 이면 ssh/api, 아니면 api' 를 하드코딩해 두어 등록 폼(프론트)과 규칙이 두 곳에
   // 흩어져 있었고, 새 방식을 추가할 때 한쪽만 고치면 조용히 어긋났다. 허용되지 않는 값은 그
@@ -122,7 +134,7 @@ export function saveDevice(input = {}) {
   }
   persist();
   const { password: _p, ...safe } = dev;
-  return { ...safe, hasPassword: !!dev.password };
+  return { ...safe, hasPassword: !!dev.password, ...(droppedSecrets.length ? { droppedSecrets } : {}) };
 }
 
 export function deleteDevice(id) {

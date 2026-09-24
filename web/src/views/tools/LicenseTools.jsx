@@ -1,6 +1,7 @@
 // LicenseTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../../api.js';
+import { droppedSecretNote } from '../droppedSecretText.js';
 import { DataTable, Loading, ErrorBox, UsageCell } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
@@ -171,8 +172,10 @@ export function LicenseExpiry({ scope, isAdmin }) {
     try {
       const body = { ...hzForm, id: hzForm.id || hzForm.host.replace(/^https?:\/\//, '').replace(/[^A-Za-z0-9.-]+/g, '-') };
       const r = await postJson('/admin/horizon', body);
-      setHzMsg(r.ok ? { ok: true, text: '저장됨 — 라이선스를 다시 불러옵니다.' } : { ok: false, text: r.reason });
-      if (r.ok) { setHzForm({ id: '', name: '', host: '', username: '', password: '', domain: '' }); load(); }
+      const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: 접속처 변경으로 저장 비밀번호 폐기 — 폼을 비우지 않는다
+      setHzMsg(r.ok ? (dropNote ? { ok: false, text: dropNote } : { ok: true, text: '저장됨 — 라이선스를 다시 불러옵니다.' }) : { ok: false, text: r.reason });
+      if (r.ok && dropNote) { setHzForm((f) => ({ ...f, id: body.id, password: '' })); load(); }
+      else if (r.ok) { setHzForm({ id: '', name: '', host: '', username: '', password: '', domain: '' }); load(); }
     } catch (e) { setHzMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };

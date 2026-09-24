@@ -275,7 +275,12 @@ function applyRemoteConfig(cfg) {
   if (Array.isArray(cfg.disabledTests)) runtime.remoteDisabledTests = cfg.disabledTests.map(String).slice(0, 200); // 축소만 — 허용 확대는 불가
 }
 
-async function pollOnce() {
+let lastRefused = null; // v2.607 RECENT2607-05: 중앙이 인스턴스 상한으로 거절한 마지막 기록 { at, reason }
+
+/** 테스트·진단용 — 연락·거절 상태. */
+export function rmaContactState() { return { lastContact, offlineFired, lastRefused }; }
+
+export async function pollOnce() {
   const batch = outbox.slice(0, 500);
   const r = await resilientFetch(`${CENTRAL_URL}/api/central/rma-poll`, {
     method: 'POST', headers: headers(),
@@ -283,12 +288,22 @@ async function pollOnce() {
     timeoutMs: runtime.longpollMs + 15_000, retries: 0,
   });
   if (r.status === 403 || r.status === 404) {
-    let reason = ''; try { reason = (await r.json()).reason || ''; } catch { /* */ }
+    let j = null; try { j = await r.json(); } catch { /* */ }
+    const reason = String(j?.reason || '').slice(0, 300);
+    // v2.607(감사 RECENT2607-05): v2.606 이 인스턴스 상한 거절을 403 + refused:true 로 바꾸자, 중앙에 **실제로 닿고 있는** 인스턴스가
+    //   onContact 를 부르지 못해 RMA_OFFLINE_MINUTES 뒤 현장 무연결 명령(RMA_OFFLINE_CMD_*)을 실행했다. refused 는 '연결됨 · 작업 없음'
+    //   이다 — 연락 시각을 갱신하고, 오류로 던져 main 루프가 백오프하게 한다(즉시 재폴하지 않게).
+    if (r.status === 403 && j?.refused === true) {
+      await onContact();
+      lastRefused = { at: Date.now(), reason };
+      throw Object.assign(new Error(`중앙이 이 인스턴스를 받지 않았습니다(연결됨 · 작업 없음)${reason ? ` — ${reason}` : ''}`), { refused: true });
+    }
     throw new Error(`중앙 거부 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`);
   }
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const body = await r.json();
   await onContact();
+  lastRefused = null;
   // v2.590 P17: 보낸 항목만 **정체성으로** 지운다. 앞에서 batch 개수만큼 자르면, 폴(최대 55초) 도중 상한(OUTBOX_MAX)에
   // 걸려 pushOutbox 가 앞을 잘라낸 경우 **보내지 않은 결과**가 대신 잘려 조용히 사라졌다.
   if (batch.length) { const sent = new Set(batch); outbox = outbox.filter((x) => !sent.has(x)); saveJson(OUTBOX_FILE, outbox); }

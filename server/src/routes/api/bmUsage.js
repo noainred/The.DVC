@@ -15,7 +15,7 @@
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { mergeScopedMap } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01
+import { mergeScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.607 AUTHZ2607-05
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers } from '../../bmusage/settings.js';
@@ -453,8 +453,11 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
    * ⚠ 동의를 서버가 대신 켜지 않는다 — 본문에 `enterpriseAck:true` 가 와야 한다
    *   (`normalizeSettings` 가 `enabled && ack` 로 못 박는다).
    */
-  const body = { ...(req.body || {}) };
   const prev = loadBmUsageSettings();
+  // v2.607 AUTHZ2607-05: 범위 계정은 법인(corps) 키만 바꿀 수 있다 — 주기·보존일·임계·Enterprise 동의 같은 전역 필드는
+  //   전 법인 공용이라 버리고 응답에 밝힌다(예전에는 범위 admin 이 보존일을 하한으로 내려 다른 법인 이력을 지웠다).
+  const kg = keepScopedFields(req.body || {}, prev, scopedVcenterIds(req.user, store.get()), ['corps', 'corpsScoped']);
+  const body = kg.patch;
   if (body.enterpriseAck === true && !prev.enterpriseAck) {
     body.enterpriseAckAt = Date.now();
     body.enterpriseAckBy = String(req.user?.username || '').slice(0, 64);
@@ -483,7 +486,7 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
   // v2.583 #36: 비어 있어 **저장하지 않은** 숫자 칸을 밝힌다(조용히 버리면 '저장했는데 왜 그대로지' 가 된다).
   const { dropped } = dropUnspecifiedNumbers(req.body || {});
   // PUT 응답도 GET 과 같은 필터(범위 계정에는 자기 범위 corps 만 · 비-admin 가림은 adminOnly 라 해당 없음).
-  res.json({ ok: true, settings: scopeMainSettings(next, allowed, true), ...(dropped.length ? { ignoredBlank: dropped } : {}), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}) });
+  res.json({ ok: true, settings: scopeMainSettings(next, allowed, true), ...(dropped.length ? { ignoredBlank: dropped } : {}), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
 }

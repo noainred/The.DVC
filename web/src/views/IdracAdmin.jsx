@@ -16,6 +16,7 @@
 //    영구 Loading/ErrorBox 가 되는 것을 막는 로딩/오류 게이트다(주석 참조). 지우면 안 된다.
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
+import { droppedSecretNote } from './droppedSecretText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { IdracScanJobs } from './idrac/IdracScanJobs.jsx';
 import { IdracScanRanges } from './idrac/IdracScanRanges.jsx';
@@ -101,7 +102,12 @@ export default function IdracAdmin() {
       const body = { id: f.id || undefined, datacenterId: f.datacenterId, service: f.service || '', ranges: f.ranges, username: f.username, agent: f.agent === '__local__' ? '' : f.agent, dispatch: f.agent !== '__local__' ? (f.dispatch === 'push' ? 'push' : 'poll') : 'poll', enabled: f.enabled, mode: f.mode };
       if ((f.password || '') !== '') body.password = f.password; // 빈 비번은 서버가 기존 유지, 그 외엔 원본 그대로 전송
       const r = await putJson('/admin/idrac/scan-ranges', body);
-      if (r.ok) {
+      const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: 대역·엣지·계정이 바뀌어 저장 비밀번호 폐기
+      if (r.ok && dropNote) {
+        setSrForm({ ...f, id: f.id || r.id, hasPassword: false, password: '' });
+        setSrMsg({ ok: false, text: `${dropNote} 스캔은 비밀번호를 입력할 때까지 보류됩니다.` });
+        await loadScanRanges();
+      } else if (r.ok) {
         const note = noPw ? ' · ⚠ 비밀번호 미설정 — 스캔하려면 비밀번호를 입력하세요' : '';
         const text = `스캔 대역 저장됨 — ${f.datacenterId}${f.service ? `/${f.service}` : ''} (대역 ${(r.ranges || []).length}개${r.enabled ? ', 주기 스캔 포함' : ', 비활성'})${note}`;
         setImportMsg({ ok: true, text }); // 상단 배너에도 표시

@@ -29,6 +29,7 @@
  */
 
 import { logAudit } from '../audit.js';
+import { capStr } from '../util/capStr.js';
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
@@ -53,7 +54,8 @@ const STATES = new Set(['ok', 'warn', 'bad']);
 
 let agents = Object.create(null);   // null-proto: agent 이름이 '__proto__' 여도 프로토타입 오염 없음
 
-const text = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+// v2.607(TIM2607-01): 상주 행·메타 문자열은 capStr 로 평탄화 — `.slice` 는 본문 원문을 붙잡는다(util/capStr.js 머리말).
+const text = (v, n) => (typeof v === 'string' ? capStr(v, n) : '');
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
 function blank(agent) {
@@ -173,6 +175,13 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
     for (const m of meta) {
       const id = text(m?.i, 64);
       if (!id) continue;
+      // v2.607(감사 CEN2607-04 — 재현): 메타에도 개수 상한 — 예전에는 완결 청크를 보내지 않는 엣지가 push 마다 새 id 의
+      //   메타를 쌓아 행 0 · 메타 5만이 됐다(GC 는 완결 때만). 결과 행이 있거나 이미 가진 id 는 언제나 받고, 새 id 는
+      //   상한(MAX_ROWS_PER_AGENT) 안에서만 받는다 — ⚠ v2.591 PR-4(메타가 결과보다 먼저 올 수 있다)와 호환되게 OR 조건이다.
+      if (!a.meta.has(id) && !a.rows.has(id) && a.meta.size >= MAX_ROWS_PER_AGENT) {
+        a.counters.metaOverflow = (a.counters.metaOverflow || 0) + 1;
+        continue;
+      }
       a.meta.set(id, {
         p: text(m?.p, 620), n: text(m?.n, 120), h: text(m?.h, 253),
         t: text(m?.t, 80), y: text(m?.y, 16), iv: num(m?.iv) || 60,

@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 // v2.560: mock vCenter id 판정은 `views/collectors/emptyInvText.js` 하나가 소유한다 —
 // 진단 모달이 같은 기준을 써야 '배지는 뜨는데 모달은 다른 원인을 말한다' 가 되지 않는다.
 import { fetchJson, postJson, putJson, delJson, downloadFile } from '../api.js';
+import { droppedSecretNote } from './droppedSecretText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
@@ -127,7 +128,9 @@ export default function Collectors() {
     setBusy(true); setMsg(null);
     try {
       const r = editing ? await putJson(`/admin/collectors/${encodeURIComponent(form.id)}`, form) : await postJson('/admin/collectors', form);
-      if (r.ok) { await load(); close(); } else setMsg({ ok: false, text: r.reason });
+      const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: URL 이 바뀌어 저장 토큰 폐기(서버가 싣는 경우)
+      if (r.ok && dropNote) { await load(); setMsg({ ok: false, text: dropNote }); }
+      else if (r.ok) { await load(); close(); } else setMsg({ ok: false, text: r.reason });
     } catch (e) { setMsg({ ok: false, text: e.message }); }
     finally { setBusy(false); }
   };

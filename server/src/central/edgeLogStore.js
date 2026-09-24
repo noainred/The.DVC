@@ -13,6 +13,7 @@
  */
 
 import { numOrNull } from '../util/numOrNull.js';
+import { capStr } from '../util/capStr.js';
 const KEEP = Math.max(2, Number(process.env.EDGELOG_KEEP_PER_AGENT) || 10);
 const LINE_CAP = Math.max(100, Number(process.env.EDGELOG_LINE_CAP) || 1_000);
 const AGENT_CAP = Math.max(10, Number(process.env.EDGELOG_MAX_AGENTS) || 200);
@@ -25,7 +26,7 @@ const SNAP_MAX_BYTES = Math.max(256 * 1024, Number(process.env.EDGELOG_SNAP_MAX_
 
 // ⚠ `String(v)` 는 toString 이 함수가 아닌 객체에서 던진다 — 글자·숫자만 글자로 받는다.
 const t = (v) => (typeof v === 'string' ? v.trim() : (typeof v === 'number' && Number.isFinite(v) ? String(v) : ''));
-const s = (v, max) => { const x = t(v); return x.length > max ? x.slice(0, max) : x; };
+const s = (v, max) => capStr(t(v), max); // v2.607(TIM2607-01): trim·slice 는 원문을 붙잡는다 — 평탄화
 const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 const bytesOf = (x) => { try { return JSON.stringify(x).length; } catch { return Infinity; } };
 
@@ -41,7 +42,7 @@ function sanitizeNode(n) {
 function sanitizeLine(e) {
   if (!isObj(e)) return null;
   const msg = typeof e.msg === 'string' ? e.msg : '';
-  return { id: numOrNull(e.id), time: typeof e.time === 'string' || typeof e.time === 'number' ? s(e.time, 40) : '', level: s(e.level, 16), msg: msg.length > LINE_MAX ? msg.slice(0, LINE_MAX) : msg };
+  return { id: numOrNull(e.id), time: typeof e.time === 'string' || typeof e.time === 'number' ? s(e.time, 40) : '', level: s(e.level, 16), msg: capStr(msg, LINE_MAX) };
 }
 /** 상태 항목 — 알려진 키만. value 는 크기 합계 상한 안에서만 남기고 넘치면 null + 개수. */
 function sanitizeStatus(list) {

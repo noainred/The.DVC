@@ -137,28 +137,35 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS) {
  * ⚠ 일반 명령에는 쓰지 말 것 — 정상 종료를 기다리지 않고 잘라내므로, 끝이 있는 명령에 쓰면
  *   출력이 중간에 끊긴 것을 성공으로 오인한다.
  */
+const CAPTURE_STDERR_MAX = 64 * 1024;
 function execCapture(conn, command, captureMs) {
   return new Promise((resolve, reject) => {
     conn.exec(command, { pty: false }, (err, stream) => {
       if (err) return reject(err);
-      let stdout = ''; let stderr = ''; let done = false;
+      let stdout = ''; let stderr = ''; let done = false; let stderrTruncated = false;
       const finish = (fn, arg) => { if (done) return; done = true; clearTimeout(timer); fn(arg); };
       const stop = () => {
         try { stream.close?.(); } catch { /* */ }
         try { stream.destroy?.(); } catch { /* */ }
-        finish(resolve, { command, code: null, stdout, stderr, captured: true });
+        finish(resolve, { command, code: null, stdout, stderr, captured: true, ...(stderrTruncated ? { stderrTruncated } : {}) });
       };
-      const timer = setTimeout(stop, Math.max(1000, captureMs));
+      const timer = setTimeout(stop, deadlineMs(captureMs)); // v2.607 TIM2607-02: 단일 관문(2^31 초과·NaN → 1ms 방지)
       timer.unref?.();
       stream.on('data', (d) => {
         stdout += d.toString();
         // 폭주 방어 — 갱신형 명령이 예상보다 빨리 그리면 메모리가 부풀 수 있다.
         if (stdout.length > 2_000_000) stop();
       });
-      stream.stderr.on('data', (d) => { stderr += d.toString(); });
+      // v2.607 SEC2607-04: stderr 도 상한 — 예전엔 stdout 만 2MB 에서 멈추고 stderr 는 캡처 시간 내내 무한히 쌓였다.
+      //   캡처 경로는 stdout 이 본체라 stderr 는 앞 64KB 만 남기고 나머지는 버린다(버린 사실은 stderrTruncated).
+      stream.stderr.on('data', (d) => {
+        if (stderr.length >= CAPTURE_STDERR_MAX) { stderrTruncated = true; return; }
+        stderr += d.toString();
+        if (stderr.length > CAPTURE_STDERR_MAX) { stderr = stderr.slice(0, CAPTURE_STDERR_MAX); stderrTruncated = true; }
+      });
       stream.on('error', (e) => finish(reject, e));
       stream.stderr.on('error', () => { /* 비치명 */ });
-      stream.on('close', (code) => finish(resolve, { command, code, stdout, stderr, captured: false }));
+      stream.on('close', (code) => finish(resolve, { command, code, stdout, stderr, captured: false, ...(stderrTruncated ? { stderrTruncated } : {}) }));
     });
   });
 }
@@ -442,7 +449,13 @@ export function execAnswered(conn, command, {
         answeredUpTo = stdout.length;
         try { stream.write(rule.answer); } catch { /* */ }
       });
-      stream.stderr.on('data', (d) => { stderr += d.toString(); });
+      // v2.607 SEC2607-04: stderr 도 stdout 과 **합산**해 EXEC_MAX_OUTPUT 을 본다(exec() 의 onChunk 와 같은 규칙).
+      //   예전엔 stdout 만 세어 장비가 stderr 로 흘리면 시한(최대 30분)까지 무한히 쌓였다(감사 재현 24MB).
+      stream.stderr.on('data', (d) => {
+        bytes += d.length;
+        if (bytes > EXEC_MAX_OUTPUT) { kill(); return finish(reject, new Error(`SSH exec 출력 상한(${Math.round(EXEC_MAX_OUTPUT / 1024)}KB) 초과: ${command}`)); }
+        stderr += d.toString();
+      });
       stream.on('error', (e) => finish(reject, e));
       stream.stderr.on('error', () => { /* 비치명 */ });
       stream.on('close', (code) => finish(resolve, out({ code })));
@@ -565,3 +578,5 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
  * import + export 형태다(`export … from` 은 이 모듈 스코프에 이름을 만들지 않는다 — v2.575).
  */
 export { withDeadline, deadlineMs };
+/** 테스트 전용 — 내보내지 않는 캡처 경로의 상한을 가짜 채널로 확인한다(v2.607 SEC2607-04). */
+export const _sshExecInternals = { execCapture };

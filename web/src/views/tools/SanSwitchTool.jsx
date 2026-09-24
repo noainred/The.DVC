@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';   // v2.447: 서버 문구의 **강조** 별표 노출 방지(감사 I6)
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson } from '../../api.js';
+import { droppedSecretNote } from '../droppedSecretText.js';
 import { MODES, bucketText, perfQuery, toLocalDt, rangeIssueOf, rangeLabel, RANGE_MAX_DAYS } from './sanSwitchPerfText.js';
 import { statusText, traceText, isActive, phaseLabel, testSnapView } from './sanSwitchTestText.js';
 import SanZoningPanel from './SanZoningPanel.jsx';
@@ -64,6 +65,7 @@ export default function SanSwitchTool() {
   const [form, setForm] = useState(null);          // null = 폼 닫힘
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [formNote, setFormNote] = useState(null); // v2.607 WEB2607-03: 저장 비밀번호 폐기 안내(폼 안에 보인다)
   const [test, setTest] = useState(null);
   const [detail, setDetail] = useState(null);      // 포트 상세 모달 { device, ports, ... }
   const detailSeq = useRef(0);
@@ -121,7 +123,12 @@ export default function SanSwitchTool() {
 
   const save = async () => {
     setBusy(true); setMsg(null);
-    try { await postJson('/tools/sanswitch/devices', form); setForm(null); await load(); setMsg('저장되었습니다.'); }
+    try {
+      const r = await postJson('/tools/sanswitch/devices', form);
+      const dropNote = droppedSecretNote(r); // v2.607 WEB2607-03: 접속처 변경으로 저장 비밀번호 폐기 — 폼 유지
+      if (dropNote) { setForm((f) => ({ ...f, password: '' })); await load(); setFormNote(dropNote); }
+      else { setForm(null); setFormNote(null); await load(); setMsg('저장되었습니다.'); }
+    }
     catch (e) { setMsg(`저장 실패: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -373,7 +380,7 @@ export default function SanSwitchTool() {
         ]}
       />
 
-      {form && <DeviceForm {...{ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll }} />}
+      {form && <DeviceForm {...{ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll, formNote, setFormNote }} />}
       {detail && <PortDetail {...{ detail, setDetail, closeDetail, portFilter, setPortFilter, portQ, setPortQ, infoOpen, setInfoOpen, tab, setTab, sort, setSort }} />}
       {dcPerf && <DcStoragePerf dcPerf={dcPerf} onClose={() => setDcPerf(null)} />}
       {/* 전체 점검 모달(v2.519). 법인 칩 선택을 그대로 범위로 쓴다 — 목록에서 고른 것과
@@ -393,11 +400,12 @@ export default function SanSwitchTool() {
 }
 
 /** 등록/수정 폼 — 수집 방식 목록은 서버 카탈로그(types.js)를 그대로 그린다. */
-function DeviceForm({ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll }) {
+function DeviceForm({ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll, formNote, setFormNote }) {
   const set = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
   const type = data.types.find((t) => t.type === form.type) || data.types[0];
   return (
-    <Modal title={form.id ? 'SAN 스위치 수정' : 'SAN 스위치 등록'} onClose={() => { setForm(null); setTest(null); stopTestPoll(); }} width={760}>
+    <Modal title={form.id ? 'SAN 스위치 수정' : 'SAN 스위치 등록'} onClose={() => { setForm(null); setTest(null); setFormNote?.(null); stopTestPoll(); }} width={760}>
+      {formNote && <div style={{ margin: '0 0 10px', padding: '8px 12px', borderRadius: 8, fontSize: 12.5, background: 'rgba(245,158,11,.12)', color: 'var(--amber)' }}>{formNote}</div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
         <label style={{ fontSize: 12 }}>표시명<input className="input" value={form.name} onChange={set('name')} placeholder="예: SAN-A-01" /></label>
         <label style={{ fontSize: 12 }}>host (IP/호스트명)<input className="input" value={form.host} onChange={set('host')} placeholder="10.10.10.11" /></label>

@@ -37,7 +37,7 @@ before(async () => {
 after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } });
 
 test('DB2607-01: 법인 B 의 수집 시작은 B 의 첫 관측이다(다른 법인 A 의 30일 전이 아니다)', async () => {
-  // A: 30일 전부터, B: 2일 전부터(1시간 간격 — 값이 달라 dead-band 에 걸리지 않게)
+  // A: 30일 전부터, B: 2일 전부터(1시간 간격 — 값이 달라 dead-band 에 걸리지 않게). 롤업의 시간 버킷 바닥 때문에 최대 30분 이르게 나올 수 있다
   for (let t = NOW - 30 * DAY; t <= NOW; t += HOUR) {
     const rows = [{ metric: 'roomtemp_inlet_avg', k: 'A2607', v: 20 + ((t / HOUR) % 7) }];
     if (t >= NOW - 2 * DAY) rows.push({ metric: 'roomtemp_inlet_avg', k: 'B2607', v: 22 + ((t / HOUR) % 5) });
@@ -46,7 +46,7 @@ test('DB2607-01: 법인 B 의 수집 시작은 B 의 첫 관측이다(다른 법
   const r = await roomTempHistory(mdb, { kind: 'inlet', group: 'B2607', range: '30d' });
   assert.ok(r.collectedSince != null, '수집 시작이 비면 안 된다');
   const ageDays = (NOW - r.collectedSince) / DAY;
-  assert.ok(ageDays <= 2.01 && ageDays >= 1.9, `B 는 2일 전부터다 — 실제 ${ageDays.toFixed(2)}일 전(수정 전 30일 전)`);
+  assert.ok(ageDays < 2.1 && ageDays >= 1.9, `B 는 2일 전부터다 — 실제 ${ageDays.toFixed(2)}일 전(수정 전 30일 전)`);
   const ra = await roomTempHistory(mdb, { kind: 'inlet', group: 'A2607', range: '30d' });
   assert.ok((NOW - ra.collectedSince) / DAY > 29, 'A 는 30일 전부터다');
   const none = await roomTempHistory(mdb, { kind: 'inlet', group: 'C2607', range: '7d' });

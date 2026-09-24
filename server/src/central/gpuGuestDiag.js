@@ -10,6 +10,7 @@
  *   소비처도 형식 가드를 둔다(방어선 2중 — 소비처 하나만 고치면 형제로 재발한다).
  */
 import { numOrNull } from '../util/numOrNull.js';
+import { capStr } from '../util/capStr.js';
 
 export const MAX_AGENTS = 256;          // 엣지 28곳(30+ 예정)보다 넉넉히 — 넘치면 가장 오래 보고 안 한 것을 뺀다
 export const MAX_VCENTERS = 64;         // 엣지 하나가 담당하는 vCenter
@@ -19,7 +20,8 @@ const AGENT_MAX_LEN = 64;
 let byAgent = new Map(); // agent명 → { at, receivedAt, mode, vcenters:[...], counts:{hosts,vms}, dropped? }
 
 const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
-const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : (typeof v === 'number' && Number.isFinite(v) ? String(v) : null));
+// v2.607(TIM2607-01): capStr — `.slice` 는 원문을 붙잡는다.
+const str = (v, n) => (typeof v === 'string' ? capStr(v, n) : (typeof v === 'number' && Number.isFinite(v) ? String(v) : null));
 
 function stopView(s) {
   if (!isObj(s)) return null;
@@ -69,7 +71,7 @@ export function sanitizeGpuGuestDiag(diag) {
 }
 
 export function setGpuGuestDiag(agent, diag, counts) {
-  const key = String(agent || '?').slice(0, AGENT_MAX_LEN);
+  const key = capStr(agent || '?', AGENT_MAX_LEN) || '?';
   const c = isObj(counts) ? { hosts: numOrNull(counts.hosts), vms: numOrNull(counts.vms) } : {};
   // 재삽입으로 순서를 최신으로 옮긴다(Map 은 삽입 순서) — 상한 퇴출이 '가장 오래 보고 안 한 것' 이 되게.
   byAgent.delete(key);

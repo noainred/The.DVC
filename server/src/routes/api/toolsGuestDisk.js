@@ -5,7 +5,7 @@
  * 않는다(보안 불변조건). 상태변경(설정 저장·수동 수집)은 requireRole('admin').
  */
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { denyScopedRun } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-02: 전 법인 수동 실행은 범위 계정 403
+import { denyScopedRun, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-02: 전 법인 수동 실행은 범위 계정 403 · v2.607 AUTHZ2607-05
 import { scopePollerStatus, scopeDbStatus } from '../../auth/scopeStatus.js'; // v2.583
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): 조회는 tools 권한
 import { logAudit } from '../../audit.js';
@@ -62,9 +62,13 @@ export function registerToolsGuestDisk(api) {
 
   // 설정 저장(주기·임계·보존) — admin.
   api.put('/tools/guest-disk/settings', requireRole('admin'), (req, res) => {
-    const next = saveSettings(req.body || {});
-    logAudit({ user: req.user?.username, action: '게스트 디스크 리포트 설정 변경', detail: `enabled=${next.enabled} interval=${next.intervalHours}h`, ip: req.ip || '' });
-    res.json({ ok: true, settings: next });
+    // v2.607 AUTHZ2607-05: 이 설정은 전부 전 법인 공용(사용 여부·주기·임계·보존일) — 범위 계정의 값은 적용하지 않고 밝힌다
+    //   (예전에는 범위 admin 이 보존일을 하한으로 내려 다른 법인 게스트 디스크 이력을 지웠다).
+    const allowed = scopedVcenterIds(req.user, store.get());
+    const kg = keepScopedFields(req.body || {}, loadSettings(), allowed, []);
+    const next = allowed ? loadSettings() : saveSettings(kg.patch);
+    if (!allowed) logAudit({ user: req.user?.username, action: '게스트 디스크 리포트 설정 변경', detail: `enabled=${next.enabled} interval=${next.intervalHours}h`, ip: req.ip || '' });
+    res.json({ ok: true, settings: next, ...ignoredGlobalFields(kg.ignoredGlobal) });
   });
 
   // 수동 수집 1회 — admin. 재진입 가드 공유(진행 중이면 skipped).

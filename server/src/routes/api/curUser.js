@@ -18,7 +18,7 @@
  */
 import { scopePollerStatus, scopeDbStatus } from '../../auth/scopeStatus.js'; // v2.583
 import { scopedVcenterIds } from '../../auth/scope.js';
-import { mergeScopedMap, filterScopedMap, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.606 AUTHZ2606-05
+import { mergeScopedMap, filterScopedMap, denyScopedRun, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.606 AUTHZ2606-05 · v2.607 AUTHZ2607-05
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
@@ -192,7 +192,9 @@ api.put('/tools/curuser/settings', requireRole('admin'), (req, res) => {
   if (allowed && b.vcenters !== undefined) {
     const m = mergeScopedMap(before.vcenters, b.vcenters, allowed); vcIn = m.merged; ignoredOutOfScope = m.ignored;
   }
-  const next = saveCurUser({ ...before, ...b, vcenters: vcIn });
+  // v2.607 AUTHZ2607-05: 전역 필드(enabled·주기·보존일 등)는 전 법인 공용 — 범위 계정의 값은 버리고 밝힌다.
+  const kg = keepScopedFields(b, before, allowed, ['vcenters']);
+  const next = saveCurUser({ ...before, ...kg.patch, vcenters: vcIn });
   logAudit({
     user: req.user?.username, action: 'curuser.settings', ip: req.ip || '',
     detail: JSON.stringify({
@@ -202,7 +204,7 @@ api.put('/tools/curuser/settings', requireRole('admin'), (req, res) => {
   });
   // PUT 응답도 GET 과 같은 필터(범위 밖 vCenter 설정을 되돌려 주지 않는다).
   const safeNext = allowed ? { ...next, vcenters: filterScopedMap(next.vcenters, allowed) } : next;
-  res.json({ ok: true, settings: safeNext, limits: LIMITS, staleAfterMs: staleAfterMs(next), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}) });
+  res.json({ ok: true, settings: safeNext, limits: LIMITS, staleAfterMs: staleAfterMs(next), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
 /**

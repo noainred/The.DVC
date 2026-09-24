@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
+import { droppedSecretNote } from './droppedSecretText.js';
 import { Loading } from '../components/ui.jsx';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
 import { CsvExportModal, CsvImportModal } from '../components/CsvBulkModals.jsx';
@@ -131,7 +132,9 @@ export default function AgentDeploy() {
       const extra = c?.registered
         ? ` · 수집 서버 '${c.id}' ${c.updated ? '갱신' : '등록'}(${c.url})${r.tokenGenerated ? ' · 수집 토큰을 새로 만들었습니다 — 배포하거나 에이전트 현황의 \'엣지에 반영\'을 해야 데이터를 당겨옵니다.' : ''}`
         : (c?.reason ? ` · 수집 서버 등록 안 됨: ${c.reason}` : '');
-      setResult({ kind: 'save', ok: true, reason: `대상을 저장했습니다.${extra}` });
+      const dropNote = droppedSecretNote(r); // v2.607 WEB2607-03: 주소·계정이 바뀌어 저장 비밀(비밀번호·키·토큰) 폐기
+      if (dropNote) setF((s) => ({ ...s, id: r.target?.id || s.id }));
+      setResult({ kind: 'save', ok: true, warn: !!dropNote, reason: dropNote ? `${dropNote}${extra}` : `대상을 저장했습니다.${extra}` });
     } else setResult({ kind: 'save', ok: false, reason: r.reason });
   };
   // gpuGuest는 EMPTY 기본값과 깊게 병합(저장 안 된 옛 대상도 안전) + 비밀번호는 비우고 has* 플래그 보존.
@@ -437,12 +440,12 @@ export default function AgentDeploy() {
       )}
 
       {result && (
-        <div className="card" style={{ borderColor: result.ok ? 'var(--green)' : 'var(--red)' }}>
-          <b style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>
-            {result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포', pkg: '패키지 다운로드', 'pkg-multi': '패키지 다운로드', token: '중앙 토큰', autofill: '자동 채우기', pkgcfg: '패키지 설정', status: '서버 상태 확인' }[result.kind] || '배포'}
+        <div className="card" style={{ borderColor: result.warn ? 'var(--amber)' : result.ok ? 'var(--green)' : 'var(--red)' }}>
+          <b style={{ color: result.warn ? 'var(--amber)' : result.ok ? 'var(--green)' : 'var(--red)' }}>
+            {result.warn ? '주의' : result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포', pkg: '패키지 다운로드', 'pkg-multi': '패키지 다운로드', token: '중앙 토큰', autofill: '자동 채우기', pkgcfg: '패키지 설정', status: '서버 상태 확인' }[result.kind] || '배포'}
           </b>
           <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.7 }}>
-            {result.reason && <div style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.reason}</div>}
+            {result.reason && <div style={{ color: result.warn ? 'var(--amber)' : result.ok ? 'var(--green)' : 'var(--red)' }}>{result.reason}</div>}
             {result.os && <div>OS: {result.os} · root: {result.isRoot ? '예' : '아니오'} · systemd: {result.systemd ? '예' : '아니오'}{result.glibc ? ` · glibc: ${result.glibc} ${result.glibcOk === false ? '❌' : result.glibcOk ? '✅' : ''}` : ''}</div>}
             {result.warn && <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ {result.warn}</div>}
             {result.glibc && result.kind !== 'test' && result.ok === false && <div style={{ color: 'var(--amber)', marginTop: 4 }}>glibc: {result.glibc}</div>}

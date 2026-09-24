@@ -123,16 +123,20 @@ export async function pushCurUserRecords(records, { generatedAt = Date.now(), cl
   };
   let sr = await sendAll();
   let resent = false;
+  let firstTry = null;
   if (!sr.ok && sr.received > 0) {
+    firstTry = sr;
     console.warn(`[curuser-push] ${sr.error?.message || sr.error} (청크 ${sr.received + 1}/${chunks.length}) — 앞 청크 ${sr.received}개가 이미 중앙 목록을 교체했으므로 전체를 한 번 다시 보냅니다`);
     resent = true;
     sr = await sendAll();
   }
   if (!sr.ok) {
     const e = sr.error;
-    const partial = sr.received > 0;
+    // 재전송의 청크 0 이 실패했으면 중앙에는 **첫 시도의 부분 목록**이 남아 있다 — '직전 push 그대로' 라고 말하면 거짓이다.
+    const ps = sr.received > 0 ? sr : (firstTry || sr);
+    const partial = ps.received > 0;
     const note = partial
-      ? `중앙 목록이 부분 상태입니다 — 청크 ${sr.received}/${chunks.length}(서버 ${sr.receivedRecords}/${slim.length}대)만 반영됐고 나머지는 다음 성공 push 까지 중앙 화면에 나오지 않습니다`
+      ? `중앙 목록이 부분 상태입니다 — 청크 ${ps.received}/${chunks.length}(서버 ${ps.receivedRecords}/${slim.length}대)만 반영됐고 나머지는 다음 성공 push 까지 중앙 화면에 나오지 않습니다`
       : '첫 청크가 실패해 중앙 목록은 직전 push 그대로입니다';
     // v2.583 감사 #33: 실패도 상태에 남긴다 — 예전에는 `last` 가 **직전 성공**에 머물러 엣지 로그의 push.curUser
     //   항목이 실패 중에도 '정상' 으로 보였다(v2.566 '새 엣지 push 경로는 실패 사유를 상태에 싣는다' — 형제
@@ -140,7 +144,7 @@ export async function pushCurUserRecords(records, { generatedAt = Date.now(), cl
     last = {
       at: Date.now(), chunks: chunks.length, sentChunks: sent, records: slim.length, bytes, gzBytes, ms: Date.now() - t0,
       error: `${e?.message || String(e)}${resent ? ' · 전체 재전송도 실패' : ''} — ${note}`, resent,
-      ...(partial ? { centralPartial: { receivedChunks: sr.received, chunks: chunks.length, receivedRecords: sr.receivedRecords, records: slim.length } } : {}),
+      ...(partial ? { centralPartial: { receivedChunks: ps.received, chunks: chunks.length, receivedRecords: ps.receivedRecords, records: slim.length } } : {}),
       ...(drop ? { centralDropped: drop } : {}),
     };
     console.warn(`[curuser-push] 실패(${sent}/${chunks.length} 청크 전송 후): ${last.error}`);

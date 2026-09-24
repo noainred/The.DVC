@@ -7,6 +7,7 @@ import React, { useRef, useState } from 'react';
 import { postJson, downloadFile } from '../api.js';
 import EscClose from './EscClose.jsx';
 import { STable } from './STable.jsx';
+import { passwordDroppedLines } from '../views/droppedSecretText.js';
 
 /**
  * 내보내기 모달. exportPath 로 다운로드하고, secrets 체크 시 `?secrets=1`(또는 secretsQuery)을
@@ -137,7 +138,14 @@ export function CsvImportModal({ title, description, importPath, samplePath, col
             <div>총 {result.total}행 — <span style={{ color: 'var(--green)' }}>추가 {result.added}</span>
               {' · '}<span style={{ color: 'var(--amber)' }}>덮어쓰기 {result.overwritten}</span>
               {result.skipped?.length ? <> · <span className="muted">건너뜀 {result.skipped.length}</span></> : ''}
-              {result.failed?.length ? <> · <span style={{ color: 'var(--red)' }}>실패 {result.failed.length}</span></> : ''}</div>
+              {result.failed?.length ? <> · <span style={{ color: 'var(--red)' }}>실패 {result.failed.length}</span></> : ''}
+              {passwordDroppedLines(result).length ? <> · <span style={{ color: 'var(--amber)' }}>비밀번호 폐기 {passwordDroppedLines(result).length}</span></> : ''}</div>
+            {/* v2.607 WEB2607-03: 저장은 됐지만 접속처가 바뀌어 저장 비밀번호를 폐기한 행 — 다시 입력하지 않으면 인증 실패 */}
+            {passwordDroppedLines(result).length > 0 && (
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18, color: 'var(--amber)' }}>
+                {passwordDroppedLines(result).map((t, i) => <li key={i}>{t}</li>)}
+              </ul>
+            )}
             {result.skipped?.length > 0 && (
               <ul style={{ margin: '6px 0 0', paddingLeft: 18 }} className="muted">
                 {result.skipped.map((f, i) => <li key={i}>행 {f.line} ({nameOf(f)}): {f.reason}</li>)}

@@ -77,7 +77,7 @@ export async function resolveBundleBytes(settings) {
       if (res.ok) {
         // v2.607 SEC2607-06: 번들 상한(archive.MAX_BUNDLE_BYTES)을 **읽는 중에** 건다 — 예전엔 상한이 없었다.
         const rd = await readBytesCapped(res, MAX_BUNDLE_BYTES);
-        if (!rd.ok) { console.warn(`[upgrade] 원격 번들이 크기 상한(${Math.round(MAX_BUNDLE_BYTES / 1048576)}MB)을 넘어 받지 않았습니다: ${info.downloadUrl}`); return null; }
+        if (!rd.ok) { console.warn(`[upgrade] 원격 번들이 크기 상한(${Math.round(MAX_BUNDLE_BYTES / 1048576)}MB)을 넘어 받지 않았습니다(버전 ${info.latest})`); return null; }
         const bytes = rd.buf;
         // 무결성 검증(checkRemote가 versions.json에서 읽어온 sha256과 대조). 실패면 번들 없음으로 취급.
         if (!verifyBundleSha(bytes, info.sha256)) return null;

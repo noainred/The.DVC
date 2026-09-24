@@ -132,20 +132,21 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
   const omitted = Math.max(0, valid.length - room);
   let vcenterBlanked = 0;
   const vcOf = (b) => {
-    const v = typeof b.vcenterId === 'string' || typeof b.vcenterId === 'number' ? String(b.vcenterId).slice(0, 128) : '';
+    const v = typeof b.vcenterId === 'string' || typeof b.vcenterId === 'number' ? capStr(b.vcenterId, 128) : '';
     if (v && typeof vcAllowed === 'function' && !vcAllowed(v)) { vcenterBlanked++; return ''; }
     return v;
   };
   const list = valid.slice(0, room).map((b) => ({
-    fleetId: String(b.fleetId || b.serviceTag || b.serverId || '').slice(0, 256),
-    name: String(b.name || '').slice(0, 256),
-    model: String(b.model || '').slice(0, 256),
-    serviceTag: String(b.serviceTag || '').slice(0, 128),
+    // v2.607(TIM2607-01): 상주 레코드 문자열은 capStr — `.slice` 는 본문 원문(최대 1MB)을 붙잡는다.
+    fleetId: capStr(b.fleetId || b.serviceTag || b.serverId || '', 256),
+    name: capStr(b.name || '', 256),
+    model: capStr(b.model || '', 256),
+    serviceTag: capStr(b.serviceTag || '', 128),
     // 엣지 push는 '전력 미보고 베어메탈' 메타 전용(설계). 전력은 원격 수집(collector pull) 경로로만
     // 중앙에 반영되므로 엣지 watts는 항상 null로 정규화 — fleet KPI와 FinOps/PowerMap의 이중계상 차단.
     watts: null,
     vcenterId: vcOf(b),
-    source: String(b.source || '').slice(0, 32),
+    source: capStr(b.source || '', 32),
   }));
   if (omitted) console.warn(`[central-fleet] '${a}' 베어메탈 ${valid.length}대 중 ${omitted}대를 상한으로 받지 않았습니다(에이전트당 ${PER_AGENT_MAX} · 전체 ${TOTAL_MAX}${verified ? '' : ` · 미검증 이름 합 ${UNVERIFIED_TOTAL_MAX}`}).`);
   if (vcenterBlanked) console.warn(`[central-fleet] '${a}' 가 소유하지 않은 vCenter 로 귀속된 베어메탈 ${vcenterBlanked}대 — 귀속(vcenterId)을 비웠습니다.`);

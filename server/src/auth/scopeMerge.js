@@ -82,3 +82,56 @@ export function denyScopedRun(req, res, what = '이 실행') {
   });
   return true;
 }
+
+/**
+ * id 목록 병합 — **빈 배열이 '없음'** 인 목록용(v2.607 RECENT2607-03 — 프록시 vcenterIds).
+ * `mergeScopedIds` 는 빈 배열을 '전체 대상' 으로 읽으므로 이 목록에 쓰면 새 프록시·빈 프록시에 자기 vCenter 를
+ * 배정하는 것까지 막힌다. 범위 밖 id 는 직전 값을 그대로 두고, 범위 안 id 는 요청대로 바꾼다.
+ */
+export function mergeScopedList(before, body, allowed) {
+  const prev = Array.isArray(before) ? before.map(String) : [];
+  const req = Array.isArray(body) ? body.map(String) : [];
+  if (!allowed) return { merged: req, ignored: [] };
+  const ignored = req.filter((id) => !allowed.has(id));
+  const merged = [...new Set([...prev.filter((id) => !allowed.has(id)), ...req.filter((id) => allowed.has(id))])];
+  return { merged, ignored };
+}
+
+/** 전역 필드를 무시했을 때 응답에 싣는 사유(anomaly v2.606 문구와 같은 뜻). */
+export const IGNORED_GLOBAL_REASON = '사용 여부·주기·보존일·임계 같은 전역 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다 — 적용하지 않았습니다.';
+
+function sameSettingValue(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a !== 'object' && typeof b !== 'object') return String(a) === String(b);
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+}
+
+/**
+ * 범위 제한 계정의 설정 PUT 에서 **vCenter 축이 있는 키만** 남긴다(v2.607 AUTHZ2607-05 — v2.605 '남긴 것:
+ * 범위 admin 의 전 법인 공통 스칼라 설정' 재확인). v2.605 는 vCenter 키 맵만 보존 병합했고 `enabled`·
+ * `retentionDays`·`intervalMin` 같은 전역 필드는 그대로 받아, 범위 admin 한 명이 전 법인 수집을 끄거나 보존일을
+ * 1일로 줄여 **다른 법인 이력을 지웠다**. anomaly(v2.606)의 ignoredGlobal 패턴을 공통화한다.
+ *  · `allowed === null`(전체 범위)이면 본문 그대로.
+ *  · 본문의 전역 키는 버리고, **직전 값과 다른 것만** `ignoredGlobal` 로 밝힌다(GET→PUT 왕복이 같은 값을
+ *    되돌려 보내는 것은 '무시했다' 고 말할 일이 아니다). 빈 문자열·null 은 '미지정'(v2.596 규약)이라 세지 않는다.
+ */
+export function keepScopedFields(body, before, allowed, scopedKeys = []) {
+  const b = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  if (!allowed) return { patch: { ...b }, ignoredGlobal: [] };
+  const keys = new Set(scopedKeys);
+  const patch = {};
+  const ignoredGlobal = [];
+  const prev = before && typeof before === 'object' ? before : {};
+  for (const [k, v] of Object.entries(b)) {
+    if (keys.has(k)) { patch[k] = v; continue; }
+    if (v === undefined || v === null || v === '') continue;
+    if (!sameSettingValue(v, prev[k])) ignoredGlobal.push(k);
+  }
+  return { patch, ignoredGlobal };
+}
+
+/** 응답 조각 — 무시한 전역 키가 있을 때만. */
+export function ignoredGlobalFields(list) {
+  return Array.isArray(list) && list.length ? { ignoredGlobal: list, ignoredReason: IGNORED_GLOBAL_REASON } : {};
+}

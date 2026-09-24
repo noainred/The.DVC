@@ -21,6 +21,9 @@ import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
 import { pctFromMetric } from '../bmusage/parse/idracTelemetry.js';
 import { readTextCapped } from '../util/readCapped.js';
 import { readBodyPrefix } from '../util/readPrefix.js';
+import { capStr } from '../util/capStr.js'; // v2.607 SEC2607-03
+/** 라이선스 항목 문자열 상한(v2.607 SEC2607-03). */
+export const LICENSE_FIELD_MAX = 256;
 
 // v2.606(감사 SEC2606-01): 스캔 대역의 **미등록 호스트**가 주는 본문 상한. 서비스 루트·401 오류 본문은 수백 바이트가
 //   정상이다 — 상한 없이 res.json()/text() 로 읽으면 gzip 폭탄(전송 2.6MB → 해제 2.6GB) 하나로 프로브 1건이 수백 MB 를
@@ -796,10 +799,12 @@ export async function fetchInventory(entry) {
       try {
         const l = await G(m['@odata.id']);
         inv.licenses.push({
-          name: l.Name || l.LicenseDescription || l.Id || '',
-          type: l.LicenseType || l.LicensePrimaryStatus || '',
-          entitlement: l.EntitlementId || l.EntitlementID || '',
-          expiry: l.ExpirationDate || '',
+          // v2.607 SEC2607-03: 장비 응답 문자열을 자르지 않고 캐시했다 — 대상 계산마다 등급 정규식이 그 전체를 훑는다.
+          //   라이선스 이름·주문 식별자는 수십 자다. 256자로 자르고 평탄화한다(capStr — 원문을 붙잡지 않게).
+          name: capStr(l.Name || l.LicenseDescription || l.Id || '', LICENSE_FIELD_MAX),
+          type: capStr(l.LicenseType || l.LicensePrimaryStatus || '', LICENSE_FIELD_MAX),
+          entitlement: capStr(l.EntitlementId || l.EntitlementID || '', LICENSE_FIELD_MAX),
+          expiry: capStr(l.ExpirationDate || '', LICENSE_FIELD_MAX),
         });
       } catch { /* skip */ }
     }

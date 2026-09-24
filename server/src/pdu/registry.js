@@ -18,6 +18,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
+import { accessMoved, secretProvided } from '../util/secretCarry.js'; // v2.607 SEC2607-07
 
 const FILE = path.join(config.configDir, 'pdu-devices.json');
 
@@ -94,12 +95,22 @@ export function saveDevice(input = {}) {
   const list = load().devices.slice();
   const idx = input.id ? list.findIndex((d) => d.id === input.id) : -1;
   const entry = normalize(input, idx >= 0 ? list[idx] : null);
+  // v2.607(감사 SEC2607-07·LEFT2607-06): normalize 는 host 변경만 비밀번호를 비운다 — 계정·SSH 포트를 바꿔도 옛
+  //   비밀번호가 새 계정·포트로 시도됐다. 공용 판정(host·username·sshPort)으로 한 번 더 본다. agent(수집 엣지) 변경은
+  //   승계한다(위임 수집에 필요, 장비는 같다). 버린 사실은 droppedSecrets 로 응답에 싣는다.
+  let droppedSecrets = [];
+  if (idx >= 0 && !secretProvided(input.password)) {
+    const e = list[idx];
+    const moved = accessMoved({ host: e.host, username: e.username || '', port: Number(e.sshPort) || 22 },
+      { host: entry.host, username: entry.username, port: entry.sshPort }, ['host', 'username', 'port']);
+    if (moved) { if (e.password) droppedSecrets = ['password']; entry.password = ''; }
+  }
   // 같은 host 중복 등록 방지(다른 id 로 같은 장비를 두 번 폴링하면 부하만 는다).
   const dup = list.find((d) => d.id !== entry.id && d.host.toLowerCase() === entry.host.toLowerCase());
   if (dup) return { ok: false, reason: `이미 등록된 host 입니다: ${entry.host} (${dup.name})` };
   if (idx >= 0) list[idx] = entry; else list.push(entry);
   save(list);
-  return { ok: true, device: redact(entry) };
+  return { ok: true, device: redact(entry), ...(droppedSecrets.length ? { droppedSecrets } : {}) };
 }
 
 export function deleteDevice(id) {

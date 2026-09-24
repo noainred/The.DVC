@@ -49,7 +49,9 @@ export const TIER_LABEL = Object.freeze({
  * `iDRAC9 Datacenter` · `iDRAC9 x5 Datacenter` 등으로 흔들린다(v2.545 '후보 체인' 규약).
  */
 const TIER_RE = Object.freeze({
-  datacenter: /data\s*-?\s*cent(er|re)/i,
+  // v2.607 SEC2607-03: 예전 /data\s*-?\s*cent(er|re)/i 는 인접한 \s*-?\s* 가 모호해 'data'+공백 n 에서 O(n²)
+  //   (16,000자 0.4초 · 항목 12개면 5초). 같은 언어를 비모호하게 쓴다 — 두 번째 공백은 '-' 뒤에서만 잡는다.
+  datacenter: /data\s*(?:-\s*)?cent(er|re)/i,
   enterprise: /enterprise/i,
   express: /express/i,
   basic: /\bbasic\b|\bbmc\b/i,

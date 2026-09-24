@@ -83,13 +83,17 @@ export function hostsOfOtherCollectors(collectorId, { now = Date.now(), staleMs 
  *     다음 주기에 새 키로 넘어갔다(어느 엣지가 먼저냐에 따라 옛 계열에 두 서버 값이 섞였다 — CEN2605-03 이 막으려던 현상).
  *  ② 없으면, 다른 활성 수집기가 같은 호스트명을 신선하게 보고 중일 때만 새 계열로 나눈다.
  *  ③ 그 밖은 예전 키 `rmt:<host>`(이력 유지).
- * 반환 { key, conflict }.
+ * 반환 { key, conflict, persisted } — conflict 는 현재 실제 충돌(경고·hostConflicts 용), persisted 는 전용 계열이 DB 에 있다는 뜻.
  */
 export function remoteSeriesKey(collectorId, hostLower, otherHosts, hasSeries = () => false) {
   const split = `rmt:${collectorId}:${hostLower}`;
   let persisted = false;
   try { persisted = Boolean(hasSeries(split)); } catch { persisted = false; }
-  if (persisted || otherHosts.has(hostLower)) return { key: split, conflict: true, persisted };
+  // v2.607(감사 RECENT2607-04): `conflict` 는 **지금 실제로** 다른 활성 수집기가 같은 호스트명을 보고 중일 때만 참이다.
+  //   persisted 는 키 선택(이력 연속)에만 쓴다 — 예전에는 persisted 만으로 conflict:true 를 돌려, 충돌이 해소된 뒤에도
+  //   puller 가 매 pull 마다 '다른 수집 서버와 같은 호스트명' 경고와 hostConflicts 를 영원히 냈다(거짓 진단).
+  const conflict = otherHosts.has(hostLower);
+  if (persisted || conflict) return { key: split, conflict, persisted };
   return { key: `rmt:${hostLower}`, conflict: false, persisted: false };
 }
 

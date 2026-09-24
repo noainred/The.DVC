@@ -9,6 +9,7 @@
  *
  * vCenterId 기준 키잉(그 vCenter를 수집하는 엣지가 응답).
  */
+import { capStr } from '../util/capStr.js'; // v2.607 TIM2607-01
 
 const pending = new Map(); // vcenterId -> [{ reqId, filter, at }]
 const results = new Map();  // reqId -> { at, vcenterId, total, rows, dbKind }
@@ -90,7 +91,8 @@ export function takeLogQueries(vcenterIds = []) {
  * 문자열은 자르며, 수치는 numOrNull(못 읽으면 null — 0 이 아니다).
  */
 const LOG_ROW_MAX = 2000;
-const lqStr = (v, n) => (typeof v === 'string' ? v.slice(0, n) : typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
+const lqStr = (v, n) => (typeof v === 'string' ? capStr(v, n) : // v2.607(TIM2607-01)
+  typeof v === 'number' && Number.isFinite(v) ? String(v) : '');
 function lqNum(v) {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
