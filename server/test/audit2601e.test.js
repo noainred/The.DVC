@@ -220,3 +220,77 @@ test('SEC2601-03: 로그 가림이 JSON 인용 키·카멜케이스 비밀 필�
   redactLogLine('"x '.repeat(100_000) + 'password');
   assert.ok(Number(process.hrtime.bigint() - t) / 1e6 < 500);
 });
+
+// ─────────────── DB2601-03 (poller)
+async function pollTimes(n) {
+  const { pollLogsOnce } = await import('../src/logs/poller.js');
+  for (let i = 0; i < n; i++) await pollLogsOnce({ manual: true });
+}
+function oldRows(prefix, count, msgLen = 10) {
+  const out = [];
+  for (let i = 0; i < count; i++) out.push({ vcenterId: 'vc2', key: `${prefix}${i}`, ts: T0 - 20 * DAY + i, severity: 'info', type: 't', user: '', entity: '', message: 'm'.repeat(msgLen) });
+  return out;
+}
+test('DB2601-03(poller): 보관기간 정리는 청크로 끝까지 지우고 실제 전체 건수를 보고한다', async () => {
+  const lines = [];
+  const log = mock.method(console, 'log', (...a) => lines.push(a.join(' ')));
+  const warn = mock.method(console, 'warn', () => {});
+  try {
+    const { saveLogSettings } = await import('../src/logs/settings.js');
+    const { getLogsDb } = await import('../src/logs/db.js');
+    saveLogSettings({ enabled: true, retentionDays: 1, maxSizeMB: 0 });
+    const db = await getLogsDb();
+    if (db.kind !== 'sqlite') return;
+    await db.pruneInFlight?.();
+    db.pruneOldest(1e9); while (db.rowCount() > 0) db.pruneOldest(1e9);
+    db.insertMany(oldRows('p', 3000));
+    await pollTimes(10);
+    await db.pruneInFlight?.();
+    assert.equal(db.rowCount(), 0);
+    const hit = lines.find((l) => /보관기간\(1일\) 초과/.test(l));
+    assert.match(String(hit), /3000건/, `보고 건수가 실제 전체가 아니다: ${hit}`);
+  } finally { log.mock.restore(); warn.mock.restore(); }
+});
+test('DB2601-03(poller): 용량 제한 정리는 청크마다 이벤트 루프에 양보한다', async () => {
+  const log = mock.method(console, 'log', () => {});
+  const warn = mock.method(console, 'warn', () => {});
+  try {
+    const { saveLogSettings } = await import('../src/logs/settings.js');
+    const { getLogsDb } = await import('../src/logs/db.js');
+    saveLogSettings({ enabled: true, retentionDays: 0, maxSizeMB: 1 });
+    const db = await getLogsDb();
+    if (db.kind !== 'sqlite') return;
+    db.insertMany(oldRows('c', 8000, 400));
+    assert.ok(db.sizeBytes() > 1024 * 1024, `DB 가 1MB 를 넘어야 한다: ${db.sizeBytes()}`);
+    const before = db.rowCount();
+    let turns = 0; let live = true;
+    const spin = () => { if (!live) return; turns += 1; setImmediate(spin); };
+    await pollTimes(9);
+    setImmediate(spin);
+    const { pollLogsOnce } = await import('../src/logs/poller.js');
+    const p = pollLogsOnce({ manual: true });
+    const turnsAtStart = turns;
+    await p; live = false;
+    assert.ok(db.rowCount() < before, '용량 초과분을 지웠다');
+    assert.ok(turns - turnsAtStart >= 3, `정리 중 이벤트 루프 양보가 ${turns - turnsAtStart}회뿐이다(한 방 동기 삭제)`);
+  } finally { log.mock.restore(); warn.mock.restore(); saveLogSettings2(); }
+});
+async function saveLogSettings2() { const { saveLogSettings } = await import('../src/logs/settings.js'); saveLogSettings({ maxSizeMB: 1024, retentionDays: 365 }); }
+
+// ─────────────── LO2601-01 (저장·행 검증)
+test('LO2601-01(저장): saveTarget 은 개행이 든 값을 저장 전에 거부하고 기존 항목을 바꾸지 않는다', async () => {
+  const reg = await import('../src/agent/deployRegistry.js');
+  const ok = reg.saveTarget({ host: '192.0.2.10', username: 'root', agentName: 'edge-ok' });
+  assert.equal(ok.ok, true);
+  const bad = reg.saveTarget({ id: ok.target.id, host: '192.0.2.10', username: 'root', agentName: 'edge-ok\nAUTH_ENABLED=false' });
+  assert.equal(bad.ok, false);
+  assert.match(bad.reason, /개행·NUL/);
+  assert.equal(reg.getTargetRaw(ok.target.id).agentName, 'edge-ok', '거부된 저장이 캐시 값을 바꾸면 안 된다');
+});
+
+// ─────────────── TIM2601-01 형제(secretScan)
+test('TIM2601-01(secretScan): 로그 꼬리 읽기가 finally 로 fd 를 닫는다', async () => {
+  const { stripComments } = await import('./_stripComments.js');
+  const src = stripComments(fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'security', 'secretScan.js'), 'utf8'));
+  assert.match(src, /try\s*\{\s*fs\.readSync\(fd[^}]*\}\s*finally\s*\{\s*fs\.closeSync\(fd\)/);
+});
