@@ -91,8 +91,9 @@ test('CEN2600-10 — 공유 토큰 본문 agent 가 객체여도 500 이 아니�
   assert.equal(g.status, 400, JSON.stringify(g.body));
   const reg = await post('/register-collector', { name: { toString: 'x' }, port: 1, collectorToken: 't' });
   assert.equal(reg.status, 400, JSON.stringify(reg.body));
+  // v2.601 CEN2601-04: 배정 없는 agent 의 결과는 409(사유)다 — 400/500 이 아니라 정상 거절이어야 한다.
   const ok = await post('/result', { agent: 'edge-ok', scanned: 1 });
-  assert.equal(ok.status, 200);
+  assert.equal(ok.status, 409, JSON.stringify(ok.body));
 });
 
 // ── CEN2600-01 ───────────────────────────────────────────────────────────────

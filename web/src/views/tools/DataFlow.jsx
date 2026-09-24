@@ -22,7 +22,7 @@ import BoldText from '../../components/boldText.jsx';
 import { layoutDataFlow, W, BUS_X, BUS_W } from './dataFlowLayout.js';
 import {
   STATE_LABEL, STATE_COLOR, STATE_DOT, KIND_LABEL, KIND_SHORT, CAT_COLOR, TONE_HEAD,
-  routePath, sinceNote, linkText, edgeBadge, edgeLasts, innerItemText, legendLines, ageText, spanText, bytesText,
+  routePath, sinceNote, sharedMark, linkText, edgeBadge, edgeLasts, innerItemText, legendLines, ageText, spanText, bytesText,
   DIR_LABEL, DIR_ARROW, DIR_KINDS_TEXT, dirCellText, dirSumText, shortEdgeLabels,
 } from './dataFlowText.js';
 import { fetchResultText, statusSummary, groupStatus } from './edgeLogText.js';
@@ -170,6 +170,8 @@ export default function DataFlow() {
                   border: `1px solid ${on ? '#e0a43a' : '#232833'}`, background: '#151920', borderRadius: 5, textAlign: 'left', cursor: 'pointer', color: '#d7dbe3', overflow: 'hidden' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, padding: '5px 9px', background: TONE_HEAD[b.tone], fontSize: 12, fontWeight: 600, color: '#f4f6f9' }}>
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{e.name}</span>
+                  {/* v2.601 WEB2601-02: 같은 주소를 쓰는 엣지 — 설명은 머리말에 한 번(sharedUrlNote) */}
+                  {sharedMark(e) && <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 500, flexShrink: 0, color: '#f0c46a' }} title={`같은 주소: ${e.sharedUrlWith.join(', ')}`}>{sharedMark(e)}</span>}
                   <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 500, flexShrink: 0 }}>{b.text}</span>
                 </div>
                 <div style={{ padding: '6px 9px 8px', display: 'flex', flexDirection: 'column', gap: 4, fontFamily: MONO, fontSize: 10.5, color: '#8a93a6' }}>

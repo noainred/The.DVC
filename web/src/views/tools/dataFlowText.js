@@ -71,7 +71,8 @@ export function unauthNote(data = {}, now = Date.now()) {
 export function sharedUrlNote(data = {}) {
   const shared = (data.edges || []).filter((e) => Array.isArray(e.sharedUrlWith) && e.sharedUrlWith.length);
   if (!shared.length) return '';
-  const names = shortEdgeLabels(shared.map((e) => e.name || e.id), 6);
+  const labels = shortEdgeLabels(shared.map((e) => String(e.name || e.id)), 16);
+  const names = labels.slice(0, 6).join(', ') + (labels.length > 6 ? ` 외 ${labels.length - 6}곳` : '');
   const rows = Array.isArray(data.sharedUrl) ? data.sharedUrl : [];
   const cnt = rows.reduce((a, r) => a + (Number(r.count) || 0), 0);
   const routes = new Set(rows.flatMap((r) => r.routes || [])).size;

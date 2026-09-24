@@ -124,3 +124,62 @@ test('WEB2601-06 puller — 한 번도 성공 못 한 엣지의 첫 실패는 ok
     assert.equal(getCollectorStatus('edge-never').at, okSt.at);
   } finally { srv.close(); }
 });
+
+/* ── 후속(코디네이터 지시): ① temps 주기 ③ 다른 중앙 → 엣지 호출 태그 ④ edge.reportAt ─────────── */
+
+test('WEB2601-05 후속 — /admin/idrac/temps 응답이 수집 주기(intervalMs)를 싣는다', async () => {
+  const { adminRouter } = await import('../src/routes/admin.js');
+  const { config } = await import('../src/config.js');
+  const layer = adminRouter.stack.find((l) => l.route?.path === '/idrac/temps' && l.route.methods.get);
+  assert.ok(layer);
+  const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+  const body = await new Promise((resolve, reject) => {
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(b) { resolve(b); } };
+    try { handler({ query: {}, user: { username: 't', role: 'admin' } }, res, reject); } catch (e) { reject(e); }
+  });
+  assert.equal(body.intervalMs, config.idrac.pollIntervalMs);
+  assert.ok(body.intervalMs > 0);
+});
+
+test('WEB2601-02 후속 — 토큰 점검·엣지 로그·사용률·ping 프로브·번들 push 도 수집 서버 태그를 싣는다', async () => {
+  const srv = http.createServer((req, res) => { res.setHeader('Content-Type', 'application/json'); res.statusCode = 404; res.end('{}'); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    const { addCollector } = await import('../src/collector/registry.js');
+    const url = `http://127.0.0.1:${srv.address().port}`;
+    assert.ok(addCollector({ id: 'tag-a', name: 'tag-a', url, token: 't', enabled: true })?.ok !== false);
+    resetOutboundStats();
+    const { pullTokenCheck } = await import('../src/central/tokenCheckPull.js');
+    const { pullEdgeLog } = await import('../src/central/edgeLogPull.js');
+    const { pullBmUsage } = await import('../src/central/bmUsageEdgePull.js');
+    const { probeCollectorPing } = await import('../src/portalcheck/tokenProbe.js');
+    const { pushBundleToCollector } = await import('../src/collector/upgradePush.js');
+    await pullTokenCheck('tag-a');
+    await pullEdgeLog('tag-a');
+    await pullBmUsage('tag-a');
+    await probeCollectorPing({ url, agent: 'tag-a', collector: { set: true } }, { token: 't' });
+    await pushBundleToCollector({ id: 'tag-a', url, token: 't' }, Buffer.from('x'), { timeout: 5000 });
+    const { pushIdracScan } = await import('../src/central/idracScanPush.js');
+    const pr = pushIdracScan('tag-a', { ips: ['10.9.9.9'], username: 'u', password: 'p' });
+    assert.equal(pr.ok, true, JSON.stringify(pr));
+    for (let i = 0; i < 100 && !outboundStats().rows.some((x) => x.path === '/api/collector/idrac-scan'); i++) await new Promise((r) => setTimeout(r, 50));
+    const rows = outboundStats().rows;
+    for (const p of ['/api/collector/token-check', '/api/collector/edge-log', '/api/collector/bm-usage', '/api/collector/ping', '/api/collector/upgrade', '/api/collector/idrac-scan']) {
+      const r = rows.find((x) => x.path === p);
+      assert.ok(r, `${p} 기록`);
+      assert.equal(r.tag, 'tag-a', `${p} 태그`);
+    }
+  } finally { srv.close(); }
+});
+
+test('WEB2601-03 후속 — mergeEdgeReport 가 reportAt 을 따로 싣는다(at 은 호환상 마지막 시도)', async () => {
+  const { mergeEdgeReport } = await import('../src/portalcheck/tokenScan.js');
+  const out = mergeEdgeReport({ rows: [{ agent: 'e1' }, { agent: 'e2' }] }, [
+    { agent: 'e1', at: NOW, ok: false, kind: 'auth', reportAt: null, report: null, lastAttempt: { at: NOW, ok: false, kind: 'auth' } },
+    { agent: 'e2', at: NOW, ok: false, kind: 'timeout', reportAt: NOW - 60_000, report: { tokens: {}, node: { agent: 'e2' } }, lastAttempt: { at: NOW, ok: false } },
+  ]);
+  const e1 = out.rows.find((r) => r.agent === 'e1').edge;
+  const e2 = out.rows.find((r) => r.agent === 'e2').edge;
+  assert.equal(e1.reportAt, null); assert.equal(e1.at, NOW);
+  assert.equal(e2.reportAt, NOW - 60_000);
+});

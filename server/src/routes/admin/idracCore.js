@@ -387,8 +387,7 @@ adminRouter.get('/idrac/temps', adminOnly, (req, res) => {
     }
   }
   rows.sort((a, b) => b.celsius - a.celsius);
-  // v2.601(WEB2601-05): 수집 주기는 서버 값을 싣는다 — 화면이 '1분마다' 를 박아 두지 않게(CLAUDE.md v2.493).
-  res.json({ rows, servers: serverList, sampledServers: serverList.length, totalServers: servers.length, missing, maxCelsius: rows.length ? rows[0].celsius : null, intervalMs: getPollerStatus().intervalMs });
+  res.json({ rows, servers: serverList, sampledServers: serverList.length, totalServers: servers.length, missing, maxCelsius: rows.length ? rows[0].celsius : null, intervalMs: getPollerStatus().intervalMs }); // v2.601(WEB2601-05): 수집 주기는 서버 값 — 화면이 '1분마다' 를 박아 두지 않게
 });
 
 // 서버 분석 — 서버 모델(R760/R770 등)별로 펌웨어/드라이버 버전 분포(버전별 설치 서버 수).
