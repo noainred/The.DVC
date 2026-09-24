@@ -133,7 +133,8 @@ api.get('/tools/threats', requirePerm('tools'), (req, res) => memoJson(req, res,
   // B) NSX 분산 IDS 이벤트(있으면) — 조직 전역이라 범위 제한 계정에는 노출하지 않는다.
   const nsx = nsxStore.get();
   let idsEvents = allowed ? [] : (nsx.idsEvents || []);
-  const idsManagers = allowed ? [] : (nsx.managers || []).map((m) => ({ name: m.name, enabled: m.idsEnabled ?? null, profiles: m.idsProfiles || 0, events: m.idsEventCount || 0 }));
+  const idsManagers = allowed ? [] : (nsx.managers || []).map((m) => ({ name: m.name, enabled: m.idsEnabled ?? null, // v2.603(감사 COL-2603-05 후속): 조회 실패는 null 이다(서버 nsx/client.js 가 싣는다) — `|| 0` 이 '프로파일 0개' 라는 거짓으로 되돌렸다.
+    profiles: m.idsProfiles ?? null, events: m.idsEventCount ?? null, ...(m.idsEventsTruncated ? { eventsTruncated: true } : {}) }));
   const sev = (e) => e.severity;
   idsEvents = idsEvents.slice(0, 500);
 

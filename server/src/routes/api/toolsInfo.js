@@ -159,6 +159,7 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
   // 같은 visibleNsxManagers 로 거르고, Horizon 은 vCenter 귀속 축이 없으므로(v2.525) 범위 계정에는 싣지 않는다.
   // 뺀 것은 omittedOutOfScope 로 밝힌다(조용한 제외 금지).
   const omittedOutOfScope = { nsxManagers: 0, nsxLicenses: 0, horizon: false };
+  const collectionErrors = [];   // v2.603: NSX 라이선스 조회 실패도 여기에 싣는다(선언을 NSX 블록 앞으로)
   // NSX 매니저 직수집 라이선스 — 특정 vCenter 를 고른 조회에서는 빼고, 전체 조회에서는 사용자 범위 안 매니저만.
   if (!scoped) {
     const allMgrs = nsxStore.get()?.managers || [];
@@ -168,6 +169,12 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
       for (const m of allMgrs) if (!seen.has(m)) { omittedOutOfScope.nsxManagers += 1; omittedOutOfScope.nsxLicenses += (m.licenses || []).length; }
     }
     for (const m of mgrs) {
+      // v2.603(감사 COL-2603-05 후속): 라이선스 조회에 실패한 매니저는 빈 목록이 '라이선스 없음' 이 아니라 **확인 불가**다 —
+      //   서버 수집기가 listsFailed 에 'licenses' 를 싣는다. 사유 원문(주소가 들어갈 수 있다)은 admin 에게만.
+      if (Array.isArray(m.listsFailed) && m.listsFailed.includes('licenses')) {
+        const why = isAdminReq(req) ? String(m.listFailReasons?.licenses || '').slice(0, 200) : '';
+        collectionErrors.push(`NSX ${m.name || m.id}: 라이선스 조회 실패 — 이 매니저의 라이선스는 '없음' 이 아니라 확인 불가${why ? ` (${why})` : ''}`);
+      }
       for (const l of (m.licenses || [])) {
         const st = licenseExpiryStatus(l.expiry || null, { forcedExpired: l.isExpired });
         items.push({
@@ -182,7 +189,6 @@ api.get('/tools/license-expiry', requirePerm('tools'), async (req, res) => {
     }
   }
   // Horizon Connection Server 직수집(등록된 서버가 있을 때만) — vCenter 스코프와 무관.
-  const collectionErrors = [];
   if (!scoped && allowed) omittedOutOfScope.horizon = listHorizon().length > 0;
   if (!scoped && !allowed) {
     try {

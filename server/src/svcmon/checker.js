@@ -22,6 +22,9 @@ import { Agent } from 'undici';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { pingOne } from '../util/ping.js';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
+// v2.603(SEC2603-03): 본문 앞부분 읽기는 util 하나(rma/testRunner.js 도 같은 헬퍼) — 재수출은 import+export 형태(v2.575)
+import { readBodyPrefix } from '../util/readPrefix.js';
+export { readBodyPrefix };
 
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher. 저장 시점 ssrfBlockReason·실행 시점 ssrfBlockReasonResolved 는 **해석한 IP 로 접속하지 않으므로** 리바인딩 창이 남는다.
 const insecureAgent = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: false }) });
@@ -61,41 +64,6 @@ export const KEYWORD_SCAN_BYTES = 256 * 1024;
 /** 응답 본문을 버린다(읽지 않고 연결 정리). 실패는 무시 — 이미 소비됐거나 본문이 없다. */
 function cancelBody(res) {
   try { res?.body?.cancel?.().catch?.(() => {}); } catch { /* */ }
-}
-
-/**
- * 본문을 **앞 maxBytes 까지만** 스트림으로 읽는다(순수 I/O 헬퍼 — v2.603 SEC2603-03). 넘으면 거기서 취소하고
- * `capped:true` 로 알린다(던지지 않는다 — 키워드 검사는 앞부분만 보면 된다). 압축 응답도 해제된 바이트로 센다.
- */
-export async function readBodyPrefix(res, maxBytes) {
-  const max = Math.max(1, Number(maxBytes) || 0);
-  if (!res?.body || typeof res.body.getReader !== 'function') {
-    const t = String(await res.text());
-    const b = Buffer.from(t, 'utf8');
-    return b.length > max ? { text: b.subarray(0, max).toString('utf8'), capped: true } : { text: t, capped: false };
-  }
-  const reader = res.body.getReader();
-  const chunks = [];
-  let n = 0, capped = false;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const room = max - n;
-    if (value.byteLength >= room) {
-      chunks.push(Buffer.from(value.buffer, value.byteOffset, room));
-      n = max;
-      capped = value.byteLength > room;
-      if (!capped) {   // 정확히 상한에 닿았다 — 뒤에 더 있는지 한 번만 본다
-        const nx = await reader.read();
-        capped = !nx.done;
-      }
-      if (capped) { try { await reader.cancel(); } catch { /* */ } }
-      break;
-    }
-    chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
-    n += value.byteLength;
-  }
-  return { text: Buffer.concat(chunks).toString('utf8'), capped };
 }
 
 /**

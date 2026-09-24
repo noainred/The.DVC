@@ -165,7 +165,7 @@ export function Threats({ scope }) {
       )}
       {sec === 'ids' && (
         <>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>NSX 분산 IDS/IPS. {data.ids.managers.map((m) => `${m.name}: ${m.enabled === true ? '활성' : m.enabled === false ? '비활성' : '미상'}(프로파일 ${m.profiles})`).join(' · ') || 'NSX 매니저 없음'}</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>NSX 분산 IDS/IPS. {data.ids.managers.map((m) => `${m.name}: ${m.enabled === true ? '활성' : m.enabled === false ? '비활성' : '미상'}(프로파일 ${m.profiles == null ? '확인 불가' : m.profiles})`).join(' · ') || 'NSX 매니저 없음'}</div>
           <div className="table-wrap" style={{ maxHeight: '60vh' }}>
             <STable><thead><tr><th>시각</th><th>시그니처</th><th>심각도</th><th>출발지</th><th>목적지</th><th>조치</th><th style={{ textAlign: 'right' }}>횟수</th></tr></thead>
               <tbody>{data.ids.events.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>IDS 이벤트가 없습니다(미활성 또는 NSX 버전/NAPP 미지원일 수 있음).</td></tr>}
