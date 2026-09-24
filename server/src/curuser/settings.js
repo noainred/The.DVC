@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.configDir, 'curuser-settings.json');
 
@@ -44,6 +45,17 @@ const clamp = (v, l) => {
 };
 const strArr = (v, max = 200) => (Array.isArray(v) ? v : [])
   .map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, max);
+
+// v2.599 LO2599-01: 숫자 칸을 비우고 저장하면(''·null·비숫자·0 이하) clamp 가 **기본값**을 줬다 — 예: 보존 3650일 →
+// 180일 · 주기 1시간 → 10분(현재 사용자). v2.596 규약대로 빈 칸은 '미지정' 이고 **이전 값을 유지**한다(판정은 numOrNull — Number('')===0 함정).
+function keepPrevBlankNumbers(input, prev) {
+  const out = { ...(input && typeof input === 'object' ? input : {}) };
+  for (const k of Object.keys(LIMITS)) {
+    const n = numOrNull(out[k]);
+    if (n == null || n <= 0) out[k] = prev[k];
+  }
+  return out;
+}
 
 let _cache = null;
 /**
@@ -99,7 +111,7 @@ export function load() {
 
 export function save(input = {}) {
   const before = _cache ? JSON.stringify(_cache) : null;
-  _cache = normalize(input);
+  _cache = normalize(keepPrevBlankNumbers(input, load()));
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
   if (before !== JSON.stringify(_cache)) for (const cb of listeners) { try { cb(); } catch { /* 격리 */ } }
   return load();

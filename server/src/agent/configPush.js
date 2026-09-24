@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
-import { collectConfigDir, REDACTED_META } from '../backup/service.js';
+import { numOrNull } from '../util/numOrNull.js';
+import { collectConfigDir, REDACTED_META, SKIPPED_META } from '../backup/service.js';
 
 let timer = null;
 let changeTimer = null;
@@ -31,22 +32,26 @@ export async function pushConfigNow(...args) {
 async function _pushConfigNow() {
   if (!config.agent.centralUrl) return null;
   try {
-    const files = collectConfigDir(); // 자기 설정(*.json/*.env), 대용량 데이터 제외
     // v2.538: .env 의 키·토큰은 collectConfigDir 가 이미 가렸다(util/envRedact.js). 가린 목록 메타는
     // 파일이 아니므로 중앙에 보내지 않는다(중앙 수신부는 문자열만 받지만 여기서 명시적으로 뺀다).
-    const redactedMeta = files[REDACTED_META]; delete files[REDACTED_META];
+    // v2.599(감사 EDGE2599-04): 크기 상한(8MB)으로 **뺀 파일 목록**(SKIPPED_META)도 메타다 — 예전에는 그것을 files 에
+    //   남겨 '설정 파일' 로 셌고(개수 +1), 뺀 사실은 어디에도 남지 않았다. 이름·크기를 상태·콘솔에 남기고 본문에도
+    //   `skipped` 로 실어 중앙이 밝힐 수 있게 한다(v2.590 D5 와 같은 규약 — 조용히 빼지 않는다).
+    const { files, redactedMeta, skipped } = splitConfigMeta(collectConfigDir()); // 자기 설정(*.json/*.env), 대용량 데이터 제외
     if (redactedMeta) console.log(`[config-push] .env 키·토큰 ${Object.values(redactedMeta).reduce((n, k) => n + k.length, 0)}개는 중앙에 보내지 않습니다`);
+    if (skipped.length) console.warn(`[config-push] 크기 상한을 넘은 설정 파일 ${skipped.length}개는 보내지 않습니다: ${skipped.map((f) => (f.size == null ? f.name : `${f.name}(${Math.round(f.size / 1048576)}MB)`)).join(', ')}`);
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/agent-config`, {
       method: 'POST', headers: headers(),
-      body: JSON.stringify({ agent: config.agent.name, files }), timeoutMs: 20_000, retries: 2,
+      body: JSON.stringify({ agent: config.agent.name, files, ...(skipped.length ? { skipped } : {}) }), timeoutMs: 20_000, retries: 2,
     });
+    const skippedInfo = skipped.length ? { skipped } : {};
     if (res.ok) {
-      console.log(`[config-push] sent → ${config.agent.centralUrl} (${Object.keys(files).length}개 설정)`);
-      _last = { at: Date.now(), ok: true, files: Object.keys(files).length, status: res.status };
+      console.log(`[config-push] sent → ${config.agent.centralUrl} (${Object.keys(files).length}개 설정${skipped.length ? ` · 크기 초과 ${skipped.length}개 제외` : ''})`);
+      _last = { at: Date.now(), ok: true, files: Object.keys(files).length, status: res.status, ...skippedInfo };
     } else {
       // v2.583 감사 #34: 403(토큰)·413(본문 한도)을 조용히 false 로 넘기지 않는다 — 상태·콘솔에 남긴다.
       const hint = res.status === 413 ? ' — 중앙 본문 한도 초과(설정 파일이 너무 큼)' : res.status === 403 ? ' — 중앙이 토큰·에이전트 이름을 거부' : '';
-      _last = { at: Date.now(), ok: false, status: res.status, error: `HTTP ${res.status}${hint}` };
+      _last = { at: Date.now(), ok: false, status: res.status, error: `HTTP ${res.status}${hint}`, ...skippedInfo };
       console.warn(`[config-push] 실패: HTTP ${res.status}${hint}`);
     }
     return res.ok;
@@ -54,6 +59,20 @@ async function _pushConfigNow() {
     _last = { at: Date.now(), ok: false, error: String(e?.message || e) };
     console.warn(`[config-push] 실패: ${e.message}`); return false;
   }
+}
+
+/**
+ * collectConfigDir 결과에서 메타 키를 떼어 낸다(순수, v2.599 EDGE2599-04) — 남는 것은 **파일만**이다.
+ * skipped 는 [{name, size}] (크기 상한으로 뺀 파일). 원본 객체는 건드리지 않는다.
+ */
+export function splitConfigMeta(collected) {
+  const files = { ...(collected || {}) };
+  const redactedMeta = files[REDACTED_META] || null; delete files[REDACTED_META];
+  const rawSkipped = files[SKIPPED_META]; delete files[SKIPPED_META];
+  const skipped = (Array.isArray(rawSkipped) ? rawSkipped : [])
+    .filter((f) => f && typeof f === 'object')
+    .map((f) => ({ name: String(f.name || ''), size: numOrNull(f.size) }));
+  return { files, redactedMeta, skipped };
 }
 
 let _last = null;

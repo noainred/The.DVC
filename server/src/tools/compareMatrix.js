@@ -137,7 +137,7 @@ export function datastoreMatrix(slice = {}, { maxRows = 300, normalize = false }
   const rowName = normalize ? stripSitePrefix : nameOf;
   const vcs = (slice.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id }));
   const allowed = new Set(vcs.map((v) => v.id));
-  const mkAcc = () => ({ count: 0, capacityGB: 0, usedGB: 0, freeGB: 0 });
+  const mkAcc = () => ({ count: 0, capacityGB: 0, usedGB: 0, freeGB: 0, usageUnknown: 0 });
   const rows = new Map();
   const totals = new Map();
   const origNames = new Map();
@@ -147,9 +147,13 @@ export function datastoreMatrix(slice = {}, { maxRows = 300, normalize = false }
     if (!allowed.has(d.vcenterId)) continue;
     const row = rowName(d.name) || '(이름 없음)';
     note(row, nameOf(d.name));
+    // v2.599 RECENT2599-03: 사용량을 못 읽은 DS(usedGB·freeGB 둘 다 null)는 용량·사용량·여유 **모두에서** 뺀다 —
+    // capacity − num(null) 로 '100% 사용' 이 되던 것. 개수는 usageUnknown 으로 밝힌다(vmtrack 과 같은 규칙).
+    const unknown = d.usedGB == null && d.freeGB == null;
     const used = d.usedGB != null ? num(d.usedGB) : Math.max(0, num(d.capacityGB) - num(d.freeGB));
     for (const a of [cellOf(rows, row, d.vcenterId, mkAcc), totalOf(totals, row, mkAcc)]) {
       a.count += 1;
+      if (unknown) { a.usageUnknown += 1; continue; }
       a.capacityGB += num(d.capacityGB);
       a.usedGB += used;
       a.freeGB += num(d.freeGB);
@@ -162,6 +166,8 @@ export function datastoreMatrix(slice = {}, { maxRows = 300, normalize = false }
     usedTB: r1(a.usedGB / 1024),
     freeTB: r1(a.freeGB / 1024),
     count: a.count,
+    // 지표(DATASTORE_METRICS)가 아니라 설명용 — 있을 때만 싣는다(셀 키 = 지표 키 계약을 평소에는 그대로 둔다).
+    ...(a.usageUnknown ? { usageUnknown: a.usageUnknown } : {}),
   });
 
   return buildRows({ rows, totals, vcs, shape, mkAcc, maxRows, sortBy: (t) => t.capacityGB, origNames });

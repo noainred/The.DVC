@@ -9,6 +9,7 @@
  */
 
 import { requireRole, requirePerm } from '../../auth/auth.js';
+import { isAdminReq, maskDeviceAddress, maskSnapAddress } from '../../auth/addressMask.js';
 import { requireSettingsOwner } from '../admin/shared.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
@@ -45,7 +46,7 @@ function allSnapshots() {
 export function registerPdu(api) {
 
   // ---- 목록/현황 ------------------------------------------------------------
-  api.get('/tools/pdu', toolsPerm, fullScopeOnly, (_req, res) => {
+  api.get('/tools/pdu', toolsPerm, fullScopeOnly, (req, res) => {
     const th = loadThresholds();
     const snaps = new Map(allSnapshots().map((s) => [s.id, s]));
     const devices = listDevices().map((d) => {
@@ -68,9 +69,12 @@ export function registerPdu(api) {
         } : null,
       };
     });
+    // v2.599(AUTHZ-2599-03): 비-admin 에는 관리 IP·계정명을 가리고 밝힌다(v2.593 relaytopo 와 같은 기준).
+    const admin = isAdminReq(req);
     res.json({
       ok: true,
-      devices,
+      devices: admin ? devices : devices.map(maskDeviceAddress),
+      ...(admin ? {} : { addressHidden: true }),
       datacenters: listDatacenters(),
       agents: knownAgentNames(),
       poller: pduPollerStatus(),
@@ -94,7 +98,10 @@ export function registerPdu(api) {
   api.get('/tools/pdu/:id', toolsPerm, fullScopeOnly, (req, res) => {
     const s = allSnapshots().find((x) => x.id === req.params.id) || getLocalSnapshot(req.params.id);
     if (!s) return res.status(404).json({ ok: false, reason: '수집된 데이터가 없습니다.' });
-    res.json({ ok: true, snapshot: { ...s, summary: summarize(s) } });
+    // v2.599(AUTHZ-2599-03): 단건 조회도 목록과 같은 기준(형제 경로가 우회로가 되지 않게).
+    const admin = isAdminReq(req);
+    const snapshot = { ...s, summary: summarize(s) };
+    res.json({ ok: true, snapshot: admin ? snapshot : maskSnapAddress(snapshot), ...(admin ? {} : { addressHidden: true }) });
   });
 
   // ---- 시계열(별도 DB) ------------------------------------------------------

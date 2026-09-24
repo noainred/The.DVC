@@ -93,9 +93,22 @@ function prepare(db) {
   };
 }
 
+// v2.599 DB2599-02: 첫 open 에서 다른 연결이 잠금을 쥐고 있으면('database is locked') 예전에는 initError 로 **래치**해
+// 프로세스 수명 동안 Horizon 세션 이력이 꺼졌다. busy_timeout 이 journal_mode 와 같은 exec 안에 있어 기다리지도
+// 않았다. storage/db.js(v2.597 L2597-02)와 같게 — busy_timeout 을 **먼저 따로** 걸고, 잠금 오류면 핸들을 닫고
+// 래치하지 않은 채 30초 뒤 다시 연다. 그 밖의 오류(node:sqlite 없음·손상)만 래치한다.
+let lockError = null;
+let retryAt = 0;
+const LOCK_RETRY_MS = 30_000;
+const isLockError = (e) => {
+  const code = e && (e.errcode ?? e.errno);
+  return code === 5 || code === 6 || /database is (locked|busy)|SQLITE_(BUSY|LOCKED)/i.test(String(e?.message || ''));
+};
+
 async function open() {
   if (x) return x;
   if (initError) return null;
+  if (!ready && retryAt && Date.now() < retryAt) return null;
   if (!ready) {
     ready = (async () => {
       // eslint-disable-next-line import/no-unresolved
@@ -103,12 +116,19 @@ async function open() {
       const p = DB_PATH();
       fs.mkdirSync(path.dirname(p), { recursive: true });
       const db = new DatabaseSync(p);
-      try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
-      const st = prepare(db);
-      try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
-      x = { db, st, path: p };
-      return x;
-    })().catch((e) => { initError = e; return null; });
+      try {
+        db.exec('PRAGMA busy_timeout=3000;');   // 먼저 — journal_mode 전환·스키마 생성도 잠금을 기다리게
+        try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;'); } catch (e) { if (isLockError(e)) throw e; /* 구버전 폴백 */ }
+        const st = prepare(db);
+        try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
+        x = { db, st, path: p };
+        lockError = null; retryAt = 0;
+        return x;
+      } catch (e) { try { db.close(); } catch { /* */ } throw e; }
+    })().catch((e) => {
+      if (isLockError(e)) { lockError = e; retryAt = Date.now() + LOCK_RETRY_MS; ready = null; return null; }
+      initError = e; return null;
+    });
   }
   return ready;
 }
@@ -119,7 +139,8 @@ export async function hzSessionDbStatus() {
   return {
     available: !!h,
     path: h ? h.path : DB_PATH(),
-    error: initError ? String(initError.message || initError).slice(0, 200) : '',
+    error: initError ? String(initError.message || initError).slice(0, 200)
+      : (!h && lockError ? `DB 파일이 잠겨 있어 열지 못했습니다(잠시 뒤 다시 시도합니다): ${String(lockError.message || lockError).slice(0, 160)}` : ''),
     ...(h ? h.st.stats.get() : { latestRows: null, seriesRows: null }),
   };
 }
@@ -142,7 +163,7 @@ const nOrNull = (v) => {
  */
 export async function commitHzSessions({ ts, records = [], series = [], maxUsers = 2000 }) {
   const h = await open();
-  if (!h) return { ok: false, reason: initError ? String(initError.message) : 'node:sqlite 없음' };
+  if (!h) return { ok: false, reason: initError ? String(initError.message) : lockError ? `DB 잠금(다시 시도 예정): ${String(lockError.message)}` : 'node:sqlite 없음' };
   const t = Date.now();
   h.db.exec('BEGIN');
   try {
@@ -232,7 +253,10 @@ export async function pruneHzSessions(retentionDays, { every = 12 } = {}) {
   return { skipped: false, series: s, before };
 }
 
+/** 테스트 전용 — 잠금 재시도 대기(30초)를 건너뛴다. */
+export function _expireLockRetryForTest() { retryAt = 0; }
+
 export function _resetForTest() {
   try { x?.db?.close?.(); } catch { /* */ }
-  x = null; ready = null; initError = null; tick = 0;
+  x = null; ready = null; initError = null; lockError = null; retryAt = 0; tick = 0;
 }

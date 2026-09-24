@@ -277,7 +277,12 @@ async function scanFile(file, ctx) {
   try {
     for await (const raw of rl) {
       let cells = null;
-      if (st) {
+      if (raw.length > PENDING_MAX) {
+        // v2.599 T2599-03: 따옴표 없는 물리행 하나에도 상한을 둔다. 예전에는 PENDING_MAX 가 인용부호 이어붙임에만
+        //   걸려, 손상 파일의 긴 한 줄(20MB)이 csvStateFeed 의 문자 단위 `field += c` 로 들어가 로프 노드가 쌓였다
+        //   (실측 heap +665MB · 2.3초). 그 행(과 이어붙이던 행)은 손상으로 세고 버린다.
+        ctx.badRows += st ? 2 : 1; st = null;
+      } else if (st) {
         // 인용부호 미종결 이어붙임 — 새 물리행만 이어서 파싱(전체 재파싱 O(L²) 금지)
         csvStateFeed(st, '\n');
         csvStateFeed(st, raw);

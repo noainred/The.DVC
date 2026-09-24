@@ -18,6 +18,11 @@ import { emptySnapshot } from '../types.js';
 // v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 — restCommon 과 같은 규약.
 import { describeFetchError, isTransportError } from './netError.js';
 import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
+
+/** 초당 바이트 → 초당 비트(v2.599 C2599-01). null·비유한값은 null(0 으로 채우면 '트래픽 없음' 거짓). */
+export function bytesRateToBps(v) {
+  return typeof v === 'number' && Number.isFinite(v) ? v * 8 : null;
+}
 import { numOrNull } from '../../util/numOrNull.js';
 
 // Isilon 전용 로컬 TLS 디스패처 — 사내 자체서명 장비 한정(다른 fetch 에 주입 금지).
@@ -130,8 +135,11 @@ export function normalizeIsilon(device, raw) {
         id: lnn,
         ip: String(n.ip || n.ip_address || (Array.isArray(n.ip_addresses) ? n.ip_addresses[0] : '') || n.ext_ip || ''),
         health: healthOf(n),
-        inBps: st['node.net.ext.bytes.in.rate'] ?? null,
-        outBps: st['node.net.ext.bytes.out.rate'] ?? null,
+        // v2.599(감사 C2599-01): node.net.ext.bytes.*.rate 는 **초당 바이트(B/s)** 인데 칸 이름·화면(bps())·SSH 경로
+        //   (isilonSsh.parseBps — 'Throughput (bps)')는 초당 비트다. 그대로 두면 REST 노드가 8배 과소로 보였다.
+        //   ×8 은 sanswitch/rates.js toBps 와 같은 규칙이고, 못 읽은 값(null)은 그대로 null 이다.
+        inBps: bytesRateToBps(st['node.net.ext.bytes.in.rate']),
+        outBps: bytesRateToBps(st['node.net.ext.bytes.out.rate']),
         hdd: mkPool(Math.max(0, (st['node.ifs.bytes.total'] || 0) - (st['node.ifs.ssd.bytes.total'] || 0)),
                     has(st, 'node.ifs.bytes.used') && (has(st, 'node.ifs.ssd.bytes.used') || !((st['node.ifs.ssd.bytes.total'] || 0) > 0))
                       ? Math.max(0, st['node.ifs.bytes.used'] - (st['node.ifs.ssd.bytes.used'] || 0)) : null),

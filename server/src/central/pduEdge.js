@@ -11,8 +11,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { preserveCorrupt } from '../util/atomicWrite.js';
 import { ackCollect, setCollectBaseResolver } from '../pdu/collectRequests.js';
+import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
 
 const FILE = path.join(config.configDir, 'central-pdu.json');
 // 엣지가 오래 조용하면 낡은 값을 '현재'처럼 보여주지 않도록 만료시킨다(정직 표기).
@@ -37,10 +38,10 @@ setCollectBaseResolver((id) => {
   return null;
 });
 
-function persist() {
-  try { atomicWriteFileSync(FILE, JSON.stringify({ edges: [...load().values()] }, null, 2), { mode: 0o600 }); }
-  catch (e) { console.error('[central-pdu] 저장 실패:', e.message); }
-}
+// v2.599(CEN-2599-04): push 마다 전체를 동기로 쓰던 것 → 디바운스 비동기 + 종료 시 동기 flush.
+//   ⚠ 로드의 preserveCorrupt 는 그대로다(손상 원본 보존). 들여쓰기(null,2)는 뺐다 — 크기만 늘린다.
+const writer = createDebouncedWriter(FILE, () => JSON.stringify({ edges: [...load().values()] }), { name: 'pduEdge' });
+function persist() { writer.save(); }
 
 /**
  * 엣지 push 수신. agent 는 **개별 토큰에 바인딩된 이름**을 호출부가 넘겨야 한다
@@ -49,14 +50,22 @@ function persist() {
 export function saveEdgePdu(agent, snapshots) {
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return { ok: false, reason: 'agent 가 필요합니다.' };
-  const list = (Array.isArray(snapshots) ? snapshots : []).slice(0, 500).map((s) => ({
+  // v2.599(CEN-2599-03·05): 객체가 아니거나 id 가 식별자가 아닌 원소는 빼고, 표시 필드의 객체 값은 null 로.
+  const { devices: clean, dropped, coerced } = sanitizeEdgeDevices(snapshots, { idKey: 'id', max: 500 });
+  const adm = admitAgent(load(), key);
+  if (!adm.ok) {
+    console.warn(`[central-pdu] 엣지 수 상한 — 새 이름 '${String(agent).slice(0, 64)}' 거절(최근 보고한 엣지를 밀어내지 않는다)`);
+    return { ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).', dropped };
+  }
+  if (adm.evicted) console.warn(`[central-pdu] 엣지 수 상한 — 오래 조용한 '${adm.evicted}' 보관분을 내렸다`);
+  const list = clean.map((s) => ({
     ...s,
     agent: String(agent),   // 표시용으로 실제 인증된 이름을 박아 둔다
   }));
   load().set(key, { agent: String(agent), at: Date.now(), snapshots: list });
   persist();
   for (const sn of list) if (sn?.id) ackCollect(sn.id, Number(sn.collectedAt) || null); // v2.590 P16: '지금 수집' 완료 확인
-  return { ok: true, count: list.length };
+  return { ok: true, count: list.length, dropped, coerced, ...(adm.evicted ? { evicted: adm.evicted } : {}) };
 }
 
 /** 만료되지 않은 엣지 스냅샷 전체(중앙 화면이 자기 수집분과 합쳐 보여준다). */

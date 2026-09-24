@@ -8,6 +8,7 @@
  */
 
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
@@ -52,6 +53,24 @@ export function installerInfo(explicit) {
   if (!p) return { available: false };
   const st = fs.statSync(p);
   return { available: true, path: p, name: path.basename(p), sizeBytes: st.size };
+}
+
+/*
+ * v2.599(감사 SEC2599-05 — 기제 재현): 토큰이 든 env 블록을 `exec("printf '%s' '<블록>' >> portal.env")` 로 붙이면
+ *   sshd 가 그 문자열을 **셸의 -c 인자**로 넘기므로, 셸이 도는 동안 대상 호스트의 `ps`·`/proc/<pid>/cmdline` 에
+ *   CENTRAL_TOKEN·COLLECTOR_TOKEN 이 보인다(로컬에서 같은 `bash -c "printf …"` 로 ps 노출 확인). 같은 withSsh 가
+ *   SFTP `writeFile` 을 주므로 블록을 **0600 임시 파일**로 올린 뒤 cat 으로 붙이고 지운다 — 명령 인자에는 경로만 남는다.
+ *   임시 파일은 대상 env 파일과 같은 디렉터리(root 소유)에 무작위 이름으로 둔다. 붙이기가 실패해도 지운다.
+ */
+async function appendSecretText({ exec, writeFile }, envFile, text) {
+  const tmp = `${envFile}.portal-append.${crypto.randomBytes(8).toString('hex')}`;
+  try {
+    await writeFile(tmp, text, 0o600);
+    const r = await exec(`cat '${tmp}' >> '${envFile}'`);
+    if (r && r.code !== 0) throw new Error(`${envFile} 에 추가하지 못했습니다: ${String(r.stderr || '').slice(0, 200)}`);
+  } finally {
+    await exec(`rm -f '${tmp}'`).catch(() => {});
+  }
 }
 
 // 주입할 env 키/값 쌍(빈 값은 제외). 재배포 시 이 키들을 portal.env에서 교체(upsert)한다.
@@ -188,8 +207,9 @@ export async function deployAgent(target, { installerPath, port: portIn = 4000 }
       const pairs = envPairs(target, port);
       const delScript = pairs.map(([k]) => `/^${k}=/d`).join(';');
       if (delScript) await exec(`sed -i '${delScript}' /etc/vmware-portal/portal.env 2>/dev/null || true`);
-      const block = ('\n# --- portal agent (auto-deployed) ---\n' + pairs.map(([k, v]) => `${k}=${v}`).join('\n') + '\n').replace(/'/g, "'\\''");
-      await exec(`printf '%s' '${block}' >> /etc/vmware-portal/portal.env`);
+      const block = '\n# --- portal agent (auto-deployed) ---\n' + pairs.map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+      // v2.599(SEC2599-05): 토큰이 든 블록을 명령 인자로 보내지 않는다(대상 호스트 ps 노출) — SFTP 임시 파일로 붙인다.
+      await appendSecretText({ exec, writeFile }, '/etc/vmware-portal/portal.env', block);
 
       // GPU 게스트 수집 자동 구성: agent의 vcenters.json + gpu-guest.json 주입(원격 포탈 로그인 불필요).
       let gpuGuestApplied = null;
@@ -293,7 +313,7 @@ export async function forceCollectorToken(target, token, { urlPort } = {}) {
   if (!tk) return { ok: false, reason: '토큰이 비어 있습니다.' };
   if (!/^[A-Za-z0-9._~+/=-]{4,512}$/.test(tk)) return { ok: false, reason: '토큰에 사용할 수 없는 문자가 있습니다(영숫자·._~+/=- 만 허용).' };
   try {
-    return await withSsh(creds(target), async ({ exec }) => {
+    return await withSsh(creds(target), async ({ exec, writeFile }) => {
       const idu = await exec('id -u');
       if (idu.stdout.trim() !== '0') return { ok: false, reason: 'portal.env 수정에는 root 권한이 필요합니다.' };
       const inst = await resolvePortalUnit(exec, urlPort);
@@ -303,7 +323,8 @@ export async function forceCollectorToken(target, token, { urlPort } = {}) {
       if (!envOk) return { ok: false, reason: `${envFile} 가 없습니다. 이 호스트에 먼저 에이전트를 배포하세요.` };
       await exec(`sed -i '/^COLLECTOR_TOKEN=/d' ${envFile}`);
       // 마지막 줄에 개행이 없어도 앞 줄에 붙지 않도록 선행 개행 포함(빈 줄은 무해).
-      await exec(`printf '\\nCOLLECTOR_TOKEN=%s\\n' '${tk}' >> ${envFile}`);
+      // v2.599(SEC2599-05): 토큰을 명령 인자로 보내지 않는다 — SFTP 임시 파일(0600)로 붙인다.
+      await appendSecretText({ exec, writeFile }, envFile, `\nCOLLECTOR_TOKEN=${tk}\n`);
       await exec(`systemctl restart ${unit} 2>&1 || true`);
       const state = await waitActive(exec, 15, 2, unit);
       const isActive = state === 'active';

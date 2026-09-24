@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'sanswitch-perf-settings.json');
 
@@ -26,6 +27,17 @@ const clamp = (v, l, def) => {
   if (!Number.isFinite(n) || n <= 0) return def;
   return Math.min(l.max, Math.max(l.min, Math.round(n)));
 };
+
+// v2.599 LO2599-01: 숫자 칸을 비우고 저장하면(''·null·비숫자·0 이하) clamp 가 **기본값**을 줬다 — 예: 보존 3650일 →
+// 90일 · 주기 1시간 → 5분(SAN 포트 사용량). v2.596 규약대로 빈 칸은 '미지정' 이고 **이전 값을 유지**한다(판정은 numOrNull — Number('')===0 함정).
+function keepPrevBlankNumbers(input, prev) {
+  const out = { ...(input && typeof input === 'object' ? input : {}) };
+  for (const k of Object.keys(LIMITS)) {
+    const n = numOrNull(out[k]);
+    if (n == null || n <= 0) out[k] = prev[k];
+  }
+  return out;
+}
 
 let _cache = null;
 
@@ -54,7 +66,7 @@ const _listeners = new Set();
 export function onPerfSettingsChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }
 function notifyChange() { for (const cb of _listeners) { try { cb(); } catch { /* 리스너 실패가 저장을 막지 않는다 */ } } }
 export function savePerfSettings(input = {}) {
-  _cache = normalizePerfSettings(input);
+  _cache = normalizePerfSettings(keepPrevBlankNumbers(input, loadPerfSettings()));
   atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
   notifyChange();
   return { ..._cache };

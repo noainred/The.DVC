@@ -21,7 +21,7 @@ import {
   DEV_KIND_LABEL, DEV_KIND_SHORT, CHANNEL_LABEL, CHANNEL_ICON, CHANNEL_WORD, CH_STATE_LABEL, CH_STATE_COLOR,
   ITEM_STATE_LABEL, ITEM_STATE_COLOR, TONE_LABEL, TONE_COLOR, UNASSIGNED_REASON,
   EDGE_STATE_LABEL, EDGE_STATE_COLOR,
-  groupTitle, countsText, groupNote, itemExtra, channelText, headerNote, reasonText, LEGEND, ageText, spanText, bytesText,
+  groupTitle, countsText, groupNote, itemExtra, channelText, headerNote, reasonText, noEdgesNote, LEGEND, ageText, spanText, bytesText,
 } from './deviceFlowText.js';
 
 const MONO = "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
@@ -146,6 +146,13 @@ export default function DeviceFlow() {
               </button>
             );
           })}
+
+          {lay.emptyEdges && (
+            <div role="note" style={{ position: 'absolute', left: 12 + lay.emptyEdges.x, top: lay.emptyEdges.y, width: lay.emptyEdges.w, minHeight: lay.emptyEdges.h,
+              boxSizing: 'border-box', padding: '8px 10px', border: '1px dashed #2c3240', borderRadius: 6, fontSize: 11.5, lineHeight: 1.55, color: '#aab1bf' }}>
+              <BoldText text={noEdgesNote(data)} />
+            </div>
+          )}
 
           <button type="button" onClick={() => toggle({ type: 'main' })} aria-pressed={sel?.type === 'main'}
             title="메인(중앙) — 클릭하면 아래에 종류별 합계"

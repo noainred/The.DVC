@@ -17,6 +17,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
+import { useLatest } from '../../hooks/useLatest.js';
 import { Loading, ErrorBox, SearchBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -92,16 +93,23 @@ export function LinkCheck() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const loadEvents = React.useCallback(async (linkId = '', hours = 24 * 7, event = '') => {
+  /*
+   * v2.599(감사 WEB2599-02): 기간·링크·구분을 빠르게 바꾸면 늦게 온 **이전 선택의 응답**이 새 선택의
+   *   로그를 덮고 '불러오는 중' 도 먼저 풀렸다(v2.596 WS-1~4 와 같은 결함 — 이 화면만 남아 있었다).
+   *   `useLatest` 세대 가드로 **마지막 요청의 응답만** 반영한다(성공·실패·로딩 해제 모두).
+   */
+  const latestEvents = useLatest();
+  const loadEvents = React.useCallback((linkId = '', hours = 24 * 7, event = '') => {
     setEvLoading(true);
-    try {
-      const qs = new URLSearchParams({ hours: String(hours), limit: '300' });
-      if (linkId) qs.set('linkId', linkId);
-      if (event) qs.set('event', event);
-      setEvents(await fetchJson(`/tools/link-check/events?${qs}`));
-    } catch (e) { setNote(`로그 조회 실패: ${e?.message || e}`); }
-    finally { setEvLoading(false); }
-  }, []);
+    const qs = new URLSearchParams({ hours: String(hours), limit: '300' });
+    if (linkId) qs.set('linkId', linkId);
+    if (event) qs.set('event', event);
+    return latestEvents(
+      fetchJson(`/tools/link-check/events?${qs}`),
+      (d) => { setEvents(d); setEvLoading(false); },
+      (e) => { setNote(`로그 조회 실패: ${e?.message || e}`); setEvLoading(false); },
+    );
+  }, [latestEvents]);
   useEffect(() => { loadEvents(evLink, evHours, evKind); }, [loadEvents, evLink, evHours, evKind]);
 
   /*

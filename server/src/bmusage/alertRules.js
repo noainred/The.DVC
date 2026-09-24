@@ -42,7 +42,7 @@ export const ALERT_METRICS = Object.freeze([
  *
  * @param {object|null} prev  `{ since, lastOverAt, notifiedAt, peak }` 또는 없음
  * @param {number|null} value 이번 주기 값(`null` = 못 읽음)
- * @param {object} cfg  `{ pct, sustainMin, repeatHours, intervalMs }`
+ * @param {object} cfg  `{ pct, sustainMin, repeatHours, intervalMs, runMs? }` — `runMs` = 이번 주기 수집 시간
  * @param {number} now
  * @returns {{state:object|null, fire:null|'over'|'recovered', reason:string, sustainedMin:number}}
  *   `state === null` = 그 지표를 더 추적하지 않는다(정상 복귀 완료).
@@ -53,8 +53,16 @@ export function stepAlert(prev, value, cfg = {}, now = Date.now()) {
   const sustainMs = Math.max(0, n(cfg.sustainMin) ?? 15) * 60_000;
   const repeatMs = Math.max(0, n(cfg.repeatHours) ?? 6) * 3_600_000;
   const staleMs = Math.max(60_000, (n(cfg.intervalMs) || 300_000) * STALE_FACTOR);
-  // 연속 관측으로 볼 최대 간격 — 주기의 1.5배(수집 지연 여유). 그보다 벌어진 두 초과 관측 사이는 '지속' 이 아니다.
-  const gapMs = Math.max(60_000, (n(cfg.intervalMs) || 300_000) * 1.5);
+  /*
+   * 연속 관측으로 볼 최대 간격 — 그보다 벌어진 두 초과 관측 사이는 '지속' 이 아니다.
+   * ⚠ v2.599(감사 RECENT2599-01): 관측 간격은 **주기 + 이번 수집 시간**이다 — 폴러의
+   *   `startAdaptiveTimer` 가 fn() 이 끝난 뒤 다음 주기를 재무장하고, 판정 시각은 수집이 끝난 시점이다.
+   *   예전 한도 `주기 × 1.5` 는 수집이 주기의 절반(기본 150초)을 넘기는 순간 **모든 간격이 한도를 넘어**
+   *   지속 시간이 영원히 0 이었다(알림이 절대 울리지 않는다 — 오류 없이). 호출부가 이번 수집 시간
+   *   (`runMs`)을 알려 주면 그만큼 한도를 늘린다. 못 받으면(구 호출부) 예전 한도 그대로다.
+   */
+  const runMs = Math.max(0, n(cfg.runMs) ?? 0);
+  const gapMs = Math.max(60_000, (n(cfg.intervalMs) || 300_000) * 1.5 + runMs);
   const p = prev || null;
 
   // 임계가 없으면 판정하지 않는다(설정이 비었을 때 0 으로 떨어지면 전 서버가 초과가 된다).

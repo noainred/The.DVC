@@ -75,7 +75,8 @@ export const ENDPOINTS = Object.freeze([
     fields: ['id', 'name', 'status', 'version', 'hosts', 'vms', 'datastores', 'alarms', 'collectedAt'],
   },
   {
-    path: '/inventory/collection', group: 'inventory', method: 'GET', scoped: false,
+    // v2.599(AUTHZ-2599-04): 범위 키에는 그 범위 vCenter 만 센다 — 내부 /health(v2.583)와 같은 기준.
+    path: '/inventory/collection', group: 'inventory', method: 'GET', scoped: true,
     summary: '수집 상태 — 첫 수집 중(pending)과 접속 실패(unreachable)를 구분해 준다',
     /*
      * ⚠ 상태값은 스냅샷의 실제 값(`connected`·`pending`·`unreachable`·`maintenance`)을

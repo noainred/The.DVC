@@ -45,12 +45,26 @@ const REC_START = /^(\d+):\s*(.*)$/;
  * @param {string} text
  * @returns {Array<Record<string,string>>}
  */
+/**
+ * 줄 끝이 `키 =`(값 없음)이면 키 원문을, 아니면 `null`.
+ * v2.599(감사 SEC2599-02 — 재현): 예전 `/^(.*?)\s+=\s*$/` 는 게으른 앞부분이 한 글자씩 늘 때마다 뒤 공백 연속을
+ *   끝까지 다시 훑어 O(n²) 였다(공백 6만 개 줄 하나에 약 3.4초 — 줄 끝 replace 를 고친 뒤에도 남았다). 같은 뜻을 선형으로 —
+ *   끝 공백을 뗀 줄이 `=` 로 끝나고 그 앞이 공백이면 키다.
+ */
+function trailingKey(line) {
+  const t = String(line).trimEnd();
+  if (!t.endsWith('=')) return null;
+  const body = t.slice(0, -1);
+  if (!/\s$/.test(body)) return null;
+  return body.trim();
+}
+
 /** 그 줄이 `키 = 값` 이면 키를, 아니면 `null`. (경계 판정과 저장이 같은 규칙을 쓰게 한다.) */
 function keyOf(line) {
   const i = line.indexOf(' = ');
   if (i >= 0) return line.slice(0, i).trim() || null;
-  const m = /^(.*?)\s+=\s*$/.exec(line);
-  return m ? (m[1].trim() || null) : null;
+  const k = trailingKey(line);
+  return k || null;
 }
 
 export function parseUemcli(text) {
@@ -61,9 +75,8 @@ export function parseUemcli(text) {
     // ⚠ 마지막 열이 빈 값이면 `Description                =` 로 끝난다(뒤에 공백이 없다).
     //   그래서 ' = ' 뿐 아니라 줄 끝의 ' =' 도 받는다.
     if (i < 0) {
-      const m = /^(.*?)\s+=\s*$/.exec(line);
-      if (!m || !cur) return;
-      const k = m[1].trim();
+      const k = trailingKey(line);
+      if (k == null || !cur) return;
       if (k) cur[k] = '';
       return;
     }
@@ -85,10 +98,12 @@ export function parseUemcli(text) {
    * 틀린 값**이 된다(풀 2개가 1개로 보이고 용량이 과소 보고된다). 그래서 **이미 본 키가 다시
    * 나오면 새 레코드**로 끊는다. 키가 겹치지 않으면 원래 한 레코드였다는 뜻이다.
    */
-  const noMarker = !lines.some((l) => REC_START.test(l.replace(/\s+$/, '')));
+  // v2.599(감사 SEC2599-02 — 재현): 줄 끝 공백 제거는 trimEnd() 다. `replace(/\s+$/, '')` 는 앞쪽 공백 연속마다
+  //   끝까지 다시 훑어 O(n²) 라, 공백만 긴 줄 하나(오동작·변조 장비 출력 — 상한 4MB)로 이벤트 루프가 멈춘다.
+  const noMarker = !lines.some((l) => REC_START.test(l.trimEnd()));
 
   for (const raw of lines) {
-    const line = raw.replace(/\s+$/, '');
+    const line = raw.trimEnd();
     if (!line.trim()) continue;
     const m = noMarker ? null : REC_START.exec(line);
     if (m) {
@@ -149,7 +164,10 @@ export function toInt(v) {
 
 /** `OK (5)` → `OK`. 빈 값은 `''`(호출부가 'unknown' 으로 다룬다 — 정상이라 하지 않는다). */
 export function healthOf(v) {
-  return String(v ?? '').trim().replace(/\s*\(\d+\)\s*$/, '');
+  // v2.599(SEC2599-02): `replace(/\s*\(\d+\)\s*$/)` 는 앞의 `\s*` 가 공백 연속마다 재시도해 O(n²) 였다(공백 4만 개 값에 1.2초).
+  const s = String(v ?? '').trim();
+  const m = /\(\d+\)$/.exec(s);
+  return m ? s.slice(0, m.index).trimEnd() : s;
 }
 
 /** `yes`/`no` → true/false. 그 밖(빈 값 포함)은 `null`(모르는 것을 false 라 하지 않는다). */

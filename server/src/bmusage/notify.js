@@ -57,6 +57,8 @@ export async function runBmUsageAlerts(rows = [], settings = {}) {
   const cfg = {
     pct: settings.alertPct, sustainMin: settings.alertSustainMin,
     repeatHours: settings.alertRepeatHours, intervalMs: settings.intervalMs,
+    // v2.599(RECENT2599-01): 관측 간격 = 주기 + 수집 시간 — 지속 판정의 연속 한도에 쓴다.
+    runMs: settings.runMs,
   };
   const { next, fires, counts } = evaluateRows(rows, load(), cfg, Date.now());
   save(next);

@@ -8,6 +8,7 @@ import { columnsFor, cellValue, sortValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit, capacityTotals } from './storageUnits.js';
 import { emptyListText, conflictText, edgeReportNotes, edgeIntervalText } from './storageListText.js';
 import { collectDropNote } from './collectDropText.js';
+import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 import { STable } from '../../components/STable.jsx';
 import { collectMethodView } from './storageMethodText.js';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
@@ -179,7 +180,7 @@ function NodeFaultModal({ r, typeLabel, onClose }) {
           <div style={{ fontWeight: 700, color: sum.tone === 'red' ? 'var(--red)' : sum.tone === 'amber' ? 'var(--amber)' : undefined }}>{sum.title}</div>
           {sum.body && <div className="muted" style={{ fontSize: 12.5, marginTop: 3, whiteSpace: 'normal', lineHeight: 1.6 }}><BoldText text={sum.body} /></div>}
           <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-            {typeLabel(r.type)} · {r.host} · 수집 {s?.collectedAt ? new Date(s.collectedAt).toLocaleString() : '—'}
+            {typeLabel(r.type)} · {hostText(r.host)} · 수집 {s?.collectedAt ? new Date(s.collectedAt).toLocaleString() : '—'}
             {s?.sections?.nodes && s.sections.nodes !== 'ok' ? ` · 노드 수집: ${s.sections.nodes}` : ''}
           </div>
         </div>
@@ -324,7 +325,7 @@ function Cell({ col, r, ctx }) {
           <div className="muted" title={differs ? `등록 표시명: ${r.name} · 장비가 보고한 이름: ${reported} · ${r.host}` : r.host}
             style={{ fontSize: 11, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {differs ? <>{'등록명 '}{r.name}{' · '}</> : null}
-            {r.host}
+            {hostText(r.host)}
           </div>
         </td>
       );
@@ -752,6 +753,12 @@ export default function StorageMonTool() {
           ⚠ 등록부에 없는 스냅샷 {d.orphans.length}건(삭제된 장비의 엣지 잔존 push) — 다음 엣지 push 주기에 자연 소멸합니다.
         </div>
       )}
+      {/* v2.599(AUTHZ-2599-03): 비-admin 에는 관리 IP·계정이 가려져 온다 — 빈 칸의 이유를 한 번 말한다 */}
+      {addressHiddenNote(d) && (
+        <div className="card" style={{ padding: '9px 13px', marginTop: 8, fontSize: 12 }}>
+          🔒 <BoldText text={addressHiddenNote(d)} />
+        </div>
+      )}
       {/* v2.591: 엣지가 가져갔지만 결과가 오지 않아 폐기된 '지금 수집' 요청 — 배지만 조용히 꺼지지 않게 */}
       {(() => {
         const t = collectDropNote(d.collectDrops, (id) => (d.devices || []).find((x) => x.id === id)?.name || id);
@@ -913,7 +920,7 @@ function DeviceDetail({ r, typeLabel, dcName, onClose, onRefresh }) {
               const mv = collectMethodView({ registered: r.collectMethod, lastUsed: ex.collectMethod, hasSnap: !!s, agent: r.agent });
               return mv.pending ? <span className="badge amber" style={{ marginLeft: 4 }} title={mv.pending.title}>등록 {mv.label} · 적용 대기</span> : null;
             })()}
-            <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{r.host}</b></span>
+            <span className="muted">호스트 <b style={{ color: 'var(--text)' }}>{hostText(r.host)}</b></span>
             <span className="muted">법인 <b style={{ color: 'var(--text)' }}>{dcName(r.datacenterId)}</b></span>
             {s.version && (
               <span className="muted"

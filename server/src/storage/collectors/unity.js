@@ -10,6 +10,8 @@ import { numOrNull } from '../../util/numOrNull.js';
 import { healthWord } from '../healthWord.js';
 
 const entries = (v) => (v?.entries || []).map((e) => e.content || {});
+/** 미해결 알람 한 페이지 크기(v2.599 C2599-07). */
+export const UNITY_ALERT_PER_PAGE = 100;
 
 /**
  * Unisphere REST `HealthEnum` → 상태 단어(순수, v2.598 감사 IDRAC-2598-05).
@@ -73,7 +75,23 @@ export function normalizeUnity(device, raw) {
   }
   const users = entries(raw.users);
   if (users.length) { snap.accounts = users.slice(0, 200).map((u) => ({ name: u.name || u.id || '', enabled: true })); snap.sections.accounts = 'ok'; }
-  if (raw.alerts) { snap.alerts.unresolved = entries(raw.alerts).length; snap.sections.alerts = 'ok'; }
+  if (raw.alerts) {
+    // v2.599(감사 C2599-07): 조회는 per_page=UNITY_ALERT_PER_PAGE 한 페이지뿐이다. 컬렉션이 주는 전체 건수(entryCount)가
+    //   있으면 그것을 쓰고, 없는데 한 페이지가 가득 찼으면 '그 이상일 수 있다' 고 밝힌다(조용한 상한 금지).
+    const got = entries(raw.alerts).length;
+    const total = numOrNull(raw.alerts.entryCount);
+    if (total != null && total >= got) {
+      snap.alerts.unresolved = total;
+      if (total > got) snap.extra.alertsNote = `전체 ${total}건(장비 보고 entryCount) — 목록은 첫 ${got}건만 받았습니다`;
+    } else {
+      snap.alerts.unresolved = got;
+      if (got >= UNITY_ALERT_PER_PAGE) {
+        snap.extra.alertsTruncated = true;
+        snap.extra.alertsNote = `조회 상한(${UNITY_ALERT_PER_PAGE}건)에 닿았고 장비가 전체 건수를 주지 않아 미해결 ${got}건 이상일 수 있습니다(하한)`;
+      }
+    }
+    snap.sections.alerts = 'ok';
+  }
   snap.extra.collectMethod = 'api';
   snap.ok = snap.sections.config === 'ok' || snap.sections.capacity === 'ok';
   if (!snap.ok && !snap.error) snap.error = '수집 실패(섹션 오류 참조)';
@@ -102,7 +120,7 @@ export async function collect(device, { signal = null } = {}) {
     await step('pools', () => get('/api/types/pool/instances?fields=name,sizeTotal,sizeUsed'));
     await step('sps', () => get('/api/types/storageProcessor/instances?fields=name,health'));
     await step('users', () => get('/api/types/user/instances?fields=name'));
-    await step('alerts', () => get('/api/types/alert/instances?fields=id&filter=state ne 2&per_page=100'));
+    await step('alerts', () => get(`/api/types/alert/instances?fields=id&filter=state ne 2&per_page=${UNITY_ALERT_PER_PAGE}`));
   } catch (e) {
     const out = normalizeUnity(device, raw);
     out.error = e.message;

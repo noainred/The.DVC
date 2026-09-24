@@ -1507,8 +1507,11 @@ api.get('/tools/capacity-forecast', requirePerm('tools'), (req, res) => memoJson
     } else if (mock) {
       synthesized = true; slope = Math.max(0, (d.capacityGB * 0.0008) + (hash(d.id) % 5) * 0.2); // 합성 증가율
     }
-    const freeGB = d.freeGB ?? Math.max(0, (d.capacityGB || 0) - (d.usedGB || 0));
-    const daysToFull = slope && slope > 0.01 ? Math.round(freeGB / slope) : null;
+    // v2.599 RECENT2599-03: 사용량을 못 읽은 DS(freeGB·usedGB 둘 다 null)를 '전량 여유' 로 계산하지 않는다 —
+    // 예전 `cap − (usedGB || 0)` 은 그 DS 의 소진일을 가장 늦은 쪽으로 밀어냈다. 여유를 모르면 소진일도 모른다.
+    const freeGB = d.freeGB != null ? d.freeGB
+      : d.usedGB != null && d.capacityGB > 0 ? Math.max(0, d.capacityGB - d.usedGB) : null;
+    const daysToFull = freeGB != null && slope && slope > 0.01 ? Math.round(freeGB / slope) : null;
     items.push({ id: d.id, name: d.name, vcenterId: d.vcenterId, type: d.type, capacityGB: d.capacityGB, usedGB: d.usedGB, freeGB, usagePct: d.usagePct, growthGBperDay: slope == null ? null : Number(slope.toFixed(2)), daysToFull, synthesized });
   }
   items.sort((a, b) => (a.daysToFull ?? Infinity) - (b.daysToFull ?? Infinity));

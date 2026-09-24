@@ -59,6 +59,13 @@ export default function VmCloneTool() {
 
       {form && <JobForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }} />}
 
+      {/* v2.599(AUTHZ-2599-05): 범위 제한 계정에는 범위 밖 vCenter 의 잡을 빼고 그 개수를 밝힌다 */}
+      {d.omittedOutOfScope > 0 && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          조회 범위 밖 vCenter 의 복제 잡 {d.omittedOutOfScope}개는 표시하지 않았습니다.
+        </div>
+      )}
+
       <div className="table-wrap" style={{ maxHeight: '46vh' }}>
         <STable>
           <thead><tr><th>VM</th><th>vCenter</th><th>대상</th><th>스케줄</th><th style={{ textAlign: 'right' }}>보존</th><th>정지점</th><th>보유 사본</th><th>최근 실행</th><th className="right">작업</th></tr></thead>

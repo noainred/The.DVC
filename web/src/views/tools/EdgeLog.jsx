@@ -14,7 +14,7 @@
  * ⚠ **폴링하지 않는다** — 가져오기는 엣지로 HTTP 왕복이다. 마운트 1회 + 버튼만(v2.508 V4 규약).
  * ⚠ 전역 잠금을 쓰지 않는다 — 한 엣지를 가져오는 동안 다른 엣지 버튼이 죽으면 안 된다(v2.529 규약).
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, SearchBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -22,6 +22,7 @@ import BoldText from '../../components/boldText.jsx';
 import {
   EDGE_KIND_LABEL, toneVar, ageText, msText, edgeHint, fetchResultText, jobText,
   storeNote, logNote, maskNote, logRedactNote, lastAttemptNote, tableFootnotes, groupStatus, statusSummary, levelTone, identityNote, unregisteredNote,
+  busyAdd, busyRemove, staleFetchNote,
 } from './edgeLogText.js';
 
 const LEVELS = [['', '전체'], ['error', '오류'], ['warn', '경고'], ['info', '정보']];
@@ -41,7 +42,12 @@ export function EdgeLog() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [busyAgent, setBusyAgent] = useState('');     // 그 엣지만 잠근다(전역 잠금 금지 — v2.529)
+  // 그 엣지만 잠근다(전역 잠금 금지 — v2.529). v2.599(WEB2599-03): **엣지별 집합** — 문자열 하나면
+  //   A 가져오는 중 B 를 누를 때 A 의 잠금이 사라지고, 먼저 끝난 A 가 B 의 잠금까지 풀었다.
+  const [busy, setBusy] = useState(() => new Set());
+  const isBusy = (key) => busy.has(key);
+  // v2.599(WEB2599-03): '마지막으로 연 화면' 세대 — 늦게 끝난 이전 요청이 보던 엣지 화면을 바꾸지 않게.
+  const viewGen = useRef(0);
   const [sel, setSel] = useState('');                  // 선택한 엣지(빈 값 = 이 포탈)
   const [snap, setSnap] = useState(null);
   const [snapFor, setSnapFor] = useState('');
@@ -72,42 +78,49 @@ export function EdgeLog() {
   const selRow = useMemo(() => rows.find((r) => r.agent === sel) || null, [rows, sel]);
 
   async function fetchEdge(agent) {
-    setBusyAgent(agent); setNote(null);
+    const g = ++viewGen.current;
+    setBusy((b) => busyAdd(b, agent)); setNote(null);
     try {
       const body = { agent, withStatus: showStatus };
       if (limit) body.limit = limit;
       if (level) body.level = level;
       const r = await postJson('/tools/edge-log/fetch', body);
-      setNote(fetchResultText(r));
-      setSel(agent); setSnap(r.snap || null); setSnapFor(agent); setSnapFresh(!!r.fresh);
+      if (g === viewGen.current) {
+        setNote(fetchResultText(r));
+        setSel(agent); setSnap(r.snap || null); setSnapFor(agent); setSnapFresh(!!r.fresh);
+      } else setNote(staleFetchNote(agent, r));   // 그 사이 다른 화면을 열었다 — 결과만 알린다
       load();
     } catch (e) {
-      setNote({ tone: 'bad', text: e?.message || String(e) });
-    } finally { setBusyAgent(''); }
+      const msg = e?.message || String(e);
+      setNote(g === viewGen.current ? { tone: 'bad', text: msg } : staleFetchNote(agent, { ok: false, reason: msg }));
+    } finally { setBusy((b) => busyRemove(b, agent)); }
   }
 
   async function openStored(agent) {
+    const g = ++viewGen.current;
     setSel(agent); setNote(null);
     try {
       const r = await fetchJson(`/tools/edge-log/${encodeURIComponent(agent)}`);
+      if (g !== viewGen.current) return;   // 늦게 온 이전 선택 — 지금 보는 화면을 덮지 않는다
       setSnap(r.snap || null); setSnapFor(agent); setSnapFresh(false);
       const fail = lastAttemptNote(r.lastAttempt);
       if (!r.snap) setNote({ tone: fail ? 'bad' : 'idle', text: fail ? `${fail} 보관된 로그도 없습니다 — 원인을 고친 뒤 **지금 가져오기** 를 누르세요.` : '이 엣지의 보관분이 없습니다 — **지금 가져오기** 를 누르세요.' });
       else if (fail) setNote({ tone: 'warn', text: `${fail} 아래에 보이는 것은 **그 이전에 가져온 보관분**이고 지금 상태가 아닙니다.` });
-    } catch (e) { setNote({ tone: 'bad', text: e?.message || String(e) }); }
+    } catch (e) { if (g === viewGen.current) setNote({ tone: 'bad', text: e?.message || String(e) }); }
   }
 
   async function openLocal() {
-    setSel(''); setBusyAgent('__local__'); setNote(null);
+    const g = ++viewGen.current;
+    setSel(''); setBusy((b) => busyAdd(b, '__local__')); setNote(null);
     try {
       const p = new URLSearchParams();
       if (limit) p.set('limit', String(limit));
       if (level) p.set('level', level);
       if (!showStatus) p.set('status', '0');
       const r = await fetchJson(`/tools/edge-log-local${p.toString() ? `?${p}` : ''}`);
-      setSnap(r); setSnapFor(''); setSnapFresh(true);
-    } catch (e) { setNote({ tone: 'bad', text: e?.message || String(e) }); }
-    finally { setBusyAgent(''); }
+      if (g === viewGen.current) { setSnap(r); setSnapFor(''); setSnapFresh(true); }
+    } catch (e) { if (g === viewGen.current) setNote({ tone: 'bad', text: e?.message || String(e) }); }
+    finally { setBusy((b) => busyRemove(b, '__local__')); }
   }
 
   if (loading && !data) return <Loading />;
@@ -160,7 +173,7 @@ export function EdgeLog() {
           <label style={{ fontSize: 12 }}>
             <input type="checkbox" checked={showStatus} onChange={(e) => setShowStatus(e.target.checked)} /> 진행상태 함께
           </label>
-          <button className="btn" onClick={openLocal} disabled={busyAgent === '__local__'}>{busyAgent === '__local__' ? '읽는 중…' : '이 포탈 로그 보기'}</button>
+          <button className="btn" onClick={openLocal} disabled={isBusy('__local__')}>{isBusy('__local__') ? '읽는 중…' : '이 포탈 로그 보기'}</button>
           <button className="btn" onClick={load}>새로고침</button>
         </div>
 
@@ -197,8 +210,8 @@ export function EdgeLog() {
                   </td>
                   <td className="right" data-sort={r.last?.logCount ?? -1}>{r.last?.logCount ?? <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                   <td>
-                    <button className="btn btn-sm" onClick={() => fetchEdge(r.agent)} disabled={busyAgent === r.agent || !h.can} title={h.can ? '' : h.text.replace(/\*\*/g, '')}>
-                      {busyAgent === r.agent ? '가져오는 중…' : '지금 가져오기'}
+                    <button className="btn btn-sm" onClick={() => fetchEdge(r.agent)} disabled={isBusy(r.agent) || !h.can} title={h.can ? '' : h.text.replace(/\*\*/g, '')}>
+                      {isBusy(r.agent) ? '가져오는 중…' : '지금 가져오기'}
                     </button>
                   </td>
                 </tr>

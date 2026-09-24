@@ -27,6 +27,8 @@ import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../sto
 import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgent,
   envIntervals, runtimeIntervalSource, applyOwnIntervals } from '../../storage/intervals.js';
 
+import { isAdminReq, maskDeviceAddress, maskSnapAddress } from '../../auth/addressMask.js';
+import { latestMapByDevice } from '../../storage/latestSnapshots.js';
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
 // v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
@@ -39,18 +41,20 @@ export function registerStorageMon(api) {
  * 같은 deviceId 가 양쪽에 있으면 최신 collectedAt 우선. 법인/타입별 뷰는 프론트가 이 평탄
  * 목록을 그룹핑한다(뷰 추가가 서버 변경 없이 가능 — 확장 요구 반영).
  */
-api.get('/tools/storage', toolsPerm, fullScopeOnly, (_req, res) => {
-  const byId = new Map();
-  for (const s of [...localSnapshots(), ...edgeStorageSnapshots()]) {
-    const cur = byId.get(s.deviceId);
-    if (!cur || (s.collectedAt || 0) > (cur.collectedAt || 0)) byId.set(s.deviceId, s);
-  }
+api.get('/tools/storage', toolsPerm, fullScopeOnly, (req, res) => {
+  // v2.599(EDGE2599-02): 장비마다 최신 collectedAt 하나 — 공개 API 와 같은 판정 하나(storage/latestSnapshots.js).
+  const byId = latestMapByDevice([localSnapshots(), edgeStorageSnapshots()]);
   const devices = listDevices().map((d) => ({ ...d, snap: byId.get(d.id) || null }));
   // 등록부에 없는데 스냅샷만 있는 항목(엣지 잔존 push 등)도 정직하게 노출(orphan 표기).
   const known = new Set(devices.map((d) => d.id));
   const orphans = [...byId.values()].filter((s) => !known.has(s.deviceId));
+  // v2.599(AUTHZ-2599-03): 비-admin(tools 권한 operator 등)에는 관리 IP·계정명을 가리고 그 사실을 밝힌다
+  //   (v2.593 relaytopo maskTopology 와 같은 기준 — 등록·수정·테스트는 adminOnly 라 화면 기능은 그대로다).
+  const admin = isAdminReq(req);
   res.json({
-    devices, orphans,
+    devices: admin ? devices : devices.map(maskDeviceAddress),
+    orphans: admin ? orphans : orphans.map(maskSnapAddress),
+    ...(admin ? {} : { addressHidden: true }),
     // 타입 카탈로그에 '수집 방식 목록'을 붙여 내려준다(v2.405) — 등록 폼이 타입별 메뉴를
     // 그 목록으로 그린다. 규칙이 프론트에 복사되지 않게 서버가 단일 소스다.
     types: STORAGE_TYPES.map((t) => ({ ...t, methods: collectMethodsFor(t.type) })),

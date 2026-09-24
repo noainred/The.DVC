@@ -371,7 +371,9 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
      * ⚠ 실패해도 수집을 실패로 만들지 않는다 — 알림은 부가 기능이고, 사유는 `_last` 에 남긴다.
      */
     let alerts = null;
-    try { alerts = await runBmUsageAlerts(rows, settings); }
+    // v2.599(RECENT2599-01): 이번 수집 시간을 함께 넘긴다 — 관측 간격이 '주기 + 수집 시간' 이라
+    //   주기만으로 연속을 판정하면 수집이 긴 현장에서 지속 시간이 0 에 묶여 알림이 영원히 안 울린다.
+    try { alerts = await runBmUsageAlerts(rows, { ...settings, runMs: Date.now() - t0 }); }
     catch (e) { alerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     const okCount = results.filter((r) => r?.ok).length;
     await pruneUsage({ rawDays: settings.rawRetentionDays, dailyDays: settings.dailyRetentionDays, every: PRUNE_EVERY });

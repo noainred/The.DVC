@@ -19,6 +19,11 @@ import { withSsh } from '../../proxy/sshExec.js';
 import { emptySnapshot, MAX_PDU_UNITS, MAX_SENSORS, MAX_BANKS, MAX_PHASES } from '../types.js';
 import { cmd, parseReading, parseAbout, toCelsius, toWatts } from '../parse.js';
 
+/** APC CLI 응답 코드가 '해당 없음(E1xx)' 인가 — 이것만 '이 인덱스부터 없다' 로 읽는다(v2.594·v2.599). */
+export function isAbsentCode(code) {
+  return /^E1/i.test(String(code || ''));
+}
+
 /**
  * 한 대 수집.
  * @param {object} device { id,name,host,username,password,sshPort,datacenterId }
@@ -92,15 +97,29 @@ export async function collect(device, { signal = undefined, onTrace = null } = {
         continue;
       }
       // 뱅크별 부하(A) — 사용자 요구 '뱅크별 소요 전력'. 있는 만큼만.
+      // v2.599(감사 C2599-04): 유닛 루프(v2.594 DATA2594-05)와 같은 규칙 — E1xx(해당 없음)만 '이 인덱스부터 없음' 이다.
+      //   명령 실패·형식 미인식에서 말없이 멈추면 뒤 뱅크·상이 **없는 것처럼** 빠진다. 멈추되 그 사실을 남긴다.
       for (let b = 1; b <= MAX_BANKS; b++) {
         const cur = await read(cmd.bank(b, 'current'));
-        if (!cur.ok) break;
+        if (!cur.ok) {
+          if (!isAbsentCode(cur.code)) {
+            unit.banksIncomplete = true;
+            snap.notes.push(`뱅크 ${b} 전류를 읽지 못해(${cur.code || '명령 실패'}) 그 뒤 뱅크 탐지를 멈췄습니다 — 뱅크 목록은 ${b === 1 ? '비어 있지만 뱅크가 없다는 뜻이 아닙니다' : `뱅크 1~${b - 1} 까지입니다`}.`);
+          }
+          break;
+        }
         unit.banks.push({ index: b, currentA: cur.value });
       }
       // 상(phase)별 전류/전압 — 3상 장비에서 유의미.
       for (let p = 1; p <= MAX_PHASES; p++) {
         const cur = await read(cmd.phase(p, 'current'));
-        if (!cur.ok) break;
+        if (!cur.ok) {
+          if (!isAbsentCode(cur.code)) {
+            unit.phasesIncomplete = true;
+            snap.notes.push(`상 ${p} 전류를 읽지 못해(${cur.code || '명령 실패'}) 그 뒤 상 탐지를 멈췄습니다 — 상 목록은 ${p === 1 ? '비어 있지만 상이 없다는 뜻이 아닙니다' : `상 1~${p - 1} 까지입니다`}.`);
+          }
+          break;
+        }
         const volt = await read(cmd.phase(p, 'voltage'));
         unit.phases.push({ index: p, currentA: cur.value, voltageV: volt.value });
       }
@@ -113,7 +132,14 @@ export async function collect(device, { signal = undefined, onTrace = null } = {
       const t = await read(cmd.temp(i));
       const h = await read(cmd.hum(i));
       // 온도·습도 **둘 다** 없으면 그 인덱스에는 센서가 없다 → 탐지 종료.
-      if (!t.ok && !h.ok) break;
+      // v2.599(감사 C2599-04): 단 둘 다 E1xx 일 때만 '없음' 이다. 그 밖의 실패는 멈추되 부분 목록임을 밝힌다.
+      if (!t.ok && !h.ok) {
+        if (!(isAbsentCode(t.code) && isAbsentCode(h.code))) {
+          snap.sensorsIncomplete = true;
+          snap.notes.push(`환경 센서 ${i} 를 읽지 못해(${t.code || h.code || '명령 실패'}) 그 뒤 센서 탐지를 멈췄습니다 — 센서 목록은 ${i === 1 ? '비어 있지만 센서가 없다는 뜻이 아닙니다' : `센서 1~${i - 1} 까지입니다`}.`);
+        }
+        break;
+      }
       let name = '';
       try {
         const n = await exec(cmd.sensorName(i));
@@ -129,7 +155,8 @@ export async function collect(device, { signal = undefined, onTrace = null } = {
         humidityPct: h.value,
       });
     }
-    if (!snap.sensors.length) snap.notes.push('환경 센서가 없습니다(AP9335T/TH 미장착) — 온도·습도는 수집되지 않습니다.');
+    // 읽기 실패로 멈춘 경우 '미장착' 이라고 단정하지 않는다(위 노트가 사유를 말한다).
+    if (!snap.sensors.length && !snap.sensorsIncomplete) snap.notes.push('환경 센서가 없습니다(AP9335T/TH 미장착) — 온도·습도는 수집되지 않습니다.');
   }, { signal });
 
   snap.ok = snap.units.length > 0 || snap.sensors.length > 0;

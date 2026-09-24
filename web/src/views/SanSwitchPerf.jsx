@@ -4,6 +4,8 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { RETENTION_PRESETS, bytesText, retentionEstimate } from './tools/sanSwitchPerfText.js';
 import { edgePerfLine, perfCollectSummary } from './tools/sanPerfDiagText.js';
 import { STable } from '../components/STable.jsx';
+// v2.599 LO2599-01: 빈 칸은 보내지 않는다(Number('')=0 → 서버가 기본값으로 저장하던 것 — 보존 3650→90일).
+import { blankOr } from './blankOr.js';
 
 /**
  * 설정 › 수집 서버 › SAN 스위치 포트 사용량 수집(v2.411, 사용자 요구
@@ -63,7 +65,8 @@ export default function SanSwitchPerf() {
   const st = data.status || {};
   const fmtTs = (t) => (t ? new Date(t).toLocaleString() : '—');
   // 보관 기간별 DB 크기 **추정**(v2.420) — 최근 24시간 적재량 × 보관일 × 행당 바이트. 표본이 없으면 표시하지 않는다.
-  const est = retentionEstimate({ rows: db.rows, fileBytes: db.fileBytes, rowsLastDay: db.rowsLastDay, retentionDays: form.retentionDays });
+  const retDays = form.retentionDays ?? data.settings?.retentionDays;   // 빈 칸이면 저장값(보내지 않으므로 그대로 유지된다)
+  const est = retentionEstimate({ rows: db.rows, fileBytes: db.fileBytes, rowsLastDay: db.rowsLastDay, retentionDays: retDays });
   const dirty = form.retentionDays !== data.settings?.retentionDays;
 
   return (
@@ -93,22 +96,22 @@ export default function SanSwitchPerf() {
         </label>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
           <label style={{ fontSize: 12 }}>수집 주기(초)
-            <input className="input" type="number" value={Math.round(form.intervalMs / 1000)}
+            <input className="input" type="number" value={form.intervalMs == null ? '' : Math.round(form.intervalMs / 1000)}
               min={L.intervalMs.min / 1000} max={L.intervalMs.max / 1000}
-              onChange={(e) => set('intervalMs', Number(e.target.value) * 1000)} />
+              onChange={(e) => { const v = blankOr(e.target.value); set('intervalMs', v === undefined ? undefined : v * 1000); }} />
             <span className="muted" style={{ fontSize: 11 }}>{L.intervalMs.min / 1000}~{L.intervalMs.max / 1000}초 · 기본 {L.intervalMs.def / 1000}초</span>
           </label>
           <label style={{ fontSize: 12 }}>표본 시간(초)
-            <input className="input" type="number" value={form.sampleSeconds}
+            <input className="input" type="number" value={form.sampleSeconds ?? ''}
               min={L.sampleSeconds.min} max={L.sampleSeconds.max}
-              onChange={(e) => set('sampleSeconds', Number(e.target.value))} />
+              onChange={(e) => set('sampleSeconds', blankOr(e.target.value))} />
             <span className="muted" style={{ fontSize: 11 }}>portperfshow 를 받아쓸 시간 · 기본 {L.sampleSeconds.def}초</span>
           </label>
           <label style={{ fontSize: 12 }} title="수집한 포트 사용량 표본을 며칠 동안 보관할지 정합니다. 이보다 오래된 표본은 수집 주기마다(20틱에 1회) 자동 삭제되고, '지금 정리'로 즉시 삭제할 수도 있습니다.">
             보관 기간(일)
-            <input className="input" type="number" value={form.retentionDays}
+            <input className="input" type="number" value={form.retentionDays ?? ''}
               min={L.retentionDays.min} max={L.retentionDays.max}
-              onChange={(e) => set('retentionDays', Number(e.target.value))} />
+              onChange={(e) => set('retentionDays', blankOr(e.target.value))} />
             <span className="muted" style={{ fontSize: 11 }}>{L.retentionDays.min}~{L.retentionDays.max.toLocaleString()}일 · 기본 {L.retentionDays.def}일</span>
           </label>
         </div>
@@ -129,7 +132,7 @@ export default function SanSwitchPerf() {
           {est ? (
             <div style={{ marginTop: 4 }}>
               <b>추정</b>(최근 24시간 적재 {est.rowsPerDay.toLocaleString()}행, 행당 약 {Math.round(est.bytesPerRow)}바이트 — 현재 파일 크기 ÷ 행 수, WAL 포함이라 실제보다 다소 클 수 있음):
-              하루 약 <b>{bytesText(est.bytesPerDay)}</b> → 보관 {form.retentionDays}일이면 최대 약 <b>{bytesText(est.bytesAtRetention)}</b>({Math.round(est.rowsAtRetention).toLocaleString()}행).
+              하루 약 <b>{bytesText(est.bytesPerDay)}</b> → 보관 {retDays}일이면 최대 약 <b>{bytesText(est.bytesAtRetention)}</b>({Math.round(est.rowsAtRetention).toLocaleString()}행).
               수집 주기·표본 시간·스위치 수를 바꾸면 달라집니다.
             </div>
           ) : <div style={{ marginTop: 4 }}>크기 추정은 최근 24시간에 적재된 표본이 있어야 계산됩니다(지금은 표본이 없습니다).</div>}

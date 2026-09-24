@@ -70,9 +70,18 @@ export function redactDeep(input) {
  *   **이름만** 적는다), 앞으로 누가 값을 찍을 수 있다. `KEY=value`·`token: value` 꼴만 잡는다.
  *   잡지 못하는 형태가 있다는 사실을 화면이 말해야 한다(`logRedactNote`).
  */
+/*
+ * v2.599(감사 SEC2599-04): `Authorization: Basic|Digest …` 와 URL 사용자정보(`https://user:pw@host`)를 더 잡는다.
+ *   도달 경로가 실재한다 — 엣지 워커 20여 곳이 기동 줄에 `config.agent.centralUrl` 을 **그대로** 찍는다
+ *   (`[ping-agent] started (central=…)` 등). 중앙 앞에 기본 인증 프록시를 두려고 CENTRAL_URL 에 `user:pw@` 를
+ *   넣은 현장이면 그 비밀번호가 콘솔 링버퍼 → 엣지 로그 화면으로 나간다. 사용자정보는 **비밀번호 쪽만** 가린다
+ *   (계정 이름은 진단 정보다). 줄 규칙만 넓힌다 — `isSecretKey`(객체 키)는 그대로 둔다(식별자 오탐 규약).
+ */
 export function redactLogLine(line) {
   return String(line == null ? '' : line)
     .replace(/((?:token|password|passwd|passphrase|secret|apikey|api_key)\s*[=:]\s*)(\S+)/gi, `$1${MASK}`)
     .replace(/\b(Bearer\s+)\S+/gi, `$1${MASK}`)
+    .replace(/\b((?:Proxy-)?Authorization\s*[=:]\s*(?:Basic|Digest)\s+)\S+/gi, `$1${MASK}`)
+    .replace(/(\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s/@:]{1,256}:)[^\s/@]{1,512}@/gi, `$1${MASK}@`)
     .replace(/(X-[A-Za-z-]*Token\s*[=:]\s*)\S+/gi, `$1${MASK}`);
 }

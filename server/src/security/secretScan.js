@@ -187,6 +187,23 @@ const SRC_MAX_HITS = 100;
 const SRC_RE = /(password|passwd|secret|token|api[_-]?key)\s*[:=]\s*['"`]([^'"`]{6,})['"`]/i;
 // 명백한 비값(플레이스홀더·필드 정의·마스킹·예시)은 제외 — 오탐 소음 억제. 완전하지 않다(정직 표기).
 const SRC_FALSE = /(\*{3}|example|sample|샘플|placeholder|redact|000000|process\.env|\$\{|<[^>]+>|changeme|your[-_]?)/i;
+/*
+ * v2.599(감사 WEB2599-05): 코드 상수·화면 라벨을 '의심' 으로 세지 않는다. 재현 — 이 저장소 전수에서 의심 9건이
+ *   **전부** 오탐이었다: ① 열거형 코드(`EDGE_NO_TOKEN: 'edge-no-token'`·`password: 'password_only'`) ② 한글 화면
+ *   라벨(`otp_or_password: 'OTP+비밀번호(혼용)'`) ③ 이 파일 자신의 정규식·주석. 화면이 '검토 필요' 라 적어도 9건 중
+ *   9건이 거짓이면 진짜 1건이 묻힌다.
+ *   ⚠ 규칙을 넓히지 말 것 — `[a-z0-9_-]+` 식별자 전체를 빼면 `admin123`·`secret_pass` 같은 **진짜 하드코딩**까지
+ *   빠진다. 빼는 것은 '글자만으로 된 여러 단어 식별자이면서 그 단어 중 하나가 걸린 키워드 자체' 인 값과 한글 라벨뿐이다.
+ */
+const SRC_RE_ALL = new RegExp(SRC_RE.source, 'gi');
+const SRC_SELF = path.resolve(new URL(import.meta.url).pathname);
+export function srcValueLooksLikeCode(keyword, value) {
+  const v = String(value || '');
+  if (/[\uac00-\ud7a3]/.test(v) && !/\d/.test(v)) return true;    // 화면 라벨(한글·숫자 없음 — 숫자가 섞인 한글 값은 비밀번호일 수 있다)
+  if (!/^[a-z]+(?:[_-][a-z]+)+$/i.test(v)) return false;            // 숫자·기호가 섞이면 코드 상수로 보지 않는다
+  const kw = String(keyword || '').toLowerCase().replace(/[_-]/g, '');
+  return v.toLowerCase().split(/[_-]/).some((w) => w === kw);       // 'probe-edge-no-token' · 'otp_or_password'
+}
 
 async function scanSourceDirs(dirs) {
   const out = [];
@@ -202,13 +219,15 @@ async function scanSourceDirs(dirs) {
       seen += 1;
       if (seen % 20 === 0) await yieldLoop();
       const fp = path.join(dir, e.name);
+      if (path.resolve(fp) === SRC_SELF) continue;   // 이 파일의 정규식·주석은 탐지 규칙이지 자격증명이 아니다
       try {
         const st = fs.statSync(fp);
         if (st.size > SRC_MAX_BYTES) continue;
         const lines = fs.readFileSync(fp, 'utf8').split('\n');
         for (let i = 0; i < lines.length; i++) {
-          const m = SRC_RE.exec(lines[i]);
-          if (!m || SRC_FALSE.test(lines[i])) continue;
+          if (!SRC_RE.test(lines[i]) || SRC_FALSE.test(lines[i])) continue;
+          // 한 줄의 **모든** 대입을 본다 — 첫 대입이 코드 상수라고 같은 줄의 진짜 값까지 빼면 안 된다.
+          if ([...lines[i].matchAll(SRC_RE_ALL)].every((m) => srcValueLooksLikeCode(m[1], m[2]))) continue;
           out.push({ file: fp, line: i + 1, preview: maskLine(lines[i].trim()).slice(0, 160) });
           if (out.length >= SRC_MAX_HITS) break;
         }

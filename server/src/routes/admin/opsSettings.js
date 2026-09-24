@@ -10,7 +10,7 @@ import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomal
 import { createJob as createProvisionJob } from '../../provision/jobs.js';
 import { updateSaved, removeSaved, getSaved } from '../../provision/saved.js';
 import { store } from '../../store.js';
-import { inUserWriteScope } from '../../auth/scope.js';
+import { inUserWriteScope, scopedVcenterIds } from '../../auth/scope.js';
 import { ssrfBlockReasonResolved } from '../../collector/registry.js';
 import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../../reports/dailyReport.js';
 import { refreshCerts } from '../../security/certMonitor.js';
@@ -136,12 +136,21 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
 adminRouter.get('/os-scan', adminOnly, (_req, res) => res.json(osScanStatus()));
 adminRouter.put('/os-scan/settings', adminOnly, (req, res) => res.json({ ok: true, ...osScanStatus(), settings: saveOsScanSettings(req.body || {}) }));
 adminRouter.post('/os-scan/run', adminOnly, async (req, res) => res.json(await runOsScanNow(req.body?.vcenterId || '')));
-adminRouter.get('/os-scan/results', adminOnly, (req, res) => {
+// v2.599(AUTHZ-2599-05): 범위 제한 admin 에게 범위 밖 vCenter VM 의 실제 OS(이름·호스트·커널)를 주지 않는다 —
+//   요청 필터(?vcenterId)보다 **먼저** 범위 교집합(server/CLAUDE.md 규칙). 뺀 개수는 밝힌다.
+function scopedOsRows(req) {
   const rows = getOsResults({ vcenterId: req.query.vcenterId || '', mismatch: req.query.mismatch === '1' });
-  res.json({ total: rows.length, items: rows.slice(0, 10000) });
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (!allowed) return { rows, omitted: 0, scoped: false };
+  const kept = rows.filter((r) => allowed.has(String(r.vcenterId)));
+  return { rows: kept, omitted: rows.length - kept.length, scoped: true };
+}
+adminRouter.get('/os-scan/results', adminOnly, (req, res) => {
+  const { rows, omitted, scoped } = scopedOsRows(req);
+  res.json({ total: rows.length, items: rows.slice(0, 10000), ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}) });
 });
 adminRouter.get('/os-scan/results.csv', adminOnly, (req, res) => {
-  const rows = getOsResults({ vcenterId: req.query.vcenterId || '', mismatch: req.query.mismatch === '1' });
+  const { rows } = scopedOsRows(req);
   const esc = (v) => {
     let s = String(v ?? '');
     if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;        // 스프레드시트 수식 인젝션 무력화(=,+,-,@ 로 시작)

@@ -17,9 +17,15 @@ const adminOnly = requireRole('admin');
 export function registerVmClone(api) {
 
 /** 잡 목록 + 실행 상태 + NFS 마운트 요약(대상 선택 드롭다운용). */
-api.get('/tools/vm-clone', adminOnly, (_req, res) => {
+api.get('/tools/vm-clone', adminOnly, (req, res) => {
+  // v2.599(AUTHZ-2599-05): 범위 제한 admin 에게 범위 밖 vCenter 잡(VM 이름·대상 DS)을 주지 않는다 —
+  //   형제 /badges 와 쓰기 라우트는 이미 범위를 본다. 뺀 개수는 밝힌다(조용한 절단 금지).
+  const allowed = scopedVcenterIds(req.user, store.get());
+  const all = listJobs();
+  const jobs = allowed ? all.filter((j) => allowed.has(String(j.vcenterId))) : all;
   res.json({
-    jobs: listJobs(),
+    jobs,
+    ...(allowed ? { scoped: true, omittedOutOfScope: all.length - jobs.length } : {}),
     status: schedulerStatus(),
     mounts: listMounts().map((m) => ({ id: m.id, server: m.server, exportPath: m.exportPath, mounted: m.mounted, mountPoint: m.mountPoint })),
   });
@@ -28,8 +34,32 @@ api.get('/tools/vm-clone', adminOnly, (_req, res) => {
 /** 잡 생성/수정 — body: { id?, vcenterId, vmId, vmName, dest, schedule, keep, quiesce, enabled } */
 api.post('/tools/vm-clone/jobs', adminOnly, (req, res) => {
   // 복제는 vCenter 상태변경 — 쓰기 범위(writeVcenters, v2.369) 강제. 미설정이면 조회 범위와 동일.
-  if (!inUserWriteScope(req.user, store.get(), String(req.body?.vcenterId || ''))) {
+  const snap = store.get();
+  const vcenterId = String(req.body?.vcenterId || '');
+  if (!inUserWriteScope(req.user, snap, vcenterId)) {
     return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+  }
+  // v2.599(AUTHZ-2599-01): 수정(body.id)이면 **기존 잡의 vCenter** 도 쓰기 범위여야 한다(DELETE·run 과 같은 규칙).
+  //   예전에는 body.vcenterId 만 봐서 범위 제한 admin 이 범위 밖 잡을 자기 vCenter 로 덮어써 가로챌 수 있었다.
+  //   그리고 기존 잡의 vCenter 는 바꾸지 않는다 — clones 원장의 ref 는 옛 vCenter 의 것이라 새 vCenter 에서
+  //   보존정책이 엉뚱한 VM 을 지울 수 있다(화면도 수정 시 vCenter 선택을 잠근다).
+  const existingId = req.body?.id ? String(req.body.id) : '';
+  const existing = existingId ? listJobs().find((j) => j.id === existingId) : null;
+  if (existing) {
+    if (!inUserWriteScope(req.user, snap, existing.vcenterId)) {
+      return res.status(403).json({ ok: false, reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
+    }
+    if (String(existing.vcenterId) !== vcenterId) {
+      return res.status(400).json({ ok: false, reason: '기존 복제 잡의 vCenter 는 바꿀 수 없습니다 — 잡을 삭제하고 새로 만드세요.' });
+    }
+  }
+  // v2.599(AUTHZ-2599-06): vmId 가 인벤토리에 있으면 그 VM 의 vCenter 가 잡의 vCenter 와 같아야 한다(입력 정합성).
+  //   권한 문제는 아니다(moref 는 job.vcenterId 연결에서만 쓰인다) — 다른 vCenter 의 VM 이 잡에 붙어 엉뚱한 moref 로
+  //   스냅샷을 시도하는 것을 막는다. 인벤토리에 없는 vmId(수집 전·삭제)는 판정할 근거가 없어 막지 않는다.
+  const vmId = String(req.body?.vmId || '');
+  const vm = vmId ? (snap?.vms || []).find((v) => v.id === vmId) : null;
+  if (vm && String(vm.vcenterId) !== vcenterId) {
+    return res.status(400).json({ ok: false, reason: '선택한 VM 이 이 vCenter 에 속하지 않습니다.' });
   }
   try {
     const job = saveJob(req.body || {});

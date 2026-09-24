@@ -179,12 +179,13 @@ export function RealOs({ scope }) {
   const [st, setSt] = useState(null);     // /admin/os-scan status+settings
   const [rows, setRows] = useState(null);
   const [mm, setMm] = useState(false);    // 불일치만
+  const [omitted, setOmitted] = useState(0); // v2.599: 조회 범위 밖이라 뺀 결과 수
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
 
   const loadStatus = () => fetchJson('/admin/os-scan').then((r) => { setSt((cur) => ({ ...(cur || {}), ...r, settings: cur?.dirty ? cur.settings : r.settings })); setErr(null); }).catch((e) => setErr(e.message));
-  const loadResults = () => fetchJson(`/admin/os-scan/results?${new URLSearchParams({ ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) })}`).then((r) => setRows(r.items || [])).catch(() => setRows([]));
+  const loadResults = () => fetchJson(`/admin/os-scan/results?${new URLSearchParams({ ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) })}`).then((r) => { setRows(r.items || []); setOmitted(Number(r.omittedOutOfScope) || 0); }).catch(() => { setRows([]); setOmitted(0); });
   useEffect(() => { loadStatus(); /* eslint-disable-next-line */ }, []);
   useEffect(() => { loadResults(); /* eslint-disable-next-line */ }, [scope, mm]);
 
@@ -248,7 +249,7 @@ export function RealOs({ scope }) {
 
       <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
         <button className={mm ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setMm((v) => !v)}>{mm ? '불일치만 ✓' : '불일치만 보기'}</button>
-        <span className="muted" style={{ fontSize: 12 }}>{rows ? `${rows.length}건` : ''}</span>
+        <span className="muted" style={{ fontSize: 12 }}>{rows ? `${rows.length}건${omitted > 0 ? ` · 조회 범위 밖 ${omitted}건 제외` : ''}` : ''}</span>
         <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px', marginLeft: 'auto' }} disabled={!rows?.length} onClick={exportCsv}>⬇ CSV 내보내기</button>
       </div>
       {!rows ? <Loading /> : rows.length === 0 ? <div className="card"><span className="muted">{mm ? '불일치 VM이 없습니다.' : '스캔 결과가 없습니다. ‘지금 스캔’을 실행하세요(계정은 GPU 게스트 수집 설정 사용).'}</span></div>

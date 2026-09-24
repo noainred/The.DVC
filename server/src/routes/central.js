@@ -86,6 +86,17 @@ function declaredGetPaths() {
   }
   return _getPaths;
 }
+let _postPaths = null;
+/** v2.599(WEB2599-01·04): 선언된 POST 경로 집합 — 없는 경로로 온 거부를 경로별 키로 쌓지 않게 한 칸으로 접는다. */
+function declaredPostPaths() {
+  if (!_postPaths) {
+    _postPaths = new Set();
+    for (const l of centralRouter.stack) if (l.route?.methods?.post && typeof l.route.path === 'string') _postPaths.add(l.route.path);
+  }
+  return _postPaths;
+}
+/** 라우터에 없는 경로로 온 거부의 경로 칸(한 칸) — 경로 문자열은 요청자가 고른 값이라 키로 쓰지 않는다. */
+export const UNKNOWN_ROUTE_KEY = '(없는 경로)';
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
 // ⚠ 라우트 등록보다 아래로 옮기지 말 것 — 그 뒤에 등록된 것만 보호된다.
@@ -125,7 +136,12 @@ centralRouter.use((req, res, next) => {
         //   공유 토큰이면 주장된 이름을 쓰되 64자로 자르고 verified:false 로 남긴다(형제 ingestReject·pullStats 와 같은 상한).
         const auth = req.centralAuth;
         const verified = !!auth?.ok && auth.mode === 'agent';
-        const agent = (verified ? String(auth.agent || '') : String(req.body?.agent || req.get('X-Agent-Name') || '')).trim().slice(0, 64) || '(unknown)';
+        // v2.599(WEB2599-01): **인증에 실패한 요청의 이름은 믿지 않는다** — v2.589 GET 계측과 같은 규약. 예전에는 무토큰
+        //   POST 의 주장 이름(body.agent·X-Agent-Name)마다 거부 기록이 생겨 데이터 흐름·3단 지도에 가짜 엣지(최대 500)가 그려졌다.
+        //   인증 실패는 한 칸(PULL_UNAUTH_KEY)에만 센다 — 막힌 push 가 있었다는 사실은 남긴다.
+        const agent = auth && !auth.ok
+          ? PULL_UNAUTH_KEY
+          : (verified ? String(auth.agent || '') : String(req.body?.agent || req.get('X-Agent-Name') || '')).trim().slice(0, 64) || '(unknown)';
         const wireBytes = Number(req.get('content-length')) || 0;
         if (res.statusCode >= 400) {
           // v2.570 — 거부는 **수신 집계에서 빼되 따로 기록**한다. 예전에는 여기서 그냥 return 해
@@ -134,9 +150,15 @@ centralRouter.use((req, res, next) => {
           // ⚠ 이 agent 이름은 **검증되지 않은 값**이다(거부됐으므로 토큰 바인딩을 통과하지 못했을
           //   수 있다) — `ingestReject.js` 가 상한을 걸고 응답이 그 사실을 밝힌다.
           const hint = res.locals?.ingestReject;
-          recordReject(agent, req.path, {
+          // v2.599(WEB2599-04): 라우터에 없는 경로(req.route 없음 · 선언 목록에도 없음)는 '수신 꺼짐' 이 아니다 — 종류를
+          //   따로 두고(unknown-route) 경로는 한 칸으로 접는다. 선언된 경로의 404 만 중앙 수신 비활성으로 본다.
+          const declared = !!req.route || declaredPostPaths().has(req.path);
+          const kindHint = hint?.kind
+            || (!declared ? REJECT_KIND.UNKNOWN_ROUTE
+              : res.statusCode === 404 ? (centralEnabled() ? REJECT_KIND.OTHER : REJECT_KIND.DISABLED) : '');
+          recordReject(agent, declared ? req.path : UNKNOWN_ROUTE_KEY, {
             status: res.statusCode,
-            kind: hint?.kind || '',
+            kind: kindHint,
             reason: hint?.reason || (res.statusCode === 403 ? (req.centralAuth?.reason || '토큰 불일치') : ''),
             vcenterId: hint?.vcenterId || String(req.body?.vcenterId || ''),
             wireBytes,
@@ -492,23 +514,82 @@ centralRouter.post('/svcmon-config-ack', (req, res) => {
   res.status(r.ok ? 200 : 409).json(r);
 });
 
+/**
+ * v2.599(EDGE2599-03): 인벤토리 소유권(TOFU)의 **인계 시한** — 소유 엣지의 마지막 push 가 이보다 오래되면 다른 개별
+ * 토큰 엣지가 넘겨받을 수 있다. 0 이면 인계하지 않는다(예전 동작). 예전에는 소유권이 만료되지 않아 **담당 엣지를
+ * 교체하면 새 엣지의 push 가 영구 403** 이었고, 유일한 해제 방법은 vCenter 를 등록부에서 지웠다 다시 넣는 것이었다.
+ * ⚠ 보안 경계는 유지한다: 소유 엣지가 **살아 있는 동안**(시한 안에 push 하는 동안) 다른 엣지는 여전히 덮어쓸 수 없다.
+ *   시한이 지난 인계는 그 vCenter 의 스냅샷이 이미 그만큼 낡은 경우뿐이고, 인계는 감사 로그·콘솔·응답에 남긴다.
+ */
+const INVENTORY_OWNER_HANDOVER_MS = (() => {
+  const v = process.env.CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS;
+  if (v == null || String(v).trim() === '') return 7 * 24 * 3_600_000; // 기본 7일
+  const h = Number(v);
+  return Number.isFinite(h) && h > 0 ? Math.max(1, h) * 3_600_000 : 0;   // 0·음수 = 인계 안 함
+})();
+const isPlainObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+/** 화면이 글자로 그리는 인벤토리 필드 — 객체·배열이면 null 로 바꾼다(React #31 방지 — CEN-2599-03). */
+const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'version', 'build', 'vendor', 'model', 'cpuModel',
+  'guestOS', 'powerState', 'connectionState', 'toolsStatus', 'toolsVersionStatus', 'ipAddress', 'folder', 'resourcePool', 'notes',
+  'hwVersion', 'storageType', 'severity', 'message', 'entity', 'entityType', 'status', 'location', 'overallStatus'];
+/**
+ * 인벤토리 조각 원소 정리(v2.599 CEN-2599-01·02·03).
+ *  - 평범한 객체만 받는다 — `hosts:[null]` 하나로 store.refresh 가 매 주기 throw 해 **전 함대 스냅샷이 멈췄다**.
+ *  - 원소의 vcenterId 는 본문 vcenterId 여야 한다 — 다르면 **뺀다**(예전에는 그대로 병합돼 소유권 검사를 지나 남의 법인
+ *    vCenter 에 호스트·VM 을 주입할 수 있었다). 없으면 본문 값으로 채운다(엣지는 항상 채워 보낸다 — inventoryPush.js).
+ *  - id 가 식별자가 아니면 뺀다. 표시 필드의 객체 값은 null.
+ */
+function sanitizeInventoryList(list, vcId, max, dropped) {
+  const out = [];
+  for (const x of Array.isArray(list) ? list.slice(0, max) : []) {
+    if (!isPlainObj(x)) { dropped.notObject += 1; continue; }
+    if (x.vcenterId != null && String(x.vcenterId) !== vcId) { dropped.otherVcenter += 1; continue; }
+    if (x.id != null && typeof x.id !== 'string' && !(typeof x.id === 'number' && Number.isFinite(x.id))) { dropped.badId += 1; continue; }
+    const o = { ...x, vcenterId: vcId };
+    for (const k of INV_TEXT_KEYS) {
+      const v = o[k];
+      if (v != null && typeof v === 'object') { o[k] = null; dropped.coerced += 1; }
+    }
+    out.push(o);
+  }
+  return out;
+}
+
 centralRouter.post('/inventory', (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const b = req.body || {};
   if (!b.vcenterId || !b.vcenter) return res.status(400).json({ ok: false, reason: 'vcenterId/vcenter가 필요합니다.' });
+  // v2.599(CEN-2599-01): vcenter 는 객체, vcenterId 는 글자여야 한다 — 그 밖의 모양은 병합 단계에서 스냅샷을 멈춘다.
+  if (!isPlainObj(b.vcenter) || (typeof b.vcenterId !== 'string' && typeof b.vcenterId !== 'number') || String(b.vcenterId).length > 128) {
+    return res.status(400).json({ ok: false, reason: 'vcenter 는 객체, vcenterId 는 128자 이하 글자여야 합니다.' });
+  }
   // 출처 agent 는 개별 토큰이면 토큰에서 해석한 값을 강제(body.agent 위조 무효화).
   const agent = req.centralAuth.agent || String(b.agent || '').trim();
   // 소유권 경계(TOFU): 이 vcenterId 를 이미 다른 엣지가 등록했다면 개별 토큰은 덮어쓸 수 없다.
   // (엣지 A 가 남의 vCenter 스냅샷을 위조·블랭킹하는 것을 차단. 공유 토큰은 agent 가 없어 검사 생략 —
   //  완전 봉인은 CENTRAL_REQUIRE_AGENT_TOKEN=true.)
+  let handover = null;
   if (req.centralAuth.mode === 'agent') {
-    const owner = getInventory(String(b.vcenterId))?.agent || '';
+    const cur = getInventory(String(b.vcenterId));
+    const owner = cur?.agent || '';
     if (owner && owner.toLowerCase() !== agent.toLowerCase()) {
-      const reason = `vcenterId '${b.vcenterId}'는 '${owner}' 소유입니다(다른 엣지가 덮어쓸 수 없습니다).`;
-      // v2.570: 거부 기록에 종류를 남긴다 — '소유권' 과 '토큰 불일치' 는 조치가 다르다.
-      res.locals.ingestReject = { kind: REJECT_KIND.OWNER, reason, vcenterId: String(b.vcenterId) };
-      return res.status(403).json({ ok: false, reason });
+      const silentMs = Date.now() - (Number(cur.at) || 0);
+      if (INVENTORY_OWNER_HANDOVER_MS > 0 && silentMs > INVENTORY_OWNER_HANDOVER_MS) {
+        // v2.599(EDGE2599-03): 소유 엣지가 시한 넘게 조용하다 — 인계한다(감사·콘솔·응답에 남긴다).
+        handover = { from: owner, silentMs };
+        console.warn(`[central] inventory 소유권 인계: vc=${b.vcenterId} ${owner} → ${agent} (옛 소유 엣지 마지막 push ${Math.round(silentMs / 3_600_000)}시간 전)`);
+        try { logAudit({ user: `edge:${agent}`, action: 'central-inventory-owner-handover', target: String(b.vcenterId), detail: `from=${owner} silentHours=${Math.round(silentMs / 3_600_000)}`, ip: req.socket?.remoteAddress || '' }); } catch { /* 감사 실패가 수신을 막지 않게 */ }
+      } else {
+        const hours = Math.round(INVENTORY_OWNER_HANDOVER_MS / 3_600_000);
+        const reason = `vcenterId '${b.vcenterId}'는 '${owner}' 소유입니다(다른 엣지가 덮어쓸 수 없습니다).`
+          + (INVENTORY_OWNER_HANDOVER_MS > 0
+            ? ` 담당 엣지를 교체했다면 옛 엣지의 마지막 push 후 ${hours}시간이 지나면 새 엣지가 넘겨받습니다(CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS). 바로 넘기려면 설정 › vCenter 에서 이 vCenter 를 지웠다가 다시 등록하세요.`
+            : ' 인계가 꺼져 있습니다(CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS=0) — 설정 › vCenter 에서 이 vCenter 를 지웠다가 다시 등록해야 넘어갑니다.');
+        // v2.570: 거부 기록에 종류를 남긴다 — '소유권' 과 '토큰 불일치' 는 조치가 다르다.
+        res.locals.ingestReject = { kind: REJECT_KIND.OWNER, reason, vcenterId: String(b.vcenterId) };
+        return res.status(403).json({ ok: false, reason, owner, ownerSilentMs: silentMs, handoverAfterMs: INVENTORY_OWNER_HANDOVER_MS || null });
+      }
     }
   }
   // v2.428(미스매치 #12): mock 노드의 인벤토리는 저장하지 않는다 — IRS 들이 DATA_SOURCE=mock 으로 같은 가짜 vCenter id 를 push 해
@@ -532,17 +613,27 @@ centralRouter.post('/inventory', (req, res) => {
   // v2.428(미스매치 #6/#7): 같은 vcenterId 를 다른 agent 가 번갈아 push 하거나, 같은 agent 이름이 다른 hostname 에서 오면 충돌로 기록.
   noteAgentIdentity(agent, { hostname: req.get('X-Agent-Hostname') || '', mock: false, peer: req.socket?.remoteAddress || '' });
   noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
-  const arr = (x, n) => (Array.isArray(x) ? x.slice(0, n) : []);
+  const vcId = String(b.vcenterId);
+  const dropped = { notObject: 0, otherVcenter: 0, badId: 0, coerced: 0 };
+  const vcenter = { ...b.vcenter, id: vcId }; // v2.599(CEN-2599-02): vcenter.id 는 본문 vcenterId 로 고정
+  for (const k of ['name', 'location', 'version', 'build', 'region', 'status']) if (vcenter[k] != null && typeof vcenter[k] === 'object') { vcenter[k] = null; dropped.coerced += 1; }
   const slice = {
-    vcenter: b.vcenter,
-    hosts: arr(b.hosts, 50_000),
-    vms: arr(b.vms, 500_000),
-    datastores: arr(b.datastores, 50_000),
-    networks: arr(b.networks, 50_000),
-    alarms: arr(b.alarms, 50_000),
+    vcenter,
+    hosts: sanitizeInventoryList(b.hosts, vcId, 50_000, dropped),
+    vms: sanitizeInventoryList(b.vms, vcId, 500_000, dropped),
+    datastores: sanitizeInventoryList(b.datastores, vcId, 50_000, dropped),
+    networks: sanitizeInventoryList(b.networks, vcId, 50_000, dropped),
+    alarms: sanitizeInventoryList(b.alarms, vcId, 50_000, dropped),
   };
-  setInventory(String(b.vcenterId), slice, agent, b.generatedAt || null);
-  res.json({ ok: true, vcenterId: b.vcenterId, hosts: slice.hosts.length, vms: slice.vms.length });
+  const droppedN = dropped.notObject + dropped.otherVcenter + dropped.badId;
+  if (droppedN) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 원소 ${droppedN}건 제외(객체 아님 ${dropped.notObject} · 다른 vCenter ${dropped.otherVcenter} · id 형식 ${dropped.badId})`);
+  setInventory(vcId, slice, agent, b.generatedAt || null);
+  res.locals.ingestSummary = {
+    vcenterId: vcId.slice(0, 128), hosts: slice.hosts.length, vms: slice.vms.length, datastores: slice.datastores.length,
+    networks: slice.networks.length, alarms: slice.alarms.length, gzip: (req.get('content-encoding') || '').includes('gzip'),
+  };
+  res.json({ ok: true, vcenterId: b.vcenterId, hosts: slice.hosts.length, vms: slice.vms.length,
+    ...(droppedN || dropped.coerced ? { rejected: droppedN, dropped } : {}), ...(handover ? { ownerHandover: handover } : {}) });
 });
 
 // 사이트 위임 게스트 디스크 수신(v2.466) — 엣지가 로컬 vCenter 의 guest.disk 를 수집해 push.
@@ -994,9 +1085,24 @@ centralRouter.post('/storage-data', async (req, res) => {
     devices = devices.filter((d) => d && owned.has(d.deviceId));
     if (before !== devices.length) console.warn(`[central] storage-data: ${agent} 미위임 deviceId ${before - devices.length}건 드롭(위조 방지)`);
   }
-  const saved = saveEdgeStorage(agent, devices);
-  res.json({ ok: true, saved });
+  // v2.599(CEN-2599-03·04·05): 모듈이 원소를 정리하고(객체 아님·식별자 아님·크기 초과를 빼고 표시 필드의 객체 값은 null)
+  //   뺀 개수를 info 에 싣는다 — 응답이 그 사실을 말한다(조용한 제외 금지).
+  const info = {};
+  const saved = saveEdgeStorage(agent, devices, info);
+  if (info.refused) return res.status(429).json({ ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).' });
+  res.json({ ok: true, saved, ...(edgeDropSummary(info)) });
 });
+
+/** v2.599: 엣지 장비 수신 정리 결과를 응답 필드로(뺀 것이 없으면 빈 객체). */
+function edgeDropSummary(info) {
+  const d = info?.dropped || {};
+  const n = Object.values(d).reduce((a, x) => a + (Number(x) || 0), 0);
+  return {
+    ...(n ? { rejected: n, dropped: d } : {}),
+    ...(info?.coerced ? { coerced: info.coerced } : {}),
+    ...(info?.evicted ? { evicted: info.evicted } : {}),
+  };
+}
 
 // ── PDU 모니터링 위임(v2.424) — 스토리지 위임과 완전히 같은 규약 ────────────────
 // GET /api/central/pdu-config?agent=<이름> — 이 엣지 몫 PDU 목록(자격증명 포함: 엣지가 PDU 에
@@ -1037,8 +1143,10 @@ centralRouter.post('/pdu-data', async (req, res) => {
     snapshots = snapshots.filter((s) => s && owned.has(s.id));
     if (before !== snapshots.length) console.warn(`[central] pdu-data: ${agent} 미위임 id ${before - snapshots.length}건 드롭(위조 방지)`);
   }
-  const saved = saveEdgePdu(agent, snapshots);
-  res.json({ ok: true, saved });
+  const r = saveEdgePdu(agent, snapshots);
+  if (r?.refused) return res.status(429).json({ ok: false, refused: true, reason: r.reason });
+  // ⚠ 예전에는 결과 객체 전체를 saved 에 담았다({ok,count}). 하위호환으로 그 모양을 유지하고 뺀 개수를 옆에 싣는다.
+  res.json({ ok: true, saved: r, ...(edgeDropSummary(r)) });
 });
 
 // ── SAN 스위치 모니터링 위임(v2.410) — 스토리지 위임과 완전히 같은 규약 ──────────
@@ -1236,8 +1344,10 @@ centralRouter.post('/sanswitch-data', async (req, res) => {
     if (before !== devices.length) console.warn(`[central] sanswitch-data: ${agent} 미위임 deviceId ${before - devices.length}건 드롭(위조 방지)`);
   }
   const chunk = Math.max(0, Number(req.body?.chunk) || 0), chunks = Math.max(1, Number(req.body?.chunks) || 1);
-  const saved = saveEdgeSanSwitch(agent, devices, { chunk, chunks });
-  res.json({ ok: true, saved });
+  const info = {};
+  const saved = saveEdgeSanSwitch(agent, devices, { chunk, chunks, info });
+  if (info.refused) return res.status(429).json({ ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).' });
+  res.json({ ok: true, saved, ...(edgeDropSummary(info)) });
 });
 
 // GET /api/central/users-config?agent=<이름>
@@ -1288,9 +1398,10 @@ centralRouter.post('/agent-config', (req, res) => {
   const files = {};
   let n = 0;
   for (const [k, v] of Object.entries(b.files)) { if (n++ >= 200) break; if (typeof v === 'string' && v.length <= 8_000_000) files[require_basename(k)] = v; }
-  setAgentConfig(agent.slice(0, 120), files);
-  console.log(`[central] agent-config 수신: agent=${agent} (${Object.keys(files).length}개)`);
-  res.json({ ok: true, agent, files: Object.keys(files).length });
+  const r = setAgentConfig(agent.slice(0, 120), files) || {};
+  if (r.refused) return res.status(429).json({ ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).' });
+  console.log(`[central] agent-config 수신: agent=${agent} (${Object.keys(files).length}개${r.omitted ? ` · 합계 상한으로 ${r.omitted}개 제외` : ''})`);
+  res.json({ ok: true, agent, files: Object.keys(files).length, ...(r.omitted ? { omitted: r.omitted } : {}), ...(r.evicted ? { evicted: r.evicted } : {}) });
 });
 function require_basename(p) { return String(p).split(/[\\/]/).pop().slice(0, 200); }
 

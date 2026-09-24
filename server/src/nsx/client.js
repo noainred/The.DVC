@@ -42,6 +42,39 @@ export const isNsxAuthError = (err) => !!(err && err.authFailed === true);
 
 const norm = (s) => String(s || '').replace(/\/+$/, '');
 
+/**
+ * 목록 조회의 페이지 상한(v2.599 감사 C2599-05). NSX 목록 API 는 한 페이지(기본 1,000개)만 주고 다음 페이지는
+ * 응답의 `cursor` 로 받는다. 예전에는 cursor 를 무시해 그룹·세그먼트·포트·전송 노드 개수가 **첫 페이지로 조용히**
+ * 잘렸다. 상한까지 따라가고, 상한에 걸려 남은 페이지가 있으면 `truncated` 로 밝힌다(조용한 상한 금지).
+ */
+export const NSX_LIST_MAX_PAGES = Math.max(1, Number(process.env.NSX_LIST_MAX_PAGES) || 20);
+/** 규칙을 조회하는 DFW 정책 수 상한(정책마다 GET 1회 — 고RTT 매니저 부하). 넘으면 개수를 밝힌다. */
+export const NSX_DFW_POLICY_MAX = 60;
+
+/**
+ * cursor 페이징을 따라 목록 전체를 모은다(순수 — 페이지 조회 함수를 주입받는다).
+ * @param {(path:string)=>Promise<any>} getPage
+ * @returns {Promise<{results:any[], result_count:number|null, truncated:boolean, pages:number}>}
+ *   result_count 는 장비가 보고한 전체 개수(없으면 null). 첫 페이지 실패는 그대로 던진다(호출부의 관용 규칙 유지).
+ */
+export async function listAllPages(getPage, pathname, { maxPages = NSX_LIST_MAX_PAGES } = {}) {
+  const results = [];
+  let cursor = null, pages = 0, count = null;
+  do {
+    const sep = pathname.includes('?') ? '&' : '?';
+    const page = await getPage(cursor ? `${pathname}${sep}cursor=${encodeURIComponent(cursor)}` : pathname);
+    pages += 1;
+    if (Array.isArray(page?.results)) results.push(...page.results);
+    const rc = Number(page?.result_count);
+    if (count == null && page?.result_count != null && Number.isFinite(rc) && rc >= 0) count = rc;
+    cursor = page?.cursor ? String(page.cursor) : null;
+  } while (cursor && pages < maxPages);
+  return { results, result_count: count, truncated: !!cursor, pages };
+}
+
+/** 목록의 개수 — 장비가 보고한 전체 개수(result_count)가 받은 것보다 크면 그것을 쓴다(v2.599). */
+export const listCount = (l) => Math.max((l?.results || []).length, Number.isFinite(l?.result_count) ? l.result_count : 0);
+
 // 보안: 과거엔 기본 분기가 '전역(미검증)' 디스패처에 기댔으나, 전역 디스패처가 검증 ON 기본으로
 // 복원되면서(감사 C1/C3) NSX 전용 '로컬' 디스패처로 명시한다 — 자체서명 NSX 기본 동작은 그대로.
 // 검증 여부: NSX_TLS_REJECT_UNAUTHORIZED=true 명시 또는 vCenter 전역 검증(VC_TLS_REJECT_
@@ -88,6 +121,9 @@ export class NsxClient {
     return ct.includes('application/json') ? res.json() : res.text();
   }
 
+  /** cursor 페이징 목록(v2.599 C2599-05) — `listAllPages` 가 상한·truncated 를 소유한다. */
+  #list(pathname) { return listAllPages((p) => this.#get(p), pathname); }
+
   /**
    * 신원 확인 호출 — 수집의 유일한 필수 호출이다. v2.590(감사 F1): 여기의 401·403 만 **자격증명 거부**로
    * 못 박는다(NSX Manager 는 틀린 Basic 자격증명에 403 "The credentials were incorrect or the account specified
@@ -102,14 +138,14 @@ export class NsxClient {
     }
   }
   clusterStatus() { return this.#get('/api/v1/cluster/status'); }
-  transportNodes() { return this.#get('/api/v1/transport-nodes'); }
-  tier0s() { return this.#get('/policy/api/v1/infra/tier-0s'); }
-  tier1s() { return this.#get('/policy/api/v1/infra/tier-1s'); }
-  segments() { return this.#get('/policy/api/v1/infra/segments'); }
-  segmentPorts(segmentId) { return this.#get(`/policy/api/v1/infra/segments/${encodeURIComponent(segmentId)}/ports`); }
-  securityPolicies() { return this.#get('/policy/api/v1/infra/domains/default/security-policies'); }
-  policyRules(policyId) { return this.#get(`/policy/api/v1/infra/domains/default/security-policies/${encodeURIComponent(policyId)}/rules`); }
-  groups() { return this.#get('/policy/api/v1/infra/domains/default/groups'); }
+  transportNodes() { return this.#list('/api/v1/transport-nodes'); }
+  tier0s() { return this.#list('/policy/api/v1/infra/tier-0s'); }
+  tier1s() { return this.#list('/policy/api/v1/infra/tier-1s'); }
+  segments() { return this.#list('/policy/api/v1/infra/segments'); }
+  segmentPorts(segmentId) { return this.#list(`/policy/api/v1/infra/segments/${encodeURIComponent(segmentId)}/ports`); }
+  securityPolicies() { return this.#list('/policy/api/v1/infra/domains/default/security-policies'); }
+  policyRules(policyId) { return this.#list(`/policy/api/v1/infra/domains/default/security-policies/${encodeURIComponent(policyId)}/rules`); }
+  groups() { return this.#list('/policy/api/v1/infra/domains/default/groups'); }
   // 그룹의 실제(effective) 멤버 — 온디맨드 라이브 조회.
   groupVmMembers(groupId) { return this.#get(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/virtual-machines`); }
   groupIpMembers(groupId) { return this.#get(`/policy/api/v1/infra/domains/default/groups/${encodeURIComponent(groupId)}/members/ip-addresses`); }
@@ -130,6 +166,29 @@ function clusterHealth(status) {
   const up = (v) => String(v || '').toUpperCase() === 'STABLE' || String(v || '').toUpperCase() === 'CONNECTED';
   if (m == null && c == null) return 'connected';
   return up(m) && (c == null || up(c)) ? 'connected' : 'degraded';
+}
+
+/**
+ * DFW 요약(순수, v2.599 감사 C2599-05). 정책 수는 **전체**(result_count 우선)이고 규칙 조회는 앞 NSX_DFW_POLICY_MAX 개뿐이다.
+ * 규칙 수는 조회한 정책의 규칙 + 조회하지 않은 정책의 `rule_count` 합이다. 뺀 정책 중 rule_count 가 없는 것이 있거나
+ * 규칙 페이지가 잘렸으면 `rulesPartial`(하한)로 밝힌다 — 부분 합을 전체라 말하지 않는다.
+ */
+export function firewallSummary({ pols, dfw, ruleSets = [] }) {
+  const all = pols?.results || [];
+  const total = listCount(pols);
+  const omitted = Math.max(0, total - dfw.length);
+  let rules = dfw.reduce((a, p) => a + (p.ruleCount || 0), 0);
+  let partial = !!ruleSets.truncated || !!pols?.truncated || total > all.length;
+  for (const p of all.slice(dfw.length)) {
+    const rc = Number(p?.rule_count);
+    if (p?.rule_count != null && Number.isFinite(rc)) rules += rc; else partial = true;
+  }
+  return {
+    policies: total, rules,
+    ...(omitted ? { policiesOmitted: omitted, policiesRuleLimit: NSX_DFW_POLICY_MAX } : {}),
+    ...(partial ? { rulesPartial: true } : {}),
+    ...(pols?.truncated ? { truncated: true } : {}),
+  };
 }
 
 /**
@@ -184,15 +243,22 @@ export async function collectFromNsx(mgr) {
       const ports = (r.results || []).filter((p) => p.attachment && p.attachment.id);
       segments[idx].ports = ports.map((p) => (p.display_name || p.id).replace(/\.vmx.*$/, '')).slice(0, 50);
       segments[idx].vmCount = ports.length;
+      if (r.truncated) segments[idx].portsTruncated = true; // v2.599: 페이지 상한에 걸려 vmCount 는 하한이다
     } catch { /* 권한/미지원 시 null 유지(=미조회) */ }
   });
 
   // Pull the actual DFW rules for each policy so the UI can browse them. 세그먼트 포트 조회와
   // 동일하게 동시성 8로 제한 — 무제한 Promise.all(최대 60 동시)은 고RTT 매니저를 과부하시킨다.
-  const policies = (pols.results || []).slice(0, 60);
+  // v2.599(감사 C2599-05): 예전에는 60개로 **조용히** 잘랐다 — 규칙 조회 상한은 유지하되 전체 정책 수와 뺀 개수를 밝힌다.
+  const allPolicies = pols.results || [];
+  const policies = allPolicies.slice(0, NSX_DFW_POLICY_MAX);
   const ruleSets = new Array(policies.length).fill(null);
   await poolSettled(policies, 8, async (p, i) => {
-    try { ruleSets[i] = (await client.policyRules(p.id)).results || []; } catch { ruleSets[i] = null; }
+    try {
+      const r = await client.policyRules(p.id);
+      ruleSets[i] = r.results || [];
+      if (r.truncated) ruleSets.truncated = (ruleSets.truncated || 0) + 1;
+    } catch { ruleSets[i] = null; }
   });
   const dfw = policies.map((p, i) => {
     const rawRules = ruleSets[i] != null ? ruleSets[i] : [];
@@ -216,7 +282,7 @@ export async function collectFromNsx(mgr) {
       category: p.category || '', ruleCount: p.rule_count ?? rules.length, rules,
     };
   });
-  const dfwRules = dfw.reduce((a, p) => a + (p.ruleCount || 0), 0);
+  const firewall = firewallSummary({ pols, dfw, ruleSets });
 
   const securityGroups = (grps.results || []).map((g) => ({
     id: `${mgr.id}:${g.id}`, managerId: mgr.id, name: g.display_name || g.id,
@@ -265,12 +331,16 @@ export async function collectFromNsx(mgr) {
       nodeCount: (cluster?.mgmt_cluster_status?.online_nodes?.length) || (cluster?.detailed_cluster_status?.groups?.length) || 1,
       idsEnabled: ids.enabled, idsProfiles: ids.profiles, idsEventCount: ids.events.length,
       licenses, // 만료일 확인용 — store.merge가 manager 필드로 그대로 실어 나른다
+      // v2.599(감사 C2599-05): 페이지 상한에 걸려 끝까지 받지 못한 목록 — 그 개수는 하한이다(조용한 상한 금지).
+      listsTruncated: [['transportNodes', tnodes], ['tier0s', t0], ['tier1s', t1], ['segments', segs], ['securityPolicies', pols], ['groups', grps]]
+        .filter(([, l]) => l?.truncated).map(([k]) => k),
     },
     gateways: [...mkGw(t0, 'T0'), ...mkGw(t1, 'T1')],
     segments,
     transportNodes: tn,
-    firewall: { policies: dfw.length, rules: dfwRules },
-    groups: (grps.results || []).length,
+    firewall,
+    groups: listCount(grps),
+
     dfw, securityGroups, ids,
   };
 }

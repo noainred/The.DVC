@@ -119,6 +119,8 @@ export function cellTitle({ rowName, vcName, metric, value, cell }) {
   const parts = [`${rowName} · ${vcName}`, `${metric?.label || ''} ${cellText(value, metric)}`];
   if (cell?.hosts != null) parts.push(`호스트 ${cell.hosts} · VM ${cell.vms ?? '—'}(On ${cell.vmsOn ?? '—'})`);
   if (cell?.count != null) parts.push(`데이터스토어 ${cell.count}개 합산 · 용량 ${cellText(cell.capacityTB, { unit: ' TB' })} · 여유 ${cellText(cell.freeTB, { unit: ' TB' })}`);
+  // v2.599 RECENT2599-03: 사용량을 못 읽은 DS 는 용량·사용·여유 합에서 빠졌다 — 조용히 빼지 않고 개수를 밝힌다.
+  if (cell?.usageUnknown > 0) parts.push(`사용량을 읽지 못한 데이터스토어 ${cell.usageUnknown}개는 용량·사용률 합계에서 제외`);
   if (metric?.help) parts.push(metric.help);
   return parts.filter(Boolean).join('\n');
 }

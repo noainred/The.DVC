@@ -8,6 +8,7 @@
  */
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { requireRole, requirePerm } from '../../auth/auth.js';
+import { isAdminReq, maskDeviceAddress, maskSnapAddress } from '../../auth/addressMask.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
@@ -88,7 +89,7 @@ export function registerSanSwitch(api) {
  * 통합 조회 — 이 노드(중앙) 직접 수집분 + 전 엣지 push 분을 합쳐 장비별 최신 스냅샷 반환.
  * 같은 deviceId 가 양쪽에 있으면 최신 collectedAt 우선(스토리지 화면과 동일 규칙).
  */
-api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (_req, res) => {
+api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (req, res) => {
   const byId = new Map();
   for (const s of [...localSnapshots(), ...edgeSanSwitchSnapshots()]) {
     const cur = byId.get(s.deviceId);
@@ -101,8 +102,13 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, (_req, res) => {
   const orphanAll = [...byId.values()].filter((s) => !known.has(s.deviceId));
   const orphans = orphanAll.filter((s) => !(s.staleMs > ORPHAN_TTL_MS)).map(listShape);
   const orphansExpired = orphanAll.length - orphans.length;
+  // v2.599(AUTHZ-2599-03): 비-admin 에는 관리 IP·계정명을 가리고 밝힌다(v2.593 relaytopo 와 같은 기준).
+  const admin = isAdminReq(req);
   res.json({
-    devices, orphans, ...(orphansExpired ? { orphansExpired, orphanTtlMs: ORPHAN_TTL_MS } : {}),
+    devices: admin ? devices : devices.map(maskDeviceAddress),
+    orphans: admin ? orphans : orphans.map(maskSnapAddress),
+    ...(admin ? {} : { addressHidden: true }),
+    ...(orphansExpired ? { orphansExpired, orphanTtlMs: ORPHAN_TTL_MS } : {}),
     types: SAN_SWITCH_TYPES.map((t) => ({ ...t, methods: collectMethodsFor(t.type) })),
     datacenters: (() => { try { return listDatacenters(); } catch { return []; } })(),
     agents: knownAgentNames(),
@@ -127,9 +133,10 @@ api.get('/tools/sanswitch/devices/:id/ports', toolsPerm, fullScopeOnly, (req, re
   // 모델/FOS/수집시각만 보내서, 이미 수집해 둔 WWN·Domain·시리얼·팹·존·FRU 상태가
   // 화면에 전혀 쓰이지 않고 버려지고 있었다.
   res.json({
-    ok: true, deviceId: snap.deviceId, name: snap.name, model: snap.model, fabricOs: snap.fabricOs,
+    ok: true, deviceId: snap.deviceId, name: (!isAdminReq(req) && snap.host && snap.name === snap.host) ? '' : snap.name, model: snap.model, fabricOs: snap.fabricOs,
     collectedAt: snap.collectedAt, source: snap === edge ? `엣지(${snap.agent || ''})` : '중앙 직접 수집',
-    host: snap.host || '', agent: snap.agent || '',
+    // v2.599(AUTHZ-2599-03): 목록과 같은 기준 — 비-admin 에는 관리 주소를 비운다.
+    host: isAdminReq(req) ? (snap.host || '') : '', ...(isAdminReq(req) ? {} : { addressHidden: true }), agent: snap.agent || '',
     serial: snap.serial || '', wwn: snap.wwn || '', domainId: snap.domainId ?? null,
     switchState: snap.switchState || '', health: snap.health || null,
     fabric: snap.fabric || null, zoning: snap.zoning || null, licenses: snap.licenses || [],
