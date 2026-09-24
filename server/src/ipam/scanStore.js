@@ -363,7 +363,7 @@ export function scanInfo() {
   const list = scanResultList();
   const byAgent = {};
   for (const r of list) byAgent[r.agent || LOCAL] = (byAgent[r.agent || LOCAL] || 0) + 1;
-  return { count: list.length, lastSeen: list.reduce((m, r) => Math.max(m, r.lastSeen || 0), 0) || null, byAgent };
+  return { count: list.length, max: MAX_SCAN_IPS, lastSeen: list.reduce((m, r) => Math.max(m, r.lastSeen || 0), 0) || null, byAgent };
 }
 
 // ---- 에이전트별 보고 기록(마지막 보고 시각·스캔/응답 수) ----------------------

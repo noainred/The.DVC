@@ -187,7 +187,7 @@ test('SEC2603-02: 선택지 줄 규칙이 예전과 같은 결과(픽스처 + �
     assert.equal(stripChoiceLines(s), oldChoiceRule(s), JSON.stringify(s));
   }
   const prompt = fs.readFileSync(path.join(FIX, 'uemcli-prompt-inline-2544.txt'), 'utf8');
-  assert.match(stripUemcliBanner(prompt), /^1:\s+ID = /m);
+  assert.match(stripUemcliBanner(prompt), /^1:\s+ID\s+= pool_2/m);
 });
 
 // ── SEC2603-03 svcmon 키워드 본문 상한 ─────────────────────────────────────

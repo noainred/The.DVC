@@ -1711,7 +1711,14 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   // 부르면 8,000개 보고에 동기 read 8,000회로 이벤트 루프가 막힌다(CLAUDE.md 논블로킹 불변조건).
   if (req.centralAuth.mode === 'agent') {
     const bounds = ((loadScanSettings(agent)?.ranges) || []).map(specToRange).filter(Boolean);
-    if (bounds.length) {   // ranges 미설정이면 전량 통과(TOFU) — 기존 동작 유지
+    // v2.603(감사 CEN2603-02): 배정 범위가 없는 개별 토큰은 거부한다(/result 의 CEN2601-04 와 같은 판단). 예전에는 전량 통과(TOFU)라
+    //   개별 토큰 하나가 임의 IP 를 무한히 쌓았다. 정상 엣지는 배정(ranges)이 있을 때만 스캔·보고한다(agent/ipScanWorker.js —
+    //   ip-scan-assignment 가 assigned:false 면 보고하지 않는다). 공유 토큰은 이름을 가릴 수 없어 전체 상한(scanStore)이 막는다.
+    if (!bounds.length) {
+      console.warn(`[central] ip-scan-result: ${agent} 는 스캔 배정 범위가 없습니다 — 결과를 받지 않습니다`);
+      return res.status(409).json({ ok: false, reason: `엣지 '${agent}' 에 배정된 스캔 범위가 없습니다 — 설정 › IPAM › 스캔에서 이 엣지의 범위를 지정하세요.`, unassigned: true });
+    }
+    {
       const before = alive.length;
       alive = alive.filter((h) => { const n = h && ipToNum(h.ip); return n != null && bounds.some((r) => n >= r.lo && n <= r.hi); });
       if (before !== alive.length) console.warn(`[central] ip-scan-result: ${agent} 배정 범위 밖 IP ${before - alive.length}개 드롭(위조 방지)`);
@@ -1720,9 +1727,11 @@ centralRouter.post('/ip-scan-result', (req, res) => {
   // v2.594(감사 EDGE2-03): 형식이 틀린 원소는 병합에서 버려진다 — 버리기 전 개수를 merged·alive 로 보고하면 수치가 부풀었다.
   const validAlive = alive.filter((h) => h && ipToNum(h.ip) != null);
   const dropped = alive.length - validAlive.length;
-  if (validAlive.length) mergeScanResults(validAlive, Date.now(), agent);
+  const mr = validAlive.length ? mergeScanResults(validAlive, Date.now(), agent) : { merged: 0, capped: 0 };
+  const capped = mr?.capped || 0;
   recordAgentReport(agent, { scanned: b.scanned || 0, alive: validAlive.length, durationMs: b.durationMs || null });
-  res.json({ ok: true, merged: validAlive.length, ...(dropped ? { dropped } : {}) });
+  // v2.603 CEN2603-02: 전체 상한으로 받지 않은 새 IP 수를 밝힌다(merged 는 받은 것만).
+  res.json({ ok: true, merged: validAlive.length - capped, ...(dropped ? { dropped } : {}), ...(capped ? { capped } : {}) });
 });
 
 /*
