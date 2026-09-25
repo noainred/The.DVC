@@ -67,6 +67,15 @@ jobs:
       - name: 웹 테스트 (vitest)
         run: npm --prefix web run test
 
+      # v2.614(카탈로그 내보내기): 특수 기능 카탈로그 `web/public/special-tools.json` 은 생성물이다
+      # (`scripts/tools-catalog.mjs` — 서버의 아키텍처 점검이 web/dist 에서 읽는다). ⚠ 이 검사는 **웹 빌드보다
+      # 앞에** 와야 한다 — `web/package.json` 의 `prebuild` 가 빌드 때 같은 파일을 다시 생성하므로 빌드 뒤에
+      # 검사하면 언제나 통과해 아무것도 증명하지 못한다. 낡았다고 릴리스를 막지는 않되(경고) 로그에 드러낸다
+      # (`api-doc --check` 와 같은 관례). 서버 단위테스트(toolCatalog2614)는 같은 대조를 **실패**로 고정한다.
+      - name: 카탈로그 최신 여부 — web/public/special-tools.json
+        continue-on-error: true
+        run: node scripts/tools-catalog.mjs --check
+
       - name: 웹 빌드 (vite)
         run: npm --prefix web run build
 

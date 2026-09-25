@@ -145,6 +145,7 @@
 | [AIRGAP-LLM-SETUP-GUIDE.md](AIRGAP-LLM-SETUP-GUIDE.md) | 에어갭 LLM 서버 구축 가이드 — Rocky Linux 9 + NVIDIA A40(24GB vGPU) + Ollama + Qwen |
 | [API-PUBLIC.md](API-PUBLIC.md) | 공개 조회 API (`/api/v1`) — 외부 포탈 연동 가이드 |
 | [API.md](API.md) | API 레퍼런스 (전 엔드포인트) |
+| [ARCH-CHECK.md](ARCH-CHECK.md) | 아키텍처 점검(특수 기능 › 포탈 점검) — 판정 계약 (v2.614) |
 | [ARCH-HEAVY-JOB-ISOLATION.md](ARCH-HEAVY-JOB-ISOLATION.md) | 대용량 작업 격리 아키텍처 — vCenter 수집 프로세스 분리 vs worker_threads |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 아키텍처 — 코드 지도와 데이터 흐름 |
 | [AUDIT-2026-06-27.md](AUDIT-2026-06-27.md) | 전체 소스 보안·버그 감사 (2026-06-27) |
@@ -212,5 +213,5 @@
 | [WORKLOG-2026-07-31.md](WORKLOG-2026-07-31.md) | 작업 기록 — VMware Global Monitoring Portal (The.DVC) |
 | [WORKLOG-2026-08-01.md](WORKLOG-2026-08-01.md) | 작업 기록 — 권한 세분화 · 로그인 테마 · 계정 정책 · 보안 감사 (2026-08-01) |
 
-`docs/*.md` 72개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
+`docs/*.md` 73개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
 <!-- arch-doc:docs:end -->

@@ -58,6 +58,16 @@ import {
   scanInventory, findingsOf as invFindingsOf, groupFindings as invGroupFindings,
   findingCounts as invFindingCounts, INV_STATE, INV_FINDING, INV_GRADE,
 } from '../../portalcheck/invScan.js';
+// v2.614 — 아키텍처 점검(세 번째 서브메뉴): 라우터 스택·게이트 태그·카탈로그·엣지 로그 표·BIG_JSON·DB·설정 파일·import 그래프.
+//   판정 코어(`portalcheck/archScan.js`)는 routes/ 를 import 하지 않으므로(arch2579 규칙 ①) 라우터는 **여기서** 넘긴다.
+import { adminRouter } from '../admin.js';
+import { centralRouter } from '../central.js';
+import { collectorRouter } from '../collector.js';
+import { declaredRoutes as flowDeclaredRoutes } from './dataFlow.js';
+import { memoJson } from './shared.js';
+import { snapCacheClear } from '../../util/snapCache.js';
+import { currentVersion } from '../../config.js';
+import { gatherArchInputs, scanArch, scopeArchPaths, ARCH_CODES, ARCH_STATES } from '../../portalcheck/archScan.js';
 
 // vc 별 위임 여부만 필요하다 — redact() 는 이미 password 를 뺀다(vcenter/registry.js:45).
 // v2.575 IMP-11: store.js 의 값을 그대로 쓴다(두 벌이면 판정 기준이 조용히 갈린다).
@@ -289,6 +299,40 @@ api.post('/tools/portal-check/tokens/edge-pull', adminOnly, fullScopeOnly, async
   } catch (err) {
     res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) });
   } finally { running = ''; }
+});
+
+/**
+ * 세 번째 서브메뉴 — 아키텍처 점검(v2.614). **왕복 0**(파일·모듈·라우터 스택만 본다). 폴링 금지 — 화면은 마운트 1회 + 버튼.
+ * 비용은 server/src 전 파일의 import 그래프(수백 ms)라 GET 은 `memoJson` 30초이고, `POST …/run` 은 캐시를 버리고 즉시 재판정한다.
+ * ⚠ `extraKey` 에 역할을 넣는다 — 절대 경로(DB 디렉터리·카탈로그 파일)는 admin 전체범위 계정에만 실리므로(`scopeArchPaths`)
+ *   다른 역할이 먼저 연 판본을 공유하면 안 된다(v2.601 규약).
+ */
+const ARCH_MEMO = 'portal-check:arch';
+const ARCH_TTL_MS = 30_000;
+function archRouters() {
+  return [
+    { name: 'api', mount: '/api', router: api },
+    { name: 'admin', mount: '/api/admin', router: adminRouter },
+    { name: 'central', mount: '/api/central', router: centralRouter },
+    { name: 'collector', mount: '/api/collector', router: collectorRouter },
+  ];
+}
+async function runArchScan() {
+  const t0 = Date.now();
+  const inputs = await gatherArchInputs({ routers: archRouters(), flowRoutes: safe(() => flowDeclaredRoutes(), null) });
+  const scan = scanArch(inputs);
+  return { ok: true, at: Date.now(), version: safe(() => currentVersion(), ''), tookMs: Date.now() - t0, ...scan, vocab: { codes: ARCH_CODES, states: ARCH_STATES } };
+}
+api.get('/tools/portal-check/arch', adminOnly, fullScopeOnly, (req, res) => memoJson(req, res, ARCH_MEMO, async () => scopeArchPaths(await runArchScan(), req.user), { ttlMs: ARCH_TTL_MS, extraKey: `role=${req.user?.role || ''}` }));
+api.post('/tools/portal-check/arch/run', adminOnly, fullScopeOnly, async (req, res) => {
+  try {
+    const out = await runArchScan();
+    snapCacheClear(ARCH_MEMO); // 다음 GET 이 낡은 판본을 돌려주지 않게
+    logAudit({ user: req.user?.username || '', action: '아키텍처 점검 — 즉시 재판정', target: `${out.kpi?.total ?? 0}항목`, ip: req.ip || '' });
+    res.json(scopeArchPaths(out, req.user));
+  } catch (err) {
+    res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) });
+  }
 });
 
 /**

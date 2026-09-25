@@ -328,11 +328,13 @@ const denyReason = (req) => req.centralAuth?.reason || '토큰 불일치';
  * @param {{notFound?:object}} [o]
  */
 export function requireCentral({ notFound = { ok: false, reason: 'central 비활성화' } } = {}) {
-  return function requireCentralGate(req, res, next) {
+  requireCentralGate.gate = Object.freeze({ kind: 'central' }); // v2.614 아키텍처 점검 태그(auth.js requireRole 참조)
+  return requireCentralGate;
+  function requireCentralGate(req, res, next) {
     if (!centralEnabled()) return res.status(404).json(notFound);
     if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
     next();
-  };
+  }
 }
 
 /**

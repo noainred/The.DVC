@@ -968,7 +968,9 @@ export function requireEnrolled(req, res, next) {
 
 /** Require the authenticated user to hold one of the given roles. */
 export function requireRole(...roles) {
-  return (req, res, next) => {
+  // v2.614(아키텍처 점검): 라우터 스택을 순회하는 판정기(portalcheck/archScan.js)가 게이트 종류를 읽을 수 있게 태그를 단다.
+  //   판정에는 영향이 없다 — 속성 하나뿐이다. `util/asyncRoute.js` 가 래핑할 때 이 속성을 복사한다.
+  const roleGate = (req, res, next) => {
     // 인증 비활성 시에도 '무조건 통과'가 아니라 익명 역할(AUTH_DISABLED_ROLE)로 검사한다 —
     // 기본(admin)은 기존과 동일하게 통과하고, viewer로 낮춘 배포에선 mutation이 차단된다.
     if (!config.auth.enabled) {
@@ -980,6 +982,8 @@ export function requireRole(...roles) {
     }
     next();
   };
+  roleGate.gate = Object.freeze({ kind: 'role', arg: Object.freeze([...roles]) });
+  return roleGate;
 }
 
 /**
@@ -989,11 +993,13 @@ export function requireRole(...roles) {
  * API 직접 호출은 여기서 막힌다.
  */
 export function requirePerm(...keys) {
-  return (req, res, next) => {
+  const permGate = (req, res, next) => {
     const role = !config.auth.enabled ? AUTH_DISABLED_ROLE : (req.user && req.user.role);
     if (role === 'admin') return next();
     const set = rolePermissionSet(role);
     if (keys.some((k) => set.has(k))) return next();
     return res.status(403).json({ error: 'forbidden', requiredPerm: keys });
   };
+  permGate.gate = Object.freeze({ kind: 'perm', arg: Object.freeze([...keys]) }); // v2.614 아키텍처 점검 태그(requireRole 참조)
+  return permGate;
 }

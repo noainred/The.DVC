@@ -17,10 +17,13 @@ export const adminOnly = requireRole('admin');
  * (routes/api 8곳 — 사유 문구만 다르다). 새 라우트는 이것을 쓴다.
  */
 export function fullScopeOnlyWith(reason = '이 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.') {
-  return (req, res, next) => {
+  const fullScopeGate = (req, res, next) => {
     if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason });
     next();
   };
+  // v2.614(아키텍처 점검): `fleetOnly`·`fleetWideOnly` 류는 전부 이 팩토리의 산물이라 태그 하나로 판정기가 알아본다.
+  fullScopeGate.gate = Object.freeze({ kind: 'fullScope' });
+  return fullScopeGate;
 }
 
 // '설정 소유 계정(settingsOwners)' 서버측 강제 — 지금까지 소유자 경계는 UI(App.jsx)에서만
@@ -45,6 +48,7 @@ export function requireSettingsOwner(req, res, next) {
   if (owners.includes(u.username)) return next();
   return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '설정 소유 계정만 변경할 수 있습니다.' });
 }
+requireSettingsOwner.gate = Object.freeze({ kind: 'settingsOwner' }); // v2.614 아키텍처 점검 태그
 
 // 자격증명 디버그 표시용 마스킹 — 평문 비밀번호는 절대 응답에 넣지 않고 길이만 노출한다.
 // (계정명/passwordless 여부는 디버그에 유용하므로 유지)

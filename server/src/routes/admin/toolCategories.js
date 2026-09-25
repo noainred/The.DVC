@@ -5,6 +5,8 @@
 // 하고, 여기에는 도구 키와 카테고리 이름밖에 없다(권한 판정은 여전히 프론트 toolAllowed +
 // 서버 auth/toolAccess 가 한다 — 이 응답이 접근을 넓히지 않는다).
 import { requireRole } from '../../auth/auth.js';
+import { fullScopeOnlyWith } from './shared.js'; // v2.614: 특수 기능 카테고리 배치는 전 사용자 공통 설정 — 범위 관리자가 바꾸면 다른 법인 화면까지 바뀐다
+const fleetOnly = fullScopeOnlyWith('특수 기능 카테고리 배치는 전 사용자 공통 설정이라 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다.');
 import { logAudit } from '../../audit.js';
 import { load as loadCfg, save as saveCfg, presetCategories } from '../../toolcats/settings.js';
 import { validate, PRESET } from '../../toolcats/catalog.js';
@@ -18,7 +20,7 @@ export function registerToolCategories(adminRouter) {
     res.json({ settings: loadCfg(), presetCount: PRESET.length });
   });
 
-  adminRouter.put('/tool-categories', adminOnly, (req, res) => {
+  adminRouter.put('/tool-categories', adminOnly, fleetOnly, (req, res) => {
     const body = req.body || {};
     const errs = validate({ ...loadCfg(), ...body });
     if (errs.length) return res.status(400).json({ ok: false, reason: errs[0], errors: errs });

@@ -1,10 +1,11 @@
 {
   "name": "vmware-portal-web",
-  "version": "2.613.0",
+  "version": "2.614.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node ../scripts/tools-catalog.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint src",
