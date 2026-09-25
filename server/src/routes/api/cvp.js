@@ -40,10 +40,32 @@ function statusOf(srv) {
   }
   // v2.611(CEN2611-02): 대소문자만 다른 보관분이 여럿이면(구버전 중앙이 남긴 것) **가장 최근에 push 한 것** — 삽입 순서로 고르면
   //   옛 정상 행이 현재 오류를 가렸다(재현).
-  const st = edgeCvpStatuses().filter((x) => x.cvpId === srv.id && agentKeyEq(x.agent, srv.agent))
-    .reduce((best, x) => (!best || (Number(x.pushedAt) || 0) > (Number(best.pushedAt) || 0) ? x : best), null);
+  const st = pickEdgeStatus(edgeCvpStatuses(), srv);
   return st ? { ...pickStatus(st), source: 'edge', pushedAt: st.pushedAt ?? null } : { pending: true, ok: null, source: 'edge', note: `엣지(${srv.agent})의 보고가 아직 없습니다` };
 }
+/** 엣지 보고 중 그 CVP·담당(대소문자 무시)에 맞는 것 — 여럿이면 pushedAt 이 가장 늦은 것(순수 — 테스트 고정). */
+export function pickEdgeStatus(list, srv) {
+  return (Array.isArray(list) ? list : []).filter((x) => x && x.cvpId === srv.id && agentKeyEq(x.agent, srv.agent))
+    .reduce((best, x) => (!best || (Number(x.pushedAt) || 0) > (Number(best.pushedAt) || 0) ? x : best), null);
+}
+
+/**
+ * 장비 행 → KPI 합계(순수 — 테스트 고정). v2.611(WEB2611-02): BGP·포트를 **읽지 못한 장비 수**도 센다 —
+ *   예전엔 조용히 건너뛰어 'down 0' 이 '전부 확인했다' 처럼 보였다.
+ */
+export function cvpTotals(rows) {
+  const totals = { devices: 0, streaming: 0, partsFault: 0, partsWarn: 0, partsUnknown: 0, partsUnread: 0, bgpDown: 0, bgpUnread: 0, portsDown: 0, portsUnread: 0 };
+  for (const d of Array.isArray(rows) ? rows : []) {
+    totals.devices++;
+    if (d.streaming === true) totals.streaming++;
+    const p = partsSummary(d.partsList);
+    if (p) { totals.partsFault += p.fault; totals.partsWarn += p.warn; totals.partsUnknown += p.unknown; } else totals.partsUnread++;
+    if (d.bgpPeers) totals.bgpDown += bgpSummary(d.bgpPeers).down; else totals.bgpUnread++;
+    if (d.ports) totals.portsDown += d.ports.down; else totals.portsUnread++;
+  }
+  return totals;
+}
+
 function pickStatus(st) {
   return {
     ok: st.pending ? null : st.ok === true, pending: st.pending === true, collectedAt: st.collectedAt ?? null, lastAttemptAt: st.lastAttemptAt ?? null,
@@ -85,15 +107,7 @@ api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
   const servers = listServers();
   const { rows, unavailable } = await cdb.listDeviceRows();
   const mine = rows.filter((r) => rowBelongs(r, servers));
-  // v2.611(WEB2611-02): BGP·포트를 **읽지 못한 장비 수**도 센다 — 예전엔 조용히 건너뛰어 'down 0' 이 '전부 확인했다' 처럼 보였다.
-  const totals = { devices: mine.length, streaming: 0, partsFault: 0, partsWarn: 0, partsUnknown: 0, partsUnread: 0, bgpDown: 0, bgpUnread: 0, portsDown: 0, portsUnread: 0 };
-  for (const d of mine) {
-    if (d.streaming === true) totals.streaming++;
-    const p = partsSummary(d.partsList);
-    if (p) { totals.partsFault += p.fault; totals.partsWarn += p.warn; totals.partsUnknown += p.unknown; } else totals.partsUnread++;
-    if (d.bgpPeers) totals.bgpDown += bgpSummary(d.bgpPeers).down; else totals.bgpUnread++;
-    if (d.ports) totals.portsDown += d.ports.down; else totals.portsUnread++;
-  }
+  const totals = cvpTotals(mine);
   const poller = cvpPollerStatus();
   res.json({
     enabled: settings.enabled, settings,

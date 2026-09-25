@@ -87,6 +87,9 @@ function mockCvp(state) {
       return send(200, state.devices.map((d) => JSON.stringify({ result: { value: { key: { deviceId: d }, hostname: d.toLowerCase(), streamingStatus: 'STREAMING_STATUS_ACTIVE' } } })).join('\n'));
     }
     const m = /^\/api\/v1\/rest\/([^/]+)\/(.*)$/.exec(p);
+    if (m && m[2] === 'Sysdb/interface/status/eth/phy/slice/1/intfStatus/all') {
+      return send(200, { notifications: [{ path: '/x/all', updates: { Ethernet1: { key: 'Ethernet1', value: { operStatus: { Name: 'intfOperUp' }, adminEnabled: true, speed: { value: 1e10 } } } } }] });
+    }
     if (m && m[2] === 'Smash/counters/ethIntf/FastCounters/current') {
       state.octets = (state.octets || 1000) + 1000;
       return send(200, { notifications: [{ path: '/x/Ethernet1', updates: { inOctets: { key: 'inOctets', value: state.octets }, outOctets: { key: 'outOctets', value: state.octets } } }] });
@@ -495,6 +498,7 @@ test('TIM2611-01 — 요청 시한은 남은 예산을 넘지 않고, 시한에 
   const srv = http.createServer((req, res) => {
     const p = new URL(req.url, 'http://x').pathname;
     if (p === '/api/resources/inventory/v1/Device/all') { res.writeHead(200); res.end(JSON.stringify({ result: { value: { key: { deviceId: 'SN-S' }, hostname: 's', streamingStatus: 'STREAMING_STATUS_ACTIVE' } } })); return; }
+    if (!p.startsWith('/api/v1/rest/')) { res.writeHead(404); res.end('{}'); return; }
     setTimeout(() => { try { res.writeHead(404); res.end('{}'); } catch { /* */ } }, 3000); // 느린 텔레메트리
   });
   const port = await listen(srv);
@@ -513,17 +517,42 @@ test('TIM2611-02 — 위임 요청 시한은 인출 시점의 설정 deviceTimeo
   const { createCollectRequestQueue } = await import('../src/util/collectRequestQueue.js');
   let per = 1000;
   const q = createCollectRequestQueue({ ackMs: 0, perItemMs: () => per });
-  q.request('a', 'e'); q.request('b', 'e');
   const t = 1_000_000;
+  q.request('a', 'e', t); q.request('b', 'e', t);
   q.take('e', t, 10);
   per = 999_999;
   // 시한 = t + 0 + 2 × 1000 — 인출 시점 값. 그 뒤 설정이 바뀌어도 이미 인출한 요청의 시한은 그대로다.
-  assert.ok(q.has('a'));
+  assert.equal(q.state('a', t).deadline, t + 2 * 1000);
   const n = createCollectRequestQueue({ ackMs: 0, perItemMs: 500 });
-  n.request('x', 'e'); n.take('e', t, 10);
-  assert.ok(n.has('x'), '숫자 perItemMs 호환');
+  n.request('x', 'e', t); n.take('e', t, 10);
+  assert.equal(n.state('x', t).deadline, t + 500, '숫자 perItemMs 호환');
   const { settings } = await mods();
   const cr = await import('../src/cvp/collectRequests.js');
   settings.saveSettings({ deviceTimeoutMs: 20 * 60_000 });
   assert.equal(cr.perItemMs(), settings.loadSettings().deviceTimeoutMs);
+});
+
+test('CEN2611-02 — 중앙 보관분에 대소문자 변형 키가 남아 있으면 청크 0 이 지운다 · 조회는 가장 최근 push', async () => {
+  const { edge } = await mods();
+  edge.saveEdgeCvpStatus('EDGE-B', [{ cvpId: 'cvp-b', ok: true, collectedAt: 1 }], { now: 1000 });
+  const r = edge.saveEdgeCvpStatus('Edge-B', [{ cvpId: 'cvp-b', ok: false, error: 'now', collectedAt: 2 }], { now: 2000 });
+  assert.equal(r.variantsRemoved, 1);
+  assert.deepEqual(edge.edgeCvpStatuses().filter((x) => x.cvpId === 'cvp-b').map((x) => x.agent), ['Edge-B']);
+  const { pickEdgeStatus } = await import('../src/routes/api/cvp.js');
+  const pick = pickEdgeStatus([{ cvpId: 'c', agent: 'E', ok: true, pushedAt: 10 }, { cvpId: 'c', agent: 'e', ok: false, pushedAt: 20 }, { cvpId: 'd', agent: 'e', pushedAt: 99 }], { id: 'c', agent: 'E' });
+  assert.equal(pick.ok, false, '삽입 순서가 아니라 가장 늦은 push');
+  // 수신 정제가 새 상태 필드를 버리지 않는다
+  const st = edge.cleanStatus({ cvpId: 'c', ok: true, missing: { deadline: '시한', budget: '예산' }, truncated: { aborted: 2 },
+    partsDueUnread: true, pruneHeld: { since: 1, untilMs: 2, had: 3, reason: '보류' } });
+  assert.equal(st.missing.deadline, '시한'); assert.equal(st.truncated.aborted, 2); assert.equal(st.partsDueUnread, true); assert.equal(st.pruneHeld.had, 3);
+});
+
+test('WEB2611-02(서버) — 합계가 BGP·포트를 못 읽은 장비 수를 센다', async () => {
+  const { cvpTotals } = await import('../src/routes/api/cvp.js');
+  const t = cvpTotals([
+    { streaming: true, partsList: null, bgpPeers: null, ports: null },
+    { streaming: true, partsList: [{ state: 'fault' }], bgpPeers: [{ state: 'Idle' }], ports: { total: 2, up: 1, down: 1 } },
+  ]);
+  assert.equal(t.devices, 2); assert.equal(t.partsUnread, 1); assert.equal(t.bgpUnread, 1); assert.equal(t.portsUnread, 1);
+  assert.equal(t.portsDown, 1); assert.equal(t.partsFault, 1);
 });

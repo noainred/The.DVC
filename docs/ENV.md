@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **535개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **537개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-24)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-25)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -39,7 +39,7 @@
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (151)
+## 공통 (153)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -97,9 +97,11 @@
 | `CVP_PARTS_EVERY_MS` | `30` |  | cvp/poller.js |
 | `CVP_PUSH_CHUNK_BYTES` | `700` |  | cvp/push.js |
 | `CVP_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | cvp/push.js |
+| `CVP_PUSH_MAX_ROUNDS` | `10` |  | cvp/push.js |
 | `CVP_PUSH_MS` | `5` |  | cvp/push.js |
 | `CVP_PUSH_ROWS` | `20000` |  | cvp/push.js |
 | `CVP_SETTINGS_LOCAL` | `''` |  | cvp/settings.js |
+| `CVP_ZERO_PRUNE_HOLD_MS` | `60` |  | cvp/poller.js |
 | `DATA_SOURCE` |  | ✅ | config.js |
 | `DATACENTER` | `''` |  | config.js |
 | `DIRUSAGE_DB_PATH` |  |  | dirusage/db.js |
@@ -131,7 +133,7 @@
 | `PACKAGE_DIR` |  |  | config.js |
 | `PARTFAULT_DB_PATH` |  |  | partfault/db.js |
 | `PARTFAULT_ENABLED` |  |  | partfault/settings.js |
-| `PARTFAULT_HOOK_DEBOUNCE_MS` | `15000` |  | partfault/hooks.js |
+| `PARTFAULT_HOOK_DEBOUNCE_MS` |  |  | partfault/hooks.js |
 | `PARTFAULT_INV_MAX_AGE_MS` | `90` |  | partfault/scan.js |
 | `PARTFAULT_POLL_MS` | `10` |  | partfault/poller.js |
 | `PARTFAULT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | partfault/push.js |
@@ -628,7 +630,7 @@
 | `IPAM_DB_LOCK_RETRY_MS` |  |  | ipam/db.js |
 | `IPAM_FPING` | `기본 아님('0' 일 때만 적용)` |  | ipam/scan.js |
 | `IPAM_PING_CONCURRENCY` | `8` |  | ipam/scan.js |
-| `IPAM_SCAN_DEADLINE_MS` | `20` |  | ipam/scanRunner.js |
+| `IPAM_SCAN_DEADLINE_MS` |  |  | ipam/scanRunner.js |
 | `IPAM_SCAN_RESULTS_MAX` |  |  | ipam/scanStore.js |
 | `IPAM_SCAN_WORKER` | `기본 적용('0' 로 끄기)` |  | ipam/scanRunner.js |
 | `IPAM_WRITE_DEBOUNCE_MS` |  |  | ipam/scanStore.js |
@@ -714,4 +716,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 535
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 537

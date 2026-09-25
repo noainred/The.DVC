@@ -3765,6 +3765,55 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `hpeDetectedApprox` 로 '대 이상' 을 붙인다(`central/idracScanJobs.hpeCountsOf`).
     - ⚠ 정직 기록: 실제 iLO 장비로 확인하지 못했다(가짜 Redfish 서버). `scanForIdracs` 는 IP 리터럴 + 루프백 차단이라 단위 테스트가
       probe·등록·저장·잡 단위로만 고정한다. 수동 임시 스캔 창·스캔 대역 CSV 는 iLO 계정을 아직 다루지 않는다.
+  - ⚠⚠ **v2.611 — 19차 점검(v2.608~2.610 회귀 우선) 확정분**(사용자 요청 "디버깅 아키텍처 점검 개선 튜닝 진행" · 선택 10축 병렬 + 반증 ·
+    전체 검증. 발견 약 75건 → 확정·일부 확정 약 60건, 반증·재보고 10여 건. 회귀 `test/audit2611{a,b,c,e}.test.js` 54건 + 웹 vitest(`virtRatioText`·
+    `audit2611d`·`scanRunText`·`cvpText`). 그룹별 변이 검증 전부 통과. 상세 `docs/AUDIT-2026-09-25.md`):
+    - ⚠⚠ **'계정이 없어 시도하지 않은 서버' 는 부분 결과다 — replace 를 병합으로 낮춘다**(RECENT2611-01 high, **v2.610 이 만든 회귀**):
+      iLO 전용 대역을 replace-datacenter 로 스캔하면 Dell 은 noCreds 로 빠지고 발견된 HPE 만으로 법인 목록을 교체해 **기존 Dell 등록이
+      자격증명째 지워졌다**. 판정은 `idrac/scan.js scanPartialReasons` 하나(중단·절단·인증 정지 건너뜀·noCreds·**authFailed**·iLO 없이 스캔했는데
+      그 법인에 HPE 등록 있음)이고 scanPoller·localScan 이 같이 쓴다. authFailed 를 넣은 대가: 인증 실패가 계속되는 대역은 replace 정리가 안 된다.
+      **스캔 결과에 새 '건너뜀' 종류를 만들면 이 함수에 더할 것**(v2.591 authSkipped 와 같은 계열의 두 번째 누락이다).
+    - ⚠⚠ **자격증명은 벤더가 '확인된' 장비에만**(`makeScanCredsFor` — SEC/RECENT/LEFT 세 축 독립 보고): 폴백 `dellCred || iloCred` 가
+      벤더 미상 장비(아무 HTTPS 서버)에 iLO 비밀번호를 보냈다. iLO 는 hpe 에만, unknown 은 Dell 계정만(없으면 noCreds).
+    - ⚠⚠ **정제 화이트리스트에 새 필드를 넣지 않으면 기능이 위임 경로에서만 조용히 죽는다**(CEN2611-01): v2.610 이 엣지 결과에 HPE 필드를
+      더했는데 중앙 `sanitizeIdracScanData` 가 몰라서 전부 버렸다 → 'HPE 0대(정확)'. 새 결과 필드를 만들면 **수신 정제·`hpeCountsOf` 같은
+      소비처**까지 따라갈 것. 소비처의 `Number(v)` 도 null 을 0 으로 읽고 있었다(numOrNull).
+    - **구버전 엣지에는 새 계약을 위임하지 않는다**(EDGE2611-01~03 — `central/idracScanPush.js iloEdgeGate`, `MIN_ILO_EDGE_VERSION` 2.610.0):
+      v2.609 엣지는 `ilo` 를 몰라 빈 계정으로 대역 전체에 로그인했다. 버전은 `allCollectorStatus().version`(인메모리 — 재시작 직후 미상).
+      iLO 전용 대역은 구버전·미상이면 보류(`held`·사유), Dell+iLO 대역은 위임하고 회신에 `iloEnabled` 필드 자체가 없으면 `iloIgnoredByEdge`.
+      ⚠ 수집 서버로 등록되지 않은 폴 전용 엣지는 버전이 늘 미상이라 iLO 전용 대역이 계속 보류된다(정직 기록 — 사유 문구가 말한다).
+    - **HPE 서비스태그는 SerialNumber**(COL2611-01, `redfish.js systemServiceTag`): `SKU||SerialNumber` 는 HPE 에서 모델 공통 부품번호라
+      같은 모델 서버가 dedup·전력 합계에서 한 대로 합쳐졌다. 이미 SKU 로 등록된 항목은 인벤토리 갱신 때 `correctHpeServiceTag` 가 **1회 교정** —
+      ⚠ 그 결과 파트 장애·bmusage 키가 바뀌어 열린 장애가 한 번 새로 열릴 수 있다('키 기준 변경' 배지는 만들지 않았다 — 남은 일).
+      HPE 팬 `ReadingUnits:'Percent'` 는 rpm 이 아니라 `pct`, Absent 온도 센서는 건너뛴다.
+    - ⚠⚠ **범위 admin 의 쓰기 — 이번엔 '등록부 파일 11개' 전체였다**(AUTHZ2611-01·02·03·04, LEFT2611-02·03·07): v2.607 fleetWideOnly 를
+      `/vcenters/import {mode:'replace'}` 가 그대로 우회했다(검증 중 신규 발견). 각 파일 상단 `const fleetOnly = fullScopeOnlyWith('<사유>')`.
+      `/admin/status` 는 403 대신 범위 필터(`scoped`·`omittedOutOfScope` — 진단 화면이 10초마다 부른다). IPMS·GPU 게스트 설정은 범위 병합.
+      **새 admin 라우트 파일을 만들면 '범위 참조 0건' 인지 먼저 볼 것** — 이번 누락은 전부 그 파일들이었다.
+    - **엣지가 보낸 region 이 등록부 region 을 덮지 않는다**(AUTHZ2611-05, `store.js withRegistryRegion` — site·점검중 두 분기).
+      지역 범위(`scope.regions`)가 스냅샷 region 으로 판정되므로 덮어쓰면 엣지가 범위 경계를 정한다(v2.548 F5 계열).
+    - ⚠⚠ **DB 를 못 쓰면 200 이 아니라 503**(CEN2611-03 = EDGE-04 = DB-03 — CVP·SAN 포트 사용량): 200 + `unavailable` 을 엣지가 성공으로 읽고
+      커서를 전진해 **표본이 영구 소실**됐다. 형제 guest-disk·vmseries 는 이미 500 이었다(계약 비대칭). 엣지는 구버전 중앙의 `unavailable` 도 실패로.
+      DB 불가는 래치라 엣지가 매 주기 재전송한다 — 콘솔은 `createChangeLogger` 로 줄인다.
+    - **CVP push**: 꽉 찬 페이지는 같은 호출에서 이어 보낸다(`CVP_PUSH_MAX_ROUNDS`) · `backlogRows`·`lostUnsent`(prune 이 미전송분을 지움) ·
+      비-2xx 본문 사유 · `touched < touch.length` 면 `_sent` 삭제. 수신 이름은 `canonicalAgent`(대소문자 무시 저장 + 변형 키 정리 — v2.604 규약의 CVP 누락).
+    - **CVP 수집**: 요청 시한 `min(30초, 남은 예산)` · counters·bgp 앞 예산 확인 · 시한에 걸린 장비는 `aborted`(pending 이 아니다) ·
+      `_partsAt` 은 부품을 실제로 읽었을 때만 · presence 긍정값만 있으면 unknown(fault 아님) · 0대 보고면 prune 1시간 보류(`CVP_ZERO_PRUNE_HOLD_MS`) ·
+      `speed2p5Gbps` · 포트 델타 간격에 실행 소요를 더한다 · 파트를 안 읽은 주기에 extra 를 보존 · '지금 수집' 큐 시한은 설정의 장비 시한.
+    - ⚠⚠ **WAL/SHM 은 본체 권한을 복사한다 — chmod 는 PRAGMA 전에**(DB2611-01, `util/sqliteOpen.js chmodDbFiles`): chmod 가 첫 쓰기 뒤면
+      12종 DB 의 `-wal`/`-shm` 이 0644 로 생기고 재시작해도 남았다. `db.location()` 으로 본체 + 기존 wal/shm 을 0600(ipam 은 wal:false 라 제외).
+      `dbLocation` mkdir 은 0o700. **새 DB 모듈은 openSqlite 를 쓰거나 생성자 직후 이 헬퍼를 부를 것.**
+    - **CVP DB**: `samplesAfter` 는 `+agent = ''` 로 인덱스를 우회(EXPLAIN 에 TEMP B-TREE 없음을 고정 — 25.7→5.7ms) · 적재는 2,000행 트랜잭션,
+      **양보는 COMMIT 뒤**(트랜잭션을 연 채 양보하면 같은 연결의 다른 요청이 BEGIN 에서 실패한다 — 재현) · prune 은 enabled 와 분리 · 일 롤업 오류 합에 `_n`.
+    - **웹**: 수집 전 vCenter 의 가상화율은 '—'·회색 '미수집'(`virtRatioText.js`) · 늦게 온 이전 응답 버림 5화면 · 조회 실패를 '없음' 으로,
+      삭제 실패를 무음으로 보이던 7화면 · HPE 전용 대역 편집 시 root 주입 · CVP KPI 부분 합(못 읽은 장비 수) · `<0.1%`.
+    - 그 밖: iDRAC 로컬 임시 스캔은 주기 스캔과 같은 잠금(`tryAcquireScan` — 409 busy)과 인증 회로 차단기 · 시한 env 상한 2곳 ·
+      IPAM 원장 조립 행당 1회 파싱(약 28% 단축, **옛 판본과 5조합 deepStrictEqual**) · 스캔 대역 단건 IP 비정규 표기 거부 · FinOps 빈 칸 ·
+      수집 서버 URL 끝 슬래시 정리 선형화(`util/trimSlashes.js`) · 중앙→엣지 호출 태그 5곳.
+    - ⚠ **속도 절대값 테스트는 CPU 에 따라 깨진다**: `audit2606g` 의 '옛 정규식 > 150ms' 가 이 컨테이너에서 110ms 로 나와 전량 테스트가
+      실패했다 — `tOld > 40 && tOld > tNew × 5`(상대 비율)로 바꿨다. **ReDoS 회귀 테스트는 비율로 쓸 것.**
+    - 남긴 것: 파트 장애 키 변경 배지(COL-01) · CVP BGP 피어 IP 가림(AUTHZ-06, 정책 판단) · pdu 등 다른 표본 커서 push 의 같은 모양 ·
+      `/idrac/:id/gpu-probe` GET 로그인 · 실장비(iLO·CVP·구버전 엣지) 미확인 — 전부 가짜 서버·합성 입력 재현이다.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

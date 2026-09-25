@@ -278,5 +278,5 @@ test('LEFT2606-01: 고정 IP 는 그 VM 이 보고한 IP 일 때만 — 폴러 �
   assert.match(src, /pinnedIpCheck\(v, resolveVmIp\(s, vc\.id, v\.id\)\)/);
   assert.match(src, /preferIp: pin\.ip/);
   const route = fs.readFileSync(new URL('../src/routes/admin/gpuGuest.js', import.meta.url), 'utf8');
-  assert.match(route, /unknownPinnedIps\(req\.body/);
+  assert.match(route, /unknownPinnedIps\((req\.body|body),/); // v2.611: 범위 계정은 본문을 범위로 좁힌 body 로 검사한다
 });
