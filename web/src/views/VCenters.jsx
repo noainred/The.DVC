@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, lazy, Suspense } from 'react';
-import { usePolling, fetchJson } from '../api.js';
+import { usePolling, fetchJson, toolAllowed } from '../api.js';
 import { growth, hasDsData, tb, gbTb, dsUnknownNote } from './tools/storageTrack.js'; // 추이 KPI(v2.358) 계산 재사용
 import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../components/ui.jsx';
 // v2.596(감사 PERFWEB-04): 상세는 recharts 를 쓴다 — 목록 화면이 그 청크를 받지 않게 상세를 열 때만 받는다.
@@ -33,7 +33,11 @@ function Spark({ points, color }) {
 function TrendKpis() {
   const [d, setD] = useState(null);
   const [dead, setDead] = useState(false);
+  // v2.616: 도구 권한이 없으면 부르지 않는다 — 예전에는 viewer 가 이 화면을 열 때마다(5분마다) 403 을 만들었다
+  //   (주석은 '권한이 없으면 카드를 숨긴다' 였지만 숨기기 전에 먼저 호출했다). V5 전수 검증에서 발견.
+  const allowed = toolAllowed('vm-track');
   useEffect(() => {
+    if (!allowed) return undefined;
     let on = true;
     const load = () => fetchJson('/tools/vm-track', { days: 30 })
       .then((r) => { if (on) { setD(r); setDead(false); } })
@@ -41,8 +45,8 @@ function TrendKpis() {
     load();
     const t = setInterval(load, 300_000);
     return () => { on = false; clearInterval(t); };
-  }, []);
-  if (dead || !d) return null;
+  }, [allowed]);
+  if (!allowed || dead || !d) return null;
   const pts = d.points || [];
   const vmFirst = pts[0] || null;
   const vmLast = pts[pts.length - 1] || null;

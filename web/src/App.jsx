@@ -39,6 +39,12 @@ const V4App = lazy(() => import('./version_4/V4App.jsx'));
 const isV4Hash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'v4';
 // 구 딥링크 보존: v2.490~v2.507 사용자가 저장한 #/v3/<page> 북마크를 버리지 않는다.
 const isV3Hash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] === 'v3';
+// V5 셸(v2.616) — 새 라우터가 아니라 기존 라우터 위의 새 틀. 주소는 개발 포탈과 같고, '지금 V5 로 그리는가' 는
+// 브라우저에 저장한 셸 플래그(version_5/route.js)가 정한다. #/v5 는 그 플래그를 켜는 진입 신호다.
+// ⚠ lazy() 를 유지할 것 — 초기 번들이 셸만큼 커진다.
+import { isV5Hash, v5EntryTarget, readShell, writeShell } from './version_5/route.js';
+const V5Shell = lazy(() => import('./version_5/V5Shell.jsx'));
+const V5Overview = lazy(() => import('./version_5/pages/Overview.jsx'));
 const redirectV3 = () => { window.location.replace(`${window.location.pathname}${window.location.search}${window.location.hash.replace(/^#\/?v3/, '#/v4')}`); };
 
 const TABS = [
@@ -210,6 +216,16 @@ function Portal({ user, onLogout }) {
 
   // Initial view: the tab in the URL hash (so a refresh stays put), else the
   // user's saved landing-page preference.
+  // V5 진입 신호(#/v5 · #/v5/<탭>)는 탭을 읽기 **전에** 소비한다 — 셸 플래그를 켜고 실제 주소로 바꾼다.
+  const [v5On, setV5On] = useState(() => {
+    if (isV5Hash(window.location.hash)) {
+      writeShell(true);
+      window.history.replaceState(null, '', v5EntryTarget(window.location.hash));
+      return true;
+    }
+    return readShell();
+  });
+  const [v5Scope, setV5Scope] = useState(''); // V5 상단 '법인' 범위(vCenter id) — 모든 탭에 함께 적용된다
   const [tab, setTabState] = useState(() => { migrateMovedHash(); return tabFromHash() || getLandingTab(); });
   const [landingTab, setLandingTab] = useState(getLandingTab);
   // Filters are kept PER TAB so a filter set on one menu never carries over to
@@ -224,8 +240,9 @@ function Portal({ user, onLogout }) {
   const [v4On, setV4On] = useState(isV4Hash);
 
   const cur = tabFilters[tab] || {};
-  const region = cur.region || '';
-  const vcenterId = cur.vcenterId || '';
+  // V5 는 법인 범위를 상단 하나로 둔다(탭마다 따로 두지 않는다) — 리전 선택은 V5 에서 쓰지 않는다.
+  const region = v5On ? '' : (cur.region || '');
+  const vcenterId = v5On ? v5Scope : (cur.vcenterId || '');
   const q = cur.q || '';
   const qNotes = !!cur.qNotes; // 메모 포함 검색 (기본 꺼짐)
   const qIpms = !!cur.qIpms;   // IPMS(IP 스캔) 자료 포함 — IP 검색 시 해당 대역 스캔 IP도 표시
@@ -244,9 +261,13 @@ function Portal({ user, onLogout }) {
   useEffect(() => {
     // ⚠ 이 가드에 셸 판정이 하나라도 빠지면 진입 직후 해시가 `#/<tab>` 으로 덮여 셸이 즉시 튕긴다.
     if (isV3Hash()) redirectV3();
-    else if (!tabFromHash() && !isConsoleHash() && !isV4Hash()) window.history.replaceState(null, '', `#/${tab}`);
+    else if (!tabFromHash() && !isConsoleHash() && !isV4Hash() && !isV5Hash(window.location.hash)) window.history.replaceState(null, '', `#/${tab}`);
     const onHash = () => {
       if (isV3Hash()) { redirectV3(); return; }                             // 구 딥링크 #/v3/<page> → #/v4/<page>
+      if (isV5Hash(window.location.hash)) {                                 // V5 진입 — 플래그를 켜고 실제 주소로(replaceState 는 hashchange 를 내지 않는다)
+        writeShell(true); setV5On(true);
+        window.history.replaceState(null, '', v5EntryTarget(window.location.hash));
+      }
       if (isConsoleHash()) { setConsoleOn(true); setV4On(false); return; }  // 콘솔 내부 페이지 전환은 콘솔이 처리
       if (isV4Hash()) { setV4On(true); setConsoleOn(false); return; }       // 신규 포탈 내부 페이지 전환은 V4App 이 처리
       setConsoleOn(false); setV4On(false);
@@ -262,6 +283,8 @@ function Portal({ user, onLogout }) {
   const exitConsole = (hash) => { setConsoleOn(false); window.location.hash = hash || `#/${tab}`; };
   // 신규 포탈(V4) 복귀 — 목적지 해시(내비의 개발 포탈 항목·도구)가 있으면 그리로, 없으면 직전 탭으로.
   const exitV4 = (hash) => { setV4On(false); window.location.hash = hash || `#/${tab}`; };
+  // V5 끄기 — 주소는 그대로 두고 틀만 바꾼다(같은 화면이 기존 틀로 보인다).
+  const exitV5 = () => { writeShell(false); setV5On(false); setV5Scope(''); };
 
   const saveLanding = (id) => { setLandingTab(id); localStorage.setItem(LANDING_KEY, id); };
 
@@ -341,6 +364,103 @@ function Portal({ user, onLogout }) {
   // Drill into a site → set the HOSTS tab's own vCenter filter, then go there.
   const selectSite = (id) => { patchFilter({ vcenterId: id, region: '' }, 'hosts'); setTab('hosts'); };
 
+  // 필터바·본문·오버레이 — 기존 틀과 V5 틀이 **같은 요소**를 쓴다(화면을 두 벌 만들지 않는다).
+  const filterBar = (showFilters && (
+          <div className="filters">
+            {!v5On && <select className="select" value={region} onChange={(e) => { setRegion(e.target.value); setVcenterId(''); }}>
+              <option value="">전체 리전</option>
+              {/* scope.regions 가 지정된 사용자는 허용 리전만 선택 가능(데이터도 서버에서 동일 제한). */}
+              {((user.scope?.regions?.length) ? REGIONS.filter((r) => user.scope.regions.includes(r)) : REGIONS)
+                .map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>}
+            {/* V5 는 법인 범위를 상단 하나로 둔다 — 여기서 다시 고르게 하지 않는다. */}
+            {!v5On && <select className="select" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)}>
+              <option value="">전체 vCenter</option>
+              {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>}
+            {MENU_FILTERS[tab] && (
+              <select className="select" value={menuFilter[tab] || ''}
+                onChange={(e) => setMenuFilter((m) => ({ ...m, [tab]: e.target.value }))}>
+                {MENU_FILTERS[tab].options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            )}
+            <SearchBox placeholder="이름 / IP / OS 검색…" value={q} onChange={setQ} />
+            <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
+              title="체크하면 검색에 메모(Notes) 내용도 포함합니다. (기본: 미포함)">
+              <input type="checkbox" checked={qNotes} onChange={(e) => setQNotes(e.target.checked)} /> 메모 포함
+            </label>
+            {['vms', 'networks', 'hosts', 'datastores'].includes(tab) && (
+              <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
+                title="체크하면 IP로 검색할 때 IPMS(IP 스캔) 자료의 해당 대역 IP도 함께 보여줍니다. (vCenter가 모르는 스캔 IP 포함)">
+                <input type="checkbox" checked={qIpms} onChange={(e) => setQIpms(e.target.checked)} /> IPMS 포함
+              </label>
+            )}
+            {((!v5On && (region || vcenterId)) || q || menuFilter[tab]) && (
+              <button className="tab" onClick={() => { patchFilter(v5On ? { q: '', qNotes: false, qIpms: false } : { region: '', vcenterId: '', q: '', qNotes: false, qIpms: false }); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
+            )}
+          </div>
+        ));
+  const tabBody = (
+    <ErrorBoundary key={tab}>
+         <Suspense fallback={<div className="muted" style={{ padding: 24 }}>로딩 중…</div>}>
+          {tab === 'overview' && (v5On
+            ? <V5Overview scope={v5Scope} health={health} healthError={healthError} onGotoTab={setTab} />
+            : <Overview onSelectSite={selectSite} onGotoTab={setTab} />)}
+          {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
+          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} resetSignal={platformResetSeq} />}
+          {tab === 'svcmon' && <SvcMonitor />}
+          {tab === 'ipam' && <Ipam defaultScope={v5On ? v5Scope : ''} />}
+          {tab === 'hosts' && <Hosts filters={filters} />}
+          {tab === 'vms' && <Vms filters={filters} />}
+          {tab === 'datastores' && <Datastores filters={filters} />}
+          {tab === 'networks' && <Networks filters={filters} />}
+          {tab === 'alarms' && <Alarms filters={filters} />}
+          {tab === 'tools' && <SpecialTools defaultScope={v5On ? v5Scope : ''} />}
+          {tab === 'settings' && user.role === 'admin' && isOwner && <Settings />}
+          {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
+          {/* v2.593(감사 UI-2593-02): 기능이 꺼져 있으면 #/upgrade 가 아무 안내 없는 빈 화면이었다. ⚠ isAllowed 에서 거르지 않는 이유 —
+              그 함수는 health 폴링(아래 선언)보다 먼저 실행돼 TDZ 가 되고, health 가 오기 전에 걸러 버리면 주소로 들어온 사용자를 내쫓는다. */}
+          {tab === 'upgrade' && user.role === 'admin' && health && !health.features?.upgradeTab && (
+            <div className="card" style={{ padding: 20 }}>업그레이드 화면이 이 포탈에서 꺼져 있습니다 — 서버 portal.env 의 ‘SHOW_UPGRADE_TAB=true’ 로 켭니다(재시작 필요).</div>
+          )}
+         </Suspense>
+        </ErrorBoundary>
+  );
+  const overlays = (
+    <>
+      {upToast && (
+        <div className="up-toast">
+          <span className="up-toast-icon">⬆️</span>
+          <div className="up-toast-body">
+            <div className="up-toast-title">업그레이드 완료</div>
+            <div className="up-toast-sub">버전 <b>v{upToast}</b> 으로 업데이트되었습니다.</div>
+          </div>
+          <button className="up-toast-reload" onClick={() => window.location.reload()}>새로고침</button>
+          <button className="up-toast-x" onClick={() => setUpToast(null)} aria-label="닫기">×</button>
+        </div>
+      )}
+
+      {egg && (
+        <div className="egg-overlay" onClick={() => setEgg(false)}>
+          <div className="egg-sparkles">{'✨🎉💫⭐🎊✨🌟💥'.split('').map((s, i) => (
+            <span key={i} style={{ ['--i']: i }}>{s}</span>
+          ))}</div>
+          <div className="egg-card" onClick={(e) => e.stopPropagation()}>
+            <div className="egg-emoji">🚀</div>
+            <div className="egg-line">이 프로그램은</div>
+            <div className="egg-name">박준호</div>
+            <div className="egg-line">가 만들었습니다.</div>
+            <button className="egg-btn" onClick={() => setEgg(false)}>닫기</button>
+          </div>
+        </div>
+      )}
+
+      {showNotes && <Suspense fallback={null}><ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} /></Suspense>}
+      {showVcDown && <VcDownList user={user} onClose={() => setShowVcDown(false)} />}
+      <RemoteConsoleWindow />
+    </>
+  );
+
   // 통합 관제 콘솔 — 포탈 셸(헤더·탭·필터·상태바) 대신 전체 화면으로 그린다. 위 훅들은 모두 선언된 뒤라
   // 조기 반환해도 훅 개수가 렌더마다 같다(CLAUDE.md 프론트엔드 규칙). /health 폴링은 그대로 유지돼 콘솔에 넘긴다.
   if (consoleOn) {
@@ -356,6 +476,24 @@ function Portal({ user, onLogout }) {
       <Suspense fallback={<div className="login-screen"><div className="loading">신규 포탈(V4) 불러오는 중…</div></div>}>
         <V4App user={user} health={health} healthError={healthError} onExit={exitV4} />
       </Suspense>
+    );
+  }
+
+  // V5 셸(v2.616) — 같은 본문을 새 틀로 감싼다. V4·콘솔이 먼저다(위 조기 반환). 훅은 모두 위에서 선언됐다.
+  if (v5On) {
+    return (
+      <>
+        <Suspense fallback={<div className="login-screen"><div className="loading">V5 불러오는 중…</div></div>}>
+          <V5Shell user={user} health={health} vcenters={vcenters} tab={tab} visibleTabIds={visibleTabs.map((t) => t.id)}
+            scope={v5Scope} setScope={setV5Scope}
+            onSearchIn={(id, text) => { patchFilter({ q: text }, id); setTab(id); }}
+            onShowVcDown={() => setShowVcDown(true)} onShowNotes={() => setShowNotes(true)} onExit={exitV5} onLogout={onLogout}>
+            {filterBar}
+            {tabBody}
+          </V5Shell>
+        </Suspense>
+        {overlays}
+      </>
     );
   }
 
@@ -456,63 +594,9 @@ function Portal({ user, onLogout }) {
       </header>
 
       <main className="content">
-        {showFilters && (
-          <div className="filters">
-            <select className="select" value={region} onChange={(e) => { setRegion(e.target.value); setVcenterId(''); }}>
-              <option value="">전체 리전</option>
-              {/* scope.regions 가 지정된 사용자는 허용 리전만 선택 가능(데이터도 서버에서 동일 제한). */}
-              {((user.scope?.regions?.length) ? REGIONS.filter((r) => user.scope.regions.includes(r)) : REGIONS)
-                .map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-            <select className="select" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)}>
-              <option value="">전체 vCenter</option>
-              {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>
-            {MENU_FILTERS[tab] && (
-              <select className="select" value={menuFilter[tab] || ''}
-                onChange={(e) => setMenuFilter((m) => ({ ...m, [tab]: e.target.value }))}>
-                {MENU_FILTERS[tab].options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            )}
-            <SearchBox placeholder="이름 / IP / OS 검색…" value={q} onChange={setQ} />
-            <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
-              title="체크하면 검색에 메모(Notes) 내용도 포함합니다. (기본: 미포함)">
-              <input type="checkbox" checked={qNotes} onChange={(e) => setQNotes(e.target.checked)} /> 메모 포함
-            </label>
-            {['vms', 'networks', 'hosts', 'datastores'].includes(tab) && (
-              <label className="flex gap" style={{ alignItems: 'center', fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
-                title="체크하면 IP로 검색할 때 IPMS(IP 스캔) 자료의 해당 대역 IP도 함께 보여줍니다. (vCenter가 모르는 스캔 IP 포함)">
-                <input type="checkbox" checked={qIpms} onChange={(e) => setQIpms(e.target.checked)} /> IPMS 포함
-              </label>
-            )}
-            {(region || vcenterId || q || menuFilter[tab]) && (
-              <button className="tab" onClick={() => { patchFilter({ region: '', vcenterId: '', q: '', qNotes: false, qIpms: false }); setMenuFilter((m) => ({ ...m, [tab]: '' })); }}>필터 초기화</button>
-            )}
-          </div>
-        )}
+        {filterBar}
 
-        <ErrorBoundary key={tab}>
-         <Suspense fallback={<div className="muted" style={{ padding: 24 }}>로딩 중…</div>}>
-          {tab === 'overview' && <Overview onSelectSite={selectSite} onGotoTab={setTab} />}
-          {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
-          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} resetSignal={platformResetSeq} />}
-          {tab === 'svcmon' && <SvcMonitor />}
-          {tab === 'ipam' && <Ipam />}
-          {tab === 'hosts' && <Hosts filters={filters} />}
-          {tab === 'vms' && <Vms filters={filters} />}
-          {tab === 'datastores' && <Datastores filters={filters} />}
-          {tab === 'networks' && <Networks filters={filters} />}
-          {tab === 'alarms' && <Alarms filters={filters} />}
-          {tab === 'tools' && <SpecialTools />}
-          {tab === 'settings' && user.role === 'admin' && isOwner && <Settings />}
-          {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
-          {/* v2.593(감사 UI-2593-02): 기능이 꺼져 있으면 #/upgrade 가 아무 안내 없는 빈 화면이었다. ⚠ isAllowed 에서 거르지 않는 이유 —
-              그 함수는 health 폴링(아래 선언)보다 먼저 실행돼 TDZ 가 되고, health 가 오기 전에 걸러 버리면 주소로 들어온 사용자를 내쫓는다. */}
-          {tab === 'upgrade' && user.role === 'admin' && health && !health.features?.upgradeTab && (
-            <div className="card" style={{ padding: 20 }}>업그레이드 화면이 이 포탈에서 꺼져 있습니다 — 서버 portal.env 의 ‘SHOW_UPGRADE_TAB=true’ 로 켭니다(재시작 필요).</div>
-          )}
-         </Suspense>
-        </ErrorBoundary>
+        {tabBody}
       </main>
 
       <footer className="statusbar">
@@ -522,36 +606,7 @@ function Portal({ user, onLogout }) {
         <div className="sb-cell"><span className="sb-label">활성 알람</span><span className="sb-val" style={{ color: health?.alarmsCritical ? 'var(--red)' : undefined }}>{(health?.alarms || 0).toLocaleString()}</span></div>
       </footer>
 
-      {upToast && (
-        <div className="up-toast">
-          <span className="up-toast-icon">⬆️</span>
-          <div className="up-toast-body">
-            <div className="up-toast-title">업그레이드 완료</div>
-            <div className="up-toast-sub">버전 <b>v{upToast}</b> 으로 업데이트되었습니다.</div>
-          </div>
-          <button className="up-toast-reload" onClick={() => window.location.reload()}>새로고침</button>
-          <button className="up-toast-x" onClick={() => setUpToast(null)} aria-label="닫기">×</button>
-        </div>
-      )}
-
-      {egg && (
-        <div className="egg-overlay" onClick={() => setEgg(false)}>
-          <div className="egg-sparkles">{'✨🎉💫⭐🎊✨🌟💥'.split('').map((s, i) => (
-            <span key={i} style={{ ['--i']: i }}>{s}</span>
-          ))}</div>
-          <div className="egg-card" onClick={(e) => e.stopPropagation()}>
-            <div className="egg-emoji">🚀</div>
-            <div className="egg-line">이 프로그램은</div>
-            <div className="egg-name">박준호</div>
-            <div className="egg-line">가 만들었습니다.</div>
-            <button className="egg-btn" onClick={() => setEgg(false)}>닫기</button>
-          </div>
-        </div>
-      )}
-
-      {showNotes && <Suspense fallback={null}><ReleaseNotes isAdmin={user.role === 'admin'} onClose={() => setShowNotes(false)} /></Suspense>}
-      {showVcDown && <VcDownList user={user} onClose={() => setShowVcDown(false)} />}
-      <RemoteConsoleWindow />
+      {overlays}
     </div>
   );
 }

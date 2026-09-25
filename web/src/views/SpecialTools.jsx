@@ -124,7 +124,7 @@ const toolFromHash = () => {
 const RECENT_KEY = 'tools.recentSearches';
 const loadRecent = () => { try { const a = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(a) ? a.filter((s) => typeof s === 'string' && s.trim()) : []; } catch { return []; } };
 
-export default function SpecialTools() {
+export default function SpecialTools({ defaultScope = '' } = {}) {
   const [tool, setTool] = useState(() => toolFromHash());
   const [menuQ, setMenuQ] = useState(''); // 메뉴 빠른 찾기
   const [isAdmin, setIsAdmin] = useState(false); // 관리자 전용 도구(VM 생성 등) 노출 제어
@@ -230,7 +230,7 @@ export default function SpecialTools() {
       </div>
     );
   }
-  if (tool) return <ToolPanel tool={tool} isAdmin={isAdmin} onBack={() => openTool(null)} />;
+  if (tool) return <ToolPanel tool={tool} isAdmin={isAdmin} defaultScope={defaultScope} onBack={() => openTool(null)} />;
   // 전 도구를 노출하되, 권한이 없으면 disabled(회색·클릭불가)로 표시한다(숨기지 않음).
   // 외부 포탈 항목은 주소가 설정된 경우에만 노출한다(미설치 환경에 죽은 카드를 남기지 않음).
   // topTab(상단 메뉴로 승격) 항목은 카드로 노출하지 않는다(권한 매트릭스 편집용으로만 목록에 존재).
@@ -388,13 +388,15 @@ function renderToolCard(t, sectionId, { countOf, externalUrls, openTool }) {
   );
 }
 
-function ToolPanel({ tool, onBack, isAdmin }) {
+function ToolPanel({ tool, onBack, isAdmin, defaultScope = '' }) {
   const meta = TOOLS.find((t) => t.k === tool);
-  const [scope, setScope] = useState('');
+  // v2.616: V5 틀의 법인 범위를 첫 값으로 받는다(바꾸면 따라간다). 개발 포탈은 넘기지 않아 예전 그대로('').
+  const [scope, setScope] = useState(defaultScope);
   // v2.491: vCenter 아래 하위 범위 — 클러스터/폴더. vCenter 를 고른 뒤에만 쓴다(클러스터 이름은
   // vCenter 간 중복될 수 있어, 전체 범위에서 이름으로 거르면 다른 사이트 VM 까지 섞인다).
   const [cluster, setCluster] = useState('');
   const [folder, setFolder] = useState('');
+  useEffect(() => { setScope(defaultScope); setCluster(''); setFolder(''); }, [defaultScope]);
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
   const scoped = ['vm-export', 'dupip', 'vmtools', 'snapshots', 'hba', 'gpu', 'licenses', 'license-expiry', 'esxi', 'hardware', 'powermap', 'guestos', 'real-os', 'thinvms', 'guest-disk', 'capacity', 'waste', 'esxitemp', 'forecast', 'dsusage', 'orphanvmdk', 'curuser',
     'daily-health', 'snapshot-age', 'zombie-vms', 'rightsizing', 'capacity-forecast', 'compliance-report', 'change-history', 'unprotected-vms'].includes(tool);
