@@ -31,6 +31,7 @@ function initSqlite() {
     // v2.613 PERSIST2613-03: chmod(DB2611-01) → busy_timeout → WAL/NORMAL 을 openSqlite 가 한다. 예전 손 사본은 busy_timeout 을
     //   두 번 걸고 journal_mode 의 잠금 오류를 삼켰다(규칙 2 위반 — 바로 뒤 CREATE 가 같은 잠금으로 던져 실효는 없었다).
     const db = openSqlite(new DatabaseSync(DB_PATH));
+    try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort — openSqlite 가 이미 했다(secAudit2535 스윕 규약 유지) */ }
     try {
       db.exec(`
         CREATE TABLE IF NOT EXISTS samples (

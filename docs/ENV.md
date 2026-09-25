@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **537개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **539개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-25)
@@ -12,7 +12,7 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (22)
+## 공용 유틸 (23)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -38,6 +38,7 @@
 | `WAN_CONNECT_TIMEOUT_MS` | `20000` |  | util/resilientFetch.js |
 | `WAN_MAX_CONNECTIONS` | `6` |  | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
+| `X` |  |  | util/dayKey.js, util/envTimeout.js |
 
 ## 공통 (153)
 
@@ -139,7 +140,7 @@
 | `PARTFAULT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | partfault/push.js |
 | `PARTFAULT_PUSH_MAX_DEVICES` | `5000` |  | partfault/push.js |
 | `PARTFAULT_PUSH_MS` | `10` |  | partfault/push.js |
-| `PARTFAULT_RETENTION_DAYS` | `730` |  | partfault/db.js |
+| `PARTFAULT_RETENTION_DAYS` |  |  | partfault/settings.js |
 | `PERF_HANG_LOG_MAX_BYTES` | `8` |  | perf/hangLog.js |
 | `PERF_HANG_LOG_MAX_LINES` | `20000` |  | perf/hangLog.js |
 | `PERF_HANG_LOG_MAX_PER_MIN` | `60` |  | perf/hangLog.js |
@@ -320,7 +321,7 @@
 | `UPGRADE_PACKAGE_MAX_BYTES` |  |  | upgrade/fetchPackage.js |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 
-## 엣지 에이전트 (39)
+## 엣지 에이전트 (38)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -343,7 +344,7 @@
 | `AGENT_PARTFAULT_CONFIG_PULL_MS` | `10` |  | agent/partFaultConfigPull.js |
 | `AGENT_PING_POLL_MS` | `4000` |  | agent/pingWorker.js |
 | `AGENT_PUSH_FLEET` | `기본 적용('false' 로 끄기)` |  | agent/fleetPush.js |
-| `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/curUserPush.js, agent/guestDiskPush.js 외 2 |
+| `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/curUserPush.js, agent/fleetPush.js 외 4 |
 | `AGENT_PUSH_TIMEOUT_MS` |  |  | agent/fleetPush.js, agent/inventoryPush.js |
 | `AGENT_VMSERIES_CHUNK_BYTES` | `700000` |  | agent/vmSeriesPush.js |
 | `AGENT_VMSERIES_CONFIG_PULL_MS` | `10` |  | agent/vmSeriesConfigPull.js |
@@ -362,7 +363,6 @@
 | `SVCMON_PUSH_INTERVAL_MS` |  |  | agent/svcmonPush.js |
 | `SVCMON_PUSH_TIMEOUT_MS` |  |  | agent/svcmonPush.js |
 | `VMSERIES_LOCAL_SETTINGS` | `기본 적용('true' 로 끄기)` |  | agent/vmSeriesConfigPull.js |
-| `X` |  |  | agent/envTimeout.js, util/dayKey.js |
 
 ## 원격 명령(RMA) (37)
 
@@ -486,7 +486,7 @@
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BMUSAGE_PULL_STALE_MS` | `30` |  | central/bmUsageEdgePull.js |
-| `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmUsageEdgePull.js |
+| `BMUSAGE_PULL_TIMEOUT_MS` | `20000` |  | central/bmUsageEdgePull.js, routes/api/bmUsage.js |
 | `CAPTURE_ACK_GRACE_MS` | `60000` |  | central/captureJobs.js |
 | `CENTRAL_AGENT_CONFIG_MAX_BYTES` | `32` |  | central/agentConfig.js |
 | `CENTRAL_AGENT_IDENTITY_MAX` |  |  | central/agentIdentity.js |
@@ -552,10 +552,12 @@
 |---|---|---|---|
 | `HEALTH_PROBE_TIMEOUT_MS` |  |  | health/network.js |
 
-## API 라우트 (31)
+## API 라우트 (33)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `BMUSAGE_PULL_BUDGET_MS` |  |  | routes/api/bmUsage.js |
+| `BMUSAGE_PULL_CONCURRENCY` | `4` |  | routes/api/bmUsage.js |
 | `CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS` |  |  | routes/central.js |
 | `CENTRAL_REQUIRE_AGENT_TOKEN` | `기본 아님('true' 일 때만 적용)` |  | routes/central.js |
 | `CENTRAL_VERIFY_SELF_REGISTER` | `기본 적용('false' 로 끄기)` | ✅ | routes/central.js |
@@ -716,4 +718,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 537
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 539

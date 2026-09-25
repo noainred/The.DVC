@@ -100,6 +100,7 @@ async function openInner() {
     // v2.447(감사 S4) DB 파일 권한 0600 · v2.611(DB2611-01) 기존 -wal/-shm 잔재까지 0600 · v2.597(L2597-02) busy_timeout 을
     // journal_mode 보다 먼저 — 셋 다 openSqlite 가 한다(chmod → busy_timeout → WAL/NORMAL). 잠금이면 핸들을 닫고 던진다.
     conn = openSqlite(new DatabaseSync(FILE()));
+    try { fs.chmodSync(FILE(), 0o600); } catch { /* best effort — openSqlite 가 이미 했다(secAudit2535 스윕 규약 유지) */ }
     conn.exec(`CREATE TABLE IF NOT EXISTS api_latest (
         device_id TEXT NOT NULL, area TEXT NOT NULL, endpoint TEXT NOT NULL,
         ts INTEGER NOT NULL, ok INTEGER NOT NULL, bytes INTEGER NOT NULL,

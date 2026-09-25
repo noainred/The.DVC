@@ -3843,6 +3843,70 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       ping 추이는 MIN/MAX 단독 · `sftpReadFile` 크기 상한 · 웹 늦은 응답·조회 실패를 0 으로 보이던 7화면 · 표 minWidth 10곳.
     - 남긴 것: PERF2612-03(백업 동기 gzip) · DB2612-03(LRU 가 prune 핸들 닫음 — vCenter 48개 초과) · GPU 배포 이름 대소문자 · 엣지
       `bmstorWorker` 잠금 공유 · `corruptOnlyReason` 4벌 복제 · CVP BGP 피어 IP 가림(정책). 실장비(CVP·iLO·OME 리다이렉트 동작)는 보지 못했다.
+  - ⚠⚠ **v2.613 — 특수 기능·신규 기능 아키텍처 점검(1단계) 확정분**(사용자 요청 "신규 기능, 특수기능 아키텍처 점검" ·
+    선택 "둘 다(점검 먼저 → 그 결과를 화면으로)" · 전체 검증. 8축 발견 96 = 확정 57 · SPLIT 25 · 가능성 6 · 반증 8 → 파일이 겹치지
+    않는 8그룹 병렬 수정 + 그룹별 워크트리 변이 검증. 회귀 `test/audit2613{a..h}.test.js` + 웹 `audit2613a/b.test.js` 외.
+    상세 `docs/AUDIT-2026-09-25c.md`. 2단계(운영 포탈이 스스로 도는 '아키텍처 점검' 화면)는 v2.614):
+    - ⚠⚠ **카탈로그의 `adminOnly` 는 이제 실제 API 게이트와 일치해야 한다 — 테스트가 docs/API.md 게이트 열과 대조한다**
+      (CATALOG2613-01, `web/src/views/audit2613a.test.js`): v2.555 가 "adminOnly 는 표시 관례이고 접근제어가 아니다" 라고
+      적은 뒤 15개가 양방향으로 어긋난 채 남아 있었다(관리자 전용 라우트인데 카드는 열려 있거나 그 반대). 새 도구를 넣을 때
+      플래그를 라우트 게이트와 맞추고 `node scripts/api-doc.mjs` 를 돌릴 것(그 문서가 대조 원천이다).
+      · 잠금 판정은 `views/toolVisibility.js lockReasonOf` 하나 — 카드 그리드·V4 내비·⌘K 팔레트·pages/Tools 가 같은 함수를 쓴다
+        (예전엔 V4 내비가 잠금을 표시하지 않았다). 소유 화면 밖에서 `/api/tools/<seg>` 를 부르는 파일은 `toolAllowed(키)` 를
+        먼저 본다(IPMS 대조·NSX 세그먼트 — 웹 스윕이 허용 목록과 대조).
+      · **새 도구의 `/api/tools/<seg>` 는 세그먼트 == 카탈로그 키**다(`auth/toolAccess.js` 머리말 규약). 다른 것은 동결된
+        `LEGACY_SEGMENT_KEYS`(18)뿐이고 늘리면 테스트가 실패한다. `TOOL_PATH_KEYS` 의 `current-users`·`horizon-sessions` 는
+        `curuser` 로(예전 선언은 사실이 아니었다).
+      · 도구 안 서브탭은 `useHashTab({base:['tools',<k>]})` 로 URL 에 싣는다(포탈 점검·통신 점검·파트 장애). ⚠ SanSwitchTool 의
+        `tab` 은 장비 모달 안의 탭이라 대상이 아니다(검증 표가 틀렸다 — 장비 id 없는 딥링크는 뜻이 없다).
+      · 옛 상단 주소 `#/explore`·`#/nsx` 도 `MOVED_TABS` 로 옮긴다(v2.592 규약의 누락 2건).
+    - ⚠⚠ **중앙 pull 사다리는 `central/edgePull.js pullFromEdge` 하나**(CONTRACT2613-01·EDGE2613-02): 엣지 로그·bm-usage·토큰
+      점검이 각자 등록부→fetch→상태코드→본문 판정을 갖고 있어 같은 404 본문을 셋이 다르게 읽었다. 새 '중앙이 엣지에서 당기는'
+      경로는 이 함수를 쓰고 `EDGE_PULL_KINDS`(10종) 안의 kind 만 낸다(웹 `edgeLogText.FETCH_KIND_TEXT` 와 1:1 — 테스트 대조).
+      · 엣지 최소 버전은 서버가 상수로 갖고 응답에 싣는다 — CVP `MIN_CVP_EDGE_VERSION='2.608.0'`(kind old-version/
+        unknown-version/silent/waiting) · 통신 점검 `MIN_EDGE_VERSION='2.552.0'`. '첫 보고 대기' 는 **기다리면 되는 경우에만**.
+    - ⚠⚠ **SAN 스위치·PDU 도 상태 전용 push 를 보낸다 — 단 중앙이 2.613 이상일 때만**(EDGE2613-04, `agent/centralStatusOnly.js`
+      `DEVICE_STATUS_ONLY_MIN_CENTRAL`): 수신 분기(`statusOnly:true` 면 목록을 건드리지 않는다)가 이 릴리스에 생겼으므로 구버전
+      중앙에 빈 목록을 보내면 **목록이 지워진다**. 지원 여부는 health-probe 버전으로 필요 버전별 캐시(1h/실패 5m). storage 의
+      `STATUS_ONLY_MIN_CENTRAL='2.581.0'` 은 그대로. v2.583 이 설계로 남긴 EDGE-3 을 닫았다.
+      · sanswitch push 단일비행은 형제 5개와 같은 `_busy(프라미스)+_again` — `sanSwitchConfigPull` 의 `BUSY_REASON` 대조·
+        `sleep(2s)×90` 루프는 삭제했다(합류 결과를 기다리면 된다). 거절 요약은 `util/centralReply.js dropSummaryOf` 하나
+        (`dropped` 객체·`coerced`·`zoningTrimmed`·`evicted` 까지 읽는다 — `readDropSummary` 사본 3벌 삭제).
+      · `/api/central/*` 51개의 인라인 토큰 게이트 쌍은 `requireCentral()` 미들웨어 하나(404→403 순서·본문 3변형 보존).
+        `scripts/api-doc.mjs GUARD_NOTE` 에 등록했다.
+    - ⚠⚠ **상태 파일을 만드는 헬퍼가 자기 파일명을 등록한다**(`util/stateFiles.js registerStateFile`, PERSIST2613-01·08):
+      v2.590 P1 이 이름 목록으로만 막아 CVP 의 `central-agent-cvp.json`·`cvp-push.json` 이 백업 '설정 변경' 감시에 다시 잡혔다.
+      `createDebouncedWriter`·`createActivityLog`·`createAuthGuard` 가 등록하고 `backup/service.js isRuntimeStateFile` 이 등록부도
+      본다. **새 상태 파일 헬퍼는 등록할 것** — 스윕 테스트가 호출부 파일명 전부를 상태로 판정하는지 본다.
+      · 등록부 5종(storage·sanswitch·pdu·cvp·bmstor)의 손상 판정·원소 필터·`devicesForThisNode/ForAgent` 는 `util/registryCore.js`
+        하나. ⚠ 동작 차이: `devicesForAgent('')` 는 이제 `[]`(빈 이름이 중앙 직접 장비와 짝지어지지 않는다).
+      · SQLite open 사본 3벌(storage/db·horizon/sessionDb·metrics/db)을 `util/sqliteOpen.js openSqlite + createLockRetry` 로 —
+        `audit2611c` 의 이름 예외를 지워 일반 스윕(`new DatabaseSync(` ∧ ¬`openSqlite(` = ∅)이 전부를 본다.
+      · 파트 장애 보존일은 설정 `retentionDays`(30~3650, 기본 730) + env `PARTFAULT_RETENTION_DAYS`(0 = 전부 보관). 화면
+        `retentionText` 가 0 일을 빈 조각으로 두지 않는다(예전 `db?.retentionDays ? … : ''` 는 '전부 보관' 이 사라졌다).
+    - ⚠⚠ **서비스 점검 대상은 `edgelog/spec.js STATUS_SPEC collect.*` 에서 파생한다**(RUNTIME2613-01, `health/services.js MODS`):
+      고정 13항목이라 폴러 26개(vCenter 로그·용량 샘플러·인증서 감시 …)를 점검하지 않았다. **spec 에 collect.* 를 더하면 MODS 에도
+      한 줄** — `audit2613g` 의 spec ⊆ MODS 검사가 먼저 깨진다. 응답 `coverage` 가 대상 밖 push/pull 워커를 말한다(웹 표시는 남은 일).
+      · 기동 스태거 `STAGGER_STEP_MS = min(1500, floor(60000/N))` — 폴러 74개면 마지막 기동 59초(전 110초).
+      · bmusage OS·ENT 세션 예산은 기동 시 장비 시한 − 5초로 자른다(`coupleBudget`, 잘랐으면 console.warn 1줄) — v2.550.3·v2.554
+        의 '예산 < 시한' 산수를 코드가 강제한다. storage cliSsh(150s) vs poller(180s)는 아직 상수 관계다(남은 일).
+      · `gpu-guest-data`·`fleet` push 는 BIG_JSON 등록 + gzip + 413 로그(v2.503 체크리스트의 누락 2곳).
+    - **의존 방향**: `agent/envTimeout.js`·`agent/central404.js` 본체는 `util/` 로(옛 경로는 재수출 — `config.js` 는 util/·security/·
+      내장만 import, arch2579 ②-c). '순환 회피' 라 적힌 동적 import 3곳은 순환이 없어 정적으로 바꿨다 — **동적 import 에 '순환'
+      주석을 달려면 실제 되돌이 경로가 있어야 한다**(테스트가 BFS 로 확인, 진짜 3곳은 동결 목록). 정적+동적 이중 import 잔여 7곳은
+      `KNOWN_STATIC_DYNAMIC_DUP` 로 고정(늘면 실패). 설정 pull 4종(gpuGuest·pdu·storage·users)은 404 를 `classifyCentral404` 로 가른다.
+    - **웹 공용 코어**: 화면은 `/auth/me` 를 다시 부르지 않는다 — `api.hasRole`·`getCurrentUser()`(인증 꺼짐이면 App 이 `/auth/config`
+      의 `serviceHubUrl` 을 Anonymous 사용자에 싣는다) · `util/fmt.fmtBytes(null) === '—'` · 상대시각은 `relTime.agoText`·
+      `util/fmt.fmtAgo`, 톤 색은 `views/tools/toneVar.js` · 직접 `fetch(` 대신 `delJson/downloadFile`(IpamNet 의 1곳은 403·409 를
+      성공처럼 보이던 무음 실패였다) · 온도 임계는 `serverTemp/board.js` 상수. 웹 스윕 4종이 사본 0 을 고정한다.
+      ⚠ 그룹 보고가 '사용 0' 이라 적은 `PortalCheck.jsx` 의 `ago` 는 사용 중이었다(:225) — **'죽은 코드' 판정은 grep 결과를 붙일 것.**
+    - **테스트·문서**: 설정 pull 진입 함수 4종을 목 중앙으로 실제 호출(`edgeSweep2574` IMP-06 이 `(push|pull|run)\w*(Now|Once)` 30개를
+      열거) · `*Status` 스윕이 `async` 도 잡는다(spec 에 `collect.vcLogs`·`collect.capacity`·`collect.certs` 추가) · 2줄 stripComments
+      사본 24파일 → `test/_stripComments.js` · 절대 시간 단언은 1초 상한 + 입력 확대(회귀 시 수 초) · `docs/ARCHITECTURE.md` 모듈
+      지도·`docs/INDEX.md` 목록은 `scripts/arch-doc.mjs` 생성(CI `--check`). **docs/*.md 를 추가하면 생성기를 다시 돌릴 것**
+      (이 릴리스의 감사 문서를 추가한 뒤 `audit2613h` 가 실제로 그것으로 실패했다).
+    - ⚠ 작업 방식: 첫 수정 워크플로 8개가 전부 세션 한도(`session limit`)로 즉시 실패했다 — 작업 트리는 깨끗했으므로 한도 해제 뒤
+      **처음부터 재실행**했다(v2.607 규약). 그룹 보고의 '리드가 할 것' 은 `scratchpad/arch2613/LEAD-TODO.md` 에 모아 통합에서 전부 처리했다.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

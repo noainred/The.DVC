@@ -27,6 +27,7 @@ import {
   notifyNote, lastRunText, ageText, intervalText, toneVar, resetNote, pushNote,
   historyEmptyText, kpiValue, kpiAccent,
   EDGE_KIND_LABEL, EDGE_KIND_TONE,
+  retentionText,
 } from './partFaultText.js';
 
 const stateColor = toneVar;
@@ -115,6 +116,21 @@ export function PartFaults() {
     finally { setBusy(false); }
   }
 
+  // v2.613 PERSIST2613-06: 이력 보존일(30~3650, 빈 칸 = 유지). env PARTFAULT_RETENTION_DAYS 가 있으면 서버가 그것을 쓴다(0 = 전부 보관).
+  const [retentionInput, setRetentionInput] = useState('');
+  async function saveRetention() {
+    const v = retentionInput.trim();
+    if (v === '') { setMsg('보존일이 비어 있습니다 — 값을 넣어야 저장됩니다(빈 칸은 유지).'); return; }
+    setSaving(true); setMsg('');
+    try {
+      const r = await putJson('/tools/part-faults/settings', { retentionDays: Number(v) });
+      setMsg(r.ok ? `보존일 저장 — ${r.settings?.retentionDays ?? v}일(다음 정리 주기부터 적용)` : `저장 실패 — ${r.reason || ''}`);
+      setRetentionInput('');
+      await load();
+    } catch (e) { setMsg(`저장 실패 — ${e.message}`); }
+    finally { setSaving(false); }
+  }
+
   async function toggleEnabled(next) {
     setSaving(true); setMsg('');
     try {
@@ -170,7 +186,16 @@ export function PartFaults() {
           <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-faint)' }}>
             자동 점검 {poller.enabled ? `켜짐(${poller.source}) · 주기 ${intervalText(poller.intervalMs)}` : `꺼짐(${poller.source})`}
             {' · 탐지 지연 상한은 iDRAC 인벤토리 주기(갱신 직후 즉시 판정)'}
-            {db && db.available === false ? ' · DB 사용 불가' : db?.retentionDays ? ` · 이력 보존 ${db.retentionDays}일` : ''}
+            {db && db.available === false ? ' · DB 사용 불가' : retentionText(db)}
+          </div>
+        )}
+        {settings && !isEdge && db && db.available !== false && (
+          <div style={{ marginTop: 4, fontSize: 12, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label htmlFor="pf-retention" style={{ color: 'var(--text-faint)' }}>이력 보존일(30~3650)</label>
+            <input id="pf-retention" type="number" min={30} max={3650} value={retentionInput} placeholder={String(settings.retentionDays ?? '')}
+              disabled={saving || db.retentionSource === 'env'} onChange={(e) => setRetentionInput(e.target.value)} style={{ width: 90, minWidth: 0 }} />
+            <button className="btn" style={{ padding: '0 8px', fontSize: 11 }} disabled={saving || db.retentionSource === 'env' || retentionInput.trim() === ''} onClick={saveRetention}>저장</button>
+            {db.retentionSource === 'env' && <span style={{ color: 'var(--text-faint)' }}>env PARTFAULT_RETENTION_DAYS 가 우선이라 화면에서 바꿀 수 없습니다.</span>}
           </div>
         )}
         {isEdge && data?.push && (

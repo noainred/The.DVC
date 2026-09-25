@@ -57,8 +57,8 @@ const hitsOf = (re) => {
 };
 
 describe('WEB2613-01 화면이 /auth/me 를 다시 부르지 않는다 — 역할은 api.hasRole(현재 사용자 객체) 하나', () => {
-  // ⚠ SpecialTools.jsx 는 G1 소유 파일이라 이 회차에 손대지 않았다(serviceHubUrl 도 같은 객체에서 읽으면 된다) — 사유와 함께 남긴다.
-  const ALLOW = new Map([['views/SpecialTools.jsx', 'G1 담당 파일(v2.613) — 다음 회차에 hasRole + getCurrentUser().serviceHubUrl 로']]);
+  // SpecialTools.jsx 도 v2.613 통합 시 hasRole + getCurrentUser().serviceHubUrl 로 옮겼다(허용 목록 0).
+  const ALLOW = new Map([]);
   it('views/** 에서 fetchJson(\'/auth/me\') 호출이 허용 목록 밖 0건', () => {
     const bad = hitsOf(/fetchJson\(\s*'\/auth\/me'/).filter((h) => !ALLOW.has(h.file)).map((h) => `${h.file}:${h.line}`);
     expect(bad).toEqual([]);
@@ -176,8 +176,8 @@ describe('WEB2613-12 온도 임계 숫자는 board.js 만 갖는다', () => {
 });
 
 describe('DEPS2613-11 상대시각·톤 색은 공용 코어(relTime·util/fmt·toneVar) 하나 — 로컬 구현 사본 0', () => {
-  // G1 담당 파일의 사본은 이 회차에 손대지 않았다 — 사유와 함께 남긴다(다음 회차 첫 후보).
-  const ALLOW = new Map([['views/tools/SanSwitchTool.jsx', 'G1 담당 파일 — ago 사본(5회 사용)'], ['views/tools/PortalCheck.jsx', 'G1 담당 파일 — ago 사본(사용 0 · 죽은 코드)']]);
+  // SanSwitchTool(껍데기로)·PortalCheck(죽은 사본 삭제)도 v2.613 통합 시 정리했다(허용 목록 0).
+  const ALLOW = new Map([]);
   const DEF = /^(?:export )?(?:const|function) (ago|fmtAgo|toneVar)\b[^\n]*/;
   it('정의는 코어에 위임하는 한 줄 껍데기뿐(자체 구현 — Date.now 산술·단위 문구 — 0)', () => {
     const bad = [];

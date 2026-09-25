@@ -1,9 +1,9 @@
 // 특수 기능(SpecialTools) — 카드 그리드 셸 + 도구 패널 디스패처.
 // v2.282.0 대형 파일 분할(2026-08-12): 5,070줄 단일 파일에서 도구 구현을 views/tools/ 로 분리했다.
 // 이 파일은 목록/권한 게이트/딥링크/최근검색 셸과 ToolPanel 라우팅만 가진다.
-// App.jsx(IpamStandalone)·Summary.jsx(GuestOsVmsModal) 호환을 위해 아래에서 재export 한다.
+// Summary.jsx(GuestOsVmsModal) 호환을 위해 아래에서 재export 한다(IpamStandalone 재수출은 v2.613 WEB2613-08 에 삭제 — App 이 IpamCore 를 직접 lazy 한다).
 import React, { useEffect, useState } from 'react';
-import { fetchJson, postJson, usePolling, toolAllowed, can, getCurrentUser } from '../api.js';
+import { fetchJson, postJson, usePolling, toolAllowed, can, getCurrentUser, hasRole } from '../api.js';
 import { SearchBox } from '../components/ui.jsx';
 import BoldText from '../components/boldText.jsx';
 import { TOOLS } from './specialToolsList.js';
@@ -18,8 +18,8 @@ import { searchTools } from './toolSearch.js'; // 도구 검색 매칭(v2.508, �
  * 실제로 볼 도구 1개를 위해 48개 전부를 내려받았다. 이제 셸(카드 그리드·권한 게이트·딥링크)만
  * 즉시 로드하고 각 도구는 선택하는 순간 자기 청크를 받는다. ToolPanel 전체를 <Suspense> 로 감싼다.
  *
- * ⚠️ 파일 하단의 재export(IpamStandalone·GuestOsVmsModal)는 App.jsx·Summary.jsx 가 쓰므로
- * 정적으로 유지한다 — lazy 로 바꾸면 그 두 화면이 깨진다.
+ * ⚠️ 파일 하단의 재export(GuestOsVmsModal)는 Summary.jsx 가 쓰므로
+ * 정적으로 유지한다 — lazy 로 바꾸면 그 화면이 깨진다.
  */
 const Topology3D = React.lazy(() => import('./Topology3D.jsx'));
 const NetTrafficAnalysis = React.lazy(() => import('./NetTrafficAnalysis.jsx'));
@@ -190,10 +190,9 @@ export default function SpecialTools() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   useEffect(() => {
-    fetchJson('/auth/me').then((r) => {
-      setIsAdmin(r.user?.role === 'admin');
-      setExternalUrls({ serviceHubUrl: r.user?.serviceHubUrl || '' });
-    }).catch(() => {});
+    // v2.613 WEB2613-01: /auth/me 를 다시 부르지 않는다 — App 이 렌더 전에 채운 현재 사용자 객체 하나(api.js)에서 읽는다.
+    setIsAdmin(hasRole('admin'));
+    setExternalUrls({ serviceHubUrl: getCurrentUser()?.serviceHubUrl || '' });
   }, []);
   // 그리드(메뉴 목록)로 돌아올 때마다 사용 횟수를 갱신. 전체 메뉴를 클릭순으로 정렬하므로
   // 상위 몇 개가 아니라 전체 도구 수를 덮을 만큼 넉넉히 가져온다(현재 42개 → 200).
@@ -556,5 +555,4 @@ function ToolPanel({ tool, onBack, isAdmin }) {
 }
 
 // 외부 파일 호환 재export(App.jsx lazy named import · Summary.jsx)
-export { IpamStandalone } from './tools/IpamCore.jsx';
 export { GuestOsVmsModal } from './tools/GuestOsTools.jsx';

@@ -452,3 +452,16 @@ export function kpiValue(summary, key) {
 export function kpiAccent(value, color) {
   return typeof value === 'number' && value > 0 ? color : undefined;
 }
+
+/**
+ * v2.613 PERSIST2613-06: 상태 줄의 '이력 보존' 조각. `retentionDays === 0` 은 env 로 '전부 보관' 을 고른 것이지 '보존 없음' 이 아니다 —
+ * 예전 `db?.retentionDays ? … : ''` 는 그 경우 조각이 통째로 비어 보였다. 출처(env/settings/default)를 함께 적는다.
+ */
+export function retentionText(db) {
+  if (!db || db.available === false) return '';
+  const d = db.retentionDays;
+  if (d == null || !Number.isFinite(Number(d))) return '';
+  const src = db.retentionSource === 'env' ? '(env)' : db.retentionSource === 'settings' ? '(설정)' : '(기본값)';
+  if (Number(d) === 0) return ` · 이력 전부 보관${src}`;
+  return ` · 이력 보존 ${Number(d)}일${src}`;
+}

@@ -115,6 +115,7 @@ async function open() {
       fs.mkdirSync(path.dirname(p), { recursive: true });
       // chmod(본체·기존 -wal/-shm 0600, DB2611-01) → busy_timeout → WAL/NORMAL 순서는 openSqlite 가 지킨다. 잠금이면 닫고 던진다.
       const db = openSqlite(new DatabaseSync(p));
+      try { fs.chmodSync(p, 0o600); } catch { /* best effort — openSqlite 가 이미 했다(secAudit2535 스윕 규약 유지) */ }
       try {
         const st = prepare(db);
         x = { db, st, path: p };

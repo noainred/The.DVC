@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **180개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **179개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-25)
@@ -62,7 +62,6 @@
 | `curuser-settings.json` | 설정 | '현재 사용자' 수집 설정(v2.520). | ✅ | ✅ | ✅ | curuser/settings.js |
 | `curuser.db` | DB | '현재 사용자' 전용 시계열 DB(v2.520). |  |  | ✅ | curuser/db.js |
 | `cvp-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | cvp/poller.js |
-| `cvp-push.json` | 설정 | 엣지 → 중앙 CloudVision(CVP) 수집 결과 push(v2.608). | ✅ |  | ✅ | cvp/push.js |
 | `cvp-servers.json` | 설정 | Arista CloudVision(CVP) 서버 등록부(v2.608). | ✅ | ✅ | ✅ | cvp/registry.js |
 | `cvp-settings.json` | 설정 | CloudVision(CVP) 수집 설정(v2.608). 파일: CONFIG_DIR/cvp-settings.json(비밀 없음). | ✅ | ✅ | ✅ | cvp/settings.js |
 | `cvp.db` | DB | CloudVision(CVP) 수집 전용 DB(v2.608, 사용자 요청 "데이터 용량이 많으니까 별도의 DB 로"). |  |  | ✅ | cvp/db.js |

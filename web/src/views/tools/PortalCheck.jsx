@@ -22,6 +22,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import { useHashTab } from '../../hooks/useHashTab.js'; // v2.613 CATALOG2613-06: 서브메뉴를 URL 에 싣는다
+import { agoText as ago } from './relTime.js'; // v2.613 DEPS2613-11: 상대시각 코어 하나(로컬 사본 삭제)
 import { Loading, ErrorBox, SearchBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -47,16 +48,6 @@ function Badge({ text, tone }) {
   return <span style={{ color: TONE[tone] || TONE.gray, fontWeight: 600, whiteSpace: 'nowrap' }}>{text}</span>;
 }
 
-const ago = (ts) => {
-  if (ts == null || ts === '') return '—';
-  const n = Number(ts);
-  if (!Number.isFinite(n) || n <= 0) return '—';
-  const s = Math.max(0, Math.round((Date.now() - n) / 1000));
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.round(s / 60)}분 전`;
-  if (s < 86400) return `${Math.round(s / 3600)}시간 전`;
-  return `${Math.round(s / 86400)}일 전`;
-};
 
 /** 토큰 점검 서브메뉴 — 기존 컴포넌트(v2.560), 자기 데이터·상태를 갖는다. */
 function TokenCheckView() {

@@ -114,7 +114,7 @@ export default function App() {
     (async () => {
       const cfg = await fetchAuthConfig();
       setAuthCfg(cfg);
-      if (!cfg.authEnabled) return setUser({ name: 'Anonymous', role: 'admin' });
+      if (!cfg.authEnabled) return setUser({ name: 'Anonymous', role: 'admin', serviceHubUrl: cfg.serviceHubUrl || '' }); // v2.613 WEB2613-01: 화면이 /auth/me 를 다시 부르지 않으므로 허브 주소도 여기서
       if (!getToken()) return setUser(null);
       const me = await fetchMe();
       setUser(me || null);

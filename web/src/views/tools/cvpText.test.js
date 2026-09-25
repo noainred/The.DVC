@@ -275,7 +275,7 @@ describe('v2.612 감사 그룹 B', () => {
 });
 
 describe('v2.613 CONTRACT2613-04 — 위임 CVP 의 보고 없음은 kind 별로 말한다(구버전은 기다려도 안 된다)', () => {
-  const readSrc = (p) => require('node:fs').readFileSync(require('node:path').join(__dirname, p), 'utf8');
+  const readSrc = (p) => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), p), 'utf8');
   it('서버 CVP_EDGE_KINDS 와 웹 문구 키가 1:1', () => {
     const src = readSrc('../../../../server/src/central/cvpEdge.js');
     const m = src.match(/export const CVP_EDGE_KINDS = Object\.freeze\(\[([^\]]*)\]\)/);
