@@ -14,8 +14,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as F from './storageFaultText.js';
 import {
-  hasNodeFault, deviceFaultKind, faultRows, faultKpi, faultKpiMeta, faultKpiAccent, faultKpiTitle, faultViewNote, faultNodeRows,
+  hasNodeFault, deviceFaultKind, deviceFaultJudge, faultRows, faultKpi, faultKpiMeta, faultKpiAccent, faultKpiTitle, faultViewNote, faultNodeRows,
+  faultJudgeOpts, staleLimitMs, snapAgeMs, isStaleSnap, unknownReasonText, STALE_FACTOR, UNKNOWN_REASON_TEXT,
 } from './storageFaultText.js';
+import { nodeRows, nodeFaultSummary, faultBadgeTitle } from './storageNodeText.js';
+import { stripComments } from '../../test/_stripComments.js'; // v2.615 SF2-06 — 공용 주석 제거기
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,6 +45,27 @@ const FIXTURE = [
   row('j', { ok: true, nodes: { count: 0, unhealthy: 0, list: [] }, sections: {} }, { type: 'vmax' }),
 ];
 
+/*
+ * ── v2.615 검토 반영 표본 ────────────────────────────────────────────────────────
+ * ⚠ 기준 시각을 Date.now() 로 두지 않는다(CLAUDE.md v2.517 — 시각에 따라 깨진다). 고정 NOW 와 서버가 줄 법한 주기.
+ */
+const NOW = 1_800_000_000_000;
+const HOUR = 3_600_000;
+const OPTS = faultJudgeOpts({
+  poller: { intervalMs: HOUR },                          // 중앙 직접 수집 주기
+  pollMsByAgent: { '': HOUR, GM1: 6 * HOUR },             // 엣지 GM1 은 6시간 주기로 배포됨
+  edgeIntervals: { push: { ms: 5 * 60_000 } },
+}, NOW);
+const fresh = (snap, ageMs = 10 * 60_000) => ({ ...snap, collectedAt: NOW - ageMs });
+const REVIEW_ROWS = [
+  row('r-ok', fresh(snapOf(okNodes(4)))),
+  row('r-off', fresh(snapOf(okNodes(4))), { enabled: false }),                       // 비활성 — 정상 아님
+  row('r-old', fresh(snapOf(okNodes(4)), 30 * 24 * HOUR)),                         // 30일 전 — 낡음
+  row('r-oldfault', fresh(snapOf([{ id: 1, health: 'DOWN' }, ...okNodes(3)], { unhealthy: 1 }), 30 * 24 * HOUR)),
+  row('r-cand', fresh(snapOf([{ id: 1, name: 'n1', ip: '10.9.0.1', health: 'n/a' }, ...okNodes(3)], { unhealthy: 1 }))),
+  row('r-66', fresh(snapOf(okNodes(66).slice(0, 64), { count: 66, unknown: 2 }))), // 목록 밖 2대 상태 미확인
+];
+
 describe('판정 = 노드 ⚠ 표지와 같은 조건', () => {
   it('★ 표지 조건(hasNodeFault)을 만족하는 행 수 == KPI 장애 수 == faultRows 길이', () => {
     const badge = FIXTURE.filter((r) => hasNodeFault(r.snap)).length;
@@ -54,9 +78,12 @@ describe('판정 = 노드 ⚠ 표지와 같은 조건', () => {
     const k = faultKpi(FIXTURE);
     expect(k.total).toBe(FIXTURE.length);
     expect(k.fault + k.ok + k.unknown).toBe(k.total);
-    expect(k).toEqual({ total: 10, fault: 3, ok: 2, unknown: 5 });
-    expect(faultKpi([])).toEqual({ total: 0, fault: 0, ok: 0, unknown: 0 });
-    expect(faultKpi(null)).toEqual({ total: 0, fault: 0, ok: 0, unknown: 0 });
+    expect(k).toMatchObject({ total: 10, fault: 3, ok: 2, unknown: 5, faultNotCurrent: 0 });
+    // 판정 불가 사유별 대수의 합 == 판정 불가(두 번째 항등식)
+    expect(Object.values(k.unknownBy).reduce((a, b) => a + b, 0)).toBe(k.unknown);
+    expect(k.unknownBy).toEqual({ 'node-unknown': 1, 'no-nodes': 2, 'collect-failed': 1, 'no-snap': 1 });
+    expect(faultKpi([])).toEqual({ total: 0, fault: 0, ok: 0, unknown: 0, unknownBy: {}, faultNotCurrent: 0 });
+    expect(faultKpi(null)).toEqual({ total: 0, fault: 0, ok: 0, unknown: 0, unknownBy: {}, faultNotCurrent: 0 });
   });
   it('문자열 수치 "2" 는 장애, 빈 값·null·"0"·음수는 장애가 아니다', () => {
     expect(hasNodeFault({ nodes: { unhealthy: '2' } })).toBe(true);
@@ -198,6 +225,178 @@ describe('비정상 노드 행 — 노드 이름을 지어내지 않는다', () 
   });
 });
 
+describe('★ SF-R1-01 — 비활성·낡은 보고는 정상으로 세지 않는다(장애 칸은 ⚠ 표지 그대로)', () => {
+  it('신선도 입력은 서버 값에서 만든다 — 담당 노드 주기 우선, 없으면 중앙 주기, 엣지는 push 주기를 더한다', () => {
+    expect(STALE_FACTOR).toBe(3);
+    expect(staleLimitMs(row('c', null), OPTS)).toBe(3 * HOUR);
+    expect(staleLimitMs(row('e', null, { agent: 'GM1' }), OPTS)).toBe(18 * HOUR + 5 * 60_000);
+    expect(staleLimitMs(row('e', null, { agent: 'NOCONF' }), OPTS)).toBe(3 * HOUR + 5 * 60_000); // 배포 주기 모름 → 중앙 주기
+    expect(staleLimitMs(row('x', null), faultJudgeOpts({}, NOW))).toBeNull();                   // 주기를 모르면 지어내지 않는다
+    expect(staleLimitMs(row('x', null, { agent: '__proto__' }), OPTS)).toBe(3 * HOUR + 5 * 60_000);
+  });
+  it('스냅샷 나이 — 수집 시각과 엣지 보고 나이(staleMs) 중 큰 값, ISO·숫자 문자열도 읽는다', () => {
+    expect(snapAgeMs({ collectedAt: NOW - 5000 }, NOW)).toBe(5000);
+    expect(snapAgeMs({ collectedAt: String(NOW - 7000) }, NOW)).toBe(7000);
+    expect(snapAgeMs({ collectedAt: new Date(NOW - 9000).toISOString() }, NOW)).toBe(9000);
+    expect(snapAgeMs({ collectedAt: NOW - 5000, staleMs: 4 * HOUR }, NOW)).toBe(4 * HOUR);
+    for (const v of [null, '', undefined, 'abc']) expect(snapAgeMs({ collectedAt: v }, NOW)).toBeNull();
+  });
+  it('now 가 없으면 낡음을 판정하지 않고, 수집 시각이 없으면 낡은 것으로 본다(지금 정상이라 말하지 않는다)', () => {
+    const r = row('x', { ...snapOf(okNodes(3)), collectedAt: NOW - 30 * 24 * HOUR });
+    expect(isStaleSnap(r, undefined)).toBe(false);
+    expect(isStaleSnap(r, OPTS)).toBe(true);
+    expect(isStaleSnap(row('y', snapOf(okNodes(3))), OPTS)).toBe(true);        // collectedAt 없음
+    expect(isStaleSnap(row('z', fresh(snapOf(okNodes(3)))), OPTS)).toBe(false);
+  });
+  it('★ 비활성 장비(노드 전부 정상·신선) → 판정 불가(disabled)', () => {
+    expect(deviceFaultJudge(REVIEW_ROWS[1], OPTS)).toMatchObject({ kind: 'unknown', reason: 'disabled' });
+    expect(deviceFaultKind(REVIEW_ROWS[1])).toBe('unknown');                   // opts 없이도 비활성은 판정 불가
+  });
+  it('★ 30일 전 스냅샷(노드 전부 정상) → 판정 불가(stale) · 장비 1대뿐이면 KPI 가 초록이 아니다', () => {
+    expect(deviceFaultJudge(REVIEW_ROWS[2], OPTS)).toMatchObject({ kind: 'unknown', reason: 'stale' });
+    const k = faultKpi([REVIEW_ROWS[2]], OPTS);
+    expect(k).toMatchObject({ total: 1, fault: 0, ok: 0, unknown: 1 });
+    expect(faultKpiAccent(k)).toBeUndefined();
+    expect(faultKpiMeta(k)).not.toContain('모두 노드 정상');
+    // 같은 행이 최근 수집이면 정상 → 초록
+    const k2 = faultKpi([REVIEW_ROWS[0]], OPTS);
+    expect(k2).toMatchObject({ ok: 1, unknown: 0 });
+    expect(faultKpiAccent(k2)).toBe('var(--green)');
+  });
+  it('엣지 6시간 주기 장비는 10시간 전 수집이어도 낡지 않았다(담당 노드 주기를 쓴다)', () => {
+    const r = row('g', fresh(snapOf(okNodes(3)), 10 * HOUR), { agent: 'GM1' });
+    expect(deviceFaultKind(r, OPTS)).toBe('ok');
+    expect(deviceFaultKind(row('c', fresh(snapOf(okNodes(3)), 10 * HOUR)), OPTS)).toBe('unknown'); // 중앙 1시간 주기
+  });
+  it('★ 장애 칸은 ⚠ 표지 계약 그대로 — 낡거나 비활성인 장애도 장애이고, faultNotCurrent 로 따로 센다', () => {
+    const j = deviceFaultJudge(REVIEW_ROWS[3], OPTS);
+    expect(j).toMatchObject({ kind: 'fault', notCurrent: true });
+    const off = row('off-f', fresh(snapOf([{ id: 1, health: 'DOWN' }], { unhealthy: 1 })), { enabled: false });
+    expect(deviceFaultJudge(off, OPTS)).toMatchObject({ kind: 'fault', notCurrent: true });
+    const k = faultKpi(REVIEW_ROWS, OPTS);
+    expect(k.fault).toBe(REVIEW_ROWS.filter((r) => hasNodeFault(r.snap)).length);   // == 표지 대수
+    expect(k.faultNotCurrent).toBe(1);
+    expect(k.fault + k.ok + k.unknown).toBe(k.total);
+  });
+  it('문구 — title·머리말이 비활성·낡은 보고를 판정 불가로 밝히고, 낡은 장애를 따로 말한다', () => {
+    const k = faultKpi(REVIEW_ROWS, OPTS);
+    const t = faultKpiTitle(k);
+    expect(t).toContain('비활성 장비 1');
+    expect(t).toContain('보고가 낡은 장비 1');
+    expect(t).toContain('비활성·낡은 보고는 판정 불가');
+    expect(t).toContain('1대는 비활성이거나 보고가 낡은 장비');
+    const n = faultViewNote(k, k.fault);
+    expect(n).toContain('비활성이거나 보고가 낡은 장비');
+    expect(n).toContain('보고가 낡은 장비 1');
+  });
+});
+
+describe('★ SF-R1-02 — 서버가 준 전 노드 기준 상태 미확인 수(nodes.unknown)', () => {
+  it('목록 64대 전부 정상이어도 nodes.unknown 2 면 판정 불가(node-unknown)', () => {
+    expect(deviceFaultJudge(REVIEW_ROWS[5], OPTS)).toMatchObject({ kind: 'unknown', reason: 'node-unknown' });
+  });
+  it('nodes.unknown 0 이면 정상(목록 절단만으로 판정 불가가 되지 않는다) · 문자열 수치도 읽는다', () => {
+    expect(deviceFaultKind(row('a', fresh(snapOf(okNodes(66).slice(0, 64), { count: 66, unknown: 0 }))), OPTS)).toBe('ok');
+    expect(deviceFaultKind(row('a', fresh(snapOf(okNodes(66).slice(0, 64), { count: 66, unknown: '1' }))), OPTS)).toBe('unknown');
+  });
+  it('구버전 수집기(필드 없음)는 예전 규칙(정상)이되 표지 title 이 목록 밖 대수와 그 한계를 밝힌다', () => {
+    const legacy = snapOf(okNodes(66).slice(0, 64), { count: 66 });
+    expect(deviceFaultKind(row('l', legacy))).toBe('ok');
+    const t = faultBadgeTitle(legacy);
+    expect(t).toContain('목록 밖 2대는 요약 수치(비정상 0대) 기준');
+    expect(t).toContain('알려 주지 않습니다');
+    const t2 = faultBadgeTitle(snapOf(okNodes(66).slice(0, 64), { count: 66, unknown: 0 }));
+    expect(t2).toContain('목록 밖 2대');
+    expect(t2).not.toContain('알려 주지 않습니다');
+    expect(faultBadgeTitle(snapOf(okNodes(4)))).not.toContain('목록 밖');   // 절단 없으면 군말 없음
+  });
+});
+
+describe('★ SF-R1-03 — 노드 목록의 비객체 원소가 화면을 죽이지 않는다', () => {
+  const bad = { ok: true, collectedAt: NOW, nodes: { count: 2, unhealthy: 0, list: [null, { health: 'ok' }] } };
+  const badFault = { ok: true, collectedAt: NOW, nodes: { count: 3, unhealthy: 1, list: [null, 'x', { id: 2, health: 'DOWN' }] } };
+  it('nodeRows 는 객체만 읽고, 요약이 뺀 개수를 밝힌다', () => {
+    expect(nodeRows(bad)).toHaveLength(1);
+    const sum = nodeFaultSummary(badFault);
+    expect(sum.dropped).toBe(2);
+    expect(sum.body).toContain('형식이 올바르지 않은 노드 항목 2개');
+  });
+  it('판정·KPI·장애 노드 행·표지 title 이 던지지 않는다 — 읽을 수 없는 원소가 있으면 정상이라 말하지 않는다', () => {
+    expect(deviceFaultJudge(row('b', bad), OPTS)).toMatchObject({ kind: 'unknown', reason: 'node-unknown' });
+    expect(() => faultKpi([row('b', bad), row('bf', badFault)], OPTS)).not.toThrow();
+    expect(faultNodeRows([row('bf', badFault)], OPTS).filter((x) => x.kind === 'bad')).toHaveLength(1);
+    expect(() => faultBadgeTitle(bad)).not.toThrow();
+  });
+});
+
+describe('★ SF-R1-04 · SF2-01 — 어긋남의 사유를 사실대로 말한다(수집 시점 차이 아님)', () => {
+  it('목록이 다 올라왔고 상태 미확인 노드가 있으면 그 사실을 말하고, 그 노드들을 원문과 함께 후보로 싣는다', () => {
+    const rows = faultNodeRows([REVIEW_ROWS[4]], OPTS);
+    const u = rows.find((x) => x.kind === 'unidentified');
+    expect(u.reason).toContain('상태를 읽지 못한 노드 1대');
+    expect(u.reason).not.toContain('수집 시점');
+    const c = rows.filter((x) => x.kind === 'candidate');
+    expect(c).toHaveLength(1);
+    expect(c[0]).toMatchObject({ label: 'n1', ip: '10.9.0.1', health: 'n/a', count: 1 });
+  });
+  it('SF2-01: 목록 전부가 상태 미확인이고 unhealthy>0 이어도 사유는 상태 미확인이다(PowerStore 모양)', () => {
+    const s = snapOf([{ id: 1, health: 'unknown' }, { id: 2, health: 'unknown' }, { id: 3, health: 'unknown' }, { id: 4, health: 'unknown' }], { unhealthy: 2 });
+    const u = faultNodeRows([row('ps', s)]).find((x) => x.kind === 'unidentified');
+    expect(u.count).toBe(2);
+    expect(u.reason).toContain('상태를 읽지 못한 노드 4대');
+  });
+  it('상태 미확인도 없는 어긋남은 판정 규칙 차이라고 말한다', () => {
+    const s = snapOf([{ id: 1, health: 'DOWN' }, ...okNodes(3)], { unhealthy: 2 });
+    const u = faultNodeRows([row('m', s)]).find((x) => x.kind === 'unidentified');
+    expect(u.reason).toContain('판정 규칙');
+    expect(faultNodeRows([row('m', s)]).some((x) => x.kind === 'candidate')).toBe(false);
+  });
+  it("모든 문구에 '수집 시점 차이' 가 없다(원인이 아니다) — 노드 팝업 요약 포함", () => {
+    const cases = [
+      snapOf([{ id: 1, health: 'DOWN' }, ...okNodes(3)], { unhealthy: 2 }),
+      snapOf([{ id: 1, health: 'n/a' }, ...okNodes(3)], { unhealthy: 1 }),
+      snapOf([...okNodes(60), { id: 61, health: 'DOWN' }, ...okNodes(3)], { count: 66, unhealthy: 3 }),
+    ];
+    for (const s of cases) {
+      expect(nodeFaultSummary(s).body).not.toContain('수집 시점');
+      for (const x of faultNodeRows([row('q', s)])) expect(x.reason).not.toContain('수집 시점');
+    }
+    expect(nodeFaultSummary(cases[1]).body).toContain('후보');
+  });
+});
+
+describe('★ SF-R1-05 · SF2-03 — title 이 실제 판정 불가 사유와 두 카드의 겹침, 타입별 열 이름을 말한다', () => {
+  it('있는 사유만 개수와 함께 나열한다', () => {
+    const k = faultKpi(FIXTURE);
+    const t = faultKpiTitle(k);
+    expect(t).toContain('일부 노드의 상태를 읽지 못한 장비 1');
+    expect(t).toContain('수집 실패(부분 실패 포함) 1');
+    expect(t).toContain('수집 전 1');
+    expect(t).not.toContain('노드 목록과 요약이 어긋난 장비');                 // 없는 사유는 말하지 않는다
+    const mism = faultKpi([row('mm', snapOf([{ id: 1, health: 'DOWN' }, ...okNodes(2)], { unhealthy: 0 }))]);
+    expect(faultKpiTitle(mism)).toContain('노드 목록과 요약이 어긋난 장비 1');
+    expect(unknownReasonText({})).toBe('');
+  });
+  it('수집 실패 카드와 겹칠 수 있다는 사실을 밝힌다', () => {
+    expect(faultKpiTitle(faultKpi(FIXTURE))).toContain('부분 실패여도 노드를 읽었고 비정상이 있으면 장애로도 셉니다');
+  });
+  it('근거 문구가 타입별 열 이름(SP·SC·디렉터)을 함께 적는다', () => {
+    expect(faultKpiTitle(faultKpi(FIXTURE))).toContain('노드(SP·SC·디렉터) 열');
+    expect(faultViewNote(faultKpi(FIXTURE), 3)).toContain('노드(SP·SC·디렉터) 열');
+  });
+});
+
+describe('변이 고정 — M3 · X8', () => {
+  it('★ M3: 수집 실패(ok:false) 스냅샷은 노드를 전부 정상으로 읽었어도 정상이 아니다', () => {
+    const s = { ok: false, collectedAt: NOW, nodes: { count: 3, unhealthy: 0, list: okNodes(3) }, sections: { nodes: 'ok', config: '오류', capacity: '오류' } };
+    expect(deviceFaultKind({ id: 'x', snap: s })).toBe('unknown');
+    expect(deviceFaultJudge({ id: 'x', snap: s }, OPTS).reason).toBe('collect-failed');
+  });
+  it('★ X8: 노드 수가 0·음수인데 목록이 전부 정상인 어긋난 데이터는 정상이 아니다', () => {
+    for (const count of [0, -1]) expect(deviceFaultKind({ id: 'x', snap: { ok: true, collectedAt: NOW, nodes: { count, unhealthy: 0, list: okNodes(3) } } })).toBe('unknown');
+  });
+});
+
 describe('문구에 백틱이 없다(BoldText 는 **강조** 만 해석한다)', () => {
   it('★ 내보낸 문구 함수 결과 전부', () => {
     const ks = [
@@ -210,50 +409,77 @@ describe('문구에 백틱이 없다(BoldText 는 **강조** 만 해석한다)',
     const s = snapOf([...okNodes(60), { id: 61, health: 'DOWN' }, ...okNodes(3)], { count: 66, unhealthy: 3 });
     for (const x of faultNodeRows([row('big', s), row('mis', snapOf([{ id: 1, health: 'DOWN' }], { unhealthy: 2 }))])) texts.push(x.label, x.reason);
     for (const t of texts) expect(String(t)).not.toContain('`');
+    // 검토 반영 경로(판정 불가 사유·낡은 보고·후보 노드)의 문구도 전부 본다.
+    const kpis = [faultKpi(FIXTURE), faultKpi(REVIEW_ROWS, OPTS)];
+    for (const k of kpis) texts.push(faultKpiMeta(k), faultKpiTitle(k), faultViewNote(k, 0), faultViewNote(k, k.fault), unknownReasonText(k));
+    for (const x of faultNodeRows(REVIEW_ROWS, OPTS)) texts.push(x.label, x.reason);
+    texts.push(...Object.values(UNKNOWN_REASON_TEXT));
+    for (const t of texts) expect(String(t)).not.toContain('`');
     expect(Object.keys(F).sort()).toEqual([
-      'deviceFaultKind', 'faultKpi', 'faultKpiAccent', 'faultKpiMeta', 'faultKpiTitle', 'faultNodeRows', 'faultRows', 'faultViewNote', 'hasNodeFault',
+      'STALE_FACTOR', 'UNKNOWN_REASON_TEXT', 'deviceFaultJudge', 'deviceFaultKind', 'faultJudgeOpts', 'faultKpi', 'faultKpiAccent', 'faultKpiMeta',
+      'faultKpiTitle', 'faultNodeRows', 'faultRows', 'faultViewNote', 'hasNodeFault', 'isStaleSnap', 'snapAgeMs', 'staleLimitMs', 'unknownReasonText',
     ]);
   });
 });
 
+
 /**
- * 주석만 지우고 **개행은 보존**한다(audit2613b·uiText 와 같은 상태 기계 — 줄 번호가 밀리지 않게, v2.574 규약).
- * ⚠ 문자열 안의 // 는 구분하지 않는다 — 대상 파일(StorageMonTool.jsx·storageFaultText.js)에는 그런 문자열이 없다.
- * (JSX 텍스트의 홑따옴표 때문에 따옴표 추적을 넣으면 오히려 동기가 깨진다.)
+ * ⚠ 표지 조건(unhealthy)을 **표시용 보간 밖에서** 쓰는 곳(SF2-05). 허용은 `{s.nodes.unhealthy}`·`${s.nodes.unhealthy}`
+ * (선택 `?? 0` 같은 표시 기본값 포함)뿐이다 — 비교·조건·산술로 쓰면 판정을 복제한 것이다(hasNodeFault 밖의 중복 판정 금지).
  */
-function stripComments(s) {
-  let out = ''; let i = 0;
-  const N = s.length;
-  while (i < N) {
-    const c = s[i]; const d = s[i + 1];
-    if (c === '/' && d === '*') { const e = s.indexOf('*/', i + 2); const seg = s.slice(i, e < 0 ? N : e + 2); out += seg.replace(/[^\n]/g, ''); i = e < 0 ? N : e + 2; continue; }
-    if (c === '/' && d === '/') { const e = s.indexOf('\n', i); const seg = s.slice(i, e < 0 ? N : e); out += seg.replace(/[^\n]/g, ''); i = e < 0 ? N : e; continue; }
-    out += c; i += 1;
-  }
-  return out;
+const ALLOWED_UNHEALTHY = /\$?\{\s*s\??\.nodes\??\.unhealthy(?:\s*\?\?\s*(?:\d+|'[^'\n]*'|"[^"\n]*"))?\s*\}/g;
+function unhealthyViolations(src) {
+  const spans = [...src.matchAll(ALLOWED_UNHEALTHY)].map((m) => [m.index, m.index + m[0].length]);
+  return [...src.matchAll(/\bunhealthy\b/g)].map((m) => m.index).filter((i) => !spans.some(([a, b]) => i >= a && i < b));
 }
 
 describe('★ 화면 소스 스윕 — StorageMonTool.jsx 가 이 모듈을 실제로 쓴다', () => {
   const src = stripComments(fs.readFileSync(path.join(HERE, 'StorageMonTool.jsx'), 'utf8'));
-  it('⚠ 표지는 hasNodeFault( 를 조건으로 쓰고, 인라인 s?.nodes?.unhealthy ? 조건이 남아 있지 않다', () => {
+  it('⚠ 표지는 hasNodeFault( 를 조건으로 쓰고, 표시값은 s.nodes.unhealthy 그대로다(X11)', () => {
     expect(src).toMatch(/\{hasNodeFault\(s\)\s*\?\s*<button[^>]*className="badge red fail-badge"/);
-    expect(src).not.toMatch(/s\?\.nodes\?\.unhealthy\s*\?(?!\.)/);
+    expect(src).toMatch(/className="badge red fail-badge"[^\n]*>⚠\{s\.nodes\.unhealthy\}<\/button>/);
   });
-  it('KPI 에 "미해결 경보" 가 없고 "장애 장비" 가 faults 화면을 연다', () => {
+  it('★ SF2-05: unhealthy 를 표시용 보간 밖에서(비교·조건·산술) 쓰는 곳이 0건이다', () => {
+    const v = unhealthyViolations(src);
+    expect(v.map((i) => src.slice(Math.max(0, i - 40), i + 30))).toEqual([]);
+  });
+  it('KPI 에 "미해결 경보" 가 없고 "장애 장비" 카드의 값은 fk.fault, 누르면 faults 화면을 연다(X1)', () => {
     expect(src).not.toMatch(/label="미해결 경보"/);
+    expect(src).toMatch(/<Kpi label="장애 장비" value=\{fk\.fault\}/);
     expect(src).toMatch(/<Kpi label="장애 장비"[\s\S]{0,200}onClick=\{\(\) => setView\('faults'\)\}/);
   });
-  it("useHashTab valid 목록에 'faults' 가 있다", () => {
+  it('KPI 는 전체 장비(rows)를 신선도 입력(fjo)과 함께 판정한다(X4 · SF-R1-01)', () => {
+    expect(src).toMatch(/const fjo = faultJudgeOpts\(d, Date\.now\(\)\);/);
+    expect(src).toMatch(/const fk = faultKpi\(rows, fjo\);/);
+  });
+  it("useHashTab valid 목록에 'faults' 가 있고 탭 버튼 숫자는 KPI 와 같은 fk.fault 다(X2)", () => {
     const m = src.match(/useHashTab\(\{[^}]*valid:\s*\[([^\]]*)\]/);
     expect(m).toBeTruthy();
     expect(m[1]).toMatch(/'faults'/);
+    expect(src).toMatch(/`⚠ 장애 장비 \$\{fk\.fault\}`/);
   });
-  it('장애 화면 목록은 필터를 적용한 목록(shown)에서 faultRows 로 만든다', () => {
-    expect(src).toMatch(/faultRows\(shown\)/);
+  it('★ 장애 화면이 실제로 렌더되고, 목록은 필터를 적용한 shown 에서 만든 shownFaults 다(X12 · X3)', () => {
+    expect(src).toMatch(/const shownFaults = view === 'faults' \? faultRows\(shown, fjo\) : \[\];/);
+    expect(src).toMatch(/\{view === 'faults' && \(\s*<FaultsView fk=\{fk\} list=\{shownFaults\}/);
+    // 필터 바는 장애 화면에서도 보인다(추이만 감춘다)
+    expect(src).toMatch(/\{view !== 'trend' && rows\.length > 0 && \(\s*<DeviceFacetBar/);
+  });
+  it('비정상 노드 표는 장애 목록에서 만든다(X5) · 장비 버튼 title 에 전체 이름(SF2-04)', () => {
+    expect(src).toMatch(/const nodeList = faultNodeRows\(list\);/);
+    expect(src).toMatch(/title=\{`\$\{x\.deviceName\} — 이 장비의 노드 상태 보기`\}/);
+  });
+  it('SF2-02: 장애 화면에서 필터·검색 요약 줄이 같은 모집단의 장애 대수를 함께 말한다', () => {
+    expect(src).toMatch(/\{view === 'faults' && <> · 이 중 장애 <b[^>]*>\{shownFaults\.length\}<\/b>대<\/>\}/);
+    expect(src).toMatch(/\{view === 'faults' \? ` · 이 중 장애 \$\{shownFaults\.length\}대` : ''\}/);
   });
   it('스윕 자체가 동작한다(변이 검증 — 주석 속 설명이 통과 근거가 되지 않는다)', () => {
     expect(stripComments("const k = 1; // hasNodeFault(s) ? <b/>\n/* label=\"미해결 경보\" */x")).toBe('const k = 1; \nx');
-    expect(/s\?\.nodes\?\.unhealthy\s*\?(?!\.)/.test('{s?.nodes?.unhealthy\n ? <b/> : null}')).toBe(true);
-    expect(/s\?\.nodes\?\.unhealthy\s*\?(?!\.)/.test('s?.nodes?.unhealthy?.x')).toBe(false);
+    // 허용: 표시용 보간
+    expect(unhealthyViolations('<b>⚠{s.nodes.unhealthy}</b> `${s.nodes.unhealthy}대` {s?.nodes?.unhealthy ?? 0}')).toEqual([]);
+    // 거부: 조건·비교·산술(판정 복제)
+    for (const bad of [
+      '{s?.nodes?.unhealthy ? <b/> : null}', '{s?.nodes?.unhealthy\n ? <b/> : null}', 'Number(s?.nodes?.unhealthy) > 0 ? a : b',
+      's.nodes.unhealthy > 0 && x', 'const n = r.snap.nodes.unhealthy;', "{x.nodes['unhealthy'] ? 1 : 0}",
+    ]) expect(unhealthyViolations(bad).length, bad).toBeGreaterThan(0);
   });
 });

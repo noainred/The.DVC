@@ -14,6 +14,7 @@
  *   401 은 즉시 중단(장비 계정 잠금 예방 — isilon/powerstore 와 동일 규칙). 조회(GET) 전용.
  */
 import { emptySnapshot } from '../types.js';
+import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
 import { makeGetter, tryAny } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
 
@@ -82,7 +83,9 @@ export function normalizeXtremio(device, raw) {
     const hOf = (c) => String(c['health-state'] || c['node-health-state'] || 'unknown').toLowerCase();
     snap.nodes = {
       count: raw.controllers.length,
-      unhealthy: raw.controllers.filter((c) => { const h = hOf(c); return h !== 'healthy' && h !== 'unknown'; }).length,
+      // v2.615(SF-R1-04): 'healthy'·'unknown' 외 전부를 비정상으로 세면 'n/a'·'ok' 가 비정상이 되어 화면 판정과 어긋났다.
+      unhealthy: raw.controllers.filter((c) => healthWord(hOf(c)) === 'bad').length,
+      unknown: raw.controllers.filter((c) => healthWord(hOf(c)) === 'unknown').length, // SF-R1-02 — 전 컨트롤러 기준
       list: raw.controllers.slice(0, 64).map((c, i) => ({
         id: i + 1, ip: c['mgmt-addr'] || '', health: hOf(c) === 'healthy' ? 'ok' : hOf(c),
         inBps: null, outBps: null, hdd: null, ssd: null, l3Bytes: 0, name: c.name || '',

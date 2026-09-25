@@ -82,7 +82,7 @@ export function normalizePowerstore(device, raw) {
     snap.extra.appliances = raw.appliances.slice(0, 8).map((a) => ({ name: a.name, model: a.model, serviceTag: a.service_tag }));
   }
   if (Array.isArray(raw.nodes)) {
-    snap.nodes = { count: raw.nodes.length, unhealthy: 0, list: raw.nodes.slice(0, 64).map((n, i) => ({ id: i + 1, ip: '', health: 'unknown', inBps: null, outBps: null, hdd: null, ssd: null, l3Bytes: 0, name: n.slot != null ? `slot ${n.slot}` : (n.id || '') })) };
+    snap.nodes = { count: raw.nodes.length, unhealthy: 0, unknown: raw.nodes.length /* v2.615 SF-R1-02 — 상태를 주지 않는다 */, list: raw.nodes.slice(0, 64).map((n, i) => ({ id: i + 1, ip: '', health: 'unknown', inBps: null, outBps: null, hdd: null, ssd: null, l3Bytes: 0, name: n.slot != null ? `slot ${n.slot}` : (n.id || '') })) };
     snap.sections.nodes = 'ok';
   }
   if (Array.isArray(raw.users)) {

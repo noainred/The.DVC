@@ -43,8 +43,16 @@ export const DISPLAY_KEYS = Object.freeze([
 export const NUMERIC_PATHS = Object.freeze([
   ['capacity', 'totalBytes', 'usedBytes', 'freeBytes', 'pct'],
   ['ports', 'total', 'licensed', 'online', 'free', 'usedPct'],
-  ['nodes', 'count', 'unhealthy'],
+  ['nodes', 'count', 'unhealthy', 'unknown'],
 ]);
+/**
+ * 스토리지 노드 목록 원소의 **아는 필드**(v2.615 SF-R1-03). 글자 필드는 글자로, 숫자 필드는 `numOrNull`,
+ * 미디어(hdd·ssd)는 객체이거나 null. 그 밖의 키는 담지 않는다(v2.598 CENTRAL '아는 필드만' 규약).
+ */
+export const NODE_STR_KEYS = Object.freeze(['id', 'name', 'ip', 'health', 'ext', 'model', 'lnn']);
+export const NODE_NUM_KEYS = Object.freeze(['inBps', 'outBps', 'totalBps', 'l3Bytes']);
+export const NODE_MEDIA_KEYS = Object.freeze(['hdd', 'ssd']);
+export const NODE_LIST_MAX = 64;
 const STR_MAX = 512;
 
 export const isPlainObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -83,6 +91,46 @@ function numericPaths(o) {
 }
 
 /**
+ * 스토리지 스냅샷의 `nodes.list` 를 좁힌다(v2.615 SF-R1-03 — 순수, `o` 를 제자리에서 고친다).
+ * 예전에는 count·unhealthy 만 숫자로 바꾸고 목록은 그대로 저장해, null 원소 하나가 화면의 노드 판정(nodeRows)에서
+ * TypeError 를 던져 **스토리지 모니터링 화면 전체**를 죽일 수 있었다. 객체 원소만·아는 필드만·상한 64 이고,
+ * 뺀 원소 수는 `nodes.listDropped` 로 밝힌다(조용한 상한 금지). 바꾼 필드 수를 돌려준다.
+ */
+export function sanitizeNodeList(o) {
+  const nodes = o?.nodes;
+  if (!isPlainObj(nodes) || !Object.hasOwn(nodes, 'list')) return 0;
+  const raw = nodes.list;
+  if (!Array.isArray(raw)) { o.nodes = { ...nodes, list: [], listDropped: raw == null ? 0 : 1 }; return 1; }
+  let coerced = 0; let dropped = 0;
+  const list = [];
+  for (const n of raw) {
+    if (!isPlainObj(n)) { dropped += 1; continue; }
+    if (list.length >= NODE_LIST_MAX) { dropped += 1; continue; }
+    const m = {};
+    for (const k of NODE_STR_KEYS) {
+      if (!Object.hasOwn(n, k)) continue;
+      const v = n[k];
+      if (v == null) m[k] = v;
+      else if (typeof v === 'string') m[k] = v.length > 256 ? capStr(v, 256) : v;
+      else if (typeof v === 'number' && Number.isFinite(v)) m[k] = v;
+      else { m[k] = null; coerced += 1; }
+    }
+    for (const k of NODE_NUM_KEYS) if (Object.hasOwn(n, k)) m[k] = n[k] == null ? null : numOrNull(n[k]);
+    for (const k of NODE_MEDIA_KEYS) {
+      if (!Object.hasOwn(n, k)) continue;
+      const v = n[k];
+      if (v == null) { m[k] = null; continue; }
+      if (!isPlainObj(v)) { m[k] = null; coerced += 1; continue; }
+      m[k] = { totalBytes: numOrNull(v.totalBytes), usedBytes: numOrNull(v.usedBytes), pct: numOrNull(v.pct) };
+    }
+    list.push(m);
+  }
+  const prev = numOrNull(nodes.listDropped) || 0;
+  o.nodes = { ...nodes, list, ...(dropped || prev ? { listDropped: prev + dropped } : {}) };
+  return coerced + dropped;
+}
+
+/**
  * 엣지 장비 목록 정리.
  * @returns {{ devices: object[], dropped: {notObject:number, badId:number, tooLarge:number, overAgentBytes:number, overCount:number}, coerced:number }}
  */
@@ -100,6 +148,7 @@ export function sanitizeEdgeDevices(list, { idKey = 'deviceId', altIdKey = '', m
     if (Object.hasOwn(o, idKey)) o[idKey] = edgeId(o[idKey]) || null;
     if (altIdKey && Object.hasOwn(o, altIdKey)) o[altIdKey] = edgeId(o[altIdKey]) || null;
     numericPaths(o);
+    coerced += sanitizeNodeList(o); // v2.615 SF-R1-03 — 노드 목록 원소도 아는 필드만
     let size;
     try { size = JSON.stringify(o).length; } catch { dropped.tooLarge += 1; continue; }
     if (size > deviceMaxBytes) {

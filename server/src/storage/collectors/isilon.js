@@ -121,6 +121,9 @@ export function normalizeIsilon(device, raw) {
     const healthOf = (n) => (word(n.status?.health) || word(n.status) || word(n.health)).toLowerCase() || 'unknown';
     // v2.586 — 판정은 `storage/healthWord.js` 하나(앵커 없는 부분 일치가 'unhealthy'·'broken' 을 정상으로 셌다).
     snap.nodes.unhealthy = list.filter((n) => healthWord(healthOf(n)) === 'bad').length;
+    // v2.615(SF-R1-02): **전 노드** 기준 상태 미확인 수 — 목록은 64대로 잘리므로 화면이 목록만 보면 상한 밖 노드의
+    //   '못 읽음' 을 정상으로 단정한다(66노드 클러스터 실재). unhealthy 와 같은 판정 함수로 센다.
+    snap.nodes.unknown = list.filter((n) => healthWord(healthOf(n)) === 'unknown').length;
     // 노드별 상세(v2.303) — devid(= 노드 id) 기준으로 노드별 통계를 조인. IP 필드는 버전별 상이라
     // 흔한 후보(ip/ip_address/ip_addresses[0]/ext_ip)를 순서대로 취하고 없으면 ''(정직 표기 — 위조 금지).
     const perNode = new Map(); // devid → { key → value }

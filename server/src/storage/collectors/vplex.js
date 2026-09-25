@@ -21,6 +21,7 @@
  *    collect() 의 v1Mode/v2Dead 흐름 참조). 조회(GET) 전용.
  */
 import { emptySnapshot } from '../types.js';
+import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
 import { makeGetter, tryAny } from './restCommon.js';
 
 /** v1 컨텍스트의 attributes:[{name,value}] → 평탄 객체(순수 — 테스트 고정). */
@@ -53,7 +54,9 @@ export function normalizeVplex(device, raw) {
   if (dirs) {
     snap.nodes = {
       count: dirs.length,
-      unhealthy: dirs.filter((d) => { const h = healthOf(d.health); return h !== 'ok' && h !== 'unknown'; }).length,
+      // v2.615(SF-R1-04): 'ok'·'unknown' 외 전부를 비정상으로 세면 'n/a' 가 비정상이 되어 화면 판정과 어긋났다.
+      unhealthy: dirs.filter((d) => healthWord(healthOf(d.health)) === 'bad').length,
+      unknown: dirs.filter((d) => healthWord(healthOf(d.health)) === 'unknown').length, // SF-R1-02 — 전 디렉터 기준
       list: dirs.slice(0, 64).map((d, i) => ({ id: i + 1, ip: '', health: healthOf(d.health), inBps: null, outBps: null, hdd: null, ssd: null, l3Bytes: 0, name: d.name || '' })),
     };
     snap.sections.nodes = 'ok';

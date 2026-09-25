@@ -23,22 +23,11 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from '../test/_stripComments.js'; // v2.615 SF2-06 — 공용 주석 제거기
 
 const VIEWS = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(VIEWS, '..');
 
-/** 주석만 지우고 **개행은 보존**한다 — 지우면 줄 번호가 밀려 엉뚱한 줄을 지목한다(v2.574 규약). */
-function stripComments(s) {
-  let out = ''; let i = 0;
-  const N = s.length;
-  while (i < N) {
-    const c = s[i]; const d = s[i + 1];
-    if (c === '/' && d === '*') { const e = s.indexOf('*/', i + 2); const seg = s.slice(i, e < 0 ? N : e + 2); out += seg.replace(/[^\n]/g, ''); i = e < 0 ? N : e + 2; continue; }
-    if (c === '/' && d === '/') { const e = s.indexOf('\n', i); const seg = s.slice(i, e < 0 ? N : e); out += seg.replace(/[^\n]/g, ''); i = e < 0 ? N : e; continue; }
-    out += c; i += 1;
-  }
-  return out;
-}
 
 function walk(dir, acc = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

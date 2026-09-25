@@ -117,7 +117,7 @@ export function normalizePowerstoreSsh(device, out, meta = {}) {
   const nodes = records(out.node || '');
   if (nodes.length) {
     snap.nodes = {
-      count: nodes.length, unhealthy: 0,
+      count: nodes.length, unhealthy: 0, unknown: nodes.length, // v2.615 SF-R1-02 — 노드 상태를 주지 않는다
       list: nodes.slice(0, 64).map((n, i) => ({
         id: i + 1, ip: '', health: 'unknown', inBps: null, outBps: null, hdd: null, ssd: null, l3Bytes: 0,
         name: pick(n, 'name') || (pick(n, 'slot') !== '' ? `slot ${pick(n, 'slot')}` : pick(n, 'id')),

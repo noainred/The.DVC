@@ -47,6 +47,25 @@ const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416
 //   (조회만 막혀 있어 범위 제한 admin 이 다른 법인 장비를 내보내고 지울 수 있었다).
 const fullScopeOnly = fullScopeOnlyWith('스토리지 모니터링은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 
+/**
+ * 담당 노드별 스토리지 수집 주기(ms) — `agent` → ms('' = 중앙 직접). 중앙이 그 노드에 배포한 `pollMs` 가 있으면 그것,
+ * 없으면 이 노드의 env 기본값이다(엣지는 중앙이 모르는 현장 값을 쓸 수 있다 — 그 한계는 화면이 '낡음' 판정 근거로만 쓴다).
+ * v2.600 DB2600-01(통합 추이의 이어 쓰기 한계)과 v2.615 SF-R1-01(장애 장비 KPI 의 '낡은 보고' 판정)이 같은 값을 쓴다 —
+ * 두 곳이 따로 계산하면 추이는 이어 쓰는데 KPI 는 낡았다고 말하는 모순이 생긴다.
+ */
+export function devicePollMsByAgent(devices = listDevices()) {
+  const envPoll = Number(envIntervals()?.pollMs) || 3_600_000;
+  const pollOf = new Map();
+  for (const d of devices) {
+    const agent = d?.agent || '';
+    if (pollOf.has(agent)) continue;
+    let v = null;
+    try { v = Number(intervalsForAgent(agent)?.pollMs); } catch { v = null; }
+    pollOf.set(agent, Number.isFinite(v) && v > 0 ? v : envPoll);
+  }
+  return { envPoll, pollOf };
+}
+
 export function registerStorageMon(api) {
 
 /**
@@ -83,6 +102,17 @@ api.get('/tools/storage', toolsPerm, fullScopeOnly, (req, res) => {
     // v2.581(BUG-D): 엣지별 보고 요약 — 장비 보고 시각·대수 + 상태 전용 보고(0대). 화면이 '엣지가 0대라고
     // 보고했다' 와 '엣지가 아무것도 안 보냈다' 를 구분해 말한다.
     edgeReports: edgeStorageReports(),
+    // v2.615(SF-R1-01): 담당 노드별 수집 주기 — 화면의 '장애 장비' KPI 가 **낡은 보고**를 '정상' 으로 세지 않게
+    //   경계(주기 × N)를 계산한다. 숫자를 화면에 박지 않기 위해 서버 값을 싣는다. 중앙 직접('')은 실제 폴러 주기.
+    pollMsByAgent: (() => {
+      try {
+        const { pollOf } = devicePollMsByAgent();
+        const out = Object.fromEntries(pollOf);
+        const own = Number(storagePollerStatus()?.intervalMs);
+        if (Number.isFinite(own) && own > 0) out[''] = own;
+        return out;
+      } catch { return null; }
+    })(),
     // v2.582 BUG-4: 화면 각주가 'config pull(≤5분) · push(≤5분)' 을 **숫자로 박고** 있었다(CLAUDE.md '주기 숫자를
     // 문구에 박지 말 것'). 중앙이 배포하는 값(전역 지정)이 있으면 그것, 없으면 기본값을 실어 준다. 엣지가 portal.env 로
     // 현장 값을 잡았으면 중앙은 그것을 모른다 — 그래서 'source' 를 함께 실어 화면이 '중앙 지정'/'기본값' 을 밝힌다.
@@ -681,18 +711,10 @@ api.get('/tools/storage/history', toolsPerm, fullScopeOnly, async (req, res) => 
   // v2.600 DB2600-01: 수집 주기(기본 1시간)가 버킷(10분)보다 길어, 버킷마다 관측된 장비만 더하면
   // 점마다 일부 엣지만 합산된다. 장비마다 **담당 노드의 수집 주기 × 2** 까지 마지막 값을 이어 쓴다
   // (주기는 중앙 배포값 — 숫자를 박지 않는다). 그보다 오래된 장비는 빠지고 점의 missing 이 밝힌다.
-  const envPoll = Number(envIntervals()?.pollMs) || 3_600_000;
-  const pollOf = new Map();
+  const devs = listDevices();
+  const { envPoll, pollOf } = devicePollMsByAgent(devs);
   const staleByDevice = new Map();
-  for (const d of listDevices()) {
-    const agent = d.agent || '';
-    if (!pollOf.has(agent)) {
-      let v = null;
-      try { v = Number(intervalsForAgent(agent)?.pollMs); } catch { v = null; }
-      pollOf.set(agent, Number.isFinite(v) && v > 0 ? v : envPoll);
-    }
-    staleByDevice.set(d.id, 2 * pollOf.get(agent));
-  }
+  for (const d of devs) staleByDevice.set(d.id, 2 * pollOf.get(d.agent || ''));
   const now = Date.now();
   const points = await capacityHistoryAll(now - spanMs, b, { nowMs: now, staleMs: 2 * envPoll, staleByDevice });
   res.json({

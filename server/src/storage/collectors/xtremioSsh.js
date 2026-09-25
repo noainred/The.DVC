@@ -114,7 +114,8 @@ export function normalizeXtremioSsh(device, out) {
         name: pick(n, 'Name', 'SC-Name') || `SC${i + 1}`,
       };
     });
-    snap.nodes = { count: list.length, unhealthy: list.filter((n) => n.health !== 'ok' && n.health !== 'unknown').length, list: list.slice(0, 64) };
+    snap.nodes = { count: list.length, unhealthy: list.filter((n) => n.health !== 'ok' && n.health !== 'unknown').length,
+      unknown: list.filter((n) => n.health === 'unknown').length, list: list.slice(0, 64) }; // v2.615 SF-R1-02 — 전 컨트롤러 기준
     snap.sections.nodes = 'ok';
   }
 

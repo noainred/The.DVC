@@ -43,9 +43,17 @@ export const nodeKindLabel = (k) => NODE_KIND[k] || NODE_KIND.unknown;
 
 const pctOf = (x) => (x ? numOrNull(x.pct) : null);
 
-/** 표에 그릴 노드 행(순수). 이름이 없으면 id·ip 로 대체하고 **지어내지 않는다**. */
+/** 노드 목록 원소 중 객체만(v2.615 SF-R1-03) — null·문자열·배열 원소는 읽을 수 없는 항목이다. */
+const isNodeObj = (n) => !!n && typeof n === 'object' && !Array.isArray(n);
+
+/**
+ * 표에 그릴 노드 행(순수). 이름이 없으면 id·ip 로 대체하고 **지어내지 않는다**.
+ * ⚠ v2.615(SF-R1-03): 엣지가 올린 `nodes.list` 에 null 원소가 섞이면 예전에는 `n.health` 에서 TypeError 를 던져
+ *   스토리지 모니터링 화면 **전체**가 죽었다(장애 장비 KPI 가 매 렌더에 이 함수를 부른다). 객체 원소만 읽고,
+ *   뺀 개수는 `nodeFaultSummary().dropped` 가 밝힌다.
+ */
 export function nodeRows(snap) {
-  const list = Array.isArray(snap?.nodes?.list) ? snap.nodes.list : [];
+  const list = Array.isArray(snap?.nodes?.list) ? snap.nodes.list.filter(isNodeObj) : [];
   return list.map((n, i) => {
     const kind = nodeHealthKind(n.health);
     return {
@@ -78,6 +86,11 @@ export function nodeFaultSummary(snap) {
   const listed = rows.length;
   const missing = Math.max(0, count - listed);
   const section = String(snap?.sections?.nodes || '');
+  // v2.615(SF-R1-03): 읽을 수 없는(객체가 아닌) 목록 원소 수 — 조용히 버리지 않고 밝힌다.
+  const rawList = Array.isArray(snap?.nodes?.list) ? snap.nodes.list : [];
+  const dropped = rawList.length - rawList.filter(isNodeObj).length;
+  // v2.615(SF-R1-02): 서버가 **전 노드** 기준으로 센 '상태를 못 읽은 노드' 수(목록 상한 밖 포함). 구버전 수집기는 없다(null).
+  const unknownAll = numOrNull(snap?.nodes?.unknown);
 
   let tone = unhealthy ? 'red' : 'green';
   let title = unhealthy ? `노드 ${count}대 중 ${unhealthy}대가 비정상입니다` : `노드 ${count}대 · 비정상 없음`;
@@ -89,13 +102,22 @@ export function nodeFaultSummary(snap) {
     if (section && section !== 'ok') bits.push(`노드 수집 상태: ${section}`);
   } else {
     if (badRows.length !== unhealthy) {
-      // 요약 수치와 목록이 어긋나면 **숨기지 않고 밝힌다**(상한 절단·수집 시점 차이).
-      bits.push(`요약은 ${unhealthy}대라고 하는데 목록에서 이상으로 보이는 노드는 ${badRows.length}대입니다 — 목록 상한이나 수집 시점 차이일 수 있습니다.`);
+      // 요약 수치와 목록이 어긋나면 **숨기지 않고 밝힌다**.
+      // ⚠ v2.615(SF-R1-04): 예전 문구는 '수집 시점 차이일 수 있습니다' 였지만 수집기는 요약과 목록을 **같은 배열에서
+      //   동기로** 계산한다 — 시점 차이는 생길 수 없다. 실제 원인은 목록 상한(64) 또는 수집기와 화면의 판정 규칙 차이다.
+      const why = missing > 0
+        ? '목록 상한(64) 밖의 노드일 수 있습니다'
+        : unknown > 0
+          ? `수집기와 화면의 상태 판정 규칙이 다릅니다 — 화면이 상태 미확인으로 본 노드 ${unknown}대가 후보입니다`
+          : '수집기와 화면의 상태 판정 규칙이 다릅니다';
+      bits.push(`요약은 ${unhealthy}대라고 하는데 목록에서 이상으로 보이는 노드는 ${badRows.length}대입니다 — ${why}.`);
     }
     if (missing) bits.push(`노드 목록은 ${listed}대만 올라왔습니다(전체 ${count}대) — **나머지 ${missing}대는 상태를 알 수 없습니다**.`);
     if (unknown) bits.push(`상태를 읽지 못한 노드 ${unknown}대는 **비정상으로 세지 않았습니다**(정상이라는 뜻도 아닙니다).`);
+    if (unknownAll != null && unknownAll > unknown) bits.push(`목록 밖 노드를 포함하면 상태를 읽지 못한 노드는 ${unknownAll}대입니다.`);
   }
-  return { count, unhealthy, unknown, listed, missing, badRows, tone, title, body: bits.join(' ') };
+  if (dropped > 0) bits.push(`형식이 올바르지 않은 노드 항목 ${dropped}개는 표시하지 않았습니다.`);
+  return { count, unhealthy, unknown, unknownAll, listed, missing, dropped, badRows, tone, title, body: bits.join(' ') };
 }
 
 /** bps 를 사람 단위로(노드 표의 처리량 열). 값이 없으면 '—'. */
@@ -112,7 +134,12 @@ export function bpsText(v) {
 /** 표지에 붙일 접근성 문구(버튼 title). */
 export function faultBadgeTitle(snap) {
   const s = nodeFaultSummary(snap);
-  return s.unhealthy ? `${s.title} — 클릭하면 어느 노드인지 봅니다` : `${s.title} — 클릭하면 노드별 상태를 봅니다`;
+  const base = s.unhealthy ? `${s.title} — 클릭하면 어느 노드인지 봅니다` : `${s.title} — 클릭하면 노드별 상태를 봅니다`;
+  // v2.615(SF-R1-02): 목록이 상한으로 잘렸으면 목록 밖 노드의 판정 근거가 **요약 수치**라는 사실을 밝힌다.
+  //   서버가 전 노드 기준 '상태 미확인 수' 를 주지 않는 구버전 수집기면 그 사실도 함께 적는다.
+  if (!s.listed || !s.missing) return base;
+  const tail = s.unknownAll == null ? ' — 이 수집 버전은 상태를 읽지 못한 노드 수를 알려 주지 않습니다' : '';
+  return `${base} · 목록 밖 ${s.missing}대는 요약 수치(비정상 ${s.unhealthy}대) 기준입니다${tail}`;
 }
 
 /**

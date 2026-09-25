@@ -28,7 +28,7 @@ import { authFailInfo } from './storageAuthText.js';  // v2.528: 401 진단 문�
 import { capacityRows, srpRows, subscribedNote, usageTrust } from './powermaxCapacityText.js'; // v2.534: 구독/할당/실제기록(순수)
 import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
 // v2.615: '장애 장비' KPI·화면 — 판정은 노드 ⚠ 표지와 같은 조건 하나(storageFaultText.hasNodeFault). v2.567 철회 교훈.
-import { hasNodeFault, faultKpi, faultRows, faultNodeRows, faultKpiMeta, faultKpiAccent, faultKpiTitle, faultViewNote } from './storageFaultText.js';
+import { hasNodeFault, faultKpi, faultRows, faultNodeRows, faultKpiMeta, faultKpiAccent, faultKpiTitle, faultViewNote, faultJudgeOpts } from './storageFaultText.js';
 import { versionCellInfo } from './storageVersionText.js';
 import { unitText } from '../unitText.js';
 import { hardwareSummaryParts } from './storageHardwareText.js'; // v2.599 C2599-06: 빈 슬롯·미확인을 이상과 나눠 말한다
@@ -496,6 +496,8 @@ function FaultsView({ fk, list, canClear, onClear, ctx, typeLabel, dcName }) {
   const nodeList = faultNodeRows(list);
   const identified = nodeList.filter((x) => x.kind === 'bad').length;
   const unidentified = nodeList.filter((x) => x.kind === 'unidentified').reduce((a, x) => a + x.count, 0);
+  // v2.615 검토(SF-R1-04): 목록이 다 올라왔는데 요약과 어긋나면 '상태 미확인' 노드를 **후보**로 원문과 함께 보인다.
+  const candidates = nodeList.filter((x) => x.kind === 'candidate').length;
   const note = faultViewNote(fk, list.length);
   const open = (id) => ctx.setNodeFault(id);
   return (
@@ -517,7 +519,7 @@ function FaultsView({ fk, list, canClear, onClear, ctx, typeLabel, dcName }) {
           <div style={{ minWidth: 0 }}>
             <div className="section-title" style={{ fontSize: 14 }}>
               비정상 노드 <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
-                — 노드 이름 확인 {identified}대{unidentified ? ` · 어느 노드인지 알 수 없음 ${unidentified}대` : ''} · 행을 누르면 그 장비의 노드 상태를 봅니다
+                — 노드 이름 확인 {identified}대{unidentified ? ` · 어느 노드인지 알 수 없음 ${unidentified}대` : ''}{candidates ? ` · 후보 ${candidates}대` : ''} · 행을 누르면 그 장비의 노드 상태를 봅니다
               </span>
             </div>
             <STable minWidth={760}>
@@ -525,11 +527,13 @@ function FaultsView({ fk, list, canClear, onClear, ctx, typeLabel, dcName }) {
               <tbody>
                 {nodeList.map((x) => {
                   const bad = x.kind === 'bad';
+                  const cand = x.kind === 'candidate';
                   const k = nodeKindLabel('bad');
                   return (
                     <tr key={x.key} style={{ cursor: 'pointer' }} onClick={() => open(x.deviceId)}>
                       <td>
-                        <button type="button" className="cell-link" title="이 장비의 노드 상태 보기" onClick={(e) => { e.stopPropagation(); open(x.deviceId); }}
+                        {/* v2.615 검토(SF2-04): 이름이 말줄임되므로 title 에 전체 이름을 싣는다(DeviceTable 장비 셀과 같다). */}
+                        <button type="button" className="cell-link" title={`${x.deviceName} — 이 장비의 노드 상태 보기`} onClick={(e) => { e.stopPropagation(); open(x.deviceId); }}
                           style={{ maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', textAlign: 'left' }}>
                           <b>{x.deviceName}</b>
                         </button>
@@ -545,7 +549,7 @@ function FaultsView({ fk, list, canClear, onClear, ctx, typeLabel, dcName }) {
                       <td>{x.health ? <code style={{ fontSize: 11 }}>{x.health}</code> : <span className="muted">—</span>}</td>
                       <td data-sort={x.kind} style={{ whiteSpace: 'nowrap', fontWeight: 600, color: bad ? `var(--${k.color})` : 'var(--amber)' }}
                         title={bad ? '장비가 보고한 노드 상태가 정상이 아닙니다' : x.reason}>
-                        {bad ? k.label : `노드 미상 ${x.count}대`}
+                        {bad ? k.label : cand ? '후보(상태 미확인)' : `노드 미상 ${x.count}대`}
                       </td>
                     </tr>
                   );
@@ -615,7 +619,9 @@ export default function StorageMonTool() {
    * ⚠ 판정은 노드 ⚠ 표지와 같은 조건 하나뿐이다(헬스 문자열·경보 개수 금지 — v2.567 이 27대 오보로 철회됐다).
    * 전체 장비 기준(다른 KPI 와 같다). 화면의 필터·찾기는 목록에만 적용하고, 가려진 개수는 머리말이 밝힌다.
    */
-  const fk = faultKpi(rows);
+  // v2.615 검토(SF-R1-01): 비활성·낡은 보고는 '정상' 으로 세지 않는다 — 낡음 경계는 서버가 주는 수집 주기로 계산한다.
+  const fjo = faultJudgeOpts(d, Date.now());
+  const fk = faultKpi(rows, fjo);
   /**
    * 빠른 찾기 판정(사용자 요구 2026-09-02) — 검색은 **칩 이름이 아니라 하단 스토리지 목록**을
    * 거른다. 판정 단위는 장비 1대이고, 그 장비의 법인·표시명·host·타입·수집주체(엣지)를 모두
@@ -633,7 +639,7 @@ export default function StorageMonTool() {
   // 판정·문구는 순수 모듈(storageListText)에 있고 테스트가 고정한다.
   const emptyInfo = emptyListText({ registered: rows.length, facetOn, query: dcQuery });
   // v2.615: 장애 장비 화면 목록 — 필터·찾기를 적용한 뒤의 장애 장비(가려진 대수는 머리말이 전체 KPI 와 비교해 밝힌다).
-  const shownFaults = view === 'faults' ? faultRows(shown) : [];
+  const shownFaults = view === 'faults' ? faultRows(shown, fjo) : [];
   // 칩 목록·개수는 공용 판정이 준다(위 facetState). 그룹핑도 공용 groupBy 를 쓰되,
   // 이 화면의 기존 소비부가 `[key, list]` 튜플 배열을 기대하므로 형태만 맞춰 준다.
   const groupShown = (keyFn) => groupByKey(shown, keyFn).map((g) => [g.key, g.list]);
@@ -775,6 +781,8 @@ export default function StorageMonTool() {
           {dcSel.size > 0 && typeSel.size > 0 && ' · '}
           {typeSel.size > 0 && <>종류 <b style={{ color: 'var(--text)' }}>{[...typeSel].map(typeLabel).join(', ')}</b></>}
           {' — '}장비 {shown.length}대 (전체 {rows.length}대 중)
+          {/* v2.615 검토(SF2-02): 장애 장비 화면에서는 같은 모집단의 장애 대수를 나란히 — 두 숫자가 다른 것을 세는 사실을 밝힌다. */}
+          {view === 'faults' && <> · 이 중 장애 <b style={{ color: 'var(--text)' }}>{shownFaults.length}</b>대</>}
           {shown.length === 0 && <span style={{ color: 'var(--amber)' }}> · 조건에 맞는 장비가 없습니다</span>}
         </div>
       )}
@@ -786,7 +794,7 @@ export default function StorageMonTool() {
               "{dcQuery}" 와 일치하는 장비가 없습니다 — 법인명·장비명·host·타입·엣지에서 검색합니다.
             </div>
           : <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-              🔎 "{dcQuery}" — 법인 {dcGroups.length}곳 · 장비 {shown.length}대 (전체 {rows.length}대 중)
+              🔎 "{dcQuery}" — 법인 {dcGroups.length}곳 · 장비 {shown.length}대 (전체 {rows.length}대 중){view === 'faults' ? ` · 이 중 장애 ${shownFaults.length}대` : ''}
             </div>
       )}
 
