@@ -13,8 +13,11 @@ import { listTargets } from '../../agent/deployRegistry.js';
 import { todayStamp } from "../../util/dayKey.js";
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
 
 const adminOnly = requireRole('admin');
+// v2.612 AUTHZ2612-03: 사이트 구성·HAProxy 적용은 전 법인 공용이라 범위 제한 admin 도 막는다(조회·저장·적용 전부).
+const fullScopeOnly = fullScopeOnlyWith('중계 토폴로지는 엣지 사이트 단위라 법인 범위로 나눌 수 없어 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 /**
  * v2.435(감사 S3): 조회를 **admin 전용**으로 올렸다.
  * 예전에는 `requirePerm('tools')` 였는데 `auth/permissions.js` 기준 **operator 가 tools 를 기본 보유**하므로,
@@ -32,8 +35,9 @@ const RE_DC = /^[^\s/\\]{1,40}$/;
 export function registerRelayTopo(api) {
 api.get('/tools/relaytopo', toolsPerm, (req, res) => {
   const admin = isAdmin(req);
-  // v2.600 AUTHZ-2600-07: 사이트 구성은 vCenter 귀속이 없다 — 범위 제한(비-admin) 계정에는 403(v2.525 규약).
-  if (!admin && scopedVcenterIds(req.user, store.get())) {
+  // v2.600 AUTHZ-2600-07: 사이트 구성은 vCenter 귀속이 없다 — 범위 제한 계정에는 403(v2.525 규약).
+  // v2.612 AUTHZ2612-03: 예전엔 `!admin &&` 로 범위 제한 **admin** 이 빠져 전 사이트 IP·SSH 계정이 가림 없이 나갔다.
+  if (scopedVcenterIds(req.user, store.get())) {
     return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true,
       reason: '중계 토폴로지는 엣지 사이트 단위라 법인 범위로 나눌 수 없어 전체 범위 계정만 볼 수 있습니다.' });
   }
@@ -64,7 +68,7 @@ function maskTopology(t) {
 }
 function accessView(raw, site, role) { const a = resolveNodeAccess(raw, site, role); return { host: a.host || '', port: a.port || 0, via: a.via || '', source: a.source || '', error: a.error || '' }; }
 
-api.put('/tools/relaytopo', adminOnly, (req, res) => {
+api.put('/tools/relaytopo', adminOnly, fullScopeOnly, (req, res) => {
   try {
     const saved = saveTopology(req.body || {});
     logAudit({ user: req.user?.username, action: '중계 토폴로지 저장', detail: `sites=${saved.sites.length} services=${saved.services.map((s) => `${s.key}:${s.listenPort}`).join(',')}`, ip: req.ip });
@@ -74,7 +78,7 @@ api.put('/tools/relaytopo', adminOnly, (req, res) => {
 });
 
 /** 가져오기: body { text?(표/CSV/TSV 붙여넣기 또는 파일 내용), json?(내보낸 JSON 객체), replace?, apply? }. apply=false 면 미리보기만. */
-api.post('/tools/relaytopo/import', adminOnly, (req, res) => {
+api.post('/tools/relaytopo/import', adminOnly, fullScopeOnly, (req, res) => {
   try {
     const { text = '', json = null, replace = false, apply = false } = req.body || {};
     let parsed; let format = 'table';
@@ -92,7 +96,7 @@ api.post('/tools/relaytopo/import', adminOnly, (req, res) => {
 });
 
 /** 내보내기(비밀 없음): ?format=json|csv */
-api.get('/tools/relaytopo/export', adminOnly, (req, res) => {
+api.get('/tools/relaytopo/export', adminOnly, fullScopeOnly, (req, res) => {
   const topo = loadTopology(); const day = todayStamp();
   logAudit({ user: req.user?.username, action: '중계 토폴로지 내보내기', detail: `format=${req.query.format || 'json'} sites=${topo.sites.length}`, ip: req.ip });
   if (String(req.query.format || 'json').toLowerCase() === 'csv') {
@@ -105,23 +109,23 @@ api.get('/tools/relaytopo/export', adminOnly, (req, res) => {
   res.send(JSON.stringify(out, null, 2));
 });
 
-api.get('/tools/relaytopo/render/:dc', adminOnly, (req, res) => {   // 관리 블록에는 전 사이트 내부 IP 가 들어간다(v2.435)
+api.get('/tools/relaytopo/render/:dc', adminOnly, fullScopeOnly, (req, res) => {   // 관리 블록에는 전 사이트 내부 IP 가 들어간다(v2.435)
   const topo = loadTopology(); const site = topo.sites.find((s) => s.dc === req.params.dc);
   if (!site) return res.status(404).json({ ok: false, reason: '사이트가 없습니다.' });
   const { text, missing } = renderManagedBlock(site, topo.services, topo.main);
   res.json({ ok: true, dc: site.dc, text, missing: missing.map((m) => m.key) });
 });
 
-api.post('/tools/relaytopo/fetch', adminOnly, async (req, res) => {
+api.post('/tools/relaytopo/fetch', adminOnly, fullScopeOnly, async (req, res) => {
   logAudit({ user: req.user?.username, action: '중계 토폴로지 전체 가져오기(SSH)', ip: req.ip });
   res.json({ ok: true, results: await fetchAll({ withIrs: req.body?.withIrs !== false }) });
 });
-api.post('/tools/relaytopo/fetch/:dc', adminOnly, async (req, res) => {
+api.post('/tools/relaytopo/fetch/:dc', adminOnly, fullScopeOnly, async (req, res) => {
   if (!RE_DC.test(req.params.dc)) return res.status(400).json({ ok: false, reason: '잘못된 사이트 이름' });
   logAudit({ user: req.user?.username, action: '중계 토폴로지 가져오기(SSH)', target: req.params.dc, ip: req.ip });
   res.json(await fetchSite(req.params.dc, { withIrs: req.body?.withIrs !== false }));
 });
-api.post('/tools/relaytopo/apply/:dc', adminOnly, async (req, res) => {
+api.post('/tools/relaytopo/apply/:dc', adminOnly, fullScopeOnly, async (req, res) => {
   if (!RE_DC.test(req.params.dc)) return res.status(400).json({ ok: false, reason: '잘못된 사이트 이름' });
   const dryRun = !!req.body?.dryRun;
   if (!dryRun && req.body?.confirm !== true) return res.status(400).json({ ok: false, reason: '적용에는 confirm=true 가 필요합니다(중계 엣지의 haproxy.cfg 를 교체하고 reload 합니다).' });
@@ -130,7 +134,7 @@ api.post('/tools/relaytopo/apply/:dc', adminOnly, async (req, res) => {
   logAudit({ user: req.user?.username, action: `중계 HAProxy 구성 ${dryRun ? '검증' : '적용'} 결과`, target: req.params.dc, detail: `ok=${r.ok} applied=${!!r.applied} ${(r.steps || []).filter((s) => !s.ok).map((s) => s.name).join(',')}`, ip: req.ip });
   res.json(r);
 });
-api.post('/tools/relaytopo/test-ssh', adminOnly, async (req, res) => {
+api.post('/tools/relaytopo/test-ssh', adminOnly, fullScopeOnly, async (req, res) => {
   const { dc = '', role = 'edge' } = req.body || {};
   if (!['edge', 'irs', 'main'].includes(role)) return res.status(400).json({ ok: false, reason: 'role 은 edge|irs|main' });
   if (role !== 'main' && !RE_DC.test(dc)) return res.status(400).json({ ok: false, reason: '잘못된 사이트 이름' });

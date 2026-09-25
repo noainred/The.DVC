@@ -244,11 +244,13 @@ adminRouter.post('/idrac/scan', adminOnly, fleetOnly, async (req, res) => {
 
   // v2.611(감사 TIM2611-04): 재진입 가드 — 주기·'지금 스캔'·다른 임시 스캔과 같은 잠금(idrac/scanPoller.js running)을 쓴다.
   //   예전에는 가드가 없어 연타·주기 스캔과 겹치면 같은 대역(최대 2,048 IP · 동시 32)에 같은 계정 로그인이 곱해졌다.
-  //   인증 실패 정책(makeScanAuthPolicy)도 넘긴다 — 수동이라 건너뛰지는 않지만(periodic:false) 실패를 기록해 주기 스캔이 본다.
+  //   v2.612 RECENT2612-03: 임시 스캔은 인증 실패를 **기록하지 않는다**(record:false). 예전 주석은 '실패를 기록해 주기 스캔이
+  //   본다' 였지만 정지 id 가 scan|adhoc|<ip> 라 어느 주기 스캔도 그 id 를 읽지 않았다(주기 스캔은 자기 대역 id 를 본다) —
+  //   읽는 사람 없이 idrac-scan-auth-stops.json 에 실행마다 최대 2,048건씩 쌓이기만 했다. 옛 기록은 scanAuth.js 가 1회 지운다.
   const lock = tryAcquireScan('adhoc');
   if (!lock.ok) return res.status(409).json({ ok: false, busy: true, by: lock.by, reason: lock.reason });
   try {
-    const authPolicy = makeScanAuthPolicy({ rangeId: 'adhoc', username, password, periodic: false });
+    const authPolicy = makeScanAuthPolicy({ rangeId: 'adhoc', username, password, periodic: false, record: false });
     const result = await scanForIdracs({ ips, username, password, authPolicy });
     res.json({ ok: true, delegated: false, ...result });
   } catch (err) {
@@ -382,7 +384,15 @@ adminRouter.post('/idrac/scan-ranges/import', adminOnly, fleetOnly, (req, res) =
     if (r.ok) {
       if (ids.length === 1) overwritten++; else added++;
       // v2.606 LEFT2606-02: 대역·엣지·계정이 바뀐 덮어쓰기는 저장 비밀번호를 폐기한다 — 그 행을 밝힌다(조용한 폐기 금지)
-      if (r.droppedSecrets?.length) passwordDropped.push({ line: row._line, datacenter: row.datacenter, reason: '저장됨 — 단 스캔 대역·수행 엣지·계정이 바뀌어 저장된 비밀번호를 폐기했습니다. 비밀번호를 다시 입력하세요(그 전까지 스캔 보류).' });
+      // v2.612 LEFT2612-02: 고정 문구 대신 saveScanRanges 가 준 **필드별 사유**(r.skipped)를 그대로 싣는다 — 고정 문구는
+      //   iLO 만 폐기된 행에도 'Dell 비밀번호 폐기 · 스캔 보류' 라고 말했다(Dell 스캔은 계속된다). iLO 비밀번호는 CSV 에 열이
+      //   없어 다시 넣을 길이 없으므로 그 사실과 조치(화면에서 입력)를 덧붙인다.
+      if (r.droppedSecrets?.length) {
+        const reasons = (Array.isArray(r.skipped) ? r.skipped : []).map((x) => String(x?.reason || '')).filter(Boolean);
+        if (!reasons.length) reasons.push(`저장된 비밀번호를 폐기했습니다(${r.droppedSecrets.join(', ')}).`);
+        if (r.droppedSecrets.includes('iloPassword')) reasons.push('iLO 비밀번호는 CSV 로 넣을 수 없습니다 — 설정 화면의 스캔 대역 편집에서 iLO 비밀번호를 입력하세요.');
+        passwordDropped.push({ line: row._line, datacenter: row.datacenter, fields: [...r.droppedSecrets], reason: `저장됨 — 단 ${reasons.join(' ')}` });
+      }
     }
     else failed.push({ line: row._line, datacenter: row.datacenter, reason: r.reason });
   }
