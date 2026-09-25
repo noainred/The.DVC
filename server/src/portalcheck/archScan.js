@@ -172,6 +172,8 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'portal.env': '설치 스크립트가 만드는 env 파일(config.js 가 읽는다)',
   'settings-owners.txt': '설정 소유 계정 목록(routes/admin/shared.js requireSettingsOwner)',
   'db-location.json': 'DB 저장 디렉터리 설정(insights/dbLocation.js)',
+  'ping-targets.json': 'Ping 감시 대상 등록부(ping/store.js — 사용자가 손으로 등록, v2.580 손상 보존). v2.614 첫 목 실행에서 미분류로 잡혀 등재',
+  'initial-admin-password.txt': '첫 관리자 임시 비밀번호(auth/auth.js — 0600, 비밀번호를 바꾸면 지운다). v2.614 첫 목 실행에서 미분류로 잡혀 여기 등재',
 });
 
 /* ── 공용 ─────────────────────────────────────────────────────────────────────── */
@@ -469,7 +471,7 @@ export async function gatherArchInputs({ routers = [], flowRoutes = null, app = 
   const bigJsonMounts = layers ? uniq(layers.filter((L) => L.isBigJson && L.mount).map((L) => L.mount)) : null;
   const catalog = await readCatalog(errors);
   const edgelog = await safeAsync(errors, 'edgelog', () => checkEdgelogSpec());
-  if (edgelog?.errors?.length) errors.push(...edgelog.errors);
+  for (const e of (edgelog?.errors || [])) errors.push(e); // 전개 push 금지(v2.603 CEN2603-03 스윕) — 작은 배열이지만 규약대로
   const dDir = dbDir || config.dbDir || config.configDir;
   const cDir = configDir || config.configDir;
   const dbFiles = process.platform === 'win32'
@@ -559,9 +561,12 @@ export function scanArch(inputs) {
     }
     items.push(item('catalog-key-orphan', uniq(bad), { unknown: catMissing || failed.has('tool-keys') || !tk, detail: { catalogKeys: keys.size } }));
   }
-  // ⑥ catalog-adminonly-mismatch — 주 라우트(`GET /api/tools/<seg>`)가 있는 도구만 판정
+  // ⑥ catalog-adminonly-mismatch — 주 라우트(`GET /api/tools/<seg>`)가 있는 도구만 판정.
+  //    ⚠ 한 방향만 warn 이다: 라우트가 admin 인데 카탈로그가 adminOnly:false 면 viewer 에게 '열 수 있는 카드' 로 보이고 열면 403 이다
+  //    (v2.613 CATALOG2613-01 웹 테스트와 같은 규칙). 반대(카탈로그 adminOnly:true 인데 라우트는 tools+fullScope)는 v2.555 가 '표시
+  //    관례' 로 확정한 구성(스토리지·파트 장애·PDU·SAN …)이라 결함이 아니다 — `detail.displayOnly` 로 개수·목록만 밝힌다.
   {
-    const bad = []; let judged = 0; let notJudged = 0;
+    const bad = []; const displayOnly = []; let judged = 0; let notJudged = 0;
     if (!catMissing && routes.length) {
       const gets = new Map(routes.filter((r) => r.method === 'GET' && r.full.startsWith('/api/tools/')).map((r) => [r.full.toLowerCase(), r]));
       for (const tool of catalog.tools || []) {
@@ -571,10 +576,11 @@ export function scanArch(inputs) {
         if (!r) { notJudged += 1; continue; }
         judged += 1;
         const admin = isAdminGated(r);
-        if (!!tool.adminOnly !== admin) bad.push(`${k}: catalog adminOnly=${!!tool.adminOnly} · route ${r.method} ${r.full} admin=${admin}`);
+        if (admin && !tool.adminOnly) bad.push(`${k}: catalog adminOnly=false · route ${r.method} ${r.full} admin=true`);
+        else if (!admin && tool.adminOnly) displayOnly.push(`${k}: ${r.method} ${r.full}`);
       }
     }
-    items.push(item('catalog-adminonly-mismatch', bad, { unknown: catMissing || failed.has('routes') || !routes.length, detail: { judged, notJudged } }));
+    items.push(item('catalog-adminonly-mismatch', bad, { unknown: catMissing || failed.has('routes') || !routes.length, detail: { judged, notJudged, displayOnly: displayOnly.length, displayOnlySamples: displayOnly.slice(0, 20) } }));
   }
   // ⑦ edgelog-spec-drift
   {

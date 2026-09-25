@@ -81,8 +81,8 @@ export const ARCH_TEXT = Object.freeze({
   },
   'catalog-adminonly-mismatch': {
     title: '카탈로그 adminOnly 와 라우트 게이트가 어긋남',
-    meaning: '카드는 관리자 전용으로 표시하는데 주 라우트(/api/tools/<seg> GET)는 tools 권한만 요구하거나, 그 반대입니다. adminOnly 는 표시 관례이지 접근 제어가 아니라(v2.555) **operator 가 주소로 직접 열 수 있습니다**.',
-    fix: '접근 제어가 의도라면 라우트에 **adminOnly** 게이트를 붙이고, 표시만이 의도라면 카탈로그의 adminOnly 를 내리세요. 둘 중 무엇이 맞는지는 그 화면의 데이터 범위로 정합니다.',
+    meaning: '주 라우트(/api/tools/<seg> GET)는 역할 admin 을 요구하는데 카탈로그는 adminOnly 가 아닙니다 — viewer·operator 에게 **열 수 있는 카드로 보이고 열면 403** 입니다. 반대 방향(카드는 관리자 전용 표시인데 라우트는 tools 권한)은 v2.555 가 확정한 표시 관례라 결함으로 세지 않습니다.',
+    fix: '카탈로그(specialToolsList.js)의 그 도구에 **adminOnly:true** 를 붙이세요. 라우트 쪽을 tools 권한으로 낮추는 것은 그 화면의 데이터 범위를 먼저 보고 정합니다.',
   },
   'edgelog-spec-drift': {
     title: '엣지 로그 표(STATUS_SPEC)가 없는 모듈·함수를 가리킴',

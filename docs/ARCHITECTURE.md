@@ -116,7 +116,7 @@
 | `pdu/` | 11 | 1,687 | `pdu/poller.js` (4) | pdu/poller.js — PDU 주기 수집. |
 | `perf/` | 5 | 1,044 | `perf/monitor.js` (13) | perf/monitor.js — 서버 성능 측정기(v2.498). 요청 지연·이벤트 루프 정체·진행 중 요청을 **상시 O(1)** |
 | `ping/` | 4 | 762 | `ping/db.js` (2) | Ping 모니터링 시계열 저장소 — 등록 대상별 RTT/도달성 샘플을 별도 SQLite에 보관한다. |
-| `portalcheck/` | 7 | 2,215 | `portalcheck/archScan.js` (2) | portalcheck/archScan.js — 특수 기능 › 포탈 점검 › **아키텍처 점검**(v2.614) 판정 코어. |
+| `portalcheck/` | 7 | 2,221 | `portalcheck/archScan.js` (2) | portalcheck/archScan.js — 특수 기능 › 포탈 점검 › **아키텍처 점검**(v2.614) 판정 코어. |
 | `provision/` | 6 | 853 | `provision/jobs.js` (2) | VM provisioning job engine. Holds deployment jobs in memory and runs them |
 | `proxy/` | 10 | 1,747 | `proxy/sshExec.js` (23) | Small SSH helper built on ssh2: connect, run commands, and upload files via |
 | `publicapi/` | 5 | 747 | `publicapi/allowlist.js` (2) | 외부 공개 API 의 허용 목록 카탈로그 (v2.562) — **순수 모듈**. 판정은 이 파일 하나가 소유한다. |
@@ -140,7 +140,7 @@
 | `vmseries/` | 9 | 1,235 | `vmseries/poller.js` (3) | vmseries/poller.js — 실시간 스파이크 주기 수집(v2.510). 기본 50분(사용자 결정), 설정에서 변경. |
 | `vmtrack/` | 4 | 1,323 | `vmtrack/db.js` (3) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
 
-디렉터리 63개 · 파일 708개 · 131,186줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 63개 · 파일 708개 · 131,192줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

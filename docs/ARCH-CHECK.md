@@ -27,7 +27,7 @@
 | tool-segment-unmapped | `/api/tools/<seg>` 의 seg 가 `TOOL_PATH_KEYS`·`TOOL_PATH2_KEYS`·`UNMAPPED_TOOL_SEGMENTS` 어디에도 없음 | 0 → ok · >0 → fault |
 | catalog-missing | `web/dist/special-tools.json` 을 못 읽음 | 못 읽으면 unknown(카탈로그 의존 항목 전부 unknown) |
 | catalog-key-orphan | permissions.json 의 toolsDenied/allowed 값·toolcats 배치·TOOL_PATH_KEYS 값 중 카탈로그에 없는 키 | 0 → ok · >0 → warn |
-| catalog-adminonly-mismatch | 카탈로그 adminOnly 와 그 도구 주 라우트(`/api/tools/<seg>` GET)의 `.gate` 가 어긋남 | 0 → ok · >0 → warn |
+| catalog-adminonly-mismatch | 도구 주 라우트(`/api/tools/<seg>` GET)가 역할 admin 인데 카탈로그 adminOnly 가 아님(한 방향만 — 반대는 v2.555 표시 관례라 `detail.displayOnly` 로 개수만) | 0 → ok · >0 → warn |
 | edgelog-spec-drift | STATUS_SPEC 항목의 모듈·함수가 실제로 없음(또는 export 되지 않음) | 0 → ok · >0 → fault |
 | bigjson-missing | centralRouter·collectorRouter 의 POST 경로 중 BIG_JSON 미등록이며 허용 목록(`BIG_JSON_SMALL`, 사유) 밖 | 0 → ok · >0 → warn |
 | dataflow-cats-unmapped | `dataflow/build.js declaredRoutes()` 의 `unmapped` | 0 → ok · >0 → warn |
