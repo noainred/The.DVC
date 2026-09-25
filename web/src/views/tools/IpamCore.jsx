@@ -1,6 +1,7 @@
 // IpamCore.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
+import { takeSearch } from '../../hooks/searchHandoff.js'; // v2.616 V5 통합 검색
 import { fetchJson, usePolling, downloadFile, hasRole } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, StateBadge, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
@@ -33,8 +34,10 @@ export function sheetScopeArg(vc, scope) {
   return scope;
 }
 
-export function IpamStandalone() {
-  const [scope, setScope] = useState('');
+export function IpamStandalone({ defaultScope = '' } = {}) {
+  // v2.616: V5 틀의 법인 범위를 첫 값으로 받는다(바꾸면 따라간다). 개발 포탈은 넘기지 않아 예전 그대로('').
+  const [scope, setScope] = useState(defaultScope);
+  useEffect(() => { setScope(defaultScope); }, [defaultScope]);
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
   return (
     <>
@@ -56,7 +59,7 @@ export function IpamStandalone() {
 function Ipam({ scope, onScope }) {
   const [reload, setReload] = useState(0);
   const { loading, data, error } = useTool('/tools/ipam', { ...(scope ? { vcenterId: scope } : {}), _r: reload });
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(() => takeSearch('ipam')); // v2.616: V5 통합 검색이 넘긴 검색어(없으면 '')
   const [sel, setSel] = useState(null);
   const [db, setDb] = useState(null);
   const [rowFilter, setRowFilter] = useState(''); // '' | duplicate | multihomed | public | private

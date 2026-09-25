@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, downloadFile } from '../../api.js';
+import { takeSearch } from '../../hooks/searchHandoff.js'; // v2.616 V5 통합 검색
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -17,7 +18,7 @@ import { addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600
  *   않으며, 그 사실이 '수집 현황'에 종류별 0 으로 그대로 드러난다(빈 결과의 이유를 숨기지 않는다).
  */
 export default function SerialLookup() {
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(() => takeSearch('serial-lookup')); // v2.616: V5 통합 검색이 넘긴 검색어(없으면 '')
   const [kinds, setKinds] = useState(() => new Set());
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);

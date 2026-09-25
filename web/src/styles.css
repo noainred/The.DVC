@@ -371,8 +371,10 @@ tbody tr:last-child td { border-bottom: none; }
   .access-denied .ad-facts dt { margin-top: 8px; }
 }
 
-.cols-2 { grid-template-columns: 2fr 1fr; }
-.cols-3 { grid-template-columns: repeat(3, 1fr); }
+/* v2.616: 트랙 최소폭을 0 으로 — `1fr` 은 minmax(auto,1fr) 이라 긴 내용이 트랙을 키워 페이지가 가로로 밀렸다
+   (탐색·랭킹 1192px 에서 172px 넘침 · V5 틀 1440px 에서 176px. v2.576 .vc-grid 와 같은 결함 — 좁은 폭 규칙에만 고쳐져 있었다). */
+.cols-2 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 /* v2.590 W5: 1fr 은 minmax(auto,1fr) 라 카드의 min-content(표·nowrap 이름)가 트랙을 키워 400px 에서 넘쳤다(v2.576 .vc-grid 와 같은 결함). */
 @media (max-width: 1100px) { .cols-2, .cols-3 { grid-template-columns: minmax(0, 1fr); } }
 /* v2.590 W7: 설정 › 특수 기능 카테고리 — 좁은 폭에서 두 번째 열이 폭 2px 로 사라지지 않게 한 열로 쌓는다. */
