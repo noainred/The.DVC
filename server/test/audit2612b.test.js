@@ -62,16 +62,19 @@ test('SEC2612-01 같은 개체의 update 는 제자리에서 합치고 개체당
   assert.equal(P.parseInterfaces(JSON.stringify(withOper)).droppedFields, 6, '파서 결과에도 실린다(operStatus 가 한 칸을 먼저 쓴다)');
 });
 
-test('SEC2612-01 같은 개체 update 수에 거의 선형이다(비율 — 2천 대비 8천이 8배 미만)', () => {
+// v2.616: 2천 대비 8천으로 재던 판본이 CI 에서 8.4배(2k=8.4ms 8k=70.5ms)로 실패했다 — 제품은 선형이다(8천→3만2천 로컬 15회
+//   3.2~4.7배). 2천 구간은 절대 시간이 수 ms 라 GC 잡음으로 4.3~6.4배까지 흔들린다. 선형이면 4배 · 2차면 16배이므로
+//   입력을 키워(8천→3만2천) 잡음 비중을 줄이고 최선값 5회로 잰다. 상한 8배는 둘을 확실히 가른다.
+test('SEC2612-01 같은 개체 update 수에 거의 선형이다(비율 — 8천 대비 3만2천이 8배 미만)', () => {
   const time = (n) => {
     const t = notifText(n);
     let best = Infinity;
-    for (let k = 0; k < 3; k++) { const t0 = process.hrtime.bigint(); P.entitiesOf(t); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); }
+    for (let k = 0; k < 5; k++) { const t0 = process.hrtime.bigint(); P.entitiesOf(t); best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6); }
     return best;
   };
-  time(500); // 워밍업
-  const a = time(2000); const b = time(8000);
-  assert.ok(b / Math.max(a, 0.5) < 8, `2k=${a.toFixed(1)}ms 8k=${b.toFixed(1)}ms`);
+  time(2000); // 워밍업
+  const a = time(8000); const b = time(32000);
+  assert.ok(b / Math.max(a, 0.5) < 8, `8k=${a.toFixed(1)}ms 32k=${b.toFixed(1)}ms`);
 });
 
 /* ── SEC2612-02 ─────────────────────────────────────────────────────── */
