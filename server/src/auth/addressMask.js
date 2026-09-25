@@ -17,6 +17,7 @@
  */
 
 import crypto from 'node:crypto';
+import { isIP } from 'node:net';
 
 export const isAdminReq = (req) => req?.user?.role === 'admin';
 
@@ -227,6 +228,22 @@ export function maskSnapAddress(s, hostHint = '') {
   }
   if ('host' in out) out.host = '';
   if (host && out.name === host) out.name = maskedNameLabel(out);
+  // v2.615(SF2-08 — 기존 결함): 스토리지 노드 목록의 **노드 IP**(클러스터 내부·관리 주소)도 가린다. 형제 host 는 가리고
+  //   노드 IP 는 그대로여서 노드 장애 팝업·장애 장비 화면의 IP 열로 샜다(v2.599 AUTHZ-2599-03 '관리 주소 가림' 계열).
+  //   노드 이름이 주소 그 자체인 경우도 라벨로 바꾼다. 비운 칸은 화면이 '—' 로 그리고 addressHidden 안내가 이유를 말한다.
+  if (out.nodes && typeof out.nodes === 'object' && !Array.isArray(out.nodes) && Array.isArray(out.nodes.list)) {
+    const ipLike = (v) => typeof v === 'string' && v !== '' && (isIP(v.trim()) !== 0 || v.trim() === host);
+    out.nodes = {
+      ...out.nodes,
+      list: out.nodes.list.map((n) => {
+        if (!n || typeof n !== 'object' || Array.isArray(n)) return n;
+        const m = { ...n };
+        if (typeof m.ip === 'string' && m.ip !== '') m.ip = '';
+        if (ipLike(m.name)) m.name = maskedAddressName(m.name);
+        return m;
+      }),
+    };
+  }
   const fp = out.extra?.credFp;
   if (fp && typeof fp === 'object') out.extra = { ...out.extra, credFp: { ...fp, user: '' } };
   return out;

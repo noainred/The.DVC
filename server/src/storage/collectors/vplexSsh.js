@@ -112,7 +112,8 @@ export function normalizeVplexSsh(device, out) {
         name: pick(d, 'Name', 'director-id') || `director${i + 1}`,
       };
     });
-    snap.nodes = { count: list.length, unhealthy: list.filter((n) => n.health !== 'ok' && n.health !== 'unknown').length, list };
+    snap.nodes = { count: list.length, unhealthy: list.filter((n) => n.health !== 'ok' && n.health !== 'unknown').length,
+      unknown: list.filter((n) => n.health === 'unknown').length, list }; // v2.615 SF-R1-02
     snap.sections.nodes = 'ok';
   }
 

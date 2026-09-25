@@ -38,7 +38,8 @@ export function usageColor(pct) {
   return 'var(--green)';
 }
 
-export function Kpi({ label, value, unit, meta, pct, accent, onClick }) {
+// v2.615: title(선택) — 주면 그 문구, 없으면 예전 그대로(onClick 이면 '클릭하여 보기'). 기존 호출부 변화 없음.
+export function Kpi({ label, value, unit, meta, pct, accent, onClick, title }) {
   return (
     <div
       className={`card kpi${onClick ? ' kpi-click' : ''}`}
@@ -46,7 +47,7 @@ export function Kpi({ label, value, unit, meta, pct, accent, onClick }) {
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
-      title={onClick ? '클릭하여 보기' : undefined}
+      title={title ?? (onClick ? '클릭하여 보기' : undefined)}
       style={accent ? { '--kpi-accent': accent } : undefined}
     >
       <div className="label">{label}</div>

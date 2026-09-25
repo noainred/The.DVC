@@ -25,6 +25,7 @@
  *                                    // 동일 의미(2026-08-15 사용자 요구). 타입이 미디어 구분이
  *                                    // 없으면 null(뷰가 컬럼을 '—' 처리).
  *   nodes: { count, unhealthy,       // 노드형이 아니면 count=컨트롤러 수 등 타입 재량(0 허용)
+ *     unknown?,                      // v2.615: **전 노드** 기준 상태 미확인 수(목록 상한 64 밖 포함). 없으면 구버전 수집기
  *     list: [{ id, ip, health,       // 노드별 상세(≤64 — isi status 노드 표와 동일 의미,
  *       inBps, outBps,               //   2026-08-15 사용자 요구): 외부망 처리량(bps)
  *       hdd:{usedBytes,totalBytes,pct}|null,   // 노드별 HDD 풀(무디스크 노드는 null — 'No Storage HDDs')

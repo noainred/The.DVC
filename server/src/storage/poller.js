@@ -74,7 +74,7 @@ async function collectOneInner(dev, startedAt) {
     snap.ok = true; snap.version = 'MOCK(가짜 데이터)'; snap.serial = `MOCK-${dev.id}`;
     snap.capacity = { totalBytes: 500e12, usedBytes: 312e12, pct: 62.4 };
     snap.media = { hdd: { totalBytes: 450e12, usedBytes: 290e12, pct: 64.4 }, ssd: { totalBytes: 50e12, usedBytes: 22e12, pct: 44 } };
-    snap.nodes = { count: 4, unhealthy: 0, list: Array.from({ length: 4 }, (_, i) => ({
+    snap.nodes = { count: 4, unhealthy: 0, unknown: 0, list: Array.from({ length: 4 }, (_, i) => ({
       id: i + 1, ip: `10.94.41.${202 + i}`, health: 'ok', inBps: 3.4e6 * (i + 1), outBps: 1.2e7,
       hdd: i < 2 ? { totalBytes: 108e12, usedBytes: 88e12, pct: 81.5 } : null,  // 무디스크 노드(No Storage HDDs) 재현
       ssd: { totalBytes: 20.7e12, usedBytes: 17.6e12, pct: 85 },

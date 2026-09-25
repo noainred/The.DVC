@@ -919,30 +919,30 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/service-check` | 권한 `tools` | [server/src/routes/api/checksLogs.js:64](../server/src/routes/api/checksLogs.js#L64) |
 | GET | `/tools/snapshots` | 권한 `tools` | [server/src/routes/api/vcTools.js:146](../server/src/routes/api/vcTools.js#L146) |
 | GET | `/tools/solutions` | 권한 `tools` | [server/src/routes/api/vcTools.js:59](../server/src/routes/api/vcTools.js#L59) |
-| GET | `/tools/storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:57](../server/src/routes/api/storageMon.js#L57) |
-| GET | `/tools/storage-growth` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:573](../server/src/routes/api/storageMon.js#L573) |
-| GET | `/tools/storage-growth/:id/daily` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:646](../server/src/routes/api/storageMon.js#L646) |
-| GET | `/tools/storage-growth/settings` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:658](../server/src/routes/api/storageMon.js#L658) |
-| POST | `/tools/storage-growth/settings` | 역할 `admin` · `fullScopeOnly` · `requireSettingsOwner` | [server/src/routes/api/storageMon.js:666](../server/src/routes/api/storageMon.js#L666) |
-| GET | `/tools/storage/activity` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:191](../server/src/routes/api/storageMon.js#L191) |
-| POST | `/tools/storage/collect-all` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:204](../server/src/routes/api/storageMon.js#L204) |
-| POST | `/tools/storage/devices` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:169](../server/src/routes/api/storageMon.js#L169) |
-| DELETE | `/tools/storage/devices/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:179](../server/src/routes/api/storageMon.js#L179) |
-| GET | `/tools/storage/devices/:id/areas` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:511](../server/src/routes/api/storageMon.js#L511) |
-| GET | `/tools/storage/devices/:id/areas/json` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:516](../server/src/routes/api/storageMon.js#L516) |
-| POST | `/tools/storage/devices/:id/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:229](../server/src/routes/api/storageMon.js#L229) |
-| GET | `/tools/storage/devices/:id/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:551](../server/src/routes/api/storageMon.js#L551) |
-| GET | `/tools/storage/devices/export.csv` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:317](../server/src/routes/api/storageMon.js#L317) |
-| GET | `/tools/storage/devices/export.txt` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:341](../server/src/routes/api/storageMon.js#L341) |
-| POST | `/tools/storage/devices/import` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:364](../server/src/routes/api/storageMon.js#L364) |
-| POST | `/tools/storage/devices/import/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:447](../server/src/routes/api/storageMon.js#L447) |
-| GET | `/tools/storage/devices/import/test/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:504](../server/src/routes/api/storageMon.js#L504) |
-| GET | `/tools/storage/devices/sample.csv` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:332](../server/src/routes/api/storageMon.js#L332) |
-| GET | `/tools/storage/devices/sample.txt` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:349](../server/src/routes/api/storageMon.js#L349) |
-| GET | `/tools/storage/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:677](../server/src/routes/api/storageMon.js#L677) |
-| GET | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:257](../server/src/routes/api/storageMon.js#L257) |
-| PUT | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:275](../server/src/routes/api/storageMon.js#L275) |
-| POST | `/tools/storage/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:115](../server/src/routes/api/storageMon.js#L115) |
+| GET | `/tools/storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:76](../server/src/routes/api/storageMon.js#L76) |
+| GET | `/tools/storage-growth` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:603](../server/src/routes/api/storageMon.js#L603) |
+| GET | `/tools/storage-growth/:id/daily` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:676](../server/src/routes/api/storageMon.js#L676) |
+| GET | `/tools/storage-growth/settings` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:688](../server/src/routes/api/storageMon.js#L688) |
+| POST | `/tools/storage-growth/settings` | 역할 `admin` · `fullScopeOnly` · `requireSettingsOwner` | [server/src/routes/api/storageMon.js:696](../server/src/routes/api/storageMon.js#L696) |
+| GET | `/tools/storage/activity` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:221](../server/src/routes/api/storageMon.js#L221) |
+| POST | `/tools/storage/collect-all` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:234](../server/src/routes/api/storageMon.js#L234) |
+| POST | `/tools/storage/devices` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:199](../server/src/routes/api/storageMon.js#L199) |
+| DELETE | `/tools/storage/devices/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:209](../server/src/routes/api/storageMon.js#L209) |
+| GET | `/tools/storage/devices/:id/areas` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:541](../server/src/routes/api/storageMon.js#L541) |
+| GET | `/tools/storage/devices/:id/areas/json` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:546](../server/src/routes/api/storageMon.js#L546) |
+| POST | `/tools/storage/devices/:id/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:259](../server/src/routes/api/storageMon.js#L259) |
+| GET | `/tools/storage/devices/:id/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:581](../server/src/routes/api/storageMon.js#L581) |
+| GET | `/tools/storage/devices/export.csv` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:347](../server/src/routes/api/storageMon.js#L347) |
+| GET | `/tools/storage/devices/export.txt` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:371](../server/src/routes/api/storageMon.js#L371) |
+| POST | `/tools/storage/devices/import` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:394](../server/src/routes/api/storageMon.js#L394) |
+| POST | `/tools/storage/devices/import/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:477](../server/src/routes/api/storageMon.js#L477) |
+| GET | `/tools/storage/devices/import/test/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:534](../server/src/routes/api/storageMon.js#L534) |
+| GET | `/tools/storage/devices/sample.csv` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:362](../server/src/routes/api/storageMon.js#L362) |
+| GET | `/tools/storage/devices/sample.txt` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:379](../server/src/routes/api/storageMon.js#L379) |
+| GET | `/tools/storage/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:707](../server/src/routes/api/storageMon.js#L707) |
+| GET | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:287](../server/src/routes/api/storageMon.js#L287) |
+| PUT | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:305](../server/src/routes/api/storageMon.js#L305) |
+| POST | `/tools/storage/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:145](../server/src/routes/api/storageMon.js#L145) |
 | GET | `/tools/thin-vms` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1078](../server/src/routes/api/toolsCapacity.js#L1078) |
 | GET | `/tools/threats` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:103](../server/src/routes/api/toolsAnalytics.js#L103) |
 | GET | `/tools/vclogs` | 권한 `tools` | [server/src/routes/api/checksLogs.js:172](../server/src/routes/api/checksLogs.js#L172) |

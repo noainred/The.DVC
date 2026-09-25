@@ -1510,6 +1510,25 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
         `Broken`(**ok** 포함)·`Not OK` 를 **초록**으로 칠했다.
     - ⚠ **이미 게시된 2.567.0 번들은 되돌릴 수 없다** — 릴리스 노트에서 그 항목을 지우지 않고
       '철회됨' 으로 표시했다(v2.565 와 같은 판단).
+    - ✅ **v2.615 에 되살렸다 — 근거는 노드 ⚠ 표지 하나다**(사용자 요청 "'미해결 경보' 를 '장애 장비' 로 변경하고
+      장애가 발생한 장비의 숫자를 표시, 클릭하면 장애 장비만 모은 화면" + 캡처의 `64 ⚠2`·`20 ⚠1` 표지.
+      `web/src/views/tools/storageFaultText.js` + 화면 `#/tools/storage-mon/faults`. 회귀는 웹
+      `storageFaultText.test.js`(변이 검증 — 생존 변이 9종을 잡는 테스트를 더했다) + 서버 `test/storageFault2615.test.js`):
+      · ⚠⚠ **장애 = `hasNodeFault(snap)` = 노드 ⚠ 표지 조건 그대로**(`numOrNull(nodes.unhealthy) > 0`). 표의 ⚠ 버튼·KPI·
+        탭 숫자·장애 목록이 **같은 함수**를 쓰므로 카드 숫자와 화면의 ⚠ 개수는 구조적으로 어긋날 수 없다.
+        `healthState`·`clusterHealth`·경보 수·부품 인벤토리는 **판정에 넣지 않는다**(테스트가 모듈 소스에서 그 이름 0건과
+        `ATTN` 픽스처를 고정한다). 판정을 인라인으로 복제하면 소스 스윕이 잡는다.
+      · **정상(초록)은 노드 상태를 실제로 읽었을 때만**이다 — 수집 실패·스냅샷 없음·노드 개수만 주는 수집기(PowerStore)·
+        `count=null`(Unity SSH)·노드 없는 타입(VMAX)·일부 노드 상태 미확인·**비활성 장비·낡은 보고**(담당 노드 수집 주기 ×3
+        + 엣지면 push 주기 — 서버가 `pollMsByAgent` 로 싣는다, 숫자를 박지 않는다)는 **판정 불가**이고 사유별로
+        세어(`unknownBy`) 카드가 '노드 상태 판정 불가 N대 제외' 로 말한다. 판정 불가가 있으면 장애 0 이어도 초록이 아니다.
+        비활성·낡은 장비의 ⚠ 는 표지 계약대로 장애로 세되 `faultNotCurrent` 로 밝힌다.
+      · 서버 수집기 7종이 **전 노드 기준 `nodes.unknown`**(상태 미확인 수)을 싣는다 — 목록은 64대로 잘려 66노드 클러스터의
+        목록 밖 '못 읽음' 을 화면이 정상으로 단정했다. 비정상 계수도 전부 `storage/healthWord.js` 하나로 맞췄다
+        (`n/a` 가 서버는 비정상·화면은 미확인이라 '어느 노드인지 알 수 없음' 이 생겼다). 구버전 엣지는 필드가 없으므로 예전 판정.
+      · 엣지 `nodes.list` 는 중앙 `edgeRecord.sanitizeNodeList` 가 객체·아는 필드·64개로 좁힌다(null 원소 하나가 새 KPI
+        계산에서 화면 전체를 죽였다). 비-admin 응답은 노드 IP 를 가린다(`addressMask.maskSnapAddress` — 기존 결함).
+      · 웹 테스트의 주석 제거 사본은 `web/src/test/_stripComments.js` 하나로 모았다(서버 `test/_stripComments.js` 와 같은 판단).
   - **스토리지 노드 장애 표지는 클릭해 '어느 노드가 왜' 를 본다**(`web/src/views/tools/
     storageNodeText.js` + `StorageMonTool.jsx NodeFaultModal`, v2.523 — 사용자 요청 "장애표지
     클릭하면 어떤 장애인지 확인하는 팝업 만들어줘"): v2.522 까지 노드 열의 `24 ⚠1` 은 클릭되지

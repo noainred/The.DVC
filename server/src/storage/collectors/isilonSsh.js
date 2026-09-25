@@ -18,6 +18,7 @@
 import { withSsh } from '../../proxy/sshExec.js';
 import { sshFailureSnapshot } from './cliSsh.js';
 import { emptySnapshot } from '../types.js';
+import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
 import { DEFAULT_PERIODS } from '../growth.js';
 
 const fmtStep = (b) => {
@@ -268,7 +269,10 @@ export function normalizeIsiStatus(device, parsed, { version = '', users = null,
   if (parsed.nodes.length) {
     snap.nodes = {
       count: parsed.nodes.length,
-      unhealthy: parsed.nodes.filter((n) => n.health && n.health !== 'OK').length,
+      // v2.615(SF-R1-04): 예전 `n.health !== 'OK'` 는 'n/a' 를 비정상으로 셌는데 화면(nodeHealthKind)은 상태 미확인으로 봐
+      //   요약과 목록이 어긋났다(어느 노드인지 알 수 없음). 판정 함수를 healthWord 하나로 맞춘다('-A-' 류 플래그는 그대로 bad).
+      unhealthy: parsed.nodes.filter((n) => healthWord(n.health) === 'bad').length,
+      unknown: parsed.nodes.filter((n) => healthWord(n.health) === 'unknown').length, // SF-R1-02 — 전 노드 기준
       list: parsed.nodes.slice(0, 64).map((n) => ({
         id: n.id, ip: n.ip, health: n.health === 'OK' ? 'ok' : (n.health || 'unknown').toLowerCase(),
         ext: n.ext, inBps: n.inBps, outBps: n.outBps,

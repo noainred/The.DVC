@@ -70,6 +70,7 @@ export function normalizeUnity(device, raw) {
     //   10·15(DEGRADED·MINOR)도 fault 였다.
     const healthOf = (h) => unityHealthWord(h?.value);
     snap.nodes = { count: sps.length, unhealthy: sps.filter((s) => healthWord(healthOf(s.health)) === 'bad').length,
+      unknown: sps.filter((s) => healthWord(healthOf(s.health)) === 'unknown').length, // v2.615 SF-R1-02
       list: sps.slice(0, 64).map((s, i) => ({ id: i + 1, ip: '', health: healthOf(s.health), inBps: null, outBps: null, hdd: null, ssd: null, l3Bytes: 0, name: s.name || s.id || '' })) };
     snap.sections.nodes = 'ok';
   }
