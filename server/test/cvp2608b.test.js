@@ -280,14 +280,15 @@ test('엣지 → 실제 centralRouter push — 중앙 DB 에 엣지 이름으로
     assert.equal((await db.listDeviceRows({ agent: 'edge-a', cvpId: other.id })).rows.length, 0, '남의 cvp_id 는 적재되지 않는다');
     assert.ok((await db.listDeviceRows({ agent: 'edge-a', cvpId: mine.id })).rows.some((d) => d.key === 'SN-NEW'), '내 것은 적재된다');
 
-    // 위임 0대 엣지 — 상태만이라도 올린다(빈 목록으로 그 엣지 보관분을 비운다)
+    // 위임 0대 엣지 — 상태만이라도 올린다(빈 목록으로 그 엣지 보관분을 비운다).
+    // v2.612 CEN2612-01: 중앙은 위임 0건 엣지의 상태를 **보관하지 않는다**(상태 슬롯을 차지해 실제 위임 엣지를 429 로 밀어내던 결함).
     config.agent.name = 'edge-zero';
     push._resetForTest();
     const z = await push.pushCvpNow();
     assert.equal(z.ok, true, z.reason); assert.equal(z.servers, 0);
     assert.equal(push.cvpPushStatus().cleared, true);
     const { edgeCvpSummary } = await import('../src/central/cvpEdge.js');
-    assert.ok(edgeCvpSummary().some((e) => e.agent === 'edge-zero' && e.servers === 0), '중앙이 0대 엣지의 보고를 받았다');
+    assert.ok(!edgeCvpSummary().some((e) => e.agent === 'edge-zero'), '위임 0건 엣지는 상태 슬롯을 차지하지 않는다(noDelegation)');
   } finally {
     srv.close();
     config.agent.centralUrl = '';

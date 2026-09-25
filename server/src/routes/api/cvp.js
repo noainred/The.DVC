@@ -72,7 +72,7 @@ function pickStatus(st) {
     durationMs: st.durationMs ?? null, deviceCount: st.deviceCount ?? null, error: st.error ?? null, authStopped: st.authStopped || null,
     usedPaths: st.usedPaths || {}, missing: st.missing || {}, seenFields: st.seenFields || {}, truncated: st.truncated || null, cvpVersion: st.cvpVersion || '',
     ...(st.dbUnavailable ? { dbUnavailable: true } : {}),
-    ...(st.partsDueUnread ? { partsDueUnread: true } : {}),
+    ...(st.partsDueUnread ? { partsDueUnread: true, partsNotTried: Number.isFinite(st.partsNotTried) ? st.partsNotTried : null } : {}), // v2.612 RECENT2612-01
     ...(st.pruneHeld && typeof st.pruneHeld === 'object' ? { pruneHeld: st.pruneHeld } : {}),
   };
 }
