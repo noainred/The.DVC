@@ -149,3 +149,24 @@ export function scanHoldNote(r) {
   if (dell) return 'HPE(iLO) 스캔은 iLO 비밀번호를 입력할 때까지 보류됩니다 — Dell(iDRAC) 스캔은 계속됩니다.';
   return '스캔은 비밀번호를 입력할 때까지 보류됩니다.';
 }
+
+/**
+ * v2.611(감사 WEB2611-01): 스캔 대역 폼의 계정 상태(순수). HPE(iLO) 전용 대역에서 Dell 비밀번호가 없는 것은 **정상**이다 —
+ *   예전에는 iDRAC 비밀번호에 필수(*) 표시를 달고 저장 후 '⚠ 비밀번호 미설정' 경고를 띄웠다(거짓 경고).
+ *   f = 폼 상태 { username, password, hasPassword, iloUsername, iloPassword, iloHasPassword }.
+ * @returns {{ dellReady:boolean, iloReady:boolean, dellPasswordRequired:boolean, warnNoPassword:boolean }}
+ *   dellPasswordRequired — iDRAC 비밀번호 칸의 '*' 표시(쓸 수 있는 iLO 계정이 있으면 필수가 아니다).
+ *   warnNoPassword       — 저장 뒤 '비밀번호 미설정' 경고(쓸 수 있는 계정이 하나도 없을 때만).
+ */
+export function scanFormCredsState(f) {
+  const pwIn = (v) => typeof v === 'string' && v !== '';   // trim 금지 — 공백 비밀번호도 입력이다(기존 규약)
+  const dellUser = Boolean(String(f?.username || '').trim());
+  const iloUser = Boolean(String(f?.iloUsername || '').trim());
+  const dellReady = dellUser && (Boolean(f?.hasPassword) || pwIn(f?.password));
+  const iloReady = iloUser && (Boolean(f?.iloHasPassword) || pwIn(f?.iloPassword));
+  return {
+    dellReady, iloReady,
+    dellPasswordRequired: !f?.hasPassword && !iloReady,
+    warnNoPassword: !dellReady && !iloReady,
+  };
+}
