@@ -4,6 +4,7 @@
  * (0600; holds per-agent tokens). Edited via the admin API.
  */
 
+import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -131,7 +132,7 @@ export const VERIFY_PING_MAX_BYTES = 64 * 1024;
 export async function verifyDerivedCollectorUrl({ url, name, datacenter = '', token }, fetchImpl = tokenFetch) {
   let why = '';
   try {
-    const pr = await fetchImpl(`${String(url).replace(/\/+$/, '')}/api/collector/ping`, { headers: { Accept: 'application/json', 'X-Collector-Token': String(token || '') }, signal: AbortSignal.timeout(8_000) });
+    const pr = await fetchImpl(`${trimTrailingSlashes(String(url))}/api/collector/ping`, { headers: { Accept: 'application/json', 'X-Collector-Token': String(token || '') }, signal: AbortSignal.timeout(8_000) });
     if (pr.status === 403 || pr.status === 401) why = `유도한 주소 ${url} 이(가) 이 엣지의 토큰을 거부(403) — 그 주소는 다른 엣지(중계/NAT 장비)입니다`;
     else if (!pr.ok) why = `유도한 주소 ${url} 응답 HTTP ${pr.status}`;
     else {
@@ -168,8 +169,10 @@ function normalize(body, existing = null) {
   if (id.length > 128 || [...id].some((c) => c.charCodeAt(0) < 32)) return [null, 'id에 사용할 수 없는 문자가 있습니다.'];
   if (!name) return [null, 'name(표시 이름)은 필수입니다.'];
   if (!url) return [null, '수집 서버 URL은 필수입니다.'];
+  // v2.611 LEFT2611-06: 길이 상한 + 선형 끝 '/' 제거 — 정규식 끝-슬래시 치환은 긴 입력에서 O(n²) 였다(4만 자 620ms).
+  if (url.length > COLLECTOR_URL_MAX) return [null, `수집 서버 URL이 너무 깁니다(${COLLECTOR_URL_MAX}자 이하).`];
   if (!/^https?:\/\//.test(url)) url = `http://${url}`;
-  url = url.replace(/\/+$/, '');
+  url = trimTrailingSlashes(url);
   // URL 형식 검증 — http/https + 유효 호스트만 허용(잘못된 스킴/입력 차단).
   try {
     const u = new URL(url);

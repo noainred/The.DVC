@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, putJson, postJson, usePolling } from '../api.js';
+import { blankOr } from './blankOr.js';
 import { Loading, ErrorBox, VmLink } from '../components/ui.jsx';
 import { enableNotifications } from '../pwa.js';
 import {
@@ -57,7 +58,9 @@ function FinOps() {
   const c = (v) => `${cur}${num(v)}`;
   const saveCfg = async () => {
     setBusy(true); setMsg(null);
-    try { const r = await putJson('/insights/finops/config', cfg); setCfg(r); setMsg('저장됨 — 다음 갱신부터 반영'); await load(); }
+    // v2.611 LEFT2611-05: 빈 숫자 칸은 보내지 않는다(blankOr) — Number('') === 0 이 CO₂ 계수 0 으로 저장됐다.
+    const body = { ...cfg, tariffPerKwh: blankOr(cfg.tariffPerKwh), co2KgPerKwh: blankOr(cfg.co2KgPerKwh), pue: blankOr(cfg.pue) };
+    try { const r = await putJson('/insights/finops/config', body); setCfg(r); setMsg('저장됨 — 다음 갱신부터 반영'); await load(); }
     catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
   };
   return (

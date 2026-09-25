@@ -238,7 +238,9 @@ export function saveScanRanges(body = {}) {
     rangeKey(cur.ranges) !== rangeKey(next.ranges)
     || accessMoved({ agent: cur.agent || '', username: cur.username || '' }, { agent: next.agent, username: next.username }, ['agent', 'username']));
   const droppedSecrets = (moved && cur.password) ? dropCarriedSecrets(next, body, ['password']) : [];
-  if (droppedSecrets.length) next.password = ''; // 스키마(빈 문자열 = 비밀번호 없음)는 유지 — enabledScanRanges 가 스캔을 보류한다
+  // 스키마(빈 문자열 = 비밀번호 없음)는 유지. v2.611 정정(감사 RECENT2611-02): 예전 주석은 'enabledScanRanges 가 스캔을 보류한다'
+  //   였지만 iLO 계정이 남아 있으면 그 대역은 계속 스캔된다(Dell 만 보류). 안내 문구는 아래 holdText 가 계정 상태로 가른다.
+  if (droppedSecrets.length) next.password = '';
   // v2.610: iLO 비밀번호도 같은 규칙 — 대역·엣지·**iLO 계정명**이 바뀌었는데 새 iLO 비밀번호가 없으면 승계하지 않는다.
   const iloMoved = existed && (rangeKey(cur.ranges) !== rangeKey(next.ranges)
     || accessMoved({ agent: cur.agent || '', username: curIlo.username }, { agent: next.agent, username: next.ilo.username }, ['agent', 'username']));
@@ -255,10 +257,24 @@ export function saveScanRanges(body = {}) {
   if (droppedSecrets.length) {
     out.droppedSecrets = droppedSecrets;
     out.skipped = [];
-    if (droppedSecrets.includes('password')) out.skipped.push({ field: 'password', reason: '스캔 대역·수행 엣지·계정이 바뀌어 저장된 비밀번호를 폐기했습니다 — 새 대역에 보낼 비밀번호를 다시 입력하세요(입력 전까지 이 항목의 스캔은 보류됩니다).' });
-    if (droppedSecrets.includes('iloPassword')) out.skipped.push({ field: 'iloPassword', reason: '스캔 대역·수행 엣지·iLO 계정이 바뀌어 저장된 iLO 비밀번호를 폐기했습니다 — iLO 비밀번호를 다시 입력하세요(입력 전까지 이 대역에서 HPE 서버는 찾지 않습니다).' });
+    const hold = scanHoldText(next);
+    if (droppedSecrets.includes('password')) out.skipped.push({ field: 'password', reason: `스캔 대역·수행 엣지·계정이 바뀌어 저장된 비밀번호를 폐기했습니다 — 새 대역에 보낼 비밀번호를 다시 입력하세요(${hold}).` });
+    if (droppedSecrets.includes('iloPassword')) out.skipped.push({ field: 'iloPassword', reason: `스캔 대역·수행 엣지·iLO 계정이 바뀌어 저장된 iLO 비밀번호를 폐기했습니다 — iLO 비밀번호를 다시 입력하세요(${hold}).` });
   }
   return out;
+}
+
+/**
+ * v2.611(감사 RECENT2611-02): 비밀번호 폐기 뒤 '무엇이 보류되고 무엇이 계속되는가'(순수). 예전에는 Dell 비밀번호를 버리면
+ *   무조건 '이 항목의 스캔은 보류됩니다' 라고 했는데, iLO 계정이 남아 있으면 enabledScanRanges 가 그 대역을 계속 스캔한다
+ *   (거짓 안내). 계정 상태로 가른다. 웹 `views/idrac/scanRunText.js scanHoldNote` 가 같은 판정이다.
+ */
+export function scanHoldText(e) {
+  const c = scanCredsOf(e);
+  if (c.dell && c.ilo) return '입력 전에도 두 계정으로 스캔은 계속됩니다';
+  if (c.ilo) return '입력 전까지 Dell(iDRAC) 스캔은 보류되고, HPE(iLO) 스캔은 계속됩니다';
+  if (c.dell) return '입력 전까지 HPE(iLO) 스캔은 보류되고, Dell(iDRAC) 스캔은 계속됩니다';
+  return '입력 전까지 이 항목의 스캔은 보류됩니다';
 }
 
 /** 삭제. id로 삭제. */

@@ -11,6 +11,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { buildHostIndex, resolveServerVcenter } from '../idrac/attribution.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'finops.json');
 
@@ -36,13 +37,15 @@ export function loadFinopsConfig() {
 }
 export function saveFinopsConfig(body = {}) {
   const cur = loadFinopsConfig();
+  // v2.611 LEFT2611-05: 세 숫자 칸의 규칙을 하나로 — 빈 값·null·숫자 아님은 **미지정**(이전 값 유지), 명시적 0 은 값이다
+  //   (v2.583·v2.596 규약). 예전엔 요금·PUE 가 `Number(x) || cur` 라 0 을 저장할 수 없었고, CO2 는 `Number('') === 0` 이라
+  //   빈 칸이 **0(무탄소)** 으로 저장됐다. 음수는 0 으로 자른다(요금·CO2), PUE 는 [1,5].
+  const pick = (v, prev) => { const n = numOrNull(v); return n == null ? prev : n; };
   const next = {
-    tariffPerKwh: Math.max(0, Number(body.tariffPerKwh) || cur.tariffPerKwh),
+    tariffPerKwh: Math.max(0, pick(body.tariffPerKwh, cur.tariffPerKwh)),
     currency: String(body.currency || cur.currency).slice(0, 8),
-    // Number(undefined)=NaN이고 NaN ?? x = NaN이라 co2 생략 시 NaN→null 저장돼 CO2 지표가 0이
-    // 되던 버그. 유한성으로 판정해 0(무탄소 전력)은 보존하고 누락/NaN만 기존값으로 폴백한다.
-    co2KgPerKwh: (() => { const c = Number(body.co2KgPerKwh); return Number.isFinite(c) ? Math.max(0, c) : cur.co2KgPerKwh; })(),
-    pue: Math.min(5, Math.max(1, Number(body.pue) || cur.pue)),
+    co2KgPerKwh: Math.max(0, pick(body.co2KgPerKwh, cur.co2KgPerKwh)),
+    pue: Math.min(5, Math.max(1, pick(body.pue, cur.pue))),
   };
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2));

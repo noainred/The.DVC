@@ -16,6 +16,7 @@
  * 복사해 시작하면 이 방어가 빠진다.
  */
 
+import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import { Router } from 'express';
 import { config, loadVcenterConfig, currentVersion } from '../config.js';
 import { instanceId } from '../instanceId.js';
@@ -272,7 +273,8 @@ function strAgent(v) { return typeof v === 'string' ? capTrim(v, 64) : ''; }
 // 경로 문자열에 의존하는 게이트를 다시 만들지 말 것.
 // v2.602(감사 SEC2602-01): 끝 '/' 는 **루프로** 뗀다 — `/\/+$/` 는 '/' 연속 뒤에 다른 글자가 오면 시작 위치마다 끝까지
 //   훑어 O(n²) 이고, 이 함수는 인증 전 모든 central 요청에서 돈다(헤더 16KB 상한까지 요청당 약 0.2초).
-export const trimTrailingSlashes = (s) => { let e = s.length; while (e > 0 && s.charCodeAt(e - 1) === 47) e--; return e === s.length ? s : s.slice(0, e); };
+// v2.611: 함수 본체는 util/trimSlashes.js 로 옮겼다(collector/registry.js 와 공유). 재수출은 import+export 형태(v2.575 — `export … from` 은 이 모듈 스코프에 이름을 만들지 않는다).
+export { trimTrailingSlashes };
 export const normPath = (p) => trimTrailingSlashes(typeof p === 'string' ? p : '').replace(/\/\.$/, '').toLowerCase();
 const registerName = (req) => (normPath(req.path) === '/register-collector' ? (typeof req.body?.name === 'string' ? req.body.name.trim() : '') : '');
 
@@ -383,7 +385,7 @@ centralRouter.get('/assignment', (req, res) => {
 // 엣지 자기등록(EDGE_MODE=all): 부팅한 엣지가 자기 이름/포트/수집토큰을 알리면 수집 서버
 // 목록에 자동 upsert — 관리자의 '수집 서버 추가' 수동 절차가 필요 없어진다.
 // Body: { name, port, collectorToken, datacenter?, urlHint?, version? }
-const REGISTER_URL_MAX = 2048;
+const REGISTER_URL_MAX = COLLECTOR_URL_MAX; // v2.611: 관리자 등록과 같은 상한(util/trimSlashes.js)
 const REGISTER_TOKEN_MAX = 1024;
 centralRouter.post('/register-collector', async (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });

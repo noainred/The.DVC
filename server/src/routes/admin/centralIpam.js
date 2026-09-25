@@ -19,6 +19,7 @@ import { listCollectors } from '../../collector/registry.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
 import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js';
 
 // v2.607 AUTHZ2607-04·07: 위임 인벤토리 현황·소유 엣지·IP 스캔 결과·설정은 법인 축으로 나눌 수 없거나(엣지·스캔 대역 전체)
 //   전 법인에 걸친 동작이라 범위 계정 403(v2.525 규약). vCenter별 스캔 대역은 쓰기 범위 밖이면 404(존재 은닉) —
@@ -37,8 +38,33 @@ adminRouter.get('/ipam/db-info', adminOnly, async (_req, res) => {
 });
 
 // IPMS settings: ignore IP ranges (global + per-vCenter) hidden from the ledger.
-adminRouter.get('/ipam/settings', adminOnly, (_req, res) => res.json({ settings: loadIpamSettings() }));
-adminRouter.put('/ipam/settings', adminOnly, (req, res) => res.json({ ok: true, settings: saveIpamSettings(req.body || {}) }));
+// v2.611 LEFT2611-02: 범위 계정에는 범위 안 vCenter 의 무시 대역만 보이고(omittedOutOfScope), PUT 은 범위 밖 vCenter 키를
+//   직전 값 그대로 보존한다(v2.605 mergeScopedMap — 예전엔 GET 이 준 목록을 그대로 저장해 다른 법인 대역을 지웠다). 전 법인 공통
+//   목록(전체 무시·공인·사설 대역)은 범위 계정이 바꿀 수 없다 — 적용하지 않고 ignoredGlobal 로 밝힌다(v2.607 AUTHZ2607-05).
+const ipamList = (v) => (Array.isArray(v) ? v : String(v || '').split(/\r?\n/)).map((x) => String(x).trim()).filter(Boolean);
+function ipamSettingsView(settings, allowed) {
+  if (!allowed) return { settings };
+  const all = Object.keys(settings.vcenters || {});
+  const vcenters = filterScopedMap(settings.vcenters || {}, allowed);
+  const omitted = all.length - Object.keys(vcenters).length;
+  return { settings: { ...settings, vcenters }, ...(omitted ? { omittedOutOfScope: omitted } : {}) };
+}
+adminRouter.get('/ipam/settings', adminOnly, (req, res) => {
+  res.json(ipamSettingsView(loadIpamSettings(), scopedVcenterIds(req.user, store.get())));
+});
+adminRouter.put('/ipam/settings', adminOnly, (req, res) => {
+  const snap = store.get();
+  const readAllowed = scopedVcenterIds(req.user, snap);
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  if (!readAllowed) return res.json({ ok: true, settings: saveIpamSettings(body) });
+  const writeAllowed = writeScopedVcenterIds(req.user, snap) || readAllowed;
+  const before = loadIpamSettings();
+  const norm = (o) => ({ global: ipamList(o.global), publicRanges: ipamList(o.publicRanges), privateRanges: ipamList(o.privateRanges) });
+  const { ignoredGlobal } = keepScopedFields({ ...body, ...norm(body) }, { ...before, ...norm(before) }, writeAllowed, ['vcenters']);
+  const { merged, ignored } = mergeScopedMap(before.vcenters || {}, body.vcenters || {}, writeAllowed);
+  const settings = saveIpamSettings({ global: before.global, publicRanges: before.publicRanges, privateRanges: before.privateRanges, vcenters: merged });
+  res.json({ ok: true, ...ipamSettingsView(settings, readAllowed), ...(ignored.length ? { ignoredOutOfScope: ignored.length } : {}), ...ignoredGlobalFields(ignoredGlobal) });
+});
 
 // 중앙 토큰(CENTRAL_TOKEN) — 조회/생성/저장(실행중 서버 + portal.env 영속).
 // ⚠ requireSettingsOwner(6차 재감사): centralTokenInfo() 는 토큰을 **평문으로** 반환한다.
@@ -105,7 +131,7 @@ adminRouter.delete('/central/agent-tokens/:agent', adminOnly, requireSettingsOwn
 
 // IP 능동 스캔(TCP 커넥트) — 에이전트별 설정/상태/수동실행/결과.
 // agent 미지정 = 이 포탈(중앙) 직접 스캔(__local__). 그 외 이름 = 분산 에이전트 할당.
-adminRouter.get('/ipam/scan/settings', adminOnly, (req, res) => {
+adminRouter.get('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => { // v2.611 LEFT2611-07: 형제 PUT·run·results 와 같은 게이트(임의 ?agent= 설정·전 엣지 보고)
   const agent = req.query.agent || LOCAL;
   // 선택 가능한 에이전트: 로컬 + IP스캔 설정된 에이전트 + iDRAC 할당 + 중앙에 보고한
   // 에이전트(getResults) + 배포된 에이전트(agentName) + 수집 서버(datacenter).
@@ -134,7 +160,7 @@ adminRouter.post('/ipam/scan/run', adminOnly, fleetOnly, (_req, res) => {
   res.json({ ...r, status: scanStatus(), info: scanInfo() });
 });
 // 진행 중 스캔 상태 + 완료된 스캔 이력(가벼운 폴링용).
-adminRouter.get('/ipam/scan/status', adminOnly, (_req, res) => {
+adminRouter.get('/ipam/scan/status', adminOnly, fleetOnly, (_req, res) => { // v2.611 LEFT2611-07
   res.json({ status: scanStatus(), info: scanInfo(), runs: getScanRuns(50), reports: getAgentReports() });
 });
 adminRouter.get('/ipam/scan/results', adminOnly, fleetOnly, (_req, res) => {
@@ -177,18 +203,21 @@ adminRouter.post('/ipam/vc-ranges/import', adminOnly, (req, res) => {
   // vCenter 이름/ID → ID(대소문자 무시). 못 찾으면 null → 오류 행(오타로 유령 vCenter 생성 방지).
   let vcs = [];
   try { vcs = loadVcenterConfig().vcenters || []; } catch { /* 목록 실패 시 resolve 전부 null → 전 행 오류 */ }
+  // v2.611 LEFT2611-04: 범위 계정에는 쓰기 범위 밖 vCenter 를 '알 수 없는 vCenter' 와 **같은 결과**로 해석한다 —
+  //   예전엔 dryRun 보고가 범위 밖 이름을 id·action 으로 풀어 줘 존재를 드러냈다(형제 PUT/DELETE 는 404 로 숨긴다).
   const resolveVc = (v) => {
     const s = String(v || '').trim();
     if (!s) return null;
-    if (vcs.some((x) => x.id === s)) return s;
-    const byName = vcs.find((x) => String(x.name || '').toLowerCase() === s.toLowerCase());
-    return byName ? byName.id : null;
+    let id = null;
+    if (vcs.some((x) => x.id === s)) id = s;
+    else { const byName = vcs.find((x) => String(x.name || '').toLowerCase() === s.toLowerCase()); id = byName ? byName.id : null; }
+    return id && vcRangeWritable(req.user, id) ? id : null;
   };
   const existing = new Set(listVcRanges().map((e) => e.vcenterId));
   const { report, summary } = analyzeVcRangesImport(rows, { resolveVc, hasExisting: (id) => existing.has(id) });
   if (req.body?.dryRun) {
-    const oos = report.filter((r) => r.vcId && r.action !== 'error' && !vcRangeWritable(req.user, r.vcId)).length;
-    return res.json({ ok: true, dryRun: true, report, summary, total: rows.length, ...(oos ? { outOfScope: oos, outOfScopeReason: '범위 밖(또는 조회 전용) vCenter 행은 가져오기에서 건너뜁니다.' } : {}) });
+    // outOfScope 개수도 존재 단서라 싣지 않는다 — 범위 밖 행은 위 resolveVc 에서 이미 '알 수 없는 vCenter' 오류 행이다.
+    return res.json({ ok: true, dryRun: true, report, summary, total: rows.length });
   }
 
   const allowOverwrite = req.body?.overwrite === true;

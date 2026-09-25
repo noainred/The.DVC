@@ -19,6 +19,7 @@ import { agentIdentitySummary } from '../../central/agentIdentity.js';
 import { pullNow } from '../../collector/puller.js';
 import { pushUpgradeToCollectors } from '../../collector/upgradePush.js';
 import { resilientFetch } from '../../util/resilientFetch.js';
+import { withOutboundTag } from '../../util/outboundStats.js'; // v2.611 LEFT2611-08: 같은 주소 엣지를 기록에서 나눈다
 // v2.605(감사 LEFT2605-01 형제): 엣지 응답은 상한까지만 읽는다 — 비밀번호 변경·오류 본문은 작고, export 는 인벤토리 전량이라 큰 상한.
 import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../../util/readCapped.js';
 const EDGE_SMALL_MAX_BYTES = 256 * 1024;
@@ -214,12 +215,12 @@ adminRouter.post('/collectors/set-password', adminOnly, fleetOnly, requireSettin
   const results = await Promise.all(targets.map(async (c) => {
     if (!c.token) return { id: c.id, name: c.name || c.id, ok: false, reason: '이 수집 서버에 저장된 토큰이 없습니다(수정에서 토큰 입력).' };
     try {
-      const r = await resilientFetch(`${String(c.url).replace(/\/+$/, '')}/api/collector/set-password`, {
+      const r = await withOutboundTag(c.id, () => resilientFetch(`${String(c.url).replace(/\/+$/, '')}/api/collector/set-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Collector-Token': c.token },
         body: JSON.stringify({ username, password }),
         timeoutMs: 15_000, retries: 1,
-      });
+      }));
       const body = await readJsonCapped(r, EDGE_SMALL_MAX_BYTES, '엣지 응답').then((j) => (j && typeof j === 'object' && !Array.isArray(j) ? j : {})).catch(() => ({}));
       if (r.status === 404) return { id: c.id, name: c.name || c.id, ok: false, reason: '엣지가 이 기능을 지원하지 않습니다(v2.107 미만 — 먼저 업그레이드하세요).' };
       if (r.status === 403) return { id: c.id, name: c.name || c.id, ok: false, reason: '토큰 불일치(엣지 COLLECTOR_TOKEN 확인).' };
@@ -399,11 +400,12 @@ adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
   }
   try {
     // 단발 fetch는 고RTT·일시적 네트워크 블립에 '가끔 연결 안 됨'으로 오판된다 → 재시도로 흡수.
-    const r = await resilientFetch(`${url.replace(/\/+$/, '')}/api/collector/export`, {
+    // 연결 테스트는 /export 본문(hosts·agent·version)이 필요하다 — 태그만 붙인다(v2.611 LEFT2611-08).
+    const r = await withOutboundTag(String(req.body?.id || url), () => resilientFetch(`${url.replace(/\/+$/, '')}/api/collector/export`, {
       headers: { Accept: 'application/json', ...(token ? { 'X-Collector-Token': token } : {}) },
       timeoutMs: config.collector.timeoutMs, retries: 2,
       onRetry: () => { retried++; },
-    });
+    }));
     if (!r.ok) {
       // 서버가 준 사유(collector 라우터의 error 필드)와 상태코드별 해결 힌트를 함께 안내한다.
       let serverMsg = '';
@@ -464,10 +466,11 @@ adminRouter.post('/collectors/:id/force-token', adminOnly, fleetOnly, async (req
   // 재검증: 새 토큰으로 export가 200인지 확인(서비스 기동 직후라 재시도 여유).
   let verified = false; let verifyReason = '';
   try {
-    const vr = await resilientFetch(`${String(saved.url || url).replace(/\/+$/, '')}/api/collector/export`, {
+    const vr = await withOutboundTag(saved.id, () => resilientFetch(`${String(saved.url || url).replace(/\/+$/, '')}/api/collector/export`, {
       headers: { Accept: 'application/json', 'X-Collector-Token': token },
       timeoutMs: config.collector.timeoutMs, retries: 2,
-    });
+    }));
+    try { await vr.body?.cancel?.(); } catch { /* 상태만 본다 — 인벤토리 본문은 읽지 않고 닫는다(v2.611 LEFT2611-08) */ }
     verified = vr.ok;
     if (!vr.ok) verifyReason = `HTTP ${vr.status}`;
   } catch (e) { verifyReason = e.message; }

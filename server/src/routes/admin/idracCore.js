@@ -16,7 +16,9 @@ import { hardwareDimMatch } from '../../idrac/hwMatch.js';
 import { partBuckets, serversWithPart, isPartCat } from '../../idrac/partsInventory.js';
 import { snapMemo } from '../../util/snapCache.js';
 import { listDatacenters, getDatacenterAssign } from '../../datacenter/store.js';
-import { adminOnly, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc, remoteServersResolved, analysisServersWithRemote, invForServer } from './shared.js';
+import { adminOnly, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc, remoteServersResolved, analysisServersWithRemote, invForServer, fullScopeOnlyWith } from './shared.js';
+// v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
+const fleetOnly = fullScopeOnlyWith('iDRAC 등록·연결 테스트·즉시 수집·전력 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 실행할 수 있습니다.');
 
 export function registerIdracCore(adminRouter) {
 
@@ -93,7 +95,7 @@ adminRouter.get('/idrac', adminOnly, (_req, res) => {
 });
 
 // Register a server, then poll immediately so power shows up right away.
-adminRouter.post('/idrac', adminOnly, async (req, res) => {
+adminRouter.post('/idrac', adminOnly, fleetOnly, async (req, res) => {
   const result = addServer(req.body || {});
   if (result.ok) pollNow().catch(() => {});
   res.status(result.ok ? 201 : 400).json(result);
@@ -103,7 +105,7 @@ adminRouter.post('/idrac', adminOnly, async (req, res) => {
 // 같은 리터럴 라우트를 가리지 않도록 이 섹션의 '맨 끝'(모든 리터럴 라우트 뒤)에 정의한다.
 
 // Test connectivity + read current power for a server (new or saved by id).
-adminRouter.post('/idrac/test', adminOnly, async (req, res) => {
+adminRouter.post('/idrac/test', adminOnly, fleetOnly, async (req, res) => {
   res.json(await testServer(req.body || {}));
 });
 
@@ -111,14 +113,14 @@ adminRouter.post('/idrac/test', adminOnly, async (req, res) => {
 // v2.590: 수동 실행은 인증 실패 정지 서버도 1회 시도한다.
 // v2.591(감사 P1): 재진입 가드에 막히면(busy) 직전 결과를 '이번 수집' 인 척 돌려주지 않고, 긴급중단(stopped)도
 //   '성공 0 · 실패 0' 이 아니라 그 사실을 싣는다 — 화면(IdracAdmin)이 셋을 나눠 말한다. 재진입 가드는 유지.
-adminRouter.post('/idrac/poll', adminOnly, async (_req, res) => {
+adminRouter.post('/idrac/poll', adminOnly, fleetOnly, async (_req, res) => {
   const r = await pollNowManual();
   res.json({ ok: r.ran, ran: r.ran, busy: r.busy, stopped: r.stopped, lastRun: r.lastRun });
 });
 
 // 전력 집계 표시 설정 — excludeUnmapped: vCenter 미매핑 측정 전력을 총합/보고/목록에서 제외.
 adminRouter.get('/idrac/power-settings', adminOnly, (_req, res) => res.json({ ok: true, settings: loadPowerSettings() }));
-adminRouter.put('/idrac/power-settings', adminOnly, async (req, res) => {
+adminRouter.put('/idrac/power-settings', adminOnly, fleetOnly, async (req, res) => {
   const settings = savePowerSettings(req.body || {});
   await store.refresh().catch(() => {}); // Overview 총합/보고 즉시 반영
   logAudit({ user: req.user?.username, action: '전력 집계 설정 변경', target: `미매핑 제외=${settings.excludeUnmapped}` });
@@ -129,7 +131,7 @@ adminRouter.put('/idrac/power-settings', adminOnly, async (req, res) => {
 // body.mode='stale'(기본): 등록 해제된 OME/수집서버 잔여 + 고아 DB 행만 삭제(활성 소스 보존).
 // body.mode='all'(강제): 등록 여부 무관하게 OME 캐시·원격 호스트 전체를 비우고 등록 iDRAC 외 DB 행 삭제.
 //   (등록된 OME/수집기가 있으면 다음 폴링에 다시 채워질 수 있음 = 출처가 실데이터.) 정리 후 분해 결과 반환.
-adminRouter.post('/idrac/power-purge', adminOnly, async (req, res) => {
+adminRouter.post('/idrac/power-purge', adminOnly, fleetOnly, async (req, res) => {
   try {
     const mode = (req.body || {}).mode === 'all' ? 'all' : 'stale';
     const before = await measuredPowerBreakdown().catch(() => null);

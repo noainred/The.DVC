@@ -1,5 +1,5 @@
 // IpamSettings.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, getToken } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { DEVTYPE_LABEL, MGMT } from './ipamShared.jsx';
@@ -208,7 +208,8 @@ export function IpmsSettings({ onClose }) {
   const setPrivate = (t) => setS({ ...s, privateRanges: t.split('\n') });
   const save = async () => {
     const r = await putJson('/admin/ipam/settings', s).catch((e) => ({ error: e.message }));
-    if (r.ok) onClose(); else setMsg(r.error || '저장 실패');
+    // v2.611 LEFT2611-02: 범위 제한 계정의 전역 대역 변경은 적용하지 않는다 — 조용히 닫지 않고 사유를 보인다.
+    if (r.ok && !r.ignoredReason) onClose(); else setMsg(r.ok ? `저장했습니다(범위 안 vCenter 대역만). ${r.ignoredReason}` : (r.error || '저장 실패'));
   };
 
   return (
@@ -284,9 +285,11 @@ export function IpScanSettings({ onClose }) {
       if (first) setS(r.settings);
       if (r.agents) setAgents(r.agents);
       setStatus(r.status); setInfo(r.info); setReports(r.reports || {}); setCentralEnabled(r.centralEnabled !== false);
-    } catch (e) { setMsg(e.message); }
+    } catch (e) { setMsg(e.message); if (e?.status === 403) deniedRef.current = true; }
   };
-  useEffect(() => { load(agent, true); const t = setInterval(() => load(agent, false), 2000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [agent]);
+  // v2.611 LEFT2611-07: 403(범위 제한 계정)은 정책 거부라 2초마다 다시 묻지 않는다.
+  const deniedRef = useRef(false);
+  useEffect(() => { load(agent, true); const t = setInterval(() => { if (!deniedRef.current) load(agent, false); }, 2000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [agent]);
   if (!s) return <Modal title="IP 스캔" onClose={onClose}>{msg ? <ErrorBox message={msg} /> : <Loading />}</Modal>;
 
   const isLocal = agent === LOCAL_AGENT;
@@ -457,8 +460,9 @@ export function ScanProgressBar({ progress }) {
 export function ScanStatusModal({ onClose }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
-  const load = () => fetchJson('/admin/ipam/scan/status').then(setD).catch((e) => setErr(e.message));
-  useEffect(() => { load(); const t = setInterval(load, 2000); return () => clearInterval(t); }, []);
+  const deniedRef = useRef(false); // v2.611 LEFT2611-07: 403 은 다시 물어도 같다 — 폴링을 멈춘다
+  const load = () => { if (deniedRef.current) return; fetchJson('/admin/ipam/scan/status').then(setD).catch((e) => { setErr(e.message); if (e?.status === 403) deniedRef.current = true; }); };
+  useEffect(() => { load(); const t = setInterval(load, 2000); return () => clearInterval(t); /* eslint-disable-next-line */ }, []);
   const fmt = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
   const dur = (ms) => (ms == null ? '—' : ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}초`);
   const st = d?.status; const runs = d?.runs || [];

@@ -15,6 +15,7 @@
  *  · 거부 응답은 기존 403 형태를 유지한다 — 프론트 ErrorBox 가 AccessDenied 로 자동 전환하려면
  *    `{error:'forbidden', requiredPerm}` 계약이 필요하다(CLAUDE.md 프론트 규칙).
  */
+import { trimTrailingSlashes } from '../util/trimSlashes.js'; // v2.611: 선형 끝 '/' 제거 단일 소스
 import { roleToolsDenied, userToolAllowed, effectiveToolAccess } from './permissions.js';
 
 /**
@@ -149,7 +150,6 @@ export const TOOL_EXACT_PATHS = Object.freeze({
 /** 전체 경로 정규화(정확 일치용) — 소문자 + 확장자 제거 + 끝 슬래시 제거. */
 // v2.602(감사 SEC2602-04 — 실측 약 0.19s/요청): /\/+$/ 는 '/' 수만 개 경로에서 위치마다 끝까지 훑어 O(n²) 였다.
 // 끝 슬래시는 뒤에서 한 번만 센다(선형).
-const trimTrailingSlashes = (s) => { let e = s.length; while (e > 0 && s.charCodeAt(e - 1) === 47) e--; return e === s.length ? s : s.slice(0, e); };
 export const stripPath = (pathname) => {
   const raw = trimTrailingSlashes(String(pathname || '').split(/[?#]/)[0].toLowerCase());
   return raw.replace(/\.(csv|json|xlsx|xls|txt)$/i, '') || '/';

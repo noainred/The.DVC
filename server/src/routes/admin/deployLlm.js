@@ -17,6 +17,7 @@ import { forceCollectorToken } from '../../agent/deploy.js';
 import { loadCollectors, updateCollector } from '../../collector/registry.js';
 import { pullNow } from '../../collector/puller.js';
 import { resilientFetch } from '../../util/resilientFetch.js';
+import { withOutboundTag } from '../../util/outboundStats.js'; // v2.611 LEFT2611-08: 같은 주소 엣지를 기록에서 나눈다
 import { logAudit } from '../../audit.js';
 import { ipBlockReason } from '../../collector/registry.js';
 import crypto from 'node:crypto';
@@ -346,13 +347,15 @@ adminRouter.post('/agent-deploy/collector-sync/probe', adminOnly, fleetOnly, asy
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 50) : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '진단할 대상을 선택하세요(최대 50건).' });
   const cols = loadCollectors();
-  const hit = async (url, token) => {
+  const hit = async (url, token, tag) => {
     if (!token) return { tried: false, ok: false, reason: '토큰 없음' };
     try {
-      const r = await resilientFetch(`${String(url).replace(/\/+$/, '')}/api/collector/export`, {
+      const r = await withOutboundTag(tag || url, () => resilientFetch(`${String(url).replace(/\/+$/, '')}/api/collector/export`, {
         headers: { Accept: 'application/json', 'X-Collector-Token': token },
         timeoutMs: config.collector.timeoutMs, retries: 0,
-      });
+      }));
+      // 상태만 본다 — 인벤토리 전량 본문을 읽지 않고 닫는다(대상 50 × 2회, v2.611 LEFT2611-08).
+      try { await r.body?.cancel?.(); } catch { /* */ }
       return { tried: true, ok: r.ok, reason: r.ok ? '' : `HTTP ${r.status}` };
     } catch (e) { return { tried: true, ok: false, reason: e.message }; }
   };
@@ -362,8 +365,8 @@ adminRouter.post('/agent-deploy/collector-sync/probe', adminOnly, fleetOnly, asy
     if (!t) { results.push({ id, ok: false, reason: '대상을 찾을 수 없습니다.' }); return; }
     const url = targetUrl(t);
     const col = cols.find((c) => String(c.url || '').replace(/\/+$/, '') === url) || cols.find((c) => c.id === collectorIdOf(t));
-    const central = await hit(url, col?.token);
-    const target = await hit(url, t.collectorToken);
+    const central = await hit(url, col?.token, col?.id || id);
+    const target = await hit(url, t.collectorToken, col?.id || id);
     let recommend = 'none'; let why = '';
     if (central.ok && !target.ok) { recommend = 'central-to-target'; why = '엣지가 중앙(수집 서버) 토큰을 받습니다 — 배포 대상 기록만 낡았습니다. 재배포 전에 맞춰 두세요.'; }
     else if (!central.ok && target.ok) { recommend = 'target-to-central'; why = '엣지가 배포 대상 토큰을 받습니다 — 중앙 수집 서버의 토큰이 낡아 지금 pull 이 실패 중입니다.'; }
@@ -461,10 +464,11 @@ adminRouter.post('/agent-deploy/collector-sync', adminOnly, fleetOnly, async (re
     let verified = null;
     if (verify) {
       try {
-        const vr = await resilientFetch(`${col.url}/api/collector/export`, {
+        const vr = await withOutboundTag(col.id, () => resilientFetch(`${col.url}/api/collector/export`, {
           headers: { Accept: 'application/json', 'X-Collector-Token': token },
           timeoutMs: config.collector.timeoutMs, retries: 1,
-        });
+        }));
+        try { await vr.body?.cancel?.(); } catch { /* 상태만 본다(v2.611 LEFT2611-08) */ }
         verified = { ok: vr.ok, reason: vr.ok ? '' : `HTTP ${vr.status}${vr.status === 403 ? ' (엣지의 COLLECTOR_TOKEN 이 다릅니다 — 배포하거나 엣지 반영을 켜세요)' : ''}` };
       } catch (e) { verified = { ok: false, reason: e.message }; }
     }

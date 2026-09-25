@@ -23,6 +23,7 @@ import { IdracScanRanges } from './idrac/IdracScanRanges.jsx';
 import BoldText from '../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { manualPollMessage } from './idrac/manualPollText.js'; // v2.591(감사 P1): 진행 중·긴급중단을 '성공' 으로 말하지 않는다
+import { scanHoldNote } from './idrac/scanRunText.js'; // v2.611(감사 RECENT2611-02): 비밀번호 폐기 뒤 남은 계정으로 계속되는 스캔을 말한다
 
 export default function IdracAdmin() {
   const [data, setData] = useState(null);
@@ -109,7 +110,7 @@ export default function IdracAdmin() {
       const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: 대역·엣지·계정이 바뀌어 저장 비밀번호 폐기
       if (r.ok && dropNote) {
         setSrForm({ ...f, id: f.id || r.id, hasPassword: r.hasPassword, password: '', iloHasPassword: r.iloHasPassword, iloPassword: '' });
-        setSrMsg({ ok: false, text: `${dropNote} 스캔은 비밀번호를 입력할 때까지 보류됩니다.` });
+        setSrMsg({ ok: false, text: `${dropNote} ${scanHoldNote(r)}` }); // v2.611 RECENT2611-02: 남은 계정으로 무엇이 계속되는지
         await loadScanRanges();
       } else if (r.ok) {
         const note = noPw ? ' · ⚠ 비밀번호 미설정 — 스캔하려면 비밀번호를 입력하세요' : '';

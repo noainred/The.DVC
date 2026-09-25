@@ -14,7 +14,10 @@ import { writeMigrationScript, listMigrationScripts, migrationsDir, DEFAULT_SERV
 import { getCodexCheckReport, renderCodexCheckMarkdown, writeCodexCheckReport } from '../../security/codexCheck.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { memtrackReport } from '../../system/memtrack.js';
-import { adminOnly } from './shared.js';
+import { adminOnly, fullScopeOnlyWith } from './shared.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
+// v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
+const fleetOnly = fullScopeOnlyWith('서버 로그·포탈 DB 경로·보안 점검 기록은 전 법인에 걸친 서버 자기진단이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
 export function registerStatusTools(adminRouter) {
 
@@ -26,7 +29,7 @@ adminRouter.get('/codex-check', adminOnly, (_req, res) => {
 adminRouter.get('/codex-check/file', adminOnly, (_req, res) => {
   res.type('text/markdown; charset=utf-8').send(renderCodexCheckMarkdown());
 });
-adminRouter.post('/codex-check/write', adminOnly, (req, res) => {
+adminRouter.post('/codex-check/write', adminOnly, fleetOnly, (req, res) => {
   try {
     const result = writeCodexCheckReport();
     logAudit({ user: req.user?.username, action: 'codex.check.write', target: result.fileName, detail: `${result.bytes} bytes` });
@@ -64,7 +67,7 @@ adminRouter.post('/emergency-stop', adminOnly, (req, res) => {
 });
 
 // Server operational logs (ring buffer). ?since=<id>&level=info|warn|error
-adminRouter.get('/logs', adminOnly, (req, res) => {
+adminRouter.get('/logs', adminOnly, fleetOnly, (req, res) => {
   res.json(getLogs({ since: req.query.since, level: req.query.level }));
 });
 
@@ -72,7 +75,11 @@ adminRouter.get('/logs', adminOnly, (req, res) => {
 // vCenter 중계 경로 단계별 진단 — TCP→TLS→HTTP 어디서 막혔는지. ?vcenterId= 또는 ?host=
 adminRouter.get('/vcenter/relay-test', adminOnly, async (req, res) => {
   let host = String(req.query.host || '').trim();
+  // v2.611 AUTHZ2611-03: 범위 계정은 임의 host 를 두드릴 수 없고(내부망 정찰), 범위 밖 vCenter 는 존재를 숨긴다(404).
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (allowed && host) return res.status(403).json({ ok: false, error: 'forbidden', reason: '주소를 직접 지정한 중계 경로 진단은 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다 — vCenter 를 골라 진단하세요.' });
   if (!host && req.query.vcenterId) {
+    if (allowed && !allowed.has(String(req.query.vcenterId))) return res.status(404).json({ ok: false, reason: '등록된 vCenter가 아닙니다.' });
     const vc = (loadVcenterConfig().vcenters || []).find((x) => x.id === req.query.vcenterId);
     if (!vc) return res.status(404).json({ ok: false, reason: '등록된 vCenter가 아닙니다.' });
     host = vc.host;
@@ -128,7 +135,7 @@ adminRouter.get('/portal-db/location', adminOnly, (_req, res) => {
 });
 
 /** 사전 점검 — 실제로 디렉터리를 만들고 쓰기/여유공간을 실측한다(복사는 하지 않음). */
-adminRouter.post('/portal-db/location/preflight', adminOnly, (req, res) => {
+adminRouter.post('/portal-db/location/preflight', adminOnly, fleetOnly, (req, res) => {
   try { res.json({ ok: true, ...preflight(String(req.body?.targetDir || '')) }); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
@@ -138,7 +145,7 @@ adminRouter.post('/portal-db/location/preflight', adminOnly, (req, res) => {
  * 서비스 정지·복사·검증·경로기록을 담은 bash 스크립트와 설명(README)을 만들고 경로를 알려준다.
  * 실제 실행은 관리자가 root 로 수행한다(서비스 정지·기동은 systemd 관할).
  */
-adminRouter.post('/portal-db/location/script', adminOnly, (req, res) => {
+adminRouter.post('/portal-db/location/script', adminOnly, fleetOnly, (req, res) => {
   try {
     const targetDir = String(req.body?.targetDir || '').trim();
     const pf = preflight(targetDir);
@@ -172,13 +179,25 @@ adminRouter.get('/memtrack', adminOnly, async (req, res) => {
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-adminRouter.get('/status', adminOnly, (_req, res) => {
+// v2.611 AUTHZ2611-03: 범위 계정에는 허용 vCenter 의 수집 오류·개수만 준다(예전엔 전 함대 오류 원문·개수를 그대로 줬다 —
+//   형제 '로그 분석' 은 같은 원천을 403 으로 막고 있었다). 403 대신 거르는 이유: 진단 화면의 'vCenter 연결 사유' 는 범위
+//   계정에게도 자기 법인 조치에 필요하다. 뺀 개수는 밝힌다(조용한 축약 금지).
+adminRouter.get('/status', adminOnly, (req, res) => {
   const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const vcs = snap.vcenters || [];
+  const errs = snap.collectionErrors || [];
+  if (!allowed) {
+    return res.json({ dataSource: snap.source, generatedAt: snap.generatedAt, vcenters: vcs.length, collectionErrors: errs });
+  }
+  const shownErrs = errs.filter((e) => e && allowed.has(String(e.vcenterId)));
   res.json({
     dataSource: snap.source,
     generatedAt: snap.generatedAt,
-    vcenters: snap.vcenters.length,
-    collectionErrors: snap.collectionErrors || [],
+    vcenters: vcs.filter((v) => allowed.has(String(v.id))).length,
+    collectionErrors: shownErrs,
+    scoped: true,
+    ...(errs.length - shownErrs.length ? { omittedOutOfScope: errs.length - shownErrs.length } : {}),
   });
 });
 }

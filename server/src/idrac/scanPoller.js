@@ -18,13 +18,13 @@ import { saveUnsupportedServers } from '../central/unsupportedServers.js'; // v2
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
-import { scanForIdracs } from './scan.js';
-import { registerScanned } from './registry.js';
+import { scanForIdracs, scanPartialReasons } from './scan.js';
+import { registerScanned, hasHpeInDatacenter } from './registry.js';
 import { pollNow } from './poller.js';
 import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw, scanRangesForDatacenter, lastScanCycleAt, scanEntryRuntime, scanEntryReady } from './scanRanges.js';
 import { appendIdracScanLog } from './scanLog.js';
 import { enqueueIdracScan, cancelPendingIdracScanJobs } from '../central/idracScanJobs.js';
-import { pushIdracScan } from '../central/idracScanPush.js';
+import { pushIdracScan, iloEdgeGate, edgeVersionOf } from '../central/idracScanPush.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { makeScanAuthPolicy } from './scanAuth.js';
 
@@ -82,15 +82,27 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
   const ips = e.ranges.join('\n');
   // 위임: 에이전트가 현지에서 스캔+자동등록(noRegister:false).
   if (e.agent && e.agent !== '__local__') {
+    // v2.611(감사 EDGE2611-01·RECENT2611-03): 위임 전 엣지 버전 게이트 — iLO 전용 대역을 iLO 를 모르는 엣지(< 2.610)·버전 미상
+    //   엣지에 보내지 않는다(구버전은 빈 계정으로 전 호스트에 로그인한다). Dell+iLO 대역은 보내되 구버전이면 iLO 가 적용되지
+    //   않는다는 사실을 lastRun 에 남긴다. push 경로는 pushIdracScan 이 같은 판정을 한 번 더 한다(수동 PUSH 대비).
+    const hasIlo = Boolean(e.ilo && e.ilo.username && e.ilo.password);
+    const hasDell = Boolean(String(e.username || '').trim() && e.password);
+    const gate = iloEdgeGate({ hasDell, hasIlo, version: edgeVersionOf(e.agent) });
+    if (!gate.delegate) {
+      console.warn(`[idrac-scan] ${e.datacenterId}: ${gate.reason}`);
+      return { datacenterId: e.datacenterId, delegated: false, held: true, agent: e.agent, heldReason: gate.reason, edgeVersion: gate.edgeVersion || '', error: null };
+    }
+    const iloNote = gate.iloIgnored ? gate.note : null;
     // dispatch=push: 중앙이 수집 서버 URL로 엣지에 직접 스캔 전송(엣지 폴링 불필요). 중앙 토큰 불요.
     if (e.dispatch === 'push') {
       const pr = pushIdracScan(e.agent, { ips, username: e.username, password: e.password, ilo: e.ilo || null, datacenterId: e.datacenterId, noRegister: false, service: e.service, trigger, rangeId: e.id || '' });
-      return { datacenterId: e.datacenterId, delegated: true, dispatch: 'push', agent: e.agent, reqId: pr.reqId || null, error: pr.ok ? null : pr.reason };
+      if (pr.held) return { datacenterId: e.datacenterId, delegated: false, held: true, agent: e.agent, heldReason: pr.reason, edgeVersion: pr.edgeVersion || '', error: null };
+      return { datacenterId: e.datacenterId, delegated: true, dispatch: 'push', agent: e.agent, reqId: pr.reqId || null, error: pr.ok ? null : pr.reason, iloNote };
     }
     // 기본(poll): 에이전트가 중앙으로 폴링해 잡을 인출. 중앙 토큰 필요.
     if (!config.central.token) return { datacenterId: e.datacenterId, delegated: false, error: '중앙 토큰 미설정으로 위임 불가' };
     const reqId = enqueueIdracScan(e.agent, { ips, username: e.username, password: e.password, ilo: e.ilo || null, datacenterId: e.datacenterId, noRegister: false, service: e.service, trigger, rangeId: e.id || '' });
-    return { datacenterId: e.datacenterId, delegated: true, dispatch: 'poll', agent: e.agent, reqId: reqId || null, error: reqId ? null : '위임 잡 적재 실패(대기 한도 초과)' };
+    return { datacenterId: e.datacenterId, delegated: true, dispatch: 'poll', agent: e.agent, reqId: reqId || null, error: reqId ? null : '위임 잡 적재 실패(대기 한도 초과)', iloNote };
   }
   // 중앙 직접 스캔 → 발견한 iDRAC을 그 법인(DataCenter)에 등록(법인 DB).
   // v2.591(감사 F3): 주기 스캔은 직전 인증 실패 IP·주 폴러 정지 서버를 건너뛴다(수동은 전부 시도하되 기록한다).
@@ -108,8 +120,12 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
   // (aborted)되거나 IP 상한으로 절단(truncated)돼 부분 결과면, 스캔 안 된 서버가 삭제된다
   // (자격증명·전력 이력까지). 부분 결과일 때는 merge로 강등해 데이터 손실을 막는다.
   // v2.591: 인증 정지로 건너뛴 IP 가 있으면 부분 결과다 — replace 로 두면 **건너뛴 등록 서버가 삭제**된다.
-  const partial = r.aborted || r.truncated || (r.authSkipped || 0) > 0;
+  // v2.611(감사 RECENT2611-01): 사유 판정은 scan.js scanPartialReasons 하나(엣지 localScan.js 와 같은 규칙) — 계정이 없어
+  //   시도하지 않은 서버(noCreds)·인증 실패 서버·(iLO 계정 없이) 이미 등록된 HPE 가 있으면 replace 가 그 등록을 지운다.
+  const partialReasons = e.mode === 'replace-datacenter' ? scanPartialReasons(r, { registeredHpe: hasHpeInDatacenter(e.datacenterId) }) : [];
+  const partial = partialReasons.length > 0;
   const effectiveMode = (e.mode === 'replace-datacenter' && !partial) ? 'replace-datacenter' : 'merge';
+  if (partial) console.warn(`[idrac-scan] ${e.datacenterId}: 부분 결과라 법인 교체(replace-datacenter) 대신 병합(merge)으로 등록합니다 — ${partialReasons.join(' · ')}`);
   if (r.found.length) {
     const reg = registerScanned(r.found, e.username, e.password, effectiveMode, '', e.datacenterId, { ilo });
     if (reg.ok) registered = (reg.added || 0) + (reg.updated || 0);
@@ -118,11 +134,12 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
   //   비밀번호가 틀려도 '최근 결과' 가 '성공 · 발견 0대' 로 보였다(형제 비대칭).
   return {
     datacenterId: e.datacenterId, delegated: false, scanned: r.scanned, found: r.found.length, registered, truncated: r.truncated, aborted: r.aborted,
-    modeDowngraded: e.mode === 'replace-datacenter' && partial, unsupported: r.unsupportedCount || 0,
+    modeDowngraded: e.mode === 'replace-datacenter' && partial, modeDowngradedReason: partial ? partialReasons.join(' · ') : null, unsupported: r.unsupportedCount || 0,
     unreachable: r.unreachable ?? null, authFailed: r.authFailed ?? null, authFailReason: r.authFailReason || null,
     blocked: r.blocked ?? null, authSkipped: r.authSkipped || 0, authSkippedRegistered: r.authSkippedRegistered || 0,
     // v2.610: 벤더별 — iLO 계정이 있는 대역만 hpe 값이 의미를 갖는다(없으면 iloEnabled:false).
     iloEnabled: !!r.iloEnabled, dellFound: r.dellFound ?? r.found.length, hpeFound: r.hpeFound || 0, hpeDetected: r.hpeDetected || 0, hpeAuthFailed: r.hpeAuthFailed || 0, noCreds: r.noCreds || 0,
+    noCredsIps: Array.isArray(r.noCredsIps) ? r.noCredsIps : [], noCredsTruncated: !!r.noCredsTruncated,
     durationMs: Date.now() - started,
   };
 }
@@ -156,7 +173,7 @@ export async function runIdracScanOnce(opts = {}) {
   running = true;
   const started = Date.now();
   const results = [];
-  let foundTotal = 0, registeredTotal = 0, delegatedTotal = 0; const errors = [];
+  let foundTotal = 0, registeredTotal = 0, delegatedTotal = 0, heldTotal = 0; const errors = [];
   try {
     for (let i = 0; i < entries.length; i++) {
       if (stopRequested) { errors.push('사용자가 스캔을 중지했습니다.'); break; }
@@ -171,13 +188,17 @@ export async function runIdracScanOnce(opts = {}) {
         const r = await scanOneDatacenter(e, (done, total, foundNow = 0) => { progress = { datacenterId: e.datacenterId, done, total, foundSoFar: foundTotal + foundNow, idx: i, totalDatacenters: entries.length, startedAt: started }; }, trigger);
         results.push(r);
         if (r.delegated) delegatedTotal++;
+        if (r.held) heldTotal++;
         foundTotal += (r.found || 0);
         registeredTotal += (r.registered || 0);
         if (r.error) errors.push(`${e.datacenterId}: ${r.error}`);
         // v2.441: 위임이면 reqId 를 함께 남긴다 — 나중에 에이전트가 결과를 회신할 때
         // recordScanRangeRunByReqId 가 이 값으로 짝을 찾아 발견/등록 수치를 채운다.
         // (예전에는 '던짐' 만 기록돼 '최근 결과' 가 영원히 '위임(AZ) · 시각' 이었다.)
-        if (e.id) {
+        if (e.id && r.held) {
+          // v2.611: 위임 보류(엣지 버전) — 실패가 아니라 '보내지 않았다' 이다. 화면(scanRunText)이 '보류' 로 사유를 말한다.
+          recordScanRangeRun(e.id, { held: true, heldReason: r.heldReason || '', agent: r.agent || null, edgeVersion: r.edgeVersion || '', delegated: false, error: null });
+        } else if (e.id) {
           recordScanRangeRun(e.id, {
             scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null,
             blocked: r.blocked ?? null, // v2.537: 차단 대역이라 찌르지 않은 IP 수(조용한 제외 금지)
@@ -187,7 +208,11 @@ export async function runIdracScanOnce(opts = {}) {
               authSkipped: r.authSkipped || 0, durationMs: r.durationMs ?? null,
               // v2.610: HPE 판별·등록 대수 — 화면 '최근 결과' 가 'HPE N대' 를 말한다.
               hpeDetected: r.hpeDetected || 0, hpeDetectedApprox: false, hpeFound: r.hpeFound || 0, iloEnabled: !!r.iloEnabled,
+              // v2.611(감사 RECENT2611-04): 계정이 없어 시도하지 않은 서버 — 화면이 '계정 없어 시도 안 함 N' 을 말한다.
+              noCreds: r.noCreds || 0,
+              ...(r.modeDowngraded ? { modeDowngraded: true, modeDowngradedReason: r.modeDowngradedReason || '' } : {}),
             }),
+            ...(r.iloNote ? { iloNote: r.iloNote } : {}),
             delegated: !!r.delegated, agent: r.agent || null, error: r.error || null,
             ...(r.delegated ? { reqId: r.reqId || '', dispatch: r.dispatch || e.dispatch || 'poll', dispatchedAt: Date.now(), pending: true } : {}),
           });
@@ -195,12 +220,13 @@ export async function runIdracScanOnce(opts = {}) {
         // 스캔 로그(이력) 적재 — 위임은 '요청' 단계로 기록하고, 결과는 에이전트 회신 시
         // setIdracScanResult 훅이 별도 1건(phase=result)으로 남긴다(reqId로 짝 맞춤).
         appendIdracScanLog({
-          trigger, phase: r.delegated ? 'dispatch' : 'result', kind: r.delegated ? 'delegated' : 'central',
-          datacenterId: e.datacenterId, service: e.service, agent: r.delegated ? (r.agent || e.agent) : '',
+          trigger, phase: r.delegated ? 'dispatch' : 'result', kind: (r.delegated || r.held) ? 'delegated' : 'central',
+          datacenterId: e.datacenterId, service: e.service, agent: (r.delegated || r.held) ? (r.agent || e.agent) : '',
           dispatch: r.delegated ? (r.dispatch || e.dispatch) : '', reqId: r.reqId || '',
           scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null,
           durationMs: r.delegated ? null : Date.now() - entryStart, error: r.error || null, stopped: r.aborted,
-          ...(r.delegated ? {} : { unreachable: r.unreachable ?? null, authFailed: r.authFailed ?? null, authSkipped: r.authSkipped || 0 }),
+          ...(r.delegated ? {} : { unreachable: r.unreachable ?? null, authFailed: r.authFailed ?? null, authSkipped: r.authSkipped || 0, noCreds: r.held ? null : (r.noCreds || 0) }),
+          ...(r.held ? { error: r.heldReason || '위임 보류' } : {}),
         });
         if (!r.delegated && (r.authSkipped || 0) > 0) console.warn(`[idrac-scan] ${e.datacenterId}: 인증 실패 정지로 ${r.authSkipped}개 IP 를 건너뛰었습니다(주기 스캔 — 계정을 고치거나 '지금 스캔' 으로 확인)`);
       } catch (err) {
@@ -213,7 +239,8 @@ export async function runIdracScanOnce(opts = {}) {
     // 새로 등록된 서버가 있으면 즉시 전력 1회 수집(대시보드에 바로 반영).
     if (registeredTotal > 0) pollNow().catch(() => {});
     const authSkippedTotal = results.reduce((a, x) => a + (x.authSkipped || 0), 0);
-    lastRun = { at: Date.now(), durationMs: Date.now() - started, datacenters: entries.length, vcenters: entries.length, found: foundTotal, registered: registeredTotal, delegated: delegatedTotal, errors, manual: !!opts.manual, stopped: stopRequested || undefined, ...(authSkippedTotal ? { authSkipped: authSkippedTotal } : {}), results };
+    const noCredsTotal = results.reduce((a, x) => a + (x.noCreds || 0), 0);
+    lastRun = { at: Date.now(), durationMs: Date.now() - started, datacenters: entries.length, vcenters: entries.length, found: foundTotal, registered: registeredTotal, delegated: delegatedTotal, errors, manual: !!opts.manual, stopped: stopRequested || undefined, ...(authSkippedTotal ? { authSkipped: authSkippedTotal } : {}), ...(noCredsTotal ? { noCreds: noCredsTotal } : {}), ...(heldTotal ? { held: heldTotal } : {}), results };
     return { ok: true, ...lastRun };
   } catch (e) {
     lastRun = { at: Date.now(), error: e.message };
