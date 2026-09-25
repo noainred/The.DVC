@@ -185,3 +185,66 @@ describe('choiceOptions (v2.609)', () => {
     expect(T.choiceOptions(['Edge-A'], 'edge-a')).toHaveLength(1);
   });
 });
+
+// ── v2.611 감사(WEB2611-02·03·04·05·11·12) ──────────────────────────────────
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+describe('v2.611 — 서버 키 대조·못 읽은 수·배너', () => {
+  it('ITEM_LABEL 키 == 서버 CANDIDATES 키 + budget·deadline(두 목록 대조 — WEB2611-04)', () => {
+    const src = fs.readFileSync(path.resolve(HERE, '../../../../server/src/cvp/client.js'), 'utf8');
+    const block = src.slice(src.indexOf('export const CANDIDATES'), src.indexOf('});', src.indexOf('export const CANDIDATES')));
+    const keys = [...block.matchAll(/^\s{2}(\w+):\s*\[/gm)].map((m) => m[1]);
+    expect(keys.length).toBeGreaterThan(5);
+    expect(Object.keys(T.ITEM_LABEL).sort()).toEqual([...keys, 'budget', 'deadline'].sort());
+    for (const k of Object.keys(T.ITEM_LABEL)) expect(T.itemLabel(k)).not.toMatch(/^[a-z]/);
+  });
+  it('0 초과 0.05 미만은 0% 가 아니라 <0.1%(WEB2611-12)', () => {
+    expect(T.pctText(6.7e-5)).toBe('<0.1%');
+    expect(T.pctText(0)).toBe('0%');
+    expect(T.pctText(0.05)).toBe('0.1%');
+  });
+  it('못 읽은 장비 수를 KPI 가 말한다(WEB2611-02)', () => {
+    const k = T.kpiItems({ devices: 5, partsFault: 0, partsUnread: 2, bgpDown: 0, bgpUnread: 3, portsDown: 0, portsUnread: 1 });
+    expect(k.find((x) => x.key === 'parts').meta).toContain('못 읽은 장비 2대');
+    expect(k.find((x) => x.key === 'bgp').meta).toContain('못 읽은 장비 3대');
+    expect(k.find((x) => x.key === 'ports').meta).toContain('못 읽은 장비 1대');
+    for (const x of k) expect(x.accent).toBeNull();
+  });
+  it('dbUnavailable·collectDrops·pendingRequest·orphanRows 를 배너로(WEB2611-03)', () => {
+    const now = Date.now();
+    const notes = T.listNotes({
+      dbUnavailable: true, orphanRows: 4,
+      servers: [{ id: 'c1', name: 'CVP-A', pendingRequest: true, status: { pruneHeld: { reason: '0대 보류' }, partsDueUnread: true } }],
+      collectDrops: [{ id: 'c1', agent: 'edge-a', at: now - 60_000, tries: 2, reason: 'untaken' }],
+    }, now);
+    const all = notes.join('\n');
+    expect(all).toContain('CVP DB 를 열지 못했습니다');
+    expect(all).toContain('폐기');
+    expect(all).toContain('재수집 요청 대기 1대');
+    expect(all).toContain('옛 장비 행 4개');
+    expect(all).toContain('0대 보류');
+    expect(all).toContain('파트를 읽을 차례');
+    expect(T.listNotes({})).toEqual([]);
+  });
+  it('읽지 못한 파트 종류를 한글로(WEB2611-05)', () => {
+    expect(T.partsMissingText(['cooling', 'temperature'])).toContain('팬 · 온도 센서');
+    expect(T.partsMissingText([])).toBe('');
+    expect(T.telemetryText('aborted')).toContain('시한');
+    expect(T.telemetryText('weird')).toContain('weird');
+  });
+  it('지금 수집은 admin·operator 만(WEB2611-11)', () => {
+    expect(T.canCollect({ role: 'viewer' })).toBe(false);
+    expect(T.canCollect({ role: 'operator' })).toBe(true);
+    expect(T.canCollect({ role: 'admin' })).toBe(true);
+    expect(T.canCollect(null)).toBe(true);
+  });
+  it('CvpTool 이 새 판정을 실제로 쓴다(소스)', () => {
+    const src = fs.readFileSync(path.resolve(HERE, 'CvpTool.jsx'), 'utf8');
+    for (const f of ['listNotes(', 'partsMissingText(', 'canCollect(', 'collectErr']) expect(src).toContain(f);
+    for (const t of Object.values(T.TELEMETRY_TEXT)) expect(t).not.toMatch(/`/);
+  });
+});

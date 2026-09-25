@@ -158,7 +158,7 @@ export function preflight(targetDir) {
   let created = false;
   if (target && !reasons.length) {
     try {
-      if (!fs.existsSync(target)) { fs.mkdirSync(target, { recursive: true }); created = true; }
+      if (!fs.existsSync(target)) { fs.mkdirSync(target, { recursive: true, mode: 0o700 }); created = true; } // v2.611(DB2611-01): DB 디렉터리는 0700(umask 0755 로 열리지 않게)
       const st = fs.statSync(target);
       if (!st.isDirectory()) reasons.push('경로가 디렉터리가 아닙니다.');
     } catch (e) { reasons.push(`디렉터리를 만들 수 없습니다: ${e.message}`); }

@@ -12,6 +12,7 @@
 import { numOrNull } from '../../numOrNull.js';
 import { unitText } from '../unitText.js';
 import { blankOr } from '../blankOr.js';
+import { collectDropNote } from './collectDropText.js';
 
 export const SECRET_MASK = '********';
 
@@ -62,6 +63,8 @@ export function pctOrNull(v) {
 
 export function pctText(v) {
   const n = pctOrNull(v);
+  // v2.611(WEB2611-12): 0 초과 0.05 미만은 반올림하면 '0%'(= 트래픽 없음)로 읽힌다 — '<0.1%' 로 말한다.
+  if (n != null && n > 0 && n < 0.05) return '<0.1%';
   return unitText(n == null ? null : (n >= 10 ? Math.round(n) : Math.round(n * 10) / 10), '%');
 }
 
@@ -76,18 +79,21 @@ export function kpiItems(totals) {
   const n = (k) => numOrNull(t[k]);
   const red = 'var(--red)'; const amber = 'var(--amber)';
   const fault = n('partsFault'); const warn = n('partsWarn'); const unknown = n('partsUnknown');
+  // v2.611(WEB2611-02): 읽지 못한 **장비** 수를 함께 말한다 — 'down 0'·'장애 0' 이 전부 확인했다는 뜻이 아니다.
+  const unread = (k, what) => { const v = n(k); return v != null && v > 0 ? `${what} 못 읽은 장비 ${v.toLocaleString('ko-KR')}대(0 에 넣지 않음)` : null; };
   const faultMeta = [
     warn != null ? `주의 ${warn.toLocaleString('ko-KR')}` : null,
     unknown != null && unknown > 0 ? `상태 미확인 ${unknown.toLocaleString('ko-KR')}(정상·장애에 넣지 않음)` : null,
+    unread('partsUnread', '파트를'),
   ].filter(Boolean).join(' · ');
   return [
     { key: 'devices', label: '장비', value: countText(n('devices')), accent: null, meta: 'CVP 인벤토리 기준' },
     { key: 'streaming', label: '스트리밍 중', value: countText(n('streaming')), accent: null,
       meta: n('devices') != null && n('streaming') != null ? `스트리밍 아님 ${countText(Math.max(0, n('devices') - n('streaming')))}` : '' },
     { key: 'parts', label: '장애 파트', value: countText(fault), accent: fault > 0 ? red : (warn > 0 ? amber : null), meta: faultMeta },
-    { key: 'bgp', label: 'BGP 피어 down', value: countText(n('bgpDown')), accent: n('bgpDown') > 0 ? red : null, meta: '' },
+    { key: 'bgp', label: 'BGP 피어 down', value: countText(n('bgpDown')), accent: n('bgpDown') > 0 ? red : null, meta: unread('bgpUnread', 'BGP 를') || '' },
     { key: 'ports', label: '포트 down', value: countText(n('portsDown')), accent: n('portsDown') > 0 ? amber : null,
-      meta: '관리상 켜 둔(admin up) 포트 중 링크 down' },
+      meta: ['관리상 켜 둔(admin up) 포트 중 링크 down', unread('portsUnread', '포트를')].filter(Boolean).join(' · ') },
   ];
 }
 
@@ -155,12 +161,73 @@ export function missingFootnotes(servers) {
   return [...map.values()].sort((a, b) => a.item.localeCompare(b.item));
 }
 
+/**
+ * 서버 수집 항목 키(cvp/client.js CANDIDATES + missing 의 budget·deadline) → 한글 라벨.
+ * v2.611(WEB2611-04): 예전 표는 서버에 없는 키(version·parts)를 들고 있고 실제 키 6개(cvpVersion·power·cooling·temperature·xcvr·budget)가
+ *   영문 그대로 샜다. 두 목록은 테스트(cvpText.test.js)가 서버 소스와 대조한다 — 서버에 키를 더하면 여기도 더할 것.
+ */
 export const ITEM_LABEL = {
-  inventory: '인벤토리', version: '버전', parts: '장애 파트', interfaces: '포트 구성', counters: '포트 카운터', bgp: 'BGP',
+  inventory: '인벤토리', cvpVersion: 'CVP 버전', interfaces: '포트 구성', counters: '포트 카운터', bgp: 'BGP',
+  power: '전원(PSU)', cooling: '팬', temperature: '온도 센서', xcvr: '트랜시버',
+  budget: '시간 예산', deadline: '수집 시한',
 };
 export const itemLabel = (k) => ITEM_LABEL[k] || String(k);
 
 export const CANDIDATE_NOTE = 'CVP 의 조회 경로는 **실장비로 확인하지 못한 후보**입니다. 항목마다 후보 경로를 차례로 시도하고, 읽은 경로와 읽지 못한 이유를 그대로 보여 줍니다 — 비어 있는 칸은 ‘0’ 이 아니라 ‘읽지 못함’ 입니다.';
+
+/** 누가 '지금 수집' 을 누를 수 있나(서버 `/tools/cvp/collect` 가 admin·operator 만 받는다 — v2.590 D1). 로그인 정보가 없으면(인증 꺼짐) 참. */
+export function canCollect(user) {
+  if (!user) return true;
+  return user.role === 'admin' || user.role === 'operator';
+}
+
+/**
+ * 목록 응답의 부가 상태 → 배너 문장들(BoldText). v2.611(WEB2611-03): 서버는 싣는데 화면이 읽지 않던 넷 —
+ *   dbUnavailable(장비 0대로 보이는 거짓) · collectDrops(요청이 결과 없이 폐기) · pendingRequest(재수집 대기) · orphanRows(담당이 바뀌어 숨긴 행).
+ * @returns {string[]}
+ */
+export function listNotes(data, now = Date.now()) {
+  const d = data && typeof data === 'object' ? data : {};
+  const servers = Array.isArray(d.servers) ? d.servers.filter((s) => s && typeof s === 'object') : [];
+  const nameOf = (id) => (servers.find((s) => String(s.id) === String(id)) || {}).name || id;
+  const out = [];
+  if (d.dbUnavailable) out.push('**중앙 CVP DB 를 열지 못했습니다** — 아래 장비 목록이 비어 있는 것은 ‘장비 0대’ 가 아니라 ‘읽지 못함’ 입니다(중앙 로그의 cvp-db 줄 참조).');
+  const drop = collectDropNote(d.collectDrops, nameOf, now);
+  if (drop) out.push(drop);
+  const pend = servers.filter((s) => s.pendingRequest);
+  if (pend.length) out.push(`재수집 요청 대기 ${pend.length}대(${pend.slice(0, 5).map((s) => s.name || s.id).join(', ')}${pend.length > 5 ? ' 외' : ''}) — 엣지가 설정을 받아 수집한 뒤 반영됩니다.`);
+  const orphan = numOrNull(d.orphanRows);
+  if (orphan != null && orphan > 0) out.push(`담당 엣지가 바뀌었거나 등록에서 빠진 CVP 의 옛 장비 행 ${orphan.toLocaleString('ko-KR')}개는 표에 넣지 않았습니다(현재 담당의 보고만 보여 줍니다).`);
+  for (const s of servers) {
+    const st = s.status && typeof s.status === 'object' ? s.status : {};
+    if (st.dbUnavailable) out.push(`${s.name || s.id}: 수집한 노드의 CVP DB 를 쓸 수 없어 결과를 저장하지 못했습니다.`);
+    if (st.pruneHeld && typeof st.pruneHeld === 'object') out.push(`${s.name || s.id}: ${String(st.pruneHeld.reason || '장비 0대 보고 — 장비 목록 정리를 잠시 보류합니다')}`);
+    if (st.partsDueUnread) out.push(`${s.name || s.id}: 이번 주기에 파트를 읽을 차례였지만 한 대도 읽지 못했습니다(시간 예산·시한) — 파트 표시는 이전 값입니다.`);
+  }
+  return out;
+}
+
+/** 장비 상세의 '읽지 못한 파트 종류' 문장(없으면 ''). 서버 키(power·cooling·…)를 한글로. */
+export function partsMissingText(kinds) {
+  const list = (Array.isArray(kinds) ? kinds : []).filter((k) => typeof k === 'string' && k);
+  if (!list.length) return '';
+  return `이번 파트 조회에서 **${list.map(itemLabel).join(' · ')}** 은(는) 읽지 못했습니다 — 목록에 없는 것은 ‘정상’ 이 아니라 ‘읽지 못함’ 입니다.`;
+}
+
+export const TELEMETRY_TEXT = {
+  ok: '텔레메트리 조회 성공',
+  failed: '텔레메트리 조회 실패(모든 후보 경로 실패)',
+  'not-streaming': 'CVP 로 스트리밍하지 않는 장비 — 텔레메트리를 조회하지 않았습니다',
+  budget: '시간 예산이 모자라 조회하지 않았습니다',
+  'budget-partial': '시간 예산이 모자라 일부만 조회했습니다',
+  aborted: '수집 시한에 걸려 조회를 끝내지 못했습니다',
+  pending: '조회 결과가 없습니다',
+};
+/** 장비 telemetry 값 → 문장('' = 없음). 모르는 값은 원문을 붙인다(지어내지 않는다). */
+export function telemetryText(v) {
+  if (v == null || v === '') return '';
+  return TELEMETRY_TEXT[v] || `텔레메트리 상태: ${String(v)}`;
+}
 
 // ── 장비 요약 셀 ─────────────────────────────────────────────────────────────
 

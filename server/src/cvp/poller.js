@@ -43,24 +43,31 @@ const _inFlight = new Map();
 const _prevCounters = new Map(); // `${cvpId}|${deviceKey}|${port}` → { at, c }
 const _prefer = new Map();       // cvpId → Map(kind → 경로 후보)
 const _partsAt = new Map();      // cvpId → 마지막 부품 조회 시각
+const _zeroSince = new Map();    // cvpId → 인벤토리가 처음 0대로 온 시각(COL2611-05 prune 보류)
+/** 장비가 있던 CVP 가 갑자기 0대를 주면 이 시간 동안 장비 행을 지우지 않는다(빈 200·스트림 조기 종료 대비 — 보류에는 반드시 시한, v2.601). */
+export const ZERO_PRUNE_HOLD_MS = clampIntervalMs(Number(process.env.CVP_ZERO_PRUNE_HOLD_MS) || 60 * 60_000, 60 * 60_000, 5 * 60_000);
 
 export const pollMs = () => loadSettings().intervalMs;
 
-/** 장비의 포트에 처리량·사용률·오류 델타를 채운다(제자리). 카운터를 못 읽었으면 전부 null. */
-export function applyDeltas(cvpId, dev, intervalMs, prevMap = _prevCounters) {
+/**
+ * 장비의 포트에 처리량·사용률·오류 델타를 채운다(제자리). 카운터를 못 읽었으면 전부 null.
+ * slackMs(COL2611-08): 간격 한계에 더할 직전 실행 소요 — 적응 타이머는 실행이 끝난 뒤 재무장하므로 두 표본 간격은
+ *   주기 + 실행 시간이다(v2.599 베어메탈 규약과 같다). 없으면 예전처럼 주기×3.
+ */
+export function applyDeltas(cvpId, dev, intervalMs, prevMap = _prevCounters, slackMs = 0) {
   if (!Array.isArray(dev.ports)) return;
   const at = dev.countersAt;
   for (const p of dev.ports) {
     const k = `${cvpId}|${dev.key}|${p.name}`;
     const c = dev.counters instanceof Map ? dev.counters.get(p.name) : null;
     if (!c || at == null) { Object.assign(p, { inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null }); continue; }
-    const d = portDelta(prevMap.get(k) || null, { at, c }, p.speedBps, intervalMs);
+    const d = portDelta(prevMap.get(k) || null, { at, c }, p.speedBps, intervalMs, slackMs);
     Object.assign(p, { inBps: d.inBps, outBps: d.outBps, inUtil: d.inUtil, outUtil: d.outUtil, inErr: d.inErr, outErr: d.outErr });
     prevMap.set(k, { at, c });
   }
 }
 
-async function collectOne(srv, { periodic, settings, forceParts }) {
+async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) {
   const full = getServerWithSecret(srv.id) || srv;
   if (periodic) {
     const stop = cvpAuthGuard.authStopFor(credOf(full));
@@ -103,22 +110,50 @@ async function collectOne(srv, { periodic, settings, forceParts }) {
       return 'failed';
     }
     cvpAuthGuard.clearAuthStop(full.id);
-    if (partsDue) _partsAt.set(full.id, t0);
+    // v2.611(TIM2611-01): 부품을 **실제로 읽은 장비가 있을 때만** '부품 조회 시각' 을 올린다 — 예산·시한에 걸려 아무 장비도 못 읽은
+    //   주기를 '읽었다' 로 적으면 다음 30분 동안 부품을 다시 보지 않고 화면은 partsRead 를 참으로 말한다.
+    const partsReadNow = partsDue && r.devices.some((d) => Array.isArray(d.parts));
+    if (partsReadNow) _partsAt.set(full.id, t0);
     const readAt = Date.now();
     for (const d of r.devices) {
-      applyDeltas(full.id, d, settings.intervalMs);
+      applyDeltas(full.id, d, settings.intervalMs, _prevCounters, slackMs);
       d.ts = d.countersAt ?? readAt;
       delete d.counters;
     }
+    // v2.611(TIM2611-05): 인벤토리를 온전히 읽었으면 사라진 장비의 이전 카운터를 인메모리에서도 지운다(누수 — v2.550.3).
+    if (r.inventoryComplete) {
+      const liveDev = new Set(r.devices.map((d) => `${full.id}|${d.key}|`));
+      const pre = `${full.id}|`;
+      for (const k of [..._prevCounters.keys()]) {
+        if (!k.startsWith(pre)) continue;
+        const dk = k.slice(0, k.indexOf('|', pre.length) + 1);
+        if (!liveDev.has(dk)) _prevCounters.delete(k);
+      }
+    }
+    // v2.611(COL2611-05): 장비가 있던 CVP 가 0대를 주면 prune 을 시한 동안 보류한다(엣지 push 도 DB 행이 남아 있으므로 0대로 가지 않는다).
+    let pruneHeld = null;
+    if (r.inventoryComplete && r.devices.length === 0) {
+      const had = await db.deviceCount(db.LOCAL_AGENT, full.id).catch(() => null);
+      if (had > 0) {
+        const since = _zeroSince.get(full.id) ?? readAt;
+        _zeroSince.set(full.id, since);
+        if (readAt - since < ZERO_PRUNE_HOLD_MS) {
+          pruneHeld = { since, untilMs: since + ZERO_PRUNE_HOLD_MS, had, reason: `직전 ${had}대가 있던 CVP 가 0대를 보고했습니다 — 빈 응답일 수 있어 ${Math.round(ZERO_PRUNE_HOLD_MS / 60_000)}분 동안 장비 목록을 지우지 않습니다` };
+          if (warnLog(`${full.id}|zero`, 'held')) console.warn(`[cvp] ${full.name || full.id}: ${pruneHeld.reason}`);
+        }
+      }
+    } else _zeroSince.delete(full.id);
     let saved = null;
     try {
       saved = await db.saveDevices({ agent: db.LOCAL_AGENT, cvpId: full.id, devices: r.devices, samples: true });
-      if (r.inventoryComplete) await db.pruneDevices(db.LOCAL_AGENT, { [full.id]: r.devices.map((d) => d.key) });
+      if (r.inventoryComplete && !pruneHeld) { await db.pruneDevices(db.LOCAL_AGENT, { [full.id]: r.devices.map((d) => d.key) }); _zeroSince.delete(full.id); }
     } catch (e) { saved = { error: e.message }; console.warn(`[cvp] ${full.name || full.id}: DB 적재 실패 — ${e.message}`); }
     putStatus(full.id, {
       name: full.name, ok: true, collectedAt: readAt, lastAttemptAt: readAt, durationMs: readAt - t0, deviceCount: r.devices.length,
       error: null, authStopped: null, usedPaths: r.usedPaths, missing: r.missing, seenFields: r.seenFields, truncated: r.truncated,
-      cvpVersion: r.cvpVersion, partsRead: partsDue, ...(saved?.unavailable ? { dbUnavailable: true } : {}), ...(saved?.error ? { dbError: saved.error } : {}),
+      cvpVersion: r.cvpVersion, partsRead: partsReadNow, ...(partsDue && !partsReadNow ? { partsDueUnread: true } : {}),
+      ...(pruneHeld ? { pruneHeld } : {}),
+      ...(saved?.unavailable ? { dbUnavailable: true } : {}), ...(saved?.error ? { dbError: saved.error } : {}),
     });
     return 'ok';
   } finally { _inFlight.delete(full.id); }
@@ -129,7 +164,12 @@ async function collectOne(srv, { periodic, settings, forceParts }) {
  */
 export async function pollCvpOnce({ manual = false, only = null, trigger = manual ? 'manual' : 'timer' } = {}) {
   const settings = loadSettings();
-  if (!settings.enabled && !manual) return { ok: false, skipped: true, reason: 'CVP 수집이 꺼져 있습니다(설정 › CVP 수집)' };
+  if (!settings.enabled && !manual) {
+    // v2.611(DB2611-05·RECENT2611-07): 보존 정리는 수집 켜짐과 무관하게 돈다 — 중앙은 꺼져 있어도 엣지 push 를 적재하고
+    //   (CVP_SETTINGS_LOCAL=1 엣지·꺼진 상태의 수동 요청), 꺼진 뒤 남은 행도 보존일은 지켜야 한다(guestdisk/poller.js 와 같은 규약).
+    db.maybePrune(settings).catch(() => {});
+    return { ok: false, skipped: true, reason: 'CVP 수집이 꺼져 있습니다(설정 › CVP 수집)' };
+  }
   if (_busy) return { ok: false, busy: true, reason: '이전 수집 진행 중(겹침 방지)' };
   _busy = true;
   const t0 = Date.now();
@@ -142,10 +182,11 @@ export async function pollCvpOnce({ manual = false, only = null, trigger = manua
       const live = new Set(all.map((s) => String(s.id)));
       keepOnly(live);
       for (const k of [..._prevCounters.keys()]) if (!live.has(k.split('|')[0])) _prevCounters.delete(k);
-      for (const m of [_prefer, _partsAt]) for (const k of [...m.keys()]) if (!live.has(k)) m.delete(k);
+      for (const m of [_prefer, _partsAt, _zeroSince]) for (const k of [...m.keys()]) if (!live.has(k)) m.delete(k);
       try { await db.pruneDevices(db.LOCAL_AGENT, {}, { cvpIds: [...live] }); } catch { /* DB 불가 — 다음 주기 */ }
     }
-    const res = await poolSettled(servers, settings.concurrency, (s) => collectOne(s, { periodic: !manual, settings, forceParts: manual }));
+    const slackMs = Math.max(0, Number(_last.durationMs) || 0); // 직전 실행 소요(COL2611-08)
+    const res = await poolSettled(servers, settings.concurrency, (s) => collectOne(s, { periodic: !manual, settings, forceParts: manual, slackMs }));
     const count = (v) => res.filter((x) => x.status === 'fulfilled' && x.value === v).length;
     const crashed = res.filter((x) => x.status === 'rejected');
     for (const c of crashed) console.warn(`[cvp] 수집 중 예외: ${c.reason?.message || c.reason}`);
@@ -181,4 +222,5 @@ export function cvpPollerStatus() {
   };
 }
 
-export function _resetForTest() { _busy = false; _last = { at: 0 }; _inFlight.clear(); _prevCounters.clear(); _prefer.clear(); _partsAt.clear(); }
+export function _resetForTest() { _busy = false; _last = { at: 0 }; _inFlight.clear(); _prevCounters.clear(); _prefer.clear(); _partsAt.clear(); _zeroSince.clear(); }
+export const _prevCountersForTest = _prevCounters;

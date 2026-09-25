@@ -253,8 +253,9 @@ export async function importSamples(agent, rows = []) {
  * ⚠ 호출자가 소유권을 먼저 걸러야 한다.
  */
 export async function touchDevices(agent, touch = []) {
+  if (!touch.length) return { touched: 0 };
   const db = await open();
-  if (!db || !touch.length) return { touched: 0 };
+  if (!db) return { touched: 0, unavailable: true };
   let n = 0;
   db.conn.exec('BEGIN');
   try {

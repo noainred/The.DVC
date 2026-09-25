@@ -15,7 +15,8 @@ import { getPollerStatus, pollNow } from '../../idrac/poller.js';
 import { listScanRanges, saveScanRanges, removeScanRanges, getScanRangeRaw } from '../../idrac/scanRanges.js';
 import { scanRangesToCsv, sampleCsv as scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport } from '../../idrac/scanRangesCsv.js';
 import { listDatacenters } from '../../datacenter/store.js';
-import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs } from '../../idrac/scanPoller.js';
+import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs, tryAcquireScan, releaseScan } from '../../idrac/scanPoller.js';
+import { makeScanAuthPolicy } from '../../idrac/scanAuth.js';
 import { listIdracScanLog, idracScanLogDatacenters } from '../../idrac/scanLog.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { getSensorSeries, remoteSensorView } from '../../idrac/sensorStore.js';
@@ -241,12 +242,18 @@ adminRouter.post('/idrac/scan', adminOnly, fleetOnly, async (req, res) => {
     return res.json({ ok: true, delegated: true, dispatch: 'poll', agent, reqId });
   }
 
+  // v2.611(감사 TIM2611-04): 재진입 가드 — 주기·'지금 스캔'·다른 임시 스캔과 같은 잠금(idrac/scanPoller.js running)을 쓴다.
+  //   예전에는 가드가 없어 연타·주기 스캔과 겹치면 같은 대역(최대 2,048 IP · 동시 32)에 같은 계정 로그인이 곱해졌다.
+  //   인증 실패 정책(makeScanAuthPolicy)도 넘긴다 — 수동이라 건너뛰지는 않지만(periodic:false) 실패를 기록해 주기 스캔이 본다.
+  const lock = tryAcquireScan('adhoc');
+  if (!lock.ok) return res.status(409).json({ ok: false, busy: true, by: lock.by, reason: lock.reason });
   try {
-    const result = await scanForIdracs({ ips, username, password });
+    const authPolicy = makeScanAuthPolicy({ rangeId: 'adhoc', username, password, periodic: false });
+    const result = await scanForIdracs({ ips, username, password, authPolicy });
     res.json({ ok: true, delegated: false, ...result });
   } catch (err) {
     res.status(500).json({ ok: false, reason: err.message });
-  }
+  } finally { releaseScan(); }
 });
 
 // 위임 스캔 결과 폴링. Query: reqId

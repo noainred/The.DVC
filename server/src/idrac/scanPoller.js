@@ -31,6 +31,10 @@ import { makeScanAuthPolicy } from './scanAuth.js';
 let timer = null;      // 주기 타이머(setTimeout 체인 — 32비트 한계 초과 주기 지원)
 let bootTimer = null;  // 부팅 60초 첫 스캔 타이머(주기 변경/끔 시 함께 취소)
 let running = false;
+// v2.611(감사 TIM2611-04): 누가 잡고 있는지 — 'periodic'(주기) · 'manual'(지금 스캔) · 'adhoc'(설정 화면 임시 스캔).
+//   임시 스캔(routes/admin/idracScan.js POST /idrac/scan 로컬)이 같은 잠금을 공유해 연타·주기 스캔과 겹쳐 같은 대역에
+//   같은 계정으로 로그인이 곱해지지 않게 한다(bulkRun '연타가 로그인 시도를 곱하지 않게' 와 같은 규약).
+let runningKind = null;
 let stopRequested = false; // 사용자 '스캔 중지' — 진행 중 사이클을 안전하게 끊는다
 // v2.591(감사 C3): 키는 `datacenters` 다(대역은 법인 단위). 예전 주석이 `vcenters` 라 적어 웹이 그 키를 읽었고
 //   '최근 전체/주기 스캔' 요약이 **항상 빠졌다**. 구버전 화면 호환으로 같은 값을 `vcenters` 에도 싣는다.
@@ -171,6 +175,7 @@ export async function runIdracScanOnce(opts = {}) {
   if (!entries.length) { lastRun = { at: Date.now(), skipped: '대상 없음' }; return { ok: false, reason: '스캔할 대역이 없습니다.' }; }
 
   running = true;
+  runningKind = opts.manual ? 'manual' : 'periodic';
   const started = Date.now();
   const results = [];
   let foundTotal = 0, registeredTotal = 0, delegatedTotal = 0, heldTotal = 0; const errors = [];
@@ -245,8 +250,26 @@ export async function runIdracScanOnce(opts = {}) {
   } catch (e) {
     lastRun = { at: Date.now(), error: e.message };
     return { ok: false, reason: e.message };
-  } finally { running = false; progress = null; stopRequested = false; }
+  } finally { running = false; runningKind = null; progress = null; stopRequested = false; }
 }
+
+/** 스캔 잠금 사유 문구 — 진행 중인 쪽이 무엇인지 밝힌다(조치가 다르다: 주기는 기다리면 끝나고, 임시 스캔은 다른 관리자가 돌리는 것). */
+export function scanBusyReason(kind = runningKind) {
+  const who = kind === 'periodic' ? '주기 스캔' : kind === 'manual' ? "'지금 스캔'" : kind === 'adhoc' ? '다른 임시 스캔' : '다른 스캔';
+  return `${who}이 진행 중입니다 — 끝난 뒤 다시 시도하세요(같은 대역에 같은 계정으로 로그인이 겹치지 않게 한 번에 하나만 돕니다).`;
+}
+
+/**
+ * v2.611(감사 TIM2611-04): 임시 스캔용 잠금 — 주기·'지금 스캔' 과 **같은** running 을 쓴다.
+ * @returns {{ok:true}|{ok:false, busy:true, by:string|null, reason:string}}
+ * 반드시 finally 에서 releaseScan() 을 부를 것.
+ */
+export function tryAcquireScan(kind = 'adhoc') {
+  if (running) return { ok: false, busy: true, by: runningKind, reason: scanBusyReason(runningKind) };
+  running = true; runningKind = kind;
+  return { ok: true };
+}
+export function releaseScan() { running = false; runningKind = null; stopRequested = false; }
 
 /** 비동기 시작(요청 즉시 반환, 창 닫아도 백그라운드 지속). */
 export function startIdracScanNow(opts = {}) {
@@ -279,7 +302,7 @@ export function idracScanStatus() {
     enabledDatacenters: enabled.length,
     totalRanges: enabled.reduce((a, e) => a + e.ranges.length, 0),
     intervalMs: intervalMs(),
-    running, lastRun,
+    running, runningKind, lastRun,
     progress: progress ? { ...progress, pct } : null,
   };
 }

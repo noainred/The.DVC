@@ -10,8 +10,12 @@
  * ⚠ 순환 import 방지 — 이 파일은 poller/push 를 **동적 import** 한다(idrac/poller.js 가 이 파일을 import).
  */
 import { config } from '../config.js';
+import { deadlineMs } from '../util/deadline.js';
 
-const DEBOUNCE_MS = Math.max(1_000, Number(process.env.PARTFAULT_HOOK_DEBOUNCE_MS) || 15_000);
+// v2.611 TIM2611-03: 상한 없는 `Math.max(1_000, env)` 는 2^31ms 초과·Infinity 에서 setTimeout 이 1ms 가 되어 디바운스가
+// 사라졌다(스냅샷 갱신마다 즉시 push·판정). 시한 관문 deadlineMs([1초, 2시간], 빈 값·비숫자는 기본 15초)를 거친다.
+export const hookDebounceMs = (v) => deadlineMs(v, 15_000);
+const DEBOUNCE_MS = hookDebounceMs(process.env.PARTFAULT_HOOK_DEBOUNCE_MS);
 let _timer = null;
 let _pending = 0;
 let _last = null;

@@ -51,13 +51,19 @@ export function getClassifier() {
   const s = load();
   const pub = (s.publicRanges || []).map(parseRange).filter(Boolean);
   const priv = (s.privateRanges || []).map(parseRange).filter(Boolean);
-  classifierCache = (ip) => {
-    const n = ipToNum(ip);
-    if (n == null) return 'private';
+  // v2.611(감사 PERF2611-01): 숫자판(`.num`) — 원장 재구성이 IP 를 행당 한 번만 파싱해 넘긴다. 문자열판은 파싱 후 숫자판을
+  //   부르므로 두 판의 결과는 항상 같다(ipToNum 은 순수 함수).
+  const byNum = (n) => {
     if (inAny(n, priv)) return 'private';
     if (inAny(n, pub)) return 'public';
     return inAny(n, RFC1918) ? 'private' : 'public';
   };
+  classifierCache = (ip) => {
+    const n = ipToNum(ip);
+    if (n == null) return 'private';
+    return byNum(n);
+  };
+  classifierCache.num = (n) => (n == null ? 'private' : byNum(n));
   return classifierCache;
 }
 
@@ -92,13 +98,18 @@ export function getIgnoreMatcher() {
   const vc = {};
   for (const [k, arr] of Object.entries(s.vcenters || {})) vc[k] = (arr || []).map(parseRange).filter(Boolean);
   const inAny = (n, ranges) => ranges.some((r) => n >= r.lo && n <= r.hi);
-  matcherCache = (ip, vcenterId) => {
-    const n = ipToNum(ip);
-    if (n == null) return false;
+  // v2.611(감사 PERF2611-01): 숫자판(`.num`) — classifier 와 같은 이유. 문자열판은 파싱 후 숫자판을 부른다.
+  const byNum = (n, vcenterId) => {
     if (inAny(n, global)) return true;
     const v = vc[vcenterId];
     return v ? inAny(n, v) : false;
   };
+  matcherCache = (ip, vcenterId) => {
+    const n = ipToNum(ip);
+    if (n == null) return false;
+    return byNum(n, vcenterId);
+  };
+  matcherCache.num = (n, vcenterId) => (n == null ? false : byNum(n, vcenterId));
   matcherCache.empty = global.length === 0 && Object.keys(vc).length === 0;
   return matcherCache;
 }

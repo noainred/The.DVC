@@ -22,7 +22,7 @@ import { DEVICE_MAX, PORT_MAX, PEER_MAX, PART_MAX, PART_STATES } from '../cvp/pa
 
 const FILE = path.join(config.configDir, 'central-agent-cvp.json');
 export const ROWS_MAX = 100_000;
-const KINDS = new Set([...Object.keys(CANDIDATES), 'budget']);
+const KINDS = new Set([...Object.keys(CANDIDATES), 'budget', 'deadline']);
 const PART_KIND_SET = new Set(['psu', 'fan', 'temp', 'xcvr']);
 const LINK = new Set(['up', 'down', 'unknown']);
 
@@ -68,8 +68,10 @@ export function cleanStatus(x, now = Date.now()) {
     collectedAt: tsClamp(x.collectedAt, now), lastAttemptAt: tsClamp(x.lastAttemptAt, now), durationMs: numOrNull(x.durationMs),
     deviceCount: numOrNull(x.deviceCount), error: x.error == null ? null : s(x.error, 1000), authStopped: auth,
     usedPaths: strMap(x.usedPaths, 256, (k) => KINDS.has(k)), missing: strMap(x.missing, 500, (k) => KINDS.has(k)), seenFields: seen,
-    truncated: numObj(x.truncated, ['devices', 'ports', 'peers', 'notTried']), cvpVersion: s(x.cvpVersion, 64),
+    truncated: numObj(x.truncated, ['devices', 'ports', 'peers', 'notTried', 'aborted']), cvpVersion: s(x.cvpVersion, 64),
     partsRead: x.partsRead === true, dbUnavailable: x.dbUnavailable === true,
+    ...(x.partsDueUnread === true ? { partsDueUnread: true } : {}),
+    ...(isPlainObj(x.pruneHeld) ? { pruneHeld: { since: tsClamp(x.pruneHeld.since, now), untilMs: numOrNull(x.pruneHeld.untilMs), had: numOrNull(x.pruneHeld.had), reason: s(x.pruneHeld.reason, 300) } } : {}),
   };
 }
 
@@ -160,15 +162,23 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
   return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped };
 }
 
-/** 청크 0 — 그 엣지의 상태를 통째로 교체. 반환 { ok, refused?, evicted? }. */
+/**
+ * 청크 0 — 그 엣지의 상태를 통째로 교체. 반환 { ok, refused?, evicted? }.
+ * agent 는 저장 키(라우트가 util/agentKey canonicalAgent 로 정한 것). v2.611(CEN2611-02): 대소문자만 다른 옛 키의 보관분은 지운다 —
+ *   남겨 두면 같은 엣지가 두 행이 되고 조회(대소문자 무시)가 옛 정상 행을 골라 현재 오류를 가렸다(재현).
+ */
 export function saveEdgeCvpStatus(agent, servers, { devicesUnavailable = false, now = Date.now() } = {}) {
-  const adm = admitAgent(load(), agent);
+  const m = load();
+  const lo = String(agent ?? '').trim().toLowerCase();
+  let variants = 0;
+  for (const k of [...m.keys()]) if (k !== agent && String(k).trim().toLowerCase() === lo) { m.delete(k); variants++; }
+  const adm = admitAgent(m, agent);
   if (!adm.ok) { console.warn(`[central] cvp-data: 엣지 수 상한 — 새 이름 '${String(agent).slice(0, 64)}' 거절`); return { ok: false, refused: true }; }
   if (adm.evicted) console.warn(`[central] cvp-data: 엣지 수 상한 — 오래 조용한 '${adm.evicted}' 보관분을 내렸다`);
-  load().set(agent, { at: now, servers, devicesUnavailable });
+  m.set(agent, { at: now, servers, devicesUnavailable });
   writer.save();
   for (const st of servers) if (st.collectedAt != null) ackCvpCollect(st.cvpId, st.collectedAt);
-  return { ok: true, ...(adm.evicted ? { evicted: adm.evicted } : {}) };
+  return { ok: true, ...(adm.evicted ? { evicted: adm.evicted } : {}), ...(variants ? { variantsRemoved: variants } : {}) };
 }
 
 /** 전 엣지 상태(평탄) — { agent, pushedAt, ...status }. */

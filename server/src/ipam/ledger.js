@@ -85,6 +85,17 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
 
   const ignored = getIgnoreMatcher();
   const classify = getClassifier();
+  // v2.611(감사 PERF2611-01): 30초마다 도는 원장 재구성에서 같은 IP 문자열을 행당 3~4번 파싱했다(ignored·ipToNum·classify 가
+  //   각자 ipToNum). 행당 한 번 파싱한 숫자를 숫자판(.num)에 넘기고, 무시 규칙이 비어 있으면(.empty) 매처 호출을 건너뛴다.
+  //   숫자판이 없는 매처·분류기(테스트 대체 등)는 문자열판으로 폴백 — 결과는 예전과 같다(audit2611e 가 옛 판본과 대조).
+  const noIgnore = ignored.empty === true;
+  const ignoredAt = typeof ignored.num === 'function'
+    ? (ip, n, vc) => !noIgnore && ignored.num(n, vc)
+    : (ip, _n, vc) => ignored(ip, vc);
+  const scopeAt = typeof classify.num === 'function' ? (ip, n) => classify.num(n) : (ip) => classify(ip);
+  // guestOS 문자열은 VM 수천 대에서 수십 종뿐이다 — 빌드 안에서만 메모한다(호출부가 스프레드로 복사하므로 참조가 새지 않는다).
+  const osMemo = new Map();
+  const parseOsMemo = (g) => { const k = String(g || ''); let v = osMemo.get(k); if (!v) { v = parseOs(k); osMemo.set(k, v); } return v; };
   // 확인 출처(discovery): 'vcenter'(vCenter 인식) · 'scan'(Ping/TCP 스캔) · 'both'(둘 다).
   // vCenter가 아는 IP가 스캔에도 잡히면 'both'로 표시. (스캔 결과는 1회만 조회해 재사용)
   const scanList = scanResultList();
@@ -94,26 +105,28 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
   for (const vm of vms) {
     const ips = vm.ipAddresses?.length ? vm.ipAddresses : (vm.ipAddress ? [vm.ipAddress] : []);
     for (const ip of ips) {
-      if (ignored(ip, vm.vcenterId)) continue;
+      const n = ipToNum(ip);
+      if (ignoredAt(ip, n, vm.vcenterId)) continue;
       count.set(ip, (count.get(ip) || 0) + 1);
       rows.push({
-        ip, ipNum: ipToNum(ip), vcenterId: vm.vcenterId, vcenterName: vcName[vm.vcenterId] || vm.vcenterId,
+        ip, ipNum: n, vcenterId: vm.vcenterId, vcenterName: vcName[vm.vcenterId] || vm.vcenterId,
         ownerType: 'vm', serverType: 'VM', ownerName: vm.name, powerState: vm.powerState, guestOS: vm.guestOS,
-        ...parseOs(vm.guestOS),
-        hostName: vm.host || '', cluster: vm.cluster || '', multiHomed: ips.length > 1, scope: classify(ip), owner: vm,
+        ...parseOsMemo(vm.guestOS),
+        hostName: vm.host || '', cluster: vm.cluster || '', multiHomed: ips.length > 1, scope: scopeAt(ip, n), owner: vm,
         discovery: scanIpSet.has(ip) ? 'both' : 'vcenter',
       });
     }
   }
   for (const h of hosts) {
-    if (ipToNum(h.name) == null) continue; // host registered by FQDN → no mgmt IP
-    if (ignored(h.name, h.vcenterId)) continue;
+    const n = ipToNum(h.name);
+    if (n == null) continue; // host registered by FQDN → no mgmt IP
+    if (ignoredAt(h.name, n, h.vcenterId)) continue;
     count.set(h.name, (count.get(h.name) || 0) + 1);
     rows.push({
-      ip: h.name, ipNum: ipToNum(h.name), vcenterId: h.vcenterId, vcenterName: vcName[h.vcenterId] || h.vcenterId,
+      ip: h.name, ipNum: n, vcenterId: h.vcenterId, vcenterName: vcName[h.vcenterId] || h.vcenterId,
       ownerType: 'host', serverType: 'BareMetal', ownerName: h.name, powerState: h.powerState, guestOS: `ESXi ${h.version || ''}`.trim(),
       osName: 'ESXi', osVersion: h.version || '',
-      hostName: h.name, cluster: h.cluster || '', multiHomed: false, scope: classify(h.name), owner: h,
+      hostName: h.name, cluster: h.cluster || '', multiHomed: false, scope: scopeAt(h.name, n), owner: h,
       discovery: scanIpSet.has(h.name) ? 'both' : 'vcenter',
     });
   }
@@ -133,16 +146,17 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
     for (const h of uniHosts) if (ipToNum(h.name) != null) known.add(h.name);
     const seen = new Set(rows.map((r) => r.ip));
     for (const sc of scanList) {
-      if (ignored(sc.ip, '') || known.has(sc.ip) || seen.has(sc.ip) || ipToNum(sc.ip) == null) continue;
+      const n = ipToNum(sc.ip);
+      if (ignoredAt(sc.ip, n, '') || known.has(sc.ip) || seen.has(sc.ip) || n == null) continue;
       seen.add(sc.ip);
       const hist = histMap[sc.ip];
       const released = hist?.status === 'down';
       count.set(sc.ip, (count.get(sc.ip) || 0) + 1);
       rows.push({
-        ip: sc.ip, ipNum: ipToNum(sc.ip), vcenterId: '', vcenterName: '(네트워크 스캔)',
+        ip: sc.ip, ipNum: n, vcenterId: '', vcenterName: '(네트워크 스캔)',
         ownerType: 'scanned', serverType: 'Scanned', ownerName: sc.hostname || sc.ip,
         powerState: released ? 'POWERED_OFF' : 'POWERED_ON', guestOS: '', osName: '', osVersion: '',
-        hostName: sc.hostname || '', cluster: '', multiHomed: false, scope: classify(sc.ip),
+        hostName: sc.hostname || '', cluster: '', multiHomed: false, scope: scopeAt(sc.ip, n),
         openPorts: sc.openPorts || [], services: sc.services || [], lastSeen: sc.lastSeen || null,
         firstSeen: hist?.firstSeen || null, usageStatus: hist?.status || null, released,
         source: 'scan', discovery: 'scan', owner: null,
