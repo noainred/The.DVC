@@ -19,7 +19,7 @@ export async function scanForIdracs({ ips, username, password, ilo = null, concu
   //   벤더를 먼저 가르고 그 벤더의 계정으로만 로그인한다(probeIdrac credsFor). 없으면 예전 동작 그대로다(HPE 는 '미지원 서버').
   const iloCred = normIloCred(ilo);
   const dellCred = (String(username || '').trim() && password) ? { username: String(username).trim(), password } : null;
-  const credsFor = iloCred ? (kind) => (kind === 'hpe' ? iloCred : (kind === 'dell' ? dellCred : (dellCred || iloCred))) : null;
+  const credsFor = makeScanCredsFor(dellCred, iloCred);
   const { ips: list, errors, truncated } = expandIpList(ips);
   // v2.537: 차단 대역(루프백·링크로컬·우회표기)은 **찌르지 않는다**. lookup 훅(util/ssrfLookup.js)은
   // IP 리터럴에는 불리지 않으므로(v2.506 문서의 한계) 스캐너는 정적으로 걸러야 한다.
@@ -92,6 +92,9 @@ export async function scanForIdracs({ ips, username, password, ilo = null, concu
       const r = await probeIdrac(ip, username, password, perHostTimeout, { credsFor });
       if (r.ok && r.vendor === 'hpe') hpeDetected++;
       if (!r.ok) unreachable++;
+      // v2.611(감사 SEC2611-01): iLO 전용 대역에서 벤더가 알려진 비-Dell·비-HPE Redfish(Lenovo 등)는 계정이 없어 로그인하지
+      //   않았지만 '계정 없음' 이 아니라 예전처럼 '미지원 서버' 다(Dell 계정이 있었어도 등록되지 않는다).
+      else if (r.noCreds && knownOtherVendor(r)) noteUnsupported(ip, r);
       else if (r.noCreds) {
         // 그 벤더의 계정이 비어 로그인하지 않았다(예: iLO 계정만 넣은 대역의 Dell 서버). 인증 실패가 아니다.
         noCreds++;
@@ -166,6 +169,44 @@ export async function scanForIdracs({ ips, username, password, ilo = null, concu
     authSkippedIps: authSkippedIps.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
     authSkippedTruncated: authSkipped > authSkippedIps.length,
   };
+}
+
+/**
+ * v2.611(감사 SEC2611-01): 벤더별 계정 선택 — **iLO 계정은 HPE 로 판별된 BMC 에만** 보낸다.
+ *   v2.610 은 벤더를 모르는(unknown)·Lenovo 등 비-HPE BMC 에 `dellCred || iloCred` 를 보내, iLO 전용 대역에서 iLO 계정이
+ *   남의 BMC 로 나갔다(로그인에 성공해도 credSet 이 'idrac' 이라 등록되지 않는다 — 이득 0, 노출만). 이제 HPE 외에는 Dell 계정만
+ *   (없으면 null = 로그인하지 않고 noCreds). Dell+iLO 대역의 unknown 은 예전처럼 Dell 계정이다(구형 iDRAC 을 찾는다).
+ *   iLO 계정이 없으면 null(credsFor 없이 부르는 예전 동작 그대로).
+ */
+export function makeScanCredsFor(dellCred, iloCred) {
+  return iloCred ? (kind) => (kind === 'hpe' ? iloCred : (dellCred || null)) : null;
+}
+
+/** 서비스 루트로 벤더를 안 비-Dell·비-HPE Redfish 장비인가(Lenovo·Supermicro 등). */
+function knownOtherVendor(r) {
+  const v = String(r?.vendor || '');
+  return Boolean(r?.redfish) && v !== '' && v !== 'dell' && v !== 'hpe' && v !== 'unknown';
+}
+
+/**
+ * v2.611(감사 RECENT2611-01): 'replace-datacenter' 로 두면 안 되는 **부분 결과** 인지 — 사유 목록(빈 배열 = 교체해도 안전).
+ *   replace 는 그 법인의 기존 등록을 **발견 목록으로 통째 교체**하므로, 발견 목록 밖으로 빠진 **실재 서버**가 하나라도 있으면
+ *   그 서버의 등록(자격증명·전력 이력)이 지워진다. v2.591 은 중단·절단·인증 정지만 봤다 — v2.610 이 만든 '계정이 없어 시도하지
+ *   않음(noCreds)' 이 빠져, iLO 전용 대역의 replace 스캔이 **그 법인의 Dell 등록을 전부 지웠다**(재현).
+ *   · authFailed — 인증 실패도 실재 Redfish 서버다(비밀번호가 바뀐 등록 서버가 한 번의 실패로 삭제되지 않게). 이 판단의 대가는
+ *     '인증 실패가 계속되는 대역은 replace 정리가 일어나지 않는다' 이고, 그것이 삭제보다 안전하다(merge 는 아무것도 지우지 않는다).
+ *   · registeredHpe — iLO 계정 없는 대역에서 HPE 는 found 에 들어가지 않는다(미지원 서버). 그 법인에 이미 HPE 가 등록돼 있으면
+ *     (iLO 계정을 비운 뒤) replace 가 그 행을 지운다.
+ */
+export function scanPartialReasons(r, { registeredHpe = false } = {}) {
+  const out = [];
+  if (r?.aborted) out.push('중단됨');
+  if (r?.truncated) out.push('IP 상한으로 절단');
+  if ((Number(r?.authSkipped) || 0) > 0) out.push(`인증 정지로 건너뜀 ${Number(r.authSkipped)}개`);
+  if ((Number(r?.noCreds) || 0) > 0) out.push(`계정이 없어 시도하지 않음 ${Number(r.noCreds)}대`);
+  if ((Number(r?.authFailed) || 0) > 0) out.push(`인증 실패 ${Number(r.authFailed)}대`);
+  if (registeredHpe && !r?.iloEnabled) out.push('iLO 계정 없이 스캔 — 등록된 HPE 서버를 찾지 않음');
+  return out;
 }
 
 /** iLO 계정 정규화 — { username, password } 가 둘 다 있을 때만 쓴다(하나라도 비면 null = iLO 스캔 안 함). */

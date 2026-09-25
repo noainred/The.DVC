@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // 자격증명 파일 규칙(v2.322): 원자적 쓰기 + 로드 손상 보존
 import { clampSetting } from '../util/clampSetting.js';
+import { secretProvided } from '../util/secretCarry.js'; // v2.611 LEFT2611-03: 계정명이 바뀌면 저장 비밀번호를 승계하지 않는다
 
 const FILE = path.join(config.configDir, 'gpu-guest.json');
 
@@ -70,7 +71,19 @@ function patchNum(v, min, max, prev) {
  * 현재 설정(cur)에 partial을 병합해 새 설정 객체를 반환한다(순수 함수 — 디스크 접근 없음).
  * 로컬 저장(saveGpuGuestSettings)과 중앙의 'agent별 배포 설정' 저장이 동일 병합 규칙을 공유한다.
  */
-export function mergeGpuGuestSettings(cur, partial = {}) {
+// v2.611(LEFT2611-03): 계정명이 바뀐 수정에서 비밀번호를 새로 주지 않았으면 저장 비밀번호를 **승계하지 않는다**
+//   (v2.503 S-2 · v2.607 SEC2607-07 `accessMoved(host·port·username)` 의 형제 누락). 예전에는 username 만 'x' 로
+//   바꾸면 이전 계정의 비밀번호가 새 계정명으로 게스트 로그인에 쓰였다(틀린 조합의 반복 로그인 = 계정 잠금 위험).
+//   접속 주소(VM IP)는 계정 신원이 아니라 이 판정에 넣지 않는다 — 고정 IP 는 VM 이 보고한 IP 중에서만 고를 수 있다(v2.606).
+const normUser = (v) => String(v ?? '').trim().toLowerCase();
+function carriedPw(prevUser, newUserRaw, pwRaw, prevPw, dropped, key) {
+  if (pwRaw !== undefined && pwRaw !== '') return String(pwRaw);
+  const moved = newUserRaw !== undefined && normUser(newUserRaw) !== normUser(prevUser);
+  if (moved && prevPw && !secretProvided(pwRaw)) { dropped.push(key); return ''; }
+  return prevPw || '';
+}
+
+export function mergeGpuGuestSettings(cur, partial = {}, dropped = []) {
   const next = { ...DEFAULTS, ...cur };
   if (partial.enabled !== undefined) next.enabled = Boolean(partial.enabled);
   next.pollIntervalMs = patchNum(partial.pollIntervalMs, 10_000, 86_400_000, next.pollIntervalMs);
@@ -88,10 +101,10 @@ export function mergeGpuGuestSettings(cur, partial = {}) {
         // username/password = Linux(기본) 공용 계정
         username: v.username !== undefined ? String(v.username || '') : (prev.username || ''),
         // 빈 비밀번호 = 기존 유지
-        password: (v.password !== undefined && v.password !== '') ? String(v.password) : (prev.password || ''),
+        password: carriedPw(prev.username, v.username, v.password, prev.password, dropped, 'password'),
         // winUsername/winPassword = Windows 공용 계정(별도). 비우면 Linux 계정으로 폴백.
         winUsername: v.winUsername !== undefined ? String(v.winUsername || '') : (prev.winUsername || ''),
-        winPassword: (v.winPassword !== undefined && v.winPassword !== '') ? String(v.winPassword) : (prev.winPassword || ''),
+        winPassword: carriedPw(prev.winUsername, v.winUsername, v.winPassword, prev.winPassword, dropped, 'winPassword'),
         vms: { ...(prev.vms || {}) }, // VM별 자격증명 override
         // VM별 SSH 접속 IP 고정(다중 NIC일 때). 자격증명(vms)과 독립 — 공용 계정 VM도 지정 가능.
         vmIps: { ...(prev.vmIps || {}) },
@@ -111,7 +124,7 @@ export function mergeGpuGuestSettings(cur, partial = {}) {
             ? { username: String(cred.username ?? pv.username ?? ''), password: '', passwordless: true }
             : {
               username: cred.username !== undefined ? String(cred.username || '') : (pv.username || ''),
-              password: (cred.password !== undefined && cred.password !== '') ? String(cred.password) : (pv.password || ''),
+              password: carriedPw(pv.username, cred.username, cred.password, pv.password, dropped, 'password'),
             };
         }
       }
@@ -122,9 +135,9 @@ export function mergeGpuGuestSettings(cur, partial = {}) {
 }
 
 /** Persist a partial update. vcenters는 병합하며, 빈 password는 기존 값을 유지한다. */
-export function saveGpuGuestSettings(partial) {
+export function saveGpuGuestSettings(partial, dropped = []) {
   const cur = readFile();
-  const next = mergeGpuGuestSettings(cur, partial);
+  const next = mergeGpuGuestSettings(cur, partial, dropped);
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   // 원자적 쓰기(v2.322): writeFileSync 는 'w'(선-truncate)라 쓰기 도중 종료 시 0바이트/부분 파일이
   // 남아 자격증명이 유실된다 — atomicWriteFileSync(임시파일+fsync+rename)로 교체.

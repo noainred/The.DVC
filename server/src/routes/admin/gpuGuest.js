@@ -18,7 +18,9 @@ import { upsertAgentUser, upsertAgentUsersBulk, removeAgentUser, listAgentUsers,
 import { loadVcenterConfig } from '../../config.js';
 import { expandIpList } from '../../idrac/iprange.js';
 import { listCollectors } from '../../collector/registry.js';
-import { adminOnly, maskPw, requireSettingsOwner } from './shared.js';
+import { adminOnly, maskPw, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
+import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields, denyScopedRun } from '../../auth/scopeMerge.js';
 import { poolRun } from '../../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
 export function registerGpuGuest(adminRouter) {
@@ -26,14 +28,23 @@ export function registerGpuGuest(adminRouter) {
 // Metrics sampler settings: 온도/용량/GPU 수집 주기 + 보존기간 (런타임 변경).
 adminRouter.get('/metrics/settings', adminOnly, (_req, res) => {
   res.json({ settings: loadMetricsSettings(), limits: METRICS_LIMITS, status: metricsSamplerStatus() });
+// v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
+const fleetOnly = fullScopeOnlyWith('물리 GPU 서버·엣지 배포 설정·엣지 사용자는 전 법인에 걸친 등록부라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
 });
 adminRouter.put('/metrics/settings', adminOnly, (req, res) => {
+  // v2.611 AUTHZ2611-02: 샘플러 주기·보존일은 전 법인 공용(vCenter 축 없음) — 범위 계정의 값은 적용하지 않고 밝힌다(v2.607 ignoredGlobal).
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (allowed) {
+    const { ignoredGlobal } = keepScopedFields(req.body || {}, loadMetricsSettings(), allowed, []);
+    return res.json({ ok: true, settings: loadMetricsSettings(), status: metricsSamplerStatus(), ...ignoredGlobalFields(ignoredGlobal) });
+  }
   const settings = saveMetricsSettings(req.body || {});
   rescheduleMetricsSampler(); // apply the new interval immediately
   res.json({ ok: true, settings, status: metricsSamplerStatus() });
 });
 // GPU 호스트 사용률 '지금 수집' — 주기를 무시하고 즉시 한 번 수집(다음 스냅샷 갱신에 반영).
-adminRouter.post('/gpu/collect-util', adminOnly, async (_req, res) => {
+adminRouter.post('/gpu/collect-util', adminOnly, async (req, res) => {
+  if (denyScopedRun(req, res, 'GPU 사용률 즉시 수집(전 vCenter 재수집)')) return; // v2.611 AUTHZ2611-02
   try {
     forceGpuUtilCollect();
     // collectAll — 진행 중 수집이 있어도 완료 후 1회 더 실행 + due(주기) 필터를 무시하고 전
@@ -47,18 +58,49 @@ adminRouter.post('/gpu/collect-util', adminOnly, async (_req, res) => {
 });
 
 // GPU 게스트 수집: 어떤 법인을 게스트 OS 계정으로 GPU 모니터링할지 + 자격증명.
-adminRouter.get('/gpu-guest/settings', adminOnly, (_req, res) => {
-  res.json({ settings: redactGpuGuestSettings(loadGpuGuestSettings()), status: gpuGuestStatus() });
+// v2.611 LEFT2611-03: 범위 계정에는 범위 안 vCenter 의 계정만 보이고(범위 밖 계정명·hasPassword 노출 금지),
+//   PUT 은 범위 밖 vCenter 를 직전 값 그대로 보존하며(v2.605 mergeScopedMap) 전역 필드(사용 여부·주기·동시성·방식)는
+//   적용하지 않고 밝힌다(v2.607 ignoredGlobal). 계정명이 바뀌면 저장 비밀번호를 승계하지 않는다(gpu/settings.js).
+const GPU_GUEST_SCOPED_KEYS = ['vcenters'];
+function scopedGpuGuestView(settings, allowed) {
+  const red = redactGpuGuestSettings(settings);
+  if (!allowed) return { settings: red };
+  const all = Object.keys(red.vcenters || {});
+  const vcenters = filterScopedMap(red.vcenters || {}, allowed);
+  const omitted = all.length - Object.keys(vcenters).length;
+  return { settings: { ...red, vcenters }, ...(omitted ? { omittedOutOfScope: omitted } : {}) };
+}
+adminRouter.get('/gpu-guest/settings', adminOnly, (req, res) => {
+  const allowed = scopedVcenterIds(req.user, store.get());
+  res.json({ ...scopedGpuGuestView(loadGpuGuestSettings(), allowed), status: gpuGuestStatus() });
 });
 adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
-  const bad = unknownPinnedIps(req.body || {}, store.get(), loadGpuGuestSettings());
+  const allowed = scopedVcenterIds(req.user, store.get());
+  const before = loadGpuGuestSettings();
+  let body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  let ignored = []; let ignoredGlobal = [];
+  if (allowed) {
+    const kept = keepScopedFields(body, redactGpuGuestSettings(before), allowed, GPU_GUEST_SCOPED_KEYS);
+    ignoredGlobal = kept.ignoredGlobal;
+    // 부분 패치 병합이라 본문에 없는 vCenter 는 건드리지 않는다 — 범위 밖 키만 떼어 내면 보존 병합과 같다.
+    const m = mergeScopedMap({}, kept.patch.vcenters || {}, allowed);
+    ignored = m.ignored;
+    body = { vcenters: m.merged };
+  }
+  const bad = unknownPinnedIps(body, store.get(), before);
   if (bad.length) {
     return res.status(400).json({ ok: false, reason: `고정 IP ${bad.length}개가 그 VM 이 보고한 IP 가 아닙니다 — 저장 자격증명을 VM 이 보고한 적 없는 주소로 보내지 않습니다(VM 의 알려진 IP 중에서 고르세요).`, rejected: bad.slice(0, 50) });
   }
-  const settings = saveGpuGuestSettings(req.body || {});
+  const droppedSecrets = [];
+  const settings = saveGpuGuestSettings(body, droppedSecrets);
   rescheduleGpuGuestPoller();
   reschedulePhysicalPoller();   // v2.597(LC2597-02): 같은 주기 설정을 쓰는 물리 GPU 폴러도
-  res.json({ ok: true, settings: redactGpuGuestSettings(settings), status: gpuGuestStatus() });
+  res.json({
+    ok: true, ...scopedGpuGuestView(settings, allowed), status: gpuGuestStatus(),
+    ...(droppedSecrets.length ? { droppedSecrets: [...new Set(droppedSecrets)] } : {}),
+    ...(ignored.length ? { ignoredOutOfScope: ignored.length } : {}),
+    ...ignoredGlobalFields(ignoredGlobal),
+  });
 });
 
 // GPU 게스트 수집 진단 — 어느 단계에서 막혔는지(선별 깔때기 + VM별 성공/실패·에러).
@@ -73,6 +115,8 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
   const vcId = req.query.vcenterId;
   if (!vcId) return res.status(400).json({ error: 'vcenterId 필요' });
   const snap = store.get();
+  if (!inUserScope(req.user, snap, String(vcId))) return res.status(404).json({ error: 'vCenter 를 찾을 수 없습니다.' }); // v2.611: 범위 밖은 존재 은닉
+  if (req.query.agent && scopedVcenterIds(req.user, snap)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '엣지 배포 설정은 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });
   const hostNames = gpuHostIds(snap, vcId);
   // agent 지정 시(중앙 UI에서 원격 엣지 설정 배포 편집) '이 엣지 앞으로 지정한 배포 설정' 기준으로
   // 저장 여부/공용계정/IP를 표시. 지정 없으면 로컬 설정 기준(기존 동작).
@@ -116,7 +160,7 @@ adminRouter.get('/gpu-guest/deploy/:agent', adminOnly, (req, res) => {
   res.json(redactAssignedGpuGuest(req.params.agent));
 });
 // 특정 엣지 앞 배포 설정 저장(병합). 엣지가 다음 pull 주기에 가져가 적용.
-adminRouter.put('/gpu-guest/deploy/:agent', adminOnly, (req, res) => {
+adminRouter.put('/gpu-guest/deploy/:agent', adminOnly, fleetOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent 필요' });
   setAssignedGpuGuest(agent, req.body || {});
@@ -146,18 +190,18 @@ adminRouter.get('/edge-users/:agent', adminOnly, (req, res) => {
 // 전 엣지의 소유자가 되어(엣지 백업 다운로드 → 엣지 AUTH_SECRET·TOTP 시크릿) 로컬의 소유자
 // 경계를 우회한다 — 백업 라우트와 같은 등급으로 올린다. 조회(GET)는 종전대로 adminOnly.
 // 사용자 추가/수정(비밀번호 주면 해시로 변환 저장). Body { username, name, role, password }.
-adminRouter.post('/edge-users/:agent', adminOnly, requireSettingsOwner, (req, res) => {
+adminRouter.post('/edge-users/:agent', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const r = upsertAgentUser(req.params.agent, req.body || {});
   res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
 });
 // 여러 엣지(또는 '*'=모든 엣지)에 같은 사용자를 한 번에 배포. Body { targets:[...], username, name, role, password }.
-adminRouter.post('/edge-users-bulk', adminOnly, requireSettingsOwner, (req, res) => {
+adminRouter.post('/edge-users-bulk', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const { targets, ...spec } = req.body || {};
   const r = upsertAgentUsersBulk(targets, spec);
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 사용자 제거(다음 pull에 엣지에서도 삭제).
-adminRouter.delete('/edge-users/:agent/:username', adminOnly, requireSettingsOwner, (req, res) => {
+adminRouter.delete('/edge-users/:agent/:username', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const r = removeAgentUser(req.params.agent, req.params.username);
   res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
 });
@@ -166,26 +210,26 @@ adminRouter.delete('/edge-users/:agent/:username', adminOnly, requireSettingsOwn
 adminRouter.get('/gpu-physical', adminOnly, (_req, res) => {
   res.json({ servers: listPhysical(), results: getAllPhysicalGpu(), status: physicalPollerStatus() });
 });
-adminRouter.post('/gpu-physical', adminOnly, (req, res) => {
+adminRouter.post('/gpu-physical', adminOnly, fleetOnly, (req, res) => {
   const r = addPhysical(req.body || {});
   if (r.ok) pollPhysicalOnce().catch(() => {});
   res.status(r.ok ? 201 : 400).json(r);
 });
-adminRouter.put('/gpu-physical/:id', adminOnly, (req, res) => {
+adminRouter.put('/gpu-physical/:id', adminOnly, fleetOnly, (req, res) => {
   const r = updatePhysical(req.params.id, req.body || {});
   if (r.ok) pollPhysicalOnce().catch(() => {});
   res.status(r.ok ? 200 : 400).json(r);
 });
-adminRouter.delete('/gpu-physical/:id', adminOnly, (req, res) => {
+adminRouter.delete('/gpu-physical/:id', adminOnly, fleetOnly, (req, res) => {
   const r = removePhysical(req.params.id);
   res.status(r.ok ? 200 : 400).json(r);
 });
-adminRouter.post('/gpu-physical/poll', adminOnly, async (_req, res) => {
+adminRouter.post('/gpu-physical/poll', adminOnly, fleetOnly, async (_req, res) => {
   res.json({ ok: true, lastRun: await pollPhysicalOnce({ manual: true }) }); // v2.590: 수동 실행은 인증 실패 정지 서버도 1회 시도
 });
 // IP+ID+PW+소속 vCenter만 받아 SSH 로그인→GPU/OS/호스트명 자동 감지→자동 등록.
 // 같은 host가 이미 있으면 갱신. Body { host, username, password, port?, vcenterId? }
-adminRouter.post('/gpu-physical/auto-register', adminOnly, async (req, res) => {
+adminRouter.post('/gpu-physical/auto-register', adminOnly, fleetOnly, async (req, res) => {
   const b = req.body || {};
   const host = String(b.host || '').trim();
   const username = String(b.username || '').trim();
@@ -209,7 +253,7 @@ adminRouter.post('/gpu-physical/auto-register', adminOnly, async (req, res) => {
 
 // 여러 IP 일괄 자동 등록 — 대역/CIDR을 펼쳐 각 IP에 SSH 로그인→감지→등록(동시성 제한).
 // Body { ips, username, password?, port?, vcenterId?, force? }
-adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, async (req, res) => {
+adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, fleetOnly, async (req, res) => {
   const b = req.body || {};
   const username = String(b.username || '').trim();
   if (!b.ips || !username) return res.status(400).json({ ok: false, reason: 'IP 목록과 계정이 필요합니다.' });
@@ -237,7 +281,7 @@ adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, async (req, res)
 });
 
 // 단건 SSH 테스트(저장 전 검증 가능) — body { host, username, password?, port?, revealCreds? } 또는 { id }
-adminRouter.post('/gpu-physical/test', adminOnly, async (req, res) => {
+adminRouter.post('/gpu-physical/test', adminOnly, fleetOnly, async (req, res) => {
   const b = req.body || {};
   let host = String(b.host || '').trim(); let username = String(b.username || '').trim(); let password = String(b.password || ''); let port = Number(b.port) || 22;
   if (b.id) { const s = getPhysicalRaw(b.id); if (s) { host = s.host; username = s.username; password = b.password || s.password; port = s.port || 22; } }
@@ -261,6 +305,7 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
   const revealCreds = !!req.body?.revealCreds; // 관리자 디버그: 실행 로그에 실제 id/pw 평문 표시(응답에만, 디스크/중앙 미기록)
   if (!vcenterId || !Array.isArray(items) || !items.length) return res.status(400).json({ error: 'vcenterId + items 필요' });
   const snap = store.get();
+  if (!inUserScope(req.user, snap, String(vcenterId))) return res.status(404).json({ error: 'vCenter 를 찾을 수 없습니다.' }); // v2.611: 범위 밖 게스트에 로그인하지 않는다
   const vmById = new Map((snap.vms || []).filter((v) => v.vcenterId === vcenterId).map((v) => [v.id, v]));
   // 호스트명 → 다운로드 후보 호스트(vCenter 실제 IP → ESXi IP → ESXi FQDN).
   const dlByHost = new Map();

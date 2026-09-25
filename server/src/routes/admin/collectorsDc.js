@@ -24,7 +24,9 @@ import { readJsonCapped, EDGE_EXPORT_MAX_BYTES } from '../../util/readCapped.js'
 const EDGE_SMALL_MAX_BYTES = 256 * 1024;
 import { resolveBundleBytes, lastBundleReject } from '../../upgrade/bundleSource.js';
 import { upgradeManager } from '../../upgrade/manager.js';
-import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner } from './shared.js';
+import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+// v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
+const fleetOnly = fullScopeOnlyWith('수집 서버(엣지)·DataCenter 등록부는 전 법인에 걸친 설정이라 전체 범위(vCenter 제한 없는) 계정만 조회·변경할 수 있습니다.');
 
 
 // ── VM 사양 변경(ReconfigVM) — vCPU/RAM/디스크 증설·추가, NIC 추가/삭제 (관리자) ──────────
@@ -76,18 +78,18 @@ export function registerCollectorsDc(adminRouter) {
 // ---- Distributed collection: remote collector agents ----------------------
 
 // List registered collectors (tokens redacted) + live pull status.
-adminRouter.get('/collectors', adminOnly, (_req, res) => {
+adminRouter.get('/collectors', adminOnly, fleetOnly, (_req, res) => {
   res.json({ collectors: listCollectors(), status: allCollectorStatus(), identity: agentIdentitySummary() });
 });
 
-adminRouter.post('/collectors', adminOnly, (req, res) => {
+adminRouter.post('/collectors', adminOnly, fleetOnly, (req, res) => {
   // 관리자 UI 등록 = 수동 고정(managed) — 엣지 자기등록이 URL/토큰을 덮어쓰지 못하게.
   const result = addCollector(req.body || {}, { managed: true });
   if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 등록', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}`, ip: req.ip || '' }); }
   res.status(result.ok ? 201 : 400).json(result);
 });
 
-adminRouter.put('/collectors/:id', adminOnly, (req, res) => {
+adminRouter.put('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
   // 관리자 UI 수정 = 수동 고정(managed) — 저장한 URL/토큰이 자기등록으로 원복되던 버그 방지.
   const result = updateCollector(req.params.id, req.body || {}, { managed: true });
   if (result.ok) {
@@ -101,7 +103,7 @@ adminRouter.put('/collectors/:id', adminOnly, (req, res) => {
   res.status(result.ok ? 200 : 400).json(result);
 });
 
-adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
+adminRouter.delete('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
   const result = removeCollector(req.params.id);
   if (result.ok) {
     clearCollectorHosts(req.params.id);   // 원격 전력 병합 상태 제거
@@ -120,7 +122,7 @@ adminRouter.delete('/collectors/:id', adminOnly, (req, res) => {
  */
 
 // 현재 등록 수집 서버를 CSV 로 내보내기. 기본은 토큰 제외(listCollectors redact 계약).
-adminRouter.get('/collectors/export.csv', adminOnly, (req, res) => {
+adminRouter.get('/collectors/export.csv', adminOnly, fleetOnly, (req, res) => {
   const withTok = String(req.query.tokens || '') === '1';
   const send = () => {
     const list = loadCollectors();
@@ -149,7 +151,7 @@ adminRouter.get('/collectors/sample.csv', adminOnly, (_req, res) => {
  *    보고 — 기존 URL/토큰/매핑을 실수로 갈아엎는 사고 방지). 행별 성공/실패 정직 반환.
  *  - 가져온 항목은 관리자 수동 등록과 동일하게 managed=true(자기등록이 못 덮어씀).
  */
-adminRouter.post('/collectors/import', adminOnly, (req, res) => {
+adminRouter.post('/collectors/import', adminOnly, fleetOnly, (req, res) => {
   const { rows, error } = parseCollectorsCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -201,7 +203,7 @@ adminRouter.post('/collectors/import', adminOnly, (req, res) => {
 // '전 엣지의 임의 계정 비밀번호를 심는 권능'이다 — /admin/edge-users* 를 소유자 전용으로 올린
 // 것과 정확히 같은 논리인데 그 승격에서 누락됐다. 엣지측에도 방어를 넣었지만(collector.js —
 // 보호 계정 거부) 중앙에서도 막아 다층으로 둔다.
-adminRouter.post('/collectors/set-password', adminOnly, requireSettingsOwner, async (req, res) => {
+adminRouter.post('/collectors/set-password', adminOnly, fleetOnly, requireSettingsOwner, async (req, res) => {
   const username = String(req.body?.username || 'admin').trim();
   const password = String(req.body?.password || '');
   if (password.length < 8) return res.status(400).json({ ok: false, reason: '비밀번호는 8자 이상이어야 합니다.' });
@@ -248,25 +250,25 @@ adminRouter.get('/datacenters', adminOnly, (_req, res) => {
   try { for (const c of loadCollectors()) ensureCollectorDatacenter(c); } catch { /* best effort */ }
   res.json({ datacenters: listDatacenters(), assign: getDatacenterAssign() });
 });
-adminRouter.post('/datacenters', adminOnly, (req, res) => {
+adminRouter.post('/datacenters', adminOnly, fleetOnly, (req, res) => {
   const r = addDatacenter(req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 등록', target: r.datacenter?.id || '', detail: r.datacenter?.name || '', ip: req.ip || '' });
   res.status(r.ok ? 201 : 400).json(r);
 });
 // '/datacenters/assign'을 '/:id'보다 먼저 둬야 라우트 충돌이 없다.
-adminRouter.put('/datacenters/assign', adminOnly, (req, res) => {
+adminRouter.put('/datacenters/assign', adminOnly, fleetOnly, (req, res) => {
   const entries = Array.isArray(req.body?.entries) ? req.body.entries.slice(0, 5000) : [];
   if (!entries.length) return res.status(400).json({ ok: false, reason: 'entries가 비었습니다.' });
   const r = setVcenterDatacenterMany(entries);
   if (r.ok) logAudit({ user: req.user?.username, action: 'vCenter→DataCenter 할당', target: `${r.changed}건`, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
-adminRouter.put('/datacenters/:id', adminOnly, (req, res) => {
+adminRouter.put('/datacenters/:id', adminOnly, fleetOnly, (req, res) => {
   const r = updateDatacenter(req.params.id, req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 수정', target: req.params.id, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
-adminRouter.delete('/datacenters/:id', adminOnly, (req, res) => {
+adminRouter.delete('/datacenters/:id', adminOnly, fleetOnly, (req, res) => {
   const r = removeDatacenter(req.params.id);
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 삭제', target: req.params.id, ip: req.ip || '' });
   res.status(r.ok ? 200 : 404).json(r);
@@ -275,7 +277,7 @@ adminRouter.delete('/datacenters/:id', adminOnly, (req, res) => {
 adminRouter.get('/datacenter-order', adminOnly, (_req, res) => {
   res.json({ order: getDatacenterOrder(), datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name, region: d.region || '' })) });
 });
-adminRouter.put('/datacenter-order', adminOnly, (req, res) => {
+adminRouter.put('/datacenter-order', adminOnly, fleetOnly, (req, res) => {
   const r = saveDatacenterOrder((req.body || {}).order);
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 순서 변경', detail: `${(r.order || []).length}개`, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
@@ -346,14 +348,14 @@ adminRouter.post('/vm/:id/reconfig', requirePerm('vm.reconfig'), async (req, res
 });
 
 // Trigger an immediate pull of all collectors.
-adminRouter.post('/collectors/pull', adminOnly, async (_req, res) => {
+adminRouter.post('/collectors/pull', adminOnly, fleetOnly, async (_req, res) => {
   await pullNow();
   res.json({ ok: true, status: allCollectorStatus() });
 });
 
 // Push an upgrade bundle to collector agents. Body: { id?, force? }.
 // Brings one (id) or all registered agents up to the central portal's version.
-adminRouter.post('/collectors/upgrade', adminOnly, async (req, res) => {
+adminRouter.post('/collectors/upgrade', adminOnly, fleetOnly, async (req, res) => {
   const { id, force } = req.body || {};
   const bundle = await resolveBundleBytes(upgradeManager.settings);
   if (!bundle) {
@@ -367,7 +369,7 @@ adminRouter.post('/collectors/upgrade', adminOnly, async (req, res) => {
 });
 
 // Test connectivity to one collector (saved by id, or an ad-hoc {url, token}).
-adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
+adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
   const body = req.body || {};
   let { url, token } = body;
   if (body.id) {
@@ -434,7 +436,7 @@ adminRouter.post('/collectors/test', adminOnly, async (req, res) => {
 // 토큰 강제 동기화 — 연결 테스트가 403(토큰 불일치)일 때, 수집 서버 URL의 호스트와 일치하는
 // 'Edge 노드 포탈 설치' 저장 대상(SSH)을 찾아 엣지 portal.env의 COLLECTOR_TOKEN을 이 화면의
 // 토큰으로 교체·재시작하고, 중앙 저장 토큰도 같은 값으로 고정(managed)한 뒤 재검증한다.
-adminRouter.post('/collectors/:id/force-token', adminOnly, async (req, res) => {
+adminRouter.post('/collectors/:id/force-token', adminOnly, fleetOnly, async (req, res) => {
   const saved = loadCollectors().find((c) => c.id === req.params.id);
   if (!saved) return res.status(404).json({ ok: false, reason: `없는 수집 서버: ${req.params.id}` });
   const token = String(req.body?.token || saved.token || '').trim();

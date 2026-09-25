@@ -56,6 +56,7 @@ export default function Diagnostics() {
 
   // log viewer state
   const [logs, setLogs] = useState([]);
+  const [logsDenied, setLogsDenied] = useState(false); // v2.611: 범위 제한 계정은 서버 로그 403 — '로그가 없습니다' 로 말하지 않는다
   const [level, setLevel] = useState('all');
   const [query, setQuery] = useState('');
   const [paused, setPaused] = useState(false);
@@ -91,10 +92,13 @@ export default function Diagnostics() {
         if (r.items?.length) {
           setLogs((prev) => [...prev, ...r.items].slice(-600));
         }
-      } catch { /* ignore transient */ }
+      } catch (e) {
+        // 403 은 정책 거부라 다시 물어도 같다 — 폴링을 멈추고 화면이 사유를 말한다(그 외는 일시 오류로 무시).
+        if (e?.status === 403) { if (on) setLogsDenied(true); clearInterval(t); }
+      }
     };
-    tick();
     const t = setInterval(tick, 3000);
+    tick();
     return () => { on = false; clearInterval(t); };
   }, []);
 
@@ -281,7 +285,7 @@ export default function Diagnostics() {
         <div className="log-console" ref={consoleRef}>
           {shown.length === 0 && (
             <div className="muted" style={{ padding: 16 }}>
-              {logs.length === 0 ? '로그가 없습니다.' : '검색/필터 조건에 맞는 로그가 없습니다.'}
+              {logsDenied ? '서버 로그는 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다 — 전 법인의 호스트명·IP·경로가 들어갑니다.' : (logs.length === 0 ? '로그가 없습니다.' : '검색/필터 조건에 맞는 로그가 없습니다.')}
             </div>
           )}
           {shown.map((l) => (

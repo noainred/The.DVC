@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../../api.js';
 import { VmLink } from '../../components/ui.jsx';
 import { fmtAgo } from './shared.jsx';
+import { droppedSecretNote } from '../droppedSecretText.js'; // v2.611: VM 계정명 변경 시 폐기된 비밀번호 안내
 import { STable } from '../../components/STable.jsx';
 
 /** 클릭하면 정렬되는 테이블 헤더(오름/내림 토글 + 방향 화살표). */
@@ -150,7 +151,7 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
       // 게스트작업으로 잘 수집되던 VM이 끊길 수 있어 안전한 'auto'를 쓴다.
       const bumpToAuto = !deployAgent && (testMethod === 'ssh' || testMethod === 'auto') && collectMethod === 'guestops';
       const url = deployAgent ? `/admin/gpu-guest/deploy/${encodeURIComponent(deployAgent)}` : '/admin/gpu-guest/settings';
-      await putJson(url, {
+      const saved = await putJson(url, {
         vcenters: { [selVc]: { vms, vmIps } },
         ...(bumpToAuto ? { collectMethod: 'auto' } : {}),
       });
@@ -158,7 +159,7 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
         ? `원격 엣지 [${deployAgent}]로 VM별 계정/IP 배포 저장됨 — 엣지가 다음 pull 주기에 가져가 적용합니다.`
         : (bumpToAuto
           ? "VM별 계정 저장 완료 — 수집 방식이 'VMware Tools만'이라 SSH 수집이 안 되던 걸 'auto(자동 폴백)'로 바꿔 켰습니다. 다음 주기부터 SSH로 수집됩니다."
-          : 'VM별 계정을 저장했습니다. (수집 방식이 SSH/auto인지 위 설정에서 확인하세요)'));
+          : 'VM별 계정을 저장했습니다. (수집 방식이 SSH/auto인지 위 설정에서 확인하세요)') + (droppedSecretNote(saved) ? ` ${droppedSecretNote(saved)}` : ''));
       if (bumpToAuto) onSavedShared?.();
       await loadVms(selVc);
     } catch (e) { setMsg(`오류: ${e.message}`); }

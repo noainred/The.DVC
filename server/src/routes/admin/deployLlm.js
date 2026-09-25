@@ -22,7 +22,9 @@ import { ipBlockReason } from '../../collector/registry.js';
 import crypto from 'node:crypto';
 import { centralTokenInfo } from '../../central/token.js';
 import path from 'node:path';
-import { adminOnly, requireSettingsOwner } from './shared.js';
+import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+// v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
+const fleetOnly = fullScopeOnlyWith('엣지 배포·패키지·LLM 설정·릴리스 노트는 전 법인에 걸친 동작이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
 
 // 배포 성공 후의 수집 서버 자동 등록은 agent/autoRegister.js 로 이관(v2.432) — 단건·대량 배포가 같은 규칙을 쓴다.
@@ -38,18 +40,18 @@ adminRouter.get('/packages', adminOnly, async (req, res) => {
   res.json({ dir: s.dir, baseUrl: s.baseUrl, settings: s, local: listLocalPackages(), remote });
 });
 // Web-editable package source (repository URL / download dir / token).
-adminRouter.put('/packages/settings', adminOnly, (req, res) => {
+adminRouter.put('/packages/settings', adminOnly, fleetOnly, (req, res) => {
   res.json({ ok: true, settings: savePackageSettings(req.body || {}) });
 });
-adminRouter.post('/packages/download', adminOnly, async (req, res) => {
+adminRouter.post('/packages/download', adminOnly, fleetOnly, async (req, res) => {
   try { const r = await downloadPackage(req.body || {}); res.status(r.ok ? 200 : 400).json(r); }
   catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
 // --- iDRAC-scan agent auto-deploy (SSH push install) ---
-adminRouter.get('/agent-deploy/installer', adminOnly, (req, res) => res.json(installerInfo(req.query.path)));
+adminRouter.get('/agent-deploy/installer', adminOnly, fleetOnly, (req, res) => res.json(installerInfo(req.query.path)));
 // 배포 폼 자동 채우기용 기본값: 중앙 URL(접속한 호스트 기준 추정) + 포탈 포트 + 토큰 상태.
-adminRouter.get('/agent-deploy/defaults', adminOnly, (req, res) => {
+adminRouter.get('/agent-deploy/defaults', adminOnly, fleetOnly, (req, res) => {
   const host = (req.get('host') || `localhost:${config.port}`).replace(/\/+$/, '');
   const proto = (req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0];
   res.json({
@@ -59,11 +61,11 @@ adminRouter.get('/agent-deploy/defaults', adminOnly, (req, res) => {
   });
 });
 
-adminRouter.post('/agent-deploy/test', adminOnly, async (req, res) => {
+adminRouter.post('/agent-deploy/test', adminOnly, fleetOnly, async (req, res) => {
   res.json(await testTarget(req.body || {}));
 });
 
-adminRouter.post('/agent-deploy', adminOnly, async (req, res) => {
+adminRouter.post('/agent-deploy', adminOnly, fleetOnly, async (req, res) => {
   // SSH 포트(target.port)와 포탈 포트(portalPort)를 혼동하지 않도록 분리.
   // portalPort만 install.sh --port 로 전달(예전 버그: SSH 22가 포탈 포트로 들어가 EACCES).
   const { installerPath, portalPort, ...target } = req.body || {};
@@ -83,7 +85,7 @@ adminRouter.post('/agent-deploy', adminOnly, async (req, res) => {
 });
 
 // Saved targets + bulk deploy.
-adminRouter.get('/agent-deploy/targets', adminOnly, (_req, res) => res.json({ targets: listTargets() }));
+adminRouter.get('/agent-deploy/targets', adminOnly, fleetOnly, (_req, res) => res.json({ targets: listTargets() }));
 
 /**
  * 대상 저장 — v2.434 부터 **저장만 해도 수집 서버로 자동 등록**한다(사용자 요구 '에이전트를 등록하면
@@ -92,7 +94,7 @@ adminRouter.get('/agent-deploy/targets', adminOnly, (_req, res) => res.json({ ta
  * autoCollectorToken=true 면 토큰이 없을 때 새로 만들어 대상에 저장한다 — 다만 그 토큰은 **엣지에 아직
  * 없으므로** 배포하거나 '엣지에 반영'을 해야 pull 이 200 이 된다(응답의 needsEdgeSync 로 알린다).
  */
-adminRouter.post('/agent-deploy/targets', adminOnly, (req, res) => {
+adminRouter.post('/agent-deploy/targets', adminOnly, fleetOnly, (req, res) => {
   const body = { ...(req.body || {}) };
   let generated = false;
   if (!String(body.collectorToken || '').trim() && req.body?.autoCollectorToken && body.registerCollector !== false) {
@@ -113,7 +115,7 @@ adminRouter.post('/agent-deploy/targets', adminOnly, (req, res) => {
   res.json({ ...r, collector, tokenGenerated: generated, needsEdgeSync: generated });
 });
 
-adminRouter.delete('/agent-deploy/targets/:id', adminOnly, (req, res) => {
+adminRouter.delete('/agent-deploy/targets/:id', adminOnly, fleetOnly, (req, res) => {
   const r = removeTarget(req.params.id);
   res.status(r.ok ? 200 : 400).json(r);
 });
@@ -124,7 +126,7 @@ adminRouter.delete('/agent-deploy/targets/:id', adminOnly, (req, res) => {
  * (host,port,username)이 겹치는 행은 body.overwrite=true 명시 시에만 갱신한다.
  * privateKey(멀티라인)·gpuGuest(중첩)는 CSV 미지원 — 가져오기가 건드리지 않아 기존값 유지.
  */
-adminRouter.get('/agent-deploy/targets/export.csv', adminOnly, (req, res) => {
+adminRouter.get('/agent-deploy/targets/export.csv', adminOnly, fleetOnly, (req, res) => {
   const withSecrets = String(req.query.secrets || '') === '1';
   const send = () => {
     const list = withSecrets ? listTargetsRaw() : listTargets();
@@ -138,7 +140,7 @@ adminRouter.get('/agent-deploy/targets/export.csv', adminOnly, (req, res) => {
   send();
 });
 
-adminRouter.get('/agent-deploy/targets/sample.csv', adminOnly, (_req, res) => {
+adminRouter.get('/agent-deploy/targets/sample.csv', adminOnly, fleetOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="agent-deploy-targets-sample.csv"');
   res.send(deploySampleCsv());
@@ -162,7 +164,7 @@ function markEnvIssues(rows, report, summary) {
   }
 }
 
-adminRouter.post('/agent-deploy/targets/import', adminOnly, (req, res) => {
+adminRouter.post('/agent-deploy/targets/import', adminOnly, fleetOnly, (req, res) => {
   const { rows, error } = parseTargetsCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -195,7 +197,7 @@ adminRouter.post('/agent-deploy/targets/import', adminOnly, (req, res) => {
   res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length });
 });
 
-adminRouter.post('/agent-deploy/targets/:id/deploy', adminOnly, async (req, res) => {
+adminRouter.post('/agent-deploy/targets/:id/deploy', adminOnly, fleetOnly, async (req, res) => {
   const t = getTargetRaw(req.params.id);
   if (!t) return res.status(404).json({ ok: false, reason: '대상을 찾을 수 없습니다.' });
   const r = await deployAgent(t, { installerPath: t.installerPath, port: t.portalPort });
@@ -205,7 +207,7 @@ adminRouter.post('/agent-deploy/targets/:id/deploy', adminOnly, async (req, res)
 });
 
 // 저장된 대상의 서비스 상태를 재확인(재배포 없이). 결과를 '마지막 결과'에 반영.
-adminRouter.post('/agent-deploy/targets/:id/status', adminOnly, async (req, res) => {
+adminRouter.post('/agent-deploy/targets/:id/status', adminOnly, fleetOnly, async (req, res) => {
   const t = getTargetRaw(req.params.id);
   if (!t) return res.status(404).json({ ok: false, reason: '대상을 찾을 수 없습니다.' });
   const r = await checkAgentStatus(t);
@@ -214,7 +216,7 @@ adminRouter.post('/agent-deploy/targets/:id/status', adminOnly, async (req, res)
 });
 
 // Deploy to all enabled saved targets, sequentially (heavy SFTP transfers).
-adminRouter.post('/agent-deploy/deploy-all', adminOnly, async (_req, res) => {
+adminRouter.post('/agent-deploy/deploy-all', adminOnly, fleetOnly, async (_req, res) => {
   const results = [];
   for (const t of listTargets().filter((x) => x.enabled !== false)) {
     const raw = getTargetRaw(t.id);
@@ -255,12 +257,12 @@ function ownerIfAutoCentralToken(req, res, next) {
 }
 
 /** 화면이 고를 수 있는 열 순서 프리셋(헤더가 있으면 헤더가 우선). */
-adminRouter.get('/agent-deploy/bulk/presets', adminOnly, (_req, res) => res.json({
+adminRouter.get('/agent-deploy/bulk/presets', adminOnly, fleetOnly, (_req, res) => res.json({
   ok: true, presets: Object.entries(COLUMN_PRESETS).map(([k, v]) => ({ key: k, label: v.label, columns: v.columns })),
   defaultPreset: DEFAULT_PRESET, hasCentralToken: !!centralTokenInfo().token,
 }));
 
-adminRouter.post('/agent-deploy/bulk/preview', adminOnly, ownerIfAutoCentralToken, (req, res) => {
+adminRouter.post('/agent-deploy/bulk/preview', adminOnly, fleetOnly, ownerIfAutoCentralToken, (req, res) => {
   try {
     const text = String(req.body?.text || '');
     if (text.length > 1_000_000) return res.status(400).json({ ok: false, reason: '입력이 1MB 를 넘습니다.' });
@@ -277,7 +279,7 @@ adminRouter.post('/agent-deploy/bulk/preview', adminOnly, ownerIfAutoCentralToke
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
-adminRouter.post('/agent-deploy/bulk/run', adminOnly, ownerIfAutoCentralToken, (req, res) => {
+adminRouter.post('/agent-deploy/bulk/run', adminOnly, fleetOnly, ownerIfAutoCentralToken, (req, res) => {
   try {
     const text = String(req.body?.text || '');
     if (text.length > 1_000_000) return res.status(400).json({ ok: false, reason: '입력이 1MB 를 넘습니다.' });
@@ -305,13 +307,13 @@ adminRouter.post('/agent-deploy/bulk/run', adminOnly, ownerIfAutoCentralToken, (
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
-adminRouter.get('/agent-deploy/bulk', adminOnly, (_req, res) => res.json({ ok: true, runs: listRuns(), activeRunId: activeRunId() }));
-adminRouter.get('/agent-deploy/bulk/:runId', adminOnly, (req, res) => {
+adminRouter.get('/agent-deploy/bulk', adminOnly, fleetOnly, (_req, res) => res.json({ ok: true, runs: listRuns(), activeRunId: activeRunId() }));
+adminRouter.get('/agent-deploy/bulk/:runId', adminOnly, fleetOnly, (req, res) => {
   const r = getRun(req.params.runId);
   if (!r) return res.status(404).json({ ok: false, reason: '실행을 찾을 수 없습니다(최근 5회만 보관).' });
   res.json(r);
 });
-adminRouter.post('/agent-deploy/bulk/:runId/cancel', adminOnly, (req, res) => {
+adminRouter.post('/agent-deploy/bulk/:runId/cancel', adminOnly, fleetOnly, (req, res) => {
   const r = cancelRun(req.params.runId);
   if (r.ok) logAudit({ user: req.user?.username, action: '엣지 노드 대량 배포 취소', detail: req.params.runId, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
@@ -322,7 +324,7 @@ adminRouter.post('/agent-deploy/bulk/:runId/cancel', adminOnly, (req, res) => {
  * 엣지에 깔리는 프로그램은 하나지만 중앙은 그 하나를 두 목록에 적어 둔다(설치용 SSH 대상 / pull 용 URL+토큰).
  * 여기서 두 목록을 맞춰 보고, 빠진 수집 서버를 만들어 준다. 응답에 토큰 값은 넣지 않는다.
  */
-adminRouter.get('/agent-deploy/collector-sync', adminOnly, (_req, res) => {
+adminRouter.get('/agent-deploy/collector-sync', adminOnly, fleetOnly, (_req, res) => {
   const targets = listTargets().map((t) => getTargetRaw(t.id)).filter(Boolean);
   const { rows, orphans, summary } = diffTargets(targets, loadCollectors());
   res.json({ ok: true, rows, orphans, summary, statusLabels: SYNC_STATUS, actionLabels: SYNC_ACTION });
@@ -340,7 +342,7 @@ adminRouter.get('/agent-deploy/collector-sync', adminOnly, (_req, res) => {
  *   · 둘 다 안 통함   → `target-to-edge`(SSH 로 엣지에 밀어넣기) 또는 엣지 자체 점검
  * 응답에 토큰 값은 넣지 않는다(통했는지 여부만).
  */
-adminRouter.post('/agent-deploy/collector-sync/probe', adminOnly, async (req, res) => {
+adminRouter.post('/agent-deploy/collector-sync/probe', adminOnly, fleetOnly, async (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 50) : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '진단할 대상을 선택하세요(최대 50건).' });
   const cols = loadCollectors();
@@ -391,7 +393,7 @@ const collectorIdOf = (t) => String(t?.collectorDatacenter || t?.agentName || t?
  *  · verify        : 등록 후 실제로 /api/collector/export 가 200 인지 확인한다.
  * SSH 는 무겁다 — 한 번에 최대 50건, 동시 3건.
  */
-adminRouter.post('/agent-deploy/collector-sync', adminOnly, async (req, res) => {
+adminRouter.post('/agent-deploy/collector-sync', adminOnly, fleetOnly, async (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 50) : [];
   if (!ids.length) return res.status(400).json({ ok: false, reason: '추가할 대상을 선택하세요(최대 50건).' });
   const generateToken = req.body?.generateToken !== false;
@@ -480,7 +482,7 @@ adminRouter.post('/agent-deploy/collector-sync', adminOnly, async (req, res) => 
 });
 
 /* 텍스트 내보내기 — 붙여넣기 입력칸에 그대로 다시 넣을 수 있는 형식(왕복). 비밀 포함은 소유자 게이트. */
-adminRouter.get('/agent-deploy/targets/export.txt', adminOnly, (req, res) => {
+adminRouter.get('/agent-deploy/targets/export.txt', adminOnly, fleetOnly, (req, res) => {
   const withSecrets = String(req.query.secrets || '') === '1';
   const send = () => {
     const list = withSecrets ? listTargetsRaw() : listTargets();
@@ -493,7 +495,7 @@ adminRouter.get('/agent-deploy/targets/export.txt', adminOnly, (req, res) => {
   if (withSecrets) return requireSettingsOwner(req, res, send);
   send();
 });
-adminRouter.get('/agent-deploy/targets/sample.txt', adminOnly, (req, res) => {
+adminRouter.get('/agent-deploy/targets/sample.txt', adminOnly, fleetOnly, (req, res) => {
   const csv = String(req.query.format || '').toLowerCase() === 'csv';
   res.setHeader('Content-Type', csv ? 'text/csv; charset=utf-8' : 'text/plain; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="agent-deploy-bulk-sample.${csv ? 'csv' : 'txt'}"`);
@@ -502,7 +504,7 @@ adminRouter.get('/agent-deploy/targets/sample.txt', adminOnly, (req, res) => {
 
 // --- Local LLM (Ollama) config for natural-language search ---
 adminRouter.get('/llm-config', adminOnly, (_req, res) => res.json({ config: loadLlmConfig() }));
-adminRouter.put('/llm-config', adminOnly, (req, res) => {
+adminRouter.put('/llm-config', adminOnly, fleetOnly, (req, res) => {
   try { res.json({ ok: true, config: saveLlmConfig(req.body || {}) }); }
   catch (e) { res.status(e.status || 500).json({ ok: false, reason: e.message }); }
 });
@@ -517,21 +519,21 @@ adminRouter.post('/llm-test', adminOnly, async (req, res) => {
 });
 
 // SSH-install Ollama on a separate server (test reuses the agent SSH probe).
-adminRouter.post('/ollama-deploy/test', adminOnly, async (req, res) => res.json(await testTarget(req.body || {})));
+adminRouter.post('/ollama-deploy/test', adminOnly, fleetOnly, async (req, res) => res.json(await testTarget(req.body || {})));
 // v2.583(감사 확정): 서버의 로컬 파일을 요청자가 고른 호스트로 보내는 경로라 자격증명 CSV 내보내기와 같은
 //   등급(설정 소유자)으로 올린다 — 파일 검증(checkOllamaArchive)과 이중 방어.
-adminRouter.post('/ollama-deploy', adminOnly, requireSettingsOwner, async (req, res) => {
+adminRouter.post('/ollama-deploy', adminOnly, fleetOnly, requireSettingsOwner, async (req, res) => {
   const { mode, binaryPath, model, port, applyToPortal, ...target } = req.body || {};
   const r = await installOllama(target, { mode, binaryPath, model, port, applyToPortal });
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 // Record / delete a release note (admin).
-adminRouter.post('/release-notes', adminOnly, (req, res) => {
+adminRouter.post('/release-notes', adminOnly, fleetOnly, (req, res) => {
   const r = saveNote(req.body || {});
   res.status(r.ok ? 200 : 400).json(r);
 });
-adminRouter.delete('/release-notes/:version', adminOnly, (req, res) => {
+adminRouter.delete('/release-notes/:version', adminOnly, fleetOnly, (req, res) => {
   const r = deleteNote(req.params.version);
   res.status(r.ok ? 200 : 400).json(r);
 });

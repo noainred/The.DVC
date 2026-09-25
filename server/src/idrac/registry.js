@@ -132,7 +132,11 @@ function normalize(body, existing = null) {
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };
   // v2.610: BMC 벤더 — 'hpe'(iLO) 만 기록한다. 없으면 Dell iDRAC(예전 항목 전부가 그렇다 — 파일을 바꾸지 않는다).
-  //   폴러는 이 값으로 Dell 전용 경로(라이선스·텔레메트리·racadm)를 건너뛴다.
+  //   v2.611 정정(감사 RECENT2611-06): 예전 주석은 '폴러는 이 값으로 Dell 전용 경로를 건너뛴다' 였는데 **사실이 아니다** —
+  //   `idrac/poller.js` 는 vendor 를 보지 않는다(표준 Redfish 경로라 HPE 에도 그대로 돈다). 이 값을 실제로 읽는 곳은
+  //   `bmusage/targets.js`(HPE 에 Dell 전용 racadm 대체 경로를 걸지 않는다) · `idrac/redfish.js` 의 서비스태그 추출
+  //   (HPE 는 SerialNumber 우선) · `idrac/scanPoller.js`·`localScan.js`(replace 강등 판정 — hasHpeInDatacenter) 다.
+  //   그래서 이 값이 사라지면(가져오기 replace) 그 판단이 조용히 Dell 쪽으로 돌아간다 — CSV 가져오기도 vendor 열을 받는다.
   const vendor = normVendor(body.vendor !== undefined ? body.vendor : e.vendor);
   if (vendor) entry.vendor = vendor;
 
@@ -362,6 +366,10 @@ export function parseCsv(text) {
       serviceTag: row.servicetag || row.service_tag || '',
       vcenterId: row.vcenterid || row.vcenter || row.vcenter_id || '',
       hostNames: (row.hostnames || row.host_names || row.esxi || '').split(/[;|]/).map((s) => s.trim()).filter(Boolean),
+      // v2.611(감사 RECENT2611-06): vendor 열(선택) — 'hpe' 만 값으로 인정한다(normVendor). 열이 없으면 undefined 라
+      //   merge 는 기존 vendor 를 유지하고, replace 는 예전처럼 비운다(Dell). 예전에는 열 자체를 읽지 않아 replace 가져오기가
+      //   HPE 표시를 지웠고, 그 결과 bmusage 의 HPE 제외(racadm 대체 경로)가 풀렸다.
+      ...(Object.hasOwn(row, 'vendor') ? { vendor: normVendor(row.vendor) } : {}),
     });
   }
   return out;
@@ -404,5 +412,37 @@ export function normVendor(v) {
   return (t === 'hpe' || t === 'hp' || t === 'ilo') ? 'hpe' : '';
 }
 
-/** v2.610: 등록 항목이 HPE iLO 인가(Dell 전용 경로를 건너뛸지 판정). */
+/**
+ * v2.610: 등록 항목이 HPE iLO 인가.
+ * v2.611(감사 RECENT2611-06): v2.610 에는 호출부가 **0곳**이었다(주석만 '폴러가 쓴다' 고 적었다). 지금은
+ *   hasHpeInDatacenter(replace 강등 판정)가 쓴다.
+ */
 export function isHpeEntry(entry) { return normVendor(entry?.vendor) === 'hpe'; }
+
+/** v2.611: 이 법인(datacenterId)에 HPE 로 등록된 서버가 있는가 — iLO 계정 없는 replace 스캔이 그것을 지우지 않게. */
+export function hasHpeInDatacenter(datacenterId) {
+  const dc = String(datacenterId || '').trim();
+  if (!dc) return false;
+  try { return loadRegistry().some((s) => String(s.datacenterId || '').trim() === dc && isHpeEntry(s)); }
+  catch { return false; }
+}
+
+/**
+ * v2.611(감사 COL2611-01): HPE 서버의 서비스태그 교정 — **1회성**.
+ *   v2.610 스캔은 HPE 의 `Systems.SKU`(주문 제품번호 — 같은 모델이면 전부 같다)를 serviceTag 로 등록했다. 등록부 값은
+ *   partfault·bmusage 의 장비 키에서 인벤토리보다 먼저라 추출을 고쳐도 남는다. 인벤토리 조회가 **HPE 이고 등록부 태그가
+ *   SKU 와 글자 그대로 같을 때만** 등록부를 SerialNumber 로 바꾼다(사람이 손으로 넣은 값·Dell 은 건드리지 않는다).
+ * @returns {boolean} 바꿨으면 true
+ */
+export function correctHpeServiceTag(id, { sku = '', serial = '' } = {}) {
+  const k = String(sku || '').trim();
+  const sn = String(serial || '').trim();
+  if (!k || !sn || k === sn) return false;
+  const list = loadRegistry();
+  const e = list.find((x) => x.id === id);
+  if (!e || String(e.serviceTag || '').trim() !== k) return false;
+  e.serviceTag = sn;
+  saveRegistry(list);
+  console.log(`[idrac] ${id}: HPE 서비스태그를 제품번호(SKU ${k})에서 시리얼(${sn})로 교정했습니다(v2.611 — 한 번만).`);
+  return true;
+}

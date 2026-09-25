@@ -7,23 +7,25 @@ import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { logAudit } from '../../audit.js';
 import { listCollectors } from '../../collector/registry.js';
 import { listAssignments, addAssignment, updateAssignment, removeAssignment, getResults, parseCsv as parseAssignmentsCsv, importAssignments, mergeKnownAgents } from '../../central/assignments.js';
-import { adminOnly } from './shared.js';
+import { adminOnly, fullScopeOnlyWith } from './shared.js';
+// v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
+const fleetOnly = fullScopeOnlyWith('Horizon 연결 서버·엣지 스캔 배정은 vCenter(법인) 축이 없는 전 법인 등록부라 전체 범위(vCenter 제한 없는) 계정만 조회·변경할 수 있습니다.');
 
 export function registerHorizonAssign(adminRouter) {
 
 // ---- Horizon Connection Server (라이선스 만료일 확인용 등록) ---------------
-adminRouter.get('/horizon', adminOnly, (_req, res) => res.json({ servers: listHorizonServers() }));
-adminRouter.post('/horizon', adminOnly, (req, res) => {
+adminRouter.get('/horizon', adminOnly, fleetOnly, (_req, res) => res.json({ servers: listHorizonServers() }));
+adminRouter.post('/horizon', adminOnly, fleetOnly, (req, res) => {
   const r = upsertHorizon(req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'Horizon 서버 등록/수정', target: String(req.body?.id || ''), ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
-adminRouter.delete('/horizon/:id', adminOnly, (req, res) => {
+adminRouter.delete('/horizon/:id', adminOnly, fleetOnly, (req, res) => {
   const r = removeHorizon(req.params.id);
   if (r.ok) logAudit({ user: req.user?.username, action: 'Horizon 서버 삭제', target: req.params.id, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
-adminRouter.post('/horizon/test', adminOnly, async (req, res) => res.json(await testHorizon(req.body || {})));
+adminRouter.post('/horizon/test', adminOnly, fleetOnly, async (req, res) => res.json(await testHorizon(req.body || {})));
 
 /* ══════════════════ Horizon 서버 대량 등록(CSV·자유텍스트, v2.525) ══════════════════
  * 사용자 요청(2026-09-16): "호라이즌 서비스에 호라이즌 서버 등록이 필요하면 csv/text
@@ -53,7 +55,7 @@ function hzParseBody(body = {}) {
 
 const hzExistingMap = () => new Map(listHorizonServers().map((s) => [String(s.id).trim().toLowerCase(), s]));
 
-adminRouter.get('/horizon/servers/export.csv', adminOnly, (req, res) => {
+adminRouter.get('/horizon/servers/export.csv', adminOnly, fleetOnly, (req, res) => {
   const servers = listHorizonServers();
   logAudit({ user: req.user?.username, action: 'Horizon 서버 CSV 내보내기', detail: `${servers.length}대`, ip: req.ip || '' });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -61,7 +63,7 @@ adminRouter.get('/horizon/servers/export.csv', adminOnly, (req, res) => {
   res.send(hzBulk.serversToCsv(servers));
 });
 
-adminRouter.get('/horizon/servers/export.txt', adminOnly, (req, res) => {
+adminRouter.get('/horizon/servers/export.txt', adminOnly, fleetOnly, (req, res) => {
   const servers = listHorizonServers();
   logAudit({ user: req.user?.username, action: 'Horizon 서버 자유텍스트 내보내기', detail: `${servers.length}대`, ip: req.ip || '' });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -69,13 +71,13 @@ adminRouter.get('/horizon/servers/export.txt', adminOnly, (req, res) => {
   res.send(hzBulk.serversToText(servers));
 });
 
-adminRouter.get('/horizon/servers/sample.csv', adminOnly, (_req, res) => {
+adminRouter.get('/horizon/servers/sample.csv', adminOnly, fleetOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="horizon-servers-sample.csv"');
   res.send(hzBulk.sampleCsv());
 });
 
-adminRouter.get('/horizon/servers/sample.txt', adminOnly, (_req, res) => {
+adminRouter.get('/horizon/servers/sample.txt', adminOnly, fleetOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="horizon-servers-sample.txt"');
   res.send(hzBulk.sampleText());
@@ -85,7 +87,7 @@ adminRouter.get('/horizon/servers/sample.txt', adminOnly, (_req, res) => {
  * ② 실제 연결 테스트 — 저장 **전에** 행마다 Horizon 로그인을 시도한다.
  * ⚠ 자동 재시도 없음(잘못된 비밀번호 반복 = AD 계정 잠금). `bulkRun` 이 강제한다.
  */
-adminRouter.post('/horizon/servers/import/test', adminOnly, (req, res) => {
+adminRouter.post('/horizon/servers/import/test', adminOnly, fleetOnly, (req, res) => {
   const p = hzParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
   const existing = hzExistingMap();
@@ -116,7 +118,7 @@ adminRouter.post('/horizon/servers/import/test', adminOnly, (req, res) => {
 });
 
 /** 연결 테스트 진행률·결과(폴링). 자격증명은 응답에 없다(`bulkRun publicRun`). */
-adminRouter.get('/horizon/servers/import/test/:id', adminOnly, (req, res) => {
+adminRouter.get('/horizon/servers/import/test/:id', adminOnly, fleetOnly, (req, res) => {
   const run = publicRun(req.params.id);
   if (!run || run.kind !== 'horizon') return res.status(404).json({ ok: false, reason: '실행을 찾을 수 없습니다(15분 지나 폐기되었을 수 있습니다).' });
   res.json({ ok: true, ...run });
@@ -126,7 +128,7 @@ adminRouter.get('/horizon/servers/import/test/:id', adminOnly, (req, res) => {
  * ①/③ 가져오기 — `dryRun:true` 면 검증만, 아니면 저장.
  * 걸러낸 행은 버리지 않고 `skipped` 로 사유와 함께 돌려준다.
  */
-adminRouter.post('/horizon/servers/import', adminOnly, (req, res) => {
+adminRouter.post('/horizon/servers/import', adminOnly, fleetOnly, (req, res) => {
   const p = hzParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 
@@ -174,7 +176,7 @@ adminRouter.post('/horizon/servers/import', adminOnly, (req, res) => {
 
 // List per-agent IP assignments (credentials redacted) + each agent's last
 // reported scan result.
-adminRouter.get('/assignments', adminOnly, (_req, res) => {
+adminRouter.get('/assignments', adminOnly, fleetOnly, (_req, res) => {
   // knownAgents: 폼에서 '에이전트 이름'을 직접 타이핑하지 않고 목록에서 고르게 한다(AGENT_NAME
   // 오타로 인한 잡 인출 불일치 방지). 출처 = 등록된 수집 서버(원격, 실제 AGENT_NAME) + 중앙에
   // 한 번이라도 보고한 에이전트 + 기존 할당. mergeKnownAgents가 대소문자 무시 중복 제거.
@@ -182,24 +184,24 @@ adminRouter.get('/assignments', adminOnly, (_req, res) => {
   res.json({ assignments: listAssignments(), results: getResults(), knownAgents, centralEnabled: Boolean(config.central.token) });
 });
 
-adminRouter.post('/assignments', adminOnly, (req, res) => {
+adminRouter.post('/assignments', adminOnly, fleetOnly, (req, res) => {
   const result = addAssignment(req.body || {});
   res.status(result.ok ? 201 : 400).json(result);
 });
 
-adminRouter.put('/assignments/:agent', adminOnly, (req, res) => {
+adminRouter.put('/assignments/:agent', adminOnly, fleetOnly, (req, res) => {
   const result = updateAssignment(req.params.agent, req.body || {});
   res.status(result.ok ? 200 : 400).json(result);
 });
 
-adminRouter.delete('/assignments/:agent', adminOnly, (req, res) => {
+adminRouter.delete('/assignments/:agent', adminOnly, fleetOnly, (req, res) => {
   const result = removeAssignment(req.params.agent);
   res.status(result.ok ? 200 : 404).json(result);
 });
 
 // Import assignments from CSV text or a JSON array. Body:
 //   { csv:"...", mode? } | { assignments:[...], mode? } | bare array
-adminRouter.post('/assignments/import', adminOnly, (req, res) => {
+adminRouter.post('/assignments/import', adminOnly, fleetOnly, (req, res) => {
   const b = req.body || {};
   let list;
   if (typeof b.csv === 'string') list = parseAssignmentsCsv(b.csv);
