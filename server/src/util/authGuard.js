@@ -142,6 +142,17 @@ export function createAuthGuard({ file }) {
       if (!rec || rec.credHash !== credHashOf(dev)) return null;
       return { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason };
     },
+    /**
+     * v2.612 RECENT2612-03: 조건에 맞는 id 를 한 번에 지운다(지운 개수). 읽는 곳이 없는 옛 기록 정리용 —
+     *   건마다 clearAuthStop 을 부르면 파일 전체를 건수만큼 다시 쓴다.
+     */
+    purgeWhere(pred) {
+      const db = load();
+      let n = 0;
+      for (const id of Object.keys(db)) { if (pred(id)) { delete db[id]; n++; } }
+      if (n) { _mem = db; save(false); }
+      return n;
+    },
     _resetForTest() { _mem = null; _dirty = false; try { fs.rmSync(FILE()); } catch { /* 없음 */ } },
     _fileForTest() { return FILE(); },
   };

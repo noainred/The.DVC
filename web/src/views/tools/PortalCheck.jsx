@@ -197,7 +197,7 @@ function TokenCheckView() {
           엣지 · 수집 서버 {rows.length}곳{rows.length !== (data?.rows || []).length ? ` (전체 ${(data?.rows || []).length}곳 중)` : ''}
         </div>
         <div style={{ overflowX: 'auto' }}>
-          <STable className="v3-table">
+          <STable className="v3-table" minWidth={980} wrap={false}>
             <thead>
               <tr>
                 <th>엣지</th><th>등록</th><th>주소</th>

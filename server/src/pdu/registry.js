@@ -24,15 +24,33 @@ const FILE = path.join(config.configDir, 'pdu-devices.json');
 
 let _cache = null;
 
+/**
+ * v2.612 LEFT2612-01: 등록부 파일을 읽지 못했으면(손상 → preserveCorrupt) 그 사실을 기억한다. 설정 pull 라우트
+ *   (routes/central.js)가 이 값을 보고 503 으로 답한다 — 빈 목록을 ok:true 로 내려보내면 엣지가 장비 목록·스냅샷을
+ *   통째로 지운다. 다음 저장이 성공하면 풀린다(그때부터는 관리자가 다시 만든 목록이 진실이다).
+ */
+let _loadError = null;
+export function registryLoadError() { load(); return _loadError; }
+// v2.612 LEFT2612-01: 파일이 없는데 손상 보존본(<파일>.corrupt.<시각>)만 있으면 재시작 뒤에도 '못 읽음' 이다 — 여기서 빈 목록으로
+//   출발하면 재시작 한 번으로 엣지 목록 삭제가 되살아난다. 관리자가 한 번 저장하면(파일이 생기면) 풀린다.
+function corruptOnlyReason(file) {
+  try {
+    const dir = path.dirname(file); const base = path.basename(file) + '.corrupt.';
+    const hit = fs.readdirSync(dir).filter((n) => n.startsWith(base)).sort().pop();
+    return hit ? `등록부 파일이 없고 손상 보존본(${hit})만 있습니다` : null;
+  } catch { return null; }
+}
+
 function load() {
   if (_cache) return _cache;
-  if (!fs.existsSync(FILE)) { _cache = { devices: [] }; return _cache; }
+  if (!fs.existsSync(FILE)) { const why = corruptOnlyReason(FILE); if (why) _loadError = { at: Date.now(), reason: why }; _cache = { devices: [] }; return _cache; }
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     _cache = { devices: openSecretsDeep(Array.isArray(parsed?.devices) ? parsed.devices : []) };
   } catch (e) {
     // 손상본을 조용히 []로 넘기면 다음 저장이 원본을 덮어써 자격증명이 영구 유실된다.
     preserveCorrupt(FILE, e.message);
+    _loadError = { at: Date.now(), reason: String(e?.message || e).slice(0, 200) };
     _cache = { devices: [] };
   }
   return _cache;
@@ -41,6 +59,7 @@ function load() {
 function save(devices) {
   _cache = { devices };
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ devices }), null, 2), { mode: 0o600 });
+  _loadError = null; // v2.612 LEFT2612-01
 }
 
 export function redact(d) {
@@ -154,4 +173,4 @@ export function applyPulledDevices(list) {
   return { ok: true, count: list.length, removed: [...before].filter((id) => !now.has(id)) };
 }
 
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; _loadError = null; }

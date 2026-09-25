@@ -64,6 +64,7 @@ async function _pullStorageConfigNow() {
     // 결과가 push 주기(≤5분)를 기다리지 않고 중앙 화면에 반영되게 한다.
     const wants = Array.isArray(body?.collectNow) ? body.collectNow.slice(0, 20) : [];
     let collected = 0;
+    let pushError = '';
     if (wants.length) {
       console.log(`[storage-config] 중앙 재수집 요청 ${wants.length}건 수신 — 즉시 수집`);
       for (const id of wants) {
@@ -71,11 +72,18 @@ async function _pullStorageConfigNow() {
         try { if (await collectDeviceNow(String(id))) collected++; else console.log(`[storage-config] ${id} 는 이미 수집 중 — 그 결과로 대신합니다`); }
         catch (e) { console.warn(`[storage-config] 재수집 실패(${id}): ${e.message}`); } // 실패 스냅샷도 push 로 전달됨
       }
-      try { await pushStorageNow(); } catch (e) { console.warn(`[storage-config] 재수집 push 실패: ${e.message}`); }
+      // v2.612 EDGE2612-02: 반환값을 본다 — pushStorageNow 는 실패를 {ok:false} 로 돌려주고(던지지 않는다) 상태 전용 push 실패는
+      //   statusSent:false 다. 예전에는 무시해 '지금 수집' 결과가 중앙에 닿지 않아도 흔적이 없었다. withheld(보류)는 실패가 아니다.
+      try {
+        const pr = await pushStorageNow();
+        if (pr && pr.ok === false) pushError = String(pr.reason || 'push 실패');
+        else if (pr && pr.statusSent === false && !pr.statusSkipped) pushError = '상태 push 가 중앙에 닿지 않았습니다';
+      } catch (e) { pushError = String(e?.message || e); }
+      if (pushError) console.warn(`[storage-config] 재수집 push 실패: ${pushError}`);
     }
-    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected,
+    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, ...(pushError ? { pushError } : {}),
       intervals: runtimeIntervals(), intervalsApplied: !!intervalsApplied.applied };
-    return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected,
+    return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected, ...(pushError ? { pushError } : {}),
       intervals: runtimeIntervals(), intervalsApplied: !!intervalsApplied.applied };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };

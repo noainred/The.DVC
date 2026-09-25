@@ -226,3 +226,19 @@ describe('v2.611 IdracAdmin 소스 계약', () => {
     expect(ranges).toContain('list.length === 0 && !loadError');
   });
 });
+
+describe('WEB2612-06 스캔 잡 결과 — HPE 대수·계정 없어 시도 안 함을 잡 표·로그에서도 말한다', async () => {
+  const { scanJobResultText } = await import('./scanRunText.js');
+  it('foundCount 를 발견 수로 쓰고 HPE·noCreds 를 덧붙인다', () => {
+    const t = scanJobResultText({ foundCount: 4, registered: 2, scanned: 254, hpeDetected: 3, iloEnabled: false, noCreds: 5,
+      unsupported: [{ ip: '10.0.0.1', vendor: 'hpe' }], unsupportedCount: 1 });
+    expect(t).toContain('발견 4대');
+    expect(t).toContain('HPE 3대');
+    expect(t).toContain('계정 없어 시도 안 함 5');
+    expect(t).not.toContain('미지원');   // HPE 로 이미 센 몫은 다시 세지 않는다
+  });
+  it('HPE 가 아닌 미지원 장비는 개수를 말한다', () => {
+    expect(scanJobResultText({ foundCount: 0, unsupported: [{ vendor: 'lenovo' }], unsupportedCount: 1 })).toContain('미지원 장비 1');
+  });
+  it('결과가 없으면 —', () => { expect(scanJobResultText(null)).toBe('—'); });
+});

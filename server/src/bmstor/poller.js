@@ -120,8 +120,11 @@ async function collectViaEdge(agent, servers) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Collector-Token': col.token || '' },
       body: JSON.stringify({ servers: servers.map((s) => ({ id: s.id, host: s.host, port: s.port, username: s.username, password: s.password, mounts: s.mounts })) }),
-      timeoutMs: PUSH_TIMEOUT_MS, retries: 1,
+      // v2.612 EDGE2612-01: 재시도 없음 — 시한(180초) 뒤 다시 보내면 엣지가 앞 수집을 끝내기 전에 같은 서버들에 SSH 세션을
+      //   한 벌 더 열었다. 이번 주기는 실패로 남기고 다음 주기에 다시 수집한다.
+      timeoutMs: PUSH_TIMEOUT_MS, retries: 0,
     }));
+    if (r.status === 409) return fail('이미 수행 중 — 엣지에서 이전 위임 수집이 아직 진행 중이라 이번 요청은 실행하지 않았습니다(다음 주기에 다시 수집합니다).');
     // v2.604(감사 CEN2604-01 형제): 상한까지만 읽는다(해제 후 크기). 결과 원소는 객체만, 사유는 글자만.
     let j = null;
     try { j = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES, '엣지 bmstor 응답'); } catch { j = null; }

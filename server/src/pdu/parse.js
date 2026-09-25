@@ -78,10 +78,12 @@ export function toCelsius(value, unit) {
  */
 export function toWatts(value, unit) {
   if (value == null) return null;
-  const u = String(unit || '').toLowerCase();
-  if (u.startsWith('kw')) return Math.round(value * 1000);
-  if (u.startsWith('w')) return Math.round(value);
-  return Math.round(value * 1000); // 단위 미표기는 장비 기본(kW)으로 본다
+  const u = String(unit || '').trim().toLowerCase();
+  // v2.612(COL2612-07): VA 는 W 와 같은 배율이다 — 예전엔 'kw'·'w' 로 시작하지 않으면 전부 kW 로 봐 1980 VA 가 1,980,000 이 됐다.
+  if (u.startsWith('kw') || u.startsWith('kva')) return Math.round(value * 1000);
+  if (u.startsWith('w') || u.startsWith('va')) return Math.round(value);
+  if (!u) return Math.round(value * 1000); // 단위 미표기는 장비 기본(kW)으로 본다
+  return null; // 모르는 단위 — 배율을 지어내지 않는다
 }
 
 /**

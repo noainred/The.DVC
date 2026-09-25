@@ -8,11 +8,15 @@
  *  · CSV 가져오기: `passwordDropped: [{ line, datacenter, reason }]`(iDRAC 스캔 대역)
  *  · 중계 토폴로지: `secretsDropped: ['<DC> Edge', ...]`
  * 예전에는 화면이 이것을 하나도 읽지 않아 모달을 닫고 '저장됨' 만 말했고, 다음 주기가 빈 비밀번호로 로그인해 실패했다
- * (v2.590 authGuard 가 주기 수집을 멈춘다). 폐기 조건은 주소·포트·계정 변경이다(수집 엣지(agent)만 바꾸면 승계된다). 폐기가 있으면 **모달을 닫지 말고** 이 문장을 보여 줄 것.
+ * (v2.590 authGuard 가 주기 수집을 멈춘다). 폐기가 있으면 **모달을 닫지 말고** 이 문장을 보여 줄 것.
+ * v2.612 WEB2612-05: 폐기 조건은 도구마다 다르다 — 장비 등록은 주소·포트·계정(수집 엣지만 바꾸면 승계), **iDRAC 스캔 대역은
+ *   대역·수행 엣지·계정·iLO 계정**(엣지만 바꿔도 폐기). 그래서 서버가 `skipped[].reason` 으로 사유를 주면 그것을 쓰고,
+ *   없으면 한쪽 조건으로 단정하지 않는 일반 문구를 쓴다. `iloPassword`(v2.610) 도 라벨이 있어야 원문 키가 새지 않는다.
  */
 
 const KEY_LABEL = {
   password: '비밀번호', winPassword: 'Windows 비밀번호', secret: '비밀번호', privateKey: '개인 키', passphrase: '키 암호',
+  iloPassword: 'iLO 비밀번호',
   token: '토큰', centralToken: '중앙 토큰', collectorToken: '수집 토큰', apiKey: 'API 키', community: 'SNMP 커뮤니티',
 };
 
@@ -33,8 +37,13 @@ export function droppedSecretKeys(r) {
 export function droppedSecretNote(r) {
   const keys = droppedSecretKeys(r);
   if (!keys.length) return '';
+  // 서버가 준 사유(폐기한 키에 해당하는 것만) — 도구마다 폐기 조건이 달라 화면이 지어내지 않는다.
+  const reasons = (Array.isArray(r.skipped) ? r.skipped : [])
+    .filter((x) => x && typeof x === 'object' && keys.includes(x.field) && typeof x.reason === 'string' && x.reason)
+    .map((x) => x.reason);
+  if (reasons.length) return `저장했습니다 — 단 ${[...new Set(reasons)].join(' ')}`;
   const names = [...new Set(keys.map(keyLabel))].join('·');
-  return `저장했습니다 — 단 접속처(주소·포트·계정)가 바뀌어 저장된 ${names}을(를) 폐기했습니다. 다시 입력하고 저장하세요(그 전까지 수집·스캔은 인증에 실패합니다).`;
+  return `저장했습니다 — 단 접속처(주소·계정·대역·수행 엣지 등)가 바뀌어 저장된 ${names}을(를) 폐기했습니다. 다시 입력하고 저장하세요(그 전까지 수집·스캔은 인증에 실패합니다).`;
 }
 
 /** CSV 가져오기 응답의 passwordDropped → 줄 목록(각 '줄 N · 이름 — 사유'). */

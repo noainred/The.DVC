@@ -70,6 +70,19 @@ const sig = (outer, leftMs) => {
   return outer ? AbortSignal.any([outer, t]) : t;
 };
 
+/*
+ * v2.612 SEC2612-02: 리다이렉트를 따라가지 않는다. fetch 기본 'follow' 는 307/308 이면 **로그인 본문(계정·비밀번호)을 그대로
+ *   다른 주소로 다시 POST** 하고, 세션 쿠키·Bearer 도 같은 출처면 따라간다. 게다가 IP 리터럴 대상은 SSRF lookup 을 거치지 않는다.
+ *   CVP API 는 리다이렉트를 쓸 이유가 없으므로 3xx 는 실패로 보고, 사유에는 상태와 Location 의 **origin 만** 싣는다(경로·쿼리에
+ *   토큰이 있을 수 있다).
+ */
+export const isRedirect = (status) => status >= 300 && status < 400;
+export function redirectReason(res, base) {
+  let origin = '';
+  try { const loc = res.headers.get('location'); if (loc) origin = new URL(loc, base).origin; } catch { origin = ''; }
+  return `CVP 가 리다이렉트로 응답했습니다(HTTP ${res.status}${origin ? ` → ${origin}` : ''}) — 따라가지 않았습니다. 등록 주소(스킴·호스트·포트)를 확인하세요`;
+}
+
 /** Set-Cookie 에서 access_token 값(없으면 ''). */
 export function accessTokenFromSetCookie(values) {
   const list = Array.isArray(values) ? values : values ? [values] : [];
@@ -96,9 +109,10 @@ export async function openSession(server, { signal, leftMs = null } = {}) {
     let res;
     try {
       res = await fetch(`${base}/cvpservice/login/authenticate.do`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body, dispatcher, signal: sig(signal, leftMs),
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body, dispatcher, signal: sig(signal, leftMs), redirect: 'manual',
       });
     } catch (e) { throw new Error(`로그인 요청 실패: ${e?.cause?.code || e?.message || e}`); }
+    if (isRedirect(res.status)) { try { await res.body?.cancel?.(); } catch { /* */ } throw new Error(`로그인 ${redirectReason(res, base)}`); }
     if (res.status === 401 || res.status === 403) {
       try { await res.body?.cancel?.(); } catch { /* */ }
       throw new CvpAuthError(`인증 실패(${res.status}) — CVP 계정·비밀번호를 확인하세요`);
@@ -122,11 +136,12 @@ export async function openSession(server, { signal, leftMs = null } = {}) {
     base,
     async get(p) {
       let res;
-      try { res = await fetch(`${base}${p}`, { headers, dispatcher, signal: sig(signal, leftMs) }); }
+      try { res = await fetch(`${base}${p}`, { headers, dispatcher, signal: sig(signal, leftMs), redirect: 'manual' }); }
       catch (e) {
         if (signal?.aborted) throw e;
         return { ok: false, status: 0, reason: `연결 실패: ${e?.cause?.code || e?.message || e}` };
       }
+      if (isRedirect(res.status)) { try { await res.body?.cancel?.(); } catch { /* */ } return { ok: false, status: res.status, reason: redirectReason(res, base), redirect: true }; }
       if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } return { ok: false, status: res.status, reason: `HTTP ${res.status}` }; }
       try { return { ok: true, status: res.status, text: await readTextCapped(res, BODY_MAX_BYTES, '응답') }; }
       catch (e) { return { ok: false, status: res.status, reason: e?.message || String(e), tooLarge: true }; }
@@ -134,7 +149,7 @@ export async function openSession(server, { signal, leftMs = null } = {}) {
     async logout() {
       if (!loggedIn) return;
       try {
-        const r = await fetch(`${base}/cvpservice/login/logout.do`, { method: 'POST', headers, dispatcher, signal: AbortSignal.timeout(10_000) });
+        const r = await fetch(`${base}/cvpservice/login/logout.do`, { method: 'POST', headers, dispatcher, signal: AbortSignal.timeout(10_000), redirect: 'manual' });
         try { await r.body?.cancel?.(); } catch { /* */ }
       } catch { /* 반납 실패는 무시 — 세션은 CVP 타임아웃으로도 회수된다 */ }
     },
@@ -236,14 +251,19 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       const bgp = await readKind('bgp', serial, (t) => { const x = P.parseBgp(t); return { value: x.peers, keys: x.keys, truncated: x.truncated }; });
       if (bgp.value) { dev.bgp = bgp.value; truncated.peers += bgp.extra.truncated || 0; }
       if (partsDue) {
-        const parts = []; let anyRead = false; const failedKinds = [];
+        const parts = []; let anyRead = false; let attempted = false; const failedKinds = [];
         for (const k of Object.keys(PART_KINDS)) {
           if (left() < MIN_SLICE_MS) { failedKinds.push(k); continue; }
+          attempted = true;
           const r = await readKind(k, serial, (t) => { const x = P.parseParts(t, PART_KINDS[k]); return { value: x.parts, keys: x.keys }; });
           if (r.value) { anyRead = true; pushAll(parts, r.value); } else failedKinds.push(k);
         }
-        dev.parts = anyRead ? parts.slice(0, P.PART_MAX) : null;
-        dev.partsAt = now();
+        // 한 종류도 시도하지 못했으면(예산) 이번에 안 읽은 것 — undefined 로 두어 DB 의 이전 파트 값을 지우지 않는다.
+        dev.parts = anyRead ? parts.slice(0, P.PART_MAX) : attempted ? null : undefined;
+        dev.partsAt = attempted ? now() : null;
+        // v2.612 RECENT2612-01: 파트 조회를 **시도했는가**(경로가 전부 404 여도 시도다). 폴러가 이것으로 조회 시각을 올린다 —
+        //   '읽었을 때만' 올리면 파트 경로가 없는 CVP 에 매 주기 4종 × 장비 수만큼 헛조회가 나간다.
+        dev.partsAttempted = attempted;
         if (failedKinds.length && anyRead) dev.partsMissingKinds = failedKinds;
       }
       dev.telemetry = intf.value || cnt.value || bgp.value ? 'ok' : 'failed';
@@ -273,16 +293,18 @@ export async function testCvp(server, { signal } = {}) {
   try {
     const sess = await openSession(server, { signal });
     try {
+      let redirected = '';
       for (const p of CANDIDATES.inventory) {
         const r = await sess.get(p);
         if (!r.ok) {
           if ((r.status === 401 || r.status === 403) && server.authMode !== 'password') throw new CvpAuthError(`인증 실패(${r.status}) — 서비스 계정 토큰을 확인하세요`);
+          if (r.redirect && !redirected) redirected = r.reason; // v2.612 SEC2612-02: 리다이렉트는 사유를 그대로 보인다
           continue;
         }
         const x = P.parseInventory(r.text);
         if (x.devices) return { ok: true, ms: Date.now() - t0, deviceCount: x.devices.length, usedPath: p, seenFields: x.keys };
       }
-      return { ok: false, ms: Date.now() - t0, reason: '로그인은 됐지만 장비 인벤토리 경로를 읽지 못했습니다(후보 경로 전부 실패)' };
+      return { ok: false, ms: Date.now() - t0, reason: redirected || '로그인은 됐지만 장비 인벤토리 경로를 읽지 못했습니다(후보 경로 전부 실패)' };
     } finally { await sess.logout(); }
   } catch (e) {
     return { ok: false, ms: Date.now() - t0, reason: e?.message || String(e), authFailed: !!e?.authFailed };

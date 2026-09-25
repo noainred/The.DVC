@@ -58,7 +58,9 @@ export function cpuPctFromJiffies(prev, cur) {
 export function linkPct(bytesPerSec, linkBitsPerSec) {
   const b = fin(bytesPerSec); const l = fin(linkBitsPerSec);
   if (b == null || l == null || l <= 0) return null;
-  return Math.min(100, Math.round(((b * 8) / l) * 1000) / 10);
+  // v2.612(COL2612-01): 100% 초과는 클램프하지 않고 null(링크 속도·카운터가 어긋난 값 — '포화' 로 보정하지 않는다. v2.578 D3).
+  const p = Math.round(((b * 8) / l) * 1000) / 10;
+  return p > 100 ? null : p;
 }
 
 /**

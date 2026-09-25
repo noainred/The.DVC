@@ -293,7 +293,7 @@ export function LinkCheck() {
       <div className="card">
         <div style={{ fontWeight: 600, marginBottom: 6 }}>링크 {rows.length}개 {rows.length !== (data?.links || []).length ? `(전체 ${(data?.links || []).length})` : ''}</div>
         <div style={{ overflowX: 'auto' }}>
-          <STable className="v3-table">
+          <STable className="v3-table" minWidth={1100} wrap={false}>
             <thead>
               <tr>
                 <th>종류</th><th>출발</th><th>대상</th><th>주소</th><th>상태</th>
@@ -358,7 +358,7 @@ export function LinkCheck() {
         </div>
         {events?.truncated && <div style={{ fontSize: 11, color: 'var(--warn, #e8b23a)' }}>상한(300건)으로 잘렸습니다 — 기간을 좁히거나 링크를 고르세요.</div>}
         <div style={{ overflowX: 'auto' }}>
-          <STable className="v3-table">
+          <STable className="v3-table" minWidth={860} wrap={false}>
             <thead><tr><th>시각</th><th>구분</th><th>링크</th><th>단계</th><th>실패 종류</th><th>측정자</th><th>요약</th><th data-nosort>상세</th></tr></thead>
             <tbody>
               {(events?.rows || []).map((e) => (

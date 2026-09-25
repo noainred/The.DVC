@@ -36,13 +36,29 @@ export function registryHostKey(v) {
   return s;
 }
 
+// v2.612 RECENT2612-03: v2.611 까지 임시 스캔이 남긴 scan|adhoc|<ip> 기록 — 어느 주기 스캔도 읽지 않고 쌓이기만 했다.
+//   정책을 처음 만들 때 1회 지운다(임시 스캔은 이제 record:false 라 새로 생기지 않는다).
+let _adhocPurged = false;
+export function purgeAdhocScanStops() {
+  if (_adhocPurged) return 0;
+  _adhocPurged = true;
+  try {
+    const n = scanAuthGuard.purgeWhere((id) => id.startsWith('scan|adhoc|'));
+    if (n) console.warn(`[idrac-scan] 읽는 곳이 없는 임시 스캔 인증 실패 기록 ${n}건을 정리했습니다(scan|adhoc|*).`);
+    return n;
+  } catch (e) { console.warn(`[idrac-scan] 임시 스캔 인증 실패 기록 정리 실패: ${e?.message || e}`); return 0; }
+}
+export function _resetAdhocPurgeForTest() { _adhocPurged = false; }
+
 /**
  * 한 번의 스캔에 쓰는 정책.
- * @param {{rangeId?:string, username:string, password:string, periodic?:boolean}} p
+ * @param {{rangeId?:string, username:string, password:string, periodic?:boolean, record?:boolean}} p
+ *   record — false 면 성공·실패를 기록하지 않는다(v2.612 RECENT2612-03 — 임시 스캔. 대역 id 가 없어 읽는 곳이 없다).
  * @returns {{skip(ip:string): (null|'scan'|'registered'), noteAuthFailed(ip:string, reason?:string): void,
  *            noteOk(ip:string): void, flush(): void, periodic: boolean}}
  */
-export function makeScanAuthPolicy({ rangeId = '', username = '', password = '', periodic = false, ilo = null } = {}) {
+export function makeScanAuthPolicy({ rangeId = '', username = '', password = '', periodic = false, ilo = null, record = true } = {}) {
+  purgeAdhocScanStops();
   // v2.610: iLO 계정이 있으면 스캔 정지 기록의 자격증명 지문에 두 계정을 **함께** 넣는다 — 어느 쪽을 고쳐도
   //   자동 재개된다. 등록 서버 정지 대조는 그 서버의 벤더 계정으로 한다(HPE 는 iLO 계정).
   const iloU = String(ilo?.username || '').trim();
@@ -71,10 +87,11 @@ export function makeScanAuthPolicy({ rangeId = '', username = '', password = '',
       return null;
     },
     noteAuthFailed(ip, reason) {
+      if (!record) return;
       const id = scanStopId(rangeId, ip);
       scanAuthGuard.markAuthStopped(id, { id, ...cred }, reason || '스캔 인증 실패', { defer: true });
     },
-    noteOk(ip) { scanAuthGuard.clearAuthStop(scanStopId(rangeId, ip), { defer: true }); },
+    noteOk(ip) { if (!record) return; scanAuthGuard.clearAuthStop(scanStopId(rangeId, ip), { defer: true }); },
     flush() { scanAuthGuard.flush(); },
   };
 }

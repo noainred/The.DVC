@@ -181,6 +181,20 @@ export function saveEdgeCvpStatus(agent, servers, { devicesUnavailable = false, 
   return { ok: true, ...(adm.evicted ? { evicted: adm.evicted } : {}), ...(variants ? { variantsRemoved: variants } : {}) };
 }
 
+/**
+ * v2.612 CEN2612-01: 위임된 CVP 가 하나도 없는 엣지의 보관분을 지운다(대소문자 변형 포함). 반환 = 지운 키 수.
+ *   예전에는 위임 0건인 엣지도 상태를 저장해 EDGE_MAX_AGENTS 칸을 채웠고(CVP 를 쓰지 않는 엣지 28곳이 전부 들어온다),
+ *   위임에서 빠진 엣지의 옛 상태가 화면에 남았다.
+ */
+export function dropEdgeCvpStatus(agent) {
+  const m = load();
+  const lo = String(agent ?? '').trim().toLowerCase();
+  let n = 0;
+  for (const k of [...m.keys()]) if (String(k).trim().toLowerCase() === lo) { m.delete(k); n++; }
+  if (n) writer.save();
+  return n;
+}
+
 /** 전 엣지 상태(평탄) — { agent, pushedAt, ...status }. */
 export function edgeCvpStatuses() {
   const out = [];

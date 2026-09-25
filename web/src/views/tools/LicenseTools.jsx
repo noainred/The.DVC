@@ -8,6 +8,7 @@ import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 �
 import { STable } from '../../components/STable.jsx';
 import { licenseScopeNote } from './licenseScopeText.js'; // v2.603: 범위 밖 제외 안내
 import BulkDeviceIo from './BulkDeviceIo.jsx';   // v2.525: Horizon 서버 CSV·자유텍스트 대량 등록(스토리지·SAN 과 같은 공용 모달)
+import { hzSummary } from './hzListText.js'; // v2.612 WEB2612-04
 
 
 export function Solutions() {
@@ -123,6 +124,7 @@ export function LicenseExpiry({ scope, isAdmin }) {
   const [statusSel, setStatusSel] = useState('');
   const [familySel, setFamilySel] = useState('');
   const [hz, setHz] = useState(null); // Horizon 서버 목록(관리자)
+  const [hzErr, setHzErr] = useState(null); // v2.612 WEB2612-04: 403 이 아닌 실패 — '0대 등록' 으로 칠하지 않는다
   const [hzDenied, setHzDenied] = useState(null); // v2.611: 범위 제한 admin 은 Horizon 등록부 403 — '0대 등록' 으로 칠하지 않는다
   const [hzBulk, setHzBulk] = useState(false); // v2.525: CSV·자유텍스트 대량 등록 모달
   const [hzForm, setHzForm] = useState({ id: '', name: '', host: '', username: '', password: '', domain: '' });
@@ -138,8 +140,8 @@ export function LicenseExpiry({ scope, isAdmin }) {
       .catch((e) => { if (gen === licGen.current) setErr(e.message); });
     if (isAdmin) {
       fetchJson('/admin/horizon')
-        .then((r) => { setHz(r.servers || []); setHzDenied(null); })
-        .catch((e) => { if (e?.status === 403) setHzDenied(true); });
+        .then((r) => { setHz(r.servers || []); setHzDenied(null); setHzErr(null); })
+        .catch((e) => { if (e?.status === 403) setHzDenied(true); else setHzErr(e?.message || String(e)); });
     }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope]);
@@ -245,8 +247,9 @@ export function LicenseExpiry({ scope, isAdmin }) {
         </div>
       )}
       {isAdmin && !hzDenied && (
-        <details style={{ marginTop: 14 }} open={(hz || []).length === 0}>
-          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🖥️ Horizon 연결 서버 관리 ({(hz || []).length}대 등록)</summary>
+        <details style={{ marginTop: 14 }} open={hzSummary(hz, hzErr).open}>
+          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>{hzSummary(hz, hzErr).label}</summary>
+          {hzErr && <div className="banner warn" style={{ marginTop: 8 }}>Horizon 등록 목록을 읽지 못했습니다(0대라는 뜻이 아닙니다): {hzErr}</div>}
           <div className="card" style={{ marginTop: 8, padding: 14 }}>
             {(hz || []).length > 0 && (
               <STable minWidth={720} style={{ marginBottom: 10 }}>

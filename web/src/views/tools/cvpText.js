@@ -202,9 +202,33 @@ export function listNotes(data, now = Date.now()) {
     const st = s.status && typeof s.status === 'object' ? s.status : {};
     if (st.dbUnavailable) out.push(`${s.name || s.id}: 수집한 노드의 CVP DB 를 쓸 수 없어 결과를 저장하지 못했습니다.`);
     if (st.pruneHeld && typeof st.pruneHeld === 'object') out.push(`${s.name || s.id}: ${String(st.pruneHeld.reason || '장비 0대 보고 — 장비 목록 정리를 잠시 보류합니다')}`);
-    if (st.partsDueUnread) out.push(`${s.name || s.id}: 이번 주기에 파트를 읽을 차례였지만 한 대도 읽지 못했습니다(시간 예산·시한) — 파트 표시는 이전 값입니다.`);
+    if (st.partsDueUnread) out.push(partsDueNote(s.name || s.id, st));
   }
   return out;
+}
+
+/**
+ * v2.612 WEB2612-07: 장비 표 제목. 목록 응답이 없으면(불러오는 중·실패) '장비 —' — '0대' 는 '읽었고 없다' 는 뜻이다.
+ */
+export function deviceCountLabel(devices, shown, total) {
+  if (!devices || typeof devices !== 'object' || !Array.isArray(devices.devices)) return '장비 —';
+  return `장비 ${countText(shown)}대${shown !== total ? ` (전체 ${countText(total)})` : ''}`;
+}
+
+const PART_ITEM_KEYS = ['power', 'cooling', 'temperature', 'xcvr'];
+/**
+ * v2.612 RECENT2612-01: '파트를 읽을 차례였지만 조회하지 못함' 문장. 서버는 이 표시를 **예산·시한 때문에 시도조차 못 한 장비**가
+ *   있을 때만 싣는다 — 그 원인만 말하고, 파트 경로 실패 사유가 함께 있으면 그 사유를 그대로 붙인다(원인을 지어내지 않는다).
+ *   '이전 값' 은 시도하지 못한 장비에만 해당한다(시도한 장비는 이번 결과가 저장된다).
+ */
+export function partsDueNote(name, st) {
+  const o = st && typeof st === 'object' ? st : {};
+  const n = numOrNull(o.partsNotTried);
+  const who = n != null && n > 0 ? `${n}대` : '일부 장비';
+  const miss = o.missing && typeof o.missing === 'object' ? o.missing : {};
+  const reasons = PART_ITEM_KEYS.filter((k) => typeof miss[k] === 'string' && miss[k]).map((k) => `${itemLabel(k)}: ${miss[k]}`);
+  return `${name}: 이번 주기에 파트를 읽을 차례였지만 ${who}는 시간 예산·수집 시한 때문에 파트를 조회하지 못했습니다 — 그 장비의 파트 표시는 이전 조회 값입니다.`
+    + (reasons.length ? ` 파트 조회 실패 사유: ${reasons.join(' · ')}` : '');
 }
 
 /** 장비 상세의 '읽지 못한 파트 종류' 문장(없으면 ''). 서버 키(power·cooling·…)를 한글로. */
@@ -254,7 +278,19 @@ export function bgpCell(bgp) {
   const peers = numOrNull(bgp.peers); const est = numOrNull(bgp.established); const down = numOrNull(bgp.down);
   if (peers === 0) return { text: '피어 없음', tone: 'muted', title: '설정된 BGP 피어가 없습니다.' };
   const text = `${countText(est)}/${countText(peers)}${down ? ` · down ${down}` : ''}`;
-  return { text, tone: down ? 'bad' : (est != null ? 'ok' : 'muted'), title: `Established ${countText(est)} · 그 외 ${countText(down)} · 받은 prefix ${countText(bgp.prefixes)}` };
+  return { text, tone: down ? 'bad' : (est != null ? 'ok' : 'muted'), title: `Established ${countText(est)} · 그 외 ${countText(down)} · 받은 prefix ${prefixText(bgp.prefixes, bgp.prefixesUnknown)}` };
+}
+
+/**
+ * v2.612 COL2612-04: 받은 prefix 합계 — prefix 수를 모르는 피어가 있으면 합계는 '최소' 값이다(부분 합을 전체라 말하지 않는다).
+ *   전부 모르면 '—'. prefixesUnknown 이 없는 옛 응답은 예전처럼 숫자만.
+ */
+export function prefixText(prefixes, unknown) {
+  const p = numOrNull(prefixes);
+  const u = numOrNull(unknown);
+  if (p == null) return '—';
+  if (u != null && u > 0) return `최소 ${countText(p)}(피어 ${countText(u)}개는 prefix 수 모름)`;
+  return countText(p);
 }
 
 /** ports 요약({total,up,down}|null). */

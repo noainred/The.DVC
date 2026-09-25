@@ -43,7 +43,7 @@ import { ingestReport } from '../central/svcmonEdge.js';
 import { getAssignmentForAgent, markPulled, ackAssignment } from '../central/svcmonAssign.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { getAssignedGpuGuest } from '../central/agentGpuGuestConfig.js';
-import { getEffectiveUsers } from '../central/agentUsers.js';
+import { getEffectiveUsers, registryLoadError as agentUsersLoadError } from '../central/agentUsers.js';
 import { takeLogQueries, setLogQueryResult, vcenterOfReq } from '../central/logQueries.js';
 import { specToRange } from '../ipam/rangePolicies.js';
 import { ipToNum } from '../ipam/ledger.js';
@@ -1204,6 +1204,20 @@ centralRouter.get('/gpu-guest-config', (req, res) => {
 
 // 중앙→엣지 배포 사용자(pull): 엣지가 자기 이름으로 '중앙이 지정한 사용자 목록'을 가져가 로컬
 // users.json에 managed로 반영. 비밀번호 해시 포함(엣지가 로그인 검증에 사용) → 토큰 필수.
+/**
+ * v2.612 LEFT2612-01: 중앙 등록부를 읽지 못했으면(손상 → 보존) 설정 pull 에 **503** 으로 답한다. 빈 목록을 ok:true 로
+ *   내려보내면 엣지가 장비 목록·스냅샷·관리 계정을 통째로 지웠다. 엣지 pull 은 비-2xx 를 실패로 보고 직전 목록을 유지한다.
+ *   ⚠ 재수집 요청 큐(take*)를 꺼내기 **전에** 본다 — 꺼낸 뒤 503 이면 요청이 사라진다.
+ */
+function registryUnreadable(res, errOf, what) {
+  let e = null;
+  try { e = typeof errOf === 'function' ? errOf() : null; } catch (x) { e = { at: Date.now(), reason: x?.message || String(x) }; }
+  if (!e) return false;
+  res.set('Cache-Control', 'no-store');
+  res.status(503).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 ${what} 등록부를 읽지 못했습니다(${String(e.reason || '사유 미상').slice(0, 200)}) — 엣지는 직전 목록을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 등록을 다시 저장하세요.`, since: e.at || null });
+  return true;
+}
+
 // ── 스토리지 모니터링 위임(v2.302) ────────────────────────────────────────────
 // GET /api/central/storage-config?agent=<이름> — 이 엣지 몫 스토리지 장비 목록(자격증명 포함:
 // 엣지가 장비에 로그인해야 한다 — gpu-guest-config 의 계정 배포와 같은 신뢰 경계·WAN TLS 검증 ON).
@@ -1216,7 +1230,8 @@ centralRouter.get('/storage-config', async (req, res) => {
   if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
     return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
   }
-  const { devicesForAgent } = await import('../storage/registry.js');
+  const { devicesForAgent, registryLoadError: storageRegErr } = await import('../storage/registry.js');
+  if (registryUnreadable(res, storageRegErr, '스토리지')) return;
   // collectNow(v2.316): 중앙 UI 의 '수집' 클릭이 남긴 재수집 요청을 one-shot 으로 서빙 —
   // 엣지는 이 목록을 즉시 수집 + 즉시 push 한다(agent/storageConfigPull.js 참조).
   const { takeRequestsForAgent } = await import('../storage/collectRequests.js');
@@ -1398,7 +1413,8 @@ centralRouter.get('/pdu-config', async (req, res) => {
   if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
     return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
   }
-  const { devicesForAgent } = await import('../pdu/registry.js');
+  const { devicesForAgent, registryLoadError: pduRegErr } = await import('../pdu/registry.js');
+  if (registryUnreadable(res, pduRegErr, 'PDU')) return;
   const { takeRequestsForAgent } = await import('../pdu/collectRequests.js');
   // intervals: **지정한 키만** 내려간다 — 전 키를 채우면 엣지 portal.env 의 현장 설정을 덮어쓴다.
   const { intervalsForEdge } = await import('../pdu/intervals.js');
@@ -1450,7 +1466,8 @@ centralRouter.get('/sanswitch-config', async (req, res) => {
   if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
     return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
   }
-  const { devicesForAgent } = await import('../sanswitch/registry.js');
+  const { devicesForAgent, registryLoadError: sanRegErr } = await import('../sanswitch/registry.js');
+  if (registryUnreadable(res, sanRegErr, 'SAN 스위치')) return;
   const { takeRequestsForAgent, takePerfRequestForAgent } = await import('../sanswitch/collectRequests.js');
   const { takeTestRequestsForAgent } = await import('../sanswitch/testRuns.js');
   const { loadPerfSettings } = await import('../sanswitch/perfSettings.js');
@@ -1685,7 +1702,8 @@ centralRouter.get('/cvp-config', async (req, res) => {
   if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
     return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
   }
-  const { serversForAgent } = await import('../cvp/registry.js');
+  const { serversForAgent, registryLoadError: cvpRegErr } = await import('../cvp/registry.js');
+  if (registryUnreadable(res, cvpRegErr, 'CVP')) return;
   const { loadSettings } = await import('../cvp/settings.js');
   const { takeCvpRequests } = await import('../cvp/collectRequests.js');
   res.set('Cache-Control', 'no-store');
@@ -1704,9 +1722,24 @@ centralRouter.post('/cvp-data', async (req, res) => {
   const authAgent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
   if (!authAgent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const { serversForAgent } = await import('../cvp/registry.js');
-  const { sanitizeCvpBody, saveEdgeCvpStatus } = await import('../central/cvpEdge.js');
+  const { sanitizeCvpBody, saveEdgeCvpStatus, dropEdgeCvpStatus } = await import('../central/cvpEdge.js');
   const cdb = await import('../cvp/db.js');
   const ownedServers = serversForAgent(authAgent);
+  /*
+   * v2.612 CEN2612-01: 위임된 CVP 가 없는 엣지는 **보관하지 않는다** — 상태를 저장하면 CVP 를 쓰지 않는 엣지들이 보관 칸
+   *   (EDGE_MAX_AGENTS)을 채워 실제 위임 엣지가 429 로 밀렸다. 이름 변형 정리(adoptAgentVariants)도 하지 않는다(행 소유권을 옮길 근거가 없다).
+   *   예전 보관분·장비 행(위임에서 빠진 뒤 남은 것)은 지운다 — 남겨 두면 화면이 옛 상태를 지금 값처럼 보인다.
+   */
+  if (!ownedServers.length) {
+    const statusRemoved = dropEdgeCvpStatus(authAgent);
+    let removed = 0;
+    const chunk0 = Math.max(0, Math.floor(numOrNull(req.body?.chunk) ?? 0)) === 0;
+    if (chunk0) {
+      try { removed = (await cdb.pruneDevices(authAgent, {}, { cvpIds: [] })).removed || 0; }
+      catch (e) { console.warn(`[central] cvp-data: 위임 해제 엣지 장비 정리 실패(${String(authAgent).slice(0, 64)}): ${e.message}`); }
+    }
+    return res.json({ ok: true, noDelegation: true, statusRemoved, removed });
+  }
   /*
    * v2.611(CEN2611-02): 저장 키는 **대소문자를 정규화한 이름**이다(util/agentKey canonicalAgent — 등록부 표기가 있으면 그것).
    *   조회·소유 판정은 대소문자를 무시하는데 저장만 원문이라, 개별↔공유 토큰 전환('Edge-A'↔'edge-a')으로 같은 엣지의 상태·장비
@@ -1764,6 +1797,7 @@ centralRouter.get('/users-config', (req, res) => {
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  if (registryUnreadable(res, agentUsersLoadError, '엣지 배포 사용자')) return;
   // 글로벌('*') 공통 사용자 + 이 엣지 전용을 합쳐서 반환(개별이 글로벌보다 우선).
   res.json({ ok: true, agent, users: getEffectiveUsers(agent) });
 });

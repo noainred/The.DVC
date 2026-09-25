@@ -38,6 +38,12 @@ function SBadge({ s }) {
   const m = STATUS_BADGE[s] || [s, 'gray'];
   return <span className={`badge ${m[1]}`}>{m[0]}</span>;
 }
+// v2.612 WEB2612-08: 관리자 설정 조회 실패를 삼키면 그 관리 섹션이 말없이 사라진다('설정이 없는 화면' 으로 읽힌다).
+//   403 은 ErrorBox(AccessDenied — 필요 권한 안내), 그 밖은 사유 한 줄.
+const adminLoadErr = (label, e) => e && (
+  e?.status === 403 ? <ErrorBox error={e} />
+    : <div className="banner warn" style={{ marginTop: 10 }}>{label}을(를) 읽지 못했습니다(설정이 없다는 뜻이 아닙니다): {e?.message || String(e)}</div>
+);
 const errBanner = (error) => error && (
   <div className="badge red" style={{ marginBottom: 8 }}>갱신 실패(직전 데이터 표시 중): {error}</div>
 );
@@ -46,11 +52,12 @@ const errBanner = (error) => error && (
 export function DailyHealth({ scope, isAdmin }) {
   const [open, setOpen] = useState(null); // 펼친 섹션 key
   const [sched, setSched] = useState(null); // 관리자 스케줄 설정
+  const [schedErr, setSchedErr] = useState(null); // v2.612 WEB2612-08
   const [saving, setSaving] = useState('');
   const { data, error, loading } = usePolling('/tools/report/health', { vcenterId: scope }, 30_000);
   useEffect(() => {
     if (!isAdmin) return;
-    fetchJson('/admin/report/daily').then(setSched).catch(() => {});
+    fetchJson('/admin/report/daily').then((r) => { setSched(r); setSchedErr(null); }).catch((e) => setSchedErr(e));
   }, [isAdmin]);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
@@ -64,7 +71,7 @@ export function DailyHealth({ scope, isAdmin }) {
     try { const r = await postJson('/admin/report/daily/run', {}); setSaving(r.ok ? `발송 완료 (${(r.results || []).join(', ') || '채널 미설정'})` : `실패: ${(r.results || []).join(', ') || r.reason}`); }
     catch (e) { setSaving(`실패: ${e.message}`); }
     // 수동 성공은 서버의 연속 실패 기록을 지운다 — 안내가 옛 값으로 남지 않게 다시 읽는다(v2.603).
-    fetchJson('/admin/report/daily').then(setSched).catch(() => {});
+    fetchJson('/admin/report/daily').then((r) => { setSched(r); setSchedErr(null); }).catch((e) => setSchedErr(e));
   };
   return (
     <>
@@ -76,6 +83,7 @@ export function DailyHealth({ scope, isAdmin }) {
         <Kpi label="호스트" value={data.summary.hosts} />
         <Kpi label="VM" value={data.summary.vms} />
       </div>
+      {isAdmin && !sched && adminLoadErr('일일 보고 설정', schedErr)}
       {isAdmin && sched && (
         <div className="card" style={{ marginBottom: 12 }}>
           <div className="flex wrap gap" style={{ alignItems: 'center' }}>
@@ -354,11 +362,12 @@ export function CapacityForecast({ scope }) {
 /* ── ⑦ 알림 채널·이력 ──────────────────────────────────────────────── */
 export function AlertChannels({ isAdmin }) {
   const [cfg, setCfg] = useState(null);   // 관리자 전체 설정(URL 포함)
+  const [cfgErr, setCfgErr] = useState(null); // v2.612 WEB2612-08
   const [msg, setMsg] = useState('');
   const { data, error, loading } = usePolling('/tools/report/alerts', {}, 15_000);
   useEffect(() => {
     if (!isAdmin) return;
-    fetchJson('/admin/alerts').then((r) => setCfg(r.config)).catch(() => {});
+    fetchJson('/admin/alerts').then((r) => { setCfg(r.config); setCfgErr(null); }).catch((e) => setCfgErr(e));
   }, [isAdmin]);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
@@ -384,6 +393,7 @@ export function AlertChannels({ isAdmin }) {
         <Kpi label="발화 중 알림" value={(data.firing || []).length} unit="건" accent={(data.firing || []).length ? 'var(--red)' : undefined} />
         <Kpi label="중복 억제 창" value={data.suppressWindowMin} unit="분" meta={`재알림 쿨다운 ${data.cooldownMin}분`} />
       </div>
+      {isAdmin && !cfg && adminLoadErr('알림 채널 설정', cfgErr)}
       {isAdmin && cfg && (
         <div className="card" style={{ marginBottom: 12 }}>
           <b style={{ fontSize: 13 }}>채널 설정 (관리자)</b>

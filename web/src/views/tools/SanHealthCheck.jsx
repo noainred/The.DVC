@@ -132,7 +132,7 @@ function PortCheckTable({ pc, problems, zoningNote, omitted }) {
       <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}><BoldText text={portBaselineNote(pc)} /></div>
       {problemOmittedNote(omitted) && <div style={{ fontSize: 11.5, marginBottom: 6, color: COLOR.amber }}>⚠ {problemOmittedNote(omitted)}</div>}
       <div className="table-wrap">
-        <STable className="v3-table">
+        <STable className="v3-table" minWidth={760} wrap={false}>
           <thead>
             <tr><th>포트</th><th>판정</th><th>상태</th><th>연결 장비</th><th>광량(Rx)</th><th>에러</th><th data-nosort>세부</th></tr>
           </thead>
@@ -445,7 +445,7 @@ export function AllHealthCheck({ datacenterIds = [] }) {
       ) : null}
 
       <div className="table-wrap" style={{ maxHeight: '46vh', overflow: 'auto' }}>
-        <STable>
+        <STable minWidth={680} wrap={false}>
           <thead><tr><th>스위치</th><th>법인</th><th>판정</th><th>확인 불가</th><th>내용</th><th data-nosort>상세</th></tr></thead>
           <tbody>
             {rows.map((r) => {

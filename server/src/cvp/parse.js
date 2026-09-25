@@ -18,6 +18,8 @@ export const DEVICE_MAX = 2000;
 export const PORT_MAX = 1024;
 export const PEER_MAX = 512;
 export const PART_MAX = 512;
+/** v2.612 SEC2612-01: 개체 하나에 합칠 필드 수 상한(넘친 개수는 entitiesOf().droppedFields). */
+export const ENTITY_FIELD_MAX = 400;
 const STR = 256;
 
 const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
@@ -106,12 +108,28 @@ export function entitiesOf(text) {
   const entities = new Map();
   const keys = new Set();
   let format = null;
+  let droppedFields = 0;
+  /*
+   * v2.612 SEC2612-01: 같은 개체 이름으로 온 update 를 **제자리에서** 합친다. 예전 `{ ...prev, ...fields }` 는 put 마다
+   *   누적 필드 전체를 복사해 O(n²) 였다(같은 개체 8천 update = 11.7초). 개체당 필드는 ENTITY_FIELD_MAX 로 자르고
+   *   버린 개수를 droppedFields 로 밝힌다. `__proto__` 같은 키는 defineProperty 로 자기 속성에만 넣는다(프로토타입을 바꾸지 않게).
+   */
   const put = (name, fields) => {
     const n = str(name, 128);
-    if (!n || entities.size >= 4096) return;
-    const prev = entities.get(n) || {};
-    entities.set(n, { ...prev, ...fields });
-    for (const k of Object.keys(fields)) if (keys.size < 40) keys.add(k.split('.').pop());
+    if (!n) return;
+    let cur = entities.get(n);
+    if (!cur) {
+      if (entities.size >= 4096) return;
+      cur = {}; entities.set(n, cur);
+    }
+    let size = Object.keys(cur).length;
+    for (const k of Object.keys(fields)) {
+      const has = Object.hasOwn(cur, k);
+      if (!has && size >= ENTITY_FIELD_MAX) { droppedFields++; continue; }
+      Object.defineProperty(cur, k, { value: fields[k], enumerable: true, writable: true, configurable: true });
+      if (!has) size++;
+      if (keys.size < 40) keys.add(k.split('.').pop());
+    }
   };
   for (const v of values) {
     if (isObj(v) && Array.isArray(v.notifications)) {
@@ -155,7 +173,7 @@ export function entitiesOf(text) {
       }
     }
   }
-  return { entities, format, keys: [...keys] };
+  return { entities, format, keys: [...keys], droppedFields };
 }
 
 function decodeSeg(s) { try { return decodeURIComponent(s); } catch { return s; } }
@@ -229,6 +247,8 @@ export function parseInventory(text, { max = DEVICE_MAX } = {}) {
 /* ── 부품 ──────────────────────────────────────────────────────────────── */
 
 export const PART_STATES = Object.freeze(['ok', 'warn', 'fault', 'unknown', 'absent']);
+// v2.612 COL2612-03: 부품 '이상' 으로 읽을 명시 단어(단어 경계 없이 — EOS 열거형은 붙여 쓴다: powerLoss·hwStatusFailed).
+const CVP_BAD = /fail|fault|error|critical|broken|loss|lost|shutdown|overheat|notok|not[\s_-]*ok|unhealthy|down|offline|alarm|bad/;
 
 /**
  * 부품 상태 판정(순수). 순서가 계약이다: ① 빈 슬롯(absent) ② 경보 플래그 ③ 경고 단어 ④ healthWord.
@@ -256,8 +276,17 @@ export function partState(flat) {
    */
   if (stateRaw == null) return alertFalse ? 'ok' : 'unknown';
   if (/warn|minor|degrad|attention/.test(s)) return 'warn';
-  const w = healthWord(s.replace(/^(powersupply|fan|xcvr|intfoper)/, ''));
-  return w === 'ok' ? 'ok' : w === 'bad' ? 'fault' : 'unknown';
+  /*
+   * v2.612 COL2612-03: EOS 열거형 접두(hwStatusOk·powerSupplyOk…)를 떼고 판정한다 — 예전에는 'hwstatus' 를 떼지 않아
+   *   hwStatusOk 가 모르는 단어 → fault 였다. healthWord 는 모르는 단어를 bad 로 보지만(스토리지 규약), CVP 는 형식을 본 적이
+   *   없으므로 **명시적 이상 단어만** fault 이고 그 밖의 모르는 단어는 unknown 이다(없는 장애를 만들지 않는다).
+   */
+  const core = s.replace(/^(hwstatus|powersupply|fanstatus|fan|xcvr|intfoper)[\s_:-]*/, '');
+  if (!core) return 'unknown';
+  const w = healthWord(core);
+  if (w === 'ok') return 'ok';
+  if (w === 'unknown') return 'unknown';
+  return CVP_BAD.test(core) ? 'fault' : 'unknown';
 }
 
 /**
@@ -265,7 +294,7 @@ export function partState(flat) {
  * @returns {{ parts: Array<{kind,name,state,detail}>|null, keys: string[], truncated: number }}
  */
 export function parseParts(text, kind, { max = PART_MAX } = {}) {
-  const { entities, format, keys } = entitiesOf(text);
+  const { entities, format, keys, droppedFields } = entitiesOf(text);
   if (!format) return { parts: null, keys, truncated: 0 };
   const parts = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
@@ -280,7 +309,7 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
     parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200) });
   }
   if (!parts.length && unrecognized) return { parts: null, keys, truncated: 0 };
-  return { parts, keys, truncated };
+  return { parts, keys, truncated, droppedFields };
 }
 
 /** 부품 목록 → 상태별 개수(null 이면 null). */
@@ -305,7 +334,8 @@ export function speedBps(v) {
   if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? v : null;
   const s = String(v);
   const e = SPEED_ENUM.exec(s);
-  const m = e ? [e[0], e[2] != null ? `${e[1]}.${e[2]}` : e[1], e[3]] : /^(\d+(?:\.\d+)?)\s*(g|m|k)\b/i.exec(s.trim());
+  // v2.612 COL2612-05: '100Gbps'·'1000Mbps'·'10 Gbps' 도 받는다(예전 식은 \b 때문에 'g' 뒤에 'bps' 가 붙으면 놓쳤다).
+  const m = e ? [e[0], e[2] != null ? `${e[1]}.${e[2]}` : e[1], e[3]] : /^(\d+(?:\.\d+)?)\s*(g|m|k)(?:b(?:ps|it\/s)?|bits?\/s)?$/i.exec(s.trim());
   if (m) {
     const n = Number(m[1]); const u = String(m[2] || '').toLowerCase();
     const mult = u === 'g' ? 1e9 : u === 'm' ? 1e6 : u === 'k' ? 1e3 : 1;
@@ -316,14 +346,27 @@ export function speedBps(v) {
   return n != null && n > 0 ? n : null;
 }
 
+/**
+ * v2.612 COL2612-05: 속도 후보를 차례로 본다 — 첫 후보가 'speedUnknown' 처럼 읽히지 않으면 다음 후보(bandwidth)로 넘어간다.
+ *   예전 pick 은 비어 있지 않은 첫 값을 골라 그것이 읽히지 않아도 null 로 끝났다.
+ */
+export function firstSpeed(flat) {
+  for (const k of ['speed', 'bandwidth', 'speedEnum']) {
+    const r = speedBps(unwrap(pick(flat, [k])));
+    if (r != null) return r;
+  }
+  return null;
+}
+
 /** oper/admin 상태 → 'up'|'down'|'unknown'. */
 export function linkWord(v) {
   if (v === true) return 'up';
   if (v === false) return 'down';
   const s = String(v ?? '').toLowerCase();
   if (!s) return 'unknown';
-  if (/notconnect|down|disabled|errdisabled|shutdown|notpresent|linkdown|intfoperdown|lowerlayerdown/.test(s)) return 'down';
-  if (/\bup\b|linkup|intfoperup|connected|enabled|^up$/.test(s)) return 'up';
+  // v2.612 COL2612-02: 'disconnected' 가 'connected' 를 품어 up 으로 읽혔다 — 끊김 단어를 down 에 넣고 up 은 단어 경계로 본다.
+  if (/notconnect|disconnect|down|disabled|errdisabled|shutdown|notpresent|linkdown|intfoperdown|lowerlayerdown/.test(s)) return 'down';
+  if (/\bup\b|linkup|intfoperup|\bconnected\b|\benabled\b/.test(s)) return 'up';
   return 'unknown';
 }
 
@@ -331,7 +374,7 @@ export function linkWord(v) {
  * 인터페이스 상태 파서 → [{name, desc, speedBps, oper, admin, vlan, lag}] 또는 null.
  */
 export function parseInterfaces(text, { max = PORT_MAX } = {}) {
-  const { entities, format, keys } = entitiesOf(text);
+  const { entities, format, keys, droppedFields } = entitiesOf(text);
   if (!format) return { ports: null, keys, truncated: 0 };
   const ports = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
@@ -343,7 +386,7 @@ export function parseInterfaces(text, { max = PORT_MAX } = {}) {
     ports.push({
       name: str(name, 64),
       desc: str(pick(f, ['description', 'desc']) ?? '', 200),
-      speedBps: speedBps(pick(f, ['speed', 'bandwidth', 'speedEnum'])),
+      speedBps: firstSpeed(f),
       oper: linkWord(pick(f, ['operStatus', 'linkStatus', 'oper', 'operState'])),
       admin: linkWord(pick(f, ['adminStatus', 'enabledState', 'adminEnabled', 'admin', 'enabled'])),
       vlan: vlanRaw == null ? '' : str(vlanRaw, 32),
@@ -351,7 +394,7 @@ export function parseInterfaces(text, { max = PORT_MAX } = {}) {
     });
   }
   if (!ports.length && unrecognized) return { ports: null, keys, truncated: 0 };
-  return { ports, keys, truncated };
+  return { ports, keys, truncated, droppedFields };
 }
 
 /**
@@ -359,7 +402,7 @@ export function parseInterfaces(text, { max = PORT_MAX } = {}) {
  * 값이 없는 필드는 null 이다(0 을 지어내지 않는다).
  */
 export function parseCounters(text) {
-  const { entities, format, keys } = entitiesOf(text);
+  const { entities, format, keys, droppedFields } = entitiesOf(text);
   if (!format) return { counters: null, keys };
   const counters = new Map();
   for (const [name, f] of entities) {
@@ -373,7 +416,7 @@ export function parseCounters(text) {
     counters.set(str(name, 64), c);
   }
   if (!counters.size && entities.size) return { counters: null, keys };
-  return { counters, keys };
+  return { counters, keys, droppedFields };
 }
 
 /**
@@ -421,7 +464,7 @@ export function portDelta(prev, cur, speed, intervalMs, slackMs = 0) {
  * prefixes 합계는 **읽은 피어가 하나라도 있을 때만**(전부 모르면 null). 전체 RIB 는 수집하지 않는다(docs/CVP.md).
  */
 export function parseBgp(text, { max = PEER_MAX } = {}) {
-  const { entities, format, keys } = entitiesOf(text);
+  const { entities, format, keys, droppedFields } = entitiesOf(text);
   if (!format) return { peers: null, summary: null, keys, truncated: 0 };
   const peers = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
@@ -438,7 +481,7 @@ export function parseBgp(text, { max = PEER_MAX } = {}) {
     });
   }
   if (!peers.length && unrecognized) return { peers: null, summary: null, keys, truncated: 0 };
-  return { peers, summary: bgpSummary(peers), keys, truncated };
+  return { peers, summary: bgpSummary(peers), keys, truncated, droppedFields };
 }
 
 export function bgpSummary(peers) {
@@ -450,7 +493,8 @@ export function bgpSummary(peers) {
     else if (s) down++;
     if (p?.prefixes != null) { pSum += p.prefixes; pKnown++; }
   }
-  return { peers: peers.length, established, down, prefixes: pKnown ? pSum : null };
+  // v2.612 COL2612-04: prefix 수를 모르는 피어 수를 함께 준다 — 있으면 prefixes 는 '최소' 값이다(부분 합을 전체라 말하지 않는다).
+  return { peers: peers.length, established, down, prefixes: pKnown ? pSum : null, prefixesUnknown: peers.length - pKnown };
 }
 
 /**

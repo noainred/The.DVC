@@ -228,7 +228,7 @@ export function PartFaults() {
 
           {tab === 'open' && (
             <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-              <STable>
+              <STable minWidth={820} wrap={false}>
                 <thead><tr>
                   <th>상태</th><th>장비</th><th>부품</th><th>장비 보고 원문</th><th>처음 감지</th><th>최근 확인</th><th>수집</th>
                 </tr></thead>
@@ -287,7 +287,7 @@ export function PartFaults() {
               {events?.events && (
                 <>
                   {events.truncated && <div style={{ padding: 8, color: 'var(--amber)', fontSize: 12 }}>상한({events.limit}건)으로 잘렸습니다 — 더 이전 이력은 기간을 좁혀 보세요.</div>}
-                  <STable>
+                  <STable minWidth={760} wrap={false}>
                     <thead><tr><th>시각</th><th>장비</th><th>부품</th><th>사건</th><th>장비 보고 원문</th><th>수집</th></tr></thead>
                     <tbody>
                       {events.events.length === 0 && <tr><td colSpan={6} style={{ padding: 16, color: 'var(--text-faint)' }}>

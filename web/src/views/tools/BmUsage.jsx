@@ -66,6 +66,8 @@ export function BmUsage() {
   const [sel, setSel] = useState('');
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailErr, setDetailErr] = useState(null);   // v2.612 WEB2612-03: 실패를 패널 안에서 말한다
+  const detailGen = React.useRef(0);                  // v2.612 WEB2612-03: 늦게 온 다른 서버·기간 응답은 버린다
   const [rangeKey, setRangeKey] = useState('24h');
   const [showSkipped, setShowSkipped] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -165,12 +167,16 @@ export function BmUsage() {
    */
   const loadDetail = React.useCallback(async (key, rk) => {
     const r = rangeOf(rk);
-    setDetailLoading(true);
+    const gen = ++detailGen.current;
+    setDetailLoading(true); setDetailErr(null);
     try {
       const q = r.source === 'daily' ? { key, days: r.days, hours: 1 } : { key, hours: r.hours, days: 90 };
-      setDetail(await fetchJson('/tools/bm-usage/history', q));
-    } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }
-    finally { setDetailLoading(false); }
+      const d = await fetchJson('/tools/bm-usage/history', q);
+      if (gen === detailGen.current) setDetail(d);
+    } catch (e) {
+      // 실패하면 다른 기간의 값을 이 기간 것처럼 두지 않는다.
+      if (gen === detailGen.current) { setDetail(null); setDetailErr(e?.message || String(e)); }
+    } finally { if (gen === detailGen.current) setDetailLoading(false); }
   }, []);
   async function openDetail(key) {
     setSel(key); setDetail(null); setRangeKey('24h');
@@ -692,7 +698,10 @@ export function BmUsage() {
               <BoldText text={'조회 상한으로 **일부 구간이 잘렸습니다** — 더 긴 기간은 일 단위 롤업으로 보세요.'} />
             </p>
           )}
-          {!detail && <p style={{ fontSize: 12, color: 'var(--muted)' }}>추이를 불러오는 중…</p>}
+          {!detail && !detailErr && <p style={{ fontSize: 12, color: 'var(--muted)' }}>추이를 불러오는 중…</p>}
+          {!detail && detailErr && (
+            <p style={{ fontSize: 12, color: toneVar('bad'), lineHeight: 1.6 }}>추이를 읽지 못했습니다: {detailErr}</p>
+          )}
           {detail && !detail.raw?.length && !detail.daily?.length && (
             <p style={{ fontSize: 12, color: 'var(--muted)' }}>저장된 추이가 없습니다 — 아직 수집되지 않았거나 이 서버의 값을 읽지 못했습니다.</p>
           )}

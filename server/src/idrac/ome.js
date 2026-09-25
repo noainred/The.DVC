@@ -19,6 +19,8 @@ import { config } from '../config.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';
 import { retryTransient } from '../util/resilientFetch.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
+// v2.612(SEC2612-03): 로그인 본문(비밀번호)·토큰 헤더가 교차 출처 리다이렉트를 따라가지 않게 — 같은 상대만 따른다.
+import { bmcFetch } from './redfish.js';
 
 // 동시성 제한 실행기 — 고RTT OME에서 장치별 전력 조회를 직렬(N×RTT)이 아닌 병렬(캡)로.
 // v2.579(ARCH-01): 본문은 `util/pool.js poolSettled`(항목별 격리)와 같다 — 사본을 지우고 별칭만 남긴다.
@@ -61,7 +63,7 @@ export class OmeClient {
   }
 
   async #req(pathname, { method = 'GET', body } = {}) {
-    const res = await fetch(`${this.base}${pathname}`, {
+    const res = await bmcFetch(`${this.base}${pathname}`, {
       method,
       headers: this.#headers(),
       body: body ? JSON.stringify(body) : undefined,
@@ -75,7 +77,7 @@ export class OmeClient {
 
   async login() {
     try {
-      const res = await fetch(`${this.base}/api/SessionService/Sessions`, {
+      const res = await bmcFetch(`${this.base}/api/SessionService/Sessions`, {
         method: 'POST',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ UserName: this.username, Password: this.password, SessionType: 'API' }),

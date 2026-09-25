@@ -104,8 +104,17 @@ export function pushIdracScan(agent, { ips, username, password, ilo = null, vcen
         // v2.591(감사 F3): trigger·rangeId — 엣지가 주기 스캔이면 인증 정지 IP 를 건너뛴다(구버전 엣지는 무시 → 전부 시도).
         // v2.610: ilo — HPE iLO 계정(있을 때만). 구버전 엣지는 이 필드를 무시하고 Dell 만 찾는다(HPE 는 미지원 서버로 남는다).
         body: JSON.stringify({ ips, username, password, ...(ilo && ilo.username && ilo.password ? { ilo: { username: ilo.username, password: ilo.password } } : {}), noRegister, vcenterId, datacenterId, mode, trigger: trigger === 'periodic' ? 'periodic' : 'manual', rangeId: String(rangeId || '') }),
-        timeoutMs: PUSH_TIMEOUT_MS, retries: 1,
+        // v2.612 EDGE2612-01: 재시도 없음 — 시한·5xx 뒤 다시 보내면 엣지가 앞 스캔을 아직 돌리는 중에 두 번째 스캔을 시작했다
+        //   (같은 대역에 같은 계정으로 로그인이 두 벌). 엣지도 409 busy 로 막지만 보내는 쪽에서 먼저 끊는다.
+        timeoutMs: PUSH_TIMEOUT_MS, retries: 0,
       }));
+      if (r.status === 409) {
+        // v2.612 EDGE2612-01: 엣지에서 다른 스캔(주기·폴링 위임·앞 PUSH)이 진행 중 — 오류가 아니라 '이미 수행 중' 이다.
+        let why = '';
+        try { const b = await readJsonCapped(r, 65_536, '엣지 busy 응답'); why = strOf(b?.reason, 300) || ''; } catch { /* 본문 없음 */ }
+        setIdracScanResult(reqId, { error: `이미 수행 중 — 엣지에서 다른 스캔이 진행 중이라 이번 요청은 실행하지 않았습니다. 끝난 뒤 다시 시도하세요.${why ? ` (${why})` : ''}`, httpStatus: 409, busy: true });
+        return;
+      }
       if (!r.ok) {
         // v2.440: 상태코드별로 원인이 갈린다 — 실측으로 확인한 규칙이다.
         //   403 = collector 라우터에 도달했고 **토큰이 틀림**

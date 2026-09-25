@@ -105,6 +105,7 @@ async function openInner() {
       //   엣지가 없는 행을 touch 로만 보내는 것을 알아채고 레코드를 다시 보낸다(예전 `AND ts < ?` 는 같은 ts 재전송을 0 으로 셌다).
       touchDevice: conn.prepare('UPDATE device_latest SET ts=MAX(ts, ?) WHERE agent=? AND cvp_id=? AND device_key=?'),
       delPortsOld: conn.prepare('DELETE FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ?'),
+      selDevTs: conn.prepare('SELECT ts FROM device_latest WHERE agent=? AND cvp_id=? AND device_key=?'),
       insSample: conn.prepare('INSERT OR IGNORE INTO port_sample (agent,cvp_id,device_key,port,ts,in_bps,out_bps,in_util,out_util,in_err,out_err) VALUES (?,?,?,?,?,?,?,?,?,?,?)'),
       upDaily: conn.prepare(`INSERT INTO port_daily (agent,cvp_id,device_key,port,day,samples,in_bps_sum,in_bps_n,in_bps_max,out_bps_sum,out_bps_n,out_bps_max,
           in_util_sum,in_util_n,in_util_max,out_util_sum,out_util_n,out_util_max,in_err_sum,out_err_sum,in_err_n,out_err_n)
@@ -163,43 +164,61 @@ export const sampleWorthy = (p) => !!p && p.oper === 'up' && ['inBps', 'outBps',
  * @param {{agent:string, cvpId:string, devices:object[], samples?:boolean}} a  samples=true 면 포트 지표를 원시 표본으로도 넣는다(로컬 수집).
  * @returns {Promise<{devices:number, ports:number, samples:number, duplicates:number, unavailable?:boolean}>}
  */
-export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], samples = false }) {
+/**
+ * v2.612 PERF2612-02: 장비 SAVE_TXN_DEVICES 대씩 트랜잭션을 나누고 **COMMIT 뒤** 양보한다(importSamples 와 같은 모양 — v2.611 DB2611-04).
+ *   예전에는 CVP 한 대분(1,000대 × 64포트)을 한 트랜잭션으로 써 매 주기 약 0.6초 이벤트 루프가 멈췄다. 한 장비의 포트·표본·
+ *   delPortsOld 는 같은 트랜잭션 안에 남으므로 재전송 이중 계수 방지는 그대로다.
+ */
+export const SAVE_TXN_DEVICES = 30;
+export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], samples = false, txnDevices = SAVE_TXN_DEVICES }) {
   const db = await open();
   if (!db) return { devices: 0, ports: 0, samples: 0, duplicates: 0, unavailable: true };
   const { st, conn } = db;
-  let nd = 0; let np = 0; let ns = 0; let dup = 0;
-  conn.exec('BEGIN');
-  try {
-    for (const d of devices) {
-      const ts = numOrNull(d.ts);
-      const key = txt(d.key, 128);
-      if (!key || ts == null) continue;
-      const partsAt = d.parts === undefined ? null : (numOrNull(d.partsAt) ?? ts);
-      const extra = d.partsMissingKinds || d.cvpVersion ? { partsMissingKinds: Array.isArray(d.partsMissingKinds) ? d.partsMissingKinds.slice(0, 8) : undefined } : null;
-      st.upDevice.run(agent, cvpId, key, ts, txt(d.hostname), txt(d.model), txt(d.serial), txt(d.mgmtIp, 64), txt(d.eosVersion, 64),
-        boolInt(d.streaming), txt(d.telemetry, 32), d.parts === undefined ? null : jsonOrNull(d.parts), partsAt,
-        jsonOrNull(d.bgp), Array.isArray(d.ports) ? 1 : 0, jsonOrNull(extra));
-      nd++;
-      if (Array.isArray(d.ports)) {
-        for (const p of d.ports) {
-          const name = txt(p?.name, 64);
-          if (!name) continue;
-          st.upPort.run(agent, cvpId, key, name, ts, txt(p.desc, 200), numOrNull(p.speedBps), txt(p.oper, 16), txt(p.admin, 16), txt(p.vlan, 32), txt(p.lag, 64),
-            numOrNull(p.inBps), numOrNull(p.outBps), numOrNull(p.inUtil), numOrNull(p.outUtil), numOrNull(p.inErr), numOrNull(p.outErr), ts);
-          np++;
-          if (samples && sampleWorthy(p)) {
-            const r = insertSample(st, [agent, cvpId, key, name, ts, p.inBps, p.outBps, p.inUtil, p.outUtil, p.inErr, p.outErr]);
-            if (r) ns++; else dup++;
+  let nd = 0; let np = 0; let ns = 0; let dup = 0; let stalePorts = 0;
+  const per = Math.max(1, Math.floor(Number(txnDevices)) || SAVE_TXN_DEVICES);
+  const list = Array.isArray(devices) ? devices : [];
+  for (let i = 0; i < list.length; i += per) {
+    if (i > 0) await new Promise((r) => setImmediate(r));
+    conn.exec('BEGIN');
+    try {
+      for (const d of list.slice(i, i + per)) {
+        const ts = numOrNull(d.ts);
+        const key = txt(d.key, 128);
+        if (!key || ts == null) continue;
+        // v2.612 DB2612-01: 이미 같거나 더 새 레코드가 있으면 포트 목록을 건드리지 않는다 — 늦게 온 옛 레코드의 upPort INSERT 가
+        //   그 사이 지워진 포트를 되살리고 delPortsOld 가 새 포트를 지울 수 있었다(장비 행은 upsert 의 ts 가드가 막는다).
+        const prevTs = numOrNull(st.selDevTs.get(agent, cvpId, key)?.ts);
+        const olderRecord = prevTs != null && ts <= prevTs;
+        const partsAt = d.parts === undefined ? null : (numOrNull(d.partsAt) ?? ts);
+        const extra = d.partsMissingKinds || d.cvpVersion ? { partsMissingKinds: Array.isArray(d.partsMissingKinds) ? d.partsMissingKinds.slice(0, 8) : undefined } : null;
+        st.upDevice.run(agent, cvpId, key, ts, txt(d.hostname), txt(d.model), txt(d.serial), txt(d.mgmtIp, 64), txt(d.eosVersion, 64),
+          boolInt(d.streaming), txt(d.telemetry, 32), d.parts === undefined ? null : jsonOrNull(d.parts), partsAt,
+          jsonOrNull(d.bgp), Array.isArray(d.ports) ? 1 : 0, jsonOrNull(extra));
+        nd++;
+        if (Array.isArray(d.ports)) {
+          if (olderRecord) stalePorts++;
+          for (const p of d.ports) {
+            const name = txt(p?.name, 64);
+            if (!name) continue;
+            if (!olderRecord) {
+              st.upPort.run(agent, cvpId, key, name, ts, txt(p.desc, 200), numOrNull(p.speedBps), txt(p.oper, 16), txt(p.admin, 16), txt(p.vlan, 32), txt(p.lag, 64),
+                numOrNull(p.inBps), numOrNull(p.outBps), numOrNull(p.inUtil), numOrNull(p.outUtil), numOrNull(p.inErr), numOrNull(p.outErr), ts);
+              np++;
+            }
+            if (samples && sampleWorthy(p)) {
+              const r = insertSample(st, [agent, cvpId, key, name, ts, p.inBps, p.outBps, p.inUtil, p.outUtil, p.inErr, p.outErr]);
+              if (r) ns++; else dup++;
+            }
           }
+          // 이번 목록에 없는 포트(장비에서 사라진 것)는 지운다 — 목록을 읽었을 때만, 그리고 이 레코드가 최신일 때만(DB2612-01).
+          if (!olderRecord) st.delPortsOld.run(agent, cvpId, key, ts);
         }
-        // 이번 목록에 없는 포트(장비에서 사라진 것)는 지운다 — 목록을 읽었을 때만.
-        st.delPortsOld.run(agent, cvpId, key, ts);
       }
-    }
-    conn.exec('COMMIT');
-  } catch (e) { try { conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+      conn.exec('COMMIT');
+    } catch (e) { try { conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  }
   if (nd || ns) _counts = null;
-  return { devices: nd, ports: np, samples: ns, duplicates: dup };
+  return { devices: nd, ports: np, samples: ns, duplicates: dup, ...(stalePorts ? { stalePorts } : {}) };
 }
 
 /** 원시 표본 1행 + 일 롤업(표본이 새로 들어갔을 때만 — 재전송 이중 계수 방지). 반환: 새로 넣었는가. */
@@ -301,34 +320,99 @@ export async function pruneDevices(agent, keepByCvp = {}, { cvpIds = null } = {}
 /**
  * v2.611(CEN2611-02): 같은 엣지가 대소문자만 다른 이름으로 남긴 행을 저장 키(agentKey) 하나로 모은다(프로세스당 키마다 1회).
  * 변형 이름은 작은 최신 표(device_latest·port_latest)에서 찾고, 표본·일 롤업은 인덱스 선행열(agent)로 옮긴다.
- * 충돌(같은 장비·포트·시각)은 저장 키 쪽을 남긴다(UPDATE OR IGNORE 뒤 남은 변형 행 삭제) — 중복을 두 벌로 두지 않는다.
+ *
+ * v2.612 PERF2612-01: 옮기기는 **행 청크**(ADOPT_CHUNK_ROWS)마다 트랜잭션 · COMMIT 뒤 양보다. 예전에는 표마다 UPDATE 한 문장이라
+ *   원시 표본 100만 행에 약 13초 이벤트 루프가 멈췄다(cvp-data 요청 처리 중). 그리고 **요청을 붙잡지 않는다** — 호출부
+ *   (routes/central.js 의 cvp-data)는 결과를 기다리지만 이 함수는 옮기기를 백그라운드로 시작하고 곧바로 돌아온다(키마다 한 번만 —
+ *   진행 중이면 같은 작업을 공유). 옮기는 동안 새 push 는 저장 키로 적재되고 변형 행과의 충돌은 아래 규칙이 합친다.
+ *   { wait:true } 는 끝날 때까지 기다린다(테스트·수동 정리).
+ * v2.612 RECENT2612-04: 충돌을 **버리지 않고 합친다** — 예전 UPDATE OR IGNORE 뒤 DELETE 는 같은 날 일 롤업(표본 수·합·최대)을
+ *   통째로 잃었다. 일 롤업은 upDaily 와 같은 규칙(합·표본 수는 더하고 최대는 MAX)으로 저장 키 행에 더하고, 최신 표는 ts 가 더 큰
+ *   쪽을 남긴다. 원시 표본은 (…, ts) 가 같으면 같은 측정이라 한 벌만 남긴다.
  */
+export const ADOPT_CHUNK_ROWS = 5_000;
 const _adopted = new Set();
-export async function adoptAgentVariants(agentKey) {
-  const key = String(agentKey ?? '');
-  if (!key || _adopted.has(key)) return { moved: 0, variants: [] };
-  const db = await open();
-  if (!db) return { moved: 0, variants: [], unavailable: true };
-  const lo = key.toLowerCase();
-  const found = new Set();
-  for (const t of ['device_latest', 'port_latest']) {
-    for (const r of db.conn.prepare(`SELECT DISTINCT agent AS a FROM ${t} WHERE agent <> '' AND LOWER(TRIM(agent)) = ?`).all(lo)) if (r.a !== key) found.add(r.a);
+const _adopting = new Map(); // key → Promise
+const ADOPT_PK = {
+  device_latest: ['cvp_id', 'device_key'],
+  port_latest: ['cvp_id', 'device_key', 'port'],
+  port_sample: ['cvp_id', 'device_key', 'port', 'ts'],
+  port_daily: ['cvp_id', 'device_key', 'port', 'day'],
+};
+const IN_CHUNK = 'rowid IN (SELECT value FROM json_each(?))';
+function dailyMergeSql() {
+  const mx = (c) => `${c}=NULLIF(MAX(IFNULL(port_daily.${c},-1e308), IFNULL(v.${c},-1e308)), -1e308)`;
+  const errSum = (c) => `${c}=CASE WHEN v.${c} IS NULL THEN port_daily.${c} ELSE IFNULL(port_daily.${c},0)+v.${c} END`;
+  const sums = ['in_bps', 'out_bps', 'in_util', 'out_util'].flatMap((m) => [`${m}_sum=port_daily.${m}_sum+v.${m}_sum`, `${m}_n=port_daily.${m}_n+v.${m}_n`, mx(`${m}_max`)]);
+  return `UPDATE port_daily SET samples=port_daily.samples+v.samples, ${sums.join(', ')},
+      ${errSum('in_err_sum')}, ${errSum('out_err_sum')}, in_err_n=port_daily.in_err_n+v.in_err_n, out_err_n=port_daily.out_err_n+v.out_err_n
+    FROM (SELECT * FROM port_daily WHERE ${IN_CHUNK}) AS v
+    WHERE port_daily.agent=? AND ${ADOPT_PK.port_daily.map((c) => `port_daily.${c}=v.${c}`).join(' AND ')}`;
+}
+async function adoptTable(db, t, key, variant, chunkRows) {
+  const pk = ADOPT_PK[t];
+  const sel = db.conn.prepare(`SELECT rowid AS r FROM ${t} WHERE agent=? LIMIT ?`);
+  const newerVariant = t === 'device_latest' || t === 'port_latest'
+    ? db.conn.prepare(`DELETE FROM ${t} WHERE agent=? AND EXISTS (SELECT 1 FROM ${t} v WHERE v.${IN_CHUNK} AND v.agent=? AND ${pk.map((c) => `v.${c}=${t}.${c}`).join(' AND ')} AND v.ts > ${t}.ts)`)
+    : null;
+  const mergeDaily = t === 'port_daily' ? db.conn.prepare(dailyMergeSql()) : null;
+  const move = db.conn.prepare(`UPDATE OR IGNORE ${t} SET agent=? WHERE agent=? AND ${IN_CHUNK}`);
+  const dropRest = db.conn.prepare(`DELETE FROM ${t} WHERE agent=? AND ${IN_CHUNK}`);
+  let moved = 0; let merged = 0;
+  for (;;) {
+    const ids = sel.all(variant, chunkRows).map((x) => x.r);
+    if (!ids.length) break;
+    const j = JSON.stringify(ids);
+    db.conn.exec('BEGIN');
+    try {
+      if (newerVariant) newerVariant.run(key, j, variant);          // 변형 쪽이 더 새 최신 행이면 저장 키 행을 비운다
+      if (mergeDaily) merged += Number(mergeDaily.run(j, key).changes); // 같은 날 일 롤업은 합친다
+      moved += Number(move.run(key, variant, j).changes);
+      dropRest.run(variant, j);                                        // 남은 것은 합쳤거나(일 롤업) 저장 키 쪽이 새것·같은 측정이다
+      db.conn.exec('COMMIT');
+    } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+    await new Promise((r) => setImmediate(r)); // COMMIT 뒤에만 양보(v2.611 DB2611-04)
   }
-  let moved = 0;
-  for (const v of found) {
-    for (const t of ['device_latest', 'port_latest', 'port_sample', 'port_daily']) {
-      db.conn.exec('BEGIN');
-      try {
-        moved += Number(db.conn.prepare(`UPDATE OR IGNORE ${t} SET agent=? WHERE agent=?`).run(key, v).changes);
-        db.conn.prepare(`DELETE FROM ${t} WHERE agent=?`).run(v);
-        db.conn.exec('COMMIT');
-      } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
-      await new Promise((r) => setImmediate(r));
+  return { moved, merged };
+}
+async function runAdopt(db, key, variants, chunkRows) {
+  let moved = 0; let merged = 0;
+  for (const v of variants) {
+    for (const t of Object.keys(ADOPT_PK)) {
+      const r = await adoptTable(db, t, key, v, chunkRows);
+      moved += r.moved; merged += r.merged;
     }
   }
-  _adopted.add(key);
-  if (found.size) { _counts = null; console.warn(`[cvp-db] 대소문자만 다른 엣지 이름 ${[...found].map((x) => `'${capStr(x, 64)}'`).join(', ')} 의 행을 '${capStr(key, 64)}' 로 모았습니다(${moved}행)`); }
-  return { moved, variants: [...found] };
+  _counts = null;
+  console.warn(`[cvp-db] 대소문자만 다른 엣지 이름 ${variants.map((x) => `'${capStr(x, 64)}'`).join(', ')} 의 행을 '${capStr(key, 64)}' 로 모았습니다(${moved}행 이동 · 같은 날 일 롤업 ${merged}행 합침)`);
+  return { moved, merged, variants };
+}
+export async function adoptAgentVariants(agentKey, { wait = false, chunkRows = ADOPT_CHUNK_ROWS } = {}) {
+  const key = String(agentKey ?? '');
+  if (!key || _adopted.has(key)) return { moved: 0, variants: [] };
+  let job = _adopting.get(key);
+  if (!job) {
+    const db = await open();
+    if (!db) return { moved: 0, variants: [], unavailable: true };
+    job = _adopting.get(key); // open 을 기다리는 사이 다른 호출이 시작했을 수 있다
+    if (!job) {
+      const lo = key.toLowerCase();
+      const found = new Set();
+      for (const t of ['device_latest', 'port_latest']) {
+        for (const r of db.conn.prepare(`SELECT DISTINCT agent AS a FROM ${t} WHERE agent <> '' AND LOWER(TRIM(agent)) = ?`).all(lo)) if (r.a !== key) found.add(r.a);
+      }
+      if (!found.size) { _adopted.add(key); return { moved: 0, variants: [] }; }
+      const per = Math.max(1, Math.floor(Number(chunkRows)) || ADOPT_CHUNK_ROWS);
+      job = runAdopt(db, key, [...found], per)
+        .then((r) => { _adopted.add(key); return r; })
+        .catch((e) => { console.warn(`[cvp-db] 엣지 이름 변형 행 모으기 실패('${capStr(key, 64)}') — 다음 push 때 다시 시도합니다: ${e.message}`); throw e; })
+        .finally(() => { _adopting.delete(key); });
+      job.catch(() => { /* 위에서 콘솔에 남겼다 — 백그라운드 실행의 unhandled rejection 방지 */ });
+      _adopting.set(key, job);
+    }
+  }
+  if (wait) return job;
+  return { moved: 0, variants: [], background: true };
 }
 
 /** 그 agent·cvp 의 장비 행 수(COL2611-05 prune 보류 판정용). DB 불가면 null. */
@@ -522,5 +606,5 @@ export async function dbStats() {
 export function _resetForTest() {
   try { if (_db && _db !== 'unavailable') _db.conn.close(); } catch { /* */ }
   _db = null; _opening = null; _counts = null; _pruneTick = 0; pruneFlight.reset(); lockRetry.ok();
-  _adopted.clear(); _lostUnsent = { total: 0, last: 0, at: null };
+  _adopted.clear(); _adopting.clear(); _lostUnsent = { total: 0, last: 0, at: null };
 }

@@ -76,7 +76,12 @@ async function _pull() {
           else { failed++; if (r?.reason) console.warn(`[pdu-config] 재수집 실패(${id}): ${r.reason}`); }
         } catch (e) { failed++; console.warn(`[pdu-config] 재수집 실패(${id}): ${e.message}`); }
       }
-      try { await pushPduNow(); } catch (e) { pushError = String(e?.message || e); console.warn(`[pdu-config] 재수집 push 실패: ${pushError}`); }
+      // v2.612 EDGE2612-02: pushPduNow 는 실패를 던지지 않고 {ok:false, reason} 으로 돌려준다 — 반환값도 본다
+      //   (예전에는 catch 만 있어 pushError 가 한 번도 채워지지 않았다). withheld(보류)는 실패가 아니다.
+      try {
+        const pr = await pushPduNow();
+        if (pr && pr.ok === false) { pushError = String(pr.reason || 'push 실패'); console.warn(`[pdu-config] 재수집 push 실패: ${pushError}`); }
+      } catch (e) { pushError = String(e?.message || e); console.warn(`[pdu-config] 재수집 push 실패: ${pushError}`); }
     }
 
     _last = { at: Date.now(), ok: true, devices: devices.length, applied, intervalsApplied, collected, collectRequested: wants.length, collectFailed: failed, ...(pushError ? { pushError } : {}) };

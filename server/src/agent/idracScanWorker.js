@@ -145,7 +145,7 @@ function noteFail(kind, detail) {
 
 export function getIdracScanWorkerStatus() {
   // lastPollAt: 마지막 성공 인출 · lastPollError: 마지막 실패(성공하면 null · streak 는 연속 실패 수)
-  return { name: config.agent.name, centralUrl: config.agent.centralUrl || null, pollMs: POLL_MS, last, lastPollAt: lastPollAt || null, lastPollError, progressError: _progressError };
+  return { name: config.agent.name, centralUrl: config.agent.centralUrl || null, pollMs: POLL_MS, last, lastPollAt: lastPollAt || null, lastPollError, progressError: _progressError, lastSkipBusy };
 }
 
 export function startIdracScanWorker() {

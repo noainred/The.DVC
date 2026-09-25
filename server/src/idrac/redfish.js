@@ -22,6 +22,8 @@ import { pctFromMetric } from '../bmusage/parse/idracTelemetry.js';
 import { readTextCapped } from '../util/readCapped.js';
 import { readBodyPrefix } from '../util/readPrefix.js';
 import { capStr } from '../util/capStr.js'; // v2.607 SEC2607-03
+import { trustedRedirect } from '../util/resilientFetch.js'; // v2.612 SEC2612-03
+import { ssrfBlockReason } from '../util/ssrfBlock.js'; // v2.612 SEC2612-03
 /** 라이선스 항목 문자열 상한(v2.607 SEC2607-03). */
 export const LICENSE_FIELD_MAX = 256;
 
@@ -49,6 +51,50 @@ const dispatcher = new Agent({
   connectTimeout: config.idrac.timeoutMs,
 });
 
+/**
+ * v2.612(SEC2612-03 — 재현 vcs/rfredir.mjs): BMC(iDRAC·iLO·OME) 요청의 리다이렉트는 **같은 상대만** 따른다.
+ *   fetch 기본값(`redirect:'follow'`)은 세션 POST 에 대한 307 을 따라가 `{UserName,Password}` 본문을 **다른 주소로
+ *   다시 보냈고**(127.0.0.1 로 재현), IP 리터럴 대상은 dispatcher 의 lookup 가드도 타지 않으며, `X-Auth-Token` 같은
+ *   커스텀 헤더는 교차 출처에서도 떼지 않는다. 그렇다고 `redirect:'manual'` 로 통째로 막으면 iDRAC/iLO 의 같은 출처
+ *   끝 슬래시 301/308 이 깨진다 — 그래서 **직접 따라가되**:
+ *   ① 같은 출처이거나 같은 호스트 이름의 http→https 상향(`trustedRedirect` — 엣지 리버스 프록시와 같은 판단)만 따른다.
+ *      호스트가 바뀌지 않으므로 새 SSRF 대상이 생기지 않는다(그래도 대상이 차단 대역이면 거부한다 — ssrfBlockReason 은
+ *      호스트가 원래 요청과 다를 때만 의미가 있어 그때만 본다).
+ *   ② 교차 출처는 **따라가지 않고 오류**다(본문·자격증명을 보내지 않는다).
+ *   ③ 최대 3회. 호출자의 signal(장비 시한)은 모든 hop 에 그대로 걸린다(v2.417 — 세션을 실제로 끊는다).
+ */
+const BMC_REDIRECT_MAX = 3;
+export async function bmcFetch(url, init = {}) {
+  let cur = String(url);
+  let opts = { ...init, dispatcher: init.dispatcher || dispatcher };
+  const originHost = (() => { try { return new URL(cur).hostname.toLowerCase(); } catch { return ''; } })();
+  for (let hop = 0; ; hop++) {
+    const res = await fetch(cur, { ...opts, redirect: 'manual' });
+    const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+    if (!loc) return res;
+    try { await res.body?.cancel?.(); } catch { /* 본문 없음 */ }
+    let next;
+    try { next = new URL(loc, cur).href; } catch { throw new Error(`BMC 리다이렉트 주소를 읽지 못했습니다(${res.status})`); }
+    if (!trustedRedirect(cur, next)) {
+      throw new Error(`BMC 가 다른 주소로 리다이렉트했습니다(${res.status} → ${new URL(next).host}) — 자격증명을 보내지 않고 중단합니다`);
+    }
+    if (new URL(next).hostname.toLowerCase() !== originHost) {
+      const blocked = ssrfBlockReason(next);
+      if (blocked) throw new Error(`BMC 리다이렉트 대상이 차단 대역입니다(${blocked})`);
+    }
+    if (hop + 1 > BMC_REDIRECT_MAX) throw new Error(`BMC 리다이렉트가 ${BMC_REDIRECT_MAX}회를 넘었습니다`);
+    // 303 과 'POST → 301/302' 는 표준대로 GET(본문 없음)으로 바꾼다.
+    const m = String(opts.method || 'GET').toUpperCase();
+    if (res.status === 303 || ((res.status === 301 || res.status === 302) && m !== 'GET' && m !== 'HEAD')) {
+      opts = { ...opts, method: 'GET', body: undefined };
+      if (opts.headers && typeof opts.headers === 'object' && !(opts.headers instanceof Headers)) {
+        const { 'Content-Type': _ct, ...rest } = opts.headers; opts.headers = rest;
+      }
+    }
+    cur = next;
+  }
+}
+
 const basicHeader = (username, password) => 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64');
 
 // 호스트별 '성공한 인증 방식' 캐시 — 한 iDRAC에 여러 번 GET(probe 2회, fetchPower 다수)할 때
@@ -72,7 +118,7 @@ function closeSession(v) {
   let loc = String(v.location || '');
   try { if (/^https?:\/\//i.test(loc)) { const u = new URL(loc); if (`${u.protocol}//${u.host}` !== new URL(v.base).origin) return; loc = u.pathname; } } catch { return; }
   if (!SESSION_PATH_RE.test(loc)) return;
-  fetch(`${v.base}${loc}`, { method: 'DELETE', headers: { 'X-Auth-Token': v.token }, signal: AbortSignal.timeout(10_000), dispatcher })
+  bmcFetch(`${v.base}${loc}`, { method: 'DELETE', headers: { 'X-Auth-Token': v.token }, signal: AbortSignal.timeout(10_000), dispatcher })
     .then((r) => r.body?.cancel?.()).catch(() => { /* idle 만료로 사라진다 */ });
 }
 function touchAuthCache(key, val) {
@@ -120,7 +166,7 @@ function pwFingerprint(pw) {
  * '계정 맞는데 인증실패'의 실제 원인). 응답 객체를 그대로 반환(401이면 세 방식 모두 실패).
  */
 async function rawGet(base, pathname, username, password, timeoutMs = config.idrac.timeoutMs) {
-  const doFetch = (headers, method = 'GET', path = pathname, body) => fetch(`${base}${path}`, {
+  const doFetch = (headers, method = 'GET', path = pathname, body) => bmcFetch(`${base}${path}`, {
     method,
     headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
     body,
@@ -246,7 +292,7 @@ export function nicPortSpeedMbps(p = {}) {
  */
 async function readIdracAuthMessage(base, pathname, username, password, timeoutMs) {
   try {
-    const res = await fetch(`${base}${pathname}`, {
+    const res = await bmcFetch(`${base}${pathname}`, {
       headers: { Authorization: basicHeader(username, password), Accept: 'application/json' },
       signal: AbortSignal.timeout(timeoutMs), dispatcher,
     });
@@ -368,7 +414,7 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000, { c
   // 1) Redfish service root (no auth). Identifies Redfish + Dell signature.
   let root;
   try {
-    const res = await fetch(`${base}/redfish/v1`, opt());
+    const res = await bmcFetch(`${base}/redfish/v1`, opt());
     if (!res.ok && res.status !== 401) return { ok: false, reason: `HTTP ${res.status}` };
     // v2.606(SEC2606-01): 64KB 상한. 넘으면 '응답 과대' 로 이 IP 를 건너뛴다. JSON 이 아니면 예전처럼 빈 객체.
     let text;
@@ -1034,8 +1080,14 @@ export async function fetchSensors(entry) {
          *   퍼센트가 섞이지 않게). 대소문자·공백은 무시한다.
          */
         const unitPct = /^\s*percent\s*$/i.test(String(f.ReadingUnits ?? ''));
-        const rpm = unitPct ? null : num(f.Reading ?? f.ReadingRPM);
-        const pct = unitPct ? num(f.Reading) : null;
+        /*
+         * v2.612(COL2612-08): 빈 팬 슬롯(`Status.State:"Absent"`)은 값이 아니다 — 온도(v2.611 COL2611-03)와 같은 규칙.
+         *   rpm·pct 를 싣지 않아 센서 시계열에서 빠지고(sensorStore 는 숫자 rpm 만 적재), `state:'absent'` 로 파트 장애가
+         *   '빈 슬롯' 으로 분류한다(예전엔 상태 미확인 · HPE 는 pct 0%). 레코드 자체는 남긴다(빈 슬롯도 인벤토리다).
+         */
+        const fanAbsent = String(f?.Status?.State ?? '').trim().toLowerCase() === 'absent';
+        const rpm = unitPct || fanAbsent ? null : num(f.Reading ?? f.ReadingRPM);
+        const pct = unitPct && !fanAbsent ? num(f.Reading) : null;
         /*
          * ⚠ v2.547 — 예전에는 `if (rpm == null) continue;` 였다. **멈춘 팬이 Reading 을 주지
          *   않으면 그 팬이 배열에서 통째로 사라져** 장애를 영원히 볼 수 없었다('팬 0개' 와
@@ -1044,10 +1096,11 @@ export async function fetchSensors(entry) {
          *   ⚠ 이름도 rpm 도 없는 항목만 버린다(그건 팬이라고 볼 근거가 없다).
          */
         const fname = f.Name || f.FanName || f.MemberId || '';
-        if (rpm == null && pct == null && !fname && !f.Status?.Health) continue;
+        if (rpm == null && pct == null && !fname && !f.Status?.Health && !fanAbsent) continue;
         fans.push({
           name: fname || 'Fan', rpm,
           ...(pct != null ? { pct } : {}),
+          ...(fanAbsent ? { state: 'absent' } : {}),
           // 파트 인벤토리용 식별 필드(같은 응답, 추가 HTTP 0회). 시계열(sensorStore)에는
           // 싣지 않고 폴러가 인벤토리 갱신 시에만 invCache 로 옮긴다(시계열 비대화 방지).
           model: f.Model || '', partNumber: f.PartNumber || '', manufacturer: f.Manufacturer || '',

@@ -3,6 +3,7 @@ import { fetchJson, postJson, putJson, delJson, usePolling } from '../api.js';
 import { Loading, ErrorBox, SearchBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
+import { queryKey, keepRowsOnError } from './queryKeyText.js'; // v2.612 RECENT2612-06
 
 const chipStyle = { cursor: 'pointer', padding: '5px 12px', fontSize: 12, userSelect: 'none' };
 const chipActive = { border: '1px solid var(--accent,#6366f1)', color: '#c7d2fe', background: 'rgba(99,102,241,.15)' };
@@ -424,11 +425,19 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
   const [loadErr, setLoadErr] = useState(null);
   const [opErr, setOpErr] = useState(null);
   const genRef = useRef(0);
+  // v2.612 RECENT2612-06: 목록을 받은 vCenter 필터 — 필터를 바꾼 뒤 실패하면 다른 vCenter 의 목록을 새 필터 아래 두지 않는다
+  //   (limit 만 바뀐 재조회는 같은 필터의 부분집합이라 직전 목록을 남긴다).
+  const dataKey = useRef(null);
   const load = () => {
     const gen = ++genRef.current;
+    const key = queryKey({ vcenterId: vc });
     return fetchJson(`/provision/saved?limit=${limit}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`)
-      .then((d) => { if (gen === genRef.current) { setData(d); setLoadErr(null); } })
-      .catch((e) => { if (gen === genRef.current) setLoadErr(e?.message || String(e)); });
+      .then((d) => { if (gen === genRef.current) { dataKey.current = key; setData(d); setLoadErr(null); } })
+      .catch((e) => {
+        if (gen !== genRef.current) return;
+        if (!keepRowsOnError(dataKey.current, key)) { dataKey.current = null; setData(null); }
+        setLoadErr(e?.message || String(e));
+      });
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [vc, limit, reloadKey]);
   if (!data) {

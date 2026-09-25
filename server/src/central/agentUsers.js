@@ -29,12 +29,29 @@ export const GLOBAL_AGENT = '*';
 let byAgent = Object.create(null); // agent -> { at, users: [...] }
 // ⚠ 손상 시 조용히 빈 객체로 시작하면 다음 persist()가 온전했던 배포 사용자(비밀번호 해시 포함)
 // 원본을 덮어써 영구 유실된다 — preserveCorrupt 로 보존한 뒤에만 빈 값으로 출발한다.
-try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); }
-catch (err) { preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-users.json 파싱 실패: ${err.message}`); byAgent = Object.create(null); }
+// v2.612 LEFT2612-01: 읽지 못했으면(손상 → 보존, 또는 파일 없이 손상 보존본만 있음) 그 사실을 기억한다 — /users-config 가 503 으로
+//   답해 엣지가 관리 계정(managed)을 전부 지우지 않게. 다음 저장이 성공하면 풀린다.
+let _loadError = null;
+export function registryLoadError() { return _loadError; }
+try {
+  if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(FILE, 'utf8')) || {});
+  else {
+    const base = path.basename(FILE) + '.corrupt.';
+    const hit = fs.readdirSync(path.dirname(FILE)).filter((n) => n.startsWith(base)).sort().pop();
+    if (hit) _loadError = { at: Date.now(), reason: `등록부 파일이 없고 손상 보존본(${hit})만 있습니다` };
+  }
+} catch (err) {
+  if (fs.existsSync(FILE)) {
+    preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-users.json 파싱 실패: ${err.message}`);
+    _loadError = { at: Date.now(), reason: String(err?.message || err).slice(0, 200) };
+  }
+  byAgent = Object.create(null);
+}
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(byAgent), { mode: 0o600 });
+  _loadError = null; // v2.612 LEFT2612-01
 }
 const cleanAgent = (a) => String(a || '').trim();
 
