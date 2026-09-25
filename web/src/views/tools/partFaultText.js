@@ -384,6 +384,8 @@ export function eventText(ev, labels = {}) {
   if (ev.event === 'open') return `장애 발생 — ${st(ev.state)}`;
   if (ev.event === 'change') return `상태 변화 — ${st(ev.prevState)} → ${st(ev.state)}`;
   if (ev.event === 'close') {
+    // v2.612 LEFT2612-04: 장비 식별 키가 바뀌어(HPE 서비스태그 교정 등) 새 키 행으로 옮겨진 것 — 고쳐진 것이 아니다.
+    if (ev.closeReason === 'key-migrated') return `**식별 키 변경**으로 새 행으로 옮김(부품이 고쳐졌다는 뜻이 아닙니다) — 직전 ${st(ev.prevState)}`;
     if (ev.closeReason === 'manual') return `관리자가 **수동으로 닫음**(재배정·등록 삭제 등 — 장비가 고쳐졌다는 뜻이 아닙니다) — 직전 ${st(ev.prevState)}`;
     return ev.closeReason === 'removed'
       ? `해소(부품이 **제거**됨 — 교체 중일 수 있습니다) — 직전 ${st(ev.prevState)}`

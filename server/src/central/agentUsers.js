@@ -18,6 +18,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { hashPassword } from '../auth/auth.js';
 import { agentKeyOf } from '../util/agentKey.js';
+import { capStr } from '../util/capStr.js'; // v2.612: 상주 사유 문자열은 평탄화해 자른다(v2.607 TIM2607-01)
 
 const FILE = path.join(config.configDir, 'central-agent-users.json');
 const VALID_ROLES = ['admin', 'operator', 'viewer'];
@@ -43,7 +44,7 @@ try {
 } catch (err) {
   if (fs.existsSync(FILE)) {
     preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-users.json 파싱 실패: ${err.message}`);
-    _loadError = { at: Date.now(), reason: String(err?.message || err).slice(0, 200) };
+    _loadError = { at: Date.now(), reason: capStr(String(err?.message || err), 200) };
   }
   byAgent = Object.create(null);
 }

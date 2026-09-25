@@ -93,7 +93,8 @@ export default function GpuGuestSettings() {
       setForm(toForm(settings, vcs, payload));
       setDrafts({});
       setMsg(deployAgent
-        ? `원격 엣지 [${deployAgent}]로 배포 저장됨 — 엣지가 다음 pull 주기(약 1분)에 가져가 적용합니다.`
+        // v2.612 RECENT2612-05: 배포 경로도 폐기된 비밀번호를 응답한다 — 말하지 않으면 '저장됨' 만 보인다.
+        ? [`원격 엣지 [${deployAgent}]로 배포 저장됨 — 엣지가 다음 pull 주기(약 1분)에 가져가 적용합니다.`, droppedSecretNote(r)].filter(Boolean).join(' ')
         : ['저장되었습니다. 새 설정이 다음 주기부터 적용됩니다.', droppedSecretNote(r), r.ignoredReason || ''].filter(Boolean).join(' '));
       if (deployAgent) fetchJson('/admin/gpu-guest/deploy/agents').then((rr) => setAgents(rr.agents || [])).catch(() => {});
     } catch (e) { setMsg(`오류: ${e.message}`); }

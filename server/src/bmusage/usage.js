@@ -57,6 +57,8 @@ export function buildUsage({ target = {}, idrac = null, os = null, ent = null, p
     const busy = maxOrNull((os.disks || []).map((d) => d.busyPct));
     if (busy != null) { out.disk_busy_pct = busy; srcOf.diskBusy = 'os'; }
     if (n(os.busyOutOfRange) > 0) notes.push(`디스크 ${os.busyOutOfRange}개의 I/O 사용률이 0~100 범위를 벗어나 비웠습니다(보정하지 않았습니다).`);
+    // v2.612 COL2612-01: 100% 를 넘는 NIC 사용률은 링크 속도 보고가 틀린 것이다 — 100 으로 자르지 않고 비운 사실을 말한다.
+    if (n(os.nicPctOutOfRange) > 0) notes.push(`NIC ${os.nicPctOutOfRange}개의 사용률이 100% 를 넘어(링크 속도 보고가 실제와 다를 수 있습니다) 비웠습니다(처리량은 그대로입니다).`);
     const used = maxOrNull((os.disks || []).map((d) => d.usedPct));
     if (used != null) { out.disk_used_pct = used; srcOf.diskUsed = 'os'; }
     const np = maxOrNull((os.nics || []).map((x) => x.pct));

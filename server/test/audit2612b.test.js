@@ -224,3 +224,18 @@ test('RECENT2612-04 · PERF2612-01 대소문자 변형 행을 청크로 옮기�
   assert.equal(Number(q("SELECT COUNT(*) n FROM port_sample WHERE agent='Edge-A'")[0].n), 0);
   assert.equal(Number(q("SELECT COUNT(*) n FROM device_latest WHERE agent='edge-a' AND cvp_id=?", cvpId)[0].n), 1);
 });
+
+test('RECENT2612-04 최신 표는 두 이름 중 ts 가 더 큰 행을 남긴다', async () => {
+  const db = await import('../src/cvp/db.js');
+  if (!(await db.available())) return;
+  const cvpId = 'cvp-adopt-latest';
+  const d = (key, ts, hostname) => ({ key, ts, hostname, ports: [{ name: 'p1', oper: 'up', admin: 'up' }] });
+  await db.saveDevices({ agent: 'Edge-B', cvpId, devices: [d('NEWER', T0 + 5000, 'variant-new'), d('OLDER', T0 + 1000, 'variant-old')] });
+  await db.saveDevices({ agent: 'edge-b', cvpId, devices: [d('NEWER', T0 + 1000, 'key-old'), d('OLDER', T0 + 5000, 'key-new')] });
+  await db.adoptAgentVariants('edge-b', { wait: true, chunkRows: 1 });
+  const rows = (await db.listDeviceRows({ cvpId })).rows;
+  const by = Object.fromEntries(rows.map((r) => [r.key, r]));
+  assert.equal(rows.every((r) => r.agent === 'edge-b'), true);
+  assert.equal(by.NEWER.hostname, 'variant-new');
+  assert.equal(by.OLDER.hostname, 'key-new');
+});
