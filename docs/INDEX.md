@@ -130,3 +130,86 @@
 | [../CLAUDE.md](../CLAUDE.md) | 프로젝트 공통 개발 규칙 — 운영 환경 전제·성능 메커니즘·릴리스 절차 |
 | [../server/CLAUDE.md](../server/CLAUDE.md) | 서버 보안 불변조건 — TLS·RBAC·scope·OTP 등 회귀 금지 규칙 |
 | [../pyportal/CLAUDE.md](../pyportal/CLAUDE.md) | 서비스 허브(pyportal) 불변조건 — 감사로 확립된 규칙 |
+
+## 9. 전체 문서 목록 (생성 — `scripts/arch-doc.mjs`)
+
+> 위 1~8 절은 손으로 분류한 목록이라 새 문서를 빠뜨릴 수 있습니다(v2.613 시점에 감사 보고서 17개·`CVP.md` 가
+> 빠져 있었습니다). 이 절은 `docs/*.md` 전부를 **생성**하며 CI 가 `--check` 로 최신 여부를 봅니다 — 손으로 고치지 마세요.
+
+<!-- arch-doc:docs:start -->
+| 문서 | 제목(첫 줄) |
+|---|---|
+| [2026-08-29-fable.MD](2026-08-29-fable.MD) | 소스 버그 감사 보고서 — 2026-08-29 (Fable 5) |
+| [2026-08-29-opus.MD](2026-08-29-opus.MD) | 소스 버그 감사 — 2026-08-29 (Opus) |
+| [2026-08-29-sonnet.md](2026-08-29-sonnet.md) | 2026-08-29 소스 전체 버그 감사 (Sonnet) |
+| [AIRGAP-LLM-SETUP-GUIDE.md](AIRGAP-LLM-SETUP-GUIDE.md) | 에어갭 LLM 서버 구축 가이드 — Rocky Linux 9 + NVIDIA A40(24GB vGPU) + Ollama + Qwen |
+| [API-PUBLIC.md](API-PUBLIC.md) | 공개 조회 API (`/api/v1`) — 외부 포탈 연동 가이드 |
+| [API.md](API.md) | API 레퍼런스 (전 엔드포인트) |
+| [ARCH-HEAVY-JOB-ISOLATION.md](ARCH-HEAVY-JOB-ISOLATION.md) | 대용량 작업 격리 아키텍처 — vCenter 수집 프로세스 분리 vs worker_threads |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 아키텍처 — 코드 지도와 데이터 흐름 |
+| [AUDIT-2026-06-27.md](AUDIT-2026-06-27.md) | 전체 소스 보안·버그 감사 (2026-06-27) |
+| [AUDIT-2026-08-13.md](AUDIT-2026-08-13.md) | 전체 소스 보안·버그 감사 (2026-08-13) |
+| [AUDIT-2026-08-17.md](AUDIT-2026-08-17.md) | 전체 소스 보안·취약점 감사 (2026-08-17) |
+| [AUDIT-2026-09-09.md](AUDIT-2026-09-09.md) | 전체 소스 감사 — 2026-09-09 (v2.446.0 기준) |
+| [AUDIT-2026-09-11.md](AUDIT-2026-09-11.md) | 전체 소스 감사 — 2026-09-11 (v2.477.0 기준 → v2.478.0 조치) |
+| [AUDIT-2026-09-11b.md](AUDIT-2026-09-11b.md) | 전체 소스 감사(2차) — 2026-09-11 (v2.478.0 기준 → v2.479.0 조치) |
+| [AUDIT-2026-09-11c.md](AUDIT-2026-09-11c.md) | 전체 소스 감사(3차) — 2026-09-11 (v2.479.0 기준 → v2.480.0 조치) |
+| [AUDIT-2026-09-13.md](AUDIT-2026-09-13.md) | 보안 전수 감사 — 2026-09-13 (v2.499.0 기준 → v2.500.0 조치) |
+| [AUDIT-2026-09-16.md](AUDIT-2026-09-16.md) | 보안 감사 2026-09-16 — 자격증명·비밀 추적 (v2.535) |
+| [AUDIT-2026-09-16b.md](AUDIT-2026-09-16b.md) | 보안 감사 — 인증·인가 게이트 전수 (v2.536, 2026-09-16) |
+| [AUDIT-2026-09-16c.md](AUDIT-2026-09-16c.md) | 보안 감사 — 외부 입력 → 장비 접속·명령 경로 (v2.537, 2026-09-16) |
+| [AUDIT-2026-09-16d.md](AUDIT-2026-09-16d.md) | 보안 감사 — 저장 파일 · 저장 데이터 · 외부 공격면 (v2.538, 2026-09-16) |
+| [AUDIT-2026-09-21.md](AUDIT-2026-09-21.md) | 전체 소스 감사 — 버그 · 개선 · 보안 (2026-09-21, v2.573.0 기준) |
+| [AUDIT-2026-09-22.md](AUDIT-2026-09-22.md) | 전수 감사 — 2026-09-22 (v2.576.0) |
+| [AUDIT-2026-09-22b.md](AUDIT-2026-09-22b.md) | 전수 보안·튜닝 감사 — 2026-09-22 (v2.577.0) |
+| [AUDIT-2026-09-22c.md](AUDIT-2026-09-22c.md) | v2.578 — 기간이 값을 바꾸는 이유를 화면이 말하게 (2026-09-22) |
+| [AUDIT-2026-09-23.md](AUDIT-2026-09-23.md) | v2.579 — 아키텍처 점검·버그 수정·튜닝 (2026-09-23) |
+| [AUDIT-2026-09-23b.md](AUDIT-2026-09-23b.md) | v2.580 — 아키텍처 점검·버그 수정·튜닝 2차 (2026-09-23) |
+| [AUDIT-2026-09-23c.md](AUDIT-2026-09-23c.md) | v2.581 — 아키텍처 점검·버그 수정·튜닝 3차 (2026-09-23) |
+| [AUDIT-2026-09-23d.md](AUDIT-2026-09-23d.md) | v2.582 — 아키텍처 점검·버그 수정·튜닝 4차 (2026-09-23) |
+| [AUDIT-2026-09-24.md](AUDIT-2026-09-24.md) | 4차 점검 — 7축 병렬 감사 (v2.593, 2026-09-24) |
+| [AUDIT-2026-09-24b.md](AUDIT-2026-09-24b.md) | 5차 점검 — 7축 병렬 감사 (v2.594, 2026-09-24) |
+| [AUDIT-2026-09-24c.md](AUDIT-2026-09-24c.md) | 6차 점검 — 7축 병렬 감사 (v2.595, 2026-09-24) |
+| [AUDIT-2026-09-24d.md](AUDIT-2026-09-24d.md) | 7차 점검 — 7축 병렬 감사 (v2.596, 2026-09-24) |
+| [AUDIT-2026-09-24e.md](AUDIT-2026-09-24e.md) | 8차 점검 — 7축 병렬 감사 (v2.597, 2026-09-24) |
+| [AUDIT-2026-09-24f.md](AUDIT-2026-09-24f.md) | 9차 점검 — 10축 병렬 감사 + 발견별 2인 반증 (v2.598, 2026-09-24) |
+| [AUDIT-2026-09-24g.md](AUDIT-2026-09-24g.md) | 10차 점검 — 10축 병렬 감사 + 발견별 2인 반증 (v2.599, 2026-09-24) |
+| [AUDIT-2026-09-24h.md](AUDIT-2026-09-24h.md) | 11차 점검 — 10축 병렬 감사 + 발견별 2인 반증 (v2.600, 2026-09-24) |
+| [AUDIT-2026-09-24i.md](AUDIT-2026-09-24i.md) | 12차 점검 — 10축 병렬 감사 + 발견별 2인 반증 (v2.601, 2026-09-24) |
+| [AUDIT-2026-09-24j.md](AUDIT-2026-09-24j.md) | 13차 점검 — 10축 병렬 감사 + 발견별 2인 반증 (v2.602, 2026-09-24) |
+| [AUDIT-2026-09-24k.md](AUDIT-2026-09-24k.md) | 14차 점검 — 10축 병렬 감사 + 발견별 2인 반증 (v2.603, 2026-09-24) |
+| [AUDIT-2026-09-24l.md](AUDIT-2026-09-24l.md) | 15차 점검 — 10축 병렬 감사 + 발견별 2인 반증 (v2.604, 2026-09-24) |
+| [AUDIT-2026-09-24m.md](AUDIT-2026-09-24m.md) | 16차 점검 — 10축 병렬 감사 + 발견별 2인 반증 (v2.605, 2026-09-24) |
+| [AUDIT-2026-09-24n.md](AUDIT-2026-09-24n.md) | 17차 점검 — 10축 병렬 감사 + 발견별 2인 반증 (v2.606, 2026-09-24) |
+| [AUDIT-2026-09-24o.md](AUDIT-2026-09-24o.md) | 18차 점검 — 10축 병렬 감사 + 발견별 2인 반증 (v2.607, 2026-09-24) |
+| [AUDIT-2026-09-25.md](AUDIT-2026-09-25.md) | 19차 점검 (v2.611) — 2026-09-25 |
+| [AUDIT-2026-09-25b.md](AUDIT-2026-09-25b.md) | 20차 점검 (v2.612) — 2026-09-25 |
+| [CAPACITY-ADVISOR.md](CAPACITY-ADVISOR.md) | 리소스 적정성 진단 (Capacity Advisor) |
+| [CONFIG-FILES.md](CONFIG-FILES.md) | 설정·데이터 파일 레퍼런스 (자동 생성) |
+| [CVP.md](CVP.md) | Arista CloudVision(CVP) 네트워크 스위치 수집 (v2.608) |
+| [DEVICE-BULK-IMPORT.md](DEVICE-BULK-IMPORT.md) | 장비 대량 등록(CSV · 자유텍스트) — SAN 스위치 / 스토리지 / Horizon |
+| [EDGE-COLLECTOR-MERGE.md](EDGE-COLLECTOR-MERGE.md) | 이전 절차서 — 별도 수집서버(원격)를 엣지 노드 포탈로 통합 |
+| [EDGE-SETUP.md](EDGE-SETUP.md) | 엣지(Edge) 설정 방법 |
+| [ENV.md](ENV.md) | 환경변수 레퍼런스 (자동 생성) |
+| [GUIDE-ADMIN.md](GUIDE-ADMIN.md) | 관리자 가이드 — 설치·구성·보안 운영 |
+| [GUIDE-BEGINNER.md](GUIDE-BEGINNER.md) | 처음 사용자 가이드 — VMware Global Monitoring Portal |
+| [GUIDE-INTERMEDIATE.md](GUIDE-INTERMEDIATE.md) | 중급 사용자 가이드 — 운영 실무 기능 활용 |
+| [HOST-ACCESS.md](HOST-ACCESS.md) | 호스트 접근 제어 (설정 › Security › 호스트 접근 제어, v2.485) |
+| [HUB-PASSWORD-RECOVERY.md](HUB-PASSWORD-RECOVERY.md) | 비밀번호 분실·잠금 복구 (관리자 비밀번호 초기화) |
+| [INDEX.md](INDEX.md) | 문서 목차 (INDEX) |
+| [INSTALL.md](INSTALL.md) | 설치 가이드 (The Davinci Virtual Platform) |
+| [MAINTENANCE-PAGE.md](MAINTENANCE-PAGE.md) | 업데이트·재시작 안내 페이지 (다운타임 안내) |
+| [NETWORK-COMMS-FIREWALL.md](NETWORK-COMMS-FIREWALL.md) | 네트워크 통신 · 방화벽 오픈 가이드 (The DVC Portal) |
+| [PERF-AUDIT-2026-09-13.md](PERF-AUDIT-2026-09-13.md) | 성능·보안 전수조사 (2026-09-13, v2.503.0) |
+| [RELEASES.md](RELEASES.md) | 릴리스/다운로드 — GitHub Releases 가이드 |
+| [REVIEW-2026-09-07.md](REVIEW-2026-09-07.md) | 전체 소스 리뷰 (2026-09-07, v2.409 ~ v2.415 신규 모듈 중심) — 결과와 남은 개선 포인트 |
+| [SERVICE-HUB.md](SERVICE-HUB.md) | 글로벌 데이터센터 서비스 허브 (pyportal) — 운영 가이드 |
+| [SETTINGS.md](SETTINGS.md) | 설정 화면 안내 — 모든 탭·모든 설정 (v2.583) |
+| [SVCMON-ARCHITECTURE.md](SVCMON-ARCHITECTURE.md) | 성능점검 — 아키텍처 / 용량 산정 / 튜닝 |
+| [SVCMON-BULK.md](SVCMON-BULK.md) | 성능점검 — 가져오기 / 내보내기 · 대량 자동등록 |
+| [SVCMON-TESTS.md](SVCMON-TESTS.md) | 성능점검 — 테스트 유형 상세 |
+| [WORKLOG-2026-07-31.md](WORKLOG-2026-07-31.md) | 작업 기록 — VMware Global Monitoring Portal (The.DVC) |
+| [WORKLOG-2026-08-01.md](WORKLOG-2026-08-01.md) | 작업 기록 — 권한 세분화 · 로그인 테마 · 계정 정책 · 보안 감사 (2026-08-01) |
+
+`docs/*.md` 71개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
+<!-- arch-doc:docs:end -->

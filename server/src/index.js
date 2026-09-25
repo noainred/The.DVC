@@ -348,6 +348,12 @@ app.use('/api/central/link-check', BIG_JSON);
 app.use('/api/central/ip-scan-result', BIG_JSON);
 // 형제 — iDRAC 스캔 결과도 같은 이유(대역이 넓으면 발견 호스트가 수천 건).
 app.use('/api/central/idrac-scan-result', BIG_JSON);
+// v2.613 DEPS2613-07·08: 본문이 함대 규모에 비례하는 두 경로 — GPU 게스트(호스트+VM+진단 vCenter 당 200건)와 베어메탈 함대
+//   (등록 서버 수 비례 — 이 현장 1,135대). 엣지가 gzip 으로 보내도 express.json 의 limit 은 **해제 후 길이**라 함께 올린다.
+app.use('/api/central/gpu-guest-data', BIG_JSON);
+app.use('/api/central/fleet', BIG_JSON);
+// v2.613 CONTRACT2613-08(반증): `/api/central/capacity-report`(rows ≤64 — 중앙이 잘라 받는다)·`/api/central/result`(스캔 found[] 뿐,
+//   unreachable·notIdrac 은 개수)는 **작아서 등록하지 않음** — 다음 감사가 같은 후보를 다시 세지 않게 적어 둔다.
 // 대상 가져오기는 XLSX 를 base64 로 실을 수 있어(2,000행 규모 ~1MB 초과 가능) 큰 한도를 준다.
 // 로그 분석 붙여넣기(v2.583) — 폐쇄망 현장이 다른 서버의 journalctl 출력을 붙여넣는다(라우트가 8MB 상한을 다시 건다).
 app.use('/api/admin/log-analysis/paste', BIG_JSON);
@@ -526,7 +532,14 @@ const stagger = [
   startLinkCheckPoller,
   startLinkCheckWorker,
 ];
-stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * 1500).unref?.());
+/*
+ * v2.613 RUNTIME2613-06: 간격 1.5초 × 74개 = 마지막 폴러가 부팅 110초 뒤에 켜지고, 그 위에 각 모듈의 firstDelayMs(45~90초)가
+ *   더해져 꼬리 기능(bmusage·파트 장애·통신 점검)의 첫 실행이 2.5~3.5분이었다. 목록이 늘수록 선형으로 밀리는 구조라
+ *   간격을 **총량으로** 정한다 — `min(1500, floor(60000 / N))` 이면 마지막 기동이 항상 60초 안이다(74개면 810ms).
+ *   CPU 평탄화(스태거의 본래 목적)는 그대로다. firstDelayMs 는 각 모듈의 것이라 손대지 않는다.
+ */
+const STAGGER_STEP_MS = Math.min(1500, Math.floor(60_000 / Math.max(1, stagger.length)));
+stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * STAGGER_STEP_MS).unref?.());
 
 const server = app.listen(config.port, () => {
   console.log(`\n  VMware Global Monitoring Portal — API`);

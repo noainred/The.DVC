@@ -118,7 +118,8 @@ export function saveEdgePdu(agent, snapshots) {
     narrowed += n;
     return { ...s, agent: String(agent) };   // 표시용으로 실제 인증된 이름을 박아 둔다
   });
-  load().set(key, { agent: String(agent), at: Date.now(), snapshots: list });
+  const prevRec = load().get(key);
+  load().set(key, { agent: String(agent), at: Date.now(), snapshots: list, ...(prevRec?.status ? { status: prevRec.status } : {}) }); // v2.613 EDGE2613-04: 마지막 상태 보고는 보존
   persist();
   for (const sn of list) if (sn?.id) ackCollect(sn.id, Number(sn.collectedAt) || null); // v2.590 P16: '지금 수집' 완료 확인
   return { ok: true, count: list.length, dropped, coerced, ...(narrowed ? { narrowed } : {}), ...(adm.evicted ? { evicted: adm.evicted } : {}) };
@@ -135,11 +136,29 @@ export function edgePduSnapshots() {
   return out;
 }
 
-/** 엣지별 보고 상태(진단 화면 — '언제 마지막으로 올라왔나'). */
+/**
+ * v2.613(감사 EDGE2613-04): 엣지의 상태 전용 보고(`statusOnly:true`) — 스냅샷 목록(`snapshots`·`at`)은 그대로 두고 `status` 만 기록한다
+ * (storageEdge.saveEdgeStorageStatus 와 같은 규약). 아는 키만(reason·registered·missing·at) 담고 문자열을 자른다. 반환: 기록했는지.
+ */
+export function saveEdgePduStatus(agent, status) {
+  const key = String(agent || '').trim().toLowerCase();
+  if (!key) return false;
+  const src = isPlainObj(status) ? status : {};
+  const rec = load().get(key) || { agent: String(agent), at: 0, snapshots: [] };
+  const registered = Number(src.registered); const missing = Number(src.missing);
+  rec.status = { reason: capStr(src.reason, 64) || 'unknown', registered: Number.isFinite(registered) ? registered : null,
+    missing: Number.isFinite(missing) && missing > 0 ? missing : 0, at: Date.now() };
+  if (!load().has(key) && !admitAgent(load(), key).ok) return false; // 상태 보고도 엣지 수 상한을 따른다(v2.599)
+  load().set(key, rec);
+  persist();
+  return true;
+}
+
+/** 엣지별 보고 상태(진단 화면 — '언제 마지막으로 올라왔나'). v2.613 EDGE2613-04: 마지막 상태 전용 보고(`status`)도 싣는다. */
 export function edgePduStatus() {
   const cut = Date.now() - TTL_MS;
   return [...load().values()].map((e) => ({
-    agent: e.agent, at: e.at, devices: (e.snapshots || []).length, stale: (e.at || 0) < cut,
+    agent: e.agent, at: e.at, devices: (e.snapshots || []).length, stale: (e.at || 0) < cut, status: e.status || null,
   }));
 }
 

@@ -30,6 +30,8 @@ import { scopeFilePaths } from '../../auth/scopeStatus.js';   // v2.598 AUTHZ-25
 import { config } from '../../config.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { fleetPartialsSummary } from '../../central/fleet.js'; // v2.607 LEFT2607-02
+import { poolSettled } from '../../util/pool.js'; // v2.613 RUNTIME2613-03(a)
+import { reqTimeoutMs } from '../../agent/envTimeout.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -129,6 +131,13 @@ export function scopeHostsUnread(h, allowed) {
     withholdMaxMs: h.withholdMaxMs ?? null, scoped: true,
   };
 }
+
+// v2.613 RUNTIME2613-03(a): 엣지 인출 풀 상수(모듈 최상위 — export 를 등록 함수 안에 두면 SyntaxError, v2.593 교훈).
+export const EDGE_PULL_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.BMUSAGE_PULL_CONCURRENCY) || 4));
+// 시한 env 는 [1초, 10분] 정규화(v2.605 TIM2605-04 규약 — agent/envTimeout.js). 예산 상한 150초 < 웹 시한 180초.
+export const EDGE_PULL_BUDGET_MS = reqTimeoutMs(process.env.BMUSAGE_PULL_BUDGET_MS, 150_000, { min: 20_000, max: 150_000 });
+// 엣지 1곳 최악 = 요청 시한 × (1 + 재시도 1). ⚠ 시한 env 는 `central/bmUsageEdgePull.js:25` 와 같은 이름을 읽는다(그쪽이 export 하지 않는다 — 두 곳).
+export const EDGE_PULL_WORST_MS = 2 * reqTimeoutMs(process.env.BMUSAGE_PULL_TIMEOUT_MS, 20_000, { min: 5_000 });
 
 export function registerBmUsage(api) {
 
@@ -421,6 +430,12 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
  * writeRole + 감사. ⚠ 연타 방지는 엣지당 한 번에 하나(중앙 인메모리 플래그).
  */
 const _pulling = new Set();
+/*
+ * v2.613 RUNTIME2613-03(a): 엣지 인출은 순차 for 였고 총 예산이 없었다 — 최악 40곳 × (20초 × 재시도 1) 은 웹 시한
+ *   (`api.js MUT_TIMEOUT_MS` 180초)을 넘긴다(웹은 한 번에 한 엣지만 보내지만 API 직접 호출은 40곳까지 받는다).
+ *   `poolSettled`(동시 4) + 총 예산 — 남은 예산이 한 엣지의 최악 시간보다 적으면 시작하지 않고 `budget` 으로 밝힌다.
+ *   ⚠ 예산은 웹 시한보다 작아야 한다(같거나 크면 화면이 먼저 끊긴다).
+ */
 api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) => {
   // ⚠ 엣지 목록·보관분에는 다른 법인 서버가 섞여 있다 — 당기는 동작은 **전체 범위 계정만**.
   if (scopedVcenterIds(req.user, store.get())) {
@@ -430,19 +445,26 @@ api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) =>
   if (!agents.length) return res.status(400).json({ ok: false, reason: '가져올 엣지 이름이 필요합니다.' });
   try {
     const { pullBmUsage } = await import('../../central/bmUsageEdgePull.js');
-    const results = [];
-    for (const a of agents) {
-      if (_pulling.has(a.toLowerCase())) { results.push({ agent: a, ok: false, kind: 'busy', reason: '이 엣지에서 이미 가져오는 중입니다.' }); continue; }
+    const deadline = Date.now() + EDGE_PULL_BUDGET_MS;
+    let budgetExceeded = 0;
+    const settled = await poolSettled(agents, EDGE_PULL_CONCURRENCY, async (a) => {
+      if (_pulling.has(a.toLowerCase())) return { agent: a, ok: false, kind: 'busy', reason: '이 엣지에서 이미 가져오는 중입니다.' };
+      if (Date.now() + EDGE_PULL_WORST_MS > deadline) {
+        budgetExceeded += 1;
+        return { agent: a, ok: false, kind: 'budget', reason: '인출 시간 예산을 넘겨 이번에는 시도하지 않았습니다 — 다시 누르면 이어서 가져옵니다.' };
+      }
       _pulling.add(a.toLowerCase());
-      try { results.push({ agent: a, ...(await pullBmUsage(a, { limit: Number(req.body?.limit) || 0 })) }); }
+      try { return { agent: a, ...(await pullBmUsage(a, { limit: Number(req.body?.limit) || 0 })) }; }
       finally { _pulling.delete(a.toLowerCase()); }
-    }
+    });
+    // 입력 순서 보존(poolSettled) — 예전 순차 for 와 같은 순서로 응답한다.
+    const results = settled.map((x, i) => (x.status === 'fulfilled' ? x.value : { agent: agents[i], ok: false, kind: 'error', reason: String(x.reason?.message || x.reason).slice(0, 300) }));
     logAudit({
       user: req.user?.username, action: 'bm-usage.edge-pull', ip: req.ip || '',
       detail: JSON.stringify({ agents: agents.length, ok: results.filter((r) => r.ok).length }).slice(0, 300),
     });
     // ⚠ 응답에 `rec.snap` 을 담지 않는다(수 백 KB) — 화면은 `/edges` 로 다시 읽는다.
-    res.json({ ok: true, results: results.map(({ agent, ok, kind, reason, ms }) => ({ agent, ok, kind, reason, ms })) });
+    res.json({ ok: true, results: results.map(({ agent, ok, kind, reason, ms }) => ({ agent, ok, kind, reason, ms })), budgetExceeded });
   } catch (e) {
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
   }

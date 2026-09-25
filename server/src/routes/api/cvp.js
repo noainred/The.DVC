@@ -19,7 +19,8 @@ import { cvpPollerStatus, pollCvpOnce, isPollerBusy, testServerConnection } from
 import { getStatus, dropStatus } from '../../cvp/store.js';
 import * as cdb from '../../cvp/db.js';
 import { partsSummary, bgpSummary } from '../../cvp/parse.js';
-import { edgeCvpStatuses, edgeCvpSummary } from '../../central/cvpEdge.js';
+import { edgeCvpStatuses, edgeCvpSummary, edgeVersionOf, classifyCvpEdge, MIN_CVP_EDGE_VERSION } from '../../central/cvpEdge.js';
+import { allCollectorStatus } from '../../collector/state.js'; // v2.613 CONTRACT2613-04: 엣지 버전 게이트
 import { requestCvpCollect, hasPendingCvpRequest, recentCvpCollectDrops } from '../../cvp/collectRequests.js';
 import { secretProvided } from '../../util/secretCarry.js';
 import { capStr } from '../../util/capStr.js';
@@ -32,6 +33,9 @@ const toolsPerm = requirePerm('tools');
 const fullScopeOnly = fullScopeOnlyWith('CVP 네트워크 스위치는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 const DEVICE_LIST_MAX = 5000;
 
+/** 중앙 프로세스 기동 시각(silent 판정의 기준 — 보관분은 파일이라 재시작을 넘어 남지만 '기다렸다' 의 기준은 이번 기동이다). */
+const CENTRAL_STARTED_AT = Date.now() - Math.round(process.uptime() * 1000);
+
 /** 그 CVP 의 최근 수집 상태 — 중앙 직접이면 이 노드의 스토어, 엣지 위임이면 그 엣지의 보고. */
 function statusOf(srv) {
   if (!String(srv.agent || '').trim()) {
@@ -41,7 +45,12 @@ function statusOf(srv) {
   // v2.611(CEN2611-02): 대소문자만 다른 보관분이 여럿이면(구버전 중앙이 남긴 것) **가장 최근에 push 한 것** — 삽입 순서로 고르면
   //   옛 정상 행이 현재 오류를 가렸다(재현).
   const st = pickEdgeStatus(edgeCvpStatuses(), srv);
-  return st ? { ...pickStatus(st), source: 'edge', pushedAt: st.pushedAt ?? null } : { pending: true, ok: null, source: 'edge', note: `엣지(${srv.agent})의 보고가 아직 없습니다` };
+  if (st) return { ...pickStatus(st), source: 'edge', pushedAt: st.pushedAt ?? null };
+  // v2.613(CONTRACT2613-04): 보고가 없는 이유를 나눈다 — 구버전(업그레이드) / 버전 미상(수집 서버 연결) / silent(엣지 로그) / 첫 보고 대기.
+  //   예전에는 전부 '보고가 아직 없습니다'(= 기다리면 된다)였다. 문장은 웹 `cvpText.serverState` 가 kind 로 만든다.
+  const edgeVersion = edgeVersionOf(srv.agent, allCollectorStatus());
+  const kind = classifyCvpEdge({ edgeVersion, sinceMs: CENTRAL_STARTED_AT, intervalMs: loadSettings().intervalMs });
+  return { pending: true, ok: null, source: 'edge', kind, edgeVersion, minEdgeVersion: MIN_CVP_EDGE_VERSION, note: `엣지(${srv.agent})의 보고가 아직 없습니다` };
 }
 /** 엣지 보고 중 그 CVP·담당(대소문자 무시)에 맞는 것 — 여럿이면 pushedAt 이 가장 늦은 것(순수 — 테스트 고정). */
 export function pickEdgeStatus(list, srv) {

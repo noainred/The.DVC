@@ -16,9 +16,10 @@ const Vms = lazy(() => import('./views/Vms.jsx'));
 const Datastores = lazy(() => import('./views/Datastores.jsx'));
 const Networks = lazy(() => import('./views/Networks.jsx'));
 const Alarms = lazy(() => import('./views/Alarms.jsx'));
-// IP관리(구 '센터별 IP 관리대장', v2.274 특수 기능에서 승격) — 화면 코드는 SpecialTools.jsx 안에
-// 있어(Ipam 본체가 그 파일의 헬퍼들과 얽힘) 단독 래퍼(IpamStandalone)만 named import 한다.
-const Ipam = lazy(() => import('./views/SpecialTools.jsx').then((m) => ({ default: m.IpamStandalone })));
+// IP관리(구 '센터별 IP 관리대장', v2.274 특수 기능에서 승격) — 단독 래퍼(IpamStandalone)는 IpamCore.jsx 가 소유한다.
+// v2.613 WEB2613-08: 예전에는 SpecialTools.jsx(허브 모듈 전체, gz 40KB)를 경유해 lazy 했다 — 허브를 열면 IPAM 3화면이,
+//   IPAM 을 열면 허브가 함께 내려왔다(v2.282 분리 이후 "헬퍼들과 얽힘" 근거는 낡은 것). 도구 파일을 직접 lazy 한다.
+const Ipam = lazy(() => import('./views/tools/IpamCore.jsx').then((m) => ({ default: m.IpamStandalone })));
 const VCenters = lazy(() => import('./views/VCenters.jsx'));
 const Summary = lazy(() => import('./views/Summary.jsx'));
 const Upgrade = lazy(() => import('./views/Upgrade.jsx'));

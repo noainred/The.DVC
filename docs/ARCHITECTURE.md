@@ -67,36 +67,81 @@
 | `store.js` | **vCenter 인벤토리 메모리 스냅샷** + 폴링 루프. 조회 API 는 거의 전부 이것을 읽습니다 |
 | `audit.js` `alerts.js` `logbuffer.js` | 감사 로그 · 알림 발송 · 콘솔 링버퍼(1,000줄 — `addLogTap` 으로 줄을 받아 가는 구독자가 있다: `loganalysis/live.js`) |
 
-### 3-2. 도메인 모듈 (줄 수 순)
+### 3-2. 도메인 모듈 (생성 — `scripts/arch-doc.mjs`)
 
-| 디렉터리 | 줄 | 무엇 |
-|---|---:|---|
-| `routes/` | 18,116 | HTTP 표면 전부. 하위 `api/`·`admin/`·`svcmon/` 로 나뉩니다 |
-| `storage/` | 6,004 | 스토리지 어레이 수집(Unity·PowerStore·PowerMax·Isilon·VPLEX) + 용량 이력·증가량 |
-| `svcmon/` | 5,243 | 서비스 모니터링(HostMonitor 식 점검 15종) |
-| `sanswitch/` | 5,190 | Brocade FOS SAN 스위치 — 포트·조닝·월간 점검·포트 사용량 |
-| `idrac/` | 4,901 | Dell iDRAC/OME — 전력·온도·인벤토리·스캔 |
-| `central/` | 4,294 | **중앙 쪽** 엣지 수신·잡 큐·토큰 관리 |
-| `agent/` | 3,815 | **엣지 쪽** push 워커·설정 pull(각각 별도 파일) |
-| `vcenter/` | 3,238 | vCenter SOAP/REST 클라이언트 · 성능 카운터 · 고아 VMDK 스캔 |
-| `bmusage/` | 3,080 | 베어메탈 사용률(OS SSH + iDRAC 텔레메트리) |
-| `util/` | 3,067 | 공용 — 원자적 쓰기 · SSRF 가드 · 압축 · 대량 등록 코어 · `numOrNull` |
-| `insights/` | 2,809 | FinOps·이상탐지·예측·토폴로지·ChatOps |
-| `ipam/` | 2,598 | IP 대장(외부 프로그램이 공유하는 `ipam.db`) |
-| `security/` | 2,431 | 비밀 봉인(secretVault) · 인증서 감시 · 로그인 잠금 |
-| `linkcheck/` | 2,387 | 통신 점검(중앙↔엣지·vCenter) + 설정 전수 점검 |
-| `rma/` | 2,275 | 원격 명령 에이전트(프리셋 argv 실행) |
-| `auth/` | 2,211 | 인증·RBAC·기능 권한·vCenter scope |
-| `partfault/` | 2,096 | 물리 부품 장애 — 전이만 기록 |
-| `tools/` | 2,003 | 리포트·분석(고아 VMDK·적정성·낭비) |
-| `publicapi/` | — | **외부 공개 API**(v2.562) — 키·허용목록·인증·OpenAPI |
+> 이 표는 **생성물**입니다(v2.613). `node scripts/arch-doc.mjs` 가 `server/src` 의 디렉터리를 전부 훑어 만들고
+> CI 가 `--check` 로 최신 여부를 봅니다 — 손으로 고치지 마세요(다음 실행에 덮입니다). 예전 손 목록은 v2.583 이후
+> 새 디렉터리 42개(`commmap`·`dataflow`·`devflow`·`cvp`·`portalcheck` …)를 싣지 못했습니다.
 
-나머지: `curuser`(현재 사용자) · `proxy`(SSH/RDP 중계) · `horizon` · `pdu` · `gpu` ·
-`vmtrack`(수량 추이) · `vmseries`(20초 스파이크) · `upgrade` · `portalcheck`(포탈 점검 — 토큰 점검 · 인벤토리 점검) ·
-`metrics`(시계열) · `collector`(엣지 등록부·puller) · `bmstor` · `backup` · `dirusage` ·
-`net`(캡처) · `relaytopo`·`relaycheck`(HAProxy) · `guestdisk` · `capacity`(자체 적정성) ·
-`edgelog` · `hostaccess` · `intro` · `mock`(데모 생성기) ·
-`perf`(요청 지연·루프 정체·hang 기록 · 요청 ID) · `loganalysis`(로그 분석 — 개선점 도출, v2.583).
+<!-- arch-doc:modules:start -->
+| 디렉터리 | 파일 | 줄 | 대표 파일(밖에서 import 수) | 머리말 첫 줄 |
+|---|---:|---:|---|---|
+| `agent/` | 40 | 5,048 | `agent/envTimeout.js` (19) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
+| `auth/` | 10 | 2,853 | `auth/scope.js` (39) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
+| `backup/` | 3 | 498 | `backup/settings.js` (3) | 백업 설정 + 스케줄러 + 변경 감시. |
+| `bmstor/` | 6 | 843 | `bmstor/poller.js` (4) | bmstor/poller.js — 베어메탈 스토리지 주기 수집(v2.340). |
+| `bmusage/` | 18 | 3,474 | `bmusage/poller.js` (3) | bmusage/poller.js — 베어메탈 사용률 주기 수집(v2.550). |
+| `capacity/` | 4 | 767 | `capacity/sampler.js` (4) | Capacity Advisor 샘플러 — 운영 중인 포탈 프로세스 안에서 30초마다 자기 호스트를 실측한다 |
+| `central/` | 38 | 6,385 | `central/inventory.js` (10) | 사이트 위임 수집 — 중앙(OC2) 측 인벤토리 캐시. |
+| `collector/` | 9 | 1,336 | `collector/registry.js` (58) | Collector registry — the list of remote collector agents (one per datacenter) |
+| `commmap/` | 1 | 353 | `commmap/build.js` (2) | commmap/build.js — 통신 지도(중앙 ↔ 엣지 통신 시각화)의 **순수 조립 모듈**(v2.584). |
+| `curuser/` | 12 | 1,814 | `curuser/settings.js` (4) | curuser/settings.js — '현재 사용자' 수집 설정(v2.520). |
+| `cvp/` | 10 | 2,305 | `cvp/poller.js` (4) | cvp/poller.js — CloudVision(CVP) 주기 수집(v2.608). |
+| `datacenter/` | 1 | 192 | `datacenter/store.js` (15) | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. |
+| `dataflow/` | 1 | 299 | `dataflow/build.js` (2) | dataflow/build.js — '데이터 흐름 지도' 의 판정(v2.587, 순수 함수). |
+| `devflow/` | 1 | 204 | `devflow/build.js` (1) | devflow/build.js — 특수기능 '3단 지도(장비 → 엣지 → 메인)' 조립기(v2.588, 순수). |
+| `dirusage/` | 5 | 892 | `dirusage/scheduler.js` (3) | dirusage/scheduler.js — 폴더 사용량 스캔 주기 실행 + 메일 발송 (v2.454). |
+| `edgelog/` | 3 | 368 | `edgelog/collect.js` (3) | edgelog/collect.js — **이 노드의** 로그 + 진행상태를 한 봉투로 모은다(v2.549). |
+| `gpu/` | 8 | 1,649 | `gpu/guestops.js` (8) | VMware Tools 게스트 작업으로 게스트 OS 안에서 nvidia-smi를 실행해 GPU 사용률을 |
+| `guest/` | 1 | 51 | `guest/accountService.js` (1) | 게스트 계정 추가 오케스트레이션 — vCenter에 로그인해 선택된 VM들의 게스트 OS에 sudo 계정을 |
+| `guestdisk/` | 5 | 953 | `guestdisk/poller.js` (3) | guestdisk/poller.js — 게스트 디스크 회수 리포트 주기 수집(v2.459). |
+| `health/` | 2 | 389 | `health/network.js` (1) | 글로벌 네트워크 점검 — 전세계 제어플레인 엔드포인트(vCenter·NSX 매니저)의 중앙에서의 |
+| `horizon/` | 8 | 1,477 | `horizon/horizon.js` (3) | Horizon Connection Server 연동 — 라이선스 만료일 확인 전용(가벼운 통합). |
+| `hostaccess/` | 4 | 485 | `hostaccess/service.js` (2) | hostaccess/service.js — 호스트 접근 제어 실행 계층(v2.485): 상태 조회 · 계획 · 적용(런타임) · 확정 · 되돌림. |
+| `idrac/` | 29 | 5,951 | `idrac/registry.js` (15) | iDRAC registry — the managed list of Dell servers whose power draw we collect |
+| `insights/` | 19 | 3,033 | `insights/analysisServers.js` (4) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
+| `intro/` | 5 | 1,967 | `intro/support.js` (0) | GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`. |
+| `inventory/` | 4 | 472 | `inventory/osScanner.js` (3) | 실제 OS 인벤토리 스캐너 — 주기적으로 'DB에 없는(또는 오래된) VM'을 찾아 게스트에서 실제 OS를 읽어 저장. |
+| `ipam/` | 18 | 2,808 | `ipam/scanStore.js` (5) | IP 스캔 설정(에이전트별) + 결과 저장소. |
+| `linkcheck/` | 12 | 2,545 | `linkcheck/links.js` (4) | linkcheck/links.js — **설정에서 통신 링크를 자동으로 뽑는다**(순수, v2.552). |
+| `llm/` | 5 | 546 | `llm/config.js` (2) | Local LLM (Ollama) settings for natural-language search. Stored in |
+| `loganalysis/` | 8 | 2,018 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › Log › 로그 분석 파사드(v2.583). |
+| `logs/` | 3 | 485 | `logs/db.js` (7) | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 |
+| `mail/` | 3 | 416 | `mail/service.js` (3) | mail/service.js — 포탈 공용 메일 발송 진입점 (v2.454). |
+| `metrics/` | 6 | 1,156 | `metrics/db.js` (8) | Generic metrics time-series store (host temperature, datastore usage, GPU |
+| `mock/` | 2 | 666 | `mock/generator.js` (7) | Deterministic-ish mock data generator that simulates a large, globally |
+| `net/` | 4 | 628 | `net/captureHistory.js` (3) | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 |
+| `nsx/` | 6 | 1,041 | `nsx/store.js` (9) | In-memory NSX aggregator + poller. Mirrors the vCenter store design: each |
+| `partfault/` | 13 | 2,246 | `partfault/poller.js` (3) | partfault/poller.js — **중앙 전용**: 스캔 → 전이 → DB → 알림(v2.548). |
+| `pdu/` | 11 | 1,687 | `pdu/poller.js` (4) | pdu/poller.js — PDU 주기 수집. |
+| `perf/` | 5 | 1,044 | `perf/monitor.js` (13) | perf/monitor.js — 서버 성능 측정기(v2.498). 요청 지연·이벤트 루프 정체·진행 중 요청을 **상시 O(1)** |
+| `ping/` | 4 | 762 | `ping/db.js` (2) | Ping 모니터링 시계열 저장소 — 등록 대상별 RTT/도달성 샘플을 별도 SQLite에 보관한다. |
+| `portalcheck/` | 5 | 1,426 | `portalcheck/edgeReport.js` (1) | portalcheck/edgeReport.js — **엣지에서** 도는 토큰 자기보고(v2.560). |
+| `provision/` | 6 | 853 | `provision/jobs.js` (2) | VM provisioning job engine. Holds deployment jobs in memory and runs them |
+| `proxy/` | 10 | 1,747 | `proxy/sshExec.js` (23) | Small SSH helper built on ssh2: connect, run commands, and upload files via |
+| `publicapi/` | 5 | 747 | `publicapi/allowlist.js` (2) | 외부 공개 API 의 허용 목록 카탈로그 (v2.562) — **순수 모듈**. 판정은 이 파일 하나가 소유한다. |
+| `relaycheck/` | 5 | 462 | `relaycheck/poller.js` (3) | relaycheck/poller.js — HAProxy 경로 주기 점검(v2.429). CLAUDE.md 폴러 규약: 재진입 가드 + 동시 점검 제한 + 대상당 타임아웃 + |
+| `relaytopo/` | 4 | 672 | `relaytopo/store.js` (3) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
+| `reports/` | 8 | 741 | `reports/dailyReport.js` (3) | 일일 헬스체크 리포트 발송 스케줄러 — 매일 지정 시각(HH:MM)에 computeHealthReport 결과를 |
+| `rma/` | 14 | 2,553 | `rma/jobs.js` (6) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
+| `routes/` | 86 | 21,627 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
+| `sanswitch/` | 26 | 5,847 | `sanswitch/registry.js` (7) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
+| `search/` | 1 | 140 | `search/deepSearch.js` (2) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
+| `security/` | 16 | 2,833 | `security/secretVault.js` (27) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
+| `storage/` | 38 | 7,149 | `storage/registry.js` (9) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
+| `svcmon/` | 17 | 5,385 | `svcmon/store.js` (10) | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). |
+| `system/` | 2 | 298 | `system/nfsMounts.js` (3) | system/nfsMounts.js — Edge 노드 NFS 마운트 관리(v2.299). |
+| `toolcats/` | 2 | 215 | `toolcats/catalog.js` (1) | toolcats/catalog.js — 특수 기능 카테고리 분류 (순수 모듈, v2.455). |
+| `tools/` | 12 | 2,082 | `tools/powerOffPoller.js` (3) | tools/powerOffPoller.js — 전원 꺼짐 점검기(v2.484). 설정 주기(기본 6시간)마다 스냅샷의 꺼진 VM 을 |
+| `upgrade/` | 9 | 1,292 | `upgrade/manager.js` (6) | Orchestrates the auto-upgrade feature for the running portal: tracks the last |
+| `util/` | 65 | 5,386 | `util/numOrNull.js` (75) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
+| `vcenter/` | 11 | 3,572 | `vcenter/registry.js` (20) | vCenter registry — read/write the managed list of vCenters in |
+| `vmclone/` | 4 | 632 | `vmclone/scheduler.js` (3) | vmclone/scheduler.js — 복제 잡 스케줄러(v2.299). |
+| `vmseries/` | 9 | 1,235 | `vmseries/poller.js` (3) | vmseries/poller.js — 실시간 스파이크 주기 수집(v2.510). 기본 50분(사용자 결정), 설정에서 변경. |
+| `vmtrack/` | 4 | 1,323 | `vmtrack/db.js` (3) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
+
+디렉터리 63개 · 파일 706개 · 130,323줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+<!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
 

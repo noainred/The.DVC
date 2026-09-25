@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeLoadError, filterObjectElements, devicesForThisNode as coreDevicesForThisNode, devicesForAgent as coreDevicesForAgent } from '../util/registryCore.js'; // v2.613 PERSIST2613-04
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 import { accessMoved, dropCarriedSecrets, secretProvided } from '../util/secretCarry.js';
@@ -36,17 +37,9 @@ let _db = null;
  *   (routes/central.js)가 이 값을 보고 503 으로 답한다 — 빈 목록을 ok:true 로 내려보내면 엣지가 장비 목록·스냅샷을
  *   통째로 지운다. 다음 저장이 성공하면 풀린다(그때부터는 관리자가 다시 만든 목록이 진실이다).
  */
-let _loadError = null;
-export function registryLoadError() { load(); return _loadError; }
-// v2.612 LEFT2612-01: 파일이 없는데 손상 보존본(<파일>.corrupt.<시각>)만 있으면 재시작 뒤에도 '못 읽음' 이다 — 여기서 빈 목록으로
-//   출발하면 재시작 한 번으로 엣지 목록 삭제가 되살아난다. 관리자가 한 번 저장하면(파일이 생기면) 풀린다.
-function corruptOnlyReason(file) {
-  try {
-    const dir = path.dirname(file); const base = path.basename(file) + '.corrupt.';
-    const hit = fs.readdirSync(dir).filter((n) => n.startsWith(base)).sort().pop();
-    return hit ? `등록부 파일이 없고 손상 보존본(${hit})만 있습니다` : null;
-  } catch { return null; }
-}
+// v2.613 PERSIST2613-04 · DEPS2613-04: 손상 보존본 판정(corruptOnlyReason)·로드 오류 상태·원소 필터·법인 축 판정은 util/registryCore.js 하나다.
+const loadErr = makeLoadError();
+export function registryLoadError() { load(); return loadErr.get(); }
 
 function load() {
   if (_db) return _db;
@@ -55,18 +48,18 @@ function load() {
       const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
       const p = openSecretsDeep(raw);
-      _db = { servers: Array.isArray(p.servers) ? p.servers.filter((s) => s && typeof s === 'object') : [] };
+      _db = { servers: filterObjectElements(p.servers).list }; // v2.613 PERSIST2613-04: 원소 필터는 util/registryCore.js 하나
       return _db;
     }
-  } catch (e) { preserveCorrupt(FILE(), e?.message); _loadError = { at: Date.now(), reason: String(e?.message || e).slice(0, 200) }; }
-  if (!_loadError && !fs.existsSync(FILE())) { const why = corruptOnlyReason(FILE()); if (why) _loadError = { at: Date.now(), reason: why }; }
+  } catch (e) { preserveCorrupt(FILE(), e?.message); loadErr.set(e); }
+  loadErr.checkCorruptOnly(FILE());
   _db = { servers: [] };
   return _db;
 }
 
 function persist() {
   atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, servers: load().servers }), null, 2), { mode: 0o600 });
-  _loadError = null; // v2.612 LEFT2612-01
+  loadErr.clear(); // v2.612 LEFT2612-01
 }
 
 /**
@@ -186,13 +179,12 @@ export function deleteServer(id) {
 
 /** 이 노드가 수집할 서버(비밀 포함). 중앙 여부는 centralUrl 로 가른다. */
 export function serversForThisNode({ servers = load().servers, agentName = config.agent.name, isEdge = !!config.agent.centralUrl } = {}) {
-  return servers.filter((s) => s.enabled !== false && (isEdge ? agentKeyEq(s.agent, agentName) : !String(s.agent || '').trim()));
+  return coreDevicesForThisNode(servers, { agentName, isEdge }); // v2.613 DEPS2613-04: 판정은 util/registryCore.js 하나(agentKeyEq 와 같은 정규화)
 }
 
 /** 특정 엣지 몫(중앙의 config 서빙용 — 비밀 포함: 엣지가 CVP 에 로그인해야 한다). */
 export function serversForAgent(agentName) {
-  if (!String(agentName || '').trim()) return [];
-  return load().servers.filter((s) => s.enabled !== false && agentKeyEq(s.agent, agentName));
+  return coreDevicesForAgent(load().servers, agentName); // v2.613 DEPS2613-04
 }
 
 /** 엣지: 중앙 pull 결과 반영 — 내 몫을 통째로 교체. 빠진 id 를 돌려준다(호출자가 스냅샷·DB 행을 지운다). */
@@ -211,4 +203,4 @@ export function applyPulledServers(list) {
   return { count: next.length, removed: [...before].filter((id) => !nextIds.has(id)) };
 }
 
-export function _resetForTest() { _db = null; _loadError = null; }
+export function _resetForTest() { _db = null; loadErr.clear(); }

@@ -1,24 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { makeLatestGate } from './latestGate.js';
-import { usePolling, fetchJson, postJson, putJson, delJson } from '../api.js';
+import { usePolling, fetchJson, postJson, putJson, delJson, hasRole } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { pingEmptyReason } from './pingEmptyText.js';
+import { agoText } from './tools/relTime.js';
 
 // 상태별 색상(파이썬 원본의 baseline 편차 색상 코딩 이식).
 const COLOR = { ok: '#22c55e', warn: '#eab308', crit: '#f97316', down: '#ef4444', unknown: '#6b7280' };
 const LABEL = { ok: '정상', warn: '주의(+20%)', crit: '경고(+50%)', down: '무응답', unknown: '수집 전' };
 const RANGES = [['1h', '1시간'], ['6h', '6시간'], ['24h', '24시간'], ['7d', '7일'], ['30d', '30일'], ['1y', '1년']];
 const fmtMs = (v) => (v == null ? '—' : `${v} ms`);
-const ago = (ts) => {
-  if (!ts) return '—';
-  const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.floor(s / 60)}분 전`;
-  if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
-  return `${Math.floor(s / 86400)}일 전`;
-};
+// v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다(로컬 ago 사본 제거).
 
 /** 버킷 시계열을 상태 색상 막대 + baseline 선으로 그리는 경량 SVG 차트. */
 function SeriesChart({ data }) {
@@ -65,7 +59,7 @@ const EMPTY = { name: '', host: '', kind: 'icmp', port: '', baselineMs: '', note
 
 export default function PingMonitor() {
   const { data, error, loading } = usePolling('/ping/status', {}, 15_000);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const isAdmin = hasRole('admin'); // v2.613 WEB2613-01: 역할은 App 이 채운 현재 사용자 객체에서 읽는다(화면이 /auth/me 를 다시 부르지 않는다).
   const [sel, setSel] = useState(null);        // 선택 대상 id
   const [range, setRange] = useState('6h');
   const [series, setSeries] = useState(null);
@@ -76,7 +70,6 @@ export default function PingMonitor() {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { fetchJson('/auth/me').then((r) => setIsAdmin(r.user?.role === 'admin')).catch(() => {}); }, []);
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4000); };
 
   const targets = data?.targets || [];
@@ -166,7 +159,7 @@ export default function PingMonitor() {
                 <td className="muted">{t.kind === 'tcp' ? 'TCP' : 'ICMP'}</td>
                 <td className="right tabular" style={{ color: COLOR[t.status], fontWeight: 600 }}>{t.status === 'down' ? '무응답' : fmtMs(t.rtt)}</td>
                 <td className="right tabular muted">{t.baseline ? `${t.baseline}${t.baselineAuto ? '*' : ''}` : '—'}</td>
-                <td className="muted" style={{ fontSize: 12 }}>{ago(t.lastTs)}</td>
+                <td className="muted" style={{ fontSize: 12 }}>{agoText(t.lastTs)}</td>
                 {isAdmin && <td className="right nowrap" onClick={(e) => e.stopPropagation()}>
                   <button className="tab" onClick={() => setForm({ id: t.id, name: t.name, host: t.host, kind: t.kind, port: t.port || '', baselineMs: t.baseline && !t.baselineAuto ? t.baseline : '', note: t.note || '', enabled: t.enabled })}>수정</button>
                   <button className="tab" style={{ color: 'var(--red)' }} onClick={() => remove(t)}>삭제</button>

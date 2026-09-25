@@ -1,12 +1,9 @@
+import { agoText } from './relTime.js';
 // 원격 명령 실행(RMA) 화면의 순수 헬퍼(v2.416) — 웹 테스트는 node 환경(DOM 없음)이라 판정·문구는
 // 여기서 회귀로 고정한다.
 
-export const ago = (ts, now = Date.now()) => {
-  if (!ts) return '—';
-  const s = Math.round((now - ts) / 1000);
-  if (s < 5) return '방금';
-  return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : s < 86400 ? `${Math.round(s / 3600)}시간 전` : `${Math.round(s / 86400)}일 전`;
-};
+// v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다 — 이 화면 계약('5초 미만 = 방금')만 옵션으로 남긴다.
+export const ago = (ts, now = Date.now()) => agoText(ts, now, { subMinute: 5000 });
 
 export const durationText = (ms) => {
   if (ms == null || !Number.isFinite(Number(ms))) return '—';

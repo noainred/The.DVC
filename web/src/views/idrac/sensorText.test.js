@@ -5,6 +5,7 @@ import {
   cpuBadgeText, maxTempText, sampleCountText, emptyNote, latestTempRows, tempColorOf, fetchErrorNote,
   trendRows, trendEmptyReason, trendBaselineNote, trendDetailNote,
 } from './sensorText.js';
+import { TEMP_WARN_C, TEMP_HOT_C } from '../tools/serverTemp/board.js';
 
 const localWithData = {
   remote: false, seriesAvailable: true, cpuSynced: true, count: 42, intervalMs: 60000,
@@ -70,10 +71,11 @@ describe('현재값 표', () => {
     expect(latestTempRows({ latest: { temps: { a: null, b: 30 } } })).toEqual([{ name: 'b', celsius: 30 }]);
     expect(latestTempRows(null)).toEqual([]);
   });
-  it('색 임계는 기존 규약과 같다(32/40)', () => {
-    expect(tempColorOf(31)).toBe('var(--green)');
-    expect(tempColorOf(32)).toBe('var(--amber)');
-    expect(tempColorOf(40)).toBe('var(--red)');
+  it('색 임계는 board.js 의 TEMP_WARN_C/TEMP_HOT_C 와 같다(v2.613 WEB2613-12 — 숫자를 여기 적지 않는다)', () => {
+    expect(tempColorOf(TEMP_WARN_C - 1)).toBe('var(--green)');
+    expect(tempColorOf(TEMP_WARN_C)).toBe('var(--amber)');
+    expect(tempColorOf(TEMP_HOT_C - 1)).toBe('var(--amber)');
+    expect(tempColorOf(TEMP_HOT_C)).toBe('var(--red)');
     expect(tempColorOf(null)).toBe('var(--text-faint)');
   });
 });

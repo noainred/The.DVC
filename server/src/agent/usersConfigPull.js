@@ -12,6 +12,7 @@
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
+import { classifyCentral404 } from '../util/central404.js'; // v2.613 DEPS2613-06·EDGE2613-06: 404 사유(central 꺼짐/거절/엔드포인트 없음) 판정
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyManagedUsers } from '../auth/auth.js';
 
@@ -40,6 +41,14 @@ async function _pullUsersConfigNow() {
   const url = `${config.agent.centralUrl}/api/central/users-config?agent=${encodeURIComponent(config.agent.name || '')}`;
   try {
     const res = await resilientFetch(url, { method: 'GET', headers: headers(), timeoutMs: 20_000, retries: 2 });
+    // v2.613 DEPS2613-06·EDGE2613-06: 404 본문을 읽어 '중앙이 central 을 끔' / '거절' / '엔드포인트 없음(구버전·주소 오류)' 을 가르고
+    //   상태·콘솔에 남긴다(curUser·sanSwitch 등 형제 5벌과 같은 규칙 — 예전에는 `<- 404` 만 남아 조치를 고를 수 없었다).
+    if (res.status === 404) {
+      const c = await classifyCentral404(res);
+      last = { at: Date.now(), applied: false, ok: false, kind: c.kind, error: c.reason };
+      if (_logChange('404', `${c.kind}: ${c.reason}`)) console.warn(`[users-config] ${c.reason}`);
+      return { ok: false, kind: c.kind, reason: c.reason, error: c.reason };
+    }
     if (!res.ok) throw new Error(`users-config <- ${res.status}`);
     const body = await res.json();
     const users = Array.isArray(body?.users) ? body.users : [];

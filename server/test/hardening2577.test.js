@@ -21,14 +21,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
 /** 주석을 지우되 **개행은 보존**한다 — 규칙을 설명하는 주석이 통과 근거가 되면 안 된다(v2.535). */
-const strip = (s) => s
-  .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ''))
-  .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + ''.padEnd(0));
+const strip = stripComments;   // v2.613 TESTDOC2613-08: 코어(개행 보존)
 
 test('★ CSP — 기본 정책이 코드에 있고 앱 정책에는 unsafe-eval 이 없다', () => {
   const s = strip(read('index.js'));

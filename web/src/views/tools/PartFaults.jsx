@@ -18,6 +18,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
+import { useHashTab } from '../../hooks/useHashTab.js'; // v2.613 CATALOG2613-06: 서브탭을 URL 에 싣는다
 import { Loading, ErrorBox, SearchBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -39,7 +40,8 @@ export function PartFaults() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [q, setQ] = useState('');
-  const [tab, setTab] = useState('open');
+  // v2.613(CATALOG2613-06): 열린 장애/이력 탭을 해시(#/tools/part-faults/<tab>)에 싣는다(v2.438 규약).
+  const [tab, setTab] = useHashTab({ base: ['tools', 'part-faults'], valid: ['open', 'events'], fallback: 'open' });
   const [days, setDays] = useState(30);
   const [showEdges, setShowEdges] = useState(false);
   const [saving, setSaving] = useState(false);

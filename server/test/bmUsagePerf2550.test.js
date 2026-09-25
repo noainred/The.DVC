@@ -20,10 +20,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { stripComments } from './_stripComments.js';
 
 const SRC = (rel) => fs.readFileSync(path.join(import.meta.dirname, '../src', rel), 'utf8');
 /** 주석을 지운 소스 — 규칙을 설명하는 주석이 검사 통과 근거가 되면 안 된다(v2.535 규약). */
-const bare = (rel) => SRC(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const bare = (rel) => stripComments(SRC(rel));   // v2.613 TESTDOC2613-08: 2줄 판본 → 코어
 
 // ── P1: MIN/MAX 한 쿼리 = 400ms (SQLite 는 aggregate 하나일 때만 인덱스 최적화) ──
 test('⚠ MIN(ts) 과 MAX(ts) 를 한 쿼리에 쓰지 않는다 (실측 400ms → 0.01ms)', () => {

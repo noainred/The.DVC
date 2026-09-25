@@ -49,6 +49,7 @@ export function specFor(link = {}, ctx = {}) {
       //   당기면 그 자체가 부하다. 토큰·정체 확인에는 ping 이 충분하다.
       url: `${origin}/api/collector/ping`,
       headers: { Accept: 'application/json', 'X-Collector-Token': token },
+      tag: t(c?.id) || t(link.to), // v2.613 EDGE2613-10: 데이터 흐름 지도가 같은 origin 엣지를 나누는 태그
       identify: (json) => {
         const iss = identityIssue({ id: t(c?.id), name: t(c?.name) }, json, others);
         return iss ? iss.reason : null;
@@ -167,6 +168,7 @@ export async function runLink(link = {}, { timeouts = {}, ctx = {}, byNode = 'ce
   const h = await stepHttp({
     url: spec.url, ip, headers: spec.headers, timeoutMs: timeouts.httpMs,
     identify: spec.identify || null, identifyRaw: spec.identifyRaw || null,
+    tag: spec.tag || '',
   });
   if (h.http) steps.http = h.http;
   if (h.auth) steps.auth = h.auth;

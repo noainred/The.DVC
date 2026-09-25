@@ -14,12 +14,12 @@
  *   둘이 다르면 그 사실 자체가 진단이므로 화면이 나란히 보여 준다.
  * ⚠ **실패가 직전 값을 지우지 않는다**(v2.550.3 H5) — 한 번 실패한 뒤 화면이 '보고 없음' 이 되면
  *   방금까지 보던 값이 사라진다. 실패는 `lastAttempt` 로 남긴다.
+ * v2.613(CONTRACT2613-01 · EDGE2613-02): 사다리(등록부 → fetch → 401/403 → 404 → http → bad-body)는 `central/edgePull.js
+ *   pullFromEdge` **하나**다 — 여기는 시한 env·`retries:0`(점검은 재시도가 판정을 흐린다)·저장·정제만 갖는다.
  */
-import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
 import { resilientFetch } from '../util/resilientFetch.js';
-import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
-import { findCollector } from './edgeLogPull.js';
-import { capTrim, capStr } from '../util/capStr.js'; // v2.606 TIM2606-02: 보관 글자는 평탄화(SlicedString 이 응답 원문을 붙잡지 않게)
+import { pullFromEdge } from './edgePull.js'; // v2.613 CONTRACT2613-01·EDGE2613-02: 당김 사다리는 하나(등록부 → fetch → 상태코드 → 본문)
+import { capTrim } from '../util/capStr.js'; // v2.606 TIM2606-02: 보관 글자는 평탄화(SlicedString 이 응답 원문을 붙잡지 않게)
 
 /** 이 엔드포인트를 내주기 시작한 최소 엣지 버전 — 그 아래는 경로가 없다. */
 export const MIN_EDGE_VERSION = '2.560.0';
@@ -106,57 +106,23 @@ export function getEdgeTokenReport(agent) { return _store.get(t(agent).toLowerCa
 export function listEdgeTokenReports() { return [..._store.values()]; }
 export function _resetForTest() { _store.clear(); }
 
-/** 404 본문으로 '구버전' 과 '엣지에서 꺼짐' 을 가른다(둘은 조치가 정반대다 — v2.549 규약). */
-function kindFor404(body) {
-  if (body && typeof body === 'object' && body.reason) return { kind: 'disabled', reason: capStr(body.reason, 300) || '(형식 오류)' }; // v2.607(TIM2607-01)
-  return { kind: 'old-version', reason: `이 엣지에 /api/collector/token-check 가 없습니다 — v${MIN_EDGE_VERSION} 이상으로 업그레이드해야 엣지 저장 토큰을 확인할 수 있습니다.` };
-}
-
 /**
  * 한 엣지에서 당긴다. **저장까지** 하고 결과를 돌려준다.
  * @returns {{ok:boolean, kind?:string, reason?:string, ms:number, rec?:object}}
  */
 export async function pullTokenCheck(agent, { selfProbe = true, fetchImpl = resilientFetch, timeoutMs = TIMEOUT_MS } = {}) {
-  const t0 = Date.now();
-  const col = await findCollector(agent);
-  if (!col) return { ok: false, kind: 'not-registered', reason: '수집 서버 등록부에 없는 이름입니다(설정 › 수집 서버에서 등록하세요).', ms: 0 };
-  if (col.enabled === false) return { ok: false, kind: 'disabled-central', reason: '중앙에서 이 수집 서버를 비활성으로 두었습니다.', ms: 0 };
-  if (!t(col.url)) return { ok: false, kind: 'no-url', reason: '이 수집 서버에 URL 이 없습니다.', ms: 0 };
-
-  // ⚠ 접속처는 **등록부 저장값에서만** 읽는다 — 요청 본문의 url 을 받지 않는다(v2.480 규약).
-  const url = `${t(col.url).replace(/\/+$/, '')}/api/collector/token-check${selfProbe ? '' : '?selfprobe=0'}`;
+  // ⚠ 접속처는 **등록부 저장값에서만** 읽는다 — 요청 본문의 url 을 받지 않는다(v2.480 규약). 토큰을 싣는 요청은 resilientFetch 로만.
+  const r = await pullFromEdge(agent, `/api/collector/token-check${selfProbe ? '' : '?selfprobe=0'}`, {
+    timeoutMs, retries: 0, // '되는가' 를 보는 점검이라 재시도가 판정을 흐린다
+    fetchImpl, minVersion: MIN_EDGE_VERSION, what: '엣지 저장 토큰을 확인할', label: '엣지 토큰 점검 응답',
+  });
+  if (!r.ok && !r.fetched) return { ok: false, kind: r.kind, reason: r.reason, ms: r.ms }; // 등록부 단계 — 보관소에 남기지 않는다
+  const col = r.col;
   const name = col.id || col.name || agent; // v2.583 #29: 점검 행 키(수집 서버 id = 에이전트 이름)와 같은 키로 저장한다
-
-  let res;
-  try {
-    res = await withOutboundTag(col.id || col.name || agent, () => fetchImpl(url, {
-      headers: { Accept: 'application/json', ...(col.token ? { 'X-Collector-Token': col.token } : {}) },
-      timeoutMs, retries: 0, // '되는가' 를 보는 점검이라 재시도가 판정을 흐린다
-    }));
-  } catch (e) {
-    const msg = String(e?.message || e);
-    const kind = /timeout|abort|timed out/i.test(msg) ? 'timeout' : 'unreachable';
-    const rec = putEdgeTokenReport(name, { ok: false, kind, reason: msg.slice(0, 300), ms: Date.now() - t0 });
-    return { ok: false, kind, reason: msg.slice(0, 300), ms: Date.now() - t0, rec };
+  if (!r.ok) {
+    const rec = putEdgeTokenReport(name, { ok: false, kind: r.kind, reason: r.reason, ms: r.ms });
+    return { ok: false, kind: r.kind, reason: r.reason, ms: r.ms, rec };
   }
-
-  const ms = Date.now() - t0;
-  let body = null;
-  try { body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '엣지 토큰 점검 응답'); } catch { body = null; } // v2.583: 크기 상한
-
-  const fail = (kind, reason) => {
-    const rec = putEdgeTokenReport(name, { ok: false, kind, reason, ms });
-    return { ok: false, kind, reason, ms, rec };
-  };
-  if (res.status === 401 || res.status === 403) {
-    return fail('auth', '수집 서버 토큰 불일치 — 중앙 등록값과 그 엣지의 COLLECTOR_TOKEN 을 대조하세요(다시 눌러도 같습니다).');
-  }
-  if (res.status === 404) { const k = kindFor404(body); return fail(k.kind, k.reason); }
-  if (!res.ok) return fail('http', `HTTP ${res.status}${body?.reason ? ` (${body.reason})` : ''}`);
-  if (!body || body.ok === false || !body.node) {
-    return fail('bad-body', body?.reason ? (capStr(body.reason, 300) || '(형식 오류)') : // v2.607(TIM2607-01)
-     '응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다).');
-  }
-  const rec = putEdgeTokenReport(name, { ok: true, ms, report: sanitizeEnvelope(body) });
-  return { ok: true, ms, rec };
+  const rec = putEdgeTokenReport(name, { ok: true, ms: r.ms, report: sanitizeEnvelope(r.body) });
+  return { ok: true, ms: r.ms, rec };
 }

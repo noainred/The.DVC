@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { parseTraceroute, traceLimits } from '../src/svcmon/checker.js';
+import { stripComments } from './_stripComments.js';
 
 // 확정 버그 회귀 방지(2026-08-30) — trace 점검의 '거짓 정상'.
 //
@@ -159,7 +160,7 @@ test('명령 상한을 임계로 넘기면 판정이 영구 거짓이 된다(그
   // 주석은 제거하고 검사한다 — 주석에 '과거엔 limit 를 넘겼다'는 설명이 있어 원문 검사는 오탐한다.
   const raw = fs.readFileSync(
     path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'svcmon', 'checker.js'), 'utf8');
-  const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const src = stripComments(raw);   // v2.613 TESTDOC2613-08
   assert.match(src, /parseTraceroute\(out,\s*\{\s*maxHops:\s*threshold\b/,
     'checker.js 의 traceroute() 는 parseTraceroute 에 threshold 를 넘겨야 한다(limit 아님)');
   assert.doesNotMatch(src, /parseTraceroute\(out,\s*\{\s*maxHops:\s*limit\b/,

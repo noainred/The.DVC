@@ -90,6 +90,11 @@ jobs:
       - name: 문서 최신 여부 — docs/API.md
         continue-on-error: true
         run: node scripts/api-doc.mjs --check
+      # v2.613(TESTDOC2613-11): ARCHITECTURE.md 의 모듈 지도 절과 INDEX.md 의 전체 문서 목록 절도 생성물이다 —
+      # 새 디렉터리·새 문서가 생기면 갱신해야 한다(손 목록은 v2.583 이후 디렉터리 42개를 놓쳤다).
+      - name: 문서 최신 여부 — docs/ARCHITECTURE.md·INDEX.md(생성 절)
+        continue-on-error: true
+        run: node scripts/arch-doc.mjs --check
       # v2.576(라이선스 점검 F3): 번들에 실리는 오픈소스 고지도 생성물이다 — 의존성이 바뀌면
       # 갱신해야 한다(MIT·ISC·BSD 는 사본마다 저작권 고지 동봉을 요구하고 minify 는 주석을 지운다).
       # ⚠ 이 검사는 `npm ci` 가 끝난 뒤에 와야 한다(설치되지 않은 의존성이 있으면 종료코드 1).

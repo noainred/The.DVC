@@ -26,19 +26,15 @@ export default function RemoteCommand() {
   const [run, setRun] = useState(null);        // { agent, instance? }
   const [cfg, setCfg] = useState(null);        // agent group for settings
   const [deploy, setDeploy] = useState(null);  // { agent? }
-  const [hist, setHist] = useState(null);
-  const [histErr, setHistErr] = useState('');
   const [view, setView] = useState(null);      // history row detail
   const [refreshTick, setRefreshTick] = useState(0);
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [tab, setTab] = useHashTab({ base: ['tools', 'rma'], valid: ['run', 'schedule', 'status'], fallback: 'run' });
-
-  useEffect(() => {
-    let alive = true;
-    fetchJson('/tools/rma/history', { limit: 100 }).then((r) => { if (alive) { setHist(r.rows || []); setHistErr(''); } }).catch((e) => { if (alive) setHistErr(e.message); });
-    const t = setInterval(() => { fetchJson('/tools/rma/history', { limit: 100 }).then((r) => alive && setHist(r.rows || [])).catch(() => {}); }, 15_000);
-    return () => { alive = false; clearInterval(t); };
-  }, [refreshTick]);
+  // v2.613 WEB2613-09: 실행 이력도 usePolling 이다 — 예전 수제 setInterval 은 403(operator 가 주소로 열면 `/tools/rma/history`
+  //   가 adminOnly·fullScopeOnly)을 15초마다 반복하며 `.catch(() => {})` 로 삼켜 감사·거부 기록을 오염시켰고 ETag/304 도 없었다.
+  //   `_r` 은 수동 새로고침 카운터(파라미터가 바뀌면 usePolling 이 즉시 다시 조회한다).
+  const { data: histData, error: histErr } = usePolling('/tools/rma/history', { limit: 100, _r: refreshTick }, 15_000);
+  const hist = histData ? (histData.rows || []) : null;
 
   const groups = data?.agents || [];
   const kpi = useMemo(() => {

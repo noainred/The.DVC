@@ -28,13 +28,17 @@
  */
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { localSnapshots } from './store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { trimZoningToFit } from '../central/edgeRecord.js'; // v2.600 RECENT2600-02 — 중앙 수신과 같은 조닝 축약(순수)
+import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.js'; // v2.613 EDGE2613-05: readDropSummary 사본 → 공용
+import { centralStatusOnlySupport, sendStatusOnly, DEVICE_STATUS_ONLY_MIN_CENTRAL } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04
 
-export const pushMs = () => Math.max(60_000, Number(process.env.SANSW_PUSH_MS) || 5 * 60_000);
+// v2.613 RUNTIME2613-04: 주기 env 는 `clampIntervalMs` 로 [하한, 2^31−1ms] 에 가둔다(v2.599 T2599-02 규약 — sanSwitchConfigPull 과 같다).
+//   상한이 없으면 adaptiveTimer 가 자른 값과 `sanSwitchPushStatus().intervalMs` 가 다르게 보고됐다.
+export const pushMs = () => clampIntervalMs(Number(process.env.SANSW_PUSH_MS) || 5 * 60_000, 5 * 60_000, 60_000);
 /** 중앙으로 올릴 포트 상한 — 문제 포트 우선. */
 const PUSH_PORT_LIMIT = Math.max(0, Number(process.env.SANSW_PUSH_PORT_LIMIT) || 64);
 const gzipAsync = promisify(zlib.gzip);
@@ -63,7 +67,8 @@ export function chunkDevices(devices, maxBytes = PUSH_CHUNK_BYTES) {
 }
 
 let _timer = null;
-let _busy = false;
+let _busy = null;   // 진행 중인 push(프라미스) — v2.613 EDGE2613-03: storage/pdu/cvp/partfault/perfPush 와 같은 규약
+let _again = false; // 진행 중에 들어온 요청 — 끝난 뒤 한 번 더 보낸다
 let _last = null;
 
 /** 중앙 전송용 축약(순수 — 테스트가 고정한다). 문제 포트를 우선 남긴다. */
@@ -111,21 +116,27 @@ export function scopeSnapshot(snap, { scope = 'full', maxBytes = DEVICE_MAX_BYTE
   return out;
 }
 
-/** 중앙 응답의 거절 요약을 읽는다(v2.600 RECENT2600-02) — 본문이 JSON 이 아니면 null. */
-async function readDropSummary(res) {
-  try {
-    const j = await res.json();
-    if (!j || typeof j !== 'object') return null;
-    const rejected = Number(j.rejected) || 0;
-    const zoningTrimmed = Number(j.zoningTrimmed) || 0;
-    return rejected || j.coerced || zoningTrimmed ? { rejected, dropped: j.dropped && typeof j.dropped === 'object' ? j.dropped : null, coerced: Number(j.coerced) || 0, zoningTrimmed } : null;
-  } catch { return null; }
-}
+// v2.613 EDGE2613-05: readDropSummary 는 util/centralReply.js 하나다(storage·pdu 사본과 함께 합쳤다 — 이 판본만 coerced·zoningTrimmed 를 읽고 있었다).
 
+/**
+ * v2.613(감사 EDGE2613-03): 재진입 가드는 **프라미스 + `_again`** 이다(storage v2.601 · pdu v2.597 · cvp · partfault · perfPush 와 같다).
+ *   v2.612 까지 SAN 만 `let _busy = false` 로 `{ok:false, reason:'이전 push 진행 중'}` 을 돌려줬고, 그 위에 호출부
+ *   (`agent/sanSwitchConfigPull.js pushAfterCollect`)가 **사유 문자열을 대조**하는 2초×90회 재시도 루프를 얹어 같은 관심사가
+ *   두 층에 나뉘어 있었다(문구 하나가 바뀌면 루프가 조용히 무력화된다). 이제 진행 중에 들어온 요청은 끝난 뒤 한 번 더 보내고
+ *   **그 결과를 합류한 호출자가 받는다**.
+ */
 export async function pushSanSwitchNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'push 비활성화(CENTRAL_URL/TOKEN 미설정)' };
-  if (_busy) return { ok: false, reason: '이전 push 진행 중' };
-  _busy = true;
+  if (_busy) { _again = true; return _busy; }
+  _busy = (async () => {
+    let r;
+    do { _again = false; r = await pushSanSwitchOnce(); } while (_again);
+    return r;
+  })().finally(() => { _busy = null; });
+  return _busy;
+}
+
+async function pushSanSwitchOnce() {
   try {
     const scope = portsScopeSetting();
     const devices = localSnapshots().map((s) => scopeSnapshot(s, { scope }));
@@ -140,8 +151,19 @@ export async function pushSanSwitchNow() {
       let assigned = null;
       try { const { devicesForThisNode } = await import('./registry.js'); assigned = devicesForThisNode().length; } catch { /* 등록부를 못 읽음 — 비우지 않는다 */ }
       if (assigned !== 0) {
-        _last = { at: Date.now(), sent: 0, reason: assigned == null ? '등록부를 읽지 못해 보내지 않았습니다' : `위임 장비 ${assigned}대 — 아직 수집된 스냅샷이 없습니다(첫 수집 대기)` };
-        return { ok: true, sent: 0 };
+        // v2.613(감사 EDGE2613-04): **보내지 않되 상태는 올린다**(v2.517 규약 — storage v2.581 과 같다). 예전에는 여기서 조용히
+        //   돌아가 중앙이 '엣지가 안 보냈다' 와 '위임은 있는데 첫 수집 대기' 를 구분하지 못했다. ⚠ `/sanswitch-data` 의 statusOnly 수신은
+        //   v2.613.0 부터라 그보다 낮은 중앙에는 보내지 않는다(빈 청크 0 = 목록 교체 — 중앙 목록이 비워진다). 사유는 상태에 남긴다.
+        const reason = assigned == null ? '등록부를 읽지 못해 보내지 않았습니다' : `위임 장비 ${assigned}대 — 아직 수집된 스냅샷이 없습니다(첫 수집 대기)`;
+        const cap = await centralStatusOnlySupport({ minVersion: DEVICE_STATUS_ONLY_MIN_CENTRAL });
+        if (!cap.ok) {
+          _last = { at: Date.now(), sent: 0, reason, statusSent: false, statusSkipped: cap.reason, centralVersion: cap.version || null };
+          return { ok: true, sent: 0, statusSent: false, statusSkipped: cap.reason };
+        }
+        const st = await sendStatusOnly('/api/central/sanswitch-data', { reason: assigned == null ? 'registry-unreadable' : 'no-snapshots', registered: assigned }, { devices: [], chunk: 0, chunks: 1 });
+        _last = { at: Date.now(), sent: 0, reason, statusSent: st.ok, ...(st.ok ? {} : { statusError: st.reason }) };
+        if (!st.ok) console.warn(`[sanswitch-push] 상태 보고 실패: ${st.reason}`);
+        return { ok: true, sent: 0, statusSent: st.ok };
       }
       const json = Buffer.from(JSON.stringify({ agent: config.agent.name, devices: [], chunk: 0, chunks: 1 }));
       const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
@@ -175,7 +197,7 @@ export async function pushSanSwitchNow() {
         if (!res.ok) return { ok: false, error: `sanswitch-data <- ${res.status} (청크 ${i + 1}/${chunks.length})`, received, receivedDevices };
         received++; receivedDevices += chunks[i].length;
         // v2.600(RECENT2600-02): 200 이어도 중앙이 일부 장비를 뺐을 수 있다(장비 크기·합계 상한 등) — 응답을 읽어 상태·콘솔에 남긴다.
-        const ds = await readDropSummary(res);
+        const ds = dropSummaryOf(await readCentralReply(res)); // v2.613 EDGE2613-05: 공용 판독기
         if (ds?.zoningTrimmed) centralTrimmed += ds.zoningTrimmed;
         if (ds?.rejected) { rejected += ds.rejected; for (const [k, n] of Object.entries(ds.dropped || {})) droppedBy[k] = (droppedBy[k] || 0) + (Number(n) || 0); }
       }
@@ -201,7 +223,7 @@ export async function pushSanSwitchNow() {
       console.warn(`[sanswitch-push] 실패: ${_last.error}`);
       return { ok: false, reason: _last.error, ...(partial ? { centralPartial: _last.centralPartial } : {}) };
     }
-    if (rejected) console.warn(`[sanswitch-push] 중앙이 장비 ${rejected}대를 받지 않았습니다(${Object.entries(droppedBy).filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(' · ') || '사유 미상'}) — 그 스위치는 중앙 화면에 나오지 않습니다`);
+    if (rejected) console.warn(`[sanswitch-push] 중앙이 장비 ${rejected}대를 받지 않았습니다(${dropText(droppedBy)}) — 그 스위치는 중앙 화면에 나오지 않습니다`);
     // 범위·크기를 상태에 남긴다 — '전체로 바꿨는데 회선이 버티나' 를 수치로 확인할 수 있게.
     const downgraded = devices.filter((d) => d.ports?.portsScopeReason).length;
     const zoningTrimmed = devices.filter((d) => d.zoning?.trimmed).length;
@@ -212,7 +234,6 @@ export async function pushSanSwitchNow() {
     console.warn(`[sanswitch-push] 실패: ${e.message}`); // v2.583(카탈로그 N2)
     return { ok: false, reason: e.message };
   }
-  finally { _busy = false; }
 }
 
 export function startSanSwitchPush() {

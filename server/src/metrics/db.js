@@ -14,7 +14,7 @@ import { splitByDeadband, policyFromEnv } from './deadband.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
 import path from 'node:path';
 import { config } from '../config.js';
-import { chmodDbFiles } from '../util/sqliteOpen.js';
+import { openSqlite, retryOnLock } from '../util/sqliteOpen.js'; // v2.613 PERSIST2613-03: open 코어는 하나
 import { pushAll } from '../util/pushAll.js';
 
 const DB_PATH = config.temp.dbPath; // reuse the temp/metrics DB path
@@ -26,12 +26,11 @@ function initSqlite() {
   // eslint-disable-next-line import/no-unresolved
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    const db = new DatabaseSync(DB_PATH);
-    chmodDbFiles(DB_PATH); // v2.611(DB2611-01): 본체·기존 -wal/-shm 0600 — PRAGMA·스키마(첫 쓰기) 전에
-    try { db.exec('PRAGMA busy_timeout=3000;'); } catch { /* */ } // 먼저 — WAL 전환도 잠금을 기다리게(v2.597 L2597-02)
     // WAL + synchronous=NORMAL: 커밋당 fsync 2회(DELETE 저널) → 배치화(단건 insert 5ms→0.01ms 실측).
-    // busy_timeout: 동시 접근 시 즉시 SQLITE_BUSY 실패 대신 대기.
-    try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=3000;'); } catch { /* 구버전 폴백 */ }
+    // busy_timeout: 동시 접근 시 즉시 SQLITE_BUSY 실패 대신 대기 — journal_mode 보다 **먼저**(v2.597 L2597-02).
+    // v2.613 PERSIST2613-03: chmod(DB2611-01) → busy_timeout → WAL/NORMAL 을 openSqlite 가 한다. 예전 손 사본은 busy_timeout 을
+    //   두 번 걸고 journal_mode 의 잠금 오류를 삼켰다(규칙 2 위반 — 바로 뒤 CREATE 가 같은 잠금으로 던져 실효는 없었다).
+    const db = openSqlite(new DatabaseSync(DB_PATH));
     try {
       db.exec(`
         CREATE TABLE IF NOT EXISTS samples (
@@ -53,7 +52,6 @@ function initSqlite() {
         CREATE INDEX IF NOT EXISTS idx_hourly_h ON samples_hourly (h); -- prune(h<?)용
       `);
     } catch (e) { try { db.close(); } catch { /* */ } throw e; } // 잠금으로 실패하면 핸들을 닫고 재시도(L2597-02)
-    try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
     const ins = db.prepare('INSERT INTO samples (metric, k, v, ts) VALUES (?, ?, ?, ?)');
     const latestAll = db.prepare(`SELECT s.k AS k, s.v AS v, s.ts AS ts FROM samples s
       JOIN (SELECT k, MAX(ts) mts FROM samples WHERE metric=? GROUP BY k) m ON s.k=m.k AND s.ts=m.mts WHERE s.metric=?`);
@@ -269,16 +267,8 @@ const round1 = (x) => (x == null ? null : Number(x.toFixed(1)));
  * 프로세스 수명 동안 SQLite 이력을 쓰지 않았다(두 저장소가 갈라진다). 잠금이면 몇 번 기다렸다 다시 연다.
  * NDJSON 폴백은 node:sqlite 자체가 없거나 잠금이 아닌 오류일 때만이다.
  */
-const LOCK_RE = /database is (locked|busy)|SQLITE_(BUSY|LOCKED)/i;
-async function initSqliteRetrying(tries = 5, waitMs = 3_000) {
-  for (let i = 1; ; i++) {
-    try { return await initSqlite(); } catch (e) {
-      if (i >= tries || !(e?.errcode === 5 || e?.errcode === 6 || LOCK_RE.test(String(e?.message || '')))) throw e;
-      console.warn(`[metrics] SQLite 잠금(${e.message}) — ${waitMs / 1000}초 뒤 다시 엽니다(${i}/${tries})`);
-      await new Promise((r) => setTimeout(r, waitMs));
-    }
-  }
-}
+// v2.613 PERSIST2613-03: 잠금 판정·대기 루프는 util/sqliteOpen.js retryOnLock 하나(예전 LOCK_RE 손 사본 제거 — 동작 동일).
+const initSqliteRetrying = (tries = 5, waitMs = 3_000) => retryOnLock(initSqlite, { tries, waitMs, tag: 'metrics' });
 
 export async function getMetricsDb() {
   if (impl) return impl;

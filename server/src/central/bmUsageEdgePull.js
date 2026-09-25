@@ -11,11 +11,10 @@
  * ⚠ **저장 키는 중앙이 아는 이름**(등록부 `name`)이다 — 응답 본문의 `node.agent` 를 믿지 않는다
  *   (v2.548 F5). 둘이 다르면 그 사실 자체가 진단이므로 화면이 나란히 보여 준다.
  * ⚠ 실패를 '모름' 으로 뭉개지 않는다 — `kind` 로 원인을 나눈다(조치가 전부 다르다).
+ * v2.613(CONTRACT2613-01 · EDGE2613-02): 사다리(등록부 → fetch → 401/403 → 404 → http → bad-body)는 `central/edgePull.js
+ *   pullFromEdge` **하나**다 — 여기는 시한 env·저장(`putEdgeBmUsage`)·정제만 갖는다. kind 문자열·응답 모양은 그대로.
  */
-import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.583: 엣지 응답 크기 상한
-import { resilientFetch } from '../util/resilientFetch.js';
-import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
-import { findCollector } from './edgeLogPull.js';
+import { pullFromEdge } from './edgePull.js'; // v2.613 CONTRACT2613-01·EDGE2613-02: 당김 사다리는 하나(등록부 → fetch → 상태코드 → 본문)
 import { strOf } from '../util/coercionTrap.js'; // v2.604 CEN2604-03: 엣지 본문의 글자 필드는 타입부터 좁힌다
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
@@ -137,59 +136,20 @@ export function getEdgeBmUsage(agent) { return _store.get(t(agent).toLowerCase()
 export function listEdgeBmUsage() { return [..._store.values()]; }
 export function _resetForTest() { _store.clear(); }
 
-/** 404 본문으로 '구버전' 과 '엣지에서 꺼짐' 을 가른다(둘은 조치가 정반대다 — v2.549 규약). */
-function kindFor404(body) {
-  // v2.604 CEN2604-03: reason 이 객체면 String() 이 던지거나 '[object Object]' 가 된다 — 글자만.
-  const why = body && typeof body === 'object' ? strOf(body.reason, 300) : '';
-  if (why) return { kind: 'disabled', reason: why };
-  return { kind: 'old-version', reason: `이 엣지에 /api/collector/bm-usage 가 없습니다 — v${MIN_EDGE_VERSION} 이상으로 업그레이드해야 사용률을 읽을 수 있습니다.` };
-}
-
 /**
  * 한 엣지에서 당긴다. **저장까지** 하고 결과를 돌려준다.
  * @returns {{ok:boolean, kind?:string, reason?:string, ms:number, rec?:object}}
  */
 export async function pullBmUsage(agent, { limit = 0 } = {}) {
-  const t0 = Date.now();
-  const col = await findCollector(agent);
-  if (!col) return { ok: false, kind: 'not-registered', reason: '수집 서버 등록부에 없는 이름입니다(설정 › 수집 서버에서 등록하세요).', ms: 0 };
-  if (col.enabled === false) return { ok: false, kind: 'disabled-central', reason: '중앙에서 이 수집 서버를 비활성으로 두었습니다.', ms: 0 };
-  if (!t(col.url)) return { ok: false, kind: 'no-url', reason: '이 수집 서버에 URL 이 없습니다.', ms: 0 };
-
   const qs = Number(limit) > 0 ? `?limit=${Math.round(Number(limit))}` : '';
-  const url = `${t(col.url).replace(/\/+$/, '')}/api/collector/bm-usage${qs}`;
-  const name = col.name || agent;
-
-  let res;
-  try {
-    res = await withOutboundTag(col.id || col.name || agent, () => resilientFetch(url, {
-      headers: { Accept: 'application/json', ...(col.token ? { 'X-Collector-Token': col.token } : {}) },
-      timeoutMs: TIMEOUT_MS, retries: 1,
-    }));
-  } catch (e) {
-    const msg = String(e?.message || e);
-    const kind = /timeout|abort|timed out/i.test(msg) ? 'timeout' : 'unreachable';
-    const rec = putEdgeBmUsage(name, { ok: false, kind, reason: msg.slice(0, 300), ms: Date.now() - t0 });
-    return { ok: false, kind, reason: msg.slice(0, 300), ms: Date.now() - t0, rec };
+  const r = await pullFromEdge(agent, `/api/collector/bm-usage${qs}`, {
+    timeoutMs: TIMEOUT_MS, retries: 1, minVersion: MIN_EDGE_VERSION, what: '사용률을 읽을', label: '엣지 사용률 응답',
+  });
+  if (!r.ok) {
+    if (!r.fetched) return { ok: false, kind: r.kind, reason: r.reason, ms: r.ms }; // 등록부 단계 — 보관소에 남기지 않는다
+    const rec = putEdgeBmUsage(r.col.name || agent, { ok: false, kind: r.kind, reason: r.reason, ms: r.ms });
+    return { ok: false, kind: r.kind, reason: r.reason, ms: r.ms, rec };
   }
-
-  const ms = Date.now() - t0;
-  let body = null;
-  try { body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '엣지 사용률 응답'); } catch { body = null; } // v2.583: 크기 상한
-
-  const fail = (kind, reason) => {
-    const rec = putEdgeBmUsage(name, { ok: false, kind, reason, ms });
-    return { ok: false, kind, reason, ms, rec };
-  };
-  if (res.status === 401 || res.status === 403) {
-    return fail('auth', '수집 서버 토큰 불일치 — 중앙 등록값과 그 엣지의 COLLECTOR_TOKEN 을 대조하세요(다시 눌러도 같습니다).');
-  }
-  if (res.status === 404) { const k = kindFor404(body); return fail(k.kind, k.reason); }
-  const bodyWhy = body && typeof body === 'object' ? strOf(body.reason, 300) : '';
-  if (!res.ok) return fail('http', `HTTP ${res.status}${bodyWhy ? ` (${bodyWhy})` : ''}`);
-  if (!isObj(body) || body.ok === false || !isObj(body.node)) {
-    return fail('bad-body', bodyWhy || '응답 형식이 다릅니다(엣지가 아닌 서버에 닿았을 수 있습니다).');
-  }
-  const rec = putEdgeBmUsage(name, { ok: true, ms, snap: body });
-  return { ok: true, ms, rec };
+  const rec = putEdgeBmUsage(r.col.name || agent, { ok: true, ms: r.ms, snap: r.body });
+  return { ok: true, ms: r.ms, rec };
 }

@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeLoadError, filterObjectElements, devicesForThisNode as coreDevicesForThisNode, devicesForAgent as coreDevicesForAgent } from '../util/registryCore.js'; // v2.613 PERSIST2613-04
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 import { accessMoved, secretProvided } from '../util/secretCarry.js'; // v2.607 SEC2607-07
@@ -29,28 +30,20 @@ let _cache = null;
  *   (routes/central.js)가 이 값을 보고 503 으로 답한다 — 빈 목록을 ok:true 로 내려보내면 엣지가 장비 목록·스냅샷을
  *   통째로 지운다. 다음 저장이 성공하면 풀린다(그때부터는 관리자가 다시 만든 목록이 진실이다).
  */
-let _loadError = null;
-export function registryLoadError() { load(); return _loadError; }
-// v2.612 LEFT2612-01: 파일이 없는데 손상 보존본(<파일>.corrupt.<시각>)만 있으면 재시작 뒤에도 '못 읽음' 이다 — 여기서 빈 목록으로
-//   출발하면 재시작 한 번으로 엣지 목록 삭제가 되살아난다. 관리자가 한 번 저장하면(파일이 생기면) 풀린다.
-function corruptOnlyReason(file) {
-  try {
-    const dir = path.dirname(file); const base = path.basename(file) + '.corrupt.';
-    const hit = fs.readdirSync(dir).filter((n) => n.startsWith(base)).sort().pop();
-    return hit ? `등록부 파일이 없고 손상 보존본(${hit})만 있습니다` : null;
-  } catch { return null; }
-}
+// v2.613 PERSIST2613-04 · DEPS2613-04: 손상 보존본 판정(corruptOnlyReason)·로드 오류 상태·원소 필터·법인 축 판정은 util/registryCore.js 하나다.
+const loadErr = makeLoadError();
+export function registryLoadError() { load(); return loadErr.get(); }
 
 function load() {
   if (_cache) return _cache;
-  if (!fs.existsSync(FILE)) { const why = corruptOnlyReason(FILE); if (why) _loadError = { at: Date.now(), reason: why }; _cache = { devices: [] }; return _cache; }
+  if (!fs.existsSync(FILE)) { loadErr.checkCorruptOnly(FILE); _cache = { devices: [] }; return _cache; }
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    _cache = { devices: openSecretsDeep(Array.isArray(parsed?.devices) ? parsed.devices : []) };
+    _cache = { devices: filterObjectElements(openSecretsDeep(Array.isArray(parsed?.devices) ? parsed.devices : [])).list }; // v2.613 PERSIST2613-04: 객체 원소만
   } catch (e) {
     // 손상본을 조용히 []로 넘기면 다음 저장이 원본을 덮어써 자격증명이 영구 유실된다.
     preserveCorrupt(FILE, e.message);
-    _loadError = { at: Date.now(), reason: String(e?.message || e).slice(0, 200) };
+    loadErr.set(e);
     _cache = { devices: [] };
   }
   return _cache;
@@ -59,7 +52,7 @@ function load() {
 function save(devices) {
   _cache = { devices };
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ devices }), null, 2), { mode: 0o600 });
-  _loadError = null; // v2.612 LEFT2612-01
+  loadErr.clear(); // v2.612 LEFT2612-01
 }
 
 export function redact(d) {
@@ -147,19 +140,12 @@ export function deleteDevice(id) {
  * 스토리지 `devicesForThisNode` 와 같은 규약.
  */
 export function devicesForThisNode({ devices = load().devices, agentName = config.agent.name, isEdge = !!config.agent.centralUrl } = {}) {
-  const me = String(agentName || '').trim().toLowerCase();
-  return devices.filter((d) => {
-    if (d.enabled === false) return false;
-    const a = String(d.agent || '').trim().toLowerCase();
-    return isEdge ? (a && a === me) : !a;
-  });
+  return coreDevicesForThisNode(devices, { agentName, isEdge }); // v2.613 DEPS2613-04: 판정은 util/registryCore.js 하나
 }
 
 /** 중앙이 특정 엣지에 내려줄 장비 목록(비밀번호 포함 — 개별 토큰 인증 경로에서만 호출). */
 export function devicesForAgent(agentName) {
-  const me = String(agentName || '').trim().toLowerCase();
-  if (!me) return [];
-  return load().devices.filter((d) => d.enabled !== false && String(d.agent || '').trim().toLowerCase() === me);
+  return coreDevicesForAgent(load().devices, agentName); // v2.613 DEPS2613-04
 }
 
 /** 엣지가 중앙에서 받은 목록으로 로컬 파일을 교체(pull 적용). */
@@ -173,4 +159,4 @@ export function applyPulledDevices(list) {
   return { ok: true, count: list.length, removed: [...before].filter((id) => !now.has(id)) };
 }
 
-export function _resetForTest() { _cache = null; _loadError = null; }
+export function _resetForTest() { _cache = null; loadErr.clear(); }

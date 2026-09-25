@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
+import { agoText } from './relTime.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { blankOr } from '../blankOr.js';
@@ -9,7 +10,7 @@ import { blankOr } from '../blankOr.js';
  * 구성도: 중앙 → Edge DVC(HAProxy :4000/4065/4066/4067/4068/4001) → IRS. 호스트 × 포트 프로파일로 대상을 자동 생성해 주기 점검하고,
  * 실패 시 원인 후보·조치·haproxy.cfg 예시를 보여준다. 상태 전이(연속 N회)에 알림 채널로 발화한다.
  */
-const ago = (ts) => { if (!ts) return '—'; const s = Math.round((Date.now() - ts) / 1000); return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : `${Math.round(s / 3600)}시간 전`; };
+// v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다(로컬 ago 사본 제거).
 const PHASE = { ok: '정상', refused: '리스너 없음', timeout: '무응답', unreach: '경로 없음', tls: 'TLS 무응답', http: 'HTTP 무응답', identity: '대상 불일치', auth: '토큰 거부', hq: '중앙 아님', banner: 'SSH 아님', unknown: '오류' };
 
 export default function RelayCheckTool() {
@@ -68,7 +69,7 @@ export default function RelayCheckTool() {
         <Kpi label="점검 대상" value={(data.targets || []).length} meta={`호스트 ${new Set((data.targets || []).map((t) => t.host)).size} × 프로파일 ${form.profile.length}`} />
         <Kpi label="정상" value={results.filter((r) => r.ok).length} accent="var(--green)" />
         <Kpi label="실패" value={failN} accent={failN ? 'var(--red)' : 'var(--green)'} />
-        <Kpi label="마지막 점검" value={ago(data.last?.at)} meta={data.busy ? '진행 중' : data.last?.durationMs ? `${Math.round(data.last.durationMs / 1000)}초 소요` : ''} />
+        <Kpi label="마지막 점검" value={agoText(data.last?.at)} meta={data.busy ? '진행 중' : data.last?.durationMs ? `${Math.round(data.last.durationMs / 1000)}초 소요` : ''} />
       </div>
 
       <div className="card" style={{ marginBottom: 12 }}>
@@ -130,8 +131,8 @@ export default function RelayCheckTool() {
                   <td data-sort={r.ok ? 1 : 0}><span className={`badge ${r.ok ? 'green' : 'red'}`}>{PHASE[r.phase] || r.phase}</span>{!r.ok && r.failStreak > 1 ? <span className="muted" style={{ fontSize: 10.5, marginLeft: 4 }}>연속 {r.failStreak}</span> : null}{r.alerted ? <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }}>알림됨</span> : null}</td>
                   <td style={{ fontSize: 12, maxWidth: 360, whiteSpace: 'normal' }}>{r.ok ? <span className="muted">{r.detail}</span> : <span style={{ color: 'var(--red)' }}>{r.error}</span>}</td>
                   <td data-sort={r.ms}>{r.ms ?? '—'}</td>
-                  <td>{ago(r.lastOkAt)}</td>
-                  <td>{ago(r.at)}</td>
+                  <td>{agoText(r.lastOkAt)}</td>
+                  <td>{agoText(r.at)}</td>
                 </tr>
                 {!r.ok && open === r.target.key && r.remedy && (
                   <tr><td colSpan={10} style={{ background: 'rgba(245,158,11,.06)' }}>

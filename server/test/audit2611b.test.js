@@ -20,6 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -290,16 +291,16 @@ test('LEFT2611-05: FinOps 숫자 칸 — 빈 값은 이전 값, 명시적 0 은 
 
 test('LEFT2611-06: 수집 서버 URL 끝 슬래시 제거는 선형 + 길이 상한 · 세 곳이 한 헬퍼', async () => {
   const { collectorInputIssue } = await import('../src/collector/registry.js');
-  const long = `http://10.1.1.1:4000${'/'.repeat(40_000)}x`;
+  const long = `http://10.1.1.1:4000${'/'.repeat(100_000)}x`;   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
   const t0 = performance.now();
   const iss = collectorInputIssue({ id: 'e', name: 'E', url: long });
-  assert.ok(performance.now() - t0 < 200, '수정 전: 4만 자 620ms(O(n²))');
+  assert.ok(performance.now() - t0 < 1000, '수정 전: 4만 자 620ms(O(n²)) — 10만 자면 약 4초');
   assert.match(String(iss), /너무 깁니다/, '수정 전: 검증 통과(null) → 저장');
   const { trimTrailingSlashes } = await import('../src/util/trimSlashes.js');
   const t1 = performance.now(); trimTrailingSlashes(`${'/'.repeat(200_000)}x`); trimTrailingSlashes(`x${'/'.repeat(200_000)}`);
-  assert.ok(performance.now() - t1 < 100);
+  assert.ok(performance.now() - t1 < 1000);
   assert.equal(trimTrailingSlashes('http://a:1///'), 'http://a:1');
-  const strip = (f) => fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const strip = (f) => stripComments(fs.readFileSync(path.join(SRC, f), 'utf8'));   // v2.613 TESTDOC2613-08
   assert.equal((strip('collector/registry.js').match(/\/\\\/\+\$\//g) || []).length, 0, '정규식 끝-슬래시 치환이 남아 있다');
   for (const f of ['routes/central.js', 'auth/toolAccess.js', 'collector/registry.js']) {
     assert.match(strip(f), /from '\.\.\/util\/trimSlashes\.js'/, `${f} 는 공용 헬퍼를 쓴다`);
@@ -308,7 +309,7 @@ test('LEFT2611-06: 수집 서버 URL 끝 슬래시 제거는 선형 + 길이 상
 });
 
 test('LEFT2611-08: 중앙→엣지 호출은 수집 서버 id 태그로 감싼다', () => {
-  const strip = (f) => fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const strip = (f) => stripComments(fs.readFileSync(path.join(SRC, f), 'utf8'));
   for (const f of ['routes/admin/collectorsDc.js', 'routes/admin/deployLlm.js']) {
     const s = strip(f);
     const calls = s.match(/resilientFetch\(`[^`]*\/api\/collector\//g) || [];

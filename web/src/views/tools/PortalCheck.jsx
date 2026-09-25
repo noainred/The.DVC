@@ -21,6 +21,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
+import { useHashTab } from '../../hooks/useHashTab.js'; // v2.613 CATALOG2613-06: 서브메뉴를 URL 에 싣는다
 import { Loading, ErrorBox, SearchBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -545,7 +546,9 @@ function InventoryCheckView() {
  * (검색어·필터·모달)가 서브메뉴 사이에 새는 것을 막기 위해 컴포넌트 자체를 스위치한다.
  */
 export function PortalCheck() {
-  const [view, setView] = useState('tokens');
+  // v2.613(CATALOG2613-06 / WEB2613-04): 서브메뉴를 해시(#/tools/portal-check/<view>)에 싣는다 — 새로고침·북마크·다른 화면에서의
+  //   딥링크(예: 인벤토리 점검)가 첫 탭으로 되돌아가지 않는다(v2.438 규약, 형제 13개 도구와 같은 훅). 훅은 조기 return 위에.
+  const [view, setView] = useHashTab({ base: ['tools', 'portal-check'], valid: VIEWS.map(([k]) => k), fallback: 'tokens' });
   return (
     <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 }}>
       <div className="card" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

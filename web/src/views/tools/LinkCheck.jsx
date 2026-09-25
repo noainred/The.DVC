@@ -18,6 +18,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { useLatest } from '../../hooks/useLatest.js';
+import { useHashTab } from '../../hooks/useHashTab.js'; // v2.613 CATALOG2613-06: 서브메뉴를 URL 에 싣는다
 import { Loading, ErrorBox, SearchBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -68,7 +69,8 @@ function PhaseTrail({ latest, phases, label }) {
 
 export function LinkCheck() {
   // ⚠ 훅은 전부 조기 return 위에(조기 반환 뒤 훅 추가는 React #310 크래시 — v2.202 실제 사고).
-  const [view, setView] = useState('settings');   // v2.553 — 기본은 '설정 전수'(요청의 초점)
+  // v2.613(CATALOG2613-06 / WEB2613-04): 서브메뉴를 해시(#/tools/link-check/<view>)에 싣는다(v2.438 규약). 기본은 '설정 전수'(v2.553 — 요청의 초점).
+  const [view, setView] = useHashTab({ base: ['tools', 'link-check'], valid: VIEWS.map(([k]) => k), fallback: 'settings' });
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);

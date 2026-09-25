@@ -21,6 +21,7 @@ import {
 import { findingsOf, findingCounts, FINDING, FINDING_GRADE } from '../src/portalcheck/tokenFindings.js';
 import { probeCollectorPing, probeCentralRole, probeAll, errorKindOf, PROBE_TIMEOUT_MS } from '../src/portalcheck/tokenProbe.js';
 import { sanitizeEnvelope, putEdgeTokenReport, _resetForTest as resetPull, MIN_EDGE_VERSION } from '../src/central/tokenCheckPull.js';
+import { stripComments } from './_stripComments.js';
 
 const SECRET = 'S3cret-token-value-0123456789';
 
@@ -419,8 +420,7 @@ test('엣지 라우트는 COLLECTOR_TOKEN 게이트 뒤에 있고 개별 토큰 
 
 test('중앙 라우트는 adminOnly + 전체 범위 전용이고, 본문에서 url·token 을 읽지 않는다', async () => {
   const fs = await import('node:fs');
-  const src = fs.readFileSync(new URL('../src/routes/api/portalCheck.js', import.meta.url), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');  // 주석이 통과 근거가 되면 안 된다(v2.535 규약)
+  const src = stripComments(fs.readFileSync(new URL('../src/routes/api/portalCheck.js', import.meta.url), 'utf8'));  // 주석이 통과 근거가 되면 안 된다(v2.535 규약)
   for (const m of ['/tools/portal-check/tokens', '/tools/portal-check/tokens/probe', '/tools/portal-check/tokens/edge-pull']) {
     const i = src.indexOf(`'${m}'`);
     assert.ok(i > 0, `${m} 라우트가 없다`);
@@ -437,8 +437,7 @@ test('중앙 라우트는 adminOnly + 전체 범위 전용이고, 본문에서 u
 test('토큰을 싣는 요청은 resilientFetch(retries 0)로만 나간다 — 전역 fetch 금지', async () => {
   const fs = await import('node:fs');
   for (const f of ['../src/portalcheck/tokenProbe.js', '../src/central/tokenCheckPull.js']) {
-    const src = fs.readFileSync(new URL(f, import.meta.url), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const src = stripComments(fs.readFileSync(new URL(f, import.meta.url), 'utf8'));
     assert.match(src, /resilientFetch/, `${f} 가 resilientFetch 를 쓰지 않는다(전역 fetch 는 DNS 리바인딩 lookup 이 없다)`);
     assert.ok(!/\bglobalThis\.fetch\b/.test(src) && !/(^|[^.\w])fetch\(/.test(src), `${f} 에 전역 fetch 호출이 있다`);
     assert.match(src, /retries:\s*0/, `${f} 의 점검 요청에 retries:0 이 없다`);
@@ -447,8 +446,7 @@ test('토큰을 싣는 요청은 resilientFetch(retries 0)로만 나간다 — �
 
 test('엣지 자기보고는 racadm 류 부하를 만들지 않는다 — 중앙 표적은 health-probe 하나다', async () => {
   const fs = await import('node:fs');
-  const src = fs.readFileSync(new URL('../src/portalcheck/edgeReport.js', import.meta.url), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const src = stripComments(fs.readFileSync(new URL('../src/portalcheck/edgeReport.js', import.meta.url), 'utf8'));
   assert.match(src, /\/api\/central\/health-probe/);
   // ⚠ 5분마다 로그인하면 세션 테이블을 채우고 계정을 잠근다(v2.553 규약) — 인증 경로를 쓰지 않는다.
   assert.ok(!src.includes('/api/central/export') && !src.includes('/api/collector/export'), '무거운 경로를 표적으로 쓰면 점검이 곧 부하가 된다');
@@ -518,7 +516,7 @@ test("'빈 인벤토리' 배지는 버튼이다 — 툴팁에만 두면 복사·
   const col = fs.readFileSync(new URL('../../web/src/views/Collectors.jsx', import.meta.url), 'utf8');
   // ⚠ 주석에도 같은 낱말이 있어 `indexOf` 로 잡으면 엉뚱한 곳을 본다(v2.535 규약의 변형) —
   //   주석을 먼저 제거하고 **마지막** 등장(= JSX 라벨)을 기준으로 본다.
-  const bare = col.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const bare = stripComments(col);   // v2.613 TESTDOC2613-08: JSX 의 {/* */} 도 블록 주석으로 지워진다(빈 {} 만 남는다)
   const i = bare.lastIndexOf('빈 인벤토리');
   assert.ok(i > 0, 'JSX 에 배지 라벨이 없다');
   const seg = bare.slice(Math.max(0, i - 700), i + 100);

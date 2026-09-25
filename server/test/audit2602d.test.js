@@ -25,10 +25,10 @@ test('SEC2602-02: PDU parseCode 는 빈 줄 8만 개에서도 선형이고 결�
   const r = parseCode('\n'.repeat(80000) + 'x');
   const ms = performance.now() - t0;
   assert.deepEqual(r, { code: '', ok: false, message: '' });
-  assert.ok(ms < 150, `parseCode ${ms.toFixed(1)}ms`);
+  assert.ok(ms < 1000, `parseCode ${ms.toFixed(1)}ms`);   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
   const t1 = performance.now();
   parseReading(' \r\n'.repeat(40000) + 'x');
-  assert.ok(performance.now() - t1 < 150);
+  assert.ok(performance.now() - t1 < 1000);
   // 동작 보존
   assert.deepEqual(parseCode('apc>tempReading 1:C\nE000: Success\n22.9 C'), { code: 'E000', ok: true, message: 'Success' });
   assert.deepEqual(parseCode('  E102: Parameter Error\r\n'), { code: 'E102', ok: false, message: 'Parameter Error' });
@@ -40,12 +40,12 @@ test('SEC2602-03: bmstor sanitizeMounts 는 길이를 먼저 보고 긴 슬래�
   const t0 = performance.now();
   const r = sanitizeMounts(['/'.repeat(80000) + 'x']);
   const ms = performance.now() - t0;
-  assert.ok(ms < 150, `sanitizeMounts ${ms.toFixed(1)}ms`);
+  assert.ok(ms < 1000, `sanitizeMounts ${ms.toFixed(1)}ms`);
   assert.equal(r.mounts.length, 0);
   assert.match(r.errors[0], /너무 김/);
   const t1 = performance.now();
   sanitizeMounts(['/a' + '/'.repeat(200)]);   // 256 이하 — 정상 경로
-  assert.ok(performance.now() - t1 < 150);
+  assert.ok(performance.now() - t1 < 1000);
   // 동작 보존: 끝 슬래시 제거 · 루트 유지 · 슬래시만 있는 값은 버림 · 금지 문자 거부
   assert.deepEqual(sanitizeMounts('/data/,/,//,/var/log//').mounts, ['/data', '/', '/var/log']);
   assert.equal(sanitizeMounts(['/a;rm']).errors.length, 1);

@@ -68,6 +68,14 @@ test('② util/ 은 util/·config.js·node 내장(+명시 allowlist)만 import �
   assert.deepEqual(bad, [], `util 이 도메인을 import 한다(v2.579 ARCH-02 유형):\n${bad.join('\n')}`);
 });
 
+// v2.613(감사 DEPS2613-01): config.js 는 거의 모든 모듈이 import 하는 설정 leaf 다 — 그것이 agent/ 같은 도메인 디렉터리를
+// 향하면(v2.605 가 `agent/envTimeout.js` 를 넣었다) 그 모듈에 config 를 import 하는 순간 파일 순환이 된다. util/·security/·
+// node 내장만 허용한다(security/secretVault.js 는 v2.296 부터 지연 로드 — 저쪽이 config 를 import 하므로 동적이어야 한다).
+test('②-c config.js 는 util/·security/·node 내장만 import 한다 — 설정 leaf 가 도메인을 향하지 않는다', () => {
+  const bad = importsOf(path.join(ROOT, 'config.js')).filter((t) => !(t.startsWith('util/') || t.startsWith('security/')));
+  assert.deepEqual(bad, [], `config.js 가 도메인 모듈을 import 한다(v2.613 DEPS2613-01 유형):\n${bad.join('\n')}`);
+});
+
 test('②-b util/ 이 속한 순환(SCC)이 없다', () => {
   const edges = new Map(files.map((f) => [rel(f), importsOf(f)]));
   let idx = 0; const st = []; const on = new Set(); const index = new Map(); const low = new Map(); const sccs = [];
@@ -91,7 +99,20 @@ test('②-b util/ 이 속한 순환(SCC)이 없다', () => {
 const POOL_EXCLUDED = new Map([
   ['svcmon/pool.js', '인라인 폴백 — 프로세스/소켓 두 레인을 따로 배수(PROC_LIMIT·SOCK_LIMIT)'],
   ['routes/admin/gpuGuest.js', '항목별 사전 판정(continue)·결과 슬롯이 한 루프 안에 있다'],
+  // v2.594 감사가 '결함 아님' 으로 판정한 7곳(호출부가 전부 고정값·클램프라 limit<=0 결함이 잠재) — v2.613 RUNTIME2613-03(b)
+  // 에 정규식을 넓히며 사유와 함께 명시한다. ⚠ 새 손 풀은 여기 더하지 말고 util/pool.js 를 쓸 것.
+  ['ping/monitor.js', 'v2.594 판정: config.ping.concurrency 는 하한 클램프된 고정값'],
+  ['bmstor/collect.js', 'v2.594 판정: Math.max(1, …) 로 하한을 잡는다'],
+  ['idrac/redfish.js', 'v2.594 판정: REPORT_FETCH_CONCURRENCY·상수 3 — 고정값 2곳'],
+  ['idrac/scan.js', 'v2.594 판정: concurrency 클램프 + `targets.length || 1`'],
+  ['routes/admin/deployLlm.js', 'v2.594 판정: 상수 4·3 — 고정값 2곳'],
+  ['security/certMonitor.js', 'v2.594 판정: CONCURRENCY 상수'],
 ]);
+// v2.613 RUNTIME2613-03(b): 예전 정규식 `Math\.min\(limit` 는 변수 이름 하나만 봐서 `Math.max(1, Math.min(PROBE_CONCURRENCY, …))`
+// (routes/api/portalCheck.js, v2.560)을 놓쳤다. 의도('N개 동일 워커가 공유 큐를 비우는 스캐폴드')로 검사한다 —
+// `Array.from({ length: Math.min|max(…) }, async …)` 또는 `…, worker)` 처럼 **콜백이 인덱스를 받지 않는** 형태.
+// `(_, k) =>` 로 k 를 쓰는 것은 매핑(nsx/mock.js 의 목 데이터 등)이지 풀이 아니다.
+const POOL_SCAFFOLD_RE = /Array\.from\(\{\s*length:\s*Math\.(?:min|max)\((?:[^()]|\([^()]*\))*\)\s*\}\s*,\s*(?:async\b|[A-Za-z_$][\w$]*\s*\))/;
 test('③ 동시성 풀 스캐폴드는 util/pool.js 하나다 — 손으로 쓴 사본 0', () => {
   const bad = [];
   for (const f of files) {
@@ -99,7 +120,7 @@ test('③ 동시성 풀 스캐폴드는 util/pool.js 하나다 — 손으로 쓴
     if (r === 'util/pool.js' || POOL_EXCLUDED.has(r)) continue;
     const s = code(f);
     if (/function (eachLimited|pool)\s*\(/.test(s) && !/poolSettled|poolRun/.test(s)) bad.push(`${r}: 자체 풀 함수`);
-    if (/Array\.from\(\{\s*length:\s*Math\.min\(limit/.test(s)) bad.push(`${r}: 풀 스캐폴드 인라인`);
+    if (POOL_SCAFFOLD_RE.test(s)) bad.push(`${r}: 풀 스캐폴드 인라인`);
   }
   assert.deepEqual(bad, [], `동시성 풀 사본이 남아 있다(v2.575 IMP-08 규약):\n${bad.join('\n')}`);
 });

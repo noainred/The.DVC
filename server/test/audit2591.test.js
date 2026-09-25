@@ -334,9 +334,9 @@ test('★ S2: 템플릿 정규식은 긴 줄에서 선형 · 분석 루프는 �
   assert.match(s, /\(\?=\[\\w\.-\]\{0,80\}\\d\)/, "식별자 앞보기가 무제한이면 'x-x-x…' 줄에서 O(n²) 이다");
   // 같은 입력의 결과는 예전과 같다(뜻을 바꾸지 않았다)
   assert.equal(templateOf('[s] server-a1b2c3 id=77 key="abc" 10.1.2.3:443'), '<id> id=<*> key=<*> <ip>');
-  const long = '[svc] ' + 'x-'.repeat(4000);
+  const long = '[svc] ' + 'x-'.repeat(40_000);   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
   const t0 = performance.now(); templateOf(long); const dt = performance.now() - t0;
-  assert.ok(dt < 40, `8,000자 한 줄에 ${dt.toFixed(1)}ms(예전 84ms — 초선형)`);
+  assert.ok(dt < 1000, `80,000자 한 줄에 ${dt.toFixed(1)}ms(예전 8,000자에 84ms — 초선형이면 80,000자에 약 8초)`);
   const { analyzeItems } = await import('../src/loganalysis/engine.js');
   let interleaved = 0;
   const tick = () => { interleaved += 1; if (interleaved < 1000) setImmediate(tick); };

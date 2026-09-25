@@ -94,7 +94,7 @@ test('SEC2599-01 — 무변경 저장은 글자 그대로 같고(RECENT2598-01),
   const prev = JSON.parse(disk).vcenters;
   const same = saved.vcenters.filter((x, i) => i !== 7 && x.password === prev[i].password).length;
   assert.equal(same, 39, '안 바뀐 39대는 암호문 재사용(경로 문맥 · 래퍼 한 단계 차이 허용)');
-  assert.ok(ms < 200, `40대 저장 ${ms.toFixed(1)}ms`);
+  assert.ok(ms < 1000, `40대 저장 ${ms.toFixed(1)}ms(수정 전 4.1초)`);   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
 });
 
 /* ── SEC2599-02 uemcli 줄 끝 공백 제거가 선형이다 ── */
@@ -104,12 +104,12 @@ test('SEC2599-02 — 공백만 긴 줄 하나로 파서가 멈추지 않는다',
   const t = process.hrtime.bigint();
   parseUemcli(`1:    ID = pool_1\n${line}\n      Name = p\n`);
   const ms = Number(process.hrtime.bigint() - t) / 1e6;
-  assert.ok(ms < 150, `60,000 공백 줄 처리 ${ms.toFixed(0)}ms — replace(/\\s+$/)·/^(.*?)\\s+=/ 는 O(n²)`);
+  assert.ok(ms < 1000, `60,000 공백 줄 처리 ${ms.toFixed(0)}ms — replace(/\\s+$/)·/^(.*?)\\s+=/ 는 O(n²)(60,000자면 수 초)`);   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
   const { healthOf } = await import('../src/storage/collectors/uemcliParse.js');
   const t2 = process.hrtime.bigint();
   healthOf(`x${' '.repeat(40_000)}y`);
   const ms2 = Number(process.hrtime.bigint() - t2) / 1e6;
-  assert.ok(ms2 < 100, `healthOf 공백 4만 ${ms2.toFixed(0)}ms`);
+  assert.ok(ms2 < 1000, `healthOf 공백 4만 ${ms2.toFixed(0)}ms`);
   assert.deepEqual(['OK (5)', ' Degraded  (12) ', 'OK', ''].map(healthOf), ['OK', 'Degraded', 'OK', '']);
   assert.doesNotMatch(read('storage/collectors/uemcliParse.js'), /replace\(\/\\s\+\$\//);
 });
@@ -194,7 +194,7 @@ test('SEC2599-02 형제 — 공백 3만 자 줄 하나로 장비 파서가 멈�
   const { parseTable } = await import('../src/storage/collectors/xtremioSsh.js');
   const { parseKeyValueBlocks } = await import('../src/storage/collectors/cliSsh.js');
   const { versionFromSvcDiag } = await import('../src/storage/collectors/unityVersion.js');
-  const N = 30_000;
+  const N = 60_000;   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
   const inputs = [' '.repeat(N) + 'x', 'x' + ' '.repeat(N) + 'x', '1 ' + ' '.repeat(N) + 'x', '\t'.repeat(N) + 'x'];
   const fns = { parseSwitchShow: fos.parseSwitchShow, parseLicenseShow: fos.parseLicenseShow, parseFabricShow: fos.parseFabricShow, parseCfgShow, parseLl, parseTable, parseKeyValueBlocks, versionFromSvcDiag };
   for (const [name, fn] of Object.entries(fns)) {
@@ -202,7 +202,7 @@ test('SEC2599-02 형제 — 공백 3만 자 줄 하나로 장비 파서가 멈�
       const t = process.hrtime.bigint();
       fn(s);
       const ms = Number(process.hrtime.bigint() - t) / 1e6;
-      assert.ok(ms < 150, `${name} 공백 ${N}자 줄 ${ms.toFixed(0)}ms — 정규식 O(n²)`);
+      assert.ok(ms < 1000, `${name} 공백 ${N}자 줄 ${ms.toFixed(0)}ms — 정규식 O(n²)(60,000자면 수 초)`);
     }
   }
   // 뜻은 그대로다(대표 입력)

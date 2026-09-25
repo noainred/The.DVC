@@ -325,7 +325,12 @@ test('#13 SAN·PDU push — 위임 0대면 빈 목록으로 중앙을 비우고,
   const r2 = await run(d2);
   const o2 = JSON.parse(r2.stdout.split('@@')[1]);
   srv.close();
-  assert.equal(seen.length, 0, `스냅샷이 없는 위임 장비가 있으면 중앙을 비우지 않는다: ${JSON.stringify(seen.map((x) => x.url))}`);
+  // v2.613 EDGE2613-04: 이제 이 경우 '상태 전용 보고' 를 올리려고 중앙 버전을 먼저 본다(health-probe GET). 이 목 중앙은 version 을 주지 않으므로
+  //   상태 보고는 보내지 않는다('central-version-unknown') — 목록 경로(*-data) POST 가 0건인 것이 이 테스트의 계약이다.
+  const dataPosts = seen.filter((x) => x.url !== '/api/central/health-probe');
+  assert.equal(dataPosts.length, 0, `스냅샷이 없는 위임 장비가 있으면 중앙을 비우지 않는다: ${JSON.stringify(seen.map((x) => x.url))}`);
+  assert.equal(o2.a.statusSkipped, 'central-version-unknown', 'SAN: 중앙 버전을 모르면 상태 전용 보고도 보내지 않고 사유를 남긴다');
+  assert.equal(o2.b.statusSkipped, 'central-version-unknown', 'PDU: 같은 규칙');
   assert.match(o2.sa.reason, /위임 장비 1대/);
   assert.match(o2.pa.reason, /위임 PDU 1대/);
   fs.rmSync(d1, { recursive: true, force: true }); fs.rmSync(d2, { recursive: true, force: true });

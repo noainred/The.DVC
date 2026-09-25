@@ -1,12 +1,8 @@
 /**
- * 엣지 워커의 요청 시한 env 정규화(v2.600 감사 추가 배정).
- *
- * `Number(process.env.X) || 기본값` 형태는 음수(-1)를 그대로 통과시켜 **요청이 즉시 중단**되고, 2^31−1ms 를 넘는
- * 값은 Node 가 1ms 로 바꿔 같은 결과가 된다(v2.599 T2599-02 의 주기 env 와 같은 계열 — 그쪽은 config.js clampIntervalMs).
- * 요청 시한은 [1초, 10분] 이 기본 범위다(배포처럼 긴 작업은 max 를 넓혀 부른다). 빈 값·0·비숫자는 기본값.
+ * 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다.
+ * config.js 가 agent/ 를 import 하는 방향(설정 leaf → 엣지 워커 디렉터리)이 잠재 순환의 씨앗이었고, agent/ 밖
+ * 18개 파일이 이 순수 헬퍼를 가져다 쓰고 있었다 — 도메인 공용 헬퍼는 util/ 이 자리다. 호출부 호환을 위해 옛 경로를 남긴다.
+ * ⚠ `export { x } from` 이 아니라 import + export 다(v2.575 규약).
  */
-export function reqTimeoutMs(raw, def, { min = 1_000, max = 600_000 } = {}) {
-  const v = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : typeof raw === 'number' ? raw : NaN;
-  if (!Number.isFinite(v) || v <= 0) return def;
-  return Math.min(max, Math.max(min, Math.round(v)));
-}
+import { reqTimeoutMs } from '../util/envTimeout.js';
+export { reqTimeoutMs };

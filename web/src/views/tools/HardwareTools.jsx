@@ -15,6 +15,21 @@ import { dayStamp } from '../../dayStamp.js';
 import { intervalText } from './collectActivityText.js';
 
 
+/**
+ * 법인(DataCenter) 목록 조회 실패 안내(v2.613 WEB2613-02 — DatastoreUsage 의 v2.590 W3 처리와 같은 문구).
+ * `/admin/datacenters` 는 관리자 전용이다 — 실패를 삼키면 assign 이 비어 서버 전부가 '미지정(법인 없음)' 으로
+ * 묶여 **설정 결함처럼** 읽힌다. 못 읽은 것은 지정되지 않았다는 뜻이 아니다.
+ */
+function DcErrNote({ err }) {
+  if (!err) return null;
+  const why = err?.status === 403 ? ' — 이 계정에는 법인 목록 조회 권한(관리자)이 없습니다' : ` — ${err?.message || err}`;
+  return (
+    <div className="card" style={{ padding: 12, marginBottom: 12, borderLeft: '3px solid var(--amber)', fontSize: 13, whiteSpace: 'normal' }}>
+      법인(DataCenter) 정보를 읽지 못했습니다{why}. 법인으로 묶지 못한 서버는 <b>법인이 지정되지 않았다는 뜻이 아닙니다</b>.
+    </div>
+  );
+}
+
 export function Hardware({ scope }) {
   const { loading, data, error } = useTool('/tools/hardware', scope ? { vcenterId: scope } : {});
   if (loading) return <Loading />;
@@ -134,7 +149,8 @@ function HardwareSummary() {
   const [err, setErr] = useState(null);
   const [drill, setDrill] = useState(null); // { dim, key } — 항목 클릭 시 서버 목록
   const [detail, setDetail] = useState(null); // 드릴 목록에서 클릭한 서버의 iDRAC 상세
-  useEffect(() => { fetchJson('/admin/datacenters').then((r) => setDcs(r.datacenters || [])).catch(() => {}); }, []);
+  const [dcErr, setDcErr] = useState(null); // v2.613 WEB2613-02: 법인 목록 조회 실패는 따로 든다(빈 목록 = '법인 없음' 이 아니다)
+  useEffect(() => { fetchJson('/admin/datacenters').then((r) => { setDcs(r.datacenters || []); setDcErr(null); }).catch((e) => setDcErr(e)); }, []);
   useEffect(() => {
     let active = true; // 법인(dc)을 빠르게 바꾸면 느린 이전 응답이 최신을 덮어쓰던 경쟁 방지.
     setD(null);
@@ -175,10 +191,11 @@ function HardwareSummary() {
           <select className="select" value={dc} onChange={(e) => setDc(e.target.value)} style={{ minWidth: 180 }}>
             <option value="">전체 데이터센터</option>
             {dcs.map((x) => <option key={x.id} value={x.id}>{x.name || x.id}</option>)}
-            <option value="__unmapped__">⚠ 미지정(법인 없음)</option>
+            <option value="__unmapped__">{dcErr ? '법인 정보를 읽지 못함' : '⚠ 미지정(법인 없음)'}</option>
           </select>
         </label>
       </div>
+      <DcErrNote err={dcErr} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
         <Bars title="🖥 서버 모델 종류" rows={d.byModel} dim="model" />
         <Bars title="⚙ CPU 종류" rows={d.byCpu} dim="cpu" />
@@ -200,9 +217,12 @@ function ServerInfoByVcenter({ vc, onServer }) {
   const [inlineCorp, setInlineCorp] = useState(null); // 법인명 클릭 → 카드 아래 인라인 상세 표(팝업 아님)
   const inlineRef = useRef(null);
   useEffect(() => { if (inlineCorp) inlineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, [inlineCorp]);
+  // v2.613 WEB2613-02(v2.590 W3 의 형제): 법인 목록(관리자 전용) 조회 실패를 `{assign:{}}` 로 삼키면 명시 datacenterId 가 없는
+  //   서버 전부가 '미지정(법인 없음)' 으로 묶여 **설정 결함처럼** 읽힌다. 실패는 dcErr 로 따로 들고 그렇게 말한다(DatastoreUsage 와 같다).
+  const [dcErr, setDcErr] = useState(null);
   const load = () => Promise.all([
     fetchJson('/admin/idrac').then((r) => r.servers || []),
-    fetchJson('/admin/datacenters').then((r) => ({ datacenters: r.datacenters || [], assign: r.assign || {} })).catch(() => ({ datacenters: [], assign: {} })),
+    fetchJson('/admin/datacenters').then((r) => { setDcErr(null); return { datacenters: r.datacenters || [], assign: r.assign || {} }; }).catch((e) => { setDcErr(e); return { datacenters: [], assign: {} }; }),
   ]).then(([servers, dc]) => { setD(servers); setDcs(dc); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, []);
   if (err) return <ErrorBox message={err} />;
@@ -230,7 +250,7 @@ function ServerInfoByVcenter({ vc, onServer }) {
   const groups = new Map();
   for (const s of rows) { const id = dcOf(s) || '__unmapped__'; if (!groups.has(id)) groups.set(id, []); groups.get(id).push(s); }
   const groupList = [...groups.entries()]
-    .map(([id, list]) => ({ id, name: id === '__unmapped__' ? '미지정(법인 없음)' /* ⚠ 아이콘은 제목 접두가 붙인다(v2.600 WEB2600-07 — 두 번 찍혔다) */ : (dcName.get(id) || id), list }))
+    .map(([id, list]) => ({ id, name: id === '__unmapped__' ? (dcErr ? '법인 정보를 읽지 못함' : '미지정(법인 없음)') /* ⚠ 아이콘은 제목 접두가 붙인다(v2.600 WEB2600-07 — 두 번 찍혔다) */ : (dcName.get(id) || id), list }))
     .sort((a, b) => (a.id === '__unmapped__' ? 1 : 0) - (b.id === '__unmapped__' ? 1 : 0) || b.list.length - a.list.length || String(a.name).localeCompare(String(b.name)));
   const corpCount = groupList.filter((g) => g.id !== '__unmapped__').length;
   return (
@@ -238,7 +258,7 @@ function ServerInfoByVcenter({ vc, onServer }) {
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="muted" style={{ fontSize: 13 }}>
           등록 서버 <b style={{ color: 'var(--accent)' }}>{rows.length}</b>대 · 법인 <b>{corpCount}</b>개
-          {groups.has('__unmapped__') && <> · <span className="badge amber">미지정 {groups.get('__unmapped__').length}</span></>}
+          {groups.has('__unmapped__') && <> · <span className="badge amber">{dcErr ? '법인 정보를 읽지 못함' : '미지정'} {groups.get('__unmapped__').length}</span></>}
           <span style={{ marginLeft: 8 }}>· 서버 행을 클릭하면 iDRAC 상세(버전·온도·CPU)를 봅니다.</span>
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
@@ -246,6 +266,7 @@ function ServerInfoByVcenter({ vc, onServer }) {
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={load}>↻ 새로고침</button>
         </div>
       </div>
+      <DcErrNote err={dcErr} />
       {groupList.length === 0 ? (
         <div className="card" style={{ padding: 16 }}><span className="muted">등록된 서버가 없습니다. ‘설정 › iDRAC 서버 등록 › 법인별 iDRAC 장비 스캔’에서 등록하세요.</span></div>
       ) : (
@@ -511,9 +532,10 @@ export function ServerAnalysis() {
   const [vcs, setVcs] = useState([]);
   const [dcs, setDcs] = useState([]); // 등록된 DataCenter(법인)
   const [assign, setAssign] = useState({}); // vCenter → DataCenter 할당
+  const [dcErr, setDcErr] = useState(null); // v2.613 WEB2613-02: 법인 목록(관리자 전용) 조회 실패 — 1차 박스가 그 사실을 말한다
   const [detail, setDetail] = useState(null); // { id, name } → iDRAC 상세 모달
   useEffect(() => { fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => fetchJson('/admin/vcenters').then((d) => setVcs(d.vcenters || [])).catch(() => {})); }, []);
-  useEffect(() => { fetchJson('/admin/datacenters').then((r) => { setDcs(r.datacenters || []); setAssign(r.assign || {}); }).catch(() => {}); }, []);
+  useEffect(() => { fetchJson('/admin/datacenters').then((r) => { setDcs(r.datacenters || []); setAssign(r.assign || {}); setDcErr(null); }).catch((e) => setDcErr(e)); }, []);
   const onServer = (s) => setDetail({ id: s.id || s.serverId, name: s.name || s.server });
   // 2차 박스의 vCenter 목록: 1차에서 법인을 고르면 그 법인 소속 vCenter만, '전체'면 모든 vCenter.
   const dcVcs = dc ? vcs.filter((v) => assign[v.id] === dc) : vcs;
@@ -543,7 +565,7 @@ export function ServerAnalysis() {
           <label className="flex gap" style={{ alignItems: 'center' }} title="1차: 법인(DataCenter). 고르면 그 법인의 모든 장비가 보입니다.">
             <span className="muted">법인(DataCenter)</span>
             <select className="select" value={dc} onChange={(e) => { setDc(e.target.value); setLvl2(''); }} style={{ minWidth: 150 }}>
-              <option value="">전체</option>
+              <option value="">{dcErr ? '전체 (법인 정보를 읽지 못함)' : '전체'}</option>
               {dcs.map((d) => <option key={d.id} value={d.id}>{d.name || d.id}</option>)}
             </select>
           </label>
@@ -562,6 +584,7 @@ export function ServerAnalysis() {
           </label>
         </div>
       </div>
+      <DcErrNote err={dcErr} />
       {sub === 'info' && <ServerInfoByVcenter {...sp} vcs={vcs} />}
       {sub === 'hw' && <HardwareSummary />}
       {sub === 'parts' && <PartsInventory {...sp} />}

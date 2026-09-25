@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 // 확정 버그 회귀 방지(2026-08-30, 6차 재감사) — 중앙→엣지 비밀번호 심기로 보호 계정 탈취.
 //
@@ -59,7 +60,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const src = (...p) => fs.readFileSync(path.join(here, '..', 'src', ...p), 'utf8');
 
 test('엣지 set-password 는 trusted 를 넘기지 않는다', () => {
-  const s = src('routes', 'collector.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const s = stripComments(src('routes', 'collector.js'));   // v2.613 TESTDOC2613-08
   assert.match(s, /setLocalPassword\(username,\s*req\.body\?\.password\)/,
     '엣지는 actor·trusted 없이 호출해야 한다(보호 계정만 거부, 일반 계정은 허용)');
   assert.doesNotMatch(s, /setLocalPassword\([^)]*trusted:\s*true/,

@@ -1,18 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../api.js';
+import { fmtAgo } from '../util/fmt.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { unitText } from './unitText.js'; // v2.611 WEB2611-09: 결측이면 단위 없이 '—'('-%' 금지)
 import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
-const fmtAgo = (ts) => {
-  if (!ts) return '없음';
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.round(s / 60)}분 전`;
-  return `${Math.round(s / 3600)}시간 전`;
-};
+// v2.613 DEPS2613-11: 상대시각은 util/fmt.fmtAgo(relTime 코어) 하나다 — 결측 표기('없음')만 이 화면 계약.
 
 // 선별 깔때기 한 줄 — 0으로 떨어지는 지점을 빨갛게 강조(여기서 막힘).
 function Funnel({ c }) {
@@ -84,7 +79,7 @@ function VcDiag({ d, failOnly }) {
         <div><b>{d.vcId}</b> <span className={`badge ${stageOk ? 'green' : 'amber'}`} style={{ marginLeft: 6 }}>{d.stage || '?'}</span>
           {d.collected != null && <span className="muted" style={{ marginLeft: 6, fontSize: 12 }}>수집 {d.collected}개</span>}
           {failN > 0 && <span className="badge red" style={{ marginLeft: 6 }}>실패 {failN}</span>}</div>
-        <span className="muted" style={{ fontSize: 11 }}>{fmtAgo(d.at)}</span>
+        <span className="muted" style={{ fontSize: 11 }}>{fmtAgo(d.at, { dash: '없음' })}</span>
       </div>
       <Funnel c={d.counts} />
       {/* v2.590: vCenter 계정이 인증 실패로 멈췄으면 그 사실을 먼저 말한다(오류 한 줄로 두면 '왜 매번 실패하나' 로 읽힌다). */}
@@ -202,7 +197,7 @@ export default function GpuGuestDiag() {
           <div key={b.key} className="card" style={{ padding: 14, marginBottom: 12 }}>
             <div className="flex between" style={{ alignItems: 'center' }}>
               <b style={{ fontSize: 14 }}>{b.agent}</b>
-              <span className="muted" style={{ fontSize: 11 }}>{b.counts ? `수신 호스트 ${b.counts.hosts ?? '-'} · VM ${b.counts.vms ?? '-'} · ` : ''}{fmtAgo(b.at)}</span>
+              <span className="muted" style={{ fontSize: 11 }}>{b.counts ? `수신 호스트 ${b.counts.hosts ?? '-'} · VM ${b.counts.vms ?? '-'} · ` : ''}{fmtAgo(b.at, { dash: '없음' })}</span>
             </div>
             {(b.vcenters || []).length === 0
               ? <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>수집 대상 vCenter 없음(설정 확인).</div>

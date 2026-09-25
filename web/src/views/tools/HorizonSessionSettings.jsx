@@ -12,7 +12,7 @@
  * ⚠ 훅은 전부 조기 return 위에(React #310 — v2.202 실제 크래시).
  */
 import React, { useEffect, useState } from 'react';
-import { fetchJson, sendJson } from '../../api.js';
+import { fetchJson, sendJson, hasRole } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -48,7 +48,7 @@ export function HorizonSessionSettings({ onClose }) {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const [isAdmin, setIsAdmin] = useState(false);
+  const isAdmin = hasRole('admin'); // v2.613 WEB2613-01: 역할은 App 이 채운 현재 사용자 객체에서 읽는다(화면이 /auth/me 를 다시 부르지 않는다).
 
   useEffect(() => {
     let live = true;
@@ -58,10 +58,6 @@ export function HorizonSessionSettings({ onClose }) {
         if (!live) return;
         setSrc(d); setS(d.settings);
       } catch (e) { if (live) setErr(e?.message || String(e)); }
-      try {
-        const me = await fetchJson('/auth/me');
-        if (live) setIsAdmin(me?.user?.role === 'admin' || me?.role === 'admin');
-      } catch { /* 권한 조회 실패는 저장 버튼만 막는다 */ }
     })();
     return () => { live = false; };
   }, []);

@@ -27,6 +27,7 @@ import path from 'node:path';
 import http from 'node:http';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sansw-push-'));
 process.env.SANSW_PUSH_GZIP = 'true';   // 실제 운영 기본값 그대로 — gzip 경로까지 본다
@@ -149,7 +150,7 @@ test('⚠ import 된 이름을 같은 파일에서 const 구조분해로 재선�
   const hits = [];
   for (const f of files) {
     // 주석을 먼저 제거한다 — 규칙을 설명하는 주석이 오탐을 만들면 안 된다(v2.535 규약).
-    const code = fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    const code = stripComments(fs.readFileSync(f, 'utf8'));   // v2.613 TESTDOC2613-08
     const imported = new Set();
     for (const m of code.matchAll(/import\s*\{([^}]+)\}\s*from/g)) {
       for (const part of m[1].split(',')) {

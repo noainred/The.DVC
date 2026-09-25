@@ -187,7 +187,7 @@ describe('정체 대조·잡다', () => {
     expect(levelTone('error')).toBe('bad');
     expect(levelTone('warn')).toBe('warn');
     expect(levelTone('log')).toBe('idle');
-    expect(toneVar('bad')).toContain('--bad');
+    expect(toneVar('bad')).toContain('--red'); // v2.613 DEPS2613-11: 공용 toneVar(테마 토큰 --red)
   });
 });
 

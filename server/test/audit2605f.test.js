@@ -356,9 +356,9 @@ test('TIM2605-04 스윕: 시한·주기 env 의 Number(env)||기본값 형태를
 test('SEC2605-01: 자연어 폴백 파서의 퍼센트 정규식은 선형이고 결과는 예전과 같다', async () => {
   const nl = await import('../src/llm/nlSearch.js');
   const t0 = performance.now();
-  nl._fallbackParseForTest('1'.repeat(30_000) + 'x');
+  nl._fallbackParseForTest('1'.repeat(90_000) + 'x');   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
   const ms = performance.now() - t0;
-  assert.ok(ms < 150, `30k 숫자열 ${ms.toFixed(1)}ms (예전 약 1,000ms)`);
+  assert.ok(ms < 1000, `90k 숫자열 ${ms.toFixed(1)}ms (예전 30k 에 약 1,000ms — 90k 면 약 9초)`);
   // 옛 정규식과 결과 대조(정상 입력 + 결정적 난수 입력)
   const old = (q) => { const m = q.match(/(\d+)\s*%/); return m ? Number(m[1]) : null; };
   const cur = (q) => nl._fallbackParseForTest(q).filters.find((f) => /Pct$/.test(f.field))?.value ?? null;

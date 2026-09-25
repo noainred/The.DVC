@@ -19,6 +19,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { stripComments } from './_stripComments.js';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2569-'));
 process.env.CONFIG_DIR = dir;
@@ -64,9 +65,7 @@ test('③ 소스 — logAudit(req, …) 오용이 한 건도 없다', () => {
       if (p.endsWith(`${path.sep}audit.js`)) continue;
       // 주석을 먼저 제거한다 — 규칙을 설명하는 주석이 통과/실패 근거가 되면 안 된다(v2.535 규약).
       // ⚠ 개행은 **보존**한다 — 지우면 줄 번호가 밀려 엉뚱한 줄을 지목한다(이 테스트 초판의 실제 오탐).
-      const src = fs.readFileSync(p, 'utf8')
-        .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-        .replace(/(^|[^:])\/\/.*$/gm, '$1');
+      const src = stripComments(fs.readFileSync(p, 'utf8'));   // v2.613 TESTDOC2613-08: 코어(개행 보존)
       src.split('\n').forEach((ln, i) => { if (/logAudit\(\s*req\b/.test(ln)) hits.push(`${p}:${i + 1}`); });
     }
   })(new URL('../src', import.meta.url).pathname);

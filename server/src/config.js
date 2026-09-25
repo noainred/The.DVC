@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { reqTimeoutMs } from './agent/envTimeout.js';   // v2.605 TIM2605-04: 요청 시한 env 정규화(무의존 leaf 모듈)
+import { reqTimeoutMs } from './util/envTimeout.js';   // v2.605 TIM2605-04: 요청 시한 env 정규화(무의존 leaf 모듈 — v2.613 DEPS2613-01 에 util/ 로 이동)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');

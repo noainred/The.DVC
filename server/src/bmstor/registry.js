@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 시 SSRF 정적 가드
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeLoadError, filterObjectElements } from '../util/registryCore.js'; // v2.613 PERSIST2613-04
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { sanitizeMounts } from './collect.js';
 import { accessMoved } from '../util/secretCarry.js'; // v2.607 LEFT2607-06
@@ -23,25 +24,30 @@ const FILE = path.join(config.configDir, 'bm-storage.json');
 const DEFAULT_INTERVAL_MIN = 10;
 
 let cache = null;
+// v2.613 PERSIST2613-04: 로드 오류 상태·원소 필터는 util/registryCore.js 하나(다른 등록부 4벌과 같은 판정). 예전에는 원소 null 하나에
+//   아래 groups 변형이 던져 **파일 전체를 손상으로 보존하고 목록을 비웠다**(정상 서버까지 소실 — 스크래치 CONFIG_DIR 재현).
+const loadErr = makeLoadError();
+export function registryLoadError() { load(); return loadErr.get(); }
 
 function load() {
   if (cache) return cache;
   try {
     if (fs.existsSync(FILE)) {
       const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      const servers = openSecretsDeep(Array.isArray(j?.servers) ? j.servers : []);
+      const servers = filterObjectElements(openSecretsDeep(Array.isArray(j?.servers) ? j.servers : [])).list; // 객체 원소만 — 변형 루프가 null 에서 던지지 않게
       // v2.340 저장분(단일 group 문자열) → groups 배열 마이그레이션(로드 시 정규화 — 다음 저장에 영속).
       for (const s of servers) { if (!Array.isArray(s.groups)) s.groups = groupsOf(s); delete s.group; }
       cache = { servers, settings: j?.settings || {} };
     }
-  } catch { preserveCorrupt(FILE); cache = null; }
-  if (!cache) cache = { servers: [], settings: {} };
+  } catch (e) { preserveCorrupt(FILE, e?.message); loadErr.set(e); cache = null; }
+  if (!cache) { loadErr.checkCorruptOnly(FILE); cache = { servers: [], settings: {} }; }
   return cache;
 }
 
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: cache.servers, settings: cache.settings }), null, 2), { mode: 0o600 });
+  loadErr.clear(); // v2.612 LEFT2612-01 과 같은 규칙
 }
 
 const redact = ({ password, ...rest }) => ({ ...rest, hasPassword: Boolean(password) });

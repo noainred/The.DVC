@@ -17,7 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { chmodDbFiles } from '../util/sqliteOpen.js';
+import { openSqlite, isSqliteLockError, createLockRetry } from '../util/sqliteOpen.js'; // v2.613 PERSIST2613-03: open 코어는 하나
 import { numOrNull } from '../util/numOrNull.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
@@ -81,14 +81,13 @@ let _pruneTick = 0;
 let _opening = null;
 // v2.597(감사 L2597-02 — 재현): 첫 open 에서 다른 프로세스가 잠금을 쥐고 있으면('database is locked') 예전에는
 // 'unavailable' 로 래치해 **프로세스 수명 동안** 시계열 저장이 꺼졌다. 잠금은 일시적이므로 래치하지 않고 30초 뒤 다시 연다.
-let _retryAt = 0;
-export function isSqliteLockError(e) {
-  const code = e && (e.errcode ?? e.errno);
-  return code === 5 || code === 6 || /database is (locked|busy)|SQLITE_(BUSY|LOCKED)/i.test(String(e?.message || ''));
-}
+// v2.613 PERSIST2613-03: 그 규칙의 원조가 이 파일이었는데 util/sqliteOpen.js 로 뽑은 뒤 여기만 손 사본(_retryAt · 자체
+//   isSqliteLockError)으로 남아 있었다 — 잠금 판정·재시도 시각·PRAGMA 순서를 공용 헬퍼로 옮긴다(동작 동일).
+const lockRetry = createLockRetry(30_000);
+export { isSqliteLockError }; // 판정은 util/sqliteOpen.js 하나(예전 호출부·테스트 호환 재수출)
 async function open() {
   if (_db) return _db === 'unavailable' ? null : _db;
-  if (_retryAt && Date.now() < _retryAt) return null;
+  if (lockRetry.blocked()) return null;
   if (_opening) return _opening;
   _opening = openInner().finally(() => { _opening = null; });
   return _opening;
@@ -98,14 +97,10 @@ async function openInner() {
   let conn = null;
   try {
     const { DatabaseSync } = await import('node:sqlite');
-    conn = new DatabaseSync(FILE());
-    chmodDbFiles(FILE()); // v2.611(DB2611-01): 기존 -wal/-shm 잔재까지 0600(본체만 chmod 하던 것의 보완)
-    // v2.447(감사 S4): DB 파일 권한 0600 — 다른 DB 모듈(idrac/metrics/logs/ipam/vmtrack/capacity/ping)은
-    // 전부 적용돼 있는데 이 파일만 빠져 있었다. 같은 호스트의 다른 로컬 사용자가 읽을 수 있었다.
-    try { fs.chmodSync(FILE(), 0o600); } catch { /* best effort */ }
-    conn.exec('PRAGMA busy_timeout=3000;'); // 먼저 — journal_mode 전환도 잠금을 기다리게(L2597-02)
-    conn.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;
-      CREATE TABLE IF NOT EXISTS api_latest (
+    // v2.447(감사 S4) DB 파일 권한 0600 · v2.611(DB2611-01) 기존 -wal/-shm 잔재까지 0600 · v2.597(L2597-02) busy_timeout 을
+    // journal_mode 보다 먼저 — 셋 다 openSqlite 가 한다(chmod → busy_timeout → WAL/NORMAL). 잠금이면 핸들을 닫고 던진다.
+    conn = openSqlite(new DatabaseSync(FILE()));
+    conn.exec(`CREATE TABLE IF NOT EXISTS api_latest (
         device_id TEXT NOT NULL, area TEXT NOT NULL, endpoint TEXT NOT NULL,
         ts INTEGER NOT NULL, ok INTEGER NOT NULL, bytes INTEGER NOT NULL,
         truncated INTEGER NOT NULL DEFAULT 0, json TEXT, error TEXT,
@@ -237,11 +232,11 @@ async function openInner() {
       prune2: conn.prepare('DELETE FROM capacity_history WHERE rowid IN (SELECT rowid FROM capacity_history WHERE ts < ? LIMIT ?)'),
       prune3: conn.prepare('DELETE FROM capacity_daily WHERE day < ?'),
     };
+    lockRetry.ok();
     return _db;
   } catch (e) {
-    if (isSqliteLockError(e)) {
+    if (lockRetry.onFail(e)) {
       try { conn?.close(); } catch { /* */ } // 다시 열 것이므로 이 핸들은 닫는다(fd 누수 방지)
-      _retryAt = Date.now() + 30_000;
       console.warn(`[storage-db] SQLite 잠금(${e.message}) — 30초 뒤 다시 엽니다(비활성으로 고정하지 않음)`);
       return null;
     }
@@ -670,4 +665,4 @@ export async function capacityResets() {
   return out;
 }
 
-export function _resetForTest() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; _pruneFlight.reset(); }
+export function _resetForTest() { try { _db?.conn?.close?.(); } catch { /* */ } _db = null; _pruneTick = 0; _pruneFlight.reset(); lockRetry.ok(); }

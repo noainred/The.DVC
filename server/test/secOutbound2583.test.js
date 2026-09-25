@@ -135,7 +135,7 @@ test('#18 엣지 응답은 해제 후 크기 상한까지만 읽는다(gzip 폭�
   t.after(async () => { ok.closeAllConnections?.(); await new Promise((r) => ok.close(r)); });
   const r2 = await resilientFetch(`http://127.0.0.1:${ok.address().port}/x`, { retries: 0 });
   assert.deepEqual(await readJsonCapped(r2, 4 * 1048576), { a: 1 });
-  for (const f of ['collector/puller.js', 'central/edgeLogPull.js', 'central/bmUsageEdgePull.js', 'central/tokenCheckPull.js']) {
+  for (const f of ['collector/puller.js', 'central/edgePull.js']) {
     const s = fs.readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8');
     assert.ok(/readJsonCapped\(res,/.test(s) && !/await res\.json\(\)/.test(s), `${f}: 엣지 응답은 readJsonCapped 로 읽는다`);
   }

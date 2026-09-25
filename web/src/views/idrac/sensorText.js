@@ -10,6 +10,7 @@
  * 그래서 값이 없는 이유를 네 가지로 구분해 문구를 만든다. 웹 테스트는 node 환경이라 컴포넌트
  * 렌더 테스트가 불가하므로(이 저장소 관례) 판정과 문구를 여기에 두고 vitest 로 고정한다.
  */
+import { TEMP_WARN_C, TEMP_HOT_C } from '../tools/serverTemp/board.js';
 
 /** CPU 사용량 배지 문구. 값이 있으면 값, 없으면 '왜 없는지' 를 근거대로. */
 export function cpuBadgeText(sensors) {
@@ -86,8 +87,12 @@ export function latestTempRows(sensors) {
     .sort((a, b) => b.celsius - a.celsius);
 }
 
-/** 온도 색(기존 tempColor 규약과 동일: 40℃↑ 빨강 · 32℃↑ 주황). */
-export const tempColorOf = (c) => (c == null ? 'var(--text-faint)' : c >= 40 ? 'var(--red)' : c >= 32 ? 'var(--amber)' : 'var(--green)');
+/**
+ * 온도 색 — 임계는 `serverTemp/board.js` 가 소유한다(v2.556 규약). v2.613 WEB2613-12: 여기만 40/32 를 숫자로 적어
+ * 두어 임계를 바꾸면 iDRAC 상세 모달만 옛 색이 됐다. `board.js` 는 import 0 인 순수 모듈이라 여기서 import 해도
+ * 이 모듈의 vitest(node 환경)가 React 를 끌고 오지 않는다.
+ */
+export const tempColorOf = (c) => (c == null ? 'var(--text-faint)' : c >= TEMP_HOT_C ? 'var(--red)' : c >= TEMP_WARN_C ? 'var(--amber)' : 'var(--green)');
 
 /* ── 온도 장기 추이(v2.504) ──────────────────────────────────────────────────
  * 사용자 요청: "idrac 에서 조사하는 온도를 차트로 보이게 해줘"(참고 화면은 '특수 기능 › ESXi 온도'

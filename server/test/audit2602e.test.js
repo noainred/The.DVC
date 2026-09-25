@@ -127,7 +127,7 @@ test('SEC2602-04: stripPath 는 끝 슬래시가 많아도 선형', async () => 
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < 20; i++) stripPath(p);
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-  assert.ok(ms < 60, `20회 ${ms.toFixed(1)}ms`);
+  assert.ok(ms < 1000, `20회 ${ms.toFixed(1)}ms — O(n²) 면 3만 자 × 20회에 수십 초`);   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
   assert.ok(stripPath(p).endsWith('x'));
 });
 

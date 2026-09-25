@@ -1,12 +1,12 @@
 /**
  * V4 ⑧ 기능 찾기(v2.508) — 시안 InfoArch.dc.html 의 IA 트리를 실제 화면으로.
  *
- * 특수 기능 79개 + 개발 포탈 탭 + V4 화면 9개를 **한 트리에 1회씩** 배치한다(tree.js, 미분류 0).
+ * 특수 기능 전부(specialToolsList.js) + 개발 포탈 탭 + V4 화면 9개를 **한 트리에 1회씩** 배치한다(tree.js, 미분류 0).
  * 도구 본체는 V4 안에서 렌더하지 않고 개발 포탈의 `#/tools/<k>` 로 보낸다 —
  * 그 키 문자열이 권한(toolsDenied)·딥링크·서버 집행 매핑이라 **바꾸지 않는다**.
  *
  * viewer 의 '잠긴 카드 벽' 문제: viewer 는 `tools` 권한이 없어 열 수 있는 도구가 0개다.
- * 78장을 회색으로 늘어놓는 대신 **무엇이 필요한지와 요청 문구**를 먼저 보여준다.
+ * 카드 전부를 회색으로 늘어놓는 대신 **무엇이 필요한지와 요청 문구**를 먼저 보여준다.
  */
 import React, { useMemo, useState } from 'react';
 import { can, toolAllowed, getCurrentUser } from '../../api.js';
@@ -15,7 +15,7 @@ import { searchTools } from '../../views/toolSearch.js';
 import { Panel, Empty } from '../ui.jsx';
 import { PAGE_META } from '../nav.js';
 import { visibleTree, groupLabelOfTool, groupLabelsOfTool, primaryToolKeys } from '../tree.js';
-import { toolHidden } from '../../views/toolVisibility.js';
+import { toolHidden, lockReasonOf } from '../../views/toolVisibility.js'; // v2.613 CATALOG2613-07: 잠금 사유도 같은 모듈
 import { fmtInt } from '../data.js';
 
 const KIND_TAG = { page: '화면', tab: '탭', tool: '기능' };
@@ -32,7 +32,13 @@ export default function Tools({ isAdmin, goAnywhere, go }) {
   }, [isAdmin, allowKey]);
   const groups = useMemo(() => visibleTree(TOOLS, { isAdmin, toolShown: shownOf }), [isAdmin, shownOf]);
   const byKey = useMemo(() => new Map(TOOLS.map((t) => [t.k, t])), []);
-  const openable = useMemo(() => TOOLS.filter(shownOf).filter((t) => canTools && toolAllowed(t.k)).length, [shownOf, canTools]);
+  // v2.613(CATALOG2613-07): 잠금 판정은 카드 그리드와 같은 함수 — 예전 `canTools && toolAllowed(k)` 는 `perm`
+  //   (insights-hub:insights · nsx:inv.nsx …) 축을 안 봐서 그리드에서는 잠긴 도구가 여기서는 열려 보였다.
+  const lockOf = useMemo(() => {
+    const allow = JSON.parse(allowKey);
+    return (t) => lockReasonOf(t, { isAdmin, toolsAllowed: allow, can, toolAllowed });
+  }, [isAdmin, allowKey]);
+  const openable = useMemo(() => TOOLS.filter(shownOf).filter((t) => !lockOf(t)).length, [shownOf, lockOf]);
 
   const hits = useMemo(() => (q.trim()
     ? new Set(searchTools(TOOLS, q, { catsOf: (t) => groupLabelsOfTool(t.k) }).map((t) => t.k))
@@ -101,14 +107,15 @@ export default function Tools({ isAdmin, goAnywhere, go }) {
                   {items.map((it) => {
                     const t = it.kind === 'tool' ? byKey.get(it.k) : null;
                     const name = it.kind === 'page' ? (PAGE_META[it.id]?.title || it.id) : it.kind === 'tab' ? it.name : `${t?.icon || ''} ${t?.label || it.k}`;
-                    const locked = it.kind === 'tool' && !(canTools && toolAllowed(it.k));
+                    const lock = it.kind === 'tool' ? lockOf(t) : null;
+                    const locked = !!lock;
                     return (
                       <button key={`${it.kind}:${it.k || it.id}`} type="button" className="v4-tree-item" onClick={() => open(it, g)}
                         title={it.kind === 'tool' ? `#/tools/${it.k}${it.alias ? ` · 주소속: ${groupLabelOfTool(it.k)}` : ''}` : (it.hash || `#/v4/${it.id}`)}>
                         <span className="v3-tag">{KIND_TAG[it.kind]}</span>
                         <span className="nm" style={it.alias ? { color: '#68738a' } : undefined}>{name}</span>
                         {it.alias && <span className="v3-tag">별칭</span>}
-                        {locked && <span className="v3-tag" title="접근 권한이 없습니다">🔒</span>}
+                        {locked && <span className="v3-tag" title={lock}>🔒</span>}
                       </button>
                     );
                   })}

@@ -2,6 +2,7 @@ import { blankOr } from './blankOr.js';
 import { scopeSaveSuffix } from './scopeSaveText.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
+import { fmtAgo, fmtBytes } from '../util/fmt.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 
@@ -15,13 +16,7 @@ const PRESETS = [
   { label: '1시간', ms: 3_600_000 },
 ];
 
-const fmtAgo = (ts) => {
-  if (!ts) return '없음';
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.round(s / 60)}분 전`;
-  return `${Math.round(s / 3600)}시간 전`;
-};
+// v2.613 WEB2613-03/DEPS2613-11: fmtAgo·fmtBytes 는 util/fmt 하나다(로컬 사본은 null 을 '0' 으로 만들었다).
 
 /** 지표 수집(서버 온도/데이터스토어 용량/GPU) 주기·보존기간 설정. */
 export default function MetricsSettings() {
@@ -167,7 +162,7 @@ export default function MetricsSettings() {
         <div className="flex gap wrap" style={{ fontSize: 13 }}>
           <span className="muted">적용 주기 <b style={{ color: 'var(--text)' }}>{Math.round((status.intervalMs || 0) / 1000)}초</b></span>
           <span className="muted">보존 <b style={{ color: 'var(--text)' }}>{status.retentionDays}일</b></span>
-          <span className="muted">마지막 수집 <b style={{ color: 'var(--text)' }}>{fmtAgo(last?.at)}</b></span>
+          <span className="muted">마지막 수집 <b style={{ color: 'var(--text)' }}>{fmtAgo(last?.at, { dash: '없음' })}</b></span>
           {last && <span className="muted">온도 보고 호스트 <b style={{ color: 'var(--text)' }}>{last.hostsWithTemp}</b> · 행 <b style={{ color: 'var(--text)' }}>{last.rows}</b></span>}
         </div>
       </div>
@@ -209,11 +204,6 @@ export function VmPerfTrackingSettings() {
   };
   useEffect(() => { load(); }, []);
 
-  const fmtBytes = (b) => {
-    if (!b) return '0';
-    const GB = 1024 ** 3; const MB = 1024 ** 2;
-    return b >= GB ? `${(b / GB).toFixed(2)} GB` : b >= MB ? `${(b / MB).toFixed(1)} MB` : `${(b / 1024).toFixed(0)} KB`;
-  };
   const toggle = (id) => setIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
 
   const save = async () => {

@@ -14,6 +14,12 @@
  *  · admin 은 항상 통과(roleToolsDenied 가 admin 에 빈 배열을 준다).
  *  · 거부 응답은 기존 403 형태를 유지한다 — 프론트 ErrorBox 가 AccessDenied 로 자동 전환하려면
  *    `{error:'forbidden', requiredPerm}` 계약이 필요하다(CLAUDE.md 프론트 규칙).
+ *
+ * 이름 규약(v2.613 CATALOG2613-12): **새 도구의 `/api/tools/<세그먼트>` 첫 세그먼트는 카탈로그 키(`k`)와 같다.**
+ *   세그먼트≠키 인 항목은 `LEGACY_SEGMENT_KEYS` 에 고정된 옛 것뿐이고(키 불변 규약 때문에 못 바꾼다),
+ *   그 밖의 항목이 세그먼트≠키 로 추가되면 테스트(test/audit2613a.test.js)가 깨진다 — 표를 늘리지 말 것.
+ *   매핑이 없는 `/api/tools` 세그먼트는 `UNMAPPED_TOOL_SEGMENTS` 에 **사유와 함께** 선언한다(같은 테스트가 라우터
+ *   스택을 열거해 대조한다 — 선언 없이 새 세그먼트를 만들면 그 도구는 거부해도 서버가 막지 않는데 아무도 모른다).
  */
 import { trimTrailingSlashes } from '../util/trimSlashes.js'; // v2.611: 선형 끝 '/' 제거 단일 소스
 import { roleToolsDenied, userToolAllowed, effectiveToolAccess } from './permissions.js';
@@ -39,6 +45,11 @@ export const TOOL_PATH_KEYS = Object.freeze({
   credentials: 'credentials',
   cvp: 'cvp',                        // CvpTool.jsx 전용(v2.608) — Arista CloudVision 네트워크 스위치
   curuser: 'curuser',                // '현재 사용자'(v2.520) — CurrentUsers.jsx 전용 엔드포인트
+  // v2.613(CATALOG2613-03): 같은 화면(CurrentUsers.jsx — '전체(합집합)'·'VDI' 탭)이 쓰는 형제 경로 둘이 매핑에 없어
+  //   `curuser` 를 거부해도 세 탭 중 둘이 그대로 동작했다(관리 화면은 '서버 집행' 이라 말했다). 둘 다 CurrentUsers 전용임을
+  //   grep 으로 확인(HorizonSessionsPanel/Settings 는 CurrentUsers.jsx 에서만 import).
+  'current-users': 'curuser',        // /tools/current-users/combined — Windows ∪ VDI 합집합(v2.525)
+  'horizon-sessions': 'curuser',     // /tools/horizon-sessions* — Horizon(VDI) 세션 탭·설정(v2.525)
   'deep-search': 'deepsearch',
   'duplicate-ips': 'dupip',
   esxi: 'esxi',
@@ -116,7 +127,36 @@ export const TOOL_PATH2_KEYS = Object.freeze({
   'report/changes': 'change-history',
   'report/unprotected': 'unprotected-vms',
   // 전용 하위경로만 — 같은 도구가 공용 `/tools/vm-track` 도 쓰므로 '부분 집행' 으로 선언한다(아래).
+  // v2.613(CATALOG2613-03): StorageTrackTool.jsx **전용**인 ds-list·ds-pivot·ds-series-all 을 더했다(예전 선언 "ds-* 만 막힌다" 는
+  //   ds-change-log 하나만 사실이었다). ⚠ `ds-series`(Datastores.jsx DsTrendModal — 가드 없음) · `ds-top`(V4 Storage.jsx) ·
+  //   `ds-changes`(VmTrackTool.jsx)는 **공유** 경로라 넣지 않는다 — 넣으면 storage-track 거부가 그 화면들을 같이 막는다.
   'vm-track/ds-change-log': 'storage-track',
+  'vm-track/ds-list': 'storage-track',
+  'vm-track/ds-pivot': 'storage-track',
+  'vm-track/ds-series-all': 'storage-track',
+});
+
+/**
+ * 세그먼트≠키 인 **옛** 항목(v2.613 CATALOG2613-12 — 머리말의 이름 규약). 키(`k`)는 permissions.json 의 toolsDenied 값·
+ * 딥링크·집행 매핑이라 바꿀 수 없고, 라우트 세그먼트는 화면·엣지·문서가 쓰고 있어 바꾸지 않는다. 그래서 이 집합은
+ * **줄어들 수는 있어도 늘어나서는 안 된다** — 새 도구는 세그먼트 = 키 로 만든다(테스트가 두 표와 대조).
+ */
+export const LEGACY_SEGMENT_KEYS = Object.freeze(new Set([
+  'capacity-forecast', 'deep-search', 'duplicate-ips', 'esxi-temp', 'guest-os', 'network-check', 'orphan-vmdk', 'edge-log-local',
+  'service-check', 'vmware-config', 'rightsize', 'sanswitch', 'storage', 'thin-vms', 'vm-finder', 'vmseries',
+  // v2.613 에 매핑한 CurrentUsers 형제 경로(라우트는 v2.525 부터 있었다 — 새 세그먼트가 아니다).
+  'current-users', 'horizon-sessions',
+]));
+
+/**
+ * `/api/tools/<세그먼트>` 중 **의도적으로** 매핑하지 않는 것(v2.613 CATALOG2613-03). 매핑에 없는 경로는 통과한다(모르면 막지
+ * 않는다 — 머리말)이므로, 여기 없는 세그먼트가 라우터에 생기면 '거부해도 서버가 막지 않는데 아무도 모르는' 상태다 →
+ * test/audit2613a.test.js 가 실제 `api` 라우터 스택을 열거해 대조한다. 사유는 실제 호출부를 열어 확인한 것.
+ */
+export const UNMAPPED_TOOL_SEGMENTS = Object.freeze({
+  'ip-ping': 'VM·호스트 상세(components/EntityDetail.jsx)가 쓰는 공용 도달성 확인 — 특수 기능 카드 키가 없고, 한 도구에 묶으면 상세 화면이 같이 막힌다',
+  vclogs: 'vCenter 로그 조회는 상단 메뉴 화면(ChecksLogs)이 쓴다 — 특수 기능 카드 키가 없다',
+  groups: '특수 기능 헤더의 클러스터·폴더 콤보가 쓰는 공용 목록(ToolPanel) — 도구마다 쓴다',
 });
 
 /**
@@ -282,7 +322,9 @@ export const TOOL_ENFORCEMENT_NOTES = Object.freeze({
   //   데이터 scope(applyFilters+scopeKey)만 걸린다. 게다가 대시보드·콘솔·V3 가 같이 쓰는 공용
   //   경로라 도구 하나 때문에 막을 수 없다 → SHARED 로 정직하게 분류한다.
   'real-os': [ENFORCE_OTHER_ROUTER, '/api/admin/os-scan(adminOnly)'],
-  nsx: [ENFORCE_OTHER_ROUTER, '/api/admin/nsx/managers(adminOnly)'],
+  // v2.613(CATALOG2613-03) 정정: 예전 사유 '/api/admin/nsx/managers(adminOnly)' 는 관리 화면 경로였다 — Nsx.jsx 의 **주** API 는
+  //   `/api/nsx`(requirePerm('inv.nsx'))이고 카탈로그도 perm:'inv.nsx' 로 그 경계를 보존한다.
+  nsx: [ENFORCE_OTHER_ROUTER, "/api/nsx(requirePerm('inv.nsx')) · 관리 경로 /api/admin/nsx/managers(adminOnly)"],
   powermap: [ENFORCE_OTHER_ROUTER, '/api/insights/power-breakdown(insights 권한)'],
   serveranalysis: [ENFORCE_OTHER_ROUTER, '/api/admin/idrac/* · /api/admin/datacenters(adminOnly)'],
   fleet: [ENFORCE_OTHER_ROUTER, '/api/insights/fleet(insights 권한)'],
@@ -311,7 +353,8 @@ export const TOOL_ENFORCEMENT_NOTES = Object.freeze({
   vcversion: [ENFORCE_SHARED, "/api/tools/solutions 를 'solutions' 도구와 공유 — 분리하면 그 도구가 같이 막힌다"],
 
   // --- 부분 집행 ---
-  'storage-track': [ENFORCE_PARTIAL, "전용 하위경로(/tools/vm-track/ds-*)만 막힌다. 공용 /tools/vm-track 은 'vm-track' 도구 것이라 계속 응답한다"],
+  // v2.613(CATALOG2613-03) 정정: 예전 문장 "ds-* 만 막힌다" 는 표에 ds-change-log 하나뿐이라 거짓이었다 — 실제 목록으로 적는다.
+  'storage-track': [ENFORCE_PARTIAL, "전용 하위경로(/tools/vm-track/ds-change-log · ds-list · ds-pivot · ds-series-all)만 막힌다. 공용 /tools/vm-track 과 다른 화면이 함께 쓰는 ds-series(데이터스토어 추이 모달)·ds-top(V4 스토리지)·ds-changes(VM 수량 추이)는 'vm-track' 도구 것이라 계속 응답한다"],
 
   // --- 막을 API 가 없다 ---
   'service-hub': [ENFORCE_NO_API, '외부 포탈 링크(새 탭) — 이 포탈의 API 를 쓰지 않는다'],

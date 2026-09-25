@@ -21,6 +21,7 @@
 
 import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
 import { numOrNull } from '../../numOrNull.js';
+import { toneVar } from './toneVar.js';
 
 const t = (v) => String(v ?? '').trim();
 /**
@@ -46,12 +47,8 @@ export const EDGE_KIND_TONE = Object.freeze({
 });
 
 /** 톤 → CSS 변수(다른 도구와 같은 팔레트). */
-export function toneVar(tone) {
-  if (tone === 'ok') return 'var(--ok, #4ade80)';
-  if (tone === 'warn') return 'var(--warn, #fbbf24)';
-  if (tone === 'bad') return 'var(--bad, #f87171)';
-  return 'var(--muted, #94a3b8)';
-}
+// v2.613 DEPS2613-11: 톤 → 색 변수는 공용 toneVar.js 하나다(예전 사본은 정의되지 않은 --ok/--warn/--bad 에 hex 폴백).
+export { toneVar };
 
 /** 경과 시간 — `null` 은 '—' 다(0 으로 만들지 않는다). */
 /**

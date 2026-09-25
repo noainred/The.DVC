@@ -1,3 +1,4 @@
+import { fmtBytes } from '../../util/fmt.js';
 /**
  * SAN 스위치 포트 사용량 화면의 **순수 헬퍼**(v2.420) — 평균/피크 보기 설명·기간 지정 파라미터·
  * 보관 기간 추정. 웹 테스트가 node 환경(DOM 없음)이라 판정·문구는 여기서 회귀로 고정한다.
@@ -67,14 +68,8 @@ export function rangeLabel(range) {
 /** 보관 기간 프리셋(일). */
 export const RETENTION_PRESETS = [[7, '1주'], [30, '1개월'], [90, '3개월'], [180, '6개월'], [365, '1년'], [1095, '3년']];
 
-/** 바이트 → 사람이 읽는 크기. */
-export function bytesText(b) {
-  const n = Number(b) || 0;
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-  return `${(n / 1024 ** 3).toFixed(2)} GB`;
-}
+/** 바이트 → 사람이 읽는 크기 — util/fmt.fmtBytes(v2.613 WEB2613-03: 로컬 사본은 null 을 '0 B' 로 만들었다). */
+export const bytesText = fmtBytes;
 
 /**
  * 보관 기간에 따른 DB 크기 **추정**(정직: 추정치임을 문구에 명시). 최근 24시간 적재 행수 × 보관일 × 행당 바이트.

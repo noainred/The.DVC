@@ -17,9 +17,9 @@ import { reportKinds, isWantedReport, deviceIdOf, parseReport, buildIdracUsage }
 import { stepAlert, evaluateRows, alertOf, ALERT_METRICS, HYSTERESIS_PCT } from '../src/bmusage/alertRules.js';
 import { buildUsage } from '../src/bmusage/usage.js';
 import { normalizeSettings, DEFAULTS } from '../src/bmusage/settings.js';
+import { stripComments } from './_stripComments.js';
 
-const bare = (rel) => fs.readFileSync(path.join(import.meta.dirname, '../src', rel), 'utf8')
-  .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const bare = (rel) => stripComments(fs.readFileSync(path.join(import.meta.dirname, '../src', rel), 'utf8'));   // v2.613 TESTDOC2613-08
 
 // ── ① iDRAC 텔레메트리 파서 ───────────────────────────────────────────────────
 test('리포트를 **이름 패턴**으로 찾는다 — id 를 굳히지 않는다', () => {

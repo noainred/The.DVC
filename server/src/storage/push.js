@@ -10,7 +10,10 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { localSnapshots } from './store.js';
 import { devicesForThisNode } from './registry.js';
 import { runtimeIntervals, startAdaptiveTimer } from './intervals.js';
-import { cmpVersion } from '../util/cmpVersion.js';
+import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.js'; // v2.613 EDGE2613-05: readDropSummary 사본 → 공용
+import { centralStatusOnlySupport, sendStatusOnly as sendStatusOnlyTo, STATUS_ONLY_MIN_CENTRAL, _resetStatusOnlyCapForTest } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04: 프로브를 공용으로 승격
+// 옛 import 경로 호환(audit2602a 등) — `export … from` 은 이 스코프에 이름을 만들지 않는다(v2.575).
+export { centralStatusOnlySupport, STATUS_ONLY_MIN_CENTRAL, _resetStatusOnlyCapForTest };
 
 // v2.409: 주기는 중앙 배포값(storage/intervals.js)을 매번 조회 — 모듈 로드 시 상수로 굳히지 않는다.
 const pushMs = () => runtimeIntervals().pushMs;
@@ -64,7 +67,7 @@ async function pushStorageOnce() {
       //   중앙 버전을 확인할 수 있을 때만 보내고, 모르거나 낮으면 **보내지 않고** 사유를 남긴다(SAN·PDU 는 첫 수집 대기 중
       //   아무것도 보내지 않는다 — 같은 쪽으로 실패한다). 위임 0대(registered===0)는 위에서 이미 목록을 비웠으므로 구버전
       //   중앙이 devices:[] 를 교체로 받아도 결과가 같다 — 그때는 확인하지 않는다(왕복 절약·기존 동작 유지).
-      const cap = registered === 0 ? { ok: true } : await centralStatusOnlySupport();
+      const cap = registered === 0 ? { ok: true } : await centralStatusOnlySupport({ minVersion: STATUS_ONLY_MIN_CENTRAL });
       if (!cap.ok) {
         _last = { at: Date.now(), sent: 0, statusSent: false, statusSkipped: cap.reason, centralVersion: cap.version || null,
           ...(registered === 0 ? { cleared, ...(clearError ? { clearError } : {}) } : {}) };
@@ -92,7 +95,7 @@ async function pushStorageOnce() {
     if (!res.ok) throw new Error(`storage-data <- ${res.status}`);
     // v2.601(감사 EDGE2601-04): 200 이어도 중앙이 일부 장비를 뺐을 수 있다(소유권·형식·크기) — SAN push(v2.600)와 같이
     //   응답을 읽어 상태·콘솔에 남긴다. 예전에는 res.ok 만 봐 '보냈다' 고만 말했다(그 장비는 중앙 화면에 없다).
-    const ds = await readDropSummary(res);
+    const ds = dropSummaryOf(await readCentralReply(res)); // v2.613 EDGE2613-05: 공용 판독기(util/centralReply.js)
     if (ds?.rejected) console.warn(`[storage-push] 중앙이 장비 ${ds.rejected}대를 받지 않았습니다(${dropText(ds.dropped)}) — 그 장비는 중앙 화면에 나오지 않습니다`);
     _last = { at: Date.now(), sent: devices.length, bytes: json.length, gzip: PUSH_GZIP && hdrs['Content-Encoding'] === 'gzip', ...(ds?.rejected ? { rejected: ds.rejected, dropped: ds.dropped } : {}) };
     return { ok: true, sent: devices.length, ...(ds?.rejected ? { rejected: ds.rejected, dropped: ds.dropped } : {}) };
@@ -103,19 +106,7 @@ async function pushStorageOnce() {
   }
 }
 
-/**
- * 중앙 응답의 거절 요약(v2.601 EDGE2601-04 — sanswitch/push.js readDropSummary 와 같은 모양). 본문이 JSON 이 아니면 null.
- * @returns {Promise<{rejected:number, dropped:object|null}|null>}
- */
-export async function readDropSummary(res) {
-  try {
-    const j = await res.json();
-    if (!j || typeof j !== 'object') return null;
-    const rejected = Number.isFinite(Number(j.rejected)) ? Number(j.rejected) : 0;
-    return rejected > 0 ? { rejected, dropped: j.dropped && typeof j.dropped === 'object' && !Array.isArray(j.dropped) ? j.dropped : null } : null;
-  } catch { return null; }
-}
-const dropText = (d) => Object.entries(d || {}).filter(([, n]) => Number(n) > 0).map(([k, n]) => `${k} ${n}`).join(' · ') || '사유 미상';
+// v2.613 EDGE2613-05: readDropSummary·dropText 는 util/centralReply.js 하나다(사본 3벌 → 1).
 
 /** 이 노드에 위임된 장비 수(상태 보고용 — 자격증명은 싣지 않는다). 등록부를 못 읽으면 null. */
 function registeredCount() {
@@ -136,54 +127,11 @@ async function sendClearList() {
   } catch (e) { return { ok: false, reason: e.message }; }
 }
 
-/** statusOnly 를 아는 첫 중앙 버전(v2.581 BUG-D). */
-export const STATUS_ONLY_MIN_CENTRAL = '2.581.0';
-const CAP_TTL_MS = 60 * 60_000;
-const CAP_FAIL_TTL_MS = 5 * 60_000;
-let _cap = null; // { at, ok, reason, version, text }
-
 /**
- * 중앙이 statusOnly 를 아는가(v2.602 EDGE2602-03) — 경량 `/api/central/health-probe`(v2.552 이상, 응답에 version)로 본다.
- * 성공은 1시간, 실패는 5분 캐시(주기 push 마다 두드리지 않게). 모르는 것(프로브 실패·버전 형식 불명)은 **지원하지 않는 쪽**이다.
- * @returns {Promise<{ok:boolean, reason:string, version?:string, text:string}>}
+ * 상태 전용 push(v2.581) — v2.613 EDGE2613-04: 본체·버전 프로브는 agent/centralStatusOnly.js(sanswitch·pdu 와 공용).
+ * 중앙은 보관 중인 장비 목록을 **건드리지 않고** 상태만 기록한다.
  */
-export async function centralStatusOnlySupport({ now = Date.now(), fetchImpl = resilientFetch } = {}) {
-  if (_cap && now - _cap.at < (_cap.ok ? CAP_TTL_MS : CAP_FAIL_TTL_MS)) return _cap;
-  let out;
-  try {
-    const res = await fetchImpl(`${config.agent.centralUrl}/api/central/health-probe`, {
-      headers: { Accept: 'application/json', 'X-Central-Token': config.agent.centralToken }, timeoutMs: 10_000, retries: 0,
-    });
-    if (!res.ok) out = { ok: false, reason: 'central-version-unknown', text: `중앙 버전 확인 실패(health-probe HTTP ${res.status}) — 구버전 중앙이면 목록을 비울 수 있어 상태 보고를 보내지 않습니다` };
-    else {
-      const j = await res.json().catch(() => null);
-      const v = typeof j?.version === 'string' ? j.version.slice(0, 32) : '';
-      const c = v ? cmpVersion(v, STATUS_ONLY_MIN_CENTRAL) : null;
-      if (c == null) out = { ok: false, reason: 'central-version-unknown', version: v, text: `중앙 버전을 읽지 못했습니다(${v || '응답에 없음'}) — 상태 보고를 보내지 않습니다` };
-      else if (c < 0) out = { ok: false, reason: 'central-too-old', version: v, text: `중앙 v${v} 는 상태 전용 보고를 모릅니다(v${STATUS_ONLY_MIN_CENTRAL} 이상 필요 — 보내면 중앙의 이 엣지 스토리지 목록이 비워집니다). 중앙을 업그레이드하세요` };
-      else out = { ok: true, reason: '', version: v, text: '' };
-    }
-  } catch (e) {
-    out = { ok: false, reason: 'central-version-unknown', text: `중앙 버전 확인 실패(${String(e?.message || e).slice(0, 120)}) — 상태 보고를 보내지 않습니다` };
-  }
-  _cap = { at: now, ...out };
-  return _cap;
-}
-export function _resetStatusOnlyCapForTest() { _cap = null; }
-
-/**
- * 상태 전용 push(v2.581) — `devices: []` 에 `statusOnly:true` 를 붙인다. 중앙은 보관 중인 장비 목록을
- * **건드리지 않고** 상태만 기록한다(빈 목록으로 덮으면 엣지 재시작 직후 한 주기 동안 중앙 화면이 빈다).
- */
-async function sendStatusOnly(status) {
-  try {
-    const json = JSON.stringify({ agent: config.agent.name, devices: [], statusOnly: true, status: { ...status, at: Date.now() } });
-    const hdrs = { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken };
-    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/storage-data`, { method: 'POST', headers: hdrs, body: json, timeoutMs: 20_000, retries: 1 });
-    if (!res.ok) return { ok: false, reason: `storage-data <- ${res.status}` };
-    return { ok: true };
-  } catch (e) { return { ok: false, reason: e.message }; }
-}
+function sendStatusOnly(status) { return sendStatusOnlyTo('/api/central/storage-data', status, { devices: [] }); }
 
 export function startStoragePush() {
   if (_timer || !config.agent.centralUrl || !config.agent.centralToken) return;

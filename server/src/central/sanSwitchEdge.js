@@ -9,6 +9,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter, isPlainObj, scalarizeFields } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
 import { numOrNull } from '../util/numOrNull.js';
+import { capStr } from '../util/capStr.js'; // v2.613 EDGE2613-04
 
 /** v2.607(CEN2607-02): SAN 스냅샷 최상위의 추가 표시 필드(목록 표가 그대로 그린다). */
 export const SAN_DISPLAY_KEYS = Object.freeze(['fabricOs', 'domainId', 'switchState', 'switchName']);
@@ -157,7 +158,8 @@ export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1, info 
     for (const [k, n] of Object.entries(merged.dropped)) dropped[k] += n;
     list = merged.devices;
   }
-  load().set(agent, { at: Date.now(), devices: list });
+  const prevRec = load().get(agent);
+  load().set(agent, { at: Date.now(), devices: list, ...(prevRec?.status ? { status: prevRec.status } : {}) }); // v2.613 EDGE2613-04: 마지막 상태 보고는 보존
   writer.save();
   // 작업 로그(v2.516) — 중앙 화면의 '수집 작업' 구획이 위임 장비도 보여주려면 push 수신 시
   // 남겨야 한다(엣지의 로컬 로그는 중앙에서 볼 수 없다). 같은 collectedAt 재push 는 건너뛴다.
@@ -199,6 +201,29 @@ export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1, info 
 }
 /** 테스트·진단용 — 중복 제거 Map 크기. */
 export function _lastRecSize() { return _lastRec.size; }
+
+/**
+ * v2.613(감사 EDGE2613-04): 엣지의 상태 전용 보고(`statusOnly:true`) — 장비 목록(`devices`·`at`)은 그대로 두고 `status` 만 기록한다
+ * (storageEdge.saveEdgeStorageStatus 와 같은 규약 — 빈 목록으로 덮으면 재시작 직후 한 주기 동안 중앙 화면이 빈다).
+ * 아는 키만 담고(reason·registered·at) 문자열 길이를 자른다(변조 본문이 파일을 부풀리지 않게). 반환: 기록했는지.
+ */
+export function saveEdgeSanSwitchStatus(agent, status) {
+  const src = isPlainObj(status) ? status : {};
+  const rec = load().get(agent) || { at: 0, devices: [] };
+  const registered = Number(src.registered);
+  rec.status = { reason: capStr(src.reason, 64) || 'unknown', registered: Number.isFinite(registered) ? registered : null, at: Date.now() };
+  if (!load().has(agent) && !admitAgent(load(), agent).ok) return false; // 상태 보고도 엣지 수 상한을 따른다(v2.599)
+  load().set(agent, rec);
+  writer.save();
+  return true;
+}
+
+/** v2.613 EDGE2613-04: 엣지별 보고 요약(화면·통신 지도용) — 장비 보고 시각·대수 + 마지막 상태 전용 보고(storageEdge.edgeStorageReports 와 같은 모양). */
+export function edgeSanSwitchReports() {
+  const out = [];
+  for (const [agent, rec] of load()) out.push({ agent, at: rec?.at || null, deviceCount: (rec?.devices || []).length, status: rec?.status || null });
+  return out;
+}
 
 /** 전 엣지 스냅샷 평탄 목록(중앙 화면이 로컬 수집분과 합쳐 쓴다). */
 export function edgeSanSwitchSnapshots() {

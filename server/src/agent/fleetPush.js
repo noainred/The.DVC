@@ -4,11 +4,15 @@
  *
  * 전력이 수집되는 베어메탈은 이미 원격 전력(remotePowerByHost) 경로로 중앙에 잡히지만,
  * '전력 미보고' 베어메탈(등록만 됐거나 전원오프)은 그 경로로 안 보이므로 여기서 메타데이터를
- * 보내 중앙의 통합 인벤토리(DC별)에서도 보이게 한다. 본문은 작아(메타만) gzip 없이 보낸다.
+ * 보내 중앙의 통합 인벤토리(DC별)에서도 보이게 한다.
+ * v2.613 DEPS2613-07: '메타만이라 작다' 는 등록 서버 수에 비례한다(이 현장 1,135대) — gzip + 중앙 BIG_JSON 등록 + 413 로그
+ *   (v2.503 push 체크리스트)를 갖춘다. AGENT_PUSH_GZIP=false 로 끈다(inventoryPush 와 같은 env).
  *
  * CENTRAL_URL 설정 시 동작(=에이전트). AGENT_PUSH_FLEET=false 로 끌 수 있다.
  */
 
+import zlib from 'node:zlib';
+import { promisify } from 'node:util';
 import { config, loadVcenterConfig, clampIntervalMs } from '../config.js';
 import { reqTimeoutMs } from './envTimeout.js';
 import { store } from '../store.js';
@@ -94,9 +98,11 @@ let last = null;     // { at, sent, error }
 let running = false;  // single-flight
 
 const ENABLED = process.env.AGENT_PUSH_FLEET !== 'false';
+const gzipAsync = promisify(zlib.gzip);
+const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
 
-function headers() {
-  return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+function headers(extra = {}) {
+  return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}), ...extra };
 }
 
 export async function pushFleetNow() {
@@ -133,11 +139,18 @@ export async function pushFleetNow() {
       partialInfo = { unreadVcenters: unread.slice(0, 32), withheldItems: dropped, withholdSince };
       console.warn(`[fleet-push] 호스트를 ${Math.round(maxMs / 60_000)}분 넘게 읽지 못한 vCenter ${unread.length}개(${unread.slice(0, 5).join(', ')}) — 그 vCenter 귀속분·귀속 없는 베어메탈 ${dropped}대를 빼고 보냅니다(중앙이 이 엣지 목록을 만료로 지우지 않게)`);
     }
+    const json = Buffer.from(JSON.stringify({ agent: config.agent.name, baremetal, generatedAt: snap.generatedAt, ...(partialInfo ? { partial: true, unreadVcenters: partialInfo.unreadVcenters, withheldItems: partialInfo.withheldItems } : {}) }));
+    let body = json; let hdrs = headers();
+    if (PUSH_GZIP) {
+      try { const gz = await gzipAsync(json); body = gz; hdrs = headers({ 'Content-Encoding': 'gzip' }); }
+      catch { /* 압축 실패 시 원본 전송 */ }
+    }
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/fleet`, {
-      method: 'POST', headers: headers(),
-      body: JSON.stringify({ agent: config.agent.name, baremetal, generatedAt: snap.generatedAt, ...(partialInfo ? { partial: true, unreadVcenters: partialInfo.unreadVcenters, withheldItems: partialInfo.withheldItems } : {}) }),
+      method: 'POST', headers: hdrs, body,
       timeoutMs: reqTimeoutMs(process.env.AGENT_PUSH_TIMEOUT_MS, 60_000), retries: 1,
     });
+    // 413 은 재시도 대상이 아니다(resilientFetch RETRYABLE_STATUS 에 없다) — 크기와 함께 찍어야 원인이 보인다(v2.503 규약).
+    if (res.status === 413) console.warn(`[fleet-push] 중앙이 본문 크기를 거부(413). 베어메탈 ${baremetal.length}대 · JSON ${Math.round(json.length / 1024)}KB(gzip ${Math.round(body.length / 1024)}KB) — 중앙의 JSON_BODY_LIMIT 또는 중앙 버전(fleet BIG_JSON 등록은 2.613.0+)을 확인하세요.`);
     if (!res.ok) throw new Error(`fleet -> ${res.status}`);
     if (!partialInfo) lastFullOkAt = Date.now();
     // v2.606 EDGE2606-03: 200 이어도 중앙이 상한(omitted)·범위 밖 vCenter 귀속 비움(vcenterBlanked)을 할 수 있다 — 상태·콘솔에.

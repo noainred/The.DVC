@@ -4,12 +4,13 @@
 // export 불변 — Settings.jsx 소비자 무변경, IdracAdmin v2.292 와 같은 '원 경로=셸 유지' 규약).
 //  · gpu-guest/PhysicalGpuManager.jsx : 물리 GPU 서버(베어메탈 — 별개 백엔드 도메인)
 //  · gpu-guest/VmCredManager.jsx      : VM별 계정·테스트 러너(이 화면 기능 커밋 최다 지점)
-//  · gpu-guest/shared.jsx             : Field·fmtAgo(셸·하위가 공용 — 복제 금지)
+//  · gpu-guest/shared.jsx             : Field(셸·하위가 공용 — 복제 금지). fmtAgo 는 util/fmt(v2.613)
 import { unitText } from './unitText.js';
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
-import { Field, fmtAgo } from './gpu-guest/shared.jsx';
+import { Field } from './gpu-guest/shared.jsx';
+import { fmtAgo } from '../util/fmt.js'; // v2.613 DEPS2613-11
 import { VmCredManager } from './gpu-guest/VmCredManager.jsx';
 import { PhysicalGpuManager } from './gpu-guest/PhysicalGpuManager.jsx';
 import { STable } from '../components/STable.jsx';
@@ -242,7 +243,7 @@ export default function GpuGuestSettings() {
           <div className="flex gap wrap" style={{ fontSize: 13 }}>
             <span className="muted">상태 <b style={{ color: status.enabled ? 'var(--green)' : 'var(--text-dim)' }}>{status.enabled ? '활성' : '비활성'}</b></span>
             <span className="muted">대상 법인 <b style={{ color: 'var(--text)' }}>{status.monitored ?? 0}</b></span>
-            <span className="muted">마지막 수집 <b style={{ color: 'var(--text)' }}>{fmtAgo(last?.at)}</b></span>
+            <span className="muted">마지막 수집 <b style={{ color: 'var(--text)' }}>{fmtAgo(last?.at, { dash: '없음' })}</b></span>
             {last && (last.skipped
               ? <span className="muted">({last.skipped})</span>
               : <span className="muted">[{last.mode}] 호스트 <b style={{ color: 'var(--text)' }}>{last.hosts}</b> · VM <b style={{ color: 'var(--text)' }}>{last.vms}</b>{last.errors ? ` · 오류 ${last.errors}` : ''}</span>)}

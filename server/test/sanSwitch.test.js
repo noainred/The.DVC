@@ -326,6 +326,11 @@ test('폴러/푸셔가 주기를 모듈 로드 시 상수로 굳히지 않는다
 });
 
 test('폴러: 재진입 가드 — 이전 수집이 진행 중이면 이번 틱을 건너뛴다', async () => {
+  // v2.613 TESTDOC2613-07: 앞 테스트가 저장한 장비(10.2.2.2)가 등록부 파일에 남아 있어 **실제 SSH 를 시도해 시한(60초)을
+  //   기다렸다**. 가드(`_busy`)는 첫 await 앞에서 동기로 세워지므로 장비 0대여도 두 번째 호출이 스킵된다 — 단언은 그대로다.
+  const { _resetForTest } = await import('../src/sanswitch/registry.js');
+  fs.rmSync(path.join(process.env.CONFIG_DIR, 'sanswitch-devices.json'), { force: true });
+  _resetForTest();
   const { pollSanSwitchOnce } = await import('../src/sanswitch/poller.js');
   const [a, b] = await Promise.all([pollSanSwitchOnce(), pollSanSwitchOnce()]);
   const skipped = [a, b].filter((r) => !r.ok && /진행 중/.test(r.reason || ''));

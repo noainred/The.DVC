@@ -12,6 +12,8 @@ import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { localSnapshots, pduPollerStatus } from './poller.js';
 import { pushMs, startAdaptiveTimer } from './intervals.js';
+import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.js'; // v2.613 EDGE2613-05: readDropSummary 사본 → 공용
+import { centralStatusOnlySupport, sendStatusOnly, DEVICE_STATUS_ONLY_MIN_CENTRAL } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04
 
 const gzipAsync = promisify(zlib.gzip);
 // v2.503: gzip 전송(SAN push v2.417·storage push 와 같은 규약) — 고RTT 회선에서 전송 시간을 줄인다.
@@ -22,15 +24,8 @@ let _timer = null;
 let _last = { at: null, ok: false, count: 0, reason: '' };
 const PUSH_MAX = 500;
 
-/** 중앙 응답의 거절 요약(v2.601 EDGE2601-04 — storage/sanswitch push 와 같은 모양. 도메인 간 import 를 피해 여기 둔다). */
-async function readDropSummary(res) {
-  try {
-    const j = await res.json();
-    if (!j || typeof j !== 'object') return null;
-    const rejected = Number.isFinite(Number(j.rejected)) ? Number(j.rejected) : 0;
-    return rejected > 0 ? { rejected, dropped: j.dropped && typeof j.dropped === 'object' && !Array.isArray(j.dropped) ? j.dropped : null } : null;
-  } catch { return null; }
-}
+// v2.613 EDGE2613-05: readDropSummary 는 util/centralReply.js 하나다('도메인 간 import 회피' 사유는 cvp/partfault 가 이미 agent/centralReply 를
+//   import 하고 있어 낡은 근거였다).
 
 // v2.597(감사 L2597-04 — 재현): 재진입 가드 — 타이머 push 와 설정 pull 뒤 push 가 겹치면 늦게 끝난 옛 본문이 새 본문을
 // 덮을 수 있다(storage/push.js 와 같은 규약). 진행 중에 들어온 요청은 끝난 뒤 한 번 더 보낸다(새 수집분을 놓치지 않게).
@@ -89,9 +84,20 @@ async function pushPduOnce() {
   const wh = pduPushWithhold({ assignedIds: assigned, snapshotIds: all.map((x) => String(x?.id)), firstPollDone: !!pduPollerStatus()?.last?.at, since: _withholdSince, now: Date.now() });
   _withholdSince = wh.since;
   if (wh.withhold) {
-    _last = { at: Date.now(), ok: true, count: 0, reason: wh.reason, withheld: true, ...(wh.missing ? { missing: wh.missing } : {}) };
     if (wh.missing && all.length) console.warn(`[pdu-push] ${wh.reason}`); // 스냅샷 0건(첫 수집 대기)은 예전처럼 상태에만
-    return { ok: true, count: 0, withheld: true, reason: wh.reason };
+    // v2.613(감사 EDGE2613-04): 보류해도 **상태는 올린다**(v2.517 규약 — storage v2.581 과 같다). PDU 스냅샷은 인메모리라 재시작마다
+    //   보류 창(최대 15분)이 생기는데 예전에는 그동안 중앙이 '엣지가 안 보냈다' 와 '보류 중' 을 구분할 수 없었다(edgePduStatus 는 마지막
+    //   push 시각뿐). ⚠ `/pdu-data` 의 statusOnly 수신은 v2.613.0 부터 — 낮은 중앙에는 보내지 않는다(빈 snapshots = 목록 교체).
+    const cap = await centralStatusOnlySupport({ minVersion: DEVICE_STATUS_ONLY_MIN_CENTRAL });
+    let statusSent = false, statusNote = {};
+    if (!cap.ok) statusNote = { statusSkipped: cap.reason, centralVersion: cap.version || null };
+    else {
+      const st = await sendStatusOnly('/api/central/pdu-data', { reason: assigned == null ? 'registry-unreadable' : 'no-snapshots', registered: assigned ? assigned.length : null, missing: wh.missing || 0 }, { snapshots: [] });
+      statusSent = st.ok;
+      if (!st.ok) { statusNote = { statusError: st.reason }; console.warn(`[pdu-push] 상태 보고 실패: ${st.reason}`); }
+    }
+    _last = { at: Date.now(), ok: true, count: 0, reason: wh.reason, withheld: true, statusSent, ...statusNote, ...(wh.missing ? { missing: wh.missing } : {}) };
+    return { ok: true, count: 0, withheld: true, reason: wh.reason, statusSent, ...(statusNote.statusSkipped ? { statusSkipped: statusNote.statusSkipped } : {}) };
   }
   const missingNote = wh.missing ? { missing: wh.missing } : {};
   try {
@@ -109,8 +115,8 @@ async function pushPduOnce() {
       console.warn(`[pdu-push] 중앙이 본문 크기를 거부(413). 스냅샷 ${snapshots.length}건 · JSON ${Math.round(json.length / 1024)}KB — 중앙의 JSON_BODY_LIMIT 을 확인하세요.`);
     }
     // v2.601(감사 EDGE2601-04): 200 이어도 중앙이 일부를 뺐을 수 있다(소유권·형식) — 응답을 읽어 상태·콘솔에 남긴다.
-    const ds = ok ? await readDropSummary(res) : null;
-    if (ds?.rejected) console.warn(`[pdu-push] 중앙이 PDU ${ds.rejected}대를 받지 않았습니다(${Object.entries(ds.dropped || {}).filter(([, n]) => Number(n) > 0).map(([k, n]) => `${k} ${n}`).join(' · ') || '사유 미상'}) — 그 PDU 는 중앙 화면에 나오지 않습니다`);
+    const ds = ok ? dropSummaryOf(await readCentralReply(res)) : null; // v2.613 EDGE2613-05: 공용 판독기
+    if (ds?.rejected) console.warn(`[pdu-push] 중앙이 PDU ${ds.rejected}대를 받지 않았습니다(${dropText(ds.dropped)}) — 그 PDU 는 중앙 화면에 나오지 않습니다`);
     const extra = { ...(omitted ? { omitted } : {}), ...(ds?.rejected ? { rejected: ds.rejected, dropped: ds.dropped } : {}), ...missingNote };
     if (ok && missingNote.missing) console.warn(`[pdu-push] 위임 PDU ${missingNote.missing}대는 스냅샷이 없어 이번 목록에 없습니다(보류 시한 초과 또는 첫 주기 이후 추가된 장비) — 중앙 화면에서 그 PDU 는 보이지 않습니다`);
     _last = { at: Date.now(), ok, count: snapshots.length, bytes: json.length, reason: ok ? (snapshots.length ? '' : '위임 PDU 0대 — 중앙 목록을 비웠습니다') : `HTTP ${res.status}`, ...extra };

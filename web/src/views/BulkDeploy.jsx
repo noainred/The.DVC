@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, downloadFile } from '../api.js';
+import { agoText } from './tools/relTime.js';
 import { STable } from '../components/STable.jsx';
 
 /**
@@ -20,7 +21,7 @@ const EMPTY_DEFAULTS = {
   autoUpgrade: true, pushInventory: false,
 };
 const dur = (ms) => (!ms ? '—' : ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}초` : `${Math.floor(ms / 60_000)}분 ${Math.round((ms % 60_000) / 1000)}초`);
-const ago = (ts) => { if (!ts) return '—'; const s = Math.round((Date.now() - ts) / 1000); return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : `${Math.round(s / 3600)}시간 전`; };
+// v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다(로컬 ago 사본 제거).
 
 export default function BulkDeploy() {
   // ⚠ 훅은 전부 조기 return 위에(React #310 회귀 방지).
@@ -248,7 +249,7 @@ export default function BulkDeploy() {
           <div className="flex gap wrap" style={{ alignItems: 'center' }}>
             <b style={{ fontSize: 14 }}>배포 진행 — {run.runId}</b>
             <span className={`badge ${run.status === 'running' ? 'blue' : run.status === 'cancelled' ? 'amber' : 'green'}`}>{run.status === 'running' ? '진행 중' : run.status === 'cancelled' ? '취소됨' : '완료'}</span>
-            <span className="muted" style={{ fontSize: 12 }}>{ago(run.at)} 시작 · {done}/{run.total} ({pct}%)</span>
+            <span className="muted" style={{ fontSize: 12 }}>{agoText(run.at)} 시작 · {done}/{run.total} ({pct}%)</span>
             <span style={{ flex: 1 }} />
             {run.status === 'running' && <button className="logout-btn" style={{ flex: 'none', padding: '6px 14px' }} disabled={busy} onClick={doCancel}>취소</button>}
           </div>
@@ -296,7 +297,7 @@ export default function BulkDeploy() {
                 <td style={{ fontFamily: 'monospace' }}>{r.runId}</td>
                 <td><span className={`badge ${r.status === 'running' ? 'blue' : r.status === 'cancelled' ? 'amber' : 'green'}`}>{r.status}</span></td>
                 <td>{r.total}</td><td>{r.ok}</td><td>{r.fail}</td>
-                <td data-sort={r.at}>{ago(r.at)}</td><td>{r.by || '—'}</td>
+                <td data-sort={r.at}>{agoText(r.at)}</td><td>{r.by || '—'}</td>
                 <td><button className="tab" disabled={busy} onClick={() => openRun(r.runId)}>열기</button></td>
               </tr>))}</tbody>
           </STable>

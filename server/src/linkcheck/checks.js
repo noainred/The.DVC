@@ -128,7 +128,7 @@ export function stepTls(ip, port, servername, { timeoutMs = 10_000 } = {}) {
  * @param {(json:object,res:object)=>string|null} p.identify  정체 대조(불일치면 사유 문자열)
  * @param {(body:string,res:object)=>string|null} p.identifyRaw  JSON 이 아닌 응답의 정체 대조(XML 등)
  */
-export async function stepHttp({ url, ip, headers = {}, timeoutMs = 15_000, identify = null, identifyRaw = null, method = 'GET' } = {}) {
+export async function stepHttp({ url, ip, headers = {}, timeoutMs = 15_000, identify = null, identifyRaw = null, method = 'GET', tag = '' } = {}) {
   const t0 = Date.now();
   const out = { http: null, auth: null, identity: null };
   let res;
@@ -160,14 +160,15 @@ export async function stepHttp({ url, ip, headers = {}, timeoutMs = 15_000, iden
     const cause = e?.cause?.message ? ` — ${e.cause.message}` : '';
     const msg = `${String(e?.message || e)}${cause}`;
     out.http = { ok: false, ms: ms(t0), failKind: failKindOfCode(e?.code || e?.cause?.code, msg), error: msg.slice(0, 200) };
-    recordOutbound(url, { error: msg.slice(0, 200), method, ms: ms(t0) });
+    recordOutbound(url, { error: msg.slice(0, 200), method, ms: ms(t0), ...(tag ? { tag } : {}) }); // v2.613 EDGE2613-10
     return out;
   }
   const httpMs = ms(t0);
   const status = res.status;
   // v2.589 (감사 ARCH-A4): 이 점검은 전역 fetch 라 resilientFetch 의 기록을 타지 않아 데이터 흐름 지도의
   //   중앙→엣지 /ping 이 5분 점검과 무관하게 회색이었다. 포탈 사이 경로(/api/collector·/api/central)만 기록된다.
-  recordOutbound(url, { status, bytes: body.length, method, ms: httpMs });
+  // v2.613 EDGE2613-10: 호출부(run.js)가 수집 서버 id 를 `tag` 로 주면 데이터 흐름 지도가 같은 origin 엣지를 나눈다(없으면 URL 만).
+  recordOutbound(url, { status, bytes: body.length, method, ms: httpMs, ...(tag ? { tag } : {}) });
   const snippet = body.slice(0, BODY_SNIP);
   const common = { status, ms: httpMs, contentType: t(res.headers.get('content-type')), bodySnippet: snippet, bytes: body.length, ...(bodyCapped ? { bodyCapped: true } : {}) };
 

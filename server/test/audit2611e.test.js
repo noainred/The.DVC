@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -23,7 +24,7 @@ process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
 process.env.IPAM_SCAN_WRITE_DEBOUNCE_MS = process.env.IPAM_SCAN_WRITE_DEBOUNCE_MS || '0';
 
-const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+const strip = stripComments;   // v2.613 TESTDOC2613-08
 const src = (p) => strip(fs.readFileSync(path.join(SRC, p), 'utf8'));
 
 function runChild(code, env = {}) {

@@ -21,16 +21,19 @@ describe('util/fmt', () => {
     expect(fmtKg(1500)).toBe('1.5 t');
     expect(fmtKg(null)).toBe('—');
   });
-  it('fmtBytes — falsy=0 B·GB 상한(PortalBackup/DavinciChecks 복붙 통합본 의미 보존)', () => {
-    expect(fmtBytes(0)).toBe('0 B');           // PortalDb 변형('—')과 다른 의도된 의미
+  it('fmtBytes — 0 은 0 B · 결측은 —(v2.613 WEB2613-03) · GB 상한', () => {
+    expect(fmtBytes(0)).toBe('0 B');           // 0 은 값이다
+    expect(fmtBytes(null)).toBe('—');          // 읽지 못한 값을 0 B 로 둔갑시키지 않는다(numOrNull)
+    expect(fmtBytes('abc')).toBe('—');         // 예전엔 throw(v.toFixed is not a function)
     expect(fmtBytes(512)).toBe('512 B');
     expect(fmtBytes(1536)).toBe('1.5 KB');
     expect(fmtBytes(5 * 1024 ** 3)).toBe('5.0 GB');
     expect(fmtBytes(9 * 1024 ** 4)).toBe('9216.0 GB'); // GB 상한 — TB 미승급이 원본 동작
   });
-  it('fmtAgo — 음수 clamp(서버-브라우저 시계 오차)', () => {
-    expect(fmtAgo(Date.now() + 60_000)).toBe('0초 전'); // 미래 ts 도 음수로 안 내려감
+  it('fmtAgo — relTime.agoText 의 껍데기(v2.613 DEPS2613-11): 미래는 방금 · 결측은 —', () => {
+    expect(fmtAgo(Date.now() + 60_000)).toBe('방금'); // 미래 ts(시계 오차)도 음수로 안 내려감 — 코어 규칙은 '방금'
     expect(fmtAgo(0)).toBe('—');
+    expect(fmtAgo(null, { dash: '없음' })).toBe('없음');
   });
   it('num/dec1 — null 안전·소수 1자리', () => {
     expect(num(null)).toBe('—');

@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2604e-'));
 process.env.CONFIG_DIR = TMP;
@@ -21,7 +22,6 @@ const SRC = path.join(HERE, '..', 'src');
 const HOUR = 3_600_000;
 const T0 = Date.parse('2031-03-04T05:30:00Z');   // 정시 +30분 — 시간 칸 경계에서 떨어뜨려 고정
 
-const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 // ── RECENT2604-02 ─────────────────────────────────────────────────────────
 test('RECENT2604-02: 대상 삭제는 삭제 시각까지만 지운다 — 같은 id 로 다시 만든 대상의 새 표본·롤업은 남는다', async () => {

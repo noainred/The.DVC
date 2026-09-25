@@ -18,6 +18,7 @@ import { promisify } from 'node:util';
 import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { registerStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { readCentralReply, dropSummaryOf, mergeDrop, warnDrop } from '../agent/centralReply.js';
@@ -28,7 +29,10 @@ import { getStatus } from './store.js';
 import * as db from './db.js';
 
 const gzipAsync = promisify(zlib.gzip);
-const CURSOR_FILE = () => path.join(config.configDir, 'cvp-push.json');
+// v2.613 PERSIST2613-01(재현): 이 커서는 표본이 있는 push 마다 다시 쓴다 — 상태 파일로 등록하지 않으면 백업 변경 감시·엣지 설정 push 가
+//   5분마다 반응한다(형제 sanswitch-perf-push.json 은 v2.590 에 목록으로 등록됐는데 CVP 는 빠졌다). 등록부 + backup 목록 이중.
+const CURSOR_NAME = registerStateFile('cvp-push.json');
+const CURSOR_FILE = () => path.join(config.configDir, CURSOR_NAME);
 export const CHUNK_BYTES = Math.max(64 * 1024, Number(process.env.CVP_PUSH_CHUNK_BYTES) || 700 * 1024);
 const MAX_ROWS = Math.max(1000, Number(process.env.CVP_PUSH_ROWS) || 20_000);
 const PUSH_GZIP = process.env.CVP_PUSH_GZIP !== 'false';

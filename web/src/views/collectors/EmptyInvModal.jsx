@@ -16,6 +16,7 @@
  */
 import React, { useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
+import { agoText } from '../tools/relTime.js';
 import EscClose from '../../components/EscClose.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -25,16 +26,7 @@ import {
   collectModeText,
 } from './emptyInvText.js';
 
-const ago = (ts) => {
-  if (ts == null || ts === '') return '—';
-  const n = Number(ts);
-  if (!Number.isFinite(n) || n <= 0) return '—';
-  const s = Math.max(0, Math.round((Date.now() - n) / 1000));
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.round(s / 60)}분 전`;
-  if (s < 86400) return `${Math.round(s / 3600)}시간 전`;
-  return `${Math.round(s / 86400)}일 전`;
-};
+// v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다(로컬 ago 사본 제거).
 
 const FETCH_KIND_TEXT = Object.freeze({
   auth: '수집 서버 토큰이 거부됐습니다 — 중앙 등록값과 그 엣지의 COLLECTOR_TOKEN 을 대조하세요(특수기능 › 포탈 점검 › 토큰 점검). **다시 눌러도 같습니다.**',
@@ -70,7 +62,7 @@ export default function EmptyInvModal({ agent, push, onClose }) {
       if (!r?.ok) {
         const base = FETCH_KIND_TEXT[r?.kind] || `가져오지 못했습니다${r?.reason ? ` — ${r.reason}` : ''}.`;
         // ⚠ 폴백 등록 사실을 **한 번만** 말한다(v2.549 초판이 두 번 띄웠다).
-        setFetchNote(r?.snap ? `${base} 아래는 ${ago(r.snap.at)} 가져온 **보관분**입니다.` : base);
+        setFetchNote(r?.snap ? `${base} 아래는 ${agoText(r.snap.at)} 가져온 **보관분**입니다.` : base);
       } else {
         setFetchNote('');
       }
@@ -83,7 +75,7 @@ export default function EmptyInvModal({ agent, push, onClose }) {
     setBusy(true); setFetchNote('');
     try {
       const r = await fetchJson(`/tools/edge-log/${encodeURIComponent(agent)}`);
-      if (r?.snap) { setSnap(r.snap); setFetchNote(`아래는 ${ago(r.snap.at)} 가져온 **보관분**입니다(지금 값이 아닙니다).`); }
+      if (r?.snap) { setSnap(r.snap); setFetchNote(`아래는 ${agoText(r.snap.at)} 가져온 **보관분**입니다(지금 값이 아닙니다).`); }
       else setFetchNote('보관된 로그가 없습니다 — 아직 한 번도 가져오지 않았습니다(이상이 아닙니다. 이 기능은 누를 때만 엣지로 갑니다).');
     } catch (e) { setFetchNote(`보관분 조회 실패 — ${e?.message || e}`); }
     finally { setBusy(false); }
@@ -132,7 +124,7 @@ export default function EmptyInvModal({ agent, push, onClose }) {
               {busy ? '가져오는 중…' : '엣지 상태·로그 가져오기'}
             </button>
             <button className="logout-btn" style={{ padding: '4px 10px', fontSize: 11 }} onClick={loadStored} disabled={busy}>보관분 보기</button>
-            {snap?.at ? <span className="muted" style={{ fontSize: 11 }}>{ago(snap.at)} · 엣지 v{snap?.node?.version || '?'}</span> : null}
+            {snap?.at ? <span className="muted" style={{ fontSize: 11 }}>{agoText(snap.at)} · 엣지 v{snap?.node?.version || '?'}</span> : null}
           </div>
           {fetchNote && <div style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 6 }}><BoldText text={fetchNote} /></div>}
           {!snap && !fetchNote && (
@@ -176,7 +168,7 @@ export default function EmptyInvModal({ agent, push, onClose }) {
           {pushSt && (
             <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.7 }}>
               인벤토리 push: {pushSt.enabled ? '켜짐' : '꺼짐'}
-              {pushSt.last ? ` · 마지막 ${ago(pushSt.last.at)} · 전송 ${pushSt.last.sent}곳`
+              {pushSt.last ? ` · 마지막 ${agoText(pushSt.last.at)} · 전송 ${pushSt.last.sent}곳`
                 + (pushSt.last.skippedMock ? ` · mock 제외 ${pushSt.last.skippedMock}곳` : '')
                 + (pushSt.last.errors?.length ? ` · 실패 ${pushSt.last.errors.length}건` : '') : ' · 아직 보낸 적 없음'}
             </div>

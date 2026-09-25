@@ -20,11 +20,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
-const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const strip = stripComments;   // v2.613 TESTDOC2613-08: 2줄 정규식 판본은 틀렸다(v2.574) — 코어 하나
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ssrf2537-'));
 delete process.env.SSRF_ALLOW_LOOPBACK; // 기본(차단) 동작을 검사한다

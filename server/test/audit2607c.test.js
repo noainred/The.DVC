@@ -227,8 +227,8 @@ test('SEC2607-02 — VPLEX 버전 정규식: 옛 정규식과 결과 동일 + �
     assert.deepEqual(execSig(NEW, s), execSig(OLD, s), JSON.stringify(s));
   }
   const { normalizeVplexSsh } = await import('../src/storage/collectors/vplexSsh.js');
-  const ms = timeIt(() => normalizeVplexSsh({ id: 'v', name: 'v', type: 'vplex' }, { version: `Version${' '.repeat(20_000)}x` }));
-  assert.ok(ms < 150, `O(n²) (${ms.toFixed(1)}ms — 예전 약 0.6초)`);
+  const ms = timeIt(() => normalizeVplexSsh({ id: 'v', name: 'v', type: 'vplex' }, { version: `Version${' '.repeat(60_000)}x` }));   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
+  assert.ok(ms < 1000, `O(n²) (${ms.toFixed(1)}ms — 예전 2만 자에 약 0.6초, 6만 자면 약 5초)`);
   assert.equal(normalizeVplexSsh({ id: 'v', name: 'v', type: 'vplex' }, { version: 'Product Version: 6.2.0.01.00.13\n' }).version, '6.2.0.01.00.13');
 });
 
@@ -242,8 +242,8 @@ test('SEC2607-03 — 라이선스 등급 정규식: 옛 정규식과 결과 동�
     assert.deepEqual(execSig(NEW, s), execSig(OLD, s), JSON.stringify(s));
   }
   const { classifyLicense } = await import('../src/bmusage/license.js');
-  const ms = timeIt(() => classifyLicense([{ name: `data${' '.repeat(20_000)}x` }]));
-  assert.ok(ms < 150, `O(n²) (${ms.toFixed(1)}ms)`);
+  const ms = timeIt(() => classifyLicense([{ name: `data${' '.repeat(60_000)}x` }]));
+  assert.ok(ms < 1000, `O(n²) (${ms.toFixed(1)}ms)`);
   assert.equal(classifyLicense([{ name: 'iDRAC9 x5 Data - Center License' }]).tier, 'datacenter');
 });
 
@@ -258,8 +258,8 @@ test('SEC2607-03 — pctFromMetric: 옛 판정과 결과 동일 + 선형', async
     assert.equal(pctFromMetric(s), old(s), JSON.stringify(s));
   }
   for (const v of [null, undefined, 5, 101, -1, '', 'N/A', ' 42 % ', '42%', '3.5']) assert.equal(pctFromMetric(v), old(v));
-  const ms = timeIt(() => pctFromMetric(`1${' '.repeat(20_000)}x`));
-  assert.ok(ms < 100, `O(n²) (${ms.toFixed(1)}ms)`);
+  const ms = timeIt(() => pctFromMetric(`1${' '.repeat(60_000)}x`));
+  assert.ok(ms < 1000, `O(n²) (${ms.toFixed(1)}ms)`);
 });
 
 test('LEFT2607-10 — lsanshow fabric id 정규식: 옛 정규식과 결과 동일 + 선형', async () => {
@@ -273,8 +273,8 @@ test('LEFT2607-10 — lsanshow fabric id 정규식: 옛 정규식과 결과 동�
   const fos = await import('../src/sanswitch/collectors/fosParse.js');
   const parse = fos.parseLsanShow;
   assert.equal(typeof parse, 'function');
-  const ms = timeIt(() => parse(`fabric id${' '.repeat(20_000)}x\n`));
-  assert.ok(ms < 150, `O(n²) (${ms.toFixed(1)}ms)`);
+  const ms = timeIt(() => parse(`fabric id${' '.repeat(60_000)}x\n`));
+  assert.ok(ms < 1000, `O(n²) (${ms.toFixed(1)}ms)`);
 });
 
 test('SEC2607-03 — redfish 라이선스 항목 문자열은 256자로 자른다', () => {

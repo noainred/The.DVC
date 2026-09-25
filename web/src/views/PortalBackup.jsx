@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson, getToken } from '../api.js';
+import { fetchJson, postJson, putJson, delJson, downloadFile } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { fmtBytes, fmtTime } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
@@ -40,14 +40,9 @@ export default function PortalBackup() {
     catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); }
   };
   const download = async (name) => {
-    try {
-      const res = await fetch(`/api/admin/backup/download/${encodeURIComponent(name)}`, { headers: { Authorization: `Bearer ${getToken()}` } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = name; a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) { setMsg(`다운로드 오류: ${e.message}`); }
+    // v2.613 WEB2613-10: api.js 를 우회한 직접 fetch 금지 — 401 전역 처리·403 안내(HttpError)·X-Request-Id 가 빠진다.
+    try { await downloadFile(`/admin/backup/download/${encodeURIComponent(name)}`, name); }
+    catch (e) { setMsg(`다운로드 오류: ${e.message}`); }
   };
   const restore = async (name) => {
     if (!window.confirm(`'${name}' 으로 중앙 설정을 복원합니다.\n현재 설정은 자동 백업(pre-restore)되며, 적용에는 포탈 재시작이 필요합니다. 계속할까요?`)) return;

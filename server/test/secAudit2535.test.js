@@ -11,12 +11,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { stripComments } from './_stripComments.js';
 
 const SRC = new URL('../src/', import.meta.url).pathname;
 const ROOT = new URL('../../', import.meta.url).pathname;
 
 /** 주석(블록·행) 제거 — 문자열 검사 전 필수. */
-const codeOf = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const codeOf = stripComments;   // v2.613 TESTDOC2613-08
 
 function walk(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

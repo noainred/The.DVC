@@ -21,6 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -106,7 +107,7 @@ test('★ 서버 게이트 키는 프론트 탭의 perm 키와 글자 그대로 
   }
   assert.ok(tabPerms.size >= 5, `App.jsx 에서 인벤토리 탭 perm 을 찾지 못했습니다(${tabPerms.size}건)`);
 
-  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const strip = stripComments;   // v2.613 TESTDOC2613-08
   const inv = strip(fs.readFileSync(path.join(SRC, 'routes/api/inventory.js'), 'utf8'));
   const nsx = strip(fs.readFileSync(path.join(SRC, 'routes/api/overviewNsx.js'), 'utf8'));
   const serverKeys = new Set([...`${inv}\n${nsx}`.matchAll(/requirePerm\('(inv\.[a-z]+)'\)/g)].map((m) => m[1]));
@@ -118,7 +119,6 @@ test('★ 서버 게이트 키는 프론트 탭의 perm 키와 글자 그대로 
 test('원격접속 대상 목록은 remote.access 권한자에게만(형제 /proxies 와 같은 기준)', () => {
   // v2.480 이 `/remote/proxies` 에만 붙이고 `/remote/targets` 는 빠뜨렸다 — VM 이름·guestOS·
   // 전체 IP 목록을 주는 경로라 기준이 같아야 한다(게이팅 비대칭 금지).
-  const src = fs.readFileSync(path.join(SRC, 'routes/remote.js'), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const src = stripComments(fs.readFileSync(path.join(SRC, 'routes/remote.js'), 'utf8'));
   assert.match(src, /remoteRouter\.get\('\/targets',\s*requirePerm\('remote\.access'\)/);
 });

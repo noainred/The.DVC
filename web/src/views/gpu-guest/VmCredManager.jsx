@@ -6,7 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../../api.js';
 import { VmLink } from '../../components/ui.jsx';
-import { fmtAgo } from './shared.jsx';
+import { fmtAgo } from '../../util/fmt.js'; // v2.613 DEPS2613-11: 코어는 util/fmt, 결측 표기('없음')만 이 화면 계약
 import { droppedSecretNote } from '../droppedSecretText.js'; // v2.611: VM 계정명 변경 시 폐기된 비밀번호 안내
 import { STable } from '../../components/STable.jsx';
 
@@ -265,7 +265,7 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
                       </td>
                       <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
                         {r.collected
-                          ? <span className="badge green" title={`마지막 수집 ${fmtAgo(r.collected.at)}`}>● {r.collected.utilNA ? 'N/A(MIG)' : `${r.collected.utilPct}%`} <span style={{ opacity: 0.7 }}>{fmtAgo(r.collected.at)}</span></span>
+                          ? <span className="badge green" title={`마지막 수집 ${fmtAgo(r.collected.at, { dash: '없음' })}`}>● {r.collected.utilNA ? 'N/A(MIG)' : `${r.collected.utilPct}%`} <span style={{ opacity: 0.7 }}>{fmtAgo(r.collected.at, { dash: '없음' })}</span></span>
                           : <span className="badge gray" title="아직 게스트에서 사용률을 읽어오지 못함">미수집</span>}
                       </td>
                       <td>

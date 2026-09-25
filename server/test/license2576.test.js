@@ -22,6 +22,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const r = (p) => path.join(ROOT, p);
@@ -84,9 +85,7 @@ test('★ F2 — 서브셋 폰트에 기계판독 라이선스 고지(nameID 13�
 });
 
 test('★ F2 — jsPDF 별칭도 예약 이름이 아니다 (PDF 폰트 리소스 이름이 된다)', () => {
-  const s = fs.readFileSync(r('web/src/views/tools/reportExport.js'), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ''))
-    .replace(/\/\/[^\n]*/g, '');
+  const s = stripComments(fs.readFileSync(r('web/src/views/tools/reportExport.js'), 'utf8'));   // v2.613 TESTDOC2613-08
   const calls = [...s.matchAll(/pdf\.(?:addFont|setFont)\(\s*(?:'[^']*'\s*,\s*)?'([^']+)'/g)].map((m) => m[1]);
   assert.ok(calls.length >= 2, 'addFont/setFont 호출을 찾지 못했다');
   for (const c of calls) assert.ok(!/^pretendard$/i.test(c), `jsPDF 별칭 '${c}' 가 예약 폰트 이름이다`);

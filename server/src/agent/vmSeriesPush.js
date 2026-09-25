@@ -17,6 +17,8 @@ import os from 'node:os';
 import { config } from '../config.js';
 import { reqTimeoutMs } from './envTimeout.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { readCentralReply } from '../util/centralReply.js'; // v2.613 CONTRACT2613-03
+import { createChangeLogger } from '../util/logThrottle.js';
 
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
@@ -62,6 +64,7 @@ export function chunkSpikeRows(rows, limitBytes = CHUNK_BYTES, maxRows = CHUNK_M
   return chunks;
 }
 
+const _dropLog = createChangeLogger({ windowMs: 10 * 60_000 });
 async function post(body) {
   const json = Buffer.from(JSON.stringify(body));
   let payload = json; let hdrs = headers();
@@ -74,7 +77,13 @@ async function post(body) {
   });
   if (res.status === 413) throw new Error('vmseries -> 413 (중앙 본문 한도 초과 — 청크 크기를 줄이세요)');
   if (!res.ok) throw new Error(`vmseries -> ${res.status}`);
-  return { bytes: json.length, gzBytes: payload.length };
+  // v2.613(감사 CONTRACT2613-03): 중앙 `sanitizeVmSeriesBody` 는 레이아웃이 맞지 않는 행을 **조용히** 버린다 — 응답의 `spikes`(받아들인 행 수)를
+  //   보낸 행 수와 대조해 모자라면 상태·콘솔에 남긴다(예전에는 `res.ok` 만 봐 알 길이 없었다). 응답을 못 읽으면 판정하지 않는다(null).
+  const j = await readCentralReply(res);
+  const sentRows = Array.isArray(body.spikes) ? body.spikes.length : 0;
+  const accepted = j && Number.isFinite(Number(j.spikes)) ? Number(j.spikes) : null;
+  const dropped = accepted != null && accepted < sentRows ? sentRows - accepted : 0;
+  return { bytes: json.length, gzBytes: payload.length, sentRows, accepted, dropped };
 }
 
 /**
@@ -87,7 +96,7 @@ export async function pushVmSeriesSlice(vc, res) {
   //   중앙이 -1 로 저장했고 위임 vCenter 의 최대 CPU/MEM 이 언제나 '—' 였다(수신측은 이미 받게 되어 있다).
   const rows = (res.spikes || []).map((s) => ({ kind: s.kind, ref: s.ref, t0: s.t0, t1: s.t1, n: s.n, cols: s.cols, data: s.buf.toString('base64'), mxcpu: s.mxcpu, mxmem: s.mxmem }));
   const chunks = chunkSpikeRows(rows);
-  let bytes = 0; let gzBytes = 0;
+  let bytes = 0; let gzBytes = 0; let sentRows = 0; let dropped = 0; let unverified = 0;
   try {
     for (let i = 0; i < chunks.length; i++) {
       const body = {
@@ -102,10 +111,13 @@ export async function pushVmSeriesSlice(vc, res) {
         ...(i === chunks.length - 1 ? { cover: res.cover || [], cursors: res.cursors || [], stats: res.stats || null, historicalInterval: res.historicalInterval || null } : {}),
       };
       const r = await post(body);
-      bytes += r.bytes; gzBytes += r.gzBytes;
+      bytes += r.bytes; gzBytes += r.gzBytes; sentRows += r.sentRows; dropped += r.dropped; if (r.accepted == null) unverified += 1;
     }
-    last = { at: Date.now(), vcenterId: vc.id, chunks: chunks.length, bytes, gzBytes, ms: Date.now() - started, error: null };
-    return { ok: true, chunks: chunks.length, bytes, gzBytes };
+    // v2.613 CONTRACT2613-03: 중앙이 받아들인 행 수가 보낸 행 수보다 적으면 그 차이를 밝힌다(형식 불일치 행 — 중앙 화면에 그만큼 없다).
+    const dropNote = dropped ? { dropped: { rows: dropped, sentRows, text: `중앙이 스파이크 행 ${dropped}/${sentRows}개를 받아들이지 않았습니다(형식 불일치 — 그만큼 중앙 화면에 없습니다)` } } : {};
+    if (dropped && _dropLog(vc.id, String(dropped))) console.warn(`[vmseries-push] ${vc.id}: ${dropNote.dropped.text}`);
+    last = { at: Date.now(), vcenterId: vc.id, chunks: chunks.length, bytes, gzBytes, ms: Date.now() - started, error: null, ...dropNote, ...(unverified ? { replyUnread: unverified } : {}) };
+    return { ok: true, chunks: chunks.length, bytes, gzBytes, ...dropNote };
   } catch (e) {
     last = { at: Date.now(), vcenterId: vc.id, chunks: chunks.length, bytes, gzBytes, ms: Date.now() - started, error: e?.message || String(e) };
     console.warn(`[vmseries-push] ${vc.id} 실패: ${e?.message || e}`);

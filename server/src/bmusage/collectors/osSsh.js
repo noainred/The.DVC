@@ -153,7 +153,7 @@ export function shapeLinux(stdout, mounts = []) {
  * @param {object} osHost  `bmstor` 등록 항목(host·port·username·password·mounts)
  * @param {{signal?:AbortSignal}} opt
  */
-export async function collectOsUsage(osHost = {}, { signal } = {}) {
+export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS } = {}) {
   const host = String(osHost.host || '').trim();
   if (!host) return { ok: false, error: 'OS host 가 없습니다.' };
   const { mounts } = sanitizeMounts(osHost.mounts);
@@ -168,7 +168,8 @@ export async function collectOsUsage(osHost = {}, { signal } = {}) {
       readyTimeout: READY_TIMEOUT_MS, signal,
     }, async ({ exec }) => {
       // 예산 시계는 **SSH 연결이 끝난 시점**부터 센다(READY 는 withSsh 가 이미 소비했다).
-      const endsAt = Date.now() + Math.max(MIN_SLICE_MS, SESSION_BUDGET_MS - READY_TIMEOUT_MS);
+      // v2.613 RUNTIME2613-05: 예산은 호출자(폴러)가 장비 시한과 묶어 준 값(`budgetMs`)이 먼저다 — 기본은 이 모듈의 상수.
+      const endsAt = Date.now() + Math.max(MIN_SLICE_MS, budgetMs - READY_TIMEOUT_MS);
       const slice = () => Math.min(CMD_TIMEOUT_MS, Math.max(0, endsAt - Date.now()));
       let budgetSkipped = '';
       const tryLinux = async () => {

@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import url from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 const { extractSanSwitchParts } = await import('../src/partfault/extract/sanswitch.js');
 const { summarize, DEVICE_KEY_KIND, KEY_KIND } = await import('../src/partfault/types.js');
@@ -91,8 +92,7 @@ test('③ 링크 포트의 광량 — 하한 이하 fault · 주의 이하 warn 
 });
 
 test('③-b 광량 임계는 소스에 숫자로 박지 않고 healthCheck 에서 import 한다(보고서·화면과 같은 원천)', () => {
-  const src = fs.readFileSync(path.join(HERE, '../src/partfault/extract/sanswitch.js'), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');   // 주석을 지운 뒤 검사한다
+  const src = stripComments(fs.readFileSync(path.join(HERE, '../src/partfault/extract/sanswitch.js'), 'utf8'));   // 주석을 지운 뒤 검사한다
   assert.match(src, /import\s*\{[^}]*RX_WARN_DBM[^}]*\}\s*from\s*'\.\.\/\.\.\/sanswitch\/healthCheck\.js'/);
   assert.match(src, /import\s*\{[^}]*RX_BAD_DBM[^}]*\}/);
   assert.match(src, /import\s*\{[^}]*isLinked[^}]*\}/);

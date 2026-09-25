@@ -10,6 +10,7 @@ import path from 'node:path';
 import http from 'node:http';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2612d-'));
 process.env.CONFIG_DIR = tmp;
@@ -19,7 +20,6 @@ process.env.SSRF_ALLOW_LOOPBACK = 'true';
 process.env.SVCMON_PUSH_CHUNK = '1000000000'; // EDGE2612-03: 상한 없는 시작 청크
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
-const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 // LEFT2612-01: 중앙 등록부 5종을 **손상된 채로** 둔다(모듈을 불러오기 전에 — agentUsers 는 모듈 로드 시 읽는다).
 for (const f of ['storage-devices.json', 'sanswitch-devices.json', 'pdu-devices.json', 'cvp-servers.json', 'central-agent-users.json']) {

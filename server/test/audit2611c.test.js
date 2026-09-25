@@ -400,14 +400,8 @@ test('DB2611-01 — 본체·-wal·-shm 은 0600(기존 0644 잔재도) · DB 디
   // ipam(wal:false)은 건드리지 않는다 — 외부 리더 권한 계약
   const src = fs.readFileSync(path.join(SRC, 'util/sqliteOpen.js'), 'utf8');
   assert.match(src, /if \(opts\.wal !== false\)/);
-  for (const [file, ctor] of [['horizon/sessionDb.js', 'new DatabaseSync(p)'], ['metrics/db.js', 'new DatabaseSync(DB_PATH)'], ['storage/db.js', 'new DatabaseSync(FILE())']]) {
-    const s = fs.readFileSync(path.join(SRC, file), 'utf8');
-    const at = s.indexOf(ctor);
-    assert.ok(at > 0, file);
-    const chmodAt = s.indexOf('chmodDbFiles(', at);
-    const pragmaAt = s.indexOf('PRAGMA', at);
-    assert.ok(chmodAt > 0 && chmodAt < pragmaAt, `${file}: chmodDbFiles 가 PRAGMA 보다 먼저여야 한다`);
-  }
+  // v2.613 PERSIST2613-03: 예전에 이름으로 박아 따로 검사하던 3모듈(horizon/sessionDb·metrics/db·storage/db)은 openSqlite 를 쓰게 됐다 —
+  //   chmod → PRAGMA 순서는 헬퍼 안에 있고, 'DatabaseSync 를 여는 모듈은 openSqlite 를 쓴다' 는 audit2613f 의 일반 스윕이 본다.
   assert.match(fs.readFileSync(path.join(SRC, 'insights/dbLocation.js'), 'utf8'), /mkdirSync\(target, \{ recursive: true, mode: 0o700 \}\)/);
 });
 

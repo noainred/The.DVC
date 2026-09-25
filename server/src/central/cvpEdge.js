@@ -19,8 +19,55 @@ import { capStr } from '../util/capStr.js';
 import { setCvpCollectBaseResolver, ackCvpCollect } from '../cvp/collectRequests.js';
 import { CANDIDATES } from '../cvp/client.js';
 import { DEVICE_MAX, PORT_MAX, PEER_MAX, PART_MAX, PART_STATES } from '../cvp/parse.js';
+import { cmpVersion } from '../util/cmpVersion.js'; // v2.613 CONTRACT2613-04: 엣지 버전 게이트
 
 const FILE = path.join(config.configDir, 'central-agent-cvp.json');
+
+/**
+ * v2.613(CONTRACT2613-04): CVP 위임 계약(`GET /cvp-config` pull + `POST /cvp-data` push)을 처음 갖는 엣지 버전 — 그 아래는
+ * `agent/cvpConfigPull.js` 자체가 없어 **영원히** 보고하지 않는다. 형제 5종(partFaults 2.548 · edgeLog 2.549 · bmUsage 2.554 ·
+ * tokenCheck 2.560 · iLO 2.610)이 전부 갖는 게이트인데 v2.608 이 빠뜨려, 구버전 엣지의 위임 CVP 가 '보고가 아직 없습니다(=기다리면
+ * 된다)' 로 남았다(v2.554 규약 — 구버전/버전 미상/첫 보고 대기는 조치가 다르므로 각각 다르게 말한다).
+ */
+export const MIN_CVP_EDGE_VERSION = '2.608.0';
+/** 보고가 없는 위임 CVP 의 분류 — 화면(`cvpText.serverState`)이 kind 별 문구를 갖는다(테스트가 1:1 대조). */
+export const CVP_EDGE_KINDS = Object.freeze(['old-version', 'unknown-version', 'silent', 'waiting']);
+/** 중앙이 이만큼(수집 주기 × N) 돌았는데도 보고가 없으면 '기다리면 된다' 가 아니다(v2.554 `edge-silent` 와 같은 배수). */
+export const SILENT_AFTER_INTERVALS = 3;
+
+/**
+ * 엣지 버전 — `allCollectorStatus()` 는 수집 서버 **id** 로 키가 잡히고 값에 엣지가 스스로 보고한 `agent` 가 있다.
+ * 등록부의 담당은 이름일 수도 id 일 수도 있어 **둘 다** 대조한다(routes/api/linkCheck.js 와 같은 판단 — 한쪽만 보면
+ * 이름과 id 가 다른 법인에서 '구버전' 대신 '버전 미상' 이 된다). 못 찾으면 ''.
+ */
+export function edgeVersionOf(agent, status = {}) {
+  const key = String(agent ?? '').trim().toLowerCase();
+  if (!key) return '';
+  for (const [id, st] of Object.entries(isPlainObj(status) ? status : {})) {
+    const ver = String(st?.version ?? '').trim();
+    if (!ver) continue;
+    if (String(id).trim().toLowerCase() === key || String(st?.agent ?? '').trim().toLowerCase() === key) return ver;
+  }
+  return '';
+}
+
+/**
+ * 보고가 없는 위임 CVP 의 분류(순수 — 테스트 고정). 보고가 있으면 부르지 않는다.
+ *  · `unknown-version` — 엣지 버전을 모른다(export 를 한 번도 받지 못함 → 수집 서버 연결부터)
+ *  · `old-version`     — `MIN_CVP_EDGE_VERSION` 미만(업그레이드해야 한다 — 기다려도 안 된다)
+ *  · `silent`          — 버전은 충분한데 중앙이 주기 × SILENT_AFTER_INTERVALS 를 넘게 돌았는데도 보고가 없다(엣지 로그를 볼 것)
+ *  · `waiting`         — 첫 보고 대기(기다리면 된다). ⚠ `sinceMs` 가 없으면(첫 주기 전) escalate 하지 않는다 — 없는 문제를 만들지 않는다.
+ */
+export function classifyCvpEdge({ edgeVersion = '', minVersion = MIN_CVP_EDGE_VERSION, sinceMs = null, intervalMs = 0, now = Date.now() } = {}) {
+  const ver = String(edgeVersion ?? '').trim();
+  if (!ver) return 'unknown-version';
+  const c = cmpVersion(ver, minVersion);
+  if (c != null && c < 0) return 'old-version';
+  const since = numOrNull(sinceMs);
+  const iv = numOrNull(intervalMs);
+  if (since != null && iv != null && iv > 0 && now - since > iv * SILENT_AFTER_INTERVALS) return 'silent';
+  return 'waiting';
+}
 export const ROWS_MAX = 100_000;
 const KINDS = new Set([...Object.keys(CANDIDATES), 'budget', 'deadline']);
 const PART_KIND_SET = new Set(['psu', 'fan', 'temp', 'xcvr']);

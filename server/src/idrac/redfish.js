@@ -18,7 +18,7 @@ import { constants as cryptoConstants } from 'node:crypto';
 import { config } from '../config.js';
 import { ssrfLookup } from '../util/ssrfLookup.js';
 import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
-import { pctFromMetric } from '../bmusage/parse/idracTelemetry.js';
+import { pctFromMetric, pickReports, buildIdracUsage } from '../bmusage/parse/idracTelemetry.js'; // v2.613 DEPS2613-02: 같은 모듈을 :1204 에서 동적으로 또 import 하던 것을 이 한 줄로
 import { readTextCapped } from '../util/readCapped.js';
 import { readBodyPrefix } from '../util/readPrefix.js';
 import { capStr } from '../util/capStr.js'; // v2.607 SEC2607-03
@@ -1201,7 +1201,6 @@ async function fetchTelemetryReports(entry, { allowList = true } = {}) {
     _reportList.set(key, { ids, at: Date.now() });
     listedNow = true;
   }
-  const { pickReports, buildIdracUsage } = await import('../bmusage/parse/idracTelemetry.js');
   const idOf = (u) => u.split('/').filter(Boolean).pop() || '';
   // v2.598(감사 IDRAC-2598-01): 목록 순서 앞 N개가 아니라 **종류별 우선순위**(SystemUsage → NIC → FC → …)로 고른다.
   const { wanted, skipped } = pickReports(ids, MAX_REPORTS_PER_DEVICE, idOf);

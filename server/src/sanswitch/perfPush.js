@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import { config, currentVersion } from '../config.js';
+import { config, currentVersion, clampIntervalMs } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { samplesAfter, metaFor, maxRowid } from './perfDb.js';
@@ -29,8 +29,9 @@ const FILE = () => path.join(config.configDir, 'sanswitch-perf-push.json');
 const CHUNK_BYTES = Math.max(64 * 1024, Number(process.env.SANSW_PERF_PUSH_CHUNK_BYTES) || 700 * 1024);
 const MAX_ROWS = Math.max(1000, Number(process.env.SANSW_PERF_PUSH_ROWS) || 20_000);
 const PUSH_GZIP = process.env.SANSW_PUSH_GZIP !== 'false';
-/** push 주기 — 기본은 수집 주기와 같다(수집 직후 즉시 push 하므로 타이머는 안전망). 하한 60초. */
-export const perfPushMs = () => Math.max(60_000, Number(process.env.SANSW_PERF_PUSH_MS) || loadPerfSettings().intervalMs);
+/** push 주기 — 기본은 수집 주기와 같다(수집 직후 즉시 push 하므로 타이머는 안전망). 하한 60초.
+ *  v2.613 RUNTIME2613-04: env 는 `clampIntervalMs` 로 상한(2^31−1ms)까지 가둔다(v2.599 규약 — `loadPerfSettings().intervalMs` 는 이미 LIMITS 클램프). */
+export const perfPushMs = () => clampIntervalMs(Number(process.env.SANSW_PERF_PUSH_MS) || loadPerfSettings().intervalMs, loadPerfSettings().intervalMs, 60_000);
 
 let _timer = null;
 let _busy = null;   // 진행 중인 push(프라미스) — v2.603 EDGE2603-03

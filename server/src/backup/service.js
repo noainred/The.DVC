@@ -14,6 +14,7 @@ import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { redactEnvSecrets, mergeRedactedEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
+import { isRegisteredStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01·08: 헬퍼가 만든 상태 파일은 스스로 등록한다
 
 /** 백업 아카이브(gzip JSON) 해제 출력 상한 — 설정 디렉터리 전체가 들어가도 수 MB 다(실측 2KB). */
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -38,6 +39,11 @@ export const RUNTIME_STATE_NAMES = new Set([
   'central-agent-storage.json', 'central-agent-sanswitch.json', 'central-agent-sanswitch-perf.json',
   'central-agent-gpu-guest.json', 'central-unsupported-servers.json', 'agent-results.json',
   'active-sessions.json', 'sanswitch-perf-push.json', 'ipam-scan-history.json', 'ipam-scan-results.json',
+  // v2.613 PERSIST2613-01(재현): v2.608 CVP 의 상태 파일 2개가 빠져 있었다 — 중앙은 CVP 엣지 push 마다, 엣지는 표본이 있는 push(5분)
+  //   마다 'change' 백업이 생겼고 엣지 설정 push 도 30분 → 5분마다 나갔다(v2.590 P1 · v2.602 EDGE2602-01 의 CVP 재발). 두 파일을
+  //   만드는 헬퍼(createDebouncedWriter · cvp/push.js saveCursor)가 이제 util/stateFiles.js 에 **스스로 등록**하지만, 확정된 이름은
+  //   여기에도 적는다(이중 안전망 — 헬퍼 모듈이 아직 로드되지 않은 시점의 판정까지 같게).
+  'central-agent-cvp.json', 'cvp-push.json',
 ]);
 // 이름 규약으로 드러나는 상태 파일(-latest·-activity·-history·-results·-runs·-log·-state·-usage·-stats·-stops·-inventory·-cache).
 // ⚠ 'vcenter-logs.json'(설정)·'dirusage.json'(설정)은 하이픈 뒤 정확한 단어가 아니라 걸리지 않는다 — 테스트가 고정한다.
@@ -52,7 +58,9 @@ export const SETTINGS_NOT_STATE = new Set(['svcmon-log.json', 'agent-assignments
 export function isRuntimeStateFile(name) {
   const b = path.basename(String(name || ''));
   if (SETTINGS_NOT_STATE.has(b)) return false;
-  return DENY_NAMES.has(b) || RUNTIME_STATE_NAMES.has(b) || RUNTIME_STATE_RE.test(b);
+  // v2.613 PERSIST2613-08: 상태 파일을 만드는 헬퍼(createDebouncedWriter·createActivityLog·createAuthGuard·push 커서)가 등록한
+  //   이름도 상태다 — 새 기능이 그 헬퍼를 쓰면 이 목록에 손으로 더하지 않아도 판정이 맞다(01 류의 여섯 번째 재발 방지).
+  return DENY_NAMES.has(b) || RUNTIME_STATE_NAMES.has(b) || RUNTIME_STATE_RE.test(b) || isRegisteredStateFile(b);
 }
 
 /** 설정 파일 묶음의 지문 — 상태·캐시 파일은 뺀다. 'change' 백업이 직전 백업과 같은 내용이면 만들지 않는 데 쓴다. */

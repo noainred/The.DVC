@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeLoadError, filterObjectElements, devicesForThisNode as coreDevicesForThisNode, devicesForAgent as coreDevicesForAgent } from '../util/registryCore.js'; // v2.613 PERSIST2613-04
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 import { isKnownType, isImplementedType, normalizeCollectMethod } from './types.js';
@@ -37,36 +38,31 @@ let _db = null;
  *   (routes/central.js)가 이 값을 보고 503 으로 답한다 — 빈 목록을 ok:true 로 내려보내면 엣지가 장비 목록·스냅샷을
  *   통째로 지운다. 다음 저장이 성공하면 풀린다(그때부터는 관리자가 다시 만든 목록이 진실이다).
  */
-let _loadError = null;
-export function registryLoadError() { load(); return _loadError; }
-// v2.612 LEFT2612-01: 파일이 없는데 손상 보존본(<파일>.corrupt.<시각>)만 있으면 재시작 뒤에도 '못 읽음' 이다 — 여기서 빈 목록으로
-//   출발하면 재시작 한 번으로 엣지 목록 삭제가 되살아난다. 관리자가 한 번 저장하면(파일이 생기면) 풀린다.
-function corruptOnlyReason(file) {
-  try {
-    const dir = path.dirname(file); const base = path.basename(file) + '.corrupt.';
-    const hit = fs.readdirSync(dir).filter((n) => n.startsWith(base)).sort().pop();
-    return hit ? `등록부 파일이 없고 손상 보존본(${hit})만 있습니다` : null;
-  } catch { return null; }
-}
+// v2.613 PERSIST2613-04 · DEPS2613-04: 손상 보존본 판정(corruptOnlyReason)·로드 오류 상태·원소 필터·법인 축 판정은 util/registryCore.js 하나다
+//   (등록부 5벌이 같은 12줄을 복사해 들고 있었고 이미 갈라져 있었다 — 원소 null 하나에 listDevices 가 매 호출 TypeError).
+const loadErr = makeLoadError();
+export function registryLoadError() { load(); return loadErr.get(); }
 
 function load() {
   if (_db) return _db;
   try {
     if (fs.existsSync(FILE)) {
       // 암호화 모드로 봉인 저장된 password 를 로드 경계에서 복호(소비자는 평문만 본다).
-      const p = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')));
-      _db = { devices: Array.isArray(p.devices) ? p.devices : [] };
+      const raw = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류'); // JSON null·배열은 손상(v2.601 규약 — cvp 와 같게)
+      const p = openSecretsDeep(raw);
+      _db = { devices: filterObjectElements(p.devices).list }; // v2.613 PERSIST2613-04: 객체 원소만(null 원소가 listDevices 의 구조분해를 죽였다)
       return _db;
     }
-  } catch (e) { preserveCorrupt(FILE); _loadError = { at: Date.now(), reason: String(e?.message || e).slice(0, 200) }; } // 손상 원본 보존 — 빈 목록 저장이 전 장비 자격증명을 지우는 사고 방지
-  if (!_loadError && !fs.existsSync(FILE)) { const why = corruptOnlyReason(FILE); if (why) _loadError = { at: Date.now(), reason: why }; }
+  } catch (e) { preserveCorrupt(FILE, e?.message); loadErr.set(e); } // 손상 원본 보존(사유 포함) — 빈 목록 저장이 전 장비 자격증명을 지우는 사고 방지
+  loadErr.checkCorruptOnly(FILE);
   _db = { devices: [] };
   return _db;
 }
 
 function persist() {
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ version: 1, devices: load().devices }), null, 2), { mode: 0o600 });
-  _loadError = null; // v2.612 LEFT2612-01
+  loadErr.clear(); // v2.612 LEFT2612-01
 }
 
 /** 목록 — 비밀번호는 절대 반환하지 않는다(hasPassword 불리언만). UI/집계 공용. */
@@ -171,16 +167,12 @@ export function deleteDevice(id) {
  *   (중앙은 CENTRAL_URL 을 설정하지 않는다 — svcmonPush 등 기존 위임 축과 동일 판별).
  */
 export function devicesForThisNode({ devices = load().devices, agentName = config.agent.name, isEdge = !!config.agent.centralUrl } = {}) {
-  const me = String(agentName || '').toLowerCase();
-  return devices.filter((d) => d.enabled !== false && (isEdge
-    ? String(d.agent || '').toLowerCase() === me
-    : !(d.agent || '').trim()));
+  return coreDevicesForThisNode(devices, { agentName, isEdge }); // v2.613 DEPS2613-04: 판정은 util/registryCore.js 하나
 }
 
 /** 특정 엣지 몫 장비(중앙의 config 서빙용 — 비밀번호 포함: 엣지가 장비에 로그인해야 한다). */
 export function devicesForAgent(agentName) {
-  const me = String(agentName || '').toLowerCase();
-  return load().devices.filter((d) => d.enabled !== false && String(d.agent || '').toLowerCase() === me);
+  return coreDevicesForAgent(load().devices, agentName); // v2.613 DEPS2613-04: 빈 이름은 빈 배열(중앙 직접 장비와 짝지어지지 않게)
 }
 
 /**
@@ -201,4 +193,4 @@ export function applyPulledDevices(list) {
   return { count: db.devices.length, removed: [...before].filter((id) => !now.has(id)) };
 }
 
-export function _resetForTest() { _db = null; _loadError = null; }
+export function _resetForTest() { _db = null; loadErr.clear(); }

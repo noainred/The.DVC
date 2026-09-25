@@ -24,6 +24,7 @@ import { dayKey, METRICS } from '../src/bmusage/db.js';
 import { applyScope } from '../src/routes/api/bmUsage.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import { stripComments } from './_stripComments.js';
 
 // ── 환산 코어 ────────────────────────────────────────────────────────────────
 test('첫 표본·리셋·간격 비정상은 0 이 아니라 null', () => {
@@ -339,7 +340,7 @@ test('⚠ 작업 로그의 host 는 내부 target 필드를 읽는다 — public
   /* ⚠ **주석을 먼저 지운다** — 규칙을 설명하는 주석에 그 문자열이 들어 있으면 검사가 자기
      주석을 잡는다(v2.550 에서 실제로 그랬다. `secAudit2535.test.js` 와 같은 규약). */
   const raw = fs.readFileSync(path.join(import.meta.dirname, '../src/bmusage/poller.js'), 'utf8');
-  const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const src = stripComments(raw);   // v2.613 TESTDOC2613-08
   assert.ok(!/target\.idracHost/.test(src), 'publicTarget 전용 필드를 폴러가 읽고 있다');
   assert.match(src, /target\.idrac\?\.host/, '내부 target 의 idrac.host 를 읽어야 한다');
 });

@@ -47,6 +47,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+import { partFaultRetention } from './settings.js'; // v2.613 PERSIST2613-06
 
 /*
  * ⚠ **`config.dbDir` 을 따른다**(설정 › DB 위치). 경로만 configDir 로 굳히면 사용자가 DB 를
@@ -56,8 +57,12 @@ import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen
  */
 const DB_PATH = () => process.env.PARTFAULT_DB_PATH
   || path.join(config.dbDir || config.configDir, 'part-faults.db');
-/** 이벤트 보존일. 전이만 쌓으므로 길게 잡아도 작다. */
-const RETENTION_DAYS = Math.max(30, Number(process.env.PARTFAULT_RETENTION_DAYS) || 730);
+/**
+ * 이벤트 보존일. 전이만 쌓으므로 길게 잡아도 작다.
+ * v2.613 PERSIST2613-06: env 전용 상수(`Math.max(30, Number(env) || 730)` — 0 이 조용히 730)였다 → 설정 파일(화면) + env(0 = 전부 보관)를
+ *   partfault/settings.js partFaultRetention() 이 결정하고 **prune 때마다 읽는다**(중앙에서 바꾸면 재시작 없이 다음 정리부터 적용).
+ */
+const retention = () => partFaultRetention();
 
 /**
  * 스키마 버전. **1** = v2.547(PK part_key 단일) · **2** = v2.548(PK (agent, part_key) + device_key).
@@ -241,7 +246,7 @@ export async function resetInfo() {
 export async function partFaultDbStatus() {
   const h = await open();
   return {
-    available: !!h, path: h ? h.path : DB_PATH(), retentionDays: RETENTION_DAYS,
+    available: !!h, path: h ? h.path : DB_PATH(), retentionDays: retention().days, retentionSource: retention().source,
     schemaVersion: h ? h.schemaVersion : null,
     reset: h ? readReset(h) : null,
     error: initError ? String(initError.message || initError).slice(0, 200) : (h ? '' : lockRetry.note()),
@@ -313,7 +318,8 @@ export async function applyTransition(tr, { now = Date.now() } = {}) {
   }
   // prune 스로틀 — `(++tick % N) === 0`(v2.453 규칙: 기동 첫 틱에 즉시 참이 되면 안 된다).
   if ((++_pruneTick % 20) === 0) {
-    try { st.prune.run(now - RETENTION_DAYS * 86_400_000); } catch { /* 정리 실패는 적재에 영향 없음 */ }
+    const { days } = retention();
+    if (days > 0) { try { st.prune.run(now - days * 86_400_000); } catch { /* 정리 실패는 적재에 영향 없음 */ } } // 0 = 전부 보관
   }
   return {
     saved: true,
