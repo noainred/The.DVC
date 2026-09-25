@@ -66,7 +66,54 @@ const PURPOSES = {
   'capacity.db': '리소스 적정성(용량) 샘플 시계열',
   'ping-monitor.db': '핑 모니터 응답/손실 시계열',
   'storage-history.db': '스토리지 장비(8종) 용량 이력',
+  // ── v2.613 PERSIST2613-02: DB 위치 이전 대상(insights/dbLocation.js MIGRATABLE) 19개 중 13개가 여기 없어 '포탈 DB' 화면이
+  //    용도 없이('SQLite 데이터베이스' 폴백) 나열했다. 테스트가 MIGRATABLE ⊆ PURPOSES 를 고정한다 — 새 DB 를 MIGRATABLE 에
+  //    넣으면 여기에도 적어야 한다(한 줄 설명은 dbLocation 의 label 과 같은 뜻으로).
+  'sanswitch-perf.db': 'SAN 스위치 포트 처리량 이력(포트별 누적 카운터 델타·일 롤업, v2.410)',
+  'rma-history.db': '원격 명령(RMA) 실행 이력(v2.416)',
+  'rma-tests.db': '원격 명령(RMA) 점검 결과(v2.418)',
+  'dirusage.db': '폴더 사용량 리포트 이력(엣지 공유 폴더 Top-N)',
+  'pdu.db': 'PDU 전력·온습도 이력(v2.424)',
+  'guest-disk.db': '게스트 디스크 회수 리포트 추이(변경분 저장, v2.459)',
+  'curuser.db': "'현재 사용자' 로그인 사용자 수 추이(v2.520)",
+  'san-health.db': 'SAN 스위치 월간 점검 이력(최근 N회 비교, v2.522)',
+  'horizon-sessions.db': 'Horizon 실시간 사용자(세션) 추이(v2.525)',
+  'part-faults.db': '물리 파트(부품) 장애 이력 — 열림/변화/해소 전이만 적재(v2.547)',
+  'bm-usage.db': '베어메탈 사용률(CPU·메모리·디스크·네트워크·HBA) 원시 90일 + 일 롤업(v2.550)',
+  'link-check.db': '통신 점검 이력(중앙↔엣지·vCenter 링크 표본·이벤트·일 롤업, v2.552)',
+  'cvp.db': 'Arista CloudVision(CVP) 네트워크 스위치 — 장비·포트 최신값·포트 사용량 이력(v2.608)',
+  // ── v2.613 PERSIST2613-02: 신규 기능의 설정·등록부 JSON(화면에서 편집 — 백업 대상).
+  'storage-devices.json': '스토리지 장비 등록부(호스트·계정·수집 방식·담당 엣지 — 비밀번호 봉인)',
+  'sanswitch-devices.json': 'SAN 스위치 등록부(호스트·계정·담당 엣지 — 비밀번호 봉인)',
+  'pdu-devices.json': 'PDU 등록부(호스트·SNMP/CLI 계정·담당 엣지 — 비밀 봉인)',
+  'cvp-servers.json': 'Arista CloudVision(CVP) 서버 등록부(주소·토큰/계정·담당 엣지 — 비밀 봉인, v2.608)',
+  'cvp-settings.json': 'CVP 수집 설정(켜짐·주기·보존일·동시성·장비 시한, v2.608)',
+  'bm-storage.json': '베어메탈 스토리지 서버 등록부 + 수집 주기(마운트 경로·SSH 계정 — 비밀 봉인, v2.340)',
+  'horizon.json': 'Horizon 커넥션 서버 등록(주소·계정 — 비밀 봉인)',
+  'horizon-sessions.json': 'Horizon 실시간 사용자(세션) 수집 설정(켜짐·주기·보존일·페이지 상한, v2.525)',
+  'curuser-settings.json': "'현재 사용자' 수집 설정(대상 폴더·주기·보존일·신선도 배수, v2.520)",
+  'bmusage-settings.json': '베어메탈 사용률 수집 설정(법인별 켜짐·주기·보존일·임계 알림·Enterprise 동의, v2.550)',
+  'linkcheck-settings.json': '통신 점검 설정(켜짐·주기·단계별 시한·엣지 짝·보존일, v2.552)',
+  'partfault-settings.json': '물리 파트 장애 기능 스위치(중앙·엣지별) + 이력 보존일(v2.548 · v2.613)',
+  'storage-intervals.json': '스토리지 수집 주기 중앙 배포값(엣지별 지정 키만, v2.409)',
+  // ── v2.613 PERSIST2613-02: 백업이 '상태·캐시' 로 분류하는 파일(backup/service.js RUNTIME_STATE_NAMES) 전부에 용도를 적는다 —
+  //    테스트가 그 목록 ⊆ PURPOSES 를 고정한다. 폴러·엣지 push 가 스스로 다시 쓰는 파일이라 편집 대상이 아니다.
+  'central-agent-config.json': '엣지가 push 한 자기 설정 사본(중앙 백업 번들에 포함 — 비밀은 엣지가 REDACTED 로 보낸다)',
+  'central-fleet.json': '엣지가 push 한 베어메탈(fleet) 집계 캐시(TTL 30분)',
+  'central-pdu.json': '엣지가 push 한 PDU 스냅샷 캐시',
+  'central-agent-storage.json': '엣지가 push 한 스토리지 장비 스냅샷 캐시',
+  'central-agent-sanswitch.json': '엣지가 push 한 SAN 스위치 스냅샷 캐시',
+  'central-agent-sanswitch-perf.json': '엣지가 push 한 SAN 스위치 포트 사용량 상태(엣지별 마지막 push·표본 수)',
+  'central-agent-gpu-guest.json': '중앙이 엣지별로 배포하는 GPU 게스트 수집 설정 사본(엣지가 pull — 비밀번호 포함 0600)',
+  'central-agent-cvp.json': '엣지가 push 한 CVP 수집 상태 캐시(엣지별 마지막 push·장비 수·오류, v2.608)',
+  'central-unsupported-servers.json': 'iDRAC 스캔이 찾은 비-Dell(미지원) 서버 보관소(위임 스캔 결과 포함, v2.495)',
+  'agent-results.json': '에이전트(엣지) 위임 iDRAC 스캔 결과 보관소',
+  'active-sessions.json': '로그인 세션 저장소(재시작 뒤 세션 유지 — 손상이면 재로그인)',
+  'sanswitch-perf-push.json': '엣지 SAN 포트 사용량 push 커서(마지막으로 보낸 rowid)',
+  'cvp-push.json': '엣지 CVP 포트 사용량 push 커서(마지막으로 보낸 rowid, v2.608)',
 };
+/** v2.613 PERSIST2613-02: 카탈로그 대조 테스트용 — MIGRATABLE·RUNTIME_STATE_NAMES 가 전부 설명을 갖는지 본다. */
+export { PURPOSES };
 
 /**
  * DB 상세 설명(v2.378) — "이 DB 가 정확히 무엇을 보관하는가"를 운영자가 판단할 수 있게 쓴다.

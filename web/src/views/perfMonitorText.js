@@ -8,20 +8,15 @@
  */
 
 import { unitText } from './unitText.js';
+import { agoText } from './tools/relTime.js';
 
 export const ms = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : (Number(v) >= 1000 ? `${(Number(v) / 1000).toFixed(Number(v) >= 10_000 ? 0 : 1)}초` : `${Math.round(Number(v))}ms`));
 export const pct = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : `${Number(v)}%`);
 export const when = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
 
 /** 경과 시간(사람 말). */
-export function ago(t, now = Date.now()) {
-  if (!t) return '—';
-  const s = Math.max(0, Math.round((now - t) / 1000));
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.floor(s / 60)}분 전`;
-  if (s < 86_400) return `${Math.floor(s / 3600)}시간 전`;
-  return `${Math.floor(s / 86_400)}일 전`;
-}
+// v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다 — 호출부 이름(ago)만 남긴다.
+export { agoText as ago };
 
 /**
  * 느린 요청의 사유 라벨 — reason 은 서버가 붙인다('wall'|'stall'|'wall+stall').

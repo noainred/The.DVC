@@ -10,12 +10,20 @@
  * 단방향 아웃바운드라 폐쇄망/NAT 사이트에 유리하다.
  */
 
+import zlib from 'node:zlib';
+import { promisify } from 'node:util';
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; // v2.606 EDGE2606-03
 import { createChangeLogger } from '../util/logThrottle.js';
 import { getGuestGpuVms, getGuestGpuAllHosts } from '../gpu/store.js';
 import { getGpuGuestDiag, gpuGuestStatus } from '../gpu/poller.js';
+
+// v2.613 DEPS2613-08: v2.503 push 체크리스트(① gzip ② 중앙 BIG_JSON 등록 ③ 413 로그) — 이 경로만 셋 다 빠져 있었다.
+//   본문 = hosts + vms(GPU VM 당 ~150B) + diag(vCenter 당 ≤200건) 라 기본 1MB 는 GPU VM 수천 대 급이지만, 413 은 재시도
+//   대상이 아니라 그 주기 전량 소실이다. inventoryPush 와 같은 env(AGENT_PUSH_GZIP=false 로 끔).
+const gzipAsync = promisify(zlib.gzip);
+const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
 
 /**
  * v2.605(감사 EDGE2605-02 — 재현): 중앙 setGuestGpu 는 이 엣지의 항목을 **전부 지우고 교체**한다. 예전에는 고정 35초 지연만 두고
@@ -53,8 +61,8 @@ let running = false;
 // v2.607(EDGE2607-03): 보류 로그는 같은 사유면 10분에 한 줄 — 예전에는 push 주기(60초)마다 같은 줄을 반복했다.
 const _withholdLog = createChangeLogger({ windowMs: 10 * 60_000, maxKeys: 8 });
 
-function headers() {
-  return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+function headers(extra = {}) {
+  return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}), ...extra };
 }
 
 export async function pushGpuGuestNow(...args) {
@@ -83,9 +91,17 @@ async function _pushGpuGuestNow() {
   const diag = getGpuGuestDiag(); // 선별 깔때기 + VM별 성공/실패(웹 '수집 진단'에서 표시)
   // 진단은 데이터가 없어도(=어디서 막혔는지가 핵심) 항상 보낸다.
   try {
+    const json = Buffer.from(JSON.stringify({ agent: config.agent.name, hosts, vms, diag }));
+    let body = json; let hdrs = headers();
+    if (PUSH_GZIP) {
+      try { const gz = await gzipAsync(json); body = gz; hdrs = headers({ 'Content-Encoding': 'gzip' }); }
+      catch { /* 압축 실패 시 원본 전송 */ }
+    }
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/gpu-guest-data`, {
-      method: 'POST', headers: headers(), body: JSON.stringify({ agent: config.agent.name, hosts, vms, diag }), timeoutMs: 30_000, retries: 2,
+      method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2,
     });
+    // 413 은 재시도 대상이 아니다(resilientFetch RETRYABLE_STATUS 에 없다) — 크기와 함께 찍어야 원인이 보인다(v2.503 규약).
+    if (res.status === 413) console.warn(`[gpu-guest-push] 중앙이 본문 크기를 거부(413). hosts=${hosts.length} vms=${vms.length} · JSON ${Math.round(json.length / 1024)}KB(gzip ${Math.round(body.length / 1024)}KB) — 중앙의 JSON_BODY_LIMIT 또는 중앙 버전(gpu-guest-data BIG_JSON 등록은 2.613.0+)을 확인하세요.`);
     if (!res.ok) throw new Error(`gpu-guest -> ${res.status}`);
     // v2.606 EDGE2606-03: 200 이어도 중앙이 미등록 vCenter 항목(unregistered)·상한(omitted)·미검증 이름을 뺄 수 있다 — 상태·콘솔에.
     const drop = dropSummaryOf(await readCentralReply(res));

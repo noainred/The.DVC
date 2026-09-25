@@ -43,10 +43,16 @@ export function buildHash(base, key) {
  * 북마크·공유 링크·관제 콘솔 내비가 옛 주소를 들고 있으므로 지우지 말 것 — 옮긴 화면이 늘면 여기에 더한다.
  *   '#/insights'         → '#/tools/insights-hub'
  *   '#/insights/anomaly' → '#/tools/insights-hub/anomaly'
+ *   '#/explore'          → '#/tools/explore'        (v2.274 에 옮긴 탭 — v2.613 CATALOG2613-09 에 소급)
+ *   '#/nsx/segments'     → '#/tools/nsx/segments'   (〃. 예전에는 TABS 에 없어 랜딩 탭으로 조용히 떨어졌다)
  * ⚠ '#/tools/insights' 는 다른 화면(운영 인사이트)이다 — 그리로 보내지 말 것.
  * 해당 없으면 null.
  */
-export const MOVED_TABS = Object.freeze({ insights: ['tools', 'insights-hub'] });
+export const MOVED_TABS = Object.freeze({
+  insights: ['tools', 'insights-hub'],
+  explore: ['tools', 'explore'],
+  nsx: ['tools', 'nsx'],
+});
 export function movedTabHash(hash) {
   const segs = hashSegments(hash);
   const to = segs.length ? MOVED_TABS[segs[0]] : null;

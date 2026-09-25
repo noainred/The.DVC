@@ -1,6 +1,6 @@
 // IpamSettings.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, getToken } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { DEVTYPE_LABEL, MGMT } from './ipamShared.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -89,7 +89,8 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved }) {
   const remove = async () => {
     if (!ipList.length || bulk) return;
     setBusy(true); setErr(null);
-    const r = await fetch(`/api/tools/ipam/ip/${encodeURIComponent(ipList[0])}`, { method: 'DELETE', headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} }).then((x) => x.json()).catch((e) => ({ ok: false, reason: e.message }));
+    // v2.613 WEB2613-10: api.js 를 우회한 직접 fetch 금지 — 401 전역 처리·403 안내(HttpError)·X-Request-Id 가 빠진다.
+    const r = await delJson(`/tools/ipam/ip/${encodeURIComponent(ipList[0])}`).catch((e) => ({ ok: false, reason: e.message }));
     setBusy(false);
     if (r.ok) onSaved(); else setErr(r.reason || '삭제 실패');
   };

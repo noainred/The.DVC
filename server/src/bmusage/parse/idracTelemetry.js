@@ -39,7 +39,7 @@ const t = (v) => String(v ?? '').trim();
  * v2.595(감사 C2595-02): 숫자만 뽑는 `replace(/[^\d.]/g,'')` 는 null·'N/A' → 0, '-1' → 1 이 됐다.
  * v2.598(감사 IDRAC-2598-02): 전수 모드의 보드 퍼센트(cpu·mem·io·sys)는 이 판정을 거치지 않고 `num()` 만 써서
  *   '-1'·'150' 이 그대로 사용률로 적재됐다(형제 누락). 범위 밖·파싱 불가면 null 이다.
- * ⚠ 이 함수가 여기 사는 이유: redfish.js 가 이 파서를 동적 import 하므로 반대 방향 import 는 순환이 된다
+ * ⚠ 이 함수가 여기 사는 이유: redfish.js 가 이 파서를 정적 import 하므로(v2.613 DEPS2613-02) 반대 방향 import 는 2-cycle 이 된다
  *   (arch2579 가 동적 import 도 edge 로 센다). 순수 파서 쪽에 두고 redfish.js 가 가져다 쓴다.
  */
 export function pctFromMetric(v) {

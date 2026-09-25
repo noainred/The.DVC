@@ -14,6 +14,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 
 const FILE = () => path.join(config.configDir, 'cvp-settings.json');
 
@@ -28,15 +29,13 @@ export const LIMITS = Object.freeze({
   deviceTimeoutMs: { min: 30_000, max: 30 * 60_000, def: 120_000 },
 });
 
-const clampNum = (v, l) => Math.min(l.max, Math.max(l.min, Math.round(v)));
 
 /** 순수 정규화 — 빈 값·비숫자는 기본값. */
 export function normalizeSettings(input = {}) {
   const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   const out = { enabled: src.enabled === true };
   for (const [k, l] of Object.entries(LIMITS)) {
-    const n = numOrNull(src[k]);
-    out[k] = n == null ? l.def : clampNum(n, l);
+    out[k] = clampSetting(src[k], l); // v2.613 DEPS2613-12: 빈 값·비숫자는 기본값(numOrNull 판정)
   }
   return out;
 }
@@ -49,7 +48,7 @@ export function mergeSettings(cur, patch = {}) {
   for (const [k, l] of Object.entries(LIMITS)) {
     const n = numOrNull(p[k]);
     if (n == null) continue;            // 빈 칸·비숫자 = 미지정(이전 값 유지)
-    next[k] = clampNum(n, l);
+    next[k] = clampSetting(n, l);
   }
   return normalizeSettings(next);
 }

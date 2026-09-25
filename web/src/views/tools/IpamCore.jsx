@@ -1,7 +1,7 @@
 // IpamCore.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, usePolling, downloadFile } from '../../api.js';
+import { fetchJson, usePolling, downloadFile, hasRole } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, StateBadge, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
@@ -74,10 +74,9 @@ function Ipam({ scope, onScope }) {
   const [stFilter, setStFilter] = useState(''); // '' = 전체 | used | multihomed | duplicate | empty
   const [reconFilter, setReconFilter] = useState(''); // '' | vcenter | scan | both | manual | managed
   const [editOv, setEditOv] = useState(null); // IP 관리상태(override) 편집 대상 row
-  const [canManage, setCanManage] = useState(false); // operator/admin → 관리상태 편집 가능
+  const canManage = hasRole('admin', 'operator'); // operator/admin → 관리상태 편집 가능. // v2.613 WEB2613-01: 역할은 App 이 채운 현재 사용자 객체에서 읽는다(화면이 /auth/me 를 다시 부르지 않는다).
   const [dlMsg, setDlMsg] = useState(''); // v2.602 WEB2602-01: 내려받기 실패 사유(409 export_busy·403) — 오류 JSON 을 파일로 저장하지 않는다
   useEffect(() => { fetchJson('/admin/ipam/db-info').then(setDb).catch(() => setDb(null)); }, []);
-  useEffect(() => { fetchJson('/auth/me').then((r) => setCanManage(['admin', 'operator'].includes(r.user?.role))).catch(() => {}); }, []);
 
   const sp = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
   const sheetGen = useRef(0); // 세대 가드 — 칩 A→B 연타 시 늦은 A 응답이 B 시트를 덮어쓰지 않게(고RTT)

@@ -1,32 +1,56 @@
 import React, { useState, useEffect } from 'react';
-import { fetchJson } from '../api.js';
-import { DataTable, StateBadge } from './primitives.jsx'; // v2.295: components/ 는 셸 대신 구현 파일 직접 import(순환 예방 규칙)
+import { fetchJson, toolAllowed } from '../api.js';
+import { DataTable, StateBadge, ErrorBox } from './primitives.jsx'; // v2.295: components/ 는 셸 대신 구현 파일 직접 import(순환 예방 규칙)
 
 /**
  * IP 검색 시 IPMS(센터별 IP 관리대장 = vCenter 인식 + 능동 스캔) 자료에서 검색어와 일치하는
  * 해당 대역의 IP를 표로 보여준다. filters.qIpms('IPMS 포함' 체크)와 filters.q(검색어)가 모두
  * 있을 때만 동작. 백엔드 변경 없이 /tools/ipam 데이터를 재사용한다. 여러 화면(가상머신·네트워크
  * 등)에서 동일하게 끼워 쓸 수 있다.
+ *
+ * v2.613(CATALOG2613-02): `/tools/ipam` 은 도구 키 `ipam` 에 묶여 서버가 집행한다(auth/toolAccess.js). ipam 을 거부한 계정에서는
+ *   403 이 오는데 예전에는 `.catch → []` 로 삼켜 **"일치하는 IPMS 자료가 없습니다"** 라고 그렸다 — '못 읽음' 을 '없음' 으로
+ *   칠하는 v2.590 W2·W3 유형의 거짓. 이제 ① 접근이 없으면 조회하지 않고 그 사실을 말하고 ② 조회 실패는 ErrorBox(403 → AccessDenied)로 보인다.
  */
+export const IPMS_DENIED_TEXT = 'IPMS 자료를 조회하지 않았습니다 — 이 계정에는 특수 기능 ‘센터별 IP 관리대장(ipam)’ 접근 권한이 없습니다(관리자에게 요청: 설정 › 사용자 관리 › 특수 기능 도구별 접근).';
 const IPMS_DISC = { vcenter: ['blue', 'vCenter'], scan: ['teal', '스캔'], both: ['green', 'vC+스캔'] };
 
 export default function IpmsMatches({ filters }) {
   const qIpms = !!filters?.qIpms;
   const q = (filters?.q || '').trim();
   const [rows, setRows] = useState([]);
+  const [err, setErr] = useState(null); // 조회 실패(403 포함) — 빈 목록으로 칠하지 않는다
+  const allowed = toolAllowed('ipam');
   useEffect(() => {
-    if (!qIpms || !q) { setRows([]); return undefined; }
+    if (!qIpms || !q || !allowed) { setRows([]); setErr(null); return undefined; }
     let on = true;
     const p = filters?.vcenterId ? { vcenterId: filters.vcenterId } : {};
+    setErr(null);
     // v2.582 TUNE-2: 검색어마다 원장 전량(운영 규모 5.3MB)을 받아 브라우저에서 거르던 것을 서버 ?q= 필터로.
     fetchJson('/tools/ipam', { ...p, q, limit: 2000 }).then((r) => {
       if (!on) return;
       setRows(r.rows || []);
-    }).catch(() => { if (on) setRows([]); });
+    }).catch((e) => { if (on) { setRows([]); setErr(e?.message || String(e)); } });
     return () => { on = false; };
-  }, [qIpms, q, filters?.vcenterId]);
+  }, [qIpms, q, filters?.vcenterId, allowed]);
 
   if (!qIpms || !q) return null;
+  if (!allowed) {
+    return (
+      <div style={{ marginTop: 18 }}>
+        <div className="section-title">🛰️ IPMS 스캔 IP</div>
+        <div className="card"><span className="muted">{IPMS_DENIED_TEXT}</span></div>
+      </div>
+    );
+  }
+  if (err) {
+    return (
+      <div style={{ marginTop: 18 }}>
+        <div className="section-title">🛰️ IPMS 스캔 IP</div>
+        <ErrorBox message={err} />
+      </div>
+    );
+  }
   const fmtT = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
   const cols = [
     { key: 'ip', label: 'IP', sortValue: (r) => r.ipNum ?? 0, render: (r) => <b>{r.ip}</b> },

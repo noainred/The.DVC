@@ -72,3 +72,19 @@ describe('movedTabHash (v2.592 인사이트 → 특수 기능)', () => {
     expect(tabFromHash(movedTabHash('#/insights/security'), MOVED_TABS.insights, ['finops', 'security'])).toBe('security');
   });
 });
+
+// v2.613 CATALOG2613-09 — v2.274 에 옮긴 상단 탭(explore·nsx)의 옛 주소도 소급한다. 예전에는 TABS 에 없어 랜딩 탭으로 조용히 떨어졌다.
+describe('CATALOG2613-09: movedTabHash 가 explore·nsx 옛 주소를 새 주소로 바꾼다', () => {
+  it('#/explore · #/nsx[/<하위>] → #/tools/<k>[/<하위>]', () => {
+    expect(movedTabHash('#/explore')).toBe('#/tools/explore');
+    expect(movedTabHash('#/nsx')).toBe('#/tools/nsx');
+    expect(movedTabHash('#/nsx/segments')).toBe('#/tools/nsx/segments');
+    expect(MOVED_TABS.explore).toEqual(['tools', 'explore']);
+    expect(MOVED_TABS.nsx).toEqual(['tools', 'nsx']);
+  });
+  it('새 주소는 Nsx 화면의 useHashTab base 와 맞아 하위 탭이 읽힌다 · 새 주소 자체는 건드리지 않는다', () => {
+    expect(tabFromHash(movedTabHash('#/nsx/dfw'), MOVED_TABS.nsx, ['gateways', 'segments', 'nodes', 'dfw', 'groups'])).toBe('dfw');
+    expect(movedTabHash('#/tools/nsx')).toBeNull();
+    expect(movedTabHash('#/tools/explore')).toBeNull();
+  });
+});

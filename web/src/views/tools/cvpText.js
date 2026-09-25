@@ -107,6 +107,29 @@ export function isAuthStopped(v) {
 }
 
 /**
+ * 보고가 없는 위임 CVP 의 kind(서버 `central/cvpEdge.js CVP_EDGE_KINDS`) → 상태. 키 집합은 서버와 1:1 이어야 한다(테스트가 대조).
+ * 문구는 여기(웹)가 만든다 — 서버는 kind·edgeVersion·minEdgeVersion 만 준다(v2.553 규약). 백틱 금지(BoldText 는 ‘**’ 만 해석).
+ */
+const EDGE_NO_REPORT_TEXT = Object.freeze({
+  'old-version': (st) => ({
+    tone: 'bad', label: `구버전 엣지${st.edgeVersion ? ` ${st.edgeVersion}` : ''}`,
+    detail: `이 엣지는 CVP 위임 수집이 없는 버전입니다(현재 ${st.edgeVersion || '?'} · 필요 ${st.minEdgeVersion || '?'} 이상). 기다려도 보고가 오지 않습니다 — 그 엣지를 업그레이드하세요.`,
+  }),
+  'unknown-version': () => ({
+    tone: 'warn', label: '보고 없음 · 버전 미상',
+    detail: '이 엣지가 중앙에 보고한 적이 없고 엣지 버전도 확인되지 않았습니다(export 를 한 번도 받지 못함). 설정 › 수집 서버에서 그 엣지 연결부터 확인하세요.',
+  }),
+  silent: () => ({
+    tone: 'warn', label: '보고 없음',
+    detail: '엣지 버전은 충분한데 중앙이 수집 주기의 3배를 넘게 돌았는데도 보고가 없습니다. 기다려서 될 일이 아닙니다 — 그 엣지의 CVP 설정 pull·push 상태를 엣지 로그(특수기능 › 엣지 로그)에서 보세요.',
+  }),
+  waiting: () => ({ tone: 'muted', label: '수집 기록 없음', detail: '첫 보고를 기다리는 중입니다(엣지 버전은 충분합니다).' }),
+});
+
+/** 서버가 낼 수 있는 '보고 없음' kind 목록 — 서버 `CVP_EDGE_KINDS` 와 1:1(테스트가 두 목록을 대조). */
+export const CVP_EDGE_KINDS = Object.freeze(Object.keys(EDGE_NO_REPORT_TEXT));
+
+/**
  * 서버 행 상태 → { tone:'ok'|'warn'|'bad'|'muted', label, detail }.
  * 수집 기록이 없는 것은 '실패' 가 아니라 '수집 기록 없음'(회색)이다.
  */
@@ -115,7 +138,11 @@ export function serverState(server, { enabled = true } = {}) {
   if (server && server.enabled === false) return { tone: 'muted', label: '비활성', detail: '등록은 되어 있지만 수집하지 않습니다.' };
   if (isAuthStopped(st && st.authStopped)) return { tone: 'bad', label: '인증 실패 정지', detail: '' };
   if (!st || (st.ok == null && !st.collectedAt && !st.error)) {
-    return { tone: 'muted', label: '수집 기록 없음', detail: enabled ? '첫 수집을 기다리는 중이거나 엣지가 아직 보고하지 않았습니다.' : '수집이 꺼져 있습니다(설정).' };
+    if (!enabled) return { tone: 'muted', label: '수집 기록 없음', detail: '수집이 꺼져 있습니다(설정).' };
+    // v2.613 CONTRACT2613-04: 엣지 위임인데 보고가 없으면 서버가 이유(kind)를 나눠 준다 — 구버전은 기다려도 안 된다.
+    const k = st && EDGE_NO_REPORT_TEXT[st.kind] ? EDGE_NO_REPORT_TEXT[st.kind](st) : null;
+    if (k) return k;
+    return { tone: 'muted', label: '수집 기록 없음', detail: '첫 수집을 기다리는 중이거나 엣지가 아직 보고하지 않았습니다.' };
   }
   if (st.ok === false) return { tone: 'bad', label: '실패', detail: String(st.error || '사유를 받지 못했습니다') };
   const miss = st.missing && typeof st.missing === 'object' ? Object.keys(st.missing).length : 0;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { usePolling, fetchJson, postJson, delJson } from '../api.js';
+import { usePolling, fetchJson, postJson, delJson, hasRole } from '../api.js';
 import { DataTable, SeverityBadge, Loading, ErrorBox, EntityDetail, Modal } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 
@@ -15,8 +15,7 @@ export default function Alarms({ filters }) {
   const [busy, setBusy] = useState(false);
   const [muteErr, setMuteErr] = useState(null);
   // 알람 무시(뮤트)는 서버가 admin/operator만 허용 — viewer에게 버튼을 숨겨 403 체험 방지.
-  const [canManage, setCanManage] = useState(false);
-  useEffect(() => { fetchJson('/auth/me').then((r) => setCanManage(['admin', 'operator'].includes(r.user?.role))).catch(() => {}); }, []);
+  const canManage = hasRole('admin', 'operator'); // v2.613 WEB2613-01: 역할은 App 이 채운 현재 사용자 객체에서 읽는다(화면이 /auth/me 를 다시 부르지 않는다).
 
   const openEntity = async (a) => {
     const ep = ENDPOINT[a.entityType];

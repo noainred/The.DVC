@@ -29,6 +29,14 @@
  */
 const t = (v) => String(v ?? '').trim();
 
+/**
+ * 엣지가 통신 점검 워커(`agent/linkCheckWorker.js` — link-check-config pull + link-check push)를 처음 갖는 버전.
+ * v2.613(CONTRACT2613-05): 이 값은 v2.552 부터 **웹**(`linkCheckText.rowState` 기본 인자)에만 있었고 서버 응답에 `minEdgeVersion`
+ * 이 없어 `LinkCheck.jsx` 의 `data?.minEdgeVersion` 은 언제나 undefined 였다 — 형제(edgeLog·bmUsage·tokenCheck·partFaults)처럼
+ * 서버 상수를 응답에 실어 화면이 그 값으로 판정한다(v2.493 '주기·상한 같은 숫자는 화면에 박지 말 것').
+ */
+export const MIN_EDGE_VERSION = '2.552.0';
+
 /** 링크 종류 — 이 목록이 계약이다(화면·DB·테스트가 같이 쓴다). */
 export const LINK_KINDS = Object.freeze({
   'central->edge': {

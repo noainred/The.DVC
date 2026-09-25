@@ -3,6 +3,7 @@ import BoldText from '../../components/boldText.jsx';   // v2.447: 서버 문구
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
+import { agoText } from './relTime.js';
 import { MODES, bucketText, perfQuery, toLocalDt, rangeIssueOf, rangeLabel, RANGE_MAX_DAYS } from './sanSwitchPerfText.js';
 import { statusText, traceText, isActive, phaseLabel, testSnapView } from './sanSwitchTestText.js';
 import SanZoningPanel from './SanZoningPanel.jsx';
@@ -36,11 +37,7 @@ import { powerText } from './sanPowerText.js';
  * 조회는 전체 범위 계정 전용(서버 403), 등록/수정/삭제/테스트는 admin.
  */
 
-const ago = (ts) => {
-  if (!ts) return '—';
-  const s = Math.round((Date.now() - ts) / 1000);
-  return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : `${Math.round(s / 3600)}시간 전`;
-};
+const ago = (ts) => agoText(ts); // v2.613 DEPS2613-11: 상대시각 코어는 relTime.js 하나
 const TONE = { ok: 'var(--green, #22c55e)', warn: 'var(--amber, #f59e0b)', bad: 'var(--red, #ef4444)', muted: 'var(--muted, #94a3b8)' };
 // 고정 폭 셀에서 긴 값이 옆 칸을 덮지 않게 하는 한 줄 말줄임(전문은 각 셀의 title 툴팁).
 const ELLIPSIS = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };

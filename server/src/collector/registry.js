@@ -13,6 +13,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { bumpFleetRev } from '../insights/fleetRev.js';
 import { readJsonCapped } from '../util/readCapped.js'; // v2.604 CEN2604-01: 자기등록 검증 ping 응답 크기 상한
+import { resilientFetch } from '../util/resilientFetch.js'; // v2.613 DEPS2613-03: 동적 import 에서 정적으로(순환 없음)
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: url 변경 시 저장 토큰 폐기
 
 const FILE = path.join(config.configDir, 'collectors.json');
@@ -84,6 +85,20 @@ export function listCollectors() {
   return loadCollectors().map(redact);
 }
 
+/**
+ * 이름 또는 id 로 수집 서버 한 항목을 찾는다(대소문자·앞뒤 공백 무시 — 등록부 규약. v2.613 EDGE2613-08).
+ * `central/edgeLogPull.js findCollector` 와 `central/idracScanPush.js findCollectorForAgent` 두 벌이던 것을 하나로 —
+ * 둘 다 이 함수를 재수출한다. ⚠ 원본(`loadCollectors`, 토큰 포함)을 돌려준다 — `listCollectors()` 는 토큰을 가리므로
+ * 그것으로 찾으면 엣지 호출이 X-Collector-Token 없이 나가 403 이 된다. 없으면 null. 등록부를 못 읽으면 loadCollectors 가
+ * 돌려주는 대로(빈 목록 → null)다.
+ */
+export function findCollectorByName(agent) {
+  const key = String(agent ?? '').trim().toLowerCase();
+  if (!key) return null;
+  const norm = (v) => String(v ?? '').trim().toLowerCase();
+  return loadCollectors().find((c) => norm(c.id) === key || norm(c.name) === key) || null;
+}
+
 // ── SSRF 가드 ────────────────────────────────────────────────────────────────
 // SSRF 차단 판정은 v2.579 에 `util/ssrfBlock.js` 로 옮겼다(ARCH-02 — util 이 collector 를 import 하던
 // 역방향 의존·순환 제거). 호출부 29곳을 위해 같은 이름을 **재수출**한다. ⚠ `export { } from` 이 아니라
@@ -114,10 +129,10 @@ export function identityIssue(entry, data = {}, otherIds = []) {
  * `X-Collector-Token` 이 실리므로, 검사 후 이름이 사내 주소로 재해석되면 그 토큰이 내부로 나간다.
  * `resilientFetch`(wanAgent, lookup 탑재)를 쓰되 재시도는 0 으로 둔다 — 이 검증은 '닿는가' 를
  * 보는 것이고 재시도가 판정을 흐리기 때문이다(기존 동작과 같게 유지).
- * 순환 import 를 피하려고 지연 로드한다(resilientFetch 는 leaf util 이지만 방향을 고정해 둔다).
+ * v2.613 DEPS2613-03: 정적 import 다 — 예전 주석의 '순환 회피 지연 로드' 는 v2.579 ARCH-02(ssrfBlock 분리) 뒤로 되돌이 경로가
+ *   없어 사실이 아니었다(util/resilientFetch.js 는 util/ 만 import 한다).
  */
 async function tokenFetch(u, init) {
-  const { resilientFetch } = await import('../util/resilientFetch.js');
   return resilientFetch(u, { ...init, retries: 0 });
 }
 

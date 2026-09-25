@@ -1,6 +1,6 @@
 // IpamNet.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, getToken, downloadFile } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, downloadFile } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { CsvImportModal } from '../../components/CsvBulkModals.jsx';
@@ -22,7 +22,6 @@ export function IpamRanges() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(null);
   const [csvImport, setCsvImport] = useState(false); // 대역 CSV 가져오기 모달(공용 CsvImportModal)
-  const authHdr = () => (getToken() ? { Authorization: `Bearer ${getToken()}` } : {});
   const load = async () => { try { setData(await fetchJson('/tools/ipam/vc-ranges')); setError(null); } catch (e) { setError(e.message); } };
   const statusDenied = useRef(false); // v2.611 LEFT2611-07: 스캔 상태는 전체 범위 계정만 — 403 이면 3초 폴링을 멈춘다
   const loadStatus = () => { if (statusDenied.current) return; fetchJson('/admin/ipam/scan/status').then(setStatus).catch((e) => { setStatus(null); if (e?.status === 403) statusDenied.current = true; }); };
@@ -45,7 +44,9 @@ export function IpamRanges() {
   };
   const removeVc = async (id) => {
     if (!window.confirm(`'${id}' 대역을 삭제할까요?`)) return;
-    try { await fetch(`/api/admin/ipam/vc-ranges/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHdr() }); await load(); } catch (e) { setMsg({ ok: false, text: e.message }); }
+    // v2.613 WEB2613-10: api.js 를 우회한 직접 fetch 금지 — 401 전역 처리·403 안내(HttpError)·X-Request-Id 가 빠진다.
+    //   예전 직접 fetch 는 res.ok 를 보지 않아 403·409 가 조용히 성공처럼 보였다(바로 load) — delJson 은 실패를 던진다.
+    try { const r = await delJson(`/admin/ipam/vc-ranges/${encodeURIComponent(id)}`); if (r?.ok === false) throw new Error(r.reason || '삭제 실패'); await load(); } catch (e) { setMsg({ ok: false, text: e.message }); }
   };
   // v2.602(감사 WEB2602-01): downloadFile 이 res.ok 를 본다 — 실패(409·403·5xx)의 오류 JSON 을 파일로 저장하지 않고 사유를 화면에 말한다.
   const downloadReport = async () => {
@@ -355,7 +356,8 @@ export function RangePolicies({ scope, canManage, vcenters = [], onChanged }) {
   const remove = async (p) => {
     if (!window.confirm(`정책 '${p.spec}'을(를) 삭제할까요? 적용 IP(${p.specSize}개)가 자동발견 상태로 복귀합니다.`)) return;
     setBusy(p.id); setErr(null);
-    const r = await fetch(`/api/tools/ipam/policies/${encodeURIComponent(p.id)}`, { method: 'DELETE', headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} }).then((x) => x.json()).catch((e) => ({ ok: false, reason: e.message }));
+    // v2.613 WEB2613-10: api.js 를 우회한 직접 fetch 금지 — 401 전역 처리·403 안내(HttpError)·X-Request-Id 가 빠진다.
+    const r = await delJson(`/tools/ipam/policies/${encodeURIComponent(p.id)}`).catch((e) => ({ ok: false, reason: e.message }));
     setBusy('');
     if (r.ok) { await load(); onChanged?.(); } else setErr(r.reason || '삭제 실패');
   };

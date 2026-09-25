@@ -5,8 +5,9 @@
  * 잘라낸 개수는 화면에 밝힌다 — 조용히 자르면 "검색해도 안 나온다" 가 된다.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { can, toolAllowed } from '../api.js';
 import { TOOLS } from '../views/specialToolsList.js';
-import { visibleTools } from '../views/toolVisibility.js';
+import { visibleTools, lockReasonOf } from '../views/toolVisibility.js'; // v2.613 CATALOG2613-07: 잠금 사유도 같은 모듈
 import { PAGE_META } from './nav.js';
 import { search, flatten } from './palette.js';
 
@@ -26,6 +27,13 @@ export default function Palette({ onClose, onPick, isAdmin, toolsAllowed = null 
   );
   const res = useMemo(() => search(q, { tools, pageMeta: PAGE_META }), [q, tools]);
   const flat = useMemo(() => flatten(res), [res]);
+  // v2.613(CATALOG2613-07): 잠긴 도구는 제안에서 빼지 않고(숨김 축은 위 visibleTools) 🔒 와 사유를 붙인다 —
+  //   판정은 카드 그리드·V4 내비·기능 찾기와 같은 lockReasonOf(perm 축 포함).
+  const byKey = useMemo(() => new Map(TOOLS.map((t) => [t.k, t])), []);
+  const lockOf = useMemo(() => {
+    const allow = JSON.parse(allowKey);
+    return (k) => lockReasonOf(byKey.get(k), { isAdmin, toolsAllowed: allow, can, toolAllowed });
+  }, [isAdmin, allowKey, byKey]);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
   useEffect(() => { setCur(0); }, [q]);
@@ -51,15 +59,18 @@ export default function Palette({ onClose, onPick, isAdmin, toolsAllowed = null 
         <div className="v4-palette-list">
           {!q.trim() && <div className="v3-empty">이름뿐 아니라 <b>키</b>(gpu · ipam · rma) · <b>분류명</b>(스토리지 · 운영 작업) · <b>옛 이름</b>(낭비 · 자원 최적화 → Optimization)으로도 찾습니다.</div>}
           {q.trim() && res.empty && <div className="v3-empty">“{q}”에 해당하는 기능·화면이 없습니다.</div>}
-          {flat.map((it, i) => (
+          {flat.map((it, i) => {
+            const lock = it.kind === 'tool' ? lockOf(it.k) : null;
+            return (
             <button key={`${it.kind}:${it.k || it.id}`} type="button" className={`v4-palette-row${i === cur ? ' on' : ''}`}
-              onMouseEnter={() => setCur(i)} onClick={() => onPick(it.hash)}>
+              title={lock || undefined} onMouseEnter={() => setCur(i)} onClick={() => onPick(it.hash)}>
               <span className="v3-tag">{KIND_LABEL[it.kind]}</span>
-              <span className="v4-palette-name">{it.label}</span>
+              <span className="v4-palette-name">{lock ? '🔒 ' : ''}{it.label}</span>
               <span className="v3-faint" style={{ fontSize: 11 }}>{it.group}</span>
               <span className="v3-num v3-faint" style={{ fontSize: 10.5, marginLeft: 'auto' }}>{it.hash}</span>
             </button>
-          ))}
+            );
+          })}
           {omitted > 0 && <div className="v3-note" style={{ padding: '8px 14px' }}>일치 항목 {omitted}개를 더 찾았지만 목록에 넣지 않았습니다 — 검색어를 좁히세요.</div>}
         </div>
       </div>

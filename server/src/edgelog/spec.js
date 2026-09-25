@@ -126,6 +126,18 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.idracScanLocal', label: 'iDRAC 스캔(로컬)', group: 'collect', mod: '../idrac/scanPoller.js', fn: 'idracScanStatus' },
   { key: 'collect.powerOff', label: '전원 꺼짐 점검', group: 'collect', mod: '../tools/powerOffPoller.js', fn: 'powerOffPollerStatus' },
   { key: 'collect.vmClone', label: 'VM 복제 스케줄러', group: 'collect', mod: '../vmclone/scheduler.js', fn: 'schedulerStatus' },
+  /*
+   * ⚠ v2.613(CONTRACT2613-06 · RUNTIME2613-02) — 아래 셋은 `index.js` 가 **조건 없이 시작**하는데 표에 없었다.
+   *   `edgeSweep2574` 의 정규식이 `export function` 만 봐서 `export async function logStatus()` 를 못 봤고,
+   *   대상 선정이 파일명(`Worker|poller|scheduler`)이라 `capacity/sampler.js`·`security/certMonitor.js` 는
+   *   훑지도 않았다. 이제 스윕은 **index.js 의 `start*` import 원천 모듈**을 대상으로 한다(시작되는 모듈이
+   *   곧 대상). `collect.js:62` 가 `await fn()` 이라 async 상태 함수도 그대로 받는다.
+   *   `logStatus()` 의 `dbPath` 는 다른 항목(스토리지·vmtrack 폴러)의 경로와 같은 취급이다 — 이 화면은
+   *   adminOnly + fullScopeOnly 이고 `redactDeep` 은 비밀 키만 가린다(경로는 진단 정보).
+   */
+  { key: 'collect.vcLogs', label: 'vCenter 로그·이벤트 수집', group: 'collect', mod: '../logs/poller.js', fn: 'logStatus' },
+  { key: 'collect.capacity', label: '리소스 적정성 샘플러', group: 'collect', mod: '../capacity/sampler.js', fn: 'capacitySamplerStatus' },
+  { key: 'collect.certs', label: 'TLS 인증서 만료 감시', group: 'collect', mod: '../security/certMonitor.js', fn: 'certStatus' },
 ]);
 
 /** 표의 키 집합 — 중앙 수신이 모르는 키를 조용히 받아들이지 않게 한다. */

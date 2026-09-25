@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  historyEmptyText, kpiValue, kpiAccent,
+  historyEmptyText, kpiValue, kpiAccent, retentionText,
   ageText, intervalText, scanNote, emptyDiag, edgeNote,
   keyKindNote, holdText, holdNote, eventText, notifyNote, lastRunText, toneVar,
   deviceKeyNote, tableFootnotes, keyKindMark, deviceKeyMark, edgeScanTotals, resetNote, pushNote, EDGE_KIND_LABEL, EDGE_KIND_TONE,
@@ -472,5 +472,18 @@ describe('v2.612 LEFT2612-04 eventText — 키 이전은 복구가 아니다', (
     const t = eventText({ event: 'close', closeReason: 'key-migrated', prevState: 'fault' });
     expect(t).toContain('식별 키 변경');
     expect(t).not.toContain('정상으로 복귀');
+  });
+});
+
+describe('v2.613 PERSIST2613-06 retentionText — 0 일(env 전부 보관)은 빈 조각이 아니고 출처를 적는다', () => {
+  it('값·출처', () => {
+    expect(retentionText({ retentionDays: 730, retentionSource: 'default' })).toBe(' · 이력 보존 730일(기본값)');
+    expect(retentionText({ retentionDays: 90, retentionSource: 'settings' })).toBe(' · 이력 보존 90일(설정)');
+    expect(retentionText({ retentionDays: 0, retentionSource: 'env' })).toBe(' · 이력 전부 보관(env)');
+  });
+  it('DB 불가·결측은 빈 문자열(지어내지 않는다)', () => {
+    expect(retentionText({ available: false, retentionDays: 90 })).toBe('');
+    expect(retentionText({ retentionDays: null })).toBe('');
+    expect(retentionText(null)).toBe('');
   });
 });

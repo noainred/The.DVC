@@ -3,6 +3,7 @@ import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
 } from 'recharts';
 import { usePolling } from '../api.js';
+import { fmtAgo } from '../util/fmt.js';
 import { Loading, ErrorBox, Kpi, usageColor } from '../components/ui.jsx';
 
 /**
@@ -48,13 +49,7 @@ function fmtVal(v, unit) {
   return String(v);
 }
 
-const fmtAgo = (ts) => {
-  if (!ts) return '—';
-  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  if (s < 90) return `${s}초 전`;
-  if (s < 5400) return `${Math.round(s / 60)}분 전`;
-  return `${Math.round(s / 3600)}시간 전`;
-};
+// v2.613 DEPS2613-11: fmtAgo 는 util/fmt(relTime 코어) 하나다 — 이 화면만 90초/5400초 임계를 쓰던 근거가 없었다.
 
 export default function CapacityAdvisor() {
   const [hostKey, setHostKey] = useState('local');

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
-import { usePolling, fetchJson } from '../api.js';
+import { usePolling, fetchJson, toolAllowed } from '../api.js';
 import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox, VmLink } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
@@ -292,26 +292,34 @@ function GroupMembers({ group }) {
 }
 
 /** Segment → VMs/IP ledger: resolve the segment's subnet against the IP 관리대장
- *  (vCenter 수집 IP)로 이 세그먼트를 실제로 사용하는 VM/IP를 보여준다. */
+ *  (vCenter 수집 IP)로 이 세그먼트를 실제로 사용하는 VM/IP를 보여준다.
+ *  v2.613(CATALOG2613-02): `/tools/ipam/sheet` 는 도구 키 `ipam` 에 묶여 서버가 집행한다 — ipam 을 거부한 계정의 403 을
+ *  `.catch → []` 로 삼켜 "수집된 IP 가 없습니다" 라고 그리던 것(못 읽음 → 없음, v2.590 W2·W3 유형)을 고쳤다:
+ *  접근이 없으면 조회하지 않고 그 사실을 말하고, 조회 실패는 ErrorBox(403 → AccessDenied)로 보인다. */
+const IPAM_DENIED_TEXT = '이 세그먼트의 IP 대장을 조회하지 않았습니다 — 이 계정에는 특수 기능 ‘센터별 IP 관리대장(ipam)’ 접근 권한이 없습니다(관리자에게 요청: 설정 › 사용자 관리 › 특수 기능 도구별 접근).';
 function SegmentVms({ subnets }) {
   const cidr = (subnets || []).find((s) => /\d+\.\d+\.\d+\.\d+\/\d+/.test(s));
   const base = cidr ? cidr.split('/')[0].split('.').slice(0, 3).join('.') : null;
   const [rows, setRows] = useState(null);
+  const [err, setErr] = useState(null);
+  const allowed = toolAllowed('ipam');
   useEffect(() => {
-    if (!base) return undefined;
+    if (!base || !allowed) return undefined;
     // 경쟁 가드(dead) — 세그먼트를 빠르게 옮기면 요청이 겹치고, 먼저 보낸 느린 응답이 나중에
     // 도착해 **다른 세그먼트의 IP 목록**을 현재 화면에 덮어쓴다(고RTT 에서 재현). 언마운트/
     // base 변경 시 이전 이펙트의 결과를 버린다(VCenterDetail.jsx 와 동일 패턴).
     // rows=null 로 먼저 비우는 것도 필수 — 안 그러면 로딩 동안 직전 세그먼트 목록이 새 세그먼트
     // 것처럼 보인다(usePolling 의 스코프 변경 시 초기화와 같은 이유).
     let dead = false;
-    setRows(null);
+    setRows(null); setErr(null);
     fetchJson(`/tools/ipam/sheet?base=${encodeURIComponent(base)}`)
       .then((r) => { if (!dead) setRows((r.rows || []).filter((x) => x.status !== 'empty' && x.status !== 'network')); })
-      .catch(() => { if (!dead) setRows([]); });
+      .catch((e) => { if (!dead) { setRows([]); setErr(e?.message || String(e)); } });
     return () => { dead = true; };
-  }, [base]);
+  }, [base, allowed]);
   if (!cidr) return <div className="muted" style={{ marginTop: 12, fontSize: 12 }}>이 세그먼트에는 서브넷이 없어 IP 대장을 연결할 수 없습니다 (VLAN 업링크 등).</div>;
+  if (!allowed) return <div className="muted" style={{ marginTop: 12, fontSize: 12 }}>{IPAM_DENIED_TEXT}</div>;
+  if (err) return <div style={{ marginTop: 12 }}><ErrorBox message={err} /></div>;
   return (
     <div style={{ marginTop: 14 }}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>이 세그먼트({cidr})를 사용하는 VM · IP 대장 {rows ? `(${rows.length})` : ''}</div>

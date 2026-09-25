@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { isSqliteLockError, chmodDbFiles } from '../util/sqliteOpen.js';
+import { openSqlite, createLockRetry } from '../util/sqliteOpen.js'; // v2.613 PERSIST2613-03: open 코어는 하나
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
 const DB_PATH = () => process.env.HZSESS_DB_PATH
@@ -98,36 +98,32 @@ function prepare(db) {
 
 // v2.599 DB2599-02: 첫 open 에서 다른 연결이 잠금을 쥐고 있으면('database is locked') 예전에는 initError 로 **래치**해
 // 프로세스 수명 동안 Horizon 세션 이력이 꺼졌다. busy_timeout 이 journal_mode 와 같은 exec 안에 있어 기다리지도
-// 않았다. storage/db.js(v2.597 L2597-02)와 같게 — busy_timeout 을 **먼저 따로** 걸고, 잠금 오류면 핸들을 닫고
-// 래치하지 않은 채 30초 뒤 다시 연다. 그 밖의 오류(node:sqlite 없음·손상)만 래치한다.
-let lockError = null;
-let retryAt = 0;
-const LOCK_RETRY_MS = 30_000;
-const isLockError = isSqliteLockError;   // 판정은 util/sqliteOpen.js 하나
+// 않았다. 잠금 오류면 핸들을 닫고 래치하지 않은 채 30초 뒤 다시 연다. 그 밖의 오류(node:sqlite 없음·손상)만 래치한다.
+// v2.613 PERSIST2613-03: 그 재시도 시각·잠금 판정·PRAGMA 순서가 여기 손 사본(lockError/retryAt/LOCK_RETRY_MS)이었다 —
+//   util/sqliteOpen.js 의 createLockRetry + openSqlite 로 옮긴다(동작 동일 · 상태 문구는 lockRetry.note()).
+const lockRetry = createLockRetry(30_000);
 
 async function open() {
   if (x) return x;
   if (initError) return null;
-  if (!ready && retryAt && Date.now() < retryAt) return null;
+  if (!ready && lockRetry.blocked()) return null;
   if (!ready) {
     ready = (async () => {
       // eslint-disable-next-line import/no-unresolved
       const { DatabaseSync } = await import('node:sqlite');
       const p = DB_PATH();
       fs.mkdirSync(path.dirname(p), { recursive: true });
-      const db = new DatabaseSync(p);
-      chmodDbFiles(p); // v2.611(DB2611-01): 본체·기존 -wal/-shm 0600 — PRAGMA·스키마(첫 쓰기) 전에
+      // chmod(본체·기존 -wal/-shm 0600, DB2611-01) → busy_timeout → WAL/NORMAL 순서는 openSqlite 가 지킨다. 잠금이면 닫고 던진다.
+      const db = openSqlite(new DatabaseSync(p));
+      try { fs.chmodSync(p, 0o600); } catch { /* best effort — openSqlite 가 이미 했다(secAudit2535 스윕 규약 유지) */ }
       try {
-        db.exec('PRAGMA busy_timeout=3000;');   // 먼저 — journal_mode 전환·스키마 생성도 잠금을 기다리게
-        try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;'); } catch (e) { if (isLockError(e)) throw e; /* 구버전 폴백 */ }
         const st = prepare(db);
-        try { fs.chmodSync(p, 0o600); } catch { /* best effort */ }
         x = { db, st, path: p };
-        lockError = null; retryAt = 0;
+        lockRetry.ok();
         return x;
       } catch (e) { try { db.close(); } catch { /* */ } throw e; }
     })().catch((e) => {
-      if (isLockError(e)) { lockError = e; retryAt = Date.now() + LOCK_RETRY_MS; ready = null; return null; }
+      if (lockRetry.onFail(e)) { ready = null; return null; }
       initError = e; return null;
     });
   }
@@ -140,8 +136,7 @@ export async function hzSessionDbStatus() {
   return {
     available: !!h,
     path: h ? h.path : DB_PATH(),
-    error: initError ? String(initError.message || initError).slice(0, 200)
-      : (!h && lockError ? `DB 파일이 잠겨 있어 열지 못했습니다(잠시 뒤 다시 시도합니다): ${String(lockError.message || lockError).slice(0, 160)}` : ''),
+    error: initError ? String(initError.message || initError).slice(0, 200) : (h ? '' : lockRetry.note()),
     ...(h ? h.st.stats.get() : { latestRows: null, seriesRows: null }),
   };
 }
@@ -164,7 +159,7 @@ const nOrNull = (v) => {
  */
 export async function commitHzSessions({ ts, records = [], series = [], maxUsers = 2000 }) {
   const h = await open();
-  if (!h) return { ok: false, reason: initError ? String(initError.message) : lockError ? `DB 잠금(다시 시도 예정): ${String(lockError.message)}` : 'node:sqlite 없음' };
+  if (!h) return { ok: false, reason: initError ? String(initError.message) : lockRetry.lastLock() ? `DB 잠금(다시 시도 예정): ${String(lockRetry.lastLock().message)}` : 'node:sqlite 없음' };
   const t = Date.now();
   h.db.exec('BEGIN');
   try {
@@ -260,9 +255,9 @@ export async function pruneHzSessions(retentionDays, { every = 12 } = {}) {
 }
 
 /** 테스트 전용 — 잠금 재시도 대기(30초)를 건너뛴다. */
-export function _expireLockRetryForTest() { retryAt = 0; }
+export function _expireLockRetryForTest() { lockRetry._expire(); }
 
 export function _resetForTest() {
   try { x?.db?.close?.(); } catch { /* */ }
-  x = null; ready = null; initError = null; lockError = null; retryAt = 0; tick = 0; _pruneFlight.reset();
+  x = null; ready = null; initError = null; lockRetry.ok(); tick = 0; _pruneFlight.reset();
 }

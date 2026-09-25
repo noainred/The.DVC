@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { pduTotals, pduTotalNote, pduPowerMark } from './pduTotals.js';
 import { STable } from '../../components/STable.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
+import { fetchJson, postJson, delJson, downloadFile, usePolling } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
@@ -10,6 +10,7 @@ import PduCharts from './PduCharts.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
+import { agoText } from './relTime.js';
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 
 /**
@@ -27,17 +28,9 @@ const fmtW = (w) => (w == null ? '—' : (w >= 1000 ? `${(w / 1000).toFixed(2)} 
 const fmtC = (c) => (c == null ? '—' : `${c.toFixed(1)} ℃`);
 const fmtH = (h) => (h == null ? '—' : `${Math.round(h)} %RH`);
 const fmtA = (a) => (a == null ? '—' : `${Number(a).toFixed(1)} A`);
-const ago = (ts) => {
-  if (!ts) return '—';
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.round(s / 60)}분 전`;
-  return `${Math.round(s / 3600)}시간 전`;
-};
+// v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다(로컬 ago 사본 제거).
 
 export default function PduTool() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
   const [form, setForm] = useState(null);
   const [test, setTest] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -50,13 +43,15 @@ export default function PduTool() {
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [tab, setTab] = useHashTab({ base: ['tools', 'pdu'], valid: ['list', 'charts'], fallback: 'list' });
 
-  const load = async () => {
-    try { setData(await fetchJson('/tools/pdu')); setError(null); }
-    catch (e) { setError(e.message); }
-  };
-  useEffect(() => { load(); }, []);
-  // 수집이 도는 동안 화면이 멈춘 것처럼 보이지 않게 30초 폴링(기존 데이터는 유지).
-  useEffect(() => { const t = setInterval(() => load().catch(() => {}), 30_000); return () => clearInterval(t); }, []);
+  // v2.613 WEB2613-09: 목록은 usePolling(30초 — 수집이 도는 동안 화면이 멈춘 것처럼 보이지 않게, 기존 데이터 유지·ETag/304·403 정지).
+  //   예전 수제 setInterval 은 403 을 `.catch(() => {})` 로 삼키며 반복했다. 저장·삭제·수집 뒤의 `load()` 는 `_r` 카운터를 올려
+  //   즉시 재조회한다(usePolling 은 파라미터가 바뀌면 바로 다시 부른다).
+  const [rev, setRev] = useState(0);
+  const { data, error: pollErr } = usePolling('/tools/pdu', { _r: rev }, 30_000);
+  const [actErr, setActErr] = useState(null); // 삭제·저장 실패 사유(폴링 오류와 별개)
+  const error = actErr || pollErr;
+  const setError = setActErr;
+  const load = async () => { setRev((r) => r + 1); };
 
   const devices = useMemo(() => data?.devices || [], [data]);
   // v2.606 WEB2606-05: 부분 합(unitsIncomplete)·전력 미수집 장비를 개수로 함께 낸다(pduTotals.js — vitest 고정).
@@ -216,7 +211,7 @@ export default function PduTool() {
                       <td className="right">{fmtC(sum?.tempMaxC)}</td>
                       <td className="right">{fmtH(sum?.humidityAvgPct)}</td>
                       <td>{sum ? `${sum.units} / ${sum.sensors}` : '—'}</td>
-                      <td className="muted" style={{ fontSize: 12 }}>{ago(s?.collectedAt)}</td>
+                      <td className="muted" style={{ fontSize: 12 }}>{agoText(s?.collectedAt)}</td>
                       <td className="right" style={{ whiteSpace: 'nowrap' }}>
                         <button className="logout-btn" style={{ padding: '4px 8px', fontSize: 12 }} disabled={busy} onClick={() => collect(d)}>수집</button>
                         <button className="logout-btn" style={{ padding: '4px 8px', fontSize: 12, marginLeft: 4 }} onClick={() => openEdit(d)}>수정</button>

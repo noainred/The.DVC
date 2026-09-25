@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { registerStateFile } from './stateFiles.js'; // v2.613 PERSIST2613-08
 
 /**
  * 도메인 하나의 작업 로그를 만든다.
@@ -37,6 +38,7 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
  */
 export function createActivityLog({ fileName, max = 500, numFields = [] }) {
   const FILE = path.join(config.configDir, fileName);
+  registerStateFile(fileName); // v2.613 PERSIST2613-08: 링버퍼 캐시 — 상태 파일로 스스로 등록(이름 규약 -activity 와 이중)
   const MAX = Math.max(50, Number(max) || 500);
   let buf = null;
 

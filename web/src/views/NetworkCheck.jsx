@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { fetchJson, postJson } from '../api.js';
+import { fetchJson, postJson, hasRole } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 
 // 상태 색상 — 스크린샷과 동일(정상=하늘, +20%=노랑, +50%=빨강).
@@ -54,7 +54,7 @@ export default function NetworkCheck() {
   const [range, setRange] = useState('1d');
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const isAdmin = hasRole('admin'); // v2.613 WEB2613-01: 역할은 App 이 채운 현재 사용자 객체에서 읽는다(화면이 /auth/me 를 다시 부르지 않는다).
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
@@ -62,7 +62,6 @@ export default function NetworkCheck() {
   const loadGen = useRef(0);
   const load = () => { const g = ++loadGen.current; setError(null); fetchJson('/ping/edge/overview', { range }).then((d) => { if (g === loadGen.current) setData(d); }).catch((e) => { if (g === loadGen.current) setError(e.message); }); };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [range]);
-  useEffect(() => { fetchJson('/auth/me').then((r) => setIsAdmin(r.user?.role === 'admin')).catch(() => {}); }, []);
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4000); };
   const sync = async () => { setBusy(true); const r = await postJson('/ping/edge/sync').catch((e) => ({ ok: false, reason: e.message })); setBusy(false); flash(r.ok, r.ok ? (r.added ? `엣지 노드 ${r.added}개를 추가했습니다.` : '추가할 새 엣지 노드가 없습니다.') : (r.reason || '동기화 실패')); if (r.ok && r.added) load(); };
 

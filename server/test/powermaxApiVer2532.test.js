@@ -94,8 +94,7 @@ test('★ 무버전 경로를 하드코딩으로 되돌리지 않았는지 소�
   const fs = await import('node:fs');
   const url = new URL('../src/storage/collectors/powermax.js', import.meta.url);
   // 주석은 걷어낸다 — 결함을 설명하는 주석에 그 경로가 적혀 있다(v2.531.1 에서 겪은 함정).
-  const code = fs.readFileSync(url, 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const code = stripComments(fs.readFileSync(url, 'utf8'));   // v2.613 TESTDOC2613-08
   for (const bad of ["get('/univmax/restapi/system/symmetrix')", "'/univmax/restapi/system/alert'"]) {
     assert.ok(!code.includes(bad), `무버전 경로 직접 호출이 남아 있다: ${bad}`);
   }
@@ -111,6 +110,7 @@ test('★ 무버전 경로를 하드코딩으로 되돌리지 않았는지 소�
  * '용량 필드를 인식하지 못했습니다' 로 떨어진다.
  */
 import { powermaxCapacity } from '../src/storage/collectors/powermax.js';
+import { stripComments } from './_stripComments.js';
 
 const REAL_102 = Object.freeze({
   symmetrixId: '000220201278', model: 'PowerMax_8500', microcode: '6079.275.0', local: true,

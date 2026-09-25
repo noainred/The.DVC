@@ -15,6 +15,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 
 const FILE = () => path.join(config.configDir, 'horizon-sessions.json');
 
@@ -29,14 +30,12 @@ export const LIMITS = Object.freeze({
   maxUsers: { min: 50, max: 20_000, def: 2000 },   // 저장·응답 계정 목록 상한(초과는 개수만)
 });
 
-const clamp = (v, l) => {
-  const n = Number(v);
-  if (!Number.isFinite(n) || n <= 0) return l.def;
-  return Math.min(l.max, Math.max(l.min, Math.round(n)));
-};
 
 // v2.599 LO2599-01: 숫자 칸을 비우고 저장하면(''·null·비숫자·0 이하) clamp 가 **기본값**을 줬다 — 예: 보존 3650일 →
 // 180일(Horizon 세션). v2.596 규약대로 빈 칸은 '미지정' 이고 **이전 값을 유지**한다(판정은 numOrNull — Number('')===0 함정).
+// v2.613 DEPS2613-12: clamp 사본 대신 util/clampSetting.js. 이 모듈의 계약(v2.599 LO2599-01·기존 테스트)은 '빈 값·비숫자·**0 이하** = 미지정
+//   → 기본값' 이라 0 이하를 먼저 미지정(null)으로 접는다 — clampSetting 은 0 을 값으로 보고 하한으로 올린다(미입력이 최소주기로 둔갑).
+const positive = (v) => { const n = numOrNull(v); return n != null && n <= 0 ? null : v; };
 function keepPrevBlankNumbers(input, prev) {
   const out = { ...(input && typeof input === 'object' ? input : {}) };
   for (const k of Object.keys(LIMITS)) {
@@ -61,13 +60,13 @@ export function normalize(input = {}) {
   }
   return {
     enabled: src.enabled === true,
-    intervalMs: clamp(src.intervalMs, LIMITS.intervalMs),
-    retentionDays: clamp(src.retentionDays, LIMITS.retentionDays),
-    concurrency: clamp(src.concurrency, LIMITS.concurrency),
-    timeoutMs: clamp(src.timeoutMs, LIMITS.timeoutMs),
-    pageSize: clamp(src.pageSize, LIMITS.pageSize),
-    maxPages: clamp(src.maxPages, LIMITS.maxPages),
-    maxUsers: clamp(src.maxUsers, LIMITS.maxUsers),
+    intervalMs: clampSetting(positive(src.intervalMs), LIMITS.intervalMs),
+    retentionDays: clampSetting(positive(src.retentionDays), LIMITS.retentionDays),
+    concurrency: clampSetting(positive(src.concurrency), LIMITS.concurrency),
+    timeoutMs: clampSetting(positive(src.timeoutMs), LIMITS.timeoutMs),
+    pageSize: clampSetting(positive(src.pageSize), LIMITS.pageSize),
+    maxPages: clampSetting(positive(src.maxPages), LIMITS.maxPages),
+    maxUsers: clampSetting(positive(src.maxUsers), LIMITS.maxUsers),
     // 계정명 표시 정책 — 사용자 선택(2026-09-16): **목록은 가리고 상세에서 본다**.
     showNamesInList: src.showNamesInList === true,
     servers,

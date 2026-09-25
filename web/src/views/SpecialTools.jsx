@@ -1,25 +1,25 @@
 // 특수 기능(SpecialTools) — 카드 그리드 셸 + 도구 패널 디스패처.
 // v2.282.0 대형 파일 분할(2026-08-12): 5,070줄 단일 파일에서 도구 구현을 views/tools/ 로 분리했다.
 // 이 파일은 목록/권한 게이트/딥링크/최근검색 셸과 ToolPanel 라우팅만 가진다.
-// App.jsx(IpamStandalone)·Summary.jsx(GuestOsVmsModal) 호환을 위해 아래에서 재export 한다.
+// Summary.jsx(GuestOsVmsModal) 호환을 위해 아래에서 재export 한다(IpamStandalone 재수출은 v2.613 WEB2613-08 에 삭제 — App 이 IpamCore 를 직접 lazy 한다).
 import React, { useEffect, useState } from 'react';
-import { fetchJson, postJson, usePolling, toolAllowed, toolExplicitlyAllowed, can, getCurrentUser } from '../api.js';
+import { fetchJson, postJson, usePolling, toolAllowed, can, getCurrentUser, hasRole } from '../api.js';
 import { SearchBox } from '../components/ui.jsx';
 import BoldText from '../components/boldText.jsx';
 import { TOOLS } from './specialToolsList.js';
-import { visibleTools, gridIntro } from './toolVisibility.js';
+import { visibleTools, gridIntro, lockReasonOf as lockReason } from './toolVisibility.js'; // v2.613 CATALOG2613-07: 잠금 사유도 한 모듈
 import { buildSections } from './toolSections.js'; // 카테고리 섹션 계산(v2.455, 순수)
 import { searchTools } from './toolSearch.js'; // 도구 검색 매칭(v2.508, 순수 · V4 팔레트와 공용)
 
 
 /**
- * v2.447(감사 T13): 도구 48개를 정적 import 하던 것을 **React.lazy** 로 바꿨다.
+ * v2.447(감사 T13): 도구 전부(당시 48개)를 정적 import 하던 것을 **React.lazy** 로 바꿨다.
  * 실측으로 SpecialTools 청크가 893.8KB 단일 덩어리였고, 사용자는 '특수 기능' 탭을 열 때
  * 실제로 볼 도구 1개를 위해 48개 전부를 내려받았다. 이제 셸(카드 그리드·권한 게이트·딥링크)만
  * 즉시 로드하고 각 도구는 선택하는 순간 자기 청크를 받는다. ToolPanel 전체를 <Suspense> 로 감싼다.
  *
- * ⚠️ 파일 하단의 재export(IpamStandalone·GuestOsVmsModal)는 App.jsx·Summary.jsx 가 쓰므로
- * 정적으로 유지한다 — lazy 로 바꾸면 그 두 화면이 깨진다.
+ * ⚠️ 파일 하단의 재export(GuestOsVmsModal)는 Summary.jsx 가 쓰므로
+ * 정적으로 유지한다 — lazy 로 바꾸면 그 화면이 깨진다.
  */
 const Topology3D = React.lazy(() => import('./Topology3D.jsx'));
 const NetTrafficAnalysis = React.lazy(() => import('./NetTrafficAnalysis.jsx'));
@@ -138,7 +138,7 @@ export default function SpecialTools() {
   const [gridEl, setGridEl] = useState(null);
   const [favCount, setFavCount] = useState(4); // 한 줄에 들어가는 카드 수(화면폭 자동, 기본 4)
   const [recent, setRecent] = useState(loadRecent); // 최근 검색어(최신순, 1줄 표시)
-  // 카테고리 설정(v2.455) — 카드(78장)를 섹션으로 나눈다. 미설정/실패면 기존 단일 그리드 그대로.
+  // 카테고리 설정(v2.455) — 카드(specialToolsList.js 의 전부)를 섹션으로 나눈다. 미설정/실패면 기존 단일 그리드 그대로.
   const [cats, setCats] = useState(null);
   const [openCats, setOpenCats] = useState({});
   const addRecent = (q) => {
@@ -190,10 +190,9 @@ export default function SpecialTools() {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   useEffect(() => {
-    fetchJson('/auth/me').then((r) => {
-      setIsAdmin(r.user?.role === 'admin');
-      setExternalUrls({ serviceHubUrl: r.user?.serviceHubUrl || '' });
-    }).catch(() => {});
+    // v2.613 WEB2613-01: /auth/me 를 다시 부르지 않는다 — App 이 렌더 전에 채운 현재 사용자 객체 하나(api.js)에서 읽는다.
+    setIsAdmin(hasRole('admin'));
+    setExternalUrls({ serviceHubUrl: getCurrentUser()?.serviceHubUrl || '' });
   }, []);
   // 그리드(메뉴 목록)로 돌아올 때마다 사용 횟수를 갱신. 전체 메뉴를 클릭순으로 정렬하므로
   // 상위 몇 개가 아니라 전체 도구 수를 덮을 만큼 넉넉히 가져온다(현재 42개 → 200).
@@ -216,16 +215,9 @@ export default function SpecialTools() {
   }, [tool, gridEl]);
   // 도구 잠금 사유 — 접근 가능하면 null. 특수 기능은 항목이 많아 '숨김'보다 '회색 잠금'이 낫다:
   // 어떤 기능이 있는지는 보이고, 권한이 없으면 클릭만 막아 관리자에게 요청할 수 있게 한다.
-  const lockReasonOf = (t) => {
-    if (!t) return '알 수 없는 기능입니다.';
-    // v2.555: 관리자가 이 계정에 **명시적으로** 허용한 도구면 'adminOnly' 표시 관례를 넘긴다
-    // (그 플래그는 접근제어가 아니다 — api.js toolExplicitlyAllowed 주석). 서버 권한은 그대로다.
-    if (t.adminOnly && !isAdmin && !toolExplicitlyAllowed(t.k)) return '관리자(admin) 전용 기능입니다.';
-    // 기능별 권한(예: NSX=inv.nsx) — 상단 메뉴에서 이동한 도구의 접근 경계를 그대로 보존한다.
-    if (t.perm && !can(t.perm)) return '이 기능에 대한 접근 권한이 없습니다 — 관리자에게 요청하세요(설정 › 사용자 관리 › 권한).';
-    if (!toolAllowed(t.k)) return '이 기능에 대한 접근 권한이 없습니다 — 관리자에게 요청하세요(설정 › 사용자 관리 › 특수 기능 도구별 접근).';
-    return null;
-  };
+  // v2.613(CATALOG2613-07): 판정은 views/toolVisibility.js lockReasonOf 하나 — V4 내비·기능 찾기·팔레트와 같은 답.
+  //   (v2.555 의 '명시 허용은 adminOnly 표시 관례를 넘긴다' 도 그 안에 있다.) 여기서 규칙을 다시 쓰지 말 것.
+  const lockReasonOf = (t) => lockReason(t, { isAdmin, toolsAllowed: getCurrentUser()?.toolsAllowed ?? null, can, toolAllowed });
   // 접근 가능 여부(딥링크 가드 공통).
   const canOpenTool = (k) => !lockReasonOf(TOOLS.find((x) => x.k === k));
   // 딥링크(#/tools/<k>)로 권한 없는 도구를 열면 접근 차단 안내(서버 엔드포인트도 별도 강제됨).
@@ -249,7 +241,7 @@ export default function SpecialTools() {
     const lock = lockReasonOf(t);
     return lock ? { ...t, disabled: true, comingSoon: false, lockReason: lock } : t;
   });
-  // 카테고리 설정(v2.455) — 카드(78장)를 섹션으로 나눈다. 실패해도 화면은 기존대로 그린다.
+  // 카테고리 설정(v2.455) — 카드를 섹션으로 나눈다. 실패해도 화면은 기존대로 그린다.
   // ⚠ 훅은 조기 return 위 최상단에 있어야 한다(React #310) — 이 컴포넌트는 아래에서 return 하므로 안전.
   const ql = menuQ.trim().toLowerCase();
   // 검색 매칭은 공용 규칙(v2.508, toolSearch.js) — 라벨·설명뿐 아니라 **키**(gpu·ipam·rma)와
@@ -537,25 +529,30 @@ function ToolPanel({ tool, onBack, isAdmin }) {
       {tool === 'nsx' && <NsxAdmin />}
       {tool === 'topo3d' && <Topology3D />}
       {tool === 'davinci-svc' && <ServiceCheck />}
-      {tool === 'capacity-advisor' && (isAdmin ? <CapacityAdvisor /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
+      {/* v2.613(CATALOG2613-08): 예전에 7개 분기(capacity-advisor·dir-usage·mail-diag·vmprovision·agent-scans·login-fails·net-issues)만
+          `isAdmin ? … : '관리자 전용 기능입니다'` 인라인 가드를 달고 있었다. 셸의 lockReasonOf 가 adminOnly 를 먼저 막으므로 그 가드에
+          닿는 것은 **허용 목록으로 명시 허용된 비관리자**뿐인데, 그때 나머지 21개 adminOnly 도구는 화면 → 서버 403 → AccessDenied 를
+          보고 이 7개만 다른 문구를 봤다(같은 조건에 두 문구). vmprovision 은 조회가 requirePerm('vm.provision')(admin 아님)이라
+          가드가 서버보다 좁기까지 했다. 관리자 판정은 **서버 게이트 + ErrorBox → AccessDenied 하나**로 통일한다(v2.555 규약).
+          이 파일에 `isAdmin ?` 렌더 분기를 다시 만들지 말 것(audit2613a 웹 테스트가 0 을 고정). */}
+      {tool === 'capacity-advisor' && <CapacityAdvisor />}
       {tool === 'net-check' && <NetworkCheck />}
       {tool === 'net-traffic' && <NetTrafficAnalysis />}
       {tool === 'deepsearch' && <DeepSearch />}
       {tool === 'vmware-backup' && <VmwareConfigBackup />}
       {tool === 'roomtemp' && <RoomTemp />}
       {tool === 'portaldb' && <PortalDb />}
-      {tool === 'dir-usage' && (isAdmin ? <DirUsageReport /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
-      {tool === 'mail-diag' && (isAdmin ? <MailDiag /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
+      {tool === 'dir-usage' && <DirUsageReport />}
+      {tool === 'mail-diag' && <MailDiag />}
       {tool === 'shutdown' && <Shutdown />}
-      {tool === 'vmprovision' && (isAdmin ? <VmProvision /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
-      {tool === 'agent-scans' && (isAdmin ? <AgentScans /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
-      {tool === 'login-fails' && (isAdmin ? <LoginFails /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
-      {tool === 'net-issues' && (isAdmin ? <NetIssues /> : <div className="card"><span className="muted">관리자 전용 기능입니다.</span></div>)}
+      {tool === 'vmprovision' && <VmProvision />}
+      {tool === 'agent-scans' && <AgentScans />}
+      {tool === 'login-fails' && <LoginFails />}
+      {tool === 'net-issues' && <NetIssues />}
     </>
     </React.Suspense>
   );
 }
 
 // 외부 파일 호환 재export(App.jsx lazy named import · Summary.jsx)
-export { IpamStandalone } from './tools/IpamCore.jsx';
 export { GuestOsVmsModal } from './tools/GuestOsTools.jsx';

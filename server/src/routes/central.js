@@ -318,6 +318,24 @@ function authed(req) { return Boolean(req.centralAuth?.ok); }
 const denyReason = (req) => req.centralAuth?.reason || '토큰 불일치';
 
 /**
+ * v2.613(감사 DEPS2613-09): 라우트마다 손으로 반복하던 2줄 게이트(404 central 비활성화 → 403 인증 실패)를 미들웨어 1벌로.
+ *   51개 라우트가 같은 두 줄을 복사하고 있었고, 4곳(storage/pdu/sanswitch/cvp-config)은 위 `centralRouter.use` 미들웨어가
+ *   `requestedAgent`(query.agent·X-Agent-Name·body.agent)로 **이미 끝낸** 토큰↔agent 대조를 부분집합(query·헤더)으로 다시 하고
+ *   있었다(도달 불가 중복 — 함께 지웠다). 응답 본문은 라우트별 예전 값 그대로다(`notFound` 로 두 변형을 지정한다):
+ *   기본 `{ok:false, reason:'central 비활성화'}` · /assignment·/register-collector `'central 비활성화 (CENTRAL_TOKEN 미설정)'` ·
+ *   /result·/rma-result·/ping-result·/log-query-result·/capture-result·/bmstor-result·/ip-scan-result `{ok:false}`.
+ *   ⚠ 순서가 계약이다 — 비활성(404)을 먼저 본다(예전과 같다: 토큰이 틀려도 central 이 꺼져 있으면 404).
+ * @param {{notFound?:object}} [o]
+ */
+export function requireCentral({ notFound = { ok: false, reason: 'central 비활성화' } } = {}) {
+  return function requireCentralGate(req, res, next) {
+    if (!centralEnabled()) return res.status(404).json(notFound);
+    if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+    next();
+  };
+}
+
+/**
  * agent 가 이 vCenter 를 소유(inventory 등록)했나 — 조회/보고 select 키가 vcenters 인 라우트의
  * 소유권 검증. `?vcenters=` 로 데이터를 고르는 라우트는 미들웨어 바인딩(want 이 비면 단락)을
  * 우회하므로, 개별 토큰(agent 모드)이 남이 소유한 vCenter 의 잡/결과를 가로채/위조하지 못하게 한다.
@@ -375,9 +393,7 @@ function reqAgentDenied(req, assignedAgent) {
 }
 
 // Agent pulls the IP assignment for its name (incl. iDRAC credentials).
-centralRouter.get('/assignment', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/assignment', requireCentral({ notFound: { ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' } }), (req, res) => {
   const a = getAssignment(req.query.agent);
   if (!a || a.enabled === false) return res.json({ ok: true, assigned: false });
   res.json({ ok: true, assigned: true, agent: a.agent, ips: a.ips, username: a.username, password: a.password });
@@ -388,9 +404,7 @@ centralRouter.get('/assignment', (req, res) => {
 // Body: { name, port, collectorToken, datacenter?, urlHint?, version? }
 const REGISTER_URL_MAX = COLLECTOR_URL_MAX; // v2.611: 관리자 등록과 같은 상한(util/trimSlashes.js)
 const REGISTER_TOKEN_MAX = 1024;
-centralRouter.post('/register-collector', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/register-collector', requireCentral({ notFound: { ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' } }), async (req, res) => {
   const b = req.body || {};
   const name = typeof b.name === 'string' ? b.name.trim() : ''; // v2.600 CEN2600-10: 객체 name 이 String() 에서 던지지 않게
   if (!name) return res.status(400).json({ ok: false, reason: 'name이 필요합니다.' });
@@ -468,9 +482,7 @@ centralRouter.post('/register-collector', async (req, res) => {
 });
 
 // Agent posts its scan result. Body: { agent, scanned, found:[...], unreachable, notIdrac, authFailed }
-centralRouter.post('/result', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/result', requireCentral({ notFound: { ok: false } }), (req, res) => {
   const b = req.body || {};
   // 저장 키는 개별 토큰이면 토큰에서 해석한 agent 를 강제한다(body.agent 위조 차단 —
   // ?agent=자기 + body.agent=남 우회 봉인). 공유 토큰(shared)은 어느 엣지인지 알 수 없어
@@ -494,9 +506,7 @@ centralRouter.post('/result', (req, res) => {
  * **개별 토큰 전용**이다. 저장 키는 토큰에서 해석한 `req.centralAuth.agent` 뿐이며 본문의
  * agent 필드는 읽지 않는다 — 그래야 한 엣지가 남의 이름으로 결과를 위조할 수 없다.
  */
-centralRouter.post('/svcmon-report', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/svcmon-report', requireCentral(), (req, res) => {
   if (req.centralAuth.mode !== 'agent') {
     return res.status(403).json({
       ok: false,
@@ -519,9 +529,7 @@ centralRouter.post('/svcmon-report', (req, res) => {
  * 밀어 올린다. **개별 토큰 전용**(svcmon-report 와 같은 3규약: agent 모드 필수 · 저장 키는
  * req.centralAuth.agent 만 · X-Agent-Name 이중 방어). 시각은 중앙 수신 시각이 진실이다.
  */
-centralRouter.post('/capacity-report', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/capacity-report', requireCentral(), async (req, res) => {
   if (req.centralAuth.mode !== 'agent') {
     return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(어느 엣지의 리소스인지 신뢰할 수 없습니다).' });
   }
@@ -563,9 +571,7 @@ centralRouter.post('/capacity-report', async (req, res) => {
  * `query.agent` 는 미들웨어 바인딩 검사를 걸기 위한 것이고, 실제 조회 키는 토큰에서 해석한
  * 이름만 쓴다(쿼리 값을 신뢰하지 않는다).
  */
-centralRouter.get('/svcmon-config', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/svcmon-config', requireCentral(), (req, res) => {
   if (req.centralAuth.mode !== 'agent') {
     return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다.' });
   }
@@ -579,9 +585,7 @@ centralRouter.get('/svcmon-config', (req, res) => {
  * 엣지 적용 결과 회신 — **이것이 배포 성공 판정의 근거다.**
  * 적용 수가 배포 수와 다르면 중앙이 `mismatch` 로 남기고 그대로 노출한다.
  */
-centralRouter.post('/svcmon-config-ack', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/svcmon-config-ack', requireCentral(), (req, res) => {
   if (req.centralAuth.mode !== 'agent') {
     return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다.' });
   }
@@ -672,9 +676,7 @@ function sanitizeInventoryList(list, vcId, max, dropped) {
   return out;
 }
 
-centralRouter.post('/inventory', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/inventory', requireCentral(), (req, res) => {
   const b = req.body || {};
   if (!b.vcenterId || !b.vcenter) return res.status(400).json({ ok: false, reason: 'vcenterId/vcenter가 필요합니다.' });
   // v2.599(CEN-2599-01): vcenter 는 객체, vcenterId 는 글자여야 한다 — 그 밖의 모양은 병합 단계에서 스냅샷을 멈춘다.
@@ -774,9 +776,7 @@ centralRouter.post('/inventory', (req, res) => {
 // 못 덮던 문제의 수신 절반. /inventory 와 같은 신뢰 경계(개별 토큰 → agent 강제 + TOFU 소유권 +
 // mock 차단)를 적용하고, 받은 VM 배열을 sanitize 후 guest-disk.db 에 커밋한다.
 // Body: { agent, source, vcenterId, vcenterName, vms:[{vmId,vmName,allocGB,usedGB,partCount,parts[]}], generatedAt }
-centralRouter.post('/guest-disk', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/guest-disk', requireCentral(), async (req, res) => {
   const b = req.body || {};
   if (!b.vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
   // 출처 agent 는 개별 토큰이면 토큰에서 해석한 값을 강제(body.agent 위조 무효화).
@@ -804,7 +804,11 @@ centralRouter.post('/guest-disk', async (req, res) => {
   if (!commit || !commit.ok) return res.status(500).json({ ok: false, reason: commit?.reason || 'guest-disk 커밋 실패(DB 사용 불가)' });
   noteVcenterOwner(String(b.vcenterId), agent, { peer: req.socket?.remoteAddress || '', hostname: req.get('X-Agent-Hostname') || '' });
   console.log(`[central] guest-disk 수신: agent=${agent} vc=${b.vcenterId} vms=${vms.length} (series vm=${commit.vmSeriesRows} part=${commit.partSeriesRows})`);
-  res.json({ ok: true, vcenterId: b.vcenterId, vms: vms.length, vmSeriesRows: commit.vmSeriesRows, partSeriesRows: commit.partSeriesRows });
+  // v2.613(감사 CONTRACT2613-03): 적재하지 않고 **센** 행(v2.601 RECENT2601-01 — 숫자가 아닌 VM·파티션)을 응답에 싣는다. 예전에는 로그에만
+  //   남아 엣지 상태·로그가 '보냈다(N대)' 인데 중앙에는 그만큼 없었다(v2.606 centralReply 규약의 누락). 뺀 것이 없으면 필드 자체가 없다(구버전 엣지 호환).
+  const gdSkipped = (Number(commit.skippedVms) || 0) + (Number(commit.skippedParts) || 0);
+  res.json({ ok: true, vcenterId: b.vcenterId, vms: vms.length, vmSeriesRows: commit.vmSeriesRows, partSeriesRows: commit.partSeriesRows,
+    ...(gdSkipped ? { dropped: { vms: Number(commit.skippedVms) || 0, parts: Number(commit.skippedParts) || 0 } } : {}) });
 });
 
 // 사이트 위임 실시간 스파이크 수신(v2.510) — 엣지 vmseries 폴러가 저장한 같은 주기 결과를 push.
@@ -849,9 +853,7 @@ function sanitizeVmSeriesBody(b, now) {
   }
   return { spikes, cover, cursors, historicalInterval };
 }
-centralRouter.post('/vmseries', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/vmseries', requireCentral(), async (req, res) => {
   const b = req.body || {};
   if (!b.vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
   const agent = req.centralAuth.agent || String(b.agent && strAgent(b.agent) || ''); // v2.600 CEN2600-10: 글자일 때만(객체면 String() 이 던졌다)
@@ -911,9 +913,7 @@ function sanitizeCurUserRecords(b) {
   }
   return out;
 }
-centralRouter.post('/curuser', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/curuser', requireCentral(), async (req, res) => {
   const b = req.body || {};
   const agent = req.centralAuth.agent || String(b.agent && strAgent(b.agent) || ''); // v2.600 CEN2600-10: 글자일 때만(객체면 String() 이 던졌다)
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
@@ -957,9 +957,7 @@ centralRouter.post('/curuser', async (req, res) => {
 });
 
 // '현재 사용자' 설정 배포(v2.520) — 엣지가 주기적으로 GET. 이 엣지가 소유한 vCenter 항목만 내려준다.
-centralRouter.get('/curuser-config', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/curuser-config', requireCentral(), (req, res) => {
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim().toLowerCase();
   const mine = new Set(listInventory().filter((e) => String(e.agent || '').toLowerCase() === agent).map((e) => String(e.vcenterId)));
   const s = loadCurUserSettings();
@@ -977,9 +975,7 @@ centralRouter.get('/curuser-config', (req, res) => {
 
 // 실시간 스파이크 수집 설정 배포(v2.510) — 엣지가 주기적으로 GET. 이 엣지가 수집하는(인벤토리 소유)
 // vCenter 의 targets 만 내려준다(다른 법인 id 비노출). scope='all' 은 그대로 내려간다.
-centralRouter.get('/vmseries-config', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/vmseries-config', requireCentral(), (req, res) => {
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim().toLowerCase();
   const mine = new Set(listInventory().filter((e) => String(e.agent || '').toLowerCase() === agent).map((e) => String(e.vcenterId)));
   const s = loadVmSeriesSettings();
@@ -989,9 +985,7 @@ centralRouter.get('/vmseries-config', (req, res) => {
 
 // 엣지 베어메탈 집계: 현장 포탈이 자기 DC의 베어메탈 목록(전력 미보고 포함)을 push.
 // Body: { agent, baremetal:[{fleetId,name,model,serviceTag,watts,vcenterId,source}], generatedAt }
-centralRouter.post('/fleet', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/fleet', requireCentral(), (req, res) => {
   const b = req.body || {};
   const agent = req.centralAuth.agent || String(b.agent && strAgent(b.agent) || ''); // v2.600 CEN2600-10: 글자일 때만(객체면 String() 이 던졌다)
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
@@ -1048,17 +1042,13 @@ function edgeNameRegistered(name) {
 }
 
 // 위임 iDRAC 스캔: 에이전트가 자기 이름의 온디맨드 스캔 잡을 인출.
-centralRouter.get('/idrac-scan-jobs', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/idrac-scan-jobs', requireCentral(), (req, res) => {
   // v2.604(감사 TIM2604-04): 개별 토큰이면 토큰 이름을 먼저 쓴다(바인딩 검사와 같은 이름). 공유 토큰만 ?agent= 를 쓴다.
   res.json({ ok: true, jobs: takeIdracScanJobs(req.centralAuth?.mode === 'agent' && req.centralAuth.agent ? req.centralAuth.agent : req.query.agent) });
 });
 
 // 위임 iDRAC 스캔: 에이전트가 스캔 진행률(중간)을 보고. Body: { reqId, scanned, total }
-centralRouter.post('/idrac-scan-progress', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/idrac-scan-progress', requireCentral(), (req, res) => {
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   if (reqAgentDenied(req, agentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
@@ -1068,9 +1058,7 @@ centralRouter.post('/idrac-scan-progress', (req, res) => {
 
 // 위임 iDRAC 스캔: 에이전트가 발견 목록·요약을 reqId와 함께 회신.
 // Body: { agent, reqId, scanned, found:[...], unreachable, notIdrac, authFailed, registered, error? }
-centralRouter.post('/idrac-scan-result', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/idrac-scan-result', requireCentral(), (req, res) => {
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   if (reqAgentDenied(req, agentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
@@ -1111,9 +1099,7 @@ export function narrowGpuRow(x, dropped = { badPct: 0 }) {
 // 게스트 GPU 수집 위임: ESXi 망에 닿는 현장 agent가 게스트 OS(nvidia-smi)에서 수집한
 // GPU 사용률을 push. 중앙은 포탈이 ESXi에 직접 못 가는 환경에서 이 값을 오버레이로 사용.
 // Body: { agent, hosts:[{hostId,utilPct}], vms:[{vmId,utilPct,memUsedPct,host,vcenterId}] }
-centralRouter.post('/gpu-guest-data', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/gpu-guest-data', requireCentral(), (req, res) => {
   const b = req.body || {};
   const agent = req.centralAuth.agent || String(b.agent && strAgent(b.agent) || ''); // v2.600 CEN2600-10: 글자일 때만(객체면 String() 이 던졌다)
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
@@ -1191,9 +1177,7 @@ centralRouter.post('/gpu-guest-data', (req, res) => {
 // 중앙→엣지 GPU 게스트 설정 배포(pull): 엣지가 자기 이름으로 배포 설정을 가져가 로컬 적용.
 // 폐쇄망/NAT 엣지도 아웃바운드 GET만으로 동작. 비밀번호 포함(엣지가 실제 인증에 사용) → 토큰 필수.
 // GET /api/central/gpu-guest-config?agent=<이름>
-centralRouter.get('/gpu-guest-config', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/gpu-guest-config', requireCentral(), (req, res) => {
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const settings = getAssignedGpuGuest(agent);
@@ -1222,14 +1206,10 @@ function registryUnreadable(res, errOf, what) {
 // GET /api/central/storage-config?agent=<이름> — 이 엣지 몫 스토리지 장비 목록(자격증명 포함:
 // 엣지가 장비에 로그인해야 한다 — gpu-guest-config 의 계정 배포와 같은 신뢰 경계·WAN TLS 검증 ON).
 // 개별 토큰이면 바인딩된 agent 와 요청 agent 불일치를 거부(자격증명 횡탈 차단 — 헤더 규약 2).
-centralRouter.get('/storage-config', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/storage-config', requireCentral(), async (req, res) => {
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
-    return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
-  }
+  // v2.613 DEPS2613-09: 토큰↔agent 대조는 위 `centralRouter.use` 미들웨어가 requestedAgent 로 이미 했다(여기 있던 재대조는 도달 불가 중복).
   const { devicesForAgent, registryLoadError: storageRegErr } = await import('../storage/registry.js');
   if (registryUnreadable(res, storageRegErr, '스토리지')) return;
   // collectNow(v2.316): 중앙 UI 의 '수집' 클릭이 남긴 재수집 요청을 one-shot 으로 서빙 —
@@ -1250,9 +1230,7 @@ centralRouter.get('/storage-config', async (req, res) => {
 //   중앙이 '정상' 과 '수집 안 됨' 을 구분한다(v2.517 규약. `storage/push.js:30` 의 미수정 결함
 //   — 장비 0대면 POST 자체를 안 하는 것 — 을 이 경로는 반복하지 않는다).
 // ⚠ BIG_JSON 등록 필수(index.js) — 열린 장애가 많은 법인이 413 으로 **조용히 전량 소실**된다.
-centralRouter.post('/part-faults', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/part-faults', requireCentral(), async (req, res) => {
   // 개별 토큰이면 **인증된 agent** 만 쓴다(body.agent 를 믿지 않는다 — 자격증명 횡탈 차단).
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
@@ -1275,18 +1253,14 @@ centralRouter.post('/part-faults', async (req, res) => {
  * 엣지가 대기 요청을 인출(claim)하고 결과를 회신(ack)한다. 미들웨어가 이미 `?agent=` 와 토큰의
  * agent 일치를 강제하므로(개별 토큰), 여기서는 그 값을 그대로 쓴다.
  */
-centralRouter.get('/edge-log-jobs', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/edge-log-jobs', requireCentral(), async (req, res) => {
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const { takeEdgeLogJob } = await import('../central/edgeLogJobs.js');
   res.json({ ok: true, job: takeEdgeLogJob(agent) });
 });
 
-centralRouter.post('/edge-log-result', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/edge-log-result', requireCentral(), async (req, res) => {
   // ⚠ 저장 키는 **인증된 agent** 다 — 본문의 `node.agent` 를 믿지 않는다(v2.548 F5 와 같은 규칙).
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : (strAgent(req.body?.agent) || strAgent(req.query?.agent));
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
@@ -1316,9 +1290,7 @@ centralRouter.post('/edge-log-result', async (req, res) => {
 });
 
 // 파트 장애 스위치 배포(v2.548 F3) — 엣지가 주기적으로 GET. 중앙 관리자가 전체/엣지별로 정한 값만 내려간다.
-centralRouter.get('/partfault-config', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/partfault-config', requireCentral(), async (req, res) => {
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim().toLowerCase();
   const { settingsForAgent } = await import('../partfault/settings.js');
   res.json({ ok: true, settings: settingsForAgent(agent) });
@@ -1326,9 +1298,7 @@ centralRouter.get('/partfault-config', async (req, res) => {
 
 // POST /api/central/storage-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
 // **인증된 agent**(개별 토큰 바인딩)만 쓴다. 공유 토큰(레거시)은 body.agent 신뢰(TOFU — 기존 축과 동일).
-centralRouter.post('/storage-data', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/storage-data', requireCentral(), async (req, res) => {
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const { saveEdgeStorage, saveEdgeStorageStatus } = await import('../central/storageEdge.js');
@@ -1405,14 +1375,10 @@ function edgeDropSummary(info) {
 // ── PDU 모니터링 위임(v2.424) — 스토리지 위임과 완전히 같은 규약 ────────────────
 // GET /api/central/pdu-config?agent=<이름> — 이 엣지 몫 PDU 목록(자격증명 포함: 엣지가 PDU 에
 // SSH 로그인해야 한다). 개별 토큰이면 바인딩된 agent 와 요청 agent 불일치를 거부(자격증명 횡탈 차단).
-centralRouter.get('/pdu-config', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/pdu-config', requireCentral(), async (req, res) => {
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
-    return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
-  }
+  // v2.613 DEPS2613-09: 토큰↔agent 대조는 위 `centralRouter.use` 미들웨어가 requestedAgent 로 이미 했다(여기 있던 재대조는 도달 불가 중복).
   const { devicesForAgent, registryLoadError: pduRegErr } = await import('../pdu/registry.js');
   if (registryUnreadable(res, pduRegErr, 'PDU')) return;
   const { takeRequestsForAgent } = await import('../pdu/collectRequests.js');
@@ -1426,12 +1392,15 @@ centralRouter.get('/pdu-config', async (req, res) => {
 
 // POST /api/central/pdu-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
 // **인증된 agent**(개별 토큰 바인딩)만 쓴다. 미위임 장비 id 는 드롭(위조 방지).
-centralRouter.post('/pdu-data', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/pdu-data', requireCentral(), async (req, res) => {
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  const { saveEdgePdu } = await import('../central/pduEdge.js');
+  const { saveEdgePdu, saveEdgePduStatus } = await import('../central/pduEdge.js');
+  // v2.613(감사 EDGE2613-04): 상태 전용 보고(보류 중 — 위임은 있는데 스냅샷이 아직 없다) — 목록은 건드리지 않고 상태만 기록한다.
+  if (req.body?.statusOnly === true) {
+    const saved = saveEdgePduStatus(agent, req.body?.status);
+    return res.json({ ok: true, saved: 0, statusOnly: true, recorded: saved });
+  }
   let snapshots = Array.isArray(req.body?.snapshots) ? req.body.snapshots : [];
   let notOwned = 0; // v2.601 EDGE2601-04
   const now = Date.now();
@@ -1458,14 +1427,10 @@ centralRouter.post('/pdu-data', async (req, res) => {
 // ── SAN 스위치 모니터링 위임(v2.410) — 스토리지 위임과 완전히 같은 규약 ──────────
 // GET /api/central/sanswitch-config?agent=<이름> — 이 엣지 몫 스위치 목록(자격증명 포함:
 // 엣지가 스위치에 SSH/REST 로그인해야 한다). 개별 토큰이면 바인딩 agent 불일치를 거부.
-centralRouter.get('/sanswitch-config', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/sanswitch-config', requireCentral(), async (req, res) => {
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
-    return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
-  }
+  // v2.613 DEPS2613-09: 토큰↔agent 대조는 위 `centralRouter.use` 미들웨어가 requestedAgent 로 이미 했다(여기 있던 재대조는 도달 불가 중복).
   const { devicesForAgent, registryLoadError: sanRegErr } = await import('../sanswitch/registry.js');
   if (registryUnreadable(res, sanRegErr, 'SAN 스위치')) return;
   const { takeRequestsForAgent, takePerfRequestForAgent } = await import('../sanswitch/collectRequests.js');
@@ -1484,9 +1449,7 @@ centralRouter.get('/sanswitch-config', async (req, res) => {
  * 소유권(sanswitch-data 와 동일): 개별 토큰 엣지는 자기에게 위임된 deviceId 만 — 남의 스위치 시계열 위조 차단.
  * ts 는 수신 시각으로 clamp(미래 시각이 '최신' 판정을 항상 이기는 것 방지). 적재는 perfDb.importSamples(트랜잭션·중복 건너뜀).
  */
-centralRouter.post('/sanswitch-perf', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/sanswitch-perf', requireCentral(), async (req, res) => {
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const { devicesForAgent } = await import('../sanswitch/registry.js');
@@ -1541,9 +1504,7 @@ centralRouter.post('/sanswitch-perf', async (req, res) => {
 
 // POST /api/central/sanswitch-test-result — 엣지가 대행한 연결 테스트 결과(추적 로그 포함) 회신(v2.421).
 // 개별 토큰이면 바인딩 agent 만, 공유 토큰은 body.agent — 어느 쪽이든 그 요청의 대상 엣지와 같아야 한다.
-centralRouter.post('/sanswitch-test-result', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/sanswitch-test-result', requireCentral(), async (req, res) => {
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const { completeTestRun } = await import('../sanswitch/testRuns.js');
@@ -1562,10 +1523,8 @@ centralRouter.post('/sanswitch-test-result', async (req, res) => {
  * Body: { agent, instance, info:{hostname,version,os,pid,uptimeSec,priority,allowCustom,signed,busy}, wait }
  * instance = 같은 법인의 여러 RMA 프로세스 구별자(분배는 rma/jobs.js). 형식 검증 후 그대로 키로 쓴다.
  */
-centralRouter.post('/rma-poll', async (req, res) => {
+centralRouter.post('/rma-poll', requireCentral(), async (req, res) => {
   res.locals.perfExpectSlow = true; // v2.498: 롱폴(최대 55초 대기)은 정상이다 — '느린 요청' 목록을 이걸로 채우지 않는다
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
   if (req.centralAuth.mode !== 'agent') {
     return res.status(403).json({ ok: false, reason: '원격 명령(RMA)은 엣지별 개별 토큰만 허용합니다 — 설정 › 엣지 토큰에서 이 엣지의 토큰을 발급해 portal.env 의 EDGE_TOKEN/CENTRAL_TOKEN 에 넣으세요.' });
   }
@@ -1623,9 +1582,7 @@ centralRouter.post('/rma-poll', async (req, res) => {
  */
 const credRate = new Map(); // agentLower → { winStart, n }
 const CRED_RATE_PER_MIN = Math.max(10, Number(process.env.RMA_CRED_RATE_PER_MIN) || 120);
-centralRouter.post('/rma-credential', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/rma-credential', requireCentral(), (req, res) => {
   if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: '계정 브로커는 엣지별 개별 토큰만 허용합니다.' });
   const agent = req.centralAuth.agent;
   const b = req.body || {};
@@ -1645,9 +1602,7 @@ centralRouter.post('/rma-credential', (req, res) => {
 });
 
 // Body: { reqId, result }
-centralRouter.post('/rma-result', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/rma-result', requireCentral({ notFound: { ok: false } }), (req, res) => {
   if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: '원격 명령(RMA)은 엣지별 개별 토큰만 허용합니다.' });
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
@@ -1658,12 +1613,16 @@ centralRouter.post('/rma-result', (req, res) => {
   res.json({ ok: true, stale: !stored });
 });
 
-centralRouter.post('/sanswitch-data', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/sanswitch-data', requireCentral(), async (req, res) => {
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  const { saveEdgeSanSwitch } = await import('../central/sanSwitchEdge.js');
+  const { saveEdgeSanSwitch, saveEdgeSanSwitchStatus } = await import('../central/sanSwitchEdge.js');
+  // v2.613(감사 EDGE2613-04): 상태 전용 보고(엣지가 위임은 있는데 첫 수집 대기 중) — 목록은 건드리지 않고 상태만 기록한다(/storage-data v2.581 과 같다).
+  //   ⚠ 이 분기가 없던 중앙(≤2.612)은 빈 청크 0 을 목록 교체로 받는다 — 엣지가 health-probe 버전으로 먼저 확인한다(agent/centralStatusOnly.js).
+  if (req.body?.statusOnly === true) {
+    const saved = saveEdgeSanSwitchStatus(agent, req.body?.status);
+    return res.json({ ok: true, saved: 0, statusOnly: true, recorded: saved });
+  }
   // 소유권 필터(v2.416 감사 L-1): 개별 토큰 엣지는 **자기에게 위임된 deviceId** 만 올릴 수 있다 — 남의
   // 스위치 id 로 '정상' 스냅샷을 밀어 실제 장애를 가리는 위조 차단. collectedAt 도 수신 시각으로 clamp
   // (미래 시각으로 '최신 우선' 병합을 항상 이기는 것 방지). 공유 토큰(레거시)은 기존 신뢰 유지.
@@ -1694,14 +1653,10 @@ centralRouter.post('/sanswitch-data', async (req, res) => {
 // ── Arista CloudVision(CVP) 수집 위임(v2.608) — SAN 스위치와 같은 규약 ───────────────
 // GET /api/central/cvp-config?agent=<이름> — 이 엣지 몫 CVP 목록(자격증명 포함: 엣지가 CVP 에 로그인해야 한다) + 수집 설정 +
 // '지금 수집' 요청(claim→ack). 개별 토큰이면 바인딩 agent 불일치를 거부(자격증명 횡탈 차단).
-centralRouter.get('/cvp-config', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/cvp-config', requireCentral(), async (req, res) => {
   const agent = strAgent(req.query.agent) || strAgent(req.get('X-Agent-Name'));
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
-  if (req.centralAuth?.mode === 'agent' && String(req.centralAuth.agent).toLowerCase() !== agent.toLowerCase()) {
-    return res.status(403).json({ ok: false, reason: '토큰의 agent 와 요청 agent 불일치' });
-  }
+  // v2.613 DEPS2613-09: 토큰↔agent 대조는 위 `centralRouter.use` 미들웨어가 requestedAgent 로 이미 했다(여기 있던 재대조는 도달 불가 중복).
   const { serversForAgent, registryLoadError: cvpRegErr } = await import('../cvp/registry.js');
   if (registryUnreadable(res, cvpRegErr, 'CVP')) return;
   const { loadSettings } = await import('../cvp/settings.js');
@@ -1716,9 +1671,7 @@ centralRouter.get('/cvp-config', async (req, res) => {
  * **소유 검사는 토큰 종류와 무관하게** 한다 — 그 이름에 위임된 CVP(serversForAgent)의 id 만 받는다(남의 cvp_id·중앙 직접 등록 CVP 거절).
  * 원소는 central/cvpEdge.js sanitizeCvpBody 가 객체만·아는 필드만 좁힌다. 뺀 개수는 응답의 rejected/dropped 로 밝힌다.
  */
-centralRouter.post('/cvp-data', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/cvp-data', requireCentral(), async (req, res) => {
   const authAgent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
   if (!authAgent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const { serversForAgent } = await import('../cvp/registry.js');
@@ -1792,9 +1745,7 @@ centralRouter.post('/cvp-data', async (req, res) => {
 });
 
 // GET /api/central/users-config?agent=<이름>
-centralRouter.get('/users-config', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/users-config', requireCentral(), (req, res) => {
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   if (registryUnreadable(res, agentUsersLoadError, '엣지 배포 사용자')) return;
@@ -1804,9 +1755,7 @@ centralRouter.get('/users-config', (req, res) => {
 
 // 위임 Ping: 현장 에이전트가 자기 담당 vCenter들의 대기 IP를 인출 → ping → 결과 보고.
 // 중앙이 VM 사설 IP에 직접 못 가는 환경에서, 그 망에 닿는 에이전트가 ping을 대행.
-centralRouter.get('/ping-jobs', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/ping-jobs', requireCentral(), (req, res) => {
   let vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
   // 개별 토큰은 자기가 소유한 vCenter 의 대기 ping 작업만 인출(남의 사이트 대상 IP 목록 가로채기 차단).
   if (req.centralAuth.mode === 'agent') vcs = vcs.filter((vc) => agentOwnsVcenter(req.centralAuth.agent, vc));
@@ -1814,9 +1763,7 @@ centralRouter.get('/ping-jobs', (req, res) => {
 });
 
 // Body: { vcenterId, results:[{ ip, alive, rttMs }] }
-centralRouter.post('/ping-result', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/ping-result', requireCentral({ notFound: { ok: false } }), (req, res) => {
   const b = req.body || {};
   const vcId = strOf(b.vcenterId, 256); // v2.603 CEN2603-05: 글자·수만(객체면 String() 이 던졌다)
   if (!vcId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다(글자).' });
@@ -1835,9 +1782,7 @@ centralRouter.post('/ping-result', (req, res) => {
 
 // 엣지 설정 push: 에이전트가 자기 CONFIG_DIR 설정을 보내 중앙 통합 백업에 합쳐지게 한다.
 // Body: { agent, files:{ name: content } }
-centralRouter.post('/agent-config', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/agent-config', requireCentral(), (req, res) => {
   const b = req.body || {};
   // 저장 키는 개별 토큰이면 토큰 해석 agent 강제(body.agent 로 남의 통합백업 config 위조 차단).
   const agent = req.centralAuth.agent || String(b.agent && strAgent(b.agent) || ''); // v2.600 CEN2600-10: 글자일 때만(객체면 String() 이 던졌다)
@@ -1866,18 +1811,14 @@ export const AGENT_CONFIG_FILE_MAX = 8 * 1024 * 1024;
 function require_basename(p) { return String(p).split(/[\\/]/).pop().slice(0, 200); }
 
 // 엣지 로그 연합 조회: 에이전트가 자기 vCenter들의 대기 조회를 인출 → 로컬 로그 DB 조회 → 결과 보고.
-centralRouter.get('/log-queries', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/log-queries', requireCentral(), (req, res) => {
   let vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
   // 개별 토큰은 자기 소유 vCenter 의 대기 조회만 인출(운영자 검색 필터·계정명 유출 차단).
   if (req.centralAuth.mode === 'agent') vcs = vcs.filter((vc) => agentOwnsVcenter(req.centralAuth.agent, vc));
   res.json({ ok: true, queries: takeLogQueries(vcs) });
 });
 // Body: { reqId, vcenterId, total, rows, dbKind }
-centralRouter.post('/log-query-result', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/log-query-result', requireCentral({ notFound: { ok: false } }), (req, res) => {
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   // 개별 토큰은 자기 소유 vCenter 의 reqId 결과만 보고(위조 로그 주입 차단). reqId 의 진짜 vCenter 는
@@ -1896,15 +1837,11 @@ centralRouter.post('/log-query-result', (req, res) => {
 });
 
 // 위임 tcpdump 캡처: 에이전트가 자기 이름의 대기 캡처 작업을 인출 → 로컬 SSH 캡처 → 결과 보고.
-centralRouter.get('/capture-jobs', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/capture-jobs', requireCentral(), (req, res) => {
   res.json({ ok: true, jobs: takeCaptureJobs(String(req.query.agent || '')) });
 });
 // Body: { reqId, result }
-centralRouter.post('/capture-result', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/capture-result', requireCentral({ notFound: { ok: false } }), (req, res) => {
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   if (reqAgentDenied(req, captureAgentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
@@ -1917,15 +1854,11 @@ centralRouter.post('/capture-result', (req, res) => {
 
 // 베어메탈 스토리지 폴링 위임(v2.341): 엣지가 자기 이름의 df 수집 잡을 인출(claim) →
 // 현지 SSH 수집 → 결과 회신(ack). 캡처/iDRAC 스캔과 동일한 claim→ack + 소유권 검증.
-centralRouter.get('/bmstor-jobs', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/bmstor-jobs', requireCentral(), (req, res) => {
   res.json({ ok: true, jobs: takeBmstorJobs(String(req.query.agent || '')) });
 });
 // Body: { reqId, results: [{ id, ok, mounts, missing?, error? }] } — 비밀번호 없음(용량 수치만).
-centralRouter.post('/bmstor-result', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/bmstor-result', requireCentral({ notFound: { ok: false } }), (req, res) => {
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   if (reqAgentDenied(req, bmstorAgentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
@@ -1940,9 +1873,7 @@ centralRouter.post('/bmstor-result', (req, res) => {
 });
 
 // Agent pulls its IP-scan assignment (TCP connect scan config) by name.
-centralRouter.get('/ip-scan-assignment', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/ip-scan-assignment', requireCentral(), (req, res) => {
   // v2.604(감사 RECENT2604-01): 개별 토큰이면 **결과 라우트와 같은 키**(토큰 이름)로 찾는다 — 배정과 결과가 서로 다른 이름으로
   //   설정을 찾으면 '배정됨' 을 받고 스캔한 뒤 결과가 전량 409 가 된다. 조회 자체도 대소문자 무시(scanStore.loadScanSettings).
   const cfg = loadScanSettings(req.centralAuth?.mode === 'agent' && req.centralAuth.agent ? req.centralAuth.agent : String(req.query.agent || ''));
@@ -1951,9 +1882,7 @@ centralRouter.get('/ip-scan-assignment', (req, res) => {
 });
 
 // Agent posts its IP-scan result. Body: { agent, alive:[{ip,openPorts,services,hostname}] }
-centralRouter.post('/ip-scan-result', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/ip-scan-result', requireCentral({ notFound: { ok: false } }), (req, res) => {
   const b = req.body || {};
   const agent = req.centralAuth.agent || String(b.agent && strAgent(b.agent) || ''); // v2.600 CEN2600-10: 글자일 때만(객체면 String() 이 던졌다)
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
@@ -2002,9 +1931,7 @@ centralRouter.post('/ip-scan-result', (req, res) => {
  *   ⚠ async 핸들러의 throw 는 express 4 가 잡지 않아 **요청이 응답 없이 매달린다** — try/catch 로
  *     400 을 돌려준다(v2.548 S1, 리뷰에서 실제 hang 을 확인했다).
  */
-centralRouter.get('/health-probe', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/health-probe', requireCentral(), (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({
     ok: true,
@@ -2018,9 +1945,7 @@ centralRouter.get('/health-probe', (req, res) => {
   });
 });
 
-centralRouter.post('/link-check', async (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.post('/link-check', requireCentral(), async (req, res) => {
   if (req.centralAuth.mode !== 'agent') {
     return res.status(403).json({
       ok: false,
@@ -2048,9 +1973,7 @@ centralRouter.post('/link-check', async (req, res) => {
  *   관리자가 명시한 짝뿐이고(자동 전량 생성 없음), 그 사실을 문서와 화면이 밝힌다.
  * ⚠ 링크 객체에는 **토큰이 없다**(`links.js` 규약) — 엣지는 자기 `CENTRAL_TOKEN` 을 쓴다.
  */
-centralRouter.get('/link-check-config', (req, res) => {
-  if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
-  if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+centralRouter.get('/link-check-config', requireCentral(), (req, res) => {
   if (req.centralAuth.mode !== 'agent') {
     return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(설정 > 엣지 토큰).' });
   }

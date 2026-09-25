@@ -26,6 +26,7 @@ import { store } from '../store.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { isMockVcenter } from '../mock/generator.js';
 import { collectVcenterGuestDisk } from '../guestdisk/service.js';
+import { readCentralReply, dropSummaryOf, mergeDrop, warnDrop } from '../util/centralReply.js'; // v2.613 CONTRACT2613-03
 
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
@@ -70,7 +71,10 @@ async function pushOne(vc) {
     timeoutMs: reqTimeoutMs(process.env.AGENT_GUESTDISK_PUSH_TIMEOUT_MS, 120_000), retries: 1,
   });
   if (!res.ok) throw new Error(`guest-disk -> ${res.status}`);
-  return { bytes: json.length, gzBytes: body.length, withGuest: r.withGuest };
+  // v2.613(감사 CONTRACT2613-03): 200 이어도 중앙이 숫자가 아닌 행을 적재하지 않고 **센다**(v2.601 RECENT2601-01) — 그 개수가 이제
+  //   응답 `dropped:{vms,parts}` 로 돌아온다. 예전에는 `res.ok` 만 봐 엣지 상태·로그가 '보냈다(N대)' 인데 중앙에는 그만큼 없었다.
+  const drop = dropSummaryOf(await readCentralReply(res));
+  return { bytes: json.length, gzBytes: body.length, withGuest: r.withGuest, drop };
 }
 
 export async function pushGuestDiskNow() {
@@ -83,7 +87,7 @@ export async function pushGuestDiskNow() {
   }
   running = true;
   const started = Date.now();
-  let sent = 0; let skipped = 0; let bytes = 0; let gzBytes = 0; const errors = [];
+  let sent = 0; let skipped = 0; let bytes = 0; let gzBytes = 0; const errors = []; let drop = null;
   try {
     for (const vc of snap.vcenters) {
       // 인벤토리 push 와 같은 필터: 비활성·위임받은 것·목 데이터는 보내지 않는다.
@@ -93,14 +97,15 @@ export async function pushGuestDiskNow() {
         const r = await pushOne(vc);
         if (r.skippedEmpty) { skipped++; continue; }
         sent++; bytes += r.bytes || 0; gzBytes += r.gzBytes || 0;
+        if (r.drop) { drop = mergeDrop(drop, r.drop); warnDrop('gd-push', r.drop); }
       } catch (e) {
         errors.push(`${vc.id}: ${e.message}`);
         console.warn(`[gd-push] ${vc.id} 실패: ${e.message}`);
       }
     }
   } finally { running = false; }
-  last = { at: Date.now(), sent, skipped, errors, bytes, gzBytes, ms: Date.now() - started, gzip: PUSH_GZIP };
-  return { ok: errors.length === 0, sent, skipped, errors, bytes, gzBytes };
+  last = { at: Date.now(), sent, skipped, errors, bytes, gzBytes, ms: Date.now() - started, gzip: PUSH_GZIP, ...(drop ? { drop } : {}) };
+  return { ok: errors.length === 0, sent, skipped, errors, bytes, gzBytes, ...(drop ? { drop } : {}) };
 }
 
 export function guestDiskPushStatus() {

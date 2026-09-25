@@ -16,6 +16,7 @@
  */
 
 import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+import { toneVar } from './toneVar.js';
 
 const n = (v) => (v == null ? null : Number(v));
 const num = (v) => (Number.isFinite(Number(v)) && v != null ? Number(v) : 0);
@@ -325,14 +326,8 @@ export function keyKindNote(keyKind, notes = {}) {
  * **색을 잃는다**(초판이 실제로 그랬고 스크린샷을 읽어야 보였다 — 수치로는 안 잡혔다.
  * v2.526 `healthBadge` 와 같은 유형: 사람은 색을 먼저 읽는다).
  */
-export function toneVar(tone) {
-  switch (String(tone || '')) {
-    case 'red': case 'bad': return 'var(--red)';
-    case 'amber': case 'warn': return 'var(--amber)';
-    case 'green': case 'ok': return 'var(--green)';
-    default: return 'var(--text-faint)';   // gray·muted·모르는 값 — '확인 불가' 는 빨강이 아니다
-  }
-}
+// v2.613 DEPS2613-11: 톤 → 색 변수는 공용 toneVar.js 하나다(이 판정 규칙이 코어로 옮겨 갔다).
+export { toneVar };
 
 /**
  * 열린 장애가 '왜 아직 열려 있나' — 전이가 보류한 사유. 없으면 빈 문자열.
@@ -456,4 +451,17 @@ export function kpiValue(summary, key) {
 /** KPI 강조색 — 0·결측은 경고색을 쓰지 않는다(숫자는 '문제 없음' 인데 색이 '문제 있음' 이라 말하지 않게). */
 export function kpiAccent(value, color) {
   return typeof value === 'number' && value > 0 ? color : undefined;
+}
+
+/**
+ * v2.613 PERSIST2613-06: 상태 줄의 '이력 보존' 조각. `retentionDays === 0` 은 env 로 '전부 보관' 을 고른 것이지 '보존 없음' 이 아니다 —
+ * 예전 `db?.retentionDays ? … : ''` 는 그 경우 조각이 통째로 비어 보였다. 출처(env/settings/default)를 함께 적는다.
+ */
+export function retentionText(db) {
+  if (!db || db.available === false) return '';
+  const d = db.retentionDays;
+  if (d == null || !Number.isFinite(Number(d))) return '';
+  const src = db.retentionSource === 'env' ? '(env)' : db.retentionSource === 'settings' ? '(설정)' : '(기본값)';
+  if (Number(d) === 0) return ` · 이력 전부 보관${src}`;
+  return ` · 이력 보존 ${Number(d)}일${src}`;
 }

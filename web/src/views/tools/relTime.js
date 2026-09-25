@@ -34,7 +34,8 @@ const DAY = 86_400_000;
  *  · `dash`      결측 표기. `'—'`(6벌 기본) / `'없음'`(linkCheck) / **`null`**(sanPerfDiag·
  *                storageAuth — 호출부가 **null 로 분기해** 문구에서 통째로 뺀다. 문자열로
  *                바꾸면 그 분기가 죽어 `수집 기록 없음` 같은 안내가 사라진다 — 실제로 깨졌다).
- *  · `subMinute` 1분 미만 표기. `'seconds'`(기본, `30초 전`) / `'방금'`.
+ *  · `subMinute` 1분 미만 표기. `'seconds'`(기본, `30초 전`) / `'방금'` / **숫자(ms)** — 그 아래는
+ *                `방금`, 그 위는 초(v2.613 DEPS2613-11: `remoteCommand.ago` 의 '5초 미만 = 방금' 계약).
  *  · `future`    미래(음수) 표기. 기본은 `방금`, `'null'` 이면 null(말하지 않는다),
  *                문자열이면 그대로(curUser 의 `미래(시계 오차)`).
  */
@@ -46,7 +47,10 @@ export function elapsedText(ms, { dash = '—', subMinute = 'seconds', future } 
     if (typeof future === 'string') return future;
     return '방금';
   }
-  if (v < MIN) return subMinute === '방금' ? '방금' : (v < 1000 ? '방금' : `${Math.round(v / 1000)}초 전`);
+  if (v < MIN) {
+    const justNowBelow = subMinute === '방금' ? MIN : (typeof subMinute === 'number' && subMinute > 0 ? subMinute : 1000);
+    return v < justNowBelow ? '방금' : `${Math.round(v / 1000)}초 전`;
+  }
   if (v < HOUR) return `${Math.round(v / MIN)}분 전`;
   if (v < DAY) return `${Math.round(v / HOUR)}시간 전`;
   return `${Math.round(v / DAY)}일 전`;

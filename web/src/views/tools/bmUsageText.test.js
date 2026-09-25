@@ -32,7 +32,7 @@ describe('값 표기', () => {
   });
   it('결측은 회색이다 — 빨강이 아니다', () => {
     expect(usageTone(null)).toBe('idle');
-    expect(toneVar('idle')).toContain('--muted');
+    expect(toneVar('idle')).toContain('--text-faint'); // v2.613 DEPS2613-11: 공용 toneVar(테마 토큰) — 모르는 톤은 회색
     expect(usageTone(50)).toBe('ok');
     expect(usageTone(80)).toBe('warn');
     expect(usageTone(95)).toBe('bad');

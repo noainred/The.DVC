@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { stripComments } from './_stripComments.js';
 
 // ⚠ static import 전에 CONFIG_DIR 을 잡는다 — 저장소의 server/config 를 오염시키지 않기 위해.
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bmusage2554-'));
@@ -175,8 +176,7 @@ test('⚠ 읽지 못하면 unparsed 이고 값을 지어내지 않는다', async
 });
 
 test('⚠⚠ 전력·온도를 수집하지 않는다(사용자 지시) — 그 호출이 소스에 없어야 한다', () => {
-  const src = fs.readFileSync(new URL('../src/bmusage/collectors/idracEnterprise.js', import.meta.url), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');   // 주석 제거(규칙 설명이 통과 근거가 되면 안 된다)
+  const src = stripComments(fs.readFileSync(new URL('../src/bmusage/collectors/idracEnterprise.js', import.meta.url), 'utf8'));   // 주석 제거(규칙 설명이 통과 근거가 되면 안 된다)
   assert.ok(!/fetchPower|fetchSensors/.test(src), '전력·온도 수집기를 부르면 안 된다');
 });
 
@@ -275,8 +275,7 @@ test('상한으로 자른 개수를 밝힌다(조용한 상한 금지)', () => {
 /* ══════════════ v2.554 — v2.552 무음 미보고 결함(사용자 실화면으로 확정) ═════ */
 
 test('⚠⚠ 엣지 워커는 0건·꺼짐이어도 중앙에 보고한다(조기 return 으로 되돌리지 말 것)', () => {
-  const src = fs.readFileSync(new URL('../src/agent/linkCheckWorker.js', import.meta.url), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');   // 주석 제거(v2.535 규약)
+  const src = stripComments(fs.readFileSync(new URL('../src/agent/linkCheckWorker.js', import.meta.url), 'utf8'));   // 주석 제거(v2.535 규약)
   // '잴 링크가 0개' 분기와 '중앙이 껐다' 분기 **둘 다** push 를 부른다.
   const zero = /if \(!links\.length\) \{[\s\S]{0,400}?pushReport\(/.test(src);
   const off = /if \(cfg\?\.enabled !== true\) \{[\s\S]{0,400}?pushReport\(/.test(src);

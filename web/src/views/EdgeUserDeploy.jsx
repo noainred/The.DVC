@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../api.js';
+import { fmtAgo } from '../util/fmt.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 
@@ -7,13 +8,7 @@ const ROLES = ['viewer', 'operator', 'admin'];
 const ROLE_LABEL = { viewer: '조회', operator: '운영', admin: '관리자' };
 const ALL = '*'; // 글로벌(모든 엣지) 대상 키
 
-const fmtAgo = (ts) => {
-  if (!ts) return '';
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.round(s / 60)}분 전`;
-  return `${Math.round(s / 3600)}시간 전`;
-};
+// v2.613 DEPS2613-11: 상대시각은 util/fmt.fmtAgo(relTime 코어) 하나다(이 화면은 a.at 이 있을 때만 부른다).
 
 /**
  * 중앙 → 엣지 사용자 배포 관리. 복수 엣지 선택 또는 '모든 엣지(전체)' 배포를 지원한다.

@@ -88,7 +88,8 @@ const backup = await import('../src/backup/service.js');
 
 test('★ P1: 백업 변경 감시는 상태·캐시 파일을 설정으로 보지 않는다(설정 파일은 그대로 본다)', () => {
   for (const n of ['central-inventory.json', 'central-agent-config.json', 'storage-activity.json', 'sanswitch-latest.json',
-    'horizon-auth-stops.json', 'ipam-scan-history.json', 'backup.json', 'agent-results.json']) {
+    'horizon-auth-stops.json', 'ipam-scan-history.json', 'backup.json', 'agent-results.json',
+    'central-agent-cvp.json', 'cvp-push.json']) { // v2.613 PERSIST2613-01: CVP 두 파일이 빠져 있었다
     assert.equal(backup.isRuntimeStateFile(n), true, `${n} 은 상태 파일이다`);
   }
   for (const n of ['vcenters.json', 'vcenter-logs.json', 'dirusage.json', 'users.json', 'portal.env', 'svcmon.json', 'permissions.json']) {

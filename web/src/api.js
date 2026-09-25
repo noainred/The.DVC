@@ -28,6 +28,19 @@ export const setUnauthorizedHandler = (fn) => { onUnauthorized = fn; };
 let _currentUser = null;
 export const setCurrentUser = (u) => { _currentUser = (u && typeof u === 'object') ? u : null; };
 export const getCurrentUser = () => _currentUser;
+/**
+ * 현재 사용자의 역할이 주어진 것 중 하나인가(v2.613 WEB2613-01).
+ *
+ * ⚠ 화면이 `/auth/me` 를 다시 부르지 않는다 — App 이 모든 뷰 렌더 **전에** `setCurrentUser` 로
+ *   채운 같은 객체를 읽는다(로그인·`/auth/me` 응답이 `role` 을 담는다). 예전에는 화면 10곳이
+ *   마운트마다 `/auth/me` 왕복을 하고 `.catch(() => {})` 로 실패를 삼켜 **조용히 '비관리자'**
+ *   가 됐다(v2.590 W2 계열). 이것은 **표시 게이팅**이다 — 집행은 서버가 한다.
+ * @returns {boolean} 사용자를 모르면(부팅 전) false — 버튼을 지어내지 않는다.
+ */
+export const hasRole = (...roles) => {
+  const u = _currentUser;
+  return !!u && roles.includes(u.role);
+};
 // 기능 권한 보유 여부(프론트 게이팅). admin·권한배열 없음(구버전/인증 비활성)은 통과.
 export const can = (key) => {
   const u = _currentUser;

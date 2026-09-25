@@ -40,6 +40,7 @@ import { listTargetsRaw } from '../../agent/deployRegistry.js';
 import { listAgentConfigs } from '../../central/agentConfig.js';
 import { knownAgentNames } from '../../central/knownAgents.js';   // v2.312 — 중앙이 아는 엣지 이름 합집합(코어는 하나다)
 import { getCentralAuthStats } from '../central.js';     // 공유 토큰 사용 통계 · CENTRAL_REQUIRE_AGENT_TOKEN
+import { poolSettled } from '../../util/pool.js';         // v2.613 RUNTIME2613-03: 풀 스캐폴드는 util/pool.js 하나다
 import { scanTokens, mergeProbe, mergeEdgeReport, withRowStates, kpisOf, TOKEN_MODE, PROBE_STATE, EDGE_TOKEN_FACT, DUP_KIND, ROW_STATE } from '../../portalcheck/tokenScan.js';
 import { findingsOf, findingCounts, groupFindings, FINDING, FINDING_GRADE } from '../../portalcheck/tokenFindings.js';
 import {
@@ -260,24 +261,28 @@ api.post('/tools/portal-check/tokens/edge-pull', adminOnly, fullScopeOnly, async
   running = 'edge-pull';
   const t0 = Date.now();
   try {
-    const results = [];
-    // 순차가 아니라 동시성 제한 — 28곳 × 고RTT 를 감당하되 엣지 하나에 몰리지 않게.
-    let i = 0;
-    const workers = Array.from({ length: Math.max(1, Math.min(PROBE_CONCURRENCY, rows.length)) }, async () => {
-      for (;;) {
-        const k = i++;
-        if (k >= rows.length) return;
-        const r = rows[k];
-        try { results.push({ agent: r.agent, ...(await pullTokenCheck(r.agent, { selfProbe })) }); }
-        catch (e) { results.push({ agent: r.agent, ok: false, kind: 'error', reason: String(e?.message || e).slice(0, 300) }); }
+    /*
+     * v2.613 RUNTIME2613-03(a): 손으로 쓴 풀(Array.from({length}) + for(;;)) → `poolSettled`(v2.579 규약) + **총 예산**.
+     *   형제 `tokenProbe.probeAll` 은 예산(PROBE_BUDGET_MS)과 초과 개수를 갖는데 이 인출만 없어 28곳 × 고RTT 에서
+     *   요청이 끝없이 길어질 수 있었다. 남은 예산이 요청 시한보다 적으면 **시작하지 않고** 개수로 밝힌다(조용한 상한 금지).
+     */
+    const deadline = t0 + PROBE_BUDGET_MS;
+    let budgetExceeded = 0;
+    const settled = await poolSettled(rows, PROBE_CONCURRENCY, async (r) => {
+      if (Date.now() + PROBE_TIMEOUT_MS > deadline) {
+        budgetExceeded += 1;
+        return { agent: r.agent, ok: false, kind: 'budget', reason: '점검 시간 예산을 넘겨 이번에는 시도하지 않았습니다 — 다시 누르면 이어서 인출합니다.' };
       }
+      try { return { agent: r.agent, ...(await pullTokenCheck(r.agent, { selfProbe })) }; }
+      catch (e) { return { agent: r.agent, ok: false, kind: 'error', reason: String(e?.message || e).slice(0, 300) }; }
     });
-    await Promise.all(workers);
+    const results = settled.map((x, k) => (x.status === 'fulfilled' ? x.value : { agent: rows[k].agent, ok: false, kind: 'error', reason: String(x.reason?.message || x.reason).slice(0, 300) }));
     logAudit({ user: req.user?.username || '', action: '토큰 점검 — 엣지 자기보고 인출', target: only || `전체 ${rows.length}곳`, ip: req.ip || '' });
     const scanned = fullScan();
     res.json({
       ok: true, pulled: rows.length, ms: Date.now() - t0,
       failed: results.filter((x) => !x.ok).length,
+      budgetExceeded, // v2.613: 예산에 걸려 시도하지 못한 엣지 수(다시 누르면 이어진다)
       results: results.map((x) => ({ agent: x.agent, ok: !!x.ok, kind: x.kind || '', reason: x.reason || '', ms: x.ms || 0 })),
       ...scanned,
     });

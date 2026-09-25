@@ -8,7 +8,7 @@
  * 판정·저장은 서버(guestdisk/*)가 하고 여기서는 표시만 한다.
  */
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { fetchJson, putJson, postJson, downloadFile } from '../../api.js';
+import { fetchJson, putJson, postJson, downloadFile, hasRole } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import GuestDiskDetailModal from './GuestDiskDetailModal.jsx';
@@ -59,7 +59,7 @@ export default function GuestDiskReport({ scope = '' }) {
   const scopeRef = useRef(scope); scopeRef.current = scope;   // 상단 vCenter 선택('' = 전체)
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const isAdmin = hasRole('admin'); // v2.613 WEB2613-01: 역할은 App 이 채운 현재 사용자 객체에서 읽는다(화면이 /auth/me 를 다시 부르지 않는다).
   const [busy, setBusy] = useState('');
   const [minReclaimStr, setMinReclaimStr] = useState('0');  // 기본 0=전체 표시(문자열 상태 — 0 이 안 지워지던 버그 수정)
   const [maxRatioStr, setMaxRatioStr] = useState('');       // 사용률(%) 이하 필터(빈 값 = 미적용)
@@ -92,7 +92,6 @@ export default function GuestDiskReport({ scope = '' }) {
     } catch (e) { if (gen === reqGen.current) setError(e.message); }
   }, [minReclaimStr, maxRatioStr, factorStr]);
 
-  useEffect(() => { fetchJson('/auth/me').then((m) => setIsAdmin(m?.user?.role === 'admin')).catch(() => {}); }, []);
   // 최초 로드 + 상단 vCenter 선택이 바뀔 때 재조회(현재 필터값 유지).
   useEffect(() => {
     reload();

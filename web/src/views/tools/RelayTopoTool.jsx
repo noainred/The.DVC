@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, downloadFile } from '../../api.js';
+import { agoText } from './relTime.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { buildGraph, frame3d, COLORS } from './relayTopoLayout.js';
@@ -18,7 +19,7 @@ const EMPTY_NODE = { privateIp: '', publicIp: '', vcenterIp: '', ssh: { ...EMPTY
 const EMPTY_SITE = { dc: '', edge: { ...EMPTY_NODE }, irs: { ...EMPTY_NODE, ssh: { ...EMPTY_SSH } }, sshTargetId: '', note: '' };
 const STATUS = { ok: ['정상', 'green'], missing: ['블록 없음', 'red'], 'wrong-backend': ['백엔드 불일치', 'red'], 'self-loop': ['자기 자신(self-loop)', 'red'], 'no-listener': ['리스너 없음', 'amber'], 'unknown-backend': ['server 없음', 'red'], timeout: ['timeout 짧음', 'amber'] };
 const LEVEL = { error: ['오류', 'red'], warn: ['경고', 'amber'], info: ['참고', 'blue'] };
-const ago = (ts) => { if (!ts) return '—'; const s = Math.round((Date.now() - ts) / 1000); return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : `${Math.round(s / 3600)}시간 전`; };
+// v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다(로컬 ago 사본 제거).
 const sshSummary = (ssh) => { if (!ssh) return '—'; const has = ssh.hasPassword || ssh.password ? '비밀번호' : ssh.hasPrivateKey || ssh.privateKey ? '키' : ''; return ssh.username ? `${ssh.username}@:${ssh.port || 22}${has ? ` (${has})` : ' (비밀 없음)'}` : '—'; };
 
 export default function RelayTopoTool() {
@@ -293,7 +294,7 @@ export default function RelayTopoTool() {
                 <span className="muted" style={{ fontSize: 12 }}>Edge {s.edge?.publicIp || s.edge?.privateIp || '—'} · IRS {s.irs?.privateIp || s.irs?.publicIp || (s.irs?.present ? '있음(주소 가림)' : '없음')}</span>
                 {r?.ok && <span className={`badge ${r.summary.edgeFailed ? 'red' : r.summary.bad ? 'amber' : 'green'}`}>{r.summary.edgeFailed ? 'Edge 접속 실패' : r.summary.bad ? `문제 ${r.summary.bad}건` : '모두 정상'}</span>}
                 {r && !r.ok && <span className="badge red">{r.reason}</span>}
-                {r && <span className="muted" style={{ fontSize: 11 }}>{ago(r.at)}</span>}
+                {r && <span className="muted" style={{ fontSize: 11 }}>{agoText(r.at)}</span>}
                 <span style={{ flex: 1 }} />
                 <button className="tab" onClick={() => fetchOne(s.dc)} disabled={busy}>가져오기</button>
                 <button className="tab" onClick={() => renderOne(s.dc)} disabled={busy}>HAProxy 미리보기</button>

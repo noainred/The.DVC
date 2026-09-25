@@ -27,7 +27,7 @@ import { resolveTargets } from './targets.js';
 import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
 import { buildUsage } from './usage.js';
-import { collectOsUsage } from './collectors/osSsh.js';
+import { collectOsUsage, SESSION_BUDGET_MS as OS_BUDGET_MS } from './collectors/osSsh.js';
 import { insertUsage, pruneUsage } from './db.js';
 import { recordBmUsage } from './activityLog.js';
 import { runBmUsageAlerts, alertStateInfo } from './notify.js';
@@ -36,6 +36,24 @@ import { idracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // 
 
 const CONCURRENCY = Math.max(1, Number(process.env.BMUSAGE_CONCURRENCY) || 4);
 const DEVICE_TIMEOUT_MS = Math.max(20_000, Number(process.env.BMUSAGE_DEVICE_TIMEOUT_MS) || 60_000);
+/**
+ * v2.613 RUNTIME2613-05: '세션 예산 < 장비 시한' 은 v2.550.3·v2.554 가 **기본값 산수**로만 지킨 관계였다 — 세 env
+ * (`BMUSAGE_DEVICE_TIMEOUT_MS`·`BMUSAGE_SESSION_BUDGET_MS`·`BMUSAGE_ENT_BUDGET_MS`)가 독립이라 장비 시한 하나를 30초로
+ * 낮추면 OS 예산 50초 안의 두 번째 시도를 `withDeadline` 이 먼저 끊어 결과가 통째로 버려졌다(v2.550.3 이 고친 결함의 env
+ * 재발 경로). 기동 시 예산을 **장비 시한 − 여유** 로 자르고(순수 함수 `coupleBudget`), 잘랐으면 콘솔에 1줄 남기며
+ * `bmUsageStatus()` 가 세 값을 밝힌다. 예산의 하한은 각 수집기가 시도를 시작할 수 있는 최소(OS `MIN_SLICE_MS`·ENT 핸드셰이크)다.
+ */
+export const BUDGET_MARGIN_MS = 5_000;
+export function coupleBudget(wantedMs, deviceMs, floorMs) {
+  const cap = Math.max(floorMs, deviceMs - BUDGET_MARGIN_MS);
+  const effective = Math.min(wantedMs, cap);
+  return { effective, clamped: effective < wantedMs, cap };
+}
+const OS_BUDGET = coupleBudget(OS_BUDGET_MS, DEVICE_TIMEOUT_MS, 10_000);
+const ENT_BUDGET = coupleBudget(ENT_BUDGET_MS, DEVICE_TIMEOUT_MS, 15_000);
+for (const [name, b, wanted] of [['OS(BMUSAGE_SESSION_BUDGET_MS)', OS_BUDGET, OS_BUDGET_MS], ['iDRAC 대체(BMUSAGE_ENT_BUDGET_MS)', ENT_BUDGET, ENT_BUDGET_MS]]) {
+  if (b.clamped) console.warn(`[bmusage] ${name} 세션 예산 ${Math.round(wanted / 1000)}초가 장비 시한(BMUSAGE_DEVICE_TIMEOUT_MS ${Math.round(DEVICE_TIMEOUT_MS / 1000)}초) − ${BUDGET_MARGIN_MS / 1000}초 를 넘어 ${Math.round(b.effective / 1000)}초로 줄였습니다 — 예산이 시한보다 크면 두 번째 시도 결과가 버려집니다(v2.613 RUNTIME2613-05)`);
+}
 const PRUNE_EVERY = 12;
 /**
  * ⚠⚠ **주기당 '리포트 목록 조회' 예산**(v2.551). 텔레메트리 전수 모드는 장비마다 목록을 한 번
@@ -74,6 +92,8 @@ export function bmUsageStatus() {
   return {
     enabled: bmUsageEnabled(), running: _running, intervalMs: s.intervalMs,
     concurrency: CONCURRENCY, deviceTimeoutMs: DEVICE_TIMEOUT_MS,
+    // v2.613 RUNTIME2613-05: 실제로 쓰는 예산(장비 시한과 묶인 값)과 잘랐는지.
+    osBudgetMs: OS_BUDGET.effective, osBudgetClamped: OS_BUDGET.clamped, entBudgetEffectiveMs: ENT_BUDGET.effective, entBudgetClamped: ENT_BUDGET.clamped, budgetMarginMs: BUDGET_MARGIN_MS,
     rawRetentionDays: s.rawRetentionDays, dailyRetentionDays: s.dailyRetentionDays,
     idracFullTelemetry: !!s.idracFullTelemetry, listBudgetPerRun: LIST_BUDGET_PER_RUN,
     // v2.554 — Enterprise 대체 수집(동의 기반). 화면이 부하·예산을 말할 수 있게 그대로 낸다.
@@ -262,7 +282,7 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
     : entStopped ? Promise.resolve({ ok: false, kind: 'auth-stopped', error: `iDRAC 인증 실패로 주기 수집이 정지됐습니다(${entStopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: entStopped })
       : import('../idrac/redfish.js').then((m) => m.fetchUsage(target.idrac, { full, allowList })).catch((e) => ({ ok: false, kind: 'unreachable', error: String(e?.message || e).slice(0, 300) })));
   jobs.push((target.paths.includes('os') && !stopped)
-    ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal }), 'OS 수집 시한 초과')
+    ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective }), 'OS 수집 시한 초과')
       .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) }))
     : Promise.resolve(stopped ? { ok: false, error: `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: stopped } : null));
   const [idrac, os] = await Promise.all(jobs);
@@ -328,7 +348,7 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
       const allowProbe = _entProbeBudget > 0;
       if (allowProbe) _entProbeBudget -= 1;
       ent = await withDeadline(DEVICE_TIMEOUT_MS,
-        (signal) => collectEnterpriseUsage(target.idrac, { mode: loadBmUsageSettings().enterpriseMode, allowProbe, signal }),
+        (signal) => collectEnterpriseUsage(target.idrac, { mode: loadBmUsageSettings().enterpriseMode, allowProbe, signal, budgetMs: ENT_BUDGET.effective }),
         'iDRAC 대체 수집 시한 초과')
         .catch((e) => ({ ok: false, kind: 'timeout', error: String(e?.message || e).slice(0, 300) }));
       // 자격증명 거부면 주기 수집을 멈춘다(위 주석 — iDRAC 계정 잠금 방지).

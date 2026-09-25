@@ -1,3 +1,4 @@
+import { elapsedText } from './relTime.js';
 /**
  * collectDropText.js — 위임 '지금 수집' 요청이 결과 없이 폐기됐을 때의 안내(v2.591, 순수).
  *
@@ -9,14 +10,8 @@
 
 export const DROP_WINDOW_MS = 6 * 3600_000; // 이보다 오래된 폐기는 다시 말하지 않는다(재시작 전까지 링에 남는다)
 
-const ago = (ms) => {
-  if (!(ms >= 0)) return '';
-  const m = Math.round(ms / 60_000);
-  if (m < 1) return '방금';
-  if (m < 60) return `${m}분 전`;
-  const h = Math.floor(m / 60);
-  return `${h}시간 ${m % 60}분 전`;
-};
+// v2.613 DEPS2613-11: 경과 시간 문구는 공용 코어 relTime.elapsedText 다(로컬 ago 사본 제거 — 결측·미래는 '' 로 비운다).
+const ago = (ms) => elapsedText(ms, { dash: '', subMinute: '방금', future: '' });
 
 /**
  * @param drops  서버 collectDrops — [{ id, agent, at, tries, reason? }] (최신이 앞)

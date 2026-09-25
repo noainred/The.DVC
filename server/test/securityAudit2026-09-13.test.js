@@ -8,6 +8,7 @@
  * 기존 테스트(securityH1RegisterCollector)가 정확 경로만 검사해 통과시켰던 결함이다.
  */
 import { test, before, after } from 'node:test';
+import http from 'node:http';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,8 +17,11 @@ import path from 'node:path';
 const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-audit0913-'));
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = 'shared-token-for-0913-test-1234567890';
+// v2.613 TESTDOC2613-07: 자기등록 검증 ping(`verifyDerivedCollectorUrl`)이 응답 없는 사설 주소(10.20.30.40)로 나가 8초 시한을
+//   기다렸다(20초 테스트). 루프백에 **목 엣지**를 띄워 ping 에 자기 이름으로 답한다 — 검증 성공 경로까지 실제로 지난다.
+process.env.SSRF_ALLOW_LOOPBACK = 'true';
 
-let server; let base; let tokA;
+let server; let base; let tokA; let mockEdge; let edgeUrl;
 
 before(async () => {
   const tokens = await import('../src/central/agentTokens.js');
@@ -30,8 +34,15 @@ before(async () => {
   await new Promise((r) => server.once('listening', r));
   base = `http://127.0.0.1:${server.address().port}/api/central`;
   tokA = tokens.issueAgentToken('edgeA').token;
+  mockEdge = http.createServer((req, res) => {
+    if (req.url.startsWith('/api/collector/ping')) { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true, agent: 'edgeA', hostname: 'edge-a', datacenter: '', version: '2.613.0' })); return; }
+    res.statusCode = 404; res.end('{}');
+  });
+  mockEdge.listen(0, '127.0.0.1');
+  await new Promise((r) => mockEdge.once('listening', r));
+  edgeUrl = `http://127.0.0.1:${mockEdge.address().port}`;
 });
-after(() => { try { server?.close(); } catch { /* */ } });
+after(() => { try { server?.close(); } catch { /* */ } try { mockEdge?.close(); } catch { /* */ } });
 
 const post = (p, token, body) => fetch(`${base}${p}`, {
   method: 'POST',
@@ -56,7 +67,7 @@ test('C-1: 경로 변형(후행 슬래시·대소문자·/.)으로 agent 바인�
 });
 
 test('C-1: 정확 경로의 자기등록은 여전히 바인딩으로 막히지 않는다(무회귀)', async () => {
-  const res = await post('/register-collector', tokA, { name: 'edgeA', urlHint: 'http://10.20.30.40:4000', collectorToken: 'own' });
+  const res = await post('/register-collector', tokA, { name: 'edgeA', urlHint: edgeUrl, collectorToken: 'own' });
   assert.notEqual(res.status, 403, '정상 자기등록이 막히면 기능이 죽는다');
 });
 

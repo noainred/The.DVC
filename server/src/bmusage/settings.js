@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 
 const FILE = () => path.join(config.configDir, 'bmusage-settings.json');
 
@@ -73,11 +74,6 @@ export const DEFAULTS = Object.freeze({
 /** 하한·상한은 서버가 강제한다(화면 입력을 믿지 않는다). */
 const MIN_INTERVAL_MS = 60_000;
 const MAX_INTERVAL_MS = 6 * 3_600_000;
-const clampInt = (v, lo, hi, dflt) => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return dflt;
-  return Math.min(hi, Math.max(lo, Math.round(n)));
-};
 
 let _cache = null;
 let _cacheAt = 0;
@@ -102,7 +98,7 @@ export function normalizeSettings(raw = {}) {
     enabled: !!raw.enabled,
     corps,
     includeUnassigned: !!raw.includeUnassigned,
-    intervalMs: clampInt(raw.intervalMs, MIN_INTERVAL_MS, MAX_INTERVAL_MS, DEFAULTS.intervalMs),
+    intervalMs: clampSetting(raw.intervalMs, { min: MIN_INTERVAL_MS, max: MAX_INTERVAL_MS, def: DEFAULTS.intervalMs }),
     // 원시 보존은 행 수를 직접 정한다 — 하한 7일(그 아래면 증가 추세를 못 본다), 상한 365일.
     idracFullTelemetry: raw.idracFullTelemetry !== false,
     /*
@@ -116,11 +112,11 @@ export function normalizeSettings(raw = {}) {
     enterpriseAckBy: String(raw.enterpriseAckBy || '').trim().slice(0, 64),
     enterpriseMode: ['auto', 'api', 'ssh'].includes(String(raw.enterpriseMode || '').trim()) ? String(raw.enterpriseMode).trim() : DEFAULTS.enterpriseMode,
     alertEnabled: raw.alertEnabled === true,
-    alertPct: clampInt(raw.alertPct, 50, 100, DEFAULTS.alertPct),
-    alertSustainMin: clampInt(raw.alertSustainMin, 0, 240, DEFAULTS.alertSustainMin),
-    alertRepeatHours: clampInt(raw.alertRepeatHours, 1, 168, DEFAULTS.alertRepeatHours),
-    rawRetentionDays: clampInt(raw.rawRetentionDays, 7, 365, DEFAULTS.rawRetentionDays),
-    dailyRetentionDays: clampInt(raw.dailyRetentionDays, 30, 365 * 10, DEFAULTS.dailyRetentionDays),
+    alertPct: clampSetting(raw.alertPct, { min: 50, max: 100, def: DEFAULTS.alertPct }),
+    alertSustainMin: clampSetting(raw.alertSustainMin, { min: 0, max: 240, def: DEFAULTS.alertSustainMin }),
+    alertRepeatHours: clampSetting(raw.alertRepeatHours, { min: 1, max: 168, def: DEFAULTS.alertRepeatHours }),
+    rawRetentionDays: clampSetting(raw.rawRetentionDays, { min: 7, max: 365, def: DEFAULTS.rawRetentionDays }),
+    dailyRetentionDays: clampSetting(raw.dailyRetentionDays, { min: 30, max: 365 * 10, def: DEFAULTS.dailyRetentionDays }),
     osSsh: raw.osSsh === undefined ? DEFAULTS.osSsh : !!raw.osSsh,
     idracTelemetry: raw.idracTelemetry === undefined ? DEFAULTS.idracTelemetry : !!raw.idracTelemetry,
   };

@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from './atomicWrite.js';
+import { registerStateFile } from './stateFiles.js'; // v2.613 PERSIST2613-08
 import { credFingerprintParts } from './credFingerprint.js';
 import { poolRun } from './pool.js';
 
@@ -69,6 +70,7 @@ export function credHashOf(dev) {
  */
 export function createAuthGuard({ file }) {
   if (!file) throw new Error('authGuard: file 이 필요합니다.');
+  registerStateFile(file); // v2.613 PERSIST2613-08: 인증 정지 기록 — 폴러가 스스로 쓰는 상태 파일(이름 규약 -stops 와 이중)
   const FILE = () => path.join(config.configDir, file);
 
   /* 캐시 성격 — 손상되면 `preserveCorrupt` 하지 않고 새로 시작한다(재생성 가능한 상태이고,

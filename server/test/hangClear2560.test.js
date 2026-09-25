@@ -20,6 +20,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as HL from '../src/perf/hangLog.js';
+import { stripComments } from './_stripComments.js';
 
 const settle = async () => { await HL.flushHangLog({ timeoutMs: 3_000 }); };
 
@@ -78,8 +79,7 @@ test('_resetHangLogCounters 는 단일비행 잠금을 깨지 않는다(③)', a
 
 test('세 부분이 소스에 모두 있다 — 하나만 고치면 다른 쪽이 깨진다', async () => {
   // 주석은 통과 근거가 될 수 없다(v2.535 규약) — 제거한 뒤 검사한다.
-  const src = fs.readFileSync(new URL('../src/perf/hangLog.js', import.meta.url), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const src = stripComments(fs.readFileSync(new URL('../src/perf/hangLog.js', import.meta.url), 'utf8'));   // v2.613 TESTDOC2613-08
   // ① 쓰기 중이면 미룬다
   assert.match(src, /if \(writing\) clearPending = true;/, '① clearHangs 가 삭제를 미루지 않는다');
   // ② 자기 세대가 아닌 콜백만 미룬 삭제를 수행한다

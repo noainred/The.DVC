@@ -14,7 +14,7 @@
  * ⚠ 훅은 전부 조기 return 위에.
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchJson, sendJson } from '../../api.js';
+import { fetchJson, sendJson, hasRole } from '../../api.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -58,14 +58,13 @@ export function CurrentUsersSettings({ onSaved }) {
   const [msg, setMsg] = useState('');
   // 저장은 서버가 admin 으로 집행한다 — 화면은 버튼을 미리 막아 '눌러 보고 403' 을 만들지 않는다
   // (프론트 게이팅은 UX 일 뿐이고 진실의 원천은 서버다 — server/CLAUDE.md).
-  const [isAdmin, setIsAdmin] = useState(false);
+  const isAdmin = hasRole('admin'); // v2.613 WEB2613-01: 역할은 App 이 채운 현재 사용자 객체에서 읽는다(화면이 /auth/me 를 다시 부르지 않는다).
 
   useEffect(() => {
     let live = true;
     fetchJson('/tools/curuser/settings')
       .then((d) => { if (live) { setSrc(d); setS(d.settings); } })
       .catch((e) => live && setErr(e?.message || String(e)));
-    fetchJson('/auth/me').then((m) => live && setIsAdmin(m?.user?.role === 'admin')).catch(() => {});
     return () => { live = false; };
   }, []);
 

@@ -1,7 +1,7 @@
 /**
  * version_4/tree.js — V4 좌측 내비 정보구조(v2.508, 순수). 시안 ⑧(InfoArch.dc.html)의 11그룹.
  *
- * 담는 것: V4 화면 9개 + 개발 포탈 탭 14개 + 특수 기능 도구 79개 = **미분류 0**.
+ * 담는 것: V4 화면 9개 + 개발 포탈 탭 14개 + 특수 기능 도구 전부(specialToolsList.js — 개수는 적지 않는다, v2.613) = **미분류 0**.
  *   · 도구는 **주소속 1곳**에 정확히 1회 배치한다(`alias: true` 는 편의상 한 번 더 보여주는 것이라
  *     커버리지 계산에서 제외한다). 이 규칙을 깨면 '어디에 있더라' 가 다시 시작된다.
  *   · **상태를 바꾸는 도구**(rma · vm-clone · vmprovision · shutdown · diskadd · backup · massdeploy ·
@@ -144,7 +144,7 @@ export function groupLabelsOfTool(k) {
 }
 
 /**
- * 역할·권한으로 트리를 거른다. 도구의 잠금 판정은 화면이 소유하므로(lockReasonOf) 여기서는
+ * 역할·권한으로 트리를 거른다. 도구의 잠금 판정은 views/toolVisibility.js lockReasonOf 가 소유하므로(v2.613) 여기서는
  * **보일지 말지**만 정한다 — 잠긴 도구는 숨기지 않고 회색으로 보여주는 것이 기존 정책이다
  * (SpecialTools: "숨김보다 회색 잠금"). 항목이 하나도 없는 그룹만 접는다.
  */

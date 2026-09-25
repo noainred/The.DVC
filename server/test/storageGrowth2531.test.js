@@ -219,6 +219,7 @@ test('★ 스토리지 수집 기본 주기는 1시간이다(사용자 지시)',
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from './_stripComments.js';
 
 const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'web', 'src');
 const readWeb = (p) => fs.readFileSync(path.join(WEB, p), 'utf8');
@@ -228,7 +229,7 @@ const readWeb = (p) => fs.readFileSync(path.join(WEB, p), 'utf8');
  * 보고 방금 고친 코드를 '아직 결함' 이라 보고했다(테스트가 틀린 것을 본 것이다).
  * `//` 는 줄 앞 공백 뒤에 있을 때만 주석으로 본다 — `https://` 를 자르지 않기 위해서다.
  */
-const codeOf = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const codeOf = stripComments;   // v2.613 TESTDOC2613-08: 2줄 판본 → 코어(문자열·정규식 안의 // 도 안전)
 
 test('★ 핵심 수치 타일은 `card kpi` 다 — `kpi` 단독은 박스가 통째로 안 걸린다', () => {
   const src = codeOf(readWeb('views/tools/StorageGrowthTool.jsx'));

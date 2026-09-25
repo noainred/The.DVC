@@ -23,6 +23,7 @@ import { csvCell } from '../../util/csv.js';
 
 import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
 import { numOrNull } from '../../numOrNull.js';
+import { toneVar } from './toneVar.js';
 const t = (v) => String(v ?? '').trim();
 /** ⚠ `v == null` 을 **먼저** 본다 — `Number(null)===0`·`Number('')===0` 이라 결측이 0 으로 둔갑한다. */
 const n = numOrNull;   // v2.576: 사본 금지 — 코어는 하나다(사본은 Number([])===0 을 막지 못했다)
@@ -59,12 +60,8 @@ export function usageTone(v) {
   if (x >= 75) return 'warn';
   return 'ok';
 }
-export function toneVar(tone) {
-  if (tone === 'ok') return 'var(--ok, #4ade80)';
-  if (tone === 'warn') return 'var(--warn, #fbbf24)';
-  if (tone === 'bad') return 'var(--bad, #f87171)';
-  return 'var(--muted, #94a3b8)';
-}
+// v2.613 DEPS2613-11: 톤 → 색 변수는 공용 toneVar.js 하나다(예전 사본은 정의되지 않은 --ok/--warn/--bad 에 hex 폴백).
+export { toneVar };
 
 /** 값의 출처 표지 — 짧게. 행마다 긴 문장을 넣으면 셀이 세로로 길어진다(v2.509 규약). */
 export const SRC_MARK = Object.freeze({

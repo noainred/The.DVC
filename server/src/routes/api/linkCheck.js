@@ -18,7 +18,7 @@
 import { requireRole } from '../../auth/auth.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { publicLink, LINK_KINDS, KIND_KEYS, EDGE_KINDS } from '../../linkcheck/links.js';
+import { publicLink, LINK_KINDS, KIND_KEYS, EDGE_KINDS, MIN_EDGE_VERSION } from '../../linkcheck/links.js';
 import { PHASES, PHASE_LABEL, FAIL_KINDS } from '../../linkcheck/phases.js';
 import { loadLinkCheckSettings, saveLinkCheckSettings, linkCheckEnabled, DEFAULTS } from '../../linkcheck/settings.js';
 import { centralLinks, pollOnce, linkCheckPollerStatus } from '../../linkcheck/poller.js';
@@ -110,6 +110,7 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
       sampleRetentionDays: s.sampleRetentionDays, eventRetentionDays: s.eventRetentionDays, dailyRetentionDays: s.dailyRetentionDays,
     },
     links: rows, counts, problems,
+    minEdgeVersion: MIN_EDGE_VERSION, // v2.613 CONTRACT2613-05: 구버전 판정 기준은 서버가 준다(웹 기본값에 기대지 않는다)
     /*
      * ⚠⚠ **'언제부터 점검이 돌고 있나'**(v2.554). 이 값이 없으면 화면이 엣지 미보고를 영원히
      *   '첫 보고 대기'(= 기다리면 된다)라고 말한다 — 사용자 실화면에서 10분·3회가 지나도 그

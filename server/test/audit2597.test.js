@@ -76,7 +76,9 @@ test('L2597-02 — 첫 open 잠금은 비활성으로 래치하지 않는다', a
   assert.equal(isSqliteLockError({ message: 'database is locked' }), true);
   assert.equal(isSqliteLockError({ message: "Cannot find module 'node:sqlite'" }), false);
   const s = read('storage/db.js');
-  assert.match(s, /if \(isSqliteLockError\(e\)\) \{[\s\S]{0,200}_retryAt = Date\.now\(\) \+ 30_000;[\s\S]{0,200}return null;/);
+  // v2.613 PERSIST2613-03: 손 사본(_retryAt) 대신 util/sqliteOpen.js createLockRetry 를 쓴다 — 잠금이면 래치하지 않고 30초 뒤 재시도, 그 사이 null.
+  assert.match(s, /if \(lockRetry\.onFail\(e\)\) \{[\s\S]{0,200}return null;/);
+  assert.match(s, /createLockRetry\(30_000\)/);
   assert.match(read('metrics/db.js'), /initSqliteRetrying\(\)\.catch/);
 });
 

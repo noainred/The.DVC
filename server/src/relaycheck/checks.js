@@ -8,6 +8,7 @@ import { identityIssue } from '../collector/registry.js';
 import { instanceId } from '../instanceId.js';
 // v2.506(적대적 검증): 전역 fetch 는 lookup 이 없어 수집 토큰이 리바인딩된 주소로 나갈 수 있었다.
 import { resilientFetch } from '../util/resilientFetch.js';
+import { withOutboundTag } from '../util/outboundStats.js'; // v2.613 EDGE2613-10: 같은 주소 엣지를 데이터 흐름 지도에서 나눈다(v2.601 WEB2601-02 의 잔여)
 import { ssrfLookup } from '../util/ssrfLookup.js';
 import { readJsonCapped } from '../util/readCapped.js';
 
@@ -59,12 +60,15 @@ function sshBanner(host, port, timeoutMs) {
   });
 }
 
-async function portalPing(host, port, { token, expectAgent, otherIds = [], timeoutMs }) {
+async function portalPing(host, port, { token, expectAgent, otherIds = [], timeoutMs, tag = '' }) {
   const t0 = Date.now();
   const base = `http://${host}:${port}`;
+  // v2.613 EDGE2613-10: 수집 서버 id 를 알면(`collectorId`·`expectAgent`) 나가는 기록에 태그를 붙인다 — 없으면 outboundStats 가
+  //   URL 만으로 기록해 같은 origin 의 두 엣지가 `sharedUrl` 로 뭉친다. 태그가 없으면(수집 서버 미등록 호스트) 예전 그대로.
+  const tagged = (fn) => (tag ? withOutboundTag(tag, fn) : fn());
   try {
     if (token) {
-      const r = await resilientFetch(`${base}/api/collector/ping`, { headers: { Accept: 'application/json', 'X-Collector-Token': token }, timeoutMs, retries: 0 });
+      const r = await tagged(() => resilientFetch(`${base}/api/collector/ping`, { headers: { Accept: 'application/json', 'X-Collector-Token': token }, timeoutMs, retries: 0 }));
       if (r.status === 403 || r.status === 401) return { ok: false, phase: 'auth', error: 'HTTP 403 토큰 거부', ms: Date.now() - t0 };
       if (r.status === 404) return { ok: false, phase: 'auth', error: 'HTTP 404 — 응답 포탈에 COLLECTOR_TOKEN 미설정(또는 포탈 아님)', ms: Date.now() - t0 };
       if (!r.ok) return { ok: false, phase: 'http', error: `HTTP ${r.status}`, ms: Date.now() - t0 };
@@ -73,7 +77,7 @@ async function portalPing(host, port, { token, expectAgent, otherIds = [], timeo
       if (iss) return { ok: false, phase: 'identity', error: iss.reason, got: { agent: j.agent, hostname: j.hostname }, ms: Date.now() - t0 };
       return { ok: true, detail: `응답 ${j.agent || '(이름 없음)'}${j.hostname ? `(${j.hostname})` : ''} v${j.version || '?'}`, got: { agent: j.agent, hostname: j.hostname }, ms: Date.now() - t0 };
     }
-    const r = await resilientFetch(`${base}/api/health`, { headers: { Accept: 'application/json' }, timeoutMs, retries: 0 });
+    const r = await tagged(() => resilientFetch(`${base}/api/health`, { headers: { Accept: 'application/json' }, timeoutMs, retries: 0 }));
     if (!r.ok) return { ok: false, phase: 'http', error: `HTTP ${r.status}`, ms: Date.now() - t0 };
     const j = await readPing(r);
     return { ok: true, detail: `health 200 v${j.version || '?'}`, got: { instance: j.instance, agent: j.agent }, ms: Date.now() - t0 };
@@ -105,5 +109,5 @@ export async function runCheck(target, { timeoutMs = 8_000 } = {}) {
   // edge-portal / irs-portal
   const t = await tcp(host, port, timeoutMs);
   if (!t.ok) return t;
-  return portalPing(host, port, { token: target.token, expectAgent: target.expectAgent, otherIds: target.otherIds || [], timeoutMs });
+  return portalPing(host, port, { token: target.token, expectAgent: target.expectAgent, otherIds: target.otherIds || [], timeoutMs, tag: target.collectorId || target.expectAgent || '' });
 }

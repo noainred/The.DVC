@@ -13,7 +13,7 @@ import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.604: 엣지 응답 크기 상한
 import { strOf } from '../util/coercionTrap.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
-import { loadCollectors } from '../collector/registry.js';
+import { findCollectorByName } from '../collector/registry.js'; // v2.613 EDGE2613-08: 이름 조회 코어는 등록부 하나
 import { pullCollectorByAgent } from '../collector/puller.js';
 import { createPushScanJob, setIdracScanResult } from './idracScanJobs.js';
 import { allCollectorStatus } from '../collector/state.js';
@@ -30,7 +30,7 @@ export const MIN_ILO_EDGE_VERSION = '2.610.0';
 
 /** 담당 엣지의 버전(수집 서버 상태 기준). 모르면 ''. 인메모리라 중앙 재시작 직후(첫 pull 전)에는 모른다. */
 export function edgeVersionOf(agent) {
-  const col = findCollectorForAgent(agent);
+  const col = findCollectorByName(agent);
   if (!col) return '';
   try { const v = allCollectorStatus()?.[col.id]?.version; return typeof v === 'string' ? v.trim() : ''; }
   catch { return ''; }
@@ -61,15 +61,11 @@ export function iloEdgeGate({ hasDell = false, hasIlo = false, version = '' } = 
 }
 
 /**
- * 에이전트 이름/‌id에 매칭되는 수집 서버(원격)를 찾는다(대소문자 무관). URL이 있어야 PUSH 가능.
- * ⚠ 반드시 loadCollectors(원본, 토큰 포함)를 쓴다 — listCollectors()는 UI용으로 token을 마스킹
- * 하므로, 그걸 쓰면 X-Collector-Token 없이 엣지에 요청해 403이 난다(엣지는 정상).
+ * 에이전트 이름/id에 매칭되는 수집 서버(원격)를 찾는다(대소문자 무관). URL이 있어야 PUSH 가능.
+ * v2.613 EDGE2613-08: 본체는 `collector/registry.js findCollectorByName`(원본·토큰 포함 — listCollectors() 는 마스킹이라
+ * 쓰면 X-Collector-Token 없이 나가 403). 호출부(bmstor/poller.js·테스트)를 위해 옛 이름으로 재수출한다.
  */
-export function findCollectorForAgent(agent) {
-  const key = String(agent || '').trim().toLowerCase();
-  if (!key) return null;
-  return loadCollectors().find((c) => String(c.id || '').toLowerCase() === key || String(c.name || '').toLowerCase() === key) || null;
-}
+export { findCollectorByName as findCollectorForAgent };
 
 // 대역이 크면 엣지 스캔이 수십 초~수 분 걸린다 — 넉넉한 타임아웃(15분).
 // v2.605(감사 TIM2605-04): [1초, 2시간] — 음수·2^31 초과가 즉시 중단(1ms)이 되지 않게.
@@ -80,7 +76,7 @@ const PUSH_TIMEOUT_MS = reqTimeoutMs(process.env.IDRAC_PUSH_TIMEOUT_MS, 15 * 60_
  * 매칭되는 수집 서버 URL이 없으면 { ok:false, reason }.
  */
 export function pushIdracScan(agent, { ips, username, password, ilo = null, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge', service = '', trigger = 'manual', rangeId = '' } = {}) {
-  const col = findCollectorForAgent(agent);
+  const col = findCollectorByName(agent);
   if (!col || !col.url) {
     return { ok: false, reason: `에이전트 '${agent}'에 매칭되는 '수집 서버(원격)' URL이 없습니다. 설정 → 수집 서버(원격)에 이 에이전트를 URL과 함께 등록하면 중앙이 직접 스캔을 전송할 수 있습니다.` };
   }

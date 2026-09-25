@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { KIND_KEYS } from './links.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 
 const FILE = () => path.join(config.configDir, 'linkcheck-settings.json');
 
@@ -41,11 +42,6 @@ const MIN_INTERVAL_MS = 60_000;
 const MAX_INTERVAL_MS = 6 * 3_600_000;
 // v2.602(감사 LEFT2602-02): 빈 값·null 은 '미지정' — dflt 로 둔다. 예전 Number('') === 0 이 하한으로 올라가
 // 보존 90→7일·30→3일·주기→60초로 저장됐다(v2.596 CLAMP 계열). saveLinkCheckSettings 는 빈 숫자 필드를 병합 전에 버린다.
-const clampInt = (v, lo, hi, dflt) => {
-  const n = numOrNull(v);
-  if (n == null) return dflt;
-  return Math.min(hi, Math.max(lo, Math.round(n)));
-};
 
 export function normalizeSettings(raw = {}) {
   const kinds = {};
@@ -65,18 +61,18 @@ export function normalizeSettings(raw = {}) {
     enabled: raw?.enabled === true,
     // 기본 켜짐(명시 false 만 끈다) — '설정에 있는 모든 통신' 이 이 기능의 요청이다.
     settingsCheck: raw?.settingsCheck !== false,
-    intervalMs: clampInt(raw?.intervalMs, MIN_INTERVAL_MS, MAX_INTERVAL_MS, DEFAULTS.intervalMs),
+    intervalMs: clampSetting(raw?.intervalMs, { min: MIN_INTERVAL_MS, max: MAX_INTERVAL_MS, def: DEFAULTS.intervalMs }),
     kinds, pairs,
-    dnsTimeoutMs: clampInt(raw?.dnsTimeoutMs, 1_000, 30_000, DEFAULTS.dnsTimeoutMs),
-    tcpTimeoutMs: clampInt(raw?.tcpTimeoutMs, 1_000, 60_000, DEFAULTS.tcpTimeoutMs),
-    tlsTimeoutMs: clampInt(raw?.tlsTimeoutMs, 1_000, 60_000, DEFAULTS.tlsTimeoutMs),
-    httpTimeoutMs: clampInt(raw?.httpTimeoutMs, 1_000, 120_000, DEFAULTS.httpTimeoutMs),
-    sshTimeoutMs: clampInt(raw?.sshTimeoutMs, 1_000, 60_000, DEFAULTS.sshTimeoutMs),
-    smtpTimeoutMs: clampInt(raw?.smtpTimeoutMs, 1_000, 60_000, DEFAULTS.smtpTimeoutMs),
-    concurrency: clampInt(raw?.concurrency, 1, 32, DEFAULTS.concurrency),
-    sampleRetentionDays: clampInt(raw?.sampleRetentionDays, 7, 365, DEFAULTS.sampleRetentionDays),
-    eventRetentionDays: clampInt(raw?.eventRetentionDays, 3, 365, DEFAULTS.eventRetentionDays),
-    dailyRetentionDays: clampInt(raw?.dailyRetentionDays, 30, 365 * 10, DEFAULTS.dailyRetentionDays),
+    dnsTimeoutMs: clampSetting(raw?.dnsTimeoutMs, { min: 1_000, max: 30_000, def: DEFAULTS.dnsTimeoutMs }),
+    tcpTimeoutMs: clampSetting(raw?.tcpTimeoutMs, { min: 1_000, max: 60_000, def: DEFAULTS.tcpTimeoutMs }),
+    tlsTimeoutMs: clampSetting(raw?.tlsTimeoutMs, { min: 1_000, max: 60_000, def: DEFAULTS.tlsTimeoutMs }),
+    httpTimeoutMs: clampSetting(raw?.httpTimeoutMs, { min: 1_000, max: 120_000, def: DEFAULTS.httpTimeoutMs }),
+    sshTimeoutMs: clampSetting(raw?.sshTimeoutMs, { min: 1_000, max: 60_000, def: DEFAULTS.sshTimeoutMs }),
+    smtpTimeoutMs: clampSetting(raw?.smtpTimeoutMs, { min: 1_000, max: 60_000, def: DEFAULTS.smtpTimeoutMs }),
+    concurrency: clampSetting(raw?.concurrency, { min: 1, max: 32, def: DEFAULTS.concurrency }),
+    sampleRetentionDays: clampSetting(raw?.sampleRetentionDays, { min: 7, max: 365, def: DEFAULTS.sampleRetentionDays }),
+    eventRetentionDays: clampSetting(raw?.eventRetentionDays, { min: 3, max: 365, def: DEFAULTS.eventRetentionDays }),
+    dailyRetentionDays: clampSetting(raw?.dailyRetentionDays, { min: 30, max: 365 * 10, def: DEFAULTS.dailyRetentionDays }),
   };
 }
 

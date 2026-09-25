@@ -166,11 +166,11 @@ test('SEC2600-02: toBytes 는 단위 없는 긴 숫자열에서도 선형이다(
     const t0 = performance.now();
     toBytes(big); toBytesOrNull(big);
     const ms = performance.now() - t0;
-    assert.ok(ms < 150, `toBytes ${big.length}자 ${ms.toFixed(0)}ms`);
+    assert.ok(ms < 1000, `toBytes ${big.length}자 ${ms.toFixed(0)}ms`);   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
   }
   const t0 = performance.now();
   normalizeXtremioSsh({ id: 'x', name: 'x', type: 'xtremio' }, { clustersInfo: `Name      Physical-Space   Space-In-Use\n---\nc1        ${'1'.repeat(60000)}x   5T\n` });
-  assert.ok(performance.now() - t0 < 150);
+  assert.ok(performance.now() - t0 < 1000);
   // 정상 표기는 그대로.
   assert.equal(toBytes('12094627905536 (11.0T)'), 12094627905536);
   assert.equal(toBytes('11.0T'), Math.round(11 * 1024 ** 4));

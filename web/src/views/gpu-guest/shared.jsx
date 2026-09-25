@@ -3,13 +3,7 @@
 // fmtAgo(상대시각)는 셸 상태 카드와 VmCredManager 가 쓴다 — 복제하면 표기가 갈라지므로 1곳.
 import React from 'react';
 
-export const fmtAgo = (ts) => {
-  if (!ts) return '없음';
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.round(s / 60)}분 전`;
-  return `${Math.round(s / 3600)}시간 전`;
-};
+// v2.613 DEPS2613-11: fmtAgo 사본 제거 — 호출부가 util/fmt.fmtAgo(ts, { dash: '없음' }) 를 직접 쓴다.
 export function Field({ label, children }) {
   return <div><label className="muted" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>{label}</label>{children}</div>;
 }

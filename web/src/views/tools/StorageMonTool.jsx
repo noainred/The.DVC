@@ -9,6 +9,7 @@ import { columnsFor, cellValue, sortValue } from './storageColumns.js';
 import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit, capacityTotals, alertTotals } from './storageUnits.js';
 import { emptyListText, conflictText, edgeReportNotes, edgeIntervalText } from './storageListText.js';
 import { collectDropNote } from './collectDropText.js';
+import { agoText } from './relTime.js';
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 import { STable } from '../../components/STable.jsx';
 import { collectMethodView } from './storageMethodText.js';
@@ -54,11 +55,7 @@ const tbFmt = (bytes) => formatBytes(bytes, ACTIVE_UNIT);
 const bps = (v) => (v == null ? '—' : v >= 1e9 ? `${(v / 1e9).toFixed(1)}G` : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(Math.round(v)));
 // 미디어 풀 셀(HDD/SSD 공용) — 사용/전체(%). null = 해당 미디어 없음(무디스크 노드 등).
 const MediaCell = ({ m }) => (m ? <span title={`${tbFmt(m.usedBytes)} / ${tbFmt(m.totalBytes)}`}>{m.pct != null ? <UsageCell pct={m.pct} /> : <span className="muted">—</span>}<span className="muted" style={{ fontSize: 10.5, display: 'block' }}>{tbFmt(m.usedBytes)}/{tbFmt(m.totalBytes)}</span></span> : <span className="muted">—</span>);
-const ago = (ts) => {
-  if (!ts) return '—';
-  const s = Math.round((Date.now() - ts) / 1000);
-  return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : `${Math.round(s / 3600)}시간 전`;
-};
+// v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다(로컬 ago 사본 제거).
 
 /**
  * 수집 실패 사유 한 줄. snap.error 가 비면 섹션별 오류 문자열로 폴백한다 — 부분 실패(일부
@@ -453,7 +450,7 @@ function Cell({ col, r, ctx }) {
               실패 <span aria-hidden="true">ⓘ</span>
             </button>
           )}
-          <div className="muted" style={{ fontSize: 10.5 }}>{ago(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div>
+          <div className="muted" style={{ fontSize: 10.5 }}>{agoText(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div>
         </td>
       );
     case 'actions':

@@ -94,9 +94,9 @@ test('SEC2601-02 — parseOs 는 긴 숫자·공백 줄에서도 선형이고 �
   assert.deepEqual(parseOs('Microsoft Windows Server 2019 (64-bit)  '), { osName: 'Microsoft Windows Server', osVersion: '2019' });
   assert.deepEqual(parseOs('Ubuntu Linux 22.04'), { osName: 'Ubuntu Linux', osVersion: '22.04' });
   const t0 = performance.now();
-  parseOs('1'.repeat(20_000) + 'x');
-  parseOs('a' + ' '.repeat(20_000) + 'b');
-  assert.ok(performance.now() - t0 < 200, `수정 전 실측: 숫자 2만 자 1.9초 · 공백 2만 자 0.6초 — 지금 ${Math.round(performance.now() - t0)}ms`);
+  parseOs('1'.repeat(40_000) + 'x');
+  parseOs('a' + ' '.repeat(40_000) + 'b');   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
+  assert.ok(performance.now() - t0 < 1000, `수정 전 실측: 숫자 2만 자 1.9초 · 공백 2만 자 0.6초(4만 자면 4배) — 지금 ${Math.round(performance.now() - t0)}ms`);
 });
 
 // ── CEN2601-02·03: /fleet ──────────────────────────────────────────────────
@@ -303,13 +303,17 @@ test('EDGE2601-06 — SAN 재수집 직후 push 가 주기 push 와 겹치면 �
     const { pushAfterCollect, sanSwitchConfigPullStatus } = await import('../src/agent/sanSwitchConfigPull.js');
     const periodic = pushSanSwitchNow(); // 위임 0대 → 빈 목록 전송(목 중앙에서 멈춤)
     await new Promise((r) => setTimeout(r, 50));
-    const r = await pushAfterCollect({ waitMs: 20, maxTries: 200 });
-    assert.equal(r.pending, true, '진행 중이면 거절을 삼키지 않고 대기 상태로 밝힌다');
-    assert.equal(sanSwitchConfigPullStatus().collectPush.pending, true);
+    // v2.613 EDGE2613-03: 진행 중이면 push 모듈이 `_again` 으로 합류시켜 끝난 뒤 한 번 더 보내고 그 결과를 돌려준다
+    //   (예전의 `{pending:true, done}` + 2초×90회 재시도 루프는 지웠다 — storage/pdu 와 같은 표준 경로).
+    let settled = false;
+    const joined = pushAfterCollect().then((x) => { settled = true; return x; });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(settled, false, '진행 중인 push 가 끝나기 전에는 결과가 나오지 않는다(합류)');
     release();
     await periodic;
-    const done = await r.done;
+    const done = await joined;
     assert.equal(done.ok, true);
+    assert.notEqual(done.reason, '이전 push 진행 중', '수정 전: 거절 사유를 돌려줬다');
     assert.equal(got.length, 2, '끝난 뒤 한 번 더 보냈다');
     assert.equal(sanSwitchConfigPullStatus().collectPush.ok, true);
   } finally { srv2.close(); config.agent.centralUrl = ''; }

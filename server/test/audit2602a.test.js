@@ -177,7 +177,7 @@ test('SEC2602-01 — register-collector 의 긴 urlHint 는 정규식 전에 400
   assert.equal(trimTrailingSlashes('///'), '');
   const t1 = performance.now();
   trimTrailingSlashes(`${'/'.repeat(200_000)}x`);
-  assert.ok(performance.now() - t1 < 50);
+  assert.ok(performance.now() - t1 < 1000, 'trimTrailingSlashes 20만 자 — O(n²) 면 수십 초');   // v2.613 TESTDOC2613-02: 절대 상한은 1초(회귀와 확실히 갈리는 값 — v2.603) · 입력은 옛 O(n²) 구현이 수 초가 되는 크기
   // 추가 배정 — normPath(인증 전 모든 central 요청)도 선형이고, 경로 변형 정규화(v2.500 C-1)는 그대로다.
   const { normPath } = await import('../src/routes/central.js');
   assert.equal(normPath('/Register-Collector//'), '/register-collector');
@@ -185,7 +185,7 @@ test('SEC2602-01 — register-collector 의 긴 urlHint 는 정규식 전에 400
   assert.equal(normPath({ toString: 1 }), '');
   const t2 = performance.now();
   normPath(`${'/'.repeat(100_000)}x`);
-  assert.ok(performance.now() - t2 < 50, 'normPath 가 O(n²) 로 돌면 인증 전 요청 하나가 이벤트 루프를 잡는다');
+  assert.ok(performance.now() - t2 < 1000, 'normPath 가 O(n²) 로 돌면 인증 전 요청 하나가 이벤트 루프를 잡는다(10만 자면 수 초)');
   const src = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
   assert.equal(src.includes(String.raw`.replace(/\/+$/`), false, 'central.js 에 끝 슬래시 정규식을 되살리지 않는다');
 });

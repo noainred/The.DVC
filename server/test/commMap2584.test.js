@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { stripComments } from './_stripComments.js';
 
 const { buildCommMap, aliasMap, originOf, REASON_SEVERITY, RES_MAX_PER_KIND, DIRECT_MAX_PER_KIND, EDGE_STATES } = await import('../src/commmap/build.js');
 
@@ -155,7 +156,7 @@ test('⑤ 사유 코드 ↔ 웹 문구 1:1 · 상태 집합 ↔ 웹 라벨 · �
   const codes = [...web.matchAll(/^  '([a-z-]+)': \{ title:/gm)].map((m) => m[1]).sort();
   assert.deepEqual(codes, Object.keys(REASON_SEVERITY).sort());
   for (const st of EDGE_STATES) assert.ok(new RegExp(`\\b${st}: '`).test(web), `STATE_LABEL 에 ${st}`);
-  const body = web.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const body = stripComments(web);   // v2.613 TESTDOC2613-08
   const strings = [...body.matchAll(/'([^'\n]*)'/g)].map((m) => m[1]);
   for (const s of strings) { assert.ok(!s.includes('`'), `백틱: ${s}`); assert.ok((s.match(/ — /g) || []).length <= 1, `3단 대시: ${s}`); }
 });

@@ -25,6 +25,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 
 const FILE = () => path.join(config.configDir, 'curuser-settings.json');
 
@@ -38,16 +39,14 @@ export const LIMITS = Object.freeze({
   maxVms: { min: 1, max: 5000, def: 400 },      // 한 주기 대상 상한(조용한 상한 금지 — 초과는 밝힌다)
 });
 
-const clamp = (v, l) => {
-  const n = Number(v);
-  if (!Number.isFinite(n) || n <= 0) return l.def;
-  return Math.min(l.max, Math.max(l.min, Math.round(n)));
-};
 const strArr = (v, max = 200) => (Array.isArray(v) ? v : [])
   .map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, max);
 
 // v2.599 LO2599-01: 숫자 칸을 비우고 저장하면(''·null·비숫자·0 이하) clamp 가 **기본값**을 줬다 — 예: 보존 3650일 →
 // 180일 · 주기 1시간 → 10분(현재 사용자). v2.596 규약대로 빈 칸은 '미지정' 이고 **이전 값을 유지**한다(판정은 numOrNull — Number('')===0 함정).
+// v2.613 DEPS2613-12: clamp 사본 대신 util/clampSetting.js. 이 모듈의 계약(v2.599 LO2599-01·기존 테스트)은 '빈 값·비숫자·**0 이하** = 미지정
+//   → 기본값' 이라 0 이하를 먼저 미지정(null)으로 접는다 — clampSetting 은 0 을 값으로 보고 하한으로 올린다(미입력이 최소주기로 둔갑).
+const positive = (v) => { const n = numOrNull(v); return n != null && n <= 0 ? null : v; };
 function keepPrevBlankNumbers(input, prev) {
   const out = { ...(input && typeof input === 'object' ? input : {}) };
   for (const k of Object.keys(LIMITS)) {
@@ -87,13 +86,13 @@ export function normalize(input = {}) {
   }
   return {
     enabled: src.enabled === true,
-    intervalMs: clamp(src.intervalMs, LIMITS.intervalMs),
-    retentionDays: clamp(src.retentionDays, LIMITS.retentionDays),
-    concurrency: clamp(src.concurrency, LIMITS.concurrency),
-    vmTimeoutMs: clamp(src.vmTimeoutMs, LIMITS.vmTimeoutMs),
-    guestPublishMs: clamp(src.guestPublishMs, LIMITS.guestPublishMs),
-    staleFactor: clamp(src.staleFactor, LIMITS.staleFactor),
-    maxVms: clamp(src.maxVms, LIMITS.maxVms),
+    intervalMs: clampSetting(positive(src.intervalMs), LIMITS.intervalMs),
+    retentionDays: clampSetting(positive(src.retentionDays), LIMITS.retentionDays),
+    concurrency: clampSetting(positive(src.concurrency), LIMITS.concurrency),
+    vmTimeoutMs: clampSetting(positive(src.vmTimeoutMs), LIMITS.vmTimeoutMs),
+    guestPublishMs: clampSetting(positive(src.guestPublishMs), LIMITS.guestPublishMs),
+    staleFactor: clampSetting(positive(src.staleFactor), LIMITS.staleFactor),
+    maxVms: clampSetting(positive(src.maxVms), LIMITS.maxVms),
     // 계정명을 목록·보고서에 상시 노출할지(기본 꺼짐 — 개인정보성. 상세 펼침에서는 항상 보인다).
     showNamesInList: src.showNamesInList === true,
     vcenters,
@@ -124,8 +123,8 @@ export function save(input = {}) {
  */
 export function staleAfterMs(s) {
   const o = s || {};
-  const pub = clamp(o.guestPublishMs, LIMITS.guestPublishMs);
-  const f = clamp(o.staleFactor, LIMITS.staleFactor);
+  const pub = clampSetting(positive(o.guestPublishMs), LIMITS.guestPublishMs);
+  const f = clampSetting(positive(o.staleFactor), LIMITS.staleFactor);
   return pub * f;
 }
 

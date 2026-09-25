@@ -3,7 +3,7 @@
  *
  * v2.490 의 V3App(6화면)을 승격해 UI 개편 시안(Design/uiredesign/ 아트보드 8장)을 구현했다.
  *   · 화면 9개 — 전사 현황 · 법인 비교 · 전력/비용 · 컴퓨트 · 스토리지 · 네트워크 · 설비 · 알람 · 기능 찾기
- *   · 좌측 내비는 시안 ⑧의 IA 11그룹(tree.js) — 도구 79개 + 개발 포탈 탭 14개가 전부 트리에 있다(미분류 0)
+ *   · 좌측 내비는 시안 ⑧의 IA 11그룹(tree.js) — 도구 전부(specialToolsList.js) + 개발 포탈 탭 14개가 트리에 있다(미분류 0)
  *   · 상단 '경영 보기 ↔ 엔지니어 보기' 모드 토글(mode.js) — **보기 설정이지 권한이 아니다**
  *   · ⌘K / Ctrl+K 커맨드 팔레트(palette.js)
  *
@@ -23,7 +23,7 @@ import { TOOLS } from '../views/specialToolsList.js';
 import './v4.css';
 import { PAGE_IDS, PAGE_META, GROUP_TILE } from './nav.js';
 import { visibleTree, groupLabelOfTool } from './tree.js';
-import { toolHidden } from '../views/toolVisibility.js';
+import { toolHidden, lockReasonOf } from '../views/toolVisibility.js'; // v2.613 CATALOG2613-07: 잠금 사유도 같은 모듈
 import { MODE_LABEL, MODE_KEY, resolveMode, modeSpec, viewFromHash } from './mode.js';
 import { loadPhase, loadText, collectProgress, liveText, shouldBanner } from './loadState.js';
 import { buildDomainTiles, severityCounts, siteRows, fmtInt, levelBar } from './data.js';
@@ -152,6 +152,12 @@ export default function V4App({ user, health, healthError, onExit }) {
     return visibleTree(TOOLS, { isAdmin, toolShown: (t) => !toolHidden(t, { isAdmin, toolsAllowed: allow, hideAdminOnly: true }) });
   }, [isAdmin, allowKey]);
   const byKey = useMemo(() => new Map(TOOLS.map((t) => [t.k, t])), []);
+  // v2.613(CATALOG2613-07): 잠긴 도구는 숨기지 않고 회색(🔒)으로 — 판정은 카드 그리드·기능 찾기·팔레트와 같은
+  //   `lockReasonOf` 하나(perm 축 포함). 예전에는 내비가 잠금을 전혀 표시하지 않아 "내비에는 열려 보이는데 누르면 막힌다" 였다.
+  const lockOf = useMemo(() => {
+    const allow = JSON.parse(allowKey);
+    return (t) => lockReasonOf(t, { isAdmin, toolsAllowed: allow, can, toolAllowed });
+  }, [isAdmin, allowKey]);
 
   const meta = PAGE_META[page] || PAGE_META.overview;
   const Page = PAGES[page] || Overview;
@@ -195,10 +201,11 @@ export default function V4App({ user, health, healthError, onExit }) {
                   );
                 }
                 const t = byKey.get(it.k);
+                const lock = lockOf(t);
                 return (
-                  <button key={`k:${g.id}:${it.k}`} type="button" className="v3-nav-item ext" title={`개발 포탈 #/tools/${it.k} 로 이동${it.alias ? ` · 주소속: ${groupLabelOfTool(it.k)}` : ''}`} onClick={() => onExit(`#/tools/${it.k}`)}>
-                    <span className="v3-nav-name">{t?.icon} {t?.label}</span>
-                    <span className="v3-nav-count">{it.alias ? '별칭' : '↗'}</span>
+                  <button key={`k:${g.id}:${it.k}`} type="button" className="v3-nav-item ext" title={`개발 포탈 #/tools/${it.k} 로 이동${it.alias ? ` · 주소속: ${groupLabelOfTool(it.k)}` : ''}${lock ? ` · 🔒 ${lock}` : ''}`} onClick={() => onExit(`#/tools/${it.k}`)}>
+                    <span className="v3-nav-name" style={lock ? { color: '#68738a' } : undefined}>{t?.icon} {t?.label}</span>
+                    <span className="v3-nav-count">{lock ? '🔒' : it.alias ? '별칭' : '↗'}</span>
                   </button>
                 );
               })}

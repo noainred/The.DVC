@@ -7,10 +7,14 @@
  * 그것은 iDRAC 부하 때문에 여기서 줄이지 않는다(화면이 '탐지 지연 상한 = 인벤토리 주기' 를 밝힌다).
  *
  * ⚠ 디바운스(기본 15초) — 폴러는 서버마다 갱신하므로 30대면 30번 부른다. 한 번으로 모은다.
- * ⚠ 순환 import 방지 — 이 파일은 poller/push 를 **동적 import** 한다(idrac/poller.js 가 이 파일을 import).
+ * v2.613 DEPS2613-03: push/poller 는 정적 import 다 — 예전 머리말의 '순환 방지 동적 import' 는 앞 절(idrac/poller.js 가 이 파일을
+ *   import)만 참이고 `partfault/{push,poller}.js` 에서 idrac/poller.js·이 파일로 되돌아오는 정적 경로가 없어 순환이 아니었다
+ *   (arch2579 는 동적 import 도 edge 로 세므로 동적화는 어차피 순환을 숨기지 못한다).
  */
 import { config } from '../config.js';
 import { deadlineMs } from '../util/deadline.js';
+import { pushPartFaultsNow } from './push.js';
+import { runPartFaultsNow } from './poller.js';
 
 // v2.611 TIM2611-03: 상한 없는 `Math.max(1_000, env)` 는 2^31ms 초과·Infinity 에서 setTimeout 이 1ms 가 되어 디바운스가
 // 사라졌다(스냅샷 갱신마다 즉시 push·판정). 시한 관문 deadlineMs([1초, 2시간], 빈 값·비숫자는 기본 15초)를 거친다.
@@ -28,10 +32,8 @@ export function onSnapshotRefreshed(source = 'idrac') {
     const n = _pending; _pending = 0; _timer = null;
     try {
       if (config.agent.centralUrl) {
-        const { pushPartFaultsNow } = await import('./push.js');
         _last = { at: Date.now(), source, batched: n, result: await pushPartFaultsNow({ reason: `hook:${source}` }) };
       } else {
-        const { runPartFaultsNow } = await import('./poller.js');
         _last = { at: Date.now(), source, batched: n, result: await runPartFaultsNow({ reason: `hook:${source}` }) };
       }
     } catch (e) { _last = { at: Date.now(), source, batched: n, error: String(e.message || e).slice(0, 200) }; }

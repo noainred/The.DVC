@@ -20,20 +20,31 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12: 숫자 설정 정규화는 하나
+import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.configDir, 'partfault-settings.json');
 const t = (v) => String(v ?? '').trim();
 let _cache = null;
+let _retentionFromFile = false; // v2.613 PERSIST2613-06: 파일에 retentionDays 가 실제로 있었는가(출처 표시용)
 
-const DEFAULTS = Object.freeze({ enabled: false, edges: {}, central: null });
+/**
+ * v2.613 PERSIST2613-06: 이력 보존일. 형제(bmusage·linkcheck·cvp·curuser·horizon)는 설정 파일 + 화면인데 partfault 만 env 전용이라
+ *   '부품 장애 이력 2년' 을 바꾸려면 portal.env 를 고쳐야 했다(v2.409 '중앙 배포값' 규약과 반대 방향). 하한 30일(그 아래면 전이
+ *   이력이 뜻을 잃는다) · 상한 10년 · 기본 730일. 빈 칸은 미지정(이전 값 유지 — v2.596 CLAMP 규약).
+ */
+export const RETENTION_LIMITS = Object.freeze({ min: 30, max: 3650, def: 730 });
+const DEFAULTS = Object.freeze({ enabled: false, edges: {}, central: null, retentionDays: RETENTION_LIMITS.def });
 
 export function loadPartFaultSettings() {
   if (_cache) return _cache;
   try {
     const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     _cache = { ...DEFAULTS, ...(j && typeof j === 'object' ? j : {}) };
+    _retentionFromFile = !!(j && typeof j === 'object' && numOrNull(j.retentionDays) != null);
   } catch (e) { if (fs.existsSync(FILE())) preserveCorrupt(FILE(), e.message); _cache = { ...DEFAULTS }; }   // 설정 파일 — 손상이면 기본값(꺼짐)으로 시작. 켜진 척하지 않는다.
   if (!_cache.edges || typeof _cache.edges !== 'object') _cache.edges = {};
+  _cache.retentionDays = clampSetting(_cache.retentionDays, RETENTION_LIMITS); // 손편집 값도 범위 안으로(비숫자는 기본값)
   return _cache;
 }
 
@@ -57,6 +68,8 @@ export function savePartFaultSettings(patch = {}) {
     }
     next.edges = edges;
   }
+  // v2.613 PERSIST2613-06: 빈 칸·비숫자는 미지정(이전 값 유지) — Number('')===0 이 하한으로 올라가 보존일이 줄어드는 사고를 막는다(v2.583·v2.596).
+  if (Object.hasOwn(patch, 'retentionDays') && numOrNull(patch.retentionDays) != null) { next.retentionDays = clampSetting(patch.retentionDays, RETENTION_LIMITS); _retentionFromFile = true; }
   return persist(next);
 }
 
@@ -94,4 +107,19 @@ export function partFaultEnabled() {
   return { enabled: !!s.enabled, source: s.enabled ? 'central' : 'default' };
 }
 
-export function _resetForTest() { _cache = null; }
+/**
+ * v2.613 PERSIST2613-06: 유효 보존일과 **출처**. env `PARTFAULT_RETENTION_DAYS` 가 이긴다(현장 강제 — PARTFAULT_ENABLED 와 같은 순서):
+ *   빈 값·비숫자·음수는 **미지정**(설정으로 간다) · `0` 은 **전부 보관**(prune 생략 — config.js retentionEnv 의 v2.583 계약
+ *   'IDRAC/TEMP/PING_RETENTION_DAYS=0 = keep all' 과 같은 뜻. 예전 `Math.max(30, Number(env) || 730)` 은 0 을 조용히 730 으로
+ *   되돌렸다) · 양수는 하한 30일. env 가 없으면 설정 파일(화면) 값, 그것도 없으면 기본 730일.
+ * @returns {{ days:number, source:'env'|'settings'|'default' }}  days 0 = 전부 보관
+ */
+export function partFaultRetention() {
+  const raw = process.env.PARTFAULT_RETENTION_DAYS;
+  const n = raw == null || String(raw).trim() === '' ? null : numOrNull(raw);
+  if (n != null && n >= 0) return { days: n === 0 ? 0 : Math.max(RETENTION_LIMITS.min, Math.round(n)), source: 'env' };
+  const s = loadPartFaultSettings();
+  return { days: clampSetting(s.retentionDays, RETENTION_LIMITS), source: _retentionFromFile ? 'settings' : 'default' };
+}
+
+export function _resetForTest() { _cache = null; _retentionFromFile = false; }

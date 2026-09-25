@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { fetchJson, usePolling, getToken } from '../api.js';
+import { fetchJson, usePolling, downloadFile } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
-import { fmtBytes } from '../util/fmt.js';
+import { fmtBytes, fmtAgo } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
 
 const DOT = { ok: '#22c55e', warn: '#f59e0b', down: '#ef4444', off: '#64748b', slow: '#f97316' };
 const LBL = { ok: '정상', warn: '주의', down: '실패', off: '비활성', slow: '느림' };
 // v2.590 W1: 객체·NaN 이면 'NaN분 전' 대신 비운다(서버가 폴러의 { at, … } 객체를 그대로 싣던 적이 있다).
-const fmtAgo = (ts) => { if (typeof ts !== 'number' || !Number.isFinite(ts) || !ts) return ''; const s = Math.round((Date.now() - ts) / 1000); return s < 60 ? `${s}초 전` : s < 3600 ? `${Math.round(s / 60)}분 전` : `${Math.round(s / 3600)}시간 전`; };
+// v2.613 DEPS2613-11: 상대시각은 util/fmt.fmtAgo(relTime 코어) 하나다(이 화면은 c.at 이 있을 때만 부른다).
 const Dot = ({ s }) => <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: DOT[s] || '#64748b', boxShadow: s === 'ok' ? `0 0 6px ${DOT.ok}` : 'none', marginRight: 8 }} />;
 // fmtBytes 는 util/fmt.js 로 통합(v2.319 — 동일 구현 복붙 제거)
 
@@ -107,13 +107,9 @@ export function VmwareConfigBackup() {
   const download = async () => {
     setBusy('dl'); setMsg(null);
     try {
-      const url = `/api/tools/vmware-config?download=1${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`;
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const blob = await res.blob();
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-      a.download = res.headers.get('Content-Disposition')?.match(/filename="(.+?)"/)?.[1] || 'vmware-config.json.gz';
-      a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      // v2.613 WEB2613-10: api.js 를 우회한 직접 fetch 금지 — 401 전역 처리·403 안내(HttpError)·X-Request-Id 가 빠진다.
+      //   서버(checksLogs.js)가 download=1 이면 항상 Content-Disposition 을 준다 — downloadFile 이 그 이름을 쓴다.
+      await downloadFile(`/tools/vmware-config?download=1${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`);
       setMsg('다운로드 완료');
     } catch (e) { setMsg(`다운로드 오류: ${e.message}`); } finally { setBusy(''); }
   };

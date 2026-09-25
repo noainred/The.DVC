@@ -1,3 +1,4 @@
+import { fmtBytes } from '../util/fmt.js';
 /**
  * vmSeriesText.js — 실시간(20초) 스파이크 수집 화면의 판정·문구(순수, v2.510).
  *
@@ -13,14 +14,9 @@ export const TEMPLATES = [
 
 export const ESXI_REALTIME_BUFFER_MIN = 60; // ESXi 실시간 구간 보관(20초 × 180). 화면 경고 문구의 근거.
 
-export function fmtBytes(b) {
-  const n = Number(b) || 0;
-  const GB = 1024 ** 3; const MB = 1024 ** 2;
-  if (n >= GB) return `${(n / GB).toFixed(2)} GB`;
-  if (n >= MB) return `${(n / MB).toFixed(1)} MB`;
-  if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${n} B`;
-}
+// v2.613 WEB2613-03: 바이트 표기는 util/fmt.fmtBytes 하나다 — 예전 로컬 사본은 `Number(b) || 0` 이라 읽지 못한
+//   값(null)을 '0 B' 로 둔갑시켰다. 재수출 형태는 `import …; export { … }`(v2.575 규약).
+export { fmtBytes };
 
 export function fmtSec(s) {
   const n = Math.max(0, Math.round(Number(s) || 0));

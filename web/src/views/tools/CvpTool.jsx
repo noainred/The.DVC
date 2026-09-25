@@ -148,7 +148,7 @@ export default function CvpTool() {
                     <td style={{ fontSize: 12 }}>{hostText(s.host)}</td>
                     <td style={{ fontSize: 12 }}>{s.agent ? `엣지 ${s.agent}` : '중앙 직접'}</td>
                     <td style={{ fontSize: 12 }}>{s.authMode === 'password' ? 'ID/비밀번호' : '토큰'}</td>
-                    <td><Badge tone={sv.tone} title={sv.detail}>{sv.label}</Badge>{sv.detail && sv.tone === 'bad' && sv.label === '실패' && <div style={{ fontSize: 11, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{sv.detail}</div>}</td>
+                    <td><Badge tone={sv.tone} title={sv.detail}>{sv.label}</Badge>{sv.detail && (sv.tone === 'bad' || sv.tone === 'warn') && <div style={{ fontSize: 11, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{sv.detail}</div>}</td>
                     <td className="right">{countText(st.deviceCount)}{isTruncated(st.truncated) ? ' (잘림)' : ''}</td>
                     <td style={{ fontSize: 12 }} data-sort={st.collectedAt || 0}>{agoText(st.collectedAt)}</td>
                     <td style={{ fontSize: 12 }} title={used.map((k) => `${itemLabel(k)}: ${st.usedPaths[k]}`).join('\n')}>

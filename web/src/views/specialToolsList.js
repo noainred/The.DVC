@@ -55,7 +55,10 @@ export const TOOLS = [
   // v2.520 — 게스트 계정 없이(사용자 결정 "Guestos 계정 없이") 게스트가 스스로 발행한
   // `guestinfo.curuser.*` 를 vCenter 구성에서 읽는다. `aka` 는 옛/다른 이름으로도 찾게 한다.
   { k: 'curuser', icon: '👥', label: '현재 사용자', desc: '지정 폴더의 Windows 서버에 로그인한 사용자 수 · 전체/법인(vCenter)별 · 같은 계정이 여러 서버에 있으면 1명 · 활성/연결끊김 구분 · 10분 주기 DB 저장·추이 · 게스트 계정 불필요(VMware Tools 발행값 읽기)', aka: ['로그인 사용자', '접속자', 'quser', 'rdp 사용자', 'current users'] },
-  { k: 'real-os', icon: '🔎', label: '실제 OS 확인(게스트)', desc: '게스트 OS에서 실제 설치 OS(/etc/os-release 등) 읽기 · ESXi 보고와 불일치 탐지 · 주기 스캔 · CSV' },
+  // v2.613(CATALOG2613-01): 아래 adminOnly 5개(real-os·portaldb·serveranalysis·nic-speed·nic-models)는 주 API 가 `/api/admin/*`
+  //   (역할 admin)인데 플래그가 없어 viewer 에게 '열 수 있는 카드' 로 보였다(열면 403). 플래그는 docs/API.md 게이트 열과 대조한다
+  //   (web/src/views/audit2613a.test.js). shutdown 은 v2.590 W2 가 operator 문구('❔ 확인하지 못했습니다')를 의도적으로 확정해 그대로 둔다.
+  { k: 'real-os', icon: '🔎', label: '실제 OS 확인(게스트)', desc: '게스트 OS에서 실제 설치 OS(/etc/os-release 등) 읽기 · ESXi 보고와 불일치 탐지 · 주기 스캔 · CSV', adminOnly: true },
   { k: 'thinvms', icon: '💧', label: 'Thin VM 찾기', desc: 'Thin 프로비저닝 VM · 회수 가능 용량(추정)' },
   { k: 'orphanvmdk', icon: '🧩', label: '고아 VMDK 찾기', desc: '데이터스토어에 있지만 어떤 VM 에도 연결되지 않은 가상디스크 · VM 소유 파일(layoutEx)과 대조 · FCD·콘텐츠 라이브러리·복제는 제외 · 확인 필요 후보만 제시(삭제 기능 없음)' },
   { k: 'guest-disk', icon: '🧹', label: '게스트 디스크 회수', desc: 'VM 게스트(VMware Tools) 파티션의 할당 대비 사용·비율 · 파티션별 사용량 증가 추이(전용 DB) · 줄일 수 있는 여유가 큰 VM 정렬 · 회수 판정(증가 중이면 보류) · CSV export' },
@@ -84,14 +87,15 @@ export const TOOLS = [
   { k: 'vcversion', icon: '🏛️', label: 'vCenter 버전별', desc: 'vCenter 버전 분포' },
   { k: 'nsx', icon: '🛡️', label: 'NSX 관리', desc: '게이트웨이·세그먼트·노드·DFW 방화벽·보안그룹 등 NSX 전체 관리', perm: 'inv.nsx' },
   { k: 'hardware', icon: '🏷️', label: '벤더/모델 서머리', desc: '법인별 호스트 벤더·모델 수량' },
-  { k: 'powermap', icon: '⚡', label: '전력 분석 (법인/모델별)', desc: '측정된 모든 서버 소비전력을 법인(vCenter)·모델·지역별로 분해 · 미매핑 포함 · CSV' },
+  // v2.613(CATALOG2613-01): powermap·fleet·topo3d 의 주 API 는 `/api/insights/*`(마운트 requirePerm('insights')) — insights-hub 와 같은 perm.
+  { k: 'powermap', icon: '⚡', label: '전력 분석 (법인/모델별)', desc: '측정된 모든 서버 소비전력을 법인(vCenter)·모델·지역별로 분해 · 미매핑 포함 · CSV', perm: 'insights' },
   { k: 'hba', icon: '🔌', label: 'HBA 카드 속도', desc: '호스트 FC/iSCSI 어댑터 속도' },
   { k: 'gpu', icon: '🎮', label: 'GPU 인벤토리', desc: '호스트/모델별 GPU + 사용률 최근 5년 추이' },
-  { k: 'serveranalysis', icon: '🔬', label: '서버 분석', desc: 'iDRAC 수집 하드웨어 분석 · GPU 찾기(모델별 장수)' },
-  { k: 'fleet', icon: '🗂️', label: '통합 서버 인벤토리', desc: 'iDRAC 태그 + vCenter 조합 → 가상화 호스트 / 베어메탈 자동 분류 · 베어메탈 전력 합계 · 수동 예외 · CSV' },
-  { k: 'nic-speed', icon: '🔌', label: '서버 NIC 속도 구분', desc: 'iDRAC 수집 서버의 물리 NIC 속도(10G/25G/100G…)별 분류 — DataCenter·가상화/베어메탈 필터 + CSV' },
-  { k: 'nic-models', icon: '🧬', label: '서버 NIC 모델 확인', desc: 'iDRAC 수집 서버에 설치된 NIC 어댑터 종류·모델명(Intel/Broadcom/Mellanox…)별 분류 — DataCenter·가상화/베어메탈 필터 + CSV' },
-  { k: 'topo3d', icon: '🌐', label: '구성도 (3D)', desc: '설정된 구성을 3D 네트워크로 — 줌인/아웃·회전·VM 펼치기' },
+  { k: 'serveranalysis', icon: '🔬', label: '서버 분석', desc: 'iDRAC 수집 하드웨어 분석 · GPU 찾기(모델별 장수)', adminOnly: true },
+  { k: 'fleet', icon: '🗂️', label: '통합 서버 인벤토리', desc: 'iDRAC 태그 + vCenter 조합 → 가상화 호스트 / 베어메탈 자동 분류 · 베어메탈 전력 합계 · 수동 예외 · CSV', perm: 'insights' },
+  { k: 'nic-speed', icon: '🔌', label: '서버 NIC 속도 구분', desc: 'iDRAC 수집 서버의 물리 NIC 속도(10G/25G/100G…)별 분류 — DataCenter·가상화/베어메탈 필터 + CSV', adminOnly: true },
+  { k: 'nic-models', icon: '🧬', label: '서버 NIC 모델 확인', desc: 'iDRAC 수집 서버에 설치된 NIC 어댑터 종류·모델명(Intel/Broadcom/Mellanox…)별 분류 — DataCenter·가상화/베어메탈 필터 + CSV', adminOnly: true },
+  { k: 'topo3d', icon: '🌐', label: '구성도 (3D)', desc: '설정된 구성을 3D 네트워크로 — 줌인/아웃·회전·VM 펼치기', perm: 'insights' },
   { k: 'davinci-svc', icon: '🩺', label: '다빈치 서비스 점검', desc: '포탈 내부 서비스/수집기(vCenter·NSX·전력·지표·GPU·알림·백업·에이전트) 상태 한눈에' },
   { k: 'capacity-advisor', icon: '📊', label: '리소스 적정성 진단', desc: '포탈 서버(중앙+엣지)의 CPU·메모리·네트워크·디스크 상시 실측 — 1일/1주/1달 추이로 인프라 증설/감축 조언 (관리자)', adminOnly: true },
   // svcmon: /api/svcmon 전체가 svcmon 기능 권한 게이트(v2.506) 아래다 — perm 이 없으면 카드가 열리고
@@ -101,7 +105,7 @@ export const TOOLS = [
   { k: 'net-traffic', icon: '🔬', label: '네트워크 트래픽 분석', desc: '두 서버 간 tcpdump 캡처·분석(핸드셰이크·재전송·RST) + 로그 자체 장애 탐지' },
   { k: 'vmware-backup', icon: '🗃️', label: 'VMware 구성 백업', desc: '사이트의 수집 구성(호스트·VM·DS·네트워크·NSX) 스냅샷 내보내기' },
   { k: 'roomtemp', icon: '🌡️', label: '법인 전산실 운영 온도', desc: '모든 법인의 흡기(Inlet)·배기(Exhaust)·CPU 온도 범위를 카드로 한 페이지 종합 · ASHRAE 권장 대역(18~27℃) 대비 상태 · 배기−흡기 ΔT · 서버별 상세', adminOnly: true },
-  { k: 'portaldb', icon: '🗄️', label: '포탈 DB', desc: '사용 중 모든 DB/데이터 파일의 경로·파일명·용도·크기·증가 추이' },
+  { k: 'portaldb', icon: '🗄️', label: '포탈 DB', desc: '사용 중 모든 DB/데이터 파일의 경로·파일명·용도·크기·증가 추이', adminOnly: true },
   { k: 'mail-diag', icon: '✉️', label: '메일 진단', desc: 'SMTP 서버 설정 + 테스트 발송 · 연결/STARTTLS/인증/수신자까지 단계별 대화 로그로 실패 지점 확인(비밀번호는 가려짐)', adminOnly: true },
   { k: 'dir-usage', icon: '📁', label: '폴더 사용량 Top-N', desc: '엣지에 마운트된 공유 폴더의 하위 폴더(=사용자)별 사용량 Top N · 직전 대비 증감 · 주기 수집 결과와 메일 발송 이력', adminOnly: true },
   { k: 'diskadd', icon: '🧩', label: '디스크 추가 자동화', desc: 'VM 디스크 추가 할당 자동화 (준비 중)', disabled: true, comingSoon: true },

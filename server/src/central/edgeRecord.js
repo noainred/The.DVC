@@ -26,6 +26,7 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js'; // v2.606 TIM2606-02
+import { registerStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-08
 
 export const RESERVED_IDS = new Set(['__proto__', 'constructor', 'prototype']);
 export const EDGE_DEVICE_MAX_BYTES = Math.max(64 * 1024, Number(process.env.CENTRAL_EDGE_DEVICE_MAX_BYTES) || 1024 * 1024);
@@ -187,6 +188,7 @@ export function admitAgent(map, key, { atOf = (r) => r?.at, now = Date.now(), ma
  * @returns {{ save(): void, flushSync(): void }}
  */
 export function createDebouncedWriter(file, serialize, { delayMs = 2_000, name = path.basename(file) } = {}) {
+  registerStateFile(file); // v2.613 PERSIST2613-08: 이 파일은 수신 캐시(상태)다 — 백업 변경 감시·엣지 설정 push 가 설정으로 보지 않게 스스로 등록
   let writeTimer = null; let writing = false; let dirty = false;
   const flushSync = () => {
     if (!writeTimer && !dirty && !writing) return; // 비동기 쓰기가 도는 중이면 그 rename 은 종료 뒤 오지 않는다 — 동기로 다시 쓴다

@@ -273,3 +273,37 @@ describe('v2.612 감사 그룹 B', () => {
     expect(T.deviceCountLabel({ devices: [1, 2] }, 1, 2)).toContain('전체');
   });
 });
+
+describe('v2.613 CONTRACT2613-04 — 위임 CVP 의 보고 없음은 kind 별로 말한다(구버전은 기다려도 안 된다)', () => {
+  const readSrc = (p) => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), p), 'utf8');
+  it('서버 CVP_EDGE_KINDS 와 웹 문구 키가 1:1', () => {
+    const src = readSrc('../../../../server/src/central/cvpEdge.js');
+    const m = src.match(/export const CVP_EDGE_KINDS = Object\.freeze\(\[([^\]]*)\]\)/);
+    expect(m).toBeTruthy();
+    const serverKinds = [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]).sort();
+    expect([...T.CVP_EDGE_KINDS].sort()).toEqual(serverKinds);
+  });
+  it('old-version → bad + 업그레이드 안내(버전 둘 다 문구에) · unknown-version/silent → warn · waiting → muted', () => {
+    const old = T.serverState({ agent: 'e1', status: { pending: true, ok: null, kind: 'old-version', edgeVersion: '2.607.0', minEdgeVersion: '2.608.0' } });
+    expect(old.tone).toBe('bad');
+    expect(old.label).toContain('구버전');
+    expect(old.detail).toContain('2.607.0');
+    expect(old.detail).toContain('2.608.0');
+    expect(old.detail).toContain('업그레이드');
+    expect(old.detail).not.toContain('기다리는 중');
+    const unk = T.serverState({ status: { pending: true, ok: null, kind: 'unknown-version', edgeVersion: '' } });
+    expect(unk.tone).toBe('warn');
+    expect(unk.label).toContain('버전 미상');
+    const sil = T.serverState({ status: { pending: true, ok: null, kind: 'silent', edgeVersion: '2.613.0' } });
+    expect(sil.tone).toBe('warn');
+    expect(sil.detail).toContain('엣지 로그');
+    const wait = T.serverState({ status: { pending: true, ok: null, kind: 'waiting', edgeVersion: '2.613.0' } });
+    expect(wait.tone).toBe('muted');
+    expect(wait.label).toBe('수집 기록 없음');
+  });
+  it('kind 가 없는(구버전 중앙·중앙 직접) 응답과 수집 꺼짐은 예전 문구 그대로', () => {
+    expect(T.serverState({ status: {} }).label).toBe('수집 기록 없음');
+    expect(T.serverState({ status: { pending: true, ok: null, note: 'x' } }).detail).toContain('기다리는 중');
+    expect(T.serverState({ status: { pending: true, ok: null, kind: 'old-version' } }, { enabled: false }).detail).toContain('꺼져');
+  });
+});

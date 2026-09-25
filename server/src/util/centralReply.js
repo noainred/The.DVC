@@ -1,0 +1,111 @@
+/**
+ * util/centralReply.js — 엣지 push 가 중앙 응답의 '일부만 받음' 요약을 읽는 공용 헬퍼(v2.606 EDGE2606-03).
+ *
+ * v2.613 EDGE2613-05: `agent/centralReply.js` 에서 옮겼다(옛 경로는 재수출). storage·sanswitch·pdu push 가 각자 들고
+ *   있던 `readDropSummary` 사본 3벌을 없애고 이 하나로 읽는다 — 사본마다 읽는 필드 집합이 달랐다(sanswitch 만
+ *   `coerced`·`zoningTrimmed`). 이제 `dropped`(사유별 뺀 개수)·`coerced`·`zoningTrimmed`·`evicted` 도 여기서 읽는다.
+ *
+ * 왜: 중앙은 200 이어도 일부를 뺄 수 있다 — curuser `rejected:[vcenterId]` · gpu-guest-data `unregistered`·
+ *   `omitted:{hosts,vms}`·`unverifiedAgent` · fleet `omitted`·`vcenterBlanked` · inventory `rejected`·`dropped`·`held` ·
+ *   agent-config `omitted`·`rejectedFiles` · storage/sanswitch/pdu-data `rejected`+`dropped`·`coerced`·`zoningTrimmed`·`evicted` ·
+ *   guest-disk `dropped:{vms,parts}`(v2.613 CONTRACT2613-03). 예전에는 push 가 `res.ok` 만 보고 '보냈다(N건)' 로
+ *   상태·콘솔에 남겼다 — 중앙 화면에는 없는데 엣지 로그 화면은 성공이다. 순수 판정 + 조절된 콘솔 경고만 둔다
+ *   (전송 로직은 각 push 가 갖는다).
+ */
+import { createChangeLogger } from './logThrottle.js';
+
+const numOf = (v) => {
+  if (v == null || v === '' || typeof v === 'boolean') return 0;
+  if (Array.isArray(v)) return v.length;
+  if (typeof v === 'object') return Object.values(v).reduce((a, x) => a + numOf(x), 0);
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+};
+const plainObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null);
+
+/** 응답 본문을 JSON 으로 읽는다(실패·비 JSON 이면 null). 본문은 한 번만 읽을 수 있으므로 이 함수만 부를 것. */
+export async function readCentralReply(res) {
+  try {
+    const j = await res.json();
+    return j && typeof j === 'object' && !Array.isArray(j) ? j : null;
+  } catch { return null; }
+}
+
+/**
+ * 응답 JSON → 거절 요약. 뺀 것이 없으면 null. 순수 — 테스트가 고정.
+ * @returns {null|{rejected:number, rejectedIds?:string[], dropped:object|null, unregistered:number, omitted:number,
+ *   vcenterBlanked:number, held:boolean, rejectedFiles:number, unverifiedAgent:boolean, coerced:number,
+ *   zoningTrimmed:number, evicted:string|null, text:string}}
+ */
+export function dropSummaryOf(j) {
+  if (!j || typeof j !== 'object') return null;
+  const dropped = plainObj(j.dropped);
+  const rejected = numOf(j.rejected) || (dropped ? numOf(dropped) : 0);
+  return finalize({
+    rejected,
+    rejectedIds: Array.isArray(j.rejected) ? j.rejected.slice(0, 20).map((x) => String(x).slice(0, 128)) : [],
+    // v2.613 EDGE2613-05: 사유별 뺀 개수(storage/sanswitch/pdu-data `dropped:{notObject,…}` · guest-disk `dropped:{vms,parts}`)
+    dropped,
+    unregistered: numOf(j.unregistered),
+    omitted: numOf(j.omitted),
+    vcenterBlanked: numOf(j.vcenterBlanked),
+    held: j.held === true,
+    rejectedFiles: Number.isFinite(Number(j.rejectedFileCount)) && Number(j.rejectedFileCount) > 0 ? Number(j.rejectedFileCount) : numOf(j.rejectedFiles),
+    unverifiedAgent: j.unverifiedAgent === true,
+    // v2.613 EDGE2613-05: 표시 필드의 객체 값을 null 로 바꿔 받은 장비 수 · 조닝을 잘라 받은 장비 수 · 상한으로 밀어낸 엣지 이름
+    coerced: numOf(j.coerced),
+    zoningTrimmed: numOf(j.zoningTrimmed),
+    evicted: typeof j.evicted === 'string' && j.evicted ? j.evicted.slice(0, 64) : null,
+  });
+}
+
+/** `dropped` 객체를 '사유 n · 사유 m' 글자로(0 은 뺀다). 비었으면 '사유 미상'. */
+export function dropText(d) {
+  return Object.entries(plainObj(d) || {}).filter(([, n]) => Number(n) > 0).map(([k, n]) => `${k} ${n}`).join(' · ') || '사유 미상';
+}
+
+function finalize(out) {
+  const parts = [];
+  if (out.rejected) parts.push(`거부 ${out.rejected}${out.rejectedIds.length ? `(${out.rejectedIds.join(', ')})` : out.dropped ? `(${dropText(out.dropped)})` : ''}`);
+  if (out.unregistered) parts.push(`중앙 미등록 ${out.unregistered}`);
+  if (out.omitted) parts.push(`상한 초과로 제외 ${out.omitted}`);
+  if (out.vcenterBlanked) parts.push(`vCenter 귀속 비움 ${out.vcenterBlanked}`);
+  if (out.held) parts.push('중앙이 직전 목록을 유지(held)');
+  if (out.rejectedFiles) parts.push(`파일 거부 ${out.rejectedFiles}`);
+  if (out.unverifiedAgent) parts.push('엣지 이름 미검증');
+  if (out.coerced) parts.push(`표시 필드 정정 ${out.coerced}`);
+  if (out.zoningTrimmed) parts.push(`조닝 일부만 저장 ${out.zoningTrimmed}`);
+  if (out.evicted) parts.push(`중앙이 오래 조용한 엣지 ‘${out.evicted}’ 보관분을 내림`);
+  if (!parts.length) return null;
+  return { ...out, text: parts.join(' · ') };
+}
+
+/** 두 요약을 합친다(청크 여러 개). null 허용. */
+export function mergeDrop(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  const n = (k) => (a[k] || 0) + (b[k] || 0);
+  let dropped = null;
+  if (a.dropped || b.dropped) {
+    dropped = {};
+    for (const src of [a.dropped, b.dropped]) for (const [k, v] of Object.entries(plainObj(src) || {})) dropped[k] = (dropped[k] || 0) + (Number(v) || 0);
+  }
+  return finalize({
+    rejected: n('rejected'),
+    rejectedIds: [...new Set([...(a.rejectedIds || []), ...(b.rejectedIds || [])])].slice(0, 20),
+    dropped,
+    unregistered: n('unregistered'), omitted: n('omitted'), vcenterBlanked: n('vcenterBlanked'),
+    held: Boolean(a.held || b.held), rejectedFiles: n('rejectedFiles'), unverifiedAgent: Boolean(a.unverifiedAgent || b.unverifiedAgent),
+    coerced: n('coerced'), zoningTrimmed: n('zoningTrimmed'), evicted: a.evicted || b.evicted || null,
+  });
+}
+
+const warnLog = createChangeLogger({ windowMs: 10 * 60_000, maxKeys: 64 });
+
+/** 뺀 것이 있으면 콘솔에 남긴다(같은 사유는 10분에 1줄). 반환: 찍었는지. */
+export function warnDrop(tag, summary, now = Date.now()) {
+  if (!summary) return false;
+  if (!warnLog(tag, summary.text, now)) return false;
+  console.warn(`[${tag}] 중앙이 일부를 받지 않았습니다 — ${summary.text} (전송은 성공했지만 중앙 화면에는 이만큼 없습니다)`);
+  return true;
+}

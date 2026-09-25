@@ -1,6 +1,6 @@
 // VmInfoTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
-import { fetchJson, postJson } from '../../api.js';
+import { fetchJson, postJson, hasRole } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, EntityDetail } from '../../components/ui.jsx';
 import { Card, tb, useTool } from './shared.jsx';
 
@@ -34,8 +34,7 @@ export function VmTools({ scope }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   // Tools 업그레이드는 서버가 admin/operator만 허용 — viewer에게 버튼을 숨겨 403 체험 방지.
-  const [canManage, setCanManage] = useState(false);
-  useEffect(() => { fetchJson('/auth/me').then((r) => setCanManage(['admin', 'operator'].includes(r.user?.role))).catch(() => {}); }, []);
+  const canManage = hasRole('admin', 'operator'); // v2.613 WEB2613-01: 역할은 App 이 채운 현재 사용자 객체에서 읽는다(화면이 /auth/me 를 다시 부르지 않는다).
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 
