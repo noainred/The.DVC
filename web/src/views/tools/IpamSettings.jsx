@@ -462,7 +462,7 @@ export function ScanStatusModal({ onClose }) {
   const [err, setErr] = useState(null);
   const deniedRef = useRef(false); // v2.611 LEFT2611-07: 403 은 다시 물어도 같다 — 폴링을 멈춘다
   const load = () => { if (deniedRef.current) return; fetchJson('/admin/ipam/scan/status').then(setD).catch((e) => { setErr(e.message); if (e?.status === 403) deniedRef.current = true; }); };
-  useEffect(() => { load(); const t = setInterval(load, 2000); return () => clearInterval(t); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(); const t = setInterval(load, 2000); return () => clearInterval(t); }, []);
   const fmt = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
   const dur = (ms) => (ms == null ? '—' : ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}초`);
   const st = d?.status; const runs = d?.runs || [];
