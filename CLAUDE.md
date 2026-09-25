@@ -3748,6 +3748,23 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - ⚠ **이미 저장돼 있던 값은 목록에 없어도 통과시킨다**(엣지가 아직 통신 전·DataCenter 삭제). 막으면 다른 칸만 고치는 저장이
       막히고, 화면이 지우면 그 값이 조용히 바뀐다 — 드롭다운은 그 값을 '(목록에 없음)' 으로 따로 보여 준다.
     - 목록 원천은 SAN 스위치 폼과 같다(`knownAgentNames()`·`listDatacenters()`). 다른 도구 폼에 같은 요구가 오면 이 모듈을 쓸 것.
+  - ⚠⚠ **HPE iLO 는 iDRAC 스캔 모듈이 함께 찾는다 — 새 수집기를 만들지 않았다**(v2.610, 사용자 요청 "idarc 찾는 모듈에다가
+    id/pw 부분만 추가해서 ip 대역을 스캔할때 dell 서버와 hpe 서버를 한번에" + "스캔하면 HPE 서버가 몇 대라는 것을 리스트에"):
+    - 대역 엔트리에 `ilo: {username, password}`(선택). `password` 라는 필드 이름이라 secretVault 가 중첩 객체까지 봉인한다 —
+      **필드 이름을 바꾸지 말 것**(바꾸면 암호화 모드에서 평문이 된다). 저장 규칙은 iDRAC 비밀번호와 같다(빈 입력 유지 · 대역·엣지·
+      iLO 계정이 바뀌면 승계 안 함 — `droppedSecrets` 에 `iloPassword`).
+    - ⚠⚠ **벤더를 먼저 가르고 그 벤더 계정으로만 로그인한다**(`probeIdrac(…, {credsFor})`): 서비스 루트는 무인증이라 로그인 전에
+      벤더를 안다. HPE 에 Dell 계정을 보내면 매 스캔 iLO 에 실패 로그인이 쌓여 **계정이 잠긴다**. 계정이 없는 벤더는 로그인하지 않고
+      `noCreds`(인증 실패로 세지 않는다). iLO 계정이 없으면 예전 동작 그대로다(HPE = 미지원 서버).
+    - 실행 엔트리는 `scanRanges.scanEntryRuntime` 하나가 만든다 — 예전엔 세 곳(enabledScanRanges·수동 단건·법인 전체)이 각자 조립했다.
+      iLO 계정만 있는 대역도 스캔 대상이다(`scanEntryReady`).
+    - 등록: HPE 는 **iLO 계정 + `vendor:'hpe'`**(`registerScanned(…, {ilo})`). 계정 없는 벤더 항목은 등록하지 않고 `skippedNoCreds`.
+      전력·센서·인벤토리는 표준 Redfish(`/Chassis/*/Power`·`Thermal`·`Systems`)라 그대로 돌고, Dell 전용 racadm 대체 경로는
+      `bmusage/targets.js` 가 HPE 에 걸지 않는다.
+    - 'HPE N대' 는 `hpeDetected`(서비스 루트 판별 — 로그인 무관)다. 구버전 엣지 회신은 미지원 목록 `vendor=hpe` 개수라 하한이고
+      `hpeDetectedApprox` 로 '대 이상' 을 붙인다(`central/idracScanJobs.hpeCountsOf`).
+    - ⚠ 정직 기록: 실제 iLO 장비로 확인하지 못했다(가짜 Redfish 서버). `scanForIdracs` 는 IP 리터럴 + 루프백 차단이라 단위 테스트가
+      probe·등록·저장·잡 단위로만 고정한다. 수동 임시 스캔 창·스캔 대역 CSV 는 iLO 계정을 아직 다루지 않는다.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

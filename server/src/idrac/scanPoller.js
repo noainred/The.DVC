@@ -21,7 +21,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; /
 import { scanForIdracs } from './scan.js';
 import { registerScanned } from './registry.js';
 import { pollNow } from './poller.js';
-import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw, scanRangesForDatacenter, lastScanCycleAt } from './scanRanges.js';
+import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw, scanRangesForDatacenter, lastScanCycleAt, scanEntryRuntime, scanEntryReady } from './scanRanges.js';
 import { appendIdracScanLog } from './scanLog.js';
 import { enqueueIdracScan, cancelPendingIdracScanJobs } from '../central/idracScanJobs.js';
 import { pushIdracScan } from '../central/idracScanPush.js';
@@ -84,19 +84,20 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
   if (e.agent && e.agent !== '__local__') {
     // dispatch=push: 중앙이 수집 서버 URL로 엣지에 직접 스캔 전송(엣지 폴링 불필요). 중앙 토큰 불요.
     if (e.dispatch === 'push') {
-      const pr = pushIdracScan(e.agent, { ips, username: e.username, password: e.password, datacenterId: e.datacenterId, noRegister: false, service: e.service, trigger, rangeId: e.id || '' });
+      const pr = pushIdracScan(e.agent, { ips, username: e.username, password: e.password, ilo: e.ilo || null, datacenterId: e.datacenterId, noRegister: false, service: e.service, trigger, rangeId: e.id || '' });
       return { datacenterId: e.datacenterId, delegated: true, dispatch: 'push', agent: e.agent, reqId: pr.reqId || null, error: pr.ok ? null : pr.reason };
     }
     // 기본(poll): 에이전트가 중앙으로 폴링해 잡을 인출. 중앙 토큰 필요.
     if (!config.central.token) return { datacenterId: e.datacenterId, delegated: false, error: '중앙 토큰 미설정으로 위임 불가' };
-    const reqId = enqueueIdracScan(e.agent, { ips, username: e.username, password: e.password, datacenterId: e.datacenterId, noRegister: false, service: e.service, trigger, rangeId: e.id || '' });
+    const reqId = enqueueIdracScan(e.agent, { ips, username: e.username, password: e.password, ilo: e.ilo || null, datacenterId: e.datacenterId, noRegister: false, service: e.service, trigger, rangeId: e.id || '' });
     return { datacenterId: e.datacenterId, delegated: true, dispatch: 'poll', agent: e.agent, reqId: reqId || null, error: reqId ? null : '위임 잡 적재 실패(대기 한도 초과)' };
   }
   // 중앙 직접 스캔 → 발견한 iDRAC을 그 법인(DataCenter)에 등록(법인 DB).
   // v2.591(감사 F3): 주기 스캔은 직전 인증 실패 IP·주 폴러 정지 서버를 건너뛴다(수동은 전부 시도하되 기록한다).
   const started = Date.now();
-  const authPolicy = makeScanAuthPolicy({ rangeId: e.id || e.datacenterId || '', username: e.username, password: e.password, periodic: trigger === 'periodic' });
-  const r = await scanForIdracs({ ips, username: e.username, password: e.password, onProgress, shouldAbort: () => stopRequested, authPolicy });
+  const ilo = e.ilo && e.ilo.username && e.ilo.password ? e.ilo : null;   // v2.610: HPE iLO 계정(선택)
+  const authPolicy = makeScanAuthPolicy({ rangeId: e.id || e.datacenterId || '', username: e.username, password: e.password, ilo, periodic: trigger === 'periodic' });
+  const r = await scanForIdracs({ ips, username: e.username, password: e.password, ilo, onProgress, shouldAbort: () => stopRequested, authPolicy });
   let registered = 0;
   // v2.495: 비-Dell(미지원) 서버 보관 — 중앙 직접 스캔은 agent '' 키. 중단된 스캔은 부분 결과라 저장하지 않는다(직전 보존).
   if (!r.aborted) {
@@ -110,7 +111,7 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
   const partial = r.aborted || r.truncated || (r.authSkipped || 0) > 0;
   const effectiveMode = (e.mode === 'replace-datacenter' && !partial) ? 'replace-datacenter' : 'merge';
   if (r.found.length) {
-    const reg = registerScanned(r.found, e.username, e.password, effectiveMode, '', e.datacenterId);
+    const reg = registerScanned(r.found, e.username, e.password, effectiveMode, '', e.datacenterId, { ilo });
     if (reg.ok) registered = (reg.added || 0) + (reg.updated || 0);
   }
   // v2.591(감사 C5): 무응답·인증실패·소요를 싣는다 — 위임 회신(central/idracScanJobs.js)과 같은 모양. 예전에는 빠져
@@ -120,6 +121,8 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
     modeDowngraded: e.mode === 'replace-datacenter' && partial, unsupported: r.unsupportedCount || 0,
     unreachable: r.unreachable ?? null, authFailed: r.authFailed ?? null, authFailReason: r.authFailReason || null,
     blocked: r.blocked ?? null, authSkipped: r.authSkipped || 0, authSkippedRegistered: r.authSkippedRegistered || 0,
+    // v2.610: 벤더별 — iLO 계정이 있는 대역만 hpe 값이 의미를 갖는다(없으면 iloEnabled:false).
+    iloEnabled: !!r.iloEnabled, dellFound: r.dellFound ?? r.found.length, hpeFound: r.hpeFound || 0, hpeDetected: r.hpeDetected || 0, hpeAuthFailed: r.hpeAuthFailed || 0, noCreds: r.noCreds || 0,
     durationMs: Date.now() - started,
   };
 }
@@ -135,18 +138,17 @@ export async function runIdracScanOnce(opts = {}) {
   if (opts.id) {
     // 수동 단건(엔트리 하나): enabled가 아니어도 실행하되 대역/계정/비밀번호는 필요.
     const raw = getScanRangeRaw(opts.id);
-    if (!raw || !(raw.ranges || []).length || !String(raw.username || '').trim()) {
-      return { ok: false, reason: '대상 항목의 대역/계정이 없습니다.' };
+    // v2.610: 계정은 iDRAC 또는 HPE iLO 중 하나만 있어도 된다(둘 다 없을 때만 거절).
+    if (!raw || !(raw.ranges || []).length) return { ok: false, reason: '대상 항목의 대역이 없습니다.' };
+    if (!scanEntryReady(raw)) {
+      return { ok: false, reason: '대상 항목에 스캔 계정이 없습니다 — iDRAC 계정·비밀번호 또는 HPE iLO 계정·비밀번호를 스캔 대역 수정에서 입력하세요.' };
     }
-    if (!String(raw.password || '')) {
-      return { ok: false, reason: '대상 항목의 iDRAC 비밀번호가 없습니다(스캔 대역 수정에서 입력하세요).' };
-    }
-    entries = [{ id: raw.id, datacenterId: String(raw.datacenterId || '').trim(), service: raw.service || '', ranges: (raw.ranges || []).filter(Boolean), username: String(raw.username).trim(), password: raw.password || '', agent: String(raw.agent || '').trim(), dispatch: raw.dispatch === 'push' ? 'push' : 'poll', mode: raw.mode || 'merge' }];
+    entries = [scanEntryRuntime(raw.id, raw)];
   } else if (opts.datacenterId) {
     // 한 법인의 모든 서비스 엔트리(비밀번호/대역/계정 갖춘 것만).
     entries = scanRangesForDatacenter(opts.datacenterId)
-      .filter((e) => (e.ranges || []).filter(Boolean).length && String(e.username || '').trim() && String(e.password || ''))
-      .map((e) => ({ id: e.id, datacenterId: String(e.datacenterId || '').trim(), service: e.service || '', ranges: (e.ranges || []).filter(Boolean), username: String(e.username).trim(), password: e.password || '', agent: String(e.agent || '').trim(), dispatch: e.dispatch === 'push' ? 'push' : 'poll', mode: e.mode || 'merge' }));
+      .filter((e) => scanEntryReady(e))
+      .map((e) => scanEntryRuntime(e.id, e));
     if (!entries.length) return { ok: false, reason: '대상 법인에 스캔 가능한 대역/계정이 없습니다.' };
   }
   if (!entries.length) { lastRun = { at: Date.now(), skipped: '대상 없음' }; return { ok: false, reason: '스캔할 대역이 없습니다.' }; }
@@ -183,6 +185,8 @@ export async function runIdracScanOnce(opts = {}) {
             ...(r.delegated ? {} : {
               unreachable: r.unreachable ?? null, authFailed: r.authFailed ?? null,
               authSkipped: r.authSkipped || 0, durationMs: r.durationMs ?? null,
+              // v2.610: HPE 판별·등록 대수 — 화면 '최근 결과' 가 'HPE N대' 를 말한다.
+              hpeDetected: r.hpeDetected || 0, hpeDetectedApprox: false, hpeFound: r.hpeFound || 0, iloEnabled: !!r.iloEnabled,
             }),
             delegated: !!r.delegated, agent: r.agent || null, error: r.error || null,
             ...(r.delegated ? { reqId: r.reqId || '', dispatch: r.dispatch || e.dispatch || 'poll', dispatchedAt: Date.now(), pending: true } : {}),
@@ -224,15 +228,12 @@ export function startIdracScanNow(opts = {}) {
   // 버려지므로, 검증 실패를 '시작됨'으로 응답하지 않도록 사전에 걸러 사유를 그대로 돌려준다.
   if (opts.id) {
     const raw = getScanRangeRaw(opts.id);
-    if (!raw || !(raw.ranges || []).length || !String(raw.username || '').trim()) {
-      return { ok: false, reason: '대상 항목의 대역/계정이 없습니다.' };
-    }
-    if (!String(raw.password || '')) {
-      return { ok: false, reason: '대상 항목의 iDRAC 비밀번호가 없습니다(스캔 대역 수정에서 입력하세요).' };
+    if (!raw || !(raw.ranges || []).length) return { ok: false, reason: '대상 항목의 대역이 없습니다.' };
+    if (!scanEntryReady(raw)) {
+      return { ok: false, reason: '대상 항목에 스캔 계정이 없습니다 — iDRAC 계정·비밀번호 또는 HPE iLO 계정·비밀번호를 스캔 대역 수정에서 입력하세요.' };
     }
   } else if (opts.datacenterId) {
-    const list = scanRangesForDatacenter(opts.datacenterId)
-      .filter((e) => (e.ranges || []).filter(Boolean).length && String(e.username || '').trim() && String(e.password || ''));
+    const list = scanRangesForDatacenter(opts.datacenterId).filter((e) => scanEntryReady(e));
     if (!list.length) return { ok: false, reason: '대상 법인에 스캔 가능한 대역/계정이 없습니다.' };
   } else if (!enabledScanRanges().length) {
     return { ok: false, reason: '스캔할 대역이 없습니다.' };

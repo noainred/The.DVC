@@ -60,7 +60,7 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
               <React.Fragment key={m.k}>
                 {i > 0 && ' · '}
                 {m.k}{' '}
-                <b style={m.accent === 'red' ? { color: '#f87171' } : undefined}>{m.n.toLocaleString()}</b>
+                <b style={m.accent === 'red' ? { color: '#f87171' } : m.accent === 'blue' ? { color: '#93c5fd' } : undefined}>{m.n.toLocaleString()}</b>
                 {m.unit}
               </React.Fragment>
             ))}
@@ -152,8 +152,9 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
       {ivMsg && <div className="muted" style={{ fontSize: 12, marginBottom: 6, color: '#93c5fd' }}>{ivMsg}</div>}
 
       <div className="muted" style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 8 }}>
-        <b>법인(DataCenter)별</b>로 iDRAC IP 대역과 계정을 저장하면, 주기 스캐너가 각 대역의 Redfish에 접속해 <b>Dell iDRAC만 골라</b>
-        해당 <b>법인 DB로 자동 등록</b>합니다(vCenter와 독립). 형식: CIDR(10.0.0.0/24)·범위(10.0.0.1-50)·단일 IP, 한 줄에 하나.
+        <b>법인(DataCenter)별</b>로 iDRAC IP 대역과 계정을 저장하면, 주기 스캐너가 각 대역의 Redfish에 접속해 <b>Dell iDRAC 을 골라</b>
+        해당 <b>법인 DB로 자동 등록</b>합니다(vCenter와 독립). <b>HPE iLO 계정</b>을 함께 넣으면 같은 스캔이 <b>HPE 서버도 찾아 등록</b>합니다 —
+        인증 없이 벤더를 먼저 판별하고 그 벤더 계정으로만 로그인합니다. iLO 계정이 없어도 '최근 결과' 에 <b>HPE 대수</b>는 표시됩니다. 형식: CIDR(10.0.0.0/24)·범위(10.0.0.1-50)·단일 IP, 한 줄에 하나.
         등록 모드는 기본 <b>병합</b>(기존 유지+추가/갱신)이며, 스캔이 일시적으로 0건이면 기존 등록을 지우지 않습니다.
         중앙이 못 닿는 사설망은 <b>스캔 수행 Agent</b>를 지정해 현장 에이전트가 대행합니다.
         <b> 스캔 방식</b>은 <b>에이전트 폴링</b>(엣지가 중앙으로 폴링해 잡 인출 — 엣지에 CENTRAL_URL/토큰 필요)과
@@ -202,7 +203,7 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
           </div>
           <div className="flex gap wrap" style={{ alignItems: 'flex-end', marginTop: 8 }}>
             <div style={{ flex: '1 1 150px' }}>
-              <label className="muted" style={{ fontSize: 11.5 }}>iDRAC 계정 *</label>
+              <label className="muted" style={{ fontSize: 11.5 }}>iDRAC 계정(Dell)</label>
               <input className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="root" />
             </div>
             <div style={{ flex: '1 1 150px' }}>
@@ -219,6 +220,20 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
                   {showPw ? '가림' : '표시'}
                 </button>
               </div>
+            </div>
+            {/* v2.610: HPE iLO 계정(선택) — 같은 대역 스캔이 Dell 과 HPE 를 한 번에 찾는다. 벤더를 먼저 가려(무인증)
+                그 벤더 계정으로만 로그인하므로 HPE 에 Dell 계정이 가지 않는다. */}
+            <div style={{ flex: '1 1 150px' }}>
+              <label className="muted" style={{ fontSize: 11.5 }}>HPE iLO 계정(선택)</label>
+              <input className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.iloUsername || ''} autoComplete="off"
+                onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, iloUsername: v })); }} placeholder="Administrator" />
+            </div>
+            <div style={{ flex: '1 1 150px' }}>
+              <label className="muted" style={{ fontSize: 11.5 }}>iLO 비밀번호 {form.iloHasPassword ? '(저장됨, 변경 시만 입력)' : ''}</label>
+              <input className="input" type={showPw ? 'text' : 'password'} autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                style={{ width: '100%', padding: '8px 10px' }} value={form.iloPassword || ''}
+                onChange={(e) => { const v = e.target.value; setForm((f) => ({ ...f, iloPassword: v })); }}
+                placeholder={form.iloHasPassword ? '•••• (유지)' : ''} />
             </div>
             <div style={{ flex: '1 1 160px' }}>
               <label className="muted" style={{ fontSize: 11.5 }}>스캔 수행 Agent</label>
@@ -269,7 +284,7 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
       )}
 
       <div className="table-wrap">
-        <STable>
+        <STable minWidth={960}>
           <thead><tr>
             <Th k="name">법인(DataCenter)</Th><Th k="service">서비스</Th><Th k="ranges">대역</Th><Th k="username">계정</Th><Th k="agent">스캔 주체</Th><Th k="enabled">주기</Th><Th k="lastRun">최근 결과</Th><th className="right">작업</th>
           </tr></thead>
@@ -280,7 +295,8 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
                 <td><b>{dcName(e.datacenterId)}</b>{dcName(e.datacenterId) !== e.datacenterId && <span className="muted" style={{ fontSize: 11 }}> ({e.datacenterId})</span>}</td>
                 <td>{e.service ? <span className="muted">{e.service}</span> : <span className="muted" style={{ opacity: 0.5 }}>—</span>}</td>
                 <td className="muted" title={(e.ranges || []).join('\n')}>{(e.ranges || []).length}개</td>
-                <td className="muted">{e.username || '—'}{e.hasPassword ? '' : <span style={{ color: 'var(--amber)' }} title="비밀번호 미설정 — 스캔 불가"> ⚠</span>}</td>
+                <td className="muted">{e.username || '—'}{(e.username && !e.hasPassword) ? <span style={{ color: 'var(--amber)' }} title="iDRAC 비밀번호 미설정 — Dell 스캔 불가"> ⚠</span> : ''}
+                  {e.iloUsername ? <div style={{ fontSize: 11 }} title="HPE iLO 계정 — 같은 스캔에서 HPE 서버도 찾습니다">iLO {e.iloUsername}{e.iloHasPassword ? '' : <span style={{ color: 'var(--amber)' }} title="iLO 비밀번호 미설정 — HPE 는 판별만 하고 등록하지 않음"> ⚠</span>}</div> : null}</td>
                 <td>{e.agent ? <>
                   <span className="badge" style={{ background: 'rgba(167,139,250,.2)', color: '#a78bfa' }}>{e.agent}</span>
                   {e.dispatch === 'push'
@@ -288,7 +304,7 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
                     : <span className="badge" style={{ marginLeft: 4, background: 'rgba(96,165,250,.15)', color: '#93c5fd' }} title="엣지가 중앙으로 폴링해 잡 인출">폴링</span>}
                 </> : <span className="muted">직접</span>}</td>
                 <td>{e.enabled ? <span className="badge green">포함</span> : <span className="badge gray">제외</span>}</td>
-                <td style={{ fontSize: 12 }}>{fmtRun(e.lastRun)}</td>
+                <td style={{ fontSize: 12, whiteSpace: 'normal', minWidth: 240 }}>{fmtRun(e.lastRun)}</td>
                 <td className="right">
                   <button className="logout-btn" style={{ padding: '5px 9px', fontSize: 12 }} disabled={busy || st.running} onClick={() => onScan(e)} title="이 서비스 대역만 지금 스캔">스캔</button>
                   {' '}<button className="logout-btn" style={{ padding: '5px 9px', fontSize: 12 }} disabled={busy} onClick={() => onEdit(e)}>수정</button>

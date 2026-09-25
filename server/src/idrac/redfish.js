@@ -340,7 +340,7 @@ const firstMember = (root) => (root?.Members || [])[0]?.['@odata.id'];
  *   { ok:true, isIdrac, dell, authFailed,        // reachable Redfish
  *     model, manufacturer, serviceTag, hostName }
  */
-export async function probeIdrac(host, username, password, timeoutMs = 3000) {
+export async function probeIdrac(host, username, password, timeoutMs = 3000, { credsFor = null } = {}) {
   let base = String(host).replace(/\/+$/, '');
   if (!/^https?:\/\//.test(base)) base = `https://${base}`;
   const opt = (extra) => ({ headers: { Accept: 'application/json', ...extra }, signal: AbortSignal.timeout(timeoutMs), dispatcher });
@@ -368,6 +368,17 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
   const vend = classifyBmcVendor({ root });
   if (vend.vendor === 'dell') dell = true;
   const vendorFields = () => ({ redfish: vend.redfish, vendor: vend.vendor, vendorLabel: vend.label, vendorEvidence: vend.evidence, product: vend.product });
+  // v2.610: 벤더별 계정 선택(Dell iDRAC + HPE iLO 동시 스캔). 서비스 루트는 **인증 없이** 받았으므로 로그인하기 전에
+  //   벤더를 안다 — 그 벤더의 계정으로 **한 번만** 로그인한다. HPE 에 Dell 계정을 보내면 매 스캔마다 iLO 에 실패 로그인이
+  //   쌓여 계정이 잠긴다. credsFor 가 null 을 주면 로그인하지 않고 `noCreds` 로 돌려준다(시도하지 않은 것 — 인증 실패가 아니다).
+  const bmcKind = dell ? 'dell' : (vend.vendor || 'unknown');
+  if (typeof credsFor === 'function') {
+    const c = credsFor(bmcKind);
+    if (!c || !c.username || !c.password) return { ok: true, isIdrac: dell, dell, authFailed: false, noCreds: true, credSet: '', ...vendorFields() };
+    username = c.username; password = c.password;
+  }
+  const credSet = typeof credsFor === 'function' ? (bmcKind === 'hpe' ? 'ilo' : 'idrac') : '';
+  const bmcName = bmcKind === 'hpe' ? 'iLO' : 'iDRAC';
 
   // 2) System identity (with auth). rawGet이 Basic → Digest → 세션 토큰 순으로 자동 시도한다.
   let model = '', manufacturer = '', serviceTag = '', hostName = '', authHint = '';
@@ -387,11 +398,11 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
       const lockish = /lock|attempt|exceed|잠금|blocked|denied/i.test(idracMsg);
       const privish = /privile|permission|not allow|권한|access/i.test(idracMsg);
       authHint = idracMsg
-        ? (lockish ? `계정 잠금 추정 — iDRAC: "${idracMsg}"`
-          : privish ? `로그인 권한 없음 추정 — iDRAC: "${idracMsg}"`
-            : `자격증명 거부 — iDRAC: "${idracMsg}"`)
-        : '자격증명 거부 — Basic·Digest·세션 인증 모두 실패(사용자/비밀번호/로그인 권한/계정 잠금 확인)';
-      return { ok: true, isIdrac: dell, dell, authFailed: true, authHint, ...vendorFields() };
+        ? (lockish ? `계정 잠금 추정 — ${bmcName}: "${idracMsg}"`
+          : privish ? `로그인 권한 없음 추정 — ${bmcName}: "${idracMsg}"`
+            : `자격증명 거부 — ${bmcName}: "${idracMsg}"`)
+        : `자격증명 거부${bmcName === 'iLO' ? '(iLO 계정)' : ''} — Basic·Digest·세션 인증 모두 실패(사용자/비밀번호/로그인 권한/계정 잠금 확인)`;
+      return { ok: true, isIdrac: dell, dell, authFailed: true, authHint, credSet, ...vendorFields() };
     }
     if (sres.ok) {
       const sroot = JSON.parse(await readTextCapped(sres, PROBE_SYSTEMS_MAX_BYTES, 'Systems'));   // v2.606: 상한(1MB)
@@ -412,7 +423,7 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000) {
   const vend2 = (vend.vendor === 'unknown' && (manufacturer || model)) ? classifyBmcVendor({ root, manufacturer, model }) : vend;
   if (vend2.vendor === 'dell') dell = true;
   return {
-    ok: true, isIdrac: dell, dell, authFailed: false, model, manufacturer, serviceTag, hostName,
+    ok: true, isIdrac: dell, dell, authFailed: false, model, manufacturer, serviceTag, hostName, credSet,
     redfish: vend2.redfish, vendor: dell ? 'dell' : vend2.vendor, vendorLabel: dell ? 'Dell' : vend2.label, vendorEvidence: vend2.evidence, product: vend2.product,
   };
 }

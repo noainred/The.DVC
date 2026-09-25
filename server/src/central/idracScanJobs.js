@@ -121,7 +121,8 @@ function newReqId() {
 }
 
 /** UI가 위임 스캔 요청 → reqId 반환. noRegister=true면 에이전트가 스캔만 하고 등록은 보류(UI 확인 후 등록). */
-export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, service = '', trigger = 'manual', rangeId = '' }) {
+export function enqueueIdracScan(agent, { ips, username, password, ilo = null, vcenterId = '', datacenterId = '', noRegister = false, service = '', trigger = 'manual', rangeId = '' }) {
+  ilo = iloOrNull(ilo);   // v2.610: HPE iLO 계정(선택)
   gc();
   const key = String(agent || '').trim().toLowerCase();
   if (!key) return null;
@@ -142,8 +143,9 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
       // 고쳐 재스캔했는데 옛 잡을 재사용해 틀린 비번으로 스캔되거나, noRegister 의도(등록 보류
       // ↔ 자동등록)가 뒤바뀐다. 다르면 기존 대기 잡을 새 값으로 갱신(가장 최근 의도 반영).
       if (String(jj.username || '') !== String(username || '') || String(jj.password || '') !== String(password || '')
+        || iloKey(jj.ilo) !== iloKey(ilo)
         || !!jj.noRegister !== !!noRegister || String(jj.vcenterId || '') !== String(vcenterId || '')) {
-        jj.username = username; jj.password = password; jj.noRegister = !!noRegister; jj.vcenterId = vcenterId;
+        jj.username = username; jj.password = password; jj.ilo = ilo; jj.noRegister = !!noRegister; jj.vcenterId = vcenterId;
         // v2.591: 주기/수동 구분도 가장 최근 의도로 — 수동 '지금 스캔' 이 대기 중인 주기 잡에 병합되면
         //   엣지가 그것을 주기로 보고 인증 정지 IP 를 건너뛴다(수동은 전부 시도해야 한다).
         if (trigger === 'manual') jj.trigger = 'manual';
@@ -160,10 +162,11 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
   // 총 IP 수를 미리 계산해 UI가 진행률 분모를 바로 표시할 수 있게 한다(스캔 max=2048 반영).
   let total = 0;
   try { total = Math.min(expandIpList(ips).ips.length, 2048); } catch { total = 0; }
-  const j = { reqId, agent, action: 'scan', ips, username, password, vcenterId, datacenterId, service, trigger, rangeId: String(rangeId || ''), noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } };
+  const j = { reqId, agent, action: 'scan', ips, username, password, ilo, vcenterId, datacenterId, service, trigger, rangeId: String(rangeId || ''), noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } };
   addEvent(j, `스캔 잡 생성 — 에이전트 '${agent}'${datacenterId ? ` · 법인 ${datacenterId}` : ''} · 대상 IP ${total}개. 에이전트 인출 대기 중.`);
   // 사용된 자격증명 지문(평문 아님) — 법인 간 비교로 "이 법인만 인증 실패" 원인 파악용.
   addEvent(j, `사용 자격증명: ${credFingerprint(username, password)} (평문 미기록 — 정상 법인과 계정/길이/지문 비교하세요)`);
+  if (ilo) addEvent(j, `HPE iLO 계정도 함께 사용: ${credFingerprint(ilo.username, ilo.password)} — Dell 과 HPE 를 한 번에 찾습니다.`);
   jobs.set(reqId, j);
   pend.add(reqId); byAgent.set(key, pend);
   return reqId;
@@ -176,7 +179,8 @@ export function enqueueIdracScan(agent, { ips, username, password, vcenterId = '
  * 폴링 큐(byAgent)에는 넣지 않는다 — 에이전트 인출 대상이 아님.
  * @returns reqId 또는 null(대기 한도 초과)
  */
-export function createPushScanJob(agent, { ips, username, password, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge', edgeUrl = '', service = '', trigger = 'manual', rangeId = '' }) {
+export function createPushScanJob(agent, { ips, username, password, ilo = null, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge', edgeUrl = '', service = '', trigger = 'manual', rangeId = '' }) {
+  ilo = iloOrNull(ilo);
   gc();
   // 인메모리 잡 총량 상한(폴링 큐와 별개) — 남용/누수 방지.
   if (jobs.size >= MAX_PENDING * 20) return null;
@@ -186,11 +190,12 @@ export function createPushScanJob(agent, { ips, username, password, vcenterId = 
   const now = Date.now();
   const j = {
     reqId, agent, action: 'scan', dispatch: 'push', edgeUrl,
-    ips, username, password, vcenterId, datacenterId, service, trigger, rangeId: String(rangeId || ''), noRegister: !!noRegister, mode: mode || 'merge',
+    ips, username, password, ilo, vcenterId, datacenterId, service, trigger, rangeId: String(rangeId || ''), noRegister: !!noRegister, mode: mode || 'merge',
     state: 'running', createdAt: now, takenAt: now, progress: { scanned: 0, total, at: now },
   };
   addEvent(j, `중앙→엣지 직접 전송(PUSH) 스캔 시작 — 에이전트 '${agent}'${datacenterId ? ` · 법인 ${datacenterId}` : ''} · 대상 IP ${total}개 · 엣지 ${edgeUrl || '(URL 미상)'}. 엣지 폴링 없이 중앙이 직접 실행합니다.`);
   addEvent(j, `사용 자격증명: ${credFingerprint(username, password)} (평문 미기록 — 정상 법인과 계정/길이/지문 비교하세요)`);
+  if (ilo) addEvent(j, `HPE iLO 계정도 함께 사용: ${credFingerprint(ilo.username, ilo.password)} — Dell 과 HPE 를 한 번에 찾습니다.`);
   jobs.set(reqId, j);
   return reqId;
 }
@@ -233,7 +238,7 @@ export function takeIdracScanJobs(agentName) {
     addEvent(j, `에이전트 '${j.agent}'가 잡을 인출 — 현지 스캔 시작(대기 ${Math.round((j.takenAt - j.createdAt) / 1000)}초, 시도 ${j.claims}/${MAX_CLAIMS}).`);
     // v2.591(감사 F3): trigger·rangeId 를 싣는다 — 엣지가 '주기 스캔이면 인증 정지 IP 를 건너뛴다' 를 판정한다.
     //   구버전 엣지는 두 필드를 모르므로 예전처럼 전부 시도한다(안전한 쪽).
-    out.push({ reqId, action: j.action || 'scan', ips: j.ips, username: j.username, password: j.password, vcenterId: j.vcenterId || '', datacenterId: j.datacenterId || '', noRegister: !!j.noRegister, found: j.found || undefined, mode: j.mode || 'merge', trigger: j.trigger === 'periodic' ? 'periodic' : 'manual', rangeId: j.rangeId || '' });
+    out.push({ reqId, action: j.action || 'scan', ips: j.ips, username: j.username, password: j.password, vcenterId: j.vcenterId || '', datacenterId: j.datacenterId || '', noRegister: !!j.noRegister, found: j.found || undefined, mode: j.mode || 'merge', trigger: j.trigger === 'periodic' ? 'periodic' : 'manual', rangeId: j.rangeId || '', ...(j.ilo ? { ilo: j.ilo } : {}) });
   }
   byAgent.delete(key);
   return out;
@@ -388,7 +393,9 @@ export function setIdracScanResult(reqId, rawData = {}) {
   // 예전에는 스캔 로그에만 남고 표는 '위임(…) · 시각' 에서 멈춰 몇 대를 찾았는지 알 수 없었다.
   try {
     const foundN = data.foundCount ?? (Array.isArray(data.found) ? data.found.length : 0);
+    const hv = hpeCountsOf(data);
     recordScanRangeRunByReqId(reqId, {
+      ...(data.error ? {} : hv),   // v2.610: HPE 판별·등록 대수(구버전 엣지는 미지원 목록에서 하한으로 센다)
       pending: false, ok: !data.error,
       scanned: data.scanned ?? null, found: data.error ? null : foundN, registered: data.error ? null : (data.registered || 0),
       unreachable: data.unreachable ?? null, authFailed: data.authFailed ?? null,
@@ -414,6 +421,7 @@ export function setIdracScanResult(reqId, rawData = {}) {
     // v2.495: 비-Dell Redfish 장비(HPE iLO 등). 화이트리스트에 넣지 않으면 엣지가 보내도 여기서 사라진다.
     unsupported: Array.isArray(data.unsupported) ? data.unsupported.slice(0, 200) : [],
     unsupportedCount: Number(data.unsupportedCount) || (Array.isArray(data.unsupported) ? data.unsupported.length : 0),
+    ...hpeCountsOf(data),   // v2.610
     unsupportedTruncated: !!data.unsupportedTruncated,
     registered: data.registered || 0,
     truncated: !!data.truncated,
@@ -568,3 +576,30 @@ export function listIdracScanJobs() {
 // 폴링 트래픽이 없어도(엣지가 인출만 하고 사라진 경우) 만료 claim이 재수확되도록 주기 실행.
 const reapTimer = setInterval(() => { try { reapClaims(); } catch { /* */ } }, 30_000);
 reapTimer.unref?.();
+
+/** v2.610: iLO 계정 정규화 — 둘 다 있을 때만 객체, 아니면 null(= iLO 스캔 안 함). */
+function iloOrNull(ilo) {
+  const u = String(ilo?.username ?? '').trim();
+  const p = typeof ilo?.password === 'string' ? ilo.password : '';
+  return (u && p) ? { username: u, password: p } : null;
+}
+const iloKey = (ilo) => (ilo ? `${ilo.username}\u0001${ilo.password}` : '');
+
+/**
+ * v2.610: 스캔 결과에서 HPE 대수를 뽑는다(아는 필드만, 숫자만).
+ *  - hpeDetected : 서비스 루트로 HPE 로 판별된 대수(로그인 성패 무관). v2.610 미만 엣지는 이 값이 없어
+ *    **미지원 목록 중 vendor=hpe 개수**로 센다 — 목록 상한(200)이 있어 하한이므로 hpeDetectedApprox 로 밝힌다.
+ *  - hpeFound    : iLO 계정으로 로그인해 발견(등록 대상)한 대수.
+ */
+export function hpeCountsOf(data) {
+  const n = (v) => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? Math.floor(x) : null; };
+  const out = { hpeFound: n(data?.hpeFound) ?? 0, iloEnabled: data?.iloEnabled === true };
+  const det = n(data?.hpeDetected);
+  if (det != null) { out.hpeDetected = det; out.hpeDetectedApprox = false; }
+  else {
+    const list = Array.isArray(data?.unsupported) ? data.unsupported : [];
+    out.hpeDetected = list.filter((u) => u && typeof u === 'object' && u.vendor === 'hpe').length;
+    out.hpeDetectedApprox = Boolean(data?.unsupportedTruncated) || (n(data?.unsupportedCount) ?? 0) > list.length;
+  }
+  return out;
+}

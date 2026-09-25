@@ -54,6 +54,10 @@ export function describeScanRun(r, now = Date.now()) {
   const metrics = [{ k: '발견', n: found, unit: '대' }];
   if (r.registered != null) metrics.push({ k: '등록', n: Number(r.registered) || 0, unit: '대', accent: 'red' });
   if (r.scanned != null) metrics.push({ k: '스캔', n: Number(r.scanned) || 0, unit: '개' });
+  // v2.610(사용자 요청 '스캔하면 HPE 서버가 몇 대인지 리스트에'): 서비스 루트로 HPE 로 판별된 대수.
+  //   iLO 계정이 없으면 등록은 되지 않지만 몇 대 있는지는 보인다. 구버전 엣지 회신은 미지원 목록으로 센 하한이라 '이상' 을 붙인다.
+  const hpe = hpeInfo(r);
+  if (hpe) metrics.push({ k: 'HPE', n: hpe.n, unit: hpe.approx ? '대 이상' : '대', accent: 'blue' });
   const parts = metrics.map((m) => `${m.k} ${m.n}${m.unit}`);
   const extra = [];
   if (r.unreachable) extra.push(`무응답 ${r.unreachable}`);
@@ -62,6 +66,7 @@ export function describeScanRun(r, now = Date.now()) {
   if (r.blocked) extra.push(`차단대역 제외 ${r.blocked}`);
   // v2.591(감사 F3): 주기 스캔이 인증 실패 정지로 시도하지 않은 IP — 같은 이유로 개수를 말한다.
   if (r.authSkipped) extra.push(`인증정지 건너뜀 ${r.authSkipped}`);
+  if (hpe && hpe.note) extra.push(hpe.note);
   const d = dur(r.durationMs);
   // v2.591(감사 C5): 발견 0대인데 인증 실패가 있으면 '성공' 이 아니라 '확인 필요' 다 — 예전에는 중앙 직접
   //   스캔이 authFailed 를 싣지 않아 비밀번호가 틀려도 '성공 · 발견 0대' 로 보였다(빈 대역과 구분 불가).
@@ -91,4 +96,21 @@ export function scanLastRunSummary(lr) {
   if (lr.delegated) parts.push(`위임 ${lr.delegated}`);
   if (lr.authSkipped) parts.push(`인증정지 건너뜀 ${lr.authSkipped}`);
   return parts.join(' · ');
+}
+
+/**
+ * v2.610: lastRun 의 HPE 수치 → 표시 정보. HPE 가 없고 iLO 계정도 없으면 null(칸을 늘리지 않는다).
+ * @returns {null | { n:number, approx:boolean, found:number, note:string }}
+ */
+export function hpeInfo(r) {
+  if (!r) return null;
+  const n = Number(r.hpeDetected);
+  const det = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  const found = Number(r.hpeFound) > 0 ? Math.floor(Number(r.hpeFound)) : 0;
+  if (!det && !found && !r.iloEnabled) return null;
+  let note = '';
+  if (det && !r.iloEnabled) note = `HPE ${det}대는 iLO 계정이 없어 등록하지 않음`;
+  else if (r.iloEnabled && det > found) note = `HPE 중 iLO 로그인 ${found}대 · 실패·미확인 ${det - found}대`;
+  else if (r.iloEnabled && found) note = `HPE ${found}대 iLO 계정으로 발견`;
+  return { n: Math.max(det, found), approx: r.hpeDetectedApprox === true, found, note };
 }

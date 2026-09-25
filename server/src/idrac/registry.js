@@ -131,6 +131,10 @@ function normalize(body, existing = null) {
     hostNames,
     enabled: body.enabled != null ? Boolean(body.enabled) : (e.enabled != null ? e.enabled : true),
   };
+  // v2.610: BMC 벤더 — 'hpe'(iLO) 만 기록한다. 없으면 Dell iDRAC(예전 항목 전부가 그렇다 — 파일을 바꾸지 않는다).
+  //   폴러는 이 값으로 Dell 전용 경로(라이선스·텔레메트리·racadm)를 건너뛴다.
+  const vendor = normVendor(body.vendor !== undefined ? body.vendor : e.vendor);
+  if (vendor) entry.vendor = vendor;
 
   // ⚠ 보안 불변조건(v2.503, 감사 S1 #6) — **접속처가 바뀌면 저장 비밀을 승계하지 않는다.**
   // 판정은 `util/secretCarry.js` 하나로 한다(각자 구현하면 다음 스토어에서 또 빠진다 — v2.500 H1/H2/H4).
@@ -263,27 +267,36 @@ export function bulkAddByIps(body) {
  * (ip, serviceTag, hostName, model); the shared username/password are applied
  * to all. hostNames includes the discovered hostname + IP for auto-matching.
  */
-export function registerScanned(found, username, password, mode = 'merge', vcenterId = '', datacenterId = '') {
+export function registerScanned(found, username, password, mode = 'merge', vcenterId = '', datacenterId = '', { ilo = null } = {}) {
   if (!Array.isArray(found) || !found.length) return { ok: false, reason: '등록할 iDRAC가 없습니다.' };
-  if (!username || !password) return { ok: false, reason: 'username/password가 필요합니다.' };
+  // v2.610: HPE iLO 로 발견된 항목은 **iLO 계정**으로 등록한다(Dell 계정을 붙이면 폴러가 매 주기 iLO 에 실패 로그인한다).
+  //   계정이 없는 벤더의 항목은 등록하지 않고 개수를 밝힌다(skippedNoCreds).
+  const iloU = String(ilo?.username || '').trim();
+  const iloP = typeof ilo?.password === 'string' ? ilo.password : '';
+  const credOf = (f) => (f?.vendor === 'hpe' ? (iloU && iloP ? [iloU, iloP] : null) : (username && password ? [username, password] : null));
+  const usable = found.filter((f) => credOf(f));
+  const skippedNoCreds = found.length - usable.length;
+  if (!usable.length) return { ok: false, reason: 'username/password가 필요합니다.', skippedNoCreds };
   const vc = String(vcenterId || '').trim();
   const dc = String(datacenterId || '').trim();
-  const servers = found.map((f) => ({
+  const servers = usable.map((f) => ({
     id: f.ip,
     // 표시 이름은 hostname으로 통일한다: iDRAC이 보고한 HostName이 있으면 그걸 쓰고,
     // 없으면 IP(주소)로 대체한다. 서비스태그는 이름으로 쓰지 않는다(서비스태그 열에만 표시).
     // 과거엔 hostName 없으면 serviceTag를 이름으로 써서 '어떤 건 이름=태그'로 뒤섞였다.
     name: f.hostName || f.ip,
     host: f.ip,
-    username,
-    password,
+    username: credOf(f)[0],
+    password: credOf(f)[1],
+    vendor: f.vendor === 'hpe' ? 'hpe' : '',
     serviceTag: f.serviceTag || '',
     hostNames: [f.hostName, f.ip].filter(Boolean),
     vcenterId: vc,
     datacenterId: dc, // 법인(DataCenter) 스캔으로 발견 → 그 법인에 귀속(법인 DB)
     enabled: true,
   }));
-  return importServers(servers, mode);
+  const r = importServers(servers, mode);
+  return skippedNoCreds ? { ...r, skippedNoCreds } : r;
 }
 
 /**
@@ -384,3 +397,12 @@ export async function testServer(body) {
     return { ok: false, reason: d.message, hint: d.hint, code: d.code, ms: Date.now() - started };
   }
 }
+
+/** v2.610: BMC 벤더 정규화 — 'hpe' 만 값으로 남긴다(Dell 은 기본값이라 빈 문자열). 모르는 값은 버린다. */
+export function normVendor(v) {
+  const t = String(v ?? '').trim().toLowerCase();
+  return (t === 'hpe' || t === 'hp' || t === 'ilo') ? 'hpe' : '';
+}
+
+/** v2.610: 등록 항목이 HPE iLO 인가(Dell 전용 경로를 건너뛸지 판정). */
+export function isHpeEntry(entry) { return normVendor(entry?.vendor) === 'hpe'; }

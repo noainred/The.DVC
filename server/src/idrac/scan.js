@@ -14,7 +14,12 @@ import { ipBlockReason } from '../collector/registry.js'; // v2.537: 차단 대�
  *   직전 인증 실패 IP·주 폴러 정지 서버를 **건너뛰고**(`authSkipped*` 로 밝힌다), 수동이면 전부 시도하되 결과를 기록한다.
  *   없으면(예전 호출부) 예전 동작 그대로다.
  */
-export async function scanForIdracs({ ips, username, password, concurrency = 32, perHostTimeout = 3000, max = 2048, onProgress = null, shouldAbort = null, authPolicy = null }) {
+export async function scanForIdracs({ ips, username, password, ilo = null, concurrency = 32, perHostTimeout = 3000, max = 2048, onProgress = null, shouldAbort = null, authPolicy = null }) {
+  // v2.610: HPE iLO 계정(선택). 있으면 한 번의 대역 스캔이 Dell iDRAC 과 HPE iLO 를 **함께** 찾는다 — 서비스 루트(무인증)로
+  //   벤더를 먼저 가르고 그 벤더의 계정으로만 로그인한다(probeIdrac credsFor). 없으면 예전 동작 그대로다(HPE 는 '미지원 서버').
+  const iloCred = normIloCred(ilo);
+  const dellCred = (String(username || '').trim() && password) ? { username: String(username).trim(), password } : null;
+  const credsFor = iloCred ? (kind) => (kind === 'hpe' ? iloCred : (kind === 'dell' ? dellCred : (dellCred || iloCred))) : null;
   const { ips: list, errors, truncated } = expandIpList(ips);
   // v2.537: 차단 대역(루프백·링크로컬·우회표기)은 **찌르지 않는다**. lookup 훅(util/ssrfLookup.js)은
   // IP 리터럴에는 불리지 않으므로(v2.506 문서의 한계) 스캐너는 정적으로 걸러야 한다.
@@ -31,6 +36,12 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
 
   const found = [];
   let unreachable = 0, notIdrac = 0, authFailed = 0;
+  // v2.610: 벤더별 집계 — 화면이 'Dell N · HPE M' 과 '계정이 없어 시도하지 않은 대수' 를 말한다(조용한 제외 금지).
+  let hpeFound = 0, hpeAuthFailed = 0, noCreds = 0;
+  // v2.610(사용자 요청 '스캔하면 HPE 서버가 몇 대인지 리스트에'): 서비스 루트(무인증)로 HPE 로 판별된 대수 —
+  //   iLO 계정 유무·로그인 성패와 무관하게 센다. 계정이 없으면 등록은 안 되지만 '몇 대 있는지' 는 알 수 있다.
+  let hpeDetected = 0;
+  const noCredsIps = [];
   const authHints = new Map(); // 인증실패 원인별 카운트(예: '자격증명 거부') — 로그 진단용
   const authFailedIps = []; // '계정 맞는데 막힌' IP 목록 — 어느 iDRAC을 점검할지 로그에 표시(상한 200)
   const MAX_AUTHFAIL_IPS = 200;
@@ -41,8 +52,10 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
   const unsupported = [];
   const MAX_UNSUPPORTED = 200;
   let unsupportedCount = 0;
+  // v2.610: iLO 계정이 있으면 HPE 는 '미지원' 이 아니라 발견 대상이다(인증 실패도 인증 실패로 센다).
   const noteUnsupported = (ip, r) => {
     if (!r.redfish || r.vendor === 'dell') return false;
+    if (iloCred && r.vendor === 'hpe') return false;
     unsupportedCount++;
     if (unsupported.length < MAX_UNSUPPORTED) {
       unsupported.push({ ip, vendor: r.vendor || 'unknown', vendorLabel: r.vendorLabel || '', evidence: r.vendorEvidence || '', product: r.product || '', model: r.model || '', manufacturer: r.manufacturer || '', hostName: r.hostName || '', authFailed: !!r.authFailed, at: Date.now() });
@@ -76,18 +89,31 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
         if (done % step === 0) report();
         continue;
       }
-      const r = await probeIdrac(ip, username, password, perHostTimeout);
+      const r = await probeIdrac(ip, username, password, perHostTimeout, { credsFor });
+      if (r.ok && r.vendor === 'hpe') hpeDetected++;
       if (!r.ok) unreachable++;
+      else if (r.noCreds) {
+        // 그 벤더의 계정이 비어 로그인하지 않았다(예: iLO 계정만 넣은 대역의 Dell 서버). 인증 실패가 아니다.
+        noCreds++;
+        if (noCredsIps.length < MAX_AUTHFAIL_IPS) noCredsIps.push({ ip, vendor: r.vendor || 'unknown' });
+      }
       // v2.495: 비-Dell Redfish 장비는 '인증실패'·'비iDRAC' 카운터 앞에서 분리한다 — Dell 계정으로
       // 찌른 HPE iLO 는 401 이라 예전에는 '인증실패' 로 집계돼 정체 없이 사라졌다. 분기 순서(authFailed
       // 우선)는 그대로 두되 그 앞에 한 단계만 추가한다(기존 authHints/authFailedIps 진단 기능 보존).
       else if (noteUnsupported(ip, r)) { /* 미지원 서버 — found 에 넣지 않는다 */ }
       else if (r.authFailed) {
         authFailed++;
+        if (r.vendor === 'hpe') hpeAuthFailed++;
         if (r.authHint) authHints.set(r.authHint, (authHints.get(r.authHint) || 0) + 1);
         if (authFailedIps.length < MAX_AUTHFAIL_IPS) authFailedIps.push(ip); // 막힌 IP 기록
         authPolicy?.noteAuthFailed(ip, r.authHint);
-      } else if (r.isIdrac) { found.push({ ip, serviceTag: r.serviceTag || '', model: r.model || '', manufacturer: r.manufacturer || '', hostName: r.hostName || '' }); authPolicy?.noteOk(ip); }
+      } else if (r.isIdrac) { found.push({ ip, vendor: 'dell', serviceTag: r.serviceTag || '', model: r.model || '', manufacturer: r.manufacturer || '', hostName: r.hostName || '' }); authPolicy?.noteOk(ip); }
+      else if (iloCred && r.vendor === 'hpe' && r.credSet === 'ilo') {
+        // v2.610: iLO 계정으로 로그인에 성공한 HPE 서버. credSet 으로 '어느 계정이 통했는지' 를 등록부에 넘긴다.
+        hpeFound++;
+        found.push({ ip, vendor: 'hpe', credSet: 'ilo', serviceTag: r.serviceTag || '', model: r.model || '', manufacturer: r.manufacturer || '', hostName: r.hostName || '' });
+        authPolicy?.noteOk(ip);
+      }
       else { notIdrac++; authPolicy?.noteOk(ip); }
       done++;
       if (done % step === 0) report();
@@ -111,6 +137,15 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
     foundCount: found.length,
     unreachable,
     notIdrac,
+    // v2.610: HPE iLO(대역에 iLO 계정이 있을 때만 의미가 있다). dellFound + hpeFound = foundCount.
+    iloEnabled: Boolean(iloCred),
+    dellFound: found.length - hpeFound,
+    hpeFound,
+    hpeDetected,
+    hpeAuthFailed,
+    noCreds,
+    noCredsIps,
+    noCredsTruncated: noCreds > noCredsIps.length,
     authFailed,
     authFailReason,
     authFailedIps, // 인증 거부된 IP 목록(≤200) — 어느 iDRAC을 점검할지
@@ -131,4 +166,12 @@ export async function scanForIdracs({ ips, username, password, concurrency = 32,
     authSkippedIps: authSkippedIps.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
     authSkippedTruncated: authSkipped > authSkippedIps.length,
   };
+}
+
+/** iLO 계정 정규화 — { username, password } 가 둘 다 있을 때만 쓴다(하나라도 비면 null = iLO 스캔 안 함). */
+export function normIloCred(ilo) {
+  if (!ilo || typeof ilo !== 'object') return null;
+  const u = String(ilo.username ?? '').trim();
+  const p = typeof ilo.password === 'string' ? ilo.password : '';
+  return (u && p) ? { username: u, password: p } : null;
 }

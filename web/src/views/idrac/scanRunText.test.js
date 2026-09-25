@@ -134,3 +134,26 @@ describe('v2.591 — 인증 실패와 인증 정지 건너뜀(감사 C5·F3·C3)
     expect(scanLastRunSummary({ datacenters: 1, found: 0, delegated: 1, authSkipped: 2 })).toContain('인증정지 건너뜀 2');
   });
 });
+
+// v2.610(사용자 요청 '스캔하면 HPE 서버가 몇 대인지 리스트에'): iLO 계정이 없어도 HPE 대수는 보인다.
+import { hpeInfo as hpeInfo2610 } from './scanRunText.js';
+describe('v2.610 HPE 대수', () => {
+  it('iLO 계정 없이 HPE 3대 판별 → 지표 HPE 3대 + 등록 안 됨 안내', () => {
+    const d = describeScanRun({ at: 1, found: 5, registered: 5, scanned: 256, hpeDetected: 3, iloEnabled: false });
+    const m = d.metrics.find((x) => x.k === 'HPE');
+    expect(m.n).toBe(3); expect(m.unit).toBe('대');
+    expect(d.text).toContain('HPE 3대');
+    expect(d.text).toContain('iLO 계정이 없어 등록하지 않음');
+  });
+  it('iLO 계정으로 일부만 로그인 → 실패·미확인 대수를 밝힌다', () => {
+    expect(hpeInfo2610({ hpeDetected: 4, hpeFound: 3, iloEnabled: true }).note).toBe('HPE 중 iLO 로그인 3대 · 실패·미확인 1대');
+  });
+  it('구버전 엣지(하한) → 대 이상', () => {
+    const d = describeScanRun({ at: 1, found: 0, registered: 0, hpeDetected: 2, hpeDetectedApprox: true });
+    expect(d.metrics.find((x) => x.k === 'HPE').unit).toBe('대 이상');
+  });
+  it('HPE 없음·iLO 계정 없음 → 칸을 늘리지 않는다', () => {
+    expect(hpeInfo2610({ found: 2 })).toBe(null);
+    expect(describeScanRun({ at: 1, found: 2, registered: 2 }).metrics.some((x) => x.k === 'HPE')).toBe(false);
+  });
+});
