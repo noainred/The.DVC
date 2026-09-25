@@ -27,6 +27,8 @@ import { healthBadge, sectionBadge, cliCutText } from './storageNodeText.js';   
 import { authFailInfo } from './storageAuthText.js';  // v2.528: 401 진단 문구(순수)
 import { capacityRows, srpRows, subscribedNote, usageTrust } from './powermaxCapacityText.js'; // v2.534: 구독/할당/실제기록(순수)
 import { nodeFaultSummary, nodeRows, nodeKindLabel, bpsText, faultBadgeTitle } from './storageNodeText.js';
+// v2.615: '장애 장비' KPI·화면 — 판정은 노드 ⚠ 표지와 같은 조건 하나(storageFaultText.hasNodeFault). v2.567 철회 교훈.
+import { hasNodeFault, faultKpi, faultRows, faultNodeRows, faultKpiMeta, faultKpiAccent, faultKpiTitle, faultViewNote } from './storageFaultText.js';
 import { versionCellInfo } from './storageVersionText.js';
 import { unitText } from '../unitText.js';
 import { hardwareSummaryParts } from './storageHardwareText.js'; // v2.599 C2599-06: 빈 슬롯·미확인을 이상과 나눠 말한다
@@ -401,7 +403,8 @@ function Cell({ col, r, ctx }) {
               {s?.nodes?.count ? (
                 <button type="button" className="cell-link" title={faultBadgeTitle(s)} onClick={() => setNodeFault(r.id)}>{v}</button>
               ) : v}
-              {s?.nodes?.unhealthy
+              {/* ⚠ v2.615: 표지 조건은 '장애 장비' KPI 와 **같은 함수**다 — 따로 쓰면 카드 숫자와 ⚠ 개수가 갈라진다. */}
+              {hasNodeFault(s)
                 ? <button type="button" className="badge red fail-badge" style={{ marginLeft: 4 }} title={faultBadgeTitle(s)} onClick={() => setNodeFault(r.id)}>⚠{s.nodes.unhealthy}</button>
                 : null}
             </>
@@ -441,7 +444,7 @@ function Cell({ col, r, ctx }) {
                   title={`부분 실패 — 접속은 됐지만 일부 섹션을 수집하지 못했습니다:\n${partialReason(s)}\n\n(클릭하면 상세 창에서 전체 내용을 봅니다)`}>
                   부분 <span aria-hidden="true">ⓘ</span>
                 </button>
-              : <span className="badge green" title={s?.nodes?.unhealthy
+              : <span className="badge green" title={hasNodeFault(s)
                   ? `수집 성공 — 이 표지는 수집 성패이고 장비 헬스와 별개입니다. 이 장비는 비정상 노드가 ${s.nodes.unhealthy}대 있습니다(노드 열의 ⚠ 표지를 누르세요).`
                   : '수집 성공 — 이 표지는 수집 성패이고 장비 헬스와 별개입니다(헬스·노드 열을 보세요).'}>정상</span>
           ) : (
@@ -480,6 +483,83 @@ function Cell({ col, r, ctx }) {
   }
 }
 
+/**
+ * **장애 장비 화면**(v2.615 — KPI '장애 장비' 를 누르면 온다. `#/tools/storage-mon/faults`).
+ *
+ * 판정·문구는 `storageFaultText.js`(순수, vitest 고정)가 갖고 여기서는 조립만 한다.
+ *  · 목록은 법인·종류 필터·찾기를 **적용한 뒤**의 장애 장비다. 가려진 대수는 머리말이 밝힌다(조용한 축소 금지).
+ *  · 장애가 0 이면 빈 표를 그리지 않고 **왜** 0 인지(판정 불가가 섞였는지)를 말한다.
+ *  · 두 번째 표는 **비정상 노드**다 — 노드 이름을 모르면 '어느 노드인지 알 수 없음 N대' 로 적는다(지어내지 않는다).
+ * ⚠ 모듈 최상위 컴포넌트다 — 렌더 함수 안에서 정의하면 30초 폴링마다 재마운트된다(v2.425 규약).
+ */
+function FaultsView({ fk, list, canClear, onClear, ctx, typeLabel, dcName }) {
+  const nodeList = faultNodeRows(list);
+  const identified = nodeList.filter((x) => x.kind === 'bad').length;
+  const unidentified = nodeList.filter((x) => x.kind === 'unidentified').reduce((a, x) => a + x.count, 0);
+  const note = faultViewNote(fk, list.length);
+  const open = (id) => ctx.setNodeFault(id);
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12, minWidth: 0 }}>
+      <div className="card" style={{ padding: '10px 13px', fontSize: 12.5, whiteSpace: 'normal', lineHeight: 1.6, borderColor: fk.fault ? 'var(--red)' : 'var(--border)' }}>
+        {fk.fault ? '⚠ ' : 'ℹ '}<BoldText text={note} />
+        {!list.length && fk.fault > 0 && canClear && (
+          <div style={{ marginTop: 8 }}>
+            <button className="qn-btn" onClick={onClear}>✕ 필터·찾기 해제하고 장애 장비 전체 보기</button>
+          </div>
+        )}
+      </div>
+      {list.length > 0 && (
+        <>
+          <div style={{ minWidth: 0 }}>
+            <div className="section-title" style={{ fontSize: 14 }}>⚠ 장애 장비 <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>— {list.length}대</span></div>
+            <DeviceTable list={list} ctx={ctx} typeLabel={typeLabel} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div className="section-title" style={{ fontSize: 14 }}>
+              비정상 노드 <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>
+                — 노드 이름 확인 {identified}대{unidentified ? ` · 어느 노드인지 알 수 없음 ${unidentified}대` : ''} · 행을 누르면 그 장비의 노드 상태를 봅니다
+              </span>
+            </div>
+            <STable minWidth={760}>
+              <thead><tr><th>장비</th><th>법인</th><th>노드</th><th>IP</th><th>장비가 보고한 상태</th><th>판정</th></tr></thead>
+              <tbody>
+                {nodeList.map((x) => {
+                  const bad = x.kind === 'bad';
+                  const k = nodeKindLabel('bad');
+                  return (
+                    <tr key={x.key} style={{ cursor: 'pointer' }} onClick={() => open(x.deviceId)}>
+                      <td>
+                        <button type="button" className="cell-link" title="이 장비의 노드 상태 보기" onClick={(e) => { e.stopPropagation(); open(x.deviceId); }}
+                          style={{ maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', textAlign: 'left' }}>
+                          <b>{x.deviceName}</b>
+                        </button>
+                        <div className="muted" style={{ fontSize: 11 }}>{typeLabel(x.type)}</div>
+                      </td>
+                      <td className="muted">{dcName(x.datacenterId)}</td>
+                      <td data-sort={x.label} style={{ whiteSpace: 'normal' }}>
+                        {bad ? <b>{x.label}</b> : x.label}
+                        {!bad && x.reason && <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>{x.reason}</div>}
+                      </td>
+                      <td className="muted" style={{ fontSize: 11.5 }}>{x.ip || '—'}</td>
+                      {/* 장비가 보고한 원문 — 우리가 해석한 판정과 나란히 둔다(판정 근거를 숨기지 않는다). */}
+                      <td>{x.health ? <code style={{ fontSize: 11 }}>{x.health}</code> : <span className="muted">—</span>}</td>
+                      <td data-sort={x.kind} style={{ whiteSpace: 'nowrap', fontWeight: 600, color: bad ? `var(--${k.color})` : 'var(--amber)' }}
+                        title={bad ? '장비가 보고한 노드 상태가 정상이 아닙니다' : x.reason}>
+                        {bad ? k.label : `노드 미상 ${x.count}대`}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!nodeList.length && <tr><td colSpan={6} className="muted">표시할 노드가 없습니다.</td></tr>}
+              </tbody>
+            </STable>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function StorageMonTool() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
@@ -488,7 +568,8 @@ export default function StorageMonTool() {
   // v2.529: '지금 수집' 은 그 장비만 잠근다(전역 busy 는 전체 새로고침·삭제 같은 진짜 전역 작업용).
   const [busyId, setBusyId] = useState(null);
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
-  const [view, setView] = useHashTab({ base: ['tools', 'storage-mon'], valid: ['devices', 'dc', 'type', 'trend'], fallback: 'devices' });
+  // v2.615: 'faults' = 장애 장비만 모은 화면(KPI '장애 장비' 를 누르면 온다 — 주소로도 열린다).
+  const [view, setView] = useHashTab({ base: ['tools', 'storage-mon'], valid: ['devices', 'dc', 'type', 'faults', 'trend'], fallback: 'devices' });
   const [detail, setDetail] = useState(null);    // 장비 상세 모달 — id 로 보관(v2.306: load() 후 최신 스냅샷 자동 반영)
   // 노드 장애 팝업(v2.523) — 같은 이유로 **id 로** 보관한다(폴링 후 최신 스냅샷이 자동 반영).
   const [nodeFault, setNodeFault] = useState(null);
@@ -527,9 +608,14 @@ export default function StorageMonTool() {
     usedPct: capAll.pct,
     unknownUsed: capAll.unknownUsed,
     fail: rows.filter((r) => r.snap && !r.snap.ok).length + rows.filter((r) => !r.snap).length,
-    // v2.602(RECENT2602-02 후속): 경보 개수를 못 읽은 장비(null)는 0 으로 더하지 않고 따로 센다(판정은 alertTotals).
-    ...(() => { const a = alertTotals(withSnap, (r) => r.snap.alerts?.unresolved); return { alerts: a.total, alertsUnknown: a.unknown }; })(),
   };
+  /*
+   * v2.615(사용자 요청 "'미해결 정보' 를 '장애 장비' 로 변경 … 장애 숫자를 클릭하면 장애 발생한 장비들만"):
+   * 예전 5번째 카드는 전 장비 미해결 경보 **합**(수천 건 — 조치로 이어지지 않았다)이었다. 이제 **장비 대수**다.
+   * ⚠ 판정은 노드 ⚠ 표지와 같은 조건 하나뿐이다(헬스 문자열·경보 개수 금지 — v2.567 이 27대 오보로 철회됐다).
+   * 전체 장비 기준(다른 KPI 와 같다). 화면의 필터·찾기는 목록에만 적용하고, 가려진 개수는 머리말이 밝힌다.
+   */
+  const fk = faultKpi(rows);
   /**
    * 빠른 찾기 판정(사용자 요구 2026-09-02) — 검색은 **칩 이름이 아니라 하단 스토리지 목록**을
    * 거른다. 판정 단위는 장비 1대이고, 그 장비의 법인·표시명·host·타입·수집주체(엣지)를 모두
@@ -546,6 +632,8 @@ export default function StorageMonTool() {
   // v2.522: 목록이 비었을 때 **왜** 비었는지(등록 0 / 필터 0 / 검색 0)를 구분한다 —
   // 판정·문구는 순수 모듈(storageListText)에 있고 테스트가 고정한다.
   const emptyInfo = emptyListText({ registered: rows.length, facetOn, query: dcQuery });
+  // v2.615: 장애 장비 화면 목록 — 필터·찾기를 적용한 뒤의 장애 장비(가려진 대수는 머리말이 전체 KPI 와 비교해 밝힌다).
+  const shownFaults = view === 'faults' ? faultRows(shown) : [];
   // 칩 목록·개수는 공용 판정이 준다(위 facetState). 그룹핑도 공용 groupBy 를 쓰되,
   // 이 화면의 기존 소비부가 `[key, list]` 튜플 배열을 기대하므로 형태만 맞춰 준다.
   const groupShown = (keyFn) => groupByKey(shown, keyFn).map((g) => [g.key, g.list]);
@@ -610,9 +698,10 @@ export default function StorageMonTool() {
     <div>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ type: 'isilon', name: '', host: '', username: 'root', password: '', agent: '', datacenterId: '', collectMethod: 'ssh', sshPort: 22, enabled: true })}>+ 장비 등록</button>
-        {['devices', 'dc', 'type', 'trend'].map((v) => (
-          <button key={v} className={view === v ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px' }} onClick={() => setView(v)}>
-            {v === 'devices' ? '🗄 장비별' : v === 'dc' ? '🏢 법인별' : v === 'type' ? '📦 타입별' : '📈 추이'}
+        {['devices', 'dc', 'type', 'faults', 'trend'].map((v) => (
+          <button key={v} className={view === v ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px' }} onClick={() => setView(v)}
+            title={v === 'faults' ? faultKpiTitle(fk) : undefined}>
+            {v === 'devices' ? '🗄 장비별' : v === 'dc' ? '🏢 법인별' : v === 'type' ? '📦 타입별' : v === 'faults' ? `⚠ 장애 장비 ${fk.fault}` : '📈 추이'}
           </button>
         ))}
         {/* CSV 일괄 관리(v2.313, 사용자 요구) — 내보내기·가져오기·샘플. v2.317: 내보내기는
@@ -653,8 +742,8 @@ export default function StorageMonTool() {
         <Kpi label="사용" value={tbFmt(totals.used)} pct={totals.usedPct ?? undefined}
           meta={totals.unknownUsed ? `사용량 미확인 ${totals.unknownUsed}대 제외` : undefined} />
         <Kpi label="수집 실패/대기" value={totals.fail} accent={totals.fail ? 'var(--red)' : 'var(--green)'} />
-        <Kpi label="미해결 경보" value={totals.alerts} accent={totals.alerts ? 'var(--amber)' : undefined}
-          meta={totals.alertsUnknown ? `경보 미확인 ${totals.alertsUnknown}대 제외` : undefined} />
+        <Kpi label="장애 장비" value={fk.fault} accent={faultKpiAccent(fk)} meta={faultKpiMeta(fk)}
+          onClick={() => setView('faults')} title={faultKpiTitle(fk)} />
       </div>
 
       {/* 법인 바로가기(사용자 요구 2026-09-02) — Platform 화면의 vCenter 바로가기와 동일한 UX/스타일.
@@ -732,6 +821,10 @@ export default function StorageMonTool() {
           <DeviceTable list={list} ctx={cellCtx} typeLabel={typeLabel} />
         </div>
       ))}
+      {view === 'faults' && (
+        <FaultsView fk={fk} list={shownFaults} canClear={facetOn || dcQuery.trim().length > 0}
+          onClear={() => { clearFacets(); setDcQuery(''); }} ctx={cellCtx} typeLabel={typeLabel} dcName={dcName} />
+      )}
 
       {/* mock 경고(v2.408, 사용자 신고 '왜 mock 이라고 나와?') — 설정 누락만으로 가짜 데이터가
           중앙까지 흘러올 수 있어(config.js dataSource 기본값이 mock) 화면 상단에 분명히 알린다.

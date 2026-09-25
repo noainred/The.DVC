@@ -90,10 +90,13 @@ describe('alertTotals (v2.602 RECENT2602-02 후속)', () => {
     expect(alertTotals(rows, (r) => r.a)).toEqual({ total: 3, unknown: 3, counted: 2 });
     expect(alertTotals([], (r) => r.a)).toEqual({ total: 0, unknown: 0, counted: 0 });
   });
-  it('화면은 (f(x) || 0) 합산을 쓰지 않고 미확인 대수를 KPI 에 밝힌다(소스)', async () => {
+  // v2.615: '미해결 경보' KPI 는 '장애 장비' 로 바뀌었다(사용자 요청 — storageFaultText.test.js 가 고정).
+  //   경보 합계·미확인 대수는 법인 바로가기 칩 툴팁에 남는다 — 그곳도 0 으로 더하지 않고 미확인 대수를 밝힌다.
+  it('화면은 (f(x) || 0) 합산을 쓰지 않고 경보 미확인 대수를 법인 칩 툴팁에 밝힌다(소스)', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync(new URL('./StorageMonTool.jsx', import.meta.url), 'utf8');
     expect(src).not.toMatch(/f\(x\) \|\| 0/);
-    expect(src).toMatch(/경보 미확인 \$\{totals\.alertsUnknown\}대/);
+    expect(src).toMatch(/경보 미확인 \$\{g\.alertsUnknown\}대/);
+    expect(src).toMatch(/alertTotals\(ok, \(r\) => r\.snap\.alerts\?\.unresolved\)/);
   });
 });
