@@ -80,7 +80,7 @@ const HARNESS = (body) => `
 
 test('LEFT2612-02: CSV 가져오기의 비밀번호 폐기 사유는 필드별(iLO 만 폐기면 Dell 폐기·스캔 보류라 말하지 않는다) + CSV 로 iLO 를 못 넣는다', () => {
   const { out } = child(HARNESS(`
-    const dc = await call('POST', '/admin/datacenters', { name: 'DC1' });
+    const dc = await call('POST', '/admin/datacenters', { id: 'dc1', name: 'DC1' });
     const dcId = dc.j?.datacenter?.id || dc.j?.id || (dc.j?.datacenters || []).find((d) => d.name === 'DC1')?.id;
     out.dcS = dc.s; out.dcId = dcId;
     out.save = (await call('PUT', '/admin/idrac/scan-ranges', { datacenterId: dcId, service: 'svc', ranges: ['10.20.0.0/30'], username: 'root', password: 'dellpw', iloUsername: 'Administrator', iloPassword: 'ilopw' })).s;

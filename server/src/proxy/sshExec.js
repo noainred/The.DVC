@@ -473,7 +473,7 @@ function execPaged(conn, command, { maxPages, ...rest } = {}) {
 const SFTP_READ_MAX = EXEC_MAX_OUTPUT;
 function sftpReadFile(conn, path, { maxBytes = SFTP_READ_MAX } = {}) {
   const cap = Math.max(1, Number(maxBytes) || SFTP_READ_MAX);
-  const tooBig = (n) => new Error(`SFTP 파일 크기 상한(${Math.round(cap / 1024)}KB) 초과${n != null ? `(${Math.round(n / 1024)}KB)` : ''} — 읽지 않았습니다: ${path}`);
+  const tooBig = (n) => new Error(`SFTP 파일 크기 상한(${Math.ceil(cap / 1024)}KB) 초과${n != null ? `(${Math.ceil(n / 1024)}KB)` : ''} — 읽지 않았습니다: ${path}`);
   return new Promise((resolve, reject) => {
     conn.sftp((err, sftp) => {
       if (err) return reject(err);
@@ -487,12 +487,12 @@ function sftpReadFile(conn, path, { maxBytes = SFTP_READ_MAX } = {}) {
         const fin = (fn, v) => { if (done) return; done = true; fn(v); };
         rs.on('data', (d) => {
           bytes += d.length;
-          if (bytes > cap) { try { rs.destroy(); } catch { /* 닫는 중 */ } return fin(reject, tooBig(null)); }
+          if (bytes > cap) { fin(reject, tooBig(null)); try { rs.destroy(); } catch { /* 닫는 중 */ } return; }
           chunks.push(d);
         });
         rs.on('error', (e) => fin(reject, e));
         rs.on('end', () => fin(resolve, Buffer.concat(chunks).toString('utf8')));
-        rs.on('close', () => fin(resolve, Buffer.concat(chunks).toString('utf8')));
+        rs.on('close', () => fin(reject, new Error(`SFTP 읽기가 끝나기 전에 닫혔습니다: ${path}`)));   // 잘린 내용을 온전한 파일인 척 돌려주지 않는다
       });
     });
   });
