@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node ../scripts/tools-catalog.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint src",

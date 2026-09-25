@@ -61,6 +61,9 @@ export function asyncRoute(handler) {
     return out;
   };
   wrapped.__asyncWrapped = true;
+  // v2.614(아키텍처 점검): 게이트 태그(`requireRole`·`requirePerm`·`fullScopeOnlyWith`·`toolGate`·`requireCentral` 이 붙인
+  //   `.gate`)를 래퍼에 복사한다 — 안 하면 `wrapAsyncRouter` 를 지난 라우터 스택에서 태그가 통째로 사라진다(테스트가 고정).
+  if (handler.gate) wrapped.gate = handler.gate;
   // 디버깅·스택에서 원래 이름이 보이게 한다(익명 래퍼만 남으면 어느 라우트인지 못 찾는다).
   try { Object.defineProperty(wrapped, 'name', { value: handler.name || 'asyncRoute' }); } catch { /* 이름 고정 실패는 무시 */ }
   return wrapped;

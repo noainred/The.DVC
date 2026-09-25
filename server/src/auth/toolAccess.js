@@ -276,7 +276,9 @@ export function exactToolAccessIssue(actor, pathname) {
  *   기본은 `/tools` 하위 경로용 `toolAccessIssue`. 전용 엔드포인트용은 `exactToolAccessIssue`.
  */
 export function toolGate({ roleOf, userOf = null, issueOf = toolAccessIssue }) {
-  return function toolGateMiddleware(req, res, next) {
+  toolGateMiddleware.gate = Object.freeze({ kind: 'tool' }); // v2.614 아키텍처 점검 태그(auth.js requireRole 참조)
+  return toolGateMiddleware;
+  function toolGateMiddleware(req, res, next) {
     const actor = userOf ? userOf(req) : { role: roleOf(req) };
     const issue = issueOf(actor, req.path);
     if (!issue) return next();
@@ -286,7 +288,7 @@ export function toolGate({ roleOf, userOf = null, issueOf = toolAccessIssue }) {
     return res.status(403).json({
       error: 'forbidden', requiredPerm: [`tool:${issue.tool}`], reason: issue.reason, toolMode: issue.mode || '',
     });
-  };
+  }
 }
 
 /* ──────────────────────────────────────────────────────────────────────────────
