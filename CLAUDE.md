@@ -3367,9 +3367,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **아키텍처**: `util/ping.js` 손 풀 → `poolRun`(concurrency 0 이면 0 워커 — v2.579 ③-b 와 같은 결함) · `upgrade.js cmpVersion` →
       `cmpVersionTuple` · `ipam/scanStore.js` IPv4 사본 → `util/ipv4` · `arch2579` 가 `export … from` edge 도 센다(순환 SCC 는 여전히 4) ·
       CI 가 루트 `npm audit` 도 본다 · dompurify 3.4.16.
-    - **남긴 것(판단 필요 — 다음 점검의 첫 후보)**: ① **DISCONNECTED 호스트가 사용률 분모에만 남는다**(DATA-03 가능성 — 실 vCenter 가
-      끊긴 호스트의 `hardware` 요약을 계속 주는지 미확인. 재현은 합성 스냅샷) ② **30초마다 IPAM 원장 재구성·서명 50~85ms**(PERF-1 —
-      외부 ipam.db 리더 신선도 계약, 사용자 결정) ③ PDU·SAN push 0건 조기 반환(EDGE-3 — v2.583 설계) ④ 손으로 쓴 풀 7곳 더
+    - **남긴 것(판단 필요 — 다음 점검의 첫 후보)**: ① ✅ **DISCONNECTED 호스트가 사용률 분모에만 남는다**(→ v2.594 `store.js usageReadable` 로 고침 — v2.613 에 이 줄을 정정) ② **30초마다 IPAM 원장 재구성·서명 50~85ms**(PERF-1 —
+      외부 ipam.db 리더 신선도 계약, 사용자 결정) ③ PDU·SAN push 0건 조기 반환(EDGE-3 — v2.583 설계 · ✅ v2.613 EDGE2613-04 에 상태 전용 push 로 고침) ④ ✅ 손으로 쓴 풀 7곳 더(v2.594 에 '결함 아님' 판정 — 목록에서 뺀다)
       (`ping/monitor.js`·`bmstor/collect.js`·`idrac/redfish.js` 2·`idrac/scan.js`·`deployLlm.js` 2·`certMonitor.js` — 호출부가 전부
       고정값·클램프라 잠재) ⑤ 버전 비교 사본 3곳(`bundleSource.js cmp3`·`dlsource.js cmp`·`release-notes.js cmpVersionDesc` — 입력이
       정규식 검증된 값) ⑥ IPv4 류 사본 3곳(`ipam/insights.js`·`netmap.js`·`ledger.js` — /24 기준 문자열이라 IP 파서가 아니다).
@@ -3450,7 +3449,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       '끔' 이 되면 오류 없이 정책이 풀린다. 새 숫자 설정을 만들면 두 쪽 다 이 규칙을 따를 것.
     - **엣지 pull 은 '빠진 것' 도 정리한다**(EF-2·3): svcmon 배정 해제(명시적 200 + assigned:false)면 `central:` 배치를 지우고,
       스토리지 `applyPulledDevices` 가 빠진 id(`removed`)를 돌려줘 스냅샷을 지운다(SAN 스위치 `onRemoved` 와 같은 규칙).
-      ⚠ PDU 의 같은 경로는 이번에 보지 않았다(다음 후보).
+      ✅ PDU 의 같은 경로는 v2.600 `agent/pduConfigPull.js:57` 에 고쳤다(v2.613 에 이 줄을 정정).
     - **큰 목록은 정렬 뒤 자른다**(PERFWEB-01 — IPAM 8,028행 전량 렌더 12.5초 정지 실측 → `DataTable limit` 1,000 + 뺀 개수) ·
       **정적 해시 자산은 `util/staticGzip.js`**(파일마다 한 번 비동기 gzip · 캐시 상한 · 작은 파일·gzip 미지원은 원본) —
       ⚠ `index.js` 첫 import 는 여전히 `logbuffer.js` 다(테스트가 고정) · 모달·상세 전용 차트는 `lazy()` 로(Datastores·VCenters).
@@ -3458,7 +3457,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       ⚠ VM 프로비저닝의 배치 초기화는 **칩을 누를 때** 한다 — 효과(useEffect)에서 하면 저장 작업 불러오기의 배치까지 지운다.
     - 그 밖: CSV 수식 가드는 웹 `util/csv.js csvCell` · 서버 `util/csv.js guardCell` 하나(bmUsage·svcmon 사본을 옮겼다) · 알림 폴링은
       401/403 이면 10분 쉰다 · 통신 점검 `ms_n` 열 추가 시 구 행 합을 비운다 · prune 은 인덱스 열로 거른다(`t0 < ? AND t1 < ?`).
-    - 남긴 것: SQLite open 일시 잠금 래치(`metrics/db.js`·`storage/db.js` — 가능성) · 엣지별 설정 조회 대소문자(가능성) · PRAGMA 묶음 exec
+    - 남긴 것: ✅ SQLite open 일시 잠금 래치(→ v2.597 L2597-02 `util/sqliteOpen.js` · v2.613 PERSIST2613-03 에 `metrics/db.js`·`storage/db.js` 도 적용) · ✅ 엣지별 설정 조회 대소문자(→ v2.597 `util/agentKey.js`) · PRAGMA 묶음 exec
       (가능성) · `/vcenters` 중복 요청(정보) · 스파이크·현재 사용자 설정 전량 배포는 **설계**(반증).
 
   - ⚠⚠ **v2.597 — 7축 병렬 감사(8차 점검) 확정분**("한번 더". 확정 21 · 가능성 9 · 반증 4, 고침 28. 회귀는
@@ -3594,7 +3593,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       (origin + 경로 접두). 태그 없는 중복 주소 기록은 어느 엣지에도 붙이지 않는다(`sharedUrl`). 새 중앙 → 엣지 호출은 태그로 감쌀 것.
     - prune 은 키별 마지막(이월) 행 보존(guestdisk·vmtrack) · vCenter 로그 prune 은 `pruneAsync` · zip 은 같은 localOffset 거부 ·
       AD 타임아웃 빈 칸 = 이전 값 · 설정 파일 JSON null 은 손상 보존 · `getMs()` 예외에도 타이머 재무장.
-    - 남긴 것: VACUUM 동기 · 공유 토큰 사칭 한계 · 태그 없는 중앙 → 엣지 호출 4종(linkcheck·relaycheck·배포 후 검증·자기등록).
+    - 남긴 것: VACUUM 동기 · 공유 토큰 사칭 한계 · 태그 없는 중앙 → 엣지 호출 4종(linkcheck·relaycheck — ✅ v2.613 EDGE2613-10 에 태그 · 배포 후 검증·자기등록은 남음).
 
   - ⚠⚠ **v2.602 — 13차 점검 확정분**("세번더" 3회차. 발견 47 = 확정 35 · 가능성 3 · 반증 9, 고침 37 + 후속 10.
     회귀 `test/audit2602{a..f}.test.js` 51건 + 웹 vitest. 상세 `docs/AUDIT-2026-09-24j.md`):
@@ -3604,7 +3603,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **엣지 pull 도 수신이다**(CEN2602-01 high): push 만 정제하고 pull(export)은 원소를 그대로 보관해, 오염된 `serviceTag` 하나가 함대
       물리 서버 집계를 죽였다. `collector/remoteInventory.js` 정제 · 버린 개수 `serversDropped`. **새 pull 경로도 같은 규칙.**
     - **svcmon 변경은 전체 범위 계정만**(AUTHZ-2602-01): 변경 라우트 32개 `fullScopeOnly`. 조회 GET 은 그대로(N-2).
-    - **`/\/+$/` 는 O(n²) 이다 — 선형 루프로**(SEC2602-01·04 + normPath): 입력 길이 상한과 함께. 저장소에 남은 `collector/registry.js` 2곳은 다음 후보.
+    - **`/\/+$/` 는 O(n²) 이다 — 선형 루프로**(SEC2602-01·04 + normPath): 입력 길이 상한과 함께. ✅ 저장소에 남은 `collector/registry.js` 2곳은 v2.611 `util/trimSlashes.js` 로 고쳤다.
     - ⚠ **정정**: v2.550.3 이 `sanswitch/perfDb.js perfDbStats` 를 '폴링하지 않는 진단 경로' 로 적은 것은 틀렸다 — 설정 화면이 **20초마다** 부른다.
       이제 MIN/MAX 단독 + COUNT 60초 캐시(`countsAt`)다. '폴링하지 않는다' 고 적기 전에 화면의 호출 주기를 grep 할 것.
     - **다운로드는 `res.ok` 를 먼저**(WEB2602-01): 409·403 오류 JSON 이 .xlsx 로 저장되던 8곳 → `api.js downloadFile`·`saveResponseAsFile`.
@@ -3669,7 +3668,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 그 밖: 가상 NIC 는 사용률(%)에서 제외(물리·bond 만) · Windows 디스크 I/O 는 `100 − PercentIdleTime` · vGPU 표본 없음은 0 이 아니라 미수집 ·
       원격 전력 키에 수집 서버 축(DB 키는 충돌할 때만 나눠 이력 연속) · 끊긴 호스트는 웹 클러스터 평균에서도 제외 · ping baseline 7일 하한 ·
       전력 정리·Capacity·게스트 디스크 prune 청크 · 데이터스토어 탐색 캐시 만료 청소·문자열 평탄화 · 설정 push `_again` · 숫자 칸 빈 값 4곳 더.
-    - 남긴 것: LEFT2605-08(장비 REST 응답 상한 — 정상 최대치 미확인) · EDGE2605-05(중앙 등록부 손상 → 엣지 빈 목록 전파) · 범위 admin 의 전 법인 공통
+    - 남긴 것: LEFT2605-08(장비 REST 응답 상한 — 정상 최대치 미확인) · ✅ EDGE2605-05(중앙 등록부 손상 → 엣지 빈 목록 전파 — v2.612 LEFT2612-01 에 503 `registryUnreadable` 로 고침) · 범위 admin 의 전 법인 공통
       스칼라 설정 · 재등록 일시 검증 실패 강등(collector/registry.js) · ping seriesOf `meta()` · env 허용 목록 잔여 89개.
     - ⚠ 작업 방식: 이 컨테이너는 CPU 4개라 Workflow 동시 상한이 2였다 — Agent 도구로 10축을 직접 병렬 실행하고 '전량 테스트·빌드 금지' 를 명시했다
       (load 2 안팎). stop hook 이 WIP 커밋을 요구해 변이 검증 도중 WIP 커밋이 들어갔고, 한 번은 **되돌려 둔 판본(idrac/db.js)을 담았다** —
@@ -3694,7 +3693,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       (부분 합은 거짓 하락). 끊긴 호스트는 N+1·용량·비교 매트릭스에서도 `store.usageReadable` 로 뺀다(WEB2606-02 — v2.594·v2.605 의 형제).
     - 엣지: GPU 게스트 push 는 **모든 대상 vCenter 를 읽은 폴**만 보낸다(인벤토리 미수집 빈 폴이 v2.605 보류를 통과했다) · svcmon 예열 중 완결은 GC 하지 않는다 ·
       push 는 중앙 거절 요약을 읽는다(`agent/centralReply.js`) · LLM 타임아웃은 숫자로 저장(문자열이 AI 검색 전부를 죽였다).
-    - 남긴 것: curuser 청크 0 교체 · `sshExec withDeadline`/`execCapture` 시한 상한 · linkcheck poller 의 currentIds · 새 응답 필드의 화면 표시 일부
+    - 남긴 것: ✅ curuser 청크 0 교체 · ✅ `sshExec withDeadline`/`execCapture` 시한 상한 · ✅ linkcheck poller 의 currentIds(셋 다 v2.607 에 고침 — v2.613 에 이 줄을 정정) · 새 응답 필드의 화면 표시 일부
       (SAN `failed`·RMA 거절·fleet partial·`hostsUsageExcluded`·`patternsOmitted`·`droppedSecrets`) · SEC2606-07 · COL2606-07.
     - ⚠ 작업 방식: 보안 축 재현 검증자가 결과를 쓰지 못하고 끝났다(안전 분류기) — 의도 검증 + 수정 그룹의 기준 커밋 재현으로 확정했다. 보안 재현 스크립트는
       **입력을 작게**(1.6만 자·수 MB) 두도록 지시할 것.
@@ -3717,7 +3716,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       화면은 `views/droppedSecretText.js` 하나로 말한다(수집 서버 PUT 이 그 필드를 버리고 있었다 — INT2607-01).
     - **재전송 경로는 '첫 시도가 이미 바꾼 것' 을 기억한다**(INT2607-02 · LEFT2607-09): 청크 0 이 교체한 뒤 재전송이 실패하면 중앙은 부분 목록이다 — '직전 그대로' 는 거짓.
     - 업그레이드·패키지 다운로드는 `util/readBytesCapped.js`(바이트 상한 스트림) · SSH 배너·stderr·WS hostname 채널 상한 · 정규식 수정은 옛 결과와 동일성 대조.
-    - 남긴 것: 미등록 장비·vCenter id 수신(공유 토큰 흐름) · `sftpReadFile` 크기 상한 · 폴러 `*_DEVICE_TIMEOUT_MS` 상한(관문이 자른다) · IPAM import dryRun 의
+    - 남긴 것: 미등록 장비·vCenter id 수신(공유 토큰 흐름) · ✅ `sftpReadFile` 크기 상한(v2.612 LEFT2612-07 `SFTP_READ_MAX`) · 폴러 `*_DEVICE_TIMEOUT_MS` 상한(관문이 자른다) · IPAM import dryRun 의
       범위 밖 존재 노출 · COL2607-06·08(가능성).
     - ⚠ 작업 방식: 수정 도중 세션 사용량 한도로 전 그룹이 중단됐다 — 재개 시 **반쯤 적용된 파일을 기준판으로 되돌리고** 변이 백업을 지운 뒤 처음부터 다시 돌렸다.
       중단된 그룹의 부분 수정을 이어 쓰지 말 것(어디까지 됐는지 알 수 없다).
