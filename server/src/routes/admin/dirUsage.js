@@ -7,6 +7,7 @@
 //  - 상태 변경은 전부 logAudit.
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
+import { fullScopeOnlyWith } from './shared.js';
 import { load as loadCfg, save as saveCfg, redact, validate } from '../../dirusage/settings.js';
 import { getDb, dbStatus } from '../../dirusage/db.js';
 import { runNow, schedulerStatus } from '../../dirusage/scheduler.js';
@@ -14,6 +15,8 @@ import { renderReport, renderSubject } from '../../dirusage/report.js';
 import { listRmaAgents } from '../../rma/jobs.js';
 
 const adminOnly = requireRole('admin');
+// v2.611 AUTHZ2611-02: 포탈 호스트 동작은 전 법인 공용 — 범위 계정 403.
+const fleetOnly = fullScopeOnlyWith('폴더 사용량 설정·실행은 포탈 호스트 경로를 스캔하는 전 법인 공용 동작이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
 
 export function registerDirUsage(adminRouter) {
 
@@ -31,7 +34,7 @@ export function registerDirUsage(adminRouter) {
   });
 
   // 저장 — 비밀 값이 없으므로 adminOnly 로 충분하다(SMTP 는 설정 › 메일 발송이 소유자 게이트).
-  adminRouter.put('/dir-usage', adminOnly, (req, res) => {
+  adminRouter.put('/dir-usage', adminOnly, fleetOnly, (req, res) => {
     const body = req.body || {};
     const errs = validate({ ...loadCfg(), ...body });
     if (errs.length) return res.status(400).json({ ok: false, reason: errs[0], errors: errs });
@@ -45,7 +48,7 @@ export function registerDirUsage(adminRouter) {
   });
 
   // 지금 스캔 — 폴러와 같은 재진입 가드를 공유한다(동시 실행 금지).
-  adminRouter.post('/dir-usage/run', adminOnly, async (req, res) => {
+  adminRouter.post('/dir-usage/run', adminOnly, fleetOnly, async (req, res) => {
     const targetId = String(req.body?.targetId || '');
     const r = await runNow(targetId);
     logAudit({ user: req.user?.username, action: '폴더 사용량 스캔 실행', target: targetId || '(전체)', detail: r.ok ? `${r.queued.length}건 요청` : r.reason, ip: req.ip });

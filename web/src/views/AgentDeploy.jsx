@@ -141,7 +141,12 @@ export default function AgentDeploy() {
   // v2.435: 서버가 centralToken/collectorToken 도 가리므로(SECRET_KEYS) 폼은 빈 값으로 두고,
   // has* 플래그로 '저장됨' 만 표시한다. 빈 채로 저장하면 서버가 기존 값을 유지한다.
   const editTarget = (t) => { setF({ ...EMPTY, ...t, gpuGuest: { ...EMPTY.gpuGuest, ...(t.gpuGuest || {}) }, password: '', privateKey: '', centralToken: '', collectorToken: '' }); setSubtab('add'); };
-  const removeTarget = async (t) => { if (window.confirm(`'${t.host}' 대상을 삭제할까요?`)) { await delJson(`/admin/agent-deploy/targets/${t.id}`).catch(() => {}); await loadTargets(); } };
+  const removeTarget = async (t) => {
+    if (!window.confirm(`'${t.host}' 대상을 삭제할까요?`)) return;
+    // v2.611 WEB2611-08: 삭제 실패를 삼키지 않는다.
+    try { await delJson(`/admin/agent-deploy/targets/${t.id}`); } catch (e) { setResult({ kind: 'remove', ok: false, reason: `대상 삭제 실패(${t.host}): ${e?.message || e}` }); }
+    await loadTargets();
+  };
   const deployTarget = async (t) => {
     if (!window.confirm(`${t.host} 에 배포할까요?`)) return;
     setBusy(true); setResult(null);
@@ -442,7 +447,7 @@ export default function AgentDeploy() {
       {result && (
         <div className="card" style={{ borderColor: result.warn ? 'var(--amber)' : result.ok ? 'var(--green)' : 'var(--red)' }}>
           <b style={{ color: result.warn ? 'var(--amber)' : result.ok ? 'var(--green)' : 'var(--red)' }}>
-            {result.warn ? '주의' : result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포', pkg: '패키지 다운로드', 'pkg-multi': '패키지 다운로드', token: '중앙 토큰', autofill: '자동 채우기', pkgcfg: '패키지 설정', status: '서버 상태 확인' }[result.kind] || '배포'}
+            {result.warn ? '주의' : result.ok ? '성공' : '실패'} — {{ test: 'SSH 테스트', save: '대상 저장', 'deploy-all': '전체 배포', pkg: '패키지 다운로드', 'pkg-multi': '패키지 다운로드', token: '중앙 토큰', autofill: '자동 채우기', pkgcfg: '패키지 설정', status: '서버 상태 확인', remove: '대상 삭제' }[result.kind] || '배포'}
           </b>
           <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.7 }}>
             {result.reason && <div style={{ color: result.warn ? 'var(--amber)' : result.ok ? 'var(--green)' : 'var(--red)' }}>{result.reason}</div>}

@@ -1,5 +1,5 @@
 // IpamNet.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, getToken, downloadFile } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
@@ -24,7 +24,8 @@ export function IpamRanges() {
   const [csvImport, setCsvImport] = useState(false); // 대역 CSV 가져오기 모달(공용 CsvImportModal)
   const authHdr = () => (getToken() ? { Authorization: `Bearer ${getToken()}` } : {});
   const load = async () => { try { setData(await fetchJson('/tools/ipam/vc-ranges')); setError(null); } catch (e) { setError(e.message); } };
-  const loadStatus = () => fetchJson('/admin/ipam/scan/status').then(setStatus).catch(() => setStatus(null));
+  const statusDenied = useRef(false); // v2.611 LEFT2611-07: 스캔 상태는 전체 범위 계정만 — 403 이면 3초 폴링을 멈춘다
+  const loadStatus = () => { if (statusDenied.current) return; fetchJson('/admin/ipam/scan/status').then(setStatus).catch((e) => { setStatus(null); if (e?.status === 403) statusDenied.current = true; }); };
   useEffect(() => { load(); loadStatus(); const t = setInterval(loadStatus, 3000); return () => clearInterval(t); }, []);
   useEffect(() => {
     if (!data) return;

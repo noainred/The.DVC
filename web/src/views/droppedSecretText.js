@@ -12,7 +12,7 @@
  */
 
 const KEY_LABEL = {
-  password: '비밀번호', secret: '비밀번호', privateKey: '개인 키', passphrase: '키 암호',
+  password: '비밀번호', winPassword: 'Windows 비밀번호', secret: '비밀번호', privateKey: '개인 키', passphrase: '키 암호',
   token: '토큰', centralToken: '중앙 토큰', collectorToken: '수집 토큰', apiKey: 'API 키', community: 'SNMP 커뮤니티',
 };
 

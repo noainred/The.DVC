@@ -71,8 +71,10 @@ async function openInner() {
         in_util_sum REAL NOT NULL DEFAULT 0, in_util_n INTEGER NOT NULL DEFAULT 0, in_util_max REAL,
         out_util_sum REAL NOT NULL DEFAULT 0, out_util_n INTEGER NOT NULL DEFAULT 0, out_util_max REAL,
         in_err_sum INTEGER, out_err_sum INTEGER,
+        in_err_n INTEGER NOT NULL DEFAULT 0, out_err_n INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (agent, cvp_id, device_key, port, day));
       CREATE INDEX IF NOT EXISTS idx_pd_day ON port_daily (day);`);
+    addDailyErrCountCols(conn);
     const maxOf = (col) => `NULLIF(MAX(IFNULL(port_daily.${col},-1e308), IFNULL(excluded.${col},-1e308)), -1e308)`;
     const st = {
       upDevice: conn.prepare(`INSERT INTO device_latest (agent,cvp_id,device_key,ts,hostname,model,serial,mgmt_ip,eos_version,streaming,telemetry,parts_json,parts_at,bgp_json,ports_read,extra_json)
@@ -81,7 +83,8 @@ async function openInner() {
           mgmt_ip=excluded.mgmt_ip, eos_version=excluded.eos_version, streaming=excluded.streaming, telemetry=excluded.telemetry,
           parts_json=CASE WHEN excluded.parts_at IS NULL THEN device_latest.parts_json ELSE excluded.parts_json END,
           parts_at=CASE WHEN excluded.parts_at IS NULL THEN device_latest.parts_at ELSE excluded.parts_at END,
-          bgp_json=excluded.bgp_json, ports_read=excluded.ports_read, extra_json=excluded.extra_json
+          bgp_json=excluded.bgp_json, ports_read=excluded.ports_read,
+          extra_json=CASE WHEN excluded.parts_at IS NULL THEN device_latest.extra_json ELSE excluded.extra_json END
         WHERE excluded.ts > device_latest.ts`),
       upPort: conn.prepare(`INSERT INTO port_latest (agent,cvp_id,device_key,port,ts,descr,speed_bps,oper,admin,vlan,lag,in_bps,out_bps,in_util,out_util,in_err,out_err,rate_ts)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -98,19 +101,22 @@ async function openInner() {
       // 원시 표본이 오면 그 포트의 마지막 처리량도 갱신한다(엣지는 구성이 바뀌지 않은 장비 레코드를 매번 보내지 않는다 — push.js).
       rateFromSample: conn.prepare(`UPDATE port_latest SET in_bps=?, out_bps=?, in_util=?, out_util=?, in_err=?, out_err=?, rate_ts=?
         WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND IFNULL(rate_ts,0) < ?`),
-      touchDevice: conn.prepare('UPDATE device_latest SET ts=? WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ?'),
+      // v2.611(EDGE2611-04): 행이 **있으면** 센다(ts 는 더 클 때만 오른다) — changes 가 '중앙에 그 장비 행이 있는가' 를 말해야
+      //   엣지가 없는 행을 touch 로만 보내는 것을 알아채고 레코드를 다시 보낸다(예전 `AND ts < ?` 는 같은 ts 재전송을 0 으로 셌다).
+      touchDevice: conn.prepare('UPDATE device_latest SET ts=MAX(ts, ?) WHERE agent=? AND cvp_id=? AND device_key=?'),
       delPortsOld: conn.prepare('DELETE FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ?'),
       insSample: conn.prepare('INSERT OR IGNORE INTO port_sample (agent,cvp_id,device_key,port,ts,in_bps,out_bps,in_util,out_util,in_err,out_err) VALUES (?,?,?,?,?,?,?,?,?,?,?)'),
       upDaily: conn.prepare(`INSERT INTO port_daily (agent,cvp_id,device_key,port,day,samples,in_bps_sum,in_bps_n,in_bps_max,out_bps_sum,out_bps_n,out_bps_max,
-          in_util_sum,in_util_n,in_util_max,out_util_sum,out_util_n,out_util_max,in_err_sum,out_err_sum)
-        VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          in_util_sum,in_util_n,in_util_max,out_util_sum,out_util_n,out_util_max,in_err_sum,out_err_sum,in_err_n,out_err_n)
+        VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(agent,cvp_id,device_key,port,day) DO UPDATE SET samples=port_daily.samples+1,
           in_bps_sum=port_daily.in_bps_sum+excluded.in_bps_sum, in_bps_n=port_daily.in_bps_n+excluded.in_bps_n, in_bps_max=${maxOf('in_bps_max')},
           out_bps_sum=port_daily.out_bps_sum+excluded.out_bps_sum, out_bps_n=port_daily.out_bps_n+excluded.out_bps_n, out_bps_max=${maxOf('out_bps_max')},
           in_util_sum=port_daily.in_util_sum+excluded.in_util_sum, in_util_n=port_daily.in_util_n+excluded.in_util_n, in_util_max=${maxOf('in_util_max')},
           out_util_sum=port_daily.out_util_sum+excluded.out_util_sum, out_util_n=port_daily.out_util_n+excluded.out_util_n, out_util_max=${maxOf('out_util_max')},
           in_err_sum=CASE WHEN excluded.in_err_sum IS NULL THEN port_daily.in_err_sum ELSE IFNULL(port_daily.in_err_sum,0)+excluded.in_err_sum END,
-          out_err_sum=CASE WHEN excluded.out_err_sum IS NULL THEN port_daily.out_err_sum ELSE IFNULL(port_daily.out_err_sum,0)+excluded.out_err_sum END`),
+          out_err_sum=CASE WHEN excluded.out_err_sum IS NULL THEN port_daily.out_err_sum ELSE IFNULL(port_daily.out_err_sum,0)+excluded.out_err_sum END,
+          in_err_n=port_daily.in_err_n+excluded.in_err_n, out_err_n=port_daily.out_err_n+excluded.out_err_n`),
     };
     _db = { conn, st };
     lockRetry.ok();
@@ -121,6 +127,19 @@ async function openInner() {
     console.warn(`[cvp-db] DB 사용 불가(수집 화면은 동작, 이력·최신값 저장만 비활성): ${e.message}`);
     _db = 'unavailable';
     return null;
+  }
+}
+
+/**
+ * v2.611(DB2611-06): 일 롤업 오류 합의 표본 수 열 — 없는 열만 더한다(table_info 로 확인 · 'duplicate column name' 만 삼킨다 —
+ * 잠금 등 다른 오류를 '열 있음' 으로 삼키면 이후 upsert 가 매번 실패한다: v2.603 DB2603-01 규약).
+ */
+function addDailyErrCountCols(conn) {
+  const have = new Set(conn.prepare('PRAGMA table_info(port_daily)').all().map((r) => r.name));
+  for (const col of ['in_err_n', 'out_err_n']) {
+    if (have.has(col)) continue;
+    try { conn.exec(`ALTER TABLE port_daily ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`); }
+    catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; }
   }
 }
 
@@ -191,7 +210,7 @@ function insertSample(st, [agent, cvpId, key, port, ts, inBps, outBps, inUtil, o
   const [ib, ob, iu, ou, ie, oe] = v;
   st.upDaily.run(agent, cvpId, key, port, dayIndex(ts),
     ib ?? 0, ib == null ? 0 : 1, ib, ob ?? 0, ob == null ? 0 : 1, ob,
-    iu ?? 0, iu == null ? 0 : 1, iu, ou ?? 0, ou == null ? 0 : 1, ou, ie, oe);
+    iu ?? 0, iu == null ? 0 : 1, iu, ou ?? 0, ou == null ? 0 : 1, ou, ie, oe, ie == null ? 0 : 1, oe == null ? 0 : 1);
   return true;
 }
 
@@ -199,21 +218,32 @@ function insertSample(st, [agent, cvpId, key, port, ts, inBps, outBps, inUtil, o
  * 중앙: 엣지 push 의 원시 표본 행 적재. rows: [[cvpId, deviceKey, port, ts, inBps, outBps, inUtil, outUtil, inErr, outErr], …]
  * ⚠ 호출자가 소유권(cvpId ∈ serversForAgent(agent))을 먼저 걸러야 한다.
  */
+export const IMPORT_TXN_ROWS = 2_000;
 export async function importSamples(agent, rows = []) {
   const db = await open();
   if (!db) return { inserted: 0, duplicates: 0, unavailable: true };
   let ins = 0; let dup = 0;
-  db.conn.exec('BEGIN');
-  try {
-    for (const r of rows) {
-      if (insertSample(db.st, [agent, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]])) {
-        ins++;
-        const v = [r[4], r[5], r[6], r[7], r[8], r[9]].map(numOrNull);
-        db.st.rateFromSample.run(...v, r[3], agent, r[0], r[1], r[2], r[3]);
-      } else dup++;
-    }
-    db.conn.exec('COMMIT');
-  } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  /*
+   * v2.611(DB2611-04): 2,000행 단위 트랜잭션 + **COMMIT 뒤** 양보. 한 번에 수만 행을 동기로 넣으면 그동안 이벤트 루프가 멈춘다
+   *   (30만 행 표에서 7,600행 170ms 실측). ⚠ 양보는 반드시 COMMIT 뒤 — BEGIN 을 연 채 양보하면 같은 연결을 쓰는 다른 요청의
+   *   BEGIN 이 'cannot start a transaction within a transaction' 으로 실패한다(재현). 한 행의 INSERT·일 롤업·최신 갱신은
+   *   같은 하위 트랜잭션 안이라 재전송 이중 계수 방지(INSERT OR IGNORE + changes — v2.550.3)는 그대로다.
+   */
+  for (let i = 0; i < rows.length; i += IMPORT_TXN_ROWS) {
+    if (i > 0) await new Promise((r) => setImmediate(r));
+    const part = rows.slice(i, i + IMPORT_TXN_ROWS);
+    db.conn.exec('BEGIN');
+    try {
+      for (const r of part) {
+        if (insertSample(db.st, [agent, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9]])) {
+          ins++;
+          const v = [r[4], r[5], r[6], r[7], r[8], r[9]].map(numOrNull);
+          db.st.rateFromSample.run(...v, r[3], agent, r[0], r[1], r[2], r[3]);
+        } else dup++;
+      }
+      db.conn.exec('COMMIT');
+    } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  }
   if (ins) _counts = null;
   return { inserted: ins, duplicates: dup };
 }
@@ -223,12 +253,13 @@ export async function importSamples(agent, rows = []) {
  * ⚠ 호출자가 소유권을 먼저 걸러야 한다.
  */
 export async function touchDevices(agent, touch = []) {
+  if (!touch.length) return { touched: 0 };
   const db = await open();
-  if (!db || !touch.length) return { touched: 0 };
+  if (!db) return { touched: 0, unavailable: true };
   let n = 0;
   db.conn.exec('BEGIN');
   try {
-    for (const [cvpId, key, ts] of touch) n += Number(db.st.touchDevice.run(ts, agent, cvpId, key, ts).changes);
+    for (const [cvpId, key, ts] of touch) n += Number(db.st.touchDevice.run(ts, agent, cvpId, key).changes);
     db.conn.exec('COMMIT');
   } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
   return { touched: n };
@@ -265,6 +296,46 @@ export async function pruneDevices(agent, keepByCvp = {}, { cvpIds = null } = {}
   } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
   if (removed) _counts = null;
   return { removed };
+}
+
+/**
+ * v2.611(CEN2611-02): 같은 엣지가 대소문자만 다른 이름으로 남긴 행을 저장 키(agentKey) 하나로 모은다(프로세스당 키마다 1회).
+ * 변형 이름은 작은 최신 표(device_latest·port_latest)에서 찾고, 표본·일 롤업은 인덱스 선행열(agent)로 옮긴다.
+ * 충돌(같은 장비·포트·시각)은 저장 키 쪽을 남긴다(UPDATE OR IGNORE 뒤 남은 변형 행 삭제) — 중복을 두 벌로 두지 않는다.
+ */
+const _adopted = new Set();
+export async function adoptAgentVariants(agentKey) {
+  const key = String(agentKey ?? '');
+  if (!key || _adopted.has(key)) return { moved: 0, variants: [] };
+  const db = await open();
+  if (!db) return { moved: 0, variants: [], unavailable: true };
+  const lo = key.toLowerCase();
+  const found = new Set();
+  for (const t of ['device_latest', 'port_latest']) {
+    for (const r of db.conn.prepare(`SELECT DISTINCT agent AS a FROM ${t} WHERE agent <> '' AND LOWER(TRIM(agent)) = ?`).all(lo)) if (r.a !== key) found.add(r.a);
+  }
+  let moved = 0;
+  for (const v of found) {
+    for (const t of ['device_latest', 'port_latest', 'port_sample', 'port_daily']) {
+      db.conn.exec('BEGIN');
+      try {
+        moved += Number(db.conn.prepare(`UPDATE OR IGNORE ${t} SET agent=? WHERE agent=?`).run(key, v).changes);
+        db.conn.prepare(`DELETE FROM ${t} WHERE agent=?`).run(v);
+        db.conn.exec('COMMIT');
+      } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+      await new Promise((r) => setImmediate(r));
+    }
+  }
+  _adopted.add(key);
+  if (found.size) { _counts = null; console.warn(`[cvp-db] 대소문자만 다른 엣지 이름 ${[...found].map((x) => `'${capStr(x, 64)}'`).join(', ')} 의 행을 '${capStr(key, 64)}' 로 모았습니다(${moved}행)`); }
+  return { moved, variants: [...found] };
+}
+
+/** 그 agent·cvp 의 장비 행 수(COL2611-05 prune 보류 판정용). DB 불가면 null. */
+export async function deviceCount(agent, cvpId) {
+  const db = await open();
+  if (!db) return null;
+  return Number(db.conn.prepare('SELECT COUNT(*) AS n FROM device_latest WHERE agent=? AND cvp_id=?').get(agent, cvpId)?.n || 0);
 }
 
 /** 최신 장비 목록(행 → 공개 모양). agent 가 null 이면 전부. */
@@ -349,7 +420,7 @@ export async function samplesAfter(rowid = 0, limit = 20_000) {
   const db = await open();
   if (!db) return { rows: [], maxRowid: Number(rowid) || 0, unavailable: true };
   const rows = db.conn.prepare(`SELECT rowid AS rowid, cvp_id, device_key, port, ts, in_bps, out_bps, in_util, out_util, in_err, out_err
-      FROM port_sample WHERE rowid > ? AND agent = '' ORDER BY rowid LIMIT ?`)
+      FROM port_sample WHERE rowid > ? AND +agent = '' ORDER BY rowid LIMIT ?`)
     .all(Number(rowid) || 0, Math.max(1, Math.min(100_000, Number(limit) || 20_000)));
   return {
     rows: rows.map((r) => [r.cvp_id, r.device_key, r.port, Number(r.ts), r.in_bps, r.out_bps, r.in_util, r.out_util, r.in_err, r.out_err]),
@@ -382,17 +453,30 @@ export async function portSeries({ agent, cvpId, key, port, hours = 24, rawReten
   const rows = db.conn.prepare(`SELECT * FROM port_daily WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND day>=? ORDER BY day LIMIT ?`)
     .all(agent, cvpId, key, port, dayIndex(from), LIMIT);
   const avg = (s, n) => (Number(n) > 0 ? Number(s) / Number(n) : null);
+  const legacyN = (n, sum) => (Number(n) === 0 && sum != null ? null : Number(n) || 0);
   const pts = rows.map((r) => ({
     ts: dayStartMs(r.day), inBps: avg(r.in_bps_sum, r.in_bps_n), outBps: avg(r.out_bps_sum, r.out_bps_n),
     inUtil: avg(r.in_util_sum, r.in_util_n), outUtil: avg(r.out_util_sum, r.out_util_n),
     inBpsMax: r.in_bps_max, outBpsMax: r.out_bps_max, inUtilMax: r.in_util_max, outUtilMax: r.out_util_max,
     inErr: r.in_err_sum, outErr: r.out_err_sum, samples: Number(r.samples),
+    // v2.611(DB2611-06): 오류 합은 **델타를 만든 표본만** 더한 부분 합이다(첫 표본·간격 비정상·카운터 리셋은 null).
+    //   몇 표본의 합인지(inErrN)를 함께 준다 — samples 와 다르면 하루 전체의 오류가 아니다. 열 추가 전(구버전) 행은 null(모름).
+    inErrN: legacyN(r.in_err_n, r.in_err_sum), outErrN: legacyN(r.out_err_n, r.out_err_sum),
   }));
   return { points: pts, source: 'daily', intervalMs: DAY_MS };
 }
 
 let _pruneTick = 0;
 export const PRUNE_EVERY = 12;
+export const PRUNE_CHUNK = 5_000;
+/*
+ * v2.611(EDGE2611-05·DB2611-07): 엣지 prune 은 ts 만 보므로 **아직 중앙에 보내지 않은** 표본도 지운다(중앙 장애가 보존일보다
+ *   길면 조용한 소실). 커서는 push.js 가 갖고 있어 여기서는 제공자로 받는다 — 지우기 전에 '커서 뒤 + 보존일 전' 행 수를 센다.
+ */
+let _cursorOf = null;
+let _lostUnsent = { total: 0, last: 0, at: null };
+export function setUnsentCursorProvider(fn) { _cursorOf = typeof fn === 'function' ? fn : null; }
+export function lostUnsentStats() { return { ..._lostUnsent }; }
 /** 보존 정리 — 스로틀은 호출자가 `(++tick % N) === 0` 로(기동 첫 틱에 돌지 않게). 여기서는 요청을 공유만 한다. */
 export async function prune({ rawRetentionDays = 7, dailyRetentionDays = 730, now = Date.now() } = {}) {
   const db = await open();
@@ -400,10 +484,20 @@ export async function prune({ rawRetentionDays = 7, dailyRetentionDays = 730, no
   const rawCut = now - Math.max(1, rawRetentionDays) * DAY_MS;
   const dayCut = dayIndex(now) - Math.max(1, dailyRetentionDays);
   return pruneFlight.run({ raw: rawCut, daily: dayCut }, async () => {
-    const a = await chunkedDelete(db.conn.prepare('DELETE FROM port_sample WHERE rowid IN (SELECT rowid FROM port_sample WHERE ts < ? LIMIT ?)'), [rawCut]);
-    const b = await chunkedDelete(db.conn.prepare('DELETE FROM port_daily WHERE rowid IN (SELECT rowid FROM port_daily WHERE day < ? LIMIT ?)'), [dayCut]);
+    let lost = 0;
+    const cur = _cursorOf ? numOrNull(_cursorOf()) : null;
+    if (cur != null) {
+      try { lost = Number(db.conn.prepare("SELECT COUNT(*) AS n FROM port_sample WHERE rowid > ? AND ts < ? AND +agent = ''").get(cur, rawCut)?.n || 0); } catch { lost = 0; }
+    }
+    // 청크 5,000(기본 2만) — 청크마다 동기 정지가 선형으로 줄어든다(DB2611-04).
+    const a = await chunkedDelete(db.conn.prepare('DELETE FROM port_sample WHERE rowid IN (SELECT rowid FROM port_sample WHERE ts < ? LIMIT ?)'), [rawCut], { chunk: PRUNE_CHUNK });
+    const b = await chunkedDelete(db.conn.prepare('DELETE FROM port_daily WHERE rowid IN (SELECT rowid FROM port_daily WHERE day < ? LIMIT ?)'), [dayCut], { chunk: PRUNE_CHUNK });
+    if (lost > 0) {
+      _lostUnsent = { total: _lostUnsent.total + lost, last: lost, at: Date.now() };
+      console.warn(`[cvp-db] 중앙에 보내지 못한 표본 ${lost}행이 보존일(${rawRetentionDays}일)을 넘어 지워졌습니다 — 중앙 수신·push 상태를 확인하세요`);
+    }
     if (a.deleted || b.deleted) _counts = null;
-    return { deleted: a.deleted + b.deleted, raw: a.deleted, daily: b.deleted, done: a.done && b.done };
+    return { deleted: a.deleted + b.deleted, raw: a.deleted, daily: b.deleted, done: a.done && b.done, ...(lost ? { lostUnsent: lost } : {}) };
   });
 }
 /** 폴러 틱마다 부른다 — N 틱에 한 번만 실제로 정리한다. */
@@ -428,4 +522,5 @@ export async function dbStats() {
 export function _resetForTest() {
   try { if (_db && _db !== 'unavailable') _db.conn.close(); } catch { /* */ }
   _db = null; _opening = null; _counts = null; _pruneTick = 0; pruneFlight.reset(); lockRetry.ok();
+  _adopted.clear(); _lostUnsent = { total: 0, last: 0, at: null };
 }

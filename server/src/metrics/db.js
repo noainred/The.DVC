@@ -14,6 +14,7 @@ import { splitByDeadband, policyFromEnv } from './deadband.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
 import path from 'node:path';
 import { config } from '../config.js';
+import { chmodDbFiles } from '../util/sqliteOpen.js';
 import { pushAll } from '../util/pushAll.js';
 
 const DB_PATH = config.temp.dbPath; // reuse the temp/metrics DB path
@@ -26,6 +27,7 @@ function initSqlite() {
   return import('node:sqlite').then(({ DatabaseSync }) => {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
     const db = new DatabaseSync(DB_PATH);
+    chmodDbFiles(DB_PATH); // v2.611(DB2611-01): 본체·기존 -wal/-shm 0600 — PRAGMA·스키마(첫 쓰기) 전에
     try { db.exec('PRAGMA busy_timeout=3000;'); } catch { /* */ } // 먼저 — WAL 전환도 잠금을 기다리게(v2.597 L2597-02)
     // WAL + synchronous=NORMAL: 커밋당 fsync 2회(DELETE 저널) → 배치화(단건 insert 5ms→0.01ms 실측).
     // busy_timeout: 동시 접근 시 즉시 SQLITE_BUSY 실패 대신 대기.

@@ -15,7 +15,8 @@ import { getPollerStatus, pollNow } from '../../idrac/poller.js';
 import { listScanRanges, saveScanRanges, removeScanRanges, getScanRangeRaw } from '../../idrac/scanRanges.js';
 import { scanRangesToCsv, sampleCsv as scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport } from '../../idrac/scanRangesCsv.js';
 import { listDatacenters } from '../../datacenter/store.js';
-import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs } from '../../idrac/scanPoller.js';
+import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs, tryAcquireScan, releaseScan } from '../../idrac/scanPoller.js';
+import { makeScanAuthPolicy } from '../../idrac/scanAuth.js';
 import { listIdracScanLog, idracScanLogDatacenters } from '../../idrac/scanLog.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { getSensorSeries, remoteSensorView } from '../../idrac/sensorStore.js';
@@ -28,8 +29,10 @@ import { findHostByServiceTag } from '../../idrac/hostMatch.js';
 import { getDatacenterAssign } from '../../datacenter/store.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { listAssignments, getResults } from '../../central/assignments.js';
-import { adminOnly, requireSettingsOwner } from './shared.js';
+import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
 import { numOrNull } from '../../util/numOrNull.js';
+// v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
+const fleetOnly = fullScopeOnlyWith('iDRAC 등록부·스캔 대역·스캔 실행은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 실행할 수 있습니다(재귀속·삭제로 다른 법인 서버를 옮길 수 있었다).');
 
 
 // Register iDRACs found by a scan, applying the shared credentials, then poll.
@@ -190,7 +193,7 @@ adminRouter.get('/idrac/:id/gpu-probe', adminOnly, async (req, res) => {
 
 // Import servers (JSON array / { servers:[...] } / CSV text). Body:
 //   { servers:[...], mode? } | { csv:"...", mode? } | bare array
-adminRouter.post('/idrac/import', adminOnly, (req, res) => {
+adminRouter.post('/idrac/import', adminOnly, fleetOnly, (req, res) => {
   const body = req.body || {};
   let list;
   if (typeof body.csv === 'string') list = parseCsv(body.csv);
@@ -208,7 +211,7 @@ adminRouter.post('/idrac/expand-ips', adminOnly, (req, res) => {
 
 // Bulk-register servers from an IP list with shared credentials, then poll.
 // Body: { ips, username, password, namePrefix?, mode? }
-adminRouter.post('/idrac/bulk-add', adminOnly, (req, res) => {
+adminRouter.post('/idrac/bulk-add', adminOnly, fleetOnly, (req, res) => {
   const result = bulkAddByIps(req.body || {});
   if (result.ok) pollNow().catch(() => {});
   res.status(result.ok ? 200 : 400).json(result);
@@ -217,7 +220,7 @@ adminRouter.post('/idrac/bulk-add', adminOnly, (req, res) => {
 // Scan an IP range and return only the IPs that are real Dell iDRACs (with
 // identity). No writes. Body: { ips, username, password, agent? }
 // agent 미지정/'__local__' = 이 포탈에서 직접 스캔(동기). 그 외 = 해당 에이전트에 위임.
-adminRouter.post('/idrac/scan', adminOnly, async (req, res) => {
+adminRouter.post('/idrac/scan', adminOnly, fleetOnly, async (req, res) => {
   const { ips, username, password } = req.body || {};
   const agent = String(req.body?.agent || '').trim();
   if (!ips) return res.status(400).json({ ok: false, reason: 'IP 대역을 입력하세요.' });
@@ -239,12 +242,18 @@ adminRouter.post('/idrac/scan', adminOnly, async (req, res) => {
     return res.json({ ok: true, delegated: true, dispatch: 'poll', agent, reqId });
   }
 
+  // v2.611(감사 TIM2611-04): 재진입 가드 — 주기·'지금 스캔'·다른 임시 스캔과 같은 잠금(idrac/scanPoller.js running)을 쓴다.
+  //   예전에는 가드가 없어 연타·주기 스캔과 겹치면 같은 대역(최대 2,048 IP · 동시 32)에 같은 계정 로그인이 곱해졌다.
+  //   인증 실패 정책(makeScanAuthPolicy)도 넘긴다 — 수동이라 건너뛰지는 않지만(periodic:false) 실패를 기록해 주기 스캔이 본다.
+  const lock = tryAcquireScan('adhoc');
+  if (!lock.ok) return res.status(409).json({ ok: false, busy: true, by: lock.by, reason: lock.reason });
   try {
-    const result = await scanForIdracs({ ips, username, password });
+    const authPolicy = makeScanAuthPolicy({ rangeId: 'adhoc', username, password, periodic: false });
+    const result = await scanForIdracs({ ips, username, password, authPolicy });
     res.json({ ok: true, delegated: false, ...result });
   } catch (err) {
     res.status(500).json({ ok: false, reason: err.message });
-  }
+  } finally { releaseScan(); }
 });
 
 // 위임 스캔 결과 폴링. Query: reqId
@@ -271,7 +280,7 @@ adminRouter.get('/idrac/scan-agents', adminOnly, (_req, res) => {
   for (const p of polling) add(p); // 실제 폴링 중인 이름을 반드시 선택 가능하게
   res.json({ agents: [...names].sort((a, b) => a.localeCompare(b)), pollingAgents: polling, centralEnabled: Boolean(config.central.token) });
 });
-adminRouter.post('/idrac/register-scanned', adminOnly, (req, res) => {
+adminRouter.post('/idrac/register-scanned', adminOnly, fleetOnly, (req, res) => {
   const { found, username, password, mode, vcenterId, datacenterId, agent } = req.body || {};
   const ag = String(agent || '').trim();
   if (ag && ag !== '__local__') {
@@ -294,7 +303,7 @@ adminRouter.get('/idrac/scan-ranges', adminOnly, (_req, res) => {
 // 저장/수정. Body: { id?, datacenterId, service?, ranges?, username?, password?, agent?, enabled?, mode? }
 // id가 있으면 그 엔트리 수정, 없으면 새 엔트리 생성(한 법인에 여러 서비스 엔트리 허용).
 // (구버전 클라이언트 호환: vcenterId로 와도 datacenterId로 처리)
-adminRouter.put('/idrac/scan-ranges', adminOnly, (req, res) => {
+adminRouter.put('/idrac/scan-ranges', adminOnly, fleetOnly, (req, res) => {
   const b = req.body || {};
   const dcId = b.datacenterId || b.vcenterId;
   const r = saveScanRanges({ ...b, datacenterId: dcId });
@@ -302,7 +311,7 @@ adminRouter.put('/idrac/scan-ranges', adminOnly, (req, res) => {
   res.status(r.ok ? 200 : 400).json(r);
 });
 // 삭제. :id = 엔트리 고유키(구버전 마이그레이션분은 id=datacenterId).
-adminRouter.delete('/idrac/scan-ranges/:id', adminOnly, (req, res) => {
+adminRouter.delete('/idrac/scan-ranges/:id', adminOnly, fleetOnly, (req, res) => {
   const r = removeScanRanges(req.params.id);
   if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 삭제', target: req.params.id });
   // v2.583: '없는 항목' 만 404 — 디스크 쓰기 실패는 500(서버 쪽 문제다. 404 로 두면 사용자가 목록이 낡은 줄 안다)
@@ -334,7 +343,7 @@ adminRouter.get('/idrac/scan-ranges/sample.csv', adminOnly, (_req, res) => {
   res.send(scanRangesSampleCsv());
 });
 
-adminRouter.post('/idrac/scan-ranges/import', adminOnly, (req, res) => {
+adminRouter.post('/idrac/scan-ranges/import', adminOnly, fleetOnly, (req, res) => {
   const { rows, error } = parseScanRangesCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -382,7 +391,7 @@ adminRouter.post('/idrac/scan-ranges/import', adminOnly, (req, res) => {
 });
 
 // 지금 스캔(비동기). Body: { id? }(엔트리 하나) | { datacenterId? }(그 법인의 모든 서비스) | {}(전체 enabled).
-adminRouter.post('/idrac/scan-ranges/scan', adminOnly, (req, res) => {
+adminRouter.post('/idrac/scan-ranges/scan', adminOnly, fleetOnly, (req, res) => {
   const id = String(req.body?.id || '').trim();
   const datacenterId = String(req.body?.datacenterId || req.body?.vcenterId || '').trim();
   const opts = id ? { id } : datacenterId ? { datacenterId } : {};
@@ -401,14 +410,14 @@ adminRouter.get('/idrac/scan-log', adminOnly, (req, res) => {
 });
 
 // 스캔 중지 — 진행 중 중앙 직접 스캔 중단 + 대기 중 위임 잡 취소(이미 인출된 위임 잡은 원격 중지 불가).
-adminRouter.post('/idrac/scan-ranges/stop', adminOnly, (req, res) => {
+adminRouter.post('/idrac/scan-ranges/stop', adminOnly, fleetOnly, (req, res) => {
   const r = stopIdracScanNow();
   logAudit({ user: req.user?.username, action: 'iDRAC 스캔 중지', target: '(전체)', detail: `중앙중단=${r.stoppingCentral} 위임취소=${r.canceledJobs}` });
   res.json({ ...r, status: idracScanStatus() });
 });
 
 // 주기 스캔 간격 설정(시간 단위, 0=주기 끔·수동만). 저장 즉시 타이머 재적용, 업그레이드 후에도 유지.
-adminRouter.put('/idrac/scan-ranges/interval', adminOnly, (req, res) => {
+adminRouter.put('/idrac/scan-ranges/interval', adminOnly, fleetOnly, (req, res) => {
   // v2.600 LO2600-05: 빈 값·null 은 400 — Number('')===0 이라 빈 칸이 '주기 끔' 으로 저장됐다(명시적 0 만 끔).
   const hours = numOrNull(req.body?.hours);
   if (hours == null || hours < 0 || hours > 720) return res.status(400).json({ ok: false, reason: '주기는 0~720 시간이어야 합니다(0=주기 끔).' });
@@ -448,7 +457,7 @@ adminRouter.get('/idrac/scan-job-log', adminOnly, (req, res) => {
 });
 
 // 개별 대기 잡 취소 — 잘못된 AGENT_NAME 등으로 영원히 '대기'하는 잡 하나를 전체 중지 없이 정리.
-adminRouter.post('/idrac/scan-job/cancel', adminOnly, (req, res) => {
+adminRouter.post('/idrac/scan-job/cancel', adminOnly, fleetOnly, (req, res) => {
   const reqId = String(req.body?.reqId || '');
   const r = cancelIdracScanJob(reqId);
   if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 대기 잡 취소', target: reqId });
@@ -456,7 +465,7 @@ adminRouter.post('/idrac/scan-job/cancel', adminOnly, (req, res) => {
 });
 
 // 서버 일괄 삭제. Body: { all:true } 또는 { vcenterId } (빈 문자열=미지정 서버 삭제).
-adminRouter.post('/idrac/delete', adminOnly, (req, res) => {
+adminRouter.post('/idrac/delete', adminOnly, fleetOnly, (req, res) => {
   const b = req.body || {};
   const result = b.all
     ? deleteServers({ all: true })
@@ -469,7 +478,7 @@ adminRouter.post('/idrac/delete', adminOnly, (req, res) => {
 
 // 다수 iDRAC 서버의 소속 vCenter 일괄 지정/해제. Body: { ids?:[], vcenterId, all? }
 // ids 미지정 + all=true → 전체 적용. 빈 vcenterId = 지정 해제(이름/태그 매칭으로 복귀).
-adminRouter.post('/idrac/assign-vcenter', adminOnly, (req, res) => {
+adminRouter.post('/idrac/assign-vcenter', adminOnly, fleetOnly, (req, res) => {
   const b = req.body || {};
   const ids = b.all ? null : (Array.isArray(b.ids) ? b.ids : []);
   if (!b.all && (!ids || !ids.length)) return res.status(400).json({ ok: false, reason: '대상(ids) 또는 all=true가 필요합니다.' });
@@ -481,13 +490,13 @@ adminRouter.post('/idrac/assign-vcenter', adminOnly, (req, res) => {
 // 파라미터 라우트는 반드시 위의 모든 리터럴 '/idrac/...' 라우트 뒤에 둔다. 그렇지 않으면
 // PUT/DELETE '/idrac/:id'가 '/idrac/scan-ranges'·'/idrac/power-settings' 같은 리터럴을 가려
 // id="scan-ranges"로 잘못 처리되어 '없는 서버: scan-ranges' 오류가 난다.
-adminRouter.put('/idrac/:id', adminOnly, async (req, res) => {
+adminRouter.put('/idrac/:id', adminOnly, fleetOnly, async (req, res) => {
   const result = updateServer(req.params.id, req.body || {});
   if (result.ok) pollNow().catch(() => {});
   res.status(result.ok ? 200 : 400).json(result);
 });
 
-adminRouter.delete('/idrac/:id', adminOnly, async (req, res) => {
+adminRouter.delete('/idrac/:id', adminOnly, fleetOnly, async (req, res) => {
   const result = removeServer(req.params.id);
   res.status(result.ok ? 200 : 404).json(result);
 });

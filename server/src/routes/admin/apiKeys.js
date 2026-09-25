@@ -13,7 +13,7 @@
  */
 
 import express from 'express';
-import { adminOnly, requireSettingsOwner } from './shared.js';
+import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
 import { logAudit } from '../../audit.js';
 import {
   issueApiKey, revokeApiKey, deleteApiKey, updateApiKey, listApiKeys, DEFAULT_RPM, KEY_PREFIX,
@@ -21,7 +21,10 @@ import {
 import { GROUPS, ENDPOINTS } from '../../publicapi/allowlist.js';
 
 export function registerApiKeys(adminRouter) {
-  const owner = [adminOnly, requireSettingsOwner];
+  // v2.611 AUTHZ2611-04: 연동 키는 전 함대 조회 자격증명이다(v2.562 '백업·토큰과 같은 등급'). 범위 제한 계정(설정 소유자여도)이
+  //   `vcenters:[]`(= 전체) 키를 발급해 자기 범위를 넘는 것을 막는다 — 가장 단순한 규칙: 발급·수정·폐기·삭제는 전체 범위 계정만.
+  const fleetOnly = fullScopeOnlyWith('연동 키는 전 함대를 조회하는 자격증명이라 전체 범위(vCenter 제한 없는) 계정만 발급·수정·폐기할 수 있습니다.');
+  const owner = [adminOnly, fleetOnly, requireSettingsOwner];
 
   /**
    * 목록 + 카탈로그. 화면이 분류 라벨·설명·엔드포인트를 **서버에서 받아** 쓴다 —

@@ -10,7 +10,7 @@ import {
   missingFootnotes, itemLabel, CANDIDATE_NOTE, partsCell, bgpCell, portsCell, streamingText, filterDevices,
   partState, partCounts, seriesGeometry, seriesSourceNote, collectSummary,
   EMPTY_SERVER, serverToForm, serverPayload, choiceOptions, settingsPayload, settingsToForm, SECRET_MASK,
-  isTruncated,
+  isTruncated, canCollect, listNotes, partsMissingText, telemetryText,
 } from './cvpText.js';
 
 /**
@@ -39,6 +39,7 @@ export default function CvpTool() {
   const [q, setQ] = useState('');
   const [cvpSel, setCvpSel] = useState('');
   const [msg, setMsg] = useState(null);
+  const [collectErr, setCollectErr] = useState(null); // 403 등 — ErrorBox 가 권한 안내로 바꾼다(v2.398)
   const [busy, setBusy] = useState(false);
   const [detailKey, setDetailKey] = useState(null); // { cvpId, key, hostname }
   const [adminOpen, setAdminOpen] = useState(false);
@@ -46,6 +47,7 @@ export default function CvpTool() {
 
   const u = getCurrentUser();
   const isAdmin = !u || u.role === 'admin';
+  const mayCollect = canCollect(u); // 서버가 admin·operator 만 받는다 — 누를 수 없는 버튼은 보이지 않게(WEB2611-11)
 
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
@@ -62,9 +64,13 @@ export default function CvpTool() {
   useEffect(() => { load(); }, [load]);
 
   const collectNow = async () => {
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg(null); setCollectErr(null);
     try { const r = await postJson('/tools/cvp/collect', {}); setMsg({ ok: true, text: collectSummary(r) }); await load(); }
-    catch (e) { setMsg({ ok: false, text: `수집 요청 실패: ${e.message || e}` }); }
+    catch (e) {
+      // 403 은 '오류' 가 아니라 정책이다 — ErrorBox 가 AccessDenied 로 바꾼다(v2.398). 그 밖의 실패만 빨간 배너.
+      if (e && e.status === 403) setCollectErr(e);
+      else setMsg({ ok: false, text: `수집 요청 실패: ${e.message || e}` });
+    }
     finally { setBusy(false); }
   };
 
@@ -93,15 +99,19 @@ export default function CvpTool() {
         </div>
         <div style={ROW}>
           <button type="button" className="btn" onClick={load}>새로고침</button>
-          <button type="button" className="btn" onClick={collectNow} disabled={busy || poller.running}
-            title={poller.running ? '수집이 진행 중입니다 — 끝난 뒤 다시 누르세요' : '중앙 직접 CVP 는 지금 수집하고, 엣지 위임 CVP 는 재수집을 요청합니다'}>
-            {busy ? '요청 중…' : poller.running ? '수집 중…' : '지금 수집'}
-          </button>
+          {mayCollect && (
+            <button type="button" className="btn" onClick={collectNow} disabled={busy || poller.running}
+              title={poller.running ? '수집이 진행 중입니다 — 끝난 뒤 다시 누르세요' : '중앙 직접 CVP 는 지금 수집하고, 엣지 위임 CVP 는 재수집을 요청합니다'}>
+              {busy ? '요청 중…' : poller.running ? '수집 중…' : '지금 수집'}
+            </button>
+          )}
         </div>
       </div>
 
       {error && <div className="banner">새로고침에 실패했습니다 — 아래는 직전 값입니다({String(error.message || error)}).</div>}
       {msg && <div className="banner" style={{ borderColor: msg.ok ? 'var(--green)' : 'var(--red)' }}><BoldText text={msg.text} /></div>}
+      {collectErr && <ErrorBox error={collectErr} />}
+      {listNotes(data).map((t, i) => <div key={`note-${i}`} className="banner"><BoldText text={t} /></div>)}
       {data.enabled === false && (
         <div className="banner">CVP 수집이 <b>꺼져 있습니다</b>. {isAdmin ? '아래 ‘등록·설정’ 에서 켜면 다음 주기부터 수집합니다.' : '관리자에게 설정을 요청하세요.'}</div>
       )}
@@ -267,6 +277,7 @@ function DeviceModal({ target, onClose }) {
             <span>모델 {dev.model || '—'}</span><span>시리얼 {dev.serial || '—'}</span>
             <span>EOS {dev.eosVersion || '—'}</span><span>관리 주소 {hostText(dev.mgmtIp)}</span>
             <span>수집 {agoText(dev.collectedAt)}</span>
+            {telemetryText(dev.telemetry) && <span>{telemetryText(dev.telemetry)}</span>}
           </div>
           <div style={ROW}>
             {[['parts', `장애 파트${parts ? ` (${parts.length})` : ''}`], ['ports', `포트${ports ? ` (${ports.length})` : ''}`],
@@ -275,6 +286,9 @@ function DeviceModal({ target, onClose }) {
             ))}
           </div>
 
+          {tab === 'parts' && partsMissingText(d.partsMissingKinds) && (
+            <div style={NOTE}><BoldText text={partsMissingText(d.partsMissingKinds)} /></div>
+          )}
           {tab === 'parts' && (parts == null ? (
             <div style={NOTE}>파트 상태를 읽지 못했습니다 — <b>정상이라는 뜻이 아닙니다</b>. ‘읽은 경로’ 탭에서 사유를 보세요.</div>
           ) : (

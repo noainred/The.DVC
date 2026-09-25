@@ -23,6 +23,7 @@ import { IdracScanRanges } from './idrac/IdracScanRanges.jsx';
 import BoldText from '../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { manualPollMessage } from './idrac/manualPollText.js'; // v2.591(감사 P1): 진행 중·긴급중단을 '성공' 으로 말하지 않는다
+import { scanHoldNote, scanFormCredsState } from './idrac/scanRunText.js'; // v2.611(감사 RECENT2611-02): 비밀번호 폐기 뒤 남은 계정으로 계속되는 스캔을 말한다
 
 export default function IdracAdmin() {
   const [data, setData] = useState(null);
@@ -41,7 +42,12 @@ export default function IdracAdmin() {
     try { setData(await fetchJson('/admin/idrac')); setError(null); }
     catch (e) { setError(e.message); }
   };
-  const loadScanRanges = () => fetchJson('/admin/idrac/scan-ranges').then((d) => setScanRanges({ ranges: d.ranges || [], status: d.status || null, centralEnabled: !!d.centralEnabled })).catch(() => {});
+  // v2.611(감사 WEB2611-08): 조회 실패를 삼키면 표가 '저장된 스캔 대역이 없습니다' 라고 말한다(거짓 빈 상태). 실패는 오류 배너로 —
+  //   직전 목록은 지우지 않는다(일시 오류 1회로 표를 갈아엎지 않는다).
+  const [srLoadErr, setSrLoadErr] = useState(null);
+  const loadScanRanges = () => fetchJson('/admin/idrac/scan-ranges')
+    .then((d) => { setScanRanges({ ranges: d.ranges || [], status: d.status || null, centralEnabled: !!d.centralEnabled, loaded: true }); setSrLoadErr(null); })
+    .catch((e) => setSrLoadErr(e?.message || String(e)));   // 문자열 — ErrorBox 의 403·일시 미가용 판정이 메시지 키로 찾는다
   const loadScanJobs = () => fetchJson('/admin/idrac/scan-jobs').then((d) => setScanJobs({ status: d.status || null, jobs: d.jobs || [], collectors: d.collectors || [], centralEnabled: !!d.centralEnabled })).catch(() => {});
   useEffect(() => {
     load();
@@ -86,7 +92,7 @@ export default function IdracAdmin() {
   // ── 법인(DataCenter)별 iDRAC 장비 스캔 ──────────────────────────
   const dcNameOf = (id) => (datacenters.find((d) => d.id === id)?.name || id || '');
   const srOpenNew = () => { setSrMsg(null); setSrForm({ id: '', datacenterId: '', service: '', ranges: '', username: 'root', password: '', agent: '__local__', dispatch: 'poll', enabled: true, mode: 'merge', iloUsername: '', iloPassword: '', iloHasPassword: false, isNew: true }); };
-  const srEdit = (e) => { setSrMsg(null); setSrForm({ id: e.id || '', datacenterId: e.datacenterId, service: e.service || '', ranges: (e.ranges || []).join('\n'), username: e.username || 'root', password: '', agent: e.agent || '__local__', dispatch: e.dispatch === 'push' ? 'push' : 'poll', enabled: e.enabled !== false, mode: e.mode || 'merge', hasPassword: e.hasPassword, iloUsername: e.iloUsername || '', iloPassword: '', iloHasPassword: !!e.iloHasPassword, isNew: false }); };
+  const srEdit = (e) => { setSrMsg(null); setSrForm({ id: e.id || '', datacenterId: e.datacenterId, service: e.service || '', ranges: (e.ranges || []).join('\n'), username: e.username || '', password: '', agent: e.agent || '__local__', dispatch: e.dispatch === 'push' ? 'push' : 'poll', enabled: e.enabled !== false, mode: e.mode || 'merge', hasPassword: e.hasPassword, iloUsername: e.iloUsername || '', iloPassword: '', iloHasPassword: !!e.iloHasPassword, isNew: false }); };
   const srSave = async () => {
     const f = srForm; if (!f) return;
     // 폼 바로 옆에 보이는 인라인 검증(상단 배너만 뜨면 폼에서 안 보여 '저장 안 됨'처럼 느껴짐).
@@ -97,7 +103,8 @@ export default function IdracAdmin() {
     // 비밀번호는 권장이지만 필수는 아님 — 없이도 저장(스캔은 비번 입력 시까지 보류). 저장이 막히지 않게.
     // '입력했는지' 판정은 빈 문자열 여부로만 한다(trim 금지) — 공백/특수문자로만 이뤄진 비밀번호도
     // 온전히 전송되게(과거 trim 판정으로 공백 비번이 조용히 누락됐다).
-    const noPw = !f.hasPassword && (f.password || '') === '';
+    // v2.611(감사 WEB2611-01): 쓸 수 있는 iLO 계정이 있으면 Dell 비밀번호가 없는 것은 정상이다(HPE 전용 대역) — 경고하지 않는다.
+    const noPw = scanFormCredsState(f).warnNoPassword;
     setBusy(true); setSrMsg(null);
     try {
       const body = { id: f.id || undefined, datacenterId: f.datacenterId, service: f.service || '', ranges: f.ranges, username: f.username, agent: f.agent === '__local__' ? '' : f.agent, dispatch: f.agent !== '__local__' ? (f.dispatch === 'push' ? 'push' : 'poll') : 'poll', enabled: f.enabled, mode: f.mode };
@@ -109,7 +116,7 @@ export default function IdracAdmin() {
       const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: 대역·엣지·계정이 바뀌어 저장 비밀번호 폐기
       if (r.ok && dropNote) {
         setSrForm({ ...f, id: f.id || r.id, hasPassword: r.hasPassword, password: '', iloHasPassword: r.iloHasPassword, iloPassword: '' });
-        setSrMsg({ ok: false, text: `${dropNote} 스캔은 비밀번호를 입력할 때까지 보류됩니다.` });
+        setSrMsg({ ok: false, text: `${dropNote} ${scanHoldNote(r)}` }); // v2.611 RECENT2611-02: 남은 계정으로 무엇이 계속되는지
         await loadScanRanges();
       } else if (r.ok) {
         const note = noPw ? ' · ⚠ 비밀번호 미설정 — 스캔하려면 비밀번호를 입력하세요' : '';
@@ -191,7 +198,9 @@ export default function IdracAdmin() {
 
       <IdracScanJobs data={scanJobs} vcenters={vcenters} datacenters={datacenters} busy={busy} onRefresh={loadScanJobs} onScanAll={() => srScanNow()} />
 
+      {srLoadErr && <ErrorBox error={srLoadErr} />}
       <IdracScanRanges
+        loadError={srLoadErr}
         data={scanRanges} vcenters={vcenters} datacenters={datacenters} agents={agents} busy={busy}
         form={srForm} setForm={setSrForm} msg={srMsg} setMsg={setSrMsg}
         onNew={srOpenNew} onEdit={srEdit} onSave={srSave} onDelete={srDelete} onScan={srScanNow}

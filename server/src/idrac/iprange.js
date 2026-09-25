@@ -9,7 +9,7 @@
 
 const MAX = 4096;
 
-import { ipToNum } from '../util/ipv4.js';
+import { ipToNum, strictIpv4Num } from '../util/ipv4.js';
 
 const ipToInt = ipToNum; // v2.586 — util/ipv4.js 하나
 
@@ -58,6 +58,11 @@ export function expandIpList(text) {
 
       } else {
         if (ipToInt(token) == null) { errors.push(`잘못된 IP: ${token}`); continue; }
+        // v2.611(감사 SEC2611-02): 단건은 원문을 그대로 접속처로 쓰므로 **정규형만** 받는다. '010.0.0.5' 는 이 파서가 10진
+        //   (10.0.0.5)으로 읽지만 URL·inet_aton 은 8진(8.0.0.5)으로 접속한다 — 같은 표기가 범위·CIDR(10진 정규화)과 다른 호스트가
+        //   되어 Dell/iLO 계정이 엉뚱한 주소로 간다. 8진인지 10진인지 추측하지 않고 거부한다(v2.589 '접속 대상은 비정규 거부' ·
+        //   svcmon/genspec.js 와 같은 판단). 범위·CIDR 은 정규형을 만들어 내보내므로 저장된 대역 호환을 위해 그대로 둔다.
+        if (strictIpv4Num(token) === false) { errors.push(`비정규 IP 표기(선행 0 등 — 정규형으로 적으세요): ${token}`); continue; }
         push(token);
       }
     }

@@ -268,6 +268,26 @@ export function idracAuthMessageFrom(text) {
 }
 
 /**
+ * v2.611(감사 COL2611-01): 시스템 식별값(서비스태그) — **벤더를 보고** 고른다.
+ *   Dell 은 `SKU` 가 서비스태그라(ESXi 매핑·파트 장비 키의 근거) 예전 순서(SKU → SerialNumber)를 유지한다.
+ *   HPE iLO 의 `SKU` 는 **주문 제품번호**(예: 867959-B21 — 같은 모델이면 전부 같다)이고 서버마다 다른 값은 `SerialNumber` 다
+ *   (HPE iLO REST 문서: ComputerSystem 의 SKU 와 SerialNumber 는 별개 속성). 예전에는 벤더를 보지 않아 같은 모델 HPE 가
+ *   전부 같은 서비스태그가 되어 원격 인벤토리 dedup·파트 장애 키·전력 합계의 '같은 물리 서버' 판정에서 **하나로 합쳐졌다**.
+ *   판정: 등록부 vendor==='hpe' 또는 Manufacturer 가 HPE/HP/Hewlett.
+ */
+export function isHpeSystem(sys, vendor = '') {
+  if (String(vendor || '').trim().toLowerCase() === 'hpe') return true;
+  const m = String(sys?.Manufacturer || '').trim();
+  return /^(hpe|hp)\b/i.test(m) || /hewlett/i.test(m);
+}
+export function systemServiceTag(sys, vendor = '') {
+  if (!sys || typeof sys !== 'object') return '';
+  const sku = typeof sys.SKU === 'string' ? sys.SKU : '';   // 예전과 같은 원문(Dell 키가 바뀌지 않게 다듬지 않는다)
+  const sn = typeof sys.SerialNumber === 'string' ? sys.SerialNumber : '';
+  return isHpeSystem(sys, vendor) ? (sn || sku) : (sku || sn);
+}
+
+/**
  * Fetch current power (Watts) and identity for one iDRAC.
  * Returns { watts, model, serviceTag, powerState, chassis }.
  * Throws on connection / auth failure.
@@ -308,7 +328,7 @@ export async function fetchPower(entry) {
     if (first) {
       const sys = await get(base, first, username, password);
       model = [sys.Manufacturer, sys.Model].filter(Boolean).join(' ').trim();
-      serviceTag = sys.SKU || sys.SerialNumber || serviceTag;
+      serviceTag = systemServiceTag(sys, entry.vendor) || serviceTag;
       powerState = sys.PowerState || '';
     }
   } catch { /* identity is optional */ }
@@ -412,7 +432,7 @@ export async function probeIdrac(host, username, password, timeoutMs = 3000, { c
         if (s2.ok) {
           const s = JSON.parse(await readTextCapped(s2, PROBE_SYSTEMS_MAX_BYTES, 'System'));   // v2.606: 상한(1MB)
           model = s.Model || ''; manufacturer = s.Manufacturer || '';
-          serviceTag = s.SKU || s.SerialNumber || ''; hostName = s.HostName || '';
+          serviceTag = systemServiceTag(s, bmcKind === 'hpe' ? 'hpe' : ''); hostName = s.HostName || '';
         }
       }
     }
@@ -468,8 +488,10 @@ export async function fetchInventory(entry) {
         hostName: s.HostName || '',
         model: s.Model || '',
         manufacturer: s.Manufacturer || '',
-        serviceTag: s.SKU || s.SerialNumber || '',
+        serviceTag: systemServiceTag(s, entry.vendor),
         serialNumber: s.SerialNumber || '',
+        sku: s.SKU || '',   // v2.611: HPE 등록부 교정(correctHpeServiceTag)이 '등록부 태그 == SKU' 를 판정하는 근거
+        hpe: isHpeSystem(s, entry.vendor),
         assetTag: s.AssetTag || '',
         uuid: s.UUID || '',
         biosVersion: s.BiosVersion || '',
@@ -996,13 +1018,24 @@ export async function fetchSensors(entry) {
         continue;
       }
       for (const t of thermal.Temperatures || []) {
+        // v2.611(감사 COL2611-03): 설치되지 않은 센서(`Status.State:"Absent"` — iLO 는 빈 DIMM·CPU 소켓을 ReadingCelsius:0
+        //   으로 나열한다)는 값이 아니다. 예전에는 0℃ 선이 센서 탭·추이에 그려졌다. Enabled·미지정은 그대로 둔다.
+        if (String(t?.Status?.State ?? '').trim().toLowerCase() === 'absent') continue;
         const c = num(t.ReadingCelsius);
         if (c == null) continue;
         const name = t.Name || t.MemberId || `Sensor ${t.SensorNumber ?? ''}`.trim();
         temps.push({ name, celsius: c });
       }
       for (const f of thermal.Fans || []) {
-        const rpm = num(f.Reading ?? f.ReadingRPM);
+        /*
+         * v2.611(감사 COL2611-02): HPE iLO 의 `Reading` 은 **퍼센트**다(`ReadingUnits:"Percent"` — HPE iLO5 리소스 정의의 지원
+         *   값은 Null·Percent 둘뿐). 예전에는 단위를 보지 않아 23% 가 `23 RPM` 으로 시계열·파트 문구에 들어갔다(오류 없이 틀린
+         *   값). Percent 면 rpm 은 null 이고 값은 `pct` 로 따로 싣는다(시계열 fans 는 {name,rpm} 그대로 — Dell RPM 과 한 차트에
+         *   퍼센트가 섞이지 않게). 대소문자·공백은 무시한다.
+         */
+        const unitPct = /^\s*percent\s*$/i.test(String(f.ReadingUnits ?? ''));
+        const rpm = unitPct ? null : num(f.Reading ?? f.ReadingRPM);
+        const pct = unitPct ? num(f.Reading) : null;
         /*
          * ⚠ v2.547 — 예전에는 `if (rpm == null) continue;` 였다. **멈춘 팬이 Reading 을 주지
          *   않으면 그 팬이 배열에서 통째로 사라져** 장애를 영원히 볼 수 없었다('팬 0개' 와
@@ -1011,9 +1044,10 @@ export async function fetchSensors(entry) {
          *   ⚠ 이름도 rpm 도 없는 항목만 버린다(그건 팬이라고 볼 근거가 없다).
          */
         const fname = f.Name || f.FanName || f.MemberId || '';
-        if (rpm == null && !fname && !f.Status?.Health) continue;
+        if (rpm == null && pct == null && !fname && !f.Status?.Health) continue;
         fans.push({
           name: fname || 'Fan', rpm,
+          ...(pct != null ? { pct } : {}),
           // 파트 인벤토리용 식별 필드(같은 응답, 추가 HTTP 0회). 시계열(sensorStore)에는
           // 싣지 않고 폴러가 인벤토리 갱신 시에만 invCache 로 옮긴다(시계열 비대화 방지).
           model: f.Model || '', partNumber: f.PartNumber || '', manufacturer: f.Manufacturer || '',

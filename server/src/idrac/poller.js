@@ -7,7 +7,7 @@
 
 import { config } from '../config.js';
 import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
-import { loadRegistry } from './registry.js';
+import { loadRegistry, correctHpeServiceTag } from './registry.js';
 import { fetchPower, fetchInventory, fetchSensors } from './redfish.js';
 import { pushSensorSample } from './sensorStore.js';
 import { fetchOmeDevices } from './ome.js';
@@ -208,6 +208,8 @@ async function pollOnceInner({ manual = false } = {}) {
             if (inv.collections && typeof inv.collections === 'object') inv.collections.fans = sensorFans?.length ? 'ok' : (sensorErr ? 'failed' : 'ok');
             setInventory(s.id, inv);
             invRefreshed += 1;
+            // v2.611(감사 COL2611-01): v2.610 스캔이 HPE 의 제품번호(SKU)를 서비스태그로 등록했으면 시리얼로 1회 교정한다.
+            if (inv.system?.hpe) { try { correctHpeServiceTag(s.id, { sku: inv.system.sku, serial: inv.system.serialNumber }); } catch { /* 교정 실패가 수집을 막지 않는다 */ } }
           } catch { /* keep last */ }
         }
         results.push({

@@ -725,7 +725,7 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
   ⚠ 정직 기록(v2.591): 실장비 응답(게스트 fault 전달·iDRAC 401 본문·SMTP 530 변형 문구·실제 AD 잠금 임계)은 확인하지 못했다 ·
   vmseries **수동** 경로의 거부 기록은 실행해 보지 않았다 · 엣지 `agent/scanner.js` 의 인증 건너뜀 개수는 중앙 `/result` 로
   가지 않는다(엣지 상태·콘솔에만). 새 정지 파일 4종은 `config-doc.mjs` 가 `createAuthGuard({file})` 형태를 못 읽어
-  CONFIG-FILES.md 에 없다(v2.590 의 7종도 같다 — 생성기 결함, 별건).
+  CONFIG-FILES.md 에 없다(v2.590 의 7종도 같다 — 생성기 결함, 별건). ✅ v2.611 정정: 정지 파일 15종 모두 CONFIG-FILES.md 에 있고 전부 git check-ignore 대상이다(LEFT2611-10).
 
 ## 2026-09-24 암호화 모드 재봉인 비용 조치(v2.598 L2598-01) — 되돌리지 말 것
 

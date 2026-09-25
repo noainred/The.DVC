@@ -14,6 +14,7 @@ import { VmCredManager } from './gpu-guest/VmCredManager.jsx';
 import { PhysicalGpuManager } from './gpu-guest/PhysicalGpuManager.jsx';
 import { STable } from '../components/STable.jsx';
 import { applyDrafts } from './blankKeep.js';
+import { droppedSecretNote } from './droppedSecretText.js'; // v2.611: 계정명 변경 시 폐기된 비밀번호 안내
 
 // v2.601(감사 RECENT2601-05): 숫자 칸의 저장값 변환(하한·초→ms). 입력 중에는 원문(초안)만 들고 있고
 // 저장할 때 한 번만 적용한다 — 입력 중에 걸면 칸을 비울 수 없고 하한이 중간 입력을 망가뜨린다.
@@ -93,7 +94,7 @@ export default function GpuGuestSettings() {
       setDrafts({});
       setMsg(deployAgent
         ? `원격 엣지 [${deployAgent}]로 배포 저장됨 — 엣지가 다음 pull 주기(약 1분)에 가져가 적용합니다.`
-        : '저장되었습니다. 새 설정이 다음 주기부터 적용됩니다.');
+        : ['저장되었습니다. 새 설정이 다음 주기부터 적용됩니다.', droppedSecretNote(r), r.ignoredReason || ''].filter(Boolean).join(' '));
       if (deployAgent) fetchJson('/admin/gpu-guest/deploy/agents').then((rr) => setAgents(rr.agents || [])).catch(() => {});
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }

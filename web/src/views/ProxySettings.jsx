@@ -65,7 +65,9 @@ export default function ProxySettings() {
   };
   const removeProxyForm = async (p) => {
     if (!window.confirm(`프록시 '${p.name}'을(를) 삭제할까요?`)) return;
-    await delJson(`/remote/proxies/${p.id}`).catch(() => {}); await load();
+    // v2.611 WEB2611-08: 삭제 실패를 삼키지 않는다.
+    try { await delJson(`/remote/proxies/${p.id}`); } catch (e) { flash(false, `프록시 삭제 실패: ${e?.message || e}`); }
+    await load();
   };
 
   return (

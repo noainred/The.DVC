@@ -75,6 +75,8 @@ export function appendIdracScanLog(rec = {}) {
     unreachable: n(rec.unreachable),
     authFailed: n(rec.authFailed),
     authSkipped: n(rec.authSkipped),
+    // v2.611(감사 RECENT2611-04): 그 벤더의 계정이 없어 로그인하지 않은 서버 수(예: iLO 전용 대역의 Dell). 옛 기록은 null.
+    noCreds: n(rec.noCreds),
     error: rec.error ? s(rec.error, 500) : null,
     stopped: rec.stopped ? true : undefined,
   };

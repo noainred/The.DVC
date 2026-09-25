@@ -236,16 +236,25 @@ export const PART_STATES = Object.freeze(['ok', 'warn', 'fault', 'unknown', 'abs
  */
 export function partState(flat) {
   if (!isObj(flat)) return 'unknown';
-  const statusRaw = pick(flat, ['state', 'status', 'health', 'operStatus', 'powerSupplyState', 'fanState', 'hwStatus', 'xcvrPresence', 'presence']);
+  const stateRaw = unwrap(pick(flat, ['state', 'status', 'health', 'operStatus', 'powerSupplyState', 'fanState', 'hwStatus']));
+  const presenceRaw = unwrap(pick(flat, ['xcvrPresence', 'presence']));
+  const statusRaw = stateRaw ?? presenceRaw;
   const s = String(statusRaw ?? '').toLowerCase();
   if (/not\s*_?inserted|notinserted|absent|not\s*_?present|notpresent|\bempty\b|xcvrnotpresent|removed/.test(s)) return 'absent';
   const alert = pick(flat, ['alertRaised', 'alarm', 'overheat', 'critical']);
   if (alert === true || String(alert).toLowerCase() === 'true') return 'fault';
+  const alertFalse = alert === false || String(alert).toLowerCase() === 'false';
   if (statusRaw == null || s === '') {
     // 상태 필드 없이 경보 플래그만 있고 그것이 false 면 정상
-    if (alert === false || String(alert).toLowerCase() === 'false') return 'ok';
+    if (alertFalse) return 'ok';
     return 'unknown';
   }
+  /*
+   * v2.611(COL2611-04): 장착 여부(xcvrPresent·present·inserted)는 '빈 슬롯이 아니다' 만 말한다 — 건강 상태가 아니다.
+   *   예전에는 이 값이 healthWord 에서 모르는 단어 → fault 로 떨어져 **꽂혀 있는 트랜시버가 전부 장애**가 됐다(재현).
+   *   다른 상태 필드가 없으면 unknown(경보 플래그가 false 로 명시돼 있을 때만 ok) — 정상으로 칠하지 않는다.
+   */
+  if (stateRaw == null) return alertFalse ? 'ok' : 'unknown';
   if (/warn|minor|degrad|attention/.test(s)) return 'warn';
   const w = healthWord(s.replace(/^(powersupply|fan|xcvr|intfoper)/, ''));
   return w === 'ok' ? 'ok' : w === 'bad' ? 'fault' : 'unknown';
@@ -284,13 +293,19 @@ export function partsSummary(parts) {
 
 /* ── 인터페이스·카운터 ─────────────────────────────────────────────────── */
 
-const SPEED_ENUM = /speed(\d+)(g|m|k)?bps/i;
-/** 속도 → bps(모르면 null). 숫자(bps) · 'speed100Gbps' · '100G' · '10000'(Mbps 로 보이는 작은 수는 그대로 두지 않는다). */
+// v2.611(COL2611-07): EOS 열거형은 소수를 'p' 로 쓴다(speed2p5Gbps = 2.5G) — 예전 식은 이것을 null 로 버렸다.
+const SPEED_ENUM = /speed(\d+)(?:p(\d+))?(g|m|k)?bps/i;
+/**
+ * 속도 → bps(모르면 null). 숫자(bps) · 'speed100Gbps' · 'speed2p5Gbps'(2.5G) · '100G' · '10000'.
+ * 단위 없는 수는 **bps 로 본다**(Mbps 로 추정해 곱하지 않는다 — 예전 주석은 반대로 적혀 있었다). 그 결과 사용률이 100% 를 넘으면
+ * portDelta 가 null 로 버린다(지어낸 속도로 사용률을 만들지 않는다).
+ */
 export function speedBps(v) {
   if (v == null || v === '') return null;
   if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? v : null;
   const s = String(v);
-  const m = SPEED_ENUM.exec(s) || /^(\d+(?:\.\d+)?)\s*(g|m|k)\b/i.exec(s.trim());
+  const e = SPEED_ENUM.exec(s);
+  const m = e ? [e[0], e[2] != null ? `${e[1]}.${e[2]}` : e[1], e[3]] : /^(\d+(?:\.\d+)?)\s*(g|m|k)\b/i.exec(s.trim());
   if (m) {
     const n = Number(m[1]); const u = String(m[2] || '').toLowerCase();
     const mult = u === 'g' ? 1e9 : u === 'm' ? 1e6 : u === 'k' ? 1e3 : 1;
@@ -370,12 +385,14 @@ export function parseCounters(text) {
  * @param {{at:number, c:object}} cur
  * @param {number|null} speed  bps
  * @param {number} intervalMs  설정 주기(간격 비정상 판정 기준)
+ * @param {number} [slackMs]    간격 한계에 더할 직전 실행 소요(v2.611 COL2611-08 — 표본 간격 = 주기 + 실행 시간)
  */
-export function portDelta(prev, cur, speed, intervalMs) {
+export function portDelta(prev, cur, speed, intervalMs, slackMs = 0) {
   const out = { inBps: null, outBps: null, inUtil: null, outUtil: null, inErr: null, outErr: null, reason: null };
   if (!prev || !prev.c) { out.reason = 'first'; return out; }
   const gapMs = Number(cur?.at) - Number(prev.at);
-  const lim = Math.max(1, Number(intervalMs) || 0) * 3;
+  const slack = Number(slackMs);
+  const lim = Math.max(1, Number(intervalMs) || 0) * 3 + (Number.isFinite(slack) && slack > 0 ? slack : 0);
   if (!Number.isFinite(gapMs) || gapMs <= 0 || gapMs > lim) { out.reason = 'gap'; return out; }
   const sec = gapMs / 1000;
   const d = (a, b) => (a == null || b == null ? null : (b - a < 0 ? null : b - a));

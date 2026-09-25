@@ -145,7 +145,7 @@ export function enqueueIdracScan(agent, { ips, username, password, ilo = null, v
       if (String(jj.username || '') !== String(username || '') || String(jj.password || '') !== String(password || '')
         || iloKey(jj.ilo) !== iloKey(ilo)
         || !!jj.noRegister !== !!noRegister || String(jj.vcenterId || '') !== String(vcenterId || '')) {
-        jj.username = username; jj.password = password; jj.ilo = ilo; jj.noRegister = !!noRegister; jj.vcenterId = vcenterId;
+        jj.username = username; jj.password = password; jj.ilo = ilo; jj.iloRequested = Boolean(ilo); jj.noRegister = !!noRegister; jj.vcenterId = vcenterId;
         // v2.591: 주기/수동 구분도 가장 최근 의도로 — 수동 '지금 스캔' 이 대기 중인 주기 잡에 병합되면
         //   엣지가 그것을 주기로 보고 인증 정지 IP 를 건너뛴다(수동은 전부 시도해야 한다).
         if (trigger === 'manual') jj.trigger = 'manual';
@@ -162,7 +162,7 @@ export function enqueueIdracScan(agent, { ips, username, password, ilo = null, v
   // 총 IP 수를 미리 계산해 UI가 진행률 분모를 바로 표시할 수 있게 한다(스캔 max=2048 반영).
   let total = 0;
   try { total = Math.min(expandIpList(ips).ips.length, 2048); } catch { total = 0; }
-  const j = { reqId, agent, action: 'scan', ips, username, password, ilo, vcenterId, datacenterId, service, trigger, rangeId: String(rangeId || ''), noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } };
+  const j = { reqId, agent, action: 'scan', ips, username, password, ilo, iloRequested: Boolean(ilo), vcenterId, datacenterId, service, trigger, rangeId: String(rangeId || ''), noRegister: !!noRegister, state: 'pending', createdAt: Date.now(), progress: { scanned: 0, total, at: Date.now() } };
   addEvent(j, `스캔 잡 생성 — 에이전트 '${agent}'${datacenterId ? ` · 법인 ${datacenterId}` : ''} · 대상 IP ${total}개. 에이전트 인출 대기 중.`);
   // 사용된 자격증명 지문(평문 아님) — 법인 간 비교로 "이 법인만 인증 실패" 원인 파악용.
   addEvent(j, `사용 자격증명: ${credFingerprint(username, password)} (평문 미기록 — 정상 법인과 계정/길이/지문 비교하세요)`);
@@ -190,7 +190,7 @@ export function createPushScanJob(agent, { ips, username, password, ilo = null, 
   const now = Date.now();
   const j = {
     reqId, agent, action: 'scan', dispatch: 'push', edgeUrl,
-    ips, username, password, ilo, vcenterId, datacenterId, service, trigger, rangeId: String(rangeId || ''), noRegister: !!noRegister, mode: mode || 'merge',
+    ips, username, password, ilo, iloRequested: Boolean(ilo), vcenterId, datacenterId, service, trigger, rangeId: String(rangeId || ''), noRegister: !!noRegister, mode: mode || 'merge',
     state: 'running', createdAt: now, takenAt: now, progress: { scanned: 0, total, at: now },
   };
   addEvent(j, `중앙→엣지 직접 전송(PUSH) 스캔 시작 — 에이전트 '${agent}'${datacenterId ? ` · 법인 ${datacenterId}` : ''} · 대상 IP ${total}개 · 엣지 ${edgeUrl || '(URL 미상)'}. 엣지 폴링 없이 중앙이 직접 실행합니다.`);
@@ -334,6 +334,14 @@ const scanStr = (v, n) => (typeof v === 'string' ? capStr(v, n) : // v2.607(TIM2
 const scanCnt = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? Math.floor(n) : null; };
 const scanIps = (v, max) => (Array.isArray(v) ? v.slice(0, max).map((x) => scanStr(x, 64)).filter(Boolean) : undefined);
 const FOUND_KEYS = ['ip', 'serviceTag', 'model', 'manufacturer', 'hostName'];
+/**
+ * v2.611(감사 CEN2611-01): v2.610 필드도 화이트리스트에 넣는다. v2.610 이 hpeCountsOf 를 추가하면서 정제를 갱신하지 않아
+ *   **신버전 엣지가 보낸 HPE 대수·iloEnabled·발견 항목의 vendor/credSet 이 여기서 사라졌다**(아래 v2.495 주석이 적어 둔 함정 그대로).
+ *   iLO 계정 대역에서는 HPE 가 미지원 목록에 들어가지 않으므로 폴백도 0 → 화면이 'HPE 0대' 라는 거짓을 말했다.
+ *   vendor 는 'dell'|'hpe' 만, credSet 은 'ilo'|'idrac' 만(모르는 값은 버린다 — 빈 문자열).
+ */
+const FOUND_ENUMS = { vendor: ['dell', 'hpe'], credSet: ['ilo', 'idrac'] };
+const NOCREDS_IPS_MAX = 200;
 const UNSUP_KEYS = ['ip', 'vendor', 'vendorLabel', 'evidence', 'product', 'model', 'manufacturer', 'hostName'];
 function scanObjs(v, keys, max) {
   if (!Array.isArray(v)) return undefined;
@@ -344,6 +352,9 @@ function scanObjs(v, keys, max) {
     const o = {};
     for (const k of keys) o[k] = scanStr(x[k], 200) ?? '';
     if (!o.ip) continue;
+    if (keys === FOUND_KEYS) {
+      for (const [k, allowed] of Object.entries(FOUND_ENUMS)) if (typeof x[k] === 'string' && allowed.includes(x[k])) o[k] = x[k];
+    }
     if ('authFailed' in x) o.authFailed = x.authFailed === true;
     if ('at' in x) o.at = numOrNull(x.at);
     out.push(o);
@@ -358,9 +369,25 @@ export function sanitizeIdracScanData(raw) {
     authFailedIps: scanIps(d.authFailedIps, 200), blockedIps: scanIps(d.blockedIps, 50),
     authFailedIpsTruncated: d.authFailedIpsTruncated === true, unsupportedTruncated: d.unsupportedTruncated === true,
     truncated: d.truncated === true, aborted: d.aborted === true,
+    // v2.611(CEN2611-01): iLO — 불리언은 === true 만. 부재 판정(EDGE2611-02)은 정제 **전** 원본에서 한다(여기서는 false 가 된다).
+    iloEnabled: d.iloEnabled === true,
+    noCredsIps: noCredsList(d.noCredsIps), noCredsTruncated: d.noCredsTruncated === true,
   };
-  for (const k of ['scanned', 'foundCount', 'registered', 'unreachable', 'notIdrac', 'authFailed', 'authSkipped', 'authSkippedRegistered', 'blocked', 'unsupportedCount', 'durationMs', 'httpStatus']) o[k] = scanCnt(d[k]);
+  for (const k of ['scanned', 'foundCount', 'registered', 'unreachable', 'notIdrac', 'authFailed', 'authSkipped', 'authSkippedRegistered', 'blocked', 'unsupportedCount', 'durationMs', 'httpStatus',
+    'hpeFound', 'hpeDetected', 'hpeAuthFailed', 'dellFound', 'noCreds']) o[k] = scanCnt(d[k]);
   return o;
+}
+/** noCredsIps — `{ip, vendor}`(v2.610 scan.js 모양)만, 상한 200. vendor 는 짧은 글자. 옛 모양(문자열 IP)도 받는다. */
+function noCredsList(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const x of v) {
+    if (out.length >= NOCREDS_IPS_MAX) break;
+    const ip = scanStr(typeof x === 'string' ? x : x?.ip, 64);
+    if (!ip) continue;
+    out.push({ ip, vendor: scanStr(x?.vendor, 32) || 'unknown' });
+  }
+  return out;
 }
 
 /** 에이전트가 스캔 결과 보고. */
@@ -368,6 +395,11 @@ export function setIdracScanResult(reqId, rawData = {}) {
   const data = sanitizeIdracScanData(rawData);
   const j = jobs.get(reqId);
   if (!j) return false;
+  // v2.611(감사 EDGE2611-02): iLO 계정을 실어 보냈는데 회신에 iloEnabled **필드 자체가 없으면** 구버전(< 2.610) 엣지가 ilo 를
+  //   무시한 것이다. 정제본은 부재를 false 로 만들므로 **원본**에서 본다. 예전에는 hpeInfo 가 이것을 'iLO 계정이 없어 등록하지
+  //   않음' 으로 말했다(대역엔 iLO 계정이 있다 — 원인 단정 오류). 오류 회신(error)은 필드가 없는 것이 정상이라 제외한다.
+  const iloIgnoredByEdge = Boolean(j.iloRequested) && !data.error && !(rawData && typeof rawData === 'object' && Object.hasOwn(rawData, 'iloEnabled'));
+  if (iloIgnoredByEdge) addEvent(j, 'HPE iLO 계정을 함께 보냈지만 엣지 회신에 iLO 결과가 없습니다 — 이 엣지가 2.610 미만이라 iLO 계정을 무시했습니다. HPE 를 찾으려면 엣지를 업그레이드하세요.', 'warn');
   j.acked = true; j.claimDeadline = null; // 결과 회신 = ack
   dropWaiting(j, reqId); // 완료된 reqId 를 대기셋에서 제거(중복 재인출·MAX_PENDING 유령 점유 방지)
   j.state = data.error ? 'error' : 'done';
@@ -393,7 +425,7 @@ export function setIdracScanResult(reqId, rawData = {}) {
   // 예전에는 스캔 로그에만 남고 표는 '위임(…) · 시각' 에서 멈춰 몇 대를 찾았는지 알 수 없었다.
   try {
     const foundN = data.foundCount ?? (Array.isArray(data.found) ? data.found.length : 0);
-    const hv = hpeCountsOf(data);
+    const hv = { ...hpeCountsOf(data), ...(iloIgnoredByEdge ? { iloIgnoredByEdge: true } : {}) };
     recordScanRangeRunByReqId(reqId, {
       ...(data.error ? {} : hv),   // v2.610: HPE 판별·등록 대수(구버전 엣지는 미지원 목록에서 하한으로 센다)
       pending: false, ok: !data.error,
@@ -401,6 +433,7 @@ export function setIdracScanResult(reqId, rawData = {}) {
       unreachable: data.unreachable ?? null, authFailed: data.authFailed ?? null,
       blocked: data.blocked ?? null, // v2.537
       authSkipped: Number(data.authSkipped) || 0, // v2.591(감사 F3)
+      noCreds: data.noCreds ?? null, // v2.611(RECENT2611-04) — 구버전 엣지는 필드가 없어 null(0 으로 지어내지 않는다)
       durationMs: data.durationMs ?? null, error: data.error || null,
     });
   } catch { /* 기록 실패가 결과 처리를 막지 않는다 */ }
@@ -422,6 +455,10 @@ export function setIdracScanResult(reqId, rawData = {}) {
     unsupported: Array.isArray(data.unsupported) ? data.unsupported.slice(0, 200) : [],
     unsupportedCount: Number(data.unsupportedCount) || (Array.isArray(data.unsupported) ? data.unsupported.length : 0),
     ...hpeCountsOf(data),   // v2.610
+    // v2.611(CEN2611-01·RECENT2611-04): 중앙 직접 경로와 대칭 — 계정이 없어 시도하지 않은 서버·Dell 발견 수.
+    noCreds: data.noCreds ?? null, noCredsIps: data.noCredsIps || [], noCredsTruncated: !!data.noCredsTruncated,
+    dellFound: data.dellFound ?? null, hpeAuthFailed: data.hpeAuthFailed ?? null,
+    ...(iloIgnoredByEdge ? { iloIgnoredByEdge: true } : {}),
     unsupportedTruncated: !!data.unsupportedTruncated,
     registered: data.registered || 0,
     truncated: !!data.truncated,
@@ -452,6 +489,7 @@ export function setIdracScanResult(reqId, rawData = {}) {
       scanned: data.scanned ?? null, found: j.result.foundCount, registered: data.registered ?? null,
       durationMs: data.durationMs ?? null, error: data.error || null,
       unreachable: data.unreachable ?? null, authFailed: data.authFailed ?? null, authSkipped: Number(data.authSkipped) || 0,
+      noCreds: data.noCreds ?? null,
     });
   }
   return true;
@@ -592,7 +630,9 @@ const iloKey = (ilo) => (ilo ? `${ilo.username}\u0001${ilo.password}` : '');
  *  - hpeFound    : iLO 계정으로 로그인해 발견(등록 대상)한 대수.
  */
 export function hpeCountsOf(data) {
-  const n = (v) => { const x = Number(v); return Number.isFinite(x) && x >= 0 ? Math.floor(x) : null; };
+  // v2.611: numOrNull — 정제본은 없는 필드를 null 로 싣는다. 예전 `Number(v)` 는 null 을 0 으로 읽어 구버전 엣지 회신에서
+  //   hpeDetected 가 '정확히 0' 이 되고 미지원 목록 폴백(하한)이 영원히 안 돌았다(Number(null)===0 — 아홉 번째).
+  const n = (v) => { const x = numOrNull(v); return x != null && x >= 0 ? Math.floor(x) : null; };
   const out = { hpeFound: n(data?.hpeFound) ?? 0, iloEnabled: data?.iloEnabled === true };
   const det = n(data?.hpeDetected);
   if (det != null) { out.hpeDetected = det; out.hpeDetectedApprox = false; }

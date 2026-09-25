@@ -165,7 +165,7 @@ test("SEC2606-04: '<' 반복 본문 — 옛 정규식은 느리고 새 요약은
   const evil = '<'.repeat(16_000);
   const tOld = timeIt(() => evil.replace(/<[^>]+>/g, ' '));
   const tNew = timeIt(() => failBodySnippet('<'.repeat(65_536)));
-  assert.ok(tOld > 150, `옛 정규식 재현 실패(${tOld.toFixed(1)}ms)`);
+  assert.ok(tOld > 40 && tOld > tNew * 5, `옛 정규식 재현 실패(${tOld.toFixed(1)}ms · 새 ${tNew.toFixed(1)}ms)`); // v2.611: 절대 150ms 는 CPU 에 따라 110ms 로 떨어져 깨졌다 — 상대 비율로
   assert.ok(tNew < 60, `새 요약이 느리다(${tNew.toFixed(1)}ms)`);
   const html = '<html><head><title>404 Not Found</title></head><body><h1>File not found</h1><p>ticket invalid</p></body></html>';
   const oldOut = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
@@ -180,7 +180,7 @@ test('SEC2606-05: 숫자 16,000자 한 줄 — 옛 정규식은 느리고 새 �
   const line = '1'.repeat(16_000);
   const tOld = timeIt(() => [...line.matchAll(/(\d+(?:\.\d+)?)\s*%/g)]);
   const tNew = timeIt(() => parseSystemPerf(`CPU Usage ${line}\nMemory Usage ${line} %`));
-  assert.ok(tOld > 150, `옛 정규식 재현 실패(${tOld.toFixed(1)}ms)`);
+  assert.ok(tOld > 40 && tOld > tNew * 5, `옛 정규식 재현 실패(${tOld.toFixed(1)}ms · 새 ${tNew.toFixed(1)}ms)`); // v2.611: 절대 150ms 는 CPU 에 따라 110ms 로 떨어져 깨졌다 — 상대 비율로
   assert.ok(tNew < 60, `새 파서가 느리다(${tNew.toFixed(1)}ms)`);
   // 정규식 자체도 선형이어야 한다(줄 절단 없이)
   const src = read('bmusage/parse/racadm.js');

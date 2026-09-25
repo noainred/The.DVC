@@ -8,12 +8,12 @@ import { blankOr } from '../blankOr.js';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx';
 import { STable } from '../../components/STable.jsx';
-import { describeScanRun, scanLastRunSummary } from './scanRunText.js';
+import { describeScanRun, scanLastRunSummary, scanFormCredsState } from './scanRunText.js';
 
 // ---- vCenter별 iDRAC 스캔 대역(주기 자동 발견) ------------------------------
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
 // 발견해 해당 vCenter로 자동 등록한다(IPMS의 'vCenter별 스캔 대역'과 같은 흐름).
-export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy, form, setForm, msg, setMsg, onNew, onEdit, onSave, onDelete, onScan, onReload }) {
+export function IdracScanRanges({ loadError = null, data, vcenters, datacenters = [], agents, busy, form, setForm, msg, setMsg, onNew, onEdit, onSave, onDelete, onScan, onReload }) {
   const st = data?.status || {};
   const prog = st.progress;
   const dcName = (id) => (datacenters.find((d) => d.id === id)?.name || id);
@@ -207,7 +207,7 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
               <input className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="root" />
             </div>
             <div style={{ flex: '1 1 150px' }}>
-              <label className="muted" style={{ fontSize: 11.5 }}>iDRAC 비밀번호 {form.hasPassword ? '(저장됨, 변경 시만 입력)' : '*'}</label>
+              <label className="muted" style={{ fontSize: 11.5 }}>iDRAC 비밀번호 {form.hasPassword ? '(저장됨, 변경 시만 입력)' : (scanFormCredsState(form).dellPasswordRequired ? '*' : '(HPE 전용이면 비워 둠)')}</label>
               <div style={{ position: 'relative' }}>
                 {/* 특수문자·공백 포함 비밀번호를 온전히 보존한다: 함수형 setState로 빠른 입력/조합 시 문자 유실 방지,
                     SHOW 토글로 마스킹된 특수문자를 눈으로 확인(입력이 안 된 것처럼 보이는 문제 해소). */}
@@ -289,7 +289,7 @@ export function IdracScanRanges({ data, vcenters, datacenters = [], agents, busy
             <Th k="name">법인(DataCenter)</Th><Th k="service">서비스</Th><Th k="ranges">대역</Th><Th k="username">계정</Th><Th k="agent">스캔 주체</Th><Th k="enabled">주기</Th><Th k="lastRun">최근 결과</Th><th className="right">작업</th>
           </tr></thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 24 }}>저장된 스캔 대역이 없습니다. “+ 대역 추가”로 등록하세요.</td></tr>}
+            {list.length === 0 && !loadError && <tr><td colSpan={8} className="center muted" style={{ padding: 24 }}>저장된 스캔 대역이 없습니다. “+ 대역 추가”로 등록하세요.</td></tr>}
             {list.map((e) => (
               <tr key={e.id || e.datacenterId} style={{ opacity: e.enabled ? 1 : 0.55 }}>
                 <td><b>{dcName(e.datacenterId)}</b>{dcName(e.datacenterId) !== e.datacenterId && <span className="muted" style={{ fontSize: 11 }}> ({e.datacenterId})</span>}</td>

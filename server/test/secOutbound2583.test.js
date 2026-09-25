@@ -85,7 +85,7 @@ test('② Ollama 오프라인 설치 — 실경로 파일명 규격 + 압축 서
 
 test('② 라우트는 설정 소유자 게이트를 거친다(자격증명 내보내기와 같은 등급)', () => {
   const src = fs.readFileSync(new URL('../src/routes/admin/deployLlm.js', import.meta.url), 'utf8');
-  assert.match(src, /adminRouter\.post\('\/ollama-deploy', adminOnly, requireSettingsOwner,/);
+  assert.match(src, /adminRouter\.post\('\/ollama-deploy', adminOnly, (fleetOnly, )?requireSettingsOwner,/); // v2.611: 전체 범위 게이트가 앞에 붙는다
 });
 
 test('#17 리다이렉트 코어 — IP 리터럴 차단 대역 hop 거부 · 교차 출처 307 본문 재전송 거부 · 호출자 manual 존중', async (t) => {

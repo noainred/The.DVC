@@ -7,8 +7,8 @@
  */
 
 import { config } from '../config.js';
-import { scanForIdracs } from './scan.js';
-import { registerScanned } from './registry.js';
+import { scanForIdracs, scanPartialReasons } from './scan.js';
+import { registerScanned, hasHpeInDatacenter } from './registry.js';
 import { pollNow } from './poller.js';
 import { makeScanAuthPolicy } from './scanAuth.js';
 
@@ -26,12 +26,16 @@ export async function runLocalIdracScan({ ips, username, password, ilo = null, n
   let registered = 0;
   // v2.591: 인증 정지로 건너뛴 IP 가 있으면 부분 결과다 — replace 로 두면 **건너뛴 등록 서버가 삭제**된다(중앙
   //   scanPoller 와 같은 규칙). 절단(truncated)도 같은 이유로 강등한다(중앙은 이미 그렇게 한다 — 형제 비대칭).
-  const partial = !!scan.truncated || (scan.authSkipped || 0) > 0;
-  const effectiveMode = partial ? 'merge' : (mode || 'merge');
+  // v2.611(감사 RECENT2611-01): 사유 판정은 scan.js scanPartialReasons 하나(중앙 scanPoller 와 같은 규칙) — noCreds·인증 실패·
+  //   (iLO 없이) 등록된 HPE 도 부분 결과다. 지금 중앙 주기 위임은 merge 만 보내지만 수동 PUSH(routes/collector.js)는 mode 를 받는다.
+  const reqMode = mode || 'merge';
+  const partialReasons = reqMode === 'merge' ? [] : scanPartialReasons(scan, { registeredHpe: hasHpeInDatacenter(datacenterId) });
+  const partial = partialReasons.length > 0;
+  const effectiveMode = partial ? 'merge' : reqMode;
   // noRegister면 스캔만(중앙 UI에서 확인 후 별도 '등록'). 그 외엔 자동등록(autoRegister 켜진 경우).
   if (!noRegister && config.agent.autoRegister && scan.found.length) {
     const rr = registerScanned(scan.found, username, password, effectiveMode, vcenterId || '', datacenterId || '', { ilo });
     if (rr.ok) { registered = (rr.added || 0) + (rr.updated || 0); pollNow().catch(() => {}); }
   }
-  return { ...scan, registered, modeDowngraded: partial && effectiveMode !== (mode || 'merge'), durationMs: Date.now() - started };
+  return { ...scan, registered, modeDowngraded: partial && effectiveMode !== reqMode, ...(partial ? { modeDowngradedReason: partialReasons.join(' · ') } : {}), durationMs: Date.now() - started };
 }

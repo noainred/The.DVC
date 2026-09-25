@@ -1,5 +1,5 @@
 // LicenseTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { DataTable, Loading, ErrorBox, UsageCell } from '../../components/ui.jsx';
@@ -123,14 +123,24 @@ export function LicenseExpiry({ scope, isAdmin }) {
   const [statusSel, setStatusSel] = useState('');
   const [familySel, setFamilySel] = useState('');
   const [hz, setHz] = useState(null); // Horizon 서버 목록(관리자)
+  const [hzDenied, setHzDenied] = useState(null); // v2.611: 범위 제한 admin 은 Horizon 등록부 403 — '0대 등록' 으로 칠하지 않는다
   const [hzBulk, setHzBulk] = useState(false); // v2.525: CSV·자유텍스트 대량 등록 모달
   const [hzForm, setHzForm] = useState({ id: '', name: '', host: '', username: '', password: '', domain: '' });
   const [hzMsg, setHzMsg] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  // 세대 가드(v2.611 WEB2611-07) — 범위를 바꾼 뒤 늦게 도착한 이전 범위 응답은 버린다.
+  const licGen = useRef(0);
   const load = () => {
-    fetchJson('/tools/license-expiry', scope ? { vcenterId: scope } : {}).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
-    if (isAdmin) fetchJson('/admin/horizon').then((r) => setHz(r.servers || [])).catch(() => {});
+    const gen = ++licGen.current;
+    fetchJson('/tools/license-expiry', scope ? { vcenterId: scope } : {})
+      .then((d) => { if (gen === licGen.current) { setData(d); setErr(null); } })
+      .catch((e) => { if (gen === licGen.current) setErr(e.message); });
+    if (isAdmin) {
+      fetchJson('/admin/horizon')
+        .then((r) => { setHz(r.servers || []); setHzDenied(null); })
+        .catch((e) => { if (e?.status === 403) setHzDenied(true); });
+    }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [scope]);
 
@@ -229,7 +239,12 @@ export function LicenseExpiry({ scope, isAdmin }) {
         Horizon은 아래에 Connection Server를 등록하면 REST API로 만료일을 직수집합니다(10분 캐시).
       </div>
 
-      {isAdmin && (
+      {isAdmin && hzDenied && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 14 }}>
+          🖥️ Horizon 연결 서버 관리는 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다(이 계정에서는 등록 목록을 보이지 않습니다).
+        </div>
+      )}
+      {isAdmin && !hzDenied && (
         <details style={{ marginTop: 14 }} open={(hz || []).length === 0}>
           <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>🖥️ Horizon 연결 서버 관리 ({(hz || []).length}대 등록)</summary>
           <div className="card" style={{ marginTop: 8, padding: 14 }}>

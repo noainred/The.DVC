@@ -157,3 +157,72 @@ describe('v2.610 HPE 대수', () => {
     expect(describeScanRun({ at: 1, found: 2, registered: 2 }).metrics.some((x) => x.k === 'HPE')).toBe(false);
   });
 });
+
+// v2.611 감사 그룹 A — 보류·noCreds·구버전 엣지·폐기 안내.
+import { scanHoldNote } from './scanRunText.js';
+describe('v2.611 iLO 스캔 체인', () => {
+  it('EDGE2611-01: 위임 보류는 실패(빨강)가 아니라 보류(호박색) + 사유', () => {
+    const d = describeScanRun({ at: 1, held: true, heldReason: '위임 보류 — 엣지 버전 미상(2.610 이상 필요)', agent: 'edgeA' });
+    expect(d.state).toBe('held'); expect(d.badge).toBe('보류'); expect(d.tone).toBe('amber');
+    expect(d.title).toContain('2.610');
+  });
+  it('RECENT2611-04: 계정이 없어 시도하지 않은 서버 수를 말한다', () => {
+    const d = describeScanRun({ at: 1, found: 1, registered: 1, scanned: 6, noCreds: 3, iloEnabled: true, hpeFound: 1, hpeDetected: 1 });
+    expect(d.extra).toContain('계정 없어 시도 안 함 3');
+    expect(describeScanRun({ at: 1, found: 1, noCreds: 0 }).extra.some((x) => x.includes('계정 없어'))).toBe(false);
+    expect(scanLastRunSummary({ datacenters: 1, found: 0, noCreds: 2, held: 1 })).toContain('계정 없어 시도 안 함 2');
+  });
+  it('EDGE2611-02: 구버전 엣지가 iLO 를 무시했으면 "iLO 계정이 없어" 가 아니라 엣지 업그레이드를 말한다', () => {
+    const d = describeScanRun({ at: 1, found: 2, registered: 2, hpeDetected: 3, hpeDetectedApprox: true, iloIgnoredByEdge: true });
+    expect(d.text).toContain('엣지 업그레이드 필요');
+    expect(d.text).not.toContain('iLO 계정이 없어');
+  });
+  it('RECENT2611-02: 폐기 안내는 남은 계정으로 무엇이 계속되는지 말한다', () => {
+    expect(scanHoldNote({ username: 'root', hasPassword: false, iloUsername: 'Administrator', iloHasPassword: true })).toContain('HPE(iLO) 스캔은 계속됩니다');
+    expect(scanHoldNote({ username: 'root', hasPassword: true, iloUsername: 'Administrator', iloHasPassword: false })).toContain('Dell(iDRAC) 스캔은 계속됩니다');
+    expect(scanHoldNote({ username: 'root', hasPassword: false, iloUsername: '', iloHasPassword: false })).toBe('스캔은 비밀번호를 입력할 때까지 보류됩니다.');
+  });
+});
+
+// v2.611 WEB2611-01: HPE 전용 대역의 Dell 비밀번호 없음은 정상 — 필수 표시·미설정 경고를 하지 않는다.
+import { scanFormCredsState } from './scanRunText.js';
+describe('v2.611 scanFormCredsState', () => {
+  it('iLO 계정(저장됨)만 있으면 Dell 비밀번호 필수 아님 · 경고 없음', () => {
+    const s = scanFormCredsState({ username: '', hasPassword: false, password: '', iloUsername: 'Administrator', iloHasPassword: true });
+    expect(s.iloReady).toBe(true);
+    expect(s.dellPasswordRequired).toBe(false);
+    expect(s.warnNoPassword).toBe(false);
+  });
+  it('iLO 비밀번호를 지금 입력해도 준비된 것으로 본다', () => {
+    expect(scanFormCredsState({ username: 'root', iloUsername: 'A', iloPassword: ' ' }).warnNoPassword).toBe(false);
+  });
+  it('아무 계정도 쓸 수 없으면 필수 표시 + 경고', () => {
+    const s = scanFormCredsState({ username: 'root', hasPassword: false, password: '', iloUsername: 'A', iloHasPassword: false });
+    expect(s.dellPasswordRequired).toBe(true);
+    expect(s.warnNoPassword).toBe(true);
+  });
+  it('Dell 비밀번호가 저장돼 있으면 경고 없음', () => {
+    expect(scanFormCredsState({ username: 'root', hasPassword: true }).warnNoPassword).toBe(false);
+  });
+});
+
+// v2.611 WEB2611-01·08 — 컴포넌트는 node 환경에서 렌더할 수 없어 소스로 고정한다.
+import fs from 'node:fs';
+describe('v2.611 IdracAdmin 소스 계약', () => {
+  const admin = fs.readFileSync(new URL('../IdracAdmin.jsx', import.meta.url), 'utf8');
+  const ranges = fs.readFileSync(new URL('./IdracScanRanges.jsx', import.meta.url), 'utf8');
+  it('편집 시 빈 iDRAC 계정을 root 로 채우지 않는다', () => {
+    const edit = admin.slice(admin.indexOf('const srEdit'), admin.indexOf('const srSave'));
+    expect(edit).toContain("username: e.username || ''");
+    expect(edit).not.toContain("'root'");
+  });
+  it('미설정 경고·필수 표시는 scanFormCredsState 가 판정한다', () => {
+    expect(admin).toContain('scanFormCredsState(f).warnNoPassword');
+    expect(ranges).toContain('scanFormCredsState(form).dellPasswordRequired');
+  });
+  it('스캔 대역 조회 실패는 삼키지 않고 오류 배너 + 빈 상태 문구를 띄우지 않는다', () => {
+    expect(admin).toMatch(/\.catch\(\(e\) => setSrLoadErr\(/);
+    expect(admin).toContain('<ErrorBox error={srLoadErr} />');
+    expect(ranges).toContain('list.length === 0 && !loadError');
+  });
+});

@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { isSqliteLockError } from '../util/sqliteOpen.js';
+import { isSqliteLockError, chmodDbFiles } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
 const DB_PATH = () => process.env.HZSESS_DB_PATH
@@ -116,6 +116,7 @@ async function open() {
       const p = DB_PATH();
       fs.mkdirSync(path.dirname(p), { recursive: true });
       const db = new DatabaseSync(p);
+      chmodDbFiles(p); // v2.611(DB2611-01): 본체·기존 -wal/-shm 0600 — PRAGMA·스키마(첫 쓰기) 전에
       try {
         db.exec('PRAGMA busy_timeout=3000;');   // 먼저 — journal_mode 전환·스키마 생성도 잠금을 기다리게
         try { db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;'); } catch (e) { if (isLockError(e)) throw e; /* 구버전 폴백 */ }

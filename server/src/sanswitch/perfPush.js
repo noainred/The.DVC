@@ -22,6 +22,7 @@ import { samplesAfter, metaFor, maxRowid } from './perfDb.js';
 import { loadPerfSettings } from './perfSettings.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { readJsonCapped } from '../util/readCapped.js';
 
 const gzipAsync = promisify(zlib.gzip);
 const FILE = () => path.join(config.configDir, 'sanswitch-perf-push.json');
@@ -35,6 +36,7 @@ let _timer = null;
 let _busy = null;   // 진행 중인 push(프라미스) — v2.603 EDGE2603-03
 let _again = false; // 진행 중에 들어온 요청 — 끝난 뒤 한 번 더 보낸다
 const _hbLog = createChangeLogger({ windowMs: 10 * 60_000 });
+const _failLog = createChangeLogger({ windowMs: 10 * 60_000 }); // v2.611: 중앙 DB 불가 래치면 매 주기 같은 실패다 — 로그만 줄인다
 let _last = null;
 
 function loadCursor() {
@@ -199,8 +201,25 @@ async function pushPerfOnce() {
       bytes += json.length; gzBytes += body.length;
       const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-perf`, { method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2 });
       if (res.status === 404) throw new Error('중앙에 sanswitch-perf 엔드포인트 없음(중앙이 v2.423 미만)');
-      if (!res.ok) throw new Error(`sanswitch-perf <- ${res.status} (청크 ${i + 1}/${chunks.length})`);
-      addRejects(rej, await res.json().catch(() => null));
+      if (!res.ok) {
+        // v2.611(CEN2611-03): 본문의 reason 을 읽는다 — 503 dbUnavailable 은 '중앙 DB 불가' 로 따로 말한다(커서는 throw 로 그대로).
+        let eb = null;
+        try { eb = await readJsonCapped(res, 64 * 1024, '중앙 오류 응답'); } catch { try { await res.body?.cancel?.(); } catch { /* */ } }
+        const why = res.status === 503 && eb?.dbUnavailable ? `중앙 SAN 사용량 DB 를 쓸 수 없습니다(503) — 커서를 전진하지 않고 다음 주기에 다시 보냅니다`
+          : `${res.status}${eb && typeof eb.reason === 'string' ? ` — ${eb.reason.slice(0, 300)}` : ''}`;
+        const e = new Error(`sanswitch-perf <- ${why} (청크 ${i + 1}/${chunks.length})`);
+        if (res.status === 503 && eb?.dbUnavailable) e.kind = 'central-db-unavailable';
+        throw e;
+      }
+      const j = await res.json().catch(() => null);
+      // v2.611(EDGE2611-04): 구버전 중앙은 DB 를 못 열어도 200 + unavailable 을 준다 — 받은 것으로 보고 커서를 전진하면 그 표본은
+      //   영원히 다시 가지 않는다. 실패로 다루고 다음 주기에 다시 보낸다(이미 전진한 앞 청크는 중앙이 받은 것이다).
+      if (j && j.unavailable === true && (c.length || chunks[i].meta.length)) {
+        const e = new Error(`sanswitch-perf <- 중앙 SAN 사용량 DB 를 쓸 수 없어 적재하지 못했습니다(200 · unavailable — 구버전 중앙) · 커서를 전진하지 않습니다 (청크 ${i + 1}/${chunks.length})`);
+        e.kind = 'central-db-unavailable';
+        throw e;
+      }
+      addRejects(rej, j);
       sent += c.length;
       if (c.length) saveCursor(Number(c[c.length - 1].rowid)); // 청크마다 커서 전진 — 다음 청크가 실패해도 성공분은 재전송하지 않는다
     }
@@ -216,8 +235,9 @@ async function pushPerfOnce() {
      * `_last.error` 에만 적어 **어디에도 드러나지 않았다** — 그것이 이 결함이 10일을 간 이유다.
      * 상태 객체와 콘솔 **둘 다** 남긴다(엣지 로그 화면이 콘솔 링버퍼를 읽는다).
      */
-    _last = { at: Date.now(), error: e.message };
-    console.warn(`[sanswitch-perf-push] 중계 실패: ${e.message}`);
+    _last = { at: Date.now(), error: e.message, ...(e.kind ? { kind: e.kind } : {}) };
+    // 같은 사유는 10분에 1줄(청크 번호는 사유에서 뺀다). 상태(_last)는 매번 갱신한다 — 화면·중앙 pushError 가 읽는다.
+    if (_failLog('push', String(e.message).replace(/\(청크 \d+\/\d+\)/, ''))) console.warn(`[sanswitch-perf-push] 중계 실패: ${e.message}`);
     return { ok: false, reason: e.message };
   }
 }

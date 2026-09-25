@@ -16,6 +16,7 @@
  * 복사해 시작하면 이 방어가 빠진다.
  */
 
+import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import { Router } from 'express';
 import { config, loadVcenterConfig, currentVersion } from '../config.js';
 import { instanceId } from '../instanceId.js';
@@ -76,7 +77,8 @@ import { loadLinkCheckSettings, linkCheckEnabled } from '../linkcheck/settings.j
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { stripCoercionTraps, strOf } from '../util/coercionTrap.js';
-import { numOrNull } from '../util/numOrNull.js';   // v2.600 CEN2600-01·RECENT2600-01 — 엣지가 보낸 수치 좁히기
+import { numOrNull } from '../util/numOrNull.js';
+import { canonicalAgent } from '../util/agentKey.js';   // v2.611 CEN2611-02 — CVP 수신 저장 키 대소문자 정규화   // v2.600 CEN2600-01·RECENT2600-01 — 엣지가 보낸 수치 좁히기
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.583: 반복 수신 로그 조절
 import { capStr, capTrim } from '../util/capStr.js'; // v2.606 TIM2606-02: 상주 기록 글자 평탄화
 const gpuRecvLog = createChangeLogger();
@@ -272,7 +274,8 @@ function strAgent(v) { return typeof v === 'string' ? capTrim(v, 64) : ''; }
 // 경로 문자열에 의존하는 게이트를 다시 만들지 말 것.
 // v2.602(감사 SEC2602-01): 끝 '/' 는 **루프로** 뗀다 — `/\/+$/` 는 '/' 연속 뒤에 다른 글자가 오면 시작 위치마다 끝까지
 //   훑어 O(n²) 이고, 이 함수는 인증 전 모든 central 요청에서 돈다(헤더 16KB 상한까지 요청당 약 0.2초).
-export const trimTrailingSlashes = (s) => { let e = s.length; while (e > 0 && s.charCodeAt(e - 1) === 47) e--; return e === s.length ? s : s.slice(0, e); };
+// v2.611: 함수 본체는 util/trimSlashes.js 로 옮겼다(collector/registry.js 와 공유). 재수출은 import+export 형태(v2.575 — `export … from` 은 이 모듈 스코프에 이름을 만들지 않는다).
+export { trimTrailingSlashes };
 export const normPath = (p) => trimTrailingSlashes(typeof p === 'string' ? p : '').replace(/\/\.$/, '').toLowerCase();
 const registerName = (req) => (normPath(req.path) === '/register-collector' ? (typeof req.body?.name === 'string' ? req.body.name.trim() : '') : '');
 
@@ -383,7 +386,7 @@ centralRouter.get('/assignment', (req, res) => {
 // 엣지 자기등록(EDGE_MODE=all): 부팅한 엣지가 자기 이름/포트/수집토큰을 알리면 수집 서버
 // 목록에 자동 upsert — 관리자의 '수집 서버 추가' 수동 절차가 필요 없어진다.
 // Body: { name, port, collectorToken, datacenter?, urlHint?, version? }
-const REGISTER_URL_MAX = 2048;
+const REGISTER_URL_MAX = COLLECTOR_URL_MAX; // v2.611: 관리자 등록과 같은 상한(util/trimSlashes.js)
 const REGISTER_TOKEN_MAX = 1024;
 centralRouter.post('/register-collector', async (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화 (CENTRAL_TOKEN 미설정)' });
@@ -1507,6 +1510,14 @@ centralRouter.post('/sanswitch-perf', async (req, res) => {
   }
   // v2.602: 적재에서 버린 메타(포트 범위 밖·빈 장비 id — perfDb.importSamples)와 위임 밖 메타를 **항상** 싣는다 —
   //   엣지(sanswitch/perfPush.js)가 상태·콘솔에 남긴다. 조용히 버리면 포트 이름·WWN 이 왜 비었는지 알 길이 없다.
+  /*
+   * v2.611(CEN2611-03·DB2611-03): 중앙 DB 를 못 열었는데 적재할 표본·메타가 있었으면 **503** 이다. 예전에는 200 + unavailable 을
+   *   주고 엣지가 청크마다 커서를 전진해 그 표본이 **조용히 전량 소실**됐다(형제 vmseries·guest-disk 는 5xx 로 재전송시킨다).
+   *   상태(하트비트)는 위에서 이미 저장했다 — 상태만 온 요청(표본 0)은 200 그대로(화면 진단이 살아 있게).
+   */
+  if (r.unavailable && (rows.length || meta.length)) {
+    return res.status(503).json({ ok: false, dbUnavailable: true, statusSaved, reason: '중앙 SAN 포트 사용량 DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [sanswitch-perf-db] 줄 참조)' });
+  }
   res.json({ ok: true, ...r, metaRejected: r.metaRejected || 0, dropped, metaDropped, statusSaved,
     ...(statusRefused ? { statusRefused: true } : {}), ...(!statusAllowed && req.body?.status ? { statusIgnored: 'no-delegated-devices' } : {}) });
 });
@@ -1690,16 +1701,24 @@ centralRouter.get('/cvp-config', async (req, res) => {
 centralRouter.post('/cvp-data', async (req, res) => {
   if (!centralEnabled()) return res.status(404).json({ ok: false, reason: 'central 비활성화' });
   if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
-  const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
-  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const authAgent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
+  if (!authAgent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
   const { serversForAgent } = await import('../cvp/registry.js');
   const { sanitizeCvpBody, saveEdgeCvpStatus } = await import('../central/cvpEdge.js');
   const cdb = await import('../cvp/db.js');
-  const owned = new Set(serversForAgent(agent).map((s) => String(s.id)));
+  const ownedServers = serversForAgent(authAgent);
+  /*
+   * v2.611(CEN2611-02): 저장 키는 **대소문자를 정규화한 이름**이다(util/agentKey canonicalAgent — 등록부 표기가 있으면 그것).
+   *   조회·소유 판정은 대소문자를 무시하는데 저장만 원문이라, 개별↔공유 토큰 전환('Edge-A'↔'edge-a')으로 같은 엣지의 상태·장비
+   *   행이 두 벌이 되고 옛 정상 행이 현재 오류를 가렸다(재현 — v2.604 RECENT2604-01 '저장·조회 둘 다' 규약).
+   */
+  const agent = canonicalAgent(authAgent, ownedServers.map((s) => s.agent));
+  const owned = new Set(ownedServers.map((s) => String(s.id)));
   const clean = sanitizeCvpBody(req.body, owned);
   if (clean.dropped.notOwned) console.warn(`[central] cvp-data: ${String(agent).slice(0, 64)} 위임되지 않은 CVP 원소 ${clean.dropped.notOwned}건 거절`);
   const chunk = Math.max(0, Math.floor(numOrNull(req.body?.chunk) ?? 0));
   const saved = { devices: 0, ports: 0, samples: 0, duplicates: 0, removed: 0 };
+  try { await cdb.adoptAgentVariants(agent); } catch (e) { console.warn(`[central] cvp-data: 이름 변형 행 정리 실패(${String(agent).slice(0, 64)}): ${e.message}`); }
   if (chunk === 0) {
     const st = saveEdgeCvpStatus(agent, clean.servers, { devicesUnavailable: clean.devicesUnavailable });
     if (!st.ok) return res.status(429).json({ ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).' });
@@ -1715,7 +1734,11 @@ centralRouter.post('/cvp-data', async (req, res) => {
       saved.devices += r.devices; saved.ports += r.ports;
       if (r.unavailable) saved.unavailable = true;
     }
-    if (clean.touch.length) saved.touched = (await cdb.touchDevices(agent, clean.touch)).touched;
+    if (clean.touch.length) {
+      const t = await cdb.touchDevices(agent, clean.touch);
+      saved.touched = t.touched;
+      if (t.unavailable) saved.unavailable = true;
+    }
     if (clean.rows.length) {
       const r = await cdb.importSamples(agent, clean.rows);
       saved.samples += r.inserted; saved.duplicates += r.duplicates;
@@ -1724,6 +1747,13 @@ centralRouter.post('/cvp-data', async (req, res) => {
   } catch (e) {
     console.warn(`[central] cvp-data: 적재 실패(${String(agent).slice(0, 64)}): ${e.message}`);
     return res.status(500).json({ ok: false, reason: `중앙 DB 적재 실패: ${e.message}` });
+  }
+  /*
+   * v2.611(CEN2611-03): 적재할 것이 있었는데 DB 를 못 열었으면 **503**. 200 으로 두면 엣지가 커서·보낸 해시를 전진해 그 표본·
+   *   레코드가 다시 오지 않았다(조용한 소실). 청크 0 의 상태는 위에서 이미 저장했다 — 화면은 '엣지 수집 상태' 를 계속 말한다.
+   */
+  if (saved.unavailable && (clean.devicesByCvp.size || clean.rows.length || clean.touch.length)) {
+    return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 CVP DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [cvp-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
   }
   res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })) });
 });

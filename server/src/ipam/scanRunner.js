@@ -11,11 +11,15 @@
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { scanRanges } from './scan.js';
+import { deadlineMs as clampDeadlineMs } from '../util/deadline.js';
 
 const WORKER = fileURLToPath(new URL('./scanWorker.js', import.meta.url));
 const workerEnabled = () => process.env.IPAM_SCAN_WORKER !== '0';
 // 기본 데드라인: 스캔이 아무리 커도 이 안엔 끝나야 한다(초과 시 자식 강제 종료). 환경변수로 조정.
-const DEADLINE_MS = Math.max(60_000, Number(process.env.IPAM_SCAN_DEADLINE_MS) || 20 * 60_000);
+// v2.611 TIM2611-03: 상한 없는 `Math.max(60_000, env)` 는 2^31ms 초과·Infinity 를 그대로 setTimeout 에 넘겨 **1ms** 가 됐다
+// (워커를 띄우자마자 '데드라인 초과' 로 죽여 스캔 전량 실패). 시한 관문 deadlineMs(상한 2시간)를 거치고 하한 60초는 유지한다.
+export const scanDeadlineMs = (v) => Math.max(60_000, clampDeadlineMs(v, 20 * 60_000));
+const DEADLINE_MS = scanDeadlineMs(process.env.IPAM_SCAN_DEADLINE_MS);
 
 /**
  * @param {object} job { ranges, ports, concurrency, timeoutMs, reverseDns, ping }
@@ -25,7 +29,7 @@ const DEADLINE_MS = Math.max(60_000, Number(process.env.IPAM_SCAN_DEADLINE_MS) |
 export async function runScan(job, { onProgress, deadlineMs = DEADLINE_MS } = {}) {
   if (workerEnabled()) {
     try {
-      return await runInWorker(job, onProgress, deadlineMs);
+      return await runInWorker(job, onProgress, scanDeadlineMs(deadlineMs));
     } catch (e) {
       // 워커 경로 실패는 조용히 인라인 폴백(기능 유지). 사유는 남긴다.
       console.warn(`[ipscan] 워커 프로세스 실패 — 인라인 폴백: ${e?.message || e}`);

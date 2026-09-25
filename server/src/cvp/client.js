@@ -57,7 +57,18 @@ export class CvpAuthError extends Error {
   constructor(msg) { super(msg); this.authFailed = true; }
 }
 
-const sig = (outer) => (outer ? AbortSignal.any([outer, AbortSignal.timeout(REQ_TIMEOUT_MS)]) : AbortSignal.timeout(REQ_TIMEOUT_MS));
+/**
+ * 요청 하나의 신호. v2.611(TIM2611-01): 건별 시한은 min(REQ_TIMEOUT, 남은 세션 예산) — 30초 요청이 10초 남은 예산을 넘어
+ *   CVP 당 시한(withDeadline)에 먼저 걸리면 그 주기 결과가 통째로 조용히 잘렸다(v2.528 '시작해 놓고 잘림').
+ */
+export const reqMsFor = (leftMs) => {
+  const l = typeof leftMs === 'function' ? Number(leftMs()) : NaN;
+  return Number.isFinite(l) ? Math.max(1_000, Math.min(REQ_TIMEOUT_MS, l)) : REQ_TIMEOUT_MS;
+};
+const sig = (outer, leftMs) => {
+  const t = AbortSignal.timeout(reqMsFor(leftMs));
+  return outer ? AbortSignal.any([outer, t]) : t;
+};
 
 /** Set-Cookie 에서 access_token 값(없으면 ''). */
 export function accessTokenFromSetCookie(values) {
@@ -73,7 +84,7 @@ export function accessTokenFromSetCookie(values) {
  * 세션을 연다. 반환: { get(path) → {ok,status,text?,reason?}, logout(), base }.
  * @throws CvpAuthError 로그인 401/403
  */
-export async function openSession(server, { signal } = {}) {
+export async function openSession(server, { signal, leftMs = null } = {}) {
   const b = baseUrlOf(server?.host);
   if (b.issue) throw new Error(b.issue);
   const base = b.base;
@@ -85,7 +96,7 @@ export async function openSession(server, { signal } = {}) {
     let res;
     try {
       res = await fetch(`${base}/cvpservice/login/authenticate.do`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body, dispatcher, signal: sig(signal),
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body, dispatcher, signal: sig(signal, leftMs),
       });
     } catch (e) { throw new Error(`로그인 요청 실패: ${e?.cause?.code || e?.message || e}`); }
     if (res.status === 401 || res.status === 403) {
@@ -111,7 +122,7 @@ export async function openSession(server, { signal } = {}) {
     base,
     async get(p) {
       let res;
-      try { res = await fetch(`${base}${p}`, { headers, dispatcher, signal: sig(signal) }); }
+      try { res = await fetch(`${base}${p}`, { headers, dispatcher, signal: sig(signal, leftMs) }); }
       catch (e) {
         if (signal?.aborted) throw e;
         return { ok: false, status: 0, reason: `연결 실패: ${e?.cause?.code || e?.message || e}` };
@@ -148,8 +159,8 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
   const t0 = now();
   const left = () => budgetMs - (now() - t0);
   const usedPaths = {}; const missing = {}; const seenFields = {};
-  const truncated = { devices: 0, ports: 0, peers: 0, notTried: 0 };
-  const sess = await openSession(server, { signal });
+  const truncated = { devices: 0, ports: 0, peers: 0, notTried: 0, aborted: 0 };
+  const sess = await openSession(server, { signal, leftMs: left });
   try {
     // ① 인벤토리 — 이것이 없으면 아무것도 없다.
     let inv = null; let invReason = '';
@@ -220,6 +231,8 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       if (left() < MIN_SLICE_MS) { dev.telemetry = 'budget-partial'; return; }
       const cnt = await readKind('counters', serial, (t) => { const x = P.parseCounters(t); return { value: x.counters, keys: x.keys }; });
       if (cnt.value) { dev.counters = cnt.value; dev.countersAt = now(); }
+      // v2.611(TIM2611-01): counters·bgp 앞에도 예산을 본다 — 시작해 놓고 잘리면 결과가 버려진다.
+      if (left() < MIN_SLICE_MS) { dev.telemetry = intf.value || cnt.value ? 'budget-partial' : 'budget'; return; }
       const bgp = await readKind('bgp', serial, (t) => { const x = P.parseBgp(t); return { value: x.peers, keys: x.keys, truncated: x.truncated }; });
       if (bgp.value) { dev.bgp = bgp.value; truncated.peers += bgp.extra.truncated || 0; }
       if (partsDue) {
@@ -235,6 +248,9 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       }
       dev.telemetry = intf.value || cnt.value || bgp.value ? 'ok' : 'failed';
     });
+    // v2.611(TIM2611-01): 시한(외부 신호)에 걸려 끝나지 못한 장비는 'pending' 으로 남는다 — '조회 중단' 으로 바꾸고 개수를 밝힌다.
+    for (const dev of devices) if (dev.telemetry === 'pending') { dev.telemetry = 'aborted'; truncated.aborted++; }
+    if (truncated.aborted) missing.deadline = `CVP 수집 시한에 걸려 ${truncated.aborted}대는 조회를 끝내지 못했습니다(값이 비어 있는 것은 '없음' 이 아니라 '못 읽음')`;
     for (const [k, st] of Object.entries(ks)) {
       if (st.fail === 0 && !st.stopped) continue;
       missing[k] = st.stopped

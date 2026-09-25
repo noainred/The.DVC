@@ -16,6 +16,49 @@ import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02
 import { loadCollectors } from '../collector/registry.js';
 import { pullCollectorByAgent } from '../collector/puller.js';
 import { createPushScanJob, setIdracScanResult } from './idracScanJobs.js';
+import { allCollectorStatus } from '../collector/state.js';
+import { cmpVersion } from '../util/cmpVersion.js';
+
+/**
+ * v2.611(감사 EDGE2611-01·03 = RECENT2611-03): iLO 스캔을 이해하는 엣지 최소 버전.
+ *   v2.609 이하 엣지는 잡의 `ilo` 를 모르고 username/password 만 쓴다. iLO 전용 대역(Dell 계정 없음)은 그 둘이 빈 문자열이라
+ *   구버전 엣지가 **빈 계정(`Basic Og==`)과 세션 POST 로 대역의 Dell·HPE 전 호스트에 로그인**했다(재현). 계정 없는 벤더에는
+ *   로그인하지 않는다(v2.610 규약)의 정반대다. 버전 근거는 `collector/state.js` 의 수집 서버 상태(엣지 export·자기등록이 채운다 —
+ *   routes/api/partFaults.js classifyEdges 와 같은 원천).
+ */
+export const MIN_ILO_EDGE_VERSION = '2.610.0';
+
+/** 담당 엣지의 버전(수집 서버 상태 기준). 모르면 ''. 인메모리라 중앙 재시작 직후(첫 pull 전)에는 모른다. */
+export function edgeVersionOf(agent) {
+  const col = findCollectorForAgent(agent);
+  if (!col) return '';
+  try { const v = allCollectorStatus()?.[col.id]?.version; return typeof v === 'string' ? v.trim() : ''; }
+  catch { return ''; }
+}
+
+/**
+ * 위임 전 판정(순수). iLO 계정이 없는 대역은 언제나 위임한다(예전 동작).
+ *  - iLO 전용(Dell 계정 없음) + 엣지 버전이 2.610 미만이거나 **미상** → 위임하지 않는다(held). 보냈다가 빈 계정 로그인이 나는
+ *    쪽이 보류보다 나쁘다. 미상은 중앙 재시작 직후 첫 pull 전·수집 서버 미등록 엣지에서 생긴다 — 사유가 그 사실을 말한다.
+ *  - Dell+iLO + 구버전(버전을 **아는** 경우) → 위임하되 iLO 는 적용되지 않음을 note 로 남긴다(Dell 계정으로 예전 동작).
+ *    미상이면 note 를 달지 않는다 — 실제 적용 여부는 회신의 iloEnabled 유무로 가린다(idracScanJobs iloIgnoredByEdge).
+ * ⚠ 이 문구는 lastRun·이벤트·로그로 흐른다 — `**`·백틱 금지.
+ */
+export function iloEdgeGate({ hasDell = false, hasIlo = false, version = '' } = {}) {
+  if (!hasIlo) return { delegate: true };
+  const c = cmpVersion(version, MIN_ILO_EDGE_VERSION);
+  if (c != null && c >= 0) return { delegate: true };
+  const known = c != null;
+  const verText = known ? `엣지 버전 ${version}` : '엣지 버전 미상(수집 서버 상태에 버전이 없음 — 중앙 재시작 직후이거나 수집 서버(원격)로 등록되지 않은 엣지)';
+  if (!hasDell) {
+    return {
+      delegate: false, held: true, edgeVersion: version || '',
+      reason: `위임 보류 — HPE iLO 계정만 있는 대역인데 담당 엣지가 iLO 스캔(2.610 이상)을 지원하는지 확인하지 못했습니다(${verText}). 구버전 엣지에 보내면 빈 계정으로 대역의 모든 서버에 로그인합니다. 엣지를 2.610 이상으로 업그레이드하면 다음 스캔부터 위임합니다.`,
+    };
+  }
+  if (!known) return { delegate: true };
+  return { delegate: true, iloIgnored: true, edgeVersion: version, note: `담당 엣지 ${version} 은 iLO 스캔을 지원하지 않습니다(2.610 이상 필요) — 이번 스캔은 Dell(iDRAC) 계정으로만 수행되고 HPE 는 미지원 서버로 남습니다.` };
+}
 
 /**
  * 에이전트 이름/‌id에 매칭되는 수집 서버(원격)를 찾는다(대소문자 무관). URL이 있어야 PUSH 가능.
@@ -44,6 +87,11 @@ export function pushIdracScan(agent, { ips, username, password, ilo = null, vcen
   // URL 끝 슬래시 제거(연결 테스트와 파리티) — '.../:4000/' 저장 시 PUSH가 '//api/...' 이중
   // 슬래시로 깨지던 것을 방지. 저장 값을 바꾸지 않고 요청 시점에만 정규화한다.
   const edgeUrl = String(col.url).replace(/\/+$/, '');
+  // v2.611(EDGE2611-03): push 경로도 같은 버전 게이트 — iLO 전용 대역을 구버전 엣지에 보내지 않는다.
+  const hasIlo = Boolean(ilo && ilo.username && ilo.password);
+  const hasDell = Boolean(String(username || '').trim() && password);
+  const gate = iloEdgeGate({ hasDell, hasIlo, version: edgeVersionOf(agent) });
+  if (!gate.delegate) return { ok: false, held: true, reason: gate.reason, edgeVersion: gate.edgeVersion };
   const reqId = createPushScanJob(agent, { ips, username, password, ilo, vcenterId, datacenterId, noRegister, mode, edgeUrl, service, trigger, rangeId });
   if (!reqId) return { ok: false, reason: '진행 중 잡이 너무 많습니다. 잠시 후 다시 시도하세요.' };
 
@@ -73,7 +121,13 @@ export function pushIdracScan(agent, { ips, username, password, ilo = null, vcen
           : r.status === 401 ? ' — 이 엣지에 PUSH 스캔 엔드포인트(/api/collector/idrac-scan)가 없습니다. 경로가 없어 인증 라우터가 401 을 낸 것으로, 토큰 문제가 아니라 엣지가 구버전입니다. 설정 › 수집 서버(원격)에서 이 엣지 버전을 확인하고 [업그레이드]하거나, 스캔 방식을 에이전트 폴링으로 바꾸세요.'
             : r.status === 404 ? ' — 엣지의 collector 기능이 꺼져 있거나(COLLECTOR_TOKEN 미설정) 경로가 없습니다.'
               : '';
-        setIdracScanResult(reqId, { error: `엣지 응답 HTTP ${r.status}${hint}`, httpStatus: r.status });
+        // v2.611(EDGE2611-03): 비-2xx 도 본문의 사유(reason)를 읽는다(상한 64KB·글자만). 예전에는 'HTTP 400' 만 남아
+        //   v2.609 엣지가 iLO 전용 대역을 'ips/username/password가 필요합니다' 로 거부한 사실이 보이지 않았다.
+        let bodyReason = '';
+        try { const b = await readJsonCapped(r, 65_536, '엣지 오류 응답'); bodyReason = strOf(b?.reason, 300) || strOf(b?.error, 300) || ''; } catch { /* 본문 없음·JSON 아님 */ }
+        const oldEdge400 = r.status === 400 && hasIlo && !hasDell
+          ? ' — iLO 전용 대역(Dell 계정 없음)을 이 엣지가 거부했습니다. 엣지가 2.610 미만이면 iLO 스캔을 모릅니다 — 엣지를 업그레이드하세요.' : '';
+        setIdracScanResult(reqId, { error: `엣지 응답 HTTP ${r.status}${bodyReason ? ` (${bodyReason})` : ''}${hint}${oldEdge400}`, httpStatus: r.status });
         return;
       }
       // v2.604(감사 CEN2604-01 형제): 상한까지만 읽는다. 객체가 아니면 형식 오류, 사유는 글자만.
@@ -92,5 +146,5 @@ export function pushIdracScan(agent, { ips, username, password, ilo = null, vcen
     }
   })();
 
-  return { ok: true, reqId };
+  return { ok: true, reqId, ...(gate.iloIgnored ? { iloNote: gate.note, edgeVersion: gate.edgeVersion } : {}) };
 }

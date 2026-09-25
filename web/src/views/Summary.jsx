@@ -7,6 +7,7 @@ import { usePolling } from '../api.js';
 import { Loading, ErrorBox, usageColor, Modal } from '../components/ui.jsx';
 import { GuestOsVmsModal } from './SpecialTools.jsx';
 import { STable } from '../components/STable.jsx';
+import { ratioOrNull, serverRatio, ratioLabel, ratioBadge, ratioKpi, numCell, RATIO_HI } from './virtRatioText.js';
 
 const OS_COLORS = {
   Windows: '#3b82f6', RHEL: '#ef4444', Ubuntu: '#f59e0b', CentOS: '#a855f7',
@@ -33,19 +34,22 @@ function Big({ label, value, unit, sub, accent, onClick }) {
  */
 function RatioModal({ rows, kind = 'cpu', onClose }) {
   const isMem = kind === 'mem';
-  const r2 = (v) => Number((v || 0).toFixed(2));
   const [sort, setSort] = useState({ key: 'ratio', dir: 'desc' });
+  // 분모가 0(호스트 없음 — 첫 수집 중·연결 실패)이면 비율은 null('—')이고 배지는 '미수집'(virtRatioText).
   const ratioOf = isMem
-    ? (vc) => (vc.memTotalGB > 0 ? r2((vc.ramAllocatedGB || 0) / vc.memTotalGB) : 0)
-    : (vc) => (vc.cpuCores > 0 ? r2((vc.vcpuAllocated || 0) / vc.cpuCores) : 0);
+    ? (vc) => ratioOrNull(vc.ramAllocatedGB, vc.memTotalGB)
+    : (vc) => ratioOrNull(vc.vcpuAllocated, vc.cpuCores);
   const base = (rows || []).map((vc) => ({ ...vc, ratio: ratioOf(vc) }));
   const list = [...base].sort((a, b) => {
     const va = a[sort.key], vb = b[sort.key];
+    // null(미수집)은 방향과 무관하게 뒤로.
+    if (va == null && vb != null) return 1;
+    if (vb == null && va != null) return -1;
     const cmp = typeof va === 'string' ? String(va).localeCompare(String(vb)) : (va || 0) - (vb || 0);
     return sort.dir === 'asc' ? cmp : -cmp;
   });
-  const HI = isMem ? 1.5 : 4;   // 높은 오버커밋 임계(메모리는 1.5:1, CPU는 4:1)
-  const ratioColor = (r) => (r > HI ? 'var(--amber)' : r > 0 ? 'var(--green)' : 'var(--text-dim)');
+  const HI = isMem ? RATIO_HI.mem : RATIO_HI.cpu;   // 높은 오버커밋 임계(메모리는 1.5:1, CPU는 4:1)
+  const ratioColor = (r) => (r == null ? 'var(--text-dim)' : r > HI ? 'var(--amber)' : r > 0 ? 'var(--green)' : 'var(--text-dim)');
   const toggle = (key) => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 'asc' ? 'desc' : 'asc') : (key === 'name' ? 'asc' : 'desc') }));
   const arrow = (key) => (sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
   const COLS = isMem
@@ -72,10 +76,10 @@ function RatioModal({ rows, kind = 'cpu', onClose }) {
               <tr key={vc.id}>
                 {COLS.map(([key, , align]) => {
                   if (key === 'name') return <td key={key}><b>{vc.name}</b></td>;
-                  if (key === 'ratio') return <td key={key} style={{ textAlign: 'right', fontWeight: 700, color: ratioColor(vc.ratio) }} className="tabular">{vc.ratio} : 1</td>;
-                  return <td key={key} style={{ textAlign: align }} className="tabular">{(vc[key] || 0).toLocaleString()}</td>;
+                  if (key === 'ratio') return <td key={key} style={{ textAlign: 'right', fontWeight: 700, color: ratioColor(vc.ratio) }} className="tabular">{ratioLabel(vc.ratio)}</td>;
+                  return <td key={key} style={{ textAlign: align }} className="tabular">{numCell(vc[key])}</td>;
                 })}
-                <td><span className={`badge ${vc.ratio > HI ? 'amber' : 'green'}`}>{vc.ratio > HI ? '높음' : '정상'}</span></td>
+                {(() => { const b = ratioBadge(vc.ratio, kind); return <td><span className={`badge ${b.cls}`} title={vc.ratio == null ? '물리 자원(코어·RAM)을 아직 읽지 못해 판정하지 않았습니다(첫 수집 중 또는 연결 실패).' : undefined}>{b.text}</span></td>; })()}
               </tr>
             ))}
           </tbody>
@@ -187,12 +191,14 @@ export default function Summary({ scope, onGotoTab }) {
       <div className="section-title">VM 할당 합계 &amp; 오버커밋</div>
       <div className="kpis">
         <Big label="할당된 vCPU 합계" value={fmt(al.vcpuAllocated)} sub={`물리 코어 ${fmt(comp.cpuCores)}개`} accent="var(--accent)" />
-        <Big label="vCPU : 물리코어 비율" value={`${al.vcpuPerCore} : 1`} sub={al.vcpuPerCore > 4 ? '높은 오버커밋' : '정상 범위'} accent={al.vcpuPerCore > 4 ? 'var(--amber)' : 'var(--green)'} onClick={() => setShowRatio(true)} />
-        <Big label="할당된 RAM 합계" value={fmt(al.ramAllocatedGB)} unit="GB" sub={`물리 RAM의 ${al.ramOvercommitPct}%`} accent="var(--purple)" />
-        {(() => { const mr = Number(((al.ramOvercommitPct || 0) / 100).toFixed(2)); return (
-          <Big label="메모리 : 물리RAM 비율" value={`${mr} : 1`}
-            sub={mr > 1.5 ? '높은 오버커밋' : mr > 1 ? '물리 초과 할당' : '정상 범위'}
-            accent={mr > 1.5 ? 'var(--amber)' : 'var(--green)'} onClick={() => setShowMemRatio(true)} />
+        {(() => { const cr = serverRatio(al.vcpuPerCore, comp.cpuCores); const k = ratioKpi(cr, 'cpu'); return (
+          <Big label="vCPU : 물리코어 비율" value={ratioLabel(cr)} sub={k.sub} accent={k.accent} onClick={() => setShowRatio(true)} />
+        ); })()}
+        <Big label="할당된 RAM 합계" value={fmt(al.ramAllocatedGB)} unit="GB" sub={comp.memTotalGB > 0 ? `물리 RAM의 ${al.ramOvercommitPct}%` : '물리 RAM 미수집'} accent="var(--purple)" />
+        {(() => { const mr = serverRatio(al.ramOvercommitPct, comp.memTotalGB, 100); const k = ratioKpi(mr, 'mem'); return (
+          <Big label="메모리 : 물리RAM 비율" value={ratioLabel(mr)}
+            sub={k.sub}
+            accent={k.accent} onClick={() => setShowMemRatio(true)} />
         ); })()}
         <Big label="프로비저닝 스토리지" value={fmt(al.provisionedStorageTB)} unit="TB" sub="VM 디스크 할당 총량" accent="var(--accent-2)" />
         <Big label="호스트당 평균 VM" value={al.avgVmPerHost} sub={`전체 ${fmt(c.vms)} VM / ${fmt(c.hosts)} 호스트`} />

@@ -158,7 +158,7 @@ export default function SanSwitchPerf() {
                 {db.fileBytes != null ? <> · 파일 <b>{bytesText(db.fileBytes)}</b>(WAL 포함)</> : null}
                 {db.rowsLastDay != null ? <> · 최근 24시간 적재 {Number(db.rowsLastDay).toLocaleString()}행</> : null}
                 {countsAtNote(db, Date.now()) ? <><br /><span style={{ fontSize: 11 }}>{countsAtNote(db, Date.now())}</span></> : null}</>}
-          {db.file ? <><br />파일: <code>{db.file}</code></> : null}
+          {db.file ? <><br />파일: <code style={{ overflowWrap: 'anywhere' }}>{db.file}</code></> : null}
           {st.errors?.length ? <><br /><span style={{ color: 'var(--amber)' }}>최근 오류: {st.errors.join(' / ')}</span></> : null}
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>

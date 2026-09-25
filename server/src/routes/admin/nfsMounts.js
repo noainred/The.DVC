@@ -4,19 +4,22 @@
 // (셸 인젝션 방어는 system/nfsMounts.js 가 소유 — 화이트리스트 검증 + execFile 배열 인자.)
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
+import { fullScopeOnlyWith } from './shared.js';
 import {
   listMounts, addMount, deleteMount, mountNow, umountNow, mountLogs, troubleshooting,
 } from '../../system/nfsMounts.js';
 
 const adminOnly = requireRole('admin');
+// v2.611 AUTHZ2611-02: 포탈 호스트 동작은 전 법인 공용 — 범위 계정 403.
+const fleetOnly = fullScopeOnlyWith('NFS 마운트는 포탈 호스트(엣지 노드) OS 상태를 바꾸는 전 법인 공용 동작이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
 export function registerNfsMounts(adminRouter) {
 
-adminRouter.get('/nfs-mounts', adminOnly, (_req, res) => {
+adminRouter.get('/nfs-mounts', adminOnly, fleetOnly, (_req, res) => {
   res.json({ mounts: listMounts(), logs: mountLogs().slice(0, 50), tips: troubleshooting(), platform: process.platform });
 });
 
-adminRouter.post('/nfs-mounts', adminOnly, (req, res) => {
+adminRouter.post('/nfs-mounts', adminOnly, fleetOnly, (req, res) => {
   try {
     const m = addMount(req.body || {});
     logAudit({ user: req.user?.username, action: 'NFS 마운트 등록', target: m.id, detail: `${m.server}:${m.exportPath}` });
@@ -24,7 +27,7 @@ adminRouter.post('/nfs-mounts', adminOnly, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
-adminRouter.delete('/nfs-mounts/:id', adminOnly, (req, res) => {
+adminRouter.delete('/nfs-mounts/:id', adminOnly, fleetOnly, (req, res) => {
   try {
     if (!deleteMount(req.params.id)) return res.status(404).json({ ok: false, reason: '항목이 없습니다.' });
     logAudit({ user: req.user?.username, action: 'NFS 마운트 삭제', target: req.params.id });
@@ -32,7 +35,7 @@ adminRouter.delete('/nfs-mounts/:id', adminOnly, (req, res) => {
   } catch (e) { res.status(409).json({ ok: false, reason: e.message }); }
 });
 
-adminRouter.post('/nfs-mounts/:id/mount', adminOnly, async (req, res) => {
+adminRouter.post('/nfs-mounts/:id/mount', adminOnly, fleetOnly, async (req, res) => {
   try {
     const r = await mountNow(req.params.id);
     logAudit({ user: req.user?.username, action: 'NFS 마운트 실행', target: req.params.id, detail: r.ok ? (r.already ? '이미 마운트됨' : r.mountPoint) : r.reason });
@@ -40,7 +43,7 @@ adminRouter.post('/nfs-mounts/:id/mount', adminOnly, async (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
-adminRouter.post('/nfs-mounts/:id/umount', adminOnly, async (req, res) => {
+adminRouter.post('/nfs-mounts/:id/umount', adminOnly, fleetOnly, async (req, res) => {
   const r = await umountNow(req.params.id);
   logAudit({ user: req.user?.username, action: 'NFS 마운트 해제', target: req.params.id, detail: r.ok ? '해제됨' : r.reason });
   res.status(r.ok ? 200 : 502).json(r);

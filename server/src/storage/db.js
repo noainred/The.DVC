@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { chmodDbFiles } from '../util/sqliteOpen.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 
@@ -98,6 +99,7 @@ async function openInner() {
   try {
     const { DatabaseSync } = await import('node:sqlite');
     conn = new DatabaseSync(FILE());
+    chmodDbFiles(FILE()); // v2.611(DB2611-01): 기존 -wal/-shm 잔재까지 0600(본체만 chmod 하던 것의 보완)
     // v2.447(감사 S4): DB 파일 권한 0600 — 다른 DB 모듈(idrac/metrics/logs/ipam/vmtrack/capacity/ping)은
     // 전부 적용돼 있는데 이 파일만 빠져 있었다. 같은 호스트의 다른 로컬 사용자가 읽을 수 있었다.
     try { fs.chmodSync(FILE(), 0o600); } catch { /* best effort */ }

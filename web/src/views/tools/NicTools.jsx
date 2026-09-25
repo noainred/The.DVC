@@ -18,11 +18,15 @@ export function NicSpeed() {
   const [speedSel, setSpeedSel] = useState(''); // 표 필터: 특정 속도만
   const [sort, setSort] = useState({ key: 'maxSpeedMbps', dir: 'desc' });
 
-  const load = () => {
+  // 세대 가드(v2.611 WEB2611-07) — 필터를 바꾼 뒤 늦게 도착한 이전 필터의 응답은 버린다.
+  useEffect(() => {
+    let active = true;
     const qs = new URLSearchParams({ ...(dc ? { datacenterId: dc } : {}), ...(type ? { type } : {}) }).toString();
-    fetchJson(`/admin/idrac/nic-speed${qs ? `?${qs}` : ''}`).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [dc, type]);
+    fetchJson(`/admin/idrac/nic-speed${qs ? `?${qs}` : ''}`)
+      .then((d) => { if (active) { setData(d); setErr(null); } })
+      .catch((e) => { if (active) setErr(e.message); });
+    return () => { active = false; };
+  }, [dc, type]);
 
   if (err) return <ErrorBox message={err} />;
   if (!data) return <Loading />;
@@ -135,11 +139,15 @@ export function NicModels() {
   const [vcModelSel, setVcModelSel] = useState(''); // vCenter 수집 모델 칩 필터(별도 컬럼)
   const [sort, setSort] = useState({ key: 'name', dir: 'asc' });
 
-  const load = () => {
+  // 세대 가드(v2.611 WEB2611-07) — 필터를 바꾼 뒤 늦게 도착한 이전 필터의 응답은 버린다.
+  useEffect(() => {
+    let active = true;
     const qs = new URLSearchParams({ ...(dc ? { datacenterId: dc } : {}), ...(type ? { type } : {}) }).toString();
-    fetchJson(`/admin/idrac/nic-models${qs ? `?${qs}` : ''}`).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [dc, type]);
+    fetchJson(`/admin/idrac/nic-models${qs ? `?${qs}` : ''}`)
+      .then((d) => { if (active) { setData(d); setErr(null); } })
+      .catch((e) => { if (active) setErr(e.message); });
+    return () => { active = false; };
+  }, [dc, type]);
 
   if (err) return <ErrorBox message={err} />;
   if (!data) return <Loading />;

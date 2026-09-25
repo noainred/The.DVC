@@ -19,6 +19,7 @@
  *  두 경우 모두 `openSqlite(new DatabaseSync(…))` 로 핸들을 만들면, 시도가 실패했을 때 그 시도에서 연 핸들이 닫힌다
  *  (`withOpenCleanup` — AsyncLocalStorage 로 그 시도의 핸들만 추적한다. 동시에 다른 모듈이 열어도 섞이지 않는다).
  */
+import fs from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 const attempt = new AsyncLocalStorage();
@@ -60,6 +61,20 @@ export function createLockRetry(retryMs = 30_000) {
 }
 
 /**
+ * v2.611(DB2611-01): DB 본체와 **기존 -wal/-shm** 을 0600 으로(없는 파일은 무시). `new DatabaseSync()` 는 umask 로 본체를 0644 로
+ *   만들고, WAL 은 첫 쓰기 때 **그 순간의 본체 권한**을 따라 생긴다 — chmod 가 첫 쓰기 뒤면 -wal/-shm 이 0644 로 남고, 닫지 않고
+ *   종료하면 다음 기동이 그 파일을 재사용해 계속 0644 였다(재현). **PRAGMA·스키마 생성(첫 쓰기) 전에** 부를 것.
+ * @param {string} file  DB 파일 경로(':memory:'·빈 값은 건너뜀)
+ */
+export function chmodDbFiles(file) {
+  const p = typeof file === 'string' ? file : '';
+  if (!p || p === ':memory:') return;
+  for (const f of [p, `${p}-wal`, `${p}-shm`]) {
+    try { fs.chmodSync(f, 0o600); } catch { /* 없는 파일·권한 없음 — best effort */ }
+  }
+}
+
+/**
  * 방금 만든 핸들을 이번 시도에 등록하고 표준 PRAGMA 를 건다: `openSqlite(new DatabaseSync(file))`.
  * `withOpenCleanup`/`retryOnLock` 안에서 부르면 시도 실패 시 자동으로 닫힌다. PRAGMA 단계에서 잠금으로 실패하면
  * 여기서 바로 닫고 던진다. (핸들 생성을 호출부에 두는 이유: 'DatabaseSync 를 여는 모듈' 을 찾는 소스 스윕 —
@@ -67,6 +82,13 @@ export function createLockRetry(retryMs = 30_000) {
  */
 export function openSqlite(db, opts = {}) {
   attempt.getStore()?.push(db);
+  // 파일 권한은 PRAGMA(첫 쓰기) 전에(DB2611-01). ⚠ wal:false(ipam.db — 외부 프로그램이 직접 읽는 공유 파일)는 건드리지 않는다 —
+  //   그 파일의 권한은 외부 리더 계약이다(ipam/db.js 가 스스로 정한다).
+  if (opts.wal !== false) {
+    let loc = null;
+    try { loc = typeof db.location === 'function' ? db.location() : null; } catch { loc = null; }
+    chmodDbFiles(loc);
+  }
   try { applyStdPragmas(db, opts); } catch (e) { try { db.close(); } catch { /* */ } throw e; }
   return db;
 }

@@ -89,7 +89,9 @@ export function createCollectRequestQueue({ ttlMs = 15 * 60_000, ackMs = 10 * 60
         if (r.agent !== me) continue;
         ids.push(id);
       }
-      const deadline = now + ackMs + ids.length * perItemMs;
+      // v2.611(TIM2611-02): perItemMs 는 숫자 또는 함수(인출 시점의 설정값 — 설정 화면에서 바꾼 장비 시한이 바로 먹게).
+      const per = Math.max(0, Number(typeof perItemMs === 'function' ? perItemMs() : perItemMs) || 0);
+      const deadline = now + ackMs + ids.length * per;
       for (const id of ids) {
         const r = pending.get(id);
         pending.delete(id);

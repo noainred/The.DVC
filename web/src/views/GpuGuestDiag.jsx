@@ -3,6 +3,7 @@ import { fetchJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
+import { unitText } from './unitText.js'; // v2.611 WEB2611-09: 결측이면 단위 없이 '—'('-%' 금지)
 import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
 const fmtAgo = (ts) => {
@@ -116,7 +117,7 @@ function VcDiag({ d, failOnly }) {
                   )}
                   <td style={{ fontSize: 12 }}>
                     {r.ok
-                      ? <span className="badge green">✓ util {r.utilNA ? 'N/A(MIG)' : r.util == null ? '—' : `${r.util}%`} · mem {r.mem ?? '-'}% · {r.gpus}GPU</span>
+                      ? <span className="badge green">✓ util {r.utilNA ? 'N/A(MIG)' : r.util == null ? '—' : `${r.util}%`} · mem {unitText(r.mem, '%')} · {unitText(r.gpus, 'GPU')}</span>
                       : <span className="badge red" style={{ whiteSpace: 'normal' }}>{r.authStopped ? '인증 실패 정지 · ' : '✗ '}{r.error}</span>}
                   </td>
                 </tr>

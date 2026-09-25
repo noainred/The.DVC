@@ -164,6 +164,17 @@ function applyAlarmMutes(snap) {
  * refreshes it on an interval. The API reads exclusively from here so HTTP
  * requests never block on slow/unreachable vCenters.
  */
+/**
+ * v2.611(감사 AUTHZ2611-05): location.region 은 **인가 입력**이다 — 지역 범위 계정 판정(auth/scope.js)이 스냅샷의 region 을 본다.
+ * 등록부(vc.location.region)에 값이 있으면 그것이 이기고, 도시·좌표 같은 표시값은 받은 값 그대로 둔다(v2.600 RECENT2600-01).
+ * 받은 location 이 객체가 아니거나 등록부 region 이 비었으면 받은 값을 그대로 돌려준다.
+ */
+export function withRegistryRegion(loc, vc) {
+  const regRegion = vc && vc.location && typeof vc.location === 'object' ? vc.location.region : undefined;
+  if (!loc || typeof loc !== 'object' || Array.isArray(loc) || regRegion == null || regRegion === '') return loc;
+  return loc.region === regRegion ? loc : { ...loc, region: regRegion };
+}
+
 class Store {
   constructor() {
     this.snapshot = emptySnapshot();
@@ -297,7 +308,8 @@ class Store {
           const c = this.vcCache.get(vc.id);
           if (c?.ok) {
             const s = c.data;
-            merged.vcenters.push({ ...s.vcenter, status: 'maintenance', maintenance: true });
+            // v2.611(감사 AUTHZ2611-05 잔여): 점검중 분기도 캐시 스냅샷의 region 이 아니라 등록부 region 이 이긴다(범위 판정 입력).
+            merged.vcenters.push({ ...s.vcenter, location: withRegistryRegion(s.vcenter?.location ?? vc.location, vc), status: 'maintenance', maintenance: true });
             pushAll(merged.hosts, s.hosts);
             pushAll(merged.vms, s.vms);
             pushAll(merged.datastores, s.datastores);
@@ -317,7 +329,12 @@ class Store {
             const stale = Date.now() - inv.at > SITE_STALE_MS;
             // v2.600(감사 RECENT2600-01) 2차 방어: 엣지가 보낸 location 이 객체가 아니면(v2.599 수신이 null 로 만든 옛 push 포함)
             //   등록부의 위치로 채운다 — 없으면 지역 롤업이 'Unknown' 으로 묶이고 지도 좌표가 사라진다.
-            const siteLoc = siteVc.location && typeof siteVc.location === 'object' && !Array.isArray(siteVc.location) ? siteVc.location : (vc.location ?? siteVc.location ?? null);
+            const siteLoc0 = siteVc.location && typeof siteVc.location === 'object' && !Array.isArray(siteVc.location) ? siteVc.location : (vc.location ?? siteVc.location ?? null);
+            // v2.611(감사 AUTHZ2611-05): location.region 은 **인가 입력**이다 — 지역 범위 계정의 판정(auth/scope.js)이 스냅샷의
+            //   region 을 본다. 엣지가 보낸 region 을 그대로 쓰면 소유 엣지가 자기 vCenter 를 다른 지역 범위 계정에 보이게 할 수
+            //   있었다(v2.548 F5 '엣지가 귀속을 정하지 못하게' 의 범위 축 누락). 등록부에 region 이 있으면 그것이 이기고, 도시·
+            //   좌표 같은 표시값은 엣지 값을 그대로 둔다(v2.600 RECENT2600-01 — 표시값을 버리면 지도가 빈다).
+            const siteLoc = withRegistryRegion(siteLoc0, vc);
             // v2.607 LEFT2607-04·WEB2607-06: collectSource 는 여기서 'site'(수집 경로)로 덮인다 — 엣지가 SOAP 대신 REST 목록으로
             //   받은 저품질 스냅샷이면 그 표지(collectSource:'rest')가 사라지므로 **collectMethod** 로 보존한다(화면이 경보 미조회를 말한다).
             const siteMethod = typeof siteVc.collectMethod === 'string' && siteVc.collectMethod ? siteVc.collectMethod
