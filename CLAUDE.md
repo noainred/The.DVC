@@ -3907,6 +3907,34 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       (이 릴리스의 감사 문서를 추가한 뒤 `audit2613h` 가 실제로 그것으로 실패했다).
     - ⚠ 작업 방식: 첫 수정 워크플로 8개가 전부 세션 한도(`session limit`)로 즉시 실패했다 — 작업 트리는 깨끗했으므로 한도 해제 뒤
       **처음부터 재실행**했다(v2.607 규약). 그룹 보고의 '리드가 할 것' 은 `scratchpad/arch2613/LEAD-TODO.md` 에 모아 통합에서 전부 처리했다.
+  - ⚠⚠ **아키텍처 점검(v2.614) — 포탈 점검 3번째 서브메뉴. 운영 포탈이 자기 라우터 스택·카탈로그·표·파일을 스스로 판정한다**
+    (`server/src/portalcheck/archScan.js`(순수 판정 `gatherArchInputs`/`scanArch` + `ARCH_CODES` 15종) · `portalcheck/toolCatalog.js` ·
+    `routes/api/portalCheck.js GET/POST /tools/portal-check/arch[/run]` · `scripts/tools-catalog.mjs` → `web/public/special-tools.json` ·
+    웹 `views/tools/ArchCheckView.jsx`·`archCheckText.js` · 계약 `docs/ARCH-CHECK.md`. 사용자 선택 "둘 다(점검 먼저 → 그 결과를 화면으로)" 의 2단계.
+    회귀 `test/archCheck2614.test.js`(실제 api 라우터 200/403·KPI 항등식·합성 라우터 변이)·`toolCatalog2614.test.js`·웹 `archCheckText.test.js`):
+    - ⚠⚠ **게이트 미들웨어에는 종류 표지가 붙어 있다** — `requireRole`→`{kind:'role'}` · `requirePerm`→`perm` · `fullScopeOnlyWith`→`fullScope` ·
+      `requireSettingsOwner`→`settingsOwner` · `toolGate`→`tool` · `requireCentral`→`central`. `util/asyncRoute.js` 의 래퍼가 그 표지를 **복사**한다
+      (안 하면 `wrapAsyncRouter` 뒤에 전부 사라져 모든 admin 라우트가 '게이트 없음' 이 된다 — 테스트 고정). **새 게이트 헬퍼를 만들면 표지를 붙일 것**
+      (없으면 그 게이트는 점검에 보이지 않고, 라우트가 '게이트 없음' 으로 잡히면 `ROUTE_GATE_ALLOW` 에 사유와 함께 적는다 — 거짓 사유 금지).
+      ⚠ 클로저 이름을 `gate` 로 두지 말 것 — BIG_JSON 판정이 `util/bigJsonGate.js` 반환 함수 이름 `gate` 에 기댄다(주석·테스트 고정).
+    - **판정 기준은 소스가 아니라 실행 중인 라우터 스택이다**(`dataflow/build.js declaredRoutes` 와 같은 순회 + `archScan.setApp(app)` 으로 마운트 수준
+      게이트). 그래서 배포된 서버가 자기 상태를 본다 — 테스트 스윕(`audit2612a` 류)과 **같은 규칙의 런타임판**이고 둘은 서로를 대체하지 않는다.
+    - ⚠⚠ **입력을 못 읽으면 그 항목은 `unknown` 이지 `ok` 가 아니다** — 카탈로그(`web/dist/special-tools.json`)가 없으면 카탈로그 의존 3항목이 전부
+      회색이고 화면 배너가 말한다. 각 입력 실패는 자기 항목만 unknown 으로 만들고 `inputs.errors` 에 남는다(한 입력 실패가 전체를 죽이지 않는다).
+      KPI 항등식 합계 = 정상 + 경고 + 결함 + 확인불가. 서버 kpi 와 화면 재계산이 다르면 화면이 그 사실을 적는다(`kpiMismatchNote`).
+    - **카탈로그는 빌드 산출물이다**: `web/package.json prebuild` 가 `scripts/tools-catalog.mjs` 를 돌려 `web/public/special-tools.json` 을 만들고 vite 가
+      dist 로 복사한다. CI `--check` 는 **빌드 전**에 둔다(빌드가 다시 만들므로 뒤에 두면 검사가 무의미하다 — S2 보고). 내용이 같으면 파일을 다시
+      쓰지 않는다(`generatedAt` 만 달라지는 diff 방지). `specialToolsList.js` 는 import 0 이라 node 가 그대로 읽는다 — **여기에 React/JSX import 를
+      넣지 말 것**(생성기가 깨진다). 배포 서버는 `config.webDist` 에서 읽고 **없으면 추측하지 않는다**(`source:'missing'`).
+    - **코드 ↔ 문구 1:1** — 서버 `ARCH_CODES`·웹 `ARCH_TEXT`·`docs/ARCH-CHECK.md` 표 셋을 테스트가 대조한다. 코드를 더하면 셋을 같이 고친다.
+      서버 `inputs.errors` 의 입력 키를 새로 만들면 웹 `INPUT_KEYS_OF` 에도 더해야 unknown 행의 조치 칸에 사유가 붙는다(정직 기록 — 웹 테스트는
+      표의 키가 서버에 실재하는지만 고정하고 서버의 새 키 누락은 못 잡는다).
+    - **첫 실행이 실제로 잡은 것**: `PUT /api/admin/tool-categories` 가 범위 관리자에게 열려 있었다(route-gate-missing warn 1) → `fleetOnly` 를
+      붙였다(전 사용자 공통 설정). 테스트의 `KNOWN_OPEN` 은 이제 비어 있다 — 새 경고가 뜨면 허용 목록이 아니라 **고치는 것이 먼저**다.
+    - `config-file-unclassified` 는 런타임에 CONFIG-FILES 카탈로그가 없어 `PURPOSES`·`SECRET_FILES`·`isRuntimeStateFile`·`KNOWN_CONFIG_FILES` 로만 분류한다 —
+      운영 CONFIG_DIR 에서 미분류 warn 이 나올 수 있고 `detail.classifier` 가 그 사실을 싣는다(정직 기록). `stripComments` 는 `archScan.js` 안에
+      사본이 있다(배포 패키지에 `server/test` 가 없어 런타임 import 불가 — 테스트가 `test/_stripComments.js` 와 출력 동일성을 고정).
+    - 권한 adminOnly + fullScopeOnly(형제 서브메뉴와 같다) · `memoJson` 30초(extraKey 에 역할) · 왕복 0 · 폴링 금지 · 표 `STable minWidth`.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

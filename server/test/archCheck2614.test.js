@@ -124,9 +124,15 @@ test('② GET /api/tools/portal-check/arch — 전체 범위 admin 200 · KPI �
   assert.ok(!/\?[a-z]+=/.test(text.replace(/https?:\/\/[^"]*/g, '')), 'URL 쿼리 0');
   // 이 저장소 현재 상태: 라우트·엣지 로그 표·풀 등은 정상이어야 한다(회귀가 생기면 여기서 드러난다).
   const by = Object.fromEntries(b.items.map((i) => [i.code, i]));
-  for (const code of ['route-gate-missing', 'asyncroute-unwrapped', 'tool-segment-unmapped', 'edgelog-spec-drift', 'dataflow-cats-unmapped', 'util-imports-domain', 'db-no-purpose']) {
+  for (const code of ['asyncroute-unwrapped', 'tool-segment-unmapped', 'edgelog-spec-drift', 'dataflow-cats-unmapped', 'util-imports-domain', 'db-no-purpose']) {
     assert.equal(by[code].state, 'ok', `${code}: ${JSON.stringify(by[code])}`);
   }
+  // ⚠ 정직 기록(v2.614): 이 저장소의 현재 상태에서 **실제로 남아 있는** admin 상태변경 라우트 1개 — `PUT /api/admin/tool-categories`
+  //   (특수 기능 카테고리 배치 = 전 법인 공통 설정)는 범위 admin 이 통째로 바꿀 수 있다(v2.605 가 '범위 admin 의 전 법인 공통 스칼라
+  //   설정' 으로 남긴 것). 허용 목록에 거짓 사유를 적어 ok 로 만들지 않는다 — 고쳐지면(fleetOnly) 이 배열을 비울 것.
+  const KNOWN_OPEN = []; // v2.614 통합: tool-categories PUT 에 fleetOnly 를 붙여 0 — 운영 트리에서 이 항목은 ok 여야 한다
+  assert.deepEqual(by['route-gate-missing'].samples, KNOWN_OPEN, JSON.stringify(by['route-gate-missing']));
+  assert.equal(by['route-gate-missing'].state, KNOWN_OPEN.length ? 'warn' : 'ok');
   assert.equal(by['import-cycle'].state, 'ok');
   assert.ok(by['import-cycle'].count <= A.IMPORT_CYCLE_MAX);
   assert.deepEqual(by['route-gate-missing'].detail.allowlistStale, [], '허용 목록에 실재하지 않는 라우트가 없다');
@@ -214,8 +220,10 @@ test('④ 카탈로그를 못 읽으면 카탈로그 의존 항목 3개는 unkno
   const mm = present.items.find((i) => i.code === 'catalog-adminonly-mismatch');
   assert.notEqual(mm.state, 'unknown');
   assert.ok(mm.detail.judged > 0, '주 라우트가 있는 도구는 판정된다');
-  // portal-check 는 adminOnly 라우트인데 카탈로그가 adminOnly:false 라 했으므로 mismatch 에 잡혀야 한다.
-  assert.ok(mm.samples.some((s) => s.startsWith('portal-check:')), JSON.stringify(mm.samples));
+  // rma 는 `GET /api/tools/rma` 가 adminOnly 인데 합성 카탈로그가 adminOnly:false 라 했으므로 mismatch 에 잡혀야 한다.
+  //   (portal-check 는 `GET /api/tools/portal-check` 자체가 없어 판정 대상이 아니다 — notJudged 로 센다.)
+  assert.ok(mm.samples.some((s) => s.startsWith('rma:')), JSON.stringify(mm.samples));
+  assert.ok(mm.detail.notJudged > 0);
   assert.equal(present.catalog.path, '/x/special-tools.json');
   assert.equal(A.scopeArchPaths(present, { role: 'operator' }).catalog.path, 'special-tools.json', '비-admin 은 basename');
   assert.equal(A.scopeArchPaths(present, { role: 'admin' }).catalog.path, '/x/special-tools.json');

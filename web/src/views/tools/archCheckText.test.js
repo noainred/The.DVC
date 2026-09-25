@@ -24,7 +24,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..', '..', '..');
 const SERVER_SCAN = path.join(ROOT, 'server', 'src', 'portalcheck', 'archScan.js');
 const SPEC = process.env.ARCH_SPEC_PATH
-  || '/tmp/claude-0/-home-user-The-DVC/6697d1b4-2c16-59c4-a364-a62c466221b4/scratchpad/arch2613/ARCH-SPEC.md';
+  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../docs/ARCH-CHECK.md'); // v2.614: 계약 문서는 저장소 docs/ 에 산다
 
 /** 계약 표(v2.614 ARCH-SPEC) — 세 번째 기준. 코드를 더하면 여기·서버·문구 셋 다 함께. */
 const CONTRACT_CODES = [
