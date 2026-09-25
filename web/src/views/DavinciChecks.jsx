@@ -93,8 +93,17 @@ export function VmwareConfigBackup() {
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
-  const loadPreview = () => { setBusy('view'); fetchJson(`/tools/vmware-config${vc ? `?vcenterId=${encodeURIComponent(vc)}` : ''}`).then(setPreview).catch((e) => setMsg(e.message)).finally(() => setBusy('')); };
-  useEffect(() => { loadPreview(); /* eslint-disable-next-line */ }, [vc]);
+  // v2.611 WEB2611-07: 세대 가드 — vCenter 를 바꾼 뒤 늦게 온 이전 vCenter 응답은 버리고,
+  // 새 vCenter 조회가 실패하면 이전 vCenter 의 미리보기를 비운다(다른 사이트 구성을 이 사이트 것처럼 보이지 않게).
+  useEffect(() => {
+    let active = true;
+    setBusy('view');
+    fetchJson(`/tools/vmware-config${vc ? `?vcenterId=${encodeURIComponent(vc)}` : ''}`)
+      .then((d) => { if (active) { setPreview(d); setMsg(null); } })
+      .catch((e) => { if (active) { setPreview(null); setMsg(`미리보기를 읽지 못했습니다: ${e.message}`); } })
+      .finally(() => { if (active) setBusy(''); });
+    return () => { active = false; };
+  }, [vc]);
   const download = async () => {
     setBusy('dl'); setMsg(null);
     try {
@@ -126,7 +135,7 @@ export function VmwareConfigBackup() {
       </div>
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         {[['사이트', sites.length], ['호스트', total.hosts], ['VM', total.vms], ['데이터스토어', total.ds], ['네트워크', total.net]].map(([l, v]) => (
-          <div key={l} className="card" style={{ padding: '10px 14px', minWidth: 110 }}><div className="muted" style={{ fontSize: 11 }}>{l}</div><div style={{ fontSize: 20, fontWeight: 700 }}>{v}</div></div>
+          <div key={l} className="card" style={{ padding: '10px 14px', minWidth: 110 }}><div className="muted" style={{ fontSize: 11 }}>{l}</div><div style={{ fontSize: 20, fontWeight: 700 }}>{preview ? v : '—'}</div></div>
         ))}
       </div>
       {sites.length > 0 && (

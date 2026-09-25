@@ -217,7 +217,7 @@ test('AUTHZ2607-03·04: vCenter 등록부·IPAM 스캔 대역 — 범위 밖은 
     out.sputIn = (await call('sadm', 'PUT', '/admin/ipam/vc-ranges', { vcenterId: 'vc-us-east', ranges: ['10.10.0.0/24'] })).s;
     const csv = 'vcenter,ranges,enabled\\nvc-eu-west,10.77.0.0/24,true\\nvc-us-east,10.11.0.0/24,true\\n';
     const imp = await call('sadm', 'POST', '/admin/ipam/vc-ranges/import', { csv, overwrite: true });
-    out.imp = { s: imp.s, oos: imp.j && imp.j.skippedOutOfScope };
+    out.imp = { s: imp.s, oos: imp.j && imp.j.skippedOutOfScope, failed: (imp.j && imp.j.failed || []).length };
     out.results = (await call('sadm', 'GET', '/admin/ipam/scan/results')).s;
     out.ranges = (await call('full', 'GET', '/tools/ipam/vc-ranges')).j;
   `);
@@ -238,7 +238,9 @@ test('AUTHZ2607-03·04: vCenter 등록부·IPAM 스캔 대역 — 범위 밖은 
   assert.equal(o.sput, 404, '수정 전: 200 으로 보이지 않는 법인 대역을 덮어썼다');
   assert.equal(o.sdel, 404);
   assert.equal(o.sputIn, 200);
-  assert.equal(o.imp.s, 200); assert.equal(o.imp.oos, 1);
+  // v2.611 LEFT2611-04: 범위 밖 vCenter 행은 '알 수 없는 vCenter' 와 같은 오류 행이다(존재 은닉) — 예전 skippedOutOfScope 개수도
+  //   존재 단서였다. 저장되지 않는다는 성질(아래 ranges 검사)은 그대로다.
+  assert.equal(o.imp.s, 200); assert.equal(o.imp.oos, undefined); assert.equal(o.imp.failed, 1);
   assert.equal(o.results, 403);
   const txt = JSON.stringify(o.ranges);
   assert.ok(txt.includes('10.53.0.0/24'), '범위 밖 대역은 그대로: ' + txt);

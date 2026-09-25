@@ -138,7 +138,7 @@ export default function SecuritySelfCheck() {
                   조치: {c.howto}
                 </div>
               )}
-              {c.evidence && <div className="muted" style={{ marginTop: 2, fontSize: 11.5 }}>근거: <code>{c.evidence}</code></div>}
+              {c.evidence && <div className="muted" style={{ marginTop: 2, fontSize: 11.5 }}>근거: <code style={{ overflowWrap: 'anywhere' }}>{c.evidence}</code></div>}
               {open[c.id] && <Rows check={c} />}
             </div>
           ))}

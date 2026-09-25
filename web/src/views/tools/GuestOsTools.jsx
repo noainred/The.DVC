@@ -1,5 +1,5 @@
 // GuestOsTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, downloadFile } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
@@ -186,7 +186,16 @@ export function RealOs({ scope }) {
   const [msg, setMsg] = useState(null);
 
   const loadStatus = () => fetchJson('/admin/os-scan').then((r) => { setSt((cur) => ({ ...(cur || {}), ...r, settings: cur?.dirty ? cur.settings : r.settings })); setErr(null); }).catch((e) => setErr(e.message));
-  const loadResults = () => fetchJson(`/admin/os-scan/results?${new URLSearchParams({ ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) })}`).then((r) => { setRows(r.items || []); setOmitted(Number(r.omittedOutOfScope) || 0); }).catch(() => { setRows([]); setOmitted(0); });
+  // v2.611 WEB2611-07·08: 세대 가드(범위·필터를 바꾼 뒤 늦게 온 이전 응답은 버린다) +
+  // 조회 실패를 '스캔 결과가 없습니다' 로 칠하지 않는다(직전 결과는 그대로 두고 배너로 말한다).
+  const resGen = useRef(0);
+  const [resErr, setResErr] = useState(null);
+  const loadResults = () => {
+    const gen = ++resGen.current;
+    return fetchJson(`/admin/os-scan/results?${new URLSearchParams({ ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) })}`)
+      .then((r) => { if (gen !== resGen.current) return; setRows(r.items || []); setOmitted(Number(r.omittedOutOfScope) || 0); setResErr(null); })
+      .catch((e) => { if (gen !== resGen.current) return; setResErr(e?.message || String(e)); });
+  };
   useEffect(() => { loadStatus(); /* eslint-disable-next-line */ }, []);
   useEffect(() => { loadResults(); /* eslint-disable-next-line */ }, [scope, mm]);
 
@@ -253,7 +262,8 @@ export function RealOs({ scope }) {
         <span className="muted" style={{ fontSize: 12 }}>{rows ? `${rows.length}건${omitted > 0 ? ` · 조회 범위 밖 ${omitted}건 제외` : ''}` : ''}</span>
         <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px', marginLeft: 'auto' }} disabled={!rows?.length} onClick={exportCsv}>⬇ CSV 내보내기</button>
       </div>
-      {!rows ? <Loading /> : rows.length === 0 ? <div className="card"><span className="muted">{mm ? '불일치 VM이 없습니다.' : '스캔 결과가 없습니다. ‘지금 스캔’을 실행하세요(계정은 GPU 게스트 수집 설정 사용).'}</span></div>
+      {resErr && <div className="banner warn" style={{ marginBottom: 8 }}>스캔 결과를 읽지 못했습니다: {resErr}{rows ? ' — 아래는 직전에 받은 결과입니다.' : ''}</div>}
+      {!rows ? (resErr ? null : <Loading />) : rows.length === 0 ? <div className="card"><span className="muted">{mm ? '불일치 VM이 없습니다.' : '스캔 결과가 없습니다. ‘지금 스캔’을 실행하세요(계정은 GPU 게스트 수집 설정 사용).'}</span></div>
         : <DataTable columns={cols} rows={rows} initialSort={{ key: 'mismatch', dir: 'desc' }} />}
     </>
   );

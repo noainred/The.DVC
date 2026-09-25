@@ -420,23 +420,47 @@ function SavedJobs({ onLoad, vcenters, reloadKey }) {
   const [data, setData] = useState(null);
   const [q, setQ] = useState('');
   const [edit, setEdit] = useState(null); // { id, memo, tags }
-  const load = () => fetchJson(`/provision/saved?limit=${limit}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).then(setData).catch(() => setData({ total: 0, items: [], vcenters: [] }));
+  // v2.611 WEB2611-07·08: 세대 가드 + 조회 실패를 '저장된 작업 없음'(빈 목록)으로 칠하지 않는다.
+  const [loadErr, setLoadErr] = useState(null);
+  const [opErr, setOpErr] = useState(null);
+  const genRef = useRef(0);
+  const load = () => {
+    const gen = ++genRef.current;
+    return fetchJson(`/provision/saved?limit=${limit}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`)
+      .then((d) => { if (gen === genRef.current) { setData(d); setLoadErr(null); } })
+      .catch((e) => { if (gen === genRef.current) setLoadErr(e?.message || String(e)); });
+  };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [vc, limit, reloadKey]);
-  if (!data) return null;
+  if (!data) {
+    return loadErr ? (
+      <>
+        <div className="section-title">저장된 작업 (재사용)</div>
+        <div className="banner warn">저장된 작업 목록을 읽지 못했습니다: {loadErr} — 저장된 작업이 없다는 뜻이 아닙니다.</div>
+      </>
+    ) : null;
+  }
 
   const term = q.trim().toLowerCase();
   const items = (data.items || []).filter((e) => !term || `${e.name} ${e.sourceName} ${e.memo} ${(e.tags || []).join(' ')}`.toLowerCase().includes(term));
   const vcName = (id) => (vcenters || []).find((v) => v.id === id)?.name || id;
 
   const saveEdit = async () => {
-    const r = await putJson(`/admin/provision/saved/${edit.id}`, { memo: edit.memo, tags: String(edit.tags).split(/[,\n]/).map((s) => s.trim()).filter(Boolean) }).catch(() => ({ ok: false }));
-    if (r.ok) { setEdit(null); load(); }
+    setOpErr(null);
+    const r = await putJson(`/admin/provision/saved/${edit.id}`, { memo: edit.memo, tags: String(edit.tags).split(/[,\n]/).map((s) => s.trim()).filter(Boolean) }).catch((err) => ({ ok: false, reason: err?.message }));
+    if (r.ok) { setEdit(null); load(); } else setOpErr(`메모·태그 저장 실패: ${r.reason || r.error || '사유 미상'}`);
   };
-  const del = async (e) => { if (!window.confirm(`저장된 작업 '${e.name}'을 삭제할까요?`)) return; await delJson(`/admin/provision/saved/${e.id}`).catch(() => {}); load(); };
+  const del = async (e) => {
+    if (!window.confirm(`저장된 작업 '${e.name}'을 삭제할까요?`)) return;
+    setOpErr(null);
+    try { await delJson(`/admin/provision/saved/${e.id}`); } catch (err) { setOpErr(`삭제 실패(${e.name}): ${err?.message || err}`); }
+    load();
+  };
 
   return (
     <>
       <div className="section-title">저장된 작업 (재사용)</div>
+      {loadErr && <div className="banner warn" style={{ marginBottom: 8 }}>저장된 작업 목록을 읽지 못했습니다: {loadErr} — 아래는 직전에 받은 목록입니다.</div>}
+      {opErr && <div className="banner warn" style={{ marginBottom: 8 }}>{opErr}</div>}
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
         <span className={vc === '' ? 'login-btn' : 'logout-btn'} style={{ cursor: 'pointer', padding: '5px 12px', fontSize: 12, borderRadius: 6 }} onClick={() => { setVc(''); setLimit(10); }}>전체 ({data.vcenters ? '' : ''}{vc === '' ? data.total : ''})</span>
         {(data.vcenters || []).map((id) => (

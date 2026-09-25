@@ -1,5 +1,5 @@
 // LicenseTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { DataTable, Loading, ErrorBox, UsageCell } from '../../components/ui.jsx';
@@ -129,8 +129,13 @@ export function LicenseExpiry({ scope, isAdmin }) {
   const [hzMsg, setHzMsg] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  // 세대 가드(v2.611 WEB2611-07) — 범위를 바꾼 뒤 늦게 도착한 이전 범위 응답은 버린다.
+  const licGen = useRef(0);
   const load = () => {
-    fetchJson('/tools/license-expiry', scope ? { vcenterId: scope } : {}).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
+    const gen = ++licGen.current;
+    fetchJson('/tools/license-expiry', scope ? { vcenterId: scope } : {})
+      .then((d) => { if (gen === licGen.current) { setData(d); setErr(null); } })
+      .catch((e) => { if (gen === licGen.current) setErr(e.message); });
     if (isAdmin) {
       fetchJson('/admin/horizon')
         .then((r) => { setHz(r.servers || []); setHzDenied(null); })

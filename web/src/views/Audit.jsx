@@ -11,13 +11,23 @@ export default function Audit() {
   const [q, setQ] = useState('');
   const [limit, setLimit] = useState(100);
 
-  const load = () => {
+  // 검색어는 입력이 멈춘 뒤(300ms) 보낸다 — 글자마다 요청하지 않는다(v2.611 WEB2611-07).
+  const [qDeb, setQDeb] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setQDeb(q), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+  useEffect(() => {
+    // 세대 가드 — 늦게 도착한 이전 조건의 응답이 방금 받은 결과를 덮지 않게(v2.596 WS 규약).
+    let active = true;
     const p = new URLSearchParams({ limit: String(limit) });
     if (user) p.set('user', user);
-    if (q) p.set('q', q);
-    fetchJson(`/admin/audit?${p.toString()}`).then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [user, q, limit]);
+    if (qDeb) p.set('q', qDeb);
+    fetchJson(`/admin/audit?${p.toString()}`)
+      .then((d) => { if (active) { setData(d); setError(null); } })
+      .catch((e) => { if (active) setError(e.message); });
+    return () => { active = false; };
+  }, [user, qDeb, limit]);
 
   if (error) return <ErrorBox message={error} />;
   if (!data) return <Loading />;

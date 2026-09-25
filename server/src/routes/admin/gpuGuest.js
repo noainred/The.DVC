@@ -23,13 +23,14 @@ import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields, denyScopedRun } from '../../auth/scopeMerge.js';
 import { poolRun } from '../../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
+// v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
+const fleetOnly = fullScopeOnlyWith('물리 GPU 서버·엣지 배포 설정·엣지 사용자는 전 법인에 걸친 등록부라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
+
 export function registerGpuGuest(adminRouter) {
 
 // Metrics sampler settings: 온도/용량/GPU 수집 주기 + 보존기간 (런타임 변경).
 adminRouter.get('/metrics/settings', adminOnly, (_req, res) => {
   res.json({ settings: loadMetricsSettings(), limits: METRICS_LIMITS, status: metricsSamplerStatus() });
-// v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
-const fleetOnly = fullScopeOnlyWith('물리 GPU 서버·엣지 배포 설정·엣지 사용자는 전 법인에 걸친 등록부라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
 });
 adminRouter.put('/metrics/settings', adminOnly, (req, res) => {
   // v2.611 AUTHZ2611-02: 샘플러 주기·보존일은 전 법인 공용(vCenter 축 없음) — 범위 계정의 값은 적용하지 않고 밝힌다(v2.607 ignoredGlobal).

@@ -157,3 +157,29 @@ describe('v2.610 HPE 대수', () => {
     expect(describeScanRun({ at: 1, found: 2, registered: 2 }).metrics.some((x) => x.k === 'HPE')).toBe(false);
   });
 });
+
+// v2.611 감사 그룹 A — 보류·noCreds·구버전 엣지·폐기 안내.
+import { scanHoldNote } from './scanRunText.js';
+describe('v2.611 iLO 스캔 체인', () => {
+  it('EDGE2611-01: 위임 보류는 실패(빨강)가 아니라 보류(호박색) + 사유', () => {
+    const d = describeScanRun({ at: 1, held: true, heldReason: '위임 보류 — 엣지 버전 미상(2.610 이상 필요)', agent: 'edgeA' });
+    expect(d.state).toBe('held'); expect(d.badge).toBe('보류'); expect(d.tone).toBe('amber');
+    expect(d.title).toContain('2.610');
+  });
+  it('RECENT2611-04: 계정이 없어 시도하지 않은 서버 수를 말한다', () => {
+    const d = describeScanRun({ at: 1, found: 1, registered: 1, scanned: 6, noCreds: 3, iloEnabled: true, hpeFound: 1, hpeDetected: 1 });
+    expect(d.extra).toContain('계정 없어 시도 안 함 3');
+    expect(describeScanRun({ at: 1, found: 1, noCreds: 0 }).extra.some((x) => x.includes('계정 없어'))).toBe(false);
+    expect(scanLastRunSummary({ datacenters: 1, found: 0, noCreds: 2, held: 1 })).toContain('계정 없어 시도 안 함 2');
+  });
+  it('EDGE2611-02: 구버전 엣지가 iLO 를 무시했으면 "iLO 계정이 없어" 가 아니라 엣지 업그레이드를 말한다', () => {
+    const d = describeScanRun({ at: 1, found: 2, registered: 2, hpeDetected: 3, hpeDetectedApprox: true, iloIgnoredByEdge: true });
+    expect(d.text).toContain('엣지 업그레이드 필요');
+    expect(d.text).not.toContain('iLO 계정이 없어');
+  });
+  it('RECENT2611-02: 폐기 안내는 남은 계정으로 무엇이 계속되는지 말한다', () => {
+    expect(scanHoldNote({ username: 'root', hasPassword: false, iloUsername: 'Administrator', iloHasPassword: true })).toContain('HPE(iLO) 스캔은 계속됩니다');
+    expect(scanHoldNote({ username: 'root', hasPassword: true, iloUsername: 'Administrator', iloHasPassword: false })).toContain('Dell(iDRAC) 스캔은 계속됩니다');
+    expect(scanHoldNote({ username: 'root', hasPassword: false, iloUsername: '', iloHasPassword: false })).toBe('스캔은 비밀번호를 입력할 때까지 보류됩니다.');
+  });
+});

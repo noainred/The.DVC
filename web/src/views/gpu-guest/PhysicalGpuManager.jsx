@@ -30,6 +30,9 @@ export function PhysicalGpuManager({ vcs }) {
   const [bulkForce, setBulkForce] = useState(true);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkRes, setBulkRes] = useState(null);
+  // v2.611 WEB2611-08: 목록 조회 실패와 삭제·지금 수집 실패를 '없음'·무반응으로 보이지 않게 따로 든다.
+  const [loadErr, setLoadErr] = useState(null);
+  const [opErr, setOpErr] = useState(null);
   const setA = (k) => (e) => setAuto((a) => ({ ...a, [k]: e.target.value }));
   const autoRegister = async (force = false) => {
     if (!auto.host.trim() || !auto.username.trim()) { setAutoMsg({ ok: false, text: 'IP와 계정을 입력하세요.' }); return; }
@@ -62,7 +65,7 @@ export function PhysicalGpuManager({ vcs }) {
     setBulkRes(r.ok ? r : { error: r.reason || '일괄 등록 실패' });
     if (r.ok) await load();
   };
-  const load = () => fetchJson('/admin/gpu-physical').then(setD).catch(() => {});
+  const load = () => fetchJson('/admin/gpu-physical').then((r) => { setD(r); setLoadErr(null); }).catch((e) => setLoadErr(e?.message || String(e)));
   useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []);
   const results = new Map((d?.results || []).map((r) => [r.id, r]));
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -77,13 +80,25 @@ export function PhysicalGpuManager({ vcs }) {
       else if (r.ok) { setForm(null); await load(); } else setMsg(r.reason || '저장 실패');
     } catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };
-  const del = async (s) => { if (window.confirm(`'${s.name}' 삭제?`)) { await delJson(`/admin/gpu-physical/${encodeURIComponent(s.id)}`).catch(() => {}); await load(); } };
+  const del = async (s) => {
+    if (!window.confirm(`'${s.name}' 삭제?`)) return;
+    setOpErr(null);
+    try { await delJson(`/admin/gpu-physical/${encodeURIComponent(s.id)}`); } catch (e) { setOpErr(`삭제 실패(${s.name}): ${e?.message || e}`); }
+    await load();
+  };
   const test = async (payload, who) => {
     setTesting(who); setTestRes(null);
     const r = await postJson('/admin/gpu-physical/test', payload).catch((e) => ({ ok: false, error: e.message }));
     setTesting(null); setTestRes({ who, ...r });
   };
-  const pollNow = async () => { setBusy(true); await postJson('/admin/gpu-physical/poll', {}).catch(() => {}); await load(); setBusy(false); };
+  const pollNow = async () => {
+    setBusy(true); setOpErr(null);
+    try {
+      const r = await postJson('/admin/gpu-physical/poll', {});
+      if (r && r.ok === false) setOpErr(`지금 수집 실패: ${r.reason || r.error || '사유 미상'}`);
+    } catch (e) { setOpErr(`지금 수집 실패: ${e?.message || e}`); }
+    await load(); setBusy(false);
+  };
 
   return (
     <div className="card" style={{ padding: 16, marginTop: 14 }}>
@@ -94,6 +109,8 @@ export function PhysicalGpuManager({ vcs }) {
           <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={openAdd}>+ 서버 추가</button>
         </div>
       </div>
+      {loadErr && <div className="banner warn" style={{ marginBottom: 8 }}>물리 GPU 서버 목록을 읽지 못했습니다: {loadErr}{d ? ' — 아래는 직전에 받은 목록입니다.' : ''}</div>}
+      {opErr && <div className="banner warn" style={{ marginBottom: 8 }}>{opErr}</div>}
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
         ESXi/VM이 아닌 <b>물리 서버</b>에 직접 SSH로 접속해 <code>nvidia-smi</code>로 GPU 사용률을 수집합니다(주기는 위 '수집 주기' 공유). 서버 OS에 NVIDIA 드라이버 + SSH가 있어야 합니다.
       </div>
@@ -163,7 +180,7 @@ export function PhysicalGpuManager({ vcs }) {
         <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
           <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>IP/계정</th><th style={{ textAlign: 'left' }}>소속</th><th style={{ textAlign: 'left' }}>GPU/사용률</th><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'right' }}>작업</th></tr></thead>
           <tbody>
-            {(d?.servers || []).length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>등록된 물리 GPU 서버가 없습니다.</td></tr>}
+            {(d?.servers || []).length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>{!d ? (loadErr ? '물리 GPU 서버 목록을 읽지 못했습니다(위 오류 참고) — 등록이 없다는 뜻이 아닙니다.' : '불러오는 중…') : '등록된 물리 GPU 서버가 없습니다.'}</td></tr>}
             {(d?.servers || []).map((s) => {
               const r = results.get(s.id);
               return (

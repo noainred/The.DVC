@@ -44,7 +44,9 @@ export default function RemoteAccess() {
   };
   const removeProxy = async (p) => {
     if (!window.confirm(`중계 서버 '${p.name}'을(를) 삭제할까요?`)) return;
-    await delJson(`/remote/proxies/${p.id}`).catch(() => {}); await load();
+    // v2.611 WEB2611-08: 삭제 실패를 삼키지 않는다(목록이 그대로 남은 이유를 말한다).
+    try { await delJson(`/remote/proxies/${p.id}`); } catch (e) { flash(false, `중계 서버 삭제 실패: ${e?.message || e}`); }
+    await load();
   };
 
   if (error) return <ErrorBox message={error} />;
@@ -58,7 +60,7 @@ export default function RemoteAccess() {
   };
   const remove = async (m) => {
     if (!window.confirm(`'${m.name}' 매핑을 삭제할까요? (HAProxy 설정에서도 제거)`)) return;
-    await delJson(`/remote/mappings/${m.id}`).catch(() => {});
+    try { await delJson(`/remote/mappings/${m.id}`); } catch (e) { flash(false, `매핑 삭제 실패: ${e?.message || e}`); }
     await load();
   };
   const reapply = async (m) => {
