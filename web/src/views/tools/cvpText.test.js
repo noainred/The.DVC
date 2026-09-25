@@ -248,3 +248,28 @@ describe('v2.611 — 서버 키 대조·못 읽은 수·배너', () => {
     for (const t of Object.values(T.TELEMETRY_TEXT)) expect(t).not.toMatch(/`/);
   });
 });
+
+describe('v2.612 감사 그룹 B', () => {
+  it('RECENT2612-01 파트 미조회 배너는 확인된 원인(예산·시한)만 말하고 경로 실패 사유를 붙인다', () => {
+    const s = T.partsDueNote('CVP-A', { partsDueUnread: true, partsNotTried: 3, missing: { power: '2대 실패(없음(404))', budget: '예산' } });
+    expect(s).toContain('3대');
+    expect(s).toContain('시간 예산·수집 시한');
+    expect(s).toContain('전원(PSU): 2대 실패(없음(404))');
+    expect(s).not.toMatch(/한 대도 읽지 못했습니다/);
+    expect(T.partsDueNote('X', {})).toContain('일부 장비');
+    const notes = T.listNotes({ servers: [{ id: 'c1', name: 'A', status: { partsDueUnread: true, partsNotTried: 1 } }] }).join('\n');
+    expect(notes).toContain('파트를 읽을 차례');
+  });
+  it('COL2612-04 prefix 수를 모르는 피어가 있으면 합계는 최소 값', () => {
+    expect(T.prefixText(120, 1)).toContain('최소 120');
+    expect(T.prefixText(120, 0)).toBe(T.countText(120));
+    expect(T.prefixText(null, 2)).toBe('—');
+    expect(T.bgpCell({ peers: 2, established: 1, down: 1, prefixes: 120, prefixesUnknown: 1 }).title).toContain('최소 120');
+  });
+  it('WEB2612-07 장비 목록을 못 받았으면 0대가 아니라 —', () => {
+    expect(T.deviceCountLabel(null, 0, 0)).toBe('장비 —');
+    expect(T.deviceCountLabel({ unavailable: true }, 0, 0)).toBe('장비 —');
+    expect(T.deviceCountLabel({ devices: [] }, 0, 0)).toBe('장비 0대');
+    expect(T.deviceCountLabel({ devices: [1, 2] }, 1, 2)).toContain('전체');
+  });
+});

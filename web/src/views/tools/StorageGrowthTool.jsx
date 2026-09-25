@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
@@ -64,12 +64,15 @@ export default function StorageGrowthTool() {
   const [query, setQuery] = useState('');
   const [axis, setAxis] = useState('device');   // 'device' | 'dc' | 'type'
 
+  // v2.612 WEB2612-02: 기간을 빠르게 바꾸면 늦게 온 이전 기간 응답이 표를 덮었다 — 세대가 같을 때만 반영한다.
+  const loadGen = useRef(0);
   const load = useCallback((p) => {
+    const gen = ++loadGen.current;
     setBusy(true);
     return fetchJson(`/tools/storage-growth?periods=${encodeURIComponent(p)}`)
-      .then((r) => { setD(r); setErr(null); })
-      .catch((e) => setErr(e.message))
-      .finally(() => setBusy(false));
+      .then((r) => { if (gen === loadGen.current) { setD(r); setErr(null); } })
+      .catch((e) => { if (gen === loadGen.current) setErr(e.message); })
+      .finally(() => { if (gen === loadGen.current) setBusy(false); });
   }, []);
 
   // ⚠ 폴링 없음 — 마운트 1회 + 기간이 바뀔 때만.

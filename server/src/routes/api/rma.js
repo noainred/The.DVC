@@ -20,8 +20,11 @@ import { deployRma, listRmaInstances, removeRmaInstance, deployInputIssue } from
 import { ssrfBlockReason } from '../../collector/registry.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { listAgentTokens } from '../../central/agentTokens.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
 
 const adminOnly = requireRole('admin');
+// v2.612 AUTHZ2612-04: RMA 는 엣지 단위 원격 명령이라 법인 축이 없다 — 범위 제한 admin 도 403(edge-log 와 같은 기준).
+const fullScopeOnly = fullScopeOnlyWith('원격 명령(RMA)은 엣지 단위라 법인 범위로 나눌 수 없어 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 const RE_AGENT = /^[^<>"'\s]{1,64}$/;
 const RE_INSTANCE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const RE_HOST = /^[A-Za-z0-9][A-Za-z0-9._-]{0,253}$/;
@@ -29,7 +32,7 @@ const RE_HOST = /^[A-Za-z0-9][A-Za-z0-9._-]{0,253}$/;
 export function registerRma(api) {
 
 /** 화면 초기 데이터 — 인스턴스 그룹(하트비트) + 카탈로그 + 분배 설정 + 비밀번호 메타 + 토큰 발급 엣지. */
-api.get('/tools/rma', adminOnly, (_req, res) => {
+api.get('/tools/rma', adminOnly, fullScopeOnly, (_req, res) => {
   const tokens = new Set(listAgentTokens().map((t) => String(t.agent || t.name || t).toLowerCase()));
   const pwMeta = Object.fromEntries(listRmaPasswordMeta().map((m) => [m.agent, m]));
   const st = getRmaSettings();
@@ -42,10 +45,10 @@ api.get('/tools/rma', adminOnly, (_req, res) => {
 });
 
 // ── 점검 스케줄(v2.418, HostMonitor 'Test by agent') ──
-api.get('/tools/rma/agents/:agent/schedule', adminOnly, (req, res) => {
+api.get('/tools/rma/agents/:agent/schedule', adminOnly, fullScopeOnly, (req, res) => {
   res.json({ ok: true, agent: req.params.agent, ...scheduleFor(String(req.params.agent || '')) });
 });
-api.put('/tools/rma/agents/:agent/schedule', adminOnly, (req, res) => {
+api.put('/tools/rma/agents/:agent/schedule', adminOnly, fullScopeOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent 형식 오류' });
   try {
@@ -58,19 +61,19 @@ api.put('/tools/rma/agents/:agent/schedule', adminOnly, (req, res) => {
     res.json({ ok: true, item: row, ...scheduleFor(agent) });
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
-api.delete('/tools/rma/agents/:agent/schedule/:id', adminOnly, (req, res) => {
+api.delete('/tools/rma/agents/:agent/schedule/:id', adminOnly, fullScopeOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   const ok = removeScheduleItem(agent, String(req.params.id || ''));
   if (ok) { dropResult(agent, String(req.params.id)); logAudit({ user: req.user?.username, action: 'RMA 점검 스케줄 삭제', target: `${agent}/${req.params.id}`, ip: req.ip }); }
   res.json({ ok, ...scheduleFor(agent) });
 });
 /** 점검 미리 검증(형식) — 저장 전 화면에서. */
-api.post('/tools/rma/tests/validate', adminOnly, (req, res) => {
+api.post('/tools/rma/tests/validate', adminOnly, fullScopeOnly, (req, res) => {
   const b = buildTest(req.body?.test, req.body?.args || {});
   res.json(b.ok ? { ok: true, args: b.args } : { ok: false, reason: b.issue });
 });
 /** 최신 점검 상태 — 'rma-itself' 는 여기서 하트비트로 판정. */
-api.get('/tools/rma/tests/results', adminOnly, async (req, res) => {
+api.get('/tools/rma/tests/results', adminOnly, fullScopeOnly, async (req, res) => {
   const agent = String(req.query.agent || '');
   const groups = listRmaAgents();
   for (const s of listSchedules()) {
@@ -81,12 +84,12 @@ api.get('/tools/rma/tests/results', adminOnly, async (req, res) => {
   const rows = latestResults({ agent });
   res.json({ ok: true, rows, summary: summarize(rows) });
 });
-api.get('/tools/rma/tests/history', adminOnly, async (req, res) => {
+api.get('/tools/rma/tests/history', adminOnly, fullScopeOnly, async (req, res) => {
   res.json({ ok: true, ...(await testHistory(String(req.query.agent || ''), String(req.query.id || ''), { hours: Number(req.query.hours) || 24, limit: Number(req.query.limit) || 500 })) });
 });
 
 /** 접속 허용 IP·코멘트 / 원격 관리 설정(v2.418). */
-api.put('/tools/rma/agents/:agent/access', adminOnly, (req, res) => {
+api.put('/tools/rma/agents/:agent/access', adminOnly, fullScopeOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent 형식 오류' });
   try {
@@ -95,7 +98,7 @@ api.put('/tools/rma/agents/:agent/access', adminOnly, (req, res) => {
     res.json({ ok: true, ...r });
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
-api.put('/tools/rma/agents/:agent/remote', adminOnly, (req, res) => {
+api.put('/tools/rma/agents/:agent/remote', adminOnly, fullScopeOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent 형식 오류' });
   try {
@@ -106,7 +109,7 @@ api.put('/tools/rma/agents/:agent/remote', adminOnly, (req, res) => {
 });
 
 /** 명령 실행 요청 — Body { agent, instance?, cmd, args?, timeoutMs? } → { reqId, target }. */
-api.post('/tools/rma/run', adminOnly, (req, res) => {
+api.post('/tools/rma/run', adminOnly, fullScopeOnly, (req, res) => {
   const b = req.body || {};
   const agent = String(b.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent(법인/엣지 이름)가 필요합니다.' });
@@ -145,16 +148,16 @@ api.post('/tools/rma/run', adminOnly, (req, res) => {
   res.json({ ok: true, reqId: r.reqId, target: r.target, signed: !!secret });
 });
 
-api.get('/tools/rma/jobs/:reqId', adminOnly, (req, res) => {
+api.get('/tools/rma/jobs/:reqId', adminOnly, fullScopeOnly, (req, res) => {
   res.json(getJob(String(req.params.reqId || '')));
 });
 
-api.get('/tools/rma/history', adminOnly, async (req, res) => {
+api.get('/tools/rma/history', adminOnly, fullScopeOnly, async (req, res) => {
   res.json({ rows: await listHistoryAsync({ agent: String(req.query.agent || ''), limit: Number(req.query.limit) || 100 }) });
 });
 
 /** 법인 RMA 비밀번호 등록/해제 — Body { password } ('' = 해제). 값은 응답·감사로그에 싣지 않는다. */
-api.put('/tools/rma/agents/:agent/password', adminOnly, (req, res) => {
+api.put('/tools/rma/agents/:agent/password', adminOnly, fullScopeOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent 형식 오류' });
   try {
@@ -165,7 +168,7 @@ api.put('/tools/rma/agents/:agent/password', adminOnly, (req, res) => {
 });
 
 /** 분배 설정 — Body { mode, primary } (법인) / PUT /settings { defaultMode } (전역). */
-api.put('/tools/rma/agents/:agent/mode', adminOnly, (req, res) => {
+api.put('/tools/rma/agents/:agent/mode', adminOnly, fullScopeOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent 형식 오류' });
   try {
@@ -174,7 +177,7 @@ api.put('/tools/rma/agents/:agent/mode', adminOnly, (req, res) => {
     res.json({ ok: true, ...r });
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
-api.put('/tools/rma/settings', adminOnly, (req, res) => {
+api.put('/tools/rma/settings', adminOnly, fullScopeOnly, (req, res) => {
   try {
     const m = setDefaultMode(String(req.body?.defaultMode || ''));
     logAudit({ user: req.user?.username, action: 'RMA 전역 분배 설정', detail: m, ip: req.ip });
@@ -195,14 +198,14 @@ function targetOf(b) {
 }
 
 /** 서버의 RMA 인스턴스 조회(SSH). Body: { host, port, username, password } */
-api.post('/tools/rma/deploy/list', adminOnly, async (req, res) => {
+api.post('/tools/rma/deploy/list', adminOnly, fullScopeOnly, async (req, res) => {
   const t = targetOf(req.body || {});
   if (t.error) return res.status(400).json({ ok: false, reason: t.error });
   res.json(await listRmaInstances(t));
 });
 
 /** 배포. Body: { host, port, username, password, instances:[{name,priority}], rmaPassword, allowCustom, agentName, centralUrl, centralToken } */
-api.post('/tools/rma/deploy', adminOnly, async (req, res) => {
+api.post('/tools/rma/deploy', adminOnly, fullScopeOnly, async (req, res) => {
   const b = req.body || {};
   const t = targetOf(b);
   if (t.error) return res.status(400).json({ ok: false, reason: t.error });
@@ -219,7 +222,7 @@ api.post('/tools/rma/deploy', adminOnly, async (req, res) => {
   res.json(r);
 });
 
-api.post('/tools/rma/deploy/remove', adminOnly, async (req, res) => {
+api.post('/tools/rma/deploy/remove', adminOnly, fullScopeOnly, async (req, res) => {
   const b = req.body || {};
   const t = targetOf(b);
   if (t.error) return res.status(400).json({ ok: false, reason: t.error });

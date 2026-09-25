@@ -468,14 +468,36 @@ function execPaged(conn, command, { maxPages, ...rest } = {}) {
   return execAnswered(conn, command, { ...rest, maxAnswers: maxPages, rules: ['pager'] });
 }
 
-function sftpReadFile(conn, path) {
+// v2.612 LEFT2612-07: SFTP 읽기 상한 — 예전 sftp.readFile 은 파일 전량을 메모리로 읽었다(대상 호스트의 그 파일이 비정상적으로
+//   크면 중앙 메모리가 그만큼 는다). 읽는 파일은 설치 디렉터리 JSON·haproxy.cfg 같은 작은 설정이다. exec 출력 상한과 같은 값.
+const SFTP_READ_MAX = EXEC_MAX_OUTPUT;
+function sftpReadFile(conn, path, { maxBytes = SFTP_READ_MAX } = {}) {
+  const cap = Math.max(1, Number(maxBytes) || SFTP_READ_MAX);
+  const tooBig = (n) => new Error(`SFTP 파일 크기 상한(${Math.ceil(cap / 1024)}KB) 초과${n != null ? `(${Math.ceil(n / 1024)}KB)` : ''} — 읽지 않았습니다: ${path}`);
   return new Promise((resolve, reject) => {
     conn.sftp((err, sftp) => {
       if (err) return reject(err);
-      sftp.readFile(path, (e, data) => (e ? reject(e) : resolve(data.toString('utf8'))));
+      // ① stat 으로 먼저 거른다 ② 그 사이 파일이 자라도 스트림이 상한+1 바이트까지만 읽는다(stat 만 믿지 않는다).
+      sftp.stat(path, (se, st) => {
+        if (se) return reject(se);
+        const size = Number(st?.size);
+        if (Number.isFinite(size) && size > cap) return reject(tooBig(size));
+        const chunks = []; let bytes = 0; let done = false;
+        const rs = sftp.createReadStream(path, { start: 0, end: cap });   // end 는 포함 — 최대 cap+1 바이트
+        const fin = (fn, v) => { if (done) return; done = true; fn(v); };
+        rs.on('data', (d) => {
+          bytes += d.length;
+          if (bytes > cap) { fin(reject, tooBig(null)); try { rs.destroy(); } catch { /* 닫는 중 */ } return; }
+          chunks.push(d);
+        });
+        rs.on('error', (e) => fin(reject, e));
+        rs.on('end', () => fin(resolve, Buffer.concat(chunks).toString('utf8')));
+        rs.on('close', () => fin(reject, new Error(`SFTP 읽기가 끝나기 전에 닫혔습니다: ${path}`)));   // 잘린 내용을 온전한 파일인 척 돌려주지 않는다
+      });
     });
   });
 }
+export { sftpReadFile as _sftpReadFileForTest };
 
 function sftpPutFile(conn, localPath, remotePath) {
   return new Promise((resolve, reject) => {

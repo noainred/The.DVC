@@ -68,6 +68,9 @@ function Ipam({ scope, onScope }) {
   const [subnets, setSubnets] = useState([]);
   const [base, setBase] = useState('');
   const [sheet, setSheet] = useState(null);
+  // v2.612 WEB2612-01: 조회 실패를 '서브넷 0개'·빈 시트로 삼키지 않는다 — 못 읽음은 없음이 아니다.
+  const [subnetsErr, setSubnetsErr] = useState('');
+  const [sheetErr, setSheetErr] = useState('');
   const [stFilter, setStFilter] = useState(''); // '' = 전체 | used | multihomed | duplicate | empty
   const [reconFilter, setReconFilter] = useState(''); // '' | vcenter | scan | both | manual | managed
   const [editOv, setEditOv] = useState(null); // IP 관리상태(override) 편집 대상 row
@@ -81,8 +84,10 @@ function Ipam({ scope, onScope }) {
   const pickBase = async (b, vc = scope) => {
     const gen = ++sheetGen.current;
     setBase(b);
-    const r = await fetchJson(`/tools/ipam/sheet?base=${b}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`).catch(() => null);
-    if (gen === sheetGen.current) setSheet(r);
+    let r = null; let err = '';
+    try { r = await fetchJson(`/tools/ipam/sheet?base=${b}${vc ? `&vcenterId=${encodeURIComponent(vc)}` : ''}`); }
+    catch (e) { err = e?.message || String(e); }
+    if (gen === sheetGen.current) { setSheet(r); setSheetErr(err); }
   };
   // v2.603(감사 WEB2603-01): '서브넷 대장' 버튼이 `onClick={openSheets}` 로 React 클릭 이벤트를 vc 로 넘겨
   //   `?vcenterId=[object Object]` → 대장이 통째로 비었다. 호출부를 고치고, 객체(이벤트)가 와도 현재 범위로 좁힌다
@@ -93,8 +98,11 @@ function Ipam({ scope, onScope }) {
     const gen = ++subnetGen.current;
     setView('sheet');
     const q = vc ? `?vcenterId=${encodeURIComponent(vc)}` : '';
-    const r = await fetchJson(`/tools/ipam/subnets${q}`).catch(() => ({ subnets: [] }));
+    let r;
+    try { r = await fetchJson(`/tools/ipam/subnets${q}`); }
+    catch (e) { if (gen === subnetGen.current) setSubnetsErr(e?.message || String(e)); return; }
     if (gen !== subnetGen.current) return;
+    setSubnetsErr('');
     setSubnets(r.subnets || []); if (r.subnets?.[0]) pickBase(r.subnets[0].base, vc);
   };
   // v2.602(감사 WEB2602-01): api.js downloadFile 이 res.ok 를 본다 — 예전에는 409(다른 내보내기 진행 중)·403 의
@@ -115,7 +123,7 @@ function Ipam({ scope, onScope }) {
     let active = true;   // v2.596(감사 WS-3): 늦게 온 이전 범위 응답이 pickBase 로 새 시트를 덮지 않게
     const gen = ++subnetGen.current; // v2.603: openSheets 와 같은 세대 — 둘 중 나중 요청만 목록을 쓴다
     const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
-    fetchJson(`/tools/ipam/subnets${q}`).then((r) => { if (!active || gen !== subnetGen.current) return; setSubnets(r.subnets); if (view === 'sheet' && r.subnets[0]) pickBase(r.subnets[0].base, scope); }).catch(() => { if (active) setSubnets([]); });
+    fetchJson(`/tools/ipam/subnets${q}`).then((r) => { if (!active || gen !== subnetGen.current) return; setSubnetsErr(''); setSubnets(r.subnets || []); if (view === 'sheet' && r.subnets?.[0]) pickBase(r.subnets[0].base, scope); }).catch((e) => { if (active && gen === subnetGen.current) setSubnetsErr(e?.message || String(e)); });
     return () => { active = false; };
     // eslint-disable-next-line
   }, [scope]);
@@ -199,8 +207,8 @@ function Ipam({ scope, onScope }) {
   return (
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
-        <Card label="총 IP" value={data.total.toLocaleString()} meta={`센터 ${data.byVcenter.length} · 서브넷 ${subnets.length}`} />
-        <Card label="서브넷(/24) 대역" value={subnets.length} meta={`10.x ${c10} · 172.x ${c172} · 192.x ${c192}`} />
+        <Card label="총 IP" value={data.total.toLocaleString()} meta={`센터 ${data.byVcenter.length} · 서브넷 ${subnetsErr ? '—' : subnets.length}`} />
+        <Card label="서브넷(/24) 대역" value={subnetsErr ? '—' : subnets.length} meta={subnetsErr ? '목록을 읽지 못함' : `10.x ${c10} · 172.x ${c172} · 192.x ${c192}`} />
         <Card label="공인 / 사설 IP" value={`${(data.publicIps ?? 0).toLocaleString()} / ${(data.privateIps ?? 0).toLocaleString()}`}
           meta={rowFilter === 'public' ? '공인만 보기 ✓' : rowFilter === 'private' ? '사설만 보기 ✓' : '클릭: 공인/사설 필터'}
           active={rowFilter === 'public' || rowFilter === 'private'}
@@ -267,6 +275,12 @@ function Ipam({ scope, onScope }) {
         <IpamInsights scope={scope} />
       ) : view === 'sheet' ? (
         <>
+          {subnetsErr && (
+            <div className="banner warn" style={{ marginBottom: 8 }}>서브넷 목록을 읽지 못했습니다(0개라는 뜻이 아닙니다){subnets.length ? ' — 아래는 직전에 받은 목록입니다' : ''}: {subnetsErr}</div>
+          )}
+          {sheetErr && (
+            <div className="banner warn" style={{ marginBottom: 8 }}>서브넷 대장({base})을 읽지 못했습니다: {sheetErr}</div>
+          )}
           <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
             {subnets.map((s) => (
               <span key={s.base} className="badge gray" title="이 서브넷 보기"

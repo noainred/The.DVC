@@ -474,7 +474,8 @@ test('COL2611-05·TIM2611-01·05 — 0대 보고는 prune 을 보류 · 부품�
     let st = store.getStatus(s.id);
     assert.equal(st.ok, true, st.error);
     assert.equal(st.partsRead, false, '부품 경로가 전부 404 — 읽은 장비가 없으니 partsRead 가 아니다');
-    assert.equal(st.partsDueUnread, true);
+    // v2.612 RECENT2612-01: 시도는 했다(404) — '예산·시한 때문에 못 읽음' 표시는 붙지 않는다(사유는 missing 이 말한다).
+    assert.equal(st.partsDueUnread, undefined);
     assert.ok([...poller._prevCountersForTest.keys()].some((k) => k.startsWith(`${s.id}|SN-B|`)));
     state.devices = ['SN-A'];
     await poller.pollCvpOnce({ manual: true, only: [s.id] });

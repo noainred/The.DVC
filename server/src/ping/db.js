@@ -76,16 +76,22 @@ function initSqlite() {
         mx = CASE WHEN excluded.mx IS NULL THEN mx WHEN mx IS NULL THEN excluded.mx ELSE MAX(mx, excluded.mx) END`);
     let rollupReady = metaGet.get('rollup_v1')?.v === 'done';
     let rollupSeed = null;   // 진행 중 시드 Promise(테스트·진단용)
+    // v2.612 DB2612-02: 시드 경계(rowid). samples 는 AUTOINCREMENT 가 아니라 **최대 rowid 행이 지워지면 새 행이 그 rowid 를
+    //   재사용**한다 — 시드 중 대상 삭제·정리가 최상위 행을 지운 뒤 적재된 행이 경계 안으로 들어와, addHour 로 한 번·시드로 한 번
+    //   더 세였다. 새 행의 rowid 가 경계 이하면 그 위의 원래 행은 전부 지워진 것이므로(rowid = MAX+1) 경계를 rowid−1 로 낮춘다
+    //   (insertMany 가 한다 — 삭제 경로가 무엇이든 막힌다).
+    let seedUpto = null;
     if (!rollupReady) {
       let upto = Number(metaGet.get('rollup_v1_upto')?.v);
       if (!Number.isFinite(upto)) {
         upto = Number(db.prepare('SELECT MAX(rowid) m FROM samples').get()?.m || 0);
         metaSet.run('rollup_v1_upto', String(upto));
       }
+      seedUpto = upto;
       rollupSeed = (async () => {
         let at = Number(metaGet.get('rollup_v1_progress')?.v) || 0;
-        while (at < upto) {
-          const next = Math.min(upto, at + SEED_CHUNK_ROWS);
+        while (at < seedUpto) {
+          const next = Math.min(seedUpto, at + SEED_CHUNK_ROWS);
           db.exec('BEGIN');
           try { seedChunk.run(at, next); metaSet.run('rollup_v1_progress', String(next)); db.exec('COMMIT'); }
           catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
@@ -94,6 +100,7 @@ function initSqlite() {
         }
         metaSet.run('rollup_v1', 'done');
         rollupReady = true;
+        seedUpto = null;
       })().catch((e) => { console.warn(`[ping] 시간당 롤업 시드 실패(장기 범위는 원시 표본을 읽는다): ${e?.message || e}`); });
     }
     // 최신 샘플(대상별 1건)
@@ -111,7 +118,12 @@ function initSqlite() {
         AVG(CASE WHEN ok=1 THEN rtt END) avg, MIN(CASE WHEN ok=1 THEN rtt END) min, MAX(CASE WHEN ok=1 THEN rtt END) max,
         SUM(CASE WHEN ok=1 THEN 0 ELSE 1 END) fail, COUNT(*) n
       FROM samples WHERE target=? AND ts>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
+    // 진단·테스트용 건수 포함 meta — 파티션 전체를 훑는다(52만 행 약 40ms). 조회 응답 경로에서 쓰지 말 것.
     const metaStmt = db.prepare('SELECT MIN(ts) mn, MAX(ts) mx, COUNT(*) n FROM samples WHERE target=?');
+    // v2.612 LEFT2612-05: 조회 응답(seriesOf)은 bounds 를 쓴다 — aggregate 하나씩은 인덱스 끝만 본다(0.0x ms, v2.550.3 규칙).
+    //   건수는 화면이 쓰지 않아(web PingMonitor 가 meta 를 읽지 않는다) 응답에서 null 이다.
+    const metaMin = db.prepare('SELECT MIN(ts) mn FROM samples WHERE target=?');
+    const metaMax = db.prepare('SELECT MAX(ts) mx FROM samples WHERE target=?');
     // v2.603(감사 DB2603-02 — 재현): 예전 `DELETE FROM samples WHERE ts < ?` 한 방은 보존일을 줄인 뒤 첫 정리에서
     // 515만 행을 동기로 지워 이벤트 루프를 5.6초 멈췄다(ping 은 가장 큰 테이블이다). rowid 서브쿼리 청크 DELETE +
     // 청크 사이 양보(util/chunkedPrune.js, v2.453·v2.601 규약) — idx_ping_ts 가 서브쿼리의 풀스캔을 막는다.
@@ -165,7 +177,21 @@ function initSqlite() {
     };
     return {
       kind: 'sqlite',
-      insertMany: (rows) => { db.exec('BEGIN'); try { for (const r of rows) { ins.run(r.target, r.ts, r.rtt == null ? null : r.rtt, r.ok ? 1 : 0); addHour(r.target, r.ts, r.rtt, r.ok); } db.exec('COMMIT'); } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; } },
+      insertMany: (rows) => {
+        db.exec('BEGIN');
+        try {
+          for (const r of rows) {
+            const info = ins.run(r.target, r.ts, r.rtt == null ? null : r.rtt, r.ok ? 1 : 0);
+            addHour(r.target, r.ts, r.rtt, r.ok);
+            // v2.612 DB2612-02: 재사용된 rowid 가 시드 경계 안이면 경계를 낮춘다(시드가 이 행을 다시 세지 않게).
+            if (seedUpto != null) {
+              const rid = Number(info?.lastInsertRowid);
+              if (Number.isFinite(rid) && rid <= seedUpto) { seedUpto = rid - 1; metaSet.run('rollup_v1_upto', String(seedUpto)); }
+            }
+          }
+          db.exec('COMMIT');
+        } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
+      },
       latest: (target) => { const r = latestOne.get(target); return r ? { rtt: r.rtt, ok: !!r.ok, ts: r.ts } : null; },
       recentOkRtt: (target, limit, sinceTs = 0) => recentOk.all(target, Number.isFinite(Number(sinceTs)) ? Number(sinceTs) : 0, limit).map((r) => r.rtt).filter((v) => v != null),
       history: (target, sinceTs, bucketMs, limit) => bucket.all(bucketMs, bucketMs, target, sinceTs, limit).reverse()
@@ -179,6 +205,7 @@ function initSqlite() {
       rollupState: () => ({ ready: rollupReady }),
       _rollupSeed: () => rollupSeed,
       meta: (target) => { const r = metaStmt.get(target); return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) }; },
+      bounds: (target) => ({ firstTs: metaMin.get(target)?.mn ?? null, lastTs: metaMax.get(target)?.mx ?? null, count: null }),
       prune,   // Promise<{deleted, done, chunks}> — 청크 사이에 양보한다
       dropTarget,   // (target, untilTs?) → Promise<{deleted, done, chunks}> — untilTs 를 주면 그 뒤 표본은 남긴다
     };

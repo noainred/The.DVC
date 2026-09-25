@@ -5,6 +5,7 @@ import { fetchJson, postJson, putJson, downloadFile } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, Modal, SearchBox, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
+import { queryKey, keepRowsOnError } from '../queryKeyText.js'; // v2.612 RECENT2612-06
 import { csvCell as esc } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
@@ -190,11 +191,19 @@ export function RealOs({ scope }) {
   // 조회 실패를 '스캔 결과가 없습니다' 로 칠하지 않는다(직전 결과는 그대로 두고 배너로 말한다).
   const resGen = useRef(0);
   const [resErr, setResErr] = useState(null);
+  // v2.612 RECENT2612-06: 행을 받은 조회 키 — 범위·필터를 바꾼 뒤 실패하면 이전 선택의 행을 새 선택 아래 두지 않는다.
+  const rowsKey = useRef(null);
   const loadResults = () => {
     const gen = ++resGen.current;
-    return fetchJson(`/admin/os-scan/results?${new URLSearchParams({ ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) })}`)
-      .then((r) => { if (gen !== resGen.current) return; setRows(r.items || []); setOmitted(Number(r.omittedOutOfScope) || 0); setResErr(null); })
-      .catch((e) => { if (gen !== resGen.current) return; setResErr(e?.message || String(e)); });
+    const params = { ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) };
+    const key = queryKey(params);
+    return fetchJson(`/admin/os-scan/results?${new URLSearchParams(params)}`)
+      .then((r) => { if (gen !== resGen.current) return; rowsKey.current = key; setRows(r.items || []); setOmitted(Number(r.omittedOutOfScope) || 0); setResErr(null); })
+      .catch((e) => {
+        if (gen !== resGen.current) return;
+        if (!keepRowsOnError(rowsKey.current, key)) { rowsKey.current = null; setRows(null); setOmitted(0); }
+        setResErr(e?.message || String(e));
+      });
   };
   useEffect(() => { loadStatus(); /* eslint-disable-next-line */ }, []);
   useEffect(() => { loadResults(); /* eslint-disable-next-line */ }, [scope, mm]);

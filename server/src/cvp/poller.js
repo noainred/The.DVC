@@ -113,7 +113,15 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
     // v2.611(TIM2611-01): 부품을 **실제로 읽은 장비가 있을 때만** '부품 조회 시각' 을 올린다 — 예산·시한에 걸려 아무 장비도 못 읽은
     //   주기를 '읽었다' 로 적으면 다음 30분 동안 부품을 다시 보지 않고 화면은 partsRead 를 참으로 말한다.
     const partsReadNow = partsDue && r.devices.some((d) => Array.isArray(d.parts));
-    if (partsReadNow) _partsAt.set(full.id, t0);
+    /*
+     * v2.612 RECENT2612-01: 조회 시각은 **시도했으면** 올린다(경로가 전부 404 인 CVP 도 시도다). 예전에는 읽었을 때만 올려 파트 경로가
+     *   없는 CVP 에 매 주기 4종 × 장비 수만큼 헛조회를 보냈다. '이번 차례에 못 읽음' 표시(partsDueUnread)는 **예산·시한 때문에
+     *   시도조차 못 한 장비**가 있을 때만 — 그때만 원인이 확인된 것이다(전부 실패는 missing 의 사유가 말한다).
+     */
+    const partsAttemptedNow = partsDue && r.devices.some((d) => d.partsAttempted === true);
+    if (partsReadNow || partsAttemptedNow) _partsAt.set(full.id, t0);
+    const partsNotTried = partsDue ? r.devices.filter((d) => d.partsAttempted !== true && d.streaming !== false
+      && ['budget', 'budget-partial', 'aborted', 'pending', 'ok', 'failed'].includes(d.telemetry) && d.parts === undefined).length : 0;
     const readAt = Date.now();
     for (const d of r.devices) {
       applyDeltas(full.id, d, settings.intervalMs, _prevCounters, slackMs);
@@ -151,7 +159,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
     putStatus(full.id, {
       name: full.name, ok: true, collectedAt: readAt, lastAttemptAt: readAt, durationMs: readAt - t0, deviceCount: r.devices.length,
       error: null, authStopped: null, usedPaths: r.usedPaths, missing: r.missing, seenFields: r.seenFields, truncated: r.truncated,
-      cvpVersion: r.cvpVersion, partsRead: partsReadNow, ...(partsDue && !partsReadNow ? { partsDueUnread: true } : {}),
+      cvpVersion: r.cvpVersion, partsRead: partsReadNow, ...(partsNotTried > 0 ? { partsDueUnread: true, partsNotTried } : {}),
       ...(pruneHeld ? { pruneHeld } : {}),
       ...(saved?.unavailable ? { dbUnavailable: true } : {}), ...(saved?.error ? { dbError: saved.error } : {}),
     });

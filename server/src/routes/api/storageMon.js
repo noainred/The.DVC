@@ -43,6 +43,8 @@ export function testCounts(snap) {
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
 // v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
+// v2.612 AUTHZ2612-01·02: 스토리지 장비 등록·삭제·내보내기·수집·주기/임계 설정도 전 법인 공용이라 adminOnly 에 이 게이트를 함께 건다
+//   (조회만 막혀 있어 범위 제한 admin 이 다른 법인 장비를 내보내고 지울 수 있었다).
 const fullScopeOnly = fullScopeOnlyWith('스토리지 모니터링은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 
 export function registerStorageMon(api) {
@@ -110,7 +112,7 @@ api.get('/tools/storage', toolsPerm, fullScopeOnly, (req, res) => {
  *    헤더 사전검증으로 값이 되울려 나오지 않는다.
  *  - 감사로그를 남긴다(자격증명 사용 + 외부 접속 시도).
  */
-api.post('/tools/storage/test', adminOnly, async (req, res) => {
+api.post('/tools/storage/test', adminOnly, fullScopeOnly, async (req, res) => {
   const body = req.body || {};
   const issue = deviceInputIssue(body);
   if (issue) return res.status(400).json({ ok: false, reason: issue });
@@ -164,7 +166,7 @@ api.post('/tools/storage/test', adminOnly, async (req, res) => {
   });
 });
 
-api.post('/tools/storage/devices', adminOnly, (req, res) => {
+api.post('/tools/storage/devices', adminOnly, fullScopeOnly, (req, res) => {
   try {
     const d = saveDevice(req.body || {});
     logAudit({ user: req.user?.username, action: '스토리지 장비 저장', target: `${d.type}/${d.name}`, detail: `${d.host} · 수집=${d.agent || '중앙'}` });
@@ -174,7 +176,7 @@ api.post('/tools/storage/devices', adminOnly, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, reason: e.message, conflict: e.conflict || null }); }
 });
 
-api.delete('/tools/storage/devices/:id', adminOnly, (req, res) => {
+api.delete('/tools/storage/devices/:id', adminOnly, fullScopeOnly, (req, res) => {
   if (!deleteDevice(req.params.id)) return res.status(404).json({ ok: false, reason: '장비를 찾을 수 없습니다.' });
   dropSnapshot(req.params.id); // 지운 장비의 낡은 스냅샷이 화면에 유령으로 남지 않게
   logAudit({ user: req.user?.username, action: '스토리지 장비 삭제', target: req.params.id });
@@ -199,7 +201,7 @@ api.get('/tools/storage/activity', toolsPerm, fullScopeOnly, (req, res) => {
  * pollStorageOnce 를 재사용해 폴러의 재진입 가드·병렬 3개 제한을 그대로 탄다(부하 평탄화).
  * 엣지 위임 장비는 원격에서 강제할 수 없어 수를 세어 '다음 주기 반영'으로 안내만 한다(정직).
  */
-api.post('/tools/storage/collect-all', adminOnly, async (req, res) => {
+api.post('/tools/storage/collect-all', adminOnly, fullScopeOnly, async (req, res) => {
   try {
     const all = listDevices().filter((d) => d.enabled !== false);
     const edgeDevs = all.filter((d) => (d.agent || '').trim());
@@ -224,7 +226,7 @@ api.post('/tools/storage/collect-all', adminOnly, async (req, res) => {
  * v2.316(사용자 버그 신고): 과거엔 엣지 장비에 안내 메시지만 반환하고 아무것도 하지 않았다 —
  * collectRequests 큐에 요청을 남기면 엣지가 다음 config pull(≤5분) 때 즉시 수집 + 즉시 push 한다.
  */
-api.post('/tools/storage/devices/:id/collect', adminOnly, async (req, res) => {
+api.post('/tools/storage/devices/:id/collect', adminOnly, fullScopeOnly, async (req, res) => {
   try {
     const dev = listDevices().find((d) => d.id === req.params.id);
     if (!dev) return res.status(404).json({ ok: false, reason: '장비를 찾을 수 없습니다.' });
@@ -252,7 +254,7 @@ api.post('/tools/storage/devices/:id/collect', adminOnly, async (req, res) => {
  */
 
 /** 현재 설정 + 이 노드(중앙)의 실효 주기 + 항목 사양(하한/기본/설명 — UI 폼의 단일 소스). */
-api.get('/tools/storage/intervals', adminOnly, (_req, res) => {
+api.get('/tools/storage/intervals', adminOnly, fullScopeOnly, (_req, res) => {
   res.json({
     ok: true,
     spec: INTERVAL_SPEC,
@@ -270,7 +272,7 @@ api.get('/tools/storage/intervals', adminOnly, (_req, res) => {
  * 비어 있는 항목은 '미지정' 이고, 미지정 항목은 엣지가 자기 portal.env/기본값을 유지한다
  * (전 키를 채워 배포하면 현장 설정을 통째로 덮어쓰기 때문 — intervals.js 계약).
  */
-api.put('/tools/storage/intervals', adminOnly, (req, res) => {
+api.put('/tools/storage/intervals', adminOnly, fullScopeOnly, (req, res) => {
   try {
     const r = saveIntervalConfig({ global: req.body?.global || {}, agents: req.body?.agents || {} });
     // 중앙 자신은 pull 축이 없으므로 저장 즉시 반영(엣지는 다음 config pull 때 받는다).
@@ -312,7 +314,7 @@ function stParseBody(body = {}) {
  * 덤프이므로 **requireSettingsOwner**(백업 라우트와 동일 게이트 — server/CLAUDE.md 규칙)를
  * 추가로 통과해야 하고 감사로그를 남긴다. admin 이어도 소유자가 아니면 403.
  */
-api.get('/tools/storage/devices/export.csv', adminOnly, (req, res) => {
+api.get('/tools/storage/devices/export.csv', adminOnly, fullScopeOnly, (req, res) => {
   const withPw = String(req.query.passwords || '') === '1';
   const send = () => {
     const devices = withPw ? listDevicesWithSecrets() : listDevices();
@@ -327,7 +329,7 @@ api.get('/tools/storage/devices/export.csv', adminOnly, (req, res) => {
 });
 
 /** 샘플 CSV 템플릿 다운로드 — 헤더 + 컬럼 설명 주석 + 예시 2행. */
-api.get('/tools/storage/devices/sample.csv', adminOnly, (_req, res) => {
+api.get('/tools/storage/devices/sample.csv', adminOnly, fullScopeOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="storage-devices-sample.csv"');
   res.send(sampleCsv());
@@ -336,7 +338,7 @@ api.get('/tools/storage/devices/sample.csv', adminOnly, (_req, res) => {
 /* ── 자유텍스트 내보내기·샘플(v2.513, 사용자 요청) ──
  * CSV 는 헤더·구분자를 맞춰야 하는데 현장 장비 목록은 위키 표·메일 본문·엑셀 한 컬럼으로 온다.
  * 붙여넣은 그대로 받는 경로를 같은 파이프라인에 붙였다. **비밀번호는 담지 않는다**(CSV 와 같은 계약). */
-api.get('/tools/storage/devices/export.txt', adminOnly, (req, res) => {
+api.get('/tools/storage/devices/export.txt', adminOnly, fullScopeOnly, (req, res) => {
   const devices = listDevices();
   logAudit({ user: req.user?.username, action: '스토리지 자유텍스트 내보내기', detail: `${devices.length}대` });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -344,7 +346,7 @@ api.get('/tools/storage/devices/export.txt', adminOnly, (req, res) => {
   res.send(devicesToText(devices, dcNameMap()));
 });
 
-api.get('/tools/storage/devices/sample.txt', adminOnly, (_req, res) => {
+api.get('/tools/storage/devices/sample.txt', adminOnly, fullScopeOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="storage-devices-sample.txt"');
   res.send(sampleText());
@@ -359,7 +361,7 @@ api.get('/tools/storage/devices/sample.txt', adminOnly, (_req, res) => {
  * 검증 규칙은 실제 저장과 동일(registry.deviceInputIssue 단일 소스 — analyzeImport 주석) +
  * 파일 내 중복(host+type) 검출. UI 는 검증 통과 후에만 실행 버튼을 활성화한다.
  */
-api.post('/tools/storage/devices/import', adminOnly, (req, res) => {
+api.post('/tools/storage/devices/import', adminOnly, fullScopeOnly, (req, res) => {
   const { rows, error, warnings, headerUsed, order, format, raw } = stParseBody(req.body || {});
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -442,7 +444,7 @@ api.post('/tools/storage/devices/import', adminOnly, (req, res) => {
  *   (닿지 못한 것을 실패라 하면 사용자가 멀쩡한 자격증명을 의심하며 고친다 — 정직 규약).
  * ⚠ 자동 재시도 없음 — 잘못된 비밀번호를 반복하면 어레이 계정이 잠긴다(bulkRun 이 강제).
  */
-api.post('/tools/storage/devices/import/test', adminOnly, (req, res) => {
+api.post('/tools/storage/devices/import/test', adminOnly, fullScopeOnly, (req, res) => {
   const p = stParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 
@@ -499,19 +501,19 @@ api.post('/tools/storage/devices/import/test', adminOnly, (req, res) => {
 });
 
 /** 연결 테스트 진행률·결과(폴링). 자격증명은 응답에 없다(bulkRun publicRun). */
-api.get('/tools/storage/devices/import/test/:id', adminOnly, (req, res) => {
+api.get('/tools/storage/devices/import/test/:id', adminOnly, fullScopeOnly, (req, res) => {
   const run = publicRun(req.params.id);
   if (!run || run.kind !== 'storage') return res.status(404).json({ ok: false, reason: '실행을 찾을 수 없습니다(15분 지나 폐기되었을 수 있습니다).' });
   res.json({ ok: true, ...run });
 });
 
 /** 영역별 수집 현황 + 원문(이 노드 DB — 중앙 수집 장비 전용. 엣지 장비 원문은 엣지 DB 에 있음). */
-api.get('/tools/storage/devices/:id/areas', adminOnly, async (req, res) => {
+api.get('/tools/storage/devices/:id/areas', adminOnly, fullScopeOnly, async (req, res) => {
   res.json({ db: await dbAvailable(), labels: AREA_LABEL, rows: await areaSummary(req.params.id) });
 });
 
 /** 영역 원문 JSON 1건 — ?endpoint= (DB api_latest 최신본, 512KB 절단 표기). */
-api.get('/tools/storage/devices/:id/areas/json', adminOnly, async (req, res) => {
+api.get('/tools/storage/devices/:id/areas/json', adminOnly, fullScopeOnly, async (req, res) => {
   const row = await areaJson(req.params.id, String(req.query.endpoint || ''));
   if (!row) return res.status(404).json({ ok: false, reason: '해당 엔드포인트의 저장된 원문이 없습니다(엣지 수집 장비면 원문은 엣지 DB 에 있습니다).' });
   res.json({ ok: true, ...row });
@@ -661,7 +663,7 @@ api.get('/tools/storage-growth/settings', toolsPerm, fullScopeOnly, (req, res) =
  * 보존 설정 저장(관리자) — **되돌릴 수 없는 삭제**가 따라올 수 있으므로 감사로그를 남긴다.
  * `prune:true` 일 때만 즉시 정리한다(화면이 '지금 정리' 를 눌렀을 때).
  */
-api.post('/tools/storage-growth/settings', adminOnly, requireSettingsOwner, async (req, res) => {
+api.post('/tools/storage-growth/settings', adminOnly, fullScopeOnly, requireSettingsOwner, async (req, res) => {
   const { values, issues } = saveGrowthSettings(req.body || {});
   let pruned = false;
   if (req.body?.prune === true) pruned = await pruneNow();

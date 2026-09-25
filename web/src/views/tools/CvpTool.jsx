@@ -7,7 +7,7 @@ import { droppedSecretNote } from '../droppedSecretText.js';
 import { hostText, addressHiddenNote } from './addressHiddenText.js';
 import {
   agoText, spanText, countText, bpsText, pctText, kpiItems, serverState, authStopText, isAuthStopped,
-  missingFootnotes, itemLabel, CANDIDATE_NOTE, partsCell, bgpCell, portsCell, streamingText, filterDevices,
+  missingFootnotes, itemLabel, CANDIDATE_NOTE, deviceCountLabel, partsCell, bgpCell, portsCell, streamingText, filterDevices,
   partState, partCounts, seriesGeometry, seriesSourceNote, collectSummary,
   EMPTY_SERVER, serverToForm, serverPayload, choiceOptions, settingsPayload, settingsToForm, SECRET_MASK,
   isTruncated, canCollect, listNotes, partsMissingText, telemetryText,
@@ -186,7 +186,8 @@ export default function CvpTool() {
 
       <div className="card" style={{ minWidth: 0 }}>
         <div style={ROW}>
-          <b>장비 {countText(shown.length)}대{shown.length !== devList.length ? ` (전체 ${countText(devList.length)})` : ''}</b>
+          {/* v2.612 WEB2612-07: 장비 목록을 아직 받지 못했거나 실패했으면 '0대' 가 아니라 '—'(읽지 못함) */}
+          <b>{deviceCountLabel(devices, shown.length, devList.length)}</b>
           {servers.length > 1 && (
             <select className="input" value={cvpSel} onChange={(e) => setCvpSel(e.target.value)} style={{ maxWidth: 220 }}>
               <option value="">모든 CVP</option>

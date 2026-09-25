@@ -12,11 +12,14 @@ import { logAudit } from '../../audit.js';
 import { perfSnapshot, measureNow, pruneHangLog } from '../../perf/monitor.js';
 import { loadPerfSettings, savePerfSettings, LIMITS as PERF_LIMITS, DEFAULTS as PERF_DEFAULTS } from '../../perf/settings.js';
 import { readHangs, clearHangs, hangLogStatus } from '../../perf/hangLog.js';
-import { adminOnly } from './shared.js';
+import { adminOnly, fullScopeOnlyWith } from './shared.js';
+
+// v2.612 AUTHZ2612-05: hang 로그에는 다른 사용자의 계정·IP·UA·경로가 담긴다 — 범위 제한 admin 도 403(/admin/audit 와 같은 기준).
+const fullScopeOnly = fullScopeOnlyWith('서버 성능 측정에는 포탈 전체 사용자의 요청 기록이 섞여 있어 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
 export function registerPerfMonitor(adminRouter) {
   /** 현재 스냅샷(라우트별 지연·느린 요청·hang·루프 창·진행 중 요청·메모리). */
-  adminRouter.get('/perf', adminOnly, (req, res) => {
+  adminRouter.get('/perf', adminOnly, fullScopeOnly, (req, res) => {
     const lim = (k, d, max) => Math.max(1, Math.min(max, Number(req.query[k]) || d));
     res.json({
       ...perfSnapshot({ routeLimit: lim('routes', 60, 400), slowLimit: lim('slow', 100, 500), hangLimit: lim('hangs', 100, 500) }),
@@ -25,7 +28,7 @@ export function registerPerfMonitor(adminRouter) {
   });
 
   /** 임계·보관 설정 변경. 저장 후 보존일 정리를 한 번 돌린다. */
-  adminRouter.put('/perf/settings', adminOnly, (req, res) => {
+  adminRouter.put('/perf/settings', adminOnly, fullScopeOnly, (req, res) => {
     const before = loadPerfSettings();
     const next = savePerfSettings(req.body || {});
     logAudit({
@@ -41,20 +44,20 @@ export function registerPerfMonitor(adminRouter) {
    * '지금 측정' — 30초 창을 기다리지 않고 현재 루프 응답성을 잰다(setImmediate 왕복 + 1초 히스토그램).
    * 재진입 가드는 monitor.measureNow 안에 있고 진행 중이면 409 로 알린다(같은 작업 중복 실행 금지 규약).
    */
-  adminRouter.post('/perf/measure', adminOnly, async (req, res) => {
+  adminRouter.post('/perf/measure', adminOnly, fullScopeOnly, async (req, res) => {
     const r = await measureNow({ samples: Number(req.body?.samples) || 60 });
     if (r.busy) return res.status(409).json(r);
     res.json(r);
   });
 
   /** hang 로그 파일(재시작 후에도 남는 기록) — 최근 limit 건, kind=loop|client 필터. */
-  adminRouter.get('/perf/hangs', adminOnly, (req, res) => {
+  adminRouter.get('/perf/hangs', adminOnly, fullScopeOnly, (req, res) => {
     const kind = ['loop', 'client'].includes(String(req.query.kind || '')) ? String(req.query.kind) : '';
     res.json({ ok: true, ...readHangs({ limit: Number(req.query.limit) || 200, kind }), status: hangLogStatus() });
   });
 
   /** hang 로그 비우기(관리자). 기록 자체가 진단 근거라 감사에 남긴다. */
-  adminRouter.delete('/perf/hangs', adminOnly, (req, res) => {
+  adminRouter.delete('/perf/hangs', adminOnly, fullScopeOnly, (req, res) => {
     const st = hangLogStatus();
     const r = clearHangs();
     logAudit({ user: req.user?.username, action: '서버 성능 hang 로그 삭제', detail: `bytes=${st.bytes ?? 0}`, ip: req.ip || '' });

@@ -44,7 +44,8 @@ adminRouter.get('/emergency-stop', adminOnly, (_req, res) => res.json(getEmergen
 
 // Body: { action:'stop'|'resume', approvals:[{username,code},{username,code}] }
 // 검증: 정확히 2명 · 서로 다른 계정 · 둘 다 admin · 둘 다 현재 OTP 일치.
-adminRouter.post('/emergency-stop', adminOnly, (req, res) => {
+// v2.612 AUTHZ2612-08: 요청자도 전체 범위만(fleetOnly).
+adminRouter.post('/emergency-stop', adminOnly, fleetOnly, (req, res) => {
   const b = req.body || {};
   const action = b.action === 'resume' ? 'resume' : 'stop';
   const approvals = Array.isArray(b.approvals) ? b.approvals : [];
@@ -58,6 +59,8 @@ adminRouter.post('/emergency-stop', adminOnly, (req, res) => {
     const u = getUser(name);
     if (!u) return res.status(400).json({ ok: false, reason: `사용자 '${name}'를 찾을 수 없습니다.` });
     if ((u.role || '') !== 'admin') return res.status(403).json({ ok: false, reason: `'${name}'는 관리자(admin)가 아닙니다.` });
+    // v2.612 AUTHZ2612-08: 긴급중단은 전 수집을 멈춘다 — 승인자도 전체 범위 admin 이어야 한다(요청자는 fleetOnly 가 막는다).
+    if (scopedVcenterIds({ username: u.username, role: u.role, scope: u.scope }, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason: `'${name}'는 범위가 제한된 계정이라 긴급중단을 승인할 수 없습니다(전체 범위 관리자만).` });
     const v = verifyUserOtp(name, a?.code);
     if (!v.ok) return res.status(403).json({ ok: false, reason: `'${name}' OTP 인증 실패 — ${v.reason}`, needEnroll: v.needEnroll });
   }

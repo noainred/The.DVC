@@ -13,6 +13,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { runLocalIdracScan } from '../idrac/localScan.js';
 import { registerScanned } from '../idrac/registry.js';
 import { pollNow } from '../idrac/poller.js';
+import { tryAcquireScan, releaseScan, scanLockBusy } from '../idrac/scanPoller.js'; // v2.612 EDGE2612-01
 
 let timer = null;
 let last = null;
@@ -65,6 +66,10 @@ export async function runIdracScanWorkerOnce() {
 
 async function runIdracScanWorkerInner() {
   try {
+    // v2.612 EDGE2612-01: 이 엣지에서 스캔(중앙 PUSH·주기)이 도는 중이면 잡을 인출하지 않는다 — 인출하면 겹쳐 돌거나
+    //   '이미 수행 중' 으로 끝난다. 인출하지 않은 잡은 중앙 대기열에 남아 다음 폴에 가져간다.
+    const busy = scanLockBusy();
+    if (busy) { lastSkipBusy = { at: Date.now(), by: busy.by }; return null; }
     const url = `${config.agent.centralUrl}/api/central/idrac-scan-jobs?agent=${encodeURIComponent(config.agent.name)}`;
     const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) {
@@ -100,7 +105,19 @@ async function runIdracScanWorkerInner() {
         };
         // 스캔+현지등록 코어는 PUSH 엔드포인트와 공유(runLocalIdracScan). durationMs는 헬퍼가 계산.
         // v2.591(감사 F3): 중앙이 싣는 trigger·rangeId — 주기 잡이면 인증 정지 IP 를 건너뛴다(구버전 중앙은 필드가 없어 수동=전부 시도).
-        const scan = await runLocalIdracScan({ ips: job.ips, username: job.username, password: job.password, ilo: job.ilo || null, noRegister: job.noRegister, vcenterId: job.vcenterId || '', datacenterId: job.datacenterId || '', mode: job.mode || 'merge', onProgress, trigger: job.trigger === 'periodic' ? 'periodic' : 'manual', rangeId: String(job.rangeId || '') });
+        // v2.612 EDGE2612-01: 인출 뒤 스캔 직전에도 잠금을 잡는다(인출과 스캔 사이에 PUSH 가 시작됐을 수 있다).
+        //   못 잡으면 겹쳐 돌지 않고 '이미 수행 중' 사유로 회신한다(중앙 잡이 '대기' 로 매달리지 않게).
+        const lock = tryAcquireScan('delegated');
+        if (!lock.ok) {
+          const postErr = await postResult({ reqId: job.reqId, agent: config.agent.name, error: `이미 수행 중: ${lock.reason}`, busy: true });
+          last = { at: Date.now(), reqId: job.reqId, error: '이미 수행 중', busy: true, ...(postErr ? { postError: postErr } : {}) };
+          console.warn(`[idrac-scan-agent] ${config.agent.name}: 다른 스캔이 진행 중이라 잡 ${job.reqId} 를 실행하지 않았습니다`);
+          continue;
+        }
+        let scan;
+        try {
+          scan = await runLocalIdracScan({ ips: job.ips, username: job.username, password: job.password, ilo: job.ilo || null, noRegister: job.noRegister, vcenterId: job.vcenterId || '', datacenterId: job.datacenterId || '', mode: job.mode || 'merge', onProgress, trigger: job.trigger === 'periodic' ? 'periodic' : 'manual', rangeId: String(job.rangeId || '') });
+        } finally { releaseScan(); }
         // v2.593(감사 EDGE-4): 회신 실패를 콘솔뿐 아니라 상태에도 싣는다 — 엣지 로그 화면이 '성공 모양' 으로 보이지 않게.
         const postErr = await postResult({ reqId: job.reqId, agent: config.agent.name, ...scan });
         last = { at: Date.now(), reqId: job.reqId, foundCount: scan.foundCount, registered: scan.registered, ...(postErr ? { postError: postErr } : {}) };
@@ -118,6 +135,7 @@ async function runIdracScanWorkerInner() {
 }
 
 let lastPollAt = 0; let lastPollError = null; let failStreak = 0;
+let lastSkipBusy = null; // v2.612 EDGE2612-01: 잠금 때문에 인출을 미룬 마지막 시각
 function noteFail(kind, detail) {
   failStreak++;
   lastPollError = { at: Date.now(), kind, detail: String(detail).slice(0, 300), streak: failStreak };
@@ -127,7 +145,7 @@ function noteFail(kind, detail) {
 
 export function getIdracScanWorkerStatus() {
   // lastPollAt: 마지막 성공 인출 · lastPollError: 마지막 실패(성공하면 null · streak 는 연속 실패 수)
-  return { name: config.agent.name, centralUrl: config.agent.centralUrl || null, pollMs: POLL_MS, last, lastPollAt: lastPollAt || null, lastPollError, progressError: _progressError };
+  return { name: config.agent.name, centralUrl: config.agent.centralUrl || null, pollMs: POLL_MS, last, lastPollAt: lastPollAt || null, lastPollError, progressError: _progressError, lastSkipBusy };
 }
 
 export function startIdracScanWorker() {

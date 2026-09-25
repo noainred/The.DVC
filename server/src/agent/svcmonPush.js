@@ -45,7 +45,10 @@ const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFin
 // v2.600: 상한도 둔다(2^31 초과 → setInterval 1ms 루프 — v2.599 T2599-02 형제 누락).
 const INTERVAL_MS = clampIntervalMs(envNum('SVCMON_PUSH_INTERVAL_MS', 60_000), 60_000, 15_000);
 /** 청크당 행 수. 행당 약 65B 실측 → 2,000행 ≈ 130KB(기본 1MB 한도에 여유). */
-const CHUNK_START = Math.max(100, envNum('SVCMON_PUSH_CHUNK', 2000));
+// v2.612 EDGE2612-03: 상한 20,000행 — 413 축소 재시도(최대 8회, 매번 절반)가 하한(250)까지 닿을 수 있는 크기다.
+//   예전에는 상한이 없어 SVCMON_PUSH_CHUNK=1e9 면 8번 줄여도 수백만 행이라 413 이 끝나지 않았다.
+const CHUNK_MAX = 20_000;
+const CHUNK_START = Math.min(CHUNK_MAX, Math.max(100, envNum('SVCMON_PUSH_CHUNK', 2000)));
 const CHUNK_MIN = 250;
 const PUSH_GZIP = process.env.SVCMON_PUSH_GZIP !== 'false';
 const ENABLED = process.env.SVCMON_PUSH !== 'false';
@@ -156,9 +159,10 @@ export async function pushSvcmonNow() {
     // ⚠ v2.590 D2: 413 이면 청크를 줄여 **스냅샷 전체를 다시 나눠** 처음부터 보낸다. 예전에는 그 청크의 앞부분만
     //   남기고(`rows.slice(0, chunkRows)`) 뒷부분을 오류도 없이 버렸다. 이미 받은 청크의 재전송은 중앙이 측정 시각으로
     //   걸러 멱등이다.
+    let shrink = false;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       accepted = 0; dropped = 0; nextNeedMeta = false; errors = [];
-      let shrink = false;
+      shrink = false;
       for (let idx = 0; idx < chunks.length; idx += 1) {
         const envelope = {
           v: 1,
@@ -210,6 +214,9 @@ export async function pushSvcmonNow() {
       if (!shrink) break;
       chunks = buildChunks(chunkRows);
     }
+    // v2.612 EDGE2612-03: 축소 재시도를 다 쓰고도 413 중이면 **보내지 못한 것**이다 — 예전에는 errors 가 비어 ok:true 로
+    //   보고했다(앞 청크만 받아진 부분 스냅샷을 성공이라 말했다).
+    if (shrink) errors.push(`413 — 청크를 ${chunkRows}행까지 줄였지만 재시도 한도(8회)를 다 써서 스냅샷 일부를 보내지 못했습니다`);
 
     if (needMeta && !errors.length) sentMetaSig = metaSig;
     needMeta = nextNeedMeta;         // 중앙이 요청하면 다음 주기에 메타 동봉

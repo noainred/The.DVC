@@ -159,8 +159,8 @@ export function extractIdracParts(server = {}, inv = {}) {
   // ── 팬 ──────────────────────────────────────────────────────────────────────
   const fans = arr('fans'); mark('fans', fans);
   for (const f of fans || []) {
-    // ⚠ 팬은 `state` 를 수집하지 않는다(redfish.js:808 은 health 만) — health 만 넘긴다.
-    const r = redfishPartState({ health: f.health });
+    // v2.612(COL2612-08): 팬은 빈 슬롯일 때만 `state:'absent'` 를 싣는다(redfish.js fetchSensors) — 그 밖엔 health 만.
+    const r = redfishPartState({ health: f.health, state: f.state });
     push('fan', t(f.name), KEY_KIND.name, r, t(f.name) || '팬',
       [t(f.model), f.rpm != null ? `${f.rpm} RPM` : ''].filter(Boolean).join(' '));
   }

@@ -3814,6 +3814,36 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       실패했다 — `tOld > 40 && tOld > tNew × 5`(상대 비율)로 바꿨다. **ReDoS 회귀 테스트는 비율로 쓸 것.**
     - 남긴 것: 파트 장애 키 변경 배지(COL-01) · CVP BGP 피어 IP 가림(AUTHZ-06, 정책 판단) · pdu 등 다른 표본 커서 push 의 같은 모양 ·
       `/idrac/:id/gpu-probe` GET 로그인 · 실장비(iLO·CVP·구버전 엣지) 미확인 — 전부 가짜 서버·합성 입력 재현이다.
+  - ⚠⚠ **v2.612 — 20차 점검 확정분**(사용자 요청 "코드 리뷰 보안 패치, 성능 개선 등" · 선택 10축 병렬 + 반증 · 전체 검증.
+    확정·부분 확정 약 45건, 반증 7건. 회귀 `test/audit2612{a..e}.test.js` + 웹 `audit2612f.test.js` 외. 상세 `docs/AUDIT-2026-09-25b.md`):
+    - ⚠⚠ **범위 관리자 차단은 '파일 단위' 로 훑어야 한다 — 이번엔 `routes/api/*` 였다**(AUTHZ2612-01~08): v2.607·v2.611 이 `routes/admin/*`
+      등록부 파일만 훑어, 스토리지·PDU·SAN 장비 내보내기·삭제·일괄 수집, 중계 토폴로지(전 사이트 IP·SSH 계정 · PUT 으로 전체 삭제),
+      RMA 원격 명령, 베어메탈 스토리지·계정 볼트, 성능 모니터 hang 로그, 전 법인 공통 설정(SAN 사용량 보존일 · 스토리지·PDU 주기·임계)이
+      범위 관리자에게 열려 있었다. **같은 파일의 목록 GET 은 이미 403 이었다**(형제 누락). 이제 그 파일들의 adminOnly 라우트 전부가
+      `fullScopeOnly`/`fleetOnly` 이고 `audit2612a` 가 **소스 스윕으로** 고정한다(새 adminOnly 라우트를 게이트 없이 더하면 실패).
+      `relaytopo`·`relaycheck` 의 `!admin &&` 예외(admin 은 통과)도 없앴다 — v2.607 이후 범위 관리자는 '관리자' 가 아니라 '범위 계정' 이다.
+      비상 정지는 요청자·승인자 모두 전체 범위여야 한다. ⚠ **새 admin/api 라우트 파일을 만들면 '범위 참조 0건' 인지 먼저 볼 것.**
+    - ⚠⚠ **대량 이동·적재는 요청 경로에서 한 문장으로 하지 않는다**(PERF2612-01·02 — v2.611 이 만든 회귀): CVP 이름 변형 병합이
+      `UPDATE OR IGNORE`+`DELETE` 한 문장으로 100만 행에 약 13초 정지했다. 5,000행 rowid 청크 · **COMMIT 뒤에만** 양보 · 백그라운드
+      single-flight(`{wait:true}` 로만 기다림) · 같은 날 일 롤업은 **합친다**(버리면 표본·피크 소실 — RECENT2612-04). `saveDevices` 도 30대마다 커밋.
+    - ⚠⚠ **자격증명을 싣는 요청은 리다이렉트를 따라가지 않는다 — `resilientFetch` 밖의 클라이언트도**(SEC2612-02·03): 전역 fetch 기본
+      follow 가 307 대상(루프백 포함)으로 계정·비밀번호 본문을 다시 보냈고, IP 리터럴 대상은 SSRF lookup 을 타지 않는다. CVP 는
+      `redirect:'manual'`(3xx = 실패), Redfish·OME 는 `redfish.bmcFetch`(같은 출처 + 같은 호스트 https 상향만, 최대 3회, 호출자 signal 유지).
+      ⚠ `resilientFetch.fetchFollowing` 을 그대로 쓰지 말 것 — 호출자 signal 을 자체 타임아웃으로 덮어 v2.417 세션 절단이 깨진다.
+    - **파서 누적은 제자리로**(SEC2612-01): `{...prev, ...fields}` 를 반복하면 O(n²) — CVP 8천 건 11.7초. 개체당 필드 상한 400 + `droppedFields`.
+    - ⚠⚠ **등록부를 못 읽었으면 '빈 목록' 을 내려보내지 않는다**(LEFT2612-01 — v2.605 가 남긴 것): 손상 → `preserveCorrupt` → 빈 목록 →
+      설정 pull 이 `ok:true` 로 엣지 장비·스냅샷·관리 계정을 지웠다. 등록부 5종 `registryLoadError()` · 설정 pull 5경로 503 `registryUnreadable` ·
+      **원본이 없고 `.corrupt.*` 만 있으면(손상 뒤 재시작) 역시 못 읽은 것**이다. 재수집 큐를 꺼내기 전에 검사한다.
+    - **중앙 → 엣지 '동작' 요청은 재전송하지 않는다**(EDGE2612-01): `resilientFetch` 는 메서드를 보지 않고 재시도한다 — 엣지 라우트가
+      동기(끝까지 기다림)라 시한 뒤 재전송이 같은 스캔·수집을 동시에 두 번 돌렸다(로그인 두 배). `retries:0` + 엣지 409 `busy`(iDRAC 스캔은
+      주기·지금 스캔·임시 스캔·폴 워커와 **같은 잠금** `tryAcquireScan`). **새 중앙 → 엣지 POST 는 멱등인지부터 볼 것.**
+    - 그 밖: 위임 0건 엣지는 CVP 상태 칸을 차지하지 않는다(`noDelegation`) · CVP 파트 조회는 '시도함' 이면 주기를 넘긴다(전부 404 인 장비를
+      매 주기 다시 묻고 '시간 예산' 탓을 하던 것) · `disconnected`→down · 모르는 hwStatus 는 unknown · BGP prefix 부분 합은 '최소' ·
+      NIC 사용률 100% 초과는 null + 사유(v2.578 D3) · `toBytes('3 tiers')` · PDU VA ×1 · 빈 팬 슬롯 absent · HPE 서비스태그 교정 시 파트 장애는
+      `key-migrated` 로 옮긴다(알림 재발송 없음) · 임시 스캔은 인증 실패를 기록하지 않는다 · GPU 게스트 엣지 배포도 `droppedSecrets` ·
+      ping 추이는 MIN/MAX 단독 · `sftpReadFile` 크기 상한 · 웹 늦은 응답·조회 실패를 0 으로 보이던 7화면 · 표 minWidth 10곳.
+    - 남긴 것: PERF2612-03(백업 동기 gzip) · DB2612-03(LRU 가 prune 핸들 닫음 — vCenter 48개 초과) · GPU 배포 이름 대소문자 · 엣지
+      `bmstorWorker` 잠금 공유 · `corruptOnlyReason` 4벌 복제 · CVP BGP 피어 IP 가림(정책). 실장비(CVP·iLO·OME 리다이렉트 동작)는 보지 못했다.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

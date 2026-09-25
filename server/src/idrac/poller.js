@@ -203,7 +203,7 @@ async function pollOnceInner({ manual = false } = {}) {
           try {
             const inv = await fetchInventory(s);
             // 팬 파트 정보 — Thermal 은 fetchSensors 가 방금 받았으므로 재호출 없이 이관(추가 HTTP 0회).
-            if (sensorFans?.length) inv.fans = sensorFans.map(({ name, model, partNumber, manufacturer, health, redundant }) => ({ name, model, partNumber, manufacturer, health, redundant }));
+            if (sensorFans?.length) inv.fans = sensorFans.map(({ name, model, partNumber, manufacturer, health, redundant, state }) => ({ name, model, partNumber, manufacturer, health, redundant, ...(state ? { state } : {}) })); // v2.612 COL2612-08: 빈 슬롯(state)
             // v2.548 F1: 팬은 Thermal 경로라 fetchInventory 의 컬렉션 메타에 없다 — 여기서 찍는다.
             if (inv.collections && typeof inv.collections === 'object') inv.collections.fans = sensorFans?.length ? 'ok' : (sensorErr ? 'failed' : 'ok');
             setInventory(s.id, inv);

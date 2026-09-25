@@ -7,13 +7,15 @@ import { getBmLatest, bmCollectNow, bmPollerStatus } from '../../bmstor/poller.j
 import { aggregate } from '../../bmstor/agg.js';
 import { bmServersToCsv, sampleCsv as bmSampleCsv, parseBmServersCsv, analyzeBmServersImport } from '../../bmstor/csv.js';
 import { listCollectors } from '../../collector/registry.js';
-import { requireSettingsOwner } from '../admin/shared.js';
+import { requireSettingsOwner, fullScopeOnlyWith } from '../admin/shared.js';
 
 const adminOnly = requireRole('admin');
+// v2.612 AUTHZ2612-06: 베어메탈 서버는 법인 축이 없다(엣지만) — 범위 제한 admin 도 403(스토리지 모니터링과 같은 기준).
+const fullScopeOnly = fullScopeOnlyWith('베어메탈 스토리지는 vCenter 범위 밖이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
 export function registerBmStorage(api) {
   // 현황 — 서버 목록(비밀 redact) + 최신 수집을 합산(서버/그룹/전체)해 반환. 엣지 콤보용 목록 포함.
-  api.get('/tools/bm-storage', adminOnly, (_req, res) => {
+  api.get('/tools/bm-storage', adminOnly, fullScopeOnly, (_req, res) => {
     const servers = listBmServers();
     const { total, groups, perServer } = aggregate(servers, getBmLatest());
     res.json({
@@ -25,20 +27,20 @@ export function registerBmStorage(api) {
   });
 
   // 서버 추가/수정 — body { id?, name, host, port, username, password?, agent, groups(최대 3개), mounts, enabled }
-  api.post('/tools/bm-storage/servers', adminOnly, (req, res) => {
+  api.post('/tools/bm-storage/servers', adminOnly, fullScopeOnly, (req, res) => {
     const r = saveBmServer(req.body || {});
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 서버 저장', target: r.server?.host || '', detail: `mounts ${(r.server?.mounts || []).length}개${r.server?.agent ? ` · 엣지 ${r.server.agent}` : ''}`, ip: req.ip || '' });
     res.status(r.ok ? 200 : 400).json(r);
   });
 
-  api.delete('/tools/bm-storage/servers/:id', adminOnly, (req, res) => {
+  api.delete('/tools/bm-storage/servers/:id', adminOnly, fullScopeOnly, (req, res) => {
     const r = removeBmServer(req.params.id);
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 서버 삭제', target: req.params.id, ip: req.ip || '' });
     res.status(r.ok ? 200 : 404).json(r);
   });
 
   // 수집 주기 저장(분) — 폴러가 30초 틱마다 설정을 다시 읽으므로 재기동 없이 반영된다.
-  api.put('/tools/bm-storage/settings', adminOnly, (req, res) => {
+  api.put('/tools/bm-storage/settings', adminOnly, fullScopeOnly, (req, res) => {
     const r = saveBmSettings(req.body || {});
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 주기 변경', target: `${r.settings.intervalMinutes}분`, ip: req.ip || '' });
     res.status(r.ok ? 200 : 400).json(r);
@@ -47,7 +49,7 @@ export function registerBmStorage(api) {
   /* ── 서버 CSV 일괄 관리(v2.341, 사용자 요구 — 다수 서버 등록). 수집 서버 CSV(v2.338)와 동일 골격:
    * 기본 export 는 비밀번호 제외(?secrets=1 은 설정 소유자 + 감사로그), 가져오기는 드라이런 →
    * 덮어쓰기(overwrite=true 명시) 2단계. agent 는 등록된 수집 서버(원격) 이름만 허용. ── */
-  api.get('/tools/bm-storage/export.csv', adminOnly, (req, res) => {
+  api.get('/tools/bm-storage/export.csv', adminOnly, fullScopeOnly, (req, res) => {
     const withPw = String(req.query.secrets || '') === '1';
     const send = () => {
       const list = withPw ? listBmServersRaw() : listBmServers();
@@ -61,13 +63,13 @@ export function registerBmStorage(api) {
     send();
   });
 
-  api.get('/tools/bm-storage/sample.csv', adminOnly, (_req, res) => {
+  api.get('/tools/bm-storage/sample.csv', adminOnly, fullScopeOnly, (_req, res) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="bm-storage-servers-sample.csv"');
     res.send(bmSampleCsv());
   });
 
-  api.post('/tools/bm-storage/import', adminOnly, (req, res) => {
+  api.post('/tools/bm-storage/import', adminOnly, fullScopeOnly, (req, res) => {
     const { rows, error } = parseBmServersCsv(String(req.body?.csv || ''));
     if (error) return res.status(400).json({ ok: false, reason: error });
     if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -103,7 +105,7 @@ export function registerBmStorage(api) {
   });
 
   // 지금 수집 — 진행 중이면 skipped(재진입 가드 공유, net/monitor.runMonitorNow 패턴).
-  api.post('/tools/bm-storage/collect', adminOnly, async (req, res) => {
+  api.post('/tools/bm-storage/collect', adminOnly, fullScopeOnly, async (req, res) => {
     const r = await bmCollectNow('manual');
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 수동 수집', detail: `서버 ${r.servers} · 성공 ${r.okCount} · 오류 ${r.errors}`, ip: req.ip || '' });
     res.status(r.ok ? 200 : 409).json(r);

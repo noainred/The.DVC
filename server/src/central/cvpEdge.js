@@ -70,7 +70,7 @@ export function cleanStatus(x, now = Date.now()) {
     usedPaths: strMap(x.usedPaths, 256, (k) => KINDS.has(k)), missing: strMap(x.missing, 500, (k) => KINDS.has(k)), seenFields: seen,
     truncated: numObj(x.truncated, ['devices', 'ports', 'peers', 'notTried', 'aborted']), cvpVersion: s(x.cvpVersion, 64),
     partsRead: x.partsRead === true, dbUnavailable: x.dbUnavailable === true,
-    ...(x.partsDueUnread === true ? { partsDueUnread: true } : {}),
+    ...(x.partsDueUnread === true ? { partsDueUnread: true, partsNotTried: numOrNull(x.partsNotTried) } : {}), // v2.612 RECENT2612-01: 시도 못 한 대수
     ...(isPlainObj(x.pruneHeld) ? { pruneHeld: { since: tsClamp(x.pruneHeld.since, now), untilMs: numOrNull(x.pruneHeld.untilMs), had: numOrNull(x.pruneHeld.had), reason: s(x.pruneHeld.reason, 300) } } : {}),
   };
 }
@@ -179,6 +179,20 @@ export function saveEdgeCvpStatus(agent, servers, { devicesUnavailable = false, 
   writer.save();
   for (const st of servers) if (st.collectedAt != null) ackCvpCollect(st.cvpId, st.collectedAt);
   return { ok: true, ...(adm.evicted ? { evicted: adm.evicted } : {}), ...(variants ? { variantsRemoved: variants } : {}) };
+}
+
+/**
+ * v2.612 CEN2612-01: 위임된 CVP 가 하나도 없는 엣지의 보관분을 지운다(대소문자 변형 포함). 반환 = 지운 키 수.
+ *   예전에는 위임 0건인 엣지도 상태를 저장해 EDGE_MAX_AGENTS 칸을 채웠고(CVP 를 쓰지 않는 엣지 28곳이 전부 들어온다),
+ *   위임에서 빠진 엣지의 옛 상태가 화면에 남았다.
+ */
+export function dropEdgeCvpStatus(agent) {
+  const m = load();
+  const lo = String(agent ?? '').trim().toLowerCase();
+  let n = 0;
+  for (const k of [...m.keys()]) if (String(k).trim().toLowerCase() === lo) { m.delete(k); n++; }
+  if (n) writer.save();
+  return n;
 }
 
 /** 전 엣지 상태(평탄) — { agent, pushedAt, ...status }. */

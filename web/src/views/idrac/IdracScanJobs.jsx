@@ -4,7 +4,7 @@
 import React, { useState } from 'react';
 import { ScanJobLogModal } from './ScanJobLogModal.jsx';
 import { STable } from '../../components/STable.jsx';
-import { scanLastRunSummary } from './scanRunText.js'; // v2.591(감사 C3): lastRun 키는 datacenters — 요약 판정은 한 곳
+import { scanLastRunSummary, scanJobResultText } from './scanRunText.js'; // v2.591(감사 C3): lastRun 키는 datacenters — 요약 판정은 한 곳
 
 // ---- 스캔 현황(주기 스캐너 + 진행 중/최근 위임 잡) --------------------------
 // iDRAC 스캔이 지금 어디까지 진행됐는지 어디서든 한눈에 확인. 주기 스캐너 상태 + 진행 중·최근
@@ -123,7 +123,7 @@ export function IdracScanJobs({ data, vcenters, datacenters = [], busy, onRefres
                   <td>
                     {(j.state === 'pending' || j.state === 'running') ? <Bar p={j.progress} />
                       : j.state === 'error' ? <span style={{ color: '#f87171', fontSize: 12 }} title={j.result?.error || ''}>오류: {(j.result?.error || '').slice(0, 60) || '알 수 없음'}</span>
-                        : <span className="muted" style={{ fontSize: 12 }}>발견 {j.result?.foundCount ?? 0} · 등록 {j.result?.registered ?? 0}{j.result?.scanned != null ? ` · 스캔 ${j.result.scanned}` : ''}</span>}
+                        : <span className="muted" style={{ fontSize: 12 }}>{scanJobResultText(j.result)}</span>}
                   </td>
                   <td className="muted" style={{ fontSize: 11.5 }}>{ago(j.doneAt || j.takenAt || j.createdAt)}</td>
                   <td><button className="tab" style={{ padding: '3px 10px', fontSize: 12 }} title="이벤트 타임라인 + 멈춤 진단" onClick={() => setLogFor(j.reqId)}>로그</button></td>

@@ -42,11 +42,13 @@ export function getAssignedGpuGuest(agent) {
 }
 
 /** 관리자 저장: partial을 기존 배포 설정에 병합(로컬 저장과 동일 규칙). 반환 병합 결과. */
-export function setAssignedGpuGuest(agent, partial) {
+//   v2.612 RECENT2612-05: dropped(선택 배열)에 폐기한 비밀 필드를 담는다 — 계정이 바뀌어 저장 비밀번호를 승계하지 않은 것을
+//   라우트가 droppedSecrets 로 밝히게(로컬 PUT 과 같은 계약. 예전엔 버려져 화면이 '배포 저장됨' 만 말했다).
+export function setAssignedGpuGuest(agent, partial, dropped = []) {
   const a = cleanAgent(agent);
   if (!a) return null;
   const cur = byAgent[a] || {};
-  const next = mergeGpuGuestSettings(cur, partial || {});
+  const next = mergeGpuGuestSettings(cur, partial || {}, dropped);
   next._updatedAt = Date.now();
   byAgent[a] = next;
   persist();

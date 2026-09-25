@@ -103,6 +103,7 @@ export function parseWinPerf(text) {
   // v2.590 F9: 사용률은 방향별 max(수신, 송신) ÷ 링크 속도(전이중). 방향별 값이 없는 옛 형식(필드 3개)은 합계로 나누되
   // 그 사실을 `pctBasis:'total'` 로 밝힌다(최대 2배 과대일 수 있다).
   const nics = [];
+  let nicPctOutOfRange = 0;
   for (const row of arr(kv.NIC)) {
     const f = String(row).split('|').map((x) => x.trim());
     if (!f[0]) continue;
@@ -111,10 +112,16 @@ export function parseWinPerf(text) {
     const rx = num(f[3]); const tx = num(f[4]);
     const dir = rx != null && tx != null ? Math.max(rx, tx) : null;
     const basis = dir != null ? dir : bps;
+    /*
+     * v2.612(COL2612-01): 100% 를 넘는 값(카운터·대역폭 불일치)은 **null 로 비우고 개수를 밝힌다** — 예전 Math.min(100, …) 은
+     *   '포화' 라는 조용한 보정이었다(디스크 busy v2.605 COL2605-02 와 같은 규칙 — v2.578 D3).
+     */
+    let pct = (basis != null && bw != null && bw > 0) ? Math.round(((basis * 8) / bw) * 1000) / 10 : null;
+    if (pct != null && pct > 100) { pct = null; nicPctOutOfRange += 1; }
     nics.push({
       iface: f[0], bytesPerSec: bps,
       bitsPerSec: bw != null && bw > 0 ? bw : null,          // 0 은 '모른다' 다(카운터 기본값)
-      pct: (basis != null && bw != null && bw > 0) ? Math.min(100, Math.round(((basis * 8) / bw) * 1000) / 10) : null,
+      pct,
       pctBasis: dir != null ? 'direction' : 'total',
     });
   }
@@ -134,6 +141,7 @@ export function parseWinPerf(text) {
     osKind: 'windows',
     cpuPct, mem, disks, nics, hbas,
     busyOutOfRange,
+    nicPctOutOfRange,
     read, missing,
     hostname: String(kv.HOSTNAME || '').trim() || '',
     osName: String(kv.OS_NAME || '').trim() || '',

@@ -156,7 +156,7 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
         ...(bumpToAuto ? { collectMethod: 'auto' } : {}),
       });
       setMsg(deployAgent
-        ? `원격 엣지 [${deployAgent}]로 VM별 계정/IP 배포 저장됨 — 엣지가 다음 pull 주기에 가져가 적용합니다.`
+        ? `원격 엣지 [${deployAgent}]로 VM별 계정/IP 배포 저장됨 — 엣지가 다음 pull 주기에 가져가 적용합니다.` + (droppedSecretNote(saved) ? ` ${droppedSecretNote(saved)}` : '')
         : (bumpToAuto
           ? "VM별 계정 저장 완료 — 수집 방식이 'VMware Tools만'이라 SSH 수집이 안 되던 걸 'auto(자동 폴백)'로 바꿔 켰습니다. 다음 주기부터 SSH로 수집됩니다."
           : 'VM별 계정을 저장했습니다. (수집 방식이 SSH/auto인지 위 설정에서 확인하세요)') + (droppedSecretNote(saved) ? ` ${droppedSecretNote(saved)}` : ''));

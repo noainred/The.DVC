@@ -32,3 +32,24 @@ describe('droppedSecretText (WEB2607-03 · LEFT2607-07)', () => {
     expect(/[`*]/.test(t)).toBe(false);
   });
 });
+
+describe('WEB2612-05 iLO 비밀번호 라벨 · 서버 사유 우선', () => {
+  it('iloPassword 원문 키가 새지 않는다', () => {
+    const t = droppedSecretNote({ droppedSecrets: ['password', 'iloPassword'] });
+    expect(t).toMatch(/iLO 비밀번호/);
+    expect(t).not.toMatch(/iloPassword/);
+  });
+  it('일반 문구는 주소·포트·계정 한쪽 조건으로 단정하지 않는다', () => {
+    const t = droppedSecretNote({ droppedSecrets: ['password'] });
+    expect(t).not.toMatch(/접속처\(주소·포트·계정\)가/);
+    expect(t).toMatch(/대역·수행 엣지/);
+  });
+  it('서버 skipped[].reason 이 있으면 그 사유를 쓴다(폐기한 키에 해당하는 것만)', () => {
+    const t = droppedSecretNote({
+      droppedSecrets: ['iloPassword'],
+      skipped: [{ field: 'iloPassword', reason: '스캔 대역·수행 엣지·iLO 계정이 바뀌어 저장된 iLO 비밀번호를 폐기했습니다.' }, { field: 'other', reason: '무관' }],
+    });
+    expect(t).toMatch(/iLO 계정이 바뀌어/);
+    expect(t).not.toMatch(/무관/);
+  });
+});

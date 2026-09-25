@@ -312,7 +312,7 @@ export function IdracDetailModal({ server, onClose }) {
               {(inv.psus || []).length > 0 && (
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>전원공급장치(PSU) {inv.psus.length}</div>
-                  <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                  <STable className="data-table" minWidth={560} style={{ width: '100%', fontSize: 13 }}>
                     <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>모델</th><th style={{ textAlign: 'left' }}>용량/출력</th><th style={{ textAlign: 'left' }}>입력</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
                     <tbody>{inv.psus.map((p, i) => (
                       <tr key={i}><td>{p.name}</td><td className="muted">{p.model || '—'}</td>
@@ -344,7 +344,7 @@ export function IdracDetailModal({ server, onClose }) {
               {(inv.gpus || []).length > 0 && (
                 <div style={{ marginBottom: 14 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>GPU(iDRAC 인식) {inv.gpus.length}</div>
-                  <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                  <STable className="data-table" minWidth={420} style={{ width: '100%', fontSize: 13 }}>
                     <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>모델</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
                     <tbody>{inv.gpus.map((g, i) => (
                       <tr key={i}><td>{g.name}</td><td className="muted">{[g.manufacturer, g.model].filter(Boolean).join(' ') || '—'}</td>
@@ -454,7 +454,7 @@ export function IdracDetailModal({ server, onClose }) {
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 700, margin: '6px 0' }}>iDRAC 인식 GPU {gpuProbe.gpus.length}</div>
                 {gpuProbe.gpus.length === 0 ? <div className="muted" style={{ fontSize: 13 }}>iDRAC가 인식한 GPU가 없습니다(패스쓰루로 게스트에 직접 할당된 경우 안 보일 수 있음).</div> : (
-                  <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
+                  <STable className="data-table" minWidth={520} style={{ width: '100%', fontSize: 13 }}>
                     <thead><tr><th style={{ textAlign: 'left' }}>GPU</th><th style={{ textAlign: 'left' }}>사용률</th><th style={{ textAlign: 'left' }}>온도</th><th style={{ textAlign: 'left' }}>전력</th><th style={{ textAlign: 'left' }}>상태</th></tr></thead>
                     <tbody>{gpuProbe.gpus.map((g, i) => (
                       <tr key={i}>

@@ -32,6 +32,8 @@ import { fullScopeOnlyWith } from '../admin/shared.js';
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
 // v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
+// v2.612 AUTHZ2612-01·02: PDU 장비 등록·삭제·내보내기·수집·주기/임계 설정도 전 법인 공용이라 adminOnly 에 이 게이트를 함께 건다
+//   (조회만 막혀 있어 범위 제한 admin 이 다른 법인 장비를 내보내고 지울 수 있었다).
 const fullScopeOnly = fullScopeOnlyWith('PDU 정보는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 
 /** 중앙 직접 수집분 + 엣지 push 분을 합친다(같은 id 는 최신 것 우선). */
@@ -104,7 +106,7 @@ export function registerPdu(api) {
     });
   });
 
-  api.post('/tools/pdu/thresholds', adminOnly, (req, res) => {
+  api.post('/tools/pdu/thresholds', adminOnly, fullScopeOnly, (req, res) => {
     const next = saveThresholds(req.body || {});
     logAudit({ user: req.user?.username, action: 'PDU 임계치 변경', target: JSON.stringify(next) });
     res.json({ ok: true, thresholds: next });
@@ -155,7 +157,7 @@ export function registerPdu(api) {
 
   // ---- 등록/수정/삭제 -------------------------------------------------------
   // ⚠ 정적 경로를 파라미터 경로보다 먼저 등록한다(/tools/pdu/csv 가 :id 로 잡히지 않게).
-  api.get('/tools/pdu/csv/export', adminOnly, (req, res) => {
+  api.get('/tools/pdu/csv/export', adminOnly, fullScopeOnly, (req, res) => {
     const withPw = String(req.query.passwords || '') === '1';
     /*
      * ⚠ **소유자 게이트를 조건부로 두지 말 것**(v2.535 감사에서 고친 것):
@@ -181,13 +183,13 @@ export function registerPdu(api) {
     res.send(devicesToCsv(devices, dcName, { includePasswords: withPw }));
   }
 
-  api.get('/tools/pdu/csv/sample', adminOnly, (_req, res) => {
+  api.get('/tools/pdu/csv/sample', adminOnly, fullScopeOnly, (_req, res) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="pdu-devices-sample.csv"');
     res.send(sampleCsv());
   });
 
-  api.post('/tools/pdu/csv/import', adminOnly, (req, res) => {
+  api.post('/tools/pdu/csv/import', adminOnly, fullScopeOnly, (req, res) => {
     const text = String(req.body?.csv || '');
     if (!text.trim()) return res.status(400).json({ ok: false, reason: 'CSV 내용이 비어 있습니다.' });
     const dcs = listDatacenters();
@@ -211,7 +213,7 @@ export function registerPdu(api) {
     res.json({ ok: true, added, updated, failed, total: rows.length });
   });
 
-  api.post('/tools/pdu/test', adminOnly, async (req, res) => {
+  api.post('/tools/pdu/test', adminOnly, fullScopeOnly, async (req, res) => {
     const b = req.body || {};
     const issue = deviceInputIssue(b);
     if (issue) return res.status(400).json({ ok: false, reason: issue });
@@ -228,19 +230,19 @@ export function registerPdu(api) {
     res.json(r);
   });
 
-  api.post('/tools/pdu/intervals', adminOnly, (req, res) => {
+  api.post('/tools/pdu/intervals', adminOnly, fullScopeOnly, (req, res) => {
     const next = saveIntervals(req.body || {});
     logAudit({ user: req.user?.username, action: 'PDU 수집 주기 변경', target: JSON.stringify(next) });
     res.json({ ok: true, intervals: runtimeIntervals(), saved: next, forEdge: intervalsForEdge() });
   });
 
-  api.post('/tools/pdu/devices', adminOnly, (req, res) => {
+  api.post('/tools/pdu/devices', adminOnly, fullScopeOnly, (req, res) => {
     const r = saveDevice(req.body || {});
     if (r.ok) logAudit({ user: req.user?.username, action: 'PDU 등록/수정', target: `${r.device.name}(${r.device.host})`, detail: r.device.agent ? `엣지 ${r.device.agent}` : '중앙 직접' });
     res.status(r.ok ? 200 : 400).json(r);
   });
 
-  api.delete('/tools/pdu/devices/:id', adminOnly, (req, res) => {
+  api.delete('/tools/pdu/devices/:id', adminOnly, fullScopeOnly, (req, res) => {
     const r = deleteDevice(req.params.id);
     if (r.ok) logAudit({ user: req.user?.username, action: 'PDU 삭제', target: req.params.id });
     res.status(r.ok ? 200 : 404).json(r);
@@ -250,7 +252,7 @@ export function registerPdu(api) {
    * 지금 수집 — 중앙 직접 수집 장비는 즉시, 엣지 위임 장비는 **재수집 요청 등록**
    * (중앙은 엣지에 명령을 밀어넣을 수 없어, 엣지가 다음 config pull 때 가져가 즉시 수집·push).
    */
-  api.post('/tools/pdu/devices/:id/collect', adminOnly, async (req, res) => {
+  api.post('/tools/pdu/devices/:id/collect', adminOnly, fullScopeOnly, async (req, res) => {
     const dev = listDevices().find((d) => d.id === req.params.id);
     if (!dev) return res.status(404).json({ ok: false, reason: '없는 장비입니다.' });
     if ((dev.agent || '').trim()) {
@@ -267,7 +269,7 @@ export function registerPdu(api) {
     res.status(r.ok ? 200 : 502).json(r);
   });
 
-  api.post('/tools/pdu/collect-all', adminOnly, async (req, res) => {
+  api.post('/tools/pdu/collect-all', adminOnly, fullScopeOnly, async (req, res) => {
     const r = await pollOnce({ manual: true }); // v2.590: 수동 실행은 인증 실패 정지 장비도 1회 시도한다
     logAudit({ user: req.user?.username, action: 'PDU 전체 수집', target: `${r.devices ?? 0}대` });
     res.json(r);

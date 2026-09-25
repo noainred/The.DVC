@@ -118,7 +118,7 @@ test('BGP — 요약, prefix 를 아무도 모르면 합계 null', () => {
     '10.0.0.1': { value: { bgpPeerState: 'Established', bgpPeerAs: 65001, bgpPeerPrefixesReceived: 120 } },
     '10.0.0.2': { value: { bgpPeerState: 'Active', bgpPeerAs: 65002 } } } }] });
   const r = P.parseBgp(body);
-  assert.deepEqual(r.summary, { peers: 2, established: 1, down: 1, prefixes: 120 });
+  assert.deepEqual(r.summary, { peers: 2, established: 1, down: 1, prefixes: 120, prefixesUnknown: 1 }); // v2.612 COL2612-04: 모르는 피어 수
   assert.equal(P.bgpSummary([{ state: 'Established', prefixes: null }]).prefixes, null);
 });
 

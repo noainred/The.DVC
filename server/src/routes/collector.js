@@ -16,6 +16,7 @@ import { setLocalPassword } from '../auth/auth.js';
 import { logAudit } from '../audit.js';
 import { runLocalIdracScan } from '../idrac/localScan.js';
 import { collectMany as bmstorCollectMany } from '../bmstor/collect.js';
+import { tryAcquireScan, releaseScan } from '../idrac/scanPoller.js'; // v2.612 EDGE2612-01: 스캔 잠금 공유
 import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { getCollectorDenyStats, _resetCollectorDenyStats, logCollectorDeny } from '../collector/denyLog.js'; // v2.579
@@ -177,6 +178,10 @@ collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req
   if (!ips || (!dellOk && !ilo)) {
     return res.status(400).json({ ok: false, reason: 'ips 와 계정(iDRAC username/password 또는 iLO 계정)이 필요합니다.' });
   }
+  // v2.612 EDGE2612-01: 한 번에 하나 — 중앙의 재전송·연타, 폴링 워커, 이 엣지의 주기 스캔과 **같은 잠금**을 쓴다.
+  //   겹치면 같은 대역에 같은 계정으로 로그인이 두 벌 나가고 등록도 두 번 돈다. 진행 중이면 409 busy(중앙이 '이미 수행 중' 으로 말한다).
+  const lock = tryAcquireScan('push');
+  if (!lock.ok) return res.status(409).json({ ok: false, busy: true, reason: lock.reason });
   try {
     const r = await runLocalIdracScan({
       ips, username: dellOk ? username : '', password: dellOk ? password : '', ilo,
@@ -189,9 +194,10 @@ collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req
     res.json({ ok: true, ...r });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
-  }
+  } finally { releaseScan(); }
 });
 
+let bmstorPushRunning = false; // v2.612 EDGE2612-01: /bmstor-collect 단일 비행
 // 베어메탈 스토리지 위임 수집(v2.340) — 중앙이 엣지에 서버 목록(SSH 자격증명+마운트)을 보내면
 // 엣지가 현지에서 df 수집 후 동기 반환한다(idrac-scan PUSH 와 같은 토큰 게이트/흐름).
 // 자격증명은 저장하지 않고 이 요청 처리에만 사용, 응답·로그에 비밀번호를 남기지 않는다.
@@ -201,13 +207,16 @@ collectorRouter.post('/bmstor-collect', express.json({ limit: '512kb' }), async 
   const servers = Array.isArray(req.body?.servers) ? req.body.servers : [];
   if (!servers.length) return res.status(400).json({ ok: false, reason: 'servers 배열이 필요합니다.' });
   if (servers.length > 200) return res.status(400).json({ ok: false, reason: '한 번에 최대 200대까지입니다.' });
+  // v2.612 EDGE2612-01: 한 번에 하나 — 중앙이 시한 뒤 다시 보낸 요청이 앞 수집과 겹쳐 같은 서버에 SSH 세션을 두 벌 열지 않게.
+  if (bmstorPushRunning) return res.status(409).json({ ok: false, busy: true, reason: '이전 위임 수집이 아직 진행 중입니다 — 끝난 뒤 다시 시도하세요.' });
+  bmstorPushRunning = true;
   try {
     const results = await bmstorCollectMany(servers);
     logAudit({ user: 'central-portal', action: '중앙 PUSH 베어메탈 스토리지 수집', detail: `서버 ${servers.length} · 성공 ${results.filter((r) => r.ok).length}`, ip: req.ip || '' });
     res.json({ ok: true, results });
   } catch (e) {
     res.status(500).json({ ok: false, reason: e.message });
-  }
+  } finally { bmstorPushRunning = false; }
 });
 
 // Receive an upgrade bundle pushed by the central portal and self-install.

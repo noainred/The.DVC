@@ -24,7 +24,10 @@ import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysi
 import { listGuestScans, saveGuestScan, removeGuestScan, runGuestScanNow } from '../../security/guestScanScheduler.js';
 import { analyzeNetIssues } from '../../security/netIssueStore.js';
 import path from 'node:path';
-import { adminOnly, requireSettingsOwner } from './shared.js';
+import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+
+// v2.612 AUTHZ2612-07: 엣지 목록·네트워크 모니터·캡처·로그인 실패 상태는 전 법인 공용 — 범위 제한 admin 은 403.
+const fleetOnly = fullScopeOnlyWith('엣지 네트워크 진단·로그인 실패 상태는 전 법인에 걸친 데이터라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
 /*
  * v2.607 AUTHZ2607-02·06 — 게스트 명령·게스트 조사·로그 분석은 vCenter 축이 있다. 예전에는 adminOnly 뿐이라 범위 제한
@@ -118,14 +121,14 @@ adminRouter.post('/vclogs/collect', adminOnly, async (req, res) => {
 
 // ───────────────────────── 네트워크 트래픽 분석 ─────────────────────────
 // 위임 캡처용 에이전트 목록(엣지가 사설망 서버를 대신 캡처).
-adminRouter.get('/net/agents', adminOnly, (_req, res) => {
+adminRouter.get('/net/agents', adminOnly, fleetOnly, (_req, res) => {
   const agents = new Set([...Object.keys(getAllAgentConfigs() || {}), ...listInventory().map((x) => x.agent).filter(Boolean), ...getAllGpuGuestDiag().map((x) => x.agent).filter(Boolean)]);
   res.json({ agents: [...agents] });
 });
 
 // 두 서버 간 tcpdump 캡처/분석(관리자 전용, SSH+root). 단일/동시(dual) + 중앙직접/에이전트위임.
 // Body: { via:'central'|'agent', agent?, dual?, hostA:{...}, hostB?:{...}, peer?, iface, seconds, maxPackets, useSudo }
-adminRouter.post('/net/capture', adminOnly, async (req, res) => {
+adminRouter.post('/net/capture', adminOnly, fleetOnly, async (req, res) => {
   const b = req.body || {};
   const dual = !!b.dual;
   if (!b.hostA?.host || !b.hostA?.username) return res.status(400).json({ ok: false, reason: 'A 서버 SSH 접속정보(host/username)가 필요합니다.' });
@@ -150,13 +153,13 @@ adminRouter.post('/net/capture', adminOnly, async (req, res) => {
 });
 
 // 위임 캡처 결과 폴링.
-adminRouter.get('/net/capture', adminOnly, (req, res) => {
+adminRouter.get('/net/capture', adminOnly, fleetOnly, (req, res) => {
   if (!req.query.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   res.json(getCaptureResult(String(req.query.reqId)));
 });
 
 // pcap 파일 캡처 + 다운로드(중앙 직접). tshark 심층 분석용.
-adminRouter.post('/net/pcap', adminOnly, async (req, res) => {
+adminRouter.post('/net/pcap', adminOnly, fleetOnly, async (req, res) => {
   const b = req.body || {};
   if (!b.hostA?.host || !b.hostA?.username || !b.peer) return res.status(400).json({ ok: false, reason: 'A 접속정보·대상 B IP가 필요합니다.' });
   try {
@@ -167,15 +170,15 @@ adminRouter.post('/net/pcap', adminOnly, async (req, res) => {
 });
 
 // 캡처 이력
-adminRouter.get('/net/history', adminOnly, (req, res) => res.json({ captures: listCaptures({ limit: Math.max(1, Math.min(1000, Number(req.query.limit) || 100)) }) })); // v2.480: limit 상한
-adminRouter.get('/net/history/:id', adminOnly, (req, res) => { const c = getCapture(req.params.id); return c ? res.json(c) : res.status(404).json({ ok: false }); });
-adminRouter.delete('/net/history/:id', adminOnly, (req, res) => res.json({ ok: deleteCapture(req.params.id) }));
+adminRouter.get('/net/history', adminOnly, fleetOnly, (req, res) => res.json({ captures: listCaptures({ limit: Math.max(1, Math.min(1000, Number(req.query.limit) || 100)) }) })); // v2.480: limit 상한
+adminRouter.get('/net/history/:id', adminOnly, fleetOnly, (req, res) => { const c = getCapture(req.params.id); return c ? res.json(c) : res.status(404).json({ ok: false }); });
+adminRouter.delete('/net/history/:id', adminOnly, fleetOnly, (req, res) => res.json({ ok: deleteCapture(req.params.id) }));
 
 // 연속 모니터링
-adminRouter.get('/net/monitors', adminOnly, (_req, res) => res.json({ monitors: listMonitors() }));
-adminRouter.put('/net/monitors', adminOnly, (req, res) => res.json(saveMonitor(req.body || {})));
-adminRouter.delete('/net/monitors/:id', adminOnly, (req, res) => res.json({ ok: removeMonitor(req.params.id) }));
-adminRouter.post('/net/monitors/:id/run', adminOnly, async (req, res) => { try { res.json(await runMonitorNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
+adminRouter.get('/net/monitors', adminOnly, fleetOnly, (_req, res) => res.json({ monitors: listMonitors() }));
+adminRouter.put('/net/monitors', adminOnly, fleetOnly, (req, res) => res.json(saveMonitor(req.body || {})));
+adminRouter.delete('/net/monitors/:id', adminOnly, fleetOnly, (req, res) => res.json({ ok: removeMonitor(req.params.id) }));
+adminRouter.post('/net/monitors/:id/run', adminOnly, fleetOnly, async (req, res) => { try { res.json(await runMonitorNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 // 로그 자체 분석(장애/이슈 탐지).
 adminRouter.get('/net/log-issues', adminOnly, async (req, res) => {
   const vcenterId = scopedVcQuery(req, res); if (vcenterId === undefined) return;   // v2.607 AUTHZ2607-06
@@ -225,7 +228,7 @@ adminRouter.get('/security/login-fails', adminOnly, async (req, res) => {
   try { res.json(await analyzeLoginFails({ vcenterId: req.query.vcenterId || '', days: Number(req.query.days) || loadLoginMonitor().days, threshold: Number(req.query.threshold) || loadLoginMonitor().threshold, windowMin: Number(req.query.windowMin) || loadLoginMonitor().windowMin })); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-adminRouter.get('/security/login-fails/status', adminOnly, (_req, res) => res.json(loginMonitorStatus()));
+adminRouter.get('/security/login-fails/status', adminOnly, fleetOnly, (_req, res) => res.json(loginMonitorStatus()));
 adminRouter.put('/security/login-fails/settings', adminOnly, (req, res) => (scopedVcenterIds(req.user, store.get()) ? res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '로그인 실패 감시 설정은 전 법인 공용이라 전체 범위 계정만 바꿀 수 있습니다.' }) : res.json(saveLoginMonitor(req.body || {}))));
 adminRouter.post('/security/login-fails/run', adminOnly, async (req, res) => { if (denyScopedRun(req, res, '로그인 실패 수동 분석')) return; try { await runLoginAnalysisNow(); res.json({ ok: true, ...loginMonitorStatus() }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 

@@ -270,6 +270,8 @@ export function tryAcquireScan(kind = 'adhoc') {
   return { ok: true };
 }
 export function releaseScan() { running = false; runningKind = null; stopRequested = false; }
+/** v2.612 EDGE2612-01: 잠그지 않고 진행 여부만 본다(폴링 워커가 잡을 인출하기 전에 — 진행 중이면 인출하지 않아 잡이 대기열에 남는다). */
+export function scanLockBusy() { return running ? { busy: true, by: runningKind, reason: scanBusyReason(runningKind) } : null; }
 
 /** 비동기 시작(요청 즉시 반환, 창 닫아도 백그라운드 지속). */
 export function startIdracScanNow(opts = {}) {

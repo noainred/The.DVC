@@ -466,3 +466,11 @@ describe("v2.603 EDGE2603-05 — 중앙 설정으로 끈 엣지('off')", () => {
     expect(e.kind).toBe('edges-not-fresh');
   });
 });
+
+describe('v2.612 LEFT2612-04 eventText — 키 이전은 복구가 아니다', () => {
+  it('key-migrated 는 해소(정상으로 복귀)로 말하지 않는다', () => {
+    const t = eventText({ event: 'close', closeReason: 'key-migrated', prevState: 'fault' });
+    expect(t).toContain('식별 키 변경');
+    expect(t).not.toContain('정상으로 복귀');
+  });
+});

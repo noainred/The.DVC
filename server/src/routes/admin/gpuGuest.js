@@ -164,8 +164,9 @@ adminRouter.get('/gpu-guest/deploy/:agent', adminOnly, (req, res) => {
 adminRouter.put('/gpu-guest/deploy/:agent', adminOnly, fleetOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent 필요' });
-  setAssignedGpuGuest(agent, req.body || {});
-  res.json({ ok: true, ...redactAssignedGpuGuest(agent) });
+  const droppedSecrets = [];   // v2.612 RECENT2612-05: 로컬 PUT 과 같이 폐기한 비밀을 밝힌다
+  setAssignedGpuGuest(agent, req.body || {}, droppedSecrets);
+  res.json({ ok: true, ...redactAssignedGpuGuest(agent), ...(droppedSecrets.length ? { droppedSecrets: [...new Set(droppedSecrets)] } : {}) });
 });
 
 // ── 중앙→엣지 배포 사용자 관리 ──────────────────────────────────────────────────

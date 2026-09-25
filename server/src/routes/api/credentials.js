@@ -18,8 +18,11 @@ import { enqueueJob, listRmaAgents } from '../../rma/jobs.js';
 import { buildCommand } from '../../rma/commands.js';
 import { signJob } from '../../rma/signing.js';
 import { rmaPasswordFor } from '../../rma/agentSecrets.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
 
 const adminOnly = requireRole('admin');
+// v2.612 AUTHZ2612-06: 통합 계정은 엣지·호스트 단위라 법인 축이 없다 — 범위 제한 admin 도 403.
+const fullScopeOnly = fullScopeOnlyWith('통합 계정 관리는 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
 /** 재인증 게이트 — 로컬 OTP 계정: OTP 코드 검증(403 + needEnroll), 그 외: 설정 소유자만. */
 function reauth(req, res, next) {
@@ -39,17 +42,17 @@ function reauth(req, res, next) {
 
 export function registerCredentials(api) {
 
-api.get('/tools/credentials', adminOnly, (_req, res) => {
+api.get('/tools/credentials', adminOnly, fullScopeOnly, (_req, res) => {
   res.json({ ok: true, items: listCredentials(), kinds: KINDS, agents: knownAgentNames(), rmaAgents: listRmaAgents().map((g) => ({ agent: g.agent, online: g.onlineCount > 0, allowSsh: (g.instances || []).some((i) => i.policy?.allowSsh) })) });
 });
 
 /** 개인키 사전 검증(저장 전) — 지문만 돌려주고 키는 저장하지 않는다. */
-api.post('/tools/credentials/inspect-key', adminOnly, (req, res) => {
+api.post('/tools/credentials/inspect-key', adminOnly, fullScopeOnly, (req, res) => {
   const r = inspectPrivateKey(req.body?.privateKey || '', req.body?.passphrase || '');
   res.json(r.ok ? { ok: true, type: r.type, fingerprint: r.fingerprint, comment: r.comment } : { ok: false, reason: r.reason });
 });
 
-api.post('/tools/credentials', adminOnly, reauth, (req, res) => {
+api.post('/tools/credentials', adminOnly, fullScopeOnly, reauth, (req, res) => {
   try {
     const { otp, ...input } = req.body || {};
     void otp;
@@ -59,7 +62,7 @@ api.post('/tools/credentials', adminOnly, reauth, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
-api.put('/tools/credentials/:id', adminOnly, reauth, (req, res) => {
+api.put('/tools/credentials/:id', adminOnly, fullScopeOnly, reauth, (req, res) => {
   try {
     const { otp, ...input } = req.body || {};
     void otp;
@@ -69,7 +72,7 @@ api.put('/tools/credentials/:id', adminOnly, reauth, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
 });
 
-api.delete('/tools/credentials/:id', adminOnly, reauth, (req, res) => {
+api.delete('/tools/credentials/:id', adminOnly, fullScopeOnly, reauth, (req, res) => {
   const gone = deleteCredential(String(req.params.id));
   if (!gone) return res.status(404).json({ ok: false, reason: '계정을 찾을 수 없습니다.' });
   logAudit({ user: req.user?.username, action: '통합 계정 삭제', target: gone.name, detail: `${gone.kind}/${gone.username}`, ip: req.ip });
@@ -77,7 +80,7 @@ api.delete('/tools/credentials/:id', adminOnly, reauth, (req, res) => {
 });
 
 /** 연결 테스트 — Body { agent, host, port?, instance? } → RMA ssh-exec 'true' 잡 등록 → { reqId } (결과는 /tools/rma/jobs/:reqId). */
-api.post('/tools/credentials/:id/test', adminOnly, (req, res) => {
+api.post('/tools/credentials/:id/test', adminOnly, fullScopeOnly, (req, res) => {
   const id = String(req.params.id);
   const cv = getCredentialView(id);
   if (!cv) return res.status(404).json({ ok: false, reason: '계정을 찾을 수 없습니다.' });

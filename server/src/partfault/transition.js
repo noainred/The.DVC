@@ -78,12 +78,42 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
     if ((RANK[p.state] || 0) > (RANK[prev.state] || 0)) byKey.set(k, p);
   }
 
+  /*
+   * v2.612 LEFT2612-04: **장비 키가 바뀐 같은 부품**(v2.611 HPE 서비스태그 교정 — SKU → SerialNumber). 파트 키에 장비 키가
+   *   들어 있어 교정 뒤 같은 부품이 새 키로 다시 열리고(알림 한 번 더) 옛 키 행은 `missing` 으로 영원히 남았다.
+   *   같은 (agent, 장비 id, 장비군, 종류, 파트 id) 에 **이번에 관측되지 않은 옛 키**의 열린 장애가 있으면 그 장애를 새 키로
+   *   옮긴다 — 옛 행은 `key-migrated` 로 닫고(복구가 아니다) 새 행은 처음 본 시각을 이어받으며 알림을 다시 보내지 않는다.
+   *   장비 수집이 실패로 표시된 주기에는 하지 않는다(규칙 ①). 새 키가 ok 면 옛 장애는 그대로 '복구(ok)' 로 닫는다(사실이다).
+   */
+  const slotOf = (p) => `${t(p.agent)}|${t(p.deviceId)}|${t(p.scope)}|${t(p.kind)}|${t(p.partId)}`;
+  const openBySlot = new Map();
+  for (const o of open) {
+    if (!o?.partKey || byKey.has(okey(o))) continue;   // 이번에 옛 키도 관측됐으면 이관이 아니다
+    const sk = slotOf(o);
+    if (!t(o.partId)) continue;                        // 파트 id 가 없으면 같은 부품이라 단정할 수 없다
+    if (!openBySlot.has(sk)) openBySlot.set(sk, o);
+  }
+  const migrated = new Set();
+  const migrateFrom = (p) => {
+    if (deviceOk[dkey(p)] === false) return null;
+    const o = openBySlot.get(slotOf(p));
+    if (!o || migrated.has(okey(o)) || okey(o) === okey(p)) return null;
+    migrated.add(okey(o));
+    return o;
+  };
+
   for (const p of byKey.values()) {
     const k = okey(p);
     seen.add(k);
     const prev = openBy.get(k);
 
     if (isBad(p.state)) {
+      const old = !prev ? migrateFrom(p) : null;
+      if (old) {
+        closed.push({ ...old, closedAt: now, closeReason: 'key-migrated', migratedTo: p.partKey });
+        opened.push({ ...p, firstSeenAt: old.firstSeenAt || now, lastSeenAt: now, migratedFrom: old.partKey, prevState: old.state });
+        continue;
+      }
       if (!prev) {
         opened.push({ ...p, firstSeenAt: now, lastSeenAt: now });
       } else if (prev.state !== p.state) {
@@ -101,6 +131,12 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
       continue;
     }
 
+    // v2.612 LEFT2612-04: 새 키로 ok/absent 가 보이고 옛 키 장애가 열려 있으면 그 장애가 해소된 것이다(옛 키로 닫는다).
+    const oldOk = !prev ? migrateFrom(p) : null;
+    if (oldOk) {
+      closed.push({ ...oldOk, closedAt: now, closeReason: p.state === PART_STATE.absent ? 'removed' : 'ok', closeRawState: p.rawState, migratedTo: p.partKey });
+      continue;
+    }
     // ok / absent — 열려 있던 것만 닫는다.
     if (prev) {
       // ① 의 방어선(v2.548 리뷰 C2): 그 장비의 이번 수집이 실패로 표시됐는데 ok 관측이 섞여 오면
@@ -117,7 +153,7 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
 
   // ④ 관측 목록에 없던 열린 장애 — 닫지 않는다. 사유를 나눠 적는다(조치가 다르다).
   for (const [k, o] of openBy) {
-    if (seen.has(k)) continue;
+    if (seen.has(k) || migrated.has(k)) continue;
     const dk = dkey(o);
     const dOk = deviceOk[dk];
     const kf = Array.isArray(kindFailed[dk]) && kindFailed[dk].includes(o.kind);
@@ -137,6 +173,7 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
       observed: observed.length,
       opened: opened.length,
       closed: closed.length,
+      keyMigrated: closed.filter((c) => c.closeReason === 'key-migrated').length,
       changed: updated.filter((u) => !u.sameState).length,
       heldUnknown: held.filter((h) => h.holdReason === HOLD_REASON.unknown).length,
       heldMissing: held.filter((h) => h.holdReason === HOLD_REASON.missing).length,

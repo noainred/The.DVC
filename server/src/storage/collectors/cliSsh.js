@@ -386,13 +386,16 @@ export function toBytes(v) {
   //   앞에 붙은 **정수 바이트가 있으면 그것이 가장 정확하므로 우선한다**(괄호 안은 반올림 표기다).
   const paren = /^(\d+)\s*\(/.exec(s);
   if (paren) return Number(paren[1]);
+  // v2.612(COL2612-06): 지수 표기(`1.2e+12`)는 바이트 수다 — 아래 단위 정규식이 `e` 를 엑사로 읽어 1.38e18 이 됐다.
+  if (/^\d{1,30}(?:\.\d{0,30})?[eE][+-]?\d{1,3}$/.test(s)) { const x = Number(s); return Number.isFinite(x) && x >= 0 ? x : 0; }
 
   const m = /^([\d.]+)\s*([kKmMgGtTpPeE])?(?:i?[bB])?$/.exec(s);
   if (!m) {
     // `11.0T (12094627905536)` 처럼 순서가 뒤바뀐 표기, 또는 `Size: 11.0T` 같은 접두가 붙은 값.
     // ⚠ v2.600(감사 SEC2600-02 — 재현 60,000자 셀 7,979ms): 앵커 없는 `([\d.]+)\s*` 는 단위 없는 긴 숫자열에서
     //   시작 위치마다 끝까지 다시 훑어 O(n²) 였다. 숫자·공백 길이에 상한을 둬 시작 위치당 작업을 상수로 묶는다.
-    const any = /((?:\d{1,30}(?:\.\d{0,12})?|\.\d{1,12}))\s{0,8}([kKmMgGtTpPeE])(?:i?[bB])?/.exec(s);
+    // v2.612(COL2612-06): 단위 글자 뒤에 **글자가 이어지면 단위가 아니다**(`3 tiers` → 테라, `7 entries` → 엑사로 읽었다).
+    const any = /((?:\d{1,30}(?:\.\d{0,12})?|\.\d{1,12}))\s{0,8}([kKmMgGtTpPeE])(?:i?[bB])?(?![A-Za-z])/.exec(s);
     if (!any) {
       const plain = /^(\d+)$/.exec(s);
       return plain ? Number(plain[1]) : 0;

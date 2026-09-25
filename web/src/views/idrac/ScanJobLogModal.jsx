@@ -5,6 +5,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
+import { scanJobResultText } from './scanRunText.js'; // v2.612 WEB2612-06
 
 // ---- 스캔 잡 세부 로그창 ------------------------------------------------------
 // '스캔 현황' 행의 [로그]를 누르면 열림. 잡의 이벤트 타임라인(생성→인출→진행→완료/오류) +
@@ -96,6 +97,10 @@ export function ScanJobLogModal({ reqId, dcName, onClose }) {
             </STable>
           </div>
           {d.result?.error && <div style={{ marginTop: 8, fontSize: 12.5, color: '#f87171', lineHeight: 1.6 }}>오류: <BoldText text={d.result.error} /></div>}
+          {/* v2.612 WEB2612-06: 결과 요약(HPE 대수·계정 없어 시도 안 함·미지원) — 스캔 대역 '최근 결과' 와 같은 판정 */}
+          {d.result && !d.result.error && (
+            <div style={{ marginTop: 8, fontSize: 12.5, lineHeight: 1.6 }}>결과: {scanJobResultText(d.result)}</div>
+          )}
           {d.result?.authFailed > 0 && (
             <div style={{ marginTop: 8, fontSize: 12.5, color: '#fbbf24' }}>
               ⚠ 인증실패 {d.result.authFailed}건{d.result.authFailReason ? ` — ${d.result.authFailReason}` : ''}

@@ -170,3 +170,23 @@ export function scanFormCredsState(f) {
     warnNoPassword: !dellReady && !iloReady,
   };
 }
+
+/**
+ * v2.612(감사 WEB2612-06): 스캔 **잡** 결과(`j.result`) → 한 줄 문구(순수). 예전 잡 표는 `발견 · 등록 · 스캔` 만 보여
+ *   v2.610 요청('스캔하면 HPE 서버가 몇 대인지 리스트에')이 스캔 대역 '최근 결과' 에서만 충족됐다. 같은 판정(describeScanRun·
+ *   hpeInfo)을 재사용한다 — 잡 결과의 발견 수 키는 `foundCount` 다. 미지원(비-Dell·HPE 외) 장비 수도 덧붙인다.
+ * @returns {string}
+ */
+export function scanJobResultText(res) {
+  if (!res || typeof res !== 'object') return '—';
+  const d = describeScanRun({ ...res, error: null, found: res.foundCount ?? res.found?.length ?? 0 });
+  const extra = [];
+  const hpeN = hpeInfo(res)?.n || 0;
+  // 미지원 목록에는 HPE 도 섞여 온다 — HPE 로 이미 센 몫은 빼고 말한다(두 번 세지 않게).
+  const unsup = Number(res.unsupportedCount) || 0;
+  const hpeInUnsup = Array.isArray(res.unsupported) ? res.unsupported.filter((x) => x && x.vendor === 'hpe').length : 0;
+  const other = Math.max(0, unsup - hpeInUnsup);
+  if (other > 0 && hpeN === 0 && hpeInUnsup === 0) extra.push(`미지원 장비 ${unsup}`);
+  else if (other > 0) extra.push(`기타 미지원 ${other}`);
+  return extra.length ? `${d.text} · ${extra.join(' · ')}` : d.text;
+}

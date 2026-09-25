@@ -174,10 +174,11 @@ function Capture() {
   const [via, setVia] = useState('central');  // 'central' | 'agent'
   const [agent, setAgent] = useState('');
   const [agents, setAgents] = useState([]);
+  const [agentsErr, setAgentsErr] = useState(null); // v2.612 — 목록 조회 실패(범위 제한 계정 403 포함)를 '에이전트 없음' 으로 보이지 않게
   const [res, setRes] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  useEffect(() => { fetchJson('/admin/net/agents').then((d) => setAgents(d.agents || [])).catch(() => {}); }, []);
+  useEffect(() => { fetchJson('/admin/net/agents').then((d) => { setAgents(d.agents || []); setAgentsErr(null); }).catch((e) => setAgentsErr(e?.message || String(e))); }, []);
 
   const run = async () => {
     setBusy(true); setErr(null); setRes(null);
@@ -230,6 +231,7 @@ function Capture() {
             <option value="agent">엣지 에이전트 위임</option>
           </select>
           {via === 'agent' && <select className="select" value={agent} onChange={(e) => setAgent(e.target.value)}><option value="">에이전트 선택</option>{agents.map((a) => <option key={a} value={a}>{a}</option>)}</select>}
+          {via === 'agent' && agentsErr && <ErrorBox message={agentsErr} />}
         </div>
       </div>
       {/* A 서버 */}
