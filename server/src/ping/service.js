@@ -110,7 +110,8 @@ export async function seriesOf(id, { rangeMs = 6 * 3_600_000, points = 240 } = {
     ts: b.ts, avg: b.avg, min: b.min, max: b.max, loss: b.loss, n: b.n,
     status: b.loss >= 1 ? 'down' : classify(b.avg, b.avg != null, baseline),
   }));
-  const meta = db.meta(t.id);
+  // v2.612 LEFT2612-05: 건수(COUNT)는 대상 이력 전체를 훑는데 화면이 쓰지 않는다 — 첫/끝 시각만(구현이 없으면 예전 meta).
+  const meta = db.bounds ? db.bounds(t.id) : db.meta(t.id);
   // v2.575 BUG-16: rangeMs 를 함께 실어 화면이 '마지막 측정이 조회 기간 밖' 을 구분할 수 있게 한다.
   return { ok: true, target: { id: t.id, name: t.name, host: t.host, port: t.port, kind: t.kind, enabled: t.enabled }, baseline, baselineAuto: auto, bucketMs, rangeMs, series, source, meta };
 }

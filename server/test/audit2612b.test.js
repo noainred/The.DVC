@@ -160,12 +160,12 @@ test('RECENT2612-01 파트 경로가 전부 404 면 다음 주기에 파트를 �
   poller._resetForTest();
   settings.saveSettings({ enabled: true, intervalMs: 300_000 });
   const s = reg.saveServer({ name: 'CVP-404', host: `http://127.0.0.1:${port}`, authMode: 'token', token: 'T' });
-  await poller.pollCvpOnce({ manual: false, only: s.id });
+  await poller.pollCvpOnce({ manual: false, only: [s.id] });
   const first = hits.parts;
   assert.ok(first > 0, '첫 주기에는 파트를 시도한다');
   const st = store.getStatus(s.id);
   assert.equal(st.partsDueUnread, undefined, `시도는 했으므로 '예산 때문에 못 읽음' 이 아니다: ${JSON.stringify(st)}`);
-  await poller.pollCvpOnce({ manual: false, only: s.id });
+  await poller.pollCvpOnce({ manual: false, only: [s.id] });
   assert.equal(hits.parts, first, '두 번째 주기에는 파트를 다시 조회하지 않는다(조회 시각이 올라갔다)');
   reg.deleteServer?.(s.id);
 });

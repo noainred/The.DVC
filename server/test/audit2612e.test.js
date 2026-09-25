@@ -108,20 +108,21 @@ test('RECENT2612-05: 엣지 배포 GPU 게스트 PUT — 계정명만 바꾸면 
   assert.ok(Array.isArray(out.b.droppedSecrets) && out.b.droppedSecrets.length > 0, JSON.stringify(out.b));
 });
 
-test('LEFT2612-05: ping meta 는 MIN·MAX 를 따로 묻고 건수는 null(첫/끝 시각은 그대로)', () => {
+test('LEFT2612-05: ping 조회 응답의 meta 는 bounds(MIN·MAX 따로, 건수 null)이고 seriesOf 는 COUNT 를 돌리지 않는다', () => {
   const file = path.join(TMP, 'meta-ping.db');
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
     const { getPingDb } = await import(${url('ping/db.js')});
     const db = await getPingDb();
     db.insertMany([{ target: 't', ts: 1000, rtt: 1, ok: true }, { target: 't', ts: 5000, rtt: 2, ok: true }, { target: 'u', ts: 9000, rtt: 2, ok: true }]);
-    console.log('@@' + JSON.stringify([db.meta('t'), db.meta('zz')]));
+    console.log('@@' + JSON.stringify([db.bounds('t'), db.bounds('zz'), db.meta('t').count]));
   `], { encoding: 'utf8', env: { ...process.env, PING_DB_PATH: file } });
   assert.equal(r.status, 0, r.stderr);
-  const [m, none] = JSON.parse(r.stdout.split('\n').find((l) => l.startsWith('@@')).slice(2));
+  const [m, none, cnt] = JSON.parse(r.stdout.split('\n').find((l) => l.startsWith('@@')).slice(2));
   assert.deepEqual(m, { firstTs: 1000, lastTs: 5000, count: null });
   assert.deepEqual(none, { firstTs: null, lastTs: null, count: null });
-  const src = fs.readFileSync(path.join(SRC, 'ping/db.js'), 'utf8');
-  assert.doesNotMatch(src, /SELECT MIN\(ts\) mn, MAX\(ts\) mx, COUNT\(\*\)/, '세 aggregate 를 한 문장에 두지 않는다');
+  assert.equal(cnt, 2, '진단용 meta 는 건수를 그대로 준다');
+  const svc = fs.readFileSync(path.join(SRC, 'ping/service.js'), 'utf8').replace(/\/\/.*$/gm, '');
+  assert.match(svc, /const meta = db\.bounds \? db\.bounds\(t\.id\)/, 'seriesOf 가 bounds 를 쓴다');
 });
 
 test('DB2612-02: 시드 중 최상위 행이 지워진 뒤 적재된 행(rowid 재사용)을 시드가 다시 세지 않는다', async () => {

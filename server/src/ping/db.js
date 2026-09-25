@@ -118,8 +118,10 @@ function initSqlite() {
         AVG(CASE WHEN ok=1 THEN rtt END) avg, MIN(CASE WHEN ok=1 THEN rtt END) min, MAX(CASE WHEN ok=1 THEN rtt END) max,
         SUM(CASE WHEN ok=1 THEN 0 ELSE 1 END) fail, COUNT(*) n
       FROM samples WHERE target=? AND ts>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
-    // v2.612 LEFT2612-05: MIN·MAX·COUNT 를 한 문장에 두면 그 대상 파티션 전체를 훑는다(52만 행 약 40ms — v2.550.3 규칙).
-    //   aggregate 하나씩은 인덱스 끝만 본다. 건수는 화면이 쓰지 않아(web PingMonitor 가 meta 를 읽지 않는다) null 로 둔다.
+    // 진단·테스트용 건수 포함 meta — 파티션 전체를 훑는다(52만 행 약 40ms). 조회 응답 경로에서 쓰지 말 것.
+    const metaStmt = db.prepare('SELECT MIN(ts) mn, MAX(ts) mx, COUNT(*) n FROM samples WHERE target=?');
+    // v2.612 LEFT2612-05: 조회 응답(seriesOf)은 bounds 를 쓴다 — aggregate 하나씩은 인덱스 끝만 본다(0.0x ms, v2.550.3 규칙).
+    //   건수는 화면이 쓰지 않아(web PingMonitor 가 meta 를 읽지 않는다) 응답에서 null 이다.
     const metaMin = db.prepare('SELECT MIN(ts) mn FROM samples WHERE target=?');
     const metaMax = db.prepare('SELECT MAX(ts) mx FROM samples WHERE target=?');
     // v2.603(감사 DB2603-02 — 재현): 예전 `DELETE FROM samples WHERE ts < ?` 한 방은 보존일을 줄인 뒤 첫 정리에서
@@ -202,7 +204,8 @@ function initSqlite() {
       },
       rollupState: () => ({ ready: rollupReady }),
       _rollupSeed: () => rollupSeed,
-      meta: (target) => ({ firstTs: metaMin.get(target)?.mn ?? null, lastTs: metaMax.get(target)?.mx ?? null, count: null }),
+      meta: (target) => { const r = metaStmt.get(target); return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) }; },
+      bounds: (target) => ({ firstTs: metaMin.get(target)?.mn ?? null, lastTs: metaMax.get(target)?.mx ?? null, count: null }),
       prune,   // Promise<{deleted, done, chunks}> — 청크 사이에 양보한다
       dropTarget,   // (target, untilTs?) → Promise<{deleted, done, chunks}> — untilTs 를 주면 그 뒤 표본은 남긴다
     };
