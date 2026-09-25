@@ -71,8 +71,10 @@ async function openInner() {
         in_util_sum REAL NOT NULL DEFAULT 0, in_util_n INTEGER NOT NULL DEFAULT 0, in_util_max REAL,
         out_util_sum REAL NOT NULL DEFAULT 0, out_util_n INTEGER NOT NULL DEFAULT 0, out_util_max REAL,
         in_err_sum INTEGER, out_err_sum INTEGER,
+        in_err_n INTEGER NOT NULL DEFAULT 0, out_err_n INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (agent, cvp_id, device_key, port, day));
       CREATE INDEX IF NOT EXISTS idx_pd_day ON port_daily (day);`);
+    addDailyErrCountCols(conn);
     const maxOf = (col) => `NULLIF(MAX(IFNULL(port_daily.${col},-1e308), IFNULL(excluded.${col},-1e308)), -1e308)`;
     const st = {
       upDevice: conn.prepare(`INSERT INTO device_latest (agent,cvp_id,device_key,ts,hostname,model,serial,mgmt_ip,eos_version,streaming,telemetry,parts_json,parts_at,bgp_json,ports_read,extra_json)
@@ -81,7 +83,8 @@ async function openInner() {
           mgmt_ip=excluded.mgmt_ip, eos_version=excluded.eos_version, streaming=excluded.streaming, telemetry=excluded.telemetry,
           parts_json=CASE WHEN excluded.parts_at IS NULL THEN device_latest.parts_json ELSE excluded.parts_json END,
           parts_at=CASE WHEN excluded.parts_at IS NULL THEN device_latest.parts_at ELSE excluded.parts_at END,
-          bgp_json=excluded.bgp_json, ports_read=excluded.ports_read, extra_json=excluded.extra_json
+          bgp_json=excluded.bgp_json, ports_read=excluded.ports_read,
+          extra_json=CASE WHEN excluded.parts_at IS NULL THEN device_latest.extra_json ELSE excluded.extra_json END
         WHERE excluded.ts > device_latest.ts`),
       upPort: conn.prepare(`INSERT INTO port_latest (agent,cvp_id,device_key,port,ts,descr,speed_bps,oper,admin,vlan,lag,in_bps,out_bps,in_util,out_util,in_err,out_err,rate_ts)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -98,19 +101,22 @@ async function openInner() {
       // 원시 표본이 오면 그 포트의 마지막 처리량도 갱신한다(엣지는 구성이 바뀌지 않은 장비 레코드를 매번 보내지 않는다 — push.js).
       rateFromSample: conn.prepare(`UPDATE port_latest SET in_bps=?, out_bps=?, in_util=?, out_util=?, in_err=?, out_err=?, rate_ts=?
         WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND IFNULL(rate_ts,0) < ?`),
-      touchDevice: conn.prepare('UPDATE device_latest SET ts=? WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ?'),
+      // v2.611(EDGE2611-04): 행이 **있으면** 센다(ts 는 더 클 때만 오른다) — changes 가 '중앙에 그 장비 행이 있는가' 를 말해야
+      //   엣지가 없는 행을 touch 로만 보내는 것을 알아채고 레코드를 다시 보낸다(예전 `AND ts < ?` 는 같은 ts 재전송을 0 으로 셌다).
+      touchDevice: conn.prepare('UPDATE device_latest SET ts=MAX(ts, ?) WHERE agent=? AND cvp_id=? AND device_key=?'),
       delPortsOld: conn.prepare('DELETE FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? AND ts < ?'),
       insSample: conn.prepare('INSERT OR IGNORE INTO port_sample (agent,cvp_id,device_key,port,ts,in_bps,out_bps,in_util,out_util,in_err,out_err) VALUES (?,?,?,?,?,?,?,?,?,?,?)'),
       upDaily: conn.prepare(`INSERT INTO port_daily (agent,cvp_id,device_key,port,day,samples,in_bps_sum,in_bps_n,in_bps_max,out_bps_sum,out_bps_n,out_bps_max,
-          in_util_sum,in_util_n,in_util_max,out_util_sum,out_util_n,out_util_max,in_err_sum,out_err_sum)
-        VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          in_util_sum,in_util_n,in_util_max,out_util_sum,out_util_n,out_util_max,in_err_sum,out_err_sum,in_err_n,out_err_n)
+        VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(agent,cvp_id,device_key,port,day) DO UPDATE SET samples=port_daily.samples+1,
           in_bps_sum=port_daily.in_bps_sum+excluded.in_bps_sum, in_bps_n=port_daily.in_bps_n+excluded.in_bps_n, in_bps_max=${maxOf('in_bps_max')},
           out_bps_sum=port_daily.out_bps_sum+excluded.out_bps_sum, out_bps_n=port_daily.out_bps_n+excluded.out_bps_n, out_bps_max=${maxOf('out_bps_max')},
           in_util_sum=port_daily.in_util_sum+excluded.in_util_sum, in_util_n=port_daily.in_util_n+excluded.in_util_n, in_util_max=${maxOf('in_util_max')},
           out_util_sum=port_daily.out_util_sum+excluded.out_util_sum, out_util_n=port_daily.out_util_n+excluded.out_util_n, out_util_max=${maxOf('out_util_max')},
           in_err_sum=CASE WHEN excluded.in_err_sum IS NULL THEN port_daily.in_err_sum ELSE IFNULL(port_daily.in_err_sum,0)+excluded.in_err_sum END,
-          out_err_sum=CASE WHEN excluded.out_err_sum IS NULL THEN port_daily.out_err_sum ELSE IFNULL(port_daily.out_err_sum,0)+excluded.out_err_sum END`),
+          out_err_sum=CASE WHEN excluded.out_err_sum IS NULL THEN port_daily.out_err_sum ELSE IFNULL(port_daily.out_err_sum,0)+excluded.out_err_sum END,
+          in_err_n=port_daily.in_err_n+excluded.in_err_n, out_err_n=port_daily.out_err_n+excluded.out_err_n`),
     };
     _db = { conn, st };
     lockRetry.ok();
@@ -191,7 +197,7 @@ function insertSample(st, [agent, cvpId, key, port, ts, inBps, outBps, inUtil, o
   const [ib, ob, iu, ou, ie, oe] = v;
   st.upDaily.run(agent, cvpId, key, port, dayIndex(ts),
     ib ?? 0, ib == null ? 0 : 1, ib, ob ?? 0, ob == null ? 0 : 1, ob,
-    iu ?? 0, iu == null ? 0 : 1, iu, ou ?? 0, ou == null ? 0 : 1, ou, ie, oe);
+    iu ?? 0, iu == null ? 0 : 1, iu, ou ?? 0, ou == null ? 0 : 1, ou, ie, oe, ie == null ? 0 : 1, oe == null ? 0 : 1);
   return true;
 }
 
@@ -228,7 +234,7 @@ export async function touchDevices(agent, touch = []) {
   let n = 0;
   db.conn.exec('BEGIN');
   try {
-    for (const [cvpId, key, ts] of touch) n += Number(db.st.touchDevice.run(ts, agent, cvpId, key, ts).changes);
+    for (const [cvpId, key, ts] of touch) n += Number(db.st.touchDevice.run(ts, agent, cvpId, key).changes);
     db.conn.exec('COMMIT');
   } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
   return { touched: n };
@@ -349,7 +355,7 @@ export async function samplesAfter(rowid = 0, limit = 20_000) {
   const db = await open();
   if (!db) return { rows: [], maxRowid: Number(rowid) || 0, unavailable: true };
   const rows = db.conn.prepare(`SELECT rowid AS rowid, cvp_id, device_key, port, ts, in_bps, out_bps, in_util, out_util, in_err, out_err
-      FROM port_sample WHERE rowid > ? AND agent = '' ORDER BY rowid LIMIT ?`)
+      FROM port_sample WHERE rowid > ? AND +agent = '' ORDER BY rowid LIMIT ?`)
     .all(Number(rowid) || 0, Math.max(1, Math.min(100_000, Number(limit) || 20_000)));
   return {
     rows: rows.map((r) => [r.cvp_id, r.device_key, r.port, Number(r.ts), r.in_bps, r.out_bps, r.in_util, r.out_util, r.in_err, r.out_err]),
@@ -382,11 +388,15 @@ export async function portSeries({ agent, cvpId, key, port, hours = 24, rawReten
   const rows = db.conn.prepare(`SELECT * FROM port_daily WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND day>=? ORDER BY day LIMIT ?`)
     .all(agent, cvpId, key, port, dayIndex(from), LIMIT);
   const avg = (s, n) => (Number(n) > 0 ? Number(s) / Number(n) : null);
+  const legacyN = (n, sum) => (Number(n) === 0 && sum != null ? null : Number(n) || 0);
   const pts = rows.map((r) => ({
     ts: dayStartMs(r.day), inBps: avg(r.in_bps_sum, r.in_bps_n), outBps: avg(r.out_bps_sum, r.out_bps_n),
     inUtil: avg(r.in_util_sum, r.in_util_n), outUtil: avg(r.out_util_sum, r.out_util_n),
     inBpsMax: r.in_bps_max, outBpsMax: r.out_bps_max, inUtilMax: r.in_util_max, outUtilMax: r.out_util_max,
     inErr: r.in_err_sum, outErr: r.out_err_sum, samples: Number(r.samples),
+    // v2.611(DB2611-06): 오류 합은 **델타를 만든 표본만** 더한 부분 합이다(첫 표본·간격 비정상·카운터 리셋은 null).
+    //   몇 표본의 합인지(inErrN)를 함께 준다 — samples 와 다르면 하루 전체의 오류가 아니다. 열 추가 전(구버전) 행은 null(모름).
+    inErrN: legacyN(r.in_err_n, r.in_err_sum), outErrN: legacyN(r.out_err_n, r.out_err_sum),
   }));
   return { points: pts, source: 'daily', intervalMs: DAY_MS };
 }
