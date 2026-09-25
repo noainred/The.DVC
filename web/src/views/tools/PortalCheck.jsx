@@ -1,5 +1,6 @@
 /**
- * 포탈 점검 — 첫 항목은 **토큰 점검**(v2.560).
+ * 포탈 점검 — 첫 항목은 **토큰 점검**(v2.560). 둘째 인벤토리 점검(v2.570), 셋째 아키텍처 점검(v2.614 —
+ * `ArchCheckView.jsx`, 이 서버가 자기 라우트·게이트·카탈로그·DB·설정 파일의 정합을 스스로 본다).
  *
  * 사용자 요청(2026-09-18): "특수기능에 '포탈 점검' 이라는 메뉴를 만들고 첫번째 서브메뉴로
  * '토큰 점검' 이라는 메뉴를 만들어줘 — ① 등록된 모든 엣지/수집 서버의 모든 토큰을 수집해서
@@ -36,8 +37,9 @@ import {
   findingGroupLine as invFindingGroupLine, bannerText as invBannerText, freshRateText,
   tableFootnotes as invTableFootnotes,
 } from './invCheckText.js';
+import { ArchCheckView } from './ArchCheckView.jsx'; // v2.614: 세 번째 서브메뉴 — 아키텍처 점검(자기 데이터·상태를 갖는다)
 
-const VIEWS = [['tokens', '토큰 점검'], ['inventory', '인벤토리 점검']];
+const VIEWS = [['tokens', '토큰 점검'], ['inventory', '인벤토리 점검'], ['arch', '아키텍처 점검']];
 
 const TONE = Object.freeze({
   green: 'var(--ok, #35c46a)', red: 'var(--bad, #ef5a5a)',
@@ -550,7 +552,7 @@ export function PortalCheck() {
           </button>
         ))}
       </div>
-      {view === 'inventory' ? <InventoryCheckView /> : <TokenCheckView />}
+      {view === 'arch' ? <ArchCheckView /> : view === 'inventory' ? <InventoryCheckView /> : <TokenCheckView />}
     </div>
   );
 }

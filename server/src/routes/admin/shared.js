@@ -17,13 +17,13 @@ export const adminOnly = requireRole('admin');
  * (routes/api 8곳 — 사유 문구만 다르다). 새 라우트는 이것을 쓴다.
  */
 export function fullScopeOnlyWith(reason = '이 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.') {
-  const gate = (req, res, next) => {
+  const fullScopeGate = (req, res, next) => {
     if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason });
     next();
   };
   // v2.614(아키텍처 점검): `fleetOnly`·`fleetWideOnly` 류는 전부 이 팩토리의 산물이라 태그 하나로 판정기가 알아본다.
-  gate.gate = Object.freeze({ kind: 'fullScope' });
-  return gate;
+  fullScopeGate.gate = Object.freeze({ kind: 'fullScope' });
+  return fullScopeGate;
 }
 
 // '설정 소유 계정(settingsOwners)' 서버측 강제 — 지금까지 소유자 경계는 UI(App.jsx)에서만

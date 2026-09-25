@@ -133,6 +133,7 @@ import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
 import { startStorageConfigPull } from './agent/storageConfigPull.js'; // 중앙→엣지 장비 배포 pull(v2.302)
 import { queryNormalizer } from './util/queryNormalize.js'; // v2.575 BUG-22
+import { setApp as archSetApp } from './portalcheck/archScan.js'; // v2.614 아키텍처 점검(마운트 게이트·BIG_JSON 을 app 에서 읽는다)
 
 const app = express();
 app.disable('x-powered-by'); // v2.538: 'X-Powered-By: Express' 는 정보 노출(프레임워크 지문)일 뿐이다
@@ -400,6 +401,7 @@ app.use('/api/capacity', authMiddleware, requireEnrolled, capacityRouter); // �
 // auditMiddleware: 대상 추가/삭제·vCenter 시드·엣지 동기화가 전부 admin 전용 상태변경이다.
 app.use('/api/ping', authMiddleware, requireEnrolled, auditMiddleware, pingRouter);       // 네트워크 Ping 모니터링(조회=인증, 대상관리=관리자)
 app.use('/api', authMiddleware, requireEnrolled, api);                   // protected resource endpoints
+archSetApp(app); // v2.614 아키텍처 점검 — 마운트 수준 게이트·BIG_JSON 등록을 app 라우터 스택에서 읽는다(라우터 마운트 뒤 1회)
 
 // 외부 공개용 소개 페이지 — 로그인 없이 접근 가능한 정적 데모(/intro, /intro/light.html).
 // 실데이터·API와 완전히 분리된 셀프부트 페이지라 인증 미들웨어를 타지 않는다.
