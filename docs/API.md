@@ -57,14 +57,14 @@
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
 | GET | `/bm-usage` | — | [server/src/routes/collector.js:105](../server/src/routes/collector.js#L105) |
-| POST | `/bmstor-collect` | `express.json` | [server/src/routes/collector.js:194](../server/src/routes/collector.js#L194) |
+| POST | `/bmstor-collect` | `express.json` | [server/src/routes/collector.js:198](../server/src/routes/collector.js#L198) |
 | GET | `/edge-log` | — | [server/src/routes/collector.js:76](../server/src/routes/collector.js#L76) |
 | GET | `/export` | — | [server/src/routes/collector.js:40](../server/src/routes/collector.js#L40) |
 | POST | `/idrac-scan` | `express.json` | [server/src/routes/collector.js:168](../server/src/routes/collector.js#L168) |
 | GET | `/ping` | — | [server/src/routes/collector.js:57](../server/src/routes/collector.js#L57) |
 | POST | `/set-password` | `express.json` | [server/src/routes/collector.js:148](../server/src/routes/collector.js#L148) |
 | GET | `/token-check` | — | [server/src/routes/collector.js:133](../server/src/routes/collector.js#L133) |
-| POST | `/upgrade` | `express.raw` | [server/src/routes/collector.js:211](../server/src/routes/collector.js#L211) |
+| POST | `/upgrade` | `express.raw` | [server/src/routes/collector.js:215](../server/src/routes/collector.js#L215) |
 
 ## `/api/capacity`
 

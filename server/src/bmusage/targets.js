@@ -134,7 +134,9 @@ export function resolveTargets({ bareMetal = [], registry = [], bmServers = [], 
       ...idOf(b), vcenterId: vc, vcName: b.vcName || '', model: b.model || '',
       paths,
       license,
-      entAllowed: !!(paths.includes('idrac') && settings.enterpriseEnabled && settings.enterpriseAck),
+      // v2.610: HPE iLO 로 등록된 서버에는 Dell 전용 대체 경로(iDRAC SSH racadm)를 걸지 않는다 — iLO 에 racadm 은 없고
+      //   SSH 로그인만 시도해 실패가 쌓인다.
+      entAllowed: !!(paths.includes('idrac') && settings.enterpriseEnabled && settings.enterpriseAck && String(reg?.vendor || '').toLowerCase() !== 'hpe'),
       // ⚠ 비밀은 여기 담기지만 **응답에는 절대 싣지 않는다**(라우트가 publicTarget 으로 뺀다).
       // `regId`(v2.590): 주 iDRAC 폴러의 인증 실패 정지 기록을 같은 id 로 조회하기 위한 것(poller.js).
       idrac: paths.includes('idrac') ? { regId: t(reg.id), host: t(reg.host), username: t(reg.username), password: reg.password } : null,

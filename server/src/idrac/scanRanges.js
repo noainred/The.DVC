@@ -14,6 +14,9 @@
  *   - service: 서비스명(라벨). 한 법인 내 여러 엔트리를 구분(빈 값 허용).
  *   - agent  : '' 또는 '__local__' = 중앙 포탈이 직접 스캔. 그 외 = 해당 에이전트에 위임.
  *   - mode   : 등록 모드(merge 기본).
+ *   - ilo    : (v2.610, 선택) HPE iLO 계정 { username, password }. 있으면 같은 대역 스캔이 Dell iDRAC 과 HPE iLO 를
+ *              **한 번에** 찾는다 — 서비스 루트(무인증)로 벤더를 가른 뒤 그 벤더 계정으로만 로그인한다. password 는
+ *              secretVault 가 필드 이름(password)으로 봉인한다(중첩 객체도 대상). 없으면 예전과 같다.
  *   - (구버전 호환) 과거 법인별 저장(`{ datacenters: {[dcId]: e} }`)·vCenter별 저장(`{ vcenters: {...} }`)도 읽어들인다.
  */
 
@@ -94,6 +97,7 @@ const normRanges = (r) => (Array.isArray(r) ? r : String(r || '').split(/[\n,]/)
 /** 비밀번호 제거 + hasPassword 노출(UI용). */
 function redact(id, e) {
   const { password, ...rest } = e;
+  const ilo = normIlo(rest.ilo);
   return {
     id,
     datacenterId: rest.datacenterId || '',
@@ -107,7 +111,45 @@ function redact(id, e) {
     updatedAt: rest.updatedAt || null,
     lastRun: rest.lastRun || null,
     hasPassword: Boolean(password),
+    // v2.610: iLO 계정은 계정명과 '비밀번호 있음' 만(평문 미노출).
+    iloUsername: ilo.username,
+    iloHasPassword: Boolean(ilo.password),
   };
+}
+
+/** v2.610: 저장된 iLO 계정 정규화 — 항상 { username, password } 모양(빈 문자열 허용). */
+function normIlo(v) {
+  return { username: String(v?.username ?? '').trim(), password: typeof v?.password === 'string' ? v.password : '' };
+}
+/** v2.610: 스캔에 쓸 수 있는 계정이 하나라도 있는가(Dell 또는 iLO). */
+function scanCredsOf(e) {
+  const dell = Boolean(String(e?.username || '').trim() && String(e?.password || ''));
+  const i = normIlo(e?.ilo);
+  const ilo = Boolean(i.username && i.password);
+  return { dell, ilo, any: dell || ilo, iloCred: ilo ? i : null };
+}
+/**
+ * 폴러가 쓰는 실행 엔트리(비밀번호 포함). enabledScanRanges·수동 단건·법인 전체 스캔이 **같은 모양**을 쓰게 한다
+ * (예전에는 세 곳이 각자 조립해 필드를 더할 때마다 한 곳씩 빠졌다).
+ */
+export function scanEntryRuntime(id, e) {
+  const c = scanCredsOf(e);
+  return {
+    id,
+    datacenterId: String(e.datacenterId || '').trim(),
+    service: e.service || '',
+    ranges: (e.ranges || []).filter(Boolean),
+    username: c.dell ? String(e.username || '').trim() : '',
+    password: c.dell ? (e.password || '') : '',
+    ilo: c.iloCred,
+    agent: String(e.agent || '').trim(),
+    dispatch: e.dispatch === 'push' ? 'push' : 'poll',
+    mode: e.mode || 'merge',
+  };
+}
+/** v2.610: 스캔 가능 여부(대역 + 어느 한쪽 계정). 사유 문구는 호출부가 쓴다. */
+export function scanEntryReady(e) {
+  return Boolean((e?.ranges || []).filter(Boolean).length) && scanCredsOf(e).any;
 }
 
 /** UI용 목록(비밀번호 마스킹). 법인→서비스 순 정렬. */
@@ -126,19 +168,9 @@ export function enabledScanRanges() {
     if (e.enabled === false) continue;
     const ranges = (e.ranges || []).filter(Boolean);
     if (!ranges.length) continue;
-    if (!String(e.username || '').trim()) continue; // 계정 없으면 스캔 불가 → 건너뜀
-    if (!String(e.password || '')) continue;        // 비밀번호 없으면 인증 불가 → 건너뜀(스캔 보류)
-    out.push({
-      id,
-      datacenterId: e.datacenterId || '',
-      service: e.service || '',
-      ranges,
-      username: String(e.username || '').trim(),
-      password: e.password || '',
-      agent: String(e.agent || '').trim(),
-      dispatch: e.dispatch === 'push' ? 'push' : 'poll',
-      mode: e.mode || 'merge',
-    });
+    // 계정(iDRAC 또는 v2.610 iLO) 이 하나도 없으면 인증 불가 → 건너뜀(스캔 보류)
+    if (!scanCredsOf(e).any) continue;
+    out.push(scanEntryRuntime(id, e));
   }
   return out;
 }
@@ -185,6 +217,17 @@ export function saveScanRanges(body = {}) {
     updatedAt: Date.now(),
     lastRun: cur.lastRun || null, // 실행 이력은 보존
   };
+  // v2.610: HPE iLO 계정(선택). iloUsername 을 보내면 갱신, 빈 iloPassword 는 기존 유지(Dell 비밀번호와 같은 규칙).
+  //   iloClear:true 면 iLO 계정을 지운다(이후 이 대역의 HPE 는 예전처럼 '미지원 서버' 로 남는다).
+  const curIlo = normIlo(cur.ilo);
+  if (body.iloClear === true) {
+    next.ilo = { username: '', password: '' };
+  } else {
+    const iu = body.iloUsername !== undefined ? String(body.iloUsername || '').trim() : curIlo.username;
+    if (iu.length > 128 || [...iu].some((c) => c.charCodeAt(0) < 32)) return { ok: false, reason: 'iLO 계정에 사용할 수 없는 문자가 있습니다.' };
+    const ip = (body.iloPassword != null && body.iloPassword !== '') ? String(body.iloPassword) : curIlo.password;
+    next.ilo = { username: iu, password: iu ? ip : '' };   // 계정을 비우면 비밀번호도 버린다(쓸 수 없는 비밀을 쌓지 않는다)
+  }
   // v2.606 LEFT2606-02: 스캔의 '접속 대상' 은 ranges 다 — 대역(정규화 집합)·수행 엣지(agent)·계정이 바뀌었는데
   //   새 비밀번호가 없으면 저장 비밀번호를 승계하지 않는다(v2.503 S-2 secretCarry 규약. 예전에는 대역만 바꿔 저장하면
   //   다음 스캔이 새 대역의 Redfish 응답 호스트마다 저장 iDRAC 비밀번호를 보냈다). 대역 '추가' 도 대상이다 —
@@ -196,6 +239,14 @@ export function saveScanRanges(body = {}) {
     || accessMoved({ agent: cur.agent || '', username: cur.username || '' }, { agent: next.agent, username: next.username }, ['agent', 'username']));
   const droppedSecrets = (moved && cur.password) ? dropCarriedSecrets(next, body, ['password']) : [];
   if (droppedSecrets.length) next.password = ''; // 스키마(빈 문자열 = 비밀번호 없음)는 유지 — enabledScanRanges 가 스캔을 보류한다
+  // v2.610: iLO 비밀번호도 같은 규칙 — 대역·엣지·**iLO 계정명**이 바뀌었는데 새 iLO 비밀번호가 없으면 승계하지 않는다.
+  const iloMoved = existed && (rangeKey(cur.ranges) !== rangeKey(next.ranges)
+    || accessMoved({ agent: cur.agent || '', username: curIlo.username }, { agent: next.agent, username: next.ilo.username }, ['agent', 'username']));
+  const iloNewPw = body.iloPassword != null && body.iloPassword !== '';
+  if (iloMoved && curIlo.password && !iloNewPw && next.ilo.password) {
+    next.ilo = { ...next.ilo, password: '' };
+    droppedSecrets.push('iloPassword');
+  }
   const prevEntries = data.entries;
   data.entries = { ...data.entries, [id]: next };
   const err = write(data);
@@ -203,7 +254,9 @@ export function saveScanRanges(body = {}) {
   const out = { ok: true, ...redact(id, next) };
   if (droppedSecrets.length) {
     out.droppedSecrets = droppedSecrets;
-    out.skipped = [{ field: 'password', reason: '스캔 대역·수행 엣지·계정이 바뀌어 저장된 비밀번호를 폐기했습니다 — 새 대역에 보낼 비밀번호를 다시 입력하세요(입력 전까지 이 항목의 스캔은 보류됩니다).' }];
+    out.skipped = [];
+    if (droppedSecrets.includes('password')) out.skipped.push({ field: 'password', reason: '스캔 대역·수행 엣지·계정이 바뀌어 저장된 비밀번호를 폐기했습니다 — 새 대역에 보낼 비밀번호를 다시 입력하세요(입력 전까지 이 항목의 스캔은 보류됩니다).' });
+    if (droppedSecrets.includes('iloPassword')) out.skipped.push({ field: 'iloPassword', reason: '스캔 대역·수행 엣지·iLO 계정이 바뀌어 저장된 iLO 비밀번호를 폐기했습니다 — iLO 비밀번호를 다시 입력하세요(입력 전까지 이 대역에서 HPE 서버는 찾지 않습니다).' });
   }
   return out;
 }

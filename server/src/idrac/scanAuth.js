@@ -42,8 +42,14 @@ export function registryHostKey(v) {
  * @returns {{skip(ip:string): (null|'scan'|'registered'), noteAuthFailed(ip:string, reason?:string): void,
  *            noteOk(ip:string): void, flush(): void, periodic: boolean}}
  */
-export function makeScanAuthPolicy({ rangeId = '', username = '', password = '', periodic = false } = {}) {
-  const cred = { username, password };
+export function makeScanAuthPolicy({ rangeId = '', username = '', password = '', periodic = false, ilo = null } = {}) {
+  // v2.610: iLO 계정이 있으면 스캔 정지 기록의 자격증명 지문에 두 계정을 **함께** 넣는다 — 어느 쪽을 고쳐도
+  //   자동 재개된다. 등록 서버 정지 대조는 그 서버의 벤더 계정으로 한다(HPE 는 iLO 계정).
+  const iloU = String(ilo?.username || '').trim();
+  const iloP = typeof ilo?.password === 'string' ? ilo.password : '';
+  const hasIlo = Boolean(iloU && iloP);
+  const cred = hasIlo ? { username: `${username}|ilo:${iloU}`, password: `${password}\u0001${iloP}` } : { username, password };
+  const credForEntry = (s) => (hasIlo && String(s?.vendor || '').toLowerCase() === 'hpe') ? { username: iloU, password: iloP } : { username, password };
   let byHost = null;
   if (periodic) {
     byHost = new Map();
@@ -61,7 +67,7 @@ export function makeScanAuthPolicy({ rangeId = '', username = '', password = '',
       if (scanAuthGuard.peekAuthStop({ id: scanStopId(rangeId, ip), ...cred })) return 'scan';
       const s = byHost?.get(String(ip).toLowerCase());
       // 같은 계정으로 주 폴러가 이미 멈췄다 — 넘긴 자격증명이 기록과 다르면 peek 가 null(스캔 계정이 고쳐졌을 수 있다).
-      if (s && idracAuthStopFor({ id: s.id, ...cred })) return 'registered';
+      if (s && idracAuthStopFor({ id: s.id, ...credForEntry(s) })) return 'registered';
       return null;
     },
     noteAuthFailed(ip, reason) {

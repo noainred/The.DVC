@@ -82,7 +82,7 @@ async function runIdracScanWorkerInner() {
       try {
         // '등록' 잡: UI가 스캔에서 확인한 found 목록을 현지 레지스트리에 등록.
         if (job.action === 'register') {
-          const rr = registerScanned(job.found || [], job.username, job.password, job.mode || 'merge', job.vcenterId || '', job.datacenterId || '');
+          const rr = registerScanned(job.found || [], job.username, job.password, job.mode || 'merge', job.vcenterId || '', job.datacenterId || '', { ilo: job.ilo || null });
           const registered = rr.ok ? ((rr.added || 0) + (rr.updated || 0)) : 0;
           if (rr.ok) pollNow().catch(() => {});
           await postResult({ reqId: job.reqId, agent: config.agent.name, scanned: 0, found: job.found || [], foundCount: (job.found || []).length, registered, error: rr.ok ? null : (rr.reason || '등록 실패'), durationMs: Date.now() - started });
@@ -100,7 +100,7 @@ async function runIdracScanWorkerInner() {
         };
         // 스캔+현지등록 코어는 PUSH 엔드포인트와 공유(runLocalIdracScan). durationMs는 헬퍼가 계산.
         // v2.591(감사 F3): 중앙이 싣는 trigger·rangeId — 주기 잡이면 인증 정지 IP 를 건너뛴다(구버전 중앙은 필드가 없어 수동=전부 시도).
-        const scan = await runLocalIdracScan({ ips: job.ips, username: job.username, password: job.password, noRegister: job.noRegister, vcenterId: job.vcenterId || '', datacenterId: job.datacenterId || '', mode: job.mode || 'merge', onProgress, trigger: job.trigger === 'periodic' ? 'periodic' : 'manual', rangeId: String(job.rangeId || '') });
+        const scan = await runLocalIdracScan({ ips: job.ips, username: job.username, password: job.password, ilo: job.ilo || null, noRegister: job.noRegister, vcenterId: job.vcenterId || '', datacenterId: job.datacenterId || '', mode: job.mode || 'merge', onProgress, trigger: job.trigger === 'periodic' ? 'periodic' : 'manual', rangeId: String(job.rangeId || '') });
         // v2.593(감사 EDGE-4): 회신 실패를 콘솔뿐 아니라 상태에도 싣는다 — 엣지 로그 화면이 '성공 모양' 으로 보이지 않게.
         const postErr = await postResult({ reqId: job.reqId, agent: config.agent.name, ...scan });
         last = { at: Date.now(), reqId: job.reqId, foundCount: scan.foundCount, registered: scan.registered, ...(postErr ? { postError: postErr } : {}) };

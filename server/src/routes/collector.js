@@ -170,12 +170,16 @@ collectorRouter.post('/idrac-scan', express.json({ limit: '256kb' }), async (req
   if (!checkToken(req)) { logCollectorDeny(req, 'idrac-scan'); return res.status(403).json({ ok: false, reason: '토큰 불일치' }); }
   const b = req.body || {};
   const ips = b.ips; const username = String(b.username || '').trim(); const password = b.password;
-  if (!ips || !username || (password == null || password === '')) {
-    return res.status(400).json({ ok: false, reason: 'ips/username/password가 필요합니다.' });
+  // v2.610: HPE iLO 계정(선택) — 아는 두 필드만 받는다. iLO 계정만 있는 대역(Dell 계정 없음)도 허용한다.
+  const ilo = (b.ilo && typeof b.ilo === 'object' && String(b.ilo.username || '').trim() && typeof b.ilo.password === 'string' && b.ilo.password)
+    ? { username: String(b.ilo.username).trim().slice(0, 128), password: String(b.ilo.password).slice(0, 512) } : null;
+  const dellOk = Boolean(username) && !(password == null || password === '');
+  if (!ips || (!dellOk && !ilo)) {
+    return res.status(400).json({ ok: false, reason: 'ips 와 계정(iDRAC username/password 또는 iLO 계정)이 필요합니다.' });
   }
   try {
     const r = await runLocalIdracScan({
-      ips, username, password,
+      ips, username: dellOk ? username : '', password: dellOk ? password : '', ilo,
       noRegister: !!b.noRegister, vcenterId: String(b.vcenterId || '').trim(),
       datacenterId: String(b.datacenterId || '').trim(), mode: b.mode || 'merge',
       // v2.591(감사 F3): 주기 스캔만 인증 정지 IP 를 건너뛴다 — 값이 없으면(구버전 중앙) 수동으로 본다(전부 시도, 안전한 쪽).
