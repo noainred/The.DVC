@@ -64,6 +64,7 @@ describe('IMP-07 — edgelog/spec.js 표가 실재하고 빠짐이 없다', () =
       ['alerts.js', 'alertStatus().config 가 alerts.json 전체(웹훅 URL — v2.604 FILE_EXTRA_SECRET_FIELDS 의 url)를 담는다. redactDeep 은 키 이름으로만 가리므로 URL 속 토큰을 못 가린다 — 설정 › 알림 화면이 따로 있다'],
       ['backup/settings.js', '포탈 자체 서비스(수집·push/pull 아님) — 설정 › 백업 화면이 상태를 보여준다. 등재는 값 내용(경로·보관 정책) 검토 뒤 별건'],
       ['security/loginMonitor.js', '포탈 자체 서비스 — lastSummary 에 로그인 실패 계정명·IP 가 담긴다. 설정 › 보안 화면이 따로 있다. 등재는 별건'],
+      ['perf/stallWatch.js', '포탈 자체 감시(v2.617, 수집·push/pull 아님) — 서비스 점검에 전용 행(stallwatch)이 있고, 멈춘 동안의 기록·스택은 그 노드의 journal [stallwatch] 줄에 남는다(엣지 로그 표의 폴러 판정(주기·최근 실행)과 뜻이 맞지 않는다)'],
       ['reports/dailyReport.js', '포탈 자체 서비스(메일 보고) — 설정 › 일일 보고 화면이 상태를 보여준다. 등재는 별건'],
     ]);
     const inSpec = new Set(STATUS_SPEC.map((s) => path.normalize(s.mod).replace(/^\.\.\//, '')));

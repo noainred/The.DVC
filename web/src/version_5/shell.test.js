@@ -17,8 +17,8 @@ describe('V5 셸 연결', () => {
     expect(app).toMatch(/const V5Shell = lazy\(\(\) => import\('\.\/version_5\/V5Shell\.jsx'\)\)/);
     expect(app).not.toMatch(/import V5Shell from/);
     // V4·콘솔 판정이 먼저다
-    expect(app.indexOf('if (consoleOn)')).toBeLessThan(app.indexOf('if (v5On)'));
-    expect(app.indexOf('if (v4On)')).toBeLessThan(app.indexOf('if (v5On)'));
+    expect(app.indexOf('if (consoleOn)')).toBeLessThan(app.indexOf('if (v5On) {'));
+    expect(app.indexOf('if (v4On)')).toBeLessThan(app.indexOf('if (v5On) {'));
   });
   it('V5 셸은 /health · /vcenters 를 폴링하지 않는다', () => {
     const src = stripComments(read('./V5Shell.jsx'));

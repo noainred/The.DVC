@@ -21,6 +21,7 @@ import { writeReleaseFile } from './util/releaseFile.js';
 import { compression } from './util/compress.js';
 import { rateLimit } from './util/rateLimit.js';
 import { startLoopLagMonitor } from './util/loopLag.js';
+import { startStallWatch } from './perf/stallWatch.js'; // v2.617: 멈춘 동안에도 stderr 로 보고 + 스택 자동 채취
 import { startLogAnalysis } from './loganalysis/index.js'; // v2.583: 설정 › Log › 로그 분석 — 로그 누적 집계
 // v2.498: 서버 성능 측정 — 요청 지연·진행 중 요청 추적(설정 › 서버 성능 측정). 계측 실패는 서비스에 영향 없음.
 import { beginRequest, endRequest, pruneHangLog } from './perf/monitor.js';
@@ -491,6 +492,7 @@ runZeroCapacityPurge()
   .catch((e) => console.warn(`[storage] 0 바이트 용량 행 정리 실패(${e.message}) — 추이 차트에 0 TB 점이 남을 수 있습니다`));
 store.start();
 try { startLogAnalysis(); } catch { /* 로그 분석 누적(v2.583) — 실패해도 서비스에 영향 없음(화면이 상태를 말한다) */ }
+startStallWatch();     // v2.617: 워커 스레드가 메인 루프 멈춤을 감시(STALL_WATCH=0 이면 끔)
 startLoopLagMonitor(); // 이벤트 루프 지연 계측(additive·no-op-on-fail) — docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0
 try { pruneHangLog(); } catch { /* hang 로그 보존일 정리(기동 1회) — 실패 무시 */ }
 upgradeManager.start();

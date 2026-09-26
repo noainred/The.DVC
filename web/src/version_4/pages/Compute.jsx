@@ -19,13 +19,13 @@ export default function Compute({ global: g, ov, sitesAll, scope, polls, phase, 
   const sites = scope.scoped(sitesAll, 'id').filter((s) => rowMatches(s, scope.q));
   const hot = clusterRows(clusters.filter((c) => rowMatches(c, scope.q)), 6);
   const advice = capacityAdvice(clusters);
-  const unreach = g ? Math.max(0, g.vcenters - g.vcentersConnected - (g.vcentersMaintenance || 0)) : 0;
+  const unreach = g ? Math.max(0, g.vcenters - g.vcentersConnected - (g.vcentersMaintenance || 0) - (g.vcentersDisabled || 0)) : 0; // v2.617: 비활성은 불가 아님
   const phys = ov?.physical || null;
 
   return (
     <>
       <div className="v3-kpis">
-        <Kpi label="vCenter" value={g ? `${g.vcentersConnected}/${g.vcenters}` : '—'} accent="#0e7490" meta={g ? `연결 불가 ${unreach}${g.vcentersMaintenance ? ` · 점검중 ${g.vcentersMaintenance}` : ''}` : waitText} />
+        <Kpi label="vCenter" value={g ? `${g.vcentersConnected}/${g.vcenters}` : '—'} accent="#0e7490" meta={g ? `연결 불가 ${unreach}${g.vcentersMaintenance ? ` · 점검중 ${g.vcentersMaintenance}` : ''}${g.vcentersDisabled ? ` · 비활성 ${g.vcentersDisabled}` : ''}` : waitText} />
         <Kpi label="물리 서버" value={phys?.servers ? fmtInt(phys.servers) : fmtInt(g?.hosts)} accent="#1a2130" meta={g ? (phys?.servers ? `iDRAC 인식 · ESXi ${fmtInt(g.hosts)} · 끊김 ${fmtInt(g.hostsDisconnected)}` : `ESXi ${fmtInt(g.hosts)} · 정상 ${fmtInt(g.hostsConnected)} · 끊김 ${fmtInt(g.hostsDisconnected)}`) : waitText} />
         <Kpi label="가상머신" value={fmtInt(g?.vms)} accent="#16a34a" meta={g ? `구동 ${fmtInt(g.vmsPoweredOn)} · 정지 ${fmtInt(g.vmsPoweredOff)}` : waitText} />
         <Kpi label="클러스터" value={cap.data ? fmtInt(cap.data.totals?.clusters) : '—'} accent="#d97706" meta={cap.data ? `vCPU/코어 ${cap.data.totals?.vcpuPerCore} · RAM 여유 ${fmtInt(cap.data.totals?.ramHeadroomGB)} GB` : canCap ? '용량 집계 대기' : "권한 필요('tools')"} />

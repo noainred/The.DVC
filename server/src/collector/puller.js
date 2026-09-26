@@ -15,6 +15,7 @@ import { describeError } from '../util/errors.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { identityIssue } from './registry.js';
 import { withOutboundTag } from '../util/outboundStats.js';
+import { poolRun } from '../util/pool.js';
 
 /**
  * v2.601(감사 WEB2601-02): 데이터 흐름 지도의 '중앙 → 엣지' 기록은 주소(origin+경로 접두)로 엣지를 찾는다 —
@@ -147,7 +148,10 @@ async function pullNowInner() {
   // 레지스트리에서 제거/교체된 수집기의 잔류 호스트·상태 자동 정리(감사 M12) — 과거엔 수동
   // power-purge에서만 정리돼 유령 항목이 전력 합산을 오염시켰다.
   try { clearStaleRemote(new Set(loadCollectors().map((c) => c.id))); } catch { /* 정리 실패는 폴링에 영향 없음 */ }
-  await Promise.all(collectors.map(async (c) => {
+  // v2.617: 동시 개수 제한(config.collector.pullConcurrency, 기본 4) — 예전 Promise.all 은 엣지 전부의 응답 사본이
+  //   한 순간에 힙에 살았다. fn 이 스스로 catch 하므로 poolRun(첫 rejection 을 올리는 쪽)이 맞다.
+  const t0 = Date.now();
+  await poolRun(collectors, config.collector.pullConcurrency, async (c) => {
     try {
       const r = await pullTagged(c);
       fails.set(c.id, 0);
@@ -174,7 +178,12 @@ async function pullNowInner() {
       }
       console.warn(`[collector] ${c.id} pull 실패(${n}): ${d.message}`);
     }
-  }));
+  });
+  const took = Date.now() - t0;
+  // 한 주기가 주기의 절반을 넘기면 알린다 — 동시 개수를 줄인 대가(벽시계 증가)를 조용히 두지 않는다.
+  if (collectors.length && took > config.collector.pullIntervalMs / 2) {
+    console.warn(`[collector] pull 주기 소요 ${Math.round(took / 1000)}초(엣지 ${collectors.length}곳 · 동시 ${config.collector.pullConcurrency}) — 주기 ${Math.round(config.collector.pullIntervalMs / 1000)}초의 절반을 넘었습니다. COLLECTOR_PULL_CONCURRENCY 를 늘리거나 COLLECTOR_PULL_INTERVAL_MS 를 늘리세요.`);
+  }
 }
 
 export function startCollectorPuller() {

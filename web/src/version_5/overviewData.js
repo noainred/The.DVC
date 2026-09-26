@@ -14,11 +14,12 @@
 import { siteRows, levelOf, tsMs } from '../console/consoleData.js';
 import { numOrNull } from '../numOrNull.js';
 
-/** 사이트(vCenter) 1곳의 상태 등급 — ok | warn | crit | wait | maint. */
+/** 사이트(vCenter) 1곳의 상태 등급 — ok | warn | crit | wait | maint | off(v2.617: 설정에서 꺼 둔 vCenter — 수집하지 않으므로 판정 대상이 아니다). */
 export function siteLevel(row) {
   if (!row) return 'wait';
   const st = String(row.status || '');
   if (st === 'maintenance') return 'maint';
+  if (st === 'disabled') return 'off';
   if (st === 'unreachable') return 'crit';
   if (st !== 'connected') return 'wait'; // pending·미상 — 확인 전이다
   if ((row.alarmsCritical || 0) > 0) return 'crit';
@@ -42,7 +43,7 @@ export function scopedSites(ov, scopeId) {
  */
 export function opsStatus({ ov, alarms, hosts, scopeId = '' } = {}) {
   const rows = scopedSites(ov, scopeId);
-  const c = { ok: 0, warn: 0, crit: 0, wait: 0, maint: 0 };
+  const c = { ok: 0, warn: 0, crit: 0, wait: 0, maint: 0, off: 0 };
   for (const r of rows) c[siteLevel(r)] += 1;
   const items = Array.isArray(alarms?.items) ? alarms.items : null;
   let affectedSites = null, affectedHosts = null, affectedVms = null;
@@ -61,7 +62,8 @@ export function opsStatus({ ov, alarms, hosts, scopeId = '' } = {}) {
       affectedVms = 0; // 영향 호스트가 없으면 목록 없이도 0 이 맞다
     }
   }
-  return { ...c, total: rows.length, affectedSites, affectedHosts, affectedVms };
+  // total 은 판정 대상(비활성 제외)이다 — 항등식 total = ok + warn + crit + wait + maint. 비활성은 off 로 따로 센다.
+  return { ...c, total: rows.length - c.off, affectedSites, affectedHosts, affectedVms };
 }
 
 /**
@@ -95,19 +97,25 @@ export function infraTotals(ov, scopeId = '') {
 
 /**
  * 카드 3 — 데이터 신뢰도. vCenter 보고율은 /health(헤더와 같은 원천) 기준.
- * @returns {{generatedMs, connected, total, pending, unreachable, maintenance, ratePct, restFallback, alarmsUnknown}}
+ * v2.617: 비활성(disabled) vCenter 는 분모에서 빼고 `disabled` 로 따로 센다 — 예전에는 범위 모드에서 '첫 수집 중'
+ *   으로, 전체 모드에서 보고율 100% 미만으로 보였다(기다려도 채워지지 않는다).
+ * @returns {{generatedMs, connected, total, pending, unreachable, maintenance, disabled, ratePct, restFallback, alarmsUnknown}}
  */
 export function trustSummary({ health, ov, scopeId = '' } = {}) {
   const rows = scopedSites(ov, scopeId);
-  let connected, total, pending, unreachable, maintenance;
+  let connected, total, pending, unreachable, maintenance, disabled;
   if (scopeId) {
-    total = rows.length;
+    disabled = rows.filter((r) => r.status === 'disabled').length;
+    total = rows.length - disabled;
     connected = rows.filter((r) => r.status === 'connected').length;
-    pending = rows.filter((r) => r.status !== 'connected' && r.status !== 'unreachable' && r.status !== 'maintenance').length;
+    pending = rows.filter((r) => !['connected', 'unreachable', 'maintenance', 'disabled'].includes(r.status)).length;
     unreachable = rows.filter((r) => r.status === 'unreachable').length;
     maintenance = rows.filter((r) => r.status === 'maintenance').length;
   } else {
-    total = numOrNull(health?.vcenters);
+    // 구버전 서버(vcentersDisabled 없음)면 사이트 목록에서 센다.
+    disabled = numOrNull(health?.vcentersDisabled) ?? rows.filter((r) => r.status === 'disabled').length;
+    const t = numOrNull(health?.vcenters);
+    total = t == null ? null : Math.max(0, t - disabled);
     connected = numOrNull(health?.vcentersConnected);
     pending = numOrNull(health?.vcentersPending) || 0;
     unreachable = numOrNull(health?.vcentersUnreachable) || 0;
@@ -116,7 +124,7 @@ export function trustSummary({ health, ov, scopeId = '' } = {}) {
   const ratePct = total > 0 && connected != null ? Math.round(((connected + maintenance) / total) * 100) : null;
   return {
     generatedMs: tsMs(health?.generatedAt ?? ov?.generatedAt),
-    connected, total, pending, unreachable, maintenance, ratePct,
+    connected, total, pending, unreachable, maintenance, disabled, ratePct,
     restFallback: rows.filter((r) => r.restFallback).length,
     alarmsUnknown: rows.filter((r) => r.alarmsUnknown).length,
   };
@@ -146,9 +154,11 @@ export function statusCard({ health, commMap } = {}) {
     const maint = numOrNull(health.vcentersMaintenance) || 0;
     const unreach = numOrNull(health.vcentersUnreachable) || 0;
     const pending = numOrNull(health.vcentersPending) || 0;
+    const off = numOrNull(health.vcentersDisabled) || 0; // v2.617: 비활성은 분모에서 뺀다
+    const judged = Math.max(0, total - off);
     head = {
-      label: `Main · vCenter ${conn}/${total}`,
-      tone: unreach > 0 ? 'crit' : pending > 0 ? 'warn' : total === 0 ? 'neutral' : conn + maint === total ? 'ok' : 'warn',
+      label: `Main · vCenter ${conn}/${judged}`,
+      tone: unreach > 0 ? 'crit' : pending > 0 ? 'warn' : judged === 0 ? 'neutral' : conn + maint === judged ? 'ok' : 'warn',
       kind: 'vcenter',
     };
   } else {
@@ -162,5 +172,7 @@ export function statusCard({ health, commMap } = {}) {
   if (pending) parts.push(`첫 수집 중 ${pending}`);
   if (unreach) parts.push(`연결 실패 ${unreach}`);
   if (maint) parts.push(`점검 ${maint}`);
+  const off = numOrNull(health?.vcentersDisabled) || 0;
+  if (off) parts.push(`비활성 ${off}`);
   return { ...head, detail: parts.join(' · '), generatedMs: tsMs(health?.generatedAt) };
 }

@@ -1,7 +1,7 @@
 // IpamCore.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { takeSearch } from '../../hooks/searchHandoff.js'; // v2.616 V5 통합 검색
+import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js'; // v2.616 V5 통합 검색 · v2.617 열린 화면도 받는다
 import { fetchJson, usePolling, downloadFile, hasRole } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, StateBadge, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
@@ -68,6 +68,12 @@ function Ipam({ scope, onScope }) {
   const [scanStatusOpen, setScanStatusOpen] = useState(false); // 스캔 상태(진행/이력) 모달
   // 목록/대역 시트 전환을 URL(#/ipam/<키>)에 싣는다(v2.438).
   const [view, setView] = useHashTab({ base: ['ipam'], valid: ['list', 'sheet'], fallback: 'list' });
+  // v2.617: 이미 열린 화면이면 주소가 같아 다시 마운트되지 않는다 — 구독으로 즉시 받는다(목록 보기로 옮겨 결과가 보이게).
+  useEffect(() => onSearchHandoff((t) => {
+    if (t !== 'ipam') return;
+    const s = takeSearch('ipam');
+    if (s) { setQ(s); setView('list'); }
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [subnets, setSubnets] = useState([]);
   const [base, setBase] = useState('');
   const [sheet, setSheet] = useState(null);

@@ -599,6 +599,8 @@ function rollupsOf(snap, { scoped = false } = {}) {
     vcenters: snap.vcenters.length,
     vcentersConnected: snap.vcenters.filter((v) => v.status === 'connected').length,
     vcentersMaintenance: snap.vcenters.filter((v) => v.status === 'maintenance').length,
+    // v2.617: 설정에서 꺼 둔 vCenter — '연결 불가' 가 아니다(화면이 불가 계산의 분모에서 뺀다).
+    vcentersDisabled: snap.vcenters.filter((v) => v.status === 'disabled').length,
     hosts: snap.hosts.length,
     hostsConnected: hc.connected,
     hostsMaintenance: hc.maintenance,

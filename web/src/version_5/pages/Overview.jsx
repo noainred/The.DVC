@@ -86,6 +86,7 @@ export default function V5Overview({ scope = '', health, healthError, onGotoTab 
           <div className="v5-note">
             위험 = 연결 실패 또는 위험 경보·사용률 90% 이상, 주의 = 주의 경보·75% 이상.
             {ops.maint > 0 && ` 점검중 ${ops.maint}곳은 어느 쪽에도 세지 않았습니다.`}
+            {ops.off > 0 && ` 비활성(수집 꺼짐) ${ops.off}곳은 판정하지 않았습니다.`}
             {' '}영향 VM 은 경보가 걸린 호스트에 올라간 VM 수입니다(경보에는 VM 대상이 없습니다).
           </div>
         </section>
@@ -127,6 +128,7 @@ export default function V5Overview({ scope = '', health, healthError, onGotoTab 
           {trust.pending > 0 && <div className="v5-line">첫 수집 중 <b>{trust.pending}</b>곳 — 기다리면 채워집니다.</div>}
           {trust.unreachable > 0 && <div className="v5-line" style={{ color: 'var(--red)' }}>연결 실패 <b>{trust.unreachable}</b>곳 — 기다려도 채워지지 않습니다(설정 › vCenter 등록·관리에서 확인).</div>}
           {trust.maintenance > 0 && <div className="v5-line">점검중 {trust.maintenance}곳(보고율에 포함)</div>}
+          {trust.disabled > 0 && <div className="v5-line">비활성 {trust.disabled}곳 — 설정에서 수집을 꺼 두어 보고율에서 뺐습니다(설정 › vCenter 에서 켤 수 있습니다).</div>}
           {trust.restFallback > 0 && <div className="v5-line">REST 폴백 {trust.restFallback}곳 — 경보를 조회하지 않아 경보 수를 모릅니다.</div>}
           <div className="v5-note">보고율은 연결됨 + 점검중을 셉니다. 첫 수집 중인 곳은 실패로 세지 않았습니다.</div>
         </section>
