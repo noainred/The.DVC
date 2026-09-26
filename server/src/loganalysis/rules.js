@@ -69,9 +69,12 @@ export const CORE_RULES = [
     meaning: '등록 항목의 URL 에 다른 이름의 엣지가 응답합니다. 문구 끝이 "다른 수집 서버 항목입니다" 면 같은 엣지가 두 이름으로 등록돼 매 주기 두 번 당겨지고 있습니다.',
     action: '수집 서버 목록에서 이 항목과 응답한 엣지 항목을 비교하세요. 같은 엣지면 옛 항목을 지우되, 그 항목에 걸린 vCenter 귀속을 먼저 옮기세요. 다른 엣지면 포트포워딩 대상을 고치세요.',
     link: '#/settings/collectors', linkLabel: '수집 서버' }),
+  // v2.621(감사 RECENT-04): v2.620 이 2회차부터 괄호 안에 ' · 재시도 없이 1회' 를 붙였는데 정규식은 숫자 바로 뒤의 ')' 만
+  //   받아, 이 규칙이 겨냥한 '연속 실패' 줄이 전부 '미분류' 로 떨어졌다(probe 'pull 실패(' 는 그대로라 테스트도 못 잡았다).
+  //   괄호 안 숫자 뒤의 부가 문구(숫자가 아닌 글자로 시작 · 80자 이하)를 받는다 — 표본은 2회차 이후 문구다.
   R({ id: 'collector-pull-fail', tag: 'collector', severity: 'medium', category: 'network', entity: 1,
-    re: /^\[collector\] (\S+) pull 실패\((\d+)\): /,
-    src: 'server/src/collector/puller.js', probe: 'pull 실패(', sample: '[collector] edge-a pull 실패(2): fetch failed (ECONNREFUSED)',
+    re: /^\[collector\] (\S+) pull 실패\((\d+)(?:[^\d)][^)]{0,80})?\): /,
+    src: 'server/src/collector/puller.js', probe: 'pull 실패(', sample: '[collector] edge-a pull 실패(2 · 재시도 없이 1회): fetch failed (ECONNREFUSED)',
     title: '수집 서버(엣지) 당겨오기 실패',
     meaning: '중앙이 엣지의 데이터를 가져오지 못했습니다. 2회 연속이면 그 법인의 서버·전력 데이터가 낡습니다.',
     action: '표본의 원인 문구를 보세요. 인증·토큰이면 토큰 점검, 연결 거부·시한이면 엣지 서비스와 방화벽을 확인하세요.',

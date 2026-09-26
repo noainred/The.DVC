@@ -77,7 +77,8 @@ export function DailyHealth({ scope, isAdmin }) {
     <>
       {errBanner(error)}
       <div className="kpis">
-        <Kpi label="종합 상태" value={{ ok: '✅ 정상', warn: '🟠 주의', crit: '🔴 위험' }[data.overall] || data.overall} />
+        {/* v2.621(감사 DATA-02): 서버가 '확인 불가'(unknown)를 따로 준다 — 코드 글자를 그대로 보이지 않는다. */}
+        <Kpi label="종합 상태" value={{ ok: '✅ 정상', warn: '🟠 주의', crit: '🔴 위험', unknown: '❔ 확인 불가' }[data.overall] || data.overall} />
         <Kpi label="발견 이슈" value={data.summary.issues} unit="건" accent={data.summary.issues ? 'var(--amber)' : undefined} />
         <Kpi label="vCenter" value={data.summary.vcenters} />
         <Kpi label="호스트" value={data.summary.hosts} />
@@ -111,6 +112,8 @@ export function DailyHealth({ scope, isAdmin }) {
               <SBadge s={s.status} />
               <b style={{ fontSize: 14 }}>{s.label}</b>
               <span className="muted" style={{ fontSize: 13 }}>{s.count}건</span>
+              {/* v2.621(감사 DATA-02): 확인하지 못한 부분(첫 수집 중·경보 미조회·사용량 미상 등)을 섹션이 말한다. */}
+              {s.detail ? <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>· {s.detail}</span> : null}
             </div>
             {s.count > 0 && <span className="muted">{open === s.key ? '▲ 접기' : '▼ 펼치기'}</span>}
           </div>

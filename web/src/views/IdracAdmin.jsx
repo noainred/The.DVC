@@ -14,7 +14,7 @@
 // ⚠ 유지 필수(감사 검증자가 지목한 과잉 삭제 함정): data/error/load 와 아래 조기 return 은
 //    렌더에 data 가 직접 안 쓰여 죽은 코드처럼 보이지만, 마운트 fetch 1회 실패 시 화면 전체가
 //    영구 Loading/ErrorBox 가 되는 것을 막는 로딩/오류 게이트다(주석 참조). 지우면 안 된다.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { droppedSecretNote } from './droppedSecretText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
@@ -24,6 +24,20 @@ import BoldText from '../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { manualPollMessage } from './idrac/manualPollText.js'; // v2.591(감사 P1): 진행 중·긴급중단을 '성공' 으로 말하지 않는다
 import { scanHoldNote, scanFormCredsState } from './idrac/scanRunText.js'; // v2.611(감사 RECENT2611-02): 비밀번호 폐기 뒤 남은 계정으로 계속되는 스캔을 말한다
+
+/**
+ * v2.621(감사 RECENT-08): 스캔 현황(scan-jobs) 조회 결과를 어떻게 보일지(순수). v2.620 이 그 경로를 전체 범위 계정 전용으로
+ * 좁혔는데 화면이 403 을 `.catch(() => {})` 로 삼켜 초기 빈 값으로 '진행 중인 스캔이 없습니다 … 자동 실행합니다' 라고 말했다 —
+ * 볼 수 없는 것을 '없다' 고 말하는 거짓이다. 권한 없음(403 — 다시 불러도 같다)과 조회 실패(일시적일 수 있다)를 나눈다.
+ * 한 번 읽은 뒤의 일시 실패는 직전 현황을 그대로 두고 사유만 덧붙인다(일시 오류 1회로 표를 갈아엎지 않는다).
+ * @returns {{ mode: 'jobs'|'denied'|'failed'|'loading', note: string|null }}
+ */
+export function scanJobsView({ loaded = false, err = null, denied = false } = {}) {
+  if (denied) return { mode: 'denied', note: `스캔 현황을 볼 권한이 없습니다(전체 범위 계정만 조회할 수 있습니다) — 진행 중인 스캔이 없다는 뜻이 아닙니다.${err ? ` 서버 사유: ${err}` : ''}` };
+  if (!loaded && err) return { mode: 'failed', note: `스캔 현황을 불러오지 못했습니다(${err}) — 진행 중인 스캔이 없다는 뜻이 아닙니다.` };
+  if (!loaded) return { mode: 'loading', note: null };
+  return { mode: 'jobs', note: err ? `스캔 현황을 다시 불러오지 못했습니다(${err}) — 아래는 마지막으로 불러온 현황입니다.` : null };
+}
 
 export default function IdracAdmin() {
   const [data, setData] = useState(null);
@@ -45,10 +59,22 @@ export default function IdracAdmin() {
   // v2.611(감사 WEB2611-08): 조회 실패를 삼키면 표가 '저장된 스캔 대역이 없습니다' 라고 말한다(거짓 빈 상태). 실패는 오류 배너로 —
   //   직전 목록은 지우지 않는다(일시 오류 1회로 표를 갈아엎지 않는다).
   const [srLoadErr, setSrLoadErr] = useState(null);
-  const loadScanRanges = () => fetchJson('/admin/idrac/scan-ranges')
+  const srDenied = useRef(false); // v2.621(감사 RECENT-08): 403(전체 범위 계정 전용)이면 30초 폴링이 같은 거부를 반복하지 않게 멈춘다
+  const srFailText = (e) => { if (e?.status === 403) srDenied.current = true; return e?.message || String(e); };
+  const loadScanRanges = () => (srDenied.current ? Promise.resolve() : fetchJson('/admin/idrac/scan-ranges')
     .then((d) => { setScanRanges({ ranges: d.ranges || [], status: d.status || null, centralEnabled: !!d.centralEnabled, loaded: true }); setSrLoadErr(null); })
-    .catch((e) => setSrLoadErr(e?.message || String(e)));   // 문자열 — ErrorBox 의 403·일시 미가용 판정이 메시지 키로 찾는다
-  const loadScanJobs = () => fetchJson('/admin/idrac/scan-jobs').then((d) => setScanJobs({ status: d.status || null, jobs: d.jobs || [], collectors: d.collectors || [], centralEnabled: !!d.centralEnabled })).catch(() => {});
+    .catch((e) => setSrLoadErr(srFailText(e))));   // 문자열 — ErrorBox 의 403·일시 미가용 판정이 메시지 키로 찾는다
+  // v2.621(감사 RECENT-08): scan-jobs 는 v2.620 부터 전체 범위 계정 전용(fleetOnly)이다. 403 을 삼키면 초기 빈 값으로
+  //   '진행 중인 스캔이 없습니다' 라고 말하므로 실패를 따로 들고, 403 이면 30초·5초 폴링을 멈춘다(다시 불러도 같은 거부).
+  const [sjErr, setSjErr] = useState(null);
+  const sjDenied = useRef(false);
+  const [sjDeniedShown, setSjDeniedShown] = useState(false);
+  const loadScanJobs = () => {
+    if (sjDenied.current) return Promise.resolve();
+    return fetchJson('/admin/idrac/scan-jobs')
+      .then((d) => { setScanJobs({ status: d.status || null, jobs: d.jobs || [], collectors: d.collectors || [], centralEnabled: !!d.centralEnabled, loaded: true }); setSjErr(null); })
+      .catch((e) => { setSjErr(e?.message || String(e)); if (e?.status === 403) { sjDenied.current = true; setSjDeniedShown(true); } });
+  };
   useEffect(() => {
     load();
     fetchJson('/admin/idrac/scan-agents').then(setAgents).catch(() => {});
@@ -88,6 +114,7 @@ export default function IdracAdmin() {
   // 현황 화면 전체가 영구 ErrorBox가 되던 문제 → 데이터 없을 때만 전체 오류(그 외엔 계속 표시).
   if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
+  const sjView = scanJobsView({ loaded: !!scanJobs.loaded, err: sjErr, denied: sjDeniedShown }); // v2.621(감사 RECENT-08)
 
   // ── 법인(DataCenter)별 iDRAC 장비 스캔 ──────────────────────────
   const dcNameOf = (id) => (datacenters.find((d) => d.id === id)?.name || id || '');
@@ -196,7 +223,19 @@ export default function IdracAdmin() {
         </div>
       )}
 
-      <IdracScanJobs data={scanJobs} vcenters={vcenters} datacenters={datacenters} busy={busy} onRefresh={loadScanJobs} onScanAll={() => srScanNow()} />
+      {/* v2.621(감사 RECENT-08): 볼 수 없거나 못 읽은 현황을 '진행 중인 스캔이 없습니다' 로 보이지 않는다(권한 없음 / 조회 실패를 나눠 말한다). */}
+      {sjView.mode === 'jobs' && sjView.note && <div className="banner warn" style={{ marginBottom: 8, fontSize: 12 }}>{sjView.note}</div>}
+      {sjView.mode === 'jobs' ? (
+        <IdracScanJobs data={scanJobs} vcenters={vcenters} datacenters={datacenters} busy={busy} onRefresh={loadScanJobs} onScanAll={() => srScanNow()} />
+      ) : sjView.mode === 'loading' ? (
+        <div className="card" style={{ marginBottom: 12, padding: '10px 13px' }}><Loading label="스캔 현황" /></div>
+      ) : (
+        <div className="card" style={{ marginBottom: 12, padding: '10px 13px', fontSize: 12 }}>
+          <b style={{ fontSize: 13 }}>스캔 현황</b>
+          <div className="muted" style={{ marginTop: 4, color: sjView.mode === 'failed' ? 'var(--red)' : undefined, overflowWrap: 'anywhere' }}>{sjView.note}</div>
+          {sjView.mode === 'failed' && <button className="tab" style={{ marginTop: 6, padding: '3px 10px', fontSize: 12 }} onClick={loadScanJobs}>다시 불러오기</button>}
+        </div>
+      )}
 
       {srLoadErr && <ErrorBox error={srLoadErr} />}
       <IdracScanRanges

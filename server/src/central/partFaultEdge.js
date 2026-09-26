@@ -63,6 +63,13 @@ async function ownedIdsFor(agent) {
   const ids = { storage: new Set(), sanswitch: new Set() };
   try { for (const d of st.devicesForAgent(agent)) ids.storage.add(t(d.id)); } catch { /* 등록부 없음 */ }
   try { for (const d of sw.devicesForAgent(agent)) ids.sanswitch.add(t(d.id)); } catch { /* 등록부 없음 */ }
+  // v2.621(감사 EDGE-04): 등록부 손상(preserveCorrupt → 빈 목록)은 던지지 않는다 — 소유 집합이 비어 그 엣지의 스토리지·SAN 보고가
+  //   전부 '미소유' 로 버려지고 200 이었다(v2.620 EDGE2620-01 이 형제 수신 5곳에만 503 을 넣었다). 못 읽은 장비군을 따로 싣는다.
+  const unreadable = {};
+  const errOf = (m) => { try { return m.registryLoadError?.() || null; } catch (e) { return { at: Date.now(), reason: e?.message || String(e) }; } };
+  const se = errOf(st); if (se) unreadable.storage = { ...se, what: '스토리지' };
+  const we = errOf(sw); if (we) unreadable.sanswitch = { ...we, what: 'SAN 스위치' };
+  if (Object.keys(unreadable).length) ids.unreadable = unreadable;
   return ids;
 }
 
@@ -76,13 +83,26 @@ export async function putEdgeReport(agent, body = {}) {
   const key = t(agent).toLowerCase();
   if (!key) return { ok: false, reason: 'agent 없음', protocol: 0, devices: 0, rejected: 0, open: 0 };
   const protocol = Number(body.v) === PUSH_PROTOCOL ? PUSH_PROTOCOL : 1;
+  // v2.621(감사 EDGE-04): 소유 판정에 쓸 중앙 등록부를 못 읽으면(손상) 그 장비군이 **보고에 있을 때만** 받지 않는다 — 소유 집합이
+  //   비어 전부 '미소유(rejected)' 로 버리고 200 을 주면 이 보고가 직전 보고를 **교체**해, 그동안 새 장애가 열리지 않고 열린 장애는
+  //   'unassigned(재배정·등록 삭제)' 라는 틀린 원인으로 보류됐다. 받지 않으면 직전 보고가 남고(오래되면 edge-stale 로 보류) 엣지는
+  //   다음 주기에 다시 보낸다. 그 장비군이 없는 보고(iDRAC 만)는 등록부를 쓰지 않으므로 받는다(형제 수신의 '상태 전용 예외' 와 같은 판단).
+  //   ⚠ 엣지 수 상한(admitAgent)보다 먼저 본다 — 받지 않을 보고가 오래 조용한 엣지를 밀어내지 않게.
+  const owned = await ownedIdsFor(key);
+  if (protocol === PUSH_PROTOCOL && isObj(owned?.unreadable)) {
+    const list = Array.isArray(body.devices) ? body.devices.slice(0, MAX_DEVICES) : [];
+    const hit = list.find((d) => isObj(d) && Object.hasOwn(owned.unreadable, s(d.scope, 32) || 'other'));
+    if (hit) {
+      const u = owned.unreadable[s(hit.scope, 32)];
+      return { ok: false, registryUnreadable: { scope: s(hit.scope, 32), what: u.what || s(hit.scope, 32), reason: capStr(String(u.reason || '사유 미상'), 200), at: u.at || null }, protocol, devices: 0, rejected: 0, open: 0 };
+    }
+  }
   // v2.605(CEN2605-02): 보관하는 엣지 수 상한 — 형제 수신(storage·SAN·PDU·agentConfig)의 admitAgent 규약. 예전에는 공유 토큰으로
   //   이름을 바꿔 가며 보내면 _map 이 무한히 커졌다. 새 이름은 오래 조용한 엣지가 있을 때만 받고, 모두 최근이면 거절한다
   //   (최근 보고한 실제 엣지를 밀어내지 않는다). ⚠ 공유 토큰으로 **같은 이름**을 사칭해 덮는 것은 문서화된 한계다(v2.601).
   const adm = admitAgent(_map, key);
   if (!adm.ok) return { ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).', protocol, devices: 0, rejected: 0, open: 0 };
   if (adm.evicted) console.warn(`[central] part-faults: 엣지 수 상한 — 오래 조용한 '${adm.evicted}' 보고를 내렸다`);
-  const owned = await ownedIdsFor(key);
   const devices = [];
   let rejected = 0;
   let openN = 0;

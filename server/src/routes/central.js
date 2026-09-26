@@ -30,7 +30,7 @@ import { setEdgeFleet } from '../central/fleet.js';
 import { setGuestGpu, withGpuTrust } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
-import { takeIdracScanJobs, setIdracScanResult, setIdracScanProgress, agentOfReq } from '../central/idracScanJobs.js';
+import { takeIdracScanJobs, applyIdracScanResult, setIdracScanProgress, agentOfReq } from '../central/idracScanJobs.js';
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
 import { upsertCollectorFromAgent, ssrfBlockReasonResolved, verifyDerivedCollectorUrl } from '../collector/registry.js';
 import { recordIngest, noteInventoryCompression } from '../central/ingestStats.js';
@@ -1054,7 +1054,9 @@ centralRouter.post('/idrac-scan-progress', requireCentral(), (req, res) => {
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   if (reqAgentDenied(req, agentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
-  setIdracScanProgress(String(b.reqId), b);
+  // v2.621(감사 EDGE-01): 중앙에 없는 잡(만료·중앙 재시작)이면 410 — 예전에는 반환값을 보지 않고 200 이라 엣지는 성공으로 적고
+  //   중앙은 아무것도 반영하지 않았다(조용한 소실). 410 은 재전송 대상이 아니다(엣지가 상태·콘솔에 남긴다).
+  if (!setIdracScanProgress(String(b.reqId), b)) return res.status(410).json({ ok: false, reason: 'unknown-job', detail: '중앙에 이 스캔 잡이 없습니다(만료되었거나 중앙이 재시작됨) — 진행 보고를 반영하지 않았습니다.' });
   res.json({ ok: true });
 });
 
@@ -1064,7 +1066,15 @@ centralRouter.post('/idrac-scan-result', requireCentral(), (req, res) => {
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   if (reqAgentDenied(req, agentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
-  setIdracScanResult(String(b.reqId), b);
+  const applied = applyIdracScanResult(String(b.reqId), b);
+  // v2.621(감사 EDGE-01): 중앙에 없는 잡이면 410 — 예전에는 반환값을 보지 않고 200 이라 엣지는 '회신 성공' 으로 적고 결과·스캔 로그·
+  //   대역 '최근 결과' 는 조용히 사라졌다. 엣지는 410 을 상태·콘솔에 남긴다(현지 등록은 이미 끝났으므로 인벤토리는 잃지 않는다).
+  if (applied.unknown) {
+    console.warn(`[central] idrac-scan-result: 중앙에 없는 잡(${String(b.reqId).slice(0, 64)}) 의 결과 — 만료·중앙 재시작으로 반영하지 못했습니다(410)`);
+    return res.status(410).json({ ok: false, reason: 'unknown-job', detail: '중앙에 이 스캔 잡이 없습니다(만료되었거나 중앙이 재시작됨) — 결과를 반영하지 않았습니다. 엣지 현지 등록은 그대로입니다.' });
+  }
+  // v2.621(감사 EDGE-07): 같은 결과의 재전송(응답 유실 후 엣지 재시도)은 ack 만 한다 — 수집 서버 pull 도 다시 걸지 않는다.
+  if (applied.duplicate) return res.json({ ok: true, duplicate: true });
   // 위임 스캔이 에이전트 현지에 서버를 등록했으면, 그 전력은 '원격 수집(collector pull)'로 중앙에
   // 반영된다. 다음 정기 풀(최대 60s)을 기다리지 않고 즉시 + 지연(에이전트 전력 수집 시간 고려)으로
   // 당겨와 반영을 앞당긴다. best-effort(실패 무시).
@@ -1256,6 +1266,14 @@ centralRouter.post('/part-faults', requireCentral(), async (req, res) => {
   let r;
   try { r = await putEdgeReport(agent, req.body || {}); } catch (e) {
     return res.status(400).json({ ok: false, reason: `본문 형식 오류: ${String(e?.message || e).slice(0, 200)}` });
+  }
+  // v2.621(감사 EDGE-04): 중앙 스토리지·SAN 등록부 손상이면 소유 판정을 하지 않고 503(형제 수신 receiveRegistryUnreadable 과 같은 모양) —
+  //   빈 소유 집합으로 전부 '미소유' 로 버리고 200 을 주면 직전 보고가 교체돼 새 장애 탐지가 멈췄다. 503 은 엣지가 다음 주기에 다시 보낸다.
+  if (r.registryUnreadable) {
+    const u = r.registryUnreadable;
+    registryUnreadable(res, () => ({ at: u.at, reason: u.reason }), u.what);
+    console.warn(`[central] part-faults 수신: 중앙 ${u.what} 등록부를 읽지 못해 503 으로 답했습니다(엣지는 다음 주기에 다시 보냅니다)`);
+    return;
   }
   if (!r.ok) return res.status(r.refused ? 429 : 400).json(r); // v2.605(CEN2605-02): 엣지 수 상한 거절은 429(형제 수신과 같다)
   // 응답에 중앙의 스위치 상태를 실어 보낸다 — 엣지가 '보냈는데 중앙이 꺼져 있다' 를 알 수 있게.
@@ -1821,11 +1839,20 @@ centralRouter.post('/agent-config', requireCentral(), (req, res) => {
     if (v.length > AGENT_CONFIG_FILE_MAX) { lenOmitted.push({ name: require_basename(k), reason: 'too-large', length: v.length }); continue; }
     files[require_basename(k)] = v;
   }
-  const r = setAgentConfig(agent.slice(0, 120), files) || {};
+  // v2.621(감사 RECENT-09): 엣지가 413 으로 보내지 못한 파일 이름(retainFiles) — 그 파일은 직전 사본을 유지한다(교체로 지우지 않는다).
+  //   이름만 받는다(내용은 이미 중앙에 있는 것만 쓴다). 상한 50개 · basename · 이번 본문에 있는 이름은 무시.
+  const retainAsked = Array.isArray(b.retainFiles);
+  const retain = retainAsked
+    ? [...new Set(b.retainFiles.slice(0, 50).filter((x) => typeof x === 'string' && x).map(require_basename))]
+      .filter((n) => n && n !== '__proto__' && !Object.hasOwn(files, n))
+    : [];
+  const r = setAgentConfig(agent.slice(0, 120), files, { retain }) || {};
   if (r.refused) return res.status(429).json({ ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).' });
   const lenNote = lenOmitted.length ? ` · 수신 상한으로 ${lenOmitted.length}개 제외(${lenOmitted.slice(0, 5).map((x) => `${x.name}:${x.reason}`).join(', ')}${lenOmitted.length > 5 ? ' …' : ''})` : '';
   (lenOmitted.length ? console.warn : console.log)(`[central] agent-config 수신: agent=${agent} (${Object.keys(files).length}개${r.omitted ? ` · 합계 상한으로 ${r.omitted}개 제외` : ''}${lenNote})`);
-  res.json({ ok: true, agent, files: Object.keys(files).length, ...(r.omitted ? { omitted: r.omitted } : {}), ...(lenOmitted.length ? { rejectedFiles: lenOmitted.slice(0, 50), rejectedFileCount: lenOmitted.length } : {}), ...(r.evicted ? { evicted: r.evicted } : {}) });
+  // v2.621(감사 RECENT-09): retainFiles 를 받았으면 **항상** retained 를 싣는다(0 이어도) — 엣지는 이 필드의 유무로 '직전 사본 유지를
+  //   아는 중앙' 인지 가른다(구버전 중앙은 모르고 사본을 교체한다 — 엣지가 그 사실을 상태·콘솔에 밝힌다).
+  res.json({ ok: true, agent, files: Object.keys(files).length, ...(r.omitted ? { omitted: r.omitted } : {}), ...(retainAsked ? { retained: r.retained || 0, retainMissing: r.retainMissing || 0 } : {}), ...(lenOmitted.length ? { rejectedFiles: lenOmitted.slice(0, 50), rejectedFileCount: lenOmitted.length } : {}), ...(r.evicted ? { evicted: r.evicted } : {}) });
 });
 /** v2.600 RECENT2600-05 — 엣지 설정 사본 파일 1개 길이 상한 = 엣지 수집 상한(backup/service.js FILE_SIZE_CAP, 8MiB). */
 export const AGENT_CONFIG_FILE_MAX = 8 * 1024 * 1024;

@@ -22,9 +22,15 @@ import { adminOnly, maskPw, requireSettingsOwner, fullScopeOnlyWith } from './sh
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields, denyScopedRun } from '../../auth/scopeMerge.js';
 import { poolRun } from '../../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
+import { strictIpv4Num } from '../../util/ipv4.js';
+import { ipBlockReason } from '../../util/ssrfBlock.js';
 
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('물리 GPU 서버·엣지 배포 설정·엣지 사용자는 전 법인에 걸친 등록부라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
+// v2.621(감사 SEC-02): IP 만으로 SSH 를 시도하는 빠른 테스트에는 법인 축이 없다 — 범위 계정이 이 경로로 범위 밖 VM·인벤토리에
+//   없는 사내 주소에 SSH 를 열 수 있었다(내부망 SSH 스캐너). 형제 /gpu-physical/test 와 같은 기준(전체 범위만)이고, 범위 계정은
+//   VM 을 골라 시험하는 /gpu-guest/test(inUserScope)를 쓴다.
+const rawIpFleetOnly = fullScopeOnlyWith('IP 만으로 SSH 를 시도하는 빠른 테스트는 법인 축이 없어 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다 — 범위 계정은 VM 을 골라 시험하세요.');
 
 export function registerGpuGuest(adminRouter) {
 
@@ -401,11 +407,19 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
 
 // 빠른 단일 테스트(SSH) — VM 목록 로딩/ vCenter 없이 IP+계정만으로 nvidia-smi 1대 테스트.
 // Body: { ip, username, password?, port?, revealCreds? }
-adminRouter.post('/gpu-guest/test-ssh', adminOnly, async (req, res) => {
+adminRouter.post('/gpu-guest/test-ssh', adminOnly, rawIpFleetOnly, async (req, res) => {
   const b = req.body || {};
   const ip = String(b.ip || '').trim();
   const username = String(b.username || '').trim();
   if (!ip || !username) return res.status(400).json({ error: 'ip, username(계정)이 필요합니다.' });
+  // v2.621(감사 SEC-02): 접속처는 **정규형 IPv4** 만 받고 SSRF 차단 대역(루프백·링크로컬·미지정)을 거른다. 수집기의 usableIp 는
+  //   정규식 + 문자열 접두라 '000.0.0.0' 이 통과해 포탈 호스트 자신(루프백)의 서비스에 닿았다(재현). 비정규 표기는 접속 라이브러리가
+  //   8진수로 읽을 수 있으므로(v2.589 strictIpv4Num 규약) 판정 전에 거부한다.
+  if (typeof strictIpv4Num(ip) !== 'number') return res.status(400).json({ error: 'ip 는 정규형 IPv4 점표기(예: 10.0.0.5)여야 합니다 — 앞자리 0·축약 표기·호스트명은 받지 않습니다.' });
+  {
+    const block = ipBlockReason(ip);
+    if (block) return res.status(400).json({ error: `대상 IP 가 차단되었습니다: ${block}` });
+  }
   const s = loadGpuGuestSettings();
   const port = Number(b.port) || s.sshPort || 22;
   const creds = { username, password: String(b.password || ''), privateKey: b.privateKey || undefined };

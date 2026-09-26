@@ -272,7 +272,9 @@ api.post('/tools/part-faults/scan', writeRole, toolsPerm, fullScopeOnly, async (
   const r = config.agent.centralUrl ? await pushPartFaultsNow({ reason: 'manual' }) : await runPartFaultsNow({ notify: true, reason: 'manual' });
   logAudit({ user: req.user?.username, action: config.agent.centralUrl ? '파트 장애 지금 push' : '파트 장애 지금 점검',
     detail: r.ok ? (r.stats ? `신규 ${r.stats.opened} · 해소 ${r.stats.closed} · 변화 ${r.stats.changed}` : `장비 ${r.devices ?? 0}대 · 열린 장애 ${r.open ?? 0}건`) : String(r.reason || '실패') });
-  res.status(r.ok ? 200 : 409).json(r);
+  // v2.621(감사 RECENT-05): 이 응답도 poller 의 마지막 실행 기록({ok, ..._last})이라 notify.results[].partKey(원문 — IP 로 등록된
+  //   iDRAC 이면 주소)를 싣는다. v2.620 이 GET /tools/part-faults·/status 에만 lastView 를 걸어 형제 경로로 남아 있었다 — 같은 함수로 가린다.
+  res.status(r.ok ? 200 : 409).json(lastView(r, isAdminReq(req)));
 });
 
 /** 상태 — 폴러·DB·push·엣지 분류를 한 번에(진단 화면용). */

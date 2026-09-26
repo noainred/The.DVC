@@ -50,14 +50,41 @@ export function splitStateFiles(files) {
   return { settings, stateNames: stateNames.sort() };
 }
 
-/** v2.620(EDGE2620-04): 413 재전송용 — 큰 파일부터 `max` 개를 뺀다(순수). 뺀 목록은 [{name,size}]. */
-export function dropLargestFiles(files, max = RETRY_DROP_MAX) {
-  const sized = Object.entries(files || {}).map(([name, c]) => ({ name, size: Buffer.byteLength(String(c ?? ''), 'utf8') }))
-    .sort((a, b) => (b.size - a.size) || a.name.localeCompare(b.name));
-  const dropped = sized.slice(0, Math.max(0, Math.min(max, sized.length - 1)));   // 최소 1개는 남긴다(빈 push 는 중앙 사본을 비운다)
+/**
+ * v2.621(감사 RECENT-09): 413 재전송에서 '본문을 이 크기 아래로' 맞추려는 목표(해제 후 바이트). 중앙 BIG_JSON 기본 한도 16MB
+ *   (index.js JSON_BODY_LIMIT)보다 1MB 아래 — 엣지는 중앙 설정값을 모르므로 기본값에 맞추고, 그보다 작게 설정된 중앙이면 아래
+ *   dropLargestFiles 가 최소 1개는 빼고, 그래도 413 이면 실패로 남는다(그때 중앙은 직전 사본을 그대로 들고 있다).
+ */
+export const RETRY_TARGET_BYTES = Math.max(1024 * 1024, Number(process.env.AGENT_CONFIG_PUSH_TARGET_BYTES) || 15728640);   // 기본 15MB
+
+/**
+ * v2.620(EDGE2620-04): 413 재전송용 — 큰 파일부터 뺀다(순수). 뺀 목록은 [{name,size}].
+ * v2.621(감사 RECENT-09): `targetBytes` 를 주면 **초과분을 덮을 만큼만** 뺀다 — 예전에는 초과량과 무관하게 min(8, n-1)개를 빼
+ *   (파일 3개면 2개) 한도와 무관한 작은 파일까지 중앙 사본에서 빠졌다. 413 이 났다는 것은 지금 크기가 한도를 넘었다는 뜻이라
+ *   목표 아래로 추정돼도 **최소 1개**는 뺀다. `totalBytes` 는 거절된 본문의 크기(없으면 추정). 목표 없이 부르면 예전 동작.
+ */
+export function dropLargestFiles(files, max = RETRY_DROP_MAX, { targetBytes = null, totalBytes = null } = {}) {
+  const sized = Object.entries(files || {}).map(([name, c]) => ({
+    name, size: Buffer.byteLength(String(c ?? ''), 'utf8'),
+    // 본문(JSON)에서 이 파일이 차지하는 바이트 — 이스케이프·이름·구분자까지(목표 판정용, 결과에는 싣지 않는다)
+    wire: Buffer.byteLength(JSON.stringify(String(c ?? ''))) + Buffer.byteLength(JSON.stringify(name)) + 2,
+  })).sort((a, b) => (b.size - a.size) || a.name.localeCompare(b.name));
+  const cap = Math.max(0, Math.min(max, sized.length - 1));   // 최소 1개는 남긴다(빈 push 는 중앙 사본을 비운다)
+  let picked;
+  const target = Number(targetBytes);
+  if (Number.isFinite(target) && target > 0) {
+    let total = Number(totalBytes);
+    if (!Number.isFinite(total) || total <= 0) total = sized.reduce((n, f) => n + f.wire, 0);
+    picked = [];
+    for (const f of sized) {
+      if (picked.length >= cap) break;
+      if (picked.length >= 1 && total <= target) break;
+      picked.push(f); total -= f.wire;
+    }
+  } else picked = sized.slice(0, cap);
   const keep = { ...files };
-  for (const d of dropped) delete keep[d.name];
-  return { files: keep, dropped };
+  for (const d of picked) delete keep[d.name];
+  return { files: keep, dropped: picked.map(({ name, size }) => ({ name, size })) };
 }
 
 /** v2.620(EDGE2620-04): gzip 본문(중앙 express.json 이 Content-Encoding: gzip 을 자동 해제 — BIG_JSON 등록 경로). 실패하면 원문. */
@@ -115,8 +142,8 @@ async function _pushConfigNow({ onlyIfChanged = false } = {}) {
       return null;
     }
     if (skipped.length) console.warn(`[config-push] 크기 상한을 넘은 설정 파일 ${skipped.length}개는 보내지 않습니다: ${skipped.map((f) => (f.size == null ? f.name : `${f.name}(${Math.round(f.size / 1048576)}MB)`)).join(', ')}`);
-    const send = async (fileMap) => {
-      const enc = await encodeBody({ agent: config.agent.name, files: fileMap, ...(skipped.length ? { skipped } : {}) });
+    const send = async (fileMap, extra = {}) => {
+      const enc = await encodeBody({ agent: config.agent.name, files: fileMap, ...(skipped.length ? { skipped } : {}), ...extra });
       const r = await resilientFetch(`${config.agent.centralUrl}/api/central/agent-config`, {
         method: 'POST', headers: enc.hdrs, body: enc.body, timeoutMs: 20_000, retries: 2,
       });
@@ -128,11 +155,15 @@ async function _pushConfigNow({ onlyIfChanged = false } = {}) {
     //   설정 사본 전체가 갱신되지 않았다. 뺀 파일은 이름·크기를 상태·콘솔에 남긴다(조용한 제외 금지).
     let retryDropped = [];
     if (res.status === 413 && Object.keys(files).length > 1) {
-      const d = dropLargestFiles(files);
+      // v2.621(감사 RECENT-09): 초과분을 덮을 만큼만 빼고(targetBytes), 뺀 파일 이름을 `retainFiles` 로 싣는다 — 중앙(v2.621+)은 그
+      //   파일의 **직전 사본을 유지**한다. 예전 재전송은 {agent, files} 뿐이라 중앙이 '413 으로 뺀 파일' 과 '엣지에서 지운 파일' 을
+      //   구분하지 못하고 사본을 통째로 교체해, 직전까지 보관하던 큰 설정(보통 등록부)이 중앙 통합 백업에서 조용히 사라졌다.
+      //   ⚠ 구버전 중앙은 retainFiles 를 모른다 — 응답에 retained 가 없으면 그 사실을 상태·콘솔에 밝힌다(아래).
+      const d = dropLargestFiles(files, RETRY_DROP_MAX, { targetBytes: RETRY_TARGET_BYTES, totalBytes: rawBytes });
       retryDropped = d.dropped;
-      console.warn(`[config-push] 중앙 본문 한도 초과(413) — 큰 설정 파일 ${retryDropped.length}개를 빼고 한 번 다시 보냅니다: ${retryDropped.map((f) => `${f.name}(${Math.round(f.size / 1024)}KB)`).join(', ')}`);
+      console.warn(`[config-push] 중앙 본문 한도 초과(413) — 큰 설정 파일 ${retryDropped.length}개를 빼고 한 번 다시 보냅니다(중앙은 그 파일의 직전 사본을 유지): ${retryDropped.map((f) => `${f.name}(${Math.round(f.size / 1024)}KB)`).join(', ')}`);
       sent = d.files;
-      ({ res, bytes, rawBytes } = await send(sent));
+      ({ res, bytes, rawBytes } = await send(sent, { partial: true, retainFiles: retryDropped.map((f) => f.name) }));
     }
     const skippedInfo = {
       ...(skipped.length ? { skipped } : {}),
@@ -147,7 +178,21 @@ async function _pushConfigNow({ onlyIfChanged = false } = {}) {
       const drop = dropSummaryOf(reply);
       const rejectedNames = Array.isArray(reply?.rejectedFiles) ? reply.rejectedFiles.slice(0, 50).map((x) => (x && typeof x === 'object' ? `${String(x.name ?? '').slice(0, 160)}:${String(x.reason ?? '').slice(0, 30)}` : String(x).slice(0, 200))) : [];
       console.log(`[config-push] sent → ${config.agent.centralUrl} (${Object.keys(sent).length}개 설정 · gzip ${Math.round(bytes / 1024)}KB${skipped.length ? ` · 크기 초과 ${skipped.length}개 제외` : ''}${retryDropped.length ? ` · 413 으로 ${retryDropped.length}개 제외` : ''})`);
-      _last = { at: Date.now(), ok: true, files: Object.keys(sent).length, status: res.status, ...skippedInfo, ...(drop ? { centralDropped: { ...drop, ...(rejectedNames.length ? { rejectedFileNames: rejectedNames } : {}) } } : {}) };
+      // v2.621(감사 RECENT-09): 413 으로 뺀 파일을 중앙이 직전 사본으로 유지했는가. 응답에 retained 가 없으면 구버전 중앙(< 2.621)이
+      //   retainFiles 를 몰라 사본을 교체한 것이다 — 그 파일의 직전 사본이 중앙 통합 백업에서 빠졌다는 사실을 숨기지 않는다.
+      let retainNote = {};
+      if (retryDropped.length) {
+        const kept = numOrNull(reply?.retained);
+        if (kept == null) {
+          retainNote = { centralRetainUnsupported: true };
+          console.warn(`[config-push] 중앙이 413 으로 뺀 파일의 직전 사본 유지(retainFiles)를 모릅니다(구버전 중앙) — ${retryDropped.map((f) => f.name).join(', ')} 의 직전 사본이 중앙 통합 백업에서 빠졌습니다. 중앙을 2.621 이상으로 올리세요`);
+        } else {
+          const missing = numOrNull(reply?.retainMissing) || 0;
+          retainNote = { centralRetained: kept, ...(missing ? { centralRetainMissing: missing } : {}) };
+          if (missing) console.warn(`[config-push] 413 으로 뺀 파일 ${missing}개는 중앙에 직전 사본이 없어 이번 사본에 들어가지 않았습니다(중앙 한도를 확인하세요)`);
+        }
+      }
+      _last = { at: Date.now(), ok: true, files: Object.keys(sent).length, status: res.status, ...skippedInfo, ...retainNote, ...(drop ? { centralDropped: { ...drop, ...(rejectedNames.length ? { rejectedFileNames: rejectedNames } : {}) } } : {}) };
       warnDrop('config-push', drop);
       // 413 으로 파일을 뺀 push 는 '설정 전체가 올라갔다' 가 아니다 — 지문을 기억하지 않아 다음 변경 감시가 다시 보낸다.
       if (!retryDropped.length) _lastPushedFp = fp;

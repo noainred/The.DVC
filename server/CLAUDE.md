@@ -750,3 +750,16 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
 - **엣지 수신 원소는 객체만**(`routes/central.js /inventory` + `store.js` 병합부 + `central/edgeRecord.js`): 비객체·예약어 id·범위 밖 vcenterId 는
   버리고 개수를 밝힌다. 중앙 엣지 저장소는 장비·엣지·엣지 수 상한을 둔다(`CENTRAL_EDGE_*`).
 - **범위 계정의 OS 스캔 실행은 vCenter 지정 필수**(400) — 비우면 전 vCenter 게스트에 로그인한다. 범위 밖 지정은 404(존재 은닉).
+
+## 2026-09-26 v2.621 감사 조치 — 되돌리지 말 것 (docs/AUDIT-2026-09-26c.md)
+
+- **범위 관리자는 범위 밖 중계 프록시를 점검·배포하지 못한다**(`routes/remote.js proxyHiddenFor`, SEC-01): `POST/DELETE /proxies` 의
+  `proxyScopeOf` 판정을 형제 라우트(`/proxies/:id/health`·`/test`·`/deploy/test`·`/deploy`)에도 쓴다 — 단건은 404(존재 은닉), 전체 배포는 숨긴
+  프록시를 건너뛰고 `omittedOutOfScope` 로 밝힌다. 공유·기본 프록시와 전체 범위 관리자는 예전 그대로.
+- **요청 본문 IP 로 직접 접속하는 테스트는 전체 범위 전용 + 정규형 IPv4 + 차단 대역**(`routes/admin/gpuGuest.js` `rawIpFleetOnly`, SEC-02):
+  비정규 표기(`000.0.0.0`·`010.0.0.5`)는 inet_aton 이 다르게 읽는다(v2.589 규약). 수집기 `gpu/sshCollect.js usableIp` 도 같은 판정이고
+  **루프백은 `SSRF_ALLOW_LOOPBACK` 과 무관하게** 뺀다(게스트 VM 의 IP 로 루프백은 뜻이 없다).
+- **폴더 사용량 조회 4종도 전체 범위 전용**(`routes/admin/dirUsage.js fleetReadOnly`, SEC-03) — 응답이 RMA 엣지 IP·호스트명·fileRoots·마운트 경로를 싣는다
+  (형제 `/tools/rma`·`/admin/collectors` 는 이미 403 이었다).
+- **엣지 push 3종(스토리지·SAN·PDU)은 등록부 손상을 '위임 0대' 로 읽지 않는다**(`registryLoadError()` 선판정, EDGE-03) · 중앙 part-faults 수신은
+  그 장비군의 등록부가 손상이면 503 `registryUnreadable`(EDGE-04 — v2.620 EDGE2620-01 의 형제 누락).

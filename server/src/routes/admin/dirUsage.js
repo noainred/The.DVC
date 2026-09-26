@@ -17,11 +17,15 @@ import { listRmaAgents } from '../../rma/jobs.js';
 const adminOnly = requireRole('admin');
 // v2.611 AUTHZ2611-02: 포탈 호스트 동작은 전 법인 공용 — 범위 계정 403.
 const fleetOnly = fullScopeOnlyWith('폴더 사용량 설정·실행은 포탈 호스트 경로를 스캔하는 전 법인 공용 동작이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
+// v2.621(감사 SEC-03): 조회 4종도 전체 범위만. 응답이 엣지 목록(listRmaAgents — 엣지 IP·호스트명·OS·RMA 정책의 fileRoots)과
+//   엣지 마운트 경로·하위 폴더 이름을 싣는데 법인 축이 없다 — 같은 사용자가 /tools/rma·/admin/collectors 에서는 403 인데 여기서는
+//   200 으로 같은 정보를 읽었다(재현, 형제 게이트 우회). v2.611 이 쓰기만 막고 조회는 열어 둔 것을 되돌린다.
+const fleetReadOnly = fullScopeOnlyWith('폴더 사용량 리포트는 엣지 목록·엣지 마운트 경로·폴더 이름을 담은 전 법인 공용 화면이라 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 
 export function registerDirUsage(adminRouter) {
 
   // 설정 + 상태 + 최근 결과. 엣지 목록도 함께 내려 화면이 선택지를 만들 수 있게 한다.
-  adminRouter.get('/dir-usage', adminOnly, async (_req, res) => {
+  adminRouter.get('/dir-usage', adminOnly, fleetReadOnly, async (_req, res) => {
     const db = await getDb();
     const latest = db ? db.latestAll() : [];
     res.json({
@@ -56,7 +60,7 @@ export function registerDirUsage(adminRouter) {
   });
 
   // 대상별 이력(최근 N건). 증감 계산은 화면이 두 건을 비교해 만든다.
-  adminRouter.get('/dir-usage/history/:targetId', adminOnly, async (req, res) => {
+  adminRouter.get('/dir-usage/history/:targetId', adminOnly, fleetReadOnly, async (req, res) => {
     const db = await getDb();
     if (!db) return res.status(503).json({ ok: false, reason: '이력 DB 를 사용할 수 없습니다(node:sqlite).' });
     const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 30));
@@ -64,7 +68,7 @@ export function registerDirUsage(adminRouter) {
   });
 
   // 스캔 1건 상세(Top-N 전체 + 직전 대비 증감).
-  adminRouter.get('/dir-usage/scan/:id', adminOnly, async (req, res) => {
+  adminRouter.get('/dir-usage/scan/:id', adminOnly, fleetReadOnly, async (req, res) => {
     const db = await getDb();
     if (!db) return res.status(503).json({ ok: false, reason: '이력 DB 를 사용할 수 없습니다(node:sqlite).' });
     const scan = db.get(Number(req.params.id));
@@ -74,7 +78,7 @@ export function registerDirUsage(adminRouter) {
   });
 
   // 메일 미리보기(HTML) — 실제 발송 없이 본문만 확인한다. 발송 전에 서식을 보게 하는 용도.
-  adminRouter.get('/dir-usage/preview/:id', adminOnly, async (req, res) => {
+  adminRouter.get('/dir-usage/preview/:id', adminOnly, fleetReadOnly, async (req, res) => {
     const db = await getDb();
     if (!db) return res.status(503).json({ ok: false, reason: '이력 DB 를 사용할 수 없습니다.' });
     const row = db.get(Number(req.params.id));

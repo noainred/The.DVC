@@ -58,7 +58,9 @@ export async function scanForIdracs({ ips, username, password, ilo = null, concu
     if (iloCred && r.vendor === 'hpe') return false;
     unsupportedCount++;
     if (unsupported.length < MAX_UNSUPPORTED) {
-      unsupported.push({ ip, vendor: r.vendor || 'unknown', vendorLabel: r.vendorLabel || '', evidence: r.vendorEvidence || '', product: r.product || '', model: r.model || '', manufacturer: r.manufacturer || '', hostName: r.hostName || '', authFailed: !!r.authFailed, at: Date.now() });
+      unsupported.push({ ip, vendor: r.vendor || 'unknown', vendorLabel: r.vendorLabel || '', evidence: r.vendorEvidence || '', product: r.product || '', model: r.model || '', manufacturer: r.manufacturer || '', hostName: r.hostName || '', authFailed: !!r.authFailed,
+        // v2.621(감사 WEB-05): 그 벤더의 계정이 없어 로그인을 시도하지 않은 장비 — authFailed:false 만 실으면 화면이 '통과' 라 말했다.
+        noCreds: r.noCreds === true, at: Date.now() });
     }
     return true;
   };

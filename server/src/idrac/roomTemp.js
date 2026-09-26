@@ -41,8 +41,18 @@ export const UNASSIGNED_KEY = '__unassigned__';
  */
 export const DEFAULT_MAX_AGE_MS = Number(process.env.ROOMTEMP_STALE_MS) || 15 * 60_000;
 
+/*
+ * v2.621(감사 DATA-04 — 코드상 성립, 실장비 미확인): HPE iLO(v2.610 부터 같은 폴러로 Thermal 수집)는 섀시 흡기
+ *   ('01-Inlet Ambient') 외에 **전원공급장치 흡기**('32-P/S 1 Inlet' 류)를 노출하는 것으로 알려져 있다. 그것이 흡기로
+ *   분류되면 종류별 최댓값 규칙 때문에 서버 대표 흡기가 PSU 내부 온도가 되어 ASHRAE 판정이 주의·고온으로 뒤집히고
+ *   ΔT(배기−흡기)가 음수가 된다. 전원공급장치 센서는 머리말의 약속대로 other 로 세고 흡기·배기 판정에서 뺀다.
+ *   Dell 명칭('System Board Inlet Temp'·'PSU1 Temp')의 분류는 바뀌지 않는다(테스트 고정). HPE 실장비 응답을 보면 좁힐 것.
+ */
+const PSU_SENSOR_RE = /\bp\/?s\s*\d|\bp\/s\b|\bpsu\d*\b|power\s*supply/i;
+
 export function classifySensor(name) {
   const s = String(name || '');
+  if (PSU_SENSOR_RE.test(s)) return 'other';
   if (/inlet|intake|ambient|front/i.test(s)) return 'inlet';
   if (/exhaust|outlet|exit|rear/i.test(s)) return 'exhaust';
   // \bcpu\b 는 'CPU1 Temp'(숫자 접미) 를 놓친다 — cpu 뒤 숫자를 허용한다(실측으로 확인).

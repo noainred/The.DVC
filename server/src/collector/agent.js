@@ -11,7 +11,7 @@ import { getCollectorDenyStats } from './denyLog.js'; // v2.579: 도메인은 ro
 import { localPowerByHostName } from '../idrac/service.js';
 import { getPollerStatus } from '../idrac/poller.js';
 import { allOmeDevices } from '../idrac/omeCache.js';
-import { loadRegistry as loadIdracRegistry } from '../idrac/registry.js';
+import { loadRegistry as loadIdracRegistry, isHpeEntry } from '../idrac/registry.js';
 import { getInventory } from '../idrac/invCache.js';
 import { getSensorSeries } from '../idrac/sensorStore.js';
 
@@ -86,6 +86,9 @@ function localServersForExport() {
       vcenterId: s.vcenterId || '',
       datacenterId: s.datacenterId || '',
       type: s.type || 'idrac',
+      // v2.621(감사 WEB-04): BMC 벤더를 싣는다 — 예전에는 빠져 있어 중앙 서버 목록이 위임 HPE 서버를 'iDRAC' 으로 보였다.
+      //   등록부 규약(vendor 없음 = Dell iDRAC)대로 'hpe' | 'dell' 을 명시한다. 필드 자체가 없으면 중앙은 구버전 엣지로 보고 '미상'.
+      vendor: isHpeEntry(s) ? 'hpe' : 'dell',
       inv: compactInv(inv),
       sensors: compactSensors(s.id), // 최신 온도(중앙 '법인별 온도'용) — 구버전 중앙은 무시(하위호환)
     });

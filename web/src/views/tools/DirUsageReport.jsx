@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -20,12 +20,20 @@ export function DirUsageReport() {
   const [history, setHistory] = useState([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const pollRef = useRef(null);
 
   const load = async () => {
     try { setD(await fetchJson('/admin/dir-usage')); setErr(null); }
-    catch (e) { setErr(e.message); }
+    catch (e) {
+      // v2.621(감사 SEC-03 후속): 403(전체 범위 전용)은 권한 안내로 보이고 폴링을 멈춘다 — 다시 물어도 결과가 같다.
+      setErr(e);
+      if (e?.status === 403 && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    }
   };
-  useEffect(() => { load(); const t = setInterval(load, 20_000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    load(); pollRef.current = setInterval(load, 20_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; };
+  }, []);
 
   // 대상이 정해지면 최신 스캔 + 이력을 가져온다.
   useEffect(() => {
@@ -100,7 +108,7 @@ export function DirUsageReport() {
         하위 폴더 이름을 사용자로 보고 사용량을 집계합니다. 대상·주기·메일 수신자는
         <b> 설정 › 폴더 사용량 리포트</b> 에서 지정합니다.
       </p>
-      {err && <div className="muted" style={{ color: '#f0a', fontSize: 12, marginBottom: 8 }}>폴링 오류: {err}</div>}
+      {err && <div className="muted" style={{ color: '#f0a', fontSize: 12, marginBottom: 8 }}>폴링 오류: {typeof err === 'string' ? err : (err?.message || '알 수 없는 오류')}</div>}
       {msg && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: msg.startsWith('오류') ? '#f0a' : undefined }}>{msg}</div>}
 
       {targets.length === 0 && (

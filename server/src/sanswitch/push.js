@@ -35,6 +35,9 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { trimZoningToFit } from '../central/edgeRecord.js'; // v2.600 RECENT2600-02 — 중앙 수신과 같은 조닝 축약(순수)
 import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.js'; // v2.613 EDGE2613-05: readDropSummary 사본 → 공용
 import { centralStatusOnlySupport, sendStatusOnly, DEVICE_STATUS_ONLY_MIN_CENTRAL } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04
+import { createChangeLogger } from '../util/logThrottle.js';
+
+const _regLog = createChangeLogger({ windowMs: 60 * 60_000 }); // v2.621(감사 EDGE-03): 등록부 손상 경고는 같은 사유면 1시간에 한 줄
 
 // v2.613 RUNTIME2613-04: 주기 env 는 `clampIntervalMs` 로 [하한, 2^31−1ms] 에 가둔다(v2.599 T2599-02 규약 — sanSwitchConfigPull 과 같다).
 //   상한이 없으면 adaptiveTimer 가 자른 값과 `sanSwitchPushStatus().intervalMs` 가 다르게 보고됐다.
@@ -148,13 +151,22 @@ async function pushSanSwitchOnce() {
        *   ② 위임 장비는 있는데 스냅샷이 아직 없으면(재기동 직후) **보내지 않는다** — 빈 목록으로 덮으면 한 주기 동안
        *      중앙 화면이 빈다(v2.581 BUG-D 와 같은 판단). 사유는 상태에 남긴다.
        */
-      let assigned = null;
-      try { const { devicesForThisNode } = await import('./registry.js'); assigned = devicesForThisNode().length; } catch { /* 등록부를 못 읽음 — 비우지 않는다 */ }
+      // v2.621(감사 EDGE-03): 등록부 손상은 **던지지 않는다**(v2.613 registryCore — preserveCorrupt 뒤 빈 목록 + registryLoadError()).
+      //   예전 catch 는 도달할 수 없어 손상 등록부가 '위임 0대' 로 읽혔고, 스냅샷 파일도 비면(신규 엣지·파일 유실) 빈 청크 0 으로
+      //   중앙의 이 엣지 목록을 비우고 '위임 장비 0대 — 중앙 목록을 비웠습니다' 라는 틀린 사유를 남겼다(CVP 는 v2.620 EDGE2620-05).
+      //   손상이면 assigned=null(못 읽음) — 비우지 않고 'registry-unreadable' 상태만 올린다. 다음 sanswitch-config pull 이 등록부를 다시 쓰면 풀린다.
+      let assigned = null; let regErr = null;
+      try {
+        const reg = await import('./registry.js');
+        regErr = reg.registryLoadError?.() || null;
+        if (!regErr) assigned = reg.devicesForThisNode().length;
+      } catch (e) { regErr = { at: Date.now(), reason: e?.message || String(e) }; /* 등록부를 못 읽음 — 비우지 않는다 */ }
       if (assigned !== 0) {
         // v2.613(감사 EDGE2613-04): **보내지 않되 상태는 올린다**(v2.517 규약 — storage v2.581 과 같다). 예전에는 여기서 조용히
         //   돌아가 중앙이 '엣지가 안 보냈다' 와 '위임은 있는데 첫 수집 대기' 를 구분하지 못했다. ⚠ `/sanswitch-data` 의 statusOnly 수신은
         //   v2.613.0 부터라 그보다 낮은 중앙에는 보내지 않는다(빈 청크 0 = 목록 교체 — 중앙 목록이 비워진다). 사유는 상태에 남긴다.
-        const reason = assigned == null ? '등록부를 읽지 못해 보내지 않았습니다' : `위임 장비 ${assigned}대 — 아직 수집된 스냅샷이 없습니다(첫 수집 대기)`;
+        const reason = assigned == null ? `등록부를 읽지 못해 보내지 않았습니다${regErr?.reason ? `(${String(regErr.reason).slice(0, 200)})` : ''} — '위임 0대' 가 아닙니다` : `위임 장비 ${assigned}대 — 아직 수집된 스냅샷이 없습니다(첫 수집 대기)`;
+        if (assigned == null && _regLog('registry', regErr?.reason)) console.warn(`[sanswitch-push] ${reason}. 중앙 sanswitch-config pull 이 등록부를 다시 쓰면 풀립니다`);
         const cap = await centralStatusOnlySupport({ minVersion: DEVICE_STATUS_ONLY_MIN_CENTRAL });
         if (!cap.ok) {
           _last = { at: Date.now(), sent: 0, reason, statusSent: false, statusSkipped: cap.reason, centralVersion: cap.version || null };

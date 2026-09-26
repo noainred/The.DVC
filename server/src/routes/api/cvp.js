@@ -120,6 +120,22 @@ export function maskErrText(v, hosts = []) {
     .replace(/(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])/g, '(주소 가림)');
 }
 
+/**
+ * v2.621(감사 RECENT-07): 비-admin 응답의 servers[].status 에서 **주소가 실릴 수 있는 문자열 칸 전부**를 가린다.
+ *   v2.620 은 status.error 만 가렸는데 status.missing 의 값도 같은 사유 문구다 — 텔레메트리·인벤토리 경로가 리다이렉트되면
+ *   `…실패(HTTP 302 → https://출처)`·`경로: 리다이렉트 사유` 를 싣고(cvp/client.js), 토큰 모드에서는 인벤토리가 첫 요청이라
+ *   error 는 가려져도 missing.inventory 로 같은 출처(등록 주소)가 원문 그대로 나갔다. authStopped.reason 도 같은 계열이다.
+ */
+export function maskStatusText(st, hosts = []) {
+  if (!st || typeof st !== 'object') return st;
+  const out = { ...st, error: maskErrText(st.error, hosts) };
+  if (st.missing && typeof st.missing === 'object') {
+    out.missing = Object.fromEntries(Object.entries(st.missing).map(([k, v]) => [k, maskErrText(v, hosts)]));
+  }
+  if (st.authStopped && typeof st.authStopped === 'object') out.authStopped = { ...st.authStopped, reason: maskErrText(st.authStopped.reason, hosts) };
+  return out;
+}
+
 export function registerCvp(api) {
 
 api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
@@ -136,7 +152,7 @@ api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
     poller: admin ? poller : maskPollerStatus(poller, servers.map((s) => s.host)),
     servers: servers.map((s) => {
       const st = statusOf(s);
-      return { ...maskServer(s, admin), status: admin || !st ? st : { ...st, error: maskErrText(st.error, hosts) }, pendingRequest: hasPendingCvpRequest(s.id) };
+      return { ...maskServer(s, admin), status: admin || !st ? st : maskStatusText(st, hosts), pendingRequest: hasPendingCvpRequest(s.id) };
     }),
     totals,
     orphanRows: rows.length - mine.length,
@@ -170,7 +186,9 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
   if (agent === undefined) return res.status(404).json({ ok: false, reason: '수집된 장비 정보가 없습니다.' });
   const det = await cdb.deviceDetail(agent, cvpId, key);
   if (!det) return res.status(404).json({ ok: false, reason: '수집된 장비 정보가 없습니다.' });
-  const st = statusOf(srv);
+  // v2.621(감사 RECENT-07): 장비 상세도 같은 status.missing 을 싣는다 — 목록과 같은 가림(형제 경로).
+  const st0 = statusOf(srv);
+  const st = admin ? st0 : maskStatusText(st0, listServers().map((x) => x.host));
   res.json({
     device: publicDevice(det.device, admin),
     parts: det.device.partsList,

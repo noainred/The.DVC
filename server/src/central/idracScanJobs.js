@@ -12,6 +12,7 @@
  *   UI    ← GET  /api/admin/idrac/scan-result?reqId=...        → getIdracScanResult
  */
 
+import crypto from 'node:crypto';
 import { expandIpList } from '../idrac/iprange.js';
 import { saveUnsupportedServers } from './unsupportedServers.js'; // v2.495: 비-Dell(미지원) 서버 영속 보관
 import { appendIdracScanLog } from '../idrac/scanLog.js';
@@ -56,6 +57,15 @@ const MAX_EVENTS = 300;    // 잡당 이벤트 로그 상한
 // 엣지가 인출 직후 재시작/단절된 것으로 보고 잡을 다시 대기로 되돌려 재인출 가능하게 한다(유실 방지).
 const ACK_TIMEOUT_MS = Number(process.env.IDRAC_SCAN_ACK_TIMEOUT_MS) || 90_000;
 const MAX_CLAIMS = 3;      // 재인출 한도(초과 시 오류 종결)
+/**
+ * v2.621(감사 EDGE-01): 폴 한 번에 인출하는 잡 수. 엣지 워커(agent/idracScanWorker.js)는 받은 잡을 **순차로** 돌고 그동안
+ *   다시 폴하지 않는다. 예전에는 대기 전량을 인출해 전부 running + claim 기한(90초)을 걸었으므로, 앞 잡이 도는 동안 뒤 잡은
+ *   ack 없이 '엣지 재시작 가능성' 으로 재대기(takenAt=null)됐고 앞 잡들의 합이 10분을 넘으면 gc 가 지워 **그 결과가 200 과
+ *   함께 버려졌다**. v2.591 collectRequestQueue take(max) 와 같은 판단 — 엣지가 처리하는 만큼만 인출한다. 남은 잡은 대기로
+ *   남아 앞 잡이 끝난 뒤의 다음 폴(기본 5초)에 간다. 구버전 엣지도 받은 목록을 처리할 뿐이라 그대로 동작한다.
+ */
+export const TAKE_MAX = 1;
+const agentKeyOf = (j) => String(j?.agent || '').trim().toLowerCase();
 
 /** 잡 이벤트 로그 한 줄 추가(로그창용 타임라인). level: info|warn|error */
 function addEvent(j, msg, level = 'info') {
@@ -93,16 +103,34 @@ export function reapClaims(now = Date.now()) {
   return { requeued, failed };
 }
 
-function gc() {
-  reapClaims(); // 만료된 claim을 먼저 재수확(재인출 대기로 복귀 또는 오류 종결)
-  const now = Date.now();
+/**
+ * v2.621(감사 EDGE-01): 에이전트별 '살아서 일하는' 마지막 시각 — 진행 중(running, 폴 인출) 잡의 인출·진행 보고 시각.
+ *   엣지는 잡을 하나씩 처리하므로 앞 잡이 도는 동안 뒤 잡이 인출되지 못한 채 기다리는 것이 정상이다.
+ */
+function agentActiveMap() {
+  const m = new Map();
+  for (const j of jobs.values()) {
+    if (j.state !== 'running' || j.dispatch === 'push') continue;
+    const k = agentKeyOf(j);
+    const at = Math.max(j.takenAt || 0, j.progress?.at || 0);
+    if (at > (m.get(k) || 0)) m.set(k, at);
+  }
+  return m;
+}
+
+function gc(now = Date.now()) {
+  reapClaims(now); // 만료된 claim을 먼저 재수확(재인출 대기로 복귀 또는 오류 종결)
+  const active = agentActiveMap();
   for (const [reqId, j] of jobs) {
     const done = j.state === 'done' || j.state === 'error';
     // 미완료 잡은 '마지막 활동'(생성/인출/진행 보고) 기준으로 만료 — createdAt 기준이면 2048 IP처럼
     // 10분을 넘기는 정상 진행(running) 잡이 도중에 삭제돼 에이전트의 결과 회신이 유실된다.
+    // v2.621(감사 EDGE-01): **대기** 잡은 그 에이전트의 활동(앞 잡의 진행 보고·잡 인출 폴)도 활동으로 본다 — 순서를 기다리는
+    //   잡이 앞 잡들의 합 10분을 넘겨 지워지면 그 결과가 버려졌다. 폴도 진행도 없는 오프라인 에이전트는 예전처럼 10분 뒤 정리된다.
+    const waitingAt = j.state === 'pending' ? Math.max(active.get(agentKeyOf(j)) || 0, agentLastScanPoll(j.agent) || 0) : 0;
     const lastActivity = done
       ? (j.doneAt || 0)
-      : Math.max(j.createdAt || 0, j.takenAt || 0, j.progress?.at || 0);
+      : Math.max(j.createdAt || 0, j.takenAt || 0, j.progress?.at || 0, waitingAt);
     if (now - lastActivity > TTL) {
       jobs.delete(reqId);
       // byAgent 대기 셋도 함께 정리 — 남겨두면 유령 reqId가 MAX_PENDING을 영구 점유해
@@ -223,14 +251,16 @@ export function takeIdracScanJobs(agentName) {
   const pend = byAgent.get(key);
   if (!pend || !pend.size) return [];
   const out = [];
-  for (const reqId of pend) {
+  for (const reqId of [...pend]) {
     const j = jobs.get(reqId);
     // ⚠ 회귀 방지(v2.287, 확정 버그 #15): 'pending' 상태만 claim 한다. reapClaims 가 만료 claim 을
     // pending 으로 되돌려 대기셋에 다시 넣은 뒤 늦은 ack(setIdracScanProgress/Result)가 도착하면
     // 그 잡은 running/done 인데도 대기셋에 남아 있어(ack 가 셋에서 안 뺐음), 상태 검사가 없으면
-    // 여기서 재인출돼 같은 대역을 중복 스캔하고 진행 상태가 역행했다. 진행/완료된 잡은 건너뛴다
-    // (아래 byAgent.delete 로 셋에서도 함께 정리된다).
-    if (!j || j.state !== 'pending') continue;
+    // 여기서 재인출돼 같은 대역을 중복 스캔하고 진행 상태가 역행했다. 진행/완료된 잡은 건너뛰고 셋에서도 뺀다.
+    if (!j || j.state !== 'pending') { pend.delete(reqId); continue; }
+    // v2.621(감사 EDGE-01): 엣지 처리량(TAKE_MAX)만큼만 인출한다 — 나머지는 대기셋에 남아 다음 폴에 간다.
+    if (out.length >= TAKE_MAX) continue;
+    pend.delete(reqId);
     // claim: running으로 전환하되 첫 보고(ack) 전까지는 claim 기한을 둔다. 기한 내 보고 없으면 재수확.
     j.state = 'running'; j.takenAt = Date.now(); j.acked = false;
     j.claims = (j.claims || 0) + 1;
@@ -240,7 +270,7 @@ export function takeIdracScanJobs(agentName) {
     //   구버전 엣지는 두 필드를 모르므로 예전처럼 전부 시도한다(안전한 쪽).
     out.push({ reqId, action: j.action || 'scan', ips: j.ips, username: j.username, password: j.password, vcenterId: j.vcenterId || '', datacenterId: j.datacenterId || '', noRegister: !!j.noRegister, found: j.found || undefined, mode: j.mode || 'merge', trigger: j.trigger === 'periodic' ? 'periodic' : 'manual', rangeId: j.rangeId || '', ...(j.ilo ? { ilo: j.ilo } : {}) });
   }
-  byAgent.delete(key);
+  if (!pend.size) byAgent.delete(key);
   return out;
 }
 
@@ -303,6 +333,9 @@ export function cancelIdracScanJob(reqId) {
 export function setIdracScanProgress(reqId, { scanned, total, found } = {}) {
   const j = jobs.get(reqId);
   if (!j) return false;
+  // v2.621(감사 EDGE-07): 결과가 이미 온(종료) 잡에 늦게 도착한 진행 보고는 반영하지 않는다 — 진행 보고는 엣지가 기다리지 않고
+  //   보내므로(fire-and-forget) 결과보다 늦게 올 수 있고, 반영하면 진행률이 결과보다 뒤로 간다. 받은 것으로는 답한다(재전송 불필요).
+  if (j.state === 'done' || j.state === 'error') return true;
   j.acked = true; j.claimDeadline = null; // 첫 진행 보고 = ack(claim 확정) → 재수확 대상 아님
   dropWaiting(j, reqId); // reap 로 되돌아온 reqId 를 대기셋에서 제거(중복 재인출 방지)
   const prevFound = j.progress?.found || 0;
@@ -356,6 +389,8 @@ function scanObjs(v, keys, max) {
       for (const [k, allowed] of Object.entries(FOUND_ENUMS)) if (typeof x[k] === 'string' && allowed.includes(x[k])) o[k] = x[k];
     }
     if ('authFailed' in x) o.authFailed = x.authFailed === true;
+    // v2.621(감사 WEB-05): 계정이 없어 로그인하지 않은 미지원 장비 — 이 표시가 빠지면 위임 스캔 결과에서 '통과' 로 보인다.
+    if ('noCreds' in x) o.noCreds = x.noCreds === true;
     if ('at' in x) o.at = numOrNull(x.at);
     out.push(o);
   }
@@ -390,15 +425,36 @@ function noCredsList(v) {
   return out;
 }
 
-/** 에이전트가 스캔 결과 보고. */
-export function setIdracScanResult(reqId, rawData = {}) {
+/** 에이전트가 스캔 결과 보고. 반영했으면(또는 같은 결과의 재전송이면) true, 모르는 reqId 면 false. */
+export function setIdracScanResult(reqId, rawData = {}) { return applyIdracScanResult(reqId, rawData).ok; }
+
+/** v2.621(감사 EDGE-07): 정제본의 서명 — 같은 본문의 재전송을 가려낸다(원본의 iloEnabled 유무도 판정에 쓰이므로 함께). */
+function resultSig(data, hasIloField) {
+  let s;
+  try { s = JSON.stringify(data); } catch { s = String(Math.random()); }
+  return crypto.createHash('sha1').update(`${hasIloField ? 1 : 0}|${s}`).digest('hex');
+}
+
+/**
+ * 에이전트(또는 PUSH 경로)가 스캔 결과를 보고한다.
+ * v2.621(감사 EDGE-07): **멱등**이다. 엣지 postResult 는 retries 2 라, 중앙이 처리했지만 고RTT 로 응답이 시한(30초)을 넘기면
+ *   **같은 본문**이 다시 온다. 예전에는 상태를 보지 않고 '완료' 이벤트·대역 최근 결과·미지원 목록·스캔 로그 결과 줄을 다시 만들어
+ *   이력이 두 줄로 부풀었다(라우트는 수집 서버 pull 도 다시 걸었다). 정제본 서명이 직전 반영분과 같으면 ack 만 하고 아무것도 하지
+ *   않는다. 다른 결과(재인출돼 다시 스캔한 경우 등)는 예전처럼 새 결과로 반영한다(최신이 이긴다).
+ * @returns {{ok:boolean, duplicate?:boolean, unknown?:boolean}}  unknown = 중앙에 그 잡이 없다(만료·중앙 재시작)
+ */
+export function applyIdracScanResult(reqId, rawData = {}) {
   const data = sanitizeIdracScanData(rawData);
   const j = jobs.get(reqId);
-  if (!j) return false;
+  if (!j) return { ok: false, unknown: true };
+  const hasIloField = !!(rawData && typeof rawData === 'object' && Object.hasOwn(rawData, 'iloEnabled'));
+  const sig = resultSig(data, hasIloField);
+  if (j.resultSig && j.resultSig === sig && (j.state === 'done' || j.state === 'error')) return { ok: true, duplicate: true };
+  j.resultSig = sig;
   // v2.611(감사 EDGE2611-02): iLO 계정을 실어 보냈는데 회신에 iloEnabled **필드 자체가 없으면** 구버전(< 2.610) 엣지가 ilo 를
   //   무시한 것이다. 정제본은 부재를 false 로 만들므로 **원본**에서 본다. 예전에는 hpeInfo 가 이것을 'iLO 계정이 없어 등록하지
   //   않음' 으로 말했다(대역엔 iLO 계정이 있다 — 원인 단정 오류). 오류 회신(error)은 필드가 없는 것이 정상이라 제외한다.
-  const iloIgnoredByEdge = Boolean(j.iloRequested) && !data.error && !(rawData && typeof rawData === 'object' && Object.hasOwn(rawData, 'iloEnabled'));
+  const iloIgnoredByEdge = Boolean(j.iloRequested) && !data.error && !hasIloField;
   if (iloIgnoredByEdge) addEvent(j, 'HPE iLO 계정을 함께 보냈지만 엣지 회신에 iLO 결과가 없습니다 — 이 엣지가 2.610 미만이라 iLO 계정을 무시했습니다. HPE 를 찾으려면 엣지를 업그레이드하세요.', 'warn');
   j.acked = true; j.claimDeadline = null; // 결과 회신 = ack
   dropWaiting(j, reqId); // 완료된 reqId 를 대기셋에서 제거(중복 재인출·MAX_PENDING 유령 점유 방지)
@@ -492,7 +548,7 @@ export function setIdracScanResult(reqId, rawData = {}) {
       noCreds: data.noCreds ?? null,
     });
   }
-  return true;
+  return { ok: true };
 }
 
 /** reqId 의 배정 agent(소유권 판정용). 없으면 빈 문자열 — reqId 는 예측가능해 결과/진행 위조 주입 방지에 쓴다. */
@@ -526,7 +582,16 @@ export function getIdracScanJobLog(reqId, opts = {}) {
   const isRegisteredCollector = collectorSet ? collectorSet.has(agentKey) : false;
   const hints = [];
   let remedy = null;   // v2.440: 구체적 조치 카드(대기 + 폴링 없음일 때)
-  if (j.state === 'pending') {
+  // v2.621(감사 EDGE-01): 같은 에이전트의 앞선 잡이 진행 중이면(진행 보고 60초 이내) 이 잡은 **순서를 기다리는 것**이다 —
+  //   엣지는 잡을 하나씩 처리하고 그동안 폴하지 않으므로 '폴링하지 않습니다' 는 틀린 원인이다.
+  const ahead = j.state === 'pending'
+    ? [...jobs.values()].find((x) => x !== j && x.state === 'running' && x.dispatch !== 'push' && agentKeyOf(x) === agentKey
+      && now - Math.max(x.takenAt || 0, x.progress?.at || 0) <= 60_000)
+    : null;
+  if (ahead) {
+    const pos = 1 + [...jobs.values()].filter((x) => x !== j && x.state === 'pending' && agentKeyOf(x) === agentKey && (x.createdAt || 0) <= (j.createdAt || 0)).length;
+    hints.push({ level: 'info', msg: `에이전트 '${j.agent}'가 앞선 잡(${ahead.reqId}, 진행 ${ahead.progress?.scanned || 0}/${ahead.progress?.total || 0})을 처리 중입니다 — 엣지는 잡을 하나씩 처리하므로 그 잡이 끝나면 이 잡을 인출합니다(대기 순번 ${pos}).` });
+  } else if (j.state === 'pending') {
     if (!lastPoll) {
       hints.push({ level: 'error', msg: `에이전트 '${j.agent}'의 잡 인출 폴링 기록이 없습니다 — 엣지 포탈이 꺼져 있거나 AGENT_NAME 불일치, CENTRAL_URL/CENTRAL_TOKEN 미설정일 수 있습니다.` });
       // 다른 이름으로 폴링 중인 에이전트가 있으면 AGENT_NAME 불일치를 바로 짚어준다(가장 흔한 원인).

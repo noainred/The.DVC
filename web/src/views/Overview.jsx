@@ -9,6 +9,7 @@ import STable from '../components/STable.jsx';
 import { unplacedRows, corpNoteText, physNoteText } from './overviewServerText.js';
 import { vcStatusMeta } from '../console/consoleData.js'; // v2.618 ARCH-1
 import { unitText } from './unitText.js'; // v2.583: 미배치 물리 서버 행
+import { storageUsageUnknownNote } from './vcCardText.js'; // v2.621(감사 WEB-03)
 
 const REGION_COLORS = { '아시아': '#22d3ee', '중국': '#ef4444', '유럽': '#a855f7', '북미': '#3b82f6', Unknown: '#64748b' };
 
@@ -170,7 +171,11 @@ export default function Overview({ onSelectSite, onGotoTab }) {
           {fmt(g.memUsedGB)} / {fmt(g.memTotalGB)} GB (ESXi){(g.hostsUsageExcluded ?? g.hostsDisconnected) > 0 ? ` · 끊긴 호스트 ${fmt(g.hostsUsageExcluded ?? g.hostsDisconnected)}대 사용률 제외` : ''}
           {ov.physical?.servers > 0 && <><br />물리 메모리 <b>{fmt(ov.physical.memGB)}</b> GB · iDRAC {fmt(ov.physical.servers)}대{ov.physical.withMemory < ov.physical.servers ? ` (메모리 정보 ${fmt(ov.physical.withMemory)}대)` : ''}</>}
         </>} />
-        <Kpi label="스토리지 사용률" value={unitText(stoPct, '%')} pct={stoPct ?? undefined} meta={`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${g.datastores} DS`} onClick={() => onGotoTab?.('datastores')} />
+        {/* v2.621(감사 WEB-03): 사용량 미상 DS 는 서버가 용량·사용량 합계에서 뺐다 — 개수를 말하지 않으면 합계가 전체 DS 의 합으로 읽힌다. */}
+        <Kpi label="스토리지 사용률" value={unitText(stoPct, '%')} pct={stoPct ?? undefined} meta={<>
+          {`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${g.datastores} DS`}
+          {storageUsageUnknownNote(g) && <><br />{storageUsageUnknownNote(g)}</>}
+        </>} onClick={() => onGotoTab?.('datastores')} />
         {g.powerReporting > 0 && (
           <Kpi label="총 소비전력" value={`${fmt(g.powerKw)} kW`} accent="var(--amber)"
             meta={g.powerRegistered != null && g.powerRegistered !== g.powerReporting

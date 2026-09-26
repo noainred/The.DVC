@@ -109,13 +109,14 @@ export default function V5Overview({ scope = '', health, healthError, onGotoTab 
               <span className="v5-tile-value">{dash(infra?.vms)}</span>
               <span className="v5-tile-meta">{infra?.vmsOn == null ? '구동 수 미상' : `구동중 ${fmtInt(infra.vmsOn)}`}</span>
             </button>
-            <button type="button" className="v5-tile" onClick={() => onGotoTab?.('datastores')}>
+            <button type="button" className="v5-tile" onClick={() => onGotoTab?.('datastores')} title={infra?.storageNote || undefined}>
               <span className="v5-tile-label">스토리지</span>
               <span className="v5-tile-value">{tb(infra?.storageTotalTB)}</span>
               <span className="v5-tile-meta">{infra?.storagePct == null ? '사용률 —' : `사용 ${tb(infra.storageUsedTB)} · ${Math.round(infra.storagePct)}%`}</span>
             </button>
           </div>
-          <div className="v5-note">스토리지는 vCenter 데이터스토어 합계입니다(스토리지 어레이 원시 용량이 아닙니다).</div>
+          {/* v2.621(감사 WEB-03): 서버가 사용량 미상 DS 를 합계에서 뺐으면 그 개수를 함께 말한다(문구는 vcCardText 하나). */}
+          <div className="v5-note">스토리지는 vCenter 데이터스토어 합계입니다(스토리지 어레이 원시 용량이 아닙니다).{infra?.storageNote ? ` ${infra.storageNote}.` : ''}</div>
         </section>
 
         <section className="v5-card" aria-label="데이터 신뢰도">

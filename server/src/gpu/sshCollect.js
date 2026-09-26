@@ -11,6 +11,8 @@
 import { withSsh, withDeadline, isSshAuthError } from '../proxy/sshExec.js';
 import { parseNvidiaSmiCsv, gpuLostError } from './guestops.js';
 import { createAuthGuard } from '../util/authGuard.js';
+import { strictIpv4Num } from '../util/ipv4.js';
+import { ipBlockReason } from '../util/ssrfBlock.js';
 
 /**
  * GPU 게스트·물리 서버 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F2, server/CLAUDE.md v2.541 '아직 가드가
@@ -70,8 +72,16 @@ async function runNvsmi(sh, argStr, remainingMs = () => 60_000) {
   return { out: '', cmd: null, stderr };
 }
 
-const usableIp = (ip) => typeof ip === 'string' && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)
-  && !ip.startsWith('127.') && !ip.startsWith('169.254.') && ip !== '0.0.0.0';
+// v2.621(감사 SEC-02 — 재현: '000.0.0.0' 이 정규식·접두 비교를 통과해 포탈 자신의 루프백 SSH 로 접속했다):
+//   정규형 IPv4 만(strictIpv4Num — 앞자리 0·축약은 inet_aton 이 8진수로 읽는다, v2.589 규약) + 차단 대역(ipBlockReason).
+//   루프백은 SSRF_ALLOW_LOOPBACK 과 무관하게 뺀다 — 게스트 VM 의 IP 로 루프백은 뜻이 없다(예전 판정과 같다).
+export function usableIp(ip) {
+  if (typeof ip !== 'string' || ip !== ip.trim()) return false;
+  const n = strictIpv4Num(ip);
+  if (typeof n !== 'number') return false;
+  if ((n >>> 24) === 127) return false;
+  return ipBlockReason(ip) == null;
+}
 
 /** VM 이 보고한 IP 집합(ipAddresses ∪ ipAddress). */
 export function knownVmIps(vm) {

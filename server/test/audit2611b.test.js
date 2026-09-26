@@ -136,7 +136,9 @@ test('AUTHZ2611-02: 전 법인 등록부는 범위 admin 403 — vCenter 가져�
   assert.equal(o.llmPutS, 403); assert.equal(o.llmGetS, 200);
   assert.equal(o.relNotesS, 403);
   assert.equal(o.nfsS, 403); assert.equal(o.nfsF, 200);
-  assert.equal(o.duPutS, 403); assert.equal(o.duRunS, 403); assert.equal(o.duGetS, 200);
+  assert.equal(o.duPutS, 403); assert.equal(o.duRunS, 403);
+  // v2.621(감사 SEC-03): 조회도 403 — 응답이 RMA 엣지 IP·호스트명·fileRoots·마운트 경로를 싣는다(형제 /tools/rma 403 우회였다).
+  assert.equal(o.duGetS, 403);
   assert.equal(o.metricsS, 200);
   assert.deepEqual(o.metricsIgnored, ['retentionDays'], '전역 스칼라는 적용하지 않고 밝힌다');
   assert.equal(o.metricsAfter, o.metricsBefore);

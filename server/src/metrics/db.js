@@ -175,14 +175,22 @@ function initSqlite() {
        */
       historyStep: (metric, k, sinceTs, bucketMs, limit, opts = {}) => {
         const p = deadbandPolicyOf(metric);
-        if (!p || bucketMs >= HOUR) return { points: implHistory(metric, k, sinceTs, bucketMs, limit), carried: 0, stepped: false, maxGapMs: p ? p.maxGapMs : null };
+        // v2.621(감사 RECENT-02 — 재현: 1주·분 버킷 → 3.47일만): 상한(limit)에 걸려 요청 기간의 앞부분을 못 덮으면
+        //   **잘렸다고 밝힌다**(truncated·coveredSince). 예전엔 days:7 을 그대로 되돌려 조용히 짧은 기간을 그렸다.
+        const sinceB = Math.floor(sinceTs / bucketMs) * bucketMs;
+        if (!p || bucketMs >= HOUR) {
+          const points = implHistory(metric, k, sinceTs, bucketMs, limit);
+          return { points, carried: 0, stepped: false, maxGapMs: p ? p.maxGapMs : null, ...historyCut(points, limit, sinceB) };
+        }
         const nowTs = Number.isFinite(opts.nowTs) ? opts.nowTs : Date.now();
-        const start = Math.max(Math.floor(sinceTs / bucketMs) * bucketMs, Math.floor(nowTs / bucketMs) * bucketMs - (Math.max(1, limit) - 1) * bucketMs);
+        const start = Math.max(sinceB, Math.floor(nowTs / bucketMs) * bucketMs - (Math.max(1, limit) - 1) * bucketMs);
         const c = carryOne.get(metric, k, start, start - p.maxGapMs - STEP_SLACK_MS);
         const carry = c && c.ts != null ? { v: c.v, ts: c.ts } : null;
         const rows = rawOne.all(metric, k, start).map((r) => ({ v: r.v, ts: r.ts }));
         const lastActualTs = latestOf(metric, k)?.ts ?? null;
-        return { ...stepBuckets({ carry, rows, start, nowTs, bucketMs, maxGapMs: p.maxGapMs, lastActualTs, slackMs: Number.isFinite(opts.slackMs) ? opts.slackMs : STEP_SLACK_MS, limit }), stepped: true, maxGapMs: p.maxGapMs };
+        // step 채움은 빈 버킷도 점이 되므로 '상한 = 덮는 버킷 수' 다 — 시작이 요청 시작보다 뒤면 잘린 것이다.
+        const cut = start > sinceB ? { truncated: true, coveredSince: start, requestedSince: sinceB } : { truncated: false, coveredSince: null, requestedSince: sinceB };
+        return { ...stepBuckets({ carry, rows, start, nowTs, bucketMs, maxGapMs: p.maxGapMs, lastActualTs, slackMs: Number.isFinite(opts.slackMs) ? opts.slackMs : STEP_SLACK_MS, limit }), stepped: true, maxGapMs: p.maxGapMs, ...cut };
       },
       /**
        * v2.620(SRV2620-02): dead-band 를 아는 짧은 창 평균. recentAvg() 는 창 안 **저장** 행만 평균하므로 온도가 안정된
@@ -313,7 +321,7 @@ function initJson() {
     meta: (metric) => { let mn = null, mx = null, n = 0; for (const r of rows) if (r.m === metric) { n++; if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx, count: n }; },
     // SQLite 구현과 같은 API(v2.504) — 호출부가 폴백 여부를 몰라도 되게 한다.
     // v2.620(SRV2620-02): NDJSON 폴백은 dead-band 를 쓰지 않아(전량 저장) step 조회가 곧 일반 조회다 — 같은 API 만 맞춘다.
-    historyStep(metric, k, sinceTs, bucketMs, limit) { return { points: this.history(metric, k, sinceTs, bucketMs, limit), carried: 0, stepped: false, maxGapMs: null }; },
+    historyStep(metric, k, sinceTs, bucketMs, limit) { const points = this.history(metric, k, sinceTs, bucketMs, limit); return { points, carried: 0, stepped: false, maxGapMs: null, ...historyCut(points, limit, Math.floor(sinceTs / bucketMs) * bucketMs) }; },
     recentAvgStep(metric, sinceTs) { const m = new Map(); for (const [k, a] of this.recentAvg(metric, sinceTs)) m.set(k, { ...a, carried: false }); return m; },
     metaKey: (metric, k) => { let mn = null, mx = null; for (const r of rows) if (r.m === metric && r.k === k) { if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx }; },
     dump: (metric, sinceTs, untilTs, limit) => rows.filter((r) => r.m === metric && r.t >= sinceTs && r.t <= untilTs).sort((a, b) => a.t - b.t).slice(0, limit).map((r) => ({ k: r.k, v: r.v, ts: r.t })),
@@ -322,6 +330,18 @@ function initJson() {
 }
 
 const round1 = (x) => (x == null ? null : Number(x.toFixed(1)));
+
+/**
+ * v2.621(감사 RECENT-02): 버킷 조회(LIMIT = '값이 있는 버킷' 개수)가 상한에 걸려 요청 시작을 못 덮었는지(순수).
+ * 꽉 찼고(points.length >= limit) 첫 점이 요청 시작 버킷보다 뒤면 잘린 것이다 — 조용히 짧은 기간을 그리지 않게 밝힌다.
+ * @returns {{truncated:boolean, coveredSince:number|null, requestedSince:number}}
+ */
+export function historyCut(points, limit, requestedSince) {
+  const n = Array.isArray(points) ? points.length : 0;
+  const first = n ? Number(points[0]?.ts) : null;
+  const truncated = n > 0 && Number.isFinite(limit) && n >= limit && Number.isFinite(first) && first > requestedSince;
+  return { truncated, coveredSince: truncated ? first : null, requestedSince };
+}
 
 /*
  * v2.620(SRV2620-02) — dead-band 계열의 step 조회(순수 함수, 테스트가 직접 부른다).

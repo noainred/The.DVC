@@ -22,6 +22,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { fmtTrendTick } from '../tools/shared.jsx';   // ESXi 온도 추이와 **같은** 눈금 규칙(조작을 화면마다 다르게 만들지 않는다)
 import { STable } from '../../components/STable.jsx';
 import { unitText } from '../unitText.js';
+import { bmcLabel } from '../tools/serverVendorText.js';
 
 const LINE_COLORS = ['#60a5fa', '#f87171', '#34d399', '#fbbf24', '#a78bfa', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#e879f9', '#94a3b8', '#fca5a5'];
 const FW_TYPE_ORDER = ['iDRAC', 'BIOS', 'NIC', 'Storage', 'GPU', 'PSU', 'Disk', 'CPLD', 'Driver', '기타'];
@@ -147,7 +148,8 @@ export function IdracDetailModal({ server, onClose }) {
       <div className="modal card" style={{ maxWidth: 980, width: '94vw' }}>
         <div className="flex between" style={{ marginBottom: 10, alignItems: 'center' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <b style={{ fontSize: 15 }}>🖥 {server.name} — iDRAC 상세 / 센서</b>
+            {/* v2.621(감사 WEB-04): 제목의 BMC 이름은 벤더 판정 한 곳(serverVendorText.bmcLabel)에서 — HPE 서버를 'iDRAC' 이라 부르지 않는다. */}
+            <b style={{ fontSize: 15 }}>🖥 {server.name} — {bmcLabel(server)} 상세 / 센서</b>
             {/* iDRAC 접속 IP(v2.301, 사용자 요구) — vcenter-host 응답의 idracHost(등록 레코드 host).
                 클릭 시 iDRAC 웹 UI(https)를 새 탭으로. 레거시 값에 프로토콜이 붙어 있어도 정리해 링크. */}
             {(() => {

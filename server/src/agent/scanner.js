@@ -12,6 +12,7 @@ import { scanForIdracs } from '../idrac/scan.js';
 import { registerScanned } from '../idrac/registry.js';
 import { pollNow } from '../idrac/poller.js';
 import { makeScanAuthPolicy } from '../idrac/scanAuth.js';
+import { tryAcquireScan, releaseScan } from '../idrac/scanPoller.js'; // v2.621(감사 LIFE-01)
 
 let timer = null;
 let last = null; // { at, agent, scanned, foundCount, registered, error }
@@ -54,13 +55,25 @@ export async function runAgentScan() {
     //   직전 인증 실패 IP·주 폴러가 같은 계정으로 이미 멈춘 등록 서버는 건너뛰고 개수를 `last` 에 남긴다.
     //   중앙 /result 는 authSkipped 를 받지 않으므로(구 계약) 엣지 로그 화면(collect.agentScan)이 그 사실을 말한다.
     const authPolicy = makeScanAuthPolicy({ rangeId: 'assign', username: a.username, password: a.password, periodic: true });
-    const scan = await scanForIdracs({ ips: a.ips, username: a.username, password: a.password, authPolicy });
-
-    let registered = 0;
-    if (config.agent.autoRegister && scan.found.length) {
-      const r = registerScanned(scan.found, a.username, a.password, 'merge');
-      if (r.ok) { registered = (r.added || 0) + (r.updated || 0); pollNow().catch(() => {}); }
+    // v2.621(감사 LIFE-01): 이 엣지의 다른 iDRAC 스캔(주기·'지금 스캔'·임시·중앙 PUSH·위임 잡)과 **같은 잠금**을 잡는다 — v2.612
+    //   EDGE2612-01 이 넷을 한 잠금으로 묶을 때 이 할당 스캐너만 자체 running 만 봐서, 다른 스캔이 도는 중에도 같은 계정으로 한 번 더
+    //   돌았다(대역이 겹치면 같은 BMC 에 로그인 시도가 두 배 — 비밀번호가 틀린 iDRAC·iLO 의 계정 잠금 위험). 못 잡으면 이번 주기는
+    //   건너뛰고 사유를 상태(last.skippedBusy)·콘솔에 남긴다(다음 주기에 다시 시도한다 — 조용한 생략 금지).
+    const lock = tryAcquireScan('assign');
+    if (!lock.ok) {
+      last = { at: Date.now(), agent: config.agent.name, assigned: true, skippedBusy: { by: lock.by || null, reason: lock.reason } };
+      console.warn(`[agent] 할당 스캔을 이번 주기에 건너뜁니다 — ${lock.reason}`);
+      return last;
     }
+    let scan;
+    let registered = 0;
+    try {
+      scan = await scanForIdracs({ ips: a.ips, username: a.username, password: a.password, authPolicy });
+      if (config.agent.autoRegister && scan.found.length) {
+        const r = registerScanned(scan.found, a.username, a.password, 'merge');
+        if (r.ok) { registered = (r.added || 0) + (r.updated || 0); pollNow().catch(() => {}); }
+      }
+    } finally { releaseScan(); }
 
     const postErr = await postResult({
       agent: config.agent.name,

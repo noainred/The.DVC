@@ -56,6 +56,9 @@ const clean = (x) => ({
   manufacturer: capStr(x?.manufacturer || '', 120),
   hostName: capStr(x?.hostName || '', 120),
   authFailed: !!x?.authFailed,
+  // v2.621(감사 WEB-05): 로그인을 시도하지 않은 장비(그 벤더 계정 없음). 없으면 false — 예전 행은 계정으로 로그인을 시도한 것이다
+  //   (v2.610 이전 스캔은 Dell 계정이 필수였다). 참(true)만 참으로 읽는다(엣지 값의 '문자열 true' 를 지어내지 않게).
+  noCreds: x?.noCreds === true,
   at: Number(x?.at) || Date.now(),
 });
 
