@@ -234,7 +234,7 @@ function DatacenterOrderCard() {
             </STable>
           </div>
           <div className="flex gap" style={{ marginTop: 10 }}>
-            <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!loadErr} title={loadErr ? '목록을 불러오지 못해 저장할 수 없습니다' : undefined}>순서 저장</button>
+            <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!loadErr || list.length === 0} title={loadErr ? '목록을 불러오지 못해 저장할 수 없습니다' : list.length === 0 ? '저장할 DataCenter 가 없습니다' : undefined}>순서 저장</button>
             <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={sortName}>이름순 정렬</button>
             <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={load}>되돌리기</button>
           </div>
