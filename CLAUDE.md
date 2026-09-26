@@ -4175,6 +4175,23 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
     않아 예전 그대로). IP관리·시리얼 조회 검색어는 `hooks/searchHandoff.js`(메모리 · 1회 · 30초)로 넘긴다 — URL 에 싣지 않는다.
   - CSS 는 `.v5` 아래로만(`shell.test.js` 가 선택자 전수 검사) · uppercase 금지 · 1024px 이하는 서랍.
   - ⚠ 정직 기록: Chromium 검증은 목 스택(엣지 0곳)이라 **엣지가 있는 'Main · Edge N/N' 표시는 화면으로 보지 못했다**(단위 테스트만).
+- ⚠⚠ **V6 도 셸이 아니라 '틀' 이다 — 상위 메뉴 10개는 `version_6/menus.js` 하나가 소유한다**(`web/src/version_6/`, v2.623 — 사용자 제공
+  핸드오프 `design_handoff_portal_home`(README 는 `docs/design/portal-home/README.md`). 선택: **V5 처럼 새 틀 추가** · **Overview/Summary 재정의는 V6 안에서만** ·
+  v2.622 뒤 별도 릴리스 · 전체 검증):
+  - V5 와 같은 원칙이다 — 본문은 App 의 `filterBar`·`tabBody` 를 그대로 쓰고, V6 전용 화면은 **Overview · Summary · 메뉴 페이지(`#/m/<id>`)** 셋뿐이다.
+    기존 `#/overview`·`#/summary` 화면은 바뀌지 않는다(V6 일 때만 V6 판을 그린다).
+  - 셸 플래그는 V5 와 **같은 키**(`ui.shell`)에 `'v6'` 이다 — 둘은 동시에 켜지지 않는다. `writeShellV6(false)` 는 값이 `'v6'` 일 때만 지운다(V5 를 끄지 않게).
+    App 판정 순서: 콘솔 → V4 → **V6 → V5**(`shell.test.js` 고정).
+  - ⚠⚠ **메뉴 주소 `#/m/…` 는 기존 탭이 아니다** — App 의 해시 동기화 가드에 `isMenuHash` 를 빼면 진입 즉시 `#/<tab>` 으로 덮여 메뉴 페이지가 튕긴다
+    (V5 때 적어 둔 '셸 판정이 하나라도 빠지면' 과 같은 함정). V6 를 끄면 메뉴 주소는 Overview 로 옮긴다.
+  - **새 도구를 추가하면 `version_6/menus.js` 에도 배치한다** — `menus.test.js` 가 카탈로그 전부 1회 · 유령 0 · 상태 변경 도구는 '자동화' 를 고정한다.
+    ⚠ 핸드오프는 `vm-clone`·`backup` 을 '보호/규정' 에 두었지만 **상태를 바꾸는 도구라 '자동화' 로 옮겼다**(V4·V5 와 같은 규칙 — 조회 메뉴에서 실행 버튼을 만나지 않게).
+  - 숨김·잠금은 `views/toolVisibility.js`, 검색은 V5 `searchData.js`(= `views/toolSearch.js`)를 그대로 쓴다. 관리자 표시 도구는 **숨기지 않고 🔒**(핸드오프 규칙).
+  - 셸은 폴링하지 않는다. `/overview` 는 V6 Overview 와 **서버 메뉴에서만**, `/summary` 는 V6 Summary 에서만 부른다(다른 메뉴 페이지는 폴링 0 — 테스트 고정).
+    '조치 필요' 는 **개수를 세지 않는 바로가기**다(각 도구 API 를 Overview 마다 부르면 그 자체가 부하 — 화면이 '개수는 각 화면에서' 라고 말한다).
+  - 핸드오프 숫자는 목업이다 — 전부 실제 API 에서 계산한다(`v6Data.js`, 값 없으면 '—', 첫 수집 중·판정 대기를 정상에 섞지 않는다, 임계 75/90 은 consoleData 하나).
+  - ⚠ 법인 격자 구분선을 **격자 배경색**으로 그리지 말 것 — 마지막 줄 빈 칸이 밝은 덩어리가 된다(v2.623 스크린샷 판독에서 발견. 수치로는 안 잡혔다). 칸마다 inset 그림자로 그린다.
+  - ⚠ 정직 기록: Chromium 검증은 목 스택(엣지 0곳)으로 admin·viewer × 1440/400 을 봤다. 실운영 규모(법인 28곳)의 법인 격자 줄바꿈은 보지 못했다.
 - **위임(엣지) 수집 환경에서 중앙 화면이 비면 안 된다**(v2.493, 2026-09-12 실제 신고 — 같은 유형이
   v2.381→2.383 에서 이미 한 번 발생했다): 위임 법인 서버는 중앙 레지스트리에 없고, 엣지가 export 로
   **최신 스냅샷만** 올려 보낸다(`collector/agent.js compactSensors` → 중앙 `collector/remoteInventory.js`).
