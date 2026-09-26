@@ -135,3 +135,20 @@ describe('v2.617 — 비활성(disabled) vCenter 는 판정 대기도 연결 실
     expect(c.detail).toContain('비활성 1');
   });
 });
+
+describe('v2.617 — 주의 목록은 위험 먼저, 그 근거를 말한다', async () => {
+  const { attentionSites } = await import('./overviewData.js');
+  it('사용률 때문에 위험이면 사용률을 적는다 · 위험이 앞', () => {
+    const rows = [
+      { id: 'w', name: 'W', status: 'connected', alarmsCritical: 0, alarmsWarning: 9, worst: 40 },
+      { id: 'c', name: 'C', status: 'connected', alarmsCritical: 0, alarmsWarning: 1, worst: 95 },
+      { id: 'u', name: 'U', status: 'unreachable', alarmsCritical: 0, alarmsWarning: 0, worst: null },
+      { id: 'o', name: 'O', status: 'connected', alarmsCritical: 0, alarmsWarning: 0, worst: 10 },
+    ];
+    const a = attentionSites(rows);
+    expect(a.map((x) => x.id)).toEqual(['c', 'u', 'w']);
+    expect(a[0].why).toBe('위험 0 · 주의 1 · 사용률 95%');
+    expect(a[1].why).toBe('연결 실패');
+    expect(a[2].why).toBe('위험 0 · 주의 9');
+  });
+});

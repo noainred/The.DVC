@@ -4,7 +4,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { loadPhase, loadText } from '../../version_4/loadState.js';
 import { fmtInt, siteRows } from '../../console/consoleData.js';
 import { agoText } from '../../views/tools/relTime.js';
-import { opsStatus, infraTotals, trustSummary, siteLevel } from '../overviewData.js';
+import { opsStatus, infraTotals, trustSummary, attentionSites } from '../overviewData.js';
 
 /**
  * V5 Overview(v2.616) — 카드 3장(현재 운영 상태 · 인프라 규모 · 데이터 신뢰도). 시안 ① 그대로.
@@ -41,7 +41,7 @@ export default function V5Overview({ scope = '', health, healthError, onGotoTab 
   }
 
   const rows = siteRows(ov.sites || []).filter((r) => !scope || r.id === scope);
-  const attention = rows.filter((r) => ['crit', 'warn'].includes(siteLevel(r))).slice(0, 5);
+  const attention = attentionSites(rows, 5);
   const trustColor = trust.unreachable > 0 ? 'var(--red)' : trust.pending > 0 ? 'var(--amber)' : 'var(--green)';
 
   return (
@@ -70,13 +70,13 @@ export default function V5Overview({ scope = '', health, healthError, onGotoTab 
           {attention.length > 0 && (
             <div className="v5-sites">
               {attention.map((r) => {
-                const lv = siteLevel(r);
+                const lv = r.level;
                 return (
                   <div key={r.id} className="v5-site">
                     <span className="v5-dot" style={{ background: LEVEL[lv].color }} />
                     <span className="v5-site-name" title={r.name}>{r.name}</span>
                     <span className="muted" style={{ fontSize: 12 }}>
-                      {r.status === 'unreachable' ? '연결 실패' : `위험 ${r.alarmsCritical} · 주의 ${r.alarmsWarning}`}
+                      {r.why}
                     </span>
                   </div>
                 );

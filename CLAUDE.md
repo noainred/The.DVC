@@ -3954,6 +3954,26 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       운영 CONFIG_DIR 에서 미분류 warn 이 나올 수 있고 `detail.classifier` 가 그 사실을 싣는다(정직 기록). `stripComments` 는 `archScan.js` 안에
       사본이 있다(배포 패키지에 `server/test` 가 없어 런타임 import 불가 — 테스트가 `test/_stripComments.js` 와 출력 동일성을 고정).
     - 권한 adminOnly + fullScopeOnly(형제 서브메뉴와 같다) · `memoJson` 30초(extraKey 에 역할) · 왕복 0 · 폴링 금지 · 표 `STable minWidth`.
+  - ⚠⚠ **v2.617 — 운영 중앙이 기동 약 5분 뒤 멈춘 사건(2026-09-26). 원인은 확정하지 못했고, 다음 재발 때 원인이 남게 했다**
+    (사용자 캡처: active · 07:37:58 이후 로그 0줄 · 한 코어 100% · RSS 5.1→5.3GB/수 초 · 브라우저 ERR_CONNECTION_TIMED_OUT.
+    회귀 `server/test/stallWatch2617.test.js` + 웹 `version_5/audit2617.test.js`):
+    - **코드 조사 결과(에이전트 2회)**: 영길이 매치 `while(re.exec)` 13곳 전부 안전 · 로그 분석 탭 최악 25ms · 5분 무렵 발화하는
+      기본 타이머 없음 → **무한 루프 후보 0**. 가장 유력한 것은 **V8 힙 한계 근처의 GC 헛돎**(추정). 마지막 로그가 gpu-guest 였던 것은
+      그 폴러가 자주 찍어서일 뿐 증거가 아니다. **'마지막 로그 줄 = 원인' 으로 단정하지 말 것.**
+    - **멈춤 감시(`perf/stallWatch.js`)**: 워커 스레드가 공유 버퍼의 박동을 보고 멈추면 **`fs.writeSync(2)`** 로 직접 쓴다(console 은
+      메인 경유라 멈춘 동안 못 나간다) + `inspector.Session.connectToMainThread()` 로 **메인 스택 자동 채취**(포트를 열지 않는다).
+      ⚠ 박동 간격은 경계보다 짧아야 한다(같거나 길면 거짓 멈춤 — 자체 테스트가 잡았다) · 워커 eval 코드는 `process.getBuiltinModule`
+      (부모가 ESM 입력 모드면 `require` 가 없다 — 자체 테스트가 잡았다). 엣지 로그 표에는 넣지 않았다(폴러 판정과 뜻이 다름 —
+      edgeSweep `EXCLUDED` 에 사유) · 서비스 점검에 전용 행.
+    - **힙 순간치 줄이기**: 엣지 pull `poolRun`(기본 4, 예전 `Promise.all` 무제한) · 큰 본문 동시 해석 상한(`bigJsonGate` 6건·96MB →
+      503 + Retry-After, 진행 0건이면 한도보다 큰 단일 본문도 받는다) · 스냅샷 교체 때 **모든 이름**의 옛 세대 응답 캐시 제거
+      (`snapCacheSweep` — v2.580 은 같은 이름에 새 키가 올 때만 지웠다) · 시작 백업 10분 뒤 · 위임 인벤토리 저장 30초 디바운스 ·
+      링 버퍼 줄 8KB(평탄화 — slice 만 하면 SlicedString 이 원문을 붙잡는다).
+    - **재발하면**: `journalctl -u vmware-portal | grep stallwatch` 가 멈춘 함수를 말한다. 스택이 없으면 GC 쪽이다 — 그때 다음 후보는
+      에이전트 보고의 나머지(엣지별 상주 저장소 상한 16MB/엣지 · svcmon 행 상한 · 엣지 설정 사본 32MB/엣지)다.
+    - **비활성(disabled) vCenter 는 '연결 불가'·'첫 수집 중' 이 아니다** — `/health`·전역 롤업에 `vcentersDisabled`. 헤더·개요·V4·관제
+      콘솔·V5 가 모두 분모에서 뺐다(V5 결함이 기존 화면 4곳에도 있었다 — 형제 비대칭).
+    - ⚠ 정직 기록: 코드 리뷰가 찾은 'V5 사이트 클릭' 결함은 **현재 V5 화면에 selectSite 를 부르는 곳이 없어** 드러나지 않았다(방어적 수정).
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

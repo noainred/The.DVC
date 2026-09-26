@@ -31,6 +31,34 @@ export function siteLevel(row) {
   return 'ok';
 }
 
+/**
+ * v2.617: 주의 목록 — 위험을 먼저, 같은 등급이면 경보 수·사용률이 큰 순. 예전에는 사용률 순 목록을 그대로 잘라
+ * 위험 법인이 5개 밖으로 밀릴 수 있었다. `why` 는 그 등급의 근거(연결 실패 / 경보 수 / 사용률)를 말한다 — 사용률 때문에
+ * 위험인 법인이 '위험 0 · 주의 3' 으로만 보이면 왜 빨간지 알 수 없다(v2.617 스크린샷 판독에서 발견).
+ */
+export function attentionSites(rows, max = 5) {
+  const rank = { crit: 0, warn: 1 };
+  return (rows || [])
+    .map((r) => ({ r, lv: siteLevel(r) }))
+    .filter((x) => x.lv === 'crit' || x.lv === 'warn')
+    .sort((a, b) => rank[a.lv] - rank[b.lv]
+      || ((b.r.alarmsCritical || 0) - (a.r.alarmsCritical || 0))
+      || ((b.r.alarmsWarning || 0) - (a.r.alarmsWarning || 0))
+      || ((b.r.worst ?? -1) - (a.r.worst ?? -1)))
+    .slice(0, max)
+    .map(({ r, lv }) => {
+      let why;
+      if (r.status === 'unreachable') why = '연결 실패';
+      else {
+        const parts = [`위험 ${r.alarmsCritical || 0} · 주의 ${r.alarmsWarning || 0}`];
+        const ul = levelOf(r.worst);
+        if (ul != null && ul >= 1) parts.push(`사용률 ${Math.round(r.worst)}%`);
+        why = parts.join(' · ');
+      }
+      return { ...r, level: lv, why };
+    });
+}
+
 /** 범위(vCenter id)가 있으면 그 사이트만. */
 export function scopedSites(ov, scopeId) {
   const rows = siteRows(ov?.sites || []);
