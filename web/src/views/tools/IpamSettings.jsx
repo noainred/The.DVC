@@ -169,6 +169,21 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved }) {
   );
 }
 
+/**
+ * v2.621(감사 WEB-02): vCenter별 스캔 대역 편집 잠금 판정(순수). 저장된 대역을 **읽지 못했으면**(미로드·실패) 빈 칸은
+ * '대역 없음' 이 아니다 — 그 상태의 저장은 기존 목록을 입력값으로 통째로 교체하므로 '대역 저장'·'지금 스캔' 을 잠근다
+ * (형제 IpamRanges 는 데이터가 올 때까지 화면 자체를 ErrorBox 로 막는다 — 같은 규칙).
+ * 한 번 읽은 뒤의 재조회 실패는 폼이 이미 서버 값으로 채워져 있으므로 잠그지 않고 사유만 보인다(v2.478 B15 와 같은 판단).
+ * @returns {{ locked: boolean, failed: boolean, note: string|null }}
+ */
+export function vcRangesGate(vcRanges, err) {
+  const loaded = !!vcRanges && typeof vcRanges === 'object';
+  if (!loaded && err) return { locked: true, failed: true, note: `저장된 스캔 대역을 불러오지 못했습니다(${err}) — 빈 칸은 ‘대역 없음’ 이 아니므로 저장·스캔을 잠갔습니다.` };
+  if (!loaded) return { locked: true, failed: false, note: '저장된 스캔 대역을 불러오는 중입니다 — 불러온 뒤 저장할 수 있습니다.' };
+  if (err) return { locked: false, failed: true, note: `스캔 대역을 다시 불러오지 못했습니다(${err}) — 아래는 마지막으로 불러온 값입니다.` };
+  return { locked: false, failed: false, note: null };
+}
+
 export function IpmsSettings({ onClose }) {
   const [s, setS] = useState(null);
   const [vcs, setVcs] = useState([]);
@@ -180,7 +195,12 @@ export function IpmsSettings({ onClose }) {
   const [scanEnabled, setScanEnabled] = useState(true);
   const [scanBusy, setScanBusy] = useState(false);
   const [scanMsg, setScanMsg] = useState(null);
-  const loadVcRanges = () => fetchJson('/tools/ipam/vc-ranges').then(setVcRanges).catch(() => {});
+  // v2.621(감사 WEB-02): 조회 실패를 삼키지 않는다 — 예전 `.catch(() => {})` 는 빈 칸을 '대역 없음' 으로 보이게 했고,
+  //   그 상태에서 '대역 저장' 을 누르면 PUT 이 그 vCenter 의 기존 대역 목록을 새 값으로 통째로 교체했다(꺼 둔 항목은 다시 켜짐).
+  const [vcRangesErr, setVcRangesErr] = useState(null);
+  const loadVcRanges = () => fetchJson('/tools/ipam/vc-ranges')
+    .then((r) => { setVcRanges(r); setVcRangesErr(null); })
+    .catch((e) => setVcRangesErr(e?.message || String(e)));
   useEffect(() => {
     fetchJson('/admin/ipam/settings').then((r) => setS(r.settings)).catch((e) => setMsg(e.message));
     fetchJson('/vcenters').then((list) => { setVcs(list); if (list[0]) setVc(list[0].id); }).catch(() => {});
@@ -194,7 +214,7 @@ export function IpmsSettings({ onClose }) {
     setScanEnabled(e ? e.enabled !== false : true);
   }, [vc, vcRanges]);
   const saveScanRanges = async () => {
-    if (!vc) return;
+    if (!vc || vcRangesGate(vcRanges, vcRangesErr).locked) return; // v2.621(감사 WEB-02): 버튼 잠금의 이중 방어
     setScanBusy(true); setScanMsg(null);
     try {
       const r = await putJson('/admin/ipam/vc-ranges', { vcenterId: vc, ranges: scanText, enabled: scanEnabled });
@@ -203,12 +223,14 @@ export function IpmsSettings({ onClose }) {
     } catch (e) { setScanMsg({ ok: false, text: e.message }); } finally { setScanBusy(false); }
   };
   const scanNow = async () => {
+    if (vcRangesGate(vcRanges, vcRangesErr).locked) return; // v2.621(감사 WEB-02)
     setScanBusy(true); setScanMsg(null);
     try { const r = await postJson('/admin/ipam/vc-ranges/scan', {}); setScanMsg(r.ok ? { ok: true, text: '스캔을 시작했습니다(백그라운드).' } : { ok: false, text: r.reason }); }
     catch (e) { setScanMsg({ ok: false, text: e.message }); } finally { setScanBusy(false); }
   };
   if (!s) return <Modal title="IPMS 설정" onClose={onClose}>{msg ? <ErrorBox message={msg} /> : <Loading />}</Modal>;
   const vcRangeEntry = (vcRanges?.ranges || []).find((x) => x.vcenterId === vc);
+  const scanGate = vcRangesGate(vcRanges, vcRangesErr);
 
   const globalText = (s.global || []).join('\n');
   const vcText = (s.vcenters?.[vc] || []).join('\n');
@@ -249,11 +271,17 @@ export function IpmsSettings({ onClose }) {
           <span className="muted" style={{ fontSize: 11 }}>대상: <b>{vcs.find((v) => v.id === vc)?.name || vc}</b>{vcRangeEntry ? ` · 약 ${(vcRangeEntry.ipCount || 0).toLocaleString()} IP` : ''}</span>
         </div>
         <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>여기 정리한 대역은 주기 IP 스캔이 함께 스캔해 사용 현황(네트워크 맵·관리대장)을 자동 갱신합니다. 위 vCenter 선택기와 연동됩니다. 형식: CIDR·범위·단일 IP, 한 줄에 하나.</div>
-        <textarea className="input" rows={5} value={scanText} onChange={(e) => setScanText(e.target.value)} placeholder={'10.94.42.0/24\n10.94.43.1-10.94.43.200'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
+        {scanGate.note && (
+          <div className="flex gap" style={{ marginBottom: 6, alignItems: 'center', flexWrap: 'wrap', padding: '7px 10px', borderRadius: 8, fontSize: 12, background: scanGate.failed ? 'rgba(239,68,68,.12)' : 'rgba(148,163,184,.12)', color: scanGate.failed ? '#f87171' : undefined }}>
+            <span style={{ overflowWrap: 'anywhere' }}>{scanGate.note}</span>
+            {scanGate.failed && <button className="logout-btn" style={{ padding: '3px 10px', fontSize: 12 }} onClick={loadVcRanges}>다시 불러오기</button>}
+          </div>
+        )}
+        <textarea className="input" rows={5} value={scanText} disabled={scanGate.locked} onChange={(e) => setScanText(e.target.value)} placeholder={'10.94.42.0/24\n10.94.43.1-10.94.43.200'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
         <div className="flex gap" style={{ marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={scanEnabled} onChange={(e) => setScanEnabled(e.target.checked)} /> 주기 스캔 포함</label>
-          <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={scanBusy || !vc} onClick={saveScanRanges}>대역 저장</button>
-          <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={scanBusy} onClick={scanNow}>🛰️ 지금 스캔</button>
+          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={scanEnabled} disabled={scanGate.locked} onChange={(e) => setScanEnabled(e.target.checked)} /> 주기 스캔 포함</label>
+          <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={scanBusy || !vc || scanGate.locked} title={scanGate.locked ? scanGate.note : undefined} onClick={saveScanRanges}>대역 저장</button>
+          <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={scanBusy || scanGate.locked} title={scanGate.locked ? scanGate.note : undefined} onClick={scanNow}>🛰️ 지금 스캔</button>
           <span className="muted" style={{ fontSize: 11 }}>스캔 주기는 ‘IP 스캔’ 설정의 간격을 따릅니다.</span>
         </div>
         {scanMsg && <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 8, fontSize: 12, background: scanMsg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: scanMsg.ok ? '#4ade80' : '#f87171' }}>{scanMsg.text}</div>}

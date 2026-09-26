@@ -17,6 +17,7 @@ import { centralStatusOnlySupport, sendStatusOnly, DEVICE_STATUS_ONLY_MIN_CENTRA
 
 const gzipAsync = promisify(zlib.gzip);
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
+import { createChangeLogger } from '../util/logThrottle.js';
 // v2.503: gzip 전송(SAN push v2.417·storage push 와 같은 규약) — 고RTT 회선에서 전송 시간을 줄인다.
 // 중앙 express.json 은 Content-Encoding: gzip 을 투명하게 푼다.
 const PUSH_GZIP = process.env.PDU_PUSH_GZIP !== 'false';
@@ -59,6 +60,12 @@ export function pduPushWithhold({ assignedIds, snapshotIds = [], firstPollDone =
   if (now - s > maxMs) return { withhold: false, since: s, missing, reason: '' };
   return { withhold: true, since: s, missing, reason: `위임 PDU ${assignedIds.length}대 중 ${missing}대 — 아직 수집된 스냅샷이 없습니다(첫 수집 대기 · 일부만 보내면 중앙이 나머지를 지웁니다)` };
 }
+/** v2.621(감사 EDGE-03): 엣지 PDU 등록부 로드 오류(없으면 null) — cvp/push.js edgeRegistryError 와 같은 판정. */
+async function edgeRegistryError() {
+  try { const { registryLoadError } = await import('./registry.js'); return registryLoadError() || null; } catch (e) { return { at: Date.now(), reason: e?.message || String(e) }; }
+}
+const _regLog = createChangeLogger({ windowMs: 60 * 60_000 });
+
 export async function pushPduNow() {
   if (_busy) { _again = true; return _busy; }
   _busy = (async () => {
@@ -80,12 +87,18 @@ async function pushPduOnce() {
   // v2.605(감사 EDGE2605-01 — 재현): 중앙 saveEdgePdu 는 이 엣지의 목록을 **통째로 교체**한다. 스냅샷은 인메모리라 재시작 직후
   //   첫 주기가 끝나기 전에는 일부 장비만 있다 — 그때 보내면 아직 수집하지 않은 장비가 중앙에서 사라졌다(0건 가드는 1건이라도
   //   있으면 통과했다). 판정은 순수 함수 pduPushWithhold 하나.
+  // v2.621(감사 EDGE-03): 등록부 손상은 **던지지 않는다**(v2.613 registryCore — preserveCorrupt 뒤 빈 목록 + registryLoadError()).
+  //   예전에는 catch 로만 '못 읽음' 을 알아 손상 등록부가 '위임 0대' 로 읽혔고, 재시작 직후 첫 설정 pull 이 실패하면 빈 snapshots 로
+  //   중앙의 이 엣지 PDU 목록을 비우고 상태에는 '위임 PDU 0대 — 중앙 목록을 비웠습니다' 라는 틀린 사유가 남았다(CVP 는 v2.620
+  //   EDGE2620-05 로 고쳐졌다). 손상이면 assigned=null(못 읽음)로 두어 보내지 않는다 — 다음 pdu-config pull 이 등록부를 다시 쓰면 풀린다.
+  const regErr = await edgeRegistryError();
   let assigned = null;
-  try { const { devicesForThisNode } = await import('./registry.js'); assigned = devicesForThisNode().map((d) => String(d.id)); } catch { /* 등록부를 못 읽음 — 비우지 않는다 */ }
+  if (!regErr) { try { const { devicesForThisNode } = await import('./registry.js'); assigned = devicesForThisNode().map((d) => String(d.id)); } catch { /* 등록부를 못 읽음 — 비우지 않는다 */ } }
   const wh = pduPushWithhold({ assignedIds: assigned, snapshotIds: all.map((x) => String(x?.id)), firstPollDone: !!pduPollerStatus()?.last?.at, since: _withholdSince, now: Date.now() });
   _withholdSince = wh.since;
   if (wh.withhold) {
     if (wh.missing && all.length) console.warn(`[pdu-push] ${wh.reason}`); // 스냅샷 0건(첫 수집 대기)은 예전처럼 상태에만
+    if (regErr && _regLog('registry', regErr.reason)) console.warn(`[pdu-push] 엣지 PDU 등록부를 읽지 못해 보내지 않았습니다(${String(regErr.reason || '사유 미상').slice(0, 200)}) — '위임 0대' 가 아닙니다. 중앙 pdu-config pull 이 등록부를 다시 쓰면 풀립니다`);
     // v2.613(감사 EDGE2613-04): 보류해도 **상태는 올린다**(v2.517 규약 — storage v2.581 과 같다). PDU 스냅샷은 인메모리라 재시작마다
     //   보류 창(최대 15분)이 생기는데 예전에는 그동안 중앙이 '엣지가 안 보냈다' 와 '보류 중' 을 구분할 수 없었다(edgePduStatus 는 마지막
     //   push 시각뿐). ⚠ `/pdu-data` 의 statusOnly 수신은 v2.613.0 부터 — 낮은 중앙에는 보내지 않는다(빈 snapshots = 목록 교체).
@@ -97,7 +110,7 @@ async function pushPduOnce() {
       statusSent = st.ok;
       if (!st.ok) { statusNote = { statusError: st.reason }; console.warn(`[pdu-push] 상태 보고 실패: ${st.reason}`); }
     }
-    _last = { at: Date.now(), ok: true, count: 0, reason: wh.reason, withheld: true, statusSent, ...statusNote, ...(wh.missing ? { missing: wh.missing } : {}) };
+    _last = { at: Date.now(), ok: true, count: 0, reason: wh.reason, withheld: true, statusSent, ...statusNote, ...(wh.missing ? { missing: wh.missing } : {}), ...(regErr ? { registryError: String(regErr.reason || '사유 미상').slice(0, 200) } : {}) };
     return { ok: true, count: 0, withheld: true, reason: wh.reason, statusSent, ...(statusNote.statusSkipped ? { statusSkipped: statusNote.statusSkipped } : {}) };
   }
   const missingNote = wh.missing ? { missing: wh.missing } : {};
@@ -118,7 +131,7 @@ async function pushPduOnce() {
     // v2.601(감사 EDGE2601-04): 200 이어도 중앙이 일부를 뺐을 수 있다(소유권·형식) — 응답을 읽어 상태·콘솔에 남긴다.
     const ds = ok ? dropSummaryOf(await readCentralReply(res)) : null; // v2.613 EDGE2613-05: 공용 판독기
     if (ds?.rejected) console.warn(`[pdu-push] 중앙이 PDU ${ds.rejected}대를 받지 않았습니다(${dropText(ds.dropped)}) — 그 PDU 는 중앙 화면에 나오지 않습니다`);
-    const extra = { ...(omitted ? { omitted } : {}), ...(ds?.rejected ? { rejected: ds.rejected, dropped: ds.dropped } : {}), ...missingNote };
+    const extra = { ...(omitted ? { omitted } : {}), ...(ds?.rejected ? { rejected: ds.rejected, dropped: ds.dropped } : {}), ...missingNote, ...(regErr ? { registryError: String(regErr.reason || '사유 미상').slice(0, 200) } : {}) };
     if (ok && missingNote.missing) console.warn(`[pdu-push] 위임 PDU ${missingNote.missing}대는 스냅샷이 없어 이번 목록에 없습니다(보류 시한 초과 또는 첫 주기 이후 추가된 장비) — 중앙 화면에서 그 PDU 는 보이지 않습니다`);
     _last = { at: Date.now(), ok, count: snapshots.length, bytes: json.length, reason: ok ? (snapshots.length ? '' : '위임 PDU 0대 — 중앙 목록을 비웠습니다') : `HTTP ${res.status}`, ...extra };
     if (!ok && res.status !== 413) console.warn(`[pdu-push] 실패: HTTP ${res.status}`); // v2.583(카탈로그 N2) — 413 은 위에서 크기와 함께 찍었다

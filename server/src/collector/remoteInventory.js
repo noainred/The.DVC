@@ -98,6 +98,17 @@ export function sanitizeRemoteSensors(x) {
 }
 const SERVER_STR_KEYS = ['name', 'host', 'serviceTag', 'model', 'vcenterId', 'datacenterId', 'type', 'hostName'];
 /**
+ * v2.621(감사 WEB-04): BMC 벤더 — 엣지(2.621+)가 등록부 판정으로 'hpe' | 'dell' 을 싣는다. 이 둘만 값으로 받고
+ *   그 밖(모르는 글자·객체)은 **버린다**(필드 없음 = 벤더 미상). 'dell' 도 받는 이유: 구버전 엣지(필드 없음)와
+ *   '신버전 엣지가 Dell 이라고 말했다' 를 화면이 구분해야 한다 — 'hpe' 만 받으면 위임 Dell 서버가 영원히 미상이다.
+ *   반대로 필드가 없는 행을 Dell 로 채우지 않는다(구버전 엣지의 HPE 를 iDRAC 이라 말하게 된다).
+ */
+export function remoteVendor(v) {
+  if (typeof v !== 'string') return null;
+  const t = v.trim().toLowerCase();
+  return t === 'hpe' || t === 'dell' ? t : null;
+}
+/**
  * 엣지가 보낸 서버 목록을 정리한다(순수). 평범한 객체 + 유효 id 만 받고, 개수 상한을 넘거나 id 가 나쁜 원소는
  * **버리고 사유별 개수를 돌려준다**(호출부가 상태에 밝힌다 — 조용한 상한 금지).
  * @returns {{ servers: object[], dropped: { notObject:number, badId:number, overCount:number }, coerced:number }}
@@ -116,6 +127,10 @@ export function sanitizeRemoteServers(list, { max = REMOTE_SERVERS_MAX } = {}) {
       if (!Object.hasOwn(s, k) || s[k] == null) continue;
       o[k] = remoteStr(s[k]);
       if (o[k] == null) coerced += 1;
+    }
+    if (Object.hasOwn(s, 'vendor') && s.vendor != null) {
+      const v = remoteVendor(s.vendor);
+      if (v) o.vendor = v; else coerced += 1; // 모르는 값은 버리고 센다(조용히 빼지 않는다)
     }
     o.inv = sanitizeRemoteInv(s.inv);
     o.sensors = sanitizeRemoteSensors(s.sensors);

@@ -25,6 +25,7 @@ export default function DirUsageSettings() {
   const [mail, setMail] = useState({ enabled: false, to: '', cc: '', subject: '', onlyOnChange: false });
   const [retentionDays, setRetentionDays] = useState('365');   // 원문 문자열(빈 칸 = 미지정) — 전송 때 blankOr
   const inited = useRef(false);
+  const pollRef = useRef(null);
 
   const load = async () => {
     try {
@@ -43,9 +44,17 @@ export default function DirUsageSettings() {
         setRetentionDays(String(s.retentionDays ?? 365));
       }
       setErr(null);
-    } catch (e) { setErr(e.message); }
+    } catch (e) {
+      // v2.621(감사 SEC-03 후속): 조회가 전체 범위 전용(403)이 됐다 — 오류 객체를 그대로 넘겨 ErrorBox 가 권한 안내로 바꾸게 하고,
+      //   403 은 다시 물어도 결과가 같으므로 폴링을 멈춘다(15초마다 같은 403 이 감사·로그만 채운다).
+      setErr(e);
+      if (e?.status === 403 && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    }
   };
-  useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load(); pollRef.current = setInterval(load, 15_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; };
+  }, []);
 
   const addTarget = () => setTargets((ts) => [...ts, {
     id: `t${Date.now().toString(36)}`, label: '', agent: d?.agents?.[0]?.agent || '', instance: '',
@@ -106,7 +115,7 @@ export default function DirUsageSettings() {
         실행은 그 법인의 <b>RMA 에이전트</b>가 현지에서 <code>du</code> 로 수행하므로 고지연 회선에 부담이 없습니다.
       </p>
 
-      {err && <div className="muted" style={{ color: '#f0a', fontSize: 12, marginBottom: 8 }}>폴링 오류: {err}</div>}
+      {err && <div className="muted" style={{ color: '#f0a', fontSize: 12, marginBottom: 8 }}>폴링 오류: {typeof err === 'string' ? err : (err?.message || '알 수 없는 오류')}</div>}
 
       <div style={{ display: 'grid', gap: 6, marginBottom: 14, padding: '10px 12px', background: 'rgba(255,176,32,.08)', border: '1px solid rgba(255,176,32,.3)', borderRadius: 6, fontSize: 12, lineHeight: 1.7 }}>
         <div>⚠ <b>엣지에서 경로를 먼저 허용해야 합니다.</b> 대상 엣지의 <code>portal.env</code> 에

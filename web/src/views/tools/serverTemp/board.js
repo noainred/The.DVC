@@ -306,3 +306,25 @@ export function densityMetrics(dense) {
     barW: dense ? 36 : 48,
   };
 }
+
+/* ── 추이 모달: 점 상한으로 잘린 기간(v2.621 감사 RECENT-02) ─────────────── */
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+/**
+ * 서버가 점 상한(`limit`) 때문에 요청 기간을 다 덮지 못했으면(`truncated:true`) 그 사실을 말하는 문구.
+ * 잘리지 않았으면 null. ⚠ 조용한 상한 금지 — 1달·분 단위처럼 점이 상한을 넘으면 최근 구간만 오는데,
+ * 이 문구가 없으면 차트가 '요청한 기간 전체' 인 것처럼 보인다. 시각은 브라우저 로컬 시각(차트 축과 같다).
+ */
+export function histCutNote(hist) {
+  if (!hist || hist.truncated !== true) return null;
+  const lim = typeof hist.limit === 'number' && Number.isFinite(hist.limit) && hist.limit > 0 ? hist.limit : null;
+  const limTxt = lim ? `(점 상한 ${lim.toLocaleString()}개)` : '(점 상한)';
+  const cs = hist.coveredSince;
+  if (typeof cs === 'number' && Number.isFinite(cs) && cs > 0) {
+    const d = new Date(cs);
+    const at = `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    return `요청한 기간 중 ${at} 이후만 표시합니다${limTxt}. 집계 단위를 넓히면 전체 기간이 보입니다.`;
+  }
+  return `요청한 기간을 다 담지 못했습니다${limTxt}. 집계 단위를 넓히면 전체 기간이 보입니다.`;
+}

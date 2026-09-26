@@ -1,5 +1,5 @@
 // ShutdownTool.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import { Modal, ErrorBox } from '../../components/ui.jsx';
 
@@ -11,8 +11,16 @@ export function Shutdown() {
   const [open, setOpen] = useState(null); // 'stop' | 'resume' | null
   // v2.590 W2: 조회 실패를 삼키면 status=null → active=false → 초록 '정상 — 수집 동작 중' 이었다. 조회는 관리자 전용이라
   //   operator 는 **언제나** 그 거짓 초록을 봤다(전 수집이 멈춘 상태에서도). 실패는 따로 들고 '확인하지 못했다' 를 말한다.
-  const load = () => fetchJson('/admin/emergency-stop').then((s) => { setStatus(s); setLoadErr(null); }).catch((e) => setLoadErr(e));
-  useEffect(() => { load(); const t = setInterval(load, 10_000); return () => clearInterval(t); }, []);
+  // v2.621(감사 WEB 후속): 403 은 다시 물어도 결과가 같다 — 폴링을 멈춘다(10초마다 같은 403 이 감사·로그만 채웠다).
+  const pollRef = useRef(null);
+  const load = () => fetchJson('/admin/emergency-stop').then((s) => { setStatus(s); setLoadErr(null); }).catch((e) => {
+    setLoadErr(e);
+    if (e?.status === 403 && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  });
+  useEffect(() => {
+    load(); pollRef.current = setInterval(load, 10_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; };
+  }, []);
   const known = status != null;
   const active = !!status?.active;
   return (

@@ -232,3 +232,29 @@ describe('빈 버킷은 온도색이 아니다 (v2.556 스크린샷 판독)', ()
     expect(bucketTitle({ t: 44, n: 0 })).toBe('44~45℃ · 0대');
   });
 });
+
+describe('추이 모달 절단 안내 — v2.621 감사 RECENT-02', () => {
+  it('잘리지 않았으면 null', async () => {
+    const { histCutNote } = await import('./board.js');
+    expect(histCutNote(null)).toBe(null);
+    expect(histCutNote({ truncated: false, coveredSince: 1, limit: 5 })).toBe(null);
+    expect(histCutNote({ points: [] })).toBe(null);
+  });
+  it('잘렸으면 시작 시각·상한을 말한다', async () => {
+    const { histCutNote } = await import('./board.js');
+    const ts = new Date(2026, 8, 20, 7, 5).getTime();
+    const t = histCutNote({ truncated: true, coveredSince: ts, limit: 10080 });
+    expect(t).toContain('09-20 07:05 이후만');
+    expect(t).toContain('10,080');
+    expect(t).not.toMatch(/`|\*\*/);
+  });
+  it('시작 시각을 모르면 단정하지 않는다(null·빈 문자열을 1970 으로 읽지 않는다)', async () => {
+    const { histCutNote } = await import('./board.js');
+    for (const cs of [null, '', undefined, 0]) {
+      const t = histCutNote({ truncated: true, coveredSince: cs, limit: 5000 });
+      expect(t).toContain('다 담지 못했습니다');
+      expect(t).not.toContain('1970');
+      expect(t).not.toContain('01-01');
+    }
+  });
+});

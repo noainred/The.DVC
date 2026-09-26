@@ -13,6 +13,8 @@ import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
 // v2.601(감사 WEB2601-05): 수집 주기를 문구에 박지 않는다(CLAUDE.md v2.493) — 서버가 준 값만 쓰고, 없으면 주기를 말하지 않는다.
 import { intervalText } from './collectActivityText.js';
+// v2.621(감사 WEB-04·WEB-05): BMC 벤더 판정·미지원 서버 인증 칸 — 배지·CSV·필터가 같은 판정을 쓴다.
+import { serverVendorBadge, serverCsvType, serverCsvVendor, vendorFilterOptions, matchesVendor, unsupportedAuthBadge } from './serverVendorText.js';
 
 
 /**
@@ -259,7 +261,7 @@ function ServerInfoByVcenter({ vc, onServer }) {
         <div className="muted" style={{ fontSize: 13 }}>
           등록 서버 <b style={{ color: 'var(--accent)' }}>{rows.length}</b>대 · 법인 <b>{corpCount}</b>개
           {groups.has('__unmapped__') && <> · <span className="badge amber">{dcErr ? '법인 정보를 읽지 못함' : '미지정'} {groups.get('__unmapped__').length}</span></>}
-          <span style={{ marginLeft: 8 }}>· 서버 행을 클릭하면 iDRAC 상세(버전·온도·CPU)를 봅니다.</span>
+          <span style={{ marginLeft: 8 }}>· 서버 행을 클릭하면 서버 상세(버전·온도·CPU)를 봅니다.</span>
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           <input className="input" placeholder="이름/서비스태그/주소 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 220 }} />
@@ -350,15 +352,21 @@ function ServerInfoByVcenter({ vc, onServer }) {
 /** 법인 서버 상세 목록 '본문'(검색/CSV/표) — 모달(모델 클릭)과 인라인 패널(법인명 클릭)이 공유. */
 function ServerListBody({ corpName, model, servers, onRow }) {
   const [q, setQ] = useState('');
+  const [vendor, setVendor] = useState(''); // v2.621(감사 WEB-04): '' 전체 | dell | hpe | unknown | ome
   const allMode = !model; // 법인명 클릭 → 전체 서버(모델 컬럼 표시)
   const ql = q.trim().toLowerCase();
+  const vendorOpts = vendorFilterOptions(servers);
+  // 고른 벤더가 목록에서 사라지면(필터 변경) 전체로 본다 — 빈 표를 '서버 0대' 로 보이지 않게.
+  const vendorKey = vendorOpts.some((o) => o.key === vendor) ? vendor : '';
   const rows = (servers || [])
+    .filter((s) => matchesVendor(s, vendorKey))
     .filter((s) => !ql || [s.name, s.serviceTag, s.host, s.model].some((x) => String(x || '').toLowerCase().includes(ql)))
     .sort((a, b) => (allMode ? String(a.model || '').localeCompare(String(b.model || '')) : 0) || String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true }));
   const exportCsv = () => {
-    const head = ['name', 'model', 'type', 'host', 'service_tag', 'vcenter', 'status'];
+    // v2.621(감사 WEB-04): type 은 BMC 종류(OME/iDRAC/iLO/BMC=미상), vendor 열을 더한다 — 예전에는 HPE 도 'iDRAC' 이었다.
+    const head = ['name', 'model', 'type', 'vendor', 'host', 'service_tag', 'vcenter', 'status'];
     const lines = [head.join(',')];
-    for (const s of rows) lines.push([s.name || s.id, s.model || model || '', s.type === 'ome' ? 'OME' : 'iDRAC', String(s.host || '').replace(/^https?:\/\//, ''), s.serviceTag || '', s._vc || '', s.enabled === false ? '중지' : '수집'].map(esc).join(','));
+    for (const s of rows) lines.push([s.name || s.id, s.model || model || '', serverCsvType(s), serverCsvVendor(s), String(s.host || '').replace(/^https?:\/\//, ''), s.serviceTag || '', s._vc || '', s.enabled === false ? '중지' : '수집'].map(esc).join(','));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
@@ -367,10 +375,16 @@ function ServerListBody({ corpName, model, servers, onRow }) {
     <>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <span className="muted" style={{ fontSize: 13 }}>
-          {allMode ? <><b style={{ color: 'var(--accent, #60a5fa)' }}>{corpName}</b> 서버</> : <><b style={{ color: 'var(--accent, #60a5fa)' }}>{model}</b> 서버</>} <b>{(servers || []).length}</b>대{ql ? ` · ${rows.length} 표시` : ''}
-          <span style={{ marginLeft: 6 }}>· 행을 클릭하면 iDRAC 상세(버전·온도·CPU)를 봅니다.</span>
+          {allMode ? <><b style={{ color: 'var(--accent, #60a5fa)' }}>{corpName}</b> 서버</> : <><b style={{ color: 'var(--accent, #60a5fa)' }}>{model}</b> 서버</>} <b>{(servers || []).length}</b>대{ql || vendorKey ? ` · ${rows.length} 표시` : ''}
+          <span style={{ marginLeft: 6 }}>· 행을 클릭하면 서버 상세(버전·온도·CPU)를 봅니다.</span>
         </span>
-        <div className="flex gap" style={{ alignItems: 'center' }}>
+        <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+          {vendorOpts.length > 0 && (
+            <select className="select select-sm" value={vendorKey} onChange={(e) => setVendor(e.target.value)} title="BMC 벤더로 거릅니다 — 벤더 미상은 벤더를 보고하지 않는 2.621 이전 엣지의 서버입니다" style={{ minWidth: 130 }}>
+              <option value="">전체 벤더</option>
+              {vendorOpts.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+            </select>
+          )}
           <input className="input" placeholder="이름/모델/태그/주소 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 180 }} />
           <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} disabled={!(servers || []).length} onClick={exportCsv}>⬇ CSV</button>
         </div>
@@ -381,10 +395,11 @@ function ServerListBody({ corpName, model, servers, onRow }) {
         </tr></thead>
         <tbody>{rows.map((s) => {
           const isOme = s.type === 'ome';
+          const vb = serverVendorBadge(s);
           return (
             <tr key={s.id} style={{ cursor: isOme ? 'default' : 'pointer' }} onClick={() => onRow(s)}>
               <td><b>{s.name || s.id}</b></td>
-              <td>{isOme ? <span className="badge blue">OME</span> : <span className="badge gray">iDRAC</span>}{s.remote && <span className="badge amber" style={{ marginLeft: 4 }} title="위임 법인 스캔으로 엣지 에이전트가 수집한 서버(원격 인벤토리)">원격</span>}{!isOme && s._vc && <span className="badge blue" style={{ marginLeft: 4 }} title={`서비스태그가 vCenter '${s._vc}'의 ESXi 호스트와 일치 — 가상화 호스트`}>🖧 {s._vc}</span>}</td>
+              <td><span className={`badge ${vb.cls}`} title={vb.title}>{vb.label}</span>{s.remote && <span className="badge amber" style={{ marginLeft: 4 }} title="위임 법인 스캔으로 엣지 에이전트가 수집한 서버(원격 인벤토리)">원격</span>}{!isOme && s._vc && <span className="badge blue" style={{ marginLeft: 4 }} title={`서비스태그가 vCenter '${s._vc}'의 ESXi 호스트와 일치 — 가상화 호스트`}>🖧 {s._vc}</span>}</td>
               {allMode && <td className="muted">{s.model || '—'}</td>}
               <td className="muted">{String(s.host || '').replace(/^https?:\/\//, '') || '—'}</td>
               <td className="muted">{s.serviceTag || '—'}</td>
@@ -536,7 +551,8 @@ export function ServerAnalysis() {
   const [detail, setDetail] = useState(null); // { id, name } → iDRAC 상세 모달
   useEffect(() => { fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => fetchJson('/admin/vcenters').then((d) => setVcs(d.vcenters || [])).catch(() => {})); }, []);
   useEffect(() => { fetchJson('/admin/datacenters').then((r) => { setDcs(r.datacenters || []); setAssign(r.assign || {}); setDcErr(null); }).catch((e) => setDcErr(e)); }, []);
-  const onServer = (s) => setDetail({ id: s.id || s.serverId, name: s.name || s.server });
+  // v2.621(감사 WEB-04): 벤더·원격 여부를 상세에도 넘긴다(상세 제목을 벤더에 맞출 근거 — serverVendorText.bmcLabel).
+  const onServer = (s) => setDetail({ id: s.id || s.serverId, name: s.name || s.server, vendor: s.vendor, remote: s.remote, type: s.type });
   // 2차 박스의 vCenter 목록: 1차에서 법인을 고르면 그 법인 소속 vCenter만, '전체'면 모든 vCenter.
   const dcVcs = dc ? vcs.filter((v) => assign[v.id] === dc) : vcs;
   // (1차 dc, 2차 lvl2) → 스코프 객체. vCenter를 고르면 그 vCenter(가상화), Baremetal이면 (법인)+baremetal.
@@ -631,6 +647,12 @@ function tempKindMatch(kind, sensor) {
   return true;
 }
 
+/** v2.621(감사 WEB-05): '인증' 칸 — 로그인을 시도하지 않은 장비(noCreds)를 '통과' 로 칠하지 않는다(판정은 serverVendorText.js). */
+function UnsupportedAuthBadge({ r }) {
+  const b = unsupportedAuthBadge(r);
+  return <span className={`badge ${b.cls}`} title={b.title}>{b.label}</span>;
+}
+
 /**
  * 미지원 서버(v2.495) — iDRAC 스캔이 발견한 비-Dell Redfish 장비(HPE iLO 등).
  * 출처는 중앙 직접 스캔 + 위임(엣지) 스캔이 함께 보관되는 영속 스토어라, 위임 환경에서도 비지 않는다
@@ -683,7 +705,7 @@ function UnsupportedServers({ vc }) {
                   <td>{[r.product, r.model].filter(Boolean).join(' · ') || <span className="muted">—</span>}{r.manufacturer ? <div className="muted" style={{ fontSize: 11 }}>{r.manufacturer}</div> : null}</td>
                   <td>{r.hostName || <span className="muted">—</span>}</td>
                   <td className="muted" style={{ fontSize: 11.5 }} title={r.evidence}>{r.evidence || '—'}</td>
-                  <td>{r.authFailed ? <span className="badge gray" title="스캔 대역 계정(Dell 용)이 이 장비에서 거부됨 — 정상(다른 벤더 계정이 다름)">거부</span> : <span className="badge green">통과</span>}</td>
+                  <td><UnsupportedAuthBadge r={r} /></td>
                   <td>{r.datacenterId || <span className="muted">(미지정)</span>}</td>
                   <td>{r.service || <span className="muted">—</span>}</td>
                   <td>{r.source === 'edge' ? <span className="badge blue" title={r.agent}>엣지 {r.agent}</span> : <span className="badge">중앙</span>}</td>
@@ -725,7 +747,8 @@ function ServerTempFinder({ vc, onServer }) {
           {avg != null && <> · 평균 {avg}℃</>}
           {d.missing > 0 && <span className="badge amber" style={{ marginLeft: 8 }}>미수집 {d.missing}대</span>}
         </div>
-        <div className="flex gap" style={{ alignItems: 'center' }}>
+        {/* v2.621(감사 WEB-06): 줄바꿈이 없어 400px 에서 '↻' 가 뷰포트 밖으로 나갔다(v2.580 BUG-C 규약). */}
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <select className="select select-sm" value={kind} onChange={(e) => setKind(e.target.value)} style={{ minWidth: 130 }}>
             {TEMP_KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </select>

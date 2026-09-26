@@ -21,6 +21,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
+import { loadPerfSettings } from './perfSettings.js';   // v2.621(감사 DATA-03): 이월 한계 = 수집 주기 × 2
 const lockRetry = createLockRetry();
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'sanswitch-perf.db');
@@ -373,19 +374,36 @@ export function storageKey(name) {
  * @param deviceIds 합산할 스위치 id 배열(법인 필터 결과)
  * @returns { buckets, bucketMs, series:[{ key, ports:[{deviceId,port}], deviceIds[], sum[], avgTotal, maxTotal }] }
  */
-export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 120, groupOf = null, from = null, to = null } = {}) {
+export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null } = {}) {
   const db = await open();
   if (!db || !deviceIds.length) return { buckets: [], series: [], bucketMs: 0, unavailable: !db };
   const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
   const ph = deviceIds.map(() => '?').join(',');
   const rows = db.conn.prepare(
-    `SELECT device_id, port, (ts / ${bucketMs}) AS b, AVG(bps) AS avg_bps, MAX(bps) AS max_bps
+    `SELECT device_id, port, (ts / ${bucketMs}) AS b, AVG(bps) AS avg_bps, MAX(bps) AS max_bps, MAX(ts) AS last_ts
        FROM port_perf WHERE device_id IN (${ph}) AND ts >= ? AND ts <= ?
       GROUP BY device_id, port, b ORDER BY b ASC`,
   ).all(...deviceIds.map(String), since, until);
   const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name FROM port_meta WHERE device_id IN (${ph})`)
     .all(...deviceIds.map(String));
   const storageOf = new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, storageKey(m.attached_name)]));
+  /*
+   * v2.621(감사 DATA-03 — 재현: 1h 조회 22버킷 전부 절반 값·avgTotal 125MB/s, 정답 250): 팹 A/B 스위치의 캡처 시각은 수십 초
+   *   어긋난다. 버킷(1h 60초·6h 180초)이 수집 주기(기본 5분)보다 짧으면 한 버킷에 한 스위치 표본만 들어가 **그 버킷의 합이
+   *   어레이 트래픽의 절반**이 됐다(v2.415 의 null 처리는 '버킷 전체가 빈' 경우만 막는다). storage/db.js sumCapacityBuckets
+   *   (v2.600 DB2600-01)와 같은 판단 — 이 스토리지 포트 중 일부만 표본이 있는 버킷은 나머지 포트의 직전 표본을
+   *   한계(carryMs, 기본 수집 주기 × 2) 안에서 이월해 채우고, 조회 시작 직전 표본도 한계 안이면 들여온다(시작 버킷이 절반이
+   *   되지 않게). 자기 표본이 하나도 없는 버킷은 예전처럼 빈 칸이다(v2.415 — 다른 장비의 표본 시각이 만든 버킷을 채우지 않는다).
+   *   그래도 빠진 포트(한 번 본 뒤 한계를 넘겨 표본이 없는 포트)가 있는 버킷은 **부분 합을 그리지 않는다** — sum·peak 를 null 로
+   *   두고 그 버킷 번호를 partial 로 밝힌다(평균·최대에서도 빠진다). 조회 구간에서 한 번도 보이지 않은 포트는 알 수 없으므로 세지 않는다.
+   */
+  const lim = Number.isFinite(Number(carryMs)) && Number(carryMs) > 0 ? Number(carryMs) : defaultCarryMs();
+  const carryIn = new Map();   // `${device}|${port}` → { avg, max, ts } — 조회 시작 직전(한계 안) 마지막 표본
+  for (const r of db.conn.prepare(
+    `SELECT device_id, port, bps, MAX(ts) AS ts FROM port_perf WHERE device_id IN (${ph}) AND ts >= ? AND ts < ? GROUP BY device_id, port`,
+  ).all(...deviceIds.map(String), since - lim, since)) {
+    carryIn.set(`${r.device_id}|${Number(r.port)}`, { avg: Math.round(Number(r.bps)), max: Math.round(Number(r.bps)), ts: Number(r.ts) });
+  }
 
   const bucketSet = [...new Set(rows.map((r) => Number(r.b)))].sort((a, b) => a - b);
   const buckets = bucketSet.map((b) => b * bucketMs);
@@ -399,26 +417,61 @@ export async function storageSeriesMulti(deviceIds = [], { hours = 24, points = 
     const gk = groupOf ? `${g}\u0000${st}` : st;
     // 0 이 아니라 null 로 시작한다 — 버킷은 조회에 포함된 전 장비의 합집합이라, 비어 있는
     // 버킷을 0 으로 세면 조회 범위를 넓힐수록 평균이 내려간다(위 storageSeries 머리말 참조).
-    if (!byGroup.has(gk)) byGroup.set(gk, { key: st, group: g, ports: new Map(), sum: new Array(buckets.length).fill(null), peak: new Array(buckets.length).fill(null) });
+    if (!byGroup.has(gk)) byGroup.set(gk, { key: st, group: g, ports: new Map(), cells: new Map() });
     const s = byGroup.get(gk);
-    s.ports.set(`${r.device_id}|${Number(r.port)}`, { deviceId: String(r.device_id), port: Number(r.port) });
-    const i = idx.get(Number(r.b));
-    s.sum[i] = (s.sum[i] ?? 0) + Math.round(Number(r.avg_bps));
-    s.peak[i] = (s.peak[i] ?? 0) + Math.round(Number(r.max_bps)); // 포트별 버킷 MAX 의 합(위 storageSeries 주석 참조)
+    const pk = `${r.device_id}|${Number(r.port)}`;
+    s.ports.set(pk, { deviceId: String(r.device_id), port: Number(r.port) });
+    let cell = s.cells.get(pk);
+    if (!cell) { cell = new Map(); s.cells.set(pk, cell); }
+    cell.set(idx.get(Number(r.b)), { avg: Math.round(Number(r.avg_bps)), max: Math.round(Number(r.max_bps)), ts: Number(r.last_ts) });
   }
   const series = [...byGroup.values()].map((s) => {
-    const vals = s.sum.filter((v) => v != null);
-    const pv = s.peak.filter((v) => v != null);
+    const n = buckets.length;
+    const sum = new Array(n).fill(null);
+    const peak = new Array(n).fill(null);
+    const partial = [];
+    let carriedCells = 0;
+    // 포트별 진행 상태(직전 표본) — 버킷을 앞에서부터 훑는다.
+    const state = [...s.cells.entries()].map(([pk, cell]) => ({ cell, last: carryIn.get(pk) || null }));
+    for (let i = 0; i < n; i++) {
+      // 이 스토리지의 포트 중 이 버킷에 **자기 표본이 하나도 없으면** 빈 칸 그대로다(v2.415 — 다른 장비 때문에 생긴 버킷을
+      //   채우지 않는다). 이월은 '일부 포트만 표본이 있는' 버킷을 완성하는 데만 쓴다.
+      if (!state.some((p) => p.cell.has(i))) continue;
+      let acc = null; let pacc = null; let missing = 0; let carried = 0;
+      for (const p of state) {
+        const own = p.cell.get(i);
+        let v = null;
+        if (own) { v = own; p.last = own; }
+        else if (p.last) {
+          if (buckets[i] - p.last.ts <= lim) { v = p.last; carried += 1; }
+          else missing += 1;                       // 본 적은 있는데 한계를 넘겨 표본이 없다 — 이 버킷의 합은 부분 합이다
+        }
+        if (v) { acc = (acc ?? 0) + v.avg; pacc = (pacc ?? 0) + v.max; }
+      }
+      if (missing > 0) { partial.push(i); continue; }   // 부분 합은 그리지 않는다(null)
+      sum[i] = acc; peak[i] = pacc;
+      carriedCells += carried;
+    }
+    const vals = sum.filter((v) => v != null);
+    const pv = peak.filter((v) => v != null);
     const ports = [...s.ports.values()];
     return {
-      key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum: s.sum, peak: s.peak,
+      key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum, peak,
       avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0,   // 버킷 평균 합의 평균
       maxTotal: vals.length ? Math.max(...vals) : 0,                                 // 버킷 평균 합의 최댓값
       peakAvg: pv.length ? pv.reduce((a, b) => a + b, 0) / pv.length : 0,           // 버킷 피크 합의 평균
       peakTotal: pv.length ? Math.max(...pv) : 0,                                    // 버킷 피크 합의 최댓값(기간 내 최고 피크)
+      // v2.621(감사 DATA-03): 빠진 포트가 있어 그리지 않은 버킷(번호)과 직전 표본으로 채운 (포트×버킷) 칸 수 — 조용히 채우거나 빼지 않는다.
+      partial, partialBuckets: partial.length, carriedCells,
     };
   }).sort((a, b) => b.avgTotal - a.avgTotal);
-  return { buckets, bucketMs, since, until, series };
+  return { buckets, bucketMs, since, until, series, carryMs: lim };
+}
+
+/** v2.621(감사 DATA-03): 이월 한계 기본값 = 포트 사용량 수집 주기 × 2(storage sumCapacityBuckets 와 같은 배수). 설정을 못 읽으면 기본 주기(5분) × 2. */
+function defaultCarryMs() {
+  try { const iv = Number(loadPerfSettings()?.intervalMs); if (Number.isFinite(iv) && iv > 0) return iv * 2; } catch { /* 설정 못 읽음 — 기본값 */ }
+  return 2 * 5 * 60_000;
 }
 
 /**

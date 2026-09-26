@@ -31,6 +31,9 @@ async function postResult(payload) {
     const r = await resilientFetch(`${config.agent.centralUrl}/api/central/idrac-scan-result`, {
       method: 'POST', headers: headers(), body: JSON.stringify(payload), timeoutMs: 30_000, retries: 2,
     });
+    // v2.621(감사 EDGE-01): 410 = 중앙에 그 잡이 없다(만료·중앙 재시작). 토큰·버전 문제가 아니므로 원인을 따로 말한다 —
+    //   예전 중앙은 이때도 200 이라 여기서 '성공' 으로 적혔고 결과는 조용히 사라졌다.
+    if (r.status === 410) { console.error(`[idrac-scan-agent] 결과 회신 거절 HTTP 410 (reqId=${payload.reqId}) — 중앙에 이 잡이 없습니다(만료되었거나 중앙이 재시작됨). 결과는 중앙에 반영되지 않았고 현지 등록은 그대로입니다.`); return '중앙에 잡이 없음(HTTP 410 — 만료·중앙 재시작) — 결과 미반영'; }
     if (!r.ok) { console.error(`[idrac-scan-agent] 결과 회신 거부 HTTP ${r.status} (reqId=${payload.reqId}) — CENTRAL_TOKEN/중앙 버전을 확인하세요.`); return `결과 회신 거부(HTTP ${r.status})`; }
     return null;
   } catch (e) {
@@ -48,7 +51,8 @@ async function postProgress(reqId, scanned, total, found) {
     const r = await resilientFetch(`${config.agent.centralUrl}/api/central/idrac-scan-progress`, {
       method: 'POST', headers: headers(), body: JSON.stringify({ reqId, scanned, total, found }), timeoutMs: 10_000, retries: 2,
     });
-    if (!r.ok) { _progressError = `진행 보고 거부(HTTP ${r.status})`; progressWarn(`progress-${r.status}`, `진행 보고 거부 HTTP ${r.status} (reqId=${reqId})`); }
+    if (r.status === 410) { _progressError = '진행 보고 거절(HTTP 410 — 중앙에 이 잡이 없음: 만료·중앙 재시작)'; progressWarn('progress-410', `진행 보고 거절 HTTP 410 (reqId=${reqId}) — 중앙에 이 잡이 없습니다(만료되었거나 중앙이 재시작됨)`); } // v2.621(EDGE-01)
+    else if (!r.ok) { _progressError = `진행 보고 거부(HTTP ${r.status})`; progressWarn(`progress-${r.status}`, `진행 보고 거부 HTTP ${r.status} (reqId=${reqId})`); }
     else _progressError = null;
   } catch (e) {
     _progressError = `진행 보고 실패: ${e.message}`;
@@ -91,8 +95,9 @@ async function runIdracScanWorkerInner() {
           const rr = registerScanned(job.found || [], job.username, job.password, job.mode || 'merge', job.vcenterId || '', job.datacenterId || '', { ilo: job.ilo || null });
           const registered = rr.ok ? ((rr.added || 0) + (rr.updated || 0)) : 0;
           if (rr.ok) pollNow().catch(() => {});
-          await postResult({ reqId: job.reqId, agent: config.agent.name, scanned: 0, found: job.found || [], foundCount: (job.found || []).length, registered, error: rr.ok ? null : (rr.reason || '등록 실패'), durationMs: Date.now() - started });
-          last = { at: Date.now(), reqId: job.reqId, registered };
+          // v2.621(감사 EDGE-01): 등록 잡도 회신 실패(410 = 중앙에 잡 없음 등)를 상태에 싣는다 — 스캔 잡(v2.593 EDGE-4)과 같은 규칙.
+          const regPostErr = await postResult({ reqId: job.reqId, agent: config.agent.name, scanned: 0, found: job.found || [], foundCount: (job.found || []).length, registered, error: rr.ok ? null : (rr.reason || '등록 실패'), durationMs: Date.now() - started });
+          last = { at: Date.now(), reqId: job.reqId, registered, ...(regPostErr ? { postError: regPostErr } : {}) };
           console.log(`[idrac-scan-agent] ${config.agent.name}: 등록 잡 — ${registered}대 현지 등록`);
           continue;
         }

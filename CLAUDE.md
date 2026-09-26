@@ -4031,6 +4031,40 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       V5 상태 카드는 `healthError`·`upgrading` 을 먼저 말한다 · iDRAC 스캔 대역·결과·로그 **조회**도 fleetOnly · 파트 장애 `lastView`·CVP `maskErrText`.
     - 남긴 것: SRV2620-04(시계열 일 버킷 UTC 경계 — 차트 경계가 바뀌는 설계 판단) · WEB2620-06(V5 법인 선택의 vCenter 탭 적용) · PERF2620-02(LRU 가
       prune 핸들 닫음 — vCenter 48 미만이면 도달 불가) · 백업 `JSON.stringify` 동기 몫 · puller 첫 주기(실패 이력 전) 불통 엣지 약 61초.
+  - ⚠⚠ **v2.621 — 6축 감사(버그·코드 개선 2회차) 확정분**(사용자 요청 "한번 더" = v2.620 과 같은 방식. 발견 36 = 확정 32 · 가능성 3 · 반증 1,
+    6그룹 + 리드 통합. 상세 `docs/AUDIT-2026-09-26c.md`, 회귀 `server/test/audit2621{a,b,c,d,f,lead}.test.js` + 웹 `views/audit2621e.test.js`·
+    `views/tools/audit2621f.test.js`·`serverTemp/board.test.js` — 그룹별 변이 검증 전부 통과):
+    - ⚠⚠ **`ErrorBox` 는 문자열·Error·HttpError 를 다 받는다 — 정규화는 `accessDeniedText.errorBoxInput` 하나**(WEB-01·RECENT-01 — **v2.620 이
+      만든 회귀**): v2.620 이 `setLoadErr(e)` 로 객체를 넘기자 4xx 하나로 탭 전체가 React #31 로 죽었다(12곳). 403 은 권한 안내, 5xx 는 서비스 안내.
+      ⚠ 오류 객체를 상태에 넣었으면 **그 상태를 글자로 그리는 다른 곳**(`폴링 오류: {err}`)도 문자열로 바꿀 것 — 같은 크래시가 된다.
+      403 은 다시 물어도 결과가 같다 — 폴링하는 화면은 403 이면 **폴링을 멈춘다**(긴급중단·폴더 사용량 2화면·트래픽 분석·iDRAC 스캔 잡).
+    - ⚠⚠ **step 채움을 넣었으면 점 상한도 다시 계산할 것**(RECENT-02 — v2.620 회귀): 빈 버킷도 점이 되자 5000점 상한이 '1주·분' 을 3.47일로
+      조용히 잘랐다. 상한은 기간을 덮는 버킷 수(상한 1주×분)이고 넘치면 `truncated`·`coveredSince`·`limit` 을 싣는다 — 모달이 `histCutNote` 로 말한다.
+    - **'못 읽은 것' 을 정상으로 보고하지 않는다 — 이번엔 일일 헬스체크**(DATA-02): 경보 미조회·첫 수집 중·낡은 위임·점검중 vCenter·사용량 미상 DS 는
+      섹션 `unknown`('확인 불가') 이고 전체 순서 crit > warn > unknown > ok. 점검중 vCenter 샘플 제외(RECENT-03)는 `unreadVcenterReasons` 하나 —
+      첫 수집 중(pending)은 **일부러 뺐다**(push 하지 않는 site 가 전체 합계를 영원히 막는다 — 판단 필요로 남김).
+    - **시각 오프셋 변환은 `loganalysis/parse.js` 와 같은 식**(DATA-01): `+0900` 이 `++09:00` 이 되어 게스트 로그인 실패가 전부 '지금' 으로 적재됐다.
+      저널이 있으면 저널만 읽는다(rsyslog 가 옮겨 적은 secure 와 이중 적재). `runGuestScript` 의 stdout 상한은 `outMax`(기본 2000 — 호출부 불변) ·
+      잘리면 `stdoutTruncated` — 로그인 조사는 32,000자(tail 80줄의 **최신** 줄이 앞 2000자 밖이었다).
+    - **위임 잡을 순차로 처리하는 엣지에는 한 번에 하나만 준다**(EDGE-01 — `idracScanJobs TAKE_MAX` 1): 전량 인출하면 뒤 잡이 거짓 재대기·gc 로
+      결과가 200 과 함께 버려진다. 모르는 reqId 는 410 `unknown-job` · 결과 재수신은 정제본 서명으로 멱등(EDGE-07) · 레거시 할당 스캐너도 공용
+      스캔 잠금(`tryAcquireScan('assign')`, LIFE-01). ⚠ `captureJobs` 는 아직 모르는 reqId 에 200 이다(데이터 손실 없음 — 남은 일).
+    - **엣지 push 3종(스토리지·SAN·PDU)은 `registryLoadError()` 를 먼저 본다**(EDGE-03): 예전 catch 는 죽은 코드라 손상 등록부가 '위임 0대' 로 중앙을
+      비웠다(CVP 는 v2.620 에 고쳤다 — 형제 비대칭). 중앙 part-faults 수신도 등록부 손상이면 503(EDGE-04).
+    - **설정 push 413 재전송은 뺀 파일을 `retainFiles` 로 밝힌다**(RECENT-09): 중앙이 그 이름의 직전 사본을 유지(`retained`). 구버전 중앙은 몰라서
+      교체한다 — 엣지가 `centralRetainUnsupported` 로 상태·콘솔에 남긴다. `AGENT_CONFIG_PUSH_TARGET_BYTES`(기본 15728640).
+    - **범위 관리자 차단 — 이번엔 중계 프록시 형제 라우트·GPU 게스트 SSH 테스트·폴더 사용량 조회**(SEC-01~03): 새 게이트 이름
+      `fleetReadOnly`·`rawIpFleetOnly` 는 `scripts/api-doc.mjs GUARD_NOTE` 에 등록했다(없으면 apiDoc2563 이 실패한다 — 이번에 실제로 실패했다).
+      v2.611 이 '폴더 사용량 조회는 연다' 고 정한 것을 되돌렸다(응답이 RMA 엣지 IP·fileRoots 를 싣는다 — `audit2611b` 단언 갱신).
+      GPU 게스트 수집기의 `usableIp` 는 정규식 + 접두 비교라 `000.0.0.0` 이 루프백에 닿았다 → `strictIpv4Num` + `ipBlockReason` + 루프백 상시 제외.
+    - **HPE 서버는 목록·CSV·상세에서 벤더로 구분한다**(WEB-04·05, `views/tools/serverVendorText.js` 하나): 엣지 export 가 `vendor`(hpe·dell)를
+      싣고 중앙은 그 둘만 받는다(없으면 '벤더 미상' — Dell 로 채우지 않는다). 미지원 장비의 `noCreds` 는 '통과' 가 아니라 '시도 안 함'.
+      ⚠ 위임 스캔 결과 정제(`sanitizeIdracScanData`)에도 새 필드를 더할 것 — 이번에도 한 번 빠졌다(v2.611 CEN2611-01 과 같은 유형).
+    - 그 밖: 팹 스위치 합산 부분 합은 이월(주기×2) 또는 `partial`(DATA-03) · HPE PSU 센서는 흡기 아님(DATA-04, 가능성) · IPMS 스캔 대역 조회 실패면
+      저장 잠금(`vcRangesGate`) · 개요 '사용량 미상 DS N개' 문구(`storageUsageUnknownNote`) · V4 물리 서버 KPI 대체 제거(`physicalServersKpi`) ·
+      작업 로그는 같은 틱을 묶어 쓴다(N=60: 83ms → 4ms) · Enterprise 대체 경로 Redfish 는 signal 을 끝까지(공유 세션 POST 제외) · 수집 요청 큐 seen 상한.
+    - 남긴 것: RECENT-10 · DATA-05(가능성) · `rawGet` 세션 폴백의 토큰 GET 시한 실패가 Basic 401 로 바뀌어 **멀쩡한 서버를 인증 정지**시킬 수 있다
+      (확인하지 못함 — 다음 점검의 첫 후보) · 섀시 Sensors 일시 오류의 6시간 absent 캐시 · 새 엣지 상태 필드의 전용 문구 · `updateVmStats` 낡은 누적.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

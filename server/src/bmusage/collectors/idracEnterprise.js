@@ -99,7 +99,9 @@ export async function collectEnterpriseUsage(entry, {
       const fn = _fetchUsageSensors || (await import('../../idrac/redfish.js')).fetchUsageSensors;
       let r = null;
       try {
-        r = await withStepDeadline(Math.min(API_SLICE_MS, left()), () => fn(entry, { allowProbe }));
+        // v2.621(감사 LIFE-02): 단계 시한과 폴러의 장비 시한을 **요청까지** 넘긴다 — 결과만 버리면 남은 센서 GET 이
+        //   BMC 로 계속 나가, auto 모드에서 곧 여는 racadm SSH 와 같은 BMC 에 겹쳤다(재현: 반환 뒤 16초간 새 요청 2건).
+        r = await withStepDeadline(Math.min(API_SLICE_MS, left()), (sig) => fn(entry, { allowProbe, signal: sig }), signal);
       } catch (e) {
         r = { ok: false, kind: 'unreachable', error: String(e?.message || e).slice(0, 300) };
       }
@@ -197,13 +199,26 @@ export async function collectEnterpriseUsage(entry, {
   return out;
 }
 
-/** 단계별 시한 — 결과만 포기하는 것이라 **SSH 세션에는 쓰지 않는다**(그쪽은 signal 로 끊는다). */
-async function withStepDeadline(ms, fn) {
+/**
+ * 단계별 시한 — **SSH 세션에는 쓰지 않는다**(그쪽은 withSsh 의 signal 로 끊는다).
+ * v2.621(감사 LIFE-02): 예전에는 `Promise.race` 로 결과만 포기해 fn 의 요청이 시한 뒤에도 돌았다. 이제 시한이 되면
+ *   AbortController 로 **실제로 끊는다** — fn 은 (단계 시한 ∪ 호출자 signal) 신호를 받아 요청에 건다(v2.417 규약).
+ *   race 는 그대로 둔다 — 신호를 무시하는 fn(테스트 주입 등)이어도 이 단계가 시한을 넘기지 않게.
+ */
+async function withStepDeadline(ms, fn, outer = null) {
+  const ac = new AbortController();
+  const sig = outer ? AbortSignal.any([ac.signal, outer]) : ac.signal;
   let timer = null;
   try {
     return await Promise.race([
-      fn(),
-      new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`단계 시한 초과(${Math.round(ms / 1000)}초)`)), Math.max(1_000, ms)); }),
+      fn(sig),
+      new Promise((_, rej) => {
+        timer = setTimeout(() => {
+          const e = new Error(`단계 시한 초과(${Math.round(ms / 1000)}초)`);
+          ac.abort(e);
+          rej(e);
+        }, Math.max(1_000, ms));
+      }),
     ]);
   } finally { if (timer) clearTimeout(timer); }
 }

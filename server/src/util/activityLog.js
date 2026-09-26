@@ -25,6 +25,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { registerStateFile } from './stateFiles.js'; // v2.613 PERSIST2613-08
+import { registerExitFlush } from './exitFlush.js'; // v2.621 LIFE-03
 
 /**
  * 도메인 하나의 작업 로그를 만든다.
@@ -41,6 +42,27 @@ export function createActivityLog({ fileName, max = 500, numFields = [] }) {
   registerStateFile(fileName); // v2.613 PERSIST2613-08: 링버퍼 캐시 — 상태 파일로 스스로 등록(이름 규약 -activity 와 이중)
   const MAX = Math.max(50, Number(max) || 500);
   let buf = null;
+  /*
+   * v2.621(감사 LIFE-03 — 재현): 예전에는 기록 1건마다 링버퍼 전량(500건 ≈ 120KB)을 직렬화하고 atomicWriteFileSync
+   *   (파일·디렉터리 fsync + rename)로 **동기** 저장했다. 중앙 push 수신은 장비마다 이 함수를 한 루프에서 부르므로
+   *   (central/sanSwitchEdge·storageEdge·sanSwitchPerfEdge, routes/central.js curuser) 장비 60대 push 한 번이
+   *   이벤트 루프를 약 105ms 멈췄다(1건당 1.7ms × 60). 이제 **같은 틱의 기록을 묶는다**:
+   *   · 그 틱의 첫 기록은 예전처럼 곧바로 쓴다(따로 떨어진 기록 — 폴러의 장비별 완료 — 는 동작이 같다).
+   *   · 같은 틱의 나머지는 메모리에만 넣고 틱 끝(마이크로태스크)에서 **한 번** 쓴다 → 루프 N건이 쓰기 2번이 된다.
+   *   · 조회(listActivity)는 메모리를 보므로 방금 기록이 **즉시** 보이고, 조회·테스트 초기화 전에는 대기분을 먼저 쓴다
+   *     (메모리와 파일이 다른 시점을 말하지 않게). `process.exit` 가 같은 틱에 오면 exit 훅이 대기분을 쓴다.
+   *   상한(MAX)·손상 시 새로 시작·0600·원자 쓰기는 그대로다.
+   */
+  let tickOpen = false; // 이 틱에 이미 한 번 썼다 — 나머지는 틱 끝에서
+  let dirty = false;    // 메모리에만 있고 아직 파일에 없는 기록이 있다
+  function writeNow() {
+    if (!buf) return;
+    dirty = false;
+    try { atomicWriteFileSync(FILE, JSON.stringify(buf), { mode: 0o600 }); }
+    catch { dirty = true; /* 영속 실패는 무시 — 인메모리 로그는 유지(다음 기록·조회에서 재시도) */ }
+  }
+  function flush() { if (dirty) writeNow(); }
+  registerExitFlush(`activity/${fileName}`, flush);
 
   function load() {
     if (buf) return buf;
@@ -71,16 +93,20 @@ export function createActivityLog({ fileName, max = 500, numFields = [] }) {
     for (const f of numFields) e[f] = Number.isFinite(evt[f]) ? evt[f] : null;
     b.push(e);
     if (b.length > MAX) b.splice(0, b.length - MAX);  // 오래된 것부터 폐기(링버퍼)
-    try { atomicWriteFileSync(FILE, JSON.stringify(b), { mode: 0o600 }); }
-    catch { /* 영속 실패는 무시 — 인메모리 로그는 유지(다음 기록에서 재시도) */ }
+    if (tickOpen) { dirty = true; return e; }         // v2.621 LIFE-03: 같은 틱의 나머지 — 틱 끝에서 한 번에
+    tickOpen = true;
+    writeNow();
+    queueMicrotask(() => { tickOpen = false; flush(); });
     return e;
   }
 
   /** 최근 이벤트 newest-first (limit 상한, 기본 100). */
   function listActivity(limit = 100) {
     const n = Math.max(1, Math.min(MAX, Number(limit) || 100));
+    flush(); // v2.621 LIFE-03: 같은 틱에 쌓인 대기분이 있으면 먼저 쓴다(없으면 아무것도 하지 않는다)
     return load().slice(-n).reverse();
   }
 
-  return { recordActivity, listActivity, _resetForTest: () => { buf = null; }, MAX, FILE };
+  // _resetForTest: 대기분을 먼저 쓰고 비운다 — 다음 load() 가 파일에서 다시 읽으므로 대기분을 버리면 사라진다.
+  return { recordActivity, listActivity, flush, _resetForTest: () => { flush(); buf = null; }, MAX, FILE };
 }

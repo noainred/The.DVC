@@ -13,6 +13,7 @@
  */
 import { siteRows, levelOf, tsMs } from '../console/consoleData.js';
 import { numOrNull } from '../numOrNull.js';
+import { storageUsageUnknownNote } from '../views/vcCardText.js'; // v2.621(감사 WEB-03): 사용량 미상 DS 제외 문구는 한 곳이 소유
 
 /** 사이트(vCenter) 1곳의 상태 등급 — ok | warn | crit | wait | maint | off(v2.617: 설정에서 꺼 둔 vCenter — 수집하지 않으므로 판정 대상이 아니다). */
 export function siteLevel(row) {
@@ -104,14 +105,17 @@ export function opsStatus({ ov, alarms, hosts, scopeId = '' } = {}) {
 
 /**
  * 카드 2 — 인프라 규모. 범위가 있으면 그 사이트 롤업·그 법인 물리 서버.
- * @returns {{vcenters, physical, physicalNote, hosts, vms, vmsOn, storageUsedTB, storageTotalTB, storagePct}}
+ * v2.621(감사 WEB-03): `storageNote` — 서버가 사용량 미상 DS 를 용량·사용량 합계에서 뺐으면 그 개수(없으면 null).
+ *   siteRows 는 그 필드를 옮기지 않으므로 범위 모드는 원본 사이트 metrics 에서 읽는다.
+ * @returns {{vcenters, physical, physicalNote, hosts, vms, vmsOn, storageUsedTB, storageTotalTB, storagePct, storageNote}}
  */
 export function infraTotals(ov, scopeId = '') {
   if (!ov) return null;
   if (scopeId) {
     const r = scopedSites(ov, scopeId)[0];
     const phys = ov.physicalByCorp && !ov.physicalByCorp.error ? numOrNull(ov.physicalByCorp.byVcenter?.[scopeId]) : null;
-    if (!r) return { vcenters: 0, physical: phys, hosts: null, vms: null, vmsOn: null, storageUsedTB: null, storageTotalTB: null, storagePct: null };
+    if (!r) return { vcenters: 0, physical: phys, hosts: null, vms: null, vmsOn: null, storageUsedTB: null, storageTotalTB: null, storagePct: null, storageNote: null };
+    const rawSite = (Array.isArray(ov.sites) ? ov.sites : []).find((x) => x?.id === scopeId);
     return {
       vcenters: 1, physical: phys, // v2.620(WEB2620-05): 집계를 못 읽은 것(오류·필드 없음)과 '연결된 서버 없음' 을 같은 문구로 말하지 않는다.
       physicalNote: phys != null ? null
@@ -119,6 +123,7 @@ export function infraTotals(ov, scopeId = '') {
         : '이 법인에 연결된 iDRAC 서버 없음',
       hosts: r.hosts, vms: r.vms, vmsOn: r.vmsOn,
       storageUsedTB: r.storageUsedTB, storageTotalTB: r.storageTotalTB, storagePct: r.sto,
+      storageNote: storageUsageUnknownNote(rawSite?.metrics),
     };
   }
   const g = ov.global;
@@ -131,6 +136,7 @@ export function infraTotals(ov, scopeId = '') {
     hosts: numOrNull(g.hosts), vms: numOrNull(g.vms), vmsOn: numOrNull(g.vmsPoweredOn),
     storageUsedTB: numOrNull(g.storageUsedTB), storageTotalTB: total,
     storagePct: numOrNull(g.datastores) > 0 && total > 0 ? numOrNull(g.storageUsagePct) : null,
+    storageNote: storageUsageUnknownNote(g),
   };
 }
 

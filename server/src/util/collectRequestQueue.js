@@ -33,11 +33,21 @@
  */
 
 const DROPS_MAX = 20;
+/**
+ * v2.621(감사 EDGE-06): seen(장비 id → 마지막 collectedAt) 기록 상한. 예전에는 push 원소마다 요청 유무와 무관하게 기록하고 지우는
+ *   경로가 _reset 뿐이라, 공유 토큰 수신(소유 필터 없음)에서 매 push 새 id 가 오면 프로세스 수명 내내 쌓였다(재현: 요청 0건에
+ *   ack 20만 건 → 힙 +45MB · v2.606 TIM2606-05 가 _lastRec 에서 고친 것의 형제). 실제 위임 장비는 수백~수천 대라 이 상한이면
+ *   정상 기록은 밀리지 않는다. 넘치면 **가장 오래 갱신되지 않은** 기록부터 버리되 대기·진행 중인 요청의 기록은 버리지 않는다.
+ *   버린 장비의 기준선은 인출 시점에 baseOf(보관 중인 엣지 스냅샷의 수집 시각 — ack 와 같은 값)가 대신한다.
+ */
+export const SEEN_MAX = 4096;
 
-export function createCollectRequestQueue({ ttlMs = 15 * 60_000, ackMs = 10 * 60_000, perItemMs = 0, maxTries = 2, lower = true, baseOf = null } = {}) {
+export function createCollectRequestQueue({ ttlMs = 15 * 60_000, ackMs = 10 * 60_000, perItemMs = 0, maxTries = 2, lower = true, baseOf = null, seenMax = SEEN_MAX } = {}) {
   const pending = new Map();   // id → { agent, requestedAt, tries, base? }
   const inflight = new Map();  // id → { agent, requestedAt, takenAt, deadline, tries, base }
-  const seen = new Map();      // id → 마지막으로 받은 collectedAt(엣지 시계 값 그대로 — 중앙 시계와 비교하지 않는다)
+  const seen = new Map();      // id → 마지막으로 받은 collectedAt(엣지 시계 값 그대로 — 중앙 시계와 비교하지 않는다) · 갱신 순서(LRU)
+  const seenCap = Math.max(1, Math.floor(Number(seenMax) || SEEN_MAX));
+  let seenEvicted = 0;
   const drops = [];            // 최근 폐기 { id, agent, at, tries } (최신이 앞)
   const norm = (a) => (lower ? String(a || '').trim().toLowerCase() : String(a || '').trim());
 
@@ -115,7 +125,19 @@ export function createCollectRequestQueue({ ttlMs = 15 * 60_000, ackMs = 10 * 60
       const p = pending.get(k);
       // 재대기 중인 요청(한 번 인출돼 기준선이 있는 것)만 — 인출된 적 없는 요청은 이 push 가 그 결과일 수 없다.
       if (!done && p && ('base' in p) && complete(p, t)) { pending.delete(k); done = true; }
-      if (t != null) seen.set(k, Math.max(t, seen.get(k) ?? -Infinity));
+      if (t != null) {
+        const v = Math.max(t, seen.get(k) ?? -Infinity);
+        seen.delete(k); seen.set(k, v); // v2.621(EDGE-06): 지우고 다시 넣어 최근 갱신이 뒤로 간다(LRU — v2.594 EDGE2-02 규약)
+        if (seen.size > seenCap) {
+          // 대기·진행 중인 요청의 기준선은 버리지 않는다(요청 수는 사람이 누른 만큼이라 유한하다 — 전부 요청 중이면 상한을 잠시 넘긴다).
+          for (const key of seen.keys()) {
+            if (seen.size <= seenCap) break;
+            if (pending.has(key) || inflight.has(key)) continue;
+            seen.delete(key); seenEvicted += 1;
+            if (seenEvicted === 1 || seenEvicted % 10_000 === 0) console.warn(`[collect-request] 기준선 기록 상한(${seenCap})을 넘어 오래된 장비 기록 ${seenEvicted}건을 버렸습니다 — 그 장비는 인출 때 보관 스냅샷 시각을 기준선으로 씁니다(엣지가 매번 새 장비 id 를 보내는지 확인하세요)`);
+          }
+        }
+      }
       return done;
     },
     has(id, now = Date.now()) { reap(now); const k = String(id); return pending.has(k) || inflight.has(k); },
@@ -130,6 +152,8 @@ export function createCollectRequestQueue({ ttlMs = 15 * 60_000, ackMs = 10 * 60
     /** 최근 폐기 목록(최신이 앞, 최대 20). 화면이 '결과 없이 폐기된 요청' 을 말하는 근거. */
     drops(now = Date.now()) { reap(now); return drops.map((d) => ({ ...d })); },
     lastDropped(now = Date.now()) { reap(now); return drops[0] ? { ...drops[0] } : null; },
-    _reset() { pending.clear(); inflight.clear(); seen.clear(); drops.length = 0; },
+    _reset() { pending.clear(); inflight.clear(); seen.clear(); drops.length = 0; seenEvicted = 0; },
+    /** 기준선 기록 수·상한으로 버린 수(v2.621 EDGE-06 — 진단·테스트용). */
+    seenStats() { return { size: seen.size, max: seenCap, evicted: seenEvicted }; },
   };
 }

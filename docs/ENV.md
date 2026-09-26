@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **552개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **553개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-26)
@@ -338,13 +338,14 @@
 | `UPGRADE_PACKAGE_MAX_BYTES` |  |  | upgrade/fetchPackage.js |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 
-## 엣지 에이전트 (38)
+## 엣지 에이전트 (39)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `AGENT_BMSTOR_POLL_MS` | `10000` |  | agent/bmstorWorker.js |
 | `AGENT_CAPTURE_POLL_MS` | `4000` |  | agent/captureWorker.js |
 | `AGENT_CONFIG_PUSH_MS` | `1800000` |  | agent/configPush.js |
+| `AGENT_CONFIG_PUSH_TARGET_BYTES` | `15728640` |  | agent/configPush.js |
 | `AGENT_CURUSER_CHUNK_BYTES` | `700000` |  | agent/curUserPush.js |
 | `AGENT_CURUSER_CONFIG_PULL_MS` | `10` |  | agent/curUserConfigPull.js |
 | `AGENT_CURUSER_PUSH_TIMEOUT_MS` |  |  | agent/curUserPush.js |
@@ -736,4 +737,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 552
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 553

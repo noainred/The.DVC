@@ -26,7 +26,7 @@ import { fmtTrendTick, tempColor, useTool } from '../shared.jsx';
 import { sparkProgressText, sparkCapText, SPARK_ROW_CAP } from '../sparkBatch.js';
 import {
   TEMP_WARN_C, TEMP_HOT_C, tempNum, tempCounts, hotList, compareRows, rowTint, dcKeyOf,
-  loadDensity, saveDensity, densityMetrics,
+  loadDensity, saveDensity, densityMetrics, histCutNote,
 } from './board.js';
 import {
   MonoLabel, Segment, DensityToggle, Section, TempHistogram, DcCompare, HotList, TempHeatmap,
@@ -419,6 +419,10 @@ export default function ServerTempBoard({ scope }) {
             ))}
             {hist.points?.length ? <span className="muted" style={{ fontSize: 11 }}>{hist.points.length}개 구간</span> : null}
           </div>
+          {/* v2.621(감사 RECENT-02): 점 상한으로 요청 기간을 다 덮지 못했으면 말한다(조용한 상한 금지). */}
+          {!hist.loading && histCutNote(hist)
+            ? <div className="muted" style={{ fontSize: 11.5, color: 'var(--amber)', marginBottom: 8, overflowWrap: 'anywhere' }}>{histCutNote(hist)}</div>
+            : null}
           {hist.loading ? <Loading /> : hist.error ? <ErrorBox message="이력을 불러오지 못했습니다." /> : (hist.points || []).length === 0
             ? <div className="muted">해당 기간 데이터가 없습니다(수집 누적 후 표시).</div>
             : (

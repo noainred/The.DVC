@@ -19,6 +19,7 @@ import TaskWho from './TaskWho.jsx';
 import ServiceDown from './ServiceDown.jsx';
 import { serviceDownKind } from './serviceDownText.js';
 import { numOrNull } from '../numOrNull.js';
+import { errorBoxInput } from './accessDeniedText.js';
 
 /** VM GPU 배지 — vGPU/패스쓰루/혼합. Vms.jsx 에 있던 것을 공용으로 옮겼다(상세 화면 단일화). */
 const GPU_TYPE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], mixed: ['혼합', 'purple'] };
@@ -323,13 +324,17 @@ export function ErrorBox({ message: msgProp, error, info = null }) {
   // v2.589: 26곳이 `error=` 로 넘기는데 이 컴포넌트는 `message` 만 읽어 **빈 '오류:'** 가 떴다
   // (403 안내·일시적 미가용 안내도 함께 사라졌다). 둘 다 받는다 — 판정은 아래 한 곳 그대로.
   const message = msgProp ?? error ?? null;
-  const perm = info || permissionInfoFor(message);
-  if (perm) return <AccessDenied info={perm} message={message} />;
+  // v2.621(감사 WEB-01): Error·HttpError 객체가 와도 문자열로 정규화한다. 예전에는 객체가
+  // 사이드 채널(문자열 키)을 빗나가 `오류: {객체}` 로 그려져 React #31 로 탭 전체가 죽었다.
+  // 객체에 상태코드가 있으면 그 객체가 곧 HTTP 정보다(403 만 AccessDenied — 계약 유지).
+  const norm = errorBoxInput(message);
+  const perm = info || norm.perm || permissionInfoFor(norm.text);
+  if (perm) return <AccessDenied info={perm} message={norm.text} />;
   // v2.459: 5xx·네트워크 실패는 '오류'가 아니라 **일시적 미가용**(업그레이드 중 재시작 포함)이다.
   // 빨간 "오류: Failed to fetch" 로 두면 사용자가 데이터 손실·자기 잘못으로 오해해 새로고침을
   // 반복한다. 403 → AccessDenied 와 같은 단일 지점 처리.
-  const http = httpInfoFor(message);
-  const kind = serviceDownKind(message, http);
-  if (kind) return <ServiceDown kind={kind} message={message} http={http} />;
-  return <div className="error-box">오류: {message}</div>;
+  const http = norm.http || httpInfoFor(norm.text);
+  const kind = serviceDownKind(norm.text, http);
+  if (kind) return <ServiceDown kind={kind} message={norm.text} http={http} />;
+  return <div className="error-box">오류: {norm.text}</div>;
 }

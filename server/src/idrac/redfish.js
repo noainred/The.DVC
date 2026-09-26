@@ -165,12 +165,16 @@ function pwFingerprint(pw) {
  * Redfish의 Basic 인증을 비활성화하고 세션 토큰만 허용한다(웹 UI 로그인은 되는데 Basic만 막힘 —
  * '계정 맞는데 인증실패'의 실제 원인). 응답 객체를 그대로 반환(401이면 세 방식 모두 실패).
  */
-async function rawGet(base, pathname, username, password, timeoutMs = config.idrac.timeoutMs) {
-  const doFetch = (headers, method = 'GET', path = pathname, body) => bmcFetch(`${base}${path}`, {
+async function rawGet(base, pathname, username, password, timeoutMs = config.idrac.timeoutMs, outerSignal = null) {
+  // v2.621(감사 LIFE-02): 호출자 signal(단계·장비 시한)을 요청마다 건시한과 합친다 — 예전에는 건시한만 있어 호출자가 결과를
+  //   포기한 뒤에도 GET 이 BMC 로 계속 나갔다. ⚠ 키마다 공유하는 세션 생성(SESSION_INFLIGHT)에는 걸지 않는다 — 한 호출자의
+  //   취소가 같은 생성을 기다리는 다른 호출자에게 '세션 실패 → 401' 로 번지면 authGuard 가 멀쩡한 서버를 멈춘다.
+  const sigOf = (shared) => (outerSignal && !shared ? AbortSignal.any([AbortSignal.timeout(timeoutMs), outerSignal]) : AbortSignal.timeout(timeoutMs));
+  const doFetch = (headers, method = 'GET', path = pathname, body, shared = false) => bmcFetch(`${base}${path}`, {
     method,
     headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}), ...headers },
     body,
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: sigOf(shared),
     dispatcher,
   });
   const drain = async (r) => { try { await r.body?.cancel?.(); } catch { /* */ } };
@@ -231,7 +235,7 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
     let inflight = SESSION_INFLIGHT.get(key);
     if (!inflight) {
       inflight = (async () => {
-        const sres = await doFetch({}, 'POST', '/redfish/v1/SessionService/Sessions', JSON.stringify({ UserName: username, Password: password }));
+        const sres = await doFetch({}, 'POST', '/redfish/v1/SessionService/Sessions', JSON.stringify({ UserName: username, Password: password }), true);
         const token = sres.headers.get('x-auth-token');
         const location = sres.headers.get('location') || '';
         await drain(sres);
@@ -245,12 +249,16 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
     }
     const token = await inflight;
     if (token) return await doFetch({ 'X-Auth-Token': token });
-  } catch { /* 세션 생성 실패 → 아래에서 원래 401 반환 */ }
+  } catch (e) {
+    // v2.621(감사 LIFE-02): 호출자가 취소한 것을 '세 방식 모두 실패(401)' 로 바꾸지 않는다 — 취소는 취소로 올린다.
+    if (outerSignal?.aborted) throw e;
+    /* 세션 생성 실패 → 아래에서 원래 401 반환 */
+  }
   return res; // 세 방식 모두 실패 — 401(자격증명/권한/잠금)
 }
 
-async function get(base, pathname, username, password) {
-  const res = await rawGet(base, pathname, username, password);
+async function get(base, pathname, username, password, { signal = null } = {}) {
+  const res = await rawGet(base, pathname, username, password, undefined, signal); // v2.621(감사 LIFE-02): 호출자 signal 전달(없으면 예전 그대로)
   // 오류 응답은 본문을 소진(cancel)한 뒤 throw — undici는 미소진 본문이 소켓을 붙잡아
   // 다수 iDRAC 폴링/스캔에서 연결·FD 누수가 누적된다.
   // v2.590(감사 F1): 자격증명 거부를 **출처에서 못 박는다** — `authFailed`·`status` 를 싣는다. 폴러가 문구를
@@ -1377,7 +1385,7 @@ export function sensorFieldOf(name) {
   for (const [field, re] of SENSOR_PATTERNS) if (re.test(low)) return field;
   return null;
 }
-/** base|user → { urls:{field:url}, seen:string[], at:number } | { absent:true, reason, at } */
+/** base|user → { urls:{field:url}, seen:string[], at:number } | { absent:true, reason, at } | { chassis:string[], at }(탐색 진척 — v2.621 LIFE-02) */
 const _sensorPaths = new Map();
 export function _resetSensorPathsForTest() { _sensorPaths.clear(); }
 export function sensorPathCacheInfo() { return { entries: _sensorPaths.size, ttlMs: SENSOR_TTL_MS }; }
@@ -1388,13 +1396,14 @@ const tailOf = (u) => String(u || '').split('/').filter(Boolean).pop() || '';
 /**
  * 표준 Redfish `Sensors` 로 보드 사용률을 읽는다(Enterprise 대체 경로).
  * @param {object} entry iDRAC 등록 항목(host·username·password)
- * @param {{allowProbe?:boolean}} opt `allowProbe:false` 면 **캐시가 있을 때만** 읽는다(주기 예산 보호)
+ * @param {{allowProbe?:boolean, signal?:AbortSignal}} opt `allowProbe:false` 면 **캐시가 있을 때만** 읽는다(주기 예산 보호).
+ *   `signal` — 호출자의 단계·장비 시한(v2.621 감사 LIFE-02). 끊기면 남은 GET 을 BMC 로 보내지 않는다(없으면 예전 그대로).
  * @returns {Promise<object>} `{ ok, cpuPct?, memPct?, ioPct?, sysPct?, usedPaths, seenSensors,
  *   absent, kind?, error? }` — `kind:'not-probed'` 는 실패가 아니라 '이번 주기엔 탐색 안 함' 이다.
  */
-export async function fetchUsageSensors(entry, { allowProbe = true } = {}) {
+export async function fetchUsageSensors(entry, { allowProbe = true, signal = null } = {}) {
   const base = String(entry.host || '').replace(/\/+$/, '');
-  const G = (p) => get(base, p, entry.username, entry.password);
+  const G = (p) => get(base, p, entry.username, entry.password, { signal });
   const key = `${base}|${entry.username || ''}`.toLowerCase();
   const cached = _sensorPaths.get(key);
   const fresh = cached && Date.now() - cached.at < SENSOR_TTL_MS;
@@ -1407,13 +1416,23 @@ export async function fetchUsageSensors(entry, { allowProbe = true } = {}) {
   if (!urls) {
     if (!allowProbe) return { ok: false, kind: 'not-probed', usedPaths: {}, seenSensors: [], absent: [] };
     try {
-      const chassisRoot = await G('/redfish/v1/Chassis');
-      const members = (chassisRoot.Members || []).map((x) => x['@odata.id']).filter(Boolean).slice(0, 2);
+      /*
+       * v2.621(감사 LIFE-02): 시한에 끊겨도 **진척은 남긴다**. 예전에는 시한 뒤에도 탐색이 백그라운드에서 끝까지 돌아 캐시를
+       *   채웠다(그것이 누수였다). 이제 끊으므로, 느린 BMC(요청당 수 초)가 매 주기 Chassis 부터 다시 묻다 영영 못 끝내지 않게
+       *   섀시 목록을 먼저 캐시하고 다음 주기는 Sensors 부터 잇는다(값을 지어내는 것이 아니다 — 경로 목록일 뿐이다).
+       */
+      let members = fresh && Array.isArray(cached.chassis) ? cached.chassis : null;
+      if (!members) {
+        const chassisRoot = await G('/redfish/v1/Chassis');
+        members = (chassisRoot.Members || []).map((x) => x['@odata.id']).filter(Boolean).slice(0, 2);
+        _sensorPaths.set(key, { chassis: members, at: Date.now() });
+      }
       const found = {};
       const names = [];
       for (const c of members) {
         let coll;
-        try { coll = await G(`${c}/Sensors`); } catch { continue; }
+        // ⚠ v2.621(감사 LIFE-02): 취소를 '이 섀시에 Sensors 없음' 으로 넘기면 끝에서 'absent' 를 6시간 캐시한다 — 취소는 올린다.
+        try { coll = await G(`${c}/Sensors`); } catch (e) { if (signal?.aborted) throw e; continue; }
         for (const m of (coll.Members || [])) {
           const u = String(m['@odata.id'] || '');
           if (!u) continue;
@@ -1456,6 +1475,7 @@ export async function fetchUsageSensors(entry, { allowProbe = true } = {}) {
   let i = 0;
   const workers = Array.from({ length: Math.min(3, fields.length) }, async () => {
     for (;;) {
+      if (signal?.aborted) return; // v2.621(감사 LIFE-02): 호출자가 포기했으면 남은 센서 GET 을 보내지 않는다
       const idx = i; i += 1;
       if (idx >= fields.length) return;
       const [field, u] = fields[idx];

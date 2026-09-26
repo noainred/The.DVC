@@ -80,3 +80,34 @@ export function buildRequestText({ user, info, reason } = {}) {
   if (reason) lines.push(`서버 사유: ${reason}`);
   return lines.join('\n');
 }
+
+/**
+ * v2.621(감사 WEB-01): ErrorBox 입구 정규화 — `message` 는 문자열이라는 계약을 어긴 호출
+ * (Error·HttpError 객체를 그대로 넘기는 곳)을 받아도 **화면이 죽지 않게** 한다.
+ *
+ * 왜 입구 한 곳인가: 12곳이 `setLoadErr(e)` 로 받은 Error 객체를 `<ErrorBox error={loadErr}/>` 로
+ * 넘겼다. 사이드 채널은 문자열 키라 `String(HttpError)` = 'HttpError: forbidden' 이 빗나가고,
+ * 마지막 `오류: {message}` 가 객체를 그려 React #31 로 **도구 탭 전체**가 ErrorBoundary 로 떨어졌다
+ * (권한 안내 대신 '이 영역을 표시하는 중 오류가 발생했습니다'). 호출부를 하나씩 고치면 다음 화면이
+ * 같은 실수를 하므로, 판정을 여기 하나에 둔다.
+ *
+ * - 문자열: 그대로(기존 계약) — 403·5xx 판정은 예전처럼 사이드 채널이 한다.
+ * - 객체: 표시 문구는 `message`(→ 서버 사유 → reason/error 문자열)이고, **상태코드가 있으면 그 객체가
+ *   곧 HTTP 정보**다(api.js 가 사이드 채널에 넣는 값도 이 HttpError 자신이다). 403 일 때만 `perm` 을
+ *   돌려준다 — 다른 상태에서 AccessDenied 가 뜨면 안 된다(403 계약 유지).
+ * - 문구를 읽을 수 없는 객체는 '[object Object]' 를 그리지 않고 사유를 모른다고 말한다.
+ * @returns {{ text: string, perm: object|null, http: object|null }}
+ */
+export const ERROR_BOX_UNKNOWN_TEXT = '사유를 읽지 못한 오류입니다';
+export function errorBoxInput(raw) {
+  if (raw == null) return { text: '', perm: null, http: null };
+  if (typeof raw === 'string') return { text: raw, perm: null, http: null };
+  if (typeof raw !== 'object') return { text: String(raw), perm: null, http: null };
+  const str = (v) => (typeof v === 'string' && v.trim() ? v : null);
+  const text = str(raw.message) || str(raw.serverReason) || str(raw.reason)
+    || str(raw.error) || ERROR_BOX_UNKNOWN_TEXT;
+  const st = raw.status;
+  const status = typeof st === 'number' && Number.isInteger(st) && st >= 100 && st <= 599 ? st : null;
+  const http = status ? raw : null;
+  return { text, perm: status === 403 ? raw : null, http };
+}

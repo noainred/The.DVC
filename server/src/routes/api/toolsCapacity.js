@@ -1287,6 +1287,9 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
   };
 }, { extraKey: `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'm'}` }));
 
+// v2.621(감사 RECENT-02): 1시간 미만(step 채움) 버킷의 점 상한 — 모달 기본 기간 '1주' 를 분 버킷으로 다 덮는 수(7일 × 1440분 + 1).
+//   그보다 긴 기간 × 분 버킷(1달·분 등)은 최근 7일만 주고 truncated·coveredSince 로 밝힌다(응답·차트 크기 상한).
+const TEMP_STEP_POINTS_MAX = 7 * 1440 + 1;
 // Temperature history (5년까지). level=host|cluster|vc, key=대상키, days=기간.
 api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
   const level = ['host', 'cluster', 'vc'].includes(req.query.level) ? req.query.level : 'host';
@@ -1303,23 +1306,32 @@ api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
         : allowedH.has((snapH.hosts || []).find((h) => h.id === key)?.vcenterId);
     if (!owns) return res.json({ level, key, days, bucket: req.query.bucket || 'auto', bucketMs: 0, synthesized: false, points: [] });
   }
-  const since = Date.now() - days * 86_400_000;
+  const nowH = Date.now();
+  const since = nowH - days * 86_400_000;
   // 집계 단위(기준): 분/시간/일 명시 선택, 미지정 시 기간에 따라 자동.
   const BUCKET = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
   const bucket = BUCKET[req.query.bucket] ? req.query.bucket : 'auto';
   const bucketMs = BUCKET[req.query.bucket]
     || (days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000);
   // 분 단위 등 미세 집계는 점이 많아질 수 있어 상한을 넉넉히.
-  const limit = bucketMs <= 60_000 ? 5000 : bucketMs <= 3_600_000 ? 3000 : 1500;
+  const baseLimit = bucketMs <= 60_000 ? 5000 : bucketMs <= 3_600_000 ? 3000 : 1500;
+  // v2.621(감사 RECENT-02 — 재현: 1주·분 → 3.47일만): 1시간 미만 버킷은 v2.620 부터 step 채움이라 **빈 버킷도 점**이 된다.
+  //   v2.619 의 상한은 '값이 있는 버킷' 수라 안정된 호스트는 7일이 다 들어갔는데, 채움 뒤에는 5000점 = 3.47일에서 잘렸다.
+  //   요청 기간을 덮는 버킷 수로 올리되 상한(TEMP_STEP_POINTS_MAX — 1주 × 분)을 두고, 그래도 넘치면(1달·분 등) 응답의
+  //   truncated·coveredSince 로 **잘렸다고 밝힌다**(조용한 상한 금지).
+  const neededBuckets = Math.floor(nowH / bucketMs) - Math.floor(since / bucketMs) + 1;
+  const limit = bucketMs < 3_600_000 ? Math.max(baseLimit, Math.min(neededBuckets, TEMP_STEP_POINTS_MAX)) : baseLimit;
   let points = [];
   // v2.620(SRV2620-02): 1시간 미만 버킷은 원본(dead-band)에서 집계되어 온도가 안정된 구간이 '점 없음' 이었다 — 직전 저장값을
   //   이월해 빈 버킷을 채우고(step) 채운 점 수를 stepFilled 로 밝힌다(채운 점은 carried:true). 60분 이상은 롤업이 전량이라 그대로.
   let stepFilled = 0; let deadbandMaxGapMs = null;
+  let cut = { truncated: false, coveredSince: null };   // v2.621(감사 RECENT-02)
   try {
     const db = await getMetricsDb();
     if (typeof db.historyStep === 'function') {
-      const r = db.historyStep(metric, key, since, bucketMs, limit);
+      const r = db.historyStep(metric, key, since, bucketMs, limit, { nowTs: nowH });
       points = r.points; stepFilled = r.carried || 0; deadbandMaxGapMs = r.stepped ? r.maxGapMs : null;
+      if (r.truncated) cut = { truncated: true, coveredSince: r.coveredSince ?? null };
     } else points = db.history(metric, key, since, bucketMs, limit);
   } catch (e) { console.warn('[toolsCapacity] 시계열 조회 실패 — 빈 배열로 응답(감사 B8):', e?.message); points = []; }
   let synthesized = false;
@@ -1329,6 +1341,7 @@ api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
     const cap = limit;
     let startT = since;
     if ((Date.now() - since) / bucketMs > cap) startT = Date.now() - cap * bucketMs;
+    cut = startT > since ? { truncated: true, coveredSince: Math.floor(startT) } : { truncated: false, coveredSince: null };   // v2.621(감사 RECENT-02)
     const base = 26 + (hash(key) % 8);
     for (let t = startT; t <= Date.now(); t += bucketMs) {
       const day = t / 86_400_000; const minute = t / 60_000;
@@ -1336,7 +1349,9 @@ api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
       points.push({ ts: Math.floor(t), avg: Number(v.toFixed(1)), min: Number((v - 2).toFixed(1)), max: Number((v + 4).toFixed(1)) });
     }
   }
-  res.json({ level, key, days, bucket, bucketMs, synthesized, points, stepFilled: synthesized ? 0 : stepFilled, deadbandMaxGapMs: synthesized ? null : deadbandMaxGapMs });
+  // v2.621(감사 RECENT-02): limit·truncated·coveredSince — 요청 기간(days)을 다 덮지 못했으면 화면이 그 사실을 말한다.
+  res.json({ level, key, days, bucket, bucketMs, synthesized, points, stepFilled: synthesized ? 0 : stepFilled, deadbandMaxGapMs: synthesized ? null : deadbandMaxGapMs,
+    limit, truncated: cut.truncated, coveredSince: cut.coveredSince });
 });
 
 /* ── 24시간 스파크라인 배치(v2.556) ────────────────────────────────────────────

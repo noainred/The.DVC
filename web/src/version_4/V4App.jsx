@@ -27,6 +27,7 @@ import { toolHidden, lockReasonOf } from '../views/toolVisibility.js'; // v2.613
 import { MODE_LABEL, MODE_KEY, resolveMode, modeSpec, viewFromHash } from './mode.js';
 import { loadPhase, loadText, collectProgress, liveText, shouldBanner } from './loadState.js';
 import { buildDomainTiles, severityCounts, siteRows, fmtInt, levelBar } from './data.js';
+import { physicalServersKpi } from '../views/vcCardText.js'; // v2.621(감사 WEB-08)
 import Palette from './Palette.jsx';
 import Overview from './pages/Overview.jsx';
 import Compare from './pages/Compare.jsx';
@@ -165,7 +166,9 @@ export default function V4App({ user, health, healthError, onExit }) {
   // 화면이 비어 있을 때 **왜** 비었는지(v2.509). 셸에서 한 번만 판정해 9화면이 공유한다 —
   // 각 화면이 따로 판정하면 같은 상황을 다르게 말하게 된다. 기준은 셸의 대표 폴(/overview)이다.
   const progress = collectProgress(health);
-  const overviewSub = global ? `${fmtInt(sitesAll.length)}개 vCenter · 물리 서버 ${fmtInt(ov.data?.physical?.servers || global.hosts)} · VM ${fmtInt(global.vms)} · 15초 수집` : phaseText.short;
+  // v2.621(감사 WEB-08): 물리 서버 수가 없으면 ESXi 호스트 수로 대체하지 않는다(예전 `|| global.hosts` 는 호스트 수를 '물리 서버' 로 보였다).
+  const physKpi = physicalServersKpi(ov.data ? ov.data.physical : undefined);
+  const overviewSub = global ? `${fmtInt(sitesAll.length)}개 vCenter · 물리 서버 ${fmtInt(physKpi.value)}${physKpi.note ? `(${physKpi.note})` : ''} · ESXi 호스트 ${fmtInt(global.hosts)} · VM ${fmtInt(global.vms)} · 15초 수집` : phaseText.short;
   const pageProps = {
     user, isAdmin, scope, go, goAnywhere, global, ov: ov.data, sitesAll, alarmsAll, tiles, mode, spec, phase, phaseText, health, progress,
     polls: { ov, al, nsx, svc, ds, stor, pdu, idrac }, perms: { storage: canStorage, pdu: canPdu, idrac: isAdmin, svcmon: canSvcmon },
@@ -213,7 +216,7 @@ export default function V4App({ user, health, healthError, onExit }) {
           ))}
         </nav>
         <div className="v3-foot">
-          <div className="v3-foot-row"><span>SERVERS</span><b>{fmtInt(ov.data?.physical?.servers || global?.hosts)}</b></div>
+          <div className="v3-foot-row" title={physKpi.note ? `${physKpi.note} — ESXi 호스트 수로 대체하지 않습니다` : 'iDRAC 등록 물리 서버'}><span>SERVERS</span><b>{fmtInt(physKpi.value)}</b></div>
           <div className="v3-foot-row"><span>VMS</span><b>{fmtInt(global?.vms)}</b></div>
           <div className="v3-foot-row"><span>POWER</span><b style={{ color: '#b45309' }}>{powerKw}</b></div>
           <div className="v3-foot-row"><span>ALARMS</span><b style={{ color: sev.critical ? '#dc2626' : '#1a2130' }}>{al.data ? fmtInt(sev.total) : '—'}</b></div>

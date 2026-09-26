@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { droppedSecretNote } from './droppedSecretText.js';
+import { pkgFormFromResponse, pkgSavePayload, pkgPlaceholder } from './pkgSettingsText.js';
 import { Loading } from '../components/ui.jsx';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
 import { CsvExportModal, CsvImportModal } from '../components/CsvBulkModals.jsx';
@@ -34,9 +35,11 @@ export default function AgentDeploy() {
   const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — 대상 CSV 일괄 관리(v2.339)
 
   const loadInstaller = () => fetchJson('/admin/agent-deploy/installer').then(setInstaller).catch(() => setInstaller({ available: false }));
-  const loadPkg = () => fetchJson('/admin/packages').then((p) => { setPkg(p); setPkgCfg({ baseUrl: p.baseUrl || '', dir: p.dir || '' }); }).catch(() => setPkg(null));
+  // v2.621(감사 WEB-07): 폼은 웹 지정값만 채운다(기본값은 placeholder) — 유효값으로 채워 두 칸을 다 보내면 저장 경로만
+  //   바꿔도 환경변수 기본 URL 이 웹 지정값으로 굳었다. 판정은 pkgSettingsText.js 하나.
+  const loadPkg = () => fetchJson('/admin/packages').then((p) => { setPkg(p); setPkgCfg(pkgFormFromResponse(p)); }).catch(() => setPkg(null));
   const savePkgCfg = async () => {
-    const r = await putJson('/admin/packages/settings', pkgCfg).catch((e) => ({ ok: false, reason: e.message }));
+    const r = await putJson('/admin/packages/settings', pkgSavePayload(pkgCfg)).catch((e) => ({ ok: false, reason: e.message }));
     setResult({ kind: 'pkgcfg', ok: !!r.ok, reason: r.reason });
     await loadPkg();
   };
@@ -202,16 +205,17 @@ export default function AgentDeploy() {
           <div className="card" style={{ margin: '0 0 10px', padding: '10px 12px', background: 'rgba(255,255,255,.02)' }}>
             <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
               <label style={{ flex: 2, minWidth: 320, fontSize: 12 }}>저장소 URL (versions.json 위치)
-                <input className="input" value={pkgCfg.baseUrl} onChange={(e) => setPkgCfg({ ...pkgCfg, baseUrl: e.target.value })} placeholder="https://mirror.corp/vmware-portal/download" />
+                <input className="input" value={pkgCfg.baseUrl} onChange={(e) => setPkgCfg({ ...pkgCfg, baseUrl: e.target.value })} placeholder={pkgPlaceholder(pkg, 'baseUrl', 'https://mirror.corp/vmware-portal/download')} />
               </label>
               <label style={{ flex: 1, minWidth: 220, fontSize: 12 }}>저장 경로
-                <input className="input" value={pkgCfg.dir} onChange={(e) => setPkgCfg({ ...pkgCfg, dir: e.target.value })} placeholder="/etc/vmware-portal/packages" />
+                <input className="input" value={pkgCfg.dir} onChange={(e) => setPkgCfg({ ...pkgCfg, dir: e.target.value })} placeholder={pkgPlaceholder(pkg, 'dir', '/etc/vmware-portal/packages')} />
               </label>
               <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={savePkgCfg}>저장</button>
               <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={loadPkg}>새로고침</button>
             </div>
             <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-              비워두면 환경변수 기본값을 사용합니다(기본 URL: <code>{pkg?.settings?.defaults?.baseUrl}</code>). {pkg?.settings?.overridden?.baseUrl ? '· 현재 웹에서 지정한 URL 사용 중' : ''}
+              {/* v2.621(감사 WEB-06): 긴 저장소 URL 이 줄바꿈되지 않아 400px 에서 페이지를 98px 밀어냈다. */}
+              비워두면 환경변수 기본값을 사용합니다(기본 URL: <code style={{ overflowWrap: 'anywhere' }}>{pkg?.settings?.defaults?.baseUrl}</code>). {pkg?.settings?.overridden?.baseUrl ? '· 현재 웹에서 지정한 URL 사용 중' : ''}{pkg?.settings?.overridden?.dir ? ' · 저장 경로는 웹에서 지정한 값 사용 중' : ''}
             </div>
           </div>
         )}
@@ -240,7 +244,7 @@ export default function AgentDeploy() {
           </div>
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-          저장소: <code>{pkg?.baseUrl}</code>{pkg?.remote?.error ? ` · ⚠ 원격 조회 실패: ${pkg.remote.error}` : (pkg?.remote?.latest ? ` · 원격 latest ${pkg.remote.latest}` : '')}
+          저장소: <code style={{ overflowWrap: 'anywhere' }}>{pkg?.baseUrl}</code>{pkg?.remote?.error ? ` · ⚠ 원격 조회 실패: ${pkg.remote.error}` : (pkg?.remote?.latest ? ` · 원격 latest ${pkg.remote.latest}` : '')}
         </div>
         {pkg?.local?.length > 0 && (
           <div style={{ marginTop: 8 }}>

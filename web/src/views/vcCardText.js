@@ -10,6 +10,7 @@
  * 배지(StateBadge)가 '대기'·'점검중'·'비활성' 이라고 말하는데 본문이 '연결 불가' 라고 말하면 둘이 서로 모순된다.
  */
 import { authStopInfo } from './tools/storageAuthText.js';
+import { numOrNull } from '../numOrNull.js';
 
 export function vcCardState(s = {}, now = Date.now()) {
   const st = String(s?.status || '');
@@ -53,4 +54,30 @@ export function storageBarInfo(m = {}) {
       : `사용량을 읽지 못한 데이터스토어 ${unknown}개는 사용률 계산에서 뺐습니다`)
     : undefined;
   return { pct, detail, title };
+}
+
+/**
+ * v2.621(감사 WEB-03): 개요 스토리지 KPI 의 '뺀 것' 문구. 서버 롤업(store.js RECENT2599-03)은 사용량을 못 읽은
+ * 데이터스토어를 **용량·사용량 양쪽**에서 빼고 그 개수를 `datastoresUsageUnknown` 으로 준다. 개수를 말하지 않으면
+ * '600 / 900 TB · 38 DS' 의 900 TB 가 38개 전체의 합으로 읽힌다(뺀 것은 밝힌다 — v2.509). 개요 화면 넷
+ * (classic·V4·V5·관제 콘솔)이 이 함수 하나를 쓴다 — 화면마다 문구를 만들면 한쪽만 말하게 된다.
+ * @returns {string|null} 뺀 것이 없으면 null(붙이지 않는다)
+ */
+export function storageUsageUnknownNote(roll) {
+  const n = numOrNull(roll?.datastoresUsageUnknown);
+  return n != null && n > 0 ? `사용량 미상 DS ${n.toLocaleString('en-US')}개는 용량·사용량 합계에서 뺐습니다` : null;
+}
+
+/**
+ * v2.621(감사 WEB-08): '물리 서버' KPI 값. iDRAC 등록 수가 없거나(범위 계정의 귀속 실패 → physical=null) 0 이면
+ * **ESXi 호스트 수로 대체하지 않는다** — 예전 `physical.servers || global.hosts` 는 186(ESXi 호스트)을 '물리 서버 186'
+ * 으로 보였고, 같은 원천을 V5 는 '—', classic 은 iDRAC 수로 보여 화면마다 같은 이름의 수치가 달랐다.
+ * 값이 없으면 null(화면 '—')이고 `note` 가 이유를 말한다. ESXi 호스트 수는 호출부가 meta 에 따로 적는다.
+ * @returns {{ value: number|null, note: string|null }}
+ */
+export function physicalServersKpi(physical) {
+  const n = numOrNull(physical?.servers);
+  if (n != null && n > 0) return { value: n, note: null };
+  if (physical == null || n == null) return { value: null, note: '물리 서버 집계 없음' };
+  return { value: null, note: 'iDRAC 등록 없음' };
 }

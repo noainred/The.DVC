@@ -15,6 +15,7 @@ import { STable } from '../../components/STable.jsx';
 import { usePolling, can, toolAllowed } from '../../api.js';
 import { TOOLS } from '../../views/specialToolsList.js';
 import { Panel, Bar, PctCell, Badge, Empty, PollState, Kpi, Spark } from '../ui.jsx';
+import { storageUsageUnknownNote, physicalServersKpi } from '../../views/vcCardText.js'; // v2.621(감사 WEB-03·08)
 import { attentionList, regionCounts, siteMarkers, REGION_COLORS, DOMAIN_LABEL, domainOf, ageText, fmtInt, fmtPct, textColor, levelBar, rowMatches, alarmCountColor, SEV_COLOR, WARN_PCT, CRIT_PCT } from '../data.js';
 
 export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, scope, go, goAnywhere, polls, mode, spec, phase, phaseText, health }) {
@@ -44,6 +45,7 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
   const rc = regionCounts(sites);
   const { markers, skipped } = siteMarkers(scope.scoped(sitesAll, 'id'));
   const phys = ov?.physical || null;
+  const physKpi = physicalServersKpi(ov ? ov.physical : undefined); // v2.621(감사 WEB-08)
 
   const NEED_TOOLS = '이 패널은 “특수 기능(tools)” 권한이 필요합니다 — 관리자에게 요청하세요.';
   const fcSoon = (fc.data?.items || []).filter((d) => scope.inScope(d.vcenterId) && d.daysToFull != null)
@@ -57,9 +59,11 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
       {exec && (
         <div className="v3-kpis">
           <Kpi label="법인 (vCenter)" value={ov ? fmtInt(sitesAll.length) : '—'} accent="#2563eb" meta={ov ? `연결 ${fmtInt(sitesAll.filter((s) => s.status === 'connected').length)} / ${fmtInt(sitesAll.length)}` : waitText} />
-          <Kpi label="물리 서버" value={fmtInt(ov?.physical?.servers || g?.hosts)} accent="#1a2130" meta={g ? `ESXi 호스트 ${fmtInt(g.hosts)}` : waitText} />
+          {/* v2.621(감사 WEB-08): iDRAC 수가 없으면 ESXi 호스트 수로 대체하지 않는다 — '—' 와 이유, 호스트 수는 meta 에 따로. */}
+          <Kpi label="물리 서버" value={fmtInt(physKpi.value)} accent="#1a2130" meta={g ? [physKpi.note, `ESXi 호스트 ${fmtInt(g.hosts)}`].filter(Boolean).join(' · ') : waitText} />
           <Kpi label="가상머신" value={fmtInt(g?.vms)} accent="#0e7490" meta={g ? `데이터스토어 ${fmtInt(g.datastores)}` : waitText} />
-          <Kpi label="스토리지 사용률" value={fmtPct(g?.storageUsagePct)} accent={textColor(g?.storageUsagePct)} meta={g ? `${g.storageUsedTB} / ${g.storageTotalTB} TB` : waitText} />
+          {/* v2.621(감사 WEB-03): 사용량 미상 DS 를 합계에서 뺀 사실을 밝힌다(문구는 vcCardText 하나가 소유). */}
+          <Kpi label="스토리지 사용률" value={fmtPct(g?.storageUsagePct)} accent={textColor(g?.storageUsagePct)} meta={g ? [`${g.storageUsedTB} / ${g.storageTotalTB} TB`, storageUsageUnknownNote(g)].filter(Boolean).join(' · ') : waitText} />
           <Kpi label="측정 전력" value={g?.powerReporting ? `${fmtInt(g.powerKw)} kW` : '—'} accent="#b45309" meta={g ? `보고 서버 ${fmtInt(g.powerReporting)}대 합계 — 전체가 아닙니다` : waitText} />
           <Kpi label="활성 알람" value={polls.al.data ? fmtInt(alarmsAll.length) : '—'} accent={alarms.some((a) => a.severity === 'critical') ? '#dc2626' : '#526075'} meta={polls.al.data ? `위험 ${fmtInt(alarmsAll.filter((a) => a.severity === 'critical').length)}` : waitText} />
         </div>
@@ -133,7 +137,7 @@ export default function Overview({ tiles, global: g, ov, sitesAll, alarmsAll, sc
                 {[
                   ['CPU', `${fmtInt(g.cpuCores)} cores (ESXi)${phys?.cores ? ` · 물리 ${fmtInt(phys.cores)}` : ''}`, g.cpuUsagePct],
                   ['메모리', `${fmtInt(g.memTotalGB)} GB (ESXi)${phys?.memGB ? ` · 물리 ${fmtInt(phys.memGB)} GB` : ''}`, g.memUsagePct],
-                  ['스토리지', `${g.storageTotalTB} TB · ${fmtInt(g.datastores)} DS`, g.storageUsagePct],
+                  ['스토리지', [`${g.storageTotalTB} TB · ${fmtInt(g.datastores)} DS`, storageUsageUnknownNote(g)].filter(Boolean).join(' · '), g.storageUsagePct], // v2.621(감사 WEB-03)
                 ].map(([label, meta, pct]) => (
                   <div key={label}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>

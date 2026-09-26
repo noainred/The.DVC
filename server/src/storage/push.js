@@ -8,7 +8,8 @@ import { promisify } from 'node:util';
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { localSnapshots } from './store.js';
-import { devicesForThisNode } from './registry.js';
+import { devicesForThisNode, registryLoadError } from './registry.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { runtimeIntervals, startAdaptiveTimer } from './intervals.js';
 import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.js'; // v2.613 EDGE2613-05: readDropSummary 사본 → 공용
 import { centralStatusOnlySupport, sendStatusOnly as sendStatusOnlyTo, STATUS_ONLY_MIN_CENTRAL, _resetStatusOnlyCapForTest } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04: 프로브를 공용으로 승격
@@ -78,6 +79,7 @@ async function pushStorageOnce() {
       // v2.618(BUG-2): 등록부를 못 읽었으면(registered null) 사유도 그렇게 말한다 — 'no-snapshots' 는 '위임은 있는데 스냅샷이 없다' 이다.
       const r = await sendStatusOnly({ reason: registered == null ? 'registry-unreadable' : 'no-snapshots', registered });
       _last = { at: Date.now(), sent: 0, statusSent: r.ok, statusError: r.ok ? null : r.reason,
+        ...(registered == null ? { reason: '등록부를 읽지 못해 목록을 보내지 않았습니다(위임 0대가 아닙니다)' } : {}), // v2.621(EDGE-03)
         ...(registered === 0 ? { cleared, ...(clearError ? { clearError } : {}) } : {}) };
       if (!r.ok) console.warn(`[storage-push] 상태 보고 실패: ${r.reason}`);
       return { ok: true, sent: 0, statusSent: r.ok, ...(registered === 0 ? { cleared } : {}) };
@@ -110,10 +112,24 @@ async function pushStorageOnce() {
 
 // v2.613 EDGE2613-05: readDropSummary·dropText 는 util/centralReply.js 하나다(사본 3벌 → 1).
 
-/** 이 노드에 위임된 장비 수(상태 보고용 — 자격증명은 싣지 않는다). 등록부를 못 읽으면 null. */
+/**
+ * 이 노드에 위임된 장비 수(상태 보고용 — 자격증명은 싣지 않는다). 등록부를 못 읽으면 null.
+ * v2.621(감사 EDGE-03): 등록부 손상은 **던지지 않는다**(v2.613 registryCore — preserveCorrupt 뒤 빈 목록 + registryLoadError()).
+ *   예전 catch 는 도달할 수 없어 손상 등록부가 0(= '위임 0대') 으로 읽혔고, 스냅샷 파일도 비면(신규 엣지·파일 유실) 빈 목록으로
+ *   중앙의 이 엣지 보관분을 비우고 상태에는 'no-snapshots · registered:0' 이라는 틀린 사유가 남았다(CVP 는 v2.620 EDGE2620-05).
+ *   손상이면 null — 비우지 않고 'registry-unreadable' 상태만 올린다. 다음 storage-config pull 이 등록부를 다시 쓰면 풀린다.
+ */
 function registeredCount() {
-  try { return devicesForThisNode().length; } catch { return null; }
+  try {
+    const err = registryLoadError();
+    if (err) {
+      if (_regLog('registry', err.reason)) console.warn(`[storage-push] 엣지 스토리지 등록부를 읽지 못해 목록을 보내지 않습니다(${String(err.reason || '사유 미상').slice(0, 200)}) — '위임 0대' 가 아닙니다. 중앙 storage-config pull 이 등록부를 다시 쓰면 풀립니다`);
+      return null;
+    }
+    return devicesForThisNode().length;
+  } catch { return null; }
 }
+const _regLog = createChangeLogger({ windowMs: 60 * 60_000 });
 
 /**
  * 위임 0대일 때 중앙 목록 비우기(v2.599 EDGE2599-01) — `statusOnly` 가 **없는** 빈 `devices` 본문이다. 중앙

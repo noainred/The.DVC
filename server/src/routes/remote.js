@@ -206,6 +206,19 @@ function sharedProxyChanges(prev, body) {
   }
   return changed;
 }
+/*
+ * v2.621(감사 SEC-01): POST·DELETE /proxies 가 404 로 숨기는 프록시(범위 밖 vCenter 만 배정 — 범위 안 0개)에 형제 라우트
+ *   (health·test·deploy/test·deploy)가 그대로 접속했다 — 숨긴 프록시의 SSH 주소가 오류 문구로 새고, /deploy 는 남의 법인
+ *   중계 서버에 haproxy.cfg 를 밀고 reload 했다(재현). 같은 판정(proxyScopeOf)을 쓴다 — 전체 범위 admin 은 예전 그대로.
+ *   공유 프록시(범위 안·밖 둘 다)와 기본 프록시는 숨기지 않는다 — 범위 안 매핑을 만들면 provision 이 이미 그 프록시에
+ *   배포·reload 하므로(proxy/provision.js) 여기서 막으면 같은 동작을 경로에 따라 다르게 판정하게 된다.
+ */
+function proxyHiddenFor(allowed, id) {
+  if (!allowed || !id) return false;
+  const { prev, inScope, outScope } = proxyScopeOf(allowed, id);
+  return !!(prev && !inScope.length && outScope.length);
+}
+const PROXY_NOT_FOUND = '프록시를 찾을 수 없습니다.';
 const SHARED_PROXY_REASON = '이 중계 서버에는 범위 밖 법인의 vCenter 도 배정돼 있어 범위 제한 계정은 주소·포트·자동 구성·이름을 바꾸거나 삭제할 수 없습니다(다른 법인의 접속 경로입니다) — 자기 범위 vCenter 배정만 바꿀 수 있습니다.';
 remoteRouter.post('/proxies', adminOnly, (req, res) => {
   const body = { ...(req.body || {}) };
@@ -242,6 +255,7 @@ remoteRouter.delete('/proxies/:id', adminOnly, (req, res) => {
 // Health check for one proxy — auto-selects Data Plane API or SSH deploy based
 // on what the proxy has enabled. Returns { ok, ms, reason, method }.
 remoteRouter.post('/proxies/:id/health', adminOnly, async (req, res) => {
+  if (proxyHiddenFor(scopedVcenterIds(req.user, store.get()), req.params.id)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND, method: 'none' }); // v2.621 SEC-01
   const proxy = getProxyById(req.params.id);
   if (!proxy) return res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.', method: 'none' });
   try {
@@ -265,6 +279,7 @@ remoteRouter.post('/proxies/:id/health', adminOnly, async (req, res) => {
 // url 만 공격자 호스트로 바꾸고 password:'********' 를 보내 저장된 Data Plane 비밀번호를 그 호스트로
 // 평문(Basic) 전송시킬 수 있다. 새 URL 을 시험하려면 비밀번호를 새로 입력해야 한다.
 remoteRouter.post('/test', adminOnly, async (req, res) => {
+  if (proxyHiddenFor(scopedVcenterIds(req.user, store.get()), (req.body || {}).proxyId)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND }); // v2.621 SEC-01
   const proxy = getProxyById((req.body || {}).proxyId);
   const body = (req.body || {}).dataplane || {};
   const dp = { ...proxy.dataplane, ...body };
@@ -280,6 +295,7 @@ remoteRouter.post('/test', adminOnly, async (req, res) => {
 // ⚠ 보안(H-2): 저장된 비밀번호/개인키를 재사용하면 접속 host/port 도 저장값으로 고정한다 —
 // dep.host 만 바꿔 저장된 root 비밀번호·SSH 개인키를 공격자 sshd 로 보내는 것을 막는다.
 remoteRouter.post('/deploy/test', adminOnly, async (req, res) => {
+  if (proxyHiddenFor(scopedVcenterIds(req.user, store.get()), (req.body || {}).proxyId)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND }); // v2.621 SEC-01
   const proxy = getProxyById((req.body || {}).proxyId);
   const body = (req.body || {}).deploy || {};
   const dep = { ...proxy.deploy, ...body };
@@ -296,16 +312,22 @@ remoteRouter.post('/deploy/test', adminOnly, async (req, res) => {
 // Push the generated HAProxy config for each proxy's mappings and reload.
 remoteRouter.post('/deploy', adminOnly, async (req, res) => {
   const onlyId = (req.body || {}).proxyId;
+  // v2.621(감사 SEC-01): 범위 admin 은 숨겨진 프록시(범위 밖 vCenter 만 배정)를 순회하지 않는다 — 지정했으면 404(존재 은닉),
+  //   전체 배포면 건너뛰고 개수를 밝힌다(POST·DELETE /proxies 가 404 로 숨기는 것과 같은 기준).
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (onlyId && proxyHiddenFor(allowed, onlyId)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND });
+  let omittedOutOfScope = 0;
   const results = [];
   for (const proxy of listProxies()) {
     if (onlyId && proxy.id !== onlyId) continue;
+    if (proxyHiddenFor(allowed, proxy.id)) { omittedOutOfScope += 1; continue; }
     if (!proxy.deploy?.enabled) continue;
     const ms = listMappings().filter((m) => (m.proxyId || 'default') === proxy.id);
     const r = await deployToProxy(proxy.deploy, ms, { bindAddress: proxy.dataplane?.bindAddress || '*' });
     if (r.ok) for (const m of ms) setMappingStatus(m.id, 'active', null);
     results.push({ proxy: proxy.name, ...r });
   }
-  res.json({ ok: results.every((r) => r.ok), results });
+  res.json({ ok: results.every((r) => r.ok), results, ...(allowed ? { scoped: true, omittedOutOfScope } : {}) });
 });
 
 

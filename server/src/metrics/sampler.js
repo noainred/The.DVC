@@ -47,10 +47,27 @@ async function sampleOnce() {
  * @returns {Set<string>}
  */
 export function staleVcenterIds(snap) {
-  const out = new Set();
+  return new Set(unreadVcenterReasons(snap).keys());
+}
+
+/**
+ * v2.621(감사 RECENT-03 — 재현: maintenance vCenter 가 제외되지 않았다): '지금 값' 으로 적재하지 않는 vCenter 와 그 사유(순수).
+ *   · `maintenance` — 점검중. store.js 가 직전 캐시를 **기한 없이** 이어 서빙하고 stale 표시도 붙이지 않는다(점검이 며칠이면
+ *     며칠 동안 같은 값의 평탄선이 ts=now 로 쌓였다). 엣지 agent/inventoryPush.js UNREAD_STATUSES 가 이미 '못 읽은 상태' 로 본다.
+ *   · `unreachable` — 수집 실패 이월(LASTGOOD) 또는 최소 항목.
+ *   · `stale` — 위임(site) push 가 낡았다(상태는 엣지가 준 값 그대로라 stale 표시로만 안다).
+ *   ⚠ `pending`(첫 수집 중)은 넣지 않는다 — 적재할 데이터가 없어 호스트 제외 효과가 없고, 넣으면 영영 push 가 오지 않는 site
+ *     vCenter 하나가 전체('') VM 합계를 **영원히** 막는다(v2.594 vmtrack 은 30분 시한을 두고 판단했다 — 같은 판단이 필요하면 별건).
+ * @returns {Map<string,'maintenance'|'unreachable'|'stale'>}
+ */
+export function unreadVcenterReasons(snap) {
+  const out = new Map();
   for (const vc of snap?.vcenters || []) {
     if (!vc || vc.id == null) continue;
-    if (vc.stale === true || vc.status === 'unreachable') out.add(String(vc.id));
+    const reason = (vc.status === 'maintenance' || vc.maintenance === true) ? 'maintenance'
+      : vc.status === 'unreachable' ? 'unreachable'
+        : vc.stale === true ? 'stale' : null;
+    if (reason) out.set(String(vc.id), reason);
   }
   return out;
 }
@@ -184,9 +201,13 @@ async function sampleOnceInner() {
   const ts = Date.now();
   const rows = [];
   // v2.620(SRV2620-03): 낡은 vCenter(수집 실패 이월·위임 push 끊김)의 호스트·DS 는 '지금 값' 으로 적재하지 않는다(staleVcenterIds 주석).
-  const staleIds = staleVcenterIds(snap);
+  // v2.621(감사 RECENT-03): 점검중(maintenance) vCenter 도 뺀다 — 사유별 개수를 staleSkipped.byReason 으로 밝힌다.
+  const unreadReasons = unreadVcenterReasons(snap);
+  const staleIds = new Set(unreadReasons.keys());
   const freshHosts = (snap.hosts || []).filter((h) => !staleIds.has(String(h.vcenterId)));
-  const staleSkipped = { vcenters: staleIds.size, hosts: (snap.hosts || []).length - freshHosts.length, datastores: 0 };
+  const byReason = {};
+  for (const r of unreadReasons.values()) byReason[r] = (byReason[r] || 0) + 1;
+  const staleSkipped = { vcenters: staleIds.size, hosts: (snap.hosts || []).length - freshHosts.length, datastores: 0, byReason };
   let vmperfStale = null;
 
   // Host temperature (only hosts that report a sensor reading).
@@ -320,6 +341,9 @@ async function sampleOnceInner() {
 }
 
 const round1 = (x) => (x == null ? null : Number(x.toFixed(1)));
+
+/** 테스트 전용 — 타이머 없이 한 번 샘플한다(v2.621 감사 RECENT-03 회귀가 실제 적재 경로를 부른다). */
+export function _sampleOnceForTest() { return sampleOnce(); }
 
 export function metricsSamplerStatus() {
   const s = loadMetricsSettings();

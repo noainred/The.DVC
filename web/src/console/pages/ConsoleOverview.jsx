@@ -5,6 +5,7 @@ import ErrorBoundary from '../../components/ErrorBoundary.jsx';
 import { StateBadge } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { Panel, Bar, PctCell, LevelBadge, Empty, PollState, levelColor } from '../ui.jsx';
+import { storageUsageUnknownNote } from '../../views/vcCardText.js'; // v2.621(감사 WEB-03): 사용량 미상 DS 제외 사실
 import { attentionList, regionCounts, REGION_COLORS, DOMAIN_LABEL, domainOf, ageText, fmtInt, fmtPct, colorOf, rowMatches, WARN_PCT, CRIT_PCT } from '../consoleData.js';
 
 const SEV_COLOR = { critical: '#ef4444', warning: '#f59e0b', info: '#3b82f6' };
@@ -68,7 +69,7 @@ export default function ConsoleOverview({ tiles, global: g, ov, sitesAll, alarms
                 {[
                   ['CPU', `${fmtInt(g.cpuUsedGhz)} / ${fmtInt(g.cpuTotalGhz)} GHz · ${fmtInt(g.cpuCores)} cores${g.hostsUsageExcluded ? ` · 끊긴 호스트 ${fmtInt(g.hostsUsageExcluded)}대 사용률 제외` : ''}`, g.cpuUsagePct],
                   ['메모리', `${fmtInt(g.memUsedGB)} / ${fmtInt(g.memTotalGB)} GB`, g.memUsagePct],
-                  ['스토리지', `${g.storageUsedTB} / ${g.storageTotalTB} TB · ${fmtInt(g.datastores)} DS`, g.storageUsagePct],
+                  ['스토리지', [`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${fmtInt(g.datastores)} DS`, storageUsageUnknownNote(g)].filter(Boolean).join(' · '), g.storageUsagePct], // v2.621(감사 WEB-03)
                 ].map(([label, meta, pct]) => (
                   <div key={label}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>

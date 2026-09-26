@@ -427,7 +427,13 @@ async function writeGuestFile(c, fileManager, vmRef, auth, guestPath, content, {
 }
 
 /** 게스트에 스크립트(+부가 파일)를 올려 실행하고 stdout/stderr/exitCode를 회수. */
-export async function runGuestScript(c, vmMoref, creds, scriptText, { isWindows = false, dlHosts = [], timeoutMs = 30_000, files = [] } = {}) {
+/*
+ * v2.621(감사 A 관찰 → 리드 확인): stdout 을 앞 2000자로 잘랐다 — 로그인 실패 조사(`tail -80`, 줄당 약 150자)는 **오래된 줄만**
+ *   남기고 최신 실패를 조용히 버렸다. `outMax`(기본 2000 — 기존 호출부 동작 그대로)로 호출부가 넓힐 수 있고, 잘렸으면
+ *   `stdoutTruncated` 로 밝힌다(조용한 상한 금지).
+ */
+export async function runGuestScript(c, vmMoref, creds, scriptText, { isWindows = false, dlHosts = [], timeoutMs = 30_000, files = [], outMax = 2000 } = {}) {
+  const cap = Math.min(256_000, Math.max(256, Number.isFinite(Number(outMax)) ? Math.floor(Number(outMax)) : 2000));
   const { processManager, fileManager } = await guestManagers(c);
   const auth = authXml(creds);
   const vmRef = `<vm type="VirtualMachine">${vmMoref}</vm>`;
@@ -470,7 +476,8 @@ export async function runGuestScript(c, vmMoref, creds, scriptText, { isWindows 
     const dl = Math.min(timeoutMs, 8000);
     const out = await readGuestFile(c, fileManager, vmRef, auth, outFile, dl, dlHosts, vmMoref);
     const err = await readGuestFile(c, fileManager, vmRef, auth, errFile, dl, dlHosts, `${vmMoref}.err`);
-    return { ok: exitCode === 0 || (exitCode == null && ended), exitCode, ended, stdout: (out.text || '').trim().slice(0, 2000), stderr: (err.text || '').trim().slice(0, 2000) };
+    const rawOut = (out.text || '').trim();
+    return { ok: exitCode === 0 || (exitCode == null && ended), exitCode, ended, stdout: rawOut.slice(0, cap), stdoutTruncated: rawOut.length > cap, stderr: (err.text || '').trim().slice(0, 2000) };
   } catch (e) {
     if (e?.guestAuth || e?.authFailed) authRejected = true;
     throw e;

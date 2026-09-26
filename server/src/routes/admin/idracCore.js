@@ -3,7 +3,7 @@ import { store } from '../../store.js';
 import { listUnsupportedServers } from '../../central/unsupportedServers.js'; // v2.495: 스캔이 발견한 비-Dell 서버
 import { logAudit } from '../../audit.js';
 import { listPhysical } from '../../gpu/physicalRegistry.js';
-import { listRegistry as listServers, addServer, testServer, loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
+import { listRegistry as listServers, addServer, testServer, loadRegistry as loadIdracRegistry, isHpeEntry } from '../../idrac/registry.js';
 import { getPollerStatus, pollNow, pollNowManual, idracAuthStops } from '../../idrac/poller.js';
 import { purgeStalePower, measuredPowerBreakdown } from '../../idrac/service.js';
 import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.js';
@@ -86,11 +86,15 @@ adminRouter.get('/idrac', adminOnly, (_req, res) => {
   const mapTag = (s) => (tagMap.get(String(s.serviceTag || s.inv?.system?.serviceTag || '').trim().toLowerCase()) || '');
   // v2.590: 인증 실패로 주기 수집이 멈춘 서버를 행마다 싣는다(조용한 정지 금지 — authGuard 규칙 1).
   const stops = idracAuthStops();
-  const local = listServers().map((s) => ({ ...s, mappedVcenterId: s.vcenterId || mapTag(s), model: s.model || getIdracInventory(s.id)?.system?.model || '', ...(stops.has(String(s.id)) ? { authStopped: stops.get(String(s.id)) } : {}) }));
+  // v2.621(감사 WEB-04): 벤더를 행마다 명시한다 — 서버 목록이 type 만 보고 HPE iLO 를 'iDRAC' 으로 보였다.
+  //   중앙 등록부는 vendor 없음 = Dell(등록부 규약)이라 'dell' 로 채우고, 원격 행은 엣지가 보낸 값만 쓴다(없으면 '' = 미상 —
+  //   구버전 엣지의 서버를 Dell 로 단정하지 않는다). OME 는 관리 콘솔 등록이라 벤더를 싣지 않는다.
+  const vendorOf = (s) => (s.type === 'ome' ? {} : { vendor: isHpeEntry(s) ? 'hpe' : 'dell' });
+  const local = listServers().map((s) => ({ ...s, ...vendorOf(s), mappedVcenterId: s.vcenterId || mapTag(s), model: s.model || getIdracInventory(s.id)?.system?.model || '', ...(stops.has(String(s.id)) ? { authStopped: stops.get(String(s.id)) } : {}) }));
   const seen = new Set(local.map((s) => String(s.id)));
   const remote = remoteServersResolved()
     .filter((s) => !seen.has(String(s.id)))
-    .map((s) => ({ id: s.id, name: s.name, host: s.host, serviceTag: s.serviceTag || '', model: s.model || s.inv?.system?.model || '', vcenterId: s.vcenterId || '', mappedVcenterId: s.vcenterId || mapTag(s), datacenterId: s.datacenterId || '', type: s.type || 'idrac', remote: true, collectorId: s.collectorId, hasInventory: !!s.inv }));
+    .map((s) => ({ id: s.id, name: s.name, host: s.host, serviceTag: s.serviceTag || '', model: s.model || s.inv?.system?.model || '', vcenterId: s.vcenterId || '', mappedVcenterId: s.vcenterId || mapTag(s), datacenterId: s.datacenterId || '', type: s.type || 'idrac', vendor: s.vendor === 'hpe' || s.vendor === 'dell' ? s.vendor : '', remote: true, collectorId: s.collectorId, hasInventory: !!s.inv }));
   res.json({ servers: local.concat(remote), poller: getPollerStatus() });
 });
 
