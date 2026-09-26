@@ -228,7 +228,7 @@
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `BACKUP_STARTUP_DELAY_MS` | `10` |  | backup/settings.js |
+| `BACKUP_STARTUP_DELAY_MS` |  |  | backup/settings.js |
 
 ## 베어메탈 스토리지 (4)
 
@@ -513,7 +513,7 @@
 | `CENTRAL_FLEET_MAX_UNVERIFIED_AGENTS` | `20` |  | central/fleet.js |
 | `CENTRAL_FLEET_MAX_UNVERIFIED_TOTAL` | `5000` |  | central/fleet.js |
 | `CENTRAL_FLEET_TTL_MS` | `30` |  | central/fleet.js |
-| `CENTRAL_INVENTORY_PERSIST_MS` | `30000` |  | central/inventory.js |
+| `CENTRAL_INVENTORY_PERSIST_MS` |  |  | central/inventory.js |
 | `CENTRAL_PDU_TTL_MS` | `6` |  | central/pduEdge.js |
 | `CENTRAL_RESULT_AGENTS_MAX` | `500` |  | central/assignments.js |
 | `CENTRAL_SANSW_ORPHAN_TTL_MS` | `7` |  | central/sanSwitchEdge.js |

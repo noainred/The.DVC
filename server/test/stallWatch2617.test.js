@@ -118,8 +118,8 @@ test('⑥ 링 버퍼는 줄마다 8KB 로 자른다 · 시작 백업은 기동 1
   const src = stripComments(read('logbuffer.js'));
   assert.match(src, /if \(msg\.length > MSG_MAX\) msg = `\$\{flatStr\(msg\.slice\(0, MSG_MAX\)\)\}/);
   assert.match(src, /const MSG_MAX = 8192;/);
-  assert.match(stripComments(read('backup/settings.js')), /BACKUP_STARTUP_DELAY_MS\) \|\| 10 \* 60_000/);
-  assert.match(stripComments(read('central/inventory.js')), /CENTRAL_INVENTORY_PERSIST_MS\) \|\| 30_000/);
+  assert.match(stripComments(read('backup/settings.js')), /clampIntervalMs\(process\.env\.BACKUP_STARTUP_DELAY_MS, 10 \* 60_000, 20_000\)/);
+  assert.match(stripComments(read('central/inventory.js')), /clampIntervalMs\(process\.env\.CENTRAL_INVENTORY_PERSIST_MS, 30_000, 1_000\)/);
   const last = all.items[all.items.length - 1];
   assert.ok(last.msg.length < 8300, `len=${last.msg.length}`);
   assert.match(last.msg, /\+41808자 생략\)$/);

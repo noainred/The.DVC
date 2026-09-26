@@ -11,7 +11,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { isMockVcenter } from '../mock/generator.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { registerExitFlush } from '../util/exitFlush.js';
@@ -55,7 +55,7 @@ registerExitFlush('central/inventory', () => { if (writeTimer || writing) persis
 // v2.617: 5초 → 기본 30초. 매 저장이 위임 vCenter 전체 캐시(수 MB~수십 MB)를 JSON.stringify 하는데, 엣지 28곳이 1분마다
 //   push 하면 거의 5초마다 돌아 그 문자열 사본이 계속 힙에 생겼다. 캐시는 다음 push 로 복구되고 종료 시 동기 flush 가
 //   있으므로(registerExitFlush) 창을 늘려도 정상 재시작에서 잃는 것은 없다. 비정상 종료 시 최대 이 창만큼 잃는다.
-const PERSIST_DEBOUNCE_MS = Math.min(300_000, Math.max(5_000, Number(process.env.CENTRAL_INVENTORY_PERSIST_MS) || 30_000));
+const PERSIST_DEBOUNCE_MS = Math.min(300_000, clampIntervalMs(process.env.CENTRAL_INVENTORY_PERSIST_MS, 30_000, 1_000));
 function persistSoon() {
   // 인벤토리는 수MB가 될 수 있으므로 디스크 쓰기를 비동기 + 디바운스(이벤트 루프 비차단).
   if (writeTimer) return;

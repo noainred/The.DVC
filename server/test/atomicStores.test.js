@@ -17,6 +17,7 @@ import crypto from 'node:crypto';
 
 const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'atomic-stores-'));
 process.env.CONFIG_DIR = CFG;
+process.env.CENTRAL_INVENTORY_PERSIST_MS = '5000'; // v2.617: 기본 30초 디바운스 — 이 테스트는 예전 5초를 전제로 기다린다
 
 const corruptBackups = (base) => fs.readdirSync(CFG).filter((n) => n.startsWith(`${base}.corrupt.`));
 const tmpLeftovers = () => fs.readdirSync(CFG).filter((n) => n.includes('.tmp-'));
