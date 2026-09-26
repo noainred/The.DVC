@@ -27,6 +27,7 @@ import { zoningFromRest } from '../zoningCollect.js';   // v2.511: 조닝 — SS
 // 보안(M-4, 2026-09-12): SANSWITCH_TLS_VERIFY=true 면 검증을 켠다(기본은 기존대로 해제 — 자체서명 FOS 대응).
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
 const dispatcher = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: process.env.SANSWITCH_TLS_VERIFY === 'true' }) });
+import { NO_REDIRECT, refuseRedirect } from '../../util/noRedirect.js';
 const TIMEOUT_MS = reqTimeoutMs(process.env.SANSW_HTTP_TIMEOUT_MS, 20_000);   // v2.606 TIM2606-03: 음수·2^31 초과 차단
 
 const RE_HEADER_VALUE = /^[\t\x20-\x7e\x80-\xff]*$/; // eslint-disable-line no-control-regex
@@ -90,8 +91,10 @@ function makeClient(device, signal) {
     async login() {
       const res = await fetch(`${base}/login`, {
         method: 'POST', headers: { Authorization: `Basic ${auth}`, Accept: 'application/yang-data+json' },
+        redirect: NO_REDIRECT, // v2.620 SEC2620-01
         dispatcher, signal: sig(TIMEOUT_MS, signal),
       });
+      refuseRedirect(res, 'SAN 스위치');
       if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
       if (res.status === 404) throw new Error('/rest 없음(404) — FOS 8.2.1 미만으로 보입니다. 수집 방식을 SSH 로 바꾸세요.');
       if (!res.ok) throw new Error(`login HTTP ${res.status}`);
@@ -102,8 +105,10 @@ function makeClient(device, signal) {
     async get(modulePath) {
       const res = await fetch(`${base}/running/${modulePath}${vf}`, {
         headers: { Authorization: token, Accept: 'application/yang-data+json' },
+        redirect: NO_REDIRECT, // v2.620 SEC2620-01
         dispatcher, signal: sig(TIMEOUT_MS, signal),
       });
+      refuseRedirect(res, 'SAN 스위치');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const j = await res.json();
       return j?.Response || {};

@@ -169,3 +169,32 @@ describe('v2.618 — 모르는 값을 0 으로 말하지 않는다(WEB-4·5)', a
     expect(o.affectedVmsUnknown).toBe(1);
   });
 });
+
+// v2.620 — 상태 카드: 응답 없음 우선 · 엣지 정상이어도 vCenter 실패면 빨강 · 상세 클릭 대상 · 물리 집계 실패 문구
+import { infraTotals as _infraTotals2620 } from './overviewData.js';
+describe('v2.620 statusCard / infraTotals', () => {
+  it('health 오류면 마지막 값으로 초록을 그리지 않는다', () => {
+    const c = statusCard({ health: { vcenters: 3, vcentersConnected: 3 }, healthError: new Error('timeout') });
+    expect(c.tone).toBe('crit'); expect(c.label).toContain('응답 없음');
+    const u = statusCard({ health: { vcenters: 3, vcentersConnected: 3 }, healthError: new Error('x'), upgrading: true });
+    expect(u.tone).toBe('warn'); expect(u.label).toContain('업그레이드');
+  });
+  it('엣지가 전부 정상이어도 vCenter 연결 실패가 있으면 crit, 첫 수집 중이면 warn', () => {
+    const edges = { edges: [{ state: 'ok' }, { state: 'ok' }] };
+    expect(statusCard({ health: { vcentersUnreachable: 2 }, commMap: edges }).tone).toBe('crit');
+    expect(statusCard({ health: { vcentersPending: 1 }, commMap: edges }).tone).toBe('warn');
+    expect(statusCard({ health: {}, commMap: edges }).tone).toBe('ok');
+  });
+  it('상세 클릭 대상 — vCenter 사유면 vcenter, 엣지 사유만이면 edges', () => {
+    expect(statusCard({ health: { vcentersUnreachable: 1 } }).detailTarget).toBe('vcenter');
+    expect(statusCard({ health: {}, commMap: { edges: [{ state: 'fail' }, { state: 'ok' }] } }).detailTarget).toBe('edges');
+    expect(statusCard({ health: {}, commMap: { edges: [{ state: 'ok' }] } }).detailTarget).toBe(null);
+  });
+  it('물리 서버 집계 실패는 "서버 없음" 이라 말하지 않는다', () => {
+    const ov = { sites: [{ id: 'vc1', name: 'A', hosts: 1 }], physicalByCorp: { error: 'x' } };
+    const t = _infraTotals2620(ov, 'vc1');
+    expect(t.physicalNote).toContain('읽지 못했');
+    const t2 = _infraTotals2620({ ...ov, physicalByCorp: { byVcenter: {} } }, 'vc1');
+    expect(t2.physicalNote).toContain('연결된 iDRAC 서버 없음');
+  });
+});

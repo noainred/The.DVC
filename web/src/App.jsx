@@ -490,7 +490,7 @@ function Portal({ user, onLogout }) {
     return (
       <>
         <Suspense fallback={<div className="login-screen"><div className="loading">V5 불러오는 중…</div></div>}>
-          <V5Shell user={user} health={health} vcenters={vcenters} tab={tab} visibleTabIds={visibleTabs.map((t) => t.id)}
+          <V5Shell user={user} health={health} healthError={healthError} upgrading={upgrading} vcenters={vcenters} tab={tab} visibleTabIds={visibleTabs.map((t) => t.id)}
             scope={v5Scope} setScope={setV5Scope}
             onSearchIn={(id, text) => { patchFilter({ q: text }, id); setTab(id); }}
             onShowVcDown={() => setShowVcDown(true)} onShowNotes={() => setShowNotes(true)} onExit={exitV5} onLogout={onLogout}>

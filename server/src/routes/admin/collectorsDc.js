@@ -279,7 +279,12 @@ adminRouter.get('/datacenter-order', adminOnly, (_req, res) => {
   res.json({ order: getDatacenterOrder(), datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name, region: d.region || '' })) });
 });
 adminRouter.put('/datacenter-order', adminOnly, fleetOnly, (req, res) => {
-  const r = saveDatacenterOrder((req.body || {}).order);
+  // v2.620(WEB2620-01): 빈 순서는 명시적 초기화({clear:true})일 때만 — 화면이 조회에 실패한 상태에서
+  // 저장하면 전 포탈의 DataCenter 순서가 지워졌다(v2.618 vCenter 순서 WEB-2 와 같은 모양).
+  const body = req.body || {};
+  const ids = Array.isArray(body.order) ? body.order : [];
+  if (!ids.length && body.clear !== true) return res.status(400).json({ ok: false, reason: '빈 순서는 저장하지 않습니다 — 순서를 초기화하려면 clear:true 를 보내세요.' });
+  const r = saveDatacenterOrder(ids);
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 순서 변경', detail: `${(r.order || []).length}개`, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });

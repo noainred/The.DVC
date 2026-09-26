@@ -180,7 +180,11 @@ function DatacenterOrderCard() {
   const [list, setList] = useState(null);
   const [msg, setMsg] = useState(null);
   const [open, setOpen] = useState(false);
-  const load = () => fetchJson('/admin/datacenter-order').then((r) => setList(r.datacenters || [])).catch(() => setList([]));
+  // v2.620(WEB2620-01): 조회 실패를 빈 목록으로 삼키면 '저장' 이 전 포탈 순서를 지운다 — 실패는 따로 들고 저장을 막는다.
+  const [loadErr, setLoadErr] = useState(null);
+  const load = () => fetchJson('/admin/datacenter-order')
+    .then((r) => { setLoadErr(null); setList(r.datacenters || []); })
+    .catch((e) => { setLoadErr(e?.message || '조회 실패'); setList([]); });
   useEffect(() => { load(); }, []);
   if (!list) return null;
 
@@ -192,6 +196,7 @@ function DatacenterOrderCard() {
     setList(next);
   };
   const save = async () => {
+    if (loadErr) { setMsg({ ok: false, text: '목록을 불러오지 못해 저장하지 않았습니다 — 새로고침 후 다시 시도하세요.' }); return; }
     const r = await putJson('/admin/datacenter-order', { order: list.map((v) => v.id) }).catch((e) => ({ ok: false, reason: e.message }));
     setMsg(r.ok ? { ok: true, text: '순서를 저장했습니다. 모든 DataCenter 선택 목록에 적용됩니다.' } : { ok: false, text: r.reason || '저장 실패' });
     if (r.ok) setTimeout(() => setMsg(null), 4000);
@@ -212,7 +217,7 @@ function DatacenterOrderCard() {
             <STable>
               <thead><tr><th style={{ width: 50 }}>순서</th><th>이름</th><th>ID</th><th>리전</th><th className="right">이동</th></tr></thead>
               <tbody>
-                {list.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>등록된 DataCenter가 없습니다.</td></tr>}
+                {list.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>{loadErr ? `목록을 불러오지 못했습니다(${loadErr}).` : '등록된 DataCenter가 없습니다.'}</td></tr>}
                 {list.map((v, i) => (
                   <tr key={v.id}>
                     <td className="muted">{i + 1}</td>
@@ -229,7 +234,7 @@ function DatacenterOrderCard() {
             </STable>
           </div>
           <div className="flex gap" style={{ marginTop: 10 }}>
-            <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save}>순서 저장</button>
+            <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={save} disabled={!!loadErr} title={loadErr ? '목록을 불러오지 못해 저장할 수 없습니다' : undefined}>순서 저장</button>
             <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={sortName}>이름순 정렬</button>
             <button className="logout-btn" style={{ padding: '8px 14px' }} onClick={load}>되돌리기</button>
           </div>

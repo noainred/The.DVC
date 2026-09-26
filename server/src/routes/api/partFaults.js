@@ -134,6 +134,21 @@ export function edgesNow() {
 }
 
 /** DB 상태 — **파일 경로는 admin 에게만**(operator 는 tools 기본 보유 — v2.500 D/M1 '거부 기본값'). */
+/**
+ * v2.620(SEC2620-02): poller 의 마지막 실행 기록은 알림 결과마다 파트 키(원문 — IP 로 등록된 iDRAC 이면 주소)를 싣는다.
+ * open[] 은 maskPartRow 로 가리면서 같은 응답의 last.notify.results 로 원문이 나가던 형제 경로다(v2.601 AUTHZ-2601-02).
+ * 비-admin 에는 결과 목록 대신 개수만 준다.
+ */
+export function lastView(last, isAdmin) {
+  if (isAdmin || !last || typeof last !== 'object') return last ?? null;
+  const out = { ...last };
+  if (out.notify && typeof out.notify === 'object') {
+    const { results, ...rest } = out.notify;
+    out.notify = { ...rest, resultsCount: Array.isArray(results) ? results.length : 0, resultsHidden: true };
+  }
+  return out;
+}
+
 function dbView(db, isAdmin) {
   if (!db) return null;
   if (isAdmin) return db;
@@ -209,7 +224,7 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
     open: shown, summary: { ...summary, devices: devices.size },
     ...(isAdmin ? {} : { addressHidden: true }),
     labels: LABELS,
-    poller: st ? { enabled: st.enabled, source: st.source, intervalMs: st.intervalMs, busy: st.busy, last: st.last } : null,
+    poller: st ? { enabled: st.enabled, source: st.source, intervalMs: st.intervalMs, busy: st.busy, last: lastView(st.last, isAdmin) } : null,
     db: dbView(st ? st.db : await partFaultDbStatus().catch(() => null), isAdmin),
     reset: st?.reset || null,
     edges: role === 'central' ? edgesNow() : null,
@@ -263,7 +278,7 @@ api.post('/tools/part-faults/scan', writeRole, toolsPerm, fullScopeOnly, async (
 /** 상태 — 폴러·DB·push·엣지 분류를 한 번에(진단 화면용). */
 api.get('/tools/part-faults/status', toolsPerm, fullScopeOnly, async (req, res) => {
   const st = await partFaultStatus().catch((e) => ({ error: String(e.message || e).slice(0, 200) }));
-  res.json({ ok: true, ...st, db: dbView(st.db, req.user?.role === 'admin'), version: currentVersion(),
+  res.json({ ok: true, ...st, last: lastView(st.last, req.user?.role === 'admin'), db: dbView(st.db, req.user?.role === 'admin'), version: currentVersion(),
     push: config.agent.centralUrl ? partFaultPushStatus() : null, edges: config.agent.centralUrl ? null : edgesNow(), hook: hookStatus() });
 });
 

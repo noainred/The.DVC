@@ -15,7 +15,9 @@ import { droppedSecretNote } from '../droppedSecretText.js';
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
-  const n = Number(b) || 0;
+  // v2.620(WEB2620-08): 못 읽은 값(null·빈 값)을 '0 B' 로 보이지 않는다.
+  if (b == null || b === '' || !Number.isFinite(Number(b))) return '—';
+  const n = Number(b);
   if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toLocaleString(undefined, { maximumFractionDigits: 1 })} TB`;
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toLocaleString(undefined, { maximumFractionDigits: 1 })} GB`;
   if (n >= 1024 ** 2) return `${Math.round(n / 1024 ** 2).toLocaleString()} MB`;

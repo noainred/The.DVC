@@ -29,6 +29,7 @@ import { createAuthGuard } from '../util/authGuard.js';
 import { effectiveRequestTimeoutMs } from '../vcenter/soapParse.js'; // v2.598 T2598-03 — 옛 저장값의 시한 상한
 import { numOrNull } from '../util/numOrNull.js';
 import { pushAll } from '../util/pushAll.js';
+import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 
 /**
  * NSX 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F1, 계정 잠금 경로). 예전에는 `client.node()` 가 401/403 으로
@@ -112,9 +113,11 @@ export class NsxClient {
   async #get(pathname) {
     const res = await fetch(`${this.baseUrl}${pathname}`, {
       headers: { Authorization: this.auth, Accept: 'application/json' },
+      redirect: NO_REDIRECT, // v2.620 SEC2620-01
       dispatcher: nsxDispatcher,
       signal: AbortSignal.timeout(this.timeoutMs),
     });
+    refuseRedirect(res, 'NSX Manager');
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       const err = new Error(`GET ${pathname} -> ${res.status} ${res.statusText} ${text.slice(0, 160)}`);

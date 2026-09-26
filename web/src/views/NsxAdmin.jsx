@@ -19,7 +19,10 @@ export default function NsxAdmin() {
   const [busy, setBusy] = useState(false);
   const { data: vcenters } = usePolling('/vcenters', {}, 60_000);
   const [proxies, setProxies] = useState([]);
-  useEffect(() => { fetchJson('/remote/proxies').then((r) => setProxies(r.proxies || [])).catch(() => setProxies([])); }, []);
+  // v2.620(WEB2620-09): 프록시 목록 조회 실패를 빈 목록으로 삼키면, 이미 프록시를 쓰는 관리자를 편집할 때 선택 칸이
+  // '직접 연결' 처럼 보인다(값은 그대로인데 화면이 거짓말). 실패 사유를 들고, 목록에 없는 현재 값은 따로 보여 준다.
+  const [proxiesErr, setProxiesErr] = useState(null);
+  useEffect(() => { fetchJson('/remote/proxies').then((r) => { setProxiesErr(null); setProxies(r.proxies || []); }).catch((e) => { setProxiesErr(e?.message || '조회 실패'); setProxies([]); }); }, []);
 
   const load = async () => {
     try { setData(await fetchJson('/admin/nsx/managers')); setError(null); }
@@ -130,7 +133,9 @@ export default function NsxAdmin() {
                 <select className="select" value={form.proxyId || ''} onChange={setF('proxyId')}>
                   <option value="">직접 연결(프록시 미사용)</option>
                   {proxies.filter((p) => p.proxyHost).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.proxyHost})</option>)}
+                  {form.proxyId && !proxies.some((p) => p.id === form.proxyId && p.proxyHost) && <option value={form.proxyId}>{form.proxyId} (목록에 없음)</option>}
                 </select>
+                {proxiesErr && <span className="muted" style={{ fontSize: 11, color: 'var(--amber)' }}>중계 서버 목록을 불러오지 못했습니다({proxiesErr}).</span>}
               </label>
               <label>수집 주기(초, 0/빈칸=기본)<input className="input" type="number" value={form.pollIntervalSec} onChange={setF('pollIntervalSec')} placeholder="예: 300 (고RTT)" /></label>
               <label>수집 타임아웃(ms, 0/빈칸=20000)<input className="input" type="number" value={form.timeoutMs} onChange={setF('timeoutMs')} placeholder="예: 60000 (고RTT)" /></label>

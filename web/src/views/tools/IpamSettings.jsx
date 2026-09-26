@@ -61,18 +61,28 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved }) {
   const [note, setNote] = useState(row.note || '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [loadWarn, setLoadWarn] = useState(null);
   useEffect(() => { fetchJson('/tools/ipam/manage-meta').then(setMeta).catch(() => setMeta({ statuses: Object.keys(MGMT), deviceTypes: Object.keys(DEVTYPE_LABEL) })); }, []);
   // 기존 IP면 서버에서 현재 override를 한 번 더 정확히 불러와 폼을 채운다(목록값 보강).
   useEffect(() => {
     if (isNew || !row.ip) return;
+    // v2.620(WEB2620-10): 응답이 늦게 오면(고RTT) 사용자가 이미 고친 칸을 서버 값으로 되돌렸다 — 목록값 그대로인 칸만 채운다.
+    //   재조회 실패는 무음이었다(목록의 근사값으로 저장될 수 있다) — 사유를 적는다.
+    const init = { status: row.mgmtStatus || '', owner: row.owner_ || '', label: row.label || '', deviceType: row.deviceType || '',
+      hostnameOverride: (row.managed && row.hostName) || '', claimedVcenterId: row.vcenterId || '', note: row.note || '',
+      reservedUntil: row.reservedUntil ? String(row.reservedUntil).slice(0, 10) : '' };
+    const keep = (k, v) => (cur) => (cur === init[k] ? v : cur);
+    let alive = true;
     fetchJson(`/tools/ipam/ip/${encodeURIComponent(row.ip)}`).then((r) => {
+      if (!alive) return;
       const o = r.override; if (!o) return;
-      setStatus(o.status || ''); setOwner(o.owner || ''); setLabel(o.label || '');
-      setDeviceType(o.deviceType || ''); setHostnameOverride(o.hostnameOverride || '');
-      setClaimedVcenterId(o.claimedVcenterId || ''); setNote(o.note || '');
-      setReservedUntil(o.reservedUntil ? String(o.reservedUntil).slice(0, 10) : '');
-    }).catch(() => {});
-  }, [row.ip, isNew]);
+      setStatus(keep('status', o.status || '')); setOwner(keep('owner', o.owner || '')); setLabel(keep('label', o.label || ''));
+      setDeviceType(keep('deviceType', o.deviceType || '')); setHostnameOverride(keep('hostnameOverride', o.hostnameOverride || ''));
+      setClaimedVcenterId(keep('claimedVcenterId', o.claimedVcenterId || '')); setNote(keep('note', o.note || ''));
+      setReservedUntil(keep('reservedUntil', o.reservedUntil ? String(o.reservedUntil).slice(0, 10) : ''));
+    }).catch((e) => { if (alive) setLoadWarn(`현재 저장값을 다시 읽지 못했습니다(${e?.message || '조회 실패'}) — 폼은 목록의 값입니다. 저장 전에 확인하세요.`); });
+    return () => { alive = false; };
+  }, [row.ip, isNew]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ipList = String(ip).split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
   const bulk = ipList.length > 1;
@@ -105,6 +115,7 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved }) {
         {isNew && ' 여러 IP를 콤마/줄바꿈으로 넣으면 한 번에 같은 상태로 일괄 적용됩니다.'}
       </div>
       {err && <div className="login-error" style={{ marginBottom: 8 }}>{err}</div>}
+      {loadWarn && <div className="muted" style={{ marginBottom: 8, fontSize: 12, color: 'var(--amber)' }}>{loadWarn}</div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
         <label style={L}>IP{isNew && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> (여러 개 가능)</span>}</label>
         {isNew

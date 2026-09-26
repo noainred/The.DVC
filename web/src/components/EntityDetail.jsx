@@ -269,7 +269,7 @@ function DsBrowseSection({ item }) {
       .catch((e) => { if (!dead) setErr(e.message); });
     return () => { dead = true; };
   }, [item.id]);
-  const fmtSize = (b) => (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : b >= 1024 ** 2 ? `${(b / 1024 ** 2).toFixed(1)} MB` : `${Math.ceil((b || 0) / 1024)} KB`);
+  const fmtSize = (b) => (b == null || b === '' || !Number.isFinite(Number(b)) ? '—' : b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : b >= 1024 ** 2 ? `${(b / 1024 ** 2).toFixed(1)} MB` : `${Math.ceil((b || 0) / 1024)} KB`);
   if (err) return <div className="card" style={{ marginTop: 14, borderColor: 'var(--amber,#f59e0b)' }}><span style={{ fontSize: 13 }}>⚠ 파일/할당 VM 조회 실패 — {err}</span></div>;
   if (!d) return <div className="muted" style={{ marginTop: 14, fontSize: 13 }}>⏳ 파일·할당 VM 조회 중… (파일이 많은 데이터스토어는 최대 2분까지 걸릴 수 있습니다)</div>;
   if (d.mock) return <div className="muted" style={{ marginTop: 14, fontSize: 13 }}>{d.reason}</div>;

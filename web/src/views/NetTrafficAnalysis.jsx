@@ -19,7 +19,8 @@ const worstBadge = (w) => <span className={`badge ${w === 'error' ? 'red' : w ==
 
 function History() {
   const [d, setD] = useState(null); const [sel, setSel] = useState(null);
-  const load = () => fetchJson('/admin/net/history').then((r) => setD(r.captures || [])).catch(() => setD([]));
+  const [loadErr, setLoadErr] = useState(null); // v2.620(WEB2620-09): 조회 실패를 '없습니다' 로 보이지 않는다 — 권한·시한 실패는 사유와 함께.
+  const load = () => fetchJson('/admin/net/history').then((r) => { setLoadErr(null); setD(r.captures || []); }).catch((e) => { setLoadErr(e); setD([]); });
   useEffect(() => { load(); }, []);
   const view = async (id) => { try { setSel(await fetchJson(`/admin/net/history/${id}`)); } catch { /* */ } };
   return (
@@ -28,7 +29,7 @@ function History() {
         <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>캡처 이력</div>
         <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={load}>⟳</button>
       </div>
-      {!d ? <div className="muted">불러오는 중…</div> : d.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>저장된 캡처가 없습니다.</div> : (
+      {!d ? <div className="muted">불러오는 중…</div> : loadErr ? <ErrorBox error={loadErr} /> : d.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>저장된 캡처가 없습니다.</div> : (
         <div className="table-wrap" style={{ maxHeight: '54vh' }}>
           <STable><thead><tr><th>시각</th><th>구분</th><th>모드</th><th>A ↔ B</th><th>결과</th><th>진단</th></tr></thead>
             <tbody>{d.map((c) => (
@@ -58,7 +59,8 @@ function History() {
 function Monitors() {
   const [d, setD] = useState(null);
   const [form, setForm] = useState(null);
-  const load = () => fetchJson('/admin/net/monitors').then((r) => setD(r.monitors || [])).catch(() => setD([]));
+  const [loadErr, setLoadErr] = useState(null); // v2.620(WEB2620-09): 조회 실패를 '없습니다' 로 보이지 않는다 — 권한·시한 실패는 사유와 함께.
+  const load = () => fetchJson('/admin/net/monitors').then((r) => { setLoadErr(null); setD(r.monitors || []); }).catch((e) => { setLoadErr(e); setD([]); });
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
   const blank = { name: '', mode: 'dual', intervalMin: 10, seconds: 10, maxPackets: 1000, iface: 'any', useSudo: true, enabled: true, hostA: { host: '', port: 22, username: 'root', password: '' }, hostB: { host: '', port: 22, username: 'root', password: '' }, peer: '' };
   const save = async () => { try { await putJson('/admin/net/monitors', form); } catch (e) { /* */ } setForm(null); load(); };
@@ -72,7 +74,7 @@ function Monitors() {
         <button className="login-btn" style={{ padding: '6px 12px' }} onClick={() => setForm(blank)}>+ 모니터 추가</button>
       </div>
       <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>두 서버 간 캡처를 주기적으로 자동 실행해 이력에 기록하고, 경로 손실/미수신 등 이슈가 감지되면 알림(설정 › 알림 채널)을 보냅니다.</p>
-      {!d ? <div className="muted">불러오는 중…</div> : d.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>등록된 모니터가 없습니다.</div> : (
+      {!d ? <div className="muted">불러오는 중…</div> : loadErr ? <ErrorBox error={loadErr} /> : d.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>등록된 모니터가 없습니다.</div> : (
         <div className="table-wrap"><STable><thead><tr><th>이름</th><th>모드</th><th>A ↔ B</th><th>주기</th><th>최근</th><th>상태</th><th>작업</th></tr></thead>
           <tbody>{d.map((m) => (
             <tr key={m.id}>

@@ -20,6 +20,8 @@ import { recordClientStall, requestStatus } from '../../perf/monitor.js';
 import { loadPerfSettings } from '../../perf/settings.js';
 import { routeKeyOf } from '../../perf/stats.js';
 import { clientIp } from '../../util/rateLimit.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
+import { store } from '../../store.js';
 
 const COOLDOWN_MS = Math.max(5_000, Math.min(600_000, Number(process.env.PERF_CLIENT_COOLDOWN_MS) || 60_000));
 // 사용자당 시간당 상한 — 쿨다운만 두면 **계정 수·IP 축으로 분산해 우회**할 수 있다(쿨다운 키가
@@ -97,7 +99,10 @@ export function registerPerfClient(api) {
   api.get('/perf/req-status', (req, res) => {
     const raw = typeof req.query.ids === 'string' ? req.query.ids : '';
     const ids = raw.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 20);
-    const items = requestStatus(ids, { user: req.user?.username || '', isAdmin: req.user?.role === 'admin' });
+    // v2.620(SEC2620-04): '전부 보기' 는 전체 범위 admin 만 — 범위 관리자가 서버 발급 ID(부팅 접두 + 순번)를 넘겨짚어
+    //   다른 법인 계정의 요청(계정명·라우트)을 읽을 수 있었다(v2.607 '범위 관리자 ≠ 관리자').
+    const isAdmin = req.user?.role === 'admin' && !scopedVcenterIds(req.user, store.get());
+    const items = requestStatus(ids, { user: req.user?.username || '', isAdmin });
     res.set('Cache-Control', 'no-store');
     res.json({ ok: true, at: Date.now(), items });
   });

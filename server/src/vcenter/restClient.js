@@ -18,6 +18,7 @@ import { effectiveRequestTimeoutMs } from './soapParse.js'; // v2.598 T2598-03 �
  * ⚠ 수동 실행(연결 테스트·'지금 수집')은 막지 않는다 — 막는 것은 **주기 수집뿐**이다(규칙 3).
  */
 export const vcAuthGuard = createAuthGuard({ file: 'vcenter-auth-stops.json' });
+import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 
 /**
  * 오류가 vCenter **자격증명 거부**인가(출처에서 못 박은 플래그만 본다 — 문구 추측 금지).
@@ -96,6 +97,7 @@ export class VCenterClient {
     const url = `${this.baseUrl}${pathname}`;
     const res = await fetch(url, {
       method,
+      redirect: NO_REDIRECT, // v2.620 SEC2620-01: 세션 헤더를 3xx 로 다른 곳에 보내지 않는다
       headers: {
         'Content-Type': 'application/json',
         ...(this.session ? { 'vmware-api-session-id': this.session } : {}),
@@ -107,6 +109,7 @@ export class VCenterClient {
       // v2.590: 수집 데드라인 신호도 함께 건다(결과만 포기하지 않고 요청을 실제로 끊는다 — v2.417).
       signal: vcRequestSignal(effectiveRequestTimeoutMs(this.vc?.timeoutMs, 15_000), ignoreExternal ? null : this.signal),
     });
+    refuseRedirect(res, 'vCenter REST');
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       const err = new Error(`${method} ${pathname} -> ${res.status} ${res.statusText} ${text.slice(0, 200)}`);
