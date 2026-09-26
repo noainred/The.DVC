@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **550개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **551개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-26)
@@ -45,7 +45,7 @@
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 | `X` |  |  | util/dayKey.js, util/envTimeout.js |
 
-## 공통 (157)
+## 공통 (158)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -128,6 +128,7 @@
 | `IDRAC_TIMEOUT_MS` | `15000` |  | config.js |
 | `IPAM_DB_PATH` |  |  | config.js |
 | `JSON_BODY_LIMIT` | `'16mb'` |  | index.js |
+| `LEDGER_FULL_CHECK_MS` |  |  | store.js |
 | `LINKCHECK_COUNT_CACHE_MS` | `60000` |  | linkcheck/db.js |
 | `LINKCHECK_DETAIL_MAX` | `8000` |  | linkcheck/db.js |
 | `LINKCHECK_ENABLED` | `''` |  | linkcheck/settings.js |
@@ -734,4 +735,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 550
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 551
