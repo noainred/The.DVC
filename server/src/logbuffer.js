@@ -4,7 +4,10 @@
  * captures as much as possible; keeps the last MAX entries.
  */
 
+import { flatStr } from './util/capStr.js'; // v2.617: 줄 길이 상한 평탄화(import 0 개인 순수 모듈)
+
 const MAX = 1000;
+const MSG_MAX = 8192;
 const buffer = [];
 let seq = 0;
 // v2.583: 로그 분석(loganalysis/live.js)이 줄마다 누적 집계를 하려고 붙는 탭. 링 버퍼(1,000줄)는
@@ -21,7 +24,10 @@ function safeStringify(o) {
 
 function record(level, args) {
   try {
-    const msg = args.map((a) => (typeof a === 'string' ? a : safeStringify(a))).join(' ');
+    let msg = args.map((a) => (typeof a === 'string' ? a : safeStringify(a))).join(' ');
+    // v2.617: 링 버퍼 1,000줄은 줄 길이 상한이 없어 큰 객체를 찍는 줄이 쌓이면 수백 MB 를 붙잡을 수 있었다. 8KB 로 자르고
+    //   평탄화한다(slice 만 하면 V8 SlicedString 이 원문을 붙잡는다 — util/capStr.js 머리말). stdout(journal)에는 원문 그대로.
+    if (msg.length > MSG_MAX) msg = `${flatStr(msg.slice(0, MSG_MAX))}…(+${msg.length - MSG_MAX}자 생략)`;
     const entry = { id: ++seq, time: Date.now(), level, msg };
     buffer.push(entry);
     if (buffer.length > MAX) buffer.shift();

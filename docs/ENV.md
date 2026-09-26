@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **543개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **547개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-26)
@@ -12,13 +12,15 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (23)
+## 공용 유틸 (25)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `API_RATE_DISABLED` | `''` |  | util/rateLimit.js |
 | `API_RATE_LIMIT` | `1800` |  | util/rateLimit.js |
 | `API_RATE_WINDOW_MS` | `60000` |  | util/rateLimit.js |
+| `BIG_JSON_MAX_BYTES` | `96` |  | util/bigJsonGate.js |
+| `BIG_JSON_MAX_CONCURRENT` | `6` |  | util/bigJsonGate.js |
 | `BMUSAGE_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `EDGE_EXPORT_MAX_BYTES` | `64` |  | util/readCapped.js |
 | `EDGE_RESPONSE_MAX_BYTES` | `16` |  | util/readCapped.js |
@@ -221,6 +223,12 @@
 | `VMPERF_MAX_OPEN_DB` |  |  | metrics/vmperfDb.js |
 | `VMPERF_RETENTION_DAYS` | `90` |  | metrics/vmperfSettings.js |
 | `VMPERF_TRACK_TOTAL` | `기본 적용('false' 로 끄기)` |  | metrics/vmperfSettings.js |
+
+## 백업 (1)
+
+| 키 | 기본값 | 예시 | 정의 위치 |
+|---|---|---|---|
+| `BACKUP_STARTUP_DELAY_MS` | `10` |  | backup/settings.js |
 
 ## 베어메탈 스토리지 (4)
 
@@ -485,7 +493,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (52)
+## 중앙(위임 수집) (53)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -505,6 +513,7 @@
 | `CENTRAL_FLEET_MAX_UNVERIFIED_AGENTS` | `20` |  | central/fleet.js |
 | `CENTRAL_FLEET_MAX_UNVERIFIED_TOTAL` | `5000` |  | central/fleet.js |
 | `CENTRAL_FLEET_TTL_MS` | `30` |  | central/fleet.js |
+| `CENTRAL_INVENTORY_PERSIST_MS` | `30000` |  | central/inventory.js |
 | `CENTRAL_PDU_TTL_MS` | `6` |  | central/pduEdge.js |
 | `CENTRAL_RESULT_AGENTS_MAX` | `500` |  | central/assignments.js |
 | `CENTRAL_SANSW_ORPHAN_TTL_MS` | `7` |  | central/sanSwitchEdge.js |
@@ -722,4 +731,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 543
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 547

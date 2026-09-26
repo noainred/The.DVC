@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { snapCacheSweep } from './util/snapCache.js'; // v2.617
 import { config, loadVcenterConfig , secretsReady } from './config.js';
 import { withJob } from './perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 import { generateSnapshot } from './mock/generator.js';
@@ -398,6 +399,7 @@ class Store {
 
       merged.generatedAt = new Date().toISOString();
       this.snapshot = withRollups(applyAlarmMutes(await overlayIdracPower(merged)));
+      try { snapCacheSweep(this.snapshot.generatedAt); } catch { /* 캐시 정리 실패는 수집에 영향 없음 */ } // v2.617: 옛 세대 응답 캐시가 옛 스냅샷을 붙잡지 않게
       this.syncLedger();
       this.lastError = null;
     } catch (err) {

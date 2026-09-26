@@ -71,3 +71,56 @@ test('③ /health 와 전역 롤업이 비활성 vCenter 를 따로 센다', () 
   assert.match(stripComments(read('routes/api/overviewNsx.js')), /vcentersDisabled:\s*byStatus\('disabled'\)/);
   assert.match(stripComments(read('store.js')), /vcentersDisabled:\s*snap\.vcenters\.filter\(\(v\) => v\.status === 'disabled'\)/);
 });
+
+test('④ 큰 본문 동시 해석 상한 — 넘으면 본문을 읽지 않고 503 + Retry-After, 끝나면 슬롯을 돌려준다', async () => {
+  const { bigJsonGate, bigJsonStats } = await import('../src/util/bigJsonGate.js');
+  const { EventEmitter } = await import('node:events');
+  let parsed = 0;
+  const parser = (_q, _s, next) => { parsed++; next(); };
+  const gate = bigJsonGate(parser, { central: () => true }, { maxConcurrent: 2, maxBytes: 10 * 1_048_576 });
+  const mkReq = (len) => ({ baseUrl: '/api/central/inventory', path: '/', get: (h) => (h === 'content-length' ? String(len) : '') });
+  const mkRes = () => { const r = new EventEmitter(); r.headers = {}; r.set = (k, v) => { r.headers[k] = v; return r; }; r.status = (c) => { r.code = c; return r; }; r.json = (b) => { r.body = b; return r; }; return r; };
+  const a = mkRes(); gate(mkReq(1_048_576), a, () => {});
+  const b = mkRes(); gate(mkReq(1_048_576), b, () => {});
+  const c = mkRes(); gate(mkReq(1_048_576), c, () => {});            // 개수 초과
+  assert.equal(parsed, 2); assert.equal(c.code, 503); assert.equal(c.headers['Retry-After'], '5');
+  a.emit('finish'); a.emit('close');                                  // 두 번 와도 한 번만 반환
+  const d = mkRes(); gate(mkReq(20 * 1_048_576), d, () => {});       // 바이트 초과(진행 중 1건 있음)
+  assert.equal(d.code, 503);
+  b.emit('close');
+  const e = mkRes(); gate(mkReq(20 * 1_048_576), e, () => {});       // 진행 중 0건이면 한도보다 커도 받는다
+  assert.equal(parsed, 3); assert.equal(e.code, undefined);
+  e.emit('close');
+  const st = bigJsonStats();
+  assert.equal(st.inflight, 0); assert.equal(st.bytes, 0); assert.ok(st.rejected >= 2);
+});
+
+test('⑤ 스냅샷이 바뀌면 모든 이름의 옛 세대 응답 캐시를 버린다(세대 개념 없는 키·진행 중 계산은 남긴다)', async () => {
+  const { snapMemo, snapCacheSweep, _snapCacheStats, snapCacheClear } = await import('../src/util/snapCache.js');
+  snapCacheClear();
+  const g1 = '2026-09-26T00:00:00.000Z', g2 = '2026-09-26T00:00:30.000Z';
+  await snapMemo('t2617a', `${g1}|/api/vms|`, 60_000, async () => ({ big: 1 }));
+  await snapMemo('t2617b', `${g1}|/api/hosts|`, 60_000, async () => ({ big: 2 }));
+  await snapMemo('t2617c', 'anomalies|x', 60_000, async () => 3);
+  assert.equal(snapCacheSweep(g2), 2);
+  assert.equal(_snapCacheStats('t2617a').entries, 0);
+  assert.equal(_snapCacheStats('t2617b').entries, 0);
+  assert.equal(_snapCacheStats('t2617c').entries, 1, '세대 개념 없는 키는 남는다');
+  assert.equal(snapCacheSweep('not-a-time'), 0);
+  assert.match(stripComments(read('store.js')), /snapCacheSweep\(this\.snapshot\.generatedAt\)/);
+  snapCacheClear();
+});
+
+test('⑥ 링 버퍼는 줄마다 8KB 로 자른다 · 시작 백업은 기동 10분 뒤 · 위임 인벤토리 저장은 30초 디바운스', async () => {
+  const lb = await import('../src/logbuffer.js');
+  lb.pushLog('info', 'y'.repeat(50_000));
+  const all = lb.getLogs ? lb.getLogs({}) : null;
+  const src = stripComments(read('logbuffer.js'));
+  assert.match(src, /if \(msg\.length > MSG_MAX\) msg = `\$\{flatStr\(msg\.slice\(0, MSG_MAX\)\)\}/);
+  assert.match(src, /const MSG_MAX = 8192;/);
+  assert.match(stripComments(read('backup/settings.js')), /BACKUP_STARTUP_DELAY_MS\) \|\| 10 \* 60_000/);
+  assert.match(stripComments(read('central/inventory.js')), /CENTRAL_INVENTORY_PERSIST_MS\) \|\| 30_000/);
+  const last = all.items[all.items.length - 1];
+  assert.ok(last.msg.length < 8300, `len=${last.msg.length}`);
+  assert.match(last.msg, /\+41808자 생략\)$/);
+});
