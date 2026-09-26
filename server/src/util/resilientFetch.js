@@ -175,6 +175,23 @@ export function normFetchTimeoutMs(v) {
   return Math.min(1_800_000, Math.max(100, Math.round(n)));
 }
 
+/**
+ * v2.617(ARCH-2): 재시도 대기. 429·503 이 `Retry-After`(초)를 주면 그것을 따른다(상한 30초) — 중앙의 큰 본문 해석 상한
+ * (util/bigJsonGate.js)은 재시작 폭주 때 503 + Retry-After 로 엣지를 돌려보내는데, 예전에는 헤더를 읽지 않고 400ms·800ms 뒤
+ * 재시도해 1.2초 안에 재시도를 다 써 버렸다(게이트가 막으려는 바로 그 구간). 여러 엣지가 같은 순간에 다시 오지 않게
+ * 0~50% 흔들림을 더한다. HTTP-날짜 형식은 읽지 않는다(이 저장소의 서버는 초 단위만 보낸다).
+ */
+export function retryDelayMs(status, retryAfterHeader, baseMs, rand = Math.random) {
+  if (status === 429 || status === 503) {
+    const sec = Number(String(retryAfterHeader ?? '').trim());
+    if (Number.isFinite(sec) && sec > 0) {
+      const ms = Math.min(30_000, sec * 1000);
+      return Math.round(Math.max(baseMs, ms) * (1 + 0.5 * rand()));
+    }
+  }
+  return baseMs;
+}
+
 async function resilientFetchInner(url, { timeoutMs: rawTimeoutMs = 20_000, retries = 2, retryBackoffMs = 400, onRetry, dispatcher, ...init } = {}) {
   const timeoutMs = normFetchTimeoutMs(rawTimeoutMs);
   let lastErr;
@@ -189,7 +206,7 @@ async function resilientFetchInner(url, { timeoutMs: rawTimeoutMs = 20_000, retr
         // 재시도 전 이전 응답 본문을 취소 — undici는 미소진 본문이 연결을 붙잡아, 제한된
         // 커넥션풀(wanAgent connections:6)이 flapping 오리진의 5xx 재시도로 고갈된다.
         try { await res.body?.cancel?.(); } catch { /* */ }
-        await sleep(retryBackoffMs * 2 ** attempt);
+        await sleep(retryDelayMs(res.status, res.headers?.get?.('retry-after'), retryBackoffMs * 2 ** attempt));
         continue;
       }
       return res;

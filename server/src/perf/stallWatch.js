@@ -138,8 +138,15 @@ export function startStallWatch({ stallMs, checkMs, beatMs, pauseWaitMs = 10_000
           heapUsed: m.heapUsed || null, heapLimit: m.heapLimit || null };
       } else if (m.type === 'resume' && _state.last && _state.last.at === m.at) {
         _state.last = { ..._state.last, durMs: m.durMs };
+        // v2.617(ARCH-3): 워커의 stderr 줄은 journal 에만 간다 — 서비스 계정은 보통 journal 을 못 읽고, 링 버퍼·엣지 로그·
+        //   로그 분석은 console 만 본다. 풀린 뒤(메인이 다시 돌 때) 요약 한 줄을 console 로도 남긴다.
+        try {
+          const top = Array.isArray(_state.last.frames) && _state.last.frames.length ? _state.last.frames[0] : null;
+          console.warn(`[stallwatch] 메인 이벤트 루프가 약 ${Math.round((m.durMs || 0) / 1000)}초 동안 멈췄다가 풀렸습니다 — ${top ? `멈춘 지점 ${top}` : `스택 없음(${_state.last.error || 'GC·네이티브 호출 가능성'})`}. 전체 스택은 journal 의 [stallwatch] 줄에 있습니다.`);
+        } catch { /* */ }
       } else if (m.type === 'heap') {
         _state.heapWarns += 1; _state.lastHeapWarnAt = m.at;
+        try { console.warn(`[stallwatch] 힙 사용량이 한계에 가깝습니다 — ${Math.round((m.heapUsed || 0) / 1048576)}MB/${Math.round((m.heapLimit || 0) / 1048576)}MB. 한계에 닿으면 GC 가 헛돌며 응답이 멈출 수 있습니다.`); } catch { /* */ }
       }
     });
     worker.on('error', (e) => { _state.error = String(e?.message || e); _state.enabled = false; try { console.warn(`[stallwatch] 감시 워커 오류 — 감시 중단: ${_state.error}`); } catch { /* */ } });
@@ -152,7 +159,7 @@ export function startStallWatch({ stallMs, checkMs, beatMs, pauseWaitMs = 10_000
   }
 }
 
-/** 엣지 로그·서비스 점검 화면용 상태(스택은 코드 경로뿐 — 비밀 없음). */
+/** 서비스 점검 화면용 상태(스택은 코드 경로뿐 — 비밀 없음). 엣지 로그 표에는 넣지 않았다(edgeSweep EXCLUDED 사유) — 대신 풀린 뒤 console 한 줄이 링 버퍼·엣지 로그로 간다. */
 export function stallWatchStatus() {
   return { ..._state, last: _state.last ? { ..._state.last } : null };
 }

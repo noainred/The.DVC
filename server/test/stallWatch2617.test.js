@@ -160,3 +160,26 @@ test('④-c SEC-2: 서비스 점검의 멈춘 지점(스택)은 관리자에게�
   assert.match(stripComments(read('routes/api/checksLogs.js')), /getServiceCheck\(\{ isAdmin: req\.user\?\.role === 'admin' \}\)/);
   assert.match(stripComments(read('health/services.js')), /opts\.isAdmin \? ` · 멈춘 지점 \$\{l\.frames\[0\]\}`/);
 });
+
+test('⑦ ARCH-2: 429·503 은 Retry-After(상한 30초)를 따르고 흔들림을 더한다 · 그 밖은 기존 백오프', async () => {
+  const { retryDelayMs } = await import('../src/util/resilientFetch.js');
+  assert.equal(retryDelayMs(503, '5', 400, () => 0), 5000);
+  assert.equal(retryDelayMs(503, '5', 400, () => 1), 7500);
+  assert.equal(retryDelayMs(429, '999', 400, () => 0), 30_000);
+  assert.equal(retryDelayMs(503, '', 400, () => 0), 400);
+  assert.equal(retryDelayMs(502, '5', 800, () => 0), 800);
+  assert.equal(retryDelayMs(503, 'Wed, 21 Oct 2015 07:28:00 GMT', 400, () => 0), 400);
+});
+
+test('⑦ ARCH-3: 멈춤이 풀리면 메인도 console 로 한 줄 남긴다(링 버퍼·엣지 로그·로그 분석이 본다)', () => {
+  const mod = new URL('perf/stallWatch.js', SRC).href;
+  const code = `
+    import { startStallWatch, _stopStallWatch } from '${mod}';
+    const orig = console.warn; const got = []; console.warn = (...a) => { got.push(a.join(' ')); };
+    startStallWatch({ stallMs: 800 });
+    setTimeout(() => { const end = Date.now() + 2500; while (Date.now() < end) {}
+      setTimeout(async () => { console.warn = orig; process.stdout.write(JSON.stringify(got)); await _stopStallWatch(); }, 1500); }, 1000);`;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8', timeout: 30_000 });
+  const got = JSON.parse(r.stdout || '[]');
+  assert.ok(got.some((l) => /^\[stallwatch\] 메인 이벤트 루프가 약 \d+초 동안 멈췄다가 풀렸습니다/.test(l)), JSON.stringify(got));
+});
