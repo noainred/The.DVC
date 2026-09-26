@@ -109,55 +109,55 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| POST | `/agent-config` | `requireCentral` | [server/src/routes/central.js:1787](../server/src/routes/central.js#L1787) |
+| POST | `/agent-config` | `requireCentral` | [server/src/routes/central.js:1806](../server/src/routes/central.js#L1806) |
 | GET | `/assignment` | `requireCentral` | [server/src/routes/central.js:398](../server/src/routes/central.js#L398) |
-| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central.js:1859](../server/src/routes/central.js#L1859) |
-| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central.js:1863](../server/src/routes/central.js#L1863) |
+| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central.js:1878](../server/src/routes/central.js#L1878) |
+| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central.js:1882](../server/src/routes/central.js#L1882) |
 | POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:534](../server/src/routes/central.js#L534) |
-| GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central.js:1842](../server/src/routes/central.js#L1842) |
-| POST | `/capture-result` | `requireCentral` | [server/src/routes/central.js:1846](../server/src/routes/central.js#L1846) |
+| GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central.js:1861](../server/src/routes/central.js#L1861) |
+| POST | `/capture-result` | `requireCentral` | [server/src/routes/central.js:1865](../server/src/routes/central.js#L1865) |
 | POST | `/curuser` | `requireCentral` | [server/src/routes/central.js:918](../server/src/routes/central.js#L918) |
 | GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:962](../server/src/routes/central.js#L962) |
-| GET | `/cvp-config` | `requireCentral` | [server/src/routes/central.js:1658](../server/src/routes/central.js#L1658) |
-| POST | `/cvp-data` | `requireCentral` | [server/src/routes/central.js:1676](../server/src/routes/central.js#L1676) |
-| GET | `/edge-log-jobs` | `requireCentral` | [server/src/routes/central.js:1258](../server/src/routes/central.js#L1258) |
-| POST | `/edge-log-result` | `requireCentral` | [server/src/routes/central.js:1265](../server/src/routes/central.js#L1265) |
+| GET | `/cvp-config` | `requireCentral` | [server/src/routes/central.js:1676](../server/src/routes/central.js#L1676) |
+| POST | `/cvp-data` | `requireCentral` | [server/src/routes/central.js:1694](../server/src/routes/central.js#L1694) |
+| GET | `/edge-log-jobs` | `requireCentral` | [server/src/routes/central.js:1272](../server/src/routes/central.js#L1272) |
+| POST | `/edge-log-result` | `requireCentral` | [server/src/routes/central.js:1279](../server/src/routes/central.js#L1279) |
 | POST | `/fleet` | `requireCentral` | [server/src/routes/central.js:990](../server/src/routes/central.js#L990) |
 | GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1182](../server/src/routes/central.js#L1182) |
 | POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1104](../server/src/routes/central.js#L1104) |
 | POST | `/guest-disk` | `requireCentral` | [server/src/routes/central.js:781](../server/src/routes/central.js#L781) |
-| GET | `/health-probe` | `requireCentral` | [server/src/routes/central.js:1936](../server/src/routes/central.js#L1936) |
+| GET | `/health-probe` | `requireCentral` | [server/src/routes/central.js:1955](../server/src/routes/central.js#L1955) |
 | GET | `/idrac-scan-jobs` | `requireCentral` | [server/src/routes/central.js:1047](../server/src/routes/central.js#L1047) |
 | POST | `/idrac-scan-progress` | `requireCentral` | [server/src/routes/central.js:1053](../server/src/routes/central.js#L1053) |
 | POST | `/idrac-scan-result` | `requireCentral` | [server/src/routes/central.js:1063](../server/src/routes/central.js#L1063) |
 | POST | `/inventory` | `requireCentral` | [server/src/routes/central.js:681](../server/src/routes/central.js#L681) |
-| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central.js:1878](../server/src/routes/central.js#L1878) |
-| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central.js:1887](../server/src/routes/central.js#L1887) |
-| POST | `/link-check` | `requireCentral` | [server/src/routes/central.js:1950](../server/src/routes/central.js#L1950) |
-| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central.js:1978](../server/src/routes/central.js#L1978) |
-| GET | `/log-queries` | `requireCentral` | [server/src/routes/central.js:1816](../server/src/routes/central.js#L1816) |
-| POST | `/log-query-result` | `requireCentral` | [server/src/routes/central.js:1823](../server/src/routes/central.js#L1823) |
-| POST | `/part-faults` | `requireCentral` | [server/src/routes/central.js:1235](../server/src/routes/central.js#L1235) |
-| GET | `/partfault-config` | `requireCentral` | [server/src/routes/central.js:1295](../server/src/routes/central.js#L1295) |
-| GET | `/pdu-config` | `requireCentral` | [server/src/routes/central.js:1380](../server/src/routes/central.js#L1380) |
-| POST | `/pdu-data` | `requireCentral` | [server/src/routes/central.js:1397](../server/src/routes/central.js#L1397) |
-| GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central.js:1760](../server/src/routes/central.js#L1760) |
-| POST | `/ping-result` | `requireCentral` | [server/src/routes/central.js:1768](../server/src/routes/central.js#L1768) |
+| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central.js:1897](../server/src/routes/central.js#L1897) |
+| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central.js:1906](../server/src/routes/central.js#L1906) |
+| POST | `/link-check` | `requireCentral` | [server/src/routes/central.js:1969](../server/src/routes/central.js#L1969) |
+| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central.js:1997](../server/src/routes/central.js#L1997) |
+| GET | `/log-queries` | `requireCentral` | [server/src/routes/central.js:1835](../server/src/routes/central.js#L1835) |
+| POST | `/log-query-result` | `requireCentral` | [server/src/routes/central.js:1842](../server/src/routes/central.js#L1842) |
+| POST | `/part-faults` | `requireCentral` | [server/src/routes/central.js:1249](../server/src/routes/central.js#L1249) |
+| GET | `/partfault-config` | `requireCentral` | [server/src/routes/central.js:1309](../server/src/routes/central.js#L1309) |
+| GET | `/pdu-config` | `requireCentral` | [server/src/routes/central.js:1395](../server/src/routes/central.js#L1395) |
+| POST | `/pdu-data` | `requireCentral` | [server/src/routes/central.js:1412](../server/src/routes/central.js#L1412) |
+| GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central.js:1779](../server/src/routes/central.js#L1779) |
+| POST | `/ping-result` | `requireCentral` | [server/src/routes/central.js:1787](../server/src/routes/central.js#L1787) |
 | POST | `/register-collector` | `requireCentral` | [server/src/routes/central.js:409](../server/src/routes/central.js#L409) |
 | POST | `/result` | `requireCentral` | [server/src/routes/central.js:487](../server/src/routes/central.js#L487) |
-| POST | `/rma-credential` | `requireCentral` | [server/src/routes/central.js:1587](../server/src/routes/central.js#L1587) |
-| POST | `/rma-poll` | `requireCentral` | [server/src/routes/central.js:1528](../server/src/routes/central.js#L1528) |
-| POST | `/rma-result` | `requireCentral` | [server/src/routes/central.js:1607](../server/src/routes/central.js#L1607) |
-| GET | `/sanswitch-config` | `requireCentral` | [server/src/routes/central.js:1432](../server/src/routes/central.js#L1432) |
-| POST | `/sanswitch-data` | `requireCentral` | [server/src/routes/central.js:1618](../server/src/routes/central.js#L1618) |
-| POST | `/sanswitch-perf` | `requireCentral` | [server/src/routes/central.js:1454](../server/src/routes/central.js#L1454) |
-| POST | `/sanswitch-test-result` | `requireCentral` | [server/src/routes/central.js:1509](../server/src/routes/central.js#L1509) |
-| GET | `/storage-config` | `requireCentral` | [server/src/routes/central.js:1211](../server/src/routes/central.js#L1211) |
-| POST | `/storage-data` | `requireCentral` | [server/src/routes/central.js:1303](../server/src/routes/central.js#L1303) |
+| POST | `/rma-credential` | `requireCentral` | [server/src/routes/central.js:1604](../server/src/routes/central.js#L1604) |
+| POST | `/rma-poll` | `requireCentral` | [server/src/routes/central.js:1545](../server/src/routes/central.js#L1545) |
+| POST | `/rma-result` | `requireCentral` | [server/src/routes/central.js:1624](../server/src/routes/central.js#L1624) |
+| GET | `/sanswitch-config` | `requireCentral` | [server/src/routes/central.js:1448](../server/src/routes/central.js#L1448) |
+| POST | `/sanswitch-data` | `requireCentral` | [server/src/routes/central.js:1635](../server/src/routes/central.js#L1635) |
+| POST | `/sanswitch-perf` | `requireCentral` | [server/src/routes/central.js:1470](../server/src/routes/central.js#L1470) |
+| POST | `/sanswitch-test-result` | `requireCentral` | [server/src/routes/central.js:1526](../server/src/routes/central.js#L1526) |
+| GET | `/storage-config` | `requireCentral` | [server/src/routes/central.js:1225](../server/src/routes/central.js#L1225) |
+| POST | `/storage-data` | `requireCentral` | [server/src/routes/central.js:1317](../server/src/routes/central.js#L1317) |
 | GET | `/svcmon-config` | `requireCentral` | [server/src/routes/central.js:576](../server/src/routes/central.js#L576) |
 | POST | `/svcmon-config-ack` | `requireCentral` | [server/src/routes/central.js:590](../server/src/routes/central.js#L590) |
 | POST | `/svcmon-report` | `requireCentral` | [server/src/routes/central.js:511](../server/src/routes/central.js#L511) |
-| GET | `/users-config` | `requireCentral` | [server/src/routes/central.js:1750](../server/src/routes/central.js#L1750) |
+| GET | `/users-config` | `requireCentral` | [server/src/routes/central.js:1769](../server/src/routes/central.js#L1769) |
 | POST | `/vmseries` | `requireCentral` | [server/src/routes/central.js:858](../server/src/routes/central.js#L858) |
 | GET | `/vmseries-config` | `requireCentral` | [server/src/routes/central.js:980](../server/src/routes/central.js#L980) |
 
@@ -319,13 +319,13 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | PUT | `/assignments/:agent` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/horizonAssign.js:192](../server/src/routes/admin/horizonAssign.js#L192) |
 | POST | `/assignments/import` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/horizonAssign.js:204](../server/src/routes/admin/horizonAssign.js#L204) |
 | GET | `/audit` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:56](../server/src/routes/admin/opsSettings.js#L56) |
-| DELETE | `/backup/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:85](../server/src/routes/admin/backupNetSec.js#L85) |
-| GET | `/backup/download/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:68](../server/src/routes/admin/backupNetSec.js#L68) |
+| DELETE | `/backup/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:86](../server/src/routes/admin/backupNetSec.js#L86) |
+| GET | `/backup/download/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:69](../server/src/routes/admin/backupNetSec.js#L69) |
 | POST | `/backup/now` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:64](../server/src/routes/admin/backupNetSec.js#L64) |
-| POST | `/backup/restore/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:86](../server/src/routes/admin/backupNetSec.js#L86) |
+| POST | `/backup/restore/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:87](../server/src/routes/admin/backupNetSec.js#L87) |
 | PUT | `/backup/settings` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:63](../server/src/routes/admin/backupNetSec.js#L63) |
 | GET | `/backup/status` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:60](../server/src/routes/admin/backupNetSec.js#L60) |
-| GET | `/backup/view/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:76](../server/src/routes/admin/backupNetSec.js#L76) |
+| GET | `/backup/view/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:77](../server/src/routes/admin/backupNetSec.js#L77) |
 | GET | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:76](../server/src/routes/admin/centralIpam.js#L76) |
 | PUT | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:105](../server/src/routes/admin/centralIpam.js#L105) |
 | POST | `/central-token/generate` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:100](../server/src/routes/admin/centralIpam.js#L100) |
@@ -344,14 +344,14 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/collectors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:86](../server/src/routes/admin/collectorsDc.js#L86) |
 | DELETE | `/collectors/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:107](../server/src/routes/admin/collectorsDc.js#L107) |
 | PUT | `/collectors/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:93](../server/src/routes/admin/collectorsDc.js#L93) |
-| POST | `/collectors/:id/force-token` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:441](../server/src/routes/admin/collectorsDc.js#L441) |
+| POST | `/collectors/:id/force-token` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:446](../server/src/routes/admin/collectorsDc.js#L446) |
 | GET | `/collectors/export.csv` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:126](../server/src/routes/admin/collectorsDc.js#L126) |
 | POST | `/collectors/import` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:155](../server/src/routes/admin/collectorsDc.js#L155) |
-| POST | `/collectors/pull` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:352](../server/src/routes/admin/collectorsDc.js#L352) |
+| POST | `/collectors/pull` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:357](../server/src/routes/admin/collectorsDc.js#L357) |
 | GET | `/collectors/sample.csv` | 역할 `admin` | [server/src/routes/admin/collectorsDc.js:141](../server/src/routes/admin/collectorsDc.js#L141) |
 | POST | `/collectors/set-password` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/collectorsDc.js:207](../server/src/routes/admin/collectorsDc.js#L207) |
-| POST | `/collectors/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:373](../server/src/routes/admin/collectorsDc.js#L373) |
-| POST | `/collectors/upgrade` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:359](../server/src/routes/admin/collectorsDc.js#L359) |
+| POST | `/collectors/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:378](../server/src/routes/admin/collectorsDc.js#L378) |
+| POST | `/collectors/upgrade` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:364](../server/src/routes/admin/collectorsDc.js#L364) |
 | GET | `/data-source` | 역할 `admin` | [server/src/routes/admin/vcenters.js:34](../server/src/routes/admin/vcenters.js#L34) |
 | PUT | `/data-source` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/vcenters.js:39](../server/src/routes/admin/vcenters.js#L39) |
 | GET | `/datacenter-order` | 역할 `admin` | [server/src/routes/admin/collectorsDc.js:278](../server/src/routes/admin/collectorsDc.js#L278) |
@@ -361,11 +361,11 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | DELETE | `/datacenters/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:272](../server/src/routes/admin/collectorsDc.js#L272) |
 | PUT | `/datacenters/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:267](../server/src/routes/admin/collectorsDc.js#L267) |
 | PUT | `/datacenters/assign` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:260](../server/src/routes/admin/collectorsDc.js#L260) |
-| POST | `/deep-search/probe` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:204](../server/src/routes/admin/backupNetSec.js#L204) |
+| POST | `/deep-search/probe` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:205](../server/src/routes/admin/backupNetSec.js#L205) |
 | GET | `/dir-usage` | 역할 `admin` | [server/src/routes/admin/dirUsage.js:24](../server/src/routes/admin/dirUsage.js#L24) |
 | PUT | `/dir-usage` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/dirUsage.js:37](../server/src/routes/admin/dirUsage.js#L37) |
 | GET | `/dir-usage/history/:targetId` | 역할 `admin` | [server/src/routes/admin/dirUsage.js:59](../server/src/routes/admin/dirUsage.js#L59) |
-| GET | `/dir-usage/preview/:id` | 역할 `admin` | [server/src/routes/admin/dirUsage.js:76](../server/src/routes/admin/dirUsage.js#L76) |
+| GET | `/dir-usage/preview/:id` | 역할 `admin` | [server/src/routes/admin/dirUsage.js:77](../server/src/routes/admin/dirUsage.js#L77) |
 | POST | `/dir-usage/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/dirUsage.js:51](../server/src/routes/admin/dirUsage.js#L51) |
 | GET | `/dir-usage/scan/:id` | 역할 `admin` | [server/src/routes/admin/dirUsage.js:67](../server/src/routes/admin/dirUsage.js#L67) |
 | POST | `/edge-users-bulk` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/gpuGuest.js:200](../server/src/routes/admin/gpuGuest.js#L200) |
@@ -394,7 +394,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/gpu-physical/poll` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/gpuGuest.js:229](../server/src/routes/admin/gpuGuest.js#L229) |
 | POST | `/gpu-physical/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/gpuGuest.js:286](../server/src/routes/admin/gpuGuest.js#L286) |
 | POST | `/gpu/collect-util` | 역할 `admin` | [server/src/routes/admin/gpuGuest.js:47](../server/src/routes/admin/gpuGuest.js#L47) |
-| POST | `/guest/add-user` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:192](../server/src/routes/admin/backupNetSec.js#L192) |
+| POST | `/guest/add-user` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:193](../server/src/routes/admin/backupNetSec.js#L193) |
 | GET | `/horizon` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/horizonAssign.js:17](../server/src/routes/admin/horizonAssign.js#L17) |
 | POST | `/horizon` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/horizonAssign.js:18](../server/src/routes/admin/horizonAssign.js#L18) |
 | DELETE | `/horizon/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/horizonAssign.js:23](../server/src/routes/admin/horizonAssign.js#L23) |
@@ -414,22 +414,22 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/host-access/revert` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/hostAccess.js:46](../server/src/routes/admin/hostAccess.js#L46) |
 | GET | `/idrac` | 역할 `admin` | [server/src/routes/admin/idracCore.js:84](../server/src/routes/admin/idracCore.js#L84) |
 | POST | `/idrac` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:98](../server/src/routes/admin/idracCore.js#L98) |
-| DELETE | `/idrac/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:509](../server/src/routes/admin/idracScan.js#L509) |
-| PUT | `/idrac/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:503](../server/src/routes/admin/idracScan.js#L503) |
-| GET | `/idrac/:id/gpu-probe` | 역할 `admin` | [server/src/routes/admin/idracScan.js:182](../server/src/routes/admin/idracScan.js#L182) |
-| GET | `/idrac/:id/inventory` | 역할 `admin` | [server/src/routes/admin/idracScan.js:47](../server/src/routes/admin/idracScan.js#L47) |
-| GET | `/idrac/:id/sensors` | 역할 `admin` | [server/src/routes/admin/idracScan.js:98](../server/src/routes/admin/idracScan.js#L98) |
-| GET | `/idrac/:id/temp-history` | 역할 `admin` | [server/src/routes/admin/idracScan.js:140](../server/src/routes/admin/idracScan.js#L140) |
-| GET | `/idrac/:id/vcenter-host` | 역할 `admin` | [server/src/routes/admin/idracScan.js:66](../server/src/routes/admin/idracScan.js#L66) |
-| POST | `/idrac/assign-vcenter` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:491](../server/src/routes/admin/idracScan.js#L491) |
-| POST | `/idrac/bulk-add` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:214](../server/src/routes/admin/idracScan.js#L214) |
-| POST | `/idrac/delete` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:478](../server/src/routes/admin/idracScan.js#L478) |
-| POST | `/idrac/expand-ips` | 역할 `admin` | [server/src/routes/admin/idracScan.js:207](../server/src/routes/admin/idracScan.js#L207) |
+| DELETE | `/idrac/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:512](../server/src/routes/admin/idracScan.js#L512) |
+| PUT | `/idrac/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:506](../server/src/routes/admin/idracScan.js#L506) |
+| GET | `/idrac/:id/gpu-probe` | 역할 `admin` | [server/src/routes/admin/idracScan.js:185](../server/src/routes/admin/idracScan.js#L185) |
+| GET | `/idrac/:id/inventory` | 역할 `admin` | [server/src/routes/admin/idracScan.js:50](../server/src/routes/admin/idracScan.js#L50) |
+| GET | `/idrac/:id/sensors` | 역할 `admin` | [server/src/routes/admin/idracScan.js:101](../server/src/routes/admin/idracScan.js#L101) |
+| GET | `/idrac/:id/temp-history` | 역할 `admin` | [server/src/routes/admin/idracScan.js:143](../server/src/routes/admin/idracScan.js#L143) |
+| GET | `/idrac/:id/vcenter-host` | 역할 `admin` | [server/src/routes/admin/idracScan.js:69](../server/src/routes/admin/idracScan.js#L69) |
+| POST | `/idrac/assign-vcenter` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:494](../server/src/routes/admin/idracScan.js#L494) |
+| POST | `/idrac/bulk-add` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:217](../server/src/routes/admin/idracScan.js#L217) |
+| POST | `/idrac/delete` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:481](../server/src/routes/admin/idracScan.js#L481) |
+| POST | `/idrac/expand-ips` | 역할 `admin` | [server/src/routes/admin/idracScan.js:210](../server/src/routes/admin/idracScan.js#L210) |
 | GET | `/idrac/firmware-inventory` | 역할 `admin` | [server/src/routes/admin/idracCore.js:396](../server/src/routes/admin/idracCore.js#L396) |
 | GET | `/idrac/gpu-inventory` | 역할 `admin` | [server/src/routes/admin/idracCore.js:431](../server/src/routes/admin/idracCore.js#L431) |
 | GET | `/idrac/hardware-servers` | 역할 `admin` | [server/src/routes/admin/idracCore.js:332](../server/src/routes/admin/idracCore.js#L332) |
 | GET | `/idrac/hardware-summary` | 역할 `admin` | [server/src/routes/admin/idracCore.js:148](../server/src/routes/admin/idracCore.js#L148) |
-| POST | `/idrac/import` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:196](../server/src/routes/admin/idracScan.js#L196) |
+| POST | `/idrac/import` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:199](../server/src/routes/admin/idracScan.js#L199) |
 | GET | `/idrac/nic-models` | 역할 `admin` | [server/src/routes/admin/idracCore.js:255](../server/src/routes/admin/idracCore.js#L255) |
 | GET | `/idrac/nic-speed` | 역할 `admin` | [server/src/routes/admin/idracCore.js:183](../server/src/routes/admin/idracCore.js#L183) |
 | GET | `/idrac/parts-inventory` | 역할 `admin` | [server/src/routes/admin/idracCore.js:490](../server/src/routes/admin/idracCore.js#L490) |
@@ -438,24 +438,24 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/idrac/power-purge` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:134](../server/src/routes/admin/idracCore.js#L134) |
 | GET | `/idrac/power-settings` | 역할 `admin` | [server/src/routes/admin/idracCore.js:122](../server/src/routes/admin/idracCore.js#L122) |
 | PUT | `/idrac/power-settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:123](../server/src/routes/admin/idracCore.js#L123) |
-| POST | `/idrac/register-scanned` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:285](../server/src/routes/admin/idracScan.js#L285) |
-| POST | `/idrac/scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:223](../server/src/routes/admin/idracScan.js#L223) |
-| GET | `/idrac/scan-agents` | 역할 `admin` | [server/src/routes/admin/idracScan.js:271](../server/src/routes/admin/idracScan.js#L271) |
-| GET | `/idrac/scan-job-log` | 역할 `admin` | [server/src/routes/admin/idracScan.js:452](../server/src/routes/admin/idracScan.js#L452) |
-| POST | `/idrac/scan-job/cancel` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:470](../server/src/routes/admin/idracScan.js#L470) |
-| GET | `/idrac/scan-jobs` | 역할 `admin` | [server/src/routes/admin/idracScan.js:442](../server/src/routes/admin/idracScan.js#L442) |
-| GET | `/idrac/scan-log` | 역할 `admin` | [server/src/routes/admin/idracScan.js:416](../server/src/routes/admin/idracScan.js#L416) |
-| GET | `/idrac/scan-ranges` | 역할 `admin` | [server/src/routes/admin/idracScan.js:302](../server/src/routes/admin/idracScan.js#L302) |
-| PUT | `/idrac/scan-ranges` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:308](../server/src/routes/admin/idracScan.js#L308) |
-| DELETE | `/idrac/scan-ranges/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:316](../server/src/routes/admin/idracScan.js#L316) |
-| GET | `/idrac/scan-ranges/export.csv` | 역할 `admin` | [server/src/routes/admin/idracScan.js:327](../server/src/routes/admin/idracScan.js#L327) |
-| POST | `/idrac/scan-ranges/import` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:348](../server/src/routes/admin/idracScan.js#L348) |
-| PUT | `/idrac/scan-ranges/interval` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:430](../server/src/routes/admin/idracScan.js#L430) |
-| GET | `/idrac/scan-ranges/sample.csv` | 역할 `admin` | [server/src/routes/admin/idracScan.js:342](../server/src/routes/admin/idracScan.js#L342) |
-| POST | `/idrac/scan-ranges/scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:404](../server/src/routes/admin/idracScan.js#L404) |
-| GET | `/idrac/scan-ranges/status` | 역할 `admin` | [server/src/routes/admin/idracScan.js:413](../server/src/routes/admin/idracScan.js#L413) |
-| POST | `/idrac/scan-ranges/stop` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:423](../server/src/routes/admin/idracScan.js#L423) |
-| GET | `/idrac/scan-result` | 역할 `admin` | [server/src/routes/admin/idracScan.js:262](../server/src/routes/admin/idracScan.js#L262) |
+| POST | `/idrac/register-scanned` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:288](../server/src/routes/admin/idracScan.js#L288) |
+| POST | `/idrac/scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:226](../server/src/routes/admin/idracScan.js#L226) |
+| GET | `/idrac/scan-agents` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:274](../server/src/routes/admin/idracScan.js#L274) |
+| GET | `/idrac/scan-job-log` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:455](../server/src/routes/admin/idracScan.js#L455) |
+| POST | `/idrac/scan-job/cancel` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:473](../server/src/routes/admin/idracScan.js#L473) |
+| GET | `/idrac/scan-jobs` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:445](../server/src/routes/admin/idracScan.js#L445) |
+| GET | `/idrac/scan-log` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:419](../server/src/routes/admin/idracScan.js#L419) |
+| GET | `/idrac/scan-ranges` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:305](../server/src/routes/admin/idracScan.js#L305) |
+| PUT | `/idrac/scan-ranges` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:311](../server/src/routes/admin/idracScan.js#L311) |
+| DELETE | `/idrac/scan-ranges/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:319](../server/src/routes/admin/idracScan.js#L319) |
+| GET | `/idrac/scan-ranges/export.csv` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:330](../server/src/routes/admin/idracScan.js#L330) |
+| POST | `/idrac/scan-ranges/import` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:351](../server/src/routes/admin/idracScan.js#L351) |
+| PUT | `/idrac/scan-ranges/interval` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:433](../server/src/routes/admin/idracScan.js#L433) |
+| GET | `/idrac/scan-ranges/sample.csv` | 역할 `admin` | [server/src/routes/admin/idracScan.js:345](../server/src/routes/admin/idracScan.js#L345) |
+| POST | `/idrac/scan-ranges/scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:407](../server/src/routes/admin/idracScan.js#L407) |
+| GET | `/idrac/scan-ranges/status` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:416](../server/src/routes/admin/idracScan.js#L416) |
+| POST | `/idrac/scan-ranges/stop` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:426](../server/src/routes/admin/idracScan.js#L426) |
+| GET | `/idrac/scan-result` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:265](../server/src/routes/admin/idracScan.js#L265) |
 | GET | `/idrac/temps` | 역할 `admin` | [server/src/routes/admin/idracCore.js:373](../server/src/routes/admin/idracCore.js#L373) |
 | POST | `/idrac/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:108](../server/src/routes/admin/idracCore.js#L108) |
 | GET | `/idrac/unsupported` | 역할 `admin` | [server/src/routes/admin/idracCore.js:366](../server/src/routes/admin/idracCore.js#L366) |
@@ -486,18 +486,18 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/memtrack` | 역할 `admin` | [server/src/routes/admin/statusTools.js:180](../server/src/routes/admin/statusTools.js#L180) |
 | GET | `/metrics/settings` | 역할 `admin` | [server/src/routes/admin/gpuGuest.js:32](../server/src/routes/admin/gpuGuest.js#L32) |
 | PUT | `/metrics/settings` | 역할 `admin` | [server/src/routes/admin/gpuGuest.js:35](../server/src/routes/admin/gpuGuest.js#L35) |
-| GET | `/net/agents` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:124](../server/src/routes/admin/backupNetSec.js#L124) |
-| GET | `/net/capture` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:156](../server/src/routes/admin/backupNetSec.js#L156) |
-| POST | `/net/capture` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:131](../server/src/routes/admin/backupNetSec.js#L131) |
-| GET | `/net/history` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:173](../server/src/routes/admin/backupNetSec.js#L173) |
-| DELETE | `/net/history/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:175](../server/src/routes/admin/backupNetSec.js#L175) |
-| GET | `/net/history/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:174](../server/src/routes/admin/backupNetSec.js#L174) |
-| GET | `/net/log-issues` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:183](../server/src/routes/admin/backupNetSec.js#L183) |
-| GET | `/net/monitors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:178](../server/src/routes/admin/backupNetSec.js#L178) |
-| PUT | `/net/monitors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:179](../server/src/routes/admin/backupNetSec.js#L179) |
-| DELETE | `/net/monitors/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:180](../server/src/routes/admin/backupNetSec.js#L180) |
-| POST | `/net/monitors/:id/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:181](../server/src/routes/admin/backupNetSec.js#L181) |
-| POST | `/net/pcap` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:162](../server/src/routes/admin/backupNetSec.js#L162) |
+| GET | `/net/agents` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:125](../server/src/routes/admin/backupNetSec.js#L125) |
+| GET | `/net/capture` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:157](../server/src/routes/admin/backupNetSec.js#L157) |
+| POST | `/net/capture` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:132](../server/src/routes/admin/backupNetSec.js#L132) |
+| GET | `/net/history` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:174](../server/src/routes/admin/backupNetSec.js#L174) |
+| DELETE | `/net/history/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:176](../server/src/routes/admin/backupNetSec.js#L176) |
+| GET | `/net/history/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:175](../server/src/routes/admin/backupNetSec.js#L175) |
+| GET | `/net/log-issues` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:184](../server/src/routes/admin/backupNetSec.js#L184) |
+| GET | `/net/monitors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:179](../server/src/routes/admin/backupNetSec.js#L179) |
+| PUT | `/net/monitors` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:180](../server/src/routes/admin/backupNetSec.js#L180) |
+| DELETE | `/net/monitors/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:181](../server/src/routes/admin/backupNetSec.js#L181) |
+| POST | `/net/monitors/:id/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:182](../server/src/routes/admin/backupNetSec.js#L182) |
+| POST | `/net/pcap` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:163](../server/src/routes/admin/backupNetSec.js#L163) |
 | GET | `/nfs-mounts` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nfsMounts.js:18](../server/src/routes/admin/nfsMounts.js#L18) |
 | POST | `/nfs-mounts` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nfsMounts.js:22](../server/src/routes/admin/nfsMounts.js#L22) |
 | DELETE | `/nfs-mounts/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nfsMounts.js:30](../server/src/routes/admin/nfsMounts.js#L30) |
@@ -544,15 +544,15 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/room-temp/spark` | 역할 `admin` | [server/src/routes/admin/idracCore.js:59](../server/src/routes/admin/idracCore.js#L59) |
 | GET | `/secrets/policy` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:131](../server/src/routes/admin/opsSettings.js#L131) |
 | PUT | `/secrets/policy` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:134](../server/src/routes/admin/opsSettings.js#L134) |
-| GET | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:240](../server/src/routes/admin/backupNetSec.js#L240) |
-| PUT | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:246](../server/src/routes/admin/backupNetSec.js#L246) |
-| DELETE | `/security/guest-scans/:id` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:262](../server/src/routes/admin/backupNetSec.js#L262) |
-| POST | `/security/guest-scans/:id/run` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:263](../server/src/routes/admin/backupNetSec.js#L263) |
-| GET | `/security/login-fails` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:224](../server/src/routes/admin/backupNetSec.js#L224) |
-| POST | `/security/login-fails/run` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:233](../server/src/routes/admin/backupNetSec.js#L233) |
-| PUT | `/security/login-fails/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:232](../server/src/routes/admin/backupNetSec.js#L232) |
-| GET | `/security/login-fails/status` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:231](../server/src/routes/admin/backupNetSec.js#L231) |
-| GET | `/security/net-issues` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:236](../server/src/routes/admin/backupNetSec.js#L236) |
+| GET | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:241](../server/src/routes/admin/backupNetSec.js#L241) |
+| PUT | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:247](../server/src/routes/admin/backupNetSec.js#L247) |
+| DELETE | `/security/guest-scans/:id` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:263](../server/src/routes/admin/backupNetSec.js#L263) |
+| POST | `/security/guest-scans/:id/run` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:264](../server/src/routes/admin/backupNetSec.js#L264) |
+| GET | `/security/login-fails` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:225](../server/src/routes/admin/backupNetSec.js#L225) |
+| POST | `/security/login-fails/run` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:234](../server/src/routes/admin/backupNetSec.js#L234) |
+| PUT | `/security/login-fails/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:233](../server/src/routes/admin/backupNetSec.js#L233) |
+| GET | `/security/login-fails/status` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/backupNetSec.js:232](../server/src/routes/admin/backupNetSec.js#L232) |
+| GET | `/security/net-issues` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:237](../server/src/routes/admin/backupNetSec.js#L237) |
 | GET | `/security/self-check` | 역할 `admin` | [server/src/routes/admin/securityCheck.js:18](../server/src/routes/admin/securityCheck.js#L18) |
 | GET | `/security/session` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:158](../server/src/routes/admin/opsSettings.js#L158) |
 | PUT | `/security/session` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:159](../server/src/routes/admin/opsSettings.js#L159) |
@@ -582,11 +582,11 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/vcenters/import-suggestions` | 역할 `admin` | [server/src/routes/admin/nsxImport.js:76](../server/src/routes/admin/nsxImport.js#L76) |
 | POST | `/vcenters/test` | 역할 `admin` | [server/src/routes/admin/vcenters.js:88](../server/src/routes/admin/vcenters.js#L88) |
 | POST | `/vcenters/test-all` | 역할 `admin` | [server/src/routes/admin/vcenters.js:102](../server/src/routes/admin/vcenters.js#L102) |
-| POST | `/vclogs/collect` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:117](../server/src/routes/admin/backupNetSec.js#L117) |
-| PUT | `/vclogs/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:100](../server/src/routes/admin/backupNetSec.js#L100) |
-| GET | `/vclogs/status` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:97](../server/src/routes/admin/backupNetSec.js#L97) |
-| GET | `/vm/:id/hardware` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:288](../server/src/routes/admin/collectorsDc.js#L288) |
-| POST | `/vm/:id/reconfig` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:311](../server/src/routes/admin/collectorsDc.js#L311) |
+| POST | `/vclogs/collect` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:118](../server/src/routes/admin/backupNetSec.js#L118) |
+| PUT | `/vclogs/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:101](../server/src/routes/admin/backupNetSec.js#L101) |
+| GET | `/vclogs/status` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:98](../server/src/routes/admin/backupNetSec.js#L98) |
+| GET | `/vm/:id/hardware` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:293](../server/src/routes/admin/collectorsDc.js#L293) |
+| POST | `/vm/:id/reconfig` | 권한 `vm.reconfig` | [server/src/routes/admin/collectorsDc.js:316](../server/src/routes/admin/collectorsDc.js#L316) |
 
 ## `/api/auth`
 
@@ -675,9 +675,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/nsx` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:258](../server/src/routes/api/overviewNsx.js#L258) |
 | GET | `/nsx/group-members` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:292](../server/src/routes/api/overviewNsx.js#L292) |
 | GET | `/overview` | — | [server/src/routes/api/overviewNsx.js:211](../server/src/routes/api/overviewNsx.js#L211) |
-| GET | `/perf/client-config` | — | [server/src/routes/api/perfClient.js:105](../server/src/routes/api/perfClient.js#L105) |
-| POST | `/perf/client-stall` | — | [server/src/routes/api/perfClient.js:67](../server/src/routes/api/perfClient.js#L67) |
-| GET | `/perf/req-status` | — | [server/src/routes/api/perfClient.js:97](../server/src/routes/api/perfClient.js#L97) |
+| GET | `/perf/client-config` | — | [server/src/routes/api/perfClient.js:110](../server/src/routes/api/perfClient.js#L110) |
+| POST | `/perf/client-stall` | — | [server/src/routes/api/perfClient.js:69](../server/src/routes/api/perfClient.js#L69) |
+| GET | `/perf/req-status` | — | [server/src/routes/api/perfClient.js:99](../server/src/routes/api/perfClient.js#L99) |
 | GET | `/provision/jobs` | — | [server/src/routes/api/provision.js:58](../server/src/routes/api/provision.js#L58) |
 | GET | `/provision/jobs/:id` | — | [server/src/routes/api/provision.js:59](../server/src/routes/api/provision.js#L59) |
 | GET | `/provision/placement` | 권한 `vm.provision` | [server/src/routes/api/provision.js:28](../server/src/routes/api/provision.js#L28) |
@@ -706,8 +706,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/bm-usage/history` | 권한 `tools` | [server/src/routes/api/bmUsage.js:229](../server/src/routes/api/bmUsage.js#L229) |
 | PUT | `/tools/bm-usage/settings` | 역할 `admin` | [server/src/routes/api/bmUsage.js:474](../server/src/routes/api/bmUsage.js#L474) |
 | GET | `/tools/capacity` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:42](../server/src/routes/api/toolsCapacity.js#L42) |
-| GET | `/tools/capacity-forecast` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1546](../server/src/routes/api/toolsCapacity.js#L1546) |
-| GET | `/tools/capacity/disk-history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1451](../server/src/routes/api/toolsCapacity.js#L1451) |
+| GET | `/tools/capacity-forecast` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1566](../server/src/routes/api/toolsCapacity.js#L1566) |
+| GET | `/tools/capacity/disk-history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1471](../server/src/routes/api/toolsCapacity.js#L1471) |
 | GET | `/tools/comm-map` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/commMap.js:92](../server/src/routes/api/commMap.js#L92) |
 | GET | `/tools/credentials` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/credentials.js:45](../server/src/routes/api/credentials.js#L45) |
 | POST | `/tools/credentials` | 역할 `admin` · `fullScopeOnly` · `reauth` | [server/src/routes/api/credentials.js:55](../server/src/routes/api/credentials.js#L55) |
@@ -723,18 +723,18 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/curuser/history` | 권한 `tools` | [server/src/routes/api/curUser.js:79](../server/src/routes/api/curUser.js#L79) |
 | GET | `/tools/curuser/settings` | 권한 `tools` | [server/src/routes/api/curUser.js:136](../server/src/routes/api/curUser.js#L136) |
 | PUT | `/tools/curuser/settings` | 역할 `admin` | [server/src/routes/api/curUser.js:176](../server/src/routes/api/curUser.js#L176) |
-| GET | `/tools/cvp` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:113](../server/src/routes/api/cvp.js#L113) |
-| POST | `/tools/cvp/collect` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:184](../server/src/routes/api/cvp.js#L184) |
-| GET | `/tools/cvp/device` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:146](../server/src/routes/api/cvp.js#L146) |
-| GET | `/tools/cvp/devices` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:134](../server/src/routes/api/cvp.js#L134) |
-| GET | `/tools/cvp/port-series` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:169](../server/src/routes/api/cvp.js#L169) |
-| GET | `/tools/cvp/servers` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:202](../server/src/routes/api/cvp.js#L202) |
-| POST | `/tools/cvp/servers` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:228](../server/src/routes/api/cvp.js#L228) |
-| DELETE | `/tools/cvp/servers/:id` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:231](../server/src/routes/api/cvp.js#L231) |
-| PUT | `/tools/cvp/servers/:id` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:229](../server/src/routes/api/cvp.js#L229) |
-| POST | `/tools/cvp/servers/:id/test` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:240](../server/src/routes/api/cvp.js#L240) |
-| GET | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:267](../server/src/routes/api/cvp.js#L267) |
-| PUT | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:270](../server/src/routes/api/cvp.js#L270) |
+| GET | `/tools/cvp` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:125](../server/src/routes/api/cvp.js#L125) |
+| POST | `/tools/cvp/collect` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:200](../server/src/routes/api/cvp.js#L200) |
+| GET | `/tools/cvp/device` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:162](../server/src/routes/api/cvp.js#L162) |
+| GET | `/tools/cvp/devices` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:150](../server/src/routes/api/cvp.js#L150) |
+| GET | `/tools/cvp/port-series` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:185](../server/src/routes/api/cvp.js#L185) |
+| GET | `/tools/cvp/servers` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:218](../server/src/routes/api/cvp.js#L218) |
+| POST | `/tools/cvp/servers` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:244](../server/src/routes/api/cvp.js#L244) |
+| DELETE | `/tools/cvp/servers/:id` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:247](../server/src/routes/api/cvp.js#L247) |
+| PUT | `/tools/cvp/servers/:id` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:245](../server/src/routes/api/cvp.js#L245) |
+| POST | `/tools/cvp/servers/:id/test` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:256](../server/src/routes/api/cvp.js#L256) |
+| GET | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:283](../server/src/routes/api/cvp.js#L283) |
+| PUT | `/tools/cvp/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/cvp.js:286](../server/src/routes/api/cvp.js#L286) |
 | GET | `/tools/data-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/dataFlow.js:62](../server/src/routes/api/dataFlow.js#L62) |
 | POST | `/tools/deep-search` | 권한 `tools` | [server/src/routes/api/checksLogs.js:40](../server/src/routes/api/checksLogs.js#L40) |
 | GET | `/tools/device-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/deviceFlow.js:29](../server/src/routes/api/deviceFlow.js#L29) |
@@ -745,8 +745,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/edge-log/fetch` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:139](../server/src/routes/api/edgeLog.js#L139) |
 | GET | `/tools/esxi` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:301](../server/src/routes/api/hardwareGpu.js#L301) |
 | GET | `/tools/esxi-temp` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1180](../server/src/routes/api/toolsCapacity.js#L1180) |
-| GET | `/tools/esxi-temp/history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1280](../server/src/routes/api/toolsCapacity.js#L1280) |
-| POST | `/tools/esxi-temp/spark` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1342](../server/src/routes/api/toolsCapacity.js#L1342) |
+| GET | `/tools/esxi-temp/history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1291](../server/src/routes/api/toolsCapacity.js#L1291) |
+| POST | `/tools/esxi-temp/spark` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1362](../server/src/routes/api/toolsCapacity.js#L1362) |
 | GET | `/tools/gpu` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:320](../server/src/routes/api/hardwareGpu.js#L320) |
 | GET | `/tools/gpu.csv` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:334](../server/src/routes/api/hardwareGpu.js#L334) |
 | GET | `/tools/gpu.json` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:326](../server/src/routes/api/hardwareGpu.js#L326) |
@@ -811,15 +811,15 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/link-check/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:271](../server/src/routes/api/linkCheck.js#L271) |
 | GET | `/tools/link-check/targets` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:219](../server/src/routes/api/linkCheck.js#L219) |
 | GET | `/tools/network-check` | 권한 `tools` | [server/src/routes/api/checksLogs.js:75](../server/src/routes/api/checksLogs.js#L75) |
-| GET | `/tools/orphan-vmdk` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1619](../server/src/routes/api/toolsCapacity.js#L1619) |
-| GET | `/tools/orphan-vmdk/datastores` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1583](../server/src/routes/api/toolsCapacity.js#L1583) |
-| GET | `/tools/part-faults` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:191](../server/src/routes/api/partFaults.js#L191) |
-| POST | `/tools/part-faults/close` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:287](../server/src/routes/api/partFaults.js#L287) |
-| GET | `/tools/part-faults/events` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:223](../server/src/routes/api/partFaults.js#L223) |
-| GET | `/tools/part-faults/reset` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:302](../server/src/routes/api/partFaults.js#L302) |
-| POST | `/tools/part-faults/scan` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:256](../server/src/routes/api/partFaults.js#L256) |
-| PUT | `/tools/part-faults/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:274](../server/src/routes/api/partFaults.js#L274) |
-| GET | `/tools/part-faults/status` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:264](../server/src/routes/api/partFaults.js#L264) |
+| GET | `/tools/orphan-vmdk` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1639](../server/src/routes/api/toolsCapacity.js#L1639) |
+| GET | `/tools/orphan-vmdk/datastores` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1603](../server/src/routes/api/toolsCapacity.js#L1603) |
+| GET | `/tools/part-faults` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:206](../server/src/routes/api/partFaults.js#L206) |
+| POST | `/tools/part-faults/close` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:302](../server/src/routes/api/partFaults.js#L302) |
+| GET | `/tools/part-faults/events` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:238](../server/src/routes/api/partFaults.js#L238) |
+| GET | `/tools/part-faults/reset` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:317](../server/src/routes/api/partFaults.js#L317) |
+| POST | `/tools/part-faults/scan` | 역할 `admin/operator` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:271](../server/src/routes/api/partFaults.js#L271) |
+| PUT | `/tools/part-faults/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:289](../server/src/routes/api/partFaults.js#L289) |
+| GET | `/tools/part-faults/status` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:279](../server/src/routes/api/partFaults.js#L279) |
 | GET | `/tools/pdu` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/pdu.js:52](../server/src/routes/api/pdu.js#L52) |
 | GET | `/tools/pdu/:id` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/pdu.js:126](../server/src/routes/api/pdu.js#L126) |
 | POST | `/tools/pdu/collect-all` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/pdu.js:272](../server/src/routes/api/pdu.js#L272) |
@@ -1019,7 +1019,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | 이름 | 붙은 라우트 | 뜻 |
 |---|---:|---|
 | `fullScopeOnly` | 196 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
-| `fleetOnly` | 142 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
+| `fleetOnly` | 150 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
 | `requireCentral` | 51 | **central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로). |
 | `requireSettingsOwner` | 34 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
 | `guarded` | 8 | 공개 API 전용 래퍼 — 허용 목록 검사 + 스냅샷 준비 + async throw 안전 처리. 미들웨어가 아니라 핸들러를 감싼 것이다. |

@@ -16,6 +16,7 @@ import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.
 import { centralStatusOnlySupport, sendStatusOnly, DEVICE_STATUS_ONLY_MIN_CENTRAL } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04
 
 const gzipAsync = promisify(zlib.gzip);
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 // v2.503: gzip 전송(SAN push v2.417·storage push 와 같은 규약) — 고RTT 회선에서 전송 시간을 줄인다.
 // 중앙 express.json 은 Content-Encoding: gzip 을 투명하게 푼다.
 const PUSH_GZIP = process.env.PDU_PUSH_GZIP !== 'false';
@@ -102,7 +103,7 @@ async function pushPduOnce() {
   const missingNote = wh.missing ? { missing: wh.missing } : {};
   try {
     const json = JSON.stringify({ agent: config.agent.name, snapshots });
-    const hdrs = { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken };
+    const hdrs = { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), 'X-Central-Token': config.agent.centralToken };
     let body = json;
     if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/pdu-data`, {

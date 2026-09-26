@@ -31,9 +31,11 @@ import { store } from './store.js';
 import { api } from './routes/api.js';
 import { authRouter } from './routes/auth.js';
 import { authMiddleware, requireEnrolled, requirePerm, warnIfNoOtpAdmin, resolveTokenUser } from './auth/auth.js';
-import { bigJsonGate } from './util/bigJsonGate.js';        // v2.538: 인증 전 대용량 본문 파싱 차단
+import { bigJsonGate, sessionBigBodyAllowed } from './util/bigJsonGate.js'; // v2.538: 인증 전 대용량 본문 파싱 차단 · v2.620(RECENT2620-03) 세션 큰 본문 사전 거름
 import { resolveCentralAuth } from './routes/central.js';   // v2.538: 게이트가 토큰만 먼저 본다
-import { recordReject } from './central/ingestReject.js';
+import { recordReject, REJECT_KIND } from './central/ingestReject.js';
+import { rolePermissionSet } from './auth/permissions.js';
+import { scopedVcenterIds } from './auth/scope.js';
 import { pruneMockInventory } from './central/inventory.js';
 import { auditMiddleware } from './audit.js';
 import { upgradeRouter } from './routes/upgrade.js';
@@ -306,6 +308,16 @@ const BIG_JSON = bigJsonGate(express.json({ limit: process.env.JSON_BODY_LIMIT |
   //   주장된 이름(64자)을 쓴다(공유 토큰 보유자는 이미 엣지 신뢰 경계 안이다). 인증 판정 자체는 예전과 같다.
   central: (req) => { const a = resolveCentralAuth(req); return a.ok ? { ok: true, agent: a.agent || String(req.get('X-Agent-Name') || req.query?.agent || '').slice(0, 64) } : false; },
   session: (req) => resolveTokenUser((req.get('Authorization') || '').replace(/^Bearer\s+/i, '')) || false,
+  // v2.620(RECENT2620-03·SEC2620-06): 세션 풀은 그 라우트를 통과할 사용자만 — viewer 가 느린 본문으로 관리자 작업을 503 으로 막지 못하게.
+  sessionAllowed: (_req, u, full) => sessionBigBodyAllowed(u, full, { permsOf: rolePermissionSet, scoped: (x) => !!scopedVcenterIds(x, store.get()) }),
+}, {
+  // v2.620(RECENT2620-04): 게이트 503 도 엣지별 거부 기록에 남긴다(이름은 개별 토큰이면 그 이름, 아니면 주장된 값 — 검증 안 됨).
+  onReject: (req, { cls, who, status, len, reason }) => {
+    if (cls !== 'central') return;
+    recordReject(who || '(unknown)', String(req.originalUrl || '').split('?')[0].slice('/api/central'.length) || '/', {
+      status, kind: REJECT_KIND.BUSY, reason, wireBytes: len,
+    });
+  },
 });
 app.use('/api/central/inventory', BIG_JSON);
 app.use('/api/central/guest-disk', BIG_JSON); // 게스트 디스크 push(v2.466) — inventory 와 동종(그 vCenter 전 VM+파티션). 1mb 기본이면 대형 site vCenter 가 413 으로 조용히 실패

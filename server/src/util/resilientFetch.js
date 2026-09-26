@@ -50,6 +50,24 @@ function isTransientErr(err) {
 }
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/**
+ * v2.620(RECENT2620-05): 재시도 대기는 호출자 signal 을 본다. v2.617 ARCH-2 로 Retry-After 대기가 최대 45초/회가 되면서
+ *   호출자가 끊어도(abort) 대기·재시도가 계속 나갔다(재현 ra.mjs: abort 500ms 인데 80초 뒤 · 서버 3회). abort 면 즉시 그 사유로 던진다.
+ */
+function abortError(signal) {
+  const r = signal?.reason;
+  if (r instanceof Error) return r;
+  return Object.assign(new Error('호출자가 요청을 취소했습니다'), { name: 'AbortError', code: 'ABORT_ERR' });
+}
+export function abortableSleep(ms, signal) {
+  if (!signal) return sleep(ms);
+  if (signal.aborted) return Promise.reject(abortError(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => { clearTimeout(tm); reject(abortError(signal)); };
+    const tm = setTimeout(() => { signal.removeEventListener?.('abort', onAbort); resolve(); }, ms);
+    signal.addEventListener?.('abort', onAbort, { once: true });
+  });
+}
 
 /**
  * 고RTT·간헐 네트워크에 견디는 fetch. 일시 오류는 지수 백오프로 재시도한다.
@@ -115,7 +133,9 @@ async function fetchFollowing(url, init, disp, timeoutMs) {
   // v2.583(감사 확정): 호출자가 `redirect:'manual'`·`'error'` 를 줬으면 그 뜻을 따른다(예전엔 덮어써서 무시했다).
   const callerManual = init.redirect === 'manual' || init.redirect === 'error';
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const res = await fetch(cur, { ...init, headers, dispatcher: disp, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
+    // v2.620(RECENT2620-05): 호출자 signal 을 건별 시한으로 덮지 않고 합친다(예전엔 호출자 abort 가 진행 중 요청을 끊지 못했다).
+    const sig = init.signal ? AbortSignal.any([AbortSignal.timeout(timeoutMs), init.signal]) : AbortSignal.timeout(timeoutMs);
+    const res = await fetch(cur, { ...init, headers, dispatcher: disp, redirect: 'manual', signal: sig });
     const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
     if (!loc || callerManual) { if (dropped.length) res.__secretsDroppedOnRedirect = dropped; return res; }
     const next = new URL(loc, cur).href;
@@ -198,7 +218,9 @@ async function resilientFetchInner(url, { timeoutMs: rawTimeoutMs = 20_000, retr
   // dispatcher 옵션: 업그레이드 다운로드처럼 'TLS 검증 강제' 디스패처(upgradeAgent)를 넘겨야 하는
   // 경로는 wanAgent(검증 off) 대신 그 디스패처로 재시도한다(보안 보존).
   const disp = dispatcher || wanAgent;
+  const callerSignal = init.signal || null;
   for (let attempt = 0; attempt <= retries; attempt++) {
+    if (callerSignal?.aborted) throw abortError(callerSignal); // v2.620(RECENT2620-05)
     try {
       const res = await fetchFollowing(url, init, disp, timeoutMs);
       if (RETRYABLE_STATUS.has(res.status) && attempt < retries) {
@@ -206,15 +228,18 @@ async function resilientFetchInner(url, { timeoutMs: rawTimeoutMs = 20_000, retr
         // 재시도 전 이전 응답 본문을 취소 — undici는 미소진 본문이 연결을 붙잡아, 제한된
         // 커넥션풀(wanAgent connections:6)이 flapping 오리진의 5xx 재시도로 고갈된다.
         try { await res.body?.cancel?.(); } catch { /* */ }
-        await sleep(retryDelayMs(res.status, res.headers?.get?.('retry-after'), retryBackoffMs * 2 ** attempt));
+        // v2.620(RECENT2620-05): 호출자가 끊으면 대기 중에도 즉시 끝낸다(abort 오류는 아래 catch 에서 재시도하지 않는다).
+        await abortableSleep(retryDelayMs(res.status, res.headers?.get?.('retry-after'), retryBackoffMs * 2 ** attempt), callerSignal);
         continue;
       }
       return res;
     } catch (err) {
       lastErr = err;
+      // v2.620(RECENT2620-05): 호출자 취소는 일시 오류가 아니다 — 'abort' 문구가 TRANSIENT_RE 에 걸려 재시도되던 것을 막는다.
+      if (callerSignal?.aborted) throw err;
       if (attempt < retries && isTransientErr(err)) {
         onRetry?.({ attempt: attempt + 1, error: err.message });
-        await sleep(retryBackoffMs * 2 ** attempt);
+        await abortableSleep(retryBackoffMs * 2 ** attempt, callerSignal);
         continue;
       }
       throw err;

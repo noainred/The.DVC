@@ -7,6 +7,7 @@
 import { config, clampIntervalMs, loadVcenterConfig } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { getLogsDb } from '../logs/db.js';
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 
 let timer = null;
 let running = false; // 재진입 방지
@@ -32,7 +33,7 @@ const POLL_MS = clampIntervalMs(Number(process.env.AGENT_LOGQ_POLL_MS) || 4_000,
 let _last = null;
 
 function headers() {
-  return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+  return { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
 export async function runLogQueryWorkerOnce() {

@@ -29,6 +29,9 @@ export const REJECT_KIND = Object.freeze({
   // v2.599(WEB2599-04): 라우터에 없는 경로로 온 요청(express 기본 404). 예전에는 모든 404 를 DISABLED('수신 꺼짐')로
   //   적어, 버전이 어긋난 엣지가 새 경로로 보낸 것을 '중앙이 꺼져 있다' 로 안내했다(조치가 다르다 — 중앙 업그레이드).
   UNKNOWN_ROUTE: 'unknown-route',
+  // v2.620(RECENT2620-04): 503 중앙 큰 본문 동시 해석 상한(util/bigJsonGate.js) — 게이트가 라우터 앞에서 응답해 예전에는 기록에
+  //   남지 않았다. 엣지가 Retry-After 뒤 재시도하므로 '중앙 오류(server)' 와 조치가 다르다(기다리면 된다 · 계속되면 상한 조정).
+  BUSY: 'busy',
   OTHER: 'other',
 });
 

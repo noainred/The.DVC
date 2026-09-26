@@ -14,6 +14,7 @@ import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.
 import { centralStatusOnlySupport, sendStatusOnly as sendStatusOnlyTo, STATUS_ONLY_MIN_CENTRAL, _resetStatusOnlyCapForTest } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04: 프로브를 공용으로 승격
 // 옛 import 경로 호환(audit2602a 등) — `export … from` 은 이 스코프에 이름을 만들지 않는다(v2.575).
 export { centralStatusOnlySupport, STATUS_ONLY_MIN_CENTRAL, _resetStatusOnlyCapForTest };
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 
 // v2.409: 주기는 중앙 배포값(storage/intervals.js)을 매번 조회 — 모듈 로드 시 상수로 굳히지 않는다.
 const pushMs = () => runtimeIntervals().pushMs;
@@ -82,7 +83,7 @@ async function pushStorageOnce() {
       return { ok: true, sent: 0, statusSent: r.ok, ...(registered === 0 ? { cleared } : {}) };
     }
     const json = JSON.stringify({ agent: config.agent.name, devices });
-    const hdrs = { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+    const hdrs = { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
     let body = json;
     if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/storage-data`, {
@@ -121,7 +122,7 @@ function registeredCount() {
 async function sendClearList() {
   try {
     const json = JSON.stringify({ agent: config.agent.name, devices: [] });
-    const hdrs = { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken };
+    const hdrs = { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), 'X-Central-Token': config.agent.centralToken };
     const res = await resilientFetch(`${config.agent.centralUrl}/api/central/storage-data`, { method: 'POST', headers: hdrs, body: json, timeoutMs: 20_000, retries: 1 });
     if (!res.ok) return { ok: false, reason: `storage-data <- ${res.status}` };
     return { ok: true };

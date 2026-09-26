@@ -21,6 +21,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { classifyCentral404 } from './central404.js';
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 
 const gzipAsync = promisify(gzip);
 const DEFAULT_POLL_MS = 60_000;
@@ -34,7 +35,7 @@ let _timer = null;
 let _running = false;
 let _last = null;
 
-const headers = () => ({ 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) });
+const headers = () => ({ 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) });
 
 /** 한 틱 — 대기 작업이 있으면 로그를 모아 회신한다. 재진입 가드(CLAUDE.md 폴러 규약). */
 export async function runEdgeLogWorkerOnce() {

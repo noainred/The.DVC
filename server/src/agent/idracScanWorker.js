@@ -16,12 +16,13 @@ import { pollNow } from '../idrac/poller.js';
 import { tryAcquireScan, releaseScan, scanLockBusy } from '../idrac/scanPoller.js'; // v2.612 EDGE2612-01
 
 let timer = null;
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 let last = null;
 // v2.599 T2599-02: 주기 env 도 [하한, MAX_TIMER_MS] 로 가둔다 — 2^31 초과·음수는 setInterval 에서 1ms 루프가 된다.
 const POLL_MS = clampIntervalMs(Number(process.env.AGENT_IDRAC_SCAN_POLL_MS) || 5_000, 5_000, 1_000);
 
 function headers() {
-  return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+  return { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
 async function postResult(payload) {

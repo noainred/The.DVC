@@ -29,6 +29,7 @@ import { collectVcenterGuestDisk } from '../guestdisk/service.js';
 import { readCentralReply, dropSummaryOf, mergeDrop, warnDrop } from '../util/centralReply.js'; // v2.613 CONTRACT2613-03
 
 const gzipAsync = promisify(zlib.gzip);
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
 
 let timer = null;
@@ -39,6 +40,7 @@ function headers(extra = {}) {
   return {
     'Content-Type': 'application/json',
     'X-Agent-Hostname': os.hostname(),
+    ...agentNameHeader(config.agent.name), // v2.620(RECENT2620-02): 중앙 큰 본문 게이트가 본문 전에 요청자를 가리게 — 이름을 헤더에도 싣는다.
     ...extra,
     ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}),
   };
