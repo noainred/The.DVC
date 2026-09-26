@@ -218,7 +218,10 @@ export function getServiceCheck(opts = {}) {
     const heap = w.heapWarns ? ` · 힙 한계 근접 경고 ${w.heapWarns}회` : '';
     if (!l) return { status: w.heapWarns ? 'warn' : 'ok', detail: `기동 후 멈춤 없음(경계 ${Math.round(w.stallMs / 1000)}초)${heap}`, at: Date.now() };
     const dur = l.durMs == null ? '지속 시간 미상' : `${Math.round(l.durMs / 1000)}초`;
-    const where = Array.isArray(l.frames) && l.frames.length ? ` · 멈춘 지점 ${l.frames[0]}` : (l.error ? ' · 스택 없음(GC·네이티브 호출 가능성)' : '');
+    // v2.617(SEC-2): 스택 프레임에는 설치 절대 경로·소스 줄이 들어 있다 — 관리자에게만 싣는다(operator 는 tools 를 기본 보유).
+    const where = Array.isArray(l.frames) && l.frames.length
+      ? (opts.isAdmin ? ` · 멈춘 지점 ${l.frames[0]}` : ' · 멈춘 지점은 관리자에게만 표시')
+      : (l.error ? ' · 스택 없음(GC·네이티브 호출 가능성)' : '');
     return { status: recent ? 'warn' : 'ok', detail: `멈춤 ${w.stalls}회 · 최근 ${Math.round((Date.now() - l.at) / MIN)}분 전 ${dur}${where}${heap} — journal 의 [stallwatch] 줄에 전체 스택`, at: l.at };
   }));
 

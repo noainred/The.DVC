@@ -124,3 +124,38 @@ test('⑥ 링 버퍼는 줄마다 8KB 로 자른다 · 시작 백업은 기동 1
   assert.ok(last.msg.length < 8300, `len=${last.msg.length}`);
   assert.match(last.msg, /\+41808자 생략\)$/);
 });
+
+test('④-b SEC-1: 세션 계열은 엣지 풀을 먹지 못하고, 요청자당 상한·본문 읽기 시한이 있다', async () => {
+  const { bigJsonGate, bigJsonStats } = await import('../src/util/bigJsonGate.js');
+  const { EventEmitter } = await import('node:events');
+  const parser = (_q, _s, next) => next();
+  const gate = bigJsonGate(parser, {
+    central: (r) => ({ ok: true, agent: r.who }),
+    session: (r) => ({ username: r.who }),
+  }, { maxConcurrent: 3, sessionMaxConcurrent: 2, readDeadlineMs: 150 });
+  const mkReq = (base, who) => { const q = new EventEmitter(); Object.assign(q, { baseUrl: base, path: '/', who, complete: false, get: (h) => (h === 'content-length' ? '1024' : '') }); q.destroy = () => { q.destroyed = true; }; return q; };
+  const mkRes = () => { const r = new EventEmitter(); r.headers = {}; r.set = (k, v) => { r.headers[k] = v; return r; }; r.status = (c) => { r.code = c; return r; }; r.json = (b) => { r.body = b; return r; }; return r; };
+  // viewer 가 느린 본문으로 세션 풀을 채워도(요청자당 1) — 두 번째는 거절
+  const v1 = mkRes(); const q1 = mkReq('/api/admin/log-analysis/paste', 'viewer'); gate(q1, v1, () => {});
+  const v2 = mkRes(); gate(mkReq('/api/svcmon/targets/import', 'viewer'), v2, () => {});
+  assert.equal(v2.code, 503, '같은 사용자의 두 번째 세션 본문은 거절');
+  // 엣지 push 는 세션 풀과 무관하게 들어온다
+  const e1 = mkRes(); gate(mkReq('/api/central/inventory', 'edgeA'), e1, () => {});
+  assert.equal(e1.code, undefined, '세션 풀이 차도 엣지 push 는 받는다');
+  // 한 엣지는 동시 2건까지
+  const e2 = mkRes(); gate(mkReq('/api/central/guest-disk', 'edgeA'), e2, () => {});
+  const e3 = mkRes(); gate(mkReq('/api/central/vmseries', 'edgeA'), e3, () => {});
+  assert.equal(e2.code, undefined); assert.equal(e3.code, 503, '요청자당 상한');
+  // 본문 읽기 시한: 끝나지 않은 느린 본문은 끊기고 슬롯이 돌아온다
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(q1.destroyed, true, '느린 본문은 시한에 끊긴다');
+  assert.equal(bigJsonStats('session').inflight, 0);
+  assert.ok(bigJsonStats('session').deadlineCut >= 1);
+  for (const r of [e1, e2]) r.emit('close');
+  assert.equal(bigJsonStats('central').inflight, 0);
+});
+
+test('④-c SEC-2: 서비스 점검의 멈춘 지점(스택)은 관리자에게만', () => {
+  assert.match(stripComments(read('routes/api/checksLogs.js')), /getServiceCheck\(\{ isAdmin: req\.user\?\.role === 'admin' \}\)/);
+  assert.match(stripComments(read('health/services.js')), /opts\.isAdmin \? ` · 멈춘 지점 \$\{l\.frames\[0\]\}`/);
+});

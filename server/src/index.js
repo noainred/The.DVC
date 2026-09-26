@@ -302,8 +302,10 @@ app.use((req, res, next) => {
 // 읽지 않는다) 라우터 인증이 401/403 을 낸다. 인증은 여전히 각 라우터가 한다(이 게이트는 '파싱 허가'
 // 일 뿐 권한 판정이 아니다). 마운트 목록은 그대로 두었다(v2.517·v2.520 테스트가 이 줄들을 고정한다).
 const BIG_JSON = bigJsonGate(express.json({ limit: process.env.JSON_BODY_LIMIT || '16mb' }), {
-  central: (req) => resolveCentralAuth(req).ok,
-  session: (req) => Boolean(resolveTokenUser((req.get('Authorization') || '').replace(/^Bearer\s+/i, ''))),
+  // v2.617(SEC-1): 신원도 돌려준다 — 요청자(엣지·사용자)당 동시 슬롯 상한에 쓴다. 공유 토큰은 이름을 검증할 수 없으므로
+  //   주장된 이름(64자)을 쓴다(공유 토큰 보유자는 이미 엣지 신뢰 경계 안이다). 인증 판정 자체는 예전과 같다.
+  central: (req) => { const a = resolveCentralAuth(req); return a.ok ? { ok: true, agent: a.agent || String(req.get('X-Agent-Name') || req.query?.agent || '').slice(0, 64) } : false; },
+  session: (req) => resolveTokenUser((req.get('Authorization') || '').replace(/^Bearer\s+/i, '')) || false,
 });
 app.use('/api/central/inventory', BIG_JSON);
 app.use('/api/central/guest-disk', BIG_JSON); // 게스트 디스크 push(v2.466) — inventory 와 동종(그 vCenter 전 VM+파티션). 1mb 기본이면 대형 site vCenter 가 413 으로 조용히 실패
