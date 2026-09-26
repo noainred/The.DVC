@@ -22,17 +22,29 @@ import { poolRun } from '../util/pool.js';
  * 같은 주소를 두 수집 서버가 쓰면 기록이 첫 엣지에 합쳐졌다. 이 호출이 **어느 수집 서버의 것인지**는 여기서
  * 알므로 id 를 태그로 붙인다.
  */
-const pullTagged = (c) => withOutboundTag(c.id, () => pullOne(c));
+const pullTagged = (c, opts) => withOutboundTag(c.id, () => pullOne(c, opts));
 
 let timer = null;
 const fails = new Map(); // collectorId -> 연속 실패 사이클 수(상태 깜빡임 방지용)
 const inflight = new Set(); // 즉시 당김 진행 중인 collectorId — 주기 폴/중복 즉시당김과 겹침 방지
 
-async function pullOne(c) {
+/**
+ * v2.620(EDGE2620-02): 직전 주기에 실패한 엣지(suspect)는 **재시도 없이 1회만**(retries 0) 당긴다. 예전에는 응답 없는(블랙홀·
+ *   방화벽 DROP) 엣지 하나가 `시한 20초 × 3회 + 백오프 ≈ 61초` 동안 워커 1개를 잡아, 불통 엣지가 동시 개수(기본 4)만큼 있으면
+ *   정상 엣지의 pull 이 전부 그 뒤로 밀리고 주기(60초)를 넘겨 재진입 가드가 다음 틱을 건너뛰었다(정상 엣지까지 pull 간격 2~3배).
+ *   시한은 줄이지 않는다 — 고RTT 로 원래 느린 엣지가 한 번 실패한 뒤 짧은 시한에 갇혀 영영 회복하지 못하는 것을 막는다.
+ *   재시도는 한 번 성공하면(fails=0) 되돌아온다.
+ */
+export const SUSPECT_RETRIES = 0;
+export function pullOptionsFor(failCount) {
+  return { retries: failCount >= 1 ? SUSPECT_RETRIES : 2 };
+}
+
+async function pullOne(c, { retries = 2 } = {}) {
   // 고RTT·일시적 네트워크 오류는 재시도로 흡수(단발 실패로 '연결 안 됨' 되는 문제 해결).
   const res = await resilientFetch(`${c.url}/api/collector/export`, {
     headers: { Accept: 'application/json', ...(c.token ? { 'X-Collector-Token': c.token } : {}) },
-    timeoutMs: config.collector.timeoutMs, retries: 2,
+    timeoutMs: config.collector.timeoutMs, retries,
     onRetry: (i) => console.warn(`[collector] ${c.id} 재시도 ${i.attempt} (${i.error || 'HTTP ' + i.status})`),
   });
   if (res.status === 401 || res.status === 403) throw new Error('수집 서버 토큰 불일치(인증 실패)');
@@ -144,16 +156,24 @@ export async function pullCollectorByAgent(agentName) {
 
 async function pullNowInner() {
   // 즉시 당김이 진행 중인 수집기는 이번 주기에서 건너뛴다(같은 수집기 pullOne 교차 실행 방지).
-  const collectors = loadCollectors().filter((c) => c.enabled !== false && c.url && !inflight.has(c.id));
+  // v2.620(EDGE2620-02): 직전 실패 엣지는 큐 뒤로(아래 주석).
+  const collectors = orderForPull(loadCollectors().filter((c) => c.enabled !== false && c.url && !inflight.has(c.id)), (id) => fails.get(id) || 0);
   // 레지스트리에서 제거/교체된 수집기의 잔류 호스트·상태 자동 정리(감사 M12) — 과거엔 수동
   // power-purge에서만 정리돼 유령 항목이 전력 합산을 오염시켰다.
   try { clearStaleRemote(new Set(loadCollectors().map((c) => c.id))); } catch { /* 정리 실패는 폴링에 영향 없음 */ }
   // v2.617: 동시 개수 제한(config.collector.pullConcurrency, 기본 4) — 예전 Promise.all 은 엣지 전부의 응답 사본이
   //   한 순간에 힙에 살았다. fn 이 스스로 catch 하므로 poolRun(첫 rejection 을 올리는 쪽)이 맞다.
+  /*
+   * v2.620(EDGE2620-02): 직전 주기에 실패한 엣지는 **큐 뒤로** 보낸다(정상 엣지가 먼저 워커를 받는다) + 재시도 0회(pullOptionsFor).
+   *   정렬은 안정적이다(같은 그룹 안의 등록 순서는 그대로). 실패 엣지가 쓴 시간을 따로 재서 경고가 원인을 말하게 한다.
+   */
+  const suspectIds = new Set(collectors.filter((c) => (fails.get(c.id) || 0) >= 1).map((c) => c.id));
+  let failedMs = 0; let failedCount = 0;
   const t0 = Date.now();
   await poolRun(collectors, config.collector.pullConcurrency, async (c) => {
+    const tStart = Date.now();
     try {
-      const r = await pullTagged(c);
+      const r = await pullTagged(c, pullOptionsFor(fails.get(c.id) || 0));
       fails.set(c.id, 0);
       setCollectorStatus(c.id, statusFromPull(r));
     } catch (err) {
@@ -176,14 +196,35 @@ async function pullNowInner() {
       } else {
         setCollectorStatus(c.id, { ...prevSt, ok: true, degraded: true, error: d.message, fails: n });
       }
-      console.warn(`[collector] ${c.id} pull 실패(${n}): ${d.message}`);
+      failedMs += Date.now() - tStart; failedCount++;
+      console.warn(`[collector] ${c.id} pull 실패(${n}${n >= 2 ? ' · 재시도 없이 1회' : ''}): ${d.message}`);
     }
   });
   const took = Date.now() - t0;
   // 한 주기가 주기의 절반을 넘기면 알린다 — 동시 개수를 줄인 대가(벽시계 증가)를 조용히 두지 않는다.
   if (collectors.length && config.collector.pullIntervalMs > 0 && took > config.collector.pullIntervalMs / 2) { // 주기 0(끔)에서 수동 pull 은 경고하지 않는다
-    console.warn(`[collector] pull 주기 소요 ${Math.round(took / 1000)}초(엣지 ${collectors.length}곳 · 동시 ${config.collector.pullConcurrency}) — 주기 ${Math.round(config.collector.pullIntervalMs / 1000)}초의 절반을 넘었습니다. COLLECTOR_PULL_CONCURRENCY 를 늘리거나 COLLECTOR_PULL_INTERVAL_MS 를 늘리세요.`);
+    console.warn(slowCycleText({ took, count: collectors.length, concurrency: config.collector.pullConcurrency, intervalMs: config.collector.pullIntervalMs, failedCount, failedMs, suspectCount: suspectIds.size }));
   }
+}
+
+/** v2.620(EDGE2620-02): 직전 실패 엣지를 뒤로(안정 정렬 — 순수). */
+export function orderForPull(collectors, failsOf) {
+  const ok = []; const bad = [];
+  for (const c of collectors) ((failsOf(c.id) || 0) >= 1 ? bad : ok).push(c);
+  return [...ok, ...bad];
+}
+
+/**
+ * v2.620(EDGE2620-02): 주기가 길어진 경고 문구(순수). 불통 엣지가 워커를 점유한 것이 원인이면 그렇게 말한다 — 예전 문구는
+ *   원인과 무관하게 '동시 개수를 늘리라' 고만 했다(원인이 불통 엣지면 동시 개수를 늘려도 응답 없는 엣지를 더 기다릴 뿐이다).
+ */
+export function slowCycleText({ took, count, concurrency, intervalMs, failedCount = 0, failedMs = 0, suspectCount = 0 }) {
+  const head = `[collector] pull 주기 소요 ${Math.round(took / 1000)}초(엣지 ${count}곳 · 동시 ${concurrency}) — 주기 ${Math.round(intervalMs / 1000)}초의 절반을 넘었습니다.`;
+  // 실패 엣지가 쓴 워커 시간이 전체 워커 시간의 절반 이상이면 원인은 불통 엣지다.
+  if (failedCount > 0 && failedMs * 2 >= took * Math.min(concurrency, count)) {
+    return `${head} 원인: 응답하지 않은 엣지 ${failedCount}곳이 워커를 약 ${Math.round(failedMs / 1000)}초 점유했습니다(직전부터 실패 중 ${suspectCount}곳은 재시도 없이 1회만 · 순서 맨 뒤). 그 엣지의 주소·방화벽·서비스 상태를 확인하거나 비활성화하세요 — 동시 개수를 늘려도 응답 없는 엣지를 더 기다릴 뿐입니다.`;
+  }
+  return `${head} COLLECTOR_PULL_CONCURRENCY 를 늘리거나 COLLECTOR_PULL_INTERVAL_MS 를 늘리세요.${failedCount ? ` (이번 주기 실패 엣지 ${failedCount}곳 · 약 ${Math.round(failedMs / 1000)}초)` : ''}`;
 }
 
 export function startCollectorPuller() {

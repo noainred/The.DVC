@@ -24,7 +24,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { readCentralReply, dropSummaryOf, mergeDrop, warnDrop } from '../agent/centralReply.js';
 import { classifyCentral404Body } from '../agent/central404.js';
 import { readJsonCapped } from '../util/readCapped.js';
-import { serversForThisNode } from './registry.js';
+import { serversForThisNode, registryLoadError } from './registry.js';
 import { getStatus } from './store.js';
 import * as db from './db.js';
 
@@ -76,6 +76,8 @@ export function centralFailText(status, body) {
   const reason = body && typeof body === 'object' && typeof body.reason === 'string' ? body.reason.slice(0, 300) : '';
   if (status === 413) return '본문이 중앙 수신 한도를 넘었습니다(413) — CVP_PUSH_CHUNK_BYTES 를 줄이세요';
   if (status === 404) return classifyCentral404Body(body).reason;
+  // v2.620(EDGE2620-01): 중앙 등록부 손상 — 중앙이 소유 판정을 못 하므로 받지 않았다. 커서를 전진하지 않고 다음 주기에 다시 보낸다.
+  if (status === 503 && body?.reason === 'registryUnreadable') return `중앙 CVP 등록부를 읽지 못해 받지 않았습니다(503)${typeof body.detail === 'string' ? ` — ${body.detail.slice(0, 300)}` : ''} · 커서를 전진하지 않고 다음 주기에 다시 보냅니다`;
   if (status === 503 && body?.dbUnavailable) return `중앙 CVP DB 를 쓸 수 없습니다(503)${reason ? ` — ${reason}` : ''} · 커서를 전진하지 않고 다음 주기에 다시 보냅니다`;
   return `HTTP ${status}${reason ? ` — ${reason}` : ''}`;
 }
@@ -103,7 +105,23 @@ function statusFor(srv) {
   return { ...st, cvpId: srv.id, name: srv.name || st.name || '' };
 }
 
+/**
+ * v2.620(EDGE2620-05): 엣지 CVP 등록부를 못 읽으면(손상 → 보존) serversForThisNode() 가 [] 라 '위임 0대' 와 구분되지 않았다 —
+ *   빈 servers 를 보내 중앙이 이 엣지의 CVP 상태를 비우고, 상태에는 '위임 CVP 0대 — 중앙 목록을 비웠습니다' 라는 틀린 문구가 남았다
+ *   (스토리지 push v2.618 BUG-2 와 같은 구분의 CVP 누락). 이 경우 **보내지 않는다** — 표본은 커서 뒤에 남아 다음 주기에 간다.
+ *   다음 cvp-config pull 이 등록부를 다시 쓰면 풀린다.
+ */
+function edgeRegistryError() {
+  try { return registryLoadError(); } catch (e) { return { at: Date.now(), reason: e?.message || String(e) }; }
+}
+
 async function pushInner() {
+  const regErr = edgeRegistryError();
+  if (regErr) {
+    const e = new Error(`엣지 CVP 등록부를 읽지 못해 보내지 않았습니다(${String(regErr.reason || '사유 미상').slice(0, 200)}) — '위임 0대' 가 아닙니다. 중앙 cvp-config pull 이 등록부를 다시 쓰면 풀립니다 · 표본은 커서 뒤에 남아 다음 주기에 갑니다`);
+    e.kind = 'edge-registry-unreadable';
+    throw e;
+  }
   const servers = serversForThisNode();
   const statuses = servers.map(statusFor);
   const deviceItems = []; const deviceKeys = {}; const touch = []; const sentNow = [];
