@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { snapCacheSweep } from './util/snapCache.js'; // v2.617
-import { config, loadVcenterConfig , secretsReady } from './config.js';
+import { config, loadVcenterConfig , secretsReady, clampIntervalMs } from './config.js';
 import { withJob } from './perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 import { generateSnapshot } from './mock/generator.js';
 import { collectFromVCenter, vcAuthGuard, isVcAuthError } from './vcenter/restClient.js';
@@ -13,7 +13,7 @@ import { loadRegistry as loadIdracRegistry } from './idrac/registry.js';
 import { buildHostIndex, resolveServerVcenter } from './idrac/attribution.js';
 import { applyMutes } from './alarm-mutes.js';
 import { getDataSource } from './runtime-settings.js';
-import { buildIpamRows } from './ipam/ledger.js';
+import { buildIpamRows, ipamRevKey } from './ipam/ledger.js';
 import { syncLedger } from './ipam/db.js';
 import { getInventory, pruneInventory } from './central/inventory.js';
 import { isStopped } from './security/emergencyStop.js';
@@ -71,6 +71,39 @@ export function ledgerSignature(rows) {
   }
   return h.digest('hex');
 }
+
+/**
+ * v2.619(PERF-1): IP 원장의 '입력' 지문 — `buildIpamRows(snap)`(무제한·전 vCenter) 가 행을 만들 때 읽는 값만 담는다.
+ * 이 지문이 직전 **성공한** 동기화와 같으면 원장 재구성(`buildIpamRows` 운영 규모 약 27ms)·행 서명·행 객체 수천 개의
+ * GC 를 건너뛴다. 결과(ipam.db 내용)는 예전과 같다 — 원장 행 서명(`ledgerSignature`)의 모든 열이 아래 입력의 순수 함수다:
+ *  · 스냅샷: vCenter id·이름(표시명) · VM(vcenterId·name·powerState·guestOS·host·cluster·ipAddresses·ipAddress)
+ *    · 호스트(name·vcenterId·powerState·version·cluster). 배열 순서도 넣는다(같은 IP 행의 순서가 서명에 들어간다).
+ *  · 관리 입력: `ipamRevKey()`(무시/분류 설정·주석·스캔 결과와 이력·override·대역 정책 리비전).
+ * 시각에 따라 바뀌는 행 값(예약 만료 `reservedExpired`)은 원장 서명에 원래 들어 있지 않다 — 그래서 예전에도 시각만으로는
+ * 재기록되지 않았다(동작 불변). ⚠ 원장이 새 필드를 읽기 시작하면 **여기에도 더할 것**(`test/perf2619.test.js` 가 원장 서명의
+ * 각 열이 이 지문을 바꾸는지 대조한다). 놓쳐도 `LEDGER_FULL_CHECK_MS` 마다 한 번은 전량 확인한다(안전망).
+ */
+export function ledgerInputSignature(snap, revKey = ipamRevKey()) {
+  const h = crypto.createHash('sha1');
+  const f = (v) => (v == null ? '' : String(v));
+  h.update(`${revKey}#`);
+  for (const vc of snap?.vcenters || []) h.update(`${f(vc?.id)}=${f(vc?.name)};`);
+  h.update('#vm');
+  const vms = snap?.vms || [];
+  h.update(String(vms.length));
+  for (const v of vms) {
+    const ips = Array.isArray(v?.ipAddresses) ? v.ipAddresses.map(f).join(',') : '';
+    h.update([v?.vcenterId, v?.name, v?.powerState, v?.guestOS, v?.host, v?.cluster, ips, v?.ipAddress].map(f).join('|') + ';');
+  }
+  h.update('#host');
+  const hosts = snap?.hosts || [];
+  h.update(String(hosts.length));
+  for (const x of hosts) h.update([x?.name, x?.vcenterId, x?.powerState, x?.version, x?.cluster].map(f).join('|') + ';');
+  return h.digest('hex');
+}
+
+// 입력 지문이 같아도 이 간격마다 한 번은 원장을 전량 다시 만들어 서명과 비교한다(지문이 모르는 입력이 생겼을 때의 안전망).
+const LEDGER_FULL_CHECK_MS = clampIntervalMs(process.env.LEDGER_FULL_CHECK_MS, 10 * 60_000, 60_000);
 
 // 등록된 iDRAC 서버 수(OME 자동발견 엔트리 제외). best-effort.
 function idracRegisteredCount() {
@@ -414,13 +447,29 @@ class Store {
   // — 30개·고RTT 확장 시 매 주기 수천 행 재기록으로 이벤트 루프가 막히는 것을 방지(성능 설계).
   syncLedger() {
     try {
+      // v2.619(PERF-1): 원장 '입력' 지문이 직전 **성공한** 동기화와 같으면 원장 재구성·행 서명을 건너뛴다(결과 동일 —
+      //   ledgerInputSignature 머리말). 30초마다 84~162ms 이벤트 루프를 막던 것(buildIpamRows·서명·행 GC)의 대부분이다.
+      //   입력 지문이 모르는 입력이 생겨도 LEDGER_FULL_CHECK_MS 마다 한 번은 전량을 다시 만들어 서명과 비교한다.
+      const now = Date.now();
+      const inSig = ledgerInputSignature(this.snapshot);
+      const fullDue = now - (this._ledgerFullAt || 0) >= LEDGER_FULL_CHECK_MS;
+      if (inSig === this._lastLedgerInputSig && !fullDue) {
+        this.ledgerInputSkips = (this.ledgerInputSkips || 0) + 1;
+        return;
+      }
+      this._ledgerFullAt = now;
+      const seq = (this._ledgerSeq = (this._ledgerSeq || 0) + 1);
       const { rows } = buildIpamRows(this.snapshot);
       const sig = ledgerSignature(rows);
-      if (sig === this._lastLedgerSig) return; // 내용 변동 없음 → 쓰기 생략
+      if (sig === this._lastLedgerSig) { this._lastLedgerInputSig = inSig; return; } // 내용 변동 없음 → 쓰기 생략
       // 서명은 쓰기 '성공 후'에 기록 — 외부 리더의 락 등으로 쓰기가 실패했는데 서명만 갱신되면
-      // 내용이 실제로 바뀔 때까지 재시도가 영영 없어 ipam.db가 낡은 채 남는다.
+      // 내용이 실제로 바뀔 때까지 재시도가 영영 없어 ipam.db가 낡은 채 남는다. 입력 지문도 같은 규칙이다 —
+      // 실패한 입력을 기억하면 다음 틱이 건너뛰어 재시도가 없어진다. 늦게 끝난 옛 쓰기는 새 쓰기의 기억을 덮지 않는다(seq).
       syncLedger(rows).then((ok) => {
-        if (ok) { this._lastLedgerSig = sig; this._noteLedger(true, null, rows.length); }
+        if (ok) {
+          if (seq === this._ledgerSeq) { this._lastLedgerSig = sig; this._lastLedgerInputSig = inSig; }
+          this._noteLedger(true, null, rows.length);
+        }
         else this._noteLedger(false, { stage: 'write', message: 'ipam.db 쓰기 실패(사유는 [ipam] 로그)' }, rows.length);
       }, (e) => this._noteLedger(false, { stage: 'write', message: String(e?.message || e) }, rows.length));
     } catch (e) {
@@ -773,6 +822,7 @@ export function storeStatus() {
     generatedAt: snap.generatedAt || null,
     lastError: store.lastError || null,
     ledgerSync: store.ledgerSync || null, // v2.603: IP 원장(ipam.db) 마지막 동기화 결과(실패 사유·연속 횟수)
+    ledgerInputSkips: store.ledgerInputSkips || 0, // v2.619 PERF-1: 입력 지문이 같아 원장 재구성을 건너뛴 틱 수(프로세스 수명)
     refreshing: store._refreshing === true,
     intervalMs: config.pollIntervalMs,
     counts,

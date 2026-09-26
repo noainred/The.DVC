@@ -3386,7 +3386,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **아키텍처**: `util/ping.js` 손 풀 → `poolRun`(concurrency 0 이면 0 워커 — v2.579 ③-b 와 같은 결함) · `upgrade.js cmpVersion` →
       `cmpVersionTuple` · `ipam/scanStore.js` IPv4 사본 → `util/ipv4` · `arch2579` 가 `export … from` edge 도 센다(순환 SCC 는 여전히 4) ·
       CI 가 루트 `npm audit` 도 본다 · dompurify 3.4.16.
-    - **남긴 것(판단 필요 — 다음 점검의 첫 후보)**: ① ✅ **DISCONNECTED 호스트가 사용률 분모에만 남는다**(→ v2.594 `store.js usageReadable` 로 고침 — v2.613 에 이 줄을 정정) ② **30초마다 IPAM 원장 재구성·서명 50~85ms**(PERF-1 —
+    - **남긴 것(판단 필요 — 다음 점검의 첫 후보)**: ① ✅ **DISCONNECTED 호스트가 사용률 분모에만 남는다**(→ v2.594 `store.js usageReadable` 로 고침 — v2.613 에 이 줄을 정정) ② ✅ **30초마다 IPAM 원장 재구성·서명 50~85ms**(→ v2.619 입력 지문 생략으로 고침 · PERF-1 —
       외부 ipam.db 리더 신선도 계약, 사용자 결정) ③ PDU·SAN push 0건 조기 반환(EDGE-3 — v2.583 설계 · ✅ v2.613 EDGE2613-04 에 상태 전용 push 로 고침) ④ ✅ 손으로 쓴 풀 7곳 더(v2.594 에 '결함 아님' 판정 — 목록에서 뺀다)
       (`ping/monitor.js`·`bmstor/collect.js`·`idrac/redfish.js` 2·`idrac/scan.js`·`deployLlm.js` 2·`certMonitor.js` — 호출부가 전부
       고정값·클램프라 잠재) ⑤ 버전 비교 사본 3곳(`bundleSource.js cmp3`·`dlsource.js cmp`·`release-notes.js cmpVersionDesc` — 입력이
@@ -3422,7 +3422,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       상세 모달 그리드는 `repeat(auto-fit, minmax(min(260px,100%),1fr))`(v2.576 `.vc-grid` 와 같은 결함 — Modal 이 overflow:hidden 이라
       잘렸다) · IPAM 쓰기 워커에는 레코드 배열만 보낸다 · 서버 문자열도 BoldText 로 그려지면 **백틱 금지**(PowerMax 용량 설명).
     - ⚠ 반증·재판정: 손 풀 7곳·버전 비교 사본 3곳은 입력이 고정·검증돼 **결함이 아니다**(v2.593 '남긴 것' 목록에서 뺀다) · VM 사용률
-      결측(rightsizing 'idle' 오판)은 현 수집기로 **도달 불가**. 남은 판단: PERF-1(원장 30초 재구성 — 사용자 결정) · EDGE-3(v2.583 설계).
+      결측(rightsizing 'idle' 오판)은 현 수집기로 **도달 불가**. 남은 판단: ✅ PERF-1(→ v2.619) · EDGE-3(v2.583 설계 — ✅ v2.613).
     - ⚠ 정직 기록: Chromium 은 목 스택으로 개요·스토리지(장비 0대)·중계 토폴로지(admin)·VM 상세 모달 1440/400 을 봤다 — 비-admin 가림
       화면과 사용량 결측 장비가 있는 스토리지 표는 **화면으로 보지 못했다**(단위·합계 로직은 테스트로 고정).
 
@@ -3986,9 +3986,23 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       '전체 − 연결 − 점검' 뺄셈을 새로 쓰지 말 것(첫 수집 중·비활성을 불가로 센다).
     - 웹 사본 스윕(`audit2617.test.js`): 상대시각은 `relTime.js`, 숫자 판정은 `numOrNull.js` 만.
     - **메모리 누수 측정 결과 — JS 힙 누수 없음**(20분·힙 스냅샷 2장·+0.8MB). RSS 증가는 네이티브(추정). '누수' 로 적기 전에 힙 스냅샷을 볼 것.
-    - 남긴 것: **PERF-1**(IPAM 원장 30초 재구성 84~162ms — 사용자 결정 사항) · ARCH-7 · ARCH-9.
+    - 남긴 것: ✅ **PERF-1**(→ v2.619 — 아래) · ARCH-7 · ARCH-9.
     - ⚠ 작업 방식: 게시 전 PR 에 다음 버전 작업을 섞지 말 것 — 이번에 **추적되지 않은 새 테스트 파일이 stash 에서 빠져** 이전 릴리스 커밋에
       함께 올라갔다(`git stash` 는 untracked 를 담지 않는다 — `git stash -u` 또는 패치로 백업).
+  - ⚠⚠ **v2.619 — IP 원장(ipam.db) 동기화는 '입력 지문' 이 같으면 재구성을 건너뛴다(PERF-1 — 사용자 결정 "PERF-1 진행해줘")**
+    (`store.js ledgerInputSignature`·`syncLedger` · 회귀 `server/test/perf2619.test.js` 6건 — 변이 4종 전부 검출):
+    - ⚠ **감사가 제안한 '수집 시각·push 수신 시각' 토큰으로는 절감이 0 이다** — 직접 수집 vCenter 는 기본 주기(30초)마다
+      전부 새로 수집되어 토큰이 매 틱 바뀐다. 그래서 **내용 기반 입력 지문**(원장이 읽는 필드만)을 쓴다. 실측(vCenter 33·
+      VM 6,004·원장 8,047행): 재구성+서명 p50 48.2ms → 입력 지문 6.4ms.
+    - ⚠⚠ **외부 ipam.db 리더의 신선도 계약은 바뀌지 않는다** — 원장 행 서명의 모든 열이 입력 지문의 순수 함수라, 내용이
+      바뀌는 틱에는 예전처럼 곧바로 다시 쓴다(감사가 '신선도 계약에 닿는다' 고 판단을 남긴 것은 시각 토큰을 전제로 한 것이다).
+    - ⚠⚠ **원장(`ipam/ledger.js buildIpamRows`)이 VM·호스트·vCenter 의 새 필드를 읽기 시작하면 `ledgerInputSignature` 에도
+      더할 것** — 테스트 ② 가 스냅샷의 모든 필드를 하나씩 바꿔 '원장 서명이 바뀌면 입력 지문도 바뀐다' 를 고정하지만, 테스트
+      픽스처에 없는 필드는 못 본다. 놓쳐도 `LEDGER_FULL_CHECK_MS`(기본 10분)마다 한 번은 전량 확인한다(안전망 — 지우지 말 것).
+      관리 입력은 `ipamRevKey()` 리비전이 덮는다 — 새 관리 입력을 원장에 넣으면 리비전도 그 키에 더할 것.
+    - 입력 지문은 **쓰기 성공 뒤에만** 기억한다(실패한 입력을 기억하면 다음 틱이 건너뛰어 재시도가 사라진다) · 늦게 끝난 옛
+      쓰기는 새 기억을 덮지 않는다(`_ledgerSeq`) · 건너뛴 횟수는 `storeStatus().ledgerInputSkips`.
+    - ⚠ 정직 기록: 목 데이터는 틱마다 값을 새로 만들어 목 모드에서는 생략이 일어나지 않는다 — 운영 현장의 실제 절감 비율은 재지 못했다.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는
