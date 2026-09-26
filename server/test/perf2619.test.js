@@ -104,3 +104,26 @@ test('⑥ 쓰기 실패한 입력은 기억하지 않는다(다음 틱이 재시
   assert.equal((body.match(/_lastLedgerInputSig = inSig/g) || []).length, 2, '입력 지문 기억은 성공 콜백과 서명 동일(이미 반영됨) 두 곳뿐이어야 한다');
   assert.match(body, /LEDGER_FULL_CHECK_MS/, '안전망(주기적 전량 확인)이 빠졌다');
 });
+
+test('⑦ v2.620(RECENT2620-01) — 쓰기 진행 중에 내용이 되돌아가도 DB 가 옛 내용으로 굳지 않는다(ABA)', async () => {
+  const S = st.store;
+  const base = snap0();
+  S.snapshot = base;
+  S._ledgerFullAt = 0; // 전량 확인을 강제해 기준선을 A 로 맞춘다
+  S.syncLedger();
+  for (let i = 0; i < 100 && S._lastLedgerSig == null; i++) await new Promise((r) => setTimeout(r, 20));
+  const sigA = rowSig(base);
+  assert.equal(S._lastLedgerSig, sigA, '기준선 A 가 기록되지 않았다');
+  // B: 관리 입력(override)으로 원장 내용을 바꾼 뒤 쓰기를 내보낸다(아직 끝나지 않았다).
+  ov.setOverride('10.2.0.20', { owner: 'ABA-담당' }, { username: 't' });
+  S.syncLedger();
+  // 곧바로 A 로 되돌린다 — 예전에는 여기서 'sig === 옛 A' 로 생략되고 B 가 DB 에 남았다.
+  ov.clearOverride('10.2.0.20');
+  S.syncLedger();
+  const seqNow = S._ledgerSeq;
+  for (let i = 0; i < 200 && S._lastLedgerSig == null; i++) await new Promise((r) => setTimeout(r, 20));
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(S._ledgerSeq, seqNow);
+  assert.equal(rowSig(S.snapshot), sigA, 'override 해제 뒤 원장 내용이 A 로 돌아오지 않았다(테스트 전제)');
+  assert.equal(S._lastLedgerSig, sigA, '마지막으로 쓴 내용(A)이 아니라 중간 내용(B)이 기억됐다 — ipam.db 가 B 로 굳는다');
+});

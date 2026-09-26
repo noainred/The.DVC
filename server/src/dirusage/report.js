@@ -8,7 +8,7 @@
  * 값 표기 규칙은 화면과 같은 함수를 쓴다(scan.js humanBytes) — 메일과 화면 숫자가 어긋나지 않게.
  * 증감이 null 이면 '—' 로 둔다(직전 관측이 없다는 뜻이며 0 으로 채우지 않는다).
  */
-import { humanBytes, deltaMap, removedEntries } from './scan.js';
+import { humanBytes, compareScans } from './scan.js';
 import { localStamp } from '../util/dayKey.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -21,6 +21,7 @@ const fmtTs = (ts) => localStamp(ts) || '—';
 function fmtDelta(d) {
   if (!d) return '—';
   if (d.isNew) return '신규';
+  if (d.entered) return '순위 진입';   // v2.620(SRV2620-01): 기존 폴더가 순위에 올라왔다(신규가 아니다)
   if (d.deltaBytes == null) return '—';
   if (d.deltaBytes === 0) return '0';
   return `${d.deltaBytes > 0 ? '+' : ''}${humanBytes(d.deltaBytes)}`;
@@ -44,8 +45,15 @@ export function renderSubject(template, { root, agent, ts, topN }) {
  */
 export function renderReport(scan, prev = null) {
   const rows = scan?.entries || [];
-  const dm = deltaMap(rows, prev?.entries || null);
-  const removed = removedEntries(rows, prev?.entries || null);
+  // v2.620(SRV2620-01): Top-N 끼리가 아니라 전체 이름 지문으로 비교한다 — 순위 밖 이탈은 '삭제' 가 아니고
+  //   순위 진입은 '신규' 가 아니다. 지문이 없는 옛 기록이면 단정하지 않고 따로 말한다.
+  const cmp = compareScans(scan, prev);
+  const dm = cmp.delta;
+  const removed = cmp.removed;
+  const rankedOut = cmp.rankedOut;
+  const outConfirmed = rankedOut.filter((r) => r.confirmed);
+  const outUnknown = rankedOut.filter((r) => !r.confirmed);
+  const names = (list) => `${list.slice(0, 10).map((r) => r.name).join(', ')}${list.length > 10 ? ' …' : ''}`;
   const denom = Number.isFinite(scan?.totalBytes) && scan.totalBytes > 0 ? scan.totalBytes : scan?.sumBytes || 0;
   const pct = (b) => (denom > 0 ? `${Math.round((b / denom) * 1000) / 10}%` : '—');
 
@@ -61,7 +69,10 @@ export function renderReport(scan, prev = null) {
     tl.push(`${String(i + 1).padStart(3)}  ${humanBytes(e.bytes).padStart(11)}  ${pct(e.bytes).padStart(6)}  ${fmtDelta(dm.get(e.name)).padStart(10)}  ${e.name}`);
   });
   if (scan.othersCount > 0) tl.push(`      ${humanBytes(scan.othersBytes).padStart(11)}  ${pct(scan.othersBytes).padStart(6)}              (그 외 ${scan.othersCount}개)`);
-  if (removed.length) tl.push('', `사라진 폴더 ${removed.length}개: ${removed.slice(0, 10).map((r) => r.name).join(', ')}${removed.length > 10 ? ' …' : ''}`);
+  if (removed.length) tl.push('', `사라진 폴더 ${removed.length}개: ${names(removed)}`);
+  if (outConfirmed.length) tl.push('', `순위 밖으로 밀린 폴더 ${outConfirmed.length}개(지금도 있음): ${names(outConfirmed)}`);
+  if (outUnknown.length) tl.push('', `순위 밖으로 벗어난 폴더 ${outUnknown.length}개(삭제인지 순위 밖인지 확인 불가): ${names(outUnknown)}`);
+  if (cmp.enteredUnknown) tl.push('', `순위 진입 ${cmp.enteredUnknown}개는 직전 기록에 전체 폴더 목록이 없어 새로 생긴 폴더인지 알 수 없습니다.`);
   if (scan.skipped) tl.push('', `⚠ 해석하지 못한 줄 ${scan.skipped}개(권한 없는 폴더이거나 이름에 개행이 있는 경우).`);
   if (scan.truncated) tl.push('⚠ 하위 폴더가 매우 많아 일부만 집계했습니다.');
   const text = tl.join('\n');
@@ -83,7 +94,7 @@ export function renderReport(scan, prev = null) {
 
   const body = rows.map((e, i) => {
     const d = dm.get(e.name);
-    const dCol = d?.isNew ? '#7a5af8' : d?.deltaBytes > 0 ? '#d92d20' : d?.deltaBytes < 0 ? '#039855' : '#667085';
+    const dCol = d?.isNew ? '#7a5af8' : d?.entered ? '#1570ef' : d?.deltaBytes > 0 ? '#d92d20' : d?.deltaBytes < 0 ? '#039855' : '#667085';
     return `<tr>`
       + `<td style="${tdR}${muted}">${i + 1}</td>`
       + `<td style="${td}word-break:break-all;">${esc(e.name)}</td>`
@@ -101,7 +112,10 @@ export function renderReport(scan, prev = null) {
     : '';
 
   const notes = [];
-  if (removed.length) notes.push(`직전 수집에 있었으나 사라진 폴더 <b>${removed.length}개</b>: ${esc(removed.slice(0, 10).map((r) => r.name).join(', '))}${removed.length > 10 ? ' …' : ''}`);
+  if (removed.length) notes.push(`직전 수집에 있었으나 사라진 폴더 <b>${removed.length}개</b>: ${esc(names(removed))}`);
+  if (outConfirmed.length) notes.push(`순위 밖으로 밀린 폴더 <b>${outConfirmed.length}개</b>(지금도 있습니다 — 이번 크기는 '그 외' 에 합산): ${esc(names(outConfirmed))}`);
+  if (outUnknown.length) notes.push(`순위 밖으로 벗어난 폴더 <b>${outUnknown.length}개</b> — 이번 기록에 전체 폴더 목록이 없어 삭제인지 순위 밖인지 확인할 수 없습니다: ${esc(names(outUnknown))}`);
+  if (cmp.enteredUnknown) notes.push(`'순위 진입' <b>${cmp.enteredUnknown}개</b>는 직전 기록에 전체 폴더 목록이 없어 새로 생긴 폴더인지 알 수 없습니다.`);
   if (scan.skipped) notes.push(`해석하지 못한 줄 <b>${scan.skipped}개</b> — 읽기 권한이 없는 폴더이거나 이름에 개행이 든 경우입니다. 그만큼 합계에서 빠집니다.`);
   if (scan.truncated) notes.push('하위 폴더가 매우 많아 일부만 집계했습니다.');
   if (!prev) notes.push('직전 수집 기록이 없어 <b>증감을 표시하지 않았습니다</b>(다음 회차부터 표시됩니다).');

@@ -9,12 +9,15 @@ import { STable } from '../../components/STable.jsx';
 // 바이트를 사람이 읽는 단위로.
 function fmtBytes(b) {
   if (b == null || !Number.isFinite(Number(b))) return '—';
-  const n = Number(b);
-  if (n < 1024) return `${n} B`;
+  // v2.620(WEB2620-07): 줄어든 DB 는 추이가 음수다 — 부호를 떼고 단위를 고른 뒤 붙인다(예전엔 '-5368709120 B').
+  const raw = Number(b);
+  const sign = raw < 0 ? '-' : '';
+  const n = Math.abs(raw);
+  if (n < 1024) return `${sign}${n} B`;
   const u = ['KB', 'MB', 'GB', 'TB'];
   let v = n / 1024; let i = 0;
   while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${u[i]}`;
+  return `${sign}${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${u[i]}`;
 }
 
 const DB_TYPE_BADGE = { sqlite: 'blue', json: 'green', ndjson: 'amber', file: 'gray' };
@@ -56,7 +59,7 @@ function DbDetailModal({ f, health, onClose, onCheck, checking }) {
     <Modal title={`DB 상세 — ${f.file}`} onClose={onClose} width={900} resizable minWidth={560} minHeight={400}>
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         <Card label="크기" value={fmtBytes(f.sizeBytes)} meta={f.type === 'sqlite' ? 'WAL/SHM 합산' : ''} />
-        <Card label="증가/일(추정)" value={f.trend?.perDayBytes ? `${f.trend.perDayBytes > 0 ? '+' : ''}${fmtBytes(f.trend.perDayBytes)}` : '—'} meta={`관측 ${fmtSpan(f.trend?.spanMs)}`} />
+        <Card label="증가/일(추정)" value={f.trend?.perDayBytes == null || !(f.trend?.spanMs > 0) ? '—' : `${f.trend.perDayBytes > 0 ? '+' : ''}${fmtBytes(f.trend.perDayBytes)}`} meta={`관측 ${fmtSpan(f.trend?.spanMs)}`} />
         <Card label="1년 후(추정)" value={f.trend?.forecast?.available ? fmtBytes(f.trend.forecast.in1y) : '—'} meta={f.trend?.forecast?.available ? `신뢰도 ${CONF_LABEL[f.trend.forecast.confidence] || '—'}` : (f.trend?.forecast?.reason || '표본 부족')} />
       </div>
 

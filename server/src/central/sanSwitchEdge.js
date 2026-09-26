@@ -10,6 +10,7 @@ import { config } from '../config.js';
 import { sanitizeEdgeDevices, admitAgent, createDebouncedWriter, isPlainObj, scalarizeFields } from './edgeRecord.js'; // v2.599 CEN-2599-03·04·05
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js'; // v2.613 EDGE2613-04
+import { canonicalAgent } from '../util/agentKey.js'; // v2.620(EDGE2620-03)
 
 /** v2.607(CEN2607-02): SAN 스냅샷 최상위의 추가 표시 필드(목록 표가 그대로 그린다). */
 export const SAN_DISPLAY_KEYS = Object.freeze(['fabricOs', 'domainId', 'switchState', 'switchName']);
@@ -137,7 +138,23 @@ setCollectBaseResolver((id) => {
  * @param info (선택) 수신 정리 결과 — `dropped`(사유별 뺀 개수)·`coerced`·`refused`·`evicted`.
  *   ⚠ v2.599(CEN-2599-03·05): 객체가 아니거나 deviceId 가 식별자가 아닌 원소는 빼고, 표시 필드의 객체 값은 null 로.
  */
+/**
+ * v2.620(EDGE2620-03): 저장 키는 **대소문자를 정규화한 이름**이다(PDU 는 소문자, CVP 는 v2.611 CEN2611-02 canonicalAgent 와 같은 판단).
+ *   예전에는 원문 agent 로 키를 잡아, 개별↔공유 토큰 전환 등으로 'Edge-A'/'edge-a' 가 오가면 두 행이 생기고 위임 0대 '목록 비우기'·
+ *   장비 제거가 새 표기 행에만 적용돼 **옛 표기 행의 스냅샷이 영구 잔존**했다(화면 orphans·보고 중복·엣지 칸 점유).
+ *   이미 보관 중인 표기가 있으면 그것을 쓴다(키가 흔들리지 않게 — 여럿이면 정렬 첫 것).
+ */
+function storeKeyOf(agent) { return canonicalAgent(agent, [...load().keys()]) || String(agent ?? '').trim(); }
+/** 목록을 교체 저장한 뒤 대소문자만 다른 옛 표기 행을 지운다(지운 이름 목록). ⚠ 상태 전용 보고에서는 지우지 않는다 — 목록이 아니다. */
+function dropAgentVariants(key) {
+  const lo = String(key).toLowerCase(); const gone = [];
+  for (const k of [...load().keys()]) if (k !== key && k.toLowerCase() === lo) { load().delete(k); gone.push(k); }
+  if (gone.length) console.warn(`[central] ${'sanswitch-data'}: 엣지 '${String(key).slice(0, 64)}' 의 대소문자만 다른 옛 보관분 ${gone.length}행을 정리했습니다`);
+  return gone;
+}
+
 export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1, info = {} } = {}) {
+  agent = storeKeyOf(agent); // v2.620(EDGE2620-03)
   const { devices: clean, dropped, coerced, trimmed } = sanitizeEdgeDevices(devices, { idKey: 'deviceId', max: MAX_DEVICES_PER_AGENT });
   info.dropped = dropped; info.coerced = coerced;
   // v2.600(RECENT2600-02): 장비 크기 상한을 넘어 **조닝을 잘라 받은** 장비 수 — 버린 것(dropped)과 구분해 밝힌다.
@@ -160,6 +177,7 @@ export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1, info 
   }
   const prevRec = load().get(agent);
   load().set(agent, { at: Date.now(), devices: list, ...(prevRec?.status ? { status: prevRec.status } : {}) }); // v2.613 EDGE2613-04: 마지막 상태 보고는 보존
+  if (chunk === 0) { const variants = dropAgentVariants(agent); if (variants.length) info.variantsRemoved = variants.length; } // v2.620(EDGE2620-03) — 교체(청크 0)일 때만
   writer.save();
   // 작업 로그(v2.516) — 중앙 화면의 '수집 작업' 구획이 위임 장비도 보여주려면 push 수신 시
   // 남겨야 한다(엣지의 로컬 로그는 중앙에서 볼 수 없다). 같은 collectedAt 재push 는 건너뛴다.
@@ -208,6 +226,7 @@ export function _lastRecSize() { return _lastRec.size; }
  * 아는 키만 담고(reason·registered·at) 문자열 길이를 자른다(변조 본문이 파일을 부풀리지 않게). 반환: 기록했는지.
  */
 export function saveEdgeSanSwitchStatus(agent, status) {
+  agent = storeKeyOf(agent); // v2.620(EDGE2620-03) — 상태도 같은 행에 붙는다
   const src = isPlainObj(status) ? status : {};
   const rec = load().get(agent) || { at: 0, devices: [] };
   const registered = numOrNull(src.registered); // v2.618(BUG-2): null(엣지가 등록부를 못 읽음)을 0(위임 0대 — 정상)으로 읽지 않는다

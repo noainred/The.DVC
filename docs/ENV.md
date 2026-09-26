@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **551개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **552개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-26)
@@ -12,7 +12,7 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (28)
+## 공용 유틸 (29)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -24,6 +24,7 @@
 | `BIG_JSON_PER_AGENT` |  |  | util/bigJsonGate.js |
 | `BIG_JSON_READ_DEADLINE_MS` |  |  | util/bigJsonGate.js |
 | `BIG_JSON_SESSION_MAX_CONCURRENT` |  |  | util/bigJsonGate.js |
+| `BIG_JSON_SESSION_READ_DEADLINE_MS` |  |  | util/bigJsonGate.js |
 | `BMUSAGE_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `EDGE_EXPORT_MAX_BYTES` | `64` |  | util/readCapped.js |
 | `EDGE_RESPONSE_MAX_BYTES` | `16` |  | util/readCapped.js |
@@ -735,4 +736,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 551
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 552

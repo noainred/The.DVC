@@ -25,6 +25,7 @@ export function bytesRateToBps(v) {
 }
 import { numOrNull } from '../../util/numOrNull.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
+import { NO_REDIRECT, refuseRedirect } from '../../util/noRedirect.js';
 
 // Isilon 전용 로컬 TLS 디스패처 — 사내 자체서명 장비 한정(다른 fetch 에 주입 금지).
 // 보안(M-4): STORAGE_TLS_VERIFY=true 면 인증서 검증을 켠다(기본은 기존대로 해제).
@@ -44,6 +45,7 @@ export async function get(device, apiPath, { signal } = {}) { // v2.308: 영역 
   try {
     res = await fetch(url, {
       headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+      redirect: NO_REDIRECT, // v2.620 SEC2620-01
       dispatcher: isilonDispatcher,
       signal: outer ? AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), outer]) : AbortSignal.timeout(TIMEOUT_MS),
     });
@@ -51,6 +53,7 @@ export async function get(device, apiPath, { signal } = {}) { // v2.308: 영역 
     if (!isTransportError(e)) throw e;
     throw new Error(describeFetchError(e, { host: device.host, port: PORT, timeoutMs: TIMEOUT_MS }), { cause: e });
   }
+  refuseRedirect(res, 'Isilon');
   if (res.status === 401) throw new Error('인증 실패(401) — 계정/비밀번호 확인');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -167,7 +170,9 @@ export function normalizeIsilon(device, raw) {
   if (raw.pools) {
     snap.pools = (raw.pools.storagepools || raw.pools.nodepools || []).slice(0, 32).map((p) => {
       const u = p.usage || {};
-      const total = Number(u.total_bytes ?? u.usable_bytes) || 0;
+      // v2.620(SRV2620-06): 전체를 못 읽은 풀을 `|| 0` 으로 0 바이트라 싣지 않는다 — null(화면 '—'). 0 이하도 '못 읽음'.
+      const t0 = numOrNull(u.total_bytes ?? u.usable_bytes);
+      const total = t0 != null && t0 > 0 ? t0 : null;
       const used = numOrNull(u.used_bytes);
       return { name: p.name || '', totalBytes: total, usedBytes: used, pct: total && used != null ? Math.round((used / total) * 1000) / 10 : null };
     });

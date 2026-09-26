@@ -462,6 +462,11 @@ class Store {
       const { rows } = buildIpamRows(this.snapshot);
       const sig = ledgerSignature(rows);
       if (sig === this._lastLedgerSig) { this._lastLedgerInputSig = inSig; return; } // 내용 변동 없음 → 쓰기 생략
+      // v2.620(RECENT2620-01 — v2.619 가 만든 회귀): 쓰기를 내보내는 순간 ipam.db 내용은 '미정' 이다. 기억을 비우지 않으면
+      //   쓰기 B 가 진행 중일 때 내용이 A 로 되돌아간 호출이 위 분기(sig === 옛 A)로 생략되고, B 는 seq 가 맞지 않아 기억을
+      //   갱신하지 못해 DB 에 B 가 남은 채 입력 지문 생략·전량 확인까지 전부 '같다' 고 판단했다(대역 정책 저장 직후 삭제로 재현).
+      //   쓰기는 워커 한 줄로 순서대로 끝나므로 마지막(seq 가 현재인) 성공만 기억을 다시 세운다.
+      this._lastLedgerSig = null; this._lastLedgerInputSig = null;
       // 서명은 쓰기 '성공 후'에 기록 — 외부 리더의 락 등으로 쓰기가 실패했는데 서명만 갱신되면
       // 내용이 실제로 바뀔 때까지 재시도가 영영 없어 ipam.db가 낡은 채 남는다. 입력 지문도 같은 규칙이다 —
       // 실패한 입력을 기억하면 다음 틱이 건너뛰어 재시도가 없어진다. 늦게 끝난 옛 쓰기는 새 쓰기의 기억을 덮지 않는다(seq).

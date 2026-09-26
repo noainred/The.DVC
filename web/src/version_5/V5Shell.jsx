@@ -53,7 +53,7 @@ const PAGE_SUB = {
 };
 
 export default function V5Shell({
-  user, health, vcenters, tab, visibleTabIds, scope, setScope, children, onSearchIn, onShowVcDown, onShowNotes, onExit, onLogout,
+  user, health, healthError = null, upgrading = false, vcenters, tab, visibleTabIds, scope, setScope, children, onSearchIn, onShowVcDown, onShowNotes, onExit, onLogout,
 }) {
   const [hash, setHash] = useState(() => window.location.hash);
   useEffect(() => {
@@ -91,7 +91,10 @@ export default function V5Shell({
   // 하단 상태 카드 — 통신 지도는 조건을 만족할 때만 부른다(아니면 path '' → 폴링하지 않는다).
   const commOk = isAdmin && fullScope && toolAllowed('comm-map');
   const { data: commMap } = usePolling(commOk ? '/tools/comm-map' : '', {}, 60_000);
-  const sc = statusCard({ health, commMap: commOk ? commMap : null });
+  const sc = statusCard({ health, healthError, upgrading, commMap: commOk ? commMap : null });
+  // v2.620(WEB2620-02): '최근 수집 N분 전' 은 부모 재렌더에만 기대면 멈춘다 — 30초마다 다시 그린다.
+  const [, setTick] = useState(0);
+  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 30_000); return () => clearInterval(t); }, []);
 
   // 통합 검색
   const [q, setQ] = useState('');
@@ -209,7 +212,9 @@ export default function V5Shell({
             <b>{sc.label}</b>
           </div>
           {sc.detail && (
-            <button type="button" className="v5-status-detail" onClick={onShowVcDown} title="클릭하면 연결 안 되는 vCenter 목록">{sc.detail}</button>
+            sc.detailTarget === 'vcenter' ? <button type="button" className="v5-status-detail" onClick={onShowVcDown} title="클릭하면 연결 안 되는 vCenter 목록">{sc.detail}</button>
+              : sc.detailTarget === 'edges' ? <button type="button" className="v5-status-detail" onClick={() => { window.location.hash = '#/tools/comm-map'; }} title="클릭하면 통신 지도(엣지 상태)">{sc.detail}</button>
+              : <div className="v5-status-detail" style={{ cursor: 'default', textDecoration: 'none' }}>{sc.detail}</div>
           )}
           <div className="v5-status-sub">
             {sc.generatedMs ? `최근 수집 ${agoText(sc.generatedMs)}` : '수집 시각 없음'}

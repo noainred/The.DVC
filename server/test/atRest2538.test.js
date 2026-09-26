@@ -68,10 +68,10 @@ test('★ 복원 병합 — 표식 줄은 현재 값으로 되살리고, 현재�
 });
 
 // ── ③ 번들 왕복(실제 파일) ───────────────────────────────────────────────────
-test('★ 백업 번들에 portal.env 의 AUTH_SECRET 이 들어가지 않고, 복원 뒤에도 현재 키가 유지된다', () => {
+test('★ 백업 번들에 portal.env 의 AUTH_SECRET 이 들어가지 않고, 복원 뒤에도 현재 키가 유지된다', async () => {
   fs.writeFileSync(path.join(CFG, 'portal.env'), 'PORT=4000\nAUTH_SECRET=very-secret-value\nCENTRAL_TOKEN=tok-abc\nDATA_SOURCE=mock\n');
   fs.writeFileSync(path.join(CFG, 'ui.json'), '{"theme":"dark"}');
-  const r = BK.createBackup('manual');
+  const r = await BK.createBackup('manual'); // v2.620 PERF2620-01: 비동기
   assert.equal(r.redacted, 2, JSON.stringify(r));
   const raw = fs.readFileSync(path.join(CFG, 'backups', r.name));
   const text = zlib.gunzipSync(raw).toString('utf8');
@@ -81,7 +81,7 @@ test('★ 백업 번들에 portal.env 의 AUTH_SECRET 이 들어가지 않고, �
   assert.deepEqual(a.central.redacted, { 'portal.env': ['AUTH_SECRET', 'CENTRAL_TOKEN'] }, '무엇을 가렸는지 번들이 말한다');
   assert.ok(!(BK.REDACTED_META in a.central.files), '메타 키가 파일 목록에 섞이면 안 된다');
   // 복원: 현재 portal.env 의 키가 그대로 남아야 한다
-  const rr = BK.restoreCentral(a);
+  const rr = await BK.restoreCentral(a);
   assert.equal(rr.envKeysRestored, 2, JSON.stringify(rr));
   const after = fs.readFileSync(path.join(CFG, 'portal.env'), 'utf8');
   assert.ok(after.includes('AUTH_SECRET=very-secret-value') && after.includes('CENTRAL_TOKEN=tok-abc'), `복원이 키를 지웠다:\n${after}`);

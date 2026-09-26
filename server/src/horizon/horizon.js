@@ -22,6 +22,7 @@ import { normRequestTimeoutMs, effectiveRequestTimeoutMs } from '../vcenter/soap
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 
 const FILE = path.join(config.configDir, 'horizon.json');
+import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 // 사내 Horizon은 사설 인증서가 일반적 — 기본은 TLS 검증 생략, HORIZON_TLS_VERIFY=true로 강제 가능(NSX와 동일 패턴).
 // v2.506(감사 S1 #2): DNS 리바인딩(TOCTOU) 차단 — 검증을 `lookup` 안에서 해 소켓이 실제로 쓸
 // 주소를 그 순간에 검사한다. SNI(`servername`)·Host·인증서 검증은 원래 호스트명을 그대로 쓴다.
@@ -140,8 +141,8 @@ export function removeHorizon(id) {
 }
 
 async function hzFetch(url, opts, timeoutMs) {
-  const res = await fetch(url, { ...opts, dispatcher, signal: AbortSignal.timeout(timeoutMs) });
-  return res;
+  const res = await fetch(url, { ...opts, redirect: NO_REDIRECT, dispatcher, signal: AbortSignal.timeout(timeoutMs) });
+  return refuseRedirect(res, 'Horizon 커넥션 서버'); // v2.620 SEC2620-01
 }
 
 /**

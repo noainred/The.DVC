@@ -32,6 +32,9 @@ import { listAssignments, getResults } from '../../central/assignments.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
 import { numOrNull } from '../../util/numOrNull.js';
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
+// v2.620(SEC2620-05): 쓰기에만 걸던 이 게이트를 스캔 대역·결과·로그·잡 **조회**에도 건다 — 전 법인 IP 대역과
+//   iDRAC·iLO 계정명이 범위 관리자에게 열려 있었다(쓰기는 v2.611 에 막았다). 서버별 상세 조회(인벤토리·센서)는
+//   '서버 분석 조회에는 범위를 걸지 않는다' 는 기존 결정이라 그대로 둔다.
 const fleetOnly = fullScopeOnlyWith('iDRAC 등록부·스캔 대역·스캔 실행은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 실행할 수 있습니다(재귀속·삭제로 다른 법인 서버를 옮길 수 있었다).');
 
 
@@ -259,7 +262,7 @@ adminRouter.post('/idrac/scan', adminOnly, fleetOnly, async (req, res) => {
 });
 
 // 위임 스캔 결과 폴링. Query: reqId
-adminRouter.get('/idrac/scan-result', adminOnly, (req, res) => {
+adminRouter.get('/idrac/scan-result', adminOnly, fleetOnly, (req, res) => {
   res.json(getIdracScanResult(String(req.query.reqId || '')));
 });
 
@@ -268,7 +271,7 @@ adminRouter.get('/idrac/scan-result', adminOnly, (req, res) => {
 // 이름은 반드시 목록에 넣는다 — 잡을 실제로 인출하는 건 '폴링 중인 이름'이므로, 등록만 되고
 // 폴링하지 않는 이름(예: OC2Sandbox)이 아니라 실제 폴링 이름(예: oc2)을 고를 수 있어야 한다.
 // 대소문자 무시 중복 제거(잡 매칭도 소문자 기준).
-adminRouter.get('/idrac/scan-agents', adminOnly, (_req, res) => {
+adminRouter.get('/idrac/scan-agents', adminOnly, fleetOnly, (_req, res) => {
   const names = new Set();
   const lower = new Set();
   const add = (v) => { const s = String(v || '').trim(); if (!s) return; const k = s.toLowerCase(); if (!lower.has(k)) { lower.add(k); names.add(s); } };
@@ -299,7 +302,7 @@ adminRouter.post('/idrac/register-scanned', adminOnly, fleetOnly, (req, res) => 
 // ---- vCenter별 iDRAC 스캔 대역 + 주기 자동 발견(IPMS의 'vCenter별 스캔 대역'과 동일 흐름) ----
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
 // 발견해 해당 vCenter로 자동 등록한다. 비밀번호는 응답에서 마스킹된다.
-adminRouter.get('/idrac/scan-ranges', adminOnly, (_req, res) => {
+adminRouter.get('/idrac/scan-ranges', adminOnly, fleetOnly, (_req, res) => {
   res.json({ ok: true, ranges: listScanRanges(), status: idracScanStatus(), centralEnabled: Boolean(config.central.token) });
 });
 // 저장/수정. Body: { id?, datacenterId, service?, ranges?, username?, password?, agent?, enabled?, mode? }
@@ -324,7 +327,7 @@ adminRouter.delete('/idrac/scan-ranges/:id', adminOnly, fleetOnly, (req, res) =>
  * 가져오기는 dryRun(법인 해석·대역 문법(expandIpList)·중복 검증) → 커밋 2단계이고,
  * (법인,서비스)가 겹치는 행은 body.overwrite=true 명시 시에만 갱신한다.
  */
-adminRouter.get('/idrac/scan-ranges/export.csv', adminOnly, (req, res) => {
+adminRouter.get('/idrac/scan-ranges/export.csv', adminOnly, fleetOnly, (req, res) => {
   const withPw = String(req.query.secrets || '') === '1';
   const dcName = (() => { try { const m = new Map(listDatacenters().map((d) => [d.id, d.name || d.id])); return (id) => m.get(id) || id || ''; } catch { return (id) => id || ''; } })();
   const send = () => {
@@ -410,10 +413,10 @@ adminRouter.post('/idrac/scan-ranges/scan', adminOnly, fleetOnly, (req, res) => 
   res.status(r.ok ? 200 : 400).json({ ...r, status: idracScanStatus() });
 });
 // 진행 상태(가벼운 폴링용).
-adminRouter.get('/idrac/scan-ranges/status', adminOnly, (_req, res) => res.json({ ok: true, status: idracScanStatus() }));
+adminRouter.get('/idrac/scan-ranges/status', adminOnly, fleetOnly, (_req, res) => res.json({ ok: true, status: idracScanStatus() }));
 
 // 스캔 로그(이력) — 주기/수동 스캔의 법인별 실행 기록. datacenterId 미지정 = 전체 통합.
-adminRouter.get('/idrac/scan-log', adminOnly, (req, res) => {
+adminRouter.get('/idrac/scan-log', adminOnly, fleetOnly, (req, res) => {
   const datacenterId = String(req.query.datacenterId || '').trim();
   const limit = Number(req.query.limit) || 300;
   res.json({ ok: true, entries: listIdracScanLog({ datacenterId, limit }), datacenters: idracScanLogDatacenters() });
@@ -439,7 +442,7 @@ adminRouter.put('/idrac/scan-ranges/interval', adminOnly, fleetOnly, (req, res) 
 // 스캔 현황 — 주기 스캐너 상태 + 진행 중·최근 위임 스캔/등록 잡 목록(어디서든 진행 확인용).
 // 위임 스캔으로 에이전트 현지 등록된 전력은 '원격 수집(collector)'로 반영되므로, 스캔 에이전트가
 // 수집 서버로 등록돼 있는지 UI가 진단할 수 있게 수집 서버 요약(상태 포함)도 함께 반환한다.
-adminRouter.get('/idrac/scan-jobs', adminOnly, (_req, res) => {
+adminRouter.get('/idrac/scan-jobs', adminOnly, fleetOnly, (_req, res) => {
   const st = allCollectorStatus();
   const collectors = listCollectors().map((c) => ({
     id: c.id, name: c.name, datacenter: c.datacenter || '', enabled: c.enabled !== false,
@@ -449,7 +452,7 @@ adminRouter.get('/idrac/scan-jobs', adminOnly, (_req, res) => {
 });
 
 // 스캔 잡 세부 로그 — '스캔 현황' 로그창. 이벤트 타임라인 + 멈춤 진단(hints).
-adminRouter.get('/idrac/scan-job-log', adminOnly, (req, res) => {
+adminRouter.get('/idrac/scan-job-log', adminOnly, fleetOnly, (req, res) => {
   // 수집 서버(원격)로 등록된 id/이름(소문자) — '등록·정상인데 폴링만 없음' 진단에 사용.
   const collectors = new Set();
   for (const c of listCollectors()) { if (c.id) collectors.add(String(c.id).toLowerCase()); if (c.name) collectors.add(String(c.name).toLowerCase()); }

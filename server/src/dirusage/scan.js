@@ -12,6 +12,8 @@
  * 중앙은 그 표준출력을 여기로 넘긴다.
  */
 
+import crypto from 'node:crypto';
+
 /** 한 번에 다룰 하위 폴더 수 상한 — 엔트리가 수만 개인 공유에서 메모리·메일 크기를 유계로 둔다. */
 export const MAX_ENTRIES = 20_000;
 /** Top-N 허용 범위(설정 화면 입력 검증과 공유). */
@@ -104,6 +106,7 @@ export function topEntries(entries, n = 20, totalBytes = null) {
  * @param {{name:string,bytes:number}[]} cur
  * @param {{name:string,bytes:number}[]|null} prev
  * @returns {Map<string,{deltaBytes:number|null, isNew:boolean}>}
+ * v2.620(SRV2620-01): 두 인자가 전체 목록일 때의 판정이다 — Top-N 기록끼리는 compareScans 를 쓸 것.
  */
 export function deltaMap(cur, prev) {
   const out = new Map();
@@ -118,11 +121,111 @@ export function deltaMap(cur, prev) {
   return out;
 }
 
-/** 사라진 항목(직전에 있었으나 이번에 없는 폴더) — 삭제·이동을 리포트에 남긴다. */
+/**
+ * 사라진 항목(직전에 있었으나 이번에 없는 폴더) — 두 인자가 **전체 목록**일 때의 판정이다.
+ * v2.620(SRV2620-01): Top-N 기록끼리는 이 함수가 아니라 compareScans 를 쓴다(순위 밖 이탈을 삭제로 말한다).
+ */
 export function removedEntries(cur, prev) {
   if (!Array.isArray(prev) || !prev.length) return [];
   const curNames = new Set((cur || []).map((e) => e.name));
   return prev.filter((e) => !curNames.has(e.name)).map((e) => ({ name: e.name, bytes: e.bytes }));
+}
+
+/*
+ * v2.620(SRV2620-01) — Top-N 끼리만 비교하면 순위 밖으로 밀린 폴더가 '사라진 폴더(삭제)' 로,
+ * 순위에 올라온 기존 폴더가 '신규' 로 메일에 나갔다(재현: topN=2, a300·b200·c100 → a300·b50·c250 에서
+ * b 는 50B 로 존재하는데 삭제, c 는 100→250 인데 신규). 그래서 기록에 **전체 폴더 이름의 지문 집합**
+ * (이름당 sha1 앞 8자리, 정렬 후 이어 붙임 — 2만 폴더면 160KB, 보통 수백 개면 수 KB)을 남기고
+ * 비교는 그 집합으로 '정말 없어졌는가/정말 새로 생겼는가' 를 판정한다. 바이트는 남기지 않는다
+ * (저장 정책 'Top-N + 요약' 은 그대로 — 순위 밖 폴더의 과거 크기는 여전히 알 수 없다).
+ * 지문 집합이 없는 옛 기록·truncated 기록은 단정하지 않고 '순위 진입' / '순위 밖으로 벗어남(확인 불가)'
+ * 으로 따로 말한다. 32비트 지문이라 충돌이 드물게 있을 수 있다 — 충돌이면 새 폴더를 '순위 진입(기존)'
+ * 으로, 지운 폴더를 '순위 밖' 으로 말한다(삭제·신규를 지어내는 쪽이 아니라 보수적인 쪽으로 틀린다).
+ */
+const DIGEST_LEN = 8;
+
+/** 폴더 이름 → 8자리 지문. */
+export function nameDigest(name) {
+  return crypto.createHash('sha1').update(String(name)).digest('hex').slice(0, DIGEST_LEN);
+}
+
+/** 전체 항목 → 지문 집합 문자열(정렬·중복 제거 후 이어 붙임). 저장·비교 모두 이 형식이다. */
+export function buildNameSet(entries) {
+  const set = new Set();
+  for (const e of entries || []) if (e && e.name != null) set.add(nameDigest(e.name));
+  return [...set].sort().join('');
+}
+
+/** 기록(camelCase 레코드 또는 DB 행)의 지문 집합 → Set | null(없거나 형식 불일치). */
+export function nameSetOf(rec) {
+  const s = rec?.nameSet ?? rec?.name_set;
+  if (typeof s !== 'string' || !s || s.length % DIGEST_LEN !== 0 || !/^[0-9a-f]+$/.test(s)) return null;
+  const out = new Set();
+  for (let i = 0; i < s.length; i += DIGEST_LEN) out.add(s.slice(i, i + DIGEST_LEN));
+  return out;
+}
+
+const othersCountOf = (r) => Number(r?.othersCount ?? r?.others_count ?? NaN);
+const truncatedOf = (r) => !!(r?.truncated);
+
+/**
+ * 그 기록이 '어떤 이름이 있었는가' 를 답할 수 있는 수단.
+ *  - Top-N 이 전부(othersCount === 0, truncated 아님)면 Top-N 자체가 전체 목록이다.
+ *  - 아니면 지문 집합(truncated 가 아닐 때만 — 잘린 목록의 부재는 증거가 아니다).
+ *  - 그것도 없으면 null(모른다).
+ * @returns {null | ((name:string)=>boolean)}
+ */
+function membershipOf(rec) {
+  if (!rec) return null;
+  if (truncatedOf(rec)) return null;
+  const top = new Set((rec.entries || []).map((e) => e.name));
+  if (othersCountOf(rec) === 0) return (n) => top.has(n);
+  const set = nameSetOf(rec);
+  if (!set) return null;
+  return (n) => top.has(n) || set.has(nameDigest(n));
+}
+
+/**
+ * 스캔 두 건을 비교한다(v2.620 SRV2620-01) — 리포트는 이 함수만 쓴다.
+ * @param {object} cur  buildScanRecord() 결과(또는 같은 모양)
+ * @param {object|null} prev 직전 스캔(레코드 또는 DB 행)
+ * @returns {{
+ *   delta: Map<string,{deltaBytes:number|null,isNew:boolean,entered?:boolean,existedBefore?:boolean|null}>,
+ *   removed: {name:string,bytes:number}[],          // 전체 목록 기준으로 이번에 없다(삭제·이동)
+ *   rankedOut: {name:string,bytes:number,confirmed:boolean}[],  // 순위 밖으로 벗어남(confirmed=지금도 있음 확인)
+ *   enteredUnknown: number,                          // 순위 진입인데 직전 존재 여부를 모르는 수
+ * }}
+ */
+export function compareScans(cur, prev) {
+  const curTop = cur?.entries || [];
+  const prevTop = prev?.entries || [];
+  const delta = new Map();
+  const removed = [];
+  const rankedOut = [];
+  let enteredUnknown = 0;
+  if (!prev || !prevTop.length) {
+    for (const e of curTop) delta.set(e.name, { deltaBytes: null, isNew: false });
+    return { delta, removed, rankedOut, enteredUnknown };
+  }
+  const prevMap = new Map(prevTop.map((e) => [e.name, e.bytes]));
+  const prevHas = membershipOf(prev);
+  for (const e of curTop) {
+    const p = prevMap.get(e.name);
+    if (p != null) { delta.set(e.name, { deltaBytes: e.bytes - p, isNew: false }); continue; }
+    if (prevHas && !prevHas(e.name)) { delta.set(e.name, { deltaBytes: null, isNew: true }); continue; }
+    // 직전에도 있었지만 순위 밖이었다(prevHas 가 true) 또는 직전 전체 목록이 없어 모른다.
+    const existedBefore = prevHas ? true : null;
+    if (existedBefore == null) enteredUnknown++;
+    delta.set(e.name, { deltaBytes: null, isNew: false, entered: true, existedBefore });
+  }
+  const curNames = new Set(curTop.map((e) => e.name));
+  const curHas = membershipOf(cur);
+  for (const p of prevTop) {
+    if (curNames.has(p.name)) continue;
+    if (curHas && !curHas(p.name)) removed.push({ name: p.name, bytes: p.bytes });
+    else rankedOut.push({ name: p.name, bytes: p.bytes, confirmed: !!curHas });
+  }
+  return { delta, removed, rankedOut, enteredUnknown };
 }
 
 /** 바이트 → 사람이 읽는 크기. 메일·화면이 같은 표기를 쓰도록 여기 하나만 둔다. */
@@ -156,5 +259,7 @@ export function buildScanRecord({ targetId, root, agent, ts, parsed, topN }) {
     skipped: parsed.skipped,
     truncated: parsed.truncated,
     entries: t.top.map((e) => ({ name: e.name, bytes: e.bytes })),
+    // v2.620(SRV2620-01): 전체 이름 지문 — 순위 밖 이탈·진입과 삭제·신규를 구분하는 근거(바이트는 없음).
+    nameSet: buildNameSet(parsed.entries),
   };
 }

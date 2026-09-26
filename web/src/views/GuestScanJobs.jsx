@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson, postJson, delJson, usePolling } from '../api.js';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
+import { ErrorBox } from '../components/ui.jsx';
 import { guestAuthLines } from './authSkipText.js'; // v2.591(감사 F2): 게스트 계정 인증 실패 정지·차단기
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
@@ -12,7 +13,8 @@ export default function GuestScanJobs({ type }) {
   const { data: vcs } = usePolling('/vcenters', {}, 60_000);
   const [jobs, setJobs] = useState(null);
   const [form, setForm] = useState(null);
-  const load = () => fetchJson('/admin/security/guest-scans').then((r) => setJobs((r.jobs || []).filter((j) => !type || j.type === type))).catch(() => setJobs([]));
+  const [loadErr, setLoadErr] = useState(null); // v2.620(WEB2620-09): 조회 실패를 '없습니다' 로 보이지 않는다 — 권한·시한 실패는 사유와 함께.
+  const load = () => fetchJson('/admin/security/guest-scans').then((r) => { setLoadErr(null); setJobs((r.jobs || []).filter((j) => !type || j.type === type)); }).catch((e) => { setLoadErr(e); setJobs([]); });
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [type]);
 
   const blank = { name: '', type: type || 'login-fails', vcenterId: '', os: 'all', intervalMin: 60, days: 7, maxVms: 100, enabled: true, guestUser: '', guestPass: '' };
@@ -28,7 +30,7 @@ export default function GuestScanJobs({ type }) {
         <button className="login-btn" style={{ padding: '6px 12px' }} onClick={() => setForm(blank)}>+ 조사 추가</button>
       </div>
       <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>지정한 주기로 vCenter별·OS별 게스트 OS를 조사해 기록·저장합니다(VMware Tools 가동 VM 대상). 게스트 계정 비우면 GPU 게스트 설정 계정 사용.</p>
-      {!jobs ? <div className="muted">불러오는 중…</div> : jobs.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>등록된 조사가 없습니다.</div> : (
+      {!jobs ? <div className="muted">불러오는 중…</div> : loadErr ? <ErrorBox error={loadErr} /> : jobs.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>등록된 조사가 없습니다.</div> : (
         <div className="table-wrap"><STable><thead><tr><th>이름</th><th>vCenter</th><th>OS</th><th>주기</th><th>최근</th><th>건수</th><th>상태</th><th>작업</th></tr></thead>
           <tbody>{jobs.map((j) => (
             <tr key={j.id}>

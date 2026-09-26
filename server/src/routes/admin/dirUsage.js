@@ -69,7 +69,8 @@ export function registerDirUsage(adminRouter) {
     if (!db) return res.status(503).json({ ok: false, reason: '이력 DB 를 사용할 수 없습니다(node:sqlite).' });
     const scan = db.get(Number(req.params.id));
     if (!scan) return res.status(404).json({ ok: false, reason: '스캔 기록이 없습니다.' });
-    res.json({ ok: true, scan, prev: db.prev(scan.target_id, scan.ts) });
+    // v2.620(SRV2620-01): 지문 집합(name_set)은 비교용 내부 값이라 응답에 싣지 않는다(행마다 최대 160KB).
+    res.json({ ok: true, scan: withoutNameSet(scan), prev: withoutNameSet(db.prev(scan.target_id, scan.ts)) });
   });
 
   // 메일 미리보기(HTML) — 실제 발송 없이 본문만 확인한다. 발송 전에 서식을 보게 하는 용도.
@@ -96,5 +97,12 @@ function toRec(r) {
     totalBytes: r.total_bytes, sumBytes: r.sum_bytes, count: r.count,
     othersBytes: r.others_bytes, othersCount: r.others_count,
     skipped: r.skipped, truncated: !!r.truncated, entries: r.entries || [],
+    nameSet: r.name_set || null,   // v2.620(SRV2620-01): 순위 밖 이탈·진입 판정 근거(옛 행은 null)
   };
+}
+
+function withoutNameSet(r) {
+  if (!r) return r;
+  const { name_set: _omit, ...rest } = r;
+  return rest;
 }

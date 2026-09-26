@@ -61,8 +61,9 @@ adminRouter.get('/backup/status', adminOnly, requireSettingsOwner, (_req, res) =
   res.json({ ...backupStatus(), backups: listBackups(), edges: listAgentConfigs() });
 });
 adminRouter.put('/backup/settings', adminOnly, requireSettingsOwner, (req, res) => res.json(saveBackupSettings(req.body || {})));
-adminRouter.post('/backup/now', adminOnly, requireSettingsOwner, (_req, res) => {
-  try { res.json({ ok: true, ...createBackup('manual', { retention: loadBackupSettings().retention }) }); }
+adminRouter.post('/backup/now', adminOnly, requireSettingsOwner, async (_req, res) => {
+  // v2.620(PERF2620-01): createBackup 은 비동기다(gzip 을 메인 루프 밖에서) — await 해야 실패가 catch 로 온다.
+  try { res.json({ ok: true, ...(await createBackup('manual', { retention: loadBackupSettings().retention })) }); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 adminRouter.get('/backup/download/:name', adminOnly, requireSettingsOwner, (req, res) => {
@@ -83,11 +84,11 @@ adminRouter.get('/backup/view/:name', adminOnly, requireSettingsOwner, (req, res
   });
 });
 adminRouter.delete('/backup/:name', adminOnly, requireSettingsOwner, (req, res) => res.json({ ok: deleteBackup(req.params.name) }));
-adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, (req, res) => {
+adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async (req, res) => {
   try {
     const a = readBackup(req.params.name);
     if (!a) return res.status(404).json({ ok: false, reason: '백업을 찾을 수 없습니다.' });
-    const r = restoreCentral(a, { retention: loadBackupSettings().retention });
+    const r = await restoreCentral(a, { retention: loadBackupSettings().retention });
     logAudit({ user: req.user?.username, action: '포탈 설정 복원', target: req.params.name, detail: `${r.restored}개 파일`, ip: req.ip || '' });
     res.json({ ok: true, ...r, note: '중앙 설정 복원 완료 — 적용하려면 포탈 재시작. 복원 전 현재 설정은 자동 백업(pre-restore)됨.' });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }

@@ -113,7 +113,10 @@ export function infraTotals(ov, scopeId = '') {
     const phys = ov.physicalByCorp && !ov.physicalByCorp.error ? numOrNull(ov.physicalByCorp.byVcenter?.[scopeId]) : null;
     if (!r) return { vcenters: 0, physical: phys, hosts: null, vms: null, vmsOn: null, storageUsedTB: null, storageTotalTB: null, storagePct: null };
     return {
-      vcenters: 1, physical: phys, physicalNote: phys == null ? '이 법인에 연결된 iDRAC 서버 없음' : null,
+      vcenters: 1, physical: phys, // v2.620(WEB2620-05): 집계를 못 읽은 것(오류·필드 없음)과 '연결된 서버 없음' 을 같은 문구로 말하지 않는다.
+      physicalNote: phys != null ? null
+        : (!ov.physicalByCorp || ov.physicalByCorp.error || !ov.physicalByCorp.byVcenter) ? '물리 서버 집계를 읽지 못했습니다'
+        : '이 법인에 연결된 iDRAC 서버 없음',
       hosts: r.hosts, vms: r.vms, vmsOn: r.vmsOn,
       storageUsedTB: r.storageUsedTB, storageTotalTB: r.storageTotalTB, storagePct: r.sto,
     };
@@ -167,7 +170,17 @@ export function trustSummary({ health, ov, scopeId = '' } = {}) {
 }
 
 /** 하단 상태 카드 — 통신 지도 응답(켜진 엣지가 있으면)으로 'Main · Edge', 없으면 vCenter 기준('Edge 0/0' 은 뜻이 없다). */
-export function statusCard({ health, commMap } = {}) {
+export function statusCard({ health, commMap, healthError = null, upgrading = false } = {}) {
+  // v2.620(WEB2620-02): /health 가 실패해도 usePolling 은 직전 값을 들고 있다 — 그 값으로 초록을 그리면 서버가 멈춘 동안에도
+  // 'vCenter 28/28' 이 그대로 남는다. 응답이 없으면 그것을 먼저 말한다(업그레이드 재시작이면 그렇게).
+  if (healthError) {
+    return {
+      label: upgrading ? '업그레이드 중 — 재시작 대기' : '서버 응답 없음',
+      tone: upgrading ? 'warn' : 'crit', kind: 'down',
+      detail: upgrading ? '새 버전으로 재시작하는 중입니다. 잠시 후 자동으로 다시 연결합니다.' : '포탈 서버가 응답하지 않습니다 — 아래 수치는 마지막으로 받은 값입니다.',
+      detailTarget: null, generatedMs: tsMs(health?.generatedAt),
+    };
+  }
   const edges = Array.isArray(commMap?.edges) ? commMap.edges : null;
   const edgeParts = [];
   let head;
@@ -210,5 +223,13 @@ export function statusCard({ health, commMap } = {}) {
   if (maint) parts.push(`점검 ${maint}`);
   const off = numOrNull(health?.vcentersDisabled) || 0;
   if (off) parts.push(`비활성 ${off}`);
-  return { ...head, detail: parts.join(' · '), generatedMs: tsMs(health?.generatedAt) };
+  // v2.620(WEB2620-03): 엣지가 전부 정상이어도 vCenter 연결 실패·첫 수집 중이 있으면 초록으로 칠하지 않는다(나쁜 쪽을 따른다).
+  let tone = head.tone;
+  if (head.kind === 'edge') {
+    if (unreach > 0) tone = 'crit';
+    else if (pending > 0 && tone === 'ok') tone = 'warn';
+  }
+  // v2.620(WEB2620-04): 상세를 누르면 그 사유가 가리키는 화면으로 — vCenter 사유가 있으면 vCenter 목록, 엣지 사유만이면 통신 지도.
+  const detailTarget = (pending || unreach || maint || off) ? 'vcenter' : edgeParts.length ? 'edges' : null;
+  return { ...head, tone, detail: parts.join(' · '), detailTarget, generatedMs: tsMs(health?.generatedAt) };
 }

@@ -1192,19 +1192,28 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
   const windowMs = avgWindowMs(sampleMs);
   let avg5Host = new Map(); let avg5Cluster = new Map(); let avg5Vc = new Map();
   let avgErr = '';
+  let avgStep = false;
   try {
     const db = await getMetricsDb();
-    const since = Date.now() - windowMs;
-    avg5Host = db.recentAvg('temp_host', since);
-    avg5Cluster = db.recentAvg('temp_cluster', since);
-    avg5Vc = db.recentAvg('temp_vc', since);
+    const now = Date.now();
+    const since = now - windowMs;
+    /* v2.620(SRV2620-02): 온도 원본은 dead-band(0.5℃ 미만 변화 생략 · 최대 30분 간격)라 창 안 저장 행만 평균하던
+     * recentAvg 는 안정된 호스트를 '—' 로, 흔들리는 호스트를 '변한 표본만의 평균' 으로 냈다. 창 직전 저장 행을 이월한
+     * 시간 가중 step 평균을 쓴다(구버전 db 객체 호환 — 메서드가 없으면 예전 경로). 이월했는지는 행의 avgCarried 로 밝힌다. */
+    const avgFn = typeof db.recentAvgStep === 'function'
+      ? (m) => db.recentAvgStep(m, since, { nowTs: now })
+      : (m) => db.recentAvg(m, since);
+    avgStep = typeof db.recentAvgStep === 'function';
+    avg5Host = avgFn('temp_host');
+    avg5Cluster = avgFn('temp_cluster');
+    avg5Vc = avgFn('temp_vc');
   } catch (e) { avgErr = e?.message || '시계열 조회 실패'; }
   const grp = (keyFn, avg5Map) => {
     const m = new Map();
     for (const h of hosts) { const k = keyFn(h); const g = m.get(k) || { key: k, count: 0, sum: 0, max: -Infinity }; g.count++; g.sum += h.tempC; g.max = Math.max(g.max, h.tempMaxC ?? h.tempC); m.set(k, g); }
     return [...m.values()].map((g) => {
       const a5 = avg5Map.get(g.key);
-      return { key: g.key, hosts: g.count, curC: r1(g.sum / g.count), avg5C: a5 ? a5.avg : null, maxC: r1(Math.max(g.max, a5?.max ?? -Infinity)) };
+      return { key: g.key, hosts: g.count, curC: r1(g.sum / g.count), avg5C: a5 ? a5.avg : null, avgCarried: !!a5?.carried, maxC: r1(Math.max(g.max, a5?.max ?? -Infinity)) };
     }).sort((a, b) => b.curC - a.curC);
   };
   /* ── iDRAC 서버 온도(v2.512) ────────────────────────────────────────────────
@@ -1266,10 +1275,12 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
     // 평균 창 — 화면이 '5분 평균' 대신 실제 창을 라벨로 쓴다.
     avgWindowMs: windowMs, avgWindowLabel: avgWindowLabel(windowMs),
     sampleIntervalMs: sampleMs || null, avgError: avgErr || '',
+    // v2.620(SRV2620-02): 평균 방식 — 'step' 이면 창 직전 저장값을 이월한 시간 가중 평균(dead-band 생략분 반영).
+    avgMethod: avgStep ? 'step' : 'raw',
     idrac,
     hosts: hosts.map((h) => {
       const a5 = avg5Host.get(h.id);
-      return { id: h.id, name: h.name, vcenterId: h.vcenterId, cluster: h.cluster, curC: h.tempC, avg5C: a5 ? a5.avg : null, tempMaxC: r1(Math.max(h.tempMaxC ?? h.tempC, a5?.max ?? -Infinity)), temps: h.temps || [] };
+      return { id: h.id, name: h.name, vcenterId: h.vcenterId, cluster: h.cluster, curC: h.tempC, avg5C: a5 ? a5.avg : null, avgCarried: !!a5?.carried, tempMaxC: r1(Math.max(h.tempMaxC ?? h.tempC, a5?.max ?? -Infinity)), temps: h.temps || [] };
     }).sort((a, b) => b.curC - a.curC),
     clusters: grp((h) => `${h.vcenterId}|${h.cluster || 'standalone'}`, avg5Cluster),
     vcenters: grp((h) => h.vcenterId, avg5Vc),
@@ -1301,7 +1312,16 @@ api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
   // 분 단위 등 미세 집계는 점이 많아질 수 있어 상한을 넉넉히.
   const limit = bucketMs <= 60_000 ? 5000 : bucketMs <= 3_600_000 ? 3000 : 1500;
   let points = [];
-  try { const db = await getMetricsDb(); points = db.history(metric, key, since, bucketMs, limit); } catch (e) { console.warn('[toolsCapacity] 시계열 조회 실패 — 빈 배열로 응답(감사 B8):', e?.message); points = []; }
+  // v2.620(SRV2620-02): 1시간 미만 버킷은 원본(dead-band)에서 집계되어 온도가 안정된 구간이 '점 없음' 이었다 — 직전 저장값을
+  //   이월해 빈 버킷을 채우고(step) 채운 점 수를 stepFilled 로 밝힌다(채운 점은 carried:true). 60분 이상은 롤업이 전량이라 그대로.
+  let stepFilled = 0; let deadbandMaxGapMs = null;
+  try {
+    const db = await getMetricsDb();
+    if (typeof db.historyStep === 'function') {
+      const r = db.historyStep(metric, key, since, bucketMs, limit);
+      points = r.points; stepFilled = r.carried || 0; deadbandMaxGapMs = r.stepped ? r.maxGapMs : null;
+    } else points = db.history(metric, key, since, bucketMs, limit);
+  } catch (e) { console.warn('[toolsCapacity] 시계열 조회 실패 — 빈 배열로 응답(감사 B8):', e?.message); points = []; }
   let synthesized = false;
   if (points.length < 2 && store.get().source === 'mock') {
     // 데모: 합성 시계열(계절·일교차·분 변동 반영). 분 단위는 점이 많아 최근 구간만.
@@ -1316,7 +1336,7 @@ api.get('/tools/esxi-temp/history', requirePerm('tools'), async (req, res) => {
       points.push({ ts: Math.floor(t), avg: Number(v.toFixed(1)), min: Number((v - 2).toFixed(1)), max: Number((v + 4).toFixed(1)) });
     }
   }
-  res.json({ level, key, days, bucket, bucketMs, synthesized, points });
+  res.json({ level, key, days, bucket, bucketMs, synthesized, points, stepFilled: synthesized ? 0 : stepFilled, deadbandMaxGapMs: synthesized ? null : deadbandMaxGapMs });
 });
 
 /* ── 24시간 스파크라인 배치(v2.556) ────────────────────────────────────────────

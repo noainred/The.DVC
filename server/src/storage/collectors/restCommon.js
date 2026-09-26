@@ -9,6 +9,7 @@ import { withSsrfLookup } from '../../util/ssrfLookup.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 // v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 바꾼다 — 순수 모듈.
 import { describeFetchError, isTransportError } from './netError.js';
+import { NO_REDIRECT, refuseRedirect } from '../../util/noRedirect.js';
 
 // 기본은 자체서명 장비 대응으로 검증 해제(기존 동작 유지). 보안(M-4, 2026-09-12): 사설 CA·공인
 // 인증서를 쓰는 사이트는 STORAGE_TLS_VERIFY=true 로 검증을 켜 MITM(어레이 관리자 자격증명 탈취)을 막는다.
@@ -28,7 +29,8 @@ const reqSignal = (signal) => (signal ? AbortSignal.any([signal, AbortSignal.tim
  */
 async function fetchOrExplain(url, init, { host, port, signal }) {
   try {
-    return await fetch(url, init);
+    // v2.620 SEC2620-01: 세션 토큰 헤더(EMC-CSRF-TOKEN·DELL-EMC-TOKEN)·로그인 본문을 3xx 로 따라 보내지 않는다.
+    return refuseRedirect(await fetch(url, { ...init, redirect: NO_REDIRECT }), host || '장비');
   } catch (e) {
     if (!isTransportError(e)) throw e;
     // cause 를 유지한다 — 화면에는 한 줄 사유만 가지만 서버 로그·디버깅에서 원문 사슬을 잃지 않는다.

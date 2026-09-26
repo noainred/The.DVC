@@ -9,7 +9,7 @@
  *  - 연결 테스트가 저장 비밀을 물려받으면 **host·계정·인증 방식을 저장값으로 고정**한다(v2.480 — 저장 비밀이 요청자 호스트로 가지 않게).
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { isAdminReq, maskPollerStatus } from '../../auth/addressMask.js';
+import { isAdminReq, maskPollerStatus, scrubHosts } from '../../auth/addressMask.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
@@ -108,6 +108,18 @@ function maskServer(s, admin) {
   return { ...s, host: '', username: '' };
 }
 
+/**
+ * v2.620(SEC2620-03): 비-admin 응답의 오류 문구에서 주소를 가린다. poller 는 maskPollerStatus 를 거치는데
+ * servers[].status.error·edges[].error(엣지 원문 최대 1,000자)는 원문 그대로였다 — 특히 리다이렉트 사유는
+ * Location 의 출처(등록부에 없는 주소일 수 있다)를 싣는다. 등록 주소는 표식으로, 그 밖의 URL·IPv4 는 일반 표식으로.
+ */
+export function maskErrText(v, hosts = []) {
+  if (typeof v !== 'string' || !v) return v;
+  return scrubHosts(v, hosts)
+    .replace(/\bhttps?:\/\/[^\s,)'"]{1,300}/g, '(주소 가림)')
+    .replace(/(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])/g, '(주소 가림)');
+}
+
 export function registerCvp(api) {
 
 api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
@@ -118,13 +130,17 @@ api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
   const mine = rows.filter((r) => rowBelongs(r, servers));
   const totals = cvpTotals(mine);
   const poller = cvpPollerStatus();
+  const hosts = servers.map((s) => s.host);
   res.json({
     enabled: settings.enabled, settings,
     poller: admin ? poller : maskPollerStatus(poller, servers.map((s) => s.host)),
-    servers: servers.map((s) => ({ ...maskServer(s, admin), status: statusOf(s), pendingRequest: hasPendingCvpRequest(s.id) })),
+    servers: servers.map((s) => {
+      const st = statusOf(s);
+      return { ...maskServer(s, admin), status: admin || !st ? st : { ...st, error: maskErrText(st.error, hosts) }, pendingRequest: hasPendingCvpRequest(s.id) };
+    }),
     totals,
     orphanRows: rows.length - mine.length,
-    edges: edgeCvpSummary(),
+    edges: admin ? edgeCvpSummary() : edgeCvpSummary().map((e) => ({ ...e, error: maskErrText(e.error, hosts) })),
     collectDrops: recentCvpCollectDrops(),
     ...(unavailable ? { dbUnavailable: true } : {}),
     ...(admin ? { db: await cdb.dbStats() } : { addressHidden: true }),

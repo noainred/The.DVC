@@ -20,6 +20,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; // v2.606 EDGE2606-03
 import { getFleetInventory } from '../insights/fleetInventory.js';
 import { UNREAD_STATUSES } from './inventoryPush.js'; // v2.604 EDGE2604-01: '읽지 못한 vCenter' 판정은 인벤토리 push 와 한 기준
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 
 /**
  * v2.604(감사 EDGE2604-01 — 재현): 이 엣지가 **직접 수집하는** vCenter 중 호스트를 아직 읽지 못한 것(순수 판정).
@@ -102,7 +103,7 @@ const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
 
 function headers(extra = {}) {
-  return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}), ...extra };
+  return { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}), ...extra };
 }
 
 export async function pushFleetNow() {

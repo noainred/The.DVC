@@ -1204,6 +1204,20 @@ function registryUnreadable(res, errOf, what) {
   return true;
 }
 
+/**
+ * v2.620(EDGE2620-01): 엣지 **수신(push)** 라우트도 소유 판정 전에 등록부 손상을 본다. 손상 → 보존 → 빈 목록이면 소유 집합이
+ *   비어 cvp-data 는 그 엣지의 상태·장비 행을 지우고, sanswitch-perf 는 전 표본을 '미위임(위조 방지)' 으로 버리고, storage/pdu/
+ *   sanswitch-data 는 그 엣지 목록을 빈 목록으로 교체한 채 **200 ok** 를 줬다 — 엣지는 커서를 전진해 표본이 영구 소실됐다.
+ *   503 은 재전송 대상이다(엣지 push 는 비-2xx 를 실패로 보고 커서·해시를 남긴다). 상태 전용 보고는 등록부를 쓰지 않으므로 먼저 받는다.
+ */
+async function receiveRegistryUnreadable(res, registryPath, what) {
+  let errOf = null;
+  try { errOf = (await import(registryPath)).registryLoadError; } catch (x) { errOf = () => ({ at: Date.now(), reason: x?.message || String(x) }); }
+  if (!registryUnreadable(res, errOf, what)) return false;
+  console.warn(`[central] ${what} 수신: 중앙 등록부를 읽지 못해 503 으로 답했습니다(엣지는 다음 주기에 다시 보냅니다)`);
+  return true;
+}
+
 // ── 스토리지 모니터링 위임(v2.302) ────────────────────────────────────────────
 // GET /api/central/storage-config?agent=<이름> — 이 엣지 몫 스토리지 장비 목록(자격증명 포함:
 // 엣지가 장비에 로그인해야 한다 — gpu-guest-config 의 계정 배포와 같은 신뢰 경계·WAN TLS 검증 ON).
@@ -1309,6 +1323,7 @@ centralRouter.post('/storage-data', requireCentral(), async (req, res) => {
     const saved = saveEdgeStorageStatus(agent, req.body?.status);
     return res.json({ ok: true, saved: 0, statusOnly: true, recorded: saved });
   }
+  if (await receiveRegistryUnreadable(res, '../storage/registry.js', '스토리지')) return; // v2.620(EDGE2620-01)
   // 소유권 필터(v2.417, sanswitch-data 와 동일): 개별 토큰 엣지는 자기에게 위임된 deviceId 만,
   // collectedAt 은 수신 시각으로 clamp. 공유 토큰(레거시)은 기존 신뢰 유지.
   let devices = Array.isArray(req.body?.devices) ? req.body.devices : [];
@@ -1403,6 +1418,7 @@ centralRouter.post('/pdu-data', requireCentral(), async (req, res) => {
     const saved = saveEdgePduStatus(agent, req.body?.status);
     return res.json({ ok: true, saved: 0, statusOnly: true, recorded: saved });
   }
+  if (await receiveRegistryUnreadable(res, '../pdu/registry.js', 'PDU')) return; // v2.620(EDGE2620-01)
   let snapshots = Array.isArray(req.body?.snapshots) ? req.body.snapshots : [];
   let notOwned = 0; // v2.601 EDGE2601-04
   const now = Date.now();
@@ -1454,6 +1470,7 @@ centralRouter.get('/sanswitch-config', requireCentral(), async (req, res) => {
 centralRouter.post('/sanswitch-perf', requireCentral(), async (req, res) => {
   const agent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  if (await receiveRegistryUnreadable(res, '../sanswitch/registry.js', 'SAN 스위치(사용량)')) return; // v2.620(EDGE2620-01)
   const { devicesForAgent } = await import('../sanswitch/registry.js');
   const { importSamples } = await import('../sanswitch/perfDb.js');
   const { loadPerfSettings } = await import('../sanswitch/perfSettings.js');
@@ -1625,6 +1642,7 @@ centralRouter.post('/sanswitch-data', requireCentral(), async (req, res) => {
     const saved = saveEdgeSanSwitchStatus(agent, req.body?.status);
     return res.json({ ok: true, saved: 0, statusOnly: true, recorded: saved });
   }
+  if (await receiveRegistryUnreadable(res, '../sanswitch/registry.js', 'SAN 스위치')) return; // v2.620(EDGE2620-01)
   // 소유권 필터(v2.416 감사 L-1): 개별 토큰 엣지는 **자기에게 위임된 deviceId** 만 올릴 수 있다 — 남의
   // 스위치 id 로 '정상' 스냅샷을 밀어 실제 장애를 가리는 위조 차단. collectedAt 도 수신 시각으로 clamp
   // (미래 시각으로 '최신 우선' 병합을 항상 이기는 것 방지). 공유 토큰(레거시)은 기존 신뢰 유지.
@@ -1676,6 +1694,7 @@ centralRouter.get('/cvp-config', requireCentral(), async (req, res) => {
 centralRouter.post('/cvp-data', requireCentral(), async (req, res) => {
   const authAgent = req.centralAuth?.mode === 'agent' ? req.centralAuth.agent : strAgent(req.body?.agent);
   if (!authAgent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  if (await receiveRegistryUnreadable(res, '../cvp/registry.js', 'CVP')) return; // v2.620(EDGE2620-01) — noDelegation 분기가 상태·장비 행을 지우기 전에
   const { serversForAgent } = await import('../cvp/registry.js');
   const { sanitizeCvpBody, saveEdgeCvpStatus, dropEdgeCvpStatus } = await import('../central/cvpEdge.js');
   const cdb = await import('../cvp/db.js');

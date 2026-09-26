@@ -102,18 +102,18 @@ test('★ P1: 백업 변경 감시는 상태·캐시 파일을 설정으로 보�
   assert.notEqual(a, c, '설정이 바뀌면 지문이 달라야 한다');
 });
 
-test('★ P1: 같은 설정의 change 백업은 만들지 않고, 자동 사유는 보관 슬롯을 독점하지 못한다', () => {
+test('★ P1: 같은 설정의 change 백업은 만들지 않고, 자동 사유는 보관 슬롯을 독점하지 못한다', async () => {
   backup._resetBackupFingerprint();
   fs.writeFileSync(path.join(TMP, 'alerts.json'), '{"a":1}');
-  const first = backup.createBackup('manual', { retention: 30 });
+  const first = await backup.createBackup('manual', { retention: 30 });
   assert.ok(first.name && /-manual\.json\.gz$/.test(first.name), `파일명에 사유가 없습니다: ${first.name}`);
   fs.writeFileSync(path.join(TMP, 'storage-activity.json'), '{"x":1}');   // 상태 파일만 변경
-  const same = backup.createBackup('change', { retention: 30, skipIfUnchanged: true });
+  const same = await backup.createBackup('change', { retention: 30, skipIfUnchanged: true });
   assert.equal(same.skipped, true, '상태 파일만 바뀐 change 백업이 만들어졌다');
   // change 를 AUTO_REASON_KEEP 보다 많이 만들어도 manual 은 살아남아야 한다(v2.589 까지는 30분 만에 밀려났다).
   for (let i = 0; i < backup.AUTO_REASON_KEEP + 5; i += 1) {
     fs.writeFileSync(path.join(TMP, 'alerts.json'), `{"a":${i + 2}}`);
-    backup.createBackup('change', { retention: 12, skipIfUnchanged: true });
+    await backup.createBackup('change', { retention: 12, skipIfUnchanged: true });
   }
   const list = backup.listBackups();
   const reasons = list.map((b) => backup.reasonOfName(b.name));
@@ -122,11 +122,11 @@ test('★ P1: 같은 설정의 change 백업은 만들지 않고, 자동 사유�
   assert.equal(backup.reasonOfName('portal-backup-2026-01-01T00-00-00-000Z.json.gz'), null, '구 이름(사유 없음)은 자동으로 치지 않는다');
 });
 
-test('★ D5: 크기 상한을 넘는 설정 파일은 조용히 빠지지 않고 결과에 실린다', () => {
+test('★ D5: 크기 상한을 넘는 설정 파일은 조용히 빠지지 않고 결과에 실린다', async () => {
   const big = path.join(TMP, 'huge-config.json');
   const fd = fs.openSync(big, 'w'); fs.ftruncateSync(fd, 9 * 1024 * 1024); fs.closeSync(fd);
   try {
-    const r = backup.createBackup('manual', { retention: 30 });
+    const r = await backup.createBackup('manual', { retention: 30 });
     assert.ok(Array.isArray(r.skipped) && r.skipped.some((s) => s.name === 'huge-config.json'), `뺀 파일이 결과에 없습니다: ${JSON.stringify(r.skipped)}`);
     assert.ok(r.sizeCapBytes > 0);
     const arc = backup.readBackup(r.name);
@@ -139,7 +139,7 @@ test('★ P2: 복원 전 자동 백업은 설정된 보관 개수를 따른다(�
   const s = src('routes/admin/backupNetSec.js');
   assert.match(s, /restoreCentral\([^;]*retention:\s*loadBackupSettings\(\)\.retention/, '복원 라우트가 보관 개수를 넘기지 않는다');
   const svc = src('backup/service.js');
-  assert.match(svc, /export function restoreCentral\(archive,\s*\{\s*retention/, 'restoreCentral 이 보관 개수를 받지 않는다');
+  assert.match(svc, /export (?:async )?function restoreCentral\(archive,\s*\{\s*retention/, 'restoreCentral 이 보관 개수를 받지 않는다');
 });
 
 // ── P11 / 로그 조회 만료 ───────────────────────────────────────────────────────

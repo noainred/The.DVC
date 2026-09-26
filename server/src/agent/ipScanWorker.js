@@ -10,13 +10,14 @@ import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { runScan } from '../ipam/scanRunner.js';
 import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js';
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 
 let timer = null;
 let last = null;
 let running = false; // 재진입 가드 — 대역 스캔이 인터벌을 넘기면 중첩 실행돼 이중 스캔/보고
 
 function headers() {
-  return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+  return { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
 export async function runIpScanAgentOnce() {

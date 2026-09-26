@@ -97,19 +97,19 @@ test('RECENT2598-01 — 기동 백업(레지스트리 로드 전) 뒤 로드·�
   const file = path.join(CFG, 'mail.json');
   fs.writeFileSync(file, sealInOtherProcess({ smtp: { host: 'mail.example', username: 'u', password: 'pw1' } }));
   bk._resetBackupFingerprint();
-  const r1 = bk.createBackup('startup', { retention: 30 });
+  const r1 = await bk.createBackup('startup', { retention: 30 });
   assert.notEqual(r1.skipped, true, 'startup 백업은 생긴다');
   // 모듈이 파일을 읽어 복호(파생키 캐시 적재) → 무변경 저장
   const loaded = vault.openSecretsDeep(JSON.parse(fs.readFileSync(file, 'utf8')));
   const raw0 = fs.readFileSync(file, 'utf8');
   fs.writeFileSync(file, JSON.stringify(vault.sealSecretsDeep(loaded)));
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).smtp.password, JSON.parse(raw0).smtp.password, '무변경 저장은 암호문을 재사용');
-  const r2 = bk.createBackup('change', { retention: 30, skipIfUnchanged: true });
+  const r2 = await bk.createBackup('change', { retention: 30, skipIfUnchanged: true });
   assert.equal(r2.skipped, true, '내용 변화 없이 change 백업이 생기면 안 된다');
   // 실제 변경은 백업한다
   loaded.smtp.password = 'pw2';
   fs.writeFileSync(file, JSON.stringify(vault.sealSecretsDeep(loaded)));
-  const r3 = bk.createBackup('change', { retention: 30, skipIfUnchanged: true });
+  const r3 = await bk.createBackup('change', { retention: 30, skipIfUnchanged: true });
   assert.notEqual(r3.skipped, true, '비밀번호 변경은 설정 변경이다');
   vault.saveSecretsPolicy({ mode: 'plain' });
 });

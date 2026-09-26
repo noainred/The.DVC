@@ -21,6 +21,7 @@ import { parseEntityPerfBatchXml, summarizeVmUsage } from './perfBatch.js'; // v
 // soapParse.js로 분리된 순수 파서를 재-export(기존 import 경로 호환: 테스트가 여기서 가져옴).
 export { parseObjectContent, xmlUnescape };
 import { pushAll } from '../util/pushAll.js';
+import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
 
 // 호스트 GPU 사용률 캐시(주기 throttle용). key=`${vcId}:${ref}` → { pct, at }.
 const _gpuUtilCache = new Map();
@@ -121,6 +122,7 @@ export class VimSoapClient {
   async #call(body, { ignoreExternal = false, isLogin = false } = {}) {
     const res = await fetch(this.url, {
       method: 'POST',
+      redirect: NO_REDIRECT, // v2.620 SEC2620-01: Login 본문(비밀번호)을 3xx 로 다른 곳에 다시 보내지 않는다
       dispatcher: vcDispatcher, // vCenter 전용 TLS 정책 — 전역 디스패처 오염 제거(감사 C1/C3)
       headers: {
         'Content-Type': 'text/xml; charset=utf-8',
@@ -131,6 +133,7 @@ export class VimSoapClient {
       // v2.598 T2598-03: 옛 저장값이 2^31ms 이상이면 AbortSignal.timeout 이 1ms 가 된다 — 상한으로 자른다.
       signal: vcRequestSignal(effectiveRequestTimeoutMs(this.vc?.timeoutMs, 30_000), ignoreExternal ? null : this.signal),
     });
+    refuseRedirect(res, 'vCenter');
     const setCookie = res.headers.get('set-cookie');
     if (setCookie) this.cookie = setCookie.split(';')[0];
     const text = await res.text();

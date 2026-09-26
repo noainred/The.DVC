@@ -57,11 +57,16 @@ function initSqlite() {
       CREATE INDEX IF NOT EXISTS idx_scans_target_ts ON scans (target_id, ts);
       CREATE INDEX IF NOT EXISTS idx_scans_ts ON scans (ts);  -- prune(ts<?) 풀스캔 방지
     `);
+    // v2.620(SRV2620-01): 전체 폴더 이름 지문 집합(scan.js buildNameSet). 옛 DB 에는 없으므로 table_info 로
+    //   없을 때만 추가한다(v2.603 DB2603-01 규약 — 'duplicate column' 을 삼키는 방식은 잠금을 '열 있음' 으로 삼킨다).
+    //   옛 행은 NULL → 리포트가 단정하지 않고 '확인 불가' 로 말한다.
+    const cols = db.prepare('PRAGMA table_info(scans)').all().map((c) => c.name);
+    if (!cols.includes('name_set')) db.exec('ALTER TABLE scans ADD COLUMN name_set TEXT');
     try { fs.chmodSync(DB_PATH, 0o600); } catch { /* best effort */ }
 
     const ins = db.prepare(`INSERT INTO scans
-      (target_id, agent, root, ts, total_bytes, sum_bytes, count, others_bytes, others_count, skipped, truncated, entries)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      (target_id, agent, root, ts, total_bytes, sum_bytes, count, others_bytes, others_count, skipped, truncated, entries, name_set)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const lastFor = db.prepare('SELECT * FROM scans WHERE target_id=? ORDER BY ts DESC LIMIT 1');
     const prevFor = db.prepare('SELECT * FROM scans WHERE target_id=? AND ts<? ORDER BY ts DESC LIMIT 1');
     const listFor = db.prepare('SELECT * FROM scans WHERE target_id=? ORDER BY ts DESC LIMIT ?');
@@ -73,6 +78,8 @@ function initSqlite() {
     const pruneStmt = db.prepare('DELETE FROM scans WHERE rowid IN (SELECT rowid FROM scans WHERE ts < ? LIMIT ?)');
 
     const hydrate = (r) => (r ? { ...r, truncated: !!r.truncated, entries: safeJson(r.entries) } : null);
+    // v2.620(SRV2620-01): 이력 목록 응답에는 지문 집합을 싣지 않는다(행마다 최대 160KB — 화면이 쓰지 않는다).
+    const hydrateLite = (r) => { const h = hydrate(r); if (h) delete h.name_set; return h; };
 
     return {
       kind: 'sqlite',
@@ -83,16 +90,17 @@ function initSqlite() {
           Math.round(rec.sumBytes || 0), rec.count || 0,
           Math.round(rec.othersBytes || 0), rec.othersCount || 0,
           rec.skipped || 0, rec.truncated ? 1 : 0,
-          JSON.stringify(rec.entries || []));
+          JSON.stringify(rec.entries || []),
+          typeof rec.nameSet === 'string' && rec.nameSet ? rec.nameSet : null);
         return Number(r.lastInsertRowid);
       },
       /** 이 대상의 가장 최근 스캔. */
       last(targetId) { return hydrate(lastFor.get(String(targetId))); },
       /** ts 직전 스캔 — 증감 계산의 기준선. */
       prev(targetId, ts) { return hydrate(prevFor.get(String(targetId), Number(ts))); },
-      list(targetId, limit = 50) { return listFor.all(String(targetId), pageArgs({ limit }, { def: 50, max: 1000 }).limit).map(hydrate); },
+      list(targetId, limit = 50) { return listFor.all(String(targetId), pageArgs({ limit }, { def: 50, max: 1000 }).limit).map(hydrateLite); },
       get(id) { return hydrate(byId.get(Number(id))); },
-      latestAll() { return latestAll.all().map(hydrate); },
+      latestAll() { return latestAll.all().map(hydrateLite); },
       markMailed(id, state, note = '') { setMail.run(Number(state) || 0, String(note || '').slice(0, 500), Number(id)); },
       async prune(beforeTs) {
         const r = await chunkedDelete(pruneStmt, [Number(beforeTs)], { label: 'dirusage.scans' });

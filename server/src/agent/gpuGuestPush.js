@@ -18,6 +18,7 @@ import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; /
 import { createChangeLogger } from '../util/logThrottle.js';
 import { getGuestGpuVms, getGuestGpuAllHosts } from '../gpu/store.js';
 import { getGpuGuestDiag, gpuGuestStatus } from '../gpu/poller.js';
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 
 // v2.613 DEPS2613-08: v2.503 push 체크리스트(① gzip ② 중앙 BIG_JSON 등록 ③ 413 로그) — 이 경로만 셋 다 빠져 있었다.
 //   본문 = hosts + vms(GPU VM 당 ~150B) + diag(vCenter 당 ≤200건) 라 기본 1MB 는 GPU VM 수천 대 급이지만, 413 은 재시도
@@ -62,7 +63,7 @@ let running = false;
 const _withholdLog = createChangeLogger({ windowMs: 10 * 60_000, maxKeys: 8 });
 
 function headers(extra = {}) {
-  return { 'Content-Type': 'application/json', ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}), ...extra };
+  return { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}), ...extra };
 }
 
 export async function pushGpuGuestNow(...args) {

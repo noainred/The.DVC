@@ -4003,6 +4003,34 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 입력 지문은 **쓰기 성공 뒤에만** 기억한다(실패한 입력을 기억하면 다음 틱이 건너뛰어 재시도가 사라진다) · 늦게 끝난 옛
       쓰기는 새 기억을 덮지 않는다(`_ledgerSeq`) · 건너뛴 횟수는 `storeStatus().ledgerInputSkips`.
     - ⚠ 정직 기록: 목 데이터는 틱마다 값을 새로 만들어 목 모드에서는 생략이 일어나지 않는다 — 운영 현장의 실제 절감 비율은 재지 못했다.
+  - ⚠⚠ **v2.620 — 6축 감사(버그·코드 개선) 확정분**(사용자 요청 "버그 및 코드 개선" · 선택: 병렬 감사 + 반증 · 전체 검증.
+    상세 `docs/AUDIT-2026-09-26b.md`, 회귀 `server/test/audit2620{a..e}.test.js`·`perf2619.test.js ⑦` — 변이 검증 리드 6/6 · A 7/7 · B 15/15 · C 10/10 · D 10/10):
+    - ⚠⚠ **'기억(서명)으로 쓰기를 생략' 하는 경로는 쓰기를 내보내는 순간 기억을 비운다**(RECENT2620-01 — **v2.619 가 만든 회귀**): 진행 중인 쓰기 B 와
+      되돌아온 내용 A 가 겹치면 A 는 '옛 기억과 같다' 로 생략되고 B 는 seq 불일치로 기억을 못 세워 ipam.db 가 B 로 굳었다. 쓰기는 워커 한 줄로
+      순서대로 끝나므로 현재 seq 의 성공만 기억을 세운다. **새로 '같으면 건너뛰기' 를 만들면 진행 중 쓰기와의 ABA 를 먼저 볼 것.**
+    - ⚠⚠ **등록부 손상 503 은 설정 pull 만이 아니라 엣지 수신에도**(EDGE2620-01): 수신 라우트가 빈 등록부로 소유 판정을 하면 200 + 삭제·버림이 되고
+      엣지는 커서를 전진해 **영구 소실**이다(v2.612 LEFT2612-01 의 형제 누락). 상태 전용 보고는 등록부를 쓰지 않으므로 200.
+    - ⚠⚠ **자격증명을 싣는 장비 요청은 `util/noRedirect.js`**(SEC2620-01 — v2.612 SEC2612-02 가 CVP·Redfish 에만 고친 것의 형제 7곳): 전역 fetch 의
+      follow 는 307 에 로그인 본문·커스텀 세션 헤더를 다시 보내고 IP 리터럴이면 SSRF lookup 도 없다. ⚠ 동작 변경 — http 로 등록하고 장비의 https
+      리다이렉트에 기대던 현장은 '리다이렉트로 응답했습니다' 오류를 받는다(조치: 등록 주소를 https 로). **새 장비 클라이언트도 이 헬퍼를 쓸 것.**
+    - **엣지 push 의 이름은 `util/agentNameHeader.js` 로 헤더에도**(RECENT2620-02): 큰 본문 게이트는 본문을 읽기 전에 요청자를 가려야 한다. 한글 이름을
+      헤더에 원문으로 넣으면 fetch 가 요청째 던지므로 ASCII 안전할 때만 싣는다(본문 agent 와 **같은 값**만 — 개별 토큰 바인딩 대조). 이름 없는 엣지를
+      IP 한 칸으로 묶지 않는다. 원문 헤더를 싣는 기존 워커(ping·svcmon·curuser·vmseries·SAN·partfault 등)는 남은 일이다.
+    - **세션 큰 본문 풀은 경로 권한을 먼저 본다**(`bigJsonGate sessionBigBodyAllowed` — viewer 가 풀을 점유해 admin 붙여넣기가 503) · 게이트 503 은
+      `recordReject(kind:'busy')` · **Retry-After 대기는 abort 를 본다**(`resilientFetch abortableSleep` · `fetchFollowing` 이 호출자 signal 을 합친다 —
+      호출자 abort 가 이제 진행 중 요청도 끊는다).
+    - **dead-band 계열을 원본으로 읽는 조회는 이월**(SRV2620-02, `metrics/db.js recentAvgStep`·`historyStep`): 0.5℃ 미만 변화를 저장하지 않으므로 짧은 창의
+      원본 평균·1시간 미만 버킷은 안정된 호스트를 빼거나 비운다. 이월은 `직전 저장 + maxGap + 5분`·마지막 실제 샘플(`lastSeen`)까지만.
+      실내 온도 1d(30분 버킷)는 아직 `history` 다(남은 일).
+    - **낡은 vCenter 는 지표 적재에서 뺀다**(SRV2620-03, `metrics/sampler.js staleVcenterIds`): LASTGOOD_HOLD·위임 캐시가 서빙하는 마지막 값을 매 주기
+      '지금 값' 으로 쌓으면 평탄선이다(v2.504 iDRAC 규약의 vCenter 판). 빠진 vCenter 가 있으면 전체('') 합계는 적재하지 않는다(부분 합 = 거짓 하락).
+      `updateVmStats`(라이트사이징 인메모리)는 같은 유형이 남아 있다.
+    - 그 밖: 폴더 사용량은 전체 이름 지문(`name_set`)으로 '삭제·신규' 와 '순위 밖·순위 진입' 을 가른다 · 엣지 설정 push 는 상태 파일 제외 + gzip + 413 1회
+      재전송 · 백업 gzip 비동기(`createBackup`·`restoreCentral` 은 이제 async, 백업끼리 직렬) · 불통 엣지는 pull 큐 뒤·재시도 0 · 스토리지·SAN 엣지 보관
+      키 정규화 · DataCenter 빈 순서는 `clear:true` 만(v2.618 vCenter 순서와 같은 모양 — **조회 실패 → 저장** 경로를 가진 화면을 만들면 먼저 볼 것) ·
+      V5 상태 카드는 `healthError`·`upgrading` 을 먼저 말한다 · iDRAC 스캔 대역·결과·로그 **조회**도 fleetOnly · 파트 장애 `lastView`·CVP `maskErrText`.
+    - 남긴 것: SRV2620-04(시계열 일 버킷 UTC 경계 — 차트 경계가 바뀌는 설계 판단) · WEB2620-06(V5 법인 선택의 vCenter 탭 적용) · PERF2620-02(LRU 가
+      prune 핸들 닫음 — vCenter 48 미만이면 도달 불가) · 백업 `JSON.stringify` 동기 몫 · puller 첫 주기(실패 이력 전) 불통 엣지 약 61초.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는
