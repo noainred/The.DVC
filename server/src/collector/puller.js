@@ -181,7 +181,7 @@ async function pullNowInner() {
   });
   const took = Date.now() - t0;
   // 한 주기가 주기의 절반을 넘기면 알린다 — 동시 개수를 줄인 대가(벽시계 증가)를 조용히 두지 않는다.
-  if (collectors.length && took > config.collector.pullIntervalMs / 2) {
+  if (collectors.length && config.collector.pullIntervalMs > 0 && took > config.collector.pullIntervalMs / 2) { // 주기 0(끔)에서 수동 pull 은 경고하지 않는다
     console.warn(`[collector] pull 주기 소요 ${Math.round(took / 1000)}초(엣지 ${collectors.length}곳 · 동시 ${config.collector.pullConcurrency}) — 주기 ${Math.round(config.collector.pullIntervalMs / 1000)}초의 절반을 넘었습니다. COLLECTOR_PULL_CONCURRENCY 를 늘리거나 COLLECTOR_PULL_INTERVAL_MS 를 늘리세요.`);
   }
 }

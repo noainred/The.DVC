@@ -63,6 +63,7 @@ test('② 엣지 pull 은 동시 개수를 제한한다', () => {
   const p = stripComments(read('collector/puller.js'));
   assert.doesNotMatch(p, /Promise\.all\(\s*collectors\.map/);
   assert.match(p, /poolRun\(collectors,\s*config\.collector\.pullConcurrency/);
+  assert.match(p, /config\.collector\.pullIntervalMs > 0 && took >/, '주기 0(끔)에서는 소요 경고를 내지 않는다');
   const c = stripComments(read('config.js'));
   assert.match(c, /pullConcurrency:\s*Math\.min\(16,\s*Math\.max\(1,/);
 });
