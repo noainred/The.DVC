@@ -1,12 +1,15 @@
 import React from 'react';
 import { TOOLS } from './specialToolsList.js';
 import { writeShell } from '../version_5/route.js';
+import { writeShellV6 } from '../version_6/route.js';
 
 /**
  * 설정 › 신규 포탈 보기 — 신규 포탈(version_4)로 들어가는 입구.
  * v2.490 에 V3(6화면)로 시작해 v2.508 에 V4 로 승격했다(UI 개편 시안 구현 · 화면 9개 · 모드 토글 · ⌘K).
  * 기존 개발 포탈 화면은 그대로 두고, V4 버튼을 누르면 해시 #/v4 로 전환된다
  * (App.jsx 가 첫 세그먼트 'v4' 를 신규 포탈로 해석하고, 옛 #/v3/* 는 #/v4/* 로 넘긴다).
+ *
+ * v2.623: V6 버튼을 더했다(version_6 — 상위 메뉴 10개 틀). V4·V5 는 그대로 둔다.
  *
  * v2.616: V5 버튼을 더했다 — V5 는 새 라우터가 아니라 **기존 화면 위의 새 틀**이다(version_5/route.js).
  * 버튼은 #/v5 로 보내고 App 이 셸 플래그를 켠 뒤 #/overview 로 바꾼다. V4 는 그대로 둔다(사용자 선택 '둘 다 유지').
@@ -22,8 +25,24 @@ export default function V4Portal() {
   const openNew = () => { window.open(`${window.location.pathname}#/v4`, '_blank', 'noopener'); };
   const openV5 = () => { writeShell(true); window.location.hash = '#/v5'; };
   const openV5New = () => { window.open(`${window.location.pathname}#/v5`, '_blank', 'noopener'); };
+  const openV6 = () => { writeShellV6(true); window.location.hash = '#/v6'; };
+  const openV6New = () => { window.open(`${window.location.pathname}#/v6`, '_blank', 'noopener'); };
   return (
     <div>
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>V6 (상위 메뉴 10개 · 좌측 사이드바)</div>
+        <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.7, margin: '0 0 12px' }}>
+          ‘특수 기능’ 탭을 없애고 기능 <b>{TOOLS.length}개</b>와 기존 화면을 <b>운영관제 · 자산 · 인프라 최적화 · 서버 · 네트워크 · 스토리지 · 보호/규정 · 자동화 · 보안 · 플랫폼 관리</b>
+          10개 상위 메뉴로 올린 틀입니다. <b>Overview 는 지금 상태</b>(연결·알람·사용률·법인별 상태·조치 필요), <b>Summary 는 자원 총량과 할당</b>만 보여 주고,
+          서버 메뉴는 <b>물리 서버 · 가상화 호스트 · 가상화 서버</b>를 나눠 봅니다. 기능은 기존 주소(<code>#/tools/&lt;키&gt;</code>)로 열리고 메뉴 페이지 주소는 <code>#/m/&lt;메뉴&gt;</code> 입니다.
+          V6 를 켜면 이 브라우저에 기억되고(V5 와 동시에 켜지지 않습니다), 좌측 아래 <b>기존 화면으로</b> 버튼으로 끕니다.
+        </p>
+        <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>
+          <button className="login-btn" style={{ fontSize: 16, fontWeight: 800, padding: '10px 26px', letterSpacing: '.04em' }} onClick={openV6}>V6</button>
+          <button className="tab" onClick={openV6New}>새 창에서 열기</button>
+          <span className="muted" style={{ fontSize: 12 }}>주소: <code>#/v6</code></span>
+        </div>
+      </div>
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 700, marginBottom: 6 }}>V5 (좌측 메뉴 틀)</div>
         <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.7, margin: '0 0 12px' }}>

@@ -45,6 +45,12 @@ const isV3Hash = () => window.location.hash.replace(/^#\/?/, '').split('/')[0] =
 import { isV5Hash, v5EntryTarget, readShell, writeShell } from './version_5/route.js';
 const V5Shell = lazy(() => import('./version_5/V5Shell.jsx'));
 const V5Overview = lazy(() => import('./version_5/pages/Overview.jsx'));
+// V6 셸(v2.623) — V5 와 같은 '기존 라우터 위의 새 틀'. 셸 플래그는 V5 와 같은 키(ui.shell)에 'v6' 로 둔다(둘은 동시에 켜지지 않는다).
+//   #/v6 는 진입 신호, #/m/<메뉴> 는 V6 메뉴 페이지 주소다(기존 탭이 아니므로 해시 동기화가 덮지 않게 따로 판정한다).
+import { isV6Hash, v6EntryTarget, readShellV6, writeShellV6, isMenuHash } from './version_6/route.js';
+const V6Shell = lazy(() => import('./version_6/V6Shell.jsx'));
+const V6Overview = lazy(() => import('./version_6/pages/Overview.jsx'));
+const V6Summary = lazy(() => import('./version_6/pages/Summary.jsx'));
 const redirectV3 = () => { window.location.replace(`${window.location.pathname}${window.location.search}${window.location.hash.replace(/^#\/?v3/, '#/v4')}`); };
 
 const TABS = [
@@ -218,12 +224,21 @@ function Portal({ user, onLogout }) {
   // user's saved landing-page preference.
   // V5 진입 신호(#/v5 · #/v5/<탭>)는 탭을 읽기 **전에** 소비한다 — 셸 플래그를 켜고 실제 주소로 바꾼다.
   const [v5On, setV5On] = useState(() => {
+    if (isV6Hash(window.location.hash)) return false;   // V6 진입 신호가 먼저다(아래 v6On 초기화가 플래그를 V6 로 바꾼다)
     if (isV5Hash(window.location.hash)) {
       writeShell(true);
       window.history.replaceState(null, '', v5EntryTarget(window.location.hash));
       return true;
     }
     return readShell();
+  });
+  const [v6On, setV6On] = useState(() => {
+    if (isV6Hash(window.location.hash)) {
+      writeShellV6(true);
+      window.history.replaceState(null, '', v6EntryTarget(window.location.hash));
+      return true;
+    }
+    return !v5On && readShellV6();
   });
   const [v5Scope, setV5Scope] = useState(''); // V5 상단 '법인' 범위(vCenter id) — 모든 탭에 함께 적용된다
   const [tab, setTabState] = useState(() => { migrateMovedHash(); return tabFromHash() || getLandingTab(); });
@@ -261,11 +276,15 @@ function Portal({ user, onLogout }) {
   useEffect(() => {
     // ⚠ 이 가드에 셸 판정이 하나라도 빠지면 진입 직후 해시가 `#/<tab>` 으로 덮여 셸이 즉시 튕긴다.
     if (isV3Hash()) redirectV3();
-    else if (!tabFromHash() && !isConsoleHash() && !isV4Hash() && !isV5Hash(window.location.hash)) window.history.replaceState(null, '', `#/${tab}`);
+    else if (!tabFromHash() && !isConsoleHash() && !isV4Hash() && !isV5Hash(window.location.hash) && !isV6Hash(window.location.hash) && !isMenuHash(window.location.hash)) window.history.replaceState(null, '', `#/${tab}`);
     const onHash = () => {
       if (isV3Hash()) { redirectV3(); return; }                             // 구 딥링크 #/v3/<page> → #/v4/<page>
+      if (isV6Hash(window.location.hash)) {                                 // V6 진입 — 플래그를 V6 로 바꾸고 실제 주소로
+        writeShellV6(true); setV6On(true); setV5On(false);
+        window.history.replaceState(null, '', v6EntryTarget(window.location.hash));
+      }
       if (isV5Hash(window.location.hash)) {                                 // V5 진입 — 플래그를 켜고 실제 주소로(replaceState 는 hashchange 를 내지 않는다)
-        writeShell(true); setV5On(true);
+        writeShell(true); setV5On(true); setV6On(false);
         window.history.replaceState(null, '', v5EntryTarget(window.location.hash));
       }
       if (isConsoleHash()) { setConsoleOn(true); setV4On(false); return; }  // 콘솔 내부 페이지 전환은 콘솔이 처리
@@ -285,6 +304,8 @@ function Portal({ user, onLogout }) {
   const exitV4 = (hash) => { setV4On(false); window.location.hash = hash || `#/${tab}`; };
   // V5 끄기 — 주소는 그대로 두고 틀만 바꾼다(같은 화면이 기존 틀로 보인다).
   const exitV5 = () => { writeShell(false); setV5On(false); setV5Scope(''); };
+  // V6 끄기 — 메뉴 페이지(#/m/…)는 기존 틀에 없는 주소라 Overview 로 옮기고, 나머지는 주소를 그대로 둔다.
+  const exitV6 = () => { writeShellV6(false); setV6On(false); if (isMenuHash(window.location.hash)) setTab('overview'); };
 
   const saveLanding = (id) => { setLandingTab(id); localStorage.setItem(LANDING_KEY, id); };
 
@@ -409,10 +430,12 @@ function Portal({ user, onLogout }) {
   const tabBody = (
     <ErrorBoundary key={tab}>
          <Suspense fallback={<div className="muted" style={{ padding: 24 }}>로딩 중…</div>}>
-          {tab === 'overview' && (v5On
-            ? <V5Overview scope={v5Scope} health={health} healthError={healthError} onGotoTab={setTab} />
-            : <Overview onSelectSite={selectSite} onGotoTab={setTab} />)}
-          {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
+          {tab === 'overview' && (v6On
+            ? <V6Overview health={health} healthError={healthError} onSelectSite={selectSite} />
+            : v5On
+              ? <V5Overview scope={v5Scope} health={health} healthError={healthError} onGotoTab={setTab} />
+              : <Overview onSelectSite={selectSite} onGotoTab={setTab} />)}
+          {tab === 'summary' && (v6On ? <V6Summary vcenters={vcenters} /> : <Summary scope={scope} onGotoTab={setTab} />)}
           {tab === 'vcenters' && <VCenters onSelectSite={selectSite} resetSignal={platformResetSeq} />}
           {tab === 'svcmon' && <SvcMonitor />}
           {tab === 'ipam' && <Ipam defaultScope={v5On ? v5Scope : ''} />}
@@ -482,6 +505,23 @@ function Portal({ user, onLogout }) {
       <Suspense fallback={<div className="login-screen"><div className="loading">신규 포탈(V4) 불러오는 중…</div></div>}>
         <V4App user={user} health={health} healthError={healthError} onExit={exitV4} />
       </Suspense>
+    );
+  }
+
+  // V6 셸(v2.623) — 같은 본문을 새 틀로 감싼다(메뉴 페이지 #/m/… 만 셸이 직접 그린다). 훅은 모두 위에서 선언됐다.
+  if (v6On) {
+    return (
+      <>
+        <Suspense fallback={<div className="login-screen"><div className="loading">V6 불러오는 중…</div></div>}>
+          <V6Shell user={user} health={health} healthError={healthError} upgrading={upgrading} tab={tab} visibleTabIds={visibleTabs.map((t) => t.id)}
+            onSearchIn={(id, text) => { patchFilter({ q: text }, id); setTab(id); }}
+            onShowVcDown={() => setShowVcDown(true)} onShowNotes={() => setShowNotes(true)} onExit={exitV6} onLogout={onLogout}>
+            {filterBar}
+            {tabBody}
+          </V6Shell>
+        </Suspense>
+        {overlays}
+      </>
     );
   }
 
