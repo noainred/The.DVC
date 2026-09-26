@@ -16,6 +16,16 @@ import { pollNow } from '../idrac/poller.js';
 import { tryAcquireScan, releaseScan, scanLockBusy } from '../idrac/scanPoller.js'; // v2.612 EDGE2612-01
 
 let timer = null;
+import { centralStatusOnlySupport } from './centralStatusOnly.js';
+/** v2.622(감사 RECENT-03·EDGE-02): 중앙 /idrac-scan-jobs 가 ?busy=1(인출 없는 생존 폴)을 이해하는 첫 버전. */
+export const IDRAC_BUSY_POLL_MIN_CENTRAL = '2.622.0';
+let _busyCapImpl = null;
+/** 테스트 주입용 — 중앙 버전 확인을 바꾼다(null 이면 health-probe). */
+export function _setBusyPollSupportForTest(fn) { _busyCapImpl = typeof fn === 'function' ? fn : null; }
+function busyPollSupport() {
+  if (_busyCapImpl) return Promise.resolve(_busyCapImpl());
+  return centralStatusOnlySupport({ minVersion: IDRAC_BUSY_POLL_MIN_CENTRAL });
+}
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 let last = null;
 // v2.599 T2599-02: 주기 env 도 [하한, MAX_TIMER_MS] 로 가둔다 — 2^31 초과·음수는 setInterval 에서 1ms 루프가 된다.
@@ -74,9 +84,19 @@ async function runIdracScanWorkerInner() {
     // v2.612 EDGE2612-01: 이 엣지에서 스캔(중앙 PUSH·주기)이 도는 중이면 잡을 인출하지 않는다 — 인출하면 겹쳐 돌거나
     //   '이미 수행 중' 으로 끝난다. 인출하지 않은 잡은 중앙 대기열에 남아 다음 폴에 가져간다.
     const busy = scanLockBusy();
-    if (busy) { lastSkipBusy = { at: Date.now(), by: busy.by }; return null; }
-    const url = `${config.agent.centralUrl}/api/central/idrac-scan-jobs?agent=${encodeURIComponent(config.agent.name)}`;
-    const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
+    // v2.622(감사 RECENT-03·EDGE-02): 잠금 중에도 **인출 없는 생존 폴**(?busy=1)을 보낸다 — 예전에는 폴 자체를 건너뛰어 중앙의 폴
+    //   시각이 멈췄고, 잠금이 10분을 넘기면(큰 대역 스캔) 이 엣지의 대기 잡이 '오프라인' 으로 보여 gc 로 사라졌다.
+    //   ⚠ busy 를 모르는 구버전 중앙은 ?busy=1 을 무시하고 잡을 **인출해 준다** — 받은 잡은 잠금 때문에 실행할 수 없고 되돌릴 길도
+    //   없어 '이미 수행 중' 오류로 끝난다(예전의 '10분 뒤 만료' 보다 나쁘다). 그래서 health-probe 로 중앙 버전을 확인했을 때만 보내고,
+    //   모르면 예전처럼 폴하지 않는다(사유는 상태에 남긴다).
+    let busyPoll = false;
+    if (busy) {
+      const cap = await busyPollSupport();
+      if (!cap.ok) { lastSkipBusy = { at: Date.now(), by: busy.by, heartbeat: false, reason: `${cap.reason || 'central-version-unknown'} — 중앙 v${cap.version || '미상'} 이 생존 폴(v${IDRAC_BUSY_POLL_MIN_CENTRAL} 이상)을 모르거나 버전을 읽지 못해 잠금 중에는 폴하지 않습니다` }; return null; }
+      busyPoll = true;
+    }
+    const url = `${config.agent.centralUrl}/api/central/idrac-scan-jobs?agent=${encodeURIComponent(config.agent.name)}${busyPoll ? '&busy=1' : ''}`;
+    const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: busyPoll ? 0 : 2 });
     if (!r.ok) {
       // v2.582 BUG-1: 예전에는 여기서 조용히 null — 중앙이 403(개별 토큰 아님·엣지 이름 불일치)이나 5xx 를
       // 돌려줘도 상태 객체·콘솔에 아무것도 남지 않아 '엣지 로그' 화면에서 진단할 길이 없었다
@@ -84,8 +104,15 @@ async function runIdracScanWorkerInner() {
       noteFail(r.status === 403 ? 'auth' : 'http', `HTTP ${r.status}`);
       return null;
     }
-    const { jobs } = await r.json();
+    const body = await r.json();
+    const jobs = body?.jobs;
     lastPollAt = Date.now(); lastPollError = null; failStreak = 0;
+    if (busyPoll) {
+      lastSkipBusy = { at: Date.now(), by: busy.by, heartbeat: body?.busyAck === true };
+      if (body?.busyAck === true) return null;
+      // busyAck 없이 잡이 왔다 = 버전 확인이 빗나간 중앙. 받은 잡은 아래에서 잠금에 막혀 '이미 수행 중' 으로 회신된다(대기로 매달리지 않게).
+      if (jobs?.length) console.warn(`[idrac-scan-agent] 중앙이 생존 폴(busy)을 이해하지 못하고 잡 ${jobs.length}건을 넘겼습니다 — 스캔 잠금 중이라 '이미 수행 중' 으로 회신합니다.`);
+    }
     if (!jobs || !jobs.length) return null;
     for (const job of jobs) {
       const started = Date.now();

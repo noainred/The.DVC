@@ -763,3 +763,10 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
   (형제 `/tools/rma`·`/admin/collectors` 는 이미 403 이었다).
 - **엣지 push 3종(스토리지·SAN·PDU)은 등록부 손상을 '위임 0대' 로 읽지 않는다**(`registryLoadError()` 선판정, EDGE-03) · 중앙 part-faults 수신은
   그 장비군의 등록부가 손상이면 503 `registryUnreadable`(EDGE-04 — v2.620 EDGE2620-01 의 형제 누락).
+
+## 2026-09-27 v2.622 감사 조치 — 되돌리지 말 것 (docs/AUDIT-2026-09-27.md)
+
+- **Redfish 세션 폴백 실패는 자격증명 거부가 아니다**(`idrac/redfish.js`, LEFT-01): 세션 POST 시한·5xx·429, 세션 생성 뒤 토큰 GET 예외는
+  `sessionTransient`(authFailed 없음)로 던진다. 명시적 401/403 과 세션 미지원 4xx 만 예전처럼 Basic 401 이다. 합치면 authGuard 가 멀쩡한 서버를 멈춘다.
+- **범위 관리자 차단 3파일 추가**(`routes/admin/opsSettings.js`·`gpuGuest.js`·`nsxImport.js`, SEC-01·03·04): 전역 알림 채널·일일 보고는 전 법인 공통 설정이라
+  저장·발송이 전체 범위 전용이다. GPU 게스트 배포·진단·엣지 사용자·물리 GPU 조회와 NSX 매니저 목록도 전체 범위 전용이다(형제 라우트가 이미 403 이었다).

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, delJson } from '../api.js';
 import { fmtAgo } from '../util/fmt.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
@@ -11,6 +11,18 @@ const ALL = '*'; // 글로벌(모든 엣지) 대상 키
 // v2.613 DEPS2613-11: 상대시각은 util/fmt.fmtAgo(relTime 코어) 하나다(이 화면은 a.at 이 있을 때만 부른다).
 
 /**
+ * v2.622(감사 WEB-03): 목록 표시 판정(순수). 목록은 그것을 불러온 대상(loaded.target)이 지금 보는 대상과
+ * 같을 때만 행으로 그린다. 예전에는 새 대상 조회가 실패하거나 늦으면 이전 대상(모든 엣지)의 사용자가
+ * 새 엣지 이름 아래 남았고, '제거' 가 새 대상으로 DELETE 를 보냈다(같은 이름의 엣지 전용 계정이 지워졌다).
+ * @returns {{state:'loading'|'error'|'ready', rows:Array, err:string|null}}
+ */
+export function edgeUsersView(viewTarget, loaded) {
+  if (!loaded || loaded.target !== viewTarget) return { state: 'loading', rows: [], err: null };
+  if (loaded.err) return { state: 'error', rows: [], err: loaded.err };
+  return { state: 'ready', rows: Array.isArray(loaded.users) ? loaded.users : [], err: null };
+}
+
+/**
  * 중앙 → 엣지 사용자 배포 관리. 복수 엣지 선택 또는 '모든 엣지(전체)' 배포를 지원한다.
  * '모든 엣지'는 글로벌('*') 목록으로 저장되어 모든 엣지가 자기 목록과 합쳐 적용하므로,
  * 나중에 추가된 엣지도 자동으로 이 사용자를 받는다.
@@ -19,7 +31,9 @@ export default function EdgeUserDeploy() {
   const [agents, setAgents] = useState(null); // [{agent, users, at}]
   const [global, setGlobal] = useState({ users: 0, at: 0 });
   const [viewTarget, setViewTarget] = useState(ALL); // 목록 보기 대상('*' 또는 엣지명)
-  const [users, setUsers] = useState([]);
+  const [loaded, setLoaded] = useState(null); // v2.622(감사 WEB-03): { target, users, err } — 불러온 대상과 함께 든다
+  const viewRef = useRef(ALL);
+  const seqRef = useRef(0);
   const [error, setError] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -29,14 +43,22 @@ export default function EdgeUserDeploy() {
 
   const loadAgents = async () => {
     try { const r = await fetchJson('/admin/edge-users/agents'); setAgents(r.agents || []); setGlobal(r.global || { users: 0, at: 0 }); setError(null); }
-    catch (e) { setError(e.message); }
+    catch (e) { setError(e); }
   };
   const loadUsers = async (t) => {
-    try { const r = await fetchJson(`/admin/edge-users/${encodeURIComponent(t)}`); setUsers(r.users || []); }
-    catch (e) { setMsg(`오류: ${e.message}`); }
+    // v2.622(감사 WEB-03): 늦게 온 응답(대상이 바뀌었거나 더 새 요청이 있음)은 버린다.
+    const mySeq = ++seqRef.current;
+    const stale = () => mySeq !== seqRef.current || t !== viewRef.current;
+    try {
+      const r = await fetchJson(`/admin/edge-users/${encodeURIComponent(t)}`);
+      if (!stale()) setLoaded({ target: t, users: r.users || [], err: null });
+    } catch (e) {
+      if (!stale()) setLoaded({ target: t, users: [], err: e.message || String(e) });
+    }
   };
   useEffect(() => { loadAgents(); }, []);
-  useEffect(() => { loadUsers(viewTarget); setMsg(null); }, [viewTarget]);
+  useEffect(() => { viewRef.current = viewTarget; setLoaded(null); loadUsers(viewTarget); setMsg(null); }, [viewTarget]);
+  const view = edgeUsersView(viewTarget, loaded);
 
   const toggleEdge = (a) => setSelEdges((s) => { const n = new Set(s); n.has(a) ? n.delete(a) : n.add(a); return n; });
 
@@ -55,6 +77,7 @@ export default function EdgeUserDeploy() {
     setBusy(false);
   };
   const editUser = (u) => {
+    if (view.state !== 'ready') return; // v2.622(감사 WEB-03): 다른 대상의 행으로 폼을 채우지 않는다
     // 선택 행을 배포 폼으로 불러온다(비밀번호는 보안상 비움 — 비우면 기존 유지). 대상은 현재 보기 대상.
     setForm({ username: u.username, name: u.name || '', role: u.role || 'viewer', password: '' });
     if (viewTarget === ALL) { setAllEdges(true); setSelEdges(new Set()); }
@@ -63,10 +86,15 @@ export default function EdgeUserDeploy() {
     try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch { /* */ }
   };
   const removeUser = async (u) => {
+    if (view.state !== 'ready') return; // v2.622(감사 WEB-03)
+    const target = viewTarget;
     const label = viewTarget === ALL ? '모든 엣지(전체)' : viewTarget;
     if (!confirm(`'${u.username}' 사용자를 [${label}] 배포에서 제거할까요? (엣지에서도 다음 pull에 삭제)`)) return;
-    const r = await delJson(`/admin/edge-users/${encodeURIComponent(viewTarget)}/${encodeURIComponent(u.username)}`).catch((e) => ({ ok: false, reason: e.message }));
-    if (r.ok) { setUsers(r.users || []); setMsg(`'${u.username}' 제거됨.`); loadAgents(); }
+    const r = await delJson(`/admin/edge-users/${encodeURIComponent(target)}/${encodeURIComponent(u.username)}`).catch((e) => ({ ok: false, reason: e.message }));
+    if (r.ok) {
+      if (target === viewRef.current) setLoaded({ target, users: r.users || [], err: null });
+      setMsg(`'${u.username}' 제거됨.`); loadAgents();
+    }
     else setMsg(`오류: ${r.reason}`);
   };
 
@@ -135,8 +163,11 @@ export default function EdgeUserDeploy() {
           <STable>
             <thead><tr><th style={{ textAlign: 'left' }}>사용자 ID</th><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>역할</th><th style={{ textAlign: 'left' }}>비밀번호</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
             <tbody>
-              {users.length === 0 && <tr><td colSpan={5} className="muted" style={{ padding: 14, textAlign: 'center' }}>이 대상에 배포된 사용자가 없습니다.</td></tr>}
-              {users.map((u) => (
+              {view.state === 'loading' && <tr><td colSpan={5} className="muted" style={{ padding: 14, textAlign: 'center' }}>불러오는 중…</td></tr>}
+              {view.state === 'error' && <tr><td colSpan={5} style={{ padding: 14, textAlign: 'center', color: 'var(--amber)' }}>이 대상의 배포 사용자 목록을 불러오지 못했습니다: {view.err} — 배포된 사용자가 없다는 뜻이 아닙니다.{' '}
+                <button className="tab" style={{ padding: '2px 8px' }} onClick={() => loadUsers(viewTarget)}>다시 시도</button></td></tr>}
+              {view.state === 'ready' && view.rows.length === 0 && <tr><td colSpan={5} className="muted" style={{ padding: 14, textAlign: 'center' }}>이 대상에 배포된 사용자가 없습니다.</td></tr>}
+              {view.rows.map((u) => (
                 <tr key={u.username}>
                   <td><b>{u.username}</b></td>
                   <td className="muted">{u.name || '—'}</td>

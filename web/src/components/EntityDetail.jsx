@@ -41,7 +41,12 @@ function DRow({ label, children, full = false, nowrap = false }) {
 }
 
 const gb = (mb) => `${Math.round((mb || 0) / 1024).toLocaleString()} GB`;
-const tb = (g) => (g >= 1024 ? `${(g / 1024).toFixed(1)} TB` : `${g} GB`);
+// v2.622(감사 WEB-02): 사용량을 못 읽은 DS(usedGB·freeGB null)는 'null GB' 가 아니라 '—'.
+export const tb = (g) => {
+  if (g == null || g === '' || !Number.isFinite(Number(g))) return '—';
+  const n = Number(g);
+  return n >= 1024 ? `${(n / 1024).toFixed(1)} TB` : `${n} GB`;
+};
 
 // Backing-storage category badge for a datastore (로컬/SAN/NAS/vSAN/vVol).
 const DS_KIND = { local: ['로컬 디스크', 'green'], san: ['SAN', 'blue'], nas: ['NAS', 'amber'], vsan: ['vSAN', 'purple'], vvol: ['vVol', 'amber'], other: ['기타', 'gray'] };

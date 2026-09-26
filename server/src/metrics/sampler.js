@@ -82,10 +82,18 @@ export function unreadVcenterReasons(snap) {
 export function vmAllocRows(snap, settings) {
   // v2.620(SRV2620-03): 낡은(stale·unreachable) vCenter 의 VM·DS 는 적재 대상이 아니다. 전체('') 합계는 대상 vCenter 중
   //   하나라도 빠지면 **적재하지 않는다** — 부분 합은 '거짓 하락' 이다(v2.594 vmtrack skipped 와 같은 판단).
-  const staleIds = staleVcenterIds(snap);
+  const unread = unreadVcenterReasons(snap);
+  const staleIds = new Set(unread.keys());
   const fresh = (id) => !staleIds.has(String(id));
+  // v2.622(감사 RECENT-01 — 재현: 점검중 vCenter 하나로 전체('') 키가 사라졌다): 점검중(maintenance)은 관리자가 켜는 상태라
+  //   며칠·몇 주 이어진다. pending 을 뺀 이유('합계를 영원히 막는다')가 그대로 들어맞으므로 전체 합계를 막는 집합에서 뺀다 —
+  //   그 vCenter 행만 제외하고(fresh 거짓) 전체 합계는 적재하되, 뺀 개수를 maintenanceExcluded 로 밝힌다(부분 합 표식).
   let staleTracked = 0;
-  for (const id of staleIds) if (vmperfTracks(id, settings)) staleTracked++;
+  let maintenanceTracked = 0;
+  for (const [id, reason] of unread) {
+    if (!vmperfTracks(id, settings)) continue;
+    if (reason === 'maintenance') maintenanceTracked++; else staleTracked++;
+  }
   // `${vcenterId}|${host.name}` -> 코어당 MHz. 이름 단독 키는 vCenter 간 동명 호스트가
   // 덮어써 다른 사이트 MHz 로 환산되는 오염이 생긴다(v2.388 수정).
   const hostMhz = new Map();
@@ -188,9 +196,12 @@ export function vmAllocRows(snap, settings) {
     if (rows.length) out.set(k, rows);
   }
   out.dsUsedUnknown = dsUsedUnknown;             // 사용량을 못 읽어 디스크 합계에서 뺀 DS 수(lastRun 에 싣는다)
-  out.staleVcenters = staleTracked;              // v2.620(SRV2620-03): 낡아서 뺀 대상 vCenter 수
+  out.staleVcenters = staleTracked;              // v2.620(SRV2620-03): 낡아서 뺀 대상 vCenter 수(점검중 제외)
+  out.maintenanceExcluded = maintenanceTracked;   // v2.622(RECENT-01): 점검중이라 행을 빼고 전체 합계에서도 빠진 대상 vCenter 수
   out.totalWithheld = false;
+  out.totalPartial = false;
   if (staleTracked > 0 && out.has('')) { out.delete(''); out.totalWithheld = true; }
+  else if (maintenanceTracked > 0 && out.has('')) out.totalPartial = true;  // 적재는 하되 점검중 vCenter 가 빠진 합계
   return out;
 }
 
@@ -264,7 +275,13 @@ async function sampleOnceInner() {
       // 이름 주의: 이 함수 위쪽 온도 집계에도 byVc 가 있어 혼동을 막으려 vmperfByVc 로 둔다.
       const vmperfByVc = vmAllocRows(snap, vmperfCfg);
       dsUsedUnknown = vmperfByVc.dsUsedUnknown || 0;
-      if (vmperfByVc.staleVcenters) vmperfStale = { vcenters: vmperfByVc.staleVcenters, totalWithheld: !!vmperfByVc.totalWithheld };
+      if (vmperfByVc.staleVcenters || vmperfByVc.maintenanceExcluded) {
+        vmperfStale = {
+          vcenters: vmperfByVc.staleVcenters || 0, totalWithheld: !!vmperfByVc.totalWithheld,
+          // v2.622(RECENT-01): 점검중 vCenter 는 합계를 막지 않고 빠진다 — 그 사실을 밝힌다.
+          ...(vmperfByVc.maintenanceExcluded ? { maintenanceExcluded: vmperfByVc.maintenanceExcluded, totalPartial: !!vmperfByVc.totalPartial } : {}),
+        };
+      }
       for (const [vcId, vcRows] of vmperfByVc) {
         try { await insertVmperf(vcId, vcRows, ts); } catch (e) { console.warn(`[vmperf] ${vcId || '(전체)'} insert 실패: ${e.message}`); }
         // v2.618(PERF-2): vCenter 사이에 한 번 양보한다 — 기동 첫 샘플은 vCenter 마다 DB 파일을 처음 열어(PRAGMA 포함)
@@ -312,7 +329,9 @@ async function sampleOnceInner() {
 
   // VM 사용률 누적(인메모리) — 라이트사이징 리포트용. 행을 쌓지 않으므로(O(VM수) 메모리)
   // 5,850 VM 규모에서도 시계열 DB 폭증 없이 평균/피크를 관측한다.
-  try { updateVmStats(snap, ts); } catch { /* 통계 실패가 샘플링을 막지 않게 */ }
+  // v2.622(감사 LEFT-04): 적재에서 뺀 vCenter(점검중·수집 실패 이월·낡은 위임)의 동결 VM 값은 누적하지 않는다.
+  let vmStatsSkipped = 0;
+  try { vmStatsSkipped = updateVmStats(snap, ts, { skipVcenterIds: staleIds })?.skipped || 0; } catch { /* 통계 실패가 샘플링을 막지 않게 */ }
 
   // Retention prune (runtime-configurable). 매 샘플마다 DELETE 스캔하면 비용이 크므로
   // 약 20샘플(기본 60s면 ~20분)에 1회만 실행한다 — store의 전력 적재 prune과 동일한 절감 패턴.
@@ -337,6 +356,7 @@ async function sampleOnceInner() {
     // v2.620(SRV2620-03): 낡아서 적재하지 않은 vCenter·호스트·DS 수와, 그 때문에 전체('') VM 합계를 적재하지 않았는지.
     ...(staleSkipped.vcenters ? { staleSkipped } : {}),
     ...(vmperfStale ? { vmperfStale } : {}),
+    ...(vmStatsSkipped ? { vmStatsSkipped } : {}),
   };
 }
 

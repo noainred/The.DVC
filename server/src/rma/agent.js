@@ -116,11 +116,19 @@ async function postResult(reqId, result) {
       const hint = r.status === 413 ? ' — 결과 본문이 중앙 한도를 넘었습니다(출력 상한 RMA_MAX_OUTPUT·중앙 JSON_BODY_LIMIT 확인)'
         : r.status === 403 ? ' — 중앙이 이 엣지의 토큰을 거부했습니다(개별 토큰 전용)' : '';
       log(`결과 회신 실패 reqId=${reqId}: HTTP ${r.status}${hint}`);
+    } else if (r && typeof r.json === 'function') {
+      // v2.622(감사 EDGE-01): 200 이어도 stale:true 면 중앙이 결과를 **반영하지 않았다**(기한 초과로 이미 '미회신' 종결·잡 정리됨).
+      //   예전에는 r.ok 만 봐서 아무것도 남지 않았다 — 중앙 화면은 '재실행하라' 고 하는데 엣지 로그는 성공처럼 보였다.
+      let body = null; try { body = await r.json(); } catch { /* 본문 없음 */ }
+      if (body && body.stale === true) log(`결과 회신은 도착했지만 중앙이 반영하지 않음(stale) reqId=${reqId} — 중앙에서 이 명령은 기한 초과(미회신)로 이미 종결됐습니다. 실제 실행 결과: ok=${result?.ok === true}`);
     }
   } catch (e) {
     log(`결과 회신 실패 reqId=${reqId}: ${e.message}`);
   }
 }
+
+/** 테스트용 — 결과 회신 경로(stale 로그 확인). */
+export const _postResultForTest = (reqId, result) => postResult(reqId, result);
 
 /** 잡 1건 처리 — 검증 실패도 결과로 회신한다(중앙 UI 가 즉시 사유를 본다). */
 export async function handleJob(job, { password = PASSWORD, allowCustom = ALLOW_CUSTOM, policy = POLICY, exec = runCommand, now } = {}) {

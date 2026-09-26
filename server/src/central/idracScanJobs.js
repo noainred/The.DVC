@@ -132,6 +132,10 @@ function gc(now = Date.now()) {
       ? (j.doneAt || 0)
       : Math.max(j.createdAt || 0, j.takenAt || 0, j.progress?.at || 0, waitingAt);
     if (now - lastActivity > TTL) {
+      // v2.622(감사 RECENT-03·EDGE-02): 미완료 잡을 **조용히 지우지 않는다** — 예전에는 jobs.delete 만 해서 사용자는 '스캔을
+      //   요청했는데 사라졌다(state unknown)' 만 봤다. 먼저 오류로 종결하고 사유를 이벤트·결과·대역 최근 결과·콘솔에 남긴다.
+      //   삭제는 완료 잡 보존(TTL)이 지난 다음 gc 가 한다. 그 사이 늦게 온 결과는 applyIdracScanResult 가 받는다(410 이 아니다).
+      if (!done) { expireUndone(reqId, j, now); continue; }
       jobs.delete(reqId);
       // byAgent 대기 셋도 함께 정리 — 남겨두면 유령 reqId가 MAX_PENDING을 영구 점유해
       // 오프라인 에이전트로의 신규 위임이 전부 거부된다.
@@ -140,6 +144,42 @@ function gc(now = Date.now()) {
       if (pend) { pend.delete(reqId); if (!pend.size) byAgent.delete(key); }
     }
   }
+}
+
+/**
+ * v2.622(감사 RECENT-03·EDGE-02): 활동 없이 TTL 을 넘긴 미완료 잡을 오류로 종결한다(조용한 삭제 금지). 대기 잡이면 '에이전트가
+ *   인출하지 않았다', 진행 잡이면 '진행 보고가 끊겼다' 로 원인을 나눠 적는다 — 조치가 다르다(엣지 폴링 확인 / 엣지 스캔 확인).
+ */
+let _gcExpired = 0;
+function expireUndone(reqId, j, now) {
+  const wasPending = j.state === 'pending';
+  const mins = Math.round(TTL / 60_000);
+  const why = wasPending
+    ? `에이전트 '${j.agent}' 가 ${mins}분 동안 이 잡을 인출하지 않아 만료했습니다 — 엣지가 꺼져 있거나 AGENT_NAME 이 다르거나, 엣지가 오래 걸리는 다른 스캔을 돌리는 중(구버전 엣지는 그동안 폴링하지 않는다)일 수 있습니다.`
+    : `에이전트 '${j.agent}' 의 진행 보고가 ${mins}분 동안 끊겨 만료했습니다 — 엣지 재시작·네트워크를 확인하세요. 늦게 온 결과는 계속 받습니다.`;
+  j.state = 'error'; j.doneAt = now; j.acked = true; j.claimDeadline = null; j.expired = true;
+  j.result = { scanned: j.progress?.scanned || 0, foundCount: 0, found: [], registered: 0, error: why, expired: true };
+  addEvent(j, why, 'error');
+  dropWaiting(j, reqId);
+  try { recordScanRangeRunByReqId(reqId, { pending: false, ok: false, error: why }); } catch { /* 기록 실패가 정리를 막지 않는다 */ }
+  _gcExpired++;
+  console.warn(`[idrac-scan-jobs] 잡 ${reqId} 만료(${wasPending ? '미인출' : '진행 보고 끊김'}) — 에이전트 '${j.agent}'`);
+}
+/** 테스트·진단용 — gc 를 주입한 시각으로 돌린다. */
+export function _gcForTest(now) { gc(now); }
+/** 만료로 종결한 미완료 잡 수(프로세스 수명 누계). */
+export function idracScanGcExpiredCount() { return _gcExpired; }
+
+/**
+ * v2.622(감사 RECENT-03·EDGE-02): 엣지가 스캔 잠금 중이라 잡을 인출하지 않는 동안에도 '살아 있음' 만 알린다(?busy=1).
+ *   예전 엣지는 잠금 중에 폴 자체를 건너뛰어 폴 시각이 멈췄고, 그 엣지의 대기 잡이 오프라인으로 보여 10분 뒤 사라졌다.
+ *   잡은 주지 않는다 — 받아도 잠금 때문에 실행할 수 없다.
+ */
+export function noteIdracScanBusyPoll(agentName) {
+  const key = String(agentName || '').trim().toLowerCase();
+  if (!key) return false;
+  notePoll(key);
+  return true;
 }
 
 let seq = 0;

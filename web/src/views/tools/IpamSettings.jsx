@@ -306,6 +306,15 @@ export function IpmsSettings({ onClose }) {
   );
 }
 
+/**
+ * v2.622(감사 WEB-08): IP 스캔 응답 수용 판정(순수). 응답은 요청한 에이전트가 지금 고른 에이전트와 같을 때만
+ * 화면에 반영한다. 예전에는 에이전트를 A→B 로 빠르게 바꾸면 늦게 온 A 의 first 로드가 B 폼을 A 설정으로 채웠고,
+ * 저장이 그 값(대역·주기·포트)을 B 에 기록했다. 2초 폴링의 늦은 이전 응답도 상태·결과를 덮었다.
+ */
+export function ipScanAccept(requestedAgent, currentAgent) {
+  return requestedAgent === currentAgent;
+}
+
 /** IP 능동 스캔(TCP 커넥트) 설정 + 수동 실행 + 결과. 물리/기타 서버 IP를 대장에 채운다. */
 const LOCAL_AGENT = '__local__';
 export function IpScanSettings({ onClose }) {
@@ -319,13 +328,19 @@ export function IpScanSettings({ onClose }) {
   const [centralEnabled, setCentralEnabled] = useState(true);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [sFor, setSFor] = useState(null); // v2.622(감사 WEB-08): 폼(s)을 채운 에이전트
+  const agentRef = useRef(LOCAL_AGENT);   // 지금 고른 에이전트(늦게 온 이전 에이전트 응답을 버린다)
   const load = async (ag, first = false) => {
     try {
       const r = await fetchJson('/admin/ipam/scan/settings', { agent: ag });
-      if (first) setS(r.settings);
+      if (!ipScanAccept(ag, agentRef.current)) return; // v2.622(감사 WEB-08)
+      if (first) { setS(r.settings); setSFor(ag); }
       if (r.agents) setAgents(r.agents);
       setStatus(r.status); setInfo(r.info); setReports(r.reports || {}); setCentralEnabled(r.centralEnabled !== false);
-    } catch (e) { setMsg(e.message); if (e?.status === 403) deniedRef.current = true; }
+    } catch (e) {
+      if (!ipScanAccept(ag, agentRef.current)) return; // v2.622(감사 WEB-08)
+      setMsg(e.message); if (e?.status === 403) deniedRef.current = true;
+    }
   };
   // v2.611 LEFT2611-07: 403(범위 제한 계정)은 정책 거부라 2초마다 다시 묻지 않는다.
   const deniedRef = useRef(false);
@@ -334,8 +349,10 @@ export function IpScanSettings({ onClose }) {
 
   const isLocal = agent === LOCAL_AGENT;
   const agentLabel = (a) => (a === LOCAL_AGENT ? '이 포탈에서 직접' : a);
-  const switchAgent = (a) => { setS(null); setMsg(null); setAgent(a); };
+  const switchAgent = (a) => { agentRef.current = a; setS(null); setSFor(null); setMsg(null); setAgent(a); };
   const save = async () => {
+    // v2.622(감사 WEB-08): 다른 에이전트의 설정으로 채워진 폼은 저장하지 않는다.
+    if (!ipScanAccept(sFor, agent)) { setMsg('이 폼은 지금 고른 에이전트의 설정이 아닙니다 — 다시 불러온 뒤 저장하세요.'); return; }
     setBusy(true); setMsg(null);
     try {
       const r = await putJson('/admin/ipam/scan/settings', scanSettingsBody(s, agent));

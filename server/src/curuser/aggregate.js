@@ -143,9 +143,15 @@ export function aggregateAll(records, { vcNameOf = (id) => id } = {}) {
 export function seriesRow(agg) {
   // v2.598 WEBUI-2598-02: 확인한 서버가 0대인 주기의 수치는 null 로 넘긴다(NULL 로 적재 — 0 이 아니다).
   const nn = (v) => (v == null ? null : n0(v));
+  // v2.622(감사 DATA-03): 발행기가 원문을 자른 서버가 섞인 주기(usersLowerBound)의 사용자·세션 수는 **하한**이다 —
+  //   부분 합을 추이에 실제 값으로 적재하면 거짓 하락이 된다(v2.606 COL2606-01 규약의 누락). 수치를 null 로 넘기고
+  //   `partial` 로 표시한다 — vc_series 열이 NOT NULL 이라 db.js 가 이 표지로 '모름' 을 기록한다. 최신 화면은 '최소 N명'.
+  const partial = !!agg.usersLowerBound;
+  const w = (v) => (partial ? null : nn(v));
   return {
-    users: nn(agg.users), usersActive: nn(agg.usersActive),
-    sessions: nn(agg.sessions), sessionsActive: nn(agg.sessionsActive), sessionsDisc: nn(agg.sessionsDisc),
+    users: w(agg.users), usersActive: w(agg.usersActive),
+    sessions: w(agg.sessions), sessionsActive: w(agg.sessionsActive), sessionsDisc: w(agg.sessionsDisc),
     vmsOk: n0(agg.vmsOk), vmsFailed: n0(agg.vmsFailed),
+    partial,
   };
 }

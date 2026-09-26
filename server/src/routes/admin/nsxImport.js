@@ -9,11 +9,35 @@ import path from 'node:path';
 import { loadRegistry as loadNsxFull, listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx, removeManager as removeNsx, testConnection as testNsx } from '../../nsx/registry.js';
 import { nsxStore, nsxAuthGuard } from '../../nsx/store.js';
 import { adminOnly, existsFile, fullScopeOnlyWith } from './shared.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
 
 // v2.611 AUTHZ2611-02: vCenter 가져오기(replace 는 전체 교체)·NSX 매니저 등록은 전 법인 등록부다 — v2.607 `POST /vcenters`
 //   의 fleetWideOnly 를 이 경로로 우회할 수 있었다(범위 admin 이 replace 로 등록 vCenter 전체를 교체). 범위 계정 403.
 const fleetOnly = fullScopeOnlyWith('vCenter 가져오기·NSX 매니저 등록은 전 법인에 걸친 등록부라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
 
+/**
+ * v2.622(감사 SEC-04): 범위 제한 admin 에게는 **자기 범위 vCenter 에 연결된 매니저만** 준다(host·계정명·vCenter 연결이
+ *   전 법인분 나가던 것). 403 대신 범위 필터를 고른 이유 — 설정 › NSX 화면이 범위 admin 에게도 열려 있어 403 이면 화면 전체가
+ *   권한 안내로 바뀐다. 연결 vCenter 가 비어 있는(귀속 불명) 매니저는 범위 밖일 수 있어 뺀다. 등록부 필드는 vcenterId(단수)이고,
+ *   배열 vcenterIds 가 오는 경우도 범위 안 id 로 자른다. 뺀 개수는 omittedOutOfScope·vcenterIdsHidden 으로 밝힌다(조용한 제외
+ *   금지). allowed === null(전체 범위)이면 그대로.
+ */
+export function scopeNsxManagers(managers, allowed) {
+  const list = Array.isArray(managers) ? managers : [];
+  if (!allowed) return { managers: list };
+  const out = [];
+  let omitted = 0;
+  for (const m of list) {
+    if (!m || typeof m !== 'object') { omitted++; continue; }
+    const many = Array.isArray(m.vcenterIds);
+    const ids = many ? m.vcenterIds.map(String) : (m.vcenterId ? [String(m.vcenterId)] : []);
+    const inScope = ids.filter((id) => allowed.has(id));
+    if (!inScope.length) { omitted++; continue; }
+    const hidden = ids.length - inScope.length;
+    out.push(many ? { ...m, vcenterIds: inScope, ...(hidden ? { vcenterIdsHidden: hidden } : {}) } : m);
+  }
+  return { managers: out, scoped: true, omittedOutOfScope: omitted };
+}
 
 // Import a vcenters.json already stored on the server. Body: { path, mode? }
 // 임의 파일 읽기 방지: configDir 하위(.json) 또는 알려진 표준 위치만 허용.
@@ -27,7 +51,7 @@ function isAllowedImportPath(p) {
 export function registerNsxImport(adminRouter) {
 
 // --- NSX Manager registry (separate from vCenter; managed by NSX Manager) ---
-adminRouter.get('/nsx/managers', adminOnly, (_req, res) => {
+adminRouter.get('/nsx/managers', adminOnly, (req, res) => {
   // v2.590: 인증 실패로 주기 수집이 멈춘 매니저를 목록이 말한다(정지 판정에는 복호된 자격증명이 필요 — 응답엔 안 싣는다).
   let full = new Map();
   try { full = new Map(loadNsxFull().map((m) => [m.id, m])); } catch { /* 목록은 그대로 */ }
@@ -35,7 +59,7 @@ adminRouter.get('/nsx/managers', adminOnly, (_req, res) => {
     const rec = full.has(m.id) ? nsxAuthGuard.authStopFor(full.get(m.id)) : null;
     return rec ? { ...m, authStopped: { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } } : m;
   });
-  res.json({ dataSource: getDataSource(), managers });
+  res.json({ dataSource: getDataSource(), ...scopeNsxManagers(managers, scopedVcenterIds(req.user, store.get())) }); // v2.622(감사 SEC-04)
 });
 adminRouter.post('/nsx/managers', adminOnly, fleetOnly, (req, res) => {
   const result = addNsx(req.body || {});

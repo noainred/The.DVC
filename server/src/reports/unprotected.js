@@ -77,6 +77,19 @@ export function computeUnprotected(vms, rows, opts = {}) {
     else { nameOnlyEvents++; keep(protectedByNameOnly, name, r); }
   }
 
+  // v2.622(감사 DATA-05 — 재현: 이벤트를 수집하지 않은 vCenter 의 VM 이 전부 '미보호' 로 세였다): 이벤트는 포탈마다 로컬
+  //   보관이라 엣지 위임 vCenter·로그 수집 꺼짐·최소 심각도 warning 이상이면 스냅샷(info) 이벤트가 이 DB 에 없다. 그 VM 을
+  //   미보호로 세면 거짓 '백업 공백' 이다. 호출자가 준 근거로만 '판정 불가' 로 분리한다(근거가 없으면 예전처럼 판정한다 —
+  //   스냅샷 이벤트 0건을 곧 '미수집' 으로 보면 진짜 백업 공백을 숨긴다).
+  //   · opts.logSettings — { enabled, minSeverity }: 수집이 꺼졌거나 info 를 저장하지 않으면 전 VM 판정 불가.
+  //   · opts.coveredVcenterIds — 조회 창 안 **이벤트(종류 무관)가 1건이라도 저장된** vCenter 집합. 없는 vCenter 의 VM 은 판정 불가.
+  const ls = opts.logSettings || null;
+  const logBlocked = ls && ls.enabled === false ? 'log-collection-off'
+    : ls && ls.minSeverity && ls.minSeverity !== 'info' ? 'severity-filter' : null;
+  const covered = opts.coveredVcenterIds == null ? null
+    : new Set([...(opts.coveredVcenterIds instanceof Set ? opts.coveredVcenterIds : opts.coveredVcenterIds)].map(String));
+  const undeterminedList = [];
+  const undeterminedByReason = {};
   const unprotectedList = [];
   const protectedList = [];
   for (const v of vms) {
@@ -86,9 +99,16 @@ export function computeUnprotected(vms, rows, opts = {}) {
       id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host || '', cluster: v.cluster || '',
       guestOS: v.guestOS || '', storageGB: v.storageGB || 0,
     };
-    if (hit) protectedList.push({ ...item, lastBackupTs: hit.ts, backupUser: hit.user });
-    else unprotectedList.push(item);
+    if (hit) { protectedList.push({ ...item, lastBackupTs: hit.ts, backupUser: hit.user }); continue; }
+    const why = logBlocked || (covered && !covered.has(String(v.vcenterId)) ? 'no-events' : null);
+    if (why) {
+      undeterminedByReason[why] = (undeterminedByReason[why] || 0) + 1;
+      undeterminedList.push({ ...item, reason: why });
+    } else unprotectedList.push(item);
   }
+  undeterminedList.sort((a, b) => b.storageGB - a.storageGB);
+  const noEventVcenters = covered
+    ? [...new Set(undeterminedList.filter((x) => x.reason === 'no-events').map((x) => String(x.vcenterId)))] : [];
   unprotectedList.sort((a, b) => b.storageGB - a.storageGB);
   protectedList.sort((a, b) => b.lastBackupTs - a.lastBackupTs);
 
@@ -102,11 +122,18 @@ export function computeUnprotected(vms, rows, opts = {}) {
       nameOnlyEvents,
       // 이벤트 조회 상한에 걸렸으면 오래된 백업 흔적이 빠져 '미보호' 가 과대 보고될 수 있다 — 조용히 두지 않는다.
       eventsTruncated: Number(opts.rowLimit) > 0 && (rows || []).length >= Number(opts.rowLimit),
+      // v2.622(DATA-05): 분모는 판정한 VM(보호+미보호)이다. 판정 불가만 있으면 0% 가 아니라 null.
       protectedPct: (unprotectedList.length + protectedList.length) > 0
-        ? Math.round((protectedList.length / (unprotectedList.length + protectedList.length)) * 100) : 0,
+        ? Math.round((protectedList.length / (unprotectedList.length + protectedList.length)) * 100)
+        : (undeterminedList.length > 0 ? null : 0),
+      undeterminedCount: undeterminedList.length,        // v2.622(DATA-05): 이벤트 미수집으로 판정하지 않은 가동 VM 수
+      undeterminedByReason,                              // { 'log-collection-off' | 'severity-filter' | 'no-events': N }
+      noEventVcenters,                                   // 조회 창 안 이벤트가 0건이라 판정하지 않은 vCenter id
+      coverageKnown: covered != null || ls != null,      // 호출자가 커버리지 근거를 줬는가(false 면 예전 판정 그대로)
     },
     unprotected: unprotectedList.slice(0, 1000),
     protected: protectedList.slice(0, 1000),
+    undetermined: undeterminedList.slice(0, 1000),
     note: '휴리스틱 판정: 조회 기간 내 백업 계정 패턴의 VM 스냅샷 이벤트가 관측된 VM을 보호로 간주합니다. 스냅샷을 쓰지 않는 백업(에이전트 방식 등)은 미보호로 보일 수 있습니다.',
   };
 }

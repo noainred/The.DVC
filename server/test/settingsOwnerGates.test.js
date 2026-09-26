@@ -78,7 +78,7 @@ test('엣지 사용자 배포의 변경 라우트 3개에 requireSettingsOwner �
     /delete\('\/edge-users\/:agent\/:username',[^)]*requireSettingsOwner/,
   ]) assert.match(s, re, `게이트 누락(또는 검사식 갱신 필요): ${re}`);
   // 조회는 소유자 전용으로 올리지 않는다(운영 화면이 막힌다).
-  assert.match(s, /get\('\/edge-users\/:agent',\s*adminOnly,\s*\(/, '조회는 adminOnly 유지');
+  assert.match(s, /get\('\/edge-users\/:agent',\s*adminOnly,\s*(fleetReadOnly,\s*)?\(/, '조회는 adminOnly 유지');
 });
 
 test('AD 설정 변경(PUT)에 requireSettingsOwner 가 붙어 있다(조회는 admin 유지)', () => {

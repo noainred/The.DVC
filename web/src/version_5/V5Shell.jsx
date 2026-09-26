@@ -52,6 +52,17 @@ const PAGE_SUB = {
   settings: '포탈 설정', upgrade: '버전·업그레이드',
 };
 
+/**
+ * v2.622(감사 WEB-07): 검색 드롭다운 하단 안내(순수). 거부 목록 모드(기본)에서는 권한 없는 도구가 🔒 와 함께
+ * 목록에 나온다(숨기는 것은 허용 목록 모드뿐 — v2.555 규약). 예전 고정 문구 '권한이 없는 메뉴는 목록에 나오지
+ * 않습니다' 는 바로 위의 🔒 행과 모순됐다 — 잠긴 결과가 있을 때만 그 사실을 말한다.
+ */
+export function v5SearchFootText(tools) {
+  const base = '↑↓ 이동 · Enter 열기 · Esc 닫기';
+  const locked = (Array.isArray(tools) ? tools : []).filter((t) => t && t.locked).length;
+  return locked > 0 ? `${base} — 🔒 표시 메뉴 ${locked}개는 권한이 없어 열 수 없습니다` : base;
+}
+
 export default function V5Shell({
   user, health, healthError = null, upgrading = false, vcenters, tab, visibleTabIds, scope, setScope, children, onSearchIn, onShowVcDown, onShowNotes, onExit, onLogout,
 }) {
@@ -262,7 +273,7 @@ export default function V5Shell({
                 })}
                 {res.toolsOmitted > 0 && <div className="v5-dd-foot">기능 {res.toolsOmitted}개 더 있음 — 검색어를 더 입력하세요</div>}
                 {!flat.length && <div className="v5-dd-foot">일치하는 기능이 없습니다.</div>}
-                <div className="v5-dd-foot">↑↓ 이동 · Enter 열기 · Esc 닫기 — 권한이 없는 메뉴는 목록에 나오지 않습니다</div>
+                <div className="v5-dd-foot">{v5SearchFootText(res.tools)}</div>
               </div>
             )}
           </div>

@@ -6,6 +6,7 @@
 
 import { localStamp } from '../util/dayKey.js'; // v2.583 #25: 프로세스 TZ 가 아니라 포탈 오프셋
 import { numOrNull } from '../util/numOrNull.js';
+import { dsUsageReadable, dsUsedOf, dsUsageUnknownOf } from '../store.js'; // v2.622(감사 RECENT-02): 판정 한 벌
 
 const DAY = 86_400_000;
 
@@ -49,8 +50,22 @@ export function computeHealthReport(snap, opts = {}) {
   // ③ 데이터스토어 용량
   // v2.621(감사 DATA-02): 사용률을 못 읽은 DS(usagePct null — v2.597 REST 폴백 결측)는 `(usagePct||0)` 으로 정상 쪽에
   //   흡수하지 않고 '사용량 미상' 으로 센다(numOrNull — Number(null)===0 함정).
-  const dsHot = (snap.datastores || []).filter((d) => { const p = numOrNull(d?.usagePct); if (p == null) { unknown.dsUsageUnknown += 1; return false; } return p >= dsWarnPct; })
-    .map((d) => ({ name: d.name, vcenterId: d.vcenterId, usagePct: numOrNull(d.usagePct), freeGB: d.freeGB }))
+  // v2.622(감사 RECENT-02 — 재현: 용량 0 DS 하나로 종합이 매일 '확인 불가'): '사용량 미상' 은 store 롤업
+  //   datastoresUsageUnknown 과 같은 기준(dsUsageUnknownOf — used·free 둘 다 없고 용량>0)이다. usagePct 가 없어도 used/free 로
+  //   계산할 수 있으면 그 값으로 임계를 판정하고, 용량 미상(0)인 DS 는 롤업처럼 판정 대상에서 뺀다(미상으로도 세지 않는다).
+  const dsPctOf = (d) => {
+    const p = numOrNull(d?.usagePct);
+    if (p != null) return p;
+    const cap = numOrNull(d?.capacityGB);
+    if (!d || !dsUsageReadable(d) || cap == null || cap <= 0) return null;
+    return Math.round((dsUsedOf(d) / cap) * 1000) / 10;
+  };
+  const dsHot = (snap.datastores || []).filter((d) => {
+    const p = dsPctOf(d);
+    if (p == null) { if (dsUsageUnknownOf(d)) unknown.dsUsageUnknown += 1; return false; }
+    return p >= dsWarnPct;
+  })
+    .map((d) => ({ name: d.name, vcenterId: d.vcenterId, usagePct: dsPctOf(d), freeGB: d.freeGB }))
     .sort((a, b) => b.usagePct - a.usagePct);
   S('datastores', withUnknown(lv(dsHot.length, dsHot.filter((d) => d.usagePct >= dsCritPct).length), unknown.dsUsageUnknown), dsHot.length, dsHot.slice(0, 50),
     `데이터스토어 사용률 ${dsWarnPct}% 이상`, unknownDetail([['사용량 미상 데이터스토어', unknown.dsUsageUnknown, '개']]));

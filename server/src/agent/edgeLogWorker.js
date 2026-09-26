@@ -22,6 +22,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { classifyCentral404 } from './central404.js';
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
+import { readCentralReply } from '../util/centralReply.js'; // v2.622(EDGE-04)
 
 const gzipAsync = promisify(gzip);
 const DEFAULT_POLL_MS = 60_000;
@@ -76,7 +77,16 @@ export async function runEdgeLogWorkerOnce() {
     });
     if (post.status === 413) console.warn(`[edgelog-worker] 중앙이 본문 크기를 거부(413) — 로그 ${snap.logs?.count}줄. EDGELOG 한도를 확인하세요.`);
     if (!post.ok) throw Object.assign(new Error(`edge-log-result <- HTTP ${post.status}`), { status: post.status });
-    _last = { at: Date.now(), ms: Date.now() - t0, ok: true, job: true, lines: snap.logs?.count ?? 0, statusFailed: snap.statusFailed ?? null };
+    // v2.622(감사 EDGE-04): 200 이어도 본문을 본다 — stored:false 는 중앙이 **보관하지 않았다**(공유 토큰의 요청 없는 회신 —
+    //   기한을 넘겨 작업이 회수된 뒤 도착) · acked:false 는 중앙이 요청으로 대조하지 못했다(작업이 대기로 되돌아가 한 번 더 수집될 수 있다).
+    //   예전에는 post.ok 만 보고 '중앙 요청 회신' 성공으로 적어, 회신했지만 저장되지 않은 사실이 어디에도 남지 않았다.
+    const reply = await readCentralReply(post);
+    if (reply && reply.stored === false) {
+      throw Object.assign(new Error(`중앙이 회신을 보관하지 않음(stored:false${reply.acked === false ? ' · acked:false — 요청 기한을 넘겨 도착' : ''})${reply.reason ? ` — ${String(reply.reason).slice(0, 200)}` : ''}`), { status: post.status, kind: 'not-stored' });
+    }
+    const notAcked = reply?.acked === false;
+    if (notAcked) console.warn('[edgelog-worker] 중앙이 이 회신을 요청과 대조하지 못했습니다(acked:false — 기한을 넘겨 도착). 보관은 됐지만 같은 요청이 한 번 더 수집될 수 있습니다.');
+    _last = { at: Date.now(), ms: Date.now() - t0, ok: true, job: true, lines: snap.logs?.count ?? 0, statusFailed: snap.statusFailed ?? null, ...(notAcked ? { acked: false, note: '중앙이 요청과 대조하지 못함(acked:false — 기한 초과 도착)' } : {}) };
     console.log(`[edgelog-worker] 중앙 요청 회신 — 로그 ${snap.logs?.count ?? 0}줄 · 상태 실패 ${snap.statusFailed ?? '?'}건 · ${Date.now() - t0}ms`);
     return { ok: true, job: true };
   } catch (e) {

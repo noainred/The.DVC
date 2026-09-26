@@ -14,7 +14,24 @@ import { dayStamp } from '../../dayStamp.js';
 // v2.601(감사 WEB2601-05): 수집 주기를 문구에 박지 않는다(CLAUDE.md v2.493) — 서버가 준 값만 쓰고, 없으면 주기를 말하지 않는다.
 import { intervalText } from './collectActivityText.js';
 // v2.621(감사 WEB-04·WEB-05): BMC 벤더 판정·미지원 서버 인증 칸 — 배지·CSV·필터가 같은 판정을 쓴다.
-import { serverVendorBadge, serverCsvType, serverCsvVendor, vendorFilterOptions, matchesVendor, unsupportedAuthBadge } from './serverVendorText.js';
+import { serverVendorBadge, serverCsvType, serverCsvVendor, vendorFilterOptions, matchesVendor, unsupportedAuthBadge, detailServerOf } from './serverVendorText.js';
+
+/**
+ * v2.622(감사 RECENT-04): 상세 모달 열기 — 행이 벤더를 모르면(온도·GPU·드릴다운) 먼저 'BMC' 로 열고 서버 목록을
+ * 한 번 받아(이후 재사용) id 로 벤더를 채운다. 그 사이 다른 서버를 열었으면 덮지 않는다.
+ */
+function useDetailOpener(setDetail) {
+  const listRef = useRef(null);
+  return (row) => {
+    const d = detailServerOf(row, listRef.current);
+    setDetail(d);
+    if (!d.vendorUnknown || listRef.current) return;
+    fetchJson('/admin/idrac').then((r) => {
+      listRef.current = Array.isArray(r?.servers) ? r.servers : [];
+      setDetail((cur) => (cur && cur.vendorUnknown && String(cur.id) === String(d.id) ? detailServerOf(row, listRef.current) : cur));
+    }).catch(() => { /* 목록을 못 읽으면 'BMC' 그대로 — 벤더를 지어내지 않는다 */ });
+  };
+}
 
 
 /**
@@ -151,6 +168,7 @@ function HardwareSummary() {
   const [err, setErr] = useState(null);
   const [drill, setDrill] = useState(null); // { dim, key } — 항목 클릭 시 서버 목록
   const [detail, setDetail] = useState(null); // 드릴 목록에서 클릭한 서버의 iDRAC 상세
+  const openDetail = useDetailOpener(setDetail); // v2.622(감사 RECENT-04): 드릴 행에는 vendor 가 없다
   const [dcErr, setDcErr] = useState(null); // v2.613 WEB2613-02: 법인 목록 조회 실패는 따로 든다(빈 목록 = '법인 없음' 이 아니다)
   useEffect(() => { fetchJson('/admin/datacenters').then((r) => { setDcs(r.datacenters || []); setDcErr(null); }).catch((e) => setDcErr(e)); }, []);
   useEffect(() => {
@@ -204,7 +222,7 @@ function HardwareSummary() {
         <Bars title="💾 메모리 용량" rows={d.byMemory} dim="memory" />
         <Bars title="🎮 GPU 종류" rows={d.byGpu} unit="장" dim="gpu" />
       </div>
-      {drill && <HwDrillModal dc={dc} dim={drill.dim} keyVal={drill.key} onClose={() => setDrill(null)} onServer={(s) => setDetail({ id: s.id, name: s.name })} />}
+      {drill && <HwDrillModal dc={dc} dim={drill.dim} keyVal={drill.key} onClose={() => setDrill(null)} onServer={openDetail} />}
       {detail && <IdracDetailModal server={detail} onClose={() => setDetail(null)} />}
     </div>
   );
@@ -552,7 +570,8 @@ export function ServerAnalysis() {
   useEffect(() => { fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => fetchJson('/admin/vcenters').then((d) => setVcs(d.vcenters || [])).catch(() => {})); }, []);
   useEffect(() => { fetchJson('/admin/datacenters').then((r) => { setDcs(r.datacenters || []); setAssign(r.assign || {}); setDcErr(null); }).catch((e) => setDcErr(e)); }, []);
   // v2.621(감사 WEB-04): 벤더·원격 여부를 상세에도 넘긴다(상세 제목을 벤더에 맞출 근거 — serverVendorText.bmcLabel).
-  const onServer = (s) => setDetail({ id: s.id || s.serverId, name: s.name || s.server, vendor: s.vendor, remote: s.remote, type: s.type });
+  // v2.622(감사 RECENT-04): 온도·GPU·펌웨어 행은 vendor 가 없다 — id 로 서버 목록에서 찾고, 모르면 'BMC'.
+  const onServer = useDetailOpener(setDetail);
   // 2차 박스의 vCenter 목록: 1차에서 법인을 고르면 그 법인 소속 vCenter만, '전체'면 모든 vCenter.
   const dcVcs = dc ? vcs.filter((v) => assign[v.id] === dc) : vcs;
   // (1차 dc, 2차 lvl2) → 스코프 객체. vCenter를 고르면 그 vCenter(가상화), Baremetal이면 (법인)+baremetal.

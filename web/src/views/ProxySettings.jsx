@@ -14,9 +14,19 @@ const withPorts = (c) => ({
 });
 
 /** 설정 → 중계 서버(프록시): HAProxy Data Plane / SSH 자동배포 + vCenter별 프록시 할당. */
+/**
+ * v2.622(감사 WEB-06): 프록시 표가 비었을 때의 문구(순수). 조회에 실패했으면 '추가 프록시가 없습니다' 라고
+ * 단정하지 않는다 — 등록된 프록시를 읽지 못했을 뿐이고, 그 문구를 믿고 같은 프록시를 다시 등록할 수 있다.
+ */
+export function proxyListEmptyText(loadErr) {
+  if (loadErr) return { tone: 'error', text: `프록시 목록을 불러오지 못했습니다: ${loadErr} — 등록된 프록시가 없다는 뜻이 아닙니다.` };
+  return { tone: 'empty', text: '추가 프록시가 없습니다. (모두 기본 프록시 사용)' };
+}
+
 export default function ProxySettings() {
   const [cfg, setCfg] = useState(null);
   const [proxies, setProxies] = useState([]);
+  const [proxiesErr, setProxiesErr] = useState(null); // v2.622(감사 WEB-06): 목록 조회 실패(빈 목록과 구분)
   const [error, setError] = useState(null);
   const [msg, setMsg] = useState(null);
   const [editProxy, setEditProxy] = useState(null);
@@ -32,7 +42,9 @@ export default function ProxySettings() {
   const load = async () => {
     try {
       const r = await fetchJson('/remote/config'); setCfg(r.config); setError(null);
-      fetchJson('/remote/proxies/full').then((p) => { setProxies(p.proxies); testAll(p.proxies); }).catch(() => setProxies([]));
+      fetchJson('/remote/proxies/full')
+        .then((p) => { const list = Array.isArray(p?.proxies) ? p.proxies : []; setProxies(list); setProxiesErr(null); testAll(list); })
+        .catch((e) => { setProxies([]); setProxiesErr(e?.message || String(e)); });
     } catch (e) { setError(e.message); }
   };
   useEffect(() => { load(); }, []);
@@ -138,7 +150,7 @@ export default function ProxySettings() {
           const other = proxies.length - ok - fail;
           return (
             <div className="flex gap wrap" style={{ fontSize: 13, marginBottom: 10 }}>
-              <span className="badge gray">총 {proxies.length}개</span>
+              <span className="badge gray">{proxiesErr ? '총 — (조회 실패)' : `총 ${proxies.length}개`}</span>
               <span className="badge green">🟢 정상 {ok}</span>
               <span className="badge red">🔴 불량 {fail}</span>
               <span className="badge gray">⚪ 대기/수동 {other}</span>
@@ -150,7 +162,15 @@ export default function ProxySettings() {
           <STable>
             <thead><tr><th>상태</th><th>이름</th><th>프록시 주소</th><th>공개포트 시작</th><th>할당 vCenter</th><th>프로비저닝</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
             <tbody>
-              {proxies.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 20 }}>추가 프록시가 없습니다. (모두 기본 프록시 사용)</td></tr>}
+              {proxies.length === 0 && (() => {
+                const e = proxyListEmptyText(proxiesErr);
+                return (
+                  <tr><td colSpan={7} className={e.tone === 'error' ? 'center' : 'center muted'} style={{ padding: 20, ...(e.tone === 'error' ? { color: 'var(--amber)' } : {}) }}>
+                    {e.text}
+                    {e.tone === 'error' && <>{' '}<button className="logout-btn" style={{ padding: '4px 10px' }} onClick={load}>다시 시도</button></>}
+                  </td></tr>
+                );
+              })()}
               {proxies.map((p) => (
                 <tr key={p.id}>
                   <td><HealthDot h={health[p.id]} /></td>

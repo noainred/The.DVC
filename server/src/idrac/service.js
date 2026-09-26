@@ -150,11 +150,18 @@ export async function allMeasuredPower({ hosts = [], vcenterFirst = false } = {}
     }
     // OME 연결의 소속 법인 → 그 연결이 발견한 디바이스가 상속(전력 귀속을 PowerMap/FinOps/플릿이 공유).
     const omeEntryVc = new Map(loadRegistry().filter((s) => s.type === 'ome' && s.vcenterId).map((s) => [s.id, s.vcenterId]));
+    // v2.622(감사 DATA-01): OME 도 iDRAC·원격과 같은 두 규칙을 따른다 — ① 비활성(enabled:false) OME 연결의 디바이스는 제외
+    //   ② 신선도 컷(POWER_STALE_MS). 폴러는 비활성·실패 OME 를 다시 읽지 않아 omeCache 에 옛 디바이스·at 이 남는데, 이 루프만
+    //   두 검사가 없어 며칠 전 값이 FinOps·PowerMap·플릿의 '현재 W' 로 계속 합산됐다(v2.287 #13·v2.583 #30 의 형제 누락).
+    const omeDisabled = new Set(loadRegistry().filter((s) => s.type === 'ome' && s.enabled === false).map((s) => s.id));
     for (const { entryId, at, device } of allOmeDevices()) {
       if (device.watts == null) continue;
+      if (omeDisabled.has(entryId)) continue;
       const key = dbKey(entryId, device);
       const sample = latest.get(key) || { watts: device.watts, ts: at };
       if (sample.watts == null || !Number.isFinite(sample.watts)) continue;
+      const sampleTs = sample.ts ?? at;
+      if (sampleTs && (nowTs - sampleTs) > POWER_STALE_MS) continue;
       const st = norm(device.serviceTag);
       const hostNames = [st, norm(device.name)].filter(Boolean);
       // OME 식별: 서비스태그 + 호스트명 모두 dedup 키로(서비스태그 없는 iDRAC과 같은 박스도 이름으로 dedup).

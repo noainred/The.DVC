@@ -32,6 +32,32 @@ const fleetOnly = fullScopeOnlyWith('물리 GPU 서버·엣지 배포 설정·�
 //   VM 을 골라 시험하는 /gpu-guest/test(inUserScope)를 쓴다.
 const rawIpFleetOnly = fullScopeOnlyWith('IP 만으로 SSH 를 시도하는 빠른 테스트는 법인 축이 없어 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다 — 범위 계정은 VM 을 골라 시험하세요.');
 
+// v2.622(감사 SEC-03): 엣지 배포 설정·엣지 배포 사용자·수집 진단 **조회**도 전 법인 등록부다 — 같은 파일의
+//   /gpu-guest/vms?agent= 는 같은 배포 데이터를 범위 계정에 403 으로 막는데 형제 GET 들은 범위 밖 vCenter 의 계정명·VM IP·
+//   엣지 사용자 목록·전 엣지 진단(VM·오류 원문)을 그대로 줬다. 변경(fleetOnly)과 같은 기준으로 조회도 전체 범위만.
+const fleetReadOnly = fullScopeOnlyWith('엣지 배포 설정·엣지 배포 사용자·GPU 게스트 수집 진단은 전 법인에 걸친 데이터라 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
+
+/**
+ * v2.622(감사 SEC-03): 물리 GPU 서버 목록은 vcenterId 축이 있으므로 범위 계정에는 403 대신 **범위 안 서버만** 준다
+ *   (설정 › GPU 게스트 화면의 물리 서버 패널이 범위 계정에도 열려 있다 — 403 이면 그 패널이 통째로 오류가 된다).
+ *   소속 vCenter 가 비어 있는 서버는 귀속을 알 수 없어 뺀다. 결과(results)도 남긴 서버 id 로 거르고, 폴러 상태의 서버 수·GPU 수·
+ *   실행 집계는 전 함대 값이라 범위 계정에는 싣지 않는다(v2.550.3 '상태 객체에 집계를 담아 내보내지 말 것'). 뺀 서버 수는
+ *   omittedOutOfScope 로 밝힌다. allowed === null(전체 범위)이면 그대로.
+ */
+export function scopePhysicalView(servers, results, status, allowed) {
+  const list = Array.isArray(servers) ? servers : [];
+  const res = Array.isArray(results) ? results : [];
+  if (!allowed) return { servers: list, results: res, status };
+  const kept = list.filter((sv) => sv && sv.vcenterId && allowed.has(String(sv.vcenterId)));
+  const ids = new Set(kept.map((sv) => sv.id));
+  return {
+    servers: kept,
+    results: res.filter((r) => r && ids.has(r.id)),
+    status: { intervalMs: status?.intervalMs ?? null, servers: kept.length, fleetCountsHidden: true },
+    scoped: true, omittedOutOfScope: list.length - kept.length,
+  };
+}
+
 export function registerGpuGuest(adminRouter) {
 
 // Metrics sampler settings: 온도/용량/GPU 수집 주기 + 보존기간 (런타임 변경).
@@ -112,7 +138,7 @@ adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
 
 // GPU 게스트 수집 진단 — 어느 단계에서 막혔는지(선별 깔때기 + VM별 성공/실패·에러).
 // 중앙 본인이 직접 수집하면 local, agent들이 push한 건 agents 로 함께 반환.
-adminRouter.get('/gpu-guest/diag', adminOnly, (_req, res) => {
+adminRouter.get('/gpu-guest/diag', adminOnly, fleetReadOnly, (_req, res) => {
   res.json({ local: getGpuGuestDiag(), agents: getAllGpuGuestDiag() });
 });
 
@@ -153,7 +179,7 @@ adminRouter.get('/gpu-guest/vms', adminOnly, (req, res) => {
 // ── 중앙→엣지 GPU 게스트 설정 배포 관리 ────────────────────────────────────────────
 // 원격 엣지(agent) 앞으로 GPU 게스트 수집 설정을 지정 → 엣지가 pull해 로컬 적용.
 // 배포 대상 후보 agent 목록(수집 서버 등록분 + gpu-guest push 이력 + 이미 배포 지정된 것).
-adminRouter.get('/gpu-guest/deploy/agents', adminOnly, (_req, res) => {
+adminRouter.get('/gpu-guest/deploy/agents', adminOnly, fleetReadOnly, (_req, res) => {
   const assigned = new Map(listAssignedGpuGuestAgents().map((a) => [a.agent, a]));
   const names = new Set();
   for (const c of listCollectors()) if (c.name) names.add(c.name); // 수집 서버(원격) 이름 = agent 이름
@@ -163,7 +189,7 @@ adminRouter.get('/gpu-guest/deploy/agents', adminOnly, (_req, res) => {
   res.json({ agents });
 });
 // 특정 엣지 앞 배포 설정 조회(비밀번호 가림).
-adminRouter.get('/gpu-guest/deploy/:agent', adminOnly, (req, res) => {
+adminRouter.get('/gpu-guest/deploy/:agent', adminOnly, fleetReadOnly, (req, res) => {
   res.json(redactAssignedGpuGuest(req.params.agent));
 });
 // 특정 엣지 앞 배포 설정 저장(병합). 엣지가 다음 pull 주기에 가져가 적용.
@@ -178,7 +204,7 @@ adminRouter.put('/gpu-guest/deploy/:agent', adminOnly, fleetOnly, (req, res) => 
 // ── 중앙→엣지 배포 사용자 관리 ──────────────────────────────────────────────────
 // 원격 엣지 포탈에 접속(설정 열람 등)할 수 있는 사용자를 중앙에서 지정 → 엣지가 pull해 반영.
 // 후보 agent 목록(수집 서버 등록분 + gpu-guest push 이력 + 이미 사용자 배포된 것).
-adminRouter.get('/edge-users/agents', adminOnly, (_req, res) => {
+adminRouter.get('/edge-users/agents', adminOnly, fleetReadOnly, (_req, res) => {
   const withUsers = new Map(listAgentUserAgents().map((a) => [a.agent, a]));
   const names = new Set();
   for (const c of listCollectors()) if (c.name) names.add(c.name);
@@ -189,14 +215,14 @@ adminRouter.get('/edge-users/agents', adminOnly, (_req, res) => {
   res.json({ agents, global: { users: g?.users || 0, at: g?.at || 0 } }); // global = 모든 엣지(전체) 배포 목록
 });
 // 특정 엣지 앞 배포 사용자 목록(비밀번호 해시 가림).
-adminRouter.get('/edge-users/:agent', adminOnly, (req, res) => {
+adminRouter.get('/edge-users/:agent', adminOnly, fleetReadOnly, (req, res) => {
   res.json({ agent: req.params.agent, users: listAgentUsers(req.params.agent) });
 });
 // ⚠ 아래 3개 변경 라우트는 requireSettingsOwner 다(4차 재감사). 중앙이 배포한 admin 계정은
 // 엣지에서 managedAdminOwners() 로 **자동 설정 소유자**가 되므로, 이 라우트는 사실상 '엣지의
 // 소유자를 만드는 권능'이다. adminOnly 로 열려 있으면 비소유자 중앙 admin 이 targets:['*'] 로
 // 전 엣지의 소유자가 되어(엣지 백업 다운로드 → 엣지 AUTH_SECRET·TOTP 시크릿) 로컬의 소유자
-// 경계를 우회한다 — 백업 라우트와 같은 등급으로 올린다. 조회(GET)는 종전대로 adminOnly.
+// 경계를 우회한다 — 백업 라우트와 같은 등급으로 올린다. 조회(GET)는 v2.622(감사 SEC-03)부터 fleetReadOnly(전체 범위만).
 // 사용자 추가/수정(비밀번호 주면 해시로 변환 저장). Body { username, name, role, password }.
 adminRouter.post('/edge-users/:agent', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const r = upsertAgentUser(req.params.agent, req.body || {});
@@ -215,8 +241,8 @@ adminRouter.delete('/edge-users/:agent/:username', adminOnly, fleetOnly, require
 });
 
 // ── 물리(베어메탈) 서버 GPU 수집 — IP+계정으로 SSH nvidia-smi(가상화 안 한 서버) ──────
-adminRouter.get('/gpu-physical', adminOnly, (_req, res) => {
-  res.json({ servers: listPhysical(), results: getAllPhysicalGpu(), status: physicalPollerStatus() });
+adminRouter.get('/gpu-physical', adminOnly, (req, res) => {
+  res.json(scopePhysicalView(listPhysical(), getAllPhysicalGpu(), physicalPollerStatus(), scopedVcenterIds(req.user, store.get()))); // v2.622(감사 SEC-03)
 });
 adminRouter.post('/gpu-physical', adminOnly, fleetOnly, (req, res) => {
   const r = addPhysical(req.body || {});

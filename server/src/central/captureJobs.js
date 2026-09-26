@@ -151,9 +151,23 @@ export function takeCaptureJobs(agent, now = Date.now()) {
 }
 
 /** 에이전트가 캡처 결과 회신(= ack). 성공/실패 모두 여기로 온다({ ok, ... } / { ok:false, reason }). */
-export function setCaptureResult(reqId, result) {
+export function setCaptureResult(reqId, result) { return applyCaptureResult(reqId, result).ok; }
+
+/**
+ * v2.622(감사 LEFT-03): 결과 반영 + '처음 받은 에이전트 결과인가' 를 함께 돌려준다 — 라우트가 이력(recordCapture)을 그때만 적는다.
+ *   예전 라우트는 반환값을 보지 않고 200 + 이력 기록을 했다: ① 중앙에 없는 reqId(TTL·중앙 재시작)의 결과가 화면은 'unknown'
+ *   인데 이력에는 남았고 ② 엣지 retries 로 같은 결과가 다시 오면 이력 행이 중복됐다.
+ *   · 모르는 reqId → `{ok:false, unknown:true}`(라우트 410)
+ *   · 이미 에이전트 결과를 받은 잡 → `{ok:true, duplicate:true}`(아무것도 바꾸지 않는다 — 재전송은 무해하게)
+ *   · reap 이 '미회신' 으로 닫은 잡에 늦게 온 실제 결과 → 반영한다(실제 결과가 추정 사유보다 낫다)
+ * @returns {{ok:boolean, unknown?:boolean, duplicate?:boolean, late?:boolean}}
+ */
+export function applyCaptureResult(reqId, result) {
   const j = jobs.get(String(reqId || ''));
-  if (!j) return false; // TTL 로 정리됐거나 위조 reqId — 저장할 곳 없음(라우트가 agent 소유권은 별도 검사)
+  if (!j) return { ok: false, unknown: true }; // TTL 로 정리됐거나 위조 reqId — 저장할 곳 없음(라우트가 agent 소유권은 별도 검사)
+  if (j.agentResultAt) return { ok: true, duplicate: true };
+  const late = j.state === 'done';
+  j.agentResultAt = Date.now();
   j.state = 'done';
   j.doneAt = Date.now();
   j.claimDeadline = null; // ack — 재수확 대상 아님
@@ -162,7 +176,7 @@ export function setCaptureResult(reqId, result) {
   j.result = sanitizeCaptureResult(result, { full: true });
   dropPending(j.agent, reqId); // reap 복귀 직후 늦은 결과가 온 경우, 대기 인덱스 잔여 제거(중복 재인출 방지)
   prune();
-  return true;
+  return late ? { ok: true, late: true } : { ok: true };
 }
 
 /** UI 결과 폴링 — { state: pending|done|unknown, result? }. running 도 'pending' 으로 묶는다(UI 구분 불필요). */

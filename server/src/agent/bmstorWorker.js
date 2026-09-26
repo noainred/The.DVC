@@ -49,7 +49,18 @@ async function postResult(url, body, timeoutMs) {
   let r;
   try { r = await resilientFetch(url, { method: 'POST', headers: headers(), body, timeoutMs, retries: 2 }); }
   catch (e) { const msg = `결과 회신 실패 — ${String(e?.message || e).slice(0, 200)}`; if (_logChange('회신', msg)) console.warn(`[bmstor-agent] ${msg}`); return msg; }
-  if (r.ok) return null;
+  if (r.ok) {
+    // v2.622(감사 EDGE-03): 200 이어도 stale 이면 중앙이 결과를 **반영하지 않았다** — 예전에는 r.ok 만 봐서 '수집 완료' 와 ok:true 가
+    //   남았는데 중앙 화면은 '회신하지 않았다' 였다. 재전송 중복(duplicate)은 앞서 반영됐으므로 실패가 아니다.
+    let b = null; try { b = await r.json(); } catch { /* 본문 없음 */ }
+    if (b && b.stale === true && b.duplicate !== true) {
+      const msg = `결과 회신은 도착했지만 중앙이 반영하지 않음(stale${b.superseded ? ' — 더 새 수집 결과가 이미 반영됨' : ' — 중앙이 이 잡을 기한 초과로 종결함'})${b.reason ? ` — ${String(b.reason).slice(0, 200)}` : ''}`;
+      if (_logChange('회신', msg)) console.warn(`[bmstor-agent] ${msg}`);
+      return msg;
+    }
+    if (b && b.late === true) console.log('[bmstor-agent] 결과가 중앙 기한을 넘겨 도착했지만 반영됐습니다(late) — 수집 서버가 많거나 SSH 가 느리면 기한에 닿을 수 있습니다.');
+    return null;
+  }
   let reason = '';
   try { const b = await r.json(); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
   const msg = `결과 회신 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
@@ -78,7 +89,7 @@ export async function runBmstorWorkerOnce() {
       postErr = jobErr || postErr;
       // v2.604(감사 EDGE2604-03): 회신이 실패한 잡을 '완료' 한 줄로만 남기지 않는다 — 같은 실패 경고는 10분에 1줄로 묶이므로
       //   이후 주기에는 이 줄만 보였다. 수집은 끝났지만 중앙에 닿지 않았다는 사실을 같은 줄에 적는다.
-      console.log(`[bmstor-agent] 수집 완료 reqId=${job.reqId} 서버 ${safe.length}대${jobErr ? ' · 결과 회신 실패(중앙이 다시 인출할 때까지 반영되지 않음)' : ''}`);
+      console.log(`[bmstor-agent] 수집 완료 reqId=${job.reqId} 서버 ${safe.length}대${jobErr ? (/HTTP 410/.test(jobErr) ? ' · 중앙에 이 잡이 없어 결과가 반영되지 않음(410 — 만료·중앙 재시작)' : ' · 결과 회신 실패(중앙이 다시 인출할 때까지 반영되지 않음)') : ''}`);
     }
     _last = postErr ? { at: Date.now(), ok: false, error: postErr } : { at: Date.now(), ok: true };
     return _last;

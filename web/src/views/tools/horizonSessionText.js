@@ -203,11 +203,25 @@ export function unionNote(total) {
   return `고유 계정 **${u}명**(합집합)인데 서버별 고유의 합은 **${sum}명** 입니다 — 차이 ${sum - u}명은 **여러 Connection Server 에 동시에 붙은 계정**입니다(같은 계정이면 1명으로 셉니다).`;
 }
 
+/**
+ * v2.622(감사 DATA-06): 합집합 카드 값 — 읽은 출처가 없으면 '—', 이름 목록이 잘렸으면 '최소 N명'.
+ */
+export function unionValueText(c) {
+  if (!c || c.union == null) return '—';
+  return `${c.unionLowerBound === true ? '최소 ' : ''}${Number(c.union)}명`;
+}
+
 /** 두 출처 합집합(전체 탭) 문구. */
 export function combinedNote(c) {
   // v2.598: 읽은 출처가 없으면 합집합은 null 이다 — '**null명**' 이나 '0명' 을 말하지 않는다.
   if (!c || c.union == null) return '';
-  const parts = [`전체 고유 사용자 **${c.union}명** = Windows 서버 ∪ Horizon(VDI)`];
+  // v2.622(감사 DATA-06): 출처의 이름 목록이 잘렸으면 합집합은 하한이다 — '최소 N명' 으로 말하고 어느 출처인지 밝힌다.
+  const lb = c.unionLowerBound === true;
+  const parts = [`전체 고유 사용자 **${lb ? '최소 ' : ''}${c.union}명** = Windows 서버 ∪ Horizon(VDI)`];
+  if (lb) {
+    const src = (c.lowerBoundSources || []).map((x) => x?.label).filter(Boolean).join(' · ');
+    parts.push(`⚠ ${src || '일부 출처'} 의 계정 목록이 상한으로 잘려 합집합·겹친 인원은 **최소값**입니다`);
+  }
   if (c.both > 0) parts.push(`양쪽에 동시에 있는 사람 **${c.both}명**(단순 합 ${c.sum}명에서 중복을 뺐습니다)`);
   else if (c.sum !== c.union) parts.push(`단순 합 ${c.sum}명`);
   if (c.sidOnly > 0) parts.push(`⚠ SID 로만 식별된 계정 ${c.sidOnly}건은 이름이 없어 Windows 쪽과 **절대 겹치지 않습니다** — 실제로는 같은 사람일 수 있습니다`);

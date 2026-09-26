@@ -38,7 +38,7 @@ export function reapBmstorClaims(now = Date.now()) {
   for (const [reqId, j] of jobs) {
     if (j.state !== 'running' || !j.claimDeadline || now <= j.claimDeadline) continue;
     if ((j.claims || 0) >= MAX_CLAIMS) {
-      j.state = 'done'; j.doneAt = now; failed++;
+      j.state = 'done'; j.doneAt = now; j.expired = true; failed++; // v2.622(EDGE-03): 늦게 온 실제 결과를 받을 수 있게 표시
       try { onExpire?.(j.agent, j.servers.map((s) => s.id), `에이전트 '${j.agent}'가 수집 잡 인출 후 ${MAX_CLAIMS}회 연속 결과를 회신하지 않았습니다 — 엣지 상태를 확인하세요.`); } catch { /* 콜백 실패가 큐를 막지 않게 */ }
       continue;
     }
@@ -99,8 +99,33 @@ export function bmstorAgentOfReq(reqId) { return jobs.get(String(reqId || ''))?.
 export function ackBmstorJob(reqId) {
   const j = jobs.get(String(reqId || ''));
   if (!j || j.state === 'done') return null;
-  j.state = 'done'; j.doneAt = Date.now(); j.claimDeadline = null;
+  j.state = 'done'; j.doneAt = Date.now(); j.claimDeadline = null; j.ackedAt = j.doneAt;
   dropPending(j.agent, reqId);
   prune();
   return { agent: j.agent, serverIds: j.servers.map((s) => s.id) };
 }
+
+/**
+ * v2.622(감사 EDGE-03): 재시도 소진으로 **만료(expired) 종결된 잡**에 늦게 온 실제 결과를 받는다. 예전에는 ackBmstorJob 이 null 을
+ *   돌려 라우트가 200 {stale:true} 로 버렸고, 중앙 화면은 수집이 끝났는데도 '회신하지 않았다' 로 남았다(엣지는 성공으로 기록).
+ *   · 같은 잡의 늦은 결과는 한 번만 반영한다(재전송 중복 방지).
+ *   · 그 뒤 **같은 에이전트의 더 새 잡**이 이미 정상 회신됐으면 반영하지 않는다(새 값을 옛 값으로 되돌리지 않게) — `superseded`.
+ * @returns {null|{agent:string, serverIds:string[], late:true}|{superseded:true}|{duplicate:true}}  null = 모르는 잡·만료가 아닌 종결
+ */
+export function lateBmstorResult(reqId) {
+  const j = jobs.get(String(reqId || ''));
+  if (!j || j.state !== 'done' || !j.expired) return null;
+  if (j.lateAppliedAt) return { duplicate: true };
+  const key = agentKey(j.agent);
+  for (const o of jobs.values()) {
+    if (o !== j && agentKey(o.agent) === key && o.ackedAt && (o.createdAt || 0) > (j.createdAt || 0)) return { superseded: true };
+  }
+  j.lateAppliedAt = Date.now();
+  return { agent: j.agent, serverIds: j.servers.map((s) => s.id), late: true };
+}
+
+/** reqId 가 중앙에 있는가(응답 구분용 — 410 은 '없는 잡' 에만). */
+export function bmstorJobKnown(reqId) { return jobs.has(String(reqId || '')); }
+
+/** 테스트용 — 잡 상태 조회. */
+export function _bmstorJobForTest(reqId) { return jobs.get(String(reqId || '')) || null; }

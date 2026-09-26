@@ -30,8 +30,8 @@ export const NAME_FORM_NOTE = '계정 비교는 **도메인 접두를 보존**�
 
 /**
  * @param {object} p
- * @param {{state:'ok'|'off'|'failed'|'unavailable', names:Array<{name:string}>, label?:string, reason?:string}} p.windows
- * @param {{state:'ok'|'off'|'failed'|'unavailable', names:Array<{name:string,isSid?:boolean}>, label?:string, reason?:string}} p.vdi
+ * @param {{state:'ok'|'off'|'failed'|'unavailable', names:Array<{name:string}>, label?:string, reason?:string, lowerBound?:boolean}} p.windows
+ * @param {{state:'ok'|'off'|'failed'|'unavailable', names:Array<{name:string,isSid?:boolean}>, label?:string, reason?:string, lowerBound?:boolean}} p.vdi
  * @returns {{
  *   union:number, sum:number, both:number, onlyWindows:number, onlyVdi:number,
  *   partial:boolean, missingSources:Array<{key:string,label:string,state:string,reason:string}>,
@@ -66,9 +66,17 @@ export function combineSources({ windows = {}, vdi = {} } = {}) {
     return {
       union: null, sum: null, both: null, onlyWindows: null, onlyVdi: null,
       partial: true, missingSources, sidOnly: 0, names: [], nameFormNote: NAME_FORM_NOTE,
+      unionLowerBound: false, lowerBoundSources: [],
     };
   }
+  // v2.622(감사 DATA-06): 출처의 이름 목록이 잘렸으면(Horizon 서버당 maxUsers · 발행기 원문 절단 · 세션 페이지 절단)
+  //   그 목록으로 센 합집합·단순 합·겹침은 **하한**이다. 읽은 출처가 전부 ok 여도 partial 만 보면 '전체' 로 읽히므로
+  //   따로 밝힌다(`unionLowerBound` + 어느 출처인지 `lowerBoundSources`) — 화면이 '최소 N명' 으로 말한다.
+  const lowerBoundSources = okSrcs.filter((s) => s.lowerBound === true).map((s) => ({ key: s.key, label: s.label }));
+  const unionLowerBound = lowerBoundSources.length > 0;
   return {
+    unionLowerBound,
+    lowerBoundSources,
     union: names.length,
     // 단순 합 — 겹침을 두 번 센 값. **'전체' 로 쓰지 말 것**(비교용으로만 표시한다).
     sum: okSrcs.reduce((a, s) => a + new Set((s.names || []).map((u) => userKey(u?.name)).filter(Boolean)).size, 0),

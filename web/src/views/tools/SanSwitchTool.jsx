@@ -11,7 +11,7 @@ import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../compo
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
   throughputText, throughputTitle, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
   toChartRows, topSeries, bps, sortPorts, nextSort, sortRows, seriesStats,
-  RX_WARN_DBM, RX_BAD_DBM, alertsMeta, usedPctText, switchesMeta } from './sanSwitchPorts.js';
+  RX_WARN_DBM, RX_BAD_DBM, alertsMeta, usedPctText, switchesMeta, perfPartialNote, perfPartialMark } from './sanSwitchPorts.js';
 import { STable } from '../../components/STable.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
 import CollectActivity from './CollectActivity.jsx';
@@ -1167,6 +1167,8 @@ function DcStoragePerf({ dcPerf, onClose }) {
               스토리지별 합산 처리량({data.split ? '법인별로 분리' : '법인 구분 없이 합산'}) · <b>{peak ? '피크 기준(버킷 안 포트별 최댓값 합)' : '평균 기준(버킷 안 포트별 평균 합)'}</b> · 버킷 폭 {bucketText(data.bucketMs)} ·
               상위 {chartSeries.length}개 · 스위치가 여러 대인 항목은 팹 A/B 를 합친 값입니다.
             </div>
+            {/* v2.622(감사 RECENT-05): 서버가 부분 합으로 비운 구간(partialBuckets)을 말한다 — 공백을 '트래픽 없음' 으로 읽지 않게. */}
+            {(() => { const pn = perfPartialNote(series); return pn ? <div style={{ fontSize: 11.5, color: 'var(--amber)', marginBottom: 4 }}>⚠ {pn.text}</div> : null; })()}
             <ResponsiveContainer width="100%" height={250}>
               <LineChart data={rows} margin={{ top: 4, right: 12, bottom: 4, left: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
@@ -1211,6 +1213,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
                       <b>{s.key}</b>
                       <div className="muted" style={{ fontSize: 10.5 }}>
                         {s.endpointKind === 'host' ? '호스트(HBA) · ' : ''}{s.arraySerial ? `S/N ${s.arraySerial}` : ''}
+                        {perfPartialMark(s) && <span style={{ color: 'var(--amber)', marginLeft: 4 }} title="한쪽 스위치 표본이 없어 합계를 그리지 않은 구간 수(부분 합 — 트래픽 0 아님)">{perfPartialMark(s)}</span>}
                       </div>
                     </td>
                     <td style={ELLIPSIS} title={s.switches.join(', ')}>{s.switches.join(', ')}</td>

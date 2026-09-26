@@ -83,6 +83,13 @@ function prepare(db) {
       if (!/duplicate column name/i.test(String(e?.message || e))) throw e;
     }
   }
+  // v2.622(감사 DATA-03): 사용자·세션 수가 하한(원문 절단 서버 포함)인 주기 표지 — 열이 NOT NULL 이라 값 칸에 null 을
+  //   넣을 수 없어 따로 둔다. seriesRange 가 이 행의 수치를 null 로 읽는다(vms_ok=0 과 같은 방식).
+  if (!db.prepare('PRAGMA table_info(vc_series)').all().some((r) => r.name === 'partial')) {
+    try { db.exec('ALTER TABLE vc_series ADD COLUMN partial INTEGER NOT NULL DEFAULT 0'); } catch (e) {
+      if (!/duplicate column name/i.test(String(e?.message || e))) throw e;
+    }
+  }
   return {
     upLatest: db.prepare(`INSERT INTO latest
       (vm_id, vcenter_id, name, folder, ts, at, kind, ok, active, disc, other, sessions, users, error, guest_host, truncated)
@@ -95,11 +102,11 @@ function prepare(db) {
     allLatest: db.prepare('SELECT * FROM latest ORDER BY vcenter_id, name'),
     latestOfVc: db.prepare('SELECT * FROM latest WHERE vcenter_id=? ORDER BY name'),
     upSeries: db.prepare(`INSERT INTO vc_series
-      (vcenter_id, ts, users, users_active, sessions, sessions_active, sessions_disc, vms_ok, vms_failed)
-      VALUES (?,?,?,?,?,?,?,?,?)
+      (vcenter_id, ts, users, users_active, sessions, sessions_active, sessions_disc, vms_ok, vms_failed, partial)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(vcenter_id, ts) DO UPDATE SET users=excluded.users, users_active=excluded.users_active,
         sessions=excluded.sessions, sessions_active=excluded.sessions_active, sessions_disc=excluded.sessions_disc,
-        vms_ok=excluded.vms_ok, vms_failed=excluded.vms_failed`),
+        vms_ok=excluded.vms_ok, vms_failed=excluded.vms_failed, partial=excluded.partial`),
     seriesOf: db.prepare('SELECT * FROM vc_series WHERE vcenter_id=? AND ts>=? AND ts<=? ORDER BY ts'),
     seriesSpan: db.prepare('SELECT MIN(ts) AS mn, MAX(ts) AS mx, COUNT(*) AS n FROM vc_series WHERE vcenter_id=?'),
     upVmSeries: db.prepare('INSERT INTO vm_series (vm_id, ts, sessions, active) VALUES (?,?,?,?) ON CONFLICT(vm_id, ts) DO UPDATE SET sessions=excluded.sessions, active=excluded.active'),
@@ -187,14 +194,15 @@ export async function commitCurUser({ ts, records = [], series = [], replaceVcen
         JSON.stringify((r.users || []).slice(0, 200)), String(r.error || '').slice(0, 300), String(r.guestHost || ''),
         r.truncated ? 1 : 0,
       );
-      if (vmSeriesEnabled() && r.ok) h.st.upVmSeries.run(String(r.vmId), Number(ts), Number(r.sessions) || 0, Number(r.active) || 0);
+      // v2.622(감사 DATA-03): 원문이 잘린 서버의 세션 수는 하한이다 — VM 계열에도 적재하지 않는다(선이 끊긴다).
+      if (vmSeriesEnabled() && r.ok && !r.truncated) h.st.upVmSeries.run(String(r.vmId), Number(ts), Number(r.sessions) || 0, Number(r.active) || 0);
     }
     for (const s of series) {
       // v2.598: 확인 서버 0대 주기는 users 등이 null 로 온다 — 열이 NOT NULL 이라 0 으로 적되 `vms_ok = 0` 이
       //   '모름' 표지다(seriesRange 가 읽을 때 null 로 되돌린다). 0 을 값으로 읽는 새 조회를 만들지 말 것.
       h.st.upSeries.run(String(s.vcenterId || ''), Number(ts), Number(s.users) || 0, Number(s.usersActive) || 0,
         Number(s.sessions) || 0, Number(s.sessionsActive) || 0, Number(s.sessionsDisc) || 0,
-        Number(s.vmsOk) || 0, Number(s.vmsFailed) || 0);
+        Number(s.vmsOk) || 0, Number(s.vmsFailed) || 0, s.partial ? 1 : 0);
     }
     h.db.exec('COMMIT');
     _counts = null; // 행 수가 바뀌었다 — 다음 상태 조회가 다시 센다
@@ -228,10 +236,13 @@ export async function seriesRange(vcenterId, fromTs, toTs) {
   // ⚠ v2.598(WEBUI-2598-02 후속): `vms_ok = 0` 인 행은 **확인한 서버가 0대**인 주기다 — 그때의 사용자·세션 수는
   //   '0명' 이 아니라 **모른다**. 열이 NOT NULL(0) 이라 저장값은 0 이지만(예전 행도 같다 — 스키마 재작성 없이
   //   기존 DB 까지 한 번에 바로잡으려고 **읽을 때** 바꾼다) 응답에서는 null 로 내 차트가 선을 끊게 한다.
-  let unknownRows = 0;
+  let unknownRows = 0; let partialRows = 0;
   const rows = h.st.seriesOf.all(String(vcenterId ?? ''), Number(fromTs), Number(toTs)).map((r) => {
-    const known = Number(r.vms_ok) > 0;
-    if (!known) unknownRows++;
+    // v2.622(감사 DATA-03): partial 행(원문 절단 서버가 섞인 주기)의 수치는 하한이라 추이에 싣지 않는다.
+    const part = Number(r.partial) > 0;
+    const known = Number(r.vms_ok) > 0 && !part;
+    if (part) partialRows++;
+    else if (!known) unknownRows++;
     const v = (x) => (known ? x : null);
     return {
       ts: Number(r.ts), users: v(r.users), usersActive: v(r.users_active),
@@ -244,6 +255,7 @@ export async function seriesRange(vcenterId, fromTs, toTs) {
     available: true,
     rows,
     unknownRows,
+    partialRows,
     // ⚠ `first` 는 '수집 시작' 이 아니라 **max(수집 시작, 보존 경계)** 다 — prune 된 테이블의
     //   MIN(ts) 이므로 화면이 '기다리면 채워진다' 고 단정하면 거짓이 될 수 있다(plan D1 과 같은 유형).
     span: sp && sp.n ? { first: Number(sp.mn), last: Number(sp.mx), rows: Number(sp.n) } : null,

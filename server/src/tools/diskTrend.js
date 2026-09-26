@@ -158,6 +158,12 @@ export function diskBreakdown(vms, datastores, { now = Date.now(), policy: pol }
   // 사용량을 못 읽은 DS 가 있으면 그 DS 위 VM 커밋은 빼지 못하므로 계산하지 않는다(부분 차이는 거짓).
   const otherGB = capGB > 0 && otherRaw >= 0 && usageUnknown === 0 ? otherRaw : null;
 
+  // v2.622(감사 DATA-04 — 재현: 사용량 미상 DS 1개로 오버서브스크립션 150%·회수 비율 100%·회수 후 사용률 0%):
+  //   VM 할당·커밋·회수량(분자)은 모든 DS 위 VM 인데 capGB 는 사용량을 읽은 DS 만이다. 할당 비율의 분모는 **용량을 아는 DS 전체**
+  //   (withCap — 사용량 미상이어도 용량은 안다)를 쓰고, 사용량 대비 비율(pctOfUsed·afterReclaimUsagePct)은 분모(사용량)가 부분 합이라
+  //   null 로 두고 사유를 싣는다(부분 합 비율은 거짓).
+  const capAllGB = withCap.reduce((a, d) => a + num(d.capacityGB), 0);
+  const ratioBlocked = usageUnknown > 0 ? 'ds-usage-unknown' : null;
   const top = (arr, fn, n = 10) => [...arr].sort((a, b) => fn(b) - fn(a)).slice(0, n);
   return {
     policy,
@@ -165,16 +171,18 @@ export function diskBreakdown(vms, datastores, { now = Date.now(), policy: pol }
     vm: {
       count: real.length, on: on.length, off: off.length, thinCount: thin.length, templates: templates.length,
       provGB: r1(provGB), committedGB: r1(committedGB), uncommittedGB: r1(uncommittedGB), templateGB: r1(templateGB),
-      overcommitPct: pct(provGB, capGB),            // 할당 ÷ 용량 (100 초과 = over-subscription)
-      committedPctOfCap: pct(committedGB, capGB),
+      overcommitPct: pct(provGB, capAllGB),         // 할당 ÷ 용량 (100 초과 = over-subscription) — v2.622 DATA-04: 용량을 아는 DS 전체
+      committedPctOfCap: pct(committedGB, capAllGB),
+      capBasisGB: r1(capAllGB),                     // v2.622 DATA-04: 위 두 비율의 분모(사용량 미상 DS 포함 용량)
     },
     reclaim: {
       off: { count: off.length, gb: r1(offGB) },
       snap: { count: snaps.length, gb: r1(snapGB) },
       snapOld: { count: snapOld.length, gb: r1(snapOldGB), maxHours: policy.snapshotMaxHours, unknownAge: snapUnknownAge },
       totalGB: r1(reclaimGB),
-      pctOfUsed: pct(reclaimGB, usedGB),
-      afterReclaimUsagePct: capGB > 0 ? pct(Math.max(0, usedGB - reclaimGB), capGB) : null,
+      pctOfUsed: ratioBlocked ? null : pct(reclaimGB, usedGB),
+      afterReclaimUsagePct: !ratioBlocked && capGB > 0 ? pct(Math.max(0, usedGB - reclaimGB), capGB) : null,
+      ...(ratioBlocked ? { ratioUnavailable: ratioBlocked } : {}),   // v2.622 DATA-04: 사용량 대비 비율을 내지 않은 사유
     },
     other: { gb: r1(otherGB) },
     topOff: top(off, (v) => num(v.storageGB)).map((v) => ({ id: v.id, name: v.name, vcenterId: v.vcenterId, storageGB: num(v.storageGB), guestOS: v.guestOS || '' })),
@@ -231,8 +239,10 @@ export function analyzeDiskTrend({ points = [], breakdown, days = 30, policy: po
   }
   const oc = b?.vm?.overcommitPct;
   if (oc != null) {
-    if (oc > 100) verdicts.push({ level: 'warn', key: 'oversub', title: `thin 오버서브스크립션 — 할당(프로비저닝)이 용량의 ${oc}%`, detail: `VM 이 커밋할 수 있는 최대량(${fmtGB(b.vm.provGB)})이 데이터스토어 용량(${fmtGB(cap)})을 넘습니다. thin 디스크가 동시에 채워지면 용량이 부족해지므로 프로비저닝 알람을 두고 증가율을 감시해야 합니다. 미커밋 ${fmtGB(b.vm.uncommittedGB)} 는 "회수 가능" 이 아니라 "아직 쓰지 않은 약속" 입니다.`, cite: ['vsphere-oversub', 'vsphere-thin'] });
-    else verdicts.push({ level: 'ok', key: 'oversub', title: `할당(프로비저닝) ${oc}% — 용량 이내`, detail: `VM 최대 커밋 가능량 ${fmtGB(b.vm.provGB)} ≤ 용량 ${fmtGB(cap)}. thin 디스크 ${b.vm.thinCount}대의 미커밋 ${fmtGB(b.vm.uncommittedGB)} 가 채워져도 용량을 넘지 않습니다.`, cite: ['vsphere-thin'] });
+    // v2.622(감사 DATA-04): 비율의 분모와 같은 용량(capBasisGB — 사용량 미상 DS 포함)을 문장에 쓴다.
+    const capBasis = b.vm.capBasisGB ?? cap;
+    if (oc > 100) verdicts.push({ level: 'warn', key: 'oversub', title: `thin 오버서브스크립션 — 할당(프로비저닝)이 용량의 ${oc}%`, detail: `VM 이 커밋할 수 있는 최대량(${fmtGB(b.vm.provGB)})이 데이터스토어 용량(${fmtGB(capBasis)})을 넘습니다. thin 디스크가 동시에 채워지면 용량이 부족해지므로 프로비저닝 알람을 두고 증가율을 감시해야 합니다. 미커밋 ${fmtGB(b.vm.uncommittedGB)} 는 "회수 가능" 이 아니라 "아직 쓰지 않은 약속" 입니다.`, cite: ['vsphere-oversub', 'vsphere-thin'] });
+    else verdicts.push({ level: 'ok', key: 'oversub', title: `할당(프로비저닝) ${oc}% — 용량 이내`, detail: `VM 최대 커밋 가능량 ${fmtGB(b.vm.provGB)} ≤ 용량 ${fmtGB(capBasis)}. thin 디스크 ${b.vm.thinCount}대의 미커밋 ${fmtGB(b.vm.uncommittedGB)} 가 채워져도 용량을 넘지 않습니다.`, cite: ['vsphere-thin'] });
   }
   if (b?.reclaim) {
     const r = b.reclaim;
@@ -240,7 +250,7 @@ export function analyzeDiskTrend({ points = [], breakdown, days = 30, policy: po
       level: r.totalGB > 0 ? 'info' : 'ok', key: 'reclaim',
       title: `회수 가능 ${fmtGB(r.totalGB)} — 정지 VM ${r.off.count}대(${fmtGB(r.off.gb)}) + 스냅샷 ${r.snap.count}대(${fmtGB(r.snap.gb)})`,
       detail: r.totalGB > 0
-        ? `사용량의 ${r.pctOfUsed}% 입니다. 전부 회수하면 사용률 ${usagePct}% → ${r.afterReclaimUsagePct}%${daysGainedByReclaim != null ? `, 현재 증가율 기준 약 ${daysGainedByReclaim}일치 여유` : ''}. 회수 뒤 배열에 공간이 돌아가려면 UNMAP(VMFS6 자동)이 동작해야 합니다. 유휴 VM·고아 디스크는 이 수치에 포함되지 않습니다(관측 불가).`
+        ? `${r.pctOfUsed != null ? `사용량의 ${r.pctOfUsed}% 입니다. 전부 회수하면 사용률 ${usagePct}% → ${r.afterReclaimUsagePct}%` : `사용량을 읽지 못한 데이터스토어 ${b.ds.usageUnknown}개가 있어 사용량 대비 비율·회수 후 사용률은 계산하지 않았습니다`}${daysGainedByReclaim != null ? `, 현재 증가율 기준 약 ${daysGainedByReclaim}일치 여유` : ''}. 회수 뒤 배열에 공간이 돌아가려면 UNMAP(VMFS6 자동)이 동작해야 합니다. 유휴 VM·고아 디스크는 이 수치에 포함되지 않습니다(관측 불가).`
         : '정지 VM 과 스냅샷이 없어 이 방식으로 회수할 용량이 없습니다.',
       cite: ['aria-reclaim', 'vsphere-unmap'],
     });

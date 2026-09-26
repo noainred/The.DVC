@@ -72,7 +72,13 @@ export function takeEdgeLogJob(agent, now = Date.now()) {
 export function ackEdgeLogJob(agent) {
   const key = t(agent).toLowerCase();
   const had = inflight.delete(key);
-  return { acked: had };
+  if (had) return { acked: true };
+  // v2.622(감사 EDGE-04): 기한(ACK_TIMEOUT_MS)을 넘겨 대기로 **되돌아간**(tries ≥ 1) 요청에 늦게 온 회신도 그 요청의 결과다 —
+  //   예전에는 acked:false 라 공유 토큰은 보관하지 않았고(stored:false) 개별 토큰은 보관하되 작업이 대기로 남아 같은 로그를 한 번 더
+  //   수집했다. 되돌아간 요청이면 대기에서 지우고 acked 로 본다. 새로 등록된 요청(tries 0)은 이 회신이 채울 수 없으므로 남긴다.
+  const p = pending.get(key);
+  if (p && (p.tries || 0) >= 1) { pending.delete(key); return { acked: true, late: true }; }
+  return { acked: false };
 }
 
 /** 그 엣지의 대기 상태 — 화면이 '요청해 두었고 아직 안 왔다' 를 말한다. */

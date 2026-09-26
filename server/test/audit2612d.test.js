@@ -134,7 +134,7 @@ test('EDGE2612-01: 폴링 워커는 잠금이 잡혀 있으면 중앙 잡을 인
   const sp = await import('../src/idrac/scanPoller.js');
   const w = await import('../src/agent/idracScanWorker.js');
   let polls = 0;
-  const srv = http.createServer((req, res) => { polls++; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ jobs: [] })); });
+  const srv = http.createServer((req, res) => { if (String(req.url).startsWith('/api/central/idrac-scan-jobs')) polls++; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ jobs: [] })); });
   servers.push(srv);
   const port = await listen(srv);
   const prev = config.agent.centralUrl;

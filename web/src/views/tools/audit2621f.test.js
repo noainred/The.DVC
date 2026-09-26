@@ -78,8 +78,9 @@ describe('WEB-04 서버 벤더 판정', () => {
     expect(body).toMatch(/vendorFilterOptions\(servers\)/);
     expect(body).not.toMatch(/s\.type === 'ome' \? 'OME' : 'iDRAC'/);
     expect(body).not.toMatch(/>iDRAC</);
-    // 상세로 벤더·원격 여부를 넘긴다(상세 제목의 근거).
-    expect(s).toMatch(/setDetail\(\{[^}]*vendor: s\.vendor[^}]*remote: s\.remote/);
+    // 상세로 벤더·원격 여부를 넘긴다(상세 제목의 근거). v2.622(RECENT-04): 모든 진입점이 공용 opener(detailServerOf)를 쓴다.
+    expect(s).toMatch(/= useDetailOpener\(setDetail\)/);
+    expect(code('serverVendorText.js')).toMatch(/export function detailServerOf/);
   });
 });
 
