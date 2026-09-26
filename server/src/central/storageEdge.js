@@ -4,6 +4,7 @@
  * (central-agent-* 는 .gitignore 와일드카드로 이미 커밋 차단 — 계정 목록 포함 데이터).
  * 저장 키는 라우트가 req.centralAuth.agent 로 강제한다(agent 바인딩 — server/CLAUDE.md).
  */
+import { numOrNull } from '../util/numOrNull.js'; // v2.618 BUG-2
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -130,7 +131,7 @@ export function _lastRecSize() { return _lastRec.size; }
 export function saveEdgeStorageStatus(agent, status) {
   const src = status && typeof status === 'object' ? status : {};
   const rec = load().get(agent) || { at: 0, devices: [] };
-  const registered = Number(src.registered);
+  const registered = numOrNull(src.registered); // v2.618(BUG-2): null(엣지가 등록부를 못 읽음)을 0(위임 0대 — 정상)으로 읽지 않는다
   rec.status = {
     reason: capStr(src.reason, 64) || 'unknown', // v2.607(TIM2607-01)
     registered: Number.isFinite(registered) ? registered : null,

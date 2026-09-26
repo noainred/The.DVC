@@ -182,6 +182,9 @@ async function openFile(vcenterId, file, mod) {
   // v2.599 DB2599-02: busy_timeout 먼저(첫 생성 중 다른 연결의 잠금을 기다린다) · 실패하면 핸들을 닫는다(fd 누수 방지 —
   //   파일별 핸들이라 다음 호출이 다시 연다. 래치 없음).
   const db = openSqlite(new mod.DatabaseSync(p));
+  // v2.618(메모리 점검): vCenter 마다 파일·핸들이 하나라 페이지 캐시(기본 약 2MB/연결)가 33곳이면 ~66MB 까지 네이티브 메모리를
+  //   차지한다(추정 — 핸들 수 × SQLite 기본값). 이 DB 는 시계열 append + 기간 조회라 큰 캐시 이득이 적어 512KB 로 묶는다.
+  try { db.exec('PRAGMA cache_size=-512'); } catch { /* 캐시 크기 설정 실패는 동작에 영향 없음 */ }
   // 공용 metrics DB 와 같은 PRAGMA — WAL 로 읽기/쓰기 병행, fsync 완화(단건 insert 5ms→0.01ms 실측).
   let st;
   try { st = prepare(db); } catch (e) { try { db.close(); } catch { /* */ } throw e; }

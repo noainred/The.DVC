@@ -31,11 +31,13 @@ const DEFAULT_REMOTE_BASE =
 // 않는다(엣지가 또 다른 중앙이 되는 부작용 없음) — 엣지에서는 EDGE_TOKEN 사용을 권장.
 // 숫자 env 파서 — 명시된 유한 숫자면 그 값(0 포함), 아니면 기본값. `Number(x) || d`는
 // 0을 falsy로 흘려 "0=비활성" 계약을 깨므로(주기 0으로 끄기 불가) 이 헬퍼로 통일한다.
-const numEnv = (raw, def) => { const n = Number(raw); return Number.isFinite(n) ? n : def; };
+// v2.618(BUG-1): 빈 문자열(`KEY=`)은 **미지정**이다 — `Number('') === 0` 이라 예전엔 빈 줄 하나가 엣지 pull·iDRAC 스캔을 끄고(0 = 끔)
+//   iDRAC 동시성을 1 로 만들었다(portal.env 예제의 주석을 풀고 값을 비우면 그렇게 된다). retentionEnv 와 같은 규칙.
+const numEnv = (raw, def) => { if (raw == null || String(raw).trim() === '') return def; const n = Number(raw); return Number.isFinite(n) ? n : def; };
 // 보존일 전용(v2.583 감사 #24): '0 = 전부 보관' 계약을 지킨다 — `Number(x) || d` 는 0 을 기본값으로 되돌려
 // 문서가 약속한 keep-all 이 조용히 prune 이 됐다(IDRAC/TEMP/PING 3곳 실측). 빈 문자열(`KEY=`)은 0 이 아니라
 // **미지정**이다 — `Number('') === 0` 이라 그대로 두면 빈 줄 하나가 '무제한 보관' 으로 둔갑한다.
-const retentionEnv = (raw, def) => (raw == null || String(raw).trim() === '' ? def : numEnv(raw, def));
+const retentionEnv = (raw, def) => numEnv(raw, def); // v2.618: numEnv 가 빈 값을 미지정으로 본다(같은 규칙)
 // v2.599 T2599-02: env 주기값은 setInterval 로 곧장 간다 — Node 는 2^31−1ms(약 24.8일)를 넘거나 0 이하·NaN 인 지연을
 // **1ms** 로 바꿔 경고 한 줄만 남기고 루프를 돈다(실측: AGENT_SCAN_INTERVAL_MS=2592000000 → 12초에 중앙 요청 7,752회).
 // 주기 env 는 전부 이 헬퍼로 [min, MAX_TIMER_MS] 에 가둔다. 0 이하·비숫자는 기본값(끄기가 문서화된 키는 offOrIntervalMs).

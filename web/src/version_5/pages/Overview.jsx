@@ -64,7 +64,8 @@ export default function V5Overview({ scope = '', health, healthError, onGotoTab 
           </div>
           <div className="v5-line">
             {canAlarms ? (
-              <>영향 법인 <b>{dash(ops.affectedSites)}</b> · 영향 호스트 <b>{dash(ops.affectedHosts)}</b> · 영향 호스트의 VM <b>{dash(ops.affectedVms)}</b></>
+              <>영향 법인 <b>{dash(ops.affectedSites)}</b> · 영향 호스트 <b>{dash(ops.affectedHosts)}</b> · 영향 호스트의 VM <b>{ops.affectedVmsUnknown > 0 && ops.affectedVms != null ? `최소 ${fmtInt(ops.affectedVms)}` : dash(ops.affectedVms)}</b>
+                {ops.affectedVmsUnknown > 0 && <span className="muted" style={{ fontSize: 12 }}> (VM 수를 모르는 호스트 {ops.affectedVmsUnknown}대)</span>}</>
             ) : '알람 조회 권한(inv.alarms)이 없어 영향 범위를 계산하지 않았습니다.'}
           </div>
           {attention.length > 0 && (

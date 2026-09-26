@@ -3974,6 +3974,21 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **비활성(disabled) vCenter 는 '연결 불가'·'첫 수집 중' 이 아니다** — `/health`·전역 롤업에 `vcentersDisabled`. 헤더·개요·V4·관제
       콘솔·V5 가 모두 분모에서 뺐다(V5 결함이 기존 화면 4곳에도 있었다 — 형제 비대칭).
     - ⚠ 정직 기록: 코드 리뷰가 찾은 'V5 사이트 클릭' 결함은 **현재 V5 화면에 selectSite 를 부르는 곳이 없어** 드러나지 않았다(방어적 수정).
+  - ⚠⚠ **v2.618 — 전면 점검(6축 병렬) 확정분**(사용자 요청 "코드 수정·튜닝·오류 수정·튜닝 포인트·보안·메모리 누수·코드·아키텍처 점검".
+    상세 `docs/AUDIT-2026-09-26.md`, 회귀 `server/test/audit2618.test.js` + 웹 `version_5/audit2617.test.js`):
+    - ⚠⚠ **새로 만든 상한·게이트는 '인증된 저권한 계정' 이 점유할 수 있는지 먼저 볼 것**(SEC-1 — v2.617 초판이 그랬다): 전역 풀 하나를
+      세션(viewer 포함)과 엣지가 나눠 쓰면 느린 본문 몇 개로 엣지 수신 전체가 막힌다. 계열별 풀 · 요청자당 상한 · 본문 읽기 시한이 짝이다.
+    - **503 에 Retry-After 를 실었으면 받는 쪽이 따르는지 확인할 것**(ARCH-2) — `resilientFetch.retryDelayMs`(429·503, 상한 30초 + 흔들림).
+    - ⚠⚠ **조회 실패를 빈 목록으로 삼킨 화면에 '저장' 버튼이 있으면 데이터 소거 경로다**(WEB-2 — vCenter 순서). 실패는 따로 들고 저장을 막고,
+      서버도 빈 목록 저장은 명시적 초기화일 때만 받는다. 설정 화면을 만들 때 '불러오기 실패 → 저장' 순서를 먼저 떠올릴 것.
+    - **env 숫자의 빈 값(`KEY=`)은 미지정**(`config.js numEnv` — BUG-1). `Number('') === 0` 이 '0 = 끔' 계약과 만나면 빈 줄 하나가 기능을 끈다.
+    - **vCenter 상태 개수는 `consoleData.vcStatusCounts` 하나**(ARCH-1) — 롤업의 `vcentersPending`·`vcentersUnreachable` 를 읽는다.
+      '전체 − 연결 − 점검' 뺄셈을 새로 쓰지 말 것(첫 수집 중·비활성을 불가로 센다).
+    - 웹 사본 스윕(`audit2617.test.js`): 상대시각은 `relTime.js`, 숫자 판정은 `numOrNull.js` 만.
+    - **메모리 누수 측정 결과 — JS 힙 누수 없음**(20분·힙 스냅샷 2장·+0.8MB). RSS 증가는 네이티브(추정). '누수' 로 적기 전에 힙 스냅샷을 볼 것.
+    - 남긴 것: **PERF-1**(IPAM 원장 30초 재구성 84~162ms — 사용자 결정 사항) · ARCH-7 · ARCH-9.
+    - ⚠ 작업 방식: 게시 전 PR 에 다음 버전 작업을 섞지 말 것 — 이번에 **추적되지 않은 새 테스트 파일이 stash 에서 빠져** 이전 릴리스 커밋에
+      함께 올라갔다(`git stash` 는 untracked 를 담지 않는다 — `git stash -u` 또는 패치로 백업).
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

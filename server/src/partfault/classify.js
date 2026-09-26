@@ -93,18 +93,6 @@ export function fruPartState(raw) {
 }
 
 /**
- * SAN 월간 점검(`sanswitch/healthCheck.js`)의 4상태 → 이 계약의 5상태.
- * 그쪽은 이미 `ok/warn/bad/unknown` 이라 **번역만** 한다(판정을 다시 하지 않는다 — v2.513 규약).
- */
-export function sanPartState(v, raw = '') {
-  const s = String(v ?? '').trim().toLowerCase();
-  if (s === 'ok') return { state: PART_STATE.ok, raw: String(raw || '') };
-  if (s === 'warn') return { state: PART_STATE.warn, raw: String(raw || '') };
-  if (s === 'bad') return { state: PART_STATE.fault, raw: String(raw || '') };
-  return { state: PART_STATE.unknown, raw: String(raw || '') };
-}
-
-/**
  * 스토리지 노드/헬스 문자열 → 5상태.
  * 수집기들이 이미 쓰는 기준과 같다(`isilon.js:92`·`unity.js:42`:
  * `st !== 'unknown' && !/ok|healthy/`) — 다만 **거기서 빠진 `absent` 를 여기서 살린다**.

@@ -208,6 +208,9 @@ async function sampleOnceInner() {
       dsUsedUnknown = vmperfByVc.dsUsedUnknown || 0;
       for (const [vcId, vcRows] of vmperfByVc) {
         try { await insertVmperf(vcId, vcRows, ts); } catch (e) { console.warn(`[vmperf] ${vcId || '(전체)'} insert 실패: ${e.message}`); }
+        // v2.618(PERF-2): vCenter 사이에 한 번 양보한다 — 기동 첫 샘플은 vCenter 마다 DB 파일을 처음 열어(PRAGMA 포함)
+        //   33곳 연속이면 84ms 멈췄다(실측). 파일 하나당 약 3ms 조각으로 나뉜다.
+        await new Promise((r) => setImmediate(r));
       }
       // 보존기간 prune — DB 개수만큼 DELETE 가 돌므로 공용(20틱)보다 더 드물게(120틱 ≈ 2시간@1분).
       // v2.583: `% 120 === 1` 은 **기동 첫 샘플에서 즉시 참**이었다(v2.453 규약 위반 — 보존일을 줄이고 재시작하면

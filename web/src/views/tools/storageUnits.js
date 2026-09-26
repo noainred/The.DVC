@@ -11,6 +11,7 @@
  * 순수 모듈로 둔 이유: 웹 테스트가 node 환경(DOM 없음)이라 렌더는 검증할 수 없다.
  * 포맷 규칙을 여기서 회귀로 고정한다(storageColumns.js 와 같은 패턴).
  */
+import { numOrNull } from '../../numOrNull.js';
 
 const TB = 1024 ** 4;
 
@@ -70,7 +71,7 @@ export function saveUnit(u) {
  */
 export function capacityTotals(list, pick) {
   let total = 0; let used = 0; let usedBase = 0; let unknownUsed = 0; let counted = 0;
-  const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  const num = numOrNull; // v2.618(ARCH-6): 웹 코어
   for (const r of Array.isArray(list) ? list : []) {
     const c = pick(r);
     if (!c) continue;
@@ -94,7 +95,7 @@ export function alertTotals(list, pick) {
   let total = 0; let unknown = 0; let counted = 0;
   for (const r of Array.isArray(list) ? list : []) {
     const v = pick(r);
-    const n = v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v);
+    const n = numOrNull(v); // v2.618(ARCH-6)
     if (n == null) { unknown += 1; continue; }
     counted += 1; total += n;
   }

@@ -129,6 +129,10 @@ adminRouter.get('/vcenter-order', adminOnly, (req, res) => {
   res.json({ order, vcenters: list });
 });
 adminRouter.put('/vcenter-order', adminOnly, fleetWideOnly, (req, res) => {
-  res.json({ ok: true, order: saveOrder((req.body || {}).order) });
+  // v2.618(WEB-2): 빈 순서는 명시적 초기화({clear:true})일 때만 — 화면이 조회에 실패한 상태에서 저장하면 전 포탈 순서가 지워졌다.
+  const body = req.body || {};
+  const ids = Array.isArray(body.order) ? body.order.filter((x) => String(x ?? '').trim()) : [];
+  if (!ids.length && body.clear !== true) return res.status(400).json({ ok: false, reason: '빈 순서는 저장하지 않습니다 — 순서를 초기화하려면 clear:true 를 보내세요.' });
+  res.json({ ok: true, order: saveOrder(ids) });
 });
 }

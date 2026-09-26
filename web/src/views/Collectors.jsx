@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 /** mock 생성기(server/src/mock/generator.js)의 vCenter id 패턴 — 실데이터가 아닌 push 를 표에서 드러낸다(v2.424). */
 // v2.560: mock vCenter id 판정은 `views/collectors/emptyInvText.js` 하나가 소유한다 —
 // 진단 모달이 같은 기준을 써야 '배지는 뜨는데 모달은 다른 원인을 말한다' 가 되지 않는다.
+import { agoText } from './tools/relTime.js'; // v2.618 ARCH-5
 import { fetchJson, postJson, putJson, delJson, downloadFile } from '../api.js';
 import { droppedSecretNote } from './droppedSecretText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
@@ -763,7 +764,7 @@ function IngestStats({ data, onReset }) {
   const rows = data?.rows || [];
   const fmtB = (n) => (n == null ? '—' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${(n / 1024).toFixed(0)} KB` : `${n} B`);
   const fmtRate = (bps) => (bps == null ? '—' : `${fmtB(bps)}/s`);
-  const ago = (ts) => { if (!ts) return ''; const s = Math.floor((Date.now() - ts) / 1000); return s >= 60 ? `${Math.floor(s / 60)}분 전` : `${s}초 전`; };
+  const ago = (ts) => agoText(ts, Date.now(), { dash: '' }); // v2.618(ARCH-5): 공용 코어 — 예전 사본은 시간 단위가 없어 '150분 전' 이었다
   // 상위 에이전트가 평균의 몇 배인지로 '비정상' 강조.
   const avgRate = rows.length ? rows.reduce((a, r) => a + (r.bytesPerSec || 0), 0) / rows.length : 0;
   const ep = (e) => (e || '').replace(/^\//, '');

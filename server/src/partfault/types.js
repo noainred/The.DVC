@@ -73,12 +73,9 @@ export const PART_STATE_TONE = Object.freeze({
 });
 
 /** 장애로 세는 상태. ⚠ `unknown`·`absent` 는 여기 넣지 말 것. */
-export const BAD_STATES = Object.freeze(['fault', 'warn']);
 export const isBad = (s) => s === PART_STATE.fault || s === PART_STATE.warn;
-/** '확인했고 정상' 만. `unknown` 은 여기도 아니다. */
-export const isGood = (s) => s === PART_STATE.ok;
-/** 세지 않는 것 — 화면이 개수를 **따로** 밝힌다. */
-export const isUncounted = (s) => s === PART_STATE.unknown || s === PART_STATE.absent;
+// v2.618(ARCH-8): 호출부가 없던 BAD_STATES·isGood·isUncounted·classify.sanPartState 를 지웠다(판정 사본은 오해를 부른다 —
+//   실제 SAN 판정은 extract/sanswitch.js 가 한다).
 
 /**
  * 파트 식별 키의 신뢰도 등급. 높을수록 좋다.

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { downloadFailText } from '../downloadFailText.js'; // v2.618 WEB-6
 import { pduTotals, pduTotalNote, pduPowerMark } from './pduTotals.js';
 import { STable } from '../../components/STable.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
@@ -408,6 +409,9 @@ function TestResult({ r }) {
 
 function CsvModal({ onClose }) {
   const [csv, setCsv] = useState('');
+  // v2.618(WEB-6): 내보내기·샘플 실패(403 관리자·전체 범위 전용, 409, 5xx)가 아무 표시 없이 사라졌다(처리되지 않은 promise).
+  const [dlErr, setDlErr] = useState('');
+  const dl = (path, name) => { setDlErr(''); downloadFile(path, name).catch((e) => setDlErr(downloadFailText(e))); };
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const doImport = async () => {
@@ -430,9 +434,10 @@ function CsvModal({ onClose }) {
           센서/PDU 수량 열이 없는 것은 의도입니다 — 자동 탐지합니다.
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-          <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => downloadFile('/tools/pdu/csv/export', 'pdu-devices.csv')}>⬇ 현재 목록 내보내기</button>
-          <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => downloadFile('/tools/pdu/csv/sample', 'pdu-devices-sample.csv')}>⬇ 샘플 받기</button>
+          <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => dl('/tools/pdu/csv/export', 'pdu-devices.csv')}>⬇ 현재 목록 내보내기</button>
+          <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => dl('/tools/pdu/csv/sample', 'pdu-devices-sample.csv')}>⬇ 샘플 받기</button>
         </div>
+        {dlErr && <div className="banner" style={{ marginBottom: 10, color: '#f87171' }}>내려받기 실패 — {dlErr}</div>}
         <textarea className="input" style={{ width: '100%', minHeight: 180, fontFamily: 'monospace', fontSize: 12 }}
           value={csv} onChange={(e) => setCsv(e.target.value)} placeholder="여기에 CSV 를 붙여넣으세요" />
         <div style={{ marginTop: 10 }}>

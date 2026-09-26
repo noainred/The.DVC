@@ -603,6 +603,10 @@ function rollupsOf(snap, { scoped = false } = {}) {
     vcentersMaintenance: snap.vcenters.filter((v) => v.status === 'maintenance').length,
     // v2.617: 설정에서 꺼 둔 vCenter — '연결 불가' 가 아니다(화면이 불가 계산의 분모에서 뺀다).
     vcentersDisabled: snap.vcenters.filter((v) => v.status === 'disabled').length,
+    // v2.618(ARCH-1): 첫 수집 중(pending)과 연결 실패(unreachable)를 따로 센다 — 웹 4곳이 '전체 − 연결 − 점검' 뺄셈으로
+    //   불가를 세어 재시작 직후 첫 수집 중인 vCenter 까지 '연결 불가' 로 보였다(v2.509 '기다리면 되는지' 규약).
+    vcentersPending: snap.vcenters.filter((v) => v.status === 'pending').length,
+    vcentersUnreachable: snap.vcenters.filter((v) => v.status === 'unreachable').length,
     hosts: snap.hosts.length,
     hostsConnected: hc.connected,
     hostsMaintenance: hc.maintenance,

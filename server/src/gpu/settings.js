@@ -187,11 +187,6 @@ export function redactGpuGuestSettings(s) {
   return { enabled: s.enabled, pollIntervalMs: s.pollIntervalMs, concurrency: s.concurrency, timeoutMs: s.timeoutMs, maxVmsPerVcenter: s.maxVmsPerVcenter, collectMethod: s.collectMethod, sshPort: s.sshPort, vcenters };
 }
 
-export function isVcenterGpuMonitored(vcId) {
-  const s = loadGpuGuestSettings();
-  return s.enabled && !!s.vcenters[vcId]?.enabled;
-}
-
 export function getGuestCreds(vcId) {
   const s = loadGpuGuestSettings();
   const v = s.vcenters[vcId];

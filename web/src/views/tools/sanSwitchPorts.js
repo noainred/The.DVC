@@ -37,11 +37,9 @@ export const RX_BAD_DBM = -12;
  *   '미수집'이 '0 dBm'(=완벽한 광레벨)으로 둔갑한다. 실제로 이 함수의 첫 구현이 그랬고
  *   회귀 테스트가 잡았다 — 미수집을 정상으로 칠하는 것은 이 화면에서 가장 위험한 오류다.
  */
-export function numOrNull(v) {
-  if (v == null || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
+// v2.618(ARCH-6): 사본을 지우고 웹 코어(src/numOrNull.js)를 재수출한다 — 사본은 공백 문자열을 0, [5] 를 5 로 읽었다.
+import { numOrNull } from '../../numOrNull.js';
+export { numOrNull };
 
 export function opticalHealth(rxDbm, txDbm) {
   const rx = numOrNull(rxDbm);

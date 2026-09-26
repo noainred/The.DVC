@@ -1,6 +1,7 @@
 // IdracScanJobs.jsx — IdracAdmin.jsx(구 1,309줄)에서 분리(v2.292). 본문은 원본 904~1051행 그대로.
 // props 계약(순수 이동 — 시그니처 불변): { data, vcenters, datacenters, busy, onRefresh, onScanAll }
 // (vcenters 는 현재 바디에서 미사용이지만 셸 호출부와의 계약을 바꾸지 않기 위해 유지 — 정리는 별도 변경으로.)
+import { agoText } from '../tools/relTime.js'; // v2.618 ARCH-5
 import React, { useState } from 'react';
 import { ScanJobLogModal } from './ScanJobLogModal.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -43,11 +44,7 @@ export function IdracScanJobs({ data, vcenters, datacenters = [], busy, onRefres
       advisory = { ok: true, text: `'원격 수집'으로 반영 중 — 수집 서버 '${col.name || col.id}'에서 호스트 ${col.hosts}대 수신.` };
     }
   }
-  const ago = (ts) => {
-    if (!ts) return '';
-    const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-    return s >= 3600 ? `${Math.floor(s / 3600)}시간 전` : s >= 60 ? `${Math.floor(s / 60)}분 전` : `${s}초 전`;
-  };
+  const ago = (ts) => agoText(ts, Date.now(), { dash: '' }); // v2.618(ARCH-5): 공용 코어 — 예전 사본은 일 단위가 없어 '50시간 전' 이었다
   const stateBadge = (s) => {
     const map = { pending: ['대기', 'gray'], running: ['진행 중', 'amber'], done: ['완료', 'green'], error: ['오류', 'red'], unknown: ['만료', 'gray'] };
     const [label, cls] = map[s] || [s, 'gray'];

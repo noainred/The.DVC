@@ -152,3 +152,20 @@ describe('v2.617 — 주의 목록은 위험 먼저, 그 근거를 말한다', a
     expect(a[2].why).toBe('위험 0 · 주의 9');
   });
 });
+
+describe('v2.618 — 모르는 값을 0 으로 말하지 않는다(WEB-4·5)', async () => {
+  const { attentionSites, opsStatus } = await import('./overviewData.js');
+  it('경보 미확인 법인', () => {
+    const a = attentionSites([{ id: 'r', name: 'R', status: 'connected', alarmsCritical: 0, alarmsWarning: 0, alarmsUnknown: true, worst: 95 }]);
+    expect(a[0].why).toBe('경보 미확인 · 사용률 95%');
+  });
+  it('VM 수를 모르는 영향 호스트', () => {
+    const o = opsStatus({
+      ov: { sites: [{ id: 'a', name: 'A', status: 'connected', metrics: {} }] },
+      alarms: { items: [{ severity: 'critical', vcenterId: 'a', entityType: 'host', entity: 'h1' }, { severity: 'warning', vcenterId: 'a', entityType: 'host', entity: 'h2' }] },
+      hosts: { items: [{ vcenterId: 'a', name: 'h1', vmCount: 7 }, { vcenterId: 'a', name: 'h2', vmCount: null }] },
+    });
+    expect(o.affectedVms).toBe(7);
+    expect(o.affectedVmsUnknown).toBe(1);
+  });
+});

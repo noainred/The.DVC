@@ -18,7 +18,7 @@ export const LEVEL_TEXT = ['#15803d', '#b45309', '#dc2626'];
 export const SEV_COLOR = { critical: '#dc2626', warning: '#d97706', info: '#2563eb' };
 export const SEV_TEXT = { critical: '#dc2626', warning: '#b45309', info: '#2563eb' };
 
-const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+import { numOrNull as num } from '../numOrNull.js'; // v2.618(ARCH-6): 사본 대신 웹 코어
 
 /** 사용률 → 막대색(아트보드 col()). 판정 불가는 회색. 임계는 consoleData 와 같은 75/90. */
 export function barColor(pct) {

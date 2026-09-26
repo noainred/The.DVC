@@ -7,6 +7,7 @@ import { usePolling, fetchJson, putJson } from '../api.js';
 import { Kpi, Loading, ErrorBox, SeverityBadge } from '../components/ui.jsx';
 import STable from '../components/STable.jsx';
 import { unplacedRows, corpNoteText, physNoteText } from './overviewServerText.js';
+import { vcStatusMeta } from '../console/consoleData.js'; // v2.618 ARCH-1
 import { unitText } from './unitText.js'; // v2.583: 미배치 물리 서버 행
 
 const REGION_COLORS = { '아시아': '#22d3ee', '중국': '#ef4444', '유럽': '#a855f7', '북미': '#3b82f6', Unknown: '#64748b' };
@@ -154,7 +155,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
       </div>
       <div className="kpis" ref={kpisRef} title="한 줄에 안 들어가는 KPI는 자동으로 숨겨집니다(창을 넓히면 더 보입니다).">
         <Kpi label="vCenter" value={`${g.vcentersConnected}/${g.vcenters}`}
-          meta={`${Math.max(0, g.vcenters - g.vcentersConnected - (g.vcentersMaintenance || 0) - (g.vcentersDisabled || 0))}개 연결 불가${g.vcentersMaintenance ? ` · 점검중 ${g.vcentersMaintenance}` : ''}${g.vcentersDisabled ? ` · 비활성 ${g.vcentersDisabled}` : ''}`}
+          meta={vcStatusMeta(g)}
           accent="var(--accent-2)" onClick={() => onGotoTab?.('vcenters')} />
         <Kpi label="ESXi 호스트" value={fmt(g.hosts)} meta={`정상 ${g.hostsConnected} · 점검 ${g.hostsMaintenance} · 끊김 ${g.hostsDisconnected}`} onClick={() => onGotoTab?.('hosts')} />
         <Kpi label="가상머신" value={fmt(g.vms)} meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`} accent="var(--green)" onClick={() => onGotoTab?.('vms')} />
