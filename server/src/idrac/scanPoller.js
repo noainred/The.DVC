@@ -51,15 +51,26 @@ function loadScanSettingsFile() {
   catch (e) { preserveCorrupt(SETTINGS_FILE, e.message); settingsCache = null; } // 파일 없음(ENOENT)이면 preserveCorrupt 는 no-op
   return settingsCache;
 }
+/**
+ * 스캔 주기 클램프 — 0 = 주기 끔(유지), 그 밖은 [10분, 30일].
+ * v2.620(SRV2620-05): 예전에는 저장 경로(setIdracScanIntervalMs)만 잘랐고 **로드 경로는 파일 값을 그대로** 썼다 — 손으로 고친 파일·
+ *   백업 복원으로 `intervalMs: 1000` 이면 1초 주기 전 대역 프로빙이 됐다(v2.602 TIM2602-04 '로드에도 저장과 같은 범위' 규약의 누락).
+ *   저장·로드·env 기본값이 이 함수 하나를 지난다.
+ */
+export function clampScanIntervalMs(ms) {
+  let v = Math.max(0, Math.min(30 * 86_400_000, Number(ms) || 0)); // 상한 30일
+  if (v > 0) v = Math.max(600_000, v); // 하한 10분 — 소수 시간 오입력으로 초 단위 전 대역 프로빙 폭주 방지
+  return v;
+}
 function intervalMs() {
   const s = loadScanSettingsFile();
-  return (s && Number.isFinite(Number(s.intervalMs))) ? Number(s.intervalMs) : config.idrac.scanIntervalMs;
+  const raw = (s && s.intervalMs !== '' && s.intervalMs != null && Number.isFinite(Number(s.intervalMs))) ? Number(s.intervalMs) : config.idrac.scanIntervalMs;
+  return clampScanIntervalMs(raw);
 }
 
 /** 주기 변경(웹 설정) — ms 단위(0=주기 끔). 저장 후 타이머 즉시 재적용. */
 export function setIdracScanIntervalMs(ms) {
-  let v = Math.max(0, Math.min(30 * 86_400_000, Number(ms) || 0)); // 상한 30일
-  if (v > 0) v = Math.max(600_000, v); // 하한 10분 — 소수 시간 오입력으로 초 단위 전 대역 프로빙 폭주 방지
+  const v = clampScanIntervalMs(ms);
   settingsCache = { ...(loadScanSettingsFile() || {}), intervalMs: v };
   try {
     fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });

@@ -10,7 +10,7 @@
  */
 
 import fs from 'node:fs';
-import { splitByDeadband, policyFromEnv } from './deadband.js';
+import { splitByDeadband, policyFromEnv, policyKeyFor } from './deadband.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -97,12 +97,49 @@ function initSqlite() {
     // 비싸진다(iDRAC 전력 withLatestCache 와 같은 문제·같은 처방). 최초 호출에 1회 시드 후
     // 쓰기 경로에서 O(1) 갱신. 캐시 갱신은 반드시 '커밋 성공 후'(실패분 유령 데이터 방지).
     const latestCache = new Map(); // metric -> Map<k, {v, ts}>
+    // v2.620(SRV2620-02): dead-band 계열의 짧은 창 조회용 — 창 시작 직전 마지막 **저장** 행(이월 값)과 창 안 원본.
+    //   bare column(v, ts) + MAX(ts) 는 SQLite 가 MAX 행의 값을 준다. 하한(ts>=?)으로 idx_samples_mt 범위를 탄다.
+    const carryAll = db.prepare('SELECT k, v, MAX(ts) AS ts FROM samples WHERE metric=? AND ts<? AND ts>=? GROUP BY k');
+    const rawAll = db.prepare('SELECT k, v, ts FROM samples WHERE metric=? AND ts>=? ORDER BY k, ts');
+    const carryOne = db.prepare('SELECT v, MAX(ts) AS ts FROM samples WHERE metric=? AND k=? AND ts<? AND ts>=?');
+    const rawOne = db.prepare('SELECT v, ts FROM samples WHERE metric=? AND k=? AND ts>=? ORDER BY ts');
     // dead-band 상태(v2.451): `${metric} ${k}` -> 마지막으로 **원본에 저장한** 샘플.
     // 프로세스 메모리에만 둔다 — 재시작하면 각 계열의 첫 샘플이 한 번 더 저장될 뿐이라 안전하다.
     // 크기는 (계열 x 키) 로 유계(호스트 658 + 클러스터/vCenter 집계 수준).
     const lastKept = new Map();
     const deadbandPolicy = policyFromEnv();
     let _skippedTotal = 0;
+    const latestAllCached = (metric) => {  // v2.620: 내부용(복사 없음) — 공개 latestAll 은 사본을 준다
+      let c = latestCache.get(metric);
+      if (!c) {
+        c = new Map();
+        for (const r of latestAll.all(metric, metric)) c.set(r.k, { v: r.v, ts: r.ts });
+        latestCache.set(metric, c);
+      }
+      return c;
+    };
+    // v2.620(SRV2620-02): dead-band 계열의 '실제 마지막 샘플'(저장 생략분 포함). latestCache 는 누가 latestAll 을 부르기 전에는
+    //   시드되지 않고, 시드는 **저장 행**만 보므로 생략 구간의 최신 시각을 모른다 — 적재 경로에서 직접 기록한다(키 수로 유계).
+    const lastSeen = new Map();
+    const latestOf = (metric, k) => lastSeen.get(`${metric} ${k}`) || latestCache.get(metric)?.get(k) || null;
+    const implHistory = (metric, k, sinceTs, bucketMs, limit) => {
+      // 60분+ 정배수 버킷이고 롤업이 요청 창을 덮으면 시간당 롤업에서 집계(원본 스캔 제거).
+      // 업그레이드 이전 데이터(롤업 없음)가 창에 걸리면 원본으로 폴백해 빈 결과를 만들지 않는다.
+      if (bucketMs >= HOUR && bucketMs % HOUR === 0) {
+        // v2.600 DB2600-02: '롤업이 sinceTs 를 덮을 때만' 이면, 원본 보존(기본 90일)이 롤업 보존(5년)보다 짧을 때
+        // 데이터 나이보다 긴 창(365일)이 원본으로 떨어져 **긴 창이 더 적게**(90일) 보였다. 롤업이 원본만큼
+        // 거슬러 올라가면(롤업 첫 시간 ≤ 원본 첫 표본) 롤업을 쓴다. 원본이 더 이르면(업그레이드 이전) 원본 폴백.
+        const mn = hourlyMin.get(metric, k)?.mn;
+        const rawFirst = mn != null && mn > sinceTs ? rawMin.get(metric, k)?.mn : null;
+        if (mn != null && (mn <= sinceTs || rawFirst == null || mn <= rawFirst)) {
+          return bucketHourly.all(bucketMs, bucketMs, metric, k, sinceTs, limit).reverse()
+            .map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) }));
+        }
+      }
+      return bucket.all(bucketMs, bucketMs, metric, k, sinceTs, limit).reverse().map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) }));
+    };
+    const implRecentAvg = (metric, sinceTs) => { const map = new Map(); for (const r of recentAvgAll.all(metric, sinceTs)) map.set(r.k, { avg: round1(r.avg), max: round1(r.max) }); return map; };
+    const deadbandPolicyOf = (metric) => { const pk = policyKeyFor(metric); const p = pk ? deadbandPolicy[pk] : null; return p && p.eps > 0 ? p : null; };
     return {
       kind: 'sqlite',
       insertMany: (rows, ts) => {
@@ -120,36 +157,55 @@ function initSqlite() {
           db.exec('COMMIT');
         } catch (e) { try { db.exec('ROLLBACK'); } catch { /* */ } throw e; }
         for (const r of rows) {
+          if (policyKeyFor(r.metric)) { const sk = `${r.metric} ${r.k}`; const cur = lastSeen.get(sk); if (!cur || ts >= cur.ts) lastSeen.set(sk, { v: r.v, ts }); }
           const c = latestCache.get(r.metric);
           if (c) { const cur = c.get(r.k); if (!cur || ts >= cur.ts) c.set(r.k, { v: r.v, ts }); }
         }
       },
       /** 진단용 — dead-band 로 생략한 누적 행 수(설정 화면·로그에서 효과 확인). */
       deadbandSkipped: () => _skippedTotal,
-      latestAll: (metric) => {
-        let c = latestCache.get(metric);
-        if (!c) {
-          c = new Map();
-          for (const r of latestAll.all(metric, metric)) c.set(r.k, { v: r.v, ts: r.ts });
-          latestCache.set(metric, c);
-        }
-        return new Map(c); // 기존 계약(매 호출 새 Map) 유지 — 호출부 변형이 캐시를 오염시키지 않게
+      latestAll: (metric) => new Map(latestAllCached(metric)), // 기존 계약(매 호출 새 Map) 유지 — 호출부 변형이 캐시를 오염시키지 않게
+      history: implHistory,
+      /**
+       * v2.620(SRV2620-02): dead-band 를 아는 짧은 버킷 조회. 온도 계열은 0.5℃ 미만 변화면 원본을 건너뛰므로
+       * (최대 간격 maxGapMs — 기본 30분) 1시간 미만 버킷을 원본에서 그대로 집계하면 안정 구간이 **점 없음**이 된다.
+       * 창 직전 마지막 저장 행을 이월하고 빈 버킷을 직전 값으로 채운다(step). 채운 점은 `carried:true`.
+       * 60분 이상 버킷·dead-band 가 없는 계열은 history() 와 같다(롤업이 생략분까지 전량 갖고 있다).
+       * @returns {{points:object[], carried:number, stepped:boolean, maxGapMs:number|null}}
+       */
+      historyStep: (metric, k, sinceTs, bucketMs, limit, opts = {}) => {
+        const p = deadbandPolicyOf(metric);
+        if (!p || bucketMs >= HOUR) return { points: implHistory(metric, k, sinceTs, bucketMs, limit), carried: 0, stepped: false, maxGapMs: p ? p.maxGapMs : null };
+        const nowTs = Number.isFinite(opts.nowTs) ? opts.nowTs : Date.now();
+        const start = Math.max(Math.floor(sinceTs / bucketMs) * bucketMs, Math.floor(nowTs / bucketMs) * bucketMs - (Math.max(1, limit) - 1) * bucketMs);
+        const c = carryOne.get(metric, k, start, start - p.maxGapMs - STEP_SLACK_MS);
+        const carry = c && c.ts != null ? { v: c.v, ts: c.ts } : null;
+        const rows = rawOne.all(metric, k, start).map((r) => ({ v: r.v, ts: r.ts }));
+        const lastActualTs = latestOf(metric, k)?.ts ?? null;
+        return { ...stepBuckets({ carry, rows, start, nowTs, bucketMs, maxGapMs: p.maxGapMs, lastActualTs, slackMs: Number.isFinite(opts.slackMs) ? opts.slackMs : STEP_SLACK_MS, limit }), stepped: true, maxGapMs: p.maxGapMs };
       },
-      history: (metric, k, sinceTs, bucketMs, limit) => {
-        // 60분+ 정배수 버킷이고 롤업이 요청 창을 덮으면 시간당 롤업에서 집계(원본 스캔 제거).
-        // 업그레이드 이전 데이터(롤업 없음)가 창에 걸리면 원본으로 폴백해 빈 결과를 만들지 않는다.
-        if (bucketMs >= HOUR && bucketMs % HOUR === 0) {
-          // v2.600 DB2600-02: '롤업이 sinceTs 를 덮을 때만' 이면, 원본 보존(기본 90일)이 롤업 보존(5년)보다 짧을 때
-          // 데이터 나이보다 긴 창(365일)이 원본으로 떨어져 **긴 창이 더 적게**(90일) 보였다. 롤업이 원본만큼
-          // 거슬러 올라가면(롤업 첫 시간 ≤ 원본 첫 표본) 롤업을 쓴다. 원본이 더 이르면(업그레이드 이전) 원본 폴백.
-          const mn = hourlyMin.get(metric, k)?.mn;
-          const rawFirst = mn != null && mn > sinceTs ? rawMin.get(metric, k)?.mn : null;
-          if (mn != null && (mn <= sinceTs || rawFirst == null || mn <= rawFirst)) {
-            return bucketHourly.all(bucketMs, bucketMs, metric, k, sinceTs, limit).reverse()
-              .map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) }));
-          }
+      /**
+       * v2.620(SRV2620-02): dead-band 를 아는 짧은 창 평균. recentAvg() 는 창 안 **저장** 행만 평균하므로 온도가 안정된
+       * 호스트는 창 안 행이 0 이라 빠지고('—'), 흔들리는 호스트는 '변한 표본만의 평균' 이 됐다. 창 직전 저장 행을 이월해
+       * **시간 가중 step 평균**을 낸다. 창 안에 실제 샘플(최신값 캐시 기준)이 없는 키는 내지 않는다(죽은 호스트를 되살리지 않는다).
+       * 값: Map<k, {avg, max, carried}> — carried 는 이월 값을 썼는지.
+       */
+      recentAvgStep: (metric, sinceTs, opts = {}) => {
+        const p = deadbandPolicyOf(metric);
+        if (!p) { const m = new Map(); for (const [k, a] of implRecentAvg(metric, sinceTs)) m.set(k, { ...a, carried: false }); return m; }
+        const nowTs = Number.isFinite(opts.nowTs) ? opts.nowTs : Date.now();
+        const carries = new Map();
+        for (const r of carryAll.all(metric, sinceTs, sinceTs - p.maxGapMs - STEP_SLACK_MS)) carries.set(r.k, { v: r.v, ts: r.ts });
+        const inWin = new Map();
+        for (const r of rawAll.all(metric, sinceTs)) { let a = inWin.get(r.k); if (!a) { a = []; inWin.set(r.k, a); } a.push({ v: r.v, ts: r.ts }); }
+        const out = new Map();
+        const keys = new Set([...carries.keys(), ...inWin.keys()]);
+        for (const k of keys) {
+          const last = latestOf(metric, k);
+          const r = stepWindowAvg({ carry: carries.get(k) || null, rows: inWin.get(k) || [], sinceTs, nowTs, last });
+          if (r) out.set(k, r);
         }
-        return bucket.all(bucketMs, bucketMs, metric, k, sinceTs, limit).reverse().map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) }));
+        return out;
       },
       // 패밀리 전 키 일괄 버킷 — 이상탐지의 키별 N+1(키 수천 × 쿼리 1회)을 쿼리 1회로 대체.
       historyAll: (metric, sinceTs, bucketMs, limitPerKey) => {
@@ -171,7 +227,7 @@ function initSqlite() {
         if (limitPerKey) for (const [k, arr] of out) if (arr.length > limitPerKey) out.set(k, arr.slice(-limitPerKey));
         return out;
       },
-      recentAvg: (metric, sinceTs) => { const map = new Map(); for (const r of recentAvgAll.all(metric, sinceTs)) map.set(r.k, { avg: round1(r.avg), max: round1(r.max) }); return map; },
+      recentAvg: implRecentAvg,
       meta: (metric) => { const r = metaStmt.get(metric); return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) }; },
       /**
        * 키 하나의 첫/마지막 관측 시각(v2.504). 원본이 prune 으로 잘려 나가도 롤업에 남아 있을 수
@@ -208,6 +264,7 @@ function initSqlite() {
         for (const c of latestCache.values()) {
           for (const [k, e] of c) if (e.ts < beforeTs) c.delete(k);
         }
+        for (const [k, e] of lastSeen) if (e.ts < beforeTs) lastSeen.delete(k);
         return r.deleted;
       },
     };
@@ -255,6 +312,9 @@ function initJson() {
     },
     meta: (metric) => { let mn = null, mx = null, n = 0; for (const r of rows) if (r.m === metric) { n++; if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx, count: n }; },
     // SQLite 구현과 같은 API(v2.504) — 호출부가 폴백 여부를 몰라도 되게 한다.
+    // v2.620(SRV2620-02): NDJSON 폴백은 dead-band 를 쓰지 않아(전량 저장) step 조회가 곧 일반 조회다 — 같은 API 만 맞춘다.
+    historyStep(metric, k, sinceTs, bucketMs, limit) { return { points: this.history(metric, k, sinceTs, bucketMs, limit), carried: 0, stepped: false, maxGapMs: null }; },
+    recentAvgStep(metric, sinceTs) { const m = new Map(); for (const [k, a] of this.recentAvg(metric, sinceTs)) m.set(k, { ...a, carried: false }); return m; },
     metaKey: (metric, k) => { let mn = null, mx = null; for (const r of rows) if (r.m === metric && r.k === k) { if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx }; },
     dump: (metric, sinceTs, untilTs, limit) => rows.filter((r) => r.m === metric && r.t >= sinceTs && r.t <= untilTs).sort((a, b) => a.t - b.t).slice(0, limit).map((r) => ({ k: r.k, v: r.v, ts: r.t })),
     prune: (beforeTs) => { const n = rows.filter((r) => r.t >= beforeTs); if (n.length !== rows.length) { rows = n; try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } } },
@@ -262,6 +322,77 @@ function initJson() {
 }
 
 const round1 = (x) => (x == null ? null : Number(x.toFixed(1)));
+
+/*
+ * v2.620(SRV2620-02) — dead-band 계열의 step 조회(순수 함수, 테스트가 직접 부른다).
+ * 원본(samples)은 '변한 값 + 최대 간격(maxGapMs)마다 1행' 만 담는다(metrics/deadband.js). 그래서 원본을 그대로
+ * 집계하는 짧은 창·짧은 버킷은 안정 구간을 '표본 없음' 으로 읽었다. 저장 행 사이는 직전 값이 유지된 구간이다
+ * (생략된 표본은 전부 직전 저장값과 eps 미만 차이). 단 **수집이 멈춘 구간**까지 잇지 않도록 이월은
+ * 직전 저장 행 + maxGapMs + 여유(STEP_SLACK_MS) 까지만, 마지막 저장 행 이후는 실제 마지막 샘플 시각(최신값 캐시)까지만이다.
+ */
+export const STEP_SLACK_MS = 5 * 60_000;
+
+/**
+ * 창 [sinceTs, nowTs] 의 시간 가중 step 평균. 창 안에 실제 샘플이 없으면(last.ts < sinceTs) null — 죽은 대상을 되살리지 않는다.
+ * @param {{carry:{v,ts}|null, rows:{v,ts}[], sinceTs:number, nowTs:number, last:{v,ts}|null}} a
+ * @returns {{avg:number, max:number, carried:boolean}|null}
+ */
+export function stepWindowAvg({ carry, rows, sinceTs, nowTs, last }) {
+  const rs = (rows || []).filter((r) => Number.isFinite(r?.v) && Number.isFinite(r?.ts) && r.ts >= sinceTs);
+  if (last && Number.isFinite(last.ts) && last.ts < sinceTs && !rs.length) return null; // 창 안에 샘플 자체가 없었다
+  if (!last && !rs.length) return null; // 최신값을 모르면 이월만으로 '지금 값' 을 만들지 않는다
+  const pts = [];
+  const carried = !!(carry && Number.isFinite(carry.v) && (!rs.length || rs[0].ts > sinceTs));
+  if (carried) pts.push({ v: carry.v, ts: sinceTs });
+  for (const r of rs) pts.push(r);
+  if (last && Number.isFinite(last.v) && Number.isFinite(last.ts) && last.ts >= sinceTs && (!pts.length || last.ts > pts[pts.length - 1].ts)) pts.push({ v: last.v, ts: last.ts });
+  if (!pts.length) return null;
+  const lastPt = pts[pts.length - 1];
+  const end = Math.max(lastPt.ts, Number.isFinite(nowTs) ? nowTs : lastPt.ts); // 마지막 값은 지금까지 유지된다
+  let wsum = 0; let wtot = 0; let max = -Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    max = Math.max(max, pts[i].v);
+    const t1 = i + 1 < pts.length ? pts[i + 1].ts : end;
+    const w = Math.max(0, t1 - pts[i].ts);
+    wsum += pts[i].v * w; wtot += w;
+  }
+  const avg = wtot > 0 ? wsum / wtot : pts.reduce((a, p) => a + p.v, 0) / pts.length;
+  return { avg: round1(avg), max: round1(max), carried };
+}
+
+/**
+ * 짧은 버킷 step 채움. 빈 버킷은 직전 값으로 채우고 `carried:true` 로 표시한다. 저장 행이 있는 버킷도 버킷 시작부터
+ * 첫 행 전까지 직전 값이 유지됐으므로 그 값을 함께 집계한다.
+ * @returns {{points:{ts,avg,min,max,carried?}[], carried:number}}
+ */
+export function stepBuckets({ carry, rows, start, nowTs, bucketMs, maxGapMs, lastActualTs = null, slackMs = STEP_SLACK_MS, limit = Infinity }) {
+  const out = [];
+  if (!(bucketMs > 0)) return { points: out, carried: 0 };
+  const rs = (rows || []).filter((r) => Number.isFinite(r?.v) && Number.isFinite(r?.ts)).sort((a, b) => a.ts - b.ts);
+  let cur = carry && Number.isFinite(carry.v) && Number.isFinite(carry.ts) ? carry : null;
+  let i = 0;
+  while (i < rs.length && rs[i].ts < start) { cur = rs[i]; i++; }
+  const endB = Math.floor(nowTs / bucketMs) * bucketMs;
+  let nCarried = 0;
+  for (let b = start; b <= endB; b += bucketMs) {
+    const vals = [];
+    const firstInBucket = i < rs.length && rs[i].ts < b + bucketMs ? rs[i] : null;
+    if (cur && (!firstInBucket || firstInBucket.ts > b)) {
+      const tail = !(i < rs.length); // 이후 저장 행이 없다 — 실제 마지막 샘플까지만 잇는다
+      let until = cur.ts + maxGapMs + slackMs;
+      if (tail && Number.isFinite(lastActualTs) && lastActualTs >= cur.ts) until = Math.min(until, lastActualTs);
+      if (b <= until) vals.push(cur.v);
+    }
+    let own = 0;
+    while (i < rs.length && rs[i].ts < b + bucketMs) { vals.push(rs[i].v); cur = rs[i]; i++; own++; }
+    if (!vals.length) continue;
+    const pt = { ts: b, avg: round1(vals.reduce((a, v) => a + v, 0) / vals.length), min: round1(Math.min(...vals)), max: round1(Math.max(...vals)) };
+    if (!own) { pt.carried = true; nCarried++; }
+    out.push(pt);
+  }
+  const cut = Number.isFinite(limit) && out.length > limit ? out.slice(-limit) : out;
+  return { points: cut, carried: cut === out ? nCarried : cut.filter((p) => p.carried).length };
+}
 
 /*
  * v2.597(감사 L2597-02 — 재현): 첫 open 이 일시 잠금('database is locked')에 걸리면 예전에는 곧바로 NDJSON 으로 폴백해

@@ -39,6 +39,23 @@ async function sampleOnce() {
 }
 
 /**
+ * v2.620(SRV2620-03): '지금 값' 으로 적재하면 안 되는 vCenter — store 는 수집 실패 vCenter 의 마지막 정상 데이터를
+ * `status:'unreachable', stale:true` 로 최대 LASTGOOD_HOLD_MS(기본 6시간) 이어 서빙하고, 위임(site) vCenter 는 마지막 push 를
+ * **기한 없이** `stale:true` 로 서빙한다. 그 값을 매 주기 `ts = now` 로 적재하면 장애·엣지 정지 구간에 마지막 값의 평탄선이
+ * 실측처럼 쌓이고 롤업·이상탐지·용량 예측이 그것을 쓴다(v2.387 · v2.504 iDRAC 규약과 같은 유형). 그런 vCenter 의 호스트·DS·VM 은
+ * 적재하지 않는다 — 결측은 결측으로 남긴다.
+ * @returns {Set<string>}
+ */
+export function staleVcenterIds(snap) {
+  const out = new Set();
+  for (const vc of snap?.vcenters || []) {
+    if (!vc || vc.id == null) continue;
+    if (vc.stale === true || vc.status === 'unreachable') out.add(String(vc.id));
+  }
+  return out;
+}
+
+/**
  * VM 할당 vs 실사용 집계 행 생성(v2.374) — vCenter 별 + 전체('').
  * 할당 CPU clock 은 vCPU × 그 VM 이 올라간 호스트의 코어당 MHz 로 환산한다(VM 객체에 MHz
  * 원값이 없어 호스트를 조인). 호스트 코어 MHz 를 모르는 VM 은 **CPU 집계에서 제외**한다
@@ -46,10 +63,17 @@ async function sampleOnce() {
  * 정보 없이 계산 가능하므로 전원 On 전량을 집계한다. 전원 OFF/템플릿은 제외(사용률 0 이라 왜곡).
  */
 export function vmAllocRows(snap, settings) {
+  // v2.620(SRV2620-03): 낡은(stale·unreachable) vCenter 의 VM·DS 는 적재 대상이 아니다. 전체('') 합계는 대상 vCenter 중
+  //   하나라도 빠지면 **적재하지 않는다** — 부분 합은 '거짓 하락' 이다(v2.594 vmtrack skipped 와 같은 판단).
+  const staleIds = staleVcenterIds(snap);
+  const fresh = (id) => !staleIds.has(String(id));
+  let staleTracked = 0;
+  for (const id of staleIds) if (vmperfTracks(id, settings)) staleTracked++;
   // `${vcenterId}|${host.name}` -> 코어당 MHz. 이름 단독 키는 vCenter 간 동명 호스트가
   // 덮어써 다른 사이트 MHz 로 환산되는 오염이 생긴다(v2.388 수정).
   const hostMhz = new Map();
   for (const h of snap.hosts || []) {
+    if (!fresh(h.vcenterId)) continue;
     const cores = Number(h.cpuCores) || 0;
     const total = Number(h.cpuTotalMhz) || 0;
     if (cores > 0 && total > 0) hostMhz.set(`${h.vcenterId}|${h.name}`, total / cores);
@@ -63,6 +87,7 @@ export function vmAllocRows(snap, settings) {
   };
   for (const v of snap.vms || []) {
     if (v.template) continue;
+    if (!fresh(v.vcenterId)) continue;
     // 디스크 트렌드(v2.446) — 용량 리포트 › 디스크 트렌드의 '할당(프로비저닝)/커밋/정지 VM/스냅샷' 계열.
     // 전원 OFF VM 도 스토리지는 점유하므로 CPU/MEM 과 달리 **전원 무관하게** 집계한다.
     if (vmperfTracks(v.vcenterId, settings)) {
@@ -105,6 +130,7 @@ export function vmAllocRows(snap, settings) {
   // 과소가 된다. 사용량을 못 읽은 DS 는 **용량·사용량 둘 다에서 빼고**(비율이 읽은 DS 끼리 맞게) 뺀 개수를 밝힌다.
   let dsUsedUnknown = 0;
   for (const d of snap.datastores || []) {
+    if (!fresh(d.vcenterId)) continue;
     if (!vmperfTracks(d.vcenterId, settings)) continue;
     const cap = Number(d.capacityGB) || 0;
     if (cap <= 0) continue;                       // 용량 미상 데이터스토어는 집계 제외(추정 금지)
@@ -145,6 +171,9 @@ export function vmAllocRows(snap, settings) {
     if (rows.length) out.set(k, rows);
   }
   out.dsUsedUnknown = dsUsedUnknown;             // 사용량을 못 읽어 디스크 합계에서 뺀 DS 수(lastRun 에 싣는다)
+  out.staleVcenters = staleTracked;              // v2.620(SRV2620-03): 낡아서 뺀 대상 vCenter 수
+  out.totalWithheld = false;
+  if (staleTracked > 0 && out.has('')) { out.delete(''); out.totalWithheld = true; }
   return out;
 }
 
@@ -154,9 +183,14 @@ async function sampleOnceInner() {
   const db = await getMetricsDb();
   const ts = Date.now();
   const rows = [];
+  // v2.620(SRV2620-03): 낡은 vCenter(수집 실패 이월·위임 push 끊김)의 호스트·DS 는 '지금 값' 으로 적재하지 않는다(staleVcenterIds 주석).
+  const staleIds = staleVcenterIds(snap);
+  const freshHosts = (snap.hosts || []).filter((h) => !staleIds.has(String(h.vcenterId)));
+  const staleSkipped = { vcenters: staleIds.size, hosts: (snap.hosts || []).length - freshHosts.length, datastores: 0 };
+  let vmperfStale = null;
 
   // Host temperature (only hosts that report a sensor reading).
-  const hostsWithTemp = (snap.hosts || []).filter((h) => h.tempC != null);
+  const hostsWithTemp = freshHosts.filter((h) => h.tempC != null);
   const byCluster = new Map();
   const byVc = new Map();
   for (const h of hostsWithTemp) {
@@ -169,13 +203,16 @@ async function sampleOnceInner() {
   for (const [k, arr] of byVc) rows.push({ metric: 'temp_vc', k, v: round1(avg(arr)) });
 
   // Datastore used GB (for capacity forecast).
-  for (const d of snap.datastores || []) if (d.usedGB != null) rows.push({ metric: 'ds_usedgb', k: d.id, v: d.usedGB });
+  for (const d of snap.datastores || []) {
+    if (staleIds.has(String(d.vcenterId))) { staleSkipped.datastores++; continue; }
+    if (d.usedGB != null) rows.push({ metric: 'ds_usedgb', k: d.id, v: d.usedGB });
+  }
 
   // GPU utilization — ESXi 보고값 우선, 없으면 게스트 OS 수집 오버레이(패스쓰루).
   // per host + per-cluster/per-vCenter averages.
   const gpuByCluster = new Map();
   const gpuByVc = new Map();
-  for (const h of snap.hosts || []) {
+  for (const h of freshHosts) {
     const util = h.gpuUtilPct ?? (getGuestGpuHost(h.id)?.utilPct ?? null);
     if (util == null) continue;
     rows.push({ metric: 'gpu_util', k: h.id, v: util });
@@ -206,6 +243,7 @@ async function sampleOnceInner() {
       // 이름 주의: 이 함수 위쪽 온도 집계에도 byVc 가 있어 혼동을 막으려 vmperfByVc 로 둔다.
       const vmperfByVc = vmAllocRows(snap, vmperfCfg);
       dsUsedUnknown = vmperfByVc.dsUsedUnknown || 0;
+      if (vmperfByVc.staleVcenters) vmperfStale = { vcenters: vmperfByVc.staleVcenters, totalWithheld: !!vmperfByVc.totalWithheld };
       for (const [vcId, vcRows] of vmperfByVc) {
         try { await insertVmperf(vcId, vcRows, ts); } catch (e) { console.warn(`[vmperf] ${vcId || '(전체)'} insert 실패: ${e.message}`); }
         // v2.618(PERF-2): vCenter 사이에 한 번 양보한다 — 기동 첫 샘플은 vCenter 마다 DB 파일을 처음 열어(PRAGMA 포함)
@@ -273,7 +311,12 @@ async function sampleOnceInner() {
       console.warn(`[metrics] prune 실패: ${e.message}`);
     }
   }
-  lastRun = { at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length, ...(dsUsedUnknown ? { dsUsedUnknown } : {}) };
+  lastRun = {
+    at: ts, rows: rows.length, hostsWithTemp: hostsWithTemp.length, ...(dsUsedUnknown ? { dsUsedUnknown } : {}),
+    // v2.620(SRV2620-03): 낡아서 적재하지 않은 vCenter·호스트·DS 수와, 그 때문에 전체('') VM 합계를 적재하지 않았는지.
+    ...(staleSkipped.vcenters ? { staleSkipped } : {}),
+    ...(vmperfStale ? { vmperfStale } : {}),
+  };
 }
 
 const round1 = (x) => (x == null ? null : Number(x.toFixed(1)));

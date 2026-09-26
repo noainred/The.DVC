@@ -20,6 +20,8 @@
  *  · 스택 추적 줄(`    at …`)은 앞 줄의 연속이다 — 따로 세면 오류 1건이 수십 건으로 부풀려진다.
  */
 
+import { numOrNull } from '../util/numOrNull.js';
+
 const MON = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
 const ISO_RE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:?\d{2}|Z)?)\s+(\S+)\s+([^\s:[]+)(?:\[\d+\])?:\s?(.*)$/;
 const SYSLOG_RE = /^([A-Z][a-z]{2})\s+(\d{1,2})\s(\d{2}):(\d{2}):(\d{2})\s+(\S+)\s+([^\s:[]+)(?:\[\d+\])?:\s?(.*)$/;
@@ -71,7 +73,10 @@ export function fromBufferEntry(e) {
   const msg = String(e.msg ?? '').slice(0, MSG_MAX);
   if (!msg.trim()) return null;
   const level = ['info', 'warn', 'error'].includes(e.level) ? e.level : 'unknown';
-  const ts = Number.isFinite(Number(e.time)) ? Number(e.time) : null;
+  // v2.620(SRV2620-07): `Number('') === 0` 이라 time 이 빈 문자열(중앙 edgeLogStore 가 time 없는 엣지 항목을 '' 로 저장)이면
+  //   ts 가 0(1970-01-01)이 됐다. 시각을 모르면 null(미상)이다 — 양수 epoch ms 만 시각으로 받는다.
+  const t = numOrNull(e.time);
+  const ts = t != null && t > 0 ? t : null;
   return { ts, tsRaw: '', host: '', proc: '', msg, level, cont: false };
 }
 
