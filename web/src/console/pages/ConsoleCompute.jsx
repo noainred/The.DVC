@@ -4,7 +4,7 @@ import { usePolling, toolAllowed } from '../../api.js';
 import { StateBadge } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { Panel, KpiCard, PctCell, PollState, Empty } from '../ui.jsx';
-import { clusterRows, clusterCountByVc, capacityAdvice, fmtInt, fmtPct, colorOf, rowMatches, LEVEL_COLOR } from '../consoleData.js';
+import { clusterRows, clusterCountByVc, capacityAdvice, fmtInt, fmtPct, colorOf, rowMatches, LEVEL_COLOR, vcStatusMeta } from '../consoleData.js';
 
 export default function ConsoleCompute({ global: g, ov, sitesAll, scope, polls }) {
   const canCap = toolAllowed('capacity');
@@ -14,12 +14,11 @@ export default function ConsoleCompute({ global: g, ov, sitesAll, scope, polls }
   const sites = scope.scoped(sitesAll, 'id').filter((s) => rowMatches(s, scope.q));
   const hot = clusterRows(clusters.filter((c) => rowMatches(c, scope.q)), 6);
   const advice = capacityAdvice(clusters);
-  const unreach = g ? Math.max(0, g.vcenters - g.vcentersConnected - (g.vcentersMaintenance || 0)) : 0;
 
   return (
     <>
       <div className="dvc-kpis">
-        <KpiCard label="vCenter" value={g ? `${g.vcentersConnected}/${g.vcenters}` : '—'} accent="#0891b2" meta={g ? `연결 불가 ${unreach}${g.vcentersMaintenance ? ` · 점검중 ${g.vcentersMaintenance}` : ''}` : '수집 대기'} />
+        <KpiCard label="vCenter" value={g ? `${g.vcentersConnected}/${g.vcenters}` : '—'} accent="#0891b2" meta={g ? vcStatusMeta(g) : '수집 대기'} />
         <KpiCard label="물리 서버 (ESXi)" value={fmtInt(g?.hosts)} accent="#0f172a" meta={g ? `정상 ${fmtInt(g.hostsConnected)} · 점검 ${fmtInt(g.hostsMaintenance)} · 끊김 ${fmtInt(g.hostsDisconnected)}${ov?.physical?.servers ? ` · iDRAC 등록 ${fmtInt(ov.physical.servers)}` : ''}` : '수집 대기'} />
         <KpiCard label="가상머신" value={fmtInt(g?.vms)} accent="#22c55e" meta={g ? `구동 ${fmtInt(g.vmsPoweredOn)} · 정지 ${fmtInt(g.vmsPoweredOff)}` : '수집 대기'} />
         <KpiCard label="클러스터" value={cap.data ? fmtInt(cap.data.totals?.clusters) : '—'} accent="#f59e0b" meta={cap.data ? `vCPU/코어 ${cap.data.totals?.vcpuPerCore} · RAM 여유 ${fmtInt(cap.data.totals?.ramHeadroomGB)} GB` : canCap ? '용량 집계 대기' : "권한 필요('tools')"} />

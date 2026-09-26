@@ -50,7 +50,8 @@ export function attentionSites(rows, max = 5) {
       let why;
       if (r.status === 'unreachable') why = '연결 실패';
       else {
-        const parts = [`위험 ${r.alarmsCritical || 0} · 주의 ${r.alarmsWarning || 0}`];
+        // v2.618(WEB-4): REST 폴백은 경보를 조회하지 않는다 — siteRows 가 0 으로 채운 값을 '위험 0' 이라 말하지 않는다.
+        const parts = [r.alarmsUnknown ? '경보 미확인' : `위험 ${r.alarmsCritical || 0} · 주의 ${r.alarmsWarning || 0}`];
         const ul = levelOf(r.worst);
         if (ul != null && ul >= 1) parts.push(`사용률 ${Math.round(r.worst)}%`);
         why = parts.join(' · ');
@@ -74,7 +75,7 @@ export function opsStatus({ ov, alarms, hosts, scopeId = '' } = {}) {
   const c = { ok: 0, warn: 0, crit: 0, wait: 0, maint: 0, off: 0 };
   for (const r of rows) c[siteLevel(r)] += 1;
   const items = Array.isArray(alarms?.items) ? alarms.items : null;
-  let affectedSites = null, affectedHosts = null, affectedVms = null;
+  let affectedSites = null, affectedHosts = null, affectedVms = null, affectedVmsUnknown = 0;
   if (items) {
     const live = items.filter((a) => (a.severity === 'critical' || a.severity === 'warning') && !a.acknowledged
       && (!scopeId || a.vcenterId === scopeId));
@@ -83,15 +84,22 @@ export function opsStatus({ ov, alarms, hosts, scopeId = '' } = {}) {
     affectedHosts = hostKeys.size;
     const hostList = Array.isArray(hosts?.items) ? hosts.items : null;
     if (hostList) {
-      let sum = 0;
-      for (const h of hostList) if (hostKeys.has(`${h.vcenterId}|${h.name}`)) sum += numOrNull(h.vmCount) || 0;
+      // v2.618(WEB-5): VM 수를 모르는 호스트(REST 폴백 vmCount null)를 0 으로 더하지 않는다 — 하나라도 모르면 합은
+      //   '최소' 이고 affectedVmsUnknown 으로 그 호스트 수를 밝힌다(화면이 '최소 N' 으로 말한다).
+      let sum = 0; let unknown = 0;
+      for (const h of hostList) {
+        if (!hostKeys.has(`${h.vcenterId}|${h.name}`)) continue;
+        const v = numOrNull(h.vmCount);
+        if (v == null) unknown += 1; else sum += v;
+      }
       affectedVms = sum;
+      affectedVmsUnknown = unknown;
     } else if (hostKeys.size === 0) {
       affectedVms = 0; // 영향 호스트가 없으면 목록 없이도 0 이 맞다
     }
   }
   // total 은 판정 대상(비활성 제외)이다 — 항등식 total = ok + warn + crit + wait + maint. 비활성은 off 로 따로 센다.
-  return { ...c, total: rows.length - c.off, affectedSites, affectedHosts, affectedVms };
+  return { ...c, total: rows.length - c.off, affectedSites, affectedHosts, affectedVms, affectedVmsUnknown };
 }
 
 /**

@@ -74,7 +74,8 @@ async function pushStorageOnce() {
         console.warn(`[storage-push] 상태 보고 생략: ${cap.text}`);
         return { ok: true, sent: 0, statusSent: false, statusSkipped: cap.reason, ...(registered === 0 ? { cleared } : {}) };
       }
-      const r = await sendStatusOnly({ reason: 'no-snapshots', registered });
+      // v2.618(BUG-2): 등록부를 못 읽었으면(registered null) 사유도 그렇게 말한다 — 'no-snapshots' 는 '위임은 있는데 스냅샷이 없다' 이다.
+      const r = await sendStatusOnly({ reason: registered == null ? 'registry-unreadable' : 'no-snapshots', registered });
       _last = { at: Date.now(), sent: 0, statusSent: r.ok, statusError: r.ok ? null : r.reason,
         ...(registered === 0 ? { cleared, ...(clearError ? { clearError } : {}) } : {}) };
       if (!r.ok) console.warn(`[storage-push] 상태 보고 실패: ${r.reason}`);

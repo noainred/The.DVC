@@ -145,7 +145,8 @@ export function saveEdgePduStatus(agent, status) {
   if (!key) return false;
   const src = isPlainObj(status) ? status : {};
   const rec = load().get(key) || { agent: String(agent), at: 0, snapshots: [] };
-  const registered = Number(src.registered); const missing = Number(src.missing);
+  const registered = numOrNull(src.registered); // v2.618(BUG-2): null(엣지가 등록부를 못 읽음)을 0(위임 0대 — 정상)으로 읽지 않는다
+  const missing = Number(src.missing);
   rec.status = { reason: capStr(src.reason, 64) || 'unknown', registered: Number.isFinite(registered) ? registered : null,
     missing: Number.isFinite(missing) && missing > 0 ? missing : 0, at: Date.now() };
   if (!load().has(key) && !admitAgent(load(), key).ok) return false; // 상태 보고도 엣지 수 상한을 따른다(v2.599)

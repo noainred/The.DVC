@@ -50,7 +50,8 @@ export const REASON_TEXT = Object.freeze({
 });
 export const REASON_CODES = Object.freeze(Object.keys(REASON_TEXT));
 
-export const num = (v) => { if (v == null || v === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
+import { numOrNull as num } from '../../numOrNull.js'; // v2.618(ARCH-6): 사본 대신 웹 코어
+export { num };
 
 export const ageText = (ts, now = Date.now()) => agoText(ts, now, { dash: '없음', subMinute: 'seconds' });
 export const durText = (ms) => elapsedText(ms, { dash: '—', subMinute: 'seconds' });

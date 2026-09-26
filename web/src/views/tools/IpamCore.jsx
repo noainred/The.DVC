@@ -486,7 +486,16 @@ function IpHistoryModal({ row, scope, onClose }) {
   }, [ip]); // eslint-disable-line react-hooks/exhaustive-deps
   // VM/호스트 소유 IP면 그 자원으로, 스캔 IP면 IP만으로 원격 접속 대상 구성.
   const remoteItem = owner || { name: hostname || ip, ipAddresses: [ip], vcenterId: row.vcenterId || scope || '' };
-  useEffect(() => { fetchJson(`/tools/ipam/history?ip=${encodeURIComponent(ip)}`).then((r) => setH(r.history || null)).catch(() => setH(null)); }, [ip]);
+  // v2.618(WEB-3): 조회 실패를 '이력 없음'(null)으로 삼키지 않는다 — 못 읽음은 없음이 아니다. 늦게 온 이전 IP 응답도 버린다.
+  const [hErr, setHErr] = useState('');
+  useEffect(() => {
+    let active = true;
+    setH(undefined); setHErr('');
+    fetchJson(`/tools/ipam/history?ip=${encodeURIComponent(ip)}`)
+      .then((r) => { if (active) setH(r.history || null); })
+      .catch((e) => { if (active) { setHErr(e?.message || '조회 실패'); setH(null); } });
+    return () => { active = false; };
+  }, [ip]);
   const fmt = (t) => (t ? new Date(t).toLocaleString() : '—');
   const dur = (ms) => { if (ms < 0) ms = 0; const d = Math.floor(ms / 86400000), hh = Math.floor((ms % 86400000) / 3600000), mm = Math.floor((ms % 3600000) / 60000); return d ? `${d}일 ${hh}시간` : (hh ? `${hh}시간 ${mm}분` : `${mm}분`); };
   // 이벤트(오래된→최신)로 사용(up)/미사용(down) 구간을 만든다. 마지막 구간은 현재까지.
@@ -501,7 +510,7 @@ function IpHistoryModal({ row, scope, onClose }) {
   const confirmedHost = lastUpHost || hostname || '—';
   return (
     <Modal title={`IP 사용 이력 — ${ip}`} onClose={onClose} width={640} resizable minWidth={440} minHeight={380}>
-      {h === undefined ? <Loading /> : !h ? (
+      {h === undefined ? <Loading /> : hErr ? <ErrorBox message={`IP 사용 이력을 읽지 못했습니다 — ${hErr}`} /> : !h ? (
         <div style={{ padding: 8 }}>
           <div className="flex gap wrap" style={{ marginBottom: 10 }}>
             <div style={{ minWidth: 160 }}><div className="muted" style={{ fontSize: 12 }}>확인된 호스트명</div><div style={{ fontSize: 13, marginTop: 2 }}>{hostname || '—'}</div></div>

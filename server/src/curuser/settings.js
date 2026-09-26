@@ -128,12 +128,6 @@ export function staleAfterMs(s) {
   return pub * f;
 }
 
-export function isMonitored(s, vcId) {
-  if (!s || s.enabled !== true) return false;
-  const v = (s.vcenters || {})[String(vcId)];
-  return !!(v && v.enabled && v.folders.length);
-}
-
 /**
  * 엣지: 중앙이 내려준 설정 적용(`storage/intervals.js`·`sanswitch/perfSettings.js` 와 같은 규약).
  * `CURUSER_LOCAL=1` 이면 현장 설정을 지킨다. 값이 같으면 파일을 다시 쓰지 않는다.

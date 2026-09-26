@@ -210,7 +210,7 @@ export function _lastRecSize() { return _lastRec.size; }
 export function saveEdgeSanSwitchStatus(agent, status) {
   const src = isPlainObj(status) ? status : {};
   const rec = load().get(agent) || { at: 0, devices: [] };
-  const registered = Number(src.registered);
+  const registered = numOrNull(src.registered); // v2.618(BUG-2): null(엣지가 등록부를 못 읽음)을 0(위임 0대 — 정상)으로 읽지 않는다
   rec.status = { reason: capStr(src.reason, 64) || 'unknown', registered: Number.isFinite(registered) ? registered : null, at: Date.now() };
   if (!load().has(agent) && !admitAgent(load(), agent).ok) return false; // 상태 보고도 엣지 수 상한을 따른다(v2.599)
   load().set(agent, rec);

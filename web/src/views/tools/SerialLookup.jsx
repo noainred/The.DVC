@@ -5,6 +5,7 @@ import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600-01
+import { downloadFailText } from '../downloadFailText.js';
 
 /**
  * 특수기능 › 시리얼 조회(v2.412, 사용자 요구 '서버·스토리지·네트워크·SAN switch 등 등록되고
@@ -29,6 +30,8 @@ export default function SerialLookup() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [exportErr, setExportErr] = useState(''); // v2.618(WEB-1): 내보내기 실패는 따로 — 예전엔 setError 만 하고 아무 데도 안 보였다
+  const [failedQ, setFailedQ] = useState(null);   // v2.618(WEB-1): 실패한 검색어 — 아래 표가 직전 검색 결과임을 밝힌다
 
   const kindParam = useMemo(() => [...kinds].join(','), [kinds]);
 
@@ -36,8 +39,8 @@ export default function SerialLookup() {
     let alive = true;
     setBusy(true);
     fetchJson('/tools/serial-lookup', { q: q.trim(), kinds: kindParam })
-      .then((d) => { if (alive) { setData(d); setError(null); } })
-      .catch((e) => { if (alive) setError(e.message); })
+      .then((d) => { if (alive) { setData(d); setError(null); setFailedQ(null); } })
+      .catch((e) => { if (alive) { setError(e.message); setFailedQ(q.trim()); } })
       .finally(() => { if (alive) setBusy(false); });
     return () => { alive = false; };
   }, [q, kindParam]);
@@ -76,9 +79,16 @@ export default function SerialLookup() {
           value={q} onChange={setQ} placeholder="시리얼 / 서비스 태그 / WWN / 부품번호 입력" />
         {busy && <span className="muted" style={{ fontSize: 12 }}>찾는 중…</span>}
         <button className="tab" style={{ marginLeft: 'auto', flex: 'none', padding: '6px 12px' }}
-          onClick={() => downloadFile(`/tools/serial-lookup/export.csv?q=${encodeURIComponent(q.trim())}&kinds=${encodeURIComponent(kindParam)}`).catch((e) => setError(e.message))}
+          onClick={() => { setExportErr(''); downloadFile(`/tools/serial-lookup/export.csv?q=${encodeURIComponent(q.trim())}&kinds=${encodeURIComponent(kindParam)}`).catch((e) => setExportErr(downloadFailText(e))); }}
           title="현재 검색 결과(검색어가 없으면 선택한 종류 전체)를 CSV 로 내려받습니다.">⬇ CSV 내보내기</button>
       </div>
+
+      {exportErr && <div className="banner" style={{ marginBottom: 10, color: '#f87171' }}>CSV 내보내기 실패 — {exportErr}</div>}
+      {error && data && (
+        <div className="banner" style={{ marginBottom: 10, color: '#fbbf24' }}>
+          검색에 실패했습니다({error}){failedQ != null ? ` — ‘${failedQ}’ 결과가 아닙니다.` : ''} 아래는 직전에 성공한 검색 결과입니다.
+        </div>
+      )}
 
       {/* 종류 필터 + 수집 현황 — 개수가 0 이면 왜 결과가 없는지가 바로 보인다. */}
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 12 }}>
@@ -105,7 +115,7 @@ export default function SerialLookup() {
           {data.truncated ? ' (상위 500건만 표시 — 검색어를 더 좁히거나 CSV 로 내려받으세요)' : ''}</> : ' · 검색어를 입력하세요'}
       </div>
 
-      {q.trim() && !rows.length && !busy && (
+      {q.trim() && !rows.length && !busy && !(error && failedQ === q.trim()) && ( /* v2.618: 실패한 검색을 '결과 없음' 이라 말하지 않는다 */
         <div className="card muted" style={{ fontSize: 13 }}>
           <b>'{q.trim()}'</b> 에 해당하는 시리얼이 없습니다.
           <div style={{ marginTop: 4 }}>일부만 입력해도 찾습니다. 그래도 없다면 그 장비가 아직 수집되지 않았을 수 있습니다 — 위 종류별 개수를 확인하세요.</div>

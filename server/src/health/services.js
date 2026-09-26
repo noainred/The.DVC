@@ -63,6 +63,7 @@ import * as m_certMonitor from '../security/certMonitor.js';
 import * as m_relayCheckPoller from '../relaycheck/poller.js';
 import * as m_partFaultPoller from '../partfault/poller.js';
 import { stallWatchStatus } from '../perf/stallWatch.js';
+import { bigJsonStats } from '../util/bigJsonGate.js';
 
 /** spec `mod` 경로 → 모듈. 표에 새 모듈이 생기면 여기에 한 줄 더한다(테스트가 빠진 것을 잡는다). */
 const MODS = Object.freeze({
@@ -223,6 +224,17 @@ export function getServiceCheck(opts = {}) {
       ? (opts.isAdmin ? ` · 멈춘 지점 ${l.frames[0]}` : ' · 멈춘 지점은 관리자에게만 표시')
       : (l.error ? ' · 스택 없음(GC·네이티브 호출 가능성)' : '');
     return { status: recent ? 'warn' : 'ok', detail: `멈춤 ${w.stalls}회 · 최근 ${Math.round((Date.now() - l.at) / MIN)}분 전 ${dur}${where}${heap} — journal 의 [stallwatch] 줄에 전체 스택`, at: l.at };
+  }));
+
+  // v2.618(ARCH-4): 큰 본문 동시 해석 상한(util/bigJsonGate.js)이 몇 건을 503 으로 돌려보냈는지 — 예전엔 콘솔 1분 1줄뿐이었다.
+  checks.push(wrap('bigjson', '큰 본문 수신 상한', () => {
+    const b = bigJsonStats();
+    const c = b.central || {}; const x = b.session || {};
+    const recent = [c.lastRejectAt, x.lastRejectAt].filter(Boolean).some((t) => Date.now() - t < 60 * MIN);
+    const cut = (c.deadlineCut || 0) + (x.deadlineCut || 0);
+    return { status: recent ? 'warn' : 'ok',
+      detail: `엣지 진행 ${c.inflight || 0}건 · 최대 ${c.peakInflight || 0}건 · 503 반환 ${c.rejected || 0}건 · 세션 503 ${x.rejected || 0}건${cut ? ` · 읽기 시한 초과로 끊음 ${cut}건` : ''}${recent ? ' — 최근 1시간 안에 거절이 있었습니다(엣지는 Retry-After 를 따라 재시도합니다)' : ''}`,
+      at: Date.now() };
   }));
 
   checks.push(wrap('nsx', 'NSX 수집', () => {

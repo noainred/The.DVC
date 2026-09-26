@@ -19,7 +19,7 @@ export const LEVEL_LABEL = ['정상', '주의', '위험'];
 export const REGION_COLORS = { '아시아': '#0891b2', '중국': '#ef4444', '유럽': '#7c3aed', '북미': '#3b82f6' };
 export const DOMAIN_LABEL = { COMPUTE: '컴퓨트', STORAGE: '스토리지', NETWORK: '네트워크', OTHER: '기타' };
 
-const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+import { numOrNull as num } from '../numOrNull.js'; // v2.618(ARCH-6): 사본 대신 웹 코어
 
 /** 사용률(%) → 0 정상 / 1 주의 / 2 위험. 값이 없으면 null(판정 불가). */
 export function levelOf(pct) {
@@ -115,6 +115,26 @@ export function correlateAlarms(items, limit = 6) {
     m.set(key, g);
   }
   return [...m.values()].sort((a, b) => b.count - a.count || sevRank(a.severity) - sevRank(b.severity)).slice(0, limit);
+}
+
+/**
+ * v2.618(ARCH-1): 전역 롤업의 vCenter 상태 개수 — **판정은 이 함수 하나**(개요·V4 컴퓨트·관제 콘솔 2곳이 같이 쓴다).
+ * 서버가 vcentersUnreachable·vcentersPending 을 주면 그대로 쓰고, 구버전 서버면 예전 뺄셈(비활성 제외)으로 떨어진다 —
+ * 그때는 첫 수집 중도 불가에 섞이므로 pending 을 null(모름)로 둔다.
+ */
+export function vcStatusCounts(g) {
+  if (!g) return null;
+  const n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const unreach = n(g.vcentersUnreachable);
+  if (unreach != null) return { unreach, pending: n(g.vcentersPending) ?? 0, maint: n(g.vcentersMaintenance) ?? 0, disabled: n(g.vcentersDisabled) ?? 0 };
+  const legacy = Math.max(0, (g.vcenters || 0) - (g.vcentersConnected || 0) - (g.vcentersMaintenance || 0) - (g.vcentersDisabled || 0));
+  return { unreach: legacy, pending: null, maint: n(g.vcentersMaintenance) ?? 0, disabled: n(g.vcentersDisabled) ?? 0 };
+}
+/** vCenter KPI 메타 문구 — 불가 · 첫 수집 중 · 점검중 · 비활성. */
+export function vcStatusMeta(g) {
+  const c = vcStatusCounts(g);
+  if (!c) return '';
+  return [`연결 불가 ${c.unreach}`, c.pending ? `첫 수집 중 ${c.pending}` : '', c.maint ? `점검중 ${c.maint}` : '', c.disabled ? `비활성 ${c.disabled}` : ''].filter(Boolean).join(' · ');
 }
 
 /** /overview.sites(vCenter 롤업) → 사이트 표 행. worst = CPU/메모리/스토리지 중 최대 사용률. */
@@ -400,11 +420,11 @@ export function buildDomainTiles({ global: g, alarms, nsx, svcmon, pdu, idracPol
   const tiles = [];
   // 컴퓨트 — 호스트 끊김·vCenter 불가면 위험, 아니면 CPU/메모리 사용률 판정.
   if (g) {
-    // v2.617: 비활성(설정에서 끔) vCenter 는 불가가 아니다 — 빼고 센다.
-    const unreach = Math.max(0, (g.vcenters || 0) - (g.vcentersConnected || 0) - (g.vcentersMaintenance || 0) - (g.vcentersDisabled || 0));
+    // v2.617: 비활성은 불가가 아니다 · v2.618: 첫 수집 중도 불가가 아니다(vcStatusCounts 하나가 판정).
+    const { unreach, pending } = vcStatusCounts(g);
     const lvUse = Math.max(levelOf(g.cpuUsagePct) ?? 0, levelOf(g.memUsagePct) ?? 0);
     const level = (g.hostsDisconnected > 0 || unreach > 0) ? 2 : lvUse;
-    tiles.push({ page: 'compute', name: '컴퓨트', level, value: `${fmtInt(g.hosts)} / ${fmtInt(g.vms)}`, meta: `호스트 / VM · vCenter ${g.vcentersConnected}/${g.vcenters}${unreach ? ` · 불가 ${unreach}` : ''}${g.vcentersDisabled ? ` · 비활성 ${g.vcentersDisabled}` : ''}${g.hostsDisconnected ? ` · 끊김 ${g.hostsDisconnected}` : ''}`, ...ci('COMPUTE') });
+    tiles.push({ page: 'compute', name: '컴퓨트', level, value: `${fmtInt(g.hosts)} / ${fmtInt(g.vms)}`, meta: `호스트 / VM · vCenter ${g.vcentersConnected}/${g.vcenters}${unreach ? ` · 불가 ${unreach}` : ''}${pending ? ` · 첫 수집 중 ${pending}` : ''}${g.vcentersDisabled ? ` · 비활성 ${g.vcentersDisabled}` : ''}${g.hostsDisconnected ? ` · 끊김 ${g.hostsDisconnected}` : ''}`, ...ci('COMPUTE') });
   } else tiles.push({ page: 'compute', name: '컴퓨트', level: null, value: '—', meta: waitMeta, ...ci('COMPUTE') });
   // 스토리지 — 전사 사용률 판정 + 임계 초과 DS 수.
   if (g) {
