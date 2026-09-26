@@ -78,10 +78,12 @@ let changeTimer = null;
 let lastRun = null;
 let lastSkip = null;
 
-function safeBackup(reason) {
+// v2.620(PERF2620-01): createBackup 이 비동기(gzip 을 libuv 스레드로)가 됐다 — 호출부 타이머는 promise 를 버리지만
+//   이 함수가 안에서 실패를 잡으므로 unhandled rejection 은 없다.
+async function safeBackup(reason) {
   try {
     // v2.590 P1: 'change' 는 설정 내용이 직전 백업과 같으면 만들지 않는다(상태 파일만 바뀐 경우). 건너뛴 사실은 lastSkip 으로 남긴다.
-    const m = createBackup(reason, { retention: loadBackupSettings().retention, skipIfUnchanged: reason === 'change' });
+    const m = await createBackup(reason, { retention: loadBackupSettings().retention, skipIfUnchanged: reason === 'change' });
     // v2.591 L5: `m.skipped` 는 성공한 백업에서도 **배열**(크기 상한으로 뺀 파일 — v2.590 D5)이라 빈 배열도 참이다. 그 값으로
     //   '생략' 을 판정하면 모든 자동 백업이 lastSkip 으로 가고 lastRun 이 영원히 비어 서비스 점검이 '백업 없음' 이라 말했다.
     if (m.skipped === true) { lastSkip = { at: Date.now(), reason, why: m.why }; return null; }

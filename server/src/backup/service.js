@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { promisify } from 'node:util';
 import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { redactEnvSecrets, mergeRedactedEnv } from '../util/envRedact.js'; // v2.538: 번들의 .env 에서 키·토큰 제거
@@ -159,8 +160,24 @@ export function collectConfigDir(dir = CONFIG_DIR) {
   return out;
 }
 
-/** 백업 아카이브 1개 생성. reason: 'manual'|'schedule'|'change'|'startup'. */
-export function createBackup(reason = 'manual', { retention = 30, skipIfUnchanged = false } = {}) {
+const gzipAsync = promisify(zlib.gzip);
+/*
+ * v2.620(PERF2620-01): 압축은 비동기 `zlib.gzip`(libuv 스레드)로 한다 — `gzipSync` 는 아카이브(중앙 설정 + 전 엣지 설정 사본)가
+ * 20MB 면 약 0.13초, 60MB 면 약 0.46초 메인 루프를 멈췄다(JSON.stringify 몫은 남는다 — 실측 정지의 약 2/3).
+ * 비동기가 되면서 두 백업이 겹칠 수 있으므로(정기·변경·수동·복원 전) **한 줄로 세운다** — 겹치면 지문 생략 판정
+ * (`_lastFingerprint`, v2.590 P1)이 앞 백업의 완료를 보지 못해 같은 내용 백업이 두 개 생기고, prune(자동 사유 슬롯)이
+ * 쓰는 중인 목록을 본다.
+ */
+let _backupChain = Promise.resolve();
+
+/** 백업 아카이브 1개 생성(비동기, v2.620 PERF2620-01). reason: 'manual'|'schedule'|'change'|'startup'|'pre-restore'. */
+export function createBackup(reason = 'manual', opts = {}) {
+  const run = _backupChain.then(() => createBackupInner(reason, opts));
+  _backupChain = run.catch(() => {});   // 한 백업의 실패가 다음 백업을 막지 않게
+  return run;
+}
+
+async function createBackupInner(reason, { retention = 30, skipIfUnchanged = false } = {}) {
   ensureDir();
   const files = collectConfigDir();
   const redactedMeta = files[REDACTED_META] || null; delete files[REDACTED_META];
@@ -171,7 +188,7 @@ export function createBackup(reason = 'manual', { retention = 30, skipIfUnchange
   const central = { version: currentVersion(), files, redacted: redactedMeta, skipped: skippedFiles.length ? skippedFiles : undefined };
   const edges = getAllAgentConfigs();
   const archive = { v: 1, createdAt: Date.now(), reason, central, edges };
-  const gz = zlib.gzipSync(Buffer.from(JSON.stringify(archive)));
+  const gz = await gzipAsync(Buffer.from(JSON.stringify(archive)));
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safeReason = /^[a-z-]{1,20}$/.test(String(reason)) ? reason : 'manual';
   const name = `portal-backup-${stamp}-${safeReason}.json.gz`;
@@ -246,11 +263,13 @@ export function readBackup(name) {
  * central.files 를 CONFIG_DIR에 덮어쓴다. 적용에는 보통 재시작이 필요하다.
  * @param archive readBackup 결과 또는 업로드 파싱 결과
  */
-export function restoreCentral(archive, { retention = 30 } = {}) {
+export async function restoreCentral(archive, { retention = 30 } = {}) {
   if (!archive || !archive.central || typeof archive.central.files !== 'object') throw new Error('유효하지 않은 백업 아카이브');
   // v2.590 P2: 사전 백업도 **설정된 보관 개수**로 정리한다 — 기본값 30 으로 잘라 보관 100 인 현장에서 오래된 백업
   // (방금 복원한 원본 포함)이 조용히 지워졌다.
-  createBackup('pre-restore', { retention });
+  // v2.620(PERF2620-01): createBackup 이 비동기가 됐다 — 사전 백업이 **끝난 뒤에** 덮어쓴다(기다리지 않으면 덮어쓴 뒤의
+  //   설정이 '복원 전' 백업에 들어간다). 사전 백업이 실패하면 예전처럼 던져 복원을 멈춘다.
+  await createBackup('pre-restore', { retention });
   ensureDir();
   let restored = 0;
   let envRestored = 0; const envDropped = [];
