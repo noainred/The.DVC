@@ -92,6 +92,8 @@ export function rejectKindLine(reject) {
   // v2.599(WEB2599-04): 라우터에 없는 경로 — '수신 꺼짐' 과 조치가 다르다(버전 차이). 경로 문자열은 한 칸으로 합쳐져 있다.
   if (k === 'unknown-route') return '**중앙이 이 경로를 모릅니다**(없는 경로) — 엣지가 중앙보다 새 버전이거나 경로가 잘못됐습니다. 중앙을 업그레이드하거나 엣지 버전을 확인하세요';
   if (k === 'too-large') return `**본문이 중앙 수신 한도를 넘었습니다(413)**${reason ? `(${reason})` : ''} — 중앙의 대용량 수신 등록·상한을 확인하세요`;
+  // v2.620(RECENT2620-04): 중앙 큰 본문 게이트가 동시 한도로 돌려보낸 503 — 엣지는 재시도한다.
+  if (k === 'busy') return `**중앙이 혼잡해 잠시 받지 않았습니다(503)**${reason ? `(${reason})` : ''} — 엣지가 다시 보냅니다. 계속되면 중앙의 대용량 수신 동시 한도를 확인하세요`;
   if (k === 'server') return `**중앙 오류로 저장에 실패했습니다**(${reason || '5xx'})`;
   return `**요청이 거부됐습니다**(${reason || '사유 미상'})`;
 }
@@ -99,7 +101,7 @@ export function rejectKindLine(reject) {
 /** 거부 종류 짧은 라벨(표·상세의 한 칸). 모르는 종류는 원문 코드를 그대로 돌려준다(지어내지 않는다). */
 export const REJECT_KIND_LABEL = Object.freeze({
   auth: '토큰 거부', mock: 'mock 데이터', owner: '소유권 충돌', 'bad-request': '형식 오류', disabled: '수신 꺼짐',
-  server: '중앙 오류', 'too-large': '크기 초과(413)', 'unknown-route': '없는 경로', other: '기타',
+  server: '중앙 오류', 'too-large': '크기 초과(413)', 'unknown-route': '없는 경로', busy: '중앙 혼잡(503)', other: '기타',
 });
 export const rejectKindLabel = (k) => REJECT_KIND_LABEL[t(k)] || t(k) || '—';
 

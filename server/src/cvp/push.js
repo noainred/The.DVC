@@ -27,6 +27,7 @@ import { readJsonCapped } from '../util/readCapped.js';
 import { serversForThisNode, registryLoadError } from './registry.js';
 import { getStatus } from './store.js';
 import * as db from './db.js';
+import { agentNameHeader } from '../util/agentNameHeader.js';
 
 const gzipAsync = promisify(zlib.gzip);
 // v2.613 PERSIST2613-01(재현): 이 커서는 표본이 있는 push 마다 다시 쓴다 — 상태 파일로 등록하지 않으면 백업 변경 감시·엣지 설정 push 가
@@ -156,7 +157,8 @@ async function pushInner() {
   const head = { agent: config.agent.name, servers: statuses, deviceKeys: devicesUnavailable ? null : deviceKeys, devicesUnavailable, touch };
   const items = [...deviceItems, ...rows.map((v) => ({ t: 'r', v }))];
   const chunks = chunkItems(items, CHUNK_BYTES, Buffer.byteLength(JSON.stringify(head)));
-  const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, 'X-Central-Token': config.agent.centralToken };
+  // v2.620(RECENT2620-02): 한글 이름을 헤더에 원문으로 실으면 fetch 가 요청 자체를 던진다 — 안전할 때만 싣는다.
+  const hdrs = { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), 'X-Central-Token': config.agent.centralToken };
   let bytes = 0; let gz = 0; let drop = null; let touchedAt = null;
   for (let i = 0; i < chunks.length; i++) {
     const c = chunks[i];

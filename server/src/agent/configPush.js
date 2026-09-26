@@ -12,6 +12,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; // v2.606 EDGE2606-03
 import { collectConfigDir, REDACTED_META, SKIPPED_META, isRuntimeStateFile, settingsFingerprint } from '../backup/service.js';
+import { agentNameHeader } from '../util/agentNameHeader.js';
 
 const gzipAsync = promisify(zlib.gzip);
 /** v2.620(EDGE2620-04): 413 이면 큰 파일부터 몇 개를 빼고 한 번 다시 보낸다 — 그 상한(개수). */
@@ -27,7 +28,8 @@ const PUSH_MS = clampIntervalMs(Number(process.env.AGENT_CONFIG_PUSH_MS) || 1_80
 let running = false;
 
 function headers(extra = {}) {
-  return { 'Content-Type': 'application/json', ...extra, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+  // v2.620(RECENT2620-02): 큰 본문 게이트가 본문을 읽기 전에 요청자를 가리도록 이름 헤더(본문 agent 와 같은 값 · 안전할 때만).
+  return { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...extra, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
 /**
