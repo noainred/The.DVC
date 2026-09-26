@@ -618,7 +618,9 @@ export const usageReadable = (h) => h.connectionState !== 'DISCONNECTED' && h.co
  * (v2.598 부터 SOAP 경로도 freeSpace 가 없으면 null 을 낸다). vmtrack diffDatastores 와 같은 규칙.
  */
 export const dsUsageReadable = (d) => d.usedGB != null || d.freeGB != null;
-const dsUsedOf = (d) => (d.usedGB != null ? d.usedGB : Math.max(0, (d.capacityGB || 0) - d.freeGB));
+export const dsUsedOf = (d) => (d.usedGB != null ? d.usedGB : Math.max(0, (d.capacityGB || 0) - d.freeGB));
+/** v2.622(감사 RECENT-02): '사용량 미상' 으로 세는 DS — 롤업 datastoresUsageUnknown 과 같은 기준(일일 헬스체크가 공유한다). */
+export const dsUsageUnknownOf = (d) => !!d && !dsUsageReadable(d) && (d.capacityGB || 0) > 0;
 
 function rollupsOf(snap, { scoped = false } = {}) {
   const sum = (arr, fn) => arr.reduce((a, x) => a + (fn(x) || 0), 0);

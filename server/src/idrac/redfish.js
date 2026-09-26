@@ -231,6 +231,17 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
   // v2.593(감사 R2593-01 — 재현): 같은 키로 동시에 캐시를 놓친 요청이 **각자** 세션을 만들면, 뒤 요청의
   //   touchAuthCache 가 앞 요청의 세션을 DELETE 해 앞 요청의 GET 이 401 이 됐다(3동시 호출에 1건) — 그 401 한 번이
   //   authGuard 로 그 서버의 주기 수집을 멈춘다. 세션 생성은 **키마다 한 번만**(진행 중인 생성을 공유) 한다.
+  // v2.622(감사 LEFT-01): 세션 단계의 **비-401 실패**(POST 5xx·429·시한 초과·연결 끊김, 토큰 GET 시한 초과)를 예전처럼
+  //   삼키고 Basic 401 을 돌려주면 get() 이 authFailed 로 올려 authGuard 가 **멀쩡한 서버의 주기 수집을 멈췄다**(세션 상한
+  //   503·느린 BMC 만으로 재현). 자격증명 거부로 보는 것은 세션 POST 가 명시적으로 401·403 을 줬을 때(와 세션 미지원 4xx —
+  //   그때는 Basic 401 이 유일한 판정 근거다)뿐이고, 나머지는 authFailed 없는 일시 오류로 던진다.
+  const transient = (detail, cause) => {
+    const err = new Error(`iDRAC 세션 생성 단계 일시 오류(${detail}) — 자격증명 거부로 보지 않는다`);
+    err.sessionTransient = true;
+    if (cause) err.cause = cause;
+    return err;
+  };
+  let sess;
   try {
     let inflight = SESSION_INFLIGHT.get(key);
     if (!inflight) {
@@ -241,19 +252,28 @@ async function rawGet(base, pathname, username, password, timeoutMs = config.idr
         await drain(sres);
         if ((sres.status === 201 || sres.ok) && token) {
           touchAuthCache(key, { mode: 'session', token, location, base });
-          return token;
+          return { token, status: sres.status };
         }
-        return null;
+        return { token: null, status: sres.status };
       })().finally(() => SESSION_INFLIGHT.delete(key));
       SESSION_INFLIGHT.set(key, inflight);
     }
-    const token = await inflight;
-    if (token) return await doFetch({ 'X-Auth-Token': token });
+    sess = await inflight;
   } catch (e) {
     // v2.621(감사 LIFE-02): 호출자가 취소한 것을 '세 방식 모두 실패(401)' 로 바꾸지 않는다 — 취소는 취소로 올린다.
     if (outerSignal?.aborted) throw e;
-    /* 세션 생성 실패 → 아래에서 원래 401 반환 */
+    throw transient(e?.name === 'TimeoutError' ? '세션 POST 시한 초과' : `세션 POST 실패: ${String(e?.message || e).slice(0, 120)}`, e);
   }
+  if (sess.token) {
+    try {
+      return await doFetch({ 'X-Auth-Token': sess.token });
+    } catch (e) {
+      if (outerSignal?.aborted) throw e;
+      throw transient(e?.name === 'TimeoutError' ? '세션 토큰 GET 시한 초과' : `세션 토큰 GET 실패: ${String(e?.message || e).slice(0, 120)}`, e);
+    }
+  }
+  // 세션 POST 가 5xx·429(세션 상한·BMC 바쁨)면 자격증명을 판정할 근거가 없다 — 일시 오류.
+  if (sess.status >= 500 || sess.status === 429) throw transient(`세션 POST 응답 ${sess.status}`);
   return res; // 세 방식 모두 실패 — 401(자격증명/권한/잠금)
 }
 
@@ -1429,10 +1449,18 @@ export async function fetchUsageSensors(entry, { allowProbe = true, signal = nul
       }
       const found = {};
       const names = [];
+      let sensorsErr = null;
       for (const c of members) {
         let coll;
         // ⚠ v2.621(감사 LIFE-02): 취소를 '이 섀시에 Sensors 없음' 으로 넘기면 끝에서 'absent' 를 6시간 캐시한다 — 취소는 올린다.
-        try { coll = await G(`${c}/Sensors`); } catch (e) { if (signal?.aborted) throw e; continue; }
+        // v2.622(감사 LEFT-02): '없음' 으로 세는 것은 **404 뿐**이다. 503·시한 초과·401 을 '없음' 으로 넘기면 끝에서 absent 를
+        //   SENSOR_TTL(기본 6시간) 캐시해, BMC 가 회복돼도 6시간 동안 요청 없이 '펌웨어가 오래됐을 수 있다' 는 틀린 사유를 말했다.
+        //   그 밖의 실패는 기억해 두고, 아무 센서도 못 찾았으면 그 오류를 올린다(바깥 catch 가 unreachable·auth 로 가른다 — 캐시 안 함).
+        try { coll = await G(`${c}/Sensors`); } catch (e) {
+          if (signal?.aborted) throw e;
+          if (e?.status !== 404 && !sensorsErr) sensorsErr = e;
+          continue;
+        }
         for (const m of (coll.Members || [])) {
           const u = String(m['@odata.id'] || '');
           if (!u) continue;
@@ -1444,6 +1472,7 @@ export async function fetchUsageSensors(entry, { allowProbe = true, signal = nul
         if (Object.keys(found).length) break;   // 한 섀시에서 찾으면 더 열거하지 않는다
       }
       seen = [...new Set(names)].slice(0, 40);
+      if (!Object.keys(found).length && sensorsErr) throw sensorsErr;   // v2.622(감사 LEFT-02): 일시 오류는 absent 로 캐시하지 않는다
       if (!Object.keys(found).length) {
         const reason = names.length
           ? `이 iDRAC 의 Sensors 컬렉션에 사용률 센서가 없습니다(센서 ${names.length}개 중 이름이 맞는 것 0개).`

@@ -202,6 +202,14 @@ export function enqueueJob(agent, spec = {}, { user = '', timeoutMs = 30_000, in
 
 export function jobAgentOf(reqId) { const j = jobs.get(String(reqId || '')); return j ? j.agent : ''; }
 
+/**
+ * v2.622(감사 EDGE-01): 폴 한 번에 인출하는 명령 수. 엣지(rma/agent.js pollOnce)는 받은 명령을 **순차로** 돌고 그동안 폴하지 않는다.
+ *   예전에는 대기 전량을 인출해 각 기한을 '인출 시각 + timeoutMs + 30초' 로 동시에 걸었으므로, 앞 명령이 도는 동안 뒤 명령의 기한이
+ *   지나 reapClaims 가 '미회신 — 재실행하세요' 로 종결했고(MAX_CLAIMS=1) 나중에 온 실제 결과는 stale 로 버려졌다 — 비멱등 명령의
+ *   이중 실행을 유도하는 안내였다. v2.621 idracScanJobs TAKE_MAX 와 같은 판단. 엣지는 명령을 마치면 곧바로 다시 폴한다(롱폴 즉시 응답).
+ */
+export const TAKE_MAX = 1;
+
 /** 인출(claim): 이 인스턴스가 받을 수 있는 pending 잡 — target 없음 / target 일치 / target 오프라인(페일오버). */
 export function takeJobs(agent, instance = '', now = Date.now()) {
   reapClaims(now);
@@ -214,6 +222,7 @@ export function takeJobs(agent, instance = '', now = Date.now()) {
     if (!j || j.state !== 'pending') { set.delete(reqId); continue; }
     if ((j.claims || 0) >= MAX_CLAIMS) { set.delete(reqId); continue; }
     if (j.target && lc(j.target) !== lc(instance) && isOnline(agent, j.target, now)) continue; // 다른 온라인 인스턴스 몫
+    if (out.length >= TAKE_MAX) break; // v2.622(감사 EDGE-01): 엣지 처리량만큼만 인출 — 나머지는 대기로 남아 다음 폴에 간다
     j.state = 'running'; j.takenAt = now; j.claims = (j.claims || 0) + 1; j.instance = String(instance || '');
     j.failover = !!(j.target && lc(j.target) !== lc(instance));
     j.claimDeadline = now + j.timeoutMs + ACK_GRACE_MS;

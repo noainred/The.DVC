@@ -340,3 +340,29 @@ export function filterPorts(list = [], mode = 'all') {
   }
   return list;
 }
+
+/**
+ * v2.622(감사 RECENT-05): 팹 A/B 합산 스토리지 사용량의 '부분 합으로 비운 구간' 안내(순수).
+ * 서버(perfDb.storageSeries, v2.621 DATA-03)는 한쪽 스위치의 포트가 이월 한계를 넘겨 표본이 없는 버킷을 합산하지 않고
+ * null 로 두며 계열마다 partialBuckets 로 개수를 싣는다. 화면이 그 수를 읽지 않으면 차트 공백이 '트래픽 없음·수집 없음' 과
+ * 구분되지 않는다(조용한 생략 금지). 계열이 없거나 전부 0 이면 null — 문구를 띄우지 않는다.
+ * @returns {{series:number, buckets:number, text:string}|null}
+ */
+export function perfPartialNote(series) {
+  let n = 0; let buckets = 0;
+  for (const s of Array.isArray(series) ? series : []) {
+    const b = numOrNull(s?.partialBuckets);
+    if (b != null && b > 0) { n += 1; buckets += b; }
+  }
+  if (!n) return null;
+  return {
+    series: n, buckets,
+    text: `한쪽 스위치(팹 A/B 중 하나)의 표본이 없어 합계를 그리지 않은 구간이 있습니다 — 계열 ${n}개 · 구간 ${buckets}개. 트래픽 0 이 아니라 부분 합이라 비워 둔 것입니다(해당 스위치의 사용량 수집 상태를 확인하세요).`,
+  };
+}
+
+/** v2.622(감사 RECENT-05): 표 행의 짧은 표지. partialBuckets 가 0 보다 크면 '부분 N구간', 아니면 ''. */
+export function perfPartialMark(s) {
+  const b = numOrNull(s?.partialBuckets);
+  return b != null && b > 0 ? `부분 ${b}구간` : '';
+}

@@ -16,6 +16,8 @@ export function serverVendorOf(s) {
   const v = typeof s.vendor === 'string' ? s.vendor.trim().toLowerCase() : '';
   if (v === 'hpe') return 'hpe';
   if (v === 'dell') return 'dell';
+  // v2.622(감사 RECENT-04): 벤더를 알 수 없는 출처(온도·GPU·드릴다운 행)에서 연 상세는 Dell 로 단정하지 않는다.
+  if (s.vendorUnknown === true) return 'unknown';
   // 원격 행에 벤더가 없으면 구버전 엣지 — 미상. 중앙 등록부 행은 등록부 규약대로 Dell.
   return s.remote ? 'unknown' : 'dell';
 }
@@ -44,6 +46,26 @@ export function serverCsvVendor(s) {
 /** 상세 모달 제목에 쓸 BMC 이름 — 'iDRAC' | 'HPE iLO' | 'BMC'(미상). */
 export function bmcLabel(s) {
   return { ome: 'OME', dell: 'iDRAC', hpe: 'HPE iLO', unknown: 'BMC' }[serverVendorOf(s)];
+}
+
+/**
+ * v2.622(감사 RECENT-04): 상세 모달에 넘길 서버 객체. 서버 목록(GET /admin/idrac) 행은 vendor 를 싣지만
+ *   법인별 온도·GPU·펌웨어·하드웨어 드릴다운 행은 싣지 않는다 — 그 행을 그대로 넘기면 serverVendorOf 가 등록부
+ *   규약대로 'dell' 로 보아 HPE iLO 서버가 경로에 따라 'iDRAC 상세' 가 됐다.
+ *   · 행이 벤더를 말하면(vendor 필드 · OME · 원격 행) 그대로 쓴다.
+ *   · 아니면 id 로 서버 목록(list)에서 찾는다.
+ *   · 목록에도 없거나 목록을 아직 모르면 vendorUnknown — 제목은 'BMC'(지어내지 않는다).
+ */
+export function detailServerOf(row, list) {
+  const r = row && typeof row === 'object' ? row : {};
+  const id = r.id || r.serverId;
+  const base = { id, name: r.name || r.server || String(id ?? '') };
+  if (typeof r.vendor === 'string' || r.type === 'ome' || r.remote === true) {
+    return { ...base, vendor: r.vendor, remote: r.remote, type: r.type };
+  }
+  const hit = Array.isArray(list) && id != null ? list.find((x) => x && String(x.id) === String(id)) : null;
+  if (hit) return { ...base, vendor: hit.vendor, remote: hit.remote, type: hit.type };
+  return { ...base, vendorUnknown: true };
 }
 
 /** 벤더 필터 선택지. 개수가 0 인 종류는 빼고, 종류가 하나뿐이면 빈 배열(필터가 뜻이 없다). */

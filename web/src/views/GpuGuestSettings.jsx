@@ -6,7 +6,7 @@
 //  · gpu-guest/VmCredManager.jsx      : VM별 계정·테스트 러너(이 화면 기능 커밋 최다 지점)
 //  · gpu-guest/shared.jsx             : Field(셸·하위가 공용 — 복제 금지). fmtAgo 는 util/fmt(v2.613)
 import { unitText } from './unitText.js';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { Field } from './gpu-guest/shared.jsx';
@@ -28,6 +28,19 @@ const NUM_MAPS = {
 };
 
 /**
+ * v2.622(감사 WEB-01): 대상(로컬/엣지) 전환 게이트(순수). 폼이 지금 고른 대상의 값으로 채워졌을 때만
+ * 편집·저장을 허용한다. 예전에는 새 대상 조회가 실패하거나 늦으면 이전 대상(로컬) 값이 새 엣지 폼에 남아
+ * '설정 저장' 이 그 값을 엣지 배포 설정으로 덮어썼다.
+ *  - formFor: 폼을 채운 대상('' = 로컬). null 이면 아직 채우지 않았다.
+ *  - loadErr: 지금 대상의 조회 실패 문구(없으면 null).
+ */
+export function gpuTargetGate({ deployAgent = '', formFor = null, loadErr = null } = {}) {
+  const ready = formFor != null && formFor === deployAgent;
+  if (ready) return { ready: true, canSave: true, state: 'ready' };
+  return { ready: false, canSave: false, state: loadErr ? 'error' : 'loading' };
+}
+
+/**
  * GPU 게스트 수집 설정 — 패스쓰루 GPU는 ESXi에서 사용률을 못 보므로, 선택한 법인의
  * VM에 VMware Tools 게스트 작업으로 nvidia-smi를 실행해 사용률을 가져온다.
  * 법인 공용 계정 + VM별 개별 계정(다른 비밀번호)을 모두 지원하며, 로그인/데이터 읽기
@@ -38,6 +51,10 @@ export default function GpuGuestSettings() {
   const [vcs, setVcs] = useState([]);       // [{id,name,...}]
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null);   // local editable copy (전역 + 공용 계정)
+  const [formFor, setFormFor] = useState(null); // v2.622(감사 WEB-01): 폼을 채운 대상('' = 로컬)
+  const [loadErr, setLoadErr] = useState(null); // v2.622(감사 WEB-01): 지금 대상의 조회 실패 — 데이터가 있어도 보인다
+  const targetRef = useRef('');                  // 지금 고른 대상(늦게 온 이전 대상 응답을 버린다)
+  const seqRef = useRef(0);                      // 대상 전환 로드 세대
   const [drafts, setDrafts] = useState({}); // 숫자 칸 입력 원문(저장 전). 빈 칸이면 저장 시 이전 값
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -48,11 +65,15 @@ export default function GpuGuestSettings() {
   const settingsUrl = (agent) => (agent ? `/admin/gpu-guest/deploy/${encodeURIComponent(agent)}` : '/admin/gpu-guest/settings');
 
   const load = async (agent = deployAgent, force = false) => {
+    // v2.622(감사 WEB-01): 늦게 온 응답은 버린다 — 대상이 바뀌었거나(폴링 포함) 더 새 전환 로드가 있으면.
+    const mySeq = force ? ++seqRef.current : seqRef.current;
+    const stale = () => agent !== targetRef.current || mySeq !== seqRef.current;
     try {
       const [d, v] = await Promise.all([
         fetchJson(settingsUrl(agent)),
         fetchJson('/admin/vcenters').catch(() => ({ vcenters: [] })),
       ]);
+      if (stale()) return;
       // 로컬: { settings, status } · 배포: { assigned, settings } (미지정이면 settings=null)
       const settings = agent ? (d.settings || { vcenters: {} }) : d.settings;
       setData(agent ? { settings, status: {}, deploy: true, assigned: !!d.assigned } : d);
@@ -60,13 +81,24 @@ export default function GpuGuestSettings() {
       // 대상 전환(force) 시 폼을 새로 채움. 로컬 30초 폴링은 최초 1회만(미저장 입력 보존).
       setForm((cur) => (force || !cur ? toForm(settings || { vcenters: {} }, v.vcenters || []) : cur));
       if (force) setDrafts({});
+      setFormFor(agent);
       setError(null);
-    } catch (e) { setError(e.message); }
+      setLoadErr(null);
+    } catch (e) {
+      if (stale()) return;
+      setError(e.message);
+      setLoadErr(e.message || String(e));
+    }
   };
   // 배포 대상 후보 목록(1회).
   useEffect(() => { fetchJson('/admin/gpu-guest/deploy/agents').then((r) => setAgents(r.agents || [])).catch(() => {}); }, []);
   // 대상 전환 시 폼 재로딩. 로컬일 때만 30초 자동 폴링(배포 편집 중 덮어쓰기 방지).
   useEffect(() => {
+    // v2.622(감사 WEB-01): 전환하는 순간 이전 대상의 폼을 비운다 — 새 대상 조회가 성공해야 다시 채워진다.
+    targetRef.current = deployAgent;
+    setFormFor(null);
+    setForm(null);
+    setLoadErr(null);
     load(deployAgent, true);
     if (deployAgent) return undefined;
     const t = setInterval(() => load('', false), 30_000);
@@ -75,7 +107,8 @@ export default function GpuGuestSettings() {
   }, [deployAgent]);
 
   if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
-  if (!data || !form) return <Loading />;
+  if (!data) return <Loading />;
+  const gate = gpuTargetGate({ deployAgent, formFor: form ? formFor : null, loadErr });
 
   // 숫자 칸: 입력 중에는 원문을 보여 주고(비울 수 있다), 건드리지 않은 칸은 저장값을 보여 준다.
   const numInput = (key, shown) => ({
@@ -85,6 +118,7 @@ export default function GpuGuestSettings() {
   const setVc = (id, patch) => setForm((f) => ({ ...f, vcenters: { ...f.vcenters, [id]: { ...f.vcenters[id], ...patch } } }));
 
   const save = async () => {
+    if (!gate.canSave) return; // v2.622(감사 WEB-01): 다른 대상의 값으로 채워진 폼은 저장하지 않는다
     setBusy(true); setMsg(null);
     try {
       const payload = applyDrafts(form, drafts, NUM_MAPS);
@@ -104,20 +138,10 @@ export default function GpuGuestSettings() {
 
   const status = data.status || {};
   const last = status.lastRun;
-  const monitoredCount = Object.values(form.vcenters).filter((v) => v.enabled).length;
 
-  return (
-    <div style={{ maxWidth: 1280 }}>
-      <div className="section-title" style={{ marginTop: 0 }}>🎮 GPU 게스트 수집</div>
-      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
-패스쓰루(DirectPath I/O) GPU는 ESXi가 사용률을 보지 못하고, vGPU도 VM별 사용률은 게스트에서 읽는 게 정확합니다. 선택한 <b>법인의 VM</b>에
-        VMware Tools 게스트 작업으로 <code>nvidia-smi</code>를 실행해 사용률을 수집합니다.
-        VM마다 계정이 다르면 <b>VM별 계정</b>을 등록하세요.
-        <span className="badge amber" style={{ marginLeft: 6 }}>실환경 BETA</span>
-      </p>
-
-      {/* 설정 대상: 이 포탈(로컬) vs 원격 엣지 배포. 원격 엣지는 폐쇄망/NAT라 중앙이 직접 접속 못 하므로,
-          여기서 지정한 설정을 엣지가 pull해 자기 로컬에 적용한다(실제 SSH/게스트작업은 엣지에서 수행). */}
+  // 설정 대상: 이 포탈(로컬) vs 원격 엣지 배포. 원격 엣지는 폐쇄망/NAT라 중앙이 직접 접속 못 하므로,
+  // 여기서 지정한 설정을 엣지가 pull해 자기 로컬에 적용한다(실제 SSH/게스트작업은 엣지에서 수행).
+  const targetCard = (
       <div className="card" style={{ padding: '10px 16px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <b style={{ fontSize: 13 }}>설정 대상</b>
         <select className="select" style={{ minWidth: 260 }} value={deployAgent} onChange={(e) => { setDeployAgent(e.target.value); setMsg(null); }}
@@ -133,6 +157,37 @@ export default function GpuGuestSettings() {
           </span>
         )}
       </div>
+  );
+
+  // v2.622(감사 WEB-01): 폼이 지금 대상의 값이 아니면 편집 화면을 그리지 않는다(저장 버튼도 없다).
+  if (!gate.ready) {
+    return (
+      <div style={{ maxWidth: 1280 }}>
+        <div className="section-title" style={{ marginTop: 0 }}>🎮 GPU 게스트 수집</div>
+        {targetCard}
+        {gate.state === 'error' ? (
+          <div className="banner warn">
+            {deployAgent ? <>원격 엣지 <b>{deployAgent}</b></> : '이 포탈'}의 설정을 불러오지 못했습니다: {loadErr} — 이전 대상의 값으로 저장하지 않도록 편집 화면을 닫았습니다.{' '}
+            <button className="tab" onClick={() => load(deployAgent, true)}>다시 시도</button>
+          </div>
+        ) : <Loading />}
+      </div>
+    );
+  }
+  const monitoredCount = Object.values(form.vcenters).filter((v) => v.enabled).length;
+
+  return (
+    <div style={{ maxWidth: 1280 }}>
+      <div className="section-title" style={{ marginTop: 0 }}>🎮 GPU 게스트 수집</div>
+      {loadErr && <div className="banner warn" style={{ marginBottom: 8 }}>설정을 다시 불러오지 못했습니다: {loadErr} — 아래는 직전에 받은 값입니다.</div>}
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+패스쓰루(DirectPath I/O) GPU는 ESXi가 사용률을 보지 못하고, vGPU도 VM별 사용률은 게스트에서 읽는 게 정확합니다. 선택한 <b>법인의 VM</b>에
+        VMware Tools 게스트 작업으로 <code>nvidia-smi</code>를 실행해 사용률을 수집합니다.
+        VM마다 계정이 다르면 <b>VM별 계정</b>을 등록하세요.
+        <span className="badge amber" style={{ marginLeft: 6 }}>실환경 BETA</span>
+      </p>
+
+      {targetCard}
 
       <div className="card" style={{ padding: 16 }}>
         <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer' }}>

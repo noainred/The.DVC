@@ -9,10 +9,19 @@
 const acc = new Map(); // vmId -> { n, nCpu, nMem, cpuSum, memSum, cpuMax, memMax, sinceTs, lastTs }
 let _pruneTick = 0;
 
-/** metrics sampler에서 호출 — 스냅샷의 순간값을 누적. 동기·O(VM수)라 이벤트 루프 부담 없음. */
-export function updateVmStats(snap, ts = Date.now()) {
+/**
+ * metrics sampler에서 호출 — 스냅샷의 순간값을 누적. 동기·O(VM수)라 이벤트 루프 부담 없음.
+ * v2.622(감사 LEFT-04): `opts.skipVcenterIds`(Set) 의 vCenter VM 은 누적하지 않는다 — 점검중·수집 실패 이월·낡은 위임 vCenter 는
+ *   store 가 마지막 값을 이어 서빙하므로 그것을 매 분 새 표본으로 쌓으면 평균이 동결 값으로 끌려가고 samples 가 부풀며 lastTs
+ *   갱신으로 7일 정리도 막힌다(v2.620 vmAllocRows 제외의 형제 누락). 판정은 호출자(sampler unreadVcenterReasons) 하나가 갖는다.
+ * @returns {{ skipped: number }} 제외한 VM 수
+ */
+export function updateVmStats(snap, ts = Date.now(), opts = {}) {
+  const skip = opts.skipVcenterIds instanceof Set && opts.skipVcenterIds.size ? opts.skipVcenterIds : null;
+  let skipped = 0;
   for (const v of snap.vms || []) {
     if (v.powerState !== 'POWERED_ON' || v.template) continue;
+    if (skip && skip.has(String(v.vcenterId))) { skipped++; continue; }
     const cpu = v.cpuUsagePct; const mem = v.memUsagePct;
     if (cpu == null && mem == null) continue;
     let e = acc.get(v.id);
@@ -30,6 +39,7 @@ export function updateVmStats(snap, ts = Date.now()) {
     const cutoff = ts - 7 * 86_400_000;
     for (const [id, e] of acc) if (e.lastTs < cutoff) acc.delete(id);
   }
+  return { skipped };
 }
 
 /** VM 1대의 누적 통계 → { samples, cpuAvg, memAvg, cpuMax, memMax, sinceTs } | null */

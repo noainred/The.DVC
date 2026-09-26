@@ -30,7 +30,7 @@ import { setEdgeFleet } from '../central/fleet.js';
 import { setGuestGpu, withGpuTrust } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
-import { takeIdracScanJobs, applyIdracScanResult, setIdracScanProgress, agentOfReq } from '../central/idracScanJobs.js';
+import { takeIdracScanJobs, applyIdracScanResult, setIdracScanProgress, agentOfReq, noteIdracScanBusyPoll } from '../central/idracScanJobs.js';
 import { pullNow as pullCollectorsNow } from '../collector/puller.js';
 import { upsertCollectorFromAgent, ssrfBlockReasonResolved, verifyDerivedCollectorUrl } from '../collector/registry.js';
 import { recordIngest, noteInventoryCompression } from '../central/ingestStats.js';
@@ -47,7 +47,7 @@ import { getEffectiveUsers, registryLoadError as agentUsersLoadError } from '../
 import { takeLogQueries, setLogQueryResult, vcenterOfReq } from '../central/logQueries.js';
 import { specToRange } from '../ipam/rangePolicies.js';
 import { ipToNum } from '../ipam/ledger.js';
-import { takeCaptureJobs, setCaptureResult, captureAgentOfReq } from '../central/captureJobs.js';
+import { takeCaptureJobs, applyCaptureResult, captureAgentOfReq } from '../central/captureJobs.js';
 import { takeJobsWait as takeRmaJobsWait, setJobResult as setRmaJobResult, jobAgentOf as rmaJobAgentOf, noteHeartbeat as noteRmaHeartbeat, onlineInstances as rmaOnlineInstances } from '../rma/jobs.js';
 import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaRemoteFor } from '../rma/settings.js';
 import { scheduleFor as rmaScheduleFor, assignForInstance as rmaAssign } from '../rma/schedules.js';
@@ -62,7 +62,7 @@ import { load as loadGuestDiskSettings } from '../guestdisk/settings.js';
 import { sanitizeGuestDiskVms } from '../guestdisk/analyze.js';
 import { brokerFetch as credentialBrokerFetch } from '../security/credentialStore.js';
 import { logAudit } from '../audit.js';
-import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq } from '../bmstor/jobs.js';
+import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq, lateBmstorResult, bmstorJobKnown } from '../bmstor/jobs.js';
 import { applyBmstorResults } from '../bmstor/poller.js';
 import { recordCapture } from '../net/captureHistory.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
@@ -1046,7 +1046,11 @@ function edgeNameRegistered(name) {
 // 위임 iDRAC 스캔: 에이전트가 자기 이름의 온디맨드 스캔 잡을 인출.
 centralRouter.get('/idrac-scan-jobs', requireCentral(), (req, res) => {
   // v2.604(감사 TIM2604-04): 개별 토큰이면 토큰 이름을 먼저 쓴다(바인딩 검사와 같은 이름). 공유 토큰만 ?agent= 를 쓴다.
-  res.json({ ok: true, jobs: takeIdracScanJobs(req.centralAuth?.mode === 'agent' && req.centralAuth.agent ? req.centralAuth.agent : req.query.agent) });
+  const who = req.centralAuth?.mode === 'agent' && req.centralAuth.agent ? req.centralAuth.agent : req.query.agent;
+  // v2.622(감사 RECENT-03·EDGE-02): ?busy=1 = 엣지가 스캔 잠금 중이라 잡을 받을 수 없다 — 폴 시각만 갱신하고 잡은 주지 않는다.
+  //   busyAck 로 '이 중앙은 busy 를 이해한다' 를 알린다(엣지는 health-probe 버전으로 먼저 확인한 뒤에만 이 폴을 보낸다).
+  if (String(req.query.busy || '') === '1') { noteIdracScanBusyPoll(who); return res.json({ ok: true, jobs: [], busyAck: true }); }
+  res.json({ ok: true, jobs: takeIdracScanJobs(who) });
 });
 
 // 위임 iDRAC 스캔: 에이전트가 스캔 진행률(중간)을 보고. Body: { reqId, scanned, total }
@@ -1893,11 +1897,15 @@ centralRouter.post('/capture-result', requireCentral({ notFound: { ok: false } }
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   if (reqAgentDenied(req, captureAgentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
-  setCaptureResult(String(b.reqId), b.result || { ok: false, reason: '빈 결과' });
+  // v2.622(감사 LEFT-03): 반영 결과를 본다 — 모르는 reqId 는 410 + 이력 미기록, 같은 결과의 재전송은 이력을 다시 적지 않는다.
+  //   예전에는 반환값을 무시하고 200 + 이력 기록이라 화면('unknown')과 이력이 어긋났고, 소유자 미상 통과(TOFU)로 이력 행을 주입할 수 있었다.
+  const applied = applyCaptureResult(String(b.reqId), b.result || { ok: false, reason: '빈 결과' });
+  if (applied.unknown) return res.status(410).json({ ok: false, error: 'unknown-job', reason: '중앙에 이 캡처 잡이 없습니다(만료되었거나 중앙이 재시작됨) — 결과는 반영·이력 기록되지 않았습니다.' });
+  if (applied.duplicate) return res.json({ ok: true, duplicate: true });
   // v2.600(CEN2600-09): 엣지 워커가 결과에 싣는 A 호스트(잡 spec.host)를 이력의 hostA 로 — 글자만, 제어문자 제거, 255자.
   const hostA = typeof b.result?.hostA === 'string' ? b.result.hostA.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 255) : '';
   try { if (b.result?.ok) recordCapture(b.result, { source: 'manual', via: 'agent', ...(hostA ? { hostA } : {}) }); } catch { /* */ }
-  res.json({ ok: true });
+  res.json({ ok: true, ...(applied.late ? { late: true } : {}) });
 });
 
 // 베어메탈 스토리지 폴링 위임(v2.341): 엣지가 자기 이름의 df 수집 잡을 인출(claim) →
@@ -1910,14 +1918,23 @@ centralRouter.post('/bmstor-result', requireCentral({ notFound: { ok: false } })
   const b = req.body || {};
   if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
   if (reqAgentDenied(req, bmstorAgentOfReq(String(b.reqId)))) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
-  const ackd = ackBmstorJob(String(b.reqId));
-  if (!ackd) return res.json({ ok: true, stale: true }); // TTL 정리/중복 회신 — 무해하게 무시
+  let ackd = ackBmstorJob(String(b.reqId));
+  // v2.622(감사 EDGE-03): 만료 종결 잡의 늦은 결과는 반영한다(late) · 중앙에 없는 잡은 410(엣지가 상태·콘솔에 남긴다) ·
+  //   같은 결과의 재전송·더 새 잡이 이미 반영된 경우만 200 stale(반영하지 않은 사유를 함께).
+  if (!ackd) {
+    if (!bmstorJobKnown(String(b.reqId))) return res.status(410).json({ ok: false, error: 'unknown-job', reason: '중앙에 이 수집 잡이 없습니다(만료 후 정리되었거나 중앙이 재시작됨) — 결과가 반영되지 않았습니다.' });
+    const late = lateBmstorResult(String(b.reqId));
+    if (!late) return res.json({ ok: true, stale: true, duplicate: true }); // 이미 정상 회신된 잡의 재전송 — 무해
+    if (late.duplicate) return res.json({ ok: true, stale: true, duplicate: true });
+    if (late.superseded) return res.json({ ok: true, stale: true, superseded: true, reason: '같은 엣지의 더 새 수집 결과가 이미 반영돼 이 늦은 결과는 쓰지 않았습니다.' });
+    ackd = late;
+  }
   // 결과는 **그 잡에 실제로 할당된 서버 id 로만** 반영한다 — 인증된 엣지가 b.results 에 남의
   // 서버 id 를 끼워 넣어 그 서버의 latest 용량 수치를 위조하는 것을 차단(잡 소유권 = 서버 소유권).
   const owned = new Set((ackd.serverIds || []).map(String));
   const results = (Array.isArray(b.results) ? b.results : []).filter((r) => r && owned.has(String(r.id)));
   applyBmstorResults(ackd.agent, results);
-  res.json({ ok: true });
+  res.json({ ok: true, ...(ackd.late ? { late: true } : {}) });
 });
 
 // Agent pulls its IP-scan assignment (TCP connect scan config) by name.

@@ -13,6 +13,24 @@ export function skippedText(r) {
 }
 
 // fmtBytes/fmtTime 은 util/fmt.js 로 통합(v2.319 — 동일 구현 복붙 제거)
+/**
+ * v2.622(감사 LEFT-05): 엣지 설정 수신 배지(순수). 413 로 일부 파일을 보내지 못해 중앙이 직전 사본을 유지한(retained)
+ * 엣지를 초록 '방금 전부 받았다' 로 보이지 않는다 — 호박색 + '직전 사본 유지 N개(낡은 값)'. 수신 시각은 push 시각이지
+ * 그 파일들의 시각이 아니다(v2.621 RECENT-09).
+ */
+export function edgeConfigBadge(e) {
+  const files = Number.isFinite(Number(e?.files)) ? Number(e.files) : 0;
+  const retained = Number.isFinite(Number(e?.retained)) && Number(e.retained) > 0 ? Number(e.retained) : 0;
+  if (retained > 0) {
+    return {
+      cls: 'amber',
+      suffix: ` · 직전 사본 유지 ${retained}개(낡은 값)`,
+      title: `설정 ${files}개 중 ${retained}개는 본문 한도(413)로 이번에 받지 못해 직전 사본을 유지했습니다 — 그 파일은 표시된 시각의 값이 아닙니다. 엣지 로그를 확인하세요.`,
+    };
+  }
+  return { cls: 'green', suffix: '', title: '' };
+}
+
 const REASON = { manual: '수동', schedule: '정기', change: '변경감지', startup: '시작', 'pre-restore': '복원전' };
 
 /** 설정 → 포탈 백업 — 중앙+엣지 통합 설정 백업, 정기/변경 자동 + 다운로드/복원. */
@@ -101,7 +119,10 @@ export default function PortalBackup() {
         <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>엣지 포탈 설정 수신 ({d.edges.length})</div>
         {d.edges.length === 0
           ? <div className="muted" style={{ fontSize: 12 }}>아직 엣지 포탈(에이전트)이 설정을 push하지 않았습니다. 에이전트에 CENTRAL_URL/TOKEN이 설정되면 자동 수신됩니다.</div>
-          : <div className="flex gap wrap">{d.edges.map((e) => <span key={e.agent} className="badge green" title={`설정 ${e.files}개 · ${fmtTime(e.at)}`}>🛰 {e.agent} · {e.files}개 · {fmtTime(e.at)}</span>)}</div>}
+          : <div className="flex gap wrap">{d.edges.map((e) => {
+            const b = edgeConfigBadge(e); // v2.622(감사 LEFT-05)
+            return <span key={e.agent} className={`badge ${b.cls}`} title={`설정 ${e.files}개 · ${fmtTime(e.at)}${b.title ? ` — ${b.title}` : ''}`}>🛰 {e.agent} · {e.files}개 · {fmtTime(e.at)}{b.suffix}</span>;
+          })}</div>}
       </div>
 
       {/* 백업 목록 */}

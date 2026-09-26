@@ -287,10 +287,16 @@ export function seriesRow(agg) {
   //   최신 화면(표·KPI)이 '최소 N' 으로 말한다. 서버 레코드(r.truncated·r.stateUnknown)와 합계(combineServers) 둘 다 받는다.
   const partial = !!agg.truncated;
   const stateGap = partial || !!agg.connectedLowerBound || (agg.connected != null && Number(agg.stateUnknown) > 0);
+  // v2.622(감사 DATA-02): 합계(combineServers)가 잘린 이름 목록(서버당 maxUsers)으로 합집합을 낸 주기는
+  //   usersLowerBound 이고 그 고유 사용자 수는 **하한**이다 — 추이에 실제 값으로 적재하면 상한 근처에서 거짓
+  //   계단·하락이 된다. 세션 수는 온전하므로 그대로 둔다(사용자 수 두 칸만 NULL).
+  //   ⚠ 서버 레코드의 usersOmitted 로는 판정하지 않는다 — 서버 하나의 users 는 자르기 전 names.length 라 정확하다.
+  const namesCut = !!agg.usersLowerBound;
   const whole = (v) => (partial ? null : n(v));
   const conn = (v) => (stateGap ? null : n(v));
+  const usersOf = (v, f) => (namesCut ? null : f(v));
   return {
-    users: whole(agg.users), usersConnected: conn(agg.usersConnected),
+    users: usersOf(agg.users, whole), usersConnected: usersOf(agg.usersConnected, conn),
     sessions: whole(agg.sessions), connected: conn(agg.connected),
     disconnected: conn(agg.disconnected), pending: conn(agg.pending),
   };

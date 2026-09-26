@@ -40,11 +40,14 @@ export default function StorageTrackTool() {
   const [dsTrend, setDsTrend] = useState(null); // 변경 이력 칩/행 클릭 → 개별 DS 추이 모달(v2.355)
   const [sort, setSort] = useState({ key: 'usedGB', dir: 'desc' }); // vCenter 표 정렬
 
-  const refresh = () => fetchJson('/tools/vm-track', { days, vcenterId })
-    .then((d) => { setData(d); setError(null); })
-    .catch((e) => setError(e.message));
+  // v2.622(감사 WEB-05): 기간·vCenter 를 바꿀 때 늦게 온 이전 범위 응답이 새 선택을 덮지 않게 세대 가드(형제
+  // VmTrackTool 과 같은 useLatest). 범위가 바뀌면 이전 범위 데이터를 비운다(다음 응답까지 옛 차트를 보이지 않게).
+  const runLatest = useLatest();
+  const refresh = () => runLatest(fetchJson('/tools/vm-track', { days, vcenterId }),
+    (d) => { setData(d); setError(null); },
+    (e) => setError(e.message));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { refresh(); const t = setInterval(refresh, 30_000); return () => clearInterval(t); }, [days, vcenterId]);
+  useEffect(() => { setData(null); setError(null); refresh(); const t = setInterval(refresh, 30_000); return () => clearInterval(t); }, [days, vcenterId]);
 
   // points 를 밖에서 만들면 매 렌더 새 배열이라 useMemo 가 무의미해진다 — 콜백 안에서 언팩한다.
   // v2.348 이전 버전에서 만들어진 스냅샷 행은 ds 열이 0 — 0 으로 그리면 라인이 바닥으로 꺼지고

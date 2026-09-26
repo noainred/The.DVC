@@ -914,7 +914,12 @@ function buildFolderTree(vms) {
   return root;
 }
 
-const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
+// v2.622(감사 WEB-02): 사용량을 못 읽은 DS(usedGB·freeGB null)는 'null GB' 가 아니라 '—'.
+export const tb = (g) => {
+  if (g == null || g === '' || !Number.isFinite(Number(g))) return '—';
+  const n = Number(g);
+  return n >= 1024 ? `${(n / 1024).toFixed(1)} TB` : `${n} GB`;
+};
 
 /**
  * VM 행 배지(v2.299): Clone = 이 포탈의 복제(백업) 잡 대상 · veeamed = Veeam 백업 흔적.

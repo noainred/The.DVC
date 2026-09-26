@@ -21,12 +21,26 @@ function SortTh({ k, sort, onSort, children }) {
   );
 }
 
+/**
+ * v2.622(감사 WEB-04): 저장·테스트 게이트(순수). 행(rows)을 불러온 vCenter·배포 대상이 지금 고른 값과 같을 때만
+ * 저장·테스트한다. 예전에는 vCenter 를 빠르게 바꾸면 늦게 온 이전 vCenter 의 VM 행이 새 selVc 아래 남아
+ * saveCreds 가 `vcenters: { [새 vCenter]: { vms: <이전 vCenter VM> } }` 로 저장했다(연결 테스트도 같은 어긋남).
+ */
+export function vmCredRowsMatch({ selVc = '', deployAgent = '', rowsFor = null } = {}) {
+  return !!(rowsFor && selVc && rowsFor.vcId === selVc && (rowsFor.agent || '') === (deployAgent || ''));
+}
+
 /** VM별 계정 관리 — 법인 선택 → 패스쓰루 GPU VM 조회 → 공용/별도 선택 + 로그인/읽기 테스트(개별·일괄).
  * deployAgent 지정 시: 저장이 로컬이 아니라 '그 엣지 앞 배포 설정'으로 가고, 테스트는 비활성(중앙이
  * 원격 VM에 도달 못 하므로). VM 목록/저장 표시는 배포 설정 기준. */
 export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, deployAgent = '' }) {
   const [selVc, setSelVc] = useState('');
   const [rows, setRows] = useState(null);   // null=미조회, []=없음
+  const [rowsFor, setRowsFor] = useState(null); // v2.622(감사 WEB-04): { vcId, agent } — 행을 불러온 대상
+  const selRef = useRef('');
+  const agentRef = useRef(deployAgent);
+  agentRef.current = deployAgent;
+  const loadSeq = useRef(0);
   const [osFilter, setOsFilter] = useState('all'); // all | linux | windows
   const [powerFilter, setPowerFilter] = useState('all'); // all | on | off
   const [sort, setSort] = useState({ key: '', dir: 'asc' }); // 헤더 클릭 정렬(빈 key=원래 순서=이름)
@@ -48,10 +62,16 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
   useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [logLines]);
 
   const loadVms = async (vcId) => {
-    if (!vcId) { setRows(null); return; }
+    // v2.622(감사 WEB-04): 요청 세대 — 늦게 온 이전 vCenter·배포 대상 응답은 버린다.
+    const mySeq = ++loadSeq.current;
+    const agent = deployAgent;
+    const stale = () => mySeq !== loadSeq.current || vcId !== selRef.current || agent !== agentRef.current;
+    if (!vcId) { setRows(null); setRowsFor(null); setLoading(false); return; }
     setLoading(true); setMsg(null);
     try {
-      const r = await fetchJson(`/admin/gpu-guest/vms?vcenterId=${encodeURIComponent(vcId)}${deployAgent ? `&agent=${encodeURIComponent(deployAgent)}` : ''}`);
+      const r = await fetchJson(`/admin/gpu-guest/vms?vcenterId=${encodeURIComponent(vcId)}${agent ? `&agent=${encodeURIComponent(agent)}` : ''}`);
+      if (stale()) return;
+      setRowsFor({ vcId, agent });
       setRows((r.vms || []).map((v) => ({
         ...v,
         mode: v.hasOwnCred ? 'own' : 'shared',   // 'shared'=공용 | 'own'=별도
@@ -63,8 +83,12 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
         hadIp: !!v.ipOverride,
         test: null,                              // {login,read,error,sample} | {pending}
       })));
-    } catch (e) { setMsg(`오류: ${e.message}`); setRows([]); }
-    finally { setLoading(false); }
+    } catch (e) {
+      if (stale()) return;
+      // v2.622(감사 WEB-04): 조회 실패는 '없음' 이 아니다 — 행을 비우고(null) 오류만 말한다.
+      setMsg(`오류: VM 목록을 불러오지 못했습니다 — ${e.message}`); setRows(null); setRowsFor(null);
+    }
+    finally { if (!stale()) setLoading(false); }
   };
 
   // passwordless = 비번 없는 계정(빈 비번 인증). 별도 + 계정명 입력 + 비번 빈칸일 때:
@@ -76,14 +100,16 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
     return !r.hadOwn; // 자동: 저장된 비번 없는 신규 별도 계정
   };
 
-  const pickVc = (vcId) => { setSelVc(vcId); setRows(null); loadVms(vcId); };
+  const pickVc = (vcId) => { selRef.current = vcId; setSelVc(vcId); setRows(null); setRowsFor(null); loadVms(vcId); };
   const setRow = (id, patch) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   // 배포 대상(로컬↔엣지)이 바뀌면 저장 표시 기준이 달라지므로 조회된 VM 목록을 다시 불러온다.
-  useEffect(() => { if (selVc) loadVms(selVc); /* eslint-disable-next-line */ }, [deployAgent]);
+  useEffect(() => { if (selVc) { setRows(null); setRowsFor(null); loadVms(selVc); } /* eslint-disable-next-line */ }, [deployAgent]);
+  const rowsMatch = vmCredRowsMatch({ selVc, deployAgent, rowsFor });
 
   const runTest = async (subset) => {
     const targets = subset || rows;
     if (!targets || !targets.length) return;
+    if (!rowsMatch) { setMsg('VM 목록이 지금 고른 법인·대상의 것이 아닙니다 — 다시 조회한 뒤 테스트하세요.'); return; } // v2.622(감사 WEB-04)
     // 도달 불가/느린 VM이 전체를 막지 않도록 작은 청크로 나눠 순차 처리하고, 끝나는 대로 행을 즉시 갱신한다.
     // 청크당 1 요청이라 길이가 짧아 프록시 유휴 끊김도 방지되고, 진행률로 멈춘 듯 보이지 않게 한다.
     const CHUNK = 4; // 서버 동시성(기본 4)에 맞춤 — 청크당 대략 1 웨이브
@@ -127,6 +153,8 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
 
   const saveCreds = async () => {
     if (!rows) return;
+    // v2.622(감사 WEB-04): 다른 vCenter·대상의 행을 지금 vCenter 아래 저장하지 않는다.
+    if (!rowsMatch) { setMsg('VM 목록이 지금 고른 법인·대상의 것이 아닙니다 — 다시 조회한 뒤 저장하세요.'); return; }
     setBusy(true); setMsg(null);
     try {
       const vms = {};
