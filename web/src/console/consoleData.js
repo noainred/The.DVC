@@ -400,10 +400,11 @@ export function buildDomainTiles({ global: g, alarms, nsx, svcmon, pdu, idracPol
   const tiles = [];
   // 컴퓨트 — 호스트 끊김·vCenter 불가면 위험, 아니면 CPU/메모리 사용률 판정.
   if (g) {
-    const unreach = Math.max(0, (g.vcenters || 0) - (g.vcentersConnected || 0) - (g.vcentersMaintenance || 0));
+    // v2.617: 비활성(설정에서 끔) vCenter 는 불가가 아니다 — 빼고 센다.
+    const unreach = Math.max(0, (g.vcenters || 0) - (g.vcentersConnected || 0) - (g.vcentersMaintenance || 0) - (g.vcentersDisabled || 0));
     const lvUse = Math.max(levelOf(g.cpuUsagePct) ?? 0, levelOf(g.memUsagePct) ?? 0);
     const level = (g.hostsDisconnected > 0 || unreach > 0) ? 2 : lvUse;
-    tiles.push({ page: 'compute', name: '컴퓨트', level, value: `${fmtInt(g.hosts)} / ${fmtInt(g.vms)}`, meta: `호스트 / VM · vCenter ${g.vcentersConnected}/${g.vcenters}${unreach ? ` · 불가 ${unreach}` : ''}${g.hostsDisconnected ? ` · 끊김 ${g.hostsDisconnected}` : ''}`, ...ci('COMPUTE') });
+    tiles.push({ page: 'compute', name: '컴퓨트', level, value: `${fmtInt(g.hosts)} / ${fmtInt(g.vms)}`, meta: `호스트 / VM · vCenter ${g.vcentersConnected}/${g.vcenters}${unreach ? ` · 불가 ${unreach}` : ''}${g.vcentersDisabled ? ` · 비활성 ${g.vcentersDisabled}` : ''}${g.hostsDisconnected ? ` · 끊김 ${g.hostsDisconnected}` : ''}`, ...ci('COMPUTE') });
   } else tiles.push({ page: 'compute', name: '컴퓨트', level: null, value: '—', meta: waitMeta, ...ci('COMPUTE') });
   // 스토리지 — 전사 사용률 판정 + 임계 초과 DS 수.
   if (g) {

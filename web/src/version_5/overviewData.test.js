@@ -101,3 +101,54 @@ describe('statusCard — pending 과 unreachable 을 합치지 않는다', () =>
     expect(statusCard({}).label).toBe('연결 중…');
   });
 });
+
+describe('v2.617 — 비활성(disabled) vCenter 는 판정 대기도 연결 실패도 아니다', () => {
+  const ovOff = { ...ov, sites: [...ov.sites, site('f', 'disabled')] };
+  it('siteLevel 은 off', () => {
+    expect(siteLevel({ status: 'disabled' })).toBe('off');
+  });
+  it('opsStatus 는 off 를 따로 세고 total 에서 뺀다(항등식 유지)', () => {
+    const o = opsStatus({ ov: ovOff });
+    expect(o.off).toBe(1);
+    expect(o.ok + o.warn + o.crit + o.wait + o.maint).toBe(o.total);
+    expect(o.wait).toBe(opsStatus({ ov }).wait);
+  });
+  it('trustSummary 범위 모드 — 비활성 사이트는 첫 수집 중이 아니다', () => {
+    const t = trustSummary({ ov: ovOff, scopeId: 'f' });
+    expect(t.pending).toBe(0);
+    expect(t.total).toBe(0);
+    expect(t.disabled).toBe(1);
+    expect(t.ratePct).toBe(null);
+  });
+  it('trustSummary 전체 모드 — 분모에서 뺀다(구버전 서버면 사이트에서 센다)', () => {
+    const h = { vcenters: 4, vcentersConnected: 3, vcentersDisabled: 1 };
+    expect(trustSummary({ health: h, ov: ovOff }).ratePct).toBe(100);
+    const old = { vcenters: 6, vcentersConnected: 2, vcentersMaintenance: 1 };
+    const t = trustSummary({ health: old, ov: ovOff });
+    expect(t.disabled).toBe(1);
+    expect(t.total).toBe(5);
+  });
+  it('statusCard — 비활성만 있으면 초록이고 detail 이 비활성을 밝힌다', () => {
+    const c = statusCard({ health: { vcenters: 4, vcentersConnected: 3, vcentersDisabled: 1 } });
+    expect(c.tone).toBe('ok');
+    expect(c.label).toBe('Main · vCenter 3/3');
+    expect(c.detail).toContain('비활성 1');
+  });
+});
+
+describe('v2.617 — 주의 목록은 위험 먼저, 그 근거를 말한다', async () => {
+  const { attentionSites } = await import('./overviewData.js');
+  it('사용률 때문에 위험이면 사용률을 적는다 · 위험이 앞', () => {
+    const rows = [
+      { id: 'w', name: 'W', status: 'connected', alarmsCritical: 0, alarmsWarning: 9, worst: 40 },
+      { id: 'c', name: 'C', status: 'connected', alarmsCritical: 0, alarmsWarning: 1, worst: 95 },
+      { id: 'u', name: 'U', status: 'unreachable', alarmsCritical: 0, alarmsWarning: 0, worst: null },
+      { id: 'o', name: 'O', status: 'connected', alarmsCritical: 0, alarmsWarning: 0, worst: 10 },
+    ];
+    const a = attentionSites(rows);
+    expect(a.map((x) => x.id)).toEqual(['c', 'u', 'w']);
+    expect(a[0].why).toBe('위험 0 · 주의 1 · 사용률 95%');
+    expect(a[1].why).toBe('연결 실패');
+    expect(a[2].why).toBe('위험 0 · 주의 9');
+  });
+});

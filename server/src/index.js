@@ -21,6 +21,7 @@ import { writeReleaseFile } from './util/releaseFile.js';
 import { compression } from './util/compress.js';
 import { rateLimit } from './util/rateLimit.js';
 import { startLoopLagMonitor } from './util/loopLag.js';
+import { startStallWatch } from './perf/stallWatch.js'; // v2.617: 멈춘 동안에도 stderr 로 보고 + 스택 자동 채취
 import { startLogAnalysis } from './loganalysis/index.js'; // v2.583: 설정 › Log › 로그 분석 — 로그 누적 집계
 // v2.498: 서버 성능 측정 — 요청 지연·진행 중 요청 추적(설정 › 서버 성능 측정). 계측 실패는 서비스에 영향 없음.
 import { beginRequest, endRequest, pruneHangLog } from './perf/monitor.js';
@@ -301,8 +302,10 @@ app.use((req, res, next) => {
 // 읽지 않는다) 라우터 인증이 401/403 을 낸다. 인증은 여전히 각 라우터가 한다(이 게이트는 '파싱 허가'
 // 일 뿐 권한 판정이 아니다). 마운트 목록은 그대로 두었다(v2.517·v2.520 테스트가 이 줄들을 고정한다).
 const BIG_JSON = bigJsonGate(express.json({ limit: process.env.JSON_BODY_LIMIT || '16mb' }), {
-  central: (req) => resolveCentralAuth(req).ok,
-  session: (req) => Boolean(resolveTokenUser((req.get('Authorization') || '').replace(/^Bearer\s+/i, ''))),
+  // v2.617(SEC-1): 신원도 돌려준다 — 요청자(엣지·사용자)당 동시 슬롯 상한에 쓴다. 공유 토큰은 이름을 검증할 수 없으므로
+  //   주장된 이름(64자)을 쓴다(공유 토큰 보유자는 이미 엣지 신뢰 경계 안이다). 인증 판정 자체는 예전과 같다.
+  central: (req) => { const a = resolveCentralAuth(req); return a.ok ? { ok: true, agent: a.agent || String(req.get('X-Agent-Name') || req.query?.agent || '').slice(0, 64) } : false; },
+  session: (req) => resolveTokenUser((req.get('Authorization') || '').replace(/^Bearer\s+/i, '')) || false,
 });
 app.use('/api/central/inventory', BIG_JSON);
 app.use('/api/central/guest-disk', BIG_JSON); // 게스트 디스크 push(v2.466) — inventory 와 동종(그 vCenter 전 VM+파티션). 1mb 기본이면 대형 site vCenter 가 413 으로 조용히 실패
@@ -491,6 +494,7 @@ runZeroCapacityPurge()
   .catch((e) => console.warn(`[storage] 0 바이트 용량 행 정리 실패(${e.message}) — 추이 차트에 0 TB 점이 남을 수 있습니다`));
 store.start();
 try { startLogAnalysis(); } catch { /* 로그 분석 누적(v2.583) — 실패해도 서비스에 영향 없음(화면이 상태를 말한다) */ }
+startStallWatch();     // v2.617: 워커 스레드가 메인 루프 멈춤을 감시(STALL_WATCH=0 이면 끔)
 startLoopLagMonitor(); // 이벤트 루프 지연 계측(additive·no-op-on-fail) — docs/ARCH-HEAVY-JOB-ISOLATION.md §10-0
 try { pruneHangLog(); } catch { /* hang 로그 보존일 정리(기동 1회) — 실패 무시 */ }
 upgradeManager.start();

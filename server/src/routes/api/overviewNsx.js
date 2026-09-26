@@ -192,6 +192,8 @@ api.get('/health', (req, res) => {
     vcentersPending: byStatus('pending'),
     vcentersUnreachable: byStatus('unreachable'),
     vcentersMaintenance: byStatus('maintenance'),
+    // v2.617: 비활성(설정에서 꺼 둔) vCenter — 수집하지 않으므로 '첫 수집 중' 도 '연결 실패' 도 아니다. 화면이 분모에서 뺀다.
+    vcentersDisabled: byStatus('disabled'),
     hosts: g.hosts || 0,
     vms: g.vms || 0,
     vmsPoweredOn: g.vmsPoweredOn || 0,

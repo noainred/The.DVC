@@ -101,6 +101,27 @@ export async function snapMemo(name, key, ttlMs, compute) {
   }
 }
 
+/**
+ * v2.617: 스냅샷이 바뀌면 **모든 이름**에서 옛 세대(스냅샷 시각이 첫 조각인 키) 항목을 버린다.
+ * v2.580 의 세대 축출은 '같은 이름에 새 키가 들어올 때' 만 돌아, 한동안 아무도 부르지 않은 화면의 캐시(예: 5,000행
+ * VM 목록)는 옛 스냅샷 객체를 붙잡은 채 남았다 — 이름 42개 × 옛 세대가 스냅샷 여러 벌을 힙에 묶어 둘 수 있었다.
+ * 첫 조각이 ISO 시각이 아닌 키(`anomalies|…` 처럼 세대 개념이 없는 것)는 건드리지 않는다. 진행 중 계산도 남긴다.
+ * @returns {number} 버린 항목 수
+ */
+const ISO_GEN = /^\d{4}-\d{2}-\d{2}T/;
+export function snapCacheSweep(currentGen) {
+  const cur = String(currentGen || '');
+  if (!ISO_GEN.test(cur)) return 0;
+  let n = 0;
+  for (const b of store.values()) {
+    for (const [k, e] of b) {
+      const g = generationOf(k);
+      if (g != null && g !== cur && ISO_GEN.test(g) && !e?.promise) { b.delete(k); n += 1; }
+    }
+  }
+  return n;
+}
+
 /** 테스트/명시적 무효화용. */
 export function snapCacheClear(name) {
   if (name) store.delete(name); else store.clear();

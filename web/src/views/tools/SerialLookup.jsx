@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, downloadFile } from '../../api.js';
-import { takeSearch } from '../../hooks/searchHandoff.js'; // v2.616 V5 통합 검색
+import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js'; // v2.616 V5 통합 검색 · v2.617 열린 화면도 받는다
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -19,6 +19,12 @@ import { addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600
  */
 export default function SerialLookup() {
   const [q, setQ] = useState(() => takeSearch('serial-lookup')); // v2.616: V5 통합 검색이 넘긴 검색어(없으면 '')
+  // v2.617: 이미 열린 화면이면 다시 마운트되지 않는다 — 구독으로 즉시 받는다.
+  useEffect(() => onSearchHandoff((t) => {
+    if (t !== 'serial-lookup') return;
+    const s = takeSearch('serial-lookup');
+    if (s) setQ(s);
+  }), []);
   const [kinds, setKinds] = useState(() => new Set());
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);

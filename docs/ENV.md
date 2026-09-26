@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **539개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **550개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-25)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-26)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -12,13 +12,18 @@
 > (루트 CLAUDE.md '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (23)
+## 공용 유틸 (28)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `API_RATE_DISABLED` | `''` |  | util/rateLimit.js |
 | `API_RATE_LIMIT` | `1800` |  | util/rateLimit.js |
 | `API_RATE_WINDOW_MS` | `60000` |  | util/rateLimit.js |
+| `BIG_JSON_MAX_BYTES` |  |  | util/bigJsonGate.js |
+| `BIG_JSON_MAX_CONCURRENT` |  |  | util/bigJsonGate.js |
+| `BIG_JSON_PER_AGENT` |  |  | util/bigJsonGate.js |
+| `BIG_JSON_READ_DEADLINE_MS` |  |  | util/bigJsonGate.js |
+| `BIG_JSON_SESSION_MAX_CONCURRENT` |  |  | util/bigJsonGate.js |
 | `BMUSAGE_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `EDGE_EXPORT_MAX_BYTES` | `64` |  | util/readCapped.js |
 | `EDGE_RESPONSE_MAX_BYTES` | `16` |  | util/readCapped.js |
@@ -40,7 +45,7 @@
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 | `X` |  |  | util/dayKey.js, util/envTimeout.js |
 
-## 공통 (153)
+## 공통 (157)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -81,6 +86,7 @@
 | `CAPACITY_ROLLUP_RETENTION_DAYS` |  |  | config.js |
 | `CAPACITY_SAMPLE_INTERVAL_MS` |  |  | config.js |
 | `COLLECT_CONCURRENCY` | `8` |  | store.js |
+| `COLLECTOR_PULL_CONCURRENCY` | `4` |  | config.js |
 | `COLLECTOR_PULL_INTERVAL_MS` |  | ✅ | config.js |
 | `COLLECTOR_TIMEOUT_MS` | `20000` |  | config.js |
 | `COLLECTOR_TOKEN` |  | ✅ | config.js |
@@ -165,6 +171,9 @@
 | `SHUTDOWN_GRACE_MS` | `8000` |  | index.js |
 | `SHUTDOWN_HARD_MS` | `1500` |  | index.js |
 | `SITE_INVENTORY_STALE_MS` | `300000` |  | store.js |
+| `STALL_WATCH` | `기본 아님('0' 일 때만 적용)` |  | perf/stallWatch.js |
+| `STALL_WATCH_HEAP_WARN_PCT` | `85` |  | perf/stallWatch.js |
+| `STALL_WATCH_MS` | `10000` |  | perf/stallWatch.js |
 | `SVCMON_ROLE` | `''` |  | config.js |
 | `TEMP_DB_PATH` |  |  | config.js |
 | `TEMP_RAW_RETENTION_DAYS` | `0` |  | config.js |
@@ -217,6 +226,12 @@
 | `VMPERF_MAX_OPEN_DB` |  |  | metrics/vmperfDb.js |
 | `VMPERF_RETENTION_DAYS` | `90` |  | metrics/vmperfSettings.js |
 | `VMPERF_TRACK_TOTAL` | `기본 적용('false' 로 끄기)` |  | metrics/vmperfSettings.js |
+
+## 백업 (1)
+
+| 키 | 기본값 | 예시 | 정의 위치 |
+|---|---|---|---|
+| `BACKUP_STARTUP_DELAY_MS` |  |  | backup/settings.js |
 
 ## 베어메탈 스토리지 (4)
 
@@ -481,7 +496,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (52)
+## 중앙(위임 수집) (53)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -501,6 +516,7 @@
 | `CENTRAL_FLEET_MAX_UNVERIFIED_AGENTS` | `20` |  | central/fleet.js |
 | `CENTRAL_FLEET_MAX_UNVERIFIED_TOTAL` | `5000` |  | central/fleet.js |
 | `CENTRAL_FLEET_TTL_MS` | `30` |  | central/fleet.js |
+| `CENTRAL_INVENTORY_PERSIST_MS` |  |  | central/inventory.js |
 | `CENTRAL_PDU_TTL_MS` | `6` |  | central/pduEdge.js |
 | `CENTRAL_RESULT_AGENTS_MAX` | `500` |  | central/assignments.js |
 | `CENTRAL_SANSW_ORPHAN_TTL_MS` | `7` |  | central/sanSwitchEdge.js |
@@ -718,4 +734,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 539
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 550

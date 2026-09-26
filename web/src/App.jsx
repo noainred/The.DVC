@@ -362,7 +362,13 @@ function Portal({ user, onLogout }) {
   const showFilters = !noFilterTabs.includes(tab);
 
   // Drill into a site → set the HOSTS tab's own vCenter filter, then go there.
-  const selectSite = (id) => { patchFilter({ vcenterId: id, region: '' }, 'hosts'); setTab('hosts'); };
+  // v2.617: V5 에서는 탭별 vCenter 필터를 읽지 않고 상단 '법인' 선택(v5Scope)이 모든 탭에 적용된다 — 예전에는 사이트를
+  //   눌러도 탭 필터에만 써서 호스트 화면이 전 vCenter 를 보였고, V5 는 그 드롭다운을 숨겨 고칠 방법도 없었다.
+  const selectSite = (id) => {
+    if (v5On) setV5Scope(id || '');
+    else patchFilter({ vcenterId: id, region: '' }, 'hosts');
+    setTab('hosts');
+  };
 
   // 필터바·본문·오버레이 — 기존 틀과 V5 틀이 **같은 요소**를 쓴다(화면을 두 벌 만들지 않는다).
   const filterBar = (showFilters && (
@@ -557,7 +563,8 @@ function Portal({ user, onLogout }) {
             const pending = health?.vcentersPending ?? 0;      // 첫 수집 전/수집 중 — '불가' 아님
             const unreach = health?.vcentersUnreachable ?? 0;  // 실제 연결 실패
             const maint = health?.vcentersMaintenance ?? 0;    // 점검중 — '불가' 아님
-            const allOk = total === 0 || conn + maint === total; // 점검중도 정상 취급(연결 실패 아님)
+            const off = health?.vcentersDisabled ?? 0;         // v2.617: 비활성(설정에서 끔) — '불가'·'확인중' 아님
+            const allOk = total === 0 || conn + maint + off === total; // 점검중·비활성도 정상 취급(연결 실패 아님)
             const color = allOk ? 'var(--green)' : unreach > 0 ? 'var(--red)' : 'var(--amber)';
             // 상태 문구: 실제 불가만 빨간 '불가', 수집 전/중은 노란 '수집 중'.
             let tail = null;
@@ -568,7 +575,7 @@ function Portal({ user, onLogout }) {
               const click = (e) => { e.stopPropagation(); setShowVcDown(true); };
               if (unreach > 0) tail = <span role="button" title="클릭하면 연결 안 되는 vCenter 목록" onClick={click} style={{ color: '#f87171', fontWeight: 700, ...openList }}> ({unreach} 불가{pending ? ` · ${pending} 수집중` : ''})</span>;
               else if (pending > 0) tail = <span role="button" title="클릭하면 수집 중인 vCenter 목록" onClick={click} style={{ color: '#fbbf24', fontWeight: 700, ...openList }}> ({pending} 수집중)</span>;
-              else tail = <span role="button" title="클릭하면 해당 vCenter 목록" onClick={click} style={{ color: '#fbbf24', fontWeight: 700, ...openList }}> ({total - conn - maint} 확인중)</span>;
+              else tail = <span role="button" title="클릭하면 해당 vCenter 목록" onClick={click} style={{ color: '#fbbf24', fontWeight: 700, ...openList }}> ({total - conn - maint - off} 확인중)</span>;
             }
             return (
               <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>

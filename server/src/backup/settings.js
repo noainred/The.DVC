@@ -7,7 +7,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { createBackup, isRuntimeStateFile } from './service.js';
 import { every as everyLong } from '../util/longTimer.js';
@@ -124,7 +124,12 @@ export function startBackupScheduler() {
   reschedule();
   startWatcher();
   // 부팅 시 1회 스냅샷(설정이 있으면).
-  setTimeout(() => safeBackup('startup'), 20_000).unref?.();
+  // v2.617: 기동 20초 뒤 → 기본 10분 뒤. 시작 백업은 CONFIG_DIR 전체 + 전 엣지 설정 사본을 **동기로**
+  //   JSON.stringify + gzipSync 한다(엣지가 많으면 수백 MB). 기동 직후는 엣지 ~30곳이 한꺼번에 다시 push 하는 가장
+  //   바쁜 구간이라, 그때 이 작업이 겹치면 힙 순간치가 겹친다(2026-09-26 운영 중앙 멈춤의 기여 후보 — 확정 아님).
+  //   BACKUP_STARTUP_DELAY_MS 로 조정(최소 20초).
+  const startupDelay = clampIntervalMs(process.env.BACKUP_STARTUP_DELAY_MS, 10 * 60_000, 20_000); // 상한: setTimeout 2^31 함정(config 헬퍼)
+  setTimeout(() => safeBackup('startup'), startupDelay).unref?.();
 }
 
 export function backupStatus() {

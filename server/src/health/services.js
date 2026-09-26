@@ -62,6 +62,7 @@ import * as m_capacitySampler from '../capacity/sampler.js';
 import * as m_certMonitor from '../security/certMonitor.js';
 import * as m_relayCheckPoller from '../relaycheck/poller.js';
 import * as m_partFaultPoller from '../partfault/poller.js';
+import { stallWatchStatus } from '../perf/stallWatch.js';
 
 /** spec `mod` 경로 → 모듈. 표에 새 모듈이 생기면 여기에 한 줄 더한다(테스트가 빠진 것을 잡는다). */
 const MODS = Object.freeze({
@@ -205,6 +206,23 @@ export function getServiceCheck(opts = {}) {
     const stale = age != null && age > 5 * MIN;
     const status = total === 0 ? 'off' : conn === 0 ? 'down' : (conn < total || stale) ? 'warn' : 'ok';
     return { status, detail: `${conn}/${total} 연결${stale ? ' · 스냅샷 지연' : ''} · ${age != null ? Math.round(age / 1000) + '초 전' : '-'}`, at: Date.parse(s.generatedAt) || Date.now() };
+  }));
+
+  // v2.617: 메인 이벤트 루프 멈춤 감시(perf/stallWatch.js). 이 행은 루프가 **풀린 뒤에** 읽히므로 '지금 멈춤' 이 아니라
+  //   '최근에 멈춘 적이 있다' 를 말한다. 멈춘 동안의 기록(스택 포함)은 journal 의 [stallwatch] 줄에 있다.
+  checks.push(wrap('stallwatch', '이벤트 루프 멈춤 감시', () => {
+    const w = stallWatchStatus();
+    if (!w.enabled) return { status: 'off', detail: w.error ? `꺼짐 — ${w.error}` : '꺼짐(STALL_WATCH=0)', at: Date.now() };
+    const l = w.last;
+    const recent = l && Date.now() - l.at < 24 * 60 * MIN;
+    const heap = w.heapWarns ? ` · 힙 한계 근접 경고 ${w.heapWarns}회` : '';
+    if (!l) return { status: w.heapWarns ? 'warn' : 'ok', detail: `기동 후 멈춤 없음(경계 ${Math.round(w.stallMs / 1000)}초)${heap}`, at: Date.now() };
+    const dur = l.durMs == null ? '지속 시간 미상' : `${Math.round(l.durMs / 1000)}초`;
+    // v2.617(SEC-2): 스택 프레임에는 설치 절대 경로·소스 줄이 들어 있다 — 관리자에게만 싣는다(operator 는 tools 를 기본 보유).
+    const where = Array.isArray(l.frames) && l.frames.length
+      ? (opts.isAdmin ? ` · 멈춘 지점 ${l.frames[0]}` : ' · 멈춘 지점은 관리자에게만 표시')
+      : (l.error ? ' · 스택 없음(GC·네이티브 호출 가능성)' : '');
+    return { status: recent ? 'warn' : 'ok', detail: `멈춤 ${w.stalls}회 · 최근 ${Math.round((Date.now() - l.at) / MIN)}분 전 ${dur}${where}${heap} — journal 의 [stallwatch] 줄에 전체 스택`, at: l.at };
   }));
 
   checks.push(wrap('nsx', 'NSX 수집', () => {

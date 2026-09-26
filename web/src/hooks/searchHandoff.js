@@ -8,10 +8,21 @@
  */
 const TTL_MS = 30_000;
 let _pending = null; // { target, q, at }
+const _subs = new Set();
+
+/**
+ * v2.617: 받는 화면이 **이미 열려 있으면** 주소가 같아 다시 마운트되지 않으므로 검색어가 버려지고 30초 동안 남아
+ * 다음 방문에 뜻하지 않게 채워졌다. 열려 있는 화면은 구독해 즉시 받는다(받으면 지워진다). 해제 함수를 돌려준다.
+ */
+export function onSearchHandoff(fn) {
+  _subs.add(fn);
+  return () => { _subs.delete(fn); };
+}
 
 export function handoffSearch(target, q, now = Date.now()) {
   const s = String(q || '').trim();
   _pending = s ? { target: String(target || ''), q: s, at: now } : null;
+  if (_pending) for (const fn of [..._subs]) { try { fn(_pending.target); } catch { /* 받는 쪽 오류가 보내는 쪽을 막지 않는다 */ } }
 }
 
 /** target 앞으로 남긴 검색어를 꺼낸다(없으면 ''). 꺼내면 지운다. */

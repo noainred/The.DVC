@@ -63,7 +63,8 @@ api.post('/tools/deep-search', requirePerm('tools'), (req, res) => {
 //   상태만 주고 문구를 비운다(형제 /tools/network-check 는 범위로 거른다). 뺀 사실은 scoped 로 밝힌다.
 api.get('/tools/service-check', requirePerm('tools'), (req, res) => {
   try {
-    const r = getServiceCheck();
+    // v2.617(SEC-2): 멈춤 감시 행의 '멈춘 지점'(설치 절대 경로·소스 줄)은 관리자에게만.
+    const r = getServiceCheck({ isAdmin: req.user?.role === 'admin' });
     if (!scopedVcenterIds(req.user, store.get())) return res.json(r);
     res.json({ ...r, scoped: true, checks: (r.checks || []).map((c) => ({ ...c, detail: '범위 제한 계정 — 함대 수준 세부 수치는 표시하지 않습니다' })) });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }

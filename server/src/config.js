@@ -226,6 +226,10 @@ export const config = {
     pullIntervalMs: offOrIntervalMs(numEnv(process.env.COLLECTOR_PULL_INTERVAL_MS, 60_000), 5_000),
     // Per-request timeout when pulling a remote collector.
     timeoutMs: clampIntervalMs(Number(process.env.COLLECTOR_TIMEOUT_MS) || 20_000, 20_000, 1_000),   // v2.599: 음수·초과 시한 차단
+    // v2.617: 엣지 pull 동시 개수. 예전에는 등록된 엣지 전부를 한꺼번에 당겨(Promise.all) 응답(엣지당 최대 64MB)의
+    //   청크·문자열·JSON 사본이 같은 순간에 모두 힙에 살았다 — 운영 중앙이 기동 약 5분 뒤 한 코어 100%·RSS 5GB 로 멈춘
+    //   사건(2026-09-26)의 유력 후보(확정 아님 — GC 헛돎 추정). 1~16, 빈 값·0 은 기본 4.
+    pullConcurrency: Math.min(16, Math.max(1, Math.floor(Number(process.env.COLLECTOR_PULL_CONCURRENCY) || 4))),
   },
   // Central orchestration of agent-side scans. The central portal hands out
   // per-agent IP assignments; each agent pulls its assignment by name, scans
