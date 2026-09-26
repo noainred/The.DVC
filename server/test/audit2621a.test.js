@@ -146,12 +146,15 @@ test('★ RECENT-03 점검중(maintenance) vCenter 도 적재 제외 — 사유�
   ]);
   assert.deepEqual([...sampler.staleVcenterIds(snap)].sort(), ['vc-down', 'vc-maint', 'vc-site']);
   assert.deepEqual(Object.fromEntries(sampler.unreadVcenterReasons(snap)), { 'vc-maint': 'maintenance', 'vc-down': 'unreachable', 'vc-site': 'stale' });
-  // VM 집계도 동결 캐시를 적재하지 않고, 대상 vCenter 가 빠졌으니 전체('') 합계는 보류한다
+  // VM 집계도 동결 캐시를 적재하지 않는다. v2.622(RECENT-01): 점검중은 기한 없는 상태라 전체('') 합계를 막지 않고
+  //   그 vCenter 행만 뺀 부분 합으로 적재하며 그 사실(totalPartial·maintenanceExcluded)을 싣는다.
   const r = sampler.vmAllocRows(snapOf([{ id: 'vc-maint', status: 'maintenance', maintenance: true }, { id: 'vc-ok', status: 'connected' }]), ALL);
   assert.equal(r.has('vc-maint'), false, '점검중 vCenter 의 동결 값이 적재됐다');
   assert.ok(r.has('vc-ok'));
-  assert.equal(r.has(''), false);
-  assert.equal(r.totalWithheld, true);
+  assert.equal(r.has(''), true);
+  assert.equal(r.totalWithheld, false);
+  assert.equal(r.totalPartial, true);
+  assert.equal(r.maintenanceExcluded, 1);
 });
 
 test('★ RECENT-03 실제 샘플 1회 — 점검중 호스트의 온도는 적재하지 않고 lastRun.staleSkipped.byReason 에 사유를 싣는다', async () => {
@@ -243,7 +246,7 @@ test('★ DATA-02 경보 미조회·첫 수집 중·낡은 위임·사용량 미
     ],
     hosts: [{ name: 'h1', vcenterId: 'vc1', connectionState: 'CONNECTED' }],
     vms: [],
-    datastores: [{ name: 'ds-null', vcenterId: 'vc1', usagePct: null }, { name: 'ds-ok', vcenterId: 'vc1', usagePct: 40 }],
+    datastores: [{ name: 'ds-null', vcenterId: 'vc1', capacityGB: 100, usagePct: null }, { name: 'ds-ok', vcenterId: 'vc1', usagePct: 40 }],
     alarms: [],
   };
   const r = hr.computeHealthReport(snap, { now: NOW });
@@ -269,7 +272,7 @@ test('★ DATA-02 경보 미조회·첫 수집 중·낡은 위임·사용량 미
 test('DATA-02 발견이 있으면 그 판정이 이긴다 · 확인 불가가 없으면 예전 그대로 ok', () => {
   const r = hr.computeHealthReport({
     vcenters: [{ id: 'a', status: 'unreachable' }, { id: 'b', status: 'pending' }],
-    hosts: [], vms: [], alarms: [], datastores: [{ name: 'hot', usagePct: 97 }, { name: 'u', usagePct: undefined }],
+    hosts: [], vms: [], alarms: [], datastores: [{ name: 'hot', usagePct: 97 }, { name: 'u', capacityGB: 100, usagePct: undefined }],
   }, { now: NOW });
   const by = Object.fromEntries(r.sections.map((s) => [s.key, s]));
   assert.equal(r.overall, 'crit');

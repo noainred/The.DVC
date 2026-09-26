@@ -11,6 +11,7 @@ import { computeRightsizing } from '../../reports/rightsizing.js';
 import { computeCompliance } from '../../reports/compliance.js';
 import { filterChangeEvents, CHANGE_CATEGORIES } from '../../reports/changes.js';
 import { computeUnprotected } from '../../reports/unprotected.js';
+import { loadLogSettings } from '../../logs/settings.js';
 import { vmStatsFor, vmStatsMeta } from '../../reports/vmStats.js';
 import { certStatus } from '../../security/certMonitor.js';
 import { dailyReportStatus } from '../../reports/dailyReport.js';
@@ -163,7 +164,13 @@ api.get('/tools/report/unprotected', requirePerm('tools'), (req, res) => memoJso
     if (allowed) lf.vcenterIds = vcParam ? (allowed.has(vcParam) ? [vcParam] : []) : [...allowed];
     const ROW_LIMIT = 20_000;
     const rows = db.query(lf, ROW_LIMIT, 0);
-    return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT });
+    // v2.622(감사 DATA-05): 조회 창 안에 이벤트(종류 무관)가 1건이라도 저장된 vCenter 만 '판정 가능' 이다 — 엣지 위임·
+    //   수집 실패로 이벤트가 없는 vCenter 의 VM 을 미보호로 세면 거짓 백업 공백이다. (vcenterId, ts) 인덱스 LIMIT 2 조회라 가볍다.
+    const coveredVcenterIds = new Set();
+    for (const vc of scoped.vcenters || []) {
+      if (db.countCapped({ vcenterId: vc.id, since: lf.since }, 1).total > 0) coveredVcenterIds.add(String(vc.id));
+    }
+    return computeUnprotected(scoped.vms, rows, { patterns, lookbackDays, rowLimit: ROW_LIMIT, logSettings: loadLogSettings(), coveredVcenterIds });
   }
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 }

@@ -39,7 +39,7 @@ import {
 } from './curUserText.js';
 import { CurrentUsersSettings } from './CurrentUsersSettings.jsx';
 import HorizonSessionsPanel from './HorizonSessionsPanel.jsx';
-import { combinedNote, partialNote, SOURCE_STATE_LABEL } from './horizonSessionText.js';
+import { combinedNote, partialNote, SOURCE_STATE_LABEL, unionValueText } from './horizonSessionText.js';
 import { vcAuthSkipNote } from '../authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
 
 const DAYS = [1, 7, 30, 90];
@@ -361,7 +361,7 @@ function CombinedPanel() {
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
         {/* v2.598: 읽은 출처가 하나도 없으면 서버가 null 을 준다 — '0명' 으로 채우지 않는다. */}
-        <Card label="전체 고유 사용자(합집합)" value={c?.union == null ? '—' : `${c.union}명`} meta={c?.union == null ? '읽은 출처가 없어 확인 불가' : (c?.partial ? '⚠ 일부 출처 누락 — 하한' : 'Windows ∪ VDI')} accent="var(--accent)" />
+        <Card label="전체 고유 사용자(합집합)" value={unionValueText(c)} meta={c?.union == null ? '읽은 출처가 없어 확인 불가' : (c?.partial ? '⚠ 일부 출처 누락 — 하한' : c?.unionLowerBound ? '⚠ 계정 목록 상한 — 하한' : 'Windows ∪ VDI')} accent="var(--accent)" />
         <Card label="양쪽 동시" value={c?.both == null ? '—' : `${c.both}명`} meta="Windows 서버와 VDI 에 모두 접속" />
         <Card label="Windows 서버만" value={c?.onlyWindows == null ? '—' : `${c.onlyWindows}명`} meta={SOURCE_STATE_LABEL[src.windows?.state] || ''} />
         <Card label="VDI 만" value={c?.onlyVdi == null ? '—' : `${c.onlyVdi}명`} meta={SOURCE_STATE_LABEL[src.vdi?.state] || ''} />

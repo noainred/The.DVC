@@ -122,11 +122,14 @@ test('EDGE-01 — 폴 한 번에 한 잡만 인출하고, 앞 잡이 도는 동�
   });
 });
 
-test('EDGE-01 — 폴도 진행도 없는 오프라인 에이전트의 대기 잡은 예전처럼 10분 뒤 정리된다', async () => {
+test('EDGE-01 — 폴도 진행도 없는 오프라인 에이전트의 대기 잡은 10분 뒤 종결된다(v2.622: 조용한 삭제가 아니라 오류로, 보존 뒤 삭제)', async () => {
   const jobs = await import('../src/central/idracScanJobs.js');
   withClock((clock) => {
     const j = jobs.enqueueIdracScan('offline-edge-2621', { ips: '10.62.0.0/29', username: 'root', password: 'pw' });
     clock.t = T0 + 11 * 60_000;
+    const r = jobs.getIdracScanResult(j);
+    assert.equal(r.state, 'error', JSON.stringify(r));
+    clock.t = T0 + 22 * 60_000;
     assert.equal(jobs.getIdracScanResult(j).state, 'unknown');
   });
 });

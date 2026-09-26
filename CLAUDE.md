@@ -4065,6 +4065,29 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       작업 로그는 같은 틱을 묶어 쓴다(N=60: 83ms → 4ms) · Enterprise 대체 경로 Redfish 는 signal 을 끝까지(공유 세션 POST 제외) · 수집 요청 큐 seen 상한.
     - 남긴 것: RECENT-10 · DATA-05(가능성) · `rawGet` 세션 폴백의 토큰 GET 시한 실패가 Basic 401 로 바뀌어 **멀쩡한 서버를 인증 정지**시킬 수 있다
       (확인하지 못함 — 다음 점검의 첫 후보) · 섀시 Sensors 일시 오류의 6시간 absent 캐시 · 새 엣지 상태 필드의 전용 문구 · `updateVmStats` 낡은 누적.
+  - ⚠⚠ **v2.622 — 6축 감사(버그·코드 개선 3회차) 확정분**(사용자 요청 "한번 더" = v2.620·v2.621 과 같은 방식. 발견 34 = 확정 26 · 가능성 4 · 반증 4,
+    6그룹 + 리드 통합. 상세 `docs/AUDIT-2026-09-27.md`, 회귀 `server/test/audit2622{a..e,lead}.test.js` + 웹 `views/audit2622f.test.js`·`views/tools/audit2622d.test.js`·
+    `views/audit2622lead.test.js` — 그룹별 변이 검증 전부 통과):
+    - ⚠⚠ **세션 폴백의 '인증 실패' 는 명시적 401/403 뿐이다**(LEFT-01 — `idrac/redfish.js` rawGet): 세션 POST 가 시한·5xx 로 실패하거나 토큰 GET 이
+      실패하면 예전에는 Basic 401 로 떨어져 authGuard 가 **멀쩡한 iDRAC 의 주기 수집을 정지**시켰다. 이제 그 경로는 `sessionTransient`(authFailed 없음).
+      **새 인증 폴백을 만들 때 '폴백 실패' 와 '자격증명 거부' 를 같은 결과로 합치지 말 것**(v2.535 authGuard 가 그 차이에 기댄다).
+    - **'없음' 캐시는 404 에만**(LEFT-02 — Sensors 컬렉션): 503·시한을 6시간 absent 로 기억하면 일시 오류가 6시간 공백이 된다.
+    - ⚠ **점검중(maintenance)은 기한 없는 상태다 — 전체 합계를 막는 집합에 넣지 말 것**(RECENT-01 — v2.621 이 만든 회귀): 그 vCenter 행만 빼고
+      부분 합(`totalPartial`·`maintenanceExcluded`)을 싣는다. pending 을 뺀 이유(합계를 영원히 막는다)와 같다. unreachable·stale 은 예전대로 보류.
+      ⚠ 화면은 아직 그 사실을 말하지 않는다(남은 일).
+    - **같은 이름의 숫자는 판정도 한 벌**(RECENT-02): 일일 헬스체크 '사용량 미상 DS' 는 `store.dsUsageUnknownOf`(capacityGB>0 조건)를 쓴다.
+    - **하한값을 추이에 적재하지 않는다**(DATA-02·03 — Horizon·현재 사용자 이름 목록 절단): v2.606 COL2606-01 규약의 누락. 합집합은 `unionLowerBound` 로 '최소 N명'.
+    - **'판정 근거 없음' 을 미보호로 세지 않는다**(DATA-05): 이벤트를 수집하지 않은 vCenter 의 VM 은 '판정 불가' 로 따로 센다 — 라우트가 로그 설정과
+      조회 창 커버리지를 넘겨야 동작한다(함수만 고치고 호출부를 잊으면 수정이 무효다 — 이번에 그룹 수정이 딱 그 상태였다).
+    - ⚠⚠ **위임 잡의 '조용한 삭제' 를 없앤다**(RECENT-03·EDGE-02): 엣지가 잠금 중이면 폴하지 않아 대기 잡이 10분 뒤 기록 없이 지워졌다. gc 는 오류로
+      종결하고 보존 뒤 지운다. 잠금 중 생존 폴(`?busy=1`)은 **중앙이 2.622.0 이상일 때만**(`IDRAC_BUSY_POLL_MIN_CENTRAL`) — 구버전 중앙은 busy 를 무시하고
+      잡을 주고, 엣지는 받은 잡을 반납할 수 없다. **새 쿼리 플래그로 중앙 동작을 바꾸면 구버전 중앙이 그 플래그를 무시했을 때를 먼저 볼 것.**
+    - **모르는 reqId 는 410, 재전송은 멱등**(LEFT-03 capture · EDGE-03 bmstor) · **순차 실행 엣지에는 한 번에 1건**(EDGE-01 RMA — v2.621 iDRAC 스캔 TAKE_MAX 의 형제) ·
+      **stored:false·acked:false 는 실패**(EDGE-04 edgeLogWorker).
+    - **범위 관리자**: 전역 알림·일일 보고 저장/발송(SEC-01) · GPU 게스트 배포/진단/엣지 사용자/물리 GPU 조회(SEC-03) · NSX 매니저 목록(SEC-04).
+    - **웹**: 대상(엣지·vCenter)을 바꾸는 설정 화면은 새 대상 조회가 성공하기 전에 폼을 비우고 저장을 잠근다(WEB-01·03·04·08 — 이전 대상 값이 새 대상에
+      저장·삭제되던 것) · 조회 실패를 '없음' 으로 보이지 않는다(WEB-06) · `null GB` 금지(WEB-02) · HPE 서버 상세 제목은 모든 진입점이 `detailServerOf` 를 쓴다(RECENT-04).
+    - 남긴 것: 용량 추이 화면의 `vmperfStale`·`vmStatsSkipped` 표시 · curuser `partialRows` 표시 · 물리 GPU·NSX 403 의 권한 안내 컴포넌트화.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

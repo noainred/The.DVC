@@ -71,7 +71,7 @@ export default function DiskTrend({ scope }) {
           accent={b.ds.usagePct >= policy.critPct ? 'var(--red)' : b.ds.usagePct >= policy.warnPct ? '#fbbf24' : undefined} />
         <Card label="VM 할당(프로비저닝) / 커밋" value={`${gb(b.vm.provGB)} / ${gb(b.vm.committedGB)}`} meta={`할당 ÷ 용량 ${n(b.vm.overcommitPct, '%')} · thin ${b.vm.thinCount}대 · 미커밋 ${gb(b.vm.uncommittedGB)}`}
           accent={b.vm.overcommitPct > 100 ? '#fbbf24' : undefined} />
-        <Card label="회수 가능 (정지 VM + 스냅샷)" value={gb1(b.reclaim.totalGB)} meta={`정지 ${b.reclaim.off.count}대 ${gb1(b.reclaim.off.gb)} · 스냅샷 ${b.reclaim.snap.count}대 ${gb1(b.reclaim.snap.gb)} · 사용의 ${n(b.reclaim.pctOfUsed, '%')}`}
+        <Card label="회수 가능 (정지 VM + 스냅샷)" value={gb1(b.reclaim.totalGB)} meta={`정지 ${b.reclaim.off.count}대 ${gb1(b.reclaim.off.gb)} · 스냅샷 ${b.reclaim.snap.count}대 ${gb1(b.reclaim.snap.gb)} · 사용의 ${b.reclaim.ratioUnavailable ? '— (사용량 미확인 DS 가 있어 비율 계산 안 함)' : n(b.reclaim.pctOfUsed, '%')}`}
           accent={b.reclaim.totalGB > 0 ? 'var(--green)' : undefined} />
         <Card label="증가율 / 위험선 도달" value={a?.growth?.usedGBperDay == null ? '근거 부족' : `${a.growth.usedGBperDay} GB/일`} meta={a?.growth?.usedGBperDay == null ? a?.growth?.reason : `위험선(${policy.critPct}%) ${dayLabel(a.eta.daysToCrit)} · 가득 참 ${dayLabel(a.eta.daysToFull)}`}
           accent={a?.eta?.daysToCrit != null && a.eta.daysToCrit <= policy.etaCritDays ? 'var(--red)' : a?.eta?.daysToCrit != null && a.eta.daysToCrit <= policy.etaWarnDays ? '#fbbf24' : undefined} />

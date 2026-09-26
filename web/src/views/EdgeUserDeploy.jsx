@@ -43,7 +43,7 @@ export default function EdgeUserDeploy() {
 
   const loadAgents = async () => {
     try { const r = await fetchJson('/admin/edge-users/agents'); setAgents(r.agents || []); setGlobal(r.global || { users: 0, at: 0 }); setError(null); }
-    catch (e) { setError(e.message); }
+    catch (e) { setError(e); }
   };
   const loadUsers = async (t) => {
     // v2.622(감사 WEB-03): 늦게 온 응답(대상이 바뀌었거나 더 새 요청이 있음)은 버린다.
