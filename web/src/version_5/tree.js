@@ -46,7 +46,7 @@ export const GROUPS = Object.freeze([
   },
   {
     id: 'capacity', section: 'OPERATIONS', label: '용량 · 최적화', icon: 'gauge',
-    items: [tool('storage-growth'), tool('bm-usage'), tool('bm-storage'), tool('vm-track'), tool('storage-track'), tool('capacity'),
+    items: [tool('storage-growth'), tool('bm-usage'), tool('corp-usage'), tool('bm-storage'), tool('vm-track'), tool('storage-track'), tool('capacity'),
       tool('waste'), tool('forecast'), tool('dsusage'), tool('thinvms'), tool('orphanvmdk'), tool('guest-disk'), tool('zombie-vms'),
       tool('rightsizing'), tool('capacity-forecast'), tool('powermap'), tool('dir-usage')],
   },

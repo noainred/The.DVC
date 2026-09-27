@@ -145,7 +145,7 @@ export async function currentTargets() {
     import('../insights/fleetInventory.js'), import('../idrac/registry.js'), import('../bmstor/registry.js'),
     import('../idrac/invCache.js'),
   ]);
-  const fleet = await getFleetInventory(snap).catch(() => ({ bareMetal: [] }));
+  const fleet = await getFleetInventory(snap).catch(() => ({ bareMetal: [], virtualizationHosts: [] }));
   const { bareMetal, hostsUnread } = await withholdUnreadBareMetal(snap, fleet.bareMetal || []);
   const registry = (() => { try { return loadRegistry(); } catch { return []; } })();
   const bmServers = (() => { try { return listBmServersRaw(); } catch { return []; } })();
@@ -154,6 +154,10 @@ export async function currentTargets() {
     settings: s,
     ...resolveTargets({
       bareMetal, registry, bmServers, settings: s,
+      // v2.625: 가상화 호스트(ESXi)도 — `includeVirtualization` 일 때만 대상이 된다. ⚠ 호스트를 못 읽은 vCenter 는
+      //   베어메탈과 같은 이유로 뺀다(판정이 흔들린다 — 아래 withholdUnreadBareMetal 과 같은 집합).
+      virtHosts: (fleet.virtualizationHosts || []).filter((h) => !hostsUnread || !(hostsUnread.vcenters || []).includes(h.vcenterId)),
+      vcenters: snap?.vcenters || [],
       agentName: config.agent?.name || '', isEdge,
       // ⚠ **캐시된** 인벤토리만 읽는다(장비 왕복 0) — 라이선스 등급 판정용(v2.554).
       inventoryOf: (id) => getInventory(id),

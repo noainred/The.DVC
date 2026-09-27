@@ -77,7 +77,7 @@ export function maskFleetPayload(p, match) {
   const row = (r) => {
     if (!r || typeof r !== 'object') return r;
     const o = { ...r };
-    for (const f of ['serverId', 'fleetId', 'tagKey']) if (match(o[f])) o[f] = maskedIdToken(o[f]);
+    for (const f of ['serverId', 'fleetId', 'tagKey', 'idracServerId']) if (match(o[f])) o[f] = maskedIdToken(o[f]);
     if (match(o.name)) o.name = maskedAddressName(o.name);
     return o;
   };
