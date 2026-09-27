@@ -27,7 +27,7 @@ const BmUsageChart = React.lazy(() => import('./BmUsageChart.jsx'));   // 추이
 import BoldText from '../../components/boldText.jsx';
 import { addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600-08
 import { rangeOf } from './bmUsageChart.js';
-import { distStateOf, distributionSummary, centralManagedNote, ignoredCentralNote, DIST_ENTERPRISE_NOTE } from './bmUsageDistText.js'; // v2.627
+import { distStateOf, lapsedVerifiedNote, distributionSummary, centralManagedNote, ignoredCentralNote, DIST_ENTERPRISE_NOTE } from './bmUsageDistText.js'; // v2.627
 import { fmtAgo } from '../../util/fmt.js';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark,
@@ -690,6 +690,9 @@ export function BmUsage() {
               <input type="number" key={`v-${String(form.alertRepeatHours)}`} min={1} max={168} defaultValue={form.alertRepeatHours} disabled={dl}
                 onBlur={(e) => numBlur(e, 'alertRepeatHours')} style={{ width: 80, minWidth: 0 }} />
             </label>
+            {data?.status?.fleetCountsHidden && (
+              <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>범위 계정에는 함대 전체의 수집 대수·실패 대수를 표시하지 않습니다.</div>
+            )}
             {data?.status?.alertState && (
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>
                 추적 중 {data.status.alertState.tracked}건 · 알린 것 {data.status.alertState.notified}건
@@ -721,7 +724,8 @@ export function BmUsage() {
                         <tr key={r.agent}>
                           <td>{r.agent}</td>
                           <td title={ds.why} style={{ color: toneVar(ds.tone) }}>{ds.label}</td>
-                          <td data-sort={r.lastPullAt || 0}>{r.lastPullAt ? fmtAgo(r.lastPullAt) : '—'}</td>
+                          <td data-sort={r.lastPullAt || 0}>{r.lastPullAt ? fmtAgo(r.lastPullAt) : '—'}
+                            {lapsedVerifiedNote(r, fmtAgo) && <div className="muted" style={{ fontSize: 11 }}>{lapsedVerifiedNote(r, fmtAgo)}</div>}</td>
                           <td>
                             <input type="checkbox" checked={!!r.excluded} disabled={distSaving}
                               onChange={(e) => saveDistribution({ excluded: { ...(data.distribution.excluded || {}), [r.agent.toLowerCase()]: e.target.checked } })} />

@@ -166,7 +166,7 @@ test('AUTHZ2611-01: iDRAC 재귀속·삭제·등록·스캔 실행은 범위 adm
   assert.equal(o.deleteS, 403, '수정 전: 200 removed — 재귀속 뒤 전량 삭제');
   assert.equal(o.putS, 403); assert.equal(o.delOneS, 403); assert.equal(o.addS, 403);
   assert.equal(o.pollS, 403); assert.equal(o.rangesPutS, 403); assert.equal(o.rangesScanS, 403); assert.equal(o.powerPutS, 403);
-  assert.equal(o.listS, 200, 'GET 은 v2.604 정책 그대로(서버 분석 계열은 범위 미적용)');
+  assert.equal(o.listS, 200, 'GET 은 열려 있다 — v2.629(AUTHZ2629-03)부터 범위 계정에는 귀속 서버만 준다');
   // v2.620(SEC2620-05): 스캔 대역 조회도 fleetOnly — 전 법인 IP 대역·iDRAC/iLO 계정명이 범위 관리자에게 열려 있었다(의도된 변경).
   assert.equal(o.rangesGetS, 403);
   assert.equal(o.regCount, 1, '범위 admin 의 요청은 등록부를 바꾸지 못했다');

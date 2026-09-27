@@ -42,6 +42,13 @@ export function distributionSummary(dist) {
   return `**배포 켜짐** — 엣지 ${c.total}곳: ${parts.join(' · ')}. 엣지는 **다음 인출**(기본 10분 주기)에 받습니다 — 저장 즉시 바뀌지 않습니다.`;
 }
 
+/** v2.629(A1-2629-04): 검증된 인출 기록이 1시간 넘게 끊겨 공유 토큰 인출이 덮은 행 — 그 사실을 말한다. 아니면 ''. */
+export function lapsedVerifiedNote(r, agoFn) {
+  if (!r?.lapsedVerifiedAt) return '';
+  const when = agoFn ? agoFn(r.lapsedVerifiedAt) : '';
+  return `마지막 검증 인출 ${when} · 이후는 공유 토큰 인출(이름 미검증)`;
+}
+
 /** 엣지 화면: 이 노드가 중앙 배포값을 쓰고 있을 때 배너. 아니면 ''. */
 export function centralManagedNote(central, agoFn) {
   if (!central?.managed) return '';

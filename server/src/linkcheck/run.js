@@ -15,6 +15,7 @@
 import { stepDns, stepTcp, stepTls, stepHttp } from './checks.js';
 import { judge, summaryText } from './phases.js';
 import { identityIssue } from '../collector/registry.js';
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.629: 헤더로 안전한 이름만(비-ASCII 는 fetch 가 요청째 던진다)
 
 const t = (v) => String(v ?? '').trim();
 
@@ -100,7 +101,7 @@ export function specFor(link = {}, ctx = {}) {
       : `/api/central/storage-config?agent=${encodeURIComponent(agent)}`;
     return {
       url: `${base}${path}`,
-      headers: { Accept: 'application/json', 'X-Central-Token': token, 'X-Agent-Name': agent },
+      headers: { Accept: 'application/json', 'X-Central-Token': token, ...agentNameHeader(agent) },
       identify: kind === 'edge->central'
         ? (json) => {
           // 중앙이 '이 토큰은 어느 엣지인지' 를 되돌려 준다 — 토큰이 남의 것이면 여기서 잡힌다.

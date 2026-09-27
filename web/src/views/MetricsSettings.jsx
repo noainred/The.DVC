@@ -164,7 +164,8 @@ export default function MetricsSettings() {
           <span className="muted">적용 주기 <b style={{ color: 'var(--text)' }}>{Math.round((status.intervalMs || 0) / 1000)}초</b></span>
           <span className="muted">보존 <b style={{ color: 'var(--text)' }}>{status.retentionDays}일</b></span>
           <span className="muted">마지막 수집 <b style={{ color: 'var(--text)' }}>{fmtAgo(last?.at, { dash: '없음' })}</b></span>
-          {last && <span className="muted">온도 보고 호스트 <b style={{ color: 'var(--text)' }}>{last.hostsWithTemp}</b> · 행 <b style={{ color: 'var(--text)' }}>{last.rows}</b></span>}
+          {last && status.fleetCountsHidden && <span className="muted">범위 계정에는 함대 전체 개수를 표시하지 않습니다</span>}
+          {last && !status.fleetCountsHidden && <span className="muted">온도 보고 호스트 <b style={{ color: 'var(--text)' }}>{last.hostsWithTemp}</b> · 행 <b style={{ color: 'var(--text)' }}>{last.rows}</b></span>}
         </div>
         {/* v2.628(감사 LEFT2628-01): 최근 샘플이 적재하지 않은 vCenter·전체 합계·VM 누적 — 예전엔 lastRun 에 있고 아무도 안 읽었다. */}
         {samplerWithheldNote(last) && <div className="muted" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.6, color: 'var(--amber)' }}>{samplerWithheldNote(last)}</div>}

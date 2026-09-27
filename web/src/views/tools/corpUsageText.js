@@ -63,6 +63,8 @@ export function coverageText(a) {
   if (a.memMissing) parts.push(`메모리 값 없음 ${a.memMissing}`);
   // v2.628(C2628-03): 다른 법인 서버와 식별 키가 겹쳐 사용률 행을 붙이지 않은 서버.
   if (a.keyConflict) parts.push(`키 겹침 ${a.keyConflict}`);
+  // v2.629(A1-2629-01): 서비스태그가 같아 같은 물리 서버로 본 중복 항목 — 한 번만 셌다.
+  if (a.dupSameBox) parts.push(`같은 서버 중복 제외 ${a.dupSameBox}`);
   return parts.join(' · ');
 }
 
@@ -74,6 +76,11 @@ export function srcText(a) {
   if (s.os) parts.push(`OS ${s.os}`);
   if (s.mixed) parts.push(`iDRAC+OS ${s.mixed}`);   // v2.628(R2628-04): 지표마다 출처가 다른 서버(DB 가 지표별 출처를 두지 않는다)
   if (s.vcenter) parts.push(`vCenter ${s.vcenter}`);
+  // v2.629(A1-2629-03): iDRAC·OS 값이 비어 그 지표만 vCenter 값으로 채운 서버 — 출처 개수와 별개로 센다.
+  const filled = [];
+  if (a?.filledCpu) filled.push(`CPU ${a.filledCpu}`);
+  if (a?.filledMem) filled.push(`메모리 ${a.filledMem}`);
+  if (filled.length) parts.push(`vCenter 로 채운 지표 ${filled.join('·')}`);
   return parts.join(' · ');
 }
 

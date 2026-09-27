@@ -13,6 +13,7 @@ import { stepSsh, stepSmtp, stepPortOnly } from './protocols.js';
 import { judge, summaryText } from './phases.js';
 import { SETTING_KINDS } from './settingsKinds.js';
 import { identityIssue } from '../collector/registry.js';
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.629: 헤더로 안전한 이름만(비-ASCII 는 fetch 가 요청째 던진다)
 
 const t = (v) => String(v ?? '').trim();
 
@@ -60,7 +61,7 @@ function headersFor(kind, target, ctx) {
   if (kind === 'set:central') {
     const tok = t(ctx.centralToken);
     if (!tok) return { skip: '이 엣지에 중앙 토큰(CENTRAL_TOKEN)이 설정돼 있지 않습니다.' };
-    return { headers: { ...h, 'X-Central-Token': tok, 'X-Agent-Name': t(ctx.agentName) } };
+    return { headers: { ...h, 'X-Central-Token': tok, ...agentNameHeader(t(ctx.agentName)) } };
   }
   return { headers: h };
 }
