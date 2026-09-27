@@ -48,7 +48,7 @@ let _cache = null;
  *   오류면 라우트가 perf 를 싣지 않고 `perfSettingsUnreadable` 을 싣는다(엣지는 body.perf 가 없으면 적용하지 않는다 — 구버전 엣지도).
  *   저장 성공만 해제한다(관리자가 다시 저장하면 풀린다).
  */
-const _loadErr = makeSettingsLoadError(() => FILE);
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'SAN 포트 사용량 설정', confirm: () => savePerfSettings({}) });
 /** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function perfSettingsLoadError() { loadPerfSettings(); return _loadErr.get(); }
 

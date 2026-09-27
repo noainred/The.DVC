@@ -32,7 +32,7 @@ export function onVmSeriesSettingsChange(cb) { listeners.add(cb); return () => l
 
 // v2.631(EDGE2631-01): 손상 → 보존 → 기본값(env — 보통 꺼짐)을 /api/central/vmseries-config 가 200 으로 내려보내면 엣지가
 //   그것을 영구 저장해 수집이 꺼진다. 로드 오류를 기억해 배포 라우트가 503(엣지는 직전 사본 유지)으로 답하게 한다.
-const _loadErr = makeSettingsLoadError(() => FILE);
+const _loadErr = makeSettingsLoadError(() => FILE, { label: '실시간 스파이크 수집 설정', confirm: () => saveVmSeriesSettings({}) });
 function readFile() {
   if (!fs.existsSync(FILE)) { _loadErr.missing(); return {}; }
   try {

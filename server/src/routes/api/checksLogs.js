@@ -1,6 +1,6 @@
 // 심층검색·서비스/네트워크 점검·vCenter 로그 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { pageArgs } from '../../util/pageArgs.js';
-import { requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5)
+import { requirePerm, requireRole } from '../../auth/auth.js'; // v2.478(감사 S5)
 import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { guardCell } from '../../util/csv.js';
 import { store } from '../../store.js';
@@ -8,6 +8,9 @@ import { config, loadVcenterConfig } from '../../config.js';
 import { scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { snapshotFilter, slimVm, filterScanResults } from '../../search/deepSearch.js';
 import { getServiceCheck } from '../../health/services.js';
+import { confirmSettingsDefault } from '../../util/settingsLoadError.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
+import { logAudit } from '../../audit.js';
 import { getNetworkCheck } from '../../health/network.js';
 import { buildVmwareConfigExport } from '../../backup/vmwareExport.js';
 import { getLogsDb } from '../../logs/db.js';
@@ -131,6 +134,22 @@ api.get('/tools/service-check', requirePerm('tools'), (req, res) => {
     if (!scopedVcenterIds(req.user, store.get())) return res.json(r);
     res.json({ ...r, scoped: true, checks: (r.checks || []).map((c) => ({ ...c, detail: '범위 제한 계정 — 함대 수준 세부 수치는 표시하지 않습니다' })) });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+});
+
+// v2.633: 손상 보존본(.corrupt.*)만 남은 설정 파일을 **지금 적용 중인 기본값으로 확정**한다 — 그 뒤 설정 pull 이 다시 200 으로
+//   답하므로 이 기본값(대개 '꺼짐')이 전 엣지에 배포된다. 보존본의 나이로 자동 해제하지 않는 이유는 util/settingsLoadError.js.
+//   파일은 서비스 점검이 준 목록(등록부)에 있는 이름만 받는다(경로 조작 불가) · 보존본은 지우지 않는다 · 감사 로그를 남긴다.
+const settingsFleetOnly = fullScopeOnlyWith('설정 파일을 기본값으로 확정하면 그 값이 모든 엣지에 배포됩니다 — 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다.');
+api.post('/tools/service-check/settings-files/confirm', requireRole('admin'), settingsFleetOnly, (req, res) => {
+  const file = typeof req.body?.file === 'string' ? req.body.file.slice(0, 128) : '';
+  if (!file) return res.status(400).json({ ok: false, code: 'bad-request', reason: 'file 이 필요합니다' });
+  const r = confirmSettingsDefault(file, { by: req.user?.username || '' });
+  if (!r.ok) {
+    const status = r.code === 'unknown-file' ? 404 : r.code === 'not-in-error' ? 409 : r.code === 'not-confirmable' ? 409 : 500;
+    return res.status(status).json(r);
+  }
+  logAudit({ user: req.user?.username, action: 'settings-file.confirm-default', target: r.file, detail: `${r.label || r.file} 을(를) 기본값으로 확정 — 이 기본값이 엣지에 배포됩니다(손상 보존본은 보관)`, ip: req.ip });
+  res.json(r);
 });
 
 // 글로벌 네트워크 점검 — 제어플레인(vCenter/NSX) 도달성·RTT + 네트워크 객체 요약.

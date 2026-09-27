@@ -243,9 +243,9 @@ export function getServiceCheck(opts = {}) {
   checks.push(wrap('settings-files', '중앙 설정 파일', () => {
     const errs = listSettingsLoadErrors();
     if (!errs.length) return { status: 'ok', detail: '엣지 배포 설정 파일 읽기 정상', at: Date.now() };
-    const names = errs.slice(0, 6).map((e) => e.file).join(', ');
+    const names = errs.slice(0, 6).map((e) => (e.label ? `${e.label}(${e.file})` : e.file)).join(', ');
     return { status: 'warn',
-      detail: `읽지 못한 설정 파일 ${errs.length}개(${names}${errs.length > 6 ? ` 외 ${errs.length - 6}개` : ''}) — 해당 설정 pull 은 503 으로 답하고 엣지는 직전 설정을 유지합니다. 손상 보존본을 복구하거나 그 설정 화면에서 다시 저장하세요.`,
+      detail: `읽지 못한 설정 파일 ${errs.length}개(${names}${errs.length > 6 ? ` 외 ${errs.length - 6}개` : ''}) — 해당 설정 pull 은 503 으로 답하고 엣지는 직전 설정을 유지합니다. 손상 보존본을 복구하거나, 그 설정 화면에서 다시 저장하거나, 관리자가 이 행의 [기본값으로 확정] 으로 지금 기본값을 저장하세요(그 기본값이 전 엣지에 배포됩니다).`,
       at: Math.min(...errs.map((e) => e.at || Date.now())), files: errs };
   }));
 

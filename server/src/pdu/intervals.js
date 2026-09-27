@@ -42,7 +42,7 @@ let _listeners = new Set();
  *   돌아갔다. 오류면 라우트가 intervals 를 싣지 않고(`intervalsUnreadable` — 구버전 엣지에는 503) 엣지는 직전 값을 유지한다.
  *   재시작 뒤 보존본만 남은 경우도 못 읽은 것이다. 관리자 저장(saveIntervals)만 해제한다.
  */
-const _loadErr = makeSettingsLoadError(() => FILE);
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'PDU 수집 주기', confirm: () => saveIntervals({}) });
 /** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function pduIntervalsLoadError() { loadFile(); return _loadErr.get(); }
 

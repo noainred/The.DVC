@@ -55,7 +55,7 @@ export function mergeSettings(cur, patch = {}) {
 }
 
 let _cache = null;
-const _loadErr = makeSettingsLoadError(() => FILE());
+const _loadErr = makeSettingsLoadError(() => FILE(), { label: 'CloudVision 수집 설정', confirm: () => saveSettings({}) });
 /** v2.631(EDGE2631-01): 설정 파일을 못 읽었으면 사유(배포 라우트가 설정을 싣지 않는다), 읽었으면 null. */
 export function cvpSettingsLoadError() { loadSettings(); return _loadErr.get(); }
 export function loadSettings() {

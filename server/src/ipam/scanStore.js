@@ -136,7 +136,7 @@ function normalizeCfg(p = {}) {
  *   /api/central/ip-scan-assignment 가 assigned:false 로 답해 전 엣지 스캔이 멈췄다(원인은 손상). 오류면 그 라우트가 503 으로 답한다.
  *   재시작 뒤 보존본만 남은 경우도 못 읽은 것이다. 저장(saveAll)만 해제한다.
  */
-const _cfgLoadErr = makeSettingsLoadError(() => CFG);
+const _cfgLoadErr = makeSettingsLoadError(() => CFG, { label: 'IP 스캔 배정', confirm: () => saveAll(loadAll()) });
 /** 스캔 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function scanSettingsLoadError() { loadAll(); return _cfgLoadErr.get(); }
 

@@ -53,7 +53,7 @@ let cache = null;
  *   재시작 뒤(원본이 .corrupt 로 옮겨져 ENOENT)도 보존본만 있으면 여전히 못 읽은 것이다(settingsLoadError.missing).
  *   오류는 **관리자 저장**(setAssignment·deleteAssignment)만 해제한다 — pull·ack·주기 기록이 빈 배정을 파일로 굳히지 않게.
  */
-const _loadErr = makeSettingsLoadError(() => FILE());
+const _loadErr = makeSettingsLoadError(() => FILE(), { label: '성능점검 엣지 배정', confirm: () => { load(); save({ admin: true }); } });
 /** 배정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function svcmonAssignLoadError() { load(); return _loadErr.get(); }
 

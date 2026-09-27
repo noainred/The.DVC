@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { fetchJson, usePolling, downloadFile } from '../api.js';
+import { fetchJson, usePolling, downloadFile, postJson, hasRole } from '../api.js';
+import { confirmPrompt, resultText, canConfirm } from './settingsFileConfirmText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { fmtBytes, fmtAgo } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
@@ -33,10 +34,39 @@ export function ServiceCheck() {
               <span className="badge" style={{ background: 'transparent', color: DOT[c.status], fontSize: 12 }}>{LBL[c.status]}</span>
             </div>
             <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{c.detail}</div>
+            {c.key === 'settings-files' && Array.isArray(c.files) && c.files.length > 0 && <SettingsFiles files={c.files} />}
             {c.at && <div className="muted" style={{ fontSize: 11, marginTop: 4, opacity: 0.7 }}>{fmtAgo(c.at)}</div>}
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/* v2.633: 읽지 못한 중앙 설정 파일 목록 + [기본값으로 확정](관리자만 보인다 — 집행은 서버: admin + 전체 범위). */
+function SettingsFiles({ files }) {
+  const [busy, setBusy] = useState('');
+  const [msg, setMsg] = useState({});
+  const isAdmin = hasRole('admin');
+  const confirmOne = async (f) => {
+    if (!window.confirm(confirmPrompt(f))) return;
+    setBusy(f.file);
+    try { const r = await postJson('/tools/service-check/settings-files/confirm', { file: f.file }); setMsg((m) => ({ ...m, [f.file]: { ok: true, text: resultText(r) } })); }
+    catch (e) { setMsg((m) => ({ ...m, [f.file]: { ok: false, text: resultText({ code: e?.body?.code, detail: e?.body?.code ? e?.body?.detail : e?.message }) } })); }
+    finally { setBusy(''); }
+  };
+  return (
+    <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
+      {files.map((f) => (
+        <div key={f.file} style={{ fontSize: 12, borderTop: '1px solid var(--border)', paddingTop: 6, minWidth: 0 }}>
+          <div className="flex between wrap" style={{ alignItems: 'center', gap: 6 }}>
+            <b style={{ overflowWrap: 'anywhere', minWidth: 0 }}>{f.label || f.file}{f.label ? <span className="muted" style={{ fontWeight: 400 }}> · {f.file}</span> : null}</b>
+            {canConfirm(f, isAdmin) && <button className="logout-btn" style={{ padding: '3px 10px', flex: 'none', fontSize: 12 }} disabled={!!busy} onClick={() => confirmOne(f)}>{busy === f.file ? '저장 중…' : '기본값으로 확정'}</button>}
+          </div>
+          <div className="muted" style={{ overflowWrap: 'anywhere' }}>{f.reason}</div>
+          {msg[f.file] && <div style={{ color: msg[f.file].ok ? 'var(--green, #22c55e)' : 'var(--red, #ef4444)', marginTop: 2 }}>{msg[f.file].text}</div>}
+        </div>
+      ))}
     </div>
   );
 }

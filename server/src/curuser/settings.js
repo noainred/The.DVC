@@ -100,7 +100,7 @@ export function normalize(input = {}) {
   };
 }
 
-const _loadErr = makeSettingsLoadError(() => FILE());
+const _loadErr = makeSettingsLoadError(() => FILE(), { label: '현재 사용자 수집 설정', confirm: () => save({}) });
 /** v2.631(EDGE2631-01): 설정 파일을 못 읽었으면 사유(배포 라우트가 503 으로 답한다), 읽었으면 null. */
 export function curUserSettingsLoadError() { load(); return _loadErr.get(); }
 
