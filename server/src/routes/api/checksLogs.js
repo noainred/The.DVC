@@ -42,13 +42,37 @@ function scopeLogMeta(meta, allowed) {
  *  - 첫 청크 뒤로는 커서 시각이 상한이 된다(지정 until 이 있으면 그것부터). '지금' 으로 고정하지 않는 것은
  *    vCenter 시계가 포탈보다 빠를 때 최신 이벤트가 조용히 빠지지 않게 하기 위해서다.
  *  - (ts, 같은 ts 안에서 이미 낸 개수) 커서로 이어 간다 — 다음 청크는 `ts <= 마지막 ts` 에서 같은 ts 로 낸 만큼만 건너뛴다.
- *    그래서 커서보다 **새** 시각의 삽입은 결과를 밀지 않는다. ⚠ 한계(정직): 행 식별자(rowid)는 logs/db.js 가 주지 않아
- *    커서와 **정확히 같은 ts** 로 청크 사이에 삽입된 행만은 경계가 한 칸 밀릴 수 있다(동률 삽입 한정).
+ *    그래서 커서보다 **새** 시각의 삽입은 결과를 밀지 않는다. ✅ v2.632: 실제 DB(sqlite·NDJSON)는 queryPage((ts, rowid) 키셋)를
+ *    주므로 커서와 **같은 ts** 의 삽입도 밀지 않는다 — 이 OFFSET 경로는 queryPage 가 없는 구현에만 남는다(그때는 동률 삽입이 한 칸 민다).
  *  - 잘림은 상한에 닿은 뒤 **한 행 더 있을 때만** 밝힌다.
  * onRows 가 false 를 돌려주면 중단(aborted).
  */
 export async function exportLogPages(db, f, { max, chunk, onRows } = {}) {
   const base = { ...f, until: f.until ? Number(f.until) : 0 };
+  // v2.632(A6-2632-02): db 가 키셋 페이지(queryPage)를 주면 (ts, rowid) 커서로 잇는다 — OFFSET 이 없어 청크 사이에 커서와
+  //   **같은 ts** 로 들어온 행도 결과를 밀지 않는다(예전: 경계 행 1개 중복 + 새 행 누락). 그 늦은 행은 내보내기 시작 뒤에 들어온
+  //   것이라 이번 결과에 없다(스냅샷 의미 — 중복·누락이 아니다). queryPage 가 없는 구현(테스트 목)만 아래 OFFSET 경로를 쓴다.
+  if (typeof db.queryPage === 'function') {
+    let cursor = null;
+    let emitted = 0;
+    for (;;) {
+      const take = Math.min(chunk, max - emitted);
+      if (take <= 0) {
+        const more = db.queryPage(base, 1, cursor);
+        return { emitted, truncated: more.length > 0, aborted: false };
+      }
+      const rows = db.queryPage(base, take, cursor);
+      if (rows.length) {
+        const go = await onRows(rows);
+        if (go === false) return { emitted, truncated: false, aborted: true };
+        emitted += rows.length;
+        const last = rows[rows.length - 1];
+        cursor = { ts: last.ts, rid: last.rid };
+      }
+      if (rows.length < take) return { emitted, truncated: false, aborted: false };
+      await new Promise((resolve) => setImmediate(resolve)); // 이벤트 루프 양보(다른 사용자 요청 처리)
+    }
+  }
   let cursorTs = base.until || null;   // null = 상한 없음(첫 청크만)
   let tieSkip = 0;
   let emitted = 0;

@@ -104,6 +104,22 @@ function testFilter(item, f, regionIds) {
   }
 }
 
+/*
+ * v2.632(감사 AX2-2632-06): 정렬 비교기. 값이 없는 항목(null·undefined·''·NaN)은 **방향과 무관하게 항상 뒤로**
+ *   (STable 과 같은 규약). 예전엔 String(null)='null' 을 숫자 문자열과 localeCompare 해 내림차순에서 맨 앞에 와,
+ *   '사용률 높은 데이터스토어' 상위 N 이 사용량 미상 DS 로 채워졌다. 숫자끼리는 수치 비교, 나머지는 문자열(숫자 인식) 비교.
+ */
+export function nlSortCompare(field, dir = 1) {
+  const empty = (v) => v == null || v === '' || (typeof v === 'number' && !Number.isFinite(v));
+  return (a, b) => {
+    const x = a?.[field], y = b?.[field];
+    const ex = empty(x), ey = empty(y);
+    if (ex || ey) return ex === ey ? 0 : ex ? 1 : -1;
+    const cmp = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true });
+    return cmp * dir;
+  };
+}
+
 function runQuery(q, allowed = null) {
   const snap = store.get();
   const entity = SCHEMA[q.entity] ? q.entity : 'vm';
@@ -118,11 +134,7 @@ function runQuery(q, allowed = null) {
 
   if (q.sort?.field) {
     const dir = q.sort.dir === 'desc' ? -1 : 1;
-    items = [...items].sort((a, b) => {
-      const x = a[q.sort.field], y = b[q.sort.field];
-      const cmp = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y));
-      return cmp * dir;
-    });
+    items = [...items].sort(nlSortCompare(q.sort.field, dir));
   }
   const limit = Math.min(Number(q.limit) || 100, 500);
   return { entity, label: SCHEMA[entity].label, total: items.length, results: items.slice(0, limit) };

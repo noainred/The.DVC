@@ -51,16 +51,28 @@ export function listSources(vcenterId, q = '', allowed = null) {
   return { total: sources.length, sources: sources.slice(0, 300) };
 }
 
-export function listJobs(user) {
+/**
+ * v2.632 AX3-02: 범위(scope) 교집합. role==='admin' 만 보고 전 작업을 주면 범위 관리자(역시 admin)가 범위 밖 법인의
+ * 원본 VM·배치·생성 VM 이름·IP 를 본다(형제 /provision/saved·/sources 는 이미 범위로 거른다).
+ * @param {Set<string>|null} allowed null = 제한 없음. Set 이면 그 vCenter 의 작업만(vCenter 귀속 없는 작업도 숨긴다).
+ */
+const inScope = (j, allowed) => !allowed || (j.vcenterId && allowed.has(String(j.vcenterId)));
+
+/** @returns {{jobs: object[], omittedOutOfScope: number}} */
+export function listJobsScoped(user, allowed = null) {
   const isAdmin = user?.role === 'admin';
-  return jobs
-    .filter((j) => isAdmin || j.createdBy === user?.username)
-    .map(redact);
+  const mine = jobs.filter((j) => isAdmin || j.createdBy === user?.username);
+  const visible = mine.filter((j) => inScope(j, allowed));
+  return { jobs: visible.map(redact), omittedOutOfScope: mine.length - visible.length };
 }
-export function getJob(id, user) {
+export function listJobs(user, allowed = null) {
+  return listJobsScoped(user, allowed).jobs;
+}
+export function getJob(id, user, allowed = null) {
   const j = jobs.find((x) => x.id === id);
   if (!j) return null;
   if (user && user.role !== 'admin' && j.createdBy !== user.username) return null;
+  if (!inScope(j, allowed)) return null; // 범위 밖은 존재 은닉(404)
   return redact(j);
 }
 

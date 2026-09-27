@@ -175,16 +175,28 @@ export function capacityCards(s) {
   if (!s) return [];
   const c = s.compute || {}, a = s.allocation || {}, st = s.storage || {};
   const ramAllocPct = n(c.memTotalGB) > 0 && n(a.ramAllocatedGB) != null ? Math.round((a.ramAllocatedGB / c.memTotalGB) * 100) : null;
-  const provPct = n(st.capacityTB) > 0 && n(a.provisionedStorageTB) != null ? Math.round((a.provisionedStorageTB / st.capacityTB) * 100) : null;
+  // v2.632(AX1-2632-04): 프로비저닝 비교의 분모는 **설치 용량 전체**(capacityTBAll). capacityTB 는 사용량을 읽은 DS 만이라
+  //   미상 DS 가 많을수록 과할당이 거짓으로 부푼다(전부 미상이면 0 으로 나눠 '—'). 사용량(used)만 읽은 DS 기준이다.
+  const capAll = physStorageTB(st);
+  const provPct = capAll > 0 && n(a.provisionedStorageTB) != null ? Math.round((a.provisionedStorageTB / capAll) * 100) : null;
+  const unk = n(st.usageUnknown);
   const vpc = n(a.vcpuPerCore);
   return [
     { id: 'cpu', label: 'CPU', phys: `${fmtN(c.cpuCores)} 코어`, alloc: `${fmtN(a.vcpuAllocated)} vCPU`,
       ratio: vpc == null ? null : `${vpc}:1`, ratioLabel: 'vCPU : 코어', warn: vpc != null && vpc > 4, allocPct: vpc == null ? null : Math.round(vpc * 25) },
     { id: 'mem', label: '메모리', phys: `${fmtN(c.memTotalGB)} GB`, alloc: `${fmtN(a.ramAllocatedGB)} GB`,
       ratio: ramAllocPct == null ? null : `${ramAllocPct}%`, ratioLabel: '할당 / 물리', warn: ramAllocPct != null && ramAllocPct > 150, allocPct: ramAllocPct },
-    { id: 'sto', label: '스토리지', phys: `${fmtN(st.capacityTB, 1)} TB`, alloc: `${fmtN(a.provisionedStorageTB, 1)} TB 프로비저닝`,
-      used: `${fmtN(st.usedTB, 1)} TB 사용`, ratio: provPct == null ? null : `${provPct}%`, ratioLabel: '프로비저닝 / 용량', warn: provPct != null && provPct > 100, allocPct: provPct },
+    { id: 'sto', label: '스토리지', phys: `${fmtN(capAll, 1)} TB`, alloc: `${fmtN(a.provisionedStorageTB, 1)} TB 프로비저닝`,
+      used: `${fmtN(st.usedTB, 1)} TB 사용${unk > 0 ? ` · 사용량 모름 DS ${fmtN(unk)}개 제외` : ''}`, ratio: provPct == null ? null : `${provPct}%`, ratioLabel: '프로비저닝 / 용량', warn: provPct != null && provPct > 100, allocPct: provPct },
   ];
+}
+/**
+ * v2.632(AX1-2632-04·WEB2632-01): '설치 스토리지 용량' — /summary storage.capacityTBAll(미상 DS 포함). 옛 응답(필드 없음)은
+ * capacityTB 로 떨어진다. capacityTB 는 v2.631 부터 '사용량을 읽은 DS 만' 이라 용량 표시·프로비저닝 비교에 쓰면 과소다.
+ */
+export function physStorageTB(st) {
+  const all = n(st?.capacityTBAll);
+  return all != null ? all : n(st?.capacityTB);
 }
 function fmtN(v, d = 0) { return n(v) == null ? '—' : Number(v).toLocaleString('en-US', { maximumFractionDigits: d }); }
 
@@ -195,7 +207,7 @@ export function totalTiles(s) {
   return [
     { label: '물리 코어', value: fmtN(c.cpuCores) },
     { label: '물리 메모리', value: n(c.memTotalGB) == null ? '—' : `${fmtN(c.memTotalGB / 1024, 1)} TB` },
-    { label: '스토리지 용량', value: n(st.capacityTB) == null ? '—' : `${fmtN(st.capacityTB, 1)} TB` },
+    { label: '스토리지 용량', value: physStorageTB(st) == null ? '—' : `${fmtN(physStorageTB(st), 1)} TB` },
     { label: '클러스터', value: fmtN(cnt.clusters) },
     { label: '호스트당 VM', value: fmtN(a.avgVmPerHost, 1) },
     powerTile(p, cnt),
@@ -274,7 +286,15 @@ export function corpContribution(s) {
     total[k] = vals.length ? vals.reduce((a, b) => a + b, 0) : null;
     missing[k] = rows.length - vals.length;
   }
-  return { rows, total, excluded, carried, missing };
+  // v2.632(WEB2632-01): 행의 storageTotalTB 는 사용량을 읽은 DS 만이다 — 뺀 DS 수를 합해 표가 그 사실을 말하게 한다.
+  const dsUnknown = rows.reduce((t, r) => t + (r.statusLabel && !r.carried ? 0 : (n(r.datastoresUsageUnknown) || 0)), 0);
+  return { rows, total, excluded, carried, missing, dsUnknown };
+}
+
+/** v2.632(WEB2632-01): 기여도 표 스토리지 셀의 짧은 표지 — 사용량 미상 DS 가 있으면 '미상 N'. 없으면 ''. */
+export function dsUnknownMark(r) {
+  const k = n(r?.datastoresUsageUnknown);
+  return k != null && k > 0 ? `미상 ${k}` : '';
 }
 
 /** 기여도 표 머리말 안내(v2.629) — 뺀 행과 직전 값 행을 나눠 말한다. 둘 다 없으면 ''. */
@@ -282,6 +302,7 @@ export function contribNote(c) {
   const parts = [];
   if (c?.excluded > 0) parts.push(`첫 수집 중·점검 중·연결 불가(보관 인벤토리 없음)·비활성 ${c.excluded}곳은 값을 모르므로 합계에서 뺐습니다`);
   if (c?.carried > 0) parts.push(`점검 중·연결 불가 ${c.carried}곳은 직전 수집 값을 합계에 포함했습니다`);
+  if (c?.dsUnknown > 0) parts.push(`스토리지 열은 사용량을 읽은 데이터스토어만 합했습니다(사용량 미상 ${c.dsUnknown}개 제외)`);
   return parts.join(' · ');
 }
 /** 합계 행 라벨. */

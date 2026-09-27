@@ -9,6 +9,8 @@ import { GuestOsVmsModal } from './SpecialTools.jsx';
 import { STable } from '../components/STable.jsx';
 import { unitText } from './unitText.js';
 import { ratioOrNull, serverRatio, ratioLabel, ratioBadge, ratioKpi, numCell, RATIO_HI } from './virtRatioText.js';
+// v2.632(감사 WEB2632-01·02): 기여도 표·설치 용량 판정은 V6 와 같은 함수를 쓴다(형제 비대칭 — 개발 포탈만 0 행을 합계에 더했다).
+import { corpContribution, contribNote, contribTotalLabel, dsUnknownMark, physStorageTB } from '../version_6/v6Data.js';
 
 const OS_COLORS = {
   Windows: '#3b82f6', RHEL: '#ef4444', Ubuntu: '#f59e0b', CentOS: '#a855f7',
@@ -18,6 +20,8 @@ const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRad
 const itemStyle = { color: '#e6edf6' };
 const labelStyle = { color: '#8b9bb4' };
 const fmt = (n) => (n ?? 0).toLocaleString('en-US');
+/** 값이 없으면 0 이 아니라 '—'(기여도 표 — 첫 수집 중·비활성 행은 모른다). */
+const fmtOr = (n, d = 0) => (n == null || !Number.isFinite(Number(n)) ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
 
 function Big({ label, value, unit, sub, accent, onClick }) {
   return (
@@ -140,13 +144,11 @@ export default function Summary({ scope, onGotoTab }) {
     { key: 'storageTotalTB', label: '스토리지(TB)', align: 'right' },
     { key: 'provisionedTB', label: '프로비저닝(TB)', align: 'right' },
   ];
-  // totals row
-  const totals = s.byVcenter.reduce((a, r) => {
-    for (const k of ['hosts', 'vms', 'cpuCores', 'vcpuAllocated', 'memTotalGB', 'ramAllocatedGB', 'storageTotalTB', 'provisionedTB']) {
-      a[k] = (a[k] || 0) + (r[k] || 0);
-    }
-    return a;
-  }, {});
+  // totals row — v2.632(WEB2632-02): 첫 수집 중·비활성·보관 인벤토리 없는 연결 불가 행은 서버가 0 으로 채워 보낸다.
+  //   그 0 은 값이 아니라 '모른다' 이므로 V6 와 같은 corpContribution 으로 행을 '—' 로 바꾸고 합계에서 뺀 뒤 개수를 밝힌다.
+  const contrib = corpContribution(s);
+  const totals = contrib.total;
+  const stPhys = physStorageTB(st); // v2.632(AX1-2632-04·WEB2632-01): 설치 용량 전체(미상 DS 포함)
 
   const osAlloc = s.osAllocation || [];
   const osAllocTotals = osAlloc.reduce((a, r) => {
@@ -175,7 +177,7 @@ export default function Summary({ scope, onGotoTab }) {
         <Big label="전체 데이터스토어" value={fmt(c.datastores)} sub={`네트워크 ${fmt(c.networks)}개`} />
         <Big label="전체 CPU 코어" value={fmt(comp.cpuCores)} sub={`${fmt(comp.cpuTotalGhz)} GHz 물리 용량`} />
         <Big label="전체 메모리" value={fmt(comp.memTotalGB)} unit="GB" sub={`≈ ${(comp.memTotalGB / 1024).toFixed(1)} TB`} />
-        <Big label="전체 스토리지" value={fmt(st.capacityTB)} unit="TB" sub={`여유 ${unitText(st.freeTB, ' TB')}${st.usageUnknown ? ` · 사용량 모름 ${st.usageUnknown}개 제외` : ''}`} />
+        <Big label="전체 스토리지" value={fmtOr(stPhys)} unit={stPhys == null ? undefined : 'TB'} sub={`여유 ${unitText(st.freeTB, ' TB')}${st.usageUnknown ? ` · 여유·사용률은 사용량 모름 DS ${st.usageUnknown}개 제외` : ''}`} />
         {s.power?.reporting > 0 && (
           <Big label="총 소비전력" value={fmt(s.power.kw)} unit="kW" accent="var(--amber)" sub={`${fmt(s.power.reporting)}개 호스트 · 연 ≈ ${fmt(s.power.annualMwh)} MWh`} />
         )}
@@ -186,7 +188,7 @@ export default function Summary({ scope, onGotoTab }) {
       <div className="grid cols-3">
         <CapacityBar label="CPU" pct={comp.cpuUsagePct} usedLabel={`${fmt(comp.cpuUsedGhz)} GHz`} totalLabel={`${fmt(comp.cpuTotalGhz)} GHz`} />
         <CapacityBar label="메모리" pct={comp.memUsagePct} usedLabel={`${fmt(comp.memUsedGB)} GB`} totalLabel={`${fmt(comp.memTotalGB)} GB`} />
-        <CapacityBar label="스토리지" pct={st.usagePct} usedLabel={`${st.usedTB} TB`} totalLabel={`${st.capacityTB} TB`} />
+        <CapacityBar label="스토리지" pct={st.usagePct} usedLabel={`${st.usedTB} TB`} totalLabel={`${st.capacityTB} TB${st.usageUnknown ? ` (사용량 읽은 DS · 모름 ${st.usageUnknown}개 제외)` : ''}`} />
       </div>
 
       <div className="section-title">VM 할당 합계 &amp; 오버커밋</div>
@@ -296,41 +298,42 @@ export default function Summary({ scope, onGotoTab }) {
               allocated={al.vcpuAllocated} allocatedLabel={`${fmt(al.vcpuAllocated)} vCPU`} />
             <OverBar title="메모리" physical={comp.memTotalGB} physicalLabel={`${fmt(comp.memTotalGB)} GB`}
               allocated={al.ramAllocatedGB} allocatedLabel={`${fmt(al.ramAllocatedGB)} GB`} />
-            <OverBar title="스토리지" physical={st.capacityTB} physicalLabel={`${st.capacityTB} TB`}
+            <OverBar title="스토리지" physical={stPhys} physicalLabel={unitText(stPhys, ' TB')}
               allocated={al.provisionedStorageTB} allocatedLabel={`${al.provisionedStorageTB} TB`} />
           </div>
         </div>
       </div>
 
       <div className="section-title">vCenter별 기여도 (사이트별 합계)</div>
+      {(contrib.excluded > 0 || contrib.carried > 0 || contrib.dsUnknown > 0) && <div className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>{contribNote(contrib)}</div>}
       <div className="table-wrap">
         <STable>
           <thead><tr>{vcCols.map((col) => <th key={col.key} style={{ textAlign: col.align || 'left' }}>{col.label}</th>)}</tr></thead>
           <tbody>
-            {s.byVcenter.map((r) => (
+            {contrib.rows.map((r) => (
               <tr key={r.id}>
-                <td><b>{r.name}</b></td>
+                <td><b>{r.name}</b>{r.statusLabel && <span className="muted" style={{ fontSize: 11 }}> · {r.statusLabel}</span>}</td>
                 <td>{r.region}</td>
-                <td className="right tabular">{fmt(r.hosts)}</td>
-                <td className="right tabular">{fmt(r.vms)}</td>
-                <td className="right tabular">{fmt(r.cpuCores)}</td>
-                <td className="right tabular">{fmt(r.vcpuAllocated)}</td>
-                <td className="right tabular">{fmt(r.memTotalGB)}</td>
-                <td className="right tabular">{fmt(r.ramAllocatedGB)}</td>
-                <td className="right tabular">{r.storageTotalTB}</td>
-                <td className="right tabular">{r.provisionedTB}</td>
+                <td className="right tabular" data-sort={r.hosts ?? ''}>{fmtOr(r.hosts)}</td>
+                <td className="right tabular" data-sort={r.vms ?? ''}>{fmtOr(r.vms)}</td>
+                <td className="right tabular" data-sort={r.cpuCores ?? ''}>{fmtOr(r.cpuCores)}</td>
+                <td className="right tabular" data-sort={r.vcpuAllocated ?? ''}>{fmtOr(r.vcpuAllocated)}</td>
+                <td className="right tabular" data-sort={r.memTotalGB ?? ''}>{fmtOr(r.memTotalGB)}</td>
+                <td className="right tabular" data-sort={r.ramAllocatedGB ?? ''}>{fmtOr(r.ramAllocatedGB)}</td>
+                <td className="right tabular" data-sort={r.storageTotalTB ?? ''}>{fmtOr(r.storageTotalTB, 1)}{dsUnknownMark(r) && <span className="muted" style={{ fontSize: 11 }} title="사용량을 못 읽은 데이터스토어는 이 값에서 뺐습니다"> · {dsUnknownMark(r)}</span>}</td>
+                <td className="right tabular" data-sort={r.provisionedTB ?? ''}>{fmtOr(r.provisionedTB, 1)}</td>
               </tr>
             ))}
-            <tr style={{ borderTop: '2px solid var(--accent)', fontWeight: 700 }}>
-              <td><b>합계</b></td><td className="muted">{s.byVcenter.length} vCenter</td>
-              <td className="right tabular">{fmt(totals.hosts)}</td>
-              <td className="right tabular">{fmt(totals.vms)}</td>
-              <td className="right tabular">{fmt(totals.cpuCores)}</td>
-              <td className="right tabular">{fmt(totals.vcpuAllocated)}</td>
-              <td className="right tabular">{fmt(totals.memTotalGB)}</td>
-              <td className="right tabular">{fmt(totals.ramAllocatedGB)}</td>
-              <td className="right tabular">{Number(totals.storageTotalTB).toFixed(1)}</td>
-              <td className="right tabular">{Number(totals.provisionedTB).toFixed(1)}</td>
+            <tr data-pin style={{ borderTop: '2px solid var(--accent)', fontWeight: 700 }}>
+              <td><b>{contribTotalLabel(contrib)}</b></td><td className="muted">{s.byVcenter.length} vCenter</td>
+              <td className="right tabular">{fmtOr(totals.hosts)}</td>
+              <td className="right tabular">{fmtOr(totals.vms)}</td>
+              <td className="right tabular">{fmtOr(totals.cpuCores)}</td>
+              <td className="right tabular">{fmtOr(totals.vcpuAllocated)}</td>
+              <td className="right tabular">{fmtOr(totals.memTotalGB)}</td>
+              <td className="right tabular">{fmtOr(totals.ramAllocatedGB)}</td>
+              <td className="right tabular">{fmtOr(totals.storageTotalTB, 1)}</td>
+              <td className="right tabular">{fmtOr(totals.provisionedTB, 1)}</td>
             </tr>
           </tbody>
         </STable>
@@ -354,25 +357,27 @@ export default function Summary({ scope, onGotoTab }) {
 }
 
 function OverBar({ title, physical, physicalLabel, allocated, allocatedLabel }) {
-  const max = Math.max(physical, allocated, 1);
-  const ratio = physical > 0 ? allocated / physical : 0;
+  // v2.632(AX1-2632-04): 물리 용량을 모르면(0·null) 비율은 0% 가 아니라 '—' 다.
+  const phys = Number(physical) > 0 ? Number(physical) : 0;
+  const max = Math.max(phys, Number(allocated) || 0, 1);
+  const ratio = phys > 0 ? (Number(allocated) || 0) / phys : null;
   return (
     <div>
       <div className="flex between" style={{ fontSize: 12, marginBottom: 6 }}>
         <b>{title}</b>
         <span className="tabular" style={{ color: ratio > 1 ? 'var(--amber)' : 'var(--text-dim)' }}>
-          할당/물리 {Math.round(ratio * 100)}%
+          할당/물리 {ratio == null ? '—' : `${Math.round(ratio * 100)}%`}
         </span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           <span className="muted" style={{ width: 56, fontSize: 11 }}>물리</span>
-          <div className="usage-bar" style={{ flex: 1, height: 9 }}><span style={{ width: `${(physical / max) * 100}%`, background: 'var(--accent)' }} /></div>
+          <div className="usage-bar" style={{ flex: 1, height: 9 }}><span style={{ width: `${(phys / max) * 100}%`, background: 'var(--accent)' }} /></div>
           <span className="tabular" style={{ width: 92, textAlign: 'right', fontSize: 11 }}>{physicalLabel}</span>
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           <span className="muted" style={{ width: 56, fontSize: 11 }}>할당</span>
-          <div className="usage-bar" style={{ flex: 1, height: 9 }}><span style={{ width: `${(allocated / max) * 100}%`, background: ratio > 1 ? 'var(--amber)' : 'var(--purple)' }} /></div>
+          <div className="usage-bar" style={{ flex: 1, height: 9 }}><span style={{ width: `${((Number(allocated) || 0) / max) * 100}%`, background: ratio > 1 ? 'var(--amber)' : 'var(--purple)' }} /></div>
           <span className="tabular" style={{ width: 92, textAlign: 'right', fontSize: 11 }}>{allocatedLabel}</span>
         </div>
       </div>

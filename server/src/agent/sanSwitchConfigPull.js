@@ -80,6 +80,10 @@ async function _pull() {
     }
     // 포트 사용량 수집 설정(v2.423): 중앙이 지정한 값을 적용(SANSW_PERF_LOCAL=1 이면 무시). 켜짐이 바뀌면 다음 틱부터 수집.
     let perfApplied = false;
+    // v2.632(감사 EDGE2632-02): 중앙이 포트 사용량 설정 파일을 못 읽으면 perf 를 빼고 사유를 싣는다 — 적용하지 않고(직전 값 유지) 상태·콘솔에 남긴다.
+    const perfUnreadable = body?.perfSettingsUnreadable && typeof body.perfSettingsUnreadable === 'object'
+      ? String(body.perfSettingsUnreadable.reason || '사유 미상').slice(0, 200) : '';
+    if (perfUnreadable && _log404('perf-unreadable', perfUnreadable)) console.warn(`[sanswitch-config] 중앙 포트 사용량 설정을 읽지 못해 받지 않았습니다(직전 설정 유지): ${perfUnreadable}`);
     if (body?.perf) { try { perfApplied = applyCentralPerfSettings(body.perf); if (perfApplied) console.log(`[sanswitch-config] 중앙 포트 사용량 설정 적용: ${JSON.stringify(body.perf)}`); } catch (e) { console.warn(`[sanswitch-config] perf 설정 적용 실패: ${e.message}`); } }
     // '지금 수집' 요청 — 구성이 안 바뀌어도 **매 pull 마다** 처리한다(재수집은 흔한 요청).
     const wants = Array.isArray(body?.collectNow) ? body.collectNow.slice(0, 20) : [];
@@ -115,7 +119,7 @@ async function _pull() {
         if (!p?.ok) console.warn(`[sanswitch-config] 포트 사용량 수집 결과 push 실패: ${p?.reason || '알 수 없음'}`);
       })().catch((e) => console.warn(`[sanswitch-config] 포트 사용량 수집 대행 실패: ${e.message}`));
     }
-    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied, perfCollect, ...(collected && _collectPush ? { collectPush: _collectPush } : {}) };
+    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied, perfCollect, ...(perfUnreadable ? { perfSettingsUnreadable: perfUnreadable } : {}), ...(collected && _collectPush ? { collectPush: _collectPush } : {}) };
     return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected, testRequested: tests.length, perfApplied, perfCollect };
   } catch (e) {
     _last = { at: Date.now(), error: e.message };

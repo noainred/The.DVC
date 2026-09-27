@@ -13,3 +13,15 @@ export function licenseScopeNote(data) {
   if (!parts.length) return null;
   return `내 조회 범위 밖이라 제외: ${parts.join(' · ')}`;
 }
+
+/**
+ * v2.632 WEB2632-07: 라이선스 사용 현황 — 여러 vCenter 가 같은 키를 보고해(Enhanced Linked Mode) 서버가 합계에서
+ * 한 번만 센 보고 수(`duplicateKeys`, v2.631 AX2-06). 화면이 그 사실을 말하지 않으면 '제품별 합계' 가 아래 표의 행을
+ * 더한 값과 달라 보인다. 0·없음이면 null(문구를 띄우지 않는다).
+ * @returns {string|null}
+ */
+export function licenseDupNote(data) {
+  const n = data?.duplicateKeys;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) return null;
+  return `여러 vCenter 가 같은 라이선스 키를 보고한 ${n.toLocaleString('en-US')}건은 제품별 합계에서 한 번만 셌습니다(아래 표는 vCenter 별 보고 그대로라 행을 더한 값과 합계가 다를 수 있습니다)`;
+}

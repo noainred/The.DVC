@@ -53,6 +53,7 @@ export function tempBuckets(rows = []) {
   const out = [];
   for (let t = BUCKET_MIN; t <= BUCKET_MAX; t += 1) out.push({ t, n: 0, last: t === BUCKET_MAX });
   for (const r of rows || []) {
+    if (r?.stale) continue;                                   // v2.632 AX2-2632-07: 오래된 값은 '현재' 분포가 아니다
     const v = tempNum(r?.curC);
     if (v == null) continue;                                  // 못 읽은 값은 0℃ 가 아니다
     const i = Math.min(BUCKET_COUNT - 1, Math.max(0, Math.floor(v) - BUCKET_MIN));
@@ -227,9 +228,12 @@ export function sparkSeriesLabel(metric) {
  * `ok + warm + hot + unknown === 전체` 가 항상 성립한다(v2.519·v2.523·v2.534 규약).
  */
 export function tempCounts(rows = []) {
-  const c = { ok: 0, warm: 0, hot: 0, unknown: 0, total: 0 };
+  // v2.632(감사 AX2-2632-07): 오래된(stale) 표본은 지금 온도가 아니다 — 정상·이상으로 세지 않고 미확인(unknown)에 넣으며
+  //   그중 오래됨 수를 stale 로 따로 밝힌다(서버 aggregate 의 staleExcluded 와 같은 기준 · 항등식은 그대로 성립).
+  const c = { ok: 0, warm: 0, hot: 0, unknown: 0, stale: 0, total: 0 };
   for (const r of rows || []) {
     c.total += 1;
+    if (r?.stale) { c.unknown += 1; c.stale += 1; continue; }
     const v = tempNum(r?.curC);
     if (v == null) { c.unknown += 1; continue; }
     if (v >= TEMP_HOT_C) c.hot += 1;
@@ -242,7 +246,7 @@ export function tempCounts(rows = []) {
 /** 이상 서버(임계 이상) — 더운 순. 값을 못 읽은 서버는 들어가지 않는다(모르는 것이다). */
 export function hotList(rows = []) {
   return (rows || [])
-    .filter((r) => { const v = tempNum(r?.curC); return v != null && v >= TEMP_WARN_C; })
+    .filter((r) => { if (r?.stale) return false; const v = tempNum(r?.curC); return v != null && v >= TEMP_WARN_C; })
     .sort((a, b) => tempNum(b.curC) - tempNum(a.curC));
 }
 

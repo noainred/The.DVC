@@ -15,7 +15,8 @@ import { dayStamp } from '../dayStamp.js';
 import { dailyReportFailNote } from './dailyReportText.js';
 import { alertChannelsBody } from './alertChannelsBody.js';
 import { unprotectedPatternNote, undeterminedNote } from './unprotectedPatternText.js';
-import { listOmittedNote, reclaimMeta, toolsKpiMeta } from './toolsReportText.js';
+import { listOmittedNote, reclaimMeta, toolsKpiMeta, forecastCapNote } from './toolsReportText.js';
+import { unitText } from './unitText.js';
 import { suggestCell, heldNote } from './rightsizeText.js';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`);
@@ -334,7 +335,7 @@ export function CapacityForecast({ scope }) {
   const columns = [
     { key: 'name', label: '데이터스토어', render: (r) => <b>{r.name}</b> },
     { key: 'vcenterId', label: 'vCenter' },
-    { key: 'usagePct', label: '사용률', align: 'right', render: (r) => `${r.usagePct}%` },
+    { key: 'usagePct', label: '사용률', align: 'right', render: (r) => unitText(r.usagePct, '%') }, // v2.632 WEB2632-04: 지금 사용량을 못 읽은 DS 는 'null%' 가 아니라 '—'
     { key: 'usedGB', label: '사용', align: 'right', render: (r) => tb(r.usedGB) },
     { key: 'capacityGB', label: '전체', align: 'right', render: (r) => tb(r.capacityGB) },
     { key: 'slopePerDay', label: '증가/일', align: 'right', render: (r) => `${r.slopePerDay > 0 ? '+' : ''}${r.slopePerDay}GB` },
@@ -359,6 +360,7 @@ export function CapacityForecast({ scope }) {
         </label>
       </div>
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'daysToLimit', dir: 'asc' }} emptyText="증가 추세가 감지된 데이터스토어가 없습니다(시계열 누적 중일 수 있음)." />
+      {forecastCapNote(data) && <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>{forecastCapNote(data)}</p>}
     </>
   );
 }

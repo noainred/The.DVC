@@ -131,8 +131,9 @@ export function infraTotals(ov, scopeId = '') {
   const total = numOrNull(g.storageTotalTB);
   return {
     vcenters: numOrNull(g.vcenters),
-    physical: numOrNull(ov.physical?.servers),
-    physicalNote: null,
+    // v2.632 WEB2632-06: 집계 실패(physical.error — 서버가 servers:0 을 함께 싣는다)를 0 으로 그리지 않는다.
+    physical: ov.physical?.error ? null : numOrNull(ov.physical?.servers),
+    physicalNote: ov.physical?.error ? '물리 서버 집계를 읽지 못했습니다' : null,
     hosts: numOrNull(g.hosts), vms: numOrNull(g.vms), vmsOn: numOrNull(g.vmsPoweredOn),
     storageUsedTB: numOrNull(g.storageUsedTB), storageTotalTB: total,
     storagePct: numOrNull(g.datastores) > 0 && total > 0 ? numOrNull(g.storageUsagePct) : null,

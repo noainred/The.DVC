@@ -92,6 +92,11 @@ export function scopedNsxRollup({ managers, gateways, segments, transportNodes }
   for (const [list, fields] of Object.entries(LIST_FIELDS)) {
     if (failed[list]) for (const f of fields) r[f] = null;
   }
+  // v2.632(감사 AX2-2632-02): 목록을 하나도 읽지 못한 매니저(연결 실패·인증 정지·첫 수집 전 — nsx/store.js unreadPart)가
+  //   있으면 목록에서 나온 합계 전부가 부분 합이다 — 전체처럼 말하지 않고 null 로 두며 그 매니저 수를 밝힌다.
+  const unread = m.filter((x) => x?.unread === true).length;
+  r.managersUnread = unread;
+  if (unread) for (const fields of Object.values(LIST_FIELDS)) for (const f of fields) r[f] = null;
   if (Object.keys(failed).length) r.listsFailed = failed;
   return r;
 }

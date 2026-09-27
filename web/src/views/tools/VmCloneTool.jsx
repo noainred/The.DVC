@@ -3,6 +3,7 @@ import { fetchJson, postJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { unitText } from '../unitText.js';
+import { dsOptionLabel } from './vmCloneDsText.js'; // v2.632 WEB2632-05
 import { cloneRunMark } from '../authSkipText.js'; // v2.591(감사 F1): 인증 정지로 건너뛴 실행은 실패도 성공도 아니다
 
 /**
@@ -180,7 +181,7 @@ function JobForm({ d, form, setForm, onSaved }) {
           <label style={{ fontSize: 12 }}>대상 데이터스토어<br />
             <select className="select" value={form.dest.datastoreName || ''} onChange={(e) => setForm({ ...form, dest: { ...form.dest, datastoreName: e.target.value } })}>
               <option value="">(선택)</option>
-              {dss.map((ds) => <option key={ds.id} value={ds.name}>{ds.name} — 여유 {Math.round((ds.freeGB || 0) / 1024 * 10) / 10}TB ({ds.usagePct}%)</option>)}
+              {dss.map((ds) => <option key={ds.id} value={ds.name}>{dsOptionLabel(ds)}</option>)}
             </select>
           </label>
         ) : (

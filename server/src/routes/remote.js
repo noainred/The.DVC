@@ -18,7 +18,7 @@ import { testDataplane, applyMapping } from '../proxy/dataplane.js';
 import { previewConfig, testDeploy, deployToProxy } from '../proxy/deploy.js';
 import { provision, deprovision } from '../proxy/provision.js';
 import { withSsh } from '../proxy/sshExec.js';
-import { issueRdpTicket } from '../proxy/rdpTicket.js';
+import { issueRdpTicket, rdpCredsIssue } from '../proxy/rdpTicket.js';
 import { ssrfBlockReasonResolved, ipBlockReason } from '../collector/registry.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
@@ -37,7 +37,10 @@ const REDACT = '********'; // getConfigSafe 가 비밀을 가릴 때 쓰는 플�
 remoteRouter.post('/rdp-ticket', requirePerm('remote.access'), (req, res) => {
   const b = req.body || {};
   if (!b.username) return res.status(400).json({ ok: false, reason: '사용자명이 필요합니다.' });
-  const ticket = issueRdpTicket({ username: b.username, password: b.password, domain: b.domain, security: b.security });
+  const creds = { username: b.username, password: b.password, domain: b.domain, security: b.security };
+  const bad = rdpCredsIssue(creds); // v2.632 AX3-03: 필드 길이 상한(자르지 않고 거부)
+  if (bad) return res.status(400).json({ ok: false, reason: bad });
+  const ticket = issueRdpTicket(creds, { owner: req.user?.username || '' });
   res.json({ ok: true, ticket });
 });
 
@@ -153,7 +156,21 @@ remoteRouter.get('/targets', requirePerm('remote.access'), (req, res) => {
   res.json({ targets: targets.slice(0, 500), total: targets.length });
 });
 
-remoteRouter.get('/config', adminOnly, (_req, res) => res.json({ config: getConfigSafe() }));
+remoteRouter.get('/config', adminOnly, (req, res) => {
+  // v2.632 AX3-01: 범위 admin 에게는 /proxies/full(v2.606)과 같은 필터 — 기본 프록시 + 범위 안 vCenter 가 배정된
+  //   프록시만, vcenterIds 도 범위 안으로 자른다. 403 으로 막지 않는 이유: 원격 접속 화면이 이 GET 의 성패로 관리자
+  //   여부를 판정한다(RemoteAccess.jsx). 뺀 개수는 밝힌다(조용한 제외 금지).
+  const config = getConfigSafe();
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (!allowed) return res.json({ config });
+  const all = Array.isArray(config.proxies) ? config.proxies : [];
+  const proxies = [];
+  for (const p of all) {
+    const ids = (p.vcenterIds || []).filter((v) => allowed.has(String(v)));
+    if (p.id === 'default' || ids.length) proxies.push({ ...p, vcenterIds: ids });
+  }
+  res.json({ config: { ...config, proxies }, omittedOutOfScope: all.length - proxies.length, scoped: true });
+});
 
 remoteRouter.put('/config', adminOnly, (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '기본 중계 서버 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 RECENT2607-03

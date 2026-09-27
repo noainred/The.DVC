@@ -41,3 +41,13 @@ export function reclaimBasisNote(rs) {
   if (rs?.reclaimBasis === 'instant') return `${ramText} · 순간 사용률 기준(기간 통계는 라이트사이징 리포트)`;
   return ramText;
 }
+
+/**
+ * v2.632 WEB2632-04: 용량 고갈 예측 목록이 서버 상한(listLimit)에 닿았을 때 한 줄. 서버는 잘리기 전 개수를
+ * 모르므로(상한에 닿았는지만 안다) 개수를 지어내지 않고 '더 있을 수 있다' 고 말한다. 닿지 않았으면 null.
+ */
+export function forecastCapNote(data) {
+  if (!data || data.datastoresCapped !== true) return null;
+  const lim = posInt(data.listLimit);
+  return `추세 산출 데이터스토어가 목록 상한(${lim != null ? `${lim}개` : '적용'})에 닿았습니다 — 고갈이 빠른 순으로 상한까지만 표시하며, 표시하지 않은 데이터스토어가 더 있을 수 있습니다.`;
+}

@@ -18,7 +18,7 @@
  */
 
 import express from 'express';
-import { store } from '../store.js';
+import { store, dsUsageReadable, dsUsedOf, dsUsageUnknownOf } from '../store.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { config } from '../config.js';
 import { apiKeyAuth } from '../publicapi/auth.js';
@@ -191,6 +191,7 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
   const vms = (snap.vms || []).filter((v) => ids.has(v.vcenterId));
   const dss = (snap.datastores || []).filter((d) => ids.has(d.vcenterId));
   const nets = (snap.networks || []).filter((n) => ids.has(n.vcenterId));
+  const dssR = dss.filter((d) => d && dsUsageReadable(d));
   const sum = (arr, fn) => arr.reduce((a, x) => a + (numOrNull(fn(x)) || 0), 0);
   /*
    * ⚠ 이 합계는 내부 `/summary` 와 **같은 값이어야 한다**. 집계가 그 라우트 안에 인라인으로
@@ -211,8 +212,13 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
     cpuUsedMhz: sum(hosts, (h) => h.cpuUsageMhz),
     memTotalMB: sum(hosts, (h) => h.memTotalMB),
     memUsedMB: sum(hosts, (h) => h.memUsageMB),
-    storageCapacityGB: sum(dss, (d) => d.capacityGB),
-    storageUsedGB: sum(dss, (d) => d.usedGB),
+    // v2.632(감사 AX2-2632-01·AX1-2632-06): 내부 /summary(v2.631)와 같은 기준 — 사용량을 읽은 DS 만 용량·사용 양쪽에
+    //   넣는다(사용량 미상 DS 를 사용 0 으로 더하면 소비자가 계산하는 사용률이 낮아지는 거짓). freeGB 만 있는 DS 는
+    //   dsUsedOf 로 되돌린다. 설치 용량 전체는 storageCapacityAllGB, 뺀 DS 수는 datastoresUsageUnknown 로 밝힌다.
+    storageCapacityGB: sum(dssR, (d) => d.capacityGB),
+    storageUsedGB: sum(dssR, dsUsedOf),
+    storageCapacityAllGB: sum(dss, (d) => d.capacityGB),
+    datastoresUsageUnknown: dss.filter(dsUsageUnknownOf).length,
     vmVcpu: sum(vms, (v) => v.cpuCount),
     vmRamMB: sum(vms, (v) => v.memMB),
     vmProvisionedGB: sum(vms, (v) => v.storageGB),

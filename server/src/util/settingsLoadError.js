@@ -15,7 +15,16 @@
  *
  * ⚠ util/ 규약(arch2579): 도메인 모듈을 import 하지 않는다.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { corruptOnlyReason } from './registryCore.js';
+
+/**
+ * v2.632(감사 AX1-2632-02): 만든 로드 오류 상태를 모듈 안에 등록해 둔다 — 예전에는 *LoadError() 의 소비처가 설정 pull 라우트뿐이라
+ *   503 이 나가는 동안 **중앙 화면·로그 어디에도** 그 사실이 없었다(엣지는 직전 설정을 유지하므로 조용히 멈춘 것처럼 보인다).
+ *   서비스 점검(`health/services.js`)이 `listSettingsLoadErrors()` 로 한 줄에 모아 보여 준다.
+ */
+const _registry = [];
 
 /**
  * @param {() => string} fileOf  설정 파일 경로(호출 시점에 계산 — CONFIG_DIR 를 테스트가 바꿀 수 있다)
@@ -24,7 +33,7 @@ import { corruptOnlyReason } from './registryCore.js';
 export function makeSettingsLoadError(fileOf) {
   let err = null;
   const set = (reason) => { err = { at: Date.now(), reason: String(reason ?? '').slice(0, 200) }; };
-  return {
+  const api = {
     get: () => err,
     ok() { err = null; },
     corrupt(e) {
@@ -38,4 +47,23 @@ export function makeSettingsLoadError(fileOf) {
       if (!err) set(why.replace('등록부 파일', '설정 파일'));   // 이미 세운 오류의 시각(since)은 유지한다
     },
   };
+  _registry.push({ fileOf, api });
+  return api;
+}
+
+/**
+ * 등록된 설정 파일 중 지금 '못 읽음' 인 것 — 서비스 점검용. 모듈을 다시 로드하지 않는다(파싱 오류는 그 모듈이 로드할 때 세운다).
+ *   다만 **파일이 없는** 경우는 여기서 손상 보존본 판정을 다시 한다(아직 한 번도 로드되지 않은 설정도 보이게 — 값싼 readdir 1회).
+ * @returns {{ file:string, at:number, reason:string }[]}
+ */
+export function listSettingsLoadErrors() {
+  const out = [];
+  for (const { fileOf, api } of _registry) {
+    let file = '';
+    try { file = String(fileOf() || ''); } catch { file = ''; }
+    try { if (file && !api.get() && !fs.existsSync(file)) api.missing(); } catch { /* 판정 실패는 오류로 세우지 않는다 */ }
+    const e = api.get();
+    if (e) out.push({ file: file ? path.basename(file) : '(경로 미상)', at: e.at, reason: e.reason });
+  }
+  return out;
 }

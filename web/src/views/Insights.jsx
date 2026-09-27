@@ -11,6 +11,7 @@ import {
 import { fmtAgo, num, fmtDate, dec1, fmtW, fmtWh, fmtKg } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
 import { forecastPctText, forecastLimitKind } from './forecastRowText.js';
+import { unitText } from './unitText.js';
 
 function Kpi({ label, value, sub, color }) {
   return (
@@ -297,8 +298,8 @@ function TreeNode({ node, depth }) {
         <span className="muted" style={{ fontSize: 11 }}>
           {node.type === 'vcenter' && `· ${node.region || ''} v${node.version || '?'} · 호스트 ${node.hosts} · VM ${node.vmCount}`}
           {node.type === 'cluster' && `· 호스트 ${node.hosts} · VM ${node.vmCount}`}
-          {node.type === 'host' && `· CPU ${node.cpuPct}% MEM ${node.memPct}% · VM ${node.vmOn}/${node.vmCount}${node.gpus ? ` · GPU ${node.gpus}` : ''}${node.watts ? ` · ${fmtW(node.watts)}` : ''}`}
-          {node.type === 'vm' && `· ${node.guestOS || ''} ${node.cpuPct}%/${node.memPct}%${node.gpu ? ` · ${node.gpu}` : ''}`}
+          {node.type === 'host' && `· CPU ${unitText(node.cpuPct, '%')} MEM ${unitText(node.memPct, '%')} · VM ${node.vmOn}/${node.vmCount}${node.gpus ? ` · GPU ${node.gpus}` : ''}${node.watts ? ` · ${fmtW(node.watts)}` : ''}`}
+          {node.type === 'vm' && `· ${node.guestOS || ''} ${unitText(node.cpuPct, '%')}/${unitText(node.memPct, '%')}${node.gpu ? ` · ${node.gpu}` : ''}`}
         </span>
       </div>
       {open && hasKids && node.children.map((ch) => <TreeNode key={ch.id} node={ch} depth={depth + 1} />)}

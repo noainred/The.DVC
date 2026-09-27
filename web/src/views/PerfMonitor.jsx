@@ -235,7 +235,7 @@ export default function PerfMonitor() {
                 <td data-sort={rate ?? ''}>{rate == null ? '—' : `${rate}%`}</td>
                 <td data-sort={r.errN}>{r.errN || '—'}</td>
                 <td className="muted">{routeHint(r.route, d.slow) || '—'}</td>
-                <td data-sort={r.lastTs ?? 0} className="muted">{ago(r.lastTs)}</td>
+                <td data-sort={r.lastTs ?? ''} className="muted">{ago(r.lastTs)}</td>
               </tr>
             );
           })}</tbody>
@@ -316,7 +316,7 @@ export default function PerfMonitor() {
                   <td><Badge label={hangKindLabel(ev.kind)} color={ev.kind === 'client' ? 'amber' : 'red'} /></td>
                   <td style={{ overflowWrap: 'anywhere' }}>{hangSummary(ev)}</td>
                   <td className="muted">{ev.user || '—'}</td>
-                  <td data-sort={ev.rssMb ?? 0}>{ev.rssMb == null ? '—' : `${ev.rssMb} MB`}</td>
+                  <td data-sort={ev.rssMb ?? ''}>{ev.rssMb == null ? '—' : `${ev.rssMb} MB`}</td>
                 </tr>
               ))}</tbody>
             </STable>

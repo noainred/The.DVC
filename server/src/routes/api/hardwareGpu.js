@@ -10,6 +10,7 @@ import { getGuestGpuVms } from '../../gpu/store.js';
 import { enqueuePing, getPingResults, setPingResults } from '../../central/pingJobs.js';
 import { pingMany } from '../../util/ping.js';
 import { todayStamp } from "../../util/dayKey.js";
+import { acquireExport } from '../../util/exportBusy.js';
 
 
 /**
@@ -176,73 +177,85 @@ async function gpuSeriesExportCsvStream(req, res) {
   res.end();
 }
 
-// GPU 사용률 '수집된 전체 데이터' export — 시계열(샘플마다 한 행). range=all(수집 시작~현재)
-// 또는 range=days(최근 N일). vcenterId로 법인 스코프. format은 .csv/.json.
-async function gpuSeriesExport(req, res, fmt) {
-  // CSV 는 스트리밍 경로로 분리(v2.371) — 아래 JSON 경로는 전량 누적이 필요해 기존 유지.
-  if (fmt === 'csv') return gpuSeriesExportCsvStream(req, res);
+/**
+ * GPU 사용률 시계열 JSON **스트리밍** export(v2.632 AX3-04).
+ * 예전 JSON 경로는 최대 30만 행을 out[] 에 모은 뒤 `JSON.stringify(…, null, 2)` + zipSingle(deflateRawSync)
+ * 를 메인 스레드에서 **동기로** 했다 — 1건 2.6초·루프 지연 1.9초, 동시 10건이면 루프 지연 15초·RSS 1GB(감사 재현).
+ * CSV(v2.371)와 같은 패턴으로 청크마다 흘려보낸다: 조회 → 그 청크만 직렬화 → res.write → drain → 양보.
+ * zip 압축은 전량 버퍼가 필요해 적용하지 않는다(CSV 와 같은 판단). 들여쓰기도 없다.
+ * sampleCount·truncated 는 끝에서야 알 수 있으므로 객체의 **마지막 키**로 싣는다(JSON 키 순서는 뜻이 없다).
+ */
+async function gpuSeriesExportJsonStream(req, res) {
   const range = req.query.range === 'days' ? 'days' : 'all';
   const days = Math.max(1, Math.min(1830, Number(req.query.days) || 30));
   const vcId = req.query.vcenterId || null;
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap); // null=무제한. 범위 밖 vCenter 의 GPU 시계열 유출 차단.
-  const hostMap = new Map(); // host.id -> {name,vcenterId,cluster}
+  const hostMap = new Map();
   for (const h of snap.hosts || []) hostMap.set(h.id, h);
   const db = await getMetricsDb();
   const meta = db.meta('gpu_util');
   const until = Date.now();
   const since = range === 'days' ? until - days * 86_400_000 : (meta.firstTs ?? 0);
-  // 대량 dump를 한 번에 하지 않는다 — 1M행 동기 조회+매핑은 이벤트 루프를 ~10초 정지시켰다(실측).
-  // ts 윈도우 청크(5만 행)로 나눠 조회하고 청크 사이 setImmediate로 양보해 폴링/API가 굶지 않게 한다.
   const MAX_ROWS = Math.max(1000, Number(process.env.GPU_EXPORT_MAX_ROWS) || 300_000);
   const CHUNK = 50_000;
-  const out = [];
-  // gpu_util은 %(0~100). 과거 일부 샘플이 vSphere 1/100% 단위로 ×100 저장된 경우가 있어
-  // 100 초과면 ÷100로 정규화하고 0~100으로 클램프(util 최대 100이라 안전).
+  // gpu_util은 %(0~100). 과거 일부 샘플이 vSphere 1/100% 단위로 ×100 저장된 경우가 있어 100 초과면 ÷100.
   const normPct = (v) => { const n = Number(v); if (!Number.isFinite(n)) return 0; const p = n > 100 ? n / 100 : n; return Math.max(0, Math.min(100, Math.round(p))); };
+  const stamp = todayStamp();
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="gpu-history-${range}-${stamp}.json"`);
+  const head = {
+    generatedAt: new Date().toISOString(), collectedSince: meta.firstTs ? new Date(meta.firstTs).toISOString() : null,
+    range, days: range === 'days' ? days : null, vcenterId: vcId,
+  };
+  res.write(JSON.stringify(head).slice(0, -1) + ',"points":[');
   let cursor = since;
+  let written = 0;
   let truncated = false;
-  while (out.length < MAX_ROWS) {
+  while (written < MAX_ROWS) {
+    if (res.destroyed) return; // 클라이언트 중단 시 즉시 종료
     const chunk = db.dump('gpu_util', cursor, until, CHUNK);
     if (!chunk.length) break;
     let rows = chunk;
     if (chunk.length === CHUNK) {
-      // 경계 ts의 행이 청크에 걸쳐 잘릴 수 있어, 마지막 ts 행들은 버리고 다음 청크(since=그 ts)에서
-      // 다시 읽는다(중복/누락 없이 페이지네이션 — 동일 ts 행 수는 호스트 수 이하라 항상 CHUNK 미만).
+      // 경계 ts 의 행이 잘리지 않게 마지막 ts 는 버리고 다음 청크에서 다시 읽는다(CSV 와 같은 페이지네이션).
       const lastTs = chunk[chunk.length - 1].ts;
       rows = chunk.filter((r) => r.ts < lastTs);
       cursor = lastTs;
     }
+    const parts = [];
     for (const r of rows) {
       const h = hostMap.get(r.k);
       if (allowed && !allowed.has(h?.vcenterId || '')) continue; // scope 밖(미상 호스트 포함) 제외
       if (vcId && (!h || h.vcenterId !== vcId)) continue;
-      out.push({ ts: r.ts, host: h?.name || r.k, vcenterId: h?.vcenterId || '', cluster: h?.cluster || '', utilPct: normPct(r.v) });
-      if (out.length >= MAX_ROWS) { truncated = true; break; }
+      parts.push(JSON.stringify({ ts: r.ts, host: h?.name || r.k, vcenterId: h?.vcenterId || '', cluster: h?.cluster || '', utilPct: normPct(r.v), tsIso: new Date(r.ts).toISOString() }));
+      written += 1;
+      if (written >= MAX_ROWS) { truncated = true; break; }
     }
+    if (parts.length) {
+      const ok = res.write((written - parts.length > 0 ? ',' : '') + parts.join(','));
+      if (!ok) await new Promise((resolve) => res.once('drain', resolve)); // 소켓 백프레셔
+    }
+    if (truncated) break;
     if (chunk.length < CHUNK) break;
-    await new Promise((r) => setImmediate(r)); // 청크 사이 이벤트 루프 양보
+    await new Promise((resolve) => setImmediate(resolve)); // 이벤트 루프 양보
   }
-  const stamp = todayStamp();
-  const sinceIso = meta.firstTs ? new Date(meta.firstTs).toISOString() : '없음';
-  if (fmt === 'json') {
-    const body = JSON.stringify({
-      generatedAt: new Date().toISOString(), collectedSince: meta.firstTs ? new Date(meta.firstTs).toISOString() : null,
-      range, days: range === 'days' ? days : null, vcenterId: vcId, sampleCount: out.length, truncated,
-      points: out.map((p) => ({ ...p, tsIso: new Date(p.ts).toISOString() })),
-    }, null, 2);
-    sendMaybeZip(res, `gpu-history-${range}-${stamp}.json`, body, 'application/json; charset=utf-8');
-    return;
+  res.end(`],"sampleCount":${written},"truncated":${truncated}}`);
+}
+
+// GPU 사용률 '수집된 전체 데이터' export — 시계열(샘플마다 한 행). range=all(수집 시작~현재)
+// 또는 range=days(최근 N일). vcenterId로 법인 스코프. format은 .csv/.json — 둘 다 스트리밍이다.
+// v2.632 AX3-04: 동시 실행 1건 가드(util/exportBusy — v2.575 '새 내보내기 라우트도 acquireExport') — 넘으면 409 export_busy.
+//   release 는 finally — 예외로 빠져나가도 이름이 잠기지 않게.
+async function gpuSeriesExport(req, res, fmt) {
+  const lock = acquireExport('gpu.series.export', req);
+  if (!lock.ok) return res.status(lock.status).json(lock.body);
+  try {
+    if (fmt === 'csv') return await gpuSeriesExportCsvStream(req, res);
+    return await gpuSeriesExportJsonStream(req, res);
+  } finally {
+    lock.release();
   }
-  const esc = (v) => { const s = guardCell(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }; // guardCell: 수식 인젝션 방어(= + - @)
-  const head = ['timestamp_iso', 'epoch_ms', 'host', 'vcenter_id', 'cluster', 'gpu_util_pct'];
-  const lines = [
-    `# GPU 사용률 수집 데이터 — 수집 시작: ${sinceIso} (그날부터 누적) | 범위: ${range === 'all' ? '전체' : `최근 ${days}일`} | 생성: ${new Date().toISOString()} | 샘플 ${out.length}${truncated ? ' (상한 도달 — 기간을 좁혀 다시 내보내세요)' : ''}`,
-    '# 단위: gpu_util_pct = GPU 사용률 %(0~100) · epoch_ms = Unix epoch 밀리초(엑셀은 지수표기로 보일 수 있음) · timestamp_iso = ISO8601 시각',
-    head.join(','),
-  ];
-  for (const p of out) lines.push([new Date(p.ts).toISOString(), p.ts, p.host, p.vcenterId, p.cluster, p.utilPct].map(esc).join(','));
-  sendMaybeZip(res, `gpu-history-${range}-${stamp}.csv`, '﻿' + lines.join('\r\n'), 'text/csv; charset=utf-8'); // BOM for Excel
 }
 
 // 중앙에서 직접 ping 시도 후 결과 저장(에이전트 없이도 같은 망이면 즉시 결과). 실패 격리.

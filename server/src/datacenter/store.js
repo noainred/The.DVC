@@ -171,17 +171,27 @@ export function setVcenterDatacenterMany(entries = []) {
   const valid = new Set(cur.datacenters.map((d) => d.id));
   const assign = { ...cur.assign };
   let changed = 0;
-  for (const [rawVc, rawDc] of entries) {
-    const vc = norm(rawVc); if (!vc) continue;
+  // v2.632 AX3-08: 원소 모양을 검사한다 — 비반복 객체를 `for (const [a, b] of …)` 로 구조분해하면 TypeError 로 500 이었다.
+  //   [vcenterId, datacenterId] 배열과 {vcenterId, datacenterId} 객체를 받고, 그 밖의 모양·없는 DataCenter 는
+  //   건너뛰되 개수를 밝힌다(malformed·unknownDatacenter — 조용한 제외 금지).
+  let malformed = 0; let unknownDatacenter = 0;
+  for (const e of Array.isArray(entries) ? entries : []) {
+    let rawVc; let rawDc;
+    if (Array.isArray(e) && e.length === 2) [rawVc, rawDc] = e;
+    else if (e && typeof e === 'object' && !Array.isArray(e) && 'vcenterId' in e) { rawVc = e.vcenterId; rawDc = e.datacenterId; }
+    else { malformed += 1; continue; }
+    if ((typeof rawVc !== 'string' && typeof rawVc !== 'number') || (rawDc != null && typeof rawDc !== 'string' && typeof rawDc !== 'number')) { malformed += 1; continue; }
+    const vc = norm(rawVc); if (!vc) { malformed += 1; continue; }
     const dc = idOf(rawDc);
-    if (dc && !valid.has(dc)) continue;
+    if (dc && !valid.has(dc)) { unknownDatacenter += 1; continue; }
     if (!dc) { if (vc in assign) { delete assign[vc]; changed += 1; } }
     else if (assign[vc] !== dc) { assign[vc] = dc; changed += 1; }
   }
-  if (!changed) return { ok: true, changed: 0 };
+  const extra = { ...(malformed ? { malformed } : {}), ...(unknownDatacenter ? { unknownDatacenter } : {}) };
+  if (!changed) return { ok: true, changed: 0, ...extra };
   try { save({ ...cur, assign }); }
   catch (e) { return { ok: false, reason: `저장 실패: ${e.message}` }; }
-  return { ok: true, changed };
+  return { ok: true, changed, ...extra };
 }
 
 /** 테스트/관리용 초기화. */

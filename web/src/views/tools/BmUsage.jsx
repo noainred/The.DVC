@@ -817,7 +817,7 @@ export function BmUsage() {
                       <td className="right" data-sort={d.disk_busy_max ?? ''}>{pctText(d.disk_busy_max)}</td>
                       <td className="right" data-sort={d.net_max ?? ''}>{pctText(d.net_max)}</td>
                       <td className="right" data-sort={d.hba_max ?? ''}>{pctText(d.hba_max)}</td>
-                      <td className="right" data-sort={d.samples ?? 0}>{d.samples ?? '—'}</td>
+                      <td className="right" data-sort={d.samples ?? ''}>{d.samples ?? '—'}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -157,8 +157,8 @@ export default function CorpUsage({ scope = '' } = {}) {
                 <tr key={c.vcenterId}>
                   <td data-sort={c.name}>{c.name}</td>
                   <td>{GROUP_LABEL[c.group] || c.group}</td>
-                  <td className="right" data-sort={c.all?.servers ?? 0} title={`물리 ${c.bm?.servers ?? 0} · 가상화 ${c.virt?.servers ?? 0}`}>
-                    {c.all?.servers ?? 0}<div className="muted" style={{ fontSize: 11 }}>{c.bm?.servers ?? 0} / {c.virt?.servers ?? 0}</div>
+                  <td className="right" data-sort={c.all?.servers ?? ''} title={`물리 ${c.bm?.servers ?? '—'} · 가상화 ${c.virt?.servers ?? '—'}`}>
+                    {c.all?.servers ?? '—'}<div className="muted" style={{ fontSize: 11 }}>{c.bm?.servers ?? '—'} / {c.virt?.servers ?? '—'}</div>
                   </td>
                   {[['all', 'cpu'], ['all', 'mem'], ['bm', 'cpu'], ['bm', 'mem'], ['virt', 'cpu'], ['virt', 'mem']].map(([role, k]) => {
                     const m = c[role]?.[k];

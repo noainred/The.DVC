@@ -1,6 +1,6 @@
 // VM 프로비저닝 조회 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
 import { expandSpec } from '../../provision/spec.js';
-import { listSources, listJobs, getJob } from '../../provision/jobs.js';
+import { listSources, listJobsScoped, getJob } from '../../provision/jobs.js';
 import { getPlacement } from '../../provision/placement.js';
 import { listSaved, getSaved } from '../../provision/saved.js';
 import { requirePerm } from '../../auth/auth.js';
@@ -55,9 +55,14 @@ api.get('/provision/saved/:id', canProvision, (req, res) => {
 });
 
 // Provisioning jobs (only the caller's own; admins see all).
-api.get('/provision/jobs', (req, res) => res.json({ jobs: listJobs(req.user) }));
+// v2.632 AX3-02: 범위 계정(범위 관리자 포함)은 자기 범위 vCenter 의 작업만 — 뺀 개수는 밝힌다, 단건은 404 존재 은닉.
+api.get('/provision/jobs', (req, res) => {
+  const allowed = scopeOf(req);
+  const { jobs, omittedOutOfScope } = listJobsScoped(req.user, allowed);
+  res.json({ jobs, ...(allowed ? { scoped: true, omittedOutOfScope } : {}) });
+});
 api.get('/provision/jobs/:id', (req, res) => {
-  const job = getJob(req.params.id, req.user);
+  const job = getJob(req.params.id, req.user, scopeOf(req));
   if (!job) return res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' });
   res.json(job);
 });

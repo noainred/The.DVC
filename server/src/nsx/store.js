@@ -98,11 +98,11 @@ class NsxStore {
       else if (c && !c.ok) {
         errors.push({ managerId: m.id, name: m.name, ...c.err, at: c.at, fallback: mockFallback, ...(stop ? { authStopped: stop } : {}) });
         if (mockFallback && !stop) parts.push(generateNsxForManager(m));
-        else parts.push({ manager: unreachableManager(m, c.err, stop), gateways: [], segments: [], transportNodes: [], firewall: { policies: 0, rules: 0 }, groups: 0 });
+        else parts.push(unreadPart(unreachableManager(m, c.err, stop)));
       } else if (stop) {
         errors.push({ managerId: m.id, name: m.name, message: stop.reason, at: stop.at, fallback: false, authStopped: stop });
-        parts.push({ manager: unreachableManager(m, { message: stop.reason, hint: '인증 실패 — 계정/비밀번호 또는 권한을 확인하세요.' }, stop), gateways: [], segments: [], transportNodes: [], firewall: { policies: 0, rules: 0 }, groups: 0 });
-      } else parts.push({ manager: pendingManager(m), gateways: [], segments: [], transportNodes: [], firewall: { policies: 0, rules: 0 }, groups: 0 });
+        parts.push(unreadPart(unreachableManager(m, { message: stop.reason, hint: '인증 실패 — 계정/비밀번호 또는 권한을 확인하세요.' }, stop)));
+      } else parts.push(unreadPart(pendingManager(m)));
     }
     this.snapshot = rollup(merge(parts, errors, dataSource));
   }
@@ -120,6 +120,16 @@ const disabledManager = (m) => ({ id: m.id, name: m.name, host: m.host, region: 
 const pendingManager = (m) => ({ id: m.id, name: m.name, host: m.host, region: m.location?.region || '', vcenterId: m.vcenterId || '', status: 'pending', version: '', nodeCount: 0 });
 const unreachableManager = (m, err, authStopped = null) => ({ id: m.id, name: m.name, host: m.host, region: m.location?.region || '', vcenterId: m.vcenterId || '', status: 'unreachable', version: '', nodeCount: 0, error: err.message, hint: err.hint, code: err.code, ...(authStopped ? { authStopped } : {}) });
 
+/*
+ * v2.632(감사 AX2-2632-02): 연결 실패·인증 정지·첫 수집 전 매니저는 **아무 목록도 읽지 않았다** — 개수는 0 이 아니라
+ *   모른다(null)다. 예전엔 firewall {0,0}·groups 0·빈 배열로 합쳐져 rollup(세그먼트·T0/T1·DFW·그룹)이 읽은 매니저만의
+ *   **부분 합을 전체처럼** 말했다. `unread:true` 로 표시하고 merge·scopedNsxRollup 이 그 매니저의 개수와 합계를 null 로 둔다
+ *   (읽지 못한 매니저 수는 rollup.managersUnread 로 밝힌다). 비활성(disabled) 매니저는 감시 대상이 아니므로 그대로다.
+ */
+export function unreadPart(manager) {
+  return { manager: { ...manager, unread: true }, gateways: [], segments: [], transportNodes: [], firewall: { policies: null, rules: null }, groups: null };
+}
+
 function empty() {
   return { generatedAt: new Date().toISOString(), source: getDataSource(), managers: [], gateways: [], segments: [], transportNodes: [], dfw: [], securityGroups: [], idsEvents: [], collectionErrors: [], rollup: null };
 }
@@ -131,10 +141,11 @@ export function merge(parts, errors, source) {
   for (const p of parts) {
     // v2.600(COL-2600-06 후속): 조회에 실패한 목록의 개수는 0 이 아니라 null(빈 배열 길이를 쓰지 않는다).
     const lf = new Set(Array.isArray(p.manager?.listsFailed) ? p.manager.listsFailed : []);
+    const unread = p.manager?.unread === true; // v2.632 AX2-2632-02: 읽지 못한 매니저의 개수 칸은 '—'
     snap.managers.push({ ...p.manager,
-      gateways: lf.has('tier0s') || lf.has('tier1s') ? null : p.gateways.length,
-      segments: lf.has('segments') ? null : p.segments.length,
-      transportNodes: lf.has('transportNodes') ? null : p.transportNodes.length,
+      gateways: unread || lf.has('tier0s') || lf.has('tier1s') ? null : p.gateways.length,
+      segments: unread || lf.has('segments') ? null : p.segments.length,
+      transportNodes: unread || lf.has('transportNodes') ? null : p.transportNodes.length,
       firewall: p.firewall, groups: p.groups });
     pushAll(snap.gateways, p.gateways);
     pushAll(snap.segments, p.segments);

@@ -64,6 +64,7 @@ import * as m_relayCheckPoller from '../relaycheck/poller.js';
 import * as m_partFaultPoller from '../partfault/poller.js';
 import { stallWatchStatus } from '../perf/stallWatch.js';
 import { bigJsonStats } from '../util/bigJsonGate.js';
+import { listSettingsLoadErrors } from '../util/settingsLoadError.js';
 
 /** spec `mod` 경로 → 모듈. 표에 새 모듈이 생기면 여기에 한 줄 더한다(테스트가 빠진 것을 잡는다). */
 const MODS = Object.freeze({
@@ -235,6 +236,17 @@ export function getServiceCheck(opts = {}) {
     return { status: recent ? 'warn' : 'ok',
       detail: `엣지 진행 ${c.inflight || 0}건 · 최대 ${c.peakInflight || 0}건 · 503 반환 ${c.rejected || 0}건 · 세션 503 ${x.rejected || 0}건${cut ? ` · 읽기 시한 초과로 끊음 ${cut}건` : ''}${recent ? ' — 최근 1시간 안에 거절이 있었습니다(엣지는 Retry-After 를 따라 재시도합니다)' : ''}`,
       at: Date.now() };
+  }));
+
+  // v2.632(감사 AX1-2632-02): 엣지에 배포되는 중앙 설정 파일을 못 읽으면 설정 pull 이 503 으로 답한다(엣지는 직전 설정 유지).
+  //   예전에는 그 사실이 화면·로그 어디에도 없어 '엣지가 조용히 멈췄다' 로만 보였다. 파일 이름과 사유를 싣는다(값은 싣지 않는다).
+  checks.push(wrap('settings-files', '중앙 설정 파일', () => {
+    const errs = listSettingsLoadErrors();
+    if (!errs.length) return { status: 'ok', detail: '엣지 배포 설정 파일 읽기 정상', at: Date.now() };
+    const names = errs.slice(0, 6).map((e) => e.file).join(', ');
+    return { status: 'warn',
+      detail: `읽지 못한 설정 파일 ${errs.length}개(${names}${errs.length > 6 ? ` 외 ${errs.length - 6}개` : ''}) — 해당 설정 pull 은 503 으로 답하고 엣지는 직전 설정을 유지합니다. 손상 보존본을 복구하거나 그 설정 화면에서 다시 저장하세요.`,
+      at: Math.min(...errs.map((e) => e.at || Date.now())), files: errs };
   }));
 
   checks.push(wrap('nsx', 'NSX 수집', () => {

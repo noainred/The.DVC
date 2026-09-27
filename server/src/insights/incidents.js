@@ -11,6 +11,17 @@ import { dayKey } from '../util/dayKey.js';
 /** ms → 포탈 오프셋(기본 KST) 기준 'YYYY-MM-DD'. v2.583 #25: 프로세스 TZ(패키지 유닛은 지정하지 않는다)를 믿지 않는다. */
 const localDay = (ts) => dayKey(ts);
 
+/*
+ * v2.632(감사 AX2-2632-05): vCenter 수집 실패의 **발생 시각**. 예전엔 `receivedAt || now` 라, receivedAt 이 없는 직접 수집
+ *   vCenter 는 10일째 실패 중이어도 조회할 때마다 '지금' 발생한 사건이 되어 recent24h 에 매번 들고 일자별 집계는 오늘 칸만
+ *   늘었다(지어낸 시각). 근거가 있는 시각만 쓴다 — ① staleSince(마지막 정상 수집 시각 — 실패는 그 뒤에 시작됐다)
+ *   ② authStopped.since(인증 정지 시작) ③ receivedAt(엣지가 그 상태를 보고한 시각). 모르면 null(화면 '시각 미상').
+ */
+export function vcFailureStartTs(v) {
+  const num = (x) => { if (x == null || x === '') return null; const n = typeof x === 'number' ? x : /^\d+$/.test(String(x)) ? Number(x) : Date.parse(String(x)); /* 숫자 문자열을 Date.parse 에 넘기지 않는다(v2.562) */ return Number.isFinite(n) && n > 0 ? n : null; };
+  return num(v?.staleSince) ?? num(v?.authStopped?.since) ?? num(v?.receivedAt) ?? null;
+}
+
 const sevRank = (s) => (s === 'critical' ? 3 : s === 'warning' ? 2 : s === 'resolved' ? 1 : 0);
 
 /**
@@ -49,16 +60,19 @@ export function getIncidents({ limit = 200, allowed = null } = {}) {
   for (const v of snap.vcenters || []) {
     if (allowed && !allowed.has(v.id)) continue;
     if (v.status === 'unreachable') {
-      events.push({ at: new Date(v.receivedAt || now).toISOString(), ts: v.receivedAt || now, key: `vc:${v.id}`, severity: 'critical', title: `vCenter 수집 실패: ${v.name || v.id}`, detail: v.error || '연결 불가', kind: 'fired' });
+      const t = vcFailureStartTs(v);
+      events.push({ at: t == null ? null : new Date(t).toISOString(), ts: t, ...(t == null ? { timeUnknown: true } : {}), key: `vc:${v.id}`, severity: 'critical', title: `vCenter 수집 실패: ${v.name || v.id}`, detail: v.error || '연결 불가', kind: 'fired' });
     }
   }
 
-  const timeline = events.sort((a, b) => b.ts - a.ts).slice(0, limit);
+  // 시각 미상(ts=null)은 방향과 무관하게 뒤로 — 지어낸 '지금' 으로 맨 위에 올리지 않는다.
+  const timeline = events.sort((a, b) => (a.ts == null) - (b.ts == null) || (b.ts ?? 0) - (a.ts ?? 0)).slice(0, limit);
 
   // 일자별 집계(최근 14일) — 추세 차트용.
   const byDay = new Map();
   for (const e of events) {
     if (e.kind !== 'fired') continue;
+    if (e.ts == null) continue; // v2.632 AX2-2632-05: 시각 미상은 어느 날짜 칸에도 넣지 않는다(오늘 칸만 부풀린다)
     // ⚠ 포탈 오프셋(KST) 기준 일자 — toISOString()(UTC)로 자르면 KST 00:00~08:59 에 발생한 인시던트가
     // '전날' 칸에 들어간다. v2.583: 서버 로컬 getter 도 쓰지 않는다(UTC 서버에서 같은 오독이 재발했다).
     const day = localDay(e.ts);
@@ -71,7 +85,9 @@ export function getIncidents({ limit = 200, allowed = null } = {}) {
     summary: {
       open: open.length,
       openCritical: open.filter((o) => o.severity === 'critical').length,
-      recent24h: events.filter((e) => e.kind === 'fired' && e.ts >= now - 86_400_000).length,
+      recent24h: events.filter((e) => e.kind === 'fired' && e.ts != null && e.ts >= now - 86_400_000).length,
+      // v2.632 AX2-2632-05: 발생 시각을 모르는 인시던트 수(최근 24시간·일자별 집계에서 뺐다 — 빼면 개수를 밝힌다).
+      timeUnknown: events.filter((e) => e.ts == null).length,
       channelsOn: !!(st.config?.channels?.slack?.enabled || st.config?.channels?.webhook?.enabled),
     },
     open,

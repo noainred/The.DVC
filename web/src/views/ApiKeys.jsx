@@ -352,7 +352,7 @@ export default function ApiKeys() {
                       {ex.kind === 'none' ? '무기한' : `${msToDay(k.expiresAt)} (${ex.text.split(' —')[0]})`}
                     </td>
                     <td className="right">{k.rpm}</td>
-                    <td data-sort={String(k.lastUsedAt ?? 0)}
+                    <td data-sort={String(k.lastUsedAt ?? '')}
                       style={{ color: lu.kind === 'never' ? TONE.muted : undefined }}>{lu.text}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 5 }}>

@@ -136,7 +136,7 @@ export function collectStateNote(d) {
   }
   if (failed > 0) {
     return { kind: 'partial', tone: 'warn', waiting: false,
-      text: `${failed}대에서 세션을 읽지 못했습니다 — 아래 수치는 읽어낸 서버만 합친 값이라 **하한**입니다(실제 사용자는 이보다 많을 수 있습니다).`,
+      text: `${failed}대에서 세션을 읽지 못했습니다 — 아래 수치는 읽어낸 서버만 합친 값이라 **하한**(최소값)이고 이 주기는 추이에 적재하지 않았습니다(실제 사용자는 이보다 많을 수 있습니다).`,
       short: `${failed}대 조회 실패` };
   }
   // v2.606 COL2606-04: 한 서버라도 페이지 상한에 걸려 **일부 세션만** 읽었으면 합계는 하한이다(추이에는 적재하지 않는다).
@@ -159,7 +159,9 @@ export function collectStateNote(d) {
  */
 export function lowerBoundPrefix(t, field = 'users') {
   if (!t) return '';
-  const cut = !!(t.truncated || t.sessionsLowerBound);
+  // v2.632(감사 AX2-2632-03): 합계에서 읽지 못한 서버가 있으면(읽은 서버는 1대 이상) 세 수치 모두 부분 합 = 하한이다.
+  const failedCut = Number(t.serversFailed) > 0 && Number(t.serversOk) > 0;
+  const cut = !!(t.truncated || t.sessionsLowerBound || failedCut);
   if (field === 'sessions') return cut ? '최소 ' : '';
   if (field === 'connected') {
     if (t.usersConnected == null) return '';
@@ -199,6 +201,8 @@ export function unionNote(total) {
   // v2.606 COL2606-04: 세션 자체를 일부만 읽은 경우(이름 목록 절단 아님)는 원인이 다르다 — 따로 말한다.
   if (total?.usersLowerBound && !(Number(total.usersOmitted) > 0)) return `일부 서버에서 세션을 페이지 상한까지만 읽어 전체 고유 계정은 **최소 ${u}명**입니다.`;
   if (total?.usersLowerBound) return `서버별 이름 목록이 상한으로 잘려(${Number(total.usersOmitted) || 0}명 생략) 전체 고유 계정은 **최소 ${u}명**입니다 — 정확한 합집합은 계산하지 못했습니다(서버별 고유의 합 ${sum}명이 상한).`;
+  // v2.632(감사 AX2-2632-03): 읽지 못한 서버가 있으면 합집합은 읽어낸 서버 기준의 **최소값**이다.
+  if (Number(total?.serversFailed) > 0) return `${Number(total.serversFailed)}대에서 세션을 읽지 못해 전체 고유 계정은 읽어낸 서버 기준 **최소 ${u}명**입니다.`;
   if (sum === u) return '서버가 1대이거나 서버 간에 겹치는 계정이 없습니다.';
   return `고유 계정 **${u}명**(합집합)인데 서버별 고유의 합은 **${sum}명** 입니다 — 차이 ${sum - u}명은 **여러 Connection Server 에 동시에 붙은 계정**입니다(같은 계정이면 1명으로 셉니다).`;
 }

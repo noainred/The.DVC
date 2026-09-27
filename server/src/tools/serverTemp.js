@@ -111,13 +111,17 @@ const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length 
  * 계열별로 표본 수가 다를 수 있어 각 평균의 분모를 따로 센다.
  */
 export function aggregate(rows) {
-  const list = rows || [];
+  const all = rows || [];
+  // v2.632(감사 AX2-2632-07): 오래된(stale) iDRAC 표본은 행(표)에는 '오래됨' 으로 남기되 **평균·최고·보고 수에는 넣지 않는다** —
+  //   3일 전 45℃ 가 법인 최고로 보고되던 거짓. 뺀 개수는 staleExcluded 로 밝힌다(조용한 제외 금지).
+  const list = all.filter((r) => !r?.stale);
   const cur = list.map((r) => r.curC).filter((v) => Number.isFinite(v));
   const pick = (k) => list.map((r) => r[k]).filter((v) => Number.isFinite(v));
   const inlet = pick('inletC'); const exhaust = pick('exhaustC'); const cpu = pick('cpuC');
   const maxes = list.map((r) => r.maxC).filter((v) => Number.isFinite(v));
   return {
-    servers: list.length,
+    servers: all.length,
+    staleExcluded: all.length - list.length,
     reporting: cur.length,
     avgC: r1(mean(cur)),
     minC: cur.length ? r1(Math.min(...cur)) : null,

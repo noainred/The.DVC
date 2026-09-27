@@ -39,7 +39,7 @@ export async function pullStorageConfigNow(...args) {
 async function _pullStorageConfigNow() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'pull 비활성화(CENTRAL_URL/TOKEN 미설정)' };
   try {
-    const url = `${config.agent.centralUrl}/api/central/storage-config?agent=${encodeURIComponent(config.agent.name || '')}`;
+    const url = `${config.agent.centralUrl}/api/central/storage-config?agent=${encodeURIComponent(config.agent.name || '')}&intervalsHold=1`;
     const res = await resilientFetch(url, { method: 'GET', headers: { 'X-Central-Token': config.agent.centralToken }, timeoutMs: 20_000, retries: 2 });
     // v2.613 DEPS2613-06·EDGE2613-06: 404 본문을 읽어 '중앙이 central 을 끔' / '거절' / '엔드포인트 없음(구버전·주소 오류)' 을 가르고
     //   상태·콘솔에 남긴다(curUser·sanSwitch 등 형제 5벌과 같은 규칙 — 예전에는 `<- 404` 만 남아 조치를 고를 수 없었다).
@@ -54,7 +54,13 @@ async function _pullStorageConfigNow() {
     // 수집 주기 배포(v2.409) — 장비 목록보다 먼저 적용한다. 중앙이 값을 안 주면 빈 객체가 되어
     // 엣지가 자기 portal.env 값으로 되돌아간다('중앙 미설정 = 로컬 유지' 계약, intervals.js).
     // 이 호출이 타이머 재무장까지 트리거하므로, 새 주기는 다음 틱을 기다리지 않고 바로 먹는다.
-    const intervalsApplied = applyCentralIntervals(body?.intervals || {});
+    // v2.632(감사 EDGE2632-03): 중앙이 주기 설정 파일을 못 읽으면 intervals 를 빼고 `intervalsUnreadable` 을 싣는다(요청의 intervalsHold=1
+    //   이 이 규약을 안다는 표시 — 모르는 구버전 엣지에는 중앙이 503 으로 답한다). 그때는 **적용하지 않고 직전 값을 유지**한다 —
+    //   빈 객체로 적용하면 중앙 지정 주기가 풀려 로컬로 돌아간다.
+    const intervalsUnreadable = body?.intervalsUnreadable && typeof body.intervalsUnreadable === 'object'
+      ? String(body.intervalsUnreadable.reason || '사유 미상').slice(0, 200) : '';
+    if (intervalsUnreadable && _logChange('intervals-unreadable', intervalsUnreadable)) console.warn(`[storage-config] 중앙 주기 설정을 읽지 못해 받지 않았습니다(직전 주기 유지): ${intervalsUnreadable}`);
+    const intervalsApplied = intervalsUnreadable ? { applied: false, held: true } : applyCentralIntervals(body?.intervals && typeof body.intervals === 'object' ? body.intervals : {});
     const devices = body?.devices || [];
     const sig = crypto.createHash('sha1').update(JSON.stringify(devices)).digest('hex');
     let applied = false;
@@ -91,7 +97,7 @@ async function _pullStorageConfigNow() {
       if (pushError) console.warn(`[storage-config] 재수집 push 실패: ${pushError}`);
     }
     _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collected, ...(pushError ? { pushError } : {}),
-      intervals: runtimeIntervals(), intervalsApplied: !!intervalsApplied.applied };
+      intervals: runtimeIntervals(), intervalsApplied: !!intervalsApplied.applied, ...(intervalsUnreadable ? { intervalsUnreadable } : {}) };
     return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collected, ...(pushError ? { pushError } : {}),
       intervals: runtimeIntervals(), intervalsApplied: !!intervalsApplied.applied };
   } catch (e) {

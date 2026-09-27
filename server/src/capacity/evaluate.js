@@ -144,12 +144,24 @@ export async function evaluateHost(k) {
   return out;
 }
 
-/** 전 호스트 요약(목록 화면) — 호스트별 1달 창 축 종합만 가볍게. */
-export async function summarizeHosts() {
+/*
+ * v2.632(A6-2632-01): 목록 요약은 짧게 memo 한다. 화면(CapacityAdvisor)이 30초마다 부르는데 매번 (호스트 × 임계 지표 5종)의
+ *   30일 시간당 롤업을 **동기로** 읽고 정렬했다 — 엣지 28곳 규모 재현에서 요청당 약 210~260ms 이벤트 루프 정지(관리자 탭 수만큼 곱해진다).
+ *   30일 창 판정이라 초 단위로 최신일 이유가 없다. TTL 안에서는 계산한 값을 그대로 주고, 동시에 온 요청은 진행 중인 계산 하나를
+ *   공유한다(single-flight). `fresh`(최근 5분 내 수신)만은 응답 시각 기준으로 다시 계산한다 — 캐시 때문에 '방금 끊긴 엣지' 가
+ *   최대 TTL 동안 정상으로 보이지 않게. 계산 시각은 `summarizeHostsAt()` 로 밝힌다(라우트가 summaryAt 으로 싣는다).
+ */
+export const SUMMARY_TTL_MS = 60_000;
+let _summary = null;      // { at, rows }
+let _summaryFlight = null;
+const FRESH_MS = 5 * 60_000;
+const withFresh = (rows, now) => rows.map((r) => ({ ...r, fresh: now - r.lastTs < FRESH_MS }));
+
+async function computeSummary() {
   const db = await getCapacityDb();
   const now = Date.now();
   const metas = collectorMeta().filter((m) => m.warn != null);
-  return db.hosts().map((h) => {
+  const rows = db.hosts().map((h) => {
     const groups = {};
     for (const m of metas) {
       const stats = db.windowStats(m.key, h.k, now - 30 * 24 * 3600_000, now);
@@ -157,8 +169,27 @@ export async function summarizeHosts() {
       const cur = groups[m.group];
       if (!cur || VERDICT_RANK[j.verdict] > VERDICT_RANK[cur]) groups[m.group] = j.verdict;
     }
-    return { k: h.k, meta: h.meta, lastTs: h.lastTs, fresh: now - h.lastTs < 5 * 60_000, groups };
+    return { k: h.k, meta: h.meta, lastTs: h.lastTs, groups };
   });
+  return { at: now, rows };
 }
+
+/** 전 호스트 요약(목록 화면) — 호스트별 1달 창 축 종합만 가볍게. SUMMARY_TTL_MS 동안 memo(single-flight). */
+export async function summarizeHosts() {
+  const now = Date.now();
+  if (_summary && now - _summary.at < SUMMARY_TTL_MS) return withFresh(_summary.rows, now);
+  if (!_summaryFlight) {
+    _summaryFlight = computeSummary()
+      .then((r) => { _summary = r; return r; })
+      .finally(() => { _summaryFlight = null; });
+  }
+  const r = await _summaryFlight;
+  return withFresh(r.rows, Date.now());
+}
+
+/** 마지막 요약 계산 시각(없으면 null) — 응답이 캐시임을 밝히는 데 쓴다. */
+export function summarizeHostsAt() { return _summary ? _summary.at : null; }
+/** 테스트 전용 — memo 를 비운다. */
+export function _resetSummaryCache() { _summary = null; _summaryFlight = null; }
 
 export { fmtVal };
