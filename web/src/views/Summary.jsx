@@ -7,6 +7,7 @@ import { usePolling } from '../api.js';
 import { Loading, ErrorBox, usageColor, Modal } from '../components/ui.jsx';
 import { GuestOsVmsModal } from './SpecialTools.jsx';
 import { STable } from '../components/STable.jsx';
+import { unitText } from './unitText.js';
 import { ratioOrNull, serverRatio, ratioLabel, ratioBadge, ratioKpi, numCell, RATIO_HI } from './virtRatioText.js';
 
 const OS_COLORS = {
@@ -174,7 +175,7 @@ export default function Summary({ scope, onGotoTab }) {
         <Big label="전체 데이터스토어" value={fmt(c.datastores)} sub={`네트워크 ${fmt(c.networks)}개`} />
         <Big label="전체 CPU 코어" value={fmt(comp.cpuCores)} sub={`${fmt(comp.cpuTotalGhz)} GHz 물리 용량`} />
         <Big label="전체 메모리" value={fmt(comp.memTotalGB)} unit="GB" sub={`≈ ${(comp.memTotalGB / 1024).toFixed(1)} TB`} />
-        <Big label="전체 스토리지" value={fmt(st.capacityTB)} unit="TB" sub={`여유 ${st.freeTB ?? '—'} TB${st.usageUnknown ? ` · 사용량 모름 ${st.usageUnknown}개 제외` : ''}`} />
+        <Big label="전체 스토리지" value={fmt(st.capacityTB)} unit="TB" sub={`여유 ${unitText(st.freeTB, ' TB')}${st.usageUnknown ? ` · 사용량 모름 ${st.usageUnknown}개 제외` : ''}`} />
         {s.power?.reporting > 0 && (
           <Big label="총 소비전력" value={fmt(s.power.kw)} unit="kW" accent="var(--amber)" sub={`${fmt(s.power.reporting)}개 호스트 · 연 ≈ ${fmt(s.power.annualMwh)} MWh`} />
         )}
