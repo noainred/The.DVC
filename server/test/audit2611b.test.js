@@ -203,7 +203,7 @@ test('AUTHZ2611-04: 연동 키 발급·수정·폐기는 전체 범위 계정만
   assert.equal(o.issueS, 403, '수정 전: 범위 admin(설정 소유자) 이 vcenters:[](= 전체) 키를 발급했다');
   assert.equal(o.issueF, 200);
   assert.equal(o.patchS, 403); assert.equal(o.revokeS, 403);
-  assert.equal(o.listS, 200);
+  assert.equal(o.listS, 403, 'v2.629 AUTHZ2629-08: 목록도 전체 범위 전용');
 });
 
 test('LEFT2611-02·04·07: IPAM 설정은 범위 밖 키를 보존하고 전역 목록을 바꾸지 못한다 · dryRun 은 범위 밖 vCenter 를 드러내지 않는다', () => {
