@@ -86,11 +86,17 @@ export function BmUsage() {
   // Enterprise 동의 체크 — 저장 버튼을 누르기 전 단계(서버는 ack 없이는 켜지 않는다).
   const [entAgree, setEntAgree] = useState(false);
 
+  // v2.628 WEB2628-06: 늦게 온 이전 GET 이 방금 저장한 설정(form)을 덮지 않게 세대로 거른다(저장 성공도 세대를 올린다).
+  const loadGen = React.useRef(0);
   const load = React.useCallback(async () => {
+    const gen = ++loadGen.current;
     setLoading(true);
-    try { const d = await fetchJson('/tools/bm-usage'); setData(d); setForm(d.settings || null); setError(''); }
-    catch (e) { setError(e?.message || String(e)); }
-    finally { setLoading(false); }
+    try {
+      const d = await fetchJson('/tools/bm-usage');
+      if (gen !== loadGen.current) return;
+      setData(d); setForm(d.settings || null); setError('');
+    } catch (e) { if (gen === loadGen.current) setError(e?.message || String(e)); }
+    finally { if (gen === loadGen.current) setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -199,16 +205,23 @@ export function BmUsage() {
       return;
     }
     if (Math.round(n * scale) === Number(form?.[field])) return; // 바뀐 게 없으면 저장하지 않는다
-    saveSettings({ [field]: n * scale });
+    // v2.628 WEB2628-06: defaultValue 는 마운트 때만 읽힌다 — 서버가 범위로 자른 값(예 999 → 360)을 이 칸에 되돌려 보여 준다.
+    const input = e.target;
+    saveSettings({ [field]: n * scale }).then((saved) => {
+      const v = Number(saved?.[field]);
+      if (saved && Number.isFinite(v) && input && input.isConnected) input.value = String(Math.round(v / scale));
+    });
   }
 
   async function saveSettings(patch) {
     setSaving(true);
     try {
       const r = await putJson('/tools/bm-usage/settings', patch);
+      loadGen.current += 1; // 진행 중이던 이전 GET 은 저장 전 값이다 — 버린다
       setForm(r.settings); { const warn = scopeSaveSuffix(r) + ignoredCentralNote(r); setMsg({ tone: warn ? 'bad' : 'ok', text: `설정을 저장했습니다.${warn}` }); }
       load();
-    } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }
+      return r.settings || null;
+    } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); return null; }
     finally { setSaving(false); }
   }
 
@@ -554,15 +567,15 @@ export function BmUsage() {
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <label style={{ fontSize: 12 }}>주기(분){' '}
-              <input type="number" min={1} max={360} defaultValue={Math.round((form.intervalMs || 0) / 60000)} disabled={dl}
+              <input type="number" key={`v-${String(Math.round((form.intervalMs || 0) / 60000))}`} min={1} max={360} defaultValue={Math.round((form.intervalMs || 0) / 60000)} disabled={dl}
                 onBlur={(e) => numBlur(e, 'intervalMs', 60000)} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>원시 보존(일){' '}
-              <input type="number" min={7} max={365} defaultValue={form.rawRetentionDays} disabled={dl}
+              <input type="number" key={`v-${String(form.rawRetentionDays)}`} min={7} max={365} defaultValue={form.rawRetentionDays} disabled={dl}
                 onBlur={(e) => numBlur(e, 'rawRetentionDays')} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>롤업 보존(일){' '}
-              <input type="number" min={30} max={3650} defaultValue={form.dailyRetentionDays} disabled={dl}
+              <input type="number" key={`v-${String(form.dailyRetentionDays)}`} min={30} max={3650} defaultValue={form.dailyRetentionDays} disabled={dl}
                 onBlur={(e) => numBlur(e, 'dailyRetentionDays')} style={{ width: 80, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>
@@ -657,15 +670,15 @@ export function BmUsage() {
           </p>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <label style={{ fontSize: 12 }}>임계(%){' '}
-              <input type="number" min={50} max={100} defaultValue={form.alertPct} disabled={dl}
+              <input type="number" key={`v-${String(form.alertPct)}`} min={50} max={100} defaultValue={form.alertPct} disabled={dl}
                 onBlur={(e) => numBlur(e, 'alertPct')} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>지속(분){' '}
-              <input type="number" min={0} max={240} defaultValue={form.alertSustainMin} disabled={dl}
+              <input type="number" key={`v-${String(form.alertSustainMin)}`} min={0} max={240} defaultValue={form.alertSustainMin} disabled={dl}
                 onBlur={(e) => numBlur(e, 'alertSustainMin')} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>재알림 간격(시간){' '}
-              <input type="number" min={1} max={168} defaultValue={form.alertRepeatHours} disabled={dl}
+              <input type="number" key={`v-${String(form.alertRepeatHours)}`} min={1} max={168} defaultValue={form.alertRepeatHours} disabled={dl}
                 onBlur={(e) => numBlur(e, 'alertRepeatHours')} style={{ width: 80, minWidth: 0 }} />
             </label>
             {data?.status?.alertState && (

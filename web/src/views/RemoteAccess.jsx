@@ -22,6 +22,7 @@ export default function RemoteAccess() {
   const [proxies, setProxies] = useState([]);
   const [editProxy, setEditProxy] = useState(null);
   const [health, setHealth] = useState({});
+  const [proxiesErr, setProxiesErr] = useState(null); // v2.628 WEB2628-07: 목록 조회 실패를 '중계 서버 없음' 으로 보이지 않는다
   const { data: vcList } = usePolling('/vcenters', {}, 60_000);
 
   const testOne = async (id) => {
@@ -34,7 +35,9 @@ export default function RemoteAccess() {
     try { setData(await fetchJson('/remote/mappings')); setError(null); }
     catch (e) { setError(e.message); }
     fetchJson('/remote/config').then(() => setIsAdmin(true)).catch(() => setIsAdmin(false)); // 403 for non-admin
-    fetchJson('/remote/proxies/full').then((p) => { setProxies(p.proxies || []); (p.proxies || []).forEach((x) => testOne(x.id)); }).catch(() => setProxies([]));
+    fetchJson('/remote/proxies/full')
+      .then((p) => { setProxies(p.proxies || []); setProxiesErr(null); (p.proxies || []).forEach((x) => testOne(x.id)); })
+      .catch((e) => { setProxiesErr(e?.message || String(e)); }); // 직전 목록은 그대로 둔다(0 개로 비우지 않는다)
   };
   useEffect(() => { load(); }, []);
 
@@ -49,7 +52,8 @@ export default function RemoteAccess() {
     await load();
   };
 
-  if (error) return <ErrorBox message={error} />;
+  // v2.628 WEB2628-07: 데이터를 이미 갖고 있으면 일시 조회 실패로 화면 전체를 오류로 갈아치우지 않는다(배너로 말한다).
+  if (error && !data) return <ErrorBox message={error} />;
   if (!data) return <Loading />;
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4500); };
 
@@ -93,6 +97,7 @@ export default function RemoteAccess() {
           background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.text}</div>
       )}
 
+      {error && <div className="banner warn" style={{ marginBottom: 12 }}>매핑 목록 갱신 실패(직전 목록 표시 중): {String(error)}</div>}
       {isAdmin && (
         <div className="card" style={{ marginBottom: 14 }}>
           <div className="flex between wrap" style={{ alignItems: 'center' }}>
@@ -155,10 +160,11 @@ export default function RemoteAccess() {
           </div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>현재 설정된 중계 서버(HAProxy)입니다. 자세한 구성은 설정 → 중계 서버에서도 가능합니다.</div>
           <div className="table-wrap">
-            <STable>
+            <STable minWidth={820} wrap={false}>
               <thead><tr><th>상태</th><th>이름</th><th>프록시 주소</th><th>공개포트 시작</th><th>할당 vCenter</th><th>프로비저닝</th><th style={{ textAlign: 'right' }}>관리</th></tr></thead>
               <tbody>
-                {proxies.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>추가 중계 서버가 없습니다. (모두 기본 프록시 사용)</td></tr>}
+                {proxiesErr && <tr data-pin><td colSpan={7} className="center" style={{ padding: 18, color: 'var(--red)' }}>중계 서버 목록을 불러오지 못했습니다: {proxiesErr}{proxies.length ? ' (직전 목록 표시 중)' : ''}</td></tr>}
+                {!proxiesErr && proxies.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>추가 중계 서버가 없습니다. (모두 기본 프록시 사용)</td></tr>}
                 {proxies.map((p) => (
                   <tr key={p.id}>
                     <td><HealthDot h={health[p.id]} /></td>
@@ -182,7 +188,7 @@ export default function RemoteAccess() {
 
       <div className="section-title" style={{ marginTop: 0 }}>접속 대상</div>
       <div className="table-wrap">
-        <STable>
+        <STable minWidth={820} wrap={false}>
           <thead><tr><th>이름</th><th>프로토콜</th><th>대상</th><th>프록시</th><th>공개 포트</th><th>상태</th><th style={{ textAlign: 'right' }}>접속</th></tr></thead>
           <tbody>
             {data.mappings.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 26 }}>등록된 대상이 없습니다.</td></tr>}
