@@ -109,10 +109,17 @@ export function noticesOf(d) {
   if (s.enabled && corps.length && !corps.some((c) => c.collectOn)) {
     out.push({ tone: 'warn', text: '**수집을 켠 법인이 없습니다** — 베어메탈 사용률 › 설정에서 법인을 고르세요. 고르기 전에는 물리 서버 값이 없습니다.' });
   }
+  // v2.626: 물리 서버가 법인에 붙지 않으면 수집 대상도 합계도 되지 못한다 — 이유를 먼저 말한다.
+  const ub = d.unassigned?.bm;
+  if (ub && ub.servers) {
+    out.push({ tone: 'warn', text: `**법인을 정하지 못한 물리 서버 ${ub.servers}대**는 수집 대상도, 법인 합계도 아닙니다 — iDRAC 등록의 법인(vCenter)·호스트명·서비스태그·수동 지정·법인(DataCenter)에 vCenter 가 하나뿐인 경우로 정합니다. 법인(DataCenter)에 vCenter 가 둘 이상이면 추측하지 않습니다 — 특수 기능 › 통합 서버 인벤토리에서 법인을 지정하세요.` });
+  }
+  const filled = numOrNull(d.attributed?.filled);
+  if (filled) out.push({ tone: 'info', text: `물리 서버 ${filled}대는 등록부에 법인이 비어 있어 **개요와 같은 귀속 규칙**(호스트명·서비스태그·지정·DataCenter)으로 법인을 정했습니다.` });
   const n = numOrNull(d.edgeSnaps?.count) ?? 0;
   out.push({ tone: 'info', text: n
-    ? `엣지가 수집하는 법인의 값은 **중앙이 가져온 엣지 보관분**(${n}곳)에서 읽습니다 — 보관분이 오래되면 그 서버는 '오래됨' 으로 빠집니다. 베어메탈 사용률 › 엣지 보관분에서 다시 가져올 수 있습니다.`
-    : '엣지가 수집하는 법인의 값은 **중앙이 가져온 엣지 보관분**에서만 읽습니다 — 아직 가져온 보관분이 없어 그 서버들은 못 읽음으로 셉니다(가상화 서버는 vCenter 값으로 채웁니다). 베어메탈 사용률 › 엣지 보관분에서 가져오세요.' });
+    ? `엣지가 수집하는 법인의 값은 **중앙이 가져온 엣지 보관분**(${n}곳)에서 읽습니다 — 보관분이 오래되면 그 서버는 '오래됨' 으로 빠집니다. 베어메탈 사용률 › 엣지 보관분에서 다시 가져올 수 있습니다. 엣지 담당 서버는 **그 엣지 포탈의** 베어메탈 사용률 설정에서 수집을 켜야 값이 생깁니다.`
+    : '엣지가 수집하는 법인의 값은 **중앙이 가져온 엣지 보관분**에서만 읽습니다 — 아직 가져온 보관분이 없어 그 서버들은 못 읽음으로 셉니다(가상화 서버는 vCenter 값으로 채웁니다). 엣지 담당 서버는 **그 엣지 포탈의** 베어메탈 사용률 설정에서 수집을 켠 뒤, 베어메탈 사용률 › 엣지 보관분에서 가져오세요.' });
   return out;
 }
 
@@ -125,7 +132,7 @@ export function footnotes(d) {
     '법인 구분은 법인(vCenter) 이름에 IRS 가 있는지로 정합니다.',
   ];
   const u = d?.unassigned?.bm;
-  if (u && u.servers) out.push(`**법인 귀속 없는 물리 서버 ${u.servers}대**는 어느 법인 합계에도 넣지 않았습니다(반영 ${countedOf(u)}대 · CPU ${pctText(u.cpu?.pct)} · 메모리 ${pctText(u.mem?.pct)}). 서버 분석 › 구분에서 법인을 지정하세요.`);
+  if (u && u.servers) out.push(`**법인 귀속 없는 물리 서버 ${u.servers}대**는 어느 법인 합계에도 넣지 않았습니다(반영 ${countedOf(u)}대 · CPU ${pctText(u.cpu?.pct)} · 메모리 ${pctText(u.mem?.pct)}). 특수 기능 › 통합 서버 인벤토리에서 법인을 지정하세요.`);
   return out;
 }
 
