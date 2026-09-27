@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import Guacamole from 'guacamole-common-js';
 import '@xterm/xterm/css/xterm.css';
 import { getToken, postJson } from '../api.js';
+import { sshDataFrames, sshCloseReasonText } from './sshSend.js';
 
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -88,8 +89,16 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
         term.write(s);
       };
       ws.onerror = () => { if (phaseRef.current !== 'live') { setPhase('error'); setStatus('WebSocket 연결 실패 — 포탈/프록시 경로 또는 인증을 확인하세요.'); } stopTimer(); };
-      ws.onclose = () => { term.write('\r\n\x1b[31m[연결 종료]\x1b[0m\r\n'); if (phaseRef.current !== 'live') { setPhase('error'); setStatus((x) => x || '연결이 종료되었습니다.'); } stopTimer(); };
-      term.onData((d) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'data', data: d })); });
+      // v2.632(AX1-2632-07): 닫힘 코드가 사유를 말하면(1009 = 프레임 상한 초과) 그것을 함께 보인다 — 사유 없는 '[연결 종료]' 금지.
+      ws.onclose = (ev) => {
+        const why = sshCloseReasonText(ev?.code);
+        term.write(`\r\n\x1b[31m[연결 종료]${why ? ` ${why}` : ''}\x1b[0m\r\n`);
+        if (why) setStatus(why);
+        if (phaseRef.current !== 'live') { setPhase('error'); setStatus((x) => why || x || '연결이 종료되었습니다.'); }
+        stopTimer();
+      };
+      // v2.632(AX1-2632-07): 붙여넣기 전량을 한 프레임으로 보내면 256KB 상한(서버 1009)에 걸려 세션이 끊긴다 — 조각으로 나눠 보낸다.
+      term.onData((d) => { if (ws.readyState === 1) for (const fr of sshDataFrames(d)) ws.send(fr); });
     }, 0);
   };
 

@@ -15,7 +15,9 @@ import { WebSocketServer } from 'ws';
 /*
  * v2.631(AX3-01): 프레임 상한. ws 기본 maxPayload 는 100MiB 라 인증된 operator(remote.access 기본 보유)가 프레임당 100MB 를 보내
  *   문자열화·파싱(동시 세션 × 100MB)으로 이벤트 루프·힙을 누를 수 있었다. 넘는 프레임은 ws 가 1009 로 닫는다.
- *   SSH 제어 프레임(auth·data·resize JSON)은 작다 — 붙여넣기 수백 KB 까지 여유.
+ *   SSH 제어 프레임(auth·resize JSON)은 작다. data 는 붙여넣기 전량이 올 수 있어 웹(web/src/remote/sshSend.js)이 32,768자 조각으로
+ *   나눠 보낸다(v2.632 AX1-2632-07 — 예전 주석의 '수백 KB 까지 여유' 는 사실이 아니었다: 256KB 를 넘는 붙여넣기 한 번이 1009 로
+ *   세션을 끊었다). 이 값을 줄이면 sshSend.js 의 조각 크기(최악 6배 확장)도 다시 계산할 것 — audit2632e 가 두 값을 대조한다.
  */
 export const SSH_WS_MAX_PAYLOAD = 256 * 1024;
 import { Client as SSHClient } from 'ssh2';

@@ -14,6 +14,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 
 const FILE = path.join(config.configDir, 'sanswitch-perf-settings.json');
 
@@ -41,15 +42,28 @@ function keepPrevBlankNumbers(input, prev) {
 
 let _cache = null;
 
+/*
+ * v2.632(감사 EDGE2632-02): 로드 오류 상태. 손상 → 보존 → 기본값(꺼짐 · 보존 90일)을 /api/central/sanswitch-config 가 perf 로
+ *   200 배포하면 전 엣지가 포트 사용량 수집을 끄고 보존일을 90일로 줄여 **저장**했다(엣지 표본이 prune 으로 잘린다).
+ *   오류면 라우트가 perf 를 싣지 않고 `perfSettingsUnreadable` 을 싣는다(엣지는 body.perf 가 없으면 적용하지 않는다 — 구버전 엣지도).
+ *   저장 성공만 해제한다(관리자가 다시 저장하면 풀린다).
+ */
+const _loadErr = makeSettingsLoadError(() => FILE);
+/** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
+export function perfSettingsLoadError() { loadPerfSettings(); return _loadErr.get(); }
+
 export function loadPerfSettings() {
   if (_cache) return { ..._cache };
   let raw = {};
-  try { if (fs.existsSync(FILE)) raw = JSON.parse(fs.readFileSync(FILE, 'utf8')); }
-  catch { preserveCorrupt(FILE); raw = {}; }
+  if (!fs.existsSync(FILE)) _loadErr.missing();
+  else {
+    try { raw = JSON.parse(fs.readFileSync(FILE, 'utf8')); _loadErr.ok(); }
+    catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE); raw = {}; }
+  }
   // v2.601(감사 TIM2601-03 — 재현): 파일 내용이 유효한 JSON 값 null·배열·숫자면 JSON.parse 는 성공해 손상 보존을 건너뛰고
   // 정규화가 TypeError 로 던졌다(_cache 가 안 채워져 **매 호출** 던진다 → 이 로더를 getMs 로 쓰는 적응 타이머가 멈췄다).
   // 객체가 아니면 손상으로 보고 보존한 뒤 기본값으로 시작한다(bmusage/settings.js readFile 과 같은 판정).
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { preserveCorrupt(FILE, '객체가 아닌 JSON 값'); raw = {}; }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { _loadErr.corrupt('객체가 아닌 JSON 값'); preserveCorrupt(FILE, '객체가 아닌 JSON 값'); raw = {}; }
   _cache = normalizePerfSettings(raw);
   return { ..._cache };
 }
@@ -73,6 +87,7 @@ function notifyChange() { for (const cb of _listeners) { try { cb(); } catch { /
 export function savePerfSettings(input = {}) {
   _cache = normalizePerfSettings(keepPrevBlankNumbers(input, loadPerfSettings()));
   atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
+  _loadErr.ok();
   notifyChange();
   return { ..._cache };
 }
@@ -93,4 +108,4 @@ export function applyCentralPerfSettings(remote) {
   return true;
 }
 
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; _loadErr.ok(); }

@@ -37,6 +37,13 @@ const capOf = (cap) => { const n = Math.trunc(Number(cap)); return Number.isFini
 export const likeEscape = (q) => String(q).replace(/[\\%_]/g, (c) => `\\${c}`);
 let impl = null;
 let ready = null;
+/** v2.632(A6-2632-02): 키셋 커서 검증 — 숫자가 아니면 커서 없음으로 두지 않고 던진다(조용히 처음부터 다시 내보내면 중복이다). */
+function keysetCursor(c) {
+  if (c == null) return null;
+  const ts = Number(c.ts); const rid = Number(c.rid);
+  if (!Number.isFinite(ts) || !Number.isFinite(rid)) throw new Error('잘못된 페이지 커서');
+  return { ts, rid };
+}
 
 function initSqlite() {
   const DB_PATH = dbPath();
@@ -111,6 +118,19 @@ function initSqlite() {
       // rowid 타이브레이커: ts 동률 행이 많은 로그 특성상 ORDER BY ts 만으로는 OFFSET 페이징이
       // 청크 간 중복/누락될 수 있다(정렬이 비결정적) — CSV 청크 내보내기·UI 페이징 안정성용.
       query: (f = {}, limit = 200, offset = 0) => { const { where, params } = filterSql(f); return db.prepare(`SELECT vcenterId,ts,severity,type,user,entity,message FROM events ${where} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`).all(...params, ...clampPage(limit, offset)); },
+      /**
+       * v2.632(A6-2632-02): 키셋 페이지 — 커서 (ts, rid) 보다 **오래된** 행만(ORDER BY ts DESC, rowid DESC). OFFSET 을 쓰지 않으므로
+       * 청크 사이에 커서와 같은 ts 로 행이 들어와도 결과가 밀리지 않는다(예전 OFFSET 경로는 '중복 1 + 누락 1' 이었다).
+       * 반환 행에 rid(rowid)가 실린다 — 다음 커서용이다. cursor 가 null 이면 처음부터.
+       */
+      queryPage: (f = {}, limit = 200, cursor = null) => {
+        const { where, params } = filterSql(f);
+        const c = keysetCursor(cursor);
+        const cond = c ? '(ts < ? OR (ts = ? AND rowid < ?))' : '';
+        const w = c ? (where ? `${where} AND ${cond}` : `WHERE ${cond}`) : where;
+        const p = c ? [...params, c.ts, c.ts, c.rid] : params;
+        return db.prepare(`SELECT rowid AS rid,vcenterId,ts,severity,type,user,entity,message FROM events ${w} ORDER BY ts DESC, rowid DESC LIMIT ?`).all(...p, clampPage(limit, 0)[0]);
+      },
       count: (f = {}) => { const { where, params } = filterSql(f); return Number(db.prepare(`SELECT COUNT(*) n FROM events ${where}`).get(...params)?.n || 0); },
       // v2.607 DB2607-02: 상한 COUNT — 맞는 행을 cap+1 개까지만 센다. 검색어·심각도 필터는 인덱스 밖이라 정확 COUNT 가
       // 페이지마다 events 전체를 훑었다. 상한에 닿으면 capped:true 로 밝힌다(조용한 상한 금지).
@@ -175,7 +195,10 @@ function initJson() {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   let rows = [];
   const seen = new Set();
-  try { for (const l of fs.readFileSync(file, 'utf8').split('\n')) { if (l.trim()) { const r = JSON.parse(l); rows.push(r); seen.add(`${r.vcenterId}|${r.k}`); } } } catch { /* */ }
+  // v2.632(A6-2632-02): 키셋 페이지용 삽입 순번(sqlite rowid 대응) — 파일에는 쓰지 않는다(WeakMap).
+  const seqOf = new WeakMap();
+  let seq = 0;
+  try { for (const l of fs.readFileSync(file, 'utf8').split('\n')) { if (l.trim()) { const r = JSON.parse(l); rows.push(r); seqOf.set(r, ++seq); seen.add(`${r.vcenterId}|${r.k}`); } } } catch { /* */ }
   const match = (r, f) => (!f.vcenterId || r.vcenterId === f.vcenterId) && (!f.severity || r.severity === f.severity)
     && (!Array.isArray(f.vcenterIds) || f.vcenterIds.includes(r.vcenterId)) // scope 화이트리스트(빈 배열=결과 없음)
     && (!f.since || r.ts >= f.since) && (!f.until || r.ts <= f.until)
@@ -184,12 +207,19 @@ function initJson() {
     kind: 'json',
     insertMany: (recs) => {
       const fresh = [];
-      for (const r of recs) { const k = r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`; const id = `${r.vcenterId}|${k}`; if (seen.has(id)) continue; seen.add(id); const row = { vcenterId: r.vcenterId, k, ts: r.ts, severity: r.severity, type: r.type, user: r.user, entity: r.entity, message: r.message }; rows.push(row); fresh.push(row); }
+      for (const r of recs) { const k = r.key || `${r.ts}:${(r.message || '').slice(0, 40)}`; const id = `${r.vcenterId}|${k}`; if (seen.has(id)) continue; seen.add(id); const row = { vcenterId: r.vcenterId, k, ts: r.ts, severity: r.severity, type: r.type, user: r.user, entity: r.entity, message: r.message }; rows.push(row); seqOf.set(row, ++seq); fresh.push(row); }
       if (fresh.length) try { fs.appendFileSync(file, fresh.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ }
     },
     lastTs: (vc) => rows.reduce((mx, r) => (r.vcenterId === vc && r.ts > mx ? r.ts : mx), 0),
     lastPowerEvents: (vc) => { const m = new Map(); for (const r of rows) { if (r.vcenterId !== vc || (r.type !== 'VmPoweredOffEvent' && r.type !== 'VmPoweredOnEvent')) continue; const k = `${r.entity}|${r.type}`; if (!m.has(k) || m.get(k).ts < r.ts) m.set(k, { entity: r.entity, type: r.type, ts: r.ts }); } return [...m.values()]; },
     query: (f = {}, limit = 200, offset = 0) => rows.filter((r) => match(r, f)).sort((a, b) => b.ts - a.ts).slice(...((a) => [a[1], a[1] + a[0]])(clampPage(limit, offset))),
+    queryPage: (f = {}, limit = 200, cursor = null) => {
+      const c = keysetCursor(cursor);
+      const [lim] = clampPage(limit, 0);
+      return rows.filter((r) => match(r, f) && (!c || r.ts < c.ts || (r.ts === c.ts && seqOf.get(r) < c.rid)))
+        .sort((a, b) => b.ts - a.ts || seqOf.get(b) - seqOf.get(a)).slice(0, lim)
+        .map((r) => ({ rid: seqOf.get(r), vcenterId: r.vcenterId, ts: r.ts, severity: r.severity, type: r.type, user: r.user, entity: r.entity, message: r.message }));
+    },
     count: (f = {}) => rows.filter((r) => match(r, f)).length,
     countCapped: (f = {}, cap = COUNT_CAP) => { const c = capOf(cap); let n = 0; for (const r of rows) { if (match(r, f) && ++n > c) return { total: c, capped: true }; } return { total: n, capped: false }; },
     meta: () => { const vc = new Map(); let mn = null, mx = null; for (const r of rows) { if (mn == null || r.ts < mn) mn = r.ts; if (mx == null || r.ts > mx) mx = r.ts; const g = vc.get(r.vcenterId) || { vcenterId: r.vcenterId, count: 0, lastTs: 0 }; g.count++; g.lastTs = Math.max(g.lastTs, r.ts); vc.set(r.vcenterId, g); } return { count: rows.length, firstTs: mn, lastTs: mx, vcenters: [...vc.values()] }; },

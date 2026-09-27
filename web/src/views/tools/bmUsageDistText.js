@@ -39,6 +39,9 @@ export function distributionSummary(dist) {
   parts.push(`대기 ${c.pending}`, `인출 기록 없음 ${c['no-pull']}`);
   if (c.excluded) parts.push(`제외 ${c.excluded}`);
   if (c.unverified) parts.push(`이름 미검증 ${c.unverified}(공유 토큰 — 이름을 확인할 수 없는 인출)`);
+  // v2.632(A6-2632-03): 등록부에 없는 미검증 이름은 최근 일부만 행으로 싣고, 상한으로 거절한 인출은 개수만 준다.
+  if (dist.unknownUnverifiedOmitted > 0) parts.push(`등록부에 없는 미검증 이름 ${dist.unknownUnverifiedOmitted}곳은 표에서 생략`);
+  if (dist.pullsOmitted > 0) parts.push(`기록 상한으로 남기지 못한 미검증 인출 ${dist.pullsOmitted}건`);
   return `**배포 켜짐** — 엣지 ${c.total}곳: ${parts.join(' · ')}. 엣지는 **다음 인출**(기본 10분 주기)에 받습니다 — 저장 즉시 바뀌지 않습니다.`;
 }
 

@@ -116,7 +116,7 @@ test('#17 리다이렉트 코어 — IP 리터럴 차단 대역 hop 거부 · �
 test('#19 엣지 번들 push 두 곳은 리다이렉트를 따라가지 않는다', () => {
   const a = fs.readFileSync(new URL('../src/collector/upgradePush.js', import.meta.url), 'utf8');
   const b = fs.readFileSync(new URL('../src/upgrade/upgrade.js', import.meta.url), 'utf8');
-  assert.match(a, /dispatcher: _rf\.wanAgent,[\s\S]{0,400}redirect: 'manual'/);
+  assert.match(a, /dispatcher: dispatcherFor\(undefined, pushTimeoutMs\),[\s\S]{0,400}redirect: 'manual'/); // v2.632: 300초 초과 시한은 긴 디스패처
   assert.match(b.slice(b.indexOf('export async function pushBundleToEdge')), /dispatcher: upgradeAgent,[\s\S]{0,300}redirect: 'manual'/);
 });
 

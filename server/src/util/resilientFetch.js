@@ -43,6 +43,33 @@ const wanAgent = new Agent({
   connections: Number(process.env.WAN_MAX_CONNECTIONS) || 6,
 });
 
+/*
+ * v2.632(AX1-2632-03): 긴 시한 호출용 디스패처. undici Agent 의 기본 headersTimeout·bodyTimeout 은 **300초**라, 호출자가
+ *   timeoutMs 를 그보다 길게 줘도(예: bmstor 중앙→엣지 수집 위임 — 서버 13대 이상이면 60초 + 20초×n 이 300초를 넘는다) 엣지가
+ *   수집을 끝내고 헤더를 보내기 전에 'Headers Timeout Error' 로 끊겼다(v2.631 EDGE2631-02 의 비례 시한이 무효였다).
+ *   이 디스패처는 두 시한을 normFetchTimeoutMs 상한(30분) + 여유로 두어 **호출자의 AbortSignal.timeout 이 시한을 정하게** 한다.
+ *   TLS 검증·SSRF lookup·연결 상한은 wanAgent 와 같다. 선택은 dispatcherFor() 하나가 한다.
+ */
+export const UNDICI_DEFAULT_IO_TIMEOUT_MS = 300_000;
+const LONG_IO_TIMEOUT_MS = 1_800_000 + 60_000;
+const wanLongAgent = new Agent({
+  connect: { rejectUnauthorized: WAN_TLS_VERIFY, lookup: ssrfLookup },
+  connectTimeout: Number(process.env.WAN_CONNECT_TIMEOUT_MS) || 20_000,
+  keepAliveTimeout: 10_000,
+  keepAliveMaxTimeout: 30_000,
+  connections: Number(process.env.WAN_MAX_CONNECTIONS) || 6,
+  headersTimeout: LONG_IO_TIMEOUT_MS,
+  bodyTimeout: LONG_IO_TIMEOUT_MS,
+});
+/**
+ * 호출자가 준 디스패처가 있으면 그것(보안 정책 — upgradeAgent 등), 없으면 시한이 undici 기본 입출력 시한(300초) 이하일 때
+ * wanAgent, 넘으면 wanLongAgent. ⚠ 호출자 디스패처를 긴 시한으로 바꿔 주지 않는다 — 그 디스패처의 시한은 호출자 책임이다.
+ */
+export function dispatcherFor(dispatcher, timeoutMs) {
+  if (dispatcher) return dispatcher;
+  return Number(timeoutMs) > UNDICI_DEFAULT_IO_TIMEOUT_MS ? wanLongAgent : wanAgent;
+}
+
 const TRANSIENT_RE = /timed?\s?out|timeout|abort|reset|hang ?up|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND|EPIPE|ETIMEDOUT|other side closed|socket|UND_ERR/i;
 function isTransientErr(err) {
   const parts = [err?.code, err?.message, err?.name, err?.cause?.code, err?.cause?.message].filter(Boolean).join(' ');
@@ -217,7 +244,7 @@ async function resilientFetchInner(url, { timeoutMs: rawTimeoutMs = 20_000, retr
   let lastErr;
   // dispatcher 옵션: 업그레이드 다운로드처럼 'TLS 검증 강제' 디스패처(upgradeAgent)를 넘겨야 하는
   // 경로는 wanAgent(검증 off) 대신 그 디스패처로 재시도한다(보안 보존).
-  const disp = dispatcher || wanAgent;
+  const disp = dispatcherFor(dispatcher, timeoutMs);   // v2.632(AX1-2632-03)
   const callerSignal = init.signal || null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (callerSignal?.aborted) throw abortError(callerSignal); // v2.620(RECENT2620-05)
@@ -268,4 +295,4 @@ export async function retryTransient(fn, { retries = 1, backoffMs = 400 } = {}) 
 }
 
 // 테스트/진단용 노출.
-export const _internals = { isTransientErr, RETRYABLE_STATUS, wanAgent };
+export const _internals = { isTransientErr, RETRYABLE_STATUS, wanAgent, wanLongAgent };

@@ -29,6 +29,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { startAdaptiveTimer as baseAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { agentValueOf } from '../util/agentKey.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 
 /** 조정 가능한 주기 항목. min/def 는 서버가 단일 소스 — UI 가 이 표를 받아 폼을 그린다. */
 export const INTERVAL_SPEC = [
@@ -143,19 +144,31 @@ const FILE = path.join(config.configDir, 'storage-intervals.json');
 const MAX_AGENTS = 200;
 let _db = null;
 
+/*
+ * v2.632(감사 EDGE2632-03): 로드 오류 상태. 손상 → 보존 → 빈 설정이면 storage-config 가 `intervals: {}` 를 내려 엣지가 중앙 지정
+ *   주기를 버리고 로컬(portal.env/기본)로 돌아갔다(예: 영역수집 60분 지정이 풀려 장비 부하 증가). 오류면 라우트가
+ *   intervals 를 싣지 않고(`intervalsUnreadable`) — 이 기능을 모르는 구버전 엣지에는 503 — 엣지는 직전 값을 유지한다.
+ */
+const _loadErr = makeSettingsLoadError(() => FILE);
+/** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
+export function storageIntervalsLoadError() { load(); return _loadErr.get(); }
+
 function load() {
   if (_db) return _db;
   try {
     if (fs.existsSync(FILE)) {
       const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아닌 JSON 값');
       _db = {
         global: normalizeIntervals(p.global || {}).values,
         agents: Object.fromEntries(Object.entries(p.agents || {}).slice(0, MAX_AGENTS)
           .map(([a, v]) => [String(a), normalizeIntervals(v || {}).values])),
       };
+      _loadErr.ok();
       return _db;
     }
-  } catch { preserveCorrupt(FILE); }
+    _loadErr.missing();
+  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e?.message); }
   _db = { global: {}, agents: {} };
   return _db;
 }
@@ -179,6 +192,7 @@ export function saveIntervalConfig({ global = {}, agents = {} } = {}) {
   }
   _db = { global: g.values, agents: a };
   atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ..._db }, null, 2), { mode: 0o600 });
+  _loadErr.ok();
   return { ok: true, config: loadIntervalConfig(), issues };
 }
 
@@ -204,4 +218,4 @@ export function applyOwnIntervals() {
   return applyCentralIntervals(intervalsForAgent(''));
 }
 
-export function _resetForTest() { _db = null; _override = {}; _overrideAt = 0; }
+export function _resetForTest() { _db = null; _override = {}; _overrideAt = 0; _loadErr.ok(); }

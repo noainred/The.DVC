@@ -309,6 +309,19 @@ export async function pollOnce() {
     }
     throw new Error(`중앙 거부 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`);
   }
+  // v2.632(감사 AX1-2632-01): 중앙 스케줄 파일을 못 읽은 503(settingsUnreadable)은 **중앙에 닿은** 응답이다 — 하트비트는 이미
+  //   기록됐다. 연락 시각을 갱신하지 않으면 RMA_OFFLINE_MINUTES 뒤 현장 무연결 명령을 실행했다(v2.607 refused 와 같은 결함).
+  //   연락은 갱신하고, 오류로 던져 main 루프가 백오프하게 한다. outbox·스케줄은 그대로 둔다(중앙이 결과를 받지 않았다).
+  if (r.status === 503) {
+    let j = null; try { j = await r.json(); } catch { /* */ }
+    if (j?.reason === 'settingsUnreadable') {
+      await onContact();
+      const detail = String(j?.detail || '').slice(0, 300);
+      lastRefused = { at: Date.now(), reason: `settingsUnreadable${detail ? ` — ${detail}` : ''}` };
+      throw Object.assign(new Error(`중앙이 RMA 스케줄 파일을 읽지 못했습니다(연결됨 · 결과 보류)${detail ? ` — ${detail}` : ''}`), { settingsUnreadable: true });
+    }
+    throw new Error('HTTP 503');
+  }
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const body = await r.json();
   await onContact();

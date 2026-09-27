@@ -133,6 +133,10 @@ export default function DiskTrend({ scope }) {
             {a?.growth?.reclaimGBperDay != null ? ` · 회수 가능 증감 ${a.growth.reclaimGBperDay} GB/일` : ''}
           </div>
         )}
+        {/* v2.632 WEB2632-07: 회수 가능 증감을 산정하지 않은 사유(정의 변경으로 옛 표본을 뺀 뒤 하한 미달)는 서버가 reclaimReason 으로 준다 — 빈칸으로 두지 않는다. */}
+        {pts.length >= 2 && a?.growth?.reclaimGBperDay == null && a?.growth?.reclaimReason && (
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>{a.growth.reclaimReason}</div>
+        )}
       </div>
 
       {/* 추이 차트 2: 회수 가능 구성 */}

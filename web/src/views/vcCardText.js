@@ -76,6 +76,9 @@ export function storageUsageUnknownNote(roll) {
  * @returns {{ value: number|null, note: string|null }}
  */
 export function physicalServersKpi(physical) {
+  // v2.632 WEB2632-06: 서버 집계가 예외로 실패하면 `{servers:0, error}` 가 온다 — 그것을 'iDRAC 등록 없음' 이라
+  // 말하면 실패가 '없음' 으로 보인다. error 가 있으면 값은 null 이고 실패라고 말한다(servers 를 보기 전에 본다).
+  if (physical && physical.error) return { value: null, note: '물리 서버 집계 실패' };
   const n = numOrNull(physical?.servers);
   if (n != null && n > 0) return { value: n, note: null };
   if (physical == null || n == null) return { value: null, note: '물리 서버 집계 없음' };

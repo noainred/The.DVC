@@ -12,7 +12,7 @@ import { reqTimeoutMs } from '../agent/envTimeout.js'; // v2.607 TIM2607-02: pus
 const UPGRADE_RESPONSE_MAX_BYTES = 64 * 1024;
 import { loadCollectors } from './registry.js';
 import { setCollectorStatus, getCollectorStatus } from './state.js';
-import { _internals as _rf } from '../util/resilientFetch.js';
+import { dispatcherFor } from '../util/resilientFetch.js';
 import { recordOutbound } from '../util/outboundStats.js'; // v2.587 — 전역 fetch 경로라 직접 기록(데이터 흐름 지도) // wanAgent — WAN 전용 로컬 디스패처(전역 오염 없음)
 
 // 실패 HTTP 상태를 사람이 이해할 원인으로 분류(엣지별로 '무엇을 점검할지' 바로 알려주기 위함).
@@ -39,17 +39,19 @@ const _shaCache = new WeakMap(); // 같은 번들 버퍼는 1회만 해시(수�
 function bundleSha(bytes) { let v = _shaCache.get(bytes); if (!v) { v = createHash('sha256').update(bytes).digest('hex'); _shaCache.set(bytes, v); } return v; }
 export async function pushBundleToCollector(c, bytes, { restart = true, force = false, timeout = process.env.EDGE_PUSH_TIMEOUT_MS } = {}) {
   const url = `${String(c.url).replace(/\/+$/, '')}/api/collector/upgrade?restart=${restart}${force ? '&force=true' : ''}`;
+  // v2.632(감사 E 후속): 시한이 undici 기본 입출력 시한(300초)을 넘으면 긴 시한 디스패처(wanLongAgent) — 아니면 headersTimeout 이 먼저 끊는다.
+  const pushTimeoutMs = reqTimeoutMs(timeout, 600_000, { max: 7_200_000 });
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/gzip', 'X-Bundle-Sha256': bundleSha(bytes), ...(c.token ? { 'X-Collector-Token': c.token } : {}) }, // v2.480: 수신측 무결성 검증
       body: bytes,
-      dispatcher: _rf.wanAgent, // 전역 디스패처가 검증 ON으로 복원돼(감사 C1/C3) 자체서명 https 엣지 호환용 WAN 디스패처 명시
+      dispatcher: dispatcherFor(undefined, pushTimeoutMs), // 전역 디스패처가 검증 ON으로 복원돼(감사 C1/C3) 자체서명 https 엣지 호환용 WAN 디스패처 명시
       // v2.583(감사 확정): 기본 redirect:'follow' 는 교차 출처에서 X-Collector-Token 을 떼지 않는다(undici 는
       //   authorization·cookie 만 뗀다) — 번들 push 는 리다이렉트될 이유가 없으므로 따라가지 않는다(3xx = 실패).
       redirect: 'manual',
       // v2.607 TIM2607-02: 'Number(env) || 기본' 은 3e9 를 그대로(→ 1ms abort), 음수는 AbortSignal.timeout 이 ERR_OUT_OF_RANGE 로 던졌다.
-      signal: AbortSignal.timeout(reqTimeoutMs(timeout, 600_000, { max: 7_200_000 })),
+      signal: AbortSignal.timeout(pushTimeoutMs),
     });
     // v2.604(감사 CEN2604-01 형제): 엣지 응답은 상한까지만 읽는다(해제 후 크기 — gzip 폭탄이 중앙 RSS 를 올리지 않게).
     //   객체가 아니거나 못 읽으면 {} — 사유·버전은 글자만(strOf).

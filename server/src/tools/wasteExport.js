@@ -43,6 +43,12 @@ export function exportZipName({ scope = 'all', cluster = '', folder = '', at = D
 const r1 = (x) => (x == null || !Number.isFinite(Number(x)) ? null : Math.round(Number(x) * 10) / 10);
 const r2 = (x) => (x == null || !Number.isFinite(Number(x)) ? null : Math.round(Number(x) * 100) / 100);
 const fmtDate = (ms) => dayKey(ms); // v2.583 #25: 포탈 오프셋 날짜(못 읽으면 빈 문자열)
+/**
+ * v2.632(AX1-2632-05): 절감률을 모르면(사용률을 읽은 VM 이 없는 범위 — savingPct null) 'null%' 가 아니라 '—'.
+ *   값이 없으면 단위를 붙이지 않는다(unitText 규약). 사용률을 못 읽어 뺀 VM 수는 비고에 밝힌다(조용한 제외 금지).
+ */
+export const pctText = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? '—' : `${v}%`);
+const unknownNote = (n) => (Number(n) > 0 ? ` · 사용률 모름 ${Number(n)}대 제외` : '');
 const OFF_SRC = { event: '이벤트', observed: '점검', track: '추적', first_seen: '관측 시작' };
 
 /**
@@ -87,8 +93,8 @@ export function buildWasteSheets({ waste = {}, offSince = null, reports = new Ma
     ['스냅샷 보유 VM', waste.snapshots?.count ?? 0, `${r1(waste.snapshots?.sizeGB) ?? 0} GB`],
     ['Thin 회수가능(추정)', `${r1(waste.thinReclaim?.reclaimableGB) ?? 0} GB`, `${waste.thinReclaim?.count ?? 0} VM`],
     ['Tools 미실행(On)', waste.noTools?.count ?? 0],
-    ...(oa.cpu ? [['미사용 CPU clock', `${oa.cpu.idleGHz} GHz`, `할당 ${oa.cpu.allocGHz} · 사용 ${oa.cpu.usedGHz} GHz → 절감 가능 ${oa.cpu.savingPct}% · 후보 ${oa.cpu.candidates}`]] : []),
-    ...(oa.mem ? [['미사용 메모리', `${oa.mem.idleGB} GB`, `할당 ${oa.mem.allocGB} · 사용 ${oa.mem.usedGB} GB → 절감 가능 ${oa.mem.savingPct}% · 후보 ${oa.mem.candidates}`]] : []),
+    ...(oa.cpu ? [['미사용 CPU clock', `${oa.cpu.idleGHz} GHz`, `할당 ${oa.cpu.allocGHz} · 사용 ${oa.cpu.usedGHz} GHz → 절감 가능 ${pctText(oa.cpu.savingPct)} · 후보 ${oa.cpu.candidates}${unknownNote(oa.usageUnknown?.cpu)}`]] : []),
+    ...(oa.mem ? [['미사용 메모리', `${oa.mem.idleGB} GB`, `할당 ${oa.mem.allocGB} · 사용 ${oa.mem.usedGB} GB → 절감 가능 ${pctText(oa.mem.savingPct)} · 후보 ${oa.mem.candidates}${unknownNote(oa.usageUnknown?.mem)}`]] : []),
     ['근거 리포트', `최근 ${days}일 vCenter 롤업 기준 · CPU/메모리 과할당 시트의 '근거 리포트' 열 클릭`, reportNote || ''],
     ['안내', 'ZIP 을 압축 해제한 뒤 xlsx 를 열어야 리포트 링크(reports/*.html)가 동작합니다. 리포트는 브라우저로 열립니다.'],
   ];

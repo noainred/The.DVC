@@ -64,9 +64,12 @@ export const GROUP_BY_KEY = Object.freeze(Object.fromEntries(GROUPS.map((g) => [
 export const ENDPOINTS = Object.freeze([
   {
     path: '/inventory/summary', group: 'inventory', method: 'GET', scoped: true,
-    summary: '전 vCenter 합계 — 개수와 자원 총량',
+    // v2.632: storageCapacityGB·storageUsedGB 는 **사용량을 읽은 DS 만**(내부 /summary 와 같은 기준 — 사용률 계산용).
+    //   설치 용량 전체는 storageCapacityAllGB, 사용량을 못 읽어 뺀 DS 수는 datastoresUsageUnknown.
+    summary: '전 vCenter 합계 — 개수와 자원 총량(스토리지 용량·사용은 사용량을 읽은 DS 기준, 설치 용량 전체는 storageCapacityAllGB)',
     fields: ['vcenters', 'hosts', 'vms', 'vmsPoweredOn', 'templates', 'datastores', 'networks', 'clusters',
       'cpuCores', 'cpuTotalMhz', 'cpuUsedMhz', 'memTotalMB', 'memUsedMB', 'storageCapacityGB', 'storageUsedGB',
+      'storageCapacityAllGB', 'datastoresUsageUnknown',
       'vmVcpu', 'vmRamMB', 'vmProvisionedGB'],
   },
   {

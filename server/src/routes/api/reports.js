@@ -19,6 +19,18 @@ import { forecastCapacity } from '../../insights/forecast.js';
 import { alertStatus } from '../../alerts.js';
 import { memoJson, scopeSlice, scopeKey } from './shared.js';
 
+/**
+ * v2.632 WEB2632-04: forecastCapacity 는 datastores·gpu 를 **상한 100개**로 자르는데 그 사실을 싣지 않아
+ * 화면이 '전부 봤다' 고 말했다(조용한 상한). 잘리기 전 개수는 이 함수 밖이라 모르므로, **상한에 닿았는지**
+ * (`capped` — 정확히 100개인 경우도 '더 있을 수 있다' 로 밝힌다)와 상한 값만 싣는다. 개수를 지어내지 않는다.
+ */
+export const FORECAST_LIST_LIMIT = 100;
+export function withForecastCap(r) {
+  if (!r || typeof r !== 'object') return r;
+  const capOf = (arr) => Array.isArray(arr) && arr.length >= FORECAST_LIST_LIMIT;
+  return { ...r, listLimit: FORECAST_LIST_LIMIT, datastoresCapped: capOf(r.datastores), gpuCapped: capOf(r.gpu) };
+}
+
 // 인증서 목록도 scope 적용 — vCenter 항목은 허용 집합으로 거르고, NSX는 범위 제한 계정에는 숨긴다.
 function scopedCerts(user, snap, vcenterId) {
   const c = certStatus();
@@ -95,8 +107,10 @@ api.get('/tools/report/rightsizing', requirePerm('tools'), (req, res) => memoJso
 api.get('/tools/report/capacity', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-capacity', async (snap) => {
   const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
   // allowed 를 함께 넘겨 GPU 예측(스냅샷 밖 metrics DB gpu_vc 키)도 범위로 제한(v2.288 확정 버그).
-  return forecastCapacity(scoped, { days: Number(req.query.days) || 14, vcenterId: req.query.vcenterId || '', allowed: scopedVcenterIds(req.user, snap) });
+  const r = forecastCapacity(scoped, { days: Number(req.query.days) || 14, vcenterId: req.query.vcenterId || '', allowed: scopedVcenterIds(req.user, snap) });
+  return withForecastCap(r);
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
+
 
 // ⑦ 알림 채널·이력 — 웹훅 URL(시크릿)은 절대 내리지 않는다(설정 여부만).
 api.get('/tools/report/alerts', requirePerm('tools'), (req, res) => {

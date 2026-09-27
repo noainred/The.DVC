@@ -18,6 +18,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { startAdaptiveTimer as baseAdaptiveTimer } from '../util/adaptiveTimer.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 
 const FILE = path.join(config.configDir, 'pdu-intervals.json');
 const MAX_MS = 24 * 60 * 60_000;
@@ -36,10 +37,23 @@ const SPEC_BY_KEY = new Map(INTERVAL_SPEC.map((s) => [s.key, s]));
 let _central = null;   // 엣지가 중앙에서 받은 값(메모리)
 let _listeners = new Set();
 
+/*
+ * v2.632(감사 EDGE2632-03): 로드 오류 상태. 손상이면 pdu-config 가 `intervals: {}` 를 내려 엣지가 중앙 지정 주기를 버리고 로컬로
+ *   돌아갔다. 오류면 라우트가 intervals 를 싣지 않고(`intervalsUnreadable` — 구버전 엣지에는 503) 엣지는 직전 값을 유지한다.
+ *   재시작 뒤 보존본만 남은 경우도 못 읽은 것이다. 관리자 저장(saveIntervals)만 해제한다.
+ */
+const _loadErr = makeSettingsLoadError(() => FILE);
+/** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
+export function pduIntervalsLoadError() { loadFile(); return _loadErr.get(); }
+
 function loadFile() {
-  if (!fs.existsSync(FILE)) return {};
-  try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; }
-  catch (e) { preserveCorrupt(FILE, e.message); return {}; }
+  if (!fs.existsSync(FILE)) { _loadErr.missing(); return {}; }
+  try {
+    const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
+    _loadErr.ok();
+    return j;
+  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); return {}; }
 }
 
 /** 중앙 UI 저장 — 지정한 키만 남긴다(빈 값/0 은 '미지정'으로 제거). */
@@ -55,6 +69,7 @@ export function saveIntervals(partial = {}) {
     next[s.key] = Math.min(MAX_MS, Math.max(s.min, n));
   }
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  _loadErr.ok();
   notify();
   return next;
 }
@@ -110,4 +125,4 @@ export function startAdaptiveTimer(getMs, fn, opts = {}) {
   return baseAdaptiveTimer(getMs, fn, { ...opts, subscribe: onIntervalsChange });
 }
 
-export function _resetForTest() { _central = null; _listeners = new Set(); }
+export function _resetForTest() { _central = null; _listeners = new Set(); _loadErr.ok(); }

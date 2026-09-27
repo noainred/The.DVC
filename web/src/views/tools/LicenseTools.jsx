@@ -6,7 +6,7 @@ import { DataTable, Loading, ErrorBox, UsageCell } from '../../components/ui.jsx
 import { Card, useTool } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
-import { licenseScopeNote } from './licenseScopeText.js'; // v2.603: 범위 밖 제외 안내
+import { licenseScopeNote, licenseDupNote } from './licenseScopeText.js'; // v2.603: 범위 밖 제외 안내
 import BulkDeviceIo from './BulkDeviceIo.jsx';   // v2.525: Horizon 서버 CSV·자유텍스트 대량 등록(스토리지·SAN 과 같은 공용 모달)
 import { hzSummary } from './hzListText.js'; // v2.612 WEB2612-04
 
@@ -107,6 +107,7 @@ export function Licenses({ scope }) {
       <div className="kpis" style={{ marginBottom: 14 }}>
         {data.byLicense.map((b) => <Card key={b.name} label={b.name} value={`${b.used}/${b.total}`} meta={b.productVersion ? `v${b.productVersion}` : ''} />)}
       </div>
+      {licenseDupNote(data) && <p className="muted" style={{ fontSize: 12, margin: '-6px 0 10px' }}>{licenseDupNote(data)}</p>}
       <DataTable columns={cols} rows={data.items} initialSort={{ key: 'used', dir: 'desc' }} />
     </>
   );

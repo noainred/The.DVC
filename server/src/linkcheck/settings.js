@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { KIND_KEYS } from './links.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 
 const FILE = () => path.join(config.configDir, 'linkcheck-settings.json');
@@ -76,11 +77,26 @@ export function normalizeSettings(raw = {}) {
   };
 }
 
+/*
+ * v2.632(감사 EDGE2632-03): 로드 오류 상태. 손상 → 보존 → 기본값(꺼짐)이면 /api/central/link-check-config 가 enabled:false 로 답해
+ *   전 엣지가 측정을 멈추고 화면은 '점검 꺼짐' 이라 말했다(원인은 손상). 오류면 라우트가 503 settingsUnreadable 로 답한다
+ *   (엣지 워커는 그 주기 측정을 쉬고 사유를 상태·콘솔에 남긴다 — '꺼짐' 이라 말하지 않는다). 관리자 저장만 해제한다.
+ */
+const _loadErr = makeSettingsLoadError(() => FILE());
+/** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
+export function linkCheckSettingsLoadError() { loadLinkCheckSettings(); return _loadErr.get(); }
+
 export function loadLinkCheckSettings() {
-  try { return normalizeSettings(JSON.parse(fs.readFileSync(FILE(), 'utf8'))); }
-  catch (e) {
+  try {
+    const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
+    const out = normalizeSettings(j);
+    _loadErr.ok();
+    return out;
+  } catch (e) {
     // 손상은 보존한다 — 다음 저장이 온전했던 원본을 덮어쓰지 않게(v2.190 규약).
-    if (e?.code !== 'ENOENT') { try { preserveCorrupt(FILE()); } catch { /* */ } }
+    if (e?.code !== 'ENOENT') { _loadErr.corrupt(e); try { preserveCorrupt(FILE()); } catch { /* */ } }
+    else _loadErr.missing();
     return { ...DEFAULTS, kinds: {}, pairs: [] };
   }
 }
@@ -104,6 +120,7 @@ export function saveLinkCheckSettings(body = {}) {
   for (const k of NUMERIC_KEYS) if (k in body && numOrNull(body[k]) == null) delete body[k];
   const next = normalizeSettings({ ...cur, ...body, kinds: { ...cur.kinds, ...(body?.kinds || {}) } });
   atomicWriteFileSync(FILE(), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  _loadErr.ok();
   for (const fn of _listeners) { try { fn(next); } catch { /* 리스너 오류가 저장을 되돌리지 않게 */ } }
   return next;
 }

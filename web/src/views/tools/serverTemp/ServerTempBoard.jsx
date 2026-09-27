@@ -289,7 +289,7 @@ export default function ServerTempBoard({ scope }) {
               <MonoLabel>온도 수집 서버</MonoLabel>
               <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1, letterSpacing: -1, marginTop: 8, fontVariantNumeric: 'tabular-nums' }}>{int(S.all?.reporting)}</div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-faint)', marginTop: 6 }}>
-                iDRAC {int(idrac.counts?.idrac)} · ESXi {int(idrac.counts?.esxi)}
+                iDRAC {int(idrac.counts?.idrac)} · ESXi {int(idrac.counts?.esxi)}{S.all?.staleExcluded ? ` · 오래됨 ${int(S.all.staleExcluded)} 제외` : ''}
               </div>
             </div>
             <div style={{ minWidth: 96, fontSize: 11.5, display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -305,8 +305,8 @@ export default function ServerTempBoard({ scope }) {
                 ))}
               {counts.unknown > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: 'var(--text-faint)' }}
-                  title="온도를 읽지 못한 서버입니다. 정상이라는 뜻도, 이상이라는 뜻도 아닙니다.">
-                  <span>미확인</span><b style={{ fontVariantNumeric: 'tabular-nums' }}>{int(counts.unknown)}</b>
+                  title={`온도를 읽지 못했거나 값이 오래된 서버입니다. 정상이라는 뜻도, 이상이라는 뜻도 아닙니다.${counts.stale ? ` 그중 오래된 값 ${counts.stale}대는 평균·최고·분포에서 뺐습니다.` : ''}`}>
+                  <span>{counts.stale ? `미확인(오래됨 ${int(counts.stale)})` : '미확인'}</span><b style={{ fontVariantNumeric: 'tabular-nums' }}>{int(counts.unknown)}</b>
                 </div>
               )}
             </div>

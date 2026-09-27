@@ -2,7 +2,7 @@
 import { config } from '../../config.js';
 import { morefOf } from '../../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import { requirePerm, setLocalPassword } from '../../auth/auth.js';
-import { inUserScope, inUserWriteScope } from '../../auth/scope.js';
+import { inUserScope, inUserWriteScope, scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { forceCollectorToken } from '../../agent/deploy.js';
 import { listTargets, getTargetRaw, pickSshTarget } from '../../agent/deployRegistry.js';
@@ -245,7 +245,28 @@ adminRouter.post('/collectors/set-password', adminOnly, fleetOnly, requireSettin
 });
 
 // ── DataCenter(법인) — vCenter의 상위 개념. 설정에서 종류 정의 + vCenter 할당 (관리자) ────────
-adminRouter.get('/datacenters', adminOnly, (_req, res) => {
+/**
+ * v2.632 AX3-05: 범위 관리자에게는 **허용 vCenter 의 할당**과 그 할당이 가리키는 DataCenter 만 준다(형제 GET
+ * /vcenters·/vcenter-order 는 v2.607/v2.611 에 범위로 거른다). 전부 403 으로 막지 않는 이유: 이 목록은 서버 분석·
+ * DS 사용량 등 조회 화면의 법인 이름 풀이에 쓰인다 — 범위 안 것은 보여야 한다. 뺀 개수는 밝힌다.
+ * @returns {null | {datacenters:object[], assign:object, omittedOutOfScope:number}}
+ */
+function scopedDatacenterView(req) {
+  const allowed = scopedVcenterIds(req.user, store.get());
+  if (!allowed) return null;
+  const allAssign = getDatacenterAssign() || {};
+  const assign = {};
+  for (const [vc, dc] of Object.entries(allAssign)) if (allowed.has(String(vc))) assign[vc] = dc;
+  const used = new Set(Object.values(assign).map(String));
+  const all = listDatacenters();
+  const datacenters = all.filter((d) => used.has(String(d.id)));
+  return { datacenters, assign, omittedOutOfScope: (all.length - datacenters.length) + (Object.keys(allAssign).length - Object.keys(assign).length) };
+}
+
+adminRouter.get('/datacenters', adminOnly, (req, res) => {
+  const scoped = scopedDatacenterView(req);
+  // 범위 계정의 GET 이 전역 등록부(파일)를 바꾸지 않게 한다 — 백필은 전체 범위 계정 GET 에서만(AX3-05).
+  if (scoped) return res.json({ ...scoped, scoped: true });
   // 백필: 등록된 수집 서버의 데이터센터를 DataCenter 목록에 없으면 자동 생성(이미 등록된 OC1 같은
   // 수집기도 재등록 없이 '스캔 대역 추가' 등에서 바로 보이게 한다). idempotent.
   try { for (const c of loadCollectors()) ensureCollectorDatacenter(c); } catch { /* best effort */ }
@@ -261,6 +282,8 @@ adminRouter.put('/datacenters/assign', adminOnly, fleetOnly, (req, res) => {
   const entries = Array.isArray(req.body?.entries) ? req.body.entries.slice(0, 5000) : [];
   if (!entries.length) return res.status(400).json({ ok: false, reason: 'entries가 비었습니다.' });
   const r = setVcenterDatacenterMany(entries);
+  // v2.632 AX3-08: 모양이 전부 틀렸으면 400 — 원소는 [vcenterId, datacenterId] 또는 {vcenterId, datacenterId}.
+  if (r.ok && r.malformed === entries.length) return res.status(400).json({ ok: false, reason: 'entries 원소는 [vcenterId, datacenterId] 또는 {vcenterId, datacenterId} 형식이어야 합니다.', malformed: r.malformed });
   if (r.ok) logAudit({ user: req.user?.username, action: 'vCenter→DataCenter 할당', target: `${r.changed}건`, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
@@ -275,8 +298,15 @@ adminRouter.delete('/datacenters/:id', adminOnly, fleetOnly, (req, res) => {
   res.status(r.ok ? 200 : 404).json(r);
 });
 // DataCenter 표시 순서(vCenter 순서와 동일한 개념) — 모든 'DataCenter 선택' 목록에 적용.
-adminRouter.get('/datacenter-order', adminOnly, (_req, res) => {
-  res.json({ order: getDatacenterOrder(), datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name, region: d.region || '' })) });
+adminRouter.get('/datacenter-order', adminOnly, (req, res) => {
+  const pick = (d) => ({ id: d.id, name: d.name, region: d.region || '' });
+  const scoped = scopedDatacenterView(req); // v2.632 AX3-05: 범위 계정은 범위 안 DataCenter 만
+  if (scoped) {
+    const ids = new Set(scoped.datacenters.map((d) => String(d.id)));
+    const all = listDatacenters();
+    return res.json({ order: (getDatacenterOrder() || []).filter((id) => ids.has(String(id))), datacenters: scoped.datacenters.map(pick), scoped: true, omittedOutOfScope: all.length - scoped.datacenters.length });
+  }
+  res.json({ order: getDatacenterOrder(), datacenters: listDatacenters().map(pick) });
 });
 adminRouter.put('/datacenter-order', adminOnly, fleetOnly, (req, res) => {
   // v2.620(WEB2620-01): 빈 순서는 명시적 초기화({clear:true})일 때만 — 화면이 조회에 실패한 상태에서

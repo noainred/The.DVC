@@ -133,11 +133,12 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   // vCenter마다 hosts/vms/datastores 전체를 재필터하면 O(vCenter×N)이라 28×5,800으로 커진다.
   // 호스트/VM/DS를 vcenterId 기준으로 '1회' 그룹핑(O(N))한 뒤 누적한다(롤업 규칙).
   const acc = new Map(); // vcId -> { hosts, vms, vmsOn, cpuCores, memMB, dsCapGB, dsUnknown, vcpu, ramMB, provGB, powerW }
-  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, dsUnknown: 0, vcpu: 0, ramMB: 0, provGB: 0, powerW: 0 }; acc.set(id, b); } return b; };
+  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, dsCapAllGB: 0, dsUnknown: 0, vcpu: 0, ramMB: 0, provGB: 0, powerW: 0 }; acc.set(id, b); } return b; };
   for (const h of hosts) { const b = bucket(h.vcenterId); b.hosts++; b.cpuCores += h.cpuCores || 0; b.memMB += h.memTotalMB || 0; b.powerW += h.powerWatts || 0; }
   for (const v of vms) { const b = bucket(v.vcenterId); b.vms++; if (v.powerState === 'POWERED_ON') b.vmsOn++; b.vcpu += v.cpuCount || 0; b.ramMB += v.memMB || 0; b.provGB += v.storageGB || 0; }
   // v2.631(AX2-01): vCenter 카드(롤업 storageTotalTB)와 같은 기준 — 사용량 미상 DS 는 용량에서 빼고 개수를 싣는다.
-  for (const d of datastores) { const b = bucket(d.vcenterId); if (dsUsageReadable(d)) b.dsCapGB += d.capacityGB || 0; else if (dsUsageUnknownOf(d)) b.dsUnknown++; }
+  //   v2.632(AX1-2632-04·WEB2632-01): 설치 용량 전체(미상 DS 포함)는 storageTotalTBAll 로 따로 싣는다 — 프로비저닝 비교는 그 값을 쓴다.
+  for (const d of datastores) { const b = bucket(d.vcenterId); b.dsCapAllGB += d.capacityGB || 0; if (dsUsageReadable(d)) b.dsCapGB += d.capacityGB || 0; else if (dsUsageUnknownOf(d)) b.dsUnknown++; }
   const byVcenter = vcenters.map((vc) => {
     const b = acc.get(vc.id) || bucket(vc.id);
     return {
@@ -148,6 +149,7 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
       cpuCores: b.cpuCores,
       memTotalGB: round(b.memMB / 1024),
       storageTotalTB: round(b.dsCapGB / 1024, 1),
+      storageTotalTBAll: round(b.dsCapAllGB / 1024, 1),   // 미상 DS 포함 설치 용량(프로비저닝 비교용)
       datastoresUsageUnknown: b.dsUnknown,
       vcpuAllocated: b.vcpu,
       ramAllocatedGB: round(b.ramMB / 1024),
@@ -196,7 +198,9 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
       // 사용량을 읽은 DS 가 없으면 0% 가 아니라 모른다(null — v2.600 LO2600-01 과 같은 규칙).
       usagePct: pctOrNullR(storUsedGB, storCapGB),
       usageUnknown: dsUsageUnknownCount,                 // 사용량을 못 읽어 합계에서 뺀 DS 수
-      capacityTBAll: round(storCapAllGB / 1024, 1),      // 미상 DS 포함 설치 용량(참고)
+      // 미상 DS 포함 설치 용량 — '전체 스토리지'·할당/물리 비율은 이 값을 쓴다(v2.632 AX1-2632-04: 읽은 DS 만의
+      //   capacityTB 로 나누면 미상 DS 가 많을수록 과할당이 거짓으로 부푼다). 사용률·여유는 capacityTB 기준.
+      capacityTBAll: round(storCapAllGB / 1024, 1),
     },
     power: {
       watts: powerWatts,

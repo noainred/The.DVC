@@ -285,7 +285,10 @@ export function seriesRow(agg) {
   // v2.606 COL2606-04·WEB2606-09: **부분 합을 전체로 적재하지 않는다**(거짓 하락). 일부 세션만 읽은 주기(truncated)는
   //   수치 전부를, 상태를 못 읽은 세션이 있는 주기는 접속 관련 수치를 NULL 로 둔다 — 차트는 선을 끊고, 하한 값은
   //   최신 화면(표·KPI)이 '최소 N' 으로 말한다. 서버 레코드(r.truncated·r.stateUnknown)와 합계(combineServers) 둘 다 받는다.
-  const partial = !!agg.truncated;
+  // v2.632(감사 AX2-2632-03): 합계(combineServers)에서 **읽지 못한 서버가 있으면**(serversFailed>0) 그 주기의 합계는
+  //   읽어낸 서버만의 부분 합이다 — 추이에 적재하면 팟 하나가 한 주기 실패할 때마다 거짓 급락이 남는다. 수치 전부 NULL
+  //   (차트는 선을 끊는다). 서버 레코드(서버 한 대)에는 serversFailed 가 없으므로 영향이 없다.
+  const partial = !!agg.truncated || Number(agg.serversFailed) > 0;
   const stateGap = partial || !!agg.connectedLowerBound || (agg.connected != null && Number(agg.stateUnknown) > 0);
   // v2.622(감사 DATA-02): 합계(combineServers)가 잘린 이름 목록(서버당 maxUsers)으로 합집합을 낸 주기는
   //   usersLowerBound 이고 그 고유 사용자 수는 **하한**이다 — 추이에 실제 값으로 적재하면 상한 근처에서 거짓

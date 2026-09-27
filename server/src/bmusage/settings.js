@@ -287,6 +287,9 @@ export function distributeFor(agent) {
 const _pulls = new Map();
 const _startedAt = Date.now();
 const PULLS_MAX = 512;
+const PULL_ACTIVE_MS = 60 * 60_000;       // v2.632 A6-2632-03: 이 안에 인출한 미검증 기록은 새 미검증 이름이 밀어내지 못한다
+const UNKNOWN_UNVERIFIED_ROWS_MAX = 32;   // v2.632 A6-2632-03: 등록부에 없는 미검증 이름은 이만큼만 행으로(나머지는 개수만)
+let _pullsOmitted = 0;                    // 상한으로 거절한 미검증 인출 수(프로세스 수명 누계)
 // v2.628(SEC2628-02): 공유 토큰 인출의 이름은 검증되지 않았다(v2.589 규약) — verified 로 구분하고, 개별 토큰으로 검증된
 //   기록을 미검증 인출이 덮지 않게 한다(공유 토큰으로 남의 이름을 대 '적용됨' 을 만들 수 없게). 화면이 미검증을 밝힌다.
 // v2.629(A1-2629-04): 그 보호가 **영구 잠금** 이면 엣지가 개별 토큰 → 공유 토큰으로 바뀐 뒤(토큰 폐기·재발급 전 구간) 행이
@@ -298,7 +301,21 @@ export function recordBmUsagePull(agent, { appliedSig = '', version = '', reason
   if (!a) return;
   const prev = _pulls.get(a);
   if (!verified && prev?.verified && now - (prev.at || 0) <= VERIFIED_HOLD_MS) return;
-  if (!_pulls.has(a) && _pulls.size >= PULLS_MAX) _pulls.delete(_pulls.keys().next().value);
+  if (!_pulls.has(a) && _pulls.size >= PULLS_MAX) {
+    // v2.632(감사 A6-2632-03): 상한 퇴출이 검증 여부를 보지 않아, 공유 토큰으로 임의 ?agent= 이름 512개를 대면 **개별 토큰으로
+    //   검증된 실제 엣지의 기록**이 밀려났다(화면 '인출 기록 없음'). 퇴출은 미검증부터 — 검증된 새 기록은 가장 오래된 미검증을,
+    //   미검증 새 기록은 최근 PULL_ACTIVE_MS 안에 인출하지 않은 미검증만 밀어낸다(살아 있는 엣지는 10분마다 인출한다).
+    //   밀어낼 것이 없으면 미검증 새 기록은 **거절**하고 개수를 밝힌다(v2.589 pullStats · v2.593 R2593-04 와 같은 규약).
+    let victim = null;
+    for (const [k, p] of _pulls) {
+      if (p.verified) continue;
+      if (!verified && now - (p.at || 0) < PULL_ACTIVE_MS) continue;
+      victim = k; break;   // Map 은 삽입 순 = 가장 오래 갱신되지 않은 것부터
+    }
+    if (victim == null && verified) victim = _pulls.keys().next().value;
+    if (victim == null) { _pullsOmitted += 1; return; }
+    _pulls.delete(victim);
+  }
   _pulls.delete(a);
   const lapsedVerifiedAt = !verified && prev?.verified ? prev.at : (!verified ? prev?.lapsedVerifiedAt || 0 : 0);
   _pulls.set(a, { agent: t(agent).slice(0, 128), at: now, appliedSig: t(appliedSig).slice(0, 32), version: t(version).slice(0, 32), reason: t(reason).slice(0, 32), verified: verified === true, deliveredSig: t(deliveredSig).slice(0, 32), ...(lapsedVerifiedAt ? { lapsedVerifiedAt } : {}) });
@@ -309,7 +326,16 @@ export function distributionStatus(knownNames = []) {
   const cur = settingsSig(loadLocalBmUsageSettings());
   const names = new Map();
   for (const n of knownNames || []) { const k = lowerAgent(n); if (k && !names.has(k)) names.set(k, t(n)); }
-  for (const [k, p] of _pulls) if (!names.has(k)) names.set(k, p.agent || k);
+  // v2.632(감사 A6-2632-03): 등록부에 없는 **미검증** 이름(공유 토큰이 ?agent= 로 댄 것)은 최근 것 UNKNOWN_UNVERIFIED_ROWS_MAX 개만
+  //   행으로 싣고 나머지는 개수만 밝힌다 — 가짜 이름 512행이 배포 현황을 덮지 않게. 검증된 이름은 전부 싣는다.
+  const unknownUnverified = [];
+  for (const [k, p] of _pulls) {
+    if (names.has(k)) continue;
+    if (p.verified) names.set(k, p.agent || k); else unknownUnverified.push([k, p]);
+  }
+  unknownUnverified.sort((x, y) => (y[1].at || 0) - (x[1].at || 0));
+  for (const [k, p] of unknownUnverified.slice(0, UNKNOWN_UNVERIFIED_ROWS_MAX)) names.set(k, p.agent || k);
+  const unknownUnverifiedOmitted = Math.max(0, unknownUnverified.length - UNKNOWN_UNVERIFIED_ROWS_MAX);
   const rows = [...names].map(([k, name]) => {
     const p = _pulls.get(k) || null;
     const excluded = isExcluded(d, k);
@@ -320,9 +346,9 @@ export function distributionStatus(knownNames = []) {
     // v2.628(R2628-05): 엣지는 받기 전 판을 알린다 — 마지막 응답이 지금 판을 보냈으면 '전달됨'(적용 확인은 다음 인출).
     else if (p.deliveredSig && p.deliveredSig === cur) state = 'delivered';
     else state = 'pending';
-    return { agent: name, excluded, lastPullAt: p?.at || 0, appliedSig: p?.appliedSig || '', state, verified: p ? p.verified === true : null, lapsedVerifiedAt: p?.lapsedVerifiedAt || null };
+    return { agent: name, excluded, lastPullAt: p?.at || 0, appliedSig: p?.appliedSig || '', state, verified: p ? p.verified === true : null, lapsedVerifiedAt: p?.lapsedVerifiedAt || null, pullReason: p?.reason || '' };
   }).sort((a, b) => a.agent.localeCompare(b.agent));
-  return { ...d, sig: cur, keys: [...DISTRIBUTED_KEYS], rows, since: _startedAt };
+  return { ...d, sig: cur, keys: [...DISTRIBUTED_KEYS], rows, since: _startedAt, unknownUnverifiedOmitted, pullsOmitted: _pullsOmitted };
 }
 
 /*
@@ -393,4 +419,4 @@ export function enterpriseActive(settings = loadBmUsageSettings()) {
   return !!(settings.enterpriseEnabled && settings.enterpriseAck && settings.idracTelemetry);
 }
 
-export function _resetForTest() { _cache = null; _cacheAt = 0; _copy = undefined; _pulls.clear(); }
+export function _resetForTest() { _cache = null; _cacheAt = 0; _copy = undefined; _pulls.clear(); _pullsOmitted = 0; }

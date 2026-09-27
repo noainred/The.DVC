@@ -24,6 +24,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 
 const FILE = () => path.join(config.configDir, 'central-svcmon-assign.json');
 
@@ -45,6 +46,17 @@ export const DEFAULT_EXCEPT_TYPES = ['trace', 'domain'];
 
 let cache = null;
 
+/*
+ * v2.632(감사 EDGE2632-01): 로드 오류 상태. 손상 → 보존 → 빈 배정이면 /api/central/svcmon-config 가 `200 assigned:false` 를 내려
+ *   엣지가 그것을 '중앙이 배정을 지웠다'(v2.596 EF-2)로 읽고 central:* 배치를 **전부 삭제**했다 — v2.631 settingsLoadError 가
+ *   이 배포 경로를 빠뜨렸다. 오류면 라우트가 503 settingsUnreadable 로 답하고 엣지는 직전 배포분을 유지한다.
+ *   재시작 뒤(원본이 .corrupt 로 옮겨져 ENOENT)도 보존본만 있으면 여전히 못 읽은 것이다(settingsLoadError.missing).
+ *   오류는 **관리자 저장**(setAssignment·deleteAssignment)만 해제한다 — pull·ack·주기 기록이 빈 배정을 파일로 굳히지 않게.
+ */
+const _loadErr = makeSettingsLoadError(() => FILE());
+/** 배정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
+export function svcmonAssignLoadError() { load(); return _loadErr.get(); }
+
 function load() {
   if (cache) return cache;
   try {
@@ -53,17 +65,22 @@ function load() {
       ? parsed.agents : null;
     if (!agents) throw new Error('agents 가 객체가 아닙니다(형식 불일치)');
     cache = { v: 1, agents: Object.assign(Object.create(null), agents) };
+    _loadErr.ok();
   } catch (e) {
     // 파싱 실패든 형식 불일치든 **똑같이 보존한다.** 한쪽만 보존하면 온전했던 배정이
     // 다음 저장에 조용히 덮여 사라진다(CLAUDE.md 의 로드 손상 보존 비대칭 규칙).
-    if (e.code !== 'ENOENT') preserveCorrupt(FILE(), e?.message);
+    if (e.code !== 'ENOENT') { _loadErr.corrupt(e); preserveCorrupt(FILE(), e?.message); } else _loadErr.missing();
     cache = { v: 1, agents: Object.create(null) };
   }
   return cache;
 }
 
-function save() {
+/** @param {{admin?:boolean}} [o] 관리자 저장이면 로드 오류를 해제한다. 로드 오류 중 비관리 저장은 쓰지 않는다. */
+function save({ admin = false } = {}) {
+  if (!admin && _loadErr.get()) return false;
   atomicWriteFileSync(FILE(), JSON.stringify(cache));
+  if (admin) _loadErr.ok();
+  return true;
 }
 
 const sigOf = (obj) => crypto.createHash('sha1').update(JSON.stringify(obj)).digest('hex').slice(0, SIG_LEN);
@@ -131,7 +148,7 @@ export function setAssignment(agent, scope = {}, targets = [], { user = '' } = {
     // v2.630(감사 R2630-06): 엣지 push 주기는 배정 내용과 무관하다 — 재배정해도 유지한다.
     ...(prev?.lastExpectMs ? { lastExpectMs: prev.lastExpectMs } : {}),
   };
-  save();
+  save({ admin: true });
   logAudit({
     user, action: 'svcmon.assign.set', target: name,
     detail: `대상 ${list.length} · 점검 ${tests} · sig ${sig}${exceptTypes.length ? ` · 제외 ${exceptTypes.join(',')}` : ''}`,
@@ -145,7 +162,7 @@ export function deleteAssignment(agent, { user = '' } = {}) {
   if (!db.agents[name]) return false;
   const c = db.agents[name].counts || {};
   delete db.agents[name];
-  save();
+  save({ admin: true });
   logAudit({ user, action: 'svcmon.assign.delete', target: name, detail: `대상 ${c.targets || 0} · 점검 ${c.tests || 0}` });
   return true;
 }
@@ -248,4 +265,4 @@ export function ackAssignment(agent, { sig, applied = {}, removed = 0, errors = 
   return { ok: true, state: a.state, exact };
 }
 
-export function _resetAssignCache() { cache = null; }
+export function _resetAssignCache() { cache = null; _loadErr.ok(); }

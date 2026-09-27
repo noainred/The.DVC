@@ -40,7 +40,7 @@ import { recordPull, PULL_UNAUTH_KEY } from '../central/pullStats.js';
 import { recordReject, REJECT_KIND } from '../central/ingestReject.js';
 import { notify } from '../alerts.js';
 import { ingestReport } from '../central/svcmonEdge.js';
-import { getAssignmentForAgent, markPulled, ackAssignment } from '../central/svcmonAssign.js';
+import { getAssignmentForAgent, markPulled, ackAssignment, svcmonAssignLoadError } from '../central/svcmonAssign.js';
 import { setAgentConfig } from '../central/agentConfig.js';
 import { getAssignedGpuGuest } from '../central/agentGpuGuestConfig.js';
 import { getEffectiveUsers, registryLoadError as agentUsersLoadError } from '../central/agentUsers.js';
@@ -65,7 +65,7 @@ import { logAudit } from '../audit.js';
 import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq, lateBmstorResult, bmstorJobKnown } from '../bmstor/jobs.js';
 import { applyBmstorResults } from '../bmstor/poller.js';
 import { recordCapture } from '../net/captureHistory.js';
-import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
+import { loadScanSettings, mergeScanResults, recordAgentReport, scanSettingsLoadError } from '../ipam/scanStore.js';
 import { putEdgeLinkReport } from '../central/linkCheckEdge.js';   // v2.552: 엣지가 잰 통신 링크 결과 수신
 import { buildLinks, publicLink, EDGE_KINDS } from '../linkcheck/links.js';
 // ⚠ **redact 된 목록**을 쓴다 — 링크 계산에 필요한 것은 name·url·host 뿐이고, 이 응답은 엣지로
@@ -73,7 +73,7 @@ import { buildLinks, publicLink, EDGE_KINDS } from '../linkcheck/links.js';
 import { listCollectors as listCollectorsForLinks } from '../collector/registry.js';
 import { allCollectorStatus as allCollectorStatusForKnown } from '../collector/state.js'; // v2.604 CEN2604-04: pull 성공한 자기등록 항목만 '아는 엣지'
 import { listRegistry as listVcentersForLinks } from '../vcenter/registry.js';
-import { loadLinkCheckSettings, linkCheckEnabled } from '../linkcheck/settings.js';
+import { loadLinkCheckSettings, linkCheckEnabled, linkCheckSettingsLoadError } from '../linkcheck/settings.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { stripCoercionTraps, strOf } from '../util/coercionTrap.js';
@@ -578,6 +578,8 @@ centralRouter.get('/svcmon-config', requireCentral(), (req, res) => {
     return res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다.' });
   }
   const agent = req.centralAuth.agent;
+  // v2.632(감사 EDGE2632-01): 배정 파일을 못 읽었으면 빈 배정(assigned:false)을 200 으로 내리지 않는다 — 엣지가 central:* 배치를 전부 지운다.
+  if (settingsUnreadable(res, svcmonAssignLoadError, '성능점검 배정')) return;
   const r = getAssignmentForAgent(agent, String(req.query.sig || ''));
   if (r.assigned && !r.unchanged) markPulled(agent, r.sig);
   res.json({ ok: true, ...r });
@@ -1226,13 +1228,37 @@ function registryUnreadable(res, errOf, what) {
  *   지워 전 엣지의 수집이 한 번에 꺼졌다(등록부는 v2.612 에 막았는데 설정 배포 경로가 빠져 있었다). 엣지 pull 은 비-2xx 를
  *   실패로 보고 직전 사본을 유지한다. 중앙 자신의 로컬 동작(꺼짐 표시)은 바꾸지 않는다.
  */
+const settingsUnreadableLog = createChangeLogger({ windowMs: 3_600_000 }); // v2.632 AX1-2632-02: 같은 사유는 1시간에 1줄
 function settingsUnreadable(res, errOf, what) {
   let e = null;
   try { e = typeof errOf === 'function' ? errOf() : null; } catch (x) { e = { at: Date.now(), reason: x?.message || String(x) }; }
   if (!e) return false;
+  // v2.632(감사 AX1-2632-02): 예전에는 콘솔에도 남기지 않아 503 이 나가는 동안 중앙 어디에서도 그 사실이 보이지 않았다.
+  if (settingsUnreadableLog(what, String(e.reason || ''))) {
+    console.warn(`[central] 중앙 ${what} 설정 파일을 읽지 못해 설정 pull 에 503 으로 답합니다(엣지는 직전 설정 유지): ${String(e.reason || '사유 미상').slice(0, 200)}`);
+  }
   res.set('Cache-Control', 'no-store');
   res.status(503).json({ ok: false, reason: 'settingsUnreadable', detail: `중앙 ${what} 설정 파일을 읽지 못했습니다(${String(e.reason || '사유 미상').slice(0, 200)}) — 엣지는 직전 설정을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 설정을 다시 저장하세요.`, since: e.at || null });
   return true;
+}
+
+/**
+ * v2.632(감사 EDGE2632-03): 스토리지·PDU 설정 pull 의 `intervals` 부분. 주기 설정 파일을 못 읽었으면 —
+ *   · 엣지가 `?intervalsHold=1`(이 규약을 아는 2.632+ 엣지)을 보냈으면 intervals 를 빼고 `intervalsUnreadable` 을 싣는다
+ *     (장비 목록·collectNow 는 등록부가 원천이라 그대로 — cvp-config 와 같은 모양). 엣지는 직전 주기를 유지한다.
+ *   · 구버전 엣지는 intervals 가 없으면 `{}` 로 적용해 중앙 지정 주기를 풀어 버리므로 **응답 전체를 503** 으로 답한다
+ *     (비-2xx 면 엣지는 장비 목록·주기를 전부 그대로 둔다). 재수집 요청은 큐에 남는다(인출하지 않는다).
+ * @returns {object|null} 응답에 펼칠 부분 — null 이면 이미 503 으로 답했다.
+ */
+function intervalsPartOrUnreadable(req, res, errOf, what, valuesOf) {
+  let e = null;
+  try { e = typeof errOf === 'function' ? errOf() : null; } catch (x) { e = { at: Date.now(), reason: x?.message || String(x) }; }
+  if (!e) return { intervals: valuesOf() };
+  if (String(req.query.intervalsHold || '') !== '1') { settingsUnreadable(res, () => e, what); return null; }
+  if (settingsUnreadableLog(what, String(e.reason || ''))) {
+    console.warn(`[central] 중앙 ${what} 설정 파일을 읽지 못해 설정 pull 에서 intervals 를 뺍니다(엣지는 직전 주기 유지): ${String(e.reason || '사유 미상').slice(0, 200)}`);
+  }
+  return { intervalsUnreadable: { reason: String(e.reason || '사유 미상').slice(0, 200), since: e.at || null } };
 }
 
 /**
@@ -1264,10 +1290,12 @@ centralRouter.get('/storage-config', requireCentral(), async (req, res) => {
   const { takeRequestsForAgent } = await import('../storage/collectRequests.js');
   // intervals(v2.409): 중앙이 이 엣지에 지정한 수집 주기(전역 위에 엣지별 덮어쓰기). **지정한 키만**
   // 내려간다 — 전 키를 채워 보내면 엣지 portal.env 의 현장 설정을 통째로 덮어쓴다(intervals.js 계약).
-  const { intervalsForAgent } = await import('../storage/intervals.js');
+  const { intervalsForAgent, storageIntervalsLoadError } = await import('../storage/intervals.js');
+  const ivPart = intervalsPartOrUnreadable(req, res, storageIntervalsLoadError, '스토리지 수집 주기', () => intervalsForAgent(agent));
+  if (!ivPart) return;
   res.json({
     ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent),
-    intervals: intervalsForAgent(agent),
+    ...ivPart,
   });
 });
 
@@ -1359,6 +1387,11 @@ centralRouter.get('/bmusage-config', requireCentral(), async (req, res) => {
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim();
   const { distributeFor, recordBmUsagePull, bmUsageSettingsLoadError } = await import('../bmusage/settings.js');
   // v2.631 EDGE2631-01: 배포 설정·로컬 설정 중 하나라도 손상이면 distribute:false(엣지가 사본을 지움) 나 기본값 배포 대신 503.
+  // v2.632(감사 AX1-2632-02): 503 전에 인출 기록을 남긴다 — 예전에는 기록 없이 반환해 배포 현황이 '인출 기록 없음'(중립)으로만 보였다.
+  {
+    let le = null; try { le = bmUsageSettingsLoadError(); } catch (x) { le = { reason: x?.message || String(x) }; }
+    if (le) recordBmUsagePull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), reason: 'settings-unreadable', verified: req.centralAuth?.mode === 'agent', deliveredSig: '' });
+  }
   if (settingsUnreadable(res, bmUsageSettingsLoadError, '베어메탈 사용률')) return;
   const out = distributeFor(agent);
   recordBmUsagePull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), reason: out.distribute ? '' : out.reason, verified: req.centralAuth?.mode === 'agent', deliveredSig: out.distribute ? String(out.sig || '') : '' });
@@ -1475,10 +1508,12 @@ centralRouter.get('/pdu-config', requireCentral(), async (req, res) => {
   if (registryUnreadable(res, pduRegErr, 'PDU')) return;
   const { takeRequestsForAgent } = await import('../pdu/collectRequests.js');
   // intervals: **지정한 키만** 내려간다 — 전 키를 채우면 엣지 portal.env 의 현장 설정을 덮어쓴다.
-  const { intervalsForEdge } = await import('../pdu/intervals.js');
+  const { intervalsForEdge, pduIntervalsLoadError } = await import('../pdu/intervals.js');
+  const ivPart = intervalsPartOrUnreadable(req, res, pduIntervalsLoadError, 'PDU 수집 주기', () => intervalsForEdge());
+  if (!ivPart) return;
   res.json({
     ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent),
-    intervals: intervalsForEdge(),
+    ...ivPart,
   });
 });
 
@@ -1528,12 +1563,22 @@ centralRouter.get('/sanswitch-config', requireCentral(), async (req, res) => {
   if (registryUnreadable(res, sanRegErr, 'SAN 스위치')) return;
   const { takeRequestsForAgent, takePerfRequestForAgent } = await import('../sanswitch/collectRequests.js');
   const { takeTestRequestsForAgent } = await import('../sanswitch/testRuns.js');
-  const { loadPerfSettings } = await import('../sanswitch/perfSettings.js');
+  const { loadPerfSettings, perfSettingsLoadError } = await import('../sanswitch/perfSettings.js');
+  // v2.632(감사 EDGE2632-02): 포트 사용량 설정 파일을 못 읽었으면 기본값(꺼짐 · 보존 90일)을 perf 로 싣지 않는다 — 엣지가 그대로
+  //   저장해 수집을 끄고 보존을 줄였다. 장비 목록·collectNow·testNow 는 등록부가 원천이라 그대로 준다(cvp-config 와 같은 모양).
+  let perfErr = null;
+  try { perfErr = perfSettingsLoadError(); } catch (x) { perfErr = { at: Date.now(), reason: x?.message || String(x) }; }
+  if (perfErr && settingsUnreadableLog('SAN 스위치 포트 사용량', String(perfErr.reason || ''))) {
+    console.warn(`[central] 중앙 SAN 스위치 포트 사용량 설정 파일을 읽지 못해 sanswitch-config 에서 perf 를 뺍니다(엣지는 직전 설정 유지): ${String(perfErr.reason || '사유 미상').slice(0, 200)}`);
+  }
+  const perfPart = perfErr
+    ? { perfSettingsUnreadable: { reason: String(perfErr.reason || '사유 미상').slice(0, 200), since: perfErr.at || null } }
+    : { perf: loadPerfSettings() };
   // testNow(v2.421): 중앙 등록 화면의 '연결 테스트' 를 이 엣지가 현지에서 대행(비밀번호 포함 — 엣지가 로그인해야 한다).
   // perf(v2.423): 중앙의 포트 사용량 수집 설정(켜짐/주기/표본/보관)을 위임 스위치에도 적용 — 엣지가 현지 수집 후 중앙으로 중계.
   // perfCollectNow(v2.517): 중앙의 '지금 수집'(포트 사용량)을 이 엣지가 현지에서 대행 — 엣지 단위
   // one-shot 플래그다(엣지의 pollPerfOnce 는 자기 몫 전체를 한 주기에 수집한다).
-  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent), testNow: takeTestRequestsForAgent(agent), perf: loadPerfSettings(), perfCollectNow: takePerfRequestForAgent(agent) });
+  res.json({ ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent), testNow: takeTestRequestsForAgent(agent), ...perfPart, perfCollectNow: takePerfRequestForAgent(agent) });
 });
 
 /**
@@ -1548,7 +1593,7 @@ centralRouter.post('/sanswitch-perf', requireCentral(), async (req, res) => {
   if (await receiveRegistryUnreadable(res, '../sanswitch/registry.js', 'SAN 스위치(사용량)')) return; // v2.620(EDGE2620-01)
   const { devicesForAgent } = await import('../sanswitch/registry.js');
   const { importSamples } = await import('../sanswitch/perfDb.js');
-  const { loadPerfSettings } = await import('../sanswitch/perfSettings.js');
+  const { loadPerfSettings, perfSettingsLoadError, LIMITS: PERF_LIMITS } = await import('../sanswitch/perfSettings.js');
   const { saveEdgePerfStatus } = await import('../central/sanSwitchPerfEdge.js');
   const ownedDevices = devicesForAgent(agent);
   const owned = new Set(ownedDevices.map((d) => String(d.id)));
@@ -1563,7 +1608,10 @@ centralRouter.post('/sanswitch-perf', requireCentral(), async (req, res) => {
   const dropped = rowsIn.length - rows.length;
   const metaDropped = metaIn.length - meta.length;
   if (dropped > 0) console.warn(`[central] sanswitch-perf: ${agent} 미위임 deviceId 표본 ${dropped}건 드롭(위조 방지)`);
-  const r = await importSamples(rows, meta, loadPerfSettings().retentionDays);
+  // v2.632(감사 EDGE2632-02): 설정 파일을 못 읽는 동안에는 기본 보존(90일)으로 prune 하지 않는다 — 상한(보존 최대)을 써서
+  //   정리를 사실상 보류한다(관리자가 3650일로 둔 중앙 표본이 손상 한 번으로 잘리지 않게).
+  let perfLoadErr = null; try { perfLoadErr = perfSettingsLoadError(); } catch { perfLoadErr = { reason: 'load' }; }
+  const r = await importSamples(rows, meta, perfLoadErr ? PERF_LIMITS.retentionDays.max : loadPerfSettings().retentionDays);
   /**
    * v2.517: 엣지의 **수집 상태**를 함께 받는다(청크 0 에만 실린다). 표본이 0건이어도 엣지가 상태
    * 전용 하트비트를 올리므로, 중앙이 '엣지가 켜졌는지·돌았는지·왜 실패하는지' 를 알 수 있다 —
@@ -2009,6 +2057,8 @@ centralRouter.post('/bmstor-result', requireCentral({ notFound: { ok: false } })
 
 // Agent pulls its IP-scan assignment (TCP connect scan config) by name.
 centralRouter.get('/ip-scan-assignment', requireCentral(), (req, res) => {
+  // v2.632(감사 EDGE2632-03): 스캔 설정 파일을 못 읽었으면 assigned:false(엣지 스캔 중단)를 200 으로 내리지 않는다.
+  if (settingsUnreadable(res, scanSettingsLoadError, 'IP 스캔')) return;
   // v2.604(감사 RECENT2604-01): 개별 토큰이면 **결과 라우트와 같은 키**(토큰 이름)로 찾는다 — 배정과 결과가 서로 다른 이름으로
   //   설정을 찾으면 '배정됨' 을 받고 스캔한 뒤 결과가 전량 409 가 된다. 조회 자체도 대소문자 무시(scanStore.loadScanSettings).
   const cfg = loadScanSettings(req.centralAuth?.mode === 'agent' && req.centralAuth.agent ? req.centralAuth.agent : String(req.query.agent || ''));
@@ -2117,6 +2167,9 @@ centralRouter.get('/link-check-config', requireCentral(), (req, res) => {
   if (reqAgent && reqAgent.toLowerCase() !== agent.toLowerCase()) {
     return res.status(403).json({ ok: false, reason: `요청한 agent('${reqAgent}')가 이 토큰의 엣지('${agent}')와 다릅니다.` });
   }
+  // v2.632(감사 EDGE2632-03): 설정 파일을 못 읽었으면 기본값(꺼짐)을 enabled:false 로 내리지 않는다 — 화면이 '점검 꺼짐' 이라 말했다.
+  //   env LINKCHECK_ENABLED 로 강제한 경우도 링크·주기·시한은 파일 값이라 같은 판단이다.
+  if (settingsUnreadable(res, linkCheckSettingsLoadError, '통신 점검')) return;
   const s = loadLinkCheckSettings();
   let links = [];
   try {

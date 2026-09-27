@@ -4,7 +4,13 @@
  * 그 외에는 호스트별 VM 개수만 집계해 O(N)·작은 페이로드를 유지한다.
  */
 
+import { numOrNull } from '../util/numOrNull.js';
+import { usageReadable } from '../store.js';
+
 const num = (x) => (Number.isFinite(x) ? x : 0);
+// v2.632 WEB2632-03: 사용률은 '못 읽음' 을 0 으로 채우지 않는다. 끊긴·무응답 호스트는 사용량을 읽을 수 없으므로
+// (store.usageReadable — 사용률 기준 단일 소스) null 이고, VM·호스트의 결측 값도 null 이다(화면 '—').
+const pctOrNull = (x) => numOrNull(x);
 
 export function buildTopology(snap, { vcenterId = null, host = null } = {}) {
   const vcs = (snap.vcenters || []).filter((v) => !vcenterId || v.id === vcenterId);
@@ -43,7 +49,8 @@ export function buildTopology(snap, { vcenterId = null, host = null } = {}) {
         const node = {
           id: h.id, type: 'host', label: h.name,
           state: h.connectionState, power: h.powerState,
-          cpuPct: num(h.cpuUsagePct), memPct: num(h.memUsagePct),
+          cpuPct: usageReadable(h) ? pctOrNull(h.cpuUsagePct) : null,
+          memPct: usageReadable(h) ? pctOrNull(h.memUsagePct) : null,
           watts: num(h.powerWatts), gpus: (h.gpus || []).length,
           vmCount: vms.length, vmOn: on,
           children: [],
@@ -52,7 +59,7 @@ export function buildTopology(snap, { vcenterId = null, host = null } = {}) {
         if (vcenterId && (!host || host === h.name || host === h.id)) {
           node.children = vms.slice(0, 200).map((vm) => ({
             id: vm.id, type: 'vm', label: vm.name, power: vm.powerState,
-            cpuPct: num(vm.cpuUsagePct), memPct: num(vm.memUsagePct),
+            cpuPct: pctOrNull(vm.cpuUsagePct), memPct: pctOrNull(vm.memUsagePct),
             guestOS: vm.guestOS, gpu: vm.gpu ? (vm.gpu.mode || 'gpu') : null, ip: vm.ipAddress || (vm.ipAddresses || [])[0] || '',
           }));
           nodeCount += node.children.length;

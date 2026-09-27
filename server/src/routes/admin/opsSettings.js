@@ -15,7 +15,7 @@ import { ssrfBlockReasonResolved } from '../../collector/registry.js';
 import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../../reports/dailyReport.js';
 import { refreshCerts } from '../../security/certMonitor.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
-import { mergeScopedMap, filterScopedMap } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
+import { mergeScopedMap, filterScopedMap, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
 import { todayStamp } from "../../util/dayKey.js";
 
 /*
@@ -97,6 +97,8 @@ adminRouter.post('/report/daily/run', adminOnly, fleetOnly, async (req, res) => 
 
 // TLS 인증서 만료 감시 — 온디맨드 새로고침(12시간 주기 외 즉시 재프로브).
 adminRouter.post('/certs/refresh', adminOnly, async (req, res) => {
+  // v2.632 AX3-07: 전 법인 등록 엔드포인트로 TLS 프로브를 즉시 실행한다 — 범위 계정은 403(v2.607 AUTHZ2607-06 규약).
+  if (denyScopedRun(req, res, '인증서 즉시 재확인')) return;
   const r = await refreshCerts();
   logAudit({ user: req.user?.username || 'unknown', action: '인증서 프로브 새로고침', detail: `${(r.items || []).length}건` });
   res.json({ ok: true, count: (r.items || []).length, at: r.at });

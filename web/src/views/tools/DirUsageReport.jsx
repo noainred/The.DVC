@@ -159,7 +159,7 @@ export function DirUsageReport() {
                       <div style={{ height: '100%', width: `${Math.max(1, r.pct || 0)}%`, background: '#2e90fa' }} />
                     </div>
                   </td>
-                  <td data-sort={r.delta ?? 0} style={{ textAlign: 'right', color: r.isNew ? '#a78bfa' : r.delta > 0 ? '#f97066' : r.delta < 0 ? '#32d583' : undefined }}>
+                  <td data-sort={r.delta ?? ''} style={{ textAlign: 'right', color: r.isNew ? '#a78bfa' : r.delta > 0 ? '#f97066' : r.delta < 0 ? '#32d583' : undefined }}>
                     {r.isNew ? '신규' : r.delta == null ? '—' : `${r.delta > 0 ? '+' : ''}${human(r.delta)}`}
                   </td>
                 </tr>

@@ -24,6 +24,8 @@ import crypto from 'node:crypto';
 import { centralTokenInfo } from '../../central/token.js';
 import path from 'node:path';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
+import { store } from '../../store.js';
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('엣지 배포·패키지·LLM 설정·릴리스 노트는 전 법인에 걸친 동작이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
@@ -35,10 +37,16 @@ export function registerDeployLlm(adminRouter) {
 // --- Package auto-download (upgrade/install packages → packages dir) ---
 adminRouter.get('/packages', adminOnly, async (req, res) => {
   const s = getPackageSettings();
+  // v2.632 AX3-06: 즉석 ?baseUrl= 은 전체 범위 계정만 — 범위 관리자가 서버에서 임의 사내 주소를 요청하고 응답·오류를
+  //   돌려받는 내부망 정찰 경로였다(v2.611 이 같은 이유로 /vcenter/relay-test?host= 를 막았다). 범위 계정은 저장값만 쓰고,
+  //   요청값을 버렸다는 사실은 응답이 밝힌다(조용한 무시 금지). 형제 PUT /packages/settings·/download 는 이미 fleetOnly.
+  const scoped = !!scopedVcenterIds(req.user, store.get());
+  const asked = req.query.baseUrl ? String(req.query.baseUrl) : '';
+  const base = scoped ? s.baseUrl : (asked || s.baseUrl);
   let remote = null;
-  try { remote = await fetchRemoteVersions(req.query.baseUrl || s.baseUrl); }
+  try { remote = await fetchRemoteVersions(base); }
   catch (e) { remote = { error: e.message }; }
-  res.json({ dir: s.dir, baseUrl: s.baseUrl, settings: s, local: listLocalPackages(), remote });
+  res.json({ dir: s.dir, baseUrl: s.baseUrl, settings: s, local: listLocalPackages(), remote, ...(scoped && asked ? { baseUrlIgnored: true, baseUrlIgnoredReason: '즉석 저장소 주소는 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있어 저장된 주소로 조회했습니다.' } : {}) });
 });
 // Web-editable package source (repository URL / download dir / token).
 adminRouter.put('/packages/settings', adminOnly, fleetOnly, (req, res) => {

@@ -216,7 +216,9 @@ test('v1 /inventory/summary 는 내부 집계와 같은 값이다(단위만 다�
       cpuCores: sum(hosts, (h) => h.cpuCores),
       cpuTotalMhz: sum(hosts, (h) => h.cpuTotalMhz),
       memTotalMB: sum(hosts, (h) => h.memTotalMB),
-      storageCapacityGB: sum(dss, (d) => d.capacityGB),
+      // v2.632: 사용량을 읽은 DS 만(내부 /summary 기준). 내부 라우트와의 직접 대조는 audit2632b.test.js 가 한다.
+      storageCapacityGB: sum(dss.filter((d) => d.usedGB != null || d.freeGB != null), (d) => d.capacityGB),
+      storageCapacityAllGB: sum(dss, (d) => d.capacityGB),
       vmVcpu: sum(vms, (v) => v.cpuCount),
     } };
   `);

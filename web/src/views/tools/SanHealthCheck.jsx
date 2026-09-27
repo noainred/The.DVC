@@ -459,7 +459,7 @@ export function AllHealthCheck({ datacenterIds = [] }) {
                     {/* 종합 판정은 deviceVerdict 의 라벨·색을 쓴다 — '정상(일부 미확인)' 을 초록으로
                         보여주지 않기 위해서다. 정렬 키는 등급+미확인 여부(정상끼리도 갈린다). */}
                     <td data-sort={`${r.overall}${r.uncheckedCount ? '-u' : ''}`}><StatusBadge status={r.overall} label={v.label} color={v.color} /></td>
-                    <td data-sort={String(r.uncheckedCount ?? 0)} style={{ textAlign: 'right', color: r.uncheckedCount ? COLOR.amber : COLOR.muted }}>{r.uncheckedCount ?? 0}</td>
+                    <td data-sort={r.uncheckedCount ?? ''} style={{ textAlign: 'right', color: r.uncheckedCount ? COLOR.amber : COLOR.muted }}>{r.uncheckedCount ?? '—'}</td>
                     <td style={{ whiteSpace: 'normal', wordBreak: 'break-word', maxWidth: 360 }}>{v.text}</td>
                     <td><button className="tab" style={{ padding: '2px 8px' }} onClick={() => setOpen(isOpen ? null : r.deviceId)}>{isOpen ? '접기' : '보기'}</button></td>
                   </tr>

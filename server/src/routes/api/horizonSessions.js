@@ -245,7 +245,7 @@ api.get('/tools/current-users/combined', requirePerm('tools'), async (req, res) 
     const { total, freshCount, latestTs } = await currentReport();
     vdi = freshCount
       // v2.622(감사 DATA-06): 서버당 이름 목록 상한(maxUsers)·세션 페이지 절단이면 이 목록은 하한이다.
-      ? { state: total.serversOk ? 'ok' : 'failed', names: total.names, lowerBound: !!total.usersLowerBound,
+      ? { state: total.serversOk ? 'ok' : 'failed', names: total.names, lowerBound: !!total.usersLowerBound || Number(total.serversFailed) > 0,
         reason: total.serversOk ? '' : '등록된 Horizon 서버에서 세션을 읽지 못했습니다(작업 로그의 사유를 확인하세요).',
         detail: { users: total.users, usersConnected: total.usersConnected, sessions: total.sessions, serversOk: total.serversOk, serversFailed: total.serversFailed, stateBlind: total.stateBlind, lastReadAt: latestTs } }
       : { state: hs.enabled ? 'failed' : 'off', names: [],

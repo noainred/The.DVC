@@ -14,6 +14,7 @@ import { upgradeAgent } from './upgradeAgent.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
 import { readBytesCapped } from '../util/readBytesCapped.js';
+import { readJsonCapped } from '../util/readCapped.js';
 
 // v2.607 SEC2607-06: 설치 패키지 다운로드의 바이트 상한 — 예전엔 상한 자체가 없어 원격 소스(사내 미러·중간자)가
 //   거대 본문을 주면 sha256 검증 전에 전량을 메모리에 받았다. 오프라인 설치 패키지(노드 런타임 포함)는 수백 MB 라
@@ -32,7 +33,8 @@ export async function fetchRemoteVersions(baseUrl) {
   // 고RTT·일시 오류 재시도. 단 TLS 검증 디스패처(upgradeAgent)는 유지(MITM→RCE 방지).
   const res = await resilientFetch(`${trim(base)}/versions.json`, { dispatcher: upgradeAgent, timeoutMs: 20000, retries: 2 });
   if (!res.ok) throw new Error(`versions.json HTTP ${res.status}`);
-  return res.json();
+  // v2.632(감사 AX3-06): 저장소 응답은 상한까지만 읽는다(외부 응답 .json() 금지 — v2.604 규약).
+  return readJsonCapped(res, 4 * 1024 * 1024, 'versions.json');
 }
 
 export function listLocalPackages(dir = getPackageDir()) {

@@ -9,12 +9,28 @@
 import { getMetricsDb } from '../metrics/db.js';
 
 // 탐지 대상 시계열 패밀리 + 라벨(엔티티 키 → 사람이 읽을 이름은 호출부에서 매핑).
+// v2.632(감사 AX2-2632-04): minScale — 척도(σ 환산)의 **하한**. 거의 상수인 계열(VMFS 사용량·안정된 온도)은 MAD 가 0 이고
+//   표준편차 폴백은 최신 1점이 만든 극소값이라, 1000→1002GB 같은 무의미한 변화가 z=60 '이상' 이 됐다. 계열마다 '이 정도는
+//   잡음' 인 절대·상대 하한을 두고 척도가 그보다 작으면 하한을 쓴다(쓴 사실은 항목의 scaleSource 로 밝힌다).
+//   온도 0.5℃(dead-band 와 같은 크기) · GPU 사용률 2%p · DS 사용량 중앙값의 0.5%(최소 1GB).
 const FAMILIES = [
-  { metric: 'temp_host', label: '호스트 온도', unit: '℃', high: true, low: false },
-  { metric: 'gpu_util', label: 'GPU 사용률', unit: '%', high: true, low: false },
-  { metric: 'gpu_vc', label: 'vCenter GPU', unit: '%', high: true, low: false },
-  { metric: 'ds_usedgb', label: '데이터스토어 사용량', unit: 'GB', high: true, low: false },
+  { metric: 'temp_host', label: '호스트 온도', unit: '℃', high: true, low: false, minScale: () => 0.5 },
+  { metric: 'gpu_util', label: 'GPU 사용률', unit: '%', high: true, low: false, minScale: () => 2 },
+  { metric: 'gpu_vc', label: 'vCenter GPU', unit: '%', high: true, low: false, minScale: () => 2 },
+  { metric: 'ds_usedgb', label: '데이터스토어 사용량', unit: 'GB', high: true, low: false, minScale: (med) => Math.max(1, Math.abs(med) * 0.005) },
 ];
+
+/**
+ * 척도 선택(순수 — 테스트가 고정). MAD(σ 환산) → 없으면 표준편차 → 둘 다 하한보다 작으면 하한.
+ * @returns {{scale:number, source:'mad'|'sd'|'floor'}}
+ */
+export function pickScale({ mad, sd, floor }) {
+  const raw = mad ? mad * 1.4826 : sd;
+  const src = mad ? 'mad' : 'sd';
+  const f = Number(floor) > 0 ? Number(floor) : 0;
+  if (f && !(raw >= f)) return { scale: f, source: 'floor' };
+  return { scale: raw || 0, source: src };
+}
 
 const median = (arr) => { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 
@@ -42,7 +58,7 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
     // MAD가 0이면(완전 평탄) 표준편차로 폴백.
     const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
     const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length) || 0;
-    const scale = mad ? mad * 1.4826 : sd; // MAD→σ 환산상수
+    const { scale, source: scaleSource } = pickScale({ mad, sd, floor: fam.minScale ? fam.minScale(med) : 0 }); // MAD→σ 환산상수
     if (!scale) continue;
     const score = (last.v - med) / scale;
     const isHigh = fam.high && score >= z;
@@ -52,7 +68,7 @@ async function detectFamily(db, fam, { z = 3.5, windowHours = 24, bucketMin = 10
         metric: fam.metric, label: fam.label, unit: fam.unit, key: k,
         value: Number(last.v.toFixed(1)), baseline: Number(med.toFixed(1)),
         z: Number(score.toFixed(1)), direction: score >= 0 ? 'high' : 'low',
-        at: last.ts, samples: hist.length,
+        at: last.ts, samples: hist.length, scaleSource,
       });
     }
   }

@@ -3,6 +3,7 @@ import { usePolling, can } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, EntityDetail } from '../components/ui.jsx';
 import { unitText } from './unitText.js';
 import { numOrNull } from '../numOrNull.js';
+import { topOmittedNote } from './topOmittedText.js'; // v2.632 WEB2632-07
 
 function SumCard({ label, value, meta, accent }) {
   return (
@@ -17,7 +18,7 @@ function SumCard({ label, value, meta, accent }) {
 /** Compact leaderboard list for a "top consumers" category. Rows are clickable. */
 // v2.583: 서버가 권한 없는 목록을 빼고 withheld 로 밝힌다 — 그 패널에 '데이터 없음' 이라 말하면 거짓이다(권한이 없는 것이다).
 const KIND_OF_TYPE = { vm: 'vms', host: 'hosts', datastore: 'datastores' };
-function TopList({ title, items, valueOf, label, accent, type, onSelect, heldKinds = null }) {
+function TopList({ title, items, valueOf, label, accent, type, onSelect, heldKinds = null, omittedNote = null }) {
   const max = Math.max(1, ...items.map(valueOf));
   return (
     <div className="card">
@@ -26,6 +27,7 @@ function TopList({ title, items, valueOf, label, accent, type, onSelect, heldKin
         <span className="muted" style={{ fontSize: 12 }}>상위 {items.length}</span>
       </div>
       {items.length === 0 && <div className="muted" style={{ padding: 12 }}>{heldKinds?.has(KIND_OF_TYPE[type]) ? '조회 권한이 없어 표시하지 않았습니다' : '데이터 없음'}</div>}
+      {omittedNote && <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>{omittedNote}</div>}
       {items.map((it, i) => {
         const v = valueOf(it);
         return (
@@ -120,20 +122,20 @@ export default function Explore() {
         </div>
       )}
       <div className="grid cols-3">
-        <TopList heldKinds={heldKinds} title="CPU 사용률 최다 VM" items={top.vmsByCpuUsage} valueOf={(v) => v.cpuUsagePct}
+        <TopList heldKinds={heldKinds} title="CPU 사용률 최다 VM" items={top.vmsByCpuUsage} omittedNote={topOmittedNote(top.omitted, 'vmsByCpuUsage', 'vm')} valueOf={(v) => v.cpuUsagePct}
           label={(v) => unitText(v.cpuUsagePct, '%')} accent="var(--accent)" type="vm" onSelect={setDetail} />
-        <TopList heldKinds={heldKinds} title="메모리 사용률 최다 VM" items={top.vmsByMemUsage} valueOf={(v) => v.memUsagePct}
+        <TopList heldKinds={heldKinds} title="메모리 사용률 최다 VM" items={top.vmsByMemUsage} omittedNote={topOmittedNote(top.omitted, 'vmsByMemUsage', 'vm')} valueOf={(v) => v.memUsagePct}
           label={(v) => unitText(v.memUsagePct, '%')} accent="var(--purple)" type="vm" onSelect={setDetail} />
-        <TopList heldKinds={heldKinds} title="디스크 할당 최다 VM" items={top.vmsByStorage} valueOf={(v) => v.storageGB}
+        <TopList heldKinds={heldKinds} title="디스크 할당 최다 VM" items={top.vmsByStorage} omittedNote={topOmittedNote(top.omitted, 'vmsByStorage', 'vm')} valueOf={(v) => v.storageGB}
           label={(v) => tb(v.storageGB)} accent="var(--accent-2)" type="vm" onSelect={setDetail} />
       </div>
 
       <div className="grid cols-3" style={{ marginTop: 16 }}>
-        <TopList heldKinds={heldKinds} title="CPU 사용률 최다 호스트" items={top.hostsByCpu} valueOf={(h) => h.cpuUsagePct}
+        <TopList heldKinds={heldKinds} title="CPU 사용률 최다 호스트" items={top.hostsByCpu} omittedNote={topOmittedNote(top.omitted, 'hostsByCpu', 'host')} valueOf={(h) => h.cpuUsagePct}
           label={(h) => unitText(h.cpuUsagePct, '%')} accent="var(--red)" type="host" onSelect={setDetail} />
-        <TopList heldKinds={heldKinds} title="메모리 사용률 최다 호스트" items={top.hostsByMem} valueOf={(h) => h.memUsagePct}
+        <TopList heldKinds={heldKinds} title="메모리 사용률 최다 호스트" items={top.hostsByMem} omittedNote={topOmittedNote(top.omitted, 'hostsByMem', 'host')} valueOf={(h) => h.memUsagePct}
           label={(h) => unitText(h.memUsagePct, '%')} accent="var(--amber)" type="host" onSelect={setDetail} />
-        <TopList heldKinds={heldKinds} title="사용률 최다 데이터스토어" items={top.datastoresByUsage} valueOf={(d) => d.usagePct}
+        <TopList heldKinds={heldKinds} title="사용률 최다 데이터스토어" items={top.datastoresByUsage} omittedNote={topOmittedNote(top.omitted, 'datastoresByUsage', 'datastore')} valueOf={(d) => d.usagePct}
           label={(d) => `${unitText(d.usagePct, '%')} · ${tb(d.capacityGB)}`} accent="var(--green)" type="datastore" onSelect={setDetail} />
       </div>
 
@@ -145,11 +147,11 @@ export default function Explore() {
       )}
 
       <div className="grid cols-3" style={{ marginTop: 16 }}>
-        <TopList heldKinds={heldKinds} title="vCPU 할당 최다 VM" items={top.vmsByVcpu} valueOf={(v) => v.cpuCount}
+        <TopList heldKinds={heldKinds} title="vCPU 할당 최다 VM" items={top.vmsByVcpu} omittedNote={topOmittedNote(top.omitted, 'vmsByVcpu', 'vm')} valueOf={(v) => v.cpuCount}
           label={(v) => `${v.cpuCount} vCPU`} accent="var(--accent)" type="vm" onSelect={setDetail} />
-        <TopList heldKinds={heldKinds} title="RAM 할당 최다 VM" items={top.vmsByRam} valueOf={(v) => v.memMB}
+        <TopList heldKinds={heldKinds} title="RAM 할당 최다 VM" items={top.vmsByRam} omittedNote={topOmittedNote(top.omitted, 'vmsByRam', 'vm')} valueOf={(v) => v.memMB}
           label={(v) => `${Math.round(v.memMB / 1024)} GB`} accent="var(--purple)" type="vm" onSelect={setDetail} />
-        <TopList heldKinds={heldKinds} title="VM 수 최다 호스트" items={top.hostsByVmCount} valueOf={(h) => h.vmCount}
+        <TopList heldKinds={heldKinds} title="VM 수 최다 호스트" items={top.hostsByVmCount} omittedNote={topOmittedNote(top.omitted, 'hostsByVmCount', 'host')} valueOf={(h) => h.vmCount}
           label={(h) => `${h.vmCount} VM`} accent="var(--accent-2)" type="host" onSelect={setDetail} />
       </div>
 

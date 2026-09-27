@@ -39,7 +39,7 @@ async function _pull() {
     return { ok: false, reason: 'pull 비활성화(CENTRAL_URL/CENTRAL_TOKEN 미설정)' };
   }
   try {
-    const url = `${config.agent.centralUrl}/api/central/pdu-config?agent=${encodeURIComponent(config.agent.name || '')}`;
+    const url = `${config.agent.centralUrl}/api/central/pdu-config?agent=${encodeURIComponent(config.agent.name || '')}&intervalsHold=1`;
     const res = await resilientFetch(url, {
       method: 'GET', headers: { 'X-Central-Token': config.agent.centralToken }, timeoutMs: 20_000, retries: 2,
     });
@@ -56,7 +56,13 @@ async function _pull() {
 
     // 주기를 장비 목록보다 먼저 적용한다. 중앙이 값을 안 주면 빈 객체 → 엣지가 자기 env 로
     // 되돌아간다('중앙 미설정 = 로컬 유지' 계약). 이 호출이 타이머 재무장까지 트리거한다.
-    const intervalsApplied = applyCentralIntervals(body?.intervals || {});
+    // v2.632(감사 EDGE2632-03): 중앙이 주기 설정 파일을 못 읽으면 intervals 를 빼고 `intervalsUnreadable` 을 싣는다(요청의 intervalsHold=1
+    //   이 이 규약을 안다는 표시 — 모르는 구버전 엣지에는 중앙이 503 으로 답한다). 그때는 **적용하지 않고 직전 값을 유지**한다 —
+    //   빈 객체로 적용하면 중앙 지정 주기가 풀려 로컬로 돌아간다.
+    const intervalsUnreadable = body?.intervalsUnreadable && typeof body.intervalsUnreadable === 'object'
+      ? String(body.intervalsUnreadable.reason || '사유 미상').slice(0, 200) : '';
+    if (intervalsUnreadable && _logChange('intervals-unreadable', intervalsUnreadable)) console.warn(`[pdu-config] 중앙 주기 설정을 읽지 못해 받지 않았습니다(직전 주기 유지): ${intervalsUnreadable}`);
+    const intervalsApplied = intervalsUnreadable ? false : applyCentralIntervals(body?.intervals && typeof body.intervals === 'object' ? body.intervals : {});
 
     const devices = Array.isArray(body?.devices) ? body.devices : [];
     const sig = crypto.createHash('sha1').update(JSON.stringify(devices)).digest('hex');
@@ -93,7 +99,7 @@ async function _pull() {
       } catch (e) { pushError = String(e?.message || e); console.warn(`[pdu-config] 재수집 push 실패: ${pushError}`); }
     }
 
-    _last = { at: Date.now(), ok: true, devices: devices.length, applied, intervalsApplied, collected, collectRequested: wants.length, collectFailed: failed, ...(pushError ? { pushError } : {}) };
+    _last = { at: Date.now(), ok: true, devices: devices.length, applied, intervalsApplied, ...(intervalsUnreadable ? { intervalsUnreadable } : {}), collected, collectRequested: wants.length, collectFailed: failed, ...(pushError ? { pushError } : {}) };
     return { ok: true, ...(_last) };
   } catch (e) {
     _last = { at: Date.now(), ok: false, reason: e.message };
