@@ -127,6 +127,7 @@ import { startCurUserConfigPull } from './agent/curUserConfigPull.js'; // 〃 �
 import { startPartFaultPoller } from './partfault/poller.js';       // 파트 장애(v2.547) — 중앙: 스캔→전이→DB→알림
 import { startPartFaultPush } from './partfault/push.js';           // 〃 엣지: 로컬 판정 후 '장애 + 전체 요약' 을 중앙 push(v2.548 프로토콜 2)
 import { startPartFaultConfigPull } from './agent/partFaultConfigPull.js'; // 〃 중앙→엣지 스위치 배포(v2.548)
+import { startBmUsageConfigPull } from './agent/bmUsageConfigPull.js'; // v2.627 베어메탈 사용률 설정 중앙→엣지 배포
 import { startEdgeLogWorker } from './agent/edgeLogWorker.js';  // 엣지 로그 폴백 워커(v2.549) — 중앙이 못 닿는 법인에서만 쓰인다
 import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 사용률 수집(v2.550) — 기본 꺼짐, 법인 단위 opt-in
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
@@ -544,7 +545,7 @@ const stagger = [
   // 파트 장애(v2.547) — 엣지는 로컬 스냅샷을 판정해 **장애만** 중앙에 push 하고,
   // 중앙은 직접 수집분 + 엣지 보고를 합쳐 전이(열림/변화/해소)를 계산해 DB 에 남기고 알린다.
   // 둘 다 opt-in/조건부이며(PARTFAULT_ENABLED · CENTRAL_URL) 왜 안 도는지 로그가 말한다.
-  startPartFaultPoller, startPartFaultPush, startPartFaultConfigPull,
+  startPartFaultPoller, startPartFaultPush, startPartFaultConfigPull, startBmUsageConfigPull,
   startEdgeLogWorker,
   startBmUsagePoller,
   startLinkCheckPoller,

@@ -18,7 +18,9 @@ import { scopedVcenterIds } from '../../auth/scope.js';
 import { mergeScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.607 AUTHZ2607-05
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers } from '../../bmusage/settings.js';
+import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers, bmUsageCentralState, distributionStatus, saveDistribution } from '../../bmusage/settings.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
+import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
 import { publicTarget, maskTargetAddress, maskBmIdentity, NO_PATH_REASON } from '../../bmusage/targets.js';
@@ -36,6 +38,8 @@ import { reqTimeoutMs } from '../../agent/envTimeout.js';
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
+// v2.627: 엣지 배포는 28곳 전부의 수집 범위를 바꾼다 — 전 법인 공용 결정이라 전체 범위 관리자만.
+const fleetOnly = fullScopeOnlyWith('베어메탈 사용률 설정의 엣지 배포는 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다 — 모든 엣지의 수집 범위를 한 번에 정합니다.');
 
 // v2.604(감사 CEN2604-03 2중 방어): 엣지 보관분 값이 객체면 String() 이 던져 이 라우트가 500 이었다 — 글자·수·불리언만.
 const t = (v) => strOf(v, 4096).trim();
@@ -193,6 +197,9 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       metrics: METRICS, reasons: NO_PATH_REASON,
       vcenters: applyScope(tg.vcenters.map((v) => ({ ...v, vcenterId: v.id })), allowed),
       isEdge: tg.isEdge,
+      // v2.627: 이 노드가 중앙 배포값을 쓰는가(엣지 화면 배너·입력 잠금) · 중앙의 배포 현황(전체 범위 admin 에게만 — 전 엣지 이름).
+      central: bmUsageCentralState(),
+      distribution: isAdmin && !allowed && !tg.isEdge ? distributionStatus(safeKnownAgents()) : null,
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
       db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
       status: isAdmin ? bmUsageStatus() : maskPollerStatus(stripAckBy(bmUsageStatus(), isAdmin), hosts),
@@ -470,6 +477,23 @@ api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) =>
   }
 });
 
+function safeKnownAgents() { try { return knownAgentNames(); } catch { return []; } }
+
+/**
+ * v2.627 엣지 배포(사용자 요청 "한번에 켜는 기능") — 켬/끔 + 엣지별 제외. 배포되는 값은 이 중앙의 설정 자체다(따로 두 벌을 두지 않는다).
+ * 엣지는 다음 인출(기본 10분 주기)에 받는다 — 응답이 그 사실과 주기를 말한다(즉시 반영된 척하지 않는다).
+ */
+api.put('/tools/bm-usage/distribute', adminOnly, fleetOnly, (req, res) => {
+  const b = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  const patch = {};
+  if (typeof b.enabled === 'boolean') patch.enabled = b.enabled;
+  if (b.excluded && typeof b.excluded === 'object' && !Array.isArray(b.excluded)) patch.excluded = b.excluded;
+  const next = saveDistribution(patch, String(req.user?.username || ''));
+  logAudit({ user: req.user?.username, action: 'bm-usage.distribute', ip: req.ip || '',
+    detail: JSON.stringify({ enabled: next.enabled, excluded: Object.keys(next.excluded).length }).slice(0, 300) });
+  res.json({ ok: true, distribution: distributionStatus(safeKnownAgents()) });
+});
+
 /** 설정 — 법인 on/off·주기·보존. 수집 범위를 바꾸는 동작이라 admin 전용 + 감사. */
 api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
   /*
@@ -511,7 +535,7 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
   // v2.583 #36: 비어 있어 **저장하지 않은** 숫자 칸을 밝힌다(조용히 버리면 '저장했는데 왜 그대로지' 가 된다).
   const { dropped } = dropUnspecifiedNumbers(req.body || {});
   // PUT 응답도 GET 과 같은 필터(범위 계정에는 자기 범위 corps 만 · 비-admin 가림은 adminOnly 라 해당 없음).
-  res.json({ ok: true, settings: scopeMainSettings(next, allowed, true), ...(dropped.length ? { ignoredBlank: dropped } : {}), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
+  res.json({ ok: true, settings: scopeMainSettings(next, allowed, true), ...(next.ignoredCentralManaged ? { ignoredCentralManaged: next.ignoredCentralManaged } : {}), ...(dropped.length ? { ignoredBlank: dropped } : {}), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
 }

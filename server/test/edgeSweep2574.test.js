@@ -143,6 +143,7 @@ describe('IMP-06 — push/pull 진입 함수를 실제로 호출한다(v2.566 TD
   };
   const EXPECTED = [
     'agent/bmstorWorker.js::runBmstorWorkerOnce', 'agent/capacityPush.js::pushCapacityNow', 'agent/captureWorker.js::runCaptureWorkerOnce',
+    'agent/bmUsageConfigPull.js::pullBmUsageConfigNow', // v2.627 — 호출 테스트는 bmUsageDistribute2627.test.js(실제 centralRouter)
     'agent/configPush.js::pushConfigNow', 'agent/curUserConfigPull.js::pullCurUserConfigNow', 'agent/cvpConfigPull.js::pullCvpConfigNow',
     'agent/edgeLogWorker.js::runEdgeLogWorkerOnce', 'agent/fleetPush.js::pushFleetNow', 'agent/gpuGuestConfigPull.js::pullGpuGuestConfigNow',
     'agent/gpuGuestPush.js::pushGpuGuestNow', 'agent/guestDiskPush.js::pushGuestDiskNow', 'agent/idracScanWorker.js::runIdracScanWorkerOnce',

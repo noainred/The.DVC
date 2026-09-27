@@ -76,6 +76,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'pull.vmseries', label: '스파이크 설정', group: 'pull', mod: '../agent/vmSeriesConfigPull.js', fn: 'vmSeriesConfigPullStatus' },
   { key: 'pull.users', label: '계정 배포', group: 'pull', mod: '../agent/usersConfigPull.js', fn: 'usersConfigPullStatus' },
   { key: 'pull.partFault', label: '파트 장애 설정', group: 'pull', mod: '../agent/partFaultConfigPull.js', fn: 'partFaultConfigPullStatus' },
+  { key: 'pull.bmUsage', label: '베어메탈 사용률 설정(중앙 배포)', group: 'pull', mod: '../agent/bmUsageConfigPull.js', fn: 'bmUsageConfigPullStatus' },
 
   // ── 로컬 수집 ──────────────────────────────────────────────────────────────
   /*

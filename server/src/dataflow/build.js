@@ -40,7 +40,7 @@ export const RECENT_MAX = 40;
 /** 데이터 종류 — 순서가 화면 순서다. `test` 는 `side:path` 에 대한 정규식이고 **처음 맞는 것** 하나를 쓴다. */
 export const CATS = Object.freeze([
   { id: 'inv', label: '인벤토리(vCenter)', test: /^central:\/(inventory|fleet|capacity-report|guest-disk|vmseries(-config)?)$|^collector:\/export$/ },
-  { id: 'idrac', label: 'iDRAC·서버', test: /^central:\/(idrac-scan-(jobs|progress|result)|assignment|ip-scan-(assignment|result))$|^collector:\/(idrac-scan|bm-usage)$/ },
+  { id: 'idrac', label: 'iDRAC·서버', test: /^central:\/(idrac-scan-(jobs|progress|result)|assignment|ip-scan-(assignment|result)|bmusage-config)$|^collector:\/(idrac-scan|bm-usage)$/ },
   { id: 'gpu', label: 'GPU', test: /^central:\/gpu-guest-(data|config)$/ },
   { id: 'power', label: '전력·PDU', test: /^central:\/pdu-(data|config)$/ },
   { id: 'storage', label: '스토리지', test: /^central:\/(storage-(data|config)|bmstor-(jobs|result))$|^collector:\/bmstor-collect$/ },

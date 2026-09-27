@@ -40,6 +40,7 @@ export const RUNTIME_STATE_NAMES = new Set([
   'central-agent-storage.json', 'central-agent-sanswitch.json', 'central-agent-sanswitch-perf.json',
   'central-agent-gpu-guest.json', 'central-unsupported-servers.json', 'agent-results.json',
   'active-sessions.json', 'sanswitch-perf-push.json', 'ipam-scan-history.json', 'ipam-scan-results.json',
+  'bmusage-central.json', // v2.627: 엣지가 받은 중앙 배포 사본(상태 — 원본은 중앙의 bmusage-settings.json)
   // v2.613 PERSIST2613-01(재현): v2.608 CVP 의 상태 파일 2개가 빠져 있었다 — 중앙은 CVP 엣지 push 마다, 엣지는 표본이 있는 push(5분)
   //   마다 'change' 백업이 생겼고 엣지 설정 push 도 30분 → 5분마다 나갔다(v2.590 P1 · v2.602 EDGE2602-01 의 CVP 재발). 두 파일을
   //   만드는 헬퍼(createDebouncedWriter · cvp/push.js saveCursor)가 이제 util/stateFiles.js 에 **스스로 등록**하지만, 확정된 이름은

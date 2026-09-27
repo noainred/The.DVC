@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **179개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **181개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-27)
@@ -38,6 +38,8 @@
 | `bmusage-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | bmusage/activityLog.js |
 | `bmusage-alert-state.json` | 설정 | 임계 초과 알림 발송 + **상태 영속**(v2.551). | ✅ |  | ✅ | bmusage/notify.js |
 | `bmusage-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bmusage/poller.js |
+| `bmusage-central.json` | 설정 | 엣지가 받은 베어메탈 사용률 설정 중앙 배포 사본(상태, v2.627) | ✅ | ✅ | ✅ | bmusage/settings.js |
+| `bmusage-distribute.json` | 설정 | 베어메탈 사용률 설정의 엣지 배포(켬·제외 엣지 — 중앙, v2.627) | ✅ | ✅ | ✅ | bmusage/settings.js |
 | `bmusage-settings.json` | 설정 | 베어메탈 사용률 수집 설정(v2.550). | ✅ | ✅ | ✅ | bmusage/settings.js |
 | `capacity.db` | DB | 리소스 적정성(용량) 샘플 시계열 |  |  |  | config.js |
 | `capture-history.json` | 설정 | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 | ✅ |  | ✅ | net/captureHistory.js |
@@ -205,6 +207,8 @@
 - **`users.json`** — ⚠ 지우면 관리자 계정이 사라진다. 기동 시 초기 관리자만 재생성
 - **`secrets-key`** — ⚠ 지우면 저장된 모든 비밀번호를 복호할 수 없다(재입력 필요)
 - **`credentials.json`** — 봉인 저장. API 응답에 값이 실리지 않는다
+- **`bmusage-distribute.json`** — 배포 원본은 bmusage-settings.json 이다. 손상이면 배포 꺼짐으로 시작한다
+- **`bmusage-central.json`** — 중앙이 배포를 끄거나 이 엣지를 제외하면 지워지고 엣지 로컬 설정으로 돌아간다
 - **`settings-owners.txt`** — username 기준. 표시이름 승계 불가
 - **`vcenters.json`** — ⚠ 지우면 수집 대상이 사라진다. v2.444 부터 예제 폴백 없음
 - **`collectors.json`** — 중앙이 이 목록을 pull 한다

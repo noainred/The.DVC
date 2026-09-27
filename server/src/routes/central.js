@@ -1334,6 +1334,18 @@ centralRouter.get('/partfault-config', requireCentral(), async (req, res) => {
   res.json({ ok: true, settings: settingsForAgent(agent) });
 });
 
+// v2.627 베어메탈 사용률 설정 배포(사용자 요청 "한번에 켜는 기능") — 엣지가 주기적으로 GET. 중앙이 배포를 켜고 그 엣지를
+//   제외하지 않았으면 배포 키(Enterprise 제외)를 내려주고, 아니면 distribute:false + 사유(엣지는 사본을 지워 로컬로 돌아간다).
+//   `?applied=<sig>` 는 엣지가 지금 적용 중인 판 — 화면이 '적용됨 / 대기' 를 가르는 근거다(인메모리 기록).
+centralRouter.get('/bmusage-config', requireCentral(), async (req, res) => {
+  const agent = String(req.centralAuth.agent || req.query.agent || '').trim();
+  const { distributeFor, recordBmUsagePull } = await import('../bmusage/settings.js');
+  const out = distributeFor(agent);
+  recordBmUsagePull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), reason: out.distribute ? '' : out.reason });
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, ...out });
+});
+
 // POST /api/central/storage-data — 엣지 수집 스냅샷 수신. 저장 키는 body.agent 가 아니라
 // **인증된 agent**(개별 토큰 바인딩)만 쓴다. 공유 토큰(레거시)은 body.agent 신뢰(TOFU — 기존 축과 동일).
 centralRouter.post('/storage-data', requireCentral(), async (req, res) => {
