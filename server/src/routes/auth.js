@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState } from '../auth/auth.js';
 import { rolePermissions, roleToolsDenied, effectiveToolAccess } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
-import { requireSettingsOwner } from './admin/shared.js';
+import { requireSettingsOwner, fullScopeOnlyWith } from './admin/shared.js';
 import { logAudit } from '../audit.js';
 import { recordPortalLoginFail } from '../security/loginStore.js';
 import { loadSessionSecurity, singleSessionRequired } from '../security/securitySettings.js';
@@ -228,7 +228,9 @@ authRouter.post('/totp/confirm', authMiddleware, (req, res) => {
 // mount 되므로(로그인/공개용), 이 admin 라우트들이 게이트 밖에 있으면 OTP 미등록(부트스트랩)
 // admin 세션이 AD 설정을 바꿔 자기 LDAP 를 admin 그룹으로 응답시켜 OTP 우회 admin 경로를 만들 수
 // 있다. requireEnrolled 를 넣어 등록 전 세션은 /auth/{me,totp/*} 외 이 라우트에 못 오게 한다.
-const adminOnly = [authMiddleware, requireEnrolled, requireRole('admin')];
+// v2.628(SEC2628-04): AD 는 전 사용자 공통 인증 소스다 — 범위 관리자가 설정을 읽거나 요청 본문의 서버로 연결 테스트(내부망
+//   포트 탐지 단서가 되는 오류 문구를 돌려준다)를 하지 못하게 전체 범위 전용으로 둔다.
+const adminOnly = [authMiddleware, requireEnrolled, requireRole('admin'), fullScopeOnlyWith('AD 설정은 전 사용자 공통이라 전체 범위 관리자만 다룰 수 있습니다.')];
 
 authRouter.get('/ad-config', ...adminOnly, (_req, res) => {
   res.json({ ad: loadAdConfig() });

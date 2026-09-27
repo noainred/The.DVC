@@ -11,6 +11,7 @@ import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
+import { fullScopeOnlyWith } from './admin/shared.js';
 export const upgradeRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
@@ -134,7 +135,10 @@ export function detectInstallState(dir) {
 }
 
 // All control endpoints require the admin role.
-const adminOnly = requireRole('admin');
+// v2.628(SEC2628-01 — 재현): 역할만 보면 **범위 관리자**(vCenter 하나로 제한된 admin)도 업그레이드 설정(installDir·remoteBase·
+//   token·autoApply)을 바꾸고 적용·재시작·번들 설치를 할 수 있었다 — 중앙 포탈 전체의 코드를 바꾸는 권능이다. v2.607 이후 범위
+//   관리자는 '관리자' 가 아니라 '범위 계정' 이다(루트 CLAUDE.md). 이 파일은 routes/ 최상위라 audit2612a 스윕 밖에 있었다.
+const adminOnly = [requireRole('admin'), fullScopeOnlyWith('업그레이드 제어는 포탈 전체에 적용되므로 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다.')];
 
 // Current upgrade status (version, config summary, last check/result).
 upgradeRouter.get('/status', adminOnly, (_req, res) => {

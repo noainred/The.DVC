@@ -58,6 +58,11 @@ export function coverageText(a) {
   if (a.unread) parts.push(`못 읽음 ${a.unread}`);
   if (a.stale) parts.push(`오래됨 ${a.stale}`);
   if (a.noCap) parts.push(`용량 모름 ${a.noCap}`);
+  // v2.628(C2628-06): 판정은 됐지만 그 지표만 값이 없어 그 지표 합계에서 빠진 서버 — 분모가 서버 수보다 작은 이유.
+  if (a.cpuMissing) parts.push(`CPU 값 없음 ${a.cpuMissing}`);
+  if (a.memMissing) parts.push(`메모리 값 없음 ${a.memMissing}`);
+  // v2.628(C2628-03): 다른 법인 서버와 식별 키가 겹쳐 사용률 행을 붙이지 않은 서버.
+  if (a.keyConflict) parts.push(`키 겹침 ${a.keyConflict}`);
   return parts.join(' · ');
 }
 
@@ -67,13 +72,14 @@ export function srcText(a) {
   const parts = [];
   if (s.idrac) parts.push(`iDRAC ${s.idrac}`);
   if (s.os) parts.push(`OS ${s.os}`);
+  if (s.mixed) parts.push(`iDRAC+OS ${s.mixed}`);   // v2.628(R2628-04): 지표마다 출처가 다른 서버(DB 가 지표별 출처를 두지 않는다)
   if (s.vcenter) parts.push(`vCenter ${s.vcenter}`);
   return parts.join(' · ');
 }
 
 /** 합계에서 빠진 서버가 하나라도 있는가 — 이 행의 사용률이 '부분' 인지. */
 export function isPartial(a) {
-  return !!a && ((a.unread || 0) + (a.stale || 0) + (a.noCap || 0)) > 0;
+  return !!a && ((a.unread || 0) + (a.stale || 0) + (a.noCap || 0) + (a.cpuMissing || 0) + (a.memMissing || 0)) > 0;
 }
 
 /** 구분 필터 — 'all' 이면 그대로. 서버가 이름 순으로 준 순서를 유지한다. */
@@ -97,8 +103,9 @@ export function noticesOf(d) {
   const out = [];
   for (const e of d.sourceErrors || []) out.push({ tone: 'bad', text: `**입력을 읽지 못했습니다** — ${e}. 이 입력에 기대는 값은 합계에서 빠져 있습니다.` });
   const s = d.settings || {};
+  // v2.628(R2628-07): 아래 설정 안내는 **이 포탈(중앙)** 의 설정이다 — 엣지가 수집하는 법인은 그 엣지 설정(또는 중앙 배포)을 따른다.
   if (!s.enabled) {
-    out.push({ tone: 'warn', text: '**베어메탈 사용률 수집이 꺼져 있습니다** — 물리 서버는 값이 없어 합계에서 빠지고(못 읽음으로 셉니다), 가상화 서버는 **vCenter 값**으로 채웁니다. 특수 기능 › 베어메탈 사용률 › 설정에서 켜세요.' });
+    out.push({ tone: 'warn', text: '**이 포탈의 베어메탈 사용률 수집이 꺼져 있습니다** — 이 포탈이 직접 수집하는 물리 서버는 값이 없어 합계에서 빠지고(못 읽음으로 셉니다), 가상화 서버는 **vCenter 값**으로 채웁니다. 특수 기능 › 베어메탈 사용률 › 설정에서 켜세요. 엣지가 수집하는 법인은 그 엣지의 설정을 따릅니다.' });
   } else if (!s.idracTelemetry) {
     out.push({ tone: 'warn', text: '**iDRAC 텔레메트리가 꺼져 있습니다** — 물리 서버는 OS 계정이 있는 것만 읽고, ESXi 호스트는 iDRAC 로 읽지 않습니다.' });
   }
@@ -107,8 +114,14 @@ export function noticesOf(d) {
   }
   const corps = d.corps || [];
   if (s.enabled && corps.length && !corps.some((c) => c.collectOn)) {
-    out.push({ tone: 'warn', text: '**수집을 켠 법인이 없습니다** — 베어메탈 사용률 › 설정에서 법인을 고르세요. 고르기 전에는 물리 서버 값이 없습니다.' });
+    out.push({ tone: 'warn', text: '**수집을 켠 법인이 없습니다** — 이 포탈의 설정에도, 가져온 엣지 보관분의 설정에도 켠 법인이 없습니다. 베어메탈 사용률 › 설정에서 법인을 고르세요. 고르기 전에는 물리 서버 값이 없습니다.' });
   }
+  // v2.628(C2628-04): 읽히지 않는 vCenter(점검중·수집 실패·위임 낡음)의 가상화 호스트는 vCenter 값으로 채우지 않는다.
+  const uv = numOrNull(d.unreadVcenters);
+  if (uv) out.push({ tone: 'warn', text: `**지금 읽히지 않는 vCenter ${uv}곳**(점검중·수집 실패·위임 보고 낡음)의 가상화 호스트는 마지막 vCenter 값을 지금 값으로 쓰지 않았습니다 — 오래됨 또는 못 읽음으로 셉니다.` });
+  // v2.628(EDGE2628-01): 엣지 보관분이 대상 수 상한으로 잘렸으면 잘린 서버는 못 읽음이 된다.
+  const tr = numOrNull(d.edgeTruncated);
+  if (tr) out.push({ tone: 'warn', text: `**엣지 보관분이 대상 수 상한으로 ${tr}대 잘렸습니다** — 그 서버는 이 화면에서 못 읽음으로 셉니다. 베어메탈 사용률 › 엣지 보관분에서 다시 가져오세요.` });
   // v2.626: 물리 서버가 법인에 붙지 않으면 수집 대상도 합계도 되지 못한다 — 이유를 먼저 말한다.
   const ub = d.unassigned?.bm;
   if (ub && ub.servers) {

@@ -228,7 +228,9 @@ export function loadDistribution() {
   } catch (e) { if (fs.existsSync(DIST_FILE())) preserveCorrupt(DIST_FILE(), e.message); return normalizeDistribution({}); }
 }
 export function normalizeDistribution(raw = {}) {
-  const excluded = {};
+  // v2.628(SEC2628-03): 엣지 이름은 외부 값이다 — '__proto__'·'constructor' 가 프로토타입을 건드리거나 상속 속성으로
+  //   '제외됨' 이 되지 않게 프로토타입 없는 객체에 담고, 조회는 자기 속성만(isExcluded) 본다.
+  const excluded = Object.create(null);
   const src = raw && typeof raw.excluded === 'object' && raw.excluded ? raw.excluded : {};
   for (const [k, v] of Object.entries(src)) { const a = lowerAgent(k); if (a && v === true) excluded[a] = true; }
   return { enabled: raw?.enabled === true, excluded, updatedAt: Number(raw?.updatedAt) > 0 ? Number(raw.updatedAt) : 0, updatedBy: t(raw?.updatedBy).slice(0, 64) };
@@ -245,11 +247,13 @@ export function saveDistribution(patch = {}, by = '') {
   return next;
 }
 
+const isExcluded = (d, a) => Object.hasOwn(d.excluded, a) && d.excluded[a] === true;
+
 /** 중앙이 한 엣지에 내려줄 값. 배포 원본은 **중앙의 로컬 설정**이다(중앙은 사본을 갖지 않는다). */
 export function distributeFor(agent) {
   const d = loadDistribution();
   if (!d.enabled) return { distribute: false, reason: 'off' };
-  if (d.excluded[lowerAgent(agent)]) return { distribute: false, reason: 'excluded' };
+  if (isExcluded(d, lowerAgent(agent))) return { distribute: false, reason: 'excluded' };
   const settings = pickDistributed(loadLocalBmUsageSettings());
   return { distribute: true, settings, sig: settingsSig(settings) };
 }
@@ -258,12 +262,15 @@ export function distributeFor(agent) {
 const _pulls = new Map();
 const _startedAt = Date.now();
 const PULLS_MAX = 512;
-export function recordBmUsagePull(agent, { appliedSig = '', version = '', reason = '' } = {}) {
+// v2.628(SEC2628-02): 공유 토큰 인출의 이름은 검증되지 않았다(v2.589 규약) — verified 로 구분하고, 개별 토큰으로 검증된
+//   기록을 미검증 인출이 덮지 않게 한다(공유 토큰으로 남의 이름을 대 '적용됨' 을 만들 수 없게). 화면이 미검증을 밝힌다.
+export function recordBmUsagePull(agent, { appliedSig = '', version = '', reason = '', verified = false, deliveredSig = '' } = {}) {
   const a = lowerAgent(agent);
   if (!a) return;
+  if (!verified && _pulls.get(a)?.verified) return;
   if (!_pulls.has(a) && _pulls.size >= PULLS_MAX) _pulls.delete(_pulls.keys().next().value);
   _pulls.delete(a);
-  _pulls.set(a, { agent: t(agent).slice(0, 128), at: Date.now(), appliedSig: t(appliedSig).slice(0, 32), version: t(version).slice(0, 32), reason: t(reason).slice(0, 32) });
+  _pulls.set(a, { agent: t(agent).slice(0, 128), at: Date.now(), appliedSig: t(appliedSig).slice(0, 32), version: t(version).slice(0, 32), reason: t(reason).slice(0, 32), verified: verified === true, deliveredSig: t(deliveredSig).slice(0, 32) });
 }
 /** 화면용 — 알려진 엣지 이름(대소문자 무시)과 인출 기록을 합친다. */
 export function distributionStatus(knownNames = []) {
@@ -274,13 +281,15 @@ export function distributionStatus(knownNames = []) {
   for (const [k, p] of _pulls) if (!names.has(k)) names.set(k, p.agent || k);
   const rows = [...names].map(([k, name]) => {
     const p = _pulls.get(k) || null;
-    const excluded = !!d.excluded[k];
+    const excluded = isExcluded(d, k);
     let state;
     if (!d.enabled || excluded) state = excluded ? 'excluded' : 'off';
     else if (!p) state = 'no-pull';
     else if (p.appliedSig && p.appliedSig === cur) state = 'applied';
+    // v2.628(R2628-05): 엣지는 받기 전 판을 알린다 — 마지막 응답이 지금 판을 보냈으면 '전달됨'(적용 확인은 다음 인출).
+    else if (p.deliveredSig && p.deliveredSig === cur) state = 'delivered';
     else state = 'pending';
-    return { agent: name, excluded, lastPullAt: p?.at || 0, appliedSig: p?.appliedSig || '', state };
+    return { agent: name, excluded, lastPullAt: p?.at || 0, appliedSig: p?.appliedSig || '', state, verified: p ? p.verified === true : null };
   }).sort((a, b) => a.agent.localeCompare(b.agent));
   return { ...d, sig: cur, keys: [...DISTRIBUTED_KEYS], rows, since: _startedAt };
 }

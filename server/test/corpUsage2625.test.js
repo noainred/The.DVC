@@ -74,8 +74,11 @@ test('① 가중 사용률 · ⑤ 이름순·구분 · 귀속 없음은 법인 �
   // ④ MEM: bm2 는 메모리 못 읽음 → 분모에 없다. 0.25×256 / 256 = 25%
   assert.equal(a.bm.mem.total, 256);
   assert.equal(a.bm.mem.pct, 25);
-  assert.equal(a.bm.src.os, 1);
+  // v2.628(R2628-04): 'os+idrac' 는 지표마다 출처가 다른 서버다 — OS 로 세지 않고 섞임(mixed)으로 밝힌다.
+  assert.equal(a.bm.src.mixed, 1);
+  assert.equal(a.bm.src.os, 0);
   assert.equal(a.bm.src.idrac, 1);
+  assert.equal(a.bm.memMissing, 1, 'bm2 는 메모리만 없다 — 그 지표 합계에서 빠진 사실을 센다(C2628-06)');
   assert.equal(out.unassigned.bm.servers, 1, '귀속 없는 물리 서버는 unassigned 로만');
   assert.equal(out.totals.all.bm.servers, 2, '법인 합계에 귀속 없음이 섞이지 않는다');
 });

@@ -53,7 +53,12 @@
 const norm = (s) => String(s || '').trim().toLowerCase();
 
 /** 호스트 이름의 짧은 형태(FQDN 앞부분) — vCenter 는 짧은 이름, iDRAC 은 FQDN 인 경우가 흔하다. */
-const shortOf = (s) => norm(s).split('.')[0];
+// v2.628(C2628-01 — 재현): IP 주소는 줄이지 않는다. '10.20.1.11' 이 '10' 이 되어 10.x 로 등록된 모든 iDRAC 서버가 그
+//   호스트와 같은 장비로 판정됐다(법인 오귀속 + ESXi 중복으로 세어 물리 전용 수가 줄었다).
+const IP_LIKE = /^(\d{1,3}\.){3}\d{1,3}$|:/;
+const shortOf = (s) => { const n = norm(s); return IP_LIKE.test(n) ? n : n.split('.')[0]; };
+/** 짧은 이름이 둘 이상의 vCenter 에 걸리면 판정 근거가 아니다(C2628-02) — 표식으로 막는다. */
+const AMBIGUOUS = Symbol('ambiguous-short-name');
 
 /**
  * @param {object[]} servers  iDRAC 레지스트리 항목(비밀 제외 가능)
@@ -80,7 +85,8 @@ export function serversByCorp(servers = [], hosts = [], opts = {}) {
   //   귀속 판정을 호출부가 다시 구현하면 두 판정이 갈라진다 — 판정은 여기 하나다.
   const onAttributed = typeof opts?.onAttributed === 'function' ? opts.onAttributed : null;
   // 호스트 이름·서비스태그 → vCenter id 색인(한 번만 만든다 — 서버마다 전체 순회하면 O(N×M)).
-  const byName = new Map();
+  const byName = new Map();   // 전체 이름(소문자) → vCenter
+  const byShort = new Map();  // 짧은 이름 → vCenter | AMBIGUOUS
   const byTag = new Map();
   const byVcenterHosts = {};
   let hostsTotal = 0;
@@ -90,7 +96,12 @@ export function serversByCorp(servers = [], hosts = [], opts = {}) {
     if (vc) byVcenterHosts[vc] = (byVcenterHosts[vc] || 0) + 1;
     if (!vc) continue;
     const n = norm(h?.name);
-    if (n) { byName.set(n, vc); byName.set(shortOf(n), vc); }
+    if (n) {
+      byName.set(n, vc);
+      const sh = shortOf(n);
+      const prev = byShort.get(sh);
+      byShort.set(sh, prev === undefined || prev === vc ? vc : AMBIGUOUS);
+    }
     const t = norm(h?.serviceTag);
     if (t) byTag.set(t, vc);
   }
@@ -115,6 +126,14 @@ export function serversByCorp(servers = [], hosts = [], opts = {}) {
   };
   const bump = (obj, key) => { if (key) obj[key] = (obj[key] || 0) + 1; };
 
+  const lookupName = (k) => {
+    if (!k) return '';
+    const full = byName.get(k);
+    if (full) return full;
+    const sh = byShort.get(shortOf(k));
+    return sh && sh !== AMBIGUOUS ? sh : '';
+  };
+
   for (const s of servers || []) {
     if (!s || s.type === 'ome') continue;      // 규칙 2 — OME 는 물리 서버가 아니다
     out.total += 1;
@@ -127,7 +146,7 @@ export function serversByCorp(servers = [], hosts = [], opts = {}) {
     let hostHit = '';
     for (const n of names) {
       const k = norm(n);
-      const hit = byName.get(k) || byName.get(shortOf(k));
+      const hit = lookupName(k);
       if (hit) { hostHit = hit; break; }
     }
     if (!hostHit) {
@@ -146,7 +165,7 @@ export function serversByCorp(servers = [], hosts = [], opts = {}) {
       // 이름으로 찾았는지 태그로 찾았는지는 위 루프가 이미 결정했다 — 어느 쪽이었는지만 센다.
       const byNameHit = names.some((n) => {
         const k = norm(n);
-        return !!(byName.get(k) || byName.get(shortOf(k)));
+        return !!lookupName(k);
       });
       vc = hostHit;
       if (byNameHit) out.matchedBy.hostName += 1; else out.matchedBy.serviceTag += 1;
