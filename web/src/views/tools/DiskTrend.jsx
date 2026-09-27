@@ -47,6 +47,9 @@ export default function DiskTrend({ scope }) {
       {DAYS.map((d) => (
         <button key={d} className={days === d ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '5px 11px' }} onClick={() => setDays(d)}>최근 {d}일</button>
       ))}
+      {data?.reclaimLegacy?.points > 0 && (
+        <span className="muted" style={{ fontSize: 11.5 }}>회수 가능 추이 중 {data.reclaimLegacy.points.toLocaleString('ko-KR')}점은 v2.630 이전 방식(정지 VM 의 스냅샷이 겹쳐 셈)이라 실제보다 클 수 있습니다</span>
+      )}
       {data?.synthesized && <span className="badge amber" title="DATA_SOURCE=mock — 현재 구성에서 되감은 합성 추이입니다">데모(mock) 합성 데이터</span>}
       {data && !data.synthesized && data.collectedSince?.vm && (
         <span className="muted" style={{ fontSize: 11.5 }}>수집 시작: 용량/사용 {data.collectedSince.ds ? new Date(data.collectedSince.ds).toLocaleDateString('ko-KR') : '—'} · 할당/회수 {new Date(data.collectedSince.vm).toLocaleDateString('ko-KR')}</span>

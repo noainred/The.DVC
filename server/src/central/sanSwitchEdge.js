@@ -130,7 +130,7 @@ function load() {
 
 // v2.591: '지금 수집' 요청 큐의 기준선 — 보관 중인 엣지 스냅샷의 수집 시각(엣지 시계 값).
 setCollectBaseResolver((id) => {
-  for (const rec of load().values()) for (const d of rec?.devices || []) if (String(d?.deviceId) === String(id)) return Number(d.collectedAt) || null;
+  for (const rec of load().values()) for (const d of rec?.devices || []) if (String(d?.deviceId) === String(id)) return Number(d.edgeCollectedAt ?? d.collectedAt) || null; // v2.630 A4-02
   return null;
 });
 
@@ -183,7 +183,7 @@ export function saveEdgeSanSwitch(agent, devices, { chunk = 0, chunks = 1, info 
   // 남겨야 한다(엣지의 로컬 로그는 중앙에서 볼 수 없다). 같은 collectedAt 재push 는 건너뛴다.
   // ⚠ 엣지는 문제 포트만 올리므로(push.js slimSnapshot) 포트 요약 수치는 전체 기준을 쓴다.
   for (const dv of list) {
-    const ca = Number(dv.collectedAt) || 0;
+    const ca = Number(dv.edgeCollectedAt ?? dv.collectedAt) || 0; // v2.630 A4-02: 엣지 시계 원본
     ackCollect(dv.deviceId, ca || null); // v2.590 P16: 위임 '지금 수집' 요청의 완료 확인
     if (ca && _lastRec.get(dv.deviceId) === ca) continue;
     if (ca) _lastRec.set(dv.deviceId, ca);

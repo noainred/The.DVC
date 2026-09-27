@@ -63,14 +63,14 @@ export function pickEdgeStatus(list, srv) {
  *   예전엔 조용히 건너뛰어 'down 0' 이 '전부 확인했다' 처럼 보였다.
  */
 export function cvpTotals(rows) {
-  const totals = { devices: 0, streaming: 0, partsFault: 0, partsWarn: 0, partsUnknown: 0, partsUnread: 0, bgpDown: 0, bgpUnread: 0, portsDown: 0, portsUnread: 0 };
+  const totals = { devices: 0, streaming: 0, partsFault: 0, partsWarn: 0, partsUnknown: 0, partsUnread: 0, bgpDown: 0, bgpStateUnknown: 0, bgpUnread: 0, portsDown: 0, portsNoLink: 0, portsUnread: 0 };
   for (const d of Array.isArray(rows) ? rows : []) {
     totals.devices++;
     if (d.streaming === true) totals.streaming++;
     const p = partsSummary(d.partsList);
     if (p) { totals.partsFault += p.fault; totals.partsWarn += p.warn; totals.partsUnknown += p.unknown; } else totals.partsUnread++;
-    if (d.bgpPeers) totals.bgpDown += bgpSummary(d.bgpPeers).down; else totals.bgpUnread++;
-    if (d.ports) totals.portsDown += d.ports.down; else totals.portsUnread++;
+    if (d.bgpPeers) { const b = bgpSummary(d.bgpPeers); totals.bgpDown += b.down; totals.bgpStateUnknown += b.stateUnknown || 0; } else totals.bgpUnread++; // v2.630 A2-03: 모르는 상태는 down 이 아니다
+    if (d.ports) { totals.portsDown += d.ports.down; totals.portsNoLink += d.ports.noLink || 0; } else totals.portsUnread++; // v2.630 A2-02
   }
   return totals;
 }

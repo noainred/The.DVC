@@ -105,7 +105,7 @@ test('COL2612-02 disconnected 는 down, connected·up 은 up', () => {
   assert.equal(P.linkWord('linkDisconnected'), 'down');
   assert.equal(P.linkWord('connected'), 'up');
   assert.equal(P.linkWord('intfOperUp'), 'up');
-  assert.equal(P.linkWord('notconnect'), 'down');
+  assert.equal(P.linkWord('notconnect'), 'nolink', 'v2.630 A2-02: 미연결은 down 이 아니다');
 });
 
 test('COL2612-03 hwStatus 접두를 떼고 판정 · 모르는 단어는 fault 가 아니라 unknown', () => {

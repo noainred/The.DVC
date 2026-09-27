@@ -4161,6 +4161,15 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **회수 가능량은 정지 VM 과 스냅샷이 겹친다**(DATA2629-01·02 — `diskTrend.snapshotReclaimGB`): 정지 VM 의 committed 에 스냅샷이 이미 들어 있다. 시계열(`vm_snap_gb`)은 아직 겹친다(남은 일).
     - **같은 서비스태그 = 같은 물리 서버**(A1-2629-01): 키 충돌(keyConflict)은 이름·fleetId 키에만 쓰고, 서비스태그가 같으면 한 대만 센다(`dupSameBox`).
     - 사용자 입력 문자열을 반복문 안에서 가공하지 말 것(AUTHZ2629-01 — 검색어 900KB × VM 2,242 = 3.2초) · 압축 파일은 로드 전에 선언 크기 합을 본다(SEC2629-09).
+  - ⚠⚠ **v2.630 — '다시 3번더' 2회차 확정분**(상세 `docs/AUDIT-2026-09-27d.md`, 회귀 `server/test/audit2630{a..d,lead}.test.js` + 웹 `views/audit2630{e,f}.test.js`):
+    - ⚠⚠ **압축 해제 상한은 '선언' 이 아니라 '실제로 푼 양' 이다**(SEC2630-01 — v2.629 가드의 우회. `svcmon/formats.js zipInflatedSize`): zip 중앙 디렉터리의 크기는
+      파일이 스스로 적은 값이다. 로드 전에 각 항목을 `maxOutputLength` 로 실제로 풀어 센다(v2.593 R2593-02 '만들어지는 사본까지 센다' 와 같은 판단).
+    - ⚠⚠ **엣지 시각은 원본(`edgeCollectedAt`)과 표시용 clamp(`collectedAt`)를 나눠 싣는다**(A4-02, `routes/central.js stampEdgeCollectedAt`): '지금 수집' 완료 판정·
+      중복 제거·기준선은 **엣지 시계 원본**끼리 비교한다(v2.591 R-Q1 '두 시계를 섞지 않는다' 의 수신 쪽 누락). 새 엣지 수신 경로도 같은 규칙.
+    - **범위 계정 iDRAC 귀속은 corpAttribution 색인까지 본다**(R2630-01 — v2.629 의 사본 판정이 DataCenter 규칙 서버를 뺐다). 귀속 판정을 새로 쓰지 말 것.
+    - **판정 헬퍼를 단건·일괄이 공유한다**(AUTHZ2630-01 — IPAM bulk 가 기존 claim 을 보지 않았다): 형제 라우트에 판정을 인라인으로 두면 한쪽이 빠진다.
+    - 게스트 디스크 부분 합은 추이에 적재하지 않는다(A2-01 — v2.606 '부분은 하한' 규약의 누락) · CVP 미연결 포트·모르는 BGP 상태는 down 이 아니다(A2-02·03).
+    - 폼은 서버의 '끔(0)' 을 기본값으로 덮지 않고, 바꾼 칸만 보낸다(WEB2630-01·02 — `web/src/views/settingsFormDiff.js`).
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

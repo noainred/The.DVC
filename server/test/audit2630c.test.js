@@ -92,7 +92,8 @@ const T0C = Date.UTC(2026, 0, 10, 3, 0, 0);
 
 // ── A2-02 · A2-03 ────────────────────────────────────────────────────────
 test('A2-02 linkWord: 미연결·트랜시버 없음은 down 이 아니라 nolink', () => {
-  for (const w of ['notconnect', 'notPresent', 'NotConnected', 'disconnected']) assert.equal(linkWord(w), 'nolink', w);
+  for (const w of ['notconnect', 'notPresent', 'NotConnected']) assert.equal(linkWord(w), 'nolink', w);
+  assert.equal(linkWord('disconnected'), 'down', 'v2.612 COL2612-02 판정 유지');
   for (const w of ['linkDown', 'errdisabled', 'intfOperDown', 'lowerLayerDown', 'down']) assert.equal(linkWord(w), 'down', w);
   assert.equal(linkWord('linkUp'), 'up');
   assert.equal(linkWord('connected'), 'up');

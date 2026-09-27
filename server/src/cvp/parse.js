@@ -371,9 +371,9 @@ export function linkWord(v) {
   if (v === false) return 'down';
   const s = String(v ?? '').toLowerCase();
   if (!s) return 'unknown';
-  if (/notconnect|notpresent|disconnect/.test(s)) return 'nolink';
+  if (/notconnect|notpresent/.test(s)) return 'nolink'; // v2.630 A2-02: EOS 의 미연결·트랜시버 없음만 — 'disconnected' 는 v2.612 판정대로 down
   // v2.612 COL2612-02: 'disconnected' 가 'connected' 를 품어 up 으로 읽혔다 — 끊김 단어를 down 에 넣고 up 은 단어 경계로 본다.
-  if (/down|disabled|errdisabled|shutdown|linkdown|intfoperdown|lowerlayerdown/.test(s)) return 'down';
+  if (/disconnect|down|disabled|errdisabled|shutdown|linkdown|intfoperdown|lowerlayerdown/.test(s)) return 'down';
   if (/\bup\b|linkup|intfoperup|\bconnected\b|\benabled\b/.test(s)) return 'up';
   return 'unknown';
 }
