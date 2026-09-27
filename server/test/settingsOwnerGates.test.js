@@ -84,5 +84,6 @@ test('엣지 사용자 배포의 변경 라우트 3개에 requireSettingsOwner �
 test('AD 설정 변경(PUT)에 requireSettingsOwner 가 붙어 있다(조회는 admin 유지)', () => {
   const s = src('routes', 'auth.js');
   assert.match(s, /put\('\/ad-config',[^)]*requireSettingsOwner/);
-  assert.match(s, /get\('\/ad-config',\s*\.\.\.adminOnly,\s*\(/);
+  // v2.628(SEC2628-04): 조회는 소유자 전용으로 올리지 않되 전체 범위 게이트(adFleetOnly)는 붙는다.
+  assert.match(s, /get\('\/ad-config',\s*\.\.\.adminOnly,\s*(adFleetOnly,\s*)?\(/);
 });
