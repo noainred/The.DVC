@@ -85,6 +85,14 @@ export async function runLinkCheckWorkerOnce() {
       _last = { at: Date.now(), ms: Date.now() - t0, ok: true, kind: c.kind, note: '중앙이 구버전입니다(통신 점검 수신 경로 없음)', links: 0 };
       return { ok: true, links: 0 };
     }
+    if (r.status === 503) {
+      // v2.632(감사 EDGE2632-03): 중앙이 통신 점검 설정 파일을 못 읽으면 기본값(꺼짐)을 200 으로 내리지 않고 503 settingsUnreadable 로
+      //   답한다 — '중앙에서 꺼짐' 으로 적지 말고 사유를 그대로 남긴다(조치가 다르다: 중앙 설정 파일 복구).
+      const b = await r.json().catch(() => null);
+      if (b?.reason === 'settingsUnreadable') {
+        throw Object.assign(new Error(`중앙이 통신 점검 설정 파일을 읽지 못했습니다 — ${String(b.detail || '').slice(0, 200)}`), { status: 503, kind: 'settingsUnreadable' });
+      }
+    }
     if (!r.ok) throw Object.assign(new Error(`link-check-config <- HTTP ${r.status}`), { status: r.status });
     const cfg = await r.json().catch(() => ({}));
     if (Number.isFinite(Number(cfg?.intervalMs)) && Number(cfg.intervalMs) > 0) _intervalMs = Number(cfg.intervalMs);
