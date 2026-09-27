@@ -27,7 +27,12 @@ export async function runIpScanAgentOnce() {
   try {
     const url = `${config.agent.centralUrl}/api/central/ip-scan-assignment?agent=${encodeURIComponent(config.agent.name)}`;
     const aRes = await resilientFetch(url, { headers: headers(), timeoutMs: 20_000, retries: 2 });
-    if (!aRes.ok) throw new Error(`assignment ${aRes.status}`);
+    if (!aRes.ok) {
+      // v2.632(감사 EDGE2632-03): 중앙 스캔 설정 파일 손상은 503 settingsUnreadable — '배정 없음' 이 아니라 사유를 남긴다.
+      let why = '';
+      if (aRes.status === 503) { try { const b = await aRes.json(); if (b?.reason === 'settingsUnreadable') why = ` — 중앙 스캔 설정 파일을 읽지 못했습니다(${String(b.detail || '').slice(0, 160)})`; } catch { /* 본문 없음 */ } }
+      throw new Error(`assignment ${aRes.status}${why}`);
+    }
     const a = await aRes.json();
     if (!a?.assigned) { last = { at: Date.now(), assigned: false }; return last; }
     // 엣지도 스캔을 별도 프로세스에서(v2.363) — 원격지 포탈/에이전트 부하 격리.

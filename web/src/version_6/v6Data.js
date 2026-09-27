@@ -322,7 +322,7 @@ export function serverSegments(ov) {
   const g = ov?.global || {};
   const pbc = ov?.physicalByCorp && !ov.physicalByCorp.error ? ov.physicalByCorp : null;
   return {
-    phys: { value: pbc ? n(pbc.total) : n(ov?.physical?.servers), sub: pbc ? `물리 전용 ${fmtN(pbc.physicalOnly)} · 호스트와 같은 장비 ${fmtN(pbc.matchedCount)}` : '' },
+    phys: { value: pbc ? n(pbc.total) : (ov?.physical?.error ? null : n(ov?.physical?.servers)), sub: pbc ? `물리 전용 ${fmtN(pbc.physicalOnly)} · 호스트와 같은 장비 ${fmtN(pbc.matchedCount)}` : '' },
     host: { value: n(g.hosts), sub: `정상 ${fmtN(g.hostsConnected)} · 점검 ${fmtN(g.hostsMaintenance)} · 끊김 ${fmtN(g.hostsDisconnected)}` },
     vm: { value: n(g.vms), sub: `구동 ${fmtN(g.vmsPoweredOn)} · 정지 ${fmtN(g.vmsPoweredOff)}` },
     union: pbc ? n(pbc.union) : null,

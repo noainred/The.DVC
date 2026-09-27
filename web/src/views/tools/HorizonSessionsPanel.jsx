@@ -214,8 +214,8 @@ export default function HorizonSessionsPanel() {
               {nameRows.map((u, i) => (
                 <tr key={`${u.name}-${i}`}>
                   <td>{canShowNames ? u.name : <span style={{ color: 'var(--text-faint)' }}>{`사용자 #${i + 1}`}</span>}{u.isSid && <span style={{ fontSize: 10, marginLeft: 4, color: 'var(--amber)' }}>SID</span>}</td>
-                  <td data-sort={String(u.connected ?? 0)}>{u.connected ?? '—'}</td>
-                  <td data-sort={String(u.sessions ?? 0)}>{u.sessions ?? '—'}</td>
+                  <td data-sort={u.connected ?? ''}>{u.connected ?? '—'}</td>
+                  <td data-sort={u.sessions ?? ''}>{u.sessions ?? '—'}</td>
                   <td style={{ fontSize: 11.5, color: 'var(--text-dim)', whiteSpace: 'normal' }}>
                     {picked ? [...(u.pools || []), ...(u.machines || [])].join(', ') || '—' : (u.servers || []).join(', ') || '—'}
                   </td>

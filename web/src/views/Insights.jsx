@@ -353,7 +353,7 @@ function Incidents() {
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         <Kpi label="진행중" value={num(d?.summary.open)} color={d?.summary.open ? '#fbbf24' : '#34d399'} />
         <Kpi label="진행중(위험)" value={num(d?.summary.openCritical)} color={d?.summary.openCritical ? '#f87171' : '#34d399'} />
-        <Kpi label="최근 24h 발생" value={num(d?.summary.recent24h)} />
+        <Kpi label="최근 24h 발생" value={num(d?.summary.recent24h)} sub={d?.summary.timeUnknown ? `시각 미상 ${d.summary.timeUnknown}건 제외` : undefined} />
       </div>
       {(d?.byDay || []).length > 0 && (
         <div className="card" style={{ padding: 14, marginBottom: 12 }}>
@@ -383,7 +383,7 @@ function Incidents() {
         {(d?.timeline || []).length === 0 ? <div className="muted" style={{ fontSize: 12 }}>기록된 이벤트가 없습니다.</div>
           : <div className="table-wrap" style={{ maxHeight: '48vh' }}><STable><thead><tr><th>시각</th><th>구분</th><th>심각도</th><th>제목</th></tr></thead>
             <tbody>{d.timeline.map((e, i) => (
-              <tr key={i}><td className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{new Date(e.ts).toLocaleString('ko-KR')}</td><td style={{ fontSize: 12 }}>{e.kind === 'resolved' ? '해소' : '발생'}</td><td>{sev(e.severity)}</td><td style={{ fontSize: 12 }}>{e.title}</td></tr>
+              <tr key={i}><td className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{e.ts == null ? '시각 미상' : new Date(e.ts).toLocaleString('ko-KR')}</td><td style={{ fontSize: 12 }}>{e.kind === 'resolved' ? '해소' : '발생'}</td><td>{sev(e.severity)}</td><td style={{ fontSize: 12 }}>{e.title}</td></tr>
             ))}</tbody></STable></div>}
       </div>
     </div>

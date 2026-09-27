@@ -18,6 +18,7 @@ import { getPolicies, isCoveredByAnyPolicy } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { ipToNum } from '../util/ipv4.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { agentKeyOf, agentValueOf } from '../util/agentKey.js'; // v2.604 RECENT2604-01
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
@@ -130,8 +131,32 @@ function normalizeCfg(p = {}) {
   };
 }
 
+/*
+ * v2.632(감사 EDGE2632-03): 스캔 **설정**(ipam-scan.json — 엣지에 배정이 배포된다)의 로드 오류 상태. 손상 → 보존 → 빈 설정이면
+ *   /api/central/ip-scan-assignment 가 assigned:false 로 답해 전 엣지 스캔이 멈췄다(원인은 손상). 오류면 그 라우트가 503 으로 답한다.
+ *   재시작 뒤 보존본만 남은 경우도 못 읽은 것이다. 저장(saveAll)만 해제한다.
+ */
+const _cfgLoadErr = makeSettingsLoadError(() => CFG);
+/** 스캔 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
+export function scanSettingsLoadError() { loadAll(); return _cfgLoadErr.get(); }
+
+function readCfg() {
+  if (!fs.existsSync(CFG)) { _cfgLoadErr.missing(); return {}; }
+  try {
+    const j = JSON.parse(fs.readFileSync(CFG, 'utf8'));
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
+    _cfgLoadErr.ok();
+    return j;
+  } catch (e) {
+    _cfgLoadErr.corrupt(e);
+    preserveCorrupt(CFG, e?.message || String(e));
+    console.warn(`[ipam] ${path.basename(CFG)} 파싱 실패(${e?.message || e}) — 손상본을 .corrupt 로 보존하고 기본값으로 시작합니다.`);
+    return {};
+  }
+}
+
 function loadAll() {
-  const p = readJson(CFG, {}) || {};
+  const p = readCfg();
   // 구버전(단일 설정) 마이그레이션: 최상위에 ranges가 있으면 __local__로 이전.
   if (!p.agents && (p.ranges || p.enabled !== undefined)) return { agents: { [LOCAL]: normalizeCfg(p) } };
   return { agents: p.agents && typeof p.agents === 'object' ? p.agents : {} };
@@ -140,6 +165,7 @@ function loadAll() {
 function saveAll(all) {
   fs.mkdirSync(path.dirname(CFG), { recursive: true });
   atomicWriteFileSync(CFG, JSON.stringify(all, null, 2));
+  _cfgLoadErr.ok();
 }
 
 /** 한 에이전트(기본=로컬)의 설정. */

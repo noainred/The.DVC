@@ -65,7 +65,7 @@ import { logAudit } from '../audit.js';
 import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq, lateBmstorResult, bmstorJobKnown } from '../bmstor/jobs.js';
 import { applyBmstorResults } from '../bmstor/poller.js';
 import { recordCapture } from '../net/captureHistory.js';
-import { loadScanSettings, mergeScanResults, recordAgentReport } from '../ipam/scanStore.js';
+import { loadScanSettings, mergeScanResults, recordAgentReport, scanSettingsLoadError } from '../ipam/scanStore.js';
 import { putEdgeLinkReport } from '../central/linkCheckEdge.js';   // v2.552: 엣지가 잰 통신 링크 결과 수신
 import { buildLinks, publicLink, EDGE_KINDS } from '../linkcheck/links.js';
 // ⚠ **redact 된 목록**을 쓴다 — 링크 계산에 필요한 것은 name·url·host 뿐이고, 이 응답은 엣지로
@@ -2057,6 +2057,8 @@ centralRouter.post('/bmstor-result', requireCentral({ notFound: { ok: false } })
 
 // Agent pulls its IP-scan assignment (TCP connect scan config) by name.
 centralRouter.get('/ip-scan-assignment', requireCentral(), (req, res) => {
+  // v2.632(감사 EDGE2632-03): 스캔 설정 파일을 못 읽었으면 assigned:false(엣지 스캔 중단)를 200 으로 내리지 않는다.
+  if (settingsUnreadable(res, scanSettingsLoadError, 'IP 스캔')) return;
   // v2.604(감사 RECENT2604-01): 개별 토큰이면 **결과 라우트와 같은 키**(토큰 이름)로 찾는다 — 배정과 결과가 서로 다른 이름으로
   //   설정을 찾으면 '배정됨' 을 받고 스캔한 뒤 결과가 전량 409 가 된다. 조회 자체도 대소문자 무시(scanStore.loadScanSettings).
   const cfg = loadScanSettings(req.centralAuth?.mode === 'agent' && req.centralAuth.agent ? req.centralAuth.agent : String(req.query.agent || ''));
