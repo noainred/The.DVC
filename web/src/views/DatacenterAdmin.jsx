@@ -13,6 +13,7 @@ export default function DatacenterAdmin() {
   const [dcs, setDcs] = useState(null);      // [{id,name,region,note}]
   const [assign, setAssign] = useState({});  // { vcenterId: datacenterId }
   const [vcs, setVcs] = useState([]);        // [{id,name}]
+  const [vcErr, setVcErr] = useState(null);  // v2.630 WEB2630-06: vCenter 목록 조회 실패(개수를 0 으로 보이지 않는다)
   const [err, setErr] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -23,7 +24,9 @@ export default function DatacenterAdmin() {
   const loadDcs = () => fetchJson('/admin/datacenters').then((d) => { setDcs(d.datacenters || []); setAssign(d.assign || {}); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => {
     loadDcs();
-    fetchJson('/admin/vcenters').then((d) => setVcs(d.vcenters || d || [])).catch(() => fetchJson('/vcenters').then((d) => setVcs(d || [])).catch(() => {}));
+    fetchJson('/admin/vcenters').then((d) => { setVcs(d.vcenters || d || []); setVcErr(null); })
+      .catch(() => fetchJson('/vcenters').then((d) => { setVcs(d || []); setVcErr(null); })
+        .catch((e) => setVcErr(e?.message || String(e || '조회 실패'))));
   }, []);
 
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 4000); };
@@ -92,6 +95,7 @@ export default function DatacenterAdmin() {
         법인 안의 물리 서버 정보는 <b>iDRAC 서버 등록 › 법인별 iDRAC 장비 스캔</b>에서 수집합니다.
       </div>
       {msg && <div className="card" style={{ padding: '8px 12px', marginBottom: 12, borderLeft: `3px solid var(--${msg.ok ? 'green' : 'red'})`, fontSize: 13 }}>{msg.ok ? '✓' : '⚠'} {msg.text}</div>}
+      {vcErr && <div className="banner" style={{ marginBottom: 12 }}>⚠ vCenter 목록을 읽지 못했습니다({vcErr}) — 법인별 vCenter 수는 ‘—’ 로 두었고 할당 표는 비어 있습니다. 새로고침으로 다시 시도하세요.</div>}
 
       {/* 1) DataCenter 종류 정의 */}
       <div className="flex between wrap gap" style={{ alignItems: 'center', margin: '6px 0' }}>
@@ -126,7 +130,7 @@ export default function DatacenterAdmin() {
                 <td><b>{d.id}</b></td>
                 <td>{d.name}</td>
                 <td className="muted">{d.region || '—'}</td>
-                <td className="tabular">{countByDc[d.id] || 0}</td>
+                <td className="tabular">{vcErr ? '—' : (countByDc[d.id] || 0)}</td>
                 <td className="muted" style={{ fontSize: 12 }}>{d.note || ''}</td>
                 <td className="right nowrap">
                   <button className="tab" onClick={() => setForm({ ...d, isNew: false })}>수정</button>
@@ -143,14 +147,14 @@ export default function DatacenterAdmin() {
 
       {/* 2) vCenter → DataCenter 할당 */}
       <div className="flex between wrap gap" style={{ alignItems: 'center', margin: '6px 0' }}>
-        <b style={{ fontSize: 14 }}>vCenter → DataCenter 할당 <span className="muted" style={{ fontWeight: 400 }}>· vCenter {vcs.length}개</span></b>
+        <b style={{ fontSize: 14 }}>vCenter → DataCenter 할당 <span className="muted" style={{ fontWeight: 400 }}>· {vcErr ? 'vCenter 목록 미확인' : `vCenter ${vcs.length}개`}</span></b>
         <button className="login-btn" style={{ flex: 'none', padding: '8px 14px', opacity: dirtyCount ? 1 : 0.5 }} disabled={busy || !dirtyCount} onClick={saveAssign}>변경 저장{dirtyCount ? ` (${dirtyCount})` : ''}</button>
       </div>
       <div className="table-wrap">
         <STable>
           <thead><tr><th>vCenter</th><th>현재 소속 DataCenter</th></tr></thead>
           <tbody>
-            {vcs.length === 0 && <tr><td colSpan={2} className="center muted" style={{ padding: 24 }}>등록된 vCenter가 없습니다.</td></tr>}
+            {vcs.length === 0 && <tr><td colSpan={2} className="center muted" style={{ padding: 24 }}>{vcErr ? 'vCenter 목록을 읽지 못해 할당 표를 그리지 못했습니다(등록된 vCenter 가 없다는 뜻이 아닙니다).' : '등록된 vCenter가 없습니다.'}</td></tr>}
             {vcs.map((v) => {
               const cur = curDc(v.id);
               const changed = (cur || '') !== (assign[v.id] || '');

@@ -358,14 +358,22 @@ export function firstSpeed(flat) {
   return null;
 }
 
-/** oper/admin 상태 → 'up'|'down'|'unknown'. */
+/**
+ * oper/admin 상태 → 'up'|'down'|'nolink'|'unknown'.
+ * v2.630(감사 A2-02): EOS 인터페이스 기본값은 no shutdown(enabled)이라 케이블 없는 포트는 'notconnect', 트랜시버 없는
+ *   포트는 'notPresent' 로 보고된다. 그것을 'down' 으로 번역하면 'admin up 인데 oper down' 판정(portsSummary)이 **쓰지 않는
+ *   포트 전부**를 다운 포트로 세 정상 장비가 수십 개의 down 을 가진 것처럼 보였다. 링크가 한 번도 없었을 수 있는 상태
+ *   (notconnect·notPresent·disconnected)는 'nolink' 로 따로 두고, down 은 linkDown·errdisabled·lowerLayerDown 처럼
+ *   '링크가 있어야 하는데 내려간' 상태로 좁힌다. ⚠ 실장비 CVP 응답을 본 적이 없다 — 단어 목록은 EOS CLI 관용 표기 기준이다.
+ */
 export function linkWord(v) {
   if (v === true) return 'up';
   if (v === false) return 'down';
   const s = String(v ?? '').toLowerCase();
   if (!s) return 'unknown';
+  if (/notconnect|notpresent|disconnect/.test(s)) return 'nolink';
   // v2.612 COL2612-02: 'disconnected' 가 'connected' 를 품어 up 으로 읽혔다 — 끊김 단어를 down 에 넣고 up 은 단어 경계로 본다.
-  if (/notconnect|disconnect|down|disabled|errdisabled|shutdown|notpresent|linkdown|intfoperdown|lowerlayerdown/.test(s)) return 'down';
+  if (/down|disabled|errdisabled|shutdown|linkdown|intfoperdown|lowerlayerdown/.test(s)) return 'down';
   if (/\bup\b|linkup|intfoperup|\bconnected\b|\benabled\b/.test(s)) return 'up';
   return 'unknown';
 }
@@ -484,17 +492,40 @@ export function parseBgp(text, { max = PEER_MAX } = {}) {
   return { peers, summary: bgpSummary(peers), keys, truncated, droppedFields };
 }
 
+/**
+ * BGP 피어 상태 → 'established'|'down'|'unknown'(v2.630 감사 A2-03).
+ * 예전에는 'established' 가 아닌 비어 있지 않은 값을 전부 down 으로 셌다 — BGP4-MIB 이름(bgpPeerState)으로 오는 값은
+ * **정수**(6=established)라 정상 피어가 전부 down 이 되고, 'unknown'·'n/a' 도 down 이었다(확인 불가를 장애로).
+ * down 은 FSM 의 비-established 상태(idle·connect·active·opensent·openconfirm, 숫자 1~5)만이고 나머지는 unknown 이다
+ * (linkWord 와 같은 원칙). ⚠ 실장비 CVP 응답 형식은 확인하지 못했다 — 관용 표기와 MIB 숫자를 둘 다 받는다.
+ */
+export function bgpStateWord(v) {
+  const s = String(v ?? '').trim().toLowerCase();
+  if (!s) return 'unknown';
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    if (n === 6) return 'established';
+    if (n >= 1 && n <= 5) return 'down';
+    return 'unknown';
+  }
+  if (/established/.test(s)) return 'established';
+  if (/^(bgp[_-]?)?(state[_-]?)?(idle|connect|active|open[_\s-]?sent|open[_\s-]?confirm)\b/.test(s)) return 'down';
+  return 'unknown';
+}
+
 export function bgpSummary(peers) {
   if (!Array.isArray(peers)) return null;
-  let established = 0; let down = 0; let pSum = 0; let pKnown = 0;
+  let established = 0; let down = 0; let unknown = 0; let pSum = 0; let pKnown = 0;
   for (const p of peers) {
-    const s = String(p?.state || '').toLowerCase();
-    if (/established/.test(s)) established++;
-    else if (s) down++;
+    const w = bgpStateWord(p?.state);
+    if (w === 'established') established++;
+    else if (w === 'down') down++;
+    else unknown++;
     if (p?.prefixes != null) { pSum += p.prefixes; pKnown++; }
   }
   // v2.612 COL2612-04: prefix 수를 모르는 피어 수를 함께 준다 — 있으면 prefixes 는 '최소' 값이다(부분 합을 전체라 말하지 않는다).
-  return { peers: peers.length, established, down, prefixes: pKnown ? pSum : null, prefixesUnknown: peers.length - pKnown };
+  // v2.630 A2-03: 상태를 알 수 없는 피어는 established 에도 down 에도 넣지 않고 따로 센다(stateUnknown).
+  return { peers: peers.length, established, down, ...(unknown ? { stateUnknown: unknown } : {}), prefixes: pKnown ? pSum : null, prefixesUnknown: peers.length - pKnown };
 }
 
 /**
@@ -503,7 +534,11 @@ export function bgpSummary(peers) {
  */
 export function portsSummary(ports) {
   if (!Array.isArray(ports)) return null;
-  let up = 0; let down = 0;
-  for (const p of ports) { if (p?.oper === 'up') up++; else if (p?.oper === 'down' && p?.admin === 'up') down++; }
-  return { total: ports.length, up, down };
+  let up = 0; let down = 0; let noLink = 0;
+  for (const p of ports) {
+    if (p?.oper === 'up') up++;
+    else if (p?.oper === 'down' && p?.admin === 'up') down++;
+    else if (p?.oper === 'nolink') noLink++;   // v2.630 A2-02: 미연결·트랜시버 없음 — down 이 아니다(개수는 밝힌다)
+  }
+  return { total: ports.length, up, down, ...(noLink ? { noLink } : {}) };   // 없으면 필드 자체를 싣지 않는다(기존 모양 호환)
 }

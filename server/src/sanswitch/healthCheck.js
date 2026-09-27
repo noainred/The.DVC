@@ -30,6 +30,7 @@
  * '기준선 없음' 을 밝힌다. ⚠ 포탈이 `portstatsclear` 를 실행하지 않는다 — 다른 팀이 잡아 둔
  * 기준선을 지우는 파괴적 동작이다. 기준선은 **포탈 안에 저장**한다(`sanswitch/errBaseline.js`).
  */
+import { rateKey } from './rates.js'; // v2.630 A2-04: 포트 키 한 벌(기준선·처리량)
 
 /** 광량 판정 기본 임계 — 웹 `sanSwitchPorts.js` 와 같은 값이어야 한다(보고서·화면 불일치 방지). */
 export const RX_WARN_DBM = -9;
@@ -384,9 +385,29 @@ function fruItem(key, fru, section, cmd) {
  * 원인**(`ERROR_CAUSE`)까지 붙인다. 사용자 제공 해석표를 그대로 옮긴 것이다 —
  * crc/enc_in/loss_sync·loss_sig/disc_c3 는 의심해야 할 곳이 서로 다르다.
  */
+/**
+ * v2.630(A2-04): 기준선에서 이 포트의 행을 찾는다. 키는 `rates.js rateKey`(slot 이 있으면 's:<slot/port>').
+ * 옛 기준선(v2.629 이전 — index 키)은 **이번 스냅샷에서 그 index 를 한 포트만 쓸 때만** 읽는다. 두 포트가 같은
+ * index 로 겹치면(REST 디렉터 · default-index 없음) 옛 행은 어느 포트 것인지 알 수 없다 → 판정 보류(null).
+ */
+export function baselineLookup(bp, ports = []) {
+  if (!bp) return () => null;
+  const hasNew = Object.keys(bp).some((k) => k.startsWith('s:'));
+  const idxCount = new Map();
+  for (const p of ports || []) { const k = String(p?.index); idxCount.set(k, (idxCount.get(k) || 0) + 1); }
+  return (p) => {
+    const k = rateKey(p);
+    if (Object.hasOwn(bp, k)) return bp[k];
+    if (!k.startsWith('s:') || hasNew) return null;
+    const ik = String(p?.index);
+    return idxCount.get(ik) === 1 && Object.hasOwn(bp, ik) ? bp[ik] : null;
+  };
+}
+
 function portErrorItem(ports, sec, baseline) {
   if (sec.counters !== 'ok') return mk('portErrors', 'unknown', uncheckedWhy(sec.counters, 'porterrshow'));
   const bp = baseline?.ports || null;
+  const rowOf = baselineLookup(bp, ports);
   const rows = [];
   let anyCounter = false;
   // v2.590 F3: k/m/g 로 축약된(반올림된) 카운터는 증분을 셀 수 없다 — '신규 0' 이 아니라 **보류**다.
@@ -395,12 +416,12 @@ function portErrorItem(ports, sec, baseline) {
     const cur = {}; const dlt = {};
     let curSum = 0; let dltSum = 0; let dltKnown = false;
     const curAp = Array.isArray(p.errApprox) ? p.errApprox : [];
-    const baseAp = bp && Array.isArray(bp[String(p.index)]?._approx) ? bp[String(p.index)]._approx : [];
+    const baseAp = bp && Array.isArray(rowOf(p)?._approx) ? rowOf(p)._approx : [];
     for (const k of ERROR_KEYS) {
       const v = num(p[k]);
       if (v != null) { anyCounter = true; cur[k] = v; curSum += v; }
       if (bp && (curAp.includes(k) || baseAp.includes(k))) { if (v != null) approxPorts.add(p.index); continue; }
-      const d = errorDelta(p[k], bp ? bp[String(p.index)]?.[k] : null);
+      const d = errorDelta(p[k], bp ? rowOf(p)?.[k] : null);
       if (d != null) { dlt[k] = d; dltSum += d; dltKnown = true; }
     }
     if (curSum > 0 || dltSum > 0) rows.push({ index: p.index, name: p.attachedName || '', cur, dlt, curSum, dltSum, dltKnown });
@@ -482,6 +503,7 @@ export function checkPorts(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad 
   const sec = snap?.extra?.collectMethod === 'rest' ? restHealthSections(snap?.sections || {}) : (snap?.sections || {});   // v2.590 F4
   const list = (snap?.ports && snap.ports.list) || [];
   const bp = baseline?.ports || null;
+  const rowOf = baselineLookup(bp, list);
   const rows = list.map((p) => {
     const linked = isLinked(p);
     const rx = num(p.rxPowerDbm);
@@ -498,13 +520,13 @@ export function checkPorts(snap, { baseline = null, rxWarn = RX_WARN_DBM, rxBad 
     let curSum = 0; let dltSum = 0; let dltKnown = false;
     // v2.590 F3: 축약(k/m/g) 카운터는 증분을 셀 수 없다 — portErrorItem 과 같은 기준으로 보류한다.
     const curAp = Array.isArray(p.errApprox) ? p.errApprox : [];
-    const baseAp = bp && Array.isArray(bp[String(p.index)]?._approx) ? bp[String(p.index)]._approx : [];
+    const baseAp = bp && Array.isArray(rowOf(p)?._approx) ? rowOf(p)._approx : [];
     let approxHeld = false;
     for (const k of ERROR_KEYS) {
       const v = num(p[k]);
       if (v != null) { cur[k] = v; curSum += v; }
       if (bp && (curAp.includes(k) || baseAp.includes(k))) { if (v != null) approxHeld = true; continue; }
-      const d = errorDelta(p[k], bp ? bp[String(p.index)]?.[k] : null);
+      const d = errorDelta(p[k], bp ? rowOf(p)?.[k] : null);
       if (d != null) { dlt[k] = d; dltSum += d; dltKnown = true; }
     }
     let errors = 'unknown';

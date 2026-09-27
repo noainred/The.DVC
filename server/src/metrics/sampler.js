@@ -107,7 +107,7 @@ export function vmAllocRows(snap, settings) {
   const agg = new Map();
   const bucket = (id) => {
     let e = agg.get(id);
-    if (!e) { e = { cpuUsed: 0, cpuAlloc: 0, memUsed: 0, memAlloc: 0, dsUsed: 0, dsCap: 0, diskProv: 0, diskUsed: 0, diskOff: 0, snapGB: 0 }; agg.set(id, e); }
+    if (!e) { e = { cpuUsed: 0, cpuAlloc: 0, memUsed: 0, memAlloc: 0, dsUsed: 0, dsCap: 0, diskProv: 0, diskUsed: 0, diskOff: 0, snapGB: 0, snapOnGB: 0 }; agg.set(id, e); }
     return e;
   };
   for (const v of snap.vms || []) {
@@ -125,6 +125,9 @@ export function vmAllocRows(snap, settings) {
         e.diskUsed += committed;
         if (v.powerState !== 'POWERED_ON') e.diskOff += committed;
         e.snapGB += snapGB;
+        // v2.630(감사 DATA2630-01): 전원 켜진 VM 의 스냅샷만 — 정지 VM 의 스냅샷 델타는 diskOff(committed)에 이미 들어 있다.
+        //   회수 가능 시계열은 diskOff + snapOn 이어야 현재값(diskTrend.snapshotReclaimGB 의 offIds 판정 '!== POWERED_ON')과 같은 뜻이다.
+        if (v.powerState === 'POWERED_ON') e.snapOnGB += snapGB;
       }
     }
     if (v.powerState !== 'POWERED_ON') continue;
@@ -192,6 +195,7 @@ export function vmAllocRows(snap, settings) {
       rows.push({ metric: 'vm_disk_used_gb', k, v: Math.round(e.diskUsed) });
       rows.push({ metric: 'vm_disk_off_gb', k, v: Math.round(e.diskOff) });
       rows.push({ metric: 'vm_snap_gb', k, v: Math.round(e.snapGB * 10) / 10 });
+      rows.push({ metric: 'vm_snap_on_gb', k, v: Math.round(e.snapOnGB * 10) / 10 });
     }
     if (rows.length) out.set(k, rows);
   }

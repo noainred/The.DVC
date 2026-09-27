@@ -24,6 +24,7 @@ import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { dayIndex, dayStartMs, DAY_MS } from '../util/dayKey.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
+import { portsSummary } from './parse.js';
 
 export const LOCAL_AGENT = '';
 const lockRetry = createLockRetry();
@@ -434,8 +435,8 @@ export async function listDeviceRows({ agent = null, cvpId = null } = {}) {
   const pw = []; const pa = [];
   if (agent != null) { pw.push('agent=?'); pa.push(agent); }
   if (cvpId != null) { pw.push('cvp_id=?'); pa.push(cvpId); }
-  const ports = db.conn.prepare(`SELECT agent, cvp_id, device_key, COUNT(*) AS total, SUM(oper='up') AS up, SUM(oper='down' AND admin='up') AS down FROM port_latest ${pw.length ? `WHERE ${pw.join(' AND ')}` : ''} GROUP BY agent, cvp_id, device_key`).all(...pa);
-  const pmap = new Map(ports.map((r) => [`${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`, { total: Number(r.total), up: Number(r.up || 0), down: Number(r.down || 0) }]));
+  const ports = db.conn.prepare(`SELECT agent, cvp_id, device_key, COUNT(*) AS total, SUM(oper='up') AS up, SUM(oper='down' AND admin='up') AS down, SUM(oper='nolink') AS nolink FROM port_latest ${pw.length ? `WHERE ${pw.join(' AND ')}` : ''} GROUP BY agent, cvp_id, device_key`).all(...pa);
+  const pmap = new Map(ports.map((r) => [`${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`, { total: Number(r.total), up: Number(r.up || 0), down: Number(r.down || 0), ...(Number(r.nolink) > 0 ? { noLink: Number(r.nolink) } : {}) }]));
   return { rows: rows.map((r) => rowToDevice(r, pmap.get(`${r.agent}\u0000${r.cvp_id}\u0000${r.device_key}`))) };
 }
 
@@ -464,7 +465,8 @@ export async function deviceDetail(agent, cvpId, key) {
   const ports = db.conn.prepare('SELECT * FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? ORDER BY port LIMIT 4096').all(agent, cvpId, key)
     .map((p) => ({ name: p.port, desc: p.descr || '', speedBps: p.speed_bps, oper: p.oper || 'unknown', admin: p.admin || 'unknown', vlan: p.vlan || '', lag: p.lag || '',
       inBps: p.in_bps, outBps: p.out_bps, inUtil: p.in_util, outUtil: p.out_util, inErr: p.in_err, outErr: p.out_err, ts: Number(p.ts) }));
-  const pSum = { total: ports.length, up: ports.filter((p) => p.oper === 'up').length, down: ports.filter((p) => p.oper === 'down' && p.admin === 'up').length };
+  // v2.630 A2-02: 합계 판정은 parse.portsSummary 하나를 쓴다(미연결 'nolink' 는 down 이 아니다 — 개수는 noLink).
+  const pSum = portsSummary(ports);
   return { device: rowToDevice(r, pSum), ports: r.ports_read === 1 ? ports : null };
 }
 

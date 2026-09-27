@@ -190,6 +190,8 @@ function initSqlite() {
       dsSeriesOf: db.prepare('SELECT slot, ts, vcenter_id, cap_gb, used_gb FROM ds_series WHERE ds_id=? AND ts>=? ORDER BY ts'),
       dsSeriesPrev: db.prepare('SELECT slot, ts, vcenter_id, cap_gb, used_gb FROM ds_series WHERE ds_id=? AND ts<? ORDER BY ts DESC LIMIT 1'),
       dsSeriesWindow: db.prepare('SELECT ds_id, ts, used_gb, cap_gb FROM ds_series WHERE ts>=? ORDER BY ts'),
+      // v2.630(PERF2630-01): 창 경계(창 안 첫 관측 시각) — idx_dsseries_ts 끝점 탐색 1회. 시작값 메모의 키다.
+      dsSeriesBoundary: db.prepare('SELECT MIN(ts) AS b FROM ds_series WHERE ts>=?'),
       dsSeriesCarry: db.prepare(`SELECT s.ds_id, s.used_gb, s.cap_gb FROM ds_series s
         JOIN (SELECT ds_id, MAX(ts) AS mts FROM ds_series WHERE ts<? GROUP BY ds_id) m
           ON m.ds_id=s.ds_id AND m.mts=s.ts`),
@@ -292,6 +294,20 @@ export function vmtrackStatus() {
  *   perVc: [{ vcenterId, total, onCount, added:[vm...], removed:[vm...],
  *             poweredOn:[vm...], poweredOff:[vm...], live:[vm...], baseline }]
  */
+// v2.630(감사 PERF2630-01): ds_series 세대 — ds_series 를 바꾸는 커밋·prune 이 올린다. 시작값 메모(service.dsStartValues)가
+//   '세대 + 창 경계' 를 키로 쓰므로, ds_series 에 쓰는 새 경로를 만들면 반드시 bumpDsSeriesGen() 을 부를 것(안 부르면 옛 값이 나간다).
+let _dsGen = 0;
+export function dsSeriesGeneration() { return _dsGen; }
+function bumpDsSeriesGen() { _dsGen += 1; }
+
+/** 창 경계 = ts>=sinceTs 인 첫 관측 시각(없으면 null). 창·이월 조회 결과는 이 값과 세대만으로 정해진다. */
+export async function dsSeriesBoundary(sinceTs) {
+  const x = await getDb();
+  if (!x) return null;
+  const r = x.st.dsSeriesBoundary.get(sinceTs);
+  return r?.b ?? null;
+}
+
 export async function commitSnapshot({ slot, ts, perVc, totalRow }) {
   const x = await getDb();
   if (!x) return { ok: false, reason: 'vmtrack DB 사용 불가' };
@@ -358,9 +374,11 @@ export async function commitSnapshot({ slot, ts, perVc, totalRow }) {
       for (const vm of vc.removed) st.delRoster.run(vc.vcenterId, vm.vmId);
     }
     db.exec('COMMIT');
+    bumpDsSeriesGen();
     return { ok: true };
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch { /* */ }
+    bumpDsSeriesGen();   // 방어적: 롤백 전 부분 상태를 누가 읽었든 메모를 버린다
     return { ok: false, reason: e.message };
   }
 }
@@ -566,6 +584,7 @@ export async function pruneVmtrack(retentionDays = Number(process.env.VMTRACK_RE
     st.pruneDsSeries.run(cut, cut); // v2.353 · v2.601 DB2601-02(경계 이전 마지막 행 보존)
     st.pruneSnaps.run(cut);
     db.exec('COMMIT');
+    bumpDsSeriesGen();
     return { ok: true, cut };
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch { /* */ }

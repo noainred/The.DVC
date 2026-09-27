@@ -11,6 +11,7 @@ import { STATUS, METHOD, statusOf, methodText } from './svcmon/constants.js';
 import { buildTree, statsOf, matchNode, summarize } from './svcmon/tree.js';
 import { TestWizard } from './svcmon/TestWizard.jsx';
 import { blankOr } from './blankOr.js';
+import { edgeCardKind, edgeCardWarn, edgeCardMeta, edgeNoReportTotal } from './svcmon/edgeCardText.js';
 
 /**
  * 성능점검 — Claude Design 핸드오프(design_handoff_perf_check) 기준 구현.
@@ -619,23 +620,23 @@ export default function SvcMonitor() {
                     · 갱신 안 됨 {data.edgeTotals.stale}
                     {data.edgeTotals.unknown ? ` · 알 수 없음 ${data.edgeTotals.unknown}` : ''}
                     {data.edgeTotals.notRun ? ` · 미점검 ${data.edgeTotals.notRun}` : ''}
+                    {edgeNoReportTotal(data.edgeTotals, data.edges)}
                   </span>
                 )}
               </div>
               <div className="svc-edge-cards">
                 {data.edges.map((e) => (
-                  <div key={e.agent} className={`svc-edge-card${e.silent ? ' silent' : ''}`}>
+                  <div key={e.agent} className={`svc-edge-card${edgeCardKind(e) !== 'live' ? ' silent' : ''}`}>
                     <div className="svc-edge-name">
-                      {e.silent ? '🔴' : '🟢'} {e.agent}
+                      {edgeCardKind(e) === 'no-report' ? '⚪' : e.silent ? '🔴' : '🟢'} {e.agent}
+                      {edgeCardKind(e) === 'no-report' && <span className="badge gray">배정됨 · 보고 없음</span>}
                       {e.skewWarn && <span className="badge amber" title={`시계 오차 추정 ${Math.round(e.skewMs / 1000)}초(전송 지연 포함)`}>시계 오차</span>}
                       {e.caps?.pingMode === 'tcp-fallback' && (
                         <span className="badge amber" title="이 엣지는 ping CLI 가 없어 TCP 연결로 판정합니다 — ICMP 와 의미가 다릅니다">ping=TCP 폴백</span>
                       )}
                     </div>
-                    {e.silent ? (
-                      <div className="svc-edge-warn">
-                        무보고 {Math.round((e.ageMs || 0) / 1000)}초 — 담당 점검 {e.rows}개의 현재 상태를 알 수 없습니다.
-                      </div>
+                    {edgeCardKind(e) !== 'live' ? (
+                      <div className="svc-edge-warn">{edgeCardWarn(e)}</div>
                     ) : (
                       <div className="svc-edge-counts">
                         <span className="pc-ok">OK {e.counts.ok}</span>
@@ -646,7 +647,7 @@ export default function SvcMonitor() {
                       </div>
                     )}
                     <div className="svc-edge-meta muted">
-                      항목 {e.items} · 보고 {e.rows}행 · {e.lastAt ? `${Math.round((e.ageMs || 0) / 1000)}초 전` : '—'}
+                      {edgeCardMeta(e)}
                       {e.poller?.overdueSkipped > 0 && ` · 밀림 ${e.poller.overdueSkipped}`}
                     </div>
                   </div>

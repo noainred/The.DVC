@@ -22,6 +22,7 @@ import { authStopInfo, authStopSummary, credFpText } from './storageAuthText.js'
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 import { powerText } from './sanPowerText.js';
+import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -77,14 +78,19 @@ export default function SanSwitchTool() {
   const [sort, setSort] = useState({ key: 'index', dir: 'asc' });  // 표 정렬(제목 클릭)
   useEffect(() => () => { if (testTimer.current) clearInterval(testTimer.current); }, []); // 언마운트 시 테스트 폴링 정리
 
+  // v2.630 WEB2630-04: 403 은 다시 물어도 결과가 같다 — 폴링을 멈추고, 오류 객체를 그대로 둬 ErrorBox 가 권한 안내로 그리게 한다.
+  const pollRef = useRef(null);
   const load = async () => {
     try { setData(await fetchJson('/tools/sanswitch')); setError(null); }
-    catch (e) { setError(e.message); }
+    catch (e) {
+      if (e?.status === 403 && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      setError(e || new Error('조회 실패'));
+    }
   };
   useEffect(() => {
     load();
-    const t = setInterval(load, 30_000);
-    return () => clearInterval(t);
+    pollRef.current = setInterval(load, 30_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; };
   }, []);
 
   const dcName = useMemo(() => {
@@ -426,6 +432,7 @@ function DeviceForm({ form, setForm, data, save, busy, runTest, test, setTest, s
         <label style={{ fontSize: 12 }}>법인(DataCenter)
           <select className="input" value={form.datacenterId} onChange={set('datacenterId')}>
             <option value="">(미지정)</option>
+            {(() => { const m = missingChoice((data.datacenters || []).map((d) => d.id), form.datacenterId); return m ? <option value={m.value}>{m.label}</option> : null; })()}
             {(data.datacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name || d.id}</option>)}
           </select>
         </label>
@@ -433,6 +440,7 @@ function DeviceForm({ form, setForm, data, save, busy, runTest, test, setTest, s
           <select className="input" value={form.agent} onChange={set('agent')}
             title="중앙에서 스위치에 직접 닿지 않으면 그 법인의 엣지를 지정하세요. 엣지가 현지에서 수집해 중앙으로 올립니다.">
             <option value="">중앙이 직접 수집</option>
+            {(() => { const m = missingChoice(data.agents || [], form.agent); return m ? <option value={m.value}>엣지 {m.label}</option> : null; })()}
             {(data.agents || []).map((a) => <option key={a} value={a}>엣지 {a}</option>)}
           </select>
         </label>

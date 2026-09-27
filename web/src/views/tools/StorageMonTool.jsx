@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
@@ -567,6 +567,7 @@ function FaultsView({ fk, list, canClear, onClear, ctx, typeLabel, dcName }) {
 export default function StorageMonTool() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
+  const pollRef = useRef(null);   // v2.630 WEB2630-04: 403 이면 폴링 중단
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   // v2.529: '지금 수집' 은 그 장비만 잠근다(전역 busy 는 전체 새로고침·삭제 같은 진짜 전역 작업용).
@@ -595,8 +596,12 @@ export default function StorageMonTool() {
   const toggleType = (v) => setTypeSel((prev) => toggleSet(prev, v));
   const clearFacets = () => { setDcSel(new Set()); setTypeSel(new Set()); };
 
-  const load = () => fetchJson('/tools/storage').then((r) => { setD(r); setErr(null); }).catch((e) => setErr(e.message));
-  useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
+  // v2.630 WEB2630-04: 403 이면 폴링을 멈춘다(PDU v2.613 과 같은 규칙) · 오류 객체를 보존해 ErrorBox 가 권한 안내로 그린다.
+  const load = () => fetchJson('/tools/storage').then((r) => { setD(r); setErr(null); }).catch((e) => {
+    if (e?.status === 403 && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    setErr(e || new Error('조회 실패'));
+  });
+  useEffect(() => { load(); pollRef.current = setInterval(load, 30_000); return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; }; }, []);
   if (err && !d) return <ErrorBox message={err} />;
   if (!d) return <Loading />;
 

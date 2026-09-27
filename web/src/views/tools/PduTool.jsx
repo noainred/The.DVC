@@ -13,6 +13,8 @@ import { authStopInfo, authStopSummary } from './storageAuthText.js'; // v2.590:
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 import { agoText } from './relTime.js';
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
+import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03
+import { changedIntervalBody } from '../settingsFormDiff.js'; // v2.630 WEB2630-02
 
 /**
  * 특수 기능 › PDU 정보 — APC Rack PDU 2G(rpdu2g) 전력·뱅크·온도·습도.
@@ -341,12 +343,14 @@ function DeviceModal({ form, setF, setForm, close, save, runTest, busy, testing,
           <F label="법인(DataCenter)">
             <select className="input" value={form.datacenterId} onChange={setF('datacenterId')}>
               <option value="">(지정 안 함)</option>
+              {(() => { const m = missingChoice((data.datacenters || []).map((d) => d.id), form.datacenterId); return m ? <option value={m.value}>{m.label}</option> : null; })()}
               {(data.datacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name || d.id}</option>)}
             </select>
           </F>
           <F label="수집 주체">
             <select className="input" value={form.agent} onChange={setF('agent')}>
               <option value="">중앙 직접 수집</option>
+              {(() => { const m = missingChoice(data.agents || [], form.agent); return m ? <option value={m.value}>{m.label}</option> : null; })()}
               {(data.agents || []).map((a) => <option key={a} value={a}>{a}</option>)}
             </select>
           </F>
@@ -463,16 +467,24 @@ function CsvModal({ onClose }) {
 
 function IntervalModal({ data, onClose }) {
   const spec = data.intervalSpec || [];
-  const [vals, setVals] = useState(() => Object.fromEntries(spec.map((s) => [s.key, Math.round((data.intervals?.[s.key] || s.def) / 1000)])));
+  // v2.630 WEB2630-02: 칸은 실효값으로 채우되 **바꾼 칸만** 보낸다 — 전 칸을 보내면 한 칸만 고쳐도 세 키가
+  //   '중앙 지정' 이 되어 각 엣지의 portal.env 현장 주기를 덮는다(스토리지 주기 규약 '중앙이 지정한 키만').
+  const [initial] = useState(() => Object.fromEntries(spec.map((s) => [s.key, Math.round((data.intervals?.[s.key] || s.def) / 1000)])));
+  const [vals, setVals] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const save = async () => {
+    const body = changedIntervalBody(initial, vals);
+    if (!Object.keys(body).length) { setMsg({ ok: true, text: '바뀐 칸이 없어 저장하지 않았습니다.' }); return; }
     setBusy(true); setMsg(null);
     try {
-      const body = Object.fromEntries(Object.entries(vals).map(([k, v]) => [k, v === '' ? '' : Number(v) * 1000]));
       const r = await postJson('/tools/pdu/intervals', body);
-      setMsg({ ok: true, text: '저장했습니다. 엣지는 다음 설정 수신 때 반영됩니다.' });
-      if (r.ok) setTimeout(onClose, 900);
+      if (r && r.ok) {
+        setMsg({ ok: true, text: `저장했습니다(바꾼 ${Object.keys(body).length}칸만 중앙 지정). 엣지는 다음 설정 수신 때 반영됩니다.` });
+        setTimeout(onClose, 900);
+      } else {
+        setMsg({ ok: false, text: `저장하지 못했습니다${r?.reason || r?.error ? ` — ${r.reason || r.error}` : ''}` });
+      }
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
   return (
@@ -486,6 +498,7 @@ function IntervalModal({ data, onClose }) {
         <div className="muted" style={{ fontSize: 12.5, marginBottom: 12, lineHeight: 1.6 }}>
           여기서 지정한 값이 <b>엣지로 배포</b>됩니다(엣지는 설정 수신 주기마다 받아 즉시 반영).
           비워 두면 ‘미지정’이 되어 각 엣지의 현장 설정(portal.env)이 유지됩니다.
+          칸에는 지금 적용 중인 값이 보이며, <b>바꾼 칸만</b> 중앙 지정으로 저장합니다.
         </div>
         {spec.map((s) => (
           <div key={s.key} style={{ marginBottom: 12 }}>

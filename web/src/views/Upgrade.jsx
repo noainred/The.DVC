@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../api.js';
 import { Loading, ErrorBox, StateBadge } from '../components/ui.jsx';
+import { pollMinutesOf, pollIsOff, pollIntervalPatch } from './settingsFormDiff.js'; // v2.630 WEB2630-01
 
 function Row({ label, children }) {
   return (
@@ -17,7 +18,8 @@ const blankForm = (s) => ({
   watchDir: s.watchDir || '',
   remoteBase: s.remoteBase || '',
   token: '',
-  pollMinutes: s.pollIntervalMs ? Math.round(s.pollIntervalMs / 60000) : 60,
+  // v2.630 WEB2630-01: 0(끔)을 60 으로 채우지 않는다 — 서버 값을 그대로 보인다.
+  pollMinutes: pollMinutesOf(s.pollIntervalMs),
   autoApply: !!s.autoApply,
 });
 
@@ -28,12 +30,14 @@ export default function Upgrade() {
   const [msg, setMsg] = useState(null);
   const [form, setForm] = useState(null);
   const [detect, setDetect] = useState(null);
+  const [pollInit, setPollInit] = useState(null); // 처음 채운 확인 주기(분) — 바뀌었을 때만 보낸다
 
   const load = async () => {
     try {
       const s = await fetchJson('/upgrade/status');
       setStatus(s);
       setForm((f) => f || blankForm(s));
+      setPollInit((p) => (p == null ? pollMinutesOf(s.pollIntervalMs) : p));
       setError(null);
     } catch (e) { setError(e.message); }
   };
@@ -70,11 +74,14 @@ export default function Upgrade() {
       };
       // v2.596(감사 CLAMP2596-06): 빈 칸('')은 0(=확인 끔)이 아니라 미지정 — 보내지 않으면 서버가 이전 값을 유지한다.
       //   명시적 0 만 '끔' 으로 보낸다.
-      if (String(form.pollMinutes ?? '').trim() !== '' && Number.isFinite(Number(form.pollMinutes))) body.pollIntervalMs = Math.max(0, Number(form.pollMinutes)) * 60000;
+      // v2.630 WEB2630-01: 처음 값에서 바뀐 경우에만 보낸다 — 다른 칸만 고친 저장이 확인 주기를 건드리지 않게.
+      const pollPatch = pollIntervalPatch(form.pollMinutes, pollInit);
+      if (pollPatch !== undefined) body.pollIntervalMs = pollPatch;
       if (form.token) body.token = form.token;
       const r = await putJson('/upgrade/settings', body);
       setMsg({ action: 'save', r: { ok: r.ok, version: undefined } });
       setForm((f) => ({ ...f, token: '' }));
+      if (r.ok && pollPatch !== undefined) setPollInit(form.pollMinutes);
       await load();
     } catch (e) { setMsg({ action: 'save', r: { ok: false, reason: e.message } }); }
     finally { setBusy(null); }
@@ -179,6 +186,7 @@ export default function Upgrade() {
             </label>
             <label>확인 주기 (분, 0=끔 · 1~10080분 — 범위 밖은 서버가 맞춥니다)
               <input className="input" type="number" min="0" max="10080" value={form.pollMinutes} onChange={setF('pollMinutes')} />
+              {pollIsOff(form.pollMinutes) && <span className="muted" style={{ fontSize: 11.5, marginLeft: 6 }}>끔 — 백그라운드 확인을 하지 않습니다</span>}
             </label>
           </div>
         </div>

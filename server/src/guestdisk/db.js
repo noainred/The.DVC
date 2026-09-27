@@ -152,15 +152,36 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
   }
   if (!rows.length) return { ok: true, vms: 0, vmSeriesRows: 0, partSeriesRows: 0, skippedEmpty: true, ...(skippedVms ? { skippedVms } : {}) };
 
+  // v2.630(감사 A2-01): 여유 공간을 보고하지 않은 파티션이 있는 VM(partsUnknown>0)의 allocGB·usedGB 는 **부분 합**이다.
+  //   그대로 vm_series 에 넣으면 D: 하나가 한 주기 미보고일 때 600→100 GB 계단(전부 미보고면 0/0 점)이 추이에 영구 적재되고
+  //   usageTrend 가 'shrinking' 으로 읽는다(CLAUDE.md '부분 합은 적재하지 않는다'). 그 VM 은 vm_series·vm_last 를 건너뛰고,
+  //   vm_latest 는 직전 행(마지막 온전한 관측 — ts 도 그대로)을 유지한다. 직전 행이 없으면 부분 합을 표시용으로만 넣되
+  //   알고 있는 파티션이 하나도 없으면 넣지 않는다(0/0 을 지어내지 않는다). 개수는 partialVms 로 밝힌다.
+  const prevLatest = new Map();
+  for (const r of db.prepare('SELECT vm_id, vcenter_name, vm_name, alloc_gb, used_gb, part_count, ts FROM vm_latest WHERE vcenter_id=?').all(vcenterId)) prevLatest.set(r.vm_id, r);
+  let partialVms = 0; let partialHeld = 0;
+
   let vmSeriesRows = 0; let partSeriesRows = 0;
   db.exec('BEGIN');
   try {
     // vm_latest 는 이 vCenter 분을 통째로 교체(변화 없는 VM 도 최신값 유지 + 사라진 VM 제거).
     db.prepare('DELETE FROM vm_latest WHERE vcenter_id=?').run(vcenterId);
     for (const vm of rows) {
-      insLatest.run(vm.vmId, vcenterId, vcenterName || '', vm.vmName || '', vm.allocGB, vm.usedGB, vm.partCount || 0, ts);
+      const partial = Number(vm.partsUnknown) > 0;
+      if (partial) {
+        partialVms++;
+        const pl = prevLatest.get(vm.vmId);
+        if (pl) {
+          insLatest.run(vm.vmId, vcenterId, vcenterName || pl.vcenter_name || '', vm.vmName || pl.vm_name || '', pl.alloc_gb, pl.used_gb, pl.part_count || 0, pl.ts);
+          partialHeld++;
+        } else if ((vm.parts || []).length) {
+          insLatest.run(vm.vmId, vcenterId, vcenterName || '', vm.vmName || '', vm.allocGB, vm.usedGB, vm.partCount || 0, ts);
+        }
+      } else {
+        insLatest.run(vm.vmId, vcenterId, vcenterName || '', vm.vmName || '', vm.allocGB, vm.usedGB, vm.partCount || 0, ts);
+      }
       const lv = vmLast.get(vm.vmId);
-      if (!lv || Math.abs(vm.usedGB - lv.used_gb) >= thr || vm.allocGB !== lv.alloc_gb) {
+      if (!partial && (!lv || Math.abs(vm.usedGB - lv.used_gb) >= thr || vm.allocGB !== lv.alloc_gb)) {
         insVmSer.run(vcenterId, vm.vmId, ts, vm.allocGB, vm.usedGB); vmSeriesRows++;
         upVmLast.run(vm.vmId, vcenterId, vm.allocGB, vm.usedGB);
       }
@@ -175,9 +196,13 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
       // v2.591(3차 감사 R-G1): 이번 수집에 **없는** 경로는 part_last 에서 지운다 — 남겨 두면 상세 화면이 그 경로의 마지막 값을
       // 이월·끝점 연장해 **언마운트된 파티션을 '평탄 → 축소 후보(safe)'** 로 권고했다. part_last 가 곧 '현재 파티션 목록' 이 된다.
       // ⚠ 파티션 목록이 비어 온 VM(VMware Tools 일시 미보고)은 지우지 않는다 — 관측 못 한 것을 '없음' 으로 단정하지 않는다(빈 수집 방어와 같은 판단).
+      // v2.630(감사 A2-01): 여유 공간을 보고하지 않아 **이번에 뺀** 경로는 '없는 경로' 가 아니다 — 지우지 않는다.
+      //   뺀 개수는 있는데 경로를 모르면(구버전 엣지) 어떤 경로가 일시 미보고인지 알 수 없으므로 이 VM 의 삭제를 건너뛴다.
       const cur = vm.parts || [];
-      if (cur.length) {
-        const now = new Set(cur.map((p) => p.path));
+      const unknownList = Array.isArray(vm.unknownPaths) ? vm.unknownPaths : [];
+      const pathsUnknownButUnnamed = partial && unknownList.length < Number(vm.partsUnknown);
+      if (cur.length && !pathsUnknownButUnnamed) {
+        const now = new Set([...cur.map((p) => p.path), ...unknownList]);
         for (const old of knownPaths.get(vm.vmId) || []) if (!now.has(old)) delPartLast.run(vm.vmId, old);
       }
     }
@@ -187,7 +212,8 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
     return { ok: false, reason: String(e.message || e) };
   }
   if (skippedParts || skippedVms) console.warn(`[guestdisk] ${vcenterId}: 값이 숫자가 아니어서 적재하지 않은 파티션 ${skippedParts}개 · VM ${skippedVms}대`);
-  return { ok: true, vms: rows.length, vmSeriesRows, partSeriesRows, ...(skippedParts ? { skippedParts } : {}), ...(skippedVms ? { skippedVms } : {}) };
+  return { ok: true, vms: rows.length, vmSeriesRows, partSeriesRows, ...(skippedParts ? { skippedParts } : {}), ...(skippedVms ? { skippedVms } : {}),
+    ...(partialVms ? { partialVms, partialHeld } : {}) };
 }
 
 /** 최신 목록 — 선택 vCenter 로 좁힐 수 있다(scope). vcenterIds=null 이면 전체. */

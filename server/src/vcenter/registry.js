@@ -176,15 +176,23 @@ export function importVcenters(incoming, mode = 'merge') {
  * Test connectivity to a vCenter (REST login). Uses the stored password when
  * the payload omits it (so you can re-test a saved entry without re-typing).
  */
-export async function testConnection(body) {
+export async function testConnection(body, { pinSavedHost = false } = {}) {
   let entry = body;
+  // v2.630 AUTHZ2630-02: 범위 관리자는 새 vCenter 를 시험할 수 없다(v2.607) — 그런데 범위 안 id 에 body.password·body.host 를
+  //   함께 넣으면 저장값을 물려받지 않아 body.host 로 로그인했다(중앙에서 임의 호스트·포트 SOAP 로그인 = 도달성 프로빙).
+  //   pinSavedHost 면 비밀번호 입력 여부와 무관하게 접속처(host·port)를 저장값으로 고정한다.
+  if (pinSavedHost) {
+    const saved = body.id ? loadRegistry().find((v) => v.id === body.id) : null;
+    if (!saved) return { ok: false, reason: '저장된 vCenter 를 찾을 수 없습니다.' };
+    entry = { ...body, host: saved.host, port: saved.port };
+  }
   // v2.590: 저장된 비밀번호로 한 테스트가 성공하면 인증 실패 정지를 푼다(비밀번호를 vCenter 쪽에서 되돌린 경우 —
   // 포탈 값이 바뀌지 않아 credHash 자동 재개가 걸리지 않는다). 입력한 새 비밀번호로 성공한 것은 **저장값이 맞다는
   // 증거가 아니므로** 풀지 않는다(풀면 주기 수집이 틀린 저장값으로 다시 로그인한다).
   const usedSaved = !body.password && !!body.id;
   if (!entry.password && entry.id) {
     const saved = loadRegistry().find((v) => v.id === entry.id);
-    if (saved) entry = { ...saved, ...body, password: saved.password, host: saved.host, port: saved.port }; // v2.480(3차 감사 S6): 저장 비밀번호를 물려받는 테스트는 host 도 저장값으로 고정 — body.host 만 공격자 IP 로 바꿔 평문 비밀번호를 받는 경로 차단(PDU S-1 과 같은 규칙)
+    if (saved) entry = { ...saved, ...entry, password: saved.password, host: saved.host, port: saved.port }; // v2.480(3차 감사 S6): 저장 비밀번호를 물려받는 테스트는 host 도 저장값으로 고정 — body.host 만 공격자 IP 로 바꿔 평문 비밀번호를 받는 경로 차단(PDU S-1 과 같은 규칙)
   }
   if (!entry.host || !entry.username || !entry.password) {
     return { ok: false, reason: 'host/username/password가 필요합니다.' };

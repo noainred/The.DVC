@@ -8,6 +8,7 @@ import { getPollerStatus, pollNow, pollNowManual, idracAuthStops } from '../../i
 import { purgeStalePower, measuredPowerBreakdown } from '../../idrac/service.js';
 import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
+import { allPhysicalServers, vcIndexFromSnap } from '../../idrac/corpAttribution.js'; // v2.630 R2630-01: 범위 귀속 한 벌
 import { getSensorSeries } from '../../idrac/sensorStore.js';
 import { roomTempReport, UNASSIGNED_KEY } from '../../idrac/roomTemp.js';
 import { roomTempHistory, roomTempSparks } from '../../idrac/roomTempSeries.js';
@@ -28,18 +29,43 @@ const fleetOnly = fullScopeOnlyWith('iDRAC 등록·연결 테스트·즉시 수�
 //   · 귀속 vCenter = 명시 vcenterId → 서비스태그로 찾은 ESXi 호스트의 vCenter(mappedVcenterId). 둘 다 없으면 귀속 없음 →
 //     범위 계정에 **노출하지 않는다**('귀속 없는 데이터 미노출' 불변조건). 뺀 개수는 omittedOutOfScope 로 밝힌다.
 //   · 전체 범위 계정은 예전과 **한 바이트도 다르지 않다**(scoped·omittedOutOfScope 필드도 싣지 않는다).
-export function idracServerVcOf(s, tagMap) {
-  const tag = String(s?.serviceTag || s?.inv?.system?.serviceTag || '').trim().toLowerCase();
-  return String(s?.vcenterId || s?.mappedVcenterId || (tag && tagMap ? tagMap.get(tag) : '') || '');
+//   · v2.630(R2630-01): 위 3단 뒤에 **개요·법인별 사용량과 같은 귀속**(idrac/corpAttribution.js — 호스트명·서비스태그·
+//     통합 서버 인벤토리 지정·DataCenter 의 vCenter 가 하나뿐이면 그 vCenter)을 이어 본다. 예전에는 이 판정을 3단으로
+//     줄인 사본이라, 같은 범위 계정이 개요에서는 자기 법인 물리 서버 N대를 보는데 서버 분석·전산실 온도에서는 0대였다.
+//     서비스태그는 등록부에 없으면 인벤토리 캐시 값을 쓴다(vcenter-host 조회와 같은 폴백).
+const idTag = (s) => String(s?.serviceTag || s?.inv?.system?.serviceTag || getIdracInventory(s?.id)?.system?.serviceTag || '').trim();
+export function idracServerVcOf(s, tagMap, index = null) {
+  const tag = idTag(s).toLowerCase();
+  const direct = String(s?.vcenterId || s?.mappedVcenterId || (tag && tagMap ? tagMap.get(tag) : '') || '');
+  if (direct || !index) return direct;
+  const id = String(s?.id ?? '').trim();
+  return String((id && index.byId?.get(id)) || (tag && index.byTag?.get(tag)) || '');
 }
-/** 범위 계정이면 { allowed:Set, tagMap } · 전체 범위면 null. */
+// 귀속 색인은 스냅샷 세대 + 10초 동안 재사용한다(서버마다 hiddenByScope 가 부르므로 요청마다 다시 만들지 않는다).
+let _idxCache = null;
+const IDX_TTL_MS = 10_000;
+export function idracCorpIndex(snap = store.get()) {
+  const gen = String(snap?.generatedAt || '');
+  const now = Date.now();
+  if (_idxCache && _idxCache.gen === gen && now - _idxCache.at < IDX_TTL_MS) return _idxCache.index;
+  let index = null;
+  try {
+    const servers = allPhysicalServers().map((x) => (x && !x.serviceTag && idTag(x) ? { ...x, serviceTag: idTag(x) } : x));
+    index = vcIndexFromSnap(snap, servers);
+  } catch { index = null; } // 색인을 못 만들면 3단 판정만(= 더 좁게 — 범위 밖을 보이게 하지 않는다)
+  _idxCache = { gen, at: now, index };
+  return index;
+}
+export function _resetIdracCorpIndex() { _idxCache = null; }
+/** 범위 계정이면 { allowed:Set, tagMap, index } · 전체 범위면 null. */
 export function idracScopeOf(req) {
-  const allowed = scopedVcenterIds(req?.user, store.get());
-  return allowed ? { allowed, tagMap: hostVcByTag() } : null;
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req?.user, snap);
+  return allowed ? { allowed, tagMap: hostVcByTag(), index: idracCorpIndex(snap) } : null;
 }
 export function idracInScope(sc, s) {
   if (!sc) return true;
-  const vc = idracServerVcOf(s, sc.tagMap);
+  const vc = idracServerVcOf(s, sc.tagMap, sc.index);
   return !!vc && sc.allowed.has(vc);
 }
 /** 서버 목록 절단. 전체 범위면 원본 그대로 + omitted 0. */

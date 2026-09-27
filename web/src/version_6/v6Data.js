@@ -246,8 +246,9 @@ export function contribRowKind(r) {
   const st = r?.status;
   if (st == null || st === '' || st === 'connected') return 'live';
   if (VALUELESS_STATUS.has(st)) return 'none';
-  if (st === 'maintenance') return 'carried';
-  if (st === 'unreachable') {
+  // v2.630 R2630-02: 점검 중도 연결 불가와 같은 규칙이다 — store 는 인메모리 캐시(vcCache)에 직전 인벤토리가 있을 때만
+  // 값을 유지하고, 없으면(중앙 재시작 직후·등록 직후 점검) 호스트·VM 없이 상태만 싣는다. 그 0 을 '직전 값' 이라 부르면 거짓이다.
+  if (st === 'maintenance' || st === 'unreachable') {
     const h = n(r?.hosts), v = n(r?.vms);
     return (h || 0) > 0 || (v || 0) > 0 ? 'carried' : 'none';
   }
@@ -278,7 +279,7 @@ export function corpContribution(s) {
 /** 기여도 표 머리말 안내(v2.629) — 뺀 행과 직전 값 행을 나눠 말한다. 둘 다 없으면 ''. */
 export function contribNote(c) {
   const parts = [];
-  if (c?.excluded > 0) parts.push(`첫 수집 중·연결 불가(보관 인벤토리 없음)·비활성 ${c.excluded}곳은 값을 모르므로 합계에서 뺐습니다`);
+  if (c?.excluded > 0) parts.push(`첫 수집 중·점검 중·연결 불가(보관 인벤토리 없음)·비활성 ${c.excluded}곳은 값을 모르므로 합계에서 뺐습니다`);
   if (c?.carried > 0) parts.push(`점검 중·연결 불가 ${c.carried}곳은 직전 수집 값을 합계에 포함했습니다`);
   return parts.join(' · ');
 }

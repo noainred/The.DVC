@@ -78,9 +78,31 @@ export const MIXED_STATE_FILES = new Set(['capture-monitors.json', 'os-scan.json
   // lastUsedAt 을 쓴다(idrac/scanRanges.js recordRun · proxy/registry.js touchMapping) — 실행·사용마다 change 백업이 생겼다.
   'idrac-scan-ranges.json', 'remote-access.json',
   // v2.602(감사 LEFT2602-01 — 재현): 엣지 배포 대상도 '상태 확인'·배포 결과마다 lastResult 를 쓴다(agent/deployRegistry.js recordResult).
-  'agent-deploy-targets.json']);
+  'agent-deploy-targets.json',
+  // v2.630(감사 A4-04): 성능점검 엣지 배정 — 엣지 pull(markPulled → pulledAt)·적용 회신(ack · state 전이)마다 파일 전체를 다시 쓴다.
+  //   배정 1회 변경당 엣지마다 추가 write 2회, 적용이 오류로 끝나면 5분 pull 마다 반복돼 자동 사유 보관 칸을 잡음 백업이 채웠다.
+  //   필드 이름이 last* 가 아니라 아래 MIXED_EXTRA_RUN_FIELDS 로 따로 지정한다(이름을 바꾸면 화면·엣지 계약이 바뀐다).
+  'central-svcmon-assign.json']);
 // 실행 필드 — last* 와 사용 횟수(useCount). 설정이 아니다.
 const RUN_FIELD_RE = /^(last[A-Z]|useCount$)/;
+/**
+ * v2.630(감사 A4-04): last* 규칙에 걸리지 않는 파일별 실행 필드. 키 이름만으로 전 깊이에서 빼면 대상·점검 정의 안의 같은 이름
+ *   필드(설정)까지 지워지므로 **위치를 정해** 뺀다 — 배정 파일은 agents.<엣지> 레코드의 pulledAt·ack·state 만.
+ */
+const SVCMON_ASSIGN_RUN = new Set(['pulledAt', 'ack', 'state']);
+export const MIXED_EXTRA_RUN_FIELDS = new Map([
+  ['central-svcmon-assign.json', (obj) => {
+    if (!obj || typeof obj !== 'object' || !obj.agents || typeof obj.agents !== 'object') return obj;
+    const agents = {};
+    for (const [k, a] of Object.entries(obj.agents)) {
+      if (!a || typeof a !== 'object') { agents[k] = a; continue; }
+      const o = {};
+      for (const [f, x] of Object.entries(a)) if (!SVCMON_ASSIGN_RUN.has(f)) o[f] = x;
+      agents[k] = o;
+    }
+    return { ...obj, agents };
+  }],
+]);
 function stripRunFields(v) {
   if (Array.isArray(v)) return v.map(stripRunFields);
   if (v && typeof v === 'object') {
@@ -105,7 +127,8 @@ function fingerprintContent(name, content) {
   if (!MIXED_STATE_FILES.has(name)) return String(content);
   let obj;
   try { obj = JSON.parse(String(content)); } catch { return String(content); }
-  return JSON.stringify(stripRunFields(obj));
+  const extra = MIXED_EXTRA_RUN_FIELDS.get(name);
+  return JSON.stringify(stripRunFields(extra ? extra(obj) : obj));
 }
 export function settingsFingerprint(files) {
   const h = crypto.createHash('sha1');

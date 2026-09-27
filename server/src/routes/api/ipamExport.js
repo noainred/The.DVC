@@ -69,6 +69,25 @@ const writeScopeDenied = (req, snap, owners, ip, claimed) => {
   return !!w && !ipInWriteScope(w, owners, ip, claimed);
 };
 const WRITE_DENIED_MSG = '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.';
+/**
+ * v2.630 AUTHZ2630-01: IP override 쓰기 판정 — 단건 PUT 과 일괄(bulk)이 **같은 함수**를 쓴다.
+ * ① 기존 레코드가 있으면 그 기존 claim 으로 먼저 접근 판정(범위 밖 vCenter 가 claim 한 예약을 본문 claim 하나로 탈취 금지)
+ * ② 새 claim(본문 → 없으면 기존)도 범위 안 ③ 쓰기 범위(writeVcenters)는 기존·새 claim 둘 다.
+ * 반환: null(허용) | { status:404|403 }
+ */
+function ipOverrideWriteVerdict(req, snap, allowed, owners, ip, bodyClaim) {
+  const existing = getOverride(ip);
+  const prevClaim = existing?.claimedVcenterId || '';
+  if (allowed && existing && !ipInWriteScope(allowed, owners, ip, prevClaim)) return { status: 404 };
+  const claimed = bodyClaim || prevClaim;
+  if (allowed && !ipInWriteScope(allowed, owners, ip, claimed)) return { status: 404 };
+  if (writeScopeDenied(req, snap, owners, ip, prevClaim) || writeScopeDenied(req, snap, owners, ip, claimed)) return { status: 403 };
+  return null;
+}
+/** setOverrideBatch 와 같은 규칙으로 대상 IP 목록을 만든다(문자열 입력도 — 검사한 목록과 적용 목록이 같아야 한다). */
+function bulkIpList(ips) {
+  return (Array.isArray(ips) ? ips : String(ips || '').split(/[\s,]+/)).map((x) => String(x).trim()).filter(Boolean);
+}
 
 export function registerIpamExport(api) {
 
@@ -265,23 +284,10 @@ api.put('/tools/ipam/ip/:ip', canWrite, requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const owners = ipVcenterOwners(snap);
-  const existing = getOverride(req.params.ip);
-  // ① 기존 레코드가 있으면 그 **기존 소유권**(owners 또는 기존 claimedVcenterId)으로 접근 가능 여부를 먼저 판정.
-  //    body.claimedVcenterId 를 앞세우면 범위 밖 vCenter 가 claim 한 예약을 scope 계정이 자기 vCenter 로
-  //    덮어써 탈취할 수 있다(감사 지적) — 볼 수 없는 레코드는 만질 수도 없게 404.
-  if (allowed && existing && !ipInWriteScope(allowed, owners, req.params.ip, existing.claimedVcenterId || '')) {
-    return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
-  }
-  // ② 새로 지정하려는 claim(또는 신규 생성)도 scope 안이어야 한다.
-  const claimed = req.body?.claimedVcenterId || existing?.claimedVcenterId || '';
-  if (allowed && !ipInWriteScope(allowed, owners, req.params.ip, claimed)) {
-    return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
-  }
-  // ③ 쓰기 범위(writeVcenters) — 기존·신규 claim 모두 수정 가능 범위여야 한다.
-  if (writeScopeDenied(req, snap, owners, req.params.ip, existing?.claimedVcenterId || '') ||
-      writeScopeDenied(req, snap, owners, req.params.ip, claimed)) {
-    return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
-  }
+  // ①②③ 판정은 ipOverrideWriteVerdict 하나(일괄 적용과 같은 함수 — v2.630 AUTHZ2630-01).
+  const v = ipOverrideWriteVerdict(req, snap, allowed, owners, req.params.ip, req.body?.claimedVcenterId || '');
+  if (v?.status === 404) return res.status(404).json({ ok: false, reason: '범위 밖 IP 입니다.' });
+  if (v?.status === 403) return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
   const r = setOverride(req.params.ip, req.body || {}, req.user);
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 저장', target: `IP ${req.params.ip}`, detail: JSON.stringify(r.override || {}).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
@@ -307,16 +313,21 @@ api.post('/tools/ipam/bulk', canWrite, requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const allowedW = writeScopedVcenterIds(req.user, snap);
+  // v2.630 AUTHZ2630-01: 단건 PUT 과 같은 판정(기존 claim 먼저) — 예전엔 본문 claim 만 봐서 범위 밖 vCenter 가
+  //   claim 한(소유 VM 없는) 예약을 본문 claim 하나로 덮어써 탈취할 수 있었다. 문자열 ips 도 같은 목록으로 검사한다.
+  const list = bulkIpList(ips);
+  // 판정 루프 전에 개수 상한(setOverrideBatch 의 MAX_BATCH 와 같은 값 — 중복 포함 원문 기준으로 먼저 자른다).
+  if (list.length > 10_000) return res.status(400).json({ ok: false, reason: '한 번에 10000개까지만 일괄 적용할 수 있습니다.' });
   if (allowed || allowedW) {
     const owners = ipVcenterOwners(snap);   // 라우트당 1회(O(N_vm)) — IP별 재스캔 금지(CLAUDE.md O(N))
     const claimed = fields.claimedVcenterId || '';
-    const bad = (Array.isArray(ips) ? ips : []).find((ip) => !ipInWriteScope(allowed, owners, String(ip), claimed));
-    if (bad !== undefined) return res.status(403).json({ ok: false, reason: `범위 밖 IP 가 포함됐습니다(${bad}). 전체를 적용하지 않았습니다.` });
-    // 쓰기 범위(writeVcenters) — 조회는 되지만 수정이 막힌 vCenter 의 IP 가 섞이면 전체 거부.
-    const badW = (Array.isArray(ips) ? ips : []).find((ip) => !ipInWriteScope(allowedW, owners, String(ip), claimed));
-    if (badW !== undefined) return res.status(403).json({ ok: false, reason: `수정 권한이 없는 vCenter 의 IP 가 포함됐습니다(${badW}). 전체를 적용하지 않았습니다.` });
+    for (const ip of list) {
+      const v = ipOverrideWriteVerdict(req, snap, allowed, owners, ip, claimed);
+      if (v?.status === 404) return res.status(403).json({ ok: false, reason: `범위 밖 IP 가 포함됐습니다(${ip}). 전체를 적용하지 않았습니다.` });
+      if (v?.status === 403) return res.status(403).json({ ok: false, reason: `수정 권한이 없는 vCenter 의 IP 가 포함됐습니다(${ip}). 전체를 적용하지 않았습니다.` });
+    }
   }
-  const r = setOverrideBatch(ips, fields, req.user);
+  const r = setOverrideBatch(list, fields, req.user);
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 일괄 적용', target: `${r.changed}개 IP`, detail: JSON.stringify(fields).slice(0, 500) });
   res.status(r.ok ? 200 : 400).json(r);
 });

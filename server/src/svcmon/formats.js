@@ -7,6 +7,7 @@
  * excel.js 도 사용)를 재사용한다 — 에어갭 배포에도 이미 번들된 의존성이다.
  */
 
+import zlib from 'node:zlib';
 import { CSV_COLUMNS } from './testSchema.js';
 import { csvLine } from '../util/csv.js';
 import { targetRows, targetsToCsv, parseTargetsCsv } from './csvio.js';
@@ -85,8 +86,8 @@ const XLSX_MAX_COLS = 200;
  * v2.629 SEC2629-09: exceljs 는 시트 전체를 먼저 풀어 파싱한 뒤에야 위 행 상한을 본다 — 압축 크기 상한(XLSX_MAX_BYTES 8MB)만으로는
  * 수백 배 확장되는 입력이 수 초 루프 정지·수백 MB 힙을 만든다(v2.577 '압축 해제에는 상한' 규약의 누락 지점).
  * 그래서 load 전에 zip 중앙 디렉터리가 **선언한** 압축 해제 크기 합을 본다.
- * ⚠ 정직 기록: 선언값만 본다 — 중앙 디렉터리를 거짓으로 쓴 파일(작은 크기를 선언)은 이 검사를 통과한다. 그 경우는
- *   exceljs(jszip) 가 끝까지 푼다. 흔한 폭탄(정상 도구로 만든 고압축 파일)은 선언값이 실제 크기라 여기서 막힌다.
+ * v2.630 SEC2630-01: 선언값만 보면 중앙 디렉터리를 거짓으로 쓴 파일(작은 크기를 선언)이 통과해 exceljs(jszip) 가 끝까지
+ *   풀었다 — 이제 선언 검사 뒤에 zipInflatedSize 가 실제로 풀어 보며(예산 초과 즉시 중단) 누적 크기를 센다.
  */
 export const XLSX_MAX_UNCOMPRESSED = Number(process.env.SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES) || 64 * 1024 * 1024;
 export const XLSX_MAX_ENTRIES = 5_000;
@@ -133,7 +134,67 @@ export function assertXlsxSizeOk(buffer, max = XLSX_MAX_UNCOMPRESSED) {
   if (z.total > max) {
     throw new Error(`XLSX 압축 해제 크기가 너무 큽니다(${Math.round(z.total / 1048576)}MB > ${Math.round(max / 1048576)}MB) — 파일을 나눠 올리세요.`);
   }
-  return z;
+  // v2.630 SEC2630-01: 선언값은 거짓일 수 있다 — 실제로 풀어 보며 누적 크기를 센다(exceljs 로드 전).
+  const real = zipInflatedSize(buffer, max);
+  if (!real.ok) {
+    if (real.reason === 'too-large') {
+      throw new Error(`XLSX 압축 해제 크기가 너무 큽니다(실제 해제 ${Math.round(max / 1048576)}MB 초과 — 선언 크기 ${Math.round(z.total / 1048576)}MB 와 다릅니다) — 파일을 나눠 올리세요.`);
+    }
+    if (real.reason === 'method') throw new Error(`XLSX 파싱 실패: 지원하지 않는 압축 방식입니다(${real.method}).`);
+    throw new Error('XLSX 파싱 실패: zip 항목을 풀지 못했습니다(엑셀 파일이 맞는지 확인하세요).');
+  }
+  return { ...z, inflated: real.total };
+}
+
+/**
+ * v2.630 SEC2630-01: zip 의 각 항목을 실제로 풀어(inflateRawSync + maxOutputLength = 남은 예산 + 1) 누적 해제 크기를 센다.
+ * 중앙 디렉터리의 선언 크기를 믿지 않는다 — 선언을 작게 속인 폭탄도 예산을 넘는 순간 멈춘다(끝까지 풀지 않는다).
+ * 압축 크기·로컬 헤더 위치는 중앙 디렉터리에서 읽는다(JSZip 과 같은 원천).
+ * 반환: { ok:true, total } | { ok:false, reason:'too-large'|'method'|'bad-entry'|'no-eocd'|'bad-cd'|'zip64' }
+ */
+export function zipInflatedSize(buf, max = XLSX_MAX_UNCOMPRESSED) {
+  if (!Buffer.isBuffer(buf) || buf.length < 22) return { ok: false, reason: 'no-eocd' };
+  const stop = Math.max(0, buf.length - 22 - 0xffff);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= stop; i -= 1) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return { ok: false, reason: 'no-eocd' };
+  const count = buf.readUInt16LE(eocd + 10);
+  const cdSize = buf.readUInt32LE(eocd + 12);
+  const cdOff = buf.readUInt32LE(eocd + 16);
+  if (count === 0xffff || cdSize === 0xffffffff || cdOff === 0xffffffff) return { ok: false, reason: 'zip64' };
+  if (cdOff + cdSize > eocd) return { ok: false, reason: 'bad-cd' };
+  let p = cdOff;
+  let total = 0;
+  for (let n = 0; n < count; n += 1) {
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) return { ok: false, reason: 'bad-cd' };
+    const method = buf.readUInt16LE(p + 10);
+    const csize = buf.readUInt32LE(p + 20);
+    const lho = buf.readUInt32LE(p + 42);
+    if (csize === 0xffffffff || lho === 0xffffffff) return { ok: false, reason: 'zip64' };
+    p += 46 + buf.readUInt16LE(p + 28) + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+    if (lho + 30 > buf.length || buf.readUInt32LE(lho) !== 0x04034b50) return { ok: false, reason: 'bad-entry' };
+    const start = lho + 30 + buf.readUInt16LE(lho + 26) + buf.readUInt16LE(lho + 28);
+    if (start + csize > buf.length) return { ok: false, reason: 'bad-entry' };
+    const remaining = max - total;
+    let size;
+    if (method === 0) {
+      size = csize;
+    } else if (method === 8) {
+      try {
+        size = zlib.inflateRawSync(buf.subarray(start, start + csize), { maxOutputLength: remaining + 1 }).length;
+      } catch (e) {
+        if (e && (e.code === 'ERR_BUFFER_TOO_LARGE' || e instanceof RangeError)) return { ok: false, reason: 'too-large' };
+        return { ok: false, reason: 'bad-entry' };
+      }
+    } else {
+      return { ok: false, reason: 'method', method };
+    }
+    total += size;
+    if (total > max) return { ok: false, reason: 'too-large' };
+  }
+  return { ok: true, total };
 }
 
 async function xlsxToCsv(buffer) {
