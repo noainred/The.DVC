@@ -228,11 +228,12 @@ authRouter.post('/totp/confirm', authMiddleware, (req, res) => {
 // mount 되므로(로그인/공개용), 이 admin 라우트들이 게이트 밖에 있으면 OTP 미등록(부트스트랩)
 // admin 세션이 AD 설정을 바꿔 자기 LDAP 를 admin 그룹으로 응답시켜 OTP 우회 admin 경로를 만들 수
 // 있다. requireEnrolled 를 넣어 등록 전 세션은 /auth/{me,totp/*} 외 이 라우트에 못 오게 한다.
+const adminOnly = [authMiddleware, requireEnrolled, requireRole('admin')];
 // v2.628(SEC2628-04): AD 는 전 사용자 공통 인증 소스다 — 범위 관리자가 설정을 읽거나 요청 본문의 서버로 연결 테스트(내부망
 //   포트 탐지 단서가 되는 오류 문구를 돌려준다)를 하지 못하게 전체 범위 전용으로 둔다.
-const adminOnly = [authMiddleware, requireEnrolled, requireRole('admin'), fullScopeOnlyWith('AD 설정은 전 사용자 공통이라 전체 범위 관리자만 다룰 수 있습니다.')];
+const adFleetOnly = fullScopeOnlyWith('AD 설정은 전 사용자 공통이라 전체 범위 관리자만 다룰 수 있습니다.');
 
-authRouter.get('/ad-config', ...adminOnly, (_req, res) => {
+authRouter.get('/ad-config', ...adminOnly, adFleetOnly, (_req, res) => {
   res.json({ ad: loadAdConfig() });
 });
 
@@ -240,12 +241,12 @@ authRouter.get('/ad-config', ...adminOnly, (_req, res) => {
 // 지정해 응답 속성(그룹·displayName)을 임의로 만들 수 있다 — 그룹으로 admin 승격은 위 주석의
 // OTP 우회 벡터이고, displayName 으로는 소유자 이름 위장 경로였다(권한 축을 username 으로
 // 단일화해 후자는 닫혔지만, 인증 소스 자체를 바꾸는 권능은 소유자 등급이 맞다).
-authRouter.put('/ad-config', ...adminOnly, requireSettingsOwner, (req, res) => {
+authRouter.put('/ad-config', ...adminOnly, adFleetOnly, requireSettingsOwner, (req, res) => {
   res.json({ ok: true, ad: saveAdConfig(req.body || {}) });
 });
 
 // Test connectivity / a sample login. Body: { config?, username?, password? }
-authRouter.post('/ad-test', ...adminOnly, async (req, res) => {
+authRouter.post('/ad-test', ...adminOnly, adFleetOnly, async (req, res) => {
   const { config: cfg, username, password } = req.body || {};
   res.json(await testAd(cfg, username, password));
 });

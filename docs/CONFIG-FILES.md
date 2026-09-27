@@ -33,7 +33,7 @@
 | `backup.json` | 설정 | 백업 설정 + 스케줄러 + 변경 감시. | ✅ | ✅ | ✅ | backup/settings.js |
 | `backups` | 디렉터리 | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 | ✅ |  | ✅ | backup/service.js |
 | `bm-storage.json` | 설정 | 베어메탈 스토리지 서버 목록 + 설정(v2.340). | ✅ | ✅ | ✅ | bmstor/registry.js |
-| `bm-usage.db` | DB | 베어메탈 사용률 DB(v2.550). 파일: `<dbDir>/bm-usage.db` |  |  | ✅ | bmusage/db.js |
+| `bm-usage.db` | DB | 베어메탈 사용률 DB(v2.550). 파일: `<dbDir>/bm-usage.db` |  | ✅ | ✅ | bmusage/db.js, bmusage/poller.js |
 | `bmstor-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bmstor/poller.js |
 | `bmusage-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | bmusage/activityLog.js |
 | `bmusage-alert-state.json` | 설정 | 임계 초과 알림 발송 + **상태 영속**(v2.551). | ✅ |  | ✅ | bmusage/notify.js |
@@ -98,7 +98,7 @@
 | `idrac-scan-log.json` | 설정 | iDRAC 스캔 실행 로그 — 주기/수동 스캔의 법인(DataCenter)별 실행 결과를 영속 저장한다. | ✅ |  | ✅ | idrac/scanLog.js |
 | `idrac-scan-ranges.json` | 설정 | 법인(DataCenter)별 iDRAC 스캔 대역 저장소 — 각 법인에 귀속된 iDRAC IP 대역과 그 대역 스캔에 | ✅ | ✅ | ✅ | idrac/scanRanges.js |
 | `idrac-scan-settings.json` | 설정 | iDRAC 자동 발견 폴러 — vCenter별로 저장된 IP 대역을 주기적으로 스캔해 Dell iDRAC을 | ✅ | ✅ | ✅ | idrac/scanPoller.js |
-| `idrac.json` | 설정 | iDRAC registry — the managed list of Dell servers whose power draw we collect | ✅ | ✅ | ✅ | idrac/registry.js |
+| `idrac.json` | 설정 | iDRAC 등록부 — 전력·온도·인벤토리를 수집하는 Dell·HPE 서버 목록(v2.628 에 bmusage/poller.js 가 손상 여부만 확인하도록 읽는다) | ✅ | ✅ | ✅ | bmusage/poller.js, idrac/registry.js |
 | `initial-admin-password.txt` | 텍스트 | 최초 기동 시 생성된 관리자 임시 비밀번호 | ✅ | ✅ | ✅ | auth/auth.js, security/selfCheck.js |
 | `ipam-annotations.json` | 설정 | Per-IP user annotations (custom memo + tags) for the IP ledger. These are | ✅ | ✅ |  | ipam/annotations.js |
 | `ipam-overrides.json` | 설정 | Per-IP 수동 관리(override) 저장소 — vCenter/스캔으로 자동 발견되는 정보와 별개로, | ✅ | ✅ | ✅ | ipam/overrides.js |
