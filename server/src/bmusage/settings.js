@@ -18,8 +18,25 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
+import crypto from 'node:crypto';
+import { registerStateFile } from '../util/stateFiles.js';
 
 const FILE = () => path.join(config.configDir, 'bmusage-settings.json');
+/*
+ * v2.627(사용자 요청 "한번에 켜는 기능" · 선택 "중앙 설정이 엣지를 따른다"): 중앙이 엣지 28곳의 설정을 한 번에 정한다.
+ *  · 중앙: `bmusage-distribute.json` — 배포 켬/끔 + 엣지별 제외(관리자가 고른 **설정**이라 백업 대상이다).
+ *  · 엣지: `bmusage-central.json` — 중앙이 내려준 사본(**상태** — 백업 '설정 변경' 감시에서 뺀다). 로컬 파일은 그대로 두고
+ *    유효 설정을 계산할 때만 겹친다 — 배포를 끄거나 그 엣지를 제외하면 사본을 지워 **엣지 로컬 설정으로 되돌아간다**.
+ * ⚠⚠ Enterprise 대체 수집(`enterprise*`)은 **배포하지 않는다**(사용자 선택) — v2.554 '장비 부하에 관리자가 동의해야 켜진다'
+ *   는 그 엣지 관리자의 동의다. `DISTRIBUTED_KEYS` 에 enterprise 키를 넣지 말 것(테스트가 고정한다).
+ */
+const DIST_FILE = () => path.join(config.configDir, 'bmusage-distribute.json');
+registerStateFile('bmusage-central.json');
+const CENTRAL_COPY_FILE = () => path.join(config.configDir, 'bmusage-central.json');
+export const DISTRIBUTED_KEYS = Object.freeze([
+  'enabled', 'corps', 'includeUnassigned', 'includeVirtualization', 'intervalMs', 'rawRetentionDays', 'dailyRetentionDays',
+  'osSsh', 'idracTelemetry', 'idracFullTelemetry', 'alertEnabled', 'alertPct', 'alertSustainMin', 'alertRepeatHours',
+]);
 
 /** 사용자가 고른 기본값. 주기 5분 · 원시 90일 · 일 롤업 5년. */
 export const DEFAULTS = Object.freeze({
@@ -130,12 +147,142 @@ export function normalizeSettings(raw = {}) {
   };
 }
 
+/** 이 노드의 **로컬 파일** 값(중앙 사본을 겹치지 않은 것). 중앙은 곧 이것이 배포 원본이다. */
+export function loadLocalBmUsageSettings() { return normalizeSettings(readFile()); }
+
+/** 유효 설정 — 엣지가 중앙 배포를 받고 있으면 배포 키만 중앙 값으로 덮는다(Enterprise 는 언제나 로컬). */
 export function loadBmUsageSettings() {
   const now = Date.now();
   if (_cache && now - _cacheAt < CACHE_MS) return _cache;
-  _cache = normalizeSettings(readFile());
+  const local = readFile();
+  const copy = readCentralCopy();
+  _cache = normalizeSettings(copy ? { ...local, ...pickDistributed(copy.settings) } : local);
   _cacheAt = now;
   return _cache;
+}
+
+/* ── v2.627 중앙 배포 ─────────────────────────────────────────────────────────── */
+function pickDistributed(src = {}) {
+  const out = {};
+  if (!src || typeof src !== 'object') return out;
+  for (const k of DISTRIBUTED_KEYS) if (Object.hasOwn(src, k)) out[k] = src[k];
+  return out;
+}
+const t = (v) => String(v ?? '').trim();
+const lowerAgent = (v) => t(v).toLowerCase().slice(0, 128);
+
+let _copy; // undefined = 아직 안 읽음 · null = 없음
+function readCentralCopy() {
+  if (_copy !== undefined) return _copy;
+  try {
+    const j = JSON.parse(fs.readFileSync(CENTRAL_COPY_FILE(), 'utf8'));
+    _copy = j && typeof j === 'object' && j.settings && typeof j.settings === 'object' ? j : null;
+  } catch (e) { if (fs.existsSync(CENTRAL_COPY_FILE())) preserveCorrupt(CENTRAL_COPY_FILE(), e.message); _copy = null; }
+  return _copy;
+}
+
+/** 배포 원본의 서명 — 엣지가 '적용한 판' 을 중앙에 알려 화면이 '적용됨/대기' 를 가른다. */
+export function settingsSig(settings = {}) {
+  const pick = pickDistributed(normalizeSettings(settings));
+  const ordered = {};
+  for (const k of DISTRIBUTED_KEYS) ordered[k] = k === 'corps' ? Object.keys(pick.corps || {}).sort() : pick[k];
+  return crypto.createHash('sha1').update(JSON.stringify(ordered)).digest('hex').slice(0, 16);
+}
+
+/** 엣지: 중앙이 내려준 배포 값 적용. 바뀌었을 때만 true(그때만 파일을 쓰고 폴러를 재무장한다). */
+export function applyCentralBmUsage({ settings, sig } = {}) {
+  if (!settings || typeof settings !== 'object') throw new Error('배포 설정 본문 없음');
+  const picked = pickDistributed(normalizeSettings(settings));
+  const s = t(sig) || settingsSig(picked);
+  const cur = readCentralCopy();
+  if (cur && cur.sig === s) { cur.at = Date.now(); return false; }
+  const next = { managed: true, at: Date.now(), sig: s, settings: picked };
+  fs.mkdirSync(path.dirname(CENTRAL_COPY_FILE()), { recursive: true });
+  atomicWriteFileSync(CENTRAL_COPY_FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  _copy = next; _cache = null;
+  notifyChange();
+  return true;
+}
+
+/** 엣지: 중앙이 배포를 끄거나 이 엣지를 제외했다 — 사본을 지워 로컬 설정으로 되돌린다. 바뀌었으면 true. */
+export function clearCentralBmUsage() {
+  const cur = readCentralCopy();
+  if (!cur) return false;
+  try { fs.rmSync(CENTRAL_COPY_FILE(), { force: true }); } catch { /* 다음 판정에서 다시 본다 */ }
+  _copy = null; _cache = null;
+  notifyChange();
+  return true;
+}
+
+/** 이 노드가 지금 중앙 배포값을 쓰는가 — 화면 배너·설정 잠금의 근거. */
+export function bmUsageCentralState() {
+  const c = readCentralCopy();
+  return c ? { managed: true, at: c.at || 0, sig: c.sig || '', keys: [...DISTRIBUTED_KEYS] } : { managed: false };
+}
+
+/** 중앙: 배포 설정(켬/끔 + 제외 엣지). 손상이면 보존 후 **꺼짐**(켜진 척하지 않는다). */
+export function loadDistribution() {
+  try {
+    const j = JSON.parse(fs.readFileSync(DIST_FILE(), 'utf8'));
+    return normalizeDistribution(j);
+  } catch (e) { if (fs.existsSync(DIST_FILE())) preserveCorrupt(DIST_FILE(), e.message); return normalizeDistribution({}); }
+}
+export function normalizeDistribution(raw = {}) {
+  const excluded = {};
+  const src = raw && typeof raw.excluded === 'object' && raw.excluded ? raw.excluded : {};
+  for (const [k, v] of Object.entries(src)) { const a = lowerAgent(k); if (a && v === true) excluded[a] = true; }
+  return { enabled: raw?.enabled === true, excluded, updatedAt: Number(raw?.updatedAt) > 0 ? Number(raw.updatedAt) : 0, updatedBy: t(raw?.updatedBy).slice(0, 64) };
+}
+export function saveDistribution(patch = {}, by = '') {
+  const cur = loadDistribution();
+  const next = normalizeDistribution({
+    enabled: typeof patch.enabled === 'boolean' ? patch.enabled : cur.enabled,
+    excluded: patch.excluded && typeof patch.excluded === 'object' ? patch.excluded : cur.excluded,
+    updatedAt: Date.now(), updatedBy: by,
+  });
+  fs.mkdirSync(path.dirname(DIST_FILE()), { recursive: true });
+  atomicWriteFileSync(DIST_FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  return next;
+}
+
+/** 중앙이 한 엣지에 내려줄 값. 배포 원본은 **중앙의 로컬 설정**이다(중앙은 사본을 갖지 않는다). */
+export function distributeFor(agent) {
+  const d = loadDistribution();
+  if (!d.enabled) return { distribute: false, reason: 'off' };
+  if (d.excluded[lowerAgent(agent)]) return { distribute: false, reason: 'excluded' };
+  const settings = pickDistributed(loadLocalBmUsageSettings());
+  return { distribute: true, settings, sig: settingsSig(settings) };
+}
+
+/* 엣지별 마지막 인출(인메모리 — 중앙 재시작 직후엔 비어 있고 화면이 그 사실을 말한다). */
+const _pulls = new Map();
+const _startedAt = Date.now();
+const PULLS_MAX = 512;
+export function recordBmUsagePull(agent, { appliedSig = '', version = '', reason = '' } = {}) {
+  const a = lowerAgent(agent);
+  if (!a) return;
+  if (!_pulls.has(a) && _pulls.size >= PULLS_MAX) _pulls.delete(_pulls.keys().next().value);
+  _pulls.delete(a);
+  _pulls.set(a, { agent: t(agent).slice(0, 128), at: Date.now(), appliedSig: t(appliedSig).slice(0, 32), version: t(version).slice(0, 32), reason: t(reason).slice(0, 32) });
+}
+/** 화면용 — 알려진 엣지 이름(대소문자 무시)과 인출 기록을 합친다. */
+export function distributionStatus(knownNames = []) {
+  const d = loadDistribution();
+  const cur = settingsSig(loadLocalBmUsageSettings());
+  const names = new Map();
+  for (const n of knownNames || []) { const k = lowerAgent(n); if (k && !names.has(k)) names.set(k, t(n)); }
+  for (const [k, p] of _pulls) if (!names.has(k)) names.set(k, p.agent || k);
+  const rows = [...names].map(([k, name]) => {
+    const p = _pulls.get(k) || null;
+    const excluded = !!d.excluded[k];
+    let state;
+    if (!d.enabled || excluded) state = excluded ? 'excluded' : 'off';
+    else if (!p) state = 'no-pull';
+    else if (p.appliedSig && p.appliedSig === cur) state = 'applied';
+    else state = 'pending';
+    return { agent: name, excluded, lastPullAt: p?.at || 0, appliedSig: p?.appliedSig || '', state };
+  }).sort((a, b) => a.agent.localeCompare(b.agent));
+  return { ...d, sig: cur, keys: [...DISTRIBUTED_KEYS], rows, since: _startedAt };
 }
 
 /*
@@ -167,14 +314,24 @@ export function dropUnspecifiedNumbers(body = {}) {
 const _listeners = new Set();
 export function onBmUsageSettingsChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }
 function notifyChange() { for (const cb of _listeners) { try { cb(); } catch { /* 리스너 실패가 저장을 막지 않는다 */ } } }
+/**
+ * 저장은 **로컬 파일**에 한다. v2.627: 이 엣지가 중앙 배포를 받는 중이면 배포 키는 저장하지 않고 `ignoredCentralManaged` 로
+ * 돌려준다(화면이 '중앙이 정한 값이라 무시했다' 를 말한다 — 저장해도 다음 계산에서 중앙 값이 이기므로 조용히 버리면 거짓이다).
+ */
 export function saveBmUsageSettings(body = {}) {
   const { patch } = dropUnspecifiedNumbers(body);
-  const next = normalizeSettings({ ...loadBmUsageSettings(), ...patch });
+  const ignoredCentralManaged = [];
+  if (readCentralCopy()) for (const k of DISTRIBUTED_KEYS) if (Object.hasOwn(patch, k)) { delete patch[k]; ignoredCentralManaged.push(k); }
+  const local = normalizeSettings({ ...normalizeSettings(readFile()), ...patch });
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
-  atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
-  _cache = next; _cacheAt = Date.now();
+  atomicWriteFileSync(FILE(), JSON.stringify(local, null, 2), { mode: 0o600 });
+  _cache = null;
+  const next = loadBmUsageSettings();
   notifyChange();
-  return next;
+  if (!ignoredCentralManaged.length) return next;
+  const out = { ...next };
+  Object.defineProperty(out, 'ignoredCentralManaged', { value: ignoredCentralManaged, enumerable: false });
+  return out;
 }
 
 /** env 로 강제 끄기(현장 탈출구). `BMUSAGE_ENABLED=false` 면 설정과 무관하게 꺼진다. */
@@ -195,4 +352,4 @@ export function enterpriseActive(settings = loadBmUsageSettings()) {
   return !!(settings.enterpriseEnabled && settings.enterpriseAck && settings.idracTelemetry);
 }
 
-export function _resetForTest() { _cache = null; _cacheAt = 0; }
+export function _resetForTest() { _cache = null; _cacheAt = 0; _copy = undefined; _pulls.clear(); }

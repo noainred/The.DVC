@@ -27,6 +27,8 @@ const BmUsageChart = React.lazy(() => import('./BmUsageChart.jsx'));   // 추이
 import BoldText from '../../components/boldText.jsx';
 import { addressHiddenNote } from './addressHiddenText.js'; // v2.600 AUTHZ-2600-08
 import { rangeOf } from './bmUsageChart.js';
+import { distStateOf, distributionSummary, centralManagedNote, ignoredCentralNote, DIST_ENTERPRISE_NOTE } from './bmUsageDistText.js'; // v2.627
+import { fmtAgo } from '../../util/fmt.js';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark,
   emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, authStopNote, keyConflictNote,
@@ -73,6 +75,7 @@ export function BmUsage() {
   const [showSettings, setShowSettings] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(null);
+  const [distSaving, setDistSaving] = useState(false); // v2.627 엣지 배포 저장 중
   /*
    * ⚠ 엣지 보관분(v2.554) — **폴링하지 않는다**(사용자 지시 "중앙으로 전달은 중앙에서 조회할때만").
    *   마운트 1회 + 버튼(v2.508 규약). `/edges` 는 네트워크에 나가지 않고 보관분만 읽는다.
@@ -203,16 +206,29 @@ export function BmUsage() {
     setSaving(true);
     try {
       const r = await putJson('/tools/bm-usage/settings', patch);
-      setForm(r.settings); { const warn = scopeSaveSuffix(r); setMsg({ tone: warn ? 'bad' : 'ok', text: `설정을 저장했습니다.${warn}` }); }
+      setForm(r.settings); { const warn = scopeSaveSuffix(r) + ignoredCentralNote(r); setMsg({ tone: warn ? 'bad' : 'ok', text: `설정을 저장했습니다.${warn}` }); }
       load();
     } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }
     finally { setSaving(false); }
+  }
+
+  /** v2.627 엣지 배포 켬/끔·제외 — 엣지는 다음 인출에 받는다(응답 요약이 그 사실을 말한다). */
+  async function saveDistribution(patch) {
+    setDistSaving(true);
+    try {
+      const r = await putJson('/tools/bm-usage/distribute', patch);
+      setData((d) => (d ? { ...d, distribution: r.distribution } : d));
+      setMsg({ tone: 'ok', text: `엣지 배포 설정을 저장했습니다. ${distributionSummary(r.distribution)}` });
+    } catch (e) { setMsg({ tone: 'bad', text: e?.message || String(e) }); }
+    finally { setDistSaving(false); }
   }
 
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox error={error} />;
 
   const st = data?.status || {};
+  // v2.627: 중앙이 배포 중인 엣지는 배포 키 입력을 잠근다(서버도 저장하지 않는다 — Enterprise 칸만 열려 있다).
+  const dl = saving || !!data?.central?.managed;
   const selRow = rows.find((r) => r.key === sel) || null;
   const fsNote = firstSampleNote(data?.rows || []);
   const skNotes = skippedNotes(data?.skippedCounts || {}, data?.reasons || {});
@@ -514,8 +530,11 @@ export function BmUsage() {
       {showSettings && form && (
         <div className="card" style={{ minWidth: 0 }}>
           <h4 style={{ marginTop: 0 }}>수집 설정</h4>
+          {centralManagedNote(data?.central, fmtAgo) && (
+            <p style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}><BoldText text={centralManagedNote(data.central, fmtAgo)} /></p>
+          )}
           <label style={{ display: 'block', fontSize: 13, marginBottom: 8 }}>
-            <input type="checkbox" checked={!!form.enabled} onChange={(e) => saveSettings({ enabled: e.target.checked })} disabled={saving} />
+            <input type="checkbox" checked={!!form.enabled} onChange={(e) => saveSettings({ enabled: e.target.checked })} disabled={dl} />
             {' '}수집 켜기
           </label>
           <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
@@ -525,7 +544,7 @@ export function BmUsage() {
             {(data?.vcenters || []).map((v) => (
               <label key={v.id} style={{ fontSize: 12, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 <input
-                  type="checkbox" disabled={saving}
+                  type="checkbox" disabled={dl}
                   checked={!!(form.corps || {})[v.id]}
                   onChange={(e) => saveSettings({ corps: { ...(form.corps || {}), [v.id]: e.target.checked } })}
                 />
@@ -535,28 +554,28 @@ export function BmUsage() {
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <label style={{ fontSize: 12 }}>주기(분){' '}
-              <input type="number" min={1} max={360} defaultValue={Math.round((form.intervalMs || 0) / 60000)} disabled={saving}
+              <input type="number" min={1} max={360} defaultValue={Math.round((form.intervalMs || 0) / 60000)} disabled={dl}
                 onBlur={(e) => numBlur(e, 'intervalMs', 60000)} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>원시 보존(일){' '}
-              <input type="number" min={7} max={365} defaultValue={form.rawRetentionDays} disabled={saving}
+              <input type="number" min={7} max={365} defaultValue={form.rawRetentionDays} disabled={dl}
                 onBlur={(e) => numBlur(e, 'rawRetentionDays')} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>롤업 보존(일){' '}
-              <input type="number" min={30} max={3650} defaultValue={form.dailyRetentionDays} disabled={saving}
+              <input type="number" min={30} max={3650} defaultValue={form.dailyRetentionDays} disabled={dl}
                 onBlur={(e) => numBlur(e, 'dailyRetentionDays')} style={{ width: 80, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>
-              <input type="checkbox" checked={!!form.osSsh} onChange={(e) => saveSettings({ osSsh: e.target.checked })} disabled={saving} /> OS SSH
+              <input type="checkbox" checked={!!form.osSsh} onChange={(e) => saveSettings({ osSsh: e.target.checked })} disabled={dl} /> OS SSH
             </label>
             <label style={{ fontSize: 12 }}>
-              <input type="checkbox" checked={!!form.idracTelemetry} onChange={(e) => saveSettings({ idracTelemetry: e.target.checked })} disabled={saving} /> iDRAC 텔레메트리
+              <input type="checkbox" checked={!!form.idracTelemetry} onChange={(e) => saveSettings({ idracTelemetry: e.target.checked })} disabled={dl} /> iDRAC 텔레메트리
             </label>
             <label style={{ fontSize: 12 }}>
-              <input type="checkbox" checked={!!form.includeUnassigned} onChange={(e) => saveSettings({ includeUnassigned: e.target.checked })} disabled={saving} /> 법인 귀속 없는 서버도 포함
+              <input type="checkbox" checked={!!form.includeUnassigned} onChange={(e) => saveSettings({ includeUnassigned: e.target.checked })} disabled={dl} /> 법인 귀속 없는 서버도 포함
             </label>
             <label style={{ fontSize: 12 }}>
-              <input type="checkbox" checked={!!form.includeVirtualization} onChange={(e) => saveSettings({ includeVirtualization: e.target.checked })} disabled={saving} /> ESXi 호스트도 iDRAC 로 수집
+              <input type="checkbox" checked={!!form.includeVirtualization} onChange={(e) => saveSettings({ includeVirtualization: e.target.checked })} disabled={dl} /> ESXi 호스트도 iDRAC 로 수집
             </label>
           </div>
           <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
@@ -566,7 +585,7 @@ export function BmUsage() {
           {/* ── iDRAC 텔레메트리 전수 모드(v2.551) ──────────────────────────── */}
           <h4 style={{ margin: '14px 0 6px' }}>iDRAC 텔레메트리</h4>
           <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
-            <input type="checkbox" checked={!!form.idracFullTelemetry} onChange={(e) => saveSettings({ idracFullTelemetry: e.target.checked })} disabled={saving} />
+            <input type="checkbox" checked={!!form.idracFullTelemetry} onChange={(e) => saveSettings({ idracFullTelemetry: e.target.checked })} disabled={dl} />
             {' '}리포트 전수 읽기
           </label>
           <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
@@ -630,7 +649,7 @@ export function BmUsage() {
           {/* ── 임계 초과 알림(v2.551) ──────────────────────────────────────── */}
           <h4 style={{ margin: '14px 0 6px' }}>임계 초과 알림</h4>
           <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
-            <input type="checkbox" checked={!!form.alertEnabled} onChange={(e) => saveSettings({ alertEnabled: e.target.checked })} disabled={saving} />
+            <input type="checkbox" checked={!!form.alertEnabled} onChange={(e) => saveSettings({ alertEnabled: e.target.checked })} disabled={dl} />
             {' '}알림 켜기
           </label>
           <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
@@ -638,15 +657,15 @@ export function BmUsage() {
           </p>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <label style={{ fontSize: 12 }}>임계(%){' '}
-              <input type="number" min={50} max={100} defaultValue={form.alertPct} disabled={saving}
+              <input type="number" min={50} max={100} defaultValue={form.alertPct} disabled={dl}
                 onBlur={(e) => numBlur(e, 'alertPct')} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>지속(분){' '}
-              <input type="number" min={0} max={240} defaultValue={form.alertSustainMin} disabled={saving}
+              <input type="number" min={0} max={240} defaultValue={form.alertSustainMin} disabled={dl}
                 onBlur={(e) => numBlur(e, 'alertSustainMin')} style={{ width: 70, minWidth: 0 }} />
             </label>
             <label style={{ fontSize: 12 }}>재알림 간격(시간){' '}
-              <input type="number" min={1} max={168} defaultValue={form.alertRepeatHours} disabled={saving}
+              <input type="number" min={1} max={168} defaultValue={form.alertRepeatHours} disabled={dl}
                 onBlur={(e) => numBlur(e, 'alertRepeatHours')} style={{ width: 80, minWidth: 0 }} />
             </label>
             {data?.status?.alertState && (
@@ -658,6 +677,41 @@ export function BmUsage() {
           <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
             <BoldText text={'감시 지표는 **퍼센트 지표 6개**(CPU·메모리·디스크 I/O·디스크 공간·네트워크·HBA)입니다 — 처리량(B/s)은 장비마다 정상 범위가 달라 임계를 정하지 않습니다. **못 읽은 주기는 초과도 정상도 아닙니다**(판정 보류).'} />
           </p>
+
+          {/* ── 엣지에 배포(v2.627) — 중앙의 전체 범위 관리자에게만 온다(서버가 distribution 을 null 로 준다). ── */}
+          {data?.distribution && (
+            <>
+              <h4 style={{ margin: '14px 0 6px' }}>엣지에 배포</h4>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
+                <input type="checkbox" checked={!!data.distribution.enabled} disabled={distSaving}
+                  onChange={(e) => saveDistribution({ enabled: e.target.checked })} />
+                {' '}이 설정을 모든 엣지에 배포(한 번에 켜기)
+              </label>
+              <p style={{ margin: '0 0 6px', fontSize: 12, lineHeight: 1.6 }}><BoldText text={distributionSummary(data.distribution)} /></p>
+              <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={DIST_ENTERPRISE_NOTE} /></p>
+              {(data.distribution.rows || []).length > 0 && (
+                <STable className="v3-table" minWidth={560} style={{ fontSize: 12 }}>
+                  <thead><tr><th>엣지</th><th>상태</th><th>마지막 인출</th><th data-nosort>제외</th></tr></thead>
+                  <tbody>
+                    {data.distribution.rows.map((r) => {
+                      const ds = distStateOf(r.state);
+                      return (
+                        <tr key={r.agent}>
+                          <td>{r.agent}</td>
+                          <td title={ds.why} style={{ color: toneVar(ds.tone) }}>{ds.label}</td>
+                          <td data-sort={r.lastPullAt || 0}>{r.lastPullAt ? fmtAgo(r.lastPullAt) : '—'}</td>
+                          <td>
+                            <input type="checkbox" checked={!!r.excluded} disabled={distSaving}
+                              onChange={(e) => saveDistribution({ excluded: { ...(data.distribution.excluded || {}), [r.agent.toLowerCase()]: e.target.checked } })} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </STable>
+              )}
+            </>
+          )}
         </div>
       )}
 

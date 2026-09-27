@@ -93,6 +93,8 @@ const PURPOSES = {
   'horizon-sessions.json': 'Horizon 실시간 사용자(세션) 수집 설정(켜짐·주기·보존일·페이지 상한, v2.525)',
   'curuser-settings.json': "'현재 사용자' 수집 설정(대상 폴더·주기·보존일·신선도 배수, v2.520)",
   'bmusage-settings.json': '베어메탈 사용률 수집 설정(법인별 켜짐·주기·보존일·임계 알림·Enterprise 동의, v2.550)',
+  'bmusage-distribute.json': '베어메탈 사용률 설정의 엣지 배포(켬·제외 엣지, 중앙 — v2.627)',
+  'bmusage-central.json': '엣지가 받은 베어메탈 사용률 설정 중앙 배포 사본(상태 — 원본은 중앙, v2.627)',
   'linkcheck-settings.json': '통신 점검 설정(켜짐·주기·단계별 시한·엣지 짝·보존일, v2.552)',
   'partfault-settings.json': '물리 파트 장애 기능 스위치(중앙·엣지별) + 이력 보존일(v2.548 · v2.613)',
   'storage-intervals.json': '스토리지 수집 주기 중앙 배포값(엣지별 지정 키만, v2.409)',
