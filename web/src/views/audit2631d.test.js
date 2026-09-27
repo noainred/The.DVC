@@ -83,6 +83,11 @@ describe('WEB2631-03 — 법인별 서버 표: 첫 수집 중·연결 실패·�
     expect(corpTotalLabel(rows)).toMatch(/1곳 제외/);
     expect(corpTotalLabel(rows.slice(0, 1))).toBe('합계');
   });
+  it('V6 서버 메뉴 합계 행이 부분 합 표지를 쓰고 행에 상태 표지를 단다', () => {
+    const s = src('version_6/pages/MenuPage.jsx');
+    expect(s).toMatch(/\{corpTotalLabel\(rows\)\}/);
+    expect(s).toMatch(/r\.mark &&/);
+  });
   it('개발 포탈 개요도 같은 판정을 쓴다', () => {
     const s = src('views/Overview.jsx');
     expect(s).toMatch(/corpSiteStatus\(s\)/);
@@ -185,4 +190,11 @@ describe('WEB2631-12 — vCenter 상세는 vm-clone 도구 권한이 있을 때�
   it('toolAllowed 게이트', () => {
     expect(src('views/VCenterDetail.jsx')).toMatch(/usePolling\(toolAllowed\('vm-clone'\) \? '\/tools\/vm-clone\/badges' : null/);
   });
+});
+
+// v2.631 리드 통합: V4 설비의 BMC 응답 KPI 도 bmcPollSummary 를 쓴다(시도 0대를 초록 0% 로 보이지 않는다).
+it('WEB2631-07 V4 Facility 가 bmcPollSummary 를 쓴다', () => {
+  const src = stripComments(fs.readFileSync(fileURLToPath(new URL('../version_4/pages/Facility.jsx', import.meta.url)), 'utf8'));
+  expect(src).toMatch(/bmcPollSummary\(lr\)/);
+  expect(src).not.toMatch(/Math\.max\(1, \(lr\.ok/);
 });

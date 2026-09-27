@@ -8,6 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import { usePolling, fetchJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
+import { bmcPollSummary, BMC_TONE_COLOR } from '../../views/bmcPollText.js'; // v2.631 WEB2631-07: 시도 0대(긴급중단 등)를 초록 0% 로 보이지 않는다
 import { scopeOmitNote } from '../../views/scopeOmitText.js'; // v2.631 A6-2631-05: 범위 계정에서 뺀 서버를 밝힌다
 import { Panel, Kpi, Bar, PctCell, Badge, PollState, Empty, Spark } from '../ui.jsx';
 import { hostFacilityRows, pduSummary, tempCellColor, tempTextColor, fmtInt, fmtPct, rowMatches, REGION_COLORS } from '../data.js';
@@ -42,6 +43,7 @@ export default function Facility({ global: g, ov, sitesAll, scope, polls, perms,
   const idracN = rows.reduce((a, r) => a + r.idracBacked, 0);
   const ps = polls.pdu.data ? pduSummary(polls.pdu.data) : null;
   const lr = polls.idrac.data?.poller?.lastRun || null;
+  const bmc = bmcPollSummary(lr); // v2.631 WEB2631-07
   const phys = ov?.physical || null;
   const pduDevs = (polls.pdu.data?.devices || []).map((d) => ({ id: d.id, name: d.name || d.host, dc: d.datacenterId || '', ok: d.snapshot ? d.snapshot.ok !== false : null, powerW: d.snapshot?.summary?.powerW ?? null, tempMaxC: d.snapshot?.summary?.tempMaxC ?? null, sensors: d.snapshot?.summary?.sensors ?? 0, violations: (d.snapshot?.violations || []).length })).filter((d) => rowMatches(d, scope.q));
 
@@ -54,7 +56,7 @@ export default function Facility({ global: g, ov, sitesAll, scope, polls, perms,
           meta={g ? `${g.powerKw >= 1000 ? `${(g.powerKw / 1000).toFixed(2)} MW · ` : ''}전력 보고 ${fmtInt(g.powerReporting)}대${g.powerUnmappedKw ? ` · 미매핑 ${g.powerUnmappedKw} kW` : ''}` : waitText} />
         <Kpi label="PDU" value={ps ? fmtInt(ps.devices) : '—'} accent="#1a2130" meta={ps ? (ps.devices ? `보고 ${ps.ok} · 무응답 ${ps.failed} · 임계 위반 ${ps.violations}` : '등록된 PDU 없음') : perms.pdu ? waitText : "권한 필요('tools')"} />
         <Kpi label="온도 센서" value={hosts.data ? fmtInt(measured) : '—'} accent={maxT == null ? '#526075' : maxT >= 26 ? '#dc2626' : maxT >= 24 ? '#d97706' : '#16a34a'} meta={hosts.data ? `호스트 흡기 측정 · 최고 ${maxT != null ? `${maxT}°C` : '—'} · 26°C 초과 ${hot}` : waitText} />
-        <Kpi label="BMC 응답" value={lr ? fmtPct(((lr.ok || 0) / Math.max(1, (lr.ok || 0) + (lr.failed || 0))) * 100) : '—'} accent="#16a34a" meta={polls.idrac.data ? `iDRAC ${fmtInt(polls.idrac.data.poller?.servers)}대 · 무응답 ${fmtInt(lr?.failed)}${phys?.servers ? ` · 인식 ${fmtInt(phys.servers)}대` : ''}` : perms.idrac ? '폴러 상태 대기' : '관리자 권한 필요 (/admin/idrac)'} />
+        <Kpi label="BMC 응답" value={bmc.pct == null ? '—' : fmtPct(bmc.pct)} accent={BMC_TONE_COLOR[bmc.tone]} meta={polls.idrac.data ? (bmc.reason || `iDRAC ${fmtInt(polls.idrac.data.poller?.servers)}대 · 무응답 ${fmtInt(lr?.failed)}${phys?.servers ? ` · 인식 ${fmtInt(phys.servers)}대` : ''}`) : perms.idrac ? '폴러 상태 대기' : '관리자 권한 필요 (/admin/idrac)'} />
         <Kpi label="iDRAC 연동 호스트" value={hosts.data && hostN ? fmtPct((idracN / hostN) * 100) : '—'} accent="#0e7490" meta={hosts.data ? `${fmtInt(idracN)} / ${fmtInt(hostN)}대 (호스트 ↔ iDRAC 매핑)` : waitText} />
       </div>
       {/* v2.631 A6-2631-05: 범위 계정 응답은 범위 밖(또는 귀속 없는) iDRAC 서버를 빼고 온다 — 줄어든 목록을 '전부' 로 읽지 않게 */}
