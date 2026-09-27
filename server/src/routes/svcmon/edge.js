@@ -11,7 +11,7 @@ import { listAgentTokens } from '../../central/agentTokens.js';
 import { silenceStatus, checkSilenceOnce } from '../../central/svcmonSilence.js';
 import { svcmonPushStatus, pushSvcmonNow } from '../../agent/svcmonPush.js';
 import {
-  listAssignments, setAssignment, deleteAssignment, DEFAULT_EXCEPT_TYPES,
+  listAssignments, setAssignment, deleteAssignment, DEFAULT_EXCEPT_TYPES, svcmonAssignLoadError,
   MAX_TARGETS_PER_AGENT, batchTag,
 } from '../../central/svcmonAssign.js';
 import { svcmonConfigPullStatus, pullSvcmonConfigNow } from '../../agent/svcmonConfigPull.js';
@@ -31,6 +31,9 @@ svcmonRouter.get('/assign', canEdit, (req, res) => {
   res.json({
     role: pollerRole(),
     assignments: listAssignments(),
+    // v2.632(감사 EDGE2632-01 후속): 배정 파일을 못 읽었으면 '배정 없음' 이 아니다 — 화면이 경고한다
+    //   (손상 중 한 엣지를 저장하면 파일이 그 엣지 하나로 새로 써진다).
+    loadError: (() => { const e = svcmonAssignLoadError(); return e ? { reason: String(e.reason || '사유 미상').slice(0, 200), since: e.at || null } : null; })(),
     defaultExceptTypes: DEFAULT_EXCEPT_TYPES,
     maxTargetsPerAgent: MAX_TARGETS_PER_AGENT,
     // 배정 후보 엣지 = **개별 토큰이 발급된 엣지 + 이미 보고 중인 엣지** 의 합집합.

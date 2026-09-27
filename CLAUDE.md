@@ -4178,6 +4178,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **서버가 null 을 보내기 시작하면 그 값을 그리는 화면을 같은 릴리스에서 맞출 것**(이번 회차 `/summary`·`/tools/waste`·`/top`): `${v}%` 는 'null%' 가 된다 — `unitText` 로.
     - 정렬값 `data-sort={v ?? -1}` 금지 — 값 없는 행이 오름차순 맨 앞에 온다. `?? ''`(STable 이 빈 값을 항상 뒤로 보낸다).
     - 웹소켓 서버는 `maxPayload` 를 준다(ws 기본 100MiB — 프레임 하나로 수백 MB 할당).
+  - ⚠⚠ **v2.632 — '한번더' 확정분**(상세 `docs/AUDIT-2026-09-27f.md`, 회귀 `server/test/audit2632{a..f,lead}.test.js` + 웹 `views/audit2632{b,f,lead}.test.js`·`views/tools/audit2632c.test.js`):
+    - ⚠⚠ **설정 손상 판정은 '배포되는 설정 전부' 에 — v2.631 은 5종만 막았다**(EDGE2632-01 high): 성능점검 배정·SAN 포트 사용량·스토리지/PDU 주기·통신 점검·IP 스캔 배정이 빠져 있었다.
+      **새 중앙→엣지 설정 배포를 만들면 `util/settingsLoadError.js` 등록부에 넣고 pull 이 503 또는 `…Unreadable` 표지로 답할 것.**
+      ⚠ 엣지가 `body?.x || {}` 로 적용하는 경로는 중앙이 필드를 빼기만 해도 지운다 — 구버전 엣지에는 응답 전체 503 이다(`?intervalsHold=1` 을 보내는 새 엣지만 필드 생략).
+    - ⚠⚠ **새 503 을 만들면 받는 엣지가 그것을 '무연결' 로 세지 않는지 볼 것**(AX1-01 — v2.631 회귀): RMA 오프라인 명령은 연락 부재 시간으로 발동한다.
+    - **undici 기본 입출력 시한은 300초다 — 그보다 긴 시한은 `resilientFetch.dispatcherFor`**(AX1-03 — v2.631 회귀): 시한만 늘리면 headersTimeout 이 먼저 끊는다.
+    - **같은 숫자를 내는 경로(내부·공개 API·화면)는 같은 기준**(AX1-04·AX2-01): 비율의 분모는 설치 용량, 사용률은 읽은 데이터스토어만. 공개 API 대조 테스트는 재구현이 아니라 **내부 라우트 응답**과 비교한다.
+    - 그 밖: 범위 관리자 형제 라우트 4곳(중계 프록시 설정·VM 생성 작업·DataCenter 목록·인증서 재확인) · RDP 티켓 필드 상한 · GPU 내보내기 스트리밍 + 동시 1건 · 용량 요약 60초 캐시 · 로그 CSV `(ts, rowid)` 커서 · NSX·Horizon 부분 합 · 이상 탐지 척도 하한 · 인시던트 시각 미상.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

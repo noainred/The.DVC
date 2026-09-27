@@ -22,3 +22,12 @@ describe('v2.632 리드', () => {
     expect(s).not.toMatch(/uncheckedCount \?\? 0/);
   });
 });
+
+import { distributionSummary } from './tools/bmUsageDistText.js';
+describe('v2.632 리드 — 배포 현황 생략 개수', () => {
+  it('등록부에 없는 미검증 이름·거절 인출 개수를 말한다', () => {
+    const t = distributionSummary({ enabled: true, rows: [], unknownUnverifiedOmitted: 3, pullsOmitted: 5 });
+    expect(t).toMatch(/미검증 이름 3곳/);
+    expect(t).toMatch(/미검증 인출 5건/);
+  });
+});

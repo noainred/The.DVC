@@ -26,3 +26,8 @@ test('Horizon 합집합 카드는 실패 서버가 있으면 하한(최소 N)이
   const s = src('routes/api/horizonSessions.js');
   assert.match(s, /lowerBound: !!total\.usersLowerBound \|\| Number\(total\.serversFailed\) > 0/);
 });
+
+test('성능점검 배정 목록은 배정 파일 손상을 싣는다', () => {
+  const s = src('routes/svcmon/edge.js');
+  assert.match(s, /loadError: \(\(\) => \{ const e = svcmonAssignLoadError\(\)/);
+});

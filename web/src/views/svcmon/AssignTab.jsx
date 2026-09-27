@@ -95,6 +95,7 @@ export default function AssignTab({ canEdit }) {
   return (
     <div className="flex col gap">
       {err && <ErrorBox message={err} />}
+      {data?.loadError && <div className="svc-cap warn">배정 파일을 읽지 못했습니다({data.loadError.reason}). 아래 목록은 비어 보일 수 있지만 배정이 없다는 뜻이 아닙니다 — 엣지에는 직전 배정이 유지됩니다. 이 상태에서 한 엣지를 저장하면 파일이 그 엣지 하나로 새로 써지므로, 먼저 중앙 설정 디렉터리의 손상 보존본을 확인하세요.</div>}
       {done && <div className="svc-ok">{done}</div>}
 
       <div className={`svc-cap ${role.executes ? 'warn' : 'ok'}`}>
