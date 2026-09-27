@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-09-25T13:59:26.904Z",
-  "count": 91,
+  "generatedAt": "2026-09-27T02:12:45.691Z",
+  "count": 92,
   "tools": [
     {
       "k": "service-hub",
@@ -92,6 +92,14 @@
     },
     {
       "k": "bm-usage",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "corp-usage",
       "adminOnly": false,
       "perm": null,
       "external": null,

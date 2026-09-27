@@ -81,7 +81,7 @@ export function indexOsHosts(bmServers = []) {
  *   를 추측이 아니라 **근거로** 말한다(`bmusage/license.js` 머리말).
  * @returns {{targets:Array, skipped:Array, counts:object}}
  */
-export function resolveTargets({ bareMetal = [], registry = [], bmServers = [], settings = {}, agentName = '', isEdge = false, inventoryOf = null, now = Date.now() } = {}) {
+export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], registry = [], bmServers = [], settings = {}, agentName = '', isEdge = false, inventoryOf = null, now = Date.now() } = {}) {
   const regById = new Map(registry.map((r) => [t(r.id), r]));
   const regByTag = new Map(registry.filter((r) => t(r.serviceTag)).map((r) => [norm(r.serviceTag), r]));
   const os = indexOsHosts(bmServers);
@@ -132,6 +132,7 @@ export function resolveTargets({ bareMetal = [], registry = [], bmServers = [], 
       : { tier: 'unknown', label: '미상', names: [], count: 0, expired: 0, evaluation: false, matched: '', source: '', at: null };
     targets.push({
       ...idOf(b), vcenterId: vc, vcName: b.vcName || '', model: b.model || '',
+      role: 'bm',
       paths,
       license,
       // v2.610: HPE iLO 로 등록된 서버에는 Dell 전용 대체 경로(iDRAC SSH racadm)를 걸지 않는다 — iLO 에 racadm 은 없고
@@ -146,7 +147,56 @@ export function resolveTargets({ bareMetal = [], registry = [], bmServers = [], 
     });
   }
 
+  /*
+   * ── 가상화 호스트(ESXi) — v2.625 ────────────────────────────────────────────
+   * 사용자 요청 "iDRAC 사용량을 ESXi 호스트까지 넓혀서". `settings.includeVirtualization` 이 켜진 경우만(기본 꺼짐).
+   *  · 대상은 `classifyFleet().virtualizationHosts` 그대로다(판정 복제 금지 — 베어메탈과 같은 규칙).
+   *  · 경로는 **iDRAC 하나**다 — ESXi 에 OS SSH(/proc)를 걸지 않는다.
+   *  · 위임: 엣지가 push 한 vCenter(`collectSource:'site'`)의 호스트는 **그 엣지**가 수집한다. 중앙은 건드리지 않는다
+   *    (같은 호스트에 iDRAC 세션이 두 배가 된다 — 베어메탈 `remoteAgent` 규칙과 같다).
+   *  · 받치는 iDRAC 을 모르면(`idracServerId` 없음·서비스태그로도 못 찾음) `no-idrac` 로 밝힌다 — '법인별 서버 사용량' 화면은
+   *    그 호스트를 vCenter 값으로 채운다(사용자 선택).
+   *  · 켜지 않았으면 제외 목록에도 싣지 않는다 — 수백 대의 '꺼짐' 행이 베어메탈 화면의 사유 목록을 덮는다.
+   */
+  if (settings.includeVirtualization) {
+    const siteAgent = new Map((vcenters || []).filter((v) => v && (v.collectSource === 'site' || v.collectMode === 'site'))
+      .map((v) => [t(v.id), t(v.collectedBy || v.agent)]));
+    const bmKeys = new Set(targets.map((x) => x.key));
+    for (const h of virtHosts || []) {
+      if (!h || typeof h !== 'object') continue;
+      const vc = t(h.vcenterId);
+      const idv = idOf({ serverId: h.idracServerId, fleetId: h.fleetId, name: h.name, serviceTag: h.serviceTag });
+      if (!vc) continue;                                   // 가상화 호스트는 늘 vCenter 에 매인다 — 없으면 합성 행(판정 불가)
+      if (bmKeys.has(idv.key)) continue;                   // 같은 물리 박스가 베어메탈로도 잡혔으면 한 번만
+      const owner = norm(siteAgent.get(vc) || '');
+      const mine = owner ? (isEdge && owner === me) : true;
+      if (!mine) { skipped.push({ ...idv, role: 'virt', reason: 'edge-delegated', agent: siteAgent.get(vc) || '', vcenterId: vc }); continue; }
+      if (!corps[vc]) { skipped.push({ ...idv, role: 'virt', reason: 'corp-off', vcenterId: vc }); continue; }
+      if (!settings.idracTelemetry) { skipped.push({ ...idv, role: 'virt', reason: 'both-off', vcenterId: vc }); continue; }
+      const reg = regById.get(t(h.idracServerId)) || (t(h.serviceTag) ? regByTag.get(norm(h.serviceTag)) : null) || null;
+      let idracReason = '';
+      if (!reg || !t(reg.host)) idracReason = 'no-idrac';
+      else if (!t(reg.username) || !t(reg.password)) idracReason = 'no-idrac-cred';
+      if (idracReason) { skipped.push({ ...idv, role: 'virt', reason: idracReason, vcenterId: vc }); continue; }
+      const license = typeof inventoryOf === 'function'
+        ? licenseFromInventory((() => { try { return inventoryOf(t(reg.id)); } catch { return null; } })(), { now })
+        : { tier: 'unknown', label: '미상', names: [], count: 0, expired: 0, evaluation: false, matched: '', source: '', at: null };
+      targets.push({
+        ...idv, vcenterId: vc, vcName: h.vcenter || '', model: h.model || '',
+        role: 'virt',
+        paths: ['idrac'],
+        license,
+        entAllowed: !!(settings.enterpriseEnabled && settings.enterpriseAck && String(reg?.vendor || '').toLowerCase() !== 'hpe'),
+        idrac: { regId: t(reg.id), host: t(reg.host), username: t(reg.username), password: reg.password },
+        osHost: null,
+        missing: [],
+      });
+      bmKeys.add(idv.key);
+    }
+  }
+
   const counts = { targets: targets.length, skipped: skipped.length, idrac: 0, os: 0, both: 0 };
+  counts.virt = targets.filter((x) => x.role === 'virt').length;
   for (const x of targets) {
     if (x.paths.includes('idrac')) counts.idrac += 1;
     if (x.paths.includes('os')) counts.os += 1;
@@ -185,8 +235,8 @@ export function resolveTargets({ bareMetal = [], registry = [], bmServers = [], 
   return { targets, skipped, counts, keyConflicts };
 }
 
-/** 안정 키 — 서비스태그 우선(v2.548 `deviceKey` 와 같은 등급 판단). */
-function idOf(b) {
+/** 안정 키 — 서비스태그 우선(v2.548 `deviceKey` 와 같은 등급 판단). v2.625: 법인별 사용량 집계가 같은 키로 최신값을 찾도록 export. */
+export function idOf(b) {
   const tag = t(b.serviceTag).toUpperCase();
   return {
     serverId: t(b.serverId),

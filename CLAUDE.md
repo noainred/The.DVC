@@ -4088,6 +4088,26 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **웹**: 대상(엣지·vCenter)을 바꾸는 설정 화면은 새 대상 조회가 성공하기 전에 폼을 비우고 저장을 잠근다(WEB-01·03·04·08 — 이전 대상 값이 새 대상에
       저장·삭제되던 것) · 조회 실패를 '없음' 으로 보이지 않는다(WEB-06) · `null GB` 금지(WEB-02) · HPE 서버 상세 제목은 모든 진입점이 `detailServerOf` 를 쓴다(RECENT-04).
     - 남긴 것: 용량 추이 화면의 `vmperfStale`·`vmStatsSkipped` 표시 · curuser `partialRows` 표시 · 물리 GPU·NSX 403 의 권한 안내 컴포넌트화.
+  - ⚠⚠ **법인별 서버 사용량(v2.625) — 퍼센트를 더하지 않는다. 사용률 × 용량으로 사용량을 만들어 더한다**
+    (`server/src/corpusage/build.js`(순수) + `routes/api/corpUsage.js GET /tools/corp-usage` + 웹 `views/tools/CorpUsage.jsx`·
+    `corpUsageText.js` + `bmusage/targets.js` 가상화 블록. 사용자 요청 "iDRAC 사용량을 ESXi 호스트까지 넓혀서 · 법인별 전체/다빈치/IRS ·
+    서버 전체/물리/가상화 CPU·메모리 사용량을 1페이지에". 선택: 별도 스위치 + 법인 선택 · 못 읽은 ESXi 는 vCenter 값 + 출처 ·
+    사용량 합 + 가중 사용률 · 전체 검증. 회귀 `server/test/corpUsage2625.test.js`(변이 11/11) + 웹 `corpUsageText.test.js`):
+    - **대상 판정을 복제하지 않는다** — 물리 = `classifyFleet().bareMetal`, 가상화 = `.virtualizationHosts`(합성 행 제외). ESXi 호스트와
+      iDRAC 등록의 연결은 `fleetInventory` 가 싣는 `idracServerId`(받침 iDRAC 의 등록 id — 엣지 보고분은 빈 값)다.
+    - ⚠⚠ **지표마다 분모가 다르다** — CPU 만 읽은 서버는 메모리 분모에 넣지 않는다(분자·분모가 같은 서버 집합이어야 사용률이 참).
+      못 읽음·오래됨(`freshMs` = 수집 주기×3, 최소 30분)·용량 모름은 합계에서 빼고 **따로 센다**(한 서버는 한 사유). 분모 0 이면 null.
+    - **vCenter 대체는 가상화 호스트만, 연결된 호스트만**(`store.usageReadable` 과 같은 기준). 물리 서버에는 vCenter 값이 없다 —
+      대체하면 다른 뜻의 숫자를 섞는다. 출처(`src`: idrac·os·vcenter)는 개수로 화면에 남긴다.
+    - **ESXi iDRAC 수집은 `bmusage` 설정 `includeVirtualization`(기본 꺼짐)** — 켜도 법인 선택·`idracTelemetry` 를 그대로 따른다.
+      경로는 iDRAC 하나(ESXi 에 OS SSH 금지). site vCenter 의 호스트는 그 엣지(`collectedBy`)가 읽는다 — 중앙이 읽으면 iDRAC 세션이 두 배.
+      베어메탈로도 잡힌 같은 박스(같은 key)는 한 번만. 꺼져 있으면 제외 목록에도 싣지 않는다(수백 행이 베어메탈 사유 목록을 덮는다).
+      엣지 봉투·중앙 정제(`bmUsageEdgePull.sanitizeBmUsageSnap`)에 새 설정 필드를 함께 넣었다 — **새 필드를 만들면 정제 화이트리스트도**.
+    - 엣지 수집 법인의 값은 **중앙이 가져온 엣지 보관분(인메모리)** 에서만 읽는다(상시 push 없음) — 없거나 오래되면 합계에서 빠지고 안내가 말한다.
+    - 응답은 **법인 합계만**(서버 이름·주소 0 — 테스트가 호스트 이름 누출 0 을 고정) · 범위 계정은 허용 법인만 + 귀속 없음 null ·
+      memoJson 12초(scopeKey) · 폴링 금지. 법인 구분은 이름의 IRS(V6 `siteGroupOf` 와 같은 규칙).
+    - ⚠ 정직 기록: 목 데이터에 베어메탈·iDRAC 텔레메트리·IRS 법인이 없어 Chromium 검증은 vCenter 경로 + 응답 합성(물리·IRS 행)으로 했다.
+      viewer 는 기본 권한에 `tools` 가 없어 막히는 것이 정상이고, tools 를 준 범위 viewer 로 허용 법인 1곳만 보이는 것을 확인했다.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

@@ -192,6 +192,9 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       connectionState: h.connectionState || '', watts: round(watts),
       powerSource: backed ? m.source : (Number.isFinite(watts) ? 'vcenter' : null),
       idracBacked: backed, via, tag: t || '', tagKey: hk,
+      // v2.625: 받치는 iDRAC 등록 id — 사용률 수집(bmusage)이 ESXi 호스트의 iDRAC 을 찾는 연결 고리.
+      //   받침이 없거나 엣지 보고분(serverByTag 에서 제외)이면 빈 값이고, 그 호스트는 iDRAC 경로가 없다.
+      idracServerId: backed ? (m.serverId || '') : '',
     });
   }
 

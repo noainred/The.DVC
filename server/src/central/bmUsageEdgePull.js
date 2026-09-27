@@ -117,6 +117,7 @@ export function sanitizeBmUsageSnap(snap) {
     settings: st ? {
       intervalMs: numOrNull(st.intervalMs), osSsh: st.osSsh === true, idracTelemetry: st.idracTelemetry === true,
       idracFullTelemetry: st.idracFullTelemetry === true, includeUnassigned: st.includeUnassigned === true,
+      includeVirtualization: st.includeVirtualization === true,
       corps: (Array.isArray(st.corps) ? st.corps : []).slice(0, 1_000).map((c) => strOf(c, 128)).filter(Boolean),
       enterpriseEnabled: st.enterpriseEnabled === true, enterpriseAck: st.enterpriseAck === true,
       enterpriseMode: strOf(st.enterpriseMode, 32), enterpriseActive: st.enterpriseActive === true,

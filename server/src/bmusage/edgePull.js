@@ -59,7 +59,7 @@ export async function buildBmUsageEnvelope({ limit = DEFAULT_LIMIT } = {}) {
     // 설정 전체를 싣지 않는다 — 중앙 화면이 쓰는 값만(법인 목록은 그 법인의 것이라 그대로).
     settings: {
       intervalMs: s.intervalMs, osSsh: !!s.osSsh, idracTelemetry: !!s.idracTelemetry,
-      idracFullTelemetry: !!s.idracFullTelemetry, includeUnassigned: !!s.includeUnassigned,
+      idracFullTelemetry: !!s.idracFullTelemetry, includeUnassigned: !!s.includeUnassigned, includeVirtualization: !!s.includeVirtualization,
       corps: Object.keys(s.corps || {}),
       enterpriseEnabled: !!s.enterpriseEnabled, enterpriseAck: !!s.enterpriseAck,
       enterpriseMode: s.enterpriseMode, enterpriseActive: enterpriseActive(s),

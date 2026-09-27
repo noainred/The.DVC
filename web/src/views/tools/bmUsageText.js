@@ -628,3 +628,15 @@ export function blurNumber(raw) {
   return Number.isFinite(n) ? n : null;
 }
 export const BLANK_KEPT_TEXT = '빈 칸은 저장하지 않았습니다 — 이전 값으로 되돌렸습니다.';
+
+/**
+ * 'ESXi 호스트도 iDRAC 로 수집' 스위치 안내(v2.625). 켜면 선택한 법인의 가상화 호스트(서버 분석 › 구분 › 가상화)도
+ * **iDRAC 경로로만** 읽는다 — ESXi 에 OS SSH 를 걸지 않는다. 부하를 축소하지 않고 말한다.
+ */
+export function esxiCollectNote(form = {}) {
+  if (!form || !form.includeVirtualization) {
+    return '**ESXi 호스트도 iDRAC 로 수집** 은 꺼져 있습니다 — 법인별 서버 사용량 화면은 가상화 호스트를 **vCenter 값**으로 채우고 출처를 밝힙니다. 켜면 선택한 법인의 ESXi 호스트도 주기마다 iDRAC 에 접속합니다(호스트 수만큼 세션이 늘어납니다).';
+  }
+  const off = !form.idracTelemetry ? ' ⚠ 위의 **iDRAC 텔레메트리가 꺼져 있어** ESXi 호스트는 읽지 않습니다.' : '';
+  return '**ESXi 호스트도 iDRAC 로 수집** 이 켜져 있습니다 — 선택한 법인의 가상화 호스트를 **iDRAC 로만** 읽습니다(OS SSH 는 걸지 않습니다). 받치는 iDRAC 등록이 없는 호스트는 제외 목록에 **iDRAC 등록 없음** 으로 남고, 법인별 서버 사용량 화면은 그 호스트를 vCenter 값으로 채웁니다.' + off;
+}

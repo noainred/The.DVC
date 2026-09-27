@@ -26,6 +26,13 @@ export const DEFAULTS = Object.freeze({
   enabled: false,
   corps: {},                 // { [vcenterId]: true }  — 켠 법인만
   includeUnassigned: false,  // 법인 귀속이 없는 베어메탈도 수집할지(기본 제외 — 어느 법인 부하인지 모른다)
+  /*
+   * v2.625(사용자 요청 "iDRAC 사용량을 ESXi 호스트까지 넓혀서"): 켠 법인의 **가상화 호스트(ESXi)** 도 iDRAC 텔레메트리로
+   * CPU·메모리를 읽는다. ⚠ **기본 꺼짐**이다 — 호스트 약 658대가 5분마다 Redfish 요청을 더한다(사용자 선택: 별도 스위치 +
+   * 법인 선택). 경로는 iDRAC 하나뿐이다(ESXi 에는 OS SSH 경로를 걸지 않는다). 못 읽은 호스트는 '법인별 서버 사용량' 화면이
+   * vCenter 값으로 채우고 출처를 밝힌다(수집이 아니라 표시 단계의 결정 — 여기서는 대상만 정한다).
+   */
+  includeVirtualization: false,
   intervalMs: 5 * 60_000,
   rawRetentionDays: 90,
   dailyRetentionDays: 365 * 5,
@@ -98,6 +105,7 @@ export function normalizeSettings(raw = {}) {
     enabled: !!raw.enabled,
     corps,
     includeUnassigned: !!raw.includeUnassigned,
+    includeVirtualization: raw.includeVirtualization === true,
     intervalMs: clampSetting(raw.intervalMs, { min: MIN_INTERVAL_MS, max: MAX_INTERVAL_MS, def: DEFAULTS.intervalMs }),
     // 원시 보존은 행 수를 직접 정한다 — 하한 7일(그 아래면 증가 추세를 못 본다), 상한 365일.
     idracFullTelemetry: raw.idracFullTelemetry !== false,

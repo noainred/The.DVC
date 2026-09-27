@@ -71,6 +71,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'edge-log': 'edge-log',            // EdgeLog.jsx 전용(v2.549) — 엣지 로그·진행상태(adminOnly)
   'edge-log-local': 'edge-log',      // 〃 이 포탈 자신의 로그(경로를 `/:agent` 와 섞지 않기 위해 분리)
   'bm-usage': 'bm-usage',            // BmUsage.jsx 전용(v2.550) — 베어메탈 사용률
+  'corp-usage': 'corp-usage',        // CorpUsage.jsx 전용(v2.625) — 법인별 서버 사용량(전체·물리·가상화)
   'link-check': 'link-check',        // LinkCheck.jsx 전용(v2.552) — 중앙↔엣지·vCenter 통신 점검(adminOnly)
   'portal-check': 'portal-check',    // PortalCheck.jsx 전용(v2.560) — 토큰 점검(adminOnly+fullScope)
   'comm-map': 'comm-map',            // CommMap.jsx 전용(v2.584) — 통신 지도(중앙↔엣지 시각화, adminOnly+fullScope)

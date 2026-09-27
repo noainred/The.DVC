@@ -33,7 +33,7 @@ import {
   facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote, hostsUnreadNote,
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes,
-  unassignedNote, edgePullState, edgePullNote, blurNumber, BLANK_KEPT_TEXT } from './bmUsageText.js';
+  unassignedNote, edgePullState, edgePullNote, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote } from './bmUsageText.js';
 
 /** 표의 지표 열 — 서버가 준 `metrics` 계약과 같은 순서를 쓴다. */
 const COLS = [
@@ -329,6 +329,7 @@ export function BmUsage() {
                       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.key); } }}
                       style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3, color: 'inherit' }}
                     >{r.name}</span>
+                    {r.role === 'virt' && <span title="ESXi(가상화) 호스트 — 설정의 'ESXi 호스트도 iDRAC 로 수집' 으로 들어온 서버입니다" style={{ marginLeft: 6, fontSize: 10, padding: '0 5px', borderRadius: 4, border: '1px solid var(--border)', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>ESXi</span>}
                     {r.serviceTag && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.serviceTag}</div>}
                   </td>
                   <td data-sort={r.vcenterId || ''}>{r.vcenterId || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
@@ -554,7 +555,13 @@ export function BmUsage() {
             <label style={{ fontSize: 12 }}>
               <input type="checkbox" checked={!!form.includeUnassigned} onChange={(e) => saveSettings({ includeUnassigned: e.target.checked })} disabled={saving} /> 법인 귀속 없는 서버도 포함
             </label>
+            <label style={{ fontSize: 12 }}>
+              <input type="checkbox" checked={!!form.includeVirtualization} onChange={(e) => saveSettings({ includeVirtualization: e.target.checked })} disabled={saving} /> ESXi 호스트도 iDRAC 로 수집
+            </label>
           </div>
+          <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+            <BoldText text={esxiCollectNote(form)} />
+          </p>
 
           {/* ── iDRAC 텔레메트리 전수 모드(v2.551) ──────────────────────────── */}
           <h4 style={{ margin: '14px 0 6px' }}>iDRAC 텔레메트리</h4>
