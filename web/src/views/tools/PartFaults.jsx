@@ -218,8 +218,8 @@ export function PartFaults() {
                   <td><span style={{ color: stateColor(EDGE_KIND_TONE[r.kind]), fontWeight: 600, whiteSpace: 'nowrap' }}>{EDGE_KIND_LABEL[r.kind] || r.kind}</span></td>
                   <td data-sort={r.version || ''} style={{ whiteSpace: 'nowrap' }}>{r.version ? `v${r.version}` : '—'}{r.protocol ? ` · p${r.protocol}` : ''}</td>
                   <td data-sort={r.at || 0} style={{ whiteSpace: 'nowrap' }}>{r.at ? ageText(r.ageMs) : '—'}</td>
-                  <td data-sort={r.devices ?? -1}>{r.devices == null ? '—' : `${r.devices}${r.devicesFailed ? ` (${r.devicesFailed})` : ''}`}</td>
-                  <td data-sort={r.open ?? -1}>{r.open == null ? '—' : r.open}</td>
+                  <td data-sort={r.devices ?? ''}>{r.devices == null ? '—' : `${r.devices}${r.devicesFailed ? ` (${r.devicesFailed})` : ''}`}</td>
+                  <td data-sort={r.open ?? ''}>{r.open == null ? '—' : r.open}</td>
                   <td data-sort={(r.rejected || 0) + (r.partsOmitted || 0)} style={{ color: (r.rejected || r.partsOmitted) ? 'var(--amber)' : undefined, whiteSpace: 'nowrap' }}>{r.rejected || 0}{r.partsOmitted ? ` · 파트 ${r.partsOmitted} 잘림` : ''}</td>
                 </tr>
               ))}

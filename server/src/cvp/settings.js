@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 
@@ -54,13 +55,22 @@ export function mergeSettings(cur, patch = {}) {
 }
 
 let _cache = null;
+const _loadErr = makeSettingsLoadError(() => FILE());
+/** v2.631(EDGE2631-01): 설정 파일을 못 읽었으면 사유(배포 라우트가 설정을 싣지 않는다), 읽었으면 null. */
+export function cvpSettingsLoadError() { loadSettings(); return _loadErr.get(); }
 export function loadSettings() {
   if (_cache) return { ..._cache };
   let raw = {};
-  try {
-    if (fs.existsSync(FILE())) raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-  } catch (e) { preserveCorrupt(FILE(), e?.message); raw = {}; }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { preserveCorrupt(FILE(), '객체가 아닌 JSON 값'); raw = {}; }
+  // v2.631(EDGE2631-01): 로드 오류를 기억한다 — 손상 → 보존 → 기본값을 /api/central/cvp-config 가 내려보내면 엣지
+  //   applyCentralSettings 가 그 기본값으로 현장 설정을 덮었다(등록부 손상만 503 이었다). 배포 라우트는 이 오류면 설정을 싣지 않는다.
+  if (!fs.existsSync(FILE())) _loadErr.missing();
+  else {
+    try {
+      raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닌 JSON 값');
+      _loadErr.ok();
+    } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE(), e?.message); raw = {}; }
+  }
   _cache = normalizeSettings(raw);
   return { ..._cache };
 }
@@ -73,6 +83,7 @@ export function saveSettings(patch = {}) {
   const cur = loadSettings();
   _cache = mergeSettings(cur, patch);
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
+  _loadErr.ok();
   if (JSON.stringify(cur) !== JSON.stringify(_cache)) notify();
   return { ..._cache };
 }
@@ -89,8 +100,9 @@ export function applyCentralSettings(remote) {
   if (JSON.stringify(next) === JSON.stringify(cur)) return false;
   _cache = next;
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
+  _loadErr.ok();
   notify();
   return true;
 }
 
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; _loadErr.ok(); }

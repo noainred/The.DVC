@@ -144,8 +144,8 @@ function PortCheckTable({ pc, problems, zoningNote, omitted }) {
                   <td data-sort={r.verdict}><StatusBadge status={r.verdict} label={portVerdict(r.verdict).label} color={portVerdict(r.verdict).color} /></td>
                   <td data-sort={r.state}>{r.stateRaw || r.state}</td>
                   <td style={{ fontSize: 11.5 }}>{r.name || '—'}</td>
-                  <td data-sort={String(r.rxPowerDbm ?? 999)}>{opticalText(r)}</td>
-                  <td data-sort={String(r.errNew ?? r.errSum ?? -1)}>{errorText(r)}</td>
+                  <td data-sort={String(r.rxPowerDbm ?? '')}>{opticalText(r)}</td>
+                  <td data-sort={String(r.errNew ?? r.errSum ?? '')}>{errorText(r)}</td>
                   <td>
                     {(r.reasons?.length || probByIndex.has(r.index))
                       ? <button className="tab" style={{ padding: '1px 7px', fontSize: 11 }} onClick={() => setOpen(open === r.index ? null : r.index)}>{open === r.index ? '접기' : '보기'}</button>
@@ -297,7 +297,7 @@ function HistoryPanel({ history }) {
                   <td data-sort={String(r.counts.warn)} style={{ color: r.counts.warn ? tone('amber') : undefined }}>{r.counts.warn}</td>
                   <td data-sort={String(r.counts.unknown)} style={{ color: r.counts.unknown ? tone('amber') : undefined }}>{r.counts.unknown}</td>
                   <td data-sort={String(r.counts.ok)}>{r.counts.ok}</td>
-                  <td data-sort={String(r.ports?.bad ?? -1)}>{r.ports?.bad == null ? '—' : r.ports.bad}</td>
+                  <td data-sort={String(r.ports?.bad ?? '')}>{r.ports?.bad == null ? '—' : r.ports.bad}</td>
                 </tr>
               ))}
               {!runs.length && <tr><td colSpan={8} className="muted">아직 기록된 점검이 없습니다 — 이번 점검부터 쌓입니다.</td></tr>}

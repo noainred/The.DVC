@@ -8,6 +8,7 @@ import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실
 
 import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 const EMPTY = { id: '', name: '', host: 'https://', username: '', password: '', vcenterId: '', proxyId: '', enabled: true, pollIntervalSec: '', timeoutMs: '', location: { region: '아시아' } };
+import ScopeOmitBanner from './ScopeOmitBanner.jsx'; // v2.631 A6-2631-06: 범위 제외 문구 단일 소스
 
 /** 설정 → NSX 관리: NSX Manager 등록/수정/연결테스트/삭제. (vCenter와 별개 수집기) */
 export default function NsxAdmin() {
@@ -87,9 +88,8 @@ export default function NsxAdmin() {
         </div>
       </div>
       {/* v2.628(감사 LEFT2628-03): 범위 계정에는 서버가 범위 밖·법인 미지정 매니저를 빼고 준다(scopeNsxManagers) — 뺀 개수를 밝힌다. */}
-      {data.scoped && data.omittedOutOfScope > 0 && (
-        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>범위 밖이거나 법인이 지정되지 않은 NSX Manager {data.omittedOutOfScope}개는 표시하지 않습니다.</div>
-      )}
+      {/* v2.631 A6-2631-06: scoped·omittedOutOfScope 판정·문구는 scopeOmitText.js 하나가 소유한다 */}
+      <ScopeOmitBanner data={data} unit="NSX Manager" counter="개" why="내 조회 범위 밖(또는 법인이 지정되지 않은)" />
 
       <div className="table-wrap">
         <STable>

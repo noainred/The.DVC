@@ -12,6 +12,7 @@ import { ErrorBox } from '../../components/ui.jsx';
 import { errorBoxInput } from '../../components/accessDeniedText.js'; // v2.628(LEFT2628-04)
 
 const PEMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', os: 'linux', vcenterId: '', enabled: true };
+import ScopeOmitBanner from '../ScopeOmitBanner.jsx'; // v2.631 A6-2631-06: 범위 제외 문구 단일 소스
 // 오류 분류별 배지 색: 로그인 안됨=red · 드라이버 없음=amber · 접속 불가=gray · 기타=red
 const PGPU_ERR_COLOR = { login: 'red', nodriver: 'amber', unreachable: 'gray', error: 'red' };
 
@@ -117,7 +118,8 @@ export function PhysicalGpuManager({ vcs }) {
       {loadErr && loadErr.status === 403 && <ErrorBox error={loadErr} />}
       {loadErr && loadErr.status !== 403 && <div className="banner warn" style={{ marginBottom: 8 }}>물리 GPU 서버 목록을 읽지 못했습니다: {errorBoxInput(loadErr).text}{d ? ' — 아래는 직전에 받은 목록입니다.' : ''}</div>}
       {/* v2.628(감사 LEFT2628-04): 범위 계정에는 서버가 범위 밖·소속 vCenter 없는 서버를 빼고, 폴러의 전 함대 집계를 싣지 않는다(scopePhysicalView). */}
-      {d?.scoped && d.omittedOutOfScope > 0 && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>범위 밖이거나 소속 vCenter 가 지정되지 않은 물리 GPU 서버 {d.omittedOutOfScope}대는 표시하지 않습니다.</div>}
+      {/* v2.631 A6-2631-06: scoped·omittedOutOfScope 판정·문구는 scopeOmitText.js 하나가 소유한다 */}
+      <ScopeOmitBanner data={d} unit="물리 GPU 서버" counter="대" why="내 조회 범위 밖(또는 소속 vCenter 가 지정되지 않은)" style={{ marginBottom: 6 }} />
       {d?.status?.fleetCountsHidden && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>전 법인 수집 현황(전체 서버·GPU 수·실행 집계)은 전체 범위 계정에만 표시합니다 — 아래 수치는 이 계정 범위 안의 서버만입니다.</div>}
       {opErr && <div className="banner warn" style={{ marginBottom: 8 }}>{opErr}</div>}
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>

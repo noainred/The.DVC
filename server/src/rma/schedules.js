@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { scheduleItemIssue, buildTest } from './tests.js';
 
 const FILE = path.join(config.configDir, 'rma-schedules.json');
@@ -17,19 +18,28 @@ const MAX_PER_AGENT = 500;
 let _db = null;
 let seq = 0;
 
+/*
+ * v2.631(EDGE2631-01): 손상 → 보존 → 빈 스케줄이면 /api/central/rma-poll 이 버전 불일치로 **빈 스케줄을 내려보내** 엣지가 점검을
+ *   전부 멈추고, 동시에 중앙은 known 집합이 비어 엣지가 보낸 점검 결과를 전부 버렸다. 로드 오류를 기억해 rma-poll 이 503 으로
+ *   답하게 한다(엣지는 비-2xx 면 outbox·스케줄을 그대로 두고 백오프한다). 관리자가 한 번 저장하면 풀린다.
+ */
+const _loadErr = makeSettingsLoadError(() => FILE);
 function load() {
   if (_db) return _db;
+  if (!fs.existsSync(FILE)) { _loadErr.missing(); _db = { agents: {} }; return _db; }
   try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      _db = { agents: p.agents && typeof p.agents === 'object' ? p.agents : {} };
-      return _db;
-    }
-  } catch { preserveCorrupt(FILE); }
+    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아닌 JSON 값');
+    _db = { agents: p.agents && typeof p.agents === 'object' ? p.agents : {} };
+    _loadErr.ok();
+    return _db;
+  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e?.message); }
   _db = { agents: {} };
   return _db;
 }
-function persist() { atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ...load() }, null, 2), { mode: 0o600 }); }
+function persist() { atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ...load() }, null, 2), { mode: 0o600 }); _loadErr.ok(); }
+/** v2.631(EDGE2631-01): 스케줄 파일을 못 읽었으면 사유(rma-poll 이 503 으로 답한다), 읽었으면 null. */
+export function rmaSchedulesLoadError() { load(); return _loadErr.get(); }
 const lc = (a) => String(a || '').trim().toLowerCase();
 const newId = () => `t_${Date.now().toString(36)}_${(seq++).toString(36)}`;
 

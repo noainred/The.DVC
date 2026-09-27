@@ -5,6 +5,7 @@ import STable from '../../components/STable.jsx';
 import { resolveMenu, menuById, SEG_INFO } from '../menus.js';
 import { menuHash } from '../route.js';
 import { serverSegments, serverCorpRows } from '../v6Data.js';
+import { corpTotalLabel } from '../../views/corpSiteStatus.js'; // v2.631(감사 WEB2631-03)
 import { unplacedRows, corpNoteText } from '../../views/overviewServerText.js';
 
 /**
@@ -81,13 +82,13 @@ function ServerExtras({ seg }) {
             <thead><tr><th>법인</th><th className="right">물리 전용</th><th className="right">가상화 호스트</th><th className="right">서버 합계</th><th className="right">가상화 서버</th><th className="right">구동중</th><th className="right">호스트당 VM</th></tr></thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id}><td>{r.name}</td><td className="right">{fmt(r.physOnly)}</td><td className="right">{fmt(r.hosts)}</td><td className="right"><b>{fmt(r.total)}</b></td>
+                <tr key={r.id}><td>{r.name}{r.mark && <span className="v6-warn" style={{ marginLeft: 6, fontSize: 11 }} title={r.markTitle || undefined}>{r.mark}</span>}</td><td className="right">{fmt(r.physOnly)}</td><td className="right">{fmt(r.hosts)}</td><td className="right"><b>{fmt(r.total)}</b></td>
                   <td className="right">{fmt(r.vms)}</td><td className="right">{fmt(r.vmsOn)}</td><td className="right">{r.perHost == null ? '—' : r.perHost}</td></tr>
               ))}
               {extra.map((r) => (
                 <tr key={r.id} data-pin title={r.title}><td className="muted">{r.name}</td><td className="right">{fmt(r.physOnly)}</td><td className="right">—</td><td className="right"><b>{fmt(r.total)}</b></td><td className="right">—</td><td className="right">—</td><td className="right">—</td></tr>
               ))}
-              <tr data-pin className="v6-total"><td>합계</td><td className="right">{fmt(sum('physOnly') == null ? null : sum('physOnly') + extra.reduce((a, r) => a + (r.physOnly || 0), 0))}</td>
+              <tr data-pin className="v6-total"><td title={corpTotalLabel(rows) !== '합계' ? '첫 수집 중·연결 실패·비활성 vCenter 는 호스트·VM 을 모르므로 합계에 넣지 않았습니다' : undefined}>{corpTotalLabel(rows)}</td><td className="right">{fmt(sum('physOnly') == null ? null : sum('physOnly') + extra.reduce((a, r) => a + (r.physOnly || 0), 0))}</td>
                 <td className="right">{fmt(sum('hosts'))}</td><td className="right">{fmt(sum('total') == null ? null : sum('total') + extra.reduce((a, r) => a + (r.total || 0), 0))}</td>
                 <td className="right">{fmt(sum('vms'))}</td><td className="right">{fmt(sum('vmsOn'))}</td><td className="right">—</td></tr>
             </tbody>

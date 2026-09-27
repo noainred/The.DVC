@@ -50,13 +50,13 @@ import { ipToNum } from '../ipam/ledger.js';
 import { takeCaptureJobs, applyCaptureResult, captureAgentOfReq } from '../central/captureJobs.js';
 import { takeJobsWait as takeRmaJobsWait, setJobResult as setRmaJobResult, jobAgentOf as rmaJobAgentOf, getJob as getRmaJob, noteHeartbeat as noteRmaHeartbeat, onlineInstances as rmaOnlineInstances } from '../rma/jobs.js';
 import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaRemoteFor } from '../rma/settings.js';
-import { scheduleFor as rmaScheduleFor, assignForInstance as rmaAssign } from '../rma/schedules.js';
+import { scheduleFor as rmaScheduleFor, assignForInstance as rmaAssign, rmaSchedulesLoadError } from '../rma/schedules.js';
 import { ingestResult as rmaIngestResult } from '../rma/testResults.js';
 import { commitCollection as commitGuestDisk } from '../guestdisk/db.js';
 import { commitVmSeries, setVmSeriesMeta } from '../vmseries/db.js';   // v2.510: 실시간 스파이크 push 수신(vCenter별 독립 DB)
-import { loadVmSeriesSettings } from '../vmseries/settings.js';
+import { loadVmSeriesSettings, vmSeriesSettingsLoadError } from '../vmseries/settings.js';
 import { commitCurUser } from '../curuser/db.js';                     // v2.520: '현재 사용자' push 수신
-import { load as loadCurUserSettings } from '../curuser/settings.js';
+import { load as loadCurUserSettings, curUserSettingsLoadError } from '../curuser/settings.js';
 import { recordCurUserActivity } from '../curuser/activityLog.js';
 import { load as loadGuestDiskSettings } from '../guestdisk/settings.js';
 import { sanitizeGuestDiskVms } from '../guestdisk/analyze.js';
@@ -960,6 +960,7 @@ centralRouter.post('/curuser', requireCentral(), async (req, res) => {
 
 // '현재 사용자' 설정 배포(v2.520) — 엣지가 주기적으로 GET. 이 엣지가 소유한 vCenter 항목만 내려준다.
 centralRouter.get('/curuser-config', requireCentral(), (req, res) => {
+  if (settingsUnreadable(res, curUserSettingsLoadError, '현재 사용자')) return; // v2.631 EDGE2631-01
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim().toLowerCase();
   const mine = new Set(listInventory().filter((e) => String(e.agent || '').toLowerCase() === agent).map((e) => String(e.vcenterId)));
   const s = loadCurUserSettings();
@@ -978,6 +979,7 @@ centralRouter.get('/curuser-config', requireCentral(), (req, res) => {
 // 실시간 스파이크 수집 설정 배포(v2.510) — 엣지가 주기적으로 GET. 이 엣지가 수집하는(인벤토리 소유)
 // vCenter 의 targets 만 내려준다(다른 법인 id 비노출). scope='all' 은 그대로 내려간다.
 centralRouter.get('/vmseries-config', requireCentral(), (req, res) => {
+  if (settingsUnreadable(res, vmSeriesSettingsLoadError, '실시간 스파이크')) return; // v2.631 EDGE2631-01
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim().toLowerCase();
   const mine = new Set(listInventory().filter((e) => String(e.agent || '').toLowerCase() === agent).map((e) => String(e.vcenterId)));
   const s = loadVmSeriesSettings();
@@ -1219,6 +1221,21 @@ function registryUnreadable(res, errOf, what) {
 }
 
 /**
+ * v2.631(EDGE2631-01): 중앙 **설정 파일**(엣지에 배포되는 값)을 읽지 못했으면 설정 pull 에 503 {settingsUnreadable} 으로 답한다.
+ *   손상 → preserveCorrupt → 기본값(꺼짐·빈 범위)을 200 으로 내려보내면 엣지가 그것을 '중앙이 명시한 값' 으로 보고 사본을 덮거나
+ *   지워 전 엣지의 수집이 한 번에 꺼졌다(등록부는 v2.612 에 막았는데 설정 배포 경로가 빠져 있었다). 엣지 pull 은 비-2xx 를
+ *   실패로 보고 직전 사본을 유지한다. 중앙 자신의 로컬 동작(꺼짐 표시)은 바꾸지 않는다.
+ */
+function settingsUnreadable(res, errOf, what) {
+  let e = null;
+  try { e = typeof errOf === 'function' ? errOf() : null; } catch (x) { e = { at: Date.now(), reason: x?.message || String(x) }; }
+  if (!e) return false;
+  res.set('Cache-Control', 'no-store');
+  res.status(503).json({ ok: false, reason: 'settingsUnreadable', detail: `중앙 ${what} 설정 파일을 읽지 못했습니다(${String(e.reason || '사유 미상').slice(0, 200)}) — 엣지는 직전 설정을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 설정을 다시 저장하세요.`, since: e.at || null });
+  return true;
+}
+
+/**
  * v2.620(EDGE2620-01): 엣지 **수신(push)** 라우트도 소유 판정 전에 등록부 손상을 본다. 손상 → 보존 → 빈 목록이면 소유 집합이
  *   비어 cvp-data 는 그 엣지의 상태·장비 행을 지우고, sanswitch-perf 는 전 표본을 '미위임(위조 방지)' 으로 버리고, storage/pdu/
  *   sanswitch-data 는 그 엣지 목록을 빈 목록으로 교체한 채 **200 ok** 를 줬다 — 엣지는 커서를 전진해 표본이 영구 소실됐다.
@@ -1330,7 +1347,8 @@ centralRouter.post('/edge-log-result', requireCentral(), async (req, res) => {
 // 파트 장애 스위치 배포(v2.548 F3) — 엣지가 주기적으로 GET. 중앙 관리자가 전체/엣지별로 정한 값만 내려간다.
 centralRouter.get('/partfault-config', requireCentral(), async (req, res) => {
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim().toLowerCase();
-  const { settingsForAgent } = await import('../partfault/settings.js');
+  const { settingsForAgent, partFaultSettingsLoadError } = await import('../partfault/settings.js');
+  if (settingsUnreadable(res, partFaultSettingsLoadError, '파트 장애')) return; // v2.631 EDGE2631-01
   res.json({ ok: true, settings: settingsForAgent(agent) });
 });
 
@@ -1339,7 +1357,9 @@ centralRouter.get('/partfault-config', requireCentral(), async (req, res) => {
 //   `?applied=<sig>` 는 엣지가 지금 적용 중인 판 — 화면이 '적용됨 / 대기' 를 가르는 근거다(인메모리 기록).
 centralRouter.get('/bmusage-config', requireCentral(), async (req, res) => {
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim();
-  const { distributeFor, recordBmUsagePull } = await import('../bmusage/settings.js');
+  const { distributeFor, recordBmUsagePull, bmUsageSettingsLoadError } = await import('../bmusage/settings.js');
+  // v2.631 EDGE2631-01: 배포 설정·로컬 설정 중 하나라도 손상이면 distribute:false(엣지가 사본을 지움) 나 기본값 배포 대신 503.
+  if (settingsUnreadable(res, bmUsageSettingsLoadError, '베어메탈 사용률')) return;
   const out = distributeFor(agent);
   recordBmUsagePull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), reason: out.distribute ? '' : out.reason, verified: req.centralAuth?.mode === 'agent', deliveredSig: out.distribute ? String(out.sig || '') : '' });
   res.set('Cache-Control', 'no-store');
@@ -1620,6 +1640,12 @@ centralRouter.post('/rma-poll', requireCentral(), async (req, res) => {
     res.locals.ingestReject = { kind: REJECT_KIND.OTHER, reason: hb.reason || 'RMA 인스턴스 수 상한' };
     return res.status(403).json({ ok: false, refused: true, reason: hb.reason || 'RMA 인스턴스 수 상한으로 이 인스턴스를 받지 않았습니다.', jobs: [] });
   }
+  /*
+   * v2.631 EDGE2631-01: 스케줄 파일이 손상이면 known 이 비어 결과를 전부 버리고(엣지는 200 이면 outbox 를 지운다) 빈 스케줄을
+   *   내려보내 엣지 점검이 전부 멈췄다. 결과를 받기 **전에** 503 — 엣지는 outbox·스케줄을 그대로 두고 백오프한다.
+   *   ⚠ 그 동안 원격 명령(작업)도 배달되지 않는다(롱폴을 열지 않는다) — 작업 큐는 중앙에 남는다.
+   */
+  if (settingsUnreadable(res, rmaSchedulesLoadError, 'RMA 점검 스케줄')) return;
   // 점검 결과 동봉(outbox) — 이 법인의 스케줄에 있는 항목만 반영(남의 항목 id 로 상태 위조 차단).
   const sch = rmaScheduleFor(agent);
   const known = new Set(sch.tests.map((t) => t.id));
@@ -1736,10 +1762,19 @@ centralRouter.get('/cvp-config', requireCentral(), async (req, res) => {
   // v2.613 DEPS2613-09: 토큰↔agent 대조는 위 `centralRouter.use` 미들웨어가 requestedAgent 로 이미 했다(여기 있던 재대조는 도달 불가 중복).
   const { serversForAgent, registryLoadError: cvpRegErr } = await import('../cvp/registry.js');
   if (registryUnreadable(res, cvpRegErr, 'CVP')) return;
-  const { loadSettings } = await import('../cvp/settings.js');
+  const { loadSettings, cvpSettingsLoadError } = await import('../cvp/settings.js');
   const { takeCvpRequests } = await import('../cvp/collectRequests.js');
   res.set('Cache-Control', 'no-store');
-  res.json({ ok: true, agent, servers: serversForAgent(agent), settings: loadSettings(), collectNow: takeCvpRequests(agent) });
+  /*
+   * v2.631 EDGE2631-01: 수집 설정 파일이 손상이면 **설정을 싣지 않는다**(엣지 applyCentralSettings 는 settings 가 없으면 현장 값을
+   *   그대로 둔다). 목록·'지금 수집' 은 등록부가 원천이라 그대로 준다 — 503 으로 통째로 막으면 설정 하나 때문에 위임 수집이 멈춘다.
+   */
+  let setErr = null;
+  try { setErr = cvpSettingsLoadError(); } catch (x) { setErr = { at: Date.now(), reason: x?.message || String(x) }; }
+  const settingsPart = setErr
+    ? { settingsUnreadable: { reason: String(setErr.reason || '사유 미상').slice(0, 200), since: setErr.at || null } }
+    : { settings: loadSettings() };
+  res.json({ ok: true, agent, servers: serversForAgent(agent), ...settingsPart, collectNow: takeCvpRequests(agent) });
 });
 
 /**

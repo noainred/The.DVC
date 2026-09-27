@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState, lazy, Suspense } from 'react';
 import { usePolling, fetchJson, toolAllowed } from '../api.js';
-import { growth, hasDsData, tb, gbTb, dsUnknownNote } from './tools/storageTrack.js'; // 추이 KPI(v2.358) 계산 재사용
+import { growth, hasDsData, gbTb } from './tools/storageTrack.js'; // 추이 KPI(v2.358) 계산 재사용
 import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../components/ui.jsx';
 // v2.596(감사 PERFWEB-04): 상세는 recharts 를 쓴다 — 목록 화면이 그 청크를 받지 않게 상세를 열 때만 받는다.
 const VCenterDetail = lazy(() => import('./VCenterDetail.jsx'));
 import { vcCardState, storageBarInfo } from './vcCardText.js';
+import { dsTrendMeta } from './dsTrendKpiText.js'; // v2.631(감사 WEB2631-09)
 import BoldText from '../components/boldText.jsx';
 import { alarmsUnknown, alarmTotals, restFallbackBadge } from './restFallbackText.js'; // v2.607 WEB2607-06
 
@@ -71,7 +72,8 @@ function TrendKpis() {
         <div className="value" style={{ color: g.netGB > 0 ? 'var(--amber)' : g.netGB < 0 ? 'var(--green)' : undefined }}>
           {dsLast ? `${g.netGB > 0 ? '+' : ''}${gbTb(g.netGB)}` : '—'}
         </div>
-        <div className="meta">{dsLast ? `사용 ${tb(dsLast.dsUsedGB).toLocaleString()} / ${tb(dsLast.dsCapGB).toLocaleString()} TB (${Math.round(dsLast.dsUsagePct || 0)}%)${dsUnknownNote(dsLast.dsUsedUnknown) ? ` · ${dsUnknownNote(dsLast.dsUsedUnknown).short}` : ''}` : '관측 전(다음 00·12시부터)'}</div>
+        {/* v2.631(감사 WEB2631-09): 사용률 null 을 '(0%)' 로, 용량 0 슬롯을 '사용 0 / 0 TB' 로 그리지 않는다(dsTrendMeta). */}
+        <div className="meta">{dsTrendMeta(dsLast)}</div>
         <Spark points={pts.map((p) => (hasDsData(p) ? p.dsUsedGB : null))} color="#f59e0b" />
       </div>
     </>

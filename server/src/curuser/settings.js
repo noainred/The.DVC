@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 
@@ -99,11 +100,23 @@ export function normalize(input = {}) {
   };
 }
 
+const _loadErr = makeSettingsLoadError(() => FILE());
+/** v2.631(EDGE2631-01): 설정 파일을 못 읽었으면 사유(배포 라우트가 503 으로 답한다), 읽었으면 null. */
+export function curUserSettingsLoadError() { load(); return _loadErr.get(); }
+
 export function load() {
   if (_cache) return { ..._cache, vcenters: { ..._cache.vcenters } };
   let raw = {};
-  try { if (fs.existsSync(FILE())) raw = JSON.parse(fs.readFileSync(FILE(), 'utf8')); }
-  catch { preserveCorrupt(FILE()); raw = {}; }
+  // v2.631(EDGE2631-01): 손상 → 보존 → 기본값(꺼짐·vcenters {})을 /api/central/curuser-config 가 내려보내면 엣지 applyCentral 이
+  //   폴더 범위 사본까지 지운다(중앙 원본은 이미 .corrupt 로 치워져 유일한 정상 사본이 사라진다) — 로드 오류를 기억해 503 으로 답한다.
+  if (!fs.existsSync(FILE())) _loadErr.missing();
+  else {
+    try {
+      raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닌 JSON 값');
+      _loadErr.ok();
+    } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE(), e?.message); raw = {}; }
+  }
   _cache = normalize(raw);
   return { ..._cache, vcenters: { ..._cache.vcenters } };
 }
@@ -112,6 +125,7 @@ export function save(input = {}) {
   const before = _cache ? JSON.stringify(_cache) : null;
   _cache = normalize(keepPrevBlankNumbers(input, load()));
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._cache }, null, 2), { mode: 0o600 });
+  _loadErr.ok();
   if (before !== JSON.stringify(_cache)) for (const cb of listeners) { try { cb(); } catch { /* 격리 */ } }
   return load();
 }

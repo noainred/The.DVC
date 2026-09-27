@@ -22,7 +22,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { isIpv4 } from './scan.js';
 import { canonIp } from '../util/ipv4.js';
-import { DAY_MS, DAY_OFFSET_MIN, dayStartMs } from '../util/dayKey.js';
+import { DAY_MS, DAY_OFFSET_MIN, dayStartMs, dayKey } from '../util/dayKey.js';
 
 
 const FILE = path.join(config.configDir, 'ipam-overrides.json');
@@ -65,6 +65,21 @@ export function reservedUntilIso(v, offsetMin = DAY_OFFSET_MIN) {
   }
   const t = new Date(v);
   return Number.isNaN(t.getTime()) ? null : t.toISOString();
+}
+
+/**
+ * 저장된 예약 만료(ISO) → 사람이 고른 '그 날'('YYYY-MM-DD', 포탈 오프셋 기준) — v2.631(감사 R2631-02·A6-2631-02).
+ * reservedUntilIso 는 '그 날 끝 = 다음 날 00:00' 을 저장하므로 **저장 시각 − 1ms** 의 포탈 날짜가 입력한 날이다.
+ * 화면이 ISO 를 slice(0,10)(UTC 날짜)로 되읽으면 오프셋 ≤ 0 현장에서 저장할 때마다 하루씩 밀렸다. 읽지 못하면 ''.
+ * 이미 'YYYY-MM-DD' 면 그대로(구 저장값·입력값).
+ */
+export function reservedUntilDay(v, offsetMin = DAY_OFFSET_MIN) {
+  if (v == null || v === '') return '';
+  const str = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const t = Date.parse(str);
+  if (!Number.isFinite(t)) return '';
+  return dayKey(t - 1, offsetMin) || '';
 }
 
 function clean(partial = {}) {

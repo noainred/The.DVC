@@ -4170,6 +4170,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **판정 헬퍼를 단건·일괄이 공유한다**(AUTHZ2630-01 — IPAM bulk 가 기존 claim 을 보지 않았다): 형제 라우트에 판정을 인라인으로 두면 한쪽이 빠진다.
     - 게스트 디스크 부분 합은 추이에 적재하지 않는다(A2-01 — v2.606 '부분은 하한' 규약의 누락) · CVP 미연결 포트·모르는 BGP 상태는 down 이 아니다(A2-02·03).
     - 폼은 서버의 '끔(0)' 을 기본값으로 덮지 않고, 바꾼 칸만 보낸다(WEB2630-01·02 — `web/src/views/settingsFormDiff.js`).
+  - ⚠⚠ **v2.631 — '다시 3번더' 3회차 확정분**(상세 `docs/AUDIT-2026-09-27e.md`, 회귀 `server/test/audit2631{a,b,c}.test.js` + 웹 `views/audit2631d.test.js`·`views/tools/audit2631{c,e}.test.js`):
+    - ⚠⚠ **엣지에 배포하는 '설정' 도 손상 판정이 필요하다 — 등록부만이 아니다**(EDGE2631-01 high, `util/settingsLoadError.js`): 설정 모듈이 손상 파일을 기본값(꺼짐)으로 읽으면
+      pull 라우트가 그 기본값을 200 으로 전 엣지에 내려 **엣지 사본까지 덮는다**(유일한 정상 사본 소실). 설정 모듈은 `*LoadError()` 를 두고 pull 라우트는 503 `settingsUnreadable`.
+      '원본 없이 `.corrupt` 만 있음'(손상 뒤 재시작)도 못 읽은 것이다(v2.612 `corruptOnlyReason` 재사용). **새 중앙→엣지 설정 배포를 만들면 이 판정부터.**
+    - **부분 합을 보류할 때 '보류 기준' 이 부분 합이 아닌지 확인할 것**(R2631-01 — v2.630 게스트 디스크): 표시용으로 넣은 부분 합 행이 다음 주기의 '직전 온전한 값' 이 되면 값이 영원히 멈춘다. 행에 `partial` 표지를 두고 보류에는 시한을 둔다(v2.601 '보류에는 반드시 시한').
+    - **서버가 null 을 보내기 시작하면 그 값을 그리는 화면을 같은 릴리스에서 맞출 것**(이번 회차 `/summary`·`/tools/waste`·`/top`): `${v}%` 는 'null%' 가 된다 — `unitText` 로.
+    - 정렬값 `data-sort={v ?? -1}` 금지 — 값 없는 행이 오름차순 맨 앞에 온다. `?? ''`(STable 이 빈 값을 항상 뒤로 보낸다).
+    - 웹소켓 서버는 `maxPayload` 를 준다(ws 기본 100MiB — 프레임 하나로 수백 MB 할당).
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

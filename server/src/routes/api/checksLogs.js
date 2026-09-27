@@ -34,6 +34,45 @@ function scopeLogMeta(meta, allowed) {
   return { ...meta, count, vcenters: vcs }; // 범위 밖 vCenter 존재/건수 미노출
 }
 
+/**
+ * v2.631(감사 AX2-05): vCenter 로그 CSV 내보내기의 페이지 순회 — 순수 헬퍼(테스트가 직접 부른다).
+ *
+ * 예전 구현은 until 을 고정하지 않은 OFFSET 페이징이라, 청크 사이 양보(setImmediate) 동안 로그 폴러가 새 행을
+ * 넣으면 OFFSET 기준이 밀려 경계 행이 **두 번** 나갔다. 또 행 수가 정확히 상한이면 더 없는데도 '잘렸습니다' 를 썼다.
+ *  - 첫 청크 뒤로는 커서 시각이 상한이 된다(지정 until 이 있으면 그것부터). '지금' 으로 고정하지 않는 것은
+ *    vCenter 시계가 포탈보다 빠를 때 최신 이벤트가 조용히 빠지지 않게 하기 위해서다.
+ *  - (ts, 같은 ts 안에서 이미 낸 개수) 커서로 이어 간다 — 다음 청크는 `ts <= 마지막 ts` 에서 같은 ts 로 낸 만큼만 건너뛴다.
+ *    그래서 커서보다 **새** 시각의 삽입은 결과를 밀지 않는다. ⚠ 한계(정직): 행 식별자(rowid)는 logs/db.js 가 주지 않아
+ *    커서와 **정확히 같은 ts** 로 청크 사이에 삽입된 행만은 경계가 한 칸 밀릴 수 있다(동률 삽입 한정).
+ *  - 잘림은 상한에 닿은 뒤 **한 행 더 있을 때만** 밝힌다.
+ * onRows 가 false 를 돌려주면 중단(aborted).
+ */
+export async function exportLogPages(db, f, { max, chunk, onRows } = {}) {
+  const base = { ...f, until: f.until ? Number(f.until) : 0 };
+  let cursorTs = base.until || null;   // null = 상한 없음(첫 청크만)
+  let tieSkip = 0;
+  let emitted = 0;
+  for (;;) {
+    const take = Math.min(chunk, max - emitted);
+    if (take <= 0) {
+      const more = db.query({ ...base, until: cursorTs ?? 0 }, 1, tieSkip);
+      return { emitted, truncated: more.length > 0, aborted: false };
+    }
+    const rows = db.query({ ...base, until: cursorTs ?? 0 }, take, tieSkip);
+    if (rows.length) {
+      const go = await onRows(rows);
+      if (go === false) return { emitted, truncated: false, aborted: true };
+      emitted += rows.length;
+      const lastTs = rows[rows.length - 1].ts;
+      let same = 0;
+      for (let i = rows.length - 1; i >= 0 && rows[i].ts === lastTs; i--) same++;
+      if (lastTs === cursorTs) tieSkip += same; else { cursorTs = lastTs; tieSkip = same; }
+    }
+    if (rows.length < take) return { emitted, truncated: false, aborted: false };
+    await new Promise((resolve) => setImmediate(resolve)); // 이벤트 루프 양보(다른 사용자 요청 처리)
+  }
+}
+
 export function registerChecksLogs(api) {
 
 // 심층 검색(스냅샷 1차) — 다조건 + 범위(전체/특정/복수 vCenter). Body: { vcenterIds[], filters{} }.
@@ -226,20 +265,17 @@ api.get('/tools/vclogs/export.csv', requirePerm('tools'), async (req, res) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vcenter-logs-${todayStamp()}.csv"`);
     res.write('﻿time,vcenter,severity,type,user,entity,message\n'); // BOM(엑셀 한글)
-    let offset = 0;
-    for (;;) {
-      if (res.destroyed) return; // 클라이언트 중단 시 즉시 종료(불필요한 조회 방지)
-      const take = Math.min(CHUNK, MAX - offset);
-      if (take <= 0) { res.write(`"(행 상한 ${MAX.toLocaleString()}건에서 잘렸습니다 — 기간을 좁혀 다시 내보내세요)"\n`); break; }
-      const rows = db.query(f, take, offset);
-      if (rows.length) {
-        const ok = res.write(rows.map((r) => [new Date(r.ts).toISOString(), r.vcenterId, r.severity, r.type, r.user, r.entity, r.message].map(esc).join(',')).join('\n') + '\n');
+    const r = await exportLogPages(db, f, {
+      max: MAX, chunk: CHUNK,
+      onRows: async (rows) => {
+        if (res.destroyed) return false; // 클라이언트 중단 시 즉시 종료(불필요한 조회 방지)
+        const ok = res.write(rows.map((x) => [new Date(x.ts).toISOString(), x.vcenterId, x.severity, x.type, x.user, x.entity, x.message].map(esc).join(',')).join('\n') + '\n');
         if (!ok) await new Promise((resolve) => res.once('drain', resolve)); // 소켓 백프레셔(느린 클라이언트에 수십 MB 버퍼링 방지)
-      }
-      offset += rows.length;
-      if (rows.length < take) break;
-      await new Promise((resolve) => setImmediate(resolve)); // 이벤트 루프 양보(다른 사용자 요청 처리)
-    }
+        return true;
+      },
+    });
+    if (r.aborted) return;
+    if (r.truncated) res.write(`"(행 상한 ${MAX.toLocaleString()}건에서 잘렸습니다 — 기간을 좁혀 다시 내보내세요)"\n`);
     res.end();
   } catch (e) {
     if (!res.headersSent) res.status(500).json({ ok: false, reason: e.message });

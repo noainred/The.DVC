@@ -66,13 +66,16 @@ async function _pull() {
     if (body?.settings) {
       try { settingsApplied = applyCentralSettings(body.settings); } catch (e) { console.warn(`[cvp-config] 설정 적용 실패: ${e.message}`); }
     }
+    // v2.631(EDGE2631-01 후속): 중앙이 자기 CVP 설정 파일을 못 읽어 설정을 빼고 보냈다 — 현장 설정을 그대로 두고, 그 사실을 남긴다.
+    const settingsUnreadable = !!body?.settingsUnreadable;
+    if (settingsUnreadable && _log('settings-unreadable', '중앙 설정 손상')) console.warn('[cvp-config] 중앙이 CVP 설정 파일을 읽지 못해 설정을 내려보내지 않았습니다 — 이 엣지의 현장 설정을 그대로 씁니다');
     const wants = Array.isArray(body?.collectNow) ? body.collectNow.filter((x) => typeof x === 'string').slice(0, 10) : [];
     if (wants.length) {
       pollCvpOnce({ manual: true, only: wants, trigger: 'central-request' })
         .then((r) => { if (!r.ok) console.warn(`[cvp-config] 중앙 요청 수집을 지금 하지 못했습니다(${r.reason}) — 요청은 중앙에서 한 번 더 내려옵니다`); })
         .catch((e) => console.warn(`[cvp-config] 중앙 요청 수집 실패: ${e.message}`));
     }
-    _last = { at: Date.now(), ok: true, applied, count: servers.length, removed: removed.length, settingsApplied, collectRequested: wants.length };
+    _last = { at: Date.now(), ok: true, applied, count: servers.length, removed: removed.length, settingsApplied, ...(settingsUnreadable ? { settingsUnreadable: true } : {}), collectRequested: wants.length };
     return { ok: true, applied, unchanged: !applied, count: servers.length, removed: removed.length, settingsApplied, collectRequested: wants.length };
   } catch (e) {
     _last = { at: Date.now(), ok: false, error: e.message };

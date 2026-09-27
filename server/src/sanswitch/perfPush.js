@@ -23,6 +23,7 @@ import { loadPerfSettings } from './perfSettings.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { readJsonCapped } from '../util/readCapped.js';
+import { classifyCentral404Body } from '../util/central404.js';
 import { agentHeaders, withAgentQuery } from '../agent/agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const gzipAsync = promisify(zlib.gzip);
@@ -202,7 +203,17 @@ async function pushPerfOnce() {
       if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
       bytes += json.length; gzBytes += body.length;
       const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/sanswitch-perf`, config.agent.name), { method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2 });
-      if (res.status === 404) throw new Error('중앙에 sanswitch-perf 엔드포인트 없음(중앙이 v2.423 미만)');
+      if (res.status === 404) {
+        // v2.631(EDGE2631-03): 404 는 두 뜻이다 — 중앙 central 기능 꺼짐(404 {reason:'central 비활성화'}) / 엔드포인트 없음(구버전 중앙).
+        //   예전에는 전부 'v2.423 미만' 이라 말해 화면이 '중앙을 업그레이드하라' 는 틀린 조치를 줬다(형제 push 들과 같은 판정 하나를 쓴다).
+        let nb = null;
+        try { nb = await readJsonCapped(res, 64 * 1024, '중앙 404 응답'); } catch { try { await res.body?.cancel?.(); } catch { /* */ } }
+        const c404 = classifyCentral404Body(nb);
+        const why = c404.kind === 'no-endpoint' ? '중앙에 sanswitch-perf 엔드포인트가 없습니다(404) — 중앙이 v2.423 미만이거나 CENTRAL_URL 이 포탈 주소가 아닙니다' : c404.reason;
+        const e = new Error(`sanswitch-perf <- ${why}`);
+        e.kind = `central-${c404.kind}`;
+        throw e;
+      }
       if (!res.ok) {
         // v2.611(CEN2611-03): 본문의 reason 을 읽는다 — 503 dbUnavailable 은 '중앙 DB 불가' 로 따로 말한다(커서는 throw 로 그대로).
         let eb = null;

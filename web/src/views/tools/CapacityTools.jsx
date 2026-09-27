@@ -393,10 +393,10 @@ export function Waste({ scope, cluster = '', folder = '' }) {
         <Card label="Thin 회수가능(추정)" value={tb2(data.thinReclaim.reclaimableGB)} meta={`${data.thinReclaim.count} VM`} />
         <Card label="Tools 미실행(On)" value={data.noTools.count} accent={data.noTools.count ? 'var(--amber)' : undefined} />
         {oa && <Card label="미사용 CPU clock" value={`${oa.cpu.idleGHz} GHz`}
-          meta={`할당 ${oa.cpu.allocGHz} · 사용 ${oa.cpu.usedGHz} GHz → 절감 가능 ${oa.cpu.savingPct}%`}
+          meta={`할당 ${oa.cpu.allocGHz} · 사용 ${oa.cpu.usedGHz} GHz → 절감 가능 ${oa.cpu.savingPct == null ? '—' : `${oa.cpu.savingPct}%`}${oa.usageUnknown?.cpu ? ` · 사용률 모름 ${oa.usageUnknown.cpu}대 제외` : ''}`}
           accent={oa.cpu.savingPct >= 50 ? 'var(--amber)' : undefined} />}
         {oa && <Card label="미사용 메모리" value={tb2(oa.mem.idleGB)}
-          meta={`할당 ${tb2(oa.mem.allocGB)} · 사용 ${tb2(oa.mem.usedGB)} → 절감 가능 ${oa.mem.savingPct}%`}
+          meta={`할당 ${tb2(oa.mem.allocGB)} · 사용 ${tb2(oa.mem.usedGB)} → 절감 가능 ${oa.mem.savingPct == null ? '—' : `${oa.mem.savingPct}%`}${oa.usageUnknown?.mem ? ` · 사용률 모름 ${oa.usageUnknown.mem}대 제외` : ''}`}
           accent={oa.mem.savingPct >= 50 ? 'var(--amber)' : undefined} />}
       </div>
       <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>

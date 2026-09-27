@@ -11,17 +11,20 @@
  * @param {object|null|undefined} data 서버 응답
  * @param {string} [unit] 센 단위 이름 — 서버 분석은 '서버', 전산실 온도 월보드 스파크는 '법인 그룹'
  * @param {string} [counter] 개수 단위 — '대'·'곳'·'개'
+ * @param {{why?: string}} [opts] 제외 근거 문구(v2.631 A6-2631-06) — 기본은 '내 조회 범위 밖(또는 법인 귀속이 없는)'.
+ *   법인 귀속 개념이 없는 자원(예: vCenter 로만 거르는 VM 복제 잡)은 그 자원에 맞는 근거를 준다.
  * @returns {string|null}
  */
-export function scopeOmitNote(data, unit = '서버', counter = '대') {
+export function scopeOmitNote(data, unit = '서버', counter = '대', opts = {}) {
   if (!data || data.scoped !== true) return null;
+  const why = typeof opts?.why === 'string' && opts.why.trim() ? opts.why.trim() : '내 조회 범위 밖(또는 법인 귀속이 없는)';
   const o = data.omittedOutOfScope;
   if (o == null || o === '' || o === 0) return null;
   if (typeof o === 'number' && Number.isInteger(o) && o > 0) {
-    return `내 조회 범위 밖(또는 법인 귀속이 없는) ${unit} ${o}${counter}는 제외했습니다 — 아래 수치는 범위 안의 ${unit}만 셉니다.`;
+    return `${why} ${unit} ${o}${counter}는 제외했습니다 — 아래 수치는 범위 안의 ${unit}만 셉니다.`;
   }
   if (typeof o === 'number') return null; // 음수·소수·NaN — 뜻이 없는 값은 말하지 않는다
-  return `내 조회 범위 밖(또는 법인 귀속이 없는) ${unit} 일부는 제외했습니다 — 아래 수치는 범위 안의 ${unit}만 셉니다.`;
+  return `${why} ${unit} 일부는 제외했습니다 — 아래 수치는 범위 안의 ${unit}만 셉니다.`;
 }
 
 /**

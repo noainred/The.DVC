@@ -171,9 +171,9 @@ export default function HorizonSessionsPanel() {
                       <KindBadge kind={s.kind} labels={labels} />
                     </button>
                   </td>
-                  <td data-sort={String(s.usersConnected ?? -1)}>{s.usersConnected ?? '—'}</td>
-                  <td data-sort={String(s.users ?? -1)}>{s.users ?? '—'}</td>
-                  <td data-sort={String(s.sessions ?? -1)}>{s.sessions ?? '—'}</td>
+                  <td data-sort={String(s.usersConnected ?? '')}>{s.usersConnected ?? '—'}</td>
+                  <td data-sort={String(s.users ?? '')}>{s.users ?? '—'}</td>
+                  <td data-sort={String(s.sessions ?? '')}>{s.sessions ?? '—'}</td>
                   <td style={{ fontSize: 11.5 }}>{`${s.connected ?? '—'} / ${s.disconnected ?? '—'} / ${s.pending ?? '—'}`}</td>
                   <td data-sort={String(s.ts || 0)}>{agoText(s.ts, data?.now)}</td>
                   <td style={{ fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'normal', maxWidth: 320 }}><BoldText text={provenanceText(s) || '—'} /></td>

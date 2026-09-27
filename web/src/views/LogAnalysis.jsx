@@ -211,7 +211,7 @@ export default function LogAnalysis() {
               <tr key={t.tag}>
                 <td style={{ fontFamily: 'ui-monospace, Menlo, Consolas, monospace' }}>{t.tag}</td>
                 <td data-sort={t.n}>{t.n.toLocaleString()}</td>
-                <td data-sort={t.sharePct ?? -1}>{t.sharePct == null ? '—' : `${t.sharePct}%`}</td>
+                <td data-sort={t.sharePct ?? ''}>{t.sharePct == null ? '—' : `${t.sharePct}%`}</td>
                 <td data-sort={t.warn}>{k.hasLevels ? t.warn.toLocaleString() : '—'}</td>
                 <td data-sort={t.error}>{k.hasLevels ? t.error.toLocaleString() : '—'}</td>
               </tr>
@@ -226,7 +226,7 @@ export default function LogAnalysis() {
             <tbody>{(report.templates || []).map((t, i) => (
               <tr key={`${t.tag}-${i}`}>
                 <td data-sort={t.count}>{t.count.toLocaleString()}</td>
-                <td data-sort={t.sharePct ?? -1}>{t.sharePct == null ? '—' : `${t.sharePct}%`}</td>
+                <td data-sort={t.sharePct ?? ''}>{t.sharePct == null ? '—' : `${t.sharePct}%`}</td>
                 <td className="muted">{t.tag || '—'}</td>
                 <td className="muted">{t.rule || '—'}</td>
                 <td style={{ overflowWrap: 'anywhere', fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 11.5 }}>{t.sample}</td>

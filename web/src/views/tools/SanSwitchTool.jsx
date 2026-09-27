@@ -4,6 +4,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianG
 import { fetchJson, postJson, delJson } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { agoText } from './relTime.js';
+import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2.631 A6-2631-04: 엣지 시계 빠름 표지
 import { MODES, bucketText, perfQuery, toLocalDt, rangeIssueOf, rangeLabel, RANGE_MAX_DAYS } from './sanSwitchPerfText.js';
 import { statusText, traceText, isActive, phaseLabel, testSnapView } from './sanSwitchTestText.js';
 import SanZoningPanel from './SanZoningPanel.jsx';
@@ -345,7 +346,7 @@ export default function SanSwitchTool() {
                   <td style={{ color: lvl === 'bad' ? TONE.bad : lvl === 'warn' ? TONE.warn : undefined, fontWeight: 600 }}>{s?.ok ? p.free : '—'}</td>
                   <td>{s?.ok ? <span style={{ color: (p.faulty || p.disabled) ? TONE.warn : undefined }}>{p.faulty} / {p.disabled}</span> : <span className="muted">—</span>}</td>
                   <td className="muted" style={{ fontSize: 11 }}>{r.agent ? `엣지 ${r.agent}` : '중앙 직접'}<div>{r.collectMethod === 'rest' ? 'REST' : 'SSH'}</div></td>
-                  <td className="muted" style={{ fontSize: 11 }}>{ago(s?.collectedAt)}{r.pending ? <div style={{ color: TONE.warn }}>재수집 대기</div> : null}</td>
+                  <td className="muted" style={{ fontSize: 11 }}>{ago(s?.collectedAt)}{(() => { const m = edgeClockAheadMark(s); return m ? <span className="badge amber" style={{ marginLeft: 4, whiteSpace: 'nowrap', fontSize: 10 }} title={m.title}>{m.label}</span> : null; })()}{r.pending ? <div style={{ color: TONE.warn }}>재수집 대기</div> : null}</td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <button className="tab" style={{ padding: '2px 8px' }} disabled={busy} onClick={() => collectNow(r)}>수집</button>{' '}
                     <button className="tab" style={{ padding: '2px 8px' }} onClick={() => openForm(r)}>수정</button>{' '}
@@ -360,6 +361,10 @@ export default function SanSwitchTool() {
           </tbody>
         </STable>
       </div>
+      {/* v2.631 A6-2631-04: 엣지 시계가 빠른 스위치 — 행에는 짧은 표지, 조치는 여기 한 번만 */}
+      {edgeClockFootnote(rows.map((r) => r.snap), '스위치') && (
+        <div className="muted" style={{ fontSize: 11, marginTop: 8, whiteSpace: 'normal' }}>⏱ {edgeClockFootnote(rows.map((r) => r.snap), '스위치')}</div>
+      )}
 
       <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
         수집 주기 {Math.round((data.poller?.intervalMs || 0) / 60000)}분(동시 {data.poller?.concurrency}대) ·

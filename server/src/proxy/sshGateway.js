@@ -12,6 +12,12 @@
  */
 
 import { WebSocketServer } from 'ws';
+/*
+ * v2.631(AX3-01): 프레임 상한. ws 기본 maxPayload 는 100MiB 라 인증된 operator(remote.access 기본 보유)가 프레임당 100MB 를 보내
+ *   문자열화·파싱(동시 세션 × 100MB)으로 이벤트 루프·힙을 누를 수 있었다. 넘는 프레임은 ws 가 1009 로 닫는다.
+ *   SSH 제어 프레임(auth·data·resize JSON)은 작다 — 붙여넣기 수백 KB 까지 여유.
+ */
+export const SSH_WS_MAX_PAYLOAD = 256 * 1024;
 import { Client as SSHClient } from 'ssh2';
 import { resolveTokenUser } from '../auth/auth.js';
 import { userHasPermission } from '../auth/permissions.js';
@@ -26,7 +32,7 @@ export const SSH_GATEWAY_READY_TIMEOUT_MS = reqTimeoutMs(process.env.SSH_READY_T
 import { config, clampIntervalMs } from '../config.js';
 
 export function attachSshGateway(server) {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: SSH_WS_MAX_PAYLOAD });
 
   server.on('upgrade', (req, socket, head) => {
     // ⚠ 보안(M-1, 2026-09-12): 잘못된 요청줄(예: `GET //[`)은 `new URL` 이 throw 하는데, upgrade

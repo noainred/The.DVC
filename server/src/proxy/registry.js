@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { ipBlockReason } from '../collector/registry.js'; // v2.537: proxyHost 차단 대역 검사
+import { ipBlockReason, ssrfBlockReason } from '../collector/registry.js'; // v2.537: proxyHost 차단 대역 검사 · v2.631 AX3-02: 배포 주소도
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
@@ -161,6 +161,7 @@ export function bindAddressIssue(v) {
 
 export function saveConfig(partial = {}) {
   const c = load();
+  { const bad = deployTargetIssue(partial); if (bad) { const e = new Error(bad); e.status = 400; throw e; } } // v2.631 AX3-02
   if (partial.dataplane) {
     const dp = partial.dataplane;
     const bad = basePathIssue(dp.basePath) || bindAddressIssue(dp.bindAddress);
@@ -191,6 +192,24 @@ export function saveConfig(partial = {}) {
   if (partial.publicPortBase !== undefined) c.publicPortBase = portOrPrev(partial.publicPortBase, c.publicPortBase);
   persist();
   return getConfigSafe();
+}
+
+/**
+ * v2.631(AX3-02): 저장 시점에 배포 대상 주소도 검사한다(순수 · 동기). 형제 시험 라우트(/remote/deploy/test·/remote/test)는
+ *   `ipBlockReason(deploy.host)`·`ssrfBlockReasonResolved(dataplane.url)` 로 막는데, 실제 배포(deployToProxy → SSH 다이얼)와
+ *   Data Plane 매핑(applyMapping → resilientFetch)은 저장값을 그대로 쓴다 — 시험 버튼을 거치지 않는 저장·직접 API 경로가 그 검사를
+ *   우회했다. 비어 있으면 통과(미설정 허용). 이름(DNS)은 동기 판정이라 리터럴·loopback 이름까지만 본다(해석 결과는 시험 라우트가 본다).
+ */
+export function deployTargetIssue({ deploy, dataplane } = {}) {
+  if (deploy && deploy.host !== undefined) {
+    const h = String(deploy.host ?? '').trim();
+    if (h) { const b = ipBlockReason(h); if (b) return `배포 SSH 호스트가 차단되었습니다: ${b}`; }
+  }
+  if (dataplane && dataplane.url !== undefined) {
+    const u = String(dataplane.url ?? '').trim();
+    if (u) { const b = ssrfBlockReason(u); if (b) return `Data Plane URL 이 차단되었습니다: ${b}`; }
+  }
+  return null;
 }
 
 /** v2.537: proxyHost 검증(순수) — 비어 있으면 통과(미설정 허용), IP 리터럴이면 차단 대역 검사. */
@@ -265,6 +284,7 @@ export function saveProxy(body = {}) {
   for (const k of ['name', 'proxyHost', 'vcenterIds']) if (body[k] !== undefined) next[k] = body[k];
   if (body.publicPortBase !== undefined) next.publicPortBase = portOrPrev(body.publicPortBase, base.publicPortBase); // v2.606 WEB2606-04
   { const bad = proxyHostIssue(body.proxyHost); if (bad) return { ok: false, reason: bad }; } // v2.537
+  { const bad = deployTargetIssue(body); if (bad) return { ok: false, reason: bad }; } // v2.631 AX3-02
   if (body.dataplane) {
     const bad = basePathIssue(body.dataplane.basePath) || bindAddressIssue(body.dataplane.bindAddress);
     if (bad) return { ok: false, reason: bad };

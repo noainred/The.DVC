@@ -9,6 +9,7 @@ import { VmRemoteButton } from '../../components/VmRemote.jsx';
 import { DEVTYPE_LABEL, DiscoveryBadge, MGMT, MgmtBadge } from './ipamShared.jsx';
 import { IpamNetMap, IpamRanges, RangePolicies } from './IpamNet.jsx';
 import { IpScanSettings, IpmsSettings, MemoEditor, OverrideEditor, ScanStatusModal } from './IpamSettings.jsx';
+import { reservedUntilText } from './ipamReserveText.js';
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
@@ -184,7 +185,7 @@ function Ipam({ scope, onScope }) {
         {r.duplicate && <span className="badge red" style={{ marginLeft: 6 }}>중복</span>}
         {r.multiHomed && <span className="badge amber" style={{ marginLeft: 4 }}>멀티홈</span>}
         {r.reservedExpired && <span className="badge amber" style={{ marginLeft: 4 }} title="예약 만료일이 지났습니다">⏳ 예약만료</span>}
-        {!r.reservedExpired && r.reservedExpiringSoon && <span className="badge amber" style={{ marginLeft: 4 }} title={`예약 만료 임박: ${r.reservedUntil ? new Date(r.reservedUntil).toLocaleDateString() : ''}`}>⏳ 임박</span>}
+        {!r.reservedExpired && r.reservedExpiringSoon && <span className="badge amber" style={{ marginLeft: 4 }} title={`예약 만료 임박: ${reservedUntilText(r.reservedUntil, data.tzOffsetMin)}`}>⏳ 임박</span>}
       </button>
     ) },
     { key: 'scope', label: '분류', sortValue: (r) => r.scope || '', render: (r) => (
@@ -199,7 +200,7 @@ function Ipam({ scope, onScope }) {
         {r.appliedBy === 'range-policy' && <span className="badge purple" style={{ fontSize: 9 }} title={`대역 정책 적용: ${r.rangePolicySpec || ''}`}>정책</span>}
         {r.appliedBy === 'override' && r.managed && <span className="badge teal" style={{ fontSize: 9 }} title="IP 단위 수동 지정">IP수동</span>}
         {r.deviceType && <span className="badge gray" style={{ fontSize: 10 }}>{DEVTYPE_LABEL[r.deviceType] || r.deviceType}</span>}
-        {r.reservedUntil && <span className="muted" style={{ fontSize: 10 }} title={`예약 만료: ${new Date(r.reservedUntil).toLocaleString()}`}>⏳</span>}
+        {r.reservedUntil && <span className="muted" style={{ fontSize: 10 }} title={`예약 만료: ${reservedUntilText(r.reservedUntil, data.tzOffsetMin) || '—'}`}>⏳</span>}
         {canManage && <button className="tab" style={{ padding: '1px 7px', fontSize: 11 }} title="IP 관리상태 편집(담당자·예약·디바이스 종류 등)" onClick={() => setEditOv(r)}>{r.managed ? '✎' : '+'}</button>}
       </span>
     ) },
@@ -422,7 +423,7 @@ function Ipam({ scope, onScope }) {
       {ipms && <IpmsSettings onClose={() => setIpms(false)} />}
       {scanOpen && <IpScanSettings onClose={() => setScanOpen(false)} />}
       {editMemo && <MemoEditor init={editMemo} onClose={() => setEditMemo(null)} onSaved={() => { setEditMemo(null); pickBase(base); }} />}
-      {editOv && <OverrideEditor row={editOv} vcenters={data.byVcenter} onClose={() => setEditOv(null)} onSaved={() => { setEditOv(null); setReload((n) => n + 1); }} />}
+      {editOv && <OverrideEditor row={editOv} vcenters={data.byVcenter} tzOffsetMin={data.tzOffsetMin} onClose={() => setEditOv(null)} onSaved={() => { setEditOv(null); setReload((n) => n + 1); }} />}
       {histIp && <IpHistoryModal row={histIp} scope={scope} onClose={() => setHistIp(null)} />}
       {scanStatusOpen && <ScanStatusModal onClose={() => setScanStatusOpen(false)} />}
     </>

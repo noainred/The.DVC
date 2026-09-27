@@ -153,7 +153,7 @@ export function DirUsageReport() {
                   <td data-sort={r.rank} className="muted">{r.rank}</td>
                   <td style={{ wordBreak: 'break-all' }}>{r.name}</td>
                   <td data-sort={r.bytes} style={{ textAlign: 'right', fontWeight: 600 }}>{human(r.bytes)}</td>
-                  <td data-sort={r.pct ?? -1} style={{ textAlign: 'right' }} className="muted">{r.pct == null ? '—' : `${r.pct}%`}</td>
+                  <td data-sort={r.pct ?? ''} style={{ textAlign: 'right' }} className="muted">{r.pct == null ? '—' : `${r.pct}%`}</td>
                   <td>
                     <div style={{ height: 8, width: 90, background: 'rgba(255,255,255,.08)', borderRadius: 2, overflow: 'hidden' }}>
                       <div style={{ height: '100%', width: `${Math.max(1, r.pct || 0)}%`, background: '#2e90fa' }} />

@@ -13,6 +13,12 @@
 
 import net from 'node:net';
 import { WebSocketServer } from 'ws';
+/*
+ * v2.631(AX3-01): 프레임 상한. ws 기본 maxPayload 는 100MiB 라 인증된 operator(remote.access 기본 보유)가 프레임당 100MB 를 보내
+ *   문자열화·파싱(동시 세션 × 100MB)으로 이벤트 루프·힙을 누를 수 있었다. 넘는 프레임은 ws 가 1009 로 닫는다.
+ *   guacd 릴레이(클립보드·파일 조각 포함)에 필요한 폭.
+ */
+export const GUAC_WS_MAX_PAYLOAD = 4 * 1024 * 1024;
 import { resolveTokenUser } from '../auth/auth.js';
 import { userHasPermission } from '../auth/permissions.js';
 import { getMapping, getProxyById, touchMapping } from './registry.js';
@@ -46,7 +52,7 @@ function parseInstruction(str, start) {
 }
 
 export function attachRdpGateway(server) {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: GUAC_WS_MAX_PAYLOAD });
   server.on('upgrade', (req, socket, head) => {
     // ⚠ 보안(M-1): 잘못된 요청줄로 `new URL` 이 throw 하면 뒤 리스너(index.js catch-all)가 실행되지
     // 않아 소켓이 파기되지 않는다 — throw 대신 return(sshGateway 와 동일).

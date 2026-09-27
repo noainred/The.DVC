@@ -4,6 +4,7 @@ import { usePolling } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Panel, KpiCard, Bar, PctCell, PollState, Empty, LevelBadge } from '../ui.jsx';
 import { hostFacilityRows, pduSummary, tempColor, fmtInt, fmtPct, rowMatches, REGION_COLORS } from '../consoleData.js';
+import { bmcPollSummary, BMC_TONE_COLOR } from '../../views/bmcPollText.js'; // v2.631(감사 WEB2631-07)
 
 export default function ConsoleFacility({ global: g, sitesAll, scope, polls, perms }) {
   const hosts = usePolling('/hosts', {}, 60_000);
@@ -15,6 +16,7 @@ export default function ConsoleFacility({ global: g, sitesAll, scope, polls, per
   const idracN = rows.reduce((a, r) => a + r.idracBacked, 0);
   const ps = polls.pdu.data ? pduSummary(polls.pdu.data) : null;
   const lr = polls.idrac.data?.poller?.lastRun || null;
+  const bmc = bmcPollSummary(lr);
   const pduDevs = (polls.pdu.data?.devices || []).map((d) => ({ id: d.id, name: d.name || d.host, dc: d.datacenterId || '', ok: d.snapshot ? d.snapshot.ok !== false : null, powerW: d.snapshot?.summary?.powerW ?? null, tempMaxC: d.snapshot?.summary?.tempMaxC ?? null, sensors: d.snapshot?.summary?.sensors ?? 0, units: d.snapshot?.summary?.units ?? 0, violations: (d.snapshot?.violations || []).length, error: d.snapshot?.error || '' })).filter((d) => rowMatches(d, scope.q));
 
   return (
@@ -24,7 +26,8 @@ export default function ConsoleFacility({ global: g, sitesAll, scope, polls, per
         <KpiCard label="PDU" value={ps ? fmtInt(ps.devices) : '—'} accent="#0f172a" meta={ps ? (ps.devices ? `수집 정상 ${ps.ok} · 실패 ${ps.failed} · 임계 위반 ${ps.violations}${ps.powerW ? ` · ${(ps.powerW / 1000).toFixed(1)} kW` : ''}` : '등록된 PDU 없음') : perms.pdu ? '수집 대기' : "권한 필요('tools')"} />
         <KpiCard label="호스트 온도 (ESXi/iDRAC 보고)" value={maxT != null ? `${maxT}°C` : '—'} accent={maxT == null ? '#6b7280' : maxT >= 26 ? '#ef4444' : maxT >= 24 ? '#f59e0b' : '#22c55e'} meta={hosts.data ? `최고값 · 측정 ${fmtInt(measured)}/${fmtInt(hostN)}대 · 26°C 이상 ${hot}대` : '호스트 수집 대기'} />
         <KpiCard label="iDRAC 연동 호스트" value={hosts.data && hostN ? fmtPct((idracN / hostN) * 100) : '—'} accent="#0891b2" meta={hosts.data ? `${fmtInt(idracN)} / ${fmtInt(hostN)}대 (호스트 ↔ iDRAC 매핑)` : '호스트 수집 대기'} />
-        <KpiCard label="BMC(iDRAC) 폴러" value={lr ? `${fmtInt(lr.ok)}/${fmtInt((lr.ok || 0) + (lr.failed || 0))}` : '—'} accent={lr ? (lr.failed ? '#f59e0b' : '#22c55e') : '#6b7280'} meta={polls.idrac.data ? `최근 실행 응답/전체 · 등록 ${fmtInt(polls.idrac.data.poller?.servers)}대${lr?.at ? ` · ${new Date(lr.at).toLocaleTimeString('ko-KR')}` : ''}` : perms.idrac ? '폴러 상태 대기' : '관리자 권한 필요 (/admin/idrac)'} />
+        {/* v2.631(감사 WEB2631-07): 폴링한 서버가 0 이면(긴급중단·대상 없음) 초록 '0/0' 이 아니라 '—' + 사유(bmcPollSummary). */}
+        <KpiCard label="BMC(iDRAC) 폴러" value={bmc.attempted ? `${fmtInt(bmc.ok)}/${fmtInt(bmc.attempted)}` : '—'} accent={BMC_TONE_COLOR[bmc.tone]} meta={polls.idrac.data ? `${bmc.reason ? `${bmc.reason} · ` : '최근 실행 응답/전체 · '}등록 ${fmtInt(polls.idrac.data.poller?.servers)}대${lr?.at ? ` · ${new Date(lr.at).toLocaleTimeString('ko-KR')}` : ''}` : perms.idrac ? '폴러 상태 대기' : '관리자 권한 필요 (/admin/idrac)'} />
       </div>
 
       <div className="dvc-grid2">

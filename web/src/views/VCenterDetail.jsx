@@ -1,7 +1,7 @@
 import { unitText } from './unitText.js';
 import { numOrNull } from '../numOrNull.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, usePolling } from '../api.js';
+import { fetchJson, postJson, usePolling, toolAllowed } from '../api.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, DataTable, SearchBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
@@ -272,7 +272,9 @@ export default function VCenterDetail({ site, onBack }) {
   const { data: hostsD } = usePolling('/hosts', { vcenterId }, 20_000);
   // VM 복제(백업) 잡 대상 vmId 집합(v2.299) — 트리 VM 행에 'Clone' 배지 표시(사용자 요구).
   // 60초 폴링(잡 등록은 드묾), scope 제한 계정은 서버가 빈 목록을 준다.
-  const { data: cloneBadgeD } = usePolling('/tools/vm-clone/badges', { vcenterId }, 60_000);
+  // v2.631(감사 WEB2631-12): 도구 권한이 없으면 부르지 않는다 — viewer(기본 tools 없음)가 상세를 열 때마다 403 을 만들었다
+  //   (v2.616 TrendKpis 와 같은 결함). 배지는 장식이라 권한이 없을 때 오류를 표시하지 않는 것이 정상이다(배지 없이 트리만).
+  const { data: cloneBadgeD } = usePolling(toolAllowed('vm-clone') ? '/tools/vm-clone/badges' : null, { vcenterId }, 60_000);
   const cloneSet = useMemo(() => new Set(cloneBadgeD?.vmIds || []), [cloneBadgeD]);
   const { data: vmsD } = usePolling('/vms', { vcenterId, limit: 5000 }, 20_000);
   const { data: dsD } = usePolling('/datastores', { vcenterId }, 30_000);

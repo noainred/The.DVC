@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { usePolling, can } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, EntityDetail } from '../components/ui.jsx';
 import { unitText } from './unitText.js';
+import { numOrNull } from '../numOrNull.js';
 
 function SumCard({ label, value, meta, accent }) {
   return (
@@ -74,7 +75,8 @@ export default function Explore() {
   if (error && !top) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   const heldKinds = new Set((top?.withheld || []).map((w) => w.kind));
 
-  const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${gb} GB`);
+  // v2.631(감사 WEB2631-05): 값이 없으면 단위를 붙이지 않는다 — 'null GB'·'undefined%' 는 0 처럼 읽힌다(unitText 규약).
+  const tb = (gb) => { const n = numOrNull(gb); return n == null ? '—' : (n >= 1024 ? `${(n / 1024).toFixed(1)} TB` : `${n} GB`); };
 
   const vmCols = [
     { key: 'name', label: 'VM', render: (v) => <button className="cell-link" onClick={() => setDetail({ type: 'vm', item: v })}>{v.name}</button> },
@@ -119,20 +121,20 @@ export default function Explore() {
       )}
       <div className="grid cols-3">
         <TopList heldKinds={heldKinds} title="CPU 사용률 최다 VM" items={top.vmsByCpuUsage} valueOf={(v) => v.cpuUsagePct}
-          label={(v) => `${v.cpuUsagePct}%`} accent="var(--accent)" type="vm" onSelect={setDetail} />
+          label={(v) => unitText(v.cpuUsagePct, '%')} accent="var(--accent)" type="vm" onSelect={setDetail} />
         <TopList heldKinds={heldKinds} title="메모리 사용률 최다 VM" items={top.vmsByMemUsage} valueOf={(v) => v.memUsagePct}
-          label={(v) => `${v.memUsagePct}%`} accent="var(--purple)" type="vm" onSelect={setDetail} />
+          label={(v) => unitText(v.memUsagePct, '%')} accent="var(--purple)" type="vm" onSelect={setDetail} />
         <TopList heldKinds={heldKinds} title="디스크 할당 최다 VM" items={top.vmsByStorage} valueOf={(v) => v.storageGB}
           label={(v) => tb(v.storageGB)} accent="var(--accent-2)" type="vm" onSelect={setDetail} />
       </div>
 
       <div className="grid cols-3" style={{ marginTop: 16 }}>
         <TopList heldKinds={heldKinds} title="CPU 사용률 최다 호스트" items={top.hostsByCpu} valueOf={(h) => h.cpuUsagePct}
-          label={(h) => `${h.cpuUsagePct}%`} accent="var(--red)" type="host" onSelect={setDetail} />
+          label={(h) => unitText(h.cpuUsagePct, '%')} accent="var(--red)" type="host" onSelect={setDetail} />
         <TopList heldKinds={heldKinds} title="메모리 사용률 최다 호스트" items={top.hostsByMem} valueOf={(h) => h.memUsagePct}
-          label={(h) => `${h.memUsagePct}%`} accent="var(--amber)" type="host" onSelect={setDetail} />
+          label={(h) => unitText(h.memUsagePct, '%')} accent="var(--amber)" type="host" onSelect={setDetail} />
         <TopList heldKinds={heldKinds} title="사용률 최다 데이터스토어" items={top.datastoresByUsage} valueOf={(d) => d.usagePct}
-          label={(d) => `${d.usagePct}% · ${tb(d.capacityGB)}`} accent="var(--green)" type="datastore" onSelect={setDetail} />
+          label={(d) => `${unitText(d.usagePct, '%')} · ${tb(d.capacityGB)}`} accent="var(--green)" type="datastore" onSelect={setDetail} />
       </div>
 
       {top.hostsByPower?.length > 0 && (

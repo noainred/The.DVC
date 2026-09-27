@@ -3,6 +3,7 @@ import { usePolling } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount, EntityDetail } from '../components/ui.jsx';
 import IpmsMatches from '../components/IpmsMatches.jsx';
 import { hostUsagePct } from './vcdOverview.js'; // v2.606 WEB2606-02: 끊긴·무응답 호스트의 0% 는 '못 읽음'(—)
+import { serverRatio, ratioLabel } from './virtRatioText.js'; // v2.631(감사 WEB2631-11): 물리 코어 0 이면 '0 : 1' 이 아니라 '—'
 
 export default function Hosts({ filters }) {
   const { data, error, loading } = usePolling('/hosts', filters, 15_000);
@@ -42,7 +43,7 @@ export default function Hosts({ filters }) {
               <span className={s.disconnected ? 'blink-red' : ''} title={s.disconnected ? '끊김(Disconnected) 호스트가 있습니다 — 연결 확인 필요' : ''}>끊김 {fmt(s.disconnected)}</span>
             </div></div>
             <div className="card kpi"><div className="label">물리 코어</div><div className="value">{fmt(s.physicalCores)}</div><div className="meta">논리 코어 {fmt(s.logicalCores)}</div></div>
-            <div className="card kpi"><div className="label">할당 vCore</div><div className="value" style={{ color: 'var(--accent)' }}>{fmt(s.vcoreAllocated)}</div><div className="meta">vCore:물리 {s.vcorePerCore} : 1</div></div>
+            <div className="card kpi"><div className="label">할당 vCore</div><div className="value" style={{ color: 'var(--accent)' }}>{fmt(s.vcoreAllocated)}</div><div className="meta">vCore:물리 {ratioLabel(serverRatio(s.vcorePerCore, s.physicalCores))}</div></div>
             <div className="card kpi"><div className="label">전체 메모리</div><div className="value">{fmt(s.memTotalGB)}<small> GB</small></div><div className="meta">≈ {(s.memTotalGB / 1024).toFixed(1)} TB{s.powerKw > 0 ? ` · ${s.powerKw} kW` : ''}</div></div>
             <div className="card kpi">
               <div className="label">ESXi 버전</div>

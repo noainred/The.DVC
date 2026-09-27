@@ -10,6 +10,7 @@ import { UNIT_OPTIONS, formatBytes, loadUnit, saveUnit, capacityTotals, alertTot
 import { emptyListText, conflictText, edgeReportNotes, edgeIntervalText } from './storageListText.js';
 import { collectDropNote } from './collectDropText.js';
 import { agoText } from './relTime.js';
+import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2.631 A6-2631-04: 엣지 시계 빠름 표지
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 import { STable } from '../../components/STable.jsx';
 import { collectMethodView } from './storageMethodText.js';
@@ -207,10 +208,10 @@ function NodeFaultModal({ r, typeLabel, onClose }) {
                         <td data-sort={x.kind} style={{ color: `var(--${k.color})`, fontWeight: k.color === 'green' ? 400 : 600, whiteSpace: 'nowrap' }}>{k.label}</td>
                         {/* 장비가 보고한 원문 — 우리가 해석한 것과 나란히 두어 판정 근거를 숨기지 않는다. */}
                         <td><code style={{ fontSize: 11 }}>{x.health || '—'}</code></td>
-                        <td data-sort={String(x.hddPct ?? -1)} style={{ textAlign: 'right' }}>{x.hddPct == null ? '—' : `${x.hddPct}%`}</td>
-                        <td data-sort={String(x.ssdPct ?? -1)} style={{ textAlign: 'right' }}>{x.ssdPct == null ? '—' : `${x.ssdPct}%`}</td>
-                        <td data-sort={String(x.inBps ?? -1)} style={{ textAlign: 'right' }}>{bpsText(x.inBps)}</td>
-                        <td data-sort={String(x.outBps ?? -1)} style={{ textAlign: 'right' }}>{bpsText(x.outBps)}</td>
+                        <td data-sort={String(x.hddPct ?? '')} style={{ textAlign: 'right' }}>{x.hddPct == null ? '—' : `${x.hddPct}%`}</td>
+                        <td data-sort={String(x.ssdPct ?? '')} style={{ textAlign: 'right' }}>{x.ssdPct == null ? '—' : `${x.ssdPct}%`}</td>
+                        <td data-sort={String(x.inBps ?? '')} style={{ textAlign: 'right' }}>{bpsText(x.inBps)}</td>
+                        <td data-sort={String(x.outBps ?? '')} style={{ textAlign: 'right' }}>{bpsText(x.outBps)}</td>
                       </tr>
                     );
                   })}
@@ -453,7 +454,8 @@ function Cell({ col, r, ctx }) {
               실패 <span aria-hidden="true">ⓘ</span>
             </button>
           )}
-          <div className="muted" style={{ fontSize: 10.5 }}>{agoText(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}</div>
+          <div className="muted" style={{ fontSize: 10.5 }}>{agoText(s?.collectedAt)}{s?.agent ? ` · ${s.agent}` : ''}
+            {(() => { const m = edgeClockAheadMark(s); return m ? <span className="badge amber" style={{ marginLeft: 4, whiteSpace: 'nowrap', fontSize: 10 }} title={m.title}>{m.label}</span> : null; })()}</div>
         </td>
       );
     case 'actions':
@@ -865,6 +867,12 @@ export default function StorageMonTool() {
       {addressHiddenNote(d) && (
         <div className="card" style={{ padding: '9px 13px', marginTop: 8, fontSize: 12 }}>
           🔒 <BoldText text={addressHiddenNote(d)} />
+        </div>
+      )}
+      {/* v2.631 A6-2631-04: 엣지 시계가 빠른 장비 — 행에는 짧은 표지, 조치는 여기 한 번만(v2.509 규약) */}
+      {edgeClockFootnote((d.devices || []).map((r) => r.snap)) && (
+        <div className="card" style={{ padding: '9px 13px', marginTop: 8, fontSize: 12, whiteSpace: 'normal' }}>
+          ⏱ {edgeClockFootnote((d.devices || []).map((r) => r.snap))}
         </div>
       )}
       {/* v2.591: 엣지가 가져갔지만 결과가 오지 않아 폐기된 '지금 수집' 요청 — 배지만 조용히 꺼지지 않게 */}
