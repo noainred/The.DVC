@@ -23,6 +23,7 @@ import { loadPerfSettings } from './perfSettings.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { readJsonCapped } from '../util/readCapped.js';
+import { agentHeaders, withAgentQuery } from '../agent/agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const gzipAsync = promisify(zlib.gzip);
 const FILE = () => path.join(config.configDir, 'sanswitch-perf-push.json');
@@ -107,9 +108,9 @@ async function sendStatusOnly(status) {
   try {
     const json = Buffer.from(JSON.stringify({ agent: config.agent.name, chunk: 0, chunks: 1, rows: [], meta: [], status }));
     let body = json;
-    const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, 'X-Central-Token': config.agent.centralToken };
+    const hdrs = { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), 'X-Central-Token': config.agent.centralToken };
     if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
-    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-perf`, { method: 'POST', headers: hdrs, body, timeoutMs: 20_000, retries: 1 });
+    const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/sanswitch-perf`, config.agent.name), { method: 'POST', headers: hdrs, body, timeoutMs: 20_000, retries: 1 });
     if (!res.ok) return { ok: false, reason: `sanswitch-perf <- ${res.status}` };
     return { ok: true };
   } catch (e) { return { ok: false, reason: e.message }; }
@@ -197,10 +198,10 @@ async function pushPerfOnce() {
         ...(i === 0 ? { status } : {}),
       }));
       let body = json;
-      const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, 'X-Central-Token': config.agent.centralToken };
+      const hdrs = { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), 'X-Central-Token': config.agent.centralToken };
       if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
       bytes += json.length; gzBytes += body.length;
-      const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-perf`, { method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2 });
+      const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/sanswitch-perf`, config.agent.name), { method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2 });
       if (res.status === 404) throw new Error('중앙에 sanswitch-perf 엔드포인트 없음(중앙이 v2.423 미만)');
       if (!res.ok) {
         // v2.611(CEN2611-03): 본문의 reason 을 읽는다 — 503 dbUnavailable 은 '중앙 DB 불가' 로 따로 말한다(커서는 throw 로 그대로).

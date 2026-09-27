@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { usePolling } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, ResultCount, EntityDetail, GpuBadge } from '../components/ui.jsx';
 import IpmsMatches from '../components/IpmsMatches.jsx';
+import { unitText } from './unitText.js';
 
 /** Render every IPv4 a VM has (multi-homed), one per line; IPv6 is excluded upstream. */
 function ipList(vm) {
@@ -42,6 +43,8 @@ export default function Vms({ filters }) {
   const t = data.totals;
   const g = t?.gpu || { total: 0, vgpu: 0, passthrough: 0, mixed: 0 };
   const fmt = (n) => (n ?? 0).toLocaleString('en-US');
+  // v2.629(감사 WEB2629-01): 사용률을 수집하지 않은 구동 VM 은 평균에서 뺐다 — 그 개수를 밝힌다(조용한 제외 금지).
+  const usageMeta = (miss) => (miss > 0 ? `구동중 VM 기준 · 사용률 미수집 ${fmt(miss)}대 제외` : '구동중 VM 기준');
 
   return (
     <>
@@ -54,11 +57,11 @@ export default function Vms({ filters }) {
           <div className="kpis" style={{ marginBottom: 12 }}>
             <div className="card kpi"><div className="label">전체 VM</div><div className="value">{fmt(t.count)}</div><div className="meta">구동중 {fmt(t.poweredOn)} · 정지 {fmt(t.poweredOff)}</div></div>
             <div className="card kpi"><div className="label">할당 vCPU / vCore</div><div className="value" style={{ color: 'var(--accent)' }}>{fmt(t.vcpu)}</div><div className="meta">vCPU {fmt(t.vcpu)} · vCore {fmt(t.vcpu)}</div></div>
-            <div className="card kpi"><div className="label">평균 CPU 사용량</div><div className="value">{t.avgCpuUsagePct}%</div><div className="meta">구동중 VM 기준</div></div>
+            <div className="card kpi"><div className="label">평균 CPU 사용량</div><div className="value">{unitText(t.avgCpuUsagePct, '%')}</div><div className="meta">{usageMeta(t.usageUnknown?.cpu)}</div></div>
             <div className="card kpi"><div className="label">할당 메모리 합계</div><div className="value" style={{ color: 'var(--purple)' }}>{fmt(t.ramGB)}<small> GB</small></div><div className="meta">≈ {(t.ramGB / 1024).toFixed(1)} TB</div></div>
-            <div className="card kpi"><div className="label">평균 메모리 사용률</div><div className="value">{t.avgMemUsagePct}%</div><div className="meta">구동중 VM 기준</div></div>
+            <div className="card kpi"><div className="label">평균 메모리 사용률</div><div className="value">{unitText(t.avgMemUsagePct, '%')}</div><div className="meta">{usageMeta(t.usageUnknown?.mem)}</div></div>
             <div className="card kpi"><div className="label">할당 디스크 합계</div><div className="value" style={{ color: 'var(--accent-2)' }}>{fmt(t.diskTB)}<small> TB</small></div><div className="meta">{fmt(t.diskGB)} GB</div></div>
-            <div className="card kpi"><div className="label">평균 디스크 사용률</div><div className="value">{t.avgDiskUsagePct ?? 0}%</div><div className="meta">프로비저닝 대비 사용</div></div>
+            <div className="card kpi"><div className="label">평균 디스크 사용률</div><div className="value">{unitText(t.avgDiskUsagePct, '%')}</div><div className="meta">프로비저닝 대비 사용</div></div>
             <div className="card kpi" role="button" tabIndex={0}
               style={{ cursor: 'pointer', outline: (gpuOnly || gpuType) ? '1px solid var(--green)' : 'none' }}
               title="클릭하면 GPU 할당 VM만 표시"

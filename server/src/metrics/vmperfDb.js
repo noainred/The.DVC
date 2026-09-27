@@ -99,7 +99,9 @@ function migrateLegacyFile(vcenterId, file) {
   } catch (e) { console.warn(`[vmperf] 파일명 마이그레이션 실패(${legacy}): ${e.message}`); }
 }
 
-const open = new Map(); // fileName -> { db, st, usedAt }
+const open = new Map(); // fileName -> { db, st, usedAt, busy? }
+/** 테스트 전용 — 열린 핸들 표(v2.629 A6-08 회귀가 LRU 동작을 직접 본다). */
+export function _openForTest() { return open; }
 let sqliteMod = null;
 
 async function loadSqlite() {
@@ -113,11 +115,16 @@ async function loadSqlite() {
   return sqliteMod;
 }
 
-/** LRU: 상한 초과분 중 가장 오래 안 쓴 핸들을 닫는다. */
-function evictIfNeeded() {
+/**
+ * LRU: 상한 초과분 중 가장 오래 안 쓴 핸들을 닫는다.
+ * v2.629(A6-08 = DB2612-03): **사용 중(`busy > 0`) 핸들은 닫지 않는다** — prune 은 청크 사이에 양보하므로 그 사이 다른 vCenter 의
+ *   open 이 LRU 로 prune 중인 핸들을 닫으면 다음 청크가 닫힌 DB 에서 실패했다(열린 파일 > VMPERF_MAX_OPEN_DB 일 때만 도달).
+ *   닫을 후보가 전부 사용 중이면 상한을 **일시적으로** 넘긴다(사용이 끝나면 다음 open 이 다시 줄인다).
+ */
+export function evictIfNeeded() {
   while (open.size > MAX_OPEN) {
     let oldestKey = null; let oldestAt = Infinity;
-    for (const [k, e] of open) if (e.usedAt < oldestAt) { oldestAt = e.usedAt; oldestKey = k; }
+    for (const [k, e] of open) if (!(e.busy > 0) && e.usedAt < oldestAt) { oldestAt = e.usedAt; oldestKey = k; }
     if (oldestKey == null) break;
     const e = open.get(oldestKey);
     open.delete(oldestKey);
@@ -252,11 +259,14 @@ export async function pruneVmperf(vcenterId, retentionDays) {
   if (!x) return 0;
   const before = Date.now() - days * 86_400_000;
   let n = 0;
+  x.busy = (x.busy || 0) + 1;   // v2.629(A6-08): 청크 사이 양보 동안 LRU 가 이 핸들을 닫지 않게
+  try {
   // v2.583: 청크 + 이벤트 루프 양보(v2.453 규약). 한 방 DELETE 는 보존일을 줄인 첫 주기에 수백만 행을 동기로 지워
   //   포탈을 멈춘다(공용 metrics/db.js 는 이미 이 형태였다 — vCenter별 파일만 빠져 있었다).
   try { n = (await chunkedDelete(x.st.prune, [before], { label: `vmperf.${vcenterId}` })).deleted; } catch (e) { console.warn(`[vmperf] ${vcenterId} prune 실패: ${e?.message || e}`); }
   // 경계의 부분 시간대는 남겨 롤업이 원본보다 먼저 비지 않게(공용 DB prune 과 같은 규약).
   try { await chunkedDelete(x.st.pruneHourly, [before - HOUR], { label: `vmperf.${vcenterId}.hourly` }); } catch (e) { console.warn(`[vmperf] ${vcenterId} 롤업 prune 실패: ${e?.message || e}`); }
+  } finally { x.busy -= 1; }
   return n;
 }
 

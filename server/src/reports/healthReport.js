@@ -6,7 +6,7 @@
 
 import { localStamp } from '../util/dayKey.js'; // v2.583 #25: 프로세스 TZ 가 아니라 포탈 오프셋
 import { numOrNull } from '../util/numOrNull.js';
-import { dsUsageReadable, dsUsedOf, dsUsageUnknownOf } from '../store.js'; // v2.622(감사 RECENT-02): 판정 한 벌
+import { dsUsageReadable, dsUsedOf, dsUsageUnknownOf, usageReadable } from '../store.js'; // v2.622(감사 RECENT-02): 판정 한 벌
 
 const DAY = 86_400_000;
 
@@ -24,6 +24,8 @@ export function computeHealthReport(snap, opts = {}) {
   //   발견이 있으면 그 판정(warn/crit)이 이긴다 — 확인 불가 개수는 섹션의 unknown·detail 로 함께 밝힌다.
   const withUnknown = (status, unknownN) => (status === 'ok' && unknownN > 0 ? 'unknown' : status);
   const unknown = { pending: 0, stale: 0, maintenance: 0, alarmsUnknown: 0, dsUsageUnknown: 0 };
+  // v2.629(감사 DATA2629-03): Tools 상태 미수집 VM 수 — summary.unknown(vCenter·경보·DS 축)과 단위가 달라(VM) 따로 싣는다.
+  let toolsUnknown = 0;
 
   // ① vCenter 도달성
   const vcDown = (snap.vcenters || []).filter((v) => v.status === 'unreachable')
@@ -43,8 +45,10 @@ export function computeHealthReport(snap, opts = {}) {
   sec.vcenters.unknown = vcUnknownN;
 
   // ② 호스트 연결 끊김
-  const hostsDown = (snap.hosts || []).filter((h) => h.connectionState === 'DISCONNECTED')
-    .map((h) => ({ name: h.name, vcenterId: h.vcenterId, cluster: h.cluster || '' }));
+  // v2.629(감사 DATA2629-06): REST 폴백은 connection_state 를 대문자화만 해 'NOT_RESPONDING' 이 온다 — 끊김 판정은
+  //   store.usageReadable 한 벌(DISCONNECTED·NOT_RESPONDING 둘 다). 예전 === 'DISCONNECTED' 는 무응답 호스트를 ✅ 로 셌다.
+  const hostsDown = (snap.hosts || []).filter((h) => h && !usageReadable(h))
+    .map((h) => ({ name: h.name, vcenterId: h.vcenterId, cluster: h.cluster || '', connectionState: h.connectionState }));
   S('hosts', hostsDown.length ? 'crit' : 'ok', hostsDown.length, hostsDown.slice(0, 50), '호스트 연결 끊김');
 
   // ③ 데이터스토어 용량
@@ -78,9 +82,17 @@ export function computeHealthReport(snap, opts = {}) {
   S('snapshots', lv(oldSnaps.length), oldSnaps.length, oldSnaps.slice(0, 50), `${snapAgeDays}일 이상 된 스냅샷 보유 VM`);
 
   // ⑤ Tools 미실행(전원 ON VM)
-  const noTools = (snap.vms || []).filter((v) => v.powerState === 'POWERED_ON' && !v.template && v.toolsStatus !== 'RUNNING')
+  // v2.629(감사 DATA2629-03 — 재현): REST 폴백 VM 은 toolsStatus 를 수집하지 않는다(restClient.js — 필드 없음).
+  //   없는 값을 '미실행' 으로 세면 그 vCenter 의 전원 켜진 VM 전부가 경고가 된다 — 수집하지 않은 VM 은 확인 불가로 센다.
+  const noTools = (snap.vms || []).filter((v) => {
+    if (v.powerState !== 'POWERED_ON' || v.template) return false;
+    if (v.toolsStatus == null || v.toolsStatus === '') { toolsUnknown += 1; return false; }
+    return v.toolsStatus !== 'RUNNING';
+  })
     .map((v) => ({ name: v.name, vcenterId: v.vcenterId, host: v.host || '' }));
-  S('tools', lv(noTools.length), noTools.length, noTools.slice(0, 50), 'VMware Tools 미실행(전원 ON)');
+  S('tools', withUnknown(lv(noTools.length), toolsUnknown), noTools.length, noTools.slice(0, 50), 'VMware Tools 미실행(전원 ON)',
+    unknownDetail([['Tools 상태 미수집 VM', toolsUnknown, '대']]));
+  sec.tools.unknown = toolsUnknown;
 
   // ⑥ 고아/접근불가 VM
   const orphaned = (snap.vms || []).filter((v) => v.connectionState && v.connectionState !== 'connected')
@@ -118,6 +130,7 @@ export function computeHealthReport(snap, opts = {}) {
       hosts: (snap.hosts || []).length,
       vms: (snap.vms || []).length,
       issues: sections.reduce((a, s) => a + (s.status !== 'ok' ? s.count : 0), 0),
+      toolsUnknown,   // v2.629 DATA2629-03: Tools 상태 미수집(전원 ON) VM 수
       unknown,   // v2.621(감사 DATA-02): 확인 불가 축별 개수(발견 이슈와 다른 축 — issues 에 더하지 않는다)
     },
     sections,

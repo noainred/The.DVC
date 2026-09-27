@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { agoText } from './relTime.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
@@ -24,13 +24,15 @@ export default function RelayCheckTool() {
   const [newHost, setNewHost] = useState('');
   const [newProfile, setNewProfile] = useState({ port: '', kind: 'irs-portal' });
 
+  // v2.629 WEB2629-03: 범위 계정은 403 — 다시 물어도 같으므로 15초 폴링을 멈춘다. 오류는 객체째(ErrorBox 권한 안내).
+  const denied = useRef(false);
   const load = async () => {
     try { const d = await fetchJson('/tools/relaycheck'); setData(d); setForm((f) => f || d.settings); setError(null); }
-    catch (e) { setError(e.message); }
+    catch (e) { if (e?.status === 403) denied.current = true; setError(e || new Error('조회 실패')); }
   };
-  useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); const t = setInterval(() => { if (!denied.current) load(); }, 15_000); return () => clearInterval(t); }, []);
 
-  if (error && !data) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox error={error} />;
   if (!data || !form) return <Loading />;
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));

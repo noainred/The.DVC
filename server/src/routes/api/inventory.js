@@ -3,6 +3,7 @@ import { requirePerm, requireRole } from '../../auth/auth.js';
 import { userHasPermission } from '../../auth/permissions.js'; // v2.583: /top 의 inv.* 집행
 import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store, usageReadable } from '../../store.js';
+import { numOrNull } from '../../util/numOrNull.js';
 const pctOrNullR = (u, t) => (t > 0 ? Math.round((u / t) * 100) : null);
 import { browseDatastore } from '../../vcenter/dsBrowse.js';
 import { listMutes, addMute, removeMute, muteCreateIssue, muteDeleteIssue, visibleMutes } from '../../alarm-mutes.js';
@@ -225,7 +226,8 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
     total: hosts.length,
     connected: hosts.filter((h) => h.connectionState === 'CONNECTED').length,
     maintenance: hosts.filter((h) => h.connectionState === 'MAINTENANCE').length,
-    disconnected: hosts.filter((h) => h.connectionState === 'DISCONNECTED').length,
+    // v2.629(감사 DATA2629-06): REST 폴백의 'NOT_RESPONDING' 도 끊김이다 — store.usageReadable 한 벌.
+    disconnected: hosts.filter((h) => !usageReadable(h)).length,
     poweredOn: hosts.filter((h) => h.powerState === 'POWERED_ON').length,
     poweredOff: hosts.filter((h) => h.powerState && h.powerState !== 'POWERED_ON').length,
     physicalCores,
@@ -294,7 +296,16 @@ api.get('/vms', invVms, (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
   // sum of the searched resources: vCPU/RAM/disk allocation + avg usage.
   const sm = (fn) => vms.reduce((a, v) => a + (fn(v) || 0), 0);
   const on = vms.filter((v) => v.powerState === 'POWERED_ON');
-  const avg = (arr, fn) => (arr.length ? Math.round((arr.reduce((a, v) => a + (fn(v) || 0), 0) / arr.length) * 10) / 10 : 0);
+  // v2.629(감사 WEB2629-01): 값이 없는 VM 은 평균 분모에 넣지 않는다(REST 폴백 VM 은 사용률 필드가 없다 — 0 으로 세면
+  //   평균이 거짓으로 내려간다). 대상이 0 이면 null('—') — 0% 는 '부하 없음' 이라는 거짓이다. 뺀 수는 usageUnknown 으로 싣는다.
+  const avgOf = (arr, fn) => {
+    let sum = 0; let n = 0;
+    for (const v of arr) { const x = numOrNull(fn(v)); if (x == null) continue; sum += x; n += 1; }
+    return { value: n ? Math.round((sum / n) * 10) / 10 : null, missing: arr.length - n };
+  };
+  const cpuAvg = avgOf(on, (v) => v.cpuUsagePct);
+  const memAvg = avgOf(on, (v) => v.memUsagePct);
+  const avg = (arr, fn) => avgOf(arr, fn).value;
   const totals = {
     count: vms.length,
     poweredOn: on.length,
@@ -303,8 +314,9 @@ api.get('/vms', invVms, (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
     ramGB: Math.round(sm((v) => v.memMB) / 1024),
     diskGB: sm((v) => v.storageGB),
     diskTB: Math.round(sm((v) => v.storageGB) / 1024 * 10) / 10,
-    avgCpuUsagePct: avg(on, (v) => v.cpuUsagePct),
-    avgMemUsagePct: avg(on, (v) => v.memUsagePct),
+    avgCpuUsagePct: cpuAvg.value,
+    avgMemUsagePct: memAvg.value,
+    usageUnknown: { cpu: cpuAvg.missing, mem: memAvg.missing },   // v2.629 WEB2629-01: 사용률 미수집 구동 VM 수
     // 평균 디스크 사용율 = 프로비저닝(committed+uncommitted) 대비 실제 사용(committed).
     // thick 디스크는 uncommitted=0 → 100%. 게스트 파일시스템 사용율과는 다름.
     avgDiskUsagePct: avg(vms.filter((v) => (v.storageGB || 0) + (v.uncommittedGB || 0) > 0),

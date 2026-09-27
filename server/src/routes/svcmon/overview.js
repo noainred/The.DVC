@@ -114,6 +114,6 @@ svcmonRouter.post('/refresh', canEdit, fullScopeOnly, async (req, res) => {
 });
 
 /** 종료 전 저장 flush(운영자 수동 호출·업그레이드 스크립트용). 위치 이동 근거는 파일 헤더 주석. */
-svcmonRouter.post('/flush', adminOnly, (req, res) => { flushStore(); res.json({ ok: true }); });
+svcmonRouter.post('/flush', adminOnly, fullScopeOnly, (req, res) => { flushStore(); res.json({ ok: true }); });   // v2.629 AUTHZ2629-02
 
 }

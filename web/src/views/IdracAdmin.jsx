@@ -47,6 +47,7 @@ export default function IdracAdmin() {
   const [agents, setAgents] = useState({ agents: [], centralEnabled: false });
   const [vcenters, setVcenters] = useState([]);           // vCenter 목록(소속 지정용)
   const [datacenters, setDatacenters] = useState([]);     // DataCenter(법인) 목록(스캔 소속 선택용)
+  const [choiceErr, setChoiceErr] = useState({ agents: null, datacenters: null }); // v2.629 WEB2629-02: 편집 폼 선택 목록 조회 실패
   const [scanRanges, setScanRanges] = useState({ ranges: [], status: null, centralEnabled: false }); // vCenter별 iDRAC 스캔 대역
   const [srForm, setSrForm] = useState(null); // 스캔 대역 편집 폼 { vcenterId, ranges, username, password, agent, enabled, mode } | null
   const [srMsg, setSrMsg] = useState(null); // 스캔 대역 폼 인라인 피드백 { ok, text }
@@ -77,9 +78,12 @@ export default function IdracAdmin() {
   };
   useEffect(() => {
     load();
-    fetchJson('/admin/idrac/scan-agents').then(setAgents).catch(() => {});
+    // v2.629 WEB2629-02: 목록 조회 실패를 삼키면 편집 폼이 빈 목록을 보여 저장된 엣지·법인이 첫 옵션처럼 보였다 — 실패를 폼에 알린다.
+    fetchJson('/admin/idrac/scan-agents').then((d) => { setAgents(d); setChoiceErr((x) => ({ ...x, agents: null })); })
+      .catch((e) => setChoiceErr((x) => ({ ...x, agents: e?.message || String(e) })));
     fetchJson('/admin/vcenters').then((d) => setVcenters(d.vcenters || d || [])).catch(() => fetchJson('/vcenters').then((d) => setVcenters(d || [])).catch(() => {}));
-    fetchJson('/admin/datacenters').then((d) => setDatacenters(d.datacenters || [])).catch(() => {});
+    fetchJson('/admin/datacenters').then((d) => { setDatacenters(d.datacenters || []); setChoiceErr((x) => ({ ...x, datacenters: null })); })
+      .catch((e) => setChoiceErr((x) => ({ ...x, datacenters: e?.message || String(e) })));
     loadScanRanges();
     loadScanJobs();
     // 이 화면은 '스캔 현황 + 법인별 iDRAC 장비 스캔'만 노출 → 스캔 관련만 주기 갱신
@@ -239,7 +243,7 @@ export default function IdracAdmin() {
 
       {srLoadErr && <ErrorBox error={srLoadErr} />}
       <IdracScanRanges
-        loadError={srLoadErr}
+        loadError={srLoadErr} choiceErrors={choiceErr}
         data={scanRanges} vcenters={vcenters} datacenters={datacenters} agents={agents} busy={busy}
         form={srForm} setForm={setSrForm} msg={srMsg} setMsg={setSrMsg}
         onNew={srOpenNew} onEdit={srEdit} onSave={srSave} onDelete={srDelete} onScan={srScanNow}

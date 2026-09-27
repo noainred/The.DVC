@@ -8,6 +8,8 @@
  * HostDatastoreBrowser 스캔이 필요해 포함하지 않는다(리포트에 한계 명시).
  */
 
+import { snapshotReclaimGB } from '../tools/diskTrend.js'; // v2.629 DATA2629-02: 회수량 스냅샷 항 판정 한 벌
+
 const DAY = 86_400_000;
 const slim = (v) => ({
   id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host || '', cluster: v.cluster || '',
@@ -42,6 +44,10 @@ export function computeZombies(snap, opts = {}) {
     .sort((a, b) => b.snapshotSizeGB - a.snapshotSizeGB);
 
   const sumGB = (arr, k = 'storageGB') => Math.round(arr.reduce((a, x) => a + (x[k] || 0), 0));
+  // v2.629(감사 DATA2629-02 — 재현: 정지 VM 100GB + 스냅샷 60GB → 회수 160GB): 정지 VM 디스크(committed)는 스냅샷 델타를
+  //   포함하므로 그 VM 의 스냅샷을 또 더하지 않는다. snapshotHogGB 는 전체 표시 그대로, 겹친 몫은 snapshotInPoweredOffGB 로 밝힌다.
+  const offIds = new Set(poweredOff.map((v) => v.id));
+  const hogReclaimGB = Math.round(snapshotReclaimGB(snapshotHogs, offIds));
   return {
     config: { snapshotMinGB: snapSizeMin, snapshotAgeDays: snapAgeDays },
     summary: {
@@ -49,8 +55,9 @@ export function computeZombies(snap, opts = {}) {
       poweredOffCount: poweredOff.length, poweredOffGB: sumGB(poweredOff),
       templateCount: templates.length, templateGB: sumGB(templates),
       snapshotHogCount: snapshotHogs.length, snapshotHogGB: sumGB(snapshotHogs, 'snapshotSizeGB'),
-      // 회수 가능 추정: 정지 VM 디스크 + 스냅샷 델타(템플릿은 보존 가능성이 높아 제외).
-      reclaimableGB: sumGB(poweredOff) + sumGB(snapshotHogs, 'snapshotSizeGB'),
+      snapshotInPoweredOffGB: Math.max(0, sumGB(snapshotHogs, 'snapshotSizeGB') - hogReclaimGB),   // v2.629 DATA2629-02
+      // 회수 가능 추정: 정지 VM 디스크 + (정지 VM 에 속하지 않은) 스냅샷 델타(템플릿은 보존 가능성이 높아 제외).
+      reclaimableGB: sumGB(poweredOff) + hogReclaimGB,
     },
     orphaned: orphaned.slice(0, 300),
     poweredOff: poweredOff.slice(0, 500),

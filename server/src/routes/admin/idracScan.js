@@ -31,10 +31,11 @@ import { allCollectorStatus } from '../../collector/state.js';
 import { listAssignments, getResults } from '../../central/assignments.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { idracScopeOf, idracInScope } from './idracCore.js'; // v2.629 AUTHZ2629-03: 서버 분석 범위 절단 판정 한 벌
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 // v2.620(SEC2620-05): 쓰기에만 걸던 이 게이트를 스캔 대역·결과·로그·잡 **조회**에도 건다 — 전 법인 IP 대역과
 //   iDRAC·iLO 계정명이 범위 관리자에게 열려 있었다(쓰기는 v2.611 에 막았다). 서버별 상세 조회(인벤토리·센서)는
-//   '서버 분석 조회에는 범위를 걸지 않는다' 는 기존 결정이라 그대로 둔다.
+//   v2.629(AUTHZ2629-03) 부터 범위 계정에 귀속 서버만 보인다(아래 hiddenByScope) — 예전 '범위를 걸지 않는다' 결정은 폐기.
 const fleetOnly = fullScopeOnlyWith('iDRAC 등록부·스캔 대역·스캔 실행은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 실행할 수 있습니다(재귀속·삭제로 다른 법인 서버를 옮길 수 있었다).');
 
 
@@ -42,6 +43,15 @@ const fleetOnly = fullScopeOnlyWith('iDRAC 등록부·스캔 대역·스캔 실�
 // Body: { found:[...], username, password, mode?, vcenterId?, agent? }
 // mode: 'merge'(기본) | 'replace'(전체 교체) | 'replace-vcenter'(소속 vCenter만 교체).
 // agent 지정(위임): 에이전트가 현지에 등록(중앙 못 닿는 대역) → reqId 반환, UI가 폴링.
+// v2.629(AUTHZ2629-03 · A6-02): 서버별 상세 조회는 범위 계정에 **귀속 vCenter 가 허용 집합인 서버만** 보여 주고
+//   (범위 밖·귀속 없음은 존재 은닉 404), 장비에 실시간으로 로그인하는 동작(GPU 프로브·인벤토리 즉시 재수집·센서 즉시 수집)은
+//   '읽기' 가 아니라 '실행' 이라 전체 범위 계정만 한다(v2.611 denyScopedRun 계열).
+const LIVE_REASON = '실시간 iDRAC 로그인(GPU 프로브·인벤토리 즉시 재수집·센서 즉시 수집)은 저장된 BMC 자격증명으로 장비에 접속하는 동작이라 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.';
+const liveFleetOnly = fullScopeOnlyWith(LIVE_REASON);
+const hiddenByScope = (req, s) => { const sc = idracScopeOf(req); return !!sc && !idracInScope(sc, s); };
+const denyLive = (req, res) => { if (!idracScopeOf(req)) return false; res.status(403).json({ ok: false, error: 'forbidden', reason: LIVE_REASON }); return true; };
+const NOT_FOUND = { ok: false, reason: '서버를 찾을 수 없습니다.' };
+
 const normIdracMode = (m) => (['replace', 'replace-vcenter', 'merge'].includes(m) ? m : 'merge');
 
 export function registerIdracScan(adminRouter) {
@@ -52,11 +62,14 @@ adminRouter.get('/idrac/:id/inventory', adminOnly, async (req, res) => {
   if (!s) {
     // 위임 법인의 원격 서버 — 중앙이 직접 못 닿으므로 엣지가 실어보낸 인벤토리를 그대로 반환(재수집 불가).
     const rs = findRemoteServer(req.params.id);
+    if (rs && hiddenByScope(req, rs)) return res.status(404).json(NOT_FOUND);
     if (rs) return res.json({ ok: true, fresh: false, remote: true, collectorId: rs.collectorId, inventory: rs.inv || null });
     return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
   }
+  if (hiddenByScope(req, s)) return res.status(404).json(NOT_FOUND);
   if (s.type === 'ome') return res.status(400).json({ ok: false, reason: 'OME 소스는 상세 인벤토리를 지원하지 않습니다(iDRAC 직접만).' });
   if (req.query.refresh === '1') {
+    if (denyLive(req, res)) return;
     try { return res.json({ ok: true, fresh: true, inventory: await fetchIdracInventory(s) }); }
     catch (e) { return res.status(502).json({ ok: false, reason: e.message }); }
   }
@@ -69,7 +82,7 @@ adminRouter.get('/idrac/:id/inventory', adminOnly, async (req, res) => {
 adminRouter.get('/idrac/:id/vcenter-host', adminOnly, (req, res) => {
   const id = req.params.id;
   const s = loadIdracRegistry().find((x) => x.id === id) || findRemoteServer(id);
-  if (!s) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  if (!s || hiddenByScope(req, s)) return res.status(404).json(NOT_FOUND);
   const norm = (t) => String(t || '').trim().toLowerCase();
   // iDRAC 접속 IP/호스트(v2.301) — 상세 모달이 'iDRAC 바로가기' 링크로 표시(사용자 요구).
   // 등록 레코드의 host 그대로(간혹 프로토콜이 붙은 레거시 값은 표시부에서 정리).
@@ -107,12 +120,15 @@ adminRouter.get('/idrac/:id/sensors', adminOnly, async (req, res) => {
     // 텔레메트리 미지원' 으로 보였다 → 수집 중단으로 오해. 최신값을 그대로 실어 보내고
     // seriesAvailable:false 로 '이력은 엣지에만 있음' 을 밝힌다.
     const rs = findRemoteServer(req.params.id);
+    if (rs && hiddenByScope(req, rs)) return res.status(404).json(NOT_FOUND);
     if (rs) return res.json({ ok: true, ...remoteSensorView(rs), live: null, intervalMs: getPollerStatus().intervalMs });
     return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
   }
+  if (hiddenByScope(req, s)) return res.status(404).json(NOT_FOUND);
   if (s.type === 'ome') return res.status(400).json({ ok: false, reason: 'OME 소스는 센서 시계열을 지원하지 않습니다.' });
   let live = null;
   if (req.query.live === '1') {
+    if (denyLive(req, res)) return;
     try { live = await fetchIdracSensors(s); } catch (e) { live = { error: e.message }; }
   }
   const minutes = Math.max(0, Math.min(1440, Number(req.query.minutes) || 0));
@@ -137,13 +153,12 @@ adminRouter.get('/idrac/:id/sensors', adminOnly, async (req, res) => {
  * 없는 이력을 지어내지 않게 하기 위함이다. 상세(흡기·배기·CPU) 계열은 `IDRAC_TEMP_SERIES_DETAIL`
  * 로만 적재되므로, 켜져 있지 않으면 `max` 한 줄만 온다 — 그 사실을 `detail` 로 밝힌다.
  *
- * 권한: 다른 iDRAC 상세 라우트와 같은 `adminOnly`(서버 분석 계열은 vCenter scope 를 걸지 않는다 —
- * 이 파일 위쪽 `/idrac/temps` 주석의 기존 규약을 따른다).
+ * 권한: 다른 iDRAC 상세 라우트와 같은 `adminOnly` + v2.629 범위 절단(범위 밖·귀속 없는 서버는 404).
  */
 adminRouter.get('/idrac/:id/temp-history', adminOnly, async (req, res) => {
   const id = String(req.params.id || '');
-  const known = loadIdracRegistry().some((x) => x.id === id) || !!findRemoteServer(id);
-  if (!known) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
+  const known = loadIdracRegistry().find((x) => x.id === id) || findRemoteServer(id);
+  if (!known || hiddenByScope(req, known)) return res.status(404).json(NOT_FOUND);
 
   const days = Math.max(1, Math.min(1830, Number(req.query.days) || 7));
   const since = Date.now() - days * 86_400_000;
@@ -182,7 +197,7 @@ adminRouter.get('/idrac/:id/temp-history', adminOnly, async (req, res) => {
 });
 
 // iDRAC에서 GPU 사용률 수집 가능 여부 실측 확인(GPU 목록 + 텔레메트리 리포트).
-adminRouter.get('/idrac/:id/gpu-probe', adminOnly, async (req, res) => {
+adminRouter.get('/idrac/:id/gpu-probe', adminOnly, liveFleetOnly, async (req, res) => {
   const s = loadIdracRegistry().find((x) => x.id === req.params.id);
   if (!s) {
     // 위임 법인 원격 서버: 중앙이 iDRAC에 직접 못 닿아 실시간 프로브 불가(현장 에이전트에서 수행).

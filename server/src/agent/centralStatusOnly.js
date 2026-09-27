@@ -15,6 +15,7 @@
 import { config } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { cmpVersion } from '../util/cmpVersion.js';
+import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 /** `/storage-data` 가 statusOnly 를 아는 첫 중앙 버전(v2.581 BUG-D). */
 export const STATUS_ONLY_MIN_CENTRAL = '2.581.0';
@@ -68,8 +69,8 @@ export function _resetStatusOnlyCapForTest() { _caps.clear(); }
 export async function sendStatusOnly(route, status, extra = {}) {
   try {
     const json = JSON.stringify({ agent: config.agent.name, ...extra, statusOnly: true, status: { ...status, at: Date.now() } });
-    const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, 'X-Central-Token': config.agent.centralToken };
-    const res = await resilientFetch(`${config.agent.centralUrl}${route}`, { method: 'POST', headers: hdrs, body: json, timeoutMs: 20_000, retries: 1 });
+    const hdrs = { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), 'X-Central-Token': config.agent.centralToken };
+    const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}${route}`, config.agent.name), { method: 'POST', headers: hdrs, body: json, timeoutMs: 20_000, retries: 1 });
     if (!res.ok) return { ok: false, reason: `${route.replace(/^\/api\/central\//, '')} <- ${res.status}` };
     return { ok: true };
   } catch (e) { return { ok: false, reason: e.message }; }

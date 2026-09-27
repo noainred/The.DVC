@@ -10,7 +10,8 @@ import { logAudit } from '../../audit.js';
 import { analyzeLog, listLogWindows, ANALYZE_BUCKETS } from '../../svcmon/loganalyze.js';
 import { getLogSettings, setLogSettings, logDir } from '../../svcmon/logsettings.js';
 import { logStatus, logFilePath, pruneOld } from '../../svcmon/csvlog.js';
-import { canEdit, adminOnly } from './shared.js';
+import { canEdit, adminOnly, fullScopeOnly } from './shared.js';
+import { dirPathIssue } from '../../util/dirPathGuard.js';
 import { scopeFilePaths, ADMIN_ONLY_TEXT } from '../../auth/scopeStatus.js';
 
 // v2.598(감사 AUTHZ-2598-04): 로그 디렉터리 절대 경로는 admin 만(이름만 남기고 pathHidden 으로 밝힌다).
@@ -28,7 +29,11 @@ export function registerLogs(svcmonRouter) {
 /* ── 로그 설정/파일 ── */
 svcmonRouter.get('/log', (req, res) => res.json(logStatusFor(req.user)));
 
-svcmonRouter.put('/log', adminOnly, (req, res) => {
+// v2.629 AUTHZ2629-02: 로그 설정·정리는 전 법인 공용 로그 파일을 바꾼다 — 범위 관리자가 keepFiles:1 로 전 법인
+//   로그를 지우고 dirPath 를 임의 절대경로로 바꿀 수 있었다. fullScopeOnly + 경로 검사(vclogs 와 같은 util/dirPathGuard.js).
+svcmonRouter.put('/log', adminOnly, fullScopeOnly, (req, res) => {
+  const pathBad = dirPathIssue(req.body?.dirPath);
+  if (pathBad) return res.status(400).json({ error: `로그 경로: ${pathBad}` });
   try {
     const before = getLogSettings();
     const next = setLogSettings(req.body || {});
@@ -98,7 +103,7 @@ svcmonRouter.get('/log/analyze', canEdit, async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); } finally { analyzeRunning = false; }
 });
 
-svcmonRouter.post('/log/prune', adminOnly, (req, res) => {
+svcmonRouter.post('/log/prune', adminOnly, fullScopeOnly, (req, res) => {
   const removed = pruneOld(logDir(), getLogSettings());
   logAudit({ user: req.user?.username, action: 'svcmon.log.prune', detail: `${removed}개 삭제` });
   res.json({ removed, ...logStatus() });

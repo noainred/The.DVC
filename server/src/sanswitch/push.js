@@ -36,6 +36,7 @@ import { trimZoningToFit } from '../central/edgeRecord.js'; // v2.600 RECENT2600
 import { readCentralReply, dropSummaryOf, dropText } from '../util/centralReply.js'; // v2.613 EDGE2613-05: readDropSummary 사본 → 공용
 import { centralStatusOnlySupport, sendStatusOnly, DEVICE_STATUS_ONLY_MIN_CENTRAL } from '../agent/centralStatusOnly.js'; // v2.613 EDGE2613-04
 import { createChangeLogger } from '../util/logThrottle.js';
+import { agentHeaders, withAgentQuery } from '../agent/agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const _regLog = createChangeLogger({ windowMs: 60 * 60_000 }); // v2.621(감사 EDGE-03): 등록부 손상 경고는 같은 사유면 1시간에 한 줄
 
@@ -178,8 +179,8 @@ async function pushSanSwitchOnce() {
         return { ok: true, sent: 0, statusSent: st.ok };
       }
       const json = Buffer.from(JSON.stringify({ agent: config.agent.name, devices: [], chunk: 0, chunks: 1 }));
-      const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
-      const res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-data`, { method: 'POST', headers: hdrs, body: json, timeoutMs: 30_000, retries: 2 });
+      const hdrs = { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+      const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/sanswitch-data`, config.agent.name), { method: 'POST', headers: hdrs, body: json, timeoutMs: 30_000, retries: 2 });
       if (!res.ok) throw new Error(`sanswitch-data <- ${res.status} (위임 0대 — 중앙 목록 비우기)`);
       _last = { at: Date.now(), sent: 0, cleared: true, reason: '위임 장비 0대 — 중앙 목록을 비웠습니다' };
       return { ok: true, sent: 0, cleared: true };
@@ -197,12 +198,12 @@ async function pushSanSwitchOnce() {
       for (let i = 0; i < chunks.length; i++) {
         const json = Buffer.from(JSON.stringify({ agent: config.agent.name, devices: chunks[i], chunk: i, chunks: chunks.length }));
         let body = json;
-        const hdrs = { 'Content-Type': 'application/json', 'X-Agent-Name': config.agent.name, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+        const hdrs = { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
         if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
         bytes += json.length; gzBytes += body.length;
         let res;
         try {
-          res = await resilientFetch(`${config.agent.centralUrl}/api/central/sanswitch-data`, {
+          res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/sanswitch-data`, config.agent.name), {
             method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2,
           });
         } catch (e) { return { ok: false, error: `${e?.message || e} (청크 ${i + 1}/${chunks.length})`, received, receivedDevices }; }

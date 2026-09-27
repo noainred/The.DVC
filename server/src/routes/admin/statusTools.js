@@ -19,14 +19,16 @@ import { scopedVcenterIds } from '../../auth/scope.js';
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('서버 로그·포탈 DB 경로·보안 점검 기록은 전 법인에 걸친 서버 자기진단이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
+// v2.629 AUTHZ2629-06: 위 사유대로 조회 GET(codex-check·portal-db·health·location)도 fleetOnly — 예전에는 쓰기만 막아
+//   범위 관리자가 DB 절대경로와 vmperf/<vCenter id> 파일명을 그대로 받았다.
 export function registerStatusTools(adminRouter) {
 
 // Codex 정적 보안·완성도 점검 보고서 — 관리자 화면과 날짜별 Markdown 기록을 동일한
 // 서버 모듈에서 생성해 화면과 파일 내용이 어긋나지 않게 한다.
-adminRouter.get('/codex-check', adminOnly, (_req, res) => {
+adminRouter.get('/codex-check', adminOnly, fleetOnly, (_req, res) => {
   res.json(getCodexCheckReport());
 });
-adminRouter.get('/codex-check/file', adminOnly, (_req, res) => {
+adminRouter.get('/codex-check/file', adminOnly, fleetOnly, (_req, res) => {
   res.type('text/markdown; charset=utf-8').send(renderCodexCheckMarkdown());
 });
 adminRouter.post('/codex-check/write', adminOnly, fleetOnly, (req, res) => {
@@ -93,7 +95,7 @@ adminRouter.get('/vcenter/relay-test', adminOnly, async (req, res) => {
 });
 
 // 포탈 DB 인벤토리 — 사용 중 모든 데이터 파일의 경로·파일명·용도·크기·증가 추이·용량 예측.
-adminRouter.get('/portal-db', adminOnly, (_req, res) => res.json(portalDbReport()));
+adminRouter.get('/portal-db', adminOnly, fleetOnly, (_req, res) => res.json(portalDbReport()));
 
 /**
  * DB 정합성·일관성 점검(v2.378) — SQLite 파일을 **읽기 전용**으로 진단한다.
@@ -103,7 +105,7 @@ adminRouter.get('/portal-db', adminOnly, (_req, res) => res.json(portalDbReport(
  */
 // v2.590 P7: 점검은 파일마다 동기 PRAGMA 라 겹쳐 돌면 정지 시간이 곱해진다 — 동시 1건(연타·여러 관리자).
 let _dbHealthBusy = false;
-adminRouter.get('/portal-db/health', adminOnly, async (req, res) => {
+adminRouter.get('/portal-db/health', adminOnly, fleetOnly, async (req, res) => {
   if (_dbHealthBusy) return res.status(409).json({ ok: false, reason: '다른 DB 점검이 진행 중입니다. 끝난 뒤 다시 누르세요.' });
   _dbHealthBusy = true;
   try {
@@ -122,7 +124,7 @@ adminRouter.get('/portal-db/health', adminOnly, async (req, res) => {
  * DB 저장 경로 현황(v2.379) — 현재 경로·이전 대상·용량·생성된 마이그레이션 스크립트 목록.
  * 대용량 시계열 DB 를 CONFIG_DIR 밖의 큰 볼륨으로 옮길 때 쓴다.
  */
-adminRouter.get('/portal-db/location', adminOnly, (_req, res) => {
+adminRouter.get('/portal-db/location', adminOnly, fleetOnly, (_req, res) => {
   try {
     const cur = dbDir();
     res.json({

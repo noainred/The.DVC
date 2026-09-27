@@ -36,6 +36,7 @@ import { classifyCentral404Body } from './central404.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { snapshotResults, pollerStats } from '../svcmon/poller.js';
 import { logStats } from '../svcmon/csvlog.js';
+import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const gzipAsync = promisify(zlib.gzip);
 
@@ -68,7 +69,7 @@ function headers(extra = {}) {
   return {
     'Content-Type': 'application/json',
     // 이름을 헤더로 붙이면 중앙 미들웨어가 '개별 토큰 ↔ agent' 일치까지 검사한다(이중 방어).
-    ...(config.agent.name ? { 'X-Agent-Name': config.agent.name } : {}),
+    ...agentHeaders(config.agent.name),
     ...extra,
     ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}),
   };
@@ -82,7 +83,7 @@ async function postChunk(payload) {
     try { body = await gzipAsync(json); hdrs = headers({ 'Content-Encoding': 'gzip' }); }
     catch { body = json; hdrs = headers(); }     // 압축 실패는 원본 전송
   }
-  const res = await resilientFetch(`${config.agent.centralUrl}/api/central/svcmon-report`, {
+  const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/svcmon-report`, config.agent.name), {
     method: 'POST', headers: hdrs, body,
     timeoutMs: reqTimeoutMs(process.env.SVCMON_PUSH_TIMEOUT_MS, 30_000), retries: 1,
   });

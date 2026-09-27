@@ -81,6 +81,20 @@ export function scopeMainSettings(settings, allowed, isAdmin) {
   if (!isAdmin && 'enterpriseAckBy' in out) { const { enterpriseAckBy: _a, ...rest } = out; void _a; out = { ...rest, enterpriseAckByHidden: true }; }
   return out;
 }
+/**
+ * v2.629(A6-05): 폴러 상태는 **전 함대 집계**다(last.servers·okCount·failCount·inserted·ent·alerts·sourceErrors ·
+ *   authStopCount · entDeferred · prevKeys · alertState). v2.550.3 은 last.counts 만 뺐고, 응답은 isAdmin 이면 원본을 그대로 실어
+ *   범위 관리자(그리고 범위 operator 도 — 가림은 주소만 한다)에게 다른 법인 대수·실패 수가 나갔다. 범위 계정에는 개수를 null 로
+ *   두고 `fleetCountsHidden` 으로 밝힌다(설정값·주기·예산·실행 여부는 전 법인 공통이라 그대로). 전체 범위면 원본. 순수.
+ */
+export function scopeBmStatus(st, allowed) {
+  if (!allowed || !st || typeof st !== 'object') return st;
+  const lr = st.last;
+  const last = lr && typeof lr === 'object'
+    ? { at: lr.at ?? null, ms: lr.ms ?? null, trigger: lr.trigger ?? null, servers: null, okCount: null, failCount: null, inserted: null }
+    : lr;
+  return { ...st, last, authStopCount: null, entDeferred: null, prevKeys: null, alertState: null, fleetCountsHidden: true };
+}
 const stripAckBy = (st, isAdmin) => {
   if (isAdmin || !st || typeof st !== 'object' || !('enterpriseAckBy' in st)) return st;
   const { enterpriseAckBy: _a, ...rest } = st; void _a; return rest;
@@ -202,7 +216,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       distribution: isAdmin && !allowed && !tg.isEdge ? distributionStatus(safeKnownAgents()) : null,
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
       db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
-      status: isAdmin ? bmUsageStatus() : maskPollerStatus(stripAckBy(bmUsageStatus(), isAdmin), hosts),
+      status: scopeBmStatus(isAdmin ? bmUsageStatus() : maskPollerStatus(stripAckBy(bmUsageStatus(), isAdmin), hosts), allowed),
       enterpriseActive: enterpriseActive(),
       licenseLabels: TIER_LABEL,
       /*

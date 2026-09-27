@@ -7,6 +7,7 @@ import { getClassifier } from '../../ipam/settings.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { nsxStore } from '../../nsx/store.js';
 import { memoJson, hash, scopeSlice, scopeKey } from './shared.js';
+import { suggestSize } from '../../reports/rightsizing.js'; // v2.629 DATA2629-05: 과대 VM 은 초과분만
 import { gpuHostKey } from './hardwareGpu.js'; // v2.598 VC2598-03 — (vCenter, 호스트) 키
 
 
@@ -39,11 +40,19 @@ api.get('/tools/insights', requirePerm('tools'), (req, res) => memoJson(req, res
   const slim = (v) => ({ name: v.name, vcenterId: v.vcenterId, host: v.host || '', cpuPct: v.cpuUsagePct ?? null, memPct: v.memUsagePct ?? null, vcpu: v.cpuCount || 0, ramGB: gb(v.memMB) });
   const idle = on.filter((v) => (v.cpuUsagePct ?? 100) < 5 && (v.memUsagePct ?? 100) < 20).map(slim);
   const oversized = on.filter((v) => (v.cpuCount || 0) >= 4 && (v.cpuUsagePct ?? 100) < 10 && !((v.cpuUsagePct ?? 100) < 5 && (v.memUsagePct ?? 100) < 20)).map(slim);
+  const oversizeExcess = (v) => {
+    const sz = suggestSize(v.vcpu || 0, v.ramGB || 0, v.cpuPct, v.memPct);
+    return { vcpu: Math.max(0, (v.vcpu || 0) - sz.suggestedVcpu), ramGB: Math.max(0, (v.ramGB || 0) - sz.suggestedRamGB) };
+  };
   const undersized = on.filter((v) => (v.cpuUsagePct ?? 0) > 85 || (v.memUsagePct ?? 0) > 90).map(slim);
   const rightsizing = {
     idleCount: idle.length, oversizedCount: oversized.length, undersizedCount: undersized.length,
-    reclaimableVcpu: [...idle, ...oversized].reduce((a, v) => a + (v.vcpu || 0), 0),
-    reclaimableRamGB: [...idle, ...oversized].reduce((a, v) => a + (v.ramGB || 0), 0),
+    // v2.629(감사 DATA2629-05): 유휴 VM 은 할당 전량, 과대(oversized — CPU 만 본 판정) VM 은 reports/rightsizing.js suggestSize 의
+    //   **초과분만** 더한다. 예전에는 메모리를 90% 쓰는 VM 의 RAM 전량까지 '회수 가능' 이었다(같은 이름의 숫자가 라이트사이징
+    //   리포트와 뜻이 달랐다). 이 화면의 사용률은 **순간값**이다 — reclaimBasis 로 밝힌다.
+    reclaimableVcpu: idle.reduce((a, v) => a + (v.vcpu || 0), 0) + oversized.reduce((a, v) => a + oversizeExcess(v).vcpu, 0),
+    reclaimableRamGB: idle.reduce((a, v) => a + (v.ramGB || 0), 0) + oversized.reduce((a, v) => a + oversizeExcess(v).ramGB, 0),
+    reclaimBasis: 'instant',
     idle: idle.slice(0, 200), oversized: oversized.slice(0, 200), undersized: undersized.slice(0, 200),
   };
 

@@ -264,13 +264,19 @@ const _startedAt = Date.now();
 const PULLS_MAX = 512;
 // v2.628(SEC2628-02): 공유 토큰 인출의 이름은 검증되지 않았다(v2.589 규약) — verified 로 구분하고, 개별 토큰으로 검증된
 //   기록을 미검증 인출이 덮지 않게 한다(공유 토큰으로 남의 이름을 대 '적용됨' 을 만들 수 없게). 화면이 미검증을 밝힌다.
-export function recordBmUsagePull(agent, { appliedSig = '', version = '', reason = '', verified = false, deliveredSig = '' } = {}) {
+// v2.629(A1-2629-04): 그 보호가 **영구 잠금** 이면 엣지가 개별 토큰 → 공유 토큰으로 바뀐 뒤(토큰 폐기·재발급 전 구간) 행이
+//   중앙 재시작 때까지 옛 시각·옛 판으로 굳는다. 검증 기록이 `VERIFIED_HOLD_MS`(1시간 — 배포 인출 기본 10분의 6배) 넘게
+//   갱신되지 않았으면 미검증 인출이 덮는다. 덮은 기록은 verified:false 이고 `lapsedVerifiedAt` 에 옛 검증 시각을 남긴다.
+export const VERIFIED_HOLD_MS = 60 * 60_000;
+export function recordBmUsagePull(agent, { appliedSig = '', version = '', reason = '', verified = false, deliveredSig = '', now = Date.now() } = {}) {
   const a = lowerAgent(agent);
   if (!a) return;
-  if (!verified && _pulls.get(a)?.verified) return;
+  const prev = _pulls.get(a);
+  if (!verified && prev?.verified && now - (prev.at || 0) <= VERIFIED_HOLD_MS) return;
   if (!_pulls.has(a) && _pulls.size >= PULLS_MAX) _pulls.delete(_pulls.keys().next().value);
   _pulls.delete(a);
-  _pulls.set(a, { agent: t(agent).slice(0, 128), at: Date.now(), appliedSig: t(appliedSig).slice(0, 32), version: t(version).slice(0, 32), reason: t(reason).slice(0, 32), verified: verified === true, deliveredSig: t(deliveredSig).slice(0, 32) });
+  const lapsedVerifiedAt = !verified && prev?.verified ? prev.at : (!verified ? prev?.lapsedVerifiedAt || 0 : 0);
+  _pulls.set(a, { agent: t(agent).slice(0, 128), at: now, appliedSig: t(appliedSig).slice(0, 32), version: t(version).slice(0, 32), reason: t(reason).slice(0, 32), verified: verified === true, deliveredSig: t(deliveredSig).slice(0, 32), ...(lapsedVerifiedAt ? { lapsedVerifiedAt } : {}) });
 }
 /** 화면용 — 알려진 엣지 이름(대소문자 무시)과 인출 기록을 합친다. */
 export function distributionStatus(knownNames = []) {
@@ -289,7 +295,7 @@ export function distributionStatus(knownNames = []) {
     // v2.628(R2628-05): 엣지는 받기 전 판을 알린다 — 마지막 응답이 지금 판을 보냈으면 '전달됨'(적용 확인은 다음 인출).
     else if (p.deliveredSig && p.deliveredSig === cur) state = 'delivered';
     else state = 'pending';
-    return { agent: name, excluded, lastPullAt: p?.at || 0, appliedSig: p?.appliedSig || '', state, verified: p ? p.verified === true : null };
+    return { agent: name, excluded, lastPullAt: p?.at || 0, appliedSig: p?.appliedSig || '', state, verified: p ? p.verified === true : null, lapsedVerifiedAt: p?.lapsedVerifiedAt || null };
   }).sort((a, b) => a.agent.localeCompare(b.agent));
   return { ...d, sig: cur, keys: [...DISTRIBUTED_KEYS], rows, since: _startedAt };
 }

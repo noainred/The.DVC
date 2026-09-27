@@ -12,10 +12,14 @@
 import { collectSelfCheck } from '../../security/selfCheck.js';
 import { listUsers } from '../../auth/auth.js';
 import { currentVersion } from '../../config.js';
-import { adminOnly } from './shared.js';
+import { adminOnly, fullScopeOnlyWith } from './shared.js';
+
+// v2.629 AUTHZ2629-06: 서버 자기진단(파일 권한·완화 스위치·계정 통계)은 전 법인 공용 서버 상태라 전체 범위만 —
+//   형제 statusTools.js 의 fleetOnly 사유('보안 점검 기록은 전체 범위만')와 같은 기준.
+const fleetOnly = fullScopeOnlyWith('보안 자가진단은 포탈 서버 전체 상태라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
 
 export function registerSecurityCheck(adminRouter) {
-  adminRouter.get('/security/self-check', adminOnly, (_req, res) => {
+  adminRouter.get('/security/self-check', adminOnly, fleetOnly, (_req, res) => {
     let users = null;
     try { users = listUsers(); } catch { users = null; }   // 조회 실패는 unknown 으로 내려간다(추정 금지)
     const { checks, summary } = collectSelfCheck({ users });

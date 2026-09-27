@@ -15,6 +15,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { collectSnapshot, createSnapshotState, hostMeta } from '../capacity/sampler.js';
 import { classifyCentral404 } from './central404.js';
+import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 let timer = null;
 let running = false;
@@ -37,11 +38,11 @@ export async function pushCapacityNow() {
   try {
     const snap = collectSnapshot(pushState, { resetEld: false });
     // 첫 주기는 델타 기준선만 잡혀 비어 있을 수 있다 — 빈 봉투도 보낸다(하트비트: '살아 있음' 신호).
-    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/capacity-report`, {
+    const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/capacity-report`, config.agent.name), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(config.agent.name ? { 'X-Agent-Name': config.agent.name } : {}),
+        ...agentHeaders(config.agent.name),
         ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}),
       },
       body: JSON.stringify({ v: 1, rows: snap.rows, meta: hostMeta() }),

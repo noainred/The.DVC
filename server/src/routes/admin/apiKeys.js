@@ -30,7 +30,8 @@ export function registerApiKeys(adminRouter) {
    * 목록 + 카탈로그. 화면이 분류 라벨·설명·엔드포인트를 **서버에서 받아** 쓴다 —
    * 문구를 웹에 복제하면 분류를 늘린 날 화면만 낡는다(CLAUDE.md '코어는 하나다').
    */
-  adminRouter.get('/api-keys', adminOnly, (_req, res) => {
+  // v2.629 AUTHZ2629-08: 목록도 전체 범위만 — 키의 vcenters 에 범위 밖 vCenter id·발급자가 실린다.
+  adminRouter.get('/api-keys', adminOnly, fleetOnly, (_req, res) => {
     const keys = listApiKeys();
     res.json({
       ok: true,

@@ -2,7 +2,7 @@
 // SSH(df)로 주기 수집해 전체/그룹/서버 순으로 총·사용·가용을 합산해 보여준다.
 // 서버는 표(컬럼) 형식 폼으로 등록하고, 그룹을 지정하면 그룹 합산 카드가 생긴다.
 // 수집 주체: 중앙 직접(기본) 또는 글로벌 엣지 위임(중앙→엣지 PUSH — 수집 서버(원격) URL 필요).
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
@@ -37,10 +37,13 @@ export default function BmStorageTool() {
   const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — CSV 일괄 관리(v2.341)
 
   // 수동 로드 + 15초 재조회(저장/수집 직후 즉시 refresh 가 필요해 usePolling 대신 직접 관리).
-  const refresh = () => fetchJson('/tools/bm-storage').then((d) => { setData(d); setError(null); }).catch((e) => setError(e.message));
-  useEffect(() => { refresh(); const t = setInterval(refresh, 15_000); return () => clearInterval(t); }, []);
+  // v2.629 WEB2629-03: 403(전체 범위 관리자 전용)은 다시 물어도 같다 — 15초 폴링을 멈추고, 오류는 객체째 들어 ErrorBox 가 권한 안내로 바꾸게 한다.
+  const denied = useRef(false);
+  const refresh = () => fetchJson('/tools/bm-storage').then((d) => { setData(d); setError(null); })
+    .catch((e) => { if (e?.status === 403) denied.current = true; setError(e || new Error('조회 실패')); });
+  useEffect(() => { refresh(); const t = setInterval(() => { if (!denied.current) refresh(); }, 15_000); return () => clearInterval(t); }, []);
 
-  if (error && !data) return <ErrorBox message={error} />;
+  if (error && !data) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
   const { total, groups, servers, config: cfgs, settings, status, agents } = data;
   const cfgOf = (id) => (cfgs || []).find((c) => c.id === id);
@@ -137,7 +140,7 @@ export default function BmStorageTool() {
           onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); refresh(); }} />
       )}
       {msg && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: '#93c5fd' }}>{msg}</div>}
-      {error && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {error}</div>}
+      {error && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {String(error?.message || error)}</div>}
 
       {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** 서버 — 조용히 멈추지 않는다(authGuard 규칙 1). */}
       {authStopSummary(servers.filter((s) => s.authStopped), { unit: '대', what: '베어메탈 서버' }) && (
