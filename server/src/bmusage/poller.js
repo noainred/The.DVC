@@ -146,7 +146,13 @@ export async function currentTargets() {
     import('../idrac/invCache.js'),
   ]);
   const fleet = await getFleetInventory(snap).catch(() => ({ bareMetal: [], virtualizationHosts: [] }));
-  const { bareMetal, hostsUnread } = await withholdUnreadBareMetal(snap, fleet.bareMetal || []);
+  const held = await withholdUnreadBareMetal(snap, fleet.bareMetal || []);
+  const { hostsUnread } = held;
+  // v2.626: 법인이 빈 베어메탈은 개요와 같은 귀속(호스트명·서비스태그·지정·DataCenter 단일 vCenter)으로 채운다 —
+  //   예전에는 '법인 귀속 없음' 으로 빠져 수집 대상이 되지 못했다. ⚠ 호스트를 못 읽은 동안 뺀 뒤에 채운다(그 판정은 그대로).
+  const { attributeBareMetalFromSnap } = await import('../idrac/corpAttribution.js');
+  const attr = attributeBareMetalFromSnap(held.bareMetal, snap);
+  const bareMetal = attr.bareMetal;
   const registry = (() => { try { return loadRegistry(); } catch { return []; } })();
   const bmServers = (() => { try { return listBmServersRaw(); } catch { return []; } })();
   const isEdge = !!config.agent?.centralUrl;
@@ -164,6 +170,7 @@ export async function currentTargets() {
     }),
     vcenters: (snap?.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id })),
     isEdge,
+    attributed: { filled: attr.filled || 0, conflicts: attr.conflicts || 0, ...(attr.error ? { error: attr.error } : {}) },
     ...(hostsUnread ? { hostsUnread } : {}),
   };
 }

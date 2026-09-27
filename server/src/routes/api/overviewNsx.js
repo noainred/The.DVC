@@ -11,53 +11,17 @@ import { loadRegistry as loadNsxRegistry } from '../../nsx/registry.js';
 import { fetchGroupMembers } from '../../nsx/client.js';
 import { memoJson, hash, scopeKey } from './shared.js';
 import { visibleNsxManagers, managerInScope, scopedNsxRollup } from '../../nsx/scope.js';
-import { loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
-import { remoteServersResolved, invForServer } from '../admin/shared.js';
+import { invForServer } from '../admin/shared.js';
+import { allPhysicalServers, corpAttribution } from '../../idrac/corpAttribution.js'; // v2.626
 import { aggregatePhysical } from '../../idrac/physicalCapacity.js'; // v2.486: iDRAC 인식 전체 물리 서버 코어·메모리
 import { serversByCorp } from '../../idrac/serverByCorp.js';          // v2.526: 법인(vCenter)별 물리 서버 수
-import { loadFleetAssign } from '../../insights/fleetAssign.js';       // v2.583: 관리자 지정 귀속(특수 기능 › 통합 서버 인벤토리)
-import { listDatacenters, getDatacenterAssign } from '../../datacenter/store.js'; // v2.583: 법인 ↔ vCenter 할당
 
+// v2.626: `allPhysicalServers`·`corpAttribution` 은 `idrac/corpAttribution.js` 로 옮겼다 — 법인별 서버 사용량·
+//   베어메탈 사용률이 **같은 귀속 입력**을 쓰게(개요만 DataCenter 규칙을 알던 것이 '물리 서버 없음' 의 원인이었다).
 /**
- * v2.486: iDRAC 가 인식한 모든 물리 서버(중앙 직접 등록 + 위임 법인 원격, OME 엔트리 제외, id 중복은 중앙 우선)의
- * 코어·메모리 합계. Overview CPU/메모리 카드가 vCenter(ESXi) 수치와 나란히 보인다. 스냅샷마다 1회(memoJson).
+ * 법인(vCenter)별 물리 서버 수(v2.526). 귀속 판정은 `idrac/serverByCorp.js`.
+ * ⚠ 범위 제한 계정에는 허용 vCenter 만 남긴다. 귀속되지 않은 서버는 범위 계정에 주지 않는다.
  */
-function allPhysicalServers() {
-  const local = loadIdracRegistry().filter((s) => s.type !== 'ome');
-  const seen = new Set(local.map((s) => String(s.id)));
-  return local.concat(remoteServersResolved().filter((s) => !seen.has(String(s.id))));
-}
-
-/**
- * 법인(vCenter)별 물리 서버 수(v2.526, 사용자 요청 "법인별 서버 수량과 guestos 수량").
- * 귀속 판정은 `idrac/serverByCorp.js` — 전력 귀속과 **같은 신호 순서**를 쓴다(그 파일 머리말).
- * ⚠ 범위 제한 계정에는 **허용 vCenter 만** 남긴다(전 법인 서버 대수 유출 차단). 귀속되지 않은
- *   서버(unassigned)는 어느 법인 것인지 모르므로 범위 계정에 **주지 않는다**.
- */
-/**
- * v2.583 보조 귀속 재료 — 관리자 지정(fleet-assign) · 법인(DataCenter) → vCenter 목록 · 살아 있는 vCenter.
- * 법인 id 는 대소문자를 무시해 맞춘다(`matchDatacenterId` 와 같은 관례). 이름도 함께 준다(화면의 행 이름).
- */
-function corpAttribution(vcenters) {
-  const known = new Set((vcenters || []).map((v) => String(v.id)));
-  const byLower = new Map();
-  for (const id of known) byLower.set(id.toLowerCase(), id);
-  const dcVcenters = new Map();
-  for (const [vcRaw, dc] of Object.entries(getDatacenterAssign() || {})) {
-    const vc = byLower.get(String(vcRaw).trim().toLowerCase());
-    const k = String(dc || '').trim().toLowerCase();
-    if (!vc || !k) continue;
-    const arr = dcVcenters.get(k) || [];
-    if (!arr.includes(vc)) arr.push(vc);
-    dcVcenters.set(k, arr);
-  }
-  const dcNames = {};
-  for (const d of listDatacenters() || []) if (d?.id) dcNames[String(d.id)] = String(d.name || d.id);
-  let fleetAssign = {};
-  try { fleetAssign = loadFleetAssign() || {}; } catch { fleetAssign = {}; }
-  return { opts: { fleetAssign, dcVcenters, knownVcenters: known }, dcNames };
-}
-
 // v2.591 C4: `sink` 를 주면 범위 계정의 **허용 vCenter 에 귀속된 서버**를 담아 돌려준다 —
 //   개요의 물리 용량(`physical`)이 같은 귀속 판정으로 다시 집계되게(함대 전체 70대와 범위 9대를 한 화면에서
 //   동시에 말하던 결함).

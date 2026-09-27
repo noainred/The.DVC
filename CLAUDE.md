@@ -4107,6 +4107,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 응답은 **법인 합계만**(서버 이름·주소 0 — 테스트가 호스트 이름 누출 0 을 고정) · 범위 계정은 허용 법인만 + 귀속 없음 null ·
       memoJson 12초(scopeKey) · 폴링 금지. 법인 구분은 이름의 IRS(V6 `siteGroupOf` 와 같은 규칙).
     - ⚠ 정직 기록: 목 데이터에 베어메탈·iDRAC 텔레메트리·IRS 법인이 없어 Chromium 검증은 vCenter 경로 + 응답 합성(물리·IRS 행)으로 했다.
+    - ⚠⚠ **v2.626 — 물리 서버의 법인 귀속은 `idrac/corpAttribution.js` 하나다**(사용자 신고 "물리서버 사용량 안됨" — 전 법인
+      '물리 서버 — 서버 없음'): `fleetInventory.resolveVc` 는 등록부 vcenterId·수동 지정만 보고, 개요(v2.583 `serversByCorp`)는 호스트명·
+      서비스태그·DataCenter 단일 vCenter 까지 본다 — 이 현장 물리 전용 서버는 마지막 규칙으로만 귀속돼 사용률 쪽에서 전부 '귀속 없음'
+      (수집 제외·합계 제외)이었다. `attributeBareMetalFromSnap` 이 **빈 법인만** 채운다(`vcSource:'corp-rule'` · 기존 귀속 불변 ·
+      같은 태그가 두 법인이면 채우지 않는다). 수집 대상(`bmusage/poller.js`)·법인별 사용량·개요가 같은 모듈을 쓴다 — **사본을 만들지 말 것**.
+      ⚠⚠ **엣지는 로컬 등록 물리 서버를 가져간다**(`targets.js` `mine = !owner || owner === me`) — 예전 `owner && owner === me` 는
+      remoteAgent 가 없는 엣지 로컬 서버를 전부 '위임됨' 으로 빼서 **v2.550 부터 엣지가 물리 서버를 한 대도 수집하지 못했다**
+      (옛 테스트가 그 동작을 고정하고 있었다 — 중앙 관점 픽스처로 엣지를 시험한 탓). 엣지 bm-usage 설정은 여전히 **각 엣지 로컬**이다(중앙 배포 없음 — 남은 일).
       viewer 는 기본 권한에 `tools` 가 없어 막히는 것이 정상이고, tools 를 준 범위 viewer 로 허용 법인 1곳만 보이는 것을 확인했다.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**

@@ -192,7 +192,12 @@ test('엣지는 자기 것만, 중앙은 위임 아닌 것만 — 같은 서버�
   const opt = { bareMetal: BM, registry: [...REG, { id: 's4', host: '10.0.0.4', username: 'root', password: 'x', serviceTag: 'QQQ1' }],
     bmServers: OSH, settings: { corps: { vc1: true, vc2: true }, osSsh: true, idracTelemetry: true } };
   const edge = resolveTargets({ ...opt, isEdge: true, agentName: 'SEOUL' });
-  assert.deepEqual(edge.targets.map((x) => x.name), ['bm-04'], '엣지는 자기 agent 것만');
+  // v2.626 정정: 엣지의 분류에는 로컬 등록분이 remoteAgent 없이 들어온다 — 그것도 엣지 자기 것이다
+  //   (예전 단언 ['bm-04'] 는 엣지가 로컬 물리 서버를 한 대도 수집하지 못하던 결함을 고정하고 있었다).
+  assert.ok(edge.targets.some((x) => x.name === 'bm-04'), '엣지는 자기 agent 것을 가져간다');
+  assert.ok(edge.targets.some((x) => x.name === 'bm-01'), '엣지는 자기 로컬 등록분도 가져간다');
+  const other = resolveTargets({ ...opt, isEdge: true, agentName: 'BUSAN' });
+  assert.ok(!other.targets.some((x) => x.name === 'bm-04'), '남의 엣지 것은 가져가지 않는다');
   const central = resolveTargets({ ...opt, isEdge: false, agentName: 'CENTRAL' });
   assert.ok(!central.targets.some((x) => x.name === 'bm-04'), '중앙은 위임 서버를 가져가지 않는다');
 });

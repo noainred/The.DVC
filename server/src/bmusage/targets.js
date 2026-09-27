@@ -93,8 +93,11 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
   for (const b of bareMetal) {
     const vc = t(b.vcenterId);
     const owner = norm(b.remoteAgent);
-    // 이 노드가 담당하는 서버인가 — 엣지는 자기 agent 것만, 중앙은 agent 없는 것만.
-    const mine = isEdge ? (owner && owner === me) : !owner;
+    // 이 노드가 담당하는 서버인가 — 엣지는 **자기 로컬 등록분**(remoteAgent 없음)과 자기 agent 것, 중앙은 agent 없는 것만.
+    // ⚠ v2.626: 예전 조건 `owner && owner === me` 는 엣지의 로컬 등록 서버(remoteAgent 는 중앙이 엣지 보고를 합칠 때만
+    //   붙는다 — 엣지 자신의 분류에는 없다)를 전부 '위임됨' 으로 빼서 **엣지가 물리 서버를 한 대도 수집하지 못했다**.
+    //   엣지의 분류에는 남의 엣지 서버가 들어오지 않으므로(fleetInventory 는 중앙에서만 엣지 보고를 합친다) 넓혀도 안전하다.
+    const mine = isEdge ? (!owner || owner === me) : !owner;
     if (!mine) { skipped.push({ ...idOf(b), reason: 'edge-delegated', agent: b.remoteAgent || '' }); continue; }
     if (!vc) {
       if (!settings.includeUnassigned) { skipped.push({ ...idOf(b), reason: 'unassigned' }); continue; }

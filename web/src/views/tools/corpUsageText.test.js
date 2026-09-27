@@ -47,6 +47,15 @@ describe('corpUsageText', () => {
     expect(err[0].tone).toBe('bad');
     expect(noticesOf(null)).toEqual([]);
   });
+  it('v2.626 — 법인을 못 정한 물리 서버·규칙으로 채운 수를 안내한다', () => {
+    const txt = noticesOf({ settings: { enabled: true, idracTelemetry: true, includeVirtualization: true }, corps: [{ collectOn: true }],
+      unassigned: { bm: agg({ servers: 12 }) }, attributed: { filled: 480 }, edgeSnaps: { count: 0 } }).map((n) => n.text).join('\n');
+    expect(txt).toMatch(/법인을 정하지 못한 물리 서버 12대/);
+    expect(txt).toMatch(/물리 서버 480대는/);
+    expect(txt).toMatch(/그 엣지 포탈의/);
+    const none = noticesOf({ settings: { enabled: true }, corps: [], attributed: { filled: null }, edgeSnaps: {} }).map((n) => n.text).join('\n');
+    expect(none).not.toMatch(/정하지 못한|대는 등록부/);
+  });
   it('각주 — 귀속 없는 물리 서버를 밝힌다 · 백틱 없음', () => {
     const f = footnotes({ unassigned: { bm: agg({ servers: 3, unread: 0, stale: 0 }) } });
     expect(f.join('\n')).toMatch(/귀속 없는 물리 서버 3대/);
