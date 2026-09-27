@@ -16,7 +16,10 @@
  *   (타임아웃·연결 실패로 멈추면 일시 장애가 수집을 영구 정지시킨다) 자격증명이 바뀌면 자동 재개한다.
  *   **수동 실행은 막지 않는다** — 고쳤는지 확인할 길을 없애면 안 된다.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.604
+import { corruptOnlyReason } from '../util/registryCore.js';
 import { config } from '../config.js';
 import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
@@ -113,6 +116,7 @@ export function bmUsageStatus() {
     last: _last ? (({ counts: _c, ...rest }) => rest)(_last) : null,
     prevKeys: _prev.size,
     authStopCount: _authStopped.size,
+    lastPrune: _lastPrune,
   };
 }
 
@@ -137,15 +141,33 @@ export function authStopsFor(targets = []) {
   return out;
 }
 
+/*
+ * v2.628(감사 EDGE2628-03): 대상 해석 입력(분류·iDRAC 등록부·OS 계정 등록부) 실패를 **조용히 빈 값으로 삼키지 않는다**.
+ *   예전에는 분류 예외가 '대상 서버가 없습니다', 등록부 손상이 전 서버 'no-idrac'/'no-os-cred'(설정 누락처럼 읽히는
+ *   틀린 사유)로 보였고 `_last` 에도 콘솔에도 흔적이 없었다. 이제 `sourceErrors[{source,error}]` 로 모아 돌려주고
+ *   (routes/api/corpUsage.js 의 sourceErrors 와 같은 모양) 폴러가 `_last` 에 싣고 콘솔에 남긴다(같은 내용은 10분에 1줄).
+ *   분류 자체가 실패하면 `classifyFailed` — 폴러는 그 주기를 '대상 0대' 가 아니라 **실패**로 기록한다.
+ */
+const _srcErrLog = createChangeLogger({ windowMs: 10 * 60_000 });
+let _fleetOverride = null;   // 테스트 전용(_setFleetForTest)
+const errText = (e) => String(e?.message || e || 'unknown').slice(0, 200);
+const IDRAC_REGISTRY_FILE = () => path.join(config.configDir, 'idrac.json');
+
 /** 대상 해석 — 스냅샷·등록부를 읽어 온다(장비에 접속하지 않는다). */
 export async function currentTargets() {
   const s = loadBmUsageSettings();
   const snap = store.get();
-  const [{ getFleetInventory }, { loadRegistry }, { listBmServersRaw }, { getInventory }] = await Promise.all([
+  const [{ getFleetInventory }, { loadRegistry }, { listBmServersRaw, registryLoadError: bmRegistryLoadError }, { getInventory }] = await Promise.all([
     import('../insights/fleetInventory.js'), import('../idrac/registry.js'), import('../bmstor/registry.js'),
     import('../idrac/invCache.js'),
   ]);
-  const fleet = await getFleetInventory(snap).catch(() => ({ bareMetal: [], virtualizationHosts: [] }));
+  const sourceErrors = [];
+  let classifyFailed = false;
+  const fleet = await (_fleetOverride || getFleetInventory)(snap).catch((e) => {
+    classifyFailed = true;
+    sourceErrors.push({ source: 'classify', error: errText(e) });
+    return { bareMetal: [], virtualizationHosts: [] };
+  });
   const held = await withholdUnreadBareMetal(snap, fleet.bareMetal || []);
   const { hostsUnread } = held;
   // v2.626: 법인이 빈 베어메탈은 개요와 같은 귀속(호스트명·서비스태그·지정·DataCenter 단일 vCenter)으로 채운다 —
@@ -153,8 +175,32 @@ export async function currentTargets() {
   const { attributeBareMetalFromSnap } = await import('../idrac/corpAttribution.js');
   const attr = attributeBareMetalFromSnap(held.bareMetal, snap);
   const bareMetal = attr.bareMetal;
-  const registry = (() => { try { return loadRegistry(); } catch { return []; } })();
-  const bmServers = (() => { try { return listBmServersRaw(); } catch { return []; } })();
+  const registry = (() => {
+    // idrac/registry.js loadRegistry 는 파싱 실패 시 손상본을 옮기고(preserveCorrupt) 빈 목록을 준다 — 호출 전후 파일
+    //   존재로 그 사실을 알아챈다(등록부 모듈을 건드리지 않고). 빈 목록이면 전 서버가 'no-idrac' 로 보이므로 밝혀야 한다.
+    let existed = false;
+    try { existed = fs.existsSync(IDRAC_REGISTRY_FILE()); } catch { /* */ }
+    try {
+      const list = loadRegistry();
+      if (!fs.existsSync(IDRAC_REGISTRY_FILE())) {
+        // 방금 손상본으로 옮겨졌거나(existed) 재시작 전에 옮겨져 보존본만 남은 경우(corruptOnlyReason).
+        const why = existed ? '손상본 보존' : corruptOnlyReason(IDRAC_REGISTRY_FILE());
+        if (why) sourceErrors.push({ source: 'idrac-registry', error: `iDRAC 등록부(idrac.json)를 읽지 못했습니다(${why}) — 대상 서버가 no-idrac 로 보일 수 있습니다` });
+      }
+      return list;
+    } catch (e) { sourceErrors.push({ source: 'idrac-registry', error: errText(e) }); return []; }
+  })();
+  const bmServers = (() => {
+    try {
+      const list = listBmServersRaw();
+      const le = typeof bmRegistryLoadError === 'function' ? bmRegistryLoadError() : null;
+      if (le) sourceErrors.push({ source: 'os-registry', error: `OS 계정 등록부를 읽지 못했습니다 — 대상 서버가 no-os-cred 로 보일 수 있습니다(${errText(le?.message || le?.reason || le)})` });
+      return list;
+    } catch (e) { sourceErrors.push({ source: 'os-registry', error: errText(e) }); return []; }
+  })();
+  for (const se of sourceErrors) {
+    if (_srcErrLog(`src:${se.source}`, se.error)) console.warn(`[bmusage] 대상 해석 입력 실패(${se.source}): ${se.error}`);
+  }
   const isEdge = !!config.agent?.centralUrl;
   return {
     settings: s,
@@ -172,6 +218,8 @@ export async function currentTargets() {
     isEdge,
     attributed: { filled: attr.filled || 0, conflicts: attr.conflicts || 0, ...(attr.error ? { error: attr.error } : {}) },
     ...(hostsUnread ? { hostsUnread } : {}),
+    sourceErrors,
+    ...(classifyFailed ? { classifyFailed: true } : {}),
   };
 }
 
@@ -400,6 +448,46 @@ async function collectOne(target, { trigger = 'auto' } = {}) {
 }
 
 /**
+ * 대상에서 사라진 키의 인메모리 상태를 버린다(v2.550.3 누수 방지 — v2.628 에 0대 경로도 부르도록 함수로 뺐다).
+ * ⚠ iDRAC 정지 키는 `<key>|idrac` 이므로 접미를 떼고 대조한다(안 떼면 영원히 남는다 — 누수).
+ */
+function dropStaleState(live) {
+  for (const k of _prev.keys()) if (!live.has(k)) _prev.delete(k);
+  for (const k of _authStopped.keys()) if (!live.has(String(k).replace(/\|idrac$/, ''))) _authStopped.delete(k);
+}
+
+/*
+ * ⚠⚠ v2.628(감사 EDGE2628-02): **보존 정리는 수집과 무관하게 돈다.** 예전에는 pruneUsage 가 '켜져 있고 대상이 1대
+ *   이상인 성공 주기' 에서만 불려, 꺼짐(중앙 배포로 끔·이 엣지 제외 포함)·대상 0대·수집 예외면 원시 90일/롤업 5년
+ *   보존이 **영원히 집행되지 않았다**(설정이 거짓말 — v2.531 과 같은 유형). 폴러 틱마다 이 함수를 부르고 스로틀은
+ *   `(++tick % N) === 0`(기동 첫 틱에 참이 되지 않는다 — v2.453 규약). 수집이 꺼져 있고 DB 파일이 아직 없으면
+ *   **파일을 만들지 않는다**(켠 적 없는 노드에 빈 DB 를 만들지 않게). 경로는 bmusage/db.js FILE() 과 같은 식이다.
+ */
+let _pruneTick = 0;
+let _lastPrune = null;
+const BMUSAGE_DB_FILE = () => path.join(config.dbDir || config.configDir, 'bm-usage.db');
+export async function pruneTick({ every = PRUNE_EVERY } = {}) {
+  if ((++_pruneTick % Math.max(1, every)) !== 0) return { ok: true, skipped: true };
+  let exists = false;
+  try { exists = fs.existsSync(BMUSAGE_DB_FILE()); } catch { /* */ }
+  if (!exists && !bmUsageEnabled()) return { ok: true, skipped: true, reason: 'no-db' };
+  const s = loadBmUsageSettings();
+  const r = await pruneUsage({ rawDays: s.rawRetentionDays, dailyDays: s.dailyRetentionDays, force: true }).catch((e) => ({ ok: false, error: errText(e) }));
+  _lastPrune = { at: Date.now(), ...r };
+  if (r && r.ok === false && r.error && _srcErrLog('prune', r.error)) console.warn(`[bmusage] 보존 정리 실패: ${r.error}`);
+  return r;
+}
+
+/** 폴러 한 틱 — 켜져 있으면 수집하고, **켜짐 여부와 무관하게** 보존 정리를 시도한다(위 주석). */
+export async function bmUsageTimerTick() {
+  try {
+    if (bmUsageEnabled()) await pollBmUsageOnce({ trigger: 'auto' });
+  } finally {
+    await pruneTick().catch(() => {});
+  }
+}
+
+/**
  * 동시성 제한 풀 — v2.579(ARCH-01): 본체는 `util/pool.js poolSettled` 다(손으로 쓴 사본 제거).
  * 이 호출부의 `fn` 은 스스로 catch 해 절대 거부하지 않으므로 `value` 만 뽑으면 예전 반환(결과 배열,
  * 입력 순서 보존)과 같다. 만에 하나 거부되면 예전에는 전체가 거부됐고 지금은 `undefined` 자리가
@@ -419,10 +507,20 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
   _running = true;
   const t0 = Date.now();
   try {
-    const { targets, counts, settings } = await currentTargets();
+    const { targets, counts, settings, sourceErrors = [], classifyFailed } = await currentTargets();
+    const srcErr = sourceErrors.length ? { sourceErrors: sourceErrors.slice(0, 8) } : {};
+    if (classifyFailed) {
+      // v2.628 EDGE2628-03: 분류 실패는 '대상 0대' 가 아니다 — 대상을 모르는 것이다. 누적 카운터·정지 기록은 건드리지 않는다
+      //   (분류가 돌아오면 같은 대상이 그대로 이어진다).
+      const reason = `대상 분류(서버 인벤토리)에 실패해 이번 주기를 건너뛰었습니다 — ${sourceErrors.find((x) => x.source === 'classify')?.error || ''}`;
+      _last = { at: Date.now(), ms: Date.now() - t0, servers: null, okCount: 0, failCount: 0, inserted: 0, error: reason, ...srcErr, trigger };
+      return { ok: false, reason, ...srcErr };
+    }
     if (!targets.length) {
-      _last = { at: Date.now(), ms: Date.now() - t0, servers: 0, okCount: 0, failCount: 0, inserted: 0, counts, trigger };
-      return { ok: true, servers: 0, counts, reason: '대상 서버가 없습니다.' };
+      // v2.628 EDGE2628-02: 0대 경로도 누적 카운터·정지 기록을 정리한다(마지막 대상의 카운터가 남아 돌아왔을 때 MAX_SPAN_MS 에 걸리지 않게).
+      dropStaleState(new Set());
+      _last = { at: Date.now(), ms: Date.now() - t0, servers: 0, okCount: 0, failCount: 0, inserted: 0, counts, ...srcErr, trigger };
+      return { ok: true, servers: 0, counts, reason: '대상 서버가 없습니다.', ...srcErr };
     }
     _listBudget = LIST_BUDGET_PER_RUN;   // ⚠ 주기 시작마다 리셋(위 상수 주석 참조)
     _entBudget = ENT_BUDGET_PER_RUN;
@@ -437,9 +535,7 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
      *   걸려 그 주기가 통째로 `null` 이 된다(첫 수집이라고 말하지도 않는다).
      */
     const live = new Set(targets.map((t2) => t2.key));
-    for (const k of _prev.keys()) if (!live.has(k)) _prev.delete(k);
-    // ⚠ iDRAC 정지 키는 `<key>|idrac` 이므로 접미를 떼고 대조한다(안 떼면 영원히 남는다 — 누수).
-    for (const k of _authStopped.keys()) if (!live.has(String(k).replace(/\|idrac$/, ''))) _authStopped.delete(k);
+    dropStaleState(live);
     // ⚠ `_perIf`·`_perFc` 는 화면 상세용 내부 배열이다 — DB 적재 경로로 넘기지 않는다(오염 방지).
     const rows = results.filter((r) => r?.ok && r.built)
       .map((r) => { const { _perIf: _a, _perFc: _b, ...row } = r.built.row; return row; });
@@ -454,7 +550,6 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
     try { alerts = await runBmUsageAlerts(rows, { ...settings, runMs: Date.now() - t0 }); }
     catch (e) { alerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     const okCount = results.filter((r) => r?.ok).length;
-    await pruneUsage({ rawDays: settings.rawRetentionDays, dailyDays: settings.dailyRetentionDays, every: PRUNE_EVERY });
     _last = {
       at: Date.now(), ms: Date.now() - t0, servers: targets.length,
       okCount, failCount: targets.length - okCount, inserted: ins.inserted || 0,
@@ -470,7 +565,7 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
         viaSsh: results.filter((r) => r?.ent?.ok && String(r.ent.via || '').includes('ssh')).length,
         unparsed: results.filter((r) => r?.ent && r.ent.kind === 'unparsed').length,
       },
-      dbOk: !!ins.ok, dbError: ins.error || null, counts, trigger,
+      dbOk: !!ins.ok, dbError: ins.error || null, counts, ...srcErr, trigger,
       alerts: alerts && !alerts.skipped ? { sent: alerts.sent ?? 0, suppressed: alerts.suppressed ?? 0, capped: alerts.capped ?? 0, over: alerts.counts?.over ?? 0, error: alerts.error || null } : null,
     };
     return { ok: true, ...(_last) };
@@ -483,14 +578,18 @@ export async function pollBmUsageOnce({ trigger = 'auto' } = {}) {
 export function startBmUsagePoller() {
   if (_timer) return;
   // ⚠ 인자 순서는 `(getMs, fn, opts)` — 매 틱 주기를 다시 읽어야 설정 변경이 재시작 없이 먹는다.
-  _timer = startAdaptiveTimer(() => loadBmUsageSettings().intervalMs, async () => {
-    if (!bmUsageEnabled()) return;
-    await pollBmUsageOnce({ trigger: 'auto' });
-  }, { name: 'bmusage', firstDelayMs: 45_000, subscribe: onBmUsageSettingsChange });
+  _timer = startAdaptiveTimer(() => loadBmUsageSettings().intervalMs, bmUsageTimerTick,
+    { name: 'bmusage', firstDelayMs: 45_000, subscribe: onBmUsageSettingsChange });
   console.log('[bmusage] 폴러 등록(설정에서 켜면 수집 시작)');
 }
 
 export function stopBmUsagePoller() { _timer?.stop?.(); _timer = null; }
-export function _resetForTest() { _prev.clear(); _authStopped.clear(); _last = null; _running = false; guard._resetForTest(); }
+export function _resetForTest() { _prev.clear(); _authStopped.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; guard._resetForTest(); }
+/** 테스트 전용 — 분류 함수 대체(EDGE2628-03) · 인메모리 상태 주입(EDGE2628-02). */
+export function _setFleetForTest(fn) { _fleetOverride = typeof fn === 'function' ? fn : null; }
+export function _seedStateForTest({ prev = [], authStopped = [] } = {}) {
+  for (const k of prev) _prev.set(k, { at: Date.now() });
+  for (const k of authStopped) _authStopped.set(k, { attempts: 1 });
+}
 export { guard as _authGuardForTest };
 
