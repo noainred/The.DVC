@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { statusTiles, usageGauges, siteCards, siteToneCounts, recentAlarms, actionLinks, capacityCards, totalTiles, osRows, corpContribution, serverSegments, serverCorpRows, pctTone } from './v6Data.js';
+import { siteGroupOf, siteGroupCounts, filterSiteGroup, bySiteName, statusTiles, usageGauges, siteCards, siteToneCounts, recentAlarms, actionLinks, capacityCards, totalTiles, osRows, corpContribution, serverSegments, serverCorpRows, pctTone } from './v6Data.js';
 
 const G = { vcenters: 12, vcentersConnected: 9, vcentersMaintenance: 1, vcentersDisabled: 1, vcentersPending: 1, vcentersUnreachable: 0,
   hosts: 186, hostsConnected: 170, hostsMaintenance: 11, hostsDisconnected: 5, vms: 2242, vmsPoweredOn: 1918, vmsPoweredOff: 324,
@@ -76,3 +76,38 @@ describe('서버 메뉴', () => {
     expect(serverSegments({ ...OV, physicalByCorp: { error: 'x' } }).union).toBe(null);
   });
 });
+
+describe('v2.624 법인 카드 — 알파벳순 · 다빈치/IRS 구분', () => {
+  const sites = [
+    { id: 'v3', name: 'ST-IRS', metrics: { cpuUsagePct: 95 } },
+    { id: 'v1', name: 'hg10', metrics: { cpuUsagePct: 10 } },
+    { id: 'v2', name: 'HG2', metrics: { cpuUsagePct: 80 } },
+    { id: 'v4', name: 'AS', metrics: {} },
+    { id: 'v5', name: 'nj-irs', metrics: { cpuUsagePct: 50 } },
+  ];
+  it('기본 순서는 사용률이 아니라 이름 알파벳순(숫자 인식·대소문자 무시)', () => {
+    expect(siteCards(sites).map((c) => c.name)).toEqual(['AS', 'HG2', 'hg10', 'nj-irs', 'ST-IRS']);
+  });
+  it('이름에 IRS 가 있으면 irs, 없으면 davinci(대소문자 무시)', () => {
+    expect(siteGroupOf('HG-IRS')).toBe('irs');
+    expect(siteGroupOf('nj-irs')).toBe('irs');
+    expect(siteGroupOf('HG2')).toBe('davinci');
+    expect(siteGroupOf(null)).toBe('davinci');
+  });
+  it('개수와 필터 — 전체 = 다빈치 + IRS', () => {
+    const cards = siteCards(sites);
+    expect(siteGroupCounts(cards)).toEqual({ all: 5, davinci: 3, irs: 2 });
+    expect(filterSiteGroup(cards, 'irs').map((c) => c.name)).toEqual(['nj-irs', 'ST-IRS']);
+    expect(filterSiteGroup(cards, 'davinci').map((c) => c.name)).toEqual(['AS', 'HG2', 'hg10']);
+    expect(filterSiteGroup(cards, 'all')).toHaveLength(5);
+    expect(filterSiteGroup(cards, '???')).toHaveLength(5);
+  });
+  it('필터된 집합의 톤 개수 — 판정 대기를 정상에 섞지 않는다', () => {
+    const irs = filterSiteGroup(siteCards(sites), 'irs');
+    expect(siteToneCounts(irs)).toEqual({ ok: 1, warn: 0, crit: 1, none: 0 });
+  });
+  it('이름이 같으면 id 로 안정 정렬', () => {
+    expect([{ name: 'A', id: 'b' }, { name: 'a', id: 'a' }].sort(bySiteName).map((x) => x.id)).toEqual(['a', 'b']);
+  });
+});
+

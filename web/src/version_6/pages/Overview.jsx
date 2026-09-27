@@ -3,7 +3,7 @@ import { usePolling, can, toolAllowed } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { loadPhase, loadText } from '../../version_4/loadState.js';
 import { agoText } from '../../views/tools/relTime.js';
-import { statusTiles, usageGauges, siteCards, siteToneCounts, recentAlarms, actionLinks } from '../v6Data.js';
+import { statusTiles, usageGauges, siteCards, siteToneCounts, recentAlarms, actionLinks, SITE_GROUPS, siteGroupCounts, filterSiteGroup } from '../v6Data.js';
 import { WARN_PCT, CRIT_PCT } from '../../console/consoleData.js';
 
 /**
@@ -14,11 +14,17 @@ import { WARN_PCT, CRIT_PCT } from '../../console/consoleData.js';
  */
 const fmt = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : Number(v).toLocaleString('en-US'));
 const TONE_LABEL = { ok: '정상', warn: '주의', crit: '위험', none: '판정 대기' };
+// 법인 구분 선택은 이 브라우저의 편의 설정이다(localStorage — 프라이빗 창에서는 throw 하므로 try/catch, 못 읽으면 '전체').
+const GROUP_KEY = 'v6.siteGroup';
+function readGroup() { try { const v = globalThis.localStorage?.getItem(GROUP_KEY); return v === 'davinci' || v === 'irs' ? v : 'all'; } catch { return 'all'; } }
+function writeGroup(v) { try { globalThis.localStorage?.setItem(GROUP_KEY, v); } catch { /* 저장 못 해도 화면은 동작한다 */ } }
 
 export default function V6Overview({ health, healthError, onSelectSite }) {
   const { data: ov, error } = usePolling('/overview', {}, 15_000);
   const canAlarms = can('inv.alarms');
   const { data: alarms } = usePolling(canAlarms ? '/alarms' : '', {}, 30_000);
+  const [group, setGroupState] = React.useState(readGroup); // 훅은 조기 return 위(React #310)
+  const setGroup = (v) => { setGroupState(v); writeGroup(v); };
   if (error && !ov) return <ErrorBox message={error} />;
   if (!ov) return <Loading label="Overview" />;
   if (!ov.global) {
@@ -28,7 +34,9 @@ export default function V6Overview({ health, healthError, onSelectSite }) {
   const g = ov.global;
   const tiles = statusTiles(g);
   const gauges = usageGauges(g);
-  const cards = siteCards(ov.sites);
+  const allCards = siteCards(ov.sites);
+  const groupCounts = siteGroupCounts(allCards);
+  const cards = filterSiteGroup(allCards, group);
   const counts = siteToneCounts(cards);
   const recent = canAlarms ? recentAlarms(alarms, 6) : null;
   const actions = actionLinks(toolAllowed);
@@ -71,8 +79,17 @@ export default function V6Overview({ health, healthError, onSelectSite }) {
       <div className="v6-panel">
         <div className="v6-panel-head">
           <b>법인별 상태</b>
-          <span>정상 {counts.ok} · 주의 {counts.warn} · 위험 {counts.crit}{counts.none ? ` · 판정 대기 ${counts.none}` : ''} — 상태 점은 CPU·메모리·스토리지 중 가장 높은 값(75% 주의 · 90% 위험)</span>
+          <span>정상 {counts.ok} · 주의 {counts.warn} · 위험 {counts.crit}{counts.none ? ` · 판정 대기 ${counts.none}` : ''} — 이름순 · 상태 점은 CPU·메모리·스토리지 중 가장 높은 값(75% 주의 · 90% 위험)</span>
         </div>
+        <div className="v6-segbar" role="group" aria-label="법인 구분">
+          {SITE_GROUPS.map((x) => (
+            <button key={x.id} type="button" className={`v6-segbtn${group === x.id ? ' on' : ''}`} aria-pressed={group === x.id}
+              onClick={() => setGroup(x.id)} title={x.id === 'irs' ? "이름에 'IRS' 가 들어간 법인" : x.id === 'davinci' ? "이름에 'IRS' 가 없는 법인" : '모든 법인'}>
+              {x.label} <b>{groupCounts[x.id]}</b>
+            </button>
+          ))}
+        </div>
+        {cards.length === 0 ? <div className="v6-note">{group === 'irs' ? "이름에 'IRS' 가 들어간 법인이 없습니다." : "이름에 'IRS' 가 없는 법인이 없습니다."}</div> : (
         <div className="v6-sites">
           {cards.map((c) => (
             <button key={c.id} type="button" className="v6-site" onClick={() => onSelectSite?.(c.id)} title={`${c.name} 호스트 목록으로`}>
@@ -84,6 +101,7 @@ export default function V6Overview({ health, healthError, onSelectSite }) {
             </button>
           ))}
         </div>
+        )}
       </div>
 
       <div className="v6-two">
