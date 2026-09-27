@@ -76,16 +76,16 @@
 <!-- arch-doc:modules:start -->
 | 디렉터리 | 파일 | 줄 | 대표 파일(밖에서 import 수) | 머리말 첫 줄 |
 |---|---:|---:|---|---|
-| `agent/` | 41 | 5,306 | `agent/envTimeout.js` (18) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
+| `agent/` | 41 | 5,331 | `agent/envTimeout.js` (18) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
 | `auth/` | 10 | 2,879 | `auth/scope.js` (43) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
 | `backup/` | 3 | 525 | `backup/service.js` (3) | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 |
 | `bmstor/` | 6 | 868 | `bmstor/poller.js` (4) | bmstor/poller.js — 베어메탈 스토리지 주기 수집(v2.340). |
-| `bmusage/` | 18 | 3,718 | `bmusage/settings.js` (4) | bmusage/settings.js — 베어메탈 사용률 수집 설정(v2.550). |
+| `bmusage/` | 18 | 3,826 | `bmusage/settings.js` (4) | bmusage/settings.js — 베어메탈 사용률 수집 설정(v2.550). |
 | `capacity/` | 4 | 767 | `capacity/sampler.js` (4) | Capacity Advisor 샘플러 — 운영 중인 포탈 프로세스 안에서 30초마다 자기 호스트를 실측한다 |
-| `central/` | 38 | 6,652 | `central/inventory.js` (10) | 사이트 위임 수집 — 중앙(OC2) 측 인벤토리 캐시. |
+| `central/` | 38 | 6,654 | `central/inventory.js` (10) | 사이트 위임 수집 — 중앙(OC2) 측 인벤토리 캐시. |
 | `collector/` | 9 | 1,404 | `collector/registry.js` (58) | Collector registry — the list of remote collector agents (one per datacenter) |
 | `commmap/` | 1 | 353 | `commmap/build.js` (2) | commmap/build.js — 통신 지도(중앙 ↔ 엣지 통신 시각화)의 **순수 조립 모듈**(v2.584). |
-| `corpusage/` | 1 | 185 | `corpusage/build.js` (1) | corpusage/build.js — 법인별 서버 CPU·메모리 사용량 합계(순수, v2.625). |
+| `corpusage/` | 1 | 220 | `corpusage/build.js` (1) | corpusage/build.js — 법인별 서버 CPU·메모리 사용량 합계(순수, v2.625). |
 | `curuser/` | 12 | 1,837 | `curuser/settings.js` (4) | curuser/settings.js — '현재 사용자' 수집 설정(v2.520). |
 | `cvp/` | 10 | 2,325 | `cvp/poller.js` (4) | cvp/poller.js — CloudVision(CVP) 주기 수집(v2.608). |
 | `datacenter/` | 1 | 192 | `datacenter/store.js` (15) | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. |
@@ -99,7 +99,7 @@
 | `health/` | 2 | 419 | `health/network.js` (1) | 글로벌 네트워크 점검 — 전세계 제어플레인 엔드포인트(vCenter·NSX 매니저)의 중앙에서의 |
 | `horizon/` | 8 | 1,488 | `horizon/horizon.js` (3) | Horizon Connection Server 연동 — 라이선스 만료일 확인 전용(가벼운 통합). |
 | `hostaccess/` | 4 | 485 | `hostaccess/service.js` (2) | hostaccess/service.js — 호스트 접근 제어 실행 계층(v2.485): 상태 조회 · 계획 · 적용(런타임) · 확정 · 되돌림. |
-| `idrac/` | 30 | 6,146 | `idrac/registry.js` (15) | iDRAC registry — the managed list of Dell servers whose power draw we collect |
+| `idrac/` | 30 | 6,181 | `idrac/registry.js` (15) | iDRAC registry — the managed list of Dell servers whose power draw we collect |
 | `insights/` | 19 | 3,038 | `insights/analysisServers.js` (5) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
 | `intro/` | 5 | 1,967 | `intro/support.js` (0) | GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`. |
 | `inventory/` | 4 | 472 | `inventory/osScanner.js` (3) | 실제 OS 인벤토리 스캐너 — 주기적으로 'DB에 없는(또는 오래된) VM'을 찾아 게스트에서 실제 OS를 읽어 저장. |
@@ -109,7 +109,7 @@
 | `loganalysis/` | 8 | 2,026 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › Log › 로그 분석 파사드(v2.583). |
 | `logs/` | 3 | 485 | `logs/db.js` (7) | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 |
 | `mail/` | 3 | 416 | `mail/service.js` (3) | mail/service.js — 포탈 공용 메일 발송 진입점 (v2.454). |
-| `metrics/` | 6 | 1,401 | `metrics/db.js` (8) | Generic metrics time-series store (host temperature, datastore usage, GPU |
+| `metrics/` | 6 | 1,425 | `metrics/db.js` (8) | Generic metrics time-series store (host temperature, datastore usage, GPU |
 | `mock/` | 2 | 666 | `mock/generator.js` (7) | Deterministic-ish mock data generator that simulates a large, globally |
 | `net/` | 4 | 628 | `net/captureHistory.js` (3) | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 |
 | `nsx/` | 6 | 1,044 | `nsx/store.js` (9) | In-memory NSX aggregator + poller. Mirrors the vCenter store design: each |
@@ -125,12 +125,12 @@
 | `relaytopo/` | 4 | 672 | `relaytopo/store.js` (3) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
 | `reports/` | 8 | 834 | `reports/dailyReport.js` (3) | 일일 헬스체크 리포트 발송 스케줄러 — 매일 지정 시각(HH:MM)에 computeHealthReport 결과를 |
 | `rma/` | 14 | 2,570 | `rma/jobs.js` (6) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
-| `routes/` | 87 | 22,107 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
+| `routes/` | 87 | 22,139 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
 | `sanswitch/` | 26 | 5,917 | `sanswitch/registry.js` (7) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 1 | 140 | `search/deepSearch.js` (2) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
 | `security/` | 16 | 2,885 | `security/secretVault.js` (28) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
 | `storage/` | 38 | 7,192 | `storage/registry.js` (9) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
-| `svcmon/` | 17 | 5,385 | `svcmon/store.js` (10) | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). |
+| `svcmon/` | 17 | 5,386 | `svcmon/store.js` (10) | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). |
 | `system/` | 2 | 298 | `system/nfsMounts.js` (3) | system/nfsMounts.js — Edge 노드 NFS 마운트 관리(v2.299). |
 | `toolcats/` | 2 | 215 | `toolcats/catalog.js` (2) | toolcats/catalog.js — 특수 기능 카테고리 분류 (순수 모듈, v2.455). |
 | `tools/` | 12 | 2,092 | `tools/powerOffPoller.js` (3) | tools/powerOffPoller.js — 전원 꺼짐 점검기(v2.484). 설정 주기(기본 6시간)마다 스냅샷의 꺼진 VM 을 |
@@ -141,7 +141,7 @@
 | `vmseries/` | 9 | 1,235 | `vmseries/poller.js` (3) | vmseries/poller.js — 실시간 스파이크 주기 수집(v2.510). 기본 50분(사용자 결정), 설정에서 변경. |
 | `vmtrack/` | 4 | 1,323 | `vmtrack/db.js` (3) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
 
-디렉터리 64개 · 파일 715개 · 134,152줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 64개 · 파일 715개 · 134,414줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

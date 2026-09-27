@@ -4132,6 +4132,25 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       · ⚠ 정직 기록: 목 스택 2대(중앙+엣지 `Edge-Seoul`)로 꺼짐 → 켬(적용·폴러 주기 600초로 재무장) → 제외(로컬 복귀)를 실제로 돌렸다.
         실엣지 28곳 규모·구버전 엣지 혼재·인증 켠 상태의 viewer 화면은 보지 못했다(배포 절은 서버가 admin 이 아니면 null 로 준다).
       viewer 는 기본 권한에 `tools` 가 없어 막히는 것이 정상이고, tools 를 준 범위 viewer 로 허용 법인 1곳만 보이는 것을 확인했다.
+  - ⚠⚠ **v2.628 — 6축 감사("프로그램 개선해줘") 확정분**(상세 `docs/AUDIT-2026-09-27b.md`, 회귀 `server/test/audit2628{a,b,d}.test.js` +
+    웹 `views/tools/audit2628a.test.js`·`version_6/audit2628c.test.js`·`views/audit2628d.test.js` — 그룹별 변이 검증 전부 통과):
+    - ⚠⚠ **범위 관리자 차단은 `routes/` 최상위 파일도 본다**(SEC2628-01 high — 재현): `routes/upgrade.js` 가 역할만 봐서 범위 관리자가 업그레이드
+      설정·적용·재시작·번들 설치를 할 수 있었다. `audit2612a` 스윕은 `routes/api/*`·`routes/admin/*` 만 본다 — `routes/capacity.js`·`routes/auth.js`
+      (AD 설정·연결 테스트)도 같은 이유로 빠져 있었다. **새 라우터 파일은 위치와 무관하게 '범위 참조 0건' 인지 먼저 볼 것.**
+      ⚠ `routes/auth.js` 의 `const adminOnly = [authMiddleware, requireEnrolled, requireRole('admin')];` 는 **글자 그대로** 둔다
+      (`securityAudit2026-08-17` 가 고정한다) — 게이트를 더할 때는 별도 이름(`adFleetOnly`)으로. 새 게이트 이름은 `api-doc.mjs GUARD_NOTE` 에.
+    - ⚠⚠ **짧은 이름 색인에 IP 를 넣지 말 것**(C2628-01 high — 재현): `shortOf('10.20.1.11')` 가 `'10'` 이 되어 10.x 로 등록된 iDRAC 서버 전부가
+      그 ESXi 호스트와 같은 장비·같은 법인이 됐다(개요 물리 전용 과소 · v2.626 부터 법인별 사용량·수집 대상까지). 짧은 이름이 두 vCenter 에 걸리면
+      판정 근거가 아니다(`AMBIGUOUS`). 이름 매칭을 새로 만들 때 **IP·중복 짧은 이름** 두 경우를 테스트에 넣을 것.
+    - **법인별 사용량**: 읽히지 않는 vCenter(`metrics/sampler.js unreadVcenterReasons`)의 호스트 값은 대체값으로 쓰지 않는다 · 엣지 행은 그 엣지 주기로
+      신선도(`_freshMs`) · 다른 vCenter 의 같은 key 는 조용히 빼지 않고 `keyConflict` · 지표별 대체 + `cpuMissing`/`memMissing` · 출처 합집합은 `mixed`.
+      ⚠ **남긴 것 C2628-05**: 엣지 위임 베어메탈(서비스태그 없음)의 중앙 키(`edge:<agent>:<fleetId>`)와 엣지 행 키가 달라 늘 '못 읽음' 이다 —
+      fleet push 계약 변경이 필요하다(다음 점검 첫 후보).
+    - **배포 인출 기록**: 공유 토큰 인출은 `verified:false` 이고 검증 기록을 덮지 못한다 · 엣지는 받기 전 판을 알리므로 방금 받은 엣지는 `delivered`.
+    - **베어메탈 사용률 폴러**: 보존 정리는 켜짐·대상 수와 무관하게 돈다(`pruneTick`, 첫 틱 제외) · 입력 실패는 `sourceErrors` + 분류 실패는 '대상 없음' 이
+      아니라 실패 · 404·CENTRAL_URL 없음은 `keptCopy`/`staleCopy` 로 '마지막 배포 사본이 계속 적용된다' 고 말한다(사본 유지 설계는 그대로).
+    - 남긴 것: `GET /admin/metrics/settings` 가 범위 관리자에게 전체 lastRun 개수를 준다 · 새 상태 필드(`sourceErrors`·`lastPrune`·`keptCopy`·`staleCopy`·
+      전산실 `stepFilled`)의 화면 문구.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

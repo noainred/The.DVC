@@ -22,7 +22,8 @@ function writeGroup(v) { try { globalThis.localStorage?.setItem(GROUP_KEY, v); }
 export default function V6Overview({ health, healthError, onSelectSite }) {
   const { data: ov, error } = usePolling('/overview', {}, 15_000);
   const canAlarms = can('inv.alarms');
-  const { data: alarms } = usePolling(canAlarms ? '/alarms' : '', {}, 30_000);
+  // v2.628 WEB2628-03: 오류를 받지 않으면 실패(403 이면 폴링이 멈춘다)가 영원히 '불러오는 중…' 으로 보였다.
+  const { data: alarms, error: alarmsErr } = usePolling(canAlarms ? '/alarms' : '', {}, 30_000);
   const [group, setGroupState] = React.useState(readGroup); // 훅은 조기 return 위(React #310)
   const setGroup = (v) => { setGroupState(v); writeGroup(v); };
   if (error && !ov) return <ErrorBox message={error} />;
@@ -107,7 +108,9 @@ export default function V6Overview({ health, healthError, onSelectSite }) {
       <div className="v6-two">
         <div className="v6-panel">
           <div className="v6-panel-head"><b>최근 알람</b>{canAlarms && <a href="#/alarms">알람 전체 →</a>}</div>
+          {alarmsErr && alarms && <div className="v6-banner warn">알람 갱신 실패(직전 목록 표시 중)</div>}
           {recent == null ? <div className="v6-note">알람 조회 권한(inv.alarms)이 없어 표시하지 않습니다.</div>
+            : alarmsErr && !alarms ? <ErrorBox message={alarmsErr} />
             : recent.length === 0 ? <div className="v6-note">{alarms ? '활성 알람이 없습니다.' : '불러오는 중…'}</div>
               : recent.map((a) => (
                 <div key={a.id} className={`v6-alarm sev-${a.sev}`}>

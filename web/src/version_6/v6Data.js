@@ -49,9 +49,20 @@ export function usageGauges(g) {
   const excl = n(g.hostsUsageExcluded ?? g.hostsDisconnected) || 0;
   const hostNote = excl > 0 ? `끊긴 호스트 ${excl}대 사용률 제외` : '';
   const dsUnknown = n(g.datastoresUsageUnknown) || 0;
+  // v2.628 WEB2628-05: 사용률(%)의 분모는 '사용량을 읽은 호스트' 용량이다(store.js usageReadable). 문구의 분모도 같은 기준을
+  //   써야 '50 / 200 GHz · 50%' 처럼 문구와 막대가 어긋나지 않는다. 서버가 읽은 호스트 용량(cpuTotalReadableGhz)을 주면 그것을,
+  //   제외된 호스트가 있는데 그 값이 없으면(구버전 서버) 전체 용량임을 문구에 밝힌다.
+  const denom = (readable, total, unit) => {
+    const r = n(readable);
+    if (r != null) return { text: `${fmt(r)} ${unit}`, extra: excl > 0 && n(total) != null ? `전체 ${fmt(total)} ${unit}` : '' };
+    return { text: `${fmt(total)} ${unit}`, extra: excl > 0 ? '분모는 끊긴 호스트 포함 전체 용량' : '' };
+  };
+  const cpuD = denom(g.cpuTotalReadableGhz, g.cpuTotalGhz, 'GHz');
+  const memD = denom(g.memTotalReadableGB, g.memTotalGB, 'GB');
+  const noteOf = (d) => [hostNote, d.extra].filter(Boolean).join(' · ');
   return [
-    { id: 'cpu', label: 'CPU', pct: n(g.cpuUsagePct), used: `${fmt(g.cpuUsedGhz)} / ${fmt(g.cpuTotalGhz)} GHz`, note: hostNote },
-    { id: 'mem', label: '메모리', pct: n(g.memUsagePct), used: `${fmt(g.memUsedGB)} / ${fmt(g.memTotalGB)} GB`, note: hostNote },
+    { id: 'cpu', label: 'CPU', pct: n(g.cpuUsagePct), used: `${fmt(g.cpuUsedGhz)} / ${cpuD.text}`, note: noteOf(cpuD) },
+    { id: 'mem', label: '메모리', pct: n(g.memUsagePct), used: `${fmt(g.memUsedGB)} / ${memD.text}`, note: noteOf(memD) },
     { id: 'sto', label: '스토리지', pct: n(g.storageUsagePct), used: `${fmt(g.storageUsedTB, 1)} / ${fmt(g.storageTotalTB, 1)} TB · ${fmt(g.datastores)} DS`,
       note: dsUnknown > 0 ? `사용량 미상 데이터스토어 ${dsUnknown}개 제외` : '' },
   ].map((x) => ({ ...x, tone: pctTone(x.pct) }));
@@ -164,8 +175,22 @@ export function totalTiles(s) {
     { label: '스토리지 용량', value: n(st.capacityTB) == null ? '—' : `${fmtN(st.capacityTB, 1)} TB` },
     { label: '클러스터', value: fmtN(cnt.clusters) },
     { label: '호스트당 VM', value: fmtN(a.avgVmPerHost, 1) },
-    { label: '총 소비전력', value: n(p.kw) == null ? '—' : `${fmtN(p.kw, 1)} kW` },
+    powerTile(p, cnt),
   ];
+}
+
+/**
+ * v2.628 WEB2628-01: 서버 /summary 의 power.kw 는 **항상 숫자**다(보고 호스트가 없으면 0). 0 kW 는 '소비 없음' 이라는 거짓이므로
+ * 보고 호스트 수(power.reporting)를 먼저 본다 — 0 이면 '—'. reporting 이 없는 옛 응답은 kw 가 양수일 때만 값으로 믿는다.
+ * 일부 호스트만 보고하면 부분 합이라 '보고 N/M대' 를 붙인다.
+ */
+function powerTile(p, cnt) {
+  const kw = n(p.kw), rep = n(p.reporting), hosts = n(cnt?.hosts);
+  if (kw == null || rep === 0 || (rep == null && !(kw > 0))) {
+    return { label: '총 소비전력', value: '—', note: rep === 0 ? '전력 보고 호스트 없음' : '' };
+  }
+  const note = rep != null && hosts != null && rep < hosts ? `보고 ${fmtN(rep)}/${fmtN(hosts)}대 합계` : '';
+  return { label: '총 소비전력', value: `${fmtN(kw, 1)} kW`, note };
 }
 
 /** OS별 할당 — 비중 %(VM 수 기준) 포함. */
@@ -175,16 +200,38 @@ export function osRows(s) {
   return rows.map((r) => ({ ...r, share: total > 0 ? Math.round(((n(r.vms) || 0) / total) * 1000) / 10 : null }));
 }
 
-/** 법인(vCenter)별 기여도 표 + 합계 행. 합계는 값이 있는 행만 더하고 못 읽은 행 수를 밝힌다. */
+export const CONTRIB_KEYS = Object.freeze(['hosts', 'vms', 'cpuCores', 'memTotalGB', 'storageTotalTB', 'vcpuAllocated', 'ramAllocatedGB', 'provisionedTB', 'powerKw']);
+const VC_STATUS_LABEL = { pending: '첫 수집 중', unreachable: '연결 불가', disabled: '비활성', maintenance: '점검 중' };
+/** 연결되지 않은 vCenter 상태 라벨 — status 가 없으면(옛 응답) null(연결로 본다). */
+export function vcStatusLabel(status) {
+  if (status == null || status === '' || status === 'connected') return null;
+  return VC_STATUS_LABEL[status] || String(status);
+}
+
+/**
+ * 법인(vCenter)별 기여도 표 + 합계 행.
+ * v2.628 WEB2628-02: 서버는 첫 수집 중·연결 불가·비활성 vCenter 행을 **0 으로 채워** 보낸다(inventory.js bucket 초기값).
+ * 그 0 은 값이 아니라 '모른다' 이므로 행의 수치를 null 로 바꾸고(`statusLabel` 로 상태를 말한다) 합계에서 뺀 뒤,
+ * 뺀 행 수(`excluded`)와 키별 못 읽은 행 수(`missing`)를 돌려준다 — 부분 합을 '합계' 라고만 말하지 않는다.
+ */
 export function corpContribution(s) {
-  const rows = Array.isArray(s?.byVcenter) ? s.byVcenter : [];
-  const keys = ['hosts', 'vms', 'cpuCores', 'memTotalGB', 'storageTotalTB', 'vcpuAllocated', 'ramAllocatedGB', 'provisionedTB', 'powerKw'];
-  const total = {};
-  for (const k of keys) {
+  const src = Array.isArray(s?.byVcenter) ? s.byVcenter : [];
+  let excluded = 0;
+  const rows = src.map((r) => {
+    const statusLabel = vcStatusLabel(r?.status);
+    if (!statusLabel) return { ...r, statusLabel: null };
+    excluded += 1;
+    const out = { ...r, statusLabel };
+    for (const k of CONTRIB_KEYS) out[k] = null;
+    return out;
+  });
+  const total = {}, missing = {};
+  for (const k of CONTRIB_KEYS) {
     const vals = rows.map((r) => n(r[k])).filter((v) => v != null);
     total[k] = vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+    missing[k] = rows.length - vals.length;
   }
-  return { rows, total };
+  return { rows, total, excluded, missing };
 }
 
 /**
@@ -211,6 +258,6 @@ export function serverCorpRows(ov) {
     const hosts = n(m.hosts), vms = n(m.vms);
     const only = pbc ? (n(pbc.byVcenterPhysicalOnly?.[s.id]) ?? 0) : null;
     return { id: s.id, name: s.name || s.id, physOnly: only, hosts, total: only == null || hosts == null ? null : only + hosts,
-      vms, vmsOn: n(m.vmsPoweredOn), perHost: hosts ? Math.round((vms / hosts) * 10) / 10 : null };
+      vms, vmsOn: n(m.vmsPoweredOn), perHost: hosts && vms != null ? Math.round((vms / hosts) * 10) / 10 : null }; // v2.628 WEB2628-04: VM 수를 모르면 0 이 아니라 null
   });
 }

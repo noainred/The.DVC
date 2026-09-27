@@ -18,12 +18,14 @@
  * '엣지 위임을 붙였으니 장애 감시가 완성됐다'가 아니다.
  */
 
+import { clampIntervalMs } from '../config.js';
 import { notify } from '../alerts.js';
 import { edgeSummary } from './svcmonEdge.js';
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
-const TICK_MS = Math.max(15_000, envNum('SVCMON_SILENCE_TICK_MS', 60_000));
+// v2.628(감사 EDGE2628-05): 상한 없음 → 2^31-1ms 초과가 setInterval 1ms 루프였다. config.js 관문으로 [15초, MAX_TIMER_MS].
+const TICK_MS = clampIntervalMs(envNum('SVCMON_SILENCE_TICK_MS', 60_000), 60_000, 15_000);
 const ENABLED = process.env.SVCMON_SILENCE_ALERT !== 'false';
 
 let timer = null;

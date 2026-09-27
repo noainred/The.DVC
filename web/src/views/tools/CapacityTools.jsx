@@ -13,6 +13,7 @@ import { sparkCellState, sparkCellText, sparkProgressText, sparkCapText, SPARK_R
 import { reportCount, exportLabel, exportTitle, progressNote, exportErrText } from './wasteExportText.js';
 // v2.578 D1·D3·D4: 기준선(언제부터의 자료인가)·해상도 인과·절단 사실 — 판정과 문구를 한 모듈이 소유한다.
 import { sinceNote, bucketAvgLabel, resolutionNote, truncationNote } from '../trendMeta.js';
+import { samplerWithheldNote } from '../samplerWithheldText.js'; // v2.628(LEFT2628-01)
 
 
 /** 서버 구분 라벨(v2.512) — iDRAC serviceTag 가 ESXi 호스트와 맞으면 가상화, 아니면 물리(베어메탈). */
@@ -221,7 +222,8 @@ function WasteTrend({ scope }) {
     let dead = false;
     setD(null); setErr(null);
     const p = { days: String(days), ...(scope ? { vcenterId: scope } : {}), ...(bucket !== 'auto' ? { bucket } : {}) };
-    fetchJson('/tools/waste/history', p).then((r) => { if (!dead) setD(r); }).catch((e) => { if (!dead) setErr(e.message); });
+    // v2.628(감사 LEFT2628-12): 오류 객체를 그대로 둔다 — 범위 계정의 전체 합계 403 이 ErrorBox 에서 권한 안내가 되게(문자열로 만들면 안내가 사라진다).
+    fetchJson('/tools/waste/history', p).then((r) => { if (!dead) setD(r); }).catch((e) => { if (!dead) setErr(e); });
     return () => { dead = true; };
   }, [scope, days, bucket]);
   const pts = d?.points || [];
@@ -242,7 +244,7 @@ function WasteTrend({ scope }) {
           <button className={mode === 'abs' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setMode('abs')}>절대량</button>
         </div>
       </div>
-      {err ? <ErrorBox message={err} />
+      {err ? <ErrorBox error={err} />
         : !d ? <Loading />
           : pts.length < 2 ? (
             <div className="muted" style={{ fontSize: 13, padding: 20, textAlign: 'center', lineHeight: 1.7 }}>
@@ -283,6 +285,10 @@ function WasteTrend({ scope }) {
             : null}
           <br />{resolutionNote(d.bucketMs)}
           <br />{sinceNote({ collectedSince: d.collectedSince, retentionDays: d.retentionDays, now: Date.now() }).text}
+          {/* v2.628(감사 LEFT2628-01): 최근 샘플의 적재 제외·부분 합(전체 범위 계정에만 온다 — 범위 계정은 null). */}
+          {samplerWithheldNote(d.sampler, { totalView: !scope })
+            ? <><br /><span style={{ color: 'var(--amber)' }}>{samplerWithheldNote(d.sampler, { totalView: !scope })}</span></>
+            : null}
         </div>
       )}
     </>

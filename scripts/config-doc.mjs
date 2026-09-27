@@ -27,6 +27,7 @@ const NOTES = {
   'users.json': ['포탈 계정(역할·비밀번호 해시·TOTP 시크릿)', '⚠ 지우면 관리자 계정이 사라진다. 기동 시 초기 관리자만 재생성'],
   'secrets-key': ['자격증명 봉인 키(암호화 모드)', '⚠ 지우면 저장된 모든 비밀번호를 복호할 수 없다(재입력 필요)'],
   'credentials.json': ['통합 계정(장비 SSH/API 자격증명)', '봉인 저장. API 응답에 값이 실리지 않는다'],
+  'idrac.json': ['iDRAC 등록부 — 전력·온도·인벤토리를 수집하는 Dell·HPE 서버 목록(v2.628 에 bmusage/poller.js 가 손상 여부만 확인하도록 읽는다)', ''],
   'bmusage-distribute.json': ['베어메탈 사용률 설정의 엣지 배포(켬·제외 엣지 — 중앙, v2.627)', '배포 원본은 bmusage-settings.json 이다. 손상이면 배포 꺼짐으로 시작한다'],
   'bmusage-central.json': ['엣지가 받은 베어메탈 사용률 설정 중앙 배포 사본(상태, v2.627)', '중앙이 배포를 끄거나 이 엣지를 제외하면 지워지고 엣지 로컬 설정으로 돌아간다'],
   'settings-owners.txt': ['설정 소유자 목록(백업·비밀 CSV 등 최상위 권한)', 'username 기준. 표시이름 승계 불가'],

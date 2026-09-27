@@ -9,6 +9,9 @@
  */
 export const DIST_STATE = Object.freeze({
   applied: { label: '적용됨', tone: 'ok', why: '이 엣지가 지금 판을 적용했다고 알려 왔습니다.' },
+  // v2.628(R2628-05): 엣지는 응답을 받기 **전** 판을 알린다 — 방금 내려받은 판은 다음 인출에서야 '적용됨' 이 된다. 그 사이를
+  //   '대기(이전 판)' 라 말하면 거짓이다. 중앙이 마지막 응답으로 지금 판을 보냈으면 '전달됨' 이다(적용 확인은 다음 인출).
+  delivered: { label: '전달됨', tone: 'ok', why: '마지막 인출에서 지금 판을 내려받았습니다 — 적용 확인은 다음 인출에 옵니다.' },
   pending: { label: '대기', tone: 'warn', why: '이 엣지가 이전 판을 쓰고 있습니다 — 다음 인출에 받습니다.' },
   'no-pull': { label: '인출 기록 없음', tone: 'muted', why: '중앙 재시작 뒤 아직 인출하지 않았거나 2.627 미만 엣지입니다(구버전은 이 배포를 받지 못합니다).' },
   excluded: { label: '제외', tone: 'muted', why: '이 엣지는 자기 로컬 설정을 씁니다.' },
@@ -19,8 +22,11 @@ export function distStateOf(state) { return DIST_STATE[state] || { label: '확�
 
 /** 배포 현황 요약 — 겹치지 않는 개수. 합계 = 적용 + 대기 + 기록 없음 + 제외(+ 꺼짐). */
 export function distributionCounts(dist) {
-  const c = { total: 0, applied: 0, pending: 0, 'no-pull': 0, excluded: 0, off: 0 };
-  for (const r of dist?.rows || []) { c.total += 1; if (Object.hasOwn(c, r.state)) c[r.state] += 1; }
+  const c = { total: 0, applied: 0, delivered: 0, pending: 0, 'no-pull': 0, excluded: 0, off: 0, unverified: 0 };
+  for (const r of dist?.rows || []) {
+    c.total += 1; if (Object.hasOwn(c, r.state)) c[r.state] += 1;
+    if (r.verified === false) c.unverified += 1;   // v2.628(SEC2628-02): 공유 토큰 인출 — 이름이 검증되지 않았다
+  }
   return c;
 }
 
@@ -28,8 +34,11 @@ export function distributionSummary(dist) {
   if (!dist) return '';
   const c = distributionCounts(dist);
   if (!dist.enabled) return `**배포 꺼짐** — 엣지 ${c.total}곳은 각자 로컬 설정을 씁니다. 켜면 이 화면의 설정(Enterprise 대체 수집 제외)이 다음 인출 때 모든 엣지에 내려갑니다.`;
-  const parts = [`적용됨 ${c.applied}`, `대기 ${c.pending}`, `인출 기록 없음 ${c['no-pull']}`];
+  const parts = [`적용됨 ${c.applied}`];
+  if (c.delivered) parts.push(`전달됨 ${c.delivered}`);
+  parts.push(`대기 ${c.pending}`, `인출 기록 없음 ${c['no-pull']}`);
   if (c.excluded) parts.push(`제외 ${c.excluded}`);
+  if (c.unverified) parts.push(`이름 미검증 ${c.unverified}(공유 토큰 — 이름을 확인할 수 없는 인출)`);
   return `**배포 켜짐** — 엣지 ${c.total}곳: ${parts.join(' · ')}. 엣지는 **다음 인출**(기본 10분 주기)에 받습니다 — 저장 즉시 바뀌지 않습니다.`;
 }
 

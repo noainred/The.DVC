@@ -18,6 +18,7 @@ import { capacityPushStatus } from '../agent/capacityPush.js';
 import { collectorMeta } from '../capacity/collectors.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
+import { fullScopeOnlyWith } from './admin/shared.js';
 export const capacityRouter = express.Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
 // 매달린다**(소켓 fd 가 잡힌다). 라우트를 등록하기 **전에** 감싸 전역 에러 핸들러로 보낸다.
@@ -25,6 +26,8 @@ export const capacityRouter = express.Router();
 wrapAsyncRouter(capacityRouter);
 const adminOnly = requireRole('admin');
 capacityRouter.use(adminOnly);
+// v2.628(SEC2628-05): 엣지 호스트별 용량·push 상태는 vCenter 로 나눌 축이 없다 — 범위 관리자에게는 403(v2.525 규약).
+capacityRouter.use(fullScopeOnlyWith('리소스 적정성 진단은 전 엣지 호스트를 다루므로 전체 범위 관리자만 볼 수 있습니다.'));
 
 /** 호스트 키 검증 — 'local' 또는 엣지 agent 이름(수신 시 이미 바인딩 검증됨). 경로 주입 방지용 형식 검사만. */
 const cleanKey = (v) => {

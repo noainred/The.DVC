@@ -15,13 +15,14 @@
  * - CSV 적재는 배치 라이터에 push 만 한다(동기 I/O 없음).
  */
 
-import { config } from '../config.js';
+import { config, clampIntervalMs } from '../config.js';
 import { listTargets, storeRevision } from './store.js';
 import { runBatch, poolStats } from './pool.js';
 import { appendResult, logStats } from './csvlog.js';
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) ? n : d; };
-const TICK_MS = Math.max(1000, envNum('SVCMON_TICK_MS', 5000));
+// v2.628(감사 EDGE2628-05): 상한이 없어 2^31-1ms 를 넘는 값이 setInterval 1ms 루프가 됐다 — config.js 관문으로 [1초, MAX_TIMER_MS].
+const TICK_MS = clampIntervalMs(envNum('SVCMON_TICK_MS', 5000), 5000, 1000);
 const MAX_PER_TICK = Math.max(100, envNum('SVCMON_MAX_PER_TICK', 4000));
 const ENABLED = process.env.SVCMON_ENABLED !== 'false';   // 킬스위치(독립 운영 요구사항)
 /**

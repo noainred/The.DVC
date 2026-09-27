@@ -365,6 +365,30 @@ const round1 = (x) => (x == null ? null : Number(x.toFixed(1)));
 /** 테스트 전용 — 타이머 없이 한 번 샘플한다(v2.621 감사 RECENT-03 회귀가 실제 적재 경로를 부른다). */
 export function _sampleOnceForTest() { return sampleOnce(); }
 
+/**
+ * v2.628(감사 LEFT2628-01): 가장 최근 샘플이 적재에서 뺀 것(개수만). v2.620·v2.622 가 lastRun 에 싣고 **어느 화면도 읽지 않던**
+ * 값이다 — 그래서 추이 화면은 마지막 전체 합계 점이 '적재 보류' 인지 '점검중 vCenter 를 뺀 부분 합' 인지 말할 수 없었다.
+ * ⚠ 전 함대 기준 개수라 **전체 범위 계정에만** 준다(범위 계정은 null — '귀속 없는 데이터 미노출').
+ * 적재 제외가 하나도 없으면 null 이다(0 칸을 늘어놓지 않는다).
+ */
+export function samplerWithheldOf(lastRun) {
+  if (!lastRun || typeof lastRun !== 'object') return null;
+  const vs = lastRun.vmperfStale || null;
+  const ss = lastRun.staleSkipped || null;
+  const out = {
+    at: _num(lastRun.at),
+    staleVcenters: _num(ss?.vcenters) || 0,
+    byReason: ss && ss.byReason && typeof ss.byReason === 'object' ? { ...ss.byReason } : {},
+    totalWithheld: !!vs?.totalWithheld,
+    totalPartial: !!vs?.totalPartial,
+    maintenanceExcluded: _num(vs?.maintenanceExcluded) || 0,
+    vmStatsSkipped: _num(lastRun.vmStatsSkipped) || 0,
+  };
+  if (!out.staleVcenters && !out.totalWithheld && !out.totalPartial && !out.maintenanceExcluded && !out.vmStatsSkipped) return null;
+  return out;
+}
+const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
 export function metricsSamplerStatus() {
   const s = loadMetricsSettings();
   return { intervalMs: s.sampleIntervalMs, retentionDays: s.retentionDays, rawRetentionDays: s.rawRetentionDays, lastRun };

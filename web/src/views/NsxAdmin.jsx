@@ -26,10 +26,11 @@ export default function NsxAdmin() {
 
   const load = async () => {
     try { setData(await fetchJson('/admin/nsx/managers')); setError(null); }
-    catch (e) { setError(e.message); }
+    // v2.628(감사 LEFT2628-03): 오류 객체를 그대로 둔다 — 문자열로 바꾸면 403 권한 안내(AccessDenied)가 사라진다.
+    catch (e) { setError(e); }
   };
   useEffect(() => { load(); }, []);
-  if (error) return <ErrorBox message={error} />;
+  if (error) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
 
   const openAdd = () => { setEditing(false); setForm(structuredClone(EMPTY)); setMsg(null); };
@@ -59,7 +60,7 @@ export default function NsxAdmin() {
   };
   const remove = async (m) => {
     if (!window.confirm(`'${m.name}' (${m.id}) NSX Manager를 삭제할까요?`)) return;
-    try { await delJson(`/admin/nsx/managers/${encodeURIComponent(m.id)}`); await load(); } catch (e) { setError(e.message); }
+    try { await delJson(`/admin/nsx/managers/${encodeURIComponent(m.id)}`); await load(); } catch (e) { setError(e); }
   };
 
   const list = data.managers || [];
@@ -78,6 +79,10 @@ export default function NsxAdmin() {
           데이터 소스가 <b>mock</b>이면 데모 데이터가 표시되고, <b>live/auto</b>일 때 실제 수집됩니다. (데이터 소스 전환은 설정 → vCenter 관리)
         </div>
       </div>
+      {/* v2.628(감사 LEFT2628-03): 범위 계정에는 서버가 범위 밖·법인 미지정 매니저를 빼고 준다(scopeNsxManagers) — 뺀 개수를 밝힌다. */}
+      {data.scoped && data.omittedOutOfScope > 0 && (
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>범위 밖이거나 법인이 지정되지 않은 NSX Manager {data.omittedOutOfScope}개는 표시하지 않습니다.</div>
+      )}
 
       <div className="table-wrap">
         <STable>

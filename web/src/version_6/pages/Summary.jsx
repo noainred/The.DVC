@@ -47,7 +47,7 @@ export default function V6Summary({ vcenters }) {
       </div>
 
       <div className="v6-totals">
-        {tiles.map((t) => <div key={t.label} className="v6-total-tile"><span>{t.label}</span><b>{t.value}</b></div>)}
+        {tiles.map((t) => <div key={t.label} className="v6-total-tile"><span>{t.label}</span><b>{t.value}</b>{t.note && <small className="v6-note">{t.note}</small>}</div>)}
       </div>
 
       <div className="v6-panel">
@@ -70,16 +70,16 @@ export default function V6Summary({ vcenters }) {
       </div>
 
       <div className="v6-panel">
-        <div className="v6-panel-head"><b>법인(vCenter)별 기여도</b></div>
+        <div className="v6-panel-head"><b>법인(vCenter)별 기여도</b>{contrib.excluded > 0 && <span>수집 중·연결 불가·비활성 {contrib.excluded}곳은 값을 모르므로 합계에서 뺐습니다</span>}</div>
         <STable className="v6-table" minWidth={900}>
           <thead><tr><th>법인</th><th className="right">호스트</th><th className="right">VM</th><th className="right">코어</th><th className="right">메모리(GB)</th><th className="right">스토리지(TB)</th><th className="right">vCPU 할당</th><th className="right">RAM 할당(GB)</th><th className="right">프로비저닝(TB)</th><th className="right">전력(kW)</th></tr></thead>
           <tbody>
             {contrib.rows.map((r) => (
-              <tr key={r.id}><td>{r.name || r.id}</td><td className="right">{fmt(r.hosts)}</td><td className="right">{fmt(r.vms)}</td><td className="right">{fmt(r.cpuCores)}</td>
+              <tr key={r.id}><td>{r.name || r.id}{r.statusLabel && <span className="v6-note"> · {r.statusLabel}</span>}</td><td className="right">{fmt(r.hosts)}</td><td className="right">{fmt(r.vms)}</td><td className="right">{fmt(r.cpuCores)}</td>
                 <td className="right">{fmt(r.memTotalGB)}</td><td className="right">{fmt(r.storageTotalTB, 1)}</td><td className="right">{fmt(r.vcpuAllocated)}</td>
                 <td className="right">{fmt(r.ramAllocatedGB)}</td><td className="right">{fmt(r.provisionedTB, 1)}</td><td className="right">{fmt(r.powerKw, 1)}</td></tr>
             ))}
-            <tr data-pin className="v6-total"><td>합계</td><td className="right">{fmt(contrib.total.hosts)}</td><td className="right">{fmt(contrib.total.vms)}</td><td className="right">{fmt(contrib.total.cpuCores)}</td>
+            <tr data-pin className="v6-total"><td>{contrib.excluded > 0 ? `합계(${contrib.excluded}곳 제외)` : '합계'}</td><td className="right">{fmt(contrib.total.hosts)}</td><td className="right">{fmt(contrib.total.vms)}</td><td className="right">{fmt(contrib.total.cpuCores)}</td>
               <td className="right">{fmt(contrib.total.memTotalGB)}</td><td className="right">{fmt(contrib.total.storageTotalTB, 1)}</td><td className="right">{fmt(contrib.total.vcpuAllocated)}</td>
               <td className="right">{fmt(contrib.total.ramAllocatedGB)}</td><td className="right">{fmt(contrib.total.provisionedTB, 1)}</td><td className="right">{fmt(contrib.total.powerKw, 1)}</td></tr>
           </tbody>

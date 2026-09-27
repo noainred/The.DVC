@@ -85,21 +85,37 @@ export function registerCorpUsage(api) {
       const central = await latestUsage().catch((e) => { sourceErrors.push(`사용률 DB: ${String(e?.message || e).slice(0, 200)}`); return []; });
       // 엣지 보관분 — 중앙이 '가져오기' 로 당겨 둔 것만 있다(상시 push 없음, v2.554). 오래됐어도 행의 ts 로 신선도를 판정한다.
       const edges = (() => { try { return edge.listEdgeBmUsage(); } catch { return []; } })();
-      const edgeRows = edges.flatMap((e) => (e?.snap?.rows || []));
+      // v2.628(R2628-02): 엣지 행은 그 엣지의 수집 주기로 신선도를 본다(중앙 주기와 다를 수 있다).
+      const freshOf = (ms) => Math.max(30 * 60_000, 3 * (numOrNull(ms) || 300_000));
+      const edgeRows = edges.flatMap((e) => {
+        const f = freshOf(e?.snap?.settings?.intervalMs);
+        return (e?.snap?.rows || []).filter((r) => r && typeof r === 'object').map((r) => ({ ...r, _freshMs: f }));
+      });
+      // v2.628(EDGE2628-01): 엣지 봉투는 대상 수 상한으로 잘릴 수 있다 — 잘린 서버는 이 화면에서 '못 읽음' 이 된다. 개수를 밝힌다.
+      const edgeTruncated = edges.reduce((a, e) => a + (numOrNull(e?.snap?.truncated) || 0), 0);
       const rowsByKey = mergeLatestRows(central, edgeRows);
       const registry = (() => { try { return loadRegistry(); } catch { return []; } })();
       const remoteServers = (() => { try { return allRemoteServers(); } catch { return []; } })();
       const hostByKey = new Map((snap?.hosts || []).map((h) => [`${t(h.vcenterId)}|${t(h.name).toLowerCase()}`, h]));
       const s = loadBmUsageSettings();
       // 신선도: 수집 주기의 3배, 최소 30분 — 한두 주기 빠진 것은 '지금 값' 으로 본다(주기 숫자를 박지 않는다).
-      const freshMs = Math.max(30 * 60_000, 3 * (numOrNull(s.intervalMs) || 300_000));
+      const freshMs = freshOf(s.intervalMs);
+      // v2.628(R2628-01 = C2628-04 — 재현): 점검중·수집 실패 이월·위임 push 낡음 vCenter 의 호스트 값은 지금 값이 아니다.
+      const { unreadVcenterReasons } = await import('../../metrics/sampler.js');
+      const unreadVcenters = (() => { try { return unreadVcenterReasons(snap); } catch { return new Map(); } })();
       const out = buildCorpUsage({
         vcenters: snap?.vcenters || [], bareMetal: attr.bareMetal, virtHosts: fleet.virtualizationHosts || [],
         rowsByKey, hostByKey, capOf: makeCapOf({ getInventory, registry, remoteServers }),
-        allowed, now: Date.now(), freshMs,
+        allowed, now: Date.now(), freshMs, unreadVcenters,
       });
       // 법인마다 '수집을 켰는가' — 값이 없는 이유를 화면이 말하려면 필요하다(켠 법인 목록 자체는 범위 밖을 주지 않는다).
-      for (const c of out.corps) c.collectOn = !!(s.corps || {})[c.vcenterId];
+      // v2.628(R2628-07): 엣지가 수집하는 법인은 **그 엣지의 설정**이 정한다 — 중앙 설정만 보고 '안 켰다' 고 말하지 않는다.
+      const edgeOn = new Set();
+      for (const e of edges) {
+        const es = e?.snap?.settings;
+        if (e?.snap?.enabled === true && es) for (const id of es.corps || []) edgeOn.add(t(id));
+      }
+      for (const c of out.corps) { c.collectOnEdge = edgeOn.has(c.vcenterId); c.collectOn = !!(s.corps || {})[c.vcenterId] || c.collectOnEdge; }
       return {
         ok: true, at: Date.now(), ...out,
         // 귀속 규칙으로 채운 물리 서버 수(법인 축 — 범위 계정에는 개수만 준다. 서버 목록은 싣지 않는다).
@@ -108,6 +124,8 @@ export function registerCorpUsage(api) {
         // 엣지 보관분 요약 — 엣지는 법인 축으로 나눌 수 없어 범위 계정에는 개수만(v2.525 규약).
         edgeSnaps: allowed ? { count: edges.filter((e) => e?.snap).length }
           : { count: edges.filter((e) => e?.snap).length, list: edges.filter((e) => e?.snap).map((e) => ({ agent: t(e.agent), snapAt: numOrNull(e.snapAt), rows: (e.snap.rows || []).length })).slice(0, 64) },
+        edgeTruncated,
+        unreadVcenters: allowed ? [...unreadVcenters.entries()].filter(([id]) => allowed.has(id)).length : unreadVcenters.size,
         sourceErrors,
         scoped: !!allowed,
       };

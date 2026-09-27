@@ -1341,7 +1341,7 @@ centralRouter.get('/bmusage-config', requireCentral(), async (req, res) => {
   const agent = String(req.centralAuth.agent || req.query.agent || '').trim();
   const { distributeFor, recordBmUsagePull } = await import('../bmusage/settings.js');
   const out = distributeFor(agent);
-  recordBmUsagePull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), reason: out.distribute ? '' : out.reason });
+  recordBmUsagePull(agent, { appliedSig: String(req.query.applied || ''), version: String(req.get('x-agent-version') || ''), reason: out.distribute ? '' : out.reason, verified: req.centralAuth?.mode === 'agent', deliveredSig: out.distribute ? String(out.sig || '') : '' });
   res.set('Cache-Control', 'no-store');
   res.json({ ok: true, ...out });
 });

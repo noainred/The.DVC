@@ -461,7 +461,8 @@ api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) =>
         return { agent: a, ok: false, kind: 'budget', reason: '인출 시간 예산을 넘겨 이번에는 시도하지 않았습니다 — 다시 누르면 이어서 가져옵니다.' };
       }
       _pulling.add(a.toLowerCase());
-      try { return { agent: a, ...(await pullBmUsage(a, { limit: Number(req.body?.limit) || 0 })) }; }
+      // v2.628(EDGE2628-01): limit 을 주지 않으면 엣지 기본(400대)에서 잘렸다 — ESXi 포함으로 대상이 늘었다. 기본을 상한(2,000)으로.
+      try { return { agent: a, ...(await pullBmUsage(a, { limit: Number(req.body?.limit) || 2_000 })) }; }
       finally { _pulling.delete(a.toLowerCase()); }
     });
     // 입력 순서 보존(poolSettled) — 예전 순차 for 와 같은 순서로 응답한다.

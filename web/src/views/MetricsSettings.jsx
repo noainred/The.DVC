@@ -1,5 +1,6 @@
 import { blankOr } from './blankOr.js';
 import { scopeSaveSuffix } from './scopeSaveText.js';
+import { samplerWithheldNote } from './samplerWithheldText.js'; // v2.628(LEFT2628-01)
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { fmtAgo, fmtBytes } from '../util/fmt.js';
@@ -165,6 +166,8 @@ export default function MetricsSettings() {
           <span className="muted">마지막 수집 <b style={{ color: 'var(--text)' }}>{fmtAgo(last?.at, { dash: '없음' })}</b></span>
           {last && <span className="muted">온도 보고 호스트 <b style={{ color: 'var(--text)' }}>{last.hostsWithTemp}</b> · 행 <b style={{ color: 'var(--text)' }}>{last.rows}</b></span>}
         </div>
+        {/* v2.628(감사 LEFT2628-01): 최근 샘플이 적재하지 않은 vCenter·전체 합계·VM 누적 — 예전엔 lastRun 에 있고 아무도 안 읽었다. */}
+        {samplerWithheldNote(last) && <div className="muted" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.6, color: 'var(--amber)' }}>{samplerWithheldNote(last)}</div>}
       </div>
 
       {/* VM 성능 트래킹(Optimization 원본) — vCenter별 독립 DB · 보존기간·대상 선택(v2.376) */}
