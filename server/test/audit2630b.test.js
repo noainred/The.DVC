@@ -36,7 +36,7 @@ before(async () => {
   await store.refresh().catch(() => {});
   snapVcIds = new Set((store.get()?.vcenters || []).map((v) => String(v.id)));
   core = await import('../src/routes/admin/idracCore.js');
-  core._resetIdracCorpIndex();
+  core._resetIdracCorpIndex?.();
 });
 
 test('R2630-01: DataCenter 단일 vCenter 로만 귀속되는 물리 서버도 그 범위 계정에 보인다(corpAttribution 한 벌)', async (t) => {

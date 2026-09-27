@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2630c-'));
+process.env.CONFIG_DIR = TMP;
 process.env.GUESTDISK_DB_PATH = path.join(TMP, 'guest-disk.db');
 process.env.VMTRACK_DB_PATH = path.join(TMP, 'vm-track.db');
 
@@ -87,6 +88,8 @@ test('A2-01 커밋: 부분 합은 vm_series·vm_last 에 적재하지 않고 vm_
   assert.equal([...(cur3 instanceof Set ? cur3 : (cur3 || []))].length, 1);
 });
 
+const T0C = Date.UTC(2026, 0, 10, 3, 0, 0);
+
 // ── A2-02 · A2-03 ────────────────────────────────────────────────────────
 test('A2-02 linkWord: 미연결·트랜시버 없음은 down 이 아니라 nolink', () => {
   for (const w of ['notconnect', 'notPresent', 'NotConnected', 'disconnected']) assert.equal(linkWord(w), 'nolink', w);
@@ -132,6 +135,23 @@ test('A2-03 BGP: MIB 정수 6 은 established, 1~5 는 down, 모르는 값은 st
   const s = bgpSummary([{ state: '6' }, { state: 'Active' }, { state: 'n/a' }, { state: 'Established' }]);
   assert.equal(s.established, 2); assert.equal(s.down, 1); assert.equal(s.stateUnknown, 1);
   assert.equal(bgpSummary([{ state: 'Established' }]).stateUnknown, undefined, '모르는 것 0 이면 필드 없음');
+});
+
+test('A2-02 cvp DB: 장비 목록·상세 포트 요약도 nolink 를 down 으로 세지 않는다', { skip: SKIP }, async () => {
+  const cdb = await import('../src/cvp/db.js');
+  const r = await cdb.saveDevices({ agent: '', cvpId: 'cvp1', devices: [{
+    key: 'SN1', ts: T0C, hostname: 'leaf1', model: 'x', serial: 'SN1', mgmtIp: '', eosVersion: '', streaming: true, telemetry: '', bgp: null,
+    ports: [
+      { name: 'Ethernet1', oper: 'up', admin: 'up' },
+      { name: 'Ethernet2', oper: 'nolink', admin: 'up' },
+      { name: 'Ethernet3', oper: 'down', admin: 'up' },
+    ],
+  }] });
+  assert.ok(!r.unavailable);
+  const { rows } = await cdb.listDeviceRows({ cvpId: 'cvp1' });
+  assert.deepEqual(rows[0].ports, { total: 3, up: 1, down: 1, noLink: 1 });
+  const det = await cdb.deviceDetail('', 'cvp1', 'SN1');
+  assert.deepEqual(det.device.ports, { total: 3, up: 1, down: 1, noLink: 1 });
 });
 
 // ── DATA2630-01 ─────────────────────────────────────────────────────────
