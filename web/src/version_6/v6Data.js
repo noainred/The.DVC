@@ -59,12 +59,46 @@ export function usageGauges(g) {
 
 /** 법인별 상태 카드 — worst(CPU·MEM·DS 최대)로 톤. 값이 하나도 없으면 'none'(판정 대기). */
 export function siteCards(sites) {
-  return siteRows(sites || []).map((r) => ({
+  return siteRows(sites || []).sort(bySiteName).map((r) => ({
+    group: siteGroupOf(r.name),
     ...r,
     tone: pctTone(r.worst),
     alarms: r.alarmsUnknown ? null : (r.alarmsCritical || 0) + (r.alarmsWarning || 0),
     bars: [['CPU', r.cpu], ['MEM', r.mem], ['DS', r.sto]].map(([k, v]) => ({ k, v, tone: pctTone(v) })),
   }));
+}
+
+/**
+ * 법인 카드 기본 순서 — 이름 알파벳순(v2.624 사용자 요청). 예전 순서(가장 나쁜 사용률 먼저)는 상태 점과 KPI 가 이미 말한다.
+ * 숫자를 인식하고(HG2 < HG10) 대소문자를 구분하지 않는다. Collator 는 한 번만 만든다(v2.503 — 비교마다 옵션 재해석 금지).
+ */
+const NAME_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+export function bySiteName(a, b) {
+  return NAME_COLLATOR.compare(String(a?.name ?? ''), String(b?.name ?? '')) || NAME_COLLATOR.compare(String(a?.id ?? ''), String(b?.id ?? ''));
+}
+
+/**
+ * 법인 구분(v2.624 사용자 요청) — 이름에 'IRS' 가 들어가면 'irs', 아니면 'davinci'(다빈치).
+ * 대소문자는 가리지 않는다(HG-IRS · hg-irs 모두 IRS). 판정 근거는 **이름뿐**이다 — 등록 정보에 따로 표시된 값이 아니다.
+ */
+export function siteGroupOf(name) {
+  return /irs/i.test(String(name ?? '')) ? 'irs' : 'davinci';
+}
+export const SITE_GROUPS = [
+  { id: 'all', label: '전체' },
+  { id: 'davinci', label: '다빈치' },
+  { id: 'irs', label: 'IRS' },
+];
+/** 구분별 개수 — {all, davinci, irs}. */
+export function siteGroupCounts(cards) {
+  const out = { all: 0, davinci: 0, irs: 0 };
+  for (const c of cards || []) { out.all += 1; out[c.group === 'irs' ? 'irs' : 'davinci'] += 1; }
+  return out;
+}
+/** 구분으로 거른다 — 모르는 값은 전체(빈 화면을 만들지 않는다). */
+export function filterSiteGroup(cards, group) {
+  if (group !== 'davinci' && group !== 'irs') return cards || [];
+  return (cards || []).filter((c) => c.group === group);
 }
 
 /** 상태 카드 톤 개수(정상·주의·위험·판정 대기) — 판정 대기를 정상에 섞지 않는다. */

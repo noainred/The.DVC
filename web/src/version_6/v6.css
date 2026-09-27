@@ -228,6 +228,9 @@
 .v6 .v6-segbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
 .v6 .v6-segbtn { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); color: var(--text-dim); text-decoration: none; font-size: 12.5px; }
 .v6 .v6-segbtn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.v6 button.v6-segbtn { background: transparent; cursor: pointer; font-family: inherit; }
+.v6 button.v6-segbtn.on { background: var(--accent); }
+.v6 .v6-segbtn b { font-family: var(--mono); margin-left: 4px; }
 
 /* ── 좁은 폭: 사이드바는 서랍 ── */
 @media (max-width: 1024px) {
