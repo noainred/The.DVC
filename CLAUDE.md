@@ -4151,6 +4151,16 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       아니라 실패 · 404·CENTRAL_URL 없음은 `keptCopy`/`staleCopy` 로 '마지막 배포 사본이 계속 적용된다' 고 말한다(사본 유지 설계는 그대로).
     - 남긴 것: `GET /admin/metrics/settings` 가 범위 관리자에게 전체 lastRun 개수를 준다 · 새 상태 필드(`sourceErrors`·`lastPrune`·`keptCopy`·`staleCopy`·
       전산실 `stepFilled`)의 화면 문구.
+  - ⚠⚠ **v2.629 — '다시 3번더' 1회차 확정분**(상세 `docs/AUDIT-2026-09-27c.md`, 회귀 `server/test/audit2629{a..e}.test.js` + 웹 `views/audit2629{a,f}.test.js` — 그룹별 워크트리 변이 검증 전부 통과):
+    - ⚠⚠ **'서버 분석 조회에는 범위를 걸지 않는다'(v2.604) 규약은 폐기다**(AUTHZ2629-03): 범위 관리자는 허용 vCenter 에 귀속된 iDRAC 서버만 본다
+      (`routes/admin/idracCore.js scopeIdracServers` — 귀속 = 명시 vcenterId → mappedVcenterId → 서비스태그 ESXi, 귀속 없음 미노출). iDRAC 에 **실시간 로그인**하는
+      경로(gpu-probe·inventory?refresh=1·sensors?live=1)는 전체 범위 전용이다. 새 서버 분석 조회를 만들면 이 헬퍼를 쓸 것.
+    - ⚠⚠ **엣지 → 중앙 요청의 이름은 `agent/agentNameCarry.js`**(A6-01): 원문 `'X-Agent-Name': name` 은 비-ASCII 이름이면 fetch 가 요청째 던진다. 헤더로 안전할 때만
+      싣고 아니면 `?agent=`(중앙 requestedAgent 가 쿼리 → 헤더 → 본문 순서로 본다). v2.620 이 9곳만 옮기고 23곳이 남아 있었다 — `audit2629c` 가 원문 헤더 0 을 스윕한다.
+    - **배포분을 교체하는 pull 은 '지우기 전에 검증'**(EDGE2629-01 — svcmon 배정): 새 정의가 거부되면 이전 배포분을 그대로 두고 ack 가 그 사실을 말한다.
+    - **회수 가능량은 정지 VM 과 스냅샷이 겹친다**(DATA2629-01·02 — `diskTrend.snapshotReclaimGB`): 정지 VM 의 committed 에 스냅샷이 이미 들어 있다. 시계열(`vm_snap_gb`)은 아직 겹친다(남은 일).
+    - **같은 서비스태그 = 같은 물리 서버**(A1-2629-01): 키 충돌(keyConflict)은 이름·fleetId 키에만 쓰고, 서비스태그가 같으면 한 대만 센다(`dupSameBox`).
+    - 사용자 입력 문자열을 반복문 안에서 가공하지 말 것(AUTHZ2629-01 — 검색어 900KB × VM 2,242 = 3.2초) · 압축 파일은 로드 전에 선언 크기 합을 본다(SEC2629-09).
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

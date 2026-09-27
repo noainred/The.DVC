@@ -79,12 +79,13 @@ test('AUTHZ2629-02·04·06·07·08: 전체 범위 관리자는 그대로 쓴다'
 
 test('AUTHZ2629-02: svcmon 로그 경로는 시스템 디렉터리·상위 경로·상대 경로를 거부한다(전체 범위여도)', async () => {
   who = FULL_ADMIN;
+  const existedBefore = fs.existsSync('/etc/svcmon');   // 환경에 이미 있으면(다른 실행의 잔재) 이 요청이 만든 것이 아니다
   for (const dp of ['/etc/svcmon', '/usr//lib/x', '/var/../etc/x', 'relative/dir', '/tmp/a\u0001b']) {
     const r = await call('PUT', '/svcmon/log', { dirPath: dp });
     assert.equal(r.status, 400, `${dp} → ${r.status}`);
     assert.match(r.body?.error || '', /로그 경로/);
   }
-  assert.ok(!fs.existsSync('/etc/svcmon'));
+  if (!existedBefore) assert.ok(!fs.existsSync('/etc/svcmon'), '거부된 경로에 디렉터리를 만들었다');
   const ok = await call('PUT', '/svcmon/log', { dirPath: path.join(TMP, 'svclog') });
   assert.equal(ok.status, 200, JSON.stringify(ok.body));
 });
