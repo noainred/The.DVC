@@ -73,7 +73,7 @@ import { buildLinks, publicLink, EDGE_KINDS } from '../linkcheck/links.js';
 import { listCollectors as listCollectorsForLinks } from '../collector/registry.js';
 import { allCollectorStatus as allCollectorStatusForKnown } from '../collector/state.js'; // v2.604 CEN2604-04: pull 성공한 자기등록 항목만 '아는 엣지'
 import { listRegistry as listVcentersForLinks } from '../vcenter/registry.js';
-import { loadLinkCheckSettings, linkCheckEnabled } from '../linkcheck/settings.js';
+import { loadLinkCheckSettings, linkCheckEnabled, linkCheckSettingsLoadError } from '../linkcheck/settings.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { stripCoercionTraps, strOf } from '../util/coercionTrap.js';
@@ -2165,6 +2165,9 @@ centralRouter.get('/link-check-config', requireCentral(), (req, res) => {
   if (reqAgent && reqAgent.toLowerCase() !== agent.toLowerCase()) {
     return res.status(403).json({ ok: false, reason: `요청한 agent('${reqAgent}')가 이 토큰의 엣지('${agent}')와 다릅니다.` });
   }
+  // v2.632(감사 EDGE2632-03): 설정 파일을 못 읽었으면 기본값(꺼짐)을 enabled:false 로 내리지 않는다 — 화면이 '점검 꺼짐' 이라 말했다.
+  //   env LINKCHECK_ENABLED 로 강제한 경우도 링크·주기·시한은 파일 값이라 같은 판단이다.
+  if (settingsUnreadable(res, linkCheckSettingsLoadError, '통신 점검')) return;
   const s = loadLinkCheckSettings();
   let links = [];
   try {

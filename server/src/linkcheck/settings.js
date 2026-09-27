@@ -80,7 +80,7 @@ export function normalizeSettings(raw = {}) {
 /*
  * v2.632(감사 EDGE2632-03): 로드 오류 상태. 손상 → 보존 → 기본값(꺼짐)이면 /api/central/link-check-config 가 enabled:false 로 답해
  *   전 엣지가 측정을 멈추고 화면은 '점검 꺼짐' 이라 말했다(원인은 손상). 오류면 라우트가 503 settingsUnreadable 로 답한다
- *   (엣지 워커는 비-2xx 를 실패로 보고 직전 설정으로 측정을 이어간다). 관리자 저장만 해제한다.
+ *   (엣지 워커는 그 주기 측정을 쉬고 사유를 상태·콘솔에 남긴다 — '꺼짐' 이라 말하지 않는다). 관리자 저장만 해제한다.
  */
 const _loadErr = makeSettingsLoadError(() => FILE());
 /** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
