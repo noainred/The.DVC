@@ -99,6 +99,8 @@ export function registerPdu(api) {
       // v2.591: 엣지가 가져갔지만 새 수집 결과가 오지 않아 재인출 뒤 폐기한 '지금 수집' 요청(조용한 소실 금지).
       collectDrops: recentCollectDrops(),
       intervals: runtimeIntervals(),
+      // v2.630(WEB2630-02 후속): 중앙이 지정한 키만 — 화면이 지정값과 엣지 상속값을 구분해 보인다.
+      intervalsForEdge: intervalsForEdge(),
       intervalSpec: INTERVAL_SPEC,
       thresholds: th,
       thresholdSpec: THRESHOLD_SPEC,

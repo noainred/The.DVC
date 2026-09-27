@@ -504,6 +504,7 @@ function IntervalModal({ data, onClose }) {
           <div key={s.key} style={{ marginBottom: 12 }}>
             <label className="muted" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
               {s.label} (초, 최소 {Math.round(s.min / 1000)})
+              {data.intervalsForEdge && ` · ${Object.hasOwn(data.intervalsForEdge, s.key) ? '중앙 지정' : '미지정(엣지 현장 설정)'}`}
             </label>
             <input className="input" type="number" min={Math.round(s.min / 1000)} value={vals[s.key]}
               onChange={(e) => setVals((v) => ({ ...v, [s.key]: e.target.value }))} style={{ width: 200 }} />

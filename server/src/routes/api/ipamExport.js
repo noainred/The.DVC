@@ -81,7 +81,8 @@ function ipOverrideWriteVerdict(req, snap, allowed, owners, ip, bodyClaim) {
   if (allowed && existing && !ipInWriteScope(allowed, owners, ip, prevClaim)) return { status: 404 };
   const claimed = bodyClaim || prevClaim;
   if (allowed && !ipInWriteScope(allowed, owners, ip, claimed)) return { status: 404 };
-  if (writeScopeDenied(req, snap, owners, ip, prevClaim) || writeScopeDenied(req, snap, owners, ip, claimed)) return { status: 403 };
+  // 기존 레코드가 없으면 '기존 claim' 판정은 뜻이 없다(빈 claim 은 소유 VM 없는 IP 에서 항상 거부 — 새 예약이 막혔다).
+  if ((existing && writeScopeDenied(req, snap, owners, ip, prevClaim)) || writeScopeDenied(req, snap, owners, ip, claimed)) return { status: 403 };
   return null;
 }
 /** setOverrideBatch 와 같은 규칙으로 대상 IP 목록을 만든다(문자열 입력도 — 검사한 목록과 적용 목록이 같아야 한다). */
