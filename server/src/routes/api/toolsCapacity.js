@@ -28,6 +28,7 @@ import { analysisServersWithRemote } from '../admin/shared.js';
 import { getSensorSeries } from '../../idrac/sensorStore.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { loadMetricsSettings } from '../../metrics/settings.js';
+import { metricsSamplerStatus, samplerWithheldOf } from '../../metrics/sampler.js'; // v2.628(LEFT2628-01): 최근 샘플의 적재 제외·부분 합을 추이 응답에 싣는다
 import { DEFAULT_MAX_AGE_MS } from '../../idrac/roomTemp.js';
 import { TEMP_SERIES_DETAIL } from '../../idrac/serverTempSeries.js'; // v2.556: 스파크 메트릭 선택(흡기 계열은 상세 적재일 때만 있다)
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
@@ -647,8 +648,10 @@ api.get('/tools/waste/history', requirePerm('tools'), async (req, res) => {
     vcenterId: vcId || 'all', days, bucketMs,
     collectedSince: meta?.firstTs ?? null, retentionDays: loadVmperfSettings().retentionDays,
     truncated, coveredDays, limit, points,
+    sampler: allowed ? null : samplerWithheldOf(metricsSamplerStatus()?.lastRun),
   });
 });
+
 
 /**
  * vCenter 사용량/할당량 추이(v2.377) — Platform › vCenter 상세의 '📈 추이' 탭·상단 미니차트.

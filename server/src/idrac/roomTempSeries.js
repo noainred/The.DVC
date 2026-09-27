@@ -59,8 +59,9 @@ export function roomTempRows() {
 export const ROOMTEMP_RANGES = {
   // v2.620(SRV2620-02): 예전 주석(원본 1분 샘플이 촘촘하다)은 v2.451 dead-band 이후 사실이 아니다. roomtemp_* 원본은
   //   0.5℃ 미만 변화면 저장을 건너뛰어(최대 30분 간격) 30분 버킷에 보통 1행이다 — 그 점은 구간 평균이 아니라 **저장된 순간값**이고,
-  //   안정 구간은 버킷이 비어 선이 끊길 수 있다. 정확한 구간 평균·최대가 필요하면 1시간(롤업) 이상 버킷을 쓸 것.
-  '1d': { spanMs: 86_400_000, bucketMs: 30 * 60_000 },        // 30분(원본 — dead-band 라 순간값 · 빈 버킷 가능)
+  //   안정 구간은 버킷이 비어 선이 끊길 수 있었다. v2.628(LEFT2628-05): 1시간 미만 버킷은 db.historyStep 으로 직전 저장값을
+  //   이월해 빈 버킷을 채운다(채운 점 수는 응답 stepFilled). 정확한 구간 평균·최대가 필요하면 1시간(롤업) 이상 버킷을 쓸 것.
+  '1d': { spanMs: 86_400_000, bucketMs: 30 * 60_000 },        // 30분(원본 — dead-band 라 순간값 · step 채움)
   '7d': { spanMs: 7 * 86_400_000, bucketMs: 3_600_000 },      // 1시간(롤업 사용)
   '30d': { spanMs: 30 * 86_400_000, bucketMs: 6 * 3_600_000 },
   '90d': { spanMs: 90 * 86_400_000, bucketMs: 12 * 3_600_000 },
@@ -84,9 +85,23 @@ export async function roomTempHistory(db, { kind = 'inlet', group = '', range = 
   const since = Date.now() - spanMs;
   const limit = bucketMs <= 3_600_000 ? 3000 : 1500;
   let avgPts = []; let maxPts = []; let meta = { firstTs: null, lastTs: null };
+  // v2.628(감사 LEFT2628-05 — v2.620 SRV2620-02 의 형제 누락): roomtemp_* 는 dead-band 계열이라 1시간 미만 버킷을 원본에서
+  //   그대로 집계하면 온도가 안정된 구간이 '점 없음' 이 되어 1일 추이가 끊겼다. ESXi 온도(toolsCapacity esxi-temp)처럼
+  //   historyStep 으로 직전 저장값을 이월해 채운다(채운 점은 carried:true · 개수는 stepFilled). 60분 이상은 롤업이라 그대로.
+  const useStep = bucketMs < 3_600_000 && typeof db.historyStep === 'function';
+  let stepFilled = 0; let cut = { truncated: false, coveredSince: null };
   try {
-    avgPts = db.history(roomTempMetric(k, 'avg'), key, since, bucketMs, limit) || [];
-    maxPts = db.history(roomTempMetric(k, 'max'), key, since, bucketMs, limit) || [];
+    if (useStep) {
+      const nowTs = Date.now();
+      const ra = db.historyStep(roomTempMetric(k, 'avg'), key, since, bucketMs, limit, { nowTs });
+      const rm = db.historyStep(roomTempMetric(k, 'max'), key, since, bucketMs, limit, { nowTs });
+      avgPts = ra?.points || []; maxPts = rm?.points || [];
+      stepFilled = (ra?.carried || 0);
+      if (ra?.truncated) cut = { truncated: true, coveredSince: ra.coveredSince ?? null };
+    } else {
+      avgPts = db.history(roomTempMetric(k, 'avg'), key, since, bucketMs, limit) || [];
+      maxPts = db.history(roomTempMetric(k, 'max'), key, since, bucketMs, limit) || [];
+    }
     // v2.607 DB2607-01: 그 법인(key)의 첫 관측이다 — meta(metric) 는 k 조건이 없어 계열 전체(전 법인)의
     // 첫 표본을 돌려줘 2일 전부터 수집된 법인에 '수집 시작: 30일 전' 이 떴다. metaKey 는 롤업 포함·
     // aggregate 단독이라 파티션 풀스캔도 없다(v2.504). key '' 는 전체 합계 계열의 키다.
@@ -102,6 +117,7 @@ export async function roomTempHistory(db, { kind = 'inlet', group = '', range = 
   return {
     kind: k, group: key, range: r, spanMs, bucketMs,
     collectedSince: meta.firstTs ?? null,
+    stepFilled, ...(cut.truncated ? cut : {}),
     points: [...byTs.values()].sort((a, b) => a.ts - b.ts),
   };
 }

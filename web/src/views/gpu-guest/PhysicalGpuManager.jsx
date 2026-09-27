@@ -3,11 +3,13 @@
 // 분리 이유: 물리 GPU 서버(베어메탈, /admin/gpu-physical)는 게스트 수집(/admin/gpu-guest)과
 // 백엔드 API·데이터모델이 다른 별개 도메인인데 UI 만 동거 중이었다(git 이력도 별도 커밋 웨이브
 // — 물리 v2.29~2.32 / 게스트 v2.166~2.170). 분리로 병렬 세션 간 같은 파일 충돌 표면 축소.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson, delJson } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { Field } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
+import { ErrorBox } from '../../components/ui.jsx';
+import { errorBoxInput } from '../../components/accessDeniedText.js'; // v2.628(LEFT2628-04)
 
 const PEMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', os: 'linux', vcenterId: '', enabled: true };
 // 오류 분류별 배지 색: 로그인 안됨=red · 드라이버 없음=amber · 접속 불가=gray · 기타=red
@@ -65,8 +67,11 @@ export function PhysicalGpuManager({ vcs }) {
     setBulkRes(r.ok ? r : { error: r.reason || '일괄 등록 실패' });
     if (r.ok) await load();
   };
-  const load = () => fetchJson('/admin/gpu-physical').then((r) => { setD(r); setLoadErr(null); }).catch((e) => setLoadErr(e?.message || String(e)));
-  useEffect(() => { load(); const t = setInterval(load, 15_000); return () => clearInterval(t); }, []);
+  // v2.628(감사 LEFT2628-04): 오류 객체를 그대로 둔다 — 문자열로 바꾸면 403 권한 안내가 사라진다. 403 은 다시 물어도 결과가 같으므로
+  //   폴링을 멈춘다(v2.621 규약).
+  const denied = useRef(false);
+  const load = () => fetchJson('/admin/gpu-physical').then((r) => { setD(r); setLoadErr(null); }).catch((e) => { if (e?.status === 403) denied.current = true; setLoadErr(e || new Error('조회 실패')); });
+  useEffect(() => { load(); const t = setInterval(() => { if (!denied.current) load(); }, 15_000); return () => clearInterval(t); }, []);
   const results = new Map((d?.results || []).map((r) => [r.id, r]));
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const openAdd = () => { setEditing(false); setForm({ ...PEMPTY }); setMsg(null); setTestRes(null); };
@@ -109,7 +114,11 @@ export function PhysicalGpuManager({ vcs }) {
           <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={openAdd}>+ 서버 추가</button>
         </div>
       </div>
-      {loadErr && <div className="banner warn" style={{ marginBottom: 8 }}>물리 GPU 서버 목록을 읽지 못했습니다: {loadErr}{d ? ' — 아래는 직전에 받은 목록입니다.' : ''}</div>}
+      {loadErr && loadErr.status === 403 && <ErrorBox error={loadErr} />}
+      {loadErr && loadErr.status !== 403 && <div className="banner warn" style={{ marginBottom: 8 }}>물리 GPU 서버 목록을 읽지 못했습니다: {errorBoxInput(loadErr).text}{d ? ' — 아래는 직전에 받은 목록입니다.' : ''}</div>}
+      {/* v2.628(감사 LEFT2628-04): 범위 계정에는 서버가 범위 밖·소속 vCenter 없는 서버를 빼고, 폴러의 전 함대 집계를 싣지 않는다(scopePhysicalView). */}
+      {d?.scoped && d.omittedOutOfScope > 0 && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>범위 밖이거나 소속 vCenter 가 지정되지 않은 물리 GPU 서버 {d.omittedOutOfScope}대는 표시하지 않습니다.</div>}
+      {d?.status?.fleetCountsHidden && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>전 법인 수집 현황(전체 서버·GPU 수·실행 집계)은 전체 범위 계정에만 표시합니다 — 아래 수치는 이 계정 범위 안의 서버만입니다.</div>}
       {opErr && <div className="banner warn" style={{ marginBottom: 8 }}>{opErr}</div>}
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
         ESXi/VM이 아닌 <b>물리 서버</b>에 직접 SSH로 접속해 <code>nvidia-smi</code>로 GPU 사용률을 수집합니다(주기는 위 '수집 주기' 공유). 서버 OS에 NVIDIA 드라이버 + SSH가 있어야 합니다.
@@ -180,7 +189,7 @@ export function PhysicalGpuManager({ vcs }) {
         <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
           <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>IP/계정</th><th style={{ textAlign: 'left' }}>소속</th><th style={{ textAlign: 'left' }}>GPU/사용률</th><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'right' }}>작업</th></tr></thead>
           <tbody>
-            {(d?.servers || []).length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>{!d ? (loadErr ? '물리 GPU 서버 목록을 읽지 못했습니다(위 오류 참고) — 등록이 없다는 뜻이 아닙니다.' : '불러오는 중…') : '등록된 물리 GPU 서버가 없습니다.'}</td></tr>}
+            {(d?.servers || []).length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>{!d ? (loadErr ? `물리 GPU 서버 목록을 읽지 못했습니다(${errorBoxInput(loadErr).text}) — 등록이 없다는 뜻이 아닙니다.` : '불러오는 중…') : '등록된 물리 GPU 서버가 없습니다.'}</td></tr>}
             {(d?.servers || []).map((s) => {
               const r = results.get(s.id);
               return (

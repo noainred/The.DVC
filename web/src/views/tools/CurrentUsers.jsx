@@ -291,6 +291,13 @@ function WindowsUsersPanel({ scope }) {
             확인한 서버가 0대였던 시각 {hist.unknownRows}개는 선을 끊었습니다 — 0명이 아니라 확인 불가입니다.
           </div>
         )}
+        {/* v2.628(감사 LEFT2628-02): 서버 curuser/db.js seriesRange 는 게스트 원문이 잘린 서버가 섞인 주기(partial)의 수치를
+            하한이라 null 로 낸다(v2.622 DATA-03) — 선이 끊긴 이유를 화면이 말한다. */}
+        {hist?.partialRows > 0 && (
+          <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginBottom: 6, whiteSpace: 'normal' }}>
+            사용자 목록 원문이 잘린 서버가 섞인 시각 {hist.partialRows}개는 선을 끊었습니다 — 그때의 인원은 하한값이라 실제로는 더 많을 수 있습니다.
+          </div>
+        )}
         {hist?.rows?.length ? (
           <div style={{ height: 240 }}>
             <ResponsiveContainer>
