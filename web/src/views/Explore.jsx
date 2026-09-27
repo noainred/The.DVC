@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { usePolling, can } from '../api.js';
 import { DataTable, UsageCell, StateBadge, Loading, ErrorBox, EntityDetail } from '../components/ui.jsx';
+import { unitText } from './unitText.js';
 
 function SumCard({ label, value, meta, accent }) {
   return (
@@ -182,8 +183,8 @@ export default function Explore() {
             <SumCard label="vCPU 합계" value={vmResult.totals.vcpu.toLocaleString()} meta="할당 vCPU" accent="var(--accent)" />
             <SumCard label="RAM 합계" value={`${vmResult.totals.ramGB.toLocaleString()} GB`} meta={`≈ ${(vmResult.totals.ramGB / 1024).toFixed(1)} TB`} accent="var(--purple)" />
             <SumCard label="디스크 합계" value={`${vmResult.totals.diskTB.toLocaleString()} TB`} meta={`${vmResult.totals.diskGB.toLocaleString()} GB`} accent="var(--accent-2)" />
-            <SumCard label="평균 CPU 사용률" value={`${vmResult.totals.avgCpuUsagePct}%`} meta="구동중 VM 기준" />
-            <SumCard label="평균 메모리 사용률" value={`${vmResult.totals.avgMemUsagePct}%`} meta="구동중 VM 기준" />
+            <SumCard label="평균 CPU 사용률" value={unitText(vmResult.totals.avgCpuUsagePct, '%')} meta="구동중 VM 기준" />
+            <SumCard label="평균 메모리 사용률" value={unitText(vmResult.totals.avgMemUsagePct, '%')} meta="구동중 VM 기준" />
           </div>
         )}
         <DataTable columns={vmCols} rows={vmResult?.items || []} initialSort={{ key: 'cpuUsagePct', dir: 'desc' }}

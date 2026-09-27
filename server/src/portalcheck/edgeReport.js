@@ -31,6 +31,7 @@ import { tokenFingerprintParts, sameToken } from '../util/tokenFingerprint.js';
 import { hygieneOf } from './tokenScan.js';
 import { readJsonCapped } from '../util/readCapped.js'; // v2.604: 응답 크기 상한
 import { strOf } from '../util/coercionTrap.js';
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.629: 헤더로 안전한 이름만(비-ASCII 는 fetch 가 요청째 던진다)
 
 // v2.604: 응답 값이 객체면 String() 이 던진다 — 글자·수·불리언만(strOf).
 const t = (v) => strOf(v, 4096).trim();
@@ -64,7 +65,7 @@ export async function selfProbeCentral({ fetchImpl = null, timeoutMs = 10_000 } 
   let res = null;
   try {
     res = await doFetch(`${url.replace(/\/+$/, '')}/api/central/health-probe`, {
-      headers: { Accept: 'application/json', 'X-Central-Token': token, 'X-Agent-Name': t(config.agent.name) },
+      headers: { Accept: 'application/json', 'X-Central-Token': token, ...agentNameHeader(t(config.agent.name)) },
       timeoutMs, retries: 0,
     });
   } catch (e) {

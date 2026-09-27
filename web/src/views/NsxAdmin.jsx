@@ -30,7 +30,10 @@ export default function NsxAdmin() {
     catch (e) { setError(e); }
   };
   useEffect(() => { load(); }, []);
-  if (error) return <ErrorBox error={error} />;
+  // v2.629 WEB2629-06: 조회 실패만, 그리고 목록이 없을 때만 화면 전체 오류다. 삭제 같은 동작 실패는 배너(actErr)로 —
+  //   예전에는 삭제 실패가 목록 화면 전체를 ErrorBox 로 바꾸고 그것을 지울 경로가 없었다.
+  const [actErr, setActErr] = useState(null);
+  if (error && !data) return <ErrorBox error={error} />;
   if (!data) return <Loading />;
 
   const openAdd = () => { setEditing(false); setForm(structuredClone(EMPTY)); setMsg(null); };
@@ -60,13 +63,17 @@ export default function NsxAdmin() {
   };
   const remove = async (m) => {
     if (!window.confirm(`'${m.name}' (${m.id}) NSX Manager를 삭제할까요?`)) return;
-    try { await delJson(`/admin/nsx/managers/${encodeURIComponent(m.id)}`); await load(); } catch (e) { setError(e); }
+    setActErr(null);
+    try { await delJson(`/admin/nsx/managers/${encodeURIComponent(m.id)}`); await load(); }
+    catch (e) { setActErr(`'${m.name || m.id}' 삭제 실패: ${e?.status === 403 ? '권한이 없습니다(전체 범위 관리자 전용)' : (e?.message || String(e))}`); }
   };
 
   const list = data.managers || [];
 
   return (
     <>
+      {actErr && <div className="banner warn" style={{ marginBottom: 8 }}>⚠ {actErr} <button type="button" className="tab" style={{ marginLeft: 8, padding: '2px 8px', fontSize: 12 }} onClick={() => setActErr(null)}>닫기</button></div>}
+      {error && data && <div className="banner warn" style={{ marginBottom: 8 }}>목록 갱신 실패(직전 목록 표시 중): {String(error?.message || error)}</div>}
       <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
         <div className="section-title" style={{ margin: '6px 0' }}>NSX Manager 등록 · 관리 (관리자)</div>
         <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ NSX Manager 추가</button>

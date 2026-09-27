@@ -3,7 +3,7 @@ import { usePolling, can, toolAllowed } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { loadPhase, loadText } from '../../version_4/loadState.js';
 import { agoText } from '../../views/tools/relTime.js';
-import { statusTiles, usageGauges, siteCards, siteToneCounts, recentAlarms, actionLinks, SITE_GROUPS, siteGroupCounts, filterSiteGroup } from '../v6Data.js';
+import { statusTiles, usageGauges, siteCards, siteToneCounts, recentAlarms, actionLinks, SITE_GROUPS, siteGroupCounts, filterSiteGroup, emptyGroupText } from '../v6Data.js';
 import { WARN_PCT, CRIT_PCT } from '../../console/consoleData.js';
 
 /**
@@ -33,7 +33,7 @@ export default function V6Overview({ health, healthError, onSelectSite }) {
     return <div className="v6-panel"><b>수집 준비 중</b><div className="v6-note">{t.long}</div></div>;
   }
   const g = ov.global;
-  const tiles = statusTiles(g);
+  const tiles = statusTiles(g, ov.sites);
   const gauges = usageGauges(g);
   const allCards = siteCards(ov.sites);
   const groupCounts = siteGroupCounts(allCards);
@@ -90,7 +90,7 @@ export default function V6Overview({ health, healthError, onSelectSite }) {
             </button>
           ))}
         </div>
-        {cards.length === 0 ? <div className="v6-note">{group === 'irs' ? "이름에 'IRS' 가 들어간 법인이 없습니다." : "이름에 'IRS' 가 없는 법인이 없습니다."}</div> : (
+        {cards.length === 0 ? <div className="v6-note">{emptyGroupText(group)}</div> : (
         <div className="v6-sites">
           {cards.map((c) => (
             <button key={c.id} type="button" className="v6-site" onClick={() => onSelectSite?.(c.id)} title={`${c.name} 호스트 목록으로`}>

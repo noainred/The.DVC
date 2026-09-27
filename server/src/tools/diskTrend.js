@@ -100,6 +100,21 @@ const pct = (a, b) => (b > 0 && a != null ? Math.round((a / b) * 1000) / 10 : nu
 export const fmtGB = (x) => (x == null || !Number.isFinite(Number(x)) ? '—' : Number(x) >= 1024 ? `${(Number(x) / 1024).toFixed(1)} TB` : `${Math.round(Number(x) * 10) / 10} GB`);
 
 /** 최소제곱 기울기(y per x). 표본 2 미만·분산 0 이면 null. */
+/**
+ * v2.629(감사 DATA2629-01·02): 회수 가능량의 스냅샷 항 — **이미 통째로 회수 대상인 VM(offIds)에 속하지 않은** 스냅샷만 더한다.
+ * 정지 VM 의 committed(storageGB)는 스냅샷 델타 파일을 포함하므로 그 VM 의 스냅샷을 또 더하면 이중 계수다.
+ * 디스크 추세(diskBreakdown)와 좀비 리포트(computeZombies)가 같은 판정을 쓴다.
+ */
+export function snapshotReclaimGB(snapVms, offIds, key = 'snapshotSizeGB') {
+  let sum = 0;
+  for (const v of snapVms || []) {
+    if (!v || (offIds && offIds.has(v.id))) continue;
+    const n = Number(v[key]);
+    if (Number.isFinite(n) && n > 0) sum += n;
+  }
+  return sum;
+}
+
 export function slopeOf(xs, ys) {
   const n = xs.length; if (n < 2) return null;
   const mx = xs.reduce((a, b) => a + b, 0) / n; const my = ys.reduce((a, b) => a + b, 0) / n;
@@ -150,7 +165,14 @@ export function diskBreakdown(vms, datastores, { now = Date.now(), policy: pol }
   const snapOldGB = snapOld.reduce((a, v) => a + num(v.snapshotSizeGB), 0);
   const snapUnknownAge = snaps.filter((v) => !v.snapshotOldestTs).length;
   const offGB = committedOf(off);
-  const reclaimGB = offGB + snapGB;
+  // v2.629(감사 DATA2629-01 — 재현: 정지 VM 1대 100GB + 스냅샷 60GB → 회수 160GB · pctOfUsed 160%):
+  //   정지 VM 의 storageGB(= summary.storage.committed)는 스냅샷 델타 파일까지 포함한다. 그 VM 의 스냅샷을 또 더하면
+  //   같은 바이트를 두 번 센다 — 회수량의 스냅샷 항은 **정지 VM 에 속하지 않은** 스냅샷만(snapshotReclaimGB 한 벌).
+  //   snap.count/gb 는 전체 스냅샷 그대로 표시하고, 겹친 몫은 overlapGB 로 밝힌다.
+  const offIds = new Set(off.map((v) => v.id));
+  const snapReclaimGB = snapshotReclaimGB(snaps, offIds);
+  const snapOverlapGB = snapGB - snapReclaimGB;
+  const reclaimGB = offGB + snapReclaimGB;
 
   // VM 외 사용량 = 데이터스토어 실제 점유 − (VM+템플릿 커밋). ISO·고아 디스크·vSAN 오버헤드·범위 밖 VM 등.
   // 음수(범위 밖 VM 이 그 DS 를 쓰거나 로컬 DS 가 목록에 없을 때)는 의미가 없으므로 null.
@@ -177,7 +199,7 @@ export function diskBreakdown(vms, datastores, { now = Date.now(), policy: pol }
     },
     reclaim: {
       off: { count: off.length, gb: r1(offGB) },
-      snap: { count: snaps.length, gb: r1(snapGB) },
+      snap: { count: snaps.length, gb: r1(snapGB), reclaimGB: r1(snapReclaimGB), overlapGB: r1(snapOverlapGB) },   // v2.629 DATA2629-01
       snapOld: { count: snapOld.length, gb: r1(snapOldGB), maxHours: policy.snapshotMaxHours, unknownAge: snapUnknownAge },
       totalGB: r1(reclaimGB),
       pctOfUsed: ratioBlocked ? null : pct(reclaimGB, usedGB),
@@ -248,7 +270,8 @@ export function analyzeDiskTrend({ points = [], breakdown, days = 30, policy: po
     const r = b.reclaim;
     verdicts.push({
       level: r.totalGB > 0 ? 'info' : 'ok', key: 'reclaim',
-      title: `회수 가능 ${fmtGB(r.totalGB)} — 정지 VM ${r.off.count}대(${fmtGB(r.off.gb)}) + 스냅샷 ${r.snap.count}대(${fmtGB(r.snap.gb)})`,
+      // v2.629(감사 DATA2629-01): 정지 VM 에 속한 스냅샷은 정지 VM 디스크에 이미 들어 있어 합계에 한 번만 센다 — 그 사실을 제목이 말한다.
+      title: `회수 가능 ${fmtGB(r.totalGB)} — 정지 VM ${r.off.count}대(${fmtGB(r.off.gb)}) + 스냅샷 ${r.snap.count}대(${fmtGB(r.snap.reclaimGB ?? r.snap.gb)})${r.snap.overlapGB > 0 ? ` · 정지 VM 의 스냅샷 ${fmtGB(r.snap.overlapGB)} 는 정지 VM 디스크에 이미 포함` : ''}`,
       detail: r.totalGB > 0
         ? `${r.pctOfUsed != null ? `사용량의 ${r.pctOfUsed}% 입니다. 전부 회수하면 사용률 ${usagePct}% → ${r.afterReclaimUsagePct}%` : `사용량을 읽지 못한 데이터스토어 ${b.ds.usageUnknown}개가 있어 사용량 대비 비율·회수 후 사용률은 계산하지 않았습니다`}${daysGainedByReclaim != null ? `, 현재 증가율 기준 약 ${daysGainedByReclaim}일치 여유` : ''}. 회수 뒤 배열에 공간이 돌아가려면 UNMAP(VMFS6 자동)이 동작해야 합니다. 유휴 VM·고아 디스크는 이 수치에 포함되지 않습니다(관측 불가).`
         : '정지 VM 과 스냅샷이 없어 이 방식으로 회수할 용량이 없습니다.',

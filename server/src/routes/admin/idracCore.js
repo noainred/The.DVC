@@ -9,16 +9,77 @@ import { purgeStalePower, measuredPowerBreakdown } from '../../idrac/service.js'
 import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { getSensorSeries } from '../../idrac/sensorStore.js';
-import { roomTempReport } from '../../idrac/roomTemp.js';
+import { roomTempReport, UNASSIGNED_KEY } from '../../idrac/roomTemp.js';
 import { roomTempHistory, roomTempSparks } from '../../idrac/roomTempSeries.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { hardwareDimMatch } from '../../idrac/hwMatch.js';
 import { partBuckets, serversWithPart, isPartCat } from '../../idrac/partsInventory.js';
 import { snapMemo } from '../../util/snapCache.js';
 import { listDatacenters, getDatacenterAssign } from '../../datacenter/store.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
 import { adminOnly, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc, remoteServersResolved, analysisServersWithRemote, invForServer, fullScopeOnlyWith } from './shared.js';
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('iDRAC 등록·연결 테스트·즉시 수집·전력 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 실행할 수 있습니다.');
+
+// ---- v2.629(감사 AUTHZ2629-03 · A6-02): 서버 분석·iDRAC 조회의 범위 절단 ---------------------------
+// v2.387 부터 '서버 분석 계열은 범위를 걸지 않는다' 였는데, 그 사이 v2.607 이 범위 관리자를 '범위 계정' 으로 바꾸고
+// v2.611·v2.620 이 같은 IP·계정을 담는 스캔 대역·결과·로그를 fleetOnly 로 막아 **이 계열만 전 법인 BMC 주소·계정명·
+// 서비스태그를 주는** 형제 비대칭이 됐다. 이제 범위 계정에는 **귀속 vCenter 가 허용 집합인 서버만** 준다.
+//   · 귀속 vCenter = 명시 vcenterId → 서비스태그로 찾은 ESXi 호스트의 vCenter(mappedVcenterId). 둘 다 없으면 귀속 없음 →
+//     범위 계정에 **노출하지 않는다**('귀속 없는 데이터 미노출' 불변조건). 뺀 개수는 omittedOutOfScope 로 밝힌다.
+//   · 전체 범위 계정은 예전과 **한 바이트도 다르지 않다**(scoped·omittedOutOfScope 필드도 싣지 않는다).
+export function idracServerVcOf(s, tagMap) {
+  const tag = String(s?.serviceTag || s?.inv?.system?.serviceTag || '').trim().toLowerCase();
+  return String(s?.vcenterId || s?.mappedVcenterId || (tag && tagMap ? tagMap.get(tag) : '') || '');
+}
+/** 범위 계정이면 { allowed:Set, tagMap } · 전체 범위면 null. */
+export function idracScopeOf(req) {
+  const allowed = scopedVcenterIds(req?.user, store.get());
+  return allowed ? { allowed, tagMap: hostVcByTag() } : null;
+}
+export function idracInScope(sc, s) {
+  if (!sc) return true;
+  const vc = idracServerVcOf(s, sc.tagMap);
+  return !!vc && sc.allowed.has(vc);
+}
+/** 서버 목록 절단. 전체 범위면 원본 그대로 + omitted 0. */
+export function scopeIdracServers(req, servers) {
+  const sc = idracScopeOf(req);
+  if (!sc) return { servers, omitted: 0, sc: null };
+  const kept = (servers || []).filter((s) => idracInScope(sc, s));
+  return { servers: kept, omitted: (servers || []).length - kept.length, sc };
+}
+/** 법인 선택 목록 — 범위 계정에는 허용 vCenter 에 할당된 법인·남은 서버의 법인만(다른 법인 이름 미노출). */
+function scopedDatacenters(r, assign) {
+  const all = listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id }));
+  if (!r.sc) return all;
+  const ids = new Set();
+  for (const vc of r.sc.allowed) { const d = assign[String(vc)]; if (d) ids.add(String(d)); }
+  for (const x of r.servers) { const d = String(x.datacenterId || assign[String(x.vcenterId || x.mappedVcenterId || '')] || ''); if (d) ids.add(d); }
+  return all.filter((d) => ids.has(String(d.id)));
+}
+/** 응답에 덧붙일 범위 필드(범위 계정만). */
+const scopeFields = (r) => (r.sc ? { scoped: true, omittedOutOfScope: r.omitted } : {});
+/**
+ * 전산실 온도 시계열 그룹(법인 id | vCenter id | 미지정 | ''=전체)이 범위 계정에 허용되는가.
+ * 그룹 합계는 그 그룹의 **모든** 서버로 적재된 값이라, 그룹 안에 범위 밖(또는 귀속 없는) 서버가 하나라도 있으면
+ * 그 합계는 범위 밖 시설 값을 섞는다 → 허용하지 않는다. '' (전 법인 합계)·미지정 그룹은 언제나 불허.
+ */
+export function roomTempGroupsAllowed(req, groups) {
+  const sc = idracScopeOf(req);
+  if (!sc) return { allowed: groups, denied: [], sc: null };
+  const members = new Map();
+  for (const s of analysisServersWithRemote()) {
+    const dcId = String(s.datacenterId || '').trim();
+    const vcId = String(s.vcenterId || '').trim();
+    const key = dcId || vcId || UNASSIGNED_KEY;
+    const m = members.get(key) || { n: 0, out: 0 };
+    m.n += 1; if (!idracInScope(sc, s)) m.out += 1;
+    members.set(key, m);
+  }
+  const ok = (g) => { const m = g ? members.get(g) : null; return !!m && m.n > 0 && m.out === 0; };
+  return { allowed: groups.filter(ok), denied: groups.filter((g) => !ok(g)), sc };
+}
 
 export function registerIdracCore(adminRouter) {
 
@@ -42,10 +103,16 @@ export function registerIdracCore(adminRouter) {
  */
 adminRouter.get('/room-temp/history', adminOnly, async (req, res) => {
   try {
+    const group = String(req.query.group || '');
+    // v2.629(AUTHZ2629-03): 범위 계정은 그룹 전원이 범위 안인 법인만(전 법인 합계 '' 는 불허).
+    const g = roomTempGroupsAllowed(req, [group]);
+    if (g.sc && !g.allowed.length) {
+      return res.status(403).json({ ok: false, error: 'forbidden', reason: group ? '이 법인의 전산실 온도에는 범위 밖(또는 귀속 없는) 서버가 섞여 있어 범위 제한 계정에는 보이지 않습니다.' : '전 법인 합계는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.' });
+    }
     const db = await getMetricsDb();
     res.json(await roomTempHistory(db, {
       kind: String(req.query.kind || 'inlet'),
-      group: String(req.query.group || ''),
+      group,
       range: String(req.query.range || '7d'),
     }));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
@@ -59,12 +126,15 @@ adminRouter.get('/room-temp/history', adminOnly, async (req, res) => {
 adminRouter.get('/room-temp/spark', adminOnly, async (req, res) => {
   try {
     const db = await getMetricsDb();
-    const groups = String(req.query.groups || '').split(',').map((x) => x.trim()).filter((x, i, a) => a.indexOf(x) === i);
-    res.json(await roomTempSparks(db, {
+    const asked = String(req.query.groups || '').split(',').map((x) => x.trim()).filter((x, i, a) => a.indexOf(x) === i);
+    // v2.629(AUTHZ2629-03): 범위 계정은 허용 그룹만 조회하고 뺀 개수를 밝힌다(조용한 제외 금지).
+    const g = roomTempGroupsAllowed(req, asked);
+    const out = await roomTempSparks(db, {
       kind: String(req.query.kind || 'inlet'),
       hours: Number(req.query.hours) || 24,
-      groups,
-    }));
+      groups: g.allowed,
+    });
+    res.json(g.sc ? { ...out, scoped: true, omittedOutOfScope: g.denied.length } : out);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
@@ -75,13 +145,15 @@ adminRouter.get('/room-temp', adminOnly, (req, res) => {
     // 위임 환경에서 온도 데이터가 실제로 있는 곳이다(그 화면이 서버 864/965·센서 3,747개 표시).
     // ⚠ scope 주의(v2.387 주석 교정): analysisFilter(req) 는 **클라이언트가 보낸 query 필터**
     //   (?vcenterId/?datacenterId)일 뿐 사용자 데이터 범위(scopedVcenterIds)가 아니다.
-    //   즉 이 라우트는 범위 제한을 걸지 않는다 — 기존 /admin/idrac/temps 등 '서버 분석' 계열과
-    //   동일한 정책(adminOnly)이다. 범위 제한을 도입하려면 그 계열 전체를 함께 바꿔야 한다.
-    res.json(roomTempReport(analysisServersWithRemote(req)));
+    //   v2.629(AUTHZ2629-03): 사용자 범위는 아래 scopeIdracServers 가 계열 전체에 같은 기준으로 건다.
+    // v2.629(AUTHZ2629-03): 위 주석의 '범위를 걸지 않는다' 는 이제 사실이 아니다 — 범위 계정은 귀속 서버만.
+    const r = scopeIdracServers(req, analysisServersWithRemote(req));
+    const rep = roomTempReport(r.servers);
+    res.json(r.sc ? { ...rep, ...scopeFields(r) } : rep);
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
-adminRouter.get('/idrac', adminOnly, (_req, res) => {
+adminRouter.get('/idrac', adminOnly, (req, res) => {
   const tagMap = hostVcByTag();
   const mapTag = (s) => (tagMap.get(String(s.serviceTag || s.inv?.system?.serviceTag || '').trim().toLowerCase()) || '');
   // v2.590: 인증 실패로 주기 수집이 멈춘 서버를 행마다 싣는다(조용한 정지 금지 — authGuard 규칙 1).
@@ -95,7 +167,18 @@ adminRouter.get('/idrac', adminOnly, (_req, res) => {
   const remote = remoteServersResolved()
     .filter((s) => !seen.has(String(s.id)))
     .map((s) => ({ id: s.id, name: s.name, host: s.host, serviceTag: s.serviceTag || '', model: s.model || s.inv?.system?.model || '', vcenterId: s.vcenterId || '', mappedVcenterId: s.vcenterId || mapTag(s), datacenterId: s.datacenterId || '', type: s.type || 'idrac', vendor: s.vendor === 'hpe' || s.vendor === 'dell' ? s.vendor : '', remote: true, collectorId: s.collectorId, hasInventory: !!s.inv }));
-  res.json({ servers: local.concat(remote), poller: getPollerStatus() });
+  // v2.629(AUTHZ2629-03): 범위 계정은 귀속 vCenter 가 허용 집합인 서버만(BMC 주소·계정명·서비스태그 전 법인분 유출 차단).
+  const r = scopeIdracServers(req, local.concat(remote));
+  if (!r.sc) return res.json({ servers: r.servers, poller: getPollerStatus() });
+  // 폴러 상태는 모양을 유지하되(화면이 읽는 키) 전 법인 집계를 빼고 범위 안 값만 싣는다 — lastRun(전 법인 성공·실패 수·
+  //   오류 목록)은 범위로 가를 수 없어 null(첫 수집 전과 같은 표시), 인증 정지 목록은 범위 안 서버만.
+  const p = getPollerStatus() || {};
+  const keptIds = new Set(r.servers.map((x) => String(x.id)));
+  res.json({
+    servers: r.servers,
+    poller: { enabled: p.enabled, intervalMs: p.intervalMs, servers: r.servers.filter((x) => !x.remote).length, lastRun: null, authStops: (p.authStops || []).filter((x) => keptIds.has(String(x.id))), scoped: true },
+    ...scopeFields(r),
+  });
 });
 
 // Register a server, then poll immediately so power shows up right away.
@@ -156,7 +239,8 @@ adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
   // 중앙 로컬 + 위임 법인 원격 서버 병합(id 중복은 중앙 우선).
   const localAll = loadIdracRegistry().filter((s) => s.type !== 'ome');
   const seen = new Set(localAll.map((s) => String(s.id)));
-  const merged = localAll.concat(remoteServersResolved().filter((s) => !seen.has(String(s.id))));
+  const scoped = scopeIdracServers(req, localAll.concat(remoteServersResolved().filter((s) => !seen.has(String(s.id))))); // v2.629 AUTHZ2629-03
+  const merged = scoped.servers;
   const servers = merged.filter((s) => (!dcFilter || dcOf(s) === (dcFilter === '__unmapped__' ? '' : dcFilter)) && (dcFilter !== '__unmapped__' || !dcOf(s)));
   const byModel = new Map(), byCpu = new Map(), byMem = new Map(), byGpu = new Map();
   let collected = 0, missing = 0, totalGpuCards = 0;
@@ -178,6 +262,7 @@ adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
   res.json({
     ok: true, datacenterId: dcFilter, totalServers: servers.length, collected, missing, totalGpuCards,
     byModel: toArr(byModel), byCpu: toArr(byCpu), byMemory: toArr(byMem, true), byGpu: toArr(byGpu),
+    ...scopeFields(scoped),
   });
 });
 
@@ -199,7 +284,8 @@ adminRouter.get('/idrac/nic-speed', adminOnly, (req, res) => {
   };
   const localAll = loadIdracRegistry().filter((s) => s.type !== 'ome').map((s) => withMappedVc(s, tagMap));
   const seen = new Set(localAll.map((s) => String(s.id)));
-  const merged = localAll.concat(remoteServersResolved().map((s) => withMappedVc(s, tagMap)).filter((s) => !seen.has(String(s.id))));
+  const scoped = scopeIdracServers(req, localAll.concat(remoteServersResolved().map((s) => withMappedVc(s, tagMap)).filter((s) => !seen.has(String(s.id))))); // v2.629 AUTHZ2629-03
+  const merged = scoped.servers;
   const vcNicMap = hostNicsByTag(); // vCenter 수집 물리 NIC(별도 컬럼) — iDRAC과 독립 소스
 
   const rows = []; let collected = 0; let missing = 0; let vcCollected = 0;
@@ -250,7 +336,8 @@ adminRouter.get('/idrac/nic-speed', adminOnly, (req, res) => {
     //   모순됐고, 하드웨어 집계(:167 servers.length)와 뜻이 달랐다. 필터 버튼이 쓰는 행 수는 rowCount 로 따로 준다.
     totalServers: collected + missing, rowCount: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
     bySpeed: speedBuckets, servers: rows,
-    datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })),
+    datacenters: scopedDatacenters(scoped, assign),
+    ...scopeFields(scoped),
   });
 });
 
@@ -266,7 +353,8 @@ adminRouter.get('/idrac/nic-models', adminOnly, (req, res) => {
   const speedLabel = (mbps) => { if (!mbps) return ''; if (mbps % 1000 === 0) return `${mbps / 1000}G`; if (mbps >= 1000) return `${(mbps / 1000).toFixed(1)}G`; return `${mbps}M`; };
   const localAll = loadIdracRegistry().filter((s) => s.type !== 'ome').map((s) => withMappedVc(s, tagMap));
   const seen = new Set(localAll.map((s) => String(s.id)));
-  const merged = localAll.concat(remoteServersResolved().map((s) => withMappedVc(s, tagMap)).filter((s) => !seen.has(String(s.id))));
+  const scoped = scopeIdracServers(req, localAll.concat(remoteServersResolved().map((s) => withMappedVc(s, tagMap)).filter((s) => !seen.has(String(s.id))))); // v2.629 AUTHZ2629-03
+  const merged = scoped.servers;
 
   const vcNicMap = hostNicsByTag(); // vCenter 수집 물리 NIC(별도 컬럼) — iDRAC과 독립 소스
   const byModel = new Map(); // model -> { servers:Set, ports }
@@ -327,7 +415,8 @@ adminRouter.get('/idrac/nic-models', adminOnly, (req, res) => {
     //   모순됐고, 하드웨어 집계(:167 servers.length)와 뜻이 달랐다. 필터 버튼이 쓰는 행 수는 rowCount 로 따로 준다.
     totalServers: collected + missing, rowCount: rows.length, collected, missing, vcCollected, virtual: virtualN, baremetal: rows.length - virtualN,
     byModel: toBuckets(byModel), vcByModel: toBuckets(vcByModel), servers: rows,
-    datacenters: listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })),
+    datacenters: scopedDatacenters(scoped, assign),
+    ...scopeFields(scoped),
   });
 });
 
@@ -342,7 +431,8 @@ adminRouter.get('/idrac/hardware-servers', adminOnly, (req, res) => {
   const dcOf = (s) => String(s.datacenterId || assign[String(s.vcenterId || '')] || '');
   const localAll = loadIdracRegistry().filter((s) => s.type !== 'ome');
   const seen = new Set(localAll.map((s) => String(s.id)));
-  const merged = localAll.concat(remoteServersResolved().filter((s) => !seen.has(String(s.id))));
+  const scoped = scopeIdracServers(req, localAll.concat(remoteServersResolved().filter((s) => !seen.has(String(s.id))))); // v2.629 AUTHZ2629-03
+  const merged = scoped.servers;
   const inDc = merged.filter((s) => (!dcFilter || dcOf(s) === (dcFilter === '__unmapped__' ? '' : dcFilter)) && (dcFilter !== '__unmapped__' || !dcOf(s)));
   const out = [];
   for (const s of inDc) {
@@ -358,7 +448,7 @@ adminRouter.get('/idrac/hardware-servers', adminOnly, (req, res) => {
     });
   }
   out.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
-  res.json({ ok: true, dim, key, datacenterId: dcFilter, count: out.length, servers: out });
+  res.json({ ok: true, dim, key, datacenterId: dcFilter, count: out.length, servers: out, ...scopeFields(scoped) });
 });
 
 /**
@@ -370,6 +460,8 @@ adminRouter.get('/idrac/hardware-servers', adminOnly, (req, res) => {
 adminRouter.get('/idrac/unsupported', adminOnly, (req, res) => {
   const datacenterId = String(req.query.datacenterId || '').trim();
   const r = listUnsupportedServers({ datacenterId });
+  // v2.629(AUTHZ2629-03): 스캔 발견물은 vCenter 귀속이 없다 — 범위 계정에는 싣지 않고 개수만 밝힌다(귀속 없음 미노출).
+  if (idracScopeOf(req)) return res.json({ ok: true, rows: [], groups: [], total: 0, truncatedGroups: 0, scoped: true, omittedOutOfScope: r.total, generatedAt: Date.now() });
   res.json({ ok: true, ...r, generatedAt: Date.now() });
 });
 
@@ -377,7 +469,8 @@ adminRouter.get('/idrac/unsupported', adminOnly, (req, res) => {
 adminRouter.get('/idrac/temps', adminOnly, (req, res) => {
   // 원격(위임 법인 엣지 등록) 서버 포함 — 엣지가 export에 실어 보낸 최신 센서(s.sensors)를 쓴다.
   // 이전엔 중앙 로컬 등록 서버만 집계해, 전부 위임인 환경에서 '법인별 온도'가 0/0으로 비었다.
-  const servers = analysisServersWithRemote(req);
+  const scoped = scopeIdracServers(req, analysisServersWithRemote(req)); // v2.629 AUTHZ2629-03
+  const servers = scoped.servers;
   const rows = [];
   const serverList = [];
   let missing = 0;
@@ -393,13 +486,14 @@ adminRouter.get('/idrac/temps', adminOnly, (req, res) => {
     }
   }
   rows.sort((a, b) => b.celsius - a.celsius);
-  res.json({ rows, servers: serverList, sampledServers: serverList.length, totalServers: servers.length, missing, maxCelsius: rows.length ? rows[0].celsius : null, intervalMs: getPollerStatus().intervalMs }); // v2.601(WEB2601-05): 수집 주기는 서버 값 — 화면이 '1분마다' 를 박아 두지 않게
+  res.json({ rows, servers: serverList, sampledServers: serverList.length, totalServers: servers.length, missing, maxCelsius: rows.length ? rows[0].celsius : null, intervalMs: getPollerStatus().intervalMs, ...scopeFields(scoped) }); // v2.601(WEB2601-05): 수집 주기는 서버 값 — 화면이 '1분마다' 를 박아 두지 않게
 });
 
 // 서버 분석 — 서버 모델(R760/R770 등)별로 펌웨어/드라이버 버전 분포(버전별 설치 서버 수).
 adminRouter.get('/idrac/firmware-inventory', adminOnly, (req, res) => {
   const CAT_ORDER = ['iDRAC', 'BIOS', 'NIC', 'HBA', 'Storage', 'GPU', 'PSU', 'CPLD', 'Disk', 'Driver', '기타'];
-  const servers = analysisServersWithRemote(req);
+  const scoped = scopeIdracServers(req, analysisServersWithRemote(req)); // v2.629 AUTHZ2629-03
+  const servers = scoped.servers;
   const models = new Map(); // model -> { servers:Set, cats: Map<cat, Map<version, Set<serverName>>> }
   const missing = [];
   for (const s of servers) {
@@ -428,12 +522,13 @@ adminRouter.get('/idrac/firmware-inventory', adminOnly, (req, res) => {
       versions: [...vmap.entries()].map(([version, set]) => ({ version, count: set.size, servers: [...set].sort() })).sort((a, b) => b.count - a.count),
     })).sort((a, b) => (CAT_ORDER.indexOf(a.category) + 1 || 99) - (CAT_ORDER.indexOf(b.category) + 1 || 99)),
   })).sort((a, b) => b.serverCount - a.serverCount);
-  res.json({ models: out, missing, totalServers: servers.length, collectedServers: servers.length - missing.length });
+  res.json({ models: out, missing, totalServers: servers.length, collectedServers: servers.length - missing.length, ...scopeFields(scoped) });
 });
 
 // 서버 분석 — 모든 iDRAC가 수집한 GPU를 모델별로 집계(어떤 모델 몇 장, 어느 서버).
 adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
-  const servers = analysisServersWithRemote(req);
+  const scoped = scopeIdracServers(req, analysisServersWithRemote(req)); // v2.629 AUTHZ2629-03
+  const servers = scoped.servers;
   const byModel = new Map();
   const serverList = [];
   const missing = [];
@@ -458,6 +553,9 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
   const vcFilter = String(req.query.vcenterId || '').trim();
   let physServers = listPhysical();
   if (vcFilter) physServers = physServers.filter((s) => (vcFilter === '__unmapped__' ? !s.vcenterId : s.vcenterId === vcFilter));
+  // v2.629: 물리 GPU 서버도 범위 계정에는 귀속 vCenter 가 허용 집합인 것만(귀속 없음 미노출).
+  let physOmitted = 0;
+  if (scoped.sc) { const before = physServers.length; physServers = physServers.filter((s) => s.vcenterId && scoped.sc.allowed.has(String(s.vcenterId))); physOmitted = before - physServers.length; }
   let physCount = 0;
   for (const s of physServers) {
     const gms = s.gpuModels || [];
@@ -484,21 +582,25 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
     collectedServers: collected, totalServers: servers.length,
     physicalServers: physCount,
     missing,
+    ...(scoped.sc ? { scoped: true, omittedOutOfScope: scoped.omitted + physOmitted } : {}),
   });
 });
 
 // 서버 분석 — 하드웨어 파트 인벤토리 집계: 어떤 장비(모델)가 몇 개, 몇 대의 서버에 있는지.
 // 카테고리: cpu/gpu/dimm/disk/controller/nic/psu/pcie/fan (idrac/partsInventory.js).
 // 1,069대 × 서버당 수십~수백 유닛 순회라 admin 폴링 하에서도 재계산이 겹치지 않게
-// single-flight + 15s TTL(snapMemo)로 묶는다(admin 전용이라 scope 캐시 누수 없음).
+// single-flight + 15s TTL(snapMemo)로 묶는다(v2.629: 키에 사용자 범위를 넣는다 — 범위 계정 판본이 섞이지 않게).
 adminRouter.get('/idrac/parts-inventory', adminOnly, async (req, res) => {
   try {
     const cat = String(req.query.cat || '').trim();
     if (cat && !isPartCat(cat)) return res.status(400).json({ ok: false, reason: `알 수 없는 카테고리: ${cat}` });
-    const key = `parts|${req.originalUrl}`;
+    // v2.629(AUTHZ2629-03): 범위 계정은 귀속 서버만 — 캐시 키에 범위를 넣는다(없으면 먼저 연 사람의 판본이 나간다).
+    const sc = idracScopeOf(req);
+    const key = `parts|${sc ? [...sc.allowed].sort().join(',') : 'all'}|${req.originalUrl}`;
     const payload = await snapMemo('idrac-parts', key, 15_000, () => {
-      const servers = analysisServersWithRemote(req);
-      return partBuckets(servers, invForServer, { cat, q: String(req.query.q || '') });
+      const r = scopeIdracServers(req, analysisServersWithRemote(req));
+      const out = partBuckets(r.servers, invForServer, { cat, q: String(req.query.q || '') });
+      return r.sc ? { ...out, ...scopeFields(r) } : out;
     });
     // ETag/304 는 전역 res.json 래퍼(util/compress.js, 본문 SHA-1)가 처리 — 여기서 키 기반
     // ETag 를 따로 만들면 재계산 후 내용이 바뀌어도 304 가 나가는 오탐이 생긴다.
@@ -510,8 +612,8 @@ adminRouter.get('/idrac/parts-inventory', adminOnly, async (req, res) => {
 // 버킷×서버 목록이 응답을 MB 단위로 키우는 것을 막는다(gpu-inventory 와 달리 버킷 수가 많음).
 adminRouter.get('/idrac/parts-servers', adminOnly, (req, res) => {
   try {
-    const servers = analysisServersWithRemote(req);
-    const list = serversWithPart(servers, invForServer, String(req.query.key || ''));
+    const scoped = scopeIdracServers(req, analysisServersWithRemote(req)); // v2.629 AUTHZ2629-03
+    const list = serversWithPart(scoped.servers, invForServer, String(req.query.key || ''));
     if (list == null) return res.status(400).json({ ok: false, reason: 'key 형식은 <카테고리>|<라벨> 입니다.' });
     // 호스트네임 폴백 — iDRAC 인벤토리에 아직 없으면(30분 주기·구버전 엣지) vCenter 스냅샷의
     // ESXi 호스트명을 서비스태그로 매칭해 즉시 표시.
@@ -519,7 +621,7 @@ adminRouter.get('/idrac/parts-servers', adminOnly, (req, res) => {
     for (const r of list) {
       if (!r.hostname) r.hostname = tagName.get(String(r.serviceTag || '').trim().toLowerCase()) || '';
     }
-    res.json({ servers: list, total: list.length });
+    res.json({ servers: list, total: list.length, ...scopeFields(scoped) });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 }

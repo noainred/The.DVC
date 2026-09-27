@@ -58,18 +58,31 @@ export function scopePhysicalView(servers, results, status, allowed) {
   };
 }
 
+/**
+ * v2.629(A6-04): 지표 샘플러 상태의 lastRun 은 전 함대 집계(rows·hostsWithTemp·staleSkipped 의 vCenter 수·사유 분포·vmperfStale)다 —
+ *   범위 관리자에게는 **실행 시각만** 준다(v2.550.3 '상태 객체에 집계를 담아 내보내지 말 것' · /tools/waste/history 와 같은 기준).
+ *   주기·보존일은 전 법인 공용 설정값이라 그대로 둔다. 순수.
+ */
+export function scopeSamplerStatus(status, allowed) {
+  if (!allowed || !status || typeof status !== 'object') return status;
+  const lr = status.lastRun;
+  const at = lr && typeof lr === 'object' ? (lr.at ?? null) : null;
+  return { ...status, lastRun: lr == null ? lr : { at, rows: null, hostsWithTemp: null }, fleetCountsHidden: true };
+}
+
 export function registerGpuGuest(adminRouter) {
 
 // Metrics sampler settings: 온도/용량/GPU 수집 주기 + 보존기간 (런타임 변경).
-adminRouter.get('/metrics/settings', adminOnly, (_req, res) => {
-  res.json({ settings: loadMetricsSettings(), limits: METRICS_LIMITS, status: metricsSamplerStatus() });
+adminRouter.get('/metrics/settings', adminOnly, (req, res) => {
+  const allowed = scopedVcenterIds(req.user, store.get());
+  res.json({ settings: loadMetricsSettings(), limits: METRICS_LIMITS, status: scopeSamplerStatus(metricsSamplerStatus(), allowed) });
 });
 adminRouter.put('/metrics/settings', adminOnly, (req, res) => {
   // v2.611 AUTHZ2611-02: 샘플러 주기·보존일은 전 법인 공용(vCenter 축 없음) — 범위 계정의 값은 적용하지 않고 밝힌다(v2.607 ignoredGlobal).
   const allowed = scopedVcenterIds(req.user, store.get());
   if (allowed) {
     const { ignoredGlobal } = keepScopedFields(req.body || {}, loadMetricsSettings(), allowed, []);
-    return res.json({ ok: true, settings: loadMetricsSettings(), status: metricsSamplerStatus(), ...ignoredGlobalFields(ignoredGlobal) });
+    return res.json({ ok: true, settings: loadMetricsSettings(), status: scopeSamplerStatus(metricsSamplerStatus(), allowed), ...ignoredGlobalFields(ignoredGlobal) });
   }
   const settings = saveMetricsSettings(req.body || {});
   rescheduleMetricsSampler(); // apply the new interval immediately

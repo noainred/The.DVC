@@ -228,7 +228,8 @@ pingRouter.get('/edge/overview', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
-pingRouter.post('/edge/sync', adminOnly, (_req, res) => {
+pingRouter.post('/edge/sync', adminOnly, (req, res) => {
+  if (denyScopedBulk(req, res, '엣지 대상 동기화')) return;   // v2.629 AUTHZ2629-07: 형제 poll-now·seed-vcenters·vcport 와 같게
   try { res.json(seedEdgeTargets(listCollectors())); }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });

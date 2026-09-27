@@ -24,6 +24,7 @@ import { config } from '../config.js';
 import { reqTimeoutMs } from './envTimeout.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { readCentralReply, dropSummaryOf, mergeDrop, warnDrop } from './centralReply.js'; // v2.606 EDGE2606-03
+import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
@@ -72,14 +73,14 @@ async function post(body) {
   const headers = {
     'Content-Type': 'application/json',
     'X-Agent-Hostname': os.hostname(),
-    'X-Agent-Name': config.agent.name,
+    ...agentHeaders(config.agent.name),
     ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}),
   };
   let payload = json;
   if (PUSH_GZIP) {
     try { payload = await gzipAsync(json); headers['Content-Encoding'] = 'gzip'; } catch { payload = json; }
   }
-  const res = await resilientFetch(`${config.agent.centralUrl}/api/central/curuser`, {
+  const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/curuser`, config.agent.name), {
     method: 'POST', headers, body: payload,
     timeoutMs: reqTimeoutMs(process.env.AGENT_CURUSER_PUSH_TIMEOUT_MS, 60_000), retries: 1,
   });

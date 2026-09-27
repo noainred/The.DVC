@@ -20,6 +20,7 @@ import { applyCentralSettings } from '../cvp/settings.js';
 import { dropStatus } from '../cvp/store.js';
 import { pruneDevices, LOCAL_AGENT } from '../cvp/db.js';
 import { pollCvpOnce } from '../cvp/poller.js';
+import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 export const configPullMs = () => clampIntervalMs(Number(process.env.CVP_CONFIG_PULL_MS) || 5 * 60_000, 5 * 60_000, 60_000);
 const _log = createChangeLogger({ windowMs: 10 * 60_000 });
@@ -38,7 +39,7 @@ async function _pull() {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'pull 비활성화(CENTRAL_URL/TOKEN 미설정)' };
   try {
     const url = `${config.agent.centralUrl}/api/central/cvp-config?agent=${encodeURIComponent(config.agent.name || '')}`;
-    const res = await resilientFetch(url, { method: 'GET', headers: { 'X-Central-Token': config.agent.centralToken, 'X-Agent-Name': config.agent.name || '' }, timeoutMs: 20_000, retries: 2 });
+    const res = await resilientFetch(url, { method: 'GET', headers: { 'X-Central-Token': config.agent.centralToken, ...agentHeaders(config.agent.name || '') }, timeoutMs: 20_000, retries: 2 });
     if (res.status === 404) {
       const c = await classifyCentral404(res);
       _last = { ...(_last || {}), at: Date.now(), ok: false, error: c.reason, kind: c.kind };

@@ -22,6 +22,7 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { classifyCentral404 } from './central404.js';
 import { runLink } from '../linkcheck/run.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
+import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const gzipAsync = promisify(gzip);
 const FALLBACK_MS = 5 * 60_000;
@@ -47,10 +48,10 @@ async function pool(items, limit, fn) {
  */
 async function pushReport(base, agent, { results = [], note = '', disabled = false } = {}) {
   const json = JSON.stringify({ at: Date.now(), version: currentVersion(), results, note, disabled });
-  const hdrs = { ...headers(), 'Content-Type': 'application/json', 'X-Agent-Name': agent };
+  const hdrs = { ...headers(), 'Content-Type': 'application/json', ...agentHeaders(agent) };
   let payload = json;
   try { payload = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { payload = json; }
-  const post = await resilientFetch(`${base}/api/central/link-check`, { method: 'POST', headers: hdrs, body: payload, timeoutMs: 30_000, retries: 2 });
+  const post = await resilientFetch(withAgentQuery(`${base}/api/central/link-check`, agent), { method: 'POST', headers: hdrs, body: payload, timeoutMs: 30_000, retries: 2 });
   if (post.status === 413) console.warn(`[linkcheck-worker] 중앙이 본문 크기를 거부(413) — 링크 ${results.length}개. 중앙의 BIG_JSON 등록을 확인하세요.`);
   if (!post.ok) {
     // ⚠ 무음 실패 금지 — 403 은 '개별 토큰이 아니다' 라는 가장 흔한 원인이다.

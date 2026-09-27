@@ -22,6 +22,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { readJsonCapped } from '../util/readCapped.js';
 import { applyCentralBmUsage, clearCentralBmUsage, bmUsageCentralState } from '../bmusage/settings.js';
+import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 const _logOnce = createChangeLogger({ windowMs: 10 * 60_000 });
 
 const PULL_MS = clampIntervalMs(Number(process.env.AGENT_BMUSAGE_CONFIG_PULL_MS) || 10 * 60_000, 10 * 60_000, 60_000);
@@ -47,7 +48,7 @@ export async function pullBmUsageConfigNow() {
     const url = `${config.agent.centralUrl}/api/central/bmusage-config?agent=${encodeURIComponent(config.agent.name)}&applied=${encodeURIComponent(applied)}`;
     const res = await resilientFetch(url, {
       method: 'GET', timeoutMs: 30_000, retries: 1,
-      headers: { 'X-Agent-Name': config.agent.name, 'X-Central-Token': config.agent.centralToken, 'X-Agent-Version': currentVersion() },
+      headers: { ...agentHeaders(config.agent.name), 'X-Central-Token': config.agent.centralToken, 'X-Agent-Version': currentVersion() },
     });
     if (res.status === 404) {
       const c = await classifyCentral404(res);

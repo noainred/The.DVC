@@ -24,6 +24,7 @@ import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysi
 import { listGuestScans, saveGuestScan, removeGuestScan, runGuestScanNow } from '../../security/guestScanScheduler.js';
 import { analyzeNetIssues } from '../../security/netIssueStore.js';
 import path from 'node:path';
+import { dirPathIssue } from '../../util/dirPathGuard.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
 
 // v2.612 AUTHZ2612-07: 엣지 목록·네트워크 모니터·캡처·로그인 실패 상태는 전 법인 공용 — 범위 제한 admin 은 403.
@@ -51,6 +52,44 @@ function scopedVcQuery(req, res) {
 function guestScanInScope(user, vcenterId) {
   const w = writeScopedVcenterIds(user, store.get());
   return !w || (!!vcenterId && w.has(String(vcenterId)));
+}
+
+/**
+ * v2.629 AUTHZ2629-05: vCenter 로그 보관 상태를 범위 계정에 맞게 좁힌다(형제 /admin/status 는 v2.611 에 범위 필터).
+ * 예전에는 logStatus() 를 그대로 내보내 범위 관리자가 전 vCenter 별 로그 건수·인증 정지 vCenter id·DB 절대 경로를 봤다.
+ * 화면(설정 › vCenter 로그 보관)을 범위 계정도 열므로 403 이 아니라 **거르고 밝힌다**(omittedOutOfScope·pathHidden).
+ * 전 법인 합계(count·firstTs·collected)는 범위 안에서 다시 세거나(가능하면) null 로 둔다 — 전 함대 값을 싣지 않는다.
+ * allowed === null(전체 범위)이면 원본 그대로.
+ */
+export function scopeVcLogStatus(st, allowed) {
+  if (!allowed || !st || typeof st !== 'object') return st;
+  const out = { ...st, scoped: true };
+  const vcs = Array.isArray(st.store?.vcenters) ? st.store.vcenters : [];
+  const kept = vcs.filter((v) => v && allowed.has(v.vcenterId));
+  if (st.store && typeof st.store === 'object') {
+    let lastTs = null;
+    for (const v of kept) if (Number.isFinite(v.lastTs) && (lastTs == null || v.lastTs > lastTs)) lastTs = v.lastTs;
+    out.store = {
+      ...st.store,
+      vcenters: kept,
+      count: kept.reduce((a, v) => a + (Number.isFinite(v.count) ? v.count : 0), 0),
+      firstTs: null,            // vCenter 별 첫 시각은 없다 — 전 함대 값을 싣지 않는다
+      lastTs,
+      omittedOutOfScope: vcs.length - kept.length,
+    };
+  }
+  if (st.lastRun && typeof st.lastRun === 'object') {
+    const lr = { ...st.lastRun, collected: null };   // 수집 건수는 전 vCenter 합계다
+    if (Array.isArray(st.lastRun.authStopped)) {
+      lr.authStopped = st.lastRun.authStopped.filter((id) => allowed.has(id));
+      lr.authStoppedOmitted = st.lastRun.authStopped.length - lr.authStopped.length;
+    }
+    out.lastRun = lr;
+  }
+  if ('dbPath' in out) out.dbPath = null;
+  if (out.settings && typeof out.settings === 'object' && out.settings.storagePath) out.settings = { ...out.settings, storagePath: '' };
+  out.pathHidden = true;
+  return out;
 }
 
 export function registerBackupNetSec(adminRouter) {
@@ -95,18 +134,15 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async
 });
 
 // ───────────────────────── vCenter 로그 보관 ─────────────────────────
-adminRouter.get('/vclogs/status', adminOnly, async (_req, res) => {
-  try { res.json(await logStatus()); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
+adminRouter.get('/vclogs/status', adminOnly, async (req, res) => {
+  try { res.json(scopeVcLogStatus(await logStatus(), scopedVcenterIds(req.user, store.get()))); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 adminRouter.put('/vclogs/settings', adminOnly, (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: 'vCenter 로그 보관 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607
   // v2.480(3차 감사 S4): storagePath 무검증 → 임의 절대경로에 SQLite(+wal/shm) 생성. 절대경로·상위경로·제어문자·시스템 디렉터리 거부.
   const sp = typeof req.body?.storagePath === 'string' ? req.body.storagePath.trim() : '';
   if (sp) {
-    const bad = [...sp].some((c) => c.charCodeAt(0) < 32) ? '제어문자'
-      : !sp.startsWith('/') ? '절대경로여야 합니다'
-        : sp.split(/[\\/]+/).includes('..') ? '상위 경로(..) 불가'
-          : /^\/(etc|proc|sys|dev|boot|root|bin|sbin|usr|lib|lib64|run)(\/|$)/.test(sp) ? '시스템 디렉터리 불가' : '';
+    const bad = dirPathIssue(sp);   // v2.629: 검사 본체는 util/dirPathGuard.js 하나(svcmon 로그 경로와 공유)
     if (bad) return res.status(400).json({ ok: false, reason: `로그 저장 경로: ${bad}` });
   }
   const s = saveLogSettings(req.body || {});

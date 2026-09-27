@@ -3,7 +3,7 @@ import { usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import STable from '../../components/STable.jsx';
 import { GuestOsVmsModal } from '../../views/SpecialTools.jsx';
-import { capacityCards, totalTiles, osRows, corpContribution } from '../v6Data.js';
+import { capacityCards, totalTiles, osRows, corpContribution, contribNote, contribTotalLabel } from '../v6Data.js';
 
 /**
  * V6 Summary(v2.623) — **자원 총량과 할당**만 둔다(핸드오프: 물리 vs 할당 · 오버커밋 · OS별 할당 · 법인별 기여도).
@@ -70,7 +70,7 @@ export default function V6Summary({ vcenters }) {
       </div>
 
       <div className="v6-panel">
-        <div className="v6-panel-head"><b>법인(vCenter)별 기여도</b>{contrib.excluded > 0 && <span>수집 중·연결 불가·비활성 {contrib.excluded}곳은 값을 모르므로 합계에서 뺐습니다</span>}</div>
+        <div className="v6-panel-head"><b>법인(vCenter)별 기여도</b>{(contrib.excluded > 0 || contrib.carried > 0) && <span>{contribNote(contrib)}</span>}</div>
         <STable className="v6-table" minWidth={900}>
           <thead><tr><th>법인</th><th className="right">호스트</th><th className="right">VM</th><th className="right">코어</th><th className="right">메모리(GB)</th><th className="right">스토리지(TB)</th><th className="right">vCPU 할당</th><th className="right">RAM 할당(GB)</th><th className="right">프로비저닝(TB)</th><th className="right">전력(kW)</th></tr></thead>
           <tbody>
@@ -79,7 +79,7 @@ export default function V6Summary({ vcenters }) {
                 <td className="right">{fmt(r.memTotalGB)}</td><td className="right">{fmt(r.storageTotalTB, 1)}</td><td className="right">{fmt(r.vcpuAllocated)}</td>
                 <td className="right">{fmt(r.ramAllocatedGB)}</td><td className="right">{fmt(r.provisionedTB, 1)}</td><td className="right">{fmt(r.powerKw, 1)}</td></tr>
             ))}
-            <tr data-pin className="v6-total"><td>{contrib.excluded > 0 ? `합계(${contrib.excluded}곳 제외)` : '합계'}</td><td className="right">{fmt(contrib.total.hosts)}</td><td className="right">{fmt(contrib.total.vms)}</td><td className="right">{fmt(contrib.total.cpuCores)}</td>
+            <tr data-pin className="v6-total"><td>{contribTotalLabel(contrib)}</td><td className="right">{fmt(contrib.total.hosts)}</td><td className="right">{fmt(contrib.total.vms)}</td><td className="right">{fmt(contrib.total.cpuCores)}</td>
               <td className="right">{fmt(contrib.total.memTotalGB)}</td><td className="right">{fmt(contrib.total.storageTotalTB, 1)}</td><td className="right">{fmt(contrib.total.vcpuAllocated)}</td>
               <td className="right">{fmt(contrib.total.ramAllocatedGB)}</td><td className="right">{fmt(contrib.total.provisionedTB, 1)}</td><td className="right">{fmt(contrib.total.powerKw, 1)}</td></tr>
           </tbody>

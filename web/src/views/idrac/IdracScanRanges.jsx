@@ -9,11 +9,12 @@ import { blankOr } from '../blankOr.js';
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx';
 import { STable } from '../../components/STable.jsx';
 import { describeScanRun, scanLastRunSummary, scanFormCredsState } from './scanRunText.js';
+import { missingChoice, choiceLoadNote } from './scanRangeFormText.js'; // v2.629 WEB2629-02
 
 // ---- vCenter별 iDRAC 스캔 대역(주기 자동 발견) ------------------------------
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
 // 발견해 해당 vCenter로 자동 등록한다(IPMS의 'vCenter별 스캔 대역'과 같은 흐름).
-export function IdracScanRanges({ loadError = null, data, vcenters, datacenters = [], agents, busy, form, setForm, msg, setMsg, onNew, onEdit, onSave, onDelete, onScan, onReload }) {
+export function IdracScanRanges({ loadError = null, choiceErrors = null, data, vcenters, datacenters = [], agents, busy, form, setForm, msg, setMsg, onNew, onEdit, onSave, onDelete, onScan, onReload }) {
   const st = data?.status || {};
   const prog = st.progress;
   const dcName = (id) => (datacenters.find((d) => d.id === id)?.name || id);
@@ -159,7 +160,7 @@ export function IdracScanRanges({ loadError = null, data, vcenters, datacenters 
         중앙이 못 닿는 사설망은 <b>스캔 수행 Agent</b>를 지정해 현장 에이전트가 대행합니다.
         <b> 스캔 방식</b>은 <b>에이전트 폴링</b>(엣지가 중앙으로 폴링해 잡 인출 — 엣지에 CENTRAL_URL/토큰 필요)과
         <b> 중앙→엣지 직접(PUSH)</b>(중앙이 등록된 수집 서버 URL로 엣지에 직접 스캔 전송 — 엣지 폴링 설정 없이도 동작) 중 선택합니다.
-        {datacenters.length === 0 && <span style={{ color: 'var(--amber)' }}> · ⚠ 먼저 <b>설정 › DataCenter(법인)</b>에서 법인을 1개 이상 정의하세요.</span>}
+        {datacenters.length === 0 && !choiceErrors?.datacenters && <span style={{ color: 'var(--amber)' }}> · ⚠ 먼저 <b>설정 › DataCenter(법인)</b>에서 법인을 1개 이상 정의하세요.</span>}
       </div>
 
       {st.running && prog && (
@@ -181,12 +182,14 @@ export function IdracScanRanges({ loadError = null, data, vcenters, datacenters 
             <b style={{ fontSize: 13 }}>{form.isNew ? '스캔 대역 추가' : `스캔 대역 수정 — ${dcName(form.datacenterId)}${form.service ? ` / ${form.service}` : ''}`}</b>
             <button className="logout-btn" style={{ padding: '5px 10px', fontSize: 12 }} onClick={() => { setMsg && setMsg(null); setForm(null); }}>닫기</button>
           </div>
+          {choiceLoadNote(choiceErrors) && <div className="banner warn" style={{ marginBottom: 8, fontSize: 12 }}>⚠ {choiceLoadNote(choiceErrors)}</div>}
           <div className="flex gap wrap" style={{ alignItems: 'flex-start' }}>
             <div style={{ flex: '1 1 200px', minWidth: 180 }}>
               <label className="muted" style={{ fontSize: 11.5 }}>법인(DataCenter) *</label>
               <select className="input" style={{ width: '100%', padding: '8px 10px' }} value={form.datacenterId}
                 onChange={(e) => setForm({ ...form, datacenterId: e.target.value })}>
                 <option value="">(선택)</option>
+                {(() => { const m = missingChoice(datacenters.map((d) => d.id), form.datacenterId); return m ? <option key={`missing:${m.value}`} value={m.value}>{m.label}</option> : null; })()}
                 {datacenters.map((d) => <option key={d.id} value={d.id}>{d.name || d.id}{d.region ? ` · ${d.region}` : ''}</option>)}
               </select>
             </div>
@@ -247,7 +250,9 @@ export function IdracScanRanges({ loadError = null, data, vcenters, datacenters 
                   const all = agents?.agents || [];
                   const polling = all.filter((a) => pollSet.has(a.toLowerCase()));
                   const idle = all.filter((a) => !pollSet.has(a.toLowerCase()));
+                  const miss = missingChoice(all, form.agent, ['__local__']);
                   return (<>
+                    {miss && <option value={miss.value}>{miss.label}</option>}
                     {polling.length > 0 && <optgroup label="폴링 중(권장)">{polling.map((a) => <option key={a} value={a}>{a} · 폴링 중</option>)}</optgroup>}
                     {idle.length > 0 && <optgroup label="등록됨(현재 미폴링)">{idle.map((a) => <option key={a} value={a}>{a}</option>)}</optgroup>}
                   </>);

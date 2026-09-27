@@ -34,6 +34,7 @@ import { TEMP_SERIES_DETAIL } from '../../idrac/serverTempSeries.js'; // v2.556:
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
 import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from './shared.js';
+import { lowerTerm } from '../../search/deepSearch.js'; // v2.629 AUTHZ2629-01: 검색어 1회 소문자화 + 길이 상한(한 벌)
 import { numOrNull } from '../../util/numOrNull.js'; // v2.578: 요청 기간 등 '읽지 못한 수치' 를 0 으로 둔갑시키지 않는다
 import { normGroupQuery, filterVmsByGroup, inventoryGroups, hasGroup } from './groupFilter.js'; // v2.491: 클러스터·폴더 하위 범위
 
@@ -1109,22 +1110,33 @@ api.get('/tools/thin-vms', requirePerm('tools'), (req, res) => memoJson(req, res
 api.post('/tools/vm-finder', requirePerm('tools'), async (req, res) => {
   const b = req.body || {};
   const snap = store.get();
-  const inList = (v, arr) => !arr || !arr.length || arr.includes(v);
+  // v2.629(감사 AUTHZ2629-01): 배열 필터는 Set 으로 한 번 만들어 VM 마다 O(1) 로 본다 — 예전 arr.includes 는
+  //   원소 11만 개 × VM 2,242대로 260~330ms 루프 정지였다. 배열이 아닌 값(문자열 등)은 예전 판정 그대로.
+  const listPred = (arr) => {
+    if (!arr || !arr.length) return () => true;
+    if (Array.isArray(arr)) { const set = new Set(arr); return (v) => set.has(v); }
+    return (v) => arr.includes(v);
+  };
+  const inVc = listPred(b.vcenterIds); const inFolder = listPred(b.folders);
+  const inCluster = listPred(b.clusters); const inPool = listPred(b.resourcePools);
   // 사용자 scope 를 요청 vcenterIds 보다 먼저 강제 — facets·items·avg 계산 전 선필터라
   // 폴더/클러스터/풀/vcenters facet 과 결과가 전부 허용 vCenter 로만 파생된다(범위 밖 id 누출 차단).
   const allowed = scopedVcenterIds(req.user, snap);
-  const scopeVms = snap.vms.filter((v) => (!allowed || allowed.has(v.vcenterId)) && inList(v.vcenterId, b.vcenterIds));
+  const scopeVms = snap.vms.filter((v) => (!allowed || allowed.has(v.vcenterId)) && inVc(v.vcenterId));
   const facets = {
     vcenters: [...new Set(scopeVms.map((v) => v.vcenterId))].sort(),
     folders: [...new Set(scopeVms.map((v) => v.folder).filter(Boolean))].sort(),
     clusters: [...new Set(scopeVms.map((v) => v.cluster).filter(Boolean))].sort(),
     resourcePools: [...new Set(scopeVms.map((v) => v.resourcePool).filter(Boolean))].sort(),
   };
-  const term = String(b.q || '').trim().toLowerCase();
-  let vms = scopeVms.filter((v) =>
-    inList(v.folder, b.folders) && inList(v.cluster, b.clusters) && inList(v.resourcePool, b.resourcePools)
+  // v2.629(AUTHZ2629-01): 검색어·OS 는 루프 밖에서 1회 소문자화 + 길이 상한(deepSearch.lowerTerm — 넘으면 무엇과도 안 맞는다).
+  const rawTerm = String(b.q || '').trim();
+  const term = rawTerm ? lowerTerm(rawTerm) : '';
+  const osLow = b.os ? lowerTerm(b.os) : '';
+  let vms = (term == null || osLow == null) ? [] : scopeVms.filter((v) =>
+    inFolder(v.folder) && inCluster(v.cluster) && inPool(v.resourcePool)
     && (!b.powerState || v.powerState === b.powerState)
-    && (!b.os || String(v.guestOS || '').toLowerCase().includes(String(b.os).toLowerCase()))
+    && (!b.os || String(v.guestOS || '').toLowerCase().includes(osLow))
     && (!term || String(v.name || '').toLowerCase().includes(term) || String(v.ipAddress || '').includes(term))
     && (b.includeTemplates || !v.template));
 

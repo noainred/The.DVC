@@ -93,6 +93,7 @@ const isSettingsOwner = (u) => {
 };
 
 import { REGIONS } from './regions.js'; // v2.575 IMP-10 — 단일 소스
+import { alarmTotals } from './views/restFallbackText.js'; // v2.629 WEB2629-04 — 상태바 경보 미조회 vCenter
 
 // Per-menu filter (added to the shared filter bar on the matching tab).
 const MENU_FILTERS = {
@@ -650,7 +651,8 @@ function Portal({ user, onLogout }) {
         <div className="sb-cell"><span className="sb-label">서버 Uptime</span><span className="sb-val">{fmtUptime(health?.uptimeSec)}</span></div>
         <div className="sb-cell"><span className="sb-label">전체 호스트</span><span className="sb-val">{(health?.hosts || 0).toLocaleString()}</span></div>
         <div className="sb-cell"><span className="sb-label">전체 VM</span><span className="sb-val">{(health?.vms || 0).toLocaleString()} <small className="muted">({(health?.vmsPoweredOn || 0).toLocaleString()} On)</small></span></div>
-        <div className="sb-cell"><span className="sb-label">활성 알람</span><span className="sb-val" style={{ color: health?.alarmsCritical ? 'var(--red)' : undefined }}>{(health?.alarms || 0).toLocaleString()}</span></div>
+        {/* v2.629 WEB2629-04: REST 폴백 vCenter 는 경보를 조회하지 않아 합계에 0 으로 들어간다 — 그 개수를 밝힌다(판정은 alarmTotals 하나). */}
+        <div className="sb-cell"><span className="sb-label">활성 알람</span><span className="sb-val" style={{ color: health?.alarmsCritical ? 'var(--red)' : undefined }}>{health ? (health.alarms || 0).toLocaleString() : '—'}{Array.isArray(vcenters) && alarmTotals(vcenters).unknown > 0 && <small className="muted" title="REST 폴백으로 수집된 vCenter 는 경보를 조회하지 않았습니다 — 합계에 들어 있지 않습니다"> (미조회 {alarmTotals(vcenters).unknown}곳 제외)</small>}</span></div>
       </footer>
 
       {overlays}

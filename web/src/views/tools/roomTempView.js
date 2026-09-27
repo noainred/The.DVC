@@ -1,3 +1,4 @@
+import { histCutNote } from './serverTemp/board.js'; // v2.629 A6-07 — 잘린 기간 문구는 한 벌
 /**
  * roomTempView.js — 법인 전산실 운영 온도 화면의 판정·서식(순수 · v2.534).
  *
@@ -167,4 +168,18 @@ export function matrixStats(groups) {
   const m = new Map();
   for (const c of MATRIX_COLS) m.set(c.key, c.kind === 'rel' ? columnStats(groups, c.pick) : { min: null, max: null });
   return m;
+}
+
+/**
+ * 추이 모달 각주(v2.629 A6-07) — 서버 응답(idrac/roomTempSeries.js roomTempHistory)의 stepFilled·truncated·coveredSince.
+ * roomtemp_* 는 dead-band 계열이라 1시간 미만 버킷은 직전 저장값을 이어 채운다(stepFilled 개) — 그 점을 실측처럼 두지 않는다.
+ * 점 상한으로 잘렸으면 serverTemp/board.js histCutNote 로 말한다(두 화면이 같은 문구). 해당 없으면 빈 배열.
+ */
+export function trendNotes(d) {
+  const out = [];
+  const filled = Number(d?.stepFilled);
+  if (Number.isFinite(filled) && filled > 0) out.push(`변화가 없던 ${filled.toLocaleString()}개 구간은 직전 값을 이어 그렸습니다(0.5℃ 미만 변화는 저장하지 않습니다).`);
+  const cut = histCutNote(d);
+  if (cut) out.push(cut);
+  return out;
 }

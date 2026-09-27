@@ -81,7 +81,63 @@ function jsonToCsv(text) {
 const XLSX_MAX_ROWS = 50_000;
 const XLSX_MAX_COLS = 200;
 
+/**
+ * v2.629 SEC2629-09: exceljs 는 시트 전체를 먼저 풀어 파싱한 뒤에야 위 행 상한을 본다 — 압축 크기 상한(XLSX_MAX_BYTES 8MB)만으로는
+ * 수백 배 확장되는 입력이 수 초 루프 정지·수백 MB 힙을 만든다(v2.577 '압축 해제에는 상한' 규약의 누락 지점).
+ * 그래서 load 전에 zip 중앙 디렉터리가 **선언한** 압축 해제 크기 합을 본다.
+ * ⚠ 정직 기록: 선언값만 본다 — 중앙 디렉터리를 거짓으로 쓴 파일(작은 크기를 선언)은 이 검사를 통과한다. 그 경우는
+ *   exceljs(jszip) 가 끝까지 푼다. 흔한 폭탄(정상 도구로 만든 고압축 파일)은 선언값이 실제 크기라 여기서 막힌다.
+ */
+export const XLSX_MAX_UNCOMPRESSED = Number(process.env.SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES) || 64 * 1024 * 1024;
+export const XLSX_MAX_ENTRIES = 5_000;
+
+/**
+ * zip 버퍼의 중앙 디렉터리를 읽어 선언된 압축 해제 크기 합을 돌려준다(순수 — 압축을 풀지 않는다).
+ * 반환: { ok:true, entries, total } | { ok:false, reason:'no-eocd'|'zip64'|'bad-cd'|'too-many-entries' }
+ */
+export function zipDeclaredSize(buf, { maxEntries = XLSX_MAX_ENTRIES } = {}) {
+  if (!Buffer.isBuffer(buf) || buf.length < 22) return { ok: false, reason: 'no-eocd' };
+  const stop = Math.max(0, buf.length - 22 - 0xffff);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= stop; i -= 1) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return { ok: false, reason: 'no-eocd' };
+  const count = buf.readUInt16LE(eocd + 10);
+  const cdSize = buf.readUInt32LE(eocd + 12);
+  const cdOff = buf.readUInt32LE(eocd + 16);
+  if (count === 0xffff || cdSize === 0xffffffff || cdOff === 0xffffffff) return { ok: false, reason: 'zip64' };
+  if (count > maxEntries) return { ok: false, reason: 'too-many-entries', entries: count };
+  if (cdOff + cdSize > eocd) return { ok: false, reason: 'bad-cd' };
+  let p = cdOff;
+  let total = 0;
+  for (let n = 0; n < count; n += 1) {
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== 0x02014b50) return { ok: false, reason: 'bad-cd' };
+    const usize = buf.readUInt32LE(p + 24);
+    if (usize === 0xffffffff) return { ok: false, reason: 'zip64' };
+    total += usize;
+    p += 46 + buf.readUInt16LE(p + 28) + buf.readUInt16LE(p + 30) + buf.readUInt16LE(p + 32);
+  }
+  return { ok: true, entries: count, total };
+}
+
+/** 선언 크기 검사 — 문제가 있으면 Error 를 던진다(호출부 xlsxToCsv 가 exceljs 를 로드하기 전에). */
+export function assertXlsxSizeOk(buffer, max = XLSX_MAX_UNCOMPRESSED) {
+  const z = zipDeclaredSize(buffer);
+  if (!z.ok) {
+    // no-eocd·bad-cd 는 zip 이 아니거나 깨진 파일이다 — exceljs 가 같은 결론을 내므로 여기서 먼저 알린다.
+    if (z.reason === 'too-many-entries') throw new Error(`XLSX 안의 파일 수가 너무 많습니다(${z.entries}개 > ${XLSX_MAX_ENTRIES}개).`);
+    if (z.reason === 'zip64') throw new Error('XLSX 가 ZIP64 형식입니다(압축 해제 크기가 4GB 급) — 받지 않습니다. 파일을 나눠 올리세요.');
+    throw new Error('XLSX 파싱 실패: zip 구조를 읽지 못했습니다(엑셀 파일이 맞는지 확인하세요).');
+  }
+  if (z.total > max) {
+    throw new Error(`XLSX 압축 해제 크기가 너무 큽니다(${Math.round(z.total / 1048576)}MB > ${Math.round(max / 1048576)}MB) — 파일을 나눠 올리세요.`);
+  }
+  return z;
+}
+
 async function xlsxToCsv(buffer) {
+  assertXlsxSizeOk(buffer);
   const ExcelJS = (await import('exceljs')).default;
   const wb = new ExcelJS.Workbook();
   try { await wb.xlsx.load(buffer); } catch (e) { throw new Error(`XLSX 파싱 실패: ${e.message}`); }

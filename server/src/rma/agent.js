@@ -45,6 +45,7 @@ import { runCommand, DEFAULT_MAX_OUTPUT } from './exec.js';
 import { pathAllowed } from './testRunner.js';  // 파일 경로 realpath 검사(점검과 같은 판정)
 import { buildTest } from './tests.js';
 import { runTest } from './testRunner.js';
+import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.629: 헤더로 안전한 이름만(비-ASCII 는 fetch 가 요청째 던진다)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const env = process.env;
@@ -84,7 +85,7 @@ let restartAfterPost = false;
 const stats = { active: 0, performed: 0, rejected: 0, testsRun: 0, testsFailed: 0 };
 
 const log = (...a) => console.log(`[rma ${new Date().toISOString()}]`, ...a);
-const headers = () => ({ 'Content-Type': 'application/json', 'X-Agent-Name': AGENT, ...(TOKEN ? { 'X-Central-Token': TOKEN } : {}) });
+const headers = () => ({ 'Content-Type': 'application/json', ...agentNameHeader(AGENT), ...(TOKEN ? { 'X-Central-Token': TOKEN } : {}) });
 
 // ── 감사 로그(엣지, jsonl) — HostMonitor 'Successful/Failure audit log' 대응 ──
 function audit(file, rec) {

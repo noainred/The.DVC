@@ -135,7 +135,15 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
     else sendCached(req, res, `${key}|masked`, maskPowerBreakdownPayload(payload, insightsMatcher(snap)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-insightsRouter.put('/finops/config', adminOnly, (req, res) => res.json(saveFinopsConfig(req.body || {})));
+// v2.629 AUTHZ2629-04: 전력 요금·PUE·CO2 계수는 전 법인 FinOps 수치가 함께 쓰는 공용 설정이다(v2.612 AUTHZ2612-02 형제) —
+//   범위 관리자가 바꿀 수 있었고 감사 기록도 없었다.
+const fleetOnly = fullScopeOnlyWith('FinOps 요금·PUE·탄소 계수는 전 법인 비용 계산에 함께 쓰이는 공용 설정이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
+insightsRouter.put('/finops/config', adminOnly, fleetOnly, (req, res) => {
+  const saved = saveFinopsConfig(req.body || {});
+  const keys = Object.keys(req.body && typeof req.body === 'object' ? req.body : {}).slice(0, 20).join(',');
+  logAudit({ user: req.user?.username, action: 'insights.finops.config', detail: keys || '(빈 변경)', ip: req.ip || '' });
+  res.json(saved);
+});
 
 // --- 통합 서버 인벤토리: iDRAC/OME 물리 서버 + vCenter 호스트 → 가상화/베어메탈 분류 + 베어메탈 전력 ---
 insightsRouter.get('/fleet', async (req, res) => {

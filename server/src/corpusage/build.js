@@ -45,6 +45,10 @@ export function emptyAgg() {
     cpuMissing: 0, memMissing: 0,
     // v2.628(C2628-03): 다른 vCenter 의 서버와 식별 키가 겹쳐 사용률 행을 쓰지 않은 서버(용량만 센다 — 남의 값을 붙이지 않는다).
     keyConflict: 0,
+    // v2.629(A1-2629-01): 서비스태그가 같은 서버를 다른 vCenter 에서 다시 만나 **같은 물리 박스로 보고 뺀** 수(두 번 세지 않는다).
+    dupSameBox: 0,
+    // v2.629(A1-2629-03): 행 출처(src)로 센 서버 중 **일부 지표를 vCenter 값으로 채운** 수 — 출처가 섞였음을 밝힌다.
+    filledCpu: 0, filledMem: 0,
     src: { idrac: 0, os: 0, mixed: 0, vcenter: 0 },
     // 용량만 알고 사용률을 못 읽은 서버까지 포함한 '전체 설치 용량'(참고 — 합계 분모와 다르다)
     capCores: 0, capMemGB: 0,
@@ -68,10 +72,14 @@ function addAgg(a, x) {
   if (!c) a.cpuMissing += 1;
   if (!m) a.memMissing += 1;
   if (x.src && a.src[x.src] != null) a.src[x.src] += 1;
+  const filled = Array.isArray(x.filledFromVcenter) ? x.filledFromVcenter : [];
+  if (c && filled.includes('cpu')) a.filledCpu += 1;
+  if (m && filled.includes('mem')) a.filledMem += 1;
 }
 function mergeAgg(into, a) {
   into.servers += a.servers; into.unread += a.unread; into.stale += a.stale; into.noCap += a.noCap;
   into.cpuMissing += a.cpuMissing; into.memMissing += a.memMissing; into.keyConflict += a.keyConflict;
+  into.dupSameBox += a.dupSameBox; into.filledCpu += a.filledCpu; into.filledMem += a.filledMem;
   into.capCores += a.capCores; into.capMemGB += a.capMemGB;
   for (const k of ['cpu', 'mem']) { into[k].used += a[k].used; into[k].total += a[k].total; into[k].n += a[k].n; }
   for (const k of Object.keys(into.src)) into.src[k] += a.src[k] || 0;
@@ -130,17 +138,36 @@ export function judgeServer({ role, row = null, host = null, now, freshMs, vcUnr
 }
 
 /**
+ * v2.629(A6-03 = C2628-05): 엣지가 보고한 **서비스태그 없는** 물리 서버는 중앙 키(`edge:<agent>:<엣지 fleetId>`)와 엣지 사용률
+ *   행 키(엣지의 fleetId)가 달라 늘 '못 읽음' 이었다. 엣지가 이미 자기 fleetId 를 push 하고 중앙이 serverId 에 그대로 싣으므로
+ *   계약 변경 없이 되찾는다 — `에이전트|fleetId` 로 그 엣지의 행만 찾는다(다른 엣지의 같은 fleetId 행이 섞이지 않게).
+ *   서비스태그가 있으면 기존대로 key(태그)로 찾는다. 순수.
+ */
+export function edgeRowOf(b, rowsByAgentKey) {
+  if (!(rowsByAgentKey instanceof Map) || !rowsByAgentKey.size || !b || typeof b !== 'object') return null;
+  if (t(b.serviceTag)) return null;
+  const agent = t(b.remoteAgent);
+  const sid = t(b.serverId);
+  const pre = `edge:${agent}:`;
+  if (!agent || !sid.toLowerCase().startsWith(pre.toLowerCase())) return null;
+  const fid = sid.slice(pre.length);
+  if (!fid) return null;
+  return rowsByAgentKey.get(`${agent.toLowerCase()}|${fid.toLowerCase()}`) || null;
+}
+
+/**
  * 법인별 집계(순수).
  * @param {object} p
  * @param {Array} p.vcenters       [{id, name}] — 법인 = vCenter(이 저장소의 법인 축)
  * @param {Array} p.bareMetal      classifyFleet().bareMetal
  * @param {Array} p.virtHosts      classifyFleet().virtualizationHosts (cpuCores·memGB 포함)
  * @param {Map}   p.rowsByKey      key → 최신 사용률 행(중앙 DB + 엣지 보관분)
+ * @param {Map}   p.rowsByAgentKey `에이전트소문자|key소문자` → 엣지 보관분 행(v2.629 A6-03 — 서비스태그 없는 엣지 서버 매칭)
  * @param {Map}   p.hostByKey      `vcenterId|이름소문자` → 스냅샷 ESXi 호스트(가상화 대체값·용량)
  * @param {function} p.capOf       (베어메탈 항목) → {cores, memGB} | null
  * @param {Set|null} p.allowed     범위 계정의 허용 vCenter(null = 전체)
  */
-export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], rowsByKey = new Map(), hostByKey = new Map(), capOf = () => null, allowed = null, now = Date.now(), freshMs = 30 * 60_000, unreadVcenters = null } = {}) {
+export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], rowsByKey = new Map(), rowsByAgentKey = new Map(), hostByKey = new Map(), capOf = () => null, allowed = null, now = Date.now(), freshMs = 30 * 60_000, unreadVcenters = null } = {}) {
   const names = new Map((vcenters || []).filter((v) => v && t(v.id)).map((v) => [t(v.id), t(v.name) || t(v.id)]));
   const corps = new Map();
   const corpOf = (vc) => {
@@ -165,19 +192,52 @@ export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], 
     const cap = hostRow
       ? { cores: posOrNull(hostRow.cpuCores), memGB: posOrNull(hostRow.memTotalMB) != null ? hostRow.memTotalMB / 1024 : null }
       : (capOf(b) || {});
-    const j = judgeServer({ role: 'bm', row: rowsByKey.get(key), now, freshMs });
+    const j = judgeServer({ role: 'bm', row: edgeRowOf(b, rowsByAgentKey) || rowsByKey.get(key), now, freshMs });
     const x = { key, name: t(b.name), role: 'bm', cores: posOrNull(cap.cores), memGB: posOrNull(cap.memGB), ...j };
     if (!vc) { if (!allowed) addAgg(unassigned.bm, x); continue; }
     if (!inScope(vc)) continue;
     const c = corpOf(vc);
     addAgg(c.bm, x); c.servers.push(x);
   }
+  // v2.629(A1-2629-01 — 재현): 서비스태그가 같으면 **같은 물리 박스**다(호스트를 새 vCenter 로 옮겼는데 옛 vCenter 가 끊긴 항목을
+  //   들고 있거나 LASTGOOD_HOLD 로 이월 중). v2.628 keyConflict 는 그것을 두 번 셌다(서버 수·설치 용량 중복). 이제 한 대만 남긴다 —
+  //   고르는 기준은 연결됨 → 그 vCenter 가 읽힘 → 반복 순서(안정). 뺀 쪽은 그 법인에 `dupSameBox` 로 센다(조용히 빼지 않는다).
+  //   ⚠ 범위와 무관하게 전 vCenter 에서 고른다 — 범위마다 다른 쪽을 고르면 같은 서버가 두 법인에서 동시에 세인다.
+  const tagWinner = new Map();   // 서비스태그 key → 남길 가상화 호스트
+  const rankOf = (h, vc) => {
+    const host = hostByKey.get(`${vc}|${t(h.name).toLowerCase()}`) || null;
+    const conn = host && host.connectionState !== 'DISCONNECTED' && host.connectionState !== 'NOT_RESPONDING' ? 2 : 0;
+    return conn + (vcUnreadOf(vc) ? 0 : 1);
+  };
+  const bmTagVc = new Map();
+  for (const [k, v] of seen) bmTagVc.set(k, v);
+  for (const h of virtHosts || []) {
+    if (!h || typeof h !== 'object' || h.synthetic) continue;
+    const vc = t(h.vcenterId);
+    if (!vc) continue;
+    const id = idOf({ serverId: h.idracServerId, fleetId: h.fleetId, name: h.name, serviceTag: h.serviceTag });
+    if (!id.key || id.keyKind !== 'serviceTag') continue;
+    const prev = tagWinner.get(id.key);
+    if (!prev || rankOf(h, vc) > rankOf(prev, t(prev.vcenterId))) tagWinner.set(id.key, h);
+  }
   for (const h of virtHosts || []) {
     if (!h || typeof h !== 'object' || h.synthetic) continue;   // 합성 행(ESXi 에 매칭 안 된 강제 가상화)은 용량·사용률이 없다
     const vc = t(h.vcenterId);
     if (!vc || !inScope(vc)) continue;
-    const { key } = idOf({ serverId: h.idracServerId, fleetId: h.fleetId, name: h.name, serviceTag: h.serviceTag });
+    const { key, keyKind } = idOf({ serverId: h.idracServerId, fleetId: h.fleetId, name: h.name, serviceTag: h.serviceTag });
     if (!key) continue;
+    if (keyKind === 'serviceTag') {
+      // 베어메탈로 이미 센 같은 박스(같은 vCenter 는 예전 규칙대로 조용히 합친다 — 한 서버의 두 분류다).
+      if (bmTagVc.has(key)) {
+        if (bmTagVc.get(key) !== vc) corpOf(vc).virt.dupSameBox += 1;
+        continue;
+      }
+      const w = tagWinner.get(key);
+      if (w && w !== h) {
+        if (t(w.vcenterId) !== vc) corpOf(vc).virt.dupSameBox += 1;
+        continue;
+      }
+    }
     // v2.628(C2628-03 — 재현): 같은 key 를 **같은 vCenter** 에서 다시 만나면 같은 박스(베어메탈로도 잡힌 ESXi 등)라 한 번만 센다.
     //   **다른 vCenter** 의 서버가 같은 key(서비스태그 없이 짧은 이름 'esxi-01' 로 떨어진 경우)를 쓰면 다른 서버다 — 예전엔 조용히
     //   빠져 그 법인 행이 통째로 사라졌다. 세되 사용률 행은 붙이지 않는다(어느 서버의 값인지 알 수 없다 — vCenter 값만 쓴다).

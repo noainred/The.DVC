@@ -9,6 +9,7 @@
  */
 import { vcStatusCounts, siteRows, WARN_PCT, CRIT_PCT } from '../console/consoleData.js';
 import { numOrNull } from '../numOrNull.js';
+import { alarmTotals } from '../views/restFallbackText.js';
 
 const n = numOrNull;
 
@@ -19,8 +20,22 @@ export function pctTone(p) {
   return v >= CRIT_PCT ? 'crit' : v >= WARN_PCT ? 'warn' : 'ok';
 }
 
-/** Overview 상태 타일 4장. g = /overview.global. */
-export function statusTiles(g) {
+/**
+ * 경보를 조회하지 않은 vCenter 수(v2.629 WEB2629-04) — REST 폴백 vCenter 는 alarms:[] 라 서버 합계에 0 으로 들어간다.
+ * 판정은 restFallbackText.alarmTotals 하나(VCenters.jsx 와 같은 기준). sites 를 못 받았으면 null(모른다).
+ */
+export function alarmsUnknownCount(sites) {
+  if (!Array.isArray(sites)) return null;
+  return alarmTotals(sites).unknown;
+}
+/** 경보 합계 옆에 붙일 안내 — 미조회가 없으면 ''. */
+export function alarmsUnknownNote(sites) {
+  const u = alarmsUnknownCount(sites);
+  return u > 0 ? `경보 미조회 vCenter ${u}곳은 합계에 없습니다` : '';
+}
+
+/** Overview 상태 타일 4장. g = /overview.global, sites = /overview.sites(경보 미조회 판정용 — 없으면 안내 생략). */
+export function statusTiles(g, sites) {
   if (!g) return [];
   const c = vcStatusCounts(g) || { unreach: null, pending: null, maint: null, disabled: 0 };
   const active = n(g.vcenters) == null ? null : n(g.vcenters) - (c.disabled || 0);
@@ -38,7 +53,7 @@ export function statusTiles(g) {
     { id: 'vms', label: '가상화 서버 (VM)', value: n(g.vms), accent: 'var(--green)', go: '#/m/server/vm', goLabel: '서버',
       parts: [{ k: '구동', v: n(g.vmsPoweredOn), tone: 'ok' }, { k: '정지', v: n(g.vmsPoweredOff), tone: 'none' }] },
     { id: 'alarms', label: '활성 알람', value: n(g.alarms), accent: 'var(--red)', go: '#/m/ops', goLabel: '운영관제',
-      parts: [{ k: '위험', v: n(g.alarmsCritical), tone: 'crit' }, { k: '경고', v: n(g.alarmsWarning), tone: 'warn' }] },
+      parts: [{ k: '위험', v: n(g.alarmsCritical), tone: 'crit' }, { k: '경고', v: n(g.alarmsWarning), tone: 'warn' }], note: alarmsUnknownNote(sites) },
   ];
 }
 
@@ -110,6 +125,13 @@ export function siteGroupCounts(cards) {
 export function filterSiteGroup(cards, group) {
   if (group !== 'davinci' && group !== 'irs') return cards || [];
   return (cards || []).filter((c) => c.group === group);
+}
+
+/** 고른 구분에 법인이 하나도 없을 때의 문구(v2.629 WEB2629-05 — '전체' 를 다빈치 문구로 말하던 것). */
+export function emptyGroupText(group) {
+  if (group === 'irs') return "이름에 'IRS' 가 들어간 법인이 없습니다.";
+  if (group === 'davinci') return "이름에 'IRS' 가 없는 법인이 없습니다.";
+  return '표시할 법인이 없습니다.';
 }
 
 /** 상태 카드 톤 개수(정상·주의·위험·판정 대기) — 판정 대기를 정상에 섞지 않는다. */
@@ -213,15 +235,34 @@ export function vcStatusLabel(status) {
  * v2.628 WEB2628-02: 서버는 첫 수집 중·연결 불가·비활성 vCenter 행을 **0 으로 채워** 보낸다(inventory.js bucket 초기값).
  * 그 0 은 값이 아니라 '모른다' 이므로 행의 수치를 null 로 바꾸고(`statusLabel` 로 상태를 말한다) 합계에서 뺀 뒤,
  * 뺀 행 수(`excluded`)와 키별 못 읽은 행 수(`missing`)를 돌려준다 — 부분 합을 '합계' 라고만 말하지 않는다.
+ * v2.629 A1-2629-02: 상태만으로 지우지 않는다 — 점검 중(maintenance) vCenter 는 store 가 직전 수집 인벤토리를 스냅샷에
+ * 유지하고, 연결 불가(unreachable)도 LASTGOOD 보존 창 안이면 직전 인벤토리를 이월한다. 그 값은 **실제로 있는 값**이고
+ * 서버 /summary 상단 합계(counts.hosts 등)에도 들어 있으므로 여기서 지우면 같은 화면의 타일과 합계가 어긋난다.
+ * 그래서 값이 없는 행만 null 이다 — 첫 수집 중·비활성, 그리고 호스트·VM 이 둘 다 0 인 연결 불가(보존 창 밖 — 인벤토리 비움).
+ * 점검 중·이월 행은 값을 두고 합계에 포함하되 '직전 값' 라벨을 붙이고 개수(`carried`)를 밝힌다.
  */
+const VALUELESS_STATUS = new Set(['pending', 'disabled']);
+export function contribRowKind(r) {
+  const st = r?.status;
+  if (st == null || st === '' || st === 'connected') return 'live';
+  if (VALUELESS_STATUS.has(st)) return 'none';
+  if (st === 'maintenance') return 'carried';
+  if (st === 'unreachable') {
+    const h = n(r?.hosts), v = n(r?.vms);
+    return (h || 0) > 0 || (v || 0) > 0 ? 'carried' : 'none';
+  }
+  return 'none'; // 모르는 상태 — 값을 믿지 않는다
+}
 export function corpContribution(s) {
   const src = Array.isArray(s?.byVcenter) ? s.byVcenter : [];
-  let excluded = 0;
+  let excluded = 0, carried = 0;
   const rows = src.map((r) => {
-    const statusLabel = vcStatusLabel(r?.status);
-    if (!statusLabel) return { ...r, statusLabel: null };
+    const kind = contribRowKind(r);
+    const base = vcStatusLabel(r?.status);
+    if (kind === 'live') return { ...r, statusLabel: null, carried: false };
+    if (kind === 'carried') { carried += 1; return { ...r, statusLabel: `${base} · 직전 값`, carried: true }; }
     excluded += 1;
-    const out = { ...r, statusLabel };
+    const out = { ...r, statusLabel: base, carried: false };
     for (const k of CONTRIB_KEYS) out[k] = null;
     return out;
   });
@@ -231,7 +272,22 @@ export function corpContribution(s) {
     total[k] = vals.length ? vals.reduce((a, b) => a + b, 0) : null;
     missing[k] = rows.length - vals.length;
   }
-  return { rows, total, excluded, missing };
+  return { rows, total, excluded, carried, missing };
+}
+
+/** 기여도 표 머리말 안내(v2.629) — 뺀 행과 직전 값 행을 나눠 말한다. 둘 다 없으면 ''. */
+export function contribNote(c) {
+  const parts = [];
+  if (c?.excluded > 0) parts.push(`첫 수집 중·연결 불가(보관 인벤토리 없음)·비활성 ${c.excluded}곳은 값을 모르므로 합계에서 뺐습니다`);
+  if (c?.carried > 0) parts.push(`점검 중·연결 불가 ${c.carried}곳은 직전 수집 값을 합계에 포함했습니다`);
+  return parts.join(' · ');
+}
+/** 합계 행 라벨. */
+export function contribTotalLabel(c) {
+  const bits = [];
+  if (c?.excluded > 0) bits.push(`${c.excluded}곳 제외`);
+  if (c?.carried > 0) bits.push(`직전 값 ${c.carried}곳 포함`);
+  return bits.length ? `합계(${bits.join(' · ')})` : '합계';
 }
 
 /**

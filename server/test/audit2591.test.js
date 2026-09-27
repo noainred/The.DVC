@@ -143,7 +143,7 @@ test('★ PR-5/PR-7: 워커 3종의 인출·회신 HTTP 실패와 설정 pull 40
     const s = src(rel);
     assert.match(s, /httpFail\(/, `${rel}: 인출 HTTP 오류가 무음이다`);
     assert.match(s, /postResult\(/, `${rel}: 결과 회신 실패를 보지 않는다`);
-    assert.match(s, /X-Agent-Name/, `${rel}: 이름 헤더가 없다(중앙 계측이 '(unknown)')`);
+    assert.match(s, /X-Agent-Name|agentHeaders\(/, `${rel}: 이름 헤더가 없다(중앙 계측이 '(unknown)')`);
   }
   for (const rel of ['agent/storageConfigPull.js', 'agent/pduConfigPull.js', 'agent/sanSwitchConfigPull.js', 'agent/usersConfigPull.js', 'agent/gpuGuestConfigPull.js']) {
     assert.match(src(rel), /createChangeLogger/, `${rel}: 실패가 콘솔에 남지 않는다`);

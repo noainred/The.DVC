@@ -41,6 +41,7 @@ const TOOLS_LABEL = {
   guestToolsBlacklisted: '결함 버전(블랙리스트)',
   guestToolsUnmanaged: '자체 관리(open-vm-tools)',
   guestToolsNotInstalled: '미설치',
+  '(미수집)': '(미수집)',
 };
 
 export function computeCompliance(snap, opts = {}) {
@@ -50,12 +51,19 @@ export function computeCompliance(snap, opts = {}) {
   const hosts = snap.hosts || [];
 
   // ① VMware Tools 상태 분포 + 업그레이드 필요 목록
+  // v2.629(감사 DATA2629-04): 개수는 전량을 세고 목록만 LIST_MAX 로 자른다 — 예전에는 잘린 목록 길이(최대 500)를 KPI 로 보고해
+  //   분포표(전량)와 KPI 가 서로 다른 수를 말했다. 뺀 개수는 omitted 로 밝힌다(조용한 상한 금지).
+  const LIST_MAX = 500;
   const toolsDist = new Map();
   const needUpgrade = [];
+  let needUpgradeCount = 0;
   for (const v of vms) {
-    const st = v.toolsVersionStatus || (v.toolsStatus === 'RUNNING' ? 'guestToolsCurrent' : 'guestToolsNotInstalled');
+    // v2.629(감사 DATA2629-03): 두 필드가 다 없으면(REST 폴백 — 수집 안 함) '미설치' 가 아니라 '(미수집)' 이다.
+    const noToolsData = !v.toolsVersionStatus && (v.toolsStatus == null || v.toolsStatus === '');
+    const st = v.toolsVersionStatus || (noToolsData ? '(미수집)' : v.toolsStatus === 'RUNNING' ? 'guestToolsCurrent' : 'guestToolsNotInstalled');
     toolsDist.set(st, (toolsDist.get(st) || 0) + 1);
-    if (['guestToolsNeedUpgrade', 'guestToolsTooOld', 'guestToolsBlacklisted'].includes(st) && needUpgrade.length < 500) {
+    if (['guestToolsNeedUpgrade', 'guestToolsTooOld', 'guestToolsBlacklisted'].includes(st)) needUpgradeCount += 1;
+    if (['guestToolsNeedUpgrade', 'guestToolsTooOld', 'guestToolsBlacklisted'].includes(st) && needUpgrade.length < LIST_MAX) {
       needUpgrade.push({ id: v.id, name: v.name, vcenterId: v.vcenterId, toolsVersion: v.toolsVersion || '', status: st, powerState: v.powerState });
     }
   }
@@ -63,11 +71,13 @@ export function computeCompliance(snap, opts = {}) {
   // ② VM 하드웨어 버전 분포 + 구버전 목록
   const hwDist = new Map();
   const oldHw = [];
+  let oldHwCount = 0;
   for (const v of vms) {
     const hv = v.hwVersion || '(미수집)';
     hwDist.set(hv, (hwDist.get(hv) || 0) + 1);
     const n = hwVersionNum(v.hwVersion);
-    if (n != null && n <= oldHwMax && oldHw.length < 500) {
+    if (n != null && n <= oldHwMax) oldHwCount += 1;
+    if (n != null && n <= oldHwMax && oldHw.length < LIST_MAX) {
       oldHw.push({ id: v.id, name: v.name, vcenterId: v.vcenterId, hwVersion: v.hwVersion, powerState: v.powerState });
     }
   }
@@ -87,13 +97,14 @@ export function computeCompliance(snap, opts = {}) {
     config: { oldHwMax },
     summary: {
       vms: vms.length, hosts: hosts.length,
-      toolsNeedUpgrade: needUpgrade.length,
-      oldHwVms: oldHw.length,
+      toolsNeedUpgrade: needUpgradeCount,
+      oldHwVms: oldHwCount,
+      toolsNotCollected: toolsDist.get('(미수집)') || 0,   // v2.629 DATA2629-03
       eolHosts: hosts.filter((h) => esxiSupportStatus(h.version, now).status === 'eol').length,
       endingHosts: hosts.filter((h) => esxiSupportStatus(h.version, now).status === 'ending').length,
     },
-    tools: { dist: distOf(toolsDist, TOOLS_LABEL), needUpgrade },
-    hwVersion: { dist: distOf(hwDist), old: oldHw },
+    tools: { dist: distOf(toolsDist, TOOLS_LABEL), needUpgrade, needUpgradeOmitted: needUpgradeCount - needUpgrade.length, listLimit: LIST_MAX },
+    hwVersion: { dist: distOf(hwDist), old: oldHw, oldOmitted: oldHwCount - oldHw.length, listLimit: LIST_MAX },
     esxi,
   };
 }

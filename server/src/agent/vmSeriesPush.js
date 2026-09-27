@@ -19,6 +19,7 @@ import { reqTimeoutMs } from './envTimeout.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { readCentralReply } from '../util/centralReply.js'; // v2.613 CONTRACT2613-03
 import { createChangeLogger } from '../util/logThrottle.js';
+import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.AGENT_PUSH_GZIP !== 'false';
@@ -34,7 +35,7 @@ function headers(extra = {}) {
   return {
     'Content-Type': 'application/json',
     'X-Agent-Hostname': os.hostname(),
-    'X-Agent-Name': config.agent.name,
+    ...agentHeaders(config.agent.name),
     ...extra,
     ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}),
   };
@@ -71,7 +72,7 @@ async function post(body) {
   if (PUSH_GZIP) {
     try { payload = await gzipAsync(json); hdrs = headers({ 'Content-Encoding': 'gzip' }); } catch { /* 원본 전송 */ }
   }
-  const res = await resilientFetch(`${config.agent.centralUrl}/api/central/vmseries`, {
+  const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/vmseries`, config.agent.name), {
     method: 'POST', headers: hdrs, body: payload,
     timeoutMs: reqTimeoutMs(process.env.AGENT_VMSERIES_PUSH_TIMEOUT_MS, 120_000), retries: 1,
   });

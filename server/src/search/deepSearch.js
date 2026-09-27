@@ -11,7 +11,19 @@ import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
 import { ipToNum } from '../util/ipv4.js';
 import { poolRun } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
 
-const has = (s, q) => String(s || '').toLowerCase().includes(String(q).toLowerCase());
+/**
+ * v2.629(감사 AUTHZ2629-01): 검색어 소문자화는 **루프 밖에서 1회**. 예전 `has()` 는 VM 마다·필드마다 검색어를 다시
+ * 소문자화해, 본문 1MB 안의 900KB 검색어 하나로 VM 2,242대에서 이벤트 루프가 3초 넘게 멈췄다(tools 권한 계정 1요청).
+ * 길이 상한(`SEARCH_TERM_MAX`)을 넘는 검색어는 **어떤 VM 과도 맞지 않는다** — VM 이름·OS·호스트·클러스터가 그보다 길 수
+ * 없으므로 옛 구현(긴 needle 의 includes = false)과 결과가 같고, 잘라서 넓게 맞추는 거짓을 만들지 않는다.
+ */
+export const SEARCH_TERM_MAX = 1024;
+/** 검색어 → 소문자(1회). 상한 초과면 null(= 아무것도 맞지 않음). */
+export function lowerTerm(q) {
+  const t = String(q);
+  return t.length > SEARCH_TERM_MAX ? null : t.toLowerCase();
+}
+const hasLow = (s, lq) => lq != null && String(s || '').toLowerCase().includes(lq);
 const numOr = (x) => (x === '' || x == null || Number.isNaN(Number(x)) ? null : Number(x));
 
 // 엄격 IPv4 → uint32. 4옥텟·각 0~255가 아니면 null(예: '10/8', '999.1.1.1', IPv6 → 오매칭 방지).
@@ -58,18 +70,18 @@ export function snapshotFilter(snap, { vcenterIds = [], f = {} } = {}) {
   const set = new Set(vcenterIds || []);
   let vms = (snap.vms || []).filter((v) => !v.template);
   if (set.size) vms = vms.filter((v) => set.has(v.vcenterId));
-  if (f.q) vms = vms.filter((v) => has(v.name, f.q) || has(v.guestOS, f.q) || (v.ipAddresses || []).some((ip) => ip.includes(f.q)) || has(v.host, f.q));
+  if (f.q) { const lq = lowerTerm(f.q); vms = lq == null ? [] : vms.filter((v) => hasLow(v.name, lq) || hasLow(v.guestOS, lq) || (v.ipAddresses || []).some((ip) => ip.includes(f.q)) || hasLow(v.host, lq)); }
   if (f.powerState) vms = vms.filter((v) => v.powerState === f.powerState);
   if (f.toolsStatus) vms = vms.filter((v) => v.toolsStatus === f.toolsStatus);
-  if (f.guestOS) vms = vms.filter((v) => has(v.guestOS, f.guestOS));
-  if (f.cluster) vms = vms.filter((v) => has(v.cluster, f.cluster));
-  if (f.host) vms = vms.filter((v) => has(v.host, f.host));
+  if (f.guestOS) { const lq = lowerTerm(f.guestOS); vms = vms.filter((v) => hasLow(v.guestOS, lq)); }
+  if (f.cluster) { const lq = lowerTerm(f.cluster); vms = vms.filter((v) => hasLow(v.cluster, lq)); }
+  if (f.host) { const lq = lowerTerm(f.host); vms = vms.filter((v) => hasLow(v.host, lq)); }
   if (f.gateway) vms = vms.filter((v) => (v.gateways || []).some((g) => g === f.gateway || g.includes(f.gateway)));
   if (f.ip) vms = vms.filter((v) => (v.ipAddresses || []).some((ip) => ip === f.ip || ip.startsWith(f.ip)));
   if (f.subnet && /\//.test(f.subnet)) vms = vms.filter((v) => (v.ipAddresses || []).some((ip) => ipInCidr(ip, f.subnet)));
   if (f.gpuMode) vms = vms.filter((v) => (f.gpuMode === 'none' ? !v.gpu : f.gpuMode === 'any' ? !!v.gpu : v.gpu?.type === f.gpuMode));
   if (f.hasSnapshot) vms = vms.filter((v) => (v.snapshotCount || 0) > 0);
-  if (f.notes) vms = vms.filter((v) => has(v.notes, f.notes));
+  if (f.notes) { const lq = lowerTerm(f.notes); vms = vms.filter((v) => hasLow(v.notes, lq)); }
   const ge = (field, min) => { const n = numOr(min); if (n != null) vms = vms.filter((v) => (v[field] ?? 0) >= n); };
   const le = (field, max) => { const n = numOr(max); if (n != null) vms = vms.filter((v) => (v[field] ?? 1e12) <= n); };
   ge('cpuCount', f.vcpuMin); le('cpuCount', f.vcpuMax);

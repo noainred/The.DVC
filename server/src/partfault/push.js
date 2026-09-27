@@ -30,6 +30,7 @@ import { dropSummaryOf, warnDrop } from '../agent/centralReply.js';
 import { runScan } from './scan.js';
 import { partFaultEnabled } from './settings.js';
 import { PUSH_PROTOCOL, partKeyTail, isBad } from './types.js';
+import { agentHeaders, withAgentQuery } from '../agent/agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.PARTFAULT_PUSH_GZIP !== 'false';
@@ -103,10 +104,10 @@ async function pushOnce(reason) {
     const scan = await runScan();
     const payload = buildPayload(scan);
     const json = JSON.stringify(payload);
-    const hdrs = { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken, 'X-Agent-Name': config.agent.name };
+    const hdrs = { 'Content-Type': 'application/json', 'X-Central-Token': config.agent.centralToken, ...agentHeaders(config.agent.name) };
     let body = json;
     if (PUSH_GZIP) { try { body = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { body = json; } }
-    const res = await resilientFetch(`${config.agent.centralUrl}/api/central/part-faults`, {
+    const res = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/part-faults`, config.agent.name), {
       method: 'POST', headers: hdrs, body, timeoutMs: 30_000, retries: 2,
       onRetry: (i) => console.warn(`[partfault-push] 재시도 ${i.attempt} (${i.error || `HTTP ${i.status}`})`),
     });

@@ -15,6 +15,7 @@ import { aggregateGuestOs } from '../../inventory/guestOsAgg.js';
 import { dayKey } from "../../util/dayKey.js";
 import { visibleNsxManagers } from '../../nsx/scope.js';
 import { isAdminReq, scrubHosts } from '../../auth/addressMask.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
 
 /** VM id → 스냅샷 VM 의 vcenterId(없으면 null). v2.598 VC2598-06 — id 를 첫 콜론에서 자르지 않는다. */
 export function upgradeVcOf(snap) {
@@ -29,7 +30,9 @@ export function registerToolsInfo(api) {
 // 결과가 '어디에 비밀이 있고 어떤 상태인가'라는 보안 태세 지도라 열람 자체가 민감하다
 // (viewer/operator 에게는 도구 카드도 안 보임 — specialToolsList adminOnly 플래그와 쌍).
 // ?fresh=1 이면 30초 캐시를 무시하고 재스캔(스캔 자체는 single-flight 로 중복 방지).
-api.get('/tools/secret-scan', requireRole('admin'), async (req, res) => {
+// v2.629 AUTHZ2629-06: 결과가 전 설정·로그의 평문 흔적 위치(전 법인 공용 파일)라 전체 범위 계정만.
+const fleetOnly = fullScopeOnlyWith('평문 자격증명 점검은 포탈 전체 설정·로그 파일의 위치를 담아 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
+api.get('/tools/secret-scan', requireRole('admin'), fleetOnly, async (req, res) => {
   try {
     const { runSecretScan } = await import('../../security/secretScan.js');
     res.json(await runSecretScan({ fresh: req.query.fresh === '1' }));

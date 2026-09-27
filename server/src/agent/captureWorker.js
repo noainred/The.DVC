@@ -8,6 +8,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { runTrafficCapture, runDualCapture } from '../net/tcpdump.js';
+import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 
 let timer = null;
 let busy = false;
@@ -29,7 +30,7 @@ export function captureWorkerStatus() { return { pollMs: POLL_MS, ..._last }; }
 
 function headers() {
   // v2.591(3차 감사 PR-2 ④): X-Agent-Name — 공유 토큰 엣지의 인출·회신이 중앙 데이터 흐름 지도에서 '(unknown)' 한 칸으로 합쳐지지 않게.
-  return { 'Content-Type': 'application/json', ...(config.agent.name ? { 'X-Agent-Name': config.agent.name } : {}), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
+  return { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
 }
 
 // v2.591(3차 감사 PR-5): 인출·회신의 **HTTP 오류**도 상태와 콘솔에 남긴다. v2.574 IMP-07 은 catch 경로만 고쳐서
@@ -47,7 +48,7 @@ async function httpFail(stage, r) {
 /** 결과 회신 — 응답 상태를 본다(예전엔 .catch(()=>{}) 로 413·403·5xx 가 '완료' 로 보였다). 실패 사유를 돌려준다(없으면 null). */
 async function postResult(url, body, timeoutMs) {
   let r;
-  try { r = await resilientFetch(url, { method: 'POST', headers: headers(), body, timeoutMs, retries: 2 }); }
+  try { r = await resilientFetch(withAgentQuery(url, config.agent.name), { method: 'POST', headers: headers(), body, timeoutMs, retries: 2 }); }
   catch (e) { const msg = `결과 회신 실패 — ${String(e?.message || e).slice(0, 200)}`; if (_logChange('회신', msg)) console.warn(`[capture-agent] ${msg}`); return msg; }
   if (r.ok) return null;
   let reason = '';

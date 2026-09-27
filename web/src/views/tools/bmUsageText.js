@@ -640,3 +640,33 @@ export function esxiCollectNote(form = {}) {
   const off = !form.idracTelemetry ? ' ⚠ 위의 **iDRAC 텔레메트리가 꺼져 있어** ESXi 호스트는 읽지 않습니다.' : '';
   return '**ESXi 호스트도 iDRAC 로 수집** 이 켜져 있습니다 — 선택한 법인의 가상화 호스트를 **iDRAC 로만** 읽습니다(OS SSH 는 걸지 않습니다). 받치는 iDRAC 등록이 없는 호스트는 제외 목록에 **iDRAC 등록 없음** 으로 남고, 법인별 서버 사용량 화면은 그 호스트를 vCenter 값으로 채웁니다.' + off;
 }
+
+/* ══════════════ v2.629 A6-06 — 입력 실패·보존 정리 표시 ══════════════════════════ */
+const SOURCE_LABEL = { classify: '대상 분류(서버 인벤토리)', 'idrac-registry': 'iDRAC 등록부', 'os-registry': 'OS 계정 등록부', prune: '보존 정리' };
+/**
+ * 이번 주기에 읽지 못한 입력(status.last.sourceErrors[{source,error}]) — 등록부를 못 읽은 주기에는 대상 서버가
+ * no-idrac·no-os-cred 같은 **틀린 사유**로 보인다. 표가 있으면 예전에는 아무 안내가 없었다. 없으면 null.
+ * 반환 { head, items[] } — items 는 입력마다 한 줄(원문 오류 포함, 최대 8개 — 폴러가 자른다).
+ */
+export function sourceErrorsNote(last) {
+  const list = Array.isArray(last?.sourceErrors) ? last.sourceErrors.filter((x) => x && typeof x === 'object') : [];
+  if (!list.length) return null;
+  return {
+    head: `이번 주기 입력 **${list.length}개**를 읽지 못했습니다 — 일부 서버의 제외 사유(iDRAC 없음·OS 계정 없음 등)가 틀릴 수 있습니다.`,
+    items: list.map((x) => `${SOURCE_LABEL[x.source] || String(x.source || '입력')}: ${String(x.error || '사유 미상')}`),
+  };
+}
+
+/**
+ * 마지막 보존 정리(status.lastPrune = { at, ok, rawDeleted, dailyDeleted, done, skipped, reason, error }) 한 줄.
+ * 기동 후 아직 정리하지 않았으면 그 사실을 말한다(정리 주기는 폴러 틱 N회마다 — 숫자를 박지 않는다).
+ */
+export function lastPruneNote(lp, now = Date.now()) {
+  if (!lp || typeof lp !== 'object' || !(n(lp.at) > 0)) return '마지막 정리: 이 프로세스가 시작된 뒤 아직 보존 정리를 하지 않았습니다.';
+  const when = _ago(lp.at, now);
+  if (lp.ok === false) return `마지막 정리 ${when}: **실패** — ${String(lp.error || '사유 미상')}`;
+  if (lp.skipped) return `마지막 정리 ${when}: 건너뜀${lp.reason === 'no-db' ? '(수집이 꺼져 있고 DB 파일이 없습니다)' : ''}`;
+  const raw = n(lp.rawDeleted), daily = n(lp.dailyDeleted);
+  const del = raw == null && daily == null ? '' : ` — 원시 ${raw == null ? '—' : raw.toLocaleString()}행 · 롤업 ${daily == null ? '—' : daily.toLocaleString()}행 삭제`;
+  return `마지막 정리 ${when}${del}${lp.done === false ? ' (다음 정리에서 이어서 지웁니다)' : ''}`;
+}

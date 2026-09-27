@@ -43,6 +43,23 @@ export function mergeLatestRows(...lists) {
 }
 
 /**
+ * v2.629(A6-03): 엣지 보관분 행을 `에이전트소문자|key소문자` 로도 색인한다 — 서비스태그 없는 엣지 서버는 중앙 키와 엣지 키가
+ *   달라 key 하나로는 찾을 수 없고, 에이전트 축이 없으면 다른 엣지의 같은 fleetId 행이 섞인다. 같은 칸은 ts 가 큰 쪽. 순수.
+ */
+export function rowsByAgentKeyOf(rows) {
+  const out = new Map();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r !== 'object') continue;
+    const a = t(r._agent).toLowerCase(); const k = t(r.key).toLowerCase();
+    if (!a || !k) continue;
+    const id = `${a}|${k}`;
+    const prev = out.get(id);
+    if (!prev || (numOrNull(r.ts) ?? -1) > (numOrNull(prev.ts) ?? -1)) out.set(id, r);
+  }
+  return out;
+}
+
+/**
  * 물리 서버 용량 찾기 — iDRAC 인벤토리 캐시 → 등록부 서비스태그 → 엣지 원격 인벤토리 순.
  * 못 찾으면 null(합계에서 빼고 '용량 모름' 으로 센다 — 지어내지 않는다).
  */
@@ -89,7 +106,7 @@ export function registerCorpUsage(api) {
       const freshOf = (ms) => Math.max(30 * 60_000, 3 * (numOrNull(ms) || 300_000));
       const edgeRows = edges.flatMap((e) => {
         const f = freshOf(e?.snap?.settings?.intervalMs);
-        return (e?.snap?.rows || []).filter((r) => r && typeof r === 'object').map((r) => ({ ...r, _freshMs: f }));
+        return (e?.snap?.rows || []).filter((r) => r && typeof r === 'object').map((r) => ({ ...r, _freshMs: f, _agent: t(e?.agent) }));
       });
       // v2.628(EDGE2628-01): 엣지 봉투는 대상 수 상한으로 잘릴 수 있다 — 잘린 서버는 이 화면에서 '못 읽음' 이 된다. 개수를 밝힌다.
       const edgeTruncated = edges.reduce((a, e) => a + (numOrNull(e?.snap?.truncated) || 0), 0);
@@ -105,7 +122,7 @@ export function registerCorpUsage(api) {
       const unreadVcenters = (() => { try { return unreadVcenterReasons(snap); } catch { return new Map(); } })();
       const out = buildCorpUsage({
         vcenters: snap?.vcenters || [], bareMetal: attr.bareMetal, virtHosts: fleet.virtualizationHosts || [],
-        rowsByKey, hostByKey, capOf: makeCapOf({ getInventory, registry, remoteServers }),
+        rowsByKey, rowsByAgentKey: rowsByAgentKeyOf(edgeRows), hostByKey, capOf: makeCapOf({ getInventory, registry, remoteServers }),
         allowed, now: Date.now(), freshMs, unreadVcenters,
       });
       // 법인마다 '수집을 켰는가' — 값이 없는 이유를 화면이 말하려면 필요하다(켠 법인 목록 자체는 범위 밖을 주지 않는다).

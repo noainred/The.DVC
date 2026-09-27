@@ -17,6 +17,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyCentral } from '../curuser/settings.js';
 import { curUserPushEnabled } from './curUserPush.js';
+import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
 const _log404 = createChangeLogger({ windowMs: 10 * 60_000 }); // v2.600 EDGE2600-06: 같은 404 사유는 10분에 한 줄
 
 const PULL_MS = clampIntervalMs(Number(process.env.AGENT_CURUSER_CONFIG_PULL_MS) || 10 * 60_000, 10 * 60_000, 60_000); // v2.600 EDGE2600-05
@@ -32,7 +33,7 @@ export async function pullCurUserConfigNow() {
     const url = `${config.agent.centralUrl}/api/central/curuser-config?agent=${encodeURIComponent(config.agent.name)}`;
     const res = await resilientFetch(url, {
       method: 'GET', timeoutMs: 30_000, retries: 1,
-      headers: { 'X-Agent-Name': config.agent.name, ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) },
+      headers: { ...agentHeaders(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) },
     });
     // v2.600 EDGE2600-06: 404 본문을 읽어 '중앙이 central 을 끔'(ok:false — 설정을 못 받는다)과 '엔드포인트 없음'을 가른다.
     if (res.status === 404) {
