@@ -135,13 +135,20 @@ export function sanitizeGuestDiskVms(raw, { maxVms = 200_000, maxParts = 128 } =
     // v2.601(RECENT2601-01): 이미 한 번 정제된 행(엣지 직접 수집 → push)은 뺀 파티션을 들고 오지 않으므로 그 개수를 이어받는다.
     const carried = Number(vm.partsUnknown);
     let partsUnknown = Number.isInteger(carried) && carried > 0 ? Math.min(carried, maxParts) : 0;
+    // v2.630(감사 A2-01): 뺀 파티션의 **경로**도 이어받는다 — commitCollection 이 '이번에 값이 없어 뺀 경로' 를
+    //   part_last 에서 지우지 않게(일시 미보고를 언마운트로 취급하지 않는다). 구버전 엣지는 경로를 안 보낸다 → 개수만 있고
+    //   경로가 없으면 commitCollection 이 그 VM 의 경로 삭제를 통째로 건너뛴다(보수적).
+    const unknownPaths = [];
+    if (Array.isArray(vm.unknownPaths)) {
+      for (const up of vm.unknownPaths.slice(0, maxParts)) if (typeof up === 'string' && up) unknownPaths.push(up.slice(0, 1024));
+    }
     for (const p of partsSrc) {
       if (!p || typeof p !== 'object') continue;
       const ppath = str(p.path, 1024); const cap = nn(p.capGB);
       if (!ppath && !cap) continue; // 경로·용량 모두 없는 잡음 파티션은 버린다(parseGuestDisks 와 동일)
       // v2.600(감사 LO2600-07): 사용량을 모르는 파티션은 저장하지 않는다 — nn(null) 이 0 이 되어 '비어 있는 파티션' 으로
       //   적재·추이에 남았다. VM 합계(allocGB·usedGB)도 vmSummary 가 같은 파티션을 뺐으므로 일관된다. 개수는 밝힌다.
-      if (p.usedGB == null || p.usedGB === '') { partsUnknown += 1; continue; }
+      if (p.usedGB == null || p.usedGB === '') { partsUnknown += 1; if (ppath && unknownPaths.length < maxParts) unknownPaths.push(ppath); continue; }
       parts.push({ path: ppath, capGB: cap, usedGB: nn(p.usedGB) });
     }
     out.push({
@@ -155,6 +162,7 @@ export function sanitizeGuestDiskVms(raw, { maxVms = 200_000, maxParts = 128 } =
       partCount: parts.length,
       parts,
       ...(partsUnknown ? { partsUnknown } : {}),
+      ...(unknownPaths.length ? { unknownPaths: [...new Set(unknownPaths)] } : {}),
     });
   }
   return out;

@@ -92,6 +92,8 @@ adminRouter.post('/vcenters/test', adminOnly, async (req, res) => {
     if (!id) return res.status(403).json({ ok: false, error: 'forbidden', reason: '새 vCenter 연결 테스트는 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.' });
     const read = scopedVcenterIds(req.user, store.get());
     if (!read.has(id)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    // v2.630 AUTHZ2630-02: 범위 계정의 테스트는 저장된 접속처(host·port)로만 — body.host 로 바꿔 임의 호스트를 두드리지 못하게.
+    return res.json(await testConnection(req.body || {}, { pinSavedHost: true }));
   }
   res.json(await testConnection(req.body || {}));
 });

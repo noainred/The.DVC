@@ -87,13 +87,33 @@ export function scopeMainSettings(settings, allowed, isAdmin) {
  *   범위 관리자(그리고 범위 operator 도 — 가림은 주소만 한다)에게 다른 법인 대수·실패 수가 나갔다. 범위 계정에는 개수를 null 로
  *   두고 `fleetCountsHidden` 으로 밝힌다(설정값·주기·예산·실행 여부는 전 법인 공통이라 그대로). 전체 범위면 원본. 순수.
  */
+export const FULL_SCOPE_TEXT = '(원문은 전체 범위 계정만 볼 수 있습니다)';
 export function scopeBmStatus(st, allowed) {
   if (!allowed || !st || typeof st !== 'object') return st;
   const lr = st.last;
+  /*
+   * v2.630(R2630-03): **오류가 있었다는 사실·개수는 남긴다** — 예전에는 error·sourceErrors 를 통째로 버려 범위 계정
+   *   화면이 마지막 수집 실패를 '저장된 값이 없습니다(기다리면 된다)' 로 말했다(bmUsageText.emptyDiag 가 last.error 로
+   *   'failed' 를 판정한다). 원문(함대 등록부·분류 오류 문장)만 가리고, 입력 이름(source)은 공통 어휘라 그대로 둔다.
+   */
+  const srcErrs = Array.isArray(lr?.sourceErrors) ? lr.sourceErrors.filter((x) => x && typeof x === 'object') : [];
   const last = lr && typeof lr === 'object'
-    ? { at: lr.at ?? null, ms: lr.ms ?? null, trigger: lr.trigger ?? null, servers: null, okCount: null, failCount: null, inserted: null }
+    ? {
+      at: lr.at ?? null, ms: lr.ms ?? null, trigger: lr.trigger ?? null, servers: null, okCount: null, failCount: null, inserted: null,
+      ...(lr.error ? { error: FULL_SCOPE_TEXT } : {}),
+      ...(srcErrs.length ? { sourceErrors: srcErrs.map((x) => ({ source: String(x.source || ''), error: FULL_SCOPE_TEXT })) } : {}),
+      ...(lr.dbError ? { dbOk: false, dbError: FULL_SCOPE_TEXT } : {}),
+    }
     : lr;
-  return { ...st, last, authStopCount: null, entDeferred: null, prevKeys: null, alertState: null, fleetCountsHidden: true };
+  // 보존 정리의 삭제 행 수는 함대 전체 수치다 — 범위 계정에는 null(정리했는지·실패했는지는 남긴다).
+  const lp = st.lastPrune;
+  const lastPrune = lp && typeof lp === 'object'
+    ? {
+      at: lp.at ?? null, ok: lp.ok ?? null, skipped: lp.skipped ?? null, reason: lp.reason ?? null, done: lp.done ?? null,
+      rawDeleted: null, dailyDeleted: null, ...(lp.error ? { error: FULL_SCOPE_TEXT } : {}),
+    }
+    : lp;
+  return { ...st, last, ...('lastPrune' in st ? { lastPrune } : {}), authStopCount: null, entDeferred: null, prevKeys: null, alertState: null, fleetCountsHidden: true };
 }
 const stripAckBy = (st, isAdmin) => {
   if (isAdmin || !st || typeof st !== 'object' || !('enterpriseAckBy' in st)) return st;

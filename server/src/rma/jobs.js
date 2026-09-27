@@ -100,7 +100,11 @@ function pushHistory(j, now) {
     ok: !!r.ok, exitCode: r.exitCode ?? null, timedOut: !!r.timedOut, durationMs: r.durationMs ?? null,
     reason: r.reason || '', stdout: capStr(r.stdout || '', HISTORY_OUTPUT_MAX), stderr: capStr(r.stderr || '', HISTORY_OUTPUT_MAX), // v2.607(TIM2607-01): 평탄화
     truncated: !!r.truncated || String(r.stdout || '').length > HISTORY_OUTPUT_MAX,
+    ...(r.late ? { late: true, lateAfterMs: r.lateAfterMs ?? null } : {}),
   });
+  // v2.630(감사 A4-03): 같은 잡의 옛 행(기한 초과 '미회신' 종결 행)은 늦게 온 실제 결과가 대체한다 — 두 행이 나란히 남으면
+  //   화면이 '미회신 — 재실행' 과 '성공' 을 동시에 말한다. 영속 이력은 req_id PRIMARY KEY + INSERT OR REPLACE 라 한 행이 된다.
+  for (let i = history.length - 1; i > 0; i--) if (history[i].reqId === j.reqId) history.splice(i, 1);
   if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
   // 영속 이력(v2.417) — sqlite 가 있으면 함께 저장(재시작 후에도 출력까지 남는다). 실패해도 메모리 링은 유지.
   // v2.602(CEN2602-03): 적재 실패를 조용히 삼키지 않는다 — saveHistoryRow 는 실패하면 false 를 돌려준다.
@@ -114,7 +118,7 @@ export function reapClaims(now = Date.now()) {
   let failed = 0;
   for (const [, j] of jobs) {
     if (j.state !== 'running' || !j.claimDeadline || now <= j.claimDeadline) continue;
-    j.state = 'done'; j.doneAt = now; j.claimDeadline = null;
+    j.state = 'done'; j.doneAt = now; j.claimDeadline = null; j.expired = true; // v2.630 A4-03: 늦게 온 실제 결과를 받을 수 있게 표시
     j.result = { ok: false, reason: `인스턴스 '${j.instance || '?'}' 가 명령 인출 후 기한(${Math.round((j.timeoutMs + ACK_GRACE_MS) / 1000)}초) 내 결과를 회신하지 않았습니다 — 명령이 실행됐을 수 있으니 상태를 확인한 뒤 재실행하세요.` };
     pushHistory(j, now);
     failed++;
@@ -302,13 +306,30 @@ export function sanitizeRmaResult(result) {
   return out;
 }
 
-/** ack — 결과 저장. TTL 정리/중복이면 false. */
+/**
+ * ack — 결과 저장. TTL 정리/중복이면 false.
+ * v2.630(감사 A4-03): 기한 초과로 '미회신' 종결된 잡(expired)에 **처음** 도착한 실제 결과는 받는다(late). 예전에는 done 이면
+ *   무조건 버려, 서비스 재시작이 성공했는데도 화면·이력이 '결과 미회신 — 재실행하세요' 로 남아 **비멱등 명령의 이중 실행**을
+ *   유도했다(형제 captureJobs·bmstor 는 이미 늦은 결과를 받는다). 재실행은 하지 않는다 — 상태만 '늦게 도착한 결과' 로 바꾼다.
+ *   같은 결과의 재전송(이미 late 반영)과 정상 회신된 잡의 재전송은 예전처럼 false.
+ */
+export const LATE_RESULT_NOTE = '기한 초과로 미회신 종결된 뒤 도착한 실제 결과입니다 — 명령은 이미 실행됐습니다(재실행하지 마세요).';
 export function setJobResult(reqId, result) {
   const j = jobs.get(String(reqId || ''));
-  if (!j || j.state === 'done') return false;
+  if (!j) return false;
+  if (j.state === 'done' && !(j.expired && !j.late)) return false;
   const now = Date.now();
+  const late = j.state === 'done';
+  const expiredAt = j.doneAt;
   j.state = 'done'; j.doneAt = now; j.claimDeadline = null;
   j.result = sanitizeRmaResult(result);
+  if (late) {
+    j.late = true;
+    j.result.late = true;
+    j.result.lateAfterMs = expiredAt ? Math.max(0, now - expiredAt) : null;
+    j.result.reason = j.result.reason ? `${LATE_RESULT_NOTE} ${j.result.reason}` : LATE_RESULT_NOTE;
+    console.warn(`[rma] 잡 ${j.reqId} 미회신 종결 뒤 실제 결과 도착(${j.result.ok ? '성공' : '실패'}) — 이력을 갱신했다`);
+  }
   dropPending(j.agent, reqId);
   pushHistory(j, now);
   prune(now);
@@ -320,7 +341,7 @@ export function getJob(reqId) {
   const j = jobs.get(String(reqId || ''));
   if (!j) return { state: 'unknown' };
   const base = { reqId: j.reqId, agent: j.agent, target: j.target, instance: j.instance, failover: !!j.failover, mode: j.mode, cmd: j.spec?.cmd, args: j.spec?.args || {}, label: j.spec?.label || '', user: j.user, createdAt: j.createdAt, takenAt: j.takenAt };
-  if (j.state === 'done') return { state: 'done', ...base, doneAt: j.doneAt, result: j.result };
+  if (j.state === 'done') return { state: 'done', ...base, doneAt: j.doneAt, result: j.result, ...(j.late ? { late: true } : j.expired ? { expired: true } : {}) };
   return { state: j.state === 'running' ? 'running' : 'pending', ...base };
 }
 

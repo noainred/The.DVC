@@ -38,6 +38,27 @@ import { lowerTerm } from '../../search/deepSearch.js'; // v2.629 AUTHZ2629-01: 
 import { numOrNull } from '../../util/numOrNull.js'; // v2.578: 요청 기간 등 '읽지 못한 수치' 를 0 으로 둔갑시키지 않는다
 import { normGroupQuery, filterVmsByGroup, inventoryGroups, hasGroup } from './groupFilter.js'; // v2.491: 클러스터·폴더 하위 범위
 
+/**
+ * 디스크 트렌드 시계열 한 점(v2.630 감사 DATA2630-01 — 순수, 테스트가 직접 부른다).
+ * e: { ts, <계열>: 평균 } — 회수 가능 = 정지 VM 디스크 + 전원 켜진 VM 스냅샷(vm_snap_on_gb). 그 계열이 없는 과거 점은
+ * 옛 정의(정지 + 전체 스냅샷)로 두고 reclaimLegacy 로 표시한다(지어낸 새 값으로 바꾸지 않는다).
+ */
+export function diskHistoryPoint(e) {
+  const r1 = (x) => (x == null ? null : Number(Number(x).toFixed(1)));
+  const off = r1(e.vm_disk_off_gb); const sn = r1(e.vm_snap_gb); const snOn = r1(e.vm_snap_on_gb);
+  const legacy = snOn == null && sn != null;
+  const reclaimGB = off == null && sn == null && snOn == null ? null
+    : snOn != null ? r1((off || 0) + snOn) : r1((off || 0) + (sn || 0));
+  return {
+    ts: e.ts,
+    dsCapGB: r1(e.ds_cap_gb_vc), dsUsedGB: r1(e.ds_used_gb_vc),
+    provGB: r1(e.vm_disk_prov_gb), usedGB: r1(e.vm_disk_used_gb),
+    offGB: off, snapGB: sn, snapOnGB: snOn,
+    reclaimGB,
+    ...(legacy ? { reclaimLegacy: true } : {}),
+  };
+}
+
 export function registerToolsCapacity(api) {
 
 // Capacity report — per-cluster compute capacity, allocation, overcommit, headroom.
@@ -1533,17 +1554,11 @@ api.get('/tools/capacity/disk-history', requirePerm('tools'), async (req, res) =
         e[m] = p.avg;
       }
     });
-    const r1 = (x) => (x == null ? null : Number(Number(x).toFixed(1)));
-    points = [...byTs.values()].sort((a, b) => a.ts - b.ts).map((e) => {
-      const off = r1(e.vm_disk_off_gb); const sn = r1(e.vm_snap_gb);
-      return {
-        ts: e.ts,
-        dsCapGB: r1(e.ds_cap_gb_vc), dsUsedGB: r1(e.ds_used_gb_vc),
-        provGB: r1(e.vm_disk_prov_gb), usedGB: r1(e.vm_disk_used_gb),
-        offGB: off, snapGB: sn,
-        reclaimGB: off == null && sn == null ? null : r1((off || 0) + (sn || 0)),
-      };
-    });
+    // v2.630(감사 DATA2630-01): 회수 가능 = 정지 VM 디스크 + **전원 켜진 VM 의 스냅샷**(vm_snap_on_gb). 정지 VM 의 스냅샷 델타는
+    //   정지 디스크(committed)에 이미 들어 있으므로 전체 스냅샷(vm_snap_gb)을 더하면 두 번 센다 — 같은 화면의 현재값
+    //   (breakdown.reclaim.totalGB, diskTrend.snapshotReclaimGB)과 추이 마지막 점이 다른 숫자를 말했다. 새 계열이 없는
+    //   **과거 점**은 고칠 수 없으므로 옛 합(off + 전체 스냅샷)을 두되 reclaimLegacy 로 표시하고 개수·구간을 응답에 싣는다.
+    points = [...byTs.values()].sort((a, b) => a.ts - b.ts).map(diskHistoryPoint);
     const [m1, m2] = await Promise.all([vmperfMeta(vcId, 'ds_cap_gb_vc'), vmperfMeta(vcId, 'vm_disk_prov_gb')]);
     collectedSince = { ds: m1.firstTs ?? null, vm: m2.firstTs ?? null };
   } catch (e) { console.warn('[toolsCapacity] 시계열 조회 실패 — 빈 배열로 응답(감사 B8):', e?.message); points = []; }
@@ -1563,14 +1578,20 @@ api.get('/tools/capacity/disk-history', requirePerm('tools'), async (req, res) =
       const wob = 1 + 0.01 * Math.sin(i / 3);
       const used = b.ds.usedGB * f * wob; const vmUsed = b.vm.committedGB * f * wob;
       const off = b.reclaim.off.gb * (0.8 + 0.2 * Math.abs(Math.sin(i / 7)));
-      const sn = b.reclaim.snap.gb * (0.6 + 0.4 * Math.abs(Math.cos(i / 5)));
-      points.push({ ts, dsCapGB: b.ds.capGB, dsUsedGB: Math.round(used), provGB: Math.round(b.vm.provGB * (0.97 + 0.03 * f)), usedGB: Math.round(vmUsed), offGB: Math.round(off), snapGB: Math.round(sn * 10) / 10, reclaimGB: Math.round((off + sn) * 10) / 10 });
+      const snW = 0.6 + 0.4 * Math.abs(Math.cos(i / 5));
+      const sn = b.reclaim.snap.gb * snW;
+      // v2.630(DATA2630-01): 합성도 실계열과 같은 정의 — 회수 가능의 스냅샷 항은 정지 VM 에 속하지 않은 몫(breakdown 의 reclaimGB)만.
+      const snOn = (b.reclaim.snap.reclaimGB ?? b.reclaim.snap.gb) * snW;
+      points.push({ ts, dsCapGB: b.ds.capGB, dsUsedGB: Math.round(used), provGB: Math.round(b.vm.provGB * (0.97 + 0.03 * f)), usedGB: Math.round(vmUsed), offGB: Math.round(off), snapGB: Math.round(sn * 10) / 10, snapOnGB: Math.round(snOn * 10) / 10, reclaimGB: Math.round((off + snOn) * 10) / 10 });
     }
     collectedSince = { ds: points[0].ts, vm: points[0].ts };
   }
 
   const analysis = analyzeDiskTrend({ points, breakdown, days, policy });
-  res.json({ ok: true, vcenterId: vcId || 'all', days, bucketMs, collectedSince, synthesized, points, breakdown, analysis });
+  // v2.630(DATA2630-01): 옛 정의(정지 VM 스냅샷을 두 번 셈)로 남은 과거 점의 개수·구간 — 화면 각주가 말한다(조용한 혼합 금지).
+  const legacyPts = points.filter((p) => p.reclaimLegacy);
+  const reclaimLegacy = legacyPts.length ? { points: legacyPts.length, from: legacyPts[0].ts, to: legacyPts[legacyPts.length - 1].ts } : null;
+  res.json({ ok: true, vcenterId: vcId || 'all', days, bucketMs, collectedSince, synthesized, points, breakdown, analysis, reclaimLegacy });
 });
 
 /**

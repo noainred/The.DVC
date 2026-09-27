@@ -128,6 +128,8 @@ export function setAssignment(agent, scope = {}, targets = [], { user = '' } = {
     state: prev && prev.sig === sig ? (prev.state || 'pending') : 'pending',
     pulledAt: prev && prev.sig === sig ? (prev.pulledAt || 0) : 0,
     ack: prev && prev.sig === sig ? (prev.ack || null) : null,
+    // v2.630(감사 R2630-06): 엣지 push 주기는 배정 내용과 무관하다 — 재배정해도 유지한다.
+    ...(prev?.lastExpectMs ? { lastExpectMs: prev.lastExpectMs } : {}),
   };
   save();
   logAudit({
@@ -157,6 +159,7 @@ export function listAssignments() {
       agent: name, sig: a.sig, prevSig: a.prevSig || '', scope: a.scope, exceptTypes: a.exceptTypes,
       counts: a.counts, updatedAt: a.updatedAt, updatedBy: a.updatedBy,
       state: a.state, pulledAt: a.pulledAt || 0, ack: a.ack || null,
+      lastExpectMs: a.lastExpectMs || null,
       tag: batchTag(a.sig),
     };
   });
@@ -175,6 +178,31 @@ export function getAssignmentForAgent(agent, knownSig = '') {
     exceptTypes: a.exceptTypes, targets: a.targets, counts: a.counts,
     tag: batchTag(a.sig), prevTag: a.prevSig ? batchTag(a.prevSig) : '',
   };
+}
+
+/**
+ * v2.630(감사 R2630-06): 엣지가 보고 봉투에 실은 자기 push 주기(expectMs)를 배정 기록에 남긴다 — 수신 상태(svcmonEdge)는
+ *   인메모리라 중앙 재시작 직후에는 주기를 모르고, '기동 후 보고 없음' 유예가 기본 주기(60초) 기준 300초로 고정돼
+ *   주기를 늘린 엣지가 재시작마다 거짓 무보고 알림 + '보고 재개' 를 냈다. 값이 **바뀔 때만** 쓴다(매 push 마다 쓰지 않는다).
+ *   필드 이름은 last* 라 백업 지문에서 빠진다(설정이 아니라 관측값). 배정이 없는 엣지는 기록하지 않는다(유예가 필요 없다).
+ *   이름은 대소문자 무시로 맞춘다(v2.604 util/agentKey 규약과 같은 판단). 반환: 기록했으면 true.
+ */
+export function noteExpectMs(agent, ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n <= 0) return false;
+  const v = Math.round(n);
+  const db = load();
+  const want = String(agent || '').trim();
+  if (!want) return false;
+  let a = db.agents[want];
+  if (!a) {
+    const lc = want.toLowerCase();
+    for (const k of Object.keys(db.agents)) if (k.toLowerCase() === lc) { a = db.agents[k]; break; }
+  }
+  if (!a || a.lastExpectMs === v) return false;
+  a.lastExpectMs = v;
+  save();
+  return true;
 }
 
 export function markPulled(agent, sig) {

@@ -147,6 +147,21 @@ api.get('/tools/vclogs/sources', requirePerm('tools'), (req, res) => {
   res.json({ local: [...localIds], remote });
 });
 
+// v2.630 SEC2630-02: 연합 조회 입력 상한과 '이 포탈이 아는 vCenter' 집합.
+const FEDERATE_Q_MAX = 500;
+const FEDERATE_SEV_MAX = 32;
+function knownVcenterIds() {
+  const ids = new Set();
+  for (const v of loadVcenterConfig().vcenters || []) if (v && v.id) ids.add(String(v.id));
+  for (const v of store.get()?.vcenters || []) if (v && v.id) ids.add(String(v.id));
+  for (const inv of listInventory()) if (inv && inv.vcenterId) ids.add(String(inv.vcenterId));
+  for (const a of getAllGpuGuestDiag()) {
+    if (!a || !Array.isArray(a.vcenters)) continue;
+    for (const vc of a.vcenters) if (vc && vc.vcId) ids.add(String(vc.vcId));
+  }
+  return ids;
+}
+
 // 엣지 로그 연합 조회 — 요청 큐잉(POST) / 결과 폴링(GET ?reqId=).
 api.post('/tools/vclogs/federate', requirePerm('tools'), (req, res) => {
   const b = req.body || {};
@@ -154,7 +169,17 @@ api.post('/tools/vclogs/federate', requirePerm('tools'), (req, res) => {
   if (!vcenterId) return res.status(400).json({ ok: false, reason: 'vcenterId가 필요합니다.' });
   // scope 강제: 범위 밖 vCenter 의 엣지 로그 연합 조회를 큐잉할 수 없다(범위 밖은 존재도 숨겨 404).
   if (!inUserScope(req.user, store.get(), vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter를 찾을 수 없습니다.' });
-  const filter = { vcenterId, severity: b.severity || '', q: b.q || '', since: Number(b.since) || 0, until: Number(b.until) || 0, limit: Math.min(500, Number(b.limit) || 200) };
+  // v2.630 SEC2630-02: 존재하지 않는 id 로 인메모리 큐 키를 무한히 만들지 못하게 — 이 포탈이 아는 vCenter 만.
+  //   (등록부 · 스냅샷 · 위임 인벤토리 · GPU 게스트 진단 — /tools/vclogs/sources 가 목록을 만드는 것과 같은 원천)
+  if (!knownVcenterIds().has(vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter를 찾을 수 없습니다.' });
+  // 검색어·심각도는 엣지 LIKE 검색으로 내려간다 — 원문 그대로(최대 1MB 본문)를 60초 보관·전달하지 않는다.
+  const q = typeof b.q === 'string' ? b.q : '';
+  if (q.length > FEDERATE_Q_MAX) return res.status(400).json({ ok: false, reason: `검색어가 너무 깁니다(${q.length}자 > ${FEDERATE_Q_MAX}자).` });
+  const severity = typeof b.severity === 'string' ? b.severity : '';
+  if (severity.length > FEDERATE_SEV_MAX) return res.status(400).json({ ok: false, reason: '심각도 값이 올바르지 않습니다.' });
+  const fin = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
+  const lim = Math.trunc(Number(b.limit));
+  const filter = { vcenterId, severity, q, since: fin(b.since), until: fin(b.until), limit: Number.isFinite(lim) && lim >= 1 ? Math.min(500, lim) : 200 };
   res.json({ ok: true, reqId: enqueueLogQuery(vcenterId, filter, req.user?.username || '') });
 });
 api.get('/tools/vclogs/federate', requirePerm('tools'), (req, res) => {

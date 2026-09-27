@@ -15,7 +15,7 @@
  * ⚠ **폴링하지 않는다** — 점검은 폴러가 주기로 돌고, 화면은 마운트 1회 + 버튼이다(v2.508 V4 규약).
  * ⚠ 표는 **가로 스크롤 컨테이너**로 감싼다 — 열이 많아 감싸지 않으면 400px 에서 페이지를 밀어낸다.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js'; // v2.613 CATALOG2613-06: 서브메뉴를 URL 에 싣는다
@@ -87,10 +87,13 @@ export function LinkCheck() {
   const [detail, setDetail] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [form, setForm] = useState(null);
+  // v2.630 WEB2630-05: 편집 중(저장 전) 폼은 '지금 점검' 뒤 load 가 서버값으로 덮지 않는다 — 저장하지 않은 편집이 조용히 사라졌다.
+  const formDirty = useRef(false);
+  const editForm = (next) => { formDirty.current = true; setForm(next); };
 
   const load = React.useCallback(async () => {
     setLoading(true);
-    try { const d = await fetchJson('/tools/link-check'); setData(d); setForm(linkFormFromSettings(d.settings)); setError(''); }
+    try { const d = await fetchJson('/tools/link-check'); setData(d); setForm((f) => (f && formDirty.current ? f : linkFormFromSettings(d.settings))); setError(''); }
     catch (e) { setError(e?.message || String(e)); }
     finally { setLoading(false); }
   }, []);
@@ -151,7 +154,7 @@ export function LinkCheck() {
   };
   const saveSettings = async () => {
     setBusy(true);
-    try { const r = await putJson('/tools/link-check/settings', linkSettingsPayload(form)); setNote('설정을 저장했습니다.'); setData({ ...data, settings: r.settings, enabled: r.settings.enabled }); setForm(linkFormFromSettings(r.settings)); }
+    try { const r = await putJson('/tools/link-check/settings', linkSettingsPayload(form)); setNote('설정을 저장했습니다.'); setData({ ...data, settings: r.settings, enabled: r.settings.enabled }); formDirty.current = false; setForm(linkFormFromSettings(r.settings)); }
     catch (e) { setNote(`저장 실패: ${e?.message || e}`); }
     finally { setBusy(false); }
   };
@@ -224,26 +227,26 @@ export function LinkCheck() {
         <div className="card" style={{ display: 'grid', gap: 8 }}>
           <div style={{ fontWeight: 600 }}>통신 점검 설정</div>
           <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
-            <input type="checkbox" checked={!!form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
+            <input type="checkbox" checked={!!form.enabled} onChange={(e) => editForm({ ...form, enabled: e.target.checked })} />
             점검 켜기 (기본 꺼짐 — 켜면 주기마다 링크 수만큼 TCP/TLS/HTTP 가 나갑니다)
           </label>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12 }}>
             <label style={{ display: 'grid', gap: 2, minWidth: 0 }}>주기(분)
               <input type="number" min="1" style={{ minWidth: 0, width: 90 }}
                 value={form.intervalMin ?? ''}
-                onChange={(e) => setForm({ ...form, intervalMin: e.target.value })} />
+                onChange={(e) => editForm({ ...form, intervalMin: e.target.value })} />
             </label>
             <label style={{ display: 'grid', gap: 2, minWidth: 0 }}>동시 점검 수
               <input type="number" min="1" max="32" style={{ minWidth: 0, width: 90 }}
-                value={form.concurrency ?? ''} onChange={(e) => setForm({ ...form, concurrency: e.target.value })} />
+                value={form.concurrency ?? ''} onChange={(e) => editForm({ ...form, concurrency: e.target.value })} />
             </label>
             <label style={{ display: 'grid', gap: 2, minWidth: 0 }}>표본 보존(일)
               <input type="number" min="7" style={{ minWidth: 0, width: 90 }}
-                value={form.sampleRetentionDays ?? ''} onChange={(e) => setForm({ ...form, sampleRetentionDays: e.target.value })} />
+                value={form.sampleRetentionDays ?? ''} onChange={(e) => editForm({ ...form, sampleRetentionDays: e.target.value })} />
             </label>
             <label style={{ display: 'grid', gap: 2, minWidth: 0 }}>로그 보존(일)
               <input type="number" min="3" style={{ minWidth: 0, width: 90 }}
-                value={form.eventRetentionDays ?? ''} onChange={(e) => setForm({ ...form, eventRetentionDays: e.target.value })} />
+                value={form.eventRetentionDays ?? ''} onChange={(e) => editForm({ ...form, eventRetentionDays: e.target.value })} />
             </label>
           </div>
           <div style={{ display: 'grid', gap: 4 }}>
@@ -251,7 +254,7 @@ export function LinkCheck() {
             {(data?.kindKeys || []).map((k) => (
               <label key={k} style={{ fontSize: 11, display: 'flex', gap: 6, alignItems: 'flex-start' }}>
                 <input type="checkbox" checked={form.kinds?.[k] !== false}
-                  onChange={(e) => setForm({ ...form, kinds: { ...(form.kinds || {}), [k]: e.target.checked ? true : false } })} />
+                  onChange={(e) => editForm({ ...form, kinds: { ...(form.kinds || {}), [k]: e.target.checked ? true : false } })} />
                 <span><b>{kinds[k]?.label || k}</b> — {kinds[k]?.desc || ''}</span>
               </label>
             ))}
@@ -263,7 +266,7 @@ export function LinkCheck() {
             엣지↔엣지 짝(한 줄에 `보내는엣지 → 받는엣지`):
             <textarea rows={4} style={{ width: '100%', minWidth: 0, fontSize: 11 }}
               value={(form.pairs || []).map((p) => `${p.from} → ${p.to}`).join('\n')}
-              onChange={(e) => setForm({
+              onChange={(e) => editForm({
                 ...form,
                 pairs: e.target.value.split(/\r?\n/).map((ln) => {
                   const m = ln.split(/→|->|,/);

@@ -317,6 +317,7 @@ export function vmperfDiskUsage() {
 export const VMPERF_METRICS = ['vm_cpu_alloc_mhz', 'vm_cpu_used_mhz', 'vm_mem_alloc_mb', 'vm_mem_used_mb'];
 export const VMPERF_DISK_METRICS = ['ds_cap_gb_vc', 'ds_used_gb_vc'];
 // VM 디스크 집계(v2.446): 할당(committed+uncommitted)·커밋·정지 VM 커밋·스냅샷 크기(GB). 키 규약 동일.
-export const VMPERF_VMDISK_METRICS = ['vm_disk_prov_gb', 'vm_disk_used_gb', 'vm_disk_off_gb', 'vm_snap_gb'];
+// v2.630(DATA2630-01): vm_snap_on_gb — 전원 켜진 VM 의 스냅샷만(회수 가능 = 정지 VM 디스크 + 이 값. 정지 VM 스냅샷은 정지 디스크에 이미 포함).
+export const VMPERF_VMDISK_METRICS = ['vm_disk_prov_gb', 'vm_disk_used_gb', 'vm_disk_off_gb', 'vm_snap_gb', 'vm_snap_on_gb'];
 export const VMPERF_ALL_METRICS = [...VMPERF_METRICS, ...VMPERF_DISK_METRICS];
 export const vmperfDir = () => DIR;

@@ -89,6 +89,7 @@ export function reapClaims(now = Date.now()) {
       j.state = 'error'; j.doneAt = now;
       j.result = { scanned: 0, foundCount: 0, found: [], registered: 0, error: `인출 후 확인 응답(진행/결과)이 ${MAX_CLAIMS}회 연속 없어 종료 — 엣지 재시작/네트워크를 확인하세요.` };
       addEvent(j, `인출 후 확인 응답 없음이 ${MAX_CLAIMS}회 반복 — 잡을 오류로 종료(엣지 재시작/네트워크 확인).`, 'error');
+      closeRangeRun(reqId, j.result.error);
       failed++;
       continue;
     }
@@ -150,6 +151,15 @@ function gc(now = Date.now()) {
  * v2.622(감사 RECENT-03·EDGE-02): 활동 없이 TTL 을 넘긴 미완료 잡을 오류로 종결한다(조용한 삭제 금지). 대기 잡이면 '에이전트가
  *   인출하지 않았다', 진행 잡이면 '진행 보고가 끊겼다' 로 원인을 나눠 적는다 — 조치가 다르다(엣지 폴링 확인 / 엣지 스캔 확인).
  */
+/**
+ * v2.630(감사 A4-01): 잡을 오류로 닫는 모든 경로가 스캔 대역 '최근 결과' 의 대기 표시(pending:true)도 함께 닫는다.
+ *   예전에는 결과 수신·gc 만료 두 경로만 닫아, 재인출 소진·개별 취소·전체 중지로 끝난 잡의 대역이 다음 스캔까지
+ *   '결과 대기 N분째' 로 남았다(잡은 이미 오류인데 화면은 기다리라고 말했다).
+ */
+function closeRangeRun(reqId, why) {
+  try { recordScanRangeRunByReqId(reqId, { pending: false, ok: false, error: why }); } catch { /* 기록 실패가 종결을 막지 않는다 */ }
+}
+
 let _gcExpired = 0;
 function expireUndone(reqId, j, now) {
   const wasPending = j.state === 'pending';
@@ -161,7 +171,7 @@ function expireUndone(reqId, j, now) {
   j.result = { scanned: j.progress?.scanned || 0, foundCount: 0, found: [], registered: 0, error: why, expired: true };
   addEvent(j, why, 'error');
   dropWaiting(j, reqId);
-  try { recordScanRangeRunByReqId(reqId, { pending: false, ok: false, error: why }); } catch { /* 기록 실패가 정리를 막지 않는다 */ }
+  closeRangeRun(reqId, why);
   _gcExpired++;
   console.warn(`[idrac-scan-jobs] 잡 ${reqId} 만료(${wasPending ? '미인출' : '진행 보고 끊김'}) — 에이전트 '${j.agent}'`);
 }
@@ -341,6 +351,7 @@ export function cancelPendingIdracScanJobs() {
       j.doneAt = Date.now();
       j.result = { scanned: 0, foundCount: 0, found: [], registered: 0, error: '사용자가 스캔을 중지(취소)했습니다.' };
       addEvent(j, '사용자가 스캔을 중지 — 대기 중이던 잡을 취소했습니다.', 'warn');
+      closeRangeRun(reqId, j.result.error);
       pend.delete(reqId);
       n++;
     }
@@ -363,6 +374,7 @@ export function cancelIdracScanJob(reqId) {
   j.doneAt = Date.now();
   j.result = { scanned: 0, foundCount: 0, found: [], registered: 0, error: '관리자가 이 대기 잡을 취소했습니다.' };
   addEvent(j, '관리자가 이 대기 잡을 개별 취소했습니다.', 'warn');
+  closeRangeRun(rid, j.result.error);
   const key = String(j.agent || '').trim().toLowerCase();
   const pend = byAgent.get(key);
   if (pend) { pend.delete(rid); if (!pend.size) byAgent.delete(key); }

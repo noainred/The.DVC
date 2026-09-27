@@ -88,7 +88,7 @@ function load() {
 
 // v2.591: '지금 수집' 요청 큐의 기준선 — 보관 중인 엣지 스냅샷의 수집 시각(엣지 시계 값).
 setCollectBaseResolver((id) => {
-  for (const e of load().values()) for (const s of e?.snapshots || []) if (String(s?.id) === String(id)) return Number(s.collectedAt) || null;
+  for (const e of load().values()) for (const s of e?.snapshots || []) if (String(s?.id) === String(id)) return Number(s.edgeCollectedAt ?? s.collectedAt) || null; // v2.630 A4-02
   return null;
 });
 
@@ -121,7 +121,7 @@ export function saveEdgePdu(agent, snapshots) {
   const prevRec = load().get(key);
   load().set(key, { agent: String(agent), at: Date.now(), snapshots: list, ...(prevRec?.status ? { status: prevRec.status } : {}) }); // v2.613 EDGE2613-04: 마지막 상태 보고는 보존
   persist();
-  for (const sn of list) if (sn?.id) ackCollect(sn.id, Number(sn.collectedAt) || null); // v2.590 P16: '지금 수집' 완료 확인
+  for (const sn of list) if (sn?.id) ackCollect(sn.id, Number(sn.edgeCollectedAt ?? sn.collectedAt) || null); // v2.630 A4-02: 엣지 시계 원본 // v2.590 P16: '지금 수집' 완료 확인
   return { ok: true, count: list.length, dropped, coerced, ...(narrowed ? { narrowed } : {}), ...(adm.evicted ? { evicted: adm.evicted } : {}) };
 }
 

@@ -91,9 +91,9 @@ export function kpiItems(totals) {
     { key: 'streaming', label: '스트리밍 중', value: countText(n('streaming')), accent: null,
       meta: n('devices') != null && n('streaming') != null ? `스트리밍 아님 ${countText(Math.max(0, n('devices') - n('streaming')))}` : '' },
     { key: 'parts', label: '장애 파트', value: countText(fault), accent: fault > 0 ? red : (warn > 0 ? amber : null), meta: faultMeta },
-    { key: 'bgp', label: 'BGP 피어 down', value: countText(n('bgpDown')), accent: n('bgpDown') > 0 ? red : null, meta: unread('bgpUnread', 'BGP 를') || '' },
+    { key: 'bgp', label: 'BGP 피어 down', value: countText(n('bgpDown')), accent: n('bgpDown') > 0 ? red : null, meta: [n('bgpStateUnknown') > 0 ? `상태 미확인 ${countText(n('bgpStateUnknown'))}(down 에 넣지 않음)` : null, unread('bgpUnread', 'BGP 를')].filter(Boolean).join(' · ') },
     { key: 'ports', label: '포트 down', value: countText(n('portsDown')), accent: n('portsDown') > 0 ? amber : null,
-      meta: ['관리상 켜 둔(admin up) 포트 중 링크 down', unread('portsUnread', '포트를')].filter(Boolean).join(' · ') },
+      meta: ['관리상 켜 둔(admin up) 포트 중 링크 down', n('portsNoLink') > 0 ? `미연결 ${countText(n('portsNoLink'))}은 제외` : null, unread('portsUnread', '포트를')].filter(Boolean).join(' · ') },
   ];
 }
 

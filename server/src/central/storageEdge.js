@@ -66,7 +66,7 @@ function load() {
 
 // v2.591: '지금 수집' 요청 큐의 기준선 — 중앙 재시작 직후에도 보관 중인 엣지 스냅샷의 수집 시각(엣지 시계 값)을 쓴다.
 setCollectBaseResolver((id) => {
-  for (const rec of load().values()) for (const d of rec?.devices || []) if (String(d?.deviceId || d?.id) === String(id)) return Number(d.collectedAt) || null;
+  for (const rec of load().values()) for (const d of rec?.devices || []) if (String(d?.deviceId || d?.id) === String(id)) return Number(d.edgeCollectedAt ?? d.collectedAt) || null; // v2.630 A4-02: 엣지 시계 원본
   return null;
 });
 
@@ -109,7 +109,7 @@ export function saveEdgeStorage(agent, devices, info = {}) {
   for (const dv of list) {
     const key = dv.deviceId || dv.id;
     if (!key) continue;
-    const ca = Number(dv.collectedAt) || 0;
+    const ca = Number(dv.edgeCollectedAt ?? dv.collectedAt) || 0; // v2.630 A4-02: 완료 판정·중복 제거는 엣지 시계 원본(수신 시각 clamp 값이면 빠른 시계의 옛 스냅샷 재전송이 완료로 보인다)
     ackCollect(key, ca || null); // v2.590 P16: 위임 '지금 수집' 요청의 완료 확인(인출 이후 수집분일 때만)
     if (_lastRec.get(key) === ca) continue;
     _lastRec.set(key, ca);

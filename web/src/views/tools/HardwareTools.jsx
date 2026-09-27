@@ -15,6 +15,7 @@ import { dayStamp } from '../../dayStamp.js';
 import { intervalText } from './collectActivityText.js';
 // v2.621(감사 WEB-04·WEB-05): BMC 벤더 판정·미지원 서버 인증 칸 — 배지·CSV·필터가 같은 판정을 쓴다.
 import { serverVendorBadge, serverCsvType, serverCsvVendor, vendorFilterOptions, matchesVendor, unsupportedAuthBadge, detailServerOf } from './serverVendorText.js';
+import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 
 /**
  * v2.622(감사 RECENT-04): 상세 모달 열기 — 행이 벤더를 모르면(온도·GPU·드릴다운) 먼저 'BMC' 로 열고 서버 목록을
@@ -135,6 +136,7 @@ function HwDrillModal({ dc, dim, keyVal, onClose, onServer }) {
           <b style={{ fontSize: 15 }}>{dim === 'gpu' ? '🎮' : dim === 'cpu' ? '⚙' : dim === 'memory' ? '💾' : '🖥'} {HW_DIM_LABEL[dim] || dim}: <span style={{ color: 'var(--accent)' }}>{keyVal}</span> <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>· {rows.length}대</span></b>
           <button className="logout-btn" onClick={onClose}>닫기</button>
         </div>
+        {!loading && !error && <ScopeOmitBanner data={data} />}
         {loading ? <Loading /> : error ? <ErrorBox message={error} /> : rows.length === 0 ? (
           <div className="muted" style={{ padding: 16 }}>해당 서버가 없습니다.</div>
         ) : (
@@ -216,6 +218,7 @@ function HardwareSummary() {
         </label>
       </div>
       <DcErrNote err={dcErr} />
+      <ScopeOmitBanner data={d} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
         <Bars title="🖥 서버 모델 종류" rows={d.byModel} dim="model" />
         <Bars title="⚙ CPU 종류" rows={d.byCpu} dim="cpu" />
@@ -240,8 +243,10 @@ function ServerInfoByVcenter({ vc, onServer }) {
   // v2.613 WEB2613-02(v2.590 W3 의 형제): 법인 목록(관리자 전용) 조회 실패를 `{assign:{}}` 로 삼키면 명시 datacenterId 가 없는
   //   서버 전부가 '미지정(법인 없음)' 으로 묶여 **설정 결함처럼** 읽힌다. 실패는 dcErr 로 따로 들고 그렇게 말한다(DatastoreUsage 와 같다).
   const [dcErr, setDcErr] = useState(null);
+  const [scopeMeta, setScopeMeta] = useState(null);
   const load = () => Promise.all([
-    fetchJson('/admin/idrac').then((r) => r.servers || []),
+    // v2.630 UI2630-01: 응답의 범위 필드(scoped·omittedOutOfScope)도 함께 든다 — 목록만 꺼내면 뺀 서버 수가 사라진다.
+    fetchJson('/admin/idrac').then((r) => { setScopeMeta(r?.scoped ? { scoped: true, omittedOutOfScope: r.omittedOutOfScope } : null); return r.servers || []; }),
     fetchJson('/admin/datacenters').then((r) => { setDcErr(null); return { datacenters: r.datacenters || [], assign: r.assign || {} }; }).catch((e) => { setDcErr(e); return { datacenters: [], assign: {} }; }),
   ]).then(([servers, dc]) => { setD(servers); setDcs(dc); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => { setD(null); load(); /* eslint-disable-next-line */ }, []);
@@ -287,6 +292,7 @@ function ServerInfoByVcenter({ vc, onServer }) {
         </div>
       </div>
       <DcErrNote err={dcErr} />
+      <ScopeOmitBanner data={scopeMeta} />
       {groupList.length === 0 ? (
         <div className="card" style={{ padding: 16 }}><span className="muted">등록된 서버가 없습니다. ‘설정 › iDRAC 서버 등록 › 법인별 iDRAC 장비 스캔’에서 등록하세요.</span></div>
       ) : (
@@ -463,7 +469,7 @@ function PartsInventory({ vc, onServer }) {
   const openDrill = (b) => {
     setDrill({ key: b.key, label: b.label, catName: b.catName });
     fetchJson(`/admin/idrac/parts-servers${vcQS(vc)}${vcQS(vc) ? '&' : '?'}key=${encodeURIComponent(b.key)}`)
-      .then((d) => setDrill((cur) => (cur && cur.key === b.key ? { ...cur, servers: d.servers } : cur)))
+      .then((d) => setDrill((cur) => (cur && cur.key === b.key ? { ...cur, servers: d.servers, scoped: d.scoped, omittedOutOfScope: d.omittedOutOfScope } : cur)))
       .catch((e) => setDrill((cur) => (cur && cur.key === b.key ? { ...cur, error: e.message } : cur)));
   };
   if (err) return <ErrorBox message={err} />;
@@ -484,6 +490,7 @@ function PartsInventory({ vc, onServer }) {
   );
   return (
     <div>
+      <ScopeOmitBanner data={data} />
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 10 }}>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           {PART_CAT_CHIPS.map(([k, label]) => (
@@ -529,6 +536,7 @@ function PartsInventory({ vc, onServer }) {
         >
           {drill.error && <ErrorBox message={drill.error} />}
           {!drill.servers && !drill.error && <Loading />}
+          {drill.servers && <ScopeOmitBanner data={drill} />}
           {drill.servers && (
             <>
               <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{drill.servers.length}대 장착 — 서버를 클릭하면 iDRAC 상세가 열립니다.</div>
@@ -697,6 +705,7 @@ function UnsupportedServers({ vc }) {
   const lastScan = groups.length ? Math.max(...groups.map((g) => g.at || 0)) : 0;
   return (
     <div>
+      <ScopeOmitBanner data={d} unit="스캔 발견 장비" />
       <div className="kpis" style={{ marginBottom: 12 }}>
         <Card label="미지원 서버" value={rows.length.toLocaleString()} meta="Dell 이 아닌 Redfish 장비" accent={rows.length ? 'var(--amber)' : undefined} />
         <Card label="스캔 그룹" value={groups.length} meta="법인·서비스·스캔 주체 조합" />
@@ -710,7 +719,7 @@ function UnsupportedServers({ vc }) {
       </div>
       {!rows.length ? (
         <div className="muted" style={{ padding: 20, textAlign: 'center' }}>
-          {groups.length ? '스캔 대역에서 Dell 이 아닌 Redfish 장비를 발견하지 않았습니다.' : '아직 스캔 결과가 없습니다 — 설정 › 수집 서버 › iDRAC 스캔 대역에서 스캔이 한 번 돌아야 채워집니다(v2.495 이후 스캔부터).'}
+          {d.scoped ? '스캔 발견 장비는 법인(vCenter) 귀속이 없어 범위 제한 계정에는 보이지 않습니다 — 목록이 비어 있다는 뜻이 아닙니다.' : groups.length ? '스캔 대역에서 Dell 이 아닌 Redfish 장비를 발견하지 않았습니다.' : '아직 스캔 결과가 없습니다 — 설정 › 수집 서버 › iDRAC 스캔 대역에서 스캔이 한 번 돌아야 채워집니다(v2.495 이후 스캔부터).'}
         </div>
       ) : (
         <div className="table-wrap" style={{ maxHeight: '64vh' }}>
@@ -759,6 +768,7 @@ function ServerTempFinder({ vc, onServer }) {
   const avg = rows.length ? Math.round(rows.reduce((a, b) => a + b.celsius, 0) / rows.length) : null;
   return (
     <div>
+      <ScopeOmitBanner data={d} />
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="muted" style={{ fontSize: 13 }}>
           서버 {d.sampledServers}/{d.totalServers} · 센서 <b style={{ color: 'var(--accent)' }}>{rows.length}</b>개
@@ -808,6 +818,7 @@ function ServerFirmwareFinder({ vc }) {
   const sel = model && d.models.find((m) => m.model === model);
   return (
     <div>
+      <ScopeOmitBanner data={d} />
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="muted" style={{ fontSize: 13 }}>
           서버 모델 <b style={{ color: 'var(--accent)' }}>{d.models.length}</b>종 · 서버 {d.collectedServers}/{d.totalServers} 수집됨 · <b>모델을 클릭</b>하면 iDRAC/BIOS/NIC/HBA 드라이버 버전별 설치 대수를 봅니다.
@@ -876,6 +887,7 @@ function ServerGpuFinder({ vc, onServer }) {
     || (m.servers || []).some((s) => (s.serviceTag || '').toLowerCase().includes(ql) || (s.name || '').toLowerCase().includes(ql))) : d.models;
   return (
     <div>
+      <ScopeOmitBanner data={d} />
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="muted" style={{ fontSize: 13 }}>
 GPU <b style={{ color: 'var(--accent)' }}>{d.totalGpus}</b>장 · <b>{d.models.length}</b>종 · iDRAC {d.collectedServers}/{d.totalServers}{d.physicalServers ? ` · 물리 ${d.physicalServers}대` : ''}

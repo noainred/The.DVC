@@ -95,9 +95,13 @@ test('L-R1: GPU 시계열 export 가 scopedVcenterIds 로 범위 밖 제외', ()
 test('M-R3: PUT /tools/ipam/ip/:ip 가 기존 레코드 소유권을 body 값보다 먼저 판정', () => {
   const src = readApiSource(); // v2.283.0 분할 — api.js + routes/api/* 결합 소스 검사
   const put = src.slice(src.indexOf("api.put('/tools/ipam/ip/:ip'"), src.indexOf("api.put('/tools/ipam/ip/:ip'") + 900);
-  assert.match(put, /const existing = getOverride\(req\.params\.ip\)/);
-  // 기존 레코드의 claimedVcenterId 로 접근 가부를 먼저 검사(body 값 아님).
-  assert.match(put, /existing && !ipInWriteScope\(allowed, owners, req\.params\.ip, existing\.claimedVcenterId/);
+  // v2.630(AUTHZ2630-01): 판정이 PUT·bulk 공용 헬퍼로 옮겨졌다 — PUT 은 그 헬퍼를 부르고,
+  // 헬퍼는 기존 레코드의 claimedVcenterId 로 접근 가부를 **먼저** 검사한다(body 값 아님).
+  assert.match(put, /ipOverrideWriteVerdict\(/);
+  const fn = src.slice(src.indexOf('function ipOverrideWriteVerdict'), src.indexOf('function ipOverrideWriteVerdict') + 900);
+  assert.match(fn, /const existing = getOverride\(ip\)/);
+  assert.match(fn, /existing && !ipInWriteScope\(allowed, owners, ip, prevClaim\)/);
+  assert.ok(fn.indexOf('prevClaim)) return') < fn.indexOf('bodyClaim ||'), '기존 claim 판정이 body claim 보다 먼저');
 });
 
 test('L-R2: CSV export 가 guardCell(수식 인젝션 방어)을 적용', () => {

@@ -332,7 +332,7 @@ function DeviceModal({ target, onClose }) {
                       <td><button type="button" className="btn" style={{ padding: '2px 8px' }} onClick={() => setPort(p.name)}>{p.name}</button></td>
                       <td style={{ fontSize: 12, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.desc || ''}>{p.desc || '—'}</td>
                       <td data-sort={p.speedBps ?? ''}>{bpsText(p.speedBps)}</td>
-                      <td><Badge tone={p.oper === 'up' ? 'ok' : p.oper ? (p.admin === 'down' ? 'muted' : 'warn') : 'muted'}>{p.oper || '—'}</Badge></td>
+                      <td><Badge tone={p.oper === 'up' ? 'ok' : p.oper === 'nolink' ? 'muted' : p.oper ? (p.admin === 'down' ? 'muted' : 'warn') : 'muted'}>{p.oper === 'nolink' ? '미연결' : (p.oper || '—')}</Badge></td>
                       <td>{p.admin || '—'}</td>
                       <td>{p.vlan == null || p.vlan === '' ? '—' : p.vlan}</td>
                       <td>{p.lag || '—'}</td>

@@ -6,7 +6,7 @@
 import { logAudit } from '../../audit.js';
 import { listTargetsCopy, KINDS } from '../../svcmon/store.js';
 import { pollerRole } from '../../svcmon/poller.js';
-import { edgeSummary, edgeState, edgeTotals, forgetAgent, probeAgent, MAX_AGENTS, MAX_ROWS_PER_AGENT } from '../../central/svcmonEdge.js';
+import { edgeSummary, edgeSummaryWithAssigned, edgeState, edgeTotals, forgetAgent, probeAgent, MAX_AGENTS, MAX_ROWS_PER_AGENT } from '../../central/svcmonEdge.js';
 import { listAgentTokens } from '../../central/agentTokens.js';
 import { silenceStatus, checkSilenceOnce } from '../../central/svcmonSilence.js';
 import { svcmonPushStatus, pushSvcmonNow } from '../../agent/svcmonPush.js';
@@ -121,7 +121,7 @@ svcmonRouter.post('/config-pull-now', canEdit, fullScopeOnly, async (req, res) =
 svcmonRouter.get('/edges', (req, res) => {
   const now = Date.now();
   res.json({
-    edges: redactEdgeSummary(edgeSummary(now), fullAddr(req)), ...(fullAddr(req) ? {} : { addressHidden: true }),
+    edges: redactEdgeSummary(edgeSummaryWithAssigned(now), fullAddr(req)), ...(fullAddr(req) ? {} : { addressHidden: true }),
     totals: edgeTotals(now),
     limits: { maxAgents: MAX_AGENTS, maxRowsPerAgent: MAX_ROWS_PER_AGENT },
     silence: silenceStatus(),
@@ -166,7 +166,7 @@ svcmonRouter.delete('/edges/:agent', canEdit, fullScopeOnly, (req, res) => {
   if (!forgetAgent(req.params.agent, req.user?.username)) {
     return res.status(404).json({ error: '그 엣지를 찾을 수 없습니다.' });
   }
-  res.json({ ok: true, edges: redactEdgeSummary(edgeSummary(), fullAddr(req)), ...(fullAddr(req) ? {} : { addressHidden: true }) });
+  res.json({ ok: true, edges: redactEdgeSummary(edgeSummaryWithAssigned(), fullAddr(req)), ...(fullAddr(req) ? {} : { addressHidden: true }) });
 });
 
 /** 이 서버가 엣지일 때 — 즉시 1회 보고(진단용). 재진입 가드는 push 모듈이 공유한다. */

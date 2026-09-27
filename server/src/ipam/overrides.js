@@ -22,6 +22,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { isIpv4 } from './scan.js';
 import { canonIp } from '../util/ipv4.js';
+import { DAY_MS, DAY_OFFSET_MIN, dayStartMs } from '../util/dayKey.js';
 
 
 const FILE = path.join(config.configDir, 'ipam-overrides.json');
@@ -47,6 +48,25 @@ export function getOverrides() { return load(); }
 /** 한 IP의 override, 없으면 null. */
 export function getOverride(ip) { const d = load(); return d[canonIp(ip) || String(ip)] || d[String(ip)] || null; }
 
+/**
+ * 예약 만료 입력 → ISO(v2.630 A2-05). 화면은 날짜만(<input type=date> 'YYYY-MM-DD') 보낸다. ECMAScript 는 그 형태를
+ * **UTC 자정**으로 읽어 한국 시각 오전 9시에 '만료' 가 됐다. '10/1 까지 예약' 은 그 날 끝까지이므로
+ * **포탈 오프셋(util/dayKey) 기준 다음 날 00:00** 으로 저장한다(ledger 의 `due < now` 가 그 날 하루 동안 예약으로 본다).
+ * 시각까지 준 값(ISO 등)은 예전처럼 그대로 해석한다. 읽지 못하면 null.
+ */
+export function reservedUntilIso(v, offsetMin = DAY_OFFSET_MIN) {
+  const str = String(v ?? '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str);
+  if (m) {
+    const utc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    const back = new Date(utc);
+    if (Number.isNaN(utc) || back.getUTCMonth() !== Number(m[2]) - 1 || back.getUTCDate() !== Number(m[3])) return null;
+    return new Date(dayStartMs(utc / DAY_MS + 1, offsetMin)).toISOString();
+  }
+  const t = new Date(v);
+  return Number.isNaN(t.getTime()) ? null : t.toISOString();
+}
+
 function clean(partial = {}) {
   const out = {};
   if (partial.status !== undefined) {
@@ -65,7 +85,7 @@ function clean(partial = {}) {
   if (partial.reservedUntil !== undefined) {
     const v = partial.reservedUntil;
     if (!v) out.reservedUntil = null;
-    else { const t = new Date(v); out.reservedUntil = Number.isNaN(t.getTime()) ? null : t.toISOString(); }
+    else out.reservedUntil = reservedUntilIso(v);
   }
   return out;
 }

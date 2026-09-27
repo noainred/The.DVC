@@ -71,7 +71,7 @@ export function classifyCvpEdge({ edgeVersion = '', minVersion = MIN_CVP_EDGE_VE
 export const ROWS_MAX = 100_000;
 const KINDS = new Set([...Object.keys(CANDIDATES), 'budget', 'deadline']);
 const PART_KIND_SET = new Set(['psu', 'fan', 'temp', 'xcvr']);
-const LINK = new Set(['up', 'down', 'unknown']);
+const LINK = new Set(['up', 'down', 'nolink', 'unknown']); // v2.630 A2-02: 링크 없음(notconnect·notPresent) — down 이 아니다
 
 let _map = null;
 const writer = createDebouncedWriter(FILE, () => JSON.stringify(Object.fromEntries(load())), { name: 'cvpEdge' });

@@ -20,7 +20,7 @@ import {
   listTargetsCopy, listFolders, getSort, totalTests, flushStore, TEST_TYPES, KINDS,
 } from '../../svcmon/store.js';
 import { testState, emptySummary } from '../../svcmon/status.js';
-import { edgeSummary, edgeTotals } from '../../central/svcmonEdge.js';
+import { edgeSummary, edgeSummaryWithAssigned, edgeTotals } from '../../central/svcmonEdge.js';
 import { silenceStatus } from '../../central/svcmonSilence.js';
 import { svcmonPushStatus } from '../../agent/svcmonPush.js';
 import { getResults, getLastSweep, runNow, pollerStats } from '../../svcmon/poller.js';
@@ -87,7 +87,7 @@ svcmonRouter.get('/state', (req, res) => {
     scopeCount: inScope.length,
     targetCount: all.length,
     // 엣지 위임 요약 — 이 포탈이 직접 실행한 것 외에, 원격 법인 엣지가 보고한 현황.
-    edges: redactEdgeSummary(edgeSummary(now), fullAddr(req)), ...(fullAddr(req) ? {} : { addressHidden: true }),
+    edges: redactEdgeSummary(edgeSummaryWithAssigned(now), fullAddr(req)), ...(fullAddr(req) ? {} : { addressHidden: true }),
     edgeTotals: edgeTotals(now),
     testTypes: TEST_TYPES,
     rotateUnits: ROTATE_UNITS,
@@ -104,7 +104,7 @@ svcmonRouter.get('/diag', canEdit, (req, res) => {
     poller: { ...pollerStats(), log: logStatsFor(req.user) }, log: logStatsFor(req.user),
     targets: listTargetsCopy().length, tests: totalTests(),
     // 엣지 위임 진단 — 이 서버가 받는 쪽(edges)인지 보내는 쪽(push)인지 함께 보인다.
-    edges: redactEdgeSummary(edgeSummary(), fullAddr(req)), push: redactPushStatus(svcmonPushStatus(), req.user), silence: silenceStatus(),
+    edges: redactEdgeSummary(edgeSummaryWithAssigned(), fullAddr(req)), push: redactPushStatus(svcmonPushStatus(), req.user), silence: silenceStatus(),
   });
 });
 

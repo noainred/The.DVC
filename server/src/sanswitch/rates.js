@@ -33,7 +33,8 @@ function rate(prevVal, curVal, seconds) {
  */
 // v2.597(감사 C2597-07): 디렉터(슬롯이 있는 포트)는 'slot/port' 로 키를 잡는다 — REST 폴백 index('1/10'·'11/0' → 둘 다 110)가
 //   겹치면 두 포트의 카운터가 섞여 처리량이 틀린다. 슬롯 없는 스위치는 예전대로 index(동작 불변).
-const rateKey = (p) => (p.slot != null && p.slotPort ? `s:${p.slotPort}` : String(p.index));
+// v2.630(A2-04): 기준선·월간 점검 증분도 같은 키를 쓴다(errBaseline·healthCheck) — export.
+export const rateKey = (p) => (p.slot != null && p.slotPort ? `s:${p.slotPort}` : String(p.index));
 export function applyRates(deviceId, ports = [], now = Date.now()) {
   const prev = _prev.get(deviceId);
   const cur = { at: now, ports: new Map() };

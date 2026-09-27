@@ -5,7 +5,7 @@
  */
 
 import { diffVcenter, diffDatastores, totalsOf, slotKey, slotStartMs } from './diff.js';
-import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, readDsChangesWindow, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry } from './db.js';
+import { commitSnapshot, loadRoster, loadDsRoster, readSeries, readChanges, readDsChanges, readDsChangesWindow, rosterVcenters, dropRoster, vmtrackMeta, vmtrackStatus, readDsSeries, listDsRoster, dsSeriesWindow, dsSeriesCarry, dsSeriesBoundary, dsSeriesGeneration } from './db.js';
 
 /**
  * 스냅샷 1회 — 현재 store 스냅샷 기준.
@@ -322,14 +322,52 @@ export async function vmtrackDsSeriesAll({ days = 30, vcenterId = '', scopeIds =
   return { items, total, offset: off, limit: lim };
 }
 
-/** DS 별 '윈도우 시작값' 맵 — carry-in(직전 마지막 관측) 우선, 없으면 윈도우 내 첫 관측. */
+/**
+ * DS 별 '윈도우 시작값' 맵 — carry-in(직전 마지막 관측) 우선, 없으면 윈도우 내 첫 관측.
+ *
+ * v2.630(감사 PERF2630-01): 결과를 메모한다. 데이터는 vmtrack 슬롯 커밋(하루 2회)·prune 때만 바뀌는데 ds-top(V4 스토리지 5분
+ *   폴링)·ds-pivot·ds-series-all 이 요청마다 창 전량 + 'GROUP BY MAX(ts) JOIN' 이월 조회를 동기로 돌렸다(합성 최악 0.35~0.58초 정지).
+ *   ⚠ 키는 'days' 가 아니라 **창 경계**(ts>=sinceTs 인 첫 관측 시각)다 — sinceTs 는 매 요청 움직이지만 행 ts 가 슬롯 커밋 시각이라
+ *   창 = ts>=경계, 이월 = ts<경계 로 결과가 **정확히** 같다(경계가 없으면 창은 비고 이월은 전체 마지막). 경계는 인덱스 끝점 1회다.
+ *   세대(dsSeriesGeneration)는 ds_series 를 바꾸는 커밋·prune 이 올린다. 반환 Map 은 공유 객체다 — **호출부는 수정하지 말 것**.
+ */
+const DS_START_MEMO_MAX = 8;
+const _dsStartMemo = new Map();   // key → Promise<{carry, firstIn}>
 async function dsStartValues(sinceTs) {
-  const [windowRows, carryRows] = await Promise.all([dsSeriesWindow(sinceTs), dsSeriesCarry(sinceTs)]);
+  const boundary = await dsSeriesBoundary(sinceTs);
+  const gen = dsSeriesGeneration();
+  // DB 를 못 연 상태(빈 결과)는 메모하지 않는다 — 잠금이 풀린 뒤에도 빈 값이 남으면 '증감 없음' 이라는 거짓이 된다.
+  if (!vmtrackStatus().available) {
+    const [windowRows, carryRows] = await Promise.all([dsSeriesWindow(sinceTs), dsSeriesCarry(sinceTs)]);
+    return startMaps(windowRows, carryRows);
+  }
+  const key = `${gen}|${boundary ?? 'none'}`;
+  const hit = _dsStartMemo.get(key);
+  if (hit) { _dsStartMemo.delete(key); _dsStartMemo.set(key, hit); return hit; }
+  // 세대가 바뀌면 옛 세대 항목은 다시 맞을 수 없다 — 지운다(v2.580 TUNE-B 규약).
+  for (const k of _dsStartMemo.keys()) if (!k.startsWith(`${gen}|`)) _dsStartMemo.delete(k);
+  const p = (async () => {
+    const [windowRows, carryRows] = await Promise.all([dsSeriesWindow(sinceTs), dsSeriesCarry(sinceTs)]);
+    return startMaps(windowRows, carryRows);
+  })();
+  _dsStartMemo.set(key, p);
+  p.catch(() => { if (_dsStartMemo.get(key) === p) _dsStartMemo.delete(key); });
+  // 조회 중에 세대가 바뀌었으면(커밋이 끼어들었으면) 이 결과를 메모로 남기지 않는다.
+  p.then(() => { if (dsSeriesGeneration() !== gen && _dsStartMemo.get(key) === p) _dsStartMemo.delete(key); }, () => {});
+  while (_dsStartMemo.size > DS_START_MEMO_MAX) _dsStartMemo.delete(_dsStartMemo.keys().next().value);
+  return p;
+}
+
+function startMaps(windowRows, carryRows) {
   const carry = new Map(carryRows.map((r) => [r.ds_id, r.used_gb]));
   const firstIn = new Map();
   for (const r of windowRows) if (!firstIn.has(r.ds_id)) firstIn.set(r.ds_id, r.used_gb);
   return { carry, firstIn };
 }
+
+/** 테스트용 — 메모 크기·초기화. */
+export function _dsStartMemoSize() { return _dsStartMemo.size; }
+export function _dsStartValuesForTest(sinceTs) { return dsStartValues(sinceTs); }
 
 /**
  * 스토리지 변경 이력 — 시각별(v2.355, 목업 A): 슬롯 행마다 그 슬롯에 변화한 DS 칩 목록.

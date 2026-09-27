@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Loading, ErrorBox, UsageCell, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
+import { reclaimBasisNote } from '../toolsReportText.js';
 
 
 /** 운영 인사이트 — 라이트사이징 · 클러스터 N+1 · 알람 핫스팟 · GPU 유휴 (기존 스냅샷 기반). */
@@ -41,7 +42,7 @@ export function Insights({ scope }) {
     <>
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="유휴 VM" value={rs.idleCount} accent="var(--amber)" meta="전원 ON·CPU<5%·MEM<20%" />
-        <Card label="회수 가능(추정)" value={`${rs.reclaimableVcpu} vCPU`} meta={`${rs.reclaimableRamGB} GB RAM`} />
+        <Card label="회수 가능(추정)" value={`${rs.reclaimableVcpu} vCPU`} meta={reclaimBasisNote(rs)} />
         <Card label="N+1 위험 클러스터" value={n1Bad} accent={n1Bad ? 'var(--red)' : 'var(--green)'} meta={`전체 ${cl.length} 클러스터`} />
         <Card label="유휴 GPU" value={gw.idleGpus} accent="var(--amber)" meta={`GPU 호스트 ${gw.totalGpuHosts} · 미보고 ${gw.unreporting}`} />
         <Card label="알람" value={ah.total} accent={ah.bySeverity.critical ? 'var(--red)' : 'var(--text)'} meta={`위험 ${ah.bySeverity.critical || 0} · 경고 ${ah.bySeverity.warning || 0}`} />

@@ -24,6 +24,7 @@ import BoldText from '../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { manualPollMessage } from './idrac/manualPollText.js'; // v2.591(감사 P1): 진행 중·긴급중단을 '성공' 으로 말하지 않는다
 import { scanHoldNote, scanFormCredsState } from './idrac/scanRunText.js'; // v2.611(감사 RECENT2611-02): 비밀번호 폐기 뒤 남은 계정으로 계속되는 스캔을 말한다
+import ScopeOmitBanner from './ScopeOmitBanner.jsx';
 
 /**
  * v2.621(감사 RECENT-08): 스캔 현황(scan-jobs) 조회 결과를 어떻게 보일지(순수). v2.620 이 그 경로를 전체 범위 계정 전용으로
@@ -201,6 +202,8 @@ export default function IdracAdmin() {
   return (
     <>
       <div className="section-title" style={{ margin: '6px 0' }}>iDRAC 서버 등록 — Dell 베어메탈/물리 서버 (관리자)</div>
+      {/* v2.630 UI2630-01: 범위 계정 응답은 귀속 서버만 싣는다 — 아래 인증 정지 목록도 범위 안 서버만이다. */}
+      <ScopeOmitBanner data={data} unit="iDRAC 서버" />
 
       {authStops.length > 0 && (
         <div className="card" style={{ marginBottom: 10, padding: '10px 14px', fontSize: 13, borderColor: 'var(--red)' }}>

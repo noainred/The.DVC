@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { rateKey } from './rates.js';
 
 const FILE = () => path.join(config.configDir, 'sanswitch-err-baseline.json');
 /** 장비 수 상한 — 28대 운영에 30+ 확장을 가정해도 넉넉하다. 포트는 디렉터 768까지. */
@@ -67,7 +68,10 @@ export function baselineFromSnapshot(snap) {
     // v2.590 F3: 축약(k/m/g) 값으로 잡은 기준선은 증분의 출발점이 될 수 없다 — 어느 키였는지 함께 남긴다.
     const ap = Array.isArray(p.errApprox) ? p.errApprox.filter((k) => KEYS.includes(k)) : [];
     if (ap.length) row._approx = ap;
-    if (any) { ports[String(p.index)] = row; counted++; }
+    // v2.630(A2-04): 키는 rates.js rateKey 와 같다(slot 이 있으면 's:<slot/port>'). REST 디렉터에서 default-index 가
+    //   없으면 '1/10'·'11/0' 이 index 110 하나로 합쳐져 뒤 포트가 앞 포트의 기준선을 덮었다. 옛 파일(index 키)은
+    //   healthCheck.baselineRowOf 가 겹치지 않는 경우에만 읽기 폴백한다.
+    if (any) { ports[rateKey(p)] = row; counted++; }
   }
   return {
     at: Number(snap?.collectedAt) || Date.now(),

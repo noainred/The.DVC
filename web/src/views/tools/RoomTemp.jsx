@@ -8,6 +8,8 @@ import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { SORTS, VIEWS, sortGroups, matrixStats, heat, tileData, boardCounts, sparkPath, trendNotes } from './roomTempView.js'; // v2.534 시안 적용(순수 판정)
 import { unitText } from '../unitText.js';
+import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
+import { roomSparkScopeNote } from '../scopeOmitText.js';
 
 const C = (v) => (v == null ? '—' : `${v}℃`);
 
@@ -506,6 +508,7 @@ export function RoomTemp() {
     <>
       {error && <div className="badge amber" style={{ marginBottom: 10, display: 'inline-block' }}>업데이트 실패(이전 데이터 표시 중)</div>}
 
+      <ScopeOmitBanner data={data} />
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="법인" value={t.groups ?? 0} meta={`측정 서버 ${t.withData ?? 0} / ${t.servers ?? 0}대`} />
         <Card label="흡기 범위(전체)" value={t.inlet?.min == null ? '—' : `${t.inlet.min}~${t.inlet.max}℃`}
@@ -549,7 +552,10 @@ export function RoomTemp() {
         </div>
       ) : view === 'range' ? <RangePlot groups={sorted} onPick={pick} />
         : view === 'matrix' ? <Matrix groups={sorted} open={open} onToggle={toggle} onTrend={openTrend} />
-          : <WallBoard groups={sorted} sparks={sparks} onPick={pick} full={full} setFull={setFull} />}
+          : <>
+            {roomSparkScopeNote(sparks) && <div className="muted" style={{ fontSize: 12, marginBottom: 8, whiteSpace: 'normal' }}>🔒 {roomSparkScopeNote(sparks)}</div>}
+            <WallBoard groups={sorted} sparks={sparks} onPick={pick} full={full} setFull={setFull} />
+          </>}
 
       {trend && (
         <TrendModal groupId={trend.group.id} groupName={trend.group.name} kind={trend.kind} onClose={() => setTrend(null)} />

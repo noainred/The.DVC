@@ -20,7 +20,7 @@
 
 import { clampIntervalMs } from '../config.js';
 import { notify } from '../alerts.js';
-import { edgeSummary, silenceLimitMs } from './svcmonEdge.js';
+import { edgeSummary, noReportGraceMs, edgeStartedAt, _setEdgeStartedAt } from './svcmonEdge.js';
 import { listAssignments } from './svcmonAssign.js';
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
@@ -38,7 +38,8 @@ let lastCheck = null;
 //   그래서 배정 목록(central-svcmon-assign.json — 파일 영속)의 엣지를 함께 본다: 기동 후 유예(판정 임계 — 기본 주기 기준)가
 //   지나도 한 번도 보고하지 않은 배정 엣지는 '기동 후 보고 없음' 으로 **한 번** 알린다. 보고가 오면 아래 전환 규칙이
 //   '보고 재개' 로 알린다(첫 관측 억제는 '보고가 있던 엣지' 에만 적용된다).
-let startedAt = Date.now();
+// v2.630(감사 R2630-06): 기동 시각은 svcmonEdge 가 소유한다(화면의 '배정됨 · 보고 없음' 행과 같은 기준). 유예는 엣지마다 —
+//   배정 기록에 남은 그 엣지의 push 주기 기준(noReportGraceMs), 모르면 예전처럼 기본 주기 기준.
 
 const sec = (ms) => Math.round((ms || 0) / 1000);
 
@@ -87,7 +88,8 @@ export async function checkSilenceOnce({ now: nowArg } = {}) {
     }
     // 배정됐는데 이 중앙이 기동한 뒤 한 번도 보고하지 않은 엣지.
     const reported = new Set(edgeSummaryNames(now));
-    const graceMs = silenceLimitMs(null);   // 봉투를 받은 적이 없으니 기본 주기(60초) 기준 임계
+    const startedAt = edgeStartedAt();
+    const graceByAgent = {};
     const noReport = [];
     let assignments = [];
     try { assignments = listAssignments(); } catch (e) { assignments = []; lastAssignError = e?.message || String(e); }
@@ -95,6 +97,8 @@ export async function checkSilenceOnce({ now: nowArg } = {}) {
       const name = String(a?.agent || '');
       if (!name || reported.has(name.toLowerCase())) continue;
       noReport.push(name);
+      const graceMs = noReportGraceMs(a);
+      graceByAgent[name] = graceMs;
       if (now - startedAt < graceMs) continue;   // 유예 중 — 아직 판정하지 않는다
       const prev = known.get(name);
       if (prev) continue;                         // 이미 알렸거나(무보고) 추적 중
@@ -109,7 +113,10 @@ export async function checkSilenceOnce({ now: nowArg } = {}) {
           + `배정 점검 ${a.counts?.tests ?? '—'}개). 이 엣지가 담당한 점검의 **현재 상태를 알 수 없습니다** — 중앙이 내려가 있는 동안 엣지가 멈췄을 수 있습니다.`,
       }).catch(() => {});
     }
-    lastCheck = { at: now, agents: known.size, fired, noReport, graceMs, startedAt };
+    // graceMs(단일 값)는 하위호환 — 엣지별 값의 최소(없으면 기본 주기 기준). 엣지별은 graceByAgent.
+    const graces = Object.values(graceByAgent);
+    const graceMs = graces.length ? Math.min(...graces) : noReportGraceMs(null);
+    lastCheck = { at: now, agents: known.size, fired, noReport, graceMs, graceByAgent, startedAt };
     return { ok: true, ...lastCheck };
   } finally {
     running = false;
@@ -125,7 +132,7 @@ export function silenceStatus() {
     enabled: ENABLED,
     tickMs: TICK_MS,
     tracked: [...known.entries()].map(([agent, v]) => ({ agent, silent: v.silent, since: v.since, ...(v.noReport ? { noReport: true } : {}) })),
-    startedAt,
+    startedAt: edgeStartedAt(),
     ...(lastAssignError ? { assignError: lastAssignError } : {}),
     lastCheck,
     note: '엣지 무보고만 알립니다. 개별 점검의 정상→실패 전이 알림은 아직 없습니다.',
@@ -139,4 +146,4 @@ export function startSvcmonSilenceWatch() {
   console.log(`[svcmon-silence] 엣지 무보고 감시 시작 (${Math.round(TICK_MS / 1000)}초 주기${ENABLED ? '' : ' · 알림 비활성'})`);
 }
 
-export function _resetSilenceState({ startedAt: at } = {}) { known.clear(); lastCheck = null; lastAssignError = ''; if (Number.isFinite(at)) startedAt = at; }
+export function _resetSilenceState({ startedAt: at } = {}) { known.clear(); lastCheck = null; lastAssignError = ''; if (Number.isFinite(at)) _setEdgeStartedAt(at); }

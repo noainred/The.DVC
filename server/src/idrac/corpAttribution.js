@@ -110,3 +110,13 @@ export function attributeBareMetalFromSnap(bareMetal = [], snap = null) {
     return { bareMetal: bareMetal || [], filled: 0, error: String(e?.message || e).slice(0, 200) };
   }
 }
+
+/**
+ * v2.630(R2630-01): 스냅샷 기준 **서버 id·서비스태그 → 귀속 vCenter 색인**(개요·법인별 사용량과 같은 판정).
+ * iDRAC 조회 라우트의 범위 절단이 이 판정을 복제하지 않고 그대로 쓰게 한다.
+ * `servers` 를 주지 않으면 `allPhysicalServers()` 를 쓴다(호출부가 인벤토리 캐시 태그를 보탠 목록을 줄 수 있다).
+ */
+export function vcIndexFromSnap(snap = null, servers = null) {
+  const { opts } = corpAttribution(snap?.vcenters || []);
+  return buildVcIndex(Array.isArray(servers) ? servers : allPhysicalServers(), snap?.hosts || [], opts);
+}

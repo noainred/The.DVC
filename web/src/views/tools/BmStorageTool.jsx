@@ -12,6 +12,7 @@ import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { droppedSecretNote } from '../droppedSecretText.js';
+import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
@@ -242,6 +243,7 @@ export default function BmStorageTool() {
               <label>수집 주체 <span className="muted" style={{ fontSize: 11 }}>(등록된 수집 서버(원격)에서 선택)</span>
                 <select className="input" value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}>
                   <option value="">중앙 직접(SSH)</option>
+                  {(() => { const m = missingChoice(agents || [], form.agent); return m ? <option value={m.value}>엣지 위임 — {m.label}</option> : null; })()}
                   {(agents || []).map((a) => <option key={a} value={a}>엣지 위임 — {a}</option>)}
                 </select>
               </label>

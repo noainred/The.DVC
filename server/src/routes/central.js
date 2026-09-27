@@ -48,7 +48,7 @@ import { takeLogQueries, setLogQueryResult, vcenterOfReq } from '../central/logQ
 import { specToRange } from '../ipam/rangePolicies.js';
 import { ipToNum } from '../ipam/ledger.js';
 import { takeCaptureJobs, applyCaptureResult, captureAgentOfReq } from '../central/captureJobs.js';
-import { takeJobsWait as takeRmaJobsWait, setJobResult as setRmaJobResult, jobAgentOf as rmaJobAgentOf, noteHeartbeat as noteRmaHeartbeat, onlineInstances as rmaOnlineInstances } from '../rma/jobs.js';
+import { takeJobsWait as takeRmaJobsWait, setJobResult as setRmaJobResult, jobAgentOf as rmaJobAgentOf, getJob as getRmaJob, noteHeartbeat as noteRmaHeartbeat, onlineInstances as rmaOnlineInstances } from '../rma/jobs.js';
 import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaRemoteFor } from '../rma/settings.js';
 import { scheduleFor as rmaScheduleFor, assignForInstance as rmaAssign } from '../rma/schedules.js';
 import { ingestResult as rmaIngestResult } from '../rma/testResults.js';
@@ -1363,7 +1363,7 @@ centralRouter.post('/storage-data', requireCentral(), async (req, res) => {
   let devices = Array.isArray(req.body?.devices) ? req.body.devices : [];
   let notOwned = 0; // v2.601 EDGE2601-04: 소유권 필터로 뺀 수도 응답에 싣는다(엣지가 상태·콘솔에 남긴다)
   const now = Date.now();
-  devices = devices.map((d) => (d && typeof d === 'object' ? { ...d, collectedAt: Math.min(Number(d.collectedAt) || now, now) } : d));
+  devices = devices.map((d) => stampEdgeCollectedAt(d, now)); // v2.630 A4-02: 원본 엣지 시각은 edgeCollectedAt 으로 따로
   {
     const r = await onlyDelegated(devices, (d) => d.deviceId ?? d.id, '../storage/registry.js'); // v2.607 CEN2607-03
     devices = r.list; notOwned += r.denied;
@@ -1394,6 +1394,27 @@ centralRouter.post('/storage-data', requireCentral(), async (req, res) => {
  *   원소가 객체가 아니거나 id 가 없으면 여기서 판정하지 않고 뒤의 수신 정리(sanitizeEdgeDevices)가 센다.
  * @returns {Promise<{ list: any[], denied: number }>}
  */
+/**
+ * v2.630(감사 A4-02): 엣지 push 의 collectedAt 을 두 값으로 나눈다.
+ *  - collectedAt       : 표시·병합용 — 중앙 수신 시각으로 clamp(v2.416 L-1: 미래 시각이 '최신 우선' 병합을 항상 이기지 않게).
+ *  - edgeCollectedAt   : 엣지가 보낸 **원래 값(엣지 시계)**. 위임 '지금 수집' 큐의 완료 판정(v2.591 기준선 = 같은 시계의 두 값)과
+ *                        같은 스냅샷 재전송 판별(_lastRec)은 이 값을 써야 한다. clamp 값은 중앙 시계가 섞여 엣지 시계가 빠르면
+ *                        같은 옛 스냅샷이 재전송마다 '지금' 으로 새로 찍혀 요청이 새 수집 없이 완료되고 작업 로그가 중복됐다.
+ *  - edgeClockAheadMs  : 엣지 시각이 수신 시각보다 5초 넘게 앞서면 그 차이(시계 빠름) — 신선도 표시가 '방금' 으로 보이는
+ *                        이유를 화면이 밝힐 수 있게 싣는다. 모르면 싣지 않는다(0 을 지어내지 않는다).
+ * 원래 값을 읽지 못하면(숫자 아님) edgeCollectedAt 은 null 이고 collectedAt 은 예전처럼 수신 시각이다.
+ */
+export const EDGE_CLOCK_AHEAD_TOLERANCE_MS = 5_000;
+export function stampEdgeCollectedAt(d, now) {
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return d;
+  const orig = numOrNull(d.collectedAt);
+  const edgeTs = orig != null && orig > 0 ? orig : null;
+  const out = { ...d, collectedAt: Math.min(edgeTs ?? now, now), edgeCollectedAt: edgeTs };
+  if (edgeTs != null && edgeTs - now > EDGE_CLOCK_AHEAD_TOLERANCE_MS) out.edgeClockAheadMs = edgeTs - now;
+  else delete out.edgeClockAheadMs; // 엣지가 보낸 값을 믿지 않는다 — 중앙이 계산한 것만 싣는다
+  return out;
+}
+
 async function onlyDelegated(list, idOf, registryPath) {
   const reg = await import(registryPath);
   const direct = new Set(reg.listDevices().filter((d) => d && d.id != null && !String(d.agent || '').trim()).map((d) => String(d.id)));
@@ -1456,7 +1477,7 @@ centralRouter.post('/pdu-data', requireCentral(), async (req, res) => {
   let snapshots = Array.isArray(req.body?.snapshots) ? req.body.snapshots : [];
   let notOwned = 0; // v2.601 EDGE2601-04
   const now = Date.now();
-  snapshots = snapshots.map((s) => (s && typeof s === 'object' ? { ...s, collectedAt: Math.min(Number(s.collectedAt) || now, now) } : s));
+  snapshots = snapshots.map((s) => stampEdgeCollectedAt(s, now)); // v2.630 A4-02
   {
     const r = await onlyDelegated(snapshots, (x) => x.id, '../pdu/registry.js'); // v2.607 CEN2607-03
     snapshots = r.list; notOwned += r.denied;
@@ -1663,7 +1684,9 @@ centralRouter.post('/rma-result', requireCentral({ notFound: { ok: false } }), (
   if (!owner) return res.json({ ok: true, stale: true });
   if (owner.toLowerCase() !== String(req.centralAuth.agent).toLowerCase()) return res.status(403).json({ ok: false, reason: '이 reqId 는 요청 에이전트의 잡이 아닙니다.' });
   const stored = setRmaJobResult(String(b.reqId), b.result);
-  res.json({ ok: true, stale: !stored });
+  // v2.630(감사 A4-03): 미회신 종결 뒤 도착한 실제 결과면 late 로 밝힌다(엣지는 outbox 에서 지운다 — 재전송 불필요).
+  const late = stored && getRmaJob(String(b.reqId))?.late === true;
+  res.json({ ok: true, stale: !stored, ...(late ? { late: true } : {}) });
 });
 
 centralRouter.post('/sanswitch-data', requireCentral(), async (req, res) => {
@@ -1683,7 +1706,7 @@ centralRouter.post('/sanswitch-data', requireCentral(), async (req, res) => {
   let devices = Array.isArray(req.body?.devices) ? req.body.devices : [];
   let sanNotOwned = 0; // v2.601 EDGE2601-04
   const now = Date.now();
-  devices = devices.map((d) => (d && typeof d === 'object' ? { ...d, collectedAt: Math.min(Number(d.collectedAt) || now, now) } : d));
+  devices = devices.map((d) => stampEdgeCollectedAt(d, now)); // v2.630 A4-02: 원본 엣지 시각은 edgeCollectedAt 으로 따로
   {
     const r = await onlyDelegated(devices, (d) => d.deviceId, '../sanswitch/registry.js'); // v2.607 CEN2607-03
     devices = r.list; sanNotOwned += r.denied;

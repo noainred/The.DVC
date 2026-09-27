@@ -30,6 +30,7 @@
 
 import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
+import { listAssignments, noteExpectMs } from './svcmonAssign.js';
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
@@ -122,7 +123,11 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   a.lastAt = recvAt;
   a.counters.chunks += 1;
   if (sentAt) a.skewMs = recvAt - sentAt;   // 편도 지연 포함 → 오차의 상한 추정치
-  if (Number.isFinite(Number(body?.expectMs)) && Number(body.expectMs) > 0) a.expectMs = Number(body.expectMs);
+  if (Number.isFinite(Number(body?.expectMs)) && Number(body.expectMs) > 0) {
+    a.expectMs = Number(body.expectMs);
+    // v2.630(감사 R2630-06): 재시작 뒤 '기동 후 보고 없음' 유예가 이 엣지의 실제 주기를 쓰게 영속한다(바뀔 때만 쓴다).
+    try { noteExpectMs(name, a.expectMs); } catch (e) { console.warn(`[svcmon-edge] 엣지 주기 기록 실패(${name}): ${e?.message || e}`); }
+  }
   if (Number.isFinite(Number(body?.items))) a.items = num(body.items);
   if (Number.isFinite(Number(body?.reported))) a.reported = num(body.reported);
   // v2.594(감사 EDGE2-01): poller·caps·log 는 엣지가 보낸 객체를 그대로 상주시키고 edgeSummary 로 되돌려 줬다 —
@@ -284,6 +289,63 @@ export function edgeSummary(now = Date.now()) {
   return out.sort((x, y) => x.agent.localeCompare(y.agent));
 }
 
+/**
+ * v2.629(EDGE2629-02) · v2.630(감사 R2630-06): 중앙 기동 시각. 수신 상태는 인메모리라 재시작 직후에는 어떤 엣지도 보고 행이 없다.
+ *   '기동 후 보고 없음' 판정(알림 — svcmonSilence · 화면 — edgeSummaryWithAssigned)이 같은 기준을 쓰도록 여기 둔다.
+ */
+let _startedAt = Date.now();
+export function edgeStartedAt() { return _startedAt; }
+export function _setEdgeStartedAt(at) { if (Number.isFinite(at)) _startedAt = at; }
+
+/**
+ * 배정 엣지의 '기동 후 보고 없음' 유예(ms). 배정 기록에 남은 그 엣지의 push 주기(lastExpectMs)가 있으면 그 주기 기준 임계
+ * (silenceLimitMs — 보고 뒤 판정과 같은 식), 없으면 예전처럼 기본 주기(60초) 기준. 주기를 늘린 엣지가 재시작마다 거짓 무보고가
+ * 되지 않게 한다.
+ */
+export function noReportGraceMs(assignment) {
+  const e = Number(assignment?.lastExpectMs);
+  return silenceLimitMs(Number.isFinite(e) && e > 0 ? { expectMs: e } : null);
+}
+
+/**
+ * v2.630(감사 UI2630-03): 엣지 카드용 요약 — 보고 중인 엣지(edgeSummary) + **배정만 있고 이 중앙 기동 뒤 보고가 없는 엣지**.
+ *   수신 상태가 인메모리라 중앙 재시작 뒤 죽어 있는 엣지는 edgeSummary 에 행이 없어 카드 목록에서 통째로 사라졌다
+ *   (무보고 알림은 v2.629 가 배정 목록을 보게 고쳤지만 화면은 아니었다). 덧붙인 행은 assignedOnly·noReport 표지를 달고,
+ *   값은 모른다 — rows 0 · items/reported/lastAt null · unknown true. 유예 전이면 silent 가 아니라 awaitingFirstReport(대기) 다.
+ *   ⚠ edgeSummary() 자체는 바꾸지 않는다 — '보고 중인 엣지' 목록으로 쓰는 곳(배정 후보·무보고 알림 전환 판정)이 있다.
+ *   배정 파일을 못 읽으면 덧붙이지 않고 assignedError 를 반환 배열의 속성으로 싣는다(조용히 빼지 않는다).
+ */
+export function edgeSummaryWithAssigned(now = Date.now()) {
+  const base = edgeSummary(now);
+  const seen = new Set(base.map((s) => String(s.agent || '').toLowerCase()));
+  let assignments = [];
+  let assignedError = '';
+  try { assignments = listAssignments(); } catch (e) { assignedError = e?.message || String(e); }
+  const out = base.slice();
+  for (const a of assignments) {
+    const name = String(a?.agent || '');
+    if (!name || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    const grace = noReportGraceMs(a);
+    const past = now - _startedAt >= grace;
+    out.push({
+      agent: name, assignedOnly: true, noReport: true,
+      sourceIp: '', portalPort: 0,
+      silent: past, awaitingFirstReport: !past, unknown: true,
+      lastAt: null, ageMs: null, sinceStartMs: Math.max(0, now - _startedAt),
+      expectMs: a.lastExpectMs || null, silenceLimitMs: grace,
+      skewMs: null, skewWarn: false, complete: false, lastSnapId: null, chunks: null,
+      items: null, reported: null, notRun: null, rows: 0, hasMeta: false,
+      counts: { ok: 0, warn: 0, bad: 0, stale: 0 },
+      assignState: a.state || null, assignedTests: a.counts?.tests ?? null, assignedTargets: a.counts?.targets ?? null,
+      poller: null, caps: null, log: null, counters: null,
+    });
+  }
+  out.sort((x, y) => x.agent.localeCompare(y.agent));
+  if (assignedError) Object.defineProperty(out, 'assignedError', { value: assignedError, enumerable: false });
+  return out;
+}
+
 /** 엣지 1개의 항목 목록(메타가 있으면 이름·경로까지). limit 로 잘라 응답 크기를 묶는다. */
 export function edgeState(agent, { path: scope = '', limit = 500, only = '' } = {}, now = Date.now()) {
   const a = agents[String(agent || '').trim()];
@@ -327,8 +389,10 @@ export function edgeState(agent, { path: scope = '', limit = 500, only = '' } = 
 
 /** 전체 엣지 합산(중앙 화면 KPI 에 더할 값). 무보고 엣지는 unknown 으로만 센다. */
 export function edgeTotals(now = Date.now()) {
-  const t = { agents: 0, silent: 0, rows: 0, ok: 0, warn: 0, bad: 0, stale: 0, unknown: 0, notRun: 0 };
-  for (const s of edgeSummary(now)) {
+  // v2.630(감사 UI2630-03): 배정만 있고 보고가 없는 엣지는 별도 축(assignedNoReport)으로 센다 — agents(보고 중)와 섞지 않는다.
+  const t = { agents: 0, silent: 0, rows: 0, ok: 0, warn: 0, bad: 0, stale: 0, unknown: 0, notRun: 0, assignedNoReport: 0 };
+  for (const s of edgeSummaryWithAssigned(now)) {
+    if (s.assignedOnly) { t.assignedNoReport += 1; continue; }
     t.agents += 1;
     if (s.silent) { t.silent += 1; t.unknown += s.rows; }
     else { t.ok += s.counts.ok; t.warn += s.counts.warn; t.bad += s.counts.bad; t.stale += s.counts.stale; }

@@ -15,6 +15,7 @@ import { dayStamp } from '../dayStamp.js';
 import { dailyReportFailNote } from './dailyReportText.js';
 import { alertChannelsBody } from './alertChannelsBody.js';
 import { unprotectedPatternNote, undeterminedNote } from './unprotectedPatternText.js';
+import { listOmittedNote, reclaimMeta, toolsKpiMeta } from './toolsReportText.js';
 import { suggestCell, heldNote } from './rightsizeText.js';
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
 const tb = (gb) => (gb >= 1024 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb)} GB`);
@@ -211,7 +212,7 @@ export function ZombieVms({ scope }) {
     <>
       {errBanner(error)}
       <div className="kpis">
-        <Kpi label="회수 가능(추정)" value={tb(s.reclaimableGB)} meta="정지 VM 디스크 + 스냅샷 델타" accent="var(--green)" />
+        <Kpi label="회수 가능(추정)" value={tb(s.reclaimableGB)} meta={reclaimMeta(s, tb)} accent="var(--green)" />
         <Kpi label="정지 VM 점유" value={tb(s.poweredOffGB)} />
         <Kpi label="스냅샷 델타" value={tb(s.snapshotHogGB)} />
         <Kpi label="템플릿 점유" value={tb(s.templateGB)} />
@@ -474,7 +475,7 @@ export function ComplianceReport({ scope }) {
     <>
       {errBanner(error)}
       <div className="kpis">
-        <Kpi label="Tools 업그레이드 필요" value={s.toolsNeedUpgrade} unit="대" accent={s.toolsNeedUpgrade ? 'var(--amber)' : undefined} />
+        <Kpi label="Tools 업그레이드 필요" value={s.toolsNeedUpgrade} unit="대" meta={toolsKpiMeta(s) || undefined} accent={s.toolsNeedUpgrade ? 'var(--amber)' : undefined} />
         <Kpi label="구버전 HW(≤vmx-13)" value={s.oldHwVms} unit="대" accent={s.oldHwVms ? 'var(--amber)' : undefined} />
         <Kpi label="EOL ESXi 호스트" value={s.eolHosts} unit="대" accent={s.eolHosts ? 'var(--red)' : undefined} />
         <Kpi label="지원 종료 임박" value={s.endingHosts} unit="대" meta="6개월 내" />
@@ -495,6 +496,7 @@ export function ComplianceReport({ scope }) {
                 { key: 'vcenterId', label: 'vCenter' }, { key: 'toolsVersion', label: 'Tools 버전' },
                 { key: 'status', label: '상태' }, { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
               ]} rows={data.tools.needUpgrade} />
+              {listOmittedNote(data.tools.needUpgradeOmitted, data.tools.listLimit) && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{listOmittedNote(data.tools.needUpgradeOmitted, data.tools.listLimit)}</div>}
             </>
           )}
         </>
@@ -510,6 +512,7 @@ export function ComplianceReport({ scope }) {
                 { key: 'vcenterId', label: 'vCenter' }, { key: 'hwVersion', label: 'HW 버전' },
                 { key: 'powerState', label: '전원', render: (r) => <StateBadge state={r.powerState} /> },
               ]} rows={data.hwVersion.old} />
+              {listOmittedNote(data.hwVersion.oldOmitted, data.hwVersion.listLimit) && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{listOmittedNote(data.hwVersion.oldOmitted, data.hwVersion.listLimit)}</div>}
             </>
           )}
         </>

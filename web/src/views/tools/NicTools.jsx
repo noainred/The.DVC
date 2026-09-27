@@ -4,6 +4,7 @@ import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
+import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 
 
 /**
@@ -49,6 +50,7 @@ export function NicSpeed() {
   return (
     <div style={{ maxWidth: 1200 }}>
       <div className="section-title" style={{ marginTop: 0 }}>🔌 서버 NIC 속도 구분</div>
+      <ScopeOmitBanner data={data} />
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
         iDRAC로 수집 중인 서버의 물리 NIC(네트워크 어댑터) <b>최고 속도</b>별 분류입니다(포트가 미링크여도 카드 지원속도로 판별). 서버는 가장 빠른 NIC 기준으로 1회 집계됩니다.
         <span className="muted"> · <b>vCenter 속도</b> 컬럼은 서비스태그로 매칭된 ESXi 호스트의 vCenter 수집(pnic) 정보로, iDRAC과 독립적으로 교차 확인할 수 있습니다.</span>
@@ -175,6 +177,7 @@ export function NicModels() {
   return (
     <div style={{ maxWidth: 1240 }}>
       <div className="section-title" style={{ marginTop: 0 }}>🧬 서버 NIC 모델 확인</div>
+      <ScopeOmitBanner data={data} />
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
         iDRAC로 수집 중인 서버에 설치된 물리 NIC(네트워크 어댑터)의 <b>종류·모델명</b>별 분류입니다(Intel·Broadcom·Mellanox 등).
         <span className="muted"> · <b>vCenter 수집</b> 컬럼은 서비스태그로 매칭된 ESXi 호스트의 vCenter(pnic+PCI) 정보로, iDRAC 인벤토리와 독립적으로 교차 확인할 수 있습니다.</span>
