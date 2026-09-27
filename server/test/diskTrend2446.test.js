@@ -31,9 +31,9 @@ test('할당 = committed+uncommitted, 사용 = DS 점유, 회수 가능 = 정지
   assert.equal(b.vm.overcommitPct, 77.5); assert.equal(b.vm.thinCount, 1);
   assert.equal(b.reclaim.off.count, 2); assert.equal(b.reclaim.off.gb, 250);
   assert.equal(b.reclaim.snap.count, 2); assert.equal(b.reclaim.snap.gb, 45);
-  assert.equal(b.reclaim.totalGB, 295);
-  assert.equal(b.reclaim.pctOfUsed, 19.7);
-  assert.equal(b.reclaim.afterReclaimUsagePct, 60.3, '(1500-295)/2000');
+  assert.equal(b.reclaim.totalGB, 290, '정지 VM 의 스냅샷 5GB 는 정지 VM 회수에 이미 포함(v2.629)');
+  assert.equal(b.reclaim.pctOfUsed, 19.3);
+  assert.equal(b.reclaim.afterReclaimUsagePct, 60.5, '(1500-290)/2000');
   // VM 외 사용량 = 1500 − 950 − 80(템플릿)
   assert.equal(b.other.gb, 470);
   assert.equal(b.vm.templateGB, 80);
@@ -60,7 +60,7 @@ test('상위 목록: 정지 VM 은 커밋 순, 스냅샷은 크기 순 + 나이(
 
 const series = (n, startUsed, perDay, extra = {}) => Array.from({ length: n }, (_, i) => ({
   ts: NOW - (n - 1 - i) * DAY, dsCapGB: 2000, dsUsedGB: startUsed + perDay * i,
-  provGB: 1550 + i, usedGB: 900 + perDay * i, offGB: 250, snapGB: 45, reclaimGB: 295, ...extra,
+  provGB: 1550 + i, usedGB: 900 + perDay * i, offGB: 250, snapGB: 45, reclaimGB: 290, ...extra,
 }));
 
 test('증가율은 최소제곱 기울기, 예상일은 (임계 − 현재) ÷ 증가율', () => {
@@ -71,7 +71,7 @@ test('증가율은 최소제곱 기울기, 예상일은 (임계 − 현재) ÷ �
   assert.equal(a.eta.daysToCrit, 20, '(1700-1500)/10');
   assert.equal(a.eta.daysToFull, 50);
   assert.equal(a.eta.daysToWarn, 0, '이미 75%');
-  assert.equal(a.eta.daysGainedByReclaim, 30, '295/10 ≈ 30');
+  assert.equal(a.eta.daysGainedByReclaim, 29, '290/10 = 29');
   const eta = a.verdicts.find((v) => v.key === 'eta');
   assert.equal(eta.level, 'crit', '20일 ≤ 30일 → 위험');
   assert.equal(a.worst, 'crit');

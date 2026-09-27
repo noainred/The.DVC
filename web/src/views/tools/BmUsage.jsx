@@ -31,7 +31,7 @@ import { distStateOf, distributionSummary, centralManagedNote, ignoredCentralNot
 import { fmtAgo } from '../../util/fmt.js';
 import {
   pctText, bpsText, ageText, usageTone, toneVar, srcMark,
-  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, authStopNote, keyConflictNote,
+  emptyDiag, firstSampleNote, skippedNotes, detailNotes, retentionNote, edgeNote, missingMark, missingFootnotes, authStopNote, keyConflictNote, sourceErrorsNote, lastPruneNote,
   facetRows, pathTypeLabel, topBusiest, corpSummary, csvOf, telemetryNote, hostsUnreadNote,
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes,
@@ -305,6 +305,8 @@ export function BmUsage() {
         {edgeNote(data?.isEdge) && <p style={{ margin: '0 0 6px', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={edgeNote(data.isEdge)} /></p>}
         <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
           <BoldText text={retentionNote(data?.settings || {}, data?.db || {})} />
+          {/* v2.629 A6-06: 보존 정리는 수집과 무관하게 돈다(v2.628) — 실제로 돌았는지 말한다. */}
+          {' '}<BoldText text={lastPruneNote(st.lastPrune)} />
         </p>
       </div>
 
@@ -338,6 +340,13 @@ export function BmUsage() {
           </span>
         </div>
 
+        {/* v2.629 A6-06: 이번 주기 입력(등록부·분류)을 못 읽었으면 표가 있어도 말한다 — 제외 사유가 틀릴 수 있다. */}
+        {sourceErrorsNote(st.last) && (
+          <div className="banner warn" style={{ margin: '0 0 8px', fontSize: 12, lineHeight: 1.6 }}>
+            <BoldText text={sourceErrorsNote(st.last).head} />
+            {sourceErrorsNote(st.last).items.map((x, i) => <div key={i} style={{ overflowWrap: 'anywhere' }}>· {x}</div>)}
+          </div>
+        )}
         {/* ⚠ 표는 **가로 스크롤 컨테이너**로 감싼다 — 지표 열이 8개라 400px 에서 페이지를 밀어낸다. */}
         <div style={{ overflowX: 'auto', minWidth: 0 }}>
           <STable>

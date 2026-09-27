@@ -6,7 +6,7 @@ import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
-import { SORTS, VIEWS, sortGroups, matrixStats, heat, tileData, boardCounts, sparkPath } from './roomTempView.js'; // v2.534 시안 적용(순수 판정)
+import { SORTS, VIEWS, sortGroups, matrixStats, heat, tileData, boardCounts, sparkPath, trendNotes } from './roomTempView.js'; // v2.534 시안 적용(순수 판정)
 import { unitText } from '../unitText.js';
 
 const C = (v) => (v == null ? '—' : `${v}℃`);
@@ -110,6 +110,8 @@ function TrendModal({ groupId, groupName, kind, onClose }) {
               <div className="muted" style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.7 }}>
                 실선 = 법인 평균, 점선 = 법인 내 최고값. 집계 단위 {fmtBucket(d.bucketMs)} 평균 · 표본 {pts.length}점
                 {d.collectedSince ? ` · 수집 시작 ${new Date(d.collectedSince).toLocaleDateString('ko-KR')}` : ''}
+                {/* v2.629 A6-07: 이월로 채운 점·점 상한으로 잘린 기간을 말한다(실측처럼 두지 않는다). */}
+                {trendNotes(d).map((t, i) => <div key={i} style={{ color: 'var(--amber)' }}>⚠ {t}</div>)}
               </div>
             </>
           )}
