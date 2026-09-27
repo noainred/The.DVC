@@ -111,8 +111,8 @@ export function LinkCheck() {
       } else {
         baseSig.current = linkSettingsSig(d.settings);
         setServerChanged(false);
-        setForm(linkFormFromSettings(d.settings));
       }
+      setForm((f) => (f && formDirty.current ? f : linkFormFromSettings(d.settings)));
       setError('');
     }
     catch (e) { setError(e?.message || String(e)); }

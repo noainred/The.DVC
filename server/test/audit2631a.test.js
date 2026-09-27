@@ -135,7 +135,7 @@ test('⑤ AX2-05 로그 CSV 페이지 순회: 중간 삽입에도 중복 없음 
   const mk = (n) => {
     let rid = 0;
     const rows = [];
-    for (let i = 0; i < n; i++) rows.push({ rowid: ++rid, ts: NOW - i * 1000 - (i % 3 === 0 ? 0 : 0), vcenterId: 'vc1', message: `m${i}` });
+    for (let i = 0; i < n; i++) rows.push({ rowid: ++rid, ts: NOW - i * 1000, vcenterId: 'vc1', message: `m${i}` });
     // 동률 ts 묶음도 넣는다
     for (let i = 0; i < 4; i++) rows.push({ rowid: ++rid, ts: NOW - 5000, vcenterId: 'vc1', message: `tie${i}` });
     return {
@@ -155,7 +155,7 @@ test('⑤ AX2-05 로그 CSV 페이지 순회: 중간 삽입에도 중복 없음 
     onRows: async (rows) => { calls++; seen.push(...rows.map((x) => x.rowid)); db.insert({ ts: NOW + calls * 10, vcenterId: 'vc1', message: 'new' }); return true; },
   });
   assert.equal(new Set(seen).size, seen.length, `중복 행이 나갔다: ${seen.length - new Set(seen).size}건`);
-  assert.equal(r.emitted, 24 + 1, '원래 24행 + 첫 청크 전에 들어온 새 행은 없고, 첫 청크 뒤 삽입분은 커서보다 새라 제외 — 첫 조회분 1행만 포함');
+  assert.equal(r.emitted, 24, '원래 24행 — 청크 사이 삽입분(커서보다 새 시각)은 결과를 밀지도 끼어들지도 않는다');
   assert.equal(r.truncated, false);
 
   const exact = mk(6);   // 10행
