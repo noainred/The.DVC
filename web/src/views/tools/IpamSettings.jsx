@@ -5,6 +5,7 @@ import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { DEVTYPE_LABEL, MGMT } from './ipamShared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { intervalMinText, scanSettingsBody } from './ipamScanForm.js';
+import { reservedDayOf, reservedFieldForSave } from './ipamReserveText.js';
 
 
 /** Per-IP user memo + tags editor (separate from vCenter notes). */
@@ -47,7 +48,7 @@ export function MemoEditor({ init, onClose, onSaved }) {
  * IP 단위로 관리상태(예약/폐기/고정 등)·담당자·라벨·디바이스 종류·예약 만료·vCenter 귀속을
  * 지정한다. 신규(빈 IP)면 IP 직접 입력 + 콤마/줄바꿈으로 여러 IP 일괄 적용도 가능.
  */
-export function OverrideEditor({ row, vcenters = [], onClose, onSaved }) {
+export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetMin = null }) {
   const isNew = !!row.__new;
   const [ip, setIp] = useState(row.ip || '');
   const [meta, setMeta] = useState(null);
@@ -57,7 +58,10 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved }) {
   const [deviceType, setDeviceType] = useState(row.deviceType || '');
   const [hostnameOverride, setHostnameOverride] = useState((row.managed && row.hostName) || '');
   const [claimedVcenterId, setClaimedVcenterId] = useState(row.vcenterId || '');
-  const [reservedUntil, setReservedUntil] = useState(row.reservedUntil ? String(row.reservedUntil).slice(0, 10) : '');
+  // v2.631(감사 R2631-02): 저장값은 '그 날 끝 = 다음 날 00:00' 이라 slice(0,10) 으로 되읽으면 오프셋에 따라 하루 밀린다 — 포탈 오프셋 기준 날짜로.
+  const rowDay = reservedDayOf(row.reservedUntil, tzOffsetMin);
+  const [reservedUntil, setReservedUntil] = useState(rowDay);
+  const [loadedDay, setLoadedDay] = useState(rowDay);   // 폼을 연 시점의 저장값 — 바뀌지 않았으면 저장 본문에서 뺀다
   const [note, setNote] = useState(row.note || '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -70,7 +74,7 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved }) {
     //   재조회 실패는 무음이었다(목록의 근사값으로 저장될 수 있다) — 사유를 적는다.
     const init = { status: row.mgmtStatus || '', owner: row.owner_ || '', label: row.label || '', deviceType: row.deviceType || '',
       hostnameOverride: (row.managed && row.hostName) || '', claimedVcenterId: row.vcenterId || '', note: row.note || '',
-      reservedUntil: row.reservedUntil ? String(row.reservedUntil).slice(0, 10) : '' };
+      reservedUntil: rowDay };
     const keep = (k, v) => (cur) => (cur === init[k] ? v : cur);
     let alive = true;
     fetchJson(`/tools/ipam/ip/${encodeURIComponent(row.ip)}`).then((r) => {
@@ -79,14 +83,16 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved }) {
       setStatus(keep('status', o.status || '')); setOwner(keep('owner', o.owner || '')); setLabel(keep('label', o.label || ''));
       setDeviceType(keep('deviceType', o.deviceType || '')); setHostnameOverride(keep('hostnameOverride', o.hostnameOverride || ''));
       setClaimedVcenterId(keep('claimedVcenterId', o.claimedVcenterId || '')); setNote(keep('note', o.note || ''));
-      setReservedUntil(keep('reservedUntil', o.reservedUntil ? String(o.reservedUntil).slice(0, 10) : ''));
+      const srvDay = r.reservedUntilDay != null ? String(r.reservedUntilDay) : reservedDayOf(o.reservedUntil, r.tzOffsetMin ?? tzOffsetMin);
+      setReservedUntil(keep('reservedUntil', srvDay)); setLoadedDay(srvDay);
     }).catch((e) => { if (alive) setLoadWarn(`현재 저장값을 다시 읽지 못했습니다(${e?.message || '조회 실패'}) — 폼은 목록의 값입니다. 저장 전에 확인하세요.`); });
     return () => { alive = false; };
   }, [row.ip, isNew]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ipList = String(ip).split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
   const bulk = ipList.length > 1;
-  const fields = { status, owner, label, deviceType, hostnameOverride, claimedVcenterId, note, reservedUntil: reservedUntil || null };
+  const fields = { status, owner, label, deviceType, hostnameOverride, claimedVcenterId, note,
+    ...reservedFieldForSave(reservedUntil, loadedDay, { always: isNew || bulk }) };
   const save = async () => {
     if (!ipList.length) { setErr('IP를 입력하세요.'); return; }
     setBusy(true); setErr(null);

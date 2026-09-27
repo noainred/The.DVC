@@ -14,6 +14,7 @@ import { cloneRunMark } from '../authSkipText.js'; // v2.591(감사 F1): 인증 
  * 실행은 서버의 전역 직렬 큐(한 번에 1개) — 여기서는 등록/실행/현황만 본다.
  */
 const MODE_LABEL = { manual: '수동만', daily: '매일', interval: '간격' };
+import ScopeOmitBanner from '../ScopeOmitBanner.jsx'; // v2.631 A6-2631-06: 범위 제외 문구 단일 소스
 
 export default function VmCloneTool() {
   const [d, setD] = useState(null);          // { jobs, status, mounts }
@@ -62,11 +63,8 @@ export default function VmCloneTool() {
       {form && <JobForm d={d} form={form} setForm={setForm} onSaved={() => { setForm(null); load(); }} />}
 
       {/* v2.599(AUTHZ-2599-05): 범위 제한 계정에는 범위 밖 vCenter 의 잡을 빼고 그 개수를 밝힌다 */}
-      {d.omittedOutOfScope > 0 && (
-        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
-          조회 범위 밖 vCenter 의 복제 잡 {d.omittedOutOfScope}개는 표시하지 않았습니다.
-        </div>
-      )}
+      {/* v2.631 A6-2631-06: scoped·omittedOutOfScope 판정·문구는 scopeOmitText.js 하나가 소유한다 */}
+      <ScopeOmitBanner data={d} unit="복제 잡" counter="개" why="조회 범위 밖 vCenter 의" />
 
       <div className="table-wrap" style={{ maxHeight: '46vh' }}>
         <STable>

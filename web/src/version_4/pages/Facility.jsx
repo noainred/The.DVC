@@ -8,6 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import { usePolling, fetchJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
+import { scopeOmitNote } from '../../views/scopeOmitText.js'; // v2.631 A6-2631-05: 범위 계정에서 뺀 서버를 밝힌다
 import { Panel, Kpi, Bar, PctCell, Badge, PollState, Empty, Spark } from '../ui.jsx';
 import { hostFacilityRows, pduSummary, tempCellColor, tempTextColor, fmtInt, fmtPct, rowMatches, REGION_COLORS } from '../data.js';
 
@@ -56,6 +57,8 @@ export default function Facility({ global: g, ov, sitesAll, scope, polls, perms,
         <Kpi label="BMC 응답" value={lr ? fmtPct(((lr.ok || 0) / Math.max(1, (lr.ok || 0) + (lr.failed || 0))) * 100) : '—'} accent="#16a34a" meta={polls.idrac.data ? `iDRAC ${fmtInt(polls.idrac.data.poller?.servers)}대 · 무응답 ${fmtInt(lr?.failed)}${phys?.servers ? ` · 인식 ${fmtInt(phys.servers)}대` : ''}` : perms.idrac ? '폴러 상태 대기' : '관리자 권한 필요 (/admin/idrac)'} />
         <Kpi label="iDRAC 연동 호스트" value={hosts.data && hostN ? fmtPct((idracN / hostN) * 100) : '—'} accent="#0e7490" meta={hosts.data ? `${fmtInt(idracN)} / ${fmtInt(hostN)}대 (호스트 ↔ iDRAC 매핑)` : waitText} />
       </div>
+      {/* v2.631 A6-2631-05: 범위 계정 응답은 범위 밖(또는 귀속 없는) iDRAC 서버를 빼고 온다 — 줄어든 목록을 '전부' 로 읽지 않게 */}
+      {scopeOmitNote(polls.idrac.data, 'iDRAC 서버') && <div className="v3-note" data-scope-omit="1">🔒 {scopeOmitNote(polls.idrac.data, 'iDRAC 서버')}</div>}
 
       <div className="v3-grid2">
         <Panel title="사이트별 전력 · 흡기 온도" sub="막대 = 측정 전력(최대 사이트 대비) · 셀 = 호스트 온도 센서(점선 = 미측정)" bodyPad={false}>
@@ -136,6 +139,8 @@ export default function Facility({ global: g, ov, sitesAll, scope, polls, perms,
         <Panel title="법인 전산실 운영 온도" sub={room.data ? `ASHRAE 권장 ${room.data.thresholds?.recommendMin}~${room.data.thresholds?.recommendMax}℃ · ΔT = 배기 − 흡기` : '관리자 전용'}
           right={<span className="v3-tag">/admin/room-temp</span>}>
           <PollState poll={isAdmin ? room : null} skipped={!isAdmin ? '이 패널은 관리자 권한이 필요합니다 (/admin/room-temp).' : undefined}>
+            {/* v2.631 A6-2631-05: 범위 계정에는 범위 밖(또는 귀속 없는) 서버를 뺀 합계가 온다 — 뺀 개수를 말한다 */}
+            {scopeOmitNote(room.data, '서버') && <div className="v3-note" data-scope-omit="1" style={{ marginBottom: 8 }}>🔒 {scopeOmitNote(room.data, '서버')}</div>}
             {(room.data?.totals?.withData || 0) === 0 ? (
               <Empty>
                 온도를 보고하는 서버가 <b>0대</b>입니다 — 등록 {fmtInt(room.data?.totals?.servers)}대 중

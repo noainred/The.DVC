@@ -149,17 +149,30 @@ api.get('/tools/threats', requirePerm('tools'), (req, res) => memoJson(req, res,
   let idsEvents = allowed ? [] : (nsx.idsEvents || []);
   const idsManagers = allowed ? [] : (nsx.managers || []).map((m) => ({ name: m.name, enabled: m.idsEnabled ?? null, // v2.603(감사 COL-2603-05 후속): 조회 실패는 null 이다(서버 nsx/client.js 가 싣는다) — `|| 0` 이 '프로파일 0개' 라는 거짓으로 되돌렸다.
     profiles: m.idsProfiles ?? null, events: m.idsEventCount ?? null, ...(m.idsEventsTruncated ? { eventsTruncated: true } : {}) }));
-  const sev = (e) => e.severity;
-  idsEvents = idsEvents.slice(0, 500);
+  // v2.631(감사 AX2-04): 합계는 **자르기 전 전량**으로 센다 — 예전엔 500건으로 자른 뒤 세어 매니저 3곳 이상이면
+  //   합계가 500 에 막히고 심각 건수가 앞쪽 매니저 것만 됐다. 목록은 심각도 우선(crit/high 먼저, 원래 순서 유지)으로
+  //   정렬한 뒤 자르고, 뺀 개수를 밝힌다(조용한 상한 금지).
+  const isCrit = (e) => /crit|high/i.test(String(e?.severity ?? ''));
+  const IDS_LIST_MAX = 500;
+  const idsTotal = idsEvents.length;
+  const idsCriticalTotal = idsEvents.filter(isCrit).length;
+  const idsSorted = idsEvents.map((e, i) => [isCrit(e) ? 0 : 1, i, e]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((r) => r[2]);
+  const idsList = idsSorted.slice(0, IDS_LIST_MAX);
+  const LIST_MAX = { mining: 200, eol: 300, risky: 300, rogue: 300 };
+  const full = { mining, eol, risky, rogue };
+  const omitted = {};
+  for (const [k, max] of Object.entries(LIST_MAX)) if (full[k].length > max) omitted[k] = full[k].length - max;
+  if (idsTotal > IDS_LIST_MAX) omitted.idsEvents = idsTotal - IDS_LIST_MAX;
 
   return {
     generatedAt: snap.generatedAt,
     summary: {
       mining: mining.length, eol: eol.length, riskyPublic: risky.filter((r) => r.public).length, riskyTotal: risky.length,
-      rogue: rogue.length, idsEvents: idsEvents.length, idsCritical: idsEvents.filter((e) => /crit|high/.test(sev(e))).length,
+      rogue: rogue.length, idsEvents: idsTotal, idsCritical: idsCriticalTotal,
     },
-    mining: mining.slice(0, 200), eol: eol.slice(0, 300), risky: risky.slice(0, 300), rogue: rogue.slice(0, 300),
-    ids: { managers: idsManagers, events: idsEvents },
+    mining: mining.slice(0, LIST_MAX.mining), eol: eol.slice(0, LIST_MAX.eol), risky: risky.slice(0, LIST_MAX.risky), rogue: rogue.slice(0, LIST_MAX.rogue),
+    ids: { managers: idsManagers, events: idsList, total: idsTotal, omitted: Math.max(0, idsTotal - IDS_LIST_MAX) },
+    omitted,
   };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 

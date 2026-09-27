@@ -49,6 +49,20 @@ function noteAuth(srv, r) {
 
 const TICK_MS = 30_000;
 const PUSH_TIMEOUT_MS = Number(process.env.BMSTOR_PUSH_TIMEOUT_MS) || 180_000;
+/*
+ * v2.631(EDGE2631-02): 중앙→엣지 PUSH 시한을 **서버 수에 비례**시킨다(폴링 위임 경로 bmstor/jobs.js 와 같은 식 — 60초 + 서버당
+ *   20초, 상한 10분). 예전 고정 180초는 한 엣지 몫이 많거나 응답 없는 마운트(df 정지)가 몇 대 섞이면 엣지가 끝까지 수집한 결과
+ *   (정상 서버 포함)를 매 주기 통째로 버렸다(엣지 동시 4 · 서버당 최악 75초 — 200대면 수 분). PUSH_TIMEOUT_MS 는 **하한**으로 남는다
+ *   (적은 대수에서 예전보다 짧아지지 않게).
+ */
+const PUSH_PER_SERVER_MS = 20_000;
+const PUSH_BASE_MS = 60_000;
+const PUSH_MAX_MS = 10 * 60_000;
+export function pushTimeoutMsFor(n, floor = PUSH_TIMEOUT_MS) {
+  const cnt = Math.max(0, Math.floor(Number(n) || 0));
+  const scaled = Math.min(PUSH_MAX_MS, PUSH_BASE_MS + PUSH_PER_SERVER_MS * cnt);
+  return Math.max(floor, scaled);
+}
 
 const latest = new Map(); // serverId → { ok, mounts, missing?, error?, at, agent }
 let running = false;      // 재진입 가드(주기 틱 + 수동 실행 공유)
@@ -120,9 +134,9 @@ async function collectViaEdge(agent, servers) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Collector-Token': col.token || '' },
       body: JSON.stringify({ servers: servers.map((s) => ({ id: s.id, host: s.host, port: s.port, username: s.username, password: s.password, mounts: s.mounts })) }),
-      // v2.612 EDGE2612-01: 재시도 없음 — 시한(180초) 뒤 다시 보내면 엣지가 앞 수집을 끝내기 전에 같은 서버들에 SSH 세션을
+      // v2.612 EDGE2612-01: 재시도 없음 — 시한 뒤 다시 보내면 엣지가 앞 수집을 끝내기 전에 같은 서버들에 SSH 세션을
       //   한 벌 더 열었다. 이번 주기는 실패로 남기고 다음 주기에 다시 수집한다.
-      timeoutMs: PUSH_TIMEOUT_MS, retries: 0,
+      timeoutMs: pushTimeoutMsFor(servers.length), retries: 0,
     }));
     if (r.status === 409) return fail('이미 수행 중 — 엣지에서 이전 위임 수집이 아직 진행 중이라 이번 요청은 실행하지 않았습니다(다음 주기에 다시 수집합니다).');
     // v2.604(감사 CEN2604-01 형제): 상한까지만 읽는다(해제 후 크기). 결과 원소는 객체만, 사유는 글자만.

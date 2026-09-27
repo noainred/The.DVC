@@ -170,7 +170,7 @@ export default function DiskTrend({ scope }) {
               <tr><td>회수 가능 ① 정지 VM</td><td data-sort={b.reclaim.off.gb}>{gb1(b.reclaim.off.gb)}</td><td className="muted">전원 OFF VM {b.reclaim.off.count}대의 커밋 용량. 삭제·아카이브 시 회수(Aria Reclaim 의 Powered-off VMs)</td></tr>
               <tr><td>회수 가능 ② 스냅샷</td><td data-sort={b.reclaim.snap.gb}>{gb1(b.reclaim.snap.gb)}</td><td className="muted">스냅샷 보유 VM {b.reclaim.snap.count}대의 스냅샷 크기. {policy.snapshotMaxHours}시간 초과 {b.reclaim.snapOld.count}대 {gb1(b.reclaim.snapOld.gb)}{b.reclaim.snapOld.unknownAge ? ` · 생성시각 미상 ${b.reclaim.snapOld.unknownAge}대` : ''}</td></tr>
               <tr data-pin><td><b>회수 가능 합계</b></td><td data-sort={b.reclaim.totalGB}><b>{gb1(b.reclaim.totalGB)}</b></td><td className="muted">사용의 {n(b.reclaim.pctOfUsed, '%')} · 전부 회수 시 사용률 {n(b.ds.usagePct, '%')} → {n(b.reclaim.afterReclaimUsagePct, '%')}{a?.eta?.daysGainedByReclaim != null ? ` · 약 ${a.eta.daysGainedByReclaim}일치 여유` : ''}</td></tr>
-              <tr><td>VM 외 사용량</td><td data-sort={b.other.gb ?? -1}>{b.other.gb == null ? '— (산정 불가)' : gb1(b.other.gb)}</td><td className="muted">사용 − (VM 커밋 + 템플릿 {gb1(b.vm.templateGB)}). ISO·오버헤드·범위 밖 VM·<b>고아 디스크</b> 후보. 음수면 범위 밖 VM 이 그 DS 를 쓰는 것이라 표시하지 않음</td></tr>
+              <tr><td>VM 외 사용량</td><td data-sort={b.other.gb ?? ''}>{b.other.gb == null ? '— (산정 불가)' : gb1(b.other.gb)}</td><td className="muted">사용 − (VM 커밋 + 템플릿 {gb1(b.vm.templateGB)}). ISO·오버헤드·범위 밖 VM·<b>고아 디스크</b> 후보. 음수면 범위 밖 VM 이 그 DS 를 쓰는 것이라 표시하지 않음</td></tr>
             </tbody>
           </STable>
         </div>
@@ -196,7 +196,7 @@ export default function DiskTrend({ scope }) {
               <div className="table-wrap" style={{ marginTop: 6 }}>
                 <STable>
                   <thead><tr><th>VM</th><th>vCenter</th><th>개수</th><th>크기</th><th>가장 오래된</th></tr></thead>
-                  <tbody>{b.topSnap.map((v) => <tr key={v.id}><td><VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /></td><td className="muted">{v.vcenterId}</td><td>{v.snapshotCount}</td><td data-sort={v.snapshotSizeGB}>{gb1(v.snapshotSizeGB)}</td><td data-sort={v.ageDays ?? -1} style={{ color: v.ageDays != null && v.ageDays * 24 > policy.snapshotMaxHours ? '#fbbf24' : undefined }}>{v.ageDays == null ? '—' : `${v.ageDays}일`}</td></tr>)}</tbody>
+                  <tbody>{b.topSnap.map((v) => <tr key={v.id}><td><VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /></td><td className="muted">{v.vcenterId}</td><td>{v.snapshotCount}</td><td data-sort={v.snapshotSizeGB}>{gb1(v.snapshotSizeGB)}</td><td data-sort={v.ageDays ?? ''} style={{ color: v.ageDays != null && v.ageDays * 24 > policy.snapshotMaxHours ? '#fbbf24' : undefined }}>{v.ageDays == null ? '—' : `${v.ageDays}일`}</td></tr>)}</tbody>
                 </STable>
               </div>
             </div>

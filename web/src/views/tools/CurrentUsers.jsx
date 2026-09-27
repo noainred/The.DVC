@@ -180,9 +180,9 @@ function WindowsUsersPanel({ scope }) {
             {vcenters.map((v) => (
               <tr key={v.vcenterId} onClick={() => { setPicked(v.vcenterId === picked ? '' : v.vcenterId); setHist(null); }} style={{ cursor: 'pointer', background: v.vcenterId === picked ? 'var(--hover)' : undefined }}>
                 <td>{v.vcenterName || v.vcenterId}</td>
-                <td data-sort={String(v.users ?? -1)}>{usersCountText(v.users, v.usersLowerBound)}</td>
-                <td data-sort={String(v.usersActive ?? -1)}>{v.usersActive ?? '—'}</td>
-                <td data-sort={String(v.sessions ?? -1)}>{v.sessions ?? '—'}</td>
+                <td data-sort={String(v.users ?? '')}>{usersCountText(v.users, v.usersLowerBound)}</td>
+                <td data-sort={String(v.usersActive ?? '')}>{v.usersActive ?? '—'}</td>
+                <td data-sort={String(v.sessions ?? '')}>{v.sessions ?? '—'}</td>
                 <td data-sort={String(v.vmsOk)}>{v.vmsOk}</td>
                 <td data-sort={String(v.vmsFailed)} style={{ color: v.vmsFailed ? 'var(--amber)' : undefined }}>{v.vmsFailed}</td>
                 <td data-sort={String(v.skipped || 0)}>{v.skipped || 0}</td>
@@ -243,7 +243,7 @@ function WindowsUsersPanel({ scope }) {
                 <td data-sort={String(r.ok ? new Set((r.users || []).map((u) => String(u.name).toLowerCase())).size : -1)}>
                   {r.ok ? usersCountText(new Set((r.users || []).map((u) => String(u.name).toLowerCase())).size, r.truncated) : '—'}
                 </td>
-                <td data-sort={String(r.sessions ?? -1)}>{r.sessions == null ? '—' : r.sessions}</td>
+                <td data-sort={String(r.sessions ?? '')}>{r.sessions == null ? '—' : r.sessions}</td>
                 <td data-sort={String(r.at || 0)}>{r.at ? agoText(data.now - r.at) : '—'}</td>
                 <td>
                   {(r.error || kindAdvice(r.kind).text)
@@ -383,8 +383,8 @@ function CombinedPanel() {
             <tr>
               <td><b>Windows 서버</b></td>
               <td>{SOURCE_STATE_LABEL[src.windows?.state] || src.windows?.state || '—'}</td>
-              <td data-sort={String(src.windows?.detail?.users ?? -1)}>{src.windows?.detail?.users ?? '—'}</td>
-              <td data-sort={String(src.windows?.detail?.sessions ?? -1)}>{src.windows?.detail?.sessions ?? '—'}</td>
+              <td data-sort={String(src.windows?.detail?.users ?? '')}>{src.windows?.detail?.users ?? '—'}</td>
+              <td data-sort={String(src.windows?.detail?.sessions ?? '')}>{src.windows?.detail?.sessions ?? '—'}</td>
               {/* ⚠ 서버 문구에 `**강조**` 가 들어 있다 — 그대로 뿌리면 별표가 화면에 샌다
                   (v2.439/2.440/2.505 실제 사고. v2.525 Chromium 판독에서 또 발견했다). */}
               <td style={{ fontSize: 11.5, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{src.windows?.reason ? <BoldText text={src.windows.reason} /> : '—'}</td>
@@ -392,8 +392,8 @@ function CombinedPanel() {
             <tr>
               <td><b>Horizon(VDI)</b></td>
               <td>{SOURCE_STATE_LABEL[src.vdi?.state] || src.vdi?.state || '—'}</td>
-              <td data-sort={String(src.vdi?.detail?.users ?? -1)}>{src.vdi?.detail?.users ?? '—'}</td>
-              <td data-sort={String(src.vdi?.detail?.sessions ?? -1)}>{src.vdi?.detail?.sessions ?? '—'}</td>
+              <td data-sort={String(src.vdi?.detail?.users ?? '')}>{src.vdi?.detail?.users ?? '—'}</td>
+              <td data-sort={String(src.vdi?.detail?.sessions ?? '')}>{src.vdi?.detail?.sessions ?? '—'}</td>
               <td style={{ fontSize: 11.5, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{src.vdi?.reason ? <BoldText text={src.vdi.reason} /> : (src.vdi?.detail?.stateBlind ? '세션 상태 필드를 읽지 못해 접속 중 인원은 셀 수 없습니다.' : '—')}</td>
             </tr>
           </tbody>

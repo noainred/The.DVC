@@ -23,6 +23,7 @@ import { Loading, ErrorBox, SearchBox, Kpi } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { linkFormFromSettings, linkSettingsPayload } from './linkCheckForm.js'; // v2.606 WEB2606-10: 빈 숫자 칸 = 이전 값
+import { linkSettingsSig, serverChangedWhileEditing, SERVER_CHANGED_NOTE } from './linkCheckDirty.js'; // v2.631 R2631-04
 import {
   STATE_LABEL, stateTone, rowState, msText, ageText, certText, kpisOf, headerNote,
   runResultText, EVENT_LABEL, eventTone, tableFootnotes, pairNote, trailFromLatest,
@@ -89,11 +90,31 @@ export function LinkCheck() {
   const [form, setForm] = useState(null);
   // v2.630 WEB2630-05: 편집 중(저장 전) 폼은 '지금 점검' 뒤 load 가 서버값으로 덮지 않는다 — 저장하지 않은 편집이 조용히 사라졌다.
   const formDirty = useRef(false);
+  // v2.631 R2631-04: 편집 기준 서버값 서명 — 편집 중 서버값이 바뀌면 저장 전에 알린다. 닫기·폐기·저장 성공이 편집 표시를 내린다.
+  const baseSig = useRef(null);
+  const [serverChanged, setServerChanged] = useState(false);
   const editForm = (next) => { formDirty.current = true; setForm(next); };
+  const resetForm = (settings) => {
+    formDirty.current = false;
+    baseSig.current = linkSettingsSig(settings);
+    setServerChanged(false);
+    setForm(linkFormFromSettings(settings));
+  };
 
   const load = React.useCallback(async () => {
     setLoading(true);
-    try { const d = await fetchJson('/tools/link-check'); setData(d); setForm((f) => (f && formDirty.current ? f : linkFormFromSettings(d.settings))); setError(''); }
+    try {
+      const d = await fetchJson('/tools/link-check');
+      setData(d);
+      if (formDirty.current) {
+        if (serverChangedWhileEditing(true, baseSig.current, d.settings)) setServerChanged(true);
+      } else {
+        baseSig.current = linkSettingsSig(d.settings);
+        setServerChanged(false);
+        setForm(linkFormFromSettings(d.settings));
+      }
+      setError('');
+    }
     catch (e) { setError(e?.message || String(e)); }
     finally { setLoading(false); }
   }, []);
@@ -154,7 +175,7 @@ export function LinkCheck() {
   };
   const saveSettings = async () => {
     setBusy(true);
-    try { const r = await putJson('/tools/link-check/settings', linkSettingsPayload(form)); setNote('설정을 저장했습니다.'); setData({ ...data, settings: r.settings, enabled: r.settings.enabled }); formDirty.current = false; setForm(linkFormFromSettings(r.settings)); }
+    try { const r = await putJson('/tools/link-check/settings', linkSettingsPayload(form)); setNote('설정을 저장했습니다.'); setData({ ...data, settings: r.settings, enabled: r.settings.enabled }); resetForm(r.settings); }
     catch (e) { setNote(`저장 실패: ${e?.message || e}`); }
     finally { setBusy(false); }
   };
@@ -207,7 +228,11 @@ export function LinkCheck() {
           {busy ? '점검 중…' : '지금 점검'}
         </button>
         <button className="btn" onClick={load} disabled={busy}>새로고침</button>
-        <button className="btn" onClick={() => setShowSettings((v) => !v)}>{showSettings ? '설정 닫기' : '설정'}</button>
+        <button className="btn" onClick={() => {
+          // v2.631 R2631-04: 닫으면 저장하지 않은 편집을 버린다(버린 값이 다음에 열 때 서버값처럼 보이지 않게)
+          if (showSettings && data?.settings) resetForm(data.settings);
+          setShowSettings((v) => !v);
+        }}>{showSettings ? '설정 닫기' : '설정'}</button>
         <SearchBox value={q} onChange={setQ} placeholder="엣지·vCenter·호스트 검색" />
         <select value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
           <option value="">모든 종류</option>
@@ -274,7 +299,15 @@ export function LinkCheck() {
                 }).filter((p) => p.from && p.to),
               })} />
           </div>
-          <div><button className="btn" onClick={saveSettings} disabled={busy}>설정 저장</button></div>
+          {serverChanged && (
+            <div className="banner warn" data-server-changed="1" style={{ whiteSpace: 'normal' }}>
+              <BoldText text={SERVER_CHANGED_NOTE} />
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn" onClick={saveSettings} disabled={busy}>설정 저장</button>
+            <button className="btn" onClick={() => { if (data?.settings) resetForm(data.settings); }} disabled={busy}>편집 취소(서버값 불러오기)</button>
+          </div>
         </div>
       )}
 

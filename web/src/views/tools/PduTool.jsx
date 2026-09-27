@@ -12,6 +12,7 @@ import BoldText from '../../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 import { agoText } from './relTime.js';
+import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2.631 A6-2631-04: 엣지 시계 빠름 표지
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03
 import { changedIntervalBody } from '../settingsFormDiff.js'; // v2.630 WEB2630-02
@@ -214,7 +215,7 @@ export default function PduTool() {
                       <td className="right">{fmtC(sum?.tempMaxC)}</td>
                       <td className="right">{fmtH(sum?.humidityAvgPct)}</td>
                       <td>{sum ? `${sum.units} / ${sum.sensors}` : '—'}</td>
-                      <td className="muted" style={{ fontSize: 12 }}>{agoText(s?.collectedAt)}</td>
+                      <td className="muted" style={{ fontSize: 12 }}>{agoText(s?.collectedAt)}{(() => { const m = edgeClockAheadMark(s); return m ? <span className="badge amber" style={{ marginLeft: 4, whiteSpace: 'nowrap', fontSize: 10 }} title={m.title}>{m.label}</span> : null; })()}</td>
                       <td className="right" style={{ whiteSpace: 'nowrap' }}>
                         <button className="logout-btn" style={{ padding: '4px 8px', fontSize: 12 }} disabled={busy} onClick={() => collect(d)}>수집</button>
                         <button className="logout-btn" style={{ padding: '4px 8px', fontSize: 12, marginLeft: 4 }} onClick={() => openEdit(d)}>수정</button>
@@ -231,6 +232,10 @@ export default function PduTool() {
           </STable>
         </div>
       ))}
+      {/* v2.631 A6-2631-04: 엣지 시계가 빠른 PDU — 행에는 짧은 표지, 조치는 여기 한 번만 */}
+      {tab === 'list' && edgeClockFootnote(devices.map((d) => d.snapshot), 'PDU') && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 8, whiteSpace: 'normal' }}>⏱ {edgeClockFootnote(devices.map((d) => d.snapshot), 'PDU')}</div>
+      )}
 
       {form && <DeviceModal {...{ form, setF, setForm, close, save, runTest, busy, testing, test, msg, data }} />}
       {csvOpen && <CsvModal onClose={() => { setCsvOpen(false); load(); }} />}

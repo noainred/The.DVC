@@ -208,7 +208,7 @@ export function EdgeLog() {
                   <td data-sort={r.last?.at || 0}>
                     {r.last?.at ? <>{ageText(r.last.at)} <span style={{ color: 'var(--muted)', fontSize: 11 }}>({msText(r.last.ms)})</span></> : <span style={{ color: 'var(--muted)' }}>—</span>}
                   </td>
-                  <td className="right" data-sort={r.last?.logCount ?? -1}>{r.last?.logCount ?? <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+                  <td className="right" data-sort={r.last?.logCount ?? ''}>{r.last?.logCount ?? <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                   <td>
                     <button className="btn btn-sm" onClick={() => fetchEdge(r.agent)} disabled={isBusy(r.agent) || !h.can} title={h.can ? '' : h.text.replace(/\*\*/g, '')}>
                       {isBusy(r.agent) ? '가져오는 중…' : '지금 가져오기'}

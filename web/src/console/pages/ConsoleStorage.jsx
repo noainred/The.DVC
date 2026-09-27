@@ -4,6 +4,7 @@ import { usePolling, toolAllowed } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Panel, KpiCard, PctCell, Bar, LevelBadge, PollState, Empty } from '../ui.jsx';
 import { datastoreTypeCounts, datastoresOver, storageRows, sanCells, sanTotals, fmtInt, fmtPct, fmtBytesTB, colorOf, rowMatches, ageText, tsMs } from '../consoleData.js';
+import { storageUsageUnknownNote } from '../../views/vcCardText.js'; // v2.631(감사 WEB2631-08) — 사용량 미상 DS 제외 사실
 
 export default function ConsoleStorage({ global: g, scope, polls, perms }) {
   const canSan = toolAllowed('san-switch'), canFc = toolAllowed('forecast');
@@ -24,7 +25,7 @@ export default function ConsoleStorage({ global: g, scope, polls, perms }) {
       <div className="dvc-kpis">
         <KpiCard label="데이터스토어" value={polls.ds.data ? fmtInt(dsAll.length) : '—'} accent="#0f172a" meta={polls.ds.data ? `VMFS ${types.VMFS} · vSAN ${types.vSAN} · NFS ${types.NFS}${types.기타 ? ` · 기타 ${types.기타}` : ''}` : '수집 대기'} />
         <KpiCard label="스토리지 어레이" value={polls.stor.data ? fmtInt(arrays.length) : '—'} accent="#0891b2" meta={polls.stor.data ? (arrays.length ? `수집 정상 ${arrOk} · 실패 ${arrBad} · 미수집 ${arrays.length - arrOk - arrBad}` : '등록된 장비 없음') : perms.storage ? '수집 대기' : "권한 필요('tools')"} />
-        <KpiCard label="전사 사용률" value={fmtPct(g?.storageUsagePct)} accent={colorOf(g?.storageUsagePct)} meta={g ? `${g.storageUsedTB} / ${g.storageTotalTB} TB (vCenter 데이터스토어 합)` : '수집 대기'} />
+        <KpiCard label="전사 사용률" value={fmtPct(g?.storageUsagePct)} accent={colorOf(g?.storageUsagePct)} meta={g ? [`${g.storageUsedTB} / ${g.storageTotalTB} TB (vCenter 데이터스토어 합)`, storageUsageUnknownNote(g)].filter(Boolean).join(' · ') : '수집 대기'} />
         <KpiCard label="임계 초과 DS" value={polls.ds.data ? fmtInt(over90) : '—'} accent="#ef4444" meta={polls.ds.data ? `≥ 90% ${over90} · ≥ 95% ${over95} (서버 알람 기준과 동일)` : '수집 대기'} />
         <KpiCard label="SAN 스위치" value={san.data ? fmtInt(st.devices) : '—'} accent="#f59e0b" meta={san.data ? (st.measured ? `포트 ${fmtInt(st.online)}/${fmtInt(st.total)} 온라인 · 오프라인 ${st.offline} · 결함 ${st.faulty}${st.failed ? ` · 수집 실패 ${st.failed}대` : ''}` : st.failed ? `수집 실패 ${st.failed}대` : st.devices ? '포트 스냅샷 없음' : '등록된 장비 없음') : canSan ? '수집 대기' : "권한 필요('tools')"} />
       </div>

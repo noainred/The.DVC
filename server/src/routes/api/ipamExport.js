@@ -18,14 +18,14 @@ import { listVcRanges } from '../../ipam/rangeStore.js';
 import { vcRangesToCsv } from '../../ipam/vcRangesCsv.js';
 import { rangeSize } from '../../ipam/scan.js';
 import { getAnnotation, setAnnotation } from '../../ipam/annotations.js';
-import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES } from '../../ipam/overrides.js';
+import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay } from '../../ipam/overrides.js';
 import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES } from '../../ipam/rangePolicies.js';
 import { ipToNum } from '../../ipam/ledger.js';
 import { logAudit } from '../../audit.js';
 import { getIpHistory, scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { buildWorkbook } from '../../ipam/excel.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드
-import { todayStamp } from "../../util/dayKey.js";
+import { todayStamp, DAY_OFFSET_MIN } from "../../util/dayKey.js";
 
 
 // VM 전체 정보 export (특수 기능) — 선택 vCenter 의 모든 VM 을 '획득 가능한 최대 필드'로.
@@ -120,7 +120,8 @@ api.get('/tools/ipam', requirePerm('tools'), (req, res) => memoJson(req, res, 't
     matched = hit.length;
     if (hit.length > lim) { truncated = true; rows = hit.slice(0, lim); } else rows = hit;
   }
-  return { ...data, rows, ...(q ? { q, matched, truncated } : {}) };
+  // v2.631(감사 R2631-02): 예약 만료일을 화면이 '포탈 오프셋 기준 그 날' 로 되읽을 수 있게 오프셋을 싣는다(브라우저 시간대가 아니다).
+  return { ...data, rows, tzOffsetMin: DAY_OFFSET_MIN, ...(q ? { q, matched, truncated } : {}) };
 }, { extraKey: `${scopeKey(req.user, store.get())}|${ipamRevKey()}` }));
 api.get('/tools/vm-export', requirePerm('tools'), async (req, res) => {
   const vcenterId = vmExportGuard(req, res);
@@ -265,7 +266,7 @@ api.get('/tools/ipam/manage-meta', requirePerm('tools'), (req, res) => {
   const owners = allowed ? ipVcenterOwners(snap) : null;
   const ovInclude = allowed ? (ip, rec) => ipInWriteScope(allowed, owners, ip, rec?.claimedVcenterId || '') : null;
   res.json({ statuses: STATUSES, deviceTypes: DEVICE_TYPES, summary: overridesSummary(ovInclude),
-    policyStatuses: POLICY_STATUSES, policiesSummary: policiesSummary(polList) });
+    policyStatuses: POLICY_STATUSES, policiesSummary: policiesSummary(polList), tzOffsetMin: DAY_OFFSET_MIN });
 });
 // 한 IP의 override 조회.
 api.get('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
@@ -277,7 +278,8 @@ api.get('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
   if (allowed && !ipInWriteScope(allowed, ipVcenterOwners(snap), req.params.ip, ov?.claimedVcenterId || '')) {
     return res.status(404).json({ ip: req.params.ip, override: null });
   }
-  res.json({ ip: req.params.ip, override: ov });
+  // v2.631(감사 R2631-02): 폼이 만료 '날짜' 를 되읽을 값을 서버가 준다(저장값은 다음 날 00:00 이라 slice(0,10) 은 오프셋에 따라 하루 밀린다).
+  res.json({ ip: req.params.ip, override: ov, reservedUntilDay: ov?.reservedUntil ? reservedUntilDay(ov.reservedUntil) : '', tzOffsetMin: DAY_OFFSET_MIN });
 });
 // 한 IP의 override 생성/수정(부분). 변경은 운영자/관리자만.
 api.put('/tools/ipam/ip/:ip', canWrite, requirePerm('tools'), (req, res) => {

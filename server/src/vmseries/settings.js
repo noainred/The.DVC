@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { DEFAULT_THRESHOLDS } from './counters.js';
 import { numOrNull } from '../util/numOrNull.js';
 
@@ -29,10 +30,20 @@ export const VMSERIES_LIMITS = { minIntervalMin: 20, maxIntervalMin: 60, maxRete
 const listeners = new Set();
 export function onVmSeriesSettingsChange(cb) { listeners.add(cb); return () => listeners.delete(cb); }
 
+// v2.631(EDGE2631-01): 손상 → 보존 → 기본값(env — 보통 꺼짐)을 /api/central/vmseries-config 가 200 으로 내려보내면 엣지가
+//   그것을 영구 저장해 수집이 꺼진다. 로드 오류를 기억해 배포 라우트가 503(엣지는 직전 사본 유지)으로 답하게 한다.
+const _loadErr = makeSettingsLoadError(() => FILE);
 function readFile() {
-  if (!fs.existsSync(FILE)) return {};
-  try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch (e) { preserveCorrupt(FILE, e.message); return {}; }
+  if (!fs.existsSync(FILE)) { _loadErr.missing(); return {}; }
+  try {
+    const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
+    _loadErr.ok();
+    return j;
+  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); return {}; }
 }
+/** v2.631(EDGE2631-01): 설정 파일을 못 읽었으면 사유(배포 라우트가 503 으로 답한다), 읽었으면 null. */
+export function vmSeriesSettingsLoadError() { readFile(); return _loadErr.get(); }
 
 // v2.602(감사 TIM2602-02): 빈 값·숫자 아님은 dflt — 예전 Number('') === 0 이 env 빈 값을 보존 0(=무제한)으로 만들었다.
 const clampInt = (v, lo, hi, dflt) => {
@@ -110,6 +121,7 @@ export function saveVmSeriesSettings(partial = {}) {
   }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  _loadErr.ok();
   const eff = loadVmSeriesSettings();
   for (const cb of listeners) { try { cb(eff); } catch { /* 리스너 오류는 저장을 막지 않는다 */ } }
   return eff;

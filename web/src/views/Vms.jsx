@@ -16,7 +16,11 @@ export default function Vms({ filters }) {
   const [selected, setSelected] = useState(null);
   const [gpuOnly, setGpuOnly] = useState(false);
   const [gpuType, setGpuType] = useState(''); // '' | vgpu | passthrough | mixed
-  const params = { ...filters, limit: 1000 };
+  // v2.631(감사 WEB2631-10): 서버 정렬 없이 limit 만 주면 스냅샷 순서(vCenter 순)의 앞 1000개가 온다 — 그것을
+  //   '상위 1,000개' 라 말하면 거짓이다(뒤 vCenter 의 CPU 100% VM 이 빠진다). 표의 기본 정렬(CPU 사용률 내림차순)과
+  //   같은 기준으로 서버가 고르게 하고, 다른 열 정렬은 그 안에서만이라는 사실을 표 위에 적는다.
+  const VM_LIMIT = 1000;
+  const params = { ...filters, limit: VM_LIMIT, sortBy: 'cpuUsagePct', order: 'desc' };
   if (gpuOnly) params.gpu = '1';
   if (gpuType) { params.gpu = '1'; params.gpuType = gpuType; }
   const { data, error, loading } = usePolling('/vms', params, 15_000);
@@ -88,6 +92,11 @@ export default function Vms({ filters }) {
         ))}
       </div>
       <ResultCount total={data.total} shown={rows.length} label="VM" filtered={Object.keys(filters || {}).length > 0 || gpuOnly || !!gpuType} />
+      {data.total > rows.length && (
+        <div className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 10 }}>
+          CPU 사용률 높은 순으로 {rows.length.toLocaleString('en-US')}개만 받았습니다 — 다른 열로 정렬하면 이 {rows.length.toLocaleString('en-US')}개 안에서만 정렬됩니다(나머지 {(data.total - rows.length).toLocaleString('en-US')}개는 필터로 좁혀 보세요).
+        </div>
+      )}
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'cpuUsagePct', dir: 'desc' }} />
 
       <IpmsMatches filters={filters} />

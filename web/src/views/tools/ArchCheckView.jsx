@@ -182,7 +182,7 @@ export function ArchCheckView() {
                     <div>{itemTitle(it)}</div>
                     <div style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--muted)' }}>{code}</div>
                   </td>
-                  <td className="right tabular" data-sort={st === 'unknown' ? -1 : (it?.count ?? -1)}>{countText(it)}</td>
+                  <td className="right tabular" data-sort={st === 'unknown' ? '' : (it?.count ?? '')}>{countText(it)}</td>
                   <td style={{ whiteSpace: 'normal', minWidth: 220, maxWidth: 360 }}>
                     <SamplesCell item={it} expanded={expanded.has(code)} onToggle={() => toggle(code)} />
                   </td>

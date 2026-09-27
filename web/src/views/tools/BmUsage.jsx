@@ -384,7 +384,7 @@ export function BmUsage() {
                     )}
                   </td>
                   {COLS.map((c) => (
-                    <td key={c.col} className="right" data-sort={r[c.col] ?? -1}><Cell v={r[c.col]} kind={c.kind} /></td>
+                    <td key={c.col} className="right" data-sort={r[c.col] ?? ''}><Cell v={r[c.col]} kind={c.kind} /></td>
                   ))}
                   <td data-sort={r.ts || 0}>{r.ts ? ageText(r.ts) : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                 </tr>
@@ -457,8 +457,8 @@ export function BmUsage() {
                       <tr key={c.vcenterId}>
                         <td data-sort={c.vcenterId}>{c.vcenterId}</td>
                         <td className="right" data-sort={c.servers}>{c.servers}</td>
-                        <td className="right" data-sort={c.max ?? -1}><span style={{ color: toneVar(usageTone(c.max)) }}>{pctText(c.max)}</span></td>
-                        <td className="right" data-sort={c.avg ?? -1}>{pctText(c.avg)}</td>
+                        <td className="right" data-sort={c.max ?? ''}><span style={{ color: toneVar(usageTone(c.max)) }}>{pctText(c.max)}</span></td>
+                        <td className="right" data-sort={c.avg ?? ''}>{pctText(c.avg)}</td>
                         <td className="right" data-sort={c.over90}>{c.over90 ? <b style={{ color: toneVar('bad') }}>{c.over90}</b> : '—'}</td>
                         <td className="right" data-sort={c.unread}>{c.unread || '—'}</td>
                       </tr>
@@ -810,13 +810,13 @@ export function BmUsage() {
                   {detail.daily.slice(-30).reverse().map((d) => (
                     <tr key={d.day}>
                       <td data-sort={d.day}>{d.day}</td>
-                      <td className="right" data-sort={d.cpu_avg ?? -1}>{pctText(d.cpu_avg)}</td>
-                      <td className="right" data-sort={d.cpu_max ?? -1}>{pctText(d.cpu_max)}</td>
-                      <td className="right" data-sort={d.mem_avg ?? -1}>{pctText(d.mem_avg)}</td>
-                      <td className="right" data-sort={d.mem_max ?? -1}>{pctText(d.mem_max)}</td>
-                      <td className="right" data-sort={d.disk_busy_max ?? -1}>{pctText(d.disk_busy_max)}</td>
-                      <td className="right" data-sort={d.net_max ?? -1}>{pctText(d.net_max)}</td>
-                      <td className="right" data-sort={d.hba_max ?? -1}>{pctText(d.hba_max)}</td>
+                      <td className="right" data-sort={d.cpu_avg ?? ''}>{pctText(d.cpu_avg)}</td>
+                      <td className="right" data-sort={d.cpu_max ?? ''}>{pctText(d.cpu_max)}</td>
+                      <td className="right" data-sort={d.mem_avg ?? ''}>{pctText(d.mem_avg)}</td>
+                      <td className="right" data-sort={d.mem_max ?? ''}>{pctText(d.mem_max)}</td>
+                      <td className="right" data-sort={d.disk_busy_max ?? ''}>{pctText(d.disk_busy_max)}</td>
+                      <td className="right" data-sort={d.net_max ?? ''}>{pctText(d.net_max)}</td>
+                      <td className="right" data-sort={d.hba_max ?? ''}>{pctText(d.hba_max)}</td>
                       <td className="right" data-sort={d.samples ?? 0}>{d.samples ?? '—'}</td>
                     </tr>
                   ))}

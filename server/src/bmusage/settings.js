@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 import crypto from 'node:crypto';
 import { registerStateFile } from '../util/stateFiles.js';
@@ -103,11 +104,31 @@ let _cache = null;
 let _cacheAt = 0;
 const CACHE_MS = 3_000;
 
+// v2.631(EDGE2631-01): 중앙에서는 이 파일이 **배포 원본**이다. 손상이면 기본값(꺼짐·빈 법인)으로 떨어지는데, 그 기본값을
+//   배포 라우트가 200 으로 내려보내면 전 엣지의 수집이 꺼진다 — 로드 오류를 기억해 /api/central/bmusage-config 가 503 으로 답한다.
+const _localErr = makeSettingsLoadError(FILE);
+const _distErr = makeSettingsLoadError(DIST_FILE);
 function readFile() {
+  if (!fs.existsSync(FILE())) { _localErr.missing(); return {}; }
   try {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    return raw && typeof raw === 'object' ? raw : {};
-  } catch (e) { if (fs.existsSync(FILE())) preserveCorrupt(FILE(), e.message); return {}; } // v2.582 ARCH-1: 손상이면 보존 후 기본값 — 법인 opt-in·Enterprise 동의 기록(누가·언제)이 든 사용자 설정이라 조용히 버리지 않는다
+    if (!raw || typeof raw !== 'object') throw new Error('객체가 아닌 JSON 값');
+    _localErr.ok();
+    return raw;
+  } catch (e) { _localErr.corrupt(e); if (fs.existsSync(FILE())) preserveCorrupt(FILE(), e.message); return {}; } // v2.582 ARCH-1: 손상이면 보존 후 기본값 — 법인 opt-in·Enterprise 동의 기록(누가·언제)이 든 사용자 설정이라 조용히 버리지 않는다
+}
+
+/**
+ * v2.631(EDGE2631-01): 배포에 쓰는 설정 두 파일(배포 켬/제외 · 로컬 설정) 중 하나라도 못 읽었으면 그 사유. 둘 다 읽었으면 null.
+ *   중앙 배포 라우트만 이 값을 본다 — 중앙 자신의 로컬 동작은 예전처럼 기본값(꺼짐)이다.
+ */
+export function bmUsageSettingsLoadError() {
+  loadDistribution();
+  readFile();
+  const d = _distErr.get(); const l = _localErr.get();
+  if (d) return { at: d.at, reason: `배포 설정(bmusage-distribute.json): ${d.reason}` };
+  if (l) return { at: l.at, reason: `사용률 설정(bmusage-settings.json): ${l.reason}` };
+  return null;
 }
 
 /** 정규화(순수) — 테스트가 하한·상한을 고정한다. */
@@ -222,10 +243,13 @@ export function bmUsageCentralState() {
 
 /** 중앙: 배포 설정(켬/끔 + 제외 엣지). 손상이면 보존 후 **꺼짐**(켜진 척하지 않는다). */
 export function loadDistribution() {
+  if (!fs.existsSync(DIST_FILE())) { _distErr.missing(); return normalizeDistribution({}); }
   try {
     const j = JSON.parse(fs.readFileSync(DIST_FILE(), 'utf8'));
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
+    _distErr.ok();
     return normalizeDistribution(j);
-  } catch (e) { if (fs.existsSync(DIST_FILE())) preserveCorrupt(DIST_FILE(), e.message); return normalizeDistribution({}); }
+  } catch (e) { _distErr.corrupt(e); if (fs.existsSync(DIST_FILE())) preserveCorrupt(DIST_FILE(), e.message); return normalizeDistribution({}); }
 }
 export function normalizeDistribution(raw = {}) {
   // v2.628(SEC2628-03): 엣지 이름은 외부 값이다 — '__proto__'·'constructor' 가 프로토타입을 건드리거나 상속 속성으로
@@ -244,6 +268,7 @@ export function saveDistribution(patch = {}, by = '') {
   });
   fs.mkdirSync(path.dirname(DIST_FILE()), { recursive: true });
   atomicWriteFileSync(DIST_FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  _distErr.ok();
   return next;
 }
 
@@ -340,6 +365,7 @@ export function saveBmUsageSettings(body = {}) {
   const local = normalizeSettings({ ...normalizeSettings(readFile()), ...patch });
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(local, null, 2), { mode: 0o600 });
+  _localErr.ok();
   _cache = null;
   const next = loadBmUsageSettings();
   notifyChange();

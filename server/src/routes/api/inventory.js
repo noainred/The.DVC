@@ -2,7 +2,7 @@
 import { requirePerm, requireRole } from '../../auth/auth.js';
 import { userHasPermission } from '../../auth/permissions.js'; // v2.583: /top 의 inv.* 집행
 import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth/scope.js';
-import { store, usageReadable } from '../../store.js';
+import { store, usageReadable, dsUsageReadable, dsUsedOf, dsUsageUnknownOf } from '../../store.js';
 import { numOrNull } from '../../util/numOrNull.js';
 const pctOrNullR = (u, t) => (t > 0 ? Math.round((u / t) * 100) : null);
 import { browseDatastore } from '../../vcenter/dsBrowse.js';
@@ -43,6 +43,28 @@ const invDs = requirePerm('inv.datastores');
 const invNet = requirePerm('inv.networks');
 const invAlarms = requirePerm('inv.alarms');
 
+/** v2.631(WEB2631-02): 알람 시각(ISO 문자열 또는 epoch ms) → ms. 못 읽으면 null. 숫자 문자열은 Date.parse 에 넘기지 않는다(v2.562). */
+export function alarmTimeMs(t) {
+  if (typeof t === 'number') return Number.isFinite(t) ? t : null;
+  if (typeof t !== 'string' || !t.trim()) return null;
+  if (/^\d+$/.test(t.trim())) { const n = Number(t); return Number.isFinite(n) ? n : null; }
+  const ms = Date.parse(t);
+  return Number.isFinite(ms) ? ms : null;
+}
+const SEV_RANK = { critical: 0, warning: 1 };
+/** 최신순(시각 내림차순) · 동률은 심각도 · 시각 없는 것은 뒤. 새 배열을 돌려준다. */
+export function sortAlarmsRecent(list) {
+  return list
+    .map((a, i) => [alarmTimeMs(a?.time), a, i])
+    .sort((x, y) => {
+      if (x[0] == null || y[0] == null) { if (x[0] == null && y[0] == null) return x[2] - y[2]; return x[0] == null ? 1 : -1; }
+      if (y[0] !== x[0]) return y[0] - x[0];
+      const sx = SEV_RANK[x[1]?.severity] ?? 2, sy = SEV_RANK[y[1]?.severity] ?? 2;
+      return sx !== sy ? sx - sy : x[2] - y[2];
+    })
+    .map((r) => r[1]);
+}
+
 export function registerInventory(api) {
 
 // Consolidated summary: SUM of every resource across all vCenters, with
@@ -71,8 +93,13 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   const hostsR = hosts.filter(usageReadable);
   const cpuPctR = pctOrNullR(sum(hostsR, (h) => h.cpuUsageMhz), sum(hostsR, (h) => h.cpuTotalMhz));
   const memPctR = pctOrNullR(sum(hostsR, (h) => h.memUsageMB), sum(hostsR, (h) => h.memTotalMB));
-  const storCapGB = sum(datastores, (d) => d.capacityGB);
-  const storUsedGB = sum(datastores, (d) => d.usedGB);
+  // v2.631(감사 AX2-01·WEB2631-01): 스토리지 합계는 롤업(store.rollupsOf)과 같은 기준 — 사용량을 읽은 DS 만 용량·사용 양쪽에 넣는다.
+  //   usedGB 가 null 인 DS 를 사용 0 으로 더하면 여유가 부풀고 사용률이 낮아진다(개요 85% vs 요약 27% 실측). 뺀 개수는 storage.usageUnknown.
+  const dsR = datastores.filter(dsUsageReadable);
+  const storCapGB = sum(dsR, (d) => d.capacityGB);
+  const storUsedGB = sum(dsR, dsUsedOf);
+  const storCapAllGB = sum(datastores, (d) => d.capacityGB);
+  const dsUsageUnknownCount = datastores.filter(dsUsageUnknownOf).length;
 
   // VM allocation totals (what is provisioned, regardless of host capacity)
   const vmVcpu = sum(vms, (v) => v.cpuCount);
@@ -101,16 +128,16 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   }
 
   const round = (v, d = 0) => Number((v || 0).toFixed(d));
-  const pct = (u, t) => (t > 0 ? Math.round((u / t) * 100) : 0);
 
   // Per-vCenter contribution (the SUM each site adds to the whole).
   // vCenter마다 hosts/vms/datastores 전체를 재필터하면 O(vCenter×N)이라 28×5,800으로 커진다.
   // 호스트/VM/DS를 vcenterId 기준으로 '1회' 그룹핑(O(N))한 뒤 누적한다(롤업 규칙).
-  const acc = new Map(); // vcId -> { hosts, vms, vmsOn, cpuCores, memMB, dsCapGB, vcpu, ramMB, provGB, powerW }
-  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, vcpu: 0, ramMB: 0, provGB: 0, powerW: 0 }; acc.set(id, b); } return b; };
+  const acc = new Map(); // vcId -> { hosts, vms, vmsOn, cpuCores, memMB, dsCapGB, dsUnknown, vcpu, ramMB, provGB, powerW }
+  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, dsUnknown: 0, vcpu: 0, ramMB: 0, provGB: 0, powerW: 0 }; acc.set(id, b); } return b; };
   for (const h of hosts) { const b = bucket(h.vcenterId); b.hosts++; b.cpuCores += h.cpuCores || 0; b.memMB += h.memTotalMB || 0; b.powerW += h.powerWatts || 0; }
   for (const v of vms) { const b = bucket(v.vcenterId); b.vms++; if (v.powerState === 'POWERED_ON') b.vmsOn++; b.vcpu += v.cpuCount || 0; b.ramMB += v.memMB || 0; b.provGB += v.storageGB || 0; }
-  for (const d of datastores) { const b = bucket(d.vcenterId); b.dsCapGB += d.capacityGB || 0; }
+  // v2.631(AX2-01): vCenter 카드(롤업 storageTotalTB)와 같은 기준 — 사용량 미상 DS 는 용량에서 빼고 개수를 싣는다.
+  for (const d of datastores) { const b = bucket(d.vcenterId); if (dsUsageReadable(d)) b.dsCapGB += d.capacityGB || 0; else if (dsUsageUnknownOf(d)) b.dsUnknown++; }
   const byVcenter = vcenters.map((vc) => {
     const b = acc.get(vc.id) || bucket(vc.id);
     return {
@@ -121,6 +148,7 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
       cpuCores: b.cpuCores,
       memTotalGB: round(b.memMB / 1024),
       storageTotalTB: round(b.dsCapGB / 1024, 1),
+      datastoresUsageUnknown: b.dsUnknown,
       vcpuAllocated: b.vcpu,
       ramAllocatedGB: round(b.ramMB / 1024),
       provisionedTB: round(b.provGB / 1024, 1),
@@ -165,7 +193,10 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
       capacityTB: round(storCapGB / 1024, 1),
       usedTB: round(storUsedGB / 1024, 1),
       freeTB: round((storCapGB - storUsedGB) / 1024, 1),
-      usagePct: pct(storUsedGB, storCapGB),
+      // 사용량을 읽은 DS 가 없으면 0% 가 아니라 모른다(null — v2.600 LO2600-01 과 같은 규칙).
+      usagePct: pctOrNullR(storUsedGB, storCapGB),
+      usageUnknown: dsUsageUnknownCount,                 // 사용량을 못 읽어 합계에서 뺀 DS 수
+      capacityTBAll: round(storCapAllGB / 1024, 1),      // 미상 DS 포함 설치 용량(참고)
     },
     power: {
       watts: powerWatts,
@@ -269,8 +300,12 @@ api.get('/vms', invVms, (req, res) => memoJson(req, res, 'inv:vms', (snap) => {
     if (q.host && v.host !== q.host) continue; // 특정 ESXi 호스트의 VM만(호스트 상세 → VM 목록)
     let hit = true;
     for (const [field, min, max] of ranges) {
-      if (min != null && !Number.isNaN(min) && !(v[field] >= min)) { hit = false; break; }
-      if (max != null && !Number.isNaN(max) && !(v[field] <= max)) { hit = false; break; }
+      // v2.631(감사 AX2-03): 값이 없는 항목(null)은 범위 조건에 맞지 않는다 — JS 비교에서 null 은 0 으로 강제돼
+      //   'cpuUsageMax=5' 가 사용률 미상 VM 을 '0%' 로 통과시켰다(같은 응답 totals.usageUnknown 은 미상으로 센다).
+      const val = numOrNull(v[field]);
+      if (val == null) { hit = false; break; }
+      if (min != null && !Number.isNaN(min) && !(val >= min)) { hit = false; break; }
+      if (max != null && !Number.isNaN(max) && !(val <= max)) { hit = false; break; }
     }
     if (!hit) continue;
     if (osq && !String(v.guestOS).toLowerCase().includes(osq)) continue;
@@ -402,30 +437,49 @@ api.get('/top', (req, res) => memoJson(req, res, 'inv:top', (snap) => {
   const datastores = applyFilters(snap.datastores, req.query, snap, ['name'], req.user);
   const onVms = vms.filter((v) => v.powerState === 'POWERED_ON');
 
-  const top = (arr, key, n = limit) =>
-    [...arr].sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0)).slice(0, n);
+  // v2.631(감사 WEB2631-05): 값이 없는 항목(null·undefined — REST 폴백 VM 의 사용률, 사용량 미상 DS)은 순위에 넣지 않는다.
+  //   예전엔 0 으로 정렬해 목록에 섞였고 화면이 'undefined%' 로 그렸다. 끊긴 호스트의 사용률(0 이 온다)도
+  //   store.usageReadable 로 뺀다. 뺀 개수는 omitted[<목록 이름>] 로 밝힌다(조용한 제외 금지).
+  const omitted = {};
+  const top = (arr, key, n = limit, name = null, pre = null) => {
+    const rows = [];
+    let skipped = 0;
+    for (const x of arr) {
+      if (pre && !pre(x)) { skipped++; continue; }
+      const val = numOrNull(x[key]);
+      if (val == null) { skipped++; continue; }
+      rows.push([val, x]);
+    }
+    if (name && skipped) omitted[name] = skipped;
+    rows.sort((a, b) => b[0] - a[0]);
+    return rows.slice(0, n).map((r) => r[1]);
+  };
   const gate = (kind, list) => (can[kind] ? list : []);
 
   return {
     generatedAt: snap.generatedAt,
     scope: { vms: vms.length, hosts: hosts.length, datastores: datastores.length },
     withheld: TOP_PERMS.filter(([n]) => !can[n]).map(([n, k]) => ({ kind: n, requiredPerm: k })),
-    vmsByCpuUsage: gate('vms', top(onVms, 'cpuUsagePct')),
-    vmsByMemUsage: gate('vms', top(onVms, 'memUsagePct')),
-    vmsByVcpu: gate('vms', top(vms, 'cpuCount')),
-    vmsByRam: gate('vms', top(vms, 'memMB')),
-    vmsByStorage: gate('vms', top(vms, 'storageGB')),
-    hostsByCpu: gate('hosts', top(hosts, 'cpuUsagePct')),
-    hostsByMem: gate('hosts', top(hosts, 'memUsagePct')),
-    hostsByVmCount: gate('hosts', top(hosts, 'vmCount')),
+    vmsByCpuUsage: gate('vms', top(onVms, 'cpuUsagePct', limit, 'vmsByCpuUsage')),
+    vmsByMemUsage: gate('vms', top(onVms, 'memUsagePct', limit, 'vmsByMemUsage')),
+    vmsByVcpu: gate('vms', top(vms, 'cpuCount', limit, 'vmsByVcpu')),
+    vmsByRam: gate('vms', top(vms, 'memMB', limit, 'vmsByRam')),
+    vmsByStorage: gate('vms', top(vms, 'storageGB', limit, 'vmsByStorage')),
+    hostsByCpu: gate('hosts', top(hosts, 'cpuUsagePct', limit, 'hostsByCpu', usageReadable)),
+    hostsByMem: gate('hosts', top(hosts, 'memUsagePct', limit, 'hostsByMem', usageReadable)),
+    hostsByVmCount: gate('hosts', top(hosts, 'vmCount', limit, 'hostsByVmCount')),
     hostsByPower: gate('hosts', top(hosts.filter((h) => h.powerWatts > 0), 'powerWatts')),
-    datastoresByUsage: gate('datastores', top(datastores, 'usagePct')),
+    datastoresByUsage: gate('datastores', top(datastores, 'usagePct', limit, 'datastoresByUsage')),
+    omitted,
   };
 }, { extraKey: `${scopeKey(req.user, store.get())}|p${topPermKey(req.user)}` }));
 
 api.get('/alarms', invAlarms, (req, res) => memoJson(req, res, 'inv:alarms', (snap) => {
   let alarms = applyFilters(snap.alarms, req.query, snap, ['message', 'entity'], req.user);
   if (req.query.severity) alarms = alarms.filter((a) => a.severity === req.query.severity);
+  // v2.631(감사 WEB2631-02): 최신순으로 준다 — 스냅샷 순서(vCenter 순)의 앞 N건을 '최근 알람' 으로 쓰면 최신 알람이 아니다.
+  //   동률이면 critical → warning → 그 밖, 시각을 못 읽은 알람은 맨 뒤(시각을 지어내지 않는다). 원본 배열은 건드리지 않는다.
+  alarms = sortAlarmsRecent(alarms);
   return { total: alarms.length, items: alarms };
 }, { extraKey: scopeKey(req.user, store.get()) }));
 

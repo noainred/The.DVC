@@ -17,6 +17,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
+import { load as loadGuestDiskSettings } from './settings.js';
 // v2.599 DB2599-02: 첫 open 잠금은 래치하지 않고 잠시 뒤 다시 연다.
 const lockRetry = createLockRetry();
 
@@ -83,6 +84,12 @@ function initSqlite() {
         PRIMARY KEY (vm_id, path)
       );
     `);
+    // v2.631(감사 R2631-01): vm_latest.partial — 이 행이 **부분 합**(여유 공간 미보고 파티션을 뺀 합)인지. 예전 DB 에는 열이 없다.
+    //   table_info 로 없을 때만 더한다(v2.603 DB2603-01 — 잠금을 '열 있음' 으로 삼키지 않게 duplicate 만 삼킨다).
+    const cols = new Set(db.prepare('PRAGMA table_info(vm_latest)').all().map((c) => c.name));
+    if (!cols.has('partial')) {
+      try { db.exec('ALTER TABLE vm_latest ADD COLUMN partial INTEGER NOT NULL DEFAULT 0'); } catch (e) { if (!/duplicate column name/i.test(String(e?.message))) throw e; }
+    }
     impl = db;
     return db;
   })).catch((e) => {
@@ -102,11 +109,18 @@ export function guestDiskDbStatus() {
   return { available: Boolean(impl), path: DB_PATH, error: initError ? String(initError.message || initError) : (impl ? null : (lockRetry.note() || null)) };
 }
 
+/** 보류 시한 인자 — 양의 유한수만 값이다(null·''·음수는 '기본값 사용'). */
+function numHold(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /**
  * 한 vCenter 의 수집 결과를 커밋한다(단일 트랜잭션).
  * vms: [{ vmId, vmName, allocGB, usedGB, partCount, parts:[{path,capGB,usedGB}] }]
  */
-export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.now(), changeThresholdGB = 1 } = {}) {
+export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.now(), changeThresholdGB = 1, holdMaxMs = null } = {}) {
   const db = await getDb();
   if (!db) return { ok: false, reason: 'DB 사용 불가' };
   // 빈 수집 방어: vms 가 비면 DELETE(=이 vCenter latest 전체 삭제)를 건너뛰고 이전 값을 유지한다.
@@ -127,7 +141,7 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
     knownPaths.get(r.vm_id).add(r.path);
   }
 
-  const insLatest = db.prepare('INSERT OR REPLACE INTO vm_latest (vm_id,vcenter_id,vcenter_name,vm_name,alloc_gb,used_gb,part_count,ts) VALUES (?,?,?,?,?,?,?,?)');
+  const insLatest = db.prepare('INSERT OR REPLACE INTO vm_latest (vm_id,vcenter_id,vcenter_name,vm_name,alloc_gb,used_gb,part_count,ts,partial) VALUES (?,?,?,?,?,?,?,?,?)');
   const insVmSer = db.prepare('INSERT INTO vm_series (vcenter_id,vm_id,ts,alloc_gb,used_gb) VALUES (?,?,?,?,?)');
   const upVmLast = db.prepare('INSERT OR REPLACE INTO vm_last (vm_id,vcenter_id,alloc_gb,used_gb) VALUES (?,?,?,?)');
   const insPartSer = db.prepare('INSERT INTO part_series (vcenter_id,vm_id,path,ts,cap_gb,used_gb) VALUES (?,?,?,?,?,?)');
@@ -154,12 +168,23 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
 
   // v2.630(감사 A2-01): 여유 공간을 보고하지 않은 파티션이 있는 VM(partsUnknown>0)의 allocGB·usedGB 는 **부분 합**이다.
   //   그대로 vm_series 에 넣으면 D: 하나가 한 주기 미보고일 때 600→100 GB 계단(전부 미보고면 0/0 점)이 추이에 영구 적재되고
-  //   usageTrend 가 'shrinking' 으로 읽는다(CLAUDE.md '부분 합은 적재하지 않는다'). 그 VM 은 vm_series·vm_last 를 건너뛰고,
-  //   vm_latest 는 직전 행(마지막 온전한 관측 — ts 도 그대로)을 유지한다. 직전 행이 없으면 부분 합을 표시용으로만 넣되
-  //   알고 있는 파티션이 하나도 없으면 넣지 않는다(0/0 을 지어내지 않는다). 개수는 partialVms 로 밝힌다.
+  //   usageTrend 가 'shrinking' 으로 읽는다(CLAUDE.md '부분 합은 적재하지 않는다'). 그 VM 은 vm_series·vm_last 를 건너뛴다.
+  // ⚠ v2.631(감사 R2631-01): 예전에는 vm_latest 의 직전 행을 **무조건** 유지해 두 결함이 있었다 — ① 직전 행이 없을 때 표시용으로
+  //   넣은 부분 합 행이 다음 주기엔 '직전 온전한 값' 이 되어 그대로 얼었고 ② 한 파티션이 계속 여유를 보고하지 않는 VM 은 온전한
+  //   관측이 다시 오지 않으므로 값·시각이 업그레이드 직전에 영원히 고정됐다. 이제:
+  //   · 직전 행이 **온전한 관측**(partial=0)이고 보류 시한(holdMaxMs — 기본 수집 주기 × 3) 안이면 그 행을 유지한다(partialHeld).
+  //   · 직전 행이 부분 합이거나 시한을 넘겼거나 없으면 **이번 부분 합**을 partial=1 로 넣는다(값·시각 갱신, 표지로 밝힘).
+  //     알고 있는 파티션이 하나도 없으면 부분 합을 만들지 않는다(0/0 을 지어내지 않는다) — 직전 행이 있으면 그대로 둔다(partialStale).
+  //   vm_series 에는 여전히 넣지 않는다. 개수는 partialVms·partialHeld·partialShown 으로 밝힌다.
   const prevLatest = new Map();
-  for (const r of db.prepare('SELECT vm_id, vcenter_name, vm_name, alloc_gb, used_gb, part_count, ts FROM vm_latest WHERE vcenter_id=?').all(vcenterId)) prevLatest.set(r.vm_id, r);
-  let partialVms = 0; let partialHeld = 0;
+  for (const r of db.prepare('SELECT vm_id, vcenter_name, vm_name, alloc_gb, used_gb, part_count, ts, partial FROM vm_latest WHERE vcenter_id=?').all(vcenterId)) prevLatest.set(r.vm_id, r);
+  let partialVms = 0; let partialHeld = 0; let partialShown = 0; let partialStale = 0;
+  let holdMs = numHold(holdMaxMs);
+  if (holdMs == null) {
+    let hours = 12;
+    try { hours = Number(loadGuestDiskSettings().intervalHours) || 12; } catch { /* 설정 없음 — 기본 */ }
+    holdMs = Math.max(1, hours) * 3 * 3_600_000;
+  }
 
   let vmSeriesRows = 0; let partSeriesRows = 0;
   db.exec('BEGIN');
@@ -171,14 +196,21 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
       if (partial) {
         partialVms++;
         const pl = prevLatest.get(vm.vmId);
-        if (pl) {
-          insLatest.run(vm.vmId, vcenterId, vcenterName || pl.vcenter_name || '', vm.vmName || pl.vm_name || '', pl.alloc_gb, pl.used_gb, pl.part_count || 0, pl.ts);
+        const plWhole = pl && !Number(pl.partial);
+        const hasKnown = (vm.parts || []).length > 0;
+        if (plWhole && (ts - Number(pl.ts)) <= holdMs) {
+          insLatest.run(vm.vmId, vcenterId, vcenterName || pl.vcenter_name || '', vm.vmName || pl.vm_name || '', pl.alloc_gb, pl.used_gb, pl.part_count || 0, pl.ts, 0);
           partialHeld++;
-        } else if ((vm.parts || []).length) {
-          insLatest.run(vm.vmId, vcenterId, vcenterName || '', vm.vmName || '', vm.allocGB, vm.usedGB, vm.partCount || 0, ts);
+        } else if (hasKnown) {
+          insLatest.run(vm.vmId, vcenterId, vcenterName || '', vm.vmName || '', vm.allocGB, vm.usedGB, vm.partCount || 0, ts, 1);
+          partialShown++;
+        } else if (pl) {
+          // 알고 있는 파티션이 없다 — 새 값을 만들 수 없으므로 직전 행을 그대로 둔다(시각도 그대로 — 낡음이 보이게).
+          insLatest.run(vm.vmId, vcenterId, vcenterName || pl.vcenter_name || '', vm.vmName || pl.vm_name || '', pl.alloc_gb, pl.used_gb, pl.part_count || 0, pl.ts, Number(pl.partial) ? 1 : 0);
+          partialStale++;
         }
       } else {
-        insLatest.run(vm.vmId, vcenterId, vcenterName || '', vm.vmName || '', vm.allocGB, vm.usedGB, vm.partCount || 0, ts);
+        insLatest.run(vm.vmId, vcenterId, vcenterName || '', vm.vmName || '', vm.allocGB, vm.usedGB, vm.partCount || 0, ts, 0);
       }
       const lv = vmLast.get(vm.vmId);
       if (!partial && (!lv || Math.abs(vm.usedGB - lv.used_gb) >= thr || vm.allocGB !== lv.alloc_gb)) {
@@ -213,7 +245,7 @@ export async function commitCollection(vcenterId, vcenterName, vms, { ts = Date.
   }
   if (skippedParts || skippedVms) console.warn(`[guestdisk] ${vcenterId}: 값이 숫자가 아니어서 적재하지 않은 파티션 ${skippedParts}개 · VM ${skippedVms}대`);
   return { ok: true, vms: rows.length, vmSeriesRows, partSeriesRows, ...(skippedParts ? { skippedParts } : {}), ...(skippedVms ? { skippedVms } : {}),
-    ...(partialVms ? { partialVms, partialHeld } : {}) };
+    ...(partialVms ? { partialVms, partialHeld, partialShown, partialStale } : {}) };
 }
 
 /** 최신 목록 — 선택 vCenter 로 좁힐 수 있다(scope). vcenterIds=null 이면 전체. */
@@ -231,6 +263,7 @@ export async function listLatest(vcenterIds = null) {
   return rows.map((r) => ({
     vmId: r.vm_id, vcenterId: r.vcenter_id, vcenterName: r.vcenter_name, vmName: r.vm_name,
     allocGB: r.alloc_gb, usedGB: r.used_gb, partCount: r.part_count, ts: r.ts,
+    ...(Number(r.partial) ? { partial: true } : {}),   // v2.631 R2631-01: 부분 합 행(여유 미보고 파티션 제외)
   }));
 }
 
@@ -310,7 +343,7 @@ export async function latestOne(vmId) {
   if (!db) return null;
   const r = db.prepare('SELECT * FROM vm_latest WHERE vm_id=?').get(vmId);
   if (!r) return null;
-  return { vmId: r.vm_id, vcenterId: r.vcenter_id, vcenterName: r.vcenter_name, vmName: r.vm_name, allocGB: r.alloc_gb, usedGB: r.used_gb, partCount: r.part_count, ts: r.ts };
+  return { vmId: r.vm_id, vcenterId: r.vcenter_id, vcenterName: r.vcenter_name, vmName: r.vm_name, allocGB: r.alloc_gb, usedGB: r.used_gb, partCount: r.part_count, ts: r.ts, ...(Number(r.partial) ? { partial: true } : {}) };
 }
 
 // v2.605(감사 DB2605-04): 청크 삭제문(후보 rowid 를 LIMIT 으로 고른다 — 후보는 ts 단독 인덱스로 좁힌다).

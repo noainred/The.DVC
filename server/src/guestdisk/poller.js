@@ -72,6 +72,8 @@ export async function runGuestDiskNow(trigger = 'manual') {
       return { ok: true, ...lastResult, note };
     }
     let vms = 0; let vmSeriesRows = 0; let partSeriesRows = 0; let partsUnknown = 0; const errors = [];
+    // v2.631(감사 R2631-01·A6-2631-04): 부분 합이라 추이에 적재하지 않은 VM 수를 상태에 싣는다(예전엔 commit 결과에만 있었다 — 조용한 보류).
+    let partialVms = 0; let partialHeld = 0; let partialShown = 0; let partialStale = 0;
     const res = await pool(vcs, CONCURRENCY, (id) => collectAndStore(id, { changeThresholdGB: s.changeThresholdGB }));
     for (let k = 0; k < res.length; k++) {
       const r = res[k];
@@ -86,10 +88,15 @@ export async function runGuestDiskNow(trigger = 'manual') {
       partsUnknown += r.partsUnknown || 0;   // v2.600(LO2600-07): 합계에서 뺀 '여유 미보고' 파티션 수
       vmSeriesRows += r.commit?.vmSeriesRows || 0;
       partSeriesRows += r.commit?.partSeriesRows || 0;
+      partialVms += Number(r.commit?.partialVms) || 0;
+      partialHeld += Number(r.commit?.partialHeld) || 0;
+      partialShown += Number(r.commit?.partialShown) || 0;
+      partialStale += Number(r.commit?.partialStale) || 0;
     }
     await prune(s.retentionDays);
     lastRunTs = Date.now();
-    lastResult = { at: lastRunTs, trigger, vcenters: vcs.length, siteDelegated, vms, vmSeriesRows, partSeriesRows, ...(partsUnknown ? { partsUnknown } : {}), ms: Date.now() - started, errors, ...(authStopped.length ? { authStopped } : {}) };
+    lastResult = { at: lastRunTs, trigger, vcenters: vcs.length, siteDelegated, vms, vmSeriesRows, partSeriesRows, ...(partsUnknown ? { partsUnknown } : {}),
+      ...(partialVms ? { partialVms, partialHeld, partialShown, partialStale } : {}), ms: Date.now() - started, errors, ...(authStopped.length ? { authStopped } : {}) };
     return { ok: true, ...lastResult };
   } finally {
     running = false;

@@ -10,6 +10,7 @@
 import { vcStatusCounts, siteRows, WARN_PCT, CRIT_PCT } from '../console/consoleData.js';
 import { numOrNull } from '../numOrNull.js';
 import { alarmTotals } from '../views/restFallbackText.js';
+import { corpSiteStatus } from '../views/corpSiteStatus.js'; // v2.631(감사 WEB2631-03)
 
 const n = numOrNull;
 
@@ -312,9 +313,13 @@ export function serverCorpRows(ov) {
   const pbc = ov?.physicalByCorp && !ov.physicalByCorp.error ? ov.physicalByCorp : null;
   return (ov?.sites || []).map((s) => {
     const m = s.metrics || {};
-    const hosts = n(m.hosts), vms = n(m.vms);
+    // v2.631(감사 WEB2631-03): 첫 수집 중·연결 실패·비활성 vCenter 는 호스트·VM 을 0 이 아니라 null('—') + 표지(corpSiteStatus 하나).
+    const st = corpSiteStatus(s);
+    const hosts = st.countable ? n(m.hosts) : null;
+    const vms = st.countable ? n(m.vms) : null;
     const only = pbc ? (n(pbc.byVcenterPhysicalOnly?.[s.id]) ?? 0) : null;
-    return { id: s.id, name: s.name || s.id, physOnly: only, hosts, total: only == null || hosts == null ? null : only + hosts,
-      vms, vmsOn: n(m.vmsPoweredOn), perHost: hosts && vms != null ? Math.round((vms / hosts) * 10) / 10 : null }; // v2.628 WEB2628-04: VM 수를 모르면 0 이 아니라 null
+    return { id: s.id, name: s.name || s.id, countable: st.countable, mark: st.mark, markTitle: st.title,
+      physOnly: only, hosts, total: only == null || hosts == null ? null : only + hosts,
+      vms, vmsOn: st.countable ? n(m.vmsPoweredOn) : null, perHost: hosts && vms != null ? Math.round((vms / hosts) * 10) / 10 : null }; // v2.628 WEB2628-04: VM 수를 모르면 0 이 아니라 null
   });
 }

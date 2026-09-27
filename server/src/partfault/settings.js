@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12: 숫자 설정 정규화는 하나
 import { numOrNull } from '../util/numOrNull.js';
 
@@ -36,13 +37,24 @@ let _retentionFromFile = false; // v2.613 PERSIST2613-06: 파일에 retentionDay
 export const RETENTION_LIMITS = Object.freeze({ min: 30, max: 3650, def: 730 });
 const DEFAULTS = Object.freeze({ enabled: false, edges: {}, central: null, retentionDays: RETENTION_LIMITS.def });
 
+const _loadErr = makeSettingsLoadError(() => FILE());
+/** v2.631(EDGE2631-01): 설정 파일을 못 읽었으면 사유(배포 라우트가 503 으로 답한다), 읽었으면 null. */
+export function partFaultSettingsLoadError() { loadPartFaultSettings(); return _loadErr.get(); }
+
 export function loadPartFaultSettings() {
   if (_cache) return _cache;
-  try {
-    const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    _cache = { ...DEFAULTS, ...(j && typeof j === 'object' ? j : {}) };
-    _retentionFromFile = !!(j && typeof j === 'object' && numOrNull(j.retentionDays) != null);
-  } catch (e) { if (fs.existsSync(FILE())) preserveCorrupt(FILE(), e.message); _cache = { ...DEFAULTS }; }   // 설정 파일 — 손상이면 기본값(꺼짐)으로 시작. 켜진 척하지 않는다.
+  // v2.631(EDGE2631-01): 손상이면 기본값(꺼짐)으로 시작하되 **로드 오류를 기억**한다 — 그 기본값을 /api/central/partfault-config 가
+  //   200 으로 내려보내면 전 엣지의 파트 장애 수집이 꺼진다. 배포 라우트는 이 오류를 보고 503(엣지는 직전 값 유지)으로 답한다.
+  if (!fs.existsSync(FILE())) { _loadErr.missing(); _cache = { ...DEFAULTS }; }
+  else {
+    try {
+      const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+      if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
+      _cache = { ...DEFAULTS, ...j };
+      _retentionFromFile = numOrNull(j.retentionDays) != null;
+      _loadErr.ok();
+    } catch (e) { _loadErr.corrupt(e); if (fs.existsSync(FILE())) preserveCorrupt(FILE(), e.message); _cache = { ...DEFAULTS }; }   // 설정 파일 — 손상이면 기본값(꺼짐)으로 시작. 켜진 척하지 않는다.
+  }
   if (!_cache.edges || typeof _cache.edges !== 'object') _cache.edges = {};
   _cache.retentionDays = clampSetting(_cache.retentionDays, RETENTION_LIMITS); // 손편집 값도 범위 안으로(비숫자는 기본값)
   return _cache;
@@ -51,6 +63,7 @@ export function loadPartFaultSettings() {
 function persist(next) {
   _cache = next;
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  _loadErr.ok();
   return next;
 }
 

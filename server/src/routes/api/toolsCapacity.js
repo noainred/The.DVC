@@ -133,7 +133,8 @@ api.get('/tools/capacity', requirePerm('tools'), (req, res) => memoJson(req, res
  */
 function overAllocatedReport(scoped, vms, { top = 50 } = {}) {
   const r1 = (x) => Number((x || 0).toFixed(1));
-  const pctOf = (used, alloc) => (alloc > 0 ? Math.round((used / alloc) * 100) : 0);
+  // v2.631(감사 AX2-02): 분모(사용률을 읽은 VM 의 할당)가 0 이면 0% 가 아니라 모른다(null).
+  const pctOf = (used, alloc) => (alloc > 0 ? Math.round((used / alloc) * 100) : null);
   // 호스트 코어당 MHz — VM 의 vCPU 를 clock(MHz) 으로 환산하는 유일한 근거.
   // 키를 `${vcenterId}|${name}` 로 — 이름만 쓰면 vCenter 간 동명 호스트(localhost.localdomain
   // 등)가 서로 덮어써 다른 사이트의 코어당 MHz 로 환산된다.
@@ -146,41 +147,50 @@ function overAllocatedReport(scoped, vms, { top = 50 } = {}) {
   const on = vms.filter((v) => v.powerState === 'POWERED_ON');
   let cpuAllocMhz = 0; let cpuUsedMhz = 0; let excludedNoHostMhz = 0;
   let memAllocMB = 0; let memUsedMB = 0;
+  // v2.631(감사 AX2-02): 사용률을 읽지 못한 VM(REST 폴백 vCenter·엣지 정제로 null)은 0% 가 아니다 — 그 지표의
+  //   합산·후보 판정에서 빼고 개수를 밝힌다. 예전 `Number(x) || 0` 은 그 VM 을 메모리 과할당 1순위(할당 전량 유휴)로 만들었다.
+  const usageUnknown = { cpu: 0, mem: 0 };
   const items = [];
   for (const v of on) {
     const vcpu = Number(v.cpuCount) || 0;
     const memMB = Number(v.memMB) || 0;
-    const cpuPct = Number(v.cpuUsagePct) || 0;
-    const memPct = Number(v.memUsagePct) || 0;
+    const cpuPct = numOrNull(v.cpuUsagePct);
+    const memPct = numOrNull(v.memUsagePct);
+    if (cpuPct == null) usageUnknown.cpu += 1;
+    if (memPct == null) usageUnknown.mem += 1;
     const mhzPerCore = hostMhz.get(`${v.vcenterId}|${v.host}`);
     // 메모리는 호스트 정보 없이도 계산 가능(MB 단위 그대로).
-    const mUsed = memMB * (memPct / 100);
-    memAllocMB += memMB; memUsedMB += mUsed;
+    const mUsed = memPct == null ? null : memMB * (memPct / 100);
+    if (mUsed != null) { memAllocMB += memMB; memUsedMB += mUsed; }
     let cAlloc = null; let cUsed = null;
     if (mhzPerCore && vcpu > 0) {
       cAlloc = vcpu * mhzPerCore;
-      cUsed = cAlloc * (cpuPct / 100);
-      cpuAllocMhz += cAlloc; cpuUsedMhz += cUsed;
+      if (cpuPct != null) {
+        cUsed = cAlloc * (cpuPct / 100);
+        cpuAllocMhz += cAlloc; cpuUsedMhz += cUsed;
+      }
     } else if (vcpu > 0) {
       excludedNoHostMhz += 1; // 호스트 MHz 미상 — clock 합계에서 제외(추정 금지)
     }
     items.push({
       id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host || '', cluster: v.cluster || '',
-      guestOS: v.guestOS || '', vcpu, cpuUsagePct: Math.round(cpuPct), memUsagePct: Math.round(memPct),
+      guestOS: v.guestOS || '', vcpu,
+      cpuUsagePct: cpuPct == null ? null : Math.round(cpuPct), memUsagePct: memPct == null ? null : Math.round(memPct),
       cpuAllocMhz: cAlloc == null ? null : Math.round(cAlloc),
       cpuUsedMhz: cUsed == null ? null : Math.round(cUsed),
-      cpuIdleMhz: cAlloc == null ? null : Math.round(cAlloc - cUsed),
-      memAllocGB: r1(memMB / 1024), memUsedGB: r1(mUsed / 1024), memIdleGB: r1((memMB - mUsed) / 1024),
-      // 절감 가능(%) = 미사용 비율. 100 - 사용률 과 같지만 의미를 명시적으로 둔다.
-      cpuSavingPct: cAlloc == null ? null : Math.max(0, 100 - Math.round(cpuPct)),
-      memSavingPct: memMB > 0 ? Math.max(0, 100 - Math.round(memPct)) : null,
+      cpuIdleMhz: cUsed == null ? null : Math.round(cAlloc - cUsed),
+      memAllocGB: r1(memMB / 1024),
+      memUsedGB: mUsed == null ? null : r1(mUsed / 1024), memIdleGB: mUsed == null ? null : r1((memMB - mUsed) / 1024),
+      // 절감 가능(%) = 미사용 비율. 100 - 사용률 과 같지만 의미를 명시적으로 둔다. 사용률을 모르면 null.
+      cpuSavingPct: cUsed == null ? null : Math.max(0, 100 - Math.round(cpuPct)),
+      memSavingPct: memMB > 0 && memPct != null ? Math.max(0, 100 - Math.round(memPct)) : null,
     });
   }
   // 후보: 사용률이 낮아 줄일 여지가 큰 VM(임계는 화면에서 조정 가능하도록 값도 함께 반환).
   const CPU_IDLE_PCT = 20;   // 이 이하면 CPU 과할당 후보
   const MEM_IDLE_PCT = 40;   // 이 이하면 메모리 과할당 후보
-  const cpuCand = items.filter((x) => x.cpuAllocMhz != null && x.cpuUsagePct <= CPU_IDLE_PCT && x.vcpu > 1);
-  const memCand = items.filter((x) => x.memAllocGB > 0 && x.memUsagePct <= MEM_IDLE_PCT);
+  const cpuCand = items.filter((x) => x.cpuAllocMhz != null && x.cpuUsagePct != null && x.cpuUsagePct <= CPU_IDLE_PCT && x.vcpu > 1);
+  const memCand = items.filter((x) => x.memAllocGB > 0 && x.memUsagePct != null && x.memUsagePct <= MEM_IDLE_PCT);
   const byIdleMhz = (a, b) => (b.cpuIdleMhz || 0) - (a.cpuIdleMhz || 0);
   const byIdleGB = (a, b) => (b.memIdleGB || 0) - (a.memIdleGB || 0);
   return {
@@ -189,14 +199,15 @@ function overAllocatedReport(scoped, vms, { top = 50 } = {}) {
     thresholds: { cpuIdlePct: CPU_IDLE_PCT, memIdlePct: MEM_IDLE_PCT },
     poweredOnVms: on.length,
     excludedNoHostMhz,     // 호스트 코어 MHz 를 몰라 clock 집계에서 빠진 VM 수(투명성)
+    usageUnknown,          // v2.631(AX2-02): 사용률을 읽지 못해 합산·후보에서 뺀 구동 VM 수 { cpu, mem }
     cpu: {
       allocGHz: r1(cpuAllocMhz / 1000), usedGHz: r1(cpuUsedMhz / 1000), idleGHz: r1((cpuAllocMhz - cpuUsedMhz) / 1000),
-      usedPct: pctOf(cpuUsedMhz, cpuAllocMhz), savingPct: Math.max(0, 100 - pctOf(cpuUsedMhz, cpuAllocMhz)),
+      usedPct: pctOf(cpuUsedMhz, cpuAllocMhz), savingPct: cpuAllocMhz > 0 ? Math.max(0, 100 - pctOf(cpuUsedMhz, cpuAllocMhz)) : null,
       candidates: cpuCand.length,
     },
     mem: {
       allocGB: r1(memAllocMB / 1024), usedGB: r1(memUsedMB / 1024), idleGB: r1((memAllocMB - memUsedMB) / 1024),
-      usedPct: pctOf(memUsedMB, memAllocMB), savingPct: Math.max(0, 100 - pctOf(memUsedMB, memAllocMB)),
+      usedPct: pctOf(memUsedMB, memAllocMB), savingPct: memAllocMB > 0 ? Math.max(0, 100 - pctOf(memUsedMB, memAllocMB)) : null,
       candidates: memCand.length,
     },
     // 상위 후보 목록(각 50개 상한 — 응답 크기 유계. 엑셀 내보내기 '전량' 은 top=Infinity).

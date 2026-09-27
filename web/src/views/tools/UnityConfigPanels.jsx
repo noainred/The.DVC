@@ -166,7 +166,7 @@ export default function UnityConfigPanels({ ex = {}, fmtBytes = (b) => String(b)
                     <tr key={i}>
                       <td>{d.enclosure ? `${d.enclosure} / ` : ''}{d.slot || d.id || '—'}</td>
                       <td className="muted">{d.tier || '—'}</td>
-                      <td data-sort={String(d.bytes ?? -1)}>{d.bytes ? fmtBytes(d.bytes) : '—'}</td>
+                      <td data-sort={String(d.bytes ?? '')}>{d.bytes ? fmtBytes(d.bytes) : '—'}</td>
                       <td className="muted">{d.pool || '—'}</td>
                       {/* `healthOf`(unitySsh.js:164)는 'ok' · 'unknown' · **장비 원문(소문자)** 중 하나를 준다 —
                           'unhealthy' 라는 값은 없다. 원문을 그대로 보여 판정 근거를 숨기지 않는다. */}
@@ -273,9 +273,9 @@ export default function UnityConfigPanels({ ex = {}, fmtBytes = (b) => String(b)
                       <td style={x.state === 'fault' ? { color: 'var(--red)' } : undefined}>
                         {x.state === 'ok' ? '정상' : x.state === 'fault' ? `고장(${x.faults.join(', ')})` : '확인 불가'}
                       </td>
-                      <td data-sort={String(x.inputWatts ?? -1)}>{x.inputWatts != null ? `${x.inputWatts} W` : '—'}</td>
-                      <td data-sort={String(x.inputVolts ?? -1)}>{x.inputVolts != null ? `${x.inputVolts} V` : '—'}</td>
-                      <td data-sort={String(x.tempC ?? -1)}>{x.tempC != null ? `${x.tempC} ℃` : '—'}</td>
+                      <td data-sort={String(x.inputWatts ?? '')}>{x.inputWatts != null ? `${x.inputWatts} W` : '—'}</td>
+                      <td data-sort={String(x.inputVolts ?? '')}>{x.inputVolts != null ? `${x.inputVolts} V` : '—'}</td>
+                      <td data-sort={String(x.tempC ?? '')}>{x.tempC != null ? `${x.tempC} ℃` : '—'}</td>
                       <td className="muted" style={{ fontSize: 11.5, whiteSpace: 'normal' }}>{[x.model, x.firmware, x.type].filter(Boolean).join(' · ') || '—'}</td>
                     </tr>
                   ))}</tbody>
@@ -367,9 +367,9 @@ export default function UnityConfigPanels({ ex = {}, fmtBytes = (b) => String(b)
                   <tbody>{prov.luns.top.map((x, i) => (
                     <tr key={i}>
                       <td>{x.name}</td>
-                      <td data-sort={String(x.bytes ?? -1)}>{x.bytes ? fmtBytes(x.bytes) : '—'}</td>
+                      <td data-sort={String(x.bytes ?? '')}>{x.bytes ? fmtBytes(x.bytes) : '—'}</td>
                       {/* 할당량을 못 읽으면 0 이 아니라 '—' 다(0 은 '아무것도 안 썼다' 는 거짓) */}
-                      <td data-sort={String(x.allocatedBytes ?? -1)}>{x.allocatedBytes != null ? fmtBytes(x.allocatedBytes) : '—'}</td>
+                      <td data-sort={String(x.allocatedBytes ?? '')}>{x.allocatedBytes != null ? fmtBytes(x.allocatedBytes) : '—'}</td>
                       <td className="muted">{x.pool || '—'}</td>
                       <td className="muted">{x.spOwner || '—'}{x.trespassed ? ' ⚠전환됨' : ''}</td>
                       <td className="muted" style={{ fontSize: 11.5 }}>
@@ -399,9 +399,9 @@ export default function UnityConfigPanels({ ex = {}, fmtBytes = (b) => String(b)
                       <tr key={i}>
                         <td>{x.filesystem || '—'}</td>
                         <td className="muted" style={{ whiteSpace: 'normal' }}>{x.path || '—'}</td>
-                        <td data-sort={String(x.usedBytes ?? -1)}>{x.usedBytes != null ? fmtBytes(x.usedBytes) : '—'}</td>
-                        <td data-sort={String(x.softBytes ?? -1)}>{x.softBytes != null ? fmtBytes(x.softBytes) : '—'}</td>
-                        <td data-sort={String(x.hardBytes ?? -1)}>{x.hardBytes != null ? fmtBytes(x.hardBytes) : '—'}</td>
+                        <td data-sort={String(x.usedBytes ?? '')}>{x.usedBytes != null ? fmtBytes(x.usedBytes) : '—'}</td>
+                        <td data-sort={String(x.softBytes ?? '')}>{x.softBytes != null ? fmtBytes(x.softBytes) : '—'}</td>
+                        <td data-sort={String(x.hardBytes ?? '')}>{x.hardBytes != null ? fmtBytes(x.hardBytes) : '—'}</td>
                         <td className="muted">{x.state || '—'}</td>
                       </tr>
                     ))}</tbody>

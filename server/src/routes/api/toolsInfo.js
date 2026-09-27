@@ -116,16 +116,40 @@ api.get('/tools/licenses', requirePerm('tools'), (req, res) => {
   const items = [];
   for (const vc of vcs) for (const l of vc.licenses || []) items.push({ vcenterId: vc.id, vcenterName: vc.name, ...l });
   // rollup by license name
+  // v2.631(감사 AX2-06, 가능성 — 실 ELM 미확인): Enhanced Linked Mode 로 라이선스 인벤토리를 공유하는 vCenter 들은
+  //   같은 키를 각자 보고할 수 있다. 그대로 더하면 total·used 가 vCenter 수만큼 불어난다. 같은 (이름, 키) 는 한 번만
+  //   세고(값이 다르면 큰 쪽), 합산에서 뺀 중복 보고 수를 항목별 duplicates·전체 duplicateKeys 로 싣는다(count 는 예전대로 보고 수).
+  //   키가 없거나 평가판(00000…)이면 예전대로 항목마다 더한다(같은 키라는 근거가 없다).
+  const dedupKey = (l) => {
+    const key = String(l.key || '');
+    if (!key || /^0{5}-/.test(key)) return null;
+    return `${l.name || l.edition || 'unknown'}|${key}`;
+  };
   const roll = new Map();
+  const seenKey = new Map();   // dedupKey -> { rollEntry, total, used, vcs:Set }
+  let duplicateKeys = 0;
   for (const l of items) {
     const k = l.name || l.edition || 'unknown';
-    if (!roll.has(k)) roll.set(k, { name: k, total: 0, used: 0, product: l.product, productVersion: l.productVersion, count: 0 });
-    const e = roll.get(k); e.total += l.total || 0; e.used += l.used || 0; e.count++;
+    if (!roll.has(k)) roll.set(k, { name: k, total: 0, used: 0, product: l.product, productVersion: l.productVersion, count: 0, duplicates: 0 });
+    const e = roll.get(k);
+    e.count++;
+    const dk = dedupKey(l);
+    if (dk && seenKey.has(dk)) {
+      const prev = seenKey.get(dk);
+      const t = l.total || 0, u = l.used || 0;
+      if (t > prev.total) { e.total += t - prev.total; prev.total = t; }
+      if (u > prev.used) { e.used += u - prev.used; prev.used = u; }
+      e.duplicates++; duplicateKeys++;
+      continue;
+    }
+    if (dk) seenKey.set(dk, { total: l.total || 0, used: l.used || 0 });
+    e.total += l.total || 0; e.used += l.used || 0;
   }
   res.json({
     items,
     byLicense: [...roll.values()].sort((a, b) => b.used - a.used),
-    totalAssigned: items.reduce((a, l) => a + (l.used || 0), 0),
+    totalAssigned: [...roll.values()].reduce((a, e) => a + (e.used || 0), 0),
+    duplicateKeys,   // 여러 vCenter 가 같은 키를 보고해 합산에서 한 번만 센 보고 수(0 이면 중복 없음)
   });
 });
 

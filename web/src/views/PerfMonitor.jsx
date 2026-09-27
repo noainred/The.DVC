@@ -226,13 +226,13 @@ export default function PerfMonitor() {
               <tr key={r.route}>
                 <td style={{ overflowWrap: 'anywhere' }}>{r.route}</td>
                 <td data-sort={r.n}>{r.n.toLocaleString()}</td>
-                <td data-sort={r.avgMs ?? -1}>{fmtMs(r.avgMs)}</td>
-                <td data-sort={r.p50Ms ?? -1}>{fmtMs(r.p50Ms)}</td>
-                <td data-sort={r.p95Ms ?? -1} style={{ color: (r.p95Ms || 0) >= st.slowRequestMs ? 'var(--amber)' : undefined }}>{fmtMs(r.p95Ms)}</td>
-                <td data-sort={r.p99Ms ?? -1}>{fmtMs(r.p99Ms)}</td>
+                <td data-sort={r.avgMs ?? ''}>{fmtMs(r.avgMs)}</td>
+                <td data-sort={r.p50Ms ?? ''}>{fmtMs(r.p50Ms)}</td>
+                <td data-sort={r.p95Ms ?? ''} style={{ color: (r.p95Ms || 0) >= st.slowRequestMs ? 'var(--amber)' : undefined }}>{fmtMs(r.p95Ms)}</td>
+                <td data-sort={r.p99Ms ?? ''}>{fmtMs(r.p99Ms)}</td>
                 <td data-sort={r.maxMs}>{fmtMs(r.maxMs)}</td>
                 <td data-sort={r.slowN}>{r.slowN || '—'}</td>
-                <td data-sort={rate ?? -1}>{rate == null ? '—' : `${rate}%`}</td>
+                <td data-sort={rate ?? ''}>{rate == null ? '—' : `${rate}%`}</td>
                 <td data-sort={r.errN}>{r.errN || '—'}</td>
                 <td className="muted">{routeHint(r.route, d.slow) || '—'}</td>
                 <td data-sort={r.lastTs ?? 0} className="muted">{ago(r.lastTs)}</td>

@@ -13,7 +13,7 @@ import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import GuestDiskDetailModal from './GuestDiskDetailModal.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { partsUnknownNote } from './guestDiskText.js'; // v2.600 LO2600-07: 여유 미보고 파티션 제외 안내
+import { partsUnknownNote, partialVmsNote } from './guestDiskText.js'; // v2.600 LO2600-07: 여유 미보고 파티션 제외 안내
 import { vcAuthSkipNote } from '../authSkipText.js'; // v2.591(감사 F1): vCenter 인증 정지로 건너뛴 vCenter
 
 // ── 단위 변환(값은 GB 기준) ──────────────────────────────────────────────
@@ -301,6 +301,9 @@ export default function GuestDiskReport({ scope = '' }) {
       )}
       {partsUnknownNote(poller.lastResult?.partsUnknown) && (
         <div className="gd-warn"><BoldText text={partsUnknownNote(poller.lastResult?.partsUnknown)} /></div>
+      )}
+      {partialVmsNote(poller.lastResult) && ( /* v2.631 A6-2631-04: 부분 합 VM 은 추이에 적재하지 않는다 — 그 사실을 말한다 */
+        <div className="gd-warn"><BoldText text={partialVmsNote(poller.lastResult)} /></div>
       )}
       {poller.lastResult?.errors?.length > 0 && (
         <div className="gd-warn">최근 수집에서 {poller.lastResult.errors.length}개 vCenter 조회 실패(엣지 수집 vCenter는 중앙에서 직접 접속이 안 될 수 있습니다).</div>

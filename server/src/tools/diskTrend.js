@@ -221,8 +221,8 @@ export function analyzeDiskTrend({ points = [], breakdown, days = 30, policy: po
   const b = breakdown;
   const DAY = 86_400_000;
 
-  const seriesSlope = (key) => {
-    const pts = points.filter((p) => p && p[key] != null && Number.isFinite(p.ts));
+  const seriesSlope = (key, keep = null) => {
+    const pts = points.filter((p) => p && p[key] != null && Number.isFinite(p.ts) && (!keep || keep(p)));
     if (!pts.length) return { slope: null, n: 0, spanDays: 0 };
     const span = (pts[pts.length - 1].ts - pts[0].ts) / DAY;
     if (pts.length < policy.minPoints || span < policy.minSpanDays) return { slope: null, n: pts.length, spanDays: r1(span) };
@@ -230,9 +230,18 @@ export function analyzeDiskTrend({ points = [], breakdown, days = 30, policy: po
   };
   const used = seriesSlope('dsUsedGB');
   const prov = seriesSlope('provGB');
-  const reclaimS = seriesSlope('reclaimGB');
+  // v2.631(감사 R2631-03): 회수 가능 정의가 바뀐 뒤(v2.630 DATA2630-01) 옛 정의 점(reclaimLegacy — 정지 + 전체 스냅샷)과
+  //   새 정의 점(정지 + 켜진 VM 스냅샷)을 한 기울기로 섞으면 전환 창 동안 '회수 가능 −N GB/일' 이라는 거짓 감소가 된다.
+  //   기울기는 새 정의 점만으로 계산하고, 그것이 정책 하한에 못 미치면 null + 사유(reclaimReason)다.
+  const legacyN = points.filter((p) => p && p.reclaimLegacy && p.reclaimGB != null).length;
+  const reclaimS = seriesSlope('reclaimGB', (p) => !p.reclaimLegacy);
+  const reclaimReason = reclaimS.slope != null ? null
+    : legacyN > 0
+      ? `회수 가능 정의가 바뀌어(정지 VM 스냅샷 제외) 옛 정의 표본 ${legacyN}점은 기울기에서 뺐습니다 — 새 정의 표본 ${reclaimS.n}점 · ${reclaimS.spanDays}일로는 정책 하한(${policy.minPoints}점 · ${policy.minSpanDays}일) 미만이라 증감을 산정하지 않습니다.`
+      : null;
   const growth = {
     usedGBperDay: r1(used.slope), provGBperDay: r1(prov.slope), reclaimGBperDay: r1(reclaimS.slope),
+    reclaimReason, reclaimLegacyExcluded: legacyN,
     samples: used.n, spanDays: used.spanDays,
     reason: used.slope == null
       ? (used.n === 0 ? '사용량 시계열이 아직 없습니다(수집 시작 전).'

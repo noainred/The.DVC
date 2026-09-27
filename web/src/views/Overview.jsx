@@ -3,19 +3,23 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
-import { usePolling, fetchJson, putJson } from '../api.js';
+import { usePolling, fetchJson, putJson, can } from '../api.js';
 import { Kpi, Loading, ErrorBox, SeverityBadge } from '../components/ui.jsx';
 import STable from '../components/STable.jsx';
 import { unplacedRows, corpNoteText, physNoteText } from './overviewServerText.js';
 import { vcStatusMeta } from '../console/consoleData.js'; // v2.618 ARCH-1
 import { unitText } from './unitText.js'; // v2.583: 미배치 물리 서버 행
 import { storageUsageUnknownNote } from './vcCardText.js'; // v2.621(감사 WEB-03)
+import { recentAlarms, alarmPanelText } from './overviewAlarmsText.js'; // v2.631(감사 WEB2631-02)
+import { corpSiteStatus } from './corpSiteStatus.js'; // v2.631(감사 WEB2631-03)
 
 const REGION_COLORS = { '아시아': '#22d3ee', '중국': '#ef4444', '유럽': '#a855f7', '북미': '#3b82f6', Unknown: '#64748b' };
 
 export default function Overview({ onSelectSite, onGotoTab }) {
   const { data: ov, error, loading } = usePolling('/overview', {}, 15_000);
-  const { data: alarmData } = usePolling('/alarms', { severity: undefined }, 15_000);
+  // v2.631(감사 WEB2631-02): inv.alarms 권한이 없으면 부르지 않는다(403 을 만들고 '활성 알람이 없습니다' 라 말하던 것).
+  const canAlarms = can('inv.alarms');
+  const { data: alarmData, error: alarmError, errorInfo: alarmDenied } = usePolling(canAlarms ? '/alarms' : null, { severity: undefined }, 15_000);
 
 
   // 글로벌 현황 KPI를 '1줄'로 유지 — 한 줄에 안 들어가 둘째 줄로 넘어간 박스는 통째로 숨긴다(부분 잘림 없음).
@@ -56,7 +60,9 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   const stoPct = g.datastores > 0 && Number(g.storageTotalTB) > 0 ? g.storageUsagePct : null;
   const regions = ov.byRegion || [];
   const sites = ov.sites || [];
-  const alarms = (alarmData?.items || []).slice(0, 8);
+  // v2.631(감사 WEB2631-02): 스냅샷 순서의 앞 8건이 아니라 시각 내림차순 8건 — 비었을 때의 문구는 '못 읽음' 과 '없음' 을 가른다.
+  const alarms = recentAlarms(alarmData?.items, 8);
+  const alarmText = alarmPanelText({ allowed: canAlarms, data: alarmData, error: alarmError, forbidden: alarmDenied?.status === 403, sites });
 
   const fmt = (n) => n?.toLocaleString('en-US');
 
@@ -120,21 +126,26 @@ export default function Overview({ onSelectSite, onGotoTab }) {
     return corpNoteText(pbc);
   })();
   const extraRows = pbc ? unplacedRows(pbc) : [];
+  // v2.631(감사 WEB2631-03): 첫 수집 중·연결 실패·비활성 vCenter 는 호스트·VM 을 '0' 이 아니라 '—' + 상태 표지로 그린다
+  //   (롤업은 그런 vCenter 를 hosts:0 으로 준다 — 측정 불가와 0대가 구분되지 않는다). 판정은 corpSiteStatus 하나.
   const corpRows = sites.map((s) => {
     const m = s.metrics || {};
-    const hosts = m.hosts || 0;
-    const vms = m.vms || 0;
+    const st = corpSiteStatus(s);
+    const hosts = st.countable ? (m.hosts || 0) : null;
+    const vms = st.countable ? (m.vms || 0) : null;
     // 서버 집계를 못 받았으면 0 이 아니라 null 이다('서버가 없다' 는 거짓을 만들지 않는다).
     const only = pbc ? (pbc.byVcenterPhysicalOnly?.[s.id] ?? 0) : null;
     return {
       id: s.id,
       name: s.name || s.id,
+      mark: st.mark,
+      markTitle: st.title,
       physOnly: only,
       hosts,
-      total: only == null ? null : only + hosts,
+      total: only == null || hosts == null ? null : only + hosts,
       vms,
-      vmsOn: m.vmsPoweredOn || 0,
-      perHost: hosts ? (vms / hosts).toFixed(1) : null,
+      vmsOn: st.countable ? (m.vmsPoweredOn || 0) : null,
+      perHost: hosts && vms != null ? (vms / hosts).toFixed(1) : null,
     };
   });
 
@@ -239,15 +250,16 @@ export default function Overview({ onSelectSite, onGotoTab }) {
                       style={{ color: 'inherit', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>
                       {r.name}
                     </span>
+                    {r.mark && <span className="badge" style={{ marginLeft: 6, fontSize: 10.5 }} title={r.markTitle || undefined}>{r.mark}</span>}
                   </td>
                   {/* 서버 집계를 못 받았으면 0 이 아니라 '—' 다 — iDRAC 에 등록되지 않았거나
                       이름·태그로 이 vCenter 에 연결되지 않은 것이지 '서버가 없다' 는 뜻이 아니다. */}
-                  <td data-sort={String(r.total ?? -1)}><b>{r.total == null ? '—' : fmt(r.total)}</b></td>
-                  <td data-sort={String(r.physOnly ?? -1)}>{r.physOnly == null ? '—' : fmt(r.physOnly)}</td>
-                  <td data-sort={String(r.hosts)}>{fmt(r.hosts)}</td>
-                  <td data-sort={String(r.vms)}>{fmt(r.vms)}</td>
-                  <td data-sort={String(r.vmsOn)} className="muted">{fmt(r.vmsOn)}</td>
-                  <td data-sort={String(r.perHost ?? -1)} className="muted">{r.perHost ?? '—'}</td>
+                  <td data-sort={String(r.total ?? '')}><b>{r.total == null ? '—' : fmt(r.total)}</b></td>
+                  <td data-sort={String(r.physOnly ?? '')}>{r.physOnly == null ? '—' : fmt(r.physOnly)}</td>
+                  <td data-sort={String(r.hosts ?? '')}>{r.hosts == null ? '—' : fmt(r.hosts)}</td>
+                  <td data-sort={String(r.vms ?? '')}>{r.vms == null ? '—' : fmt(r.vms)}</td>
+                  <td data-sort={String(r.vmsOn ?? '')} className="muted">{r.vmsOn == null ? '—' : fmt(r.vmsOn)}</td>
+                  <td data-sort={String(r.perHost ?? '')} className="muted">{r.perHost ?? '—'}</td>
                 </tr>
               ))}
               {/* v2.583: vCenter 행을 정하지 못한 물리 서버 — 정렬에서 빼고 표 아래에 고정한다(data-pin). */}
@@ -308,7 +320,8 @@ export default function Overview({ onSelectSite, onGotoTab }) {
             <b>최근 알람</b>
             <button className="tab" onClick={() => onGotoTab?.('alarms')}>전체 보기 →</button>
           </div>
-          {alarms.length === 0 && <div className="muted" style={{ padding: 16 }}>활성 알람이 없습니다.</div>}
+          {alarms.length === 0 && <div className="muted" style={{ padding: 16 }}>{alarmText.empty}</div>}
+          {alarmText.note && <div className="muted" style={{ fontSize: 11.5, padding: '4px 0' }}>{alarmText.note}</div>}
           {alarms.map((a) => (
             <div className="alarm-row" key={a.id}>
               <div className={`alarm-sev ${a.severity}`} />

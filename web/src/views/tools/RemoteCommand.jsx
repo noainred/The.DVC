@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
+import { rmaLateMark } from './edgeLateText.js'; // v2.631 A6-2631-04: 늦게 도착한 결과 배지
 import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel } from './remoteCommand.js';
 import { STable } from '../../components/STable.jsx';
 
@@ -127,7 +128,7 @@ export default function RemoteCommand() {
                   <td>{h.agent}</td><td><code>{h.instance || '—'}</code></td>
                   <td>{h.label || h.cmd}{Object.keys(h.args || {}).length ? <span className="muted"> {JSON.stringify(h.args)}</span> : null}</td>
                   <td>{h.user || '—'}</td>
-                  <td style={{ color: TONE[s.tone] }}>{s.text}</td>
+                  <td style={{ color: TONE[s.tone] }}>{s.text}{(() => { const m = rmaLateMark(h); return m ? <span className="badge amber" style={{ marginLeft: 6, whiteSpace: 'nowrap' }} title={m.title}>{m.label}</span> : null; })()}</td>
                   <td>{durationText(h.durationMs)}</td>
                 </tr>
               );
@@ -155,6 +156,7 @@ function ResultView({ r }) {
   return (
     <div>
       <div style={{ color: TONE[s.tone], marginBottom: 6 }}>{s.text}{r.instance ? <span className="muted"> · 인스턴스 {r.instance}</span> : null}{r.failover ? <span style={{ color: TONE.warn }}> · 페일오버로 다른 인스턴스가 실행</span> : null}</div>
+      {rmaLateMark(r) && <div className="banner warn" style={{ marginBottom: 6, whiteSpace: 'normal' }}>⚠ {rmaLateMark(r).label} — {rmaLateMark(r).title}</div>}
       {r.argv && <div className="muted" style={{ marginBottom: 6 }}>argv: <code>{r.argv.join(' ')}</code></div>}
       {r.stdout ? <pre style={{ maxHeight: 420, overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 12 }}>{r.stdout}</pre> : <div className="muted">(stdout 없음)</div>}
       {r.stderr ? <><div className="muted">stderr</div><pre style={{ maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 12, color: TONE.warn }}>{r.stderr}</pre></> : null}
@@ -270,7 +272,7 @@ function RunModal({ group, catalog, modes, onClose }) {
         {state?.signed === false && state?.phase && <span style={{ color: TONE.warn }}>무서명 요청</span>}
       </div>
       {state?.err && <div className="error-box" style={{ marginTop: 8 }}>{state.err}</div>}
-      {state?.phase === 'done' && <div style={{ marginTop: 10 }}><ResultView r={{ ...(state.job.result || {}), instance: state.job.instance, failover: state.job.failover }} /></div>}
+      {state?.phase === 'done' && <div style={{ marginTop: 10 }}><ResultView r={{ ...(state.job.result || {}), instance: state.job.instance, failover: state.job.failover, ...(state.job.late ? { late: true } : {}) }} /></div>}
     </Modal>
   );
 }

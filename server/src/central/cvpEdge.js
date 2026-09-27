@@ -86,12 +86,16 @@ function load() {
 }
 
 setCvpCollectBaseResolver((id) => {
-  for (const rec of load().values()) for (const s of rec?.servers || []) if (s?.cvpId === String(id)) return numOrNull(s.collectedAt);
+  // v2.631 A6-2631-01: 기준선은 **엣지 시계 원본**(edgeCollectedAt) — ack 와 같은 시계여야 한다(v2.630 A4-02 의 CVP 판).
+  for (const rec of load().values()) for (const s of rec?.servers || []) if (s?.cvpId === String(id)) return numOrNull(s.edgeCollectedAt ?? s.collectedAt);
   return null;
 });
 
 const s = (v, n) => capStr(v, n);
 const tsClamp = (v, now) => { const n = numOrNull(v); return n == null || n <= 0 ? null : Math.min(n, now); };
+const tsOrig = (v) => { const n = numOrNull(v); return n == null || n <= 0 ? null : n; };
+/** v2.631 A6-2631-01: routes/central.js EDGE_CLOCK_AHEAD_TOLERANCE_MS 와 같은 값(엣지 시계가 이보다 앞서면 차이를 밝힌다). */
+const EDGE_CLOCK_AHEAD_TOLERANCE_MS = 5_000;
 const strMap = (o, max, keyOk = () => true) => {
   if (!isPlainObj(o)) return {};
   const out = {};
@@ -112,7 +116,14 @@ export function cleanStatus(x, now = Date.now()) {
   if (isPlainObj(x.seenFields)) for (const [k, v] of Object.entries(x.seenFields).slice(0, 32)) if (KINDS.has(k) && Array.isArray(v)) seen[k] = v.filter((y) => typeof y === 'string').slice(0, 40).map((y) => s(y, 64));
   return {
     cvpId: s(x.cvpId, 128), name: s(x.name, 128), ok: x.ok === true, pending: x.pending === true,
-    collectedAt: tsClamp(x.collectedAt, now), lastAttemptAt: tsClamp(x.lastAttemptAt, now), durationMs: numOrNull(x.durationMs),
+    collectedAt: tsClamp(x.collectedAt, now),
+    /*
+     * v2.631 A6-2631-01: 엣지가 보낸 **원래 수집 시각**(엣지 시계). '지금 수집' 큐의 기준선·완료 판정은 이 값을 쓴다 — clamp 값은
+     *   엣지 시계가 빠르면 매 push 가 '그 push 의 수신 시각' 이 되어 단조 증가하므로, 재수집 전 상태 push 가 요청을 완료로 만들었다.
+     */
+    edgeCollectedAt: tsOrig(x.collectedAt),
+    ...(() => { const o = tsOrig(x.collectedAt); return o != null && o - now > EDGE_CLOCK_AHEAD_TOLERANCE_MS ? { edgeClockAheadMs: o - now } : {}; })(),
+    lastAttemptAt: tsClamp(x.lastAttemptAt, now), durationMs: numOrNull(x.durationMs),
     deviceCount: numOrNull(x.deviceCount), error: x.error == null ? null : s(x.error, 1000), authStopped: auth,
     usedPaths: strMap(x.usedPaths, 256, (k) => KINDS.has(k)), missing: strMap(x.missing, 500, (k) => KINDS.has(k)), seenFields: seen,
     truncated: numObj(x.truncated, ['devices', 'ports', 'peers', 'notTried', 'aborted']), cvpVersion: s(x.cvpVersion, 64),
@@ -224,7 +235,7 @@ export function saveEdgeCvpStatus(agent, servers, { devicesUnavailable = false, 
   if (adm.evicted) console.warn(`[central] cvp-data: 엣지 수 상한 — 오래 조용한 '${adm.evicted}' 보관분을 내렸다`);
   m.set(agent, { at: now, servers, devicesUnavailable });
   writer.save();
-  for (const st of servers) if (st.collectedAt != null) ackCvpCollect(st.cvpId, st.collectedAt);
+  for (const st of servers) { const at = st.edgeCollectedAt ?? st.collectedAt; if (at != null) ackCvpCollect(st.cvpId, at); } // v2.631 A6-2631-01: 엣지 시계 원본
   return { ok: true, ...(adm.evicted ? { evicted: adm.evicted } : {}), ...(variants ? { variantsRemoved: variants } : {}) };
 }
 
