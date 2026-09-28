@@ -1,6 +1,6 @@
 /**
- * ipam/scanLog.js — IP 스캔 **실행 로그**(v2.636 — 사용자 요청 "sub menu 에 scan 상태, 로그를 볼 수 있는 기능도 추가해줘",
- * 선택 "스캔 실행 로그를 새로 기록").
+ * ipam/scanLog.js — IP 스캔 실행 로그(시작·종료·실패·건너뜀·엣지 보고·설정 변경 — 링버퍼, 손상이면 새로 시작).
+ * v2.636 — 사용자 요청 "sub menu 에 scan 상태, 로그를 볼 수 있는 기능도 추가해줘", 선택 "스캔 실행 로그를 새로 기록".
  *
  * 왜 새로 두는가: 기존 `scanStore.recordRun` 은 **완료된 스캔의 개수**(에이전트·스캔 수·응답 수·소요)만 남긴다. 그래서
  * '왜 스캔이 안 돌았나'(비활성·대역 없음·이미 실행 중) · '어디서 실패했나'(오류 문구) · '누가 대역을 바꿨나' 는 어디에도
@@ -31,7 +31,7 @@ import { numOrNull } from '../util/numOrNull.js';
 
 export const SCAN_LOG_FILE_NAME = 'ipam-scan-log.json';
 registerStateFile(SCAN_LOG_FILE_NAME);
-const FILE = () => path.join(config.configDir, SCAN_LOG_FILE_NAME);
+const FILE = () => path.join(config.configDir, 'ipam-scan-log.json'); // 리터럴 — scripts/config-doc.mjs 가 이 형태만 읽는다(SCAN_LOG_FILE_NAME 과 같은 값)
 export const SCAN_LOG_EVENTS = Object.freeze(['start', 'finish', 'fail', 'skip', 'busy', 'report', 'reject', 'settings']);
 const LEVEL_OF = Object.freeze({ start: 'info', finish: 'info', report: 'info', settings: 'info', skip: 'warn', busy: 'warn', reject: 'warn', fail: 'error' });
 export const SCAN_LOG_MAX = (() => {

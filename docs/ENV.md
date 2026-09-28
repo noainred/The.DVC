@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **561개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **562개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-28)
@@ -652,7 +652,7 @@
 | `ROOMTEMP_STALE_CAP_MS` |  |  | idrac/roomTemp.js |
 | `ROOMTEMP_STALE_MS` | `15` |  | idrac/roomTemp.js |
 
-## IP 관리 (9)
+## IP 관리 (10)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -660,6 +660,7 @@
 | `IPAM_FPING` | `기본 아님('0' 일 때만 적용)` |  | ipam/scan.js |
 | `IPAM_PING_CONCURRENCY` | `8` |  | ipam/scan.js |
 | `IPAM_SCAN_DEADLINE_MS` |  |  | ipam/scanRunner.js |
+| `IPAM_SCAN_LOG_MAX` |  |  | ipam/scanLog.js |
 | `IPAM_SCAN_RESULTS_MAX` |  |  | ipam/scanStore.js |
 | `IPAM_SCAN_WORKER` | `기본 적용('0' 로 끄기)` |  | ipam/scanRunner.js |
 | `IPAM_WRITE_DEBOUNCE_MS` |  |  | ipam/scanStore.js |
@@ -745,4 +746,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 561
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 562

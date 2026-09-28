@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **182개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **183개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-28)
@@ -106,6 +106,7 @@
 | `ipam-range-policies.json` | 설정 | 대역(subnet/range) 단위 IP 정책 저장소 — IP 단위 override(overrides.js)와 '평행'한 | ✅ | ✅ | ✅ | ipam/rangePolicies.js |
 | `ipam-scan-agents.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
 | `ipam-scan-history.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
+| `ipam-scan-log.json` | 설정 | IP 스캔 실행 로그(시작·종료·실패·건너뜀·엣지 보고·설정 변경 — 링버퍼, 손상이면 새로 시작). | ✅ |  | ✅ | ipam/scanLog.js |
 | `ipam-scan-results.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
 | `ipam-scan-runs.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
 | `ipam-scan.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
