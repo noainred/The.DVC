@@ -101,3 +101,37 @@ CVP 도 Edge 에 연결되어 있다. 가져올 정보: 스위치 정보·장애
 - CVaaS(클라우드) 는 토큰 모드로만 가정했다 — 확인 못 함.
 - 목 CVP(테스트 `server/test/cvp2608b.test.js`)의 응답 모양은 위 추정으로 **합성**했다. 파서는 인식 필드가 하나도 없는 본문(오류 JSON 등)을 포트·부품·피어로
   지어내지 않는다(null — 테스트 고정).
+
+## 7. v2.640 개선 — 진단 도구 · 장애 전이 · 화면
+
+사용자 요청 "CVP 개선해줘" 의 선택 4축 전부. 회귀: `server/test/cvpFaults2640.test.js`(전이 규칙) · `cvpPreview2640.test.js`(파서 시험) ·
+`cvpImprove2640.test.js`(실제 `api` 라우터 — 가림·CSV·닫기·설정) + 웹 `cvpText.test.js`.
+
+### 7.1 원문 표본(`status.samples`) · 파서 시험(`POST /tools/cvp/parse-preview`)
+- 수집기(`client.js`)가 **종류마다 처음 성공한 응답의 앞 4,096자**(`SAMPLE_HEAD_CHARS`), 성공이 없으면 **마지막 실패 응답의 앞 2,048바이트**
+  (`SAMPLE_FAIL_BYTES`)를 상태에 싣는다. 6절의 '확인 못 한 것' 을 첫 실수집에서 바로 좁히기 위한 근거다. 엣지 보고에도 실린다(`cvpEdge.cleanSamples`,
+  종류 16개 상한). **관리자에게만** 보인다(비-admin 응답은 `samplesHidden:true`) — 원문에 관리 IP·피어 IP 가 들어 있다.
+- 파서 시험은 CVP 응답 원문(JSON·NDJSON)을 붙여넣으면 **이 포탈의 파서가 무엇을 읽는지** 보여 준다(`cvp/preview.js previewParse` —
+  왕복 0·저장 0·adminOnly·1MB 상한·항목 50개). 인식한 필드가 없으면 `ok:false` 이고 `keys` 로 '응답에 있던 필드' 를 보여 준다 — 그것이
+  곧 다음 후보 경로·필드명의 근거다.
+
+### 7.2 장애 전이 기록 + 알림(`cvp/faults.js`·`faultScan.js`·`faultNotify.js`, `cvp_fault_state`·`cvp_fault_event`)
+- 판정은 **중앙 전용**이다(엣지는 판정하지 않는다 — 같은 부품이 두 번 열린다). 중앙 `cvp.db` 의 `device_latest`·`port_latest` 만 읽고
+  장비에 접속하지 않는다. 수집 적재(로컬·엣지 push) 뒤 디바운스 15초(`CVP_FAULT_SCAN_DEBOUNCE_MS`)로 한 번 돈다. 재진입 가드는 진행 중 프라미스 공유.
+- 규칙은 partfault v2.548 의 6규칙 그대로(`faults.js` 머리말): 장비 실패·낡음·스트리밍 아님 → 보류 / `unknown` 은 열지도 닫지도 않음 /
+  `absent` 는 `removed` 로 닫음 / 관측에 없으면 `missing` 보류 / 장비 단위 / 종류 단위. 포트 장애는 **admin up + oper down** 뿐, BGP 는 상태 단어를
+  읽은 피어만. 키 = `(agent, cvp_id, device_key, fault_key)`.
+- 알림은 `settings.faultAlerts`(**기본 꺼짐**) · 해소 알림 `faultAlertsClosed`(기본 켬). 파트당 1건 즉시·순차·상한 200(`capped` 로 밝힘)·`**` 제거.
+- 화면: '열린 장애(전이)' KPI · 장애 이력 카드(열린 목록·보류 사유·최근 이력·'지금 판정'·관리자 수동 닫기 — 사유 필수·감사 로그·이벤트 `manual:<user>`).
+  등록 삭제는 그 CVP 의 열린 장애를 지운다(이벤트는 남긴다).
+
+### 7.3 남은 결함 정리 · 화면
+- BGP 피어 IP 는 admin 에게만(AUTHZ2611-06 — `maskPeers`, 장애 목록의 BGP 행은 `(주소 가림)`). CVP 버전·DB 통계·엣지 보고 상태 필드를 화면이 쓴다.
+  `agoText` 사본은 `relTime.js` 로.
+- 장비 CSV(`GET /tools/cvp/devices.csv` — BOM·수식 가드·비-admin 관리 주소 빈 칸·값 없는 칸은 빈 칸) · 장비 필터 칩 7종(`DEVICE_CHIPS`) ·
+  포트 차트 처리량 모드(y축은 데이터 최대 + 단위, 사용률 모드는 0~100 고정 그대로).
+
+### 7.4 ⚠ 정직 기록
+- 여전히 실장비 CVP 로 확인하지 못했다 — 검증은 목 CVP(테스트와 같은 합성 응답)와 Chromium(admin·operator × 1440/400) 이다. 원문 표본·파서 시험은
+  바로 그 확인을 위한 도구다.
+- 처리량 차트 눈금('50.0 Kbps')이 초판에서 잘려 있었다(스크린샷 판독 — 수치로는 안 잡혔다). `viewBox` 를 왼쪽으로 늘려 고쳤다.

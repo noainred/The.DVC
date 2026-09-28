@@ -1903,6 +1903,10 @@ centralRouter.post('/cvp-data', requireCentral(), async (req, res) => {
   if (saved.unavailable && (clean.devicesByCvp.size || clean.rows.length || clean.touch.length)) {
     return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 CVP DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [cvp-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
   }
+  // v2.640(③ 장애 전이): 엣지 보고가 적재됐으면 중앙의 전이 판정을 예약한다(디바운스 — 엣지 여럿의 push 를 한 번으로 모은다).
+  if (clean.devicesByCvp.size || clean.touch.length || chunk === 0) {
+    try { (await import('../cvp/faultScan.js')).scheduleCvpFaultScan('edge-push'); } catch (e) { console.warn(`[central] cvp-data: 장애 판정 예약 실패: ${e.message}`); }
+  }
   res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })) });
 });
 

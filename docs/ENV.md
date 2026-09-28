@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **562개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **563개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-28)
@@ -46,7 +46,7 @@
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 | `X` |  |  | util/dayKey.js, util/envTimeout.js |
 
-## 공통 (158)
+## 공통 (159)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -101,6 +101,7 @@
 | `CVP_BODY_MAX_BYTES` | `8` |  | cvp/client.js |
 | `CVP_DEVICE_CONCURRENCY` | `6` |  | cvp/client.js |
 | `CVP_DEVICE_TIMEOUT_MS` |  |  | cvp/collectRequests.js |
+| `CVP_FAULT_SCAN_DEBOUNCE_MS` |  |  | cvp/faultScan.js |
 | `CVP_HTTP_TIMEOUT_MS` |  |  | cvp/client.js |
 | `CVP_PARTS_EVERY_MS` | `30` |  | cvp/poller.js |
 | `CVP_PUSH_CHUNK_BYTES` | `700` |  | cvp/push.js |
@@ -746,4 +747,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 562
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 563

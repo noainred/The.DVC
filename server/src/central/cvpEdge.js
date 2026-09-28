@@ -109,11 +109,35 @@ const numObj = (o, keys) => {
   return out;
 };
 
+/** v2.640: 원문 표본 종류 상한 · head 상한(client.js SAMPLE_HEAD_CHARS 와 같은 값 — 변조 엣지가 큰 본문을 실어도 여기서 잘린다). */
+export const SAMPLE_KINDS_MAX = 16;
+export const SAMPLE_HEAD_MAX = 4096;
+const BAD_KEY = new Set(['__proto__', 'constructor', 'prototype']);
+/**
+ * 원문 표본(`samples`) 정제 — 종류 ≤ SAMPLE_KINDS_MAX · 아는 필드만(path·head·status·bytes·ok·at·reason·device).
+ * 필드가 없거나 객체가 아니면 null(호출부가 필드 자체를 생략한다 — 구버전 엣지는 이 필드를 보내지 않는다).
+ */
+export function cleanSamples(v, now = Date.now()) {
+  if (!isPlainObj(v)) return null;
+  const out = {};
+  for (const [k, x] of Object.entries(v)) {
+    if (Object.keys(out).length >= SAMPLE_KINDS_MAX) break;
+    const key = s(k, 32);
+    if (!key || BAD_KEY.has(key) || !isPlainObj(x)) continue;
+    out[key] = {
+      path: s(x.path, 256), head: s(x.head, SAMPLE_HEAD_MAX), status: numOrNull(x.status), bytes: numOrNull(x.bytes), ok: x.ok === true, at: tsClamp(x.at, now),
+      ...(x.reason == null ? {} : { reason: s(x.reason, 300) }), ...(x.device == null ? {} : { device: s(x.device, 128) }),
+    };
+  }
+  return out;
+}
+
 /** CVP 상태 1건 정제(아는 필드만). */
 export function cleanStatus(x, now = Date.now()) {
   const auth = isPlainObj(x.authStopped) ? { since: numOrNull(x.authStopped.since), at: numOrNull(x.authStopped.at), attempts: numOrNull(x.authStopped.attempts), reason: s(x.authStopped.reason, 300) } : null;
   const seen = {};
   if (isPlainObj(x.seenFields)) for (const [k, v] of Object.entries(x.seenFields).slice(0, 32)) if (KINDS.has(k) && Array.isArray(v)) seen[k] = v.filter((y) => typeof y === 'string').slice(0, 40).map((y) => s(y, 64));
+  const samples = cleanSamples(x.samples, now);
   return {
     cvpId: s(x.cvpId, 128), name: s(x.name, 128), ok: x.ok === true, pending: x.pending === true,
     collectedAt: tsClamp(x.collectedAt, now),
@@ -130,6 +154,7 @@ export function cleanStatus(x, now = Date.now()) {
     partsRead: x.partsRead === true, dbUnavailable: x.dbUnavailable === true,
     ...(x.partsDueUnread === true ? { partsDueUnread: true, partsNotTried: numOrNull(x.partsNotTried) } : {}), // v2.612 RECENT2612-01: 시도 못 한 대수
     ...(isPlainObj(x.pruneHeld) ? { pruneHeld: { since: tsClamp(x.pruneHeld.since, now), untilMs: numOrNull(x.pruneHeld.untilMs), had: numOrNull(x.pruneHeld.had), reason: s(x.pruneHeld.reason, 300) } } : {}),
+    ...(samples ? { samples } : {}), // v2.640: 원문 표본(구버전 엣지는 없다 — 필드 자체를 생략)
   };
 }
 

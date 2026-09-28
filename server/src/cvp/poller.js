@@ -24,6 +24,7 @@ import { collectCvp, testCvp } from './client.js';
 import { portDelta } from './parse.js';
 import * as db from './db.js';
 import { putStatus, getStatus, keepOnly } from './store.js';
+import { scheduleCvpFaultScan } from './faultScan.js'; // v2.640: 중앙 직접 수집 뒤 장애 전이 판정(디바운스)
 
 export const cvpAuthGuard = createAuthGuard({ file: 'cvp-auth-stops.json' });
 const PARTS_EVERY_MS = clampIntervalMs(Number(process.env.CVP_PARTS_EVERY_MS) || 30 * 60_000, 30 * 60_000, 5 * 60_000);
@@ -98,14 +99,16 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
       } else if (warnLog(full.id, msg)) console.warn(`[cvp] ${full.name || full.id}: 수집 실패 — ${msg}`);
       const prev = getStatus(full.id);
       putStatus(full.id, { name: full.name, ok: false, collectedAt: prev?.collectedAt ?? null, lastAttemptAt: Date.now(), durationMs: Date.now() - t0,
-        deviceCount: prev?.deviceCount ?? null, error: msg, authStopped, usedPaths: prev?.usedPaths || {}, missing: prev?.missing || {}, seenFields: prev?.seenFields || {}, truncated: prev?.truncated || null });
+        deviceCount: prev?.deviceCount ?? null, error: msg, authStopped, usedPaths: prev?.usedPaths || {}, missing: prev?.missing || {}, seenFields: prev?.seenFields || {}, truncated: prev?.truncated || null,
+        ...(prev?.samples ? { samples: prev.samples } : {}) }); // v2.640 ②: 시한·로그인 실패로 던진 주기에는 직전 표본을 유지(진단 근거를 지우지 않는다)
       return 'failed';
     }
     if (!r.ok) {
       if (warnLog(full.id, r.error)) console.warn(`[cvp] ${full.name || full.id}: ${r.error}`);
       const prev = getStatus(full.id);
       putStatus(full.id, { name: full.name, ok: false, collectedAt: prev?.collectedAt ?? null, lastAttemptAt: Date.now(), durationMs: Date.now() - t0,
-        deviceCount: prev?.deviceCount ?? null, error: r.error, authStopped: null, usedPaths: r.usedPaths, missing: r.missing, seenFields: r.seenFields, truncated: r.truncated });
+        deviceCount: prev?.deviceCount ?? null, error: r.error, authStopped: null, usedPaths: r.usedPaths, missing: r.missing, seenFields: r.seenFields, truncated: r.truncated,
+        ...(r.samples ? { samples: r.samples } : {}) }); // v2.640: 실패해도 원문 표본(오류 본문)은 진단 근거다
       cvpAuthGuard.clearAuthStop(full.id); // 로그인은 됐다 — 자격증명 문제가 아니다
       return 'failed';
     }
@@ -162,7 +165,10 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
       cvpVersion: r.cvpVersion, partsRead: partsReadNow, ...(partsNotTried > 0 ? { partsDueUnread: true, partsNotTried } : {}),
       ...(pruneHeld ? { pruneHeld } : {}),
       ...(saved?.unavailable ? { dbUnavailable: true } : {}), ...(saved?.error ? { dbError: saved.error } : {}),
+      ...(r.samples ? { samples: r.samples } : {}), // v2.640(② 진단): 종류별 원문 표본(첫 성공 응답 앞 4KB) — 관리자 화면만 본다
     });
+    // v2.640(③): 중앙 직접 수집분이 DB 에 들어갔으면 장애 전이 판정을 예약한다(엣지는 판정하지 않는다 — 중앙 push 수신이 예약한다).
+    if (!config.agent.centralUrl && saved && !saved.unavailable && !saved.error) scheduleCvpFaultScan('poll');
     return 'ok';
   } finally { _inFlight.delete(full.id); }
 }

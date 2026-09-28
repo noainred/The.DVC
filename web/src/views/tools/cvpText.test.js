@@ -130,7 +130,7 @@ describe('지금 수집', () => {
 describe('폼', () => {
   it('설정 빈 칸은 보내지 않는다', () => {
     const b = T.settingsPayload({ enabled: true, intervalMin: '', rawRetentionDays: '7', dailyRetentionDays: ' ', concurrency: '2', deviceTimeoutSec: '' });
-    expect(b).toEqual({ enabled: true, rawRetentionDays: 7, concurrency: 2 });
+    expect(b).toEqual({ enabled: true, faultAlerts: false, faultAlertsClosed: true, rawRetentionDays: 7, concurrency: 2 });
     const c = T.settingsPayload({ enabled: false, intervalMin: '5', deviceTimeoutSec: '120' });
     expect(c.intervalMs).toBe(300_000);
     expect(c.deviceTimeoutMs).toBe(120_000);
@@ -305,5 +305,155 @@ describe('v2.613 CONTRACT2613-04 — 위임 CVP 의 보고 없음은 kind 별로
     expect(T.serverState({ status: {} }).label).toBe('수집 기록 없음');
     expect(T.serverState({ status: { pending: true, ok: null, note: 'x' } }).detail).toContain('기다리는 중');
     expect(T.serverState({ status: { pending: true, ok: null, kind: 'old-version' } }, { enabled: false }).detail).toContain('꺼져');
+  });
+});
+
+describe('v2.640 ① 남은 결함·정리', () => {
+  it('agoText 는 공용 relTime 코어다(사본 제거) · 0·null 은 —', () => {
+    expect(T.agoText(null)).toBe('—');
+    expect(T.agoText(0)).toBe('—');
+    expect(T.agoText(Date.now() - 90_000)).toMatch(/분 전$/);
+  });
+  it('엣지 보고에 devicesUnavailable 을 말한다(서버는 싣는데 화면이 안 읽던 값)', () => {
+    const v = T.edgeReportView({ ok: true, devicesUnavailable: true, servers: 2, error: null });
+    expect(v.label).toBe('정상');
+    expect(v.extras.join(' ')).toContain('엣지 DB 불가');
+    expect(v.extras.join(' ')).toContain('CVP 2대');
+    expect(T.edgeReportView({ ok: false, error: 'x' }).tone).toBe('bad');
+    expect(T.edgeReportView(null).label).toBe('—');
+  });
+  it('서버 행 툴팁 — CVP 버전·수집 소요 · DB 요약 한 줄', () => {
+    expect(T.serverMetaText({ cvpVersion: '2024.2.0', durationMs: 4250, partsRead: true })).toBe('CVP 2024.2.0 · 수집 소요 4.3초 · 이번 주기에 파트 읽음');
+    expect(T.serverMetaText({})).toBe('');
+    expect(T.dbStatsText({ available: true, rows: { device: 10, port: 640, sample: 5000, daily: 0 }, bytes: 1_048_576 })).toContain('원시 표본 5,000');
+    expect(T.dbStatsText({ available: false, note: '잠금' })).toContain('사용 불가');
+    expect(T.dbStatsText(null)).toBe('');
+  });
+});
+
+describe('v2.640 ④ 필터 칩·CSV·처리량 차트', () => {
+  const devs = [
+    { hostname: 'a', parts: { fault: 1 }, ports: { down: 0 }, bgp: { down: 0 }, streaming: true, telemetry: 'ok' },
+    { hostname: 'b', parts: { fault: 0, warn: 2 }, ports: { down: 3 }, bgp: null, streaming: false, telemetry: 'ok' },
+    { hostname: 'c', parts: null, ports: null, bgp: { down: 1 }, streaming: true, telemetry: 'failed' },
+    null,
+  ];
+  it('칩 개수는 요약 셀과 같은 값을 보고, 못 읽음은 정상이 아니라 모름', () => {
+    const c = T.chipCounts(devs);
+    expect(c).toEqual({ all: 3, fault: 1, warn: 1, portDown: 1, bgpDown: 1, notStreaming: 1, unread: 2 });
+    expect(T.filterByChip(devs, 'unread').map((d) => d.hostname)).toEqual(['b', 'c']);
+    expect(T.filterByChip(devs, 'all')).toHaveLength(3);
+    expect(T.filterByChip(devs, 'nope')).toHaveLength(0);
+    expect(T.chipMatch({ parts: { fault: '' } }, 'fault')).toBe(false);
+  });
+  it('CSV 경로는 검색·CVP 만 반영한다', () => {
+    expect(T.devicesCsvPath('', '')).toBe('/tools/cvp/devices.csv');
+    expect(T.devicesCsvPath('c1', ' leaf ')).toBe('/tools/cvp/devices.csv?cvpId=c1&q=leaf');
+    expect(T.CSV_NOTE).not.toMatch(/`/);
+  });
+  it('처리량 축 상한은 데이터 최대를 1·2·5 계열로 올리고, 값 없으면 기본', () => {
+    expect(T.bpsAxisMax(0)).toBe(1000);
+    expect(T.bpsAxisMax(null)).toBe(1000);
+    expect(T.bpsAxisMax(1_300_000)).toBe(2_000_000);
+    expect(T.bpsAxisMax(5_000_000)).toBe(5_000_000);
+    expect(T.bpsAxisMax(7_000_000)).toBe(10_000_000);
+  });
+  it('처리량 기하 — null 은 버리고 끊김·점 1개 규칙은 사용률과 같다', () => {
+    const opt = { width: 200, height: 120, pad: 10, intervalMs: 60_000 };
+    const pts = [{ ts: 0, inBps: 100, outBps: null }, { ts: 60_000, inBps: 200, outBps: 50 }, { ts: 3_600_000, inBps: 150, outBps: 20 }];
+    const g = T.seriesGeometryBps(pts, ['inBps', 'outBps'], opt);
+    expect(g.count).toBe(5);
+    expect(g.max).toBe(200);
+    expect(g.axisMax).toBe(200);
+    expect(g.paths.inBps).toHaveLength(1);
+    expect(g.dots.inBps).toHaveLength(1);
+    expect(g.dots.outBps).toHaveLength(2);
+    expect(g.ticks).toHaveLength(3);
+    expect(g.ticks[2].label).toBe('200 bps');
+    expect(T.seriesGeometryBps([], ['inBps'], opt).count).toBe(0);
+  });
+  it('상한으로 잘린 추이는 밝힌다', () => {
+    expect(T.chartCutNote({ truncated: true, limit: 5000 })).toContain('5,000점');
+    expect(T.chartCutNote({ truncated: false })).toBe('');
+    expect(T.chartCutNote(null)).toBe('');
+  });
+});
+
+describe('v2.640 ③ 장애 전이', () => {
+  it('보류 사유 키 == 서버 HOLD_REASON 값(두 목록 대조 — 서버가 새 사유를 내면 화면도 문구를 가져야 한다)', () => {
+    const src = fs.readFileSync(path.resolve(HERE, '../../../../server/src/cvp/faults.js'), 'utf8');
+    const m = src.match(/export const HOLD_REASON = Object\.freeze\(\{([^}]*)\}\)/);
+    expect(m).toBeTruthy();
+    const serverVals = [...m[1].matchAll(/:\s*'([^']+)'/g)].map((x) => x[1]).sort();
+    expect([...T.HOLD_KEYS].sort()).toEqual(serverVals);
+    for (const k of T.HOLD_KEYS) expect(T.holdText(k)).not.toMatch(/`/);
+  });
+  it('종류 라벨은 한글이고 모르는 종류는 원문', () => {
+    for (const k of ['psu', 'fan', 'temp', 'xcvr', 'port', 'bgp']) expect(T.faultKindLabel(k)).not.toMatch(/^[a-z]/);
+    expect(T.faultKindLabel('zzz')).toBe('zzz');
+  });
+  it('열린 장애 행·이벤트·닫힘 사유', () => {
+    const v = T.faultRowView({ kind: 'port', state: 'fault', deviceName: 'leaf1', cvpName: 'CVP-HQ', agent: 'edge-a', holdReason: 'missing', firstSeen: 1, lastSeen: 2, notifiedAt: 3 });
+    expect(v.kindLabel).toBe('포트');
+    expect(v.state.label).toBe('장애');
+    expect(v.where).toBe('CVP-HQ · 엣지 edge-a');
+    expect(v.hold).toContain('고쳐졌다는 뜻이 아닙니다');
+    expect(v.notified).toBe(true);
+    expect(T.faultRowView({ state: 'weird' }).state.label).toBe('상태 미확인');
+    expect(T.faultEventText({ event: 'open', state: 'warn' })).toBe('열림 — 주의');
+    expect(T.faultEventText({ event: 'change', prevState: 'warn', state: 'fault' })).toBe('변경 — 주의 → 장애');
+    expect(T.faultEventText({ event: 'close', closeReason: 'removed' })).toContain('빈 슬롯');
+    expect(T.closeReasonText('manual:admin')).toBe('수동 닫기(admin)');
+    expect(T.closeReasonText('ok')).toBe('정상으로 관측');
+  });
+  it('KPI — DB 불가는 0 이 아니라 — · 0 은 강조색 없음 · 보류를 따로 말한다', () => {
+    expect(T.faultKpi({ unavailable: true }).value).toBe('—');
+    expect(T.faultKpi(null).value).toBe('—');
+    const k = T.faultKpi({ open: 0, byState: { fault: 0, warn: 0 }, held: 0 });
+    expect(k.value).toBe('0');
+    expect(k.accent).toBeNull();
+    const k2 = T.faultKpi({ open: 3, byState: { fault: 2, warn: 1 }, held: 1 });
+    expect(k2.accent).toBe('var(--red)');
+    expect(k2.meta).toContain('보류 1');
+  });
+  it('판정 문장 — 판정 전은 모른다고, 알림 꺼짐은 기록만 남긴다고 말한다', () => {
+    const t = T.faultScanNote(null, { faultAlerts: false });
+    expect(t).toContain('아직 판정하지 않았습니다');
+    expect(t).toContain('알림 꺼짐');
+    const t2 = T.faultScanNote({ at: Date.now() - 1000, reason: 'poll', devices: 5, opened: 1, updated: 0, closed: 0, held: 2, notified: { sent: 1, capped: 0 } }, { faultAlerts: true, faultAlertsClosed: false });
+    expect(t2).toContain('장비 5대');
+    expect(t2).toContain('알림 1건');
+    expect(t2).toContain('해소는 알리지 않음');
+    expect(T.FAULT_INTRO).not.toMatch(/`/);
+  });
+  it('설정 폼은 알림 스위치를 싣고 응답에서 되돌린다', () => {
+    const f = T.settingsToForm({ enabled: true, faultAlerts: true, faultAlertsClosed: false, intervalMs: 300000 });
+    expect(f.faultAlerts).toBe(true);
+    expect(f.faultAlertsClosed).toBe(false);
+    expect(T.settingsPayload(f).faultAlertsClosed).toBe(false);
+    expect(T.settingsToForm({}).faultAlertsClosed).toBe(true);
+  });
+});
+
+describe('v2.640 ② 진단 — 원문 표본·파서 시험', () => {
+  it('표본 행은 라벨 순이고 비객체는 버린다', () => {
+    const rows = T.sampleRows({ interfaces: { path: '/x', ok: true, status: 200, bytes: 12, head: '{}' }, inventory: { path: '/i', ok: false, status: 404, reason: '없음(404)', head: '{"error":1}' }, junk: 5 });
+    expect(rows.map((r) => r.kind)).toEqual(['inventory', 'interfaces']);
+    expect(rows[0].ok).toBe(false);
+    expect(rows[0].status).toBe(404);
+    expect(T.sampleRows(null)).toEqual([]);
+    expect(T.SAMPLE_NOTE).not.toMatch(/`/);
+    expect(T.PREVIEW_NOTE).not.toMatch(/`/);
+  });
+  it('파서 시험 요약 — 실패는 응답에 있던 필드를 근거로 말한다', () => {
+    const bad = T.previewSummary({ ok: false, note: '인식한 필드가 없습니다', keys: ['errorMessage'], badChunks: 0 });
+    expect(bad.ok).toBe(false);
+    expect(bad.text).toContain('errorMessage');
+    const ok = T.previewSummary({ ok: true, format: 'notifications', count: 3, entities: 4, truncated: 0, unrecognized: 1, truncatedInput: true });
+    expect(ok.text).toContain('읽은 항목 3');
+    expect(ok.text).toContain('인식 못 한 개체 1');
+    expect(ok.text).toContain('앞부분만');
+    expect(T.previewSummary(null).ok).toBe(false);
+    expect(T.previewColumns([{ a: 1 }, { b: 2, a: 3 }, null])).toEqual(['a', 'b']);
   });
 });

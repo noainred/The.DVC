@@ -3758,6 +3758,24 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 서버 `truncated` 는 **개수 객체**다 — 진리값으로 읽으면 0 뿐인데 '(잘림)' 으로 뜬다(v2.608 Chromium 판독에서 발견. `cvpText.isTruncated`).
     - CVP 는 vCenter 귀속이 없어 범위 계정 403 · 관리 주소는 비-admin 에 가림 · 기본 꺼짐 · 등록·설정은 admin.
 
+  - ⚠⚠ **CVP 개선(v2.640) — 장애 전이는 중앙만 판정하고, 원문 표본·파서 시험이 '추정 경로' 를 좁히는 도구다**
+    (`cvp/{faults,faultScan,faultNotify,preview}.js` + `client.js samples` + 라우트 5개 + 웹 `CvpTool.jsx`·`cvpText.js`, 사용자 요청 "CVP 개선해줘" —
+    선택 4축 전부 · 전체 검증. 상세 `docs/CVP.md` §7. 회귀 `test/cvpFaults2640`·`cvpPreview2640`·`cvpImprove2640`(실제 api 라우터) + 웹 `cvpText.test.js`):
+    - **판정은 중앙 전용**(`faultScan.js` — 엣지가 판정하면 같은 부품이 두 번 열린다: partfault v2.548 F3). 장비 접속 0(DB 최신값만), 적재 뒤 디바운스
+      15초(`CVP_FAULT_SCAN_DEBOUNCE_MS`), 진행 중 프라미스 공유. `health/services.js CENTRAL_ONLY_SPEC` 에 `collect.cvpFaults` 로 등재했고
+      `edgeSweep2574 EXCLUDED` 에 사유를 적었다(엣지 로그 표 대상이 아니다).
+    - **닫는 6규칙은 partfault 그대로**(`faults.js` 머리말) — `unknown` 은 열지도 닫지도 않고 · `absent` 는 `removed` · 장비 실패·낡음·스트리밍 아님·
+      관측 누락은 보류(`HOLD_REASON` 6종 — 웹 `HOLD_KEYS` 와 1:1, 테스트 대조). 포트 장애는 **admin up + oper down** 뿐(쓰지 않는 포트를 장애로 세지 않는다).
+      알림은 `faultAlerts` **기본 꺼짐**(파트당 1건·순차·상한 밝힘). 수동 닫기는 adminOnly + 사유 필수 + 감사 로그.
+    - ⚠ **`INSERT` 열 목록과 `.run` 인자 순서를 대조할 것** — `cvp_fault_event` 의 `device_name`·`fault_key` 가 바뀌어 저장돼 **비-admin 이벤트에 BGP 피어 IP 가
+      새고** 라우트 테스트 ③ 이 잡았다(에이전트 생성 코드). 준비문 열 목록을 바꾸면 모든 `.run` 호출부를 같이 볼 것.
+    - **원문 표본은 admin 에게만**(`stripSamples` → `samplesHidden:true`) — 관리 IP·피어 IP 가 들어 있다. 종류마다 첫 성공 응답 4,096자 / 마지막 실패 2,048바이트.
+      파서 시험(`POST /tools/cvp/parse-preview`)은 왕복 0·저장 0·adminOnly·1MB 상한 — 인식 필드 0 이면 `ok:false` + `keys`(응답에 있던 필드).
+    - BGP 피어 IP 가림은 **장비 상세·장애 목록·이벤트 세 응답 전부**(`maskPeers` + faults 라우트의 `(주소 가림)`) — 한 곳만 가리면 우회로다(v2.596 규약).
+    - ⚠ **처리량 차트 눈금은 PAD 30 에 들어가지 않는다** — `'50.0 Kbps'` 가 `Kbps` 만 보이고 숫자가 잘렸다(Chromium 판독, 수치로는 안 잡혔다).
+      `viewBox` 를 모드별로 왼쪽으로 늘린다(`XL`) — 기하(pad)는 그대로. **y축 라벨이 길어지는 모드를 추가하면 같은 자리를 볼 것.**
+    - CSV 응답의 BOM 은 `Response.text()` 가 벗긴다 — 테스트는 `arrayBuffer` 원시 바이트로 본다.
+    - ⚠ 정직 기록: 실장비 CVP 는 여전히 없다 — 목 CVP + Chromium(admin·operator × 1440/400) 검증이다.
   - **등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다**
     (`cvp/formChoices.js pickAgent`·`pickDatacenter` + 웹 `cvpText.choiceOptions`, v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를
     콤보박스로 … 오타/대소문자 방지"):
