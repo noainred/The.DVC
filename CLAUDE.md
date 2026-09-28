@@ -4195,6 +4195,19 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 서버는 등록부에 있는 파일 이름만 받는다(경로 조작 404) · admin + 전체 범위(`settingsFleetOnly`) · 감사 로그 · 보존본은 지우지 않는다 ·
       저장했는데 여전히 못 읽으면 `still-error`(성공이라 말하지 않는다).
     - ⚠ 역할 게이트 테스트는 `AUTH_ENABLED=true` 로 — 꺼져 있으면 requireRole 이 익명(admin)으로 통과시켜 operator 가 200 을 받는다(이번에 실제로 그랬다).
+  - ⚠⚠ **v2.634 — 폴러의 표본 시각은 '그 서버를 실제로 읽은 시각' 이고, 신선도 경계는 폴 주기 소요에 맞춰 넓힌다**
+    (`idrac/poller.js` sensorAt·powerAt · `idrac/sensorStore.js sensorPollCycle` · `idrac/roomTemp.js effectiveMaxAgeMs`·
+    `sampleMaxAgeMs` · 엣지 `compactSensors` 의 `cycleMs`·`intervalMs` · 웹 `roomTempView.staleCardMeta`·`staleBannerText` ·
+    서비스 점검 `idrac-cycle` 행. 사용자 신고 "예전에는 온도가 나왔는데 … 수집을 못하고 있어" — 법인 전산실 온도
+    '측정 0/980 · 미갱신 975'. 회귀 `server/test/roomTempCycle2634.test.js`(변이 7/7) + 웹 `roomTempStale2634.test.js`):
+    - **원인 두 겹**: ① 표본 시각이 주기 시작 시각 하나였다(v2.550.3 bmusage 규약의 iDRAC 누락) ② 경계 15분이 주기 소요를
+      몰랐다 — 한 주기가 15분을 넘으면 정상 서버가 전부 빠진다. ⚠ ①만 고쳐도 ②는 남는다(같은 서버의 두 표본 간격이 주기 소요다).
+    - 경계 = `max(15분, min(상한 2시간, 2×주기 소요 + 간격))`. 주기 정보가 없으면 **넓히지 않는다**(추측 금지). 원격 표본은
+      **엣지가 보낸 자기 주기만** 쓴다 — 중앙 폴러 주기를 엣지 서버에 적용하지 말 것. 구버전 엣지는 15분 그대로.
+    - 법인 전산실 온도 · 서버 온도 화면 · 서버 온도 시계열이 같은 `sampleMaxAgeMs` 를 쓴다 — 새 신선도 판정도 이것을 쓸 것.
+    - 응답 `staleMsMax`(실제로 쓴 최대 경계)를 화면이 말한다 — '15분' 이라 적고 41분을 쓰면 거짓이다.
+    - ⚠ 정직 기록: 운영 포탈의 실제 주기 소요는 보지 못했다(추정). 서비스 점검 'iDRAC 폴 주기' 행이 그 값을 보여준다 —
+      주기가 짧은데도 계속 비면 다른 원인이다. `lastRun.at` 은 호환을 위해 여전히 주기 **시작** 시각이다(`finishedAt` 별도).
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

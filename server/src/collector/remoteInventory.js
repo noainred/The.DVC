@@ -94,7 +94,13 @@ export function sanitizeRemoteSensors(x) {
     temps[name] = c; n += 1;
   }
   if (!n) return null;
-  return { t: numOrNull(x.t), temps };
+  // v2.634: 엣지 폴러 주기(신선도 경계용). 모르는 값·범위 밖은 싣지 않는다(판정은 기본 경계로 떨어진다).
+  const cyc = numOrNull(x.cycleMs); const itv = numOrNull(x.intervalMs);
+  return {
+    t: numOrNull(x.t), temps,
+    ...(cyc != null && cyc >= 0 && cyc <= 7 * 86_400_000 ? { cycleMs: cyc } : {}),
+    ...(itv != null && itv > 0 && itv <= 7 * 86_400_000 ? { intervalMs: itv } : {}),
+  };
 }
 const SERVER_STR_KEYS = ['name', 'host', 'serviceTag', 'model', 'vcenterId', 'datacenterId', 'type', 'hostName'];
 /**

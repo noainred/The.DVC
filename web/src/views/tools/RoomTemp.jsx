@@ -6,7 +6,7 @@ import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
-import { SORTS, VIEWS, sortGroups, matrixStats, heat, tileData, boardCounts, sparkPath, trendNotes } from './roomTempView.js'; // v2.534 시안 적용(순수 판정)
+import { SORTS, VIEWS, sortGroups, matrixStats, heat, tileData, boardCounts, sparkPath, trendNotes, staleCardMeta, staleBannerText } from './roomTempView.js'; // v2.534 시안 적용(순수 판정)
 import { unitText } from '../unitText.js';
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 import { roomSparkScopeNote } from '../scopeOmitText.js';
@@ -513,15 +513,18 @@ export function RoomTemp() {
         <Card label="법인" value={t.groups ?? 0} meta={`측정 서버 ${t.withData ?? 0} / ${t.servers ?? 0}대`} />
         <Card label="흡기 범위(전체)" value={t.inlet?.min == null ? '—' : `${t.inlet.min}~${t.inlet.max}℃`}
           meta={t.inlet?.avg != null ? `평균 ${t.inlet.avg}℃` : '흡기 센서 없음'}
-          accent={t.inlet?.max != null && t.inlet.max > 27 ? 'var(--amber)' : 'var(--green)'} />
+          accent={t.inlet?.max == null ? undefined : t.inlet.max > 27 ? 'var(--amber)' : 'var(--green)'} />{/* v2.634: 값이 없으면 정상색(초록)을 칠하지 않는다 */}
         <Card label="배기 범위(전체)" value={t.exhaust?.min == null ? '—' : `${t.exhaust.min}~${t.exhaust.max}℃`}
           meta={t.exhaust?.avg != null ? `평균 ${t.exhaust.avg}℃` : '배기 센서 없음'} />
         <Card label="CPU 범위(전체)" value={t.cpu?.min == null ? '—' : `${t.cpu.min}~${t.cpu.max}℃`}
           meta={t.cpu?.avg != null ? `평균 ${t.cpu.avg}℃` : 'CPU 센서 없음'} />
         {t.noSensor ? <Card label="센서 미수집 서버" value={t.noSensor} meta="온도 센서를 아직 못 받은 서버 — 집계 제외" /> : null}
         {t.stale ? <Card label="미갱신 서버" value={t.stale} accent="var(--amber)"
-          meta={`${Math.round((data.staleMs || 0) / 60000)}분 이상 갱신 없음 — 집계 제외(동결값 방지)`} /> : null}
+          meta={staleCardMeta(data)} /> : null}
       </div>
+      {staleBannerText(data) ? (
+        <div className="banner" style={{ marginBottom: 12, fontSize: 12 }}>{staleBannerText(data)}</div>
+      ) : null}
 
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 10, gap: 8 }}>
         <span className="muted" style={{ fontSize: 12 }}>정렬</span>

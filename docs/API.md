@@ -708,8 +708,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/bm-usage/history` | 권한 `tools` | [server/src/routes/api/bmUsage.js:270](../server/src/routes/api/bmUsage.js#L270) |
 | PUT | `/tools/bm-usage/settings` | 역할 `admin` | [server/src/routes/api/bmUsage.js:533](../server/src/routes/api/bmUsage.js#L533) |
 | GET | `/tools/capacity` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:65](../server/src/routes/api/toolsCapacity.js#L65) |
-| GET | `/tools/capacity-forecast` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1628](../server/src/routes/api/toolsCapacity.js#L1628) |
-| GET | `/tools/capacity/disk-history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1533](../server/src/routes/api/toolsCapacity.js#L1533) |
+| GET | `/tools/capacity-forecast` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1629](../server/src/routes/api/toolsCapacity.js#L1629) |
+| GET | `/tools/capacity/disk-history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1534](../server/src/routes/api/toolsCapacity.js#L1534) |
 | GET | `/tools/comm-map` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/commMap.js:92](../server/src/routes/api/commMap.js#L92) |
 | GET | `/tools/corp-usage` | 권한 `tools` | [server/src/routes/api/corpUsage.js:89](../server/src/routes/api/corpUsage.js#L89) |
 | GET | `/tools/credentials` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/credentials.js:45](../server/src/routes/api/credentials.js#L45) |
@@ -748,8 +748,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/edge-log/fetch` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:139](../server/src/routes/api/edgeLog.js#L139) |
 | GET | `/tools/esxi` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:314](../server/src/routes/api/hardwareGpu.js#L314) |
 | GET | `/tools/esxi-temp` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1227](../server/src/routes/api/toolsCapacity.js#L1227) |
-| GET | `/tools/esxi-temp/history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1341](../server/src/routes/api/toolsCapacity.js#L1341) |
-| POST | `/tools/esxi-temp/spark` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1424](../server/src/routes/api/toolsCapacity.js#L1424) |
+| GET | `/tools/esxi-temp/history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1342](../server/src/routes/api/toolsCapacity.js#L1342) |
+| POST | `/tools/esxi-temp/spark` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1425](../server/src/routes/api/toolsCapacity.js#L1425) |
 | GET | `/tools/gpu` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:333](../server/src/routes/api/hardwareGpu.js#L333) |
 | GET | `/tools/gpu.csv` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:347](../server/src/routes/api/hardwareGpu.js#L347) |
 | GET | `/tools/gpu.json` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:339](../server/src/routes/api/hardwareGpu.js#L339) |
@@ -814,8 +814,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/link-check/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:271](../server/src/routes/api/linkCheck.js#L271) |
 | GET | `/tools/link-check/targets` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:219](../server/src/routes/api/linkCheck.js#L219) |
 | GET | `/tools/network-check` | 권한 `tools` | [server/src/routes/api/checksLogs.js:157](../server/src/routes/api/checksLogs.js#L157) |
-| GET | `/tools/orphan-vmdk` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1701](../server/src/routes/api/toolsCapacity.js#L1701) |
-| GET | `/tools/orphan-vmdk/datastores` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1665](../server/src/routes/api/toolsCapacity.js#L1665) |
+| GET | `/tools/orphan-vmdk` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1702](../server/src/routes/api/toolsCapacity.js#L1702) |
+| GET | `/tools/orphan-vmdk/datastores` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1666](../server/src/routes/api/toolsCapacity.js#L1666) |
 | GET | `/tools/part-faults` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:206](../server/src/routes/api/partFaults.js#L206) |
 | POST | `/tools/part-faults/close` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:304](../server/src/routes/api/partFaults.js#L304) |
 | GET | `/tools/part-faults/events` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/partFaults.js:238](../server/src/routes/api/partFaults.js#L238) |

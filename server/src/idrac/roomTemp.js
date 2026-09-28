@@ -21,7 +21,7 @@
  *  그 외(DIMM·PSU·보드 등)는 other 로 세기만 하고 집계에서 제외한다.
  */
 
-import { getSensorSeries } from './sensorStore.js';
+import { getSensorSeries, sensorPollCycle } from './sensorStore.js';
 import { listDatacenters } from '../datacenter/store.js';
 
 /**
@@ -40,6 +40,46 @@ export const UNASSIGNED_KEY = '__unassigned__';
  * 차트가 동결값 평탄선이 되어 실제 급등을 은폐한다(전력의 POWER_CURRENT_STALE_MS 와 같은 취지).
  */
 export const DEFAULT_MAX_AGE_MS = Number(process.env.ROOMTEMP_STALE_MS) || 15 * 60_000;
+
+/**
+ * v2.634 — 신선도 경계를 **폴 주기 소요에 맞춰 넓힌다**(2026-09-28 사용자 신고 '측정 서버 0/980 · 미갱신 975').
+ * 한 서버의 표본은 한 주기에 한 번 온다. 주기가 D 만큼 걸리고 간격이 I 면, 같은 서버의 두 표본 사이는
+ * 최악 약 2D + I 다(주기 앞쪽에서 읽힌 서버가 다음 주기 뒤쪽에서 읽히는 경우). 경계가 그보다 짧으면
+ * **정상 서버가 '미갱신' 으로 빠진다** — 대상이 많거나 불통 iDRAC 이 많아 주기가 15분을 넘는 현장에서
+ * 실제로 전부가 빠졌다. 상한(기본 2시간)은 남긴다 — 죽은 서버의 마지막 온도를 무기한 '현재' 로 쓰지
+ * 않는다는 v2.387 의 목적은 그대로다. 주기 정보가 없으면 기본 경계 그대로다(추측으로 넓히지 않는다).
+ */
+const capEnv = process.env.ROOMTEMP_STALE_CAP_MS == null || process.env.ROOMTEMP_STALE_CAP_MS === '' ? NaN : Number(process.env.ROOMTEMP_STALE_CAP_MS);
+export const STALE_CYCLE_CAP_MS = Math.max(DEFAULT_MAX_AGE_MS, Number.isFinite(capEnv) && capEnv > 0 ? Math.min(capEnv, 24 * 3600_000) : 2 * 3600_000);
+
+export function effectiveMaxAgeMs(base, cycle, cap = STALE_CYCLE_CAP_MS) {
+  if (!(base > 0)) return base;              // 0 이하 = 호출부가 검사를 끈 것
+  if (!cycle) return base;
+  const d = Number(cycle.durationMs); const i = Number(cycle.intervalMs);
+  const dur = Number.isFinite(d) && d > 0 ? d : 0;
+  const itv = Number.isFinite(i) && i > 0 ? i : 0;
+  if (!dur && !itv) return base;
+  return Math.max(base, Math.min(Math.max(base, cap), 2 * dur + itv));
+}
+
+/**
+ * 한 서버 표본에 쓸 주기 정보. 원격(엣지) 표본은 **엣지가 보낸 자기 주기**(`cycleMs`·`intervalMs`)만 쓴다 —
+ * 중앙 폴러의 주기를 엣지 서버에 적용하면 뜻이 다른 값이다. 구버전 엣지(필드 없음)는 null → 기본 경계.
+ */
+export function cycleOfSample(latest, { remote = false, localCycle = null } = {}) {
+  if (remote) {
+    const d = Number(latest?.cycleMs);
+    if (latest?.cycleMs == null || !Number.isFinite(d)) return null;
+    const i = Number(latest?.intervalMs);
+    return { durationMs: d, intervalMs: latest?.intervalMs != null && Number.isFinite(i) ? i : null };
+  }
+  return localCycle;
+}
+
+/** 표본 하나에 적용할 경계(순수 — 호출부가 now·localCycle 을 준다). */
+export function sampleMaxAgeMs(base, latest, { remote = false, localCycle = null } = {}) {
+  return effectiveMaxAgeMs(base, cycleOfSample(latest, { remote, localCycle }));
+}
 
 /*
  * v2.621(감사 DATA-04 — 코드상 성립, 실장비 미확인): HPE iLO(v2.610 부터 같은 폴러로 Thermal 수집)는 섀시 흡기
@@ -91,7 +131,7 @@ const finishAgg = (a) => ({
  * servers 를 **주입받는다**(라우트가 shared.js 헬퍼로 만들어 넘김) — 이 모듈이 req 를 몰라도
  * 되고, 테스트에서 실데이터 모양만 맞춰 검증할 수 있다.
  */
-export function roomTempReport(servers, { now = Date.now(), maxAgeMs = DEFAULT_MAX_AGE_MS } = {}) {
+export function roomTempReport(servers, { now = Date.now(), maxAgeMs = DEFAULT_MAX_AGE_MS, localCycle = sensorPollCycle(now) } = {}) {
   let dcName = new Map();
   try { dcName = new Map(listDatacenters().map((d) => [String(d.id), d.name || d.id])); } catch { /* 목록 없음 */ }
 
@@ -111,6 +151,8 @@ export function roomTempReport(servers, { now = Date.now(), maxAgeMs = DEFAULT_M
   };
 
   let totalServers = 0; let withData = 0; let noSensorTotal = 0; let staleTotal = 0;
+  // v2.634: 빠진 표본의 나이 분포 — '전부 경계를 막 넘었다'(주기 문제)와 '오래전에 멈췄다'(죽은 서버)를 가른다.
+  let staleNewest = null; let staleOldest = null; let staleNoTs = 0; let effMax = maxAgeMs; let widened = 0;
   const all = { inlet: emptyAgg(), exhaust: emptyAgg(), cpu: emptyAgg() };
 
   for (const s of servers || []) {
@@ -132,7 +174,20 @@ export function roomTempReport(servers, { now = Date.now(), maxAgeMs = DEFAULT_M
     // 타임스탬프가 아예 없는 표본은 나이를 알 수 없어 stale 로 취급한다(추정으로 통과시키지 않음).
     if (maxAgeMs > 0) {
       const at = Number(latest?.t);
-      if (!Number.isFinite(at) || now - at > maxAgeMs) { g.staleCount += 1; staleTotal += 1; continue; }
+      // v2.634: 경계는 그 표본을 만든 폴러의 주기에 맞춘다(effectiveMaxAgeMs 머리말).
+      const lim = sampleMaxAgeMs(maxAgeMs, latest, { remote: !!s.remote, localCycle });
+      if (lim > effMax) effMax = lim;
+      if (lim > maxAgeMs) widened += 1;
+      if (latest?.t == null || !Number.isFinite(at) || now - at > lim) {
+        g.staleCount += 1; staleTotal += 1;
+        if (latest?.t == null || !Number.isFinite(at)) staleNoTs += 1;
+        else {
+          const age = now - at;
+          if (staleNewest == null || age < staleNewest) staleNewest = age;
+          if (staleOldest == null || age > staleOldest) staleOldest = age;
+        }
+        continue;
+      }
     }
 
     const per = { inlet: null, exhaust: null, cpu: null };
@@ -180,8 +235,17 @@ export function roomTempReport(servers, { now = Date.now(), maxAgeMs = DEFAULT_M
     generatedAt: now,
     source: 'idrac-analysis',   // /admin/idrac/temps 와 같은 소스임을 화면이 밝힐 수 있게
     staleMs: maxAgeMs,          // 화면이 '몇 분 이상 미갱신을 제외했는지' 정직하게 표기하도록
+    // v2.634: 주기가 길어 경계를 넓힌 경우 그 최대값과 넓힌 서버 수. 화면이 '15분' 이라 적고 실제로는
+    //   더 긴 경계를 쓰면 거짓이 된다.
+    staleMsMax: effMax,
+    staleWidened: widened,
+    pollCycle: localCycle ? {
+      durationMs: localCycle.durationMs ?? null, intervalMs: localCycle.intervalMs ?? null,
+      lastDurationMs: localCycle.lastDurationMs ?? null, runningForMs: localCycle.runningForMs ?? null,
+    } : null,
     totals: {
       groups: list.length, servers: totalServers, withData, noSensor: noSensorTotal, stale: staleTotal,
+      staleNewestAgeMs: staleNewest, staleOldestAgeMs: staleOldest, staleNoTimestamp: staleNoTs,
       inlet: finishAgg(all.inlet), exhaust: finishAgg(all.exhaust), cpu: finishAgg(all.cpu),
     },
     thresholds: { recommendMin: 18, recommendMax: 27, warnMax: 32 },

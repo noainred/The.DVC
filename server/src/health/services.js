@@ -264,6 +264,25 @@ export function getServiceCheck(opts = {}) {
     return { status: (reporting || cols.length) ? 'ok' : 'off', detail: `측정 호스트 ${reporting} · 원격 수집기 ${cols.length}`, at: Date.now() };
   }));
 
+  // v2.634: iDRAC 폴 주기 — 한 주기가 간격보다 훨씬 오래 걸리면 표본이 늦게 와 법인 전산실 온도가 '미갱신' 으로
+  //   빠진다(2026-09-28 사용자 신고 0/980). 주기 소요·지금 주기 경과를 여기서 말한다.
+  checks.push(wrap('idrac-cycle', 'iDRAC 폴 주기(센서·전력)', () => {
+    const st = m_idracPoller.getPollerStatus();
+    if (!st.enabled) return { status: 'off', detail: '비활성(IDRAC_ENABLED=false)', at: Date.now() };
+    const iv = Number(st.intervalMs) || 60_000;
+    const last = st.lastRun || null;
+    const dur = Number(last?.durationMs);
+    const run = Number(st.runningForMs);
+    const secs = (ms) => (ms >= MIN ? `${Math.round(ms / MIN)}분` : `${Math.max(1, Math.round(ms / 1000))}초`);
+    const parts = [`대상 ${last?.servers ?? st.servers ?? 0}대 · 간격 ${secs(iv)}`];
+    if (Number.isFinite(dur)) parts.push(`직전 주기 ${secs(dur)}`);
+    if (Number.isFinite(run) && run > 0) parts.push(`지금 주기 ${secs(run)}째`);
+    if (last && !Number.isFinite(dur)) parts.push('주기 소요 미기록(첫 주기 전·긴급중단·mock)');
+    const slow = (Number.isFinite(dur) && dur > 3 * iv) || (Number.isFinite(run) && run > 3 * iv);
+    if (slow) parts.push('간격보다 3배 넘게 걸림 — 그동안 다음 주기는 건너뜁니다');
+    return { status: slow ? 'warn' : 'ok', detail: parts.join(' · '), at: Number(last?.finishedAt) || Number(last?.at) || Date.now() };
+  }));
+
   checks.push(wrap('metrics', '지표 샘플러', () => {
     const m = metricsSamplerStatus();
     const last = atOf(m.lastRun);

@@ -87,3 +87,40 @@ export function remoteSensorView(rs) {
     syncedAt: t,
   };
 }
+
+/*
+ * v2.634 — 폴 주기 정보(신선도 판정용). 2026-09-28 사용자 신고: 법인 전산실 운영 온도가 '측정 서버 0/980 ·
+ * 미갱신 975' 로 통째로 비었다. 표본 시각이 주기 시작 시각이었고(poller.js — 이 릴리스에 '실제로 읽은 시각' 으로
+ * 고쳤다), 신선도 경계(15분)가 **한 주기가 얼마나 걸리는지를 모른 채** 고정돼 있었다. 대상이 많거나 불통
+ * iDRAC 이 많아 한 주기가 15분을 넘으면, 표본을 읽은 시각으로 찍어도 다음 표본까지의 간격이 15분을 넘어
+ * 정상 서버가 '미갱신' 으로 빠진다. 그래서 폴러가 주기 소요를 여기에 남기고 판정 쪽이 경계를 넓힌다.
+ * 이 모듈은 leaf 다(import 0) — 판정 모듈(roomTemp 등)이 폴러를 import 하지 않게 여기에 둔다.
+ */
+let _cycle = { durationMs: null, intervalMs: null, at: null, runningSince: null };
+
+/** 폴러가 주기 시작을 알린다. */
+export function markSensorPollStart(at = Date.now()) { _cycle = { ..._cycle, runningSince: at }; }
+
+/** 폴러가 주기 종료를 알린다. */
+export function setSensorPollCycle({ durationMs, intervalMs, at = Date.now() } = {}) {
+  const d = Number(durationMs); const i = Number(intervalMs);
+  _cycle = {
+    durationMs: Number.isFinite(d) && d >= 0 ? d : null,
+    intervalMs: Number.isFinite(i) && i > 0 ? i : null,
+    at,
+    runningSince: null,
+  };
+}
+
+/**
+ * 판정에 쓸 주기 정보 — `durationMs` 는 직전 주기 소요와 **지금 도는 주기의 경과** 중 큰 값이다
+ * (지금 주기가 더 오래 걸리고 있으면 그만큼 표본이 늦게 온다). 폴러가 한 번도 돌지 않았으면 null.
+ */
+export function sensorPollCycle(now = Date.now()) {
+  const running = _cycle.runningSince != null ? Math.max(0, now - _cycle.runningSince) : null;
+  const d = [_cycle.durationMs, running].filter((x) => x != null);
+  if (!d.length && _cycle.intervalMs == null) return null;
+  return { durationMs: d.length ? Math.max(...d) : null, intervalMs: _cycle.intervalMs, lastDurationMs: _cycle.durationMs, runningForMs: running };
+}
+
+export function _resetSensorPollCycleForTest() { _cycle = { durationMs: null, intervalMs: null, at: null, runningSince: null }; }
