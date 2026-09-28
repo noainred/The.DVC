@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  checkRangeList, ipmsSettingsErrors, listSummaryText, sameIpmsSettings, serverInvalidText, vcDirty, vcenterOptionLabel, vcenterOptions,
+  checkRangeList, ipmsSettingsErrors, listSummaryText, normalizeRangeText, policySpecSize, sameIpmsSettings, serverInvalidText, vcDirty, vcenterOptionLabel, vcenterOptions,
 } from './ipmsRangeText.js';
 import { stripComments } from '../../test/_stripComments.js';
 
@@ -38,15 +38,34 @@ describe('ipmsRangeText', () => {
     expect(vcenterOptionLabel(o[0])).toBe('● VC-A · 무시 1');
     expect(vcenterOptionLabel(o[1])).toBe('gone (삭제된 vCenter) · 무시 1');
   });
+  it('v2.639(D1) 대역 정책 IP 개수 — 서버 specToRange 와 같은 뜻(CIDR 은 네트워크·브로드캐스트 제외, 범위·단일은 그대로)', () => {
+    expect(policySpecSize('192.168.1.1-50')).toBe(50);      // 예전 IpamNet 사본은 >>> 0 이 없어 음수 → 0(저장 잠김)
+    expect(policySpecSize('10.0.0.0/24')).toBe(254);
+    expect(policySpecSize('10.0.0.0/8/x')).toBe(0);
+    expect(policySpecSize('10.0.0.0/31')).toBe(2);
+    expect(policySpecSize('10.0.0.5/32')).toBe(1);
+    expect(policySpecSize('10.0.0.5')).toBe(1);
+    expect(policySpecSize('10.0.0.50-10.0.0.1')).toBe(0);  // 뒤집힌 범위는 서버(reversed:'error')처럼 0
+    expect(policySpecSize('')).toBe(0);
+  });
+  it('v2.639(D8) 쉼표는 줄바꿈으로 — 서버는 쉼표도 받는데 웹 판정은 줄 단위라 한 줄이 오류로 보였다', () => {
+    expect(normalizeRangeText('10.0.0.0/24, 10.0.1.0/24')).toBe('10.0.0.0/24\n10.0.1.0/24');
+    expect(checkRangeList(normalizeRangeText('10.0.0.0/24,10.0.1.0/24')).valid).toEqual(['10.0.0.0/24', '10.0.1.0/24']);
+    expect(checkRangeList('10.0.0.0/24,10.0.1.0/24').invalid.length).toBe(1); // 판정 자체는 그대로(서버 대조 테스트가 고정)
+    expect(normalizeRangeText(null)).toBe('');
+  });
   it('서버 400 항목은 어디의 몇 행인지로 말한다', () => {
     expect(serverInvalidText({ field: 'vcenters', vcenterId: 'a', line: 2, value: 'x', reason: '형식 아님' }, () => 'VC-A')).toBe('vCenter별 무시 대역 · VC-A — 2행 ‘x’ — 형식 아님');
     expect(serverInvalidText({ field: 'global', line: 1, value: 'y', reason: 'r' })).toBe('전체 무시 대역 — 1행 ‘y’ — r');
+    expect(serverInvalidText({ field: 'ranges', line: 2, value: 'z', reason: 'r' })).toBe('스캔 대역 — 2행 ‘z’ — r'); // PUT scan/settings 의 400(v2.639)
   });
 });
 
 describe('IpmsSettings 소스 계약', () => {
-  const src = stripComments(fs.readFileSync(path.join(HERE, 'IpamSettings.jsx'), 'utf8'));
-  const fn = src.slice(src.indexOf('export function IpmsSettings('), src.indexOf('export function ipScanAccept('));
+  // v2.639(U2): 구현은 IpmsSettings.jsx 로 옮겼다(IpamSettings.jsx 는 재수출 셸). ② 편집기는 VcScanRangeEditor.jsx.
+  const src = stripComments(fs.readFileSync(path.join(HERE, 'IpmsSettings.jsx'), 'utf8'));
+  const fn = src.slice(src.indexOf('export function IpmsSettings('));
+  const editor = stripComments(fs.readFileSync(path.join(HERE, 'VcScanRangeEditor.jsx'), 'utf8'));
   it('저장 실패는 서버 사유(reason)와 줄 목록(invalid)을 보인다 — r.error 만 읽으면 400 이 "저장 실패" 로 뭉개진다', () => {
     expect(fn).toMatch(/r\.reason \|\| r\.error/);
     expect(fn).toMatch(/r\.invalid/);
@@ -58,6 +77,7 @@ describe('IpmsSettings 소스 계약', () => {
   });
   it('형식 오류가 있으면 저장 버튼을 잠근다(서버도 400)', () => {
     expect(fn).toMatch(/disabled=\{saving \|\| errors\.length > 0\}/);
-    expect(fn).toMatch(/scanCheck\.invalid\.length > 0/);
+    expect(editor).toMatch(/scanCheck\.invalid\.length > 0/);
+    expect(editor).toMatch(/list: \(r\.invalid \|\| \[\]\)\.map\(lineIssueText\)/); // 서버 400 의 줄 목록(D4)
   });
 });

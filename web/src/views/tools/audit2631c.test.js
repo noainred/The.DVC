@@ -45,7 +45,7 @@ describe('reservedFieldForSave', () => {
 });
 
 describe('화면 소스', () => {
-  const settings = stripComments(fs.readFileSync(new URL('./IpamSettings.jsx', import.meta.url), 'utf8'));
+  const settings = stripComments(fs.readFileSync(new URL('./IpamEditors.jsx', import.meta.url), 'utf8')); // v2.639: OverrideEditor 는 IpamEditors.jsx
   const core = stripComments(fs.readFileSync(new URL('./IpamCore.jsx', import.meta.url), 'utf8'));
   it('폼은 만료 ISO 를 slice(0,10) 으로 되읽지 않는다', () => {
     expect(settings).not.toMatch(/reservedUntil\)\.slice\(0,\s*10\)/);

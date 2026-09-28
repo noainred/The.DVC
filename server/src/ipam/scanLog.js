@@ -17,14 +17,16 @@
  *
  * 규약:
  *  · 인메모리 링버퍼 + 파일 영속(0600, 원자 쓰기, 같은 틱 기록은 한 번에 — `util/activityLog.js` 와 같은 방식).
- *    재생성 가능한 기록이라 손상 파일은 보존하지 않고 새로 시작한다(activityLog 와 같은 판단).
+ *    v2.639(감사 S2): 손상 파일은 `.corrupt.<ts>` 로 **보존**하고 빈 버퍼로 시작한다 — 예전(v2.636)은 '재생성 가능한 기록' 이라며
+ *    조용히 `[]` 로 넘겼는데, 이 로그는 재생성되지 않는다(과거 스캔의 시작·실패·설정 변경 사건은 다시 만들 수 없다). 다음 기록이
+ *    손상 원본을 덮어쓰기 전에 옆으로 치운다(arch2582 ARCH-1 규약 — 예외 목록에서 뺐다).
  *  · 상한 `IPAM_SCAN_LOG_MAX`(기본 1000, 하한 100). 문구는 300자로 자른다. 비밀은 들어오지 않는다(대역·개수·사유뿐).
  *  · 수치 필드는 유한수가 아니면 **null**(0 과 '모름' 을 섞지 않는다).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -34,7 +36,8 @@ registerStateFile(SCAN_LOG_FILE_NAME);
 const FILE = () => path.join(config.configDir, 'ipam-scan-log.json'); // 리터럴 — scripts/config-doc.mjs 가 이 형태만 읽는다(SCAN_LOG_FILE_NAME 과 같은 값)
 export const SCAN_LOG_EVENTS = Object.freeze(['start', 'finish', 'fail', 'skip', 'busy', 'report', 'reject', 'settings']);
 const LEVEL_OF = Object.freeze({ start: 'info', finish: 'info', report: 'info', settings: 'info', skip: 'warn', busy: 'warn', reject: 'warn', fail: 'error' });
-export const SCAN_LOG_MAX = (() => {
+// v2.639: 바깥 호출부 0건(listScanLog 응답의 `max` 로만 나간다) — 모듈 내부 상수(export 를 뗐다).
+const SCAN_LOG_MAX = (() => {
   const n = numOrNull(process.env.IPAM_SCAN_LOG_MAX);
   return n != null && n > 0 ? Math.max(100, Math.floor(n)) : 1000;
 })();
@@ -45,10 +48,17 @@ let dirty = false;
 
 function load() {
   if (buf) return buf;
+  const file = FILE();
+  if (!fs.existsSync(file)) { buf = []; return buf; }
   try {
-    const a = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    buf = Array.isArray(a) ? a.slice(-SCAN_LOG_MAX) : [];
-  } catch { buf = []; }
+    const a = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!Array.isArray(a)) throw new Error('배열이 아닌 JSON 값');
+    buf = a.slice(-SCAN_LOG_MAX);
+  } catch (e) {
+    // v2.639 S2: 조용한 `[]` 는 다음 기록이 손상 원본을 덮어쓰게 한다 — 보존 뒤 빈 버퍼(preserveCorrupt 가 경고를 낸다).
+    preserveCorrupt(file, e?.message || String(e));
+    buf = [];
+  }
   return buf;
 }
 function writeNow() {

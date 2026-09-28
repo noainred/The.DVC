@@ -23,7 +23,8 @@ let running = false;
 let lastRun = null;
 let progress = null; // 실행 중 진행률: { total, done, alive, startedAt }
 
-export async function runScanOnce({ manual = false } = {}) {
+// v2.639: 바깥 호출부 0건(라우트는 startScan 을 쓴다) — 모듈 내부 함수(export 를 뗐다).
+async function runScanOnce({ manual = false } = {}) {
   const trigger = manual ? 'manual' : 'periodic';
   if (running) {
     if (manual) recordScanLog({ event: 'busy', trigger, message: '이미 스캔 중이라 새로 시작하지 않았습니다.' });

@@ -19,6 +19,7 @@ import { listVcRanges } from '../../ipam/rangeStore.js';
 import { vcRangesToCsv } from '../../ipam/vcRangesCsv.js';
 import { rangeSize } from '../../ipam/scan.js';
 import { checkRangeSpec } from '../../ipam/rangeSyntax.js'; // v2.639: 저장된 옛 값 중 이제 무효인 줄을 밝힌다
+import { makeVcResolver } from '../../ipam/vcResolve.js';
 import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany } from '../../ipam/annotations.js';
 import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany } from '../../ipam/overrides.js';
 import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANAGE_CHUNK_MAX } from '../../ipam/manageCsv.js';
@@ -512,23 +513,12 @@ function manageEntries(snap, user, vcenterId) {
   uniq.sort((a, b) => (ipToNum(a.ip) ?? 0) - (ipToNum(b.ip) ?? 0));
   return { entries: uniq, hiddenOutOfScope: allowed ? hidden : 0 };
 }
-/** vCenter 이름·ID → ID. 이름이 두 vCenter 에 걸리면 모호하므로 null(지어내지 않는다). 범위 계정은 범위 안만. */
+/** vCenter 이름·ID → ID. 이름이 두 vCenter 에 걸리면 모호하므로 null(지어내지 않는다). 범위 계정은 범위 안만.
+ *  v2.639: 해석 규칙은 ipam/vcResolve.js 한 벌(vc-ranges CSV 가져오기와 같은 규칙 — 예전엔 그쪽이 첫 항목을 택했다). */
 function vcResolver(snap, user) {
   const allowed = scopedVcenterIds(user, snap);
-  const list = (snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
-  const byId = new Map(list.map((v) => [String(v.id).toLowerCase(), v.id]));
-  const byName = new Map();
-  for (const v of list) {
-    const n = String(v.name || '').trim().toLowerCase();
-    if (!n) continue;
-    byName.set(n, byName.has(n) && byName.get(n) !== v.id ? null : v.id);
-  }
-  return (s) => {
-    const k = String(s || '').trim().toLowerCase();
-    if (!k) return null;
-    if (byId.has(k)) return byId.get(k);
-    return byName.get(k) || null;
-  };
+  const rv = makeVcResolver((snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id)));
+  return (s) => rv(s).id;
 }
 api.get('/tools/ipam/manage.csv', requirePerm('tools'), (req, res) => {
   const snap = store.get();

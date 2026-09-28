@@ -30,21 +30,27 @@ function read() {
   return cache;
 }
 
+/*
+ * v2.639(감사 S1): 쓰기 실패는 **던진다** — 예전에는 console 에만 남기고 호출부(saveVcRanges·removeVcRanges)가 `{ok:true}` 를
+ *   돌려줬다. 캐시는 이미 새 값이라 화면은 '저장됨' 이었고 재시작하면 사라졌다(디스크 풀·권한). 형제 `scanStore.saveAll`·
+ *   `settings.saveSettings` 는 던지므로 같은 동작으로 맞춘다(호출부 centralIpam.js 는 동기 핸들러라 throw 가 500 으로 간다).
+ *   캐시는 **쓰기가 성공한 뒤에만** 바꾼다(실패해도 메모리와 디스크가 어긋나지 않게). 호출부도 캐시 객체를 제자리에서
+ *   고치지 않고 사본을 넘긴다.
+ */
 function write(data) {
+  fs.mkdirSync(path.dirname(FILE), { recursive: true });
+  atomicWriteFileSync(FILE, JSON.stringify(data, null, 2));
+  try { fs.chmodSync(FILE, 0o600); } catch { /* */ }
   cache = data;
-  try {
-    fs.mkdirSync(path.dirname(FILE), { recursive: true });
-    atomicWriteFileSync(FILE, JSON.stringify(data, null, 2));
-    try { fs.chmodSync(FILE, 0o600); } catch { /* */ }
-    try { cacheMtime = fs.statSync(FILE).mtimeMs; } catch { cacheMtime = -1; }
-  } catch (e) { console.error('[ipam-ranges] 저장 실패:', e.message); }
+  try { cacheMtime = fs.statSync(FILE).mtimeMs; } catch { cacheMtime = -1; }
 }
 
 const normRanges = (r) => (Array.isArray(r) ? r : String(r || '').split(/[\n,]/))
   .map((s) => String(s).trim()).filter(Boolean);
 
-/** 전체 per-vCenter 대역 맵 반환(원본 캐시는 노출하지 않게 복제). */
-export function loadVcRanges() {
+/** 전체 per-vCenter 대역 맵 반환(원본 캐시는 노출하지 않게 복제). v2.639: 바깥 호출부 0건 — 모듈 내부용(export 를 뗐다). */
+// eslint-disable-next-line no-unused-vars
+function loadVcRanges() {
   return structuredClone(read().vcenters || {});
 }
 
@@ -73,17 +79,16 @@ export function saveVcRanges(vcenterId, partial = {}) {
     enabled: partial.enabled !== undefined ? partial.enabled !== false : (cur.enabled !== false),
     updatedAt: Date.now(),
   };
-  data.vcenters = { ...data.vcenters, [id]: next };
-  write(data);
+  write({ ...data, vcenters: { ...data.vcenters, [id]: next } }); // 캐시 객체를 제자리에서 고치지 않는다(쓰기 실패 시 원복이 필요 없게)
   return { ok: true, vcenterId: id, ...next };
 }
 
-/** vCenter 대역 삭제. */
+/** vCenter 대역 삭제. 쓰기 실패는 던진다(v2.639 S1). */
 export function removeVcRanges(vcenterId) {
   const data = read();
   if (!data.vcenters[vcenterId]) return { ok: false, reason: '없는 항목' };
-  delete data.vcenters[vcenterId];
-  write({ vcenters: { ...data.vcenters } });
+  const { [vcenterId]: _removed, ...rest } = data.vcenters;
+  write({ ...data, vcenters: rest });
   return { ok: true };
 }
 

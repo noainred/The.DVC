@@ -16,7 +16,7 @@ export const RANGE_ACTION = Object.freeze({
   empty: ['대역 없음 줄', 'gray'],
   error: ['오류', 'red'],
 });
-export const FIELD_TEXT = Object.freeze({
+const FIELD_TEXT = Object.freeze({
   status: '상태', deviceType: '디바이스', owner: '담당자', label: '라벨', hostnameOverride: '호스트명', claimedVcenterId: '귀속 vCenter',
   reservedUntil: '예약 만료', note: '비고', memo: '메모', tags: '태그',
 });

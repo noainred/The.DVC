@@ -2,7 +2,8 @@
 //   routes/admin/centralTokens.js 로 분리했다(이 파일은 IPAM 전용). 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config, loadVcenterConfig } from '../../config.js';
 import { ledgerInfo } from '../../ipam/db.js';
-import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries } from '../../ipam/settings.js';
+import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries, invalidEntries } from '../../ipam/settings.js';
+import { makeVcResolver } from '../../ipam/vcResolve.js'; // v2.639: vCenter 이름 해석기 한 벌(모호하면 null — 예전엔 첫 항목을 택했다)
 import { checkRangeList } from '../../ipam/rangeSyntax.js';
 import { listTargets } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
@@ -73,20 +74,9 @@ function ipamSettingsView(settings, allowed, snap) {
   const omitted = all.length - Object.keys(vcenters).length;
   return view({ ...settings, vcenters }, omitted ? { omittedOutOfScope: omitted } : {});
 }
-/**
- * v2.637: 적용될 목록만 검사한다(범위 계정의 전역 목록 변경은 어차피 적용되지 않으므로 검사 대상이 아니다).
- * 예전에는 아무것도 검사하지 않아 `10.0.0.0/`(→ /0) 가 IPv4 전체를 숨기고, `abc` 는 '저장했습니다' 뒤 조용히 버려졌다.
- */
-function ipamSettingsInvalid(body, { globals, vcKeys }) {
-  const out = [];
-  const add = (field, list, vcenterId) => {
-    for (const x of checkRangeList(list || []).invalid) out.push({ field, ...(vcenterId != null ? { vcenterId } : {}), ...x });
-  };
-  if (globals) { add('global', body.global); add('publicRanges', body.publicRanges); add('privateRanges', body.privateRanges); }
-  const vcs = body.vcenters && typeof body.vcenters === 'object' && !Array.isArray(body.vcenters) ? body.vcenters : {};
-  for (const [k, v] of Object.entries(vcs)) if (!vcKeys || vcKeys.has(k)) add('vcenters', v, k);
-  return out;
-}
+// v2.637: 적용될 목록만 검사한다(범위 계정의 전역 목록 변경은 어차피 적용되지 않으므로 검사 대상이 아니다).
+//   v2.639: 판정 본체는 ipam/settings.js invalidEntries 하나(savedInvalidEntries 와 같은 루프였다 — 두 벌 제거).
+const ipamSettingsInvalid = (body, opt) => invalidEntries(body, opt);
 const invalidReply = (res, invalid) => res.status(400).json({ ok: false, reason: `형식이 올바르지 않은 줄 ${invalid.length}개가 있어 저장하지 않았습니다.`, invalid: invalid.slice(0, 200), invalidCount: invalid.length });
 adminRouter.get('/ipam/settings', adminOnly, (req, res) => {
   const snap = store.get();
@@ -287,14 +277,10 @@ adminRouter.post('/ipam/vc-ranges/import', adminOnly, (req, res) => {
   try { vcs = loadVcenterConfig().vcenters || []; } catch { /* 목록 실패 시 resolve 전부 null → 전 행 오류 */ }
   // v2.611 LEFT2611-04: 범위 계정에는 쓰기 범위 밖 vCenter 를 '알 수 없는 vCenter' 와 **같은 결과**로 해석한다 —
   //   예전엔 dryRun 보고가 범위 밖 이름을 id·action 으로 풀어 줘 존재를 드러냈다(형제 PUT/DELETE 는 404 로 숨긴다).
-  const resolveVc = (v) => {
-    const s = String(v || '').trim();
-    if (!s) return null;
-    let id = null;
-    if (vcs.some((x) => x.id === s)) id = s;
-    else { const byName = vcs.find((x) => String(x.name || '').toLowerCase() === s.toLowerCase()); id = byName ? byName.id : null; }
-    return id && vcRangeWritable(req.user, id) ? id : null;
-  };
+  // v2.639: 해석기는 ipam/vcResolve.js 한 벌 — 이름이 겹치면 **null**(예전엔 첫 항목을 택해 오타 없이도 다른 vCenter 대역을 덮어썼다.
+  //   manage CSV 의 해석기는 이미 모호하면 null 이었다 — 두 규칙을 하나로).
+  const rv = makeVcResolver(vcs);
+  const resolveVc = (v) => { const r = rv(v); return r.id && vcRangeWritable(req.user, r.id) ? r.id : null; };
   const existing = new Set(listVcRanges().map((e) => e.vcenterId));
   const { report, summary } = analyzeVcRangesImport(rows, { resolveVc, hasExisting: (id) => existing.has(id) });
   if (req.body?.dryRun) {

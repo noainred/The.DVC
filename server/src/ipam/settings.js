@@ -34,14 +34,26 @@ export function loadSettings() { return load(); }
  * @returns {{ field: string, vcenterId?: string, line: number, value: string, reason: string }[]}
  */
 export function savedInvalidEntries(settings = load()) {
+  return invalidEntries(settings, { globals: true, vcKeys: null });
+}
+
+/**
+ * v2.639(감사 S5): 설정 본문의 형식 오류 줄 — 저장된 값(`savedInvalidEntries`)과 PUT 본문 검사(routes/admin/centralIpam.js)가
+ * 같은 루프를 두 벌 갖고 있었다. 판정은 `rangeSyntax.checkRangeList` 하나이고 여기서는 필드·vCenter 축만 붙인다.
+ * @param {object} body           { global, publicRanges, privateRanges, vcenters:{ [id]: list } } — 목록은 배열·문자열 둘 다
+ * @param {{globals?:boolean, vcKeys?:Set<string>|null}} [opt]
+ *   globals: false 면 전역 3목록은 검사하지 않는다(범위 계정 저장 — 전역 변경은 어차피 무시된다).
+ *   vcKeys: 검사할 vCenter id 집합(null·미지정이면 전부).
+ * @returns {{ field: string, vcenterId?: string, line: number, value: string, reason: string }[]}
+ */
+export function invalidEntries(body = {}, { globals = true, vcKeys = null } = {}) {
   const out = [];
   const add = (field, list, vcenterId) => {
     for (const x of checkRangeList(list || []).invalid) out.push({ field, ...(vcenterId != null ? { vcenterId } : {}), ...x });
   };
-  add('global', settings.global);
-  add('publicRanges', settings.publicRanges);
-  add('privateRanges', settings.privateRanges);
-  for (const [k, v] of Object.entries(settings.vcenters || {})) add('vcenters', v, k);
+  if (globals) { add('global', body.global); add('publicRanges', body.publicRanges); add('privateRanges', body.privateRanges); }
+  const vcs = body.vcenters && typeof body.vcenters === 'object' && !Array.isArray(body.vcenters) ? body.vcenters : {};
+  for (const [k, v] of Object.entries(vcs)) if (!vcKeys || vcKeys.has(k)) add('vcenters', v, k);
   return out;
 }
 

@@ -149,7 +149,7 @@ test('TIM2605-04: IPAM_WRITE_DEBOUNCE_MS 는 [100ms, 10분] — 음수·2^31 초
 });
 
 test('LEFT2605-06: IPAM 스캔 화면은 숫자 칸 원문을 상태에 두고 ipamScanForm 으로 보낸다', () => {
-  const s = webSrc('views/tools/IpamSettings.jsx');
+  const s = webSrc('views/tools/IpScanSettings.jsx');
   assert.doesNotMatch(s, /retentionDays:\s*Number\(e\.target\.value\)/);
   assert.doesNotMatch(s, /concurrency:\s*Number\(e\.target\.value\)/);
   assert.match(s, /scanSettingsBody\(s, agent\)/);

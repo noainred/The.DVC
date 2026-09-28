@@ -10,7 +10,7 @@ import { errorBoxInput, ERROR_BOX_UNKNOWN_TEXT } from '../components/accessDenie
 import { HttpError, noteHttpError } from '../api.js';
 import { storageUsageUnknownNote, physicalServersKpi } from './vcCardText.js';
 import { infraTotals } from '../version_5/overviewData.js';
-import { vcRangesGate } from './tools/IpamSettings.jsx';
+import { vcRangesGate } from './tools/VcScanRangeEditor.jsx'; // v2.639(U1): 편집기 한 벌로 옮겼다
 import { scanJobsView } from './IdracAdmin.jsx';
 import { stripComments } from '../test/_stripComments.js';
 
@@ -97,11 +97,13 @@ describe('WEB-02 — IPMS 설정 스캔 대역: 읽지 못했으면 저장·스�
     expect(vcRangesGate({ ranges: [] }, 'timeout')).toMatchObject({ locked: false, failed: true });
   });
   it('소스: 조회 실패를 삼키지 않고 두 버튼이 잠금을 본다', () => {
-    const src = stripComments(read('./tools/IpamSettings.jsx'));
-    expect(src).not.toMatch(/vc-ranges'\)\.then\(setVcRanges\)\.catch\(\(\) => \{\}\)/);
-    // v2.637: 삭제된 vCenter·형식 오류 조건이 더해졌다 — 잠금(scanGate.locked)을 보는지만 고정한다.
+    // v2.639(U1): 조회는 IpmsSettings.jsx(부모), 버튼은 VcScanRangeEditor.jsx(편집기 한 벌 — 대역·스캔 페이지도 같은 것을 쓴다).
+    const parent = stripComments(read('./tools/IpmsSettings.jsx'));
+    expect(parent).not.toMatch(/vc-ranges'\)\.then\(setVcRanges\)\.catch\(\(\) => \{\}\)/);
+    const src = stripComments(read('./tools/VcScanRangeEditor.jsx'));
+    // v2.637: 삭제된 vCenter·형식 오류 조건이 더해졌다 — 잠금(scanGate.locked)을 보는지만 고정한다. v2.639: 관리자 아님·실행 중 조건도.
     expect(src).toMatch(/disabled=\{scanBusy \|\| !vc \|\|[^}]*scanGate\.locked[^}]*\}[^>]*onClick=\{saveScanRanges\}/);
-    expect(src).toMatch(/disabled=\{scanBusy \|\| scanGate\.locked\}[^>]*onClick=\{scanNow\}/);
+    expect(src).toMatch(/disabled=\{scanBusy \|\| scanGate\.locked[^}]*\}[^>]*onClick=\{scanNow\}/);
   });
 });
 

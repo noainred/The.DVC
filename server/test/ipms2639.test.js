@@ -219,3 +219,17 @@ test('② GET /tools/ipam/vc-ranges 는 저장된 옛 값 중 이제 무효인 �
   assert.equal(old.invalid.length, 1); assert.equal(old.invalid[0].value, '10.0.0.250-300'); assert.ok(old.invalid[0].reason);
   assert.equal(fine.invalid, null, '전부 유효하면 invalid 필드 없음');
 });
+
+// ── v2.639 리드 배선: vCenter 이름 해석기·IPMS 설정 검사 루프는 한 벌 ─────────────────────────────
+test('⑤ 라우트 2파일이 vcResolve.js 해석기와 settings.invalidEntries 를 쓰고 자체 사본을 갖지 않는다', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const src = (...p) => stripComments(fs.readFileSync(path.join(here, '..', 'src', ...p), 'utf8'));
+  const ci = src('routes', 'admin', 'centralIpam.js');
+  const ie = src('routes', 'api', 'ipamExport.js');
+  assert.match(ci, /makeVcResolver\(/, 'vc-ranges CSV 가져오기의 vCenter 해석은 ipam/vcResolve.js');
+  assert.match(ie, /makeVcResolver\(/, 'manage CSV 의 vCenter 해석도 같은 모듈');
+  assert.doesNotMatch(ci, /vcs\.find\(\(x\) => String\(x\.name/, '예전 인라인 해석기(이름 겹치면 첫 항목)가 남아 있지 않다');
+  assert.doesNotMatch(ie, /byName\.set\(n,/, '예전 인라인 해석기(byName 맵)가 남아 있지 않다');
+  assert.match(ci, /invalidEntries\(/, 'IPMS 설정 검사 루프는 ipam/settings.js invalidEntries 하나');
+  assert.doesNotMatch(ci, /for \(const x of checkRangeList\(list \|\| \[\]\)\.invalid\)/, '예전 인라인 add 루프가 남아 있지 않다');
+});

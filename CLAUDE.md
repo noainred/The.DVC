@@ -4252,6 +4252,40 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       '이미 입력됨' 판정은 **저장하지 않은 입력** 기준이라 웹이 한다(대역 문법은 `ipmsRangeText.js` 하나).
     - ⚠ 정직 기록: 실제 엣지(에이전트 이름 ≠ 수집 서버 id 인 현장)로는 확인하지 못했다 — 목 스택에 등록부를 심어 확인했다.
 
+  - ⚠⚠ **IPMS 아키텍처 정리(v2.639) — 대역 문법 판정은 서버 `ipam/rangeSyntax.js` 한 벌, vCenter 대역 편집기는 웹
+    `VcScanRangeEditor.jsx` 한 벌**(사용자 요청 "ipms 부분 아키텍처 리뷰해서 통합할 수 있는 부분 통합하고 개선" · 선택 전체 + 전체 검증.
+    조사 에이전트 2 → 수정 3그룹 병렬. 회귀 `server/test/ipms2639.test.js`·`ipamStore2639.test.js` + 웹 `ipamRanges2639.test.js` — 변이 검증
+    A1 3/3·A2 7/7. 상세 `docs/AUDIT-2026-09-28-ipms.md`):
+    - ⚠⚠ **판정기가 네 벌이었다** — `rangeSyntax.checkRangeSpec`(v2.637 엄격) · `scan.js rangeSize`·`expandRange` · `rangePolicies.specToRange`.
+      화면 PUT 만 엄격 판정을 쓰고 **CSV 가져오기 2종·`PUT /ipam/scan/settings`** 는 느슨한 `rangeSize` 라 `10.0.0.0/8/x`·`10.0.0.250-300`
+      (실제로 10.0.1.x 를 스캔)·`/24.5`(180개) 를 저장했다(재현). v2.637 "저장도 적용도 같은 판정" 의 누락. 이제 셋은 `checkRangeSpec` 위의
+      어댑터다 — **의미는 유지**(CIDR 네트워크·브로드캐스트 제외 `/24`=254, 정책 lo+1/hi−1, RANGE_CAP 루프 상한). ⚠ `checkRangeSpec.size` 는
+      256 이라 두 크기가 다른 것은 의도다(테스트가 둘 다 고정). **새 대역 입력 경로는 `checkRangeList(…, {reversed:'error', scanCap:RANGE_CAP})`
+      를 쓰고 `ipms2639.test.js` ① 의 여섯 경로 대조에 더할 것.** 옛 저장값 중 이제 무효인 줄은 `GET /tools/ipam/vc-ranges` 가 `invalid` 로 밝힌다.
+    - **웹 사본 파서 `IpamNet.rangeSpecSize` 는 `>>> 0` 이 빠져 `192.168.1.1-50` 이 음수 → 정책 폼 저장 잠금**이었다(서버는 고쳐진 버그의
+      화면 사본). `ipmsRangeText.policySpecSize`(specToRange 뜻) 하나로. **서버에서 고친 파서 버그는 웹 사본에도 있는지 grep 할 것.**
+    - **편집기 두 곳**(`IpamNet.IpamRanges` 원시 textarea vs `IpmsSettings` ②)을 `VcScanRangeEditor` 로 — 초안 키는 페이지별
+      (`ranges:vc:<id>` / `ipms:vcscan:<id>`, `ipamDraft.pageOfKey` 규칙) · `access==='no'` 면 쓰기 버튼 잠금 + 사유(모름은 잠그지 않는다 — 서버가
+      집행) · 쉼표 입력은 `normalizeRangeText`(줄 앞 공백까지 제거 — 남기면 들여쓴 줄처럼 보인다, Chromium 판독) · 저장 중 vCenter 를 바꾸면 늦은
+      응답이 새 vCenter 초안을 '저장됨' 으로 만들지 않는다. `vcRangesGate`·`RangeCheck`·`SCAN_CAP` 는 이 파일이 소유한다(IpmsSettings↔Editor 순환 회피).
+    - **`IpScanSettings.runNow` 가 저장 400 을 무시하고 스캔을 시작하며 '입력한 대역 N개 스캔' 이라 말했다** — `putJson` 은 400 본문을 돌려준다
+      (`api.js:299`). `sv.ok===false` 면 시작하지 않는다. 에이전트 대역 칸도 `checkRangeList` + 잠금.
+    - **`IpamSettings.jsx`(853줄) → `IpamEditors`·`IpmsSettings`·`IpScanSettings`·`IpamScanStatus` 4파일 + 재수출 셸.** 소스를 grep 하는 테스트
+      (`audit2605e`·`audit2621e`·`audit2622f`·`audit2613b`·`audit2631c`·`ipmsRangeText.test`·`ipamSubmenu2636`)는 새 경로로 옮겼다 —
+      **화면 파일을 나누면 그 파일을 읽는 서버·웹 테스트 경로를 함께 grep 할 것**(`webSrc('views/tools/IpamSettings.jsx')` 가 서버 테스트에도 있었다).
+    - 서버 위생: `rangeStore.write` 실패를 `{ok:true}` 로 보고하던 것 → throw(캐시는 성공 뒤에만) · `scanLog` 손상 보존(`arch2582` allowlist 에서
+      뺌) · vCenter 이름 해석기 2벌(vc-ranges CSV 는 **이름 겹치면 첫 항목** — 다른 vCenter 대역을 덮었다) → `ipam/vcResolve.js makeVcResolver`
+      (모호하면 null + candidates) · `settings.invalidEntries` 한 벌 · `_ipamKey` 가 `ipamRevKey()` 재사용(키 문자열 불변) · `scanStore` 설정 파일
+      (mtime,size) 캐시(디바운스 저장소 밖이라 안전 — CFG 의 쓰기 경로는 `saveAll` 뿐) · `scanDatacenterSource` 는 입력 토큰(파일 stat + scanRev)이
+      같으면 재판정 생략 — 실측 26만 결과에서 **167ms → 0.01ms**(병목은 정렬이 아니라 26만 개 전량 훑기였다 → `scanResultAgents()` 카운터).
+    - **라우트 분리**: `centralIpam.js` 의 비-IPAM 10개(중앙 토큰 3·개별 토큰 3·인벤토리 2·수신 통계 2) → `routes/admin/centralTokens.js`(본문·
+      게이트 불변). `collectorSetPasswordGuard`·`audit2599b` 가 그 파일을 마운트/grep 한다.
+    - **의도적으로 합치지 않은 것**: 웹 `ipmsRangeText.js` ↔ 서버 `rangeSyntax.js`(번들 경계 — `ipms2637.test.js` 가 대조) · `rangeStore` ↔
+      `scanStore` 데이터 모델(권한 축이 다르다 — vc 대역은 쓰기 범위·404, 에이전트 대역은 fleetOnly) · CSV 2종의 analyze(교체 단위·blocked 규칙이
+      다르다) · `scanDatacenter.LOCAL_AGENT` ↔ `scanStore.LOCAL`(순수 모듈 경계 — 테스트가 동일성 고정).
+    - ⚠ **정직 기록**: v2.638 보고의 '웹 2,480건 통과' 는 **틀렸다** — `ipamSubmenu2636.test.js:221` 이 그 커밋에서 깨져 있었다(`onSaved` prop 추가를
+      테스트가 못 받음). 이번에 고쳤다. 전량 테스트 결과를 보고할 때 **실패 수를 파일에서 grep 해** 적을 것(이번엔 `# fail 0` 을 파일로 확인).
+      `scanInfo.byAgent` 키 순서가 IP 순에서 적재 순으로 바뀌었다(화면은 entries 를 join — 표시 순서만). 실장비 엣지·범위 계정 화면은 목 스택으로만 봤다.
   - ⚠⚠ **IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다**
     (`web/src/views/tools/`{ipamPages.js·ipamDraft.js·useIpamDraft.js·IpamDraftBanner.jsx·IpamCsv.jsx·IpamScanLog.jsx·ipamCsvChunk.js·
     ipamCsvText.js·ipamScanLogText.js} + 서버 `ipam/`{scanLog.js·manageCsv.js·scanRangesCsv.js}, 사용자 요청 "IP scan 을 위한 입력/수정이

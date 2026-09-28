@@ -12,7 +12,7 @@ import { edgeUsersView } from './EdgeUserDeploy.jsx';
 import { vmCredRowsMatch } from './gpu-guest/VmCredManager.jsx';
 import { proxyListEmptyText } from './ProxySettings.jsx';
 import { v5SearchFootText } from '../version_5/V5Shell.jsx';
-import { ipScanAccept } from './tools/IpamSettings.jsx';
+import { ipScanAccept } from './tools/IpScanSettings.jsx'; // v2.639(U2): IpamSettings.jsx 분할
 import { detailServerOf, bmcLabel, serverVendorOf } from './tools/serverVendorText.js';
 import { perfPartialNote, perfPartialMark } from './tools/sanSwitchPorts.js';
 import { edgeConfigBadge } from './PortalBackup.jsx';
@@ -133,7 +133,7 @@ describe('WEB-08 — IP 스캔: 이전 에이전트 응답이 새 에이전트 �
     expect(ipScanAccept('A', 'B')).toBe(false);
     expect(ipScanAccept('B', 'B')).toBe(true);
     expect(ipScanAccept(null, 'B')).toBe(false);
-    const s = src('./tools/IpamSettings.jsx');
+    const s = src('./tools/IpScanSettings.jsx');
     // v2.636: 폼은 편집 초안 훅(d.load)으로 채운다 — 가드(응답 에이전트 == 지금 에이전트)는 그대로 앞에 있어야 한다.
     expect(s).toMatch(/if \(!ipScanAccept\(ag, agentRef\.current\)\) return;\s*if \(first\) \{ (?:setS|d\.load)\(r\.settings\); setSFor\(ag\); \}/);
     expect(s).toMatch(/if \(!ipScanAccept\(sFor, agent\)\)/);

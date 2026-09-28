@@ -106,7 +106,7 @@
 | `ipam-range-policies.json` | 설정 | 대역(subnet/range) 단위 IP 정책 저장소 — IP 단위 override(overrides.js)와 '평행'한 | ✅ | ✅ | ✅ | ipam/rangePolicies.js |
 | `ipam-scan-agents.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
 | `ipam-scan-history.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
-| `ipam-scan-log.json` | 설정 | IP 스캔 실행 로그(시작·종료·실패·건너뜀·엣지 보고·설정 변경 — 링버퍼, 손상이면 새로 시작). | ✅ |  | ✅ | ipam/scanLog.js |
+| `ipam-scan-log.json` | 설정 | IP 스캔 실행 로그(시작·종료·실패·건너뜀·엣지 보고·설정 변경 — 링버퍼, 손상이면 새로 시작). | ✅ | ✅ | ✅ | ipam/scanLog.js |
 | `ipam-scan-results.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
 | `ipam-scan-runs.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
 | `ipam-scan.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
@@ -193,7 +193,7 @@
 | `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 |  |  | ✅ | logs/db.js |
 | `vcenter-logs.json` | 설정 | vCenter 로그 보관 설정 — CONFIG_DIR/vcenter-logs.json. 보관 기간(retentionDays)을 여기서 지정. | ✅ | ✅ | ✅ | logs/settings.js |
 | `vcenter-order.json` | 설정 | vCenter display order — a user-defined ordering applied to every "vCenter | ✅ | ✅ | ✅ | vcenter/order.js |
-| `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, routes/publicApi.js 외 1 |
+| `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, ipam/scanDatacenterSource.js 외 2 |
 | `vm-clone.json` | 설정 | VM 복제(백업식) 잡 저장소(v2.299). | ✅ | ✅ | ✅ | vmclone/store.js |
 | `vm-track.db` | DB | VM 수량·데이터스토어 사용량 추이(변경분만 저장) |  |  | ✅ | vmtrack/db.js |
 | `vmperf` | 디렉터리 | 디렉터리 — vCenter별 VM 성능 DB(+ _index.json 역산 매핑) |  |  | ✅ | metrics/vmperfDb.js |

@@ -188,7 +188,7 @@ design-preview-svcmon2.html
 # 올라왔다. 실제로 v2.503 커밋에 섞여 들어가 amend 로 걷어낸 적이 있다(해당 파일들에는
 # AUTH_SECRET·초기 admin 비밀번호가 들어 있어 커밋되면 그대로 유출이다).
 # 매번 `rm -rf server/tmp` 를 기억하는 것에 의존하지 않는다.
-server/tmp/
+server/tmp*/
 
 # Claude Design 캔버스 씨딩 결과물(에디터 런타임 2.6MB 포함) — 소스는 *.dc.html + canvas.json
 Design/uiredesign/vmware-portal-ui-redesign.html

@@ -43,7 +43,9 @@ export function ipamRevKey() { return `s${settingsRev()}|a${annotationsRev()}|n$
 //   다음 스냅샷 세대(30초)를 기다리지 않고 대장이 다시 만들어진다. 범위 계정은 스캔 행을 받지 않으므로 넣지 않는다.
 //   vCenter 를 고른 조회(vcenterId)는 그 vCenter 의 DataCenter 할당도 넣는다(그 할당이 어떤 스캔 행이 보이는지를 정한다).
 const _dcKey = (snap, vcenterId, allowed) => (allowed ? '' : `|d${currentScanDatacenters(snap?.vcenters).sig}${vcenterId ? `@${datacenterOfVcenter(vcenterId)}` : ''}`);
-const _ipamKey = (snap, vcenterId, allowed = null) => `${snap?.generatedAt || ''}|${vcenterId || ''}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}${_dcKey(snap, vcenterId, allowed)}`;
+// v2.639(감사 S6): 리비전 조각은 ipamRevKey() 하나 — 예전에는 같은 `s|a|n|o|p` 를 여기서 다시 적었다(축을 더할 때 한쪽만 늘면 라우트 memo 와
+//   원장 캐시가 다른 것을 본다). 키 문자열 값은 그대로다(perf2619·ipamScope 가 이 키를 본다).
+const _ipamKey = (snap, vcenterId, allowed = null) => `${snap?.generatedAt || ''}|${vcenterId || ''}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|${ipamRevKey()}${_dcKey(snap, vcenterId, allowed)}`;
 
 // 자동 발견 출처(discovery)를 사용자 친화 reconcile 상태로 매핑.
 // vcenter=vCenter만 인식 · scan=스캔만 발견(수동) · both=양쪽 · manual=운영자 등록(자동발견 없음)

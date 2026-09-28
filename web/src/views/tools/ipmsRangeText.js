@@ -72,10 +72,25 @@ export function checkRangeSpec(spec, opt = {}) {
   return { ok: true, lo: n, hi: n, size: 1, kind: 'ip', warn: null };
 }
 
-/** 적용용 파서 — 판정을 통과한 줄만 {lo,hi}. 저장된 옛 값(검증 전 저장분)도 같은 규칙이다. */
-export function parseRangeSpec(spec) {
-  const r = checkRangeSpec(spec);
-  return r.ok ? { lo: r.lo, hi: r.hi } : null;
+/**
+ * v2.639(D1): 대역 정책 폼의 'IP 개수' 미리보기 — 서버 `rangePolicies.specToRange` 와 같은 뜻(CIDR 은 네트워크·브로드캐스트를
+ * 뺀다, /31·/32 는 전체, 범위·단일은 그대로, 뒤집힌 범위·형식 오류는 0). 예전 IpamNet 의 사본 `rangeSpecSize` 는
+ * `(an & 0xffffff00) + 끝옥텟` 에 `>>> 0` 이 없어 `192.168.1.1-50` 이 **음수(→ 0)** 가 되어 정책 폼이 저장을 잠갔다.
+ */
+export function policySpecSize(spec) {
+  const r = checkRangeSpec(spec, { reversed: 'error' });
+  if (!r.ok) return 0;
+  return r.kind === 'cidr' && r.size > 2 ? r.size - 2 : r.size;
+}
+
+/**
+ * v2.639(D8): 대역 입력칸의 쉼표를 줄바꿈으로. 서버(PUT vc-ranges·scan/settings 의 `split(/[\n,]/)`)는 `a/24, b/24` 한 줄을
+ * 받는데 웹 `checkRangeList` 는 줄 단위라 그 줄이 오류로 보였다. 판정을 바꾸지 않고(서버 대조 테스트) 편집기가 입력·저장 전에
+ * 이것으로 정규화한다 — 줄 번호가 textarea 의 줄과 계속 같다.
+ */
+export function normalizeRangeText(text) {
+  // 쉼표 뒤의 공백(`a/24, b/24`)을 줄 앞에 남기지 않는다 — 남기면 textarea 에 들여쓴 줄처럼 보인다(v2.639 Chromium 판독에서 발견).
+  return String(text ?? '').replace(/,/g, '\n').replace(/^[ \t]+/gm, '');
 }
 
 /**
@@ -106,19 +121,20 @@ export function checkRangeList(list, opt = {}) {
 
 /* ── 화면 문구(v2.637) ─────────────────────────────────────────────────────── */
 
-export const FIELD_LABEL = {
+const FIELD_LABEL = {
   global: '전체 무시 대역',
   vcenters: 'vCenter별 무시 대역',
   publicRanges: '공인 대역',
   privateRanges: '사설 대역',
   scanRanges: '스캔 대역',
+  ranges: '스캔 대역', // v2.639: PUT /admin/ipam/scan/settings 의 400 invalid 항목(field 'ranges')
 };
 
 /** 빈 줄을 뺀 정리본 — 초안(빈 줄 포함)과 서버 값(정리본)을 같은 기준으로 비교하려고 쓴다. */
 export const cleanLines = (list) => (Array.isArray(list) ? list : String(list ?? '').split(/\r?\n/)).map((x) => String(x ?? '').trim()).filter(Boolean);
 
 /** 설정 객체 정리본(무시·분류 목록 + vCenter별) — '실제로 바뀐 것이 있나' 판정용. */
-export function normIpmsSettings(s) {
+function normIpmsSettings(s) {
   if (!s || typeof s !== 'object') return null;
   const vcenters = {};
   for (const [k, v] of Object.entries(s.vcenters || {})) { const c = cleanLines(v); if (c.length) vcenters[k] = c; }
