@@ -38,8 +38,8 @@
  *  - 첫 관측 이전 구간은 화면이 소급 표시하지 않는다(조회 라우트가 `firstTs` 를 함께 준다).
  */
 
-import { classifySensor, DEFAULT_MAX_AGE_MS } from './roomTemp.js';
-import { getSensorSeries } from './sensorStore.js';
+import { classifySensor, DEFAULT_MAX_AGE_MS, sampleMaxAgeMs } from './roomTemp.js';
+import { getSensorSeries, sensorPollCycle } from './sensorStore.js';
 import { analysisServersWithRemote } from '../insights/analysisServers.js'; // v2.579: ARCH-04
 
 /** 켜짐/상세 여부 — 환경변수로만 바꾼다(현장이 저장량을 알고 결정해야 한다). */
@@ -78,12 +78,13 @@ export function serverTempKinds(latest) {
  * 표본이 쓸 수 있는 것인가(순수). 반환은 사유 문자열 또는 null(통과).
  * `maxAgeMs <= 0` 이면 나이 검사를 하지 않는다(호출부가 명시적으로 끈 경우).
  */
-export function sampleStaleReason(latest, { now = Date.now(), maxAgeMs = DEFAULT_MAX_AGE_MS } = {}) {
+export function sampleStaleReason(latest, { now = Date.now(), maxAgeMs = DEFAULT_MAX_AGE_MS, remote = false, localCycle = null } = {}) {
   if (!latest || !latest.temps || !Object.keys(latest.temps).length) return 'no-sensors';
   if (maxAgeMs <= 0) return null;
   const at = Number(latest.t);
-  if (!Number.isFinite(at)) return 'no-timestamp';
-  if (now - at > maxAgeMs) return 'stale';
+  if (latest.t == null || !Number.isFinite(at)) return 'no-timestamp';
+  // v2.634: 경계는 그 표본을 만든 폴러의 주기에 맞춘다(roomTemp.effectiveMaxAgeMs) — 법인 전산실 온도와 같은 판정.
+  if (now - at > sampleMaxAgeMs(maxAgeMs, latest, { remote, localCycle })) return 'stale';
   return null;
 }
 
@@ -99,6 +100,7 @@ export function sampleStaleReason(latest, { now = Date.now(), maxAgeMs = DEFAULT
 export function buildServerTempRows(servers, {
   now = Date.now(), maxAgeMs = DEFAULT_MAX_AGE_MS, detail = TEMP_SERIES_DETAIL,
   latestOf = (s) => (s.remote ? s.sensors : getSensorSeries(s.id).latest),
+  localCycle = sensorPollCycle(now),
 } = {}) {
   const rows = [];
   const skipped = { noSensors: 0, stale: 0, noTimestamp: 0 };
@@ -108,7 +110,7 @@ export function buildServerTempRows(servers, {
     if (!id) continue;
     let latest = null;
     try { latest = latestOf(s); } catch { latest = null; }
-    const bad = sampleStaleReason(latest, { now, maxAgeMs });
+    const bad = sampleStaleReason(latest, { now, maxAgeMs, remote: !!s.remote, localCycle });
     if (bad === 'no-sensors') { skipped.noSensors += 1; continue; }
     if (bad === 'no-timestamp') { skipped.noTimestamp += 1; continue; }
     if (bad === 'stale') { skipped.stale += 1; continue; }

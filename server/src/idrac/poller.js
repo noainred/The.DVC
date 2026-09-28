@@ -9,7 +9,7 @@ import { config } from '../config.js';
 import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 import { loadRegistry, correctHpeServiceTag } from './registry.js';
 import { fetchPower, fetchInventory, fetchSensors } from './redfish.js';
-import { pushSensorSample } from './sensorStore.js';
+import { pushSensorSample, setSensorPollCycle, markSensorPollStart } from './sensorStore.js';
 import { fetchOmeDevices } from './ome.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(예전 ome.eachLimited 와 같은 격리 의미)
 import { setOmeDevices, dbKey } from './omeCache.js';
@@ -85,6 +85,8 @@ const INVENTORY_MAX_AGE_MS = 30 * 60_000;
 let timer = null;
 let lastRun = null; // { at, ok, failed, results: [{id, watts?, devices?, error?}] }
 let running = false; // 재진입 방지(이전 폴이 끝나기 전 다음 틱이 겹쳐 도는 것 차단)
+let _runningSince = null; // v2.634: 진행 중인 주기의 시작 시각
+let _lastDurationMs = null; // v2.634: 직전 주기 소요
 let pruneTick = 0; // retention prune 스로틀(10틱마다 1회)
 const BUSY = Symbol('idrac-poll-busy'); // v2.591(감사 P1): 재진입 가드에 막혔다는 표지(수동 응답이 말하게)
 
@@ -95,6 +97,11 @@ async function pollOnce({ manual = false } = {}) {
     return await withJob('idrac.poll', () => pollOnceInner({ manual }));
   } finally {
     running = false;
+    // 주기가 도중에 던졌으면 끝을 알리지 못했다 — 경과를 소요로 남겨 '영원히 도는 주기' 로 보이지 않게 한다.
+    if (_runningSince != null) {
+      try { setSensorPollCycle({ durationMs: Date.now() - _runningSince, intervalMs: config.idrac.pollIntervalMs }); } catch { /* */ }
+    }
+    _runningSince = null;
   }
 }
 
@@ -126,7 +133,13 @@ async function pollOnceInner({ manual = false } = {}) {
   const notPolled = registry.filter((s) => !servers.includes(s)).map((s) => ({ id: s.id, name: s.name, reason: skipReason(s) }));
   if (!servers.length) { lastRun = { at: Date.now(), ok: 0, failed: 0, results: [], notPolled }; return; }
   const db = await getDb();
+  // v2.634: ts 는 **주기 시작 시각**이다(prune·lastRun.startedAt 용). 표본 시각에는 쓰지 않는다 — 한 주기가
+  //   길어지면(대상 980대·불통 iDRAC 다수) 주기 시작 시각으로 찍힌 표본이 전부 '15분 이상 미갱신' 으로 보여
+  //   법인 전산실 온도가 통째로 비었다(2026-09-28 사용자 신고 0/980). 표본은 그 서버를 **실제로 읽은 시각**이다
+  //   (v2.550.3 bmusage 와 같은 규약).
   const ts = Date.now();
+  _runningSince = ts;
+  markSensorPollStart(ts);
   const results = [];
   const samples = []; // 전력 샘플을 모아 폴 종료 후 단일 트랜잭션으로 적재(서버 수만큼 fsync 방지).
   // 동시성 상한 — 무제한 Promise.all은 수백 대에 동시 TLS를 열어 CPU 스파이크/소켓 고갈.
@@ -144,9 +157,10 @@ async function pollOnceInner({ manual = false } = {}) {
       if (s.type === 'ome') {
         // One OME -> many devices. Persist a sample per device + cache for lookups.
         const { devices, usedMetricService, count } = await fetchOmeDevices(s);
+        const readAt = Date.now(); // v2.634: 이 장비를 실제로 읽은 시각
         let measured = 0;
         for (const d of devices) {
-          if (d.watts != null) { samples.push({ serverId: dbKey(s.id, d), watts: d.watts, ts }); measured++; }
+          if (d.watts != null) { samples.push({ serverId: dbKey(s.id, d), watts: d.watts, ts: readAt }); measured++; }
         }
         setOmeDevices(s.id, devices, { usedMetricService });
         results.push({ id: s.id, name: s.name, type: 'ome', devices: count, measured, metric: usedMetricService ? 'powermanager' : 'inventory' });
@@ -157,9 +171,10 @@ async function pollOnceInner({ manual = false } = {}) {
         // 종속될 이유는 없다. 실패 사유는 results 에 남겨 '지금 폴' 응답에서 보이게 한다.
         let powerErr = null;
         const r = await fetchPower(s).catch((e) => { powerErr = e; return null; });
+        const powerAt = Date.now(); // v2.634: 이 서버의 전력을 실제로 읽은 시각
         // v2.602(LEFT2602-04 후속): 섀시 일부의 Power 조회가 실패한 **부분 합**은 적재하지 않는다 — 전력 대시보드·
         //   시간당 롤업이 그것을 그 서버의 전체 전력으로 그린다(오류 없이 틀린 값). 사실은 results·lastRun 에 밝힌다.
-        if (r && r.watts != null && !r.partial) samples.push({ serverId: s.id, watts: r.watts, ts });
+        if (r && r.watts != null && !r.partial) samples.push({ serverId: s.id, watts: r.watts, ts: powerAt });
         // v2.590: 자격증명 거부면 **이번 주기의 나머지(센서·인벤토리)도 시도하지 않고** 정지를 기록한다 —
         // 같은 계정이라 결과가 같고, 폴백 3단(Basic·Digest·세션)이 요청마다 실패 인증을 더한다.
         if (powerErr && isIdracAuthError(powerErr)) {
@@ -176,6 +191,7 @@ async function pollOnceInner({ manual = false } = {}) {
         let sensorErr = null;
         try {
           const sn = await fetchSensors(s);
+          const sensorAt = Date.now(); // v2.634: 이 서버의 센서를 실제로 읽은 시각
           // v2.590(감사 F7): Thermal 을 하나도 못 읽었으면 **'읽었고 0개' 가 아니다** — 실패로 기록하고
           // 팬 컬렉션을 'failed' 로 올린다(파트 장애가 그 종류의 열린 장애를 닫지 않고 보류한다 — v2.548 F1).
           if (sn.thermalOk === false) sensorErr = new Error(sn.error || 'Thermal 을 읽지 못했습니다');
@@ -183,7 +199,7 @@ async function pollOnceInner({ manual = false } = {}) {
           // 빈 표본은 적재하지 않는다 — 온도도 CPU 도 없는 점을 매 분 쌓으면 센서 탭이 'N샘플' 을 말하며
           // 정상처럼 보인다. CPU(텔레메트리)만 읽힌 경우는 그 값만 싣는다(온도는 비어 있는 채로 — 지어내지 않는다).
           if (sn.thermalOk !== false || sn.cpuUsagePct != null) {
-            pushSensorSample(s.id, { t: ts, cpuUsagePct: sn.cpuUsagePct, temps: sn.thermalOk === false ? [] : sn.temps, fans: (sensorFans || []).map((f) => ({ name: f.name, rpm: f.rpm })) });
+            pushSensorSample(s.id, { t: sensorAt, cpuUsagePct: sn.cpuUsagePct, temps: sn.thermalOk === false ? [] : sn.temps, fans: (sensorFans || []).map((f) => ({ name: f.name, rpm: f.rpm })) });
           }
         } catch (e) {
           // v2.493: 조용히 삼키지 않는다 — 센서만 실패하는 상황(Thermal 미지원 등)을 진단할 수
@@ -246,7 +262,16 @@ async function pollOnceInner({ manual = false } = {}) {
   const failed = results.filter((r) => r.error).length;
   // ok 는 '성공' 만 센다 — 정지로 건너뛴 서버(authStopped·error 없음)를 성공으로 세면 거짓이다(v2.590).
   const okCount = results.filter((r) => !r.error && !r.authStopped).length;
-  lastRun = { at: ts, ok: okCount, failed, results, notPolled, authStopped: results.filter((r) => r.authStopped).length, authSkipped, manual,
+  const finishedAt = Date.now();
+  const durationMs = finishedAt - ts;
+  _runningSince = null;
+  _lastDurationMs = durationMs;
+  // 신선도 판정(법인 전산실 온도 등)이 '주기가 얼마나 걸리는가' 를 보고 경계를 넓힐 수 있게 알린다.
+  setSensorPollCycle({ durationMs, intervalMs: config.idrac.pollIntervalMs, at: finishedAt });
+  if (durationMs > 3 * config.idrac.pollIntervalMs) {
+    console.warn(`[idrac] poll: 한 주기가 ${Math.round(durationMs / 1000)}초 걸렸습니다(대상 ${servers.length}대 · 주기 ${Math.round(config.idrac.pollIntervalMs / 1000)}초 · 동시 ${config.idrac.pollConcurrency}) — 그동안 다음 주기는 건너뜁니다`);
+  }
+  lastRun = { at: ts, startedAt: ts, finishedAt, durationMs, servers: servers.length, ok: okCount, failed, results, notPolled, authStopped: results.filter((r) => r.authStopped).length, authSkipped, manual,
     powerPartial: results.filter((r) => r.powerPartial).length };   // v2.602: 부분 합이라 적재하지 않은 서버 수
   if (lastRun.powerPartial) console.warn(`[idrac] poll: 섀시 일부의 Power 조회 실패로 부분 합이 된 서버 ${lastRun.powerPartial}대 — 전력 적재를 건너뛰었습니다`);
   if (failed) console.warn(`[idrac] poll: ${okCount}/${results.length} 성공${authSkipped ? ` · 인증 실패 정지로 건너뜀 ${authSkipped}` : ''}`);
@@ -264,6 +289,10 @@ export function getPollerStatus() {
     intervalMs: config.idrac.pollIntervalMs,
     servers: registry.length,
     lastRun,
+    // v2.634: 지금 도는 주기가 언제 시작했는지(없으면 null) · 직전 주기 소요 — 주기가 간격을 넘기면 다음 틱은 건너뛴다.
+    runningSince: _runningSince,
+    runningForMs: _runningSince ? Date.now() - _runningSince : null,
+    lastDurationMs: _lastDurationMs,
     // v2.590: 인증 실패로 주기 수집이 멈춘 서버 — 재시작 뒤에도(파일) 화면이 말하게 매번 다시 본다.
     authStops: [...stops.entries()].map(([id, v]) => ({ id, name: registry.find((x) => String(x.id) === id)?.name || id, ...v })),
   };

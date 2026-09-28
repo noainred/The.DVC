@@ -183,3 +183,52 @@ export function trendNotes(d) {
   if (cut) out.push(cut);
   return out;
 }
+
+/*
+ * v2.634 — '미갱신 서버' 가 **왜** 빠졌는지를 말한다(2026-09-28 사용자 신고 '측정 서버 0/980 · 미갱신 975').
+ * 예전 카드는 '15분 이상 갱신 없음' 한 줄뿐이라 '센서가 고장났다' 와 '폴 한 주기가 15분보다 오래 걸린다' 를
+ * 가를 수 없었다. 서버가 주는 값(staleMs·staleMsMax·pollCycle·totals.staleNewestAgeMs)만 쓴다 — 숫자를 박지 않는다.
+ */
+export function spanText(ms) {
+  const n = ms == null || ms === '' ? NaN : Number(ms);
+  if (!Number.isFinite(n) || n < 0) return null;
+  if (n < 60_000) return `${Math.max(1, Math.round(n / 1000))}초`;
+  if (n < 3_600_000) return `${Math.round(n / 60_000)}분`;
+  return `${Math.round((n / 3_600_000) * 10) / 10}시간`;
+}
+
+/** 미갱신 카드의 짧은 설명. */
+export function staleCardMeta(data) {
+  const base = spanText(data?.staleMs);
+  const max = Number(data?.staleMsMax);
+  const widened = Number.isFinite(max) && max > Number(data?.staleMs);
+  const parts = [widened
+    ? `경계 ${base}(폴 주기가 길어 최대 ${spanText(max)}까지 넓힘) 넘게 갱신 없음 — 집계 제외`
+    : `${base ?? '—'} 이상 갱신 없음 — 집계 제외(동결값 방지)`];
+  const newest = spanText(data?.totals?.staleNewestAgeMs);
+  if (newest) parts.push(`빠진 것 중 가장 최근 표본 ${newest} 전`);
+  return parts.join(' · ');
+}
+
+/**
+ * 폴 주기·전량 제외 안내(배너 한 줄) — 없으면 null.
+ * 원인을 단정하지 않는다: 측정 0대면 '폴러가 멈췄다' 와 '한 주기가 매우 오래 걸린다' 두 가능성을 함께 말한다.
+ */
+export function staleBannerText(data) {
+  const t = data?.totals || {};
+  const pc = data?.pollCycle || null;
+  const itv = Number(pc?.intervalMs);
+  const dur = Number(pc?.durationMs);
+  const out = [];
+  if (pc && Number.isFinite(dur) && Number.isFinite(itv) && itv > 0 && dur > 3 * itv) {
+    const running = Number(pc.runningForMs);
+    const widened = Number(data?.staleMsMax) > Number(data?.staleMs);
+    // 넓힌 사실은 서버가 실제로 넓혔을 때만 말한다 — 전부 엣지 위임 서버(구버전 엣지)면 이 포탈의 주기로 넓히지 않는다.
+    out.push(`이 포탈의 iDRAC 폴 한 주기가 ${spanText(dur)} 걸리고 있습니다(간격 ${spanText(itv)}${Number.isFinite(running) && running > 0 ? ` · 지금 주기 ${spanText(running)}째` : ''}) — 서버마다 표본이 그만큼 늦게 옵니다${widened ? `. 신선도 경계를 최대 ${spanText(data.staleMsMax)}까지 넓혔습니다.` : '.'}`);
+  }
+  if ((t.withData ?? 0) === 0 && (t.stale ?? 0) > 0) {
+    const newest = spanText(t.staleNewestAgeMs);
+    out.push(`측정 서버가 0대입니다 — 온도를 받은 서버 ${t.stale}대가 모두 경계를 넘었습니다${newest ? `(가장 최근 표본 ${newest} 전)` : ''}. iDRAC 폴러가 멈췄거나 한 주기가 경계보다 오래 걸리는 경우입니다 — 특수 기능 › 다빈치 서비스 점검의 ‘iDRAC 폴 주기’ 행과 수집 서버(엣지) 상태를 확인하세요.`);
+  }
+  return out.length ? out.join(' ') : null;
+}

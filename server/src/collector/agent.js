@@ -13,7 +13,7 @@ import { getPollerStatus } from '../idrac/poller.js';
 import { allOmeDevices } from '../idrac/omeCache.js';
 import { loadRegistry as loadIdracRegistry, isHpeEntry } from '../idrac/registry.js';
 import { getInventory } from '../idrac/invCache.js';
-import { getSensorSeries } from '../idrac/sensorStore.js';
+import { getSensorSeries, sensorPollCycle } from '../idrac/sensorStore.js';
 
 // 최신 온도 센서(콤팩트) — 중앙 '법인별 온도'가 위임 법인(엣지 등록) 서버도 보이게 실어 보낸다.
 // 센서 이름→℃ 맵 + 관측 시각만(시계열 전체는 안 보냄, 센서 수 상한 64).
@@ -21,7 +21,14 @@ function compactSensors(serverId) {
   const latest = getSensorSeries(serverId).latest;
   const temps = latest?.temps;
   if (!temps || !Object.keys(temps).length) return null;
-  return { t: latest.t, temps: Object.fromEntries(Object.entries(temps).slice(0, 64)) };
+  // v2.634: 엣지 폴러의 주기 소요·간격을 함께 싣는다 — 중앙이 그 엣지 표본의 신선도 경계를 맞출 수 있게
+  //   (roomTemp.effectiveMaxAgeMs). 구버전 중앙은 모르는 필드라 무시한다.
+  const cyc = sensorPollCycle();
+  return {
+    t: latest.t, temps: Object.fromEntries(Object.entries(temps).slice(0, 64)),
+    ...(cyc?.durationMs != null ? { cycleMs: Math.round(cyc.durationMs) } : {}),
+    ...(cyc?.intervalMs != null ? { intervalMs: cyc.intervalMs } : {}),
+  };
 }
 
 // 서버 분석용 콤팩트 인벤토리(중앙 '서버 분석' 4개 탭이 쓰는 필드만; 자격증명·잡정보 제외).

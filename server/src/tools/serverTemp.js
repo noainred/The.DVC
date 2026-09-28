@@ -27,7 +27,7 @@
  * ('5분 평균' 이라 적어 놓고 20분을 평균내면 그것도 거짓이므로).
  */
 
-import { classifySensor } from '../idrac/roomTemp.js';
+import { classifySensor, sampleMaxAgeMs } from '../idrac/roomTemp.js';
 import { addressMatcher, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
 
 const r1 = (x) => (x == null || !Number.isFinite(x) ? null : Number(x.toFixed(1)));
@@ -157,7 +157,7 @@ export function splitAggregate(rows) {
  */
 export function buildServerTempReport({
   idracServers = [], hosts = [], latestOf = () => null,
-  dcName = (id) => id, now = Date.now(), maxAgeMs = 15 * 60_000,
+  dcName = (id) => id, now = Date.now(), maxAgeMs = 15 * 60_000, localCycle = null,
 } = {}) {
   const tagMap = hostsByServiceTag(hosts);
   const rows = [];
@@ -176,7 +176,8 @@ export function buildServerTempReport({
     if (sum.max == null) { counts.noSensors += 1; continue; }
     if (host) usedHostIds.add(host.id);
     const at = Number(latest?.t);
-    const stale = maxAgeMs > 0 && Number.isFinite(at) && now - at > maxAgeMs;
+    // v2.634: 경계는 그 표본을 만든 폴러의 주기에 맞춘다(roomTemp.effectiveMaxAgeMs — 법인 전산실 온도와 같은 판정).
+    const stale = maxAgeMs > 0 && Number.isFinite(at) && now - at > sampleMaxAgeMs(maxAgeMs, latest, { remote: !!s.remote, localCycle });
     if (stale) counts.stale += 1;
     counts.idrac += 1;
     rows.push({

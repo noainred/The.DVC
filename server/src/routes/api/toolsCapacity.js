@@ -25,7 +25,7 @@ import { getMetricsDb } from '../../metrics/db.js';
 import { buildServerTempReport, avgWindowMs, avgWindowLabel, sparkMetricFor, sparkMetricFallback, maskIdracTempRows } from '../../tools/serverTemp.js';
 import { isAdminReq, resolveMaskedToken, MASK_TOKEN_PREFIX } from '../../auth/addressMask.js';
 import { analysisServersWithRemote } from '../admin/shared.js';
-import { getSensorSeries } from '../../idrac/sensorStore.js';
+import { getSensorSeries, sensorPollCycle } from '../../idrac/sensorStore.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { loadMetricsSettings } from '../../metrics/settings.js';
 import { metricsSamplerStatus, samplerWithheldOf } from '../../metrics/sampler.js'; // v2.628(LEFT2628-01): 최근 샘플의 적재 제외·부분 합을 추이 응답에 싣는다
@@ -1279,6 +1279,7 @@ api.get('/tools/esxi-temp', requirePerm('tools'), (req, res) => memoJson(req, re
       latestOf: (s) => (s.remote ? s.sensors : getSensorSeries(s.id).latest),
       dcName: (id) => dcNames.get(String(id)) || id,
       maxAgeMs: DEFAULT_MAX_AGE_MS,
+      localCycle: sensorPollCycle(),   // v2.634: 폴 주기가 길면 신선도 경계를 넓힌다
     });
     idrac = { enabled: true, ...rep, reason: rep.counts.idrac ? '' : 'iDRAC 센서를 보고한 서버가 없습니다(등록·자격증명·수집 주기를 확인하세요).' };
     // 데모(mock): iDRAC 등록이 없어 물리 서버가 0 이면 화면의 물리/가상화 분리를 확인할 수 없다.
