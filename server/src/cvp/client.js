@@ -23,6 +23,8 @@
 import { Agent } from 'undici';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
 import { readTextCapped } from '../util/readCapped.js';
+import { readBodyPrefix } from '../util/readPrefix.js';
+import { capStr } from '../util/capStr.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { poolSettled } from '../util/pool.js';
 import { pushAll } from '../util/pushAll.js';
@@ -36,6 +38,14 @@ export const BODY_MAX_BYTES = Math.max(1_048_576, Number(process.env.CVP_BODY_MA
 const DEVICE_CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.CVP_DEVICE_CONCURRENCY) || 6));
 const FAIL_STREAK_STOP = 3;
 const MIN_SLICE_MS = 5_000;
+/**
+ * v2.640 — 원문 표본(samples). 실장비 CVP 응답을 본 적이 없으므로(머리말) 첫 실수집에서 후보를 좁힐 **근거**를 남긴다:
+ *   종류마다 처음 성공한 응답의 앞 SAMPLE_HEAD_CHARS 자, 성공이 없으면 마지막 실패 응답의 앞 SAMPLE_FAIL_BYTES 바이트.
+ *   실패 본문도 읽는 이유 — 404/403 의 오류 JSON(`errorCode`·`errorMessage`)이 '경로가 없다' 와 'RBAC 거부' 를 가르는 근거다
+ *   (예전에는 cancel 만 해서 상태 코드 하나만 남았다). 본문 앞부분만 읽고 스트림을 끊는다(readBodyPrefix — 상한을 넘어도 던지지 않는다).
+ */
+export const SAMPLE_HEAD_CHARS = 4096;
+export const SAMPLE_FAIL_BYTES = 2048;
 const RE_HEADER = /^[\t\x20-\x7e]*$/; // eslint-disable-line no-control-regex
 
 /** 경로 후보(추정 — docs/CVP.md). `{serial}` 은 장비 키로 치환된다. */
@@ -142,9 +152,14 @@ export async function openSession(server, { signal, leftMs = null } = {}) {
         return { ok: false, status: 0, reason: `연결 실패: ${e?.cause?.code || e?.message || e}` };
       }
       if (isRedirect(res.status)) { try { await res.body?.cancel?.(); } catch { /* */ } return { ok: false, status: res.status, reason: redirectReason(res, base), redirect: true }; }
-      if (!res.ok) { try { await res.body?.cancel?.(); } catch { /* */ } return { ok: false, status: res.status, reason: `HTTP ${res.status}` }; }
+      if (!res.ok) {
+        // v2.640: 오류 본문의 앞부분(SAMPLE_FAIL_BYTES)만 읽는다 — 진단 근거. 못 읽으면 ''(표본이 없을 뿐 판정은 상태 코드로 한다).
+        let head = '';
+        try { head = capStr((await readBodyPrefix(res, SAMPLE_FAIL_BYTES)).text, SAMPLE_HEAD_CHARS); } catch { head = ''; }
+        return { ok: false, status: res.status, reason: `HTTP ${res.status}`, head };
+      }
       try { return { ok: true, status: res.status, text: await readTextCapped(res, BODY_MAX_BYTES, '응답') }; }
-      catch (e) { return { ok: false, status: res.status, reason: e?.message || String(e), tooLarge: true }; }
+      catch (e) { return { ok: false, status: res.status, reason: e?.message || String(e), tooLarge: true, head: '' }; }
     },
     async logout() {
       if (!loggedIn) return;
@@ -175,12 +190,25 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
   const left = () => budgetMs - (now() - t0);
   const usedPaths = {}; const missing = {}; const seenFields = {};
   const truncated = { devices: 0, ports: 0, peers: 0, notTried: 0, aborted: 0 };
+  const samples = {};
+  /*
+   * v2.640: 종류마다 표본 1건 — **처음 성공한** 응답이 이기고, 성공이 없는 동안은 **마지막 실패**로 덮는다. 장비별 종류는 어느
+   *   장비의 것이든 처음 성공한 1건이다(전 장비를 담으면 크기가 장비 수 × 4KB — 상태 push 에 실리는 값이다). `device` 로 어느
+   *   장비의 응답인지 밝힌다. 실패 표본의 bytes 는 '읽은 앞부분' 길이다(전체 길이는 읽지 않았으므로 모른다).
+   */
+  const noteSample = (kind, p, r, device = '') => {
+    const cur = samples[kind];
+    if (cur && cur.ok) return;
+    if (r.ok) samples[kind] = { path: p, at: now(), status: r.status, ok: true, bytes: Buffer.byteLength(r.text), head: capStr(r.text, SAMPLE_HEAD_CHARS), ...(device ? { device } : {}) };
+    else samples[kind] = { path: p, at: now(), status: r.status, ok: false, bytes: Buffer.byteLength(r.head || ''), head: capStr(r.head || '', SAMPLE_HEAD_CHARS), reason: capStr(r.reason, 300), ...(device ? { device } : {}) };
+  };
   const sess = await openSession(server, { signal, leftMs: left });
   try {
     // ① 인벤토리 — 이것이 없으면 아무것도 없다.
     let inv = null; let invReason = '';
     for (const p of ordered('inventory', prefer)) {
       const r = await sess.get(p);
+      noteSample('inventory', p, r);
       if (!r.ok) {
         if ((r.status === 401 || r.status === 403) && server.authMode !== 'password') throw new CvpAuthError(`인증 실패(${r.status}) — 서비스 계정 토큰을 확인하세요`);
         invReason = `${p}: ${r.reason}`;
@@ -194,7 +222,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
     }
     if (!inv) {
       missing.inventory = invReason || '후보 경로가 없습니다';
-      return { ok: false, error: `장비 인벤토리를 읽지 못했습니다 — ${missing.inventory}`, devices: [], usedPaths, missing, seenFields, truncated, inventoryComplete: false, cvpVersion: '' };
+      return { ok: false, error: `장비 인벤토리를 읽지 못했습니다 — ${missing.inventory}`, devices: [], usedPaths, missing, seenFields, truncated, samples, inventoryComplete: false, cvpVersion: '' };
     }
     truncated.devices = inv.truncated;
 
@@ -202,6 +230,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
     let cvpVersion = '';
     for (const p of ordered('cvpVersion', prefer)) {
       const r = await sess.get(p);
+      noteSample('cvpVersion', p, r);
       if (!r.ok) { missing.cvpVersion = `${p}: ${r.reason}`; continue; }
       const { values } = P.splitJsonStream(r.text);
       const v = values[0] && typeof values[0] === 'object' ? String(values[0].version || values[0].appVersion || '') : '';
@@ -218,6 +247,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       let lastReason = '';
       for (const tpl of ordered(kind, prefer)) {
         const r = await sess.get(fill(tpl, serial));
+        noteSample(kind, tpl, r, serial);
         if (!r.ok) { lastReason = r.status === 403 ? 'forbidden(403)' : r.status === 404 ? '없음(404)' : r.reason; continue; }
         const out = parse(r.text);
         if (out && out.value != null) {
@@ -279,7 +309,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
     }
     if (truncated.notTried) missing.budget = `시간 예산이 모자라 ${truncated.notTried}대는 이번 주기에 조회하지 않았습니다`;
     return {
-      ok: true, error: null, devices, usedPaths, missing, seenFields, truncated, cvpVersion,
+      ok: true, error: null, devices, usedPaths, missing, seenFields, truncated, samples, cvpVersion,
       inventoryComplete: inv.truncated === 0,
     };
   } finally { await sess.logout(); }
@@ -287,26 +317,44 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
 
 /**
  * 연결 테스트 — 로그인 + 인벤토리만(장비별 조회 없음). 스냅샷·DB 에 저장하지 않는다.
+ * v2.640: 성공이면 `sample`(읽은 인벤토리 원문 앞부분) + `cvpVersion`(getCvpInfo 후보 1회 — 실패는 무시), 실패면 마지막 응답의
+ *   `sample`(상태·오류 본문 앞부분)을 함께 돌려준다 — 등록 화면에서 '어떤 응답이 왔는가' 를 바로 보게(경로 후보를 좁힐 근거).
  */
 export async function testCvp(server, { signal } = {}) {
   const t0 = Date.now();
+  let last = null; // 마지막 응답 표본(성공·실패 무관) — 실패 사유 옆에 붙인다
+  const sampleOf = (p, r) => (r.ok
+    ? { path: p, status: r.status, ok: true, bytes: Buffer.byteLength(r.text), head: capStr(r.text, SAMPLE_HEAD_CHARS) }
+    : { path: p, status: r.status, ok: false, bytes: Buffer.byteLength(r.head || ''), head: capStr(r.head || '', SAMPLE_HEAD_CHARS), reason: capStr(r.reason, 300) });
   try {
     const sess = await openSession(server, { signal });
     try {
       let redirected = '';
       for (const p of CANDIDATES.inventory) {
         const r = await sess.get(p);
+        last = sampleOf(p, r);
         if (!r.ok) {
           if ((r.status === 401 || r.status === 403) && server.authMode !== 'password') throw new CvpAuthError(`인증 실패(${r.status}) — 서비스 계정 토큰을 확인하세요`);
           if (r.redirect && !redirected) redirected = r.reason; // v2.612 SEC2612-02: 리다이렉트는 사유를 그대로 보인다
           continue;
         }
         const x = P.parseInventory(r.text);
-        if (x.devices) return { ok: true, ms: Date.now() - t0, deviceCount: x.devices.length, usedPath: p, seenFields: x.keys };
+        if (x.devices) {
+          let cvpVersion = '';
+          try {
+            const vp = CANDIDATES.cvpVersion[0];
+            const vr = vp ? await sess.get(vp) : null;
+            if (vr?.ok) {
+              const { values } = P.splitJsonStream(vr.text);
+              cvpVersion = values[0] && typeof values[0] === 'object' ? capStr(values[0].version || values[0].appVersion || '', 64) : '';
+            }
+          } catch { cvpVersion = ''; } // 버전은 참고값 — 실패해도 테스트 결과를 바꾸지 않는다
+          return { ok: true, ms: Date.now() - t0, deviceCount: x.devices.length, usedPath: p, seenFields: x.keys, sample: last, cvpVersion };
+        }
       }
-      return { ok: false, ms: Date.now() - t0, reason: redirected || '로그인은 됐지만 장비 인벤토리 경로를 읽지 못했습니다(후보 경로 전부 실패)' };
+      return { ok: false, ms: Date.now() - t0, reason: redirected || '로그인은 됐지만 장비 인벤토리 경로를 읽지 못했습니다(후보 경로 전부 실패)', ...(last ? { sample: last } : {}) };
     } finally { await sess.logout(); }
   } catch (e) {
-    return { ok: false, ms: Date.now() - t0, reason: e?.message || String(e), authFailed: !!e?.authFailed };
+    return { ok: false, ms: Date.now() - t0, reason: e?.message || String(e), authFailed: !!e?.authFailed, ...(last ? { sample: last } : {}) };
   }
 }

@@ -9,6 +9,8 @@
  *  - port_sample   원시(지표를 열로 — v2.550 bmusage 규약) · **링크가 올라온 포트만** · 기본 7일.
  *                  UNIQUE(agent,cvp_id,device_key,port,ts) — 엣지 재전송 중복을 걸러 롤업 이중 계수를 막는다(INSERT OR IGNORE + changes).
  *  - port_daily    일 롤업(평균 = 합/표본수 · 최대) · 기본 730일. **null 은 평균의 분모에 넣지 않는다.** 하루 경계는 util/dayKey.
+ *  - cvp_fault_state (PK agent,cvp_id,device_key,fault_key) — **지금 열린 장애**(v2.640, 판정은 faults.js). 파트 수만큼만 존재.
+ *  - cvp_fault_event  전이만 append(open/change/close) · 보존은 dailyRetentionDays · `at` 단독 인덱스 + (agent,cvp_id,device_key,at).
  *  agent '' = 이 노드가 직접 수집한 행. 중앙은 엣지 push 를 인증된 엣지 이름으로 적재한다.
  *
  * 규약: 진행 중인 open 공유(_opening — v2.580 BUG-A) · 잠금은 래치하지 않고 재시도(createLockRetry — v2.599) ·
@@ -32,7 +34,7 @@ const FILE = () => path.join(config.dbDir || config.configDir, 'cvp.db');
 let _db = null;       // { conn, st } | 'unavailable'
 let _opening = null;
 let _counts = null;   // { at, device, port, sample, daily }
-const pruneFlight = createPruneFlight({ covers: (a, b) => a.raw <= b.raw && a.daily <= b.daily });
+const pruneFlight = createPruneFlight({ covers: (a, b) => a.raw <= b.raw && a.daily <= b.daily && (a.ev ?? 0) <= (b.ev ?? 0) });
 
 async function open() {
   if (_db) return _db === 'unavailable' ? null : _db;
@@ -74,7 +76,19 @@ async function openInner() {
         in_err_sum INTEGER, out_err_sum INTEGER,
         in_err_n INTEGER NOT NULL DEFAULT 0, out_err_n INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (agent, cvp_id, device_key, port, day));
-      CREATE INDEX IF NOT EXISTS idx_pd_day ON port_daily (day);`);
+      CREATE INDEX IF NOT EXISTS idx_pd_day ON port_daily (day);
+      CREATE TABLE IF NOT EXISTS cvp_fault_state (
+        agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, fault_key TEXT NOT NULL,
+        kind TEXT NOT NULL, label TEXT, detail TEXT, state TEXT NOT NULL,
+        first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, hold_reason TEXT, notified_at INTEGER, device_name TEXT,
+        PRIMARY KEY (agent, cvp_id, device_key, fault_key));
+      CREATE TABLE IF NOT EXISTS cvp_fault_event (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL,
+        agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, device_name TEXT,
+        fault_key TEXT NOT NULL, kind TEXT NOT NULL, label TEXT, event TEXT NOT NULL,
+        state TEXT, prev_state TEXT, detail TEXT, close_reason TEXT);
+      CREATE INDEX IF NOT EXISTS idx_cfe_at ON cvp_fault_event (at);
+      CREATE INDEX IF NOT EXISTS idx_cfe_dev ON cvp_fault_event (agent, cvp_id, device_key, at);`);
     addDailyErrCountCols(conn);
     const maxOf = (col) => `NULLIF(MAX(IFNULL(port_daily.${col},-1e308), IFNULL(excluded.${col},-1e308)), -1e308)`;
     const st = {
@@ -119,6 +133,19 @@ async function openInner() {
           in_err_sum=CASE WHEN excluded.in_err_sum IS NULL THEN port_daily.in_err_sum ELSE IFNULL(port_daily.in_err_sum,0)+excluded.in_err_sum END,
           out_err_sum=CASE WHEN excluded.out_err_sum IS NULL THEN port_daily.out_err_sum ELSE IFNULL(port_daily.out_err_sum,0)+excluded.out_err_sum END,
           in_err_n=port_daily.in_err_n+excluded.in_err_n, out_err_n=port_daily.out_err_n+excluded.out_err_n`),
+      // ── 장애 전이(v2.640, faults.js) — 전이만 적재. state 표는 파트 수만큼만 존재하고 event 는 open/change/close 만 append.
+      fOpen: conn.prepare(`INSERT INTO cvp_fault_state (agent,cvp_id,device_key,fault_key,kind,label,detail,state,first_seen,last_seen,hold_reason,notified_at,device_name)
+        VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,?)
+        ON CONFLICT(agent,cvp_id,device_key,fault_key) DO UPDATE SET kind=excluded.kind, label=excluded.label, detail=excluded.detail, state=excluded.state,
+          last_seen=excluded.last_seen, hold_reason=NULL, device_name=excluded.device_name`),
+      fChange: conn.prepare('UPDATE cvp_fault_state SET state=?, detail=?, label=?, last_seen=?, hold_reason=NULL, device_name=? WHERE agent=? AND cvp_id=? AND device_key=? AND fault_key=?'),
+      fSustain: conn.prepare('UPDATE cvp_fault_state SET detail=?, last_seen=?, hold_reason=NULL WHERE agent=? AND cvp_id=? AND device_key=? AND fault_key=?'),
+      fHold: conn.prepare('UPDATE cvp_fault_state SET hold_reason=? WHERE agent=? AND cvp_id=? AND device_key=? AND fault_key=?'),
+      fDel: conn.prepare('DELETE FROM cvp_fault_state WHERE agent=? AND cvp_id=? AND device_key=? AND fault_key=?'),
+      fGet: conn.prepare('SELECT * FROM cvp_fault_state WHERE agent=? AND cvp_id=? AND device_key=? AND fault_key=?'),
+      fNotified: conn.prepare('UPDATE cvp_fault_state SET notified_at=? WHERE agent=? AND cvp_id=? AND device_key=? AND fault_key=?'),
+      fEvent: conn.prepare(`INSERT INTO cvp_fault_event (at,agent,cvp_id,device_key,fault_key,device_name,kind,label,event,state,prev_state,detail,close_reason)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`),
     };
     _db = { conn, st };
     lockRetry.ok();
@@ -552,6 +579,159 @@ export async function portSeries({ agent, cvpId, key, port, hours = 24, rawReten
   return { points: pts, source: 'daily', intervalMs: DAY_MS };
 }
 
+/* ── 장애 전이(v2.640) — 판정은 cvp/faults.js(순수), 적재는 여기. 규약은 partfault/db.js 와 같다:
+ *   state 표(cvp_fault_state)는 **지우지 말 것** — 없으면 매 주기가 전부 새 장애(알림 폭주). 재시작에도 살아야 하므로 DB 다.
+ *   held(유지)는 이벤트를 만들지 않는다(사유만 갱신) · 같은 상태의 지속도 이벤트가 아니다(전이 표가 전량 적재가 된다). */
+
+const fArgs = (f) => [String(f.agent ?? ''), String(f.cvpId ?? ''), String(f.deviceKey ?? ''), String(f.faultKey ?? '')];
+function rowToFault(r) {
+  return {
+    agent: r.agent, cvpId: r.cvp_id, deviceKey: r.device_key, deviceName: r.device_name || '',
+    faultKey: r.fault_key, kind: r.kind, label: r.label || '', detail: r.detail || '', state: r.state,
+    firstSeen: Number(r.first_seen), lastSeen: Number(r.last_seen), holdReason: r.hold_reason || null,
+    notifiedAt: r.notified_at == null ? null : Number(r.notified_at),
+  };
+}
+function rowToFaultEvent(r) {
+  return {
+    id: Number(r.id), at: Number(r.at), agent: r.agent, cvpId: r.cvp_id, deviceKey: r.device_key, deviceName: r.device_name || '',
+    faultKey: r.fault_key, kind: r.kind, label: r.label || '', event: r.event, state: r.state ?? null, prevState: r.prev_state ?? null,
+    detail: r.detail || '', closeReason: r.close_reason ?? null,
+  };
+}
+
+/** 포트 상태 전량(port_latest — 한 쿼리). 장애 판정(faults.observeDevice)이 장비별로 묶어 쓴다. */
+export async function portStateRows({ agent = null, cvpId = null } = {}) {
+  const db = await open();
+  if (!db) return { rows: [], unavailable: true };
+  const where = []; const args = [];
+  if (agent != null) { where.push('agent=?'); args.push(agent); }
+  if (cvpId != null) { where.push('cvp_id=?'); args.push(cvpId); }
+  const rows = db.conn.prepare(`SELECT agent, cvp_id, device_key, port, oper, admin, descr FROM port_latest ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`).all(...args);
+  return { rows: rows.map((r) => ({ agent: r.agent, cvpId: r.cvp_id, key: r.device_key, port: r.port, oper: r.oper || 'unknown', admin: r.admin || 'unknown', desc: r.descr || '' })) };
+}
+
+/** 열린 장애(공개 모양). limit 상한을 넘긴 행은 전이 입력에 없다 — v2.548 리뷰가 기록한 같은 한계. */
+export async function listOpenFaults({ agent = null, cvpId = null, limit = 20_000 } = {}) {
+  const db = await open();
+  if (!db) return { rows: [], unavailable: true };
+  const where = []; const args = [];
+  if (agent != null) { where.push('agent=?'); args.push(agent); }
+  if (cvpId != null) { where.push('cvp_id=?'); args.push(cvpId); }
+  const lim = Math.max(1, Math.min(50_000, Math.trunc(Number(limit)) || 20_000));
+  const rows = db.conn.prepare(`SELECT * FROM cvp_fault_state ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY first_seen DESC LIMIT ?`).all(...args, lim);
+  return { rows: rows.map(rowToFault), ...(rows.length >= lim ? { truncated: true, limit: lim } : {}) };
+}
+
+/**
+ * 전이 결과(faults.transition)를 **트랜잭션 1회**로 반영한다. opened → INSERT + 'open' · updated(상태 변화) → UPDATE + 'change' ·
+ * updated(같은 상태) → last_seen 만 · held → hold_reason 만 · closed → DELETE + 'close'. 실패하면 ROLLBACK 하고 던진다(부분 반영 금지).
+ * @returns {Promise<{opened:number, updated:number, closed:number, held:number, events:number, unavailable?:boolean}>}
+ */
+export async function applyFaultTransition(tr, { now = Date.now() } = {}) {
+  const db = await open();
+  if (!db) return { opened: 0, updated: 0, closed: 0, held: 0, events: 0, unavailable: true };
+  const { st, conn } = db;
+  const T = (v, n = 256) => capStr(v, n);
+  // 상태는 문자열 그대로(String(null) 은 'null' 이 되어 NOT NULL 제약을 지나간다 — 잘못된 전이는 제약 위반으로 트랜잭션째 실패해야 한다).
+  const stateOf = (v) => (typeof v === 'string' && v ? v : null);
+  const ev = (f, event, { state = f.state ?? null, prevState = null, closeReason = null, detail = f.detail } = {}) => {
+    st.fEvent.run(now, ...fArgs(f), T(f.deviceName, 128), T(f.kind, 16), T(f.label, 128), event, state, prevState, T(detail, 400), closeReason);
+  };
+  let opened = 0; let updated = 0; let closed = 0; let held = 0; let events = 0;
+  conn.exec('BEGIN');
+  try {
+    for (const f of tr?.opened || []) {
+      st.fOpen.run(...fArgs(f), T(f.kind, 16), T(f.label, 128), T(f.detail, 400), stateOf(f.state), numOrNull(f.firstSeen) ?? now, numOrNull(f.lastSeen) ?? now, T(f.deviceName, 128));
+      ev(f, 'open'); opened++; events++;
+    }
+    for (const f of tr?.updated || []) {
+      if (f.sameState) { st.fSustain.run(T(f.detail, 400), numOrNull(f.lastSeen) ?? now, ...fArgs(f)); continue; }
+      st.fChange.run(stateOf(f.state), T(f.detail, 400), T(f.label, 128), numOrNull(f.lastSeen) ?? now, T(f.deviceName, 128), ...fArgs(f));
+      ev(f, 'change', { prevState: f.prevState ?? null }); updated++; events++;
+    }
+    for (const f of tr?.held || []) { st.fHold.run(T(f.holdReason, 32) || null, ...fArgs(f)); held++; }
+    for (const f of tr?.closed || []) {
+      st.fDel.run(...fArgs(f));
+      ev(f, 'close', { state: null, prevState: f.state ?? null, closeReason: T(f.closeReason, 64) || 'ok', detail: f.closeDetail ?? f.detail });
+      closed++; events++;
+    }
+    conn.exec('COMMIT');
+  } catch (e) { try { conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  return { opened, updated, closed, held, events };
+}
+
+/** 알림 발송 시각 — (agent,cvpId,deviceKey,faultKey) 를 받는다. 반환은 **실제로 갱신된 행 수**. */
+export async function markFaultNotified(items, { now = Date.now() } = {}) {
+  const db = await open();
+  if (!db || !Array.isArray(items) || !items.length) return 0;
+  let n = 0;
+  db.conn.exec('BEGIN');
+  try {
+    for (const it of items) { if (it && it.faultKey) n += Number(db.st.fNotified.run(now, ...fArgs(it)).changes || 0); }
+    db.conn.exec('COMMIT');
+  } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  return n;
+}
+
+/** 최근 전이 이벤트(at DESC). limit 은 정수 [1, 5000](node:sqlite 는 소수를 REAL 로 바인딩한다 — v2.607 DB2607-04). */
+export async function recentFaultEvents({ sinceMs = 30 * 86_400_000, limit = 500, cvpId = null, agent = null } = {}) {
+  const db = await open();
+  if (!db) return { rows: [], unavailable: true };
+  const since = Math.trunc(Date.now() - Math.max(0, numOrNull(sinceMs) ?? 0));
+  const lim = Math.max(1, Math.min(5_000, Math.trunc(Number(limit)) || 500));
+  const where = ['at >= ?']; const args = [since];
+  if (cvpId != null) { where.push('cvp_id=?'); args.push(cvpId); }
+  if (agent != null) { where.push('agent=?'); args.push(agent); }
+  const rows = db.conn.prepare(`SELECT * FROM cvp_fault_event WHERE ${where.join(' AND ')} ORDER BY at DESC, id DESC LIMIT ?`).all(...args, lim);
+  return { rows: rows.map(rowToFaultEvent), ...(rows.length >= lim ? { truncated: true, limit: lim } : {}) };
+}
+
+/**
+ * 관리자 수동 닫기(장비 재배정·등록 삭제로 보고가 끊긴 장애 — 보고 부재 ≠ 고침이라 자동으로 닫지 않는다: v2.548 리뷰 C5).
+ * 이벤트 close_reason 은 `manual:<user>`, detail 은 사유. 반환 {ok, closed}(없으면 closed 0).
+ */
+export async function closeFaultManual({ agent = '', cvpId, deviceKey, faultKey, reason = '', user = '', now = Date.now() } = {}) {
+  const db = await open();
+  if (!db) return { ok: false, closed: 0, unavailable: true };
+  const key = { agent, cvpId, deviceKey, faultKey };
+  const row = db.st.fGet.get(...fArgs(key));
+  if (!row) return { ok: true, closed: 0 };
+  const f = rowToFault(row);
+  db.conn.exec('BEGIN');
+  try {
+    db.st.fDel.run(...fArgs(f));
+    db.st.fEvent.run(now, ...fArgs(f), capStr(f.deviceName, 128), capStr(f.kind, 16), capStr(f.label, 128), 'close', null, f.state,
+      capStr(reason, 400), `manual:${capStr(user, 64)}`);
+    db.conn.exec('COMMIT');
+  } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  return { ok: true, closed: 1 };
+}
+
+/** 등록 삭제 시 — 그 CVP 의 열린 장애를 지운다(이벤트 이력은 남긴다). agent null 이면 모든 agent. */
+export async function deleteFaultsFor(agent, cvpId) {
+  const db = await open();
+  if (!db) return { removed: 0, unavailable: true };
+  const id = String(cvpId ?? '');
+  const r = agent == null
+    ? db.conn.prepare('DELETE FROM cvp_fault_state WHERE cvp_id=?').run(id)
+    : db.conn.prepare('DELETE FROM cvp_fault_state WHERE agent=? AND cvp_id=?').run(String(agent), id);
+  return { removed: Number(r.changes || 0) };
+}
+
+/** 열린 장애 개수(표가 작아 캐시하지 않는다). */
+export async function faultCounts() {
+  const db = await open();
+  if (!db) return { open: 0, byState: { fault: 0, warn: 0 }, held: 0, unavailable: true };
+  const rows = db.conn.prepare('SELECT state, SUM(hold_reason IS NOT NULL) AS held, COUNT(*) AS n FROM cvp_fault_state GROUP BY state').all();
+  const out = { open: 0, byState: { fault: 0, warn: 0 }, held: 0 };
+  for (const r of rows) {
+    out.open += Number(r.n); out.held += Number(r.held || 0);
+    if (Object.hasOwn(out.byState, r.state)) out.byState[r.state] += Number(r.n);
+  }
+  return out;
+}
+
 let _pruneTick = 0;
 export const PRUNE_EVERY = 12;
 export const PRUNE_CHUNK = 5_000;
@@ -569,7 +749,8 @@ export async function prune({ rawRetentionDays = 7, dailyRetentionDays = 730, no
   if (!db) return { deleted: 0, unavailable: true };
   const rawCut = now - Math.max(1, rawRetentionDays) * DAY_MS;
   const dayCut = dayIndex(now) - Math.max(1, dailyRetentionDays);
-  return pruneFlight.run({ raw: rawCut, daily: dayCut }, async () => {
+  const evCut = now - Math.max(1, dailyRetentionDays) * DAY_MS; // 장애 전이 이벤트(v2.640)는 일 롤업과 같은 보존일
+  return pruneFlight.run({ raw: rawCut, daily: dayCut, ev: evCut }, async () => {
     let lost = 0;
     const cur = _cursorOf ? numOrNull(_cursorOf()) : null;
     if (cur != null) {
@@ -578,12 +759,13 @@ export async function prune({ rawRetentionDays = 7, dailyRetentionDays = 730, no
     // 청크 5,000(기본 2만) — 청크마다 동기 정지가 선형으로 줄어든다(DB2611-04).
     const a = await chunkedDelete(db.conn.prepare('DELETE FROM port_sample WHERE rowid IN (SELECT rowid FROM port_sample WHERE ts < ? LIMIT ?)'), [rawCut], { chunk: PRUNE_CHUNK });
     const b = await chunkedDelete(db.conn.prepare('DELETE FROM port_daily WHERE rowid IN (SELECT rowid FROM port_daily WHERE day < ? LIMIT ?)'), [dayCut], { chunk: PRUNE_CHUNK });
+    const c = await chunkedDelete(db.conn.prepare('DELETE FROM cvp_fault_event WHERE rowid IN (SELECT rowid FROM cvp_fault_event WHERE at < ? LIMIT ?)'), [evCut], { chunk: PRUNE_CHUNK });
     if (lost > 0) {
       _lostUnsent = { total: _lostUnsent.total + lost, last: lost, at: Date.now() };
       console.warn(`[cvp-db] 중앙에 보내지 못한 표본 ${lost}행이 보존일(${rawRetentionDays}일)을 넘어 지워졌습니다 — 중앙 수신·push 상태를 확인하세요`);
     }
     if (a.deleted || b.deleted) _counts = null;
-    return { deleted: a.deleted + b.deleted, raw: a.deleted, daily: b.deleted, done: a.done && b.done, ...(lost ? { lostUnsent: lost } : {}) };
+    return { deleted: a.deleted + b.deleted + c.deleted, raw: a.deleted, daily: b.deleted, faultEvents: c.deleted, done: a.done && b.done && c.done, ...(lost ? { lostUnsent: lost } : {}) };
   });
 }
 /** 폴러 틱마다 부른다 — N 틱에 한 번만 실제로 정리한다. */

@@ -34,7 +34,12 @@ export const LIMITS = Object.freeze({
 /** 순수 정규화 — 빈 값·비숫자는 기본값. */
 export function normalizeSettings(input = {}) {
   const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  const out = { enabled: src.enabled === true };
+  /*
+   * v2.640(③ 장애 전이·알림): faultAlerts — 부품 fault·포트 down·BGP down 전이가 생기면 알림(alerts.js 채널)을 보낸다. **기본 꺼짐**
+   *   (파트 장애 v2.548 과 같은 opt-in — 켜지 않아도 전이 기록은 남는다). faultAlertsClosed — 해소도 알린다(기본 켬).
+   *   판정은 중앙에서만 돈다(cvp/faultScan.js) — 엣지는 이 값을 받아도 쓰지 않는다.
+   */
+  const out = { enabled: src.enabled === true, faultAlerts: src.faultAlerts === true, faultAlertsClosed: src.faultAlertsClosed !== false };
   for (const [k, l] of Object.entries(LIMITS)) {
     out[k] = clampSetting(src[k], l); // v2.613 DEPS2613-12: 빈 값·비숫자는 기본값(numOrNull 판정)
   }
@@ -46,6 +51,8 @@ export function mergeSettings(cur, patch = {}) {
   const p = patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {};
   const next = { ...cur };
   if (typeof p.enabled === 'boolean') next.enabled = p.enabled;
+  if (typeof p.faultAlerts === 'boolean') next.faultAlerts = p.faultAlerts;
+  if (typeof p.faultAlertsClosed === 'boolean') next.faultAlertsClosed = p.faultAlertsClosed;
   for (const [k, l] of Object.entries(LIMITS)) {
     const n = numOrNull(p[k]);
     if (n == null) continue;            // 빈 칸·비숫자 = 미지정(이전 값 유지)

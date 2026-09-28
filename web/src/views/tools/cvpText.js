@@ -13,19 +13,10 @@ import { numOrNull } from '../../numOrNull.js';
 import { unitText } from '../unitText.js';
 import { blankOr } from '../blankOr.js';
 import { collectDropNote } from './collectDropText.js';
+import { agoText } from './relTime.js'; // v2.640 ①: 상대시각 사본(9벌 중 하나 — v2.613 WEB2613-15)을 공용 코어로
 
 export const SECRET_MASK = '********';
-
-/** 경과 시각 문구('—' 는 시각 없음). */
-export function agoText(ts, now = Date.now()) {
-  const t = numOrNull(ts);
-  if (t == null || t <= 0) return '—';
-  const s = Math.max(0, Math.round((now - t) / 1000));
-  if (s < 60) return `${s}초 전`;
-  if (s < 3600) return `${Math.round(s / 60)}분 전`;
-  if (s < 86400) return `${Math.round(s / 3600)}시간 전`;
-  return `${Math.round(s / 86400)}일 전`;
-}
+export { agoText };
 
 /** 기간(ms) → '5분' 류. 주기 숫자를 문구에 박지 않고 서버 값을 쓴다. */
 export function spanText(ms) {
@@ -469,7 +460,8 @@ export function serverPayload(f, { isNew = false } = {}) {
 
 /** 설정 폼 → PUT 본문. 빈 칸은 보내지 않는다(blankOr) — 서버가 이전 값을 유지한다. */
 export function settingsPayload(f) {
-  const out = { enabled: !!(f && f.enabled) };
+  // v2.640 ③: 알림 스위치 둘(불리언 — 빈 칸 규칙 대상이 아니다). faultAlertsClosed 는 체크 해제가 곧 false.
+  const out = { enabled: !!(f && f.enabled), faultAlerts: !!(f && f.faultAlerts), faultAlertsClosed: !(f && f.faultAlertsClosed === false) };
   const min = (v) => { const n = blankOr(v); return n == null ? undefined : n; };
   const intervalMin = min(f && f.intervalMin);
   if (intervalMin != null) out.intervalMs = Math.round(intervalMin * 60_000);
@@ -488,6 +480,8 @@ export function settingsToForm(s) {
   const n = (v, div = 1) => { const x = numOrNull(v); return x == null ? '' : String(Math.round((x / div) * 100) / 100); };
   return {
     enabled: !!o.enabled,
+    faultAlerts: o.faultAlerts === true,
+    faultAlertsClosed: o.faultAlertsClosed !== false,
     intervalMin: n(o.intervalMs, 60_000),
     rawRetentionDays: n(o.rawRetentionDays),
     dailyRetentionDays: n(o.dailyRetentionDays),
@@ -520,4 +514,257 @@ export function choiceOptions(list, current) {
     items.unshift({ value: cur, label: `${cur} (목록에 없음)`, missing: true });
   }
   return items;
+}
+
+// ── v2.640 ① 남은 결함·정리 ───────────────────────────────────────────────────
+
+/** 엣지 보고 1건 → 배지. v2.640: `devicesUnavailable`(엣지 DB 불가 — 상태만 보냄)을 함께 말한다(예전엔 서버가 싣는데 화면이 안 읽었다). */
+export function edgeReportView(e) {
+  const o = e && typeof e === 'object' ? e : {};
+  const tone = o.ok === false ? 'bad' : o.ok ? 'ok' : 'muted';
+  const label = o.ok === false ? '실패' : o.ok ? '정상' : '—';
+  const extras = [];
+  if (o.devicesUnavailable === true) extras.push('엣지 DB 불가 — 상태만 보고(장비 목록은 직전 값)');
+  const servers = numOrNull(o.servers);
+  if (servers != null) extras.push(`CVP ${servers}대`);
+  return { tone, label, title: String(o.error || ''), extras };
+}
+
+/** 서버 행 툴팁 — CVP 자체 버전·수집 소요(서버는 싣는데 화면이 안 보이던 값). */
+export function serverMetaText(st) {
+  const o = st && typeof st === 'object' ? st : {};
+  const bits = [];
+  if (o.cvpVersion) bits.push(`CVP ${String(o.cvpVersion)}`);
+  const d = numOrNull(o.durationMs);
+  if (d != null && d >= 0) bits.push(`수집 소요 ${d < 1000 ? `${d}ms` : `${Math.round(d / 100) / 10}초`}`);
+  if (o.partsRead === true) bits.push('이번 주기에 파트 읽음');
+  return bits.join(' · ');
+}
+
+/** 관리자용 DB 요약 한 줄(행 수는 캐시값 — countsAt 이 말한다). */
+export function dbStatsText(db, now = Date.now()) {
+  if (!db || typeof db !== 'object') return '';
+  if (db.available === false) return `중앙 CVP DB 사용 불가${db.note ? ` — ${db.note}` : ''}`;
+  const r = db.rows && typeof db.rows === 'object' ? db.rows : {};
+  const mb = numOrNull(db.bytes);
+  return `DB 장비 ${countText(r.device)} · 포트 ${countText(r.port)} · 원시 표본 ${countText(r.sample)} · 일 롤업 ${countText(r.daily)}`
+    + (mb != null ? ` · ${(mb / 1_048_576).toFixed(1)} MB` : '') + (db.countsAt ? ` (행 수는 ${agoText(db.countsAt, now)} 기준)` : '');
+}
+
+// ── v2.640 ④ 화면 UX — 필터 칩 · CSV ─────────────────────────────────────────
+
+/** 장비 필터 칩. 판정은 목록 응답의 요약 셀과 같은 값을 본다(표와 칩 개수가 어긋나지 않게). */
+export const DEVICE_CHIPS = Object.freeze([
+  { key: 'all', label: '전체' },
+  { key: 'fault', label: '장애 파트' },
+  { key: 'warn', label: '주의 파트' },
+  { key: 'portDown', label: '포트 down' },
+  { key: 'bgpDown', label: 'BGP down' },
+  { key: 'notStreaming', label: '스트리밍 아님' },
+  { key: 'unread', label: '못 읽음' },
+]);
+const gt0 = (v) => { const n = numOrNull(v); return n != null && n > 0; };
+/** 장비 1대가 칩에 해당하는가. 'unread' = 파트·포트·BGP 중 하나라도 읽지 못했거나 텔레메트리 실패(정상이 아니라 '모름'). */
+export function chipMatch(d, key) {
+  if (!d || typeof d !== 'object') return false;
+  switch (key) {
+    case 'all': return true;
+    case 'fault': return gt0(d.parts && d.parts.fault);
+    case 'warn': return gt0(d.parts && d.parts.warn);
+    case 'portDown': return gt0(d.ports && d.ports.down);
+    case 'bgpDown': return gt0(d.bgp && d.bgp.down);
+    case 'notStreaming': return d.streaming === false;
+    case 'unread': return d.parts == null || d.ports == null || d.bgp == null || ['failed', 'aborted', 'budget'].includes(String(d.telemetry || ''));
+    default: return false;
+  }
+}
+export function chipCounts(devices) {
+  const list = Array.isArray(devices) ? devices : [];
+  const out = {};
+  for (const c of DEVICE_CHIPS) out[c.key] = list.filter((d) => chipMatch(d, c.key)).length;
+  return out;
+}
+export function filterByChip(devices, key) {
+  const list = (Array.isArray(devices) ? devices : []).filter((d) => d && typeof d === 'object');
+  if (!key || key === 'all') return list;
+  return list.filter((d) => chipMatch(d, key));
+}
+/** CSV 다운로드 경로(목록과 같은 필터를 쓴다 — 칩 필터는 화면 전용이라 CSV 는 검색·CVP 범위만 반영한다는 것을 문구가 말한다). */
+export function devicesCsvPath(cvpSel, q) {
+  const p = new URLSearchParams();
+  if (cvpSel) p.set('cvpId', String(cvpSel));
+  if (q && String(q).trim()) p.set('q', String(q).trim());
+  const qs = p.toString();
+  return `/tools/cvp/devices.csv${qs ? `?${qs}` : ''}`;
+}
+export const CSV_NOTE = 'CSV 는 검색어·CVP 선택만 반영합니다(필터 칩은 화면 전용). 값이 없는 칸은 비어 있습니다 — 0 이 아닙니다.';
+
+// ── v2.640 ④ 포트 차트 — 처리량 모드 ─────────────────────────────────────────
+
+export const CHART_MODES = Object.freeze([['util', '사용률'], ['bps', '처리량']]);
+/** 처리량 축 상한 — 데이터 최대를 1·2·5 계열로 올림(사용률과 달리 상한이 없으므로 데이터에 맞춘다 — v2.551 규약). */
+export function bpsAxisMax(max) {
+  const m = numOrNull(max);
+  if (m == null || m <= 0) return 1000;
+  const e = Math.pow(10, Math.floor(Math.log10(m)));
+  for (const k of [1, 2, 5, 10]) if (m <= k * e) return k * e;
+  return 10 * e;
+}
+/**
+ * 처리량(bps) 기하 — 사용률 기하와 같은 규칙(끊김·점 1개·null 버림)이지만 y 축은 두 방향의 최대에 맞춘다.
+ * @returns { paths:{[key]:string[]}, dots:{[key]:{x,y}[]}, count, max, axisMax, ticks:[{v,y,label}] }
+ */
+export function seriesGeometryBps(points, keys = ['inBps', 'outBps'], { width = 600, height = 160, pad = 28, intervalMs = 300_000, gapFactor = 3 } = {}) {
+  const list = Array.isArray(points) ? points : [];
+  let max = 0; let count = 0;
+  const per = {};
+  for (const k of keys) {
+    per[k] = list.map((p) => ({ t: numOrNull(p && p.ts), v: numOrNull(p && p[k]) })).filter((p) => p.t != null && p.v != null && p.v >= 0).sort((a, b) => a.t - b.t);
+    for (const p of per[k]) if (p.v > max) max = p.v;
+    count += per[k].length;
+  }
+  const axisMax = bpsAxisMax(max);
+  const all = keys.flatMap((k) => per[k]);
+  const t0 = all.length ? Math.min(...all.map((p) => p.t)) : null;
+  const t1 = all.length ? Math.max(...all.map((p) => p.t)) : null;
+  const span = (t1 ?? 0) - (t0 ?? 0) || 1;
+  const w = width - pad * 2; const h = height - pad * 2;
+  const X = (t) => pad + (all.length === 1 ? w / 2 : ((t - t0) / span) * w);
+  const Y = (v) => pad + h - (v / axisMax) * h;
+  const gap = Math.max(1, numOrNull(intervalMs) || 300_000) * gapFactor;
+  const paths = {}; const dots = {};
+  for (const k of keys) {
+    const segs = []; let cur = [];
+    for (let i = 0; i < per[k].length; i += 1) {
+      if (i > 0 && per[k][i].t - per[k][i - 1].t > gap) { segs.push(cur); cur = []; }
+      cur.push(per[k][i]);
+    }
+    segs.push(cur);
+    paths[k] = []; dots[k] = [];
+    for (const sg of segs) {
+      if (!sg.length) continue;
+      if (sg.length === 1) { dots[k].push({ x: X(sg[0].t), y: Y(sg[0].v) }); continue; }
+      paths[k].push(sg.map((p, i) => `${i ? 'L' : 'M'}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join(' '));
+    }
+  }
+  const ticks = [0, 0.5, 1].map((f) => ({ v: axisMax * f, y: Y(axisMax * f), label: bpsText(axisMax * f) }));
+  return { paths, dots, count, max, axisMax, ticks, t0, t1 };
+}
+/** 응답 상한으로 잘린 추이 — 조용한 상한 금지(v2.509). '' 면 잘리지 않았다. */
+export function chartCutNote(resp) {
+  if (!resp || typeof resp !== 'object' || resp.truncated !== true) return '';
+  const lim = numOrNull(resp.limit);
+  return `응답 상한${lim != null ? `(${countText(lim)}점)` : ''}으로 잘렸습니다 — 최근 표본만 그렸습니다. 기간을 줄이거나 30일 이상은 일 롤업으로 보세요.`;
+}
+
+// ── v2.640 ③ 장애 전이·알림 ──────────────────────────────────────────────────
+
+export const FAULT_KIND_LABEL = Object.freeze({ psu: '전원(PSU)', fan: '팬', temp: '온도 센서', xcvr: '트랜시버', port: '포트', bgp: 'BGP 피어' });
+export const faultKindLabel = (k) => FAULT_KIND_LABEL[k] || String(k || '—');
+/** 보류 사유(서버 cvp/faults.js HOLD_REASON) → 문장. 보류는 '고쳐지지 않았다' 도 '고쳐졌다' 도 아니다. 키 집합은 테스트가 서버와 대조한다. */
+export const HOLD_TEXT = Object.freeze({
+  'device-failed': '장비 수집 실패 — 닫지 않고 보류(한 주기 실패로 전 장애를 복구로 적지 않습니다)',
+  'device-stale': '수집이 낡음(주기 3배 초과) — 보류',
+  'collection-failed': '그 종류(파트·포트·BGP)를 이번에 읽지 못함 — 보류',
+  unknown: '상태 미확인으로 관측 — 보류(정상도 이상도 아닙니다)',
+  missing: '관측 목록에 없음 — 보류. 고쳐졌다는 뜻이 아닙니다(장비·부품이 사라졌으면 관리자가 수동으로 닫습니다)',
+  'not-streaming': 'CVP 로 스트리밍하지 않는 장비 — 보류',
+});
+export const HOLD_KEYS = Object.freeze(Object.keys(HOLD_TEXT));
+export function holdText(r) { return r ? (HOLD_TEXT[r] || `보류(${String(r)})`) : ''; }
+/** 닫힘 사유 → 문장. */
+export function closeReasonText(r) {
+  const s = String(r ?? '');
+  if (!s) return '—';
+  if (s === 'ok') return '정상으로 관측';
+  if (s === 'removed') return '빈 슬롯(부품 제거 — 교체 여부를 확인하세요)';
+  if (s.startsWith('manual')) { const who = s.split(':')[1]; return `수동 닫기${who ? `(${who})` : ''}`; }
+  return s;
+}
+/** 열린 장애 행 → 표시. */
+export function faultRowView(f) {
+  const o = f && typeof f === 'object' ? f : {};
+  const ps = partState(o.state);
+  return {
+    kindLabel: faultKindLabel(o.kind),
+    state: ps,
+    device: o.deviceName || o.deviceKey || '—',
+    where: [o.cvpName || o.cvpId || '', o.agent ? `엣지 ${o.agent}` : '중앙'].filter(Boolean).join(' · '),
+    hold: holdText(o.holdReason),
+    since: o.firstSeen,
+    lastSeen: o.lastSeen,
+    notified: o.notifiedAt != null,
+  };
+}
+/** 이벤트 행 → 문장. */
+export function faultEventText(ev) {
+  const o = ev && typeof ev === 'object' ? ev : {};
+  if (o.event === 'open') return `열림 — ${partState(o.state).label}`;
+  if (o.event === 'change') return `변경 — ${partState(o.prevState).label} → ${partState(o.state).label}`;
+  if (o.event === 'close') return `닫힘 — ${closeReasonText(o.closeReason)}`;
+  return String(o.event || '—');
+}
+/** KPI 칸 — 열린 장애 수. DB 불가면 '—'(0 이 아니다). 보류 중인 것은 따로 말한다. */
+export function faultKpi(counts) {
+  const c = counts && typeof counts === 'object' ? counts : null;
+  if (!c || c.unavailable) return { key: 'faults', label: '열린 장애(전이)', value: '—', accent: null, meta: c && c.unavailable ? '장애 DB 를 읽지 못함' : '' };
+  const open = numOrNull(c.open); const held = numOrNull(c.held);
+  const by = c.byState && typeof c.byState === 'object' ? c.byState : {};
+  const fault = numOrNull(by.fault); const warn = numOrNull(by.warn);
+  return {
+    key: 'faults', label: '열린 장애(전이)', value: countText(open), accent: fault > 0 ? 'var(--red)' : warn > 0 ? 'var(--amber)' : null,
+    meta: [fault != null ? `장애 ${countText(fault)}` : null, warn != null ? `주의 ${countText(warn)}` : null, held != null && held > 0 ? `보류 ${countText(held)}(판정 못 함)` : null].filter(Boolean).join(' · '),
+  };
+}
+/** 마지막 판정 문장. */
+export function faultScanNote(scan, settings, now = Date.now()) {
+  const s = scan && typeof scan === 'object' ? scan : {};
+  const st = settings && typeof settings === 'object' ? settings : {};
+  const bits = [];
+  if (s.at) bits.push(`마지막 판정 ${agoText(s.at, now)}${s.reason ? `(${s.reason})` : ''}`);
+  else bits.push('이번 기동 뒤 아직 판정하지 않았습니다(수집이 들어오면 자동으로 돕니다)');
+  if (s.error) bits.push(`마지막 판정 실패: ${String(s.error)}`);
+  if (s.unavailable) bits.push('장애 DB 불가');
+  if (s.at && s.devices != null) bits.push(`장비 ${countText(s.devices)}대 · 열림 ${countText(s.opened)} · 변경 ${countText(s.updated)} · 닫힘 ${countText(s.closed)} · 보류 ${countText(s.held)}`);
+  if (s.notified && typeof s.notified === 'object') {
+    const sent = numOrNull(s.notified.sent); const capped = numOrNull(s.notified.capped);
+    if (sent != null) bits.push(`알림 ${countText(sent)}건${capped ? ` (상한으로 ${countText(capped)}건 미발송)` : ''}`);
+  }
+  bits.push(st.faultAlerts === true ? `알림 켬${st.faultAlertsClosed === false ? '(해소는 알리지 않음)' : ''}` : '알림 꺼짐(기록만 남깁니다 — 등록·설정에서 켤 수 있습니다)');
+  return bits.join(' · ');
+}
+export const FAULT_INTRO = '전이만 기록합니다 — 부품 **장애·주의**, 관리상 켜 둔 포트의 **링크 down**, **BGP 피어 down** 이 생기거나 사라질 때만 남깁니다. '
+  + '상태 미확인·빈 슬롯·읽지 못한 종류·수집 실패 장비는 **열지도 닫지도 않고 보류**합니다(못 읽은 것을 복구로 적지 않습니다). 판정은 중앙이 가진 최신값으로만 하며 장비·엣지 왕복이 없습니다.';
+
+// ── v2.640 ② 진단 — 원문 표본 · 파서 시험 ───────────────────────────────────
+
+/** 상태의 samples → 표 행(종류 라벨 순). */
+export function sampleRows(samples) {
+  const o = samples && typeof samples === 'object' ? samples : {};
+  return Object.entries(o).filter(([, v]) => v && typeof v === 'object').map(([kind, v]) => ({
+    kind, label: itemLabel(kind), path: String(v.path || ''), ok: v.ok === true, status: numOrNull(v.status), bytes: numOrNull(v.bytes), at: numOrNull(v.at),
+    head: typeof v.head === 'string' ? v.head : '', reason: typeof v.reason === 'string' ? v.reason : '',
+  })).sort((a, b) => a.label.localeCompare(b.label));
+}
+export const SAMPLE_NOTE = '원문 표본은 **그 CVP 에서 처음 성공한 응답(종류별 1건, 앞 4KB)** 이고 성공이 없으면 마지막 실패 응답입니다. 첫 실수집에서 후보 경로·필드명을 좁히는 근거입니다 — 관리자에게만 보이며 아래 ‘파서 시험’ 에 그대로 붙여넣어 볼 수 있습니다.';
+export const PREVIEW_NOTE = 'CVP 응답 원문(JSON·NDJSON)을 붙여넣으면 **이 포탈의 파서가 무엇을 읽는지** 보여줍니다 — 네트워크 왕복·저장 없음. 인식한 필드가 없으면 실패이고, 그때 ‘응답에 있던 필드’ 가 곧 다음 후보의 근거입니다(1MB 이하 — 더 크면 앞부분만).';
+/** 파서 시험 응답 → 요약 문장 + 표 열. */
+export function previewSummary(p) {
+  const o = p && typeof p === 'object' ? p : null;
+  if (!o) return { ok: false, text: '응답을 읽지 못했습니다.' };
+  if (o.ok === false) return { ok: false, text: `읽지 못함 — ${o.note || o.reason || '인식한 필드가 없습니다'}${Array.isArray(o.keys) && o.keys.length ? ` · 응답에 있던 필드: ${o.keys.slice(0, 20).join(', ')}` : ''}${numOrNull(o.badChunks) ? ` · JSON 조각 오류 ${o.badChunks}건` : ''}` };
+  const bits = [`형식 ${o.format || '—'}`, `읽은 항목 ${countText(o.count)}`];
+  if (numOrNull(o.entities) != null) bits.push(`개체 ${countText(o.entities)}`);
+  if (numOrNull(o.truncated)) bits.push(`상한으로 ${countText(o.truncated)}개 잘림`);
+  if (numOrNull(o.unrecognized)) bits.push(`인식 못 한 개체 ${countText(o.unrecognized)}`);
+  if (numOrNull(o.dropped)) bits.push(`키 없이 버림 ${countText(o.dropped)}`);
+  if (numOrNull(o.badChunks)) bits.push(`JSON 조각 오류 ${countText(o.badChunks)}건`);
+  if (o.truncatedInput) bits.push('입력이 상한을 넘어 앞부분만 읽었습니다');
+  return { ok: true, text: bits.join(' · ') };
+}
+/** 항목 배열의 열 이름(첫 50개 항목의 키 합집합 — 파서가 무엇을 채웠는지 그대로). */
+export function previewColumns(items) {
+  const cols = [];
+  for (const it of Array.isArray(items) ? items.slice(0, 50) : []) if (it && typeof it === 'object') for (const k of Object.keys(it)) if (!cols.includes(k)) cols.push(k);
+  return cols;
 }

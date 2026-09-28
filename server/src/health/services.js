@@ -35,6 +35,7 @@ import * as m_storagePoller from '../storage/poller.js';
 import * as m_sanPoller from '../sanswitch/poller.js';
 import * as m_sanPerfPoller from '../sanswitch/perfPoller.js';
 import * as m_cvpPoller from '../cvp/poller.js';
+import * as m_cvpFaultScan from '../cvp/faultScan.js'; // v2.640: CVP 장애 전이 판정(중앙 · ingest 디바운스)
 import * as m_pduPoller from '../pdu/poller.js';
 import * as m_curUserPoller from '../curuser/poller.js';
 import * as m_hzPoller from '../horizon/sessionPoller.js';
@@ -74,6 +75,7 @@ const MODS = Object.freeze({
   '../sanswitch/poller.js': m_sanPoller,
   '../sanswitch/perfPoller.js': m_sanPerfPoller,
   '../cvp/poller.js': m_cvpPoller,
+  '../cvp/faultScan.js': m_cvpFaultScan,
   '../pdu/poller.js': m_pduPoller,
   '../curuser/poller.js': m_curUserPoller,
   '../horizon/sessionPoller.js': m_hzPoller,
@@ -112,6 +114,8 @@ const MODS = Object.freeze({
 export const CENTRAL_ONLY_SPEC = Object.freeze([
   { key: 'collect.relayCheck', label: 'HAProxy 경로 점검', group: 'collect', mod: '../relaycheck/poller.js', fn: 'relayCheckStatus', centralOnly: true },
   { key: 'collect.partFault', label: '파트 장애 판정', group: 'collect', mod: '../partfault/poller.js', fn: 'partFaultStatus', centralOnly: true },
+  // v2.640: CVP 장애 전이 판정 — 중앙 cvp.db 에 전 엣지 합이 있어 중앙만 돈다(수집·push 뒤 디바운스). 상태의 enabled·intervalMs 는 CVP 수집 설정을 따른다.
+  { key: 'collect.cvpFaults', label: 'CVP 장애 전이 판정', group: 'collect', mod: '../cvp/faultScan.js', fn: 'cvpFaultScanStatus', centralOnly: true },
 ]);
 
 /** 고정 항목이 이미 다루는 spec 키 — 같은 폴러를 두 줄로 그리지 않는다(고정 항목 쪽에 `specKey` 를 단다). */

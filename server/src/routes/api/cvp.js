@@ -26,6 +26,10 @@ import { secretProvided } from '../../util/secretCarry.js';
 import { capStr } from '../../util/capStr.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { pickAgent, pickDatacenter } from '../../cvp/formChoices.js';
+import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   // v2.640 ③ 장애 전이 판정(중앙)
+import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
+import { csvLine, CSV_BOM } from '../../util/csv.js';
+import { fileStamp, localStamp } from '../../util/dayKey.js';
 
 const adminOnly = requireRole('admin');
 const writer = requireRole('admin', 'operator');
@@ -83,7 +87,21 @@ function pickStatus(st) {
     ...(st.dbUnavailable ? { dbUnavailable: true } : {}),
     ...(st.partsDueUnread ? { partsDueUnread: true, partsNotTried: Number.isFinite(st.partsNotTried) ? st.partsNotTried : null } : {}), // v2.612 RECENT2612-01
     ...(st.pruneHeld && typeof st.pruneHeld === 'object' ? { pruneHeld: st.pruneHeld } : {}),
+    ...(st.samples && typeof st.samples === 'object' ? { samples: st.samples } : {}), // v2.640 ②: 원문 표본(라우트가 admin 에게만 싣는다)
   };
+}
+
+/** v2.640 ②: 원문 표본은 호스트명·IP·오류 본문이 그대로 들어간다 — 비-admin 응답에서는 통째로 뺀다(가림이 아니라 제거). */
+function stripSamples(st) {
+  if (!st || typeof st !== 'object' || !st.samples) return st;
+  const { samples, ...rest } = st;
+  return { ...rest, samplesHidden: true };
+}
+
+/** v2.640 ①(AUTHZ2611-06): BGP 피어 주소는 장비 관리 주소와 같은 등급으로 본다 — 비-admin 에는 비운다(화면은 '—'). */
+function maskPeers(peers, admin) {
+  if (admin || !Array.isArray(peers)) return peers;
+  return peers.map((p) => (p && typeof p === 'object' ? { ...p, peer: '' } : p));
 }
 
 /** 등록부 담당과 맞는 행만(엣지가 바뀌었는데 옛 엣지 행이 남은 경우를 거짓으로 섞지 않게). */
@@ -152,9 +170,12 @@ api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
     poller: admin ? poller : maskPollerStatus(poller, servers.map((s) => s.host)),
     servers: servers.map((s) => {
       const st = statusOf(s);
-      return { ...maskServer(s, admin), status: admin || !st ? st : maskStatusText(st, hosts), pendingRequest: hasPendingCvpRequest(s.id) };
+      return { ...maskServer(s, admin), status: admin || !st ? st : stripSamples(maskStatusText(st, hosts)), pendingRequest: hasPendingCvpRequest(s.id) };
     }),
     totals,
+    // v2.640 ③: 열린 장애 개수 + 마지막 판정 — 화면 KPI 와 '장애 이력' 카드가 쓴다. DB 불가면 counts 가 unavailable 을 말한다.
+    faults: await cdb.faultCounts().catch((e) => ({ unavailable: true, error: capStr(e?.message, 200) })),
+    faultScan: faultScanView(cvpFaultScanStatus()),
     orphanRows: rows.length - mine.length,
     edges: admin ? edgeCvpSummary() : edgeCvpSummary().map((e) => ({ ...e, error: maskErrText(e.error, hosts) })),
     collectDrops: recentCvpCollectDrops(),
@@ -193,11 +214,122 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
     device: publicDevice(det.device, admin),
     parts: det.device.partsList,
     ports: det.ports,
-    bgp: det.device.bgpPeers ? { peers: det.device.bgpPeers, summary: bgpSummary(det.device.bgpPeers) } : null,
+    bgp: det.device.bgpPeers ? { peers: maskPeers(det.device.bgpPeers, admin), summary: bgpSummary(det.device.bgpPeers) } : null,
     partsMissingKinds: det.device.extra?.partsMissingKinds || [],
     usedPaths: st.usedPaths || {}, missing: st.missing || {}, seenFields: st.seenFields || {},
+    // v2.640 ②: 그 CVP 의 종류별 원문 표본(첫 장비의 응답 앞부분) — admin 만. 장비마다 다르지 않다(표본은 CVP 단위).
+    ...(admin ? { samples: st0.samples || null } : { addressHidden: true, samplesHidden: true }),
+  });
+});
+
+/** v2.640 ③: 판정 상태 → 화면 모양(주소 없음). */
+function faultScanView(st) {
+  const o = st && typeof st === 'object' ? st : {};
+  return { at: o.at ?? null, reason: o.reason ?? null, devices: o.devices ?? null, opened: o.opened ?? null, updated: o.updated ?? null, closed: o.closed ?? null,
+    held: o.held ?? null, notified: o.notified ?? null, durationMs: o.durationMs ?? null, error: o.error ?? null, unavailable: o.unavailable === true, pending: o.pending ?? 0, debounceMs: o.debounceMs ?? null };
+}
+
+/**
+ * v2.640 ③ — 장애 이력: 열린 장애(보류 사유 포함) + 최근 전이 이벤트. 조회는 tools + 전체 범위(목록과 같다).
+ * 비-admin 에는 detail(BGP 피어 주소가 들어간다)·오류 문구를 가린다.
+ */
+api.get('/tools/cvp/faults', toolsPerm, fullScopeOnly, async (req, res) => {
+  const admin = isAdminReq(req);
+  const cvpId = typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null;
+  const days = Math.max(1, Math.min(365, Math.floor(Number(req.query.days)) || 30));
+  const servers = listServers();
+  const known = new Set(servers.map((s) => String(s.id)));
+  const hosts = servers.map((s) => s.host);
+  const nameOf = new Map(servers.map((s) => [String(s.id), s.name || s.id]));
+  const mask = (f) => (admin ? f : { ...f, detail: maskErrText(f.detail, hosts), label: f.kind === 'bgp' ? maskErrText(f.label, hosts) : f.label, faultKey: f.kind === 'bgp' ? '(가림)' : f.faultKey });
+  let open = []; let events = []; let unavailable = false;
+  try {
+    const o = await cdb.listOpenFaults({ cvpId });
+    const e = await cdb.recentFaultEvents({ sinceMs: days * 86_400_000, limit: 500, cvpId });
+    if (o.unavailable || e.unavailable) unavailable = true;
+    open = (o.rows || []).filter((f) => known.has(String(f.cvpId))).map((f) => mask({ ...f, cvpName: nameOf.get(String(f.cvpId)) || f.cvpId }));
+    events = (e.rows || []).filter((f) => known.has(String(f.cvpId))).map((f) => mask({ ...f, cvpName: nameOf.get(String(f.cvpId)) || f.cvpId }));
+  } catch (e) { unavailable = true; console.warn(`[cvp] 장애 이력 조회 실패: ${e.message}`); }
+  const settings = loadSettings();
+  res.json({
+    open, events, days, unavailable,
+    counts: await cdb.faultCounts().catch(() => ({ unavailable: true })),
+    scan: faultScanView(cvpFaultScanStatus()),
+    settings: { enabled: settings.enabled, faultAlerts: settings.faultAlerts === true, faultAlertsClosed: settings.faultAlertsClosed !== false, intervalMs: settings.intervalMs },
     ...(admin ? {} : { addressHidden: true }),
   });
+});
+
+/** v2.640 ③ — '지금 판정': 중앙 DB 의 최신값만 다시 판정한다(장비·엣지 왕복 0 — 연타해도 부하 없음). admin·operator. */
+api.post('/tools/cvp/faults/scan', writer, toolsPerm, fullScopeOnly, async (req, res) => {
+  try {
+    const r = await runCvpFaultScan({ reason: 'manual' });
+    logAudit({ user: req.user?.username, action: 'CVP 장애 판정 실행', target: 'cvp-faults', detail: `열림 ${r?.opened ?? '?'} · 변경 ${r?.updated ?? '?'} · 닫힘 ${r?.closed ?? '?'} · 보류 ${r?.held ?? '?'}` });
+    res.json({ ok: true, result: faultScanView({ ...r, at: r?.at ?? Date.now() }) });
+  } catch (e) { res.status(500).json({ ok: false, reason: capStr(e?.message, 300) }); }
+});
+
+/**
+ * v2.640 ③ — 수동 닫기(adminOnly · 사유 필수 · 감사): 등록 삭제·담당 변경으로 관측이 사라진 장애는 자동으로 닫히지 않는다
+ * (보고 부재 ≠ 고침 — v2.548 C5). 화면 문구가 '고쳐졌다는 뜻이 아니다' 를 적는다.
+ */
+api.post('/tools/cvp/faults/close', adminOnly, toolsPerm, fullScopeOnly, async (req, res) => {
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const pick = (k, n) => (typeof b[k] === 'string' ? capStr(b[k], n) : '');
+  const agent = typeof b.agent === 'string' ? capStr(b.agent, 128) : '';
+  const cvpId = pick('cvpId', 128); const deviceKey = pick('deviceKey', 128); const faultKey = pick('faultKey', 256); const reason = pick('reason', 300);
+  if (!cvpId || !deviceKey || !faultKey) return res.status(400).json({ ok: false, reason: 'cvpId·deviceKey·faultKey 가 필요합니다.' });
+  if (!reason.trim()) return res.status(400).json({ ok: false, reason: '닫는 사유를 적어야 합니다(감사 기록).' });
+  try {
+    const r = await cdb.closeFaultManual({ agent, cvpId, deviceKey, faultKey, reason, user: req.user?.username || '' });
+    if (r?.unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
+    const closed = Number(r?.closed || 0) > 0;
+    logAudit({ user: req.user?.username, action: 'CVP 장애 수동 닫기', target: `${cvpId}/${deviceKey}/${faultKey}`, detail: `${closed ? '닫음' : '대상 없음'} · 사유: ${reason}` });
+    if (!closed) return res.status(404).json({ ok: false, reason: '열린 장애가 없습니다(이미 닫혔거나 키가 다릅니다).' });
+    res.json({ ok: true, closed: 1 });
+  } catch (e) { res.status(500).json({ ok: false, reason: capStr(e?.message, 300) }); }
+});
+
+/**
+ * v2.640 ② — 파서 시험(adminOnly): 관리자가 CVP 응답 원문을 붙여넣으면 이 포탈의 파서가 무엇을 읽는지 보여준다. **네트워크 왕복 0**,
+ * 저장 0. 본문 상한은 express.json 기본(1MB) — 그보다 큰 응답은 앞부분만 붙여넣으라고 화면이 말한다(PREVIEW_TEXT_MAX 는 문자 기준).
+ */
+api.post('/tools/cvp/parse-preview', adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const kind = typeof b.kind === 'string' ? b.kind : '';
+  if (!PREVIEW_KINDS.includes(kind)) return res.status(400).json({ ok: false, reason: `kind 는 ${PREVIEW_KINDS.join('·')} 중 하나여야 합니다.`, kinds: PREVIEW_KINDS });
+  const text = typeof b.text === 'string' ? b.text : '';
+  if (!text.trim()) return res.status(400).json({ ok: false, reason: '응답 원문을 붙여넣으세요.' });
+  res.json({ ok: true, kinds: PREVIEW_KINDS, textMax: PREVIEW_TEXT_MAX, preview: previewParse(kind, text) });
+});
+
+/**
+ * v2.640 ④ — 장비 목록 CSV(목록 라우트와 같은 필터·같은 가림). 파일명은 ASCII(v2.519 규약) · 수식 가드(util/csv) · BOM.
+ * 수치가 없으면 빈 칸(0 을 지어내지 않는다).
+ */
+api.get('/tools/cvp/devices.csv', toolsPerm, fullScopeOnly, async (req, res) => {
+  const admin = isAdminReq(req);
+  const cvpId = typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null;
+  const q = capStr(typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '', 128);
+  const servers = listServers();
+  const nameOf = new Map(servers.map((s) => [String(s.id), s.name || s.id]));
+  const { rows, unavailable } = await cdb.listDeviceRows({ cvpId });
+  if (unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
+  let list = rows.filter((r) => rowBelongs(r, servers));
+  if (q) list = list.filter((d) => [d.hostname, d.model, d.serial, d.eosVersion, d.key, ...(admin ? [d.mgmtIp] : [])].some((x) => String(x || '').toLowerCase().includes(q)));
+  const n = (v) => (v == null ? '' : v);
+  const head = ['호스트명', '모델', '시리얼', '관리 주소', 'EOS', '스트리밍', '파트 정상', '파트 주의', '파트 장애', '파트 미확인', '빈 슬롯', '포트 up', '포트 down', '포트 전체', 'BGP established', 'BGP down', 'BGP 피어', 'CVP', '엣지', '수집 시각', '텔레메트리'];
+  const lines = [csvLine(head)];
+  for (const d of list) {
+    const p = partsSummary(d.partsList); const bg = d.bgpPeers ? bgpSummary(d.bgpPeers) : null; const po = d.ports;
+    lines.push(csvLine([d.hostname, d.model, d.serial, admin ? d.mgmtIp : '', d.eosVersion, d.streaming === true ? 'yes' : d.streaming === false ? 'no' : '',
+      n(p?.ok), n(p?.warn), n(p?.fault), n(p?.unknown), n(p?.absent), n(po?.up), n(po?.down), n(po?.total), n(bg?.established), n(bg?.down), n(bg?.peers),
+      nameOf.get(String(d.cvpId)) || d.cvpId, d.agent || '', localStamp(d.collectedAt), d.telemetry || '']));
+  }
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="cvp-devices-${fileStamp()}.csv"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(CSV_BOM + lines.join('\r\n') + '\r\n');
 });
 
 api.get('/tools/cvp/port-series', toolsPerm, fullScopeOnly, async (req, res) => {
@@ -267,6 +399,8 @@ api.delete('/tools/cvp/servers/:id', adminOnly, toolsPerm, fullScopeOnly, async 
   if (!deleteServer(req.params.id)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
   dropStatus(req.params.id);
   try { await cdb.pruneDevices(cdb.LOCAL_AGENT, {}, { cvpIds: listServers().filter((s) => !String(s.agent || '').trim()).map((s) => s.id) }); } catch { /* 다음 주기 폴러가 다시 정리한다 */ }
+  // v2.640 ③: 등록을 지우면 그 CVP 의 열린 장애도 지운다(관측이 영영 오지 않으므로 'missing' 보류로 남기면 화면에 유령이 된다). 이벤트 이력은 남긴다.
+  try { await cdb.deleteFaultsFor(null, req.params.id); } catch (e) { console.warn(`[cvp] 삭제한 CVP 의 장애 행 정리 실패: ${e.message}`); }
   logAudit({ user: req.user?.username, action: 'CVP 서버 삭제', target: `${srv?.name || ''}(${req.params.id})` });
   res.json({ ok: true });
 });
@@ -292,7 +426,8 @@ api.post('/tools/cvp/servers/:id/test', adminOnly, toolsPerm, fullScopeOnly, asy
   logAudit({ user: req.user?.username, action: 'CVP 연결 테스트', target: `${saved.name}(${newSecret ? target.host : saved.host})`, detail: `${target.authMode}${newSecret ? ' 새 비밀' : ' 저장 비밀'} → ${r.ok ? `성공 ${r.deviceCount}대` : `실패: ${capStr(r.reason, 200)}`}` });
   res.json({
     ok: !!r.ok, ms: r.ms ?? null, ranOn: 'central',
-    ...(r.ok ? { deviceCount: r.deviceCount, usedPath: r.usedPath, seenFields: r.seenFields || [] } : { reason: r.reason, error: r.reason, authFailed: !!r.authFailed }),
+    ...(r.ok ? { deviceCount: r.deviceCount, usedPath: r.usedPath, seenFields: r.seenFields || [], ...(r.cvpVersion ? { cvpVersion: r.cvpVersion } : {}) } : { reason: r.reason, error: r.reason, authFailed: !!r.authFailed }),
+    ...(r.sample && typeof r.sample === 'object' ? { sample: r.sample } : {}), // v2.640 ②: 원문 표본(adminOnly 라우트)
     ...(String(saved.agent || '').trim() ? { note: `이 CVP 는 엣지(${saved.agent})가 수집합니다 — 중앙에서 닿지 않는 것은 정상일 수 있습니다(엣지의 다음 수집 결과를 보세요).` } : {}),
   });
 });
