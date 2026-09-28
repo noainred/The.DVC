@@ -149,7 +149,7 @@ let _db = null;
  *   주기를 버리고 로컬(portal.env/기본)로 돌아갔다(예: 영역수집 60분 지정이 풀려 장비 부하 증가). 오류면 라우트가
  *   intervals 를 싣지 않고(`intervalsUnreadable`) — 이 기능을 모르는 구버전 엣지에는 503 — 엣지는 직전 값을 유지한다.
  */
-const _loadErr = makeSettingsLoadError(() => FILE);
+const _loadErr = makeSettingsLoadError(() => FILE, { label: '스토리지 수집 주기', confirm: () => saveIntervalConfig({}) });
 /** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function storageIntervalsLoadError() { load(); return _loadErr.get(); }
 

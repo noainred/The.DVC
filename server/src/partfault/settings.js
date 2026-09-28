@@ -37,7 +37,7 @@ let _retentionFromFile = false; // v2.613 PERSIST2613-06: 파일에 retentionDay
 export const RETENTION_LIMITS = Object.freeze({ min: 30, max: 3650, def: 730 });
 const DEFAULTS = Object.freeze({ enabled: false, edges: {}, central: null, retentionDays: RETENTION_LIMITS.def });
 
-const _loadErr = makeSettingsLoadError(() => FILE());
+const _loadErr = makeSettingsLoadError(() => FILE(), { label: '파트 장애 설정', confirm: () => savePartFaultSettings({}) });
 /** v2.631(EDGE2631-01): 설정 파일을 못 읽었으면 사유(배포 라우트가 503 으로 답한다), 읽었으면 null. */
 export function partFaultSettingsLoadError() { loadPartFaultSettings(); return _loadErr.get(); }
 

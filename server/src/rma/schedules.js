@@ -23,7 +23,7 @@ let seq = 0;
  *   전부 멈추고, 동시에 중앙은 known 집합이 비어 엣지가 보낸 점검 결과를 전부 버렸다. 로드 오류를 기억해 rma-poll 이 503 으로
  *   답하게 한다(엣지는 비-2xx 면 outbox·스케줄을 그대로 두고 백오프한다). 관리자가 한 번 저장하면 풀린다.
  */
-const _loadErr = makeSettingsLoadError(() => FILE);
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'RMA 점검 스케줄', confirm: () => { load(); persist(); } });
 function load() {
   if (_db) return _db;
   if (!fs.existsSync(FILE)) { _loadErr.missing(); _db = { agents: {} }; return _db; }

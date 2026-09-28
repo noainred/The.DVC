@@ -4186,6 +4186,15 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **undici 기본 입출력 시한은 300초다 — 그보다 긴 시한은 `resilientFetch.dispatcherFor`**(AX1-03 — v2.631 회귀): 시한만 늘리면 headersTimeout 이 먼저 끊는다.
     - **같은 숫자를 내는 경로(내부·공개 API·화면)는 같은 기준**(AX1-04·AX2-01): 비율의 분모는 설치 용량, 사용률은 읽은 데이터스토어만. 공개 API 대조 테스트는 재구현이 아니라 **내부 라우트 응답**과 비교한다.
     - 그 밖: 범위 관리자 형제 라우트 4곳(중계 프록시 설정·VM 생성 작업·DataCenter 목록·인증서 재확인) · RDP 티켓 필드 상한 · GPU 내보내기 스트리밍 + 동시 1건 · 용량 요약 60초 캐시 · 로그 CSV `(ts, rowid)` 커서 · NSX·Horizon 부분 합 · 이상 탐지 척도 하한 · 인시던트 시각 미상.
+  - ⚠⚠ **v2.633 — 손상 보존본만 남은 중앙 설정 파일은 관리자가 '기본값으로 확정' 한다. 나이로 자동 해제하지 않는다**
+    (`util/settingsLoadError.js confirmSettingsDefault` + `POST /tools/service-check/settings-files/confirm` + 웹 `DavinciChecks.jsx`·
+    `settingsFileConfirmText.js`, 사용자 선택 "진행"(추천 ③). 회귀 `server/test/audit2633.test.js` — 13개 파일 실제 확정 · 변이 3/3):
+    - 해제는 곧 기본값(대개 꺼짐)을 전 엣지에 배포하는 것이다 — 보존본 나이로 풀면 v2.631 EDGE2631-01 을 시간차로 되살린다.
+    - **새 설정 배포 모듈은 `makeSettingsLoadError(fileOf, { label, confirm })`** — confirm 은 그 모듈의 저장 함수로 지금 기본값을 쓴다
+      (저장 성공이 곧 `ok()`). 테스트 ① 이 전 호출부의 label·confirm 을 소스로 고정하고 **등록 수 13 을 고정**한다(늘면 FILES 도 갱신).
+    - 서버는 등록부에 있는 파일 이름만 받는다(경로 조작 404) · admin + 전체 범위(`settingsFleetOnly`) · 감사 로그 · 보존본은 지우지 않는다 ·
+      저장했는데 여전히 못 읽으면 `still-error`(성공이라 말하지 않는다).
+    - ⚠ 역할 게이트 테스트는 `AUTH_ENABLED=true` 로 — 꺼져 있으면 requireRole 이 익명(admin)으로 통과시켜 operator 가 200 을 받는다(이번에 실제로 그랬다).
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

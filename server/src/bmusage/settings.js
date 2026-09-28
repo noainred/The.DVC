@@ -106,8 +106,8 @@ const CACHE_MS = 3_000;
 
 // v2.631(EDGE2631-01): 중앙에서는 이 파일이 **배포 원본**이다. 손상이면 기본값(꺼짐·빈 법인)으로 떨어지는데, 그 기본값을
 //   배포 라우트가 200 으로 내려보내면 전 엣지의 수집이 꺼진다 — 로드 오류를 기억해 /api/central/bmusage-config 가 503 으로 답한다.
-const _localErr = makeSettingsLoadError(FILE);
-const _distErr = makeSettingsLoadError(DIST_FILE);
+const _localErr = makeSettingsLoadError(FILE, { label: '베어메탈 사용률 설정', confirm: () => saveBmUsageSettings({}) });
+const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포', confirm: ({ by } = {}) => saveDistribution({}, by || '') });
 function readFile() {
   if (!fs.existsSync(FILE())) { _localErr.missing(); return {}; }
   try {
