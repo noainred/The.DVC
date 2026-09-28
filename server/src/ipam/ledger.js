@@ -5,10 +5,12 @@
 
 import { getIgnoreMatcher, getClassifier, settingsRev } from './settings.js';
 import { getAnnotations, annotationsRev } from './annotations.js';
-import { scanResultList, getIpHistoryMap, scanRev } from './scanStore.js';
+import { scanResultList, getIpHistoryMap, scanRev, LOCAL as SCAN_LOCAL } from './scanStore.js';
 import { getOverrides, overridesRev } from './overrides.js';
 import { findPolicy, policiesRev, getPolicies } from './rangePolicies.js';
 import { ipToNum } from '../util/ipv4.js';
+import { currentScanDatacenters } from './scanDatacenterSource.js'; // v2.638: 스캔 결과의 데이터센터 귀속
+import { datacenterOfVcenter } from '../datacenter/store.js';
 
 // buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override/정책 리비전이면 재계산하지 않는다.
 // (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
@@ -37,7 +39,11 @@ export function _ledgerCacheStats() {
 // 범위 제한 계정에 캐시 히트로 새어 나간다(M1 캐시 교차 유출과 동형). allowed=null='all'.
 /** 스냅샷 세대 밖의 변동 축(설정·주석·스캔·override·정책 리비전) — 라우트 memo 키가 같이 써야 주석 저장 직후 TTL 동안 낡은 응답이 나가지 않는다(v2.582 TUNE-1). */
 export function ipamRevKey() { return `s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}`; }
-const _ipamKey = (snap, vcenterId, allowed = null) => `${snap?.generatedAt || ''}|${vcenterId || ''}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}`;
+// v2.638: 스캔 행의 데이터센터 귀속(scanDatacenter.js)도 키에 넣는다 — 스캔 설정의 데이터센터·DataCenter 할당을 바꾸면
+//   다음 스냅샷 세대(30초)를 기다리지 않고 대장이 다시 만들어진다. 범위 계정은 스캔 행을 받지 않으므로 넣지 않는다.
+//   vCenter 를 고른 조회(vcenterId)는 그 vCenter 의 DataCenter 할당도 넣는다(그 할당이 어떤 스캔 행이 보이는지를 정한다).
+const _dcKey = (snap, vcenterId, allowed) => (allowed ? '' : `|d${currentScanDatacenters(snap?.vcenters).sig}${vcenterId ? `@${datacenterOfVcenter(vcenterId)}` : ''}`);
+const _ipamKey = (snap, vcenterId, allowed = null) => `${snap?.generatedAt || ''}|${vcenterId || ''}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}${_dcKey(snap, vcenterId, allowed)}`;
 
 // 자동 발견 출처(discovery)를 사용자 친화 reconcile 상태로 매핑.
 // vcenter=vCenter만 인식 · scan=스캔만 발견(수동) · both=양쪽 · manual=운영자 등록(자동발견 없음)
@@ -145,9 +151,17 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
     }
     for (const h of uniHosts) if (ipToNum(h.name) != null) known.add(h.name);
     const seen = new Set(rows.map((r) => r.ip));
+    // v2.638: 스캔한 에이전트의 데이터센터에 귀속한다(수동 지정 > 자동 — ipam/scanDatacenter.js). 귀속을 판정하지 못한 행은
+    //   예전처럼 어느 데이터센터에도 두지 않는다(지어내지 않는다). vCenter 를 고른 조회에서는 **다른 데이터센터에 귀속된** 스캔 행을
+    //   빼고, 귀속 없는 행과 그 vCenter 의 데이터센터 행만 보인다. 그 vCenter 에 DataCenter 할당이 없으면 판단할 근거가 없으므로 예전 그대로다.
+    const dcMap = currentScanDatacenters(snap.vcenters).map;
+    const viewDc = vcenterId ? datacenterOfVcenter(vcenterId) : '';
     for (const sc of scanList) {
       const n = ipToNum(sc.ip);
       if (ignoredAt(sc.ip, n, '') || known.has(sc.ip) || seen.has(sc.ip) || n == null) continue;
+      const agent = sc.agent || SCAN_LOCAL;
+      const dc = dcMap.get(String(agent).toLowerCase()) || null;
+      if (viewDc && dc?.datacenterId && dc.datacenterId !== viewDc) continue;
       seen.add(sc.ip);
       const hist = histMap[sc.ip];
       const released = hist?.status === 'down';
@@ -160,6 +174,7 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
         openPorts: sc.openPorts || [], services: sc.services || [], lastSeen: sc.lastSeen || null,
         firstSeen: hist?.firstSeen || null, usageStatus: hist?.status || null, released,
         source: 'scan', discovery: 'scan', owner: null,
+        scanAgent: agent, datacenterId: dc?.datacenterId || '', datacenterName: dc?.datacenterName || '', dcSource: dc?.source || '',
       });
     }
   }
@@ -256,6 +271,14 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
 
   const byVc = {};
   for (const r of rows) byVc[r.vcenterId] = (byVc[r.vcenterId] || 0) + 1;
+  // v2.638: 스캔으로만 확인된 IP 의 데이터센터별 개수(귀속 없음은 datacenterId '').
+  const scanDc = new Map();
+  for (const r of rows) {
+    if (r.ownerType !== 'scanned') continue;
+    const k = r.datacenterId || '';
+    const e = scanDc.get(k) || { datacenterId: k, datacenterName: r.datacenterName || '', count: 0 };
+    e.count += 1; scanDc.set(k, e);
+  }
   // reconcile(출처 대조) 분포 + 관리상태 분포 + 관리 방식(override/정책/자동) 분포 — 대시보드 요약 카드용.
   const reconCounts = { vcenter: 0, scan: 0, both: 0, manual: 0, conflict: 0 };
   const mgmtCounts = {};
@@ -286,6 +309,7 @@ export function buildIpamRows(snap, vcenterId, allowed = null) {
     mgmtStatus: mgmtCounts,
     appliedBy: appliedCounts,
     byVcenter: Object.entries(byVc).map(([id, c]) => ({ vcenterId: id, vcenterName: vcName[id] || (id || '네트워크 스캔'), scanned: !id, count: c })).sort((a, b) => b.count - a.count),
+    scanByDatacenter: [...scanDc.values()].sort((a, b) => b.count - a.count),
     rows,
   };
   putGenerationCache(_ipamCache, _ck, out);

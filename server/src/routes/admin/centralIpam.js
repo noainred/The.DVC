@@ -10,6 +10,10 @@ import { startScan, scanStatus, rescheduleScanPoller } from '../../ipam/scanPoll
 import { recordScanLog, listScanLog, SCAN_LOG_EVENTS } from '../../ipam/scanLog.js'; // v2.636: 스캔 실행 로그
 import { scanRangesToCsv, scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport, LOCAL_AGENT } from '../../ipam/scanRangesCsv.js'; // v2.636: 에이전트별 스캔 대역 CSV
 import { rangeSize, RANGE_CAP } from '../../ipam/scan.js';
+import { agentVcenterIds, suggestAgentSubnets } from '../../ipam/scanDatacenter.js'; // v2.638: 데이터센터 귀속 · /24 대역 제안
+import { currentScanDatacenters, invalidateScanDatacenters, scanDatacenterOf } from '../../ipam/scanDatacenterSource.js';
+import { agentIdracServers } from '../../ipam/scanSuggestSource.js';
+import { listDatacenters } from '../../datacenter/store.js';
 import { todayStamp } from '../../util/dayKey.js';
 import { saveVcRanges, removeVcRanges, listVcRanges } from '../../ipam/rangeStore.js';
 import { sampleCsv as vcRangesSampleCsv, parseVcRangesCsv, analyzeVcRangesImport } from '../../ipam/vcRangesCsv.js';
@@ -33,6 +37,18 @@ const fleetOnly = fullScopeOnlyWith('이 기능은 전 법인(엣지·스캔 전
 function vcRangeWritable(user, vcenterId) {
   const w = writeScopedVcenterIds(user, store.get());
   return !w || w.has(String(vcenterId || ''));
+}
+
+/**
+ * v2.638: IP 스캔 설정 화면의 데이터센터 칸 — 이 에이전트의 귀속 판정(수동/자동/판정 불가와 근거)과 고를 수 있는 DataCenter 목록.
+ * DataCenter 목록을 못 읽으면 빈 목록 + 사유(`datacentersError`) — 화면이 '없음' 이 아니라 '못 읽음' 이라 말한다.
+ */
+function scanDatacenterView(agent) {
+  let datacenters = []; let datacentersError = null;
+  try { datacenters = listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })); } catch (e) { datacentersError = String(e?.message || e).slice(0, 200); }
+  let datacenter = null;
+  try { datacenter = scanDatacenterOf(agent, store.get().vcenters); } catch { /* 판정 실패 — null(화면: 판정하지 못함) */ }
+  return { datacenter, datacenters, ...(datacentersError ? { datacentersError } : {}) };
 }
 
 export function registerCentralIpam(adminRouter) {
@@ -183,15 +199,42 @@ adminRouter.get('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => { // 
     status: scanStatus(), info: scanInfo(),
     centralEnabled: !!config.central.token,   // 에이전트 보고 가능 여부(중앙 토큰 설정)
     reports: getAgentReports(),               // 에이전트별 마지막 보고
+    ...scanDatacenterView(agent),             // v2.638: 이 에이전트의 데이터센터 귀속 판정 + 고를 수 있는 DataCenter 목록
   });
 });
 adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => {
   const agent = (req.body && req.body.agent) || LOCAL;
+  // v2.638: 데이터센터는 등록된 DataCenter 만(빈 값 = 자동). 목록에 없는 값을 저장하면 그 에이전트의 스캔 결과가 어디에도 귀속되지 않는다.
+  if (req.body && req.body.datacenterId !== undefined && req.body.datacenterId !== '') {
+    const want = String(req.body.datacenterId || '').trim();
+    let dcs = [];
+    try { dcs = listDatacenters(); } catch { /* 아래에서 거부 */ }
+    if (!dcs.some((d) => d.id === want)) return res.status(400).json({ ok: false, reason: `등록되지 않은 DataCenter 입니다: ${want.slice(0, 64)} — 설정 › DataCenter 에서 먼저 등록하거나 '자동' 을 고르세요.` });
+  }
   const settings = saveScanSettings(agent, req.body || {});
+  invalidateScanDatacenters();
   if (agent === LOCAL) rescheduleScanPoller(); // 로컬 설정만 이 포탈 폴러에 적용
   recordScanLog({ event: 'settings', agent, user: req.user?.username, ranges: (settings.ranges || []).length, rangesSample: (settings.ranges || []).slice(0, 5),
     message: `IP 스캔 설정 저장 — ${settings.enabled ? '주기 스캔 켬' : '주기 스캔 끔'} · 주기 ${Math.round((settings.intervalMs || 0) / 60000)}분 · 포트 ${(settings.ports || []).length}개` });
-  res.json({ ok: true, agent, settings, status: scanStatus() });
+  res.json({ ok: true, agent, settings, status: scanStatus(), ...scanDatacenterView(agent) });
+});
+// v2.638: 에이전트가 쓰는 /24 대역 제안 — 그 에이전트가 수집하는 vCenter 의 VM·호스트 IP + 담당 iDRAC 관리 IP(스냅샷·등록부만 읽는다 — 장비 왕복 0).
+adminRouter.get('/ipam/scan/suggest', adminOnly, fleetOnly, (req, res) => {
+  const agent = String(req.query.agent || LOCAL).slice(0, 128);
+  const snap = store.get();
+  const { inputs } = currentScanDatacenters(snap.vcenters);
+  const vcIds = agentVcenterIds(agent, { vcenters: inputs.vcenters, snapVcenters: snap.vcenters, collectors: inputs.collectors });
+  const idrac = agentIdracServers(agent, inputs.collectors);
+  const vcName = {};
+  for (const v of snap.vcenters || []) vcName[v.id] = v.name || v.id;
+  const r = suggestAgentSubnets({ vcenterIds: vcIds, vms: snap.vms, hosts: snap.hosts, idrac: idrac.servers, vcName });
+  res.json({
+    ok: true, agent, ...r,
+    vcenters: vcIds.map((id) => ({ id, name: vcName[id] || id })),
+    idracServers: idrac.servers.length, idracSource: idrac.source,
+    datacenter: scanDatacenterOf(agent, snap.vcenters),
+    ...(Object.keys(inputs.errors || {}).length ? { inputErrors: inputs.errors } : {}),
+  });
 });
 // v2.636: 스캔 실행 로그(시작·종료·실패·건너뜀·엣지 보고·설정 변경) — 형제 status 와 같은 게이트(전 엣지 이름·대역이 들어간다).
 adminRouter.get('/ipam/scan/log', adminOnly, fleetOnly, (req, res) => {

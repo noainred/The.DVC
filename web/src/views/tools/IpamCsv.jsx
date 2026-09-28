@@ -197,7 +197,7 @@ function ManageCsv({ scope, canManage, onApplied }) {
 }
 
 /* ── ③ 에이전트별 스캔 대역 CSV ─────────────────────────────────────────── */
-function RangesCsv({ onApplied }) {
+export function RangesCsv({ onApplied }) { // v2.638: IP 스캔 설정 페이지에서도 연다(같은 초안 키 — 두 곳의 입력이 하나다)
   const d = useIpamDraft('csv:ranges');
   useEffect(() => { if (!d.loaded) d.load(''); }, [d.loaded]); // eslint-disable-line react-hooks/exhaustive-deps
   const text = d.value ?? '';

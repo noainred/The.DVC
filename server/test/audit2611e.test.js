@@ -452,7 +452,10 @@ test('PERF2611-01: buildIpamRows 결과가 옛 판본과 완전히 같다(무시
     const snap2 = makeSnap(`g${++gen}`, 11);
     const t2 = performance.now(); const b = ledger.buildIpamRows(snap2, vcenterId, allowed); const t3 = performance.now();
     // owner 는 스냅샷 객체 참조라 두 스냅샷이 다른 객체 — 내용이 같으면 deepStrictEqual 이 같다고 본다.
-    assert.deepStrictEqual(b, a, `${label}: 결과가 옛 판본과 다르다`);
+    // v2.638: 스캔 행의 데이터센터 귀속 필드와 그 요약은 이 판본 뒤에 **추가**된 것이다 — 뺀 나머지가 옛 판본과 같아야 한다.
+    const V2638 = ['scanAgent', 'datacenterId', 'datacenterName', 'dcSource'];
+    const strip = (x) => ({ ...x, scanByDatacenter: undefined, rows: x.rows.map((r) => { const o = { ...r }; for (const k of V2638) delete o[k]; return o; }) });
+    assert.deepStrictEqual(strip(b), strip(a), `${label}: 결과가 옛 판본과 다르다`);
     assert.ok(a.rows.length > minRows, `${label}: 입력이 충분히 커야 한다(${a.rows.length})`);
     return { label, rows: a.rows.length, oldMs: +(t1 - t0).toFixed(1), newMs: +(t3 - t2).toFixed(1) };
   };
