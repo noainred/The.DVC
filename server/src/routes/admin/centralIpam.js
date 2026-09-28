@@ -6,6 +6,10 @@ import { listTargets } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../../ipam/scanStore.js';
 import { startScan, scanStatus, rescheduleScanPoller } from '../../ipam/scanPoller.js';
+import { recordScanLog, listScanLog, SCAN_LOG_EVENTS } from '../../ipam/scanLog.js'; // v2.636: 스캔 실행 로그
+import { scanRangesToCsv, scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport, LOCAL_AGENT } from '../../ipam/scanRangesCsv.js'; // v2.636: 에이전트별 스캔 대역 CSV
+import { rangeSize, RANGE_CAP } from '../../ipam/scan.js';
+import { todayStamp } from '../../util/dayKey.js';
 import { saveVcRanges, removeVcRanges, listVcRanges } from '../../ipam/rangeStore.js';
 import { sampleCsv as vcRangesSampleCsv, parseVcRangesCsv, analyzeVcRangesImport } from '../../ipam/vcRangesCsv.js';
 import { loadVcenterConfig } from '../../config.js';
@@ -154,7 +158,13 @@ adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => {
   const agent = (req.body && req.body.agent) || LOCAL;
   const settings = saveScanSettings(agent, req.body || {});
   if (agent === LOCAL) rescheduleScanPoller(); // 로컬 설정만 이 포탈 폴러에 적용
+  recordScanLog({ event: 'settings', agent, user: req.user?.username, ranges: (settings.ranges || []).length, rangesSample: (settings.ranges || []).slice(0, 5),
+    message: `IP 스캔 설정 저장 — ${settings.enabled ? '주기 스캔 켬' : '주기 스캔 끔'} · 주기 ${Math.round((settings.intervalMs || 0) / 60000)}분 · 포트 ${(settings.ports || []).length}개` });
   res.json({ ok: true, agent, settings, status: scanStatus() });
+});
+// v2.636: 스캔 실행 로그(시작·종료·실패·건너뜀·엣지 보고·설정 변경) — 형제 status 와 같은 게이트(전 엣지 이름·대역이 들어간다).
+adminRouter.get('/ipam/scan/log', adminOnly, fleetOnly, (req, res) => {
+  res.json({ ok: true, ...listScanLog({ limit: req.query.limit, agent: req.query.agent, level: req.query.level, event: req.query.event }), events: SCAN_LOG_EVENTS });
 });
 adminRouter.post('/ipam/scan/run', adminOnly, fleetOnly, (_req, res) => {
   const r = startScan({ manual: true }); // 비동기 시작 — 즉시 반환(백그라운드 실행, 창 닫아도 지속)
@@ -168,17 +178,64 @@ adminRouter.get('/ipam/scan/results', adminOnly, fleetOnly, (_req, res) => {
   res.json({ results: scanResultList().slice(0, 5000), info: scanInfo() });
 });
 
+/* ── v2.636: 에이전트별 IP 스캔 대역 CSV(IP관리 › CSV 가져오기·내보내기) ─────────────────────────────────
+ * 형제 스캔 설정 라우트와 같은 게이트(adminOnly + fleetOnly — 전 엣지 이름·대역이 들어간다). 가져오기는 dryRun → 적용
+ * 2단계이고, 교체 모드는 **파일에 나온 에이전트만** 바꾼다. 오류 줄이 있는 에이전트는 통째로 적용하지 않는다(scanRangesCsv). */
+function scanRangesCurrent() {
+  const m = new Map();
+  for (const a of listScanAgents()) m.set(String(a.name).toLowerCase(), { name: a.name, ranges: a.ranges || [] });
+  if (!m.has(LOCAL_AGENT)) m.set(LOCAL_AGENT, { name: LOCAL_AGENT, ranges: loadScanSettings(LOCAL).ranges || [] });
+  return m;
+}
+adminRouter.get('/ipam/scan/ranges.csv', adminOnly, fleetOnly, (_req, res) => {
+  const agents = [...scanRangesCurrent().values()].sort((a, b) => (a.name === LOCAL_AGENT ? -1 : b.name === LOCAL_AGENT ? 1 : a.name.localeCompare(b.name)));
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="ip-scan-ranges-${todayStamp()}.csv"`);
+  res.send(scanRangesToCsv(agents));
+});
+adminRouter.get('/ipam/scan/ranges/sample.csv', adminOnly, fleetOnly, (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="ip-scan-ranges-sample.csv"');
+  res.send(scanRangesSampleCsv());
+});
+adminRouter.post('/ipam/scan/ranges/import', adminOnly, fleetOnly, (req, res) => {
+  const { rows, error } = parseScanRangesCsv(String(req.body?.csv || ''));
+  if (error) return res.status(400).json({ ok: false, reason: error });
+  if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
+  const mode = req.body?.mode === 'add' ? 'add' : 'replace';
+  const { report, summary, plans } = analyzeScanRangesImport(rows, { mode, current: scanRangesCurrent(), rangeSize, rangeCap: RANGE_CAP });
+  const changing = plans.filter((p) => !p.blocked && (p.added.length || p.removed.length));
+  if (req.body?.dryRun) return res.json({ ok: true, dryRun: true, mode, report, summary, plans, total: rows.length });
+  const applied = []; const failed = [];
+  for (const p of changing) {
+    try { saveScanSettings(p.key, { ranges: p.after }); applied.push({ agent: p.agent, added: p.added.length, removed: p.removed.length, total: p.after.length }); }
+    catch (e) { failed.push({ agent: p.agent, reason: String(e?.message || e).slice(0, 200) }); }
+  }
+  if (applied.some((a) => a.agent === LOCAL_AGENT)) { try { rescheduleScanPoller(); } catch { /* */ } }
+  const blocked = plans.filter((p) => p.blocked).map((p) => ({ agent: p.agent, reason: p.blocked }));
+  if (applied.length) {
+    const addN = applied.reduce((a, x) => a + x.added, 0); const rmN = applied.reduce((a, x) => a + x.removed, 0);
+    logAudit({ user: req.user?.username, action: 'IP 스캔 대역 CSV 가져오기', detail: `${mode === 'add' ? '추가' : '교체'} · 에이전트 ${applied.length}곳 · 대역 +${addN} −${rmN} · 막힘 ${blocked.length}`, ip: req.ip || '' });
+    recordScanLog({ event: 'settings', user: req.user?.username, message: `IP 스캔 대역 CSV 가져오기(${mode === 'add' ? '추가' : '교체'}) — 에이전트 ${applied.length}곳 · 대역 +${addN} −${rmN}${blocked.length ? ` · 오류로 적용 안 한 에이전트 ${blocked.length}곳` : ''}` });
+  }
+  res.json({ ok: true, mode, applied, blocked, failed, report, summary, total: rows.length });
+});
+
 // vCenter별 스캔 대역 저장/삭제 + 즉시 스캔(주기 스캔이 이 대역들을 함께 스캔).
 adminRouter.put('/ipam/vc-ranges', adminOnly, (req, res) => {
   const b = req.body || {};
   if (!vcRangeWritable(req.user, b.vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); // v2.607 AUTHZ2607-04
   const r = saveVcRanges(b.vcenterId, { ranges: b.ranges, enabled: b.enabled });
-  if (r.ok) { try { rescheduleScanPoller(); } catch { /* */ } }
+  if (r.ok) {
+    try { rescheduleScanPoller(); } catch { /* */ }
+    recordScanLog({ event: 'settings', user: req.user?.username, ranges: (r.ranges || []).length, rangesSample: (r.ranges || []).slice(0, 5), message: `vCenter 스캔 대역 저장 — ${String(b.vcenterId || '').slice(0, 120)}` });
+  }
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.delete('/ipam/vc-ranges/:vcenterId', adminOnly, (req, res) => {
   if (!vcRangeWritable(req.user, req.params.vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); // v2.607 AUTHZ2607-04
   const r = removeVcRanges(req.params.vcenterId);
+  if (r.ok) recordScanLog({ event: 'settings', user: req.user?.username, message: `vCenter 스캔 대역 삭제 — ${String(req.params.vcenterId || '').slice(0, 120)}` });
   res.status(r.ok ? 200 : 404).json(r);
 });
 adminRouter.post('/ipam/vc-ranges/scan', adminOnly, fleetOnly, (_req, res) => {
@@ -236,6 +293,7 @@ adminRouter.post('/ipam/vc-ranges/import', adminOnly, (req, res) => {
   }
   if (added || overwritten) { try { rescheduleScanPoller(); } catch { /* */ } }
   logAudit({ user: req.user?.username, action: 'IPAM 스캔 대역 CSV 가져오기', detail: `추가 ${added}·덮어쓰기 ${overwritten}·건너뜀 ${skipped.length}·실패 ${failed.length}`, ip: req.ip || '' });
+  if (added || overwritten) recordScanLog({ event: 'settings', user: req.user?.username, message: `vCenter 스캔 대역 CSV 가져오기 — 추가 ${added} · 덮어쓰기 ${overwritten} · 건너뜀 ${skipped.length} · 실패 ${failed.length}` });
   res.json({ ok: true, added, overwritten, skipped, failed, total: rows.length, ...(outOfScope ? { skippedOutOfScope: outOfScope, skippedOutOfScopeReason: '범위 밖(또는 조회 전용) vCenter 행은 저장하지 않았습니다.' } : {}) });
 });
 }

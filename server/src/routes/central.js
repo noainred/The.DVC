@@ -66,6 +66,7 @@ import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq, lateBmstorResult, bmsto
 import { applyBmstorResults } from '../bmstor/poller.js';
 import { recordCapture } from '../net/captureHistory.js';
 import { loadScanSettings, mergeScanResults, recordAgentReport, scanSettingsLoadError } from '../ipam/scanStore.js';
+import { recordScanLog } from '../ipam/scanLog.js'; // v2.636: 엣지 스캔 보고·거부를 실행 로그에
 import { putEdgeLinkReport } from '../central/linkCheckEdge.js';   // v2.552: 엣지가 잰 통신 링크 결과 수신
 import { buildLinks, publicLink, EDGE_KINDS } from '../linkcheck/links.js';
 // ⚠ **redact 된 목록**을 쓴다 — 링크 계산에 필요한 것은 name·url·host 뿐이고, 이 응답은 엣지로
@@ -2087,6 +2088,7 @@ centralRouter.post('/ip-scan-result', requireCentral({ notFound: { ok: false } }
       //   개별 토큰 하나가 임의 IP 를 무한히 쌓았다. 정상 엣지는 배정(ranges)이 있을 때만 스캔·보고한다(agent/ipScanWorker.js —
       //   ip-scan-assignment 가 assigned:false 면 보고하지 않는다). 공유 토큰은 이름을 가릴 수 없어 전체 상한(scanStore)이 막는다.
       console.warn(`[central] ip-scan-result: ${agent} 는 스캔 배정 범위가 없습니다 — 결과를 받지 않습니다`);
+      recordScanLog({ event: 'reject', agent, message: '이 엣지에 배정된 스캔 대역이 없어 보고를 받지 않았습니다(409).' });
       return res.status(409).json({ ok: false, reason: `엣지 '${agent}' 에 배정된 스캔 범위가 없습니다 — 설정 › IPAM › 스캔에서 이 엣지의 범위를 지정하세요.`, unassigned: true });
     }
   }
@@ -2099,6 +2101,17 @@ centralRouter.post('/ip-scan-result', requireCentral({ notFound: { ok: false } }
   const mr = validAlive.length ? mergeScanResults(validAlive, Date.now(), agent) : { merged: 0, capped: 0 };
   const capped = mr?.capped || 0;
   recordAgentReport(agent, { scanned: b.scanned || 0, alive: validAlive.length, durationMs: b.durationMs || null });
+  {
+    // v2.636: 엣지 보고를 실행 로그에 — 받지 않은 개수(범위 밖·형식 오류·상한)를 사유와 함께 남긴다(조용한 드롭 금지).
+    const outOfRange = Array.isArray(b.alive) ? Math.max(0, Math.min(b.alive.length, 8000) - alive.length) : 0;
+    const notes = [];
+    if (outOfRange) notes.push(`배정 범위 밖 ${outOfRange}개 제외`);
+    if (dropped) notes.push(`형식 오류 ${dropped}개 제외`);
+    if (capped) notes.push(`저장 상한으로 새 IP ${capped}개 미반영`);
+    if (aliveOmitted) notes.push(`보고 상한(8000) 초과 ${aliveOmitted}개 미수신`);
+    recordScanLog({ event: 'report', agent, scanned: b.scanned, alive: validAlive.length, durationMs: b.durationMs,
+      dropped: outOfRange + dropped + aliveOmitted, message: notes.join(' · ') });
+  }
   // v2.603 CEN2603-02: 전체 상한으로 받지 않은 새 IP 수를 밝힌다(merged 는 받은 것만).
   res.json({ ok: true, merged: validAlive.length - capped, ...(dropped ? { dropped } : {}), ...(capped ? { capped } : {}), ...(aliveOmitted ? { omitted: aliveOmitted } : {}) });
 });

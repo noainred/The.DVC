@@ -177,6 +177,34 @@ export function setOverrideBatch(ips, partial = {}, user) {
   return { ok: true, changed };
 }
 
+/**
+ * v2.636: IP 마다 **다른** 변경을 한 번에 적용(CSV 가져오기). setOverride 를 행마다 부르면 행마다 파일을 원자 쓰기한다
+ * (1만 행 = 1만 번 fsync) — 여기서는 메모리에서 모두 적용하고 **한 번** 쓴다. 규칙은 setOverride 와 같다(부분 갱신,
+ * 비면 레코드 삭제, 정규형 키, 원문 키 유령 이전). 판정(값 검증·범위)은 호출부(manageCsv.analyzeManageImport)가 끝낸 뒤다.
+ * @param {{ip:string, partial:object}[]} entries
+ * @returns {{ok:true, changed:number, removed:number}}
+ */
+export function setOverridesMany(entries, user) {
+  const data = load();
+  const now = new Date().toISOString();
+  const by = user?.username || 'unknown';
+  let changed = 0; let removed = 0;
+  for (const e of entries || []) {
+    const raw = String(e?.ip || '').trim();
+    const key = canonIp(raw);
+    if (!key) continue;
+    const prev = data[key] || (raw !== key ? data[raw] : null) || {};
+    if (raw !== key && data[raw]) delete data[raw];
+    const next = { ...prev, ...clean(e.partial || {}) };
+    delete next.updatedAt; delete next.updatedBy;
+    if (isEmpty(next)) { if (data[key]) { delete data[key]; removed++; } continue; }
+    next.updatedAt = now; next.updatedBy = by;
+    data[key] = next; changed++;
+  }
+  if (changed || removed) persist(data);
+  return { ok: true, changed, removed };
+}
+
 /** 관리 상태 요약(상태별·디바이스별 개수) — 대시보드용. */
 /**
  * override 요약(총계·상태/디바이스 분포). `includeFn(ip, rec)` 를 주면 그 조건을 통과한 override

@@ -7,6 +7,7 @@
 import { runScan } from './scanRunner.js';
 import { loadScanSettings, mergeScanResults, pruneScanResults, recordAgentReport, sweepReleases, listScanAgents, LOCAL } from './scanStore.js';
 import { enabledVcRanges } from './rangeStore.js';
+import { recordScanLog } from './scanLog.js'; // v2.636: 실행 로그(시작·종료·실패·건너뜀·중복 실행)
 
 // 로컬 폴러가 실제로 스캔할 대역 = __local__ 설정 대역 ∪ enabled인 모든 vCenter 대역(유니크).
 function effectiveRanges(s) {
@@ -23,15 +24,29 @@ let lastRun = null;
 let progress = null; // 실행 중 진행률: { total, done, alive, startedAt }
 
 export async function runScanOnce({ manual = false } = {}) {
-  if (running) return { ok: false, reason: '이미 스캔 중입니다.' };
+  const trigger = manual ? 'manual' : 'periodic';
+  if (running) {
+    if (manual) recordScanLog({ event: 'busy', trigger, message: '이미 스캔 중이라 새로 시작하지 않았습니다.' });
+    return { ok: false, reason: '이미 스캔 중입니다.' };
+  }
   const s = loadScanSettings();
   const ranges = effectiveRanges(s);
   // 주기 스캔은 __local__ enabled이거나, enabled인 vCenter 대역이 하나라도 있으면 돈다.
-  if (!manual && !s.enabled && !enabledVcRanges().length) { lastRun = { at: Date.now(), skipped: '비활성' }; return { ok: false, reason: '비활성' }; }
-  if (!ranges.length) { lastRun = { at: Date.now(), skipped: '대역 없음' }; return { ok: false, reason: '스캔 대역이 없습니다.' }; }
+  if (!manual && !s.enabled && !enabledVcRanges().length) {
+    lastRun = { at: Date.now(), skipped: '비활성' };
+    recordScanLog({ event: 'skip', trigger, message: '주기 스캔이 꺼져 있습니다(이 포탈 설정 비활성 · 켜진 vCenter 대역 없음).' });
+    return { ok: false, reason: '비활성' };
+  }
+  if (!ranges.length) {
+    lastRun = { at: Date.now(), skipped: '대역 없음' };
+    recordScanLog({ event: 'skip', trigger, message: '스캔할 대역이 없습니다.' });
+    return { ok: false, reason: '스캔 대역이 없습니다.' };
+  }
   running = true;
   const started = Date.now();
   progress = { total: 0, done: 0, alive: 0, startedAt: started };
+  recordScanLog({ event: 'start', trigger, at: started, ranges: ranges.length, rangesSample: ranges.slice(0, 5),
+    message: `대역 ${ranges.length}개 · 포트 ${(s.ports || []).length}개 · 동시 ${s.concurrency} · 시한 ${s.timeoutMs}ms${s.ping ? ' · ICMP 병행' : ''}` });
   try {
     // 스캔은 별도 프로세스에서(v2.363) — TCP/ping/역DNS 부하·FD 를 포탈에서 격리.
     const { scanned, alive } = await runScan(
@@ -45,18 +60,26 @@ export async function runScanOnce({ manual = false } = {}) {
     sweepReleases(releaseIdleMs(), { agent: LOCAL });
     pruneScanResults(s.retentionDays);
     lastRun = { at: Date.now(), durationMs: Date.now() - started, scanned, alive: alive.length, manual };
+    recordScanLog({ event: 'finish', trigger, ranges: ranges.length, scanned, alive: alive.length, durationMs: lastRun.durationMs });
     return { ok: true, ...lastRun };
   } catch (e) {
     lastRun = { at: Date.now(), error: e.message, manual };
+    recordScanLog({ event: 'fail', trigger, ranges: ranges.length, durationMs: Date.now() - started, message: e?.message || String(e) });
     return { ok: false, reason: e.message };
   } finally { running = false; progress = null; }
 }
 
 /** 비동기로 스캔 시작(요청은 즉시 반환, 창을 닫아도 백그라운드에서 계속 실행). */
 export function startScan({ manual = true } = {}) {
-  if (running) return { ok: false, reason: '이미 스캔 중입니다.', running: true };
+  if (running) {
+    recordScanLog({ event: 'busy', trigger: manual ? 'manual' : 'periodic', message: '이미 스캔 중이라 새로 시작하지 않았습니다.' });
+    return { ok: false, reason: '이미 스캔 중입니다.', running: true };
+  }
   const s = loadScanSettings();
-  if (!effectiveRanges(s).length) return { ok: false, reason: '스캔 대역이 없습니다.' };
+  if (!effectiveRanges(s).length) {
+    recordScanLog({ event: 'skip', trigger: manual ? 'manual' : 'periodic', message: '스캔할 대역이 없습니다.' });
+    return { ok: false, reason: '스캔 대역이 없습니다.' };
+  }
   runScanOnce({ manual }).catch((e) => console.error('[ipscan] 백그라운드 스캔 실패:', e.message));
   return { ok: true, started: true };
 }

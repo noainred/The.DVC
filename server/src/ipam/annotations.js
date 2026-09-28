@@ -53,3 +53,32 @@ export function setAnnotation(ip, { memo = '', tags = [] } = {}, user) {
   cache = data; rev++;
   return { ok: true, annotation: data[key] || null };
 }
+
+/**
+ * v2.636: 여러 IP 의 메모·태그를 한 번에 저장(CSV 가져오기) — 파일 쓰기 1회. 규칙은 setAnnotation 과 같다
+ * (빈 메모 + 태그 없음 = 삭제, 메모 2000자·태그 20개 절단은 판정 단계에서 이미 오류로 걸렀다).
+ * @param {{ip:string, memo:string, tags:string[]}[]} entries
+ */
+export function setAnnotationsMany(entries, user) {
+  const data = load();
+  const now = new Date().toISOString();
+  const by = user?.username || 'unknown';
+  let changed = 0; let removed = 0;
+  for (const e of entries || []) {
+    const raw = String(e?.ip || '').trim();
+    if (!raw) continue;
+    const key = canonIp(raw) || raw;
+    if (raw !== key && data[raw]) delete data[raw];
+    const m = String(e.memo || '').trim().slice(0, 2000);
+    const t = cleanTags(e.tags);
+    if (!m && t.length === 0) { if (data[key]) { delete data[key]; removed++; } continue; }
+    data[key] = { memo: m, tags: t, updatedAt: now, updatedBy: by };
+    changed++;
+  }
+  if (changed || removed) {
+    fs.mkdirSync(path.dirname(FILE), { recursive: true });
+    atomicWriteFileSync(FILE, JSON.stringify(data, null, 2));
+    cache = data; rev++;
+  }
+  return { ok: true, changed, removed };
+}
