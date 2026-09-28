@@ -9,6 +9,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { ipToNum } from '../util/ipv4.js'; // v2.586 — ledger.js 를 import 하던 순환(settings ↔ ledger) 제거
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { parseRangeSpec, checkRangeList } from './rangeSyntax.js';
 
 const FILE = path.join(config.configDir, 'ipam-settings.json');
 
@@ -27,6 +28,22 @@ function load() {
 }
 
 export function loadSettings() { return load(); }
+
+/**
+ * v2.637: 저장된 값 중 적용되지 않는 줄(검증 전에 저장된 옛 값) — 화면이 '저장돼 있지만 무시되는 줄' 을 밝힌다.
+ * @returns {{ field: string, vcenterId?: string, line: number, value: string, reason: string }[]}
+ */
+export function savedInvalidEntries(settings = load()) {
+  const out = [];
+  const add = (field, list, vcenterId) => {
+    for (const x of checkRangeList(list || []).invalid) out.push({ field, ...(vcenterId != null ? { vcenterId } : {}), ...x });
+  };
+  add('global', settings.global);
+  add('publicRanges', settings.publicRanges);
+  add('privateRanges', settings.privateRanges);
+  for (const [k, v] of Object.entries(settings.vcenters || {})) add('vcenters', v, k);
+  return out;
+}
 
 export function saveSettings(body = {}) {
   const next = {
@@ -69,26 +86,9 @@ export function getClassifier() {
 
 const cleanList = (v) => (Array.isArray(v) ? v : String(v || '').split(/\r?\n/)).map((s) => String(s).trim()).filter(Boolean);
 
-function parseRange(s) {
-  s = String(s).trim();
-  if (!s) return null;
-  if (s.includes('/')) {
-    const [b, m] = s.split('/');
-    const base = ipToNum(b); const mask = Number(m);
-    if (base == null || !(mask >= 0 && mask <= 32)) return null;
-    const size = 2 ** (32 - mask);
-    const lo = Math.floor(base / size) * size;
-    return { lo, hi: lo + size - 1 };
-  }
-  if (s.includes('-')) {
-    const [a, b] = s.split('-');
-    const lo = ipToNum(a.trim()), hi = ipToNum(b.trim());
-    if (lo == null || hi == null) return null;
-    return { lo: Math.min(lo, hi), hi: Math.max(lo, hi) };
-  }
-  const n = ipToNum(s);
-  return n == null ? null : { lo: n, hi: n };
-}
+// v2.637: 판정은 rangeSyntax.js 하나다 — 예전 사본은 `10.0.0.0/`(빈 마스크)를 Number('')===0 → /0 으로 읽어
+//   무시 대역이면 IPv4 전체를 대장에서 숨기고, 공인 대역이면 사설 주소까지 '공인' 으로 분류했다.
+function parseRange(s) { return parseRangeSpec(s); }
 
 /** Returns (ip, vcenterId) → true if the IP should be hidden. */
 export function getIgnoreMatcher() {

@@ -4225,6 +4225,16 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       발견). 점이 90개를 넘으면 온전한 점은 찍지 않는다(반기 360점이 굵은 띠가 된다) — 부분 합 점은 항상 찍는다.
     - ⚠ 12시간 간격이라 '1일' 차트는 점이 최대 3개다 — `pointsNote` 가 그 사실을 말한다. 기간 앞부분이 빈 이유는 단정하지 않는다(`spanNote`).
     - ⚠ 정직 기록: Chromium 검증은 합성 이력(201슬롯 · 빈 구간 · 부분 합 1회)을 심은 목 서버로 했다 — 실장비 수집으로 쌓인 이력은 보지 못했다.
+  - ⚠⚠ **IPMS 대역 문법은 `ipam/rangeSyntax.js` 하나다 — 저장도 적용도 같은 판정**(v2.637, 사용자 요청 "Ipms 부분 버그 잡고 ui 개선해줘".
+    웹 사본 `web/src/views/tools/ipmsRangeText.js` — 번들 경계로 두 벌이고 `server/test/ipms2637.test.js` ③ 이 같은 입력으로 대조한다):
+    - ⚠⚠ **빈 마스크 `10.0.0.0/` 가 /0 이었다(재현)** — 예전 `settings.js parseRange` 가 `Number('')===0` 으로 마스크 0 을 받아 무시 대역이면
+      IPv4 전체가 대장에서 사라지고, 공인 대역이면 사설 주소까지 '공인' 이 됐다(`Number('')` 함정의 아홉 번째). 마스크는 1~2자리 숫자·/8~/32.
+    - **저장 경로는 아무것도 검사하지 않았다** — 이제 `PUT /admin/ipam/settings`·`/ipam/vc-ranges` 가 400 + `invalid[{field,vcenterId,line,value,reason}]`
+      (줄 번호는 빈 줄 포함 원래 줄). 범위 계정은 **적용되는 vCenter 목록만** 검사한다(전역 목록 변경은 어차피 `ignoredGlobal` — 검사하면 기존 계약이 깨진다).
+    - 뒤바뀐 범위는 무시·분류 목록에서 **바꿔 읽고 경고**(옛 저장값이 조용히 빠지지 않게), 스캔 대역은 오류(`reversed:'error'` — `rangeSize` 가 거부한다).
+    - GET 은 `invalidSaved`(검사 전 저장분)·`orphanVcenters`(삭제된 vCenter 에 남은 키 — 전체 범위만)를 싣는다. 화면 선택기가 그 키를 보여 줘야
+      지울 수 있다. ⚠ JSDoc 안에 별표 두 개 + 슬래시(굵게 표기의 /0)를 쓰지 말 것 — 블록 주석이 거기서 끝난다(이번에도 밟았다).
+    - 화면은 `r.reason` 을 읽는다(`putJson` 은 400 을 던지지 않고 본문을 돌려준다 — 예전 `r.error` 만 읽어 '저장 실패' 로 뭉개졌다).
   - ⚠⚠ **IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다**
     (`web/src/views/tools/`{ipamPages.js·ipamDraft.js·useIpamDraft.js·IpamDraftBanner.jsx·IpamCsv.jsx·IpamScanLog.jsx·ipamCsvChunk.js·
     ipamCsvText.js·ipamScanLogText.js} + 서버 `ipam/`{scanLog.js·manageCsv.js·scanRangesCsv.js}, 사용자 요청 "IP scan 을 위한 입력/수정이

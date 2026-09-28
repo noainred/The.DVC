@@ -1,7 +1,8 @@
 // 중앙 토큰/에이전트 토큰·IPAM 설정/스캔/대역 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { ledgerInfo } from '../../ipam/db.js';
-import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings } from '../../ipam/settings.js';
+import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries } from '../../ipam/settings.js';
+import { checkRangeList } from '../../ipam/rangeSyntax.js';
 import { listTargets } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
 import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanAgents, getAgentReports, getScanRuns, LOCAL } from '../../ipam/scanStore.js';
@@ -46,28 +47,58 @@ adminRouter.get('/ipam/db-info', adminOnly, async (_req, res) => {
 //   직전 값 그대로 보존한다(v2.605 mergeScopedMap — 예전엔 GET 이 준 목록을 그대로 저장해 다른 법인 대역을 지웠다). 전 법인 공통
 //   목록(전체 무시·공인·사설 대역)은 범위 계정이 바꿀 수 없다 — 적용하지 않고 ignoredGlobal 로 밝힌다(v2.607 AUTHZ2607-05).
 const ipamList = (v) => (Array.isArray(v) ? v : String(v || '').split(/\r?\n/)).map((x) => String(x).trim()).filter(Boolean);
-function ipamSettingsView(settings, allowed) {
-  if (!allowed) return { settings };
+function ipamSettingsView(settings, allowed, snap) {
+  // v2.637: 저장돼 있지만 적용되지 않는 줄(검증 전 저장분)과, 삭제된 vCenter 에 남은 무시 대역을 밝힌다 — 예전에는 화면의
+  //   vCenter 선택기가 등록된 vCenter 만 보여 줘서 삭제된 vCenter 의 대역을 보거나 지울 길이 없었다.
+  const known = new Set((snap?.vcenters || []).map((v) => v.id));
+  const view = (st, extra = {}) => {
+    const invalidSaved = savedInvalidEntries(st);
+    const orphanVcenters = Object.keys(st.vcenters || {}).filter((k) => !known.has(k));
+    return { settings: st, ...extra, ...(invalidSaved.length ? { invalidSaved } : {}), ...(orphanVcenters.length ? { orphanVcenters } : {}) };
+  };
+  if (!allowed) return view(settings);
   const all = Object.keys(settings.vcenters || {});
   const vcenters = filterScopedMap(settings.vcenters || {}, allowed);
   const omitted = all.length - Object.keys(vcenters).length;
-  return { settings: { ...settings, vcenters }, ...(omitted ? { omittedOutOfScope: omitted } : {}) };
+  return view({ ...settings, vcenters }, omitted ? { omittedOutOfScope: omitted } : {});
 }
+/**
+ * v2.637: 적용될 목록만 검사한다(범위 계정의 전역 목록 변경은 어차피 적용되지 않으므로 검사 대상이 아니다).
+ * 예전에는 아무것도 검사하지 않아 `10.0.0.0/`(→ /0) 가 IPv4 전체를 숨기고, `abc` 는 '저장했습니다' 뒤 조용히 버려졌다.
+ */
+function ipamSettingsInvalid(body, { globals, vcKeys }) {
+  const out = [];
+  const add = (field, list, vcenterId) => {
+    for (const x of checkRangeList(list || []).invalid) out.push({ field, ...(vcenterId != null ? { vcenterId } : {}), ...x });
+  };
+  if (globals) { add('global', body.global); add('publicRanges', body.publicRanges); add('privateRanges', body.privateRanges); }
+  const vcs = body.vcenters && typeof body.vcenters === 'object' && !Array.isArray(body.vcenters) ? body.vcenters : {};
+  for (const [k, v] of Object.entries(vcs)) if (!vcKeys || vcKeys.has(k)) add('vcenters', v, k);
+  return out;
+}
+const invalidReply = (res, invalid) => res.status(400).json({ ok: false, reason: `형식이 올바르지 않은 줄 ${invalid.length}개가 있어 저장하지 않았습니다.`, invalid: invalid.slice(0, 200), invalidCount: invalid.length });
 adminRouter.get('/ipam/settings', adminOnly, (req, res) => {
-  res.json(ipamSettingsView(loadIpamSettings(), scopedVcenterIds(req.user, store.get())));
+  const snap = store.get();
+  res.json(ipamSettingsView(loadIpamSettings(), scopedVcenterIds(req.user, snap), snap));
 });
 adminRouter.put('/ipam/settings', adminOnly, (req, res) => {
   const snap = store.get();
   const readAllowed = scopedVcenterIds(req.user, snap);
   const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
-  if (!readAllowed) return res.json({ ok: true, settings: saveIpamSettings(body) });
+  if (!readAllowed) {
+    const invalid = ipamSettingsInvalid(body, { globals: true });
+    if (invalid.length) return invalidReply(res, invalid);
+    return res.json({ ok: true, ...ipamSettingsView(saveIpamSettings(body), null, snap) });
+  }
   const writeAllowed = writeScopedVcenterIds(req.user, snap) || readAllowed;
+  const invalid = ipamSettingsInvalid(body, { globals: false, vcKeys: writeAllowed });
+  if (invalid.length) return invalidReply(res, invalid);
   const before = loadIpamSettings();
   const norm = (o) => ({ global: ipamList(o.global), publicRanges: ipamList(o.publicRanges), privateRanges: ipamList(o.privateRanges) });
   const { ignoredGlobal } = keepScopedFields({ ...body, ...norm(body) }, { ...before, ...norm(before) }, writeAllowed, ['vcenters']);
   const { merged, ignored } = mergeScopedMap(before.vcenters || {}, body.vcenters || {}, writeAllowed);
   const settings = saveIpamSettings({ global: before.global, publicRanges: before.publicRanges, privateRanges: before.privateRanges, vcenters: merged });
-  res.json({ ok: true, ...ipamSettingsView(settings, readAllowed), ...(ignored.length ? { ignoredOutOfScope: ignored.length } : {}), ...ignoredGlobalFields(ignoredGlobal) });
+  res.json({ ok: true, ...ipamSettingsView(settings, readAllowed, snap), ...(ignored.length ? { ignoredOutOfScope: ignored.length } : {}), ...ignoredGlobalFields(ignoredGlobal) });
 });
 
 // 중앙 토큰(CENTRAL_TOKEN) — 조회/생성/저장(실행중 서버 + portal.env 영속).
@@ -225,7 +256,15 @@ adminRouter.post('/ipam/scan/ranges/import', adminOnly, fleetOnly, (req, res) =>
 adminRouter.put('/ipam/vc-ranges', adminOnly, (req, res) => {
   const b = req.body || {};
   if (!vcRangeWritable(req.user, b.vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); // v2.607 AUTHZ2607-04
+  // v2.637: 스캔이 읽지 못하는 줄(rangeSize 0 — 빈 마스크·/33·뒤집힌 범위·오타)을 저장하지 않는다. 예전에는 오류 없이 저장되고
+  //   주기 스캔에서 조용히 0개로 버려졌다.
+  let check = null;
+  if (b.ranges !== undefined) {
+    check = checkRangeList(Array.isArray(b.ranges) ? b.ranges : String(b.ranges ?? '').split(/[\n,]/), { reversed: 'error', scanCap: RANGE_CAP });
+    if (check.invalid.length) return invalidReply(res, check.invalid.map((x) => ({ field: 'scanRanges', vcenterId: String(b.vcenterId || ''), ...x })));
+  }
   const r = saveVcRanges(b.vcenterId, { ranges: b.ranges, enabled: b.enabled });
+  if (r.ok && check?.warnings.length) r.warnings = check.warnings.slice(0, 50);
   if (r.ok) {
     try { rescheduleScanPoller(); } catch { /* */ }
     recordScanLog({ event: 'settings', user: req.user?.username, ranges: (r.ranges || []).length, rangesSample: (r.ranges || []).slice(0, 5), message: `vCenter 스캔 대역 저장 — ${String(b.vcenterId || '').slice(0, 120)}` });
