@@ -15,7 +15,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { STATUSES, DEVICE_TYPES } from './overrides.js';
-import { ipToNum } from '../util/ipv4.js'; // v2.586 — 단일 소스
+import { checkRangeSpec } from './rangeSyntax.js'; // v2.639 — 대역 문법 판정 코어 하나(scan.js 와 같은 판정)
 
 const FILE = path.join(config.configDir, 'ipam-range-policies.json');
 const MAX_POLICIES = 1000;     // 정책 수 상한
@@ -25,32 +25,18 @@ const IGNORE_CAP = 1024;       // status='ignored'(대역 통째 숨김) 허용 
 export const POLICY_STATUSES = STATUSES;
 
 
-/** "10.0.0.0/24" | "10.0.0.1-10.0.0.50" | "10.0.0.1-50" | "10.0.0.5" → {lo,hi,size} (없으면 null). scan.js 규칙과 동일. */
+/**
+ * "10.0.0.0/24" | "10.0.0.1-10.0.0.50" | "10.0.0.1-50" | "10.0.0.5" → {lo,hi,size} (없으면 null). scan.js 규칙과 동일 —
+ * CIDR 은 /31·/32 만 전체이고 그 외는 네트워크·브로드캐스트를 뺀다(/24 → .1~.254, size 254). 뒤집힌 범위는 null.
+ * v2.639: 판정은 `rangeSyntax.checkRangeSpec` 하나다 — 예전 자체 파서는 `10.0.0.0/24.5`·`10.0.0.250-300` 같은 줄을
+ * scan.js 와 다르게 읽어, 저장은 통과하고 중앙 `/ip-scan-result` 는 거부하는 어긋남을 만들었다.
+ */
 export function specToRange(spec) {
-  const s = String(spec || '').trim();
-  if (!s) return null;
-  if (s.includes('/')) {
-    const [base, bitsStr] = s.split('/');
-    const bits = Number(bitsStr); const b = ipToNum(base);
-    if (b == null || !(Number.isInteger(bits) && bits >= 8 && bits <= 32)) return null;
-    const size = 2 ** (32 - bits);
-    const net0 = b & (size === 0 ? 0 : ((0xffffffff << (32 - bits)) >>> 0));
-    const start = bits >= 31 ? 0 : 1;          // /31·/32는 전체, 그 외는 네트워크/브로드캐스트 제외
-    const end = bits >= 31 ? size : size - 1;  // exclusive upper index
-    const lo = (net0 + start) >>> 0;
-    const hi = (net0 + end - 1) >>> 0;
-    return { lo, hi, size: hi - lo + 1 };
-  }
-  if (s.includes('-')) {
-    const [a, bRaw] = s.split('-').map((x) => x.trim());
-    const an = ipToNum(a); let bn = ipToNum(bRaw);
-    if (bn == null && /^\d{1,3}$/.test(bRaw) && an != null) bn = ((an & 0xffffff00) >>> 0) + Number(bRaw); // a.b.c.d-e 단축형 (>>>0: 192.168.x 등 첫 옥텟≥128 부호 버그 방지)
-    if (an == null || bn == null || bn < an) return null;
-    return { lo: an, hi: bn, size: bn - an + 1 };
-  }
-  const n = ipToNum(s);
-  if (n == null) return null;
-  return { lo: n, hi: n, size: 1 };
+  const r = checkRangeSpec(spec, { reversed: 'error' });
+  if (!r.ok) return null;
+  const lo = r.kind === 'cidr' && r.size > 2 ? r.lo + 1 : r.lo;
+  const hi = r.kind === 'cidr' && r.size > 2 ? r.hi - 1 : r.hi;
+  return { lo, hi, size: hi - lo + 1 };
 }
 
 let cache = null;

@@ -14,7 +14,8 @@ import { expandRange, portService } from './scan.js';
 const DAY = 86_400_000;
 
 // OS 카테고리 → 격자 색(범례). 추정(스캔 서비스 기반)은 점선 표시용으로 guessed 플래그.
-export const OS_COLORS = {
+// v2.639: 바깥 호출부 0건(응답의 legend 로만 나간다 — 웹의 동명 상수는 별개) — 내부 상수(export 를 뗐다).
+const OS_COLORS = {
   Windows: '#2563eb', Linux: '#16a34a', ESXi: '#7c3aed', Hypervisor: '#9333ea',
   'BMC/장비': '#0891b2', Network: '#0d9488', Other: '#d97706', Unknown: '#64748b',
 };

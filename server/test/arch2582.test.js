@@ -97,7 +97,7 @@ test('ARCH-1 스윕 — configDir JSON 을 읽고 원자 쓰기로 저장하는 
     'svcmon/logsettings.js', 'net/monitor.js', 'central/svcmonEdge.js', 'security/netIssueStore.js', 'security/loginStore.js', 'storage/authGuard.js', 'util/authGuard.js', 'util/tokenFingerprint.js',
     'central/sanSwitchPerfEdge.js', 'storage/store.js',     // 엣지 push·스냅샷 캐시 — 다음 push/수집이 재구축
     'util/activityLog.js', 'tool-usage.js',                  // 링버퍼·사용 횟수 — v2.516 이 'preserveCorrupt 대상이 아니다' 로 못 박은 캐시
-    'ipam/scanLog.js',                                        // v2.636 스캔 실행 로그 — activityLog 와 같은 링버퍼(손상이면 새로 시작한다)
+    // 'ipam/scanLog.js' — v2.639 S2 에 preserveCorrupt 를 받았다(과거 스캔 사건은 재생성되지 않는다). 예외 목록에서 뺐다 — 스윕 대상.
     'loganalysis/live.js',                                   // v2.583 로그 분석 누적 통계 — 재생성 가능한 집계(손상 시 새로 시작하고 상태에 밝힌다)
   ]);
   const missing = [];

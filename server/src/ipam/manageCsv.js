@@ -19,8 +19,8 @@
 import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../util/csv.js';
 import { canonIp } from '../util/ipv4.js';
 
-/** 열 이름(내보내기 순서) — 필드 키와 한글 별칭. */
-export const MANAGE_COLUMNS = Object.freeze([
+/** 열 이름(내보내기 순서) — 필드 키와 한글 별칭. v2.639: 바깥 호출부 0건 — 내부 상수(export 를 뗐다). */
+const MANAGE_COLUMNS = Object.freeze([
   { key: 'ip', aliases: ['ip', 'ip주소', 'ipaddress', 'address'] },
   { key: 'status', aliases: ['status', '상태', '관리상태'] },
   { key: 'deviceType', aliases: ['devicetype', 'device', '디바이스', '디바이스종류'] },
@@ -35,8 +35,8 @@ export const MANAGE_COLUMNS = Object.freeze([
 ]);
 /** override 로 가는 열 → override 필드 이름. */
 const OVERRIDE_FIELD = Object.freeze({ status: 'status', deviceType: 'deviceType', owner: 'owner', label: 'label', hostname: 'hostnameOverride', vcenter: 'claimedVcenterId', reservedUntil: 'reservedUntil', note: 'note' });
-/** 길이 상한 — overrides.clean·annotations 의 절단 값과 같다(여기서는 자르지 않고 오류로 보고한다). */
-export const MANAGE_LIMITS = Object.freeze({ owner: 200, label: 200, hostname: 253, vcenter: 120, note: 1000, memo: 2000, tagCount: 20, tagLen: 100 });
+/** 길이 상한 — overrides.clean·annotations 의 절단 값과 같다(여기서는 자르지 않고 오류로 보고한다). v2.639: 내부 상수(바깥 호출부 0건). */
+const MANAGE_LIMITS = Object.freeze({ owner: 200, label: 200, hostname: 253, vcenter: 120, note: 1000, memo: 2000, tagCount: 20, tagLen: 100 });
 /** 파일 한 번에 받는 행 상한(청크가 아니라 요청 하나 기준). 화면은 이보다 작게 나눠 보낸다. */
 export const MANAGE_CHUNK_MAX = 2500;
 

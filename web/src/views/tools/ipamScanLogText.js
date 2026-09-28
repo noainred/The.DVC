@@ -13,7 +13,7 @@ export const EVENT_TEXT = Object.freeze({
   reject: '보고 거부',
   settings: '설정 변경',
 });
-export const LEVEL_TEXT = Object.freeze({ info: ['정보', 'gray'], warn: ['주의', 'amber'], error: ['오류', 'red'] });
+const LEVEL_TEXT = Object.freeze({ info: ['정보', 'gray'], warn: ['주의', 'amber'], error: ['오류', 'red'] });
 
 export function eventText(e) { return EVENT_TEXT[e] || String(e || '—'); }
 export function levelBadge(l) { return LEVEL_TEXT[l] || ['—', 'gray']; }

@@ -7,7 +7,7 @@
  * 여기서는 서버 reservedUntilDay 와 같은 식(저장 시각 − 1ms 의 포탈 날짜)을 쓴다. 오프셋은 서버가 주는 tzOffsetMin 이고,
  * 없으면 서버 기본(540 = KST)이다.
  */
-export const DEFAULT_TZ_OFFSET_MIN = 540;
+const DEFAULT_TZ_OFFSET_MIN = 540;
 
 function offsetOf(offsetMin) {
   if (offsetMin == null || offsetMin === '') return DEFAULT_TZ_OFFSET_MIN;

@@ -13,6 +13,7 @@ import { chunkRecords, commentRecord, ipColumnIndex, mergeManageReports, splitCs
 import { actionBadge, applicableCount, changesText, MANAGE_ACTION, MANAGE_RULES, manageApplyText, manageSummaryText, MODE_NOTE, planText, RANGE_ACTION, rangeSummaryText } from './ipamCsvText.js';
 import { useIpamDraft } from './useIpamDraft.js';
 import { DraftBanner } from './IpamDraftBanner.jsx';
+import { agentLabel, LOCAL_AGENT } from './ipamShared.jsx'; // v2.639(U3): '__local__' → '이 포탈' 표시 한 벌
 
 const FILE_MAX = 30 * 1024 * 1024;       // 브라우저에서 읽을 파일 상한(이보다 크면 나눠서)
 const RANGES_BODY_MAX = 900 * 1024;      // 스캔 대역 CSV 는 한 번에 보낸다(서버 본문 한도 1MB)
@@ -223,7 +224,7 @@ export function RangesCsv({ onApplied }) { // v2.638: IP 스캔 설정 페이지
       if (dryRun) setCheck({ sig: textSig(text), mode, ...r });
       else {
         setCheck({ sig: textSig(text), mode, ...r, plans: check?.plans || [], afterApply: true });
-        const a = (r.applied || []).map((x) => `${x.agent === '__local__' ? '이 포탈' : x.agent}(+${x.added} −${x.removed})`).join(', ');
+        const a = (r.applied || []).map((x) => `${agentLabel(x.agent)}(+${x.added} −${x.removed})`).join(', ');
         setMsg({ ok: true, text: `적용 — 에이전트 ${(r.applied || []).length}곳${a ? `: ${a}` : ''}${(r.blocked || []).length ? ` · 오류로 적용하지 않은 에이전트 ${(r.blocked || []).length}곳` : ''}${(r.failed || []).length ? ` · 저장 실패 ${(r.failed || []).length}곳` : ''}. 엣지 에이전트는 다음 주기에 새 대역을 읽어 갑니다.` });
         d.saved(text);   // 적용했으니 '적용하지 않은 입력' 표시를 내린다
         onApplied?.();
@@ -270,7 +271,7 @@ export function RangesCsv({ onApplied }) { // v2.638: IP 스캔 설정 페이지
               {plans.length === 0 && <tr><td colSpan={2} className="center muted" style={{ padding: 14 }}>바꿀 에이전트가 없습니다.</td></tr>}
               {plans.map((p) => (
                 <tr key={p.key}>
-                  <td><b>{p.agent === '__local__' ? '이 포탈(__local__)' : p.agent}</b></td>
+                  <td><b>{agentLabel(p.agent)}</b>{p.agent === LOCAL_AGENT && <span className="muted" style={{ fontSize: 11 }}> (__local__)</span>}</td>
                   <td style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', color: p.blocked ? 'var(--red)' : undefined }}>{planText(p)}</td>
                 </tr>
               ))}

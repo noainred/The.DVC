@@ -4,45 +4,36 @@ import { fetchJson, postJson, putJson, delJson, downloadFile } from '../../api.j
 import { downloadFailText } from '../downloadFailText.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { CsvImportModal } from '../../components/CsvBulkModals.jsx';
-import { DEVTYPE_LABEL, MGMT, MgmtBadge } from './ipamShared.jsx';
-import { ScanProgressBar } from './IpamSettings.jsx';
+import { adminWriteGate, DEVTYPE_LABEL, fmtDt, MGMT, MgmtBadge } from './ipamShared.jsx';
+import { ScanProgressBar, ScanRunsTable } from './IpamScanStatus.jsx';
+import { VcScanRangeEditor } from './VcScanRangeEditor.jsx';
+import { policySpecSize } from './ipmsRangeText.js';
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
 
 
-/** vCenter별 IP 대역 저장 + 주기 스캔 + 스캔결과(첨부) 다운로드. */
-export function IpamRanges() {
+/**
+ * vCenter별 IP 대역 저장 + 주기 스캔 + 스캔결과(첨부) 다운로드.
+ * v2.639(U1·D4): 편집부는 VcScanRangeEditor(IPMS 설정 ② 와 같은 편집기 한 벌 — 초안·문법 검사·서버 400 표시·조회 실패 잠금).
+ *   예전 이 페이지의 원시 textarea 는 셋 다 없었다. 저장된 대역(/tools/ipam/vc-ranges)은 여기서 읽어 편집기와 목록 표가 같이 쓴다.
+ * v2.639(I3): 저장·삭제·CSV 가져오기·지금 스캔은 서버가 adminOnly 다 — access 'no'(403 확정)면 버튼을 잠그고 사유를 말한다.
+ *   '모름' 은 잠그지 않는다(서버가 집행한다).
+ */
+export function IpamRanges({ access = 'unknown' } = {}) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [vc, setVc] = useState('');
-  const [ranges, setRanges] = useState('');
-  const [enabled, setEnabled] = useState(true);
   const [msg, setMsg] = useState(null);
-  const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState(null);
   const [csvImport, setCsvImport] = useState(false); // 대역 CSV 가져오기 모달(공용 CsvImportModal)
   const load = async () => { try { setData(await fetchJson('/tools/ipam/vc-ranges')); setError(null); } catch (e) { setError(e.message); } };
   const statusDenied = useRef(false); // v2.611 LEFT2611-07: 스캔 상태는 전체 범위 계정만 — 403 이면 3초 폴링을 멈춘다
   const loadStatus = () => { if (statusDenied.current) return; fetchJson('/admin/ipam/scan/status').then(setStatus).catch((e) => { setStatus(null); if (e?.status === 403) statusDenied.current = true; }); };
   useEffect(() => { load(); loadStatus(); const t = setInterval(loadStatus, 3000); return () => clearInterval(t); }, []);
-  useEffect(() => {
-    if (!data) return;
-    const e = (data.ranges || []).find((x) => x.vcenterId === vc);
-    setRanges(e ? (e.ranges || []).join('\n') : ''); setEnabled(e ? e.enabled !== false : true);
-  }, [vc, data]);
-  const save = async () => {
-    if (!vc) { setMsg({ ok: false, text: 'vCenter를 선택하세요.' }); return; }
-    setBusy(true); setMsg(null);
-    try { const r = await putJson('/admin/ipam/vc-ranges', { vcenterId: vc, ranges, enabled }); setMsg(r.ok ? { ok: true, text: `저장됨 — 대역 ${(r.ranges || []).length}개` } : { ok: false, text: r.reason }); if (r.ok) await load(); }
-    catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
-  };
-  const scanNow = async () => {
-    setBusy(true); setMsg(null);
-    try { const r = await postJson('/admin/ipam/vc-ranges/scan', {}); setMsg(r.ok ? { ok: true, text: '스캔을 시작했습니다(백그라운드). 잠시 후 결과가 갱신됩니다.' } : { ok: false, text: r.reason }); loadStatus(); }
-    catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
-  };
+  const write = adminWriteGate(access);
   const removeVc = async (id) => {
+    if (write.locked) { setMsg({ ok: false, text: write.note }); return; }
     if (!window.confirm(`'${id}' 대역을 삭제할까요?`)) return;
     // v2.613 WEB2613-10: api.js 를 우회한 직접 fetch 금지 — 401 전역 처리·403 안내(HttpError)·X-Request-Id 가 빠진다.
     //   예전 직접 fetch 는 res.ok 를 보지 않아 403·409 가 조용히 성공처럼 보였다(바로 load) — delJson 은 실패를 던진다.
@@ -52,36 +43,21 @@ export function IpamRanges() {
   const downloadReport = async () => {
     try { await downloadFile('/tools/ipam/scan-report.csv', `ip-scan-report-${dayStamp()}.csv`); } catch (e) { setMsg({ ok: false, text: downloadFailText(e) }); }
   };
-  if (error && !data) return <ErrorBox message={error} />; // v2.478(감사 B15): 데이터 보유 중 일시 오류는 화면 유지(아래 배너)
-  if (!data) return <Loading />;
-  const fmtDt = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
-  const list = data.ranges || [];
+  // v2.639: 저장된 대역을 못 읽어도 화면을 통째로 막지 않는다 — 편집기는 vcRangesGate 로 저장·스캔만 잠그고 사유를 말한다(v2.621 WEB-02).
+  const list = data?.ranges || [];
   const runs = status?.runs || [];
   return (
     <>
-      {error && <div style={{ color: "#f87171", fontSize: 12, marginBottom: 8 }}>⚠ 최근 조회 실패: {error} — 이전 데이터를 표시 중입니다.</div>}
       <div className="card" style={{ marginBottom: 12 }}>
-        <b style={{ fontSize: 14 }}>vCenter별 스캔 대역</b>
-        <div className="muted" style={{ fontSize: 12, margin: '4px 0 10px' }}>vCenter(법인)에 IP 대역을 저장하면 주기 스캔이 이 대역들을 함께 스캔해 사용 현황을 갱신합니다. 형식: CIDR(10.0.0.0/24)·범위(10.0.0.1-50)·단일 IP, 한 줄에 하나.</div>
-        <div className="flex gap wrap" style={{ alignItems: 'flex-start' }}>
-          <label style={{ minWidth: 200 }}>vCenter
-            <select className="input" value={vc} onChange={(e) => setVc(e.target.value)}>
-              <option value="">(선택)</option>
-              {(data.vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
-            </select>
-          </label>
-          <label style={{ flex: 1, minWidth: 280 }}>대역 (한 줄에 하나)
-            <textarea className="input" style={{ width: '100%', minHeight: 110, fontFamily: 'monospace', fontSize: 12 }} value={ranges} onChange={(e) => setRanges(e.target.value)} placeholder={'10.0.0.0/24\n192.168.1.1-192.168.1.50'} />
-          </label>
-        </div>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>vCenter(법인)에 IP 대역을 저장하면 주기 스캔이 이 대역들을 함께 스캔해 사용 현황을 갱신합니다.</div>
+        <VcScanRangeEditor vc={vc} onVc={setVc} options={data ? (data.vcenters || []) : null} showSelect draftPrefix="ranges:vc" access={access}
+          vcRanges={data} vcRangesErr={error} onReloadRanges={load} onSaved={load}
+          scanRunning={!!status?.running} onScanStarted={loadStatus} title="vCenter별 스캔 대역" />
         <div className="flex gap" style={{ marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 13 }}><input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> 주기 스캔 포함</label>
-          <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} disabled={busy || !vc} onClick={save}>저장</button>
-          <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy || status?.running} onClick={scanNow}>🛰️ 지금 스캔(전체)</button>
-          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadReport} title="현재 스캔 결과를 CSV 첨부파일로 내려받기">⬇ 스캔 결과(CSV)</button>
+          <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={downloadReport} title="현재 스캔 결과를 CSV 첨부파일로 내려받기">⬇ 스캔 결과(CSV)</button>
         </div>
         {status?.running && <div style={{ marginTop: 10 }}><ScanProgressBar progress={status.progress} /></div>}
-        {msg && <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, fontSize: 13, background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.text}</div>}
+        {msg && <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, fontSize: 13, background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{msg.text}</div>}
       </div>
 
       <div className="card" style={{ marginBottom: 12 }}>
@@ -89,25 +65,27 @@ export function IpamRanges() {
           <b style={{ fontSize: 14 }}>저장된 대역 ({list.length})</b>
           <span className="flex gap">
             <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} title="저장된 대역 목록을 CSV 로 내려받기(가져오기 양식과 동일)"
-              onClick={() => downloadFile('/tools/ipam/vc-ranges.csv').catch((e) => setMsg({ ok: false, text: e.message }))}>⤓ 대역 CSV</button>
-            <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} title="CSV 로 대역 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인"
+              onClick={() => downloadFile('/tools/ipam/vc-ranges.csv').catch((e) => setMsg({ ok: false, text: downloadFailText(e) }))}>⤓ 대역 CSV</button>
+            <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} title={write.locked ? write.title : 'CSV 로 대역 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인'} disabled={write.locked}
               onClick={() => setCsvImport(true)}>⤒ CSV 가져오기</button>
           </span>
         </div>
+        {error && data && <div className="banner warn" style={{ marginTop: 8, whiteSpace: 'normal' }}>목록을 다시 읽지 못했습니다 — 아래는 마지막으로 받은 값입니다: {error}</div>}
         <div className="table-wrap" style={{ marginTop: 8 }}>
-          <STable><thead><tr><th>vCenter</th><th>대역</th><th className="right">IP 수</th><th>주기</th><th>수정시각</th><th className="right">작업</th></tr></thead>
+          <STable minWidth={640} wrap={false}><thead><tr><th>vCenter</th><th>대역</th><th className="right">IP 수</th><th>주기</th><th>수정시각</th><th className="right">작업</th></tr></thead>
             <tbody>
-              {list.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>등록된 대역이 없습니다.</td></tr>}
+              {!data && <tr><td colSpan={6} className="center muted" style={{ padding: 18, whiteSpace: 'normal' }}>{error ? `저장된 대역을 읽지 못했습니다(0개라는 뜻이 아닙니다): ${error}` : '저장된 대역을 불러오는 중…'}</td></tr>}
+              {data && list.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>등록된 대역이 없습니다.</td></tr>}
               {list.map((e) => (
                 <tr key={e.vcenterId}>
                   <td><b>{e.vcenterName}</b></td>
                   <td className="muted" style={{ fontFamily: 'monospace', fontSize: 12, whiteSpace: 'normal', wordBreak: 'break-word' }}>{(e.ranges || []).join(', ')}</td>
                   <td className="right">{(e.ipCount || 0).toLocaleString()}</td>
                   <td>{e.enabled ? <span className="badge green">포함</span> : <span className="badge gray">제외</span>}</td>
-                  <td className="muted">{fmtDt(e.updatedAt)}</td>
+                  <td className="muted" data-sort={e.updatedAt ?? ''}>{fmtDt(e.updatedAt)}</td>
                   <td className="right nowrap">
-                    <button className="tab" onClick={() => setVc(e.vcenterId)}>수정</button>
-                    <button className="tab" style={{ color: 'var(--red)' }} onClick={() => removeVc(e.vcenterId)}>삭제</button>
+                    <button className="tab" onClick={() => setVc(e.vcenterId)}>{write.locked ? '보기' : '수정'}</button>
+                    <button className="tab" style={{ color: 'var(--red)' }} disabled={write.locked} title={write.title} onClick={() => removeVc(e.vcenterId)}>삭제</button>
                   </td>
                 </tr>
               ))}
@@ -120,19 +98,9 @@ export function IpamRanges() {
           <b style={{ fontSize: 14 }}>완료된 스캔 (첨부)</b>
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={downloadReport}>⬇ 전체 결과 CSV</button>
         </div>
-        <div className="table-wrap" style={{ marginTop: 8, maxHeight: '40vh' }}>
-          <STable><thead><tr><th>완료시각</th><th>에이전트</th><th className="right">스캔/응답</th><th className="right">소요</th></tr></thead>
-            <tbody>
-              {runs.length === 0 && <tr><td colSpan={4} className="center muted" style={{ padding: 18 }}>완료된 스캔 기록이 없습니다. ‘지금 스캔’으로 실행하세요.</td></tr>}
-              {runs.map((r, i) => (
-                <tr key={i}>
-                  <td className="muted">{fmtDt(r.at)}</td>
-                  <td>{r.agent === '__local__' ? '이 포탈' : r.agent}</td>
-                  <td className="right">{(r.scanned || 0).toLocaleString()} / <b style={{ color: 'var(--green)' }}>{(r.alive || 0).toLocaleString()}</b></td>
-                  <td className="right muted">{r.durationMs != null ? `${(r.durationMs / 1000).toFixed(1)}s` : '—'}</td>
-                </tr>
-              ))}
-            </tbody></STable>
+        {status == null && statusDenied.current && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>스캔 이력은 전체 범위 관리자 계정만 볼 수 있습니다.</div>}
+        <div style={{ marginTop: 8 }}>
+          <ScanRunsTable runs={runs} maxHeight="40vh" emptyText="완료된 스캔 기록이 없습니다. ‘지금 스캔’으로 실행하세요." />
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>스캔 결과는 ‘⬇ 스캔 결과(CSV)’로 첨부파일처럼 내려받을 수 있습니다(IP·호스트명·상태·포트·서비스·최초/최근 관측).</div>
       </div>
@@ -203,7 +171,6 @@ export function IpamNetMap() {
   if (!data) return <Loading />;
   const N = data.buckets?.length || 0;
   const bi = bucket == null ? Math.max(0, N - 1) : Math.min(bucket, N - 1);
-  const fmtDt = (t) => (t ? new Date(t).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
   const cellStyle = (cell) => {
     const st = cell.states?.[bi];
     if (!cell.present) return { background: 'rgba(148,163,184,.07)', border: '1px solid rgba(148,163,184,.13)' };
@@ -330,16 +297,6 @@ export function IpamNetMap() {
   );
 }
 
-// 대역 spec → IP 개수(미리보기). 백엔드 specToRange와 동일 규칙(클라 즉시 계산).
-function rangeSpecSize(spec) {
-  const s = String(spec || '').trim();
-  const toNum = (x) => { const p = String(x).split('.').map(Number); return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) ? ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3] : null; };
-  if (!s) return 0;
-  if (s.includes('/')) { const [b, bits] = s.split('/'); const n = Number(bits); if (toNum(b) == null || !(n >= 8 && n <= 32)) return 0; const sz = 2 ** (32 - n); return n >= 31 ? sz : Math.max(0, sz - 2); }
-  if (s.includes('-')) { const [a, bRaw] = s.split('-').map((x) => x.trim()); const an = toNum(a); let bn = toNum(bRaw); if (bn == null && /^\d{1,3}$/.test(bRaw) && an != null) bn = (an & 0xffffff00) + Number(bRaw); if (an == null || bn == null || bn < an) return 0; return bn - an + 1; }
-  return toNum(s) != null ? 1 : 0;
-}
-
 /**
  * 대역(subnet/range) 단위 정책 관리 — 한 대역을 통째로 예약/DHCP풀/폐기 등으로 지정한다.
  * 우선순위: IP 단위 수동(override) > 대역 정책 > 자동발견. 정책은 행을 만들지 않고 오버레이만 한다.
@@ -389,7 +346,7 @@ export function RangePolicies({ scope, canManage, vcenters = [], onChanged }) {
         <div className="card"><span className="muted">등록된 대역 정책이 없습니다. ‘＋ 새 정책’으로 대역(예: 10.0.0.0/24)에 기본 관리상태를 지정하세요.</span></div>
       ) : (
         <div className="table-wrap">
-          <STable>
+          <STable minWidth={860} wrap={false}>
             <thead><tr><th>활성</th><th>대역(spec)</th><th>커버 IP</th><th>상태</th><th>vCenter</th><th>우선순위</th><th>담당/라벨</th><th>비고</th><th></th></tr></thead>
             <tbody>
               {policies.map((p) => (
@@ -432,7 +389,7 @@ function PolicyForm({ policy, vcenters = [], onClose, onSaved }) {
   const [enabled, setEnabled] = useState(policy.enabled !== false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const size = rangeSpecSize(spec);
+  const size = policySpecSize(spec); // v2.639(D1): 서버 specToRange 와 같은 뜻 — 예전 사본은 `192.168.1.1-50` 을 음수(0)로 읽어 저장을 잠갔다
   const save = async () => {
     if (size <= 0) { setErr('유효한 대역(CIDR/범위/IP)이 아닙니다.'); return; }
     setBusy(true); setErr(null);

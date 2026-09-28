@@ -21,8 +21,11 @@
  */
 import { ipToNum } from '../util/ipv4.js';
 
+// ⚠ scanStore.js `LOCAL` 과 같은 값이어야 한다 — 이 모듈은 순수(scanStore 를 import 하지 않는다)라 상수를 따로 둔다.
+//   `test/ipamStore2639.test.js` 가 두 값이 같음을 고정한다(모듈 경계가 두 벌을 두는 이유 — 억지 통합 금지).
 export const LOCAL_AGENT = '__local__';
-export const SUGGEST_MAX = 1024;
+const SUGGEST_MAX = 1024; // v2.639: 바깥 호출부 0건(응답의 omitted 로만 드러난다) — 내부 상수
+
 const t = (v) => (v == null ? '' : String(v).trim());
 const low = (v) => t(v).toLowerCase();
 

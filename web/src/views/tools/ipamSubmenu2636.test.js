@@ -218,19 +218,28 @@ describe('⑤ 화면 소스', () => {
   });
   it('해시 키는 페이지 전부 · 설정은 모달이 아니라 페이지(asPage)', () => {
     expect(ipamFn).toMatch(/useHashTab\(\{ base: \['ipam'\], valid: IPAM_PAGE_KEYS/);
-    expect(ipamFn).toMatch(/<IpScanSettings asPage \/>/);
-    expect(ipamFn).toMatch(/<IpmsSettings asPage \/>/);
+    // v2.638 부터 onSaved · v2.639 부터 access 도 넘긴다 — 'asPage 로 그린다' 만 고정한다(D3: 초판 정규식이 ' />' 까지 요구해 깨졌다).
+    expect(ipamFn).toMatch(/<IpScanSettings asPage\b/);
+    expect(ipamFn).toMatch(/<IpmsSettings asPage\b/);
     expect(ipamFn).toMatch(/<ScanStatusModal asPage \/>/);
     expect(ipamFn).toMatch(/<IpamScanLog \/>/);
     expect(ipamFn).toMatch(/<IpamCsv /);
     expect(ipamFn).not.toMatch(/setScanOpen|setIpms\(|setScanStatusOpen/);
   });
-  it('설정 폼은 편집 초안을 쓴다(IPMS·vCenter 스캔 대역·IP 스캔)', () => {
-    const settings = stripComments(read('./IpamSettings.jsx'));
-    expect(settings).toMatch(/useIpamDraft\('ipms:settings'\)/);
-    expect(settings).toMatch(/useIpamDraft\(`ipms:vcscan:\$\{vc \|\| '-'\}`\)/);
-    expect(settings).toMatch(/useIpamDraft\(`scan:\$\{agent\}`\)/);
-    expect(settings).toMatch(/d\.saved\(r\.settings\)/);
+  it('설정 폼은 편집 초안을 쓴다(IPMS·vCenter 스캔 대역·IP 스캔) — v2.639 분할 뒤 파일별', () => {
+    // v2.639(U2): IpamSettings.jsx 는 재수출 셸이고 구현은 성격별 파일에 있다. 초안 키의 첫 조각은 서브메뉴 키여야 한다(pageOfKey → ● 표시).
+    expect(stripComments(read('./IpmsSettings.jsx'))).toMatch(/useIpamDraft\('ipms:settings'\)/);
+    const editor = stripComments(read('./VcScanRangeEditor.jsx'));
+    expect(editor).toMatch(/useIpamDraft\(`\$\{draftPrefix\}:\$\{vc \|\| '-'\}`\)/);
+    expect(stripComments(read('./IpmsSettings.jsx'))).toMatch(/draftPrefix="ipms:vcscan"/);
+    expect(stripComments(read('./IpamNet.jsx'))).toMatch(/draftPrefix="ranges:vc"/);
+    const scan = stripComments(read('./IpScanSettings.jsx'));
+    expect(scan).toMatch(/useIpamDraft\(`scan:\$\{agent\}`\)/);
+    expect(scan).toMatch(/d\.saved\(r\.settings\)/);
+    // 재수출 셸에는 구현이 없다
+    const shell = stripComments(read('./IpamSettings.jsx'));
+    expect(shell).not.toMatch(/useState|useEffect|<Frame/);
+    for (const name of ['MemoEditor', 'OverrideEditor', 'IpmsSettings', 'IpScanSettings', 'ipScanAccept', 'ScanProgressBar', 'ScanStatusModal', 'vcRangesGate']) expect(shell, name).toContain(name);
   });
   it('CSV 적용 뒤에는 초안을 내린다(적용한 입력을 \'미적용\' 으로 말하지 않는다)', () => {
     const csv = stripComments(read('./IpamCsv.jsx'));

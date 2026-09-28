@@ -9,7 +9,8 @@
 import net from 'node:net';
 import dnsp from 'node:dns/promises';
 import { execFile } from 'node:child_process';
-import { ipToNum, isIpv4 } from '../util/ipv4.js';
+import { numToIp, isIpv4 } from '../util/ipv4.js';
+import { checkRangeSpec } from './rangeSyntax.js'; // v2.639: 대역 문법 판정 코어 하나
 import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 
 export const DEFAULT_PORTS = [22, 80, 443, 445, 3389, 623, 8006, 902, 5985, 5986];
@@ -21,66 +22,46 @@ export const portService = (p) => SERVICE[p] || String(p);
 
 // v2.586 — 예전 판본은 '10..1.1'·'10.1.1.' 을 유효로 받았다(빈 옥텟 → 0). 판정은 util/ipv4.js 하나.
 export { isIpv4 };
-const numToIp = (n) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
 
 export const RANGE_CAP = 4096; // spec 1개당 확장 IP 안전 상한
 
+/*
+ * v2.639: 대역 문법 판정은 `rangeSyntax.checkRangeSpec` 하나다. 예전에는 이 파일(`rangeSize`·`expandRange`)·
+ * `rangePolicies.specToRange`·`rangeSyntax` 가 각자 `split('/')`·`split('-')` 로 읽어 **같은 줄을 다르게 판정**했다 —
+ * `10.0.0.0/8/x`(rangeSize 16,777,214 · expandRange 4,096개 · checkRangeSpec 오류) · `10.0.0.250-300`(끝 옥텟 300 을
+ * 그대로 더해 10.0.1.44 까지) · `10.0.0.0/24.5`(Number('24.5') → 179.019개) · `10.0.0.1-2-3`(첫 두 조각만). 그래서
+ * PUT vc-ranges 는 거부하는 줄을 CSV 가져오기·PUT scan/settings 는 저장했고, 엣지는 그 줄을 스캔한 뒤 중앙
+ * `/ip-scan-result` 가 `specToRange` null 로 전부 거부했다. 여기 두 함수는 그 판정 위에서 **스캔의 의미**(CIDR 의
+ * 네트워크·브로드캐스트 제외, RANGE_CAP 상한)만 얹는 어댑터다. 뒤집힌 범위는 스캔에서는 오류다(`reversed:'error'`).
+ */
+const judge = (spec) => checkRangeSpec(spec, { reversed: 'error' });
+/** 판정 결과 → 스캔 대상 [lo, hi](CIDR 은 /31·/32 만 전체, 그 외는 네트워크·브로드캐스트 제외). */
+function scanBounds(r) {
+  if (r.kind === 'cidr' && r.size > 2) return { lo: r.lo + 1, hi: r.hi - 1 };
+  return { lo: r.lo, hi: r.hi };
+}
+
 /** spec의 '진짜' IP 개수(배열 생성 없이 계산, 4096 상한 미적용 — 표시용). 0이면 무효 spec. */
 export function rangeSize(spec) {
-  const s = String(spec || '').trim();
-  if (!s) return 0;
-  if (s.includes('/')) {
-    const [base, bitsStr] = s.split('/');
-    const bits = Number(bitsStr); const b = ipToNum(base);
-    if (b == null || !(bits >= 8 && bits <= 32)) return 0;
-    const size = 2 ** (32 - bits);
-    return bits >= 31 ? size : Math.max(0, size - 2);
-  }
-  if (s.includes('-')) {
-    const [a, bRaw] = s.split('-').map((x) => x.trim());
-    const an = ipToNum(a);
-    let bn = ipToNum(bRaw);
-    // & 는 int32라 첫 옥텟 ≥128(192.168.x 등)이면 음수가 됨 — >>>0 으로 부호 제거 필수.
-    if (bn == null && /^\d{1,3}$/.test(bRaw) && an != null) bn = ((an & 0xffffff00) >>> 0) + Number(bRaw);
-    if (an == null || bn == null || bn < an) return 0;
-    return bn - an + 1;
-  }
-  return ipToNum(s) != null ? 1 : 0;
+  const r = judge(spec);
+  if (!r.ok) return 0;
+  const { lo, hi } = scanBounds(r);
+  return hi - lo + 1;
 }
 
 /** "10.0.0.0/24" | "10.0.0.1-10.0.0.50" | "10.0.0.1-50" | "10.0.0.5" → IP 배열(스캔용, 4096 상한). */
 export function expandRange(spec) {
-  const s = String(spec || '').trim();
-  if (!s) return [];
-  if (s.includes('/')) {
-    const [base, bitsStr] = s.split('/');
-    const bits = Number(bitsStr); const b = ipToNum(base);
-    if (b == null || !(bits >= 8 && bits <= 32)) return [];
-    const size = 2 ** (32 - bits);
-    const net0 = b & (size === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0);
-    const out = [];
-    // /31·/32는 전체, 그 외는 네트워크/브로드캐스트 제외.
-    const start = bits >= 31 ? 0 : 1;
-    const fullEnd = bits >= 31 ? size : size - 1;
-    // 상한을 '생성 후 slice'가 아니라 루프 종료조건으로 적용 — /8(1670만) 등은 slice 전에 이미
-    // 전체 배열(~1GB)을 할당하며 이벤트 루프를 수 초 블로킹한다. 앞 RANGE_CAP개만 만든다.
-    const end = Math.min(fullEnd, start + RANGE_CAP);
-    for (let i = start; i < end; i++) out.push(numToIp((net0 + i) >>> 0));
-    if (fullEnd - start > RANGE_CAP) console.warn(`[ipscan] 대역 ${s}이(가) ${fullEnd - start}개로 ${RANGE_CAP} 상한 초과 — 앞 ${RANGE_CAP}개만 스캔합니다. /24 단위로 나눠 등록하세요.`);
-    return out; // 이미 상한 적용됨
-  }
-  if (s.includes('-')) {
-    const [a, bRaw] = s.split('-').map((x) => x.trim());
-    const an = ipToNum(a);
-    let bn = ipToNum(bRaw);
-    if (bn == null && /^\d{1,3}$/.test(bRaw) && an != null) bn = ((an & 0xffffff00) >>> 0) + Number(bRaw); // a.b.c.d-e (>>>0: 192.168.x 부호 버그 방지)
-    if (an == null || bn == null || bn < an) return [];
-    const total = bn - an + 1;
-    if (total > RANGE_CAP) console.warn(`[ipscan] 범위 ${s}이(가) ${total}개로 ${RANGE_CAP} 상한 초과 — 앞 ${RANGE_CAP}개만 스캔합니다.`);
-    const out = []; for (let n = an; n <= bn && out.length < RANGE_CAP; n++) out.push(numToIp(n >>> 0));
-    return out;
-  }
-  return ipToNum(s) != null ? [s] : [];
+  const r = judge(spec);
+  if (!r.ok) return [];
+  const { lo, hi } = scanBounds(r);
+  const total = hi - lo + 1;
+  // 상한을 '생성 후 slice'가 아니라 루프 종료조건으로 적용 — /8(1670만) 등은 slice 전에 이미
+  // 전체 배열(~1GB)을 할당하며 이벤트 루프를 수 초 블로킹한다. 앞 RANGE_CAP개만 만든다.
+  if (total > RANGE_CAP) console.warn(`[ipscan] 대역 ${String(spec).trim()}이(가) ${total}개로 ${RANGE_CAP} 상한 초과 — 앞 ${RANGE_CAP}개만 스캔합니다. /24 단위로 나눠 등록하세요.`);
+  const end = lo + Math.min(total, RANGE_CAP);
+  const out = [];
+  for (let n = lo; n < end; n++) out.push(numToIp(n));
+  return out; // 이미 상한 적용됨
 }
 
 function tcpProbe(ip, port, timeoutMs) {

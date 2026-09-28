@@ -118,7 +118,8 @@ describe('WEB2613-08 IP관리 탭은 허브(SpecialTools.jsx)를 경유하지 �
 describe('WEB2613-09 폴링은 usePolling — RemoteCommand·PduTool 의 수제 setInterval 0', () => {
   // 나머지 수제 폴러는 후속(SPLIT) — 사유와 함께 열거한다. 여기서 빠진 새 파일에 setInterval 폴러가 생기면 실패한다.
   const FOLLOW_UP = new Map([
-    ['views/tools/VmCloneTool.jsx', '10초 load — 후속'], ['views/tools/IpamSettings.jsx', '2초 진행 표시(deniedRef 로 403 정지 있음) — 대상 아님'],
+    ['views/tools/VmCloneTool.jsx', '10초 load — 후속'], ['views/tools/IpScanSettings.jsx', '2초 진행 표시(deniedRef 로 403 정지 있음) — 대상 아님'],
+    ['views/tools/IpamScanStatus.jsx', '2초 스캔 상태(deniedRef 로 403 정지 있음) — v2.639 에 IpamSettings.jsx 에서 나눔'],
     ['views/tools/BmStorageTool.jsx', '후속'], ['views/tools/StorageTrackTool.jsx', '후속'], ['views/tools/HardwareTools.jsx', '후속(:687 NIC 표)'],
     ['views/tools/IpamNet.jsx', '3초 스캔 상태(statusDenied 로 403 정지 있음)'], ['views/tools/CapacityTools.jsx', '내보내기 경과초 표시(네트워크 아님)'],
     ['views/tools/SanSwitchTool.jsx', 'G1 담당 파일 — 후속'], ['views/tools/ShutdownTool.jsx', '후속'], ['views/tools/StorageMonTool.jsx', '후속'],
@@ -145,7 +146,7 @@ describe('WEB2613-10 views/** 에서 api.js 를 우회한 직접 fetch( 0건', (
   });
   it('옮긴 곳이 delJson/downloadFile 을 쓴다', () => {
     expect(code(path.join(SRC, 'views/tools/IpamNet.jsx'))).toMatch(/delJson\(`\/admin\/ipam\/vc-ranges\//);
-    expect(code(path.join(SRC, 'views/tools/IpamSettings.jsx'))).toMatch(/delJson\(`\/tools\/ipam\/ip\//);
+    expect(code(path.join(SRC, 'views/tools/IpamEditors.jsx'))).toMatch(/delJson\(`\/tools\/ipam\/ip\//); // v2.639: OverrideEditor 는 IpamEditors.jsx
     expect(code(path.join(SRC, 'views/tools/GpuTool.jsx'))).toMatch(/downloadFile\(`\/tools\/gpu\/export\./);
     expect(code(path.join(SRC, 'views/PortalBackup.jsx'))).toMatch(/downloadFile\(`\/admin\/backup\/download\//);
     expect(code(path.join(SRC, 'views/DavinciChecks.jsx'))).toMatch(/downloadFile\(`\/tools\/vmware-config\?download=1/);

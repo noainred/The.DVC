@@ -39,7 +39,7 @@ function loadAll() {
 function emit() { for (const fn of [...listeners]) { try { fn(); } catch { /* 구독자 오류가 다른 구독자를 막지 않게 */ } } }
 
 /** 키 순서와 무관한 JSON — 같은 값인지 비교할 때 쓴다(객체 키 순서가 서버·폼에서 달라도 같은 값). */
-export function stableJson(v) {
+function stableJson(v) {
   const seen = new WeakSet();
   const walk = (x) => {
     if (x === undefined) return null;
@@ -83,7 +83,7 @@ export function clearDraft(key) {
 
 export function dirtyKeys() { loadAll(); return [...mem.keys()]; }
 /** 초안 키의 페이지(서브메뉴 키). */
-export function pageOfKey(key) { return String(key).split(':')[0]; }
+function pageOfKey(key) { return String(key).split(':')[0]; }
 /** 미저장 초안이 있는 페이지 집합. */
 export function dirtyPages() { return new Set(dirtyKeys().map(pageOfKey)); }
 export function onDraftChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }

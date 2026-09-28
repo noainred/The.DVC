@@ -24,7 +24,7 @@
 |---|---|
 | 엔드포인트 | **859개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 80개 |
+| 라우트 파일 | 81개 |
 | GET | 450개 |
 | POST | 272개 |
 | PUT | 88개 |
@@ -327,16 +327,16 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | PUT | `/backup/settings` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:102](../server/src/routes/admin/backupNetSec.js#L102) |
 | GET | `/backup/status` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:99](../server/src/routes/admin/backupNetSec.js#L99) |
 | GET | `/backup/view/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:116](../server/src/routes/admin/backupNetSec.js#L116) |
-| GET | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:127](../server/src/routes/admin/centralIpam.js#L127) |
-| PUT | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:156](../server/src/routes/admin/centralIpam.js#L156) |
-| POST | `/central-token/generate` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:151](../server/src/routes/admin/centralIpam.js#L151) |
-| GET | `/central/agent-tokens` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:169](../server/src/routes/admin/centralIpam.js#L169) |
-| POST | `/central/agent-tokens` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:172](../server/src/routes/admin/centralIpam.js#L172) |
-| DELETE | `/central/agent-tokens/:agent` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:178](../server/src/routes/admin/centralIpam.js#L178) |
-| GET | `/central/ingest-stats` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:147](../server/src/routes/admin/centralIpam.js#L147) |
-| POST | `/central/ingest-stats/reset` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:148](../server/src/routes/admin/centralIpam.js#L148) |
-| GET | `/central/inventory` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:129](../server/src/routes/admin/centralIpam.js#L129) |
-| POST | `/central/inventory/owner` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:134](../server/src/routes/admin/centralIpam.js#L134) |
+| GET | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralTokens.js:24](../server/src/routes/admin/centralTokens.js#L24) |
+| PUT | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralTokens.js:53](../server/src/routes/admin/centralTokens.js#L53) |
+| POST | `/central-token/generate` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralTokens.js:48](../server/src/routes/admin/centralTokens.js#L48) |
+| GET | `/central/agent-tokens` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralTokens.js:66](../server/src/routes/admin/centralTokens.js#L66) |
+| POST | `/central/agent-tokens` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/centralTokens.js:69](../server/src/routes/admin/centralTokens.js#L69) |
+| DELETE | `/central/agent-tokens/:agent` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/centralTokens.js:75](../server/src/routes/admin/centralTokens.js#L75) |
+| GET | `/central/ingest-stats` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralTokens.js:44](../server/src/routes/admin/centralTokens.js#L44) |
+| POST | `/central/ingest-stats/reset` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralTokens.js:45](../server/src/routes/admin/centralTokens.js#L45) |
+| GET | `/central/inventory` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralTokens.js:26](../server/src/routes/admin/centralTokens.js#L26) |
+| POST | `/central/inventory/owner` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralTokens.js:31](../server/src/routes/admin/centralTokens.js#L31) |
 | POST | `/certs/refresh` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:99](../server/src/routes/admin/opsSettings.js#L99) |
 | GET | `/codex-check` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:28](../server/src/routes/admin/statusTools.js#L28) |
 | GET | `/codex-check/file` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:31](../server/src/routes/admin/statusTools.js#L31) |
@@ -460,24 +460,24 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/idrac/temps` | 역할 `admin` | [server/src/routes/admin/idracCore.js:495](../server/src/routes/admin/idracCore.js#L495) |
 | POST | `/idrac/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:221](../server/src/routes/admin/idracCore.js#L221) |
 | GET | `/idrac/unsupported` | 역할 `admin` | [server/src/routes/admin/idracCore.js:486](../server/src/routes/admin/idracCore.js#L486) |
-| GET | `/ipam/db-info` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:57](../server/src/routes/admin/centralIpam.js#L57) |
-| GET | `/ipam/scan/log` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:240](../server/src/routes/admin/centralIpam.js#L240) |
-| GET | `/ipam/scan/ranges.csv` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:264](../server/src/routes/admin/centralIpam.js#L264) |
-| POST | `/ipam/scan/ranges/import` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:275](../server/src/routes/admin/centralIpam.js#L275) |
-| GET | `/ipam/scan/ranges/sample.csv` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:270](../server/src/routes/admin/centralIpam.js#L270) |
-| GET | `/ipam/scan/results` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:251](../server/src/routes/admin/centralIpam.js#L251) |
-| POST | `/ipam/scan/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:243](../server/src/routes/admin/centralIpam.js#L243) |
-| GET | `/ipam/scan/settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:186](../server/src/routes/admin/centralIpam.js#L186) |
-| PUT | `/ipam/scan/settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:205](../server/src/routes/admin/centralIpam.js#L205) |
-| GET | `/ipam/scan/status` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:248](../server/src/routes/admin/centralIpam.js#L248) |
-| GET | `/ipam/scan/suggest` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:222](../server/src/routes/admin/centralIpam.js#L222) |
-| GET | `/ipam/settings` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:96](../server/src/routes/admin/centralIpam.js#L96) |
-| PUT | `/ipam/settings` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:100](../server/src/routes/admin/centralIpam.js#L100) |
-| PUT | `/ipam/vc-ranges` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:299](../server/src/routes/admin/centralIpam.js#L299) |
-| DELETE | `/ipam/vc-ranges/:vcenterId` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:317](../server/src/routes/admin/centralIpam.js#L317) |
-| POST | `/ipam/vc-ranges/import` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:338](../server/src/routes/admin/centralIpam.js#L338) |
-| GET | `/ipam/vc-ranges/sample.csv` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:332](../server/src/routes/admin/centralIpam.js#L332) |
-| POST | `/ipam/vc-ranges/scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:323](../server/src/routes/admin/centralIpam.js#L323) |
+| GET | `/ipam/db-info` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:53](../server/src/routes/admin/centralIpam.js#L53) |
+| GET | `/ipam/scan/log` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:172](../server/src/routes/admin/centralIpam.js#L172) |
+| GET | `/ipam/scan/ranges.csv` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:196](../server/src/routes/admin/centralIpam.js#L196) |
+| POST | `/ipam/scan/ranges/import` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:207](../server/src/routes/admin/centralIpam.js#L207) |
+| GET | `/ipam/scan/ranges/sample.csv` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:202](../server/src/routes/admin/centralIpam.js#L202) |
+| GET | `/ipam/scan/results` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:183](../server/src/routes/admin/centralIpam.js#L183) |
+| POST | `/ipam/scan/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:175](../server/src/routes/admin/centralIpam.js#L175) |
+| GET | `/ipam/scan/settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:109](../server/src/routes/admin/centralIpam.js#L109) |
+| PUT | `/ipam/scan/settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:128](../server/src/routes/admin/centralIpam.js#L128) |
+| GET | `/ipam/scan/status` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:180](../server/src/routes/admin/centralIpam.js#L180) |
+| GET | `/ipam/scan/suggest` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:154](../server/src/routes/admin/centralIpam.js#L154) |
+| GET | `/ipam/settings` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:81](../server/src/routes/admin/centralIpam.js#L81) |
+| PUT | `/ipam/settings` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:85](../server/src/routes/admin/centralIpam.js#L85) |
+| PUT | `/ipam/vc-ranges` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:231](../server/src/routes/admin/centralIpam.js#L231) |
+| DELETE | `/ipam/vc-ranges/:vcenterId` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:249](../server/src/routes/admin/centralIpam.js#L249) |
+| POST | `/ipam/vc-ranges/import` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:270](../server/src/routes/admin/centralIpam.js#L270) |
+| GET | `/ipam/vc-ranges/sample.csv` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:264](../server/src/routes/admin/centralIpam.js#L264) |
+| POST | `/ipam/vc-ranges/scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:255](../server/src/routes/admin/centralIpam.js#L255) |
 | GET | `/llm-config` | 역할 `admin` | [server/src/routes/admin/deployLlm.js:518](../server/src/routes/admin/deployLlm.js#L518) |
 | PUT | `/llm-config` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/deployLlm.js:519](../server/src/routes/admin/deployLlm.js#L519) |
 | POST | `/llm-test` | 역할 `admin` | [server/src/routes/admin/deployLlm.js:523](../server/src/routes/admin/deployLlm.js#L523) |
@@ -784,33 +784,33 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/insights` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:29](../server/src/routes/api/toolsAnalytics.js#L29) |
 | GET | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:401](../server/src/routes/api/hardwareGpu.js#L401) |
 | POST | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:376](../server/src/routes/api/hardwareGpu.js#L376) |
-| GET | `/tools/ipam` | 권한 `tools` | [server/src/routes/api/ipamExport.js:114](../server/src/routes/api/ipamExport.js#L114) |
-| GET | `/tools/ipam.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:462](../server/src/routes/api/ipamExport.js#L462) |
-| GET | `/tools/ipam.xlsx` | 권한 `tools` | [server/src/routes/api/ipamExport.js:441](../server/src/routes/api/ipamExport.js#L441) |
-| GET | `/tools/ipam/annotation` | 권한 `tools` | [server/src/routes/api/ipamExport.js:235](../server/src/routes/api/ipamExport.js#L235) |
-| PUT | `/tools/ipam/annotation` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:246](../server/src/routes/api/ipamExport.js#L246) |
-| POST | `/tools/ipam/bulk` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:315](../server/src/routes/api/ipamExport.js#L315) |
-| GET | `/tools/ipam/history` | 권한 `tools` | [server/src/routes/api/ipamExport.js:166](../server/src/routes/api/ipamExport.js#L166) |
-| GET | `/tools/ipam/insights` | 권한 `tools` | [server/src/routes/api/ipamExport.js:149](../server/src/routes/api/ipamExport.js#L149) |
-| DELETE | `/tools/ipam/ip/:ip` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:301](../server/src/routes/api/ipamExport.js#L301) |
-| GET | `/tools/ipam/ip/:ip` | 권한 `tools` | [server/src/routes/api/ipamExport.js:274](../server/src/routes/api/ipamExport.js#L274) |
-| PUT | `/tools/ipam/ip/:ip` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:287](../server/src/routes/api/ipamExport.js#L287) |
-| GET | `/tools/ipam/manage-meta` | 권한 `tools` | [server/src/routes/api/ipamExport.js:262](../server/src/routes/api/ipamExport.js#L262) |
-| GET | `/tools/ipam/manage.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:525](../server/src/routes/api/ipamExport.js#L525) |
-| POST | `/tools/ipam/manage/import` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:550](../server/src/routes/api/ipamExport.js#L550) |
-| GET | `/tools/ipam/manage/sample.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:539](../server/src/routes/api/ipamExport.js#L539) |
-| GET | `/tools/ipam/netmap` | 권한 `tools` | [server/src/routes/api/ipamExport.js:201](../server/src/routes/api/ipamExport.js#L201) |
-| GET | `/tools/ipam/policies` | 권한 `tools` | [server/src/routes/api/ipamExport.js:342](../server/src/routes/api/ipamExport.js#L342) |
-| POST | `/tools/ipam/policies` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:373](../server/src/routes/api/ipamExport.js#L373) |
-| DELETE | `/tools/ipam/policies/:id` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:417](../server/src/routes/api/ipamExport.js#L417) |
-| PUT | `/tools/ipam/policies/:id` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:390](../server/src/routes/api/ipamExport.js#L390) |
-| GET | `/tools/ipam/policies/ip/:ip` | 권한 `tools` | [server/src/routes/api/ipamExport.js:351](../server/src/routes/api/ipamExport.js#L351) |
-| GET | `/tools/ipam/policies/preview` | 권한 `tools` | [server/src/routes/api/ipamExport.js:368](../server/src/routes/api/ipamExport.js#L368) |
-| GET | `/tools/ipam/scan-report.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:210](../server/src/routes/api/ipamExport.js#L210) |
-| GET | `/tools/ipam/sheet` | 권한 `tools` | [server/src/routes/api/ipamExport.js:159](../server/src/routes/api/ipamExport.js#L159) |
-| GET | `/tools/ipam/subnets` | 권한 `tools` | [server/src/routes/api/ipamExport.js:155](../server/src/routes/api/ipamExport.js#L155) |
-| GET | `/tools/ipam/vc-ranges` | 권한 `tools` | [server/src/routes/api/ipamExport.js:174](../server/src/routes/api/ipamExport.js#L174) |
-| GET | `/tools/ipam/vc-ranges.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:189](../server/src/routes/api/ipamExport.js#L189) |
+| GET | `/tools/ipam` | 권한 `tools` | [server/src/routes/api/ipamExport.js:116](../server/src/routes/api/ipamExport.js#L116) |
+| GET | `/tools/ipam.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:471](../server/src/routes/api/ipamExport.js#L471) |
+| GET | `/tools/ipam.xlsx` | 권한 `tools` | [server/src/routes/api/ipamExport.js:450](../server/src/routes/api/ipamExport.js#L450) |
+| GET | `/tools/ipam/annotation` | 권한 `tools` | [server/src/routes/api/ipamExport.js:244](../server/src/routes/api/ipamExport.js#L244) |
+| PUT | `/tools/ipam/annotation` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:255](../server/src/routes/api/ipamExport.js#L255) |
+| POST | `/tools/ipam/bulk` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:324](../server/src/routes/api/ipamExport.js#L324) |
+| GET | `/tools/ipam/history` | 권한 `tools` | [server/src/routes/api/ipamExport.js:168](../server/src/routes/api/ipamExport.js#L168) |
+| GET | `/tools/ipam/insights` | 권한 `tools` | [server/src/routes/api/ipamExport.js:151](../server/src/routes/api/ipamExport.js#L151) |
+| DELETE | `/tools/ipam/ip/:ip` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:310](../server/src/routes/api/ipamExport.js#L310) |
+| GET | `/tools/ipam/ip/:ip` | 권한 `tools` | [server/src/routes/api/ipamExport.js:283](../server/src/routes/api/ipamExport.js#L283) |
+| PUT | `/tools/ipam/ip/:ip` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:296](../server/src/routes/api/ipamExport.js#L296) |
+| GET | `/tools/ipam/manage-meta` | 권한 `tools` | [server/src/routes/api/ipamExport.js:271](../server/src/routes/api/ipamExport.js#L271) |
+| GET | `/tools/ipam/manage.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:523](../server/src/routes/api/ipamExport.js#L523) |
+| POST | `/tools/ipam/manage/import` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:548](../server/src/routes/api/ipamExport.js#L548) |
+| GET | `/tools/ipam/manage/sample.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:537](../server/src/routes/api/ipamExport.js#L537) |
+| GET | `/tools/ipam/netmap` | 권한 `tools` | [server/src/routes/api/ipamExport.js:210](../server/src/routes/api/ipamExport.js#L210) |
+| GET | `/tools/ipam/policies` | 권한 `tools` | [server/src/routes/api/ipamExport.js:351](../server/src/routes/api/ipamExport.js#L351) |
+| POST | `/tools/ipam/policies` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:382](../server/src/routes/api/ipamExport.js#L382) |
+| DELETE | `/tools/ipam/policies/:id` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:426](../server/src/routes/api/ipamExport.js#L426) |
+| PUT | `/tools/ipam/policies/:id` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/ipamExport.js:399](../server/src/routes/api/ipamExport.js#L399) |
+| GET | `/tools/ipam/policies/ip/:ip` | 권한 `tools` | [server/src/routes/api/ipamExport.js:360](../server/src/routes/api/ipamExport.js#L360) |
+| GET | `/tools/ipam/policies/preview` | 권한 `tools` | [server/src/routes/api/ipamExport.js:377](../server/src/routes/api/ipamExport.js#L377) |
+| GET | `/tools/ipam/scan-report.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:219](../server/src/routes/api/ipamExport.js#L219) |
+| GET | `/tools/ipam/sheet` | 권한 `tools` | [server/src/routes/api/ipamExport.js:161](../server/src/routes/api/ipamExport.js#L161) |
+| GET | `/tools/ipam/subnets` | 권한 `tools` | [server/src/routes/api/ipamExport.js:157](../server/src/routes/api/ipamExport.js#L157) |
+| GET | `/tools/ipam/vc-ranges` | 권한 `tools` | [server/src/routes/api/ipamExport.js:176](../server/src/routes/api/ipamExport.js#L176) |
+| GET | `/tools/ipam/vc-ranges.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:198](../server/src/routes/api/ipamExport.js#L198) |
 | GET | `/tools/license-expiry` | 권한 `tools` | [server/src/routes/api/toolsInfo.js:160](../server/src/routes/api/toolsInfo.js#L160) |
 | GET | `/tools/licenses` | 권한 `tools` | [server/src/routes/api/toolsInfo.js:110](../server/src/routes/api/toolsInfo.js#L110) |
 | GET | `/tools/link-check` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/linkCheck.js:53](../server/src/routes/api/linkCheck.js#L53) |
@@ -968,8 +968,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/vm-clone/jobs` | 역할 `admin` | [server/src/routes/api/vmClone.js:47](../server/src/routes/api/vmClone.js#L47) |
 | DELETE | `/tools/vm-clone/jobs/:id` | 역할 `admin` | [server/src/routes/api/vmClone.js:83](../server/src/routes/api/vmClone.js#L83) |
 | POST | `/tools/vm-clone/jobs/:id/run` | 역할 `admin` | [server/src/routes/api/vmClone.js:94](../server/src/routes/api/vmClone.js#L94) |
-| GET | `/tools/vm-export` | 권한 `tools` | [server/src/routes/api/ipamExport.js:128](../server/src/routes/api/ipamExport.js#L128) |
-| GET | `/tools/vm-export.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:137](../server/src/routes/api/ipamExport.js#L137) |
+| GET | `/tools/vm-export` | 권한 `tools` | [server/src/routes/api/ipamExport.js:130](../server/src/routes/api/ipamExport.js#L130) |
+| GET | `/tools/vm-export.csv` | 권한 `tools` | [server/src/routes/api/ipamExport.js:139](../server/src/routes/api/ipamExport.js#L139) |
 | POST | `/tools/vm-finder` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1142](../server/src/routes/api/toolsCapacity.js#L1142) |
 | GET | `/tools/vm-track` | 권한 `tools` | [server/src/routes/api/vmtrack.js:18](../server/src/routes/api/vmtrack.js#L18) |
 | GET | `/tools/vm-track/changes` | 권한 `tools` | [server/src/routes/api/vmtrack.js:47](../server/src/routes/api/vmtrack.js#L47) |

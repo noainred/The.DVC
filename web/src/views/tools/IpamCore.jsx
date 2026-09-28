@@ -5,10 +5,13 @@ import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js'; // v
 import { fetchJson, usePolling, hasRole } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
-import { DEVTYPE_LABEL, DiscoveryBadge, MGMT, MgmtBadge } from './ipamShared.jsx';
+import { agentLabel, DEVTYPE_LABEL, DiscoveryBadge, fmtDt, fmtDur, MGMT, MgmtBadge } from './ipamShared.jsx';
 import { IpamNetMap, IpamRanges, RangePolicies } from './IpamNet.jsx';
-import { IpScanSettings, IpmsSettings, MemoEditor, OverrideEditor, ScanStatusModal } from './IpamSettings.jsx';
-import { IPAM_PAGE_KEYS, menuGroups, pageDeniedNote } from './ipamPages.js'; // v2.636 IP관리 서브메뉴
+import { MemoEditor, OverrideEditor } from './IpamEditors.jsx';
+import { IpmsSettings } from './IpmsSettings.jsx';
+import { IpScanSettings } from './IpScanSettings.jsx';
+import { ScanStatusModal } from './IpamScanStatus.jsx';
+import { IPAM_PAGE_KEYS, ipamPage, menuGroups, pageDeniedNote } from './ipamPages.js'; // v2.636 IP관리 서브메뉴
 import { dirtyKeys, dirtyPages, onDraftChange } from './ipamDraft.js';
 import { IpamScanLog } from './IpamScanLog.jsx';
 import { IpamCsv } from './IpamCsv.jsx';
@@ -197,7 +200,7 @@ function Ipam({ scope, onScope }) {
     { key: 'vcenterName', label: '센터(vCenter)', sortValue: (r) => `${r.vcenterName || ''} ${r.datacenterName || ''}`, render: (r) => (
       r.ownerType === 'scanned'
         ? <span>{r.vcenterName}{r.datacenterName
-          ? <span className="badge teal" style={{ marginLeft: 4, fontSize: 10 }} title={`스캔한 에이전트 ${r.scanAgent === '__local__' ? '이 포탈' : r.scanAgent || '—'} 의 데이터센터(${r.dcSource === 'manual' ? '직접 지정' : '자동 판정'})`}>{r.datacenterName}</span>
+          ? <span className="badge teal" style={{ marginLeft: 4, fontSize: 10 }} title={`스캔한 에이전트 ${r.scanAgent ? agentLabel(r.scanAgent) : '—'} 의 데이터센터(${r.dcSource === 'manual' ? '직접 지정' : '자동 판정'})`}>{r.datacenterName}</span>
           : <span className="muted" style={{ marginLeft: 4, fontSize: 10 }} title="스캔한 에이전트의 데이터센터를 판정하지 못했습니다 — IP 스캔 설정에서 데이터센터를 고르세요">데이터센터 미정</span>}</span>
         : r.vcenterName
     ) },
@@ -224,8 +227,9 @@ function Ipam({ scope, onScope }) {
 
   const denied = pageDeniedNote(view, access);
   const go = (k) => (k === 'sheet' ? openSheets() : setView(k));
-  // 대장 데이터가 있어야 그릴 수 있는 페이지(목록·대역 정책)의 대기 표시 — 설정 페이지는 이것을 기다리지 않는다.
-  const ledgerWait = data ? null : (error ? <ErrorBox message={error} /> : <Loading />);
+  // 대장 데이터가 있어야 그릴 수 있는 페이지의 대기 표시 — 어느 페이지가 그런지는 ipamPages.needsLedger 하나가 정한다(v2.639 I2 —
+  //   예전엔 여기서 'list'·'policies' 를 손으로 정해 needsLedger 를 읽는 곳이 0 이었다). 설정 페이지는 이것을 기다리지 않는다.
+  const ledgerWait = data || !ipamPage(view)?.needsLedger ? null : (error ? <ErrorBox message={error} /> : <Loading />);
   return (
     <>
       {data ? (
@@ -275,10 +279,10 @@ function Ipam({ scope, onScope }) {
       : view === 'scan' ? <IpScanSettings asPage onSaved={() => setReload((n) => n + 1)} />
       : view === 'status' ? <ScanStatusModal asPage />
       : view === 'log' ? <IpamScanLog />
-      : view === 'ipms' ? <IpmsSettings asPage />
+      : view === 'ipms' ? <IpmsSettings asPage access={access} />
       : view === 'csv' ? <IpamCsv scope={scope} access={access} canManage={canManage} onGoto={go} onApplied={() => setReload((n) => n + 1)} />
       : view === 'ranges' ? (
-        <IpamRanges />
+        <IpamRanges access={access} />
       ) : view === 'netmap' ? (
         <IpamNetMap />
       ) : view === 'policies' ? (
@@ -287,16 +291,7 @@ function Ipam({ scope, onScope }) {
         <IpamInsights scope={scope} />
       ) : view === 'sheet' ? (
         <>
-  {data && (
-        <div className="flex gap wrap" style={{ marginBottom: 10 }}>
-          {data.byVcenter.map((v) => (
-            <span key={v.vcenterId || '__scan__'} className={`badge ${v.scanned ? 'teal' : 'gray'}`}
-              title={v.scanned ? '어떤 vCenter에도 속하지 않고 IP 능동 스캔으로만 확인된 IP입니다. 서브넷 대장의 “스캔 확인” 필터로 볼 수 있습니다.' : '이 vCenter의 서브넷 대장 보기'}
-              style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer', border: scope === v.vcenterId ? '1px solid var(--accent,#2563eb)' : undefined }}
-              onClick={() => { onScope?.(v.vcenterId); openSheets(v.vcenterId); }}>{v.scanned ? '🛰 네트워크 스캔' : v.vcenterName} · {v.count}</span>
-          ))}
-        </div>
-  )}
+          {data && <VcenterChips byVcenter={data.byVcenter} scope={scope} onPick={(id) => { onScope?.(id); openSheets(id); }} />}
           {subnetsErr && (
             <div className="banner warn" style={{ marginBottom: 8 }}>서브넷 목록을 읽지 못했습니다(0개라는 뜻이 아닙니다){subnets.length ? ' — 아래는 직전에 받은 목록입니다' : ''}: {subnetsErr}</div>
           )}
@@ -352,7 +347,7 @@ function Ipam({ scope, onScope }) {
                   </div>
                 )}
                 <div className="table-wrap" style={{ maxHeight: '62vh' }}>
-                  <STable>
+                  <STable minWidth={1100} wrap={false}>
                     <thead><tr><th>{base}.X</th><th>Purpose</th><th>Hostname</th><th>서버종류</th><th>확인 방식</th><th>OS</th><th>메모(Notes)</th><th>전원</th><th>분류</th><th>상태</th><th>사용이력</th><th>메모 · 태그</th></tr></thead>
                     <tbody>
                       {shown.length === 0 && <tr><td colSpan={12} className="center muted" style={{ padding: 22 }}>해당 상태의 IP가 없습니다.</td></tr>}
@@ -376,7 +371,7 @@ function Ipam({ scope, onScope }) {
                             {/* 상시 배지(v2.359, 사용자 요구): 열만 봐도 '지금 사용중 / 과거 사용' 이 보이게.
                                 클릭하면 기존 이력 모달(사용·미사용 구간 타임라인). */}
                             {r.usageStatus
-                              ? <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} title={`최초 발견: ${r.firstSeen ? new Date(r.firstSeen).toLocaleString() : '—'}\n마지막 확인: ${r.lastSeen ? new Date(r.lastSeen).toLocaleString() : '—'}\n클릭: 사용/미사용 구간 이력`}
+                              ? <button className="tab" style={{ padding: '2px 8px', fontSize: 11 }} title={`최초 발견: ${fmtDt(r.firstSeen)}\n마지막 확인: ${fmtDt(r.lastSeen)}\n클릭: 사용/미사용 구간 이력`}
                                   onClick={() => setHistIp(r)}>
                                   {r.usageStatus === 'up'
                                     ? <span style={{ color: 'var(--green)' }}>🟢 사용중</span>
@@ -411,16 +406,7 @@ function Ipam({ scope, onScope }) {
               <button className="tab" style={{ padding: '4px 10px' }} onClick={() => setRowFilter('')}>필터 해제</button>
             </div>
           )}
-  {data && (
-        <div className="flex gap wrap" style={{ marginBottom: 10 }}>
-          {data.byVcenter.map((v) => (
-            <span key={v.vcenterId || '__scan__'} className={`badge ${v.scanned ? 'teal' : 'gray'}`}
-              title={v.scanned ? '어떤 vCenter에도 속하지 않고 IP 능동 스캔으로만 확인된 IP입니다. 서브넷 대장의 “스캔 확인” 필터로 볼 수 있습니다.' : '이 vCenter의 서브넷 대장 보기'}
-              style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer', border: scope === v.vcenterId ? '1px solid var(--accent,#2563eb)' : undefined }}
-              onClick={() => { onScope?.(v.vcenterId); openSheets(v.vcenterId); }}>{v.scanned ? '🛰 네트워크 스캔' : v.vcenterName} · {v.count}</span>
-          ))}
-        </div>
-  )}
+          {data && <VcenterChips byVcenter={data.byVcenter} scope={scope} onPick={(id) => { onScope?.(id); openSheets(id); }} />}
           {(data?.scanByDatacenter || []).length > 0 && (
             <div className="muted" style={{ fontSize: 12, marginBottom: 8 }} title="스캔으로만 확인된 IP 를, 스캔한 에이전트의 데이터센터로 나눈 개수입니다(IP 스캔 설정의 데이터센터 — 직접 지정 또는 자동).">
               🛰 스캔 IP 데이터센터별: {data.scanByDatacenter.map((x) => `${x.datacenterId ? x.datacenterName : '미정'} ${x.count}`).join(' · ')}
@@ -458,7 +444,7 @@ function Ipam({ scope, onScope }) {
       {db && (view === 'list' || view === 'sheet') && (
         <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7, overflowWrap: 'anywhere' }}>
           타 프로그램 공유용 DB: <code>{db.path}</code> ({db.kind === 'sqlite' ? 'SQLite · 테이블 ip_records' : 'NDJSON'})
-          {' · '}갱신 {db.updatedAt ? new Date(db.updatedAt).toLocaleString() : '—'} · 수집 주기마다 자동 갱신됩니다.
+          {' · '}갱신 {fmtDt(db.updatedAt)} · 수집 주기마다 자동 갱신됩니다.
         </div>
       )}
       {sel && <IpOwnerDetail row={sel} onClose={() => setSel(null)} />}
@@ -466,6 +452,23 @@ function Ipam({ scope, onScope }) {
       {editOv && data && <OverrideEditor row={editOv} vcenters={data.byVcenter} tzOffsetMin={data.tzOffsetMin} onClose={() => setEditOv(null)} onSaved={() => { setEditOv(null); setReload((n) => n + 1); }} />}
       {histIp && <IpHistoryModal row={histIp} scope={scope} onClose={() => setHistIp(null)} />}
     </>
+  );
+}
+
+/**
+ * v2.639(U5): vCenter별 개수 칩 — 목록·서브넷 대장 두 보기가 같은 블록을 복사해 갖고 있었다. 칩을 누르면 그 vCenter 의 서브넷 대장으로.
+ * `scanned` 행은 어떤 vCenter 에도 속하지 않고 스캔으로만 확인된 IP 묶음이다.
+ */
+function VcenterChips({ byVcenter, scope, onPick }) {
+  return (
+    <div className="flex gap wrap" style={{ marginBottom: 10 }}>
+      {(byVcenter || []).map((v) => (
+        <span key={v.vcenterId || '__scan__'} className={`badge ${v.scanned ? 'teal' : 'gray'}`}
+          title={v.scanned ? '어떤 vCenter에도 속하지 않고 IP 능동 스캔으로만 확인된 IP입니다. 서브넷 대장의 “스캔 확인” 필터로 볼 수 있습니다.' : '이 vCenter의 서브넷 대장 보기'}
+          style={{ fontSize: 12, padding: '4px 10px', cursor: 'pointer', border: scope === v.vcenterId ? '1px solid var(--accent,#2563eb)' : undefined }}
+          onClick={() => onPick(v.vcenterId)}>{v.scanned ? '🛰 네트워크 스캔' : v.vcenterName} · {v.count}</span>
+      ))}
+    </div>
   );
 }
 
@@ -536,8 +539,8 @@ function IpHistoryModal({ row, scope, onClose }) {
       .catch((e) => { if (active) { setHErr(e?.message || '조회 실패'); setH(null); } });
     return () => { active = false; };
   }, [ip]);
-  const fmt = (t) => (t ? new Date(t).toLocaleString() : '—');
-  const dur = (ms) => { if (ms < 0) ms = 0; const d = Math.floor(ms / 86400000), hh = Math.floor((ms % 86400000) / 3600000), mm = Math.floor((ms % 3600000) / 60000); return d ? `${d}일 ${hh}시간` : (hh ? `${hh}시간 ${mm}분` : `${mm}분`); };
+  const fmt = fmtDt; // v2.639(U7): 시각·소요는 ipamShared 한 벌(예전 이 모달만 브라우저 로케일 toLocaleString() · '분' 단위 소요)
+  const dur = (ms) => fmtDur(Math.max(0, ms));
   // 이벤트(오래된→최신)로 사용(up)/미사용(down) 구간을 만든다. 마지막 구간은 현재까지.
   const evs = (h?.events) || [];
   const now = Date.now();
@@ -571,7 +574,7 @@ function IpHistoryModal({ row, scope, onClose }) {
 
           <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>사용 / 미사용 구간</div>
           <div className="table-wrap" style={{ marginBottom: 14 }}>
-            <STable>
+            <STable minWidth={480} wrap={false}>
               <thead><tr><th>구간</th><th>시작</th><th>종료</th><th style={{ textAlign: 'right' }}>기간</th></tr></thead>
               <tbody>
                 {[...segs].reverse().map((s, i) => (
@@ -589,7 +592,7 @@ function IpHistoryModal({ row, scope, onClose }) {
 
           <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>전이 기록(확인 시점별)</div>
           <div className="table-wrap">
-            <STable>
+            <STable minWidth={480} wrap={false}>
               <thead><tr><th>시각</th><th>전이</th><th>호스트명</th><th>포트</th></tr></thead>
               <tbody>
                 {[...(h.events || [])].reverse().map((e, i) => (

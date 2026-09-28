@@ -18,6 +18,8 @@ import { buildNetmap } from '../../ipam/netmap.js';
 import { listVcRanges } from '../../ipam/rangeStore.js';
 import { vcRangesToCsv } from '../../ipam/vcRangesCsv.js';
 import { rangeSize } from '../../ipam/scan.js';
+import { checkRangeSpec } from '../../ipam/rangeSyntax.js'; // v2.639: 저장된 옛 값 중 이제 무효인 줄을 밝힌다
+import { makeVcResolver } from '../../ipam/vcResolve.js';
 import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany } from '../../ipam/annotations.js';
 import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany } from '../../ipam/overrides.js';
 import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANAGE_CHUNK_MAX } from '../../ipam/manageCsv.js';
@@ -176,10 +178,17 @@ api.get('/tools/ipam/vc-ranges', requirePerm('tools'), (req, res) => {
   const allowed = scopedVcenterIds(req.user, snap);   // 범위 밖 vCenter id·name 열거 차단
   const vcName = {};
   for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
-  const list = listVcRanges().filter((e) => !allowed || allowed.has(e.vcenterId)).map((e) => ({
-    ...e, vcenterName: vcName[e.vcenterId] || e.vcenterId,
-    ipCount: e.ranges.reduce((a, s) => a + rangeSize(s), 0),
-  }));
+  const list = listVcRanges().filter((e) => !allowed || allowed.has(e.vcenterId)).map((e) => {
+    // v2.639: 판정이 하나로 엄격해져(rangeSyntax) 예전에 저장된 줄(예: `10.0.0.250-300`)이 이제 스캔되지 않을 수 있다 —
+    //   rangeSize 0 으로 조용히 빠지지 않게 `invalid:[{value,reason}]` 로 밝힌다(설정 화면의 invalidSaved 와 같은 뜻).
+    const invalid = [];
+    for (const s of e.ranges || []) { const r = checkRangeSpec(s, { reversed: 'error' }); if (!r.ok) invalid.push({ value: String(s).slice(0, 80), reason: r.reason }); }
+    return {
+      ...e, vcenterName: vcName[e.vcenterId] || e.vcenterId,
+      ipCount: (e.ranges || []).reduce((a, s) => a + rangeSize(s), 0),
+      ...(invalid.length ? { invalid } : {}),
+    };
+  });
   // 등록 안 된 vCenter도 선택할 수 있게 (허용 범위 내) vCenter 목록을 함께 내려준다.
   res.json({ ranges: list, vcenters: (snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id)).map((v) => ({ id: v.id, name: v.name })) });
 });
@@ -504,23 +513,12 @@ function manageEntries(snap, user, vcenterId) {
   uniq.sort((a, b) => (ipToNum(a.ip) ?? 0) - (ipToNum(b.ip) ?? 0));
   return { entries: uniq, hiddenOutOfScope: allowed ? hidden : 0 };
 }
-/** vCenter 이름·ID → ID. 이름이 두 vCenter 에 걸리면 모호하므로 null(지어내지 않는다). 범위 계정은 범위 안만. */
+/** vCenter 이름·ID → ID. 이름이 두 vCenter 에 걸리면 모호하므로 null(지어내지 않는다). 범위 계정은 범위 안만.
+ *  v2.639: 해석 규칙은 ipam/vcResolve.js 한 벌(vc-ranges CSV 가져오기와 같은 규칙 — 예전엔 그쪽이 첫 항목을 택했다). */
 function vcResolver(snap, user) {
   const allowed = scopedVcenterIds(user, snap);
-  const list = (snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
-  const byId = new Map(list.map((v) => [String(v.id).toLowerCase(), v.id]));
-  const byName = new Map();
-  for (const v of list) {
-    const n = String(v.name || '').trim().toLowerCase();
-    if (!n) continue;
-    byName.set(n, byName.has(n) && byName.get(n) !== v.id ? null : v.id);
-  }
-  return (s) => {
-    const k = String(s || '').trim().toLowerCase();
-    if (!k) return null;
-    if (byId.has(k)) return byId.get(k);
-    return byName.get(k) || null;
-  };
+  const rv = makeVcResolver((snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id)));
+  return (s) => rv(s).id;
 }
 api.get('/tools/ipam/manage.csv', requirePerm('tools'), (req, res) => {
   const snap = store.get();

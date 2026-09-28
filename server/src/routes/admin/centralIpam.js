@@ -1,7 +1,9 @@
-// 중앙 토큰/에이전트 토큰·IPAM 설정/스캔/대역 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
-import { config } from '../../config.js';
+// IPAM 설정/스캔/대역 — admin.js(구 2,410줄) 분할(v2.285.0). v2.639: 중앙 토큰·개별 토큰·위임 인벤토리·수신 통계 라우트 10개는
+//   routes/admin/centralTokens.js 로 분리했다(이 파일은 IPAM 전용). 등록 순서는 admin.js 호출 순서가 보존한다.
+import { config, loadVcenterConfig } from '../../config.js';
 import { ledgerInfo } from '../../ipam/db.js';
-import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries } from '../../ipam/settings.js';
+import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries, invalidEntries } from '../../ipam/settings.js';
+import { makeVcResolver } from '../../ipam/vcResolve.js'; // v2.639: vCenter 이름 해석기 한 벌(모호하면 null — 예전엔 첫 항목을 택했다)
 import { checkRangeList } from '../../ipam/rangeSyntax.js';
 import { listTargets } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
@@ -9,7 +11,7 @@ import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanA
 import { startScan, scanStatus, rescheduleScanPoller } from '../../ipam/scanPoller.js';
 import { recordScanLog, listScanLog, SCAN_LOG_EVENTS } from '../../ipam/scanLog.js'; // v2.636: 스캔 실행 로그
 import { scanRangesToCsv, scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport, LOCAL_AGENT } from '../../ipam/scanRangesCsv.js'; // v2.636: 에이전트별 스캔 대역 CSV
-import { rangeSize, RANGE_CAP } from '../../ipam/scan.js';
+import { RANGE_CAP } from '../../ipam/scan.js';
 import { agentVcenterIds, suggestAgentSubnets } from '../../ipam/scanDatacenter.js'; // v2.638: 데이터센터 귀속 · /24 대역 제안
 import { currentScanDatacenters, invalidateScanDatacenters, scanDatacenterOf } from '../../ipam/scanDatacenterSource.js';
 import { agentIdracServers } from '../../ipam/scanSuggestSource.js';
@@ -17,15 +19,9 @@ import { listDatacenters } from '../../datacenter/store.js';
 import { todayStamp } from '../../util/dayKey.js';
 import { saveVcRanges, removeVcRanges, listVcRanges } from '../../ipam/rangeStore.js';
 import { sampleCsv as vcRangesSampleCsv, parseVcRangesCsv, analyzeVcRangesImport } from '../../ipam/vcRangesCsv.js';
-import { loadVcenterConfig } from '../../config.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../../central/assignments.js';
-import { centralTokenInfo, generateCentralToken, setCentralToken } from '../../central/token.js';
-import { listAgentTokens, issueAgentToken, revokeAgentToken } from '../../central/agentTokens.js';
-import { getCentralAuthStats } from '../central.js';
-import { listInventory, setInventoryOwner } from '../../central/inventory.js';
-import { getIngestStats, resetIngestStats } from '../../central/ingestStats.js';
 import { listCollectors } from '../../collector/registry.js';
-import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js';
@@ -78,20 +74,9 @@ function ipamSettingsView(settings, allowed, snap) {
   const omitted = all.length - Object.keys(vcenters).length;
   return view({ ...settings, vcenters }, omitted ? { omittedOutOfScope: omitted } : {});
 }
-/**
- * v2.637: 적용될 목록만 검사한다(범위 계정의 전역 목록 변경은 어차피 적용되지 않으므로 검사 대상이 아니다).
- * 예전에는 아무것도 검사하지 않아 `10.0.0.0/`(→ /0) 가 IPv4 전체를 숨기고, `abc` 는 '저장했습니다' 뒤 조용히 버려졌다.
- */
-function ipamSettingsInvalid(body, { globals, vcKeys }) {
-  const out = [];
-  const add = (field, list, vcenterId) => {
-    for (const x of checkRangeList(list || []).invalid) out.push({ field, ...(vcenterId != null ? { vcenterId } : {}), ...x });
-  };
-  if (globals) { add('global', body.global); add('publicRanges', body.publicRanges); add('privateRanges', body.privateRanges); }
-  const vcs = body.vcenters && typeof body.vcenters === 'object' && !Array.isArray(body.vcenters) ? body.vcenters : {};
-  for (const [k, v] of Object.entries(vcs)) if (!vcKeys || vcKeys.has(k)) add('vcenters', v, k);
-  return out;
-}
+// v2.637: 적용될 목록만 검사한다(범위 계정의 전역 목록 변경은 어차피 적용되지 않으므로 검사 대상이 아니다).
+//   v2.639: 판정 본체는 ipam/settings.js invalidEntries 하나(savedInvalidEntries 와 같은 루프였다 — 두 벌 제거).
+const ipamSettingsInvalid = (body, opt) => invalidEntries(body, opt);
 const invalidReply = (res, invalid) => res.status(400).json({ ok: false, reason: `형식이 올바르지 않은 줄 ${invalid.length}개가 있어 저장하지 않았습니다.`, invalid: invalid.slice(0, 200), invalidCount: invalid.length });
 adminRouter.get('/ipam/settings', adminOnly, (req, res) => {
   const snap = store.get();
@@ -117,69 +102,7 @@ adminRouter.put('/ipam/settings', adminOnly, (req, res) => {
   res.json({ ok: true, ...ipamSettingsView(settings, readAllowed, snap), ...(ignored.length ? { ignoredOutOfScope: ignored.length } : {}), ...ignoredGlobalFields(ignoredGlobal) });
 });
 
-// 중앙 토큰(CENTRAL_TOKEN) — 조회/생성/저장(실행중 서버 + portal.env 영속).
-// ⚠ requireSettingsOwner(6차 재감사): centralTokenInfo() 는 토큰을 **평문으로** 반환한다.
-// `EDGE_MODE=all` + CENTRAL_TOKEN 설정 + COLLECTOR_TOKEN 미설정 구성에서는
-// EDGE_TOKEN = CENTRAL_TOKEN = collector.token 이므로(config.js), 이 응답이 그 인스턴스의
-// COLLECTOR_TOKEN 노출과 같아져 /api/collector/* 시스템 경로를 직접 호출할 수 있다.
-// 비밀 '열람'은 소유자 등급이 맞다(collectors export.csv?tokens=1 와 같은 기준).
-// UI 는 설정 탭(App.jsx ownerOnly) 안의 AgentDeploy 에서만 쓰므로 화면 영향 없음.
-adminRouter.get('/central-token', adminOnly, requireSettingsOwner, (_req, res) => res.json(centralTokenInfo()));
-// 사이트 위임 수집 현황(어떤 vCenter를 어떤 에이전트가 언제 push했는지).
-adminRouter.get('/central/inventory', adminOnly, fleetOnly, (_req, res) => res.json({ inventory: listInventory() }));
-// v2.599(EDGE2599-03): 위임(site) vCenter 인벤토리 소유 엣지 해제/지정 — 담당 엣지를 교체하면 새 엣지 push 가 TOFU 소유권에
-//   막혀 영구 403 이었다. 해제(agent 비움)하면 다음 개별 토큰 push 가 새 소유가 되고, 지정하면 그 엣지만 쓸 수 있다.
-//   보안 경계(엣지가 남의 vCenter 를 가로채지 못함)는 그대로다 — 바꾸는 주체는 관리자이고 전부 감사 로그에 남는다.
-// Body: { vcenterId, agent }  (agent 빈 값 = 해제)
-adminRouter.post('/central/inventory/owner', adminOnly, fleetOnly, (req, res) => {
-  const vcenterId = String(req.body?.vcenterId || '').trim();
-  const agent = String(req.body?.agent ?? '').trim();
-  if (!vcenterId || vcenterId.length > 128) return res.status(400).json({ ok: false, reason: 'vcenterId 가 필요합니다.' });
-  if (agent && !/^[A-Za-z0-9._-]{1,64}$/.test(agent)) return res.status(400).json({ ok: false, reason: '엣지 이름 형식이 올바르지 않습니다(영숫자·._- 64자 이내).' });
-  const r = setInventoryOwner(vcenterId, agent);
-  if (!r.ok) return res.status(404).json({ ok: false, reason: `vcenterId '${vcenterId}' 의 위임 인벤토리가 없습니다 — 아직 아무 엣지도 push 하지 않았다면 첫 개별 토큰 push 가 소유가 됩니다.` });
-  logAudit({ user: req.user?.username, action: agent ? '위임 인벤토리 소유 엣지 지정' : '위임 인벤토리 소유 엣지 해제', target: vcenterId, detail: `from=${r.from || '(없음)'} to=${r.to || '(해제 — 다음 개별 토큰 push 가 소유)'}`, ip: req.ip || '' });
-  res.json({ ok: true, vcenterId, from: r.from, to: r.to, released: !agent });
-});
-// 에이전트별 수신 트래픽 진단 — 누가 무엇을 얼마나 보내는지(와이어 바이트·push 빈도·페이로드 규모).
-// iftop에서 특정 에이전트 트래픽이 비정상적으로 높을 때 원인(큰 페이로드 vs 잦은 push)을 짚어낸다.
-// v2.612 AUTHZ2612-07: 엣지 수신 통계·엣지 토큰 목록은 전 법인 공용 — fleetOnly.
-adminRouter.get('/central/ingest-stats', adminOnly, fleetOnly, (_req, res) => res.json({ ok: true, ...getIngestStats() }));
-adminRouter.post('/central/ingest-stats/reset', adminOnly, fleetOnly, (req, res) => { resetIngestStats(); logAudit({ user: req.user?.username, action: '수신 트래픽 통계 초기화', target: 'ingest-stats' }); res.json({ ok: true }); });
-// 생성·저장도 소유자 전용 — 둘 다 응답에 토큰 평문을 실으므로 조회와 같은 노출이고,
-// 저장은 엣지 인증 비밀을 임의 값으로 바꾸는 권능이다.
-adminRouter.post('/central-token/generate', adminOnly, requireSettingsOwner, (req, res) => {
-  const r = generateCentralToken({ force: !!(req.body && req.body.force) });
-  logAudit({ user: req.user?.username, action: '중앙 토큰 생성', target: 'central-token', ip: req.ip || '' });
-  res.json({ ok: true, ...r });
-});
-adminRouter.put('/central-token', adminOnly, requireSettingsOwner, (req, res) => {
-  try {
-    const token = setCentralToken(req.body && req.body.token);
-    logAudit({ user: req.user?.username, action: '중앙 토큰 변경', target: 'central-token', ip: req.ip || '' });
-    res.json({ ok: true, token });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
-});
-
-// ── 엣지별 개별 central 토큰 (공유 토큰의 광역 스코프 축소) ──────────────────
-// 공유 CENTRAL_TOKEN 하나면 엣지 1대만 침해돼도 '남의 이름'으로 다른 사이트의 iDRAC 평문
-// 비번·게스트 비번·사용자 해시를 전부 인출할 수 있다. 개별 토큰은 토큰↔agent를 바인딩해
-// 자기 데이터만 보게 한다. 엣지는 이 값을 기존 CENTRAL_TOKEN(EDGE_TOKEN) 자리에 넣으면 되므로
-// 엣지 코드 변경 없이 사이트별로 하나씩 이관할 수 있다.
-adminRouter.get('/central/agent-tokens', adminOnly, fleetOnly, (_req, res) => {
-  res.json({ ok: true, tokens: listAgentTokens(), auth: getCentralAuthStats() });
-});
-adminRouter.post('/central/agent-tokens', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => { // v2.480(3차 감사 S3): 토큰 발급은 소유자 경계
-  const r = issueAgentToken(req.body?.agent, { note: req.body?.note });
-  if (r.ok) logAudit({ user: req.user?.username, action: '엣지 개별 central 토큰 발급', target: r.agent, detail: '기존 토큰이 있으면 회전(교체)', ip: req.ip || '' });
-  // 평문 토큰은 이 응답에서만 확인 가능(서버는 해시만 저장) — 화면에서 복사해 엣지에 설정.
-  res.status(r.ok ? 200 : 400).json(r);
-});
-adminRouter.delete('/central/agent-tokens/:agent', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
-  const r = revokeAgentToken(req.params.agent);
-  if (r.ok) logAudit({ user: req.user?.username, action: '엣지 개별 central 토큰 회수', target: req.params.agent, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
-});
+// (중앙 토큰·개별 토큰·위임 인벤토리·수신 통계 라우트 10개는 v2.639 에 routes/admin/centralTokens.js 로 옮겼다.)
 
 // IP 능동 스캔(TCP 커넥트) — 에이전트별 설정/상태/수동실행/결과.
 // agent 미지정 = 이 포탈(중앙) 직접 스캔(__local__). 그 외 이름 = 분산 에이전트 할당.
@@ -211,12 +134,21 @@ adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => {
     try { dcs = listDatacenters(); } catch { /* 아래에서 거부 */ }
     if (!dcs.some((d) => d.id === want)) return res.status(400).json({ ok: false, reason: `등록되지 않은 DataCenter 입니다: ${want.slice(0, 64)} — 설정 › DataCenter 에서 먼저 등록하거나 '자동' 을 고르세요.` });
   }
+  // v2.639: 대역 문법은 형제 PUT /ipam/vc-ranges 와 같은 판정(checkRangeList — 뒤집힌 범위 오류·스캔 상한 경고)으로 검사한다.
+  //   예전에는 검사 0(saveScanSettings 는 trim 뿐)이라 `10.0.0.0/24.5`·`10.0.0.250-300` 이 저장되고, 엣지가 그 줄을 느슨한 파서로
+  //   스캔한 뒤 중앙 `/ip-scan-result` 가 specToRange null 로 전부 409 거부했다. 나누는 규칙([\n,])은 saveScanSettings 와 같다.
+  let check = null;
+  if (req.body && req.body.ranges !== undefined) {
+    const raw = req.body.ranges;
+    check = checkRangeList(Array.isArray(raw) ? raw : String(raw ?? '').split(/[\n,]/), { reversed: 'error', scanCap: RANGE_CAP });
+    if (check.invalid.length) return invalidReply(res, check.invalid.map((x) => ({ field: 'ranges', agent, ...x })));
+  }
   const settings = saveScanSettings(agent, req.body || {});
   invalidateScanDatacenters();
   if (agent === LOCAL) rescheduleScanPoller(); // 로컬 설정만 이 포탈 폴러에 적용
   recordScanLog({ event: 'settings', agent, user: req.user?.username, ranges: (settings.ranges || []).length, rangesSample: (settings.ranges || []).slice(0, 5),
     message: `IP 스캔 설정 저장 — ${settings.enabled ? '주기 스캔 켬' : '주기 스캔 끔'} · 주기 ${Math.round((settings.intervalMs || 0) / 60000)}분 · 포트 ${(settings.ports || []).length}개` });
-  res.json({ ok: true, agent, settings, status: scanStatus(), ...scanDatacenterView(agent) });
+  res.json({ ok: true, agent, settings, status: scanStatus(), ...(check?.warnings.length ? { warnings: check.warnings.slice(0, 50) } : {}), ...scanDatacenterView(agent) });
 });
 // v2.638: 에이전트가 쓰는 /24 대역 제안 — 그 에이전트가 수집하는 vCenter 의 VM·호스트 IP + 담당 iDRAC 관리 IP(스냅샷·등록부만 읽는다 — 장비 왕복 0).
 adminRouter.get('/ipam/scan/suggest', adminOnly, fleetOnly, (req, res) => {
@@ -277,7 +209,7 @@ adminRouter.post('/ipam/scan/ranges/import', adminOnly, fleetOnly, (req, res) =>
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
   const mode = req.body?.mode === 'add' ? 'add' : 'replace';
-  const { report, summary, plans } = analyzeScanRangesImport(rows, { mode, current: scanRangesCurrent(), rangeSize, rangeCap: RANGE_CAP });
+  const { report, summary, plans } = analyzeScanRangesImport(rows, { mode, current: scanRangesCurrent(), rangeCap: RANGE_CAP });
   const changing = plans.filter((p) => !p.blocked && (p.added.length || p.removed.length));
   if (req.body?.dryRun) return res.json({ ok: true, dryRun: true, mode, report, summary, plans, total: rows.length });
   const applied = []; const failed = [];
@@ -345,14 +277,10 @@ adminRouter.post('/ipam/vc-ranges/import', adminOnly, (req, res) => {
   try { vcs = loadVcenterConfig().vcenters || []; } catch { /* 목록 실패 시 resolve 전부 null → 전 행 오류 */ }
   // v2.611 LEFT2611-04: 범위 계정에는 쓰기 범위 밖 vCenter 를 '알 수 없는 vCenter' 와 **같은 결과**로 해석한다 —
   //   예전엔 dryRun 보고가 범위 밖 이름을 id·action 으로 풀어 줘 존재를 드러냈다(형제 PUT/DELETE 는 404 로 숨긴다).
-  const resolveVc = (v) => {
-    const s = String(v || '').trim();
-    if (!s) return null;
-    let id = null;
-    if (vcs.some((x) => x.id === s)) id = s;
-    else { const byName = vcs.find((x) => String(x.name || '').toLowerCase() === s.toLowerCase()); id = byName ? byName.id : null; }
-    return id && vcRangeWritable(req.user, id) ? id : null;
-  };
+  // v2.639: 해석기는 ipam/vcResolve.js 한 벌 — 이름이 겹치면 **null**(예전엔 첫 항목을 택해 오타 없이도 다른 vCenter 대역을 덮어썼다.
+  //   manage CSV 의 해석기는 이미 모호하면 null 이었다 — 두 규칙을 하나로).
+  const rv = makeVcResolver(vcs);
+  const resolveVc = (v) => { const r = rv(v); return r.id && vcRangeWritable(req.user, r.id) ? r.id : null; };
   const existing = new Set(listVcRanges().map((e) => e.vcenterId));
   const { report, summary } = analyzeVcRangesImport(rows, { resolveVc, hasExisting: (id) => existing.has(id) });
   if (req.body?.dryRun) {

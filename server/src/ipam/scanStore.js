@@ -27,7 +27,7 @@ const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이
 //   받지 않고 개수를 돌려준다 — 이미 있는 IP(다른 엣지 것 포함)는 밀어내지 않는다(조용한 상한 금지 — 호출부가 응답·로그에 싣는다).
 const _capEnv = numOrNull(process.env.IPAM_SCAN_RESULTS_MAX);
 export const MAX_SCAN_IPS = _capEnv != null && _capEnv > 0 ? Math.floor(_capEnv) : 262_144;
-export const MAX_HIST_IPS = MAX_SCAN_IPS * 2; // 이력은 결과보다 오래 남는다(1년) — 여유를 둔다
+const MAX_HIST_IPS = MAX_SCAN_IPS * 2; // 이력은 결과보다 오래 남는다(1년) — 여유를 둔다. v2.639: 바깥 호출부 0건(scanInfo.historyMax 로 나간다) — 내부 상수
 let _histCapped = 0;   // 이력 상한으로 만들지 않은 이력 항목 수(누적 — scanInfo 가 밝힌다)
 let _resultCount = 0;   // Object.keys(results).length 를 매 원소 세지 않게(v2.589 규약) — 새 IP 를 넣을 때만 늘린다
 let _histCount = 0;
@@ -157,17 +157,35 @@ function readCfg() {
   }
 }
 
+/*
+ * v2.639(감사 I3): 설정 파일(ipam-scan.json)은 (mtime,size) 토큰 캐시다 — 예전에는 loadScanSettings·listScanAgents 가 **호출마다**
+ *   readFileSync + JSON.parse 였다(원장 재구성·폴러·릴리스 타이머·설정 pull 이 부른다). rangeStore·datacenter/store 와 같은 방식.
+ *   ⚠ 이 파일은 디바운스 저장소(_stores)에 **없다** — 결과·이력·보고·실행 이력만 디바운스이고 설정은 saveAll 이 즉시 원자 쓰기 한다.
+ *   그래서 '메모리에는 있는데 파일에는 아직 없는 값' 과 mtime 캐시가 어긋날 경로가 없다(saveAll 이 캐시를 직접 세운다 — 같은 ms
+ *   저장이어도 stat 을 다시 읽지 않고 방금 쓴 객체를 그대로 캐시로 둔다).
+ *   파일이 없을 때(토큰 '')는 캐시하지 않는다 — readCfg 의 missing() 판정(.corrupt 보존본만 남았는가)을 매번 다시 보게.
+ */
+let _cfgCache = null;
+let _cfgTok = '';
+const cfgTok = () => { try { const st = fs.statSync(CFG); return `${st.mtimeMs}:${st.size}`; } catch { return ''; } };
+
 function loadAll() {
+  const tok = cfgTok();
+  if (tok && _cfgCache && tok === _cfgTok) return _cfgCache;
   const p = readCfg();
   // 구버전(단일 설정) 마이그레이션: 최상위에 ranges가 있으면 __local__로 이전.
-  if (!p.agents && (p.ranges || p.enabled !== undefined)) return { agents: { [LOCAL]: normalizeCfg(p) } };
-  return { agents: p.agents && typeof p.agents === 'object' ? p.agents : {} };
+  const all = (!p.agents && (p.ranges || p.enabled !== undefined))
+    ? { agents: { [LOCAL]: normalizeCfg(p) } }
+    : { agents: p.agents && typeof p.agents === 'object' ? p.agents : {} };
+  if (tok) { _cfgCache = all; _cfgTok = tok; } else { _cfgCache = null; _cfgTok = ''; }
+  return all;
 }
 
 function saveAll(all) {
   fs.mkdirSync(path.dirname(CFG), { recursive: true });
   atomicWriteFileSync(CFG, JSON.stringify(all, null, 2));
   _cfgLoadErr.ok();
+  _cfgCache = all; _cfgTok = cfgTok(); // 쓰기 성공 뒤에만 — 실패하면 캐시는 옛 값(디스크와 같다)
 }
 
 /** 한 에이전트(기본=로컬)의 설정. */
@@ -200,8 +218,7 @@ export function saveScanSettings(agent, partial = {}) {
   if (partial.retentionDays !== undefined) next.retentionDays = clampSetting(partial.retentionDays, { min: 0, max: 3650, def: cur.retentionDays });
   // v2.638: 데이터센터 귀속(빈 값 = 자동). 존재 여부는 라우트가 등록부로 검사한다(여기는 형식만).
   if (partial.datacenterId !== undefined) next.datacenterId = typeof partial.datacenterId === 'string' ? partial.datacenterId.trim().slice(0, 64) : '';
-  all.agents[key] = next;
-  saveAll(all);
+  saveAll({ ...all, agents: { ...all.agents, [key]: next } }); // v2.639 I3: 캐시 객체를 제자리에서 고치지 않는다(쓰기 실패 시 메모리≠디스크 방지)
   return next;
 }
 
@@ -243,9 +260,18 @@ function cleanServices(v) {
 function cleanHostname(v) {
   return typeof v === 'string' ? v.replace(CTRL_RE, '').slice(0, MAX_HOST_LEN) : '';
 }
-/** alive 원소 하나를 아는 필드로 좁힌다(순수 — 테스트가 직접 부른다). ip 는 호출부가 isIpv4 로 검사한다. */
-export function cleanAliveHost(h) {
+/** alive 원소 하나를 아는 필드로 좁힌다(순수). ip 는 호출부가 isIpv4 로 검사한다. v2.639: 바깥 호출부 0건(테스트도 mergeScanResults 로 검사한다) — 내부 함수. */
+function cleanAliveHost(h) {
   return { ip: h.ip, openPorts: cleanPorts(h.openPorts), services: cleanServices(h.services), hostname: cleanHostname(h.hostname) };
+}
+// v2.639(감사 I2): 결과에 나오는 에이전트 이름 → IP 수. 데이터센터 귀속 판정(scanDatacenterSource)이 '결과에 나오는 에이전트
+//   집합' 을 매번 26만 개를 훑어 모으던 것을(실측 약 150ms) 적재·정리 시점에 유지한다. 갱신 지점은 셋뿐이다 — 로드 정제·
+//   mergeScanResults(새 IP·에이전트 교체)·pruneScanResults(삭제). results 를 다른 곳에서 고치면 여기도 함께.
+const _agentCount = new Map();
+function bumpAgent(agent, d) {
+  const k = agent || LOCAL;
+  const n = (_agentCount.get(k) || 0) + d;
+  if (n > 0) _agentCount.set(k, n); else _agentCount.delete(k);
 }
 function cleanStoredResults(raw) {
   const out = {};
@@ -253,6 +279,7 @@ function cleanStoredResults(raw) {
   for (const [ip, r] of Object.entries(raw)) {
     if (!r || typeof r !== 'object' || !isIpv4(ip)) continue;
     out[ip] = { ...cleanAliveHost({ ...r, ip }), lastSeen: numOrNull(r.lastSeen) ?? 0, agent: typeof r.agent === 'string' ? r.agent : LOCAL };
+    bumpAgent(out[ip].agent, 1);
   }
   return out;
 }
@@ -265,6 +292,8 @@ let scanRevN = 0; // 스캔 결과/이력 변경 리비전(대장 캐시 무효�
 export function scanRev() { return scanRevN; }
 export function getScanResults() { return results; }
 export function scanResultList() { return Object.values(results).sort((a, b) => (a.ip < b.ip ? -1 : 1)); }
+/** 스캔 결과에 나오는 에이전트 이름 목록(정렬 없음 · O(에이전트 수)). 결과가 0건인 이름은 없다. */
+export function scanResultAgents() { return [..._agentCount.keys()]; }
 
 const sameList = (a, b) => { const x = a || [], y = b || []; return x.length === y.length && x.every((v, i) => v === y[i]); };
 
@@ -287,6 +316,7 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL) {
     // 실제 내용(포트/서비스/호스트명/에이전트) 변화가 있을 때만 리비전을 올린다(불필요한 대장 재계산 방지).
     if (!prev || !sameList(prev.openPorts, h.openPorts) || !sameList(prev.services, h.services)
       || (prev.hostname || '') !== (h.hostname || '') || prev.agent !== agent) changed = true;
+    if (!prev) bumpAgent(agent, 1); else if (prev.agent !== agent) { bumpAgent(prev.agent, -1); bumpAgent(agent, 1); } // v2.639 I2
     results[h.ip] = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: h.hostname || '', lastSeen: ts, agent };
     recordSeen(h, ts, agent); // IP 사용 이력(온라인 전환) 갱신
   }
@@ -390,8 +420,9 @@ export function getIpHistoryMap() {
   return m;
 }
 
-/** ip → { firstSeen, lastSeen, status, agent, events[] } 전체 맵(시간축 시각화용 — up/down 전이 시계열 포함). */
-export function getAllHistoryEvents() {
+/** ip → { firstSeen, lastSeen, status, agent, events[] } 전체 맵(시간축 시각화용 — up/down 전이 시계열 포함). v2.639: 바깥 호출부 0건(netmap 은 getIpHistory 를 쓴다) — 내부 함수(export 를 뗐다). */
+// eslint-disable-next-line no-unused-vars
+function getAllHistoryEvents() {
   const m = {};
   for (const e of Object.values(history)) {
     m[e.ip] = { firstSeen: e.firstSeen, lastSeen: e.lastSeen, status: e.status, agent: e.agent || '', events: e.events || [] };
@@ -405,15 +436,17 @@ export function pruneScanResults(retentionDays) {
   let changed = false;
   const isManaged = managedChecker();
   // 관리(override/대역정책) IP의 스캔 결과는 보존(보존기간 초과여도 운영 가시성 유지).
-  for (const [ip, r] of Object.entries(results)) if ((r.lastSeen || 0) < cut && !isManaged(ip)) { delete results[ip]; _resultCount--; changed = true; }
+  for (const [ip, r] of Object.entries(results)) if ((r.lastSeen || 0) < cut && !isManaged(ip)) { bumpAgent(r.agent, -1); delete results[ip]; _resultCount--; changed = true; }
   if (changed) { scheduleWrite(RES); scanRevN++; }
 }
 
 export function scanInfo() {
-  const list = scanResultList();
+  // v2.639 I2: 정렬(scanResultList) 없이 — 에이전트별 개수는 _agentCount, 마지막 관측은 한 번 훑는다(값은 예전과 같다).
   const byAgent = {};
-  for (const r of list) byAgent[r.agent || LOCAL] = (byAgent[r.agent || LOCAL] || 0) + 1;
-  return { count: list.length, max: MAX_SCAN_IPS, historyMax: MAX_HIST_IPS, ...(_histCapped ? { historyCapped: _histCapped } : {}), lastSeen: list.reduce((m, r) => Math.max(m, r.lastSeen || 0), 0) || null, byAgent };
+  for (const [a, n] of _agentCount) byAgent[a] = n;
+  let lastSeen = 0;
+  for (const r of Object.values(results)) if ((r.lastSeen || 0) > lastSeen) lastSeen = r.lastSeen || 0;
+  return { count: _resultCount, max: MAX_SCAN_IPS, historyMax: MAX_HIST_IPS, ...(_histCapped ? { historyCapped: _histCapped } : {}), lastSeen: lastSeen || null, byAgent };
 }
 
 // ---- 에이전트별 보고 기록(마지막 보고 시각·스캔/응답 수) ----------------------
