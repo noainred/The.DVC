@@ -70,7 +70,7 @@ test('엣지 set-password 는 trusted 를 넘기지 않는다', () => {
 test('중앙 set-password·중앙토큰 라우트에 requireSettingsOwner 가 붙어 있다', () => {
   assert.match(src('routes', 'admin', 'collectorsDc.js'),
     /post\('\/collectors\/set-password',[^)]*requireSettingsOwner/);
-  const ci = src('routes', 'admin', 'centralIpam.js');
+  const ci = src('routes', 'admin', 'centralTokens.js'); // v2.639: centralIpam.js 에서 분리(IPAM 전용 파일로)
   assert.match(ci, /get\('\/central-token',[^)]*requireSettingsOwner/, '토큰 평문 조회는 소유자 전용');
   assert.match(ci, /post\('\/central-token\/generate',[^)]*requireSettingsOwner/);
   assert.match(ci, /put\('\/central-token',[^)]*requireSettingsOwner/);

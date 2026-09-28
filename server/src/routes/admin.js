@@ -4,6 +4,7 @@ import { registerApiKeys } from './admin/apiKeys.js';
 import { registerUsers } from './admin/users.js';
 import { registerDeployLlm } from './admin/deployLlm.js';
 import { registerCentralIpam } from './admin/centralIpam.js';
+import { registerCentralTokens } from './admin/centralTokens.js';
 import { registerGpuGuest } from './admin/gpuGuest.js';
 import { registerVcenters } from './admin/vcenters.js';
 import { registerOpsSettings } from './admin/opsSettings.js';
@@ -37,6 +38,7 @@ registerApiKeys(adminRouter);            // 설정 › 연동 키(외부 포탈�
 registerUsers(adminRouter);
 registerDeployLlm(adminRouter);
 registerCentralIpam(adminRouter);
+registerCentralTokens(adminRouter);
 registerGpuGuest(adminRouter);
 registerVcenters(adminRouter);
 registerOpsSettings(adminRouter);
