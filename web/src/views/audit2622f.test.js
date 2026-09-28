@@ -134,7 +134,8 @@ describe('WEB-08 — IP 스캔: 이전 에이전트 응답이 새 에이전트 �
     expect(ipScanAccept('B', 'B')).toBe(true);
     expect(ipScanAccept(null, 'B')).toBe(false);
     const s = src('./tools/IpamSettings.jsx');
-    expect(s).toMatch(/if \(!ipScanAccept\(ag, agentRef\.current\)\) return;\s*if \(first\) \{ setS\(r\.settings\); setSFor\(ag\); \}/);
+    // v2.636: 폼은 편집 초안 훅(d.load)으로 채운다 — 가드(응답 에이전트 == 지금 에이전트)는 그대로 앞에 있어야 한다.
+    expect(s).toMatch(/if \(!ipScanAccept\(ag, agentRef\.current\)\) return;\s*if \(first\) \{ (?:setS|d\.load)\(r\.settings\); setSFor\(ag\); \}/);
     expect(s).toMatch(/if \(!ipScanAccept\(sFor, agent\)\)/);
     expect(s).toMatch(/const switchAgent = \(a\) => \{ agentRef\.current = a;/);
   });

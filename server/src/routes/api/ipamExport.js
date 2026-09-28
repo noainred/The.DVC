@@ -17,8 +17,9 @@ import { buildNetmap } from '../../ipam/netmap.js';
 import { listVcRanges } from '../../ipam/rangeStore.js';
 import { vcRangesToCsv } from '../../ipam/vcRangesCsv.js';
 import { rangeSize } from '../../ipam/scan.js';
-import { getAnnotation, setAnnotation } from '../../ipam/annotations.js';
-import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay } from '../../ipam/overrides.js';
+import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany } from '../../ipam/annotations.js';
+import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany } from '../../ipam/overrides.js';
+import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANAGE_CHUNK_MAX } from '../../ipam/manageCsv.js';
 import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES } from '../../ipam/rangePolicies.js';
 import { ipToNum } from '../../ipam/ledger.js';
 import { logAudit } from '../../audit.js';
@@ -470,5 +471,111 @@ api.get('/tools/ipam.csv', requirePerm('tools'), (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="ipam-${todayStamp()}.csv"`);
   res.send('﻿' + lines.join('\r\n')); // BOM for Excel
+});
+
+// ---- v2.636: IP 관리상태 + 메모·태그 CSV(대용량 내보내기·가져오기) -----------------------------------------
+// 사용자 요청(2026-09-28): IP관리 서브메뉴 'CSV 가져오기·내보내기'. 판정은 ipam/manageCsv.js(순수)가 하고,
+// 범위는 단건 저장·일괄 적용과 **같은 함수**(ipOverrideWriteVerdict)로 행마다 판정한다(v2.630 AUTHZ2630-01).
+/** 범위(조회) 안의 관리상태·메모 항목 — 내보내기 대상. vcenterId 를 주면 그 vCenter 귀속(소유 VM 또는 claim)만. */
+function manageEntries(snap, user, vcenterId) {
+  const allowed = scopedVcenterIds(user, snap);
+  const owners = ipVcenterOwners(snap);
+  const ovs = getOverrides(); const anns = getAnnotations();
+  const keys = new Set([...Object.keys(ovs), ...Object.keys(anns)]);
+  const out = [];
+  let hidden = 0;
+  for (const k of keys) {
+    const ip = canonIp(k);
+    if (!ip) continue;                                   // 비-IPv4 옛 키는 CSV 대상이 아니다(가져오기도 IPv4 만 받는다)
+    const override = ovs[ip] || ovs[k] || null;
+    const annotation = anns[ip] || anns[k] || null;
+    const claimed = override?.claimedVcenterId || '';
+    if (allowed && !ipInWriteScope(allowed, owners, ip, claimed)) { hidden++; continue; }
+    if (vcenterId) {
+      const own = owners.get(ip);
+      if (!(claimed === vcenterId || (own && own.has(vcenterId)))) continue;
+    }
+    out.push({ ip, override, annotation });
+  }
+  // 같은 IP 가 원문·정규형 두 키로 남아 있으면 한 행만(Set 이 원문 키를 따로 세지 않게).
+  const seen = new Set();
+  const uniq = out.filter((e) => (seen.has(e.ip) ? false : (seen.add(e.ip), true)));
+  uniq.sort((a, b) => (ipToNum(a.ip) ?? 0) - (ipToNum(b.ip) ?? 0));
+  return { entries: uniq, hiddenOutOfScope: allowed ? hidden : 0 };
+}
+/** vCenter 이름·ID → ID. 이름이 두 vCenter 에 걸리면 모호하므로 null(지어내지 않는다). 범위 계정은 범위 안만. */
+function vcResolver(snap, user) {
+  const allowed = scopedVcenterIds(user, snap);
+  const list = (snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+  const byId = new Map(list.map((v) => [String(v.id).toLowerCase(), v.id]));
+  const byName = new Map();
+  for (const v of list) {
+    const n = String(v.name || '').trim().toLowerCase();
+    if (!n) continue;
+    byName.set(n, byName.has(n) && byName.get(n) !== v.id ? null : v.id);
+  }
+  return (s) => {
+    const k = String(s || '').trim().toLowerCase();
+    if (!k) return null;
+    if (byId.has(k)) return byId.get(k);
+    return byName.get(k) || null;
+  };
+}
+api.get('/tools/ipam/manage.csv', requirePerm('tools'), (req, res) => {
+  const snap = store.get();
+  const vcId = String(req.query.vcenterId || '');
+  if (vcId && !inUserScope(req.user, snap, vcId)) return res.status(404).json({ error: 'vCenter를 찾을 수 없습니다.' });
+  const { entries, hiddenOutOfScope } = manageEntries(snap, req.user, vcId);
+  const names = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="ip-manage-${todayStamp()}.csv"`);
+  res.setHeader('Cache-Control', 'no-store');
+  // 행 수·범위 밖 개수를 헤더로 밝힌다(파일 본문은 그대로 다시 가져올 수 있어야 하므로 본문에 섞지 않는다).
+  res.setHeader('X-Ipam-Rows', String(entries.length));
+  res.setHeader('X-Ipam-Hidden-Out-Of-Scope', String(hiddenOutOfScope));
+  res.send(manageToCsv(entries, { vcName: (id) => names.get(id) || id, dayOf: (iso) => reservedUntilDay(iso) }));
+});
+api.get('/tools/ipam/manage/sample.csv', requirePerm('tools'), (_req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="ip-manage-sample.csv"');
+  res.send(manageSampleCsv(STATUSES, DEVICE_TYPES));
+});
+/**
+ * body: { csv, dryRun?:boolean, lineOffset?:number }. 화면은 큰 파일을 MANAGE_CHUNK_MAX 행 이하 조각으로 나눠 보낸다
+ * (전역 본문 한도 1MB) — 조각마다 헤더를 붙이고 lineOffset 으로 원래 파일의 행 번호를 맞춘다.
+ * 적용(dryRun=false)은 **서버가 다시 판정**한다 — 화면이 보낸 판정 결과를 믿지 않는다(그 사이 값이 바뀌었을 수 있다).
+ * 조각 안에서 오류가 있는 행만 빼고 나머지를 적용한다(사용자가 결과표로 무엇이 빠졌는지 본다).
+ */
+api.post('/tools/ipam/manage/import', canWrite, requirePerm('tools'), (req, res) => {
+  const text = typeof req.body?.csv === 'string' ? req.body.csv : '';
+  if (!text.trim()) return res.status(400).json({ ok: false, reason: 'CSV 내용이 비어 있습니다.' });
+  const dryRun = req.body?.dryRun !== false;
+  const parsed = parseManageCsv(text, { lineOffset: req.body?.lineOffset, maxRows: MANAGE_CHUNK_MAX });
+  if (parsed.error) return res.status(400).json({ ok: false, reason: parsed.error });
+  if (parsed.rows.length > MANAGE_CHUNK_MAX) return res.status(400).json({ ok: false, reason: `한 번에 ${MANAGE_CHUNK_MAX}행까지 받습니다 — 화면은 자동으로 나눠 보냅니다.` });
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const owners = ipVcenterOwners(snap);
+  const resolveVc = vcResolver(snap, req.user);
+  const a = analyzeManageImport(parsed.rows, parsed.columns, {
+    getOverride, getAnnotation, resolveVc,
+    verdict: (ip, claimed) => {
+      const v = ipOverrideWriteVerdict(req, snap, allowed, owners, ip, claimed);
+      if (!v) return null;
+      return { reason: v.status === 403 ? WRITE_DENIED_MSG : '범위 밖이거나 수정 권한이 없는 IP 입니다.' };
+    },
+    statuses: STATUSES, deviceTypes: DEVICE_TYPES, dayOf: (iso) => reservedUntilDay(iso),
+  });
+  if (dryRun) return res.json({ ok: true, dryRun: true, columns: parsed.columns, report: a.report, summary: a.summary, total: parsed.rows.length });
+  const ovEntries = a.plans.filter((p) => p.override).map((p) => ({ ip: p.ip, partial: p.override }));
+  const anEntries = a.plans.filter((p) => p.annotation).map((p) => ({ ip: p.ip, memo: p.annotation.memo, tags: p.annotation.tags }));
+  const ov = ovEntries.length ? setOverridesMany(ovEntries, req.user) : { changed: 0, removed: 0 };
+  const an = anEntries.length ? setAnnotationsMany(anEntries, req.user) : { changed: 0, removed: 0 };
+  if (a.plans.length) {
+    logAudit({ user: req.user?.username, action: 'IP 관리상태 CSV 가져오기', target: `${a.plans.length}개 IP`,
+      detail: JSON.stringify({ lines: `${parsed.rows[0]?._line ?? ''}~${parsed.rows[parsed.rows.length - 1]?._line ?? ''}`, summary: a.summary, override: ov, annotation: an }).slice(0, 800) });
+  }
+  res.json({ ok: true, dryRun: false, columns: parsed.columns, report: a.report, summary: a.summary, total: parsed.rows.length,
+    applied: a.plans.length, override: { changed: ov.changed, removed: ov.removed }, annotation: { changed: an.changed, removed: an.removed } });
 });
 }

@@ -4225,6 +4225,39 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       발견). 점이 90개를 넘으면 온전한 점은 찍지 않는다(반기 360점이 굵은 띠가 된다) — 부분 합 점은 항상 찍는다.
     - ⚠ 12시간 간격이라 '1일' 차트는 점이 최대 3개다 — `pointsNote` 가 그 사실을 말한다. 기간 앞부분이 빈 이유는 단정하지 않는다(`spanNote`).
     - ⚠ 정직 기록: Chromium 검증은 합성 이력(201슬롯 · 빈 구간 · 부분 합 1회)을 심은 목 서버로 했다 — 실장비 수집으로 쌓인 이력은 보지 못했다.
+  - ⚠⚠ **IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다**
+    (`web/src/views/tools/`{ipamPages.js·ipamDraft.js·useIpamDraft.js·IpamDraftBanner.jsx·IpamCsv.jsx·IpamScanLog.jsx·ipamCsvChunk.js·
+    ipamCsvText.js·ipamScanLogText.js} + 서버 `ipam/`{scanLog.js·manageCsv.js·scanRangesCsv.js}, 사용자 요청 "IP scan 을 위한 입력/수정이
+    많고 복잡해서 별도의 화면 · KPI 아래에 sub menu · IPMS 설정·추천 30선·대용량 CSV·스캔 상태를 각각의 페이지로 · 편집하다가 없어지는 일이
+    없도록" + "sub menu 에 scan 상태, 로그". 선택: 기존 보기 버튼까지 전부 · CSV 는 IP 관리상태 + 스캔 대역 · 스캔 실행 로그를 새로 기록.
+    회귀 `server/test/ipamSubmenu2636.test.js`(변이 2종 검출) + 웹 `ipamSubmenu2636.test.js`):
+    - ⚠⚠ **편집 유실의 원인(코드로 확인)**: IPMS 설정·IP 스캔·스캔 상태는 대장 화면 **안의 모달**이었고 대장 화면은 `if (loading) return
+      <Loading />` 였다. `useTool` 은 파라미터(범위·재조회 카운터)가 바뀔 때마다 loading 을 true 로 돌리므로 범위 칩 클릭·관리상태 저장 뒤
+      재조회가 모달을 **언마운트**했다. **대장 화면에 조기 return 을 되살리지 말 것** — 목록·대역 정책만 `ledgerWait` 로 기다리고, 재조회 중에는
+      같은 범위의 직전 값을 보여 준다(다른 범위의 값은 섞지 않는다). 웹 테스트가 조기 return 0 을 고정한다.
+    - **해시 키는 페이지 전부**(`IPAM_PAGE_KEYS`) — 예전 `valid:['list','sheet']` 라 '추천 기능 30선' 등을 누르면 해시가 바뀌는 순간
+      hashchange 가 목록으로 되돌렸다(기존 결함). **새 페이지는 `ipamPages.js` 에 더할 것.** 관리자 페이지는 `/admin/ipam/settings` 가
+      **403 일 때만** 숨긴다(네트워크 오류 = 'unknown' 이면 보여 주고 서버가 집행한다 — '모름' 을 '없음' 으로 읽지 않는다).
+    - **편집 초안**(`ipamDraft.js`): 메모리 + sessionStorage(try/catch — 못 쓰면 메모리만, `volatile` 로 밝힌다 · 512KB 넘는 초안도 메모리만).
+      초안에 **편집을 시작한 시점의 서버 값(base)** 을 둬서 돌아왔을 때 서버 값이 바뀌었으면 말한다(조용히 덮어쓰면 다른 관리자 변경을 지운다).
+      값이 서버 값과 같아지면 초안을 지운다. 키 `<페이지>:<세부>` — 에이전트·vCenter 마다 따로(`scan:<agent>`·`ipms:vcscan:<vc>`)라 대상을
+      바꿔도 다른 대상 값이 새 대상에 남지 않는다(v2.622 WEB-08 과 같은 판단). 탭을 닫을 때 `beforeunload` 경고.
+      ⚠ 저장 성공 뒤에는 **`d.saved(서버가 돌려준 값)`** — 서버가 정리한 값(빈 줄 제거)과 폼 값이 달라 초안이 남는 것을 막는다.
+      ⚠ 전역 `.input { min-width: 220px }` 이 페이지로 옮긴 2열 폼을 400px 에서 24px 밀어냈다 — `.ipam-page .input` 에서만 푼다.
+    - **CSV 조각 분할은 서버 파서와 글자 그대로 같은 행 경계**(`ipamCsvChunk.splitCsvRecords` ↔ `server/src/util/csv.js parseCsvRows`) —
+      서버가 조각마다 `_line = lineOffset + n + 2` 로 행 번호를 매기므로 어긋나면 결과표가 **엉뚱한 줄**을 지목한다. 웹 테스트가 서버 파서를
+      import 해 칸·행 번호를 대조한다(인용 안 줄바꿈·CRLF·BOM·빈 행·탭 구분). 조각을 넘는 같은 IP 는 서버가 못 보므로 화면이 뒤 행을 오류로 바꾸고
+      적용 때 그 행을 **주석 행**(ip 칸 `#`)으로 바꿔 보낸다 — 행을 빼면 뒤 행 번호가 밀린다.
+    - **관리상태 CSV 판정 규칙**(`manageCsv.js`): 헤더에 있는 열만 바꾼다 · 빈 칸 = 지움 · 모르는 상태·디바이스·날짜·길이 초과는 **오류**
+      (저장 함수 `overrides.clean` 은 모르는 상태를 빈 값으로 **조용히 지운다** — 그 경로를 타면 오타 하나가 기존 상태를 지운다) · 파일에 없는 IP 는
+      건드리지 않는다 · 범위는 단건·일괄과 같은 `ipOverrideWriteVerdict` · 적용은 서버가 **다시 판정** · 쓰기는 `setOverridesMany`·
+      `setAnnotationsMany` 로 파일 1회(행마다 원자 쓰기 금지 — 1만 행이면 1만 번 fsync).
+    - **스캔 대역 CSV**: 교체는 파일에 나온 에이전트만 · 오류 줄이 하나라도 있는 에이전트는 통째로 막는다(교체에서 오류 줄만 빼면 그 대역이 조용히 지워진다).
+    - **스캔 로그**(`ipam/scanLog.js`, `ipam-scan-log.json`, `IPAM_SCAN_LOG_MAX` 기본 1,000): 연속 같은 사유의 skip·reject 는 한 줄로 합친다
+      (비이벤트가 상한을 소진하지 않게 — v2.517 규약). activityLog 와 같은 링버퍼라 손상이면 새로 시작한다(arch2582 allowlist 에 사유).
+      못 읽은 수치는 null. 게이트는 형제 status 와 같은 adminOnly + fleetOnly. **새 스캔 경로(엣지 보고·수동 실행)를 만들면 여기에도 기록할 것.**
+    - ⚠ 정직 기록: 실제 엣지 에이전트의 스캔 보고 로그는 테스트 라우터로만 확인했다 · 브라우저 검증은 목 데이터(관리자·AUTH_DISABLED_ROLE=viewer)로
+      했다 — viewer 서버에서도 웹 `hasRole` 은 admin 으로 보여 'CSV 가져오기는 운영자·관리자만' 안내는 화면으로 보지 못했다(서버 403 은 테스트로 고정).
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

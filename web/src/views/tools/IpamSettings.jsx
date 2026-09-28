@@ -6,6 +6,24 @@ import { DEVTYPE_LABEL, MGMT } from './ipamShared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { intervalMinText, scanSettingsBody } from './ipamScanForm.js';
 import { reservedDayOf, reservedFieldForSave } from './ipamReserveText.js';
+import { useIpamDraft } from './useIpamDraft.js'; // v2.636: 편집 초안 — 페이지를 옮기거나 대장이 다시 로딩돼도 입력이 남는다
+import { DraftBanner } from './IpamDraftBanner.jsx';
+
+/**
+ * v2.636: 모달 또는 페이지로 그린다. IP관리 서브메뉴는 `asPage` 로 쓴다 — 예전 모달은 대장 화면 안에 있어서 대장을 다시 읽는
+ * 순간(`if (loading) return <Loading />`) 함께 언마운트되어 입력이 사라졌다.
+ */
+function Frame({ asPage, title, onClose, children, ...modal }) {
+  if (asPage) {
+    return (
+      <div className="card ipam-page" style={{ padding: 14, minWidth: 0 }}>
+        <b style={{ fontSize: 15, display: 'block', marginBottom: 8 }}>{title}</b>
+        {children}
+      </div>
+    );
+  }
+  return <Modal title={title} onClose={onClose} {...modal}>{children}</Modal>;
+}
 
 
 /** Per-IP user memo + tags editor (separate from vCenter notes). */
@@ -190,15 +208,23 @@ export function vcRangesGate(vcRanges, err) {
   return { locked: false, failed: false, note: null };
 }
 
-export function IpmsSettings({ onClose }) {
-  const [s, setS] = useState(null);
+export function IpmsSettings({ onClose, asPage = false }) {
+  // v2.636: 폼 값은 편집 초안(ipms:settings) — 저장 전까지 다른 페이지로 옮겨도 남는다.
+  const d = useIpamDraft('ipms:settings');
+  const s = d.value;
+  const setS = d.set;
+  const [loadErr, setLoadErr] = useState(null); // 조회 실패(403 이면 HttpError 그대로 — 권한 안내로 그린다)
   const [vcs, setVcs] = useState([]);
   const [vc, setVc] = useState('');
   const [msg, setMsg] = useState(null);
   // vCenter별 스캔 대역(사전 정리 + 주기 스캔) — rangeStore(/vc-ranges) 백엔드 재사용.
   const [vcRanges, setVcRanges] = useState(null);
-  const [scanText, setScanText] = useState('');
-  const [scanEnabled, setScanEnabled] = useState(true);
+  // v2.636: vCenter 마다 따로 초안(ipms:vcscan:<id>) — vCenter 를 바꿔도 다른 vCenter 에 입력하던 대역이 남는다.
+  const sd = useIpamDraft(`ipms:vcscan:${vc || '-'}`);
+  const scanText = sd.value?.text ?? '';
+  const scanEnabled = sd.value ? sd.value.enabled !== false : true;
+  const setScanText = (t) => sd.set((c) => ({ ...(c || { enabled: true }), text: t }));
+  const setScanEnabled = (v) => sd.set((c) => ({ ...(c || { text: '' }), enabled: v }));
   const [scanBusy, setScanBusy] = useState(false);
   const [scanMsg, setScanMsg] = useState(null);
   // v2.621(감사 WEB-02): 조회 실패를 삼키지 않는다 — 예전 `.catch(() => {})` 는 빈 칸을 '대역 없음' 으로 보이게 했고,
@@ -208,24 +234,23 @@ export function IpmsSettings({ onClose }) {
     .then((r) => { setVcRanges(r); setVcRangesErr(null); })
     .catch((e) => setVcRangesErr(e?.message || String(e)));
   useEffect(() => {
-    fetchJson('/admin/ipam/settings').then((r) => setS(r.settings)).catch((e) => setMsg(e.message));
-    fetchJson('/vcenters').then((list) => { setVcs(list); if (list[0]) setVc(list[0].id); }).catch(() => {});
+    fetchJson('/admin/ipam/settings').then((r) => d.load(r.settings)).catch((e) => setLoadErr(e));
+    fetchJson('/vcenters').then((list) => { setVcs(list); if (list[0]) setVc((cur) => cur || list[0].id); }).catch(() => {});
     loadVcRanges();
-  }, []);
-  // 선택한 vCenter의 저장된 스캔 대역을 폼에 채운다.
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // 선택한 vCenter의 저장된 스캔 대역을 폼에 채운다(초안이 있으면 초안이 이긴다 — useIpamDraft.load).
   useEffect(() => {
-    if (!vcRanges) return;
+    if (!vcRanges || !vc) return;
     const e = (vcRanges.ranges || []).find((x) => x.vcenterId === vc);
-    setScanText(e ? (e.ranges || []).join('\n') : '');
-    setScanEnabled(e ? e.enabled !== false : true);
-  }, [vc, vcRanges]);
+    sd.load({ text: e ? (e.ranges || []).join('\n') : '', enabled: e ? e.enabled !== false : true });
+  }, [vc, vcRanges]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveScanRanges = async () => {
     if (!vc || vcRangesGate(vcRanges, vcRangesErr).locked) return; // v2.621(감사 WEB-02): 버튼 잠금의 이중 방어
     setScanBusy(true); setScanMsg(null);
     try {
       const r = await putJson('/admin/ipam/vc-ranges', { vcenterId: vc, ranges: scanText, enabled: scanEnabled });
       setScanMsg(r.ok ? { ok: true, text: `저장됨 — 대역 ${(r.ranges || []).length}개` } : { ok: false, text: r.reason });
-      if (r.ok) await loadVcRanges();
+      if (r.ok) { sd.saved({ text: (r.ranges || []).join('\n'), enabled: scanEnabled }); await loadVcRanges(); }
     } catch (e) { setScanMsg({ ok: false, text: e.message }); } finally { setScanBusy(false); }
   };
   const scanNow = async () => {
@@ -234,7 +259,7 @@ export function IpmsSettings({ onClose }) {
     try { const r = await postJson('/admin/ipam/vc-ranges/scan', {}); setScanMsg(r.ok ? { ok: true, text: '스캔을 시작했습니다(백그라운드).' } : { ok: false, text: r.reason }); }
     catch (e) { setScanMsg({ ok: false, text: e.message }); } finally { setScanBusy(false); }
   };
-  if (!s) return <Modal title="IPMS 설정" onClose={onClose}>{msg ? <ErrorBox message={msg} /> : <Loading />}</Modal>;
+  if (!s) return <Frame asPage={asPage} title="IPMS 설정" onClose={onClose}>{loadErr ? <ErrorBox message={loadErr} /> : <Loading />}</Frame>;
   const vcRangeEntry = (vcRanges?.ranges || []).find((x) => x.vcenterId === vc);
   const scanGate = vcRangesGate(vcRanges, vcRangesErr);
 
@@ -247,15 +272,22 @@ export function IpmsSettings({ onClose }) {
   const setPublic = (t) => setS({ ...s, publicRanges: t.split('\n') });
   const setPrivate = (t) => setS({ ...s, privateRanges: t.split('\n') });
   const save = async () => {
+    setMsg(null);
     const r = await putJson('/admin/ipam/settings', s).catch((e) => ({ error: e.message }));
+    if (r.ok) d.saved(r.settings || s);   // 서버가 정리한 값으로(빈 줄 제거 등) — 초안을 지운다
     // v2.611 LEFT2611-02: 범위 제한 계정의 전역 대역 변경은 적용하지 않는다 — 조용히 닫지 않고 사유를 보인다.
-    if (r.ok && !r.ignoredReason) onClose(); else setMsg(r.ok ? `저장했습니다(범위 안 vCenter 대역만). ${r.ignoredReason}` : (r.error || '저장 실패'));
+    // v2.636: 페이지로 쓸 때는 닫을 것이 없다 — 저장했다고 말한다.
+    if (r.ok && !r.ignoredReason) { if (asPage) setMsg({ ok: true, text: '저장했습니다 — 대장·검색·공유 DB 는 다음 수집 주기에 새 대역으로 다시 만들어집니다.' }); else onClose(); }
+    else setMsg(r.ok ? `저장했습니다(범위 안 vCenter 대역만). ${r.ignoredReason}` : (r.error || '저장 실패'));
   };
 
   return (
-    <Modal title="IPMS 설정 — 무시 대역 · vCenter 스캔 대역" onClose={onClose} width={560}>
+    <Frame asPage={asPage} title="IPMS 설정 — 무시 대역 · vCenter 스캔 대역" onClose={onClose} width={560}>
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>여기 입력한 대역의 IP는 IP 관리대장/검색/공유DB에서 제외됩니다. 형식: CIDR(10.0.0.0/8), 범위(10.0.0.1-10.0.0.50), 단일 IP. 한 줄에 하나.</div>
-      {msg && <div className="login-error" style={{ marginBottom: 8 }}>{msg}</div>}
+      <DraftBanner d={d} />
+      {msg && (typeof msg === 'object' && msg.ok
+        ? <div className="banner ok" role="status" style={{ marginBottom: 8 }}>{msg.text}</div>
+        : <div className="login-error" style={{ marginBottom: 8 }}>{typeof msg === 'object' ? msg.text : msg}</div>)}
       <label style={{ display: 'block', marginBottom: 12 }}>전체 무시 대역 (모든 vCenter)
         <textarea className="input" rows={5} value={globalText} onChange={(e) => setGlobal(e.target.value)} placeholder={'10.255.0.0/16\n8.8.8.8'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
       </label>
@@ -283,6 +315,7 @@ export function IpmsSettings({ onClose }) {
             {scanGate.failed && <button className="logout-btn" style={{ padding: '3px 10px', fontSize: 12 }} onClick={loadVcRanges}>다시 불러오기</button>}
           </div>
         )}
+        <DraftBanner d={sd} />
         <textarea className="input" rows={5} value={scanText} disabled={scanGate.locked} onChange={(e) => setScanText(e.target.value)} placeholder={'10.94.42.0/24\n10.94.43.1-10.94.43.200'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
         <div className="flex gap" style={{ marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={scanEnabled} disabled={scanGate.locked} onChange={(e) => setScanEnabled(e.target.checked)} /> 주기 스캔 포함</label>
@@ -305,10 +338,11 @@ export function IpmsSettings({ onClose }) {
         </div>
       </div>
       <div className="flex gap" style={{ marginTop: 14 }}>
-        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={save}>저장</button>
-        <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>
+        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={save}>저장{d.dirty ? ' ●' : ''}</button>
+        {!asPage && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>}
+        {asPage && <span className="muted" style={{ fontSize: 11 }}>위 ‘저장’ 은 무시 대역·공인/사설 분류를 저장합니다. vCenter별 스캔 대역은 그 칸의 ‘대역 저장’ 으로 따로 저장합니다.</span>}
       </div>
-    </Modal>
+    </Frame>
   );
 }
 
@@ -323,9 +357,12 @@ export function ipScanAccept(requestedAgent, currentAgent) {
 
 /** IP 능동 스캔(TCP 커넥트) 설정 + 수동 실행 + 결과. 물리/기타 서버 IP를 대장에 채운다. */
 const LOCAL_AGENT = '__local__';
-export function IpScanSettings({ onClose }) {
-  const [s, setS] = useState(null);
+export function IpScanSettings({ onClose, asPage = false }) {
   const [agent, setAgent] = useState(LOCAL_AGENT);
+  // v2.636: 폼 값은 에이전트마다 따로 편집 초안(scan:<에이전트>) — 저장 전까지 페이지를 옮기거나 에이전트를 바꿔도 남는다.
+  const d = useIpamDraft(`scan:${agent}`);
+  const s = d.value;
+  const setS = d.set;
   const [agents, setAgents] = useState([LOCAL_AGENT]);
   const [newAgent, setNewAgent] = useState('');
   const [status, setStatus] = useState(null);
@@ -333,6 +370,7 @@ export function IpScanSettings({ onClose }) {
   const [reports, setReports] = useState({});
   const [centralEnabled, setCentralEnabled] = useState(true);
   const [msg, setMsg] = useState(null);
+  const [loadErr, setLoadErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [sFor, setSFor] = useState(null); // v2.622(감사 WEB-08): 폼(s)을 채운 에이전트
   const agentRef = useRef(LOCAL_AGENT);   // 지금 고른 에이전트(늦게 온 이전 에이전트 응답을 버린다)
@@ -340,29 +378,30 @@ export function IpScanSettings({ onClose }) {
     try {
       const r = await fetchJson('/admin/ipam/scan/settings', { agent: ag });
       if (!ipScanAccept(ag, agentRef.current)) return; // v2.622(감사 WEB-08)
-      if (first) { setS(r.settings); setSFor(ag); }
+      if (first) { d.load(r.settings); setSFor(ag); }
       if (r.agents) setAgents(r.agents);
       setStatus(r.status); setInfo(r.info); setReports(r.reports || {}); setCentralEnabled(r.centralEnabled !== false);
     } catch (e) {
       if (!ipScanAccept(ag, agentRef.current)) return; // v2.622(감사 WEB-08)
-      setMsg(e.message); if (e?.status === 403) deniedRef.current = true;
+      if (first) setLoadErr(e); else setMsg(e.message);
+      if (e?.status === 403) deniedRef.current = true;
     }
   };
   // v2.611 LEFT2611-07: 403(범위 제한 계정)은 정책 거부라 2초마다 다시 묻지 않는다.
   const deniedRef = useRef(false);
   useEffect(() => { load(agent, true); const t = setInterval(() => { if (!deniedRef.current) load(agent, false); }, 2000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [agent]);
-  if (!s) return <Modal title="IP 스캔" onClose={onClose}>{msg ? <ErrorBox message={msg} /> : <Loading />}</Modal>;
+  if (!s) return <Frame asPage={asPage} title="🛰️ IP 스캔 설정" onClose={onClose}>{loadErr ? <ErrorBox message={loadErr} /> : msg ? <ErrorBox message={msg} /> : <Loading />}</Frame>;
 
   const isLocal = agent === LOCAL_AGENT;
   const agentLabel = (a) => (a === LOCAL_AGENT ? '이 포탈에서 직접' : a);
-  const switchAgent = (a) => { agentRef.current = a; setS(null); setSFor(null); setMsg(null); setAgent(a); };
+  const switchAgent = (a) => { agentRef.current = a; setSFor(null); setMsg(null); setLoadErr(null); setAgent(a); }; // 폼은 useIpamDraft 가 키(에이전트)마다 새로 시작한다
   const save = async () => {
     // v2.622(감사 WEB-08): 다른 에이전트의 설정으로 채워진 폼은 저장하지 않는다.
     if (!ipScanAccept(sFor, agent)) { setMsg('이 폼은 지금 고른 에이전트의 설정이 아닙니다 — 다시 불러온 뒤 저장하세요.'); return; }
     setBusy(true); setMsg(null);
     try {
       const r = await putJson('/admin/ipam/scan/settings', scanSettingsBody(s, agent));
-      setS(r.settings); setStatus(r.status);
+      d.saved(r.settings); setStatus(r.status);
       const cfg = r.settings || s;
       const mins = Math.max(1, Math.round((cfg.intervalMs || 3_600_000) / 60000));
       const nextAt = new Date(Date.now() + (cfg.intervalMs || 3_600_000)).toLocaleString('ko-KR');
@@ -390,7 +429,7 @@ export function IpScanSettings({ onClose }) {
     try {
       // 입력한 대역을 먼저 저장한 뒤 스캔(미저장 입력이 무시되어 첫 대역만 스캔되던 문제 방지).
       const sv = await putJson('/admin/ipam/scan/settings', scanSettingsBody(s, agent));
-      if (sv?.settings) setS(sv.settings);
+      if (sv?.settings) d.saved(sv.settings);
       const r = await postJson('/admin/ipam/scan/run', {});
       if (r.status) setStatus(r.status); if (r.info) setInfo(r.info);
       setMsg(r.ok ? `대역 ${nRanges}개 스캔을 백그라운드에서 시작했습니다(전체 IP는 진행 막대에 표시). 창을 닫아도 계속 실행됩니다.` : `시작 실패: ${r.reason}`);
@@ -399,7 +438,8 @@ export function IpScanSettings({ onClose }) {
   const last = status?.lastRun;
 
   return (
-    <Modal title="🛰️ IP 능동 스캔 (TCP 커넥트)" onClose={onClose} width={680} resizable minWidth={460} minHeight={420}>
+    <Frame asPage={asPage} title="🛰️ IP 능동 스캔 (TCP 커넥트)" onClose={onClose} width={680} resizable minWidth={460} minHeight={420}>
+      <DraftBanner d={d} />
       <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
         vCenter가 모르는 <b>물리서버·타 가상화·네트워크 장비</b> IP를 TCP 커넥트 스캔으로 찾아 IP 관리대장에 채웁니다.
         <b> 할당 에이전트</b>를 고르면 해당 에이전트가 이 설정을 읽어가 자기 사이트에서 스캔하고 결과를 포탈에 보고합니다.
@@ -407,13 +447,13 @@ export function IpScanSettings({ onClose }) {
       </div>
       {msg && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{msg}</div>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}> {/* v2.636: 페이지(400px)에서 1fr 의 최소폭이 내용 폭이라 입력칸이 카드 밖으로 밀렸다 */}
         <label style={{ fontWeight: 600, paddingTop: 9 }}>할당 에이전트</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-          <select className="select" value={agent} onChange={(e) => switchAgent(e.target.value)} style={{ maxWidth: 260 }}>
+          <select className="select" value={agent} onChange={(e) => switchAgent(e.target.value)} style={{ maxWidth: '100%', width: 260 }}>
             {agents.map((a) => <option key={a} value={a}>{agentLabel(a)}</option>)}
           </select>
-          <input className="input" style={{ width: 160 }} placeholder="새 에이전트 이름" value={newAgent} onChange={(e) => setNewAgent(e.target.value)} />
+          <input className="input" style={{ width: 160, maxWidth: '100%' }} placeholder="새 에이전트 이름" value={newAgent} onChange={(e) => setNewAgent(e.target.value)} />
           <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={!newAgent.trim()} onClick={() => { const a = newAgent.trim(); setNewAgent(''); if (a) switchAgent(a); }}>추가/선택</button>
         </div>
         <label style={{ fontWeight: 600, paddingTop: 9 }}>사용</label>
@@ -494,12 +534,12 @@ export function IpScanSettings({ onClose }) {
         <ScanProgressBar progress={status?.progress} />
       </div>
 
-      <div className="flex gap" style={{ marginTop: 14 }}>
-        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={save}>저장</button>
+      <div className="flex gap wrap" style={{ marginTop: 14 }}>
+        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={busy} onClick={save}>저장{d.dirty ? ' ●' : ''}</button>
         <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy || status?.running || !isLocal} title={isLocal ? '' : '원격 에이전트는 자체 주기로 스캔합니다'} onClick={runNow}>지금 스캔(포탈)</button>
-        <button className="logout-btn" style={{ padding: '9px 14px', marginLeft: 'auto' }} onClick={onClose}>닫기</button>
+        {!asPage && <button className="logout-btn" style={{ padding: '9px 14px', marginLeft: 'auto' }} onClick={onClose}>닫기</button>}
       </div>
-    </Modal>
+    </Frame>
   );
 }
 
@@ -520,17 +560,17 @@ export function ScanProgressBar({ progress }) {
 }
 
 /** 대장 상단 '스캔 상태' 버튼이 여는 모달: 진행 중 스캔 + 완료된 스캔 이력. */
-export function ScanStatusModal({ onClose }) {
+export function ScanStatusModal({ onClose, asPage = false }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const deniedRef = useRef(false); // v2.611 LEFT2611-07: 403 은 다시 물어도 같다 — 폴링을 멈춘다
-  const load = () => { if (deniedRef.current) return; fetchJson('/admin/ipam/scan/status').then(setD).catch((e) => { setErr(e.message); if (e?.status === 403) deniedRef.current = true; }); };
+  const load = () => { if (deniedRef.current) return; fetchJson('/admin/ipam/scan/status').then(setD).catch((e) => { setErr(e); if (e?.status === 403) deniedRef.current = true; }); }; // v2.636: HttpError 그대로 — 403 은 권한 안내
   useEffect(() => { load(); const t = setInterval(load, 2000); return () => clearInterval(t); }, []);
   const fmt = (t) => (t ? new Date(t).toLocaleString('ko-KR') : '—');
   const dur = (ms) => (ms == null ? '—' : ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}초`);
   const st = d?.status; const runs = d?.runs || [];
   return (
-    <Modal title="🛰️ IP 스캔 상태 — 진행 중 · 이력" onClose={onClose} width={720} resizable minWidth={480} minHeight={400}>
+    <Frame asPage={asPage} title="📡 IP 스캔 상태 — 진행 중 · 이력" onClose={onClose} width={720} resizable minWidth={480} minHeight={400}>
       {err && <ErrorBox message={err} />}
       {!d ? <Loading /> : (
         <>
@@ -564,6 +604,6 @@ export function ScanStatusModal({ onClose }) {
           </div>
         </>
       )}
-    </Modal>
+    </Frame>
   );
 }
