@@ -8,6 +8,8 @@ import { intervalMinText, scanSettingsBody } from './ipamScanForm.js';
 import { reservedDayOf, reservedFieldForSave } from './ipamReserveText.js';
 import { useIpamDraft } from './useIpamDraft.js'; // v2.636: 편집 초안 — 페이지를 옮기거나 대장이 다시 로딩돼도 입력이 남는다
 import { DraftBanner } from './IpamDraftBanner.jsx';
+import { RangesCsv } from './IpamCsv.jsx'; // v2.638: 스캔 대역 CSV 를 이 페이지에서도
+import { appendSubnets, coverageOf, dcDecisionText, rangesOf, suggestEmptyText, suggestSummaryText } from './ipScanDcText.js';
 import { checkRangeList, cleanLines, ipmsSettingsErrors, lineIssueText, listSummaryText, sameIpmsSettings, serverInvalidText, vcenterOptionLabel, vcenterOptions } from './ipmsRangeText.js';
 
 /**
@@ -466,9 +468,99 @@ export function ipScanAccept(requestedAgent, currentAgent) {
   return requestedAgent === currentAgent;
 }
 
+/** v2.638: 데이터센터 귀속 판정(서버) 한 줄 + 근거. pending = 고른 값을 아직 저장하지 않았다. */
+function DcDecision({ info, pending }) {
+  if (info === undefined) return <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>귀속 판정을 불러오는 중…</div>;
+  const t = dcDecisionText(info);
+  const color = t.tone === 'ok' ? 'var(--green)' : t.tone === 'warn' ? 'var(--amber)' : undefined;
+  return (
+    <div style={{ fontSize: 11, marginTop: 4, lineHeight: 1.6, overflowWrap: 'anywhere' }}>
+      <span className="muted">스캔으로 찾은 IP 의 귀속: </span><b style={{ color }}>{t.text}</b>
+      {pending && <span style={{ color: 'var(--amber)' }}> · 바꾼 값은 저장하면 적용됩니다(위 판정은 저장된 값 기준)</span>}
+      <div className="muted">{t.detail}</div>
+    </div>
+  );
+}
+
+/**
+ * v2.638: 에이전트가 쓰는 /24 대역 제안 — 그 에이전트가 수집하는 vCenter 의 VM·ESXi IP + 담당 iDRAC IP 를 /24 로 묶은 목록에서
+ * 골라 스캔 대역 칸에 붙인다. 판정·조회는 서버(GET /admin/ipam/scan/suggest), 이미 입력된 대역 표시는 저장하지 않은 입력 기준.
+ */
+function SubnetSuggest({ agent, ranges, onAdd }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [pick, setPick] = useState(() => new Set());
+  const [note, setNote] = useState(null);
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    let alive = true; // 늦게 온 이전 에이전트의 응답을 버린다(v2.622 WEB-08 과 같은 규칙)
+    setData(null); setErr(null); setPick(new Set()); setNote(null);
+    fetchJson('/admin/ipam/scan/suggest', { agent }).then((r) => { if (alive) setData(r); }).catch((e) => { if (alive) setErr(e); });
+    return () => { alive = false; };
+  }, [agent]);
+  const covered = rangesOf(ranges);
+  const list = (data?.subnets || []).filter((x) => !q.trim() || x.cidr.includes(q.trim()) || (x.vcenters || []).some((v) => v.toLowerCase().includes(q.trim().toLowerCase())));
+  const toggle = (c) => setPick((p) => { const n = new Set(p); if (n.has(c)) n.delete(c); else n.add(c); return n; });
+  const addable = list.filter((x) => coverageOf(x.cidr, covered) !== 'full');
+  const add = () => {
+    const r = appendSubnets(ranges, [...pick]);
+    onAdd(r.lines);
+    setNote(`${r.added}개 대역을 스캔 대역 칸에 넣었습니다${r.skipped ? `(이미 들어 있던 ${r.skipped}개는 뺐습니다)` : ''} — 아직 저장하지 않았습니다. 아래 ‘저장’ 을 누르세요.`);
+    setPick(new Set());
+  };
+  return (
+    <div className="card" style={{ padding: 10, marginTop: 8, minWidth: 0 }}>
+      {err ? <ErrorBox message={err} /> : !data ? <Loading /> : (
+        <>
+          <div className="muted" style={{ fontSize: 11, lineHeight: 1.6 }}>{suggestSummaryText(data)}</div>
+          <div className="muted" style={{ fontSize: 11, lineHeight: 1.6 }}>
+            대상: {(data.vcenters || []).length ? `vCenter ${(data.vcenters || []).map((v) => v.name).join(', ')}` : 'vCenter 없음'}
+            {` · iDRAC ${data.idracServers ?? 0}대(${data.idracSource === 'central-registry' ? '이 포탈 등록' : '엣지가 마지막으로 보고한 목록'})`}
+          </div>
+          {data.inputErrors && <div style={{ fontSize: 11, color: 'var(--amber)' }}>일부 등록부를 읽지 못했습니다({Object.keys(data.inputErrors).join(', ')}) — 목록이 빠졌을 수 있습니다.</div>}
+          {(data.subnets || []).length === 0 ? (
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{suggestEmptyText(data, agent === LOCAL_AGENT)}</div>
+          ) : (
+            <>
+              <div className="flex gap wrap" style={{ alignItems: 'center', margin: '6px 0' }}>
+                <input className="input" style={{ width: 200, maxWidth: '100%', minWidth: 0 }} placeholder="대역·vCenter 이름 검색" value={q} onChange={(e) => setQ(e.target.value)} aria-label="대역 검색" />
+                <button className="tab" style={{ flex: 'none', padding: '5px 10px', fontSize: 12 }} onClick={() => setPick(new Set(addable.map((x) => x.cidr)))}>보이는 것 모두 선택({addable.length})</button>
+                <button className="tab" style={{ flex: 'none', padding: '5px 10px', fontSize: 12 }} disabled={!pick.size} onClick={() => setPick(new Set())}>선택 해제</button>
+                <button className="login-btn" style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} disabled={!pick.size} onClick={add}>선택한 {pick.size}개 추가</button>
+              </div>
+              <div className="table-wrap" style={{ maxHeight: 280 }}>
+                <STable minWidth={520}>
+                  <thead><tr><th data-nosort /><th>대역(/24)</th><th style={{ textAlign: 'right' }}>IP 수</th><th style={{ textAlign: 'right' }}>vCenter</th><th style={{ textAlign: 'right' }}>iDRAC</th><th>출처 vCenter</th><th>상태</th></tr></thead>
+                  <tbody>
+                    {list.map((x) => {
+                      const cov = coverageOf(x.cidr, covered);
+                      return (
+                        <tr key={x.cidr}>
+                          <td><input type="checkbox" aria-label={`${x.cidr} 선택`} disabled={cov === 'full'} checked={pick.has(x.cidr)} onChange={() => toggle(x.cidr)} /></td>
+                          <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{x.cidr}</td>
+                          <td style={{ textAlign: 'right' }}>{x.ips}</td>
+                          <td style={{ textAlign: 'right' }}>{x.vcenterIps}</td>
+                          <td style={{ textAlign: 'right' }}>{x.idracIps}</td>
+                          <td className="muted" style={{ fontSize: 11, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{(x.vcenters || []).join(', ') || '—'}</td>
+                          <td>{cov === 'full' ? <span className="badge green">이미 입력됨</span> : cov === 'partial' ? <span className="badge amber" title="이 /24 의 일부만 입력된 대역에 들어 있습니다">일부 입력됨</span> : <span className="muted">—</span>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </STable>
+              </div>
+            </>
+          )}
+          {note && <div style={{ fontSize: 12, marginTop: 6, color: 'var(--green)' }}>{note}</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
 /** IP 능동 스캔(TCP 커넥트) 설정 + 수동 실행 + 결과. 물리/기타 서버 IP를 대장에 채운다. */
 const LOCAL_AGENT = '__local__';
-export function IpScanSettings({ onClose, asPage = false }) {
+export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638: onSaved — 데이터센터 귀속이 바뀌면 대장을 다시 읽게
   const [agent, setAgent] = useState(LOCAL_AGENT);
   // v2.636: 폼 값은 에이전트마다 따로 편집 초안(scan:<에이전트>) — 저장 전까지 페이지를 옮기거나 에이전트를 바꿔도 남는다.
   const d = useIpamDraft(`scan:${agent}`);
@@ -485,11 +577,20 @@ export function IpScanSettings({ onClose, asPage = false }) {
   const [busy, setBusy] = useState(false);
   const [sFor, setSFor] = useState(null); // v2.622(감사 WEB-08): 폼(s)을 채운 에이전트
   const agentRef = useRef(LOCAL_AGENT);   // 지금 고른 에이전트(늦게 온 이전 에이전트 응답을 버린다)
+  // v2.638: 데이터센터 귀속 판정(서버) + 고를 수 있는 DataCenter 목록 · /24 대역 제안 패널 · CSV 패널
+  const [dcInfo, setDcInfo] = useState(undefined);  // undefined = 아직 모름(구버전 서버는 필드가 없다)
+  const [dcList, setDcList] = useState(null);       // null = 목록을 못 받음
+  const [dcListErr, setDcListErr] = useState(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [csvOpen, setCsvOpen] = useState(false);
   const load = async (ag, first = false) => {
     try {
       const r = await fetchJson('/admin/ipam/scan/settings', { agent: ag });
       if (!ipScanAccept(ag, agentRef.current)) return; // v2.622(감사 WEB-08)
       if (first) { d.load(r.settings); setSFor(ag); }
+      if ('datacenter' in r) setDcInfo(r.datacenter);
+      if (Array.isArray(r.datacenters)) setDcList(r.datacenters);
+      setDcListErr(r.datacentersError || null);
       if (r.agents) setAgents(r.agents);
       setStatus(r.status); setInfo(r.info); setReports(r.reports || {}); setCentralEnabled(r.centralEnabled !== false);
     } catch (e) {
@@ -505,14 +606,18 @@ export function IpScanSettings({ onClose, asPage = false }) {
 
   const isLocal = agent === LOCAL_AGENT;
   const agentLabel = (a) => (a === LOCAL_AGENT ? '이 포탈에서 직접' : a);
-  const switchAgent = (a) => { agentRef.current = a; setSFor(null); setMsg(null); setLoadErr(null); setAgent(a); }; // 폼은 useIpamDraft 가 키(에이전트)마다 새로 시작한다
+  const switchAgent = (a) => { agentRef.current = a; setSFor(null); setMsg(null); setLoadErr(null); setDcInfo(undefined); setAgent(a); }; // 폼은 useIpamDraft 가 키(에이전트)마다 새로 시작한다
   const save = async () => {
     // v2.622(감사 WEB-08): 다른 에이전트의 설정으로 채워진 폼은 저장하지 않는다.
     if (!ipScanAccept(sFor, agent)) { setMsg('이 폼은 지금 고른 에이전트의 설정이 아닙니다 — 다시 불러온 뒤 저장하세요.'); return; }
     setBusy(true); setMsg(null);
     try {
       const r = await putJson('/admin/ipam/scan/settings', scanSettingsBody(s, agent));
+      // v2.638: 400(등록되지 않은 데이터센터 등)은 putJson 이 던지지 않고 본문을 돌려준다 — 사유를 말하고 초안을 남긴다.
+      if (r && r.ok === false) { setMsg(`저장하지 못했습니다: ${r.reason || '서버가 거부했습니다'}`); return; }
       d.saved(r.settings); setStatus(r.status);
+      if ('datacenter' in r) setDcInfo(r.datacenter);
+      onSaved?.();
       const cfg = r.settings || s;
       const mins = Math.max(1, Math.round((cfg.intervalMs || 3_600_000) / 60000));
       const nextAt = new Date(Date.now() + (cfg.intervalMs || 3_600_000)).toLocaleString('ko-KR');
@@ -561,11 +666,23 @@ export function IpScanSettings({ onClose, asPage = false }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}> {/* v2.636: 페이지(400px)에서 1fr 의 최소폭이 내용 폭이라 입력칸이 카드 밖으로 밀렸다 */}
         <label style={{ fontWeight: 600, paddingTop: 9 }}>할당 에이전트</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-          <select className="select" value={agent} onChange={(e) => switchAgent(e.target.value)} style={{ maxWidth: '100%', width: 260 }}>
+          <select className="select" value={agent} onChange={(e) => switchAgent(e.target.value)} style={{ maxWidth: '100%', width: 260 }} aria-label="할당 에이전트">
             {agents.map((a) => <option key={a} value={a}>{agentLabel(a)}</option>)}
           </select>
-          <input className="input" style={{ width: 160, maxWidth: '100%' }} placeholder="새 에이전트 이름" value={newAgent} onChange={(e) => setNewAgent(e.target.value)} />
-          <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={!newAgent.trim()} onClick={() => { const a = newAgent.trim(); setNewAgent(''); if (a) switchAgent(a); }}>추가/선택</button>
+          <input className="input" style={{ width: 160, maxWidth: '100%' }} placeholder="새 에이전트 이름" value={newAgent} onChange={(e) => setNewAgent(e.target.value)}
+            title="목록에 아직 없는 엣지의 AGENT_NAME 을 적으면 그 이름으로 스캔 설정을 미리 만들어 둡니다. 엣지가 붙으면 이 설정을 읽어 갑니다." aria-label="새 에이전트 이름" />
+          <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={!newAgent.trim()} title="입력한 이름의 스캔 설정을 새로 만들거나(없으면) 그 에이전트를 고릅니다" onClick={() => { const a = newAgent.trim(); setNewAgent(''); if (a) switchAgent(a); }}>추가/선택</button>
+          <span className="muted" style={{ fontSize: 11, flexBasis: '100%' }}>‘새 에이전트 이름’ 은 목록에 아직 없는 엣지(AGENT_NAME)의 설정을 미리 만들어 둘 때만 씁니다.</span>
+        </div>
+        <label style={{ fontWeight: 600, paddingTop: 9 }}>데이터센터</label>
+        <div style={{ minWidth: 0 }}>
+          <select className="select" value={s.datacenterId || ''} onChange={(e) => setS({ ...s, datacenterId: e.target.value })} style={{ maxWidth: '100%', width: 260 }} aria-label="스캔 결과 데이터센터">
+            <option value="">자동(에이전트가 속한 데이터센터)</option>
+            {(dcList || []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            {s.datacenterId && dcList && !dcList.some((x) => x.id === s.datacenterId) && <option value={s.datacenterId}>{s.datacenterId} (목록에 없음)</option>}
+          </select>
+          {dcListErr && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--amber)' }}>DataCenter 목록을 읽지 못했습니다({dcListErr}) — 지금은 ‘자동’ 만 고를 수 있습니다.</div>}
+          <DcDecision info={dcInfo} pending={(s.datacenterId || '') !== ((d.base && d.base.datacenterId) || '')} />
         </div>
         <label style={{ fontWeight: 600, paddingTop: 9 }}>사용</label>
         <label className="flex gap" style={{ alignItems: 'center', paddingTop: 9 }}>
@@ -576,6 +693,15 @@ export function IpScanSettings({ onClose, asPage = false }) {
           <textarea className="input" value={(s.ranges || []).join('\n')} onChange={(e) => setS({ ...s, ranges: e.target.value.split(/\n/) })}
             placeholder={'10.0.0.0/24\n192.168.1.1-192.168.1.50\n172.16.5.10'} style={{ resize: 'vertical', minHeight: 96, fontFamily: 'monospace', fontSize: 12, width: '100%', boxSizing: 'border-box', display: 'block' }} />
           <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>등록 대역 <b>{(s.ranges || []).map((x) => String(x).trim()).filter(Boolean).length}</b>개 — 모든 줄을 스캔합니다. <b>지금 스캔</b>은 입력값을 자동 저장 후 실행합니다.</div>
+          <div className="flex gap wrap" style={{ marginTop: 6 }}>
+            <button className="tab" style={{ flex: 'none', padding: '5px 10px', fontSize: 12, whiteSpace: 'normal', textAlign: 'left', maxWidth: '100%' }} aria-expanded={suggestOpen} onClick={() => setSuggestOpen((v) => !v)}>
+              {suggestOpen ? '▾' : '▸'} 사용 중인 대역에서 고르기(/24)
+            </button>
+            <button className="tab" style={{ flex: 'none', padding: '5px 10px', fontSize: 12, whiteSpace: 'normal', textAlign: 'left', maxWidth: '100%' }} aria-expanded={csvOpen} onClick={() => setCsvOpen((v) => !v)}>
+              {csvOpen ? '▾' : '▸'} 스캔 대역 CSV 가져오기·내보내기
+            </button>
+          </div>
+          {suggestOpen && <SubnetSuggest agent={agent} ranges={s.ranges || []} onAdd={(lines) => setS({ ...s, ranges: lines })} />}
         </div>
         <label style={{ fontWeight: 600, paddingTop: 9 }}>포트</label>
         <input className="input" value={(s.ports || []).join(', ')} onChange={(e) => setS({ ...s, ports: e.target.value.split(/[\s,]+/).map(Number).filter(Boolean) })}
@@ -593,6 +719,13 @@ export function IpScanSettings({ onClose, asPage = false }) {
           <input className="input" type="number" min={0} style={{ width: 80 }} value={s.retentionDays} onChange={(e) => setS({ ...s, retentionDays: e.target.value })} /><span className="muted">일 보존</span>
         </div>
       </div>
+
+      {csvOpen && (
+        <div style={{ marginTop: 12 }}>
+          {d.dirty && <div style={{ fontSize: 12, marginBottom: 6, color: 'var(--amber)' }}>이 화면에 저장하지 않은 입력이 있습니다 — CSV 로 적용해도 이 폼의 입력(초안)이 우선 보입니다. 저장하거나 ‘되돌리기’ 한 뒤 적용 결과를 확인하세요.</div>}
+          <RangesCsv onApplied={() => load(agent, true)} />
+        </div>
+      )}
 
       {!isLocal && <div className="muted" style={{ fontSize: 12, marginTop: 12 }}>※ 이 설정은 <b>{agent}</b> 에이전트(<code>AGENT_NAME={agent}</code>, <code>CENTRAL_URL</code> 설정 필요)가 다음 주기에 읽어가 자기 사이트에서 스캔하고 결과를 포탈로 보고합니다. '지금 스캔'은 이 포탈에서 직접 스캔할 때만 동작합니다.</div>}
 

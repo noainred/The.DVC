@@ -11,6 +11,7 @@ import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { buildVmExport, vmExportCsv } from '../../vcenter/vmExport.js';
 import { buildIpamRows, buildSubnetSheets, listSubnets, ipVcenterOwners, ipamRevKey } from '../../ipam/ledger.js';
+import { currentScanDatacenters } from '../../ipam/scanDatacenterSource.js';
 import { memoJson, scopeKey } from './shared.js';
 import { buildIpamInsights } from '../../ipam/insights.js';
 import { buildNetmap } from '../../ipam/netmap.js';
@@ -123,7 +124,7 @@ api.get('/tools/ipam', requirePerm('tools'), (req, res) => memoJson(req, res, 't
   }
   // v2.631(감사 R2631-02): 예약 만료일을 화면이 '포탈 오프셋 기준 그 날' 로 되읽을 수 있게 오프셋을 싣는다(브라우저 시간대가 아니다).
   return { ...data, rows, tzOffsetMin: DAY_OFFSET_MIN, ...(q ? { q, matched, truncated } : {}) };
-}, { extraKey: `${scopeKey(req.user, store.get())}|${ipamRevKey()}` }));
+}, { extraKey: `${scopeKey(req.user, store.get())}|${ipamRevKey()}|d${currentScanDatacenters(store.get().vcenters).sig}` })); // v2.638: 스캔 행 데이터센터 귀속이 바뀌면 캐시를 버린다
 api.get('/tools/vm-export', requirePerm('tools'), async (req, res) => {
   const vcenterId = vmExportGuard(req, res);
   if (!vcenterId) return;

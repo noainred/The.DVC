@@ -128,6 +128,8 @@ function normalizeCfg(p = {}) {
     // 켜더라도 ping 전용 동시성 상한(scan.js PING_MAX)으로 소수만 동시에 실행된다.
     ping: p.ping === true,
     retentionDays: clamp(p.retentionDays, 0, 3650, DEFAULTS.retentionDays),
+    // v2.638: 이 에이전트가 찾은 IP 를 귀속시킬 DataCenter(비우면 자동 — ipam/scanDatacenter.js). 엣지는 이 칸을 쓰지 않는다.
+    datacenterId: typeof p.datacenterId === 'string' ? p.datacenterId.trim().slice(0, 64) : '',
   };
 }
 
@@ -196,6 +198,8 @@ export function saveScanSettings(agent, partial = {}) {
   if (partial.reverseDns !== undefined) next.reverseDns = !!partial.reverseDns;
   if (partial.ping !== undefined) next.ping = !!partial.ping; // v2.359 — 누락 시 저장이 조용히 무시됨
   if (partial.retentionDays !== undefined) next.retentionDays = clampSetting(partial.retentionDays, { min: 0, max: 3650, def: cur.retentionDays });
+  // v2.638: 데이터센터 귀속(빈 값 = 자동). 존재 여부는 라우트가 등록부로 검사한다(여기는 형식만).
+  if (partial.datacenterId !== undefined) next.datacenterId = typeof partial.datacenterId === 'string' ? partial.datacenterId.trim().slice(0, 64) : '';
   all.agents[key] = next;
   saveAll(all);
   return next;

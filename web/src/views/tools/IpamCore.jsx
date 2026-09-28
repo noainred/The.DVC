@@ -193,7 +193,14 @@ function Ipam({ scope, onScope }) {
     { key: 'scope', label: '분류', sortValue: (r) => r.scope || '', render: (r) => (
       <span className={`badge ${r.scope === 'public' ? 'amber' : 'green'}`}>{r.scope === 'public' ? '공인' : '사설'}</span>
     ) },
-    { key: 'vcenterName', label: '센터(vCenter)' },
+    // v2.638: 스캔으로만 확인된 IP 는 스캔한 에이전트의 데이터센터를 함께 보인다(귀속 못 한 행은 예전 그대로).
+    { key: 'vcenterName', label: '센터(vCenter)', sortValue: (r) => `${r.vcenterName || ''} ${r.datacenterName || ''}`, render: (r) => (
+      r.ownerType === 'scanned'
+        ? <span>{r.vcenterName}{r.datacenterName
+          ? <span className="badge teal" style={{ marginLeft: 4, fontSize: 10 }} title={`스캔한 에이전트 ${r.scanAgent === '__local__' ? '이 포탈' : r.scanAgent || '—'} 의 데이터센터(${r.dcSource === 'manual' ? '직접 지정' : '자동 판정'})`}>{r.datacenterName}</span>
+          : <span className="muted" style={{ marginLeft: 4, fontSize: 10 }} title="스캔한 에이전트의 데이터센터를 판정하지 못했습니다 — IP 스캔 설정에서 데이터센터를 고르세요">데이터센터 미정</span>}</span>
+        : r.vcenterName
+    ) },
     { key: 'serverType', label: '서버종류', sortValue: (r) => r.serverType || '', render: (r) => <span className={`badge ${r.serverType === 'BareMetal' ? 'amber' : r.serverType === 'Scanned' ? 'teal' : 'blue'}`} title={r.serverType === 'Scanned' ? 'vCenter가 모르는 IP를 능동 스캔으로 확인' : undefined}>{r.serverType === 'BareMetal' ? '베어메탈' : r.serverType === 'Scanned' ? '🛰 스캔 확인' : 'VM'}</span> },
     { key: 'discovery', label: '확인 방식', sortValue: (r) => r.discovery || '', render: (r) => <DiscoveryBadge d={r.discovery} /> },
     { key: 'mgmt', label: '관리상태', sortValue: (r) => r.mgmtStatus || (r.managed ? 'zz' : 'zzz'), render: (r) => (
@@ -265,7 +272,7 @@ function Ipam({ scope, onScope }) {
         ))}
       </nav>
       {denied ? <div className="banner warn" role="status" style={{ marginBottom: 8 }}>{denied}</div>
-      : view === 'scan' ? <IpScanSettings asPage />
+      : view === 'scan' ? <IpScanSettings asPage onSaved={() => setReload((n) => n + 1)} />
       : view === 'status' ? <ScanStatusModal asPage />
       : view === 'log' ? <IpamScanLog />
       : view === 'ipms' ? <IpmsSettings asPage />
@@ -414,6 +421,11 @@ function Ipam({ scope, onScope }) {
           ))}
         </div>
   )}
+          {(data?.scanByDatacenter || []).length > 0 && (
+            <div className="muted" style={{ fontSize: 12, marginBottom: 8 }} title="스캔으로만 확인된 IP 를, 스캔한 에이전트의 데이터센터로 나눈 개수입니다(IP 스캔 설정의 데이터센터 — 직접 지정 또는 자동).">
+              🛰 스캔 IP 데이터센터별: {data.scanByDatacenter.map((x) => `${x.datacenterId ? x.datacenterName : '미정'} ${x.count}`).join(' · ')}
+            </div>
+          )}
           <div className="flex between wrap gap" style={{ marginBottom: 8, alignItems: 'center' }}>
             {/* 검색창 강조 — 사용자 요청: 대장에서 가장 많이 쓰는 입력인데 다른 버튼들 사이에 묻혀
                 눈에 안 띔. 빨간 테두리 + 은은한 글로우로 시선 유도(값 입력과 무관한 정적 스타일). */}

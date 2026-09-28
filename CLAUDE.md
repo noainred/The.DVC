@@ -4235,6 +4235,23 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - GET 은 `invalidSaved`(검사 전 저장분)·`orphanVcenters`(삭제된 vCenter 에 남은 키 — 전체 범위만)를 싣는다. 화면 선택기가 그 키를 보여 줘야
       지울 수 있다. ⚠ JSDoc 안에 별표 두 개 + 슬래시(굵게 표기의 /0)를 쓰지 말 것 — 블록 주석이 거기서 끝난다(이번에도 밟았다).
     - 화면은 `r.reason` 을 읽는다(`putJson` 은 400 을 던지지 않고 본문을 돌려준다 — 예전 `r.error` 만 읽어 '저장 실패' 로 뭉개졌다).
+  - ⚠⚠ **스캔 IP 의 데이터센터 귀속은 '수동 지정 > 후보가 하나일 때만 자동' 이다 — 지어내지 않는다**(v2.638, 사용자 요청
+    "scan 한 데이터를 할당 에이전트가 속한 데이터센터에 자동으로" + "agent 가 속한 idrac/vcenter 에서 사용중인 ip 대역을 /24 로 골라 추가" +
+    "csv import/export". 선택: 수동 지정 + 자동 · 전체 검증. `server/src/ipam/scanDatacenter.js`(순수 판정·제안) · `scanDatacenterSource.js`
+    (입력 10초 메모 — ledger 가 import) · `scanSuggestSource.js`(iDRAC 입력 — **라우트 전용**, ledger 가 iDRAC 등록부를 끌어오지 않게 나눴다) ·
+    `GET /admin/ipam/scan/suggest` + 웹 `ipScanDcText.js`. 회귀 `server/test/ipScanDc2638.test.js`(변이: vCenter 조회 필터를 지우면 실패)):
+    - '에이전트가 수집하는 vCenter' = 등록부 collectMode 'site' + remoteAgent(없으면 스냅샷 collectedBy), 이름은 대소문자 무시 + 수집 서버 id·name 별칭.
+      이 포탈(`__local__`)은 site 가 아닌 vCenter. **비활성 vCenter 는 근거가 아니다.** 후보 = 그 vCenter 들의 DataCenter 할당 + 같은 이름 수집 서버의 datacenter(이름으로도 찾는다).
+    - 후보 0·2개 이상·삭제된 수동 값(`manual-missing`)은 **귀속하지 않고** 사유·후보를 화면이 말한다. 자동으로 바꿔 채우지 말 것.
+    - 대장 스캔 행에 `datacenterId`·`datacenterName`·`dcSource`·`scanAgent` + 요약 `scanByDatacenter`. **vcenterName('(네트워크 스캔)')과 ipam.db 열은 그대로**
+      (외부 리더 계약 — v2.619 입력 지문도 무변경). vCenter 를 고른 조회는 **다른 데이터센터에 귀속된** 스캔 행만 뺀다(귀속 없음은 예전처럼 보인다).
+      범위 계정에는 여전히 스캔 행을 주지 않는다 — 데이터센터 귀속은 vCenter 귀속이 아니다.
+    - 캐시: ledger `_ipamKey` 와 `/tools/ipam` memo extraKey 에 귀속 지문(`|d…`)이 붙는다 — 빼면 저장 뒤 스냅샷 세대(30초)·TTL 동안 옛 귀속이 보인다.
+      스캔 설정 저장은 `invalidateScanDatacenters()` 를 부르고 화면은 `onSaved` 로 대장을 다시 읽는다(Chromium 검증에서 **대장이 저장 전 값을 보이던 것**을 잡았다).
+    - /24 제안은 스냅샷·등록부·엣지 export 마지막 사본만 읽는다(장비 왕복 0). 이름 등록 호스트·iDRAC 은 개수만(`skipped`), 상한 1,024 는 `omitted`.
+      '이미 입력됨' 판정은 **저장하지 않은 입력** 기준이라 웹이 한다(대역 문법은 `ipmsRangeText.js` 하나).
+    - ⚠ 정직 기록: 실제 엣지(에이전트 이름 ≠ 수집 서버 id 인 현장)로는 확인하지 못했다 — 목 스택에 등록부를 심어 확인했다.
+
   - ⚠⚠ **IP관리 서브메뉴(v2.636) — 설정은 대장 로딩과 무관한 페이지이고, 입력은 편집 초안에 남는다**
     (`web/src/views/tools/`{ipamPages.js·ipamDraft.js·useIpamDraft.js·IpamDraftBanner.jsx·IpamCsv.jsx·IpamScanLog.jsx·ipamCsvChunk.js·
     ipamCsvText.js·ipamScanLogText.js} + 서버 `ipam/`{scanLog.js·manageCsv.js·scanRangesCsv.js}, 사용자 요청 "IP scan 을 위한 입력/수정이

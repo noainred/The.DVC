@@ -256,7 +256,8 @@ test('BUG-4 — 스토리지 화면 각주는 주기 숫자를 박지 않고 서
 test('TUNE-1/2/3 — /tools/ipam·/tools/esxi-temp 는 memoJson + 범위 키(+원장 리비전) 이고 ?q 는 서버가 거른다', () => {
   const ipam = code('routes/api/ipamExport.js');
   assert.ok(/api\.get\('\/tools\/ipam', requirePerm\('tools'\), \(req, res\) => memoJson\(req, res, 'tools-ipam'/.test(ipam));
-  assert.ok(/extraKey: `\$\{scopeKey\(req\.user, store\.get\(\)\)\}\|\$\{ipamRevKey\(\)\}`/.test(ipam), '범위 + 원장 리비전이 캐시 키에 들어간다');
+  // v2.638: 뒤에 스캔 데이터센터 귀속 지문(|d…)이 붙는다 — 범위·원장 리비전이 앞에 그대로 있는지만 본다.
+  assert.ok(/extraKey: `\$\{scopeKey\(req\.user, store\.get\(\)\)\}\|\$\{ipamRevKey\(\)\}(`|\|d\$\{currentScanDatacenters\(store\.get\(\)\.vcenters\)\.sig\}`)/.test(ipam), '범위 + 원장 리비전이 캐시 키에 들어간다');
   assert.ok(/req\.query\.q/.test(ipam) && /truncated/.test(ipam));
   const cap = code('routes/api/toolsCapacity.js');
   assert.ok(/api\.get\('\/tools\/esxi-temp', requirePerm\('tools'\), \(req, res\) => memoJson\(req, res, 'tools-esxi-temp'/.test(cap));
