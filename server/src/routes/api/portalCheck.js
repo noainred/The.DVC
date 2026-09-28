@@ -68,6 +68,8 @@ import { memoJson } from './shared.js';
 import { snapCacheClear } from '../../util/snapCache.js';
 import { currentVersion } from '../../config.js';
 import { gatherArchInputs, scanArch, scopeArchPaths, ARCH_CODES, ARCH_STATES } from '../../portalcheck/archScan.js';
+// v2.636 — 코드 감사(네 번째 서브메뉴): 감사 결과 카탈로그(codeAudit.json) + 앵커 존재 확인. 왕복 0.
+import { buildCodeAuditReport } from '../../portalcheck/codeAudit.js';
 
 // vc 별 위임 여부만 필요하다 — redact() 는 이미 password 를 뺀다(vcenter/registry.js:45).
 // v2.575 IMP-11: store.js 의 값을 그대로 쓴다(두 벌이면 판정 기준이 조용히 갈린다).
@@ -334,6 +336,15 @@ api.post('/tools/portal-check/arch/run', adminOnly, fullScopeOnly, async (req, r
     res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) });
   }
 });
+
+/**
+ * 네 번째 서브메뉴 — 코드 감사(v2.636). 감사 결과 카탈로그(`portalcheck/codeAudit.json` — `docs/AUDIT-2026-09-28.md` 의 원천)를
+ * 내리고, 발견마다 **앵커(코드 조각)가 이 설치본의 소스에 아직 있는지** 확인한다. 왕복 0(파일 40개 읽기) · 폴링 금지 ·
+ * `memoJson` 60초. 절대 경로는 싣지 않는다(`file` 은 저장소 상대 경로). 게이트는 형제 서브메뉴와 같다(전 파일 경로·결함 상세).
+ */
+const CODE_AUDIT_MEMO = 'portal-check:code-audit';
+const CODE_AUDIT_TTL_MS = 60_000;
+api.get('/tools/portal-check/code-audit', adminOnly, fullScopeOnly, (req, res) => memoJson(req, res, CODE_AUDIT_MEMO, async () => ({ ...buildCodeAuditReport(), at: Date.now(), serverVersion: safe(() => currentVersion(), '') }), { ttlMs: CODE_AUDIT_TTL_MS, extraKey: `role=${req.user?.role || ''}` }));
 
 /**
  * 두 번째 서브메뉴 — 인벤토리 점검(v2.570).
