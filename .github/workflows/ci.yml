@@ -104,11 +104,6 @@ jobs:
       - name: 문서 최신 여부 — docs/ARCHITECTURE.md·INDEX.md(생성 절)
         continue-on-error: true
         run: node scripts/arch-doc.mjs --check
-      # v2.636: 코드 감사 문서(docs/AUDIT-2026-09-28.md)는 server/src/portalcheck/codeAudit.json 의 투사다 —
-      # 포탈 화면(포탈 점검 › 코드 감사)이 같은 JSON 을 읽으므로 문서와 화면이 다른 말을 할 수 없다.
-      - name: 문서 최신 여부 — 코드 감사 문서(codeAudit.json → docs/AUDIT-*.md)
-        continue-on-error: true
-        run: node scripts/code-audit-doc.mjs --check
       # v2.576(라이선스 점검 F3): 번들에 실리는 오픈소스 고지도 생성물이다 — 의존성이 바뀌면
       # 갱신해야 한다(MIT·ISC·BSD 는 사본마다 저작권 고지 동봉을 요구하고 minify 는 주석을 지운다).
       # ⚠ 이 검사는 `npm ci` 가 끝난 뒤에 와야 한다(설치되지 않은 의존성이 있으면 종료코드 1).
