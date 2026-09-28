@@ -116,6 +116,7 @@ import { startSanSwitchPerfPoller } from './sanswitch/perfPoller.js';    // 〃 
 import { startSanSwitchPerfPush } from './sanswitch/perfPush.js';        // 〃 엣지→중앙 포트 사용량 시계열 중계(v2.423)
 import { startRelayCheckPoller } from './relaycheck/poller.js';          // HAProxy 경로 점검(v2.429)
 import { startBmstorPoller } from './bmstor/poller.js';           // 베어메탈 스토리지(SSH df, v2.340)
+import { startBmstorHistory } from './bmstor/historySampler.js';  // 〃 디스크 사용량 12시간 이력(v2.635) — 별도 DB, 장비 접속 없음
 import { startBmstorWorker } from './agent/bmstorWorker.js';       // 〃 폴링 위임 워커(엣지, v2.341)
 import { startVmtrackPoller } from './vmtrack/poller.js';          // VM 수량 추이 00/12시 스냅샷(v2.345)
 import { startGuestDiskPoller } from './guestdisk/poller.js';       // 게스트 디스크 회수 리포트(v2.459)
@@ -530,6 +531,7 @@ const stagger = [
   startSanSwitchPerfPush,   // 〃 엣지→중앙 중계(v2.423) — CENTRAL_URL 미설정이면 자기기동 안 함, 커서 방식
   startRelayCheckPoller,    // HAProxy 경로 점검(v2.429) — 설정 꺼짐이면 틱만 돌고 아무것도 안 함
   startBmstorPoller, // 베어메탈 스토리지(v2.340) — 30초 틱 + 재진입 가드, 등록 0대면 대기
+  startBmstorHistory, // 〃 12시간 이력(v2.635) — 60초 틱 + 재진입 가드, 슬롯당 1회(부분 합이면 새 수집마다 보강)
   startBmstorWorker, // 〃 폴링 위임 워커(v2.341) — CENTRAL_URL 미설정이면 자기기동 안 함
   startVmtrackPoller, // VM 수량 추이(v2.345) — 60초 틱, 슬롯(00/12시) 미기록 시에만 수집 + 재진입 가드
   startDirUsageScheduler, // 폴더 사용량 Top-N 리포트(v2.454) — 60초 틱 + 재진입 가드, 설정 꺼짐이면 결과 수거만

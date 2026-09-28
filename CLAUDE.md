@@ -4208,6 +4208,23 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 응답 `staleMsMax`(실제로 쓴 최대 경계)를 화면이 말한다 — '15분' 이라 적고 41분을 쓰면 거짓이다.
     - ⚠ 정직 기록: 운영 포탈의 실제 주기 소요는 보지 못했다(추정). 서비스 점검 'iDRAC 폴 주기' 행이 그 값을 보여준다 —
       주기가 짧은데도 계속 비면 다른 원인이다. `lastRun.at` 은 호환을 위해 여전히 주기 **시작** 시각이다(`finishedAt` 별도).
+  - ⚠⚠ **v2.635 — 베어메탈 스토리지 디스크 사용량 12시간 이력. 새 수집이 아니라 '최신 결과를 떼어 적재' 한다**
+    (`server/src/bmstor/`{history.js(순수 판정),historyDb.js(`bmstor-history.db`),historySampler.js} + `GET /tools/bm-storage/history` +
+    웹 `views/tools/BmStorHistoryPanel.jsx`·`bmStorHistoryText.js`, 사용자 요청 "서버별 그룹별 디스크 사용량과 합을 12시간마다 별도의 DB 에
+    저장해서 1일/7일/1달/반기/분기 차트". 회귀 `server/test/bmstorHistory2635.test.js` + 웹 `bmStorHistoryText.test.js`):
+    - **장비에 다시 접속하지 않는다** — `poller.js` 의 `getBmLatest()` 를 12시간 슬롯(KST 0시·12시, `slotOf`)마다 한 번 적재한다. 합산 판정은
+      `agg.js aggregate` 를 그대로 쓴다(복제 금지). 폴러가 기동 뒤 한 번도 돌지 않았으면 적재하지 않는다(재시작 직후 0 바이트 금지).
+    - ⚠⚠ **낡은 값·부분 합의 규칙**: 수집 시각이 `freshMsFor`(폴러 주기 × 3, 최소 30분)를 넘긴 서버는 못 읽은 것으로 세고, 그 그룹·합계는
+      `partial`(+`read`/`servers`)로 적재한다. 한 대도 못 읽었으면 행을 만들지 않는다. 화면은 부분 합 점을 **선으로 잇지 않고 속이 빈 점**으로
+      둔다(부분 합 = 거짓 하락, v2.606 규약). 기간 변화도 온전한 점만으로 계산한다.
+    - 같은 슬롯에서는 **더 온전한 값만 덮는다**(DB 의 `ON CONFLICT … WHERE`) — 부분 합이면 폴러가 새로 수집할 때마다 다시 시도하고, 온전한 합이
+      들어가면 그 슬롯은 끝난다. 재시작 뒤에도 DB 의 슬롯 기록을 보고 다시 적재하지 않는다(`totalOfSlot`).
+    - 행 수: 41계열 × 2회/일 × 5년 ≈ 15만 행(보존 `BMSTOR_HISTORY_RETENTION_DAYS` 기본 1825, 0 = 전부 보관, 빈 값은 미지정). `ts` 단독 인덱스 ·
+      청크 prune 6시간마다(첫 틱 제외) · `insights/dbLocation.js MIGRATABLE` 등재 · `edgelog/spec.js`·`health/services.js MODS` 등재.
+    - ⚠ **SVG viewBox 는 실제 폭으로**(`useWidth` ResizeObserver) — 고정 640 이면 1440px 한 칸 차트에서 글자·선이 2배로 커졌다(스크린샷 판독에서
+      발견). 점이 90개를 넘으면 온전한 점은 찍지 않는다(반기 360점이 굵은 띠가 된다) — 부분 합 점은 항상 찍는다.
+    - ⚠ 12시간 간격이라 '1일' 차트는 점이 최대 3개다 — `pointsNote` 가 그 사실을 말한다. 기간 앞부분이 빈 이유는 단정하지 않는다(`spanNote`).
+    - ⚠ 정직 기록: Chromium 검증은 합성 이력(201슬롯 · 빈 구간 · 부분 합 1회)을 심은 목 서버로 했다 — 실장비 수집으로 쌓인 이력은 보지 못했다.
   - **상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다**(v2.592 — 사용자 요청 "인싸이트를 특수기능으로
     이동해줘"): 상단 '인사이트' 탭(`views/Insights.jsx`, FinOps 등 7패널)은 특수 기능 카드 **`insights-hub`**
     (`#/tools/insights-hub/<패널>`)가 됐다. ⚠⚠ **기존 카드 `insights`(운영 인사이트 — `tools/InsightsThreats.jsx`)는

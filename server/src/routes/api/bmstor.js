@@ -7,6 +7,9 @@ import { getBmLatest, bmCollectNow, bmPollerStatus } from '../../bmstor/poller.j
 import { aggregate } from '../../bmstor/agg.js';
 import { bmServersToCsv, sampleCsv as bmSampleCsv, parseBmServersCsv, analyzeBmServersImport } from '../../bmstor/csv.js';
 import { listCollectors } from '../../collector/registry.js';
+import { bmHistoryStatus } from '../../bmstor/historySampler.js';
+import { bmHistoryRange, bmHistoryDbStatus } from '../../bmstor/historyDb.js';
+import { historyPeriodOf, seriesFromRows, HISTORY_PERIODS } from '../../bmstor/history.js';
 import { requireSettingsOwner, fullScopeOnlyWith } from '../admin/shared.js';
 
 const adminOnly = requireRole('admin');
@@ -23,6 +26,27 @@ export function registerBmStorage(api) {
       config: servers, // 편집 폼용 원본(마운트 목록 포함, 비밀번호는 hasPassword 만)
       settings: getBmSettings(), status: bmPollerStatus(),
       agents: listCollectors().map((c) => c.id), // 위임 가능한 엣지(수집 서버) 이름 목록
+    });
+  });
+
+  /*
+   * 디스크 사용량 이력(v2.635, 사용자 요청 — 12시간마다 별도 DB 에 적재 · 1일/7일/1달/분기/반기 차트).
+   * 폴링하지 않는 화면이 기간을 바꿀 때만 부른다. kind(total|group|server)로 좁힐 수 있다.
+   * 이 DB 에는 호스트 주소를 저장하지 않는다(서버 id·이름·용량 수치뿐) — 게이트는 형제 라우트와 같다.
+   */
+  api.get('/tools/bm-storage/history', adminOnly, fullScopeOnly, async (req, res) => {
+    const period = historyPeriodOf(String(req.query.period || ''));
+    const kindQ = String(req.query.kind || '');
+    const kind = ['total', 'group', 'server'].includes(kindQ) ? kindQ : null;
+    const to = Date.now();
+    const from = to - period.days * 86_400_000;
+    const r = await bmHistoryRange(from, to, { kind });
+    const db = await bmHistoryDbStatus();
+    res.json({
+      ok: true, available: r.available, period: period.key, periods: HISTORY_PERIODS, from, to, kind,
+      series: seriesFromRows(r.rows, { servers: listBmServers() }),
+      span: r.span, status: bmHistoryStatus(),
+      dbError: r.available ? '' : (db.error || 'node:sqlite 를 쓸 수 없습니다'),
     });
   });
 

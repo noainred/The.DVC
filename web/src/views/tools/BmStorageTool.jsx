@@ -13,6 +13,7 @@ import BoldText from '../../components/boldText.jsx';
 import { authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
+import BmStorHistoryPanel from './BmStorHistoryPanel.jsx'; // v2.635: 디스크 사용량 12시간 이력 차트
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
@@ -158,6 +159,9 @@ export default function BmStorageTool() {
         <Kpi label="사용량" value={fmtBytes(total.usedBytes)} pct={total.usedPct == null ? undefined : Math.round(total.usedPct)} />
         <Kpi label="사용 가능" value={fmtBytes(total.availBytes)} />
       </div>
+
+      {/* v2.635(사용자 요청): 서버·그룹·합계 디스크 사용량 추이 — 12시간마다 별도 DB 에 쌓인 기록. 폴링하지 않는다. */}
+      {servers.length > 0 && <BmStorHistoryPanel />}
 
       {/* 그룹 합산 — 그룹을 지정한 서버들의 디스크 사용량이 합산되어 표시(사용자 요구) */}
       {groups.length > 0 && servers.length > 0 && (

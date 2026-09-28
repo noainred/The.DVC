@@ -42,6 +42,7 @@ import * as m_vmSeriesPoller from '../vmseries/poller.js';
 import * as m_vmtrackPoller from '../vmtrack/poller.js';
 import * as m_guestDiskPoller from '../guestdisk/poller.js';
 import * as m_bmstorPoller from '../bmstor/poller.js';
+import * as m_bmstorHistory from '../bmstor/historySampler.js';
 import * as m_metricsSampler from '../metrics/sampler.js';
 import * as m_ipamScanPoller from '../ipam/scanPoller.js';
 import * as m_osScanner from '../inventory/osScanner.js';
@@ -80,6 +81,7 @@ const MODS = Object.freeze({
   '../vmtrack/poller.js': m_vmtrackPoller,
   '../guestdisk/poller.js': m_guestDiskPoller,
   '../bmstor/poller.js': m_bmstorPoller,
+  '../bmstor/historySampler.js': m_bmstorHistory,
   '../metrics/sampler.js': m_metricsSampler,
   '../ipam/scanPoller.js': m_ipamScanPoller,
   '../inventory/osScanner.js': m_osScanner,
