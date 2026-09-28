@@ -18,6 +18,7 @@ import { buildNetmap } from '../../ipam/netmap.js';
 import { listVcRanges } from '../../ipam/rangeStore.js';
 import { vcRangesToCsv } from '../../ipam/vcRangesCsv.js';
 import { rangeSize } from '../../ipam/scan.js';
+import { checkRangeSpec } from '../../ipam/rangeSyntax.js'; // v2.639: 저장된 옛 값 중 이제 무효인 줄을 밝힌다
 import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany } from '../../ipam/annotations.js';
 import { getOverride, setOverride, clearOverride, setOverrideBatch, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany } from '../../ipam/overrides.js';
 import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANAGE_CHUNK_MAX } from '../../ipam/manageCsv.js';
@@ -176,10 +177,17 @@ api.get('/tools/ipam/vc-ranges', requirePerm('tools'), (req, res) => {
   const allowed = scopedVcenterIds(req.user, snap);   // 범위 밖 vCenter id·name 열거 차단
   const vcName = {};
   for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
-  const list = listVcRanges().filter((e) => !allowed || allowed.has(e.vcenterId)).map((e) => ({
-    ...e, vcenterName: vcName[e.vcenterId] || e.vcenterId,
-    ipCount: e.ranges.reduce((a, s) => a + rangeSize(s), 0),
-  }));
+  const list = listVcRanges().filter((e) => !allowed || allowed.has(e.vcenterId)).map((e) => {
+    // v2.639: 판정이 하나로 엄격해져(rangeSyntax) 예전에 저장된 줄(예: `10.0.0.250-300`)이 이제 스캔되지 않을 수 있다 —
+    //   rangeSize 0 으로 조용히 빠지지 않게 `invalid:[{value,reason}]` 로 밝힌다(설정 화면의 invalidSaved 와 같은 뜻).
+    const invalid = [];
+    for (const s of e.ranges || []) { const r = checkRangeSpec(s, { reversed: 'error' }); if (!r.ok) invalid.push({ value: String(s).slice(0, 80), reason: r.reason }); }
+    return {
+      ...e, vcenterName: vcName[e.vcenterId] || e.vcenterId,
+      ipCount: (e.ranges || []).reduce((a, s) => a + rangeSize(s), 0),
+      ...(invalid.length ? { invalid } : {}),
+    };
+  });
   // 등록 안 된 vCenter도 선택할 수 있게 (허용 범위 내) vCenter 목록을 함께 내려준다.
   res.json({ ranges: list, vcenters: (snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id)).map((v) => ({ id: v.id, name: v.name })) });
 });

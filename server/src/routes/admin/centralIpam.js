@@ -1,6 +1,6 @@
 // IPAM 설정/스캔/대역 — admin.js(구 2,410줄) 분할(v2.285.0). v2.639: 중앙 토큰·개별 토큰·위임 인벤토리·수신 통계 라우트 10개는
 //   routes/admin/centralTokens.js 로 분리했다(이 파일은 IPAM 전용). 등록 순서는 admin.js 호출 순서가 보존한다.
-import { config } from '../../config.js';
+import { config, loadVcenterConfig } from '../../config.js';
 import { ledgerInfo } from '../../ipam/db.js';
 import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries } from '../../ipam/settings.js';
 import { checkRangeList } from '../../ipam/rangeSyntax.js';
@@ -10,7 +10,7 @@ import { loadScanSettings, saveScanSettings, scanResultList, scanInfo, listScanA
 import { startScan, scanStatus, rescheduleScanPoller } from '../../ipam/scanPoller.js';
 import { recordScanLog, listScanLog, SCAN_LOG_EVENTS } from '../../ipam/scanLog.js'; // v2.636: 스캔 실행 로그
 import { scanRangesToCsv, scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport, LOCAL_AGENT } from '../../ipam/scanRangesCsv.js'; // v2.636: 에이전트별 스캔 대역 CSV
-import { rangeSize, RANGE_CAP } from '../../ipam/scan.js';
+import { RANGE_CAP } from '../../ipam/scan.js';
 import { agentVcenterIds, suggestAgentSubnets } from '../../ipam/scanDatacenter.js'; // v2.638: 데이터센터 귀속 · /24 대역 제안
 import { currentScanDatacenters, invalidateScanDatacenters, scanDatacenterOf } from '../../ipam/scanDatacenterSource.js';
 import { agentIdracServers } from '../../ipam/scanSuggestSource.js';
@@ -18,10 +18,9 @@ import { listDatacenters } from '../../datacenter/store.js';
 import { todayStamp } from '../../util/dayKey.js';
 import { saveVcRanges, removeVcRanges, listVcRanges } from '../../ipam/rangeStore.js';
 import { sampleCsv as vcRangesSampleCsv, parseVcRangesCsv, analyzeVcRangesImport } from '../../ipam/vcRangesCsv.js';
-import { loadVcenterConfig } from '../../config.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../../central/assignments.js';
 import { listCollectors } from '../../collector/registry.js';
-import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js';
@@ -145,12 +144,21 @@ adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => {
     try { dcs = listDatacenters(); } catch { /* 아래에서 거부 */ }
     if (!dcs.some((d) => d.id === want)) return res.status(400).json({ ok: false, reason: `등록되지 않은 DataCenter 입니다: ${want.slice(0, 64)} — 설정 › DataCenter 에서 먼저 등록하거나 '자동' 을 고르세요.` });
   }
+  // v2.639: 대역 문법은 형제 PUT /ipam/vc-ranges 와 같은 판정(checkRangeList — 뒤집힌 범위 오류·스캔 상한 경고)으로 검사한다.
+  //   예전에는 검사 0(saveScanSettings 는 trim 뿐)이라 `10.0.0.0/24.5`·`10.0.0.250-300` 이 저장되고, 엣지가 그 줄을 느슨한 파서로
+  //   스캔한 뒤 중앙 `/ip-scan-result` 가 specToRange null 로 전부 409 거부했다. 나누는 규칙([\n,])은 saveScanSettings 와 같다.
+  let check = null;
+  if (req.body && req.body.ranges !== undefined) {
+    const raw = req.body.ranges;
+    check = checkRangeList(Array.isArray(raw) ? raw : String(raw ?? '').split(/[\n,]/), { reversed: 'error', scanCap: RANGE_CAP });
+    if (check.invalid.length) return invalidReply(res, check.invalid.map((x) => ({ field: 'ranges', agent, ...x })));
+  }
   const settings = saveScanSettings(agent, req.body || {});
   invalidateScanDatacenters();
   if (agent === LOCAL) rescheduleScanPoller(); // 로컬 설정만 이 포탈 폴러에 적용
   recordScanLog({ event: 'settings', agent, user: req.user?.username, ranges: (settings.ranges || []).length, rangesSample: (settings.ranges || []).slice(0, 5),
     message: `IP 스캔 설정 저장 — ${settings.enabled ? '주기 스캔 켬' : '주기 스캔 끔'} · 주기 ${Math.round((settings.intervalMs || 0) / 60000)}분 · 포트 ${(settings.ports || []).length}개` });
-  res.json({ ok: true, agent, settings, status: scanStatus(), ...scanDatacenterView(agent) });
+  res.json({ ok: true, agent, settings, status: scanStatus(), ...(check?.warnings.length ? { warnings: check.warnings.slice(0, 50) } : {}), ...scanDatacenterView(agent) });
 });
 // v2.638: 에이전트가 쓰는 /24 대역 제안 — 그 에이전트가 수집하는 vCenter 의 VM·호스트 IP + 담당 iDRAC 관리 IP(스냅샷·등록부만 읽는다 — 장비 왕복 0).
 adminRouter.get('/ipam/scan/suggest', adminOnly, fleetOnly, (req, res) => {
@@ -211,7 +219,7 @@ adminRouter.post('/ipam/scan/ranges/import', adminOnly, fleetOnly, (req, res) =>
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
   const mode = req.body?.mode === 'add' ? 'add' : 'replace';
-  const { report, summary, plans } = analyzeScanRangesImport(rows, { mode, current: scanRangesCurrent(), rangeSize, rangeCap: RANGE_CAP });
+  const { report, summary, plans } = analyzeScanRangesImport(rows, { mode, current: scanRangesCurrent(), rangeCap: RANGE_CAP });
   const changing = plans.filter((p) => !p.blocked && (p.added.length || p.removed.length));
   if (req.body?.dryRun) return res.json({ ok: true, dryRun: true, mode, report, summary, plans, total: rows.length });
   const applied = []; const failed = [];

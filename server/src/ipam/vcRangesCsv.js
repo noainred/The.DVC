@@ -9,12 +9,13 @@
  * CSV 도 vCenter 당 1행이고, 가져오기 커밋은 그 vCenter 의 대역 전체를 CSV 값으로 교체한다
  * (saveVcRanges 의 기존 계약과 동일).
  *
- * 대역 문법은 실제 스캐너와 같은 파서(scan.js rangeSize — CIDR/범위/단일 IP)를 검증기로
- * 재사용해, 드라이런 통과 = 주기 스캔이 실제로 해석 가능함을 보장한다.
+ * 대역 문법은 저장 라우트(PUT /admin/ipam/vc-ranges)·스캐너와 **같은 판정**(`rangeSyntax.checkRangeSpec`,
+ * 뒤집힌 범위 오류)으로 검증해, 드라이런 통과 = 주기 스캔이 실제로 해석 가능함을 보장한다. v2.639 까지는 느슨한
+ * `scan.js rangeSize` 만 봐서 PUT 이 거부하는 줄(`10.0.0.0/24.5`·`10.0.0.250-300`)을 CSV 는 저장했다.
  */
 
 import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../util/csv.js';
-import { rangeSize } from './scan.js';
+import { checkRangeSpec } from './rangeSyntax.js';
 
 export const CSV_COLUMNS = ['vcenter', 'ranges', 'enabled'];
 
@@ -104,8 +105,10 @@ export function analyzeVcRangesImport(rows, { resolveVc, hasExisting }) {
       vcId = resolveVc(row.vcenter);
       if (!vcId) reason = `알 수 없는 vCenter: '${row.vcenter}' (등록된 vCenter 이름 또는 ID 여야 함)`;
       else {
-        const bad = row.ranges.find((s) => rangeSize(s) <= 0); // 스캐너와 같은 파서로 문법 검증
-        if (bad !== undefined) reason = `대역 문법 오류: '${bad}' (CIDR/범위/단일 IP 형식이 아님)`;
+        // 저장 라우트·스캐너와 같은 판정 — 첫 오류 줄의 사유(checkRangeSpec.reason)를 그대로 싣는다(v2.639).
+        let badReason = null;
+        const bad = row.ranges.find((s) => { const r = checkRangeSpec(s, { reversed: 'error' }); if (!r.ok) badReason = r.reason; return !r.ok; });
+        if (bad !== undefined) reason = `대역 문법 오류: '${bad}' (${badReason})`;
       }
     }
     if (!reason) {

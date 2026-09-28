@@ -147,7 +147,7 @@ test('CEN-2599-04 — agent-config 는 엣지당 합계 상한을 넘는 파일�
 // ── EDGE2599-03: 소유권 — 자동 인계 기본 꺼짐 + 관리자 명시 해제/지정 ────────
 test('EDGE2599-03 — 자동 인계는 기본 꺼짐(8일 조용해도 403)이고, 관리자 해제 뒤 다음 개별 토큰 push 가 새 소유가 된다', async () => {
   const express = (await import('express')).default;
-  const { registerCentralIpam } = await import('../src/routes/admin/centralIpam.js');
+  const { registerCentralTokens } = await import('../src/routes/admin/centralTokens.js'); // v2.639: /central/inventory/owner 는 centralIpam.js 에서 분리됐다
   const { issueAgentToken } = await import('../src/central/agentTokens.js');
   const { getInventory } = await import('../src/central/inventory.js');
   const A = issueAgentToken('edgeA').token; const B = issueAgentToken('edgeB').token;
@@ -160,7 +160,7 @@ test('EDGE2599-03 — 자동 인계는 기본 꺼짐(8일 조용해도 403)이�
   // 관리자 API — 실제 라우터를 띄운다(role 은 앞단 인증 미들웨어가 채우는 req.user 를 흉내낸다)
   const app = express(); app.use(express.json());
   app.use((req, _res, next) => { req.user = { username: req.get('X-Test-User'), role: req.get('X-Test-Role') }; next(); });
-  const r = express.Router(); registerCentralIpam(r); app.use('/api/admin', r);
+  const r = express.Router(); registerCentralTokens(r); app.use('/api/admin', r);
   const asrv = await new Promise((ok) => { const s2 = app.listen(0, '127.0.0.1', () => ok(s2)); });
   const call = (role, b) => fetch(`http://127.0.0.1:${asrv.address().port}/api/admin/central/inventory/owner`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Test-Role': role, 'X-Test-User': 'u1' }, body: JSON.stringify(b),
