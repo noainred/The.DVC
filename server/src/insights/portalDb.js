@@ -82,6 +82,7 @@ const PURPOSES = {
   'bm-usage.db': '베어메탈 사용률(CPU·메모리·디스크·네트워크·HBA) 원시 90일 + 일 롤업(v2.550)',
   'link-check.db': '통신 점검 이력(중앙↔엣지·vCenter 링크 표본·이벤트·일 롤업, v2.552)',
   'cvp.db': 'Arista CloudVision(CVP) 네트워크 스위치 — 장비·포트 최신값·포트 사용량 이력(v2.608)',
+  'bmstor-history.db': '베어메탈 스토리지 디스크 사용량 12시간 이력 — 서버·그룹·합계(v2.635)',
   // ── v2.613 PERSIST2613-02: 신규 기능의 설정·등록부 JSON(화면에서 편집 — 백업 대상).
   'storage-devices.json': '스토리지 장비 등록부(호스트·계정·수집 방식·담당 엣지 — 비밀번호 봉인)',
   'sanswitch-devices.json': 'SAN 스위치 등록부(호스트·계정·담당 엣지 — 비밀번호 봉인)',

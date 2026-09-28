@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **557개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **561개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-28)
@@ -235,12 +235,16 @@
 |---|---|---|---|
 | `BACKUP_STARTUP_DELAY_MS` |  |  | backup/settings.js |
 
-## 베어메탈 스토리지 (4)
+## 베어메탈 스토리지 (8)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BMSTOR_ACK_GRACE_MS` | `60000` |  | bmstor/jobs.js |
 | `BMSTOR_CONCURRENCY` | `4` |  | bmstor/collect.js |
+| `BMSTOR_HISTORY` | `''` |  | bmstor/historySampler.js |
+| `BMSTOR_HISTORY_DB_PATH` |  |  | bmstor/historyDb.js |
+| `BMSTOR_HISTORY_INTERVAL_HOURS` |  |  | bmstor/history.js |
+| `BMSTOR_HISTORY_RETENTION_DAYS` |  |  | bmstor/history.js |
 | `BMSTOR_PUSH_TIMEOUT_MS` | `180000` |  | bmstor/poller.js |
 | `BMSTOR_SSH_TIMEOUT_MS` |  |  | bmstor/collect.js |
 
@@ -741,4 +745,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 557
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 561

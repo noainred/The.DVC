@@ -52,6 +52,7 @@ export const MIGRATABLE = [
   { file: 'part-faults.db', label: '물리 파트(부품) 장애 이력 — 열림/변화/해소 전이(v2.547)' },
   { file: 'bm-usage.db', label: '베어메탈 사용률(CPU·메모리·디스크·네트워크·HBA, v2.550)' },
   { file: 'link-check.db', label: '통신 점검 이력(중앙↔엣지·vCenter 링크, v2.552)' },
+  { file: 'bmstor-history.db', label: '베어메탈 스토리지 디스크 사용량 12시간 이력(서버·그룹·합계, v2.635)' },
   { file: 'cvp.db', label: 'Arista CloudVision(CVP) 네트워크 스위치 — 장비·포트 최신값·포트 사용량 이력(v2.608)' },
   // vcenter-logs.db 는 **이미 자체 경로 설정**(설정 › 로그 수집의 storagePath)이 있어 제외한다 —
   // 두 곳에서 경로를 제어하면 어느 쪽이 이겼는지 알 수 없다(그 화면에서 옮기세요).

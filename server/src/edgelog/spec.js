@@ -97,6 +97,7 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'collect.vmtrack', label: '추이 트래킹', group: 'collect', mod: '../vmtrack/poller.js', fn: 'vmtrackPollerStatus' },
   { key: 'collect.guestDisk', label: '게스트 디스크 수집', group: 'collect', mod: '../guestdisk/poller.js', fn: 'guestDiskPollerStatus' },
   { key: 'collect.bmstor', label: '베어메탈 스토리지', group: 'collect', mod: '../bmstor/poller.js', fn: 'bmPollerStatus' },
+  { key: 'collect.bmstorHistory', label: '베어메탈 스토리지 12시간 이력', group: 'collect', mod: '../bmstor/historySampler.js', fn: 'bmHistoryStatus' },
   { key: 'collect.metrics', label: '성능 샘플러', group: 'collect', mod: '../metrics/sampler.js', fn: 'metricsSamplerStatus' },
   { key: 'collect.ipamScan', label: 'IPAM 스캔', group: 'collect', mod: '../ipam/scanPoller.js', fn: 'scanStatus' },
   { key: 'collect.osScan', label: '게스트 OS 스캔', group: 'collect', mod: '../inventory/osScanner.js', fn: 'osScanStatus' },
