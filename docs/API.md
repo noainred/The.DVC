@@ -327,16 +327,16 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | PUT | `/backup/settings` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:102](../server/src/routes/admin/backupNetSec.js#L102) |
 | GET | `/backup/status` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:99](../server/src/routes/admin/backupNetSec.js#L99) |
 | GET | `/backup/view/:name` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/backupNetSec.js:116](../server/src/routes/admin/backupNetSec.js#L116) |
-| GET | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:80](../server/src/routes/admin/centralIpam.js#L80) |
-| PUT | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:109](../server/src/routes/admin/centralIpam.js#L109) |
-| POST | `/central-token/generate` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:104](../server/src/routes/admin/centralIpam.js#L104) |
-| GET | `/central/agent-tokens` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:122](../server/src/routes/admin/centralIpam.js#L122) |
-| POST | `/central/agent-tokens` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:125](../server/src/routes/admin/centralIpam.js#L125) |
-| DELETE | `/central/agent-tokens/:agent` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:131](../server/src/routes/admin/centralIpam.js#L131) |
-| GET | `/central/ingest-stats` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:100](../server/src/routes/admin/centralIpam.js#L100) |
-| POST | `/central/ingest-stats/reset` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:101](../server/src/routes/admin/centralIpam.js#L101) |
-| GET | `/central/inventory` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:82](../server/src/routes/admin/centralIpam.js#L82) |
-| POST | `/central/inventory/owner` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:87](../server/src/routes/admin/centralIpam.js#L87) |
+| GET | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:111](../server/src/routes/admin/centralIpam.js#L111) |
+| PUT | `/central-token` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:140](../server/src/routes/admin/centralIpam.js#L140) |
+| POST | `/central-token/generate` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:135](../server/src/routes/admin/centralIpam.js#L135) |
+| GET | `/central/agent-tokens` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:153](../server/src/routes/admin/centralIpam.js#L153) |
+| POST | `/central/agent-tokens` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:156](../server/src/routes/admin/centralIpam.js#L156) |
+| DELETE | `/central/agent-tokens/:agent` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/centralIpam.js:162](../server/src/routes/admin/centralIpam.js#L162) |
+| GET | `/central/ingest-stats` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:131](../server/src/routes/admin/centralIpam.js#L131) |
+| POST | `/central/ingest-stats/reset` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:132](../server/src/routes/admin/centralIpam.js#L132) |
+| GET | `/central/inventory` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:113](../server/src/routes/admin/centralIpam.js#L113) |
+| POST | `/central/inventory/owner` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:118](../server/src/routes/admin/centralIpam.js#L118) |
 | POST | `/certs/refresh` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:99](../server/src/routes/admin/opsSettings.js#L99) |
 | GET | `/codex-check` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:28](../server/src/routes/admin/statusTools.js#L28) |
 | GET | `/codex-check/file` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:31](../server/src/routes/admin/statusTools.js#L31) |
@@ -460,23 +460,23 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/idrac/temps` | 역할 `admin` | [server/src/routes/admin/idracCore.js:495](../server/src/routes/admin/idracCore.js#L495) |
 | POST | `/idrac/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:221](../server/src/routes/admin/idracCore.js#L221) |
 | GET | `/idrac/unsupported` | 역할 `admin` | [server/src/routes/admin/idracCore.js:486](../server/src/routes/admin/idracCore.js#L486) |
-| GET | `/ipam/db-info` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:40](../server/src/routes/admin/centralIpam.js#L40) |
-| GET | `/ipam/scan/log` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:166](../server/src/routes/admin/centralIpam.js#L166) |
-| GET | `/ipam/scan/ranges.csv` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:190](../server/src/routes/admin/centralIpam.js#L190) |
-| POST | `/ipam/scan/ranges/import` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:201](../server/src/routes/admin/centralIpam.js#L201) |
-| GET | `/ipam/scan/ranges/sample.csv` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:196](../server/src/routes/admin/centralIpam.js#L196) |
-| GET | `/ipam/scan/results` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:177](../server/src/routes/admin/centralIpam.js#L177) |
-| POST | `/ipam/scan/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:169](../server/src/routes/admin/centralIpam.js#L169) |
-| GET | `/ipam/scan/settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:139](../server/src/routes/admin/centralIpam.js#L139) |
-| PUT | `/ipam/scan/settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:157](../server/src/routes/admin/centralIpam.js#L157) |
-| GET | `/ipam/scan/status` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:174](../server/src/routes/admin/centralIpam.js#L174) |
-| GET | `/ipam/settings` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:56](../server/src/routes/admin/centralIpam.js#L56) |
-| PUT | `/ipam/settings` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:59](../server/src/routes/admin/centralIpam.js#L59) |
-| PUT | `/ipam/vc-ranges` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:225](../server/src/routes/admin/centralIpam.js#L225) |
-| DELETE | `/ipam/vc-ranges/:vcenterId` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:235](../server/src/routes/admin/centralIpam.js#L235) |
-| POST | `/ipam/vc-ranges/import` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:256](../server/src/routes/admin/centralIpam.js#L256) |
-| GET | `/ipam/vc-ranges/sample.csv` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:250](../server/src/routes/admin/centralIpam.js#L250) |
-| POST | `/ipam/vc-ranges/scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:241](../server/src/routes/admin/centralIpam.js#L241) |
+| GET | `/ipam/db-info` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:41](../server/src/routes/admin/centralIpam.js#L41) |
+| GET | `/ipam/scan/log` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:197](../server/src/routes/admin/centralIpam.js#L197) |
+| GET | `/ipam/scan/ranges.csv` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:221](../server/src/routes/admin/centralIpam.js#L221) |
+| POST | `/ipam/scan/ranges/import` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:232](../server/src/routes/admin/centralIpam.js#L232) |
+| GET | `/ipam/scan/ranges/sample.csv` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:227](../server/src/routes/admin/centralIpam.js#L227) |
+| GET | `/ipam/scan/results` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:208](../server/src/routes/admin/centralIpam.js#L208) |
+| POST | `/ipam/scan/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:200](../server/src/routes/admin/centralIpam.js#L200) |
+| GET | `/ipam/scan/settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:170](../server/src/routes/admin/centralIpam.js#L170) |
+| PUT | `/ipam/scan/settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:188](../server/src/routes/admin/centralIpam.js#L188) |
+| GET | `/ipam/scan/status` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:205](../server/src/routes/admin/centralIpam.js#L205) |
+| GET | `/ipam/settings` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:80](../server/src/routes/admin/centralIpam.js#L80) |
+| PUT | `/ipam/settings` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:84](../server/src/routes/admin/centralIpam.js#L84) |
+| PUT | `/ipam/vc-ranges` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:256](../server/src/routes/admin/centralIpam.js#L256) |
+| DELETE | `/ipam/vc-ranges/:vcenterId` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:274](../server/src/routes/admin/centralIpam.js#L274) |
+| POST | `/ipam/vc-ranges/import` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:295](../server/src/routes/admin/centralIpam.js#L295) |
+| GET | `/ipam/vc-ranges/sample.csv` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:289](../server/src/routes/admin/centralIpam.js#L289) |
+| POST | `/ipam/vc-ranges/scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:280](../server/src/routes/admin/centralIpam.js#L280) |
 | GET | `/llm-config` | 역할 `admin` | [server/src/routes/admin/deployLlm.js:518](../server/src/routes/admin/deployLlm.js#L518) |
 | PUT | `/llm-config` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/deployLlm.js:519](../server/src/routes/admin/deployLlm.js#L519) |
 | POST | `/llm-test` | 역할 `admin` | [server/src/routes/admin/deployLlm.js:523](../server/src/routes/admin/deployLlm.js#L523) |

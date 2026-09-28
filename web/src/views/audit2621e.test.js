@@ -99,7 +99,8 @@ describe('WEB-02 — IPMS 설정 스캔 대역: 읽지 못했으면 저장·스�
   it('소스: 조회 실패를 삼키지 않고 두 버튼이 잠금을 본다', () => {
     const src = stripComments(read('./tools/IpamSettings.jsx'));
     expect(src).not.toMatch(/vc-ranges'\)\.then\(setVcRanges\)\.catch\(\(\) => \{\}\)/);
-    expect(src).toMatch(/disabled=\{scanBusy \|\| !vc \|\| scanGate\.locked\}[^>]*onClick=\{saveScanRanges\}/);
+    // v2.637: 삭제된 vCenter·형식 오류 조건이 더해졌다 — 잠금(scanGate.locked)을 보는지만 고정한다.
+    expect(src).toMatch(/disabled=\{scanBusy \|\| !vc \|\|[^}]*scanGate\.locked[^}]*\}[^>]*onClick=\{saveScanRanges\}/);
     expect(src).toMatch(/disabled=\{scanBusy \|\| scanGate\.locked\}[^>]*onClick=\{scanNow\}/);
   });
 });

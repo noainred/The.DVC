@@ -8,6 +8,7 @@ import { intervalMinText, scanSettingsBody } from './ipamScanForm.js';
 import { reservedDayOf, reservedFieldForSave } from './ipamReserveText.js';
 import { useIpamDraft } from './useIpamDraft.js'; // v2.636: 편집 초안 — 페이지를 옮기거나 대장이 다시 로딩돼도 입력이 남는다
 import { DraftBanner } from './IpamDraftBanner.jsx';
+import { checkRangeList, cleanLines, ipmsSettingsErrors, lineIssueText, listSummaryText, sameIpmsSettings, serverInvalidText, vcenterOptionLabel, vcenterOptions } from './ipmsRangeText.js';
 
 /**
  * v2.636: 모달 또는 페이지로 그린다. IP관리 서브메뉴는 `asPage` 로 쓴다 — 예전 모달은 대장 화면 안에 있어서 대장을 다시 읽는
@@ -208,15 +209,45 @@ export function vcRangesGate(vcRanges, err) {
   return { locked: false, failed: false, note: null };
 }
 
+/** v2.637: 대역 입력 칸 바로 아래 판정 — 오류(저장 막음)·경고(저장은 됨)·요약을 입력하는 동안 보인다. */
+function RangeCheck({ check, max = 4 }) {
+  if (!check) return null;
+  const { invalid, warnings } = check;
+  return (
+    <div style={{ fontSize: 11, marginTop: 4, lineHeight: 1.6 }}>
+      <span className="muted">{listSummaryText(check)}</span>
+      {invalid.length > 0 && (
+        <div style={{ color: 'var(--red)' }}>
+          {invalid.slice(0, max).map((x) => <div key={`e${x.line}`}>✕ {lineIssueText(x)}</div>)}
+          {invalid.length > max && <div>외 {invalid.length - max}줄</div>}
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div style={{ color: 'var(--amber)' }}>
+          {warnings.slice(0, max).map((x, i) => <div key={`w${x.line}-${i}`}>△ {lineIssueText(x)}</div>)}
+          {warnings.length > max && <div>외 {warnings.length - max}건</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const RANGE_TA = { resize: 'vertical', fontFamily: 'monospace', fontSize: 12, width: '100%' };
+const SECTION = { border: '1px solid var(--border)', borderRadius: 10, padding: 12, minWidth: 0 };
+const SCAN_CAP = 4096; // 서버 ipam/scan.js RANGE_CAP — 한 줄이 이보다 크면 스캔은 앞부분만 돈다(경고용)
+
 export function IpmsSettings({ onClose, asPage = false }) {
   // v2.636: 폼 값은 편집 초안(ipms:settings) — 저장 전까지 다른 페이지로 옮겨도 남는다.
   const d = useIpamDraft('ipms:settings');
   const s = d.value;
   const setS = d.set;
   const [loadErr, setLoadErr] = useState(null); // 조회 실패(403 이면 HttpError 그대로 — 권한 안내로 그린다)
-  const [vcs, setVcs] = useState([]);
+  const [meta, setMeta] = useState({});         // v2.637: invalidSaved·orphanVcenters·omittedOutOfScope
+  const [vcs, setVcs] = useState(null);         // null = 아직 모름(실패와 구분)
+  const [vcsErr, setVcsErr] = useState(null);
   const [vc, setVc] = useState('');
-  const [msg, setMsg] = useState(null);
+  const [msg, setMsg] = useState(null);         // { ok, text, list? } 하나의 모양
+  const [saving, setSaving] = useState(false);
   // vCenter별 스캔 대역(사전 정리 + 주기 스캔) — rangeStore(/vc-ranges) 백엔드 재사용.
   const [vcRanges, setVcRanges] = useState(null);
   // v2.636: vCenter 마다 따로 초안(ipms:vcscan:<id>) — vCenter 를 바꿔도 다른 vCenter 에 입력하던 대역이 남는다.
@@ -233,9 +264,15 @@ export function IpmsSettings({ onClose, asPage = false }) {
   const loadVcRanges = () => fetchJson('/tools/ipam/vc-ranges')
     .then((r) => { setVcRanges(r); setVcRangesErr(null); })
     .catch((e) => setVcRangesErr(e?.message || String(e)));
+  const metaOf = (r) => ({ invalidSaved: r?.invalidSaved || [], orphanVcenters: r?.orphanVcenters || [], omittedOutOfScope: r?.omittedOutOfScope || 0 });
+  // v2.637: vCenter 목록 조회 실패를 삼키지 않는다 — 예전 `.catch(() => {})` 는 선택기가 비어 vc 가 '' 인 채로
+  //   'vCenter별 무시 대역' 입력이 `vcenters['']` 에 저장됐다(어느 vCenter 에도 적용되지 않는다 — 오류 없이 사라지는 입력).
+  const loadVcs = () => fetchJson('/vcenters')
+    .then((list) => { const arr = Array.isArray(list) ? list : []; setVcs(arr); setVcsErr(null); if (arr[0]) setVc((cur) => cur || arr[0].id); })
+    .catch((e) => setVcsErr(e?.message || String(e)));
   useEffect(() => {
-    fetchJson('/admin/ipam/settings').then((r) => d.load(r.settings)).catch((e) => setLoadErr(e));
-    fetchJson('/vcenters').then((list) => { setVcs(list); if (list[0]) setVc((cur) => cur || list[0].id); }).catch(() => {});
+    fetchJson('/admin/ipam/settings').then((r) => { d.load(r.settings); setMeta(metaOf(r)); }).catch((e) => setLoadErr(e));
+    loadVcs();
     loadVcRanges();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 선택한 vCenter의 저장된 스캔 대역을 폼에 채운다(초안이 있으면 초안이 이긴다 — useIpamDraft.load).
@@ -244,103 +281,177 @@ export function IpmsSettings({ onClose, asPage = false }) {
     const e = (vcRanges.ranges || []).find((x) => x.vcenterId === vc);
     sd.load({ text: e ? (e.ranges || []).join('\n') : '', enabled: e ? e.enabled !== false : true });
   }, [vc, vcRanges]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 등록 목록이 비었거나 실패했어도 설정에만 남은(삭제된) vCenter 가 있으면 그것을 고를 수 있어야 한다 — 선택이 빈 채로 두지 않는다.
+  useEffect(() => {
+    if (vc) return;
+    const first = (vcs || [])[0]?.id || (meta.orphanVcenters || [])[0];
+    if (first) setVc(first);
+  }, [vcs, meta, vc]);
+
+  const nameOf = (id) => (vcs || []).find((v) => v.id === id)?.name || id;
+  const scanCheck = checkRangeList(scanText, { reversed: 'error', scanCap: SCAN_CAP });
+  const scanDirty = !!sd.dirty && JSON.stringify(cleanLines(sd.value?.text)) + scanEnabled !== JSON.stringify(cleanLines(sd.base?.text)) + (sd.base ? sd.base.enabled !== false : true);
+
   const saveScanRanges = async () => {
-    if (!vc || vcRangesGate(vcRanges, vcRangesErr).locked) return; // v2.621(감사 WEB-02): 버튼 잠금의 이중 방어
+    if (!vc || vcRangesGate(vcRanges, vcRangesErr).locked || scanCheck.invalid.length) return; // v2.621(감사 WEB-02): 버튼 잠금의 이중 방어
     setScanBusy(true); setScanMsg(null);
     try {
       const r = await putJson('/admin/ipam/vc-ranges', { vcenterId: vc, ranges: scanText, enabled: scanEnabled });
-      setScanMsg(r.ok ? { ok: true, text: `저장됨 — 대역 ${(r.ranges || []).length}개` } : { ok: false, text: r.reason });
-      if (r.ok) { sd.saved({ text: (r.ranges || []).join('\n'), enabled: scanEnabled }); await loadVcRanges(); }
+      if (r.ok) {
+        const warn = (r.warnings || []).length ? ` · 경고 ${r.warnings.length}건(저장은 됨)` : '';
+        setScanMsg({ ok: true, text: `저장됨 — 대역 ${(r.ranges || []).length}개${warn}` });
+        sd.saved({ text: (r.ranges || []).join('\n'), enabled: scanEnabled }); await loadVcRanges();
+      } else {
+        setScanMsg({ ok: false, text: r.reason || '저장하지 못했습니다', list: (r.invalid || []).map(lineIssueText) });
+      }
     } catch (e) { setScanMsg({ ok: false, text: e.message }); } finally { setScanBusy(false); }
   };
   const scanNow = async () => {
     if (vcRangesGate(vcRanges, vcRangesErr).locked) return; // v2.621(감사 WEB-02)
     setScanBusy(true); setScanMsg(null);
-    try { const r = await postJson('/admin/ipam/vc-ranges/scan', {}); setScanMsg(r.ok ? { ok: true, text: '스캔을 시작했습니다(백그라운드).' } : { ok: false, text: r.reason }); }
+    try { const r = await postJson('/admin/ipam/vc-ranges/scan', {}); setScanMsg(r.ok ? { ok: true, text: '스캔을 시작했습니다(백그라운드) — 진행은 ‘스캔 상태’ 페이지에서 봅니다.' } : { ok: false, text: r.reason || '스캔을 시작하지 못했습니다' }); }
     catch (e) { setScanMsg({ ok: false, text: e.message }); } finally { setScanBusy(false); }
   };
   if (!s) return <Frame asPage={asPage} title="IPMS 설정" onClose={onClose}>{loadErr ? <ErrorBox message={loadErr} /> : <Loading />}</Frame>;
   const vcRangeEntry = (vcRanges?.ranges || []).find((x) => x.vcenterId === vc);
   const scanGate = vcRangesGate(vcRanges, vcRangesErr);
 
+  const opts = vcenterOptions(vcs, s, d.base, meta.orphanVcenters);
+  const cur = opts.find((o) => o.id === vc) || null;
+  const errors = ipmsSettingsErrors(s, nameOf);
+  const realDirty = !!d.dirty && !sameIpmsSettings(s, d.base);
   const globalText = (s.global || []).join('\n');
   const vcText = (s.vcenters?.[vc] || []).join('\n');
   const publicText = (s.publicRanges || []).join('\n');
   const privateText = (s.privateRanges || []).join('\n');
   const setGlobal = (t) => setS({ ...s, global: t.split('\n') });
-  const setVcText = (t) => setS({ ...s, vcenters: { ...(s.vcenters || {}), [vc]: t.split('\n') } });
+  const setVcText = (t) => { if (!vc) return; setS({ ...s, vcenters: { ...(s.vcenters || {}), [vc]: t.split('\n') } }); };
   const setPublic = (t) => setS({ ...s, publicRanges: t.split('\n') });
   const setPrivate = (t) => setS({ ...s, privateRanges: t.split('\n') });
   const save = async () => {
-    setMsg(null);
-    const r = await putJson('/admin/ipam/settings', s).catch((e) => ({ error: e.message }));
-    if (r.ok) d.saved(r.settings || s);   // 서버가 정리한 값으로(빈 줄 제거 등) — 초안을 지운다
-    // v2.611 LEFT2611-02: 범위 제한 계정의 전역 대역 변경은 적용하지 않는다 — 조용히 닫지 않고 사유를 보인다.
-    // v2.636: 페이지로 쓸 때는 닫을 것이 없다 — 저장했다고 말한다.
-    if (r.ok && !r.ignoredReason) { if (asPage) setMsg({ ok: true, text: '저장했습니다 — 대장·검색·공유 DB 는 다음 수집 주기에 새 대역으로 다시 만들어집니다.' }); else onClose(); }
-    else setMsg(r.ok ? `저장했습니다(범위 안 vCenter 대역만). ${r.ignoredReason}` : (r.error || '저장 실패'));
+    if (errors.length) return; // 버튼 잠금의 이중 방어 — 서버도 같은 판정으로 400 을 준다
+    setMsg(null); setSaving(true);
+    try {
+      const r = await putJson('/admin/ipam/settings', s);
+      if (r.ok) {
+        d.saved(r.settings || s);   // 서버가 정리한 값으로(빈 줄 제거 등) — 초안을 지운다
+        setMeta(metaOf(r));
+        // v2.611 LEFT2611-02: 범위 제한 계정의 전역 대역 변경은 적용하지 않는다 — 조용히 닫지 않고 사유를 보인다.
+        if (r.ignoredReason) setMsg({ ok: false, text: `저장했습니다(범위 안 vCenter 대역만). ${r.ignoredReason}` });
+        else if (asPage) setMsg({ ok: true, text: '저장했습니다 — 대장·검색·공유 DB 는 다음 수집 주기에 새 대역으로 다시 만들어집니다.' });
+        else onClose();
+      } else {
+        // v2.637: 400 은 `reason` 이다 — 예전에는 `r.error` 만 읽어 서버 사유 대신 '저장 실패' 만 보였다.
+        setMsg({ ok: false, text: r.reason || r.error || '저장하지 못했습니다', list: (r.invalid || []).map((x) => serverInvalidText(x, nameOf)) });
+      }
+    } catch (e) { setMsg({ ok: false, text: e?.message || String(e) }); } finally { setSaving(false); }
   };
+  const Msg = ({ m }) => m && (
+    <div className={`banner ${m.ok ? 'ok' : 'warn'}`} role="status" style={{ marginBottom: 8, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+      {m.text}
+      {m.list?.length > 0 && <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12 }}>{m.list.slice(0, 20).map((t, i) => <li key={i}>{t}</li>)}{m.list.length > 20 && <li>외 {m.list.length - 20}건</li>}</ul>}
+    </div>
+  );
+  const saveTitle = errors.length ? `형식 오류 ${errors.length}줄을 먼저 고치세요 — ${errors.slice(0, 3).map((e) => `${e.where} ${e.line}행`).join(', ')}` : undefined;
+  const gridCols = asPage ? 'repeat(auto-fit, minmax(min(460px, 100%), 1fr))' : '1fr';
 
   return (
-    <Frame asPage={asPage} title="IPMS 설정 — 무시 대역 · vCenter 스캔 대역" onClose={onClose} width={560}>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>여기 입력한 대역의 IP는 IP 관리대장/검색/공유DB에서 제외됩니다. 형식: CIDR(10.0.0.0/8), 범위(10.0.0.1-10.0.0.50), 단일 IP. 한 줄에 하나.</div>
+    <Frame asPage={asPage} title="IPMS 설정 — 무시 대역 · vCenter 스캔 대역 · 공인/사설 분류" onClose={onClose} width={620}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.7 }}>
+        형식: CIDR(<code>10.0.0.0/24</code>, 마스크 /8~/32) · 범위(<code>10.0.0.1-10.0.0.50</code> 또는 <code>10.0.0.1-50</code>) · 단일 IP — 한 줄에 하나.
+        입력하는 동안 칸 아래에 오류(✕ — 저장을 막음)와 경고(△ — 저장은 됨)를 보여 줍니다.
+      </div>
       <DraftBanner d={d} />
-      {msg && (typeof msg === 'object' && msg.ok
-        ? <div className="banner ok" role="status" style={{ marginBottom: 8 }}>{msg.text}</div>
-        : <div className="login-error" style={{ marginBottom: 8 }}>{typeof msg === 'object' ? msg.text : msg}</div>)}
-      <label style={{ display: 'block', marginBottom: 12 }}>전체 무시 대역 (모든 vCenter)
-        <textarea className="input" rows={5} value={globalText} onChange={(e) => setGlobal(e.target.value)} placeholder={'10.255.0.0/16\n8.8.8.8'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
-      </label>
-      <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 10 }}>
-        <div className="flex gap" style={{ alignItems: 'center', marginBottom: 6 }}>
-          <b style={{ fontSize: 13 }}>vCenter별 무시 대역</b>
-          <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ maxWidth: 240 }}>
-            {vcs.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
+      <Msg m={msg} />
+      {meta.invalidSaved?.length > 0 && (
+        <div className="banner warn" style={{ marginBottom: 8, whiteSpace: 'normal' }}>
+          저장돼 있지만 <b>적용되지 않는 줄 {meta.invalidSaved.length}개</b>가 있습니다(이전 버전에서 검사 없이 저장된 값). 고치거나 지운 뒤 저장하세요.
+          <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12 }}>{meta.invalidSaved.slice(0, 10).map((x, i) => <li key={i}>{serverInvalidText(x, nameOf)}</li>)}</ul>
         </div>
-        <textarea className="input" rows={5} value={vcText} onChange={(e) => setVcText(e.target.value)} placeholder={'172.16.0.0/12'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
-        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>선택한 <b>{vcs.find((v) => v.id === vc)?.name || vc}</b> 에서만 위 대역을 숨깁니다.</div>
+      )}
+      {meta.omittedOutOfScope > 0 && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>권한 범위 밖 vCenter {meta.omittedOutOfScope}곳의 무시 대역은 보이지 않으며 저장해도 그대로 유지됩니다.</div>}
+
+      <div style={{ display: 'grid', gridTemplateColumns: gridCols, gap: 12 }}>
+        <section style={SECTION}>
+          <b style={{ fontSize: 13 }}>① 무시 대역</b>
+          <div className="muted" style={{ fontSize: 11, margin: '2px 0 8px' }}>여기 입력한 대역의 IP 는 IP 관리대장·검색·공유 DB 에서 제외됩니다.</div>
+          <label style={{ display: 'block', fontSize: 12 }}>전체(모든 vCenter)
+            <textarea className="input" rows={5} value={globalText} onChange={(e) => setGlobal(e.target.value)} placeholder={'10.255.0.0/16\n8.8.8.8'} style={RANGE_TA} aria-label="전체 무시 대역" />
+          </label>
+          <RangeCheck check={checkRangeList(s.global || [])} />
+          <div className="flex gap wrap" style={{ alignItems: 'center', margin: '12px 0 4px' }}>
+            <span style={{ fontSize: 12 }}>vCenter별</span>
+            <select className="select" value={vc} onChange={(e) => setVc(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }} disabled={!opts.length} aria-label="vCenter 선택">
+              {!opts.length && <option value="">{vcs == null && !vcsErr ? '불러오는 중…' : 'vCenter 없음'}</option>}
+              {opts.map((o) => <option key={o.id} value={o.id}>{vcenterOptionLabel(o)}</option>)}
+            </select>
+          </div>
+          {vcsErr && (
+            <div className="banner warn" style={{ marginBottom: 6, whiteSpace: 'normal' }}>
+              vCenter 목록을 불러오지 못했습니다({vcsErr}) — 목록 없이 입력하면 어느 vCenter 에도 적용되지 않으므로 칸을 잠갔습니다.
+              <button className="logout-btn" style={{ padding: '2px 10px', fontSize: 12, marginLeft: 8 }} onClick={loadVcs}>다시 불러오기</button>
+            </div>
+          )}
+          <textarea className="input" rows={5} value={vcText} disabled={!vc} onChange={(e) => setVcText(e.target.value)} placeholder={'172.16.0.0/12'} style={RANGE_TA} aria-label="vCenter별 무시 대역" />
+          {vc && <RangeCheck check={checkRangeList(s.vcenters?.[vc] || [])} />}
+          {cur?.orphan && <div style={{ fontSize: 11, marginTop: 4, color: 'var(--amber)' }}>이 vCenter 는 등록 목록에 없습니다(삭제됨) — 이 대역은 어느 IP 에도 적용되지 않습니다. 칸을 비우고 저장하면 정리됩니다.</div>}
+          {vc && !cur?.orphan && <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>선택한 <b>{cur?.name || vc}</b> 에서만 위 대역을 숨깁니다. ● 는 저장하지 않은 변경이 있는 vCenter 입니다.</div>}
+        </section>
+
+        {/* vCenter별 스캔 대역 — 사전 정리 + 주기 스캔(rangeStore). 저장 버튼이 따로다. */}
+        <section style={SECTION}>
+          <div className="flex between wrap" style={{ alignItems: 'center', gap: 6 }}>
+            <b style={{ fontSize: 13 }}>② vCenter별 스캔 대역 (주기 스캔)</b>
+            <span className="muted" style={{ fontSize: 11 }}>대상: <b>{cur?.name || vc || '—'}</b>{vcRangeEntry ? ` · 저장된 약 ${(vcRangeEntry.ipCount || 0).toLocaleString()} IP` : ''}</span>
+          </div>
+          <div className="muted" style={{ fontSize: 11, margin: '2px 0 8px' }}>주기 IP 스캔이 이 대역을 함께 스캔해 사용 현황(네트워크 맵·관리대장)을 갱신합니다. ① 의 vCenter 선택과 연동됩니다. 이 칸은 아래 ‘대역 저장’ 으로 따로 저장합니다.</div>
+          {scanGate.note && (
+            <div className="flex gap" style={{ marginBottom: 6, alignItems: 'center', flexWrap: 'wrap', padding: '7px 10px', borderRadius: 8, fontSize: 12, background: scanGate.failed ? 'rgba(239,68,68,.12)' : 'rgba(148,163,184,.12)', color: scanGate.failed ? '#f87171' : undefined }}>
+              <span style={{ overflowWrap: 'anywhere' }}>{scanGate.note}</span>
+              {scanGate.failed && <button className="logout-btn" style={{ padding: '3px 10px', fontSize: 12 }} onClick={loadVcRanges}>다시 불러오기</button>}
+            </div>
+          )}
+          <DraftBanner d={sd} />
+          <textarea className="input" rows={6} value={scanText} disabled={scanGate.locked || !vc || cur?.orphan} onChange={(e) => setScanText(e.target.value)} placeholder={'10.94.42.0/24\n10.94.43.1-10.94.43.200'} style={RANGE_TA} aria-label="vCenter별 스캔 대역" />
+          <RangeCheck check={scanCheck} />
+          <div className="flex gap" style={{ marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={scanEnabled} disabled={scanGate.locked || !vc || cur?.orphan} onChange={(e) => setScanEnabled(e.target.checked)} /> 주기 스캔 포함</label>
+            <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={scanBusy || !vc || cur?.orphan || scanGate.locked || scanCheck.invalid.length > 0}
+              title={scanGate.locked ? scanGate.note : scanCheck.invalid.length ? `형식 오류 ${scanCheck.invalid.length}줄을 먼저 고치세요` : undefined} onClick={saveScanRanges}>대역 저장{scanDirty ? ' ●' : ''}</button>
+            <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={scanBusy || scanGate.locked} title={scanGate.locked ? scanGate.note : scanDirty ? '저장하지 않은 대역 변경은 이번 스캔에 들어가지 않습니다' : undefined} onClick={scanNow}>🛰️ 지금 스캔</button>
+          </div>
+          {scanDirty && <div style={{ fontSize: 11, marginTop: 6, color: 'var(--amber)' }}>저장하지 않은 변경이 있습니다 — ‘지금 스캔’ 은 <b>저장된</b> 대역으로 돕니다.</div>}
+          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>스캔 주기는 ‘IP 스캔 설정’ 의 간격을 따릅니다. 전체 스캔은 전체 범위 계정만 시작할 수 있습니다.</div>
+          {scanMsg && <div style={{ marginTop: 8 }}><Msg m={scanMsg} /></div>}
+        </section>
       </div>
 
-      {/* vCenter별 스캔 대역 — 사전 정리 + 주기 스캔(rangeStore) */}
-      <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 10, marginTop: 12 }}>
-        <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
-          <b style={{ fontSize: 13 }}>vCenter별 스캔 대역 (주기 스캔)</b>
-          <span className="muted" style={{ fontSize: 11 }}>대상: <b>{vcs.find((v) => v.id === vc)?.name || vc}</b>{vcRangeEntry ? ` · 약 ${(vcRangeEntry.ipCount || 0).toLocaleString()} IP` : ''}</span>
-        </div>
-        <div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>여기 정리한 대역은 주기 IP 스캔이 함께 스캔해 사용 현황(네트워크 맵·관리대장)을 자동 갱신합니다. 위 vCenter 선택기와 연동됩니다. 형식: CIDR·범위·단일 IP, 한 줄에 하나.</div>
-        {scanGate.note && (
-          <div className="flex gap" style={{ marginBottom: 6, alignItems: 'center', flexWrap: 'wrap', padding: '7px 10px', borderRadius: 8, fontSize: 12, background: scanGate.failed ? 'rgba(239,68,68,.12)' : 'rgba(148,163,184,.12)', color: scanGate.failed ? '#f87171' : undefined }}>
-            <span style={{ overflowWrap: 'anywhere' }}>{scanGate.note}</span>
-            {scanGate.failed && <button className="logout-btn" style={{ padding: '3px 10px', fontSize: 12 }} onClick={loadVcRanges}>다시 불러오기</button>}
+      <section style={{ ...SECTION, marginTop: 12 }}>
+        <b style={{ fontSize: 13 }}>③ 공인 / 사설 IP 분류</b>
+        <div className="muted" style={{ fontSize: 11, margin: '2px 0 10px' }}>관리대장의 <b>분류</b> 열에 쓰입니다. 명시한 대역이 우선이고(둘 다 해당하면 사설), 해당 없으면 RFC1918(10/8·172.16/12·192.168/16)은 <b>사설</b>, 그 외는 <b>공인</b>입니다.</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))', gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <label style={{ display: 'block', fontSize: 12 }}>공인(Public) 대역
+              <textarea className="input" rows={4} value={publicText} onChange={(e) => setPublic(e.target.value)} placeholder={'203.0.113.0/24\n8.8.8.8'} style={RANGE_TA} aria-label="공인 대역" />
+            </label>
+            <RangeCheck check={checkRangeList(s.publicRanges || [])} />
           </div>
-        )}
-        <DraftBanner d={sd} />
-        <textarea className="input" rows={5} value={scanText} disabled={scanGate.locked} onChange={(e) => setScanText(e.target.value)} placeholder={'10.94.42.0/24\n10.94.43.1-10.94.43.200'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
-        <div className="flex gap" style={{ marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={scanEnabled} disabled={scanGate.locked} onChange={(e) => setScanEnabled(e.target.checked)} /> 주기 스캔 포함</label>
-          <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={scanBusy || !vc || scanGate.locked} title={scanGate.locked ? scanGate.note : undefined} onClick={saveScanRanges}>대역 저장</button>
-          <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={scanBusy || scanGate.locked} title={scanGate.locked ? scanGate.note : undefined} onClick={scanNow}>🛰️ 지금 스캔</button>
-          <span className="muted" style={{ fontSize: 11 }}>스캔 주기는 ‘IP 스캔’ 설정의 간격을 따릅니다.</span>
+          <div style={{ minWidth: 0 }}>
+            <label style={{ display: 'block', fontSize: 12 }}>사설(Private) 대역
+              <textarea className="input" rows={4} value={privateText} onChange={(e) => setPrivate(e.target.value)} placeholder={'100.64.0.0/10\n10.0.0.0/8'} style={RANGE_TA} aria-label="사설 대역" />
+            </label>
+            <RangeCheck check={checkRangeList(s.privateRanges || [])} />
+          </div>
         </div>
-        {scanMsg && <div style={{ marginTop: 8, padding: '7px 10px', borderRadius: 8, fontSize: 12, background: scanMsg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: scanMsg.ok ? '#4ade80' : '#f87171' }}>{scanMsg.text}</div>}
-      </div>
-      <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 10, marginTop: 12 }}>
-        <b style={{ fontSize: 13 }}>공인 / 사설 IP 분류</b>
-        <div className="muted" style={{ fontSize: 11, margin: '4px 0 10px' }}>관리대장의 <b>분류</b> 열에 사용됩니다. 명시한 대역이 우선이고, 둘 다 해당 없으면 RFC1918(10/8·172.16/12·192.168/16)은 <b>사설</b>, 그 외는 <b>공인</b>으로 자동 분류됩니다. 사설이 우선합니다.</div>
-        <div className="flex gap wrap">
-          <label style={{ flex: 1, minWidth: 220 }}>공인(Public) 대역
-            <textarea className="input" rows={4} value={publicText} onChange={(e) => setPublic(e.target.value)} placeholder={'203.0.113.0/24\n8.8.8.8'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
-          </label>
-          <label style={{ flex: 1, minWidth: 220 }}>사설(Private) 대역
-            <textarea className="input" rows={4} value={privateText} onChange={(e) => setPrivate(e.target.value)} placeholder={'100.64.0.0/10\n10.0.0.0/8'} style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: 12 }} />
-          </label>
-        </div>
-      </div>
-      <div className="flex gap" style={{ marginTop: 14 }}>
-        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={save}>저장{d.dirty ? ' ●' : ''}</button>
+      </section>
+
+      <div className="flex gap wrap" style={{ marginTop: 12, alignItems: 'center', paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+        <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} disabled={saving || errors.length > 0} title={saveTitle} onClick={save}>{saving ? '저장 중…' : `①·③ 저장${realDirty ? ' ●' : ''}`}</button>
         {!asPage && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={onClose}>취소</button>}
-        {asPage && <span className="muted" style={{ fontSize: 11 }}>위 ‘저장’ 은 무시 대역·공인/사설 분류를 저장합니다. vCenter별 스캔 대역은 그 칸의 ‘대역 저장’ 으로 따로 저장합니다.</span>}
+        <span className="muted" style={{ fontSize: 11 }}>
+          {errors.length ? <span style={{ color: 'var(--red)' }}>형식 오류 {errors.length}줄 — 고친 뒤 저장할 수 있습니다. </span> : realDirty ? '저장하지 않은 변경이 있습니다. ' : '변경 없음. '}
+          무시 대역·공인/사설 분류를 함께 저장합니다(② 스캔 대역은 따로).
+        </span>
       </div>
     </Frame>
   );
