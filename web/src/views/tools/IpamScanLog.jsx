@@ -19,7 +19,7 @@ export function IpamScanLog() {
   if (error && !data) return <ErrorBox message={errorInfo || error} />; // 403 은 HttpError 로 넘겨 권한 안내가 되게
   const rows = data?.entries || [];
   return (
-    <div className="card" style={{ padding: 14, minWidth: 0 }}>
+    <div className="card ipam-page" style={{ padding: 14, minWidth: 0 }}>
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
         <b style={{ fontSize: 15 }}>🧾 IP 스캔 로그</b>
         <span className="muted" style={{ fontSize: 12 }}>10초마다 새로 읽습니다</span>

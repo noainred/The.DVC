@@ -101,12 +101,15 @@ export function resolveDraft(server, draft) {
 
 /**
  * 폼 위에 띄울 문구(순수). null 이면 띄우지 않는다.
- * @param {{restored?:boolean, serverChanged?:boolean, dirty?:boolean, volatile?:boolean}} st
+ * @param {{restored?:boolean, serverChanged?:boolean, dirty?:boolean, volatile?:boolean, kind?:'import'}} st  kind 'import' = CSV 가져오기 입력(저장이 아니라 적용)
  */
 export function draftNote(st = {}) {
   if (!st.dirty && !st.restored) return null;
   const parts = [];
-  if (st.restored) parts.push('저장하지 않은 편집을 복원했습니다 — 다른 페이지로 옮기거나 대장이 다시 로딩돼도 입력은 저장 전까지 남습니다.');
+  if (st.kind === 'import') parts.push(st.restored
+    ? '적용하지 않은 가져오기 입력을 복원했습니다 — 서버에는 ‘적용’ 을 눌러야 반영됩니다.'
+    : '적용하지 않은 가져오기 입력이 있습니다 — 다른 페이지로 옮겨도 남습니다. 서버에는 ‘적용’ 을 눌러야 반영됩니다.');
+  else if (st.restored) parts.push('저장하지 않은 편집을 복원했습니다 — 다른 페이지로 옮기거나 대장이 다시 로딩돼도 입력은 저장 전까지 남습니다.');
   else parts.push('저장하지 않은 변경이 있습니다 — 다른 페이지로 옮겨도 입력은 남습니다. 서버에는 저장을 눌러야 반영됩니다.');
   if (st.serverChanged) parts.push('편집을 시작한 뒤 서버에 저장된 값이 바뀌었습니다(다른 관리자 또는 다른 화면) — 저장하면 지금 입력으로 덮어씁니다. 서버 값을 보려면 ‘서버 값으로 되돌리기’.');
   if (st.volatile) parts.push('입력이 커서 이 탭의 메모리에만 보관합니다 — 새로고침하면 사라집니다.');

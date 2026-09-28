@@ -100,6 +100,9 @@ describe('② 편집 초안', () => {
     expect(D.draftNote({ dirty: true, restored: true })).toMatch(/복원/);
     expect(D.draftNote({ dirty: true, restored: true, serverChanged: true })).toMatch(/서버에 저장된 값이 바뀌었습니다/);
     expect(D.draftNote({ dirty: true, volatile: true })).toMatch(/새로고침하면 사라집니다/);
+    // CSV 가져오기 입력은 '저장' 이 아니라 '적용' 이라고 말한다
+    expect(D.draftNote({ dirty: true, kind: 'import' })).toMatch(/‘적용’ 을 눌러야/);
+    expect(D.draftNote({ dirty: true, kind: 'import' })).not.toMatch(/저장을 눌러야/);
   });
   it('구독자는 쓰기·지우기에 불린다', () => {
     let n = 0; const off = D.onDraftChange(() => { n++; });
@@ -228,6 +231,10 @@ describe('⑤ 화면 소스', () => {
     expect(settings).toMatch(/useIpamDraft\(`ipms:vcscan:\$\{vc \|\| '-'\}`\)/);
     expect(settings).toMatch(/useIpamDraft\(`scan:\$\{agent\}`\)/);
     expect(settings).toMatch(/d\.saved\(r\.settings\)/);
+  });
+  it('CSV 적용 뒤에는 초안을 내린다(적용한 입력을 \'미적용\' 으로 말하지 않는다)', () => {
+    const csv = stripComments(read('./IpamCsv.jsx'));
+    expect((csv.match(/d\.saved\(text\)/g) || []).length).toBe(2);
   });
   it('서브메뉴가 저장하지 않은 페이지를 표시하고, 탭을 닫을 때 경고한다', () => {
     expect(ipamFn).toMatch(/dirty\.has\(pg\.k\)/);

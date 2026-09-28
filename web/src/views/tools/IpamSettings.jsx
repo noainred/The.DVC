@@ -16,7 +16,7 @@ import { DraftBanner } from './IpamDraftBanner.jsx';
 function Frame({ asPage, title, onClose, children, ...modal }) {
   if (asPage) {
     return (
-      <div className="card" style={{ padding: 14, minWidth: 0 }}>
+      <div className="card ipam-page" style={{ padding: 14, minWidth: 0 }}>
         <b style={{ fontSize: 15, display: 'block', marginBottom: 8 }}>{title}</b>
         {children}
       </div>
@@ -447,13 +447,13 @@ export function IpScanSettings({ onClose, asPage = false }) {
       </div>
       {msg && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{msg}</div>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}> {/* v2.636: 페이지(400px)에서 1fr 의 최소폭이 내용 폭이라 입력칸이 카드 밖으로 밀렸다 */}
         <label style={{ fontWeight: 600, paddingTop: 9 }}>할당 에이전트</label>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-          <select className="select" value={agent} onChange={(e) => switchAgent(e.target.value)} style={{ maxWidth: 260 }}>
+          <select className="select" value={agent} onChange={(e) => switchAgent(e.target.value)} style={{ maxWidth: '100%', width: 260 }}>
             {agents.map((a) => <option key={a} value={a}>{agentLabel(a)}</option>)}
           </select>
-          <input className="input" style={{ width: 160 }} placeholder="새 에이전트 이름" value={newAgent} onChange={(e) => setNewAgent(e.target.value)} />
+          <input className="input" style={{ width: 160, maxWidth: '100%' }} placeholder="새 에이전트 이름" value={newAgent} onChange={(e) => setNewAgent(e.target.value)} />
           <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={!newAgent.trim()} onClick={() => { const a = newAgent.trim(); setNewAgent(''); if (a) switchAgent(a); }}>추가/선택</button>
         </div>
         <label style={{ fontWeight: 600, paddingTop: 9 }}>사용</label>

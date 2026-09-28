@@ -122,6 +122,7 @@ function ManageCsv({ scope, canManage, onApplied }) {
       setApplied(r);
       setCheck({ sig: textSig(text), ...m, total: parsed.records.length, chunks: chunks.length, columns: results[0]?.columns || [], afterApply: true });
       setMsg({ ok: true, text: manageApplyText(r) });
+      d.saved(text);   // 적용했으니 '적용하지 않은 입력' 표시를 내린다(입력 글은 결과와 함께 보이도록 둔다)
       onApplied?.();
     } catch (e) {
       const doneRows = chunks.slice(0, results.length).reduce((a, c) => a + c.rows, 0);
@@ -143,7 +144,7 @@ function ManageCsv({ scope, canManage, onApplied }) {
         {MANAGE_RULES.map((t) => <li key={t}><BoldText text={t} /></li>)}
       </ul>
       {!canManage && <div className="banner warn" style={{ marginBottom: 8 }}>가져오기(검증·적용)는 운영자·관리자 계정만 할 수 있습니다 — 내보내기는 누구나 됩니다.</div>}
-      <DraftBanner d={d} revertLabel="입력 지우기" />
+      <DraftBanner d={d} revertLabel="입력 지우기" kind="import" />
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
         <FilePick disabled={busy || !canManage} onText={(t, name) => { d.set(t); setFileName(name); setCheck(null); setApplied(null); setMsg(null); }} />
         {fileName && <span className="muted" style={{ fontSize: 12 }}>{fileName}</span>}
@@ -224,7 +225,7 @@ function RangesCsv({ onApplied }) {
         setCheck({ sig: textSig(text), mode, ...r, plans: check?.plans || [], afterApply: true });
         const a = (r.applied || []).map((x) => `${x.agent === '__local__' ? '이 포탈' : x.agent}(+${x.added} −${x.removed})`).join(', ');
         setMsg({ ok: true, text: `적용 — 에이전트 ${(r.applied || []).length}곳${a ? `: ${a}` : ''}${(r.blocked || []).length ? ` · 오류로 적용하지 않은 에이전트 ${(r.blocked || []).length}곳` : ''}${(r.failed || []).length ? ` · 저장 실패 ${(r.failed || []).length}곳` : ''}. 엣지 에이전트는 다음 주기에 새 대역을 읽어 갑니다.` });
-        d.saved('');
+        d.saved(text);   // 적용했으니 '적용하지 않은 입력' 표시를 내린다
         onApplied?.();
       }
     } catch (e) { setMsg({ ok: false, text: `${dryRun ? '검증' : '적용'}하지 못했습니다: ${e?.message || e}` }); }
@@ -246,7 +247,7 @@ function RangesCsv({ onApplied }) {
         ))}
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{MODE_NOTE[mode]} 오류 줄이 하나라도 있는 에이전트는 통째로 적용하지 않습니다(교체에서 오류 줄만 빼면 그 대역이 조용히 지워집니다).</div>
-      <DraftBanner d={d} revertLabel="입력 지우기" />
+      <DraftBanner d={d} revertLabel="입력 지우기" kind="import" />
       <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
         <FilePick disabled={busy} onText={(t) => { d.set(t); setCheck(null); setMsg(null); }} />
       </div>
@@ -304,7 +305,7 @@ export function IpamCsv({ scope, access, canManage, onGoto, onApplied }) {
   const sp = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
   const dl = async (path, name) => { setMsg(null); try { await downloadFile(path, name); } catch (e) { setMsg({ ok: false, text: downloadFailText(e) }); } };
   return (
-    <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 }}>
+    <div className="ipam-page" style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 }}>
       <Section title="IP 관리대장 내보내기" note="수집(vCenter)·스캔·수동 등록을 합친 대장 전체입니다. 읽기 전용 내보내기이고 가져오기 대상이 아닙니다(대장은 수집으로 만들어집니다).">
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <button className="logout-btn" style={{ padding: '7px 14px' }} onClick={() => dl(`/tools/ipam.csv${sp}`, `ipam-${dayStamp()}.csv`)}>⇩ 대장 CSV</button>

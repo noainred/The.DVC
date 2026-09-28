@@ -2,8 +2,8 @@
 import React from 'react';
 import { draftNote } from './ipamDraft.js';
 
-export function DraftBanner({ d, revertLabel = '서버 값으로 되돌리기' }) {
-  const note = draftNote(d);
+export function DraftBanner({ d, revertLabel = '서버 값으로 되돌리기', kind }) {
+  const note = draftNote({ ...d, kind });
   if (!note) return null;
   return (
     <div className="banner warn" role="status" style={{ margin: '8px 0', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>

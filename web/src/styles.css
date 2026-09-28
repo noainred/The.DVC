@@ -1127,3 +1127,6 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .ipam-subnav .tab { padding: 5px 10px; font-size: 12.5px; white-space: nowrap; }
 .ipam-dirty-dot { color: var(--amber); }
 .ipam-subnav .tab.active .ipam-dirty-dot { color: #fde68a; }
+/* v2.636: 전역 .input 의 min-width 220px 이 페이지로 옮긴 IP 스캔 설정의 2열 폼을 400px 에서 24px 밀어냈다
+   (숫자 칸 width 90 도 220 으로 늘어나 있었다). IP관리 페이지 안에서만 풀고 칸 폭은 각 입력의 width 를 따른다. */
+.ipam-page .input { min-width: 0; max-width: 100%; }

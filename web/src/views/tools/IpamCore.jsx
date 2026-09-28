@@ -443,8 +443,8 @@ function Ipam({ scope, onScope }) {
             footer={rows.length > IPAM_ROW_LIMIT ? `${rows.length.toLocaleString()}행 중 ${IPAM_ROW_LIMIT.toLocaleString()}행만 표시합니다 — 검색·필터로 좁히면 나머지도 보입니다(정렬은 전체 기준).` : null} />
         </>
       )}
-      {db && (
-        <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7 }}>
+      {db && (view === 'list' || view === 'sheet') && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 10, lineHeight: 1.7, overflowWrap: 'anywhere' }}>
           타 프로그램 공유용 DB: <code>{db.path}</code> ({db.kind === 'sqlite' ? 'SQLite · 테이블 ip_records' : 'NDJSON'})
           {' · '}갱신 {db.updatedAt ? new Date(db.updatedAt).toLocaleString() : '—'} · 수집 주기마다 자동 갱신됩니다.
         </div>
