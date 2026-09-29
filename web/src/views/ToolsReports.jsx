@@ -5,7 +5,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
-import { fetchJson, postJson, putJson, usePolling } from '../api.js';
+import { fetchJson, postJson, putJson, usePolling, canCsv } from '../api.js'; // v2.643 canCsv: CSV 내보내기는 관리자 이상 + data.csv 권한만
 import { DataTable, Loading, ErrorBox, StateBadge, ResultCount, Kpi, SearchBox, VmLink } from '../components/ui.jsx';
 import { csvCell } from '../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 
@@ -172,8 +172,8 @@ export function SnapshotAge({ scope }) {
             <span className="muted">GB</span>
           </label>
           <span className="muted" style={{ fontSize: 13 }}>총 {data.count}대 · 델타 {tb(data.totalSizeGB)} · 생성일 확인 {data.withAge}대</span>
-          <button className="logout-btn" onClick={() => exportCsv('snapshot-age', ['VM', 'vCenter', '나이(일)', '생성일', '개수', '크기GB', '전원'],
-            rows.map((r) => [r.name, r.vcenterId, r.ageDays ?? '', r.oldestTs ? new Date(r.oldestTs).toISOString() : '', r.snapshotCount, r.snapshotSizeGB, r.powerState]))}>CSV</button>
+          {canCsv() && <button className="logout-btn" onClick={() => exportCsv('snapshot-age', ['VM', 'vCenter', '나이(일)', '생성일', '개수', '크기GB', '전원'],
+            rows.map((r) => [r.name, r.vcenterId, r.ageDays ?? '', r.oldestTs ? new Date(r.oldestTs).toISOString() : '', r.snapshotCount, r.snapshotSizeGB, r.powerState]))}>CSV</button>}
         </div>
       </div>
       <ResultCount count={rows.length} />
@@ -566,8 +566,8 @@ export function ChangeHistory({ scope }) {
           <span className="muted" style={{ fontSize: 13 }}>
             변경 {data.total}건 / 스캔 {data.scanned}건{data.truncated ? ' (스캔 상한 도달 — 기간을 줄이세요)' : ''}
           </span>
-          <button className="logout-btn" onClick={() => exportCsv('change-history', ['시각', 'vCenter', '분류', '타입', '계정', '대상', '내용'],
-            (data.rows || []).map((r) => [new Date(r.ts).toISOString(), r.vcenterId, r.category, r.type, r.user, r.entity, r.message]))}>CSV</button>
+          {canCsv() && <button className="logout-btn" onClick={() => exportCsv('change-history', ['시각', 'vCenter', '분류', '타입', '계정', '대상', '내용'],
+            (data.rows || []).map((r) => [new Date(r.ts).toISOString(), r.vcenterId, r.category, r.type, r.user, r.entity, r.message]))}>CSV</button>}
         </div>
       </div>
       <div className="card" style={{ padding: 0 }}>
@@ -640,8 +640,8 @@ export function UnprotectedVms({ scope }) {
           </label>
           {/* v2.607 WEB2607-07: 상한을 넘어 버린 패턴 · 실제 판정에 쓴 패턴 */}
           {unprotectedPatternNote(data.config) && <div style={{ flexBasis: '100%', fontSize: 12, color: 'var(--amber)' }}>⚠ {unprotectedPatternNote(data.config)}</div>}
-          <button className="logout-btn" onClick={() => exportCsv('unprotected-vms', ['VM', 'vCenter', '클러스터', 'OS', '디스크GB'],
-            (data.unprotected || []).map((r) => [r.name, r.vcenterId, r.cluster, r.guestOS, r.storageGB]))}>CSV</button>
+          {canCsv() && <button className="logout-btn" onClick={() => exportCsv('unprotected-vms', ['VM', 'vCenter', '클러스터', 'OS', '디스크GB'],
+            (data.unprotected || []).map((r) => [r.name, r.vcenterId, r.cluster, r.guestOS, r.storageGB]))}>CSV</button>}
         </div>
       </div>
       <div className="vcd-views" style={{ marginBottom: 10 }}>

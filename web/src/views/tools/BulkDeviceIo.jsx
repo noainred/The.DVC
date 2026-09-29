@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, downloadFile } from '../../api.js';
+import { fetchJson, postJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import { Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -166,6 +166,9 @@ export default function BulkDeviceIo({
   const allPicked = pickable.length > 0 && pickable.every((l) => sel.has(l));
   const toggle = (line) => setSel((p) => { const n = new Set(p); n.has(line) ? n.delete(line) : n.add(line); return n; });
   const fmt = FORMATS.find((f) => f.key === format) || FORMATS[0];
+
+  // v2.643: 방어선 — 호출부가 버튼을 숨기지만, 열렸더라도 CSV 권한이 없으면 안내만 보인다(훅은 모두 위에).
+  if (!canCsv()) return <Modal title={title} onClose={onClose} width={520}><div className="muted" style={{ fontSize: 12.5 }}>{CSV_DENIED_NOTE}</div></Modal>;
 
   return (
     <Modal title={title} onClose={onClose} width={980}>

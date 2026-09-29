@@ -391,7 +391,7 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
     const raw = pick(f, ['state', 'status', 'health', 'operStatus']);
     if (raw != null) detailBits.push(String(raw));
     const t = numOrNull(pick(f, ['temperature', 'currentTemperature', 'value']));
-    if (kind === 'temp' && t != null) detailBits.push(`${t}℃`);
+    if (kind === 'temp' && t != null) detailBits.push(`${Math.round(t * 10) / 10}℃`); // v2.643: 25.329440000034℃ 같은 부동소수 꼬리를 자른다
     parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200) });
   }
   if (!parts.length && unrecognized) return { parts: null, keys, truncated: 0 };

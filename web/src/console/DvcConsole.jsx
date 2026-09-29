@@ -157,7 +157,7 @@ export default function DvcConsole({ user, health, onExit }) {
           </div>
           <div className="dvc-user">
             <div className="dvc-avatar" title={user?.name}>{(user?.name || 'U').slice(0, 1).toUpperCase()}</div>
-            <div><div className="dvc-user-name">{user?.name}</div><div className="dvc-user-role">{user?.role}</div></div>
+            <div><div className="dvc-user-name">{user?.name}</div><div className="dvc-user-role">{user?.superAdmin ? 'super_admin' : user?.role}</div></div>
           </div>
           <button className="dvc-exit" onClick={() => onExit()} title="기존 개발 포탈 화면으로 돌아갑니다">개발 포탈 ↗</button>
         </div>

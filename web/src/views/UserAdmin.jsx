@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { fetchJson, postJson, patchJson, delJson, putJson } from '../api.js';
+import { fetchJson, postJson, patchJson, delJson, putJson, getCurrentUser } from '../api.js';
+import { roleOptions, superTargetLocked, isAdminTier, permCell, toggleAdminDenied, roleBadgeTone, SUPER_LOCK_TITLE, SUPER_ROLE_TITLE, MATRIX_NOTE } from './userAdmin/roleText.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { TOOLS as SPECIAL_TOOLS } from './specialToolsList.js';
 import { enforcementOf, enforcementSummary, LEVEL_SERVER, LEVEL_PARTIAL } from './userAdmin/toolEnforcementText.js';
@@ -15,12 +16,13 @@ const TOOL_ROWS = roleToolRows(SPECIAL_TOOLS);
 import { hasMatrixKey, toggleMatrixKey, isToolAllowed, toggleToolDenied, setAllToolsDenied } from './userAdmin/permMatrixOps.js';
 import { STable } from '../components/STable.jsx';
 
-const ROLES = ['viewer', 'operator', 'admin'];
 import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 
 /** 설정 → 사용자 관리: 계정 CRUD + Google OTP(TOTP) 등록/해제 + 기능 권한 매트릭스 + 데이터 범위(scope). */
 export default function UserAdmin() {
   const [data, setData] = useState(null);
+  // v2.643: 나는 super_admin 인가 — /auth/me 가 superAdmin 을 싣는다(요청 문맥 role 은 admin 으로 접혀 있다).
+  const meSuper = getCurrentUser()?.superAdmin === true;
   const [error, setError] = useState(null);
   const [msg, setMsg] = useState(null);
   const [adding, setAdding] = useState(false);
@@ -109,9 +111,15 @@ export default function UserAdmin() {
     setPerms((p) => ({ ...p, matrix: toggleMatrixKey(p.matrix, role, key) }));
     setPermDirty(true);
   };
+  // v2.643: admin 행(CSV) 토글 — super_admin 만(서버도 403). 바꾸지 않았으면 adminDenied 를 보내도 서버가 통과시킨다.
+  const toggleAdminPerm = (key) => {
+    setPerms((p) => ({ ...p, matrix: toggleAdminDenied(p.matrix, key) }));
+    setPermDirty(true);
+  };
   const savePerms = async () => {
     const r = await putJson('/admin/permissions', {
       operator: perms.matrix.operator, viewer: perms.matrix.viewer, toolsDenied: perms.matrix.toolsDenied,
+      ...(perms.canEditAdminRow ? { adminDenied: perms.matrix.adminDenied || [] } : {}),
     }).catch((e) => ({ ok: false, reason: e.message }));
     if (r.ok) { setPerms((p) => ({ ...p, matrix: r.matrix })); setPermDirty(false); flash(true, '권한 매트릭스를 저장했습니다.'); }
     else flash(false, r.reason);
@@ -215,7 +223,7 @@ export default function UserAdmin() {
             <label>이름<input className="input" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Alice" /></label>
             <label>역할
               <select className="select" value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
-                {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                {roleOptions(meSuper, form.role).map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </label>
           </div>
@@ -235,13 +243,14 @@ export default function UserAdmin() {
               <tr key={u.username}>
                 <td><b>{u.username}</b>
                   {u.demo && <span className="badge blue" style={{ marginLeft: 8 }} title="내장 데모 계정 — viewer 고정·삭제 불가. 비밀번호가 설정된 동안만 로그인할 수 있습니다.">데모</span>}
-                  {u.superuser && <span className="badge green" style={{ marginLeft: 8 }} title="수퍼관리자 — 항상 admin 이며 강등·삭제·로그인 차단이 불가능합니다.">최고 관리자</span>}
+                  {u.superuser && <span className="badge green" style={{ marginLeft: 8 }} title="수퍼관리자 — 항상 super_admin 이며 강등·삭제·로그인 차단이 불가능합니다.">최고 관리자</span>}
+                  {u.role === 'super_admin' && <span className={`badge ${roleBadgeTone(u.role)}`} style={{ marginLeft: 8 }} title={SUPER_ROLE_TITLE}>super_admin</span>}
                 </td>
                 <td>{u.name}</td>
                 <td>
                   <select className="select" value={u.role} onChange={(e) => changeRole(u, e.target.value)} style={{ maxWidth: 130 }}
-                    disabled={u.demo || u.superuser} title={u.demo ? '데모 계정은 viewer 고정입니다.' : u.superuser ? '수퍼관리자는 admin 고정입니다.' : undefined}>
-                    {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                    disabled={u.demo || u.superuser || superTargetLocked(meSuper, u)} title={u.demo ? '데모 계정은 viewer 고정입니다.' : u.superuser ? '수퍼관리자는 super_admin 고정입니다.' : superTargetLocked(meSuper, u) ? SUPER_LOCK_TITLE : undefined}>
+                    {roleOptions(meSuper, u.role).map((r) => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </td>
                 <td>
@@ -258,8 +267,8 @@ export default function UserAdmin() {
                 </td>
                 {/* v2.555 사용자별 특수기능 접근 — admin 은 대상이 아니다(관리자 잠김 방지). */}
                 <td data-sort={overrideBadge(userOv(u.username)).mode}>
-                  {u.role === 'admin'
-                    ? <span className="muted" style={{ fontSize: 12 }} title="admin 은 항상 전체 기능을 사용합니다(관리자 잠김 방지).">전체</span>
+                  {isAdminTier(u.role)
+                    ? <span className="muted" style={{ fontSize: 12 }} title="admin·super_admin 은 항상 전체 기능을 사용합니다(관리자 잠김 방지).">전체</span>
                     : (() => {
                       const b = overrideBadge(userOv(u.username));
                       const cls = b.tone === 'bad' ? 'red' : b.tone === 'warn' ? 'amber' : 'gray';
@@ -273,11 +282,12 @@ export default function UserAdmin() {
                     })()}
                 </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  {superTargetLocked(meSuper, u) ? <span className="muted" style={{ fontSize: 12 }} title={SUPER_LOCK_TITLE}>super_admin 전용</span> : (<>
                   {/* 비밀번호가 로그인에 쓰일 수 없는 계정에는 [비번 설정]을 노출하지 않는다:
                        · admin·operator — OTP 전용 정책(비번 로그인 차단). 온보딩은 [OTP 등록](QR)으로 한다.
                        · OTP 등록 계정 — 서버가 OTP 분기를 우선해 비밀번호를 아예 검증하지 않는다.
                      viewer(데모 포함)는 비번 로그인을 쓰므로 계속 노출된다. */}
-                  {!u.totpEnabled && u.role !== 'admin' && u.role !== 'operator' && (
+                  {!u.totpEnabled && !isAdminTier(u.role) && u.role !== 'operator' && (
                     <>
                       <button className="tab" style={{ padding: '6px 10px', fontSize: 12 }} onClick={() => setPwEdit({ username: u.username, pw: '', pw2: '', error: null })}
                         title="비밀번호를 설정/변경합니다. admin·operator 는 이 비밀번호로 최초 1회 로그인한 뒤 OTP 등록을 마쳐야 하며, 등록 시 비밀번호는 삭제됩니다.">비번 설정</button>
@@ -296,6 +306,7 @@ export default function UserAdmin() {
                     : <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => startEnroll(u)}>OTP 등록</button>}
                   {' '}
                   {!u.demo && !u.superuser && <button className="logout-btn" style={{ padding: '6px 10px' }} onClick={() => remove(u)}>삭제</button>}
+                  </>)}
                 </td>
               </tr>
             ))}
@@ -325,12 +336,11 @@ export default function UserAdmin() {
             </div>
           </div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.7 }}>
-            역할에 기능 권한을 켜고 끕니다. <b>admin</b>은 항상 전체 권한을 가지며 변경할 수 없습니다.
-            서버에서 강제되므로(메뉴를 숨겨도 API 직접 호출 차단), 저장 즉시 각 사용자에 반영됩니다.
+            <BoldText text={MATRIX_NOTE} />
           </div>
           <div className="table-wrap">
             <STable>
-              <thead><tr><th>기능</th><th style={{ textAlign: 'center' }}>admin</th><th style={{ textAlign: 'center' }}>operator</th><th style={{ textAlign: 'center' }}>viewer</th></tr></thead>
+              <thead><tr><th>기능</th><th style={{ textAlign: 'center' }}>super_admin</th><th style={{ textAlign: 'center' }}>admin</th><th style={{ textAlign: 'center' }}>operator</th><th style={{ textAlign: 'center' }}>viewer</th></tr></thead>
               <tbody>
                 {(() => {
                   const rows = [];
@@ -338,14 +348,21 @@ export default function UserAdmin() {
                   for (const p of perms.catalog) {
                     if (p.group !== lastGroup) {
                       lastGroup = p.group;
-                      rows.push(<tr key={`g-${p.group}`}><td colSpan={4} style={{ background: 'rgba(148,163,184,.08)', fontWeight: 700, fontSize: 12 }}>{p.group}</td></tr>);
+                      rows.push(<tr key={`g-${p.group}`}><td colSpan={5} style={{ background: 'rgba(148,163,184,.08)', fontWeight: 700, fontSize: 12 }}>{p.group}</td></tr>);
                     }
                     rows.push(
                       <tr key={p.key}>
                         <td>{p.label} <span className="muted" style={{ fontSize: 11 }}>({p.key})</span></td>
-                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked readOnly disabled title="admin은 항상 전체" /></td>
-                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={hasMx('operator', p.key)} onChange={() => togglePerm('operator', p.key)} /></td>
-                        <td style={{ textAlign: 'center' }}><input type="checkbox" checked={hasMx('viewer', p.key)} onChange={() => togglePerm('viewer', p.key)} /></td>
+                        {['super_admin', 'admin', 'operator', 'viewer'].map((role) => {
+                          const c = permCell(p, role, perms);
+                          const onChange = role === 'admin' ? () => toggleAdminPerm(p.key) : () => togglePerm(role, p.key);
+                          return (
+                            <td key={role} style={{ textAlign: 'center' }}>
+                              <input type="checkbox" checked={c.checked} disabled={c.disabled} readOnly={c.disabled} title={c.title}
+                                onChange={c.disabled ? undefined : onChange} />
+                            </td>
+                          );
+                        })}
                       </tr>,
                     );
                   }

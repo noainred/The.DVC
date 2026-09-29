@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { downloadFile } from '../../api.js';
+import { downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import BoldText from '../../components/boldText.jsx';
 import BulkDeviceIo from './BulkDeviceIo.jsx';
 import {
@@ -32,6 +32,8 @@ export default function CvpBulkIo({ onDone }) {
   };
 
   const btn = { flex: 'none', padding: '6px 12px', fontSize: 12.5 };
+  // v2.643: CSV 가져오기/내보내기는 관리자 이상 + data.csv 권한만 — 이 패널은 CSV 전용이라 안내 한 줄로 바꾼다(훅은 모두 위에).
+  if (!canCsv()) return <div className="muted" style={{ fontSize: 12, minWidth: 0 }}>{CSV_DENIED_NOTE}</div>;
   return (
     <div style={{ minWidth: 0 }}>
       <div className="flex gap wrap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>

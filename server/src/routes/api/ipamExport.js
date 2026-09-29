@@ -30,6 +30,8 @@ import { getIpHistory, scanResultList, getIpHistoryMap } from '../../ipam/scanSt
 import { buildWorkbook } from '../../ipam/excel.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드
 import { todayStamp, DAY_OFFSET_MIN } from "../../util/dayKey.js";
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 
 
 // VM 전체 정보 export (특수 기능) — 선택 vCenter 의 모든 VM 을 '획득 가능한 최대 필드'로.
@@ -127,7 +129,7 @@ api.get('/tools/ipam', requirePerm('tools'), (req, res) => memoJson(req, res, 't
   // v2.631(감사 R2631-02): 예약 만료일을 화면이 '포탈 오프셋 기준 그 날' 로 되읽을 수 있게 오프셋을 싣는다(브라우저 시간대가 아니다).
   return { ...data, rows, tzOffsetMin: DAY_OFFSET_MIN, ...(q ? { q, matched, truncated } : {}) };
 }, { extraKey: `${scopeKey(req.user, store.get())}|${ipamRevKey()}|d${currentScanDatacenters(store.get().vcenters).sig}` })); // v2.638: 스캔 행 데이터센터 귀속이 바뀌면 캐시를 버린다
-api.get('/tools/vm-export', requirePerm('tools'), async (req, res) => {
+api.get('/tools/vm-export', csvPerm, requirePerm('tools'), async (req, res) => {
   const vcenterId = vmExportGuard(req, res);
   if (!vcenterId) return;
   try {
@@ -136,7 +138,7 @@ api.get('/tools/vm-export', requirePerm('tools'), async (req, res) => {
     res.json({ ...r, rows: r.rows.slice(0, 100) });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
-api.get('/tools/vm-export.csv', requirePerm('tools'), async (req, res) => {
+api.get('/tools/vm-export.csv', csvPerm, requirePerm('tools'), async (req, res) => {
   const vcenterId = vmExportGuard(req, res);
   if (!vcenterId) return;
   try {
@@ -195,7 +197,7 @@ api.get('/tools/ipam/vc-ranges', requirePerm('tools'), (req, res) => {
 
 // 스캔 대역 목록 CSV 내보내기 — JSON 라우트(/tools/ipam/vc-ranges)와 같은 scope 교집합.
 // vCenter 는 표시명으로 내보낸다(가져오기가 이름/ID 둘 다 해석). 재가져오기 가능한 형식.
-api.get('/tools/ipam/vc-ranges.csv', requirePerm('tools'), (req, res) => {
+api.get('/tools/ipam/vc-ranges.csv', csvPerm, requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const vcName = {};
@@ -216,7 +218,7 @@ api.get('/tools/ipam/netmap', requirePerm('tools'), (req, res) => {
 });
 
 // 스캔 결과를 '첨부파일'처럼 내려받기(CSV). 현재 결과 + 이력(상태/최초관측) 조인.
-api.get('/tools/ipam/scan-report.csv', requirePerm('tools'), (req, res) => {
+api.get('/tools/ipam/scan-report.csv', csvPerm, requirePerm('tools'), (req, res) => {
   const head = 'ip,hostname,status,open_ports,services,first_seen,last_seen,agent';
   // 스캔 결과 전량(전 사이트 IP/포트/서비스/수집엣지)은 vCenter 귀속이 없어 scope 판정 불가 →
   // 범위 제한 계정에는 헤더만 반환한다(ledger.js 스캔 행 차단과 일관 — 이 경로로 새면 하드닝 무의미).
@@ -447,7 +449,7 @@ api.delete('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), (req, res
  * 형제 라우트 `/tools/waste/export` 는 v2.500 부터 같은 가드를 갖고 있었는데 여기만 빠져 있었다.
  * **이 가드를 지우지 말 것.** 새 내보내기 라우트도 `acquireExport` 를 쓴다.
  */
-api.get('/tools/ipam.xlsx', requirePerm('tools'), async (req, res) => {
+api.get('/tools/ipam.xlsx', csvPerm, requirePerm('tools'), async (req, res) => {
   res.locals.perfExpectSlow = true; // 수십 초가 정상인 내보내기(v2.498 계측이 '느린 요청' 으로 세지 않게)
   const lock = acquireExport('ipam.xlsx', req);
   if (!lock.ok) return res.status(lock.status).json(lock.body);
@@ -468,7 +470,7 @@ api.get('/tools/ipam.xlsx', requirePerm('tools'), async (req, res) => {
 });
 
 // CSV export of the IP ledger for sharing with other tools/spreadsheets.
-api.get('/tools/ipam.csv', requirePerm('tools'), (req, res) => {
+api.get('/tools/ipam.csv', csvPerm, requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const { rows } = buildIpamRows(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const head = ['ip', 'vcenter_id', 'vcenter_name', 'owner_type', 'owner_name', 'power_state', 'guest_os', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate',
@@ -520,7 +522,7 @@ function vcResolver(snap, user) {
   const rv = makeVcResolver((snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id)));
   return (s) => rv(s).id;
 }
-api.get('/tools/ipam/manage.csv', requirePerm('tools'), (req, res) => {
+api.get('/tools/ipam/manage.csv', csvPerm, requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const vcId = String(req.query.vcenterId || '');
   if (vcId && !inUserScope(req.user, snap, vcId)) return res.status(404).json({ error: 'vCenter를 찾을 수 없습니다.' });
@@ -534,7 +536,7 @@ api.get('/tools/ipam/manage.csv', requirePerm('tools'), (req, res) => {
   res.setHeader('X-Ipam-Hidden-Out-Of-Scope', String(hiddenOutOfScope));
   res.send(manageToCsv(entries, { vcName: (id) => names.get(id) || id, dayOf: (iso) => reservedUntilDay(iso) }));
 });
-api.get('/tools/ipam/manage/sample.csv', requirePerm('tools'), (_req, res) => {
+api.get('/tools/ipam/manage/sample.csv', csvPerm, requirePerm('tools'), (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="ip-manage-sample.csv"');
   res.send(manageSampleCsv(STATUSES, DEVICE_TYPES));
@@ -545,7 +547,7 @@ api.get('/tools/ipam/manage/sample.csv', requirePerm('tools'), (_req, res) => {
  * 적용(dryRun=false)은 **서버가 다시 판정**한다 — 화면이 보낸 판정 결과를 믿지 않는다(그 사이 값이 바뀌었을 수 있다).
  * 조각 안에서 오류가 있는 행만 빼고 나머지를 적용한다(사용자가 결과표로 무엇이 빠졌는지 본다).
  */
-api.post('/tools/ipam/manage/import', canWrite, requirePerm('tools'), (req, res) => {
+api.post('/tools/ipam/manage/import', csvPerm, canWrite, requirePerm('tools'), (req, res) => {
   const text = typeof req.body?.csv === 'string' ? req.body.csv : '';
   if (!text.trim()) return res.status(400).json({ ok: false, reason: 'CSV 내용이 비어 있습니다.' });
   const dryRun = req.body?.dryRun !== false;

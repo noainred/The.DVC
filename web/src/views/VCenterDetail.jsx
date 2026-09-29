@@ -1,7 +1,7 @@
 import { unitText } from './unitText.js';
 import { numOrNull } from '../numOrNull.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, usePolling, toolAllowed } from '../api.js';
+import { fetchJson, postJson, usePolling, toolAllowed, canCsv } from '../api.js'; // v2.643 canCsv: CSV 내보내기 게이팅
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, DataTable, SearchBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
@@ -527,10 +527,10 @@ export default function VCenterDetail({ site, onBack }) {
                   title="모든 클러스터·호스트를 트리 펼침 없이 한 표로 봅니다(현재 'Off VM 포함' 설정이 가상화율에 반영됩니다)">
                   📋 전체 현황
                 </button>
-                <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} onClick={exportOverviewCsv}
+                {canCsv() && <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} onClick={exportOverviewCsv}
                   title="모든 클러스터·호스트의 현황(VM 수·CPU/MEM 사용률·가상화율·할당/물리 자원·ESXi 버전·모델·전력·온도)을 CSV 로 내려받습니다">
                   ⤓ CSV
-                </button>
+                </button>}
               </span>
             )}
           </div>

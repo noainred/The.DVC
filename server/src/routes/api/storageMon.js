@@ -30,6 +30,8 @@ import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgen
 import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, maskPollerStatus } from '../../auth/addressMask.js';
 import { latestMapByDevice } from '../../storage/latestSnapshots.js';
 import { numOrNull } from '../../util/numOrNull.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 /**
  * 연결 테스트 응답의 개수 요약(v2.603 RECENT2603-04). 노드·경보는 수집기가 못 읽으면 null 이다 — 0 으로 바꾸지 않는다
  * (0 은 '경보 없음' 이라는 거짓). 풀·계정은 배열 길이라 빈 배열이면 0 이 맞다.
@@ -344,7 +346,7 @@ function stParseBody(body = {}) {
  * 덤프이므로 **requireSettingsOwner**(백업 라우트와 동일 게이트 — server/CLAUDE.md 규칙)를
  * 추가로 통과해야 하고 감사로그를 남긴다. admin 이어도 소유자가 아니면 403.
  */
-api.get('/tools/storage/devices/export.csv', adminOnly, fullScopeOnly, (req, res) => {
+api.get('/tools/storage/devices/export.csv', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   const withPw = String(req.query.passwords || '') === '1';
   const send = () => {
     const devices = withPw ? listDevicesWithSecrets() : listDevices();
@@ -359,7 +361,7 @@ api.get('/tools/storage/devices/export.csv', adminOnly, fullScopeOnly, (req, res
 });
 
 /** 샘플 CSV 템플릿 다운로드 — 헤더 + 컬럼 설명 주석 + 예시 2행. */
-api.get('/tools/storage/devices/sample.csv', adminOnly, fullScopeOnly, (_req, res) => {
+api.get('/tools/storage/devices/sample.csv', csvPerm, adminOnly, fullScopeOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="storage-devices-sample.csv"');
   res.send(sampleCsv());
@@ -368,7 +370,7 @@ api.get('/tools/storage/devices/sample.csv', adminOnly, fullScopeOnly, (_req, re
 /* ── 자유텍스트 내보내기·샘플(v2.513, 사용자 요청) ──
  * CSV 는 헤더·구분자를 맞춰야 하는데 현장 장비 목록은 위키 표·메일 본문·엑셀 한 컬럼으로 온다.
  * 붙여넣은 그대로 받는 경로를 같은 파이프라인에 붙였다. **비밀번호는 담지 않는다**(CSV 와 같은 계약). */
-api.get('/tools/storage/devices/export.txt', adminOnly, fullScopeOnly, (req, res) => {
+api.get('/tools/storage/devices/export.txt', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   const devices = listDevices();
   logAudit({ user: req.user?.username, action: '스토리지 자유텍스트 내보내기', detail: `${devices.length}대` });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -376,7 +378,7 @@ api.get('/tools/storage/devices/export.txt', adminOnly, fullScopeOnly, (req, res
   res.send(devicesToText(devices, dcNameMap()));
 });
 
-api.get('/tools/storage/devices/sample.txt', adminOnly, fullScopeOnly, (_req, res) => {
+api.get('/tools/storage/devices/sample.txt', csvPerm, adminOnly, fullScopeOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="storage-devices-sample.txt"');
   res.send(sampleText());
@@ -391,7 +393,7 @@ api.get('/tools/storage/devices/sample.txt', adminOnly, fullScopeOnly, (_req, re
  * 검증 규칙은 실제 저장과 동일(registry.deviceInputIssue 단일 소스 — analyzeImport 주석) +
  * 파일 내 중복(host+type) 검출. UI 는 검증 통과 후에만 실행 버튼을 활성화한다.
  */
-api.post('/tools/storage/devices/import', adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/storage/devices/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   const { rows, error, warnings, headerUsed, order, format, raw } = stParseBody(req.body || {});
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -474,7 +476,7 @@ api.post('/tools/storage/devices/import', adminOnly, fullScopeOnly, (req, res) =
  *   (닿지 못한 것을 실패라 하면 사용자가 멀쩡한 자격증명을 의심하며 고친다 — 정직 규약).
  * ⚠ 자동 재시도 없음 — 잘못된 비밀번호를 반복하면 어레이 계정이 잠긴다(bulkRun 이 강제).
  */
-api.post('/tools/storage/devices/import/test', adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/storage/devices/import/test', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   const p = stParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 
@@ -531,7 +533,7 @@ api.post('/tools/storage/devices/import/test', adminOnly, fullScopeOnly, (req, r
 });
 
 /** 연결 테스트 진행률·결과(폴링). 자격증명은 응답에 없다(bulkRun publicRun). */
-api.get('/tools/storage/devices/import/test/:id', adminOnly, fullScopeOnly, (req, res) => {
+api.get('/tools/storage/devices/import/test/:id', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   const run = publicRun(req.params.id);
   if (!run || run.kind !== 'storage') return res.status(404).json({ ok: false, reason: '실행을 찾을 수 없습니다(15분 지나 폐기되었을 수 있습니다).' });
   res.json({ ok: true, ...run });

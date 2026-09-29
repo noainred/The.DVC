@@ -10,6 +10,9 @@ import { loadRegistry as loadNsxFull, listRegistry as listNsx, addManager as add
 import { nsxStore, nsxAuthGuard } from '../../nsx/store.js';
 import { adminOnly, existsFile, fullScopeOnlyWith } from './shared.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
+import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requireCsvPerm('data.csv');
 
 // v2.611 AUTHZ2611-02: vCenter 가져오기(replace 는 전체 교체)·NSX 매니저 등록은 전 법인 등록부다 — v2.607 `POST /vcenters`
 //   의 fleetWideOnly 를 이 경로로 우회할 수 있었다(범위 admin 이 replace 로 등록 vCenter 전체를 교체). 범위 계정 403.
@@ -88,7 +91,7 @@ adminRouter.get('/geocode', adminOnly, (req, res) => {
 
 // Import an uploaded vcenters.json. Body: { vcenters:[...], mode?:'merge'|'replace' }
 // (a bare array is also accepted). Triggers a re-poll on success.
-adminRouter.post('/vcenters/import', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/vcenters/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const body = req.body || {};
   const list = Array.isArray(body) ? body : body.vcenters;
   const result = importVcenters(list, body.mode === 'replace' ? 'replace' : 'merge');
@@ -97,7 +100,7 @@ adminRouter.post('/vcenters/import', adminOnly, fleetOnly, (req, res) => {
 });
 
 // Default server-side path suggestions for the "server file" import.
-adminRouter.get('/vcenters/import-suggestions', adminOnly, (_req, res) => {
+adminRouter.get('/vcenters/import-suggestions', csvPerm, adminOnly, (_req, res) => {
   const candidates = [
     `${config.configDir}/vcenters.json`,
     '/etc/vmware-portal/vcenters.json',
@@ -105,7 +108,7 @@ adminRouter.get('/vcenters/import-suggestions', adminOnly, (_req, res) => {
   ];
   res.json({ default: candidates[0], suggestions: [...new Set(candidates)].filter((p) => existsFile(p)) });
 });
-adminRouter.post('/vcenters/import-file', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/vcenters/import-file', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const { path: filePath, mode } = req.body || {};
   if (!filePath || typeof filePath !== 'string') return res.status(400).json({ ok: false, reason: '파일 경로가 필요합니다.' });
   if (!isAllowedImportPath(filePath)) return res.status(400).json({ ok: false, reason: '허용된 경로(설정 디렉터리의 .json)만 불러올 수 있습니다.' });

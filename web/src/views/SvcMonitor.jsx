@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
-import { usePolling, postJson, putJson, delJson, fetchJson, getCurrentUser, downloadFile } from '../api.js';
+import { usePolling, postJson, putJson, delJson, fetchJson, getCurrentUser, downloadFile, canCsv } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { useTreeDnd } from '../hooks/useTreeDnd.js';
 import TemplateTab from './svcmon/TemplateTab.jsx';   // 템플릿 화면은 하나만 — 폴더 적용 모달에서도 이 화면을 불러 쓴다
@@ -102,6 +102,7 @@ export default function SvcMonitor() {
   // 2000 이므로 그 이상은 data.truncated 배너로 알린다(모드 토글은 클라이언트 필터라 즉시 유지).
   const { data, error, loading } = usePolling('/svcmon/state', { seq, limit: 2000 }, 15_000);
   const me = getCurrentUser();
+  const csvOk = canCsv(); // v2.643: 폴더 CSV 내보내기는 관리자 이상 + data.csv 권한만
   const canEdit = me?.role === 'admin' || me?.role === 'operator';
 
   // 인프라/서비스 전환을 URL(#/svcmon/<키>)에 싣는다(v2.438) — 새로고침해도 보던 쪽이 유지된다.
@@ -692,10 +693,10 @@ export default function SvcMonitor() {
             )}
             {!ctx.targetId && <>
               {/* 등록은 위 '이 폴더에 등록…' 하나로 통합(소량 직접입력·대량 붙여넣기·파일·템플릿). */}
-              <button className="pc-ctx-item" onClick={() => {
+              {csvOk && <button className="pc-ctx-item" onClick={() => {
                 setCtx(null); closeSubs();
                 exportFolderCsv(ctx.node === 'root' ? '' : ctx.node);
-              }}>⤓ 이 폴더 CSV 내보내기</button>
+              }}>⤓ 이 폴더 CSV 내보내기</button>}
               <button className="pc-ctx-item" onClick={() => {
                 const p = ctx.node === 'root' ? '' : ctx.node;
                 setCtx(null); closeSubs();

@@ -40,6 +40,8 @@ import * as swBulk from '../../sanswitch/bulk.js';
 import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools'); // 조회 라우트에도 기능 권한(v2.416 감사 L-3 — 프론트 게이팅만으로는 API 직접 호출을 못 막는다)
@@ -828,7 +830,7 @@ function swParseBody(body = {}) {
   return { ...r, warnings: [], headerUsed: null, order: r.order || swBulk.COLUMNS, format, raw };
 }
 
-api.get('/tools/sanswitch/devices/export.csv', adminOnly, fullScopeOnly, (req, res) => {
+api.get('/tools/sanswitch/devices/export.csv', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   const devices = listDevices();
   logAudit({ user: req.user?.username, action: 'SAN 스위치 CSV 내보내기', detail: `${devices.length}대` });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -836,7 +838,7 @@ api.get('/tools/sanswitch/devices/export.csv', adminOnly, fullScopeOnly, (req, r
   res.send(swBulk.devicesToCsv(devices, swDcName()));
 });
 
-api.get('/tools/sanswitch/devices/export.txt', adminOnly, fullScopeOnly, (req, res) => {
+api.get('/tools/sanswitch/devices/export.txt', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   const devices = listDevices();
   logAudit({ user: req.user?.username, action: 'SAN 스위치 자유텍스트 내보내기', detail: `${devices.length}대` });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -844,13 +846,13 @@ api.get('/tools/sanswitch/devices/export.txt', adminOnly, fullScopeOnly, (req, r
   res.send(swBulk.devicesToText(devices, swDcName()));
 });
 
-api.get('/tools/sanswitch/devices/sample.csv', adminOnly, fullScopeOnly, (_req, res) => {
+api.get('/tools/sanswitch/devices/sample.csv', csvPerm, adminOnly, fullScopeOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="san-switches-sample.csv"');
   res.send(swBulk.sampleCsv());
 });
 
-api.get('/tools/sanswitch/devices/sample.txt', adminOnly, fullScopeOnly, (_req, res) => {
+api.get('/tools/sanswitch/devices/sample.txt', csvPerm, adminOnly, fullScopeOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="san-switches-sample.txt"');
   res.send(swBulk.sampleText());
@@ -864,7 +866,7 @@ api.get('/tools/sanswitch/devices/sample.txt', adminOnly, fullScopeOnly, (_req, 
  *   자격증명을 의심하며 고친다(정직 규약).
  * ⚠ 자동 재시도 없음(잘못된 비밀번호 반복 = 계정 잠금). bulkRun 이 강제한다.
  */
-api.post('/tools/sanswitch/devices/import/test', adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/sanswitch/devices/import/test', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   const p = swParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
   const resolveDc = swDcResolver();
@@ -907,7 +909,7 @@ api.post('/tools/sanswitch/devices/import/test', adminOnly, fullScopeOnly, (req,
 });
 
 /** 연결 테스트 진행률·결과(폴링). 자격증명은 응답에 없다(bulkRun publicRun). */
-api.get('/tools/sanswitch/devices/import/test/:id', adminOnly, fullScopeOnly, (req, res) => {
+api.get('/tools/sanswitch/devices/import/test/:id', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   const run = publicRun(req.params.id);
   if (!run || run.kind !== 'sanswitch') return res.status(404).json({ ok: false, reason: '실행을 찾을 수 없습니다(15분 지나 폐기되었을 수 있습니다).' });
   res.json({ ok: true, ...run });
@@ -919,7 +921,7 @@ api.get('/tools/sanswitch/devices/import/test/:id', adminOnly, fullScopeOnly, (r
  *  · `testRunId`    연결 테스트 실행 id — 주면 **통과한 줄과의 교집합**만 저장
  * 걸러낸 행은 버리지 않고 `skipped` 로 사유와 함께 돌려준다.
  */
-api.post('/tools/sanswitch/devices/import', adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/sanswitch/devices/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   const p = swParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 

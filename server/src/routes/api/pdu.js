@@ -28,6 +28,8 @@ import { summarize } from '../../pdu/types.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
@@ -159,7 +161,7 @@ export function registerPdu(api) {
 
   // ---- 등록/수정/삭제 -------------------------------------------------------
   // ⚠ 정적 경로를 파라미터 경로보다 먼저 등록한다(/tools/pdu/csv 가 :id 로 잡히지 않게).
-  api.get('/tools/pdu/csv/export', adminOnly, fullScopeOnly, (req, res) => {
+  api.get('/tools/pdu/csv/export', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
     const withPw = String(req.query.passwords || '') === '1';
     /*
      * ⚠ **소유자 게이트를 조건부로 두지 말 것**(v2.535 감사에서 고친 것):
@@ -185,13 +187,13 @@ export function registerPdu(api) {
     res.send(devicesToCsv(devices, dcName, { includePasswords: withPw }));
   }
 
-  api.get('/tools/pdu/csv/sample', adminOnly, fullScopeOnly, (_req, res) => {
+  api.get('/tools/pdu/csv/sample', csvPerm, adminOnly, fullScopeOnly, (_req, res) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="pdu-devices-sample.csv"');
     res.send(sampleCsv());
   });
 
-  api.post('/tools/pdu/csv/import', adminOnly, fullScopeOnly, (req, res) => {
+  api.post('/tools/pdu/csv/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
     const text = String(req.body?.csv || '');
     if (!text.trim()) return res.status(400).json({ ok: false, reason: 'CSV 내용이 비어 있습니다.' });
     const dcs = listDatacenters();

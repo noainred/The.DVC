@@ -26,6 +26,9 @@ import path from 'node:path';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
+import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requireCsvPerm('data.csv');
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('엣지 배포·패키지·LLM 설정·릴리스 노트는 전 법인에 걸친 동작이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 
@@ -135,7 +138,7 @@ adminRouter.delete('/agent-deploy/targets/:id', adminOnly, fleetOnly, (req, res)
  * (host,port,username)이 겹치는 행은 body.overwrite=true 명시 시에만 갱신한다.
  * privateKey(멀티라인)·gpuGuest(중첩)는 CSV 미지원 — 가져오기가 건드리지 않아 기존값 유지.
  */
-adminRouter.get('/agent-deploy/targets/export.csv', adminOnly, fleetOnly, (req, res) => {
+adminRouter.get('/agent-deploy/targets/export.csv', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const withSecrets = String(req.query.secrets || '') === '1';
   const send = () => {
     const list = withSecrets ? listTargetsRaw() : listTargets();
@@ -149,7 +152,7 @@ adminRouter.get('/agent-deploy/targets/export.csv', adminOnly, fleetOnly, (req, 
   send();
 });
 
-adminRouter.get('/agent-deploy/targets/sample.csv', adminOnly, fleetOnly, (_req, res) => {
+adminRouter.get('/agent-deploy/targets/sample.csv', csvPerm, adminOnly, fleetOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="agent-deploy-targets-sample.csv"');
   res.send(deploySampleCsv());
@@ -173,7 +176,7 @@ function markEnvIssues(rows, report, summary) {
   }
 }
 
-adminRouter.post('/agent-deploy/targets/import', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/agent-deploy/targets/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const { rows, error } = parseTargetsCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -494,7 +497,7 @@ adminRouter.post('/agent-deploy/collector-sync', adminOnly, fleetOnly, async (re
 });
 
 /* 텍스트 내보내기 — 붙여넣기 입력칸에 그대로 다시 넣을 수 있는 형식(왕복). 비밀 포함은 소유자 게이트. */
-adminRouter.get('/agent-deploy/targets/export.txt', adminOnly, fleetOnly, (req, res) => {
+adminRouter.get('/agent-deploy/targets/export.txt', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const withSecrets = String(req.query.secrets || '') === '1';
   const send = () => {
     const list = withSecrets ? listTargetsRaw() : listTargets();
@@ -507,7 +510,7 @@ adminRouter.get('/agent-deploy/targets/export.txt', adminOnly, fleetOnly, (req, 
   if (withSecrets) return requireSettingsOwner(req, res, send);
   send();
 });
-adminRouter.get('/agent-deploy/targets/sample.txt', adminOnly, fleetOnly, (req, res) => {
+adminRouter.get('/agent-deploy/targets/sample.txt', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const csv = String(req.query.format || '').toLowerCase() === 'csv';
   res.setHeader('Content-Type', csv ? 'text/csv; charset=utf-8' : 'text/plain; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="agent-deploy-bulk-sample.${csv ? 'csv' : 'txt'}"`);

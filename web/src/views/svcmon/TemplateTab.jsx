@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson, downloadFile } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import PreviewTable from './PreviewTable.jsx';
@@ -55,6 +55,7 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
   const [itemEdit, setItemEdit] = useState(null);    // { idx, item } · idx<0 = 신규
   const [applyCfg, setApplyCfg] = useState(null);    // { kind, path, includeSub, overwrite }
   const [csvOpen, setCsvOpen] = useState(false);      // CSV 가져오기 패널
+  const csvOk = canCsv(); // v2.643: 템플릿 CSV 가져오기/내보내기는 관리자 이상 + data.csv 권한만
   const [csvText, setCsvText] = useState('');
   const [csvPreview, setCsvPreview] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -231,9 +232,9 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
         <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 8 }}>
           <b>점검 템플릿 ({templates.length} / {limits.maxTemplates})</b>
           <div className="flex gap wrap">
-            <button className="tab" onClick={csvExport}>⤓ CSV 내보내기</button>
-            <button className="tab" onClick={csvSample}>⤓ 샘플 CSV</button>
-            {canEdit && <button className="tab" onClick={() => { setCsvOpen((v) => !v); setCsvPreview(null); }}>⤒ CSV 가져오기</button>}
+            {csvOk && <button className="tab" onClick={csvExport}>⤓ CSV 내보내기</button>}
+            {csvOk && <button className="tab" onClick={csvSample}>⤓ 샘플 CSV</button>}
+            {csvOk && canEdit && <button className="tab" onClick={() => { setCsvOpen((v) => !v); setCsvPreview(null); }}>⤒ CSV 가져오기</button>}
             {canEdit && !editing && <button className="login-btn" onClick={startNew}>+ 새 템플릿</button>}
           </div>
         </div>
@@ -287,7 +288,7 @@ export default function TemplateTab({ canEdit, initialApply = null }) {
         </div>
       </div>
 
-      {csvOpen && (
+      {csvOk && csvOpen && (
         <div className="card" style={{ padding: 14 }}>
           <b>템플릿 CSV 가져오기</b>
           <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>

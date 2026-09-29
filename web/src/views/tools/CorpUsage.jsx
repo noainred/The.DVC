@@ -9,7 +9,7 @@
  * ⚠ 서버 목록은 여기 없다 — 서버별 값은 '베어메탈 사용률' 화면이 소유한다(두 화면이 서버 판정을 복제하지 않게).
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson } from '../../api.js';
+import { fetchJson, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -109,7 +109,7 @@ export default function CorpUsage({ scope = '' } = {}) {
             <input type="checkbox" checked={onlyScope} onChange={(e) => setOnlyScope(e.target.checked)} /> 선택한 법인만
           </label>
         )}
-        <button className="tab" onClick={exportCsv} disabled={!rows.length}>CSV</button>
+        {canCsv() && <button className="tab" onClick={exportCsv} disabled={!rows.length}>CSV</button>}
         <button className="tab" onClick={load} disabled={loading}>{loading ? '불러오는 중…' : '새로고침'}</button>
       </div>
       {error && <div style={{ fontSize: 12, color: 'var(--amber)' }}>새로고침 실패 — 아래는 직전 값입니다: {String(error?.message || error)}</div>}

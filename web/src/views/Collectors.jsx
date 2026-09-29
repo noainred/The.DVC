@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 // v2.560: mock vCenter id 판정은 `views/collectors/emptyInvText.js` 하나가 소유한다 —
 // 진단 모달이 같은 기준을 써야 '배지는 뜨는데 모달은 다른 원인을 말한다' 가 되지 않는다.
 import { agoText } from './tools/relTime.js'; // v2.618 ARCH-5
-import { fetchJson, postJson, putJson, delJson, downloadFile } from '../api.js';
+import { fetchJson, postJson, putJson, delJson, downloadFile, canCsv } from '../api.js';
 import { droppedSecretNote } from './droppedSecretText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
@@ -33,6 +33,7 @@ export default function Collectors() {
   const [pwBusy, setPwBusy] = useState(false);
   const [dcs, setDcs] = useState([]); // 데이터센터(법인) 목록 — 등록 폼 콤보박스용
   const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — CSV 일괄 관리(v2.338)
+  const csvOk = canCsv(); // v2.643: CSV 가져오기/내보내기는 관리자 이상 + data.csv 권한만
   const [diag, setDiag] = useState(null); // { collector, cards[] } — 경고 배지 상세(v2.437)
 
   const load = async () => {
@@ -276,14 +277,14 @@ export default function Collectors() {
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy} onClick={() => upgrade(null)}>모두 업그레이드</button>
           <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={busy || !enabledCount} title="모든(또는 선택한) 엣지 포탈의 로컬 계정 비밀번호를 한 번에 변경" onClick={() => { setPwForm({ username: 'admin', password: '', confirm: '', includeCentral: false }); setPwResult(null); }}>🔑 엣지 비번 일괄 변경</button>
           <button className="logout-btn" style={{ padding: '9px 14px', color: 'var(--red)', borderColor: erroredCount ? 'var(--red)' : undefined }} disabled={busy || !erroredCount} title="상태가 '오류'인 수집 서버를 일괄 삭제" onClick={removeErrored}>오류 서버 일괄 삭제{erroredCount ? ` (${erroredCount})` : ''}</button>
-          <button className="logout-btn" style={{ padding: '9px 14px' }} title="등록 수집 서버 목록을 CSV 로 내려받기(기본 토큰 제외)" onClick={() => setCsvModal('export')}>⤓ CSV</button>
-          <button className="logout-btn" style={{ padding: '9px 14px' }} title="CSV 로 수집 서버 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인" onClick={() => setCsvModal('import')}>⤒ CSV 가져오기</button>
+          {csvOk && <button className="logout-btn" style={{ padding: '9px 14px' }} title="등록 수집 서버 목록을 CSV 로 내려받기(기본 토큰 제외)" onClick={() => setCsvModal('export')}>⤓ CSV</button>}
+          {csvOk && <button className="logout-btn" style={{ padding: '9px 14px' }} title="CSV 로 수집 서버 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인" onClick={() => setCsvModal('import')}>⤒ CSV 가져오기</button>}
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 수집 서버 추가</button>
         </div>
       </div>
 
-      {csvModal === 'export' && <CollectorsCsvExportModal onClose={() => setCsvModal(null)} />}
-      {csvModal === 'import' && <CollectorsCsvImportModal onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); load(); }} />}
+      {csvOk && csvModal === 'export' && <CollectorsCsvExportModal onClose={() => setCsvModal(null)} />}
+      {csvOk && csvModal === 'import' && <CollectorsCsvImportModal onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); load(); }} />}
 
       {banner && (
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,

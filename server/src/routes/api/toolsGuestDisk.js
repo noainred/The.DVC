@@ -15,6 +15,8 @@ import { guestDiskDbStatus } from '../../guestdisk/db.js';
 import { guestDiskPollerStatus, runGuestDiskNow } from '../../guestdisk/poller.js';
 import { load as loadSettings, save as saveSettings } from '../../guestdisk/settings.js';
 import { todayStamp } from "../../util/dayKey.js";
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 
 export function registerToolsGuestDisk(api) {
   // 회수 목록(VM별 할당/사용/여유/비율) — scope 적용.
@@ -41,7 +43,7 @@ export function registerToolsGuestDisk(api) {
   });
 
   // CSV — 회수 목록. scope 적용, 수식 인젝션 가드 + BOM 은 service 에서.
-  api.get('/tools/guest-disk/export.csv', requirePerm('tools'), async (req, res) => {
+  api.get('/tools/guest-disk/export.csv', csvPerm, requirePerm('tools'), async (req, res) => {
     const allowed = scopedVcenterIds(req.user, store.get());
     const minReclaimGB = req.query.minReclaimGB != null ? Number(req.query.minReclaimGB) : loadSettings().minReclaimGB;
     const maxRatioPct = req.query.maxRatioPct != null && req.query.maxRatioPct !== '' ? Number(req.query.maxRatioPct) : null;

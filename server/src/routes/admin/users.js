@@ -1,6 +1,6 @@
 // 사용자 관리·권한 매트릭스·비밀번호·TOTP — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
-import { listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, setLocalPassword, clearLoginCredentials } from '../../auth/auth.js';
-import { PERMISSION_CATALOG, ROLES, loadMatrix, saveMatrix, resetMatrix, rolePermissions, USER_TOOL_MODES, setUserTools, userToolOverrides, effectiveToolAccess } from '../../auth/permissions.js';
+import { listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, setLocalPassword, clearLoginCredentials, actorIsSuperAdmin } from '../../auth/auth.js';
+import { PERMISSION_CATALOG, ROLES, ADMIN_TOGGLE_KEYS, loadMatrix, saveMatrix, resetMatrix, rolePermissions, USER_TOOL_MODES, setUserTools, userToolOverrides, effectiveToolAccess } from '../../auth/permissions.js';
 // v2.506: 도구 거부목록의 '서버 집행 가능 여부' 를 권한 화면에 함께 내려준다(무음 실패 제거).
 import { enforcedToolKeys, TOOL_ENFORCEMENT_NOTES } from '../../auth/toolAccess.js';
 import { logAudit } from '../../audit.js';
@@ -109,6 +109,9 @@ adminRouter.get('/permissions', adminOnly, (_req, res) => {
     catalog: PERMISSION_CATALOG,
     roles: ROLES,
     matrix: { admin: rolePermissions('admin'), ...loadMatrix() },
+    // v2.643: admin 행에서 끌 수 있는 키(CSV)와 그것을 바꿀 수 있는가(super_admin 만). super_admin 은 항상 전체.
+    adminToggleKeys: ADMIN_TOGGLE_KEYS,
+    canEditAdminRow: actorIsSuperAdmin(_req.user?.username),
     // v2.506(감사 미해결 #5): **서버가 실제로 막을 수 있는 도구인지** 함께 내려준다.
     // 도구 거부목록 게이트는 `api.use('/tools', …)` 에만 걸려 있어, 자기 API 가 `/api/tools/*`
     // 가 아닌 도구(예 /admin/*·/insights/*)는 이 목록으로 못 막는다. 그런데 화면은 그냥
@@ -140,7 +143,7 @@ adminRouter.put('/user-tools/:username', adminOnly, (req, res) => {
   const name = String(req.params.username || '').trim();
   const target = listUsers().find((u) => u.username === name);
   if (!target) return res.status(400).json({ ok: false, reason: '없는 계정입니다.' });
-  if (target.role === 'admin') {
+  if (target.role === 'admin' || target.role === 'super_admin') {
     return res.status(400).json({ ok: false, reason: 'admin 계정에는 기능 제한을 걸 수 없습니다(관리자 잠김 방지). 역할을 먼저 바꾸세요.' });
   }
   const b = req.body || {};
@@ -161,12 +164,27 @@ adminRouter.put('/permissions', adminOnly, (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 AUTHZ2607-01
   const b = req.body || {};
   const next = b.matrix || b; // { operator:[...], viewer:[...], toolsDenied:{...} } 또는 { matrix:{...} }
-  const matrix = saveMatrix({ operator: next.operator, viewer: next.viewer, toolsDenied: next.toolsDenied });
-  logAudit({ user: req.user?.username, action: '기능 권한 매트릭스 변경', target: 'permissions', detail: `operator=${matrix.operator.length}·viewer=${matrix.viewer.length}·거부(op/vw)=${matrix.toolsDenied.operator.length}/${matrix.toolsDenied.viewer.length}`, ip: req.ip || '' });
+  // v2.643: admin 행(CSV 등 관리자 전용 키)을 바꾸는 것은 super_admin 만 — admin 이 스스로 권한을 되살리지 못하게.
+  //   값이 그대로면 통과시킨다(화면이 전체 매트릭스를 보내도 admin 의 operator·viewer 편집이 막히지 않게).
+  let adminDenied;
+  if (next.adminDenied !== undefined) {
+    const cur = [...(loadMatrix().adminDenied || [])].sort().join(',');
+    const want = [...new Set((Array.isArray(next.adminDenied) ? next.adminDenied : []).filter((k) => ADMIN_TOGGLE_KEYS.includes(k)))].sort().join(',');
+    if (cur !== want && !actorIsSuperAdmin(req.user?.username)) {
+      return res.status(403).json({ ok: false, error: 'forbidden', code: 'super-admin-only', reason: 'admin 행(CSV 가져오기/내보내기)의 권한은 super_admin 만 바꿀 수 있습니다.' });
+    }
+    adminDenied = next.adminDenied;
+  }
+  const matrix = saveMatrix({ operator: next.operator, viewer: next.viewer, toolsDenied: next.toolsDenied, adminDenied });
+  logAudit({ user: req.user?.username, action: '기능 권한 매트릭스 변경', target: 'permissions', detail: `operator=${matrix.operator.length}·viewer=${matrix.viewer.length}·거부(op/vw)=${matrix.toolsDenied.operator.length}/${matrix.toolsDenied.viewer.length}·admin끔=${(matrix.adminDenied || []).join(',') || '없음'}`, ip: req.ip || '' });
   res.json({ ok: true, matrix: { admin: rolePermissions('admin'), ...matrix } });
 });
 adminRouter.post('/permissions/reset', adminOnly, (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 AUTHZ2607-01
+  // v2.643: 초기화는 admin 행(adminDenied)도 기본(허용)으로 되돌린다 — admin 이 super_admin 의 결정을 우회하지 못하게.
+  if ((loadMatrix().adminDenied || []).length && !actorIsSuperAdmin(req.user?.username)) {
+    return res.status(403).json({ ok: false, error: 'forbidden', code: 'super-admin-only', reason: 'super_admin 이 끈 admin 권한(CSV)이 있어 초기화는 super_admin 만 할 수 있습니다.' });
+  }
   const matrix = resetMatrix();
   logAudit({ user: req.user?.username, action: '기능 권한 매트릭스 초기화', target: 'permissions', ip: req.ip || '' });
   res.json({ ok: true, matrix: { admin: rolePermissions('admin'), ...matrix } });

@@ -4,10 +4,26 @@
 // 서버 계약: import 는 { csv, dryRun?, overwrite? } → dryRun 시 { report, summary{add,overwrite,
 // error,...}, total }, 커밋 시 { added, overwritten, skipped[], failed[] }.
 import React, { useRef, useState } from 'react';
-import { postJson, downloadFile } from '../api.js';
+import { postJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../api.js';
 import EscClose from './EscClose.jsx';
 import { STable } from './STable.jsx';
 import { passwordDroppedLines } from '../views/droppedSecretText.js';
+
+// v2.643: 방어선 — 호출부가 버튼을 숨기지만, 열렸더라도 CSV 권한이 없으면 안내만 보인다.
+function CsvDeniedModal({ title, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <EscClose onClose={onClose} />
+      <div className="modal card" style={{ maxWidth: 480 }}>
+        <h3 style={{ marginTop: 0 }}>{title}</h3>
+        <div className="muted" style={{ fontSize: 12.5 }}>{CSV_DENIED_NOTE}</div>
+        <div className="flex gap" style={{ justifyContent: 'flex-end', marginTop: 12 }}>
+          <button className="tab" style={{ padding: '8px 16px' }} onClick={onClose}>닫기</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /**
  * 내보내기 모달. exportPath 로 다운로드하고, secrets 체크 시 `?secrets=1`(또는 secretsQuery)을
@@ -23,6 +39,7 @@ export function CsvExportModal({ title, description, exportPath, secretsQuery = 
     catch (e) { setErr(e.message); }
     finally { setBusy(false); }
   };
+  if (!canCsv()) return <CsvDeniedModal title={title} onClose={onClose} />; // 훅은 모두 위에(React #310)
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <EscClose onClose={onClose} />
@@ -83,6 +100,7 @@ export function CsvImportModal({ title, description, importPath, samplePath, col
   };
   const verified = check && checkedText === text; // 검증 후 내용이 바뀌면 재검증 요구
   const actLabel = { add: '추가', overwrite: '덮어쓰기', error: '오류' };
+  if (!canCsv()) return <CsvDeniedModal title={title} onClose={onClose} />; // 훅은 모두 위에(React #310)
   return (
     <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
       <EscClose onClose={() => { if (!busy) onClose(); }} />

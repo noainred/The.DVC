@@ -794,3 +794,23 @@ export function previewColumns(items) {
   for (const it of Array.isArray(items) ? items.slice(0, 50) : []) if (it && typeof it === 'object') for (const k of Object.keys(it)) if (!cols.includes(k)) cols.push(k);
   return cols;
 }
+
+/**
+ * v2.643: 이벤트의 장비 목록 — 서버가 준 deviceRefs(식별자 → 장비 키·호스트명)를 화면용으로 편다.
+ *   호스트명이 있으면 호스트명, 없으면 원문 식별자(대개 시리얼)다. deviceRefs 가 없는 옛 응답은 devices 원문으로 폴백한다.
+ * @returns {Array<{id:string, key:string|null, hostname:string, label:string}>}
+ */
+export function eventDeviceRefs(e) {
+  const src = e && Array.isArray(e.deviceRefs) ? e.deviceRefs
+    : (e && Array.isArray(e.devices) ? e.devices.map((id) => ({ id })) : []);
+  return src.filter((d) => d && typeof d === 'object' && d.id != null && String(d.id) !== '').map((d) => {
+    const hostname = typeof d.hostname === 'string' ? d.hostname.trim() : '';
+    return { id: String(d.id), key: typeof d.key === 'string' && d.key ? d.key : null, hostname, label: hostname || String(d.id) };
+  });
+}
+
+/** 장비 칸 정렬값 — 보이는 글자(첫 장비의 호스트명/식별자)와 같은 기준. 없으면 빈 값(항상 뒤로). */
+export function eventDeviceSort(e) {
+  const r = eventDeviceRefs(e);
+  return r.length ? r[0].label : '';
+}

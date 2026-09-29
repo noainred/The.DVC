@@ -1,7 +1,7 @@
 // HardwareTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson } from '../../api.js';
+import { fetchJson, canCsv } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, Modal, SearchBox } from '../../components/ui.jsx';
 import { csvCell as esc } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import EscClose from '../../components/EscClose.jsx';
@@ -410,7 +410,7 @@ function ServerListBody({ corpName, model, servers, onRow }) {
             </select>
           )}
           <input className="input" placeholder="이름/모델/태그/주소 검색" value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 180 }} />
-          <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} disabled={!(servers || []).length} onClick={exportCsv}>⬇ CSV</button>
+          {canCsv() && <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} disabled={!(servers || []).length} onClick={exportCsv}>⬇ CSV</button>}
         </div>
       </div>
       <STable minWidth={720} className="data-table" style={{ width: '100%', fontSize: 13 }}>
@@ -499,7 +499,7 @@ function PartsInventory({ vc, onServer }) {
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           <SearchBox value={q} onChange={setQ} placeholder="파트/모델 검색…" />
-          <button className="tab" style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={exportCsv}>⬇ CSV</button>
+          {canCsv() && <button className="tab" style={{ flex: 'none', padding: '5px 12px', fontSize: 12 }} onClick={exportCsv}>⬇ CSV</button>}
         </div>
       </div>
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>

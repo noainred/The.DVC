@@ -46,6 +46,15 @@ const FAIL_STREAK_STOP = 3;
 export const FOLLOW_REQ_MAX = Math.max(16, Math.min(1024, Number(process.env.CVP_FOLLOW_MAX) || 160));
 const FOLLOW_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.CVP_FOLLOW_CONCURRENCY) || 4));
 const FOLLOW_DEPTH = 3;
+/**
+ * v2.643(실장비 캡처 — '포인터 추종 상한·시간 예산으로 32,406개 하위 개체를 읽지 못했습니다'): 종류마다 **필요한 깊이까지만** 따라간다.
+ *   포트는 intfStatus/Ethernet1 **한 단계**에 필드가 있는데(v2.642 실장비 확인) 그 아래 포인터까지 세 단계를 내려가며 장비당
+ *   요청 상한(FOLLOW_REQ_MAX)을 먹고, 뒤에 읽을 PSU·온도가 시간 예산을 잃었다. BGP 는 표 → VRF → 피어라 두 단계,
+ *   부품은 컨테이너(powerSupply) → 부품(PowerSupply1) 두 단계다. 이 깊이를 넘는 포인터는 **읽을 대상이 아니므로 '못 읽음' 으로
+ *   세지 않는다**(상한·예산 때문에 못 읽은 것만 센다 — 예전에는 마지막 깊이에서 남은 포인터를 전부 '못 읽음' 에 더했다).
+ *   ⚠ 부품 깊이 2 는 추정이다 — 트랜시버(xcvr) 목록이 그보다 깊으면 안 나온다(정직 기록).
+ */
+export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ interfaces: 1, counters: 1, memory: 1, cpu: 2, bgp: 2, power: 2, cooling: 2, temperature: 2, xcvr: 2 });
 /** 빈 응답(`{"notifications":[]}`) — 경로는 열려 있지만 그 노드에 값이 없다(v2.641 실장비 확인). */
 export const EMPTY_REASON = '경로에 데이터 없음(빈 응답 — 이 장비에 그 값이 없거나 경로가 다릅니다)';
 export const UNREAD_REASON = '응답은 왔지만 형식을 읽지 못했습니다';
@@ -130,6 +139,8 @@ export const PROBE_MAX = 28;
 export const EVENTS_BODY_MAX = Math.max(262_144, Number(process.env.CVP_EVENTS_BODY_MAX) || 4 * 1_048_576);
 /** 부품 종류 → 표시 kind. */
 export const PART_KINDS = Object.freeze({ power: 'psu', cooling: 'fan', temperature: 'temp', xcvr: 'xcvr' });
+/** v2.643: 부품 이름의 포인터 경로 구분자(부품 이름에 '/' 가 있어 — Fan1/1 — 다른 기호를 쓴다). */
+export const PART_PATH_SEP = ' › ';
 
 export class CvpAuthError extends Error {
   constructor(msg) { super(msg); this.authFailed = true; }
@@ -461,7 +472,8 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       const leaves = []; let requests = 0; let truncated = 0;
       // keys: 따라온 키의 경로. 개체 이름은 첫 키(포트·부품 이름)다 — BGP 만 두 번째 키(피어)를 쓰고 첫 키(VRF)를 필드로 남긴다.
       let level = ptrs.map((x) => ({ ...x, parent: parentPath, keys: [x.key], direct: !!suffix }));
-      for (let depth = 0; depth < FOLLOW_DEPTH && level.length; depth++) {
+      const maxDepth = FOLLOW_DEPTH_BY_KIND[kind] || FOLLOW_DEPTH;
+      for (let depth = 0; depth < maxDepth && level.length; depth++) {
         const next = [];
         const room = Math.max(0, FOLLOW_REQ_MAX - requests);
         if (level.length > room) { truncated += level.length - room; level = level.slice(0, room); }
@@ -476,7 +488,11 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
           const vals = P.splitJsonStream(r.text).values;
           const own = [];
           const bgpLike = kind === 'bgp' && x.keys.length >= 2;
-          const name = bgpLike ? x.keys[1] : x.keys[0];
+          // v2.643(실장비 캡처): 부품은 **포인터 경로 전체**로 이름을 짓는다. 첫 키로 지으면 `/environment/power/status` 아래
+          //   powerSupply → PowerSupply1·PowerSupply2 가 'powerSupply' 한 개체로 **합쳐져** 뒤 값이 앞 값을 덮었다(화면에 psu
+          //   'powerSupply'·'currentSensor' 같은 컨테이너 이름만 보이고 실제 PSU 가 안 보였다 — 장애가 나도 잡을 수 없다).
+          //   상태 필드가 없는 컨테이너는 parseParts 가 건너뛴다. 포트(첫 키)·BGP(둘째 키)는 그대로다.
+          const name = bgpLike ? x.keys[1] : Object.hasOwn(PART_KINDS, kind) ? x.keys.join(PART_PATH_SEP) : x.keys[0];
           for (const v of vals) {
             if (!v || typeof v !== 'object' || !Array.isArray(v.notifications)) continue;
             for (const n of v.notifications) {
@@ -486,7 +502,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
             }
           }
           if (own.length) leaves.push({ notifications: own });
-          if (sh.ptrs.length) for (const c of sh.ptrs) next.push({ ...c, parent: url, keys: [...x.keys, c.key], direct: false });
+          if (sh.ptrs.length && depth + 1 < maxDepth) for (const c of sh.ptrs) next.push({ ...c, parent: url, keys: [...x.keys, c.key], direct: false });
         });
         level = next;
       }

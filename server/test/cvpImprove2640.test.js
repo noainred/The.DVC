@@ -155,7 +155,8 @@ test('④ 장비 CSV — BOM·수식 가드·비-admin 주소 빈 칸·값 없�
   const cells = lines[1].split(',');
   assert.equal(cells[0], 'leaf1');
   const o = await call('op', 'GET', `/tools/cvp/devices.csv?cvpId=${id}`);
-  assert.equal(o.s, 200);
+  // v2.643: CSV 가져오기/내보내기는 관리자 이상(data.csv) — operator 는 403 이다(주소 가림 이전에 막힌다).
+  assert.equal(o.s, 403);
   assert.equal(o.t.includes('10.99.1.1'), false, '비-admin 은 관리 주소 없음');
   const vw = await call('viewer', 'GET', '/tools/cvp/devices.csv');
   assert.equal(vw.s, 403, 'viewer 는 tools 권한이 없다');

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
-import { fetchJson, postJson, delJson, downloadFile } from '../../api.js';
+import { fetchJson, postJson, delJson, downloadFile, canCsv } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox, usageColor } from '../../components/ui.jsx';
 import { columnsFor, cellValue, sortValue } from './storageColumns.js';
@@ -718,16 +718,16 @@ export default function StorageMonTool() {
           </button>
         ))}
         {/* CSV 일괄 관리(v2.313, 사용자 요구) — 내보내기·가져오기·샘플. v2.317: 내보내기는
-            비밀번호 포함 여부를 고르는 모달로(포함은 소유자 게이트 — 자격증명 덤프). */}
-        <span style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 2px' }} />
-        <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} title="현재 등록 장비를 CSV 로 내려받기(비밀번호 포함 여부 선택)"
-          onClick={() => setExportOpen(true)}>⬇ CSV 내보내기</button>
+            비밀번호 포함 여부를 고르는 모달로(포함은 소유자 게이트 — 자격증명 덤프). v2.643: 관리자 이상 + data.csv 권한만. */}
+        {canCsv() && <span style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 2px' }} />}
+        {canCsv() && <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} title="현재 등록 장비를 CSV 로 내려받기(비밀번호 포함 여부 선택)"
+          onClick={() => setExportOpen(true)}>⬇ CSV 내보내기</button>}
         {/* v2.513(사용자 요청): CSV + 자유텍스트 대량 등록 — 형식 검증 → 실제 연결 테스트 →
             통과분만 선택 등록 + 실패 행 수정 조언. 샘플·내보내기도 이 모달 안에 있다(두 형식 모두).
             공용 컴포넌트를 SAN 스위치 화면과 **함께** 쓴다(복제 금지 — BulkDeviceIo 헤더 주석). */}
-        <button className="tab" style={{ flex: 'none', padding: '7px 13px' }}
+        {canCsv() && <button className="tab" style={{ flex: 'none', padding: '7px 13px' }}
           title="CSV 또는 자유텍스트로 장비를 일괄 등록/수정합니다. 샘플 내려받기·형식 검증·실제 연결 테스트·선택 등록을 한 창에서 합니다."
-          onClick={() => setImportOpen(true)}>⬆ 대량 등록(CSV·텍스트)</button>
+          onClick={() => setImportOpen(true)}>⬆ 대량 등록(CSV·텍스트)</button>}
         {/* 전체 새로고침(v2.315, 사용자 요구) — 중앙 직접 장비 즉시 재수집 + 화면 갱신(엣지는 다음 주기). */}
         <span style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 2px' }} />
         <button className="tab" style={{ flex: 'none', padding: '7px 13px' }} disabled={busy}
@@ -809,11 +809,11 @@ export default function StorageMonTool() {
         /* v2.522: 중복으로 막혔을 때 그 장비를 실제로 보여준다 — 필터·찾기를 풀고(시야 밖이었던
            것이 원인) 그 host 로 좁힌 뒤 등록 폼을 닫는다. 'devices' 뷰로 되돌려야 표에 나온다. */
         onShowConflict={(c) => { clearFacets(); setDcQuery(c.host || ''); setView('devices'); setForm(null); }} />}
-      {importOpen && (
+      {canCsv() && importOpen && (
         <BulkDeviceIo base="/tools/storage" title="스토리지 장비 대량 등록 — CSV · 자유텍스트" keyLabel="host+type"
           onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />
       )}
-      {exportOpen && <CsvExport onClose={() => setExportOpen(false)} />}
+      {canCsv() && exportOpen && <CsvExport onClose={() => setExportOpen(false)} />}
 
       {view === 'devices' && <DeviceTable list={shown} ctx={cellCtx} typeLabel={typeLabel}
         empty={emptyInfo} onClear={() => { clearFacets(); setDcQuery(''); }} />}

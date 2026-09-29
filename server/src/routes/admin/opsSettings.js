@@ -17,6 +17,9 @@ import { refreshCerts } from '../../security/certMonitor.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
 import { mergeScopedMap, filterScopedMap, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
 import { todayStamp } from "../../util/dayKey.js";
+import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requireCsvPerm('data.csv');
 
 /*
  * v2.604 AUTHZ-2604-05: 범위 제한 admin 에게 범위 밖 vCenter 의 발생 중·최근 알림(제목에 VM·호스트·DS 이름)을 주지 않는다 —
@@ -244,7 +247,7 @@ adminRouter.get('/os-scan/results', adminOnly, (req, res) => {
   const { rows, omitted, scoped } = scopedOsRows(req);
   res.json({ total: rows.length, items: rows.slice(0, 10000), ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}) });
 });
-adminRouter.get('/os-scan/results.csv', adminOnly, (req, res) => {
+adminRouter.get('/os-scan/results.csv', csvPerm, adminOnly, (req, res) => {
   const { rows } = scopedOsRows(req);
   const esc = (v) => {
     let s = String(v ?? '');

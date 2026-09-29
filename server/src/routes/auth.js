@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import { authenticate, signToken, verifyToken, authMiddleware, requireEnrolled, requireRole, getUser, beginTotpEnroll, confirmTotpEnroll, setupState } from '../auth/auth.js';
-import { rolePermissions, roleToolsDenied, effectiveToolAccess } from '../auth/permissions.js';
+import { roleToolsDenied, effectiveToolAccess, userPermissions } from '../auth/permissions.js';
 import { loadAdConfig, saveAdConfig, testAd } from '../auth/ad.js';
 import { requireSettingsOwner, fullScopeOnlyWith } from './admin/shared.js';
 import { logAudit } from '../audit.js';
@@ -108,7 +108,7 @@ authRouter.post('/login', async (req, res) => {
   const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
   const enriched = {
     ...user,
-    permissions: rolePermissions(user.role),
+    permissions: userPermissions(user),   // v2.643: super_admin·admin 행(CSV) 반영 — 판정은 userPermissionSet 하나
     /*
      * ⚠⚠ **사용자 재정의를 반영한 유효값**이다(v2.555). `roleToolsDenied(role)` 로 되돌리면
      *   '이 사용자만 스토리지' 설정이 화면에 반영되지 않아 **숨겨야 할 메뉴가 그대로 보인다**.
@@ -149,7 +149,7 @@ authRouter.get('/me', authMiddleware, (req, res) => {
   // isSettingsOwner: '설정' 탭 노출 여부(계정명 목록 대신 불리언만 — 열거 단서 제거).
   const owners = (() => { try { return loadSessionSecurity().settingsOwners || []; } catch { return []; } })();
   const isSettingsOwner = !config.auth.enabled || owners.includes(req.user.username); // username 만(위 주석 참고)
-  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: rolePermissions(req.user.role), ...toolFields(req.user), isSettingsOwner, serviceHubUrl: config.serviceHubUrl || '' } });
+  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: userPermissions(req.user), ...toolFields(req.user), isSettingsOwner, serviceHubUrl: config.serviceHubUrl || '' } });
 });
 
 /**

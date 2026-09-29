@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { isSuperAdmin } from './roles.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 기능별 권한(Permission) 프레임워크 — "모든 기능에 대해 역할별 권한을 켜고 끈다".
@@ -47,7 +48,15 @@ export const PERMISSION_CATALOG = [
   { key: 'settings', label: '설정', group: '관리' },
   { key: 'upgrade', label: '업그레이드', group: '관리' },
   { key: 'users.manage', label: '사용자·권한 관리', group: '관리' },
+  // v2.643(사용자 지시 "csv import/export 기능은 관리자 이상만"): CSV·자유텍스트 가져오기/내보내기 전부.
+  //   **관리자 전용 키**다 — operator·viewer 행에는 넣을 수 없고(sanitizeRow 가 버린다), admin 은 기본 허용이며
+  //   권한 설정에서 끌 수 있다(`adminDenied`). super_admin 은 항상 허용(끌 수 없다 — 잠김 방지).
+  { key: 'data.csv', label: 'CSV 가져오기/내보내기', group: '관리', adminOnly: true, adminToggle: true },
 ];
+/** 관리자 전용 키 — operator·viewer 에게 줄 수 없다. */
+export const ADMIN_ONLY_KEYS = Object.freeze(PERMISSION_CATALOG.filter((p) => p.adminOnly).map((p) => p.key));
+/** admin 행에서 끌 수 있는 키(끄는 것은 super_admin 만 — routes/admin/users.js). super_admin 은 항상 허용. */
+export const ADMIN_TOGGLE_KEYS = Object.freeze(PERMISSION_CATALOG.filter((p) => p.adminToggle).map((p) => p.key));
 
 export const ALL_PERMISSION_KEYS = PERMISSION_CATALOG.map((p) => p.key);
 const CATALOG_SET = new Set(ALL_PERMISSION_KEYS);
@@ -65,9 +74,12 @@ const CATALOG_SET = new Set(ALL_PERMISSION_KEYS);
  * 합친다(가산만 — 관리자가 이미 내린 결정은 건드리지 않는다). 한 번 저장되면 버전이 찍혀
  * 이후로는 마이그레이션이 돌지 않는다.
  */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const KEYS_ADDED_IN = Object.freeze({
   2: ['svcmon'],   // v2.506 — 서비스 모니터 조회 권한 분리
+  // v2.643 — CSV 가져오기/내보내기. operator·viewer 기본값에 없으므로 가산되는 것이 없다(관리자 전용 키).
+  //   admin 은 adminDenied 가 비어 있으면 허용이라 옛 파일도 그대로 허용이다(조용한 거부 없음).
+  3: ['data.csv'],
 });
 
 // 기본 매트릭스(admin 은 항상 전체라 매트릭스에 담지 않는다).
@@ -164,8 +176,12 @@ function matrixFile() {
 let cached = null;
 
 function sanitizeRow(arr) {
-  // 카탈로그에 없는 키는 버리고, 중복 제거.
-  return [...new Set((Array.isArray(arr) ? arr : []).filter((k) => CATALOG_SET.has(k)))];
+  // 카탈로그에 없는 키·관리자 전용 키는 버리고, 중복 제거(operator·viewer 행 전용).
+  return [...new Set((Array.isArray(arr) ? arr : []).filter((k) => CATALOG_SET.has(k) && !ADMIN_ONLY_KEYS.includes(k)))];
+}
+/** admin 행에서 끈 키 — ADMIN_TOGGLE_KEYS 안의 것만. */
+function sanitizeAdminDenied(arr) {
+  return [...new Set((Array.isArray(arr) ? arr : []).filter((k) => ADMIN_TOGGLE_KEYS.includes(k)))];
 }
 
 // 도구 키(특수 기능 k) — 소문자/숫자/하이픈 슬러그만 허용(임의 값 차단), 중복 제거.
@@ -197,6 +213,7 @@ function defaultMatrix() {
     viewer: [...DEFAULT_MATRIX.viewer],
     toolsDenied: { operator: [...DEFAULT_TOOLS_DENIED.operator], viewer: [...DEFAULT_TOOLS_DENIED.viewer] },
     users: {},                 // v2.555 — 사용자별 도구 재정의(위 주석)
+    adminDenied: [],           // v2.643 — admin 행에서 끈 관리자 전용 키(기본 없음 = admin 허용)
   };
 }
 
@@ -219,6 +236,7 @@ export function loadMatrix() {
           viewer: sanitizeTools(td.viewer ?? DEFAULT_TOOLS_DENIED.viewer),
         },
         users: sanitizeUsers(m.users),
+        adminDenied: sanitizeAdminDenied(m.adminDenied),
       };
       return cached;
     } catch (err) {
@@ -250,6 +268,8 @@ export function saveMatrix(next = {}) {
     // ⚠ 부분 갱신: `users` 를 안 보내면 **기존 재정의를 유지**한다(역할 행만 저장하는 화면이
     //   사용자 재정의를 통째로 날리지 않게 — 실제로 그 화면이 먼저 있었다).
     users: next.users !== undefined ? sanitizeUsers(next.users) : (cur.users || {}),
+    // v2.643: 보내지 않으면 유지(부분 갱신). 바꾸는 권한(super_admin)은 라우트가 검사한다.
+    adminDenied: next.adminDenied !== undefined ? sanitizeAdminDenied(next.adminDenied) : (cur.adminDenied || []),
   };
   persistMatrix();
   return cached;
@@ -349,9 +369,15 @@ export function userToolOverrides() {
   return { ...(loadMatrix().users || {}) };
 }
 
-/** 역할이 가진 권한 키 집합(Set). admin → 전체. */
+/**
+ * 역할이 가진 권한 키 집합(Set). admin → 전체 − admin 행에서 끈 키(data.csv). super_admin 은 역할 단위로 부르지
+ * 말 것 — 요청 문맥에서 role 이 'admin' 으로 접혀 있다. 사용자 단위 판정은 `userPermissionSet`.
+ */
 export function rolePermissionSet(role) {
-  if (role === 'admin') return new Set(ALL_PERMISSION_KEYS);
+  if (role === 'admin') {
+    const off = new Set(loadMatrix().adminDenied || []);
+    return new Set(ALL_PERMISSION_KEYS.filter((k) => !off.has(k)));
+  }
   const m = loadMatrix();
   return new Set(role === 'operator' ? m.operator : role === 'viewer' ? m.viewer : []);
 }
@@ -361,9 +387,21 @@ export function rolePermissions(role) {
   return [...rolePermissionSet(role)];
 }
 
+/** 사용자(req.user) 의 권한 키 집합 — super_admin 은 항상 전체(v2.643). 판정의 단일 지점. */
+export function userPermissionSet(user) {
+  if (!user) return new Set();
+  if (isSuperAdmin(user)) return new Set(ALL_PERMISSION_KEYS);
+  return rolePermissionSet(user.role);
+}
+
+/** 사용자 권한 키 배열(프론트 노출용 — 로그인·/auth/me). */
+export function userPermissions(user) { return [...userPermissionSet(user)]; }
+
 /** 사용자(req.user) 가 특정 권한을 가지는지. */
 export function userHasPermission(user, key) {
   if (!user) return false;
-  if (user.role === 'admin') return true;
+  if (isSuperAdmin(user)) return true;
+  // admin 은 예전처럼 **어떤 키든** 통과한다(카탈로그 밖 키 포함 — 기존 계약) — admin 행에서 끈 키(data.csv)만 예외다.
+  if (user.role === 'admin') return !(loadMatrix().adminDenied || []).includes(key);
   return rolePermissionSet(user.role).has(key);
 }

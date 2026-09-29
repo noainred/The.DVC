@@ -160,8 +160,10 @@ test('AUTHZ-2602-01: 범위 operator 의 변경 요청은 403 · 저장되지 �
 test('AUTHZ-2602-01: 범위 계정의 조회와 저장하지 않는 변환은 그대로 · 전체 범위 operator 는 변경 가능', async () => {
   who = SCOPED_OP;
   assert.equal((await call('GET', '/assign')).status, 200);
-  assert.equal((await call('GET', '/targets/export.csv')).status, 200);
-  assert.equal((await call('POST', '/targets/hostmap/export.csv', { pairs: [] })).status, 200);
+  // v2.643: CSV 내보내기는 관리자 이상(data.csv) — operator 는 범위와 무관하게 403 이다.
+  const ex = await call('GET', '/targets/export.csv');
+  assert.equal(ex.status, 403); assert.deepEqual(ex.body?.requiredPerm, ['data.csv']);
+  assert.equal((await call('POST', '/targets/hostmap/export.csv', { pairs: [] })).status, 403);
   who = FULL_OP;
   const r = await call('PUT', '/assign/edge-ok', { mode: 'preview' });
   assert.equal(r.status, 200, JSON.stringify(r.body));

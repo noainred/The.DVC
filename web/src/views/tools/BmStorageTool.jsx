@@ -3,7 +3,7 @@
 // 서버는 표(컬럼) 형식 폼으로 등록하고, 그룹을 지정하면 그룹 합산 카드가 생긴다.
 // 수집 주체: 중앙 직접(기본) 또는 글로벌 엣지 위임(중앙→엣지 PUSH — 수집 서버(원격) URL 필요).
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, canCsv } from '../../api.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx'; // CSV 일괄 관리(v2.341)
@@ -114,18 +114,18 @@ export default function BmStorageTool() {
             {status.lastRunAt ? <> · 최근 수집 {fmtAgo(status.lastRunAt)}</> : ' · 아직 수집 전'}
           </span>
           <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={busy || status.running} onClick={collectNow}>{status.running ? '수집 중…' : '⚡ 지금 수집'}</button>
-          <button className="logout-btn" style={{ padding: '8px 14px' }} title="서버 목록을 CSV 로 내려받기(기본 비밀번호 제외)" onClick={() => setCsvModal('export')}>⤓ CSV</button>
-          <button className="logout-btn" style={{ padding: '8px 14px' }} title="CSV 로 다수 서버 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인" onClick={() => setCsvModal('import')}>⤒ CSV 가져오기</button>
+          {canCsv() && <button className="logout-btn" style={{ padding: '8px 14px' }} title="서버 목록을 CSV 로 내려받기(기본 비밀번호 제외)" onClick={() => setCsvModal('export')}>⤓ CSV</button>}
+          {canCsv() && <button className="logout-btn" style={{ padding: '8px 14px' }} title="CSV 로 다수 서버 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인" onClick={() => setCsvModal('import')}>⤒ CSV 가져오기</button>}
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setForm({ ...EMPTY })}>+ 서버 추가</button>
         </div>
       </div>
-      {csvModal === 'export' && (
+      {canCsv() && csvModal === 'export' && (
         <CsvExportModal title="베어메탈 스토리지 서버 CSV 내보내기" exportPath="/tools/bm-storage/export.csv"
           secretsLabel="비밀번호 포함(SSH 계정)"
           description={<>등록 서버(이름·호스트·포트·계정·그룹·엣지·방식·마운트·활성)를 CSV 로 내려받습니다. 마운트 여러 개는 한 셀에 세미콜론(;) 구분. 기본은 <b>비밀번호 제외</b>이며, 가져오기에서 비우면 기존 값이 유지됩니다.</>}
           onClose={() => setCsvModal(null)} />
       )}
-      {csvModal === 'import' && (
+      {canCsv() && csvModal === 'import' && (
         <CsvImportModal title="베어메탈 스토리지 서버 CSV 가져오기" importPath="/tools/bm-storage/import"
           samplePath="/tools/bm-storage/sample.csv"
           description={<>헤더 행 필수(<code>host</code>·<code>mounts</code>는 필수 — 마운트는 세미콜론(;) 구분 절대경로). <b>host+포트+계정</b>이 같은 서버는 <b>덮어쓰기</b>로 판정되며 아래에서 명시적으로 허용해야 적용됩니다. <b>agent 는 등록된 수집 서버(원격) 이름만</b> 허용됩니다(오타 시 오류). 양식은 <b>📄 샘플 CSV</b>로 받으세요.</>}

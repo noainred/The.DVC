@@ -30,7 +30,7 @@ function runChild(body, { env = {} } = {}) {
     const { adminRouter } = await import(SRC + 'routes/admin.js');
     auth.createUser({ username: 'sadm', role: 'admin', name: 'S', scope: { vcenters: ['vc-us-east'] } }, { trusted: true });
     auth.createUser({ username: 'viewer1', role: 'viewer', name: 'V' }, { trusted: true });
-    auth.createUser({ username: 'euop', role: 'operator', name: 'E', scope: { vcenters: ['vc-eu-west'] } }, { trusted: true });
+    auth.createUser({ username: 'euop', role: 'admin', name: 'E', scope: { vcenters: ['vc-eu-west'] } }, { trusted: true }); // v2.643: CSV 는 관리자 이상 — 범위 판정을 보려면 범위 admin 이어야 한다
     const app = express(); app.use(express.json({ limit: '5mb' }));
     app.use((req, _r, n) => {
       const name = req.headers['x-u'] || 'full';

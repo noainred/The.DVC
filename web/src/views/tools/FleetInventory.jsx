@@ -1,7 +1,7 @@
 // FleetInventory.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useRef } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson, putJson } from '../../api.js';
+import { fetchJson, postJson, putJson, canCsv } from '../../api.js';
 import { Loading, ErrorBox, ResultCount, SearchBox } from '../../components/ui.jsx';
 import { Card, fmtWatts } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
@@ -180,7 +180,7 @@ export function FleetInventory({ isAdmin }) {
             <option value="__none__">(미지정)</option>
           </select>
           <SearchBox className="input" style={{ maxWidth: 240 }} placeholder="서버/모델/서비스태그 검색" value={q} onChange={setQ} />
-          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={csv}>CSV</button>
+          {canCsv() && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={csv}>CSV</button>}
         </div>
       </div>
 

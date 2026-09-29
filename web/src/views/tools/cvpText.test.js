@@ -5,6 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as T from './cvpText.js';
+const { eventDeviceRefs, eventDeviceSort } = T;
 
 describe('값 표기', () => {
   it('null·빈 문자열은 0 이 아니라 — 이고 단위가 없다', () => {
@@ -455,5 +456,21 @@ describe('v2.640 ② 진단 — 원문 표본·파서 시험', () => {
     expect(ok.text).toContain('앞부분만');
     expect(T.previewSummary(null).ok).toBe(false);
     expect(T.previewColumns([{ a: 1 }, { b: 2, a: 3 }, null])).toEqual(['a', 'b']);
+  });
+});
+
+describe('v2.643 이벤트 장비 — 시리얼 대신 호스트명', () => {
+  it('찾은 장비는 호스트명·키, 못 찾은 것은 원문 식별자(키 없음)', () => {
+    const r = eventDeviceRefs({ deviceRefs: [{ id: 'HNN21445377', key: 'HNN21445377', hostname: 'SW-A' }, { id: 'JPA1' }] });
+    expect(r).toEqual([
+      { id: 'HNN21445377', key: 'HNN21445377', hostname: 'SW-A', label: 'SW-A' },
+      { id: 'JPA1', key: null, hostname: '', label: 'JPA1' },
+    ]);
+    expect(eventDeviceSort({ deviceRefs: [{ id: 'X', key: 'X', hostname: 'SW-B' }] })).toBe('SW-B');
+  });
+  it('옛 응답(deviceRefs 없음)은 devices 원문 · 오염 원소는 버린다', () => {
+    expect(eventDeviceRefs({ devices: ['S1', null, ''] }).map((d) => d.label)).toEqual(['S1']);
+    expect(eventDeviceRefs({ deviceRefs: [null, 'x', { id: 'S2', hostname: 5 }] })).toEqual([{ id: 'S2', key: null, hostname: '', label: 'S2' }]);
+    expect(eventDeviceSort({})).toBe('');
   });
 });

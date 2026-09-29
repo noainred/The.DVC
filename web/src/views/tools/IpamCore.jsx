@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js'; // v2.616 V5 통합 검색 · v2.617 열린 화면도 받는다
-import { fetchJson, usePolling, hasRole } from '../../api.js';
+import { fetchJson, usePolling, hasRole, canCsv } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, EntityDetail, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
 import { agentLabel, DEVTYPE_LABEL, DiscoveryBadge, fmtDt, fmtDur, MGMT, MgmtBadge } from './ipamShared.jsx';
@@ -264,7 +264,7 @@ function Ipam({ scope, onScope }) {
       {/* v2.636: IP관리 서브메뉴(사용자 요청 — KPI 아래). 설정 페이지는 대장 로딩과 무관하게 그린다(예전 모달은 대장을 다시 읽는
           순간 함께 사라져 입력이 날아갔다). ● = 저장하지 않은 입력이 있는 페이지(편집 초안 — 다른 페이지로 옮겨도 남는다). */}
       <nav className="card ipam-subnav" aria-label="IP관리 메뉴">
-        {menuGroups(access).map((g) => (
+        {menuGroups(access, { csvOk: canCsv() }).map((g) => (
           <div key={g.g} className="ipam-subnav-group">
             <span className="ipam-subnav-label">{g.label}</span>
             {g.pages.map((pg) => (

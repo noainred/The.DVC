@@ -543,6 +543,18 @@ function rowToDevice(r, portSum) {
   };
 }
 
+/**
+ * v2.643: 이벤트의 장비 식별자(대개 시리얼) → 장비 키·호스트명 색인. 이벤트 화면이 시리얼 대신 호스트명을 보이고
+ *   클릭하면 장비 상세를 열게 한다. 행 수는 장비 수(수백)라 가볍다 — 이벤트 행마다 조회하지 않고 한 번에 읽는다.
+ * @returns {Promise<{rows:Array<{agent:string,cvpId:string,key:string,serial:string,hostname:string}>, unavailable?:true}>}
+ */
+export async function deviceNameIndex({ cvpId = null } = {}) {
+  const db = await open();
+  if (!db) return { rows: [], unavailable: true };
+  const rows = db.conn.prepare(`SELECT agent, cvp_id, device_key, serial, hostname FROM device_latest ${cvpId != null ? 'WHERE cvp_id=?' : ''} LIMIT 20000`).all(...(cvpId != null ? [cvpId] : []));
+  return { rows: rows.map((r) => ({ agent: r.agent, cvpId: r.cvp_id, key: r.device_key, serial: r.serial || '', hostname: r.hostname || '' })) };
+}
+
 /** 장비 하나의 최신(부품·BGP 원소 포함) + 포트 목록. */
 export async function deviceDetail(agent, cvpId, key) {
   const db = await open();

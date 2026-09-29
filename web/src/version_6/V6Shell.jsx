@@ -174,7 +174,7 @@ export default function V6Shell({
         </div>
         <div className="v6-side-foot">
           <div><span>UPTIME</span> {uptimeText(health?.uptimeSec)}</div>
-          <div><span>ROLE</span> {user?.role || '—'}</div>
+          <div><span>ROLE</span> {user?.superAdmin ? 'super_admin' : (user?.role || '—')}</div>
           <button type="button" className="v6-exit" onClick={onExit} title="V6 를 끄고 기존 개발 포탈 화면으로 돌아갑니다(주소는 그대로)">기존 화면으로</button>
         </div>
       </nav>
