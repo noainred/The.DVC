@@ -1,6 +1,6 @@
 // LicenseTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, delJson } from '../../api.js';
+import { fetchJson, postJson, delJson, canCsv } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { DataTable, Loading, ErrorBox, UsageCell } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
@@ -232,7 +232,7 @@ export function LicenseExpiry({ scope, isAdmin }) {
           <button key={f} className="tab" style={{ padding: '5px 12px', background: familySel === f ? 'rgba(34,211,238,.15)' : undefined }}
             onClick={() => setFamilySel(familySel === f ? '' : f)}>{f}</button>
         ))}
-        <button className="tab" style={{ marginLeft: 'auto', padding: '5px 12px' }} onClick={exportCsv}>CSV 내보내기</button>
+        {canCsv() && <button className="tab" style={{ marginLeft: 'auto', padding: '5px 12px' }} onClick={exportCsv}>CSV 내보내기</button>}
       </div>
 
       <DataTable columns={cols} rows={rows} initialSort={{ key: 'daysLeft', dir: 'asc' }} />
@@ -283,7 +283,7 @@ export function LicenseExpiry({ scope, isAdmin }) {
               {/* v2.525(사용자 요청 "호라이즌 서버 등록이 필요하면 csv/text import/export 기능 추가해줘"):
                   스토리지·SAN 스위치와 **같은 공용 모달**을 쓴다(판정·문구 단일 소스 — BulkDeviceIo 헤더).
                   식별 키는 `id` 단독이고 타입 열은 없다(Horizon 은 장비 타입이 없다). */}
-              <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setHzBulk(true)}>📥 CSV · 자유텍스트 대량 등록</button>
+              {canCsv() && <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setHzBulk(true)}>📥 CSV · 자유텍스트 대량 등록</button>}
             </div>
             <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
               Horizon 8(2006+) REST API(<code>/rest/login → /rest/config/v1/licenses</code>)를 사용합니다. 읽기 전용 관리자 계정을 권장하며, 자격증명은 <code>$CONFIG_DIR/horizon.json</code>(0600)에만 저장됩니다.
@@ -292,7 +292,7 @@ export function LicenseExpiry({ scope, isAdmin }) {
           </div>
         </details>
       )}
-      {hzBulk && (
+      {canCsv() && hzBulk && (
         <BulkDeviceIo base="/admin/horizon" resource="servers" unitLabel="서버" typeCol={null}
           title="Horizon 연결 서버 대량 등록 — CSV · 자유텍스트" keyLabel="id"
           onClose={() => setHzBulk(false)} onDone={() => { setHzBulk(false); load(); }} />

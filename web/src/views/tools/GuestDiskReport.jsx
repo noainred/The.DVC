@@ -8,7 +8,7 @@
  * 판정·저장은 서버(guestdisk/*)가 하고 여기서는 표시만 한다.
  */
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { fetchJson, putJson, postJson, downloadFile, hasRole } from '../../api.js';
+import { fetchJson, putJson, postJson, downloadFile, hasRole, canCsv } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import GuestDiskDetailModal from './GuestDiskDetailModal.jsx';
@@ -283,7 +283,7 @@ export default function GuestDiskReport({ scope = '' }) {
         <button type="button" className="gd-btn" onClick={() => reload(minReclaimStr, maxRatioStr, factorStr)}>적용</button>
         {isAdmin && <button type="button" className="gd-btn" disabled={busy === 'run'} onClick={runNow}>{busy === 'run' ? '수집 중…' : '지금 수집'}</button>}
         <div className="gd-spacer" />
-        <button type="button" className="gd-btn primary" onClick={exportCsv} disabled={!rows.length}>⬇ CSV ({data.vmCount})</button>
+        {canCsv() && <button type="button" className="gd-btn primary" onClick={exportCsv} disabled={!rows.length}>⬇ CSV ({data.vmCount})</button>}
       </div>
 
       {isAdmin && form && (

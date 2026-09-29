@@ -94,3 +94,31 @@ test('⑤ 수집 — ptr 배열을 따라가 포트·BGP 피어를 읽고, /Kern
     assert.equal(hits.some((h) => h.includes('/Kernel/proc/stat')), false, 'PID 별 표를 CPU 후보로 조회하지 않는다');
   } finally { srv.close(); }
 });
+
+test('⑥ v2.643 부품 — 포인터 경로 전체로 이름(PowerSupply1·2 가 컨테이너 한 개로 합쳐지지 않는다) · 온도 소수 1자리', async () => {
+  const PW = '/Sysdb/environment/power/status';
+  const srv = http.createServer((req, res) => {
+    const send = (b) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(typeof b === 'string' ? b : JSON.stringify(b)); };
+    const raw = new URL(req.url, 'http://x').pathname;
+    if (raw === '/api/resources/inventory/v1/Device/all') return send(JSON.stringify({ result: { value: { key: { deviceId: 'SN-B' }, hostname: 'sw-b', streamingStatus: 'STREAMING_STATUS_ACTIVE' } } }));
+    const m = /^\/api\/v1\/rest\/SN-B(\/.*)$/.exec(raw);
+    if (!m) return send('{"notifications":[]}');
+    const rest = m[1].split('/').map((x) => decodeURIComponent(x)).join('/');
+    if (rest === PW) return send({ notifications: [note(PW, { powerSupply: ptrU(PW, 'powerSupply'), currentSensor: ptrU(PW, 'currentSensor') })] });
+    if (rest === `${PW}/powerSupply`) return send({ notifications: [note(rest, { PowerSupply1: ptrU(rest, 'PowerSupply1'), PowerSupply2: ptrU(rest, 'PowerSupply2') })] });
+    if (rest === `${PW}/powerSupply/PowerSupply1`) return send({ notifications: [note(rest, { state: { key: 'state', value: 'ok' } })] });
+    if (rest === `${PW}/powerSupply/PowerSupply2`) return send({ notifications: [note(rest, { state: { key: 'state', value: 'powerLoss' } })] });
+    if (rest === `${PW}/currentSensor`) return send({ notifications: [note(rest, { units: { key: 'units', value: 'A' } })] }); // 상태 필드 없음 → 부품 아님
+    return send('{"notifications":[]}');
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    const r = await C.collectCvp({ host: `http://127.0.0.1:${srv.address().port}`, authMode: 'token', token: 'T', verifyTls: false }, { budgetMs: 30_000, partsDue: true, prefer: new Map() });
+    const d = r.devices.find((x) => x.key === 'SN-B' || x.serial === 'SN-B');
+    const psu = (d.parts || []).filter((p) => p.kind === 'psu');
+    assert.deepEqual(psu.map((p) => p.name).sort(), [`powerSupply${C.PART_PATH_SEP}PowerSupply1`, `powerSupply${C.PART_PATH_SEP}PowerSupply2`], JSON.stringify(d.parts));
+    assert.equal(psu.find((p) => p.name.endsWith('PowerSupply2')).state === 'ok', false, 'powerLoss 인 PSU2 가 정상으로 보이면 안 된다(예전엔 PSU1 과 합쳐졌다)');
+  } finally { srv.close(); }
+  const t = P.parseParts(JSON.stringify({ notifications: [note('/x', { temperature: { key: 'temperature', value: 25.329440000000034 } })] }), 'temp');
+  assert.ok(t.parts[0].detail.includes('25.3℃'), t.parts[0].detail);
+});

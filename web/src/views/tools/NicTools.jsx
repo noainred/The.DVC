@@ -1,6 +1,6 @@
 // NicTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
-import { fetchJson } from '../../api.js';
+import { fetchJson, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
@@ -75,7 +75,7 @@ export function NicSpeed() {
           <span className="muted" style={{ fontSize: 12 }}>
             대상 {data.totalServers} · 수집됨 {data.collected}{data.missing ? ` · 미수집 ${data.missing}` : ''} · 가상화 {data.virtual} · 베어메탈 {data.baremetal} · vCenter 매칭 {data.vcCollected || 0}
           </span>
-          <button className="tab" style={{ marginLeft: 'auto', padding: '6px 12px' }} onClick={exportCsv}>CSV 내보내기</button>
+          {canCsv() && <button className="tab" style={{ marginLeft: 'auto', padding: '6px 12px' }} onClick={exportCsv}>CSV 내보내기</button>}
         </div>
 
         <div className="flex gap wrap" style={{ marginTop: 12, gap: 8 }}>
@@ -202,7 +202,7 @@ export function NicModels() {
           <span className="muted" style={{ fontSize: 12 }}>
             대상 {data.totalServers} · 수집됨 {data.collected}{data.missing ? ` · 미수집 ${data.missing}` : ''} · 모델 {(data.byModel || []).length}종 · vCenter 매칭 {data.vcCollected || 0} (모델 {(data.vcByModel || []).length}종)
           </span>
-          <button className="tab" style={{ marginLeft: 'auto', padding: '6px 12px' }} onClick={exportCsv}>CSV 내보내기</button>
+          {canCsv() && <button className="tab" style={{ marginLeft: 'auto', padding: '6px 12px' }} onClick={exportCsv}>CSV 내보내기</button>}
         </div>
 
         <div className="flex gap wrap" style={{ marginTop: 12, gap: 8, alignItems: 'center' }}>

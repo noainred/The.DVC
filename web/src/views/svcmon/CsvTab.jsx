@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fetchJson, downloadFile } from '../../api.js';
+import { fetchJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 
@@ -26,6 +26,7 @@ export default function CsvTab({ canEdit }) {
   const [schema, setSchema] = useState(null);
   const [showCols, setShowCols] = useState(false);
   const [exp, setExp] = useState({ kind: '', path: '', tests: true, format: 'csv' });
+  const csvOk = canCsv(); // v2.643: 이 탭은 내보내기 전용 — 관리자 이상 + data.csv 권한만
 
   const doExport = async () => {
     setErr(''); setBusy('export'); setDone('');
@@ -53,6 +54,9 @@ export default function CsvTab({ canEdit }) {
     try { setSchema(await fetchJson('/svcmon/targets/csv-schema')); setShowCols(true); }
     catch (e) { setErr(e.message); }
   };
+
+  // ⚠ 훅은 모두 위에 있다 — 이 조기 return 아래에 훅을 더하지 말 것(React #310).
+  if (!csvOk) return <div className="card muted" style={{ padding: 14, fontSize: 12.5 }}>{CSV_DENIED_NOTE}</div>;
 
   return (
     <div className="flex col gap">

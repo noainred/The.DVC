@@ -1,7 +1,7 @@
 // PowerMap.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useState } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { usePolling } from '../../api.js';
+import { usePolling, canCsv } from '../../api.js';
 import { Loading, ErrorBox, ResultCount, SearchBox } from '../../components/ui.jsx';
 import { Card, fmtKwh, fmtWatts, useTool } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
@@ -71,7 +71,7 @@ export function PowerMap({ scope }) {
             <button key={k} className={view === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView(k)}>{label}</button>
           ))}
         </div>
-        <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={csv}>CSV</button>
+        {canCsv() && <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={csv}>CSV</button>}
       </div>
 
       {view === 'datacenter' && (

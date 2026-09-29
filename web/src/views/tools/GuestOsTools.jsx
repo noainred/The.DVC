@@ -1,7 +1,7 @@
 // GuestOsTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useRef, useState } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson, putJson, downloadFile } from '../../api.js';
+import { fetchJson, postJson, putJson, downloadFile, canCsv } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, Modal, SearchBox, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
@@ -168,7 +168,7 @@ export function GuestOsVmsModal({ label, params, onClose }) {
                 </label>
               )}
             </div>
-            <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={!items.length} onClick={exportCsv}>⬇ CSV 내보내기</button>
+            {canCsv() && <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={!items.length} onClick={exportCsv}>⬇ CSV 내보내기</button>}
           </div>
           <DataTable columns={cols} rows={items} initialSort={{ key: 'name', dir: 'asc' }} />
         </>
@@ -269,7 +269,7 @@ export function RealOs({ scope }) {
       <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
         <button className={mm ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setMm((v) => !v)}>{mm ? '불일치만 ✓' : '불일치만 보기'}</button>
         <span className="muted" style={{ fontSize: 12 }}>{rows ? `${rows.length}건${omitted > 0 ? ` · 조회 범위 밖 ${omitted}건 제외` : ''}` : ''}</span>
-        <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px', marginLeft: 'auto' }} disabled={!rows?.length} onClick={exportCsv}>⬇ CSV 내보내기</button>
+        {canCsv() && <button className="logout-btn" style={{ flex: 'none', padding: '7px 14px', marginLeft: 'auto' }} disabled={!rows?.length} onClick={exportCsv}>⬇ CSV 내보내기</button>}
       </div>
       {resErr && <div className="banner warn" style={{ marginBottom: 8 }}>스캔 결과를 읽지 못했습니다: {resErr}{rows ? ' — 아래는 직전에 받은 결과입니다.' : ''}</div>}
       {!rows ? (resErr ? null : <Loading />) : rows.length === 0 ? <div className="card"><span className="muted">{mm ? '불일치 VM이 없습니다.' : '스캔 결과가 없습니다. ‘지금 스캔’을 실행하세요(계정은 GPU 게스트 수집 설정 사용).'}</span></div>

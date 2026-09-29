@@ -130,6 +130,8 @@ export const PROBE_MAX = 28;
 export const EVENTS_BODY_MAX = Math.max(262_144, Number(process.env.CVP_EVENTS_BODY_MAX) || 4 * 1_048_576);
 /** 부품 종류 → 표시 kind. */
 export const PART_KINDS = Object.freeze({ power: 'psu', cooling: 'fan', temperature: 'temp', xcvr: 'xcvr' });
+/** v2.643: 부품 이름의 포인터 경로 구분자(부품 이름에 '/' 가 있어 — Fan1/1 — 다른 기호를 쓴다). */
+export const PART_PATH_SEP = ' › ';
 
 export class CvpAuthError extends Error {
   constructor(msg) { super(msg); this.authFailed = true; }
@@ -476,7 +478,11 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
           const vals = P.splitJsonStream(r.text).values;
           const own = [];
           const bgpLike = kind === 'bgp' && x.keys.length >= 2;
-          const name = bgpLike ? x.keys[1] : x.keys[0];
+          // v2.643(실장비 캡처): 부품은 **포인터 경로 전체**로 이름을 짓는다. 첫 키로 지으면 `/environment/power/status` 아래
+          //   powerSupply → PowerSupply1·PowerSupply2 가 'powerSupply' 한 개체로 **합쳐져** 뒤 값이 앞 값을 덮었다(화면에 psu
+          //   'powerSupply'·'currentSensor' 같은 컨테이너 이름만 보이고 실제 PSU 가 안 보였다 — 장애가 나도 잡을 수 없다).
+          //   상태 필드가 없는 컨테이너는 parseParts 가 건너뛴다. 포트(첫 키)·BGP(둘째 키)는 그대로다.
+          const name = bgpLike ? x.keys[1] : Object.hasOwn(PART_KINDS, kind) ? x.keys.join(PART_PATH_SEP) : x.keys[0];
           for (const v of vals) {
             if (!v || typeof v !== 'object' || !Array.isArray(v.notifications)) continue;
             for (const n of v.notifications) {

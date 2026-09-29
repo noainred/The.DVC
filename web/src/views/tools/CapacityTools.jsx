@@ -1,7 +1,7 @@
 // CapacityTools.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState, useRef } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson, downloadFile } from '../../api.js';
+import { fetchJson, postJson, downloadFile, canCsv } from '../../api.js';
 import { DataTable, Loading, ErrorBox, StateBadge, UsageCell, Modal, ResultCount, SearchBox, VmLink } from '../../components/ui.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { Card, fmtTrendTick, tb, tempColor, useTool } from './shared.jsx';
@@ -406,7 +406,7 @@ export function Waste({ scope, cluster = '', folder = '' }) {
         ))}
         {tab !== 'trend' && <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 260, minWidth: 170 }}
           placeholder="🔍 VM 이름 검색" value={q} onChange={setQ} />}
-        {tab !== 'trend' && (
+        {tab !== 'trend' && canCsv() && ( /* v2.643: 근거 리포트 내보내기는 관리자 이상 + data.csv 권한만 */
           <span className="flex gap" style={{ alignItems: 'center', flex: 'none' }}>
             <select className="select" style={{ width: 116 }} value={exportDays} disabled={exporting}
               onChange={(e) => setExportDays(Number(e.target.value))} title="근거 리포트의 vCenter 성능 관측 기간">

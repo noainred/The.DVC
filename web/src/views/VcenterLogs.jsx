@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, putJson, postJson, usePolling, downloadFile } from '../api.js';
+import { fetchJson, putJson, postJson, usePolling, downloadFile, canCsv } from '../api.js'; // v2.643 canCsv: CSV 내보내기 게이팅
 import { downloadFailText } from './downloadFailText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
@@ -176,7 +176,7 @@ function LogViewer() {
         <div className="flex gap" style={{ alignItems: 'center' }}>
           {mode === 'edge' && <span className="badge amber" title="데이터는 엣지에 보관, 조회만 중계">엣지 조회: {remoteAgent(f.vcenterId) || '?'}</span>}
           <span className="muted" style={{ fontSize: 12 }} title={totalInfo.totalCapped ? '검색어·심각도 필터가 있으면 건수를 상한까지만 셉니다 — 실제로는 더 있을 수 있습니다' : undefined}>{vcLogTotalText({ total, ...totalInfo }, fmtNum)}</span>
-          <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={exportCsv} disabled={mode === 'edge'} title={mode === 'edge' ? '엣지 조회는 CSV 미지원(엣지 포탈에서 받으세요)' : ''}>⬇ CSV</button>
+          {canCsv() && <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={exportCsv} disabled={mode === 'edge'} title={mode === 'edge' ? '엣지 조회는 CSV 미지원(엣지 포탈에서 받으세요)' : ''}>⬇ CSV</button>}
         </div>
       </div>
       {dlMsg && <div className="banner error" role="alert" style={{ marginBottom: 8 }}>{dlMsg}</div>}

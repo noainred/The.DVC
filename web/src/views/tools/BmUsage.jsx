@@ -16,7 +16,7 @@
  * ⚠ 전역 잠금을 쓰지 않는다 — 수집 중에도 설정을 고칠 수 있어야 한다(v2.529 규약).
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchJson, postJson, putJson } from '../../api.js';
+import { fetchJson, postJson, putJson, canCsv } from '../../api.js';
 import { scopeSaveSuffix } from '../scopeSaveText.js';
 import { fleetPartialsNote } from '../fleetPartialText.js';
 import { Loading, ErrorBox, Kpi } from '../../components/ui.jsx';
@@ -326,7 +326,7 @@ export function BmUsage() {
           query={q} onQuery={setQ} typeLabel={pathTypeLabel}
         />
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '8px 0' }}>
-          <button className="btn" onClick={exportCsv} disabled={!shown.length}>CSV 내보내기</button>
+          {canCsv() && <button className="btn" onClick={exportCsv} disabled={!shown.length}>CSV 내보내기</button>}
           <button className="btn" onClick={collectNow} disabled={busy || !data?.enabled} title={data?.enabled ? '' : '수집이 꺼져 있습니다'}>
             {busy ? '수집 중…' : '지금 수집'}
           </button>

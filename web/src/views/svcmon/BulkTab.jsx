@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, downloadFile } from '../../api.js';
+import { fetchJson, postJson, putJson, downloadFile, canCsv } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import PreviewTable from './PreviewTable.jsx';
 import TemplateTab from './TemplateTab.jsx';
@@ -35,6 +35,7 @@ export default function BulkTab({ canEdit, prefill }) {
   const [freeText, setFreeText] = useState('');
   const [fileImp, setFileImp] = useState({ format: 'csv', content: '', fileName: '' });   // 파일(CSV/JSON/XLSX) 가져오기
   const fileRef = useRef(null);
+  const csvOk = canCsv(); // v2.643: 파일(CSV/XLSX/JSON) 가져오기·샘플은 관리자 이상 + data.csv 권한만 — 표·붙여넣기 입력은 그대로
   const [templateId, setTemplateId] = useState('');
   const [enabled, setEnabled] = useState(false);
 
@@ -270,7 +271,7 @@ export default function BulkTab({ canEdit, prefill }) {
               onChange={(e) => onCountChange(e.target.value)} onBlur={onCountBlur} disabled={inputMode !== 'table'} />
           </label>
           <div className="flex gap" style={{ alignItems: 'center' }}>
-            {[['table', '표로 입력'], ['free', '자유형식 붙여넣기'], ['file', '파일(CSV/XLSX)']].map(([v, t]) => (
+            {[['table', '표로 입력'], ['free', '자유형식 붙여넣기'], ...(csvOk ? [['file', '파일(CSV/XLSX)']] : [])].map(([v, t]) => (
               <label key={v} className={`tab ${inputMode === v ? 'active' : ''}`} style={{ cursor: 'pointer' }}>
                 <input type="radio" name="inputMode" checked={inputMode === v} onChange={() => { setInputMode(v); setValidation(null); setPreview(null); }} style={{ marginRight: 6 }} />
                 {t}
@@ -334,7 +335,7 @@ export default function BulkTab({ canEdit, prefill }) {
         )}
 
         {/* 파일 모드 — CSV/JSON/XLSX. 파일이 경로·호스트·점검을 모두 담는다(①위치·③템플릿 미사용). */}
-        {inputMode === 'file' && (
+        {csvOk && inputMode === 'file' && (
           <div style={{ marginTop: 12 }}>
             <div className="flex gap wrap" style={{ alignItems: 'center' }}>
               <input ref={fileRef} type="file" accept={IMPORT_ACCEPT} onChange={onFile} disabled={!canEdit} />

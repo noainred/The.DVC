@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson } from '../api.js';
+import { fetchJson, postJson, putJson, delJson, canCsv, CSV_DENIED_NOTE } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
@@ -25,6 +25,7 @@ export default function VCenterAdmin() {
   const [replaceMode, setReplaceMode] = useState(false);
   const [serverPath, setServerPath] = useState('');
   const fileRef = useRef(null);
+  const csvOk = canCsv(); // v2.643: 파일 가져오기(업로드·서버 파일)는 관리자 이상 + data.csv 권한만
 
   const load = async () => {
     try { setData(await fetchJson('/admin/vcenters')); setError(null); }
@@ -32,7 +33,7 @@ export default function VCenterAdmin() {
   };
   useEffect(() => {
     load();
-    fetchJson('/admin/vcenters/import-suggestions').then((s) => setServerPath((p) => p || s.default || '')).catch(() => {});
+    if (csvOk) fetchJson('/admin/vcenters/import-suggestions').then((s) => setServerPath((p) => p || s.default || '')).catch(() => {});
   }, []);
 
   const showImportResult = (r, extra = '') => setImportMsg(r.ok
@@ -147,11 +148,13 @@ export default function VCenterAdmin() {
       <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
         <div className="section-title" style={{ margin: '6px 0' }}>vCenter 등록 · 관리 (관리자)</div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="체크 시 기존 목록을 모두 교체">
-            <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} /> 전체 교체
-          </label>
-          <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onImportFile} />
-          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => fileRef.current?.click()}>파일 업로드</button>
+          {csvOk && <>
+            <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12 }} title="체크 시 기존 목록을 모두 교체">
+              <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} /> 전체 교체
+            </label>
+            <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onImportFile} />
+            <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => fileRef.current?.click()}>파일 업로드</button>
+          </>}
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ vCenter 추가</button>
         </div>
       </div>
@@ -206,7 +209,8 @@ export default function VCenterAdmin() {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 12, padding: '12px 14px' }}>
+      {!csvOk && <div className="muted" style={{ marginBottom: 12, fontSize: 12 }}>{CSV_DENIED_NOTE}</div>}
+      {csvOk && <div className="card" style={{ marginBottom: 12, padding: '12px 14px' }}>
         <div className="flex gap wrap" style={{ alignItems: 'center' }}>
           <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>서버 파일에서 불러오기</span>
           <input className="input" style={{ flex: 1, minWidth: 280 }} value={serverPath}
@@ -216,7 +220,7 @@ export default function VCenterAdmin() {
         <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
           서버에 이미 있는 vcenters.json 경로를 지정하거나, 위 “파일 업로드”로 PC의 파일을 올릴 수 있습니다. “전체 교체” 체크 시 기존 목록을 덮어씁니다.
         </div>
-      </div>
+      </div>}
 
       {importMsg && (
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,
