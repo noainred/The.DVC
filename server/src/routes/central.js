@@ -1892,6 +1892,17 @@ centralRouter.post('/cvp-data', requireCentral(), async (req, res) => {
       saved.samples += r.inserted; saved.duplicates += r.duplicates;
       if (r.unavailable) saved.unavailable = true;
     }
+    // v2.641 ③④: CPU·메모리 최신 표본 · CVP 이벤트
+    if (clean.devSamples.length) {
+      const r = await cdb.importDevSamples(agent, clean.devSamples);
+      saved.devSamples = r.samples;
+      if (r.unavailable) saved.unavailable = true;
+    }
+    for (const [cvpId, list] of clean.eventsByCvp) {
+      const r = await cdb.saveEvents(agent, cvpId, list);
+      saved.events = (saved.events || 0) + r.saved;
+      if (r.unavailable) saved.unavailable = true;
+    }
   } catch (e) {
     console.warn(`[central] cvp-data: 적재 실패(${String(agent).slice(0, 64)}): ${e.message}`);
     return res.status(500).json({ ok: false, reason: `중앙 DB 적재 실패: ${e.message}` });
@@ -1900,7 +1911,7 @@ centralRouter.post('/cvp-data', requireCentral(), async (req, res) => {
    * v2.611(CEN2611-03): 적재할 것이 있었는데 DB 를 못 열었으면 **503**. 200 으로 두면 엣지가 커서·보낸 해시를 전진해 그 표본·
    *   레코드가 다시 오지 않았다(조용한 소실). 청크 0 의 상태는 위에서 이미 저장했다 — 화면은 '엣지 수집 상태' 를 계속 말한다.
    */
-  if (saved.unavailable && (clean.devicesByCvp.size || clean.rows.length || clean.touch.length)) {
+  if (saved.unavailable && (clean.devicesByCvp.size || clean.rows.length || clean.touch.length || clean.devSamples.length || clean.eventsByCvp.size)) {
     return res.status(503).json({ ok: false, dbUnavailable: true, saved, reason: '중앙 CVP DB 를 쓸 수 없습니다 — 엣지는 커서를 전진하지 않고 다음 주기에 다시 보냅니다(중앙 로그의 [cvp-db] 줄 참조)', ...(edgeDropSummary({ dropped: clean.dropped })) });
   }
   // v2.640(③ 장애 전이): 엣지 보고가 적재됐으면 중앙의 전이 판정을 예약한다(디바운스 — 엣지 여럿의 push 를 한 번으로 모은다).

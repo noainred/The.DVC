@@ -15,7 +15,8 @@ import * as P from './parse.js';
 import { PART_KINDS } from './client.js';
 import { capStr } from '../util/capStr.js';
 
-export const PREVIEW_KINDS = Object.freeze(['inventory', 'cvpVersion', 'interfaces', 'counters', 'bgp', 'power', 'cooling', 'temperature', 'xcvr']);
+export const PREVIEW_KINDS = Object.freeze(['inventory', 'cvpVersion', 'interfaces', 'counters', 'bgp', 'power', 'cooling', 'temperature', 'xcvr',
+  'cpu', 'memory', 'enrich', 'lifecycle', 'bugs', 'events']); // v2.641 추가 6종
 /** 입력 상한(문자) — 붙여넣기용이다. 1MB 면 장비 1대의 인터페이스 전량(포트 수백 개)도 들어간다. */
 export const PREVIEW_TEXT_MAX = 1_000_000;
 export const PREVIEW_ITEMS_MAX = 50;
@@ -71,8 +72,33 @@ function run(kind, t) {
       note: ver ? `버전 ‘${ver}’ 을 읽었습니다${badNote}` : `version·appVersion 필드가 없습니다${keys.length ? ` — 있던 필드: ${keys.join(', ')}` : ''}${badNote}`,
     };
   }
+  // v2.641: 모양 판정(빈 응답·포인터)을 함께 준다 — '빈 응답' 과 '포인터만 있는 컬렉션' 은 조치가 다르다.
+  const shape = P.telemetryShape(t);
+  const shapeNote = shape.empty ? ' · 빈 응답(notifications 가 비어 있습니다 — 그 경로에 값이 없습니다)'
+    : shape.ptrs.length ? ` · 포인터 ${shape.ptrs.length}개(하위 개체는 수집기가 따라가 읽습니다 — 붙여넣기에서는 따라가지 않습니다)` : '';
+  const one = (ok, count, item, keys, extra = {}) => ({
+    ok, format: values.length ? 'json' : null, keys: keysOf(keys, []), entities: values.length, count, truncated: 0, droppedFields: 0,
+    items: item ? [item] : [], badChunks: bad, note: (ok ? '읽었습니다' : NOTE_NONE) + shapeNote + badNote, ...extra });
+  const mapped = (m, keys) => {
+    const ok = m instanceof Map;
+    const list = ok ? [...m].slice(0, PREVIEW_ITEMS_MAX).map(([k, v]) => ({ device: k, ...v })) : [];
+    return { ok, format: values.length ? 'json' : null, keys: keysOf(keys, []), entities: values.length, count: ok ? m.size : null, truncated: 0, droppedFields: 0,
+      items: list, badChunks: bad, note: ok ? `장비 ${m.size}대분을 읽었습니다${badNote}` : NOTE_NONE + badNote };
+  };
+  if (kind === 'cpu') { const r = P.parseCpu(t); return one(r.pct != null || !!r.counters, r.pct != null || r.counters ? 1 : null, r.pct != null ? { cpuPct: r.pct } : r.counters ? { counters: r.counters, note: '누적 카운터 — 사용률은 두 표본의 차이로 계산합니다' } : null, r.keys, { shape }); }
+  if (kind === 'memory') { const r = P.parseMemory(t); return one(r.pct != null, r.pct != null ? 1 : null, r.pct != null ? { memPct: r.pct, total: r.total } : null, r.keys, { shape }); }
+  if (kind === 'enrich') { const r = P.parseLegacyInventory(t); return mapped(r.map && r.map.size ? r.map : null, r.keys); }
+  if (kind === 'lifecycle') { const r = P.parseLifecycle(t); return mapped(r.map, r.keys); }
+  if (kind === 'bugs') { const r = P.parseBugExposure(t); return mapped(r.map, r.keys); }
+  if (kind === 'events') {
+    const r = P.parseEvents(t);
+    const ok = Array.isArray(r.events);
+    return { ok, format: values.length ? 'json' : null, keys: keysOf(r.keys, []), entities: values.length, count: ok ? r.total : null, truncated: r.truncated || 0, droppedFields: 0,
+      items: ok ? r.events.slice(0, PREVIEW_ITEMS_MAX) : [], badChunks: bad, summary: r.bySeverity,
+      note: ok ? `이벤트 ${r.total}건을 읽었습니다${badNote}` : NOTE_NONE + badNote };
+  }
   const ent = P.entitiesOf(t);
-  const base = { format: ent.format, entities: ent.entities.size, badChunks: bad };
+  const base = { format: ent.format, entities: ent.entities.size, badChunks: bad, shape };
   const finish = (list, keys, extra) => {
     const ok = Array.isArray(list);
     const count = ok ? list.length : null;
@@ -81,7 +107,7 @@ function run(kind, t) {
     return {
       ok, ...base, keys: keysOf(keys, ent.keys), count, truncated, unrecognized, droppedFields: extra?.droppedFields || ent.droppedFields || 0,
       items: items(list),
-      note: ok ? `${count}개를 읽었습니다${unrecognized ? ` · 필드를 못 알아본 개체 ${unrecognized}개 제외` : ''}${truncated ? ` · 상한으로 ${truncated}개 잘림` : ''}${badNote}` : NOTE_NONE + badNote,
+      note: ok ? `${count}개를 읽었습니다${unrecognized ? ` · 필드를 못 알아본 개체 ${unrecognized}개 제외` : ''}${truncated ? ` · 상한으로 ${truncated}개 잘림` : ''}${badNote}` : NOTE_NONE + shapeNote + badNote,
     };
   };
   if (kind === 'interfaces') { const r = P.parseInterfaces(t); return finish(r.ports, r.keys, r); }

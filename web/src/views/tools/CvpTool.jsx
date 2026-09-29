@@ -4,6 +4,12 @@ import { fetchJson, postJson, putJson, delJson, getCurrentUser, downloadFile } f
 import { Loading, ErrorBox, Kpi, Modal, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { droppedSecretNote } from '../droppedSecretText.js';
+import { useHashTab } from '../../hooks/useHashTab.js';
+import CvpBulkIo from './CvpBulkIo.jsx';
+import {
+  overviewRows, sysCell, eventReadNotes, severityCounts, severityTone, severityLabel, EVENT_SEVERITIES,
+  portUsageKpis, PORT_USAGE_NOTE, utilTone, rateText, probeRows, PROBE_NOTE,
+} from './cvpMoreText.js';
 import { hostText, addressHiddenNote } from './addressHiddenText.js';
 import {
   agoText, spanText, countText, bpsText, pctText, kpiItems, serverState, authStopText, isAuthStopped,
@@ -13,7 +19,7 @@ import {
   isTruncated, canCollect, listNotes, partsMissingText, telemetryText,
   edgeReportView, serverMetaText, dbStatsText, DEVICE_CHIPS, chipCounts, filterByChip, devicesCsvPath, CSV_NOTE,
   CHART_MODES, seriesGeometryBps, chartCutNote, faultKindLabel, faultRowView, faultEventText, faultKpi, faultScanNote, FAULT_INTRO,
-  sampleRows, SAMPLE_NOTE, PREVIEW_NOTE, previewSummary, previewColumns,
+  sampleRows, SAMPLE_NOTE, PREVIEW_NOTE, previewSummary, previewColumns, sampleBadge, SYS_HIGH_PCT,
 } from './cvpText.js';
 
 /**
@@ -51,6 +57,8 @@ export default function CvpTool() {
   const [faultsErr, setFaultsErr] = useState(null);
   const [csvMsg, setCsvMsg] = useState(null);
   const loadSeq = useRef(0);
+  // v2.641: 화면 전환(장비 · 포트 사용량 · 이벤트) — URL 에 싣는다(v2.613 도구 안 서브탭 규약).
+  const [view, setView] = useHashTab({ base: ['tools', 'cvp'], valid: ['devices', 'ports', 'events'], fallback: 'devices' });
 
   const u = getCurrentUser();
   const isAdmin = !u || u.role === 'admin';
@@ -139,6 +147,16 @@ export default function CvpTool() {
         ))}
       </div>
 
+      <div style={ROW}>
+        {[['devices', '장비'], ['ports', '포트 사용량'], ['events', '이벤트']].map(([k, l]) => (
+          <button key={k} type="button" className={`tab${view === k ? ' active' : ''}`} onClick={() => setView(k)}>{l}</button>
+        ))}
+      </div>
+
+      {view === 'ports' && <PortUsageCard servers={servers} onOpen={(p) => setDetailKey({ cvpId: p.cvpId, key: p.key, hostname: p.hostname, tab: 'ports' })} />}
+      {view === 'events' && <EventsCard servers={servers} isAdmin={isAdmin} />}
+
+      {view === 'devices' && (<>
       <div className="card" style={{ minWidth: 0 }}>
         <b>CVP 서버 {servers.length}대</b>
         {stopped.map((s) => (
@@ -234,11 +252,13 @@ export default function CvpTool() {
         {devices && devList.length === 0 ? (
           <div style={{ ...NOTE, marginTop: 8 }}>아직 수집된 장비가 없습니다.</div>
         ) : devices ? (
-          <STable minWidth={900} limit={500} style={{ marginTop: 8 }}>
-            <thead><tr><th>호스트명</th><th>모델</th><th>시리얼</th><th>관리 주소</th><th>EOS</th><th>스트리밍</th><th>파트</th><th>포트 up/전체</th><th>BGP</th><th>CVP</th><th>수집</th></tr></thead>
+          <STable minWidth={1040} limit={500} style={{ marginTop: 8 }}>
+            <thead><tr><th>호스트명</th><th>모델</th><th>시리얼</th><th>관리 주소</th><th>EOS</th><th>스트리밍</th><th>파트</th><th>포트 up/전체</th><th>BGP</th><th>CPU</th><th>메모리</th><th>CVP</th><th>수집</th></tr></thead>
             <tbody>
               {shown.map((d) => {
-                const pc = partsCell(d.parts); const bc = bgpCell(d.bgp); const oc = portsCell(d.ports); const sc = streamingText(d.streaming);
+                const inf = d.info && typeof d.info === 'object' ? d.info : {};
+                const pc = partsCell(d.parts); const bc = bgpCell(d.bgp, { empty: inf.bgpEmpty === true }); const oc = portsCell(d.ports, { empty: inf.portsEmpty === true }); const sc = streamingText(d.streaming);
+                const cc = sysCell(d.cpuPct); const mc = sysCell(d.memPct);
                 return (
                   <tr key={`${d.cvpId}|${d.key}`} style={{ cursor: 'pointer' }} onClick={() => setDetailKey({ cvpId: d.cvpId, key: d.key, hostname: d.hostname })}>
                     <td><b style={{ textDecoration: 'underline dotted', textUnderlineOffset: 3 }}>{d.hostname || d.key || '—'}</b></td>
@@ -250,6 +270,8 @@ export default function CvpTool() {
                     <td><Badge tone={pc.tone} title={pc.title}>{pc.text}</Badge></td>
                     <td><Badge tone={oc.tone} title={oc.title}>{oc.text}</Badge></td>
                     <td><Badge tone={bc.tone} title={bc.title}>{bc.text}</Badge></td>
+                    <td data-sort={d.cpuPct ?? ''}><Badge tone={cc.tone} title={cc.title}>{cc.text}</Badge></td>
+                    <td data-sort={d.memPct ?? ''}><Badge tone={mc.tone} title={mc.title}>{mc.text}</Badge></td>
                     <td style={{ fontSize: 12 }}>{nameOf(d.cvpId)}{d.agent ? ` · ${d.agent}` : ''}</td>
                     <td style={{ fontSize: 12 }} data-sort={d.collectedAt || 0}>{agoText(d.collectedAt)}</td>
                   </tr>
@@ -262,6 +284,7 @@ export default function CvpTool() {
       </div>
 
       <FaultsCard faults={faults} err={faultsErr} isAdmin={isAdmin} mayCollect={mayCollect} onChanged={load} />
+      </>)}
 
       {isAdmin && (
         <div className="card" style={{ minWidth: 0 }}>
@@ -285,7 +308,7 @@ function DeviceModal({ target, onClose }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [port, setPort] = useState(null);
-  const [tab, setTab] = useState('parts');
+  const [tab, setTab] = useState(target.tab || 'overview'); // v2.641: 개요가 첫 탭(포트 사용량 화면에서 열면 포트 탭)
   useEffect(() => {
     let active = true;
     setD(null); setErr(null);
@@ -313,11 +336,13 @@ function DeviceModal({ target, onClose }) {
             {telemetryText(dev.telemetry) && <span>{telemetryText(dev.telemetry)}</span>}
           </div>
           <div style={ROW}>
-            {[['parts', `장애 파트${parts ? ` (${parts.length})` : ''}`], ['ports', `포트${ports ? ` (${ports.length})` : ''}`],
+            {[['overview', '개요'], ['parts', `장애 파트${parts ? ` (${parts.length})` : ''}`], ['ports', `포트${ports ? ` (${ports.length})` : ''}`],
               ['bgp', `BGP 피어${bgp ? ` (${bgp.length})` : ''}`], ['paths', '읽은 경로']].map(([k, l]) => (
               <button key={k} type="button" className={`tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
+
+          {tab === 'overview' && <OverviewView target={target} dev={dev} addressHidden={!!d.addressHidden} />}
 
           {tab === 'parts' && partsMissingText(d.partsMissingKinds) && (
             <div style={NOTE}><BoldText text={partsMissingText(d.partsMissingKinds)} /></div>
@@ -351,7 +376,7 @@ function DeviceModal({ target, onClose }) {
           ))}
 
           {tab === 'ports' && (ports == null ? (
-            <div style={NOTE}>포트 구성을 읽지 못했습니다.</div>
+            <div style={NOTE}>포트 구성을 읽지 못했습니다{dev.info && dev.info.portsEmpty ? ' — 포트 경로가 빈 응답을 돌려줬습니다(포트 0개라는 뜻이 아닙니다). ‘읽은 경로’ 탭의 경로 탐색 표본을 보세요' : ''}.</div>
           ) : (
             <>
               {port && <PortChart target={target} port={port} onClose={() => setPort(null)} />}
@@ -381,7 +406,7 @@ function DeviceModal({ target, onClose }) {
           ))}
 
           {tab === 'bgp' && (bgp == null ? (
-            <div style={NOTE}>BGP 상태를 읽지 못했거나 BGP 를 쓰지 않는 장비입니다. 전체 라우팅 테이블은 수집하지 않습니다(피어 요약만).</div>
+            <div style={NOTE}>{dev.info && dev.info.bgpEmpty ? 'BGP 경로가 빈 응답을 돌려줬습니다 — BGP 를 쓰지 않는 장비이거나 이 CVP 에서 경로가 다릅니다(피어 0개라는 뜻이 아닙니다).' : 'BGP 상태를 읽지 못했거나 BGP 를 쓰지 않는 장비입니다.'} 전체 라우팅 테이블은 수집하지 않습니다(피어 요약만).</div>
           ) : bgp.length === 0 ? <div style={NOTE}>설정된 BGP 피어가 없습니다.</div> : (
             <STable minWidth={560}>
               <thead><tr><th>피어</th><th>AS</th><th>VRF</th><th>상태</th><th>받은 prefix</th></tr></thead>
@@ -420,7 +445,7 @@ function PathsView({ d }) {
           {samples.map((r) => (
             <details key={r.kind} style={{ marginTop: 6 }}>
               <summary style={{ cursor: 'pointer', fontSize: 12 }}>
-                <Badge tone={r.ok ? 'ok' : 'bad'}>{r.ok ? '성공' : `실패${r.status != null ? ` HTTP ${r.status}` : ''}`}</Badge>
+                <Badge tone={sampleBadge(r).tone}>{sampleBadge(r).label}</Badge>
                 {' '}{r.label} — <span style={{ wordBreak: 'break-all' }}>{r.path || '—'}</span>{r.bytes != null ? ` · ${countText(r.bytes)}B` : ''}{r.at ? ` · ${agoText(r.at)}` : ''}{r.reason ? ` · ${r.reason}` : ''}
               </summary>
               <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 240, overflow: 'auto', margin: '4px 0 0', padding: 8, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6 }}>{r.head || '(본문 없음)'}</pre>
@@ -428,7 +453,27 @@ function PathsView({ d }) {
           ))}
         </details>
       )}
-      {d.samplesHidden && <div style={NOTE}>원문 표본은 관리자에게만 표시됩니다.</div>}
+      {probeRows(d.probes).length > 0 && (
+        <details>
+          <summary style={{ cursor: 'pointer', fontSize: 13 }}><b>경로 탐색 표본 {probeRows(d.probes).length}곳</b> (관리자)</summary>
+          <div style={{ ...NOTE, marginTop: 4 }}><BoldText text={PROBE_NOTE} /></div>
+          <STable minWidth={640}>
+            <thead><tr><th>경로</th><th>결과</th><th>크기</th><th>응답 앞부분</th></tr></thead>
+            <tbody>
+              {probeRows(d.probes).map((p, i) => (
+                <tr key={`${p.path}|${i}`}>
+                  <td style={{ fontSize: 12, wordBreak: 'break-all' }}>{p.path}</td>
+                  <td style={{ fontSize: 12, whiteSpace: 'normal' }}><Badge tone={p.ok ? (p.shape.startsWith('빈 응답') ? 'warn' : 'ok') : 'bad'}>{p.shape}</Badge></td>
+                  <td className="right" style={{ fontSize: 12 }}>{p.bytes == null ? '—' : `${countText(p.bytes)}B`}</td>
+                  <td><details><summary style={{ cursor: 'pointer', fontSize: 11 }}>보기</summary>
+                    <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 200, overflow: 'auto', margin: '4px 0 0' }}>{p.head || '(본문 없음)'}</pre></details></td>
+                </tr>
+              ))}
+            </tbody>
+          </STable>
+        </details>
+      )}
+      {d.samplesHidden && <div style={NOTE}>원문 표본·경로 탐색 표본은 관리자에게만 표시됩니다.</div>}
       {items.length === 0 ? <div style={NOTE}>경로 기록이 없습니다.</div> : (
         <STable minWidth={640}>
           <thead><tr><th>항목</th><th>읽은 경로</th><th>읽지 못한 이유</th><th>응답에 있던 필드</th></tr></thead>
@@ -443,6 +488,221 @@ function PathsView({ d }) {
             ))}
           </tbody>
         </STable>
+      )}
+    </div>
+  );
+}
+
+// ── v2.641 ② 장비 개요 + ③ CPU·메모리 추이 ───────────────────────────────────
+function OverviewView({ target, dev, addressHidden }) {
+  const [hours, setHours] = useState(24);
+  const [r, setR] = useState(null);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    let active = true;
+    setR(null); setErr(null);
+    fetchJson('/tools/cvp/device-series', { cvpId: target.cvpId, key: target.key, hours })
+      .then((x) => { if (active) setR(x); }).catch((e) => { if (active) setErr(e); });
+    return () => { active = false; };
+  }, [target.cvpId, target.key, hours]);
+  const rows = overviewRows({ ...dev, addressHidden });
+  const cc = sysCell(dev.cpuPct); const mc = sysCell(dev.memPct);
+  const pts = r && Array.isArray(r.points) ? r.points : [];
+  return (
+    <div style={{ display: 'grid', gap: 10, minWidth: 0 }}>
+      <div style={ROW}>
+        <span style={NOTE}>CPU</span><Badge tone={cc.tone} title={cc.title}>{cc.text}</Badge>
+        <span style={NOTE}>메모리</span><Badge tone={mc.tone} title={mc.title}>{mc.text}</Badge>
+        <span style={NOTE}>{dev.sysAt ? `측정 ${agoText(dev.sysAt)}` : 'CPU·메모리를 읽지 못했습니다(0% 라는 뜻이 아닙니다)'}</span>
+      </div>
+      <div className="card" style={{ minWidth: 0 }}>
+        <div style={{ ...ROW, justifyContent: 'space-between' }}>
+          <b>CPU·메모리 추이</b>
+          <div style={ROW}>{HOURS.slice(0, 2).map(([h, l]) => <button key={h} type="button" className={`tab${hours === h ? ' active' : ''}`} onClick={() => setHours(h)}>{l}</button>)}</div>
+        </div>
+        {err && <ErrorBox error={err} />}
+        {!r && !err && <Loading />}
+        {r && (pts.length < 2 ? (
+          <div style={{ ...NOTE, marginTop: 6 }}>{pts.length === 0 ? '이 기간에 CPU·메모리 표본이 없습니다.' : '표본이 1개뿐이라 선을 그리지 않습니다(한 점을 선으로 만들면 추세가 있는 것처럼 보입니다).'} 원시 표본은 {countText(r.rawRetentionDays)}일 보관합니다.</div>
+        ) : <SysChart points={pts} intervalMs={r.intervalMs} />)}
+        {r && r.truncated && <div style={{ ...NOTE, marginTop: 4 }}>표본 상한({countText(r.limit)})으로 최근 것만 그렸습니다.</div>}
+      </div>
+      <STable minWidth={560}>
+        <thead><tr><th data-nosort>항목</th><th data-nosort>값</th><th data-nosort>비고</th></tr></thead>
+        <tbody>
+          {rows.map(([l, v, n]) => (
+            <tr key={l}><td style={{ fontSize: 12 }}>{l}</td><td>{v}</td><td style={{ fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{n || ''}</td></tr>
+          ))}
+        </tbody>
+      </STable>
+    </div>
+  );
+}
+
+/** CPU·메모리 추이 — y축 0~100 고정(v2.551 — 데이터 범위에 맞추면 잔물결이 '거의 100%' 처럼 보인다). 수집이 끊긴 구간은 잇지 않는다. */
+function SysChart({ points, intervalMs }) {
+  const W = 640; const H = 160; const PAD = 30;
+  const geo = (key) => seriesGeometry(points.map((p) => ({ ts: p.ts, v: p[key] })), 'v', { width: W, height: H, pad: PAD, intervalMs: intervalMs || 300_000 });
+  const c = geo('cpu'); const m = geo('mem');
+  return (
+    <div style={{ overflowX: 'auto', marginTop: 6 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', minWidth: 320, maxWidth: W, display: 'block' }} role="img" aria-label="CPU·메모리 사용률 추이">
+        {[0, 50, SYS_HIGH_PCT, 100].map((y) => {
+          const yy = H - PAD - ((H - 2 * PAD) * y) / 100;
+          return <g key={y}><line x1={PAD} x2={W - 8} y1={yy} y2={yy} stroke="var(--border)" strokeDasharray={y === SYS_HIGH_PCT ? '4 3' : undefined} /><text x={PAD - 4} y={yy + 3} fontSize="9" textAnchor="end" fill="var(--text-dim)">{y}%</text></g>;
+        })}
+        {c.paths.map((d, i) => <path key={`c${i}`} d={d} fill="none" stroke="var(--accent)" strokeWidth="1.5" />)}
+        {c.dots.map((p, i) => <circle key={`cd${i}`} cx={p.x} cy={p.y} r="2" fill="var(--accent)" />)}
+        {m.paths.map((d, i) => <path key={`m${i}`} d={d} fill="none" stroke="var(--amber)" strokeWidth="1.5" />)}
+        {m.dots.map((p, i) => <circle key={`md${i}`} cx={p.x} cy={p.y} r="2" fill="var(--amber)" />)}
+      </svg>
+      <div style={{ ...NOTE, display: 'flex', gap: 12 }}>
+        <span><span style={{ color: 'var(--accent)' }}>━</span> CPU</span><span><span style={{ color: 'var(--amber)' }}>━</span> 메모리</span>
+        <span>점선 = {SYS_HIGH_PCT}%</span>
+      </div>
+    </div>
+  );
+}
+
+// ── v2.641 ⑤ 포트 사용량 ──────────────────────────────────────────────────────
+function PortUsageCard({ servers, onOpen }) {
+  const [cvpId, setCvpId] = useState('');
+  const [minUtil, setMinUtil] = useState(0);
+  const [r, setR] = useState(null);
+  const [err, setErr] = useState(null);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setErr(null);
+    fetchJson('/tools/cvp/port-usage', { ...(cvpId ? { cvpId } : {}), minUtil, limit: 500 })
+      .then((x) => { if (active) setR(x); }).catch((e) => { if (active) { setErr(e); setR(null); } });
+    return () => { active = false; };
+  }, [cvpId, minUtil, reload]);
+  const ports = r && Array.isArray(r.ports) ? r.ports.filter((p) => p && typeof p === 'object') : [];
+  return (
+    <div className="card" style={{ minWidth: 0 }}>
+      <div style={ROW}>
+        <b>포트 사용량</b>
+        {servers.length > 1 && (
+          <select className="input" value={cvpId} onChange={(e) => setCvpId(e.target.value)} style={{ maxWidth: 220 }}>
+            <option value="">모든 CVP</option>
+            {servers.map((s) => <option key={s.id} value={String(s.id)}>{s.name || s.id}</option>)}
+          </select>
+        )}
+        {[[0, '전체'], [50, '50% 이상'], [80, '80% 이상']].map(([v, l]) => (
+          <button key={v} type="button" className={`tab${minUtil === v ? ' active' : ''}`} onClick={() => setMinUtil(v)}>{l}</button>
+        ))}
+        <button type="button" className="btn" style={{ marginLeft: 'auto' }} onClick={() => setReload((x) => x + 1)}>새로고침</button>
+      </div>
+      <div style={{ ...NOTE, marginTop: 6 }}><BoldText text={PORT_USAGE_NOTE} /></div>
+      {err && <div style={{ marginTop: 8 }}><ErrorBox error={err} /></div>}
+      {!r && !err && <Loading />}
+      {r && (
+        <>
+          <div className="kpis" style={{ marginTop: 8 }}>
+            {portUsageKpis(r.counts, { staleMs: r.staleMs }).map((k) => <Kpi key={k.key} label={k.label} value={k.value} accent={k.accent || undefined} meta={k.meta || undefined} />)}
+          </div>
+          {ports.length === 0 ? (
+            <div style={{ ...NOTE, marginTop: 8 }}>{minUtil > 0 ? `사용률 ${minUtil}% 이상인 포트가 없습니다(사용률을 계산한 포트 기준).` : '사용률을 계산한 포트가 아직 없습니다 — 처리량은 두 번째 수집 주기부터 나오고, 포트 카운터를 읽지 못하면 계산하지 않습니다.'}</div>
+          ) : (
+            <STable minWidth={900} style={{ marginTop: 8 }}>
+              <thead><tr><th>장비</th><th>포트</th><th>설명</th><th>속도</th><th>사용률(최대)</th><th>수신</th><th>송신</th><th>오류(수/송)</th><th>CVP</th><th>측정</th></tr></thead>
+              <tbody>
+                {ports.map((p) => (
+                  <tr key={`${p.agent}|${p.cvpId}|${p.key}|${p.port}`}>
+                    <td><button type="button" className="btn" style={{ padding: '2px 8px' }} onClick={() => onOpen(p)}>{p.hostname || p.key}</button></td>
+                    <td style={{ fontSize: 12 }}>{p.port}</td>
+                    <td style={{ fontSize: 12, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.desc || ''}>{p.desc || '—'}</td>
+                    <td data-sort={p.speedBps ?? ''}>{bpsText(p.speedBps)}</td>
+                    <td data-sort={p.util ?? ''}><Badge tone={utilTone(p.util)}>{pctText(p.util)}</Badge></td>
+                    <td data-sort={p.inBps ?? ''} style={{ fontSize: 12 }}>{rateText(p.inBps, p.inUtil)}</td>
+                    <td data-sort={p.outBps ?? ''} style={{ fontSize: 12 }}>{rateText(p.outBps, p.outUtil)}</td>
+                    <td style={{ fontSize: 12 }}>{countText(p.inErr)} / {countText(p.outErr)}</td>
+                    <td style={{ fontSize: 12 }}>{p.cvpName || p.cvpId}</td>
+                    <td style={{ fontSize: 12 }} data-sort={p.rateAt || 0}>{agoText(p.rateAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          )}
+          {numOrZero(r.omitted) > 0 && <div style={{ ...NOTE, marginTop: 6 }}>상위 {countText(r.limit)}개만 받았습니다({countText(r.omitted)}개 생략) — 사용률 조건으로 좁혀 보세요.</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── v2.641 ④ 이벤트 ──────────────────────────────────────────────────────────
+function EventsCard({ servers, isAdmin }) {
+  const [cvpId, setCvpId] = useState('');
+  const [sev, setSev] = useState('');
+  const [hours, setHours] = useState(24);
+  const [r, setR] = useState(null);
+  const [err, setErr] = useState(null);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setErr(null);
+    fetchJson('/tools/cvp/events', { ...(cvpId ? { cvpId } : {}), ...(sev ? { severity: sev } : {}), hours, limit: 500 })
+      .then((x) => { if (active) setR(x); }).catch((e) => { if (active) { setErr(e); setR(null); } });
+    return () => { active = false; };
+  }, [cvpId, sev, hours, reload]);
+  const events = r && Array.isArray(r.events) ? r.events.filter((e) => e && typeof e === 'object') : [];
+  const notes = r ? eventReadNotes(r.readState) : [];
+  return (
+    <div className="card" style={{ minWidth: 0 }}>
+      <div style={ROW}>
+        <b>CVP 이벤트</b>
+        {servers.length > 1 && (
+          <select className="input" value={cvpId} onChange={(e) => setCvpId(e.target.value)} style={{ maxWidth: 220 }}>
+            <option value="">모든 CVP</option>
+            {servers.map((s) => <option key={s.id} value={String(s.id)}>{s.name || s.id}</option>)}
+          </select>
+        )}
+        {[[24, '1일'], [168, '7일'], [720, '30일']].map(([h, l]) => (
+          <button key={h} type="button" className={`tab${hours === h ? ' active' : ''}`} onClick={() => setHours(h)}>{l}</button>
+        ))}
+        <button type="button" className="btn" style={{ marginLeft: 'auto' }} onClick={() => setReload((x) => x + 1)}>새로고침</button>
+      </div>
+      {err && <div style={{ marginTop: 8 }}><ErrorBox error={err} /></div>}
+      {!r && !err && <Loading />}
+      {r && (
+        <>
+          {notes.map((t, i) => <div key={`en-${i}`} className="banner" style={{ marginTop: 8 }}><BoldText text={t} /></div>)}
+          <div style={{ ...ROW, marginTop: 8 }}>
+            <button type="button" className={`tab${!sev ? ' active' : ''}`} onClick={() => setSev('')}>전체</button>
+            {EVENT_SEVERITIES.map(([k, l]) => {
+              const c = severityCounts(r.counts).find((x) => x.key === k);
+              if (!c && sev !== k) return null;
+              return <button key={k} type="button" className={`tab${sev === k ? ' active' : ''}`} onClick={() => setSev(k)}>{l} {countText(c ? c.count : 0)}</button>;
+            })}
+          </div>
+          {events.length === 0 ? (
+            <div style={{ ...NOTE, marginTop: 8 }}>이 기간에 받은 이벤트가 없습니다{notes.length ? ' — 위 안내처럼 이벤트를 읽지 못한 CVP 가 있으면 0건은 확인된 값이 아닙니다' : ''}.</div>
+          ) : (
+            <STable minWidth={820} style={{ marginTop: 8 }}>
+              <thead><tr><th>발생</th><th>심각도</th><th>제목</th><th>설명</th><th>장비</th><th>CVP</th><th>확인</th></tr></thead>
+              <tbody>
+                {events.map((e) => (
+                  <tr key={`${e.agent}|${e.cvpId}|${e.key}|${e.ts}`}>
+                    <td style={{ fontSize: 12 }} data-sort={e.ts || 0}>{agoText(e.ts)}</td>
+                    <td><Badge tone={severityTone(e.severity)}>{severityLabel(e.severity)}</Badge></td>
+                    <td style={{ fontSize: 12, whiteSpace: 'normal' }}>{e.title || '—'}</td>
+                    <td style={{ fontSize: 12, whiteSpace: 'normal', maxWidth: 320 }}>{e.desc || '—'}</td>
+                    <td style={{ fontSize: 12 }}>{Array.isArray(e.devices) && e.devices.length ? `${e.devices.slice(0, 2).join(', ')}${e.devices.length > 2 ? ` 외 ${e.devices.length - 2}` : ''}` : '—'}</td>
+                    <td style={{ fontSize: 12 }}>{e.cvpName || e.cvpId}</td>
+                    <td style={{ fontSize: 12 }}>{e.ack === true ? '확인됨' : e.ack === false ? '미확인' : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          )}
+          {r.truncated && <div style={{ ...NOTE, marginTop: 6 }}>최근 {countText(r.limit)}건만 받았습니다 — 심각도·기간으로 좁혀 보세요.</div>}
+          <div style={{ ...NOTE, marginTop: 6 }}>
+            이벤트는 CVP 가 보고한 것을 그대로 옮깁니다(보관 {countText(r.retentionDays)}일). 진행 중·종료 여부는 CVP 응답에 종료 시각이 없어 판정하지 않습니다.
+            {!isAdmin && r.addressHidden ? ' 제목·설명의 주소는 가렸습니다.' : ''}
+          </div>
+        </>
       )}
     </div>
   );
@@ -765,6 +1025,9 @@ function AdminPanel({ onChanged }) {
       </div>
 
       <PreviewPanel />
+
+      {/* v2.641 ⑥: CVP 서버 CSV·자유텍스트 대량 등록·내보내기(공용 BulkDeviceIo — 비밀 포함 내보내기는 설정 소유자 전용) */}
+      <CvpBulkIo onDone={loadAll} />
 
       <div style={{ minWidth: 0 }}>
         <div style={ROW}>

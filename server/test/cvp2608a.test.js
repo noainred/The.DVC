@@ -23,7 +23,8 @@ test('인벤토리 — Resource API NDJSON(줄마다 result.value)을 읽는다'
   ].map((x) => JSON.stringify(x)).join('\n');
   const r = P.parseInventory(nd);
   assert.equal(r.devices.length, 2);
-  assert.deepEqual(r.devices[0], { key: 'SN-A1', hostname: 'leaf1', model: 'DCS-7050SX3', serial: 'SN-A1', mgmtIp: '', eosVersion: '4.30.1F', streaming: true });
+  assert.deepEqual(r.devices[0], { key: 'SN-A1', hostname: 'leaf1', model: 'DCS-7050SX3', serial: 'SN-A1', mgmtIp: '', eosVersion: '4.30.1F', streaming: true,
+    mac: '', fqdn: '', hwRevision: '', bootAt: null }); // v2.641: 개요 필드(없으면 빈 값·null)
   assert.equal(r.devices[1].streaming, false);
 });
 

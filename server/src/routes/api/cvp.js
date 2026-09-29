@@ -36,6 +36,8 @@ const writer = requireRole('admin', 'operator');
 const toolsPerm = requirePerm('tools');
 const fullScopeOnly = fullScopeOnlyWith('CVP 네트워크 스위치는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
 const DEVICE_LIST_MAX = 5000;
+/** v2.641: CPU·메모리 '높음' 경계(%) — 웹 cvpText.SYS_HIGH_PCT 와 같은 값(테스트 대조). */
+export const SYS_HIGH_PCT = 80;
 
 /** 중앙 프로세스 기동 시각(silent 판정의 기준 — 보관분은 파일이라 재시작을 넘어 남지만 '기다렸다' 의 기준은 이번 기동이다). */
 const CENTRAL_STARTED_AT = Date.now() - Math.round(process.uptime() * 1000);
@@ -67,7 +69,8 @@ export function pickEdgeStatus(list, srv) {
  *   예전엔 조용히 건너뛰어 'down 0' 이 '전부 확인했다' 처럼 보였다.
  */
 export function cvpTotals(rows) {
-  const totals = { devices: 0, streaming: 0, partsFault: 0, partsWarn: 0, partsUnknown: 0, partsUnread: 0, bgpDown: 0, bgpStateUnknown: 0, bgpUnread: 0, portsDown: 0, portsNoLink: 0, portsUnread: 0 };
+  const totals = { devices: 0, streaming: 0, partsFault: 0, partsWarn: 0, partsUnknown: 0, partsUnread: 0, bgpDown: 0, bgpStateUnknown: 0, bgpUnread: 0, bgpEmpty: 0, portsDown: 0, portsNoLink: 0, portsUnread: 0, portsEmpty: 0,
+    cpuHigh: 0, memHigh: 0, sysUnread: 0, cpuMax: null, memMax: null };
   for (const d of Array.isArray(rows) ? rows : []) {
     totals.devices++;
     if (d.streaming === true) totals.streaming++;
@@ -75,6 +78,13 @@ export function cvpTotals(rows) {
     if (p) { totals.partsFault += p.fault; totals.partsWarn += p.warn; totals.partsUnknown += p.unknown; } else totals.partsUnread++;
     if (d.bgpPeers) { const b = bgpSummary(d.bgpPeers); totals.bgpDown += b.down; totals.bgpStateUnknown += b.stateUnknown || 0; } else totals.bgpUnread++; // v2.630 A2-03: 모르는 상태는 down 이 아니다
     if (d.ports) { totals.portsDown += d.ports.down; totals.portsNoLink += d.ports.noLink || 0; } else totals.portsUnread++; // v2.630 A2-02
+    // v2.641: 빈 응답(경로에 값 없음)으로 못 읽은 장비는 따로 센다 — '형식을 못 읽음' 과 조치가 다르다.
+    if (!d.bgpPeers && d.info?.bgpEmpty) totals.bgpEmpty++;
+    if (!d.ports && d.info?.portsEmpty) totals.portsEmpty++;
+    // v2.641 ③: CPU·메모리 — 80% 이상을 '높음' 으로 센다(임계는 화면 문구와 같은 값). 못 읽은 장비는 sysUnread.
+    if (d.cpuPct == null && d.memPct == null) totals.sysUnread++;
+    if (d.cpuPct != null) { if (d.cpuPct >= SYS_HIGH_PCT) totals.cpuHigh++; totals.cpuMax = Math.max(totals.cpuMax ?? 0, d.cpuPct); }
+    if (d.memPct != null) { if (d.memPct >= SYS_HIGH_PCT) totals.memHigh++; totals.memMax = Math.max(totals.memMax ?? 0, d.memPct); }
   }
   return totals;
 }
@@ -88,13 +98,15 @@ function pickStatus(st) {
     ...(st.partsDueUnread ? { partsDueUnread: true, partsNotTried: Number.isFinite(st.partsNotTried) ? st.partsNotTried : null } : {}), // v2.612 RECENT2612-01
     ...(st.pruneHeld && typeof st.pruneHeld === 'object' ? { pruneHeld: st.pruneHeld } : {}),
     ...(st.samples && typeof st.samples === 'object' ? { samples: st.samples } : {}), // v2.640 ②: 원문 표본(라우트가 admin 에게만 싣는다)
+    ...(Array.isArray(st.probes) ? { probes: st.probes } : {}), // v2.641: 경로 탐색 표본(admin 만 — stripSamples 가 뺀다)
+    ...(Object.hasOwn(st, 'events') ? { events: st.events } : {}), // v2.641 ④: 이벤트 요약(null = 못 읽음)
   };
 }
 
 /** v2.640 ②: 원문 표본은 호스트명·IP·오류 본문이 그대로 들어간다 — 비-admin 응답에서는 통째로 뺀다(가림이 아니라 제거). */
 function stripSamples(st) {
-  if (!st || typeof st !== 'object' || !st.samples) return st;
-  const { samples, ...rest } = st;
+  if (!st || typeof st !== 'object' || (!st.samples && !st.probes)) return st;
+  const { samples, probes, ...rest } = st; // v2.641: 경로 탐색 표본도 같은 등급(원문 응답 — 관리 IP·피어 IP 가 들어 있다)
   return { ...rest, samplesHidden: true };
 }
 
@@ -118,6 +130,9 @@ function publicDevice(d, admin) {
     parts: partsSummary(d.partsList), partsAt: d.partsAt,
     bgp: d.bgpPeers ? bgpSummary(d.bgpPeers) : null,
     ports: d.ports, collectedAt: d.collectedAt, telemetry: d.telemetry,
+    // v2.641 ②③: CPU·메모리 최신값(못 읽으면 null) · 개요(비-admin 에는 MAC 을 뺀다 — 관리 식별자 등급)
+    cpuPct: d.cpuPct ?? null, memPct: d.memPct ?? null, sysAt: d.sysAt ?? null,
+    info: d.info ? (admin ? d.info : (({ mac, ...rest }) => rest)(d.info)) : null,
   };
 }
 
@@ -218,8 +233,66 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
     partsMissingKinds: det.device.extra?.partsMissingKinds || [],
     usedPaths: st.usedPaths || {}, missing: st.missing || {}, seenFields: st.seenFields || {},
     // v2.640 ②: 그 CVP 의 종류별 원문 표본(첫 장비의 응답 앞부분) — admin 만. 장비마다 다르지 않다(표본은 CVP 단위).
-    ...(admin ? { samples: st0.samples || null } : { addressHidden: true, samplesHidden: true }),
+    ...(admin ? { samples: st0.samples || null, probes: st0.probes || null } : { addressHidden: true, samplesHidden: true }),
   });
+});
+
+// ── v2.641 ③ CPU·메모리 추이 · ④ 이벤트 · ⑤ 포트 사용량 ──────────────────────────
+/** 장비 행을 가진 agent 를 등록부 담당으로 고른다(port-series 와 같은 규칙). */
+async function agentFor(srv, cvpId, key) {
+  const agents = await cdb.agentsForDevice(cvpId, key);
+  return String(srv.agent || '').trim() ? agents.find((a) => agentKeyEq(a, srv.agent)) : (agents.includes(cdb.LOCAL_AGENT) ? cdb.LOCAL_AGENT : undefined);
+}
+api.get('/tools/cvp/device-series', toolsPerm, fullScopeOnly, async (req, res) => {
+  const cvpId = typeof req.query.cvpId === 'string' ? req.query.cvpId : '';
+  const key = typeof req.query.key === 'string' ? req.query.key : '';
+  const srv = cvpId ? getServer(cvpId) : null;
+  if (!srv || !key) return res.status(404).json({ ok: false, reason: '없는 장비입니다.' });
+  const agent = await agentFor(srv, cvpId, key);
+  const s = loadSettings();
+  if (agent === undefined) return res.json({ points: [], intervalMs: s.intervalMs, rawRetentionDays: s.rawRetentionDays });
+  const hours = Math.max(1, Math.min(24 * 90, Math.floor(Number(req.query.hours)) || 24));
+  const r = await cdb.devSeries({ agent, cvpId, key, hours });
+  res.json({ ...r, intervalMs: s.intervalMs, rawRetentionDays: s.rawRetentionDays, highPct: SYS_HIGH_PCT });
+});
+
+/**
+ * CVP 이벤트 목록(최신 순) + 기간 안 심각도별 개수. 이벤트 본문(description)에 장비 관리 IP·피어 IP 가 들어갈 수 있어
+ *   비-admin 에는 주소를 가린다(maskErrText — 등록 주소 + 일반 IPv4·URL).
+ */
+api.get('/tools/cvp/events', toolsPerm, fullScopeOnly, async (req, res) => {
+  const admin = isAdminReq(req);
+  const servers = listServers();
+  const cvpId = typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null;
+  if (cvpId && !servers.some((x) => x.id === cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
+  const sev = ['critical', 'error', 'warning', 'info', 'debug', 'unknown'].includes(req.query.severity) ? req.query.severity : null;
+  const hours = Math.max(1, Math.min(24 * 30, Math.floor(Number(req.query.hours)) || 24));
+  const r = await cdb.listEvents({ cvpId, severity: sev, sinceMs: hours * 3600_000, limit: Math.floor(Number(req.query.limit)) || 500 });
+  if (r.unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
+  const hosts = servers.map((x) => x.host);
+  // 등록부 담당과 맞는 행만(옛 담당 엣지의 이벤트를 섞지 않는다 — rowBelongs 와 같은 규칙).
+  const byId = new Map(servers.map((x) => [x.id, x]));
+  const own = (e) => { const srv = byId.get(e.cvpId); return !!srv && (String(srv.agent || '').trim() ? agentKeyEq(e.agent, srv.agent) : e.agent === cdb.LOCAL_AGENT); };
+  const list = r.events.filter(own).map((e) => ({ ...e, cvpName: byId.get(e.cvpId)?.name || e.cvpId, ...(admin ? {} : { title: maskErrText(e.title, hosts), desc: maskErrText(e.desc, hosts) }) }));
+  // 이벤트를 읽었는지(서버별 events 요약) — null 이면 '못 읽음', 없으면 '보고 없음'. 화면이 0건과 구분한다.
+  const readState = servers.filter((x) => !cvpId || x.id === cvpId).map((x) => { const st = statusOf(x); return { cvpId: x.id, name: x.name || x.id, events: Object.hasOwn(st || {}, 'events') ? st.events : undefined, missing: admin ? (st?.missing?.events || null) : maskErrText(st?.missing?.events || null, hosts) }; });
+  res.json({ events: list, counts: r.counts, hours, ...(r.truncated ? { truncated: true, limit: r.limit } : {}), readState, retentionDays: cdb.EVENT_RETENTION_DAYS, ...(admin ? {} : { addressHidden: true }) });
+});
+
+/** 포트 사용량 — 전 장비 포트를 사용률 높은 순으로(⑤). 사용률을 계산할 수 없는 포트는 사유별 개수로 밝힌다(0% 로 세지 않는다). */
+api.get('/tools/cvp/port-usage', toolsPerm, fullScopeOnly, async (req, res) => {
+  const servers = listServers();
+  const cvpId = typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null;
+  if (cvpId && !servers.some((x) => x.id === cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
+  const s = loadSettings();
+  // 처리량이 '지금 값' 인지 — 수집 주기의 3배(최소 15분)보다 오래되면 순위에서 뺀다.
+  const staleMs = Math.max(15 * 60_000, s.intervalMs * 3);
+  const byId = new Map(servers.map((x) => [x.id, x]));
+  const own = (p) => { const srv = byId.get(p.cvpId); return !!srv && (String(srv.agent || '').trim() ? agentKeyEq(p.agent, srv.agent) : p.agent === cdb.LOCAL_AGENT); };
+  const r = await cdb.portUsage({ cvpId, limit: Math.floor(Number(req.query.limit)) || 200, minUtil: Number(req.query.minUtil) || 0, staleMs, keep: own });
+  if (r.unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
+  const ports = r.ports.map((p) => ({ ...p, cvpName: byId.get(p.cvpId)?.name || p.cvpId }));
+  res.json({ ports, counts: r.counts, staleMs, intervalMs: s.intervalMs, highPct: SYS_HIGH_PCT, ...(r.omitted ? { omitted: r.omitted, limit: r.limit } : {}) });
 });
 
 /** v2.640 ③: 판정 상태 → 화면 모양(주소 없음). */

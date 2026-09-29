@@ -199,7 +199,7 @@ describe('v2.611 — 서버 키 대조·못 읽은 수·배너', () => {
     const block = src.slice(src.indexOf('export const CANDIDATES'), src.indexOf('});', src.indexOf('export const CANDIDATES')));
     const keys = [...block.matchAll(/^\s{2}(\w+):\s*\[/gm)].map((m) => m[1]);
     expect(keys.length).toBeGreaterThan(5);
-    expect(Object.keys(T.ITEM_LABEL).sort()).toEqual([...keys, 'budget', 'deadline'].sort());
+    expect(Object.keys(T.ITEM_LABEL).sort()).toEqual([...keys, 'budget', 'deadline', 'eventsCapped'].sort());
     for (const k of Object.keys(T.ITEM_LABEL)) expect(T.itemLabel(k)).not.toMatch(/^[a-z]/);
   });
   it('0 초과 0.05 미만은 0% 가 아니라 <0.1%(WEB2611-12)', () => {
@@ -340,7 +340,7 @@ describe('v2.640 ④ 필터 칩·CSV·처리량 차트', () => {
   ];
   it('칩 개수는 요약 셀과 같은 값을 보고, 못 읽음은 정상이 아니라 모름', () => {
     const c = T.chipCounts(devs);
-    expect(c).toEqual({ all: 3, fault: 1, warn: 1, portDown: 1, bgpDown: 1, notStreaming: 1, unread: 2 });
+    expect(c).toEqual({ all: 3, fault: 1, warn: 1, portDown: 1, bgpDown: 1, notStreaming: 1, sysHigh: 0, unread: 2 });
     expect(T.filterByChip(devs, 'unread').map((d) => d.hostname)).toEqual(['b', 'c']);
     expect(T.filterByChip(devs, 'all')).toHaveLength(3);
     expect(T.filterByChip(devs, 'nope')).toHaveLength(0);

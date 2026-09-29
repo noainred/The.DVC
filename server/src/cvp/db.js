@@ -88,19 +88,44 @@ async function openInner() {
         fault_key TEXT NOT NULL, kind TEXT NOT NULL, label TEXT, event TEXT NOT NULL,
         state TEXT, prev_state TEXT, detail TEXT, close_reason TEXT);
       CREATE INDEX IF NOT EXISTS idx_cfe_at ON cvp_fault_event (at);
-      CREATE INDEX IF NOT EXISTS idx_cfe_dev ON cvp_fault_event (agent, cvp_id, device_key, at);`);
+      CREATE INDEX IF NOT EXISTS idx_cfe_dev ON cvp_fault_event (agent, cvp_id, device_key, at);
+      CREATE TABLE IF NOT EXISTS device_sample (
+        agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, ts INTEGER NOT NULL, cpu_pct REAL, mem_pct REAL);
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_ds_key ON device_sample (agent, cvp_id, device_key, ts);
+      CREATE INDEX IF NOT EXISTS idx_ds_ts ON device_sample (ts);
+      CREATE TABLE IF NOT EXISTS cvp_event (
+        agent TEXT NOT NULL, cvp_id TEXT NOT NULL, ev_key TEXT NOT NULL, ts INTEGER NOT NULL,
+        severity TEXT NOT NULL, title TEXT, descr TEXT, ev_type TEXT, devices_json TEXT, ack INTEGER, updated_at INTEGER, deleted INTEGER, seen_at INTEGER NOT NULL,
+        PRIMARY KEY (agent, cvp_id, ev_key, ts));
+      CREATE INDEX IF NOT EXISTS idx_ce_ts ON cvp_event (ts);
+      CREATE INDEX IF NOT EXISTS idx_ce_seen ON cvp_event (seen_at);`);
     addDailyErrCountCols(conn);
+    addDeviceInfoCols(conn);
     const maxOf = (col) => `NULLIF(MAX(IFNULL(port_daily.${col},-1e308), IFNULL(excluded.${col},-1e308)), -1e308)`;
     const st = {
-      upDevice: conn.prepare(`INSERT INTO device_latest (agent,cvp_id,device_key,ts,hostname,model,serial,mgmt_ip,eos_version,streaming,telemetry,parts_json,parts_at,bgp_json,ports_read,extra_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      upDevice: conn.prepare(`INSERT INTO device_latest (agent,cvp_id,device_key,ts,hostname,model,serial,mgmt_ip,eos_version,streaming,telemetry,parts_json,parts_at,bgp_json,ports_read,extra_json,info_json,sys_ts,cpu_pct,mem_pct,mem_total)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(agent,cvp_id,device_key) DO UPDATE SET ts=excluded.ts, hostname=excluded.hostname, model=excluded.model, serial=excluded.serial,
           mgmt_ip=excluded.mgmt_ip, eos_version=excluded.eos_version, streaming=excluded.streaming, telemetry=excluded.telemetry,
           parts_json=CASE WHEN excluded.parts_at IS NULL THEN device_latest.parts_json ELSE excluded.parts_json END,
           parts_at=CASE WHEN excluded.parts_at IS NULL THEN device_latest.parts_at ELSE excluded.parts_at END,
           bgp_json=excluded.bgp_json, ports_read=excluded.ports_read,
-          extra_json=CASE WHEN excluded.parts_at IS NULL THEN device_latest.extra_json ELSE excluded.extra_json END
+          extra_json=CASE WHEN excluded.parts_at IS NULL THEN device_latest.extra_json ELSE excluded.extra_json END,
+          info_json=excluded.info_json,
+          sys_ts=CASE WHEN excluded.sys_ts IS NULL OR IFNULL(device_latest.sys_ts,0) > excluded.sys_ts THEN device_latest.sys_ts ELSE excluded.sys_ts END,
+          cpu_pct=CASE WHEN excluded.sys_ts IS NULL OR IFNULL(device_latest.sys_ts,0) > excluded.sys_ts THEN device_latest.cpu_pct ELSE excluded.cpu_pct END,
+          mem_pct=CASE WHEN excluded.sys_ts IS NULL OR IFNULL(device_latest.sys_ts,0) > excluded.sys_ts THEN device_latest.mem_pct ELSE excluded.mem_pct END,
+          mem_total=CASE WHEN excluded.sys_ts IS NULL OR IFNULL(device_latest.sys_ts,0) > excluded.sys_ts THEN device_latest.mem_total ELSE excluded.mem_total END
         WHERE excluded.ts > device_latest.ts`),
+      // v2.641 ③: CPU·메모리 — 원시(7일, port_sample 과 같은 보존) + 최신값은 device_latest 열. 엣지 push 의 devSamples 도 여기로 온다.
+      insDevSample: conn.prepare('INSERT OR IGNORE INTO device_sample (agent,cvp_id,device_key,ts,cpu_pct,mem_pct) VALUES (?,?,?,?,?,?)'),
+      sysLatest: conn.prepare(`UPDATE device_latest SET sys_ts=?, cpu_pct=?, mem_pct=?, mem_total=COALESCE(?, mem_total)
+        WHERE agent=? AND cvp_id=? AND device_key=? AND IFNULL(sys_ts,0) < ?`),
+      // v2.641 ④: 이벤트 — (agent,cvp,key,ts) upsert. seen_at 은 그 이벤트를 **처음 받은 시각**(보존 기준 — 이벤트 시각이 아니다).
+      upEvent: conn.prepare(`INSERT INTO cvp_event (agent,cvp_id,ev_key,ts,severity,title,descr,ev_type,devices_json,ack,updated_at,deleted,seen_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(agent,cvp_id,ev_key,ts) DO UPDATE SET severity=excluded.severity, title=excluded.title, descr=excluded.descr, ev_type=excluded.ev_type,
+          devices_json=excluded.devices_json, ack=excluded.ack, updated_at=excluded.updated_at, deleted=excluded.deleted`),
       upPort: conn.prepare(`INSERT INTO port_latest (agent,cvp_id,device_key,port,ts,descr,speed_bps,oper,admin,vlan,lag,in_bps,out_bps,in_util,out_util,in_err,out_err,rate_ts)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(agent,cvp_id,device_key,port) DO UPDATE SET ts=excluded.ts, descr=excluded.descr, speed_bps=excluded.speed_bps, oper=excluded.oper,
@@ -172,6 +197,16 @@ function addDailyErrCountCols(conn) {
   }
 }
 
+/** v2.641: device_latest 의 개요·CPU·메모리 열 — 없는 열만 더한다(DB2603-01 규약: 'duplicate column name' 만 삼킨다). */
+function addDeviceInfoCols(conn) {
+  const have = new Set(conn.prepare('PRAGMA table_info(device_latest)').all().map((r) => r.name));
+  for (const [col, type] of [['info_json', 'TEXT'], ['sys_ts', 'INTEGER'], ['cpu_pct', 'REAL'], ['mem_pct', 'REAL'], ['mem_total', 'REAL']]) {
+    if (have.has(col)) continue;
+    try { conn.exec(`ALTER TABLE device_latest ADD COLUMN ${col} ${type}`); }
+    catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; }
+  }
+}
+
 export async function available() { return !!(await open()); }
 
 const txt = (v, n = 256) => { const s = capStr(v, n); return s === '' ? null : s; };
@@ -181,6 +216,22 @@ const jsonOrNull = (v, max = 256 * 1024) => {
 };
 const parseJson = (s) => { if (s == null) return null; try { return JSON.parse(s); } catch { return null; } };
 const boolInt = (v) => (v === true ? 1 : v === false ? 0 : null);
+/** 0~100 퍼센트만(범위 밖은 null — 지어낸 100% 로 자르지 않는다: v2.578 D3). */
+const pctOrNull = (v) => { const n = numOrNull(v); return n == null || n < 0 || n > 100 ? null : n; };
+/**
+ * v2.641 ②: 장비 개요 — 아는 필드만 저장(엣지가 보낸 값도 cvpEdge.cleanDevice 가 먼저 좁힌다). 없으면 null(행의 개요를 지운다 —
+ *   이번 주기에 못 읽었다는 뜻이다. '예전 값' 을 지금 값처럼 두지 않는다).
+ */
+export const INFO_KEYS = Object.freeze(['mac', 'fqdn', 'hwRevision', 'bootAt', 'status', 'complianceCode', 'complianceIndication', 'container', 'ztpMode', 'mlag', 'internalVersion', 'lifecycle', 'bugs', 'readKinds', 'portsEmpty', 'bgpEmpty']);
+function infoOf(d) {
+  const src = d && typeof d.info === 'object' && d.info ? d.info : {};
+  const out = {};
+  for (const k of INFO_KEYS) {
+    const v = Object.hasOwn(src, k) ? src[k] : Object.hasOwn(d || {}, k) ? d[k] : undefined;
+    if (v !== undefined && v !== null && v !== '') out[k] = v;
+  }
+  return Object.keys(out).length ? out : null;
+}
 
 /** 포트 행이 원시 표본으로 적재될 만한가 — 링크가 올라와 있고 지표가 하나라도 있다. */
 export const sampleWorthy = (p) => !!p && p.oper === 'up' && ['inBps', 'outBps', 'inUtil', 'outUtil', 'inErr', 'outErr'].some((k) => p[k] != null);
@@ -221,8 +272,14 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
         const extra = d.partsMissingKinds || d.cvpVersion ? { partsMissingKinds: Array.isArray(d.partsMissingKinds) ? d.partsMissingKinds.slice(0, 8) : undefined } : null;
         st.upDevice.run(agent, cvpId, key, ts, txt(d.hostname), txt(d.model), txt(d.serial), txt(d.mgmtIp, 64), txt(d.eosVersion, 64),
           boolInt(d.streaming), txt(d.telemetry, 32), d.parts === undefined ? null : jsonOrNull(d.parts), partsAt,
-          jsonOrNull(d.bgp), Array.isArray(d.ports) ? 1 : 0, jsonOrNull(extra));
+          jsonOrNull(d.bgp), Array.isArray(d.ports) ? 1 : 0, jsonOrNull(extra),
+          jsonOrNull(infoOf(d), 64 * 1024), numOrNull(d.sysAt), pctOrNull(d.cpuPct), pctOrNull(d.memPct), numOrNull(d.memTotal));
         nd++;
+        // v2.641 ③: CPU·메모리 원시 표본(로컬 수집만 — 엣지 push 는 devSamples 로 따로 온다).
+        if (samples && numOrNull(d.sysAt) != null && (pctOrNull(d.cpuPct) != null || pctOrNull(d.memPct) != null)) {
+          const r = st.insDevSample.run(agent, cvpId, key, numOrNull(d.sysAt), pctOrNull(d.cpuPct), pctOrNull(d.memPct));
+          if (Number(r.changes)) ns++;
+        }
         if (Array.isArray(d.ports)) {
           if (olderRecord) stalePorts++;
           for (const p of d.ports) {
@@ -480,6 +537,9 @@ function rowToDevice(r, portSum) {
     portsRead: r.ports_read === 1,
     ports: r.ports_read === 1 ? (portSum || { total: 0, up: 0, down: 0 }) : null,
     extra: parseJson(r.extra_json) || {},
+    // v2.641: 개요·CPU·메모리(열이 없던 구버전 행은 null — 못 읽음)
+    info: parseJson(r.info_json) || null,
+    sysAt: r.sys_ts == null ? null : Number(r.sys_ts), cpuPct: r.cpu_pct ?? null, memPct: r.mem_pct ?? null, memTotal: r.mem_total ?? null,
   };
 }
 
@@ -524,6 +584,8 @@ export async function deviceRecordsFor(agent, cvpId) {
       parts: r.parts_at == null ? undefined : parseJson(r.parts_json), partsAt: r.parts_at == null ? null : Number(r.parts_at),
       ...(Array.isArray(x.partsMissingKinds) ? { partsMissingKinds: x.partsMissingKinds } : {}),
       bgp: parseJson(r.bgp_json), ports: r.ports_read === 1 ? (portsBy.get(r.device_key) || []) : null,
+      info: parseJson(r.info_json) || null,
+      sysAt: r.sys_ts == null ? null : Number(r.sys_ts), cpuPct: r.cpu_pct ?? null, memPct: r.mem_pct ?? null, memTotal: r.mem_total ?? null,
     };
   });
 }
@@ -744,6 +806,122 @@ let _lostUnsent = { total: 0, last: 0, at: null };
 export function setUnsentCursorProvider(fn) { _cursorOf = typeof fn === 'function' ? fn : null; }
 export function lostUnsentStats() { return { ..._lostUnsent }; }
 /** 보존 정리 — 스로틀은 호출자가 `(++tick % N) === 0` 로(기동 첫 틱에 돌지 않게). 여기서는 요청을 공유만 한다. */
+/** v2.641: CVP 이벤트 보존일(처음 받은 시각 기준). 0 이하·빈 값은 기본 30일. */
+export const EVENT_RETENTION_DAYS = (() => { const n = numOrNull(process.env.CVP_EVENT_RETENTION_DAYS); return n != null && n >= 1 ? Math.min(3650, Math.floor(n)) : 30; })();
+export const EVENT_SAVE_MAX = 2000;
+
+/**
+ * v2.641 ③: 엣지 push 의 CPU·메모리 최신 표본 적재. rows: [[cvpId, key, ts, cpuPct, memPct, memTotal], …] — 호출자가 소유권을 먼저 거른다.
+ * 원시 표본은 (agent,cvp,key,ts) UNIQUE 라 재전송이 두 번 들어가지 않는다. 최신 열은 ts 가 더 클 때만 갱신한다.
+ */
+export async function importDevSamples(agent, rows = []) {
+  const db = await open();
+  if (!db) return { samples: 0, unavailable: true };
+  let n = 0;
+  db.conn.exec('BEGIN');
+  try {
+    for (const r of Array.isArray(rows) ? rows : []) {
+      if (!Array.isArray(r)) continue;
+      const [cvpId, key, ts0, cpu0, mem0, tot0] = r;
+      const ts = numOrNull(ts0); const cpu = pctOrNull(cpu0); const mem = pctOrNull(mem0);
+      if (typeof cvpId !== 'string' || typeof key !== 'string' || ts == null || (cpu == null && mem == null)) continue;
+      if (Number(db.st.insDevSample.run(agent, cvpId, key, ts, cpu, mem).changes)) n++;
+      db.st.sysLatest.run(ts, cpu, mem, numOrNull(tot0), agent, cvpId, key, ts);
+    }
+    db.conn.exec('COMMIT');
+  } catch (e) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw e; }
+  return { samples: n };
+}
+
+/** CPU·메모리 추이(원시만 — 보존은 port_sample 과 같다). */
+export async function devSeries({ agent, cvpId, key, hours = 24, now = Date.now() }) {
+  const db = await open();
+  if (!db) return { points: [], unavailable: true };
+  const h = Math.max(1, Math.min(24 * 90, Number(hours) || 24));
+  const LIMIT = 5000;
+  const rows = db.conn.prepare('SELECT ts, cpu_pct, mem_pct FROM device_sample WHERE agent=? AND cvp_id=? AND device_key=? AND ts>=? ORDER BY ts DESC LIMIT ?')
+    .all(agent, cvpId, key, now - h * 3600_000, LIMIT + 1);
+  return { points: rows.slice(0, LIMIT).reverse().map((r) => ({ ts: Number(r.ts), cpu: r.cpu_pct, mem: r.mem_pct })), ...(rows.length > LIMIT ? { truncated: true, limit: LIMIT } : {}) };
+}
+
+/**
+ * v2.641 ④: 이벤트 적재(upsert). events: parse.parseEvents 의 원소. 반환 { saved, capped }.
+ * 한 번에 EVENT_SAVE_MAX 건까지(넘치면 최신부터 — 목록은 최신 순이다).
+ */
+export async function saveEvents(agent, cvpId, events = [], { now = Date.now() } = {}) {
+  const db = await open();
+  if (!db) return { saved: 0, unavailable: true };
+  const list = (Array.isArray(events) ? events : []).slice(0, EVENT_SAVE_MAX);
+  let n = 0;
+  db.conn.exec('BEGIN');
+  try {
+    for (const e of list) {
+      const key = txt(e?.key, 256); const ts = numOrNull(e?.ts);
+      if (!key || ts == null) continue;
+      db.st.upEvent.run(agent, cvpId, key, ts, txt(e.severity, 16) || 'unknown', txt(e.title, 256), txt(e.desc, 1000), txt(e.type, 128),
+        jsonOrNull(Array.isArray(e.devices) ? e.devices.slice(0, 32) : []), boolInt(e.ack), numOrNull(e.updatedAt), e.deleted ? 1 : 0, now);
+      n++;
+    }
+    db.conn.exec('COMMIT');
+  } catch (err) { try { db.conn.exec('ROLLBACK'); } catch { /* */ } throw err; }
+  return { saved: n, ...(Array.isArray(events) && events.length > EVENT_SAVE_MAX ? { capped: events.length - EVENT_SAVE_MAX } : {}) };
+}
+
+/** 이벤트 목록(최신 순) + 기간 안 심각도별 개수. deviceKeys 가 있으면 그 장비가 components 에 있는 것만. */
+export async function listEvents({ agent = null, cvpId = null, sinceMs = 24 * 3600_000, severity = null, limit = 500, now = Date.now() } = {}) {
+  const db = await open();
+  if (!db) return { events: [], counts: null, unavailable: true };
+  const where = ['ts >= ?']; const args = [now - Math.max(60_000, Number(sinceMs) || 0)];
+  if (agent != null) { where.push('agent=?'); args.push(agent); }
+  if (cvpId != null) { where.push('cvp_id=?'); args.push(cvpId); }
+  const counts = {};
+  for (const r of db.conn.prepare(`SELECT severity, COUNT(*) AS n FROM cvp_event WHERE ${where.join(' AND ')} GROUP BY severity`).all(...args)) counts[r.severity] = Number(r.n);
+  if (severity) { where.push('severity=?'); args.push(String(severity)); }
+  const lim = Math.max(1, Math.min(2000, Number(limit) || 500));
+  const rows = db.conn.prepare(`SELECT * FROM cvp_event WHERE ${where.join(' AND ')} ORDER BY ts DESC LIMIT ?`).all(...args, lim + 1);
+  return {
+    events: rows.slice(0, lim).map((r) => ({ agent: r.agent, cvpId: r.cvp_id, key: r.ev_key, ts: Number(r.ts), severity: r.severity, title: r.title || '', desc: r.descr || '',
+      type: r.ev_type || '', devices: parseJson(r.devices_json) || [], ack: r.ack == null ? null : r.ack === 1, updatedAt: r.updated_at == null ? null : Number(r.updated_at), deleted: r.deleted === 1 })),
+    counts, ...(rows.length > lim ? { truncated: true, limit: lim } : {}),
+  };
+}
+
+/**
+ * v2.641 ⑤: 포트 사용량 — 전 장비 포트의 최신 사용률(방향별 최대)을 높은 순으로. 사용률을 **계산할 수 없는** 포트는 사유별로 센다:
+ *   링크 올라옴 + 속도 모름(noSpeed) · 링크 올라옴 + 처리량 없음(noRate — 첫 표본·카운터 못 읽음) · 링크 없음(notUp). 0% 로 세지 않는다.
+ * staleMs 보다 오래된 처리량은 '지금 값' 이 아니므로 순위에서 빼고 stale 로 센다.
+ */
+export async function portUsage({ agent = null, cvpId = null, limit = 200, minUtil = 0, staleMs = 30 * 60_000, now = Date.now(), keep = null } = {}) {
+  const db = await open();
+  if (!db) return { ports: [], counts: null, unavailable: true };
+  const where = []; const args = [];
+  if (agent != null) { where.push('p.agent=?'); args.push(agent); }
+  if (cvpId != null) { where.push('p.cvp_id=?'); args.push(cvpId); }
+  const rows = db.conn.prepare(`SELECT p.*, d.hostname AS hostname FROM port_latest p LEFT JOIN device_latest d
+      ON d.agent=p.agent AND d.cvp_id=p.cvp_id AND d.device_key=p.device_key ${where.length ? `WHERE ${where.join(' AND ')}` : ''} LIMIT 200000`).all(...args);
+  const counts = { total: 0, measured: 0, notUp: 0, noSpeed: 0, noRate: 0, stale: 0, over80: 0, over50: 0 };
+  const list = [];
+  for (const r of rows) {
+    // keep: 등록부 담당과 맞는 행만 센다(옛 담당 엣지 행을 개수에 섞지 않게 — 라우트의 rowBelongs 와 같은 규칙).
+    if (typeof keep === 'function' && !keep({ agent: r.agent, cvpId: r.cvp_id })) continue;
+    counts.total++;
+    if (r.oper !== 'up') { counts.notUp++; continue; }
+    const fresh = r.rate_ts != null && now - Number(r.rate_ts) <= staleMs;
+    if (r.in_bps == null && r.out_bps == null) { counts.noRate++; continue; }
+    if (!fresh) { counts.stale++; continue; }
+    if (!(Number(r.speed_bps) > 0) || (r.in_util == null && r.out_util == null)) { counts.noSpeed++; continue; }
+    const util = Math.max(r.in_util ?? -1, r.out_util ?? -1);
+    counts.measured++;
+    if (util >= 80) counts.over80++; else if (util >= 50) counts.over50++;
+    if (util < (Number(minUtil) || 0)) continue;
+    list.push({ agent: r.agent, cvpId: r.cvp_id, key: r.device_key, hostname: r.hostname || '', port: r.port, desc: r.descr || '', speedBps: r.speed_bps,
+      inBps: r.in_bps, outBps: r.out_bps, inUtil: r.in_util, outUtil: r.out_util, util, inErr: r.in_err, outErr: r.out_err, rateAt: Number(r.rate_ts) });
+  }
+  list.sort((a, b) => b.util - a.util);
+  const lim = Math.max(1, Math.min(2000, Number(limit) || 200));
+  return { ports: list.slice(0, lim), counts, ...(list.length > lim ? { omitted: list.length - lim, limit: lim } : {}), staleMs };
+}
+
 export async function prune({ rawRetentionDays = 7, dailyRetentionDays = 730, now = Date.now() } = {}) {
   const db = await open();
   if (!db) return { deleted: 0, unavailable: true };
@@ -760,12 +938,16 @@ export async function prune({ rawRetentionDays = 7, dailyRetentionDays = 730, no
     const a = await chunkedDelete(db.conn.prepare('DELETE FROM port_sample WHERE rowid IN (SELECT rowid FROM port_sample WHERE ts < ? LIMIT ?)'), [rawCut], { chunk: PRUNE_CHUNK });
     const b = await chunkedDelete(db.conn.prepare('DELETE FROM port_daily WHERE rowid IN (SELECT rowid FROM port_daily WHERE day < ? LIMIT ?)'), [dayCut], { chunk: PRUNE_CHUNK });
     const c = await chunkedDelete(db.conn.prepare('DELETE FROM cvp_fault_event WHERE rowid IN (SELECT rowid FROM cvp_fault_event WHERE at < ? LIMIT ?)'), [evCut], { chunk: PRUNE_CHUNK });
+    // v2.641: CPU·메모리 원시는 포트 원시와 같은 보존 · CVP 이벤트는 처음 받은 시각 기준 EVENT_RETENTION_DAYS.
+    const d2 = await chunkedDelete(db.conn.prepare('DELETE FROM device_sample WHERE rowid IN (SELECT rowid FROM device_sample WHERE ts < ? LIMIT ?)'), [rawCut], { chunk: PRUNE_CHUNK });
+    const e2 = await chunkedDelete(db.conn.prepare('DELETE FROM cvp_event WHERE rowid IN (SELECT rowid FROM cvp_event WHERE seen_at < ? LIMIT ?)'), [now - EVENT_RETENTION_DAYS * DAY_MS], { chunk: PRUNE_CHUNK });
     if (lost > 0) {
       _lostUnsent = { total: _lostUnsent.total + lost, last: lost, at: Date.now() };
       console.warn(`[cvp-db] 중앙에 보내지 못한 표본 ${lost}행이 보존일(${rawRetentionDays}일)을 넘어 지워졌습니다 — 중앙 수신·push 상태를 확인하세요`);
     }
     if (a.deleted || b.deleted) _counts = null;
-    return { deleted: a.deleted + b.deleted + c.deleted, raw: a.deleted, daily: b.deleted, faultEvents: c.deleted, done: a.done && b.done && c.done, ...(lost ? { lostUnsent: lost } : {}) };
+    return { deleted: a.deleted + b.deleted + c.deleted + d2.deleted + e2.deleted, raw: a.deleted, daily: b.deleted, faultEvents: c.deleted, devSamples: d2.deleted, cvpEvents: e2.deleted,
+      done: a.done && b.done && c.done && d2.done && e2.done, ...(lost ? { lostUnsent: lost } : {}) };
   });
 }
 /** 폴러 틱마다 부른다 — N 틱에 한 번만 실제로 정리한다. */

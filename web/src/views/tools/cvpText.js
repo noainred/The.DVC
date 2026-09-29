@@ -16,6 +16,8 @@ import { collectDropNote } from './collectDropText.js';
 import { agoText } from './relTime.js'; // v2.640 ①: 상대시각 사본(9벌 중 하나 — v2.613 WEB2613-15)을 공용 코어로
 
 export const SECRET_MASK = '********';
+/** v2.641: CPU·메모리 '높음' 경계 — 서버 routes/api/cvp.js SYS_HIGH_PCT 와 같은 값(테스트 대조). */
+export const SYS_HIGH_PCT = 80;
 export { agoText };
 
 /** 기간(ms) → '5분' 류. 주기 숫자를 문구에 박지 않고 서버 값을 쓴다. */
@@ -84,7 +86,12 @@ export function kpiItems(totals) {
     { key: 'parts', label: '장애 파트', value: countText(fault), accent: fault > 0 ? red : (warn > 0 ? amber : null), meta: faultMeta },
     { key: 'bgp', label: 'BGP 피어 down', value: countText(n('bgpDown')), accent: n('bgpDown') > 0 ? red : null, meta: [n('bgpStateUnknown') > 0 ? `상태 미확인 ${countText(n('bgpStateUnknown'))}(down 에 넣지 않음)` : null, unread('bgpUnread', 'BGP 를')].filter(Boolean).join(' · ') },
     { key: 'ports', label: '포트 down', value: countText(n('portsDown')), accent: n('portsDown') > 0 ? amber : null,
-      meta: ['관리상 켜 둔(admin up) 포트 중 링크 down', n('portsNoLink') > 0 ? `미연결 ${countText(n('portsNoLink'))}은 제외` : null, unread('portsUnread', '포트를')].filter(Boolean).join(' · ') },
+      meta: ['관리상 켜 둔(admin up) 포트 중 링크 down', n('portsNoLink') > 0 ? `미연결 ${countText(n('portsNoLink'))}은 제외` : null, unread('portsUnread', '포트를'),
+        n('portsEmpty') > 0 ? `그중 ${countText(n('portsEmpty'))}대는 빈 응답` : null].filter(Boolean).join(' · ') },
+    // v2.641 ③: CPU·메모리 — SYS_HIGH_PCT 이상 대수. 못 읽은 장비는 따로(0 이 아니다).
+    { key: 'sys', label: `CPU·메모리 ${SYS_HIGH_PCT}%↑`, value: n('cpuHigh') == null && n('memHigh') == null ? '—' : `${countText(n('cpuHigh'))} · ${countText(n('memHigh'))}`,
+      accent: (n('cpuHigh') > 0 || n('memHigh') > 0) ? amber : null,
+      meta: ['CPU 대수 · 메모리 대수', n('cpuMax') != null ? `최대 CPU ${pctText(n('cpuMax'))}` : null, n('memMax') != null ? `최대 메모리 ${pctText(n('memMax'))}` : null, unread('sysUnread', 'CPU·메모리를')].filter(Boolean).join(' · ') },
   ];
 }
 
@@ -188,6 +195,9 @@ export const ITEM_LABEL = {
   inventory: '인벤토리', cvpVersion: 'CVP 버전', interfaces: '포트 구성', counters: '포트 카운터', bgp: 'BGP',
   power: '전원(PSU)', cooling: '팬', temperature: '온도 센서', xcvr: '트랜시버',
   budget: '시간 예산', deadline: '수집 시한',
+  // v2.641 추가 항목
+  enrich: '장비 상태(레거시 인벤토리)', lifecycle: '수명주기(EOL)', bugs: '버그·CVE 노출', events: '이벤트', eventsCapped: '이벤트 상한',
+  cpu: 'CPU', memory: '메모리',
 };
 export const itemLabel = (k) => ITEM_LABEL[k] || String(k);
 
@@ -264,6 +274,7 @@ export const TELEMETRY_TEXT = {
   'budget-partial': '시간 예산이 모자라 일부만 조회했습니다',
   aborted: '수집 시한에 걸려 조회를 끝내지 못했습니다',
   pending: '조회 결과가 없습니다',
+  empty: '텔레메트리 경로가 빈 응답을 돌려줬습니다(경로에 데이터 없음 — 읽지 못함)',
 };
 /** 장비 telemetry 값 → 문장('' = 없음). 모르는 값은 원문을 붙인다(지어내지 않는다). */
 export function telemetryText(v) {
@@ -291,7 +302,9 @@ export function partsCell(parts) {
 }
 
 /** bgp 요약({peers,established,down,prefixes}|null). */
-export function bgpCell(bgp) {
+export function bgpCell(bgp, { empty = false } = {}) {
+  // v2.641: 빈 응답(경로에 값 없음)은 '피어 없음' 도 '못 읽음' 도 아니다 — BGP 를 쓰지 않는 장비일 수도, 경로가 다를 수도 있다(둘 다 말한다).
+  if ((bgp == null || typeof bgp !== 'object') && empty) return { text: '값 없음', tone: 'muted', title: 'BGP 경로가 빈 응답을 돌려줬습니다 — BGP 를 쓰지 않는 장비이거나 이 CVP 에서 경로가 다릅니다(피어 0개라는 뜻이 아닙니다).' };
   if (bgp == null || typeof bgp !== 'object') return { text: '—', tone: 'muted', title: 'BGP 상태를 읽지 못했거나 BGP 를 쓰지 않는 장비입니다.' };
   const peers = numOrNull(bgp.peers); const est = numOrNull(bgp.established); const down = numOrNull(bgp.down);
   if (peers === 0) return { text: '피어 없음', tone: 'muted', title: '설정된 BGP 피어가 없습니다.' };
@@ -312,7 +325,8 @@ export function prefixText(prefixes, unknown) {
 }
 
 /** ports 요약({total,up,down}|null). */
-export function portsCell(ports) {
+export function portsCell(ports, { empty = false } = {}) {
+  if ((ports == null || typeof ports !== 'object') && empty) return { text: '읽지 못함', tone: 'muted', title: '포트 경로가 빈 응답을 돌려줬습니다(경로에 데이터 없음) — 포트 0개라는 뜻이 아닙니다.' };
   if (ports == null || typeof ports !== 'object') return { text: '—', tone: 'muted', title: '포트 구성을 읽지 못했습니다.' };
   const total = numOrNull(ports.total); const up = numOrNull(ports.up); const down = numOrNull(ports.down);
   return { text: `${countText(up)}/${countText(total)}${down ? ` · down ${down}` : ''}`, tone: down ? 'warn' : 'ok', title: `up ${countText(up)} · down ${countText(down)} · 전체 ${countText(total)}` };
@@ -561,6 +575,7 @@ export const DEVICE_CHIPS = Object.freeze([
   { key: 'portDown', label: '포트 down' },
   { key: 'bgpDown', label: 'BGP down' },
   { key: 'notStreaming', label: '스트리밍 아님' },
+  { key: 'sysHigh', label: `CPU·메모리 ${SYS_HIGH_PCT}%↑` },
   { key: 'unread', label: '못 읽음' },
 ]);
 const gt0 = (v) => { const n = numOrNull(v); return n != null && n > 0; };
@@ -574,7 +589,8 @@ export function chipMatch(d, key) {
     case 'portDown': return gt0(d.ports && d.ports.down);
     case 'bgpDown': return gt0(d.bgp && d.bgp.down);
     case 'notStreaming': return d.streaming === false;
-    case 'unread': return d.parts == null || d.ports == null || d.bgp == null || ['failed', 'aborted', 'budget'].includes(String(d.telemetry || ''));
+    case 'sysHigh': { const c = numOrNull(d.cpuPct); const m = numOrNull(d.memPct); return (c != null && c >= SYS_HIGH_PCT) || (m != null && m >= SYS_HIGH_PCT); }
+    case 'unread': return d.parts == null || d.ports == null || d.bgp == null || ['failed', 'aborted', 'budget', 'empty'].includes(String(d.telemetry || ''));
     default: return false;
   }
 }
@@ -744,7 +760,17 @@ export function sampleRows(samples) {
   return Object.entries(o).filter(([, v]) => v && typeof v === 'object').map(([kind, v]) => ({
     kind, label: itemLabel(kind), path: String(v.path || ''), ok: v.ok === true, status: numOrNull(v.status), bytes: numOrNull(v.bytes), at: numOrNull(v.at),
     head: typeof v.head === 'string' ? v.head : '', reason: typeof v.reason === 'string' ? v.reason : '',
+    // v2.641: 빈 응답·못 읽음을 '성공' 으로 보이지 않게 — 배지가 셋으로 갈린다(성공 / 응답은 왔지만 못 읽음 / 빈 응답 / 실패).
+    empty: v.empty === true, unread: v.unread === true,
   })).sort((a, b) => a.label.localeCompare(b.label));
+}
+/** 표본 행 → 배지 {tone,label}. */
+export function sampleBadge(r) {
+  if (!r) return { tone: 'muted', label: '—' };
+  if (r.ok) return { tone: 'ok', label: '성공' };
+  if (r.empty) return { tone: 'warn', label: '빈 응답' };
+  if (r.unread) return { tone: 'warn', label: '못 읽음' };
+  return { tone: 'bad', label: `실패${r.status != null ? ` HTTP ${r.status}` : ''}` };
 }
 export const SAMPLE_NOTE = '원문 표본은 **그 CVP 에서 처음 성공한 응답(종류별 1건, 앞 4KB)** 이고 성공이 없으면 마지막 실패 응답입니다. 첫 실수집에서 후보 경로·필드명을 좁히는 근거입니다 — 관리자에게만 보이며 아래 ‘파서 시험’ 에 그대로 붙여넣어 볼 수 있습니다.';
 export const PREVIEW_NOTE = 'CVP 응답 원문(JSON·NDJSON)을 붙여넣으면 **이 포탈의 파서가 무엇을 읽는지** 보여줍니다 — 네트워크 왕복·저장 없음. 인식한 필드가 없으면 실패이고, 그때 ‘응답에 있던 필드’ 가 곧 다음 후보의 근거입니다(1MB 이하 — 더 크면 앞부분만).';

@@ -49,9 +49,13 @@ const failLog = createChangeLogger({ windowMs: 10 * 60_000 });
  */
 const FULL_REFRESH_MS = 60 * 60_000;
 const _sent = new Map(); // `${cvpId}|${key}` → { h, at }
+const _evSent = new Map(); // v2.641: cvpId → 보낸 이벤트의 최대 (updatedAt|ts) — 재기동하면 비어 최근 7일분을 다시 보낸다(중앙 upsert)
+export const EVENT_PUSH_MAX = 2000;
 const RATE_KEYS = ['inBps', 'outBps', 'inUtil', 'outUtil', 'inErr', 'outErr'];
 export function recordHash(d) {
-  const { ts, partsAt, ...rest } = d;
+  // v2.641: CPU·메모리 값은 매 주기 바뀐다 — 해시에 넣으면 전 장비 레코드가 매번 다시 간다. 값은 devSamples 가 싣고 해시에는 '있는가' 만.
+  const { ts, partsAt, sysAt, cpuPct, memPct, memTotal, ...rest } = d;
+  rest.sysKnown = [cpuPct, memPct].map((v) => (v == null ? 0 : 1)).join('');
   const ports = Array.isArray(rest.ports) ? rest.ports.map((p) => {
     const o = { ...p };
     for (const k of RATE_KEYS) o[k] = p[k] == null ? 0 : 1;
@@ -125,7 +129,7 @@ async function pushInner() {
   }
   const servers = serversForThisNode();
   const statuses = servers.map(statusFor);
-  const deviceItems = []; const deviceKeys = {}; const touch = []; const sentNow = [];
+  const deviceItems = []; const deviceKeys = {}; const touch = []; const sentNow = []; const devSamples = []; const events = {}; const evMaxNow = new Map();
   const nowMs = Date.now();
   let devicesUnavailable = !(await db.available());
   if (!devicesUnavailable) {
@@ -135,7 +139,18 @@ async function pushInner() {
       // 장비 키 목록은 '온전히 읽은 적이 있을 때만' 싣는다 — 이번 기동에서 아직 수집 전이고 DB 도 비면 중앙 행을 지우지 않는다.
       const st = getStatus(srv.id);
       if (recs.length || (st?.ok && st.deviceCount === 0)) deviceKeys[srv.id] = recs.map((d) => d.key);
+      // v2.641 ④: 이 CVP 의 이벤트 중 지난 push 뒤 새로 생기거나 바뀐 것(재기동 뒤에는 최근 7일 최대 EVENT_PUSH_MAX 건 — 중앙이 upsert 한다).
+      try {
+        const ev = await db.listEvents({ agent: db.LOCAL_AGENT, cvpId: srv.id, sinceMs: 7 * 86_400_000, limit: EVENT_PUSH_MAX });
+        const wm = _evSent.get(srv.id) || 0;
+        const fresh = (ev.events || []).filter((e) => Math.max(e.updatedAt || 0, e.ts || 0) > wm);
+        if (fresh.length) {
+          events[srv.id] = fresh.map(({ agent: _a, cvpId: _c, ...rest }) => rest);
+          evMaxNow.set(srv.id, Math.max(...fresh.map((e) => Math.max(e.updatedAt || 0, e.ts || 0))));
+        }
+      } catch { /* 이벤트는 부가 정보 — 실패해도 장비 push 는 계속한다 */ }
       for (const d of recs) {
+        if (d.sysAt != null && (d.cpuPct != null || d.memPct != null)) devSamples.push([srv.id, d.key, d.sysAt, d.cpuPct, d.memPct, d.memTotal ?? null]);
         const k = `${srv.id}|${d.key}`;
         const h = recordHash(d);
         const prev = _sent.get(k);
@@ -154,7 +169,7 @@ async function pushInner() {
     const r = await db.samplesAfter(cursor, MAX_ROWS);
     rows = r.rows; maxRowid = r.maxRowid;
   }
-  const head = { agent: config.agent.name, servers: statuses, deviceKeys: devicesUnavailable ? null : deviceKeys, devicesUnavailable, touch };
+  const head = { agent: config.agent.name, servers: statuses, deviceKeys: devicesUnavailable ? null : deviceKeys, devicesUnavailable, touch, devSamples, events };
   const items = [...deviceItems, ...rows.map((v) => ({ t: 'r', v }))];
   const chunks = chunkItems(items, CHUNK_BYTES, Buffer.byteLength(JSON.stringify(head)));
   // v2.620(RECENT2620-02): 한글 이름을 헤더에 원문으로 실으면 fetch 가 요청 자체를 던진다 — 안전할 때만 싣는다.
@@ -191,6 +206,7 @@ async function pushInner() {
     drop = mergeDrop(drop, dropSummaryOf(reply));
   }
   if (rows.length) saveCursor(maxRowid);
+  for (const [c, m] of evMaxNow) _evSent.set(c, Math.max(_evSent.get(c) || 0, m));
   for (const [k, h] of sentNow) _sent.set(k, { h, at: nowMs });
   // v2.611(EDGE2611-04): 중앙에 그 장비 행이 없으면(중앙 DB 교체·정리) touch 는 아무것도 갱신하지 않는다 — 해시를 버려
   //   다음 push 에 레코드 전체를 다시 보낸다(한 시간 전량 갱신을 기다리지 않게).
@@ -202,6 +218,7 @@ async function pushInner() {
   // 등록부에서 빠진 CVP·장비의 해시는 버린다(누수 방지 — 다시 나타나면 전량을 보낸다).
   const liveKeys = new Set(Object.entries(deviceKeys).flatMap(([c, ks]) => ks.map((x) => `${c}|${x}`)));
   if (!devicesUnavailable) for (const k of [..._sent.keys()]) if (!liveKeys.has(k)) _sent.delete(k);
+  { const liveCvp = new Set(servers.map((x) => String(x.id))); for (const k of [..._evSent.keys()]) if (!liveCvp.has(k)) _evSent.delete(k); }
   warnDrop('cvp-push', drop);
   const cursorNow = rows.length ? maxRowid : cursor0;
   const backlogRows = dbMax != null ? Math.max(0, dbMax - cursorNow) : null;
@@ -246,4 +263,4 @@ export function startCvpPush() {
   _timer = startAdaptiveTimer(pushMs, () => pushCvpNow(), { firstDelayMs: 70_000, name: 'CVP push' });
 }
 export function cvpPushStatus() { return { ...(_last || {}), intervalMs: pushMs(), cursor: loadCursor() }; }
-export function _resetForTest() { _busy = null; _again = false; _last = null; _sent.clear(); try { fs.rmSync(CURSOR_FILE()); } catch { /* */ } }
+export function _resetForTest() { _busy = null; _again = false; _last = null; _sent.clear(); _evSent.clear(); try { fs.rmSync(CURSOR_FILE()); } catch { /* */ } }
