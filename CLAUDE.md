@@ -3815,6 +3815,11 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     (`cvp/parse.js parseIntfConfig·intfDetailOf·xcvrTypeText` · `poller.js fillDescs` · 웹 `CvpInterfaces.jsx`·`cvpIntfText.js`, 상세 `docs/CVP.md` §16):
     DB 는 설명·세부 열이 NULL 이면 직전 값을 유지(COALESCE)한다 — '' 로 채우면 설명을 지운 것이 된다. `pick` 은 빈 문자열을 건너뛰므로 설명은 키를 직접 찾는다.
     도넛은 읽은 값만 세고 못 읽은 것은 회색 칸이다. ⚠ 설정 노드 경로와 duplex·MAC·MTU·mediaType 필드 이름은 실장비 미확인 추정이다.
+  - **Optimization(`#/tools/waste`) 화면은 시안 A 배치다 — 계산은 `views/tools/wasteViewText.js` 하나**(v2.651, 사용자 요청 "시안 A 적용해줘" —
+    디자인 캔버스 `Optimization 시안`): 회수 가능 스토리지 = 꺼진 VM 점유(committed) + Thin 여유(uncommitted) — 겹치지 않는 두 양의 합이고 **추정**이라 적는다.
+    꺼진 기간 분포는 `/tools/waste/off-since`(꺼진 VM 전량), 법인별 점유는 `byVcenter`(절단 전 전체) 기준 — 화면에 실린 상위 300대로 세지 말 것
+    (부분 합이 된다). 기간 칩의 **표 필터**는 표시 목록 기준이라 개수와 다를 수 있다(문구가 '표시 목록 N대 중' 으로 말한다). 0 인 분포 칸은 중립색(`zero`).
+    탭 주소(`#/tools/waste/<탭>`)·검색·엑셀 내보내기·근거 리포트·스파크라인은 그대로다. '확인 필요 후보 · 포탈은 VM 을 지우지 않습니다' 안내를 지우지 말 것(v2.505 규약).
   - ⚠⚠ **GPU 메모리·온도·동작(v2.650) — 사용률·메모리 점유·온도는 서로 다른 것을 잰다. 온도는 판정에 쓰지 않는다**
     (`gpu/activity.js`·`vgpuProfile.js`·`hostGpu.js` + `GET /tools/gpu/host` + 웹 `components/HostGpuPanel.jsx`·`views/tools/gpuUsageText.js`·
     `GpuHistModal.jsx`, 사용자 요청 "GPU 메모리 점유/사용량도 추가" · "GPU 온도 센서의 온도도 같이 수집해서 실제로 GPU 가 동작하는지 점검" ·

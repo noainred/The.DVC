@@ -1148,3 +1148,60 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 @media (max-width: 640px) {
   .cvp-ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ── v2.651 Optimization 시안 A: 회수 가능량 밴드 · 밑줄 탭 · 기간 칩 · 오른쪽 분석 패널 ── */
+.waste-band { display: grid; grid-template-columns: minmax(0, 1.25fr) repeat(3, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: 14px; background: var(--panel); margin-bottom: 16px; overflow: hidden; }
+.waste-band-cell { padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; min-width: 0; border-right: 1px solid var(--border); }
+.waste-band-cell:last-child { border-right: 0; }
+.waste-band-label { font-size: 12px; color: var(--text-dim); }
+.waste-band-num { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; overflow-wrap: anywhere; }
+.waste-band-main .waste-band-num { font-size: 34px; }
+.waste-band-meta { font-size: 12px; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 4px 14px; line-height: 1.5; }
+.waste-band-meta b { color: var(--text); }
+.waste-bar { height: 8px; border-radius: 4px; background: rgba(148, 163, 184, .16); display: flex; overflow: hidden; }
+.waste-bar > div { height: 8px; }
+.waste-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: 0; }
+.waste-status-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+.waste-tabs { border-bottom: 1px solid var(--border); padding-bottom: 0; row-gap: 8px; }
+.waste-tab { flex: none; height: 42px; padding: 0 14px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--text-dim); font: inherit; font-size: 13px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; margin-bottom: -1px; }
+.waste-tab:hover { color: var(--text); }
+.waste-tab.on { color: var(--text); font-weight: 600; border-bottom-color: var(--amber); }
+.waste-tab-count { font-size: 12px; font-variant-numeric: tabular-nums; border-radius: 999px; padding: 1px 8px; background: rgba(148, 163, 184, .14); }
+.waste-tab.on .waste-tab-count { background: rgba(245, 158, 11, .18); color: var(--amber); }
+.waste-chip { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.waste-chip.on { border-color: var(--accent); color: var(--text); background: rgba(56, 132, 255, .14); }
+.waste-chip.dim:not(.on) { opacity: .75; }
+.waste-chip:disabled { cursor: default; opacity: .5; }
+.waste-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
+.waste-main { min-width: 0; }
+.waste-aside { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.waste-panel { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; }
+.waste-corp-row { display: grid; grid-template-columns: 84px minmax(0, 1fr) 70px; gap: 10px; align-items: center; font-size: 12px; }
+.waste-size-cell { display: inline-flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.waste-size-bar { display: inline-block; width: 80px; height: 6px; border-radius: 3px; background: rgba(148, 163, 184, .16); overflow: hidden; flex: none; }
+.waste-size-bar.wide { width: auto; height: 10px; }
+.waste-size-bar > i { display: block; height: 100%; background: var(--amber); border-radius: 3px; }
+.waste-src { font-size: 11px; border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; color: var(--text-dim); white-space: nowrap; }
+.waste-hist { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; align-items: end; }
+.waste-hist-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 5px; background: transparent; border: 0; border-radius: 6px; padding: 4px 2px; color: var(--text); font: inherit; cursor: pointer; min-height: 132px; }
+.waste-hist-col.on { background: rgba(56, 132, 255, .12); }
+.waste-hist-n { font-size: 12px; font-variant-numeric: tabular-nums; }
+.waste-hist-bar { width: 100%; border-radius: 4px 4px 0 0; }
+.waste-hist-bar.ge30 { background: var(--amber); }
+.waste-hist-bar.d7 { background: #a87a37; }
+.waste-hist-bar.lt7 { background: #56698a; }
+.waste-hist-bar.unknown { background: repeating-linear-gradient(45deg, #3a4556 0 4px, #232c3a 4px 8px); }
+.waste-hist-bar.zero { background: var(--border); }
+.waste-hist-label { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.waste-warn { border: 1px solid rgba(245, 158, 11, .35); background: rgba(245, 158, 11, .07); border-radius: 12px; padding: 12px 14px; font-size: 12px; line-height: 1.6; color: var(--text); }
+@media (max-width: 1100px) {
+  .waste-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .waste-band-cell:nth-child(2) { border-right: 0; }
+  .waste-band-cell:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+  .waste-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .waste-band { grid-template-columns: minmax(0, 1fr); }
+  .waste-band-cell { border-right: 0; border-bottom: 1px solid var(--border); }
+  .waste-band-cell:last-child { border-bottom: 0; }
+}

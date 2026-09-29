@@ -11,6 +11,7 @@ import ServerTempBoard from './serverTemp/ServerTempBoard.jsx'; // v2.556: 서�
 import { sparkCellState, sparkCellText, sparkProgressText, sparkCapText, SPARK_ROW_CAP } from './sparkBatch.js';
 // v2.497: 엑셀(ZIP) 내보내기 버튼 문구·예상치 — 판정은 순수 모듈(node 테스트로 고정)
 import { reportCount, exportLabel, exportTitle, progressNote, exportErrText } from './wasteExportText.js';
+import { reclaimStorage, AGE_BUCKETS, ageBucketOf, ageCounts, corpOffShare, sizeText, OFF_SRC_SHORT } from './wasteViewText.js'; // v2.651 시안 A
 // v2.578 D1·D3·D4: 기준선(언제부터의 자료인가)·해상도 인과·절단 사실 — 판정과 문구를 한 모듈이 소유한다.
 import { sinceNote, bucketAvgLabel, resolutionNote, truncationNote } from '../trendMeta.js';
 import { samplerWithheldNote } from '../samplerWithheldText.js'; // v2.628(LEFT2628-01)
@@ -333,6 +334,8 @@ export function Waste({ scope, cluster = '', folder = '' }) {
   // v2.491: VM 이름 검색 — 아래 하위 탭(전원 꺼짐·스냅샷·Tools 미실행·CPU/메모리 과할당)의 표를
   // 이름으로 거른다. 훅이므로 조기 return 위에 선언한다(CLAUDE.md 프론트 회귀 방지).
   const [q, setQ] = useState('');
+  // v2.651(시안 A): 전원 꺼짐 탭의 꺼진 기간 칩 필터('' = 전체). 훅이므로 조기 return 위.
+  const [ageFilter, setAgeFilter] = useState('');
   // v2.483: 전원 꺼진 VM 의 '꺼진 지 N일' — 목록(/tools/waste)과 별도로 조회해 뒤이어 채운다(출처: 이벤트/추적/first_seen).
   const [offSince, setOffSince] = useState(null); // { byId: {vmId: {offSince, offDays, source, exact}}, sources, error }
   // v2.497: 엑셀(ZIP) 내보내기 — 표 5개 + vCenter 별 현황 xlsx + VM 별 근거 리포트(HTML) 첨부.
@@ -387,23 +390,58 @@ export function Waste({ scope, cluster = '', folder = '' }) {
           {folder ? <> 폴더 <b style={{ color: 'var(--text)' }}>{folder}</b></> : null}
         </div>
       )}
-      <div className="kpis" style={{ marginBottom: 14 }}>
-        <Card label="전원 꺼진 VM" value={data.poweredOff.count} meta={`스토리지 ${tb2(data.poweredOff.storageGB)} 점유`} accent={data.poweredOff.count ? 'var(--amber)' : undefined} />
-        <Card label="스냅샷 보유 VM" value={data.snapshots.count} meta={`${tb2(data.snapshots.sizeGB)} 사용`} accent={data.snapshots.count ? 'var(--amber)' : undefined} />
-        <Card label="Thin 회수가능(추정)" value={tb2(data.thinReclaim.reclaimableGB)} meta={`${data.thinReclaim.count} VM`} />
-        <Card label="Tools 미실행(On)" value={data.noTools.count} accent={data.noTools.count ? 'var(--amber)' : undefined} />
-        {oa && <Card label="미사용 CPU clock" value={`${oa.cpu.idleGHz} GHz`}
-          meta={`할당 ${oa.cpu.allocGHz} · 사용 ${oa.cpu.usedGHz} GHz → 절감 가능 ${oa.cpu.savingPct == null ? '—' : `${oa.cpu.savingPct}%`}${oa.usageUnknown?.cpu ? ` · 사용률 모름 ${oa.usageUnknown.cpu}대 제외` : ''}`}
-          accent={oa.cpu.savingPct >= 50 ? 'var(--amber)' : undefined} />}
-        {oa && <Card label="미사용 메모리" value={tb2(oa.mem.idleGB)}
-          meta={`할당 ${tb2(oa.mem.allocGB)} · 사용 ${tb2(oa.mem.usedGB)} → 절감 가능 ${oa.mem.savingPct == null ? '—' : `${oa.mem.savingPct}%`}${oa.usageUnknown?.mem ? ` · 사용률 모름 ${oa.usageUnknown.mem}대 제외` : ''}`}
-          accent={oa.mem.savingPct >= 50 ? 'var(--amber)' : undefined} />}
-      </div>
-      <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
+      {/* v2.651 시안 A: 회수 가능량 밴드 — 스토리지(꺼진 VM 점유 + Thin 여유) · CPU · 메모리 · 관리 상태 */}
+      {(() => {
+        const rs = reclaimStorage(data);
+        return (
+          <section className="waste-band">
+            <div className="waste-band-cell waste-band-main">
+              <span className="waste-band-label">회수 가능 스토리지 (추정)</span>
+              <div className="waste-band-num" style={{ color: 'var(--amber)' }}>{rs ? sizeText(rs.totalGB) : '—'}</div>
+              {rs && rs.totalGB > 0 && (
+                <div className="waste-bar" aria-hidden="true">
+                  <div style={{ width: `${rs.offPct ?? 0}%`, background: 'var(--amber)' }} />
+                  <div style={{ width: `${100 - (rs.offPct ?? 0)}%`, background: '#7c6bd6' }} />
+                </div>
+              )}
+              <div className="waste-band-meta">
+                <span><i className="waste-dot" style={{ background: 'var(--amber)' }} />꺼진 VM {data.poweredOff.count}대 점유 {sizeText(data.poweredOff.storageGB)}</span>
+                <span><i className="waste-dot" style={{ background: '#7c6bd6' }} />Thin 여유 {sizeText(data.thinReclaim.reclaimableGB)} · {data.thinReclaim.count} VM</span>
+              </div>
+            </div>
+            <div className="waste-band-cell">
+              <span className="waste-band-label">미사용 CPU clock</span>
+              <div className="waste-band-num" style={{ color: 'var(--accent-2, #3fb6a8)' }}>{oa ? `${oa.cpu.idleGHz} GHz` : '—'}</div>
+              {oa && oa.cpu.savingPct != null && <div className="waste-bar" aria-hidden="true"><div style={{ width: `${oa.cpu.savingPct}%`, background: 'var(--accent-2, #3fb6a8)' }} /></div>}
+              <div className="waste-band-meta">{oa ? <span>할당 {oa.cpu.allocGHz} · 사용 {oa.cpu.usedGHz} GHz · 절감 가능 <b>{oa.cpu.savingPct == null ? '—' : `${oa.cpu.savingPct}%`}</b>{oa.usageUnknown?.cpu ? ` · 사용률 모름 ${oa.usageUnknown.cpu}대 제외` : ''}</span> : <span>과할당 집계 없음(구버전 서버)</span>}</div>
+            </div>
+            <div className="waste-band-cell">
+              <span className="waste-band-label">미사용 메모리</span>
+              <div className="waste-band-num" style={{ color: 'var(--accent-2, #3fb6a8)' }}>{oa ? tb2(oa.mem.idleGB) : '—'}</div>
+              {oa && oa.mem.savingPct != null && <div className="waste-bar" aria-hidden="true"><div style={{ width: `${oa.mem.savingPct}%`, background: 'var(--accent-2, #3fb6a8)' }} /></div>}
+              <div className="waste-band-meta">{oa ? <span>할당 {tb2(oa.mem.allocGB)} · 사용 {tb2(oa.mem.usedGB)} · 절감 가능 <b>{oa.mem.savingPct == null ? '—' : `${oa.mem.savingPct}%`}</b>{oa.usageUnknown?.mem ? ` · 사용률 모름 ${oa.usageUnknown.mem}대 제외` : ''}</span> : <span>과할당 집계 없음(구버전 서버)</span>}</div>
+            </div>
+            <div className="waste-band-cell waste-band-status">
+              <span className="waste-band-label">관리 상태</span>
+              <div className="waste-status-row"><span>스냅샷 보유 VM</span><b style={{ color: data.snapshots.count ? 'var(--amber)' : undefined }}>{data.snapshots.count}</b></div>
+              <div className="waste-status-row"><span className="muted" style={{ fontSize: 11 }}>스냅샷 크기</span><span className="muted" style={{ fontSize: 11 }}>{tb2(data.snapshots.sizeGB)}</span></div>
+              <div className="waste-status-row"><span>Tools 미실행(On)</span><b style={{ color: data.noTools.count ? 'var(--amber)' : undefined }}>{data.noTools.count}</b></div>
+              <div className="waste-status-row"><span>고아 디스크</span><span className="muted" style={{ fontSize: 12 }}>파일 스캔 필요</span></div>
+            </div>
+          </section>
+        );
+      })()}
+      <div className="flex gap wrap waste-tabs" style={{ marginBottom: 10, alignItems: 'center' }}>
         {[['off', `전원 꺼짐 (${data.poweredOff.count})`], ['snap', `스냅샷 (${data.snapshots.count})`], ['tools', `Tools 미실행 (${data.noTools.count})`],
-          ...(oa ? [['cpu', `CPU 과할당 (${oa.cpu.candidates})`], ['mem', `메모리 과할당 (${oa.mem.candidates})`], ['trend', '📈 사용 추이']] : [])].map(([k, l]) => (
-          <button key={k} className={tab === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setTab(k)}>{l}</button>
-        ))}
+          ...(oa ? [['cpu', `CPU 과할당 (${oa.cpu.candidates})`], ['mem', `메모리 과할당 (${oa.mem.candidates})`], ['trend', '📈 사용 추이']] : [])].map(([k, l]) => {
+          // v2.651 시안 A: 밑줄 탭 + 개수 배지(라벨 끝의 '(N)' 을 배지로 뗀다)
+          const m = /^(.*) \(([\d,]+)\)$/.exec(l);
+          return (
+            <button key={k} aria-pressed={tab === k} className={`waste-tab${tab === k ? ' on' : ''}`} onClick={() => setTab(k)}>
+              {m ? m[1] : l.replace('📈 ', '')}{m && <span className="waste-tab-count">{Number(m[2]).toLocaleString('ko-KR')}</span>}
+            </button>
+          );
+        })}
         {tab !== 'trend' && <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 260, minWidth: 170 }}
           placeholder="🔍 VM 이름 검색" value={q} onChange={setQ} />}
         {tab !== 'trend' && canCsv() && ( /* v2.643: 근거 리포트 내보내기는 관리자 이상 + data.csv 권한만 */
@@ -425,32 +463,100 @@ export function Waste({ scope, cluster = '', folder = '' }) {
       {exportErr && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)', overflowWrap: 'anywhere' }}>{exportErr}</div>}
       {tab === 'off' && (() => {
         const SRC = { event: 'vCenter 전원 이벤트(정확)', observed: `전원 꺼짐 점검(${offSince?.sources?.observedIntervalHours || 6}시간 주기)에서 관측된 현재 꺼짐 구간 시작 — 하한`, track: 'VM 추적 12시간 슬롯 전환(그 시각 이후 확실히 꺼짐 — 하한)', first_seen: 'VM 추적 시작 이후 계속 꺼짐(하한)' };
-        const SRC_SHORT = { event: '이벤트', observed: '점검', track: '추적', first_seen: '관측 시작' };
         const all = data.poweredOff.vms.map((v) => ({ ...v, ...(offSince?.byId?.[v.id] || {}) }));
-        const rows = byName(all);
-        return (<>
-          <MatchCount total={all.length} shown={rows.length} term={term} />
-          <DataTable rows={rows} emptyText={emptyText} initialSort={{ key: 'storageGB', dir: 'desc' }} columns={[
-            { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> }, { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
-            { key: 'guestOS', label: 'OS' }, { key: 'storageGB', label: '스토리지', align: 'right', render: (v) => tb2(v.storageGB) },
-            { key: 'offDays', label: '꺼진 지', align: 'right', render: (v) => (
-              v.offDays == null
-                ? <span className="muted">{offSince ? '—' : '…'}</span>
-                : <span title={`${SRC[v.source] || v.source} · ${new Date(v.offSince).toLocaleString('ko-KR')}`}>
-                    <b style={{ color: v.offDays >= 90 ? 'var(--amber)' : undefined }}>{v.exact ? '' : '≥ '}{v.offDays}일</b>
-                    <div className="muted" style={{ fontSize: 11 }}>{new Date(v.offSince).toLocaleDateString('ko-KR')} · {SRC_SHORT[v.source] || v.source}</div>
+        // v2.651 시안 A: 꺼진 기간 칩 — 분포는 off-since(꺼진 VM 전량) 기준, 표 필터는 화면에 실린 상위 목록 기준.
+        const dist = offSince && !offSince.error ? ageCounts(Object.values(offSince.byId || {}), data.poweredOff.count) : null;
+        const named = byName(all);
+        const rows = ageFilter ? named.filter((v) => (offSince ? ageBucketOf(v.offDays) : 'unknown') === ageFilter) : named;
+        const maxGB = Math.max(1, ...all.map((v) => v.storageGB || 0));
+        const corps = corpOffShare(data.byVcenter, 7);
+        const distMax = dist ? Math.max(1, ...AGE_BUCKETS.map((b) => dist[b.k])) : 1;
+        return (
+          <div className="waste-layout">
+            <section className="waste-main">
+              <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  <b style={{ color: 'var(--text)' }}>{data.poweredOff.count}</b>대 중 스토리지 큰 순 상위 {all.length}대 표시
+                  {data.poweredOff.count > all.length ? ` · 나머지 ${data.poweredOff.count - all.length}대는 엑셀 내보내기에 포함` : ''}
+                </span>
+                <span className="flex gap wrap" style={{ gap: 6 }}>
+                  <button className={`waste-chip${ageFilter === '' ? ' on' : ''}`} aria-pressed={ageFilter === ''} onClick={() => setAgeFilter('')}>전체</button>
+                  {AGE_BUCKETS.map((b) => (
+                    <button key={b.k} className={`waste-chip${ageFilter === b.k ? ' on' : ''}${b.k === 'unknown' ? ' dim' : ''}`} aria-pressed={ageFilter === b.k}
+                      disabled={!offSince} title={!offSince ? '꺼진 시각을 불러오는 중입니다' : '표를 이 기간으로 거릅니다(개수는 꺼진 VM 전체 기준)'}
+                      onClick={() => setAgeFilter(ageFilter === b.k ? '' : b.k)}>
+                      {b.label}{dist ? ` ${dist[b.k].toLocaleString('ko-KR')}` : ''}
+                    </button>
+                  ))}
+                </span>
+              </div>
+              {(term || ageFilter) && (
+                <div className="muted result-count" style={{ marginBottom: 10 }}>
+                  표시 목록 {all.length.toLocaleString('ko-KR')}대 중 <b style={{ color: 'var(--text)' }}>{rows.length.toLocaleString('ko-KR')}</b>대
+                  {term && <span className="badge blue" style={{ marginLeft: 8 }}>검색: {term}</span>}
+                  {ageFilter && <span className="badge amber" style={{ marginLeft: 8 }}>꺼진 기간: {AGE_BUCKETS.find((x) => x.k === ageFilter)?.label}</span>}
+                </div>
+              )}
+              <DataTable rows={rows} emptyText={ageFilter && !term ? '이 기간에 해당하는 VM 이 표시 목록에 없습니다.' : emptyText} initialSort={{ key: 'storageGB', dir: 'desc' }} columns={[
+                { key: 'name', label: 'VM', render: (v) => <VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /> }, { key: 'vcenterId', label: '법인(vCenter)', render: (v) => <span className="muted">{v.vcenterId}</span> },
+                { key: 'guestOS', label: 'OS', render: (v) => <span className="muted">{v.guestOS || '—'}</span> },
+                { key: 'storageGB', label: '스토리지', align: 'right', render: (v) => (
+                  <span className="waste-size-cell">
+                    <span className="waste-size-bar" aria-hidden="true"><i style={{ width: `${Math.max(2, Math.round(((v.storageGB || 0) / maxGB) * 100))}%` }} /></span>
+                    <span className="nowrap">{tb2(v.storageGB)}</span>
                   </span>) },
-          ]} />
-          <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
-            <b>꺼진 지</b> 출처 — <b>이벤트</b>: vCenter 전원 이벤트(정확, 로그 수집이 켜져 있고 보관 기간 안일 때; VM 이름 기준이라 동명 VM 은 구분 못 함) ·
-            <b> 점검</b>: 전원 꺼짐 점검({offSince?.sources?.observedIntervalHours || 6}시간 주기, 설정 › 수집 서버 › 전원 꺼짐 점검)에서 처음 꺼진 것으로 관측된 시각('≥' 하한, 정밀도 = 주기) ·
-            <b> 추적</b>: VM 추적의 12시간 슬롯에서 On→Off 전환이 관측된 시각(실제로는 그 직전 슬롯 사이 — '≥' 하한) ·
-            <b> 관측 시작</b>: VM 추적 시작부터 계속 꺼짐('≥' 하한). '—' 는 세 출처 모두 없음(로그 수집·VM 추적이 꺼져 있거나 보관 기간 밖).
-            {offSince && !offSince.error && !offSince.sources?.events && <> 이 조회에서 이벤트 출처는 사용되지 않았습니다(vCenter 로그 수집 확인).</>}
-            {offSince && !offSince.error && offSince.sources?.observedEnabled === false && <> 전원 꺼짐 점검이 꺼져 있습니다(설정에서 켜면 점검 주기 정밀도로 추적).</>}
-            {offSince?.error && <> 조회 실패: {offSince.error}</>}
+                { key: 'offDays', label: '꺼진 기간', align: 'right', render: (v) => (
+                  v.offDays == null
+                    ? <span className="muted">{offSince ? '—' : '…'}</span>
+                    : <span className="nowrap" title={`${SRC[v.source] || v.source} · ${new Date(v.offSince).toLocaleString('ko-KR')}`}>
+                        <b style={{ color: v.offDays >= 90 ? 'var(--amber)' : undefined }}>{v.exact ? '' : '≥ '}{v.offDays}일</b>
+                        <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>{new Date(v.offSince).toLocaleDateString('ko-KR')}</span>
+                      </span>) },
+                { key: 'source', label: '근거', render: (v) => (v.source ? <span className="waste-src" title={SRC[v.source] || v.source}>{OFF_SRC_SHORT[v.source] || v.source}</span> : <span className="muted">{offSince ? '없음' : '…'}</span>) },
+              ]} />
+              <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
+                근거 — <b>이벤트</b> 정확(vCenter 로그 수집·보관 기간 안, VM 이름 기준) · <b>점검</b> ≥ 하한({offSince?.sources?.observedIntervalHours || 6}시간 주기) · <b>추적</b> ≥ 하한(12시간 슬롯) · <b>관측 시작</b> ≥ 하한 · <b>없음</b> 세 출처 모두 기록 없음.
+                {offSince && !offSince.error && !offSince.sources?.events && <> 이 조회에서 이벤트 출처는 쓰이지 않았습니다(vCenter 로그 수집 확인).</>}
+                {offSince && !offSince.error && offSince.sources?.observedEnabled === false && <> 전원 꺼짐 점검이 꺼져 있습니다(설정 › 수집 서버에서 켜면 점검 주기 정밀도로 추적).</>}
+                {offSince?.error && <> 꺼진 시각 조회 실패: {offSince.error}</>}
+              </div>
+            </section>
+            <aside className="waste-aside">
+              <section className="card waste-panel">
+                <div className="flex" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}><b style={{ fontSize: 14 }}>법인별 꺼진 VM 점유</b><span className="muted" style={{ fontSize: 11 }}>스토리지</span></div>
+                {corps.top.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>꺼진 VM 이 없습니다.</div> : corps.top.map((c) => (
+                  <div key={c.vcenterId} className="waste-corp-row">
+                    <span className="muted" title={c.vcenterId} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.vcenterId}</span>
+                    <span className="waste-size-bar wide" aria-hidden="true"><i style={{ width: `${c.pct}%`, background: '#c98a3c' }} /></span>
+                    <span className="nowrap" style={{ textAlign: 'right' }}>{sizeText(c.gb)}</span>
+                  </div>
+                ))}
+                {corps.restCount > 0 && <span className="muted" style={{ fontSize: 11 }}>나머지 {corps.restCount}개 법인 합 {sizeText(corps.restGB)}</span>}
+              </section>
+              <section className="card waste-panel">
+                <b style={{ fontSize: 14 }}>꺼진 기간 분포</b>
+                {!dist ? <div className="muted" style={{ fontSize: 12 }}>{offSince?.error ? '꺼진 시각을 읽지 못해 분포를 그리지 않았습니다.' : '꺼진 시각을 불러오는 중…'}</div> : (
+                  <>
+                    <div className="waste-hist">
+                      {AGE_BUCKETS.map((b) => (
+                        <button key={b.k} className={`waste-hist-col${ageFilter === b.k ? ' on' : ''}`} onClick={() => setAgeFilter(ageFilter === b.k ? '' : b.k)} title={`${b.label} — 표를 이 기간으로 거릅니다`}>
+                          <span className="waste-hist-n">{dist[b.k].toLocaleString('ko-KR')}</span>
+                          {/* 0 인 칸은 온도·기간 색이 아니라 축 눈금(중립색 1px)이다 — 색 있는 선이 '있다' 고 말하지 않게(v2.556 규약) */}
+                          <span className={`waste-hist-bar ${dist[b.k] ? b.k : 'zero'}`} style={{ height: `${dist[b.k] ? Math.max(4, Math.round((dist[b.k] / distMax) * 90)) : 1}px` }} />
+                          <span className="waste-hist-label">{b.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="muted" style={{ margin: 0, fontSize: 12, lineHeight: 1.6 }}>‘시점 모름’ 은 이벤트·점검·추적 어디에도 기록이 없는 VM 이고, 꺼진 지 얼마 안 됐다는 뜻이 아닙니다.</p>
+                  </>
+                )}
+              </section>
+              <section className="waste-warn">
+                <b>확인 필요 후보</b>입니다. 삭제를 판단하기 전에 소유 부서·백업·복제 대상 여부를 확인하세요. 포탈은 VM 을 지우지 않습니다.
+              </section>
+            </aside>
           </div>
-        </>);
+        );
       })()}
       {tab === 'snap' && <>
         <MatchCount total={(data.snapshots.vms || []).length} shown={byName(data.snapshots.vms).length} term={term} />
