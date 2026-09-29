@@ -407,13 +407,31 @@ export async function checkRemote(baseUrl, currentVersion, { token, timeout = 10
   return out;
 }
 
+/** 주소를 화면에 싣기 전에 자격증명·쿼리를 뗀다(사내 미러 URL 에 user:pass@ 나 ?token= 이 들어갈 수 있다). */
+export function safeUrlText(url) {
+  try { const u = new URL(String(url)); u.username = ''; u.password = ''; u.search = ''; u.hash = ''; return u.toString(); }
+  catch { return String(url || '').split('?')[0].replace(/\/\/[^/@]*@/, '//'); }
+}
+
+/**
+ * v2.651: 다운로드 실패 사유 — 예전에는 'download HTTP 404' 한 줄이라 **무엇이 없는지** 화면이 말하지 않았다(사용자 신고:
+ * 사내 미러의 versions.json 은 새 버전을 가리키는데 패키지 파일이 아직 없어 404). 조치가 다른 상태를 나눠 말한다.
+ * 앞머리 `download HTTP <코드>` 는 유지한다(기존 로그·화면이 그 접두로 찾는다).
+ */
+export function downloadFailReason(status, url) {
+  const where = safeUrlText(url);
+  if (status === 404) return `download HTTP 404 — 패키지 파일이 없습니다: ${where} · versions.json 은 이 버전을 가리키는데 파일이 없습니다(사내 미러라면 패키지 동기화가 아직 안 됐거나 빠졌습니다). 확인 주기마다 다시 시도합니다`;
+  if (status === 401 || status === 403) return `download HTTP ${status} — 저장소가 다운로드를 거부했습니다: ${where} · 토큰(사설 레포)·미러 권한을 확인하세요`;
+  return `download HTTP ${status} — ${where}`;
+}
+
 /** Download a remote archive into destDir (validates name, caps size, auth). */
 export async function downloadArchive(url, destDir, { token, timeout = 120_000, maxBytes = MAX_BUNDLE_BYTES, sha256 } = {}) {
   const name = path.basename(String(url || '').split('?')[0]);
   if (!ARCHIVE_RE.test(name)) return { ok: false, reason: `disallowed archive name: ${name || '(none)'}` };
   try {
     const res = await resilientFetch(url, { dispatcher: upgradeAgent, headers: authHeaders(url, token), timeoutMs: timeout, retries: 2, retryBackoffMs: 2000 });
-    if (!res.ok) return { ok: false, reason: `download HTTP ${res.status}` };
+    if (!res.ok) return { ok: false, reason: downloadFailReason(res.status, url), status: res.status };
     // v2.607 SEC2607-06: 예전엔 전량을 메모리에 받은 뒤 비교했다 — 상한을 넘는 순간 읽기를 멈춘다.
     const rd = await readBytesCapped(res, maxBytes);
     if (!rd.ok) return { ok: false, reason: `download too large (>${maxBytes} bytes)` };
