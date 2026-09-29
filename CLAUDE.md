@@ -3861,6 +3861,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       펼침은 한 번에 한 행(`DataTable` 의 선택 인자 — 기본값이면 기존 표 무변경) · 추이 창 기본 1일.
     - 데모(v2.654): mock 은 설정 없이 전 법인을 합성 수집(`gpu/poller.js demoAll`)하고 일부 VM·법인을 일부러 실패로 둬 이유 칩이 보인다 · 목 GPU VM 은 호스트별 순번으로 배치(`mkVmGpu(…, ord)`).
     - ⚠ **Playwright 스크린샷 경로는 절대 경로로** — 상대 경로면 스크립트를 돌린 cwd(저장소)에 png 가 떨어진다(이번에 server/·web/ 에 떨어져 지웠다).
+    - **집계 단위(v2.655, 사용자 요청 "1분/10분/1시간/6시간 단위로")**: `/tools/gpu/history?bucket=1m|10m|1h|6h`(서버 `GPU_HIST_BUCKETS` ↔ 웹
+      `GpuHistModal.jsx GPU_HIST_BUCKETS` 키 대조 — 둘 다 테스트가 고정). 안 주면 예전 기간 규칙. 단위를 고르면 점 상한 3,000 이고 넘치면
+      `historyStep` 의 `truncated`·`coveredSince` 로 밝힌다. 화면은 상한을 넘는 기간 버튼을 막고, 사용률 수집 주기(`sampleSec` =
+      `gpuUtilIntervalSec`)와 비슷한 단위면 '같은 값이 이어질 수 있다' 고 적는다. GPU 계열은 dead-band 가 없어 1분 원본이 그대로 있다.
   - ⚠ **CVP 슬롯 전원(`ecb › LinecardN`)은 PSU 가 아니다 — 빈 슬롯/카드 전원 이상을 근거로 가른다**(v2.648, `cvp/parse.js judgeSlotPower`·
     `client.js slotEvidence`, 상세 `docs/CVP.md` §15): kind 는 psu 그대로(faultKey 불변 — 바꾸면 열린 장애가 영원히 보류), 표시만 '슬롯 전원(카드)'.
     그 슬롯의 링크 up 포트가 있으면 장애 → 주의, 다른 슬라이스는 있는데 그 번호만 없고 센서·트랜시버도 없으면 빈 슬롯(absent — removed 로 닫힘),

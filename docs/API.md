@@ -772,7 +772,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/gpu.json` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:424](../server/src/routes/api/hardwareGpu.js#L424) |
 | GET | `/tools/gpu/export.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:455](../server/src/routes/api/hardwareGpu.js#L455) |
 | GET | `/tools/gpu/export.json` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:456](../server/src/routes/api/hardwareGpu.js#L456) |
-| GET | `/tools/gpu/history` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:180](../server/src/routes/api/toolsAnalytics.js#L180) |
+| GET | `/tools/gpu/history` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:187](../server/src/routes/api/toolsAnalytics.js#L187) |
 | GET | `/tools/gpu/host` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:496](../server/src/routes/api/hardwareGpu.js#L496) |
 | GET | `/tools/gpu/series-meta` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:448](../server/src/routes/api/hardwareGpu.js#L448) |
 | GET | `/tools/gpu/vms` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:512](../server/src/routes/api/hardwareGpu.js#L512) |
@@ -793,7 +793,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/horizon-sessions/history` | 권한 `tools` | [server/src/routes/api/horizonSessions.js:120](../server/src/routes/api/horizonSessions.js#L120) |
 | GET | `/tools/horizon-sessions/settings` | 권한 `tools` | [server/src/routes/api/horizonSessions.js:159](../server/src/routes/api/horizonSessions.js#L159) |
 | PUT | `/tools/horizon-sessions/settings` | 역할 `admin` | [server/src/routes/api/horizonSessions.js:179](../server/src/routes/api/horizonSessions.js#L179) |
-| GET | `/tools/insights` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:29](../server/src/routes/api/toolsAnalytics.js#L29) |
+| GET | `/tools/insights` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:36](../server/src/routes/api/toolsAnalytics.js#L36) |
 | GET | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:486](../server/src/routes/api/hardwareGpu.js#L486) |
 | POST | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:461](../server/src/routes/api/hardwareGpu.js#L461) |
 | GET | `/tools/ipam` | 권한 `tools` | [server/src/routes/api/ipamExport.js:118](../server/src/routes/api/ipamExport.js#L118) |
@@ -969,7 +969,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:307](../server/src/routes/api/storageMon.js#L307) |
 | POST | `/tools/storage/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:147](../server/src/routes/api/storageMon.js#L147) |
 | GET | `/tools/thin-vms` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1116](../server/src/routes/api/toolsCapacity.js#L1116) |
-| GET | `/tools/threats` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:112](../server/src/routes/api/toolsAnalytics.js#L112) |
+| GET | `/tools/threats` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:119](../server/src/routes/api/toolsAnalytics.js#L119) |
 | GET | `/tools/vclogs` | 권한 `tools` | [server/src/routes/api/checksLogs.js:282](../server/src/routes/api/checksLogs.js#L282) |
 | GET | `/tools/vclogs/export.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/checksLogs.js:298](../server/src/routes/api/checksLogs.js#L298) |
 | GET | `/tools/vclogs/federate` | 권한 `tools` | [server/src/routes/api/checksLogs.js:269](../server/src/routes/api/checksLogs.js#L269) |

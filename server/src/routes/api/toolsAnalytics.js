@@ -5,6 +5,13 @@ import { store, usageReadable } from '../../store.js';
 import { scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { getClassifier } from '../../ipam/settings.js';
 import { getMetricsDb } from '../../metrics/db.js';
+import { loadMetricsSettings } from '../../metrics/settings.js';
+import { numOrNull } from '../../util/numOrNull.js';
+
+/** v2.655: GPU 추이 집계 단위(사용자 요청 "1분/10분/1시간/6시간 단위로"). 키는 화면과 같아야 한다(웹 GPU_HIST_BUCKETS). */
+export const GPU_HIST_BUCKETS = Object.freeze({ '1m': 60_000, '10m': 600_000, '1h': 3_600_000, '6h': 21_600_000 });
+/** 단위를 고른 조회의 점 상한 — 1분 × 2일(2,880) 이 들어가고 차트가 그릴 만한 크기. */
+export const GPU_HIST_MAX_POINTS = 3000;
 import { nsxStore } from '../../nsx/store.js';
 import { memoJson, hash, scopeSlice, scopeKey } from './shared.js';
 import { suggestSize } from '../../reports/rightsizing.js'; // v2.629 DATA2629-05: 과대 VM 은 초과분만
@@ -202,16 +209,28 @@ api.get('/tools/gpu/history', requirePerm('tools'), async (req, res) => {
           : allowedG.has((snapG.hosts || []).find((h) => h.id === key)?.vcenterId);
     if (!owns) return res.json({ level, key, metric: kind, days, bucketMs: 0, unit, synthesized: false, points: [] });
   }
-  const since = Date.now() - days * 86_400_000;
-  const bucketMs = days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000;
+  const now = Date.now();
+  const since = now - days * 86_400_000;
+  // v2.655: 집계 단위를 고를 수 있다(1분·10분·1시간·6시간) — 안 고르면 예전처럼 기간으로 정한다.
+  //   점 상한(GPU_HIST_MAX_POINTS)을 넘는 조합은 최근 쪽만 남기고 **잘렸다고 밝힌다**(truncated·coveredSince — 조용한 절단 금지).
+  const pick = GPU_HIST_BUCKETS[req.query.bucket] || null;
+  const bucketMs = pick || (days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000);
+  const limit = pick ? GPU_HIST_MAX_POINTS : 1000;
   let points = [];
-  try { const db = await getMetricsDb(); points = db.history(metric, key, since, bucketMs, 1000); } catch { points = []; }
+  let cut = { truncated: false, coveredSince: null };
+  try {
+    const db = await getMetricsDb();
+    const r = db.historyStep(metric, key, since, bucketMs, limit);
+    points = r.points || []; cut = { truncated: !!r.truncated, coveredSince: r.coveredSince ?? null };
+  } catch { points = []; }
   let synthesized = false;
   if (points.length < 2 && store.get().source === 'mock') {
     // 데모: 일과 시간대·요일 부하를 반영한 0~100% 합성 시계열.
     synthesized = true; points = [];
     const base = 25 + (hash(key + kind) % 30);
-    for (let t = since; t <= Date.now(); t += bucketMs) {
+    const start = Math.max(since, now - (limit - 1) * bucketMs);
+    cut = start > since ? { truncated: true, coveredSince: start } : { truncated: false, coveredSince: null };
+    for (let t = start; t <= now; t += bucketMs) {
       const day = t / 86_400_000;
       let v = base + 22 * Math.abs(Math.sin(day / 9)) + 14 * Math.sin(day) + (hash(key + t) % 8);
       v = Math.max(0, Math.min(100, v));
@@ -220,6 +239,9 @@ api.get('/tools/gpu/history', requirePerm('tools'), async (req, res) => {
       points.push({ ts: Math.floor(t), avg: Number(v.toFixed(1)), min: Number(Math.max(0, v - 12).toFixed(1)), max: Number((kind === 'memmb' ? v * 1.1 : Math.min(100, v + 10)).toFixed(1)) });
     }
   }
-  res.json({ level, key, metric: kind, days, bucketMs, unit, synthesized, points });
+  // 수집 주기(호스트 GPU 사용률 샘플 간격)보다 짧은 단위는 같은 값이 이어져 보일 수 있다 — 화면이 그 사실을 말한다.
+  let sampleSec = null;
+  try { sampleSec = numOrNull(loadMetricsSettings().gpuUtilIntervalSec); } catch { sampleSec = null; }
+  res.json({ level, key, metric: kind, days, bucket: pick ? req.query.bucket : 'auto', bucketMs, limit, unit, synthesized, sampleSec, ...cut, points });
 });
 }
