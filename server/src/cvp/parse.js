@@ -547,6 +547,82 @@ export function devicePower(parts) {
   return { watts: sum, psus: psus.length, read: n, partial: n < psus.length, basis: usedOut === 0 ? 'input' : usedOut === n ? 'output' : 'mixed', capW: capN === psus.length ? cap : null };
 }
 
+/*
+ * v2.648 — 슬롯 전원(카드 전원) 확인 루틴(사용자 신고: 7504N 에서 `ecb › Linecard4` 가 PSU 장애 'failed' 인데 서비스는 정상).
+ *   `/Sysdb/environment/power/status` 아래에는 PSU 뿐 아니라 **카드 슬롯별 전원 차단기(ecb — Electronic Circuit Breaker 로 추정)** 항목이
+ *   있다. 그 슬롯에 ① 카드가 없어 전원이 안 들어간 것인지 ② 카드는 있는데 전원이 안 들어간 것인지는 항목 하나로는 알 수 없다.
+ *   장비 로그인 없이 CVP 가 이미 가진 다른 근거로 가른다: 그 슬롯 번호의 인터페이스 슬라이스·포트 링크·센서·트랜시버.
+ *   ⚠ '슬라이스 번호 = 라인카드 슬롯 번호' 는 추정이다(실장비 미확인 — docs/CVP.md §15). 근거를 전부 detail·slotCheck 에 싣는다.
+ *   **faultKey 는 바꾸지 않는다**(kind 는 psu 그대로 — 바꾸면 이미 열린 장애가 '관측 누락' 으로 영원히 보류된다). 화면 표시만 '슬롯 전원'.
+ */
+const SLOT_SEG = /^(linecard|fabric|supervisor)(\d+)$/i;
+/** 부품 이름에서 카드 슬롯(없으면 null). */
+export function slotOfPart(p) {
+  if (!p || p.kind !== 'psu') return null;
+  const segs = String(p.name || '').split(' › ').map((x) => x.trim());
+  for (const seg of segs) {
+    const m = SLOT_SEG.exec(seg);
+    if (m) return { role: m[1].toLowerCase(), slot: Number(m[2]) };
+  }
+  return null;
+}
+/** 확인 루틴 대상 — 라인카드 슬롯 전원 항목 중 정상이 아닌 것의 슬롯 번호(중복 제거). */
+export function slotsToCheck(parts) {
+  const out = new Set();
+  for (const p of Array.isArray(parts) ? parts : []) {
+    const s = slotOfPart(p);
+    if (s && s.role === 'linecard' && p.state !== 'ok' && p.state !== 'absent') out.add(s.slot);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+/**
+ * 슬롯 전원 판정(순수). evidence = { slicesRead:boolean, sliceKeys:string[], slices: { [N]: { intfs:number|null, sampled:number, up:number } } }.
+ *  · card-running: 그 슬롯에 인터페이스가 있고 표본 포트 중 링크 up 이 있다 → 카드는 전원을 받아 동작 중. 장애(fault)를 **주의(warn)** 로 낮춘다
+ *    (전원 경로 하나의 이상·보고 오류 가능 — 장비 원문 값은 그대로 detail 에 남긴다).
+ *  · card-present: 인터페이스는 있는데 up 포트를 못 봤다(표본 없음·전부 down) → 카드는 있다. 상태를 바꾸지 않는다(카드 전원 이상 가능성 — 높은 심각도).
+ *  · slot-empty: 슬라이스 목록을 읽었고 **다른 라인카드 슬라이스는 있는데** 이 번호만 없고, 이 슬롯의 센서·트랜시버도 없다 → 빈 슬롯으로 판단(absent).
+ *  · unknown: 그 밖(근거 부족) — 상태를 바꾸지 않고 '확인 불가' 를 적는다.
+ */
+export function judgeSlotPower(parts, evidence = {}) {
+  if (!Array.isArray(parts)) return parts;
+  const ev = evidence && typeof evidence === 'object' ? evidence : {};
+  const sliceKeys = new Set((Array.isArray(ev.sliceKeys) ? ev.sliceKeys : []).map(String));
+  const numericSlices = [...sliceKeys].filter((k) => /^\d+$/.test(k));
+  const sensorsOf = (n) => parts.filter((p) => p && p.kind !== 'psu' && String(p.name || '').split(' › ').some((seg) => seg.trim().toLowerCase() === `linecard${n}`)).length;
+  const xcvrsOf = (n) => parts.filter((p) => p && p.kind === 'xcvr' && p.state !== 'absent' && new RegExp(`(^| › )Ethernet${n}/`, 'i').test(String(p.name || ''))).length;
+  return parts.map((p) => {
+    const s = slotOfPart(p);
+    if (!s || s.role !== 'linecard' || p.state === 'ok' || p.state === 'absent') return s ? { ...p, role: 'slot-power' } : p;
+    const n = s.slot;
+    const sl = ev.slices && typeof ev.slices === 'object' ? ev.slices[n] || ev.slices[String(n)] : null;
+    const intfs = sl && Number.isFinite(sl.intfs) ? sl.intfs : null;
+    const up = sl && Number.isFinite(sl.up) ? sl.up : 0;
+    const sampled = sl && Number.isFinite(sl.sampled) ? sl.sampled : 0;
+    const sensors = sensorsOf(n); const xcvrs = xcvrsOf(n);
+    let verdict = 'unknown';
+    if ((intfs != null && intfs > 0 && up > 0)) verdict = 'card-running';
+    else if ((intfs != null && intfs > 0) || sensors > 0 || xcvrs > 0) verdict = 'card-present';
+    else if (ev.slicesRead === true && numericSlices.some((k) => k !== String(n)) && !sliceKeys.has(String(n))) verdict = 'slot-empty';
+    const bits = [];
+    if (ev.slicesRead === true) bits.push(sliceKeys.has(String(n)) ? `인터페이스 ${intfs ?? '?'}개` : '인터페이스 슬라이스 없음');
+    else bits.push('인터페이스 슬라이스 못 읽음');
+    if (sampled) bits.push(`표본 포트 up ${up}/${sampled}`);
+    bits.push(`카드 센서 ${sensors}`, `트랜시버 ${xcvrs}`);
+    const why = bits.join(' · ');
+    const text = verdict === 'card-running' ? `카드 동작 중(${why}) — 카드는 전원을 받고 있습니다. 전원 경로 하나의 이상 또는 보고 오류일 수 있어 주의로 낮췄습니다`
+      : verdict === 'card-present' ? `카드 있음(${why}) — 카드 전원 이상일 수 있습니다`
+        : verdict === 'slot-empty' ? `빈 슬롯으로 판단(${why}) — 장비 원문 값은 이상이지만 꽂힌 카드가 없어 장애로 세지 않습니다`
+          : `빈 슬롯인지 카드 전원 이상인지 확인 불가(${why})`;
+    let state = p.state;
+    if (verdict === 'card-running' && state === 'fault') state = 'warn';
+    if (verdict === 'slot-empty') state = 'absent';
+    return {
+      ...p, role: 'slot-power', state, detail: str(`${p.detail ? `${p.detail} · ` : ''}${text}`, 200),
+      slotCheck: { slot: n, verdict, intfs, up, sampled, sensors, xcvrs, slicesRead: ev.slicesRead === true, rawState: p.state },
+    };
+  });
+}
+
 /** 부품 목록 → 상태별 개수(null 이면 null). */
 export function partsSummary(parts) {
   if (!Array.isArray(parts)) return null;

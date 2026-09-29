@@ -680,7 +680,12 @@ export function chartCutNote(resp) {
 // ── v2.640 ③ 장애 전이·알림 ──────────────────────────────────────────────────
 
 export const FAULT_KIND_LABEL = Object.freeze({ psu: '전원(PSU)', fan: '팬', temp: '온도 센서', xcvr: '트랜시버', port: '포트', bgp: 'BGP 피어' });
-export const faultKindLabel = (k) => FAULT_KIND_LABEL[k] || String(k || '—');
+/**
+ * v2.648: 전원 경로의 카드 슬롯 항목(ecb › Linecard4 등)은 PSU 가 아니라 **슬롯(카드) 전원**이다 — 이름으로 가려 표시한다
+ *   (서버 faultKey 는 psu 그대로 — 이미 열린 장애가 끊기지 않게). name 을 주지 않으면 예전 표시 그대로.
+ */
+export const SLOT_POWER_NAME = /(^| › )(ecb|linecard\d+|fabric\d+|supervisor\d+)( ›|$)/i;
+export const faultKindLabel = (k, name) => (k === 'psu' && name && SLOT_POWER_NAME.test(String(name)) ? '슬롯 전원(카드)' : FAULT_KIND_LABEL[k] || String(k || '—'));
 /** 보류 사유(서버 cvp/faults.js HOLD_REASON) → 문장. 보류는 '고쳐지지 않았다' 도 '고쳐졌다' 도 아니다. 키 집합은 테스트가 서버와 대조한다. */
 export const HOLD_TEXT = Object.freeze({
   'device-failed': '장비 수집 실패 — 닫지 않고 보류(한 주기 실패로 전 장애를 복구로 적지 않습니다)',
@@ -706,7 +711,7 @@ export function faultRowView(f) {
   const o = f && typeof f === 'object' ? f : {};
   const ps = partState(o.state);
   return {
-    kindLabel: faultKindLabel(o.kind),
+    kindLabel: faultKindLabel(o.kind, o.label || o.name),
     state: ps,
     device: o.deviceName || o.deviceKey || '—',
     where: [o.cvpName || o.cvpId || '', o.agent ? `엣지 ${o.agent}` : '중앙'].filter(Boolean).join(' · '),

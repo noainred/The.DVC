@@ -403,7 +403,7 @@ function DeviceModal({ target, onClose }) {
                       const ps = partState(p.state);
                       return (
                         <tr key={`${p.kind}|${p.name}|${i}`}>
-                          <td>{p.kind || '—'}</td><td>{p.name || '—'}</td>
+                          <td>{p.kind ? faultKindLabel(p.kind, p.name) : '—'}</td><td>{p.name || '—'}</td>
                           <td><Badge tone={ps.tone}>{ps.label}</Badge></td>
                           <td style={{ fontSize: 12, whiteSpace: 'normal' }}>{p.detail || '—'}</td>
                         </tr>
@@ -487,7 +487,7 @@ function HistoryView({ h, addressHidden }) {
             <tbody>
               {open.map((f, i) => { const ps = partState(f.state); return (
                 <tr key={`of-${f.faultKey}-${i}`}>
-                  <td>{faultKindLabel(f.kind)}</td><td style={{ fontSize: 12 }}>{f.label || '—'}</td>
+                  <td>{faultKindLabel(f.kind, f.label)}</td><td style={{ fontSize: 12 }}>{f.label || '—'}</td>
                   <td><Badge tone={ps.tone}>{ps.label}</Badge>{f.holdReason ? <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>판정 보류</div> : null}</td>
                   <td style={{ fontSize: 12 }} data-sort={f.firstSeen || 0}>{agoText(f.firstSeen)}</td>
                   <td style={{ fontSize: 12 }} data-sort={f.lastSeen || 0}>{agoText(f.lastSeen)}</td>
@@ -507,7 +507,7 @@ function HistoryView({ h, addressHidden }) {
               {fe.map((f, i) => (
                 <tr key={`fe-${f.id || i}`}>
                   <td style={{ fontSize: 12 }} data-sort={f.at || 0}>{agoText(f.at)}</td>
-                  <td>{faultKindLabel(f.kind)}</td><td style={{ fontSize: 12 }}>{f.label || '—'}</td>
+                  <td>{faultKindLabel(f.kind, f.label)}</td><td style={{ fontSize: 12 }}>{f.label || '—'}</td>
                   <td style={{ fontSize: 12 }}>{faultEventText(f)}</td>
                   <td style={{ fontSize: 12, whiteSpace: 'normal' }}>{f.detail || '—'}</td>
                 </tr>
@@ -1009,7 +1009,7 @@ function FaultsCard({ faults, err, isAdmin, mayCollect, onChanged }) {
       )}
       {closeTarget && (
         <div className="card" style={{ marginTop: 8, display: 'grid', gap: 6 }}>
-          <b>수동 닫기 — {closeTarget.deviceName || closeTarget.deviceKey} · {faultKindLabel(closeTarget.kind)} {closeTarget.label}</b>
+          <b>수동 닫기 — {closeTarget.deviceName || closeTarget.deviceKey} · {faultKindLabel(closeTarget.kind, closeTarget.label)} {closeTarget.label}</b>
           <div style={NOTE}>수동 닫기는 ‘고쳐졌다’ 는 판정이 아니라 관리자의 결정입니다(감사 로그에 남습니다). 다시 관측되면 새 장애로 열립니다.</div>
           <input className="input" value={closeReason} onChange={(e) => setCloseReason(e.target.value)} placeholder="사유(필수) — 예: 장비 철거, 포트 용도 변경" />
           <div style={ROW}>
@@ -1025,7 +1025,7 @@ function FaultsCard({ faults, err, isAdmin, mayCollect, onChanged }) {
             {events.map((x) => (
               <tr key={x.id ?? `${x.at}|${x.faultKey}`}>
                 <td style={{ fontSize: 12 }} data-sort={x.at || ''}>{agoText(x.at)}</td>
-                <td>{faultKindLabel(x.kind)}</td>
+                <td>{faultKindLabel(x.kind, x.label)}</td>
                 <td>{x.deviceName || x.deviceKey || '—'}<div style={{ fontSize: 11, color: 'var(--text-dim)' }}>{x.cvpName || x.cvpId}{x.agent ? ` · 엣지 ${x.agent}` : ''}</div></td>
                 <td style={{ fontSize: 12 }}>{x.label || '—'}</td>
                 <td style={{ fontSize: 12 }}>{faultEventText(x)}</td>

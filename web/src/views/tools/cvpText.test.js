@@ -474,3 +474,12 @@ describe('v2.643 이벤트 장비 — 시리얼 대신 호스트명', () => {
     expect(eventDeviceSort({})).toBe('');
   });
 });
+
+import { faultKindLabel as fkl2648 } from './cvpText.js';
+describe('v2.648 슬롯 전원 표시', () => {
+  it('ecb › LinecardN 은 슬롯 전원 · 일반 PSU 는 그대로', () => {
+    expect(fkl2648('psu', 'ecb › Linecard4')).toBe('슬롯 전원(카드)');
+    expect(fkl2648('psu', 'powerSupply › PowerSupply1')).toBe('전원(PSU)');
+    expect(fkl2648('psu')).toBe('전원(PSU)');
+  });
+});
