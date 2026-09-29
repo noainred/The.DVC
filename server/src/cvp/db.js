@@ -102,6 +102,7 @@ async function openInner() {
       CREATE INDEX IF NOT EXISTS idx_ce_seen ON cvp_event (seen_at);`);
     addDailyErrCountCols(conn);
     addDeviceInfoCols(conn);
+    addPortDetailCols(conn);
     const maxOf = (col) => `NULLIF(MAX(IFNULL(port_daily.${col},-1e308), IFNULL(excluded.${col},-1e308)), -1e308)`;
     const st = {
       upDevice: conn.prepare(`INSERT INTO device_latest (agent,cvp_id,device_key,ts,hostname,model,serial,mgmt_ip,eos_version,streaming,telemetry,parts_json,parts_at,bgp_json,ports_read,extra_json,info_json,sys_ts,cpu_pct,mem_pct,mem_total)
@@ -127,10 +128,13 @@ async function openInner() {
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(agent,cvp_id,ev_key,ts) DO UPDATE SET severity=excluded.severity, title=excluded.title, descr=excluded.descr, ev_type=excluded.ev_type,
           devices_json=excluded.devices_json, ack=excluded.ack, updated_at=excluded.updated_at, deleted=excluded.deleted`),
-      upPort: conn.prepare(`INSERT INTO port_latest (agent,cvp_id,device_key,port,ts,descr,speed_bps,oper,admin,vlan,lag,in_bps,out_bps,in_util,out_util,in_err,out_err,rate_ts)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(agent,cvp_id,device_key,port) DO UPDATE SET ts=excluded.ts, descr=excluded.descr, speed_bps=excluded.speed_bps, oper=excluded.oper,
+      // v2.649: 설명·세부 열은 NULL(이번에 못 읽음)이면 직전 값을 유지한다 — '' 는 '설명 없음' 으로 그대로 저장한다.
+      upPort: conn.prepare(`INSERT INTO port_latest (agent,cvp_id,device_key,port,ts,descr,speed_bps,oper,admin,vlan,lag,in_bps,out_bps,in_util,out_util,in_err,out_err,rate_ts,duplex,fwd_model,mac,mtu,oper_raw)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(agent,cvp_id,device_key,port) DO UPDATE SET ts=excluded.ts, descr=COALESCE(excluded.descr, port_latest.descr), speed_bps=excluded.speed_bps, oper=excluded.oper,
           admin=excluded.admin, vlan=excluded.vlan, lag=excluded.lag,
+          duplex=COALESCE(excluded.duplex, port_latest.duplex), fwd_model=COALESCE(excluded.fwd_model, port_latest.fwd_model),
+          mac=COALESCE(excluded.mac, port_latest.mac), mtu=COALESCE(excluded.mtu, port_latest.mtu), oper_raw=COALESCE(excluded.oper_raw, port_latest.oper_raw),
           in_bps=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.in_bps ELSE excluded.in_bps END,
           out_bps=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.out_bps ELSE excluded.out_bps END,
           in_util=CASE WHEN IFNULL(port_latest.rate_ts,0) > excluded.rate_ts THEN port_latest.in_util ELSE excluded.in_util END,
@@ -198,6 +202,16 @@ function addDailyErrCountCols(conn) {
   }
 }
 
+/** v2.649: port_latest 의 인터페이스 세부 정보 열(duplex·forwarding model·MAC·MTU·원래 상태 문자열) — 없는 열만 더한다. */
+function addPortDetailCols(conn) {
+  const have = new Set(conn.prepare('PRAGMA table_info(port_latest)').all().map((r) => r.name));
+  for (const [col, type] of [['duplex', 'TEXT'], ['fwd_model', 'TEXT'], ['mac', 'TEXT'], ['mtu', 'INTEGER'], ['oper_raw', 'TEXT']]) {
+    if (have.has(col)) continue;
+    try { conn.exec(`ALTER TABLE port_latest ADD COLUMN ${col} ${type}`); }
+    catch (e) { if (!/duplicate column name/i.test(String(e?.message || ''))) throw e; }
+  }
+}
+
 /** v2.641: device_latest 의 개요·CPU·메모리 열 — 없는 열만 더한다(DB2603-01 규약: 'duplicate column name' 만 삼킨다). */
 function addDeviceInfoCols(conn) {
   const have = new Set(conn.prepare('PRAGMA table_info(device_latest)').all().map((r) => r.name));
@@ -211,6 +225,11 @@ function addDeviceInfoCols(conn) {
 export async function available() { return !!(await open()); }
 
 const txt = (v, n = 256) => { const s = capStr(v, n); return s === '' ? null : s; };
+// v2.649: 설명은 '' 을 값으로 남긴다(설명 없음) — null 만 '못 읽음' 이다.
+const descOf = (v) => (v == null || (typeof v !== 'string' && typeof v !== 'number') ? null : capStr(String(v), 200));
+const mtuOf = (v) => { const n = numOrNull(v); return n != null && n > 0 && n < 100_000 ? Math.round(n) : null; };
+/** port_latest 행 → 화면·push 공용 세부 필드(v2.649). 설명이 NULL 이면 null('못 읽음'). */
+const portDetailOf = (p) => ({ desc: p.descr == null ? null : p.descr, duplex: p.duplex ?? null, fwdModel: p.fwd_model ?? null, mac: p.mac ?? null, mtu: p.mtu ?? null, operRaw: p.oper_raw ?? null });
 const jsonOrNull = (v, max = 256 * 1024) => {
   if (v == null) return null;
   try { const s = JSON.stringify(v); return s.length > max ? null : s; } catch { return null; }
@@ -287,8 +306,9 @@ export async function saveDevices({ agent = LOCAL_AGENT, cvpId, devices = [], sa
             const name = txt(p?.name, 64);
             if (!name) continue;
             if (!olderRecord) {
-              st.upPort.run(agent, cvpId, key, name, ts, txt(p.desc, 200), numOrNull(p.speedBps), txt(p.oper, 16), txt(p.admin, 16), txt(p.vlan, 32), txt(p.lag, 64),
-                numOrNull(p.inBps), numOrNull(p.outBps), numOrNull(p.inUtil), numOrNull(p.outUtil), numOrNull(p.inErr), numOrNull(p.outErr), ts);
+              st.upPort.run(agent, cvpId, key, name, ts, descOf(p.desc), numOrNull(p.speedBps), txt(p.oper, 16), txt(p.admin, 16), txt(p.vlan, 32), txt(p.lag, 64),
+                numOrNull(p.inBps), numOrNull(p.outBps), numOrNull(p.inUtil), numOrNull(p.outUtil), numOrNull(p.inErr), numOrNull(p.outErr), ts,
+                txt(p.duplex, 48), txt(p.fwdModel, 48), txt(p.mac, 32), mtuOf(p.mtu), txt(p.operRaw, 48));
               np++;
             }
             if (samples && sampleWorthy(p)) {
@@ -563,8 +583,8 @@ export async function deviceDetail(agent, cvpId, key) {
   const r = db.conn.prepare('SELECT * FROM device_latest WHERE agent=? AND cvp_id=? AND device_key=?').get(agent, cvpId, key);
   if (!r) return null;
   const ports = db.conn.prepare('SELECT * FROM port_latest WHERE agent=? AND cvp_id=? AND device_key=? ORDER BY port LIMIT 4096').all(agent, cvpId, key)
-    .map((p) => ({ name: p.port, desc: p.descr || '', speedBps: p.speed_bps, oper: p.oper || 'unknown', admin: p.admin || 'unknown', vlan: p.vlan || '', lag: p.lag || '',
-      inBps: p.in_bps, outBps: p.out_bps, inUtil: p.in_util, outUtil: p.out_util, inErr: p.in_err, outErr: p.out_err, ts: Number(p.ts) }));
+    .map((p) => ({ name: p.port, speedBps: p.speed_bps, oper: p.oper || 'unknown', admin: p.admin || 'unknown', vlan: p.vlan || '', lag: p.lag || '',
+      inBps: p.in_bps, outBps: p.out_bps, inUtil: p.in_util, outUtil: p.out_util, inErr: p.in_err, outErr: p.out_err, ts: Number(p.ts), ...portDetailOf(p) }));
   // v2.630 A2-02: 합계 판정은 parse.portsSummary 하나를 쓴다(미연결 'nolink' 는 down 이 아니다 — 개수는 noLink).
   const pSum = portsSummary(ports);
   return { device: rowToDevice(r, pSum), ports: r.ports_read === 1 ? ports : null };
@@ -586,8 +606,8 @@ export async function deviceRecordsFor(agent, cvpId) {
   for (const p of db.conn.prepare('SELECT * FROM port_latest WHERE agent=? AND cvp_id=?').all(agent, cvpId)) {
     const k = p.device_key;
     if (!portsBy.has(k)) portsBy.set(k, []);
-    portsBy.get(k).push({ name: p.port, desc: p.descr || '', speedBps: p.speed_bps, oper: p.oper, admin: p.admin, vlan: p.vlan || '', lag: p.lag || '',
-      inBps: p.in_bps, outBps: p.out_bps, inUtil: p.in_util, outUtil: p.out_util, inErr: p.in_err, outErr: p.out_err });
+    portsBy.get(k).push({ name: p.port, speedBps: p.speed_bps, oper: p.oper, admin: p.admin, vlan: p.vlan || '', lag: p.lag || '',
+      inBps: p.in_bps, outBps: p.out_bps, inUtil: p.in_util, outUtil: p.out_util, inErr: p.in_err, outErr: p.out_err, ...portDetailOf(p) });
   }
   return devs.map((r) => {
     const x = parseJson(r.extra_json) || {};

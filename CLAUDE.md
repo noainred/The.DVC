@@ -3811,6 +3811,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     트랜시버 노드는 장착 여부만 준다(건강 아님 — 정상으로 칠하지 않는다) · DOM 은 xcvr 만 추종 깊이 3 + `dom` 이름 포인터만(추정 경로) ·
     **링크가 올라온 포트만** 수신 광량을 판정(바닥이 정상인 미사용 포트를 장애로 세지 않는다) · 장비 임계 먼저, 없으면 CVP 설정 `xcvrRxWarnDbm`/`xcvrRxFaultDbm` ·
     `show interfaces transceiver` 는 스위치 CLI 라 CVP REST 로 실행할 수 없다(스위치 계정이 필요 — 도입하지 않음). CVP 등록·설정은 'CVP 설정' 탭에만 있다.
+  - **CVP 인터페이스 세부 정보(v2.649) — 설명은 설정 노드에서 부품 주기에 읽고, `null`(못 읽음)과 `''`(설명 없음)을 구분한다**
+    (`cvp/parse.js parseIntfConfig·intfDetailOf·xcvrTypeText` · `poller.js fillDescs` · 웹 `CvpInterfaces.jsx`·`cvpIntfText.js`, 상세 `docs/CVP.md` §16):
+    DB 는 설명·세부 열이 NULL 이면 직전 값을 유지(COALESCE)한다 — '' 로 채우면 설명을 지운 것이 된다. `pick` 은 빈 문자열을 건너뛰므로 설명은 키를 직접 찾는다.
+    도넛은 읽은 값만 세고 못 읽은 것은 회색 칸이다. ⚠ 설정 노드 경로와 duplex·MAC·MTU·mediaType 필드 이름은 실장비 미확인 추정이다.
   - ⚠ **CVP 슬롯 전원(`ecb › LinecardN`)은 PSU 가 아니다 — 빈 슬롯/카드 전원 이상을 근거로 가른다**(v2.648, `cvp/parse.js judgeSlotPower`·
     `client.js slotEvidence`, 상세 `docs/CVP.md` §15): kind 는 psu 그대로(faultKey 불변 — 바꾸면 열린 장애가 영원히 보류), 표시만 '슬롯 전원(카드)'.
     그 슬롯의 링크 up 포트가 있으면 장애 → 주의, 다른 슬라이스는 있는데 그 번호만 없고 센서·트랜시버도 없으면 빈 슬롯(absent — removed 로 닫힘),

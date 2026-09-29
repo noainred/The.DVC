@@ -45,6 +45,8 @@ const _prevCounters = new Map(); // `${cvpId}|${deviceKey}|${port}` → { at, c 
 const _prevCpu = new Map();      // v2.641: `${cvpId}|${deviceKey}` → { busy, total } (누적 CPU 카운터 — 첫 표본은 null)
 const _prefer = new Map();       // cvpId → Map(kind → 경로 후보)
 const _partsAt = new Map();      // cvpId → 마지막 부품 조회 시각
+// v2.649: 포트 설명은 부품 주기에만 읽는다 — 사이 주기에는 직전에 읽은 설명을 채워 push 해시가 30분마다 뒤집히지 않게 한다(재시작 직후는 DB 가 COALESCE 로 유지).
+const _descs = new Map();        // cvpId → Map(deviceKey → Map(port → 설명))
 const _zeroSince = new Map();    // cvpId → 인벤토리가 처음 0대로 온 시각(COL2611-05 prune 보류)
 /** 장비가 있던 CVP 가 갑자기 0대를 주면 이 시간 동안 장비 행을 지우지 않는다(빈 200·스트림 조기 종료 대비 — 보류에는 반드시 시한, v2.601). */
 export const ZERO_PRUNE_HOLD_MS = clampIntervalMs(Number(process.env.CVP_ZERO_PRUNE_HOLD_MS) || 60 * 60_000, 60 * 60_000, 5 * 60_000);
@@ -143,7 +145,10 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
     const partsNotTried = partsDue ? r.devices.filter((d) => d.partsAttempted !== true && d.streaming !== false
       && ['budget', 'budget-partial', 'aborted', 'pending', 'ok', 'failed'].includes(d.telemetry) && d.parts === undefined).length : 0;
     const readAt = Date.now();
+    const descMap = _descs.get(full.id) || new Map();
+    _descs.set(full.id, descMap);
     for (const d of r.devices) {
+      fillDescs(descMap, d);
       applyDeltas(full.id, d, settings.intervalMs, _prevCounters, slackMs);
       applySys(full.id, d);
       d.ts = d.countersAt ?? readAt;
@@ -154,6 +159,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
       const liveDev = new Set(r.devices.map((d) => `${full.id}|${d.key}|`));
       const pre = `${full.id}|`;
       for (const k of [..._prevCpu.keys()]) if (k.startsWith(pre) && !liveDev.has(`${k}|`)) _prevCpu.delete(k);
+      for (const k of [...descMap.keys()]) if (!liveDev.has(`${full.id}|${k}|`)) descMap.delete(k);
       for (const k of [..._prevCounters.keys()]) {
         if (!k.startsWith(pre)) continue;
         const dk = k.slice(0, k.indexOf('|', pre.length) + 1);
@@ -201,6 +207,23 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
 /**
  * @param {{ manual?:boolean, only?:string[]|null, trigger?:string }} [opts] manual — 사람이 누른 실행(꺼져 있어도, 인증 정지여도 1회 시도).
  */
+/**
+ * v2.649: 포트 설명 캐시(순수에 가깝다 — 테스트 고정). 이번에 설명을 읽었으면(descsAt) 캐시를 갱신하고, 못 읽었으면(desc null) 캐시 값을 채운다.
+ *   캐시에도 없으면 null 그대로 — 저장소가 직전 값을 유지한다('' 로 채우면 설명을 지운 것이 된다).
+ */
+export function fillDescs(descMap, d) {
+  if (!d || !Array.isArray(d.ports)) return;
+  if (d.descsAt != null) {
+    const m = new Map();
+    for (const p of d.ports) if (p && p.desc != null) m.set(p.name, p.desc);
+    descMap.set(d.key, m);
+    return;
+  }
+  const m = descMap.get(d.key);
+  if (!m) return;
+  for (const p of d.ports) if (p && p.desc == null && m.has(p.name)) p.desc = m.get(p.name);
+}
+
 export async function pollCvpOnce({ manual = false, only = null, trigger = manual ? 'manual' : 'timer' } = {}) {
   const settings = loadSettings();
   if (!settings.enabled && !manual) {
@@ -222,7 +245,7 @@ export async function pollCvpOnce({ manual = false, only = null, trigger = manua
       keepOnly(live);
       for (const k of [..._prevCounters.keys()]) if (!live.has(k.split('|')[0])) _prevCounters.delete(k);
       for (const k of [..._prevCpu.keys()]) if (!live.has(k.split('|')[0])) _prevCpu.delete(k);
-      for (const m of [_prefer, _partsAt, _zeroSince]) for (const k of [...m.keys()]) if (!live.has(k)) m.delete(k);
+      for (const m of [_prefer, _partsAt, _zeroSince, _descs]) for (const k of [...m.keys()]) if (!live.has(k)) m.delete(k);
       try { await db.pruneDevices(db.LOCAL_AGENT, {}, { cvpIds: [...live] }); } catch { /* DB 불가 — 다음 주기 */ }
     }
     const slackMs = Math.max(0, Number(_last.durationMs) || 0); // 직전 실행 소요(COL2611-08)

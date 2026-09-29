@@ -192,7 +192,7 @@ export function missingFootnotes(servers) {
  *   영문 그대로 샜다. 두 목록은 테스트(cvpText.test.js)가 서버 소스와 대조한다 — 서버에 키를 더하면 여기도 더할 것.
  */
 export const ITEM_LABEL = {
-  inventory: '인벤토리', cvpVersion: 'CVP 버전', interfaces: '포트 구성', counters: '포트 카운터', bgp: 'BGP',
+  inventory: '인벤토리', cvpVersion: 'CVP 버전', interfaces: '포트 구성', intfConfig: '포트 설명', counters: '포트 카운터', bgp: 'BGP',
   power: '전원(PSU)', cooling: '팬', temperature: '온도 센서', xcvr: '트랜시버',
   budget: '시간 예산', deadline: '수집 시한',
   // v2.641 추가 항목
