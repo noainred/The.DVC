@@ -25,6 +25,9 @@ import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js';
+import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requireCsvPerm('data.csv');
 
 // v2.607 AUTHZ2607-04·07: 위임 인벤토리 현황·소유 엣지·IP 스캔 결과·설정은 법인 축으로 나눌 수 없거나(엣지·스캔 대역 전체)
 //   전 법인에 걸친 동작이라 범위 계정 403(v2.525 규약). vCenter별 스캔 대역은 쓰기 범위 밖이면 404(존재 은닉) —
@@ -193,18 +196,18 @@ function scanRangesCurrent() {
   if (!m.has(LOCAL_AGENT)) m.set(LOCAL_AGENT, { name: LOCAL_AGENT, ranges: loadScanSettings(LOCAL).ranges || [] });
   return m;
 }
-adminRouter.get('/ipam/scan/ranges.csv', adminOnly, fleetOnly, (_req, res) => {
+adminRouter.get('/ipam/scan/ranges.csv', csvPerm, adminOnly, fleetOnly, (_req, res) => {
   const agents = [...scanRangesCurrent().values()].sort((a, b) => (a.name === LOCAL_AGENT ? -1 : b.name === LOCAL_AGENT ? 1 : a.name.localeCompare(b.name)));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="ip-scan-ranges-${todayStamp()}.csv"`);
   res.send(scanRangesToCsv(agents));
 });
-adminRouter.get('/ipam/scan/ranges/sample.csv', adminOnly, fleetOnly, (_req, res) => {
+adminRouter.get('/ipam/scan/ranges/sample.csv', csvPerm, adminOnly, fleetOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="ip-scan-ranges-sample.csv"');
   res.send(scanRangesSampleCsv());
 });
-adminRouter.post('/ipam/scan/ranges/import', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/ipam/scan/ranges/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const { rows, error } = parseScanRangesCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -261,13 +264,13 @@ adminRouter.post('/ipam/vc-ranges/scan', adminOnly, fleetOnly, (_req, res) => {
  * 가져오기는 dryRun(vCenter 해석·대역 문법(rangeSize)·중복 검증) → 커밋 2단계이고,
  * 기존 vCenter 와 겹치는 행은 body.overwrite=true 명시 시에만 교체한다(대역 전체 교체 —
  * saveVcRanges 계약). 자격증명이 없는 데이터라 secrets 경로는 없다. */
-adminRouter.get('/ipam/vc-ranges/sample.csv', adminOnly, (_req, res) => {
+adminRouter.get('/ipam/vc-ranges/sample.csv', csvPerm, adminOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="ipam-vc-ranges-sample.csv"');
   res.send(vcRangesSampleCsv());
 });
 
-adminRouter.post('/ipam/vc-ranges/import', adminOnly, (req, res) => {
+adminRouter.post('/ipam/vc-ranges/import', csvPerm, adminOnly, (req, res) => {
   const { rows, error } = parseVcRangesCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });

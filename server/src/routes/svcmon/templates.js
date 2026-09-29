@@ -19,6 +19,9 @@ import {
 } from '../../svcmon/templates.js';
 import { canEdit, fullScopeOnly } from './shared.js';
 import { todayStamp } from "../../util/dayKey.js";
+import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requireCsvPerm('data.csv');
 
 export function registerTemplates(svcmonRouter) {
 
@@ -75,7 +78,7 @@ svcmonRouter.delete('/templates/:id', canEdit, fullScopeOnly, (req, res) => {
 });
 
 /** 템플릿 내보내기 — 항목 1건=1행(대상 CSV 와 같은 규약). item.key 는 싣지 않는다. */
-svcmonRouter.get('/templates/export.csv', canEdit, (req, res) => {
+svcmonRouter.get('/templates/export.csv', csvPerm, canEdit, (req, res) => {
   const all = listTemplates();
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="svcmon-templates-${todayStamp()}.csv"`);
@@ -83,7 +86,7 @@ svcmonRouter.get('/templates/export.csv', canEdit, (req, res) => {
   res.send(templatesToCsv(all));
 });
 
-svcmonRouter.get('/templates/sample.csv', canEdit, (req, res) => {
+svcmonRouter.get('/templates/sample.csv', csvPerm, canEdit, (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="svcmon-templates-sample.csv"');
   res.send(sampleTemplatesCsv());
@@ -94,7 +97,7 @@ svcmonRouter.get('/templates/sample.csv', canEdit, (req, res) => {
  * preview 는 파싱 수준 검증만이다 — 치환 변수·상한 검증은 addTemplate 안에 있어 등록
  * 시점에 실패할 수 있다(그 한계를 응답 notice 로 명시한다. 과장 금지).
  */
-svcmonRouter.post('/templates/import', canEdit, fullScopeOnly, (req, res) => {
+svcmonRouter.post('/templates/import', csvPerm, canEdit, fullScopeOnly, (req, res) => {
   const csv = typeof req.body?.csv === 'string' ? req.body.csv : '';
   if (!csv.trim()) return res.status(400).json({ error: 'CSV 내용이 비어 있습니다.' });
   // 내보내기 상한(템플릿 100 × 항목 50 = 5,000행)을 자기 가져오기가 못 받는 비대칭을 없앤다.

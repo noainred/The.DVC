@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, downloadFile } from '../api.js';
+import { fetchJson, postJson, downloadFile, canCsv } from '../api.js';
 import { agoText } from './tools/relTime.js';
 import { STable } from '../components/STable.jsx';
 
@@ -25,6 +25,7 @@ const dur = (ms) => (!ms ? '—' : ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms 
 
 export default function BulkDeploy() {
   // ⚠ 훅은 전부 조기 return 위에(React #310 회귀 방지).
+  const csvOk = canCsv(); // v2.643: 파일 가져오기·샘플·내보내기는 관리자 이상 + data.csv 권한만(붙여넣기는 그대로)
   const [text, setText] = useState('');
   const [d, setD] = useState(EMPTY_DEFAULTS);
   const [preview, setPreview] = useState(null);
@@ -128,11 +129,13 @@ export default function BulkDeploy() {
         <div className="flex gap wrap" style={{ alignItems: 'center', marginBottom: 6 }}>
           <b style={{ fontSize: 14 }}>① 서버 목록 (붙여넣기 · 파일 · 내보내기)</b>
           <span style={{ flex: 1 }} />
-          <input type="file" accept=".txt,.tsv,.csv,text/plain" onChange={onFile} style={{ fontSize: 12 }} title="CSV·TSV·TXT 파일을 올리면 아래 입력칸에 그대로 들어갑니다(쉼표·탭 자동 인식)" />
-          <button className="tab" disabled={busy} onClick={() => call('샘플', () => downloadFile('/admin/agent-deploy/targets/sample.txt'))} title="붙여넣기 형식 안내(텍스트)">📄 샘플 TXT</button>
-          <button className="tab" disabled={busy} onClick={() => call('샘플', () => downloadFile('/admin/agent-deploy/targets/sample.txt?format=csv'))} title="엑셀에서 열어 채운 뒤 그대로 올리면 됩니다">📄 샘플 CSV</button>
-          <button className="tab" disabled={busy} onClick={() => call('내보내기', () => downloadFile('/admin/agent-deploy/targets/export.txt'))} title="저장된 배포 대상을 이 입력칸 형식(탭 구분)으로 내려받기 — 비밀 제외">⤓ TXT 내보내기</button>
-          <button className="tab" disabled={busy} onClick={() => call('내보내기', () => downloadFile('/admin/agent-deploy/targets/export.txt?format=csv'))} title="저장된 배포 대상을 CSV(엑셀)로 내려받기 — 비밀 제외">⤓ CSV 내보내기</button>
+          {csvOk && <>
+            <input type="file" accept=".txt,.tsv,.csv,text/plain" onChange={onFile} style={{ fontSize: 12 }} title="CSV·TSV·TXT 파일을 올리면 아래 입력칸에 그대로 들어갑니다(쉼표·탭 자동 인식)" />
+            <button className="tab" disabled={busy} onClick={() => call('샘플', () => downloadFile('/admin/agent-deploy/targets/sample.txt'))} title="붙여넣기 형식 안내(텍스트)">📄 샘플 TXT</button>
+            <button className="tab" disabled={busy} onClick={() => call('샘플', () => downloadFile('/admin/agent-deploy/targets/sample.txt?format=csv'))} title="엑셀에서 열어 채운 뒤 그대로 올리면 됩니다">📄 샘플 CSV</button>
+            <button className="tab" disabled={busy} onClick={() => call('내보내기', () => downloadFile('/admin/agent-deploy/targets/export.txt'))} title="저장된 배포 대상을 이 입력칸 형식(탭 구분)으로 내려받기 — 비밀 제외">⤓ TXT 내보내기</button>
+            <button className="tab" disabled={busy} onClick={() => call('내보내기', () => downloadFile('/admin/agent-deploy/targets/export.txt?format=csv'))} title="저장된 배포 대상을 CSV(엑셀)로 내려받기 — 비밀 제외">⤓ CSV 내보내기</button>
+          </>}
         </div>
 
         {/* 열 순서 — 3열 표는 'host 이름 계정' 과 'host 계정 비밀번호' 를 값만 보고 구분할 수 없어 추측하지 않는다. */}

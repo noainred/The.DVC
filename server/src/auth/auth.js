@@ -6,7 +6,8 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { authenticateAD } from './ad.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
-import { rolePermissionSet } from './permissions.js';
+import { rolePermissionSet, userPermissionSet } from './permissions.js';
+import { VALID_ROLES, SUPER_ADMIN, isAdminTier, authzRole } from './roles.js';
 import { effectiveLoginPolicy, userLoginPolicy, singleSessionRequired, loadSessionSecurity } from '../security/securitySettings.js';
 import { isActiveSession } from './sessions.js';
 
@@ -127,12 +128,15 @@ export const DEMO_USERNAME = 'thedvcdemp';
 // 모두 거부된다. 설정 소유자(settingsOwners)에도 항상 포함된다(securitySettings 참고).
 export const SUPER_USERNAME = 'noainred';
 
-// 수퍼관리자 보장: 없으면 생성(비번 없이 = 비번 설정 전 로그인 불가), 있으면 admin 역할 강제.
+// 수퍼관리자 보장: 없으면 생성(비번 없이 = 비번 설정 전 로그인 불가), 있으면 super_admin 역할 강제.
+// v2.643: 역할이 admin → **super_admin** 으로 바뀌었다(사용자 지시 "noainred 계정은 super_admin").
+//   기존 설치는 다음 로드에서 한 번 올라간다(tokenVersion 은 올리지 않는다 — 권한이 넓어지는 방향이고
+//   요청 문맥의 역할은 여전히 'admin' 이라 기존 세션을 끊을 이유가 없다).
 function ensureSuperUser(list) {
   const u = list.find((x) => x.username === SUPER_USERNAME);
-  if (!u) { list.push({ username: SUPER_USERNAME, name: 'noainred', role: 'admin', superuser: true }); return true; }
+  if (!u) { list.push({ username: SUPER_USERNAME, name: 'noainred', role: SUPER_ADMIN, superuser: true }); return true; }
   let changed = false;
-  if (u.role !== 'admin') { u.role = 'admin'; changed = true; } // 강등돼 있었다면 복구
+  if (u.role !== SUPER_ADMIN) { u.role = SUPER_ADMIN; changed = true; } // 강등돼 있었거나 v2.642 이하(admin)였다면 올린다
   if (!u.superuser) { u.superuser = true; changed = true; }
   return changed;
 }
@@ -233,7 +237,7 @@ export function isOtpOnlyRole(role) {
   const p = effectiveLoginPolicy();
   if (p === 'otp_or_password' || p === 'password_only') return false;
   if (p === 'otp_only') return true; // 전 계정 강제
-  return role === 'admin' || role === 'operator'; // 미설정(레거시): 고권한만
+  return isAdminTier(role) || role === 'operator'; // 미설정(레거시): 고권한만(super_admin 포함 — v2.643)
 }
 
 /** 이 사용자에게 적용되는 로그인 정책 — 사용자별 재정의(파일/ENV) > 전역 정책 > null(레거시). */
@@ -252,7 +256,7 @@ export function isOtpOnlyUser(username, role) {
   const p = loginPolicyFor(username);
   if (p === 'otp_or_password' || p === 'password_only') return false;
   if (p === 'otp_only') return true;
-  return role === 'admin' || role === 'operator'; // 미설정(레거시): 고권한만
+  return isAdminTier(role) || role === 'operator'; // 미설정(레거시): 고권한만(super_admin 포함 — v2.643)
 }
 
 /**
@@ -269,7 +273,7 @@ export function isOtpOnlyUser(username, role) {
 export function setupState() {
   try {
     const list = loadUsers();
-    const setupPending = !list.some((u) => u.role === 'admin' && u.totpEnabled);
+    const setupPending = !list.some((u) => isAdminTier(u.role) && u.totpEnabled);
     if (!setupPending) return { setupPending: false, initialPasswordFile: null };
     const file = path.join(CONFIG_DIR, 'initial-admin-password.txt');
     return { setupPending: true, initialPasswordFile: fs.existsSync(file) ? file : null };
@@ -282,7 +286,7 @@ export function warnIfNoOtpAdmin() {
   // 정책상 admin 이 OTP 전용일 때만 의미 있는 경고(혼용/비번전용이면 admin 은 비번으로 들어올 수 있다).
   if (!isOtpOnlyRole('admin') || !config.auth.enabled) return false;
   const list = loadUsers();
-  if (list.some((u) => u.role === 'admin' && u.totpEnabled)) return false;
+  if (list.some((u) => isAdminTier(u.role) && u.totpEnabled)) return false;
   console.warn('[auth] ⚠ OTP 가 등록된 admin 계정이 없습니다 — admin/operator 는 비밀번호로 로그인할 수 없습니다(OTP 전용).');
   console.warn('[auth]   서버에서 다음을 실행해 첫 관리자의 OTP 를 등록하세요:');
   console.warn('[auth]     node server/src/tools/otp-enroll.js --list');
@@ -352,7 +356,9 @@ export function authenticateLocal(username, credential) {
   return equalize({
     username: user.username,
     name: user.name || user.username,
-    role,
+    // v2.643: 요청 문맥의 역할은 super_admin → 'admin' 으로 접고 superAdmin 을 더한다(auth/roles.js 머리말).
+    role: authzRole(role),
+    ...(role === SUPER_ADMIN ? { superAdmin: true } : {}),
     source: 'local',
     totpEnabled: !!user.totpEnabled,
     // OTP 전용 강제 대상이 아직 OTP 미등록 → 이번 세션은 'OTP 등록 전용'.
@@ -362,7 +368,7 @@ export function authenticateLocal(username, credential) {
 
 /* ------------------------------ user management ---------------------------- */
 
-const VALID_ROLES = ['admin', 'operator', 'viewer'];
+// 저장 가능한 역할은 auth/roles.js VALID_ROLES(super_admin·admin·operator·viewer — v2.643).
 
 // 사용자별 데이터 범위(scope) — 볼 수 있는 vCenter/리전을 제한한다(권한 키와는 직교: 무엇을
 // '할' 수 있나 ≠ 무엇을 '볼' 수 있나). 형식/타입만 정규화한다.
@@ -403,7 +409,7 @@ export function listUsers() {
     totpEnabled: !!u.totpEnabled, hasPassword: !!u.passwordHash,
     managedBy: u.managedBy || null, // 'central' = 중앙에서 배포·관리하는 계정
     demo: !!u.demo,                 // 내장 데모 계정(viewer 고정·삭제 불가·비번 없으면 로그인 불가)
-    superuser: !!u.superuser,       // 수퍼관리자(admin 고정·강등/삭제/로그인차단 불가)
+    superuser: !!u.superuser,       // 수퍼관리자(super_admin 고정·강등/삭제/로그인차단 불가)
     scope: normalizedScope(u),      // 볼 수 있는 vCenter/리전 제한(빈 배열 = 전체)
   }));
 }
@@ -412,11 +418,36 @@ export function getUser(username) {
   return loadUsers().find((u) => u.username === username) || null;
 }
 
+/**
+ * v2.643 — super_admin 계정 경계: **super_admin 계정의 생성·삭제·변경(역할·자격증명)과 super_admin 역할 부여는
+ * super_admin 만** 할 수 있다(사용자 지시 "super_admin 은 super_admin 사용자만 추가/삭제 가능").
+ *   · 대상 저장 역할이 super_admin 이거나 새 역할이 super_admin 이면 요청자가 super_admin 이어야 한다.
+ *   · ⚠ 삭제만 막으면 admin 이 super_admin 의 비밀번호·OTP 를 바꿔 그 계정을 가져간다 — 그래서 자격증명·역할
+ *     변경도 같은 경계다(credentialGuardDenied 와 같은 이유).
+ *   · trusted(콘솔 복구 도구·중앙→엣지 시스템 경로)는 예외 — 단 중앙 배포는 super_admin 역할을 싣지 못한다
+ *     (applyManagedUsers 가 따로 거부한다).
+ * actor 는 계정명이다 — 요청자의 **저장 역할**을 보고 판정한다(요청 문맥의 role 은 admin 으로 접혀 있다).
+ */
+export function actorIsSuperAdmin(actor) {
+  if (!actor) return false;
+  const a = getUser(String(actor).trim());
+  return !!a && a.role === SUPER_ADMIN;
+}
+function superAdminGuardDenied(u, { nextRole, actor = null, trusted = false, what = '변경' } = {}) {
+  if (trusted) return null;
+  const touches = (u && u.role === SUPER_ADMIN) || nextRole === SUPER_ADMIN;
+  if (!touches) return null;
+  if (actorIsSuperAdmin(actor)) return null;
+  return { ok: false, reason: `super_admin 계정의 ${what}은(는) super_admin 만 할 수 있습니다.`, code: 'super-admin-only' };
+}
+
 export function createUser({ username, name, role = 'viewer', password, scope } = {}, { actor = null, trusted = false } = {}) {
   username = String(username || '').trim();
   if (!/^[A-Za-z0-9._@-]{2,64}$/.test(username)) return { ok: false, reason: '사용자 ID 형식이 올바르지 않습니다.' };
   if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
   if (getUser(username)) return { ok: false, reason: '이미 존재하는 사용자입니다.' };
+  const sa = superAdminGuardDenied(null, { nextRole: role, actor, trusted, what: '생성' });
+  if (sa) return sa;
   // 소유자 이름 선점 차단(identityGuardDenied 주석 참고) — 이름만 차지해도 소유자 지위가 승계된다.
   const denied = identityGuardDenied({ username, actor, trusted, what: '계정 생성' });
   if (denied) return denied;
@@ -451,7 +482,8 @@ export function setLocalPassword(username, password, { actor = null, trusted = f
   if (!u) return { ok: false, reason: '사용자를 찾을 수 없습니다.' };
   // 보호 계정(수퍼관리자·설정소유자)의 비밀번호를 다른 admin 이 아는 값으로 설정하면 그 계정으로
   // 로그인할 수 있다 — OTP 등록 경로와 같은 탈취 경로다(credentialGuardDenied).
-  const denied = credentialGuardDenied(u, { actor, trusted, what: '비밀번호' });
+  const denied = credentialGuardDenied(u, { actor, trusted, what: '비밀번호' })
+    || superAdminGuardDenied(u, { actor, trusted, what: '비밀번호 변경' });
   if (denied) return denied;
   u.passwordHash = hashPassword(pw);
   bumpTokenVersion(u); // 비번 변경 → 기존 세션 토큰 즉시 폐기
@@ -470,9 +502,10 @@ export function clearLoginCredentials(username, { actor = null, trusted = false 
   if (u.superuser) return { ok: false, reason: '수퍼관리자 계정의 로그인은 차단할 수 없습니다.' };
   // 설정소유자도 보호 — OTP·비번을 모두 지운 뒤 setLocalPassword 로 비번을 심으면 부트스트랩
   // 로그인이 열려 계정 탈취로 이어진다(재감사에서 재현된 경로).
-  const denied = credentialGuardDenied(u, { actor, trusted, what: '로그인 자격증명' });
+  const denied = credentialGuardDenied(u, { actor, trusted, what: '로그인 자격증명' })
+    || superAdminGuardDenied(u, { actor, trusted, what: '로그인 차단' });
   if (denied) return denied;
-  if (u.role === 'admin' && loadUsers().filter((x) => x.role === 'admin').length <= 1) {
+  if (isAdminTier(u.role) && loadUsers().filter((x) => isAdminTier(x.role)).length <= 1) {
     return { ok: false, reason: '마지막 관리자의 로그인은 차단할 수 없습니다.' };
   }
   delete u.passwordHash;
@@ -493,6 +526,8 @@ export function updateUser(username, { name, role, scope } = {}, { actor = null,
   // 표시이름(name)은 이제 권한 축이 아니지만(requireSettingsOwner 가 username 만 본다),
   // 감사 추적에서 사람을 오인하게 만들 수 있어 보호 계정에 대해서는 함께 제한한다.
   if (role !== undefined || scope !== undefined || name !== undefined) {
+    const sa = superAdminGuardDenied(u, { nextRole: role, actor, trusted, what: '계정 정보 변경' });
+    if (sa) return sa;
     const denied = credentialGuardDenied(u, { actor, trusted, what: '계정 정보(역할·범위·표시이름)' });
     if (denied && !actorIsOwner(actor)) return denied;   // 소유자는 다른 소유자를 관리할 수 있다
     // 소유자 집합 '진입' 차단 — 위 가드는 '이미 보호 계정인가'만 보므로, 아직 소유자가 아닌 계정을
@@ -505,10 +540,10 @@ export function updateUser(username, { name, role, scope } = {}, { actor = null,
     if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
     // 데모 계정은 viewer 고정 — 데모 자격증명이 유출돼도 권한 상승 경로가 없게 서버측에서 잠근다.
     if (u.demo && role !== 'viewer') return { ok: false, reason: '데모 계정의 역할은 viewer로 고정되어 있습니다.' };
-    // 수퍼관리자는 admin 고정 — 다른 admin 이 강등시켜 최고 권한을 뺏는 경로를 차단.
-    if (u.superuser && role !== 'admin') return { ok: false, reason: '수퍼관리자 계정의 역할은 admin으로 고정되어 있습니다.' };
-    // Don't allow demoting the last admin.
-    if (u.role === 'admin' && role !== 'admin' && loadUsers().filter((x) => x.role === 'admin').length <= 1) {
+    // 수퍼관리자는 super_admin 고정 — 강등시켜 최고 권한을 뺏는 경로를 차단(v2.643: admin → super_admin).
+    if (u.superuser && role !== SUPER_ADMIN) return { ok: false, reason: '수퍼관리자 계정의 역할은 super_admin 으로 고정되어 있습니다.' };
+    // Don't allow demoting the last admin(관리자 계열 = admin·super_admin).
+    if (isAdminTier(u.role) && !isAdminTier(role) && loadUsers().filter((x) => isAdminTier(x.role)).length <= 1) {
       return { ok: false, reason: '마지막 관리자는 역할을 변경할 수 없습니다.' };
     }
     if (u.role !== role) bumpTokenVersion(u); // 역할 변경(강등 포함) → 기존 토큰 폐기
@@ -532,9 +567,11 @@ export function deleteUser(username, { actor = null, trusted = false } = {}) {
   if (u.superuser) return { ok: false, reason: '수퍼관리자 계정은 삭제할 수 없습니다.' };
   // 소유자 계정 삭제 차단 — 지운 뒤 같은 이름으로 다시 만들면 소유자 지위가 승계된다
   // (identityGuardDenied 주석 참고: 자격증명만 막으면 신원이 안 막혀 탈취가 성립했다).
+  const sa = superAdminGuardDenied(u, { actor, trusted, what: '삭제' });
+  if (sa) return sa;
   const denied = identityGuardDenied({ username: u.username, actor, trusted, what: '계정 삭제' });
   if (denied) return denied;
-  if (u.role === 'admin' && list.filter((x) => x.role === 'admin').length <= 1) {
+  if (isAdminTier(u.role) && list.filter((x) => isAdminTier(x.role)).length <= 1) {
     return { ok: false, reason: '마지막 관리자는 삭제할 수 없습니다.' };
   }
   users = list.filter((x) => x.username !== username);
@@ -557,8 +594,11 @@ export function applyManagedUsers(managed = []) {
   for (const [username, m] of want) {
     if (!/^[A-Za-z0-9._@-]{2,64}$/.test(username)) { result.skipped.push(`${username}(ID 형식)`); continue; }
     if (!VALID_ROLES.includes(m.role)) { result.skipped.push(`${username}(역할)`); continue; }
+    // v2.643: 중앙 배포로 super_admin 을 만들지 않는다(super_admin 은 그 포탈의 super_admin 만 만든다).
+    if (m.role === SUPER_ADMIN) { result.skipped.push(`${username}(super_admin 은 배포 불가)`); continue; }
     const existing = list.find((x) => x.username === username);
     if (existing && existing.managedBy !== 'central') { result.skipped.push(`${username}(로컬 계정 충돌)`); continue; }
+    if (existing && existing.role === SUPER_ADMIN) { result.skipped.push(`${username}(super_admin 계정)`); continue; }
     if (!existing) {
       const u = { username, name: m.name || username, role: m.role, managedBy: 'central' };
       if (m.passwordHash) u.passwordHash = m.passwordHash;
@@ -574,7 +614,7 @@ export function applyManagedUsers(managed = []) {
   for (let i = list.length - 1; i >= 0; i--) {
     const u = list[i];
     if (u.managedBy === 'central' && !want.has(u.username)) {
-      if (u.role === 'admin' && list.filter((x) => x.role === 'admin').length <= 1) { result.skipped.push(`${u.username}(마지막 admin 삭제 보류)`); continue; }
+      if (isAdminTier(u.role) && list.filter((x) => isAdminTier(x.role)).length <= 1) { result.skipped.push(`${u.username}(마지막 admin 삭제 보류)`); continue; }
       list.splice(i, 1); result.removed++;
     }
   }
@@ -745,7 +785,7 @@ function identityGuardDenied({ username, actor, trusted, what }) {
 
 /** OTP 등록(begin/confirm) 전용 래퍼 — 메시지만 다르고 경계는 동일하다. */
 function totpRebindDenied(u, actor, trusted = false) {
-  return credentialGuardDenied(u, { actor, trusted, what: 'OTP 등록' });
+  return credentialGuardDenied(u, { actor, trusted, what: 'OTP 등록' }) || superAdminGuardDenied(u, { actor, trusted, what: 'OTP 등록' });
 }
 
 /** Start TOTP enrollment: generate a secret (pending until confirmed).
@@ -823,7 +863,7 @@ export function confirmTotpEnroll(username, code, { actor = null, trusted = fals
   persistUsers();
   // 부트스트랩용 임의 비밀번호 파일(평문)은 관리자가 OTP 를 등록하는 순간 역할이 끝난다 → 자동 삭제
   // (정책과 무관하게 항상 지운다 — 임의 생성 초기 비번 평문이 서버에 남는 사고를 막는다).
-  if ((u.role || '') === 'admin') {
+  if (isAdminTier(u.role || '')) {
     try { fs.rmSync(path.join(CONFIG_DIR, 'initial-admin-password.txt'), { force: true }); } catch { /* 없으면 무시 */ }
   }
   return { ok: true };
@@ -853,7 +893,7 @@ export function disableTotp(username, { password, force = false, actor = null } 
   // `{"force":true}` 주입으로 이 가드가 무력화되는 경로가 재감사에서 재현됐다.
   if (u.superuser && !force) return { ok: false, reason: '수퍼관리자 계정의 OTP는 해제할 수 없습니다(재등록은 해제 없이 OTP 등록으로 가능합니다).' };
   // 설정소유자도 같은 경계 — 해제 + 임시 비밀번호는 그 계정으로 로그인할 수 있게 만드는 작업이다.
-  const denied = credentialGuardDenied(u, { actor, trusted: force, what: 'OTP 해제' });
+  const denied = credentialGuardDenied(u, { actor, trusted: force, what: 'OTP 해제' }) || superAdminGuardDenied(u, { actor, trusted: force, what: 'OTP 해제' });
   if (denied) return denied;
   // 임시 비밀번호 검증 — setLocalPassword 와 같은 규칙(문자열·8~128자). 검증 없이 hash 하면
   // "[object Object]" 같은 값이 비밀번호가 되는 사고를 만든다.
@@ -894,7 +934,7 @@ export async function authenticate(username, password) {
 // 인증 비활성(AUTH_ENABLED=false) 시 익명 사용자에게 부여할 역할(감사 H13). 과거엔 무조건
 // admin이라 env 한 줄 실수로 전체 mutation이 익명 개방됐다. 기본은 하위호환(admin) 유지하되
 // AUTH_DISABLED_ROLE=viewer|operator 로 낮출 수 있고, requireRole도 이 역할로 실제 검사한다.
-const AUTH_DISABLED_ROLE = VALID_ROLES.includes(process.env.AUTH_DISABLED_ROLE)
+const AUTH_DISABLED_ROLE = ['admin', 'operator', 'viewer'].includes(process.env.AUTH_DISABLED_ROLE) // super_admin 은 익명에 주지 않는다(v2.643)
   ? process.env.AUTH_DISABLED_ROLE : 'admin';
 
 /** 인증 비활성(AUTH_ENABLED=false) 환경에서 검사에 쓰는 대체 역할. 라우터 게이트가 공유한다(v2.447). */
@@ -930,12 +970,14 @@ export function resolveTokenUser(token) {
     // role·scope·등록강제 여부는 토큰이 아니라 현재 레코드에서 읽어 변경을 즉시 반영한다.
     const role = u.role || 'viewer';
     return {
-      username: payload.sub, role, name: payload.name, scope: normalizedScope(u),
+      // v2.643: super_admin 은 요청 문맥에서 'admin' + superAdmin:true(auth/roles.js 머리말 — 기존 admin 판정을 전부 그대로 통과).
+      username: payload.sub, role: authzRole(role), ...(role === SUPER_ADMIN ? { superAdmin: true } : {}), name: payload.name, scope: normalizedScope(u),
       mustEnrollOtp: isOtpOnlyUser(u.username, role) && !u.totpEnabled,
     };
   }
   // AD 계정 등 로컬 레코드가 없는 토큰은 scope 를 적용하지 않는다(전체 열람).
-  return { username: payload.sub, role: payload.role, name: payload.name, scope: { vcenters: [], regions: [], writeVcenters: [] } };
+  // super_admin 은 로컬 계정 전용이다 — 토큰 클레임이 super_admin 이어도 admin 으로 접는다(v2.643).
+  return { username: payload.sub, role: authzRole(payload.role), name: payload.name, scope: { vcenters: [], regions: [], writeVcenters: [] } };
 }
 
 export function authMiddleware(req, res, next) {
@@ -995,8 +1037,8 @@ export function requireRole(...roles) {
 export function requirePerm(...keys) {
   const permGate = (req, res, next) => {
     const role = !config.auth.enabled ? AUTH_DISABLED_ROLE : (req.user && req.user.role);
-    if (role === 'admin') return next();
-    const set = rolePermissionSet(role);
+    // v2.643: admin 도 '관리자가 끌 수 있는 권한'(data.csv)은 매트릭스를 본다 — 판정은 userPermissionSet 하나.
+    const set = !config.auth.enabled ? rolePermissionSet(role) : userPermissionSet(req.user);
     if (keys.some((k) => set.has(k))) return next();
     return res.status(403).json({ error: 'forbidden', requiredPerm: keys });
   };

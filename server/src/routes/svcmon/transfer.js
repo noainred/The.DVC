@@ -25,13 +25,16 @@ import { getTemplate, materializeForTarget } from '../../svcmon/templates.js';
 import { recordBatch } from '../../svcmon/batches.js';
 import { canEdit, fullScopeOnly, XLSX_MAX_BYTES, dryRunTargets } from './shared.js';
 import { todayStamp } from "../../util/dayKey.js";
+import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requireCsvPerm('data.csv');
 
 export function registerTransfer(svcmonRouter) {
 
 /* ── CSV 가져오기 / 내보내기 ── */
 
 /** 내보내기 — 청크 스트리밍. `res.json` 을 쓰면 압축 래퍼의 SHA-1 ETag 계산이 동기로 걸린다. */
-svcmonRouter.get('/targets/export.csv', canEdit, (req, res) => {
+svcmonRouter.get('/targets/export.csv', csvPerm, canEdit, (req, res) => {
   const kind = KINDS.includes(req.query.kind) ? req.query.kind : null;
   const scope = typeof req.query.path === 'string' ? req.query.path.trim() : '';
   const withTests = req.query.tests !== '0';
@@ -66,7 +69,7 @@ svcmonRouter.get('/targets/export.csv', canEdit, (req, res) => {
  * json/xlsx 는 전량을 메모리에 만들되 1회 요청 상한(대상 20,000) 규모에서 수 MB 수준이다.
  * ⚠️ 이 라우트는 반드시 export.csv **뒤에** 등록돼야 한다(파일 헤더의 순서 불변조건).
  */
-svcmonRouter.get('/targets/export.:format', canEdit, async (req, res) => {
+svcmonRouter.get('/targets/export.:format', csvPerm, canEdit, async (req, res) => {
   const format = FORMATS.includes(req.params.format) ? req.params.format : null;
   if (!format || format === 'csv') return res.status(404).json({ error: 'csv 는 /targets/export.csv 를 쓰세요.' });
   const kind = KINDS.includes(req.query.kind) ? req.query.kind : null;
@@ -88,7 +91,7 @@ svcmonRouter.get('/targets/export.:format', canEdit, async (req, res) => {
   } catch (e) { res.status(500).json({ error: `내보내기 실패: ${e.message}` }); }
 });
 
-svcmonRouter.get('/targets/sample.csv', canEdit, (req, res) => {
+svcmonRouter.get('/targets/sample.csv', csvPerm, canEdit, (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="svcmon-sample.csv"');
   res.send(sampleCsv());
@@ -97,7 +100,7 @@ svcmonRouter.get('/targets/sample.csv', canEdit, (req, res) => {
 /* ── 수동 IP 매핑(이름↔IP) 템플릿·가져오기·내보내기 ── */
 
 /** 수동 매핑 CSV 템플릿 다운로드. `?names=a,b,c` 를 주면 그 이름들을 미리 채워 IP 만 적게 한다. */
-svcmonRouter.get('/targets/hostmap-template.csv', canEdit, (req, res) => {
+svcmonRouter.get('/targets/hostmap-template.csv', csvPerm, canEdit, (req, res) => {
   const raw = typeof req.query.names === 'string' ? req.query.names : '';
   const names = raw.split(',').map((s) => s.trim()).filter(Boolean).slice(0, LIMITS.maxBulkRows);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -126,7 +129,7 @@ svcmonRouter.post('/targets/hostmap/parse', canEdit, async (req, res) => {
 });
 
 /** 현재 매핑 표를 CSV 로 내보내기(수식 인젝션 가드는 hostMapToCsv 가 적용). */
-svcmonRouter.post('/targets/hostmap/export.csv', canEdit, (req, res) => {
+svcmonRouter.post('/targets/hostmap/export.csv', csvPerm, canEdit, (req, res) => {
   const pairs = Array.isArray(req.body?.pairs) ? req.body.pairs.slice(0, LIMITS.maxBulkRows) : [];
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="svcmon-hostmap.csv"');
@@ -134,7 +137,7 @@ svcmonRouter.post('/targets/hostmap/export.csv', canEdit, (req, res) => {
 });
 
 /** 컬럼 설명 — 화면이 표를 그릴 때 쓴다(스키마와 화면이 어긋나지 않게). */
-svcmonRouter.get('/targets/csv-schema', canEdit, (req, res) => {
+svcmonRouter.get('/targets/csv-schema', csvPerm, canEdit, (req, res) => {
   const of = (f) => ({
     col: f.col, label: f.label, kind: f.kind, max: f.max, min: f.min,
     dflt: f.dflt, requiredFor: f.requiredFor, usedBy: f.usedBy,
@@ -155,7 +158,7 @@ svcmonRouter.get('/targets/csv-schema', canEdit, (req, res) => {
  * 가져오기 — `mode:'preview'` 는 저장하지 않고 판정만, `'add'` 는 커밋한다.
  * 커밋은 all-or-nothing 이며 이미 있는 대상(구분+경로+이름)은 건너뛴다.
  */
-svcmonRouter.post('/targets/import', canEdit, fullScopeOnly, async (req, res) => {
+svcmonRouter.post('/targets/import', csvPerm, canEdit, fullScopeOnly, async (req, res) => {
   const mode = req.body?.mode === 'add' ? 'add' : 'preview';
   // 포맷 결정: format 이 명시되면 그것을, 없고 csv 필드만 오면 csv(구버전 호환).
   const format = FORMATS.includes(req.body?.format) ? req.body.format : 'csv';

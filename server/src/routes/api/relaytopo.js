@@ -14,6 +14,8 @@ import { todayStamp } from "../../util/dayKey.js";
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 
 const adminOnly = requireRole('admin');
 // v2.612 AUTHZ2612-03: 사이트 구성·HAProxy 적용은 전 법인 공용이라 범위 제한 admin 도 막는다(조회·저장·적용 전부).
@@ -78,7 +80,7 @@ api.put('/tools/relaytopo', adminOnly, fullScopeOnly, (req, res) => {
 });
 
 /** 가져오기: body { text?(표/CSV/TSV 붙여넣기 또는 파일 내용), json?(내보낸 JSON 객체), replace?, apply? }. apply=false 면 미리보기만. */
-api.post('/tools/relaytopo/import', adminOnly, fullScopeOnly, (req, res) => {
+api.post('/tools/relaytopo/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   try {
     const { text = '', json = null, replace = false, apply = false } = req.body || {};
     let parsed; let format = 'table';
@@ -96,7 +98,7 @@ api.post('/tools/relaytopo/import', adminOnly, fullScopeOnly, (req, res) => {
 });
 
 /** 내보내기(비밀 없음): ?format=json|csv */
-api.get('/tools/relaytopo/export', adminOnly, fullScopeOnly, (req, res) => {
+api.get('/tools/relaytopo/export', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
   const topo = loadTopology(); const day = todayStamp();
   logAudit({ user: req.user?.username, action: '중계 토폴로지 내보내기', detail: `format=${req.query.format || 'json'} sites=${topo.sites.length}`, ip: req.ip });
   if (String(req.query.format || 'json').toLowerCase() === 'csv') {

@@ -37,6 +37,9 @@ import { idracScopeOf, idracInScope } from './idracCore.js'; // v2.629 AUTHZ2629
 //   iDRAC·iLO 계정명이 범위 관리자에게 열려 있었다(쓰기는 v2.611 에 막았다). 서버별 상세 조회(인벤토리·센서)는
 //   v2.629(AUTHZ2629-03) 부터 범위 계정에 귀속 서버만 보인다(아래 hiddenByScope) — 예전 '범위를 걸지 않는다' 결정은 폐기.
 const fleetOnly = fullScopeOnlyWith('iDRAC 등록부·스캔 대역·스캔 실행은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꾸거나 실행할 수 있습니다(재귀속·삭제로 다른 법인 서버를 옮길 수 있었다).');
+import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requireCsvPerm('data.csv');
 
 
 // Register iDRACs found by a scan, applying the shared credentials, then poll.
@@ -211,7 +214,7 @@ adminRouter.get('/idrac/:id/gpu-probe', adminOnly, liveFleetOnly, async (req, re
 
 // Import servers (JSON array / { servers:[...] } / CSV text). Body:
 //   { servers:[...], mode? } | { csv:"...", mode? } | bare array
-adminRouter.post('/idrac/import', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/idrac/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const body = req.body || {};
   let list;
   if (typeof body.csv === 'string') list = parseCsv(body.csv);
@@ -342,7 +345,7 @@ adminRouter.delete('/idrac/scan-ranges/:id', adminOnly, fleetOnly, (req, res) =>
  * 가져오기는 dryRun(법인 해석·대역 문법(expandIpList)·중복 검증) → 커밋 2단계이고,
  * (법인,서비스)가 겹치는 행은 body.overwrite=true 명시 시에만 갱신한다.
  */
-adminRouter.get('/idrac/scan-ranges/export.csv', adminOnly, fleetOnly, (req, res) => {
+adminRouter.get('/idrac/scan-ranges/export.csv', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const withPw = String(req.query.secrets || '') === '1';
   const dcName = (() => { try { const m = new Map(listDatacenters().map((d) => [d.id, d.name || d.id])); return (id) => m.get(id) || id || ''; } catch { return (id) => id || ''; } })();
   const send = () => {
@@ -357,13 +360,13 @@ adminRouter.get('/idrac/scan-ranges/export.csv', adminOnly, fleetOnly, (req, res
   send();
 });
 
-adminRouter.get('/idrac/scan-ranges/sample.csv', adminOnly, (_req, res) => {
+adminRouter.get('/idrac/scan-ranges/sample.csv', csvPerm, adminOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="idrac-scan-ranges-sample.csv"');
   res.send(scanRangesSampleCsv());
 });
 
-adminRouter.post('/idrac/scan-ranges/import', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/idrac/scan-ranges/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const { rows, error } = parseScanRangesCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });

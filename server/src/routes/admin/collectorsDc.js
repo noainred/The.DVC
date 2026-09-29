@@ -26,6 +26,8 @@ const EDGE_SMALL_MAX_BYTES = 256 * 1024;
 import { resolveBundleBytes, lastBundleReject } from '../../upgrade/bundleSource.js';
 import { upgradeManager } from '../../upgrade/manager.js';
 import { adminOnly, ensureCollectorDatacenter, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('수집 서버(엣지)·DataCenter 등록부는 전 법인에 걸친 설정이라 전체 범위(vCenter 제한 없는) 계정만 조회·변경할 수 있습니다.');
 
@@ -123,7 +125,7 @@ adminRouter.delete('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
  */
 
 // 현재 등록 수집 서버를 CSV 로 내보내기. 기본은 토큰 제외(listCollectors redact 계약).
-adminRouter.get('/collectors/export.csv', adminOnly, fleetOnly, (req, res) => {
+adminRouter.get('/collectors/export.csv', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const withTok = String(req.query.tokens || '') === '1';
   const send = () => {
     const list = loadCollectors();
@@ -138,7 +140,7 @@ adminRouter.get('/collectors/export.csv', adminOnly, fleetOnly, (req, res) => {
 });
 
 /** 샘플 CSV 템플릿 다운로드 — 헤더 + 컬럼 설명 주석 + 예시 2행. */
-adminRouter.get('/collectors/sample.csv', adminOnly, (_req, res) => {
+adminRouter.get('/collectors/sample.csv', csvPerm, adminOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="collectors-sample.csv"');
   res.send(collectorsSampleCsv());
@@ -152,7 +154,7 @@ adminRouter.get('/collectors/sample.csv', adminOnly, (_req, res) => {
  *    보고 — 기존 URL/토큰/매핑을 실수로 갈아엎는 사고 방지). 행별 성공/실패 정직 반환.
  *  - 가져온 항목은 관리자 수동 등록과 동일하게 managed=true(자기등록이 못 덮어씀).
  */
-adminRouter.post('/collectors/import', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/collectors/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const { rows, error } = parseCollectorsCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });

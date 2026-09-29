@@ -11,6 +11,9 @@ import { bmHistoryStatus } from '../../bmstor/historySampler.js';
 import { bmHistoryRange, bmHistoryDbStatus } from '../../bmstor/historyDb.js';
 import { historyPeriodOf, seriesFromRows, HISTORY_PERIODS } from '../../bmstor/history.js';
 import { requireSettingsOwner, fullScopeOnlyWith } from '../admin/shared.js';
+import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requireCsvPerm('data.csv');
 
 const adminOnly = requireRole('admin');
 // v2.612 AUTHZ2612-06: 베어메탈 서버는 법인 축이 없다(엣지만) — 범위 제한 admin 도 403(스토리지 모니터링과 같은 기준).
@@ -73,7 +76,7 @@ export function registerBmStorage(api) {
   /* ── 서버 CSV 일괄 관리(v2.341, 사용자 요구 — 다수 서버 등록). 수집 서버 CSV(v2.338)와 동일 골격:
    * 기본 export 는 비밀번호 제외(?secrets=1 은 설정 소유자 + 감사로그), 가져오기는 드라이런 →
    * 덮어쓰기(overwrite=true 명시) 2단계. agent 는 등록된 수집 서버(원격) 이름만 허용. ── */
-  api.get('/tools/bm-storage/export.csv', adminOnly, fullScopeOnly, (req, res) => {
+  api.get('/tools/bm-storage/export.csv', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
     const withPw = String(req.query.secrets || '') === '1';
     const send = () => {
       const list = withPw ? listBmServersRaw() : listBmServers();
@@ -87,13 +90,13 @@ export function registerBmStorage(api) {
     send();
   });
 
-  api.get('/tools/bm-storage/sample.csv', adminOnly, fullScopeOnly, (_req, res) => {
+  api.get('/tools/bm-storage/sample.csv', csvPerm, adminOnly, fullScopeOnly, (_req, res) => {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="bm-storage-servers-sample.csv"');
     res.send(bmSampleCsv());
   });
 
-  api.post('/tools/bm-storage/import', adminOnly, fullScopeOnly, (req, res) => {
+  api.post('/tools/bm-storage/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
     const { rows, error } = parseBmServersCsv(String(req.body?.csv || ''));
     if (error) return res.status(400).json({ ok: false, reason: error });
     if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });

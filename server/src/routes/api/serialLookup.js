@@ -15,6 +15,8 @@ import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { todayStamp } from "../../util/dayKey.js";
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { isAdminReq } from '../../auth/addressMask.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 
 const toolsPerm = requirePerm('tools'); // 조회 라우트 기능 권한(v2.416 감사 L-3)
 // v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
@@ -83,7 +85,7 @@ api.get('/tools/serial-lookup', toolsPerm, fullScopeOnly, (req, res) => {
 });
 
 /** 검색 결과 CSV 내보내기(자산 대조·RMA 목록 작성용). 감사로그를 남긴다. */
-api.get('/tools/serial-lookup/export.csv', toolsPerm, fullScopeOnly, (req, res) => {
+api.get('/tools/serial-lookup/export.csv', csvPerm, toolsPerm, fullScopeOnly, (req, res) => {
   const q = String(req.query.q || '').trim();
   const kinds = String(req.query.kinds || '').split(',').map((s) => s.trim()).filter(Boolean);
   const idx = serialIndex(req);

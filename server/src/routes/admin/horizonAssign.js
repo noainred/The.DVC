@@ -8,6 +8,9 @@ import { logAudit } from '../../audit.js';
 import { listCollectors } from '../../collector/registry.js';
 import { listAssignments, addAssignment, updateAssignment, removeAssignment, getResults, parseCsv as parseAssignmentsCsv, importAssignments, mergeKnownAgents } from '../../central/assignments.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
+import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requireCsvPerm('data.csv');
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('Horizon 연결 서버·엣지 스캔 배정은 vCenter(법인) 축이 없는 전 법인 등록부라 전체 범위(vCenter 제한 없는) 계정만 조회·변경할 수 있습니다.');
 
@@ -55,7 +58,7 @@ function hzParseBody(body = {}) {
 
 const hzExistingMap = () => new Map(listHorizonServers().map((s) => [String(s.id).trim().toLowerCase(), s]));
 
-adminRouter.get('/horizon/servers/export.csv', adminOnly, fleetOnly, (req, res) => {
+adminRouter.get('/horizon/servers/export.csv', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const servers = listHorizonServers();
   logAudit({ user: req.user?.username, action: 'Horizon 서버 CSV 내보내기', detail: `${servers.length}대`, ip: req.ip || '' });
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -63,7 +66,7 @@ adminRouter.get('/horizon/servers/export.csv', adminOnly, fleetOnly, (req, res) 
   res.send(hzBulk.serversToCsv(servers));
 });
 
-adminRouter.get('/horizon/servers/export.txt', adminOnly, fleetOnly, (req, res) => {
+adminRouter.get('/horizon/servers/export.txt', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const servers = listHorizonServers();
   logAudit({ user: req.user?.username, action: 'Horizon 서버 자유텍스트 내보내기', detail: `${servers.length}대`, ip: req.ip || '' });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -71,13 +74,13 @@ adminRouter.get('/horizon/servers/export.txt', adminOnly, fleetOnly, (req, res) 
   res.send(hzBulk.serversToText(servers));
 });
 
-adminRouter.get('/horizon/servers/sample.csv', adminOnly, fleetOnly, (_req, res) => {
+adminRouter.get('/horizon/servers/sample.csv', csvPerm, adminOnly, fleetOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="horizon-servers-sample.csv"');
   res.send(hzBulk.sampleCsv());
 });
 
-adminRouter.get('/horizon/servers/sample.txt', adminOnly, fleetOnly, (_req, res) => {
+adminRouter.get('/horizon/servers/sample.txt', csvPerm, adminOnly, fleetOnly, (_req, res) => {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="horizon-servers-sample.txt"');
   res.send(hzBulk.sampleText());
@@ -87,7 +90,7 @@ adminRouter.get('/horizon/servers/sample.txt', adminOnly, fleetOnly, (_req, res)
  * ② 실제 연결 테스트 — 저장 **전에** 행마다 Horizon 로그인을 시도한다.
  * ⚠ 자동 재시도 없음(잘못된 비밀번호 반복 = AD 계정 잠금). `bulkRun` 이 강제한다.
  */
-adminRouter.post('/horizon/servers/import/test', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/horizon/servers/import/test', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const p = hzParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
   const existing = hzExistingMap();
@@ -118,7 +121,7 @@ adminRouter.post('/horizon/servers/import/test', adminOnly, fleetOnly, (req, res
 });
 
 /** 연결 테스트 진행률·결과(폴링). 자격증명은 응답에 없다(`bulkRun publicRun`). */
-adminRouter.get('/horizon/servers/import/test/:id', adminOnly, fleetOnly, (req, res) => {
+adminRouter.get('/horizon/servers/import/test/:id', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const run = publicRun(req.params.id);
   if (!run || run.kind !== 'horizon') return res.status(404).json({ ok: false, reason: '실행을 찾을 수 없습니다(15분 지나 폐기되었을 수 있습니다).' });
   res.json({ ok: true, ...run });
@@ -128,7 +131,7 @@ adminRouter.get('/horizon/servers/import/test/:id', adminOnly, fleetOnly, (req, 
  * ①/③ 가져오기 — `dryRun:true` 면 검증만, 아니면 저장.
  * 걸러낸 행은 버리지 않고 `skipped` 로 사유와 함께 돌려준다.
  */
-adminRouter.post('/horizon/servers/import', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/horizon/servers/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const p = hzParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 
@@ -201,7 +204,7 @@ adminRouter.delete('/assignments/:agent', adminOnly, fleetOnly, (req, res) => {
 
 // Import assignments from CSV text or a JSON array. Body:
 //   { csv:"...", mode? } | { assignments:[...], mode? } | bare array
-adminRouter.post('/assignments/import', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/assignments/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
   const b = req.body || {};
   let list;
   if (typeof b.csv === 'string') list = parseAssignmentsCsv(b.csv);

@@ -11,6 +11,8 @@ import { enqueuePing, getPingResults, setPingResults } from '../../central/pingJ
 import { pingMany } from '../../util/ping.js';
 import { todayStamp } from "../../util/dayKey.js";
 import { acquireExport } from '../../util/exportBusy.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 
 
 /**
@@ -344,7 +346,7 @@ api.get('/tools/gpu.json', requirePerm('tools'), (req, res) => {
 });
 
 // GPU 사용량/인벤토리 CSV export — 호스트별 한 행(모델·장수·모드·사용률·할당 VM).
-api.get('/tools/gpu.csv', requirePerm('tools'), (req, res) => {
+api.get('/tools/gpu.csv', csvPerm, requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const data = buildGpuInventory(snap, req.query.vcenterId, scopedVcenterIds(req.user, snap));
   const head = ['host', 'vcenter_id', 'cluster', 'gpu_model', 'gpu_count', 'mem_gb', 'mode', 'mode_breakdown', 'util_pct', 'util_source', 'assigned_vms'];
@@ -367,8 +369,8 @@ api.get('/tools/gpu/series-meta', requirePerm('tools'), async (req, res) => {
     res.json({ collectedSince: m.firstTs, latestAt: m.lastTs, sampleCount: m.count });
   } catch { res.json({ collectedSince: null, latestAt: null, sampleCount: 0 }); }
 });
-api.get('/tools/gpu/export.csv', requirePerm('tools'), (req, res) => gpuSeriesExport(req, res, 'csv'));
-api.get('/tools/gpu/export.json', requirePerm('tools'), (req, res) => gpuSeriesExport(req, res, 'json'));
+api.get('/tools/gpu/export.csv', csvPerm, requirePerm('tools'), (req, res) => gpuSeriesExport(req, res, 'csv'));
+api.get('/tools/gpu/export.json', csvPerm, requirePerm('tools'), (req, res) => gpuSeriesExport(req, res, 'json'));
 
 // VM IP Ping(위임) — 중앙은 VM 사설 IP에 직접 못 가므로, 그 vCenter 담당 에이전트가
 // ping을 대행한다. POST로 요청 큐잉 → 에이전트가 인출/실행/보고 → GET으로 녹/적 조회.

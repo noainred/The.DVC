@@ -41,11 +41,15 @@ export const hasRole = (...roles) => {
   const u = _currentUser;
   return !!u && roles.includes(u.role);
 };
+/** v2.643: admin 도 끌 수 있는 관리자 전용 권한 키(서버 permissions.js ADMIN_TOGGLE_KEYS 와 같다). */
+export const ADMIN_TOGGLE_PERMS = Object.freeze(['data.csv']);
 // 기능 권한 보유 여부(프론트 게이팅). admin·권한배열 없음(구버전/인증 비활성)은 통과.
+//   ⚠ v2.643: admin 도 ADMIN_TOGGLE_PERMS(CSV)는 서버가 준 permissions 로 판정한다(super_admin 이 끌 수 있다).
 export const can = (key) => {
   const u = _currentUser;
   if (!key || !u) return true;
-  if (u.role === 'admin') return true;
+  if (u.superAdmin === true) return true;
+  if (u.role === 'admin' && !ADMIN_TOGGLE_PERMS.includes(key)) return true;
   if (!Array.isArray(u.permissions)) return true;
   return u.permissions.includes(key);
 };
@@ -59,6 +63,20 @@ export const can = (key) => {
  * ⚠ 이 함수는 **표시 게이팅**이다 — 서버도 같은 판정을 집행한다
  *   (`auth/permissions.js userToolAllowed` → `auth/toolAccess.js`). 한쪽만 고치지 말 것.
  */
+/**
+ * v2.643: CSV·텍스트 가져오기/내보내기(파일 import/export·샘플 다운로드)를 이 사용자가 쓸 수 있는가 — **표시 게이팅**.
+ *   관리자 이상(admin·super_admin)만이고, admin 은 권한 설정의 'CSV 가져오기/내보내기' 가 켜져 있어야 한다.
+ *   집행은 서버 `requirePerm('data.csv')` 다. 사용자를 모르면(부팅 전) false — 버튼을 지어내지 않는다.
+ */
+export const canCsv = () => {
+  const u = _currentUser;
+  if (!u || u.role !== 'admin') return false;
+  if (u.superAdmin === true) return true;
+  return !Array.isArray(u.permissions) || u.permissions.includes('data.csv');
+};
+/** CSV 버튼을 숨겼을 때 한 번 보여 줄 안내(짧게). */
+export const CSV_DENIED_NOTE = 'CSV 가져오기/내보내기는 관리자 이상만 쓸 수 있습니다(설정 › 사용자 관리 › 권한).';
+
 export const toolAllowed = (k) => {
   const u = _currentUser;
   if (!u || u.role === 'admin') return true;

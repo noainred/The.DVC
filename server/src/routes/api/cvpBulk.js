@@ -27,6 +27,8 @@ import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { capStr } from '../../util/capStr.js';
 import { fileStamp } from '../../util/dayKey.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
@@ -69,7 +71,7 @@ const setDownload = (res, type, name) => {
 
 export function registerCvpBulk(api) {
 
-api.get(`${BASE}/export.csv`, adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+api.get(`${BASE}/export.csv`, csvPerm, adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
   // 스토리지 모달의 옛 쿼리(`passwords=1`)도 같은 뜻으로 받는다 — 어느 쪽이든 설정 소유자 게이트를 탄다.
   const withSecrets = String(req.query.secrets || '') === '1' || String(req.query.passwords || '') === '1';
   const send = () => {
@@ -85,19 +87,19 @@ api.get(`${BASE}/export.csv`, adminOnly, toolsPerm, fullScopeOnly, (req, res) =>
   send();
 });
 
-api.get(`${BASE}/export.txt`, adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+api.get(`${BASE}/export.txt`, csvPerm, adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
   const list = listServers();
   logAudit({ user: req.user?.username, action: 'CVP 서버 자유텍스트 내보내기', detail: `${list.length}대`, ip: req.ip || '' });
   setDownload(res, 'text/plain', `cvp-servers-${fileStamp()}.txt`);
   res.send(cvpBulk.serversToText(list));
 });
 
-api.get(`${BASE}/sample.csv`, adminOnly, toolsPerm, fullScopeOnly, (_req, res) => {
+api.get(`${BASE}/sample.csv`, csvPerm, adminOnly, toolsPerm, fullScopeOnly, (_req, res) => {
   setDownload(res, 'text/csv', 'cvp-servers-sample.csv');
   res.send(cvpBulk.sampleCsv());
 });
 
-api.get(`${BASE}/sample.txt`, adminOnly, toolsPerm, fullScopeOnly, (_req, res) => {
+api.get(`${BASE}/sample.txt`, csvPerm, adminOnly, toolsPerm, fullScopeOnly, (_req, res) => {
   setDownload(res, 'text/plain', 'cvp-servers-sample.txt');
   res.send(cvpBulk.sampleText());
 });
@@ -107,7 +109,7 @@ api.get(`${BASE}/sample.txt`, adminOnly, toolsPerm, fullScopeOnly, (_req, res) =
  * ⚠ 자동 재시도 없음(잘못된 비밀번호 반복 = 계정 잠금). 재진입 가드·TTL·자격증명 제거는 `bulkRun` 이 강제한다.
  * ⚠ 엣지 위임 행은 '실패' 가 아니라 '테스트 불가'(skipped)다 — 중앙에서 닿지 않는 것이 정상이다.
  */
-api.post(`${BASE}/import/test`, adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+api.post(`${BASE}/import/test`, csvPerm, adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
   const p = parseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
   const ctx = ctxNow();
@@ -135,7 +137,7 @@ api.post(`${BASE}/import/test`, adminOnly, toolsPerm, fullScopeOnly, (req, res) 
 });
 
 /** 연결 테스트 진행률·결과(폴링). 자격증명은 응답에 없다(`bulkRun publicRun`). */
-api.get(`${BASE}/import/test/:id`, adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+api.get(`${BASE}/import/test/:id`, csvPerm, adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
   const run = publicRun(req.params.id);
   if (!run || run.kind !== 'cvp') return res.status(404).json({ ok: false, reason: '실행을 찾을 수 없습니다(15분 지나 폐기되었을 수 있습니다).' });
   res.json({ ok: true, ...run });
@@ -146,7 +148,7 @@ api.get(`${BASE}/import/test/:id`, adminOnly, toolsPerm, fullScopeOnly, (req, re
  * 걸러낸 행은 버리지 않고 `skipped` 로 사유와 함께 돌려준다. 접속 대상이 바뀌어 저장 비밀을 폐기한 행은
  * `droppedSecrets` 로 **따로** 밝힌다(다음 수집이 실패한다 — 조용히 넘기지 않는다).
  */
-api.post(`${BASE}/import`, adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+api.post(`${BASE}/import`, csvPerm, adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
   const p = parseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 

@@ -20,6 +20,7 @@ import {
   edgeReportView, serverMetaText, dbStatsText, DEVICE_CHIPS, chipCounts, filterByChip, devicesCsvPath, CSV_NOTE,
   CHART_MODES, seriesGeometryBps, chartCutNote, faultKindLabel, faultRowView, faultEventText, faultKpi, faultScanNote, FAULT_INTRO,
   sampleRows, SAMPLE_NOTE, PREVIEW_NOTE, previewSummary, previewColumns, sampleBadge, SYS_HIGH_PCT,
+  eventDeviceRefs, eventDeviceSort,
 } from './cvpText.js';
 
 /**
@@ -154,7 +155,7 @@ export default function CvpTool() {
       </div>
 
       {view === 'ports' && <PortUsageCard servers={servers} onOpen={(p) => setDetailKey({ cvpId: p.cvpId, key: p.key, hostname: p.hostname, tab: 'ports' })} />}
-      {view === 'events' && <EventsCard servers={servers} isAdmin={isAdmin} />}
+      {view === 'events' && <EventsCard servers={servers} isAdmin={isAdmin} onOpen={(t) => setDetailKey(t)} />}
 
       {view === 'devices' && (<>
       <div className="card" style={{ minWidth: 0 }}>
@@ -633,7 +634,7 @@ function PortUsageCard({ servers, onOpen }) {
 }
 
 // ── v2.641 ④ 이벤트 ──────────────────────────────────────────────────────────
-function EventsCard({ servers, isAdmin }) {
+function EventsCard({ servers, isAdmin, onOpen }) {
   const [cvpId, setCvpId] = useState('');
   const [sev, setSev] = useState('');
   const [hours, setHours] = useState(24);
@@ -689,7 +690,7 @@ function EventsCard({ servers, isAdmin }) {
                     <td><Badge tone={severityTone(e.severity)}>{severityLabel(e.severity)}</Badge></td>
                     <td style={{ fontSize: 12, whiteSpace: 'normal' }}>{e.title || '—'}</td>
                     <td style={{ fontSize: 12, whiteSpace: 'normal', maxWidth: 320 }}>{e.desc || '—'}</td>
-                    <td style={{ fontSize: 12 }}>{Array.isArray(e.devices) && e.devices.length ? `${e.devices.slice(0, 2).join(', ')}${e.devices.length > 2 ? ` 외 ${e.devices.length - 2}` : ''}` : '—'}</td>
+                    <td style={{ fontSize: 12 }} data-sort={eventDeviceSort(e)}><EventDevices e={e} onOpen={onOpen} /></td>
                     <td style={{ fontSize: 12 }}>{e.cvpName || e.cvpId}</td>
                     <td style={{ fontSize: 12 }}>{e.ack === true ? '확인됨' : e.ack === false ? '미확인' : '—'}</td>
                   </tr>
@@ -705,6 +706,34 @@ function EventsCard({ servers, isAdmin }) {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * v2.643: 이벤트의 장비 칸 — 시리얼 대신 호스트명을 보이고, 누르면 장비 상세를 연다(사용자 요청).
+ *   서버가 장비 색인에서 찾지 못한 식별자는 원문 그대로 둔다(호스트명을 지어내지 않는다 · 클릭 불가).
+ */
+function EventDevices({ e, onOpen }) {
+  const refs = eventDeviceRefs(e);
+  if (!refs.length) return '—';
+  const shown = refs.slice(0, 2);
+  return (
+    <span>
+      {shown.map((d, i) => (
+        <span key={`${d.id}-${i}`}>
+          {i > 0 ? ', ' : ''}
+          {d.key && onOpen ? (
+            <span role="button" tabIndex={0} title={`시리얼 ${d.id} — 누르면 장비 상세`}
+              style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3, color: 'inherit' }}
+              onClick={() => onOpen({ cvpId: e.cvpId, key: d.key, hostname: d.hostname })}
+              onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onOpen({ cvpId: e.cvpId, key: d.key, hostname: d.hostname }); } }}>
+              {d.label}
+            </span>
+          ) : <span title={d.key ? undefined : '장비 목록에서 이 식별자를 찾지 못했습니다'}>{d.label}</span>}
+        </span>
+      ))}
+      {refs.length > 2 ? ` 외 ${refs.length - 2}` : ''}
+    </span>
   );
 }
 

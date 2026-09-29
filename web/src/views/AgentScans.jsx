@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson } from '../api.js';
+import { fetchJson, postJson, putJson, delJson, canCsv } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
@@ -26,6 +26,7 @@ export default function AgentScans() {
   const [importMsg, setImportMsg] = useState(null);
   const [customAgent, setCustomAgent] = useState(false); // true=에이전트 이름 직접 입력, false=목록 선택
   const fileRef = useRef(null);
+  const csvOk = canCsv(); // v2.643: CSV 가져오기/샘플은 관리자 이상 + data.csv 권한만
 
   const downloadSample = () => {
     const blob = new Blob([SAMPLE_CSV], { type: 'text/csv;charset=utf-8' });
@@ -96,9 +97,11 @@ export default function AgentScans() {
       <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
         <div className="section-title" style={{ margin: '6px 0' }}>에이전트 작업 — IP 할당 스캔 (관리자)</div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" style={{ display: 'none' }} onChange={onFile} />
-          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setCsvText(''); setImportMsg(null); setCsvOpen(true); }}>CSV 가져오기</button>
-          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadSample}>샘플 CSV 다운로드</button>
+          {csvOk && <>
+            <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain" style={{ display: 'none' }} onChange={onFile} />
+            <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => { setCsvText(''); setImportMsg(null); setCsvOpen(true); }}>CSV 가져오기</button>
+            <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={downloadSample}>샘플 CSV 다운로드</button>
+          </>}
           <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ 작업 추가</button>
         </div>
       </div>
@@ -228,7 +231,7 @@ export default function AgentScans() {
         </div>
       )}
 
-      {csvOpen && (
+      {csvOk && csvOpen && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setCsvOpen(false); }}>
           <EscClose onClose={() => setCsvOpen(false)} />
           <div className="modal card" style={{ maxWidth: 760 }}>

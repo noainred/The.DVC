@@ -30,6 +30,8 @@ import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   
 import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp, localStamp } from '../../util/dayKey.js';
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 
 const adminOnly = requireRole('admin');
 const writer = requireRole('admin', 'operator');
@@ -273,7 +275,19 @@ api.get('/tools/cvp/events', toolsPerm, fullScopeOnly, async (req, res) => {
   // 등록부 담당과 맞는 행만(옛 담당 엣지의 이벤트를 섞지 않는다 — rowBelongs 와 같은 규칙).
   const byId = new Map(servers.map((x) => [x.id, x]));
   const own = (e) => { const srv = byId.get(e.cvpId); return !!srv && (String(srv.agent || '').trim() ? agentKeyEq(e.agent, srv.agent) : e.agent === cdb.LOCAL_AGENT); };
-  const list = r.events.filter(own).map((e) => ({ ...e, cvpName: byId.get(e.cvpId)?.name || e.cvpId, ...(admin ? {} : { title: maskErrText(e.title, hosts), desc: maskErrText(e.desc, hosts) }) }));
+  // v2.643: 장비 식별자(시리얼·장비 키) → 호스트명·장비 키(상세 열기용). 등록부 담당 행만 쓴다(rowBelongs 와 같은 규칙).
+  //   못 찾으면 원문 식별자를 그대로 둔다(호스트명을 지어내지 않는다 — refs 에 hostname 이 없다).
+  const idx = new Map();
+  for (const d of (await cdb.deviceNameIndex({ cvpId })).rows) {
+    if (!own(d)) continue;
+    const v = { key: d.key, hostname: d.hostname };
+    for (const id of [d.serial, d.key]) { if (id) { const k = `${d.cvpId}\u0000${String(id).toLowerCase()}`; if (!idx.has(k)) idx.set(k, v); } }
+  }
+  const refsOf = (e) => (Array.isArray(e.devices) ? e.devices : []).map((id) => {
+    const hit = idx.get(`${e.cvpId}\u0000${String(id).toLowerCase()}`);
+    return hit ? { id: String(id), key: hit.key, hostname: hit.hostname || '' } : { id: String(id) };
+  });
+  const list = r.events.filter(own).map((e) => ({ ...e, deviceRefs: refsOf(e), cvpName: byId.get(e.cvpId)?.name || e.cvpId, ...(admin ? {} : { title: maskErrText(e.title, hosts), desc: maskErrText(e.desc, hosts) }) }));
   // 이벤트를 읽었는지(서버별 events 요약) — null 이면 '못 읽음', 없으면 '보고 없음'. 화면이 0건과 구분한다.
   const readState = servers.filter((x) => !cvpId || x.id === cvpId).map((x) => { const st = statusOf(x); return { cvpId: x.id, name: x.name || x.id, events: Object.hasOwn(st || {}, 'events') ? st.events : undefined, missing: admin ? (st?.missing?.events || null) : maskErrText(st?.missing?.events || null, hosts) }; });
   res.json({ events: list, counts: r.counts, hours, ...(r.truncated ? { truncated: true, limit: r.limit } : {}), readState, retentionDays: cdb.EVENT_RETENTION_DAYS, ...(admin ? {} : { addressHidden: true }) });
@@ -380,7 +394,7 @@ api.post('/tools/cvp/parse-preview', adminOnly, toolsPerm, fullScopeOnly, (req, 
  * v2.640 ④ — 장비 목록 CSV(목록 라우트와 같은 필터·같은 가림). 파일명은 ASCII(v2.519 규약) · 수식 가드(util/csv) · BOM.
  * 수치가 없으면 빈 칸(0 을 지어내지 않는다).
  */
-api.get('/tools/cvp/devices.csv', toolsPerm, fullScopeOnly, async (req, res) => {
+api.get('/tools/cvp/devices.csv', csvPerm, toolsPerm, fullScopeOnly, async (req, res) => {
   const admin = isAdminReq(req);
   const cvpId = typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null;
   const q = capStr(typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '', 128);

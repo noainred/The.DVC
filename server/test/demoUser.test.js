@@ -42,10 +42,10 @@ test('데모 계정 보호: 역할 변경(승격) 거부 · 삭제 거부, 이�
   assert.equal(auth.updateUser(auth.DEMO_USERNAME, { name: '데모 계정' }).ok, true);
 });
 
-test('수퍼관리자(noainred): 자동 시드 · admin 고정 · 강등/삭제/로그인차단 거부', () => {
+test('수퍼관리자(noainred): 자동 시드 · super_admin 고정(v2.643) · 강등/삭제/로그인차단 거부', () => {
   const su = auth.loadUsers().find((u) => u.username === auth.SUPER_USERNAME);
   assert.ok(su, '수퍼관리자 계정이 시드되어야 함');
-  assert.equal(su.role, 'admin');
+  assert.equal(su.role, 'super_admin');   // v2.643: admin → super_admin
   assert.ok(su.superuser);
   // trusted:true — v2.395 부터 updateUser 는 보호 계정(수퍼관리자·설정소유자)에 대해 actor/trusted
   // 없으면 거부한다(fail-closed). 이 테스트가 검증하려는 것은 **역할 고정 로직**이므로, 그 로직에
@@ -53,14 +53,15 @@ test('수퍼관리자(noainred): 자동 시드 · admin 고정 · 강등/삭제/
   // 때문에 통과해 테스트가 무의미해진다.
   assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'viewer' }, { trusted: true }).ok, false);
   assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'operator' }, { trusted: true }).ok, false);
-  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'admin' }, { trusted: true }).ok, true); // 동일 역할은 무해
+  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'admin' }, { trusted: true }).ok, false); // v2.643: admin 도 강등이다
+  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'super_admin' }, { trusted: true }).ok, true); // 동일 역할은 무해
   // 권한 가드도 함께 고정: actor/trusted 없이 호출하면 보호 계정은 거부된다.
-  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'admin' }).ok, false, 'fail-closed');
+  assert.equal(auth.updateUser(auth.SUPER_USERNAME, { role: 'super_admin' }).ok, false, 'fail-closed');
   assert.equal(auth.deleteUser(auth.SUPER_USERNAME).ok, false);
   assert.equal(auth.clearLoginCredentials(auth.SUPER_USERNAME).ok, false);
 });
 
-test('수퍼관리자: users.json 에 강등 상태로 저장돼 있어도 로드 시 admin 으로 복구', async () => {
+test('수퍼관리자: users.json 에 강등 상태로 저장돼 있어도 로드 시 super_admin 으로 복구', async () => {
   // 강등된 noainred 가 담긴 users.json 을 만들어 두고, 모듈을 새로 로드해 시드 경로를 재실행.
   // (ESM 은 쿼리스트링이 다르면 별도 모듈 인스턴스로 평가된다 — 메모이즈 우회용.)
   const file = path.join(TMP, 'users.json');
@@ -70,5 +71,5 @@ test('수퍼관리자: users.json 에 강등 상태로 저장돼 있어도 로�
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
   const fresh = await import('../src/auth/auth.js?fresh-super');
   const reloaded = fresh.loadUsers().find((u) => u.username === fresh.SUPER_USERNAME);
-  assert.equal(reloaded.role, 'admin', '로드 시 admin 으로 복구되어야 함');
+  assert.equal(reloaded.role, 'super_admin', '로드 시 super_admin 으로 복구되어야 함(v2.643)');
 });

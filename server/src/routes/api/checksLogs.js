@@ -19,6 +19,8 @@ import { listInventory } from '../../central/inventory.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import zlib from 'node:zlib';
 import { todayStamp } from "../../util/dayKey.js";
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 
 
 // vClogs scope: 사용자 scope 를 f.vcenterIds 화이트리스트로 강제하고, meta 도 범위 내 vCenter 만 남긴다.
@@ -293,7 +295,7 @@ api.get('/tools/vclogs', requirePerm('tools'), async (req, res) => {
       rows: db.query(f, limit, offset), meta: scopeLogMeta(db.meta(), allowed), dbKind: db.kind });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-api.get('/tools/vclogs/export.csv', requirePerm('tools'), async (req, res) => {
+api.get('/tools/vclogs/export.csv', csvPerm, requirePerm('tools'), async (req, res) => {
   try {
     const db = await getLogsDb();
     const f = { vcenterId: req.query.vcenterId || '', severity: req.query.severity || '', q: req.query.q || '',

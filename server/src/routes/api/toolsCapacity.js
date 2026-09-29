@@ -37,6 +37,8 @@ import { memoJson, hash, linregSlope, eachLimited, scopeSlice, scopeKey } from '
 import { lowerTerm } from '../../search/deepSearch.js'; // v2.629 AUTHZ2629-01: 검색어 1회 소문자화 + 길이 상한(한 벌)
 import { numOrNull } from '../../util/numOrNull.js'; // v2.578: 요청 기간 등 '읽지 못한 수치' 를 0 으로 둔갑시키지 않는다
 import { normGroupQuery, filterVmsByGroup, inventoryGroups, hasGroup } from './groupFilter.js'; // v2.491: 클러스터·폴더 하위 범위
+// v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
+const csvPerm = requirePerm('data.csv');
 
 /**
  * 디스크 트렌드 시계열 한 점(v2.630 감사 DATA2630-01 — 순수, 테스트가 직접 부른다).
@@ -434,7 +436,7 @@ api.get('/tools/waste/off-since', requirePerm('tools'), async (req, res) => {
 // 갖고 있지 않아 실제로 프로세스를 죽이는 취약점이 됐다 — 복사하지 말고 코어를 쓴다).
 const WASTE_EXPORT_MAX_REPORTS = Math.max(1, Math.min(1000, Number(process.env.WASTE_EXPORT_MAX_REPORTS) || 200));
 const WASTE_EXPORT_CHUNK = Math.max(1, Math.min(50, Number(process.env.WASTE_EXPORT_CHUNK) || 8));
-api.get('/tools/waste/export', requirePerm('tools'), async (req, res) => {
+api.get('/tools/waste/export', csvPerm, requirePerm('tools'), async (req, res) => {
   res.locals.perfExpectSlow = true; // v2.498: vCenter 성능 조회를 동반해 수십 초가 정상인 내보내기
   // 진행자 계정명은 **본인일 때만** 밝힌다(v2.500 감사 L-2) — 판정·문구는 acquireExport 가 갖는다.
   const lock = acquireExport('waste.export', req);
