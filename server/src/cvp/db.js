@@ -880,21 +880,32 @@ export async function saveEvents(agent, cvpId, events = [], { now = Date.now() }
 }
 
 /** 이벤트 목록(최신 순) + 기간 안 심각도별 개수. deviceKeys 가 있으면 그 장비가 components 에 있는 것만. */
-export async function listEvents({ agent = null, cvpId = null, sinceMs = 24 * 3600_000, severity = null, limit = 500, now = Date.now() } = {}) {
+export async function listEvents({ agent = null, cvpId = null, cvpIds = null, sinceMs = 24 * 3600_000, severity = null, limit = 500, now = Date.now(), byCvp = false } = {}) {
   const db = await open();
   if (!db) return { events: [], counts: null, unavailable: true };
   const where = ['ts >= ?']; const args = [now - Math.max(60_000, Number(sinceMs) || 0)];
   if (agent != null) { where.push('agent=?'); args.push(agent); }
   if (cvpId != null) { where.push('cvp_id=?'); args.push(cvpId); }
+  // v2.645: 법인 필터 — 그 법인에 속한 CVP 서버 여러 대(빈 배열이면 결과 0 — '전체' 로 넓히지 않는다).
+  if (Array.isArray(cvpIds)) {
+    if (!cvpIds.length) return { events: [], counts: {}, ...(byCvp ? { countsByCvp: [] } : {}) };
+    const ids = cvpIds.slice(0, 500).map(String);
+    where.push(`cvp_id IN (${ids.map(() => '?').join(',')})`); args.push(...ids);
+  }
   const counts = {};
   for (const r of db.conn.prepare(`SELECT severity, COUNT(*) AS n FROM cvp_event WHERE ${where.join(' AND ')} GROUP BY severity`).all(...args)) counts[r.severity] = Number(r.n);
+  // v2.645: (CVP 서버·agent·심각도)별 개수 — 라우트가 등록부 담당 행만 골라 법인별로 합친다(심각도 필터 전 기준).
+  const countsByCvp = byCvp
+    ? db.conn.prepare(`SELECT cvp_id, agent, severity, COUNT(*) AS n FROM cvp_event WHERE ${where.join(' AND ')} GROUP BY cvp_id, agent, severity`).all(...args)
+      .map((r) => ({ cvpId: r.cvp_id, agent: r.agent, severity: r.severity, n: Number(r.n) }))
+    : null;
   if (severity) { where.push('severity=?'); args.push(String(severity)); }
   const lim = Math.max(1, Math.min(2000, Number(limit) || 500));
   const rows = db.conn.prepare(`SELECT * FROM cvp_event WHERE ${where.join(' AND ')} ORDER BY ts DESC LIMIT ?`).all(...args, lim + 1);
   return {
     events: rows.slice(0, lim).map((r) => ({ agent: r.agent, cvpId: r.cvp_id, key: r.ev_key, ts: Number(r.ts), severity: r.severity, title: r.title || '', desc: r.descr || '',
       type: r.ev_type || '', devices: parseJson(r.devices_json) || [], ack: r.ack == null ? null : r.ack === 1, updatedAt: r.updated_at == null ? null : Number(r.updated_at), deleted: r.deleted === 1 })),
-    counts, ...(rows.length > lim ? { truncated: true, limit: lim } : {}),
+    counts, ...(countsByCvp ? { countsByCvp } : {}), ...(rows.length > lim ? { truncated: true, limit: lim } : {}),
   };
 }
 
@@ -932,6 +943,27 @@ export async function portUsage({ agent = null, cvpId = null, limit = 200, minUt
   list.sort((a, b) => b.util - a.util);
   const lim = Math.max(1, Math.min(2000, Number(limit) || 200));
   return { ports: list.slice(0, lim), counts, ...(list.length > lim ? { omitted: list.length - lim, limit: lim } : {}), staleMs };
+}
+
+/**
+ * v2.645: 장비별 트래픽 합(마지막 수집의 순간값 bps) — Overview·법인별 트래픽이 쓴다.
+ *   measured = 링크 올라옴 + 처리량이 staleMs 안(수신·송신 중 하나라도 값 있음) · unmeasured = 링크 올라옴인데 그렇지 않은 포트.
+ *   합은 SQL SUM 이라 NULL 방향은 건너뛴다(한 방향만 읽은 포트는 그 방향만 더한다). GROUP BY 는 합계라 '최신 1건' 함정과 무관하다
+ *   (port_latest 가 이미 최신 표다).
+ */
+export async function trafficByDevice({ staleMs = 30 * 60_000, now = Date.now() } = {}) {
+  const db = await open();
+  if (!db) return { rows: [], unavailable: true };
+  const cut = Math.trunc(now - Math.max(60_000, Number(staleMs) || 0));
+  const rows = db.conn.prepare(`SELECT agent, cvp_id, device_key,
+      SUM(CASE WHEN fresh THEN in_bps END) AS in_sum, SUM(CASE WHEN fresh THEN out_bps END) AS out_sum,
+      SUM(fresh) AS measured, SUM(oper='up' AND NOT fresh) AS unmeasured
+    FROM (SELECT agent, cvp_id, device_key, oper, in_bps, out_bps,
+            (oper='up' AND rate_ts IS NOT NULL AND rate_ts >= ? AND (in_bps IS NOT NULL OR out_bps IS NOT NULL)) AS fresh
+          FROM port_latest)
+    GROUP BY agent, cvp_id, device_key`).all(cut);
+  return { rows: rows.map((r) => ({ agent: r.agent, cvpId: r.cvp_id, key: r.device_key, inBps: r.in_sum == null ? 0 : Number(r.in_sum), outBps: r.out_sum == null ? 0 : Number(r.out_sum),
+    measured: Number(r.measured || 0), unmeasured: Number(r.unmeasured || 0) })) };
 }
 
 export async function prune({ rawRetentionDays = 7, dailyRetentionDays = 730, now = Date.now() } = {}) {

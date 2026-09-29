@@ -26,6 +26,7 @@ import { secretProvided } from '../../util/secretCarry.js';
 import { capStr } from '../../util/capStr.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { pickAgent, pickDatacenter } from '../../cvp/formChoices.js';
+import { buildCvpOverview, corpResolver, freshnessBounds, RECENT_EVENTS_MAX } from '../../cvp/overview.js'; // v2.645
 import { runCvpFaultScan, cvpFaultScanStatus } from '../../cvp/faultScan.js';   // v2.640 ③ 장애 전이 판정(중앙)
 import { previewParse, PREVIEW_KINDS, PREVIEW_TEXT_MAX } from '../../cvp/preview.js'; // v2.640 ② 파서 시험(왕복 0)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -210,7 +211,59 @@ api.get('/tools/cvp/devices', toolsPerm, fullScopeOnly, async (req, res) => {
   let list = rows.filter((r) => rowBelongs(r, servers));
   if (q) list = list.filter((d) => [d.hostname, d.model, d.serial, d.eosVersion, d.key, ...(admin ? [d.mgmtIp] : [])].some((x) => String(x || '').toLowerCase().includes(q)));
   const omitted = Math.max(0, list.length - DEVICE_LIST_MAX);
-  res.json({ devices: list.slice(0, DEVICE_LIST_MAX).map((d) => publicDevice(d, admin)), omitted, ...(unavailable ? { dbUnavailable: true } : {}), ...(admin ? {} : { addressHidden: true }) });
+  // v2.645: 법인(= 그 CVP 서버에 지정한 DataCenter) — 화면의 법인·모델 칩이 쓴다. 지정이 없으면 corpId '' ('법인 미지정').
+  const corpOf = corpResolver(servers, dcList());
+  res.json({
+    devices: list.slice(0, DEVICE_LIST_MAX).map((d) => { const c = corpOf(d.cvpId); return { ...publicDevice(d, admin), corpId: c.corpId, corpName: c.corpName, ...(c.missing ? { corpMissing: true } : {}) }; }),
+    omitted, ...(unavailable ? { dbUnavailable: true } : {}), ...(admin ? {} : { addressHidden: true }),
+  });
+});
+
+/**
+ * v2.645 — CVP Overview: 관리 상태·법인별 상태·모델·EOS 버전·신선도·법인별 트래픽 합·최근 장애 전이를 한 번에(판정은 cvp/overview.js).
+ *   장비·엣지 왕복 0(중앙 DB 최신값만). 화면은 폴링하지 않는다(마운트 1회 + 새로고침). 법인 = CVP 서버에 지정한 DataCenter.
+ */
+api.get('/tools/cvp/overview', toolsPerm, fullScopeOnly, async (req, res) => {
+  const admin = isAdminReq(req);
+  const settings = loadSettings();
+  const servers = listServers();
+  const hosts = servers.map((s) => s.host);
+  const { rows, unavailable } = await cdb.listDeviceRows();
+  const devices = rows.filter((r) => rowBelongs(r, servers));
+  const own = (x) => rowBelongs({ cvpId: x.cvpId, agent: x.agent }, servers);
+  const { staleMs } = freshnessBounds(settings.intervalMs);
+  const [faults, traffic, events, faultEvents, usage] = await Promise.all([
+    cdb.listOpenFaults().catch(() => ({ rows: [], unavailable: true })),
+    cdb.trafficByDevice({ staleMs }).catch(() => ({ rows: [], unavailable: true })),
+    cdb.listEvents({ sinceMs: 24 * 3600_000, limit: 2000 }).catch(() => ({ events: [], unavailable: true })),
+    cdb.recentFaultEvents({ sinceMs: 7 * 86_400_000, limit: RECENT_EVENTS_MAX }).catch(() => ({ rows: [], unavailable: true })),
+    cdb.portUsage({ limit: 1, staleMs, keep: own }).catch(() => ({ counts: null, unavailable: true })),
+  ]);
+  const ov = buildCvpOverview({
+    devices, servers, datacenters: dcList(), intervalMs: settings.intervalMs, highPct: SYS_HIGH_PCT,
+    openFaults: (faults.rows || []).filter(own), traffic: (traffic.rows || []).filter(own),
+    events: (events.events || []).filter(own), eventsTruncated: events.truncated === true,
+  });
+  const corpOf = corpResolver(servers, dcList());
+  const nameOf = new Map(servers.map((s) => [String(s.id), s.name || s.id]));
+  const recent = (faultEvents.rows || []).filter(own).map((f) => {
+    const c = corpOf(f.cvpId);
+    const base = { at: f.at, event: f.event, state: f.state, prevState: f.prevState, kind: f.kind, label: f.label, detail: f.detail, closeReason: f.closeReason,
+      cvpId: f.cvpId, deviceKey: f.deviceKey, deviceName: f.deviceName, cvpName: nameOf.get(String(f.cvpId)) || f.cvpId, corpId: c.corpId, corpName: c.corpName };
+    return admin ? base : { ...base, detail: maskErrText(base.detail, hosts), label: f.kind === 'bgp' ? maskErrText(base.label, hosts) : base.label };
+  });
+  res.json({
+    ...ov, enabled: settings.enabled,
+    servers: servers.length,
+    serverStates: servers.map((s) => { const st = statusOf(s); return { id: s.id, name: s.name || s.id, ok: st?.ok ?? null, pending: st?.pending === true, collectedAt: st?.collectedAt ?? null }; }),
+    portUsage: usage.counts || null, highPct: SYS_HIGH_PCT,
+    recentFaults: recent,
+    unavailable: {
+      devices: !!unavailable, faults: !!faults.unavailable, traffic: !!traffic.unavailable, events: !!events.unavailable,
+      faultEvents: !!faultEvents.unavailable, portUsage: !!usage.unavailable,
+    },
+    ...(admin ? {} : { addressHidden: true }),
+  });
 });
 
 api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
@@ -226,9 +279,35 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
   if (!det) return res.status(404).json({ ok: false, reason: '수집된 장비 정보가 없습니다.' });
   // v2.621(감사 RECENT-07): 장비 상세도 같은 status.missing 을 싣는다 — 목록과 같은 가림(형제 경로).
   const st0 = statusOf(srv);
-  const st = admin ? st0 : maskStatusText(st0, listServers().map((x) => x.host));
+  const hosts = listServers().map((x) => x.host);
+  const st = admin ? st0 : maskStatusText(st0, hosts);
+  // v2.645: 이 장비의 열린 장애 · 장애 전이 이력(30일) · 이벤트(7일, 장비 식별자 = 시리얼·장비 키) — 한 화면에서 이력을 보게.
+  //   전부 중앙 DB(장비 왕복 0). BGP 라벨·상세·이벤트 본문은 비-admin 에 주소를 가린다(/tools/cvp/faults·/events 와 같은 규칙).
+  const maskF = (f) => (admin ? f : { ...f, detail: maskErrText(f.detail, hosts), label: f.kind === 'bgp' ? maskErrText(f.label, hosts) : f.label, faultKey: f.kind === 'bgp' ? '(가림)' : f.faultKey });
+  const HIST_MAX = 100;
+  const [of, fe, ev] = await Promise.all([
+    cdb.listOpenFaults({ agent, cvpId }).catch(() => ({ rows: [], unavailable: true })),
+    cdb.recentFaultEvents({ agent, cvpId, sinceMs: 30 * 86_400_000, limit: 5000 }).catch(() => ({ rows: [], unavailable: true })),
+    cdb.listEvents({ agent, cvpId, sinceMs: 7 * 86_400_000, limit: 2000 }).catch(() => ({ events: [], unavailable: true })),
+  ]);
+  const ids = new Set([det.device.serial, det.device.key].filter(Boolean).map((x) => String(x).toLowerCase()));
+  const devOpen = (of.rows || []).filter((f) => f.deviceKey === key).map(maskF);
+  const devFaultEv = (fe.rows || []).filter((f) => f.deviceKey === key);
+  const devEv = (ev.events || []).filter((e) => (Array.isArray(e.devices) ? e.devices : []).some((d) => ids.has(String(d).toLowerCase())));
+  const corp = corpResolver(listServers(), dcList())(cvpId);
   res.json({
-    device: publicDevice(det.device, admin),
+    device: { ...publicDevice(det.device, admin), corpId: corp.corpId, corpName: corp.corpName },
+    cvpName: srv.name || srv.id,
+    history: {
+      openFaults: devOpen,
+      faultEvents: devFaultEv.slice(0, HIST_MAX).map(maskF), faultEventsOmitted: Math.max(0, devFaultEv.length - HIST_MAX),
+      events: devEv.slice(0, HIST_MAX).map((e) => (admin ? e : { ...e, title: maskErrText(e.title, hosts), desc: maskErrText(e.desc, hosts) })),
+      eventsOmitted: Math.max(0, devEv.length - HIST_MAX),
+      // 이벤트는 CVP 단위 최근 2,000건 안에서 이 장비를 고른다 — 넘치면 7일 전부를 본 것이 아니다(화면이 밝힌다).
+      eventsScanTruncated: ev.truncated === true,
+      faultDays: 30, eventDays: 7,
+      unavailable: !!(of.unavailable || fe.unavailable || ev.unavailable),
+    },
     parts: det.device.partsList,
     ports: det.ports,
     bgp: det.device.bgpPeers ? { peers: maskPeers(det.device.bgpPeers, admin), summary: bgpSummary(det.device.bgpPeers) } : null,
@@ -269,7 +348,11 @@ api.get('/tools/cvp/events', toolsPerm, fullScopeOnly, async (req, res) => {
   if (cvpId && !servers.some((x) => x.id === cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
   const sev = ['critical', 'error', 'warning', 'info', 'debug', 'unknown'].includes(req.query.severity) ? req.query.severity : null;
   const hours = Math.max(1, Math.min(24 * 30, Math.floor(Number(req.query.hours)) || 24));
-  const r = await cdb.listEvents({ cvpId, severity: sev, sinceMs: hours * 3600_000, limit: Math.floor(Number(req.query.limit)) || 500 });
+  // v2.645: 법인 필터(?corp=<DataCenter id>, '' 는 '법인 미지정'). 그 법인의 CVP 서버들로 좁힌다 — 모르는 법인은 결과 0(전체로 넓히지 않는다).
+  const corpOf = corpResolver(servers, dcList());
+  const corpParam = typeof req.query.corp === 'string' ? capStr(req.query.corp, 128) : null;
+  const cvpIds = corpParam == null ? null : servers.filter((x) => corpOf(x.id).corpId === corpParam).map((x) => x.id);
+  const r = await cdb.listEvents({ cvpId, cvpIds, severity: sev, sinceMs: hours * 3600_000, limit: Math.floor(Number(req.query.limit)) || 500, byCvp: true });
   if (r.unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
   const hosts = servers.map((x) => x.host);
   // 등록부 담당과 맞는 행만(옛 담당 엣지의 이벤트를 섞지 않는다 — rowBelongs 와 같은 규칙).
@@ -287,10 +370,19 @@ api.get('/tools/cvp/events', toolsPerm, fullScopeOnly, async (req, res) => {
     const hit = idx.get(`${e.cvpId}\u0000${String(id).toLowerCase()}`);
     return hit ? { id: String(id), key: hit.key, hostname: hit.hostname || '' } : { id: String(id) };
   });
-  const list = r.events.filter(own).map((e) => ({ ...e, deviceRefs: refsOf(e), cvpName: byId.get(e.cvpId)?.name || e.cvpId, ...(admin ? {} : { title: maskErrText(e.title, hosts), desc: maskErrText(e.desc, hosts) }) }));
+  const list = r.events.filter(own).map((e) => { const c = corpOf(e.cvpId); return { ...e, deviceRefs: refsOf(e), cvpName: byId.get(e.cvpId)?.name || e.cvpId, corpId: c.corpId, corpName: c.corpName, ...(admin ? {} : { title: maskErrText(e.title, hosts), desc: maskErrText(e.desc, hosts) }) }; });
+  // v2.645: 법인별 심각도 개수(조회 기간·CVP·법인 필터 적용, 심각도 필터 전) — 등록부 담당 행만. 법인 칩이 쓴다.
+  const corpCounts = new Map();
+  for (const x of (r.countsByCvp || [])) {
+    if (!own(x)) continue;
+    const c = corpOf(x.cvpId);
+    const row = corpCounts.get(c.corpId) || { corpId: c.corpId, corpName: c.corpName, total: 0, bySeverity: {} };
+    row.total += x.n; row.bySeverity[x.severity] = (row.bySeverity[x.severity] || 0) + x.n;
+    corpCounts.set(c.corpId, row);
+  }
   // 이벤트를 읽었는지(서버별 events 요약) — null 이면 '못 읽음', 없으면 '보고 없음'. 화면이 0건과 구분한다.
   const readState = servers.filter((x) => !cvpId || x.id === cvpId).map((x) => { const st = statusOf(x); return { cvpId: x.id, name: x.name || x.id, events: Object.hasOwn(st || {}, 'events') ? st.events : undefined, missing: admin ? (st?.missing?.events || null) : maskErrText(st?.missing?.events || null, hosts) }; });
-  res.json({ events: list, counts: r.counts, hours, ...(r.truncated ? { truncated: true, limit: r.limit } : {}), readState, retentionDays: cdb.EVENT_RETENTION_DAYS, ...(admin ? {} : { addressHidden: true }) });
+  res.json({ events: list, counts: r.counts, corpCounts: [...corpCounts.values()], corp: corpParam, hours, ...(r.truncated ? { truncated: true, limit: r.limit } : {}), readState, retentionDays: cdb.EVENT_RETENTION_DAYS, ...(admin ? {} : { addressHidden: true }) });
 });
 
 /** 포트 사용량 — 전 장비 포트를 사용률 높은 순으로(⑤). 사용률을 계산할 수 없는 포트는 사유별 개수로 밝힌다(0% 로 세지 않는다). */
