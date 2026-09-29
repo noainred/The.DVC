@@ -38,7 +38,7 @@ export const BODY_MAX_BYTES = Math.max(1_048_576, Number(process.env.CVP_BODY_MA
 const DEVICE_CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.CVP_DEVICE_CONCURRENCY) || 6));
 const FAIL_STREAK_STOP = 3;
 /**
- * v2.641 — 포인터 추종(텔레메트리 컬렉션 노드는 하위 개체를 `_ptr` 로 준다 — parse.telemetryShape).
+ * v2.641 — 포인터 추종(텔레메트리 컬렉션 노드는 하위 개체를 포인터로 준다 — 실장비는 `{ptr:[조각…]}` 배열, v2.642 · parse.telemetryShape).
  *   장비당·종류당 요청 상한(FOLLOW_REQ_MAX)과 장비 안 동시성(FOLLOW_CONCURRENCY)을 둔다 — 포트 52개 장비 173대면 한 주기
  *   약 9천 GET 이라 CVP 부하가 실재한다. 상한에 걸리면 `followTruncated` 로 밝힌다(조용한 상한 금지).
  *   하위 목록(포인터)은 장비별로 CHILD_CACHE_MS 동안 기억해 컬렉션 GET 을 매 주기 반복하지 않는다(포트 구성은 드물게 바뀐다).
@@ -95,7 +95,9 @@ export const CANDIDATES = Object.freeze({
   bugs: ['/api/resources/bugexposure/v1/BugExposure/all'],
   events: ['/api/resources/event/v1/Event/all'],
   // v2.641 실장비 확인: `/Kernel/proc` 자식은 cpu·meminfo·stat(포인터). `/Kernel/proc/cpu` 에서 포인터를 따라간다(그 아래 모양은 미확인).
-  cpu: ['/api/v1/rest/{serial}/Kernel/proc/cpu/utilization/total', '/api/v1/rest/{serial}/Kernel/proc/cpu', '/api/v1/rest/{serial}/Kernel/proc/stat'],
+  // v2.642: `/Kernel/proc/stat` 는 이 장비에서 **프로세스(PID) 별** 표였다(키가 1·1022·1550… — 사용자 캡처). 시스템 CPU 가 아니므로
+  //   후보에서 뺐다(따라가면 PID 수백 개를 조회한다).
+  cpu: ['/api/v1/rest/{serial}/Kernel/proc/cpu/utilization/total', '/api/v1/rest/{serial}/Kernel/proc/cpu'],
   memory: ['/api/v1/rest/{serial}/Kernel/proc/meminfo'],
 });
 /** v2.641: CVP 단위(장비별이 아닌) 추가 항목 — 한 주기에 CVP 당 요청 1회씩. */
@@ -267,8 +269,11 @@ const FOLLOW_KINDS = new Set(['interfaces', 'counters', 'bgp', 'power', 'cooling
  * v2.641: 하위 개체 URL. 포인터가 '부모 경로 + / + 키' 모양이면 부모 URL 뒤에 **키를 인코딩해** 붙인다('Ethernet3/1' 의 '/' 를 지키려고).
  *   그렇지 않으면 포인터 경로를 조각마다 인코딩해 장비 텔레메트리 루트에 붙인다. 포인터 원문은 장비가 준 값이라 `..` 조각은 버린다.
  */
-export function childPath(serial, parentUrl, key, ptr) {
+export function childPath(serial, parentUrl, key, ptr, segsIn = null) {
   const root = `/api/v1/rest/${encodeURIComponent(serial)}`;
+  // v2.642: 포인터가 조각 배열이면(실장비 `{"ptr":[…]}`) 조각마다 인코딩해 그대로 쓴다 — '/' 로 이었다 다시 자르면
+  //   'Ethernet3/1' 같은 조각이 둘로 갈라진다. `..` 조각은 버린다(장비가 준 값).
+  if (Array.isArray(segsIn) && segsIn.length) return `${root}/${segsIn.filter((x) => x && x !== '.' && x !== '..').map((x) => encodeURIComponent(x)).join('/')}`;
   const parentRel = String(parentUrl || '').startsWith(root) ? decodeSafe(String(parentUrl).slice(root.length)) : '';
   const p = String(ptr || '');
   if (parentRel && key && p === `${parentRel}/${key}`) return `${parentUrl}/${encodeURIComponent(key)}`;
@@ -462,7 +467,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
         if (level.length > room) { truncated += level.length - room; level = level.slice(0, room); }
         await poolSettled(level, FOLLOW_CONCURRENCY, async (x) => {
           if (left() < MIN_SLICE_MS || signal?.aborted) { truncated++; return; }
-          const url = x.direct ? `${childPath(serial, x.parent, x.key, x.ptr)}${suffix.split('/').map((y) => (y ? encodeURIComponent(y) : '')).join('/')}` : childPath(serial, x.parent, x.key, x.ptr);
+          const url = x.direct ? `${childPath(serial, x.parent, x.key, x.ptr, x.segs)}${suffix.split('/').map((y) => (y ? encodeURIComponent(y) : '')).join('/')}` : childPath(serial, x.parent, x.key, x.ptr, x.segs);
           requests++;
           const r = await sess.get(url);
           if (!r.ok) return;

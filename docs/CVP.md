@@ -182,3 +182,24 @@ CPU·메모리 값은 레코드 해시에 넣지 않는다(매 주기 전 레코
 - 포인터 추종·포트·BGP·부품·CPU 의 **하위 모양(필드 이름)은 여전히 추정**이다. 확인한 것은 §8.1 의 목록 수준뿐이다. 첫 실수집의 경로 탐색 표본과
   원문 표본을 보고 좁힐 것. 특히 BGP 새 표(`vrfBgpPeerAfiSafiStateTable`)에 세션 상태가 없으면 BGP 는 '형식 미인식' 으로 남는다.
 - 검증은 목 CVP(§8.1 의 모양을 흉내 낸 합성 응답)와 Chromium(admin·operator × 1440/400, 58장 · 오류 0 · 넘침 0)이다.
+
+## 9. v2.642 — 실장비 포인터 형식(`ptr` 배열) · 타입 값 · 객체 키
+
+### 9.1 실장비에서 확인한 사실(사용자 원문 표본 캡처 — 장비 `HBG224602TH`, CVP 2023.1.1)
+- 포인터는 **`{"ptr":["Sysdb","interface",…,"intfStatus","Ethernet1"]}` 조각 배열**이다. v2.641 은 `{"_ptr":"/…"}` 문자열만
+  알아서 **포인터를 한 번도 따라가지 못했다** — 포트·BGP·CPU 가 전부 '읽지 못함' 이었던 원인이다.
+- 값은 **타입 래퍼**다 — `{"key":"memTotal","value":{"int":4056276992}}`. 키도 객체일 수 있다 — `{"key":{"int":1},"value":…}`.
+- 한 경로가 **시각이 다른 여러 notification 으로 나뉘어** 온다 — 나중 값이 이긴다(`byTimestamp`).
+- `/Kernel/proc/stat` 은 **프로세스(PID)별** 포인터다 — 시스템 CPU 가 아니므로 후보에서 뺐다.
+- `/Smash/counters/ethIntf/FastCounters/current` 는 이 장비에서 빈 응답이다.
+- BGP `vrfBgpPeerAfiSafiStateTable` 은 VRF(`Private`·`default`) 포인터를 준다.
+
+### 9.2 규약
+- `parse.ptrSegs` 가 배열·문자열 두 형식을 받는다. **배열 포인터는 조각 그대로 URL 을 만든다**(`childPath(…, segs)` — '/' 로 이었다 자르면
+  'Ethernet3/1' 이 둘로 갈라진다). 문자열 포인터는 조각 경계를 모르므로 예전 부모+키 규칙을 쓴다(segs 를 싣지 않는다).
+- `unwrap` 은 단일 키 타입 래퍼(`int`·`uint`·`float`·`double`·`bool`·`str`·`string`)를 벗긴다. 이름은 `updKey`(객체 키면 첫 스칼라).
+
+### 9.3 ⚠ 정직 기록
+- 포트 하위 필드(`operStatus`·속도)·`/Kernel/proc/cpu` 내용·BGP 피어 잎 필드·카운터 위치·부품 경로는 **여전히 추정**이다 — 목 CVP 는
+  실장비 포인터 모양만 흉내 낸다. 업그레이드 뒤 원문 표본(`intfStatus/Ethernet1` 하위, `/Kernel/proc/cpu`, BGP 피어 하위)을 보고 좁힐 것.
+- 장비당 포트 약 50개 × 173대를 따라가면 시간 예산(110초)에 걸릴 수 있다 — 걸린 장비는 `notTried`/예산 사유로 밝힌다.

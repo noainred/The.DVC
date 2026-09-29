@@ -69,7 +69,42 @@ export function unwrap(v, depth = 0) {
   if (keys.length === 1 && Object.hasOwn(v, 'value')) return unwrap(v.value, depth + 1);
   if (keys.length === 2 && Object.hasOwn(v, 'key') && Object.hasOwn(v, 'value')) return unwrap(v.value, depth + 1);
   if (keys.length === 1 && Object.hasOwn(v, 'Value')) return unwrap(v.Value, depth + 1);
+  // v2.642: 실장비 CVP 2023.1.1 텔레메트리 REST 는 값을 형식 표지로 감싼다 — `{"int":4056276992}`·`{"float":…}`·`{"bool":…}`.
+  //   벗기지 않으면 meminfo 의 모든 값이 '.int' 필드가 되어 memTotal 을 못 찾았다(사용자 캡처로 확인).
+  if (keys.length === 1 && TYPED_KEYS.has(keys[0]) && !isObj(v[keys[0]])) return v[keys[0]];
   return v;
+}
+const TYPED_KEYS = new Set(['int', 'uint', 'float', 'double', 'bool', 'str', 'string']);
+
+/**
+ * v2.642: 텔레메트리 포인터 → 경로 조각 배열(없으면 null). 실장비 CVP 2023.1.1 은 `{"ptr":["Sysdb","interface",…,"Ethernet1"]}`
+ *   (**배열**)을 준다(사용자 캡처로 확인). v2.641 은 `{"_ptr":"/…"}`(문자열)만 알아서 포인터를 한 번도 따라가지 못했다 — 그래서
+ *   포트·BGP·CPU 가 전부 '형식을 읽지 못했습니다' 였다. 문자열 형태도 계속 받는다.
+ */
+export function ptrSegs(val) {
+  if (!isObj(val)) return null;
+  if (Array.isArray(val.ptr) && val.ptr.length && val.ptr.every((x) => typeof x === 'string' || typeof x === 'number')) return val.ptr.map((x) => String(x));
+  const sp = typeof val._ptr === 'string' ? val._ptr : typeof val.ptr === 'string' ? val.ptr : null;
+  if (sp) { const segs = sp.split('/').filter(Boolean); return segs.length ? segs : null; }
+  return null;
+}
+
+/** v2.642: update 의 키 → 문자열. 키가 객체(`{"key":{"int":1}}`)면 첫 스칼라를 쓴다(예전에는 update 맵 키로 떨어졌다). */
+export function updKey(u, k) {
+  if (!isObj(u)) return k;
+  if (typeof u.key === 'string' || typeof u.key === 'number') return String(u.key);
+  if (isObj(u.key)) {
+    const f = flatten(u.key);
+    const first = Object.values(f).find((x) => (typeof x === 'string' && x) || typeof x === 'number');
+    if (first != null) return String(first);
+  }
+  return k;
+}
+
+/** 같은 경로의 notification 을 시각 순으로(나중 값이 앞 값을 덮게). 시각은 ns 문자열이라 길이·사전순으로 비교한다. */
+function byTimestamp(list) {
+  const t = (n) => { const x = isObj(n) ? n.timestamp : null; return typeof x === 'string' ? x : typeof x === 'number' ? String(x) : ''; };
+  return [...list].sort((a, b) => { const x = t(a), y = t(b); return x.length - y.length || (x < y ? -1 : x > y ? 1 : 0); });
 }
 
 /** 중첩 객체를 `a.b.c` 평면 필드로(깊이 4 · 필드 200개 상한). 값은 벗긴 스칼라만. */
@@ -134,7 +169,7 @@ export function entitiesOf(text) {
   for (const v of values) {
     if (isObj(v) && Array.isArray(v.notifications)) {
       format = 'notifications';
-      for (const n of v.notifications) {
+      for (const n of byTimestamp(v.notifications)) {
         if (!isObj(n) || !isObj(n.updates)) continue;
         // v2.641: 경로는 `path`(문자열) 또는 `path_elements`(배열) — Arista 텔레메트리 판본마다 다르다(둘 다 받는다).
         const segs = typeof n.path === 'string' ? n.path.split('/').filter(Boolean)
@@ -142,19 +177,19 @@ export function entitiesOf(text) {
         const tail = segs.length ? decodeSeg(segs[segs.length - 1]) : '';
         const ups = Object.entries(n.updates);
         // v2.641: 포인터(`{_ptr}`)는 필드가 아니다 — 개체 값으로 세면 포인터 목록이 '읽은 개체' 가 된다(없는 포트를 지어낸다).
-        const isPtr = (u) => { const x = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u; return isObj(x) && typeof x._ptr === 'string'; };
+        const isPtr = (u) => { const x = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u; return ptrSegs(x) != null; };
         const objUps = ups.filter(([, u]) => !isPtr(u) && isObj(unwrap(isObj(u) && Object.hasOwn(u, 'value') ? u.value : u)));
         // 와일드카드 응답: 대부분의 update 값이 객체면 update 키가 개체 이름이다.
         if (tail === 'all' || (ups.length && objUps.length === ups.length && ups.length > 1)) {
           for (const [k, u] of ups) {
             if (isPtr(u)) continue;
             const val = unwrap(isObj(u) && Object.hasOwn(u, 'value') ? u.value : u);
-            const name = isObj(u) && typeof u.key === 'string' ? u.key : k;
+            const name = updKey(u, k);
             if (isObj(val)) put(name, flatten(val));
           }
         } else {
           const fields = {};
-          for (const [k, u] of ups) if (!isPtr(u)) fields[isObj(u) && typeof u.key === 'string' ? u.key : k] = unwrap(isObj(u) && Object.hasOwn(u, 'value') ? u.value : u);
+          for (const [k, u] of ups) if (!isPtr(u)) fields[updKey(u, k)] = unwrap(isObj(u) && Object.hasOwn(u, 'value') ? u.value : u);
           if (Object.keys(fields).length) put(tail || '(root)', flatten(fields));
         }
       }
@@ -185,7 +220,7 @@ export function entitiesOf(text) {
  * v2.641 — 텔레메트리 REST 응답의 '모양' 을 본다(순수). 실장비 CVP 2023.1.1 에서 확인한 사실(사용자 캡처):
  *   ① 경로는 열려 있지만 그 노드에 값이 없으면 HTTP 200 + `{"notifications":[]}`(21 바이트)가 온다. v2.640 까지 파서는 이것을
  *      '읽었고 0개' 로 세 화면이 초록 `0/0`·'피어 없음' 이라 말했다 — **빈 응답은 읽은 것이 아니다**(경로에 데이터 없음).
- *   ② 컬렉션 노드는 하위 개체를 `{"_ptr": "/Sysdb/…/Ethernet1"}` 포인터로 준다(추정 — Arista 텔레메트리 관용 모양).
+ *   ② 컬렉션 노드는 하위 개체를 포인터로 준다 — 실장비는 `{"ptr":["Sysdb",…,"Ethernet1"]}` 배열(v2.642 확인), 문자열 `_ptr` 도 받는다.
  *      BGP '응답은 왔지만 형식을 읽지 못했습니다' 9대가 이 경우였을 가능성이 높다(포인터 하나를 필드로 읽어 인식 필드 0).
  * @returns {{ format:'notifications'|null, empty:boolean, updates:number, ptrs:Array<{key:string, ptr:string}>, pathOf:string }}
  */
@@ -203,9 +238,14 @@ export function telemetryShape(text) {
       for (const [k, u] of Object.entries(n.updates)) {
         updates++;
         const val = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u;
-        if (isObj(val) && typeof val._ptr === 'string' && ptrs.length < PTR_MAX) {
-          const key = isObj(u) && typeof u.key === 'string' ? u.key : isObj(u) && isObj(u.key) ? (Object.values(flatten(u.key)).find((x) => typeof x === 'string') || k) : k;
-          ptrs.push({ key: str(key, 128), ptr: str(val._ptr, 512) });
+        const segs = ptrSegs(val);
+        if (segs && ptrs.length < PTR_MAX) {
+          const key = updKey(u, k);
+          // ptr 는 '/' 로 이은 문자열(표시·비교용), segs 는 조각 배열(URL 조립용 — 'Ethernet3/1' 같은 조각을 지킨다).
+          // 문자열 포인터(`_ptr`)는 조각 경계를 알 수 없으므로 segs 를 싣지 않는다(childPath 가 부모+키 규칙으로 이름을 지킨다).
+          const arr = Array.isArray(val.ptr);
+          ptrs.push(arr ? { key: str(key, 128), ptr: str('/' + segs.join('/'), 512), segs: segs.slice(0, 32).map((x) => str(x, 128)) }
+            : { key: str(key, 128), ptr: str('/' + segs.join('/'), 512) });
         }
       }
     }
