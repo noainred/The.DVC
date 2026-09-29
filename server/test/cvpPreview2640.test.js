@@ -164,7 +164,7 @@ test('collectCvp — samples: 성공 종류는 head(원문 앞부분) · 404 종
     assert.equal(bgp.ok, false); assert.equal(bgp.status, 404);
     assert.match(bgp.head, /no such path/, '실패 본문의 앞부분이 남는다(예전에는 cancel 만 했다)');
     assert.match(bgp.reason, /HTTP 404/);
-    assert.equal(bgp.path, C.CANDIDATES.bgp[0]);
+    assert.ok(C.CANDIDATES.bgp.includes(bgp.path), 'BGP 후보 경로 중 하나(v2.641 — 후보가 둘이 되며 마지막 실패 표본이 남는다)');
     const cool = r.samples.cooling;
     assert.equal(cool.status, 403); assert.match(cool.head, /RBAC denied/);
     assert.equal(r.samples.power.ok, true);

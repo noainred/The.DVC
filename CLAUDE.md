@@ -3776,6 +3776,21 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       `viewBox` 를 모드별로 왼쪽으로 늘린다(`XL`) — 기하(pad)는 그대로. **y축 라벨이 길어지는 모드를 추가하면 같은 자리를 볼 것.**
     - CSV 응답의 BOM 은 `Response.text()` 가 벗긴다 — 테스트는 `arrayBuffer` 원시 바이트로 본다.
     - ⚠ 정직 기록: 실장비 CVP 는 여전히 없다 — 목 CVP + Chromium(admin·operator × 1440/400) 검증이다.
+  - ⚠⚠ **CVP 텔레메트리의 빈 응답은 '읽음 0개' 가 아니다 — 실장비(CVP 2023.1.1)로 확인했다**(v2.641, `cvp/{client,parse,db,push}.js` +
+    `cvp/bulk.js` + 웹 `CvpTool.jsx`·`cvpMoreText.js`, 사용자 요청 "기능 개선해줘"(실장비 캡처 5장) · "포트 사용량도 보는 기능" · "CVP 를 CSV
+    import/export … 비밀번호·토큰도 포함". 선택 4축 전부 · 전체 검증. 상세 `docs/CVP.md` §8. 회귀 `test/cvp2641.test.js`·`cvpBulk2641.test.js` +
+    웹 `cvpMoreText.test.js`·`cvpBulkText.test.js`):
+    - **증상**: v2.608 후보 경로가 전부 HTTP 200 + `{"notifications":[]}` 였고 파서가 그것을 '읽었고 0개' 로 세 173대가 초록 `0/0`·'피어 없음' 이었다.
+      notifications 형식에서 개체 0개는 **null(못 읽음)** 이다(`parse.notRead`). 새 파서도 이 규칙을 따를 것.
+    - **컬렉션은 `_ptr` 포인터다**(사용자 Telemetry Browser 캡처로 `intfStatus` 확인) — `followPtrs` 가 따라간다. 개체 이름은 **포인터 키**
+      (응답 경로 꼬리는 'Ethernet3/1' 에서 잘린다). v2.608 의 `vrfBgpPeerInfoStatusEntryTable`·`/Smash/counters/ethIntf` 는 **이 장비에 없는
+      경로**였다 — 경로를 추정할 때는 경로 탐색 표본(`probes`)으로 확인하기 전에 '있다' 고 적지 말 것.
+    - **원문 표본은 빈 응답보다 '못 읽은 본문' 을 남긴다**(v2.640 은 빈 응답을 첫 성공으로 잡아 정작 필요한 본문이 없었다). 후보가 여럿이면 뒤 404 가
+      앞 403 사유를 덮지 않는다.
+    - CPU·메모리 값은 push 레코드 해시에 넣지 않는다(`devSamples` 가 싣는다) — 넣으면 매 주기 전 장비 레코드가 다시 간다.
+    - CVP 서버 CSV 비밀 포함 내보내기는 iDRAC 스캔 대역·배포 대상과 같은 **설정 소유자 + 감사 로그** 경로다. 새 경로는 `/tools/cvp/bulk/*`
+      (기존 `/tools/cvp/servers/:id/test` 가 `import` 를 id 로 잡으므로 분리했다).
+    - ⚠ 정직 기록: 하위 필드 이름(포트 상태·카운터·BGP 새 표·부품·CPU)은 여전히 추정이다. 실장비 CVP 가 없어 목 CVP + Chromium 으로 검증했다.
   - **등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다**
     (`cvp/formChoices.js pickAgent`·`pickDatacenter` + 웹 `cvpText.choiceOptions`, v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를
     콤보박스로 … 오타/대소문자 방지"):

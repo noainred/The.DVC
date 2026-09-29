@@ -69,7 +69,7 @@ export function classifyCvpEdge({ edgeVersion = '', minVersion = MIN_CVP_EDGE_VE
   return 'waiting';
 }
 export const ROWS_MAX = 100_000;
-const KINDS = new Set([...Object.keys(CANDIDATES), 'budget', 'deadline']);
+const KINDS = new Set([...Object.keys(CANDIDATES), 'budget', 'deadline', 'eventsCapped']);
 const PART_KIND_SET = new Set(['psu', 'fan', 'temp', 'xcvr']);
 const LINK = new Set(['up', 'down', 'nolink', 'unknown']); // v2.630 A2-02: 링크 없음(notconnect·notPresent) — down 이 아니다
 
@@ -155,7 +155,20 @@ export function cleanStatus(x, now = Date.now()) {
     ...(x.partsDueUnread === true ? { partsDueUnread: true, partsNotTried: numOrNull(x.partsNotTried) } : {}), // v2.612 RECENT2612-01: 시도 못 한 대수
     ...(isPlainObj(x.pruneHeld) ? { pruneHeld: { since: tsClamp(x.pruneHeld.since, now), untilMs: numOrNull(x.pruneHeld.untilMs), had: numOrNull(x.pruneHeld.had), reason: s(x.pruneHeld.reason, 300) } } : {}),
     ...(samples ? { samples } : {}), // v2.640: 원문 표본(구버전 엣지는 없다 — 필드 자체를 생략)
+    ...(Array.isArray(x.probes) ? { probes: cleanProbes(x.probes, now) } : {}), // v2.641: 경로 탐색 표본
+    ...(isPlainObj(x.events) ? { events: {
+      bySeverity: Object.fromEntries([...SEVS].map((k) => [k, numOrNull(x.events.bySeverity?.[k])])), total: numOrNull(x.events.total),
+      truncated: numOrNull(x.events.truncated), capped: x.events.capped === true, at: tsClamp(x.events.at, now) } } : x.events === null ? { events: null } : {}),
   };
+}
+
+/** v2.641: 경로 탐색 표본 정제 — PROBE_MAX(28)개 · head 1536자. */
+export function cleanProbes(list, now = Date.now()) {
+  return list.filter(isPlainObj).slice(0, 28).map((x) => ({
+    path: s(x.path, 256), device: s(x.device, 128), status: numOrNull(x.status), at: tsClamp(x.at, now), ok: x.ok === true,
+    bytes: numOrNull(x.bytes), head: s(x.head, 1536), empty: x.empty === true ? true : x.empty === false ? false : null,
+    updates: numOrNull(x.updates), ptrs: numOrNull(x.ptrs), ptrKeys: Array.isArray(x.ptrKeys) ? x.ptrKeys.filter((k) => typeof k === 'string').slice(0, 12).map((k) => s(k, 128)) : [],
+  }));
 }
 
 /** 장비 레코드 1건 정제 — 부품·BGP·포트 배열까지 아는 필드만. 반환 null = 버림. */
@@ -184,7 +197,51 @@ export function cleanDevice(x, now = Date.now(), cnt = { ports: 0 }) {
     d.partsAt = tsClamp(x.partsAt, now) ?? ts;
   }
   if (Array.isArray(x.partsMissingKinds)) d.partsMissingKinds = x.partsMissingKinds.filter((k) => typeof k === 'string').slice(0, 8).map((k) => s(k, 32));
+  // v2.641: 장비 개요(아는 필드만)·CPU·메모리 최신값.
+  const info = cleanInfo(x.info, now);
+  if (info) d.info = info;
+  const pct = (v) => { const n = numOrNull(v); return n == null || n < 0 || n > 100 ? null : n; };
+  d.sysAt = tsClamp(x.sysAt, now); d.cpuPct = pct(x.cpuPct); d.memPct = pct(x.memPct); d.memTotal = numOrNull(x.memTotal);
   return d;
+}
+
+/** v2.641: 장비 개요 정제(cvp/db.js INFO_KEYS 와 같은 필드 — 문자열·불리언·시각·수명주기·버그 요약만). */
+const EXPO = new Set(['none', 'low', 'high']);
+export function cleanInfo(v, now = Date.now()) {
+  if (!isPlainObj(v)) return null;
+  const bool = (b) => (b === true ? true : b === false ? false : undefined);
+  const out = {
+    mac: s(v.mac, 32) || undefined, fqdn: s(v.fqdn, 256) || undefined, hwRevision: s(v.hwRevision, 64) || undefined,
+    bootAt: numOrNull(v.bootAt) ?? undefined, status: s(v.status, 32) || undefined,
+    complianceCode: s(v.complianceCode, 32) || undefined, complianceIndication: s(v.complianceIndication, 32) || undefined,
+    container: s(v.container, 128) || undefined, ztpMode: bool(v.ztpMode), mlag: bool(v.mlag), internalVersion: s(v.internalVersion, 64) || undefined,
+    portsEmpty: v.portsEmpty === true || undefined, bgpEmpty: v.bgpEmpty === true || undefined,
+    readKinds: Array.isArray(v.readKinds) ? v.readKinds.filter((k) => ['enrich', 'lifecycle', 'bugs'].includes(k)) : undefined,
+  };
+  if (isPlainObj(v.lifecycle)) {
+    const l = v.lifecycle;
+    out.lifecycle = { swEolVersion: s(l.swEolVersion, 64), swEndOfSupport: numOrNull(l.swEndOfSupport), hwEndOfLife: numOrNull(l.hwEndOfLife),
+      hwEndOfSale: numOrNull(l.hwEndOfSale), hwEndOfTacSupport: numOrNull(l.hwEndOfTacSupport), hwEndOfRma: numOrNull(l.hwEndOfRma) };
+  }
+  if (isPlainObj(v.bugs)) {
+    const b = v.bugs;
+    out.bugs = { bugCount: numOrNull(b.bugCount), cveCount: numOrNull(b.cveCount), highestBug: EXPO.has(b.highestBug) ? b.highestBug : null,
+      highestCve: EXPO.has(b.highestCve) ? b.highestCve : null, acknowledged: b.acknowledged === true };
+  }
+  for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
+  return Object.keys(out).length ? out : null;
+}
+
+const SEVS = new Set(['critical', 'error', 'warning', 'info', 'debug', 'unknown']);
+export const EDGE_EVENTS_MAX = 2000;
+/** v2.641 ④: 엣지 이벤트 1건 정제. 반환 null = 버림. */
+export function cleanEvent(e, now = Date.now()) {
+  if (!isPlainObj(e)) return null;
+  const key = s(e.key, 256); const ts = numOrNull(e.ts);
+  if (!key || ts == null || ts > now + 86_400_000) return null;
+  return { key, ts, severity: SEVS.has(e.severity) ? e.severity : 'unknown', title: s(e.title, 256), desc: s(e.desc, 1000), type: s(e.type, 128),
+    devices: Array.isArray(e.devices) ? e.devices.filter((d) => typeof d === 'string').slice(0, 32).map((d) => s(d, 128)) : [],
+    ack: e.ack === true, updatedAt: numOrNull(e.updatedAt), deleted: e.deleted === true };
 }
 
 /**
@@ -242,7 +299,28 @@ export function sanitizeCvpBody(body, owned, now = Date.now()) {
       deviceKeys[cvpId] = keys.filter((k) => typeof k === 'string' && k).slice(0, DEVICE_MAX).map((k) => s(k, 128));
     }
   }
-  return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped };
+  // v2.641 ③: CPU·메모리 최신 표본 [cvpId, key, ts, cpu, mem, memTotal]
+  const devSamples = [];
+  for (const r of Array.isArray(b.devSamples) ? b.devSamples.slice(0, DEVICE_MAX * 4) : []) {
+    if (!Array.isArray(r) || r.length < 5) { dropped.badRow++; continue; }
+    if (!own(r[0])) { dropped.notOwned++; continue; }
+    const key = s(r[1], 128); const ts = tsClamp(r[2], now);
+    if (!key || ts == null) { dropped.badRow++; continue; }
+    devSamples.push([r[0], key, ts, numOrNull(r[3]), numOrNull(r[4]), numOrNull(r[5])]);
+  }
+  // v2.641 ④: 이벤트 { cvpId: [event…] } — CVP 당 EDGE_EVENTS_MAX 건.
+  const eventsByCvp = new Map();
+  if (isPlainObj(b.events)) {
+    for (const [cvpId, list] of Object.entries(b.events).slice(0, 256)) {
+      if (!owned.has(cvpId)) { dropped.notOwned++; continue; }
+      if (!Array.isArray(list)) continue;
+      const out = [];
+      for (const e of list.slice(0, EDGE_EVENTS_MAX)) { const c = cleanEvent(e, now); if (c) out.push(c); else dropped.badRow++; }
+      if (list.length > EDGE_EVENTS_MAX) dropped.overCount += list.length - EDGE_EVENTS_MAX;
+      eventsByCvp.set(cvpId, out);
+    }
+  }
+  return { servers, devicesByCvp, rows, touch, deviceKeys, devicesUnavailable: b.devicesUnavailable === true, dropped, devSamples, eventsByCvp };
 }
 
 /**

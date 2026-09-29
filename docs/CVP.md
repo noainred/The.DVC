@@ -135,3 +135,50 @@ CVP 도 Edge 에 연결되어 있다. 가져올 정보: 스위치 정보·장애
 - 여전히 실장비 CVP 로 확인하지 못했다 — 검증은 목 CVP(테스트와 같은 합성 응답)와 Chromium(admin·operator × 1440/400) 이다. 원문 표본·파서 시험은
   바로 그 확인을 위한 도구다.
 - 처리량 차트 눈금('50.0 Kbps')이 초판에서 잘려 있었다(스크린샷 판독 — 수치로는 안 잡혔다). `viewBox` 를 왼쪽으로 늘려 고쳤다.
+
+## 8. v2.641 — 실장비(CVP 2023.1.1) 대응 · 개요·CPU·메모리·이벤트 · 포트 사용량 · 서버 CSV
+
+### 8.1 실장비에서 확인한 사실(사용자 캡처 — 추정이 아니다)
+- 텔레메트리 REST 는 경로가 열려 있어도 그 노드에 값이 없으면 **HTTP 200 + `{"notifications":[]}`(21 바이트)** 를 준다.
+  v2.608 후보(`…/intfStatus/all` · `…/FastCounters/current` · `…/vrfBgpPeerInfoStatusEntryTable`)가 전부 이 빈 응답이었고,
+  v2.640 파서는 그것을 '읽음 0개' 로 세 화면이 초록 `0/0`·'피어 없음' 이라 말했다.
+- Telemetry Browser(장비 `HBG224602TH`, L2 7010TX):
+  - `/Sysdb/interface/status/eth/phy/slice/1/intfStatus` → `Ethernet1…N` 이 전부 **Pointer**
+  - `/Smash/counters/ethIntf` → **No data**
+  - `/Kernel/proc` → `cpu` · `meminfo` · `stat`(Pointer) · `name`
+  - `/Sysdb/routing/bgp/export` → `config` · **`vrfBgpPeerAfiSafiStateTable`** (v2.608 의 `vrfBgpPeerInfoStatusEntryTable` 은 없다)
+  - `/Sysdb/environment` → `archer` · `cooling` · `power` · `temperature` · `thermostat`(Pointer)
+- 레거시 인벤토리(`/cvpservice/inventory/devices`) 필드는 Arista cvprac(`get_inventory`)이 쓰는 이름으로 확인했다(ipAddress·
+  bootupTimestamp·status·mlagEnabled). Resource API(lifecycle·bugexposure·event) 필드는 aristanetworks/cloudvision-apis 의 proto 로
+  확인했다 — **CVP 2023.1.1 에 그 경로가 있는지는 확인하지 못했다**(없으면 404 가 사유로 남는다).
+
+### 8.2 판정 규약
+- **빈 응답은 읽은 것이 아니다** — 파서는 notifications 형식에서 개체가 0개면 null(`parse.notRead`). 사유는 `EMPTY_REASON`, 장비 표지
+  `portsEmpty`·`bgpEmpty`, 텔레메트리 `empty`. 화면은 포트 '읽지 못함' · BGP '값 없음'(BGP 미설정일 수도, 경로가 다를 수도 — 둘 다 말한다).
+- **포인터 추종**(`client.followPtrs`): 깊이 3 · 장비당 종류당 `CVP_FOLLOW_MAX`(160)회 · 장비 안 동시 `CVP_FOLLOW_CONCURRENCY`(4).
+  개체 이름은 **첫 키**(포트·부품) — BGP 만 둘째 키(피어)이고 첫 키(VRF)를 `vrfName` 필드로 남긴다. 'Ethernet3/1' 의 '/' 는 키를
+  인코딩해 보존한다(`childPath`). 후보의 `경로@접미` 는 각 포인터 키 뒤에 접미를 붙여 바로 읽는다(카운터 `…/intfCounterDir@/intfCounter/current`
+  — ⚠ 이 경로는 아직 확인하지 못했다). 카운터는 **링크가 올라온 포트만** 따라간다(요청 수 절감).
+- **원문 표본 우선순위**: 읽음 > 못 읽은 본문 > 404 가 아닌 실패(403 등) > 빈 응답 > 404. 뒤 후보의 404 가 앞 후보의 403 사유를 덮지 않는다.
+- **경로 탐색 표본**(`probes`): 부품 주기(30분)마다 CVP 당 장비 1대로 `PROBE_PATHS`(약 20곳)를 GET 해 응답 앞 1.5KB 와 모양(빈 응답·포인터 수·
+  값 수)을 남긴다. 관리자만 본다. **다음 후보 수정의 근거다.**
+
+### 8.3 새 항목
+| 항목 | 경로(후보) | 저장 | 비고 |
+|---|---|---|---|
+| 개요 | 레거시 인벤토리 · lifecycle.v1 · bugexposure.v1 | `device_latest.info_json` | Resource API `bootTime` 1970 은 값 없음(`tsOf`) — 레거시 `bootupTimestamp` 로 채운다. 관리 IP 도 레거시에서 |
+| CPU·메모리 | `/Kernel/proc/cpu/utilization/total` → `/Kernel/proc/cpu`(포인터) → `/Kernel/proc/stat` · `/Kernel/proc/meminfo` | `device_latest` 열 + `device_sample`(원시 보존 = 포트 원시) | 퍼센트면 `100−(idle+iowait)`, 누적이면 두 표본 차이(첫 표본 null) |
+| 이벤트 | `/api/resources/event/v1/Event/all`(앞 `CVP_EVENTS_BODY_MAX` 4MB) | `cvp_event`(처음 받은 시각 기준 `CVP_EVENT_RETENTION_DAYS` 30일) | 진행 중·종료는 판정하지 않는다(스키마에 종료 시각 없음) |
+| 포트 사용량 | (포트 최신값) | — | `/tools/cvp/port-usage` — 측정·링크 없음·속도 모름·처리량 없음·오래된 값을 사유별로(항등식 테스트 고정) |
+
+엣지 push: 장비 레코드에 `info`, 첫 청크에 `devSamples`(장비별 CPU·메모리 최신)·`events`(CVP 별 · 지난 push 뒤 바뀐 것 — 워터마크).
+CPU·메모리 값은 레코드 해시에 넣지 않는다(매 주기 전 레코드 재전송 방지).
+
+### 8.4 CVP 서버 CSV·자유텍스트(`cvp/bulk.js` · `routes/api/cvpBulk.js`)
+공용 대량 등록 코어(`util/bulkImport.js`)·화면(`BulkDeviceIo`)을 쓴다. 식별 키는 `saveServer` 규칙(id, 없으면 origin + 담당 엣지).
+파일에 없는 열은 저장값 유지. 비밀번호·토큰 포함 내보내기(`?secrets=1`)는 **설정 소유자 전용 + 감사 로그**(값은 남기지 않는다) — 사용자 요청.
+
+### 8.5 ⚠ 정직 기록
+- 포인터 추종·포트·BGP·부품·CPU 의 **하위 모양(필드 이름)은 여전히 추정**이다. 확인한 것은 §8.1 의 목록 수준뿐이다. 첫 실수집의 경로 탐색 표본과
+  원문 표본을 보고 좁힐 것. 특히 BGP 새 표(`vrfBgpPeerAfiSafiStateTable`)에 세션 상태가 없으면 BGP 는 '형식 미인식' 으로 남는다.
+- 검증은 목 CVP(§8.1 의 모양을 흉내 낸 합성 응답)와 Chromium(admin·operator × 1440/400, 58장 · 오류 0 · 넘침 0)이다.

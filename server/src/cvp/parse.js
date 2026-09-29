@@ -136,21 +136,26 @@ export function entitiesOf(text) {
       format = 'notifications';
       for (const n of v.notifications) {
         if (!isObj(n) || !isObj(n.updates)) continue;
-        const segs = String(typeof n.path === 'string' ? n.path : '').split('/').filter(Boolean);
+        // v2.641: 경로는 `path`(문자열) 또는 `path_elements`(배열) — Arista 텔레메트리 판본마다 다르다(둘 다 받는다).
+        const segs = typeof n.path === 'string' ? n.path.split('/').filter(Boolean)
+          : Array.isArray(n.path_elements) ? n.path_elements.filter((x) => typeof x === 'string' && x) : [];
         const tail = segs.length ? decodeSeg(segs[segs.length - 1]) : '';
         const ups = Object.entries(n.updates);
-        const objUps = ups.filter(([, u]) => isObj(unwrap(isObj(u) && Object.hasOwn(u, 'value') ? u.value : u)));
+        // v2.641: 포인터(`{_ptr}`)는 필드가 아니다 — 개체 값으로 세면 포인터 목록이 '읽은 개체' 가 된다(없는 포트를 지어낸다).
+        const isPtr = (u) => { const x = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u; return isObj(x) && typeof x._ptr === 'string'; };
+        const objUps = ups.filter(([, u]) => !isPtr(u) && isObj(unwrap(isObj(u) && Object.hasOwn(u, 'value') ? u.value : u)));
         // 와일드카드 응답: 대부분의 update 값이 객체면 update 키가 개체 이름이다.
         if (tail === 'all' || (ups.length && objUps.length === ups.length && ups.length > 1)) {
           for (const [k, u] of ups) {
+            if (isPtr(u)) continue;
             const val = unwrap(isObj(u) && Object.hasOwn(u, 'value') ? u.value : u);
             const name = isObj(u) && typeof u.key === 'string' ? u.key : k;
             if (isObj(val)) put(name, flatten(val));
           }
         } else {
           const fields = {};
-          for (const [k, u] of ups) fields[isObj(u) && typeof u.key === 'string' ? u.key : k] = unwrap(isObj(u) && Object.hasOwn(u, 'value') ? u.value : u);
-          put(tail || '(root)', flatten(fields));
+          for (const [k, u] of ups) if (!isPtr(u)) fields[isObj(u) && typeof u.key === 'string' ? u.key : k] = unwrap(isObj(u) && Object.hasOwn(u, 'value') ? u.value : u);
+          if (Object.keys(fields).length) put(tail || '(root)', flatten(fields));
         }
       }
     } else if (isObj(v) && isObj(v.result) && isObj(v.result.value)) {
@@ -175,6 +180,44 @@ export function entitiesOf(text) {
   }
   return { entities, format, keys: [...keys], droppedFields };
 }
+
+/**
+ * v2.641 — 텔레메트리 REST 응답의 '모양' 을 본다(순수). 실장비 CVP 2023.1.1 에서 확인한 사실(사용자 캡처):
+ *   ① 경로는 열려 있지만 그 노드에 값이 없으면 HTTP 200 + `{"notifications":[]}`(21 바이트)가 온다. v2.640 까지 파서는 이것을
+ *      '읽었고 0개' 로 세 화면이 초록 `0/0`·'피어 없음' 이라 말했다 — **빈 응답은 읽은 것이 아니다**(경로에 데이터 없음).
+ *   ② 컬렉션 노드는 하위 개체를 `{"_ptr": "/Sysdb/…/Ethernet1"}` 포인터로 준다(추정 — Arista 텔레메트리 관용 모양).
+ *      BGP '응답은 왔지만 형식을 읽지 못했습니다' 9대가 이 경우였을 가능성이 높다(포인터 하나를 필드로 읽어 인식 필드 0).
+ * @returns {{ format:'notifications'|null, empty:boolean, updates:number, ptrs:Array<{key:string, ptr:string}>, pathOf:string }}
+ */
+export const PTR_MAX = 256;
+export function telemetryShape(text) {
+  const { values } = splitJsonStream(text);
+  let format = null; let updates = 0; const ptrs = []; let pathOf = '';
+  for (const v of values) {
+    if (!isObj(v) || !Array.isArray(v.notifications)) continue;
+    format = 'notifications';
+    for (const n of v.notifications) {
+      if (!isObj(n)) continue;
+      if (!pathOf) pathOf = typeof n.path === 'string' ? n.path : Array.isArray(n.path_elements) ? '/' + n.path_elements.map((x) => (typeof x === 'string' ? x : '')).join('/') : '';
+      if (!isObj(n.updates)) continue;
+      for (const [k, u] of Object.entries(n.updates)) {
+        updates++;
+        const val = isObj(u) && Object.hasOwn(u, 'value') ? u.value : u;
+        if (isObj(val) && typeof val._ptr === 'string' && ptrs.length < PTR_MAX) {
+          const key = isObj(u) && typeof u.key === 'string' ? u.key : isObj(u) && isObj(u.key) ? (Object.values(flatten(u.key)).find((x) => typeof x === 'string') || k) : k;
+          ptrs.push({ key: str(key, 128), ptr: str(val._ptr, 512) });
+        }
+      }
+    }
+  }
+  return { format, empty: format === 'notifications' && updates === 0, updates, ptrs, pathOf: str(pathOf, 512) };
+}
+
+/**
+ * v2.641: 텔레메트리 응답에서 개체를 하나도 못 만들었으면(빈 응답·포인터만) '읽음 0개' 가 아니라 **못 읽음** 이다.
+ *   평범한 JSON 빈 배열(`[]`)은 형식이 분명하므로 0개로 둔다 — 이 규칙은 notifications 형식에만 적용한다.
+ */
+const notRead = (format, entities) => !format || (format === 'notifications' && entities.size === 0);
 
 function decodeSeg(s) { try { return decodeURIComponent(s); } catch { return s; } }
 function nameOf(o) {
@@ -239,6 +282,9 @@ export function parseInventory(text, { max = DEVICE_MAX } = {}) {
       mgmtIp: str(pick(f, ['ipAddress', 'managementIp', 'mgmtIp', 'ip'])) || '',
       eosVersion: str(pick(f, ['softwareVersion', 'version', 'eosVersion'])) || '',
       streaming: streamingOf(pick(f, ['streamingStatus', 'streaming', 'streamingState'])),
+      // v2.641: 장비 개요용(실장비 Resource API 에서 확인한 이름 — systemMacAddress·fqdn·hardwareRevision·bootTime).
+      mac: str(mac || '', 32), fqdn: str(pick(f, ['fqdn']) ?? '', 256), hwRevision: str(pick(f, ['hardwareRevision']) ?? '', 64),
+      bootAt: tsOf(pick(f, ['bootTime', 'bootupTimestamp', 'bootupTimeStamp'])),
     });
   }
   return { devices: out, truncated, dropped, keys: [...keys], badChunks: bad };
@@ -295,7 +341,7 @@ export function partState(flat) {
  */
 export function parseParts(text, kind, { max = PART_MAX } = {}) {
   const { entities, format, keys, droppedFields } = entitiesOf(text);
-  if (!format) return { parts: null, keys, truncated: 0 };
+  if (notRead(format, entities)) return { parts: null, keys, truncated: 0 };
   const parts = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
     if (pick(f, ['state', 'status', 'health', 'operStatus', 'powerSupplyState', 'fanState', 'hwStatus', 'xcvrPresence', 'presence', 'alertRaised', 'alarm', 'overheat', 'critical', 'temperature', 'currentTemperature']) === undefined) { unrecognized++; continue; }
@@ -383,7 +429,7 @@ export function linkWord(v) {
  */
 export function parseInterfaces(text, { max = PORT_MAX } = {}) {
   const { entities, format, keys, droppedFields } = entitiesOf(text);
-  if (!format) return { ports: null, keys, truncated: 0 };
+  if (notRead(format, entities)) return { ports: null, keys, truncated: 0 };
   const ports = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
     // 인터페이스 필드가 하나도 없는 개체(오류 본문 등)는 포트로 세지 않는다 — 없는 포트를 지어내지 않게.
@@ -411,7 +457,7 @@ export function parseInterfaces(text, { max = PORT_MAX } = {}) {
  */
 export function parseCounters(text) {
   const { entities, format, keys, droppedFields } = entitiesOf(text);
-  if (!format) return { counters: null, keys };
+  if (notRead(format, entities)) return { counters: null, keys };
   const counters = new Map();
   for (const [name, f] of entities) {
     const c = {
@@ -473,7 +519,7 @@ export function portDelta(prev, cur, speed, intervalMs, slackMs = 0) {
  */
 export function parseBgp(text, { max = PEER_MAX } = {}) {
   const { entities, format, keys, droppedFields } = entitiesOf(text);
-  if (!format) return { peers: null, summary: null, keys, truncated: 0 };
+  if (notRead(format, entities)) return { peers: null, summary: null, keys, truncated: 0 };
   const peers = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
     const stateRaw = pick(f, ['bgpPeerState', 'peerState', 'state', 'bgpState']);
@@ -541,4 +587,212 @@ export function portsSummary(ports) {
     else if (p?.oper === 'nolink') noLink++;   // v2.630 A2-02: 미연결·트랜시버 없음 — down 이 아니다(개수는 밝힌다)
   }
   return { total: ports.length, up, down, ...(noLink ? { noLink } : {}) };   // 없으면 필드 자체를 싣지 않는다(기존 모양 호환)
+}
+
+/* ── v2.641: CPU·메모리 ─────────────────────────────────────────────────── */
+
+/**
+ * CPU 사용률 파서(순수). ⚠ 경로·필드는 추정이다(TerminAttr 가 올리는 Linux /proc 관용 이름 — user·system·idle·iowait…).
+ *   값이 **퍼센트**(합 90~110)면 바로 `pct = 100 − (idle + iowait)` 이고(iowait 를 busy 로 세면 디스크 대기 중인 장비가 100% 로
+ *   보인다 — v2.550 규약), **누적 카운터**(합이 더 크다)면 `counters:{busy,total}` 만 주고 두 표본의 차이는 호출자(폴러)가 계산한다.
+ *   필드가 없으면 null(0% 를 지어내지 않는다).
+ * @returns {{ pct:number|null, counters:{busy:number,total:number}|null, keys:string[] }}
+ */
+export function parseCpu(text) {
+  const { entities, format, keys } = entitiesOf(text);
+  if (notRead(format, entities)) return { pct: null, counters: null, keys };
+  // 첫 개체(보통 'total') 또는 이름에 total 이 들어간 개체.
+  let f = null;
+  for (const [name, x] of entities) { if (/total|^cpu$|\(root\)|leaf/.test(String(name).toLowerCase()) || !f) f = x; if (/total/i.test(name)) break; }
+  if (!f) return { pct: null, counters: null, keys };
+  const NAMES = ['user', 'nice', 'system', 'idle', 'iowait', 'irq', 'softirq', 'steal'];
+  const v = {};
+  for (const n of NAMES) { const x = numOrNull(pick(f, [n])); if (x != null && x >= 0) v[n] = x; }
+  const util = numOrNull(pick(f, ['utilization', 'cpuUtilization', 'busy', 'usage']));
+  if (v.idle == null) {
+    if (util != null && util >= 0 && util <= 100) return { pct: Math.round(util * 10) / 10, counters: null, keys };
+    return { pct: null, counters: null, keys };
+  }
+  const total = Object.values(v).reduce((a, b) => a + b, 0);
+  const idle = v.idle + (v.iowait || 0);
+  if (!(total > 0)) return { pct: null, counters: null, keys };
+  if (total >= 90 && total <= 110) {
+    const pct = Math.max(0, Math.min(100, (1 - idle / total) * 100));
+    return { pct: Math.round(pct * 10) / 10, counters: null, keys };
+  }
+  return { pct: null, counters: { busy: total - idle, total }, keys };
+}
+
+/** 누적 CPU 카운터 두 개 → 사용률(첫 표본·리셋·간격 0 이면 null — rates.js 규약). */
+export function cpuPctFromCounters(prev, cur) {
+  if (!prev || !cur) return null;
+  const dt = cur.total - prev.total; const db = cur.busy - prev.busy;
+  if (!(dt > 0) || db < 0) return null;
+  const p = (db / dt) * 100;
+  return p > 100 ? null : Math.round(p * 10) / 10;
+}
+
+/**
+ * 메모리 파서(순수) — /proc/meminfo 관용 이름. 사용률 = (total − available)/total, available 이 없으면 (total − free − buffers − cached)/total.
+ * 단위는 확인하지 못했다(/proc/meminfo 는 kB) — 비율만 단정하고 total 은 원값을 그대로 싣는다(`unit` 은 추정 표시용).
+ * @returns {{ pct:number|null, total:number|null, keys:string[] }}
+ */
+export function parseMemory(text) {
+  const { entities, format, keys } = entitiesOf(text);
+  if (notRead(format, entities)) return { pct: null, total: null, keys };
+  let f = null;
+  for (const [, x] of entities) if (pick(x, ['memTotal', 'MemTotal', 'total']) != null) { f = x; break; }
+  if (!f) return { pct: null, total: null, keys };
+  const total = numOrNull(pick(f, ['memTotal', 'MemTotal', 'total']));
+  if (!(total > 0)) return { pct: null, total: null, keys };
+  const avail = numOrNull(pick(f, ['memAvailable', 'MemAvailable', 'available']));
+  let used = null;
+  if (avail != null && avail >= 0 && avail <= total) used = total - avail;
+  else {
+    const free = numOrNull(pick(f, ['memFree', 'MemFree', 'free']));
+    if (free == null) return { pct: null, total, keys };
+    const bc = (numOrNull(pick(f, ['buffers', 'Buffers'])) || 0) + (numOrNull(pick(f, ['cached', 'Cached'])) || 0);
+    used = total - free - bc;
+    if (used < 0) return { pct: null, total, keys };
+  }
+  return { pct: Math.round((used / total) * 1000) / 10, total, keys };
+}
+
+/* ── v2.641: 장비 개요(레거시 인벤토리·수명주기·버그 노출) · 이벤트 ─────────────── */
+
+/** 시각 → epoch ms. ISO 문자열·초·밀리초를 받는다. **1970 년(0 이하)·말이 안 되는 값은 null**(실장비 Resource API 의 bootTime 이
+ *  '1970-01-01T00:00:00Z' 였다 — 그것을 믿으면 업타임 56년이 된다). 숫자 문자열은 Date.parse 에 넘기지 않는다(v2.562). */
+export function tsOf(v) {
+  if (v == null || v === '') return null;
+  let ms = null;
+  if (typeof v === 'number' || (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v.trim()))) {
+    const n = Number(v);
+    ms = n > 1e14 ? Math.floor(n / 1e6) : n > 1e11 ? n : n * 1000; // ns · ms · s
+  } else if (typeof v === 'string') { const t = Date.parse(v); ms = Number.isFinite(t) ? t : null; }
+  else if (isObj(v) && (v.seconds != null)) ms = Number(v.seconds) * 1000;
+  if (!Number.isFinite(ms) || ms <= 86_400_000 * 365) return null; // 1971 이전은 '값 없음'
+  return Math.round(ms);
+}
+
+/**
+ * 레거시 인벤토리(`/cvpservice/inventory/devices`) → Map(serial → {mgmtIp, status, complianceCode, complianceIndication,
+ *   bootAt, container, ztpMode, mlag}). 필드 이름은 Arista cvprac(get_inventory)이 쓰는 이름이다.
+ */
+export function parseLegacyInventory(text) {
+  const { values } = splitJsonStream(text);
+  const out = new Map(); const keys = new Set();
+  const visit = (o) => {
+    if (!isObj(o)) return;
+    const serial = str(o.serialNumber || '', 128);
+    if (!serial) return;
+    for (const k of Object.keys(o)) if (keys.size < 40) keys.add(k);
+    const code = o.complianceCode == null ? '' : str(o.complianceCode, 32);
+    out.set(serial, {
+      mgmtIp: str(o.ipAddress || '', 64),
+      status: str(o.status || '', 32),
+      complianceCode: code,
+      complianceIndication: str(o.complianceIndication || '', 32),
+      bootAt: tsOf(o.bootupTimestamp ?? o.bootupTimeStamp),
+      container: str(o.containerName || o.parentContainerName || '', 128),
+      ztpMode: o.ztpMode === true || o.ztpMode === 'true' ? true : o.ztpMode === false || o.ztpMode === 'false' ? false : null,
+      mlag: o.mlagEnabled === true ? true : o.mlagEnabled === false ? false : null,
+      internalVersion: str(o.internalVersion || '', 64),
+    });
+  };
+  for (const v of values) {
+    if (Array.isArray(v)) v.forEach(visit);
+    else if (isObj(v) && Array.isArray(v.netElementList)) v.netElementList.forEach(visit);
+    else visit(v);
+  }
+  return { map: values.length ? out : null, keys: [...keys] };
+}
+
+/** Resource API 스트림(`{"result":{"value":…}}`) → value 목록. 못 읽으면 null. */
+function resourceValues(text) {
+  const { values } = splitJsonStream(text);
+  const out = []; let recognized = false;
+  for (const v of values) {
+    const list = Array.isArray(v) ? v : [v];
+    for (const x of list) if (isObj(x) && isObj(x.result) && isObj(x.result.value)) { recognized = true; out.push(x.result.value); }
+  }
+  return recognized ? out : (values.length === 0 ? [] : null);
+}
+const devIdOf = (v) => (isObj(v?.key) ? str(v.key.deviceId || '', 128) : '');
+
+/** 수명주기(lifecycle.v1 DeviceLifecycleSummary) → Map(deviceId → {swEol:{version,endOfSupport}, hwEol, hwEos, hwEoTac, hwEoRma}). */
+export function parseLifecycle(text) {
+  const vals = resourceValues(text);
+  if (vals == null) return { map: null, keys: [] };
+  const out = new Map(); const keys = new Set();
+  for (const v of vals) {
+    const id = devIdOf(v); if (!id) continue;
+    for (const k of Object.keys(v)) if (keys.size < 40) keys.add(k);
+    const sw = isObj(v.softwareEol) ? v.softwareEol : {};
+    const hw = isObj(v.hardwareLifecycleSummary) ? v.hardwareLifecycleSummary : {};
+    const d = (x) => (isObj(x) ? tsOf(x.date) : null);
+    out.set(id, {
+      swEolVersion: str(sw.version || '', 64), swEndOfSupport: tsOf(sw.endOfSupport),
+      hwEndOfLife: d(hw.endOfLife), hwEndOfSale: d(hw.endOfSale), hwEndOfTacSupport: d(hw.endOfTacSupport), hwEndOfRma: d(hw.endOfHardwareRmaRequests),
+    });
+  }
+  return { map: out, keys: [...keys] };
+}
+
+const EXPOSURE = { HIGHEST_EXPOSURE_NONE: 'none', HIGHEST_EXPOSURE_LOW: 'low', HIGHEST_EXPOSURE_HIGH: 'high' };
+/** 버그 노출(bugexposure.v1) → Map(deviceId → {bugCount, cveCount, highestBug, highestCve}). **확인하지 않은(UNACKNOWLEDGED) 것**을 우선한다. */
+export function parseBugExposure(text) {
+  const vals = resourceValues(text);
+  if (vals == null) return { map: null, keys: [] };
+  const out = new Map(); const keys = new Set();
+  for (const v of vals) {
+    const id = devIdOf(v); if (!id) continue;
+    for (const k of Object.keys(v)) if (keys.size < 40) keys.add(k);
+    const ack = String(v.key?.acknowledgement || '');
+    const rec = {
+      bugCount: numOrNull(v.bugCount), cveCount: numOrNull(v.cveCount),
+      highestBug: EXPOSURE[v.highestBugExposure] || null, highestCve: EXPOSURE[v.highestCveExposure] || null,
+      acknowledged: ack === 'ACKNOWLEDGEMENT_ACKNOWLEDGED',
+    };
+    const prev = out.get(id);
+    if (!prev || (prev.acknowledged && !rec.acknowledged)) out.set(id, rec);
+  }
+  return { map: out, keys: [...keys] };
+}
+
+export const EVENT_SEVERITIES = Object.freeze(['critical', 'error', 'warning', 'info', 'debug', 'unknown']);
+const SEV = { EVENT_SEVERITY_CRITICAL: 'critical', EVENT_SEVERITY_ERROR: 'error', EVENT_SEVERITY_WARNING: 'warning', EVENT_SEVERITY_INFO: 'info', EVENT_SEVERITY_DEBUG: 'debug' };
+export const EVENT_MAX = 2000;
+
+/**
+ * 이벤트(event.v1 Event) → { events:[{key, ts, severity, title, desc, type, devices[], ack, updatedAt, deleted}] (최신 순, 상한 EVENT_MAX),
+ *   bySeverity, total, truncated }. 필드 이름은 cloudvision-apis event.proto 기준(camelCase JSON). 대상 장비는 components 의
+ *   `deviceId` 값에서 뽑는다(없으면 빈 목록 — 지어내지 않는다). **'진행 중(Active)' 여부는 판정하지 않는다** — 스키마에 종료 시각
+ *   필드가 없다(delete_time 은 삭제다). 못 읽으면 events=null.
+ */
+export function parseEvents(text, { max = EVENT_MAX } = {}) {
+  const vals = resourceValues(text);
+  if (vals == null) return { events: null, bySeverity: null, total: 0, truncated: 0, keys: [] };
+  const keys = new Set(); const all = [];
+  for (const v of vals) {
+    if (!isObj(v?.key)) continue;
+    for (const k of Object.keys(v)) if (keys.size < 40) keys.add(k);
+    const ts = tsOf(v.key.timestamp);
+    const devs = [];
+    const comps = Array.isArray(v.components?.components) ? v.components.components : [];
+    for (const c of comps) {
+      const m = isObj(c?.components) ? c.components : {};
+      const id = m.deviceId || m.device || m.serialNumber;
+      if (typeof id === 'string' && id && devs.length < 32 && !devs.includes(id)) devs.push(str(id, 128));
+    }
+    all.push({
+      key: str(v.key.key || '', 256), ts,
+      severity: SEV[v.severity] || 'unknown',
+      title: str(v.title || '', 256), desc: str(v.description || '', 1000), type: str(v.eventType || '', 128),
+      devices: devs, ack: v.ack?.ack === true, updatedAt: tsOf(v.lastUpdatedTime), deleted: tsOf(v.deleteTime) != null,
+    });
+  }
+  all.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  const bySeverity = Object.fromEntries(EVENT_SEVERITIES.map((k) => [k, 0]));
+  for (const e of all) bySeverity[e.severity]++;
+  return { events: all.slice(0, max), bySeverity, total: all.length, truncated: Math.max(0, all.length - max), keys: [...keys] };
 }

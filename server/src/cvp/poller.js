@@ -21,7 +21,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { serversForThisNode, getServerWithSecret } from './registry.js';
 import { loadSettings, onSettingsChange } from './settings.js';
 import { collectCvp, testCvp } from './client.js';
-import { portDelta } from './parse.js';
+import { portDelta, cpuPctFromCounters } from './parse.js';
 import * as db from './db.js';
 import { putStatus, getStatus, keepOnly } from './store.js';
 import { scheduleCvpFaultScan } from './faultScan.js'; // v2.640: 중앙 직접 수집 뒤 장애 전이 판정(디바운스)
@@ -42,6 +42,7 @@ let _busy = false;
 let _last = { at: 0 };
 const _inFlight = new Map();
 const _prevCounters = new Map(); // `${cvpId}|${deviceKey}|${port}` → { at, c }
+const _prevCpu = new Map();      // v2.641: `${cvpId}|${deviceKey}` → { busy, total } (누적 CPU 카운터 — 첫 표본은 null)
 const _prefer = new Map();       // cvpId → Map(kind → 경로 후보)
 const _partsAt = new Map();      // cvpId → 마지막 부품 조회 시각
 const _zeroSince = new Map();    // cvpId → 인벤토리가 처음 0대로 온 시각(COL2611-05 prune 보류)
@@ -55,6 +56,22 @@ export const pollMs = () => loadSettings().intervalMs;
  * slackMs(COL2611-08): 간격 한계에 더할 직전 실행 소요 — 적응 타이머는 실행이 끝난 뒤 재무장하므로 두 표본 간격은
  *   주기 + 실행 시간이다(v2.599 베어메탈 규약과 같다). 없으면 예전처럼 주기×3.
  */
+/**
+ * v2.641 ③: 장비 CPU·메모리 값을 레코드 필드로 옮긴다(제자리). CPU 가 누적 카운터면 이전 표본과의 차이로 사용률을 계산한다
+ *   (첫 표본·리셋은 null — 0% 가 아니다). 못 읽었으면 전부 null.
+ */
+export function applySys(cvpId, dev, prevMap = _prevCpu) {
+  const k = `${cvpId}|${dev.key}`;
+  let cpu = null;
+  if (dev.cpu && dev.cpu.pct != null) cpu = dev.cpu.pct;
+  else if (dev.cpu && dev.cpu.counters) { cpu = cpuPctFromCounters(prevMap.get(k) || null, dev.cpu.counters); prevMap.set(k, dev.cpu.counters); }
+  dev.cpuPct = cpu;
+  dev.memPct = dev.mem ? dev.mem.pct : null;
+  dev.memTotal = dev.mem ? dev.mem.total : null;
+  if (dev.cpuPct == null && dev.memPct == null) dev.sysAt = null;
+  delete dev.cpu; delete dev.mem;
+}
+
 export function applyDeltas(cvpId, dev, intervalMs, prevMap = _prevCounters, slackMs = 0) {
   if (!Array.isArray(dev.ports)) return;
   const at = dev.countersAt;
@@ -128,6 +145,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
     const readAt = Date.now();
     for (const d of r.devices) {
       applyDeltas(full.id, d, settings.intervalMs, _prevCounters, slackMs);
+      applySys(full.id, d);
       d.ts = d.countersAt ?? readAt;
       delete d.counters;
     }
@@ -135,6 +153,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
     if (r.inventoryComplete) {
       const liveDev = new Set(r.devices.map((d) => `${full.id}|${d.key}|`));
       const pre = `${full.id}|`;
+      for (const k of [..._prevCpu.keys()]) if (k.startsWith(pre) && !liveDev.has(`${k}|`)) _prevCpu.delete(k);
       for (const k of [..._prevCounters.keys()]) {
         if (!k.startsWith(pre)) continue;
         const dk = k.slice(0, k.indexOf('|', pre.length) + 1);
@@ -158,6 +177,8 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
     try {
       saved = await db.saveDevices({ agent: db.LOCAL_AGENT, cvpId: full.id, devices: r.devices, samples: true });
       if (r.inventoryComplete && !pruneHeld) { await db.pruneDevices(db.LOCAL_AGENT, { [full.id]: r.devices.map((d) => d.key) }); _zeroSince.delete(full.id); }
+      // v2.641 ④: CVP 이벤트(읽었을 때만 — 못 읽은 주기에 빈 목록으로 지우지 않는다. 이벤트는 upsert 라 지우는 경로가 보존 정리뿐이다).
+      if (r.events && Array.isArray(r.events.list)) await db.saveEvents(db.LOCAL_AGENT, full.id, r.events.list, { now: readAt });
     } catch (e) { saved = { error: e.message }; console.warn(`[cvp] ${full.name || full.id}: DB 적재 실패 — ${e.message}`); }
     putStatus(full.id, {
       name: full.name, ok: true, collectedAt: readAt, lastAttemptAt: readAt, durationMs: readAt - t0, deviceCount: r.devices.length,
@@ -166,6 +187,10 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
       ...(pruneHeld ? { pruneHeld } : {}),
       ...(saved?.unavailable ? { dbUnavailable: true } : {}), ...(saved?.error ? { dbError: saved.error } : {}),
       ...(r.samples ? { samples: r.samples } : {}), // v2.640(② 진단): 종류별 원문 표본(첫 성공 응답 앞 4KB) — 관리자 화면만 본다
+      // v2.641: 경로 탐색 표본(부품 주기마다 갱신 — 없으면 직전 것을 유지한다: 진단 근거를 30분마다 지우지 않게)
+      ...(r.probes ? { probes: r.probes } : getStatus(full.id)?.probes ? { probes: getStatus(full.id).probes } : {}),
+      // v2.641 ④: 이벤트 요약(읽었을 때만 — 못 읽으면 null 이고 화면이 '이벤트를 읽지 못함' 이라 말한다)
+      events: r.events ? { bySeverity: r.events.bySeverity, total: r.events.total, truncated: r.events.truncated, capped: r.events.capped, at: r.events.at } : null,
     });
     // v2.640(③): 중앙 직접 수집분이 DB 에 들어갔으면 장애 전이 판정을 예약한다(엣지는 판정하지 않는다 — 중앙 push 수신이 예약한다).
     if (!config.agent.centralUrl && saved && !saved.unavailable && !saved.error) scheduleCvpFaultScan('poll');
@@ -196,6 +221,7 @@ export async function pollCvpOnce({ manual = false, only = null, trigger = manua
       const live = new Set(all.map((s) => String(s.id)));
       keepOnly(live);
       for (const k of [..._prevCounters.keys()]) if (!live.has(k.split('|')[0])) _prevCounters.delete(k);
+      for (const k of [..._prevCpu.keys()]) if (!live.has(k.split('|')[0])) _prevCpu.delete(k);
       for (const m of [_prefer, _partsAt, _zeroSince]) for (const k of [...m.keys()]) if (!live.has(k)) m.delete(k);
       try { await db.pruneDevices(db.LOCAL_AGENT, {}, { cvpIds: [...live] }); } catch { /* DB 불가 — 다음 주기 */ }
     }
@@ -236,5 +262,5 @@ export function cvpPollerStatus() {
   };
 }
 
-export function _resetForTest() { _busy = false; _last = { at: 0 }; _inFlight.clear(); _prevCounters.clear(); _prefer.clear(); _partsAt.clear(); _zeroSince.clear(); }
+export function _resetForTest() { _busy = false; _last = { at: 0 }; _inFlight.clear(); _prevCounters.clear(); _prevCpu.clear(); _prefer.clear(); _partsAt.clear(); _zeroSince.clear(); }
 export const _prevCountersForTest = _prevCounters;
