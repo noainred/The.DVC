@@ -15,6 +15,7 @@ import { hostUsagePct } from '../views/vcdOverview.js'; // v2.606 WEB2606-02: �
 // **앱 entry 그래프에 정적으로 붙어 있어서**, recharts(vendor-charts 496KB)가 차트가 없는
 // 로그인 화면에서까지 modulepreload 됐다(실측). 둘 다 상세 화면에서만 렌더되므로 지연 로드가 맞다.
 const HostPowerPanel = React.lazy(() => import('./HostPowerPanel.jsx'));
+const HostGpuPanel = React.lazy(() => import('./HostGpuPanel.jsx')); // v2.650
 // v2.449: VM 상세에서도 '자원 축소 근거 리포트'(Optimization 표의 📊 리포트와 같은 화면)를 연다.
 // recharts 를 쓰므로 반드시 lazy — 정적 import 하면 이 파일이 entry 그래프에 있어 로그인 화면까지
 // 차트 번들(496KB)이 따라온다(v2.448 에서 끊어낸 경로).
@@ -467,6 +468,8 @@ export function EntityDetail({ type, item, onClose }) {
           <div className="flex gap wrap">
             {item.gpus.map((g, i) => <span key={i} className="badge gray" style={{ fontSize: 12 }}>{g.model}{g.memGB ? ` · ${g.memGB}GB` : ''}{g.vgpuMode ? ' · vGPU' : ''}</span>)}
           </div>
+          {/* v2.650: GPU 사용률·온도·메모리 할당/사용·VM 별 동작 */}
+          <Lazy><HostGpuPanel hostId={item.id} hostName={item.name} /></Lazy>
         </div>
       )}
       {type === 'host' && <Lazy><HostPowerPanel hostName={item.name} serviceTag={item.serviceTag} /></Lazy>}

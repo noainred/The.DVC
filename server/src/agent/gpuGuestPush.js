@@ -88,7 +88,7 @@ async function _pushGpuGuestNow() {
     return { ok: false, skipped: true, reason: note };
   }
   const hosts = [...getGuestGpuAllHosts().entries()].map(([hostId, v]) => ({ hostId, utilPct: v.utilPct }));
-  const vms = getGuestGpuVms().map((v) => ({ vmId: v.vmId, utilPct: v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, host: v.host, vcenterId: v.vcenterId }));
+  const vms = getGuestGpuVms().map((v) => ({ vmId: v.vmId, utilPct: v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, memUsedMB: v.memUsedMB ?? null, memTotalMB: v.memTotalMB ?? null, tempC: v.tempC ?? null, gpus: v.gpus ?? null, host: v.host, vcenterId: v.vcenterId }));
   const diag = getGpuGuestDiag(); // 선별 깔때기 + VM별 성공/실패(웹 '수집 진단'에서 표시)
   // 진단은 데이터가 없어도(=어디서 막혔는지가 핵심) 항상 보낸다.
   try {

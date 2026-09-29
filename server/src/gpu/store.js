@@ -5,7 +5,7 @@
  */
 
 let byHost = new Map(); // hostId -> { utilPct, at, source:'guest' }
-let byVm = new Map();   // vmId   -> { utilPct, memUsedPct, at, host, vcenterId }
+let byVm = new Map();   // vmId   -> { utilPct, memUsedPct, memUsedMB, memTotalMB, tempC, gpus, at, host, vcenterId }
 
 import { numOrNull } from '../util/numOrNull.js';
 
@@ -15,6 +15,11 @@ import { numOrNull } from '../util/numOrNull.js';
  * 수신 라우트(routes/central.js narrowGpuRow)가 1차로 좁히고, 이 함수가 모든 입력 경로(로컬 폴러 포함)를 다시 좁힌다.
  */
 export const pctOrNull = (v) => { const n = numOrNull(v); return n != null && n >= 0 && n <= 100 ? n : null; };
+/** v2.650: GPU 메모리(MB) — 0 이상 유한수(상한 64TB — GPU 여러 장 합이라 넉넉히). 밖이면 null. */
+export const mbOrNull = (v) => { const n = numOrNull(v); return n != null && n >= 0 && n <= 64 * 1024 * 1024 ? n : null; };
+/** v2.650: GPU 온도(℃) — 센서 오류값(-30 이하·150 이상)은 null(0 으로 두면 '꺼진 GPU' 로 읽힌다). */
+export const tempOrNull = (v) => { const n = numOrNull(v); return n != null && n > -30 && n < 150 ? n : null; };
+const cntOrNull = (v) => { const n = numOrNull(v); return n != null && n >= 0 && n <= 64 ? Math.floor(n) : null; };
 
 /**
  * v2.603(감사 CEN2603-01): 개수 상한. 예전에는 byVm·byHost 에 상한이 없어 토큰 하나로 한 요청 50만 VM 을 계속 밀어 넣으면
@@ -43,7 +48,7 @@ export function withGpuTrust(verified, fn) { const prev = _trust; _trust = !!ver
 export function setGuestGpu({ hosts = [], vms = [], agent = '', verified = _trust }) {
   const now = Date.now();
   hosts = (Array.isArray(hosts) ? hosts : []).filter((h) => h && typeof h === 'object').map((h) => ({ ...h, utilPct: pctOrNull(h.utilPct) }));
-  vms = (Array.isArray(vms) ? vms : []).filter((v) => v && typeof v === 'object').map((v) => ({ ...v, utilPct: pctOrNull(v.utilPct), memUsedPct: pctOrNull(v.memUsedPct) }));
+  vms = (Array.isArray(vms) ? vms : []).filter((v) => v && typeof v === 'object').map((v) => ({ ...v, utilPct: pctOrNull(v.utilPct), memUsedPct: pctOrNull(v.memUsedPct), memUsedMB: mbOrNull(v.memUsedMB), memTotalMB: mbOrNull(v.memTotalMB), tempC: tempOrNull(v.tempC), gpus: cntOrNull(v.gpus) }));
   const ak = agentKeyOf(agent);
   // ① 엣지 보고는 교체 — 이 엣지가 넣은 이전 항목을 지운다(다른 엣지·로컬 항목은 건드리지 않는다).
   if (ak) {
@@ -69,7 +74,7 @@ export function setGuestGpu({ hosts = [], vms = [], agent = '', verified = _trus
     if (!(v && v.vmId != null && (v.utilPct != null || v.utilNA))) continue;
     const exists = byVm.has(v.vmId);
     if (!exists && (nv >= vmCap || byVm.size >= GPU_LIMITS.vmsTotal)) { omittedVms++; continue; }
-    byVm.set(v.vmId, { utilPct: v.utilNA ? null : v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, at: now, host: v.host, vcenterId: v.vcenterId, agent });
+    byVm.set(v.vmId, { utilPct: v.utilNA ? null : v.utilPct, utilNA: !!v.utilNA, memUsedPct: v.memUsedPct ?? null, memUsedMB: v.memUsedMB ?? null, memTotalMB: v.memTotalMB ?? null, tempC: v.tempC ?? null, gpus: v.gpus ?? null, at: now, host: v.host, vcenterId: v.vcenterId, agent });
     nv++;
   }
   return { hosts: nh, vms: nv, omittedHosts, omittedVms };

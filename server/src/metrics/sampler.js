@@ -11,7 +11,8 @@ import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진�
 import { store } from './../store.js';
 import { getMetricsDb } from './db.js';
 import { loadMetricsSettings } from './settings.js';
-import { getGuestGpuHost } from '../gpu/store.js';
+import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
+import { loadGpuGuestSettings } from '../gpu/settings.js';
 import { updateVmStats } from '../reports/vmStats.js';
 import { memSampleRows, maybeLogMem } from '../system/memtrack.js';
 import { insertVmperf, pruneVmperf } from './vmperfDb.js';
@@ -258,6 +259,33 @@ async function sampleOnceInner() {
   }
   for (const [k, arr] of gpuByCluster) rows.push({ metric: 'gpu_cluster', k, v: round1(avg(arr)) });
   for (const [k, arr] of gpuByVc) rows.push({ metric: 'gpu_vc', k, v: round1(avg(arr)) });
+
+  // v2.650: VM 별 GPU 사용률·메모리 점유·온도 + 호스트 GPU 온도(가장 뜨거운 GPU)·메모리 점유.
+  //   계열 수 계산(시간당 롤업 기준): GPU VM 200대 × 3계열 × 8,760시간 = 연 526만 행 — temp_host(655 호스트 연 574만 행)와
+  //   같은 규모다. 원시 표본은 dead-band(0.5 변화)로 줄어든다. 켜진 VM 의 **신선한** 게스트 값만 적재한다
+  //   (게스트 폴 주기 × 3, 최소 15분 — 마지막 값을 매 분 다시 쓰면 장기 차트가 평탄선이 된다, v2.504 규약).
+  //   GPU_VM_SERIES=0 으로 끈다.
+  if (process.env.GPU_VM_SERIES !== '0') {
+    const pollMs = Number(loadGpuGuestSettings()?.pollIntervalMs) || 60_000;
+    const freshMs = Math.max(15 * 60_000, pollMs * 3);
+    const nowG = Date.now();
+    const onGpuVm = new Map((snap.vms || []).filter((v) => v.gpu && v.powerState === 'POWERED_ON' && !staleIds.has(String(v.vcenterId))).map((v) => [v.id, v]));
+    const hostIdOf = new Map((snap.hosts || []).map((h) => [`${h.vcenterId}\t${h.name}`, h.id]));
+    const hostTemp = new Map(); const hostMem = new Map();
+    for (const g of getGuestGpuVms()) {
+      const vm = onGpuVm.get(g.vmId);
+      if (!vm || !(g.at > nowG - freshMs)) continue;
+      if (g.utilPct != null && !g.utilNA) rows.push({ metric: 'gpu_vm_util', k: g.vmId, v: g.utilPct });
+      if (g.memUsedPct != null) rows.push({ metric: 'gpu_vm_mem', k: g.vmId, v: g.memUsedPct });
+      if (g.tempC != null) rows.push({ metric: 'gpu_vm_temp', k: g.vmId, v: g.tempC });
+      const hid = hostIdOf.get(`${vm.vcenterId}\t${vm.host}`);
+      if (!hid) continue;
+      if (g.tempC != null) hostTemp.set(hid, Math.max(hostTemp.get(hid) ?? -Infinity, g.tempC));
+      if (g.memUsedMB != null && g.memTotalMB > 0) { const e = hostMem.get(hid) || [0, 0]; e[0] += g.memUsedMB; e[1] += g.memTotalMB; hostMem.set(hid, e); }
+    }
+    for (const [k, v] of hostTemp) rows.push({ metric: 'gpu_temp', k, v });
+    for (const [k, [u, t]] of hostMem) rows.push({ metric: 'gpu_mem', k, v: round1((u / t) * 100) });
+  }
 
   // VM 실사용 vs 할당 집계(v2.374) — '주기적 실사용 트렌드로 할당량을 조절'하기 위한 시계열.
   //

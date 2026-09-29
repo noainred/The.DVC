@@ -17,6 +17,7 @@ import { collectVmGpuSsh, guestIps, gpuAuthGuard, gpuStopView, isGpuAuthError, p
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
+import { vmVgpuAllocGB } from './vgpuProfile.js'; // v2.650: 데모 VRAM 용량(vGPU 는 프로파일 크기)
 
 let timer = null;
 let lastRun = null;
@@ -65,8 +66,15 @@ function pollMock(snap, vcId) {
   }
   for (const v of snap.vms || []) {
     if (v.vcenterId !== vcId || !hostNames.has(v.host) || v.powerState !== 'POWERED_ON' || !vmUsesGpu(v) || v.template) continue;
-    const util = Math.round(30 + 60 * Math.abs(Math.sin((hashStr(v.id) % 80) + t / 5)));
-    vms.push({ vmId: v.id, host: v.host, vcenterId: vcId, utilPct: Math.min(100, util), memUsedPct: Math.min(100, util + 10) });
+    // v2.650: 데모도 세 동작 상태(연산 중 / 메모리 점유·유휴 / 유휴)가 모두 보이게 VM 마다 성격을 다르게 둔다.
+    const kind = hashStr(v.id) % 3;
+    const wave = Math.abs(Math.sin((hashStr(v.id) % 80) + t / 5));
+    const util = kind === 0 ? Math.round(30 + 60 * wave) : kind === 1 ? Math.round(3 * wave) : Math.round(2 * wave);
+    const memTotalMB = Math.round((vmVgpuAllocGB(v.gpu) ?? 80 * Math.max(1, Number(v.gpu?.count) || 1)) * 1024); // vGPU 는 프로파일 크기만 보인다
+    const memUsedPct = kind === 0 ? Math.min(100, util + 10) : kind === 1 ? 70 : 1;
+    const memUsedMB = Math.round((memTotalMB * memUsedPct) / 100);
+    const tempC = Math.round(kind === 0 ? 45 + util * 0.3 : kind === 1 ? 38 : 32);
+    vms.push({ vmId: v.id, host: v.host, vcenterId: vcId, utilPct: Math.min(100, util), memUsedPct, memUsedMB, memTotalMB, tempC, gpus: Number(v.gpu?.count) || 1 });
   }
   return { hosts, vms };
 }
@@ -216,12 +224,13 @@ async function pollLive(snap, vc, s) {
       const osLabel = isWindows ? 'Windows' : 'Linux';
       const acct = `${creds.username}(${creds.source})·${usedMethod}`;
       if (r && r.utilPct != null) {
-        console.log(`[gpu-guest]   ✓ ${v.name}: util=${r.utilNA ? 'N/A(MIG)' : `${r.utilPct}%`} mem=${r.memUsedPct ?? '-'}% gpus=${r.count}`);
+        console.log(`[gpu-guest]   ✓ ${v.name}: util=${r.utilNA ? 'N/A(MIG)' : `${r.utilPct}%`} mem=${r.memUsedPct ?? '-'}% temp=${r.tempC ?? '-'}C gpus=${r.count}`);
         // v2.593(감사 DATA-02): MIG 모드로 GPU 단위 사용률이 없으면(utilNA) 파서가 0 을 채운다 — 그 0 을 그대로 저장하면
         //   '사용률 0%(유휴)' 가 되어 호스트 대표값·평균을 끌어내린다. 사용률은 null + utilNA 로 싣고 호스트 대표값에서 뺀다.
-        vms.push({ vmId: v.id, host: v.host, vcenterId: vc.id, utilPct: r.utilNA ? null : r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct });
+        // v2.650: 메모리 절대량(MB)·온도(℃, 가장 뜨거운 GPU)·읽은 GPU 수도 싣는다 — 호스트 상세·GPU 모니터링의 할당/사용/온도.
+        vms.push({ vmId: v.id, host: v.host, vcenterId: vc.id, utilPct: r.utilNA ? null : r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, memUsedMB: r.memUsedMB ?? null, memTotalMB: r.memTotalMB ?? null, tempC: r.tempC ?? null, gpus: r.count });
         if (!r.utilNA) { const arr = byHost.get(v.host) || []; arr.push(r.utilPct); byHost.set(v.host, arr); }
-        if (diag.results.length < 200) diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: true, util: r.utilNA ? null : r.utilPct, utilNA: !!r.utilNA, mem: r.memUsedPct ?? null, gpus: r.count });
+        if (diag.results.length < 200) diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: true, util: r.utilNA ? null : r.utilPct, utilNA: !!r.utilNA, mem: r.memUsedPct ?? null, temp: r.tempC ?? null, gpus: r.count });
       } else if (diag.results.length < 200) {
         diag.results.push({ vm: v.name, host: v.host, vcenterId: vc.id, os: osLabel, account: acct, ok: false, error: err || 'nvidia-smi 결과 없음(stdout 비어있음)', ...(authRec ? { authStopped: gpuStopView(authRec) } : {}) });
       }

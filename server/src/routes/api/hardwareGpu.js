@@ -7,6 +7,9 @@ import { config, loadVcenterConfig } from '../../config.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { sendMaybeZip } from '../../util/zip.js';
 import { getGuestGpuVms } from '../../gpu/store.js';
+import { summarizeHostGpu } from '../../gpu/hostGpu.js';
+import { gpuActivity, BUSY_UTIL_PCT, HELD_MEM_PCT } from '../../gpu/activity.js';
+import { vmVgpuAllocGB } from '../../gpu/vgpuProfile.js';
 import { enqueuePing, getPingResults, setPingResults } from '../../central/pingJobs.js';
 import { pingMany } from '../../util/ping.js';
 import { todayStamp } from "../../util/dayKey.js";
@@ -64,10 +67,25 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
     const k = gpuHostKey(vm.vcenterId, g.host || vm.host);
     const arr = guestUtilByHost.get(k) || []; arr.push(g.utilPct); guestUtilByHost.set(k, arr);
   }
+  // v2.650: 호스트별 GPU 메모리 할당/사용·온도·동작 — 호스트 상세와 같은 판정(gpu/hostGpu.js summarizeHostGpu).
+  const guestByVm = new Map(getGuestGpuVms().map((g) => [g.vmId, g]));
+  const gpuVmsByHost = new Map();
+  for (const v of scopedVms) {
+    if (!v.gpu || !v.host) continue;
+    const k = gpuHostKey(v.vcenterId, v.host);
+    (gpuVmsByHost.get(k) || gpuVmsByHost.set(k, []).get(k)).push(v);
+  }
+  let allocGBTotal = 0; let allocHosts = 0; let memUsedMBTotal = 0; let memTotalMBTotal = 0; let memHosts = 0; let tempMax = null;
+  const actTotal = { busy: 0, held: 0, idle: 0, unknown: 0 };
   for (const h of hosts) {
     const gpus = h.gpus || [];
     if (!gpus.length) continue;
     totalGpus += gpus.length;
+    const gs = summarizeHostGpu(h, gpuVmsByHost.get(gpuHostKey(h.vcenterId, h.name)) || [], guestByVm);
+    if (gs.allocGB != null) { allocGBTotal += gs.allocGB; allocHosts++; }
+    if (gs.memUsedMB != null) { memUsedMBTotal += gs.memUsedMB; memTotalMBTotal += gs.memTotalMB; memHosts++; }
+    if (gs.tempC != null) tempMax = tempMax == null ? gs.tempC : Math.max(tempMax, gs.tempC);
+    for (const k of Object.keys(actTotal)) actTotal[k] += gs.activity[k] || 0;
     // 한 호스트에 모드가 섞일 수 있으므로 대표 모드(가장 많은 것) + 개수 분포를 함께 제공.
     const modes = {};
     for (const g of gpus) { const md = g.mode || (g.vgpuMode ? 'vgpu' : 'passthrough'); modes[md] = (modes[md] || 0) + 1; byMode[md] = (byMode[md] || 0) + 1; }
@@ -82,6 +100,11 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
       model: gpus[0].model, memGB: gpus[0].memGB, mode: primaryMode, modes,
       vgpu: primaryMode === 'vgpu', utilPct, utilSource: h.gpuUtilPct != null ? 'esxi' : (guestUtil != null ? 'guest' : null),
       assignedVms: vmAlloc.vms, assignedVmsOn: vmAlloc.on || 0, assignedVmsOff: vmAlloc.off || 0, assignedVmNames: vmAlloc.names || [],
+      // v2.650
+      capacityGB: gs.capacityGB, capacityEstimated: gs.capacityEstimated,
+      allocGB: gs.allocGB, allocUnknown: gs.allocUnknown, allocPct: gs.allocPct, passthroughOn: gs.passthroughOn,
+      memUsedMB: gs.memUsedMB, memTotalMB: gs.memTotalMB, memUsedPct: gs.memUsedPct, memVms: gs.memVms,
+      tempC: gs.tempC, vmsRead: gs.vmsRead, vmsUnread: gs.vmsUnread, activity: gs.activity,
     });
     for (const g of gpus) {
       byModel[g.model] = (byModel[g.model] || 0) + 1;
@@ -97,6 +120,14 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
     gpuVmCount,
     utilReporting: utils.length,
     avgUtilPct: utils.length ? Math.round(utils.reduce((a, b) => a + b, 0) / utils.length) : null,
+    // v2.650: 메모리 할당(vGPU 프로파일 합)·사용(게스트 수집 합)·가장 뜨거운 GPU·동작 상태 개수(켜진 GPU VM 기준 — 겹치지 않는다)
+    allocGB: allocHosts ? Math.round(allocGBTotal * 10) / 10 : null,
+    memUsedMB: memHosts ? memUsedMBTotal : null,
+    memTotalMB: memHosts ? memTotalMBTotal : null,
+    memUsedPct: memHosts && memTotalMBTotal ? Math.round((memUsedMBTotal / memTotalMBTotal) * 100) : null,
+    tempC: tempMax,
+    activity: actTotal,
+    activityRule: { busyUtilPct: BUSY_UTIL_PCT, heldMemPct: HELD_MEM_PCT },
     byMode,
     byModel: Object.entries(byModel).map(([model, count]) => ({ model, count })).sort((a, b) => b.count - a.count),
     byVcenter: Object.entries(byVcenter).map(([vcenterId, count]) => ({ vcenterId, count })).sort((a, b) => b.count - a.count),
@@ -408,6 +439,22 @@ api.get('/tools/ip-ping', requirePerm('tools'), (req, res) => {
   res.json({ ok: true, results: getPingResults(vcenterId, ips) });
 });
 
+// v2.650: 호스트 한 대의 GPU 사용 요약 — 호스트 상세(EntityDetail)의 GPU 칸. 사용률·온도·메모리 할당/사용·VM별 행.
+//   스냅샷·인메모리 오버레이만 읽는다(vCenter·게스트 왕복 0). 범위 밖 호스트는 존재를 숨긴다(404).
+api.get('/tools/gpu/host', requirePerm('tools'), (req, res) => {
+  const snap = store.get();
+  const vcenterId = String(req.query.vcenterId || '');
+  const id = String(req.query.id || '');
+  const name = String(req.query.host || '');
+  const h = (snap.hosts || []).find((x) => (id ? x.id === id : (x.name === name && (!vcenterId || x.vcenterId === vcenterId))));
+  if (!h || !inUserScope(req.user, snap, h.vcenterId)) return res.status(404).json({ ok: false, reason: 'not found' });
+  if (!(h.gpus || []).length) return res.json({ ok: true, hostId: h.id, gpus: 0 });
+  const vms = (snap.vms || []).filter((v) => v.gpu && v.host === h.name && v.vcenterId === h.vcenterId);
+  const guestByVm = new Map(getGuestGpuVms().map((g) => [g.vmId, g]));
+  const sum = summarizeHostGpu(h, vms, guestByVm);
+  res.json({ ok: true, hostId: h.id, host: h.name, vcenterId: h.vcenterId, ...sum, vms: sum.vms.slice(0, 200), vmsOmitted: Math.max(0, sum.vms.length - 200), activityRule: { busyUtilPct: BUSY_UTIL_PCT, heldMemPct: HELD_MEM_PCT } });
+});
+
 // GPU가 할당된 VM 목록 — 어떤 VM이 어떤 방식(vGPU/패스쓰루)·프로파일로 GPU를 쓰는지.
 // 선택 필터: vcenterId, host, mode(vgpu|passthrough|mixed), model(호스트 GPU 모델).
 api.get('/tools/gpu/vms', requirePerm('tools'), (req, res) => {
@@ -433,6 +480,11 @@ api.get('/tools/gpu/vms', requirePerm('tools'), (req, res) => {
         id: v.id, name: v.name, vcenterId: v.vcenterId, host: v.host, cluster: v.cluster,
         powerState: v.powerState, model: modelOf(v), gpu: v.gpu,
         guestUtilPct: g ? g.utilPct : null, guestUtilNA: g ? !!g.utilNA : false, guestMemPct: g ? (g.memUsedPct ?? null) : null, guestAt: g ? g.at : null,
+        // v2.650: VRAM 절대량·온도·동작 판정·vGPU 할당 GB(프로파일에서 계산 — 해석 못 하면 null)
+        guestMemUsedMB: g ? (g.memUsedMB ?? null) : null, guestMemTotalMB: g ? (g.memTotalMB ?? null) : null,
+        guestTempC: g ? (g.tempC ?? null) : null,
+        activity: v.powerState === 'POWERED_ON' ? gpuActivity(g).state : 'off',
+        allocGB: vmVgpuAllocGB(v.gpu),
       };
     }).sort((a, b) => (a.vcenterId === b.vcenterId
       ? String(a.name || '').localeCompare(String(b.name || ''))

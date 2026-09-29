@@ -27,7 +27,7 @@ import { setInventory, getInventory, listInventory } from '../central/inventory.
 import { noteAgentIdentity, noteVcenterOwner } from '../central/agentIdentity.js';
 import { isMockVcenter } from '../mock/generator.js';
 import { setEdgeFleet } from '../central/fleet.js';
-import { setGuestGpu, withGpuTrust } from '../gpu/store.js';
+import { setGuestGpu, withGpuTrust, mbOrNull, tempOrNull } from '../gpu/store.js';
 import { setGpuGuestDiag } from '../central/gpuGuestDiag.js';
 import { takePingJobs, setPingResults } from '../central/pingJobs.js';
 import { takeIdracScanJobs, applyIdracScanResult, setIdracScanProgress, agentOfReq, noteIdracScanBusyPoll } from '../central/idracScanJobs.js';
@@ -1112,6 +1112,11 @@ export function narrowGpuRow(x, dropped = { badPct: 0 }) {
   if (out.hostId == null && out.vmId == null) return null;
   if (Object.hasOwn(x, 'utilPct')) out.utilPct = pctOf(x.utilPct);
   if (Object.hasOwn(x, 'memUsedPct')) out.memUsedPct = pctOf(x.memUsedPct);
+  // v2.650: 메모리 MB·온도·GPU 수 — 범위 밖은 null(gpu/store.js 가 같은 규칙으로 다시 좁힌다). 구버전 엣지는 필드가 없다.
+  if (Object.hasOwn(x, 'memUsedMB')) out.memUsedMB = mbOrNull(x.memUsedMB);
+  if (Object.hasOwn(x, 'memTotalMB')) out.memTotalMB = mbOrNull(x.memTotalMB);
+  if (Object.hasOwn(x, 'tempC')) out.tempC = tempOrNull(x.tempC);
+  if (Object.hasOwn(x, 'gpus')) { const n = numOrNull(x.gpus); out.gpus = n != null && n >= 0 && n <= 64 ? Math.floor(n) : null; }
   if (x.utilNA === true) out.utilNA = true;
   for (const k of ['host', 'vcenterId', 'name']) if (x[k] != null) out[k] = typeof x[k] === 'string' ? x[k].slice(0, 256) : (typeof x[k] === 'number' && Number.isFinite(x[k]) ? String(x[k]) : null);
   return out;
