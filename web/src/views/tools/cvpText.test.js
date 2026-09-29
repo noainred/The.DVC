@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as T from './cvpText.js';
-const { eventDeviceRefs, eventDeviceSort } = T;
+const { eventDeviceRefs, eventDeviceSort, totalsFromDevices, filterKpiNote } = T;
 
 describe('값 표기', () => {
   it('null·빈 문자열은 0 이 아니라 — 이고 단위가 없다', () => {
@@ -481,5 +481,28 @@ describe('v2.648 슬롯 전원 표시', () => {
     expect(fkl2648('psu', 'ecb › Linecard4')).toBe('슬롯 전원(카드)');
     expect(fkl2648('psu', 'powerSupply › PowerSupply1')).toBe('전원(PSU)');
     expect(fkl2648('psu')).toBe('전원(PSU)');
+  });
+});
+
+// v2.652: 필터를 건 장비로 KPI 를 다시 센다 — 못 읽은 장비는 0 에 넣지 않고 따로(서버 cvpTotals 와 같은 규칙).
+describe('totalsFromDevices · filterKpiNote (v2.652)', () => {
+  it('요약 필드로 합계를 내고 못 읽은 장비를 따로 센다', () => {
+    const t = totalsFromDevices([
+      { streaming: true, parts: { fault: 2, warn: 1, unknown: 3 }, bgp: { down: 1, stateUnknown: 2 }, ports: { down: 4, noLink: 5 }, cpuPct: 85, memPct: 40 },
+      { streaming: false, parts: null, bgp: null, ports: null, cpuPct: null, memPct: null, info: { bgpEmpty: true, portsEmpty: true } },
+      null,
+    ]);
+    expect(t).toMatchObject({ devices: 2, streaming: 1, partsFault: 2, partsWarn: 1, partsUnknown: 3, partsUnread: 1,
+      bgpDown: 1, bgpStateUnknown: 2, bgpUnread: 1, bgpEmpty: 1, portsDown: 4, portsNoLink: 5, portsUnread: 1, portsEmpty: 1,
+      cpuHigh: 1, memHigh: 0, sysUnread: 1, cpuMax: 85, memMax: 40 });
+  });
+  it('빈 목록이면 0대 · 최대값은 null(지어내지 않는다)', () => {
+    expect(totalsFromDevices([])).toMatchObject({ devices: 0, cpuMax: null, memMax: null });
+  });
+  it('필터가 없으면 문구 없음 · 있으면 기준 대수·상한 절단·전이 KPI 한계를 말한다', () => {
+    expect(filterKpiNote({ active: false })).toBeNull();
+    const s = filterKpiNote({ active: true, shown: 12, total: 327, omitted: 3 });
+    expect(s).toMatch(/12대/); expect(s).toMatch(/327대/); expect(s).toMatch(/3대 잘려/); expect(s).toMatch(/열린 장애/);
+    expect(s).not.toMatch(/`/);
   });
 });

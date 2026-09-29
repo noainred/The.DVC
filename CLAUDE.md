@@ -3811,6 +3811,11 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     트랜시버 노드는 장착 여부만 준다(건강 아님 — 정상으로 칠하지 않는다) · DOM 은 xcvr 만 추종 깊이 3 + `dom` 이름 포인터만(추정 경로) ·
     **링크가 올라온 포트만** 수신 광량을 판정(바닥이 정상인 미사용 포트를 장애로 세지 않는다) · 장비 임계 먼저, 없으면 CVP 설정 `xcvrRxWarnDbm`/`xcvrRxFaultDbm` ·
     `show interfaces transceiver` 는 스위치 CLI 라 CVP REST 로 실행할 수 없다(스위치 계정이 필요 — 도입하지 않음). CVP 등록·설정은 'CVP 설정' 탭에만 있다.
+  - **CVP 장비 목록 EOS 버전 칩 · 필터 연동 KPI(v2.652)** — 사용자 요청 "CVP 버전별로 보는 기능, 모델 아래 버전 표시" + "아래 조건 필터 걸면 위 숫자 변경":
+    `deviceFacets.facetState` 에 선택 셋째 축(`verSel`·`verOf`·`verLabel`, 없으면 예전 두 축 그대로 — 스토리지 화면 무변경)과 `DeviceFacetBar` 셋째 줄을 더했다
+    (검색창은 마지막 줄 끝 규약 유지). 버전 = 장비의 **EOS 버전**(`cvpOverviewText.eosVersionOf`) — CVP 서버 자신의 버전이 아니다. KPI 는 필터가 걸리면
+    `cvpText.totalsFromDevices`(서버 `cvpTotals` 와 같은 규칙 — 못 읽은 장비는 따로)로 다시 세고 `filterKpiNote` 가 기준 대수·목록 상한 절단·
+    '열린 장애(전이)' 는 전체 기준임을 말한다(장비 목록에 전이 기록이 없어 거를 수 없다 — 지어내지 않는다).
   - **CVP 인터페이스 세부 정보(v2.649) — 설명은 설정 노드에서 부품 주기에 읽고, `null`(못 읽음)과 `''`(설명 없음)을 구분한다**
     (`cvp/parse.js parseIntfConfig·intfDetailOf·xcvrTypeText` · `poller.js fillDescs` · 웹 `CvpInterfaces.jsx`·`cvpIntfText.js`, 상세 `docs/CVP.md` §16):
     DB 는 설명·세부 열이 NULL 이면 직전 값을 유지(COALESCE)한다 — '' 로 채우면 설명을 지운 것이 된다. `pick` 은 빈 문자열을 건너뛰므로 설명은 키를 직접 찾는다.

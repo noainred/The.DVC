@@ -92,3 +92,14 @@ describe('cvpOverviewText (v2.645)', () => {
     expect(/uppercase/i.test(src)).toBe(false);
   });
 });
+
+describe('eosVersionOf · versionLabel (v2.652)', () => {
+  it('EOS 버전을 읽고 못 읽으면 빈 값 → (버전 미상)', async () => {
+    const { eosVersionOf, versionLabel } = await import('./cvpOverviewText.js');
+    expect(eosVersionOf({ eosVersion: ' 4.30.1F ' })).toBe('4.30.1F');
+    expect(eosVersionOf({})).toBe('');
+    expect(eosVersionOf(null)).toBe('');
+    expect(versionLabel('')).toBe('(버전 미상)');
+    expect(versionLabel('4.30.1F')).toBe('4.30.1F');
+  });
+});

@@ -18,6 +18,8 @@
  *  ⑤ 검색은 공백 구분 **다중 키워드 AND**.
  */
 
+const VER_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+
 /** 문자열 Set 토글(불변) — 화면이 `setState(toggle(prev, v))` 로 쓴다. */
 export function toggleIn(prev, v) {
   const next = new Set(prev);
@@ -38,8 +40,12 @@ export function toggleIn(prev, v) {
  * @param {Function} [o.hay]      행 → 검색 건초더미 배열(화면마다 다른 필드를 더할 수 있게)
  * @returns {{searched:object[], shown:object[], dcChips:object[], typeChips:object[], facetOn:boolean}}
  */
-export function facetState({ rows = [], dcSel, typeSel, query = '', dcName, typeLabel, hay = null }) {
+export function facetState({ rows = [], dcSel, typeSel, query = '', dcName, typeLabel, hay = null, verSel, verOf = null, verLabel = null }) {
   const dSel = dcSel instanceof Set ? dcSel : new Set();
+  // v2.652: 선택 축 셋째(버전) — verOf 가 없으면 예전 두 축 동작 그대로(verChips 빈 배열).
+  const vSel = verOf && verSel instanceof Set ? verSel : new Set();
+  const vKey = (r) => (verOf ? String(verOf(r) ?? '') : '');
+  const vLabel = verLabel || ((v) => String(v || ''));
   const tSel = typeSel instanceof Set ? typeSel : new Set();
   const name = dcName || ((id) => String(id || '미지정'));
   const tLabel = typeLabel || ((t) => String(t || ''));
@@ -55,7 +61,8 @@ export function facetState({ rows = [], dcSel, typeSel, query = '', dcName, type
   const searched = rows.filter(matches);                       // 규칙 ①
   const inDc = (r) => dSel.size === 0 || dSel.has(name(r.datacenterId));
   const inType = (r) => tSel.size === 0 || tSel.has(r.type);
-  const shown = searched.filter((r) => inDc(r) && inType(r));  // 규칙 ③④
+  const inVer = (r) => vSel.size === 0 || vSel.has(vKey(r));
+  const shown = searched.filter((r) => inDc(r) && inType(r) && inVer(r));  // 규칙 ③④
 
   // 법인 칩 — 개수는 '장비 종류 선택' 을 반영(규칙 ②)
   const byDc = new Map();
@@ -65,7 +72,7 @@ export function facetState({ rows = [], dcSel, typeSel, query = '', dcName, type
     byDc.get(k).push(r);
   }
   const dcChips = [...byDc.entries()]
-    .map(([dc, list]) => ({ dc, list, count: list.filter(inType).length }))
+    .map(([dc, list]) => ({ dc, list, count: list.filter((r) => inType(r) && inVer(r)).length }))
     .sort((a, b) => a.dc.localeCompare(b.dc, 'ko'));
 
   // 종류 칩 — 개수는 '법인 선택' 을 반영(규칙 ②)
@@ -75,10 +82,24 @@ export function facetState({ rows = [], dcSel, typeSel, query = '', dcName, type
     byType.get(r.type).push(r);
   }
   const typeChips = [...byType.entries()]
-    .map(([type, list]) => ({ type, list, count: list.filter(inDc).length }))
+    .map(([type, list]) => ({ type, list, count: list.filter((r) => inDc(r) && inVer(r)).length }))
     .sort((a, b) => tLabel(a.type).localeCompare(tLabel(b.type), 'ko'));
 
-  return { searched, shown, dcChips, typeChips, facetOn: dSel.size > 0 || tSel.size > 0 };
+  // 버전 칩 — 개수는 '법인·종류 선택' 을 반영(규칙 ②). 숫자 인식 정렬(4.28.3M < 4.30.1F), 미상('')은 맨 뒤.
+  let verChips = [];
+  if (verOf) {
+    const byVer = new Map();
+    for (const r of searched) {
+      const k = vKey(r);
+      if (!byVer.has(k)) byVer.set(k, []);
+      byVer.get(k).push(r);
+    }
+    verChips = [...byVer.entries()]
+      .map(([ver, list]) => ({ ver, list, count: list.filter((r) => inDc(r) && inType(r)).length }))
+      .sort((a, b) => (a.ver === '') - (b.ver === '') || VER_COLLATOR.compare(vLabel(a.ver), vLabel(b.ver)));
+  }
+
+  return { searched, shown, dcChips, typeChips, verChips, facetOn: dSel.size > 0 || tSel.size > 0 || vSel.size > 0 };
 }
 
 /**

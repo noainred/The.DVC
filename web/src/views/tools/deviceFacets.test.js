@@ -116,3 +116,31 @@ describe('방어', () => {
     expect(facetState({ rows: ROWS, dcSel: null, typeSel: undefined }).shown).toHaveLength(4);
   });
 });
+
+// v2.652: 셋째 축(버전) — 개수는 다른 두 축의 선택을 반영하고, 넘기지 않으면 예전 두 축 그대로다.
+describe('facetState — 버전 축(v2.652)', () => {
+  const rows = [
+    { datacenterId: 'A', type: 'm1', ver: '4.30.1F' },
+    { datacenterId: 'A', type: 'm2', ver: '4.28.3M' },
+    { datacenterId: 'B', type: 'm1', ver: '4.30.1F' },
+    { datacenterId: 'B', type: 'm1', ver: '' },
+  ];
+  const base = { rows, dcSel: new Set(), typeSel: new Set(), verOf: (r) => r.ver };
+  it('verOf 가 없으면 verChips 는 빈 배열이고 필터도 없다', () => {
+    const f = facetState({ rows, dcSel: new Set(), typeSel: new Set(), verSel: new Set(['4.30.1F']) });
+    expect(f.verChips).toEqual([]);
+    expect(f.shown.length).toBe(4);
+  });
+  it('버전 칩: 숫자 인식 정렬 · 미상은 맨 뒤 · 개수는 법인·모델 선택 반영', () => {
+    const f = facetState({ ...base, dcSel: new Set(['A']) });
+    expect(f.verChips.map((c) => c.ver)).toEqual(['4.28.3M', '4.30.1F', '']);
+    expect(Object.fromEntries(f.verChips.map((c) => [c.ver, c.count]))).toEqual({ '4.28.3M': 1, '4.30.1F': 1, '': 0 });
+  });
+  it('버전을 고르면 shown·법인·모델 칩 개수가 그 버전으로 줄고 facetOn 이 켜진다', () => {
+    const f = facetState({ ...base, verSel: new Set(['4.30.1F']) });
+    expect(f.shown.length).toBe(2);
+    expect(f.facetOn).toBe(true);
+    expect(Object.fromEntries(f.dcChips.map((c) => [c.dc, c.count]))).toEqual({ A: 1, B: 1 });
+    expect(Object.fromEntries(f.typeChips.map((c) => [c.type, c.count]))).toEqual({ m1: 2, m2: 0 });
+  });
+});

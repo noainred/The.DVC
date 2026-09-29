@@ -208,6 +208,9 @@ export function corpNameFn(devices) {
   return (id) => m.get(id ?? '') || (id ? String(id) : UNASSIGNED_LABEL);
 }
 export const modelLabel = (t) => t || '(모델 미상)';
+/** v2.652: 버전 축 — 장비가 보고한 EOS 버전. 읽지 못한 장비는 '(버전 미상)' 한 칸(지어내지 않는다). */
+export const eosVersionOf = (d) => (d && typeof d === 'object' && typeof d.eosVersion === 'string' ? d.eosVersion.trim() : '');
+export const versionLabel = (v) => v || '(버전 미상)';
 
 /**
  * 이벤트 화면의 두 축(v2.646 사용자 요청 — '법인: AZ WA … / 이벤트: 경고 오류' 를 **따로** 고른다. 한 칩에 둘을 묶지 않는다).

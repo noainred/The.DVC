@@ -14,7 +14,7 @@ import CvpPowerView from './CvpPower.jsx';
 import CvpInterfacesView from './CvpInterfaces.jsx';
 import { descCell, byIntfName } from './cvpIntfText.js';
 import {
-  facetRowsOf, corpNameFn, modelLabel, eventCorpChips, eventSevChips, deviceSummaryTiles, historyNotes, CORP_NOTE, corpLabel,
+  facetRowsOf, corpNameFn, modelLabel, eosVersionOf, versionLabel, eventCorpChips, eventSevChips, deviceSummaryTiles, historyNotes, CORP_NOTE, corpLabel,
 } from './cvpOverviewText.js';
 import {
   overviewRows, sysCell, eventReadNotes, severityTone, severityLabel,
@@ -26,7 +26,7 @@ import {
   missingFootnotes, itemLabel, CANDIDATE_NOTE, deviceCountLabel, partsCell, bgpCell, portsCell, streamingText, filterDevices,
   partState, partCounts, seriesGeometry, seriesSourceNote, collectSummary,
   EMPTY_SERVER, serverToForm, serverPayload, choiceOptions, settingsPayload, settingsToForm, SECRET_MASK,
-  isTruncated, canCollect, listNotes, partsMissingText, telemetryText,
+  isTruncated, canCollect, listNotes, totalsFromDevices, filterKpiNote, partsMissingText, telemetryText,
   edgeReportView, serverMetaText, dbStatsText, DEVICE_CHIPS, chipCounts, filterByChip, devicesCsvPath, CSV_NOTE,
   CHART_MODES, seriesGeometryBps, chartCutNote, faultKindLabel, faultRowView, faultEventText, faultKpi, faultScanNote, FAULT_INTRO,
   sampleRows, SAMPLE_NOTE, PREVIEW_NOTE, previewSummary, previewColumns, sampleBadge, SYS_HIGH_PCT,
@@ -71,6 +71,7 @@ export default function CvpTool() {
   const [ovErr, setOvErr] = useState(null);
   const [dcSel, setDcSel] = useState(() => new Set());   // v2.645 법인 칩(표시명)
   const [typeSel, setTypeSel] = useState(() => new Set()); // v2.645 모델 칩
+  const [verSel, setVerSel] = useState(() => new Set());   // v2.652 EOS 버전 칩
   const loadSeq = useRef(0);
   // v2.641: 화면 전환(장비 · 포트 사용량 · 이벤트) — URL 에 싣는다(v2.613 도구 안 서브탭 규약).
   // v2.645: Overview 가 기본 화면이다(사용자 승인 시안) · 모델 · 트래픽 추가.
@@ -119,11 +120,15 @@ export default function CvpTool() {
   const scoped = cvpSel ? devList.filter((d) => String(d.cvpId) === cvpSel) : devList;
   const searched = filterDevices(scoped, q);
   // v2.645: 법인 × 모델 칩(스토리지 모니터링과 같은 DeviceFacetBar · deviceFacets 판정). 칩 목록은 검색만 적용한 집합에서.
-  const facet = facetState({ rows: facetRowsOf(searched), dcSel, typeSel, dcName: corpNameFn(devList), typeLabel: modelLabel });
+  const facet = facetState({ rows: facetRowsOf(searched), dcSel, typeSel, dcName: corpNameFn(devList), typeLabel: modelLabel, verSel, verOf: eosVersionOf, verLabel: versionLabel });
   const chips = chipCounts(facet.shown); // 상태 칩 개수는 '법인·모델까지 적용한 집합' 에서(자기 칩으로 자기 개수를 줄이지 않는다)
   const shown = filterByChip(facet.shown, chip);
-  const goCorp = (name) => { setDcSel(new Set(name ? [name] : [])); setTypeSel(new Set()); setChip('all'); setView('devices'); };
-  const goModel = (model) => { setTypeSel(new Set([model ?? ''])); setDcSel(new Set()); setChip('all'); setView('devices'); };
+  // v2.652: 장비 화면에서 조건(CVP·검색·법인·모델·버전·상태 칩)을 걸면 위 KPI 를 그 장비들로 다시 센다.
+  const filterActive = view === 'devices' && devList.length > 0 && (!!cvpSel || !!String(q || '').trim() || facet.facetOn || (chip && chip !== 'all'));
+  const kpiTotals = filterActive ? totalsFromDevices(shown) : data.totals;
+  const kpiNote = filterKpiNote({ active: filterActive, shown: shown.length, total: devList.length, omitted: devices?.omitted });
+  const goCorp = (name) => { setDcSel(new Set(name ? [name] : [])); setTypeSel(new Set()); setVerSel(new Set()); setChip('all'); setView('devices'); };
+  const goModel = (model) => { setTypeSel(new Set([model ?? ''])); setDcSel(new Set()); setVerSel(new Set()); setChip('all'); setView('devices'); };
   const downloadCsv = async () => {
     setCsvMsg(null);
     try { await downloadFile(devicesCsvPath(cvpSel, q)); }
@@ -163,10 +168,11 @@ export default function CvpTool() {
       {addressHiddenNote(data) && <div className="banner">🔒 <BoldText text={addressHiddenNote(data)} /></div>}
 
       {view !== 'overview' && <div className="kpis">
-        {[...kpiItems(data.totals), faultKpi(data.faults)].map((k) => (
+        {[...kpiItems(kpiTotals), faultKpi(data.faults)].map((k) => (
           <Kpi key={k.key} label={k.label} value={k.value} accent={k.accent || undefined} meta={k.meta || undefined} />
         ))}
       </div>}
+      {view !== 'overview' && kpiNote && <div style={NOTE}><BoldText text={kpiNote} /></div>}
 
       <div style={ROW}>
         {[['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['intf', '인터페이스 세부 정보'], ['ports', '포트 사용량'], ['optics', '광신호'], ['power', '전력'], ['events', '이벤트'], ['settings', 'CVP 설정']].map(([k, l]) => (
@@ -201,8 +207,10 @@ export default function CvpTool() {
           <div style={{ marginTop: 8 }}>
             <DeviceFacetBar dcChips={facet.dcChips} typeChips={facet.typeChips} dcSel={dcSel} typeSel={typeSel}
               onToggleDc={(v) => setDcSel((p) => toggleIn(p, v))} onToggleType={(v) => setTypeSel((p) => toggleIn(p, v))}
-              onClear={() => { setDcSel(new Set()); setTypeSel(new Set()); }}
-              query={q} onQuery={setQ} typeLabel={modelLabel} typeTitle="🗄 모델" placeholder="호스트명·모델·시리얼·EOS" />
+              onClear={() => { setDcSel(new Set()); setTypeSel(new Set()); setVerSel(new Set()); }}
+              query={q} onQuery={setQ} typeLabel={modelLabel} typeTitle="🗄 모델" placeholder="호스트명·모델·시리얼·EOS"
+              verChips={facet.verChips} verSel={verSel} onToggleVer={(v) => setVerSel((p) => toggleIn(p, v))}
+              verLabel={versionLabel} verTitle="🏷 EOS 버전" />
             <div style={{ ...NOTE, marginTop: 4 }}><BoldText text={CORP_NOTE} /></div>
           </div>
         )}

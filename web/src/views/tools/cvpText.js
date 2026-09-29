@@ -95,6 +95,48 @@ export function kpiItems(totals) {
   ];
 }
 
+/**
+ * v2.652: 장비 목록 행(`/tools/cvp/devices` 의 publicDevice 모양) → KPI 합계. 서버 `routes/api/cvp.js cvpTotals` 와 같은 규칙이다
+ *   (행의 parts·bgp 는 이미 요약이다). 법인·모델·버전·검색 필터를 건 부분 집합의 숫자를 위 KPI 에 그리기 위한 것 — 사용자 요청
+ *   "아래 조건 필터 걸면 위 숫자 변경되게". 못 읽은 장비는 0 에 넣지 않고 따로 센다(서버와 같은 판단).
+ */
+export function totalsFromDevices(rows) {
+  const t = { devices: 0, streaming: 0, partsFault: 0, partsWarn: 0, partsUnknown: 0, partsUnread: 0, bgpDown: 0, bgpStateUnknown: 0, bgpUnread: 0, bgpEmpty: 0,
+    portsDown: 0, portsNoLink: 0, portsUnread: 0, portsEmpty: 0, cpuHigh: 0, memHigh: 0, sysUnread: 0, cpuMax: null, memMax: null };
+  const n0 = (v) => numOrNull(v) ?? 0;
+  for (const d of Array.isArray(rows) ? rows : []) {
+    if (!d || typeof d !== 'object') continue;
+    t.devices++;
+    if (d.streaming === true) t.streaming++;
+    const p = d.parts && typeof d.parts === 'object' ? d.parts : null;
+    if (p) { t.partsFault += n0(p.fault); t.partsWarn += n0(p.warn); t.partsUnknown += n0(p.unknown); } else t.partsUnread++;
+    const b = d.bgp && typeof d.bgp === 'object' ? d.bgp : null;
+    if (b) { t.bgpDown += n0(b.down); t.bgpStateUnknown += n0(b.stateUnknown); } else t.bgpUnread++;
+    const po = d.ports && typeof d.ports === 'object' ? d.ports : null;
+    if (po) { t.portsDown += n0(po.down); t.portsNoLink += n0(po.noLink); } else t.portsUnread++;
+    if (!b && d.info?.bgpEmpty) t.bgpEmpty++;
+    if (!po && d.info?.portsEmpty) t.portsEmpty++;
+    const cpu = numOrNull(d.cpuPct); const mem = numOrNull(d.memPct);
+    if (cpu == null && mem == null) t.sysUnread++;
+    if (cpu != null) { if (cpu >= SYS_HIGH_PCT) t.cpuHigh++; t.cpuMax = Math.max(t.cpuMax ?? 0, cpu); }
+    if (mem != null) { if (mem >= SYS_HIGH_PCT) t.memHigh++; t.memMax = Math.max(t.memMax ?? 0, mem); }
+  }
+  return t;
+}
+
+/**
+ * v2.652: 필터를 건 KPI 가 무엇을 기준으로 셌는지(한 줄). 필터가 없으면 null(예전 서버 합계 그대로).
+ *   · 목록이 상한으로 잘렸으면(omitted) 필터 합계도 받은 장비까지만이다 — 그 사실을 말한다(부분 합을 전체라 말하지 않는다).
+ *   · '열린 장애(전이)' 는 장비 목록에 없는 전이 기록이라 필터를 반영하지 못한다 — 전체 기준임을 밝힌다.
+ */
+export function filterKpiNote({ active, shown, total, omitted } = {}) {
+  if (!active) return null;
+  const bits = [`필터 적용 — 위 숫자는 조건에 맞는 장비 **${countText(shown)}대** 기준입니다(전체 ${countText(total)}대)`];
+  if (numOrNull(omitted) > 0) bits.push(`장비 목록이 상한으로 ${countText(omitted)}대 잘려 받은 장비만 셌습니다`);
+  bits.push('‘열린 장애(전이)’ 는 필터를 반영하지 않은 전체 기준입니다');
+  return bits.join(' · ');
+}
+
 // ── 서버(CVP) 상태 ───────────────────────────────────────────────────────────
 
 /** authStopped 값(불리언 또는 {since,at,attempts,reason}) → 있으면 true. */
