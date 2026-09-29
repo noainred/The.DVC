@@ -3782,6 +3782,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     웹 `cvpMoreText.test.js`·`cvpBulkText.test.js`):
     - **증상**: v2.608 후보 경로가 전부 HTTP 200 + `{"notifications":[]}` 였고 파서가 그것을 '읽었고 0개' 로 세 173대가 초록 `0/0`·'피어 없음' 이었다.
       notifications 형식에서 개체 0개는 **null(못 읽음)** 이다(`parse.notRead`). 새 파서도 이 규칙을 따를 것.
+    - ⚠ **v2.642 정정 — 실장비 포인터는 `{"ptr":[조각…]}` 배열이다**(원문 표본 캡처로 확인). v2.641 은 `_ptr` 문자열만 알아 포인터를 한 번도
+      따라가지 못했다(포트·BGP·CPU 전부 '읽지 못함'). 값은 `{"int":…}` 타입 래퍼·키는 객체일 수 있고·같은 경로가 여러 notification 으로 나뉜다.
+      `/Kernel/proc/stat` 은 PID 별이라 CPU 후보에서 뺐다. 상세 `docs/CVP.md` §9 · 회귀 `test/cvp2642.test.js`. **추정 형식으로 파서를 만들었으면
+      실장비 원문 표본을 받는 즉시 그 형식을 픽스처로 옮길 것.**
     - **컬렉션은 `_ptr` 포인터다**(사용자 Telemetry Browser 캡처로 `intfStatus` 확인) — `followPtrs` 가 따라간다. 개체 이름은 **포인터 키**
       (응답 경로 꼬리는 'Ethernet3/1' 에서 잘린다). v2.608 의 `vrfBgpPeerInfoStatusEntryTable`·`/Smash/counters/ethIntf` 는 **이 장비에 없는
       경로**였다 — 경로를 추정할 때는 경로 탐색 표본(`probes`)으로 확인하기 전에 '있다' 고 적지 말 것.
