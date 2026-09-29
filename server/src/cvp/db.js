@@ -901,7 +901,9 @@ export async function listEvents({ agent = null, cvpId = null, cvpIds = null, si
   }
   const counts = {};
   for (const r of db.conn.prepare(`SELECT severity, COUNT(*) AS n FROM cvp_event WHERE ${where.join(' AND ')} GROUP BY severity`).all(...args)) counts[r.severity] = Number(r.n);
-  if (severity) { where.push('severity=?'); args.push(String(severity)); }
+  // v2.646: 심각도 묶음(오류 = critical+error) — 배열이면 IN.
+  if (Array.isArray(severity) && severity.length) { const sv = severity.slice(0, 8).map(String); where.push(`severity IN (${sv.map(() => '?').join(',')})`); pushAll(args, sv); }
+  else if (severity && !Array.isArray(severity)) { where.push('severity=?'); args.push(String(severity)); }
   const lim = Math.max(1, Math.min(2000, Number(limit) || 500));
   const rows = db.conn.prepare(`SELECT * FROM cvp_event WHERE ${where.join(' AND ')} ORDER BY ts DESC LIMIT ?`).all(...args, lim + 1);
   return {

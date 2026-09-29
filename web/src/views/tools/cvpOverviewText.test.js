@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import {
   healthRing, healthNote, overviewKpis, corpCards, modelBars, versionRows, freshnessRows, trafficRows,
-  facetRowsOf, corpNameFn, eventCorpChips, deviceSummaryTiles, historyNotes, corpLabel, UNASSIGNED_LABEL, CORP_NOTE, TRAFFIC_NOTE,
+  facetRowsOf, corpNameFn, eventCorpChips, eventSevChips, deviceSummaryTiles, historyNotes, corpLabel, UNASSIGNED_LABEL, CORP_NOTE, TRAFFIC_NOTE,
 } from './cvpOverviewText.js';
 
 describe('cvpOverviewText (v2.645)', () => {
@@ -66,10 +66,16 @@ describe('cvpOverviewText (v2.645)', () => {
     const nm = corpNameFn(devs);
     expect(nm('kr')).toBe('Korea'); expect(nm('')).toBe(UNASSIGNED_LABEL);
   });
-  it('eventCorpChips — 오류(critical+error)·경고, 미지정은 맨 뒤', () => {
-    const c = eventCorpChips([{ corpId: '', total: 1, bySeverity: { warning: 1 } }, { corpId: 'kr', corpName: 'Korea', total: 3, bySeverity: { critical: 1, error: 1, info: 1 } }]);
-    expect(c[0].corpId).toBe('kr'); expect(c[0].errors).toBe(2); expect(c[0].tone).toBe('bad');
-    expect(c[1].tone).toBe('warn');
+  it('eventCorpChips·eventSevChips — 두 축을 따로, 개수는 다른 축 선택 기준', () => {
+    const cc = [{ corpId: '', total: 1, bySeverity: { warning: 1 } }, { corpId: 'kr', corpName: 'Korea', total: 3, bySeverity: { critical: 1, error: 1, info: 1 } }];
+    const c = eventCorpChips(cc, 'errors');
+    expect(c[0].corpId).toBe('kr'); expect(c[0].count).toBe(2); expect(c[1].count).toBe(0);
+    expect(eventCorpChips(cc, 'warning')[1].count).toBe(1);
+    expect(eventCorpChips(cc)[0].count).toBe(3);
+    const s = eventSevChips({ critical: 1, error: 2, warning: 4 });
+    expect(s.map((x) => x.label)).toEqual(['전체', '오류', '경고']);
+    expect(s.find((x) => x.key === 'errors').count).toBe(3);
+    expect(eventSevChips({}, 'info').map((x) => x.key)).toContain('info');
   });
   it('deviceSummaryTiles·historyNotes — 못 읽으면 —, 잘린 개수를 밝힌다', () => {
     const t = deviceSummaryTiles({ device: { corpId: 'kr', corpName: 'Korea', ports: { down: 2 } }, history: { openFaults: [{ state: 'fault' }], events: [{ severity: 'error' }], eventDays: 7 } });

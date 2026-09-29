@@ -104,7 +104,7 @@ async function collectOne(srv, { periodic, settings, forceParts, slackMs = 0 }) 
   try {
     let r;
     try {
-      r = await withDeadline(timeout, (signal) => collectCvp(full, { signal, budgetMs: Math.max(20_000, timeout - 10_000), partsDue, prefer }), 'CVP 수집 시한 초과');
+      r = await withDeadline(timeout, (signal) => collectCvp(full, { signal, budgetMs: Math.max(20_000, timeout - 10_000), partsDue, prefer, optics: { warnDbm: settings.xcvrRxWarnDbm, faultDbm: settings.xcvrRxFaultDbm } }), 'CVP 수집 시한 초과');
     } catch (e) {
       const auth = !!e?.authFailed;
       const msg = e?.message || String(e);

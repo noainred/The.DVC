@@ -380,11 +380,12 @@ export function partState(flat) {
  * @returns {{ parts: Array<{kind,name,state,detail}>|null, keys: string[], truncated: number }}
  */
 export function parseParts(text, kind, { max = PART_MAX } = {}) {
-  const { entities, format, keys, droppedFields } = entitiesOf(text);
-  if (notRead(format, entities)) return { parts: null, keys, truncated: 0 };
+  const { entities: raw0, format, keys, droppedFields } = entitiesOf(text);
+  if (notRead(format, raw0)) return { parts: null, keys, truncated: 0 };
+  const entities = kind === 'xcvr' ? mergeXcvrDom(raw0) : raw0;
   const parts = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
-    if (pick(f, ['state', 'status', 'health', 'operStatus', 'powerSupplyState', 'fanState', 'hwStatus', 'xcvrPresence', 'presence', 'alertRaised', 'alarm', 'overheat', 'critical', 'temperature', 'currentTemperature']) === undefined) { unrecognized++; continue; }
+    if (pick(f, ['state', 'status', 'health', 'operStatus', 'powerSupplyState', 'fanState', 'hwStatus', 'xcvrPresence', 'presence', 'alertRaised', 'alarm', 'overheat', 'critical', 'temperature', 'currentTemperature', ...(kind === 'xcvr' ? DOM_FIELDS.map((d) => d.key) : [])]) === undefined) { unrecognized++; continue; }
     if (parts.length >= max) { truncated++; continue; }
     const st = partState(f);
     const detailBits = [];
@@ -392,10 +393,117 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
     if (raw != null) detailBits.push(String(raw));
     const t = numOrNull(pick(f, ['temperature', 'currentTemperature', 'value']));
     if (kind === 'temp' && t != null) detailBits.push(`${Math.round(t * 10) / 10}℃`); // v2.643: 25.329440000034℃ 같은 부동소수 꼬리를 자른다
-    parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200) });
+    let dom = null; let domJudge = null;
+    if (kind === 'xcvr') {
+      const x = xcvrDom(f);
+      dom = x.values;
+      if (raw == null && st !== 'absent') {
+        const pres = unwrap(pick(f, ['xcvrPresence', 'presence']));
+        if (pres != null) detailBits.push(`장착(${String(pres)})`);
+      }
+      if (x.text) detailBits.push(x.text);
+      // 최종 판정(광량 포함)은 judgeOptics 가 포트 링크 상태를 보고 한다 — 여기서는 재료만 싣는다.
+      if (dom) domJudge = { otherState: x.otherState, rxDevice: x.rxDevice };
+    }
+    parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200), ...(dom ? { dom, domJudge } : {}) });
   }
   if (!parts.length && unrecognized) return { parts: null, keys, truncated: 0 };
   return { parts, keys, truncated, droppedFields };
+}
+
+/*
+ * v2.646 — 트랜시버 DOM(`show interfaces transceiver` 의 값). ⚠ 필드 이름·단위는 실장비로 확인하지 못했다(추정) — 후보 이름으로 읽고,
+ *   단위는 붙이지 않고 장비가 준 수 그대로 보인다(dBm 인지 mW 인지 모르는 값에 단위를 지어 붙이지 않는다). 판정은 **장비가 준 임계**
+ *   (<지표>HighAlarm·LowAlarm·HighWarn·LowWarn)가 있을 때만 한다 — 임계가 없으면 상태는 바꾸지 않는다(정상이라 말하지 않는다).
+ */
+export const DOM_FIELDS = Object.freeze([
+  { key: 'rxPower', label: 'Rx' }, { key: 'txPower', label: 'Tx' }, { key: 'temperature', label: '온도' },
+  { key: 'voltage', label: '전압' }, { key: 'txBias', label: '바이어스' },
+]);
+/** 이름이 `<트랜시버> › …dom…` 인 개체를 그 트랜시버 개체에 합친다(DOM 하위 노드는 따로 온다 — client XCVR_DOM_KEY). */
+export function mergeXcvrDom(entities) {
+  const out = new Map();
+  const doms = [];
+  for (const [name, f] of entities) {
+    const segs = String(name).split(' › ');
+    const i = segs.findIndex((x, j) => j > 0 && /dom/i.test(x));
+    if (i > 0) doms.push([segs.slice(0, i).join(' › '), f]);
+    else out.set(name, { ...f });
+  }
+  for (const [parent, f] of doms) {
+    const cur = out.get(parent) || {};
+    for (const [k, v] of Object.entries(f)) if (!Object.hasOwn(cur, k)) Object.defineProperty(cur, k, { value: v, enumerable: true, writable: true, configurable: true });
+    out.set(parent, cur);
+  }
+  return out;
+}
+const r2 = (n) => Math.round(n * 100) / 100;
+const RANK = { ok: 0, warn: 1, fault: 2 };
+const worse = (a, b) => (a == null ? b : b == null ? a : (RANK[b] > RANK[a] ? b : a));
+function judgeVal(v, { hiA, loA, hiW, loW }) {
+  if ((hiA != null && v >= hiA) || (loA != null && v <= loA)) return 'fault';
+  if ((hiW != null && v >= hiW) || (loW != null && v <= loW)) return 'warn';
+  return 'ok';
+}
+/**
+ * DOM 값·임계 → { values, text, otherState, rxDevice }. otherState = Rx 를 뺀 지표를 **장비 임계**로 판정한 결과(임계 없으면 null) ·
+ * rxDevice = Rx 를 장비 임계로 판정한 결과(null 이면 장비 임계 없음). Rx 는 링크 상태를 알아야 판정할 수 있어 judgeOptics 가 마무리한다.
+ */
+export function xcvrDom(flat) {
+  const values = {}; const bits = []; let otherState = null; let rxDevice = null; const rxTh = {};
+  for (const { key, label } of DOM_FIELDS) {
+    const v = numOrNull(unwrap(pick(flat, [key, `${key}Dbm`, `${key}Value`])));
+    if (v == null) continue;
+    values[key] = v;
+    bits.push(`${label} ${r2(v)}`);
+    const th = (suf) => numOrNull(unwrap(pick(flat, [`${key}${suf}`])));
+    const t = { hiA: th('HighAlarm'), loA: th('LowAlarm'), hiW: th('HighWarn'), loW: th('LowWarn') };
+    const has = Object.values(t).some((x) => x != null);
+    if (key === 'rxPower') { if (has) { rxDevice = judgeVal(v, t); Object.assign(rxTh, t); } continue; }
+    if (has) otherState = worse(otherState, judgeVal(v, t));
+  }
+  return { values: bits.length ? values : null, text: bits.join(' · '), otherState, rxDevice, rxThresholds: Object.keys(rxTh).length ? rxTh : null };
+}
+
+/** 부품 이름(`all › Ethernet49 › domInfo` 등)에서 인터페이스 이름을 뽑는다. */
+export function xcvrIntfOf(name) {
+  return String(name || '').split(' › ').find((seg) => /^(ethernet|et|management)[\d/]+$/i.test(seg.trim())) || null;
+}
+
+/**
+ * v2.646 — GBIC 광신호(Rx) 판정(사용자 요청 '신호가 약하면 장애로 판정'). 순수.
+ *  · **링크가 올라온 포트만** 판정한다 — 링크가 없으면 상대가 빛을 보내지 않으므로 Rx 가 바닥인 것이 정상이다(v2.521 SAN 규약).
+ *    그런 트랜시버는 `optic.judged=false` 로 밝히고 상태를 바꾸지 않는다.
+ *  · 임계는 **장비가 준 임계가 먼저**, 없으면 포탈 설정(warnDbm·faultDbm — CVP 설정 화면에서 바꾼다)이다. 어느 쪽인지 `optic.basis`.
+ *  · ⚠ 단위는 dBm 으로 본다 — `show interfaces transceiver` 가 dBm 이고 텔레메트리도 같다고 **추정**했다(실장비 미확인 — docs/CVP.md §13).
+ *  · 포트 목록을 못 읽었으면(null) 판정하지 않는다(링크를 모른다).
+ */
+export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}) {
+  if (!Array.isArray(parts)) return parts;
+  const byName = new Map((Array.isArray(ports) ? ports : []).filter((p) => p && typeof p === 'object').map((p) => [String(p.name), p]));
+  const portsKnown = Array.isArray(ports);
+  return parts.map((p) => {
+    if (!p || p.kind !== 'xcvr' || !p.dom) return p;
+    const intf = xcvrIntfOf(p.name);
+    const port = intf ? byName.get(intf) : null;
+    const rx = numOrNull(p.dom.rxPower);
+    const linked = !!port && port.oper === 'up';
+    const basis = p.domJudge?.rxDevice ? 'device' : 'portal';
+    let rxState = null;
+    if (rx != null && linked) rxState = p.domJudge?.rxDevice || (rx <= faultDbm ? 'fault' : rx <= warnDbm ? 'warn' : 'ok');
+    const judged = rxState != null || p.domJudge?.otherState != null;
+    let state = p.state;
+    if (p.state !== 'absent' && judged) state = worse(p.domJudge?.otherState ?? null, rxState) || p.state;
+    const optic = {
+      intf, rx, tx: numOrNull(p.dom.txPower), linked, portKnown: portsKnown && !!port, judged: rxState != null, rxState, basis: rxState != null ? basis : null,
+      ...(basis === 'portal' && rxState != null ? { warnDbm, faultDbm } : {}),
+    };
+    let detail = p.detail || '';
+    if (rx != null && !linked) detail = `${detail}${detail ? ' · ' : ''}${portsKnown && port ? '링크 없음 — 광량 판정 안 함' : '포트 상태 모름 — 광량 판정 안 함'}`;
+    if (rxState === 'fault' || rxState === 'warn') detail = `${detail}${detail ? ' · ' : ''}수신 광량 ${rxState === 'fault' ? '약함(장애)' : '낮음(주의)'}`;
+    const { domJudge, ...rest } = p; // 내부 판정 재료는 저장하지 않는다
+    return { ...rest, state, detail: str(detail, 200), optic };
+  });
 }
 
 /** 부품 목록 → 상태별 개수(null 이면 null). */

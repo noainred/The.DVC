@@ -3807,6 +3807,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     확인 불가(오래됨·스트리밍 아님·못 읽음)는 정상에도 이상에도 넣지 않는다 · **법인 = CVP 서버의 DataCenter**(장비 단위가 아니다 — 화면이 말한다) ·
     트래픽 합은 마지막 수집 **순간값** 합이고 스위치 간 링크는 양쪽에서 세어진다(측정 못 한 포트는 빼고 개수를 밝힌다) · 이벤트 `corpCounts` 는
     **법인 필터 전** 기준(고른 칩만 남으면 해제할 수 없다) · 장비 법인·모델 칩은 스토리지와 같은 `DeviceFacetBar` · 벤더 지원 상태는 지어내지 않는다.
+  - **CVP GBIC 광신호(v2.646)** — `parse.judgeOptics`·`xcvrDom`·`mergeXcvrDom` + `GET /tools/cvp/optics` + 웹 `CvpOptics.jsx`, 상세 `docs/CVP.md` §13:
+    트랜시버 노드는 장착 여부만 준다(건강 아님 — 정상으로 칠하지 않는다) · DOM 은 xcvr 만 추종 깊이 3 + `dom` 이름 포인터만(추정 경로) ·
+    **링크가 올라온 포트만** 수신 광량을 판정(바닥이 정상인 미사용 포트를 장애로 세지 않는다) · 장비 임계 먼저, 없으면 CVP 설정 `xcvrRxWarnDbm`/`xcvrRxFaultDbm` ·
+    `show interfaces transceiver` 는 스위치 CLI 라 CVP REST 로 실행할 수 없다(스위치 계정이 필요 — 도입하지 않음). CVP 등록·설정은 'CVP 설정' 탭에만 있다.
   - **등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다**
     (`cvp/formChoices.js pickAgent`·`pickDatacenter` + 웹 `cvpText.choiceOptions`, v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를
     콤보박스로 … 오타/대소문자 방지"):

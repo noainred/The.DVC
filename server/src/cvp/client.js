@@ -56,7 +56,18 @@ const FOLLOW_DEPTH = 3;
  */
 // v2.644: counters 2(`…/current` 아래에 `statistics` 같은 포인터가 한 단계 더 있을 수 있다) · bgp 3(실장비: 표 → VRF(default·Private) →
 //   피어 → 그 피어의 값 — 캡처에서 VRF 아래 피어가 또 포인터였다. 깊이 2 에서는 이름·VRF 만 남아 '형식을 읽지 못했습니다' 였다).
-export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ interfaces: 1, counters: 2, memory: 1, cpu: 2, bgp: 3, power: 2, cooling: 2, temperature: 2, xcvr: 2 });
+export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ interfaces: 1, counters: 2, memory: 1, cpu: 2, bgp: 3, power: 2, cooling: 2, temperature: 2, xcvr: 3 });
+/*
+ * v2.646(사용자 신고 'xcvr 이 여전히 나오지 않는다' — 캡처: `all › Ethernet1` 등 전부 '상태 미확인'): 트랜시버 노드는 **장착 여부만** 주고
+ *   건강 상태 필드가 없다. `show interfaces transceiver` 가 보여 주는 DOM(온도·전압·바이어스·Tx/Rx 광량)은 그 노드 **한 단계 아래**
+ *   (domInfo 로 추정 — ⚠ 실장비로 확인하지 못했다)에 있을 것으로 보고 xcvr 만 한 단계 더 따라간다. 단 그 단계에서는 **이름이 dom 을
+ *   포함하는 포인터만** 따라간다(다른 하위 포인터까지 따라가면 포트 52개 장비에서 요청이 수배로 늘어난다).
+ */
+export const XCVR_DOM_KEY = /dom/i;
+function followChild(kind, depth, key) {
+  if (kind === 'xcvr' && depth >= 1) return XCVR_DOM_KEY.test(String(key || ''));
+  return true;
+}
 /** 빈 응답(`{"notifications":[]}`) — 경로는 열려 있지만 그 노드에 값이 없다(v2.641 실장비 확인). */
 export const EMPTY_REASON = '경로에 데이터 없음(빈 응답 — 이 장비에 그 값이 없거나 경로가 다릅니다)';
 export const UNREAD_REASON = '응답은 왔지만 형식을 읽지 못했습니다';
@@ -143,7 +154,21 @@ export const PROBE_PATHS = Object.freeze([
   '/Sysdb/routing/bgp/export/vrfBgpPeerAfiSafiStateTable/default',
 ]);
 export const PROBE_HEAD_CHARS = 1536;
-export const PROBE_MAX = 28;
+export const PROBE_MAX = 32;
+/**
+ * v2.646: 트랜시버 DOM 경로 탐색 — 그 장비에서 **장착된** 첫 트랜시버의 노드와 그 아래 후보(domInfo)를 본다. 경로를 확인하지 못했으므로
+ *   (xcvr 머리말) 첫 실수집의 표본이 근거가 된다. 장착된 트랜시버를 모르면(부품을 못 읽음) 컨테이너 노드만 본다.
+ */
+export function xcvrProbePaths(parts) {
+  const base = '/Sysdb/hardware/archer/xcvr/status/all';
+  const out = [base];
+  const x = (Array.isArray(parts) ? parts : []).find((p) => p && p.kind === 'xcvr' && p.state !== 'absent' && typeof p.name === 'string');
+  if (x) {
+    const intf = x.name.split(PART_PATH_SEP).find((seg) => /^[A-Za-z]+[\d/]+$/.test(seg));
+    if (intf) out.push(`${base}/${encodeURIComponent(intf)}`, `${base}/${encodeURIComponent(intf)}/domInfo`);
+  }
+  return out;
+}
 /** v2.641: 이벤트 응답은 앞부분만 읽는다(전량이 수십 MB 일 수 있다 — 1,900건/일 실측 화면). */
 export const EVENTS_BODY_MAX = Math.max(262_144, Number(process.env.CVP_EVENTS_BODY_MAX) || 4 * 1_048_576);
 /** 부품 종류 → 표시 kind. */
@@ -335,7 +360,7 @@ function decodeSafe(x) { try { return x.split('/').map((y) => decodeURIComponent
  * @param {{ signal?:AbortSignal, budgetMs?:number, partsDue?:boolean, prefer?:Map, now?:()=>number }} opts
  * @returns {Promise<object>} 결과(아래 머리말) — 자격증명 거부는 CvpAuthError 로 던진다.
  */
-export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue = true, prefer = new Map(), now = Date.now } = {}) {
+export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue = true, prefer = new Map(), now = Date.now, optics = {} } = {}) {
   const t0 = now();
   const left = () => budgetMs - (now() - t0);
   const usedPaths = {}; const missing = {}; const seenFields = {};
@@ -553,7 +578,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
             }
           }
           if (own.length) leaves.push({ notifications: own });
-          if (sh.ptrs.length && depth + 1 < maxDepth) for (const c of sh.ptrs) next.push({ ...c, parent: url, keys: [...x.keys, c.key], direct: false });
+          if (sh.ptrs.length && depth + 1 < maxDepth) for (const c of sh.ptrs) if (followChild(kind, depth, c.key)) next.push({ ...c, parent: url, keys: [...x.keys, c.key], direct: false });
         });
         level = next;
       }
@@ -598,7 +623,8 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
           if (r.value) { anyRead = true; pushAll(parts, r.value); } else failedKinds.push(k);
         }
         // 한 종류도 시도하지 못했으면(예산) 이번에 안 읽은 것 — undefined 로 두어 DB 의 이전 파트 값을 지우지 않는다.
-        dev.parts = anyRead ? parts.slice(0, P.PART_MAX) : attempted ? null : undefined;
+        // v2.646: GBIC 광신호 판정 — 링크가 올라온 포트만(judgeOptics 머리말).
+        dev.parts = anyRead ? P.judgeOptics(parts.slice(0, P.PART_MAX), dev.ports, optics) : attempted ? null : undefined;
         dev.partsAt = attempted ? now() : null;
         // v2.612 RECENT2612-01: 파트 조회를 **시도했는가**(경로가 전부 404 여도 시도다). 폴러가 이것으로 조회 시각을 올린다 —
         //   '읽었을 때만' 올리면 파트 경로가 없는 CVP 에 매 주기 4종 × 장비 수만큼 헛조회가 나간다.
@@ -616,7 +642,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
     const probeDev = partsDue ? devices.find((d) => d.streaming !== false && (d.serial || d.key)) : null;
     if (probeDev) {
       const serial = probeDev.serial || probeDev.key;
-      for (const rel of PROBE_PATHS) {
+      for (const rel of [...PROBE_PATHS, ...xcvrProbePaths(probeDev.parts)]) {
         if (probes.length >= PROBE_MAX || left() < MIN_SLICE_MS || signal?.aborted) break;
         const p = `/api/v1/rest/${encodeURIComponent(serial)}${rel}`;
         const r = await sess.get(p);

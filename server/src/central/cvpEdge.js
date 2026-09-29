@@ -29,6 +29,28 @@ const FILE = path.join(config.configDir, 'central-agent-cvp.json');
  * tokenCheck 2.560 · iLO 2.610)이 전부 갖는 게이트인데 v2.608 이 빠뜨려, 구버전 엣지의 위임 CVP 가 '보고가 아직 없습니다(=기다리면
  * 된다)' 로 남았다(v2.554 규약 — 구버전/버전 미상/첫 보고 대기는 조치가 다르므로 각각 다르게 말한다).
  */
+/** v2.646: 트랜시버 DOM·광신호 판정 — 아는 필드만(수치는 numOrNull, 문자열은 짧게). 없으면 빈 객체(구버전 엣지). */
+const DOM_KEYS = ['rxPower', 'txPower', 'temperature', 'voltage', 'txBias'];
+const OPTIC_STATES = new Set(['ok', 'warn', 'fault']);
+function opticOf(p) {
+  const out = {};
+  if (p && p.dom && typeof p.dom === 'object') {
+    const d = {};
+    for (const k of DOM_KEYS) { const v = numOrNull(p.dom[k]); if (v != null) d[k] = v; }
+    if (Object.keys(d).length) out.dom = d;
+  }
+  const o = p && p.optic && typeof p.optic === 'object' ? p.optic : null;
+  if (o) {
+    out.optic = {
+      intf: typeof o.intf === 'string' ? o.intf.slice(0, 64) : null, rx: numOrNull(o.rx), tx: numOrNull(o.tx),
+      linked: o.linked === true, portKnown: o.portKnown === true, judged: o.judged === true,
+      rxState: OPTIC_STATES.has(o.rxState) ? o.rxState : null, basis: o.basis === 'device' || o.basis === 'portal' ? o.basis : null,
+      ...(numOrNull(o.warnDbm) != null ? { warnDbm: numOrNull(o.warnDbm) } : {}), ...(numOrNull(o.faultDbm) != null ? { faultDbm: numOrNull(o.faultDbm) } : {}),
+    };
+  }
+  return out;
+}
+
 export const MIN_CVP_EDGE_VERSION = '2.608.0';
 /** 보고가 없는 위임 CVP 의 분류 — 화면(`cvpText.serverState`)이 kind 별 문구를 갖는다(테스트가 1:1 대조). */
 export const CVP_EDGE_KINDS = Object.freeze(['old-version', 'unknown-version', 'silent', 'waiting']);
@@ -193,6 +215,7 @@ export function cleanDevice(x, now = Date.now(), cnt = { ports: 0 }) {
   if (Object.hasOwn(x, 'parts')) {
     d.parts = x.parts === null ? null : listOf(x.parts, PART_MAX, (p) => ({
       kind: PART_KIND_SET.has(p.kind) ? p.kind : 'psu', name: s(p.name, 128), state: PART_STATES.includes(p.state) ? p.state : 'unknown', detail: s(p.detail, 200),
+      ...opticOf(p),
     }));
     d.partsAt = tsClamp(x.partsAt, now) ?? ts;
   }

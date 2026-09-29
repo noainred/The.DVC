@@ -28,6 +28,10 @@ export const LIMITS = Object.freeze({
   dailyRetentionDays: { min: 30, max: 3650, def: 730 },
   concurrency: { min: 1, max: 8, def: 2 },
   deviceTimeoutMs: { min: 30_000, max: 30 * 60_000, def: 120_000 },
+  // v2.646: GBIC 수신 광량(Rx, dBm) 판정 기준 — 장비가 임계를 주지 않을 때만 쓴다(링크가 올라온 포트만 판정). 이하이면 주의·장애.
+  //   기본값은 흔한 10G SR/LR 수신 감도 근처로 잡은 **추정**이다 — 현장 광 모듈에 맞춰 CVP 설정에서 바꾼다.
+  xcvrRxWarnDbm: { min: -40, max: 0, def: -10 },
+  xcvrRxFaultDbm: { min: -40, max: 0, def: -14 },
 });
 
 
@@ -43,6 +47,8 @@ export function normalizeSettings(input = {}) {
   for (const [k, l] of Object.entries(LIMITS)) {
     out[k] = clampSetting(src[k], l); // v2.613 DEPS2613-12: 빈 값·비숫자는 기본값(numOrNull 판정)
   }
+  // v2.646: 장애 기준이 주의 기준보다 높으면(덜 엄격하면) 주의가 영영 안 뜬다 — 장애 ≤ 주의로 맞춘다.
+  if (out.xcvrRxFaultDbm > out.xcvrRxWarnDbm) out.xcvrRxFaultDbm = out.xcvrRxWarnDbm;
   return out;
 }
 

@@ -485,6 +485,8 @@ export function settingsPayload(f) {
   }
   const to = min(f && f.deviceTimeoutSec);
   if (to != null) out.deviceTimeoutMs = Math.round(to * 1000);
+  // v2.646: GBIC 수신 광량 기준(dBm, 음수)
+  for (const k of ['xcvrRxWarnDbm', 'xcvrRxFaultDbm']) { const n = min(f && f[k]); if (n != null) out[k] = n; }
   return out;
 }
 
@@ -501,6 +503,8 @@ export function settingsToForm(s) {
     dailyRetentionDays: n(o.dailyRetentionDays),
     concurrency: n(o.concurrency),
     deviceTimeoutSec: n(o.deviceTimeoutMs, 1000),
+    xcvrRxWarnDbm: n(o.xcvrRxWarnDbm),
+    xcvrRxFaultDbm: n(o.xcvrRxFaultDbm),
   };
 }
 
