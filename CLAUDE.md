@@ -3786,6 +3786,11 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       따라가지 못했다(포트·BGP·CPU 전부 '읽지 못함'). 값은 `{"int":…}` 타입 래퍼·키는 객체일 수 있고·같은 경로가 여러 notification 으로 나뉜다.
       `/Kernel/proc/stat` 은 PID 별이라 CPU 후보에서 뺐다. 상세 `docs/CVP.md` §9 · 회귀 `test/cvp2642.test.js`. **추정 형식으로 파서를 만들었으면
       실장비 원문 표본을 받는 즉시 그 형식을 픽스처로 옮길 것.**
+    - ⚠ **v2.643 — 파트 이름은 포인터 경로 전체, 추종 깊이는 종류별**(사용자 신고 "장애 파트 안나오는거"): 배열 포인터의 자식을 컨테이너 이름
+      하나로 묶어 PSU 두 개가 한 부품으로 합쳐졌다(한쪽 ok 가 다른 쪽 장애를 덮는다) → 이름 = 키 전체를 ` › `(`PART_PATH_SEP`)로 이은 것.
+      ⚠ 이름이 바뀌면 열린 장애의 키도 바뀐다(이번 캡처에는 열린 장애가 없었다). 추종은 `FOLLOW_DEPTH_BY_KIND`(포트·카운터·메모리 1, 나머지 2) —
+      깊이 제한으로 따라가지 않은 포인터는 '확인하지 못한 경로' 로 세지 않는다(예전엔 장비당 상한·시간 예산을 전부 여기 썼다). 이벤트는
+      `deviceRefs` 로 서비스태그 대신 **호스트네임**을 싣고 누르면 장비 상세가 열린다(색인에 없는 id 는 그대로 — 이름을 지어내지 않는다).
     - **컬렉션은 `_ptr` 포인터다**(사용자 Telemetry Browser 캡처로 `intfStatus` 확인) — `followPtrs` 가 따라간다. 개체 이름은 **포인터 키**
       (응답 경로 꼬리는 'Ethernet3/1' 에서 잘린다). v2.608 의 `vrfBgpPeerInfoStatusEntryTable`·`/Smash/counters/ethIntf` 는 **이 장비에 없는
       경로**였다 — 경로를 추정할 때는 경로 탐색 표본(`probes`)으로 확인하기 전에 '있다' 고 적지 말 것.
@@ -4364,6 +4369,23 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     · 옛 주소 `#/insights[/<패널>]` 는 `hooks/hashTab.js MOVED_TABS`·`movedTabHash` 가 `replaceState` 로 바꾼다
       (App 최초 렌더 + hashchange). **지우지 말 것** — 북마크·공유 링크가 있다. 옮긴 탭이 늘면 이 표에 더한다.
     · 탭 권한(`perm:'insights'`)은 카드의 `perm` 으로 옮겼다 — 데이터 API `/api/insights/*` 는 원래대로 requirePerm.
+
+  - ⚠⚠ **super_admin 은 '저장 역할' 이고 요청 문맥에서는 admin + `superAdmin:true` 다**(`auth/roles.js authzRole`, v2.643 — 사용자 요청
+    "super_admin role · noainred 는 super_admin · CSV 가져오기/내보내기는 관리자 이상 · 권한 설정 메뉴에 · super_admin 은 super_admin 만 추가/삭제"):
+    - 코드에 `role === 'admin'` 판정이 약 87곳·`requireRole('admin')` 이 수백 곳이라 새 역할을 요청 문맥에 그대로 내보내면 전부 거부된다.
+      그래서 `resolveTokenUser`·`authenticateLocal` 이 **접는다**. 저장 레코드를 볼 때만 `isAdminTier(role)` 을 쓴다(마지막 관리자·OTP 강제 판정).
+      **새 코드에서 `role === 'super_admin'` 을 req.user 에 대고 비교하지 말 것** — 절대 참이 되지 않는다(`req.user.superAdmin` 을 본다).
+    - super_admin 계정의 생성·삭제·역할·비밀번호·OTP 변경과 super_admin 역할 부여는 **요청자의 저장 역할이 super_admin** 일 때만
+      (`superAdminGuardDenied`, 코드 `super-admin-only`). 콘솔 도구·중앙 동기화(`trusted`)는 예외지만 **중앙 관리 계정 동기화는 super_admin 을
+      만들지도 건드리지도 않는다**. AD 토큰·`AUTH_DISABLED_ROLE` 은 super_admin 이 될 수 없다. `noainred` 는 기동 시 super_admin 으로 올린다.
+    - 권한 키 **`data.csv`**(관리 그룹, `adminOnly`+`adminToggle`): operator·viewer 행에서는 항상 빠지고, admin 은 기본 보유이며
+      **`matrix.adminDenied` 로 super_admin 만 끌 수 있다**(끄기·되돌리기·기본값 초기화 모두 super_admin). `SCHEMA_VERSION` 3.
+      `userHasPermission`: superAdmin → 전부 · admin → adminDenied 외 전부(모르는 키도 통과 — 기존 동작) · 그 외 역할 행.
+    - CSV·자유텍스트 가져오기/내보내기/샘플 라우트 약 90곳이 `csvPerm = requirePerm('data.csv')` 다. `server/test/superAdmin2643.test.js` 가
+      **라우터 스택을 훑어** CSV 경로 전부에 이 게이트가 있는지(≥80) 고정한다 — 새 CSV 라우트는 게이트를 붙이거나 `NOT_CSV` 에 사유를 적을 것.
+      svcmon `/targets/import` 는 JSON 표 입력을 예외로 두는 `csvPermUnlessJson`(fullScopeOnly 뒤), `/targets/csv-schema` 는 스키마 설명이라 열어 둔다.
+    - 화면은 `api.canCsv()` 로 CSV 버튼을 **숨긴다**(약 40화면). ⚠ 브라우저에서 표를 CSV 로 만드는 버튼은 **화면 숨김일 뿐**이다 — 데이터는 이미
+      화면에 있다(정직 기록). ⚠ svcmon 결과 로그 파일 다운로드(`/svcmon/log/files/:name`)는 게이트하지 않았다(판단 필요로 남김).
 
 ## 보안 불변조건 (회귀 방지 — 유지할 것)
 

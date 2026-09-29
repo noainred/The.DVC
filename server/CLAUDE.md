@@ -770,3 +770,14 @@ ssh2 라이브러리 원문까지 검사한다. 변이 검증 완료: 정규식�
   `sessionTransient`(authFailed 없음)로 던진다. 명시적 401/403 과 세션 미지원 4xx 만 예전처럼 Basic 401 이다. 합치면 authGuard 가 멀쩡한 서버를 멈춘다.
 - **범위 관리자 차단 3파일 추가**(`routes/admin/opsSettings.js`·`gpuGuest.js`·`nsxImport.js`, SEC-01·03·04): 전역 알림 채널·일일 보고는 전 법인 공통 설정이라
   저장·발송이 전체 범위 전용이다. GPU 게스트 배포·진단·엣지 사용자·물리 GPU 조회와 NSX 매니저 목록도 전체 범위 전용이다(형제 라우트가 이미 403 이었다).
+
+## 2026-09-29 super_admin · CSV 권한(v2.643) — 되돌리지 말 것
+
+- `super_admin` 은 users.json 에만 저장되는 역할이다. 요청 문맥(`resolveTokenUser`·`authenticateLocal`)은 `role:'admin'` + `superAdmin:true` 로
+  접는다(`auth/roles.js authzRole`) — 기존 admin 게이트를 전부 그대로 통과시키기 위해서다. 접기를 없애면 super_admin 이 모든 admin 라우트에서 403 이 된다.
+- super_admin 계정을 만들고·지우고·역할/비밀번호/OTP 를 바꾸거나 super_admin 역할을 주는 것은 **요청자의 저장 역할이 super_admin** 일 때만이다
+  (`superAdminGuardDenied`). 비밀번호·OTP 함수는 `credentialGuardDenied`('본인만')를 먼저 본다(사유 문구 순서 — 테스트 고정).
+  중앙 관리 계정 동기화(`applyManagedUsers`)는 super_admin 을 만들지도 바꾸지도 않는다 · AD 토큰의 역할 클레임도 접는다.
+- `data.csv` 는 admin 전용 토글 키다: operator·viewer 행에 넣을 수 없고(`sanitizeRow`), admin 에게서 끄는 `adminDenied` 변경과
+  비어 있지 않은 adminDenied 의 초기화는 super_admin 만(403 `super-admin-only`). 사용자별 도구 재정의는 super_admin 계정도 대상 밖이다.
+- CSV 라우트 게이트는 `requirePerm('data.csv')` 이고 `requirePerm` 은 `userHasPermission` 하나로 판정한다(superAdmin → 전부, admin → adminDenied 외 전부).
