@@ -1,6 +1,6 @@
 // IpamNet.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson, downloadFile } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, downloadFile, canCsv } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { CsvImportModal } from '../../components/CsvBulkModals.jsx';
@@ -54,7 +54,7 @@ export function IpamRanges({ access = 'unknown' } = {}) {
           vcRanges={data} vcRangesErr={error} onReloadRanges={load} onSaved={load}
           scanRunning={!!status?.running} onScanStarted={loadStatus} title="vCenter별 스캔 대역" />
         <div className="flex gap" style={{ marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={downloadReport} title="현재 스캔 결과를 CSV 첨부파일로 내려받기">⬇ 스캔 결과(CSV)</button>
+          {canCsv() && <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={downloadReport} title="현재 스캔 결과를 CSV 첨부파일로 내려받기">⬇ 스캔 결과(CSV)</button>}
         </div>
         {status?.running && <div style={{ marginTop: 10 }}><ScanProgressBar progress={status.progress} /></div>}
         {msg && <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, fontSize: 13, background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{msg.text}</div>}
@@ -64,10 +64,10 @@ export function IpamRanges({ access = 'unknown' } = {}) {
         <div className="flex between wrap" style={{ alignItems: 'center' }}>
           <b style={{ fontSize: 14 }}>저장된 대역 ({list.length})</b>
           <span className="flex gap">
-            <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} title="저장된 대역 목록을 CSV 로 내려받기(가져오기 양식과 동일)"
-              onClick={() => downloadFile('/tools/ipam/vc-ranges.csv').catch((e) => setMsg({ ok: false, text: downloadFailText(e) }))}>⤓ 대역 CSV</button>
-            <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} title={write.locked ? write.title : 'CSV 로 대역 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인'} disabled={write.locked}
-              onClick={() => setCsvImport(true)}>⤒ CSV 가져오기</button>
+            {canCsv() && <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} title="저장된 대역 목록을 CSV 로 내려받기(가져오기 양식과 동일)"
+              onClick={() => downloadFile('/tools/ipam/vc-ranges.csv').catch((e) => setMsg({ ok: false, text: downloadFailText(e) }))}>⤓ 대역 CSV</button>}
+            {canCsv() && <button className="logout-btn" style={{ padding: '6px 12px', fontSize: 12 }} title={write.locked ? write.title : 'CSV 로 대역 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인'} disabled={write.locked}
+              onClick={() => setCsvImport(true)}>⤒ CSV 가져오기</button>}
           </span>
         </div>
         {error && data && <div className="banner warn" style={{ marginTop: 8, whiteSpace: 'normal' }}>목록을 다시 읽지 못했습니다 — 아래는 마지막으로 받은 값입니다: {error}</div>}
@@ -96,16 +96,16 @@ export function IpamRanges({ access = 'unknown' } = {}) {
       <div className="card">
         <div className="flex between wrap" style={{ alignItems: 'center' }}>
           <b style={{ fontSize: 14 }}>완료된 스캔 (첨부)</b>
-          <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={downloadReport}>⬇ 전체 결과 CSV</button>
+          {canCsv() && <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={downloadReport}>⬇ 전체 결과 CSV</button>}
         </div>
         {status == null && statusDenied.current && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>스캔 이력은 전체 범위 관리자 계정만 볼 수 있습니다.</div>}
         <div style={{ marginTop: 8 }}>
           <ScanRunsTable runs={runs} maxHeight="40vh" emptyText="완료된 스캔 기록이 없습니다. ‘지금 스캔’으로 실행하세요." />
         </div>
-        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>스캔 결과는 ‘⬇ 스캔 결과(CSV)’로 첨부파일처럼 내려받을 수 있습니다(IP·호스트명·상태·포트·서비스·최초/최근 관측).</div>
+        {canCsv() && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>스캔 결과는 ‘⬇ 스캔 결과(CSV)’로 첨부파일처럼 내려받을 수 있습니다(IP·호스트명·상태·포트·서비스·최초/최근 관측).</div>}
       </div>
 
-      {csvImport && (
+      {canCsv() && csvImport && (
         <CsvImportModal title="스캔 대역 CSV 가져오기" importPath="/admin/ipam/vc-ranges/import"
           samplePath="/admin/ipam/vc-ranges/sample.csv"
           description={<>헤더 행 필수(<code>vcenter</code>·<code>ranges</code> — vCenter 는 등록된 이름/ID, 대역은 세미콜론(;) 구분 CIDR·범위·IP, <code>enabled</code> 는 주기 스캔 포함 여부). vCenter 당 1행이며, <b>기존 vCenter 와 겹치는 행은 대역 전체가 CSV 값으로 교체</b>되므로 아래에서 덮어쓰기를 명시적으로 허용해야 적용됩니다. 대역 문법은 실제 스캐너와 같은 파서로 검증됩니다. 양식은 <b>📄 샘플 CSV</b>로 받으세요.</>}

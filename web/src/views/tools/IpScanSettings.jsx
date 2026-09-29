@@ -1,6 +1,6 @@
 // IpScanSettings.jsx — IP관리 › IP 스캔 설정(에이전트별 능동 스캔 대역·포트·주기 + /24 제안 + 데이터센터 귀속). v2.639 에 IpamSettings.jsx(853줄)에서 나눴다.
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson } from '../../api.js';
+import { fetchJson, postJson, putJson, canCsv } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { intervalMinText, scanSettingsBody } from './ipamScanForm.js';
@@ -266,9 +266,9 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
             <button className="tab" style={{ flex: 'none', padding: '5px 10px', fontSize: 12, whiteSpace: 'normal', textAlign: 'left', maxWidth: '100%' }} aria-expanded={suggestOpen} onClick={() => setSuggestOpen((v) => !v)}>
               {suggestOpen ? '▾' : '▸'} 사용 중인 대역에서 고르기(/24)
             </button>
-            <button className="tab" style={{ flex: 'none', padding: '5px 10px', fontSize: 12, whiteSpace: 'normal', textAlign: 'left', maxWidth: '100%' }} aria-expanded={csvOpen} onClick={() => setCsvOpen((v) => !v)}>
+            {canCsv() && <button className="tab" style={{ flex: 'none', padding: '5px 10px', fontSize: 12, whiteSpace: 'normal', textAlign: 'left', maxWidth: '100%' }} aria-expanded={csvOpen} onClick={() => setCsvOpen((v) => !v)}>
               {csvOpen ? '▾' : '▸'} 스캔 대역 CSV 가져오기·내보내기
-            </button>
+            </button>}
           </div>
           {suggestOpen && <SubnetSuggest agent={agent} ranges={s.ranges || []} onAdd={(lines) => setS({ ...s, ranges: lines })} />}
         </div>
@@ -289,7 +289,7 @@ export function IpScanSettings({ onClose, asPage = false, onSaved }) { // v2.638
         </div>
       </div>
 
-      {csvOpen && (
+      {canCsv() && csvOpen && (
         <div style={{ marginTop: 12 }}>
           {d.dirty && <div style={{ fontSize: 12, marginBottom: 6, color: 'var(--amber)' }}>이 화면에 저장하지 않은 입력이 있습니다 — CSV 로 적용해도 이 폼의 입력(초안)이 우선 보입니다. 저장하거나 ‘되돌리기’ 한 뒤 적용 결과를 확인하세요.</div>}
           <RangesCsv onApplied={() => load(agent, true)} />

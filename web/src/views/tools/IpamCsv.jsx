@@ -4,7 +4,7 @@
 // 판정은 서버가 한다(server/src/ipam/manageCsv.js·scanRangesCsv.js). 화면은 큰 파일을 서버 한도 안의 조각으로 나눠 보내고
 // (ipamCsvChunk.js — 서버 파서와 같은 행 경계), 결과를 합쳐 말한다. 입력은 편집 초안에 남는다(다른 페이지로 옮겨도 그대로).
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { downloadFile, postJson } from '../../api.js';
+import { downloadFile, postJson, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { downloadFailText } from '../downloadFailText.js';
@@ -234,6 +234,8 @@ export function RangesCsv({ onApplied }) { // v2.638: IP 스캔 설정 페이지
   };
   const plans = check?.plans || [];
   const changing = plans.filter((p) => !p.blocked && (p.added.length || p.removed.length)).length;
+  // v2.643: 방어선 — CSV 권한이 없으면 안내 한 줄(훅은 모두 위에 — React #310).
+  if (!canCsv()) return <div className="muted" style={{ fontSize: 12 }}>{CSV_DENIED_NOTE}</div>;
   return (
     <Section title="IP 스캔 대역 CSV(에이전트별)" note="IP 스캔 설정의 대역을 에이전트(엣지)별로 한 파일에서 고칩니다. agent 열은 에이전트 이름, 이 포탈에서 직접 스캔하는 대역은 __local__(또는 ‘이 포탈’)입니다. 한 줄에 대역 하나.">
       <div className="flex gap wrap" style={{ alignItems: 'center' }}>
@@ -305,6 +307,8 @@ export function IpamCsv({ scope, access, canManage, onGoto, onApplied }) {
   const [msg, setMsg] = useState(null);
   const sp = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
   const dl = async (path, name) => { setMsg(null); try { await downloadFile(path, name); } catch (e) { setMsg({ ok: false, text: downloadFailText(e) }); } };
+  // v2.643: 이 페이지는 CSV 전용 — 관리자 이상 + data.csv 권한이 없으면 안내 한 줄(메뉴에서도 숨긴다. 훅은 모두 위에).
+  if (!canCsv()) return <div className="ipam-page card muted" style={{ padding: 14, fontSize: 12.5, minWidth: 0 }}>{CSV_DENIED_NOTE}</div>;
   return (
     <div className="ipam-page" style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0 }}>
       <Section title="IP 관리대장 내보내기" note="수집(vCenter)·스캔·수동 등록을 합친 대장 전체입니다. 읽기 전용 내보내기이고 가져오기 대상이 아닙니다(대장은 수집으로 만들어집니다).">

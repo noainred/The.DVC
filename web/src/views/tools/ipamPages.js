@@ -12,6 +12,8 @@
  *
  * `needsLedger` 는 대장(/tools/ipam) 데이터가 있어야 그릴 수 있는 페이지다 — 나머지는 대장을 읽는 중에도 그린다.
  * `admin` 은 서버가 관리자에게만 여는 페이지다(메뉴에서 숨기지만 서버가 집행한다 — 화면은 안내일 뿐).
+ * `csv` 는 v2.643 CSV 권한(`api.js canCsv()` — 관리자 이상 + data.csv) 전용 페이지다. 이 모듈은 순수라 api.js 를 import 하지
+ *   않는다 — 호출부가 `{ csvOk: canCsv() }` 를 넘긴다(생략하면 예전처럼 보인다 — 서버가 집행한다).
  */
 export const IPAM_PAGES = Object.freeze([
   { k: 'list', label: '대장 목록', icon: '📋', group: 'ledger', needsLedger: true, title: 'vCenter·스캔·수동 등록 IP 전체 목록' },
@@ -24,7 +26,7 @@ export const IPAM_PAGES = Object.freeze([
   { k: 'status', label: '스캔 상태', icon: '📡', group: 'scan', admin: true, title: '진행 중 스캔 + 완료된 스캔 이력' },
   { k: 'log', label: '스캔 로그', icon: '🧾', group: 'scan', admin: true, title: '스캔 시작·종료·실패·건너뜀·엣지 보고·설정 변경 기록' },
   { k: 'ipms', label: 'IPMS 설정', icon: '⚙', group: 'setup', admin: true, title: '무시 대역 · vCenter 스캔 대역 · 공인/사설 분류' },
-  { k: 'csv', label: 'CSV 가져오기·내보내기', icon: '⇅', group: 'setup', title: '대장 내보내기 · IP 관리상태·메모 CSV · 스캔 대역 CSV' },
+  { k: 'csv', label: 'CSV 가져오기·내보내기', icon: '⇅', group: 'setup', csv: true, title: '대장 내보내기 · IP 관리상태·메모 CSV · 스캔 대역 CSV' },
 ]);
 export const IPAM_GROUPS = Object.freeze([['ledger', 'IP 대장'], ['range', '대역'], ['scan', '스캔'], ['setup', '설정·데이터']]);
 export const IPAM_PAGE_KEYS = Object.freeze(IPAM_PAGES.map((p) => p.k));
@@ -37,15 +39,16 @@ export function ipamPage(k) { return BY_KEY.get(k) || null; }
  * 관리자 페이지 접근 판정. access: 'yes'(관리자 설정을 읽었다) | 'no'(403 — 관리자 아님) | 'unknown'(아직 모름·네트워크 오류).
  * '모름' 을 '없음' 으로 읽지 않는다 — 메뉴는 보여 주고 각 페이지가 서버 응답으로 말한다(권한은 서버가 집행한다).
  */
-export function pageShown(k, access) {
+export function pageShown(k, access, { csvOk = true } = {}) {
   const p = BY_KEY.get(k);
   if (!p) return false;
+  if (p.csv && !csvOk) return false;
   return !p.admin || access !== 'no';
 }
 
 /** 메뉴에 보일 페이지를 그룹별로. */
-export function menuGroups(access) {
-  return IPAM_GROUPS.map(([g, label]) => ({ g, label, pages: IPAM_PAGES.filter((p) => p.group === g && pageShown(p.k, access)) }))
+export function menuGroups(access, opts = {}) {
+  return IPAM_GROUPS.map(([g, label]) => ({ g, label, pages: IPAM_PAGES.filter((p) => p.group === g && pageShown(p.k, access, opts)) }))
     .filter((x) => x.pages.length);
 }
 

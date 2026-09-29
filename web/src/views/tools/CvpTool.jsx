@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
-import { fetchJson, postJson, putJson, delJson, getCurrentUser, downloadFile } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, getCurrentUser, downloadFile, canCsv } from '../../api.js';
 import { Loading, ErrorBox, Kpi, Modal, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { droppedSecretNote } from '../droppedSecretText.js';
@@ -235,7 +235,7 @@ export default function CvpTool() {
           )}
           <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 260, minWidth: 160 }} value={q} onChange={setQ}
             placeholder="호스트명·모델·시리얼·EOS" />
-          <button type="button" className="btn" onClick={downloadCsv} disabled={!devices} title={CSV_NOTE.replace(/\*\*/g, '')}>CSV 내보내기</button>
+          {canCsv() && <button type="button" className="btn" onClick={downloadCsv} disabled={!devices} title={CSV_NOTE.replace(/\*\*/g, '')}>CSV 내보내기</button>}
         </div>
         {/* v2.640 ④: 필터 칩 — 개수는 검색만 적용한 집합에서 센다. 'unread' 는 못 읽은 장비(정상이 아니라 모름). */}
         <div style={{ ...ROW, marginTop: 8 }}>
