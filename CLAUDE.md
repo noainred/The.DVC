@@ -3803,6 +3803,10 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - CVP 서버 CSV 비밀 포함 내보내기는 iDRAC 스캔 대역·배포 대상과 같은 **설정 소유자 + 감사 로그** 경로다. 새 경로는 `/tools/cvp/bulk/*`
       (기존 `/tools/cvp/servers/:id/test` 가 `import` 를 id 로 잡으므로 분리했다).
     - ⚠ 정직 기록: 하위 필드 이름(포트 상태·카운터·BGP 새 표·부품·CPU)은 여전히 추정이다. 실장비 CVP 가 없어 목 CVP + Chromium 으로 검증했다.
+  - **CVP Overview·법인 구분(v2.645)** — `cvp/overview.js`(순수) + `GET /tools/cvp/overview` + 웹 `CvpOverview.jsx`·`cvpOverviewText.js`, 상세 `docs/CVP.md` §12:
+    확인 불가(오래됨·스트리밍 아님·못 읽음)는 정상에도 이상에도 넣지 않는다 · **법인 = CVP 서버의 DataCenter**(장비 단위가 아니다 — 화면이 말한다) ·
+    트래픽 합은 마지막 수집 **순간값** 합이고 스위치 간 링크는 양쪽에서 세어진다(측정 못 한 포트는 빼고 개수를 밝힌다) · 이벤트 `corpCounts` 는
+    **법인 필터 전** 기준(고른 칩만 남으면 해제할 수 없다) · 장비 법인·모델 칩은 스토리지와 같은 `DeviceFacetBar` · 벤더 지원 상태는 지어내지 않는다.
   - **등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다**
     (`cvp/formChoices.js pickAgent`·`pickDatacenter` + 웹 `cvpText.choiceOptions`, v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를
     콤보박스로 … 오타/대소문자 방지"):

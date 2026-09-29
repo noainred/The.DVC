@@ -28,6 +28,7 @@ import { SearchBox } from '../../components/ui.jsx';
 export default function DeviceFacetBar({
   dcChips = [], typeChips = [], dcSel, typeSel,
   onToggleDc, onToggleType, onClear, query = '', onQuery, typeLabel = (t) => t, dcMeta = null,
+  typeTitle = '🗄 장비 종류', placeholder = '법인·장비 찾기 (목록 필터)',
 }) {
   const facetOn = (dcSel?.size || 0) > 0 || (typeSel?.size || 0) > 0;
   return (
@@ -48,7 +49,7 @@ export default function DeviceFacetBar({
         })}
       </div>
       <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8 }}>
-        <span className="qn-label" style={{ minWidth: 74 }}>🗄 장비 종류</span>
+        <span className="qn-label" style={{ minWidth: 74 }}>{typeTitle}</span>
         {typeChips.map(({ type, count }) => {
           const on = !!typeSel?.has(type);
           return (
@@ -62,7 +63,7 @@ export default function DeviceFacetBar({
         })}
         <span className="flex gap" style={{ marginLeft: 'auto', alignItems: 'center', gap: 8 }}>
           <SearchBox className="input" style={{ maxWidth: 250, minWidth: 180 }}
-            value={query} onChange={onQuery} placeholder="법인·장비 찾기 (목록 필터)"
+            value={query} onChange={onQuery} placeholder={placeholder}
             title="입력한 글자가 포함된 법인·장비만 아래 목록에 표시합니다(법인명·장비명·host·타입에서 검색)." />
           {facetOn && (
             <button className="qn-btn" onClick={onClear}
