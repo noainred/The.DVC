@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import path from 'node:path';
 import { ACTIVITY_TEXT, activityOf, memText, gbText, tempText, allocText, capacityNote, coverageText, activityRuleNote, activitySummary } from './gpuUsageText.js';
 
 describe('gpuUsageText (v2.650)', () => {
@@ -30,7 +29,7 @@ describe('gpuUsageText (v2.650)', () => {
     expect(activityRuleNote({ busyUtilPct: 10, heldMemPct: 10 })).toMatch(/10% 이상 = 연산 중/);
   });
   it('문구에 백틱이 없다(BoldText 는 백틱을 글자로 그린다)', () => {
-    const src = fs.readFileSync(path.join(__dirname, 'gpuUsageText.js'), 'utf8');
+    const src = fs.readFileSync(new URL('./gpuUsageText.js', import.meta.url), 'utf8');
     const strings = src.match(/'[^'\n]*'/g) || [];
     expect(strings.filter((s) => s.includes('`'))).toEqual([]);
   });
