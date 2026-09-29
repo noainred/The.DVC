@@ -31,9 +31,29 @@ export default function DeviceFacetBar({
   typeTitle = '🗄 장비 종류', placeholder = '법인·장비 찾기 (목록 필터)',
   // v2.652: 선택 셋째 줄(버전) — verChips 가 없으면 예전 두 줄 그대로.
   verChips = null, verSel = null, onToggleVer = null, verLabel = (v) => v, verTitle = '🏷 버전',
+  // v2.656: 선택 넷째 줄(둘째 버전 축 — CVP 서버 버전) — ver2Chips 가 없으면 예전 그대로.
+  ver2Chips = null, ver2Sel = null, onToggleVer2 = null, ver2Label = (v) => v, ver2Title = '🏷 버전',
 }) {
   const hasVer = Array.isArray(verChips) && verChips.length > 0;
-  const facetOn = (dcSel?.size || 0) > 0 || (typeSel?.size || 0) > 0 || (verSel?.size || 0) > 0;
+  const hasVer2 = Array.isArray(ver2Chips) && ver2Chips.length > 0;
+  const facetOn = (dcSel?.size || 0) > 0 || (typeSel?.size || 0) > 0 || (verSel?.size || 0) > 0 || (ver2Sel?.size || 0) > 0;
+  const verRow = (chips, sel, onToggle, label, title, withTools) => (
+    <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8 }}>
+      <span className="qn-label" style={{ minWidth: 74 }}>{title}</span>
+      {chips.map(({ ver, count }) => {
+        const on = !!sel?.has(ver);
+        return (
+          <button key={ver || '(none)'} className={`qn-btn${on ? ' on' : ''}${count === 0 ? ' down' : ''}`}
+            aria-pressed={on} onClick={() => onToggle?.(ver)}
+            title={`${label(ver)} — 다른 선택 기준 ${count}대\n${on ? '클릭하면 선택 해제' : '클릭하면 이 버전만 표시(여러 개 선택 가능)'}`}>
+            {label(ver)}
+            <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{count}</span>
+          </button>
+        );
+      })}
+      {withTools && tools}
+    </div>
+  );
   // 검색창·해제 버튼은 마지막 줄 끝에 둔다(규약 — 줄이 셋이면 셋째 줄).
   const tools = (
     <span className="flex gap" style={{ marginLeft: 'auto', alignItems: 'center', gap: 8 }}>
@@ -76,25 +96,10 @@ export default function DeviceFacetBar({
             </button>
           );
         })}
-        {!hasVer && tools}
+        {!hasVer && !hasVer2 && tools}
       </div>
-      {hasVer && (
-        <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8 }}>
-          <span className="qn-label" style={{ minWidth: 74 }}>{verTitle}</span>
-          {verChips.map(({ ver, count }) => {
-            const on = !!verSel?.has(ver);
-            return (
-              <button key={ver || '(none)'} className={`qn-btn${on ? ' on' : ''}${count === 0 ? ' down' : ''}`}
-                aria-pressed={on} onClick={() => onToggleVer?.(ver)}
-                title={`${verLabel(ver)} — 선택된 법인·모델 기준 ${count}대\n${on ? '클릭하면 선택 해제' : '클릭하면 이 버전만 표시(여러 개 선택 가능)'}`}>
-                {verLabel(ver)}
-                <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{count}</span>
-              </button>
-            );
-          })}
-          {tools}
-        </div>
-      )}
+      {hasVer && verRow(verChips, verSel, onToggleVer, verLabel, verTitle, !hasVer2)}
+      {hasVer2 && verRow(ver2Chips, ver2Sel, onToggleVer2, ver2Label, ver2Title, true)}
     </div>
   );
 }

@@ -3811,6 +3811,17 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     트랜시버 노드는 장착 여부만 준다(건강 아님 — 정상으로 칠하지 않는다) · DOM 은 xcvr 만 추종 깊이 3 + `dom` 이름 포인터만(추정 경로) ·
     **링크가 올라온 포트만** 수신 광량을 판정(바닥이 정상인 미사용 포트를 장애로 세지 않는다) · 장비 임계 먼저, 없으면 CVP 설정 `xcvrRxWarnDbm`/`xcvrRxFaultDbm` ·
     `show interfaces transceiver` 는 스위치 CLI 라 CVP REST 로 실행할 수 없다(스위치 계정이 필요 — 도입하지 않음). CVP 등록·설정은 'CVP 설정' 탭에만 있다.
+  - ⚠⚠ **CVP GBIC — 링크가 내려간 것을 '확인한' 포트는 광량·Tx·바이어스를 판정하지 않는다. 온도·전압은 판정한다**(v2.656, `cvp/parse.js`
+    `xcvrDom.envState`·`judgeOptics` + `cvp/faults.js NO_LINK`·`partObservation closeAs` + `faultNotify.js`, 회귀 `server/test/cvpNoLink2656.test.js` — 변이 2/2):
+    링크가 없으면 상대가 빛을 보내지 않고 레이저도 꺼진다(Tx·바이어스 LowAlarm 이 정상) — v2.521 SAN 광량 규약의 CVP 판. **포트 상태를 모르면
+    (목록 없음·그 포트 없음) 예전 판정 그대로**다. 판정할 지표가 없으면 state unknown 이고, 전이 쪽이 `optic.portKnown && linked===false` 인 xcvr 의
+    unknown 만 관측 ok + `closeAs:'no-link'` 로 바꿔 **열린 장애를 '판정 대상 아님' 으로 닫는다**(고쳐졌다는 뜻이 아님 — 알림 제목 'CVP 장애 판정 제외').
+    ⚠ 판정은 엣지(`client.js judgeOptics`)이므로 엣지 위임 CVP 는 엣지 업그레이드가 필요하다. 닫힘 쪽은 중앙이 하므로 구버전 엣지 보고로도 동작한다.
+  - **CVP 서버 버전 칩(v2.656)** — `cvpOverviewText.cvpServerVersionMap/Of/Chips` + `DeviceFacetBar` 넷째 줄(`ver2*`, 없으면 예전 그대로):
+    장비의 EOS 버전과 **다른 축**이다(장비를 관리하는 CVP 서버의 getCvpInfo 버전 — 서버 상태 `cvpVersion` 을 cvpId 로 붙인다). 칩 개수는 다른 축만
+    적용한 집합 · 한 종류뿐이면 줄을 만들지 않는다 · 못 읽으면 '(CVP 버전 미상)'.
+  - **GPU 추이 창은 수집 공백을 잇지 않는다**(v2.656, `GpuHistModal.gapRows`): 간격이 `max(버킷, 수집 주기) × 2` 를 넘으면 null 행을 끼워 선을 끊고
+    (버킷을 모르면 이웃 간격 중앙값), 앞뒤가 빈 점은 점으로 찍는다(v2.551 bmUsageChart 규약과 같다). 끊은 곳 수를 창 아래에 적는다 · 평균/최고 범례.
   - **CVP 장비 목록 EOS 버전 칩 · 필터 연동 KPI(v2.652)** — 사용자 요청 "CVP 버전별로 보는 기능, 모델 아래 버전 표시" + "아래 조건 필터 걸면 위 숫자 변경":
     `deviceFacets.facetState` 에 선택 셋째 축(`verSel`·`verOf`·`verLabel`, 없으면 예전 두 축 그대로 — 스토리지 화면 무변경)과 `DeviceFacetBar` 셋째 줄을 더했다
     (검색창은 마지막 줄 끝 규약 유지). 버전 = 장비의 **EOS 버전**(`cvpOverviewText.eosVersionOf`) — CVP 서버 자신의 버전이 아니다. KPI 는 필터가 걸리면

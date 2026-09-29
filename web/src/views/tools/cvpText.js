@@ -745,6 +745,7 @@ export function closeReasonText(r) {
   if (!s) return '—';
   if (s === 'ok') return '정상으로 관측';
   if (s === 'removed') return '빈 슬롯(부품 제거 — 교체 여부를 확인하세요)';
+  if (s === 'no-link') return '링크 없음 — 판정 대상 아님(고쳐졌다는 뜻이 아닙니다)';
   if (s.startsWith('manual')) { const who = s.split(':')[1]; return `수동 닫기${who ? `(${who})` : ''}`; }
   return s;
 }

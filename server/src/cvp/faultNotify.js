@@ -21,14 +21,16 @@ export function alertOf(f, { closed = false } = {}) {
   const dev = t(f?.deviceName) || t(f?.hostname) || t(f?.deviceKey);
   const label = t(f?.label);
   const partText = label && new RegExp(`^${kind}\\b`, 'i').test(label) ? label : `${kind} ${label}`.trim();
-  const head = closed ? 'CVP 장애 해소' : 'CVP 장애';
+  const head = closed ? (f?.closeReason === 'no-link' ? 'CVP 장애 판정 제외' : 'CVP 장애 해소') : 'CVP 장애';
   const title = `${head} — ${dev} · ${partText}`;
   const lines = [
     `장비: ${dev}${t(f?.agent) ? ` (수집: ${t(f.agent)})` : ''}`,
     ...(t(f?.cvpName) ? [`CVP: ${t(f.cvpName)}`] : []),
     `파트: ${partText}${t(f?.detail) ? ` · ${t(f.detail)}` : ''}`,
     closed
-      ? `상태: 해소됨${f?.closeReason === 'removed' ? ' (부품이 제거되어 더 이상 보이지 않습니다 — 교체 여부를 확인하세요)' : ''}`
+      ? (f?.closeReason === 'no-link'
+        ? '상태: 판정 대상에서 제외됨 (링크가 내려간 포트라 광량·Tx·바이어스를 판정하지 않습니다 — 고쳐졌다는 뜻이 아닙니다)'
+        : `상태: 해소됨${f?.closeReason === 'removed' ? ' (부품이 제거되어 더 이상 보이지 않습니다 — 교체 여부를 확인하세요)' : ''}`)
       : `상태: ${FAULT_STATE_LABEL[f?.state] || t(f?.state)}${t(f?.prevState) ? ` (이전: ${FAULT_STATE_LABEL[f.prevState] || t(f.prevState)})` : ''}`,
   ];
   return {

@@ -406,7 +406,7 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
       }
       if (x.text) detailBits.push(x.text);
       // 최종 판정(광량 포함)은 judgeOptics 가 포트 링크 상태를 보고 한다 — 여기서는 재료만 싣는다.
-      if (dom) domJudge = { otherState: x.otherState, rxDevice: x.rxDevice };
+      if (dom) domJudge = { otherState: x.otherState, envState: x.envState, rxDevice: x.rxDevice };
       media = xcvrTypeText(unwrap(pick(f, ['mediaTypeString', 'mediaType', 'xcvrMediaType', 'media', 'xcvrType', 'transceiverType'])));
     }
     parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200), ...(dom ? { dom, domJudge } : {}), ...(pw ? { power: pw } : {}), ...(media ? { media } : {}) });
@@ -442,6 +442,11 @@ export function mergeXcvrDom(entities) {
   return out;
 }
 const r2 = (n) => Math.round(n * 100) / 100;
+/**
+ * v2.656: 링크가 내려간 포트에서도 판정하는 DOM 지표(온도·전압). Tx·바이어스는 링크 상태에 따라 레이저를 끄거나 낮추는 장비가 있어
+ *   링크가 없으면 판정하지 않는다(Rx 와 같은 규약 — 사용자 승인). 모듈 수준 상수라 xcvrDom 보다 위에 둔다.
+ */
+const ENV_KEYS = new Set(['temperature', 'voltage']);
 const RANK = { ok: 0, warn: 1, fault: 2 };
 const worse = (a, b) => (a == null ? b : b == null ? a : (RANK[b] > RANK[a] ? b : a));
 function judgeVal(v, { hiA, loA, hiW, loW }) {
@@ -454,7 +459,7 @@ function judgeVal(v, { hiA, loA, hiW, loW }) {
  * rxDevice = Rx 를 장비 임계로 판정한 결과(null 이면 장비 임계 없음). Rx 는 링크 상태를 알아야 판정할 수 있어 judgeOptics 가 마무리한다.
  */
 export function xcvrDom(flat) {
-  const values = {}; const bits = []; let otherState = null; let rxDevice = null; const rxTh = {};
+  const values = {}; const bits = []; let otherState = null; let envState = null; let rxDevice = null; const rxTh = {};
   for (const { key, label } of DOM_FIELDS) {
     const v = numOrNull(unwrap(pick(flat, [key, `${key}Dbm`, `${key}Value`])));
     if (v == null) continue;
@@ -464,9 +469,12 @@ export function xcvrDom(flat) {
     const t = { hiA: th('HighAlarm'), loA: th('LowAlarm'), hiW: th('HighWarn'), loW: th('LowWarn') };
     const has = Object.values(t).some((x) => x != null);
     if (key === 'rxPower') { if (has) { rxDevice = judgeVal(v, t); Object.assign(rxTh, t); } continue; }
-    if (has) otherState = worse(otherState, judgeVal(v, t));
+    if (has) {
+      otherState = worse(otherState, judgeVal(v, t));
+      if (ENV_KEYS.has(key)) envState = worse(envState, judgeVal(v, t));
+    }
   }
-  return { values: bits.length ? values : null, text: bits.join(' · '), otherState, rxDevice, rxThresholds: Object.keys(rxTh).length ? rxTh : null };
+  return { values: bits.length ? values : null, text: bits.join(' · '), otherState, envState, rxDevice, rxThresholds: Object.keys(rxTh).length ? rxTh : null };
 }
 
 /** 부품 이름(`all › Ethernet49 › domInfo` 등)에서 인터페이스 이름을 뽑는다. */
@@ -481,6 +489,7 @@ export function xcvrIntfOf(name) {
  *  · 임계는 **장비가 준 임계가 먼저**, 없으면 포탈 설정(warnDbm·faultDbm — CVP 설정 화면에서 바꾼다)이다. 어느 쪽인지 `optic.basis`.
  *  · ⚠ 단위는 dBm 으로 본다 — `show interfaces transceiver` 가 dBm 이고 텔레메트리도 같다고 **추정**했다(실장비 미확인 — docs/CVP.md §13).
  *  · 포트 목록을 못 읽었으면(null) 판정하지 않는다(링크를 모른다).
+ *  · v2.656: 링크가 내려간 것을 **확인한** 포트는 Tx·바이어스도 판정하지 않는다(온도·전압만 장비 임계로). 포트 상태를 모르면 예전 판정 그대로.
  */
 export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}) {
   if (!Array.isArray(parts)) return parts;
@@ -492,18 +501,22 @@ export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}
     const port = intf ? byName.get(intf) : null;
     const rx = numOrNull(p.dom.rxPower);
     const linked = !!port && port.oper === 'up';
+    // v2.656: 링크가 내려간 것을 '확인한' 포트 — Rx 에 더해 Tx·바이어스도 판정하지 않는다(온도·전압만). 포트 상태를 모르면 예전 판정 그대로.
+    const linkDown = portsKnown && !!port && !linked;
+    const other = linkDown ? (p.domJudge?.envState ?? null) : (p.domJudge?.otherState ?? null);
     const basis = p.domJudge?.rxDevice ? 'device' : 'portal';
     let rxState = null;
     if (rx != null && linked) rxState = p.domJudge?.rxDevice || (rx <= faultDbm ? 'fault' : rx <= warnDbm ? 'warn' : 'ok');
-    const judged = rxState != null || p.domJudge?.otherState != null;
+    const judged = rxState != null || other != null;
     let state = p.state;
-    if (p.state !== 'absent' && judged) state = worse(p.domJudge?.otherState ?? null, rxState) || p.state;
+    if (p.state !== 'absent' && judged) state = worse(other, rxState) || p.state;
     const optic = {
       intf, rx, tx: numOrNull(p.dom.txPower), linked, portKnown: portsKnown && !!port, judged: rxState != null, rxState, basis: rxState != null ? basis : null,
       ...(basis === 'portal' && rxState != null ? { warnDbm, faultDbm } : {}),
     };
     let detail = p.detail || '';
-    if (rx != null && !linked) detail = `${detail}${detail ? ' · ' : ''}${portsKnown && port ? '링크 없음 — 광량 판정 안 함' : '포트 상태 모름 — 광량 판정 안 함'}`;
+    if (linkDown) detail = `${detail}${detail ? ' · ' : ''}링크 없음 — 광량·Tx·바이어스 판정 안 함`;
+    else if (rx != null && !linked) detail = `${detail}${detail ? ' · ' : ''}포트 상태 모름 — 광량 판정 안 함`;
     if (rxState === 'fault' || rxState === 'warn') detail = `${detail}${detail ? ' · ' : ''}수신 광량 ${rxState === 'fault' ? '약함(장애)' : '낮음(주의)'}`;
     const { domJudge, ...rest } = p; // 내부 판정 재료는 저장하지 않는다
     return { ...rest, state, detail: str(detail, 200), optic };

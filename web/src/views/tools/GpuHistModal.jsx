@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import { Modal } from '../../components/Modal.jsx';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush, Legend } from 'recharts';
 import { fmtTrendTick } from './shared.jsx';
 import { numOrNull } from '../../numOrNull.js';
 
@@ -37,6 +37,39 @@ export function gpuTick(ts, days, bucketMs) {
   return fmtTrendTick(ts, days);
 }
 
+/**
+ * v2.656: 수집이 없던 구간은 선을 잇지 않는다 — 앞뒤 점을 직선으로 이으면 그 구간에도 값이 있었던 것처럼 보인다
+ *   (bmUsageChart·roomTempView 와 같은 규약). 이웃 점 간격이 '집계 단위 × 2'(수집 주기가 더 길면 그 × 2)를 넘으면
+ *   사이에 빈 점(avg·max 가 null)을 넣는다 — recharts 는 null 에서 선을 끊는다(connectNulls 기본 false).
+ *   양옆이 비어 선이 그려지지 않는 외톨이 점은 `iso` 로 표시해 점으로 그린다(없애면 그 값이 화면에서 사라진다).
+ *   단위를 모르면(bucketMs 없음) 이웃 간격의 중앙값을 단위로 본다. 반환 { rows, gaps }.
+ */
+export function gapRows(points, bucketMs, sampleSec) {
+  const pts = (Array.isArray(points) ? points : []).filter((p) => p && numOrNull(p.ts) != null).slice().sort((a, b) => a.ts - b.ts);
+  let unit = numOrNull(bucketMs);
+  if (!unit && pts.length > 2) {
+    const diffs = pts.slice(1).map((p, i) => p.ts - pts[i].ts).filter((x) => x > 0).sort((a, b) => a - b);
+    unit = diffs.length ? diffs[Math.floor(diffs.length / 2)] : null;
+  }
+  const s = numOrNull(sampleSec);
+  const limit = unit ? Math.max(unit, s ? s * 1000 : 0) * 2 : null;
+  const rows = []; let gaps = 0;
+  for (let i = 0; i < pts.length; i++) {
+    if (i > 0 && limit && pts[i].ts - pts[i - 1].ts > limit) {
+      rows.push({ ts: pts[i - 1].ts + 1, avg: null, max: null, gap: true });
+      gaps += 1;
+    }
+    rows.push({ ts: pts[i].ts, avg: numOrNull(pts[i].avg), max: numOrNull(pts[i].max) });
+  }
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i].gap) continue;
+    const prevOk = i > 0 && !rows[i - 1].gap;
+    const nextOk = i < rows.length - 1 && !rows[i + 1].gap;
+    if (!prevOk && !nextOk) rows[i].iso = true;
+  }
+  return { rows, gaps };
+}
+
 /** level: host|cluster|vc|vm. 클러스터·법인은 사용률만 있다(서버가 400 을 준다). */
 export default function GpuHistModal({ level, hkey, title, initialMetric = 'util', onClose }) {
   const [days, setDays] = useState(1);
@@ -58,6 +91,7 @@ export default function GpuHistModal({ level, hkey, title, initialMetric = 'util
   const label = GPU_HIST_METRICS.find(([k]) => k === metric)?.[1] || '';
   const bucketLabel = GPU_HIST_BUCKETS.find(([k]) => k === bucket)?.[1] || '';
   const bMs = numOrNull(d.bucketMs);
+  const gapped = gapRows(d.points, bMs, d.sampleSec);
   return (
     <Modal title={`GPU ${label} 추이 — ${title || hkey}`} onClose={onClose} width={760}>
       <div className="flex gap" style={{ marginBottom: 10, flexWrap: 'wrap', rowGap: 6 }}>
@@ -87,21 +121,35 @@ export default function GpuHistModal({ level, hkey, title, initialMetric = 'util
         : (
           <>
             <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={(d.points || []).map((p) => ({ t: gpuTick(p.ts, days, bMs), avg: conv(p.avg), max: conv(p.max) }))}>
+              <LineChart data={gapped.rows.map((p) => ({ t: p.gap ? '' : gpuTick(p.ts, days, bMs), avg: conv(p.avg), max: conv(p.max), iso: !!p.iso }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
                 <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={40} />
                 <YAxis tick={{ fontSize: 11 }} unit={temp ? '℃' : mb ? 'GB' : '%'} domain={temp || mb ? [mb ? 0 : 'auto', 'auto'] : [0, 100]} allowDataOverflow={!temp && !mb} />
                 <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} />
-                <Line type="monotone" dataKey="avg" stroke="#a78bfa" dot={false} name="평균" isAnimationActive={false} />
-                <Line type="monotone" dataKey="max" stroke="#f59e0b" dot={false} name="최고" isAnimationActive={false} />
+                <Legend verticalAlign="top" height={24} iconType="plainline" wrapperStyle={{ fontSize: 12 }} />
+                <Line type="monotone" dataKey="avg" stroke="#a78bfa" dot={isoDot('#a78bfa')} name="평균" isAnimationActive={false} />
+                <Line type="monotone" dataKey="max" stroke="#f59e0b" dot={isoDot('#f59e0b')} name="최고" isAnimationActive={false} />
                 <Brush dataKey="t" height={22} stroke="#6366f1" travellerWidth={8} tickFormatter={() => ''} />
               </LineChart>
             </ResponsiveContainer>
-            <div className="muted" style={{ fontSize: 11, marginTop: 4, textAlign: 'center' }}>{bucketNote(d, bucketLabel)}아래 막대를 드래그하면 구간을 좁혀 확대해 볼 수 있습니다.{temp ? ' 온도 축은 값 범위에 맞춥니다.' : mb ? ' 메모리 사용량 축은 값 범위에 맞춥니다(GB).' : ''}</div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 4, textAlign: 'center' }}>{bucketNote(d, bucketLabel)}{gapNote(gapped.gaps)}아래 막대를 드래그하면 구간을 좁혀 확대해 볼 수 있습니다.{temp ? ' 온도 축은 값 범위에 맞춥니다.' : mb ? ' 메모리 사용량 축은 값 범위에 맞춥니다(GB).' : ''}</div>
           </>
         )}
     </Modal>
   );
+}
+
+/** 외톨이 점(양옆이 빈 구간)만 점으로 그린다 — 나머지는 선. recharts dot 렌더 함수. */
+function isoDot(color) {
+  return (props) => {
+    const { cx, cy, payload, key } = props || {};
+    if (!payload?.iso || cx == null || cy == null) return <g key={key} />;
+    return <circle key={key} cx={cx} cy={cy} r={2.5} fill={color} stroke="none" />;
+  };
+}
+/** 끊은 구간 안내 — 0 이면 빈 문자열. */
+export function gapNote(gaps) {
+  return gaps > 0 ? `수집이 없던 구간 ${gaps}곳은 선을 잇지 않았습니다(빈 칸 = 값 없음). ` : '';
 }
 
 /** 단위 안내 — 실제로 쓴 단위 · 잘림 · 수집 주기보다 짧은 단위. 값이 없으면 빈 문자열. */
