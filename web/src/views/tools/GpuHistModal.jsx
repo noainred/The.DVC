@@ -6,11 +6,11 @@ import { Modal } from '../../components/Modal.jsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
 import { fmtTrendTick } from './shared.jsx';
 
-export const GPU_HIST_METRICS = [['util', '사용률'], ['mem', '메모리 점유'], ['temp', '온도']];
+export const GPU_HIST_METRICS = [['util', '사용률'], ['mem', '메모리 사용률'], ['memmb', '메모리 사용량'], ['temp', '온도']];
 
 /** level: host|cluster|vc|vm. 클러스터·법인은 사용률만 있다(서버가 400 을 준다). */
 export default function GpuHistModal({ level, hkey, title, initialMetric = 'util', onClose }) {
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(1);
   const [metric, setMetric] = useState(initialMetric);
   const [d, setD] = useState({ loading: true });
   const gen = useRef(0);
@@ -23,6 +23,8 @@ export default function GpuHistModal({ level, hkey, title, initialMetric = 'util
       .catch(() => { if (g === gen.current) setD({ error: true }); });
   }, [level, hkey, days, metric]);
   const temp = metric === 'temp';
+  const mb = metric === 'memmb'; // v2.653: 서버는 MB 로 저장한다 — GB 로 그린다
+  const conv = (v) => (v == null ? null : mb ? Math.round((v / 1024) * 10) / 10 : v);
   const label = GPU_HIST_METRICS.find(([k]) => k === metric)?.[1] || '';
   return (
     <Modal title={`GPU ${label} 추이 — ${title || hkey}`} onClose={onClose} width={760}>
@@ -37,21 +39,21 @@ export default function GpuHistModal({ level, hkey, title, initialMetric = 'util
         {d.synthesized && <span className="badge amber" style={{ alignSelf: 'center' }}>데모 합성</span>}
       </div>
       {d.loading ? <Loading /> : d.error ? <ErrorBox message="이력을 불러오지 못했습니다." /> : (d.points || []).length === 0
-        ? <div className="muted">해당 기간 데이터가 없습니다{metric === 'util' ? '(수집 누적 후 표시)' : '(메모리·온도 추이는 v2.650 부터 게스트 수집값으로 쌓입니다)'}.</div>
+        ? <div className="muted">해당 기간 데이터가 없습니다{metric === 'util' ? '(수집 누적 후 표시)' : (mb ? '(메모리 사용량 추이는 v2.653 부터 쌓입니다)' : '(메모리·온도 추이는 v2.650 부터 게스트 수집값으로, v2.653 부터 ESXi 카운터 값으로도 쌓입니다)')}.</div>
         : (
           <>
             <ResponsiveContainer width="100%" height={320}>
-              <LineChart data={(d.points || []).map((p) => ({ t: fmtTrendTick(p.ts, days), avg: p.avg, max: p.max }))}>
+              <LineChart data={(d.points || []).map((p) => ({ t: fmtTrendTick(p.ts, days), avg: conv(p.avg), max: conv(p.max) }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
                 <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={40} />
-                <YAxis tick={{ fontSize: 11 }} unit={temp ? '℃' : '%'} domain={temp ? ['auto', 'auto'] : [0, 100]} allowDataOverflow={!temp} />
+                <YAxis tick={{ fontSize: 11 }} unit={temp ? '℃' : mb ? 'GB' : '%'} domain={temp || mb ? [mb ? 0 : 'auto', 'auto'] : [0, 100]} allowDataOverflow={!temp && !mb} />
                 <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} />
                 <Line type="monotone" dataKey="avg" stroke="#a78bfa" dot={false} name="평균" isAnimationActive={false} />
                 <Line type="monotone" dataKey="max" stroke="#f59e0b" dot={false} name="최고" isAnimationActive={false} />
                 <Brush dataKey="t" height={22} stroke="#6366f1" travellerWidth={8} tickFormatter={() => ''} />
               </LineChart>
             </ResponsiveContainer>
-            <div className="muted" style={{ fontSize: 11, marginTop: 4, textAlign: 'center' }}>아래 막대를 드래그하면 구간을 좁혀 확대해 볼 수 있습니다.{temp ? ' 온도 축은 값 범위에 맞춥니다.' : ''}</div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 4, textAlign: 'center' }}>아래 막대를 드래그하면 구간을 좁혀 확대해 볼 수 있습니다.{temp ? ' 온도 축은 값 범위에 맞춥니다.' : mb ? ' 메모리 사용량 축은 값 범위에 맞춥니다(GB).' : ''}</div>
           </>
         )}
     </Modal>

@@ -278,13 +278,25 @@ async function sampleOnceInner() {
       if (g.utilPct != null && !g.utilNA) rows.push({ metric: 'gpu_vm_util', k: g.vmId, v: g.utilPct });
       if (g.memUsedPct != null) rows.push({ metric: 'gpu_vm_mem', k: g.vmId, v: g.memUsedPct });
       if (g.tempC != null) rows.push({ metric: 'gpu_vm_temp', k: g.vmId, v: g.tempC });
+      // v2.653: 메모리 절대량(MB)도 저장 — 사용률(%)만으로는 '몇 GB 를 쓰는가' 추이를 볼 수 없다(사용자 요청 "수집하는 모든 데이터를 저장").
+      if (g.memUsedMB != null) rows.push({ metric: 'gpu_vm_mem_mb', k: g.vmId, v: g.memUsedMB });
       const hid = hostIdOf.get(`${vm.vcenterId}\t${vm.host}`);
       if (!hid) continue;
       if (g.tempC != null) hostTemp.set(hid, Math.max(hostTemp.get(hid) ?? -Infinity, g.tempC));
       if (g.memUsedMB != null && g.memTotalMB > 0) { const e = hostMem.get(hid) || [0, 0]; e[0] += g.memUsedMB; e[1] += g.memTotalMB; hostMem.set(hid, e); }
     }
     for (const [k, v] of hostTemp) rows.push({ metric: 'gpu_temp', k, v });
-    for (const [k, [u, t]] of hostMem) rows.push({ metric: 'gpu_mem', k, v: round1((u / t) * 100) });
+    for (const [k, [u, t]] of hostMem) { rows.push({ metric: 'gpu_mem', k, v: round1((u / t) * 100) }); rows.push({ metric: 'gpu_mem_mb', k, v: u }); }
+    // v2.653: 게스트 값이 없는 호스트는 ESXi 카운터(gpu.temperature · gpu.mem.usage/used — vGPU/vSGA)로 채운다.
+    //   같은 호스트에 두 출처를 섞지 않는다(게스트가 먼저). 신선한 호스트(freshHosts)만 — 낡은 vCenter 값을 '지금' 으로 쌓지 않는다.
+    for (const h of freshHosts) {
+      if (!(h.gpus || []).length) continue;
+      if (!hostTemp.has(h.id) && Number.isFinite(h.gpuTempC)) rows.push({ metric: 'gpu_temp', k: h.id, v: h.gpuTempC });
+      if (!hostMem.has(h.id)) {
+        if (Number.isFinite(h.gpuMemUsedPct)) rows.push({ metric: 'gpu_mem', k: h.id, v: h.gpuMemUsedPct });
+        if (Number.isFinite(h.gpuMemUsedMB)) rows.push({ metric: 'gpu_mem_mb', k: h.id, v: h.gpuMemUsedMB });
+      }
+    }
   }
 
   // VM 실사용 vs 할당 집계(v2.374) — '주기적 실사용 트렌드로 할당량을 조절'하기 위한 시계열.

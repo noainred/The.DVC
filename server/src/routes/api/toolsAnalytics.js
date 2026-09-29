@@ -180,15 +180,16 @@ api.get('/tools/threats', requirePerm('tools'), (req, res) => memoJson(req, res,
 api.get('/tools/gpu/history', requirePerm('tools'), async (req, res) => {
   const level = ['host', 'cluster', 'vc', 'vm'].includes(req.query.level) ? req.query.level : 'host';
   // v2.650: 지표 선택 — util(사용률) · mem(메모리 점유 %) · temp(온도 ℃). 클러스터·법인 단위는 사용률만 있다.
-  const kind = ['util', 'mem', 'temp'].includes(req.query.metric) ? req.query.metric : 'util';
+  // v2.653: memmb(메모리 사용량 MB) 추가.
+  const kind = ['util', 'mem', 'memmb', 'temp'].includes(req.query.metric) ? req.query.metric : 'util';
   const METRICS = {
-    host: { util: 'gpu_util', mem: 'gpu_mem', temp: 'gpu_temp' },
-    vm: { util: 'gpu_vm_util', mem: 'gpu_vm_mem', temp: 'gpu_vm_temp' },
+    host: { util: 'gpu_util', mem: 'gpu_mem', memmb: 'gpu_mem_mb', temp: 'gpu_temp' },
+    vm: { util: 'gpu_vm_util', mem: 'gpu_vm_mem', memmb: 'gpu_vm_mem_mb', temp: 'gpu_vm_temp' },
     cluster: { util: 'gpu_cluster' }, vc: { util: 'gpu_vc' },
   };
   const metric = METRICS[level][kind];
   if (!metric) return res.status(400).json({ ok: false, reason: `${level} 단위에는 ${kind} 추이가 없습니다(사용률만 있습니다).` });
-  const unit = kind === 'temp' ? '℃' : '%';
+  const unit = kind === 'temp' ? '℃' : kind === 'memmb' ? 'MB' : '%';
   const key = String(req.query.key || '');
   const days = Math.max(1, Math.min(1830, Number(req.query.days) || 7));
   // key 의 vCenter 귀속을 scope 로 검사(범위 밖 호스트/클러스터/vc GPU 히스토리 조회 차단).
@@ -215,7 +216,8 @@ api.get('/tools/gpu/history', requirePerm('tools'), async (req, res) => {
       let v = base + 22 * Math.abs(Math.sin(day / 9)) + 14 * Math.sin(day) + (hash(key + t) % 8);
       v = Math.max(0, Math.min(100, v));
       if (kind === 'temp') v = 32 + v * 0.45; // 데모: 32~77℃
-      points.push({ ts: Math.floor(t), avg: Number(v.toFixed(1)), min: Number(Math.max(0, v - 12).toFixed(1)), max: Number(Math.min(100, v + 10).toFixed(1)) });
+      if (kind === 'memmb') v = v * 800; // 데모: 0~80,000MB
+      points.push({ ts: Math.floor(t), avg: Number(v.toFixed(1)), min: Number(Math.max(0, v - 12).toFixed(1)), max: Number((kind === 'memmb' ? v * 1.1 : Math.min(100, v + 10)).toFixed(1)) });
     }
   }
   res.json({ level, key, metric: kind, days, bucketMs, unit, synthesized, points });

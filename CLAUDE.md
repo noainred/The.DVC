@@ -3842,6 +3842,24 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       **신선한 게스트 값만**(폴 주기 × 3, 최소 15분) · `GPU_VM_SERIES=0` 으로 끈다. 히스토리 API 는 `metric=util|mem|temp`, 클러스터·법인은 사용률만(400).
     - 호스트 상세는 소유 화면 밖에서 `/tools/gpu` 를 부르므로 `toolAllowed('gpu')` 를 먼저 본다(v2.613 CATALOG2613-02 스윕이 실제로 잡았다).
     - ⚠ 정직 기록: vGPU 게스트에서 `temperature.gpu` 가 값을 주는지, 이 현장 프로파일 이름 형식은 실장비로 확인하지 못했다. 목 데이터는 vGPU 과할당(>100%)이 나온다(합성 한계).
+  - ⚠⚠ **GPU 표 시안 A(v2.653) — 빈 칸은 이유를 말하고, 게스트 값이 없으면 ESXi 카운터로 채우되 출처를 밝힌다**
+    (`gpu/guestWhy.js`(순수 판정) · `routes/api/hardwareGpu.js gatherGuestWhyCtx` · `vcenter/soapClient.js gpuPerfCounterIds`·`parseHostGpuPerf` ·
+    웹 `views/tools/GpuTool.jsx`·`gpuWhyText.js` + `DataTable expandedKey/renderExpanded`. 사용자 요청 "온도·메모리 사용률이 안 나오고 할당 VM 이 많으면 줄 간격이
+    넓다 · edge 에서 수집하는 건 안 된다" + "조회 기본 1일" + "GPU 에서 수집하는 모든 데이터 저장". 회귀 `server/test/gpuTable2653.test.js` + 웹 `gpuWhyText.test.js`):
+    - **엣지 법인이 빈 원인은 확정하지 못했다(정직 기록)** — 엣지 push·중앙 수신·저장·화면 코드는 온도·메모리 필드를 전부 넘긴다. 'VM 동작 불가 N' 은 그 VM 의
+      게스트 기록이 중앙에 아예 없다는 뜻이다. 그래서 원인을 추측하지 않고 **행마다 이유 코드**(`GUEST_WHY_CODES` 9종 — 웹 `WHY_TEXT` 와 1:1, 테스트 대조)를
+      싣는다: site vCenter 는 담당 엣지(스냅샷 `collectedBy`)의 진단 보고 유무·나이(30분)·그 vCenter 항목 유무 → 선별 단계, direct 는 로컬 설정·진단.
+      판정 입력은 전부 인메모리·설정 파일이다(왕복 0). 엣지 버전 < 2.650 이면 '엣지 구버전'(온도·메모리 절대량 미전송) — **버전을 모르면 단정하지 않는다**.
+    - **ESXi GPU 카운터는 사용률과 같은 QueryPerf 한 번**이다(`gpu.mem.usage`(%) · `gpu.mem.used`(KB, 인스턴스 합) · `gpu.temperature`(인스턴스 최대)).
+      ⚠ 카운터 이름은 관용 이름이고 이 현장 vCenter 카탈로그에서 확인하지 못했다 — 없으면 그 값만 null 이고 수집 로그가 '카운터 없음' 을 말한다.
+      -1 표본은 버리고(0 으로 채우지 않는다) 합계 인스턴스("")는 GPU 인스턴스가 있으면 뺀다. 호스트 필드 `gpuTempC`·`gpuMemUsedPct`·`gpuMemUsedMB` 는
+      중앙 `INV_NUM_KEYS` 에 넣었다(엣지 push 로 오는 값도 수로 좁힌다).
+    - **게스트 값이 먼저다**(`summarizeHostGpu` — `tempSource`·`memSource`). 두 출처를 한 호스트에 섞지 않는다 — 화면은 ESXi 값에 'ESXi' 표지를 붙인다.
+      패스쓰루 용량은 모델명 추정이라 ESXi MB 로 백분율을 계산하지 않는다.
+    - 저장: `gpu_mem_mb`(호스트)·`gpu_vm_mem_mb`(VM) 추가 + 게스트 값이 없는 신선한 호스트는 ESXi 값으로 `gpu_temp`·`gpu_mem` 적재. 추이 API `metric=memmb`(MB 저장, 화면 GB).
+    - 화면: 행 높이 44px 고정(CSS 는 `.gpu-host-table > tbody > tr:not(.row-expanded) > td` — 펼침 표까지 44px 가 되던 것을 좁혔다) · 칩은 켜진 VM 먼저 ·
+      펼침은 한 번에 한 행(`DataTable` 의 선택 인자 — 기본값이면 기존 표 무변경) · 추이 창 기본 1일.
+    - ⚠ **Playwright 스크린샷 경로는 절대 경로로** — 상대 경로면 스크립트를 돌린 cwd(저장소)에 png 가 떨어진다(이번에 server/·web/ 에 떨어져 지웠다).
   - ⚠ **CVP 슬롯 전원(`ecb › LinecardN`)은 PSU 가 아니다 — 빈 슬롯/카드 전원 이상을 근거로 가른다**(v2.648, `cvp/parse.js judgeSlotPower`·
     `client.js slotEvidence`, 상세 `docs/CVP.md` §15): kind 는 psu 그대로(faultKey 불변 — 바꾸면 열린 장애가 영원히 보류), 표시만 '슬롯 전원(카드)'.
     그 슬롯의 링크 up 포트가 있으면 장애 → 주의, 다른 슬라이스는 있는데 그 번호만 없고 센서·트랜시버도 없으면 빈 슬롯(absent — removed 로 닫힘),

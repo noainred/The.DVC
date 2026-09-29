@@ -71,7 +71,8 @@ test('COL2605-03: vGPU 사용률 — 표본이 없는 호스트를 0%(유휴)로
   const s = bare('vcenter/soapClient.js');
   assert.doesNotMatch(s, /pct:\s*map\.get\(ref\)\s*\?\?\s*0/, "예전: map.get(ref) ?? 0 — 표본 없음·-1·연결 끊김이 0%");
   assert.match(s, /pct:\s*got\s*\?\s*map\.get\(ref\)\s*:\s*null/);
-  assert.match(s, /e\.pct != null && \(host\.gpus/, '미수집(null)을 호스트에 0 으로 적용하지 않는다');
+  // v2.653: 적용 블록이 메모리·온도까지 늘어 형태가 바뀌었다 — 의도(pct 가 null 이면 적용하지 않는다)를 검사한다.
+  assert.match(s, /(e\.pct != null && \(host\.gpus|if \(e\.pct != null\) host\.gpuUtilPct = e\.pct)/, '미수집(null)을 호스트에 0 으로 적용하지 않는다');
 });
 
 // ── COL2605-04 ────────────────────────────────────────────────────────────────

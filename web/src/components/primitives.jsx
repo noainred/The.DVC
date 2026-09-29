@@ -130,6 +130,7 @@ export function SeverityBadge({ severity }) {
 export function DataTable({
   columns, rows, initialSort, emptyText = '데이터가 없습니다.',
   rowStyle, className = '', bare = false, maxHeight = '64vh', limit = 0, footer = null, onVisible,
+  expandedKey = null, renderExpanded = null,
 }) {
   const [sort, setSort] = useState(initialSort || { key: columns[0].key, dir: 'asc' });
   // 같은 위치의 DataTable이 뷰 전환으로 다른 columns를 받으면(initialSort는 최초 마운트만 반영)
@@ -181,15 +182,23 @@ export function DataTable({
           {shown.length === 0 && (
             <tr><td colSpan={columns.length} className="center muted" style={{ padding: 30 }}>{emptyText}</td></tr>
           )}
-          {shown.map((r, i) => (
-            <tr key={r.id || r.key || i} style={rowStyle ? rowStyle(r) : undefined}>
-              {columns.map((c) => (
-                <td key={c.key} style={{ textAlign: c.align || 'left' }}>
-                  {c.render ? c.render(r) : r[c.key]}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {shown.map((r, i) => {
+            const rk = r.id || r.key || i;
+            // v2.653: 선택 인자 — expandedKey 와 같은 행 아래에 renderExpanded(r) 을 한 줄 펼친다(정렬·limit 뒤라 보이는 행에만).
+            const open = renderExpanded && expandedKey != null && (r.key ?? r.id) === expandedKey;
+            return (
+              <React.Fragment key={rk}>
+                <tr style={rowStyle ? rowStyle(r) : undefined}>
+                  {columns.map((c) => (
+                    <td key={c.key} style={{ textAlign: c.align || 'left' }}>
+                      {c.render ? c.render(r) : r[c.key]}
+                    </td>
+                  ))}
+                </tr>
+                {open && <tr className="row-expanded"><td colSpan={columns.length} style={{ padding: 0 }}>{renderExpanded(r)}</td></tr>}
+              </React.Fragment>
+            );
+          })}
         </tbody>
       </table>
       {footer}

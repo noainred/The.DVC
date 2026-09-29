@@ -64,22 +64,37 @@ export function summarizeHostGpu(host, vms, guestByVm, { now = Date.now() } = {}
   }
   const esxi = numOrNull(host?.gpuUtilPct);
   const guestAvg = utils.length ? Math.round(utils.reduce((a, b) => a + b, 0) / utils.length) : null;
+  // v2.653: 게스트 값이 없으면 ESXi 카운터(gpu.temperature · gpu.mem.used/usage — vGPU/vSGA 호스트)로 채우고 출처를 밝힌다.
+  //   게스트 값이 있으면 게스트가 먼저다(VM 이 실제로 쓰는 프레임버퍼 기준). 두 값을 섞지 않는다.
+  const esxiTemp = numOrNull(host?.gpuTempC);
+  const esxiMemMB = numOrNull(host?.gpuMemUsedMB);
+  const esxiMemPct = numOrNull(host?.gpuMemUsedPct);
+  const capMB = capacityGB != null && !capacityEstimated ? Math.round(capacityGB * 1024) : null;
+  let mem = memVms ? { used: memUsed, total: memTotal, pct: memTotal ? Math.round((memUsed / memTotal) * 100) : null, src: 'guest' } : null;
+  if (!mem && (esxiMemMB != null || esxiMemPct != null)) {
+    const pct = esxiMemPct ?? (esxiMemMB != null && capMB ? Math.round((esxiMemMB / capMB) * 100) : null);
+    const used = esxiMemMB ?? (pct != null && capMB ? Math.round((capMB * pct) / 100) : null);
+    if (used != null || pct != null) mem = { used, total: capMB, pct, src: 'esxi' };
+  }
+  const tempC = temps.length ? Math.max(...temps) : esxiTemp;
   return {
     gpus: gpus.length,
     models: [...new Set(gpus.map((g) => g.model).filter(Boolean))],
     capacityGB, capacityEstimated,
     utilPct: esxi ?? guestAvg,
     utilSource: esxi != null ? 'esxi' : guestAvg != null ? 'guest' : null,
-    tempC: temps.length ? Math.max(...temps) : null,
+    tempC,
+    tempSource: temps.length ? 'guest' : esxiTemp != null ? 'esxi' : null,
     // 할당 — vGPU 는 GB, 패스스루는 장(한 장 통째)
     allocGB: allocKnown ? round1(allocGB) : null,
     allocUnknown,
     allocPct: allocKnown && capacityGB ? Math.round((allocGB / capacityGB) * 100) : null,
     passthroughOn,
     // 사용 — 게스트 수집분만
-    memUsedMB: memVms ? memUsed : null,
-    memTotalMB: memVms ? memTotal : null,
-    memUsedPct: memVms && memTotal ? Math.round((memUsed / memTotal) * 100) : null,
+    memUsedMB: mem ? mem.used : null,
+    memTotalMB: mem ? mem.total : null,
+    memUsedPct: mem ? mem.pct : null,
+    memSource: mem ? mem.src : null,
     memVms,
     vmsOn, vmsRead, vmsUnread: vmsOn - vmsRead,
     activity: activityCounts(acts),
