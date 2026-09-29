@@ -152,9 +152,13 @@ export const PROBE_PATHS = Object.freeze([
   // v2.644: 카운터·BGP 가 빈 응답·형식 미인식이던 장비에서 한 단계 아래 모양을 본다.
   '/Sysdb/interface/counter/eth/phy/slice/1/intfCounterDir',
   '/Sysdb/routing/bgp/export/vrfBgpPeerAfiSafiStateTable/default',
+  // v2.648: 모듈형 섀시 — 카드 슬롯별 인터페이스 슬라이스 목록 · 카드 인벤토리 후보(entmib, 추정).
+  '/Sysdb/interface/status/eth/phy/slice', '/Sysdb/hardware/entmib',
 ]);
 export const PROBE_HEAD_CHARS = 1536;
-export const PROBE_MAX = 32;
+export const PROBE_MAX = 34;
+/** v2.648: 슬롯 전원 확인 루틴에서 링크 상태를 볼 표본 포트 수(슬롯당). */
+export const SLOT_SAMPLE = 8;
 /**
  * v2.646: 트랜시버 DOM 경로 탐색 — 그 장비에서 **장착된** 첫 트랜시버의 노드와 그 아래 후보(domInfo)를 본다. 경로를 확인하지 못했으므로
  *   (xcvr 머리말) 첫 실수집의 표본이 근거가 된다. 장착된 트랜시버를 모르면(부품을 못 읽음) 컨테이너 노드만 본다.
@@ -586,6 +590,36 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       return { text: leaves.map((l) => JSON.stringify(l)).join('\n'), requests, truncated };
     }
 
+    /**
+     * v2.648: 슬롯 근거 — ① 인터페이스 슬라이스 목록(1회) ② 대상 슬롯 슬라이스의 포트 목록(슬롯당 1회) ③ 그중 앞 SLOT_SAMPLE 개 포트의
+     *   링크 상태(포인터 추종). 요청 수는 장비당 1 + 슬롯 수 × (1 + SLOT_SAMPLE) 이하이고 대상 장비만 한다.
+     */
+    async function slotEvidence(serial, slots) {
+      const ev = { slicesRead: false, sliceKeys: [], slices: {} };
+      const base = `/api/v1/rest/${encodeURIComponent(serial)}/Sysdb/interface/status/eth/phy/slice`;
+      const r = await sess.get(base);
+      if (!r.ok) return ev;
+      const sh = P.telemetryShape(r.text);
+      if (sh.empty && !sh.ptrs.length) return ev;
+      ev.slicesRead = true;
+      ev.sliceKeys = sh.ptrs.map((x) => String(x.key));
+      for (const n of slots) {
+        if (!ev.sliceKeys.includes(String(n)) || left() < MIN_SLICE_MS || signal?.aborted) continue;
+        const u = `${base}/${encodeURIComponent(String(n))}/intfStatus`;
+        const ir = await sess.get(u);
+        if (!ir.ok) { ev.slices[n] = { intfs: null, sampled: 0, up: 0 }; continue; }
+        const ish = P.telemetryShape(ir.text);
+        const intfs = ish.ptrs.length;
+        let sampled = 0; let up = 0;
+        if (intfs && left() >= MIN_SLICE_MS) {
+          const fol = await followPtrs(serial, u, ish.ptrs.slice(0, SLOT_SAMPLE), { kind: 'interfaces' });
+          const ports = fol.text ? P.parseInterfaces(fol.text).ports : null;
+          if (Array.isArray(ports)) { sampled = ports.length; up = ports.filter((x) => x.oper === 'up').length; }
+        }
+        ev.slices[n] = { intfs, sampled, up };
+      }
+      return ev;
+    }
     const followNote = {};
     const devices = inv.devices.map((d) => ({ ...d, parts: undefined, partsAt: null, bgp: null, ports: null, counters: null, countersAt: null, telemetry: 'pending' }));
     await poolSettled(devices, DEVICE_CONCURRENCY, async (dev) => {
@@ -625,6 +659,12 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
         // 한 종류도 시도하지 못했으면(예산) 이번에 안 읽은 것 — undefined 로 두어 DB 의 이전 파트 값을 지우지 않는다.
         // v2.646: GBIC 광신호 판정 — 링크가 올라온 포트만(judgeOptics 머리말).
         dev.parts = anyRead ? P.judgeOptics(parts.slice(0, P.PART_MAX), dev.ports, optics) : attempted ? null : undefined;
+        // v2.648: 슬롯 전원(카드 전원) 확인 루틴 — 정상이 아닌 라인카드 슬롯 전원 항목이 있을 때만(대개 0대 — 추가 요청은 그 장비·그 슬롯만).
+        if (Array.isArray(dev.parts)) {
+          const slots = P.slotsToCheck(dev.parts);
+          if (slots.length && left() >= MIN_SLICE_MS) dev.parts = P.judgeSlotPower(dev.parts, await slotEvidence(serial, slots));
+          else dev.parts = P.judgeSlotPower(dev.parts, {});
+        }
         dev.partsAt = attempted ? now() : null;
         // v2.612 RECENT2612-01: 파트 조회를 **시도했는가**(경로가 전부 404 여도 시도다). 폴러가 이것으로 조회 시각을 올린다 —
         //   '읽었을 때만' 올리면 파트 경로가 없는 CVP 에 매 주기 4종 × 장비 수만큼 헛조회가 나간다.

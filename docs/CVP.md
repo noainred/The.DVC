@@ -286,3 +286,24 @@ show interfaces transceiver" · "각 GBIC 의 광신호 세기를 확인, 약하
 - `GET /tools/cvp/power`: 장비별·법인별·모델별 합과 못 읽은 사유별 개수(부품 미수집·PSU 없음·전력 값 없음). 합계는 읽은 장비만 더한다. 화면은 '전력' 탭.
 - 2.646.0 은 따로 게시하지 않고 2.647.0 에 함께 게시했다.
 - 회귀: `server/test/cvpPower2647.test.js` · 웹 `cvpPowerText.test.js`. ⚠ Chromium 검증은 합성 PSU 전력 값으로 했다.
+
+## 15. 슬롯 전원(카드 전원) 확인 루틴(v2.648)
+
+사용자 신고: 7504N 에서 `전원(PSU) · ecb › Linecard4 · 장애 · failed` 가 열려 있는데 서비스는 정상. "모듈이 설치가 안 돼서 전기가 안 들어가는지,
+모듈은 있는데 전기가 안 들어간 건지 확인하는 루틴" · 장비 로그인은 지금 불가.
+
+- `/Sysdb/environment/power/status` 아래에는 PSU 만이 아니라 **카드 슬롯별 전원 항목**(`ecb` — Electronic Circuit Breaker 로 **추정**)이 있다.
+  경로 조각이 `linecardN`·`fabricN`·`supervisorN` 인 psu 파트를 슬롯 전원으로 본다(`parse.slotOfPart`). 화면 표시는 '슬롯 전원(카드)'(`cvpText.faultKindLabel`).
+- ⚠ **kind 는 psu 그대로다** — faultKey = `kind:name` 이라 kind 를 바꾸면 이미 열린 장애가 '관측 누락' 으로 영원히 보류된다.
+- 정상이 아닌 **라인카드** 슬롯만 확인한다(`slotsToCheck`). 근거는 장비 로그인 없이 CVP 텔레메트리에서(`client.js slotEvidence`):
+  `/Sysdb/interface/status/eth/phy/slice` 목록(슬라이스 번호) · 그 슬롯 slice 의 `intfStatus` 포인터 수 · 앞 8개(`SLOT_SAMPLE`) 포트의 링크 상태 ·
+  이름에 `LinecardN` 이 들어간 센서 · `EthernetN/` 트랜시버. ⚠ **'슬라이스 번호 = 라인카드 슬롯 번호' 는 추정**이다.
+- 판정(`parse.judgeSlotPower`, 순수):
+  · `card-running` — 인터페이스가 있고 표본 포트 중 링크 up 이 있다 → 카드는 전원을 받고 있다. **장애 → 주의**로 낮춘다(원문 값은 detail 에 남긴다).
+  · `card-present` — 인터페이스·센서·트랜시버 중 하나가 있지만 up 포트를 못 봤다 → 카드는 있다. 상태를 바꾸지 않는다(카드 전원 이상 가능성).
+  · `slot-empty` — 슬라이스 목록을 읽었고 다른 번호 슬라이스는 있는데 이 번호만 없고 센서·트랜시버도 없다 → **빈 슬롯**(absent — 열린 장애는 `removed` 로 닫힌다).
+  · `unknown` — 근거 부족. 상태를 바꾸지 않는다.
+  근거(`slotCheck{slot,verdict,intfs,up,sampled,sensors,xcvrs,slicesRead,rawState}`)와 설명은 detail 에 싣고, 엣지 수신 정제(`opticOf`)도 `role`·`slotCheck` 를 옮긴다.
+- 경로 탐색 표본에 `/Sysdb/interface/status/eth/phy/slice`·`/Sysdb/hardware/entmib` 를 더했다(`PROBE_MAX` 34) — 실장비 원문으로 대응을 확인할 것.
+- ⚠ 모듈러 섀시에서 포트 수집이 slice 1 만 읽는 것으로 보인다(7504 캡처 '포트 (3)') — 이번 릴리스 범위 밖이고 확정하지 못했다.
+- 회귀: `server/test/cvpSlotPower2648.test.js` · 웹 `cvpText.test.js`(표시 이름). ⚠ 실장비 7504 응답은 보지 못했다(합성 입력).

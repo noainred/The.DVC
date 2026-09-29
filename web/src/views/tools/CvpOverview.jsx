@@ -172,7 +172,7 @@ export function CvpOverviewView({ ov, err, onGo, onCorp, onOpenDevice }) {
             <button key={`${f.at}-${i}`} type="button" onClick={() => onOpenDevice?.({ cvpId: f.cvpId, key: f.deviceKey, hostname: f.deviceName })}
               style={{ display: 'grid', gridTemplateColumns: '64px 70px minmax(0,1fr)', gap: 8, alignItems: 'baseline', textAlign: 'left', background: 'none', border: 0, borderBottom: '1px solid var(--border)', padding: '6px 0', color: 'var(--text)', cursor: 'pointer' }}>
               <span style={{ ...MONO, fontSize: 12, color: 'var(--text-dim)' }}>{agoText(f.at)}</span>
-              <span style={{ fontSize: 12, color: f.event === 'close' ? 'var(--green)' : f.state === 'fault' ? 'var(--red)' : 'var(--amber)' }}>{faultKindLabel(f.kind)}</span>
+              <span style={{ fontSize: 12, color: f.event === 'close' ? 'var(--green)' : f.state === 'fault' ? 'var(--red)' : 'var(--amber)' }}>{faultKindLabel(f.kind, f.label)}</span>
               <span style={{ fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 <b>{f.deviceName || f.deviceKey}</b> · {f.label} — {faultEventText(f)}
                 <span style={{ color: 'var(--text-dim)' }}> · {corpLabel(f)}</span>

@@ -44,6 +44,13 @@ function opticOf(p) {
     for (const k of ['inW', 'outW', 'capW']) { const v = numOrNull(p.power[k]); pw[k] = v != null && v >= 0 && v < 100_000 ? v : null; }
     if (pw.inW != null || pw.outW != null) out.power = pw;
   }
+  if (p && p.role === 'slot-power') out.role = 'slot-power';
+  const sc = p && p.slotCheck && typeof p.slotCheck === 'object' ? p.slotCheck : null;
+  if (sc) {
+    const V = new Set(['card-running', 'card-present', 'slot-empty', 'unknown']);
+    out.slotCheck = { slot: numOrNull(sc.slot), verdict: V.has(sc.verdict) ? sc.verdict : 'unknown', intfs: numOrNull(sc.intfs), up: numOrNull(sc.up), sampled: numOrNull(sc.sampled),
+      sensors: numOrNull(sc.sensors), xcvrs: numOrNull(sc.xcvrs), slicesRead: sc.slicesRead === true, rawState: PART_STATES.includes(sc.rawState) ? sc.rawState : null };
+  }
   const o = p && p.optic && typeof p.optic === 'object' ? p.optic : null;
   if (o) {
     out.optic = {
