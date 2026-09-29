@@ -213,6 +213,30 @@ export const eosVersionOf = (d) => (d && typeof d === 'object' && typeof d.eosVe
 export const versionLabel = (v) => v || '(버전 미상)';
 
 /**
+ * v2.656: CVP 서버 버전 — 장비가 속한 **CVP 서버**(cvpId)의 버전이다. 장비 자신의 EOS 버전과 다르다(한 CVP 가 여러 EOS 를 관리).
+ * 서버 상태의 cvpVersion(getCvpInfo)을 cvpId 로 붙인다. 못 읽었으면 '' — 지어내지 않는다.
+ */
+export function cvpServerVersionMap(servers) {
+  const m = new Map();
+  for (const s of Array.isArray(servers) ? servers : []) {
+    if (!s || typeof s !== 'object' || s.id == null) continue;
+    const v = s.status && typeof s.status === 'object' && typeof s.status.cvpVersion === 'string' ? s.status.cvpVersion.trim() : '';
+    m.set(String(s.id), v);
+  }
+  return m;
+}
+export const cvpServerVersionOf = (d, map) => (d && typeof d === 'object' && map instanceof Map ? (map.get(String(d.cvpId ?? '')) || '') : '');
+export const cvpVersionLabel = (v) => v || '(CVP 버전 미상)';
+/** CVP 버전 칩 — 개수는 호출자가 넘긴 집합(다른 축만 적용한 것) 기준. 칩이 하나뿐이면 가를 것이 없어 빈 배열. */
+export function cvpVersionChips(rows, map) {
+  const by = new Map();
+  for (const d of Array.isArray(rows) ? rows : []) { const v = cvpServerVersionOf(d, map); by.set(v, (by.get(v) || 0) + 1); }
+  const out = [...by.entries()].map(([ver, count]) => ({ ver, count }))
+    .sort((a, b) => (a.ver === '') - (b.ver === '') || b.ver.localeCompare(a.ver, undefined, { numeric: true }));
+  return out.length > 1 ? out : [];
+}
+
+/**
  * 이벤트 화면의 두 축(v2.646 사용자 요청 — '법인: AZ WA … / 이벤트: 경고 오류' 를 **따로** 고른다. 한 칩에 둘을 묶지 않는다).
  *  · SEV_GROUPS: '' 전체 · errors(critical+error) · warning · info. 서버 severity 파라미터와 같은 값이다.
  *  · 법인 칩의 개수는 **고른 이벤트 종류** 기준, 이벤트 칩의 개수는 **고른 법인** 기준(서버 counts 가 법인 필터 뒤 값) — 규칙 ②.

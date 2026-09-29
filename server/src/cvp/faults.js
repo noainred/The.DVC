@@ -11,6 +11,7 @@
  *      실패한 주기의 관측(있더라도 옛 값)으로 열지도 않는다.
  *   ② `unknown` 은 열지도 닫지도 않는다(열려 있던 것은 held 'unknown').
  *   ③ `absent`(빈 슬롯·뽑힌 부품)는 닫되 closeReason 'removed' — 'ok'(고쳐짐)와 구분한다.
+ *      v2.656: 링크가 내려간 것을 확인한 트랜시버에 판정할 지표가 없으면 closeReason 'no-link'(판정 대상 아님).
  *   ④ 관측 목록에 없는 열린 장애는 닫지 않는다(held 'missing' — 사라진 것 ≠ 고쳐진 것).
  *   ⑤ 장비 단위로 판정한다(A 성공·B 실패면 A 만 닫는다).
  *   ⑥ 종류(kind) 단위로도 판정한다 — 부품 목록만 못 읽은 주기(partsList null)는 psu·fan·temp·xcvr 의 열린 장애만
@@ -42,6 +43,8 @@ export const HOLD_REASON = Object.freeze({
   notStreaming: 'not-streaming',           // CVP 에 스트리밍하지 않는 장비 — 텔레메트리가 없어 판정할 수 없다
 });
 
+/** v2.656: 닫는 사유 — 링크 없는 트랜시버(판정 대상 아님). 'ok'(고쳐짐)·'removed'(빈 슬롯)와 구분한다. */
+export const NO_LINK = 'no-link';
 /** 장애로 세는 상태. ⚠ unknown·absent 를 여기 넣지 말 것. */
 export const isBad = (s) => s === 'fault' || s === 'warn';
 /** C1 — 같은 키 중복 관측의 우선순위(큰 쪽이 이긴다). */
@@ -91,8 +94,13 @@ function partObservation(p) {
   if (!PART_KINDS.includes(kind)) return null;
   const name = capStr(p?.name, 128);
   if (!name) return null;
-  const st = FAULT_STATES.includes(p?.state) ? p.state : 'unknown';
-  return { faultKey: `${kind}:${name}`, kind, label: name, state: st, detail: capStr(p?.detail, 200) };
+  let st = FAULT_STATES.includes(p?.state) ? p.state : 'unknown';
+  // v2.656: 링크가 내려간 것을 확인한 트랜시버에서 판정할 지표(온도·전압 임계)가 없으면 '판정 대상 아님' 이다 — 열린 장애는
+  //   closeReason 'no-link' 로 닫는다(고쳐졌다는 'ok' 와 구분). 링크 상태를 모르면(portKnown false) 예전처럼 unknown 보류.
+  const o = p?.optic && typeof p.optic === 'object' ? p.optic : null;
+  let closeAs = null;
+  if (kind === 'xcvr' && o && o.portKnown === true && o.linked === false && st === 'unknown') { st = 'ok'; closeAs = NO_LINK; }
+  return { faultKey: `${kind}:${name}`, kind, label: name, state: st, detail: capStr(p?.detail, 200), ...(closeAs ? { closeAs } : {}) };
 }
 
 /**
@@ -186,7 +194,7 @@ export function transition({ open = [], observedByDevice = new Map(), now = Date
         continue;
       }
       // ok / absent — 열려 있던 것만 닫는다(③ 사유 구분).
-      if (prev) closed.push({ ...prev, closedAt: now, closeReason: p.state === 'absent' ? 'removed' : 'ok', closeDetail: p.detail });
+      if (prev) closed.push({ ...prev, closedAt: now, closeReason: p.state === 'absent' ? 'removed' : (p.closeAs || 'ok'), closeDetail: p.detail });
     }
     // ④·⑥ 이 장비의 열린 장애 중 관측에 없던 것 — 그 종류를 못 읽었으면 collection-failed, 읽었는데 없으면 missing.
     for (const [k, o] of openBy) {

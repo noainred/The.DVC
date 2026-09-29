@@ -325,3 +325,13 @@ show interfaces transceiver" · "각 GBIC 의 광신호 세기를 확인, 약하
 - DB: `port_latest` 에 `duplex·fwd_model·mac·mtu·oper_raw` 열(table_info 로 없을 때만 추가) · 설명·세부 열은 NULL 이면 유지. 엣지 수신 정제도 새 필드를 아는 것만 옮긴다.
 - 상태 칸은 CVP 의 Connected/Down/Disconnected 를 그대로 옮기지 않고 포탈 판정(연결됨=up · 다운=down · 미연결=notconnect/notPresent · 확인 불가)을 쓴다.
 - 회귀: `server/test/cvpIntf2649.test.js`(6) · 웹 `cvpIntfText.test.js`(10). Chromium 1440/400 은 합성 장비 2대(52포트·부품 없음)를 심은 목 서버로 봤다.
+
+## 17. 링크 없는 포트의 GBIC 판정 제외 · CVP 서버 버전 칩(v2.656)
+
+- 링크가 내려간 것을 **확인한** 포트(포트 목록에 있고 oper ≠ up)의 트랜시버는 수신 광량·Tx·바이어스를 판정하지 않는다. 링크가 없으면 상대가 빛을
+  보내지 않고 레이저도 꺼지므로 그 값들이 LowAlarm 아래인 것이 정상이다. 온도·전압은 장비 임계로 계속 판정한다(`xcvrDom.envState`).
+- 포트 상태를 모르면 예전 판정 그대로다(모르는 것을 정상으로 칠하지 않는다).
+- 이미 열린 장애는 다음 부품 주기에 닫힌다 — 온도·전압이 정상이면 사유 `ok`, 판정할 지표가 없으면 사유 `no-link`('링크 없음 — 판정 대상 아님',
+  고쳐졌다는 뜻이 아니다). 알림 제목은 'CVP 장애 판정 제외'.
+- 판정은 엣지에서 한다(`client.js`). 엣지 위임 CVP 는 엣지를 2.656 이상으로 올려야 Tx·바이어스 장애가 새로 열리지 않는다.
+- 장비 목록의 '🛰 CVP 버전' 칩은 장비를 관리하는 CVP 서버의 버전(getCvpInfo)이다 — EOS 버전 칩과 다른 축이다. 버전을 못 읽은 CVP 는 '(CVP 버전 미상)'.
