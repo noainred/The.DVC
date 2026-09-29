@@ -54,7 +54,9 @@ const FOLLOW_DEPTH = 3;
  *   세지 않는다**(상한·예산 때문에 못 읽은 것만 센다 — 예전에는 마지막 깊이에서 남은 포인터를 전부 '못 읽음' 에 더했다).
  *   ⚠ 부품 깊이 2 는 추정이다 — 트랜시버(xcvr) 목록이 그보다 깊으면 안 나온다(정직 기록).
  */
-export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ interfaces: 1, counters: 1, memory: 1, cpu: 2, bgp: 2, power: 2, cooling: 2, temperature: 2, xcvr: 2 });
+// v2.644: counters 2(`…/current` 아래에 `statistics` 같은 포인터가 한 단계 더 있을 수 있다) · bgp 3(실장비: 표 → VRF(default·Private) →
+//   피어 → 그 피어의 값 — 캡처에서 VRF 아래 피어가 또 포인터였다. 깊이 2 에서는 이름·VRF 만 남아 '형식을 읽지 못했습니다' 였다).
+export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ interfaces: 1, counters: 2, memory: 1, cpu: 2, bgp: 3, power: 2, cooling: 2, temperature: 2, xcvr: 2 });
 /** 빈 응답(`{"notifications":[]}`) — 경로는 열려 있지만 그 노드에 값이 없다(v2.641 실장비 확인). */
 export const EMPTY_REASON = '경로에 데이터 없음(빈 응답 — 이 장비에 그 값이 없거나 경로가 다릅니다)';
 export const UNREAD_REASON = '응답은 왔지만 형식을 읽지 못했습니다';
@@ -82,7 +84,11 @@ export const CANDIDATES = Object.freeze({
    *   `@/intfCounter/current` 접미는 '컬렉션의 각 포인터 키 뒤에 이 접미를 붙여 바로 읽는다' 는 표시다(포트당 1회 — followPtrs).
    */
   counters: ['/api/v1/rest/{serial}/Sysdb/interface/counter/eth/phy/slice/1/intfCounterDir@/intfCounter/current',
-    '/api/v1/rest/{serial}/Smash/counters/ethIntf/FastCounters/current/counter', '/api/v1/rest/{serial}/Smash/counters/ethIntf/FastCounters/current'],
+    '/api/v1/rest/{serial}/Smash/counters/ethIntf/FastCounters/current/counter', '/api/v1/rest/{serial}/Smash/counters/ethIntf/FastCounters/current',
+    // v2.644: 실장비(DCS-7010TX · EOS 4.28 · CVP 2023.1.1)에서 위 셋이 **전부 빈 응답**이었다(사용자 캡처 — 80대). 카운터 에이전트
+    //   디렉터리 이름은 플랫폼마다 다르다(추정) — `/Smash/counters/ethIntf` 의 자식을 차례로 시도한다(와일드카드).
+    '/api/v1/rest/{serial}/Smash/counters/ethIntf/*/current/counter',
+    '/api/v1/rest/{serial}/Smash/counters/ethIntf/*/current'],
   // v2.641 실장비 확인: `/Sysdb/routing/bgp/export` 의 자식은 `config`·`vrfBgpPeerAfiSafiStateTable` 둘뿐이었다 — v2.608 의
   //   `vrfBgpPeerInfoStatusEntryTable` 은 **없는 이름**이었다. 새 표에 세션 상태가 있는지는 아직 확인하지 못했다(없으면 형식 미인식으로 남는다).
   bgp: ['/api/v1/rest/{serial}/Sysdb/routing/bgp/export/vrfBgpPeerAfiSafiStateTable', '/api/v1/rest/{serial}/Sysdb/routing/bgp/export/vrfBgpPeerInfoStatusEntryTable'],
@@ -132,6 +138,9 @@ export const PROBE_PATHS = Object.freeze([
   '/Sysdb/environment',
   '/Sysdb/environment/archer/power/status',
   '/Kernel/proc',
+  // v2.644: 카운터·BGP 가 빈 응답·형식 미인식이던 장비에서 한 단계 아래 모양을 본다.
+  '/Sysdb/interface/counter/eth/phy/slice/1/intfCounterDir',
+  '/Sysdb/routing/bgp/export/vrfBgpPeerAfiSafiStateTable/default',
 ]);
 export const PROBE_HEAD_CHARS = 1536;
 export const PROBE_MAX = 28;
@@ -271,7 +280,34 @@ export async function openSession(server, { signal, leftMs = null } = {}) {
 function ordered(kind, prefer) {
   const list = CANDIDATES[kind] || [];
   const p = prefer?.get?.(kind);
+  // v2.644: 와일드카드 후보('/*/')를 펼쳐 이긴 구체 경로도 앞으로 둔다(목록에 그대로는 없다).
+  if (p && !list.includes(p) && list.some((x) => wildcardMatches(x, p))) return [p, ...list];
   return p && list.includes(p) ? [p, ...list.filter((x) => x !== p)] : list;
+}
+/**
+ * v2.644 — 와일드카드 후보. 경로 조각 `*` 은 '그 앞 경로의 포인터 키 각각' 이다(예: `/Smash/counters/ethIntf/*` + `/current/counter`).
+ *   실장비(DCS-7010TX, EOS 4.28)에서 `FastCounters/current` 가 빈 응답이었다 — 카운터 에이전트 이름은 플랫폼마다 다르므로
+ *   이름을 굳히지 않고 부모가 가진 자식을 차례로 시도한다(WILDCARD_MAX 개까지 · 이미 시도한 구체 경로는 건너뛴다).
+ */
+export const WILDCARD_MAX = 6;
+export function wildcardMatches(tpl, concrete) {
+  const i = String(tpl).indexOf('/*/');
+  if (i < 0) return false;
+  const pre = tpl.slice(0, i + 1); const post = tpl.slice(i + 2);
+  const c = String(concrete);
+  return c.startsWith(pre) && c.endsWith(post) && c.length > pre.length + post.length && !c.slice(pre.length, c.length - post.length).includes('/');
+}
+export function expandWildcard(tpl, keys, max = WILDCARD_MAX) {
+  const i = String(tpl).indexOf('/*/');
+  if (i < 0) return [tpl];
+  const pre = tpl.slice(0, i + 1); const post = tpl.slice(i + 2);
+  const out = [];
+  for (const k of Array.isArray(keys) ? keys : []) {
+    if (typeof k !== 'string' || !k || k === '.' || k === '..') continue;
+    out.push(`${pre}${encodeURIComponent(k)}${post}`);
+    if (out.length >= max) break;
+  }
+  return out;
 }
 const fill = (tpl, serial) => tpl.replaceAll('{serial}', encodeURIComponent(serial));
 /** v2.641: 포인터를 따라갈 종류(부품·인터페이스·카운터·BGP·CPU·메모리). */
@@ -417,7 +453,22 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       const st = ks[kind];
       if (st.stopped) return { skipped: true };
       let lastReason = ''; let allEmpty = true;
-      for (const tpl of ordered(kind, prefer)) {
+      const queue = [...ordered(kind, prefer)];
+      const tried = new Set();
+      while (queue.length) {
+        const tpl = queue.shift();
+        if (tried.has(tpl)) continue;
+        tried.add(tpl);
+        // v2.644: 와일드카드 — 부모 경로의 포인터 키로 펼쳐 큐 앞에 넣는다(부모 조회 1회). 부모가 비었거나 실패하면 그 사유를 남긴다.
+        if (tpl.includes('/*/')) {
+          const parent = fill(tpl.slice(0, tpl.indexOf('/*/')), serial);
+          const pr = await sess.get(parent);
+          if (!pr.ok) { allEmpty = false; if (!lastReason || lastReason === EMPTY_REASON) lastReason = pr.status === 404 ? '없음(404)' : pr.reason; continue; }
+          const psh = P.telemetryShape(pr.text);
+          if (psh.empty || !psh.ptrs.length) { if (!lastReason) lastReason = EMPTY_REASON; continue; }
+          queue.unshift(...expandWildcard(tpl, psh.ptrs.map((x) => x.key)).filter((x) => !tried.has(x)));
+          continue;
+        }
         // v2.641: '경로@접미' — 컬렉션을 읽은 뒤 각 포인터 키 뒤에 접미를 붙여 바로 읽는다(중간 단계 조회를 건너뛴다).
         const at = tpl.indexOf('@');
         const suffix = at >= 0 ? tpl.slice(at + 1) : '';
