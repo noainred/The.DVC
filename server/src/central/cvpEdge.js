@@ -39,6 +39,11 @@ function opticOf(p) {
     for (const k of DOM_KEYS) { const v = numOrNull(p.dom[k]); if (v != null) d[k] = v; }
     if (Object.keys(d).length) out.dom = d;
   }
+  if (p && p.power && typeof p.power === 'object') {
+    const pw = {};
+    for (const k of ['inW', 'outW', 'capW']) { const v = numOrNull(p.power[k]); pw[k] = v != null && v >= 0 && v < 100_000 ? v : null; }
+    if (pw.inW != null || pw.outW != null) out.power = pw;
+  }
   const o = p && p.optic && typeof p.optic === 'object' ? p.optic : null;
   if (o) {
     out.optic = {

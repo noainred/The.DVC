@@ -18,7 +18,7 @@ import { loadSettings, saveSettings, LIMITS } from '../../cvp/settings.js';
 import { cvpPollerStatus, pollCvpOnce, isPollerBusy, testServerConnection } from '../../cvp/poller.js';
 import { getStatus, dropStatus } from '../../cvp/store.js';
 import * as cdb from '../../cvp/db.js';
-import { partsSummary, bgpSummary } from '../../cvp/parse.js';
+import { partsSummary, bgpSummary, devicePower as cvpDevicePower } from '../../cvp/parse.js'; // v2.647: devicePower
 import { edgeCvpStatuses, edgeCvpSummary, edgeVersionOf, classifyCvpEdge, MIN_CVP_EDGE_VERSION } from '../../central/cvpEdge.js';
 import { allCollectorStatus } from '../../collector/state.js'; // v2.613 CONTRACT2613-04: 엣지 버전 게이트
 import { requestCvpCollect, hasPendingCvpRequest, recentCvpCollectDrops } from '../../cvp/collectRequests.js';
@@ -431,6 +431,53 @@ api.get('/tools/cvp/optics', toolsPerm, fullScopeOnly, async (req, res) => {
     optics: list.slice(0, OPTICS_MAX), counts, thresholds: { warnDbm: s.xcvrRxWarnDbm, faultDbm: s.xcvrRxFaultDbm },
     ...(omitted ? { omitted, limit: OPTICS_MAX } : {}),
   });
+});
+
+/**
+ * v2.647 — 네트워크 장비 소비전력(사용자 요청 '전체 네트워크 장비의 소비전력'). 장착된 PSU 의 입력 전력 합(parse.devicePower)을 장비별·법인별·
+ *   모델별로 준다(중앙 DB 최신값 — 왕복 0). 합계는 **값을 읽은 장비만** 더하고, 못 읽은 장비는 사유별 개수로 밝힌다(0W 로 채우지 않는다).
+ *   PSU 전력 필드 이름은 실장비 미확인 추정이다(parse.PSU_POWER_FIELDS).
+ */
+api.get('/tools/cvp/power', toolsPerm, fullScopeOnly, async (req, res) => {
+  const servers = listServers();
+  const cvpId = typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null;
+  if (cvpId && !servers.some((x) => x.id === cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
+  const { rows, unavailable } = await cdb.listDeviceRows({ cvpId });
+  if (unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
+  const corpOf = corpResolver(servers, dcList());
+  const nameOf = new Map(servers.map((x) => [String(x.id), x.name || x.id]));
+  const totals = { devices: 0, read: 0, partial: 0, watts: 0, capW: 0, capDevices: 0, unread: { partsNotRead: 0, noPsu: 0, noPowerField: 0 }, basis: { input: 0, output: 0, mixed: 0 } };
+  const corps = new Map(); const models = new Map(); const devices = [];
+  for (const d of rows.filter((r) => rowBelongs(r, servers))) {
+    totals.devices++;
+    const c = corpOf(d.cvpId);
+    if (!corps.has(c.corpId)) corps.set(c.corpId, { corpId: c.corpId, corpName: c.corpName, ...(c.missing ? { missing: true } : {}), devices: 0, read: 0, partial: 0, watts: 0 });
+    const cr = corps.get(c.corpId); cr.devices++;
+    const model = String(d.model || '');
+    if (!models.has(model)) models.set(model, { model, devices: 0, read: 0, watts: 0 });
+    const mr = models.get(model); mr.devices++;
+    const parts = Array.isArray(d.partsList) ? d.partsList : null;
+    const pw = cvpDevicePower(parts);
+    if (!pw) {
+      const psus = parts ? parts.filter((p) => p && p.kind === 'psu' && p.state !== 'absent').length : 0;
+      totals.unread[!parts ? 'partsNotRead' : psus === 0 ? 'noPsu' : 'noPowerField']++;
+    } else {
+      totals.read++; totals.watts += pw.watts; totals.basis[pw.basis]++;
+      if (pw.partial) totals.partial++;
+      if (pw.capW != null) { totals.capW += pw.capW; totals.capDevices++; }
+      cr.read++; cr.watts += pw.watts; if (pw.partial) cr.partial++;
+      mr.read++; mr.watts += pw.watts;
+    }
+    devices.push({
+      cvpId: d.cvpId, cvpName: nameOf.get(String(d.cvpId)) || d.cvpId, key: d.key, hostname: d.hostname || '', model: d.model || '', corpId: c.corpId, corpName: c.corpName,
+      watts: pw ? pw.watts : null, psus: pw ? pw.psus : null, psuRead: pw ? pw.read : null, partial: !!pw?.partial, basis: pw?.basis || null, capW: pw?.capW ?? null, partsAt: d.partsAt,
+    });
+  }
+  devices.sort((a, b) => (b.watts ?? -1) - (a.watts ?? -1));
+  const corpList = [...corps.values()].sort((a, b) => (a.corpId === '' ? 1 : 0) - (b.corpId === '' ? 1 : 0) || String(a.corpName).localeCompare(String(b.corpName), 'ko', { numeric: true }));
+  const modelList = [...models.values()].map((m) => ({ ...m, avgW: m.read ? m.watts / m.read : null })).sort((a, b) => b.watts - a.watts);
+  const LIMIT = 5000;
+  res.json({ totals, corps: corpList, models: modelList, devices: devices.slice(0, LIMIT), ...(devices.length > LIMIT ? { omitted: devices.length - LIMIT, limit: LIMIT } : {}) });
 });
 
 /** 포트 사용량 — 전 장비 포트를 사용률 높은 순으로(⑤). 사용률을 계산할 수 없는 포트는 사유별 개수로 밝힌다(0% 로 세지 않는다). */

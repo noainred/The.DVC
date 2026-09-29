@@ -10,6 +10,7 @@ import DeviceFacetBar from './DeviceFacetBar.jsx';
 import { facetState, toggleIn } from './deviceFacets.js';
 import { CvpOverviewView, CvpModelsView, CvpTrafficView } from './CvpOverview.jsx';
 import CvpOpticsView from './CvpOptics.jsx';
+import CvpPowerView from './CvpPower.jsx';
 import {
   facetRowsOf, corpNameFn, modelLabel, eventCorpChips, eventSevChips, deviceSummaryTiles, historyNotes, CORP_NOTE, corpLabel,
 } from './cvpOverviewText.js';
@@ -70,7 +71,7 @@ export default function CvpTool() {
   const loadSeq = useRef(0);
   // v2.641: 화면 전환(장비 · 포트 사용량 · 이벤트) — URL 에 싣는다(v2.613 도구 안 서브탭 규약).
   // v2.645: Overview 가 기본 화면이다(사용자 승인 시안) · 모델 · 트래픽 추가.
-  const [view, setView] = useHashTab({ base: ['tools', 'cvp'], valid: ['overview', 'devices', 'models', 'traffic', 'ports', 'optics', 'events', 'settings'], fallback: 'overview' });
+  const [view, setView] = useHashTab({ base: ['tools', 'cvp'], valid: ['overview', 'devices', 'models', 'traffic', 'ports', 'optics', 'power', 'events', 'settings'], fallback: 'overview' });
 
   const u = getCurrentUser();
   const isAdmin = !u || u.role === 'admin';
@@ -165,7 +166,7 @@ export default function CvpTool() {
       </div>}
 
       <div style={ROW}>
-        {[['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['ports', '포트 사용량'], ['optics', '광신호'], ['events', '이벤트'], ['settings', 'CVP 설정']].map(([k, l]) => (
+        {[['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['ports', '포트 사용량'], ['optics', '광신호'], ['power', '전력'], ['events', '이벤트'], ['settings', 'CVP 설정']].map(([k, l]) => (
           <button key={k} type="button" className={`tab${view === k ? ' active' : ''}`} onClick={() => setView(k)}>{l}</button>
         ))}
       </div>
@@ -175,6 +176,7 @@ export default function CvpTool() {
       {view === 'traffic' && <CvpTrafficView ov={ov} err={ovErr} onCorp={goCorp} onOpenDevice={(t) => setDetailKey(t)} />}
       {view === 'ports' && <PortUsageCard servers={servers} onOpen={(p) => setDetailKey({ cvpId: p.cvpId, key: p.key, hostname: p.hostname, tab: 'ports' })} />}
       {view === 'optics' && <CvpOpticsView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'parts' })} />}
+      {view === 'power' && <CvpPowerView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'parts' })} />}
       {view === 'events' && <EventsCard servers={servers} isAdmin={isAdmin} onOpen={(t) => setDetailKey(t)} />}
 
       {view === 'devices' && (<>

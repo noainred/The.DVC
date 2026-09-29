@@ -275,3 +275,14 @@ show interfaces transceiver" · "각 GBIC 의 광신호 세기를 확인, 약하
   법인 칩 개수는 고른 종류 기준, 종류 칩 개수는 고른 법인 기준이다.
 - 회귀: `server/test/cvpOptics2646.test.js`(7) · `cvpOverview2645.test.js`(severity 묶음) · 웹 `cvpOpticsText.test.js`·`cvpOverviewText.test.js`.
 - ⚠ 정직 기록: Chromium 검증은 합성 DOM 값을 심은 목 서버로 했다. 실장비 텔레메트리 DOM 응답은 보지 못했다.
+
+## 14. 네트워크 장비 소비전력(v2.647)
+
+사용자 요청: "전체 네트워크 장비의 소비전력도 볼 수 있는 메뉴".
+
+- PSU 파트에 `power:{inW,outW,capW}` 를 싣는다(`parse.psuPower` — ⚠ 필드 이름 `inputPower`·`outputPower`·`capacity` 등은 **실장비 미확인 추정**, 후보 목록 `PSU_POWER_FIELDS`).
+- 장비 전력(`parse.devicePower`) = 장착된 PSU 의 입력 전력 합. 입력을 모르면 출력으로 대신하고 `basis` 로 밝힌다. 값이 있는 PSU 가 없으면 **null**(0W 아님),
+  일부만 있으면 `partial`. 엣지 수신 정제도 `power` 를 아는 필드만 옮긴다.
+- `GET /tools/cvp/power`: 장비별·법인별·모델별 합과 못 읽은 사유별 개수(부품 미수집·PSU 없음·전력 값 없음). 합계는 읽은 장비만 더한다. 화면은 '전력' 탭.
+- 2.646.0 은 따로 게시하지 않고 2.647.0 에 함께 게시했다.
+- 회귀: `server/test/cvpPower2647.test.js` · 웹 `cvpPowerText.test.js`. ⚠ Chromium 검증은 합성 PSU 전력 값으로 했다.

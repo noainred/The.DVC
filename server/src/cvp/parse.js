@@ -385,7 +385,7 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
   const entities = kind === 'xcvr' ? mergeXcvrDom(raw0) : raw0;
   const parts = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
-    if (pick(f, ['state', 'status', 'health', 'operStatus', 'powerSupplyState', 'fanState', 'hwStatus', 'xcvrPresence', 'presence', 'alertRaised', 'alarm', 'overheat', 'critical', 'temperature', 'currentTemperature', ...(kind === 'xcvr' ? DOM_FIELDS.map((d) => d.key) : [])]) === undefined) { unrecognized++; continue; }
+    if (pick(f, ['state', 'status', 'health', 'operStatus', 'powerSupplyState', 'fanState', 'hwStatus', 'xcvrPresence', 'presence', 'alertRaised', 'alarm', 'overheat', 'critical', 'temperature', 'currentTemperature', ...(kind === 'xcvr' ? DOM_FIELDS.map((d) => d.key) : []), ...(kind === 'psu' ? PSU_POWER_KEYS : [])]) === undefined) { unrecognized++; continue; }
     if (parts.length >= max) { truncated++; continue; }
     const st = partState(f);
     const detailBits = [];
@@ -393,6 +393,9 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
     if (raw != null) detailBits.push(String(raw));
     const t = numOrNull(pick(f, ['temperature', 'currentTemperature', 'value']));
     if (kind === 'temp' && t != null) detailBits.push(`${Math.round(t * 10) / 10}℃`); // v2.643: 25.329440000034℃ 같은 부동소수 꼬리를 자른다
+    // v2.647: PSU 전력(W) — `show environment power` 의 입력·출력 전력. ⚠ 필드 이름은 실장비 미확인 추정(후보로 읽는다 — PSU_POWER_FIELDS).
+    const pw = kind === 'psu' ? psuPower(f) : null;
+    if (pw) detailBits.push([pw.inW != null ? `입력 ${Math.round(pw.inW)}W` : '', pw.outW != null ? `출력 ${Math.round(pw.outW)}W` : ''].filter(Boolean).join(' · '));
     let dom = null; let domJudge = null;
     if (kind === 'xcvr') {
       const x = xcvrDom(f);
@@ -405,7 +408,7 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
       // 최종 판정(광량 포함)은 judgeOptics 가 포트 링크 상태를 보고 한다 — 여기서는 재료만 싣는다.
       if (dom) domJudge = { otherState: x.otherState, rxDevice: x.rxDevice };
     }
-    parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200), ...(dom ? { dom, domJudge } : {}) });
+    parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200), ...(dom ? { dom, domJudge } : {}), ...(pw ? { power: pw } : {}) });
   }
   if (!parts.length && unrecognized) return { parts: null, keys, truncated: 0 };
   return { parts, keys, truncated, droppedFields };
@@ -504,6 +507,44 @@ export function judgeOptics(parts, ports, { warnDbm = -10, faultDbm = -14 } = {}
     const { domJudge, ...rest } = p; // 내부 판정 재료는 저장하지 않는다
     return { ...rest, state, detail: str(detail, 200), optic };
   });
+}
+
+/*
+ * v2.647 — PSU 전력(사용자 요청 '전체 네트워크 장비의 소비전력'). ⚠ 필드 이름은 **실장비로 확인하지 못한 추정**이다 — EOS
+ *   `show environment power` 의 열(입력 전력·출력 전력·용량)에 대응하는 후보로 읽는다. 음수·비숫자는 버린다(0 을 지어내지 않는다).
+ */
+export const PSU_POWER_FIELDS = Object.freeze({
+  inW: ['inputPower', 'powerIn', 'inPower', 'inputPowerWatts'],
+  outW: ['outputPower', 'powerOut', 'outPower', 'outputPowerWatts', 'power'],
+  capW: ['capacity', 'maxPower', 'powerCapacity', 'ratedPower'],
+});
+const PSU_POWER_KEYS = [...PSU_POWER_FIELDS.inW, ...PSU_POWER_FIELDS.outW];
+export function psuPower(flat) {
+  const out = {};
+  for (const [k, names] of Object.entries(PSU_POWER_FIELDS)) {
+    const v = numOrNull(unwrap(pick(flat, names)));
+    if (v != null && v >= 0 && v < 100_000) out[k] = v;
+  }
+  return out.inW != null || out.outW != null ? { inW: out.inW ?? null, outW: out.outW ?? null, capW: out.capW ?? null } : null;
+}
+
+/**
+ * 장비 한 대의 소비전력(W) — 장착된 PSU 의 입력 전력 합(입력을 모르면 출력으로 대신하고 basis 로 밝힌다).
+ * PSU 를 못 읽었으면 null · 전력 값이 있는 PSU 가 하나도 없으면 null(0W 가 아니다) · 일부 PSU 만 값이 있으면 partial.
+ */
+export function devicePower(parts) {
+  if (!Array.isArray(parts)) return null;
+  const psus = parts.filter((p) => p && p.kind === 'psu' && p.state !== 'absent');
+  if (!psus.length) return null;
+  let sum = 0; let n = 0; let usedOut = 0; let cap = 0; let capN = 0;
+  for (const p of psus) {
+    const pw = p.power && typeof p.power === 'object' ? p.power : null;
+    const inW = numOrNull(pw?.inW); const outW = numOrNull(pw?.outW);
+    if (inW != null) { sum += inW; n++; } else if (outW != null) { sum += outW; n++; usedOut++; }
+    const c = numOrNull(pw?.capW); if (c != null) { cap += c; capN++; }
+  }
+  if (!n) return null;
+  return { watts: sum, psus: psus.length, read: n, partial: n < psus.length, basis: usedOut === 0 ? 'input' : usedOut === n ? 'output' : 'mixed', capW: capN === psus.length ? cap : null };
 }
 
 /** 부품 목록 → 상태별 개수(null 이면 null). */
