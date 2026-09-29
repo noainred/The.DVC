@@ -9,11 +9,13 @@ import CvpBulkIo from './CvpBulkIo.jsx';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
 import { facetState, toggleIn } from './deviceFacets.js';
 import { CvpOverviewView, CvpModelsView, CvpTrafficView } from './CvpOverview.jsx';
+import CvpOpticsView from './CvpOptics.jsx';
+import CvpPowerView from './CvpPower.jsx';
 import {
-  facetRowsOf, corpNameFn, modelLabel, eventCorpChips, deviceSummaryTiles, historyNotes, CORP_NOTE, corpLabel,
+  facetRowsOf, corpNameFn, modelLabel, eventCorpChips, eventSevChips, deviceSummaryTiles, historyNotes, CORP_NOTE, corpLabel,
 } from './cvpOverviewText.js';
 import {
-  overviewRows, sysCell, eventReadNotes, severityCounts, severityTone, severityLabel, EVENT_SEVERITIES,
+  overviewRows, sysCell, eventReadNotes, severityTone, severityLabel,
   portUsageKpis, PORT_USAGE_NOTE, utilTone, rateText, probeRows, PROBE_NOTE,
 } from './cvpMoreText.js';
 import { hostText, addressHiddenNote } from './addressHiddenText.js';
@@ -58,7 +60,6 @@ export default function CvpTool() {
   const [collectErr, setCollectErr] = useState(null); // 403 등 — ErrorBox 가 권한 안내로 바꾼다(v2.398)
   const [busy, setBusy] = useState(false);
   const [detailKey, setDetailKey] = useState(null); // { cvpId, key, hostname }
-  const [adminOpen, setAdminOpen] = useState(false);
   const [chip, setChip] = useState('all');          // v2.640 ④ 필터 칩(화면 전용)
   const [faults, setFaults] = useState(null);       // v2.640 ③ 장애 이력 응답
   const [faultsErr, setFaultsErr] = useState(null);
@@ -70,7 +71,7 @@ export default function CvpTool() {
   const loadSeq = useRef(0);
   // v2.641: 화면 전환(장비 · 포트 사용량 · 이벤트) — URL 에 싣는다(v2.613 도구 안 서브탭 규약).
   // v2.645: Overview 가 기본 화면이다(사용자 승인 시안) · 모델 · 트래픽 추가.
-  const [view, setView] = useHashTab({ base: ['tools', 'cvp'], valid: ['overview', 'devices', 'models', 'traffic', 'ports', 'events'], fallback: 'overview' });
+  const [view, setView] = useHashTab({ base: ['tools', 'cvp'], valid: ['overview', 'devices', 'models', 'traffic', 'ports', 'optics', 'power', 'events', 'settings'], fallback: 'overview' });
 
   const u = getCurrentUser();
   const isAdmin = !u || u.role === 'admin';
@@ -165,7 +166,7 @@ export default function CvpTool() {
       </div>}
 
       <div style={ROW}>
-        {[['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['ports', '포트 사용량'], ['events', '이벤트']].map(([k, l]) => (
+        {[['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['ports', '포트 사용량'], ['optics', '광신호'], ['power', '전력'], ['events', '이벤트'], ['settings', 'CVP 설정']].map(([k, l]) => (
           <button key={k} type="button" className={`tab${view === k ? ' active' : ''}`} onClick={() => setView(k)}>{l}</button>
         ))}
       </div>
@@ -174,74 +175,11 @@ export default function CvpTool() {
       {view === 'models' && <CvpModelsView ov={ov} err={ovErr} onModel={goModel} />}
       {view === 'traffic' && <CvpTrafficView ov={ov} err={ovErr} onCorp={goCorp} onOpenDevice={(t) => setDetailKey(t)} />}
       {view === 'ports' && <PortUsageCard servers={servers} onOpen={(p) => setDetailKey({ cvpId: p.cvpId, key: p.key, hostname: p.hostname, tab: 'ports' })} />}
+      {view === 'optics' && <CvpOpticsView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'parts' })} />}
+      {view === 'power' && <CvpPowerView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'parts' })} />}
       {view === 'events' && <EventsCard servers={servers} isAdmin={isAdmin} onOpen={(t) => setDetailKey(t)} />}
 
       {view === 'devices' && (<>
-      <div className="card" style={{ minWidth: 0 }}>
-        <b>CVP 서버 {servers.length}대</b>
-        {stopped.map((s) => (
-          <div key={`stop-${s.id}`} className="banner" style={{ marginTop: 8, borderColor: 'var(--red)' }}>
-            <BoldText text={authStopText(s.status.authStopped, s.name || s.id)} />
-          </div>
-        ))}
-        {servers.length === 0 ? (
-          <div style={{ ...NOTE, marginTop: 8 }}>등록된 CVP 서버가 없습니다. {isAdmin ? '아래 ‘등록·설정’ 에서 추가하세요.' : ''}</div>
-        ) : (
-          <STable minWidth={760} style={{ marginTop: 8 }}>
-            <thead><tr><th>이름</th><th>주소</th><th>수집 위치</th><th>인증</th><th>상태</th><th>장비</th><th>수집 시각</th><th>읽은 경로</th></tr></thead>
-            <tbody>
-              {servers.map((s) => {
-                const st = s.status || {};
-                const sv = serverState(s, { enabled: data.enabled !== false });
-                const used = st.usedPaths && typeof st.usedPaths === 'object' ? Object.keys(st.usedPaths) : [];
-                const miss = st.missing && typeof st.missing === 'object' ? Object.keys(st.missing) : [];
-                return (
-                  <tr key={s.id}>
-                    <td><b>{s.name || s.id}</b></td>
-                    <td style={{ fontSize: 12 }}>{hostText(s.host)}</td>
-                    <td style={{ fontSize: 12 }}>{s.agent ? `엣지 ${s.agent}` : '중앙 직접'}</td>
-                    <td style={{ fontSize: 12 }}>{s.authMode === 'password' ? 'ID/비밀번호' : '토큰'}</td>
-                    <td><Badge tone={sv.tone} title={sv.detail}>{sv.label}</Badge>{sv.detail && (sv.tone === 'bad' || sv.tone === 'warn') && <div style={{ fontSize: 11, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{sv.detail}</div>}</td>
-                    <td className="right">{countText(st.deviceCount)}{isTruncated(st.truncated) ? ' (잘림)' : ''}</td>
-                    <td style={{ fontSize: 12 }} data-sort={st.collectedAt || 0}>{agoText(st.collectedAt)}</td>
-                    <td style={{ fontSize: 12 }} title={[serverMetaText(st), ...used.map((k) => `${itemLabel(k)}: ${st.usedPaths[k]}`)].filter(Boolean).join('\n')}>
-                      {used.length ? `${used.length}개 항목` : '—'}{miss.length ? ` · 미확인 ${miss.length}` : ''}
-                      {st.cvpVersion ? <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>CVP {st.cvpVersion}</div> : null}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </STable>
-        )}
-        <div style={{ ...NOTE, marginTop: 8 }}><BoldText text={CANDIDATE_NOTE} /></div>
-        {foot.length > 0 && (
-          <div style={{ ...NOTE, marginTop: 4 }}>
-            <b>확인하지 못한 경로</b>
-            <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
-              {foot.map((f) => (
-                <li key={f.item}>{itemLabel(f.item)} — {f.servers.join(', ')}{f.reasons.length ? ` (${f.reasons.join(' / ')})` : ''}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {edges.length > 0 && (
-          <div style={{ ...NOTE, marginTop: 8 }}>
-            <b>엣지 보고</b>{' '}
-            {edges.map((e) => {
-              const v = edgeReportView(e); // v2.640 ①: devicesUnavailable(엣지 DB 불가)도 말한다
-              return (
-                <span key={e.agent} style={{ marginRight: 12, whiteSpace: 'nowrap' }}>
-                  {e.agent}: <Badge tone={v.tone} title={v.title}>{v.label}</Badge>
-                  {' '}{agoText(e.lastPushAt)}{v.extras.length ? ` · ${v.extras.join(' · ')}` : ''}
-                </span>
-              );
-            })}
-          </div>
-        )}
-        {isAdmin && data.db && <div style={{ ...NOTE, marginTop: 6 }}>{dbStatsText(data.db)}</div>}
-      </div>
-
       <div className="card" style={{ minWidth: 0 }}>
         <div style={ROW}>
           {/* v2.612 WEB2612-07: 장비 목록을 아직 받지 못했거나 실패했으면 '0대' 가 아니라 '—'(읽지 못함) */}
@@ -315,14 +253,80 @@ export default function CvpTool() {
       <FaultsCard faults={faults} err={faultsErr} isAdmin={isAdmin} mayCollect={mayCollect} onChanged={load} />
       </>)}
 
-      {isAdmin && (
+      {/* v2.646: CVP 서버 상태·등록·설정은 'CVP 설정' 탭에만(사용자 요청 — 모든 탭 하단에 붙어 있던 블록을 옮겼다) */}
+      {view === 'settings' && (<>
+      <div className="card" style={{ minWidth: 0 }}>
+        <b>CVP 서버 {servers.length}대</b>
+        {stopped.map((s) => (
+          <div key={`stop-${s.id}`} className="banner" style={{ marginTop: 8, borderColor: 'var(--red)' }}>
+            <BoldText text={authStopText(s.status.authStopped, s.name || s.id)} />
+          </div>
+        ))}
+        {servers.length === 0 ? (
+          <div style={{ ...NOTE, marginTop: 8 }}>등록된 CVP 서버가 없습니다. {isAdmin ? '아래 ‘등록·설정’ 에서 추가하세요.' : ''}</div>
+        ) : (
+          <STable minWidth={760} style={{ marginTop: 8 }}>
+            <thead><tr><th>이름</th><th>주소</th><th>수집 위치</th><th>인증</th><th>상태</th><th>장비</th><th>수집 시각</th><th>읽은 경로</th></tr></thead>
+            <tbody>
+              {servers.map((s) => {
+                const st = s.status || {};
+                const sv = serverState(s, { enabled: data.enabled !== false });
+                const used = st.usedPaths && typeof st.usedPaths === 'object' ? Object.keys(st.usedPaths) : [];
+                const miss = st.missing && typeof st.missing === 'object' ? Object.keys(st.missing) : [];
+                return (
+                  <tr key={s.id}>
+                    <td><b>{s.name || s.id}</b></td>
+                    <td style={{ fontSize: 12 }}>{hostText(s.host)}</td>
+                    <td style={{ fontSize: 12 }}>{s.agent ? `엣지 ${s.agent}` : '중앙 직접'}</td>
+                    <td style={{ fontSize: 12 }}>{s.authMode === 'password' ? 'ID/비밀번호' : '토큰'}</td>
+                    <td><Badge tone={sv.tone} title={sv.detail}>{sv.label}</Badge>{sv.detail && (sv.tone === 'bad' || sv.tone === 'warn') && <div style={{ fontSize: 11, color: 'var(--text-dim)', whiteSpace: 'normal' }}>{sv.detail}</div>}</td>
+                    <td className="right">{countText(st.deviceCount)}{isTruncated(st.truncated) ? ' (잘림)' : ''}</td>
+                    <td style={{ fontSize: 12 }} data-sort={st.collectedAt || 0}>{agoText(st.collectedAt)}</td>
+                    <td style={{ fontSize: 12 }} title={[serverMetaText(st), ...used.map((k) => `${itemLabel(k)}: ${st.usedPaths[k]}`)].filter(Boolean).join('\n')}>
+                      {used.length ? `${used.length}개 항목` : '—'}{miss.length ? ` · 미확인 ${miss.length}` : ''}
+                      {st.cvpVersion ? <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>CVP {st.cvpVersion}</div> : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </STable>
+        )}
+        <div style={{ ...NOTE, marginTop: 8 }}><BoldText text={CANDIDATE_NOTE} /></div>
+        {foot.length > 0 && (
+          <div style={{ ...NOTE, marginTop: 4 }}>
+            <b>확인하지 못한 경로</b>
+            <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
+              {foot.map((f) => (
+                <li key={f.item}>{itemLabel(f.item)} — {f.servers.join(', ')}{f.reasons.length ? ` (${f.reasons.join(' / ')})` : ''}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {edges.length > 0 && (
+          <div style={{ ...NOTE, marginTop: 8 }}>
+            <b>엣지 보고</b>{' '}
+            {edges.map((e) => {
+              const v = edgeReportView(e); // v2.640 ①: devicesUnavailable(엣지 DB 불가)도 말한다
+              return (
+                <span key={e.agent} style={{ marginRight: 12, whiteSpace: 'nowrap' }}>
+                  {e.agent}: <Badge tone={v.tone} title={v.title}>{v.label}</Badge>
+                  {' '}{agoText(e.lastPushAt)}{v.extras.length ? ` · ${v.extras.join(' · ')}` : ''}
+                </span>
+              );
+            })}
+          </div>
+        )}
+        {isAdmin && data.db && <div style={{ ...NOTE, marginTop: 6 }}>{dbStatsText(data.db)}</div>}
+      </div>
+
+      {isAdmin ? (
         <div className="card" style={{ minWidth: 0 }}>
-          <button type="button" className="btn" onClick={() => setAdminOpen((v) => !v)}>
-            {adminOpen ? '▾' : '▸'} 등록·설정(관리자)
-          </button>
-          {adminOpen && <AdminPanel onChanged={load} />}
+          <b>등록·설정(관리자)</b>
+          <AdminPanel onChanged={load} />
         </div>
-      )}
+      ) : <div style={NOTE}>CVP 서버 등록·수집 설정은 관리자만 바꿀 수 있습니다.</div>}
+      </>)}
 
       {detailKey && <DeviceModal target={detailKey} onClose={() => setDetailKey(null)} />}
     </div>
@@ -754,7 +758,7 @@ function EventsCard({ servers, isAdmin, onOpen }) {
       .then((x) => { if (active) setR(x); }).catch((e) => { if (active) { setErr(e); setR(null); } });
     return () => { active = false; };
   }, [cvpId, sev, hours, corp, reload]);
-  const corpChips = r ? eventCorpChips(r.corpCounts) : [];
+  const corpChips = r ? eventCorpChips(r.corpCounts, sev) : [];
   const events = r && Array.isArray(r.events) ? r.events.filter((e) => e && typeof e === 'object') : [];
   const notes = r ? eventReadNotes(r.readState) : [];
   return (
@@ -777,29 +781,31 @@ function EventsCard({ servers, isAdmin, onOpen }) {
       {r && (
         <>
           {notes.map((t, i) => <div key={`en-${i}`} className="banner" style={{ marginTop: 8 }}><BoldText text={t} /></div>)}
-          {/* v2.645: 법인 하위 메뉴 — 칩마다 기간 안 오류·경고 개수(법인 필터 전 기준이라 고른 칩이 사라지지 않는다) */}
-          {corpChips.length > 0 && (
-            <div className="vc-quicknav" style={{ marginTop: 8 }}>
-              <span className="qn-label" style={{ minWidth: 74 }}>🏢 법인</span>
-              <button type="button" className={`qn-btn${corp == null ? ' on' : ''}`} aria-pressed={corp == null} onClick={() => setCorp(null)}>전체</button>
-              {corpChips.map((c) => (
-                <button key={c.corpId || '(none)'} type="button" className={`qn-btn${corp === c.corpId ? ' on' : ''}`} aria-pressed={corp === c.corpId}
-                  onClick={() => setCorp(corp === c.corpId ? null : c.corpId)} title={`${c.name} — 이 기간 이벤트 ${c.total}건(오류 ${c.errors} · 경고 ${c.warnings})`}>
-                  <span className="qn-dot" style={{ background: c.tone === 'bad' ? 'var(--red)' : c.tone === 'warn' ? 'var(--amber)' : 'var(--text-dim)' }} />{c.name}
-                  <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--red)' }}>{c.errors ? ` 오류 ${countText(c.errors)}` : ''}</span>
-                  <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--amber)' }}>{c.warnings ? ` 경고 ${countText(c.warnings)}` : ''}</span>
-                  {!c.errors && !c.warnings ? <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> {countText(c.total)}</span> : null}
+          {/* v2.646: 두 축을 따로 고른다(사용자 요청 — '법인: AZ WA … / 이벤트: 경고 오류'). 법인 칩 개수는 고른 이벤트 종류 기준,
+              이벤트 칩 개수는 고른 법인 기준이다. 법인 칩 목록은 법인 필터 전 기준이라 고른 칩이 사라지지 않는다. */}
+          <div className="vc-quicknav" style={{ marginTop: 8, flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+            {corpChips.length > 0 && (
+              <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8 }}>
+                <span className="qn-label" style={{ minWidth: 74 }}>🏢 법인</span>
+                <button type="button" className={`qn-btn${corp == null ? ' on' : ''}`} aria-pressed={corp == null} onClick={() => setCorp(null)}>전체</button>
+                {corpChips.map((c) => (
+                  <button key={c.corpId || '(none)'} type="button" className={`qn-btn${corp === c.corpId ? ' on' : ''}`} aria-pressed={corp === c.corpId}
+                    onClick={() => setCorp(corp === c.corpId ? null : c.corpId)} title={`${c.name} — 오류 ${c.errors} · 경고 ${c.warnings}`}>
+                    <span className="qn-dot" style={{ background: c.tone === 'bad' ? 'var(--red)' : c.tone === 'warn' ? 'var(--amber)' : 'var(--text-dim)' }} />{c.name}
+                    <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{countText(c.count)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8 }}>
+              <span className="qn-label" style={{ minWidth: 74 }}>⚠ 이벤트</span>
+              {eventSevChips(r.counts, sev).map((c) => (
+                <button key={c.key || 'all'} type="button" className={`qn-btn${sev === c.key ? ' on' : ''}`} aria-pressed={sev === c.key} onClick={() => setSev(c.key)}>
+                  {c.key ? <span className="qn-dot" style={{ background: c.tone === 'bad' ? 'var(--red)' : c.tone === 'warn' ? 'var(--amber)' : 'var(--text-dim)' }} /> : null}{c.label}
+                  <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{countText(c.count)}</span>
                 </button>
               ))}
             </div>
-          )}
-          <div style={{ ...ROW, marginTop: 8 }}>
-            <button type="button" className={`tab${!sev ? ' active' : ''}`} onClick={() => setSev('')}>전체</button>
-            {EVENT_SEVERITIES.map(([k, l]) => {
-              const c = severityCounts(r.counts).find((x) => x.key === k);
-              if (!c && sev !== k) return null;
-              return <button key={k} type="button" className={`tab${sev === k ? ' active' : ''}`} onClick={() => setSev(k)}>{l} {countText(c ? c.count : 0)}</button>;
-            })}
           </div>
           {events.length === 0 ? (
             <div style={{ ...NOTE, marginTop: 8 }}>이 기간에 받은 이벤트가 없습니다{notes.length ? ' — 위 안내처럼 이벤트를 읽지 못한 CVP 가 있으면 0건은 확인된 값이 아닙니다' : ''}.</div>
@@ -1168,6 +1174,8 @@ function AdminPanel({ onChanged }) {
           <label style={LBL}>일 롤업 보존(일)<input className="input" inputMode="numeric" value={sform.dailyRetentionDays} onChange={sset('dailyRetentionDays')} /></label>
           <label style={LBL}>동시 수집 수<input className="input" inputMode="numeric" value={sform.concurrency} onChange={sset('concurrency')} /></label>
           <label style={LBL}>CVP 당 시한(초)<input className="input" inputMode="numeric" value={sform.deviceTimeoutSec} onChange={sset('deviceTimeoutSec')} /></label>
+          <label style={LBL} title="링크가 올라온 포트의 수신 광량이 이 값 이하이면 주의(장비가 임계를 주면 그것이 먼저입니다)">광신호 주의(dBm 이하)<input className="input" inputMode="decimal" value={sform.xcvrRxWarnDbm} onChange={sset('xcvrRxWarnDbm')} /></label>
+          <label style={LBL} title="링크가 올라온 포트의 수신 광량이 이 값 이하이면 장애로 판정합니다">광신호 장애(dBm 이하)<input className="input" inputMode="decimal" value={sform.xcvrRxFaultDbm} onChange={sset('xcvrRxFaultDbm')} /></label>
           <label style={{ ...LBL, alignContent: 'end' }} title="부품 장애·포트 down·BGP down 전이가 생길 때 알림 채널(설정 › 알림)로 보냅니다. 전이 기록은 이 값과 무관하게 남습니다."><span><input type="checkbox" checked={!!sform.faultAlerts} onChange={sset('faultAlerts')} /> 장애 전이 알림</span></label>
           <label style={{ ...LBL, alignContent: 'end' }}><span><input type="checkbox" checked={sform.faultAlertsClosed !== false} onChange={sset('faultAlertsClosed')} disabled={!sform.faultAlerts} /> 해소도 알림</span></label>
         </div>

@@ -18,7 +18,7 @@ import { loadSettings, saveSettings, LIMITS } from '../../cvp/settings.js';
 import { cvpPollerStatus, pollCvpOnce, isPollerBusy, testServerConnection } from '../../cvp/poller.js';
 import { getStatus, dropStatus } from '../../cvp/store.js';
 import * as cdb from '../../cvp/db.js';
-import { partsSummary, bgpSummary } from '../../cvp/parse.js';
+import { partsSummary, bgpSummary, devicePower as cvpDevicePower } from '../../cvp/parse.js'; // v2.647: devicePower
 import { edgeCvpStatuses, edgeCvpSummary, edgeVersionOf, classifyCvpEdge, MIN_CVP_EDGE_VERSION } from '../../central/cvpEdge.js';
 import { allCollectorStatus } from '../../collector/state.js'; // v2.613 CONTRACT2613-04: 엣지 버전 게이트
 import { requestCvpCollect, hasPendingCvpRequest, recentCvpCollectDrops } from '../../cvp/collectRequests.js';
@@ -346,7 +346,9 @@ api.get('/tools/cvp/events', toolsPerm, fullScopeOnly, async (req, res) => {
   const servers = listServers();
   const cvpId = typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null;
   if (cvpId && !servers.some((x) => x.id === cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
-  const sev = ['critical', 'error', 'warning', 'info', 'debug', 'unknown'].includes(req.query.severity) ? req.query.severity : null;
+  // v2.646: 'errors' = 오류 묶음(critical+error) — 이벤트 화면의 '오류' 칩(사용자 요청 '이벤트: 경고 · 오류').
+  const sev = req.query.severity === 'errors' ? ['critical', 'error']
+    : ['critical', 'error', 'warning', 'info', 'debug', 'unknown'].includes(req.query.severity) ? req.query.severity : null;
   const hours = Math.max(1, Math.min(24 * 30, Math.floor(Number(req.query.hours)) || 24));
   // v2.645: 법인 필터(?corp=<DataCenter id>, '' 는 '법인 미지정'). 그 법인의 CVP 서버들로 좁힌다 — 모르는 법인은 결과 0(전체로 넓히지 않는다).
   const corpOf = corpResolver(servers, dcList());
@@ -383,6 +385,99 @@ api.get('/tools/cvp/events', toolsPerm, fullScopeOnly, async (req, res) => {
   // 이벤트를 읽었는지(서버별 events 요약) — null 이면 '못 읽음', 없으면 '보고 없음'. 화면이 0건과 구분한다.
   const readState = servers.filter((x) => !cvpId || x.id === cvpId).map((x) => { const st = statusOf(x); return { cvpId: x.id, name: x.name || x.id, events: Object.hasOwn(st || {}, 'events') ? st.events : undefined, missing: admin ? (st?.missing?.events || null) : maskErrText(st?.missing?.events || null, hosts) }; });
   res.json({ events: list, counts: r.counts, corpCounts: [...corpCounts.values()], corp: corpParam, hours, ...(r.truncated ? { truncated: true, limit: r.limit } : {}), readState, retentionDays: cdb.EVENT_RETENTION_DAYS, ...(admin ? {} : { addressHidden: true }) });
+});
+
+/**
+ * v2.646 — GBIC 광신호(수신 광량) 목록. 전 장비의 트랜시버 파트 중 DOM 을 읽은 것을 수신 광량 낮은 순으로 준다(중앙 DB 최신값 — 왕복 0).
+ *   판정은 수집 시(parse.judgeOptics — 링크가 올라온 포트만) 끝나 있다. DOM 을 못 읽은 트랜시버·링크 없는 포트는 개수로 밝힌다.
+ */
+const OPTICS_MAX = 3000;
+api.get('/tools/cvp/optics', toolsPerm, fullScopeOnly, async (req, res) => {
+  const servers = listServers();
+  const cvpId = typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null;
+  if (cvpId && !servers.some((x) => x.id === cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
+  const { rows, unavailable } = await cdb.listDeviceRows({ cvpId });
+  if (unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
+  const corpOf = corpResolver(servers, dcList());
+  const nameOf = new Map(servers.map((x) => [String(x.id), x.name || x.id]));
+  const s = loadSettings();
+  const counts = { xcvr: 0, present: 0, absent: 0, withDom: 0, noDom: 0, judged: 0, ok: 0, warn: 0, fault: 0, notLinked: 0, devicesNoXcvrRead: 0 };
+  const list = [];
+  for (const d of rows.filter((r) => rowBelongs(r, servers))) {
+    const parts = Array.isArray(d.partsList) ? d.partsList.filter((p) => p && p.kind === 'xcvr') : null;
+    if (!parts) { counts.devicesNoXcvrRead++; continue; }
+    for (const p of parts) {
+      counts.xcvr++;
+      if (p.state === 'absent') { counts.absent++; continue; }
+      counts.present++;
+      const o = p.optic && typeof p.optic === 'object' ? p.optic : null;
+      if (!p.dom && !o) { counts.noDom++; continue; }
+      counts.withDom++;
+      if (o && o.judged) { counts.judged++; if (o.rxState && Object.hasOwn(counts, o.rxState)) counts[o.rxState]++; }
+      else if (o && !o.linked) counts.notLinked++;
+      const c = corpOf(d.cvpId);
+      list.push({
+        cvpId: d.cvpId, cvpName: nameOf.get(String(d.cvpId)) || d.cvpId, key: d.key, hostname: d.hostname || '', corpId: c.corpId, corpName: c.corpName,
+        intf: o?.intf || null, part: p.name, state: p.state, rx: o?.rx ?? p.dom?.rxPower ?? null, tx: o?.tx ?? p.dom?.txPower ?? null,
+        temperature: p.dom?.temperature ?? null, voltage: p.dom?.voltage ?? null, txBias: p.dom?.txBias ?? null,
+        linked: o ? o.linked : null, judged: !!o?.judged, rxState: o?.rxState || null, basis: o?.basis || null, partsAt: d.partsAt,
+      });
+    }
+  }
+  // 수신 광량 낮은 순(판정한 것 먼저 — 링크 없는 포트의 낮은 값이 위를 덮지 않게), 값 없는 것은 뒤.
+  list.sort((a, b) => (Number(b.judged) - Number(a.judged)) || ((a.rx ?? Infinity) - (b.rx ?? Infinity)));
+  const omitted = Math.max(0, list.length - OPTICS_MAX);
+  res.json({
+    optics: list.slice(0, OPTICS_MAX), counts, thresholds: { warnDbm: s.xcvrRxWarnDbm, faultDbm: s.xcvrRxFaultDbm },
+    ...(omitted ? { omitted, limit: OPTICS_MAX } : {}),
+  });
+});
+
+/**
+ * v2.647 — 네트워크 장비 소비전력(사용자 요청 '전체 네트워크 장비의 소비전력'). 장착된 PSU 의 입력 전력 합(parse.devicePower)을 장비별·법인별·
+ *   모델별로 준다(중앙 DB 최신값 — 왕복 0). 합계는 **값을 읽은 장비만** 더하고, 못 읽은 장비는 사유별 개수로 밝힌다(0W 로 채우지 않는다).
+ *   PSU 전력 필드 이름은 실장비 미확인 추정이다(parse.PSU_POWER_FIELDS).
+ */
+api.get('/tools/cvp/power', toolsPerm, fullScopeOnly, async (req, res) => {
+  const servers = listServers();
+  const cvpId = typeof req.query.cvpId === 'string' && req.query.cvpId ? req.query.cvpId : null;
+  if (cvpId && !servers.some((x) => x.id === cvpId)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
+  const { rows, unavailable } = await cdb.listDeviceRows({ cvpId });
+  if (unavailable) return res.status(503).json({ ok: false, reason: '중앙 CVP DB 를 열지 못했습니다.' });
+  const corpOf = corpResolver(servers, dcList());
+  const nameOf = new Map(servers.map((x) => [String(x.id), x.name || x.id]));
+  const totals = { devices: 0, read: 0, partial: 0, watts: 0, capW: 0, capDevices: 0, unread: { partsNotRead: 0, noPsu: 0, noPowerField: 0 }, basis: { input: 0, output: 0, mixed: 0 } };
+  const corps = new Map(); const models = new Map(); const devices = [];
+  for (const d of rows.filter((r) => rowBelongs(r, servers))) {
+    totals.devices++;
+    const c = corpOf(d.cvpId);
+    if (!corps.has(c.corpId)) corps.set(c.corpId, { corpId: c.corpId, corpName: c.corpName, ...(c.missing ? { missing: true } : {}), devices: 0, read: 0, partial: 0, watts: 0 });
+    const cr = corps.get(c.corpId); cr.devices++;
+    const model = String(d.model || '');
+    if (!models.has(model)) models.set(model, { model, devices: 0, read: 0, watts: 0 });
+    const mr = models.get(model); mr.devices++;
+    const parts = Array.isArray(d.partsList) ? d.partsList : null;
+    const pw = cvpDevicePower(parts);
+    if (!pw) {
+      const psus = parts ? parts.filter((p) => p && p.kind === 'psu' && p.state !== 'absent').length : 0;
+      totals.unread[!parts ? 'partsNotRead' : psus === 0 ? 'noPsu' : 'noPowerField']++;
+    } else {
+      totals.read++; totals.watts += pw.watts; totals.basis[pw.basis]++;
+      if (pw.partial) totals.partial++;
+      if (pw.capW != null) { totals.capW += pw.capW; totals.capDevices++; }
+      cr.read++; cr.watts += pw.watts; if (pw.partial) cr.partial++;
+      mr.read++; mr.watts += pw.watts;
+    }
+    devices.push({
+      cvpId: d.cvpId, cvpName: nameOf.get(String(d.cvpId)) || d.cvpId, key: d.key, hostname: d.hostname || '', model: d.model || '', corpId: c.corpId, corpName: c.corpName,
+      watts: pw ? pw.watts : null, psus: pw ? pw.psus : null, psuRead: pw ? pw.read : null, partial: !!pw?.partial, basis: pw?.basis || null, capW: pw?.capW ?? null, partsAt: d.partsAt,
+    });
+  }
+  devices.sort((a, b) => (b.watts ?? -1) - (a.watts ?? -1));
+  const corpList = [...corps.values()].sort((a, b) => (a.corpId === '' ? 1 : 0) - (b.corpId === '' ? 1 : 0) || String(a.corpName).localeCompare(String(b.corpName), 'ko', { numeric: true }));
+  const modelList = [...models.values()].map((m) => ({ ...m, avgW: m.read ? m.watts / m.read : null })).sort((a, b) => b.watts - a.watts);
+  const LIMIT = 5000;
+  res.json({ totals, corps: corpList, models: modelList, devices: devices.slice(0, LIMIT), ...(devices.length > LIMIT ? { omitted: devices.length - LIMIT, limit: LIMIT } : {}) });
 });
 
 /** 포트 사용량 — 전 장비 포트를 사용률 높은 순으로(⑤). 사용률을 계산할 수 없는 포트는 사유별 개수로 밝힌다(0% 로 세지 않는다). */

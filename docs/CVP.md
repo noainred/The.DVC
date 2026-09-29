@@ -252,3 +252,37 @@ CPU·메모리 값은 레코드 해시에 넣지 않는다(매 주기 전 레코
 - 회귀: `server/test/cvpOverview2645.test.js`(순수 + 실제 api 라우터 — 변이 3종 검출) · 웹 `cvpOverviewText.test.js`.
 - ⚠ 정직 기록: Chromium 검증은 합성 장비 324대(CVP 5대 · 법인 4곳 + 미지정)를 심은 목 서버로 했다(admin·operator × 1440/400, 오류 0 · 가로 넘침 0).
   실장비 CVP 데이터로는 보지 못했다.
+
+## 13. CVP 설정 탭 · GBIC 광신호 · 이벤트 두 축(v2.646)
+
+사용자 요청: "CVP 와 등록 설정/변경 페이지를 별도 페이지로 — 이벤트 옆 'CVP 설정' 메뉴, 모든 서브메뉴 하단 블록 제거" · "xcvr 이 여전히 나오지 않는다 —
+show interfaces transceiver" · "각 GBIC 의 광신호 세기를 확인, 약하면 장애" · "이벤트 서브메뉴를 법인 / 이벤트(경고·오류) 두 줄로 따로".
+
+- **CVP 설정 탭**: CVP 서버 상태 표 + 등록·설정(관리자)은 이 탭에만 있다. 비-admin 은 서버 상태 표만 본다.
+- **xcvr 가 '상태 미확인' 이던 이유(코드로 확인)**: 트랜시버 노드(`/Sysdb/hardware/archer/xcvr/status/all/<포트>`)는 **장착 여부(presence)만** 준다.
+  장착 여부는 건강 상태가 아니므로(v2.611 COL2611-04) 정상으로 칠하지 않는다 — 결함이 아니라 판정 근거가 없던 것이다.
+- **`show interfaces transceiver` 는 스위치 CLI 다** — CVP REST(Resource·Telemetry API)로는 CLI 를 실행할 수 없다. 그 명령을 그대로 쓰려면 스위치
+  300여 대 각각의 계정(eAPI/SSH)이 필요하다(도입하지 않았다 — 필요하면 별건). 같은 값(DOM: 온도·전압·바이어스·Tx/Rx 광량)은 텔레메트리의 트랜시버 노드
+  **한 단계 아래**에 있을 것으로 보고, xcvr 만 추종 깊이 3 · 그 단계에서는 이름에 `dom` 이 들어간 포인터만 따라간다(`client.js followChild`).
+  ⚠ 경로(`domInfo`)·필드 이름(`rxPower`·`txPower`·`temperature`·`voltage`·`txBias`)·단위(dBm)는 **실장비로 확인하지 못한 추정**이다.
+  경로 탐색 표본에 그 장비에서 장착된 첫 트랜시버의 노드와 `domInfo` 를 추가했다(`xcvrProbePaths`) — 첫 실수집에서 이 표본으로 좁힌다.
+- **광신호 판정(`parse.judgeOptics`)**: 링크가 올라온 포트만 판정한다(링크가 없으면 상대가 빛을 보내지 않아 바닥이 정상 — v2.521 SAN 규약).
+  장비가 준 임계(`rxPowerLowAlarm` 등)가 먼저, 없으면 CVP 설정 `xcvrRxWarnDbm`(기본 -10) · `xcvrRxFaultDbm`(기본 -14) — 기본값은 흔한 10G SR/LR
+  수신 감도 근처로 잡은 추정이다. 장애 기준이 주의보다 높으면 주의 값으로 맞춘다. 판정 결과는 파트 상태라 **장애 전이·알림**으로 이어진다.
+  포트 목록을 못 읽었으면 판정하지 않는다. 판정 재료(`domJudge`)는 저장하지 않고 `dom`·`optic`(아는 필드만 — 엣지 수신도 `opticOf` 로 좁힌다)만 저장한다.
+- **`GET /tools/cvp/optics`**: 판정한 것 먼저·수신 광량 낮은 순, 개수(판정·링크 없음·DOM 없음·빈 슬롯·트랜시버 목록 못 읽은 장비)를 밝힌다(상한 3,000 · omitted).
+- **이벤트 두 축**: 법인 칩과 이벤트 종류 칩(전체·오류=critical+error·경고·정보)을 따로 고른다. `?severity=errors` 가 오류 묶음이다.
+  법인 칩 개수는 고른 종류 기준, 종류 칩 개수는 고른 법인 기준이다.
+- 회귀: `server/test/cvpOptics2646.test.js`(7) · `cvpOverview2645.test.js`(severity 묶음) · 웹 `cvpOpticsText.test.js`·`cvpOverviewText.test.js`.
+- ⚠ 정직 기록: Chromium 검증은 합성 DOM 값을 심은 목 서버로 했다. 실장비 텔레메트리 DOM 응답은 보지 못했다.
+
+## 14. 네트워크 장비 소비전력(v2.647)
+
+사용자 요청: "전체 네트워크 장비의 소비전력도 볼 수 있는 메뉴".
+
+- PSU 파트에 `power:{inW,outW,capW}` 를 싣는다(`parse.psuPower` — ⚠ 필드 이름 `inputPower`·`outputPower`·`capacity` 등은 **실장비 미확인 추정**, 후보 목록 `PSU_POWER_FIELDS`).
+- 장비 전력(`parse.devicePower`) = 장착된 PSU 의 입력 전력 합. 입력을 모르면 출력으로 대신하고 `basis` 로 밝힌다. 값이 있는 PSU 가 없으면 **null**(0W 아님),
+  일부만 있으면 `partial`. 엣지 수신 정제도 `power` 를 아는 필드만 옮긴다.
+- `GET /tools/cvp/power`: 장비별·법인별·모델별 합과 못 읽은 사유별 개수(부품 미수집·PSU 없음·전력 값 없음). 합계는 읽은 장비만 더한다. 화면은 '전력' 탭.
+- 2.646.0 은 따로 게시하지 않고 2.647.0 에 함께 게시했다.
+- 회귀: `server/test/cvpPower2647.test.js` · 웹 `cvpPowerText.test.js`. ⚠ Chromium 검증은 합성 PSU 전력 값으로 했다.

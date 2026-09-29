@@ -209,16 +209,37 @@ export function corpNameFn(devices) {
 }
 export const modelLabel = (t) => t || '(모델 미상)';
 
-/** 이벤트 법인 칩 — 서버 corpCounts([{corpId,corpName,total,bySeverity}]) → 오류·경고 개수 + 톤. 이름순, 미지정 맨 뒤. */
-export function eventCorpChips(corpCounts) {
+/**
+ * 이벤트 화면의 두 축(v2.646 사용자 요청 — '법인: AZ WA … / 이벤트: 경고 오류' 를 **따로** 고른다. 한 칩에 둘을 묶지 않는다).
+ *  · SEV_GROUPS: '' 전체 · errors(critical+error) · warning · info. 서버 severity 파라미터와 같은 값이다.
+ *  · 법인 칩의 개수는 **고른 이벤트 종류** 기준, 이벤트 칩의 개수는 **고른 법인** 기준(서버 counts 가 법인 필터 뒤 값) — 규칙 ②.
+ */
+export const SEV_GROUPS = Object.freeze([
+  { key: '', label: '전체', sev: null },
+  { key: 'errors', label: '오류', sev: ['critical', 'error'] },
+  { key: 'warning', label: '경고', sev: ['warning'] },
+  { key: 'info', label: '정보', sev: ['info'] },
+]);
+const sevCount = (by, key) => {
+  const g = SEV_GROUPS.find((x) => x.key === key) || SEV_GROUPS[0];
+  const o = by && typeof by === 'object' ? by : {};
+  if (!g.sev) return Object.values(o).reduce((a, v) => a + (numOrNull(v) ?? 0), 0);
+  return g.sev.reduce((a, k) => a + (numOrNull(o[k]) ?? 0), 0);
+};
+/** 법인 칩 — 이름순, 미지정 맨 뒤. count = 고른 이벤트 종류의 개수. */
+export function eventCorpChips(corpCounts, sevKey = '') {
   const list = (Array.isArray(corpCounts) ? corpCounts : []).filter((c) => c && typeof c === 'object').map((c) => {
-    const s = c.bySeverity && typeof c.bySeverity === 'object' ? c.bySeverity : {};
-    const errors = (numOrNull(s.critical) ?? 0) + (numOrNull(s.error) ?? 0);
-    const warnings = numOrNull(s.warning) ?? 0;
-    return { corpId: c.corpId ?? '', name: corpLabel(c), total: numOrNull(c.total) ?? 0, errors, warnings, tone: errors > 0 ? 'bad' : warnings > 0 ? 'warn' : 'muted' };
+    const by = c.bySeverity && typeof c.bySeverity === 'object' ? c.bySeverity : {};
+    const errors = sevCount(by, 'errors'); const warnings = sevCount(by, 'warning');
+    return { corpId: c.corpId ?? '', name: corpLabel(c), count: sevCount(by, sevKey), errors, warnings, tone: errors > 0 ? 'bad' : warnings > 0 ? 'warn' : 'muted' };
   });
   list.sort((a, b) => (a.corpId === '' ? 1 : 0) - (b.corpId === '' ? 1 : 0) || a.name.localeCompare(b.name, 'ko', { numeric: true }));
   return list;
+}
+/** 이벤트 종류 칩 — counts(심각도별, 고른 법인 기준). 정보는 개수가 있거나 골랐을 때만. */
+export function eventSevChips(counts, sevKey = '') {
+  return SEV_GROUPS.map((g) => ({ key: g.key, label: g.label, count: sevCount(counts, g.key), tone: g.key === 'errors' ? 'bad' : g.key === 'warning' ? 'warn' : 'muted' }))
+    .filter((c) => c.key !== 'info' || c.count > 0 || sevKey === 'info');
 }
 
 /** 장비 상세 요약 칸(판정은 서버 값 그대로 — 여기서는 모양만). */
