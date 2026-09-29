@@ -110,3 +110,17 @@ test('⑧ 실제 api 라우터: /tools/gpu 가 guestWhy·호스트 VM 목록·ES
     assert.ok(Array.isArray(b.guestWhy) && b.guestWhy.length === 1 && b.guestWhy[0].hosts === 1);
   } finally { srv.close(); store.snapshot = prev; gstore._resetGuestGpuForTest(); }
 });
+
+test('⑨ 목 데이터: vSGA 가 아닌 GPU 호스트는 전부 GPU VM 을 갖고, 데모 게스트 수집은 설정 없이도 돈다', async () => {
+  const { generateSnapshot } = await import('../src/mock/generator.js');
+  const s = await generateSnapshot();
+  const g = s.hosts.filter((h) => (h.gpus || []).length && h.gpus[0].mode !== 'vsga');
+  const empty = g.filter((h) => !s.vms.some((v) => v.host === h.name && v.vcenterId === h.vcenterId && v.gpu));
+  assert.equal(empty.length, 0, `GPU VM 0대 호스트: ${empty.map((h) => h.name).join(', ')}`);
+  assert.ok(s.vms.filter((v) => v.template && v.gpu).length === 0, '템플릿은 GPU 를 받지 않는다');
+  const src = stripComments(fs.readFileSync(path.join(SRC, 'gpu/poller.js'), 'utf8'));
+  assert.match(src, /const demoAll = mock &&/);
+  assert.match(src, /return \{ hosts, vms, diag \}/, '데모도 수집 진단을 낸다(이유 칩)');
+  const hw = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/hardwareGpu.js'), 'utf8'));
+  assert.match(hw, /snap\.source === 'mock' \? null/, "데모에서 '수집 꺼짐' 이라 말하지 않는다");
+});
