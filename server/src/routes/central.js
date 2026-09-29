@@ -626,7 +626,7 @@ const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'v
  * 정상 엣지(inventoryPush.js)는 숫자를 보내므로 정상 입력에는 무변경이다.
  */
 const INV_NUM_KEYS = ['cpuCores', 'cpuThreads', 'cpuTotalMhz', 'cpuUsageMhz', 'cpuUsagePct', 'memTotalMB', 'memUsageMB', 'memUsagePct',
-  'vmCount', 'hostCount', 'powerWatts', 'powerWattsIdrac', 'tempC', 'tempMaxC', 'gpuUtilPct', 'uptimeSec',
+  'vmCount', 'hostCount', 'powerWatts', 'powerWattsIdrac', 'tempC', 'tempMaxC', 'gpuUtilPct', 'gpuMemUsedPct', 'gpuMemUsedMB', 'gpuTempC', 'uptimeSec',
   'cpuCount', 'numCpu', 'memMB', 'memoryMB', 'storageGB', 'uncommittedGB', 'snapshotCount', 'snapshotSizeGB',
   'snapshotOldestTs', 'snapshotNewestTs', 'capacityGB', 'freeGB', 'usedGB', 'usagePct', 'provisionedGB', 'vlanId'];
 /**

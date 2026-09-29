@@ -1205,3 +1205,34 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
   .waste-band-cell { border-right: 0; border-bottom: 1px solid var(--border); }
   .waste-band-cell:last-child { border-bottom: 0; }
 }
+
+/* v2.653 GPU 호스트 표(시안 A) — 행 높이 고정 · 한 줄 칩 · 값이 없는 이유 칩 */
+.gpu-host-table > tbody > tr:not(.row-expanded) > td { vertical-align: middle; height: 44px; padding-top: 4px; padding-bottom: 4px; }
+.gpu-host { display: flex; flex-direction: column; gap: 1px; min-width: 0; max-width: 260px; }
+.gpu-ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; max-width: 260px; }
+.gpu-sub { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gpu-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; }
+.gpu-src { font-size: 10px; margin-left: 5px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap; }
+.gpu-why { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 6px; border: 1px dashed var(--text-faint); color: #aab6cc; white-space: nowrap; cursor: help; max-width: 190px; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.gpu-mem { display: flex; flex-direction: column; gap: 3px; }
+.gpu-bar { display: block; width: 110px; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.gpu-bar > span { display: block; height: 4px; background: var(--accent-2); }
+.gpu-act { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.gpu-actbar { display: inline-flex; width: 64px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--border); flex: none; }
+.gpu-actbar > .busy { background: var(--green); }
+.gpu-actbar > .held { background: #a78bfa; }
+.gpu-actbar > .idle { background: #475569; }
+.gpu-actbar > .unk { background: repeating-linear-gradient(45deg, #334155 0 3px, #1f2a40 3px 6px); }
+.gpu-vms { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; max-width: 340px; overflow: hidden; }
+.gpu-chip a, .gpu-chip button { font-size: 11px !important; font-weight: 400 !important; color: var(--text) !important; }
+.gpu-chip { font-size: 11px; padding: 1px 7px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--border); white-space: nowrap; }
+.gpu-chip.off { opacity: .55; }
+.gpu-more { font-size: 11px; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--accent-2); cursor: pointer; white-space: nowrap; }
+.gpu-icon-btn { width: 30px; height: 28px; border-radius: 7px; border: 1px solid var(--border); background: var(--panel); color: var(--text-dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.gpu-icon-btn:hover { color: var(--text); border-color: var(--accent); }
+.gpu-expand { position: sticky; left: 0; box-sizing: border-box; width: min(1180px, calc(100vw - 72px)); padding: 10px 14px 12px 28px; background: var(--panel-deep); }
+.gpu-expand td { padding-top: 5px; padding-bottom: 5px; }
+.gpu-why-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 14px; margin-bottom: 10px; border: 1px solid #5a4516; background: #1d1809; border-radius: 10px; font-size: 13px; color: #fde68a; }
+.gpu-why-banner .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: none; }
+.gpu-why-banner a { color: #7dd3fc; font-weight: 600; }
+.gpu-why-banner .list { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; color: #c9b27a; font-size: 12px; }

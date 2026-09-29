@@ -330,6 +330,41 @@ export class VimSoapClient {
   }
 
   /**
+   * v2.653: 호스트 GPU 카운터 id 묶음 — 사용률 외에 메모리 점유(%)·메모리 사용량(KB)·온도(℃).
+   * ⚠ 이름은 vSphere 성능 카운터 카탈로그의 관용 이름이다(NVIDIA vGPU 호스트 드라이버가 올린다). 이 현장 vCenter 의
+   *   카탈로그에서 확인하지 못했다 — 없는 카운터는 null 이고 그 값만 비운다(0 으로 채우지 않는다).
+   */
+  async gpuPerfCounterIds() {
+    if (!this.sc.perfManager) return {};
+    const m = await this.perfCounterMap();
+    return {
+      util: m.get('gpu.utilization.average') || null,
+      memPct: m.get('gpu.mem.usage.average') || null,
+      memUsedKB: m.get('gpu.mem.used.average') || null,
+      tempC: m.get('gpu.temperature.average') || null,
+    };
+  }
+
+  /**
+   * v2.653: 호스트별 GPU 카운터 한 번에(QueryPerf 1회). 반환 Map<ref, {util, memPct, memUsedKB, tempC}> — 값을 받은 항목만.
+   *   사용률·메모리 점유는 GPU(인스턴스) 평균, 메모리 사용량은 합, 온도는 가장 뜨거운 GPU. -1(그 시각 값 없음)은 버린다.
+   */
+  async queryHostGpuPerf(ids, hostRefs) {
+    const out = new Map();
+    const want = Object.entries(ids || {}).filter(([, v]) => v != null);
+    if (!want.length || !hostRefs.length) return out;
+    const keyOf = new Map(want.map(([k, v]) => [String(v), k]));
+    const metricIds = want.map(([, v]) => `<metricId><counterId>${v}</counterId><instance>*</instance></metricId>`).join('');
+    const specs = hostRefs.map((ref) =>
+      `<querySpec><entity type="HostSystem">${ref}</entity><maxSample>1</maxSample>${metricIds}<intervalId>20</intervalId></querySpec>`
+    ).join('');
+    const xml = await this.#call(
+      `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${specs}</QueryPerf>`
+    );
+    return parseHostGpuPerf(xml, keyOf);
+  }
+
+  /**
    * Map 'group.name.rollup' -> counterId from the PerformanceManager catalog.
    *
    * v2.447(감사 T1): **vCenter 별 프로세스 캐시**를 둔다. 이 카탈로그는 vCenter 의 정적 메타데이터
@@ -1513,9 +1548,12 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
             .map(([ref]) => ref);
           const stale = _gpuForce ? gpuRefs : gpuRefs.filter((ref) => now - (_gpuUtilCache.get(`${vc.id}:${ref}`)?.at || 0) >= intervalMs);
           if (stale.length) {
-            const cid = await c.gpuUtilCounterId();
-            if (cid) {
-              const map = await c.queryHostGpuUtil(cid, stale);
+            // v2.653: 사용률과 같은 QueryPerf 로 메모리 점유·사용량·온도 카운터도 읽는다(왕복 추가 0). 없는 카운터는 그 값만 빈다.
+            const ids = await c.gpuPerfCounterIds();
+            const cid = ids.util;
+            if (cid || ids.memPct || ids.memUsedKB || ids.tempC) {
+              const perf = await c.queryHostGpuPerf(ids, stale);
+              const map = new Map([...perf].filter(([, r]) => r.util != null).map(([ref, r]) => [ref, r.util]));
               /*
                * v2.605(COL2605-03): 값을 받은 호스트만 사용률을 기록한다. 예전에는 '카운터가 있으면 값이 없어도(유휴) 0' 으로
                *   적었는데, 표본 없음·-1(그 시각 값 없음)·연결 끊김도 전부 '0%(유휴)' 가 됐다 — v2.598 VC2598-08 전력
@@ -1525,9 +1563,11 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
               for (const ref of stale) {
                 const got = map.has(ref);
                 if (!got) noSample += 1;
-                _gpuUtilCache.set(`${vc.id}:${ref}`, { pct: got ? map.get(ref) : null, at: now });
+                const r = perf.get(ref) || {};
+                _gpuUtilCache.set(`${vc.id}:${ref}`, { pct: got ? map.get(ref) : null, memPct: r.memPct ?? null, memUsedKB: r.memUsedKB ?? null, tempC: r.tempC ?? null, at: now });
               }
-              console.log(`[collect] ${vc.id} vGPU 사용률 수집: 대상 ${stale.length} · 값 ${map.size}${noSample ? ` · 표본 없음 ${noSample}(미수집 — 0 으로 채우지 않음)` : ''} (gpu.utilization 카운터 OK)`);
+              const extra = [ids.memPct ? `메모리% ${[...perf.values()].filter((r) => r.memPct != null).length}` : '메모리% 카운터 없음', ids.tempC ? `온도 ${[...perf.values()].filter((r) => r.tempC != null).length}` : '온도 카운터 없음'].join(' · ');
+              console.log(`[collect] ${vc.id} vGPU 사용률 수집: 대상 ${stale.length} · 값 ${map.size}${noSample ? ` · 표본 없음 ${noSample}(미수집 — 0 으로 채우지 않음)` : ''} (gpu.utilization 카운터 ${cid ? 'OK' : '없음'} · ${extra})`);
             } else {
               console.warn(`[collect] ${vc.id} gpu.utilization 카운터 없음 — vGPU 사용률 미수집(NVIDIA vGPU Manager VIB/드라이버 또는 vCenter 카운터 확인)`);
             }
@@ -1535,7 +1575,12 @@ export async function collectFromVCenterSoap(vc, { signal = null } = {}) {
           // 캐시된 사용률을 GPU 보유 호스트에 적용(throttle 주기 사이에도 마지막 값 유지).
           for (const [ref, host] of hostByRef) {
             const e = _gpuUtilCache.get(`${vc.id}:${ref}`);
-            if (e && e.pct != null && (host.gpus || []).length) host.gpuUtilPct = e.pct;
+            if (!e || !(host.gpus || []).length) continue;
+            if (e.pct != null) host.gpuUtilPct = e.pct;
+            // v2.653: ESXi 가 준 GPU 메모리·온도(vGPU/vSGA 호스트). 게스트 수집이 없어도 호스트 값이 채워진다.
+            if (e.memPct != null) host.gpuMemUsedPct = e.memPct;
+            if (e.memUsedKB != null) host.gpuMemUsedMB = Math.round(e.memUsedKB / 1024);
+            if (e.tempC != null) host.gpuTempC = e.tempC;
           }
         }
       } catch (err) {
@@ -1732,4 +1777,38 @@ export async function collectFoldersAndPools(vc) {
   } finally {
     await c.logout();
   }
+}
+
+
+/**
+ * v2.653: QueryPerf 응답에서 호스트별 GPU 카운터를 읽는다(순수 — 테스트가 고정). keyOf: counterId 문자열 → 'util'|'memPct'|'memUsedKB'|'tempC'.
+ *   각 시계열 `<id><counterId>N</counterId><instance>…</instance></id>` 뒤의 `<value>` 들 중 마지막 표본을 쓴다.
+ *   빈 인스턴스("")는 호스트 합계라 GPU 인스턴스가 있으면 뺀다(이중 계산 방지).
+ */
+export function parseHostGpuPerf(xml, keyOf) {
+  const out = new Map();
+  const re = /<returnval[^>]*>([\s\S]*?)<\/returnval>/g;
+  let m;
+  while ((m = re.exec(String(xml || '')))) {
+    const blk = m[1];
+    const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
+    if (!ent) continue;
+    const series = {};
+    for (const sm of blk.matchAll(/<id><counterId>(\d+)<\/counterId>(?:<instance>([^<]*)<\/instance>|<instance\/>)?<\/id>((?:<value>-?\d+<\/value>)+)/g)) {
+      const key = keyOf.get(sm[1]);
+      if (!key) continue;
+      const vals = [...sm[3].matchAll(/<value>(-?\d+)<\/value>/g)].map((x) => Number(x[1]));
+      const v = vals[vals.length - 1];
+      if (!Number.isFinite(v) || v < 0) continue;
+      (series[key] || (series[key] = [])).push({ inst: sm[2] || '', v });
+    }
+    const pick = (arr) => { const g = arr.filter((x) => x.inst !== ''); return g.length ? g : arr; };
+    const rec = {};
+    if (series.util) { const a = pick(series.util); rec.util = Math.max(0, Math.min(100, Math.round(a.reduce((s, x) => s + x.v, 0) / a.length / 100))); }
+    if (series.memPct) { const a = pick(series.memPct); rec.memPct = Math.max(0, Math.min(100, Math.round(a.reduce((s, x) => s + x.v, 0) / a.length / 100))); }
+    if (series.memUsedKB) { const a = pick(series.memUsedKB); rec.memUsedKB = a.reduce((s, x) => s + x.v, 0); }
+    if (series.tempC) { const a = pick(series.tempC); const t = Math.max(...a.map((x) => x.v)); if (t > 0 && t < 150) rec.tempC = t; }
+    if (Object.keys(rec).length) out.set(ent, rec);
+  }
+  return out;
 }

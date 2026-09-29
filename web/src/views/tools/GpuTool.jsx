@@ -8,9 +8,11 @@ import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../co
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { activityOf, memText, gbText, tempText, allocText, activityRuleNote, activitySummary } from './gpuUsageText.js';
+import { whyChip, whyBannerItems, vmChips, activityBar, srcText } from './gpuWhyText.js';
 const GpuHistModal = React.lazy(() => import('./GpuHistModal.jsx'));
 
 
+const numOver = (p) => typeof p === 'number' && p > 100;
 const GPU_MODE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], vsga: ['vSGA', 'blue'] };
 function GpuModeBadge({ mode, modes }) {
   const [label, cls] = GPU_MODE[mode] || ['—', 'gray'];
@@ -107,6 +109,7 @@ export function Gpu({ scope }) {
   const [mode, setMode] = useState(''); // '' | vgpu | passthrough | vsga
   const [modelFilter, setModelFilter] = useState(''); // '' = 전체 모델, 아니면 특정 GPU 모델
   const [power, setPower] = useState(''); // '' | on(켜진 VM 있는 호스트) | off(꺼진 VM 있는 호스트)
+  const [openHost, setOpenHost] = useState(null); // v2.653: 할당 VM 을 펼친 호스트(한 번에 한 행)
   // 선택한 사용 방식(mode) 필터에 해당하는 GPU가 0개면 '전체'로 자동 복구(빈 표 혼란 방지).
   useEffect(() => { if (data && mode && (data.byMode?.[mode] ?? 0) === 0) setMode(''); }, [data, mode]);
   if (loading) return <Loading />;
@@ -144,6 +147,9 @@ export function Gpu({ scope }) {
     tempC: h.tempC ?? null, memUsedMB: h.memUsedMB ?? null, memTotalMB: h.memTotalMB ?? null, memUsedPct: h.memUsedPct ?? null,
     allocGB: h.allocGB ?? null, allocPct: h.allocPct ?? null, capacityGB: h.capacityGB ?? null, passthroughOn: h.passthroughOn || 0, allocUnknown: h.allocUnknown || 0,
     activity: h.activity || null,
+    // v2.653
+    guestWhy: h.guestWhy || null, collectPath: h.collectPath || null, collectAgent: h.collectAgent || null,
+    memSource: h.memSource || null, tempSource: h.tempSource || null, vms: h.vms || [],
   }));
   // 법인 × GPU 모델별 수량 집계: 어떤 법인에 어떤 GPU 카드가 몇 장 설치됐는지.
   const modelAgg = () => {
@@ -161,38 +167,90 @@ export function Gpu({ scope }) {
       : view === 'model' ? modelAgg()
         : aggregate((h) => h.vcenterId, (h) => h.vcenterId);
 
+  // v2.653(시안 A): 행 높이를 고정한다 — 할당 VM 은 한 줄 칩 + '+N', 누르면 그 호스트의 VM 표가 행 아래에 펼쳐진다.
+  //   값이 없는 칸은 '—' 대신 이유 칩(gpu/guestWhy.js 코드)을 보인다 — 엣지 수집 법인에서 왜 비었는지가 화면에 없었다.
+  const toggleHost = (k) => setOpenHost((cur) => (cur === k ? null : k));
+  const WhyChip = ({ why }) => {
+    const c = whyChip(why);
+    if (!c) return <span className="muted">—</span>;
+    return <span className="gpu-why" title={c.title}>{c.short}</span>;
+  };
+  const SrcTag = ({ s }) => (s === 'esxi' ? <span className="gpu-src" title="ESXi 성능 카운터 값(게스트 수집값이 없어 대신 표시)">ESXi</span> : null);
   const hostCols = [
-    { key: 'name', label: '호스트', render: (r) => <button className="cell-link" onClick={() => openHist('host', r.key)}>{r.name}</button> },
-    { key: 'vcenterId', label: 'vCenter', render: (r) => <span className="muted">{r.vcenterId}</span> },
-    { key: 'model', label: 'GPU 모델' },
-    { key: 'count', label: '개수', align: 'right' },
-    { key: 'memGB', label: 'VRAM', align: 'right', render: (r) => `${r.memGB} GB` },
-    { key: 'mode', label: '사용 방식', sortValue: (r) => r.mode, render: (r) => <GpuModeBadge mode={r.mode} modes={r.modes} /> },
-    { key: 'util', label: '사용률', render: (r) => (r.util == null ? <span className="muted">—</span>
-      : <span className="flex gap" style={{ alignItems: 'center' }}><UsageCell pct={r.util} />{r.utilSource === 'guest' && <span className="badge gray" style={{ fontSize: 10 }} title="게스트 OS에서 수집(패스쓰루)">게스트</span>}</span>) },
-    { key: 'tempC', label: '온도', align: 'right', sortValue: (r) => r.tempC, render: (r) => (r.tempC == null ? <span className="muted" title="게스트 수집값 없음 — ESXi 경로에는 GPU 온도가 없습니다">—</span> : <span title="가장 높은 GPU(게스트 nvidia-smi)"><button className="cell-link" onClick={() => openHist('host', r.key, 'temp')}>{tempText(r.tempC)}</button></span>) },
-    { key: 'memUsedMB', label: 'GPU 메모리 사용', sortValue: (r) => r.memUsedPct, render: (r) => (r.memUsedMB == null ? <span className="muted" title="게스트 수집값 없음">—</span> : <span className="nowrap"><button className="cell-link" onClick={() => openHist('host', r.key, 'mem')}>{memText(r.memUsedMB, r.memTotalMB)}</button> <span className="muted" style={{ fontSize: 11 }}>({r.memUsedPct}%)</span></span>) },
-    { key: 'allocGB', label: 'GPU 메모리 할당', sortValue: (r) => r.allocGB, render: (r) => <span style={{ fontSize: 12 }}>{allocText(r)}</span> },
-    { key: 'activity', label: 'VM 동작', sortValue: (r) => (r.activity?.busy || 0), render: (r) => <span className="muted nowrap" style={{ fontSize: 12 }} title={activitySummary(r.activity) || '켜진 GPU VM 없음'}>{activitySummary(r.activity, { short: true }) || '—'}</span> },
-    { key: 'assignedVms', label: '할당 VM', sortValue: (r) => r.assignedVms, render: (r) => (r.assignedVms ? (
-      <div style={{ minWidth: 160 }}>
-        <button className="cell-link" onClick={() => setVmList({ title: `GPU 할당 VM — ${r.name}`, params: { host: r.name } })}>{r.assignedVms}대</button>
-        <span className="muted" style={{ fontSize: 11, marginLeft: 6 }} title="GPU 할당 VM의 전원 상태">🟢{r.assignedVmsOn || 0} ⚫{r.assignedVmsOff || 0}</span>
-        {(r.assignedVmNames || []).length > 0 && (
-          <div className="muted" style={{ fontSize: 11, marginTop: 2, lineHeight: 1.5, whiteSpace: 'normal', wordBreak: 'break-all' }} title={(r.assignedVmNames || []).map((x) => `${x.name || x} ${(x.on ?? true) ? '(On)' : '(Off)'}`).join(', ')}>
-            {(r.assignedVmNames || []).slice(0, 6).map((x, i) => {
-              const nm = x.name || x; const on = x.on ?? true;
-              return (
-                <span key={i}>{i > 0 && ', '}<span title={on ? 'On' : 'Off'} style={{ color: on ? 'var(--green)' : 'var(--text-faint)' }}>{on ? '🟢' : '⚫'}</span> <VmLink name={nm} vcenterId={r.vcenterId} label={nm} /></span>
-              );
-            })}
-            {(r.assignedVmNames || []).length > 6 && <span> 외 {(r.assignedVmNames || []).length - 6}대</span>}
-          </div>
-        )}
+    { key: 'name', label: '호스트', render: (r) => (
+      <div className="gpu-host">
+        <button className="cell-link gpu-ellip" title={`${r.name} — 누르면 추이`} onClick={() => openHist('host', r.key)}>{r.name}</button>
+        <span className="gpu-sub">{r.vcenterId} · <span style={{ color: r.collectPath === 'site' ? 'var(--amber)' : 'var(--accent-2)' }}>{r.collectPath === 'site' ? `엣지${r.collectAgent ? ` ${r.collectAgent}` : ''}` : '중앙 직접'}</span></span>
       </div>
-    ) : <span className="muted">0</span>) },
-    { key: 'hist', label: '추이', render: (r) => <button className="tab" onClick={() => openHist('host', r.key)}>5년 추이</button> },
+    ) },
+    { key: 'count', label: 'GPU', align: 'left', sortValue: (r) => r.count, render: (r) => <span className="nowrap">{r.model} <span className="muted gpu-mono">×{r.count} · {r.memGB} GB</span></span> },
+    { key: 'mode', label: '방식', sortValue: (r) => r.mode, render: (r) => <GpuModeBadge mode={r.mode} modes={r.modes} /> },
+    { key: 'util', label: '사용률', render: (r) => (r.util == null ? <span className="muted">—</span>
+      : <span className="flex gap" style={{ alignItems: 'center', flexWrap: 'nowrap' }}><UsageCell pct={r.util} />{r.utilSource === 'guest' && <span className="gpu-src" title="게스트 OS에서 수집(패스쓰루)">게스트</span>}</span>) },
+    { key: 'tempC', label: '온도', align: 'right', sortValue: (r) => r.tempC, render: (r) => (r.tempC == null ? <span className="muted" title="온도 값 없음(게스트 수집값도 ESXi 카운터도 없음)">—</span>
+      : <span className="nowrap"><button className="cell-link gpu-mono" title={r.tempSource === 'esxi' ? 'ESXi gpu.temperature(가장 뜨거운 GPU)' : '가장 높은 GPU(게스트 nvidia-smi)'} onClick={() => openHist('host', r.key, 'temp')}>{tempText(r.tempC)}</button><SrcTag s={r.tempSource} /></span>) },
+    { key: 'memUsedMB', label: '메모리 사용', sortValue: (r) => r.memUsedPct, render: (r) => ((r.memUsedMB == null && r.memUsedPct == null) ? <WhyChip why={r.guestWhy} /> : (
+      <div className="gpu-mem">
+        <span className="nowrap"><button className="cell-link gpu-mono" onClick={() => openHist('host', r.key, 'mem')}>{r.memUsedMB != null && r.memTotalMB ? memText(r.memUsedMB, r.memTotalMB) : `${r.memUsedPct}%`}</button>{r.memUsedMB != null && r.memTotalMB && r.memUsedPct != null && <span className="muted" style={{ fontSize: 11 }}> {r.memUsedPct}%</span>}<SrcTag s={r.memSource} /></span>
+        {r.memUsedPct != null && <span className="gpu-bar"><span style={{ width: `${Math.max(0, Math.min(100, r.memUsedPct))}%` }} /></span>}
+      </div>
+    )) },
+    { key: 'allocGB', label: '메모리 할당', sortValue: (r) => r.allocGB, render: (r) => <span className="nowrap" style={{ fontSize: 12, color: numOver(r.allocPct) ? 'var(--amber)' : undefined }} title={numOver(r.allocPct) ? '할당 합이 GPU 용량을 넘습니다(vGPU 프로파일 합 > VRAM) — 동시에 켜진 VM 이 용량을 넘겨 요청하고 있습니다' : ''}>{allocText(r)}</span> },
+    { key: 'activity', label: 'VM 동작', sortValue: (r) => (r.activity?.busy || 0), render: (r) => {
+      const b = activityBar(r.activity);
+      const txt = activitySummary(r.activity, { short: true });
+      return (
+        <span className="gpu-act" title={activitySummary(r.activity) || '켜진 GPU VM 없음'}>
+          {b ? <span className="gpu-actbar"><span className="busy" style={{ width: `${b.busy}%` }} /><span className="held" style={{ width: `${b.held}%` }} /><span className="idle" style={{ width: `${b.idle}%` }} /><span className="unk" style={{ width: `${b.unknown}%` }} /></span> : null}
+          <span className="muted nowrap" style={{ fontSize: 11 }}>{txt || '—'}</span>
+          {(r.memUsedMB != null || r.memUsedPct != null) && r.guestWhy && r.guestWhy.code !== 'partial' && <WhyChip why={r.guestWhy} />}
+        </span>
+      );
+    } },
+    { key: 'assignedVms', label: '할당 VM', sortValue: (r) => r.assignedVms, render: (r) => {
+      if (!r.assignedVms) return <span className="muted">0</span>;
+      const { chips, more } = vmChips(r.assignedVmNames);
+      const open = openHost === r.key;
+      return (
+        <span className="gpu-vms">
+          <button className="cell-link nowrap" aria-expanded={open} title={open ? '접기' : '이 호스트의 VM 표 펼치기'} onClick={() => toggleHost(r.key)}>{open ? '▾' : '▸'} {r.assignedVms}대</button>
+          <span className="nowrap" style={{ fontSize: 11, color: 'var(--green)' }} title="켜진 GPU 할당 VM">● {r.assignedVmsOn || 0}</span>
+          {(r.assignedVmsOff || 0) > 0 && <span className="nowrap" style={{ fontSize: 11, color: 'var(--text-faint)' }} title="꺼진 GPU 할당 VM">● {r.assignedVmsOff}</span>}
+          {chips.map((c) => <span key={c.name} className={`gpu-chip${c.on ? '' : ' off'}`}><VmLink name={c.name} vcenterId={r.vcenterId} label={c.name} /></span>)}
+          {more > 0 && <button className="gpu-more" onClick={() => toggleHost(r.key)} title="나머지 VM 까지 펼치기">+{more}</button>}
+        </span>
+      );
+    } },
+    { key: 'hist', label: '추이', render: (r) => <button className="gpu-icon-btn" aria-label="추이" title="추이(기본 1일)" onClick={() => openHist('host', r.key)}><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M2 12l4-4 3 3 5-6" /></svg></button> },
   ];
+  const renderHostVms = (r) => (
+    <div className="gpu-expand">
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{r.name} 의 GPU 할당 VM {r.vms.length}대{r.guestWhy ? <> · <WhyChip why={r.guestWhy} /></> : null}</div>
+      <STable minWidth={900}>
+        <thead><tr><th>VM</th><th>전원</th><th>방식·프로파일</th><th style={{ textAlign: 'right' }}>할당</th><th style={{ textAlign: 'right' }}>사용률</th><th style={{ textAlign: 'right' }}>메모리</th><th style={{ textAlign: 'right' }}>온도</th><th>동작</th><th>추이</th></tr></thead>
+        <tbody>
+          {r.vms.length === 0 && <tr><td colSpan={9} className="center muted">VM 정보가 없습니다.</td></tr>}
+          {r.vms.map((v) => {
+            const a = activityOf(v.activity);
+            const on = v.powerState === 'POWERED_ON';
+            return (
+              <tr key={v.id}>
+                <td><VmLink name={v.name} vcenterId={r.vcenterId} label={v.name} /></td>
+                <td className="nowrap" style={{ color: on ? 'var(--green)' : 'var(--text-faint)' }}>● {on ? '켜짐' : '꺼짐'}</td>
+                <td className="muted gpu-mono" style={{ fontSize: 12 }}>{v.profile || (v.mode === 'passthrough' ? '패스쓰루' : v.mode || '—')}</td>
+                <td className="right gpu-mono" data-sort={v.allocGB ?? ''}>{v.allocGB == null ? '—' : gbText(v.allocGB)}</td>
+                <td className="right gpu-mono" data-sort={v.utilPct ?? ''}>{v.utilNA ? 'N/A(MIG)' : v.utilPct == null ? '—' : `${v.utilPct}%`}</td>
+                <td className="right gpu-mono" data-sort={v.memUsedMB ?? ''}>{memText(v.memUsedMB, v.memTotalMB)}</td>
+                <td className="right gpu-mono" data-sort={v.tempC ?? ''}>{tempText(v.tempC)}</td>
+                <td className="nowrap" title={a.title} style={{ color: `var(--${a.tone === 'gray' ? 'text-dim' : a.tone})` }}>{on ? a.label : '꺼짐'}</td>
+                <td><button className="gpu-icon-btn" aria-label={`${v.name} 추이`} title="VM 추이(기본 1일)" onClick={() => openHist('vm', v.id)}><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M2 12l4-4 3 3 5-6" /></svg></button></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </STable>
+    </div>
+  );
   const aggCols = [
     { key: 'name', label: '클러스터', render: (r) => <button className="cell-link" onClick={() => openHist(r.level, r.key)}>{r.name}</button> },
     { key: 'sub', label: '구분', render: (r) => <span className="muted" style={{ fontSize: 12 }}>{r.sub}</span> },
@@ -266,7 +324,7 @@ export function Gpu({ scope }) {
           </div>
         </div>
       )}
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ vGPU/vSGA는 ESXi가 사용률을 보고하지만, <b>패스쓰루(DirectPath I/O)</b>는 게스트 OS가 GPU를 직접 소유해 ESXi에서 사용률을 볼 수 없습니다(설정 › GPU 게스트 수집에서 게스트 OS 수집을 켜면 표시). 이름을 클릭하면 최근 5년 추이를 봅니다. 온도·GPU 메모리 사용은 게스트 수집값이고(ESXi 경로에는 없습니다), 할당은 vGPU 프로파일 이름에서 계산합니다. {data.activityRule && activityRuleNote(data.activityRule)}</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ vGPU/vSGA는 ESXi가 사용률을 보고하지만, <b>패스쓰루(DirectPath I/O)</b>는 게스트 OS가 GPU를 직접 소유해 ESXi에서 사용률을 볼 수 없습니다(설정 › GPU 게스트 수집에서 게스트 OS 수집을 켜면 표시). 이름·온도·메모리를 누르면 추이(기본 1일)를 봅니다. 온도·GPU 메모리 사용은 게스트 수집값을 먼저 쓰고, 없으면 ESXi 성능 카운터 값(vGPU/vSGA 호스트)을 <b>ESXi</b> 표지와 함께 보입니다. 값이 없는 칸의 점선 칩은 그 이유입니다. 할당은 vGPU 프로파일 이름에서 계산합니다. {data.activityRule && activityRuleNote(data.activityRule)}</div>
       {data.items.length === 0 ? <div className="card"><span className="muted">GPU가 설치된 호스트가 없습니다.</span></div> : (
         <>
           <div className="flex gap wrap" style={{ marginBottom: 8 }}>
@@ -309,10 +367,23 @@ export function Gpu({ scope }) {
               <button className="tab" style={{ marginLeft: 10, padding: '4px 10px' }} onClick={() => { setMode(''); setModelFilter(''); setPower(''); }}>필터 초기화</button>
             </div>
           ) : (
-            <DataTable
-              columns={view === 'host' ? hostCols : view === 'model' ? modelCols : view === 'vc' ? vcCols : aggCols}
-              rows={rows}
-              initialSort={{ key: (view === 'host' || view === 'model' || view === 'vc') ? (view === 'host' ? 'count' : 'gpus') : 'avg', dir: 'desc' }} />
+            <>
+              {view === 'host' && whyBannerItems(data.guestWhy).length > 0 && (
+                <div className="gpu-why-banner">
+                  <span className="dot" />
+                  <b>게스트 GPU 값을 읽지 못한 호스트가 있습니다</b>
+                  <span className="list">{whyBannerItems(data.guestWhy).slice(0, 6).map((x) => <span key={x.key} title={x.title}>{x.text}</span>)}{whyBannerItems(data.guestWhy).length > 6 && <span>외 {whyBannerItems(data.guestWhy).length - 6}건</span>}</span>
+                  <a href="#/settings/gpu-guest" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>수집 진단 열기 →</a>
+                </div>
+              )}
+              <DataTable
+                className={view === 'host' ? 'gpu-host-table' : ''}
+                columns={view === 'host' ? hostCols : view === 'model' ? modelCols : view === 'vc' ? vcCols : aggCols}
+                rows={rows}
+                expandedKey={view === 'host' ? openHost : null}
+                renderExpanded={view === 'host' ? renderHostVms : null}
+                initialSort={{ key: (view === 'host' || view === 'model' || view === 'vc') ? (view === 'host' ? 'count' : 'gpus') : 'avg', dir: 'desc' }} />
+            </>
           )}
         </>
       )}

@@ -388,6 +388,15 @@ export function generateSnapshot() {
           if (!gs.length || gs.every((g) => g.mode === 'passthrough')) return null;
           return Math.round(cpuLoad * 80 + (h.idx % 17)) % 100;
         })(),
+        // v2.653: ESXi GPU 메모리·온도 카운터(vGPU/vSGA 호스트만 — 패스쓰루는 ESXi 가 못 본다). 3번째 호스트마다 비워
+        //   '카운터 없음' 도 재현한다(실환경 드라이버에 따라 없을 수 있다).
+        ...(() => {
+          const gs = mkGpus(h.idx, site);
+          if (disconnected || !gs.length || gs.every((g) => g.mode === 'passthrough') || h.idx % 3 === 0) return {};
+          const capMB = gs.reduce((a, g) => a + (Number(g.memGB) || 0), 0) * 1024;
+          const pct = Math.round(cpuLoad * 60 + (h.idx % 13));
+          return { gpuMemUsedPct: pct, gpuMemUsedMB: Math.round((capMB * pct) / 100), gpuTempC: Math.round(34 + cpuLoad * 30 + (h.idx % 5)) };
+        })(),
       });
 
       if (connectionState === 'DISCONNECTED') {

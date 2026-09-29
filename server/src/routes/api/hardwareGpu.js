@@ -8,6 +8,12 @@ import { getMetricsDb } from '../../metrics/db.js';
 import { sendMaybeZip } from '../../util/zip.js';
 import { getGuestGpuVms } from '../../gpu/store.js';
 import { summarizeHostGpu } from '../../gpu/hostGpu.js';
+import { guestWhyOf } from '../../gpu/guestWhy.js';
+import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
+import { getGpuGuestDiag } from '../../gpu/poller.js';
+import { loadGpuGuestSettings } from '../../gpu/settings.js';
+import { findCollectorByName } from '../../collector/registry.js';
+import { allCollectorStatus } from '../../collector/state.js';
 import { gpuActivity, BUSY_UTIL_PCT, HELD_MEM_PCT } from '../../gpu/activity.js';
 import { vmVgpuAllocGB } from '../../gpu/vgpuProfile.js';
 import { enqueuePing, getPingResults, setPingResults } from '../../central/pingJobs.js';
@@ -30,6 +36,42 @@ export function gpuHostModelMap(hosts) {
   const m = new Map();
   for (const h of hosts || []) if ((h.gpus || []).length) m.set(gpuHostKey(h.vcenterId, h.name), h.gpus[0].model);
   return m;
+}
+
+/**
+ * v2.653: 호스트별 '게스트 값이 왜 비었는가' 판정 입력(gpu/guestWhy.js)을 vCenter 단위로 모은다.
+ *   수집 경로(site=엣지/direct=중앙) · 담당 엣지(스냅샷 collectedBy) · 엣지 버전(수집 서버 상태) · 엣지가 보낸 수집 진단 ·
+ *   중앙 로컬 설정·진단. 모두 인메모리/설정 파일이라 왕복 0 이다. 실패는 그 입력만 비운다(판정은 'unknown' 으로 떨어진다).
+ */
+export function gatherGuestWhyCtx(snap) {
+  const mode = new Map();
+  try { for (const v of loadVcenterConfig().vcenters || []) if (v && v.id != null) mode.set(String(v.id), (v.collectMode || 'direct') === 'site' ? 'site' : 'direct'); } catch { /* 등록부 못 읽음 */ }
+  const agentOf = new Map();
+  for (const v of snap.vcenters || []) if (v && v.collectedBy) agentOf.set(String(v.id), String(v.collectedBy));
+  const reports = new Map();
+  try { for (const r of getAllGpuGuestDiag()) if (r && r.agent) reports.set(String(r.agent).toLowerCase(), r); } catch { /* */ }
+  let st = {}; try { st = allCollectorStatus() || {}; } catch { st = {}; }
+  const verOf = (agent) => { try { const c = findCollectorByName(agent); return (c && st[c.id]?.version) || null; } catch { return null; } };
+  let local = null; let settings = null;
+  try { local = getGpuGuestDiag(); } catch { local = null; }
+  try { settings = loadGpuGuestSettings(); } catch { settings = null; }
+  const cache = new Map();
+  return (vcId) => {
+    const id = String(vcId ?? '');
+    if (cache.has(id)) return cache.get(id);
+    let ctx;
+    if (mode.get(id) === 'site') {
+      const agent = agentOf.get(id) || '';
+      const report = agent ? reports.get(agent.toLowerCase()) || null : null;
+      ctx = { mode: 'site', agent, edgeVersion: agent ? verOf(agent) : null, report,
+        diagVc: report ? (report.vcenters || []).find((x) => String(x?.vcId) === id) || null : null };
+    } else {
+      const enabled = settings ? !!(settings.enabled && settings.vcenters?.[id]?.enabled) : null;
+      ctx = { mode: 'direct', enabled, diagVc: local ? (local.vcenters || []).find((x) => String(x?.vcId) === id) || null : null };
+    }
+    cache.set(id, ctx);
+    return ctx;
+  };
 }
 
 // GPU inventory per host + aggregate counts by model and vCenter.
@@ -77,13 +119,17 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
   }
   let allocGBTotal = 0; let allocHosts = 0; let memUsedMBTotal = 0; let memTotalMBTotal = 0; let memHosts = 0; let tempMax = null;
   const actTotal = { busy: 0, held: 0, idle: 0, unknown: 0 };
+  const whyCtx = gatherGuestWhyCtx(snap);
+  const whyCounts = {};
   for (const h of hosts) {
     const gpus = h.gpus || [];
     if (!gpus.length) continue;
     totalGpus += gpus.length;
     const gs = summarizeHostGpu(h, gpuVmsByHost.get(gpuHostKey(h.vcenterId, h.name)) || [], guestByVm);
+    const why = guestWhyOf(gs, whyCtx(h.vcenterId));
+    if (why) { const k = `${h.vcenterId}\t${why.code}`; const e = whyCounts[k] || (whyCounts[k] = { vcenterId: h.vcenterId, code: why.code, agent: why.agent || null, detail: why.detail || null, hosts: 0, vms: 0 }); e.hosts++; e.vms += gs.vmsUnread || 0; }
     if (gs.allocGB != null) { allocGBTotal += gs.allocGB; allocHosts++; }
-    if (gs.memUsedMB != null) { memUsedMBTotal += gs.memUsedMB; memTotalMBTotal += gs.memTotalMB; memHosts++; }
+    if (gs.memUsedMB != null && gs.memTotalMB > 0) { memUsedMBTotal += gs.memUsedMB; memTotalMBTotal += gs.memTotalMB; memHosts++; }
     if (gs.tempC != null) tempMax = tempMax == null ? gs.tempC : Math.max(tempMax, gs.tempC);
     for (const k of Object.keys(actTotal)) actTotal[k] += gs.activity[k] || 0;
     // 한 호스트에 모드가 섞일 수 있으므로 대표 모드(가장 많은 것) + 개수 분포를 함께 제공.
@@ -103,8 +149,11 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
       // v2.650
       capacityGB: gs.capacityGB, capacityEstimated: gs.capacityEstimated,
       allocGB: gs.allocGB, allocUnknown: gs.allocUnknown, allocPct: gs.allocPct, passthroughOn: gs.passthroughOn,
-      memUsedMB: gs.memUsedMB, memTotalMB: gs.memTotalMB, memUsedPct: gs.memUsedPct, memVms: gs.memVms,
+      memUsedMB: gs.memUsedMB, memTotalMB: gs.memTotalMB, memUsedPct: gs.memUsedPct, memVms: gs.memVms, memSource: gs.memSource, tempSource: gs.tempSource,
       tempC: gs.tempC, vmsRead: gs.vmsRead, vmsUnread: gs.vmsUnread, activity: gs.activity,
+      // v2.653: 게스트 값이 빈 이유(gpu/guestWhy.js) · 수집 경로 · 호스트 VM 목록(펼침 행 — 호스트 상세와 같은 판정)
+      guestWhy: why, collectPath: whyCtx(h.vcenterId).mode, collectAgent: whyCtx(h.vcenterId).agent || null,
+      vms: gs.vms.map((v) => ({ id: v.id, name: v.name, powerState: v.powerState, mode: v.mode, profile: v.profile, allocGB: v.allocGB, utilPct: v.utilPct, utilNA: v.utilNA, memUsedMB: v.memUsedMB, memTotalMB: v.memTotalMB, tempC: v.tempC, activity: v.activity })),
     });
     for (const g of gpus) {
       byModel[g.model] = (byModel[g.model] || 0) + 1;
@@ -132,6 +181,8 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
     byModel: Object.entries(byModel).map(([model, count]) => ({ model, count })).sort((a, b) => b.count - a.count),
     byVcenter: Object.entries(byVcenter).map(([vcenterId, count]) => ({ vcenterId, count })).sort((a, b) => b.count - a.count),
     items: hostsWithGpu.sort((a, b) => b.count - a.count),
+    // v2.653: vCenter × 사유별 개수(표 위 배너) — 켜진 GPU VM 을 한 대도/일부 못 읽은 호스트만 센다.
+    guestWhy: Object.values(whyCounts).sort((a, b) => b.hosts - a.hosts),
   };
 }
 
