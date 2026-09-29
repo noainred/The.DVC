@@ -3859,6 +3859,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 저장: `gpu_mem_mb`(호스트)·`gpu_vm_mem_mb`(VM) 추가 + 게스트 값이 없는 신선한 호스트는 ESXi 값으로 `gpu_temp`·`gpu_mem` 적재. 추이 API `metric=memmb`(MB 저장, 화면 GB).
     - 화면: 행 높이 44px 고정(CSS 는 `.gpu-host-table > tbody > tr:not(.row-expanded) > td` — 펼침 표까지 44px 가 되던 것을 좁혔다) · 칩은 켜진 VM 먼저 ·
       펼침은 한 번에 한 행(`DataTable` 의 선택 인자 — 기본값이면 기존 표 무변경) · 추이 창 기본 1일.
+    - 데모(v2.654): mock 은 설정 없이 전 법인을 합성 수집(`gpu/poller.js demoAll`)하고 일부 VM·법인을 일부러 실패로 둬 이유 칩이 보인다 · 목 GPU VM 은 호스트별 순번으로 배치(`mkVmGpu(…, ord)`).
     - ⚠ **Playwright 스크린샷 경로는 절대 경로로** — 상대 경로면 스크립트를 돌린 cwd(저장소)에 png 가 떨어진다(이번에 server/·web/ 에 떨어져 지웠다).
   - ⚠ **CVP 슬롯 전원(`ecb › LinecardN`)은 PSU 가 아니다 — 빈 슬롯/카드 전원 이상을 근거로 가른다**(v2.648, `cvp/parse.js judgeSlotPower`·
     `client.js slotEvidence`, 상세 `docs/CVP.md` §15): kind 는 psu 그대로(faultKey 불변 — 바꾸면 열린 장애가 영원히 보류), 표시만 '슬롯 전원(카드)'.
