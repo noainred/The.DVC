@@ -55,7 +55,7 @@ export async function pollPhysicalOnce({ manual = false } = {}) {
         const r = await collectVmGpuSsh(vm, creds, { timeoutMs: s.timeoutMs, port: sv.port || 22 });
         setPhysicalGpu(sv.id, {
           id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '',
-          count: r.count, utilPct: r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, gpus: r.gpus || [], error: null,
+          count: r.count, utilPct: r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, memUsedMB: r.memUsedMB ?? null, memTotalMB: r.memTotalMB ?? null, tempC: r.tempC ?? null, gpus: r.gpus || [], error: null,
         });
         // GPU 모델명이 없으면(수동 등록) 1회 감지해 등록부에 백필 → 서버 분석 GPU 찾기에 모델별 합산.
         if (!(sv.gpuModels && sv.gpuModels.length)) {

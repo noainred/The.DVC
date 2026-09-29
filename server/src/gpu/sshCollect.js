@@ -9,7 +9,7 @@
  */
 
 import { withSsh, withDeadline, isSshAuthError } from '../proxy/sshExec.js';
-import { parseNvidiaSmiCsv, gpuLostError } from './guestops.js';
+import { parseNvidiaSmiCsv, gpuLostError, NVSMI_QUERY } from './guestops.js';
 import { createAuthGuard } from '../util/authGuard.js';
 import { strictIpv4Num } from '../util/ipv4.js';
 import { ipBlockReason } from '../util/ssrfBlock.js';
@@ -45,7 +45,8 @@ export function isGpuAuthError(err) {
   return /InvalidGuestLogin|게스트 로그인 실패/.test(String(err.message || err));
 }
 
-const NVSMI = '--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,mig.mode.current --format=csv,noheader,nounits';
+// v2.650: 게스트 경로와 같은 쿼리 하나(guestops.js NVSMI_QUERY) — 사본이 갈라지면 SSH 경로만 온도가 빠진다.
+const NVSMI = NVSMI_QUERY;
 const tlog = (tr, msg) => { if (tr) tr.push({ t: Date.now(), msg: String(msg) }); };
 
 // nvidia-smi 실행 후보(OS·PATH 무관). 순서: 직접(Win/Linux PATH) → Linux 비대화형 PATH 보강

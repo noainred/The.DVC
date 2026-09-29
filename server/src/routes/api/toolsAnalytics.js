@@ -178,8 +178,17 @@ api.get('/tools/threats', requirePerm('tools'), (req, res) => memoJson(req, res,
 
 // GPU 사용률 히스토리(5년까지). level=host|cluster|vc, key=대상키, days=기간.
 api.get('/tools/gpu/history', requirePerm('tools'), async (req, res) => {
-  const level = ['host', 'cluster', 'vc'].includes(req.query.level) ? req.query.level : 'host';
-  const metric = { host: 'gpu_util', cluster: 'gpu_cluster', vc: 'gpu_vc' }[level];
+  const level = ['host', 'cluster', 'vc', 'vm'].includes(req.query.level) ? req.query.level : 'host';
+  // v2.650: 지표 선택 — util(사용률) · mem(메모리 점유 %) · temp(온도 ℃). 클러스터·법인 단위는 사용률만 있다.
+  const kind = ['util', 'mem', 'temp'].includes(req.query.metric) ? req.query.metric : 'util';
+  const METRICS = {
+    host: { util: 'gpu_util', mem: 'gpu_mem', temp: 'gpu_temp' },
+    vm: { util: 'gpu_vm_util', mem: 'gpu_vm_mem', temp: 'gpu_vm_temp' },
+    cluster: { util: 'gpu_cluster' }, vc: { util: 'gpu_vc' },
+  };
+  const metric = METRICS[level][kind];
+  if (!metric) return res.status(400).json({ ok: false, reason: `${level} 단위에는 ${kind} 추이가 없습니다(사용률만 있습니다).` });
+  const unit = kind === 'temp' ? '℃' : '%';
   const key = String(req.query.key || '');
   const days = Math.max(1, Math.min(1830, Number(req.query.days) || 7));
   // key 의 vCenter 귀속을 scope 로 검사(범위 밖 호스트/클러스터/vc GPU 히스토리 조회 차단).
@@ -188,8 +197,9 @@ api.get('/tools/gpu/history', requirePerm('tools'), async (req, res) => {
     const snapG = store.get();
     const owns = level === 'vc' ? allowedG.has(key)
       : level === 'cluster' ? allowedG.has(key.split('|')[0])
-        : allowedG.has((snapG.hosts || []).find((h) => h.id === key)?.vcenterId);
-    if (!owns) return res.json({ level, key, days, bucketMs: 0, unit: '%', synthesized: false, points: [] });
+        : level === 'vm' ? allowedG.has((snapG.vms || []).find((v) => v.id === key)?.vcenterId)
+          : allowedG.has((snapG.hosts || []).find((h) => h.id === key)?.vcenterId);
+    if (!owns) return res.json({ level, key, metric: kind, days, bucketMs: 0, unit, synthesized: false, points: [] });
   }
   const since = Date.now() - days * 86_400_000;
   const bucketMs = days <= 2 ? 3_600_000 : days <= 14 ? 6 * 3_600_000 : days <= 120 ? 86_400_000 : days <= 800 ? 7 * 86_400_000 : 30 * 86_400_000;
@@ -199,14 +209,15 @@ api.get('/tools/gpu/history', requirePerm('tools'), async (req, res) => {
   if (points.length < 2 && store.get().source === 'mock') {
     // 데모: 일과 시간대·요일 부하를 반영한 0~100% 합성 시계열.
     synthesized = true; points = [];
-    const base = 25 + (hash(key) % 30);
+    const base = 25 + (hash(key + kind) % 30);
     for (let t = since; t <= Date.now(); t += bucketMs) {
       const day = t / 86_400_000;
       let v = base + 22 * Math.abs(Math.sin(day / 9)) + 14 * Math.sin(day) + (hash(key + t) % 8);
       v = Math.max(0, Math.min(100, v));
+      if (kind === 'temp') v = 32 + v * 0.45; // 데모: 32~77℃
       points.push({ ts: Math.floor(t), avg: Number(v.toFixed(1)), min: Number(Math.max(0, v - 12).toFixed(1)), max: Number(Math.min(100, v + 10).toFixed(1)) });
     }
   }
-  res.json({ level, key, days, bucketMs, unit: '%', synthesized, points });
+  res.json({ level, key, metric: kind, days, bucketMs, unit, synthesized, points });
 });
 }

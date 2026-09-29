@@ -20,9 +20,12 @@ import { VimSoapClient } from '../vcenter/soapClient.js';
 import { vcDispatcher } from '../vcenter/restClient.js';
 import { readTextCapped } from '../util/readCapped.js';
 
-// mig.mode.current(Enabled/Disabled/N/A)를 마지막 컬럼으로 추가 수집 → MIG(분할 GPU) 가시화.
+// mig.mode.current(Enabled/Disabled/N/A)를 5번째 컬럼으로 추가 수집 → MIG(분할 GPU) 가시화.
 // 문자열 컬럼이므로 파서에서 원본 문자열로 별도 처리(숫자 변환 금지).
-const NVSMI_QUERY = '--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,mig.mode.current --format=csv,noheader,nounits';
+// v2.650: temperature.gpu(℃)를 **맨 뒤**(6번째)에 붙였다 — 앞 컬럼 위치를 바꾸면 구버전 파서·엣지와 어긋난다.
+//   온도는 '사용률 숫자가 실제 동작과 맞는지' 를 보는 근거다(gpu/activity.js). 같은 nvidia-smi 호출이라 수집 부하는 같다.
+//   ⚠ 이 쿼리는 게스트(guestops)·SSH(sshCollect) 두 경로가 **같이 쓴다** — 사본을 만들지 말 것.
+export const NVSMI_QUERY = '--query-gpu=utilization.gpu,utilization.memory,memory.used,memory.total,mig.mode.current,temperature.gpu --format=csv,noheader,nounits';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // XML 이스케이프(5개 사전정의 엔티티). 비밀번호는 <password> 요소 내용으로만 들어가고
@@ -325,7 +328,10 @@ export function gpuLostError(parsed) {
   return e;
 }
 
-/** "12, 8, 2048, 81920, Enabled" 형식(여러 줄=여러 GPU)을 파싱해 집계. 마지막 컬럼은 MIG 모드(문자열). */
+/**
+ * "12, 8, 2048, 81920, Enabled, 54" 형식(여러 줄=여러 GPU)을 파싱해 집계. 5번째 컬럼은 MIG 모드(문자열), 6번째는 온도(℃).
+ * v2.650: 온도 컬럼이 없는 출력(구버전 쿼리·SSH 사본)도 그대로 읽는다 — 온도만 null 이다.
+ */
 export function parseNvidiaSmiCsv(text) {
   if (!text || !text.trim()) return null;
   const gpus = [];
@@ -350,14 +356,17 @@ export function parseNvidiaSmiCsv(text) {
     // MIG 모드: 'Enabled'/'Disabled'/'N/A'(미지원 GPU). 숫자가 아닌 마지막 컬럼.
     const migRaw = raw.length >= 5 ? raw[4] : '';
     const mig = /enabled/i.test(migRaw) ? 'enabled' : /disabled/i.test(migRaw) ? 'disabled' : null;
-    gpus.push({ utilPct, memUtilPct: num(raw[1]), memUsedMB, memTotalMB, mig });
+    // v2.650: 온도 — 범위 밖(센서 오류값)은 null(0℃ 로 두면 '꺼진 GPU' 처럼 읽힌다). vGPU 게스트는 N/A 일 수 있다(미확인).
+    const t = raw.length >= 6 ? num(raw[5]) : null;
+    const tempC = t != null && t > -30 && t < 150 ? t : null;
+    gpus.push({ utilPct, memUtilPct: num(raw[1]), memUsedMB, memTotalMB, mig, tempC });
   }
   // v2.601(감사 RECENT2601-04): GPU 가 **전부** 오류 문장이면 예전에는 여기서 null 을 돌려 gpuErrors 가 사라졌고, 호출부는
   //   '출력 파싱 실패'·'stdout 비어 있음' 이라는 **엉뚱한 원인**을 말했다. 개수 0 + gpuErrors 로 밝히고, 수집 경로는
   //   gpuLostError() 로 'GPU 응답 없음' 실패를 던진다(사용률을 지어내지 않는다 — utilPct null).
   if (!gpus.length) {
     if (!errLines.length) return null;
-    return { count: 0, utilPct: null, utilNA: false, memUsedPct: null, migEnabled: 0, gpuErrors: errLines.length, gpuErrorLines: errLines.slice(0, 3), gpus: [] };
+    return { count: 0, utilPct: null, utilNA: false, memUsedPct: null, memUsedMB: null, memTotalMB: null, tempC: null, migEnabled: 0, gpuErrors: errLines.length, gpuErrorLines: errLines.slice(0, 3), gpus: [] };
   }
   const avg = (arr) => Math.round(arr.reduce((a, b) => a + b, 0) / arr.length);
   const known = gpus.map((g) => g.utilPct).filter((v) => v != null);
@@ -374,13 +383,21 @@ export function parseNvidiaSmiCsv(text) {
   // v2.599(감사 C2599-10): MIG 혼합 호스트에서 사용률을 아는 GPU 만 평균했는데 그 사실을 싣지 않았다 — 값이 'N개 중
   //   M개 기준' 인지 알 길이 없었다(메모리 쪽 memPartial 과 비대칭). 뺀 GPU 수를 utilPartial 로 밝힌다(전부 N/A 면 utilNA).
   const utilPartial = utilNA ? 0 : gpus.length - known.length;
+  // v2.650: 온도는 **가장 뜨거운 GPU** 가 대표값이다(평균이면 한 장이 과열이어도 묻힌다). 못 읽은 GPU 수는 tempPartial.
+  const temps = gpus.map((g) => g.tempC).filter((v) => v != null);
+  const tempPartial = temps.length ? gpus.length - temps.length : 0;
   return {
     count: gpus.length,
     utilPct: known.length ? avg(known) : 0,
     utilNA,
     ...(utilPartial ? { utilPartial } : {}),
     memUsedPct: memTotal ? Math.round((memUsed / memTotal) * 100) : null,
+    // v2.650: 절대량(MB) — 비율만 두면 '80GB 중 8GB' 와 '16GB 중 1.6GB' 가 같은 10% 다. 읽은 GPU 합이고 못 읽은 GPU 는 memPartial.
+    memUsedMB: memBoth.length ? memUsed : null,
+    memTotalMB: memBoth.length ? memTotal : null,
     ...(memPartial ? { memPartial } : {}),
+    tempC: temps.length ? Math.max(...temps) : null,
+    ...(tempPartial ? { tempPartial } : {}),
     migEnabled: migCount,
     ...(errLines.length ? { gpuErrors: errLines.length, gpuErrorLines: errLines.slice(0, 3) } : {}),
     gpus,

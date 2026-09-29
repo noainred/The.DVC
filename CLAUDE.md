@@ -3815,6 +3815,23 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     (`cvp/parse.js parseIntfConfig·intfDetailOf·xcvrTypeText` · `poller.js fillDescs` · 웹 `CvpInterfaces.jsx`·`cvpIntfText.js`, 상세 `docs/CVP.md` §16):
     DB 는 설명·세부 열이 NULL 이면 직전 값을 유지(COALESCE)한다 — '' 로 채우면 설명을 지운 것이 된다. `pick` 은 빈 문자열을 건너뛰므로 설명은 키를 직접 찾는다.
     도넛은 읽은 값만 세고 못 읽은 것은 회색 칸이다. ⚠ 설정 노드 경로와 duplex·MAC·MTU·mediaType 필드 이름은 실장비 미확인 추정이다.
+  - ⚠⚠ **GPU 메모리·온도·동작(v2.650) — 사용률·메모리 점유·온도는 서로 다른 것을 잰다. 온도는 판정에 쓰지 않는다**
+    (`gpu/activity.js`·`vgpuProfile.js`·`hostGpu.js` + `GET /tools/gpu/host` + 웹 `components/HostGpuPanel.jsx`·`views/tools/gpuUsageText.js`·
+    `GpuHistModal.jsx`, 사용자 요청 "GPU 메모리 점유/사용량도 추가" · "GPU 온도 센서의 온도도 같이 수집해서 실제로 GPU 가 동작하는지 점검" ·
+    호스트 상세 "GPU 사용율, GPU 온도, GPU 메모리 할당/사용율". 회귀 `server/test/gpuMemTemp2650.test.js` + 웹 `gpuUsageText.test.js`):
+    - **nvidia-smi 쿼리는 `guestops.js NVSMI_QUERY` 하나**(SSH 경로도 import) — `temperature.gpu` 는 **맨 뒤**에 붙였다(앞 열 위치를 바꾸면 구버전
+      파서와 어긋난다). 테스트가 src 전체에서 쿼리 리터럴이 한 곳뿐임을 고정한다. 온도 열이 없는 출력도 읽는다(온도만 null).
+    - 동작 판정(`gpuActivity`)은 **사용률 → 메모리 점유** 순이다: 사용률 ≥ 10 = 연산 중 · 그 아래이면서 메모리 ≥ 10 = 메모리 점유·유휴 · 그 밖 = 유휴 ·
+      사용률을 모르면(미수집·MIG) **판정 불가**(유휴로 세지 않는다). 온도는 모델·냉각마다 정상 범위가 달라 **임계를 정하지 않고** 근거로만 보인다.
+      기준 숫자는 서버가 `activityRule` 로 싣는다(화면에 박지 말 것).
+    - 호스트 요약은 `summarizeHostGpu` 하나를 호스트 상세와 GPU 모니터링 표가 같이 쓴다. **꺼진 VM 은 할당·사용·온도에서 뺀다**(vGPU 는 꺼지면 프레임버퍼를
+      잡지 않고, 게스트 값은 낡은 값이다). 게스트 수집이 없는 켜진 VM 수는 `vmsUnread` 로 밝힌다(합계에서 빠졌다는 사실).
+    - vGPU 할당 GB 는 프로파일 이름 끝 숫자(`…-20c` = 20, `0` = 512MB)다 — **해석 못 하면 null**(`allocUnknown` 으로 센다). 패스스루는 한 장 통째라 '장' 이다.
+      `gpu` 객체에 vgpu·passthrough 개수가 없으면(구버전 스냅샷·목) `vmGpuDevices` 가 type + count 로 되돌린다. 패스스루 용량은 모델명 추정(`capacityEstimated`).
+    - 추이: `gpu_vm_util`·`gpu_vm_mem`·`gpu_vm_temp`(VM) + `gpu_temp`·`gpu_mem`(호스트) — GPU VM 200대면 연 약 526만 행(temp_host 와 같은 규모).
+      **신선한 게스트 값만**(폴 주기 × 3, 최소 15분) · `GPU_VM_SERIES=0` 으로 끈다. 히스토리 API 는 `metric=util|mem|temp`, 클러스터·법인은 사용률만(400).
+    - 호스트 상세는 소유 화면 밖에서 `/tools/gpu` 를 부르므로 `toolAllowed('gpu')` 를 먼저 본다(v2.613 CATALOG2613-02 스윕이 실제로 잡았다).
+    - ⚠ 정직 기록: vGPU 게스트에서 `temperature.gpu` 가 값을 주는지, 이 현장 프로파일 이름 형식은 실장비로 확인하지 못했다. 목 데이터는 vGPU 과할당(>100%)이 나온다(합성 한계).
   - ⚠ **CVP 슬롯 전원(`ecb › LinecardN`)은 PSU 가 아니다 — 빈 슬롯/카드 전원 이상을 근거로 가른다**(v2.648, `cvp/parse.js judgeSlotPower`·
     `client.js slotEvidence`, 상세 `docs/CVP.md` §15): kind 는 psu 그대로(faultKey 불변 — 바꾸면 열린 장애가 영원히 보류), 표시만 '슬롯 전원(카드)'.
     그 슬롯의 링크 up 포트가 있으면 장애 → 주의, 다른 슬라이스는 있는데 그 번호만 없고 센서·트랜시버도 없으면 빈 슬롯(absent — removed 로 닫힘),

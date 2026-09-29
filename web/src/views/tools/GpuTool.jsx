@@ -1,13 +1,14 @@
 // GpuTool.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, downloadFile, canCsv } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../components/ui.jsx';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Brush } from 'recharts';
-import { Card, fmtTrendTick, useTool } from './shared.jsx';
+import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
+import { activityOf, memText, gbText, tempText, allocText, activityRuleNote, activitySummary } from './gpuUsageText.js';
+const GpuHistModal = React.lazy(() => import('./GpuHistModal.jsx'));
 
 
 const GPU_MODE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], vsga: ['vSGA', 'blue'] };
@@ -46,12 +47,12 @@ function GpuVmsModal({ title, params, onClose }) {
     <Modal title={title} onClose={onClose} width={1000} resizable minWidth={560} minHeight={380}>
       {err ? <ErrorBox message={err} /> : !d ? <Loading /> : (
         <>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>GPU 할당 VM <b>{d.total}</b>개 · 어떤 VM이 어떤 방식/프로파일로 GPU를 사용하는지 보여줍니다. <span style={{ opacity: 0.8 }}>사용률·메모리는 게스트 OS(nvidia-smi) 수집값 — 전원 ON·VMware Tools·GPU 게스트 수집 계정이 있어야 표시됩니다(패스쓰루·vGPU 공통).</span></div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>GPU 할당 VM <b>{d.total}</b>개 · 어떤 VM이 어떤 방식/프로파일로 GPU를 사용하는지 보여줍니다. <span style={{ opacity: 0.8 }}>사용률·메모리·온도는 게스트 OS(nvidia-smi) 수집값 — 전원 ON·VMware Tools·GPU 게스트 수집 계정이 있어야 표시됩니다(패스쓰루·vGPU 공통). 할당은 vGPU 프로파일 이름(…-10c = 10 GB)에서 계산합니다.</span></div>
           <div className="table-wrap">
-            <STable>
-              <thead><tr><th>VM</th><th>법인</th><th>호스트</th><th>GPU 모델</th><th>사용 방식</th><th>프로파일</th><th style={{ textAlign: 'right' }}>장수</th><th style={{ textAlign: 'right' }}>사용률</th><th style={{ textAlign: 'right' }}>메모리</th><th>전원</th></tr></thead>
+            <STable minWidth={1180} wrap={false}>
+              <thead><tr><th>VM</th><th>법인</th><th>호스트</th><th>GPU 모델</th><th>사용 방식</th><th>프로파일</th><th style={{ textAlign: 'right' }}>장수</th><th style={{ textAlign: 'right' }}>할당</th><th style={{ textAlign: 'right' }}>사용률</th><th style={{ textAlign: 'right' }}>메모리 점유</th><th style={{ textAlign: 'right' }}>메모리 사용</th><th style={{ textAlign: 'right' }}>온도</th><th>동작</th><th>전원</th></tr></thead>
               <tbody>
-                {d.vms.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 20 }}>GPU 할당 VM이 없습니다.</td></tr>}
+                 {d.vms.length === 0 && <tr><td colSpan={14} className="center muted" style={{ padding: 20 }}>GPU 할당 VM이 없습니다.</td></tr>}
                 {d.vms.map((v) => (
                   <tr key={v.id}>
                     <td><VmLink name={v.name} vcenterId={v.vcenterId} label={v.name} /></td>
@@ -61,8 +62,12 @@ function GpuVmsModal({ title, params, onClose }) {
                     <td><VmGpuModeBadge gpu={v.gpu} /></td>
                     <td className="muted" style={{ fontSize: 12 }}>{v.gpu?.profile || '—'}</td>
                     <td style={{ textAlign: 'right' }}>{v.gpu?.count ?? '—'}</td>
+                    <td style={{ textAlign: 'right' }} data-sort={v.allocGB ?? ''}>{v.allocGB != null ? gbText(v.allocGB) : ((v.gpu?.passthrough || v.gpu?.type === 'passthrough') ? <span className="muted" title="패스스루는 GPU 한 장을 통째로 줍니다">한 장 전체</span> : <span className="muted" title="vGPU 프로파일 이름에서 용량을 읽지 못했습니다">—</span>)}</td>
                     <td style={{ textAlign: 'right' }}>{v.guestUtilNA ? <span className="muted" title="MIG 모드 — GPU 단위 사용률을 nvidia-smi 가 주지 않습니다(0% 가 아닙니다)">N/A(MIG)</span> : v.guestUtilPct == null ? <span className="muted" title={v.powerState === 'POWERED_ON' ? 'GPU 게스트 수집 미설정/미수집 — 설정 › GPU 게스트 수집에서 해당 VM 계정 등록 후 수집됩니다' : '전원 OFF — 게스트에서 사용률 수집 불가'}>—</span> : <UsageCell pct={v.guestUtilPct} />}</td>
                     <td style={{ textAlign: 'right' }}>{v.guestMemPct == null ? <span className="muted" title={v.powerState === 'POWERED_ON' ? 'GPU 게스트 수집 미설정/미수집 — 설정 › GPU 게스트 수집에서 계정 등록 후 수집됩니다' : '전원 OFF — 수집 불가'}>—</span> : <UsageCell pct={v.guestMemPct} />}</td>
+                    <td style={{ textAlign: 'right' }} data-sort={v.guestMemUsedMB ?? ''}>{memText(v.guestMemUsedMB, v.guestMemTotalMB)}</td>
+                    <td style={{ textAlign: 'right' }} data-sort={v.guestTempC ?? ''}>{tempText(v.guestTempC)}</td>
+                    <td>{(() => { const a = activityOf(v.activity); return <span className={`badge ${a.tone}`} title={a.title}>{a.label}</span>; })()}</td>
                     <td>{v.powerState === 'POWERED_ON' ? <span className="badge green">On</span> : <span className="badge gray">Off</span>}</td>
                   </tr>
                 ))}
@@ -95,22 +100,13 @@ export function Gpu({ scope }) {
   };
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [view, setView] = useHashTab({ base: ['tools', 'gpu'], valid: ['host', 'cluster', 'vc', 'model'], fallback: 'host' });
-  const [hist, setHist] = useState(null);   // { level, key, days, points, synthesized }
+  const [hist, setHist] = useState(null);   // { level, key, metric } — v2.650: GpuHistModal 이 조회한다
   const [vmList, setVmList] = useState(null); // { title, params } for GpuVmsModal
-  const [days, setDays] = useState(7);
-  const histGen = useRef(0); // 세대 가드 — 늦은 응답의 모달 재오픈/다른 대상 덮어쓰기 방지
-  const openHist = async (level, key) => {
-    const gen = ++histGen.current;
-    setHist({ level, key, loading: true });
-    const r = await fetchJson(`/tools/gpu/history?level=${level}&key=${encodeURIComponent(key)}&days=${days}`).catch(() => null);
-    if (gen !== histGen.current) return;
-    setHist(r ? { ...r } : { error: true });
-  };
-  const closeHist = () => { histGen.current++; setHist(null); };
+  const openHist = (level, key, metric = 'util') => setHist({ level, key, metric });
+  const closeHist = () => setHist(null);
   const [mode, setMode] = useState(''); // '' | vgpu | passthrough | vsga
   const [modelFilter, setModelFilter] = useState(''); // '' = 전체 모델, 아니면 특정 GPU 모델
   const [power, setPower] = useState(''); // '' | on(켜진 VM 있는 호스트) | off(꺼진 VM 있는 호스트)
-  useEffect(() => { if (hist && hist.key) openHist(hist.level, hist.key); /* eslint-disable-next-line */ }, [days]);
   // 선택한 사용 방식(mode) 필터에 해당하는 GPU가 0개면 '전체'로 자동 복구(빈 표 혼란 방지).
   useEffect(() => { if (data && mode && (data.byMode?.[mode] ?? 0) === 0) setMode(''); }, [data, mode]);
   if (loading) return <Loading />;
@@ -144,6 +140,10 @@ export function Gpu({ scope }) {
   const hostRows = items.map((h) => ({
     key: h.id, name: h.host, vcenterId: h.vcenterId, sub: `${h.vcenterId} / ${h.cluster || '-'} · ${h.model}`,
     model: h.model, count: h.count, memGB: h.memGB, mode: h.mode, modes: h.modes, utilSource: h.utilSource, avg: h.utilPct, max: h.utilPct, util: h.utilPct, assignedVms: h.assignedVms || 0, assignedVmsOn: h.assignedVmsOn || 0, assignedVmsOff: h.assignedVmsOff || 0, assignedVmNames: h.assignedVmNames || [], level: 'host',
+    // v2.650
+    tempC: h.tempC ?? null, memUsedMB: h.memUsedMB ?? null, memTotalMB: h.memTotalMB ?? null, memUsedPct: h.memUsedPct ?? null,
+    allocGB: h.allocGB ?? null, allocPct: h.allocPct ?? null, capacityGB: h.capacityGB ?? null, passthroughOn: h.passthroughOn || 0, allocUnknown: h.allocUnknown || 0,
+    activity: h.activity || null,
   }));
   // 법인 × GPU 모델별 수량 집계: 어떤 법인에 어떤 GPU 카드가 몇 장 설치됐는지.
   const modelAgg = () => {
@@ -170,6 +170,10 @@ export function Gpu({ scope }) {
     { key: 'mode', label: '사용 방식', sortValue: (r) => r.mode, render: (r) => <GpuModeBadge mode={r.mode} modes={r.modes} /> },
     { key: 'util', label: '사용률', render: (r) => (r.util == null ? <span className="muted">—</span>
       : <span className="flex gap" style={{ alignItems: 'center' }}><UsageCell pct={r.util} />{r.utilSource === 'guest' && <span className="badge gray" style={{ fontSize: 10 }} title="게스트 OS에서 수집(패스쓰루)">게스트</span>}</span>) },
+    { key: 'tempC', label: '온도', align: 'right', sortValue: (r) => r.tempC, render: (r) => (r.tempC == null ? <span className="muted" title="게스트 수집값 없음 — ESXi 경로에는 GPU 온도가 없습니다">—</span> : <span title="가장 높은 GPU(게스트 nvidia-smi)"><button className="cell-link" onClick={() => openHist('host', r.key, 'temp')}>{tempText(r.tempC)}</button></span>) },
+    { key: 'memUsedMB', label: 'GPU 메모리 사용', sortValue: (r) => r.memUsedPct, render: (r) => (r.memUsedMB == null ? <span className="muted" title="게스트 수집값 없음">—</span> : <span className="nowrap"><button className="cell-link" onClick={() => openHist('host', r.key, 'mem')}>{memText(r.memUsedMB, r.memTotalMB)}</button> <span className="muted" style={{ fontSize: 11 }}>({r.memUsedPct}%)</span></span>) },
+    { key: 'allocGB', label: 'GPU 메모리 할당', sortValue: (r) => r.allocGB, render: (r) => <span style={{ fontSize: 12 }}>{allocText(r)}</span> },
+    { key: 'activity', label: 'VM 동작', sortValue: (r) => (r.activity?.busy || 0), render: (r) => <span className="muted nowrap" style={{ fontSize: 12 }} title={activitySummary(r.activity) || '켜진 GPU VM 없음'}>{activitySummary(r.activity, { short: true }) || '—'}</span> },
     { key: 'assignedVms', label: '할당 VM', sortValue: (r) => r.assignedVms, render: (r) => (r.assignedVms ? (
       <div style={{ minWidth: 160 }}>
         <button className="cell-link" onClick={() => setVmList({ title: `GPU 할당 VM — ${r.name}`, params: { host: r.name } })}>{r.assignedVms}대</button>
@@ -232,6 +236,10 @@ export function Gpu({ scope }) {
         <Card label="GPU 호스트" value={data.hostsWithGpu} accent="var(--accent-2)" meta="GPU 설치 ESXi 호스트" />
         <Card label="GPU 사용 VM" value={data.gpuVmCount ?? 0} accent="var(--green)" meta="GPU 할당된 VM 수" />
         <Card label="평균 GPU 사용률" value={data.avgUtilPct == null ? '—' : `${data.avgUtilPct}%`} meta={data.utilReporting ? `${data.utilReporting} 호스트 보고` : '사용률 미보고'} />
+        <Card label="GPU 메모리 사용" value={data.memUsedMB == null ? '—' : `${data.memUsedPct}%`} meta={data.memUsedMB == null ? '게스트 수집값 없음' : memText(data.memUsedMB, data.memTotalMB)} />
+        <Card label="vGPU 메모리 할당" value={data.allocGB == null ? '—' : gbText(data.allocGB)} meta="켜진 VM 의 vGPU 프로파일 합" />
+        <Card label="최고 GPU 온도" value={tempText(data.tempC)} meta={data.tempC == null ? '게스트 수집값 없음' : '가장 뜨거운 GPU'} />
+        <Card label="VM 동작" value={data.activity ? data.activity.busy : '—'} accent="var(--green)" meta={activitySummary(data.activity) || '켜진 GPU VM 없음'} />
         <Card label="vGPU" value={data.byMode?.vgpu ?? 0} accent="var(--green)" meta="공유 다이렉트(GRID)" />
         <Card label="패스쓰루" value={data.byMode?.passthrough ?? 0} accent="var(--amber)" meta="DirectPath I/O" />
         {(data.byMode?.vsga ?? 0) > 0 && <Card label="vSGA" value={data.byMode.vsga} meta="공유(소프트)" />}
@@ -258,7 +266,7 @@ export function Gpu({ scope }) {
           </div>
         </div>
       )}
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ vGPU/vSGA는 ESXi가 사용률을 보고하지만, <b>패스쓰루(DirectPath I/O)</b>는 게스트 OS가 GPU를 직접 소유해 ESXi에서 사용률을 볼 수 없습니다(설정 › GPU 게스트 수집에서 게스트 OS 수집을 켜면 표시). 이름을 클릭하면 최근 5년 추이를 봅니다.</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>※ vGPU/vSGA는 ESXi가 사용률을 보고하지만, <b>패스쓰루(DirectPath I/O)</b>는 게스트 OS가 GPU를 직접 소유해 ESXi에서 사용률을 볼 수 없습니다(설정 › GPU 게스트 수집에서 게스트 OS 수집을 켜면 표시). 이름을 클릭하면 최근 5년 추이를 봅니다. 온도·GPU 메모리 사용은 게스트 수집값이고(ESXi 경로에는 없습니다), 할당은 vGPU 프로파일 이름에서 계산합니다. {data.activityRule && activityRuleNote(data.activityRule)}</div>
       {data.items.length === 0 ? <div className="card"><span className="muted">GPU가 설치된 호스트가 없습니다.</span></div> : (
         <>
           <div className="flex gap wrap" style={{ marginBottom: 8 }}>
@@ -309,34 +317,7 @@ export function Gpu({ scope }) {
         </>
       )}
 
-      {hist && (
-        <Modal title={`GPU 사용률 추이 — ${hist.key || ''}`} onClose={closeHist} width={760}>
-          <div className="flex gap" style={{ marginBottom: 10 }}>
-            {[[1, '1일'], [7, '1주'], [30, '1달'], [365, '1년'], [1830, '5년']].map(([d, l]) => (
-              <button key={d} className={days === d ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 12px', fontSize: 12 }} onClick={() => setDays(d)}>{l}</button>
-            ))}
-            {hist.synthesized && <span className="badge amber" style={{ alignSelf: 'center' }}>데모 합성</span>}
-          </div>
-          {hist.loading ? <Loading /> : hist.error ? <ErrorBox message="이력을 불러오지 못했습니다." /> : (hist.points || []).length === 0
-            ? <div className="muted">해당 기간 데이터가 없습니다(수집 누적 후 표시).</div>
-            : (
-              <>
-                <ResponsiveContainer width="100%" height={320}>
-                  <LineChart data={(hist.points || []).map((p) => ({ t: fmtTrendTick(p.ts, days), avg: p.avg, max: p.max }))}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.08)" />
-                    <XAxis dataKey="t" tick={{ fontSize: 11 }} minTickGap={40} />
-                    <YAxis tick={{ fontSize: 11 }} unit="%" domain={[0, 100]} allowDataOverflow />
-                    <Tooltip contentStyle={{ background: '#0b1220', border: '1px solid #243049', fontSize: 12 }} />
-                    <Line type="monotone" dataKey="avg" stroke="#a78bfa" dot={false} name="평균" isAnimationActive={false} />
-                    <Line type="monotone" dataKey="max" stroke="#f59e0b" dot={false} name="최고" isAnimationActive={false} />
-                    <Brush dataKey="t" height={22} stroke="#6366f1" travellerWidth={8} tickFormatter={() => ''} />
-                  </LineChart>
-                </ResponsiveContainer>
-                <div className="muted" style={{ fontSize: 11, marginTop: 4, textAlign: 'center' }}>아래 막대를 드래그하면 구간을 좁혀 스크롤·확대해 볼 수 있습니다.</div>
-              </>
-            )}
-        </Modal>
-      )}
+      {hist && <React.Suspense fallback={null}><GpuHistModal level={hist.level} hkey={hist.key} initialMetric={hist.metric} onClose={closeHist} /></React.Suspense>}
       {vmList && <GpuVmsModal title={vmList.title} params={vmList.params} onClose={() => setVmList(null)} />}
       {canCsv() && exportOpen && <GpuExportModal scope={scope} onClose={() => setExportOpen(false)} onSnapshot={exportGpu} />}
     </>
