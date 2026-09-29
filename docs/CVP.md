@@ -214,3 +214,17 @@ CPU·메모리 값은 레코드 해시에 넣지 않는다(매 주기 전 레코
 - 이벤트 응답은 `deviceRefs:[{id,key,hostname}]` 를 싣는다(`db.deviceNameIndex` — 자기 행만). 화면은 서비스태그 대신 호스트네임을 보여 주고
   누르면 장비 상세를 연다. 색인에 없는 id 는 그대로 둔다(이름을 지어내지 않는다).
 - ⚠ 정직 기록: 실장비 트랜시버 구조가 2단보다 깊을 수 있다 · 카운터 경로는 이 장비에서 전부 비어 확인하지 못했다 · 검증은 목 CVP 다.
+
+## 11. v2.644 — 카운터·BGP 수집 경로(실장비 DCS-7010TX · EOS 4.28 캡처)
+
+- **카운터**: 알려진 세 후보(`Sysdb …/intfCounterDir@/intfCounter/current` · `Smash …/FastCounters/current/counter` ·
+  `…/FastCounters/current`)가 80대 전부 **빈 응답**이었다. 카운터 에이전트 디렉터리 이름은 플랫폼마다 다르다고 보고(추정)
+  **와일드카드 후보** `/Smash/counters/ethIntf/*/current/counter`(와 `…/*/current`)를 더했다 — `*` 은 부모의 포인터 키 각각이다
+  (`expandWildcard`, 최대 `WILDCARD_MAX` 6개, 부모 조회 1회). 이긴 구체 경로는 다음 장비부터 먼저 시도한다(`ordered`).
+  포트 아래 `statistics` 같은 포인터가 한 단계 더 있을 수 있어 카운터 추종 깊이를 2 로 올렸다.
+- **BGP**: `vrfBgpPeerAfiSafiStateTable` 은 표 → VRF(`default`·`Private`) → 피어 → 값 구조였다(캡처에서 VRF 아래가 또 포인터).
+  깊이 2 에서는 이름·VRF 만 남아 '형식을 읽지 못했습니다' 였다 → 깊이 3. 피어 값에 세션 상태·AS 가 없을 수 있어 **VRF 이름 외
+  필드가 하나라도 있으면 피어로 세고 상태는 모름**으로 남긴다(established/down 으로 칠하지 않는다).
+- 탐색 표본에 `/Sysdb/interface/counter/eth/phy/slice/1/intfCounterDir`·`…/vrfBgpPeerAfiSafiStateTable/default` 를 더했다.
+- ⚠ 정직 기록: 이 장비의 실제 카운터 디렉터리 이름과 BGP 피어 값의 필드명은 **여전히 보지 못했다**(가짜 CVP 로만 확인).
+  그래도 비면 '읽은 경로' 탭의 경로 탐색 표본에서 `/Smash/counters/ethIntf` 행을 펼쳐 보면 자식 이름이 보인다.

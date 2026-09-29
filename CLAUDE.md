@@ -3791,6 +3791,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       ⚠ 이름이 바뀌면 열린 장애의 키도 바뀐다(이번 캡처에는 열린 장애가 없었다). 추종은 `FOLLOW_DEPTH_BY_KIND`(포트·카운터·메모리 1, 나머지 2) —
       깊이 제한으로 따라가지 않은 포인터는 '확인하지 못한 경로' 로 세지 않는다(예전엔 장비당 상한·시간 예산을 전부 여기 썼다). 이벤트는
       `deviceRefs` 로 서비스태그 대신 **호스트네임**을 싣고 누르면 장비 상세가 열린다(색인에 없는 id 는 그대로 — 이름을 지어내지 않는다).
+    - ⚠ **v2.644 — 카운터는 와일드카드 후보, BGP 는 깊이 3**(실장비 캡처: 카운터 세 후보 80대 전부 빈 응답 · BGP 는 VRF 아래가 또 포인터).
+      `/Smash/counters/ethIntf/*/current/counter` 의 `*` 은 부모 포인터 키로 펼친다(`expandWildcard` · 최대 6). BGP 피어 값에 상태가 없으면
+      피어로는 세되 상태는 모름. **플랫폼마다 다른 이름을 후보에 굳히지 말 것** — 와일드카드와 탐색 표본이 그 역할이다. 상세 `docs/CVP.md` §11.
     - **컬렉션은 `_ptr` 포인터다**(사용자 Telemetry Browser 캡처로 `intfStatus` 확인) — `followPtrs` 가 따라간다. 개체 이름은 **포인터 키**
       (응답 경로 꼬리는 'Ethernet3/1' 에서 잘린다). v2.608 의 `vrfBgpPeerInfoStatusEntryTable`·`/Smash/counters/ethIntf` 는 **이 장비에 없는
       경로**였다 — 경로를 추정할 때는 경로 탐색 표본(`probes`)으로 확인하기 전에 '있다' 고 적지 말 것.

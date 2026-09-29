@@ -562,8 +562,13 @@ export function parseBgp(text, { max = PEER_MAX } = {}) {
   if (notRead(format, entities)) return { peers: null, summary: null, keys, truncated: 0 };
   const peers = []; let truncated = 0; let unrecognized = 0;
   for (const [name, f] of entities) {
-    const stateRaw = pick(f, ['bgpPeerState', 'peerState', 'state', 'bgpState']);
-    if (stateRaw === undefined && pick(f, ['bgpPeerAs', 'peerAs', 'remoteAs', 'peerAddress', 'bgpPeerAddr']) === undefined) { unrecognized++; continue; }
+    const stateRaw = pick(f, ['bgpPeerState', 'peerState', 'state', 'bgpState', 'sessionState', 'peerSessionState']);
+    // v2.644: 실장비의 `vrfBgpPeerAfiSafiStateTable` 은 VRF → 피어 → 값 구조이고 피어 값에 세션 상태·AS 가 없을 수 있다(추정 —
+    //   필드명은 아직 보지 못했다). 피어 키 아래 **VRF 이름 외의 필드가 하나라도 있으면** 피어로 센다 — 상태는 모름(unknown)으로 남는다.
+    //   VRF 이름만 있는 개체(포인터만 가진 중간 단계)는 세지 않는다.
+    const ownFields = Object.keys(f).filter((k) => !['vrfName', 'vrf', 'name'].includes(k));
+    const peerTable = typeof stateRaw === 'undefined' && pick(f, ['bgpPeerAs', 'peerAs', 'remoteAs', 'peerAddress', 'bgpPeerAddr']) === undefined;
+    if (peerTable && !(Object.hasOwn(f, 'vrfName') && ownFields.length)) { unrecognized++; continue; }
     if (peers.length >= max) { truncated++; continue; }
     const state = str(stateRaw ?? '', 32);
     peers.push({
@@ -571,7 +576,7 @@ export function parseBgp(text, { max = PEER_MAX } = {}) {
       asn: str(pick(f, ['bgpPeerAs', 'peerAs', 'asn', 'remoteAs']) ?? '', 16),
       vrf: str(pick(f, ['vrf', 'vrfName']) ?? '', 64),
       state,
-      prefixes: numOrNull(pick(f, ['bgpPeerPrefixesReceived', 'prefixesReceived', 'prefixReceived', 'prefixAccepted', 'bgpPeerPrefixAccepted'])),
+      prefixes: numOrNull(pick(f, ['bgpPeerPrefixesReceived', 'prefixesReceived', 'prefixReceived', 'prefixAccepted', 'bgpPeerPrefixAccepted', 'prefixesAccepted', 'acceptedPrefixes', 'numPrefixes', 'prefixCount'])),
     });
   }
   if (!peers.length && unrecognized) return { peers: null, summary: null, keys, truncated: 0 };
