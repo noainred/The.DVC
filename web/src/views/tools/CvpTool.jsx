@@ -11,6 +11,8 @@ import { facetState, toggleIn } from './deviceFacets.js';
 import { CvpOverviewView, CvpModelsView, CvpTrafficView } from './CvpOverview.jsx';
 import CvpOpticsView from './CvpOptics.jsx';
 import CvpPowerView from './CvpPower.jsx';
+import CvpInterfacesView from './CvpInterfaces.jsx';
+import { descCell, byIntfName } from './cvpIntfText.js';
 import {
   facetRowsOf, corpNameFn, modelLabel, eventCorpChips, eventSevChips, deviceSummaryTiles, historyNotes, CORP_NOTE, corpLabel,
 } from './cvpOverviewText.js';
@@ -60,6 +62,7 @@ export default function CvpTool() {
   const [collectErr, setCollectErr] = useState(null); // 403 등 — ErrorBox 가 권한 안내로 바꾼다(v2.398)
   const [busy, setBusy] = useState(false);
   const [detailKey, setDetailKey] = useState(null); // { cvpId, key, hostname }
+  const [intfSel, setIntfSel] = useState(null);     // v2.649 인터페이스 세부 정보로 넘길 장비('cvpId|key')
   const [chip, setChip] = useState('all');          // v2.640 ④ 필터 칩(화면 전용)
   const [faults, setFaults] = useState(null);       // v2.640 ③ 장애 이력 응답
   const [faultsErr, setFaultsErr] = useState(null);
@@ -71,7 +74,7 @@ export default function CvpTool() {
   const loadSeq = useRef(0);
   // v2.641: 화면 전환(장비 · 포트 사용량 · 이벤트) — URL 에 싣는다(v2.613 도구 안 서브탭 규약).
   // v2.645: Overview 가 기본 화면이다(사용자 승인 시안) · 모델 · 트래픽 추가.
-  const [view, setView] = useHashTab({ base: ['tools', 'cvp'], valid: ['overview', 'devices', 'models', 'traffic', 'ports', 'optics', 'power', 'events', 'settings'], fallback: 'overview' });
+  const [view, setView] = useHashTab({ base: ['tools', 'cvp'], valid: ['overview', 'devices', 'models', 'traffic', 'intf', 'ports', 'optics', 'power', 'events', 'settings'], fallback: 'overview' });
 
   const u = getCurrentUser();
   const isAdmin = !u || u.role === 'admin';
@@ -166,7 +169,7 @@ export default function CvpTool() {
       </div>}
 
       <div style={ROW}>
-        {[['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['ports', '포트 사용량'], ['optics', '광신호'], ['power', '전력'], ['events', '이벤트'], ['settings', 'CVP 설정']].map(([k, l]) => (
+        {[['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['intf', '인터페이스 세부 정보'], ['ports', '포트 사용량'], ['optics', '광신호'], ['power', '전력'], ['events', '이벤트'], ['settings', 'CVP 설정']].map(([k, l]) => (
           <button key={k} type="button" className={`tab${view === k ? ' active' : ''}`} onClick={() => setView(k)}>{l}</button>
         ))}
       </div>
@@ -174,6 +177,7 @@ export default function CvpTool() {
       {view === 'overview' && <CvpOverviewView ov={ov} err={ovErr} onGo={(k) => setView(k)} onCorp={goCorp} onOpenDevice={(t) => setDetailKey(t)} />}
       {view === 'models' && <CvpModelsView ov={ov} err={ovErr} onModel={goModel} />}
       {view === 'traffic' && <CvpTrafficView ov={ov} err={ovErr} onCorp={goCorp} onOpenDevice={(t) => setDetailKey(t)} />}
+      {view === 'intf' && <CvpInterfacesView devices={devList} initial={intfSel} />}
       {view === 'ports' && <PortUsageCard servers={servers} onOpen={(p) => setDetailKey({ cvpId: p.cvpId, key: p.key, hostname: p.hostname, tab: 'ports' })} />}
       {view === 'optics' && <CvpOpticsView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'parts' })} />}
       {view === 'power' && <CvpPowerView servers={servers} onOpen={(t) => setDetailKey({ ...t, tab: 'parts' })} />}
@@ -328,7 +332,7 @@ export default function CvpTool() {
       ) : <div style={NOTE}>CVP 서버 등록·수집 설정은 관리자만 바꿀 수 있습니다.</div>}
       </>)}
 
-      {detailKey && <DeviceModal target={detailKey} onClose={() => setDetailKey(null)} />}
+      {detailKey && <DeviceModal target={detailKey} onClose={() => setDetailKey(null)} onIntf={(id) => { setIntfSel(id); setDetailKey(null); setView('intf'); }} />}
     </div>
   );
 }
@@ -337,7 +341,7 @@ function numOrZero(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; 
 
 // ── 장비 상세 ────────────────────────────────────────────────────────────────
 
-function DeviceModal({ target, onClose }) {
+function DeviceModal({ target, onClose, onIntf }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [port, setPort] = useState(null);
@@ -420,14 +424,18 @@ function DeviceModal({ target, onClose }) {
           ) : (
             <>
               {port && <PortChart target={target} port={port} onClose={() => setPort(null)} />}
-              <div style={NOTE}>포트 이름을 누르면 사용률 추이를 봅니다. 사용률은 인터페이스 속도를 알 때만 방향별로 계산합니다.</div>
+              <div style={{ ...NOTE, display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                <span>포트 이름을 누르면 사용률 추이를 봅니다. 사용률은 인터페이스 속도를 알 때만 방향별로 계산합니다. 설명은 부품 주기(기본 30분)마다 읽습니다.</span>
+                {onIntf && <button type="button" className="btn" style={{ padding: '2px 8px' }} onClick={() => onIntf(`${target.cvpId}|${target.key}`)}>인터페이스 세부 정보로 보기</button>}
+              </div>
               <STable minWidth={980} limit={1024}>
                 <thead><tr><th>포트</th><th>설명</th><th>속도</th><th>상태</th><th>관리</th><th>VLAN</th><th>LAG</th><th>수신</th><th>송신</th><th>수신 %</th><th>송신 %</th><th>오류(수/송)</th></tr></thead>
                 <tbody>
-                  {ports.filter((p) => p && typeof p === 'object').map((p) => (
+                  {ports.filter((p) => p && typeof p === 'object').slice().sort(byIntfName).map((p) => (
                     <tr key={p.name}>
                       <td><button type="button" className="btn" style={{ padding: '2px 8px' }} onClick={() => setPort(p.name)}>{p.name}</button></td>
-                      <td style={{ fontSize: 12, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.desc || ''}>{p.desc || '—'}</td>
+                      {/* v2.649: 설명(연결 서버·장비 이름)은 잘리지 않게 줄바꿈한다 — null 은 '아직 못 읽음', '' 은 '설명 없음'(title 이 구분한다). */}
+                      <td style={{ fontSize: 12, minWidth: 140, maxWidth: 260, whiteSpace: 'normal', overflowWrap: 'anywhere' }} title={descCell(p.desc).title}>{descCell(p.desc).text}</td>
                       <td data-sort={p.speedBps ?? ''}>{bpsText(p.speedBps)}</td>
                       <td><Badge tone={p.oper === 'up' ? 'ok' : p.oper === 'nolink' ? 'muted' : p.oper ? (p.admin === 'down' ? 'muted' : 'warn') : 'muted'}>{p.oper === 'nolink' ? '미연결' : (p.oper || '—')}</Badge></td>
                       <td>{p.admin || '—'}</td>

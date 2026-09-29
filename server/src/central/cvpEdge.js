@@ -44,6 +44,7 @@ function opticOf(p) {
     for (const k of ['inW', 'outW', 'capW']) { const v = numOrNull(p.power[k]); pw[k] = v != null && v >= 0 && v < 100_000 ? v : null; }
     if (pw.inW != null || pw.outW != null) out.power = pw;
   }
+  if (p && p.media != null) { const m = sOrNull(p.media, 48); if (m) out.media = m; } // v2.649: 트랜시버 종류
   if (p && p.role === 'slot-power') out.role = 'slot-power';
   const sc = p && p.slotCheck && typeof p.slotCheck === 'object' ? p.slotCheck : null;
   if (sc) {
@@ -126,6 +127,7 @@ setCvpCollectBaseResolver((id) => {
 });
 
 const s = (v, n) => capStr(v, n);
+const sOrNull = (v, n) => (v == null || (typeof v !== 'string' && typeof v !== 'number') ? null : (capStr(String(v), n) || null));
 const tsClamp = (v, now) => { const n = numOrNull(v); return n == null || n <= 0 ? null : Math.min(n, now); };
 const tsOrig = (v) => { const n = numOrNull(v); return n == null || n <= 0 ? null : n; };
 /** v2.631 A6-2631-01: routes/central.js EDGE_CLOCK_AHEAD_TOLERANCE_MS 와 같은 값(엣지 시계가 이보다 앞서면 차이를 밝힌다). */
@@ -217,7 +219,9 @@ export function cleanDevice(x, now = Date.now(), cnt = { ports: 0 }) {
     streaming: x.streaming === true ? true : x.streaming === false ? false : null, telemetry: s(x.telemetry, 32),
     bgp: listOf(x.bgp, PEER_MAX, (p) => ({ peer: s(p.peer, 64), asn: s(p.asn, 16), vrf: s(p.vrf, 64), state: s(p.state, 32), prefixes: numOrNull(p.prefixes) })),
     ports: listOf(x.ports, PORT_MAX, (p) => ({
-      name: s(p.name, 64), desc: s(p.desc, 200), speedBps: numOrNull(p.speedBps),
+      // v2.649: 설명 null = '못 읽음'(중앙 DB 가 직전 값을 유지) — '' 로 바꾸면 설명을 지운 것이 된다. 세부 필드도 아는 것만·길이 상한.
+      name: s(p.name, 64), desc: p.desc == null ? null : s(p.desc, 200), speedBps: numOrNull(p.speedBps),
+      duplex: sOrNull(p.duplex, 48), fwdModel: sOrNull(p.fwdModel, 48), mac: sOrNull(p.mac, 32), mtu: numOrNull(p.mtu), operRaw: sOrNull(p.operRaw, 48),
       oper: LINK.has(p.oper) ? p.oper : 'unknown', admin: LINK.has(p.admin) ? p.admin : 'unknown', vlan: s(p.vlan, 32), lag: s(p.lag, 64),
       inBps: numOrNull(p.inBps), outBps: numOrNull(p.outBps), inUtil: numOrNull(p.inUtil), outUtil: numOrNull(p.outUtil), inErr: numOrNull(p.inErr), outErr: numOrNull(p.outErr),
     })),

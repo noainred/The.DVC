@@ -56,7 +56,7 @@ const FOLLOW_DEPTH = 3;
  */
 // v2.644: counters 2(`…/current` 아래에 `statistics` 같은 포인터가 한 단계 더 있을 수 있다) · bgp 3(실장비: 표 → VRF(default·Private) →
 //   피어 → 그 피어의 값 — 캡처에서 VRF 아래 피어가 또 포인터였다. 깊이 2 에서는 이름·VRF 만 남아 '형식을 읽지 못했습니다' 였다).
-export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ interfaces: 1, counters: 2, memory: 1, cpu: 2, bgp: 3, power: 2, cooling: 2, temperature: 2, xcvr: 3 });
+export const FOLLOW_DEPTH_BY_KIND = Object.freeze({ interfaces: 1, intfConfig: 1, counters: 2, memory: 1, cpu: 2, bgp: 3, power: 2, cooling: 2, temperature: 2, xcvr: 3 });
 /*
  * v2.646(사용자 신고 'xcvr 이 여전히 나오지 않는다' — 캡처: `all › Ethernet1` 등 전부 '상태 미확인'): 트랜시버 노드는 **장착 여부만** 주고
  *   건강 상태 필드가 없다. `show interfaces transceiver` 가 보여 주는 DOM(온도·전압·바이어스·Tx/Rx 광량)은 그 노드 **한 단계 아래**
@@ -89,6 +89,9 @@ export const CANDIDATES = Object.freeze({
   // v2.641: 실장비(CVP 2023.1.1)에서 `…/intfStatus/all`·`…/FastCounters/current` 는 **빈 응답**이었다(사용자 캡처). 컬렉션 노드
   //   (`…/intfStatus` · `…/current/counter`)를 먼저 읽고 포인터를 따라간다(followPtrs). 옛 후보는 뒤에 남긴다(다른 버전 대비).
   interfaces: ['/api/v1/rest/{serial}/Sysdb/interface/status/eth/phy/slice/1/intfStatus', '/api/v1/rest/{serial}/Sysdb/interface/status/eth/phy/slice/1/intfStatus/all'],
+  // v2.649: 포트 설명(description)은 상태 노드가 아니라 설정 노드에 있다(EOS Sysdb 관용 — ⚠ 실장비 미확인 추정, 경로 탐색 표본이 확인한다).
+  //   설명은 자주 바뀌지 않으므로 부품 주기(partsDue — 기본 30분)에만 읽는다(포트당 GET 1회 — followPtrs).
+  intfConfig: ['/api/v1/rest/{serial}/Sysdb/interface/config/eth/phy/slice/1/intfConfig', '/api/v1/rest/{serial}/Sysdb/interface/config/eth/phy/slice/1/intfConfig/all'],
   /*
    * v2.641 실장비 확인(사용자 Telemetry Browser 캡처, L2 7010TX): `/Smash/counters/ethIntf` 는 **No data** 였다. 카운터는 Sysdb 쪽
    *   `…/intfCounterDir/<포트>/intfCounter/current` 로 추정한다(⚠ 이 경로 자체는 아직 확인하지 못했다 — 경로 탐색 표본이 확인한다).
@@ -340,7 +343,7 @@ export function expandWildcard(tpl, keys, max = WILDCARD_MAX) {
 }
 const fill = (tpl, serial) => tpl.replaceAll('{serial}', encodeURIComponent(serial));
 /** v2.641: 포인터를 따라갈 종류(부품·인터페이스·카운터·BGP·CPU·메모리). */
-const FOLLOW_KINDS = new Set(['interfaces', 'counters', 'bgp', 'power', 'cooling', 'temperature', 'xcvr', 'cpu', 'memory']);
+const FOLLOW_KINDS = new Set(['interfaces', 'intfConfig', 'counters', 'bgp', 'power', 'cooling', 'temperature', 'xcvr', 'cpu', 'memory']);
 /**
  * v2.641: 하위 개체 URL. 포인터가 '부모 경로 + / + 키' 모양이면 부모 URL 뒤에 **키를 인코딩해** 붙인다('Ethernet3/1' 의 '/' 를 지키려고).
  *   그렇지 않으면 포인터 경로를 조각마다 인코딩해 장비 텔레메트리 루트에 붙인다. 포인터 원문은 장비가 준 값이라 `..` 조각은 버린다.
@@ -470,7 +473,7 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
     }
 
     // ③ 장비별 텔레메트리 — 종류마다 후보 체인 + 연속 실패 차단.
-    const kinds = ['interfaces', 'counters', 'bgp', 'cpu', 'memory', ...(partsDue ? Object.keys(PART_KINDS) : [])];
+    const kinds = ['interfaces', 'counters', 'bgp', 'cpu', 'memory', ...(partsDue ? ['intfConfig', ...Object.keys(PART_KINDS)] : [])];
     const ks = Object.fromEntries(kinds.map((k) => [k, { ok: 0, fail: 0, streak: 0, stopped: false, last: '', empty: 0, followed: 0, followTruncated: 0 }]));
     /*
      * v2.641: 종류 하나를 읽는다. 응답이 ① 빈 응답(`{"notifications":[]}`)이면 **읽은 것이 아니다** — 다음 후보로 넘어가고 사유는
@@ -629,6 +632,11 @@ export async function collectCvp(server, { signal, budgetMs = 110_000, partsDue 
       const serial = dev.serial || dev.key;
       const intf = await readKind('interfaces', serial, (t) => { const x = P.parseInterfaces(t); return { value: x.ports, keys: x.keys, truncated: x.truncated }; });
       if (intf.value) { dev.ports = intf.value; truncated.ports += intf.extra.truncated || 0; }
+      // v2.649: 설명 — 부품 주기에만(설정 노드). 못 읽으면 포트 desc 는 null 로 남고 저장소가 직전 값을 유지한다(COALESCE).
+      if (partsDue && Array.isArray(dev.ports) && left() >= MIN_SLICE_MS) {
+        const cfg = await readKind('intfConfig', serial, (t) => { const x = P.parseIntfConfig(t); return { value: x.descs, keys: x.keys }; });
+        if (cfg.value) { dev.ports = P.mergeIntfConfig(dev.ports, cfg.value); dev.descsAt = now(); }
+      }
       if (left() < MIN_SLICE_MS) { dev.telemetry = 'budget-partial'; return; }
       const upSet = Array.isArray(dev.ports) ? new Set(dev.ports.filter((p) => p.oper === 'up').map((p) => p.name)) : null;
       const cnt = await readKind('counters', serial, (t) => { const x = P.parseCounters(t); return { value: x.counters, keys: x.keys }; }, upSet ? (k) => upSet.has(k) : null);

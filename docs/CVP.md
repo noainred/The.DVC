@@ -307,3 +307,21 @@ show interfaces transceiver" · "각 GBIC 의 광신호 세기를 확인, 약하
 - 경로 탐색 표본에 `/Sysdb/interface/status/eth/phy/slice`·`/Sysdb/hardware/entmib` 를 더했다(`PROBE_MAX` 34) — 실장비 원문으로 대응을 확인할 것.
 - ⚠ 모듈러 섀시에서 포트 수집이 slice 1 만 읽는 것으로 보인다(7504 캡처 '포트 (3)') — 이번 릴리스 범위 밖이고 확정하지 못했다.
 - 회귀: `server/test/cvpSlotPower2648.test.js` · 웹 `cvpText.test.js`(표시 이름). ⚠ 실장비 7504 응답은 보지 못했다(합성 입력).
+
+## 16. 인터페이스 세부 정보(v2.649)
+
+사용자 요청: CVP 'Devices › <장비> › Interfaces › Ethernet' 화면(Ethernet Status · Interface Speed · Transceiver Type 도넛 + 인터페이스 표)을 같은 모양으로 ·
+장비 상세 포트 표에도 CVP 처럼 설명(연결된 서버·장비 이름)을 표시.
+
+- 새 탭 '인터페이스 세부 정보'(`#/tools/cvp/intf`, `CvpInterfaces.jsx` + 순수 `cvpIntfText.js`). 장비를 고르면 `/tools/cvp/device` 를 1회 부른다(폴링 금지).
+  도넛은 읽은 값만 센다 — 못 읽은 것은 '확인 불가'·'속도 모름'·'종류 모름'(회색) 칸이다. 트랜시버 목록을 못 읽은 장비는 도넛 대신 안내.
+  표는 열마다 필터(머리글 칸 안 — STable 은 thead 마지막 행을 정렬 머리글로 쓴다)이고 이름 자연 순서다.
+- **설명은 상태 노드(intfStatus)가 아니라 설정 노드(`…/intfConfig/<포트>`)** 에 있다고 보고 부품 주기(partsDue)에만 읽는다(`kind intfConfig`, 포트당 GET 1회).
+  ⚠ 경로·필드 이름은 **추정**이다(경로 탐색 표본에 이미 `intfConfig/Ethernet1` 이 있다 — 첫 실수집에서 확인).
+- 설명의 세 상태: `null` = 이번에 못 읽음(DB `COALESCE` 로 직전 값 유지) · `''` = 설명 없음(그대로 저장) · 문자열. 파서 `pick` 이 빈 문자열을 건너뛰므로
+  `parseIntfConfig` 는 키를 직접 찾는다. 사이 주기에는 poller `fillDescs` 가 캐시 설명을 채워 push 해시가 30분마다 뒤집히지 않게 한다.
+- 세부 필드(`parse.intfDetailOf`): `duplex`(duplexFull→full) · `fwdModel`(intfForwardingModelBridged→bridged) · `mac`(burnedInAddr, 형식 검사) · `mtu` · `operRaw`
+  (장비 원문 상태 — 표의 상태 칸 title). 트랜시버 종류는 xcvr 파트의 `media`(`xcvrTypeText`: xcvr1000BaseT→1000BASE-T). ⚠ 전부 필드 이름 추정.
+- DB: `port_latest` 에 `duplex·fwd_model·mac·mtu·oper_raw` 열(table_info 로 없을 때만 추가) · 설명·세부 열은 NULL 이면 유지. 엣지 수신 정제도 새 필드를 아는 것만 옮긴다.
+- 상태 칸은 CVP 의 Connected/Down/Disconnected 를 그대로 옮기지 않고 포탈 판정(연결됨=up · 다운=down · 미연결=notconnect/notPresent · 확인 불가)을 쓴다.
+- 회귀: `server/test/cvpIntf2649.test.js`(6) · 웹 `cvpIntfText.test.js`(10). Chromium 1440/400 은 합성 장비 2대(52포트·부품 없음)를 심은 목 서버로 봤다.

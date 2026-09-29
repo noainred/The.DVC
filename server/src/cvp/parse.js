@@ -396,7 +396,7 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
     // v2.647: PSU 전력(W) — `show environment power` 의 입력·출력 전력. ⚠ 필드 이름은 실장비 미확인 추정(후보로 읽는다 — PSU_POWER_FIELDS).
     const pw = kind === 'psu' ? psuPower(f) : null;
     if (pw) detailBits.push([pw.inW != null ? `입력 ${Math.round(pw.inW)}W` : '', pw.outW != null ? `출력 ${Math.round(pw.outW)}W` : ''].filter(Boolean).join(' · '));
-    let dom = null; let domJudge = null;
+    let dom = null; let domJudge = null; let media = null;
     if (kind === 'xcvr') {
       const x = xcvrDom(f);
       dom = x.values;
@@ -407,8 +407,9 @@ export function parseParts(text, kind, { max = PART_MAX } = {}) {
       if (x.text) detailBits.push(x.text);
       // 최종 판정(광량 포함)은 judgeOptics 가 포트 링크 상태를 보고 한다 — 여기서는 재료만 싣는다.
       if (dom) domJudge = { otherState: x.otherState, rxDevice: x.rxDevice };
+      media = xcvrTypeText(unwrap(pick(f, ['mediaTypeString', 'mediaType', 'xcvrMediaType', 'media', 'xcvrType', 'transceiverType'])));
     }
-    parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200), ...(dom ? { dom, domJudge } : {}), ...(pw ? { power: pw } : {}) });
+    parts.push({ kind, name: str(name, 128), state: st, detail: str(detailBits.join(' · '), 200), ...(dom ? { dom, domJudge } : {}), ...(pw ? { power: pw } : {}), ...(media ? { media } : {}) });
   }
   if (!parts.length && unrecognized) return { parts: null, keys, truncated: 0 };
   return { parts, keys, truncated, droppedFields };
@@ -702,18 +703,92 @@ export function parseInterfaces(text, { max = PORT_MAX } = {}) {
     if (ports.length >= max) { truncated++; continue; }
     const lagRaw = pick(f, ['lag', 'portChannel', 'lagId', 'membership']);
     const vlanRaw = pick(f, ['vlan', 'accessVlan', 'nativeVlan', 'vlanId']);
+    // v2.649: 설명은 상태 노드에 없을 수 있다(설정 노드 intfConfig — mergeIntfConfig). 필드가 없으면 null('못 읽음' — '' 은 '설명 없음').
+    const descRaw = unwrap(pick(f, ['description', 'desc']));
+    const operRaw = unwrap(pick(f, ['linkStatus', 'operStatus', 'oper', 'operState']));
     ports.push({
       name: str(name, 64),
-      desc: str(pick(f, ['description', 'desc']) ?? '', 200),
+      desc: descRaw == null ? null : str(descRaw, 200),
       speedBps: firstSpeed(f),
       oper: linkWord(pick(f, ['operStatus', 'linkStatus', 'oper', 'operState'])),
       admin: linkWord(pick(f, ['adminStatus', 'enabledState', 'adminEnabled', 'admin', 'enabled'])),
       vlan: vlanRaw == null ? '' : str(vlanRaw, 32),
       lag: lagRaw == null ? '' : str(lagRaw, 64),
+      ...intfDetailOf(f, operRaw),
     });
   }
   if (!ports.length && unrecognized) return { ports: null, keys, truncated: 0 };
   return { ports, keys, truncated, droppedFields };
+}
+
+/*
+ * v2.649 — 인터페이스 세부 정보(CVP 'Interfaces › Ethernet' 화면의 열: Duplex · Forwarding Model · Burned-in MAC · MTU · 원래 상태 문자열).
+ *   ⚠ 필드 이름(duplex·forwardingModel·burnedInAddr·mtu)은 EOS Sysdb intfStatus 의 관용 이름으로 **추정**했다(실장비 미확인 — docs/CVP.md §16).
+ *   못 읽은 값은 null 이다(빈 칸을 'Full' 같은 값으로 지어내지 않는다). 열거형 접두(duplexFull·intfForwardingModelBridged)는 떼어 사람이 읽는 말로.
+ */
+const ENUM_PREFIX = /^(duplex|intfforwardingmodel|forwardingmodel|link|intfoper)/i;
+/** 'duplexFull' → 'full' · 'intfForwardingModelBridged' → 'bridged' · 모르면 원문(소문자) · 없으면 null. */
+export function enumWord(v) {
+  if (v == null || v === '') return null;
+  if (typeof v !== 'string' && typeof v !== 'number') return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const core = s.replace(ENUM_PREFIX, '').replace(/^[\s_:-]+/, '');
+  return (core || s).slice(0, 48).toLowerCase();
+}
+const MAC_RE = /^[0-9a-f]{1,2}([:.-][0-9a-f]{1,4}){2,5}$/i;
+export function intfDetailOf(f, operRaw) {
+  const mac = unwrap(pick(f, ['burnedInAddr', 'burnedInAddress', 'hardwareAddr', 'addr', 'macAddr', 'macAddress']));
+  const mtu = numOrNull(unwrap(pick(f, ['mtu', 'l3Mtu', 'maxMtu'])));
+  return {
+    duplex: enumWord(unwrap(pick(f, ['duplex', 'duplexMode']))),
+    fwdModel: enumWord(unwrap(pick(f, ['forwardingModel', 'fwdModel']))),
+    mac: typeof mac === 'string' && MAC_RE.test(mac.trim()) ? mac.trim().toLowerCase() : null,
+    mtu: mtu != null && mtu > 0 && mtu < 100_000 ? Math.round(mtu) : null,
+    operRaw: operRaw == null || (typeof operRaw !== 'string' && typeof operRaw !== 'number') ? null : str(String(operRaw), 48),
+  };
+}
+
+/**
+ * v2.649 — 인터페이스 설정 노드(`…/intfConfig/<포트>`)에서 설명을 읽는다(순수). 반환 Map(name → 설명 문자열) 또는 null(못 읽음).
+ *   설명 필드가 있는 개체만 센다 — 빈 문자열은 '설명 없음' 으로 그대로 담는다(못 읽은 것과 구분).
+ */
+export function parseIntfConfig(text) {
+  const { entities, format, keys } = entitiesOf(text);
+  if (notRead(format, entities)) return { descs: null, keys };
+  const descs = new Map();
+  for (const [name, f] of entities) {
+    // pick 은 빈 문자열을 건너뛴다 — 여기서는 '' 이 '설명 없음' 이라는 값이므로 키를 직접 찾는다.
+    const k = Object.keys(isObj(f) ? f : {}).find((x) => /^(description|desc)$/i.test(x.split('.').pop()));
+    if (k === undefined) continue;
+    const d = unwrap(f[k]);
+    if (d !== null && d !== undefined && typeof d !== 'string' && typeof d !== 'number') continue;
+    descs.set(str(name, 64), d == null ? '' : str(String(d), 200));
+  }
+  if (!descs.size) return { descs: null, keys };
+  return { descs, keys };
+}
+
+/** 포트 목록에 설명을 입힌다(순수) — 설정에서 읽은 값이 먼저, 없으면 상태 노드 값. 둘 다 없으면 null(못 읽음). */
+export function mergeIntfConfig(ports, descs) {
+  if (!Array.isArray(ports)) return ports;
+  if (!(descs instanceof Map)) return ports;
+  return ports.map((p) => (descs.has(p.name) ? { ...p, desc: descs.get(p.name) } : p));
+}
+
+/**
+ * v2.649 — 트랜시버 종류(CVP 'Transceiver Type' 열). 'xcvr1000BaseT' → '1000BASE-T' · 'xcvr25GBaseSr' → '25GBASE-SR'.
+ *   ⚠ 필드 이름(mediaType 등)과 열거형 표기는 추정이다. 모르는 형태는 원문 그대로(지어내지 않는다).
+ */
+export function xcvrTypeText(v) {
+  if (v == null || (typeof v !== 'string' && typeof v !== 'number')) return null;
+  const raw = String(v).trim();
+  if (!raw) return null;
+  const core = raw.replace(/^(xcvrmediatype|xcvrmedia|mediatype|xcvr)[\s_:-]*/i, '');
+  if (!core || /^(unknown|none)$/i.test(core)) return null;
+  const up = core.replace(/[\s_]+/g, '').toUpperCase();
+  const m = /^(\d+(?:\.\d+)?[GM]?)BASE-?([A-Z0-9]+)$/.exec(up);
+  return m ? `${m[1]}BASE-${m[2]}` : raw.slice(0, 48);
 }
 
 /**
