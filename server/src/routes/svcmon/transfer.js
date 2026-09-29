@@ -137,7 +137,8 @@ svcmonRouter.post('/targets/hostmap/export.csv', csvPerm, canEdit, (req, res) =>
 });
 
 /** 컬럼 설명 — 화면이 표를 그릴 때 쓴다(스키마와 화면이 어긋나지 않게). */
-svcmonRouter.get('/targets/csv-schema', csvPerm, canEdit, (req, res) => {
+// v2.643: 스키마는 템플릿 편집 폼(TemplateTab)의 필드 목록이기도 하다 — 파일 입출력이 아니라 CSV 권한으로 막지 않는다.
+svcmonRouter.get('/targets/csv-schema', canEdit, (req, res) => {
   const of = (f) => ({
     col: f.col, label: f.label, kind: f.kind, max: f.max, min: f.min,
     dflt: f.dflt, requiredFor: f.requiredFor, usedBy: f.usedBy,
@@ -158,7 +159,14 @@ svcmonRouter.get('/targets/csv-schema', csvPerm, canEdit, (req, res) => {
  * 가져오기 — `mode:'preview'` 는 저장하지 않고 판정만, `'add'` 는 커밋한다.
  * 커밋은 all-or-nothing 이며 이미 있는 대상(구분+경로+이름)은 건너뛴다.
  */
-svcmonRouter.post('/targets/import', csvPerm, canEdit, fullScopeOnly, async (req, res) => {
+/*
+ * v2.643: 등록 마법사의 '표로 입력'·'자유형식 붙여넣기' 도 이 경로(format:'json')를 쓴다 — 그것은 화면 입력이지 CSV 파일 입출력이
+ *   아니므로 CSV 권한으로 막지 않는다(막으면 operator 가 성능점검 대상을 한 건도 등록하지 못한다). 파일 형식(csv·xlsx)만 data.csv.
+ *   게이트 표지(gate)는 그대로 달아 둔다 — 라우터 스택을 보는 점검(superAdmin2643·archScan)이 게이트를 읽는다.
+ */
+const csvPermUnlessJson = (req, res, next) => (req.body?.format === 'json' ? next() : csvPerm(req, res, next));
+csvPermUnlessJson.gate = Object.freeze({ kind: 'perm', arg: Object.freeze(['data.csv']), note: 'format=json 제외' });
+svcmonRouter.post('/targets/import', canEdit, fullScopeOnly, csvPermUnlessJson, async (req, res) => {
   const mode = req.body?.mode === 'add' ? 'add' : 'preview';
   // 포맷 결정: format 이 명시되면 그것을, 없고 csv 필드만 오면 csv(구버전 호환).
   const format = FORMATS.includes(req.body?.format) ? req.body.format : 'csv';

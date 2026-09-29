@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchJson, downloadFile } from '../../api.js';
+import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js'; // v2.616 V5 통합 검색 · v2.617 열린 화면도 받는다
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -78,9 +78,9 @@ export default function SerialLookup() {
         <SearchBox className="input" style={{ maxWidth: 420, minWidth: 260, fontSize: 15 }}
           value={q} onChange={setQ} placeholder="시리얼 / 서비스 태그 / WWN / 부품번호 입력" />
         {busy && <span className="muted" style={{ fontSize: 12 }}>찾는 중…</span>}
-        <button className="tab" style={{ marginLeft: 'auto', flex: 'none', padding: '6px 12px' }}
+        {canCsv() && <button className="tab" style={{ marginLeft: 'auto', flex: 'none', padding: '6px 12px' }}
           onClick={() => { setExportErr(''); downloadFile(`/tools/serial-lookup/export.csv?q=${encodeURIComponent(q.trim())}&kinds=${encodeURIComponent(kindParam)}`).catch((e) => setExportErr(downloadFailText(e))); }}
-          title="현재 검색 결과(검색어가 없으면 선택한 종류 전체)를 CSV 로 내려받습니다.">⬇ CSV 내보내기</button>
+          title="현재 검색 결과(검색어가 없으면 선택한 종류 전체)를 CSV 로 내려받습니다.">⬇ CSV 내보내기</button>}
       </div>
 
       {exportErr && <div className="banner" style={{ marginBottom: 10, color: '#f87171' }}>CSV 내보내기 실패 — {exportErr}</div>}

@@ -40,6 +40,7 @@ const CSV_RE = /(\.csv|\.txt|\.xlsx|csv-schema|\/import|export|sample|\/tools\/c
 const NOT_CSV = {
   '/tools/link-check/samples': '통신 점검 원시 표본 조회(화면 표) — 파일 입출력이 아니다',
   '/tools/cvp/samples': 'CVP 원문 표본(관리자 진단)',
+  '/targets/csv-schema': '성능점검 템플릿 편집 폼의 필드 목록 — 파일 입출력이 아니다(v2.643 에이전트 보고)',
   '/tools/vm-export': 'VM 내보내기 **미리보기**(100행 JSON) — CSV 다운로드는 .csv 경로가 게이트된다',
 };
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson, putJson, downloadFile } from '../../api.js';
+import { fetchJson, postJson, putJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import { agoText } from './relTime.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -214,8 +214,8 @@ export default function RelayTopoTool() {
             <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
               <b>사이트(DC) — Edge DVC · IRS</b><span style={{ flex: 1 }} />
               <button className="tab" onClick={() => setEdit({ site: structuredClone(EMPTY_SITE), index: -1 })}>+ 사이트 추가</button>
-              <button className="tab" onClick={() => exportAs('json')} disabled={busy}>⬇ JSON</button>
-              <button className="tab" onClick={() => exportAs('csv')} disabled={busy}>⬇ CSV</button>
+              {canCsv() && <button className="tab" onClick={() => exportAs('json')} disabled={busy}>⬇ JSON</button>}
+              {canCsv() && <button className="tab" onClick={() => exportAs('csv')} disabled={busy}>⬇ CSV</button>}
               <button className="login-btn" style={{ flex: 'none', padding: '6px 16px' }} onClick={save} disabled={busy}>저장</button>
             </div>
             <div style={{ overflowX: 'auto' }}>
@@ -250,30 +250,33 @@ export default function RelayTopoTool() {
             )}
           </div>
 
-          <div className="card" style={{ marginBottom: 12 }}>
-            <b>가져오기 — 표 붙여넣기 / CSV·JSON 파일</b>
-            <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>
-              스프레드시트(첨부 표)를 그대로 붙여넣으세요: 열 순서 <code>Datacenter · Server(Main/Edge/IRS) · private IP · public IP …</code>, IRS 행의 DC 가 비어 있으면 직전 DC 로 이어집니다. 이 도구가 내보낸 CSV/JSON 도 같은 자리에서 읽습니다(머리글로 자동 판별). 같은 DC 는 IP 를 갱신하되 저장된 SSH 비밀은 유지합니다.
-            </div>
-            <textarea className="input" rows={7} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }} value={importText} onChange={(e) => setImportText(e.target.value)} placeholder={'OC2\tMain\t192.168.20.143\t10.94.40.217\nAZ\tEdge\t192.168.30.221\t10.112.158.217\n\tIRS\t192.168.31.11\t10.112.159.11'} />
-            <div className="flex gap" style={{ alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
-              <input type="file" accept=".csv,.tsv,.txt,.json" onChange={onFile} style={{ fontSize: 12 }} />
-              <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={importReplace} onChange={(e) => setImportReplace(e.target.checked)} />기존 사이트 목록 교체(병합 대신)</label>
-              <span style={{ flex: 1 }} />
-              <button className="tab" onClick={importPreview} disabled={busy || !importText.trim()}>미리보기</button>
-              <button className="login-btn" style={{ flex: 'none', padding: '6px 16px' }} onClick={importApply} disabled={busy || !importText.trim()}>가져와서 저장</button>
-            </div>
-            {preview && (
-              <div style={{ marginTop: 8, fontSize: 12 }}>
-                <b>미리보기</b> — 형식 {preview.format} · 인식 사이트 {preview.parsedSites} · 저장 후 사이트 {preview.preview.sites.length} · 건너뜀 {preview.skipped.length}줄 · 점검 {preview.issues.length}건
-                <STable style={{ marginTop: 4 }}>
-                  <thead><tr><th>DC</th><th>Edge private</th><th>Edge public</th><th>IRS private</th><th>IRS public</th></tr></thead>
-                  <tbody>{preview.preview.sites.map((s) => <tr key={s.dc}><td>{s.dc}</td><td>{s.edge.privateIp || '—'}</td><td>{s.edge.publicIp || '—'}</td><td>{s.irs.privateIp || '—'}</td><td>{s.irs.publicIp || '—'}</td></tr>)}</tbody>
-                </STable>
-                {preview.skipped.length > 0 && <pre className="muted" style={{ fontSize: 11, maxHeight: 100, overflow: 'auto' }}>{'건너뜀:\n' + preview.skipped.join('\n')}</pre>}
+          {!canCsv() && <div className="card muted" style={{ marginBottom: 12, fontSize: 12.5 }}>{CSV_DENIED_NOTE}</div>}
+          {canCsv() && (
+            <div className="card" style={{ marginBottom: 12 }}>
+              <b>가져오기 — 표 붙여넣기 / CSV·JSON 파일</b>
+              <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>
+                스프레드시트(첨부 표)를 그대로 붙여넣으세요: 열 순서 <code>Datacenter · Server(Main/Edge/IRS) · private IP · public IP …</code>, IRS 행의 DC 가 비어 있으면 직전 DC 로 이어집니다. 이 도구가 내보낸 CSV/JSON 도 같은 자리에서 읽습니다(머리글로 자동 판별). 같은 DC 는 IP 를 갱신하되 저장된 SSH 비밀은 유지합니다.
               </div>
-            )}
-          </div>
+              <textarea className="input" rows={7} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }} value={importText} onChange={(e) => setImportText(e.target.value)} placeholder={'OC2\tMain\t192.168.20.143\t10.94.40.217\nAZ\tEdge\t192.168.30.221\t10.112.158.217\n\tIRS\t192.168.31.11\t10.112.159.11'} />
+              <div className="flex gap" style={{ alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
+                <input type="file" accept=".csv,.tsv,.txt,.json" onChange={onFile} style={{ fontSize: 12 }} />
+                <label className="flex gap" style={{ alignItems: 'center', fontSize: 12 }}><input type="checkbox" checked={importReplace} onChange={(e) => setImportReplace(e.target.checked)} />기존 사이트 목록 교체(병합 대신)</label>
+                <span style={{ flex: 1 }} />
+                <button className="tab" onClick={importPreview} disabled={busy || !importText.trim()}>미리보기</button>
+                <button className="login-btn" style={{ flex: 'none', padding: '6px 16px' }} onClick={importApply} disabled={busy || !importText.trim()}>가져와서 저장</button>
+              </div>
+              {preview && (
+                <div style={{ marginTop: 8, fontSize: 12 }}>
+                  <b>미리보기</b> — 형식 {preview.format} · 인식 사이트 {preview.parsedSites} · 저장 후 사이트 {preview.preview.sites.length} · 건너뜀 {preview.skipped.length}줄 · 점검 {preview.issues.length}건
+                  <STable style={{ marginTop: 4 }}>
+                    <thead><tr><th>DC</th><th>Edge private</th><th>Edge public</th><th>IRS private</th><th>IRS public</th></tr></thead>
+                    <tbody>{preview.preview.sites.map((s) => <tr key={s.dc}><td>{s.dc}</td><td>{s.edge.privateIp || '—'}</td><td>{s.edge.publicIp || '—'}</td><td>{s.irs.privateIp || '—'}</td><td>{s.irs.publicIp || '—'}</td></tr>)}</tbody>
+                  </STable>
+                  {preview.skipped.length > 0 && <pre className="muted" style={{ fontSize: 11, maxHeight: 100, overflow: 'auto' }}>{'건너뜀:\n' + preview.skipped.join('\n')}</pre>}
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 

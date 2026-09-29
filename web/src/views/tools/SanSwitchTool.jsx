@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';   // v2.447: 서버 문구의 **강조** 별표 노출 방지(감사 I6)
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
-import { fetchJson, postJson, delJson } from '../../api.js';
+import { fetchJson, postJson, delJson, canCsv } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { agoText } from './relTime.js';
 import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2.631 A6-2631-04: 엣지 시계 빠름 표지
@@ -259,9 +259,9 @@ export default function SanSwitchTool() {
               스토리지 모니터링과 **같은 공용 컴포넌트**를 쓴다(판정·문구 단일 소스 — BulkDeviceIo 헤더).
               ⚠ 식별 키는 host **단독**이다(스토리지는 host+type) — sanswitch/registry.js 가 host
                 중복을 거부하므로 type 을 키에 넣으면 '드라이런 통과 → 저장 예외' 가 된다. */}
-          <button className="tab" style={{ flex: 'none', padding: '6px 12px' }}
+          {canCsv() && <button className="tab" style={{ flex: 'none', padding: '6px 12px' }}
             title="CSV 또는 자유텍스트로 스위치를 일괄 등록/수정합니다. 샘플 내려받기·형식 검증·실제 로그인 테스트·선택 등록을 한 창에서 합니다."
-            onClick={() => setBulkOpen(true)}>⬆ 대량 등록(CSV·텍스트)</button>
+            onClick={() => setBulkOpen(true)}>⬆ 대량 등록(CSV·텍스트)</button>}
         </div>
       </div>
 
@@ -399,7 +399,7 @@ export default function SanSwitchTool() {
         </Modal>
       )}
 
-      {bulkOpen && (
+      {canCsv() && bulkOpen && (
         <BulkDeviceIo base="/tools/sanswitch" title="SAN 스위치 대량 등록 — CSV · 자유텍스트" keyLabel="host"
           onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); load(); }} />
       )}

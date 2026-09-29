@@ -6,7 +6,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { authenticateAD } from './ad.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
-import { rolePermissionSet, userPermissionSet } from './permissions.js';
+import { userHasPermission } from './permissions.js';
 import { VALID_ROLES, SUPER_ADMIN, isAdminTier, authzRole } from './roles.js';
 import { effectiveLoginPolicy, userLoginPolicy, singleSessionRequired, loadSessionSecurity } from '../security/securitySettings.js';
 import { isActiveSession } from './sessions.js';
@@ -1037,9 +1037,9 @@ export function requireRole(...roles) {
 export function requirePerm(...keys) {
   const permGate = (req, res, next) => {
     const role = !config.auth.enabled ? AUTH_DISABLED_ROLE : (req.user && req.user.role);
-    // v2.643: admin 도 '관리자가 끌 수 있는 권한'(data.csv)은 매트릭스를 본다 — 판정은 userPermissionSet 하나.
-    const set = !config.auth.enabled ? rolePermissionSet(role) : userPermissionSet(req.user);
-    if (keys.some((k) => set.has(k))) return next();
+    // v2.643: admin 도 '관리자가 끌 수 있는 권한'(data.csv)은 매트릭스를 본다 — 판정은 userHasPermission 하나.
+    const who = !config.auth.enabled ? { role } : req.user;
+    if (keys.some((k) => userHasPermission(who, k))) return next();
     return res.status(403).json({ error: 'forbidden', requiredPerm: keys });
   };
   permGate.gate = Object.freeze({ kind: 'perm', arg: Object.freeze([...keys]) }); // v2.614 아키텍처 점검 태그(requireRole 참조)

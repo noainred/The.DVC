@@ -3,7 +3,7 @@ import { downloadFailText } from '../downloadFailText.js'; // v2.618 WEB-6
 import { pduTotals, pduTotalNote, pduPowerMark } from './pduTotals.js';
 import { STable } from '../../components/STable.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson, delJson, downloadFile, usePolling } from '../../api.js';
+import { fetchJson, postJson, delJson, downloadFile, usePolling, canCsv } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
@@ -111,7 +111,7 @@ export default function PduTool() {
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={() => setIvOpen(true)}>⏱ 수집 주기</button>
           <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={() => setThOpen(true)}>🚨 임계치</button>
-          <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={() => setCsvOpen(true)}>📄 CSV</button>
+          {canCsv() && <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={() => setCsvOpen(true)}>📄 CSV</button>}
           <button className="logout-btn" style={{ padding: '7px 12px' }} disabled={busy} onClick={collectAll}>⚡ 전체 수집</button>
           <button className="login-btn" style={{ flex: 'none', padding: '7px 14px' }} onClick={openAdd}>+ PDU 추가</button>
         </div>
@@ -238,7 +238,7 @@ export default function PduTool() {
       )}
 
       {form && <DeviceModal {...{ form, setF, setForm, close, save, runTest, busy, testing, test, msg, data }} />}
-      {csvOpen && <CsvModal onClose={() => { setCsvOpen(false); load(); }} />}
+      {canCsv() && csvOpen && <CsvModal onClose={() => { setCsvOpen(false); load(); }} />}
       {ivOpen && <IntervalModal data={data} onClose={() => { setIvOpen(false); load(); }} />}
       {thOpen && <ThresholdModal data={data} onClose={() => { setThOpen(false); load(); }} />}
     </>

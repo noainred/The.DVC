@@ -400,5 +400,8 @@ export function userPermissions(user) { return [...userPermissionSet(user)]; }
 /** 사용자(req.user) 가 특정 권한을 가지는지. */
 export function userHasPermission(user, key) {
   if (!user) return false;
-  return userPermissionSet(user).has(key);
+  if (isSuperAdmin(user)) return true;
+  // admin 은 예전처럼 **어떤 키든** 통과한다(카탈로그 밖 키 포함 — 기존 계약) — admin 행에서 끈 키(data.csv)만 예외다.
+  if (user.role === 'admin') return !(loadMatrix().adminDenied || []).includes(key);
+  return rolePermissionSet(user.role).has(key);
 }

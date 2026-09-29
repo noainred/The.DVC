@@ -1,6 +1,6 @@
 // VmExport.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
-import { fetchJson, downloadFile } from '../../api.js';
+import { fetchJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, StateBadge } from '../../components/ui.jsx';
 import { Card } from './shared.jsx';
@@ -17,9 +17,11 @@ export function VmExport({ scope }) {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [dlMsg, setDlMsg] = useState('');
+  // v2.643: 이 도구는 내보내기 전용(미리보기 API 도 같은 권한) — 관리자 이상 + data.csv 권한만. 없으면 조회하지 않는다.
+  const csvOk = canCsv();
   useEffect(() => {
     setData(null); setErr(null);
-    if (!scope) return undefined;
+    if (!scope || !csvOk) return undefined;
     let dead = false;
     setBusy(true);
     fetchJson(`/tools/vm-export?vcenterId=${encodeURIComponent(scope)}`)
@@ -27,13 +29,14 @@ export function VmExport({ scope }) {
       .catch((e) => { if (!dead) setErr(e.message); })
       .finally(() => { if (!dead) setBusy(false); });
     return () => { dead = true; };
-  }, [scope]);
+  }, [scope, csvOk]);
   // v2.602(감사 WEB2602-01): downloadFile 이 res.ok 를 본다 — 실패(409·403·5xx)의 오류 JSON 을 파일로 저장하지 않고 사유를 화면에 말한다.
   const download = async () => {
     setDlMsg('');
     try { await downloadFile(`/tools/vm-export.csv?vcenterId=${encodeURIComponent(scope)}`, `vm-export-${scope}-${dayStamp()}.csv`); } catch (e) { setDlMsg(downloadFailText(e)); }
   };
 
+  if (!csvOk) return <div className="card muted" style={{ fontSize: 12.5 }}>{CSV_DENIED_NOTE}</div>;
   if (!scope) return <div className="card"><span className="muted">위 <b>범위</b>에서 vCenter 를 선택하세요 — 그 vCenter 의 모든 VM 상세(호스트·클러스터·NIC·디스크·데이터스토어·게스트 파티션 등)를 미리보고 CSV 로 내려받습니다.</span></div>;
   if (busy && !data) return <Loading />;
   if (err && !data) return <ErrorBox message={err} />;

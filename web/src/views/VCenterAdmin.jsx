@@ -33,7 +33,7 @@ export default function VCenterAdmin() {
   };
   useEffect(() => {
     load();
-    if (csvOk) fetchJson('/admin/vcenters/import-suggestions').then((s) => setServerPath((p) => p || s.default || '')).catch(() => {});
+    if (canCsv()) fetchJson('/admin/vcenters/import-suggestions').then((s) => setServerPath((p) => p || s.default || '')).catch(() => {});
   }, []);
 
   const showImportResult = (r, extra = '') => setImportMsg(r.ok
