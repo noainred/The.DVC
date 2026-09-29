@@ -56,6 +56,10 @@ export function vmUsesGpu(v) { return !!(v && v.gpu); }
 // 데모(mock): 선택 법인의 패스쓰루 호스트/VM에 합성 사용률을 채운다.
 function pollMock(snap, vcId) {
   const hostNames = gpuHostIds(snap, vcId);
+  // v2.653: 화면의 '값이 없는 이유' 칩이 데모에서도 보이게 일부 VM 은 일부러 읽지 못한 것으로 둔다 —
+  //   VM 7대 중 1대는 실패(수집 진단에 사유), 법인 이름 해시로 한 곳은 전부 실패(수집 대상 계정 없음)로 둔다.
+  const results = [];
+  const vcAllFail = hashStr(vcId) % 5 === 0;
   const hosts = [];
   const vms = [];
   const t = Date.now() / 60000;
@@ -66,6 +70,11 @@ function pollMock(snap, vcId) {
   }
   for (const v of snap.vms || []) {
     if (v.vcenterId !== vcId || !hostNames.has(v.host) || v.powerState !== 'POWERED_ON' || !vmUsesGpu(v) || v.template) continue;
+    if (vcAllFail) continue;
+    if (hashStr(v.id) % 7 === 0) {
+      results.push({ vm: v.name, host: v.host, vcenterId: vcId, os: 'Linux', account: 'demo(공용)·auto', ok: false, error: '데모: nvidia-smi 결과 없음(드라이버 미설치 시뮬레이션)' });
+      continue;
+    }
     // v2.650: 데모도 세 동작 상태(연산 중 / 메모리 점유·유휴 / 유휴)가 모두 보이게 VM 마다 성격을 다르게 둔다.
     const kind = hashStr(v.id) % 3;
     const wave = Math.abs(Math.sin((hashStr(v.id) % 80) + t / 5));
@@ -75,8 +84,12 @@ function pollMock(snap, vcId) {
     const memUsedMB = Math.round((memTotalMB * memUsedPct) / 100);
     const tempC = Math.round(kind === 0 ? 45 + util * 0.3 : kind === 1 ? 38 : 32);
     vms.push({ vmId: v.id, host: v.host, vcenterId: vcId, utilPct: Math.min(100, util), memUsedPct, memUsedMB, memTotalMB, tempC, gpus: Number(v.gpu?.count) || 1 });
+    if (results.length < 200) results.push({ vm: v.name, host: v.host, vcenterId: vcId, os: 'Linux', account: 'demo(공용)·auto', ok: true, util: Math.min(100, util), mem: memUsedPct, temp: tempC, gpus: Number(v.gpu?.count) || 1 });
   }
-  return { hosts, vms };
+  const diag = vcAllFail
+    ? { vcId, at: Date.now(), stage: '수집 대상 계정 없음', counts: { gpuHosts: hostNames.size }, results: [], error: null }
+    : { vcId, at: Date.now(), stage: '완료', counts: { gpuHosts: hostNames.size, candidates: results.length }, results, error: null, collected: vms.length };
+  return { hosts, vms, diag };
 }
 
 const hashStr = (s) => { let h = 0; for (let i = 0; i < String(s).length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; };
@@ -254,12 +267,15 @@ async function pollOnce() {
   try {
     if (isStopped()) { lastRun = { at: Date.now(), skipped: '긴급중단' }; return; }
     const s = loadGpuGuestSettings();
-    if (!s.enabled) { lastRun = { at: Date.now(), skipped: '비활성' }; return; }
     const snap = store.get();
-    const enabledIds = Object.entries(s.vcenters).filter(([, v]) => v.enabled).map(([id]) => id);
+    const mock = snap.source === 'mock';
+    // v2.653: 데모(mock)는 설정 없이도 전 법인에 합성 게스트 값을 채운다 — 예전에는 설정을 켜야만 채워져 데모 화면의
+    //   온도·메모리·VM 동작이 전부 비어 있었다. 실데이터 경로(live)는 바뀌지 않는다(설정이 꺼져 있으면 그대로 건너뛴다).
+    const demoAll = mock && !(s.enabled && Object.values(s.vcenters || {}).some((v) => v && v.enabled));
+    if (!s.enabled && !demoAll) { lastRun = { at: Date.now(), skipped: '비활성' }; return; }
+    const enabledIds = demoAll ? (snap.vcenters || []).map((v) => v.id).filter(Boolean) : Object.entries(s.vcenters).filter(([, v]) => v.enabled).map(([id]) => id);
     if (!enabledIds.length) { lastRun = { at: Date.now(), skipped: '대상 법인 없음' }; return; }
 
-    const mock = snap.source === 'mock';
     const reg = mock ? [] : (loadVcenterConfig().vcenters || []);
     let collectedHosts = 0; let collectedVms = 0; let errors = 0;
     const diags = [];

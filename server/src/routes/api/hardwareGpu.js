@@ -66,7 +66,8 @@ export function gatherGuestWhyCtx(snap) {
       ctx = { mode: 'site', agent, edgeVersion: agent ? verOf(agent) : null, report,
         diagVc: report ? (report.vcenters || []).find((x) => String(x?.vcId) === id) || null : null };
     } else {
-      const enabled = settings ? !!(settings.enabled && settings.vcenters?.[id]?.enabled) : null;
+      // v2.653: 데모(mock)는 설정과 무관하게 전 법인을 합성 수집한다(gpu/poller.js demoAll) — '수집 꺼짐' 이라 말하면 거짓이다.
+      const enabled = snap.source === 'mock' ? null : settings ? !!(settings.enabled && settings.vcenters?.[id]?.enabled) : null;
       ctx = { mode: 'direct', enabled, diagVc: local ? (local.vcenters || []).find((x) => String(x?.vcId) === id) || null : null };
     }
     cache.set(id, ctx);

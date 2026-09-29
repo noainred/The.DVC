@@ -161,17 +161,23 @@ function mkGpus(idx, site) {
   }));
 }
 // VM의 GPU 할당 정보(vGPU/패스쓰루). GPU 호스트 위 VM의 일부에만 부여.
-function mkVmGpu(hostState, idx) {
+// v2.653: ord = 그 호스트 안에서 몇 번째 VM 인가. 예전에는 전역 idx % 3 만 봐서 GPU 호스트 49대 중 16대가 GPU VM 0대였다
+//   (VM 배치와 idx 주기가 겹쳤다) — 데모 표의 할당·동작·온도 칸이 그 호스트에서 전부 비었다. 이제 호스트마다 앞 VM 부터 준다
+//   (패스쓰루는 카드 수만큼, vGPU 는 호스트 VM 의 절반 — 프로파일 합이 VRAM 을 넘는 과할당도 재현된다).
+function mkVmGpu(hostState, idx, ord = null) {
   const hg = hostState?.gpus || [];
   if (!hg.length) return null;
   const mode = hg[0].mode; // 'vgpu' | 'passthrough' | 'vsga'
   if (mode === 'vsga') return null;            // vSGA는 할당형 GPU 아님
-  if (idx % 3 !== 0) return null;              // GPU 호스트 VM의 ~1/3만 GPU 보유
+  if (ord != null) {
+    if (mode === 'passthrough' && ord >= hg.length) return null;
+    if (mode === 'vgpu' && ord % 2 !== 0) return null;
+  } else if (idx % 3 !== 0) return null;       // GPU 호스트 VM의 ~1/3만 GPU 보유
   if (mode === 'vgpu') {
     const prof = hg[0].model.includes('A100') ? 'grid_a100-10c' : hg[0].model.includes('H100') ? 'grid_h100-20c' : 'grid_t4-4q';
     return { type: 'vgpu', count: 1, profile: prof, model: hg[0].model };
   }
-  return { type: 'passthrough', count: idx % 6 === 0 ? 2 : 1, profile: '', model: hg[0].model };
+  return { type: 'passthrough', count: ord != null ? 1 : (idx % 6 === 0 ? 2 : 1), profile: '', model: hg[0].model };
 }
 function mkLicenses(site) {
   const n = site.hosts;
@@ -411,8 +417,10 @@ export function generateSnapshot() {
     }
 
     // VMs
+    const vmOrd = new Map(); // v2.653: 호스트별 VM 순번(mkVmGpu)
     for (const vm of env.vms) {
       const hostState = hosts.find((x) => x.name === vm.host.name && x.vcenterId === site.id);
+      const ord = vmOrd.get(vm.host.name) || 0; vmOrd.set(vm.host.name, ord + 1);
       const hostDown = hostState?.connectionState === 'DISCONNECTED';
       const powered = vm.baseOn && !hostDown;
       const cpuUsagePct = powered ? Math.round(clamp(15 + 60 * Math.abs(Math.sin((vm.idx + tick) / 11)), 1, 100)) : 0;
@@ -453,7 +461,7 @@ export function generateSnapshot() {
         snapshotOldestTs: vm.idx % 6 === 0 ? Date.now() - ((vm.idx % 180) + 1) * 86_400_000 : null,
         snapshotNewestTs: vm.idx % 6 === 0 ? Date.now() - ((vm.idx % 30) + 1) * 86_400_000 : null,
         snapshotNames: vm.idx % 6 === 0 ? ['pre-patch', 'before-upgrade'].slice(0, 1 + (vm.idx % 2)) : [],
-        gpu: mkVmGpu(hostState, vm.idx),
+        gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
       });
     }
 
