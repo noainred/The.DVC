@@ -153,6 +153,7 @@ test('③-b devices·events — 법인을 싣고 ?corp 로 좁힌다', async () 
   const f = await call('admin', '/tools/cvp/events?hours=24&corp=kr');
   assert.deepEqual(f.j.events.map((e) => e.key).sort(), ['e1', 'e2']);
   assert.ok(f.j.events.every((e) => e.corpName === 'Korea'));
+  assert.equal(f.j.corpCounts.length, 2, '법인 칩 개수는 법인 필터 전 기준(고른 법인만 남지 않는다)');
   const none = await call('admin', '/tools/cvp/events?hours=24&corp=nope');
   assert.equal(none.j.events.length, 0, '모르는 법인은 전체로 넓히지 않는다');
   const unassigned = await call('admin', '/tools/cvp/events?hours=24&corp=');

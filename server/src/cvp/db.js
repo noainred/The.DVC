@@ -19,6 +19,7 @@
  *   ts 단독 인덱스 · COUNT(*) 는 짧게 캐시하고 캐시임을 밝힌다(countsAt).
  */
 import fs from 'node:fs';
+import { pushAll } from '../util/pushAll.js';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
@@ -886,19 +887,20 @@ export async function listEvents({ agent = null, cvpId = null, cvpIds = null, si
   const where = ['ts >= ?']; const args = [now - Math.max(60_000, Number(sinceMs) || 0)];
   if (agent != null) { where.push('agent=?'); args.push(agent); }
   if (cvpId != null) { where.push('cvp_id=?'); args.push(cvpId); }
-  // v2.645: 법인 필터 — 그 법인에 속한 CVP 서버 여러 대(빈 배열이면 결과 0 — '전체' 로 넓히지 않는다).
-  if (Array.isArray(cvpIds)) {
-    if (!cvpIds.length) return { events: [], counts: {}, ...(byCvp ? { countsByCvp: [] } : {}) };
-    const ids = cvpIds.slice(0, 500).map(String);
-    where.push(`cvp_id IN (${ids.map(() => '?').join(',')})`); args.push(...ids);
-  }
-  const counts = {};
-  for (const r of db.conn.prepare(`SELECT severity, COUNT(*) AS n FROM cvp_event WHERE ${where.join(' AND ')} GROUP BY severity`).all(...args)) counts[r.severity] = Number(r.n);
-  // v2.645: (CVP 서버·agent·심각도)별 개수 — 라우트가 등록부 담당 행만 골라 법인별로 합친다(심각도 필터 전 기준).
+  // v2.645: (CVP 서버·agent·심각도)별 개수 — 법인 필터 **전** 기준(법인 칩은 고른 법인과 무관하게 전부 보여야 한다 — deviceFacets 규칙 ①).
+  //   라우트가 등록부 담당 행만 골라 법인별로 합친다. 심각도 필터 전 기준.
   const countsByCvp = byCvp
     ? db.conn.prepare(`SELECT cvp_id, agent, severity, COUNT(*) AS n FROM cvp_event WHERE ${where.join(' AND ')} GROUP BY cvp_id, agent, severity`).all(...args)
       .map((r) => ({ cvpId: r.cvp_id, agent: r.agent, severity: r.severity, n: Number(r.n) }))
     : null;
+  // v2.645: 법인 필터 — 그 법인에 속한 CVP 서버 여러 대(빈 배열이면 결과 0 — '전체' 로 넓히지 않는다).
+  if (Array.isArray(cvpIds)) {
+    if (!cvpIds.length) return { events: [], counts: {}, ...(countsByCvp ? { countsByCvp } : {}) };
+    const ids = cvpIds.slice(0, 500).map(String);
+    where.push(`cvp_id IN (${ids.map(() => '?').join(',')})`); pushAll(args, ids);
+  }
+  const counts = {};
+  for (const r of db.conn.prepare(`SELECT severity, COUNT(*) AS n FROM cvp_event WHERE ${where.join(' AND ')} GROUP BY severity`).all(...args)) counts[r.severity] = Number(r.n);
   if (severity) { where.push('severity=?'); args.push(String(severity)); }
   const lim = Math.max(1, Math.min(2000, Number(limit) || 500));
   const rows = db.conn.prepare(`SELECT * FROM cvp_event WHERE ${where.join(' AND ')} ORDER BY ts DESC LIMIT ?`).all(...args, lim + 1);

@@ -371,7 +371,7 @@ api.get('/tools/cvp/events', toolsPerm, fullScopeOnly, async (req, res) => {
     return hit ? { id: String(id), key: hit.key, hostname: hit.hostname || '' } : { id: String(id) };
   });
   const list = r.events.filter(own).map((e) => { const c = corpOf(e.cvpId); return { ...e, deviceRefs: refsOf(e), cvpName: byId.get(e.cvpId)?.name || e.cvpId, corpId: c.corpId, corpName: c.corpName, ...(admin ? {} : { title: maskErrText(e.title, hosts), desc: maskErrText(e.desc, hosts) }) }; });
-  // v2.645: 법인별 심각도 개수(조회 기간·CVP·법인 필터 적용, 심각도 필터 전) — 등록부 담당 행만. 법인 칩이 쓴다.
+  // v2.645: 법인별 심각도 개수(조회 기간·CVP 적용, 법인·심각도 필터 전) — 등록부 담당 행만. 법인 칩이 쓴다.
   const corpCounts = new Map();
   for (const x of (r.countsByCvp || [])) {
     if (!own(x)) continue;
