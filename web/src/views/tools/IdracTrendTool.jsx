@@ -17,7 +17,7 @@ import {
   corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
   loadOrder, saveOrder, moveKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
   cpuDiagText, idracStateBanner, loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
-  CHART_SERIES, hostCpuNote, loadCpuRef, saveCpuRef, showCpuRef, presetSpanOf, maxBackOf, scrollWindow, scrollLabel,
+  CHART_SERIES, hostCpuNote, shownSeriesOf, hostGpuEmptyText, hostGpuNote, loadCpuRef, saveCpuRef, showCpuRef, presetSpanOf, maxBackOf, scrollWindow, scrollLabel,
 } from './idracTrendText.js';
 
 const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12 };
@@ -101,7 +101,7 @@ export default function IdracTrendTool() {
   const pts = data?.points || [];
   const span = data ? data.end - data.start : DAY;
   const st = Object.fromEntries(CHART_SERIES.map((s) => [s.k, statsOf(pts, s.k)]));
-  const shownSeries = CHART_SERIES.filter((s) => !s.vc || data?.hostCpu); // ESXi CPU 는 매칭된 가상화 서버에만
+  const shownSeries = shownSeriesOf(data); // ESXi CPU·GPU 는 매칭된 가상화 서버에만(GPU 는 GPU 가 없다고 확인되면 숨김)
   const srv = servers.find((s) => s.id === serverId);
   const esxi = data?.kind === 'esxi';
   const toggle = (k) => { if (st[k]) setOn((o) => ({ ...o, [k]: !o[k] })); };
@@ -171,14 +171,14 @@ export default function IdracTrendTool() {
               style={{ padding: '10px 14px', minWidth: 0, cursor: arrange ? 'grab' : x ? 'pointer' : 'default', opacity: dragK === s.k ? 0.4 : !x ? 0.55 : on[s.k] ? 1 : 0.5, userSelect: 'none', outline: arrange ? '1px dashed var(--border)' : undefined }}>
               <div className="flex" style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
                 <LineSwatch color={s.color} st={styles[s.k]} />
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', letterSpacing: 0.5, minWidth: 0, wordBreak: 'keep-all', overflowWrap: 'anywhere' }}>{s.label}</span>
                 {arrange
                   ? <span className="flex" style={{ marginLeft: 'auto', gap: 4 }}>{arrowBtn(-1, '◀')}{arrowBtn(1, '▶')}</span>
                   : <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{x ? (on[s.k] ? '표시' : '숨김') : ''}</span>}
               </div>
               <div style={{ fontSize: 22, fontWeight: 800, marginTop: 5, color: s.color, fontVariantNumeric: 'tabular-nums', textAlign: 'center' }}>{x ? valueText(x.cur, s.unit) : '—'}</div>
               <div style={{ fontSize: 11, marginTop: 5, color: 'var(--text-faint)', textAlign: 'center', overflowWrap: 'anywhere' }}>
-                {x ? `평균 ${valueText(x.avg, s.unit)} · 최대 ${valueText(x.max, s.unit)}` : s.k === 'gpuTemp' ? 'GPU 없음 — 센서 미보고' : s.k === 'cpuPct' ? '보고 없음 — 어느 경로로도 못 읽음' : s.k === 'powerW' && data?.power && !data.power.found ? '전력 보고 대기' : s.k === 'hostCpuPct' ? 'vCenter 값 없음 — v2.666 부터 쌓임' : '보고 없음'}
+                {x ? `평균 ${valueText(x.avg, s.unit)} · 최대 ${valueText(x.max, s.unit)}` : s.k === 'gpuTemp' ? 'GPU 없음 — 센서 미보고' : s.k === 'cpuPct' ? '보고 없음 — 어느 경로로도 못 읽음' : s.k === 'powerW' && data?.power && !data.power.found ? '전력 보고 대기' : s.k === 'hostCpuPct' ? 'vCenter 값 없음 — v2.666 부터 쌓임' : s.gpu ? hostGpuEmptyText(data) : '보고 없음'}
               </div>
             </div>
           );
@@ -360,6 +360,7 @@ export default function IdracTrendTool() {
           GPU 온도는 사용률이 아니라 GPU 가 동작하는지 가늠하는 근거입니다. 흡기는 서버가 빨아들이는 공기(전산실) 온도, 배기는 내보내는 공기 온도입니다.
           iDRAC 무응답 구간은 선을 끊고 0 으로 채우지 않습니다. {retentionNote(data)} 기간이 길면 집계 단위(5분 ~ 1일) 평균으로 표시합니다.
           {hostCpuNote(data) ? ` ${hostCpuNote(data)}` : ''}
+          {hostGpuNote(data) ? ` ${hostGpuNote(data)}` : ''}
           {data?.firstTs ? ` 이 서버의 첫 적재는 ${ymd(data.firstTs)} ${hm(data.firstTs)} 입니다(그 이전은 비어 있습니다).` : ''}
         </div>
       </div>
@@ -367,7 +368,7 @@ export default function IdracTrendTool() {
       {modal === 'host' && data?.host && <HostDetailLoader host={data.host} onClose={() => setModal(null)} />}
       {modal === 'idrac' && srv && <IdracDetailModal server={{ id: srv.id, name: srv.name, remote: srv.remote, serviceTag: srv.serviceTag, datacenterId: srv.corp }} onClose={() => setModal(null)} />}
       {(modal === 'csv' || modal === 'xlsx') && (
-        <CsvModal hasHost={!!data?.hostCpu} fmt={modal} gpuOnly={gpuOnly} styles={styles} serverId={serverId} serverName={srv?.name || serverId} corp={corp} site={site} siteCount={inSite.length}
+        <CsvModal hasHost={!!data?.hostCpu} noGpu={data?.hostGpu?.hasGpu === false} fmt={modal} gpuOnly={gpuOnly} styles={styles} serverId={serverId} serverName={srv?.name || serverId} corp={corp} site={site} siteCount={inSite.length}
           range={range} custom={custom} on={on} onClose={() => setModal(null)} />
       )}
     </>
@@ -394,12 +395,12 @@ function HostDetailLoader({ host, onClose }) {
   return <EntityDetail type="host" item={item} onClose={onClose} />;
 }
 
-function CsvModal({ hasHost = false, fmt = 'csv', gpuOnly = false, styles = null, serverId, serverName, corp, site, siteCount, range, custom, on, onClose }) {
+function CsvModal({ hasHost = false, noGpu = false, fmt = 'csv', gpuOnly = false, styles = null, serverId, serverName, corp, site, siteCount, range, custom, on, onClose }) {
   const [scope, setScope] = useState('server');
   const [r, setR] = useState(range === 'custom' && !custom ? '24h' : range);
   const [cols, setCols] = useState('all');
   const [busy, setBusy] = useState(false); const [e, setE] = useState(null);
-  const keys = CHART_SERIES.filter((s) => !s.vc || hasHost || scope === 'dc').map((s) => s.k).filter((k) => cols === 'all' || on[k]);
+  const keys = CHART_SERIES.filter((s) => scope === 'dc' || (!s.vc || (hasHost && !(s.gpu && noGpu)))).map((s) => s.k).filter((k) => cols === 'all' || on[k]);
   const opt = (cur, k) => (cur === k ? 'login-btn' : 'tab');
   const xlsx = fmt === 'xlsx';
   const go = async () => {
@@ -422,7 +423,7 @@ function CsvModal({ hasHost = false, fmt = 'csv', gpuOnly = false, styles = null
       </div>
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>항목</div>
       <div className="flex wrap" style={{ gap: 8, marginBottom: 14 }}>
-        <button type="button" className={opt(cols, 'all')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setCols('all')}>전체 {CHART_SERIES.filter((s) => !s.vc || hasHost || scope === 'dc').length}개</button>
+        <button type="button" className={opt(cols, 'all')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setCols('all')}>전체 {CHART_SERIES.filter((s) => scope === 'dc' || (!s.vc || (hasHost && !(s.gpu && noGpu)))).length}개</button>
         <button type="button" className={opt(cols, 'shown')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setCols('shown')}>표시 중인 항목만 ({Object.values(on).filter(Boolean).length}개)</button>
       </div>
       <div className="banner">

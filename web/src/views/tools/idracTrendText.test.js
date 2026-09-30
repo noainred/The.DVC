@@ -84,10 +84,10 @@ describe('판별 근거 문구', () => {
 describe('v2.661 카드 순서 · 출처 문구', async () => {
   const m = await import('./idracTrendText.js');
   it('카드 6장 — 흡기·배기 추가, 기본 순서는 SERIES 순서', () => {
-    expect(m.DEFAULT_ORDER).toEqual(['cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp', 'powerW', 'hostCpuPct']); // v2.666 ESXi CPU 카드(가상화 서버에만 보인다)
+    expect(m.DEFAULT_ORDER).toEqual(['cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp', 'powerW', 'hostCpuPct', 'hostGpuPct', 'hostGpuMemPct']); // v2.666 ESXi CPU 카드(가상화 서버에만 보인다)
   });
   it('저장된 순서 정규화 — 모르는 키는 버리고 빠진 키는 뒤에 붙인다', () => {
-    expect(m.normalizeOrder(['powerW', 'zz', 'powerW', 'cpuPct'])).toEqual(['powerW', 'cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp', 'hostCpuPct']);
+    expect(m.normalizeOrder(['powerW', 'zz', 'powerW', 'cpuPct'])).toEqual(['powerW', 'cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp', 'hostCpuPct', 'hostGpuPct', 'hostGpuMemPct']);
     expect(m.normalizeOrder(null)).toEqual(m.DEFAULT_ORDER);
   });
   it('◀ ▶ 이동과 끌어서 놓기', () => {
@@ -221,7 +221,7 @@ import { SERIES as S2666, gapAreas as gap2666, kindBasisText as kb2666 } from '.
 describe('v2.666 ESXi CPU(vCenter) 계열 · 기준선 토글 · 과거 스크롤', () => {
   it('ESXi CPU 는 차트 계열에만 — iDRAC 6계열(표·조건·무응답 판정)에는 넣지 않는다', () => {
     expect(S2666.some((s) => s.k === 'hostCpuPct')).toBe(false);
-    expect(CHART_SERIES.at(-1)).toBe(HOST_CPU_SERIES);
+    expect(CHART_SERIES.includes(HOST_CPU_SERIES)).toBe(true);
     expect(ORDER2666).toContain('hostCpuPct');
     expect(ns2666(null).hostCpuPct.dash).toBe('dot');
     // iDRAC 값이 모두 비고 vCenter 값만 있는 점은 여전히 'iDRAC 무응답' 이다
@@ -258,5 +258,28 @@ describe('v2.666 ESXi CPU(vCenter) 계열 · 기준선 토글 · 과거 스크�
     expect(kb2666({ kind: 'baremetal', serviceTag: 'ABC', hostAmbiguous: true })).toContain('여럿');
     expect(hostCpuNote({})).toBe('');
     expect(hostCpuNote({ hostCpu: { hostName: 'esx01', matchedBy: 'serviceTag' } })).toContain('섞지 않습니다');
+  });
+});
+
+import { HOST_GPU_SERIES, SERIES as S2668, shownSeriesOf, hostGpuEmptyText, hostGpuNote } from './idracTrendText.js';
+describe('v2.668 ESXi 호스트 GPU 계열', () => {
+  it('iDRAC SERIES 에 섞지 않고 차트 계열에만 둔다', () => {
+    expect(S2668.some((s) => s.gpu || s.vc)).toBe(false);
+    expect(HOST_GPU_SERIES.map((s) => s.k)).toEqual(['hostGpuPct', 'hostGpuMemPct']);
+    for (const s of HOST_GPU_SERIES) expect(CHART_SERIES).toContain(s);
+  });
+  it('매칭 없음 → 숨김 · GPU 없음 확인 → 숨김 · 모름 → 보임', () => {
+    const ks = (d) => shownSeriesOf(d).map((s) => s.k);
+    expect(ks(null)).not.toContain('hostGpuPct');
+    expect(ks({ hostCpu: {}, hostGpu: { hasGpu: false } })).not.toContain('hostGpuPct');
+    expect(ks({ hostCpu: {}, hostGpu: { hasGpu: false } })).toContain('hostCpuPct');
+    expect(ks({ hostCpu: {}, hostGpu: { hasGpu: null } })).toContain('hostGpuMemPct');
+    expect(ks({ hostCpu: {}, hostGpu: { hasGpu: true } })).toContain('hostGpuPct');
+  });
+  it('각주는 출처를 밝히고 값이 없으면 그렇게 말한다', () => {
+    expect(hostGpuNote({ hostGpu: { hostName: 'esx01', hasGpu: true, firstTs: {} } })).toMatch(/iDRAC 값이 아닙니다.*아직 적재된 값이 없습니다/);
+    expect(hostGpuNote({ hostGpu: { hasGpu: false } })).toBe('');
+    expect(hostGpuEmptyText({ hostGpu: { hasGpu: false } })).toBe('GPU 없음');
+    expect(hostGpuEmptyText({ hostGpu: { hasGpu: true } })).toMatch(/GPU 모니터링/);
   });
 });

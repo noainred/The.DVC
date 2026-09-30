@@ -190,13 +190,20 @@ export function idracStateOf(s, { now = Date.now(), latest = null, localCycle = 
 
 /** v2.666: 매칭된 ESXi 호스트의 vCenter CPU 사용률 계열(metrics/sampler.js HOST_CPU_METRIC). iDRAC CPU 와 다른 계열이다. */
 export const HOST_CPU_METRIC = 'host_cpu_pct';
+/**
+ * v2.668: 매칭된 ESXi 호스트의 **GPU 사용률·GPU 메모리 점유** 계열(사용자 요청 "이 화면에서 수집한 GPU 사용량 붙여서 호스트 별로
+ * 사용량을 같이"). GPU 모니터링이 이미 호스트 id 로 적재하는 계열(metrics/sampler.js `gpu_util`·`gpu_mem`)을 **읽기만** 한다 —
+ * 새 수집은 없다. vCenter·게스트 출처라 iDRAC 계열(SERIES)과 섞지 않는다(v2.665 규약). GPU 온도는 iDRAC 계열이 이미 있다.
+ */
+export const HOST_GPU_METRICS = Object.freeze({ hostGpuPct: 'gpu_util', hostGpuMemPct: 'gpu_mem' });
 
 async function seriesFor(s, win, { host = undefined } = {}) {
   const id = String(s?.id || '');
   const errors = {};
-  const out = { cpuPct: [], cpuTemp: [], gpuTemp: [], inletTemp: [], exhaustTemp: [], powerW: [], hostCpuPct: [] };
+  const out = { cpuPct: [], cpuTemp: [], gpuTemp: [], inletTemp: [], exhaustTemp: [], powerW: [], hostCpuPct: [], hostGpuPct: [], hostGpuMemPct: [] };
   const matched = host !== undefined ? host : (() => { try { return kindOf(s).host; } catch { return null; } })();
   let hostCpuFirstTs = null;
+  const hostGpuFirstTs = {};
   const cpuParts = { telemetry: [], sensor: [], bmIdrac: [], history: [] };
   let firstTs = null;
   let cpuHistoryKey = null;
@@ -217,6 +224,11 @@ async function seriesFor(s, win, { host = undefined } = {}) {
       try { out.hostCpuPct = db.historyRange(HOST_CPU_METRIC, String(matched.id), win.start, win.end, win.bucketMs); }
       catch (e) { errors.hostCpuPct = e?.message || String(e); }
       try { hostCpuFirstTs = db.metaKey?.(HOST_CPU_METRIC, String(matched.id))?.firstTs ?? null; } catch { /* 참고값 */ }
+      for (const [k, metric] of Object.entries(HOST_GPU_METRICS)) {
+        try { out[k] = db.historyRange(metric, String(matched.id), win.start, win.end, win.bucketMs); }
+        catch (e) { errors[k] = e?.message || String(e); }
+        try { hostGpuFirstTs[k] = db.metaKey?.(metric, String(matched.id))?.firstTs ?? null; } catch { /* 참고값 */ }
+      }
     }
     for (const metric of [...Object.values(TREND_METRICS), ...Object.values(CPU_FALLBACK_METRICS)]) {
       try { const m = db.metaKey?.(metric, id); if (m?.firstTs && (firstTs == null || m.firstTs < firstTs)) firstTs = m.firstTs; } catch { /* 첫 관측은 참고값 */ }
@@ -239,7 +251,7 @@ async function seriesFor(s, win, { host = undefined } = {}) {
     power = powerKeyOf(s, { entries: remotePowerEntries(), hasSeries: (k) => (typeof pdb.latest === 'function' ? pdb.latest(k) != null : false) });
     out.powerW = power.key && pdb.bucketRange ? pdb.bucketRange(power.key, win.start, win.end, win.bucketMs) : [];
   } catch (e) { errors.powerW = e?.message || String(e); }
-  return { points: mergeSeries(win, out), errors, firstTs, cpuSources: cpu.sources, cpuHistoryKey, power: { found: !!power.key, reason: power.reason }, hostCpuFirstTs };
+  return { points: mergeSeries(win, out), errors, firstTs, cpuSources: cpu.sources, cpuHistoryKey, power: { found: !!power.key, reason: power.reason }, hostCpuFirstTs, hostGpuFirstTs };
 }
 
 /** id → 서버 객체(중앙 등록 → 엣지 보고 순). */
@@ -270,6 +282,15 @@ export function kindOf(s, { index = null, inv = undefined } = {}) {
     host: host ? { id: host.id, name: host.name, vcenterId: host.vcenterId || '' } : null,
     matchedBy: m.matchedBy, hostAmbiguous: m.ambiguous,
   };
+}
+
+/** v2.668: 매칭 호스트에 GPU 장치가 있는가(스냅샷 host.gpus). 모르면 null — 화면이 'GPU 없음' 을 단정하지 않게. */
+export function hostHasGpu(host, hosts = null) {
+  if (!host?.id) return null;
+  const list = hosts || store.get().hosts || [];
+  const h = list.find((x) => x.id === host.id);
+  if (!h) return null;
+  return Array.isArray(h.gpus) ? h.gpus.length > 0 : null;
 }
 
 /** 선택 목록(범위 절단 후). 법인 이름은 DataCenter 목록에서, 사이트는 스캔 대역 이름. */
@@ -304,10 +325,10 @@ function serverRows(req, { gpuKeys = null } = {}) {
   return { rows, omitted: r.omitted, scoped: !!r.sc };
 }
 
-const EXPORT_COLS = { cpuPct: 'CPU 사용률(%)', cpuTemp: 'CPU 온도(℃)', gpuTemp: 'GPU 온도(℃)', inletTemp: '흡기 온도(℃)', exhaustTemp: '배기 온도(℃)', powerW: '소비 전력(W)', hostCpuPct: 'ESXi 호스트 CPU(vCenter, %)' };
-const EXPORT_COLORS = { cpuPct: '3b82f6', cpuTemp: 'ef4444', gpuTemp: 'a855f7', inletTemp: '06b6d4', exhaustTemp: 'ec4899', powerW: 'f59e0b', hostCpuPct: '22c55e' };
+const EXPORT_COLS = { cpuPct: 'CPU 사용률(%)', cpuTemp: 'CPU 온도(℃)', gpuTemp: 'GPU 온도(℃)', inletTemp: '흡기 온도(℃)', exhaustTemp: '배기 온도(℃)', powerW: '소비 전력(W)', hostCpuPct: 'ESXi 호스트 CPU(vCenter, %)', hostGpuPct: 'ESXi 호스트 GPU 사용률(%)', hostGpuMemPct: 'ESXi 호스트 GPU 메모리(%)' };
+const EXPORT_COLORS = { cpuPct: '3b82f6', cpuTemp: 'ef4444', gpuTemp: 'a855f7', inletTemp: '06b6d4', exhaustTemp: 'ec4899', powerW: 'f59e0b', hostCpuPct: '22c55e', hostGpuPct: '84cc16', hostGpuMemPct: '14b8a6' };
 // v2.662: 엑셀 차트 선 모양 — 기본은 흡기·배기 점선(화면 기본과 같다). 사용자 설정은 ?styles=k:모양:굵기:점,… 로 받고 허용 목록으로 거른다.
-const EXPORT_DASH_DEFAULT = { inletTemp: 'dash', exhaustTemp: 'dash', hostCpuPct: 'dot' };
+const EXPORT_DASH_DEFAULT = { inletTemp: 'dash', exhaustTemp: 'dash', hostCpuPct: 'dot', hostGpuPct: 'dot', hostGpuMemPct: 'dot' };
 export function parseExportStyles(q) {
   const out = {};
   for (const part of String(q || '').slice(0, 400).split(',')) {
@@ -354,7 +375,7 @@ function exportJob(req, res, ext, gpuKeys) {
   }
   if (req.query.scope === 'dc' && req.query.gpuOnly === '1') targets = targets.filter((s) => s.gpu);
   if (!targets.length) { res.status(404).json(NOT_FOUND); return null; }
-  const cols = String(req.query.cols || 'cpuPct,cpuTemp,gpuTemp,inletTemp,exhaustTemp,powerW,hostCpuPct').split(',').filter((c) => EXPORT_COLS[c]);
+  const cols = String(req.query.cols || 'cpuPct,cpuTemp,gpuTemp,inletTemp,exhaustTemp,powerW,hostCpuPct,hostGpuPct,hostGpuMemPct').split(',').filter((c) => EXPORT_COLS[c]);
   if (!cols.length) { res.status(400).json({ ok: false, reason: '내보낼 항목이 없습니다.' }); return null; }
   const max = ext === 'xlsx' ? XLSX_SERVER_MAX : SERVER_EXPORT_MAX;
   const omitted = Math.max(0, targets.length - max);
@@ -557,7 +578,7 @@ export function registerIdracTrend(adminRouter) {
     const win = parseWindow(req.query, { retentionDays: keep });
     if (win.error) return res.status(400).json({ ok: false, reason: win.error });
     const k = kindOf(s);
-    const { points, errors, firstTs, cpuSources, cpuHistoryKey, power, hostCpuFirstTs } = await seriesFor(s, win, { host: k.host });
+    const { points, errors, firstTs, cpuSources, cpuHistoryKey, power, hostCpuFirstTs, hostGpuFirstTs } = await seriesFor(s, win, { host: k.host });
     // v2.665: 지금 CPU 사용률을 iDRAC 의 어느 경로로 읽는지 · 못 읽으면 왜인지 + iDRAC 표본이 지금 들어오는지(멈춤 진단).
     let cpuDiag = null; let idracState = null;
     const now = Date.now();
@@ -579,6 +600,7 @@ export function registerIdracTrend(adminRouter) {
       retentionDays: keep, retention: { metricsDays: keep, powerDays: config.idrac.retentionDays || 0 },
       enabled: TREND_SERIES_ENABLED, airflow: TREND_AIRFLOW_ENABLED, firstTs, points, cpuSources, cpuHistory: cpuHistoryKey ? true : undefined, power, cpuDiag, idracState,
       hostCpu: k.host ? { hostId: k.host.id, hostName: k.host.name, matchedBy: k.matchedBy, firstTs: hostCpuFirstTs } : null,
+      hostGpu: k.host ? { hostId: k.host.id, hostName: k.host.name, firstTs: hostGpuFirstTs, hasGpu: hostHasGpu(k.host) } : null,
       errors: errList.length ? errors : undefined,
     });
   });
