@@ -320,6 +320,27 @@ export async function usageHistory(key, { agent = '', hours = 24, limit = 3_000 
   } catch { return { rows: [], truncated: false }; }
 }
 
+/**
+ * 기간 버킷 평균 CPU %(한 서버의 여러 후보 키 — 서비스태그·id·fleetId). iDRAC 통합 추이(v2.661)가 **이미 쌓인** 원시 이력으로
+ * 텔레메트리가 없던 과거 구간을 채울 때 쓴다. `ts/?` 버킷은 CAST 로 정수화한다(node:sqlite 는 JS 수를 REAL 로 바인딩 — v2.598 DB2598-01).
+ * 값이 없는 버킷은 행이 없다(0 으로 채우지 않는다). 원시 보존일(기본 90일)보다 오래된 구간은 비어 있다 — 호출부가 밝힌다.
+ */
+export async function usageCpuRange(keys = [], { agent = '', start, end, bucketMs } = {}) {
+  const db = await getDb();
+  // PK(agent,key,ts) 선탐색을 쓰려고 대소문자 변형을 키로 늘린다(COLLATE NOCASE 는 인덱스를 못 탄다).
+  const ks = [...new Set((keys || []).flatMap((k) => { const t = String(k || '').trim(); return t ? [t, t.toUpperCase(), t.toLowerCase()] : []; }))].slice(0, 9);
+  if (!db || !ks.length || !(end > start) || !(bucketMs > 0)) return { rows: [], key: null };
+  try {
+    for (const key of ks) {
+      const rows = db.prepare(`SELECT CAST(ts/? AS INTEGER)*? AS b, AVG(cpu_pct) AS v FROM usage_history
+        WHERE key=? AND agent=? AND ts>=? AND ts<? AND cpu_pct IS NOT NULL GROUP BY b ORDER BY b`)
+        .all(bucketMs, bucketMs, key, String(agent), start, end);
+      if (rows.length) return { rows: rows.map((r) => ({ ts: Number(r.b), v: r.v })), key };
+    }
+  } catch { /* 참고값 — 실패는 빈 결과 */ }
+  return { rows: [], key: null };
+}
+
 /** 일 롤업(한 서버 또는 전체). 평균은 `sum/n` 으로 되돌린다 — **n 이 0 이면 `null`**(0 이 아니다). */
 export async function usageDaily({ key = '', agent = '', days = 90 } = {}) {
   const db = await getDb();

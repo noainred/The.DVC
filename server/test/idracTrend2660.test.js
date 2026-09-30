@@ -63,7 +63,7 @@ test('③ 한 시간축 — 결측은 null(0 금지)', () => {
 
 test('④ 적재 값 — GPU 는 센서 상세와 같은 역할 판정, 전원공급장치·범위 밖 퍼센트는 쓰지 않는다', () => {
   const v = trendValuesOf({ t: NOW, cpu: 42, temps: { 'CPU1 Temp': 61, 'CPU2 Temp': 64, 'GPU1 Temp': 55, 'GPU Temp 7': 58, 'PS1 Temp': 70 } });
-  assert.deepEqual(v, { cpuPct: 42, cpuTemp: 64, gpuTemp: 58 });
+  assert.deepEqual(v, { cpuPct: 42, cpuTemp: 64, gpuTemp: 58, inletTemp: null, exhaustTemp: null });
   assert.equal(trendValuesOf({ cpu: 150, temps: {} }).cpuPct, null, '0~100 밖은 퍼센트가 아니다');
   const rows = buildServerTrendRows([{ id: 's1' }, { id: 's2' }], {
     now: NOW, detail: false, localCycle: null, maxAgeMs: 10 * MIN,

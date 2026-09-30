@@ -3873,6 +3873,29 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 화면: 폴링은 `usePolling`(1시간 범위만 30초) · KPI 는 720px 이하 2×2(`.idrac-trend-kpis` — 4칸이면 400px 에서 라벨이 말줄임으로 사라졌다,
       스크린샷 판독) · 도구 키 `idrac-trend`(adminOnly — 주 API 가 /api/admin). V4·V5·V6 트리 · toolcats · toolAccess 선언에 등록했다.
     - ⚠ 정직 기록: 실장비 iDRAC 으로는 보지 못했다 — 목 서버에 합성 적재(3일)를 심어 Chromium 1440/400 으로 확인했다.
+  - ⚠⚠ **iDRAC 통합 추이 보강(v2.661) — CPU 사용률은 대체 출처로 채우되 출처를 밝히고, 엣지 서버 전력은 `rmt:` 키로 찾는다**
+    (`idrac/serverTrendSeries.js CPU_FALLBACK_METRICS`·`bmCpuOf`·`hostCpuFrom` · `bmusage/cpuLatest.js`(센서 상세와 공용) ·
+    `bmusage/db.js usageCpuRange` · `routes/admin/idracTrend.js mergeCpuSeries`·`powerKeyOf`·`export.xlsx` · `util/xlsxChart.js` +
+    웹 `IdracTrendTool.jsx`·`idracTrendText.js`, 사용자 신고 "CPU 온도·GPU 온도는 나오는데 CPU 사용률과 소비 전력은 안 나와" + 요청
+    "엑셀로 차트를 그려 내보내기" · "가상화 서버는 2개(ESXi·iDRAC 상세)" · "흡기/배기 카드 + 위치 변경" · "GPU 온도가 있는 서버만". 회귀
+    `server/test/idracTrend2661.test.js` + 웹 `idracTrendText.test.js`):
+    - **CPU 사용률이 빈 원인은 라이선스다** — Dell 텔레메트리 SystemUsage 는 Datacenter 전용(v2.554)이고 이 현장은 Enterprise 다. 샘플러가 한 서버·한 주기에
+      **한 계열만** 적재한다: `idracusage_cpu`(텔레메트리) > `idracusage_cpu_os`(bmusage 최신값 — 센서 상세와 같은 행·같은 신선도) >
+      `idracusage_cpu_vc`(ESXi 호스트 CPU — 서비스태그 일치 · 연결된 호스트 · 샘플러의 freshHosts 만). 출처가 다른 값을 한 계열에 섞지 않으므로 조회가 버킷마다
+      출처를 고르고 `cpuSources` 로 밝힌다. **빈 버킷만** 중앙 bmusage 원시 이력(`usageCpuRange` — 대소문자 변형 키로 PK 선탐색, COLLATE NOCASE 금지)으로 채운다.
+      ⚠ 엣지 수집 서버의 bmusage 이력은 엣지 DB 에만 있어 과거 구간을 채울 수 없다(정직 기록 — 앞으로는 샘플러가 엣지 보관분 최신값으로 쌓는다).
+    - **엣지 서버의 전력 키는 서버 id 가 아니다** — puller 는 `rmt:<호스트>`(충돌 시 `rmt:<수집서버>:<호스트>`)로 적재한다. `powerKeyOf` 가 지금 보고 중인
+      항목(수집 서버 + 엣지 서버 id)의 dbKey 를 쓰고, 없으면(중앙 재시작 직후) 법인 축 키만 본다. **법인 축 없는 `rmt:<이름>` 을 추측으로 쓰지 말 것**(v2.605).
+    - **흡기·배기는 전용 계열 `idractrend_inlet`·`idractrend_exhaust`(온도 dead-band)** — 상세 모드의 `idractemp_inlet`·`exhaust` 는 전량 저장이고 기존 화면이
+      원본을 step 없이 읽으므로 그 이름에 dead-band 를 걸지 말 것. 롤업 행은 서버당 연 8,760 × 2 가 늘어난다(`IDRAC_TREND_AIRFLOW=false` 로 끈다).
+    - **엑셀 차트는 DrawingML 을 직접 넣는다**(exceljs 4.4 는 차트를 못 만든다 — 이미지로 넣으면 값을 고칠 수 없다). jszip 은 exceljs 의 의존성을 그 위치에서
+      불러온다(새 의존성 없음). `dispBlanksAs gap`(결측을 잇지 않는다) · 전력은 보조 축 · 시트의 `<drawing>` 은 `legacyDrawing`·`tableParts`·`extLst` 앞.
+      ⚠ 정직 기록: 이 컨테이너의 LibreOffice 에는 Calc 가 없어 **엑셀/Calc 로 열어 그려지는 것은 보지 못했다** — openpyxl 이 차트·계열 참조를 읽고 재저장하는 것과
+      exceljs 재로드까지 확인했다. 첫 실사용에서 엑셀로 열어 확인할 것.
+    - 카드 순서는 **브라우저 저장**(`idracTrend.cardOrder`, try/catch)이다 — 서버 설정으로 두면 한 사람이 바꾼 순서가 모두에게 바뀐다. 모르는 키는 버리고 새 카드는 뒤에 붙인다.
+    - 'GPU 서버만' = 최신 센서의 GPU 역할 온도(roleOf) 또는 추이 DB 에 `idractemp_gpu` 계열이 있음(`metrics db.keysOf` — 한 번에 읽는다. 서버마다 metaKey 를 부르지 말 것 —
+      NDJSON 폴백은 키마다 전량을 훑는다). 데이터센터 전체 내보내기도 `gpuOnly=1` 로 같은 필터.
+    - 가상화 서버는 ESXi 호스트 상세 + iDRAC 상세 **둘 다** 버튼을 둔다(사용자 요청). CSV 권한이 없으면 버튼을 숨기되 그 사실을 한 줄로 말한다.
   - **CVP Overview EOS 버전 패널은 버전 순(최신 먼저)이다**(v2.657, `cvpOverviewText.versionList`·`cmpEosVersion` — 재사용 Collator numeric): 예전 '갈린 버전 먼저 → 대수' 순은
     사용자 요청으로 바꿨다. '버전 갈림' 은 태그로만 남는다 · 상한 12 · 넘치면 생략 개수를 적는다.
   - **GPU 추이 창은 수집 공백을 잇지 않는다**(v2.656, `GpuHistModal.gapRows`): 간격이 `max(버킷, 수집 주기) × 2` 를 넘으면 null 행을 끼워 선을 끊고

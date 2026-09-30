@@ -1246,5 +1246,6 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .sd-table { min-width: 1000px; width: 100%; }
 
 /* v2.660 iDRAC 통합 추이 KPI — 넓은 폭은 한 줄 4칸, 720px 이하는 2×2(4칸으로 좁히면 라벨이 말줄임으로 사라진다 — 400px 스크린샷 판독). */
-.idrac-trend-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.idrac-trend-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+@media (max-width: 1280px) { .idrac-trend-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .idrac-trend-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
