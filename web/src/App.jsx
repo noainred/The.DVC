@@ -11,6 +11,7 @@ import { STable } from './components/STable.jsx';
 
 // 탭 화면은 지연 로드(코드 스플릿)해 초기 번들/첫 로딩을 줄인다(recharts 등 무거운 의존성 분리).
 const Overview = lazy(() => import('./views/Overview.jsx'));
+const ExecOverview = lazy(() => import('./views/ExecOverview.jsx')); // v2.670 Overview '경영 보기'
 const Hosts = lazy(() => import('./views/Hosts.jsx'));
 const Vms = lazy(() => import('./views/Vms.jsx'));
 const Datastores = lazy(() => import('./views/Datastores.jsx'));
@@ -94,6 +95,11 @@ const isSettingsOwner = (u) => {
 
 import { REGIONS } from './regions.js'; // v2.575 IMP-10 — 단일 소스
 import { alarmTotals } from './views/restFallbackText.js'; // v2.629 WEB2629-04 — 상태바 경보 미조회 vCenter
+import OverviewModeToggle from './views/OverviewModeToggle.jsx'; // v2.670
+import { modeFromHash } from './views/execOverviewText.js';
+import { MODE_KEY, normMode, resolveMode } from './version_4/mode.js';
+const readOvMode = () => { try { return normMode(window.localStorage.getItem(MODE_KEY)); } catch { return null; } };
+const writeOvMode = (m) => { try { window.localStorage.setItem(MODE_KEY, m); } catch { /* 저장 실패는 기능을 막지 않는다 */ } };
 
 // Per-menu filter (added to the shared filter bar on the matching tab).
 const MENU_FILTERS = {
@@ -233,6 +239,14 @@ function Portal({ user, onLogout }) {
     }
     return readShell();
   });
+  // v2.670 Overview 보기 모드(경영 ↔ 엔지니어): ① #/overview/exec|eng(그 탭에만, 저장 안 함) → ② 저장값 → ③ 역할 기본값(version_4/mode.js).
+  const [ovModeStored, setOvModeStored] = useState(readOvMode);
+  const [ovModeHash, setOvModeHash] = useState(() => modeFromHash(window.location.hash));
+  useEffect(() => {
+    const on = () => setOvModeHash(modeFromHash(window.location.hash));
+    window.addEventListener('hashchange', on);
+    return () => window.removeEventListener('hashchange', on);
+  }, []);
   const [v6On, setV6On] = useState(() => {
     if (isV6Hash(window.location.hash)) {
       writeShellV6(true);
@@ -428,6 +442,13 @@ function Portal({ user, onLogout }) {
             )}
           </div>
         ));
+  const ovMode = resolveMode({ query: ovModeHash, stored: ovModeStored, role: user?.role });
+  const ovToggle = (
+    <OverviewModeToggle mode={ovMode} onChange={(m) => {
+      writeOvMode(m); setOvModeStored(m); setOvModeHash(null);
+      if (modeFromHash(window.location.hash)) window.history.replaceState(null, '', '#/overview');
+    }} />
+  );
   const tabBody = (
     <ErrorBoundary key={tab}>
          <Suspense fallback={<div className="muted" style={{ padding: 24 }}>로딩 중…</div>}>
@@ -435,7 +456,9 @@ function Portal({ user, onLogout }) {
             ? <V6Overview health={health} healthError={healthError} onSelectSite={selectSite} />
             : v5On
               ? <V5Overview scope={v5Scope} health={health} healthError={healthError} onGotoTab={setTab} />
-              : <Overview onSelectSite={selectSite} onGotoTab={setTab} />)}
+              : ovMode === 'exec'
+                ? <ExecOverview onSelectSite={selectSite} onGotoTab={setTab} modeToggle={ovToggle} />
+                : <Overview onSelectSite={selectSite} onGotoTab={setTab} modeToggle={ovToggle} />)}
           {tab === 'summary' && (v6On ? <V6Summary vcenters={vcenters} /> : <Summary scope={scope} onGotoTab={setTab} />)}
           {tab === 'vcenters' && <VCenters onSelectSite={selectSite} resetSignal={platformResetSeq} />}
           {tab === 'svcmon' && <SvcMonitor />}

@@ -109,6 +109,9 @@ function initSqlite() {
     // 24h 통계를 시간당 롤업에서 계산: peak=MAX(maxw), min=MIN(minw), avg=SUM(sumw)/SUM(cnt), last=MAX(last_ts).
     const statsHourlyStmt = db.prepare('SELECT server_id, MAX(maxw) AS peak, MIN(minw) AS minw, SUM(sumw) AS sumw, SUM(cnt) AS cnt, MAX(last_ts) AS last FROM power_hourly WHERE hb >= ? GROUP BY server_id');
     const bucketsHourlyStmt = db.prepare('SELECT server_id, hb, sumw, cnt FROM power_hourly WHERE hb >= ?');
+    // v2.670: 함대 전력 추이(경영 보기 Overview 스파크라인) — **지정한 시간(hb)들만** 인덱스로 읽어 시간마다 서버별 평균의 합을 낸다.
+    //   창 전체를 서버별로 묶으면 90일 × 서버 1천 대 = 216만 행을 훑어 실측 3.7초 동기 정지였다(v2.670 측정). 칸마다 대표 시간
+    //   몇 개만 읽으면 결과가 칸 수 × 표본 수 행이다(호출부 overview/trend.js sampleHours).
     const pruneHourlyStmt = db.prepare('DELETE FROM power_hourly WHERE rowid IN (SELECT rowid FROM power_hourly WHERE hb < ? LIMIT ?)');
     const delOneHourlyStmt = db.prepare('DELETE FROM power_hourly WHERE server_id = ?');
     // v2.599 DB2599-01: 롤업의 서버별 마지막 관측 시각 — dead-band 로 원시 저장을 건너뛴 표본도 롤업에는 들어가므로
@@ -212,6 +215,16 @@ function initSqlite() {
         // 비-시간 버킷은 원시 테이블에서(현재 대시보드는 항상 1시간이라 이 경로는 예외적).
         return bucketStmt.all(bucketMs, sinceTs).map((r) => ({ serverId: r.server_id, bucket: r.bk * bucketMs, avg: r.avgw }));
       },
+      fleetHourSums: (hbs) => {
+        const list = [...new Set((hbs || []).map(Number).filter(Number.isFinite))];
+        const out = [];
+        for (let i = 0; i < list.length; i += 400) {
+          const part = list.slice(i, i + 400);
+          const q = db.prepare(`SELECT hb, SUM(sumw * 1.0 / cnt) AS w, COUNT(*) AS n FROM power_hourly WHERE hb IN (${part.map(() => '?').join(',')}) AND cnt > 0 GROUP BY hb`);
+          for (const r of q.all(...part)) out.push({ hb: r.hb, watts: r.w, servers: r.n });
+        }
+        return out.sort((a, b) => a.hb - b.hb);
+      },
       // v2.451: 원본과 롤업의 보존기간 분리(metrics/db.js 와 같은 규약).
       // rollupBeforeTs 생략 시 기존 동작(둘 다 같은 기준).
       prune: async (beforeTs, rollupBeforeTs = null) => {
@@ -304,6 +317,21 @@ function initJsonFallback() {
         a.sum += r.w; a.n++; acc.set(k, a);
       }
       return [...acc.values()].map((a) => ({ serverId: a.s, bucket: a.bucket, avg: a.sum / a.n }));
+    },
+    // v2.670: SQLite 경로와 같은 모양(지정 시간마다 서버별 평균의 합 + 서버 수).
+    fleetHourSums: (hbs) => {
+      const want = new Set((hbs || []).map(Number));
+      const acc = new Map(); // `${s}|${hb}` -> {sum,n}
+      for (const r of rows) {
+        const hb = Math.floor(r.t / 3_600_000);
+        if (!want.has(hb)) continue;
+        const k = `${r.s}|${hb}`;
+        const a = acc.get(k) || { hb, sum: 0, n: 0 };
+        a.sum += r.w; a.n++; acc.set(k, a);
+      }
+      const byHb = new Map();
+      for (const a of acc.values()) { const x = byHb.get(a.hb) || { w: 0, n: 0 }; x.w += a.sum / a.n; x.n += 1; byHb.set(a.hb, x); }
+      return [...byHb.entries()].sort((x, y) => x[0] - y[0]).map(([hb, x]) => ({ hb, watts: x.w, servers: x.n }));
     },
     prune: (beforeTs) => {
       const next = rows.filter((r) => r.t >= beforeTs);

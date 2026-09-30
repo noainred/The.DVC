@@ -27,6 +27,11 @@ import { latestMapByDevice } from '../../storage/latestSnapshots.js';
 import { allMeasuredPower } from '../../idrac/service.js';
 import { buildPowerTotal } from '../../power/total.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { vmtrackSeries } from '../../vmtrack/service.js';
+import { capacityHistoryAll } from '../../storage/db.js';
+import { devicePollMsByAgent } from './storageMon.js';
+import { getDb as getPowerDb } from '../../idrac/db.js';
+import { TREND_SPECS, normTrendDays, trendGrid, vmTrend, storageTrend, powerTrend, powerSampleHours, POWER_SAMPLES_PER_BUCKET, deltaOf, partialCount } from '../../overview/trend.js';
 
 const toolsPerm = requirePerm('tools');
 const fullScopeOnly = fullScopeOnlyWith('전체 소비 전력은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다 — 네트워크·스토리지는 vCenter 축이 없습니다.');
@@ -125,6 +130,35 @@ export function registerOverviewCards(api) {
     }, { extraKey: scopeKey(req.user, snap), ttlMs: 20_000 });
   });
 
+  /**
+   * GET /overview/trend?days=7|30|90 — 경영 보기 Overview 핵심 지표 추이(v2.670, 시안 design_handoff_exec_overview).
+   * 이미 쌓는 시계열만 읽는다(장비 왕복 0). 계산·판정은 overview/trend.js(순수). 권한은 /overview/cards 와 같다(집계 수치).
+   * 범위 계정: VM 은 허용 vCenter 만 합산하고, 스토리지·전력은 vCenter 축이 없어 null + 사유(카드와 같은 규칙).
+   * ⚠ 스냅샷 세대(30초)가 아니라 **5분 캐시**다 — 전력 90일 창은 power_hourly 를 수백만 행 훑을 수 있고, 12시간·1일 버킷의
+   *   추이는 5분 안에 바뀌지 않는다. 캐시 키에 범위(scopeKey)를 넣어 범위 계정 사이에 섞이지 않게 한다.
+   */
+  api.get('/overview/trend', async (req, res) => {
+    try {
+      const snap = store.get() || {};
+      const allowed = scopedVcenterIds(req.user, snap);
+      const days = normTrendDays(req.query.days);
+      const key = `${days}|${scopeKey(req.user, snap)}`;
+      const hit = TREND_CACHE.get(key);
+      const now = Date.now();
+      let p = hit && now - hit.at < TREND_TTL_MS ? hit.p : null;
+      if (!p) {
+        p = computeTrend(days, allowed, now);
+        TREND_CACHE.set(key, { at: now, p });
+        p.catch(() => TREND_CACHE.delete(key));
+        if (TREND_CACHE.size > 64) TREND_CACHE.delete(TREND_CACHE.keys().next().value);
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(await p);
+    } catch (e) {
+      if (!res.headersSent) res.status(500).json({ ok: false, reason: e?.message || String(e) });
+    }
+  });
+
   api.get('/tools/power-total', toolsPerm, fullScopeOnly, async (req, res) => {
     // v2.667: 못 읽은 스토리지의 세부(오류 원문)는 관리 주소를 담을 수 있다 — admin 에게만(operator 는 tools 를 기본 보유).
     const admin = req.user?.role === 'admin';
@@ -135,3 +169,49 @@ export function registerOverviewCards(api) {
     }, { ttlMs: 20_000, extraKey: admin ? 'admin' : 'user' });
   });
 }
+
+const TREND_TTL_MS = 5 * 60_000;
+const TREND_CACHE = new Map();
+
+/** 추이 계산 — 원천마다 실패해도 나머지는 준다(그 지표만 error). */
+async function computeTrend(days, allowed, now) {
+  const spec = TREND_SPECS[days];
+  const full = allowed == null;
+  const since = now - spec.days * DAY_MS_T - spec.bucketMs;
+  const out = { ok: true, days, bucketMs: spec.bucketMs, points: spec.points, grid: trendGrid(days, now), scoped: !full, generatedAt: now };
+  // 가상 서버 — vmtrack(매일 00·12시). 범위 계정은 허용 vCenter 합산.
+  try {
+    const r = await vmtrackSeries({ days: spec.days + 2, vcenterId: '', scopeIds: allowed });
+    const series = vmTrend(r.points, days, now);
+    out.virtual = { series, delta: deltaOf(series), partial: partialCount(series), source: 'vm-track' };
+  } catch (e) { out.virtual = { series: null, error: e?.message || String(e) }; }
+  // 물리 서버 — 수를 기록하는 시계열이 없다. 지어내지 않는다.
+  out.physical = { series: null, reason: 'no-series' };
+  if (!full) {
+    out.storage = { series: null, reason: FLEET_ONLY };
+    out.power = { series: null, reason: FLEET_ONLY };
+    return out;
+  }
+  // 스토리지 사용량 — 스토리지 모니터링 용량 이력(카드와 같은 장비 집합). 빠진 장비가 있는 버킷은 null.
+  try {
+    const devs = listStorageDevices();
+    const { envPoll, pollOf } = devicePollMsByAgent(devs);
+    const staleByDevice = new Map(devs.map((d) => [d.id, 2 * pollOf.get(d.agent || '')]));
+    const pts = await capacityHistoryAll(since, spec.bucketMs, { nowMs: now, staleMs: 2 * envPoll, staleByDevice });
+    const series = storageTrend(pts, days, now);
+    out.storage = { series, delta: deltaOf(series), partial: partialCount(series), unit: 'bytes', source: 'storage-history', devices: pts.expectedDevices ?? null };
+  } catch (e) { out.storage = { series: null, error: e?.message || String(e) }; }
+  // 소비 전력 — iDRAC 서버 전력 시간당 롤업만(카드는 서버+네트워크+스토리지 — 화면이 그 차이를 말한다).
+  try {
+    const db = await getPowerDb();
+    const rows = typeof db?.fleetHourSums === 'function' ? db.fleetHourSums(powerSampleHours(days, now)) : [];
+    const r = powerTrend(rows, days, now);
+    out.power = { series: r.series, delta: deltaOf(r.series), partial: partialCount(r.series), maxServers: r.maxServers, fullRatio: r.fullRatio,
+      samplesPerBucket: POWER_SAMPLES_PER_BUCKET, unit: 'watts', scope: 'servers', source: 'power-hourly' };
+  } catch (e) { out.power = { series: null, error: e?.message || String(e) }; }
+  return out;
+}
+const DAY_MS_T = 86_400_000;
+
+/** 테스트용 — 캐시 비우기. */
+export function _resetTrendCacheForTest() { TREND_CACHE.clear(); }
