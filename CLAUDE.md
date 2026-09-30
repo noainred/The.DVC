@@ -3904,6 +3904,15 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       이하=기간 최소, 값 없음은 판정 불가로 따로 센다 — 0 으로 보지 않는다). ⚠ 서비스태그는 `serverTrendSeries.serviceTagOf`(최상위 → 인벤토리)
       하나로 읽는다 — 적재기가 최상위만 봐서 엣지 서버의 vCenter CPU 대체가 쌓이지 않았다(화면 머리 판정과 출처가 달랐다). 지금 CPU 를 못 읽는
       사유는 `cpuFallbackDiag` → 응답 `cpuDiag` → 웹 `cpuDiagText`.
+    - ⚠⚠ **v2.665 — CPU 사용률은 iDRAC 출처만이다. v2.661 의 bmusage(OS)·vCenter 대체는 철회했다**(사용자 지시 "vcenter 에서 가져오지 말고
+      idrac 에서 가져오는걸로"). 순서: `idracusage_cpu`(텔레메트리) > `idracusage_cpu_rs`(Sensors 컬렉션 CPU 센서 — `summarizeSensors().sensorCpuUsagePct`,
+      컬렉션 시각 기준 `SENSOR_CPU_FRESH_MS` 75분) > `idracusage_cpu_bm`(bmusage 최신 행 중 `bmSrcIsIdrac(src)` — 'os' 토큰이 있거나 src 가 비면 제외).
+      이력 채우기도 `usageCpuRange(…, {idracOnly:true})`(`IDRAC_ONLY_SQL`). 옛 계열 `_os`·`_vc`(`CPU_RETIRED_METRICS`)는 **쓰지도 읽지도 않는다** —
+      `_os` 는 OS 값과 iDRAC 값이 섞여 있어 가를 수 없다. **여기에 vCenter·OS 대체를 되살리지 말 것.** Enterprise 라이선스 서버는 빈칸일 수 있고
+      `cpuDiag` 코드(ok·sensor-stale·bm-os-only·bm-stale·no-idrac-cpu)로 이유를 말한다. 센서 상세 화면(`tools/serverSensors.cpuOf`)은 그대로다(다른 화면).
+    - **수집 멈춤 배너(v2.665)**: `/idrac/:id/trend` 응답 `idracState`(`idracStateOf` — 표본 시각·나이·경계, 엣지 서버는 중앙 pull 상태 `lastOkAt`·`ok`·`fails`
+      와 `exportAt`)를 웹 `idracStateBanner` 가 판정한다 — pull 정상 + 표본 멈춤 = 엣지의 iDRAC 수집, pull 실패 = 통신. 오류 원문은 `idracScopeOf(req)` 가
+      null(전체 범위)일 때만 싣는다. ⚠ 2026-09-30 02:32 멈춤 신고의 원인은 확정하지 못했다(운영 증거 필요 — 배너가 가른다).
   - ⚠⚠ **Overview 카드 8장 · 전체 소비 전력(v2.664) — 합산은 `server/src/power/total.js buildPowerTotal` 하나**(Overview 카드와 특수 기능
     `power-total` 이 같은 함수. `GET /overview/cards`·`GET /tools/power-total`, `routes/api/overviewCards.js` · 웹 `overviewCardsText.js`·`tools/PowerTotal.jsx`):
     · 서버 = `allMeasuredPower` 중 **vCenter 추정(source 'vcenter') 제외** · 네트워크 = CVP PSU `power.inW` 합(없으면 outW, `outputOnly` 로 밝힘 — 필드명 추정) ·
@@ -4756,6 +4765,8 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
   실측값·문서)를 붙이고, 검증하지 못한 내용은 반드시 추정임을 명시한다. 모르면 모른다고 말한다.
   실패·한계·리스크는 축소 없이 그대로 보고한다.
 - **항상 한글로 응답**: 모든 답변/설명 메시지는 한국어로 작성한다.
+- **존댓말로 응답**(2026-10-01 사용자 지시 "존대말로 해줄래? 기억해줘"): 모든 답변은 합니다체(존댓말)로 쓴다.
+  반말·평서체('~다', '~했다')로 사용자에게 말하지 않는다. 코드 주석·문서·커밋 메시지는 기존 문체를 따른다.
 - **새 작업 요청 시 작업 현황 표 표시**: 새로운 작업(명령) 요청을 받으면 응답 맨 앞에
   "작업 현황" 표를 보여준다. 열: `난이도 | 적합 | 실행 | 작업 | 시간 | 상태 | 비고`
   (2026-09-15 사용자 지시 — **`시간` 열을 따로 두고**, `비고` 에는 시간이 아니라 **참고 사항**을 적는다).

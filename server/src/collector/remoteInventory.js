@@ -266,7 +266,7 @@ export function findRemoteServer(id) {
   const want = String(id || '');
   for (const [collectorId, e] of byCollector) {
     for (const s of e.servers || []) {
-      if (String(s.id) === want) return { ...s, remote: true, collectorId, collectorDatacenter: e.datacenter };
+      if (String(s.id) === want) return { ...s, remote: true, collectorId, collectorDatacenter: e.datacenter, pulledAt: e.at ?? null };
     }
   }
   return null;

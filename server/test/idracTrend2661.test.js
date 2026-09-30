@@ -15,49 +15,69 @@ process.env.AUTH_ENABLED = 'false';
 process.env.DATA_SOURCE = 'mock';
 
 const { mergeCpuSeries, powerKeyOf, uniqueSheetName, cpuSourceText, XLSX_SERVER_MAX } = await import('../src/routes/admin/idracTrend.js');
-const { buildServerTrendRows, bmCpuOf, hostCpuFrom, TREND_METRICS, CPU_FALLBACK_METRICS } = await import('../src/idrac/serverTrendSeries.js');
+const { buildServerTrendRows, bmCpuOf, bmSrcIsIdrac, TREND_METRICS, CPU_FALLBACK_METRICS, CPU_RETIRED_METRICS } = await import('../src/idrac/serverTrendSeries.js');
 const { cpuIndexOf } = await import('../src/tools/serverSensors.js');
 const { chartXml, addLineCharts, colLetter, sheetRef } = await import('../src/util/xlsxChart.js');
 
 const MIN = 60_000, HOUR = 3_600_000;
 const NOW = Math.floor(Date.now() / HOUR) * HOUR - 30 * MIN; // 경계에서 떨어뜨린 기준 시각(v2.517 규약)
 
-test('① CPU 대체 적재 — 텔레메트리 > bmusage(신선) > vCenter 호스트, 한 주기에 한 계열만', () => {
+test('① v2.665 CPU 적재 — iDRAC 출처만: 텔레메트리 > Sensors CPU 센서 > 베어메탈 사용률 iDRAC 경로, vCenter·OS 는 쓰지 않는다', () => {
   const fresh = { t: NOW, temps: { 'CPU1 Temp': 55 } };
-  const idx = cpuIndexOf([{ key: 'ABC1234', ts: NOW - 60_000, cpu_pct: 42.34, _freshMs: 30 * MIN }, { key: 'OLD9999', ts: NOW - 5 * HOUR, cpu_pct: 90, _freshMs: 30 * MIN }]);
-  const hostCpuOf = hostCpuFrom([{ serviceTag: 'VCHOST1', cpuUsagePct: 33, connectionState: 'CONNECTED' }, { serviceTag: 'VCDOWN1', cpuUsagePct: 70, connectionState: 'DISCONNECTED' }]);
+  const idx = cpuIndexOf([
+    { key: 'OSONLY1', ts: NOW - 60_000, cpu_pct: 42.34, src: 'os', _freshMs: 30 * MIN },
+    { key: 'MIXED01', ts: NOW - 60_000, cpu_pct: 50, src: 'os+idrac', _freshMs: 30 * MIN },
+    { key: 'IDRAC01', ts: NOW - 60_000, cpu_pct: 21.26, src: 'idrac-ent', _freshMs: 30 * MIN },
+    { key: 'NOSRC01', ts: NOW - 60_000, cpu_pct: 30, src: '', _freshMs: 30 * MIN },
+    { key: 'OLD9999', ts: NOW - 5 * HOUR, cpu_pct: 90, src: 'idrac', _freshMs: 30 * MIN },
+  ]);
+  const cpuSensor = (v) => ({ name: 'CPU Usage', kind: 'percent', role: 'cpu', reading: v, state: 'ok' });
+  const detail = {
+    sens: { list: [cpuSensor(64.44)], collAt: NOW - 10 * MIN },
+    sensOld: { list: [cpuSensor(80)], collAt: NOW - 3 * HOUR },
+  };
   const rows = buildServerTrendRows([
-    { id: 'tel', serviceTag: 'ABC1234' },           // 텔레메트리가 있으면 대체를 쓰지 않는다
-    { id: 'os', serviceTag: 'abc1234' },             // 대소문자 무시로 bmusage
-    { id: 'old', serviceTag: 'OLD9999' },            // bmusage 가 오래됨 → 쓰지 않는다
-    { id: 'vc', serviceTag: 'VCHOST1' },             // ESXi 호스트 CPU
-    { id: 'down', serviceTag: 'VCDOWN1' },           // 연결 끊긴 호스트 값은 쓰지 않는다
+    { id: 'tel', serviceTag: 'IDRAC01' },            // 텔레메트리가 있으면 다른 경로를 쓰지 않는다
+    { id: 'sens', serviceTag: 'IDRAC01' },           // Sensors 컬렉션 CPU 센서(신선)가 베어메탈 값보다 먼저
+    { id: 'sensOld', serviceTag: 'IDRAC01' },        // 센서가 낡으면 베어메탈 iDRAC 경로
+    { id: 'os', serviceTag: 'osonly1' },             // OS 값은 쓰지 않는다
+    { id: 'mixed', serviceTag: 'MIXED01' },          // 출처에 os 가 섞이면 쓰지 않는다
+    { id: 'nosrc', serviceTag: 'NOSRC01' },          // 출처 모름 — 쓰지 않는다
+    { id: 'old', serviceTag: 'OLD9999' },            // 오래된 값 — 쓰지 않는다
   ], {
-    now: NOW, detail: false, localCycle: null, cpuIndex: idx, hostCpuOf,
+    now: NOW, detail: false, localCycle: null, cpuIndex: idx, detailOf: (s) => detail[s.id] || null,
     latestOf: (s) => (s.id === 'tel' ? { ...fresh, cpu: 12 } : fresh),
   });
   const cpu = rows.filter((r) => [TREND_METRICS.cpuPct, ...Object.values(CPU_FALLBACK_METRICS)].includes(r.metric));
   assert.deepEqual(cpu.map((r) => [r.k, r.metric, r.v]), [
     ['tel', TREND_METRICS.cpuPct, 12],
-    ['os', CPU_FALLBACK_METRICS.os, 42.3],
-    ['vc', CPU_FALLBACK_METRICS.vcenter, 33],
+    ['sens', CPU_FALLBACK_METRICS.sensor, 64.4],
+    ['sensOld', CPU_FALLBACK_METRICS.bmIdrac, 21.3],
   ]);
+  assert.ok(!rows.some((r) => Object.values(CPU_RETIRED_METRICS).includes(r.metric)), 'vCenter·OS 계열은 더 이상 쓰지 않는다');
   assert.equal(bmCpuOf({ serviceTag: '' }, idx, NOW), null, '키가 없으면 null');
   assert.equal(bmCpuOf({ serviceTag: 'ABC1234' }, null, NOW), null, '색인이 없으면 null');
+  assert.equal(bmCpuOf({ serviceTag: 'OSONLY1' }, idx, NOW), 42.3, 'idracOnly 가 아니면 예전처럼 준다(센서 상세 화면용)');
+  assert.equal(bmCpuOf({ serviceTag: 'OSONLY1' }, idx, NOW, { idracOnly: true }), null);
+  for (const [src, want] of [['idrac', true], ['idrac-ent', true], ['idrac+idrac-ent', true], ['os', false], ['os+idrac', false], ['', false], ['cost', false]]) {
+    assert.equal(bmSrcIsIdrac(src), want, src);
+  }
 });
 
-test('② CPU 계열 병합 — 버킷마다 우선순위 하나, 빈 버킷만 이력으로 채우고 출처를 센다', () => {
+test('② CPU 계열 병합 — 버킷마다 iDRAC 출처 우선순위 하나, 빈 버킷만 이력으로 채우고 출처를 센다', () => {
   const win = { start: NOW, end: NOW + 5 * MIN, bucketMs: MIN };
   const t = (i) => NOW + i * MIN;
   const r = mergeCpuSeries(win, {
     telemetry: [{ ts: t(0), v: 10 }],
-    os: [{ ts: t(0), v: 99 }, { ts: t(1), v: 20 }],
-    vcenter: [{ ts: t(2), avg: 30 }],
+    sensor: [{ ts: t(0), v: 99 }, { ts: t(1), v: 20 }],
+    bmIdrac: [{ ts: t(2), avg: 30 }],
     history: [{ ts: t(1), v: 77 }, { ts: t(3), v: 40 }, { ts: t(4), v: 150 }], // 150 은 퍼센트가 아니다 — 버린다
+    // 예전 계열 이름을 넘겨도 읽지 않는다
+    os: [{ ts: t(4), v: 5 }], vcenter: [{ ts: t(4), v: 6 }],
   });
   assert.deepEqual(r.series.map((p) => [p.ts - NOW, p.v]), [[0, 10], [MIN, 20], [2 * MIN, 30], [3 * MIN, 40]]);
-  assert.deepEqual(r.sources, { telemetry: 1, os: 1, vcenter: 1, history: 1 });
-  assert.equal(cpuSourceText(r.sources), 'iDRAC 텔레메트리 1 · 베어메탈 사용률(OS·iDRAC) 1 · vCenter 호스트 1 · 베어메탈 사용률 이력 1');
+  assert.deepEqual(r.sources, { telemetry: 1, sensor: 1, bmIdrac: 1, history: 1 });
+  assert.equal(cpuSourceText(r.sources), 'iDRAC 텔레메트리 1 · iDRAC CPU 센서 1 · iDRAC 대체 경로 1 · iDRAC 대체 경로 이력 1');
   assert.equal(cpuSourceText({}), '없음');
 });
 
@@ -137,7 +157,8 @@ test('⑦ 라우트 — 엑셀 내보내기 200·형식·파일 이름 · CSV �
     assert.deepEqual(wb.worksheets.map((w) => w.name), ['요약', 'bm-x']);
     assert.equal(wb.getWorksheet('bm-x').getRow(1).getCell(2).value, 'CPU 사용률(%)');
     const t = await (await fetch(`${base}/idrac/bm-x/trend?range=1h`)).json();
-    assert.deepEqual(t.cpuSources, { telemetry: 0, os: 0, vcenter: 0, history: 0 });
+    assert.deepEqual(t.cpuSources, { telemetry: 0, sensor: 0, bmIdrac: 0, history: 0 });
+    assert.equal(t.idracState.remote, false);
     assert.deepEqual(t.power, { found: true, reason: 'local' });
     assert.equal((await fetch(`${base}/idrac/trend/export.xlsx?scope=server&id=none`)).status, 404);
     assert.equal((await fetch(`${base}/idrac/trend/export.xlsx?scope=server&id=bm-x&cols=zz`)).status, 400);
@@ -208,19 +229,56 @@ test('⑪ v2.663 라우트 — /idrac/trend/table 200·행 · 잘못된 기간 4
   } finally { srv.close(); }
 });
 
-test('⑫ v2.663 CPU 대체 — 태그가 인벤토리에만 있는 엣지 서버도 호스트를 찾고, 못 쓰는 사유를 코드로 준다', async () => {
-  const { serviceTagOf, hostCpuFrom, cpuFallbackDiag } = await import('../src/idrac/serverTrendSeries.js');
+test('⑫ v2.665 CPU 진단 — iDRAC 경로만 보고, 못 쓰는 사유를 코드로 준다(vCenter 값은 사유가 아니다)', async () => {
+  const { serviceTagOf, cpuFallbackDiag } = await import('../src/idrac/serverTrendSeries.js');
   const edge = { id: 'e1', remote: true, serviceTag: '', inv: { system: { serviceTag: '6W4JNY3' } } };
   assert.equal(serviceTagOf(edge), '6W4JNY3', '최상위가 비면 인벤토리 태그');
-  const hosts = [{ name: 'esx4', vcenterId: 'vc1', serviceTag: '6w4jny3', connectionState: 'CONNECTED', cpuUsagePct: 41 }];
-  assert.equal(hostCpuFrom(hosts)(edge), 41, '예전엔 최상위 태그만 봐서 null 이었다');
-  assert.equal(cpuFallbackDiag(edge, { hosts }).code, 'ok');
-  assert.equal(cpuFallbackDiag(edge, { hosts }).source, 'vcenter');
-  assert.equal(cpuFallbackDiag({ id: 'x', remote: true }, { hosts }).code, 'no-tag');
-  assert.equal(cpuFallbackDiag({ id: 'x', serviceTag: 'ZZZ' }, { hosts }).code, 'no-host');
-  const d = cpuFallbackDiag(edge, { hosts, unread: new Map([['vc1', 'stale']]) });
-  assert.deepEqual([d.code, d.reason, d.host.name], ['vcenter-unread', 'stale', 'esx4']);
-  assert.equal(cpuFallbackDiag(edge, { hosts: [{ ...hosts[0], connectionState: 'NOT_RESPONDING' }] }).code, 'host-disconnected');
-  assert.equal(cpuFallbackDiag(edge, { hosts: [{ ...hosts[0], cpuUsagePct: null }] }).code, 'no-host-cpu');
-  assert.equal(cpuFallbackDiag(edge, { hosts, latest: { at: Date.now(), cpu: 12 } }).source, 'telemetry');
+  const now = Date.now();
+  const sensor = (v, collAt) => () => ({ list: [{ name: 'CPU Usage', kind: 'percent', role: 'cpu', reading: v }], collAt });
+  const none = () => null;
+  assert.equal(cpuFallbackDiag(edge, { latest: { t: now, cpu: 12 }, detailOf: none }).source, 'telemetry');
+  const sd = cpuFallbackDiag(edge, { detailOf: sensor(40, now - MIN), now });
+  assert.deepEqual([sd.code, sd.source], ['ok', 'sensor']);
+  assert.equal(cpuFallbackDiag(edge, { detailOf: sensor(40, now - 3 * HOUR), now }).code, 'sensor-stale');
+  const idx = (src, ts = now - MIN) => cpuIndexOf([{ key: '6W4JNY3', ts, cpu_pct: 30, src, _freshMs: 30 * MIN }]);
+  assert.equal(cpuFallbackDiag(edge, { cpuIndex: idx('idrac-ent'), detailOf: none, now }).source, 'bmIdrac');
+  assert.equal(cpuFallbackDiag(edge, { cpuIndex: idx('os'), detailOf: none, now }).code, 'bm-os-only');
+  assert.equal(cpuFallbackDiag(edge, { cpuIndex: idx('idrac', now - 5 * HOUR), detailOf: none, now }).code, 'bm-stale');
+  assert.equal(cpuFallbackDiag(edge, { detailOf: none, now }).code, 'no-idrac-cpu');
+});
+
+test('⑬ v2.665 멈춤 진단 — 표본 시각·엣지 pull 상태를 나눠 싣고, 오류 원문은 전체 범위에만', async () => {
+  const { idracStateOf } = await import('../src/routes/admin/idracTrend.js');
+  const now = NOW;
+  const latest = { t: now - 90 * MIN, temps: { 'CPU1 Temp': 50 } };
+  const st = idracStateOf({ id: 'e', remote: true, collectorId: 'c1', pulledAt: now - MIN }, {
+    now, latest, collector: { at: now - MIN, ok: true, error: 'http://edge:4000 거부', version: '2.664.0' }, showError: false,
+  });
+  assert.equal(st.stale, 'stale', '90분 전 표본은 오래됨');
+  assert.equal(st.ageMs, 90 * MIN);
+  assert.equal(st.collector.ok, true, 'pull 은 정상 — 멈춘 곳은 엣지의 iDRAC 수집');
+  assert.equal(st.collector.lastOkAgeMs, MIN);
+  assert.equal(st.collector.error, '', '범위 계정에는 오류 원문을 싣지 않는다');
+  assert.equal(st.collector.errorHidden, true);
+  assert.equal(st.exportAt, now - MIN);
+  const full = idracStateOf({ id: 'e', remote: true, collectorId: 'c1' }, { now, latest, collector: { at: now - 2 * HOUR, ok: false, error: 'timeout' }, showError: true });
+  assert.deepEqual([full.collector.ok, full.collector.error], [false, 'timeout']);
+  assert.equal(idracStateOf({ id: 'e', remote: true, collectorId: 'c9' }, { now, latest }).collector.known, false);
+  const local = idracStateOf({ id: 'l' }, { now, latest: { t: now - MIN, temps: { a: 1 } } });
+  assert.deepEqual([local.remote, local.stale, local.collector], [false, null, undefined]);
+});
+
+test('⑭ v2.665 베어메탈 이력 채우기 — idracOnly 면 출처가 iDRAC 뿐인 행만 버킷에 넣는다', async () => {
+  const db = await import('../src/bmusage/db.js');
+  const t0 = NOW - 3 * HOUR;
+  const mk = (key, i, src, cpu) => ({ key, ts: t0 + i * MIN, name: key, src, cpu_pct: cpu });
+  await db.insertUsage([
+    mk('K1', 0, 'os', 90), mk('K1', 1, 'idrac', 20), mk('K1', 2, 'os+idrac', 91),
+    mk('K1', 3, 'idrac-ent', 30), mk('K1', 4, '', 92), mk('K1', 5, 'idrac+idrac-ent', 40),
+  ], '');
+  const win = { start: t0, end: t0 + 10 * MIN, bucketMs: MIN };
+  const all = await db.usageCpuRange(['K1'], { agent: '', ...win });
+  assert.equal(all.rows.length, 6, 'idracOnly 가 아니면 예전 그대로');
+  const only = await db.usageCpuRange(['K1'], { agent: '', ...win, idracOnly: true });
+  assert.deepEqual(only.rows.map((r) => [r.ts - t0, r.v]), [[MIN, 20], [3 * MIN, 30], [5 * MIN, 40]]);
 });

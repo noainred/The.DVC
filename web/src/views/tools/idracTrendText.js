@@ -162,13 +162,16 @@ export function saveOrder(storage, order) {
   try { if (order.join() === DEFAULT_ORDER.join()) storage?.removeItem(CARD_ORDER_KEY); else storage?.setItem(CARD_ORDER_KEY, JSON.stringify(order)); } catch { /* 저장 못 하면 이번 화면에서만 */ }
 }
 
-/** CPU 사용률 출처(버킷 수) — 어느 값으로 채웠는지 밝힌다(측정 방식이 달라 출처가 바뀌면 값이 튈 수 있다). */
-const CPU_SRC = { telemetry: 'iDRAC 텔레메트리', os: '베어메탈 사용률(OS·iDRAC 대체 경로)', vcenter: 'vCenter ESXi 호스트', history: '베어메탈 사용률 이력' };
+/**
+ * CPU 사용률 출처(버킷 수) — 어느 값으로 채웠는지 밝힌다. v2.665 부터 **iDRAC 출처만**(사용자 지시 — vCenter·OS 값은 쓰지 않는다).
+ * 출처가 바뀌는 구간은 측정 방식이 달라(텔레메트리 1분 · Sensors 컬렉션 30분 · 대체 경로 5분) 값이 튈 수 있다.
+ */
+export const CPU_SRC = { telemetry: 'iDRAC 텔레메트리', sensor: 'iDRAC CPU 센서', bmIdrac: 'iDRAC 대체 경로(베어메탈 사용률)', history: 'iDRAC 대체 경로 이력' };
 export function cpuSourceNote(data) {
   const src = data?.cpuSources;
   if (!src) return '';
   const parts = Object.entries(src).filter(([, n]) => n > 0).map(([k, n]) => `${CPU_SRC[k] || k} ${n}구간`);
-  if (!parts.length) return 'CPU 사용률은 어느 경로로도 읽지 못했습니다 — iDRAC 텔레메트리(Datacenter 라이선스)·베어메탈 사용률 수집·vCenter 호스트(가상화 서버) 모두 값이 없습니다.';
+  if (!parts.length) return 'CPU 사용률은 iDRAC 의 어느 경로로도 읽지 못했습니다 — 텔레메트리(Datacenter 라이선스)·Sensors 컬렉션의 CPU 센서·베어메탈 사용률의 iDRAC 대체 경로 모두 값이 없습니다.';
   const mixed = parts.length > 1 ? ' 출처가 바뀌는 구간은 측정 방식이 달라 값이 튈 수 있습니다.' : '';
   return `CPU 사용률 출처: ${parts.join(' · ')}.${mixed}`;
 }
@@ -299,19 +302,59 @@ export function tableCsv(rows, hours) {
   return `﻿${lines.join('\r\n')}\r\n`;
 }
 
-/** v2.663: 지금 CPU 사용률을 못 읽는 사유(서버 cpuDiag). 과거 구간의 원인은 말하지 않는다 — '지금' 기준이다. */
-const VC_UNREAD = { stale: '위임(엣지) push 가 오래돼', unreachable: '수집 실패로 마지막 값을 이어 쓰는 중이라', maintenance: '점검중이라' };
+const minText = (ms) => {
+  if (ms == null || ms === '' || !Number.isFinite(Number(ms))) return '—';
+  const m = Math.round(Number(ms) / 60_000);
+  if (m < 60) return `${m}분`;
+  const h = Math.floor(m / 60); const r = m % 60;
+  if (h < 48) return r ? `${h}시간 ${r}분` : `${h}시간`;
+  return `${Math.round(h / 24)}일`;
+};
+
+/**
+ * v2.665: 지금 CPU 사용률을 iDRAC 의 어느 경로로 읽는지 · 못 읽으면 왜인지(서버 cpuDiag). '지금' 기준이다(과거 구간의 원인은 말하지 않는다).
+ * vCenter·OS 값은 쓰지 않으므로 그 사유도 말하지 않는다.
+ */
 export function cpuDiagText(d) {
   if (!d || !d.code) return '';
-  const h = d.host?.name ? `ESXi 호스트 ${d.host.name}` : 'ESXi 호스트';
   switch (d.code) {
-    case 'ok': return d.source === 'telemetry' ? '지금 CPU 사용률: iDRAC 텔레메트리로 읽는 중.'
-      : d.source === 'os' ? '지금 CPU 사용률: 베어메탈 사용률 수집 값으로 채우는 중.' : `지금 CPU 사용률: ${h}(vCenter) 값으로 채우는 중.`;
-    case 'no-tag': return '지금 CPU 사용률을 채울 수 없습니다 — 서비스태그를 모릅니다(iDRAC 인벤토리 수집 전이거나 비어 있음). vCenter 호스트와 대조할 수 없습니다.';
-    case 'no-host': return `지금 CPU 사용률을 채울 수 없습니다 — 서비스태그 ${d.tag} 와 맞는 ESXi 호스트가 인벤토리에 없습니다.`;
-    case 'vcenter-unread': return `지금 CPU 사용률을 채울 수 없습니다 — ${h} 의 vCenter 가 ${VC_UNREAD[d.reason] || '지금 값을 주지 않아'} 그 값을 '지금 값' 으로 쌓지 않습니다.`;
-    case 'host-disconnected': return `지금 CPU 사용률을 채울 수 없습니다 — ${h} 가 vCenter 에서 연결 끊김(${d.host?.connectionState || '?'}) 상태입니다.`;
-    case 'no-host-cpu': return `지금 CPU 사용률을 채울 수 없습니다 — ${h} 의 CPU 사용량 값이 비어 있습니다.`;
+    case 'ok':
+      if (d.source === 'telemetry') return '지금 CPU 사용률: iDRAC 텔레메트리로 읽는 중.';
+      if (d.source === 'sensor') return `지금 CPU 사용률: iDRAC Sensors 컬렉션의 CPU 센서${d.name ? `(${d.name})` : ''}로 읽는 중(인벤토리 주기 — 기본 30분마다 갱신).`;
+      return '지금 CPU 사용률: 베어메탈 사용률의 iDRAC 대체 경로 값으로 읽는 중.';
+    case 'sensor-stale': return `지금 CPU 사용률을 쓰지 않습니다 — iDRAC CPU 센서 값이 ${minText(d.ageMs)} 전 것입니다(Sensors 컬렉션을 최근에 읽지 못했습니다).`;
+    case 'bm-os-only': return '지금 CPU 사용률이 없습니다 — 베어메탈 사용률 값은 OS(SSH) 경로라 이 화면(iDRAC)에는 쓰지 않습니다. 이 서버 iDRAC 은 텔레메트리·CPU 센서를 주지 않습니다.';
+    case 'bm-stale': return `지금 CPU 사용률을 쓰지 않습니다 — iDRAC 대체 경로 값이 ${minText(d.ageMs)} 전 것입니다.`;
+    case 'no-idrac-cpu': return '지금 CPU 사용률이 없습니다 — 이 서버 iDRAC 에서 CPU 사용률을 읽을 경로가 없습니다(텔레메트리는 Datacenter 라이선스 전용 · CPU 센서 없음 · 베어메탈 사용률 iDRAC 대체 경로 미수집). vCenter 값은 쓰지 않습니다.';
     default: return `CPU 사용률 진단 실패: ${d.reason || d.code}`;
   }
+}
+
+/**
+ * v2.665: iDRAC 표본이 지금 들어오는가(서버 idracState — 사용자 신고 "데이터가 수집되다가 지금은 안되고 있어").
+ * 온도·전력은 표본이 신선할 때만 쌓이므로 차트가 멈췄다면 여기서 어디가 멈췄는지 가른다. 멈추지 않았으면 null(배너 없음).
+ * @returns {{tone:'amber'|'red', title:string, lines:string[]}|null}
+ */
+export function idracStateBanner(st) {
+  if (!st || typeof st !== 'object' || !st.stale) return null;
+  const lines = [];
+  const age = st.sampleAt != null ? `마지막 iDRAC 표본은 ${minText(st.ageMs)} 전(${hm(st.sampleAt)})입니다` : 'iDRAC 표본 시각을 모릅니다';
+  lines.push(st.stale === 'no-sensors' ? '이 서버의 iDRAC 온도 표본이 없습니다.' : `${age} — 기준 ${minText(st.maxAgeMs)} 을 넘겨 새 값을 쌓지 않습니다.`);
+  const c = st.collector;
+  if (!st.remote) {
+    lines.push('이 포탈이 직접 폴링하는 서버입니다 — 서비스 점검의 iDRAC 폴 주기 행과 iDRAC 응답(연결 테스트)을 확인하세요.');
+    return { tone: 'amber', title: 'iDRAC 수집이 멈췄습니다', lines };
+  }
+  if (!c || !c.known) {
+    lines.push('담당 엣지의 pull 상태를 중앙이 모릅니다(중앙 재시작 직후이거나 수집 서버 등록에서 빠졌습니다).');
+    return { tone: 'amber', title: 'iDRAC 수집이 멈췄습니다', lines };
+  }
+  const pulled = c.lastOkAt != null ? `${minText(c.lastOkAgeMs)} 전` : '기록 없음';
+  if (c.ok) {
+    lines.push(`중앙 → 엣지(${c.id}) pull 은 정상입니다(마지막 정상 ${pulled}). 엣지가 보내는 이 서버의 표본 시각이 멈췄으므로 **엣지의 iDRAC 수집**을 보세요 — 특수 기능 › 엣지 로그에서 그 엣지의 collect.idrac 줄(마지막 실행·진행 시간·주기).`);
+    return { tone: 'amber', title: '엣지의 iDRAC 수집이 멈췄습니다', lines };
+  }
+  const err = c.error ? ` 사유: ${c.error}` : (c.errorHidden ? ' (사유는 전체 범위 관리자에게만 보입니다)' : '');
+  lines.push(`중앙 → 엣지(${c.id}) pull 이 실패하고 있습니다(마지막 정상 ${pulled}${c.fails ? ` · 연속 실패 ${c.fails}회` : ''}).${err} 설정 › 수집 서버에서 그 엣지 상태를 확인하세요.`);
+  return { tone: 'red', title: '엣지에서 데이터를 가져오지 못하고 있습니다', lines };
 }

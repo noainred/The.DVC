@@ -172,7 +172,7 @@ export function IdracTrendTable({ corps, sitesFor, initCorp, initSite, gpuOnly, 
           <div className="muted" style={{ fontSize: 11, marginTop: 10, lineHeight: 1.6 }}>
             각 칸은 최근 {hoursLabel(hours)}의 최대(굵게) · 평균 · 최소입니다. 열 제목을 누르면 정렬되고, 기준(최대·평균·최소·현재)은 오른쪽 위에서 고릅니다.
             조건을 만족한 칸은 호박색으로 칠합니다. 값은 시간당 집계에서 읽어 기간이 앞쪽으로 최대 1시간 넓습니다(실제 시작 {ymd(data.since)} {hm(data.since)}).
-            CPU 사용률은 iDRAC 텔레메트리·베어메탈 사용률·vCenter 호스트 값을 합쳐 봅니다(추이 차트의 베어메탈 이력 대체는 표에 쓰지 않습니다). 서버 이름을 누르면 그 서버의 추이 차트로 갑니다.
+            CPU 사용률은 iDRAC 에서 온 값만 씁니다(텔레메트리·CPU 센서·베어메탈 사용률의 iDRAC 대체 경로 — vCenter·OS 값은 쓰지 않습니다. 추이 차트의 이력 대체는 표에 쓰지 않습니다). 서버 이름을 누르면 그 서버의 추이 차트로 갑니다.
           </div>
         </>
       )}
