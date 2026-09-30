@@ -16,8 +16,8 @@ export const SERIES = [
   { k: 'cpuPct', label: 'CPU 사용률', unit: '%', color: '#3b82f6', axis: 'pct' },
   { k: 'cpuTemp', label: 'CPU 온도', unit: '℃', color: '#ef4444', axis: 'pct' },
   { k: 'gpuTemp', label: 'GPU 온도', unit: '℃', color: '#a855f7', axis: 'pct' },
-  { k: 'inletTemp', label: '흡기 온도', unit: '℃', color: '#06b6d4', axis: 'pct' },   // v2.661
-  { k: 'exhaustTemp', label: '배기 온도', unit: '℃', color: '#ec4899', axis: 'pct' }, // v2.661
+  { k: 'inletTemp', label: '흡기 온도', unit: '℃', color: '#06b6d4', axis: 'pct', dash: 'dash' },   // v2.661 · v2.662 기본 점선
+  { k: 'exhaustTemp', label: '배기 온도', unit: '℃', color: '#ec4899', axis: 'pct', dash: 'dash' }, // v2.661 · v2.662 기본 점선
   { k: 'powerW', label: '소비 전력', unit: ' W', color: '#f59e0b', axis: 'w' },
 ];
 
@@ -176,4 +176,59 @@ export function powerNote(data) {
   if (!p || p.found) return '';
   if (p.reason === 'no-edge-report') return '소비 전력 — 이 서버를 수집하는 엣지의 전력 보고를 아직 받지 못했습니다(중앙 재시작 직후면 1분 안에 채워집니다).';
   return '소비 전력 계열을 찾지 못했습니다.';
+}
+
+/*
+ * v2.662 — 선 모양(사용자 요청 "흡기·배기 온도는 점선으로" + "사용자가 줄 모양과 형태를 지정해서 볼 수 있게").
+ * 계열마다 { dash, width, dot } 이고 카드 순서와 같이 **브라우저에만** 저장한다(사람마다 보는 방식이 다르다).
+ * 기본값과 같은 계열은 저장하지 않는다 — 다음 릴리스에서 기본값을 바꾸면 손대지 않은 사람에게 그대로 먹게.
+ * 모양 키는 엑셀 차트(`xlsxChart.js` prstDash)와 같은 이름을 쓴다 — 서버가 같은 목록으로 거른다.
+ */
+export const LINE_STYLE_KEY = 'idracTrend.lineStyle';
+export const DASHES = [
+  { k: 'solid', label: '실선', array: undefined },
+  { k: 'dash', label: '점선', array: '6 4' },
+  { k: 'dot', label: '짧은 점선', array: '2 3' },
+  { k: 'dashdot', label: '일점쇄선', array: '8 3 2 3' },
+];
+export const WIDTHS = [1, 2, 3, 4];
+export const dashArrayOf = (k) => DASHES.find((d) => d.k === k)?.array;
+export function defaultStyleOf(k) {
+  const s = SERIES.find((x) => x.k === k);
+  return { dash: s?.dash || 'solid', width: 2, dot: false };
+}
+export const DEFAULT_STYLES = Object.fromEntries(SERIES.map((s) => [s.k, defaultStyleOf(s.k)]));
+/** 저장값 정규화 — 모르는 계열·모양·굵기는 기본값(조용히 깨지지 않게). 항상 전 계열을 채운다. */
+export function normalizeStyles(saved) {
+  const src = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  const out = {};
+  for (const s of SERIES) {
+    const d = defaultStyleOf(s.k);
+    const v = src[s.k] && typeof src[s.k] === 'object' ? src[s.k] : {};
+    out[s.k] = {
+      dash: DASHES.some((x) => x.k === v.dash) ? v.dash : d.dash,
+      width: WIDTHS.includes(v.width) ? v.width : d.width,
+      dot: typeof v.dot === 'boolean' ? v.dot : d.dot,
+    };
+  }
+  return out;
+}
+const sameStyle = (a, b) => a.dash === b.dash && a.width === b.width && a.dot === b.dot;
+export const isDefaultStyles = (styles) => SERIES.every((s) => sameStyle(styles[s.k], defaultStyleOf(s.k)));
+export function setStyle(styles, k, patch) {
+  if (!styles[k]) return styles;
+  return normalizeStyles({ ...styles, [k]: { ...styles[k], ...patch } });
+}
+export function loadStyles(storage) {
+  try { return normalizeStyles(JSON.parse(storage?.getItem(LINE_STYLE_KEY) || 'null')); } catch { return normalizeStyles(null); }
+}
+export function saveStyles(storage, styles) {
+  try {
+    const diff = Object.fromEntries(SERIES.filter((s) => !sameStyle(styles[s.k], defaultStyleOf(s.k))).map((s) => [s.k, styles[s.k]]));
+    if (!Object.keys(diff).length) storage?.removeItem(LINE_STYLE_KEY); else storage?.setItem(LINE_STYLE_KEY, JSON.stringify(diff));
+  } catch { /* 저장 못 하면 이번 화면에서만 */ }
+}
+/** 엑셀 내보내기 쿼리 — `k:모양:굵기:점` 을 쉼표로. 기본값이면 빈 문자열(서버 기본과 같다). */
+export function stylesQuery(styles, keys) {
+  return (keys || []).filter((k) => styles?.[k]).map((k) => `${k}:${styles[k].dash}:${styles[k].width}:${styles[k].dot ? 1 : 0}`).join(',');
 }

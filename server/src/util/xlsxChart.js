@@ -33,12 +33,20 @@ export function colLetter(n) {
 const txPr = (sz = 900) => `<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="${sz}"/></a:pPr><a:endParaRPr lang="ko-KR"/></a:p></c:txPr>`;
 const titleXml = (text, sz = 1200) => `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="${sz}" b="1"/></a:pPr><a:r><a:rPr lang="ko-KR" sz="${sz}" b="1"/><a:t>${esc(text)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`;
 
+/** 화면 모양 키 → DrawingML 프리셋(웹 idracTrendText.js DASHES 와 같은 키). */
+export const PRST_DASH = { dash: 'dash', dot: 'sysDot', dashdot: 'dashDot' };
+
 function serXml(s, idx, catRef) {
   const color = /^[0-9A-Fa-f]{6}$/.test(String(s.color || '').replace('#', '')) ? String(s.color).replace('#', '') : '4472C4';
+  // v2.662: 선 모양 — 허용 목록 밖은 실선. 스키마 순서: solidFill → prstDash → round.
+  const dash = PRST_DASH[s.dash] || null;
+  const w = Number.isInteger(s.width) && s.width >= 1 && s.width <= 4 ? s.width * 9525 : 19050;
   return `<c:ser><c:idx val="${idx}"/><c:order val="${idx}"/>`
     + `<c:tx><c:strRef><c:f>${esc(s.nameRef)}</c:f></c:strRef></c:tx>`
-    + `<c:spPr><a:ln w="19050" cap="rnd"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:round/></a:ln></c:spPr>`
-    + '<c:marker><c:symbol val="none"/></c:marker>'
+    + `<c:spPr><a:ln w="${w}" cap="${dash ? 'flat' : 'rnd'}"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill>${dash ? `<a:prstDash val="${dash}"/>` : ''}<a:round/></a:ln></c:spPr>`
+    + (s.marker
+      ? `<c:marker><c:symbol val="circle"/><c:size val="4"/><c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr></c:marker>`
+      : '<c:marker><c:symbol val="none"/></c:marker>')
     + `<c:cat><c:strRef><c:f>${esc(catRef)}</c:f></c:strRef></c:cat>`
     + `<c:val><c:numRef><c:f>${esc(s.ref)}</c:f></c:numRef></c:val>`
     + '<c:smooth val="0"/></c:ser>';

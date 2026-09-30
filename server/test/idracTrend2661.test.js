@@ -158,3 +158,18 @@ test('⑧ 흡기·배기 — 전용 계열(dead-band 온도 정책), 상세 모�
   const off = buildServerTrendRows([{ id: 'a' }], { now: NOW, detail: false, localCycle: null, airflow: false, latestOf: () => ({ t: NOW, temps: { 'System Board Inlet Temp': 22 } }) });
   assert.equal(off.length, 0, 'IDRAC_TREND_AIRFLOW=false');
 });
+
+test('⑨ v2.662 선 모양 — 쿼리는 허용 목록으로 거르고, 차트 XML 은 prstDash·굵기·점을 싣는다', async () => {
+  const { parseExportStyles } = await import('../src/routes/admin/idracTrend.js');
+  assert.deepEqual(parseExportStyles('inletTemp:dot:3:1,cpuPct:solid:9:0,zz:dash:2:0,gpuTemp:"x":2:0'),
+    { inletTemp: { dash: 'dot', width: 3, marker: true }, cpuPct: { dash: 'solid', width: 2, marker: false } }, '모르는 계열·모양은 버리고 굵기 범위 밖은 2');
+  assert.deepEqual(parseExportStyles(''), {});
+  const x = chartXml({ title: 't', catRef: "'s'!$A$2:$A$9", series: [
+    { nameRef: "'s'!$B$1", ref: "'s'!$B$2:$B$9", color: '06b6d4', dash: 'dash', width: 3, marker: true },
+    { nameRef: "'s'!$C$1", ref: "'s'!$C$2:$C$9", color: 'ef4444', dash: '<evil>' },
+  ] });
+  assert.match(x, /<a:ln w="28575" cap="flat"><a:solidFill><a:srgbClr val="06b6d4"\/><\/a:solidFill><a:prstDash val="dash"\/><a:round\/><\/a:ln>/);
+  assert.match(x, /<c:symbol val="circle"\/>/);
+  assert.match(x, /<a:ln w="19050" cap="rnd"><a:solidFill><a:srgbClr val="ef4444"\/><\/a:solidFill><a:round\/><\/a:ln>/, '모르는 모양은 실선');
+  assert.doesNotMatch(x, /evil/);
+});

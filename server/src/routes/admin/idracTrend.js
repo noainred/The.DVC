@@ -239,6 +239,19 @@ function serverRows(req, { gpuKeys = null } = {}) {
 
 const EXPORT_COLS = { cpuPct: 'CPU 사용률(%)', cpuTemp: 'CPU 온도(℃)', gpuTemp: 'GPU 온도(℃)', inletTemp: '흡기 온도(℃)', exhaustTemp: '배기 온도(℃)', powerW: '소비 전력(W)' };
 const EXPORT_COLORS = { cpuPct: '3b82f6', cpuTemp: 'ef4444', gpuTemp: 'a855f7', inletTemp: '06b6d4', exhaustTemp: 'ec4899', powerW: 'f59e0b' };
+// v2.662: 엑셀 차트 선 모양 — 기본은 흡기·배기 점선(화면 기본과 같다). 사용자 설정은 ?styles=k:모양:굵기:점,… 로 받고 허용 목록으로 거른다.
+const EXPORT_DASH_DEFAULT = { inletTemp: 'dash', exhaustTemp: 'dash' };
+export function parseExportStyles(q) {
+  const out = {};
+  for (const part of String(q || '').slice(0, 400).split(',')) {
+    const [k, dash, width, dot] = part.split(':');
+    if (!EXPORT_COLS[k] || !['solid', 'dash', 'dot', 'dashdot'].includes(dash)) continue;
+    const w = Number(width);
+    out[k] = { dash, width: Number.isInteger(w) && w >= 1 && w <= 4 ? w : 2, marker: dot === '1' };
+  }
+  return out;
+}
+const exportStyleOf = (styles, c) => styles[c] || { dash: EXPORT_DASH_DEFAULT[c] || 'solid', width: 2, marker: false };
 /** 엑셀은 서버마다 시트·차트 1장이라 CSV 보다 상한이 작다(뺀 대수는 밝힌다). */
 export const XLSX_SERVER_MAX = 40;
 const CPU_SOURCE_LABEL = { telemetry: 'iDRAC 텔레메트리', os: '베어메탈 사용률(OS·iDRAC)', vcenter: 'vCenter 호스트', history: '베어메탈 사용률 이력' };
@@ -337,6 +350,7 @@ export function registerIdracTrend(adminRouter) {
     const job = exportJob(req, res, 'xlsx', await gpuKeysFn());
     if (!job) return;
     const { win, targets, cols, omitted, names } = job;
+    const lineStyles = parseExportStyles(req.query.styles);
     const lock = acquireExport('idrac-trend-xlsx', req);
     if (!lock.ok) return res.status(lock.status).json(lock.body);
     try {
@@ -375,7 +389,7 @@ export function registerIdracTrend(adminRouter) {
           charts.push({
             sheet: sheetNo, title: `${s.name || s.id} · ${periodLabel(req, win)}`,
             catRef: `${ref}!$A$2:$A$${last}`,
-            series: cols.map((c, i) => ({ nameRef: `${ref}!$${colLetter(i + 2)}$1`, ref: `${ref}!$${colLetter(i + 2)}$2:$${colLetter(i + 2)}$${last}`, color: EXPORT_COLORS[c], axis: c === 'powerW' ? 'secondary' : 'primary' })),
+            series: cols.map((c, i) => ({ nameRef: `${ref}!$${colLetter(i + 2)}$1`, ref: `${ref}!$${colLetter(i + 2)}$2:$${colLetter(i + 2)}$${last}`, color: EXPORT_COLORS[c], ...exportStyleOf(lineStyles, c), axis: c === 'powerW' ? 'secondary' : 'primary' })),
             y1: { title: '% · ℃', min: 0, max: 100 }, y2: { title: 'W', min: 0 },
             anchor: { fromCol: cols.length + 2, fromRow: 1, toCol: cols.length + 16, toRow: 26 },
           });

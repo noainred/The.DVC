@@ -14,12 +14,22 @@ import {
   PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
   corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
   loadOrder, saveOrder, moveKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
+  loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
 } from './idracTrendText.js';
 
 const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12 };
 const ALL_ON = Object.fromEntries(SERIES.map((s) => [s.k, true]));
 const store = () => { try { return window.localStorage; } catch { return null; } };
 const errText = (e) => e?.message || String(e);
+/** 선 모양 견본(카드·설정 공용) — 차트와 같은 dasharray·굵기로 그린다. */
+function LineSwatch({ color, st, w = 22 }) {
+  return (
+    <svg width={w} height={10} style={{ display: 'block', flexShrink: 0 }} aria-hidden="true">
+      <line x1={1} y1={5} x2={w - 1} y2={5} stroke={color} strokeWidth={st?.width || 2} strokeDasharray={dashArrayOf(st?.dash)} strokeLinecap="butt" />
+      {st?.dot && <circle cx={w / 2} cy={5} r={2.5} fill={color} />}
+    </svg>
+  );
+}
 const pill = { fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: 999, color: '#7dd3fc', background: 'rgba(56,189,248,.12)', border: '1px solid rgba(56,189,248,.45)', lineHeight: 1.4 };
 
 export default function IdracTrendTool() {
@@ -39,6 +49,9 @@ export default function IdracTrendTool() {
   const [arrange, setArrange] = useState(false);                   // 순서 편집 모드(◀ ▶ 버튼)
   const [dragK, setDragK] = useState(null);
   const applyOrder = (next) => { setOrder(next); saveOrder(store(), next); };
+  const [styles, setStyles] = useState(() => loadStyles(store()));  // v2.662: 계열별 선 모양(브라우저 저장)
+  const [styling, setStyling] = useState(false);
+  const applyStyles = (next) => { setStyles(next); saveStyles(store(), next); };
 
   useEffect(() => {
     let alive = true;
@@ -125,7 +138,7 @@ export default function IdracTrendTool() {
               onClick={() => { if (!arrange) toggle(s.k); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(s.k); } }}
               style={{ padding: '10px 14px', minWidth: 0, cursor: arrange ? 'grab' : x ? 'pointer' : 'default', opacity: dragK === s.k ? 0.4 : !x ? 0.55 : on[s.k] ? 1 : 0.5, userSelect: 'none', outline: arrange ? '1px dashed var(--border)' : undefined }}>
               <div className="flex" style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
-                <i style={{ width: 12, height: 3, borderRadius: 2, background: s.color, display: 'block', flexShrink: 0 }} />
+                <LineSwatch color={s.color} st={styles[s.k]} />
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
                 {arrange
                   ? <span className="flex" style={{ marginLeft: 'auto', gap: 4 }}>{arrowBtn(-1, '◀')}{arrowBtn(1, '▶')}</span>
@@ -143,8 +156,43 @@ export default function IdracTrendTool() {
       <div className="flex wrap" style={{ gap: 8, alignItems: 'center', margin: '-6px 0 12px', fontSize: 12 }}>
         <button type="button" className={arrange ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }} onClick={() => setArrange((v) => !v)}>{arrange ? '✓ 순서 편집 끝' : '↔ 카드 순서 바꾸기'}</button>
         {arrange && <button type="button" className="tab" style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }} disabled={order.join() === DEFAULT_ORDER.join()} onClick={() => applyOrder([...DEFAULT_ORDER])}>기본 순서</button>}
+        <button type="button" className={styling ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }} onClick={() => setStyling((v) => !v)}>{styling ? '✓ 선 모양 닫기' : '〰 선 모양'}</button>
         <span style={{ color: 'var(--text-faint)' }}>{arrange ? '◀ ▶ 로 옮기거나 카드를 끌어다 놓으세요 — 이 브라우저에 저장됩니다.' : '카드를 끌어다 놓아도 순서가 바뀝니다.'}</span>
       </div>
+      {styling && (
+        <div className="card idrac-trend-styles" style={{ padding: '12px 14px', marginBottom: 12, minWidth: 0 }}>
+          <div className="flex wrap" style={{ alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <b style={{ fontSize: 13 }}>선 모양</b>
+            <span className="muted" style={{ fontSize: 11 }}>계열마다 모양·굵기·점 표시를 고릅니다 — 이 브라우저에 저장되고 엑셀(차트) 내보내기에도 같이 들어갑니다.</span>
+            <button type="button" className="tab" style={{ flex: 'none', padding: '3px 10px', marginTop: 0, marginLeft: 'auto' }} disabled={isDefaultStyles(styles)} onClick={() => applyStyles(normalizeStyles(null))}>기본 모양</button>
+          </div>
+          {SERIES.map((s) => {
+            const x = styles[s.k];
+            return (
+              <div key={s.k} className="flex wrap" style={{ alignItems: 'center', gap: 8, padding: '5px 0', borderTop: '1px solid var(--border)', minWidth: 0 }}>
+                <span className="flex" style={{ alignItems: 'center', gap: 8, width: 150, minWidth: 0 }}>
+                  <LineSwatch color={s.color} st={x} w={34} /><span style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{s.label}</span>
+                </span>
+                <span className="flex wrap" style={{ gap: 4 }} role="group" aria-label={`${s.label} 선 모양`}>
+                  {DASHES.map((d) => (
+                    <button key={d.k} type="button" className={x.dash === d.k ? 'login-btn' : 'tab'} aria-pressed={x.dash === d.k}
+                      style={{ flex: 'none', padding: '2px 9px', marginTop: 0, fontSize: 12 }} onClick={() => applyStyles(setStyle(styles, s.k, { dash: d.k }))}>{d.label}</button>
+                  ))}
+                </span>
+                <label className="flex" style={{ alignItems: 'center', gap: 4, fontSize: 12 }}>
+                  굵기
+                  <select className="input" style={{ minWidth: 0, width: 64, padding: '2px 6px' }} value={x.width} onChange={(e) => applyStyles(setStyle(styles, s.k, { width: Number(e.target.value) }))}>
+                    {WIDTHS.map((w) => <option key={w} value={w}>{w}px</option>)}
+                  </select>
+                </label>
+                <label className="flex" style={{ alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={x.dot} onChange={(e) => applyStyles(setStyle(styles, s.k, { dot: e.target.checked }))} /> 점 표시
+                </label>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="card" style={{ padding: '16px 18px', minWidth: 0 }}>
         <div className="flex wrap" style={{ alignItems: 'baseline', gap: 10, marginBottom: 10, minWidth: 0 }}>
@@ -221,9 +269,9 @@ export default function IdracTrendTool() {
                 <Tooltip contentStyle={tipStyle} labelStyle={{ color: '#8b9bb4' }}
                   labelFormatter={(t) => `${span >= DAY ? `${ymd(t)} ` : ''}${hm(t)}${data.bucketMs > 60_000 ? ` · ${bucketLabel(data.bucketMs)} 평균` : ''}`}
                   formatter={(v, name) => { const s = SERIES.find((x) => x.label === name); return [valueText(v, s?.unit || ''), name]; }} />
-                {on.powerW && st.powerW && <Area yAxisId="w" type="monotone" dataKey="powerW" name="소비 전력" stroke="#f59e0b" strokeWidth={2} fill="url(#idracPwrFill)" dot={false} isAnimationActive={false} />}
+                {on.powerW && st.powerW && <Area yAxisId="w" type="monotone" dataKey="powerW" name="소비 전력" stroke="#f59e0b" strokeWidth={styles.powerW.width} strokeDasharray={dashArrayOf(styles.powerW.dash)} fill="url(#idracPwrFill)" dot={styles.powerW.dot ? { r: 2.5, fill: '#f59e0b', strokeWidth: 0 } : false} isAnimationActive={false} />}
                 {SERIES.filter((s) => s.axis === 'pct' && on[s.k] && st[s.k]).map((s) => (
-                  <Line key={s.k} yAxisId="pct" type="monotone" dataKey={s.k} name={s.label} stroke={s.color} strokeWidth={2} dot={false} isAnimationActive={false} />
+                  <Line key={s.k} yAxisId="pct" type="monotone" dataKey={s.k} name={s.label} stroke={s.color} strokeWidth={styles[s.k].width} strokeDasharray={dashArrayOf(styles[s.k].dash)} dot={styles[s.k].dot ? { r: 2.5, fill: s.color, strokeWidth: 0 } : false} isAnimationActive={false} />
                 ))}
               </ComposedChart>
             </ResponsiveContainer>
@@ -241,7 +289,7 @@ export default function IdracTrendTool() {
       {modal === 'host' && data?.host && <HostDetailLoader host={data.host} onClose={() => setModal(null)} />}
       {modal === 'idrac' && srv && <IdracDetailModal server={{ id: srv.id, name: srv.name, remote: srv.remote, serviceTag: srv.serviceTag, datacenterId: srv.corp }} onClose={() => setModal(null)} />}
       {(modal === 'csv' || modal === 'xlsx') && (
-        <CsvModal fmt={modal} gpuOnly={gpuOnly} serverId={serverId} serverName={srv?.name || serverId} corp={corp} site={site} siteCount={inSite.length}
+        <CsvModal fmt={modal} gpuOnly={gpuOnly} styles={styles} serverId={serverId} serverName={srv?.name || serverId} corp={corp} site={site} siteCount={inSite.length}
           range={range} custom={custom} on={on} onClose={() => setModal(null)} />
       )}
     </>
@@ -268,7 +316,7 @@ function HostDetailLoader({ host, onClose }) {
   return <EntityDetail type="host" item={item} onClose={onClose} />;
 }
 
-function CsvModal({ fmt = 'csv', gpuOnly = false, serverId, serverName, corp, site, siteCount, range, custom, on, onClose }) {
+function CsvModal({ fmt = 'csv', gpuOnly = false, styles = null, serverId, serverName, corp, site, siteCount, range, custom, on, onClose }) {
   const [scope, setScope] = useState('server');
   const [r, setR] = useState(range === 'custom' && !custom ? '24h' : range);
   const [cols, setCols] = useState('all');
@@ -278,7 +326,7 @@ function CsvModal({ fmt = 'csv', gpuOnly = false, serverId, serverName, corp, si
   const xlsx = fmt === 'xlsx';
   const go = async () => {
     setBusy(true); setE(null);
-    const q = { scope, cols: keys.join(','), ...(scope === 'dc' ? { corp, site, ...(gpuOnly ? { gpuOnly: 1 } : {}) } : { id: serverId }), ...(r === 'custom' && custom ? { start: custom.start, end: custom.end } : { range: r }) };
+    const q = { scope, cols: keys.join(','), ...(scope === 'dc' ? { corp, site, ...(gpuOnly ? { gpuOnly: 1 } : {}) } : { id: serverId }), ...(r === 'custom' && custom ? { start: custom.start, end: custom.end } : { range: r }), ...(xlsx && styles ? { styles: stylesQuery(styles, keys) } : {}) };
     const qs = new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)])).toString();
     try { await downloadFile(`/admin/idrac/trend/export.${xlsx ? 'xlsx' : 'csv'}?${qs}`); onClose(); } catch (x) { setE(x); } finally { setBusy(false); }
   };
