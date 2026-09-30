@@ -179,7 +179,9 @@ export function registerIdracTrend(adminRouter) {
       const period = win.custom ? `${fileStamp(win.start).slice(0, 8)}-${fileStamp(win.end).slice(0, 8)}` : (PRESETS[req.query.range] ? req.query.range : '24h');
       const fname = `idrac-trend_${label}_${period}_${fileStamp()}.csv`;
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="idrac-trend.csv"; filename*=UTF-8''${encodeURIComponent(fname)}`);
+      // ASCII 대체 이름에도 기간·시각을 싣는다(웹 downloadFile 이 filename= 을 먼저 읽는다 — 한글 라벨은 filename* 에만).
+      const ascii = `idrac-trend_${period}_${fileStamp()}.csv`;
+      res.setHeader('Content-Disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fname)}`);
       if (omitted) res.setHeader('X-Omitted-Servers', String(omitted)); // 상한으로 뺀 대수(조용한 상한 금지)
       res.send(CSV_BOM + lines.join('\r\n') + '\r\n');
     } finally { lock.release(); }

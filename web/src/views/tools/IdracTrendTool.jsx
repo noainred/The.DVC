@@ -12,7 +12,7 @@ import { IdracDetailModal } from '../idrac/IdracDetailModal.jsx';
 import { WARN_PCT, CRIT_PCT } from '../../console/consoleData.js';
 import {
   PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
-  corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, DC_SOURCE_TEXT,
+  corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
 } from './idracTrendText.js';
 
 const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12 };
@@ -94,7 +94,7 @@ export default function IdracTrendTool() {
       {list.scoped && list.omittedOutOfScope > 0 && <div className="banner" style={{ marginBottom: 10 }}>범위 밖 서버 {list.omittedOutOfScope}대는 목록에서 뺐습니다.</div>}
 
       {/* KPI — 클릭 = 계열 켜기/끄기(별도 토글 행 없음). 값이 없는 계열은 클릭을 무시한다. */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0,1fr))', gap: 10, marginBottom: 14 }}>
+      <div className="idrac-trend-kpis">
         {SERIES.map((s) => {
           const x = st[s.k];
           return (
@@ -126,7 +126,7 @@ export default function IdracTrendTool() {
           {data && (esxi ? data.host : true) && (
             <button type="button" style={pill} onClick={() => setModal(esxi ? 'host' : 'idrac')}>{esxi ? '🖧 ESXi 호스트 상세 ›' : '🖥 iDRAC 상세 / 센서 ›'}</button>
           )}
-          {data && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>서비스태그 {data.serviceTag || '—'} {esxi ? '→ ESXi 호스트 일치' : '— 일치하는 ESXi 호스트 없음'}</span>}
+          {data && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{kindBasisText(data)}</span>}
           {srv?.dcSource && DC_SOURCE_TEXT[srv.dcSource] && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{DC_SOURCE_TEXT[srv.dcSource]}</span>}
         </div>
 

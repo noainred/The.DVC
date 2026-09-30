@@ -72,3 +72,11 @@ describe('iDRAC 통합 추이 문구(v2.660)', () => {
     for (const s of src.match(/'[^'\n]*'/g) || []) { expect(s.includes('`')).toBe(false); expect(s.includes('**')).toBe(false); }
   });
 });
+
+describe('판별 근거 문구', () => {
+  it('서비스태그가 없으면 대조할 수 없다고 말한다', async () => {
+    const { kindBasisText } = await import('./idracTrendText.js');
+    expect(kindBasisText({ serviceTag: '', kind: 'baremetal' })).toMatch(/대조할 수 없어/);
+    expect(kindBasisText({ serviceTag: 'ABC', kind: 'esxi' })).toBe('서비스태그 ABC → ESXi 호스트 일치');
+  });
+});

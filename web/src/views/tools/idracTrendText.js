@@ -115,3 +115,10 @@ export const DC_SOURCE_TEXT = {
   'scan-range': '법인은 이 서버 IP 를 포함한 iDRAC 스캔 대역의 법인으로 분류했습니다',
   'scan-ambiguous': '여러 법인의 스캔 대역이 겹쳐 법인을 정하지 않았습니다',
 };
+
+/** 서버 형태 판별 근거 — 서비스태그가 없으면 판별할 수 없어 베어메탈로 보인다는 사실을 말한다. */
+export function kindBasisText(d) {
+  if (!d) return '';
+  if (!d.serviceTag) return '서비스태그 없음 — ESXi 호스트와 대조할 수 없어 베어메탈로 표시합니다';
+  return d.kind === 'esxi' ? `서비스태그 ${d.serviceTag} → ESXi 호스트 일치` : `서비스태그 ${d.serviceTag} — 일치하는 ESXi 호스트 없음`;
+}
