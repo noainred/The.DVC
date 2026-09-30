@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **568개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **570개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-29)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-09-30)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -642,7 +642,7 @@
 | `HZSESS_DB_PATH` |  |  | horizon/sessionDb.js |
 | `HZSESS_FIRST_DELAY_MS` | `60000` |  | horizon/sessionPoller.js |
 
-## iDRAC/전력 (11)
+## iDRAC/전력 (13)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -650,6 +650,8 @@
 | `BMUSAGE_REPORT_TTL_MS` | `6` |  | idrac/redfish.js |
 | `BMUSAGE_SENSOR_TTL_MS` | `6` |  | idrac/redfish.js |
 | `IDRAC_AUTH_CACHE_MAX` | `4096` |  | idrac/redfish.js |
+| `IDRAC_SENSOR_BUDGET_MS` |  |  | idrac/redfish.js |
+| `IDRAC_SENSOR_MEMBER_MAX` | `250` |  | idrac/redfish.js |
 | `IDRAC_SENSOR_SAMPLES` | `1440` |  | idrac/sensorStore.js |
 | `IDRAC_TEMP_SERIES` | `기본 적용('false' 로 끄기)` |  | idrac/serverTempSeries.js |
 | `IDRAC_TEMP_SERIES_DETAIL` | `기본 아님('true' 일 때만 적용)` |  | idrac/serverTempSeries.js |
@@ -752,4 +754,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 568
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 77 / 570

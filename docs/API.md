@@ -22,10 +22,10 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **871개** |
+| 엔드포인트 | **873개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 81개 |
-| GET | 459개 |
+| 라우트 파일 | 82개 |
+| GET | 461개 |
 | POST | 275개 |
 | PUT | 88개 |
 | PATCH | 2개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 359 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 361 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -766,6 +766,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/esxi` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:423](../server/src/routes/api/hardwareGpu.js#L423) |
 | GET | `/tools/esxi-temp` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1229](../server/src/routes/api/toolsCapacity.js#L1229) |
 | GET | `/tools/esxi-temp/history` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1344](../server/src/routes/api/toolsCapacity.js#L1344) |
+| GET | `/tools/esxi-temp/sensors` | 권한 `tools` | [server/src/routes/api/serverSensors.js:135](../server/src/routes/api/serverSensors.js#L135) |
+| GET | `/tools/esxi-temp/sensors/:id` | 권한 `tools` | [server/src/routes/api/serverSensors.js:176](../server/src/routes/api/serverSensors.js#L176) |
 | POST | `/tools/esxi-temp/spark` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1427](../server/src/routes/api/toolsCapacity.js#L1427) |
 | GET | `/tools/gpu` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:442](../server/src/routes/api/hardwareGpu.js#L442) |
 | GET | `/tools/gpu.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:456](../server/src/routes/api/hardwareGpu.js#L456) |

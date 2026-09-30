@@ -34,9 +34,11 @@ import {
 } from './parts.jsx';
 import { useTempSparklines } from './useTempSparklines.js';
 import { unitText } from '../../unitText.js';
+import SensorDetailView from './SensorDetailView.jsx';
 
 const KIND_KO = { physical: '물리', virtual: '가상화' };
-const VIEWS = [['server', '서버별'], ['host', 'ESXi 호스트별'], ['cluster', '클러스터별'], ['vc', '법인별']];
+// v2.659: '센서 상세' — iDRAC 전 센서(임계값·상태)·전산실 흡기·CPU/GPU 온도·CPU 사용률(SensorDetailView).
+const VIEWS = [['server', '서버별'], ['host', 'ESXi 호스트별'], ['cluster', '클러스터별'], ['vc', '법인별'], ['sensor', '센서 상세']];
 const VIEW_TITLE = { server: '서버별', host: 'ESXi 호스트별', cluster: '클러스터별', vc: '법인별' };
 const HEAT_TITLE = { server: '서버 히트맵', host: 'ESXi 호스트 히트맵', cluster: '클러스터 히트맵', vc: '법인 히트맵' };
 const n1 = (v) => { const n = tempNum(v); return n == null ? '—' : n.toFixed(1); };
@@ -48,7 +50,7 @@ const int = (v) => Number(v || 0).toLocaleString();
 export default function ServerTempBoard({ scope }) {
   /* ── 훅(전부 조기 return 위) ─────────────────────────────────────────────── */
   const { loading, data, error } = useTool('/tools/esxi-temp', scope ? { vcenterId: scope } : {});
-  const [view, setView] = useHashTab({ base: ['tools', 'esxitemp'], valid: ['server', 'host', 'cluster', 'vc'], fallback: 'server' });
+  const [view, setView] = useHashTab({ base: ['tools', 'esxitemp'], valid: ['server', 'host', 'cluster', 'vc', 'sensor'], fallback: 'server' });
   const [kindF, setKindF] = useState('all');
   const [sel, setSel] = useState(null);               // 선택 법인 key
   const [dense, setDense] = useState(loadDensity);
@@ -149,6 +151,17 @@ export default function ServerTempBoard({ scope }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (hist && hist.key) openHist(hist.level, hist.key); }, [days, bucket]);
 
+  // v2.659: 센서 상세 탭은 자기 API 를 쓴다 — 온도 보드의 로딩·오류와 무관하게 그린다(훅은 전부 이 위에 있다).
+  if (view === 'sensor') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+        <div style={{ padding: '12px 16px', borderRadius: 12, border: '1px solid var(--border)', borderLeft: '2px solid var(--teal)', background: 'linear-gradient(180deg, rgba(20,27,45,.9), rgba(13,20,28,.85))' }}>
+          <Segment items={VIEWS} value={view} onPick={setView} />
+        </div>
+        <SensorDetailView scope={scope} />
+      </div>
+    );
+  }
   if (loading) return <Loading />;
   if (error) return <ErrorBox message={error} />;
 

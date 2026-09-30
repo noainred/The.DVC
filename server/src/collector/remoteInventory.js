@@ -15,6 +15,7 @@
 
 import { edgeId, isPlainObj } from '../central/edgeRecord.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { expandCompact, compactSensor } from '../idrac/sensorDetail.js'; // v2.659 센서 상세
 
 const byCollector = new Map(); // collectorId -> { at, datacenter, servers: [...] }
 
@@ -102,6 +103,30 @@ export function sanitizeRemoteSensors(x) {
     ...(itv != null && itv > 0 && itv <= 7 * 86_400_000 ? { intervalMs: itv } : {}),
   };
 }
+/**
+ * v2.659: 엣지가 보낸 센서 상세(콤팩트)를 좁힌다 — 원소는 expandCompact 로 되돌려 **상태를 중앙이 다시 판정**한다
+ *   (엣지가 보낸 state 는 받지 않는다). 상한 150 · 넘친 원소·못 읽은 원소는 개수로 밝힌다. 객체가 아니면 null.
+ */
+export const REMOTE_SENSOR_DETAIL_MAX = 150;
+export function sanitizeRemoteSensorDetail(x) {
+  if (!isPlainObj(x) || !Array.isArray(x.list)) return null;
+  const list = [];
+  let dropped = 0;
+  for (const o of x.list) {
+    if (list.length >= REMOTE_SENSOR_DETAIL_MAX) { dropped += 1; continue; }
+    const e = expandCompact(o);
+    if (e) list.push(compactSensor(e)); else dropped += 1;
+  }
+  if (!list.length) return null;
+  const om = numOrNull(x.omitted);
+  return {
+    at: numOrNull(x.at), thermalAt: numOrNull(x.thermalAt), collAt: numOrNull(x.collAt),
+    collOk: x.collOk === true ? true : (x.collOk === false ? false : null),
+    collError: remoteStr(x.collError, 300) || '',
+    omitted: (om != null && om >= 0 ? om : 0) + dropped,
+    list,
+  };
+}
 const SERVER_STR_KEYS = ['name', 'host', 'serviceTag', 'model', 'vcenterId', 'datacenterId', 'type', 'hostName'];
 /**
  * v2.621(감사 WEB-04): BMC 벤더 — 엣지(2.621+)가 등록부 판정으로 'hpe' | 'dell' 을 싣는다. 이 둘만 값으로 받고
@@ -140,6 +165,7 @@ export function sanitizeRemoteServers(list, { max = REMOTE_SERVERS_MAX } = {}) {
     }
     o.inv = sanitizeRemoteInv(s.inv);
     o.sensors = sanitizeRemoteSensors(s.sensors);
+    o.sensorDetail = sanitizeRemoteSensorDetail(s.sensorDetail);
     servers.push(o);
   }
   return { servers, dropped, coerced };

@@ -1,9 +1,9 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **183개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **185개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-29)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-09-30)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -19,6 +19,7 @@
 | 파일 | 종류 | 용도 | 원자적 | 손상보존 | 0600 | 정의 모듈 |
 |---|---|---|:--:|:--:|:--:|---|
 | `_index.json` | 설정 | VM 성능 시계열 — **vCenter 별 독립 DB**(v2.376). |  |  | ✅ | metrics/vmperfDb.js, vmseries/db.js |
+| `<이름>` | 디렉터리 | iDRAC 센서 상세 캐시(v2.659) — 서버별 ① Thermal 상세(매 폴 주기, 인메모리) ② Sensors 컬렉션(인벤토리 주기, 파일 보관). | ✅ |  | ✅ | idrac/sensorDetailCache.js |
 | `active-sessions.json` | 설정 | 활성 세션 레지스트리 (v2.280) — '단일 세션 강제'(ID 공유 금지)의 상태 저장소. | ✅ |  | ✅ | auth/sessions.js |
 | `agent-assignments.json` | 설정 | Central store for per-agent scan assignments and the results agents report | ✅ | ✅ | ✅ | central/assignments.js |
 | `agent-deploy-targets.json` | 설정 | Edge 노드 설치 대상(SSH 접속 정보) | ✅ | ✅ | ✅ | agent/deployRegistry.js |
@@ -99,6 +100,7 @@
 | `idrac-scan-log.json` | 설정 | iDRAC 스캔 실행 로그 — 주기/수동 스캔의 법인(DataCenter)별 실행 결과를 영속 저장한다. | ✅ |  | ✅ | idrac/scanLog.js |
 | `idrac-scan-ranges.json` | 설정 | 법인(DataCenter)별 iDRAC 스캔 대역 저장소 — 각 법인에 귀속된 iDRAC IP 대역과 그 대역 스캔에 | ✅ | ✅ | ✅ | idrac/scanRanges.js |
 | `idrac-scan-settings.json` | 설정 | iDRAC 자동 발견 폴러 — vCenter별로 저장된 IP 대역을 주기적으로 스캔해 Dell iDRAC을 | ✅ | ✅ | ✅ | idrac/scanPoller.js |
+| `idrac-sensor-cache.json` | 설정 | iDRAC 센서 상세 캐시(v2.659) — 서버별 ① Thermal 상세(매 폴 주기, 인메모리) ② Sensors 컬렉션(인벤토리 주기, 파일 보관). | ✅ |  | ✅ | idrac/sensorDetailCache.js |
 | `idrac.json` | 설정 | iDRAC 등록부 — 전력·온도·인벤토리를 수집하는 Dell·HPE 서버 목록(v2.628 에 bmusage/poller.js 가 손상 여부만 확인하도록 읽는다) | ✅ | ✅ | ✅ | bmusage/poller.js, idrac/registry.js |
 | `initial-admin-password.txt` | 텍스트 | 최초 기동 시 생성된 관리자 임시 비밀번호 | ✅ | ✅ | ✅ | auth/auth.js, security/selfCheck.js |
 | `ipam-annotations.json` | 설정 | Per-IP user annotations (custom memo + tags) for the IP ledger. These are | ✅ | ✅ |  | ipam/annotations.js |

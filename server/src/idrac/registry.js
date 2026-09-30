@@ -21,6 +21,7 @@ import { testOme } from './ome.js';
 import { expandIpList } from './iprange.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
 import { removeInventory } from './invCache.js';
+import { removeSensorDetail } from './sensorDetailCache.js';
 import { clearSensorSeries } from './sensorStore.js';
 import { parseCsvRows } from '../util/csv.js';
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
@@ -30,6 +31,7 @@ import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.
 function dropDerivedCaches(ids) {
   for (const id of ids) {
     try { removeInventory(id); } catch { /* best effort */ }
+    try { removeSensorDetail(id); } catch { /* best effort */ }
     try { clearSensorSeries(id); } catch { /* best effort */ }
   }
 }
