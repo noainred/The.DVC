@@ -22,6 +22,14 @@ export const SERIES = [
   { k: 'exhaustTemp', label: '배기 온도', unit: '℃', color: '#ec4899', axis: 'pct', dash: 'dash' }, // v2.661 · v2.662 기본 점선
   { k: 'powerW', label: '소비 전력', unit: ' W', color: '#f59e0b', axis: 'w' },
 ];
+/*
+ * v2.666 — 가상화 서버의 **ESXi 호스트 CPU 사용률(vCenter 값)** 을 비교용 계열로 함께 그린다(사용자 요청 "가상화 서버의 경우
+ * hostname 이나 service tag 로 매칭되는 장비가 있으면 cpu 사용량을 불러와서 같이 보여주는 기능"). ⚠ 이것은 iDRAC 값이 아니다 —
+ * v2.665 규칙(iDRAC CPU 에 vCenter 값을 섞지 않는다)은 그대로이고 **다른 선·다른 이름**으로만 보인다. 그래서 SERIES(iDRAC 6계열 —
+ * 서버 표·조건 검색·무응답 구간 판정이 쓴다)에 넣지 않고 차트·카드·선 모양·내보내기 목록(CHART_SERIES)에만 넣는다.
+ */
+export const HOST_CPU_SERIES = { k: 'hostCpuPct', label: 'ESXi CPU (vCenter)', unit: '%', color: '#22c55e', axis: 'pct', dash: 'dot', vc: true };
+export const CHART_SERIES = [...SERIES, HOST_CPU_SERIES];
 
 const p2 = (n) => String(n).padStart(2, '0');
 export const ymd = (t) => { const d = new Date(t); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; };
@@ -123,16 +131,42 @@ export const DC_SOURCE_TEXT = {
 /** 서버 형태 판별 근거 — 서비스태그가 없으면 판별할 수 없어 베어메탈로 보인다는 사실을 말한다. */
 export function kindBasisText(d) {
   if (!d) return '';
-  if (!d.serviceTag) return '서비스태그 없음 — ESXi 호스트와 대조할 수 없어 베어메탈로 표시합니다';
-  return d.kind === 'esxi' ? `서비스태그 ${d.serviceTag} → ESXi 호스트 일치` : `서비스태그 ${d.serviceTag} — 일치하는 ESXi 호스트 없음`;
+  const hn = d.host?.name || '';
+  if (d.kind === 'esxi' && d.matchedBy === 'hostname') return `호스트네임 일치 → ESXi 호스트 ${hn}(도메인·대소문자 무시${d.serviceTag ? ` · 서비스태그 ${d.serviceTag} 는 일치 없음` : ' · 서비스태그 없음'})`;
+  if (d.kind === 'esxi') return `서비스태그 ${d.serviceTag} → ESXi 호스트 ${hn || '일치'}`;
+  const amb = d.hostAmbiguous ? ' · 같은 호스트네임의 ESXi 호스트가 여럿이라 정하지 않았습니다' : '';
+  if (!d.serviceTag) return `서비스태그 없음 — 서비스태그로 대조할 수 없어 호스트네임으로 찾았지만 일치하는 ESXi 호스트가 없어 베어메탈로 표시합니다${amb}`;
+  return `서비스태그 ${d.serviceTag} · 호스트네임 — 일치하는 ESXi 호스트 없음${amb}`;
 }
+
+/** v2.666: ESXi 호스트 CPU(vCenter) 계열 각주. 매칭이 없으면 ''. */
+export function hostCpuNote(data) {
+  const h = data?.hostCpu;
+  if (!h) return '';
+  const by = h.matchedBy === 'hostname' ? '호스트네임(도메인·대소문자 무시)' : '서비스태그';
+  const first = Number.isFinite(h.firstTs) ? ` 이 호스트의 첫 적재는 ${ymd(h.firstTs)} ${hm(h.firstTs)} 입니다(v2.666 부터 쌓이며 그 이전은 비어 있습니다).` : ' 이 계열은 v2.666 부터 쌓입니다 — 아직 적재된 값이 없습니다.';
+  return `초록 점선 ESXi CPU (vCenter) 는 ${by}로 찾은 ESXi 호스트 ${h.hostName || h.hostId} 의 vCenter CPU 사용률이고 비교용입니다 — iDRAC CPU 사용률에 섞지 않습니다.${first}`;
+}
+
+/*
+ * v2.666 — CPU 사용률 기준선(75% 주의 · 90% 위험) 표시 켜기/끄기(사용자 요청 "cpu 90 위험, 75주의 표시 on/off"). 카드 순서·선 모양과
+ * 같이 **브라우저에만** 저장한다(기본 켜짐 — 예전 화면 그대로). 기준선은 CPU 사용률 계열(iDRAC 또는 ESXi)이 하나라도 보일 때만 그린다.
+ */
+export const CPU_REF_KEY = 'idracTrend.cpuRef';
+export function loadCpuRef(storage) {
+  try { return storage?.getItem(CPU_REF_KEY) !== '0'; } catch { return true; }
+}
+export function saveCpuRef(storage, on) {
+  try { if (on) storage?.removeItem(CPU_REF_KEY); else storage?.setItem(CPU_REF_KEY, '0'); } catch { /* 저장 못 하면 이번 화면에서만 */ }
+}
+export const showCpuRef = (refOn, on, st) => !!refOn && ((!!on?.cpuPct && !!st?.cpuPct) || (!!on?.hostCpuPct && !!st?.hostCpuPct));
 
 /*
  * v2.661 — 카드 순서(사용자 요청 "사용자가 위치를 변경할 수 있게"). 브라우저에만 저장한다(사람마다 보는 순서가 다르다 —
  * 서버 설정으로 두면 한 사람이 바꾼 순서가 모두에게 바뀐다). 모르는 키는 버리고, 새 카드(다음 릴리스에 늘어난 계열)는 뒤에 붙인다.
  */
 export const CARD_ORDER_KEY = 'idracTrend.cardOrder';
-export const DEFAULT_ORDER = SERIES.map((s) => s.k);
+export const DEFAULT_ORDER = CHART_SERIES.map((s) => s.k);
 export function normalizeOrder(saved) {
   const known = new Set(DEFAULT_ORDER);
   const seen = new Set();
@@ -199,15 +233,15 @@ export const DASHES = [
 export const WIDTHS = [1, 2, 3, 4];
 export const dashArrayOf = (k) => DASHES.find((d) => d.k === k)?.array;
 export function defaultStyleOf(k) {
-  const s = SERIES.find((x) => x.k === k);
+  const s = CHART_SERIES.find((x) => x.k === k);
   return { dash: s?.dash || 'solid', width: 2, dot: false };
 }
-export const DEFAULT_STYLES = Object.fromEntries(SERIES.map((s) => [s.k, defaultStyleOf(s.k)]));
+export const DEFAULT_STYLES = Object.fromEntries(CHART_SERIES.map((s) => [s.k, defaultStyleOf(s.k)]));
 /** 저장값 정규화 — 모르는 계열·모양·굵기는 기본값(조용히 깨지지 않게). 항상 전 계열을 채운다. */
 export function normalizeStyles(saved) {
   const src = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
   const out = {};
-  for (const s of SERIES) {
+  for (const s of CHART_SERIES) {
     const d = defaultStyleOf(s.k);
     const v = src[s.k] && typeof src[s.k] === 'object' ? src[s.k] : {};
     out[s.k] = {
@@ -219,7 +253,7 @@ export function normalizeStyles(saved) {
   return out;
 }
 const sameStyle = (a, b) => a.dash === b.dash && a.width === b.width && a.dot === b.dot;
-export const isDefaultStyles = (styles) => SERIES.every((s) => sameStyle(styles[s.k], defaultStyleOf(s.k)));
+export const isDefaultStyles = (styles) => CHART_SERIES.every((s) => sameStyle(styles[s.k], defaultStyleOf(s.k)));
 export function setStyle(styles, k, patch) {
   if (!styles[k]) return styles;
   return normalizeStyles({ ...styles, [k]: { ...styles[k], ...patch } });
@@ -229,7 +263,7 @@ export function loadStyles(storage) {
 }
 export function saveStyles(storage, styles) {
   try {
-    const diff = Object.fromEntries(SERIES.filter((s) => !sameStyle(styles[s.k], defaultStyleOf(s.k))).map((s) => [s.k, styles[s.k]]));
+    const diff = Object.fromEntries(CHART_SERIES.filter((s) => !sameStyle(styles[s.k], defaultStyleOf(s.k))).map((s) => [s.k, styles[s.k]]));
     if (!Object.keys(diff).length) storage?.removeItem(LINE_STYLE_KEY); else storage?.setItem(LINE_STYLE_KEY, JSON.stringify(diff));
   } catch { /* 저장 못 하면 이번 화면에서만 */ }
 }
@@ -357,4 +391,29 @@ export function idracStateBanner(st) {
   const err = c.error ? ` 사유: ${c.error}` : (c.errorHidden ? ' (사유는 전체 범위 관리자에게만 보입니다)' : '');
   lines.push(`중앙 → 엣지(${c.id}) pull 이 실패하고 있습니다(마지막 정상 ${pulled}${c.fails ? ` · 연속 실패 ${c.fails}회` : ''}).${err} 설정 › 수집 서버에서 그 엣지 상태를 확인하세요.`);
   return { tone: 'red', title: '엣지에서 데이터를 가져오지 못하고 있습니다', lines };
+}
+
+/*
+ * v2.666 — 과거 구간 스크롤(사용자 요청 "차트 아래 스크롤바로 이전 기간도 조회 · 1시간 조회에서 1시간 이전 데이터도 1시간 단위로").
+ * 같은 길이(span)의 창을 `back` 칸만큼 과거로 옮긴다. 기준 끝(anchor)은 스크롤을 시작한 순간 한 번 잡는다 — 매번 Date.now() 로
+ * 다시 잡으면 30초 폴링 사이에 창이 조금씩 밀려 같은 칸이 다른 구간이 된다. back=0 은 예전 그대로 '최근 구간'(폴링)이다.
+ */
+export const presetSpanOf = (range) => (PRESETS.find(([k]) => k === range) || [])[2] || null;
+/** 보관 기간 안에서 몇 칸까지 과거로 갈 수 있나(창 전체가 보관 기간 안이어야 한다 — 서버 parseWindow 가 그 밖을 거절한다). */
+export function maxBackOf(spanMs, retentionDays) {
+  const span = Number(spanMs); const keep = Number(retentionDays) * DAY;
+  if (!(span > 0) || !(keep > 0)) return 0;
+  return Math.max(0, Math.floor((keep - span) / span));
+}
+/** back 칸 과거 창 — { start, end } (ms). back 은 [0, max] 로 자른다. */
+export function scrollWindow(spanMs, back, anchorEnd, maxBack = Infinity) {
+  const b = Math.max(0, Math.min(Number.isFinite(maxBack) ? maxBack : Infinity, Math.floor(Number(back) || 0)));
+  const end = Number(anchorEnd) - b * spanMs;
+  return { start: end - spanMs, end, back: b };
+}
+/** 스크롤 위치 문구 — '최근' 또는 'N칸 전(단위)'. */
+export function scrollLabel(back, range) {
+  if (!back) return '최근 구간';
+  const lbl = (PRESETS.find(([k]) => k === range) || [])[1] || '';
+  return `${back.toLocaleString()}칸 전 (${lbl} 단위)`;
 }

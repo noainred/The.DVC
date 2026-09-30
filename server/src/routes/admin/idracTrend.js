@@ -8,7 +8,8 @@
  *
  * 데이터센터(사이트) = **그 서버 IP 를 포함하는 iDRAC 스캔 대역의 이름**(사용자 선택 — 법인 아래 사이트 필드는 저장소에
  *   없다). 판정은 idrac/scanSite.js 하나이고 서버 분석의 법인 보강과 같은 색인을 쓴다.
- * 서버 형태: 서비스태그가 ESXi 호스트와 일치하면 ESXi, 아니면 베어메탈(`findHostByServiceTag` — /idrac/:id/vcenter-host 와 같은 함수).
+ * 서버 형태: 서비스태그 또는 (v2.666) 호스트네임(도메인 제거·대소문자 무시)이 ESXi 호스트와 일치하면 ESXi, 아니면 베어메탈(idrac/hostMatch.js).
+ * v2.666: ESXi 로 매칭되면 그 호스트의 **vCenter CPU 사용률**을 별도 계열 `hostCpuPct` 로 싣는다 — iDRAC CPU(cpuPct)에 섞지 않는다.
  * 권한·범위: 다른 iDRAC 상세 라우트와 같다(adminOnly + v2.629 범위 절단 — 범위 밖·귀속 없는 서버는 404).
  *   CSV 는 `data.csv` 권한 + 동시 1건(util/exportBusy — v2.575 규약).
  * 정직성: 결측은 null(CSV 빈 칸)이다 — 0 으로 채우지 않는다. 계열마다 보관 기간이 다르고(전력 DB 는 기본 90일) 그 사실을
@@ -18,7 +19,7 @@
 import { loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
 import { findRemoteServer } from '../../collector/remoteInventory.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
-import { findHostByServiceTag } from '../../idrac/hostMatch.js';
+import { buildHostMatchIndex, matchHostForServer } from '../../idrac/hostMatch.js';
 import { store } from '../../store.js';
 import { config } from '../../config.js';
 import { getMetricsDb } from '../../metrics/db.js';
@@ -187,10 +188,15 @@ export function idracStateOf(s, { now = Date.now(), latest = null, localCycle = 
   return out;
 }
 
-async function seriesFor(s, win) {
+/** v2.666: 매칭된 ESXi 호스트의 vCenter CPU 사용률 계열(metrics/sampler.js HOST_CPU_METRIC). iDRAC CPU 와 다른 계열이다. */
+export const HOST_CPU_METRIC = 'host_cpu_pct';
+
+async function seriesFor(s, win, { host = undefined } = {}) {
   const id = String(s?.id || '');
   const errors = {};
-  const out = { cpuPct: [], cpuTemp: [], gpuTemp: [], inletTemp: [], exhaustTemp: [], powerW: [] };
+  const out = { cpuPct: [], cpuTemp: [], gpuTemp: [], inletTemp: [], exhaustTemp: [], powerW: [], hostCpuPct: [] };
+  const matched = host !== undefined ? host : (() => { try { return kindOf(s).host; } catch { return null; } })();
+  let hostCpuFirstTs = null;
   const cpuParts = { telemetry: [], sensor: [], bmIdrac: [], history: [] };
   let firstTs = null;
   let cpuHistoryKey = null;
@@ -207,6 +213,11 @@ async function seriesFor(s, win) {
     out.gpuTemp = read('gpuTemp', TREND_METRICS.gpuTemp);
     out.inletTemp = read('inletTemp', TREND_METRICS.inletTemp);
     out.exhaustTemp = read('exhaustTemp', TREND_METRICS.exhaustTemp);
+    if (matched?.id) {
+      try { out.hostCpuPct = db.historyRange(HOST_CPU_METRIC, String(matched.id), win.start, win.end, win.bucketMs); }
+      catch (e) { errors.hostCpuPct = e?.message || String(e); }
+      try { hostCpuFirstTs = db.metaKey?.(HOST_CPU_METRIC, String(matched.id))?.firstTs ?? null; } catch { /* 참고값 */ }
+    }
     for (const metric of [...Object.values(TREND_METRICS), ...Object.values(CPU_FALLBACK_METRICS)]) {
       try { const m = db.metaKey?.(metric, id); if (m?.firstTs && (firstTs == null || m.firstTs < firstTs)) firstTs = m.firstTs; } catch { /* 첫 관측은 참고값 */ }
     }
@@ -228,7 +239,7 @@ async function seriesFor(s, win) {
     power = powerKeyOf(s, { entries: remotePowerEntries(), hasSeries: (k) => (typeof pdb.latest === 'function' ? pdb.latest(k) != null : false) });
     out.powerW = power.key && pdb.bucketRange ? pdb.bucketRange(power.key, win.start, win.end, win.bucketMs) : [];
   } catch (e) { errors.powerW = e?.message || String(e); }
-  return { points: mergeSeries(win, out), errors, firstTs, cpuSources: cpu.sources, cpuHistoryKey, power: { found: !!power.key, reason: power.reason } };
+  return { points: mergeSeries(win, out), errors, firstTs, cpuSources: cpu.sources, cpuHistoryKey, power: { found: !!power.key, reason: power.reason }, hostCpuFirstTs };
 }
 
 /** id → 서버 객체(중앙 등록 → 엣지 보고 순). */
@@ -236,10 +247,29 @@ function serverById(id) {
   return loadIdracRegistry().find((x) => x.id === id) || findRemoteServer(id);
 }
 
-function kindOf(s) {
-  const tag = String(s.serviceTag || getIdracInventory(s.id)?.system?.serviceTag || invForServer(s)?.system?.serviceTag || '').trim();
-  const host = tag ? findHostByServiceTag(tag, store.get().hosts || []) : null;
-  return { serviceTag: tag.toUpperCase(), kind: host ? 'esxi' : 'baremetal', host: host ? { id: host.id, name: host.name, vcenterId: host.vcenterId || '' } : null };
+/**
+ * v2.666: 서버 형태 판정 — 서비스태그가 ESXi 호스트와 같거나, 없으면 **호스트네임**(도메인 제거·대소문자 무시)이 같으면 ESXi
+ * (사용자 요청 "hostname 이나 service tag 를 조회해서 매칭"). 색인은 스냅샷 호스트 배열마다 한 번 만든다(서버 목록이 서버 수만큼 부른다).
+ * 이름 후보: iDRAC 등록 이름 · 등록 hostName · 인벤토리 system.hostName. IP 는 이름이 아니다(hostShortName 이 뺀다).
+ */
+const _hostIdx = new WeakMap();
+function hostIndex() {
+  const hosts = store.get().hosts || [];
+  let idx = _hostIdx.get(hosts);
+  if (!idx) { idx = buildHostMatchIndex(hosts); _hostIdx.set(hosts, idx); }
+  return idx;
+}
+export function kindOf(s, { index = null, inv = undefined } = {}) {
+  const inventory = inv !== undefined ? inv : (getIdracInventory(s.id) || invForServer(s));
+  const tag = String(s.serviceTag || inventory?.system?.serviceTag || '').trim();
+  const names = [s.name, s.hostName, inventory?.system?.hostName, ...(Array.isArray(s.hostNames) ? s.hostNames : [])];
+  const m = matchHostForServer(index || hostIndex(), { serviceTag: tag, names });
+  const host = m.host;
+  return {
+    serviceTag: tag.toUpperCase(), kind: host ? 'esxi' : 'baremetal',
+    host: host ? { id: host.id, name: host.name, vcenterId: host.vcenterId || '' } : null,
+    matchedBy: m.matchedBy, hostAmbiguous: m.ambiguous,
+  };
 }
 
 /** 선택 목록(범위 절단 후). 법인 이름은 DataCenter 목록에서, 사이트는 스캔 대역 이름. */
@@ -274,10 +304,10 @@ function serverRows(req, { gpuKeys = null } = {}) {
   return { rows, omitted: r.omitted, scoped: !!r.sc };
 }
 
-const EXPORT_COLS = { cpuPct: 'CPU 사용률(%)', cpuTemp: 'CPU 온도(℃)', gpuTemp: 'GPU 온도(℃)', inletTemp: '흡기 온도(℃)', exhaustTemp: '배기 온도(℃)', powerW: '소비 전력(W)' };
-const EXPORT_COLORS = { cpuPct: '3b82f6', cpuTemp: 'ef4444', gpuTemp: 'a855f7', inletTemp: '06b6d4', exhaustTemp: 'ec4899', powerW: 'f59e0b' };
+const EXPORT_COLS = { cpuPct: 'CPU 사용률(%)', cpuTemp: 'CPU 온도(℃)', gpuTemp: 'GPU 온도(℃)', inletTemp: '흡기 온도(℃)', exhaustTemp: '배기 온도(℃)', powerW: '소비 전력(W)', hostCpuPct: 'ESXi 호스트 CPU(vCenter, %)' };
+const EXPORT_COLORS = { cpuPct: '3b82f6', cpuTemp: 'ef4444', gpuTemp: 'a855f7', inletTemp: '06b6d4', exhaustTemp: 'ec4899', powerW: 'f59e0b', hostCpuPct: '22c55e' };
 // v2.662: 엑셀 차트 선 모양 — 기본은 흡기·배기 점선(화면 기본과 같다). 사용자 설정은 ?styles=k:모양:굵기:점,… 로 받고 허용 목록으로 거른다.
-const EXPORT_DASH_DEFAULT = { inletTemp: 'dash', exhaustTemp: 'dash' };
+const EXPORT_DASH_DEFAULT = { inletTemp: 'dash', exhaustTemp: 'dash', hostCpuPct: 'dot' };
 export function parseExportStyles(q) {
   const out = {};
   for (const part of String(q || '').slice(0, 400).split(',')) {
@@ -324,7 +354,7 @@ function exportJob(req, res, ext, gpuKeys) {
   }
   if (req.query.scope === 'dc' && req.query.gpuOnly === '1') targets = targets.filter((s) => s.gpu);
   if (!targets.length) { res.status(404).json(NOT_FOUND); return null; }
-  const cols = String(req.query.cols || 'cpuPct,cpuTemp,gpuTemp,inletTemp,exhaustTemp,powerW').split(',').filter((c) => EXPORT_COLS[c]);
+  const cols = String(req.query.cols || 'cpuPct,cpuTemp,gpuTemp,inletTemp,exhaustTemp,powerW,hostCpuPct').split(',').filter((c) => EXPORT_COLS[c]);
   if (!cols.length) { res.status(400).json({ ok: false, reason: '내보낼 항목이 없습니다.' }); return null; }
   const max = ext === 'xlsx' ? XLSX_SERVER_MAX : SERVER_EXPORT_MAX;
   const omitted = Math.max(0, targets.length - max);
@@ -527,7 +557,7 @@ export function registerIdracTrend(adminRouter) {
     const win = parseWindow(req.query, { retentionDays: keep });
     if (win.error) return res.status(400).json({ ok: false, reason: win.error });
     const k = kindOf(s);
-    const { points, errors, firstTs, cpuSources, cpuHistoryKey, power } = await seriesFor(s, win);
+    const { points, errors, firstTs, cpuSources, cpuHistoryKey, power, hostCpuFirstTs } = await seriesFor(s, win, { host: k.host });
     // v2.665: 지금 CPU 사용률을 iDRAC 의 어느 경로로 읽는지 · 못 읽으면 왜인지 + iDRAC 표본이 지금 들어오는지(멈춤 진단).
     let cpuDiag = null; let idracState = null;
     const now = Date.now();
@@ -548,6 +578,7 @@ export function registerIdracTrend(adminRouter) {
       ok: true, id, ...k, remote: !!s.remote, start: win.start, end: win.end, bucketMs: win.bucketMs, custom: win.custom,
       retentionDays: keep, retention: { metricsDays: keep, powerDays: config.idrac.retentionDays || 0 },
       enabled: TREND_SERIES_ENABLED, airflow: TREND_AIRFLOW_ENABLED, firstTs, points, cpuSources, cpuHistory: cpuHistoryKey ? true : undefined, power, cpuDiag, idracState,
+      hostCpu: k.host ? { hostId: k.host.id, hostName: k.host.name, matchedBy: k.matchedBy, firstTs: hostCpuFirstTs } : null,
       errors: errList.length ? errors : undefined,
     });
   });
