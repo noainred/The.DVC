@@ -22,3 +22,15 @@ describe('v2.664 Overview 카드 · 전체 소비 전력 문구', () => {
     for (const t of T.POWER_FOOTNOTE) { expect(t).not.toMatch(/`|\*\*/); }
   });
 });
+
+// v2.667 — 스토리지 전력 '못 읽음' 사유 문구는 서버 사유 코드와 1:1(한쪽만 늘면 화면이 코드를 그대로 보인다).
+import { STORAGE_POWER_REASON, reasonCountsText } from './overviewCardsText.js';
+import { PROBE_REASONS } from '../../../server/src/storage/power.js';
+describe('v2.667 스토리지 전력 사유', () => {
+  it('서버 사유 코드 전부에 문구가 있다', () => {
+    for (const k of [...PROBE_REASONS, 'no-snapshot', 'collect-failed', 'not-reported', 'stale']) expect(STORAGE_POWER_REASON[k], k).toBeTruthy();
+  });
+  it('사유별 개수는 많은 순 · 0 은 뺀다', () => {
+    expect(reasonCountsText({ 'no-field': 3, skipped: 0, 'collect-failed': 5 })).toBe('장비 수집 실패(스토리지 모니터링의 오류 참조) 5 · 응답에 전원 필드 없음 3');
+  });
+});

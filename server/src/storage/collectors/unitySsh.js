@@ -34,6 +34,7 @@
  *    것 같은 문제는 원문을 봐야 잡힌다(예전에는 실패분만 실었다).
  *  - 항등식(`Total = Used + Free + Preallocated`)이 어긋나면 밝힌다 — 조용히 이어가지 않는다.
  */
+import { powerProbe } from '../power.js';
 import { runCliSession, sshFailureSnapshot } from './cliSsh.js';
 import { stripUemcliBanner } from '../../proxy/sshExec.js';
 import { versionAttemptsOf } from './cliSsh.js'; // v2.585 — 실패 스냅샷(cliSsh)도 같은 요약을 싣는다. ⚠ import+export(재수출 전용 문법은 이 파일 안에서 이름을 만들지 않는다 — v2.575)
@@ -302,6 +303,34 @@ export function applyCutInfo(snap, truncated = {}) {
   return snap;
 }
 
+/**
+ * spinfo 결과 → extra.power | extra.powerProbe (v2.667, 순수 — extra 변경). r = runCliSession 결과.
+ * 순서: ① 전원 요약 구획의 `Input Power` 합 ② FRU 상태줄 `psN: OK 330` 의 숫자 합(svcDiag 머리말 규칙 3 — 같은 값임을
+ *   사용자 출력으로 교차 확인했다) ③ 둘 다 없으면 사유.
+ */
+export function applyUnitySshPower(extra, r) {
+  const source = 'svc_diag -s spinfo';
+  if (!r?.out?.power) {
+    if ((r?.skipped || []).includes('power')) extra.powerProbe = powerProbe('skipped', { source, detail: '수집 시간 예산이 모자라 이번 주기에는 실행하지 않았습니다' });
+    else if (r?.errors?.power) extra.powerProbe = powerProbe('request-failed', { source, detail: r.errors.power });
+    return;
+  }
+  let sp;
+  try { sp = parseSpinfo(r.out.power); } catch (e) { extra.powerProbe = powerProbe('parse-failed', { source, detail: String(e?.message || e) }); return; }
+  if (sp.power?.totalWatts != null) {
+    extra.power = { watts: Math.round(sp.power.totalWatts), read: sp.power.readWatts, supplies: sp.power.supplies.length,
+      scope: 'dpe', basis: 'input', truncated: !!sp.truncated, source, at: Date.now() };
+    return;
+  }
+  const ps = (sp.fru?.items || []).filter((x) => /^ps\d+$/i.test(x.name) && x.state === 'ok' && Number.isFinite(x.value) && x.value > 0 && x.value < 5000);
+  if (ps.length) {
+    extra.power = { watts: Math.round(ps.reduce((a, x) => a + x.value, 0)), read: ps.length, supplies: ps.length,
+      scope: 'dpe', basis: 'input', truncated: !!sp.truncated, source: `${source} (FRU 상태줄)`, at: Date.now() };
+    return;
+  }
+  extra.powerProbe = powerProbe('no-field', { source, detail: sp.truncated ? '출력이 잘렸습니다' : '전원공급장치 입력 전력 줄이 없습니다' });
+}
+
 export async function collectViaSsh(device) {
   let raw = [];
   try {
@@ -325,15 +354,9 @@ export async function collectViaSsh(device) {
     // v2.585 — 버전이 왜 비었는지를 표의 열이 바로 말할 수 있게 시도 결과를 따로 싣는다(원문 상세를 열지 않아도).
     snap.extra.versionAttempts = versionAttemptsOf(raw);
     // v2.664: 전원 — 읽은 전원공급장치의 입력 전력 합(W). 하나도 못 읽으면 싣지 않는다(0 W 라는 거짓 금지).
-    if (r.out?.power) {
-      try {
-        const sp = parseSpinfo(r.out.power);
-        if (sp.power?.totalWatts != null) {
-          snap.extra.power = { watts: Math.round(sp.power.totalWatts), read: sp.power.readWatts, supplies: sp.power.supplies.length,
-            scope: 'dpe', truncated: !!sp.truncated, source: 'svc_diag -s spinfo', at: Date.now() };
-        }
-      } catch { /* 전원은 참고값 — 파싱 실패가 스냅샷을 막지 않는다 */ }
-    }
+    // v2.667: 못 읽은 이유를 `extra.powerProbe` 로 싣는다(예산 초과로 건너뜀 / 명령 실패 / 출력에 값 없음) —
+    //   전체 소비 전력 화면이 '못 읽음 N' 을 사유별로 말한다. 요약 구획이 없으면 FRU 상태줄(`ps0: OK 330`)의 숫자로 대신한다.
+    applyUnitySshPower(snap.extra, r);
     // v2.586 — 버전은 못 읽었지만 어느 후보가 모델을 줬다면 버리지 않는다(accept 가 버전만 성공으로 본다).
     if (!snap.extra.model) {
       for (const x of raw) {

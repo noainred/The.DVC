@@ -38,14 +38,14 @@ test('② 합산 — vCenter 추정 제외 · 미측정/낡음/경로 없음을 
     storage: [
       { id: 'u1', name: 'unity', type: 'unity480', collectMethod: 'ssh', datacenterId: 'NJ', snap: { extra: { power: { watts: 660, at: NOW } } } },
       { id: 'u2', name: 'unity2', type: 'unity480', collectMethod: 'ssh', snap: { extra: {} } },
-      { id: 'i1', name: 'isilon', type: 'isilon', snap: { ok: true } },
+      { id: 'i1', name: 'vplex', type: 'vplex', snap: { ok: true } },  // v2.667: Isilon 은 경로가 생겼다 — 경로 없는 예는 VPLEX
       { id: 'off', type: 'isilon', enabled: false },
     ],
     dcOfVc: (vc) => (vc === 'vc1' ? 'NJ' : ''),
   });
   assert.equal(r.servers.watts, 800); assert.equal(r.servers.measured, 2); assert.equal(r.servers.excludedVcenter, 1);
   assert.equal(r.network.watts, 200); assert.equal(r.network.stale, 1); assert.equal(r.network.unread, 1); assert.equal(r.network.devices, 3);
-  assert.equal(r.storage.watts, 660); assert.equal(r.storage.unread, 1, 'Unity SSH 인데 못 읽음'); assert.equal(r.storage.unsupported, 1, 'Isilon 은 수집 경로 없음'); assert.equal(r.storage.devices, 3, '비활성 제외');
+  assert.equal(r.storage.watts, 660); assert.equal(r.storage.unread, 1, 'Unity SSH 인데 못 읽음'); assert.equal(r.storage.unsupported, 1, 'VPLEX 는 수집 경로 없음'); assert.equal(r.storage.devices, 3, '비활성 제외');
   assert.equal(r.totalWatts, 1660);
   const hg = r.byCorp.find((c) => c.corpId === 'HG'); const nj = r.byCorp.find((c) => c.corpId === 'NJ');
   assert.deepEqual([hg.servers, hg.network, hg.total], [500, 200, 700]);

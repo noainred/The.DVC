@@ -11,6 +11,7 @@ import { healthWord } from '../healthWord.js'; // v2.599(감사 C2599-06) — �
 // v2.599(감사 C2599-02·03): 점 선택·미해결 판정은 powerstoreCore.js 로 옮겼다 — SSH 수집기(powerstoreSsh.js)가 같은 코어를
 //   쓰는데, 여기서 import 하면 powerstore.js → (동적) powerstoreSsh.js → powerstore.js 순환이 생긴다(arch2579 SCC 상한).
 import { pickLatestSpacePoint, isActiveAlert } from './powerstoreCore.js';
+import { applyScannedPower, powerProbe } from '../power.js';
 export { pickLatestSpacePoint, isActiveAlert };
 
 /** 미해결 알람 조회 상한(v2.599 C2599-08) — 닿으면 '이상' 으로 밝힌다(조용한 상한 금지). */
@@ -184,10 +185,22 @@ export function normalizePowerstore(device, raw) {
     };
     snap.sections.performance = 'ok';
   }
+  applyPowerstorePower(snap.extra, raw);
   snap.extra.collectMethod = 'api';
   snap.ok = snap.sections.config === 'ok' || snap.sections.capacity === 'ok';
   if (!snap.ok && !snap.error) snap.error = '수집 실패(섹션 오류 참조)';
   return snap;
+}
+
+/** PowerStore 전원(v2.667) — 전원공급장치 하드웨어 항목의 extra_details 에서 입력 전력 이름을 찾는다.
+ *  ⚠ extra_details 의 전력 필드 이름은 **실장비 응답으로 확인하지 못했다** — 못 찾으면 응답의 키를 seenKeys 로 싣는다. */
+export const POWERSTORE_POWER_PATH = '/api/rest/hardware?select=id,name,type,appliance_id,extra_details&type=eq.Power_Supply&limit=64';
+export function applyPowerstorePower(extra, raw) {
+  const source = 'PowerStore REST hardware(Power_Supply).extra_details';
+  if (raw.psuErr) { extra.powerProbe = powerProbe('request-failed', { source, detail: raw.psuErr }); return; }
+  if (!Array.isArray(raw.psus)) return;
+  if (!raw.psus.length) { extra.powerProbe = powerProbe('no-field', { source, detail: '전원공급장치 항목이 0개입니다' }); return; }
+  applyScannedPower(extra, raw.psus.map((x) => x?.extra_details ?? x), { source, scope: 'psu' });
 }
 
 const PORT = () => Number(process.env.STORAGE_POWERSTORE_PORT) || 443;
@@ -353,6 +366,11 @@ export async function collect(device, { signal = null } = {}) {
       raw[`${key}Truncated`] = Array.isArray(raw[key]) && raw[key].length >= limit;
     };
     await listStep('hardware', '/api/rest/hardware?select=id,type,name,slot,lifecycle_state', 1000);
+    // v2.667 — 전원. 하드웨어 목록과 따로 조회한다(extra_details 는 크고, 이 필터를 받지 않는 버전이 오류를 내도 목록을 깨지 않게).
+    if (!signal?.aborted) {
+      try { raw.psus = await get(POWERSTORE_POWER_PATH); }
+      catch (e) { if (/401/.test(e.message) || signal?.aborted) throw e; raw.psuErr = String(e.message || e).slice(0, 200); }
+    }
     await listStep('volumes', '/api/rest/volume?select=id,size,state', LIMIT);
     await listStep('hosts', '/api/rest/host?select=id', 1000);
     await listStep('hostGroups', '/api/rest/host_group?select=id', 1000);

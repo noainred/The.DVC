@@ -10,15 +10,19 @@
  *  · 서버는 iDRAC·OME·엣지 실측만(vCenter 추정 `source:'vcenter'` 은 뺀다 — 요청이 'iDRAC 에서 수집한' 이다).
  *  · 네트워크는 CVP PSU **입력 전력(inW)** 합이다. 입력이 없고 출력만 있으면 출력을 쓰되 그 대수를 `outputOnly` 로 밝힌다
  *    (출력은 입력보다 작다 — 효율 손실만큼 과소). ⚠ 필드 이름은 실장비 미확인 추정(cvp/parse.js PSU_POWER_FIELDS).
- *  · 스토리지는 수집기가 `extra.power.watts` 를 실은 장비만(현재 Unity SSH `svc_diag -s spinfo` — DPE 전원공급장치만,
- *    확장 DAE 는 빠진다). 그 밖의 타입은 `unsupported` 로 센다 — 수집 경로가 없다는 뜻이다.
+ *  · 스토리지는 수집기가 `extra.power.watts` 를 실은 장비만 더한다. v2.667 부터 경로는 `storage/power.js POWER_PATHS` 가
+ *    소유한다(Unity SSH·REST · PowerStore · XtremIO · Isilon · PowerMax/VMAX). 경로가 있는데 못 읽은 장비는 **사유별로**
+ *    (`unreadBy`) 세고, 경로가 없는 조합(VPLEX·SSH 수집 방식 일부)은 `unsupported`(+`unsupportedBy`) 로 센다.
+ *    ⚠ Unity SSH 외의 전원 필드는 실장비 미확인 — 못 읽은 장비는 응답에 있던 키(seenKeys)를 `issues` 로 싣는다.
  *  · 오래된 값은 '현재' 가 아니다 — 경계(ms)를 넘긴 장비는 `stale` 로 빼고 개수를 밝힌다.
  */
 import { numOrNull } from '../util/numOrNull.js';
+import { powerPathOf, noPathReason } from '../storage/power.js';
 
 export const NET_STALE_MS = 6 * 3_600_000;      // CVP 부품(PSU)은 부품 주기로 읽는다 — 6시간을 넘으면 현재값이 아니다
 export const STORAGE_STALE_MS = 6 * 3_600_000;  // 스토리지 기본 수집 주기 1시간 — 6배
 export const UNASSIGNED = '';
+export const ISSUE_MAX = 200;   // 못 읽은 장비 목록 상한 — 넘친 개수는 issuesOmitted 로 밝힌다
 
 const w0 = (v) => { const n = numOrNull(v); return n != null && n >= 0 && n < 1_000_000 ? n : null; };
 
@@ -83,22 +87,39 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
     net.items.push({ id: `${d.cvpId}/${d.key}`, name: d.hostname || d.key, model: d.model || '', watts: p.watts, basis: p.basis, psus: p.psus, corpId: d.corp?.corpId || '', ts: at });
   }
 
-  // ③ 스토리지 — 수집기가 실은 extra.power.
-  const sto = { watts: 0, devices: 0, measured: 0, unsupported: 0, unread: 0, stale: 0, byType: {}, items: [] };
+  // ③ 스토리지 — 수집기가 실은 extra.power(v2.667: 못 읽은 사유를 extra.powerProbe 로 받는다).
+  const sto = { watts: 0, devices: 0, measured: 0, unsupported: 0, unread: 0, stale: 0, byType: {}, unreadBy: {}, unsupportedBy: {}, items: [], issues: [], issuesOmitted: 0 };
+  const issue = (d, t, state, reason, extra = {}) => {
+    if (sto.issues.length >= ISSUE_MAX) { sto.issuesOmitted += 1; return; }
+    sto.issues.push({ id: String(d.id), name: d.name || String(d.id), type: t, method: d.collectMethod || '', corpId: String(d.datacenterId || ''), state, reason, ...extra });
+  };
   for (const d of storage || []) {
     if (!d || d.enabled === false) continue;
     sto.devices += 1;
     const t = String(d.type || '');
     const bt = sto.byType[t] || (sto.byType[t] = { devices: 0, measured: 0 });
     bt.devices += 1;
-    const pw = d.snap?.extra?.power;
+    const ex = d.snap?.extra || {};
+    const pw = ex.power;
     const w = pw && typeof pw === 'object' ? w0(pw.watts) : null;
-    // 전원 수집 경로가 있는 것은 Unity SSH 뿐이다 — 그 밖은 '못 읽음' 이 아니라 '수집 경로 없음'.
-    if (w == null) { if (t === 'unity480' && d.collectMethod === 'ssh') sto.unread += 1; else sto.unsupported += 1; continue; }
+    if (w == null) {
+      const path = powerPathOf(d);
+      if (!path) {
+        const why = noPathReason(d);
+        sto.unsupported += 1; sto.unsupportedBy[why] = (sto.unsupportedBy[why] || 0) + 1;
+        continue;
+      }
+      // 경로가 있는데 못 읽었다 — 사유: 스냅샷 없음 / 수집 실패 / 수집기가 사유를 실음 / 전원을 보고하지 않음(구버전 수집기).
+      const pr = ex.powerProbe && typeof ex.powerProbe === 'object' ? ex.powerProbe : null;
+      const reason = !d.snap ? 'no-snapshot' : d.snap.ok === false ? 'collect-failed' : pr ? String(pr.reason || 'request-failed') : 'not-reported';
+      sto.unread += 1; sto.unreadBy[reason] = (sto.unreadBy[reason] || 0) + 1;
+      issue(d, t, 'unread', reason, pr ? { source: String(pr.source || '').slice(0, 200), detail: String(pr.detail || '').slice(0, 200), seenKeys: Array.isArray(pr.seenKeys) ? pr.seenKeys.slice(0, 20).map(String) : [] } : { source: path });
+      continue;
+    }
     const at = numOrNull(pw.at) ?? numOrNull(d.snap?.collectedAt);
-    if (at == null || now - at > STORAGE_STALE_MS) { sto.stale += 1; continue; }
+    if (at == null || now - at > STORAGE_STALE_MS) { sto.stale += 1; issue(d, t, 'stale', 'stale', { ts: at }); continue; }
     sto.watts += w; sto.measured += 1; bt.measured += 1; add('storage', d.datacenterId || '', w);
-    sto.items.push({ id: String(d.id), name: d.name || String(d.id), type: t, watts: Math.round(w), scope: pw.scope || '', corpId: String(d.datacenterId || ''), ts: at });
+    sto.items.push({ id: String(d.id), name: d.name || String(d.id), type: t, watts: Math.round(w), scope: pw.scope || '', basis: pw.basis || '', source: String(pw.source || '').slice(0, 200), corpId: String(d.datacenterId || ''), ts: at });
   }
 
   const trim = (x) => {

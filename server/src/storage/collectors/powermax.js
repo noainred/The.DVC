@@ -57,6 +57,7 @@
  *  - 관리 계정 목록은 Unisphere 사용자 API 가 버전 의존이라 수집하지 않는다(sections.accounts='skip').
  *  - 401 즉시 중단(계정 잠금 예방) · 조회(GET) 전용.
  */
+import { scanPower, pickPower, powerResult, powerProbe } from '../power.js';
 import { emptySnapshot } from '../types.js';
 import { makeGetter } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -464,6 +465,7 @@ export function normalizePowermax(device, raw) {
   // v2.601(COL-2601-05): 필터 없는 목록으로 셌으면 확인된 경보가 섞였다 — 화면·보고가 알 수 있게 근거를 싣는다.
   if (raw.alertsBasis) snap.extra.alertsBasis = raw.alertsBasis;
   // nodes/accounts 는 이번 범위 밖(디렉터·보드 상세는 실장비 확인 후 후속) — 'skip' 정직 표기.
+  applyPowermaxPower(snap.extra, raw);
   snap.extra.collectMethod = 'api';
   // 버전차 진단의 근거 — 화면이 '이 장비는 102 로 읽었다' 를 말할 수 있어야 한다.
   if (raw.apiVersions) snap.extra.apiVersions = raw.apiVersions;
@@ -479,6 +481,17 @@ export function normalizePowermax(device, raw) {
  */
 function alertsUnknownIfFailed(out) {
   if (/^오류/.test(String(out.sections?.alerts || '')) && out.alerts) out.alerts.unresolved = null;
+}
+
+/** PowerMax/VMAX 전원(v2.667) — 어레이 상세 응답에 전원 이름이 있으면 그 값(어레이가 여럿이면 합). 없으면 '응답에 전원 필드 없음'
+ *  + 응답에 있던 키(seenKeys) — 실장비 응답을 받으면 경로를 좁힐 것(v2.545 규약). */
+export function applyPowermaxPower(extra, raw) {
+  const source = 'Unisphere REST system/symmetrix/{id}';
+  if (!Array.isArray(raw.arrays) || !raw.arrays.length) return;   // 어레이를 못 읽음 — 수집 실패가 말한다
+  const p = pickPower(raw.powerHits || []);
+  const r = p ? powerResult({ watts: p.watts, source, basis: p.basis, scope: p.basis === 'system' ? 'system' : 'psu', parts: p.parts, keys: p.keys }) : null;
+  if (r) extra.power = r;
+  else extra.powerProbe = powerProbe('no-field', { source, detail: '어레이 상세 응답에 전원 필드가 없습니다', seenKeys: raw.powerSeen || [] });
 }
 
 export async function collect(device, { signal = null } = {}) {
@@ -515,7 +528,14 @@ export async function collect(device, { signal = null } = {}) {
         const a = Array.isArray(d?.symmetrix) ? d.symmetrix[0] : d?.symmetrix || d;
         if (a && a.local === false) { raw.arraysRemote += 1; continue; }
         if (a && raw.arrays.length >= MAX_LOCAL_ARRAYS) { raw.arraysOverCap += 1; continue; }
-        if (a) raw.arrays.push({ symmetrixId: a.symmetrixId || id, model: a.model, ucode: a.ucode, local: a.local });
+        if (a) {
+          raw.arrays.push({ symmetrixId: a.symmetrixId || id, model: a.model, ucode: a.ucode, local: a.local });
+          // v2.667 — 전원: 이미 받은 어레이 상세 응답을 훑는다(추가 왕복 0). ⚠ 전원 필드 존재는 확인하지 못했다.
+          const sc = scanPower(a);
+          raw.powerHits ||= [];
+          for (const h of sc.hits) raw.powerHits.push(h);
+          if (!raw.powerSeen) raw.powerSeen = sc.keys;
+        }
       } catch (e) {
         if (/401/.test(e.message)) throw e;
         snap.sections.config = `일부 어레이 오류: ${e.message}`;

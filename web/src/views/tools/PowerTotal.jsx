@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import { STable } from '../../components/STable.jsx';
-import { kwText, kwOrDash, wText, powerCatNote, POWER_FOOTNOTE, countText } from '../overviewCardsText.js';
+import { kwText, kwOrDash, wText, powerCatNote, POWER_FOOTNOTE, countText, storagePowerReasonText, reasonCountsText } from '../overviewCardsText.js';
 
 const CATS = [['servers', '🖥 서버', '#3b82f6'], ['network', '🔀 네트워크', '#22c55e'], ['storage', '🗄 스토리지', '#a855f7']];
 
@@ -87,7 +87,7 @@ export default function PowerTotal() {
                 <td>{x.name}</td>
                 <td>{corpName(x.corpId)}</td>
                 {tab === 'network' && <td>{x.model || '—'}</td>}
-                {tab === 'storage' && <td>{x.type}{x.scope === 'dpe' ? ' · DPE 만' : ''}</td>}
+                {tab === 'storage' && <td title={x.source || ''}>{x.type}{x.scope === 'dpe' ? ' · DPE 만' : x.scope === 'node' ? ' · 노드 합' : x.scope === 'psu' ? ' · PSU 합' : ''}{x.basis === 'output' ? ' · 출력 기준' : ''}</td>}
                 <td className="right" data-sort={x.watts}>{wText(x.watts)}</td>
                 {tab === 'network' && <td>{x.basis === 'output' ? 'PSU 출력' : x.basis === 'mixed' ? '입력·출력 혼합' : 'PSU 입력'} · PSU {x.psus}</td>}
                 {tab === 'servers' && <td>{x.source === 'remote' ? '엣지' : x.source === 'ome' ? 'OME' : 'iDRAC'}</td>}
@@ -97,10 +97,46 @@ export default function PowerTotal() {
         </STable>
         {!cat.items.length && <div className="muted" style={{ padding: 10 }}>측정된 장비가 없습니다 — {powerCatNote(tab, cat)}</div>}
         {cat.omitted > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>큰 순 {cat.items.length}대만 보였습니다 — {cat.omitted}대는 목록에서 뺐습니다(합계에는 포함).</div>}
+        {tab === 'storage' && <StorageUnread cat={cat} corpName={corpName} />}
         <ul className="muted" style={{ fontSize: 11, marginTop: 10, lineHeight: 1.6, paddingLeft: 18 }}>
           {POWER_FOOTNOTE.map((t) => <li key={t}>{t}</li>)}
         </ul>
       </div>
+    </div>
+  );
+}
+
+/** 스토리지 — 전력을 못 읽은 장비와 사유(v2.667). 수집 경로가 없는 장비는 사유별 개수만 말한다. */
+function StorageUnread({ cat, corpName }) {
+  const issues = Array.isArray(cat?.issues) ? cat.issues : [];
+  const unsup = reasonCountsText(cat?.unsupportedBy);
+  if (!issues.length && !unsup) return null;
+  return (
+    <div style={{ marginTop: 14, minWidth: 0 }}>
+      <b style={{ fontSize: 13 }}>전력을 합계에 넣지 못한 장비</b>
+      {cat.unreadBy && Object.keys(cat.unreadBy).length > 0 && <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>못 읽음 — {reasonCountsText(cat.unreadBy)}</div>}
+      {unsup && <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>수집 경로 없음 — {unsup}</div>}
+      {issues.length > 0 && (
+        <STable minWidth={760}>
+          <thead><tr><th>장비</th><th>법인</th><th>타입</th><th>사유</th><th>세부 · 응답에 있던 키</th></tr></thead>
+          <tbody>
+            {issues.map((x) => (
+              <tr key={x.id}>
+                <td>{x.name}</td>
+                <td>{corpName(x.corpId)}</td>
+                <td>{x.type}{x.method ? ` · ${x.method}` : ''}</td>
+                <td>{storagePowerReasonText(x.reason)}</td>
+                <td style={{ whiteSpace: 'normal', fontSize: 12 }}>
+                  {[x.source, x.detail].filter(Boolean).join(' — ') || '—'}
+                  {x.detailHidden && <span className="muted"> (오류 원문은 관리자에게만 보입니다)</span>}
+                  {Array.isArray(x.seenKeys) && x.seenKeys.length > 0 && <div className="muted" style={{ overflowWrap: 'anywhere' }}>키: {x.seenKeys.join(', ')}</div>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </STable>
+      )}
+      {cat.issuesOmitted > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{cat.issuesOmitted}대는 목록 상한으로 뺐습니다(개수에는 포함).</div>}
     </div>
   );
 }

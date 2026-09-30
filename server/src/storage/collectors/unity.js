@@ -8,6 +8,7 @@ import { emptySnapshot } from '../types.js';
 import { makeGetter } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { healthWord } from '../healthWord.js';
+import { powerResult, powerProbe, applyScannedPower } from '../power.js';
 
 const entries = (v) => (v?.entries || []).map((e) => e.content || {});
 /** 미해결 알람 한 페이지 크기(v2.599 C2599-07). */
@@ -31,7 +32,22 @@ export function unityHealthWord(value) {
   return UNITY_HEALTH[v] || `health:${v}`;
 }
 
-/** 원시 응답 → 정규화(순수). raw: {system,sw,cap,pools,sps,users,alerts} */
+/** Unity REST 전원 조회 경로(v2.667) — 시스템 객체의 현재 전력 필드(W). ⚠ 필드 이름은 Unisphere REST 문서 지식 기반이고
+ *  실장비 응답으로 확인하지 못했다 — 필드가 없으면 응답의 다른 전원 이름을 훑고, 그래도 없으면 '응답에 전원 필드 없음' 으로 밝힌다. */
+export const UNITY_POWER_PATH = '/api/types/system/instances?fields=currentPower';
+
+/** raw.power(시스템 응답)·raw.powerErr → extra.power | extra.powerProbe (순수 — extra 변경). */
+export function applyUnityPower(extra, raw) {
+  const source = 'Unisphere REST system.currentPower';
+  if (raw.powerErr) { extra.powerProbe = powerProbe('request-failed', { source, detail: raw.powerErr }); return; }
+  if (!raw.power) return;   // 조회 전 중단(401 등) — 시도하지 않은 것이다
+  const sys = entries(raw.power)[0];
+  const r = sys ? powerResult({ watts: sys.currentPower, source, basis: 'system', scope: 'system', keys: ['currentPower'] }) : null;
+  if (r) { extra.power = r; return; }
+  applyScannedPower(extra, entries(raw.power), { source, scope: 'system' });
+}
+
+/** 원시 응답 → 정규화(순수). raw: {system,sw,cap,pools,sps,users,alerts,power} */
 export function normalizeUnity(device, raw) {
   const snap = emptySnapshot(device);
   const sys = entries(raw.system)[0];
@@ -93,6 +109,7 @@ export function normalizeUnity(device, raw) {
     }
     snap.sections.alerts = 'ok';
   }
+  applyUnityPower(snap.extra, raw);
   snap.extra.collectMethod = 'api';
   snap.ok = snap.sections.config === 'ok' || snap.sections.capacity === 'ok';
   if (!snap.ok && !snap.error) snap.error = '수집 실패(섹션 오류 참조)';
@@ -122,6 +139,9 @@ export async function collect(device, { signal = null } = {}) {
     await step('sps', () => get('/api/types/storageProcessor/instances?fields=name,health'));
     await step('users', () => get('/api/types/user/instances?fields=name'));
     await step('alerts', () => get(`/api/types/alert/instances?fields=id&filter=state ne 2&per_page=${UNITY_ALERT_PER_PAGE}`));
+    // v2.667 — 전원. 다른 섹션과 따로 조회한다(필드가 없는 버전이 오류를 내도 system 조회를 깨지 않게).
+    try { raw.power = await get(UNITY_POWER_PATH); }
+    catch (e) { if (/401/.test(e.message)) throw e; raw.powerErr = String(e.message || e).slice(0, 200); }
   } catch (e) {
     const out = normalizeUnity(device, raw);
     out.error = e.message;
