@@ -329,6 +329,7 @@ export const TOOL_ENFORCEMENT_NOTES = Object.freeze({
   //   `/api/nsx`(requirePerm('inv.nsx'))이고 카탈로그도 perm:'inv.nsx' 로 그 경계를 보존한다.
   nsx: [ENFORCE_OTHER_ROUTER, "/api/nsx(requirePerm('inv.nsx')) · 관리 경로 /api/admin/nsx/managers(adminOnly)"],
   powermap: [ENFORCE_OTHER_ROUTER, '/api/insights/power-breakdown(insights 권한)'],
+  'idrac-trend': [ENFORCE_OTHER_ROUTER, '/api/admin/idrac/trend/* · /api/admin/idrac/:id/trend(adminOnly · CSV 는 data.csv)'], // v2.660
   serveranalysis: [ENFORCE_OTHER_ROUTER, '/api/admin/idrac/* · /api/admin/datacenters(adminOnly)'],
   fleet: [ENFORCE_OTHER_ROUTER, '/api/insights/fleet(insights 권한)'],
   'nic-speed': [ENFORCE_OTHER_ROUTER, '/api/admin/idrac/nic-speed(adminOnly)'],

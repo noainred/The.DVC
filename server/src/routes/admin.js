@@ -10,6 +10,7 @@ import { registerVcenters } from './admin/vcenters.js';
 import { registerOpsSettings } from './admin/opsSettings.js';
 import { registerNsxImport } from './admin/nsxImport.js';
 import { registerIdracCore } from './admin/idracCore.js';
+import { registerIdracTrend } from './admin/idracTrend.js'; // v2.660: 특수 기능 › iDRAC 통합 추이
 import { registerIdracScan } from './admin/idracScan.js';
 import { registerCollectorsDc } from './admin/collectorsDc.js';
 import { registerHorizonAssign } from './admin/horizonAssign.js';
@@ -43,6 +44,7 @@ registerGpuGuest(adminRouter);
 registerVcenters(adminRouter);
 registerOpsSettings(adminRouter);
 registerNsxImport(adminRouter);
+registerIdracTrend(adminRouter);    // v2.660 — '/idrac/trend/*' 가 '/idrac/:id/…' 보다 먼저여야 한다
 registerIdracCore(adminRouter);
 registerIdracScan(adminRouter);
 registerCollectorsDc(adminRouter);

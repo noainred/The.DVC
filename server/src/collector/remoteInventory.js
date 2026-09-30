@@ -99,6 +99,8 @@ export function sanitizeRemoteSensors(x) {
   const cyc = numOrNull(x.cycleMs); const itv = numOrNull(x.intervalMs);
   return {
     t: numOrNull(x.t), temps,
+    // v2.660: CPU 사용률(0~100 만 — 범위 밖은 퍼센트가 아니다). 구버전 엣지는 싣지 않는다.
+    ...(() => { const c = numOrNull(x.cpu); return c != null && c >= 0 && c <= 100 ? { cpu: c } : {}; })(),
     ...(cyc != null && cyc >= 0 && cyc <= 7 * 86_400_000 ? { cycleMs: cyc } : {}),
     ...(itv != null && itv > 0 && itv <= 7 * 86_400_000 ? { intervalMs: itv } : {}),
   };

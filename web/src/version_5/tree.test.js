@@ -25,10 +25,10 @@ describe('V5 트리 커버리지', () => {
     const auto = GROUPS.find((g) => g.id === 'auto').items.map((i) => i.k);
     expect([...auto].sort()).toEqual([...MUTATING_TOOLS].sort());
   });
-  it('자산 그룹은 소제목 4개로 나뉘고 항목은 25개', () => {
+  it('자산 그룹은 소제목 4개로 나뉘고 항목은 26개', () => {
     const g = GROUPS.find((x) => x.id === 'assets');
     expect(g.items.filter((i) => i.kind === 'sub').map((i) => i.label)).toEqual(['인벤토리', '장비', '검색', '버전 · 구성']);
-    expect(g.items.filter((i) => i.kind !== 'sub').length).toBe(25);
+    expect(g.items.filter((i) => i.kind !== 'sub').length).toBe(26); // v2.660: idrac-trend
   });
   it('HOME 은 Overview · Summary', () => {
     expect(HOME.map((i) => i.id)).toEqual(['overview', 'summary']);
@@ -39,7 +39,7 @@ describe('resolveTree — 판정은 toolVisibility 가 한다', () => {
   it('admin: 전부 보이고 개수 = 보이는 항목 수(소제목 제외)', () => {
     const t = resolveTree(TOOLS, { isAdmin: true, visibleTabIds: ALL_TABS, serviceHubUrl: 'https://hub' });
     const assets = t.groups.find((g) => g.id === 'assets');
-    expect(assets.count).toBe(25);
+    expect(assets.count).toBe(26);
     const total = t.groups.reduce((a, g) => a + g.count, 0);
     // 도구 91 + 탭 11(HOME 2 제외, ipam 은 도구 항목으로 1회)
     expect(total).toBe(TOOLS.length + ALL_TABS.length - 2 - 1);

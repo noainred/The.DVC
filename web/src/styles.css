@@ -1244,3 +1244,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 
 /* v2.659 서버 온도 › 센서 상세 — 열 10개. 최소폭이 없으면 400px 에서 셀이 세로로 짜부라진다(v2.562 규약) — 가로 스크롤은 DataTable 래퍼가 맡는다. */
 .sd-table { min-width: 1000px; width: 100%; }
+
+/* v2.660 iDRAC 통합 추이 KPI — 넓은 폭은 한 줄 4칸, 720px 이하는 2×2(4칸으로 좁히면 라벨이 말줄임으로 사라진다 — 400px 스크린샷 판독). */
+.idrac-trend-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+@media (max-width: 720px) { .idrac-trend-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

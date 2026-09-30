@@ -18,6 +18,8 @@ import { allRemoteServers, dedupRemoteServers } from '../collector/remoteInvento
 import { matchDatacenterId } from '../collector/datacenterMatch.js';
 import { serverInScope } from './analysisScope.js';
 import { listDatacenters, getDatacenterAssign, ensureDatacenter } from '../datacenter/store.js';
+import { listScanRanges } from '../idrac/scanRanges.js';
+import { buildScanSiteIndex, scanSiteOf, hostIpNum } from '../idrac/scanSite.js';
 
 // 서버 분석 공용 필터 술어. 쿼리로 3가지 축을 지원한다:
 //   ?vcenterId=<id>      — 그 vCenter의 가상화 장비만 (vcenterId 일치). __unmapped__=vCenter 미지정.
@@ -105,10 +107,41 @@ export function remoteServersResolved() {
 export function analysisServersWithRemote(req) {
   const pred = analysisFilter(req);
   const tagMap = hostVcByTag();
-  const local = loadIdracRegistry().filter((s) => s.type !== 'ome').map((s) => withMappedVc(s, tagMap)).filter(pred);
+  const idx = scanSiteIndex();
+  const assign = getDatacenterAssign();
+  const prep = (s) => withScanDatacenter(withMappedVc(s, tagMap), idx, assign);
+  const local = loadIdracRegistry().filter((s) => s.type !== 'ome').map(prep).filter(pred);
   const seen = new Set(local.map((s) => String(s.id)));
-  const remote = remoteServersResolved().map((s) => withMappedVc(s, tagMap)).filter((s) => !seen.has(String(s.id)) && pred(s));
+  const remote = remoteServersResolved().map(prep).filter((s) => !seen.has(String(s.id)) && pred(s));
   return local.concat(remote);
+}
+
+/*
+ * v2.660(사용자 요청 "미 가상화 물리서버도 idrac scan 할때 사용한 agent 가 속한 데이터 센터로 분류해줘"):
+ * 법인(datacenterId)이 비어 있고 vCenter 로도 법인을 알 수 없는 서버는 서버 분석의 법인 칩에서 빠지고
+ * 'Baremetal' 에만 보였다. 그 IP 를 포함하는 iDRAC 스캔 대역 → 대역의 에이전트(수집 서버)가 속한 데이터센터
+ * (모르면 그 대역을 등록한 법인)로 채운다. 판정은 idrac/scanSite.js 하나(iDRAC 통합 추이의 사이트와 같은 색인).
+ *  · 이미 법인이 있거나, vCenter→법인 할당이 있는 서버는 **건드리지 않는다**(기존 귀속 우선).
+ *  · 대역이 겹쳐 서로 다른 법인을 가리키면 채우지 않는다(지어내지 않는다) — dcSource 'scan-ambiguous' 로 밝힌다.
+ */
+export function scanSiteIndex() {
+  let entries = [];
+  try { entries = listScanRanges(); } catch { entries = []; }
+  const byCollector = collectorToDatacenterMap();
+  const lower = new Map([...byCollector].map(([k, v]) => [String(k).toLowerCase(), v]));
+  const names = new Map(loadCollectors().map((c) => [String(c.name || '').toLowerCase(), byCollector.get(String(c.id)) || '']));
+  const agentDc = (a) => byCollector.get(a) || lower.get(String(a).toLowerCase()) || names.get(String(a).toLowerCase()) || '';
+  return buildScanSiteIndex(entries, { agentDc });
+}
+export function withScanDatacenter(s, idx, assign = null) {
+  if (!s || String(s.datacenterId || '').trim()) return s;
+  const effVc = String(s.vcenterId || s.mappedVcenterId || '').trim();
+  const a = assign || getDatacenterAssign();
+  if (effVc && a[effVc]) return s;
+  const r = scanSiteOf(hostIpNum(s.host), idx);
+  if (r.match && r.match.datacenterId) return { ...s, datacenterId: r.match.datacenterId, dcSource: r.match.dcSource === 'agent' ? 'scan-agent' : 'scan-range', scanSite: r.match.site };
+  if (r.ambiguous) return { ...s, dcSource: 'scan-ambiguous' };
+  return s;
 }
 
 // 인벤토리 조회: 원격 서버는 엣지가 실어 보낸 콤팩트 인벤토리(s.inv)를, 중앙 서버는 캐시를 쓴다.

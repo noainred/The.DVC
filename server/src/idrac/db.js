@@ -9,7 +9,8 @@
  */
 
 import fs from 'node:fs';
-import { shouldStore, policyFromEnv } from '../metrics/deadband.js';   // v2.451: 변화분만 저장
+import { shouldStore, policyFromEnv } from '../metrics/deadband.js';
+import { stepBuckets, STEP_SLACK_MS } from '../metrics/db.js'; // v2.660: 기간 조회 step 채움(순수 함수)   // v2.451: 변화분만 저장
 import path from 'node:path';
 import { config } from '../config.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
@@ -76,6 +77,10 @@ function initSqlite() {
     // — 60s 폴×24h=1440 > limit 1000이면 최근 ~7h가 차트에서 사라짐). DESC로 최신 limit개를
     // 선택한 뒤 오름차순으로 되돌려 NDJSON 폴백(slice(-limit))과 순서·의미를 일치시킨다.
     const historyStmt = db.prepare('SELECT ts, watts FROM power_samples WHERE server_id = ? AND ts >= ? ORDER BY ts DESC LIMIT ?');
+    // v2.660: iDRAC 통합 추이 — [start, end) 버킷 평균. 1시간 정배수면 롤업, 그 외 원본. CAST 는 node:sqlite 가 JS 수를
+    //   REAL 로 바인딩하기 때문이다(v2.598 DB2598-01 — 없으면 버킷이 나뉘지 않는다).
+    const rangeRawStmt = db.prepare('SELECT ts, watts FROM power_samples WHERE server_id = ? AND ts >= ? AND ts < ? ORDER BY ts');
+    const rangeHourlyStmt = db.prepare('SELECT CAST(hb / ? AS INTEGER) AS bk, SUM(sumw) AS s, SUM(cnt) AS n FROM power_hourly WHERE server_id = ? AND hb >= ? AND hb < ? GROUP BY bk ORDER BY bk');
     // 청크 DELETE (v2.453) — metrics/db.js 와 같은 이유. idrac-power.db 도 운영 실측 26.9GB 라
     // 한 방 DELETE 는 이벤트 루프를 수 분 멈춘다. rowid 서브쿼리 + LIMIT 으로 끊는다.
     const pruneStmt = db.prepare('DELETE FROM power_samples WHERE rowid IN (SELECT rowid FROM power_samples WHERE ts < ? LIMIT ?)');
@@ -179,6 +184,19 @@ function initSqlite() {
         return map;
       },
       history: (serverId, sinceTs, limit) => historyStmt.all(serverId, sinceTs, limit).reverse(),
+      bucketRange: (serverId, startTs, endTs, bucketMs) => {
+        if (bucketMs >= HOUR_MS && bucketMs % HOUR_MS === 0) {
+          const per = bucketMs / HOUR_MS;
+          return rangeHourlyStmt.all(per, serverId, Math.floor(startTs / HOUR_MS), Math.ceil(endTs / HOUR_MS))
+            .map((r) => ({ ts: r.bk * bucketMs, watts: r.n ? Math.round(r.s / r.n) : null }));
+        }
+        // 원본은 dead-band(3W·최대 30분) 저장이라 안정 구간에 행이 없다 — 창 직전 행을 이월해 step 채움(metrics historyStep 과 같은 규칙).
+        const p = deadbandPolicy.power;
+        const gap = p && p.eps > 0 ? p.maxGapMs : 0;
+        const rows = rangeRawStmt.all(serverId, startTs - gap - STEP_SLACK_MS, endTs).map((r) => ({ v: r.watts, ts: r.ts }));
+        const { points } = stepBuckets({ carry: null, rows, start: startTs, nowTs: endTs - 1, bucketMs, maxGapMs: gap, lastActualTs: null });
+        return points.map((pt) => ({ ts: pt.ts, watts: Math.round(pt.avg) }));
+      },
       // 시간당 롤업에서 계산(24h 윈도우 ≈ 24 시간버킷 스캔). 윈도우는 시간 단위로 정렬됨(대시보드 집계엔 무해).
       statsSince: (sinceTs) => {
         const hbSince = Math.floor(sinceTs / HOUR_MS);
@@ -259,6 +277,11 @@ function initJsonFallback() {
     history: (serverId, sinceTs, limit) =>
       rows.filter((r) => r.s === serverId && r.t >= sinceTs).sort((a, b) => a.t - b.t).slice(-limit)
         .map((r) => ({ ts: r.t, watts: r.w })),
+    bucketRange: (serverId, startTs, endTs, bucketMs) => {
+      const acc = new Map();
+      for (const r of rows) if (r.s === serverId && r.t >= startTs && r.t < endTs) { const b = Math.floor(r.t / bucketMs) * bucketMs; const g = acc.get(b) || { s: 0, n: 0 }; g.s += r.w; g.n++; acc.set(b, g); }
+      return [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([ts, g]) => ({ ts, watts: Math.round(g.s / g.n) }));
+    },
     statsSince: (sinceTs) => {
       const acc = new Map(); // s -> {peak,min,sum,n,last}
       for (const r of rows) {

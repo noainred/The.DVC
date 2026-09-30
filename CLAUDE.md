@@ -3850,6 +3850,29 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 캐시 `idrac-sensor-cache.json` 은 상태 파일(백업 감시 제외)이고 손상이면 새로 시작한다(arch2582 CACHE_OK). 파일명은 리터럴로 둔다(config-doc 생성기).
     - 화면: 폴링하지 않는다(마운트 1회 + 새로고침). 비-admin 은 IP 로 등록된 id·name 을 가린다(상세 조회는 토큰을 되찾는다). 표 `.sd-table` 최소폭 1000px.
       ⚠ 탭 5개가 되며 서버 온도 `Segment` 가 400px 에서 페이지를 51px 밀어냈다 — `flexWrap:'wrap'` 로 고쳤다(같은 탭 묶음을 쓰는 '서버별' 탭도 같이 넘쳤다 · 수정 후 두 탭 모두 0 · 변경 전 코드와의 A/B 는 하지 않았다).
+  - ⚠⚠ **iDRAC 통합 추이(v2.660) — 새 수집이 아니라 샘플러 적재 3계열 + 기간 조회. 데이터센터는 스캔 대역 이름이다**
+    (`idrac/serverTrendSeries.js` · `idrac/scanSite.js` · `routes/admin/idracTrend.js` + metrics `historyRange` · 전력 `bucketRange` + 웹
+    `views/tools/IdracTrendTool.jsx`·`idracTrendText.js`, 사용자 제공 핸드오프 `design_handoff_idrac_trend`. 선택: 데이터센터 = **스캔 대역 이름** ·
+    전체 검증. 같은 릴리스에 사용자 요청 "미 가상화 물리서버도 idrac scan 할때 사용한 agent 가 속한 데이터 센터로 분류". 회귀
+    `server/test/idracTrend2660.test.js`(실제 metrics·전력 DB + 실제 admin 라우터) + 웹 `idracTrendText.test.js`):
+    - **계열**: `idracusage_cpu`(dead-band 없음 — 사용률 규약) · `idractemp_cpu`·`idractemp_gpu`(온도 dead-band 0.5℃ — `deadband.js policyKeyFor`).
+      `idractemp_max`·inlet·exhaust 는 **예전 그대로 전량 저장**이다(기존 화면이 분 단위 원본을 step 없이 읽는다 — 바꾸면 공백이 생긴다).
+      `idractemp_cpu` 가 dead-band 가 됐으므로 `/idrac/:id/temp-history` 는 `historyStep` 으로 읽는다. 상세 모드(`IDRAC_TEMP_SERIES_DETAIL`)면
+      serverTempSeries 가 idractemp_cpu 를 적재하므로 여기서는 건너뛴다(두 번 적재 금지). GPU 판정은 `sensorDetail.roleOf`(센서 상세와 같은 판정).
+    - **기간 조회는 끝이 있다**(`historyRange`·`bucketRange`) — `history()` 는 '지금까지' 만 받아 과거 기간을 보려면 지금까지 전부 읽어야 했다.
+      1시간 정배수 버킷은 롤업, 짧은 버킷의 dead-band 계열(온도·전력)은 step 채움(창 직전 행 이월, 최대 간격 + 5분까지만). ⚠ step 은
+      실제 중단 직전 약 35분을 이어 그린다(dead-band 에서 '안 변함' 과 '멈춤' 을 원본만으로 구분할 수 없다 — 기존 historyStep 과 같은 한계).
+    - **데이터센터 = 그 서버 IP 를 포함하는 iDRAC 스캔 대역 이름**(`scanSite.js` — 대역을 펼치지 않고 [lo,hi] 구간 비교, 겹치면 가장 좁은 대역,
+      **다른 법인 대역이 겹치면 정하지 않음**). 같은 색인이 서버 분석의 **법인 보강**(`analysisServers.withScanDatacenter`)을 한다 — 법인이 비고
+      vCenter→법인 할당도 없는 서버만, 에이전트가 속한 데이터센터(모르면 대역의 법인)로. `dcSource` 로 근거를 밝힌다. 판정을 복제하지 말 것.
+    - 보관: 조회 가능 기간 `IDRAC_TREND_RETENTION_DAYS`(기본 365, metrics 롤업 보존보다 길 수 없다). 전력은 전력 DB 보관(기본 90일)이라 응답
+      `retention.powerDays` 를 화면이 말한다. 첫 적재(`firstTs`) 이전은 무응답이 아니라 '수집 전' 이다(회색 무응답 칸을 칠하지 않는다).
+    - 엣지: export 센서 요약에 `cpu`(0~100)를 싣고 중앙 `sanitizeRemoteSensors` 가 받는다 — 위임 서버 CPU 사용률은 엣지 2.660 이 필요하다.
+    - CSV: `data.csv` + adminOnly + 동시 1건(`exportBusy`) · 데이터센터 전체 300대 상한(`X-Omitted-Servers`) · BOM · 빈 칸 결측 ·
+      `filename=` ASCII 대체 이름에도 기간·시각을 싣는다(웹 `downloadFile` 이 그것을 먼저 읽는다).
+    - 화면: 폴링은 `usePolling`(1시간 범위만 30초) · KPI 는 720px 이하 2×2(`.idrac-trend-kpis` — 4칸이면 400px 에서 라벨이 말줄임으로 사라졌다,
+      스크린샷 판독) · 도구 키 `idrac-trend`(adminOnly — 주 API 가 /api/admin). V4·V5·V6 트리 · toolcats · toolAccess 선언에 등록했다.
+    - ⚠ 정직 기록: 실장비 iDRAC 으로는 보지 못했다 — 목 서버에 합성 적재(3일)를 심어 Chromium 1440/400 으로 확인했다.
   - **CVP Overview EOS 버전 패널은 버전 순(최신 먼저)이다**(v2.657, `cvpOverviewText.versionList`·`cmpEosVersion` — 재사용 Collator numeric): 예전 '갈린 버전 먼저 → 대수' 순은
     사용자 요청으로 바꿨다. '버전 갈림' 은 태그로만 남는다 · 상한 12 · 넘치면 생략 개수를 적는다.
   - **GPU 추이 창은 수집 공백을 잇지 않는다**(v2.656, `GpuHistModal.gapRows`): 간격이 `max(버킷, 수집 주기) × 2` 를 넘으면 null 행을 끼워 선을 끊고

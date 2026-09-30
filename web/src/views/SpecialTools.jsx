@@ -40,7 +40,8 @@ const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx
 const PartFaults = React.lazy(() => import('./tools/PartFaults.jsx'));   // 파트 장애(v2.547)
 const EdgeLog = React.lazy(() => import('./tools/EdgeLog.jsx'));         // 엣지 로그·진행상태(v2.549)
 const BmUsage = React.lazy(() => import('./tools/BmUsage.jsx'));         // 베어메탈 사용률(v2.550)
-const CorpUsage = React.lazy(() => import('./tools/CorpUsage.jsx'));     // 법인별 서버 사용량(v2.625)
+const CorpUsage = React.lazy(() => import('./tools/CorpUsage.jsx'));
+const IdracTrend = React.lazy(() => import('./tools/IdracTrendTool.jsx')); // iDRAC 통합 추이(v2.660)     // 법인별 서버 사용량(v2.625)
 const LinkCheck = React.lazy(() => import('./tools/LinkCheck.jsx'));     // 통신 점검(중앙↔엣지·vCenter, v2.552)
 const PortalCheck = React.lazy(() => import('./tools/PortalCheck.jsx')); // 포탈 점검 › 토큰 점검(v2.560)
 const CommMap = React.lazy(() => import('./tools/CommMap.jsx'));         // 통신 지도(중앙↔엣지 라디얼, v2.584)
@@ -473,6 +474,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '' }) {
       {tool === 'edge-log' && <EdgeLog />}
       {tool === 'bm-usage' && <BmUsage />}
       {tool === 'corp-usage' && <CorpUsage scope={scope} />}
+      {tool === 'idrac-trend' && <IdracTrend />}
       {tool === 'link-check' && <LinkCheck />}
       {tool === 'portal-check' && <PortalCheck />}
       {tool === 'comm-map' && <CommMap />}

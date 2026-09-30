@@ -19,6 +19,7 @@ import { insertVmperf, pruneVmperf } from './vmperfDb.js';
 import { loadVmperfSettings, vmperfTracks } from './vmperfSettings.js';
 import { roomTempRows } from '../idrac/roomTempSeries.js';
 import { serverTempRows } from '../idrac/serverTempSeries.js';   // v2.504: 서버별 온도 추이(아래 주석)
+import { serverTrendRows } from '../idrac/serverTrendSeries.js'; // v2.660: iDRAC 통합 추이(CPU 사용률·CPU/GPU 온도)
 
 let timer = null;
 import { pushAll } from '../util/pushAll.js';
@@ -364,6 +365,8 @@ async function sampleOnceInner() {
   // (엣지는 최신 스냅샷만 export 하므로 중앙에 이력이 0 이었다 — v2.493 이 '중앙 이력 없음' 으로
   // 정직하게 표기한 그 공백을 이 계열이 채운다).
   try { pushAll(rows, serverTempRows()); } catch { /* 집계 실패가 샘플링을 막지 않게 */ }
+  // v2.660: iDRAC 통합 추이 — 같은 대상·같은 신선도 판정(idrac/serverTrendSeries.js 머리말에 계열 수).
+  try { pushAll(rows, serverTrendRows()); } catch { /* 집계 실패가 샘플링을 막지 않게 */ }
 
   // 포탈 자신의 프로세스 메모리(누수 추적) — 인벤토리 유무와 무관하게 항상 샘플하고,
   // 시간당 1줄 상태 로그(링 버퍼·journal)도 여기서 남긴다. 실패가 본 샘플링을 막지 않게 격리.

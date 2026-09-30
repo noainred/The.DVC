@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-09-27T02:12:45.691Z",
-  "count": 92,
+  "generatedAt": "2026-09-30T05:24:48.164Z",
+  "count": 93,
   "tools": [
     {
       "k": "service-hub",
@@ -277,6 +277,14 @@
     {
       "k": "waste",
       "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "idrac-trend",
+      "adminOnly": true,
       "perm": null,
       "external": null,
       "topTab": false,

@@ -1,0 +1,275 @@
+// IdracTrendTool.jsx — 특수 기능 › iDRAC 통합 추이(v2.660). CPU 사용률 · CPU 온도 · GPU 온도 · 소비 전력을 한 차트로.
+// 디자인: 사용자 제공 핸드오프 design_handoff_idrac_trend(README · iDRAC 통합 추이 (기존 포탈).dc.html).
+// 셸(← 특수 기능 · 제목)은 SpecialTools.jsx 가 그린다 — 여기서는 본문만.
+// 판정은 서버(routes/admin/idracTrend.js)가 하고 문구·요약은 idracTrendText.js 가 한다(읽기만).
+import React, { useEffect, useMemo, useState } from 'react';
+import { ResponsiveContainer, ComposedChart, Line, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea } from 'recharts';
+import { fetchJson, canCsv, downloadFile, usePolling } from '../../api.js';
+import { Loading, ErrorBox } from '../../components/primitives.jsx';
+import { Modal } from '../../components/Modal.jsx';
+import { EntityDetail } from '../../components/EntityDetail.jsx';
+import { IdracDetailModal } from '../idrac/IdracDetailModal.jsx';
+import { WARN_PCT, CRIT_PCT } from '../../console/consoleData.js';
+import {
+  PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
+  corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
+} from './idracTrendText.js';
+
+const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12 };
+const ALL_ON = { cpuPct: true, cpuTemp: true, gpuTemp: true, powerW: true };
+const errText = (e) => e?.message || String(e);
+const pill = { fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: 999, color: '#7dd3fc', background: 'rgba(56,189,248,.12)', border: '1px solid rgba(56,189,248,.45)', lineHeight: 1.4 };
+
+export default function IdracTrendTool() {
+  const [list, setList] = useState(null);         // /admin/idrac/trend/servers
+  const [listErr, setListErr] = useState(null);
+  const [corp, setCorp] = useState(null);
+  const [site, setSite] = useState(null);
+  const [serverId, setServerId] = useState('');
+  const [range, setRange] = useState('24h');
+  const [custom, setCustom] = useState(null);      // { start, end } ms
+  const [customOpen, setCustomOpen] = useState(false);
+  const [draft, setDraft] = useState(() => ({ start: toLocalInput(Date.now() - 7 * DAY), end: toLocalInput(Date.now()) }));
+  const [rangeErr, setRangeErr] = useState(null);
+  const [on, setOn] = useState(ALL_ON);
+  const [modal, setModal] = useState(null);        // 'host' | 'idrac' | 'csv'
+
+  useEffect(() => {
+    let alive = true;
+    fetchJson('/admin/idrac/trend/servers').then((d) => { if (alive) { setList(d); setListErr(null); } })
+      .catch((e) => { if (alive) setListErr(e); });
+    return () => { alive = false; };
+  }, []);
+
+  const servers = useMemo(() => list?.servers || [], [list]);
+  const corps = useMemo(() => corpsOf(servers), [servers]);
+  const sites = useMemo(() => (corp == null ? [] : sitesOf(servers, corp)), [servers, corp]);
+  const inSite = useMemo(() => (corp == null || site == null ? [] : serversOf(servers, corp, site)), [servers, corp, site]);
+  // 법인 → 첫 데이터센터 → 첫 서버(상위를 바꾸면 하위를 첫 항목으로).
+  useEffect(() => { if (corps.length && !corps.some((c) => c.value === corp)) setCorp(corps[0].value); }, [corps, corp]);
+  useEffect(() => { if (sites.length && !sites.some((s) => s.value === site)) setSite(sites[0].value); }, [sites, site]);
+  useEffect(() => { if (!inSite.some((s) => s.id === serverId)) setServerId(inSite[0]?.id || ''); }, [inSite, serverId]);
+
+  const q = range === 'custom' && custom ? { start: custom.start, end: custom.end } : { range };
+  // 폴링은 공용 usePolling(v2.613 WEB2613-09) — 1시간 범위만 30초 자동 갱신, 그 밖은 사실상 수동(6시간).
+  //   파라미터(서버·기간)가 바뀌면 직전 데이터를 비운다(다른 서버의 추이를 새 선택처럼 보이지 않게 — 포탈 규약).
+  const { data, error: err } = usePolling(serverId ? `/admin/idrac/${encodeURIComponent(serverId)}/trend` : null, q, range === '1h' ? 30_000 : 6 * 3_600_000);
+
+  if (listErr && !list) return <ErrorBox error={listErr} />;
+  if (!list) return <Loading label="iDRAC 서버" />;
+  if (!servers.length) {
+    return <div className="card muted">{list.scoped ? `범위 안에 보이는 iDRAC 서버가 없습니다(범위 밖 ${list.omittedOutOfScope || 0}대 제외).` : '등록된 iDRAC 서버가 없습니다 — 서버 분석에서 iDRAC 을 등록하거나 스캔하세요.'}</div>;
+  }
+
+  const pts = data?.points || [];
+  const span = data ? data.end - data.start : DAY;
+  const st = Object.fromEntries(SERIES.map((s) => [s.k, statsOf(pts, s.k)]));
+  const srv = servers.find((s) => s.id === serverId);
+  const esxi = data?.kind === 'esxi';
+  const toggle = (k) => { if (st[k]) setOn((o) => ({ ...o, [k]: !o[k] })); };
+  const keep = data?.retentionDays || list.retentionDays || 365;
+  const applyCustom = () => {
+    const a = new Date(draft.start).getTime(), b = new Date(draft.end).getTime();
+    const e = customRangeError(a, b, { retentionDays: keep });
+    setRangeErr(e); if (!e) { setCustom({ start: a, end: b }); setRange('custom'); }
+  };
+  const sel = (label, value, onChange, opts, minWidth) => (
+    <label className="flex" style={{ alignItems: 'center', gap: 6, fontSize: 13 }}>
+      <span className="muted" style={{ whiteSpace: 'nowrap' }}>{label}</span>
+      <select className="select" style={{ minWidth: minWidth || 0, maxWidth: '100%' }} value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
+        {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
+  );
+  const empty = emptyNote(data);
+  const gaps = data ? gapAreas(pts, data.firstTs) : [];
+
+  return (
+    <>
+      <div className="flex wrap" style={{ gap: 12, marginBottom: 14, justifyContent: 'flex-end' }}>
+        {sel('법인', corp, setCorp, corps)}
+        {sel('데이터센터', site, setSite, sites.map((s) => ({ value: s.value, label: `${s.value} · ${s.n}대` })))}
+        {sel('서버', serverId, setServerId, inSite.map((s) => ({ value: s.id, label: serverLabel(s) })), 180)}
+      </div>
+      {list.scoped && list.omittedOutOfScope > 0 && <div className="banner" style={{ marginBottom: 10 }}>범위 밖 서버 {list.omittedOutOfScope}대는 목록에서 뺐습니다.</div>}
+
+      {/* KPI — 클릭 = 계열 켜기/끄기(별도 토글 행 없음). 값이 없는 계열은 클릭을 무시한다. */}
+      <div className="idrac-trend-kpis">
+        {SERIES.map((s) => {
+          const x = st[s.k];
+          return (
+            <div key={s.k} className="card" role="button" tabIndex={x ? 0 : -1} aria-pressed={!!on[s.k]}
+              onClick={() => toggle(s.k)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(s.k); } }}
+              style={{ padding: '10px 14px', minWidth: 0, cursor: x ? 'pointer' : 'default', opacity: !x ? 0.55 : on[s.k] ? 1 : 0.5, userSelect: 'none' }}>
+              <div className="flex" style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <i style={{ width: 12, height: 3, borderRadius: 2, background: s.color, display: 'block', flexShrink: 0 }} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{x ? (on[s.k] ? '표시' : '숨김') : ''}</span>
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 800, marginTop: 5, color: s.color, fontVariantNumeric: 'tabular-nums', textAlign: 'center' }}>{x ? valueText(x.cur, s.unit) : '—'}</div>
+              <div style={{ fontSize: 11, marginTop: 5, color: 'var(--text-faint)', textAlign: 'center', overflowWrap: 'anywhere' }}>
+                {x ? `평균 ${valueText(x.avg, s.unit)} · 최대 ${valueText(x.max, s.unit)}` : s.k === 'gpuTemp' ? 'GPU 없음 — 센서 미보고' : s.k === 'cpuPct' ? '보고 없음 — 텔레메트리 미지원 가능' : '보고 없음'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="card" style={{ padding: '16px 18px', minWidth: 0 }}>
+        <div className="flex wrap" style={{ alignItems: 'baseline', gap: 10, marginBottom: 10, minWidth: 0 }}>
+          <b style={{ fontSize: 15, whiteSpace: 'nowrap' }}>🖥️ {srv?.name || serverId}</b>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {[srv?.corpName, srv?.site].filter(Boolean).join(' › ')}{srv?.model ? ` · ${srv.model}` : ''}{data?.serviceTag ? ` · ${data.serviceTag}` : ''}
+          </span>
+          {data && <span className={`badge ${esxi ? 'blue' : 'teal'}`}>{esxi ? 'VM호스트 (ESXi)' : '베어메탈'}</span>}
+          {data?.remote && <span className="badge gray" title="엣지가 수집해 보낸 서버입니다">위임(엣지)</span>}
+          {data && (esxi ? data.host : true) && (
+            <button type="button" style={pill} onClick={() => setModal(esxi ? 'host' : 'idrac')}>{esxi ? '🖧 ESXi 호스트 상세 ›' : '🖥 iDRAC 상세 / 센서 ›'}</button>
+          )}
+          {data && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{kindBasisText(data)}</span>}
+          {srv?.dcSource && DC_SOURCE_TEXT[srv.dcSource] && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{DC_SOURCE_TEXT[srv.dcSource]}</span>}
+        </div>
+
+        <div className="flex wrap" style={{ gap: 6, alignItems: 'center', marginBottom: 10 }}>
+          {PRESETS.map(([k, label]) => (
+            <button key={k} type="button" className={range === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => { setRange(k); setRangeErr(null); }}>{label}</button>
+          ))}
+          <button type="button" className={range === 'custom' ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px', marginTop: 0, borderColor: 'var(--border)' }} onClick={() => setCustomOpen((v) => !v)}>📅 기간 지정</button>
+          {data && (
+            <span className="muted" style={{ fontSize: 12, padding: '0 6px' }}>
+              조회 기간 <b style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{periodText(data.start, data.end)}</b>
+              <span style={{ color: 'var(--text-faint)', marginLeft: 8 }}>집계 {bucketLabel(data.bucketMs)} 평균 · 표본 {pts.length.toLocaleString()}개</span>
+            </span>
+          )}
+          {canCsv() && <button type="button" className="logout-btn" style={{ flex: 'none', padding: '7px 14px', marginLeft: 'auto' }} disabled={!data} onClick={() => setModal('csv')}>⬇ CSV 내보내기</button>}
+        </div>
+
+        {(customOpen || range === 'custom') && (
+          <div className="flex wrap" style={{ gap: 8, marginBottom: 10, alignItems: 'center', fontSize: 12 }}>
+            <span className="muted">기간 지정</span>
+            <input className="input" type="datetime-local" style={{ padding: '5px 8px', width: 'auto', minWidth: 0 }} value={draft.start}
+              min={toLocalInput(Date.now() - keep * DAY)} max={toLocalInput(Date.now())} onChange={(e) => setDraft((d) => ({ ...d, start: e.target.value }))} />
+            <span className="muted">~</span>
+            <input className="input" type="datetime-local" style={{ padding: '5px 8px', width: 'auto', minWidth: 0 }} value={draft.end}
+              min={toLocalInput(Date.now() - keep * DAY)} max={toLocalInput(Date.now())} onChange={(e) => setDraft((d) => ({ ...d, end: e.target.value }))} />
+            <button type="button" className="tab" onClick={applyCustom}>적용</button>
+            {range === 'custom' && <button type="button" className="tab" onClick={() => { setRange('24h'); setCustom(null); setCustomOpen(false); setRangeErr(null); }}>최근으로</button>}
+            {range === 'custom' ? <span className="badge blue">기간 조회</span> : <span className="muted">최근 구간</span>}
+            <span style={{ color: 'var(--text-faint)' }}>보관 {keep}일 · {ymd(Date.now() - keep * DAY)} 이후 조회 가능</span>
+          </div>
+        )}
+        {rangeErr && <div className="banner warn" style={{ marginBottom: 10 }}>{rangeErr}</div>}
+        {err && data && <div className="banner warn" style={{ marginBottom: 10 }}>다시 불러오지 못했습니다({errText(err)}) — 아래는 마지막으로 불러온 추이입니다.</div>}
+        {data?.errors && <div className="banner warn" style={{ marginBottom: 10 }}>일부 계열을 읽지 못했습니다: {Object.keys(data.errors).join(', ')} — 그 계열은 비어 보입니다(0 이 아닙니다).</div>}
+        {empty && <div className="banner" style={{ marginBottom: 10 }}>{empty}</div>}
+
+        <div style={{ height: 340, minWidth: 0 }}>
+          {!data && !err && <Loading label="iDRAC 추이" />}
+          {!data && err && <ErrorBox error={err} />}
+          {data && (
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={pts} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="idracPwrFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.35} /><stop offset="100%" stopColor="#f59e0b" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#243049" />
+                <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} scale="time" stroke="#8b9bb4" fontSize={11} minTickGap={40} tickFormatter={(t) => fmtTick(t, span)} />
+                <YAxis yAxisId="pct" domain={[0, 100]} stroke="#8b9bb4" fontSize={11} width={40} />
+                <YAxis yAxisId="w" orientation="right" domain={[0, pMaxOf(pts)]} stroke="#f59e0b" fontSize={11} width={56} unit=" W" />
+                {gaps.map((g) => <ReferenceArea key={g.x1} yAxisId="pct" x1={g.x1} x2={g.x2} fill="rgba(139,155,180,.10)" strokeOpacity={0} label={{ value: 'iDRAC 무응답 — 값 없음', fill: '#8b9bb4', fontSize: 11, position: 'insideTop' }} />)}
+                {on.cpuPct && st.cpuPct && <ReferenceLine yAxisId="pct" y={WARN_PCT} stroke="#f59e0b" strokeDasharray="5 4" label={{ value: `CPU ${WARN_PCT}% 주의`, fill: '#fbbf24', fontSize: 11, position: 'insideTopLeft' }} />}
+                {on.cpuPct && st.cpuPct && <ReferenceLine yAxisId="pct" y={CRIT_PCT} stroke="#ef4444" strokeDasharray="5 4" label={{ value: `CPU ${CRIT_PCT}% 위험`, fill: '#f87171', fontSize: 11, position: 'insideTopLeft' }} />}
+                <Tooltip contentStyle={tipStyle} labelStyle={{ color: '#8b9bb4' }}
+                  labelFormatter={(t) => `${span >= DAY ? `${ymd(t)} ` : ''}${hm(t)}${data.bucketMs > 60_000 ? ` · ${bucketLabel(data.bucketMs)} 평균` : ''}`}
+                  formatter={(v, name) => { const s = SERIES.find((x) => x.label === name); return [valueText(v, s?.unit || ''), name]; }} />
+                {on.powerW && st.powerW && <Area yAxisId="w" type="monotone" dataKey="powerW" name="소비 전력" stroke="#f59e0b" strokeWidth={2} fill="url(#idracPwrFill)" dot={false} isAnimationActive={false} />}
+                {SERIES.filter((s) => s.axis === 'pct' && on[s.k] && st[s.k]).map((s) => (
+                  <Line key={s.k} yAxisId="pct" type="monotone" dataKey={s.k} name={s.label} stroke={s.color} strokeWidth={2} dot={false} isAnimationActive={false} />
+                ))}
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+        <div className="muted" style={{ fontSize: 11, marginTop: 12, lineHeight: 1.6 }}>
+          왼쪽 축은 CPU 사용률(%) · CPU/GPU 온도(℃) 공통 0~100, 오른쪽 축은 소비 전력(W)입니다. 위 카드를 누르면 계열을 켜고 끕니다.<br />
+          CPU 사용률은 Dell 텔레메트리(SystemUsage)를 보고하는 서버에서만 표시됩니다. GPU 온도는 사용률이 아니라 GPU 가 동작하는지 가늠하는 근거입니다.
+          iDRAC 무응답 구간은 선을 끊고 0 으로 채우지 않습니다. {retentionNote(data)} 기간이 길면 집계 단위(5분 ~ 1일) 평균으로 표시합니다.
+          {data?.firstTs ? ` 이 서버의 첫 적재는 ${ymd(data.firstTs)} ${hm(data.firstTs)} 입니다(그 이전은 비어 있습니다).` : ''}
+        </div>
+      </div>
+
+      {modal === 'host' && data?.host && <HostDetailLoader host={data.host} onClose={() => setModal(null)} />}
+      {modal === 'idrac' && srv && <IdracDetailModal server={{ id: srv.id, name: srv.name, remote: srv.remote, serviceTag: srv.serviceTag, datacenterId: srv.corp }} onClose={() => setModal(null)} />}
+      {modal === 'csv' && (
+        <CsvModal serverId={serverId} serverName={srv?.name || serverId} corp={corp} site={site} siteCount={inSite.length}
+          range={range} custom={custom} on={on} onClose={() => setModal(null)} />
+      )}
+    </>
+  );
+}
+
+/** 서비스태그로 찾은 ESXi 호스트 → 기존 EntityDetail(host). 인벤토리 목록에서 같은 id 를 찾는다(없으면 이유를 말한다). */
+function HostDetailLoader({ host, onClose }) {
+  const [item, setItem] = useState(null); const [e, setE] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    fetchJson('/hosts', { vcenterId: host.vcenterId, q: host.name })
+      .then((d) => {
+        const rows = Array.isArray(d) ? d : (d?.items || d?.hosts || []);
+        const hit = rows.find((h) => h.id === host.id) || rows.find((h) => h.name === host.name);
+        if (!alive) return;
+        if (hit) setItem(hit); else setE(new Error('인벤토리에서 이 호스트를 찾지 못했습니다(권한 범위 밖이거나 방금 사라졌습니다).'));
+      })
+      .catch((x) => { if (alive) setE(x); });
+    return () => { alive = false; };
+  }, [host.id, host.name, host.vcenterId]);
+  if (e) return <Modal title="호스트 상세" onClose={onClose}><ErrorBox error={e} /></Modal>;
+  if (!item) return <Modal title="호스트 상세" onClose={onClose}><Loading /></Modal>;
+  return <EntityDetail type="host" item={item} onClose={onClose} />;
+}
+
+function CsvModal({ serverId, serverName, corp, site, siteCount, range, custom, on, onClose }) {
+  const [scope, setScope] = useState('server');
+  const [r, setR] = useState(range === 'custom' && !custom ? '24h' : range);
+  const [cols, setCols] = useState('all');
+  const [busy, setBusy] = useState(false); const [e, setE] = useState(null);
+  const keys = SERIES.map((s) => s.k).filter((k) => cols === 'all' || on[k]);
+  const opt = (cur, k) => (cur === k ? 'login-btn' : 'tab');
+  const go = async () => {
+    setBusy(true); setE(null);
+    const q = { scope, cols: keys.join(','), ...(scope === 'dc' ? { corp, site } : { id: serverId }), ...(r === 'custom' && custom ? { start: custom.start, end: custom.end } : { range: r }) };
+    const qs = new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)])).toString();
+    try { await downloadFile(`/admin/idrac/trend/export.csv?${qs}`); onClose(); } catch (x) { setE(x); } finally { setBusy(false); }
+  };
+  return (
+    <Modal title="⬇ iDRAC 통합 추이 CSV 내보내기" onClose={onClose} width={560}>
+      <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>범위</div>
+      <div className="flex" style={{ flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+        <button type="button" className={opt(scope, 'server')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('server')}>단일 서버 — {serverName}</button>
+        <button type="button" className={opt(scope, 'dc')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('dc')}>데이터센터 전체 — {site} ({siteCount}대)</button>
+      </div>
+      <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>기간</div>
+      <div className="flex wrap" style={{ gap: 8, marginBottom: 14 }}>
+        {PRESETS.map(([k, label]) => <button key={k} type="button" className={opt(r, k)} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setR(k)}>{label}</button>)}
+        {custom && <button type="button" className={opt(r, 'custom')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setR('custom')}>지정 기간 ({ymd(custom.start)} ~ {ymd(custom.end)})</button>}
+      </div>
+      <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>항목</div>
+      <div className="flex wrap" style={{ gap: 8, marginBottom: 14 }}>
+        <button type="button" className={opt(cols, 'all')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setCols('all')}>전체 4개</button>
+        <button type="button" className={opt(cols, 'shown')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setCols('shown')}>표시 중인 항목만 ({Object.values(on).filter(Boolean).length}개)</button>
+      </div>
+      <div className="banner">
+        열: 법인 · 데이터센터 · 서버 · 서비스태그 · 유형 · 시각 + 측정 {keys.length}개. iDRAC 무응답 구간과 GPU 없는 서버의 GPU 온도는 빈 칸입니다(0 으로 채우지 않음). UTF-8 BOM 포함.
+        {scope === 'dc' && ' 데이터센터 전체는 한 번에 300대까지 담고, 넘으면 뺀 대수를 응답 헤더에 밝힙니다.'}
+      </div>
+      {!keys.length && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--amber)' }}>표시 중인 항목이 없습니다 — ‘전체 4개’ 를 고르세요.</div>}
+      {e && <div style={{ marginTop: 8 }}><ErrorBox error={e} /></div>}
+      <div className="flex" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+        <button type="button" className="tab" onClick={onClose}>취소</button>
+        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px', marginTop: 0 }} disabled={!keys.length || busy} onClick={go}>{busy ? '내보내는 중…' : '⬇ CSV 다운로드'}</button>
+      </div>
+    </Modal>
+  );
+}

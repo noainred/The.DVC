@@ -44,7 +44,7 @@ export const MAX_LABEL = 40;
 export const PRESET = Object.freeze([
   {
     id: 'server', label: '서버', icon: '🖥️',
-    tools: ['fleet', 'hardware', 'serveranalysis', 'serial-lookup', 'esxi', 'esxitemp', 'roomtemp',
+    tools: ['fleet', 'hardware', 'serveranalysis', 'idrac-trend', 'serial-lookup', 'esxi', 'esxitemp', 'roomtemp',
       'powermap', 'pdu', 'gpu', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults',
       'bm-usage', 'corp-usage'],
   },

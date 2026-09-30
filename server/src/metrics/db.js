@@ -103,6 +103,13 @@ function initSqlite() {
     const rawAll = db.prepare('SELECT k, v, ts FROM samples WHERE metric=? AND ts>=? ORDER BY k, ts');
     const carryOne = db.prepare('SELECT v, MAX(ts) AS ts FROM samples WHERE metric=? AND k=? AND ts<? AND ts>=?');
     const rawOne = db.prepare('SELECT v, ts FROM samples WHERE metric=? AND k=? AND ts>=? ORDER BY ts');
+    // v2.660: 끝이 있는 기간 조회(iDRAC 통합 추이의 '기간 지정'). history() 는 '지금까지' 만 받아 과거 구간을 보려면
+    //   지금까지 전부 읽어야 했다. 버킷 수는 호출부가 제한한다(≈400).
+    const bucketRange = db.prepare(`SELECT CAST(ts/? AS INTEGER)*? AS b, AVG(v) avg, MIN(v) min, MAX(v) max FROM samples
+      WHERE metric=? AND k=? AND ts>=? AND ts<? GROUP BY b ORDER BY b`);
+    const bucketHourlyRange = db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max
+      FROM samples_hourly WHERE metric=? AND k=? AND h>=? AND h<? GROUP BY b ORDER BY b`);
+    const rawRange = db.prepare('SELECT v, ts FROM samples WHERE metric=? AND k=? AND ts>=? AND ts<? ORDER BY ts');
     // dead-band 상태(v2.451): `${metric} ${k}` -> 마지막으로 **원본에 저장한** 샘플.
     // 프로세스 메모리에만 둔다 — 재시작하면 각 계열의 첫 샘플이 한 번 더 저장될 뿐이라 안전하다.
     // 크기는 (계열 x 키) 로 유계(호스트 658 + 클러스터/vCenter 집계 수준).
@@ -166,6 +173,31 @@ function initSqlite() {
       deadbandSkipped: () => _skippedTotal,
       latestAll: (metric) => new Map(latestAllCached(metric)), // 기존 계약(매 호출 새 Map) 유지 — 호출부 변형이 캐시를 오염시키지 않게
       history: implHistory,
+      /**
+       * v2.660: [startTs, endTs) 버킷 조회(오름차순). 규칙은 history()·historyStep() 과 같다 —
+       * 1시간 정배수 버킷은 롤업(롤업이 원본만큼 거슬러 올라갈 때), 짧은 버킷의 dead-band 계열은 step 채움.
+       * 끝이 과거면 그 뒤의 실제 샘플로 선을 잇지 않는다(lastActualTs 는 창 안에서만 쓴다).
+       */
+      historyRange: (metric, k, startTs, endTs, bucketMs) => {
+        const mapRow = (r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) });
+        if (bucketMs >= HOUR && bucketMs % HOUR === 0) {
+          const mn = hourlyMin.get(metric, k)?.mn;
+          const rawFirst = mn != null && mn > startTs ? rawMin.get(metric, k)?.mn : null;
+          if (mn != null && (mn <= startTs || rawFirst == null || mn <= rawFirst)) {
+            return bucketHourlyRange.all(bucketMs, bucketMs, metric, k, startTs, endTs).map(mapRow);
+          }
+        }
+        const p = deadbandPolicyOf(metric);
+        if (p && bucketMs < HOUR) {
+          const c = carryOne.get(metric, k, startTs, startTs - p.maxGapMs - STEP_SLACK_MS);
+          const carry = c && c.ts != null ? { v: c.v, ts: c.ts } : null;
+          const rows = rawRange.all(metric, k, startTs, endTs).map((r) => ({ v: r.v, ts: r.ts }));
+          const last = latestOf(metric, k)?.ts ?? null;
+          const lastActualTs = last != null && last < endTs ? last : null;
+          return stepBuckets({ carry, rows, start: startTs, nowTs: endTs - 1, bucketMs, maxGapMs: p.maxGapMs, lastActualTs }).points;
+        }
+        return bucketRange.all(bucketMs, bucketMs, metric, k, startTs, endTs).map(mapRow);
+      },
       /**
        * v2.620(SRV2620-02): dead-band 를 아는 짧은 버킷 조회. 온도 계열은 0.5℃ 미만 변화면 원본을 건너뛰므로
        * (최대 간격 maxGapMs — 기본 30분) 1시간 미만 버킷을 원본에서 그대로 집계하면 안정 구간이 **점 없음**이 된다.
@@ -321,6 +353,15 @@ function initJson() {
     meta: (metric) => { let mn = null, mx = null, n = 0; for (const r of rows) if (r.m === metric) { n++; if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx, count: n }; },
     // SQLite 구현과 같은 API(v2.504) — 호출부가 폴백 여부를 몰라도 되게 한다.
     // v2.620(SRV2620-02): NDJSON 폴백은 dead-band 를 쓰지 않아(전량 저장) step 조회가 곧 일반 조회다 — 같은 API 만 맞춘다.
+    historyRange(metric, k, startTs, endTs, bucketMs) {
+      const acc = new Map();
+      for (const r of rows) if (r.m === metric && r.k === k && r.t >= startTs && r.t < endTs) {
+        const b = Math.floor(r.t / bucketMs) * bucketMs;
+        const g = acc.get(b) || { sum: 0, n: 0, min: Infinity, max: -Infinity };
+        g.sum += r.v; g.n++; g.min = Math.min(g.min, r.v); g.max = Math.max(g.max, r.v); acc.set(b, g);
+      }
+      return [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([b, g]) => ({ ts: b, avg: round1(g.sum / g.n), min: round1(g.min), max: round1(g.max) }));
+    },
     historyStep(metric, k, sinceTs, bucketMs, limit) { const points = this.history(metric, k, sinceTs, bucketMs, limit); return { points, carried: 0, stepped: false, maxGapMs: null, ...historyCut(points, limit, Math.floor(sinceTs / bucketMs) * bucketMs) }; },
     recentAvgStep(metric, sinceTs) { const m = new Map(); for (const [k, a] of this.recentAvg(metric, sinceTs)) m.set(k, { ...a, carried: false }); return m; },
     metaKey: (metric, k) => { let mn = null, mx = null; for (const r of rows) if (r.m === metric && r.k === k) { if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx }; },

@@ -78,8 +78,9 @@ export function remoteSensorView(rs) {
   return {
     remote: true,
     seriesAvailable: false,       // 중앙에 이력이 없다(엣지에만 있음)
-    cpuSynced: false,             // 엣지 export 에 CPU 사용량이 없다
-    latest: { t, cpu: null, temps: clean, fans: {} },
+    // v2.660: 2.660+ 엣지는 CPU 사용량(텔레메트리)을 함께 보낸다 — 없으면 예전처럼 미동기화.
+    cpuSynced: typeof rs.sensors.cpu === 'number',
+    latest: { t, cpu: typeof rs.sensors.cpu === 'number' ? rs.sensors.cpu : null, temps: clean, fans: {} },
     sensors: names,
     fanNames: [],
     samples: [],
