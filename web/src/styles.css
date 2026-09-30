@@ -1254,3 +1254,92 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .idrac-trend-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
 @media (max-width: 1280px) { .idrac-trend-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .idrac-trend-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* v2.669 SAN 스위치 화면(시안 'SAN Switch v2') — 큰 카드 radius 16 · 섹션 제목 mono 12px + ▸ 민트. 대문자 변환 금지(v2.575). */
+.san2-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 18px; margin: 0 0 16px; }
+.san2-head h1 { font-size: 28px; font-weight: 700; margin: 2px 0 6px; letter-spacing: -.01em; }
+.san2-crumb { font-size: 12.5px; color: var(--text-dim); }
+.san2-status { font-family: var(--mono); font-size: 12px; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.san2-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.san2-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.san2-btn { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 9px 14px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; font-family: inherit; }
+.san2-btn:hover:not(:disabled) { border-color: var(--accent); }
+.san2-btn:disabled { opacity: .55; cursor: default; }
+.san2-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.san2-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 24px 28px; margin-bottom: 18px; min-width: 0; }
+.san2-title { font-family: var(--mono); font-size: 12px; letter-spacing: .16em; color: var(--text-dim); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.san2-title::before { content: '▸'; color: var(--mint); letter-spacing: 0; }
+.san2-cap { display: flex; flex-wrap: wrap; gap: 0; padding: 0; overflow: hidden; }
+.san2-cap-main { flex: 2 1 460px; padding: 24px 28px; min-width: 0; }
+.san2-cap-side { flex: 1 1 260px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-left: 1px solid var(--border-soft); min-width: 0; }
+.san2-cap-side > div { padding: 18px 20px; border-bottom: 1px solid var(--border-soft); min-width: 0; }
+.san2-cap-side > div:nth-child(odd) { border-right: 1px solid var(--border-soft); }
+.san2-cap-side .lab { font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em; color: var(--text-dim); }
+.san2-cap-side .val { font-size: 26px; font-weight: 700; margin-top: 4px; }
+.san2-cap-side .meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; overflow-wrap: anywhere; }
+.san2-big { font-size: 52px; font-weight: 700; line-height: 1.05; }
+.san2-bar { height: 12px; border-radius: 999px; background: var(--panel-deep); overflow: hidden; display: flex; margin: 14px 0 10px; }
+.san2-bar > span { height: 100%; }
+.san2-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--text-dim); }
+.san2-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: 1px; }
+.san2-traffic { display: flex; flex-direction: column; gap: 18px; }
+.san2-badge-live { background: rgba(52,224,180,.12); color: var(--mint); font-family: var(--mono); font-size: 11px; letter-spacing: 0; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.san2-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-deep); flex: none; }
+.san2-seg button { background: none; border: 0; color: var(--text-dim); padding: 6px 12px; font-size: 12.5px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.san2-seg button + button { border-left: 1px solid var(--border); }
+.san2-seg button.on { background: var(--mint); color: #04201a; font-weight: 700; }
+.san2-msg { font-size: 22px; font-weight: 600; line-height: 1.4; }
+.san2-msg b { color: var(--mint); font-weight: 700; }
+.san2-sub { font-size: 13.5px; color: var(--text-dim); margin-top: 6px; }
+.san2-tbody { display: flex; flex-wrap: wrap; gap: 18px; }
+.san2-chart { flex: 3 1 520px; min-width: 0; }
+.san2-tside { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.san2-sum3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: var(--panel-deep); border-radius: 12px; overflow: hidden; }
+.san2-sum3 > div { padding: 12px 14px; min-width: 0; }
+.san2-sum3 > div + div { border-left: 1px solid var(--border-soft); }
+.san2-sum3 .lab { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+.san2-sum3 .val { font-size: 16px; font-weight: 700; margin-top: 4px; white-space: nowrap; }
+.san2-sum3 .meta { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+.san2-share { display: grid; grid-template-columns: minmax(0, 72px) minmax(0, 1fr) auto; gap: 6px 10px; align-items: center; font-size: 12.5px; }
+.san2-share .code { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.san2-share .track { height: 6px; border-radius: 999px; background: var(--panel-deep); overflow: hidden; }
+.san2-share .track span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--mint)); }
+.san2-foot { font-size: 11.5px; color: var(--text-faint); line-height: 1.55; }
+.san2-dchead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 4px 2px 10px; }
+.san2-link { background: none; border: 0; color: var(--mint); cursor: pointer; font-size: 13px; font-family: inherit; padding: 2px 0; }
+.san2-link.plain { color: var(--text-dim); text-decoration: underline dotted; text-underline-offset: 3px; }
+.san2-dcgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.san2-dc { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; text-align: left; color: var(--text); cursor: pointer; font-family: inherit; min-width: 0; display: flex; flex-direction: column; gap: 7px; justify-content: flex-start; }
+.san2-dc:hover { border-color: var(--accent); }
+.san2-dc.on { border-color: var(--mint); background: rgba(52,224,180,.08); }
+.san2-dc.down { border-color: var(--red); }
+.san2-dc .top { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; font-weight: 700; min-width: 0; }
+.san2-dc .top span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.san2-dc .top span:last-child { color: var(--text-dim); font-weight: 500; flex: none; }
+.san2-dc .mini { height: 4px; border-radius: 999px; background: var(--panel-deep); overflow: hidden; }
+.san2-dc .mini span { display: block; height: 100%; }
+.san2-dc .bot { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-dim); font-family: var(--mono); }
+.san2-list { padding: 0; overflow: hidden; }
+.san2-listhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 16px 20px; border-bottom: 1px solid var(--border-soft); }
+.san2-listhead h2 { font-size: 16px; font-weight: 700; margin: 0; }
+.san2-hot { background: rgba(245,158,11,.14); color: var(--amber); border: 1px solid rgba(245,158,11,.35); border-radius: 999px; font-size: 11.5px; font-weight: 700; padding: 1px 9px; white-space: nowrap; }
+.san2-listtools { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.san2-table td:first-child { position: relative; }
+.san2-table tr[data-mark] td:first-child { box-shadow: inset 2px 0 0 var(--row-mark); }
+.san2-ubar { height: 5px; border-radius: 999px; background: var(--panel-deep); overflow: hidden; margin: 4px 0 2px; min-width: 90px; }
+.san2-ubar span { display: block; height: 100%; }
+.san2-ghost { background: none; border: 1px solid transparent; color: var(--text-dim); border-radius: 6px; padding: 3px 8px; font-size: 12px; cursor: pointer; font-family: inherit; }
+.san2-ghost:hover:not(:disabled) { border-color: var(--border); color: var(--text); }
+.san2-ghost.danger:hover:not(:disabled) { color: var(--red); border-color: rgba(239,68,68,.45); }
+.san2-ghost:disabled { opacity: .5; cursor: default; }
+.san2-pill { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 8px; white-space: nowrap; border: 1px solid var(--border); color: var(--text-dim); }
+.san2-pill.edge { color: var(--accent-2); border-color: rgba(34,211,238,.35); }
+@media (max-width: 720px) {
+  .san2-card { padding: 18px 16px; }
+  .san2-cap-main { padding: 18px 16px; }
+  .san2-cap-side { border-left: 0; border-top: 1px solid var(--border-soft); }
+  .san2-big { font-size: 40px; }
+  .san2-msg { font-size: 18px; }
+  .san2-head h1 { font-size: 23px; }
+  .san2-listtools { margin-left: 0; }
+}
