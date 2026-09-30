@@ -95,3 +95,53 @@ export function activityBar(a) {
 
 /** 출처 표기 — 'ESXi' / '게스트' / ''. */
 export const srcText = (s) => (s === 'esxi' ? 'ESXi' : s === 'guest' ? '게스트' : '');
+
+/**
+ * v2.658 '수집 점검' 창(사용자 요청 "외 22건 말고 전체 메시지를 법인별로 클릭해서 분류해서 볼 수 있게").
+ * 배너는 켜진 GPU VM 을 한 대도 못 읽은 원인만 앞 6줄을 보여 준다 — 이 창은 **전부**(일부만 수집 포함)를
+ * vCenter(법인) 단위로 묶고, 그 법인에서 값이 빈 호스트를 한 줄씩 보여 준다. 판정은 서버가 준 guestWhy 그대로다.
+ * @param {object[]} guestWhy 서버 응답의 vCenter × 사유 목록
+ * @param {object[]} items 서버 응답의 호스트 목록(guestWhy·utilPct·memUsed*·tempC·vmsUnread 포함)
+ */
+export function collectCheckGroups(guestWhy, items) {
+  const by = new Map();
+  const get = (vc) => by.get(vc) || by.set(vc, { vcenterId: vc, hosts: 0, vms: 0, full: 0, partial: 0, entries: [], hostRows: [] }).get(vc);
+  for (const x of Array.isArray(guestWhy) ? guestWhy : []) {
+    if (!x || !x.code) continue;
+    const g = get(String(x.vcenterId ?? ''));
+    const t = WHY_TEXT[x.code] || WHY_TEXT.unknown;
+    const hosts = Math.max(0, numOrNull(x.hosts) ?? 0);
+    g.hosts += hosts; g.vms += Math.max(0, numOrNull(x.vms) ?? 0);
+    if (x.code === 'partial') g.partial += hosts; else g.full += hosts;
+    g.entries.push({
+      key: `${x.vcenterId}|${x.code}`, code: x.code, partial: x.code === 'partial',
+      short: t.short, fix: t.fix, agent: x.agent || null, hosts, vms: numOrNull(x.vms) ?? 0,
+      detail: missingText(x),
+    });
+  }
+  for (const h of Array.isArray(items) ? items : []) {
+    if (!h || !h.guestWhy || !h.guestWhy.code) continue;
+    const g = get(String(h.vcenterId ?? ''));
+    const chip = whyChip(h.guestWhy);
+    g.hostRows.push({
+      key: h.id || `${h.vcenterId}|${h.host}`, host: h.host || '', model: h.model || '', count: numOrNull(h.count),
+      why: chip ? chip.short : '', whyTitle: chip ? chip.title : '', partial: h.guestWhy.code === 'partial',
+      vmsUnread: numOrNull(h.vmsUnread) ?? 0,
+      util: h.utilPct != null, mem: h.memUsedMB != null || h.memUsedPct != null, temp: h.tempC != null,
+      utilSrc: h.utilSource || null, memSrc: h.memSource || null, tempSrc: h.tempSource || null,
+    });
+  }
+  const groups = [...by.values()];
+  for (const g of groups) {
+    g.entries.sort((a, b) => Number(a.partial) - Number(b.partial) || b.hosts - a.hosts);
+    g.hostRows.sort((a, b) => Number(a.partial) - Number(b.partial) || b.vmsUnread - a.vmsUnread || a.host.localeCompare(b.host));
+  }
+  groups.sort((a, b) => b.full - a.full || b.hosts - a.hosts || a.vcenterId.localeCompare(b.vcenterId));
+  return groups;
+}
+
+/** 호스트 한 줄의 값 칸 — 읽었으면 출처, 못 읽었으면 '못 읽음'. */
+export function readCell(ok, src) {
+  if (!ok) return { text: '못 읽음', bad: true };
+  return { text: src === 'esxi' ? '읽음(ESXi)' : src === 'guest' ? '읽음(게스트)' : '읽음', bad: false };
+}

@@ -3827,6 +3827,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     할당률 분모 = GPU 마다 `max(보고값, 모델 명목값)` — 모델을 모르면 보고값(명목을 지어내지 않는다). **메모리 사용 분모(`capacityGB`)는 보고값 그대로**다(두 분모를
     섞지 말 것). 보고값이 작은 이유(예약분)는 추정이다. 배너 한 줄(vCenter × 사유)에 `missing{util,mem,temp,alloc,all}`(호스트 대수) — 할당은 게스트가 아니라
     vCenter 프로파일에서 오므로 따로 말한다. 100% 초과 툴팁은 '실제 초과' 라 단정하지 않는다(vGPU 는 프레임버퍼를 넘겨 줄 수 없다 — 해석·추정 어긋남 가능).
+  - **GPU '수집 점검' 창(v2.658)은 배너와 같은 판정(guestWhy)을 법인별로 전부 보여 준다**(`gpuWhyText.collectCheckGroups`·`readCell` +
+    `GpuTool.jsx GpuCollectCheckModal`, 사용자 요청 "외 22건 말고 전체를 법인별로 클릭해서"): 배너는 앞 6줄 + '외 N건'(누르면 이 창)이고, 창은 '일부만 수집'
+    까지 싣는다. 법인 칩으로 거르고 호스트 줄은 값마다 읽음(출처)/못 읽음을 적는다. 새 조회를 만들지 않는다(이미 받은 /tools/gpu 응답만).
   - **CVP Overview EOS 버전 패널은 버전 순(최신 먼저)이다**(v2.657, `cvpOverviewText.versionList`·`cmpEosVersion` — 재사용 Collator numeric): 예전 '갈린 버전 먼저 → 대수' 순은
     사용자 요청으로 바꿨다. '버전 갈림' 은 태그로만 남는다 · 상한 12 · 넘치면 생략 개수를 적는다.
   - **GPU 추이 창은 수집 공백을 잇지 않는다**(v2.656, `GpuHistModal.gapRows`): 간격이 `max(버킷, 수집 주기) × 2` 를 넘으면 null 행을 끼워 선을 끊고
