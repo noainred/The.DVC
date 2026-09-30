@@ -108,7 +108,7 @@ export function registerOverviewCards(api) {
         const p = await powerTotal();
         power = { totalWatts: p.totalWatts, servers: { watts: p.servers.watts, measured: p.servers.measured },
           network: { watts: p.network.watts, measured: p.network.measured, devices: p.network.devices },
-          storage: { watts: p.storage.watts, measured: p.storage.measured, devices: p.storage.devices, unsupported: p.storage.unsupported },
+          storage: { watts: p.storage.watts, measured: p.storage.measured, devices: p.storage.devices, unsupported: p.storage.unsupported, unread: p.storage.unread },
           errors: p.errors };
       }
       return {
@@ -126,6 +126,12 @@ export function registerOverviewCards(api) {
   });
 
   api.get('/tools/power-total', toolsPerm, fullScopeOnly, async (req, res) => {
-    await memoJson(req, res, 'powerTotal', async () => ({ ok: true, ...(await powerTotal()) }), { ttlMs: 20_000 });
+    // v2.667: 못 읽은 스토리지의 세부(오류 원문)는 관리 주소를 담을 수 있다 — admin 에게만(operator 는 tools 를 기본 보유).
+    const admin = req.user?.role === 'admin';
+    await memoJson(req, res, 'powerTotal', async () => {
+      const out = await powerTotal();
+      if (!admin) out.storage = { ...out.storage, issues: out.storage.issues.map(({ detail, ...x }) => ({ ...x, detailHidden: !!detail })) };
+      return { ok: true, ...out };
+    }, { ttlMs: 20_000, extraKey: admin ? 'admin' : 'user' });
   });
 }

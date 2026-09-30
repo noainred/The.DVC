@@ -18,6 +18,8 @@ import { emptySnapshot } from '../types.js';
 // v2.513: 전송 계층 실패(`fetch failed`·`aborted`)를 행동 가능한 사유로 — restCommon 과 같은 규약.
 import { describeFetchError, isTransportError } from './netError.js';
 import { healthWord } from '../healthWord.js'; // v2.586 — 노드 상태 판정 단일 소스
+import { powerResult, powerProbe } from '../power.js';
+import { pickIsiPowerKey, keyNamesOfRest, isiPowerFromStats, cachedIsiPowerKey, rememberIsiPowerKey } from './isilonPower.js';
 
 /** 초당 바이트 → 초당 비트(v2.599 C2599-01). null·비유한값은 null(0 으로 채우면 '트래픽 없음' 거짓). */
 export function bytesRateToBps(v) {
@@ -200,6 +202,27 @@ export function normalizeIsilon(device, raw) {
   return snap;
 }
 
+/** OneFS REST 전원(v2.667) — 통계 키 탐색(6시간 캐시) → 그 키 하나의 현재값을 노드별로 합산. */
+async function collectIsilonRestPower(device, extra) {
+  const source = 'OneFS statistics(전원 키 탐색)';
+  try {
+    let c = cachedIsiPowerKey(device.host);
+    if (!c) {
+      const body = await get(device, '/platform/1/statistics/keys?queryable=true');
+      rememberIsiPowerKey(device.host, pickIsiPowerKey(keyNamesOfRest(body)));
+      c = cachedIsiPowerKey(device.host);
+    }
+    if (!c?.key) { extra.powerProbe = powerProbe('no-field', { source, detail: '통계 키 목록에 전원 키가 없습니다' }); return; }
+    const st = await get(device, `/platform/1/statistics/current?key=${encodeURIComponent(c.key)}&devid=all`);
+    const p = isiPowerFromStats(st, c.key);
+    const r = p ? powerResult({ watts: p.watts, source: `OneFS statistics ${c.key}`, basis: 'input', scope: p.nodes ? 'node' : 'system', parts: p.parts, keys: [c.key] }) : null;
+    if (r) extra.power = r;
+    else extra.powerProbe = powerProbe('no-field', { source, detail: `${c.key} 값을 읽지 못했습니다`, seenKeys: c.seen });
+  } catch (e) {
+    extra.powerProbe = powerProbe('request-failed', { source, detail: e?.message || String(e) });
+  }
+}
+
 export async function collect(device, { signal = null } = {}) {
   // v2.605(TIM2605-02): 폴러·연결 테스트가 넘기는 opts.signal 도 받는다 — get() 은 device._signal 을 읽으므로
   //   _signal 없이 opts 로만 온 신호를 거기에 싣는다(형제 unity·powerstore 와 같은 계약).
@@ -238,6 +261,8 @@ export async function collect(device, { signal = null } = {}) {
   await trySection('pools', () => getAny(device, ['/platform/1/storagepool/storagepools', '/platform/1/storagepool/nodepools']));
   await trySection('events', () => getAny(device, ['/platform/3/event/eventgroup-occurrences?resolved=false&limit=1', '/platform/1/event/events?resolved=false&limit=1']));
   const out = normalizeIsilon(device, raw);
+  // v2.667 — 전원(부가 정보 — 실패해도 섹션 오류로 만들지 않는다).
+  await collectIsilonRestPower(device, out.extra);
   // normalize 가 만든 sections 위에, 시도 단계에서 기록한 오류 문구를 보존(덮어쓰기 방지).
   for (const [k, v] of Object.entries(snap.sections)) if (String(v).startsWith('오류')) out.sections[k] = v;
   if (!out.ok && !out.error) out.error = out.sections.config !== 'ok' ? String(out.sections.config) : '수집 실패(섹션 오류 참조)';

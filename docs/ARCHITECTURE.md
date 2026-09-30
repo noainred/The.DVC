@@ -118,7 +118,7 @@
 | `perf/` | 6 | 1,218 | `perf/monitor.js` (13) | perf/monitor.js — 서버 성능 측정기(v2.498). 요청 지연·이벤트 루프 정체·진행 중 요청을 **상시 O(1)** |
 | `ping/` | 4 | 762 | `ping/db.js` (2) | Ping 모니터링 시계열 저장소 — 등록 대상별 RTT/도달성 샘플을 별도 SQLite에 보관한다. |
 | `portalcheck/` | 7 | 2,222 | `portalcheck/archScan.js` (2) | portalcheck/archScan.js — 특수 기능 › 포탈 점검 › **아키텍처 점검**(v2.614) 판정 코어. |
-| `power/` | 1 | 113 | `power/total.js` (1) | power/total.js — 전체 소비 전력 합산(v2.664, **순수 모듈** — 테스트로 고정). |
+| `power/` | 1 | 134 | `power/total.js` (1) | power/total.js — 전체 소비 전력 합산(v2.664, **순수 모듈** — 테스트로 고정). |
 | `provision/` | 6 | 865 | `provision/jobs.js` (2) | VM provisioning job engine. Holds deployment jobs in memory and runs them |
 | `proxy/` | 10 | 1,808 | `proxy/sshExec.js` (23) | Small SSH helper built on ssh2: connect, run commands, and upload files via |
 | `publicapi/` | 5 | 750 | `publicapi/allowlist.js` (2) | 외부 공개 API 의 허용 목록 카탈로그 (v2.562) — **순수 모듈**. 판정은 이 파일 하나가 소유한다. |
@@ -126,23 +126,23 @@
 | `relaytopo/` | 4 | 672 | `relaytopo/store.js` (3) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
 | `reports/` | 8 | 865 | `reports/dailyReport.js` (3) | 일일 헬스체크 리포트 발송 스케줄러 — 매일 지정 시각(HH:MM)에 computeHealthReport 결과를 |
 | `rma/` | 14 | 2,615 | `rma/jobs.js` (6) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
-| `routes/` | 92 | 24,977 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
+| `routes/` | 92 | 24,983 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
 | `sanswitch/` | 26 | 5,972 | `sanswitch/registry.js` (7) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 1 | 152 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
 | `security/` | 16 | 2,885 | `security/secretVault.js` (28) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
-| `storage/` | 38 | 7,227 | `storage/registry.js` (10) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
+| `storage/` | 40 | 7,654 | `storage/registry.js` (10) | storage/registry.js — 스토리지 장비 등록부(v2.302). |
 | `svcmon/` | 17 | 5,503 | `svcmon/store.js` (10) | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). |
 | `system/` | 2 | 298 | `system/nfsMounts.js` (3) | system/nfsMounts.js — Edge 노드 NFS 마운트 관리(v2.299). |
 | `toolcats/` | 2 | 215 | `toolcats/catalog.js` (2) | toolcats/catalog.js — 특수 기능 카테고리 분류 (순수 모듈, v2.455). |
 | `tools/` | 13 | 2,267 | `tools/powerOffPoller.js` (3) | tools/powerOffPoller.js — 전원 꺼짐 점검기(v2.484). 설정 주기(기본 6시간)마다 스냅샷의 꺼진 VM 을 |
 | `upgrade/` | 9 | 1,312 | `upgrade/manager.js` (6) | Orchestrates the auto-upgrade feature for the running portal: tracks the last |
-| `util/` | 70 | 6,034 | `util/numOrNull.js` (96) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
+| `util/` | 70 | 6,034 | `util/numOrNull.js` (97) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
 | `vcenter/` | 11 | 3,643 | `vcenter/registry.js` (20) | vCenter registry — read/write the managed list of vCenters in |
 | `vmclone/` | 4 | 632 | `vmclone/scheduler.js` (3) | vmclone/scheduler.js — 복제 잡 스케줄러(v2.299). |
 | `vmseries/` | 9 | 1,247 | `vmseries/poller.js` (3) | vmseries/poller.js — 실시간 스파이크 주기 수집(v2.510). 기본 50분(사용자 결정), 설정에서 변경. |
 | `vmtrack/` | 4 | 1,380 | `vmtrack/db.js` (3) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
 
-디렉터리 65개 · 파일 754개 · 145,544줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 65개 · 파일 756개 · 145,998줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

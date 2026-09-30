@@ -13,6 +13,7 @@
  *   섹션별 성공/오류가 상세 모달에 그대로 표시되므로 첫 연결에서 확인·보정한다.
  *   401 은 즉시 중단(장비 계정 잠금 예방 — isilon/powerstore 와 동일 규칙). 조회(GET) 전용.
  */
+import { applyScannedPower, powerProbe } from '../power.js';
 import { emptySnapshot } from '../types.js';
 import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
 import { makeGetter, tryAny } from './restCommon.js';
@@ -97,11 +98,24 @@ export function normalizeXtremio(device, raw) {
     snap.accounts = raw.users.slice(0, 200).map((u) => ({ name: u.name || '', enabled: true, role: u.role || undefined }));
     snap.sections.accounts = 'ok';
   }
+  applyXtremioPower(snap.extra, raw);
   if (raw.alertCount != null) { snap.alerts.unresolved = Number(raw.alertCount) || 0; snap.sections.alerts = 'ok'; }
   snap.extra.collectMethod = 'api';
   snap.ok = snap.sections.config === 'ok' || snap.sections.capacity === 'ok';
   if (!snap.ok && !snap.error) snap.error = '수집 실패(섹션 오류 참조)';
   return snap;
+}
+
+/** XtremIO 전원(v2.667) — 스토리지 컨트롤러 전원공급장치 목록을 훑는다.
+ *  ⚠ XMS 응답의 전력 필드 이름은 **실장비로 확인하지 못했다** — 못 찾으면 응답의 키를 seenKeys 로 싣는다. */
+export const XTREMIO_POWER_PATHS = ['/api/json/v3/types/storage-controller-psus?full=1', '/api/json/v2/types/storage-controller-psus?full=1'];
+export function applyXtremioPower(extra, raw) {
+  const source = 'XMS REST storage-controller-psus';
+  if (raw.psuErr) { extra.powerProbe = powerProbe('request-failed', { source, detail: raw.psuErr }); return; }
+  if (!raw.psus) return;
+  const list = raw.psus['storage-controller-psus'] || raw.psus;
+  if (Array.isArray(list) && !list.length) { extra.powerProbe = powerProbe('no-field', { source, detail: '전원공급장치 항목이 0개입니다' }); return; }
+  applyScannedPower(extra, list, { source, scope: 'psu' });
 }
 
 export async function collect(device, { signal = null } = {}) {
@@ -168,6 +182,9 @@ export async function collect(device, { signal = null } = {}) {
       return (r?.alerts || []).length;
     });
     raw.alertCount = raw.alerts; delete raw.alerts;
+    // v2.667 — 전원(부가 정보 — 실패해도 섹션 오류로 만들지 않는다).
+    try { raw.psus = await tryAny(get, XTREMIO_POWER_PATHS); }
+    catch (e) { if (/401/.test(e.message)) throw e; raw.psuErr = String(e.message || e).slice(0, 200); }
   } catch (e) {
     const out = normalizeXtremio(device, raw);
     out.error = e.message;

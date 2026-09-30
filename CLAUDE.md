@@ -3932,6 +3932,21 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       고정한다. 합계는 **DPE 만**(확장 DAE 없음). v2.542 '이 경로에서 spinfo 를 부르지 않는다' 는 이 항목 하나만 예외(테스트 고정).
     · 카드 수치는 등록부·스냅샷 조합(장비 왕복 0). 범위 계정에는 vCenter 축이 없는 값(Agent·스토리지·CVP·전력)을 null + 사유. 가상 서버 수는 롤업과 같은 기준(템플릿 포함).
     · 예전 한 줄 KPI 자동 숨김(kpisRef)은 지웠다 — 8장을 다 보여야 한다(`.ov-cards8` 4열 → 900px 이하 2열).
+  - ⚠⚠ **스토리지 소비 전력(v2.667) — 경로 표는 `storage/power.js POWER_PATHS` 하나이고, 못 읽은 장비는 사유별로 센다**
+    (사용자 요청 "스토리지가 안나오는데, 모든 스토리지의 수집하는 파싱값에서 소비전력 추가로 수집" — 화면이 '측정 0/79 · 못 읽음 18 · 경로 없음 61'.
+    회귀 `server/test/storagePower2667.test.js` 10건 — 변이 7종 중 6종 검출, 살아남은 1종은 중복 코드라 지웠다):
+    · 수집기는 `extra.power`(읽음 — watts·source·basis·scope) 또는 `extra.powerProbe`(시도했지만 못 읽음 — reason·source·detail·seenKeys)를 싣는다.
+      합산(`power/total.js`)은 경로가 있는데 둘 다 없으면 `not-reported`(구버전 수집기·다음 주기 전), 스냅샷 없음·수집 실패도 따로 센다(`unreadBy`).
+    · 경로: Unity SSH(svc_diag + **FRU 상태줄 `psN: OK W` 대체** — 요약 구획이 없을 때) · Unity REST(`system.currentPower`, 별도 요청) ·
+      PowerStore(`hardware` Power_Supply `extra_details`) · XtremIO(`storage-controller-psus`) · Isilon REST·SSH(통계 키 목록에서 전원 키 **하나**를 탐색 —
+      6시간 캐시 · 노드 합, 클러스터 행과 더하지 않음) · PowerMax/VMAX(이미 받은 어레이 상세 응답을 훑는다 — 왕복 0).
+      VPLEX/Metro Node·PowerStore/XtremIO/VPLEX 의 SSH 방식은 '경로 없음'(`NO_PATH_REASON`). 방식 기본값은 `normalizeCollectMethod`(Isilon = ssh).
+    · ⚠⚠ **Unity SSH 외 전원 필드 이름은 실장비 미확인(정직 기록)** — 그래서 이름을 굳히지 않고 `powerKeyKind` 패턴으로 찾는다. 평균·최대·정격·임계·퍼센트·
+      상태 이름은 전력이 아니다. 한 응답에 시스템 합계와 부품 값이 함께 있으면 **시스템 합계 하나**(이중 계수 금지) · 같은 층에 이름이 여럿이면 가장 흔한
+      이름 하나. 못 찾으면 `seenKeys`(응답에 있던 키 40개)를 화면이 보여 준다 — 첫 실수집에서 그것을 보고 좁힐 것.
+    · Isilon 키는 `[\w.]+` 만 통과한다(`pickIsiPowerKey`) — SSH 명령에 그대로 들어가므로 이 필터를 지우지 말 것.
+    · 화면: 전체 소비 전력 스토리지 탭에 못 읽은 장비 표(상한 200, `issuesOmitted`) · 사유 문구는 웹 `STORAGE_POWER_REASON`(서버 사유 코드와 1:1 — 웹 테스트 대조).
+      **오류 원문(detail)은 admin 에게만**(관리 주소가 들어간다 — operator 는 tools 기본 보유) · memoJson extraKey 에 역할.
   - **CVP Overview EOS 버전 패널은 버전 순(최신 먼저)이다**(v2.657, `cvpOverviewText.versionList`·`cmpEosVersion` — 재사용 Collator numeric): 예전 '갈린 버전 먼저 → 대수' 순은
     사용자 요청으로 바꿨다. '버전 갈림' 은 태그로만 남는다 · 상한 12 · 넘치면 생략 개수를 적는다.
   - **GPU 추이 창은 수집 공백을 잇지 않는다**(v2.656, `GpuHistModal.gapRows`): 간격이 `max(버킷, 수집 주기) × 2` 를 넘으면 null 행을 끼워 선을 끊고
