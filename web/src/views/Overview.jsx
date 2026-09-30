@@ -12,6 +12,7 @@ import { unitText } from './unitText.js'; // v2.583: 미배치 물리 서버 행
 import { storageUsageUnknownNote } from './vcCardText.js'; // v2.621(감사 WEB-03)
 import { recentAlarms, alarmPanelText } from './overviewAlarmsText.js'; // v2.631(감사 WEB2631-02)
 import { corpSiteStatus } from './corpSiteStatus.js'; // v2.631(감사 WEB2631-03)
+import { countText, capText, kwText, cardMeta } from './overviewCardsText.js'; // v2.664 카드 8장
 
 const REGION_COLORS = { '아시아': '#22d3ee', '중국': '#ef4444', '유럽': '#a855f7', '북미': '#3b82f6', Unknown: '#64748b' };
 
@@ -20,27 +21,9 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   // v2.631(감사 WEB2631-02): inv.alarms 권한이 없으면 부르지 않는다(403 을 만들고 '활성 알람이 없습니다' 라 말하던 것).
   const canAlarms = can('inv.alarms');
   const { data: alarmData, error: alarmError, errorInfo: alarmDenied } = usePolling(canAlarms ? '/alarms' : null, { severity: undefined }, 15_000);
+  // v2.664: 카드 8장(등록부·스냅샷 조합 — 서버 20초 캐시). 1분 주기면 충분하다(수량·용량은 천천히 변한다).
+  const { data: cards, error: cardsErr } = usePolling('/overview/cards', {}, 60_000);
 
-
-  // 글로벌 현황 KPI를 '1줄'로 유지 — 한 줄에 안 들어가 둘째 줄로 넘어간 박스는 통째로 숨긴다(부분 잘림 없음).
-  const kpisRef = useRef(null);
-  useLayoutEffect(() => {
-    const el = kpisRef.current;
-    if (!el) return undefined;
-    let lastW = -1;
-    const recompute = () => {
-      const kids = Array.from(el.children);
-      if (!kids.length) return;
-      kids.forEach((k) => { k.style.display = ''; });
-      const top0 = kids[0].offsetTop;
-      kids.forEach((k) => { if (k.offsetTop > top0) k.style.display = 'none'; });
-    };
-    recompute();
-    lastW = el.clientWidth;
-    const ro = new ResizeObserver(() => { const w = el.clientWidth; if (w === lastW) return; lastW = w; recompute(); });
-    ro.observe(el);
-    return () => ro.disconnect();
-  });
 
   if (loading && !ov) return <Loading />;
   // 데이터가 이미 있으면 일시적 폴링 실패 1건으로 대시보드 전체를 오류 화면으로 갈아치우지 않는다
@@ -165,38 +148,20 @@ export default function Overview({ onSelectSite, onGotoTab }) {
           <span style={{ color: 'var(--mint)' }}>LIVE</span>
         </div>
       </div>
-      <div className="kpis" ref={kpisRef} title="한 줄에 안 들어가는 KPI는 자동으로 숨겨집니다(창을 넓히면 더 보입니다).">
-        <Kpi label="vCenter" value={`${g.vcentersConnected}/${g.vcenters}`}
-          meta={vcStatusMeta(g)}
-          accent="var(--accent-2)" onClick={() => onGotoTab?.('vcenters')} />
-        <Kpi label="ESXi 호스트" value={fmt(g.hosts)} meta={`정상 ${g.hostsConnected} · 점검 ${g.hostsMaintenance} · 끊김 ${g.hostsDisconnected}`} onClick={() => onGotoTab?.('hosts')} />
-        <Kpi label="가상머신" value={fmt(g.vms)} meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`} accent="var(--green)" onClick={() => onGotoTab?.('vms')} />
-        {/* v2.486: 사용률(%)은 vCenter(ESXi 호스트) 실측이고, 두 번째 줄은 iDRAC 가 인식한 모든 물리 서버(베어메탈 포함)의
-            코어·메모리 합계 — 출처가 달라 나란히 표기한다(물리 합계로 %를 다시 계산하지 않음: 베어메탈은 사용률 자료가 없다). */}
-        <Kpi label="CPU 사용률" value={unitText(cpuPct, '%')} pct={cpuPct ?? undefined} meta={<>
-          {g.cpuUsedGhz} / {g.cpuTotalGhz} GHz · ESXi {fmt(g.cpuCores)} cores
-          {(g.hostsUsageExcluded ?? g.hostsDisconnected) > 0 && <span title="연결이 끊긴 호스트는 사용량을 알 수 없어 사용률 계산에서 뺐습니다(용량 합계에는 포함)"> · 끊긴 호스트 {fmt(g.hostsUsageExcluded ?? g.hostsDisconnected)}대 사용률 제외</span>}
-          {ov.physical?.servers > 0 && <><br />물리 서버 코어 <b>{fmt(ov.physical.cores)}</b> · iDRAC {fmt(ov.physical.servers)}대{ov.physical.withCores < ov.physical.servers ? ` (코어 정보 ${fmt(ov.physical.withCores)}대)` : ''}</>}
-        </>} />
-        <Kpi label="메모리 사용률" value={unitText(memPct, '%')} pct={memPct ?? undefined} meta={<>
-          {fmt(g.memUsedGB)} / {fmt(g.memTotalGB)} GB (ESXi){(g.hostsUsageExcluded ?? g.hostsDisconnected) > 0 ? ` · 끊긴 호스트 ${fmt(g.hostsUsageExcluded ?? g.hostsDisconnected)}대 사용률 제외` : ''}
-          {ov.physical?.servers > 0 && <><br />물리 메모리 <b>{fmt(ov.physical.memGB)}</b> GB · iDRAC {fmt(ov.physical.servers)}대{ov.physical.withMemory < ov.physical.servers ? ` (메모리 정보 ${fmt(ov.physical.withMemory)}대)` : ''}</>}
-        </>} />
-        {/* v2.621(감사 WEB-03): 사용량 미상 DS 는 서버가 용량·사용량 합계에서 뺐다 — 개수를 말하지 않으면 합계가 전체 DS 의 합으로 읽힌다. */}
-        <Kpi label="스토리지 사용률" value={unitText(stoPct, '%')} pct={stoPct ?? undefined} meta={<>
-          {`${g.storageUsedTB} / ${g.storageTotalTB} TB · ${g.datastores} DS`}
-          {storageUsageUnknownNote(g) && <><br />{storageUsageUnknownNote(g)}</>}
-        </>} onClick={() => onGotoTab?.('datastores')} />
-        {g.powerReporting > 0 && (
-          <Kpi label="총 소비전력" value={`${fmt(g.powerKw)} kW`} accent="var(--amber)"
-            meta={g.powerRegistered != null && g.powerRegistered !== g.powerReporting
-              ? `전력 보고 ${fmt(g.powerReporting)}대 / 등록 ${fmt(g.powerRegistered)}대`
-              : `전력 보고 ${fmt(g.powerReporting)}대 합계`}
-            onClick={() => { window.location.hash = '#/tools/insights-hub'; }} />
-        )}
-        <Kpi label="GPU 카드 수량" value={fmt(ov.gpuCards)} accent="var(--accent-2)" meta="설치된 GPU 장수" onClick={() => onGotoTab?.('tools')} />
-        <Kpi label="GPU 사용 VM 수량" value={fmt(ov.gpuVms)} accent="var(--green)" meta="GPU 할당된 VM 수" onClick={() => onGotoTab?.('tools')} />
+      {/* v2.664(사용자 요청): 카드 8장 — 데이터센터·서버 Farm·물리 서버·가상 서버·GPU·스토리지 용량·네트워크 장비·소비 전력.
+          값은 서버 /overview/cards 가 이미 가진 등록부·스냅샷만 조합한다(장비 왕복 0). 못 읽은 값은 '—'(0 이 아니다).
+          예전 한 줄 KPI 는 넘치는 카드를 숨겼는데, 8장을 다 보여야 하므로 4열 격자(좁으면 2열)로 둔다. */}
+      <div className="ov-cards8">
+        <Kpi label="데이터센터" value={countText(cards?.datacenters?.count)} meta={cardMeta('datacenters', cards)} accent="var(--accent-2)" title="설정 › DataCenter 등록 수" />
+        <Kpi label="서버 Farm" value={countText(cards?.farms?.count)} meta={cardMeta('farms', cards)} accent="var(--accent-2)" title="설정 › 수집 Agent 등록 수" />
+        <Kpi label="물리 서버" value={countText(cards?.physical?.count)} meta={cardMeta('physical', cards)} accent="var(--accent)" onClick={() => { window.location.hash = '#/tools/serveranalysis/info'; }} />
+        <Kpi label="가상 서버" value={countText(cards?.virtual?.count ?? g.vms)} meta={<>{cards ? cardMeta('virtual', cards) : `구동중 ${fmt(g.vmsPoweredOn)}`}{vcStatusMeta(g) && <><br />vCenter {g.vcentersConnected}/{g.vcenters} · {vcStatusMeta(g)}</>}</>} accent="var(--green)" onClick={() => onGotoTab?.('vcenters')} />
+        <Kpi label="GPU" value={countText(cards?.gpus?.count)} unit={cards?.gpus?.count != null ? '장' : undefined} meta={cardMeta('gpus', cards)} accent="var(--accent-2)" onClick={() => { window.location.hash = '#/tools/serveranalysis/gpu'; }} />
+        <Kpi label="스토리지 용량" value={capText(cards?.storage?.totalBytes)} meta={cardMeta('storage', cards)} accent="var(--accent)" onClick={cards?.storage?.reason ? undefined : () => { window.location.hash = '#/tools/storage-mon'; }} />
+        <Kpi label="네트워크 장비" value={countText(cards?.network?.count)} meta={cardMeta('network', cards)} accent="var(--green)" onClick={cards?.network?.reason ? undefined : () => { window.location.hash = '#/tools/cvp'; }} />
+        <Kpi label="소비 전력" value={kwText(cards?.power?.totalWatts)} meta={cardMeta('power', cards)} accent="var(--amber)" onClick={cards?.power?.reason ? undefined : () => { window.location.hash = '#/tools/power-total'; }} />
       </div>
+      {cardsErr && !cards && <div className="banner" style={{ marginBottom: 10 }}>카드 값을 불러오지 못했습니다: {String(cardsErr)}</div>}
 
       {/* v2.526(사용자 요청 "overview 에서 지도 없애줘"): 세계 지도를 제거했다.
           ⚠ `components/WorldMap.jsx` 자체는 지우지 않는다 — 관제 콘솔(`console/pages/ConsoleOverview.jsx`)이

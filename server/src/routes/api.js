@@ -4,6 +4,7 @@ import { authDisabledRole } from '../auth/auth.js';
 import { toolGate, exactToolAccessIssue } from '../auth/toolAccess.js';
 import { registerVmMetrics } from './api/vmMetrics.js';
 import { registerOverviewNsx } from './api/overviewNsx.js';
+import { registerOverviewCards } from './api/overviewCards.js'; // v2.664 Overview 카드 8장 · 전체 소비 전력
 import { registerProvision } from './api/provision.js';
 import { registerVcTools } from './api/vcTools.js';
 import { registerReports } from './api/reports.js';
@@ -81,6 +82,7 @@ api.use(toolGate({ roleOf: toolGateRole, userOf: toolGateUser, issueOf: exactToo
 
 registerVmMetrics(api);
 registerOverviewNsx(api);
+registerOverviewCards(api);
 registerProvision(api);
 registerVcTools(api);
 registerReports(api);

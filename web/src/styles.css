@@ -218,6 +218,11 @@ body {
   padding: 16px 18px; box-shadow: var(--shadow);
 }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+/* v2.664 Overview 카드 8장 — 4열(좁으면 2열). 트랙은 minmax(0,1fr)(긴 부제가 트랙을 밀지 않게 — v2.576 규약). */
+.ov-cards8 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+.ov-cards8 > .kpi { min-width: 0; }
+.ov-cards8 .meta { overflow-wrap: anywhere; }
+@media (max-width: 900px) { .ov-cards8 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* 1줄 고정 변형 — 타일 개수와 무관하게 항상 한 행에 균등 배치, 화면이 좁아지면 줄바꿈 대신
    글자 크기를 축소해 맞춘다(Summary 상단 '전체 통합 합계'용). */
 .kpis-1row { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 10px; }

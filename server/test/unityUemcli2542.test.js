@@ -214,7 +214,7 @@ test('풀 합계와 시스템 전체가 다르면 교차 경고를 낸다', () =
  * 사용자가 그 출력을 직접 제공했다(모델 `Unity 480F` · 버전 · 시리얼). `-s spinfo` 는 그대로 안 부른다.
  */
 test('★ 용량·상태 명령은 3개 그대로이고 CSV 후보가 없다', () => {
-  const core = SPECS.filter((s) => s.key !== 'version');
+  const core = SPECS.filter((s) => s.key !== 'version' && s.key !== 'power');
   assert.equal(core.length, 3, `용량·상태 명령이 ${core.length}개다 — 늘리려면 예산 산수를 먼저 할 것`);
   assert.deepEqual(core.flatMap((s) => s.cmds), [
     'uemcli /stor/config/pool show -detail',
@@ -223,7 +223,10 @@ test('★ 용량·상태 명령은 3개 그대로이고 CSV 후보가 없다', (
   ]);
   const all = SPECS.flatMap((s) => s.cmds);
   assert.ok(!all.some((c) => /-output csv/.test(c)), '이 장비의 CSV 출력은 확인된 적이 없다');
-  assert.ok(!all.some((c) => /svc_diag\s+-s/.test(c)), 'svc_diag -s spinfo 는 이 경로에서 부르지 않는다(v2.542)');
+  // v2.664: 사용자 선택("Unity 부터 수집 추가")으로 전원 항목 하나만 spinfo 를 부른다 — lowPriority·맨 뒤·required 아님.
+  const spinfo = SPECS.filter((s) => s.cmds.some((c) => /svc_diag\s+-s/.test(c)));
+  assert.deepEqual(spinfo.map((s) => s.key), ['power'], 'svc_diag -s spinfo 는 전원 항목에서만 부른다');
+  assert.ok(spinfo[0].lowPriority && !spinfo[0].required && SPECS[SPECS.length - 1] === spinfo[0], '전원 항목은 맨 뒤 lowPriority');
 });
 
 test('★ 인증서 프롬프트 응답에 파괴적 선택이 없다', () => {

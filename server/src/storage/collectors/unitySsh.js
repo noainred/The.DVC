@@ -41,6 +41,7 @@ export { versionAttemptsOf };
 import { emptySnapshot } from '../types.js';
 import { parsePools, parseSystemSpace, checkSpaceIdentity, parseUemcli } from './uemcliParse.js';
 import { versionFromUemcli, versionFromSvcDiag, mergeVersionInfo } from './unityVersion.js';
+import { parseSpinfo } from './svcDiag.js'; // v2.664 전원(입력 전력 W)
 
 /** 이 수집기가 실행하는 명령 전부. **늘리기 전에 시간 예산을 함께 볼 것**(v2.528 회귀의 원인). */
 export const SPECS = [
@@ -100,6 +101,16 @@ export const SPECS = [
       //   (svc_diag 가 모델 줄만 주는 장비). 모델은 아래 collect 가 원문에서 따로 건진다.
       return !!v.version;
     } },
+  /*
+   * v2.664 — 전원(입력 전력 W). 사용자 요청 "소비전력 = … + 스토리지 장비 소비 전력" · 선택 "Unity 부터 수집 추가".
+   * `svc_diag -s spinfo` 의 `Summary of power supply info:` 구획(`Input Power : 330 Watts`)을 `svcDiag.powerFromBlocks` 가 읽는다
+   * — 사용자가 실제 출력을 준 명령이고 파서도 그 출력으로 만들었다(v2.526). Unisphere 계정이 필요 없다.
+   * ⚠ **맨 뒤 · lowPriority** — 세션 예산이 남을 때만 돈다(`runCliSession` 이 예산이 모자라면 시작하지 않고 사유를 남긴다).
+   *   맨 뒤라서 앞 항목(용량·상태·버전)을 밀어내지 못한다 — 예산 산수 테스트가 이 두 성질을 고정한다.
+   * ⚠ 합계는 **DPE(SP 인클로저) 전원공급장치**만이다 — 확장 DAE 의 전력은 이 출력에 없다(화면이 '일부' 라고 말한다).
+   */
+  { key: 'power', answered: true, rules: ['pager', 'certAccept'], lowPriority: true, timeoutMs: 25_000,
+    cmds: ['svc_diag -s spinfo'] },
 ];
 
 /** 이 수집 방식으로는 알 수 없는 섹션 — '오류' 가 아니라 '미수집' 이다. */
@@ -313,6 +324,16 @@ export async function collectViaSsh(device) {
     snap.extra.cliRawMode = 'all';
     // v2.585 — 버전이 왜 비었는지를 표의 열이 바로 말할 수 있게 시도 결과를 따로 싣는다(원문 상세를 열지 않아도).
     snap.extra.versionAttempts = versionAttemptsOf(raw);
+    // v2.664: 전원 — 읽은 전원공급장치의 입력 전력 합(W). 하나도 못 읽으면 싣지 않는다(0 W 라는 거짓 금지).
+    if (r.out?.power) {
+      try {
+        const sp = parseSpinfo(r.out.power);
+        if (sp.power?.totalWatts != null) {
+          snap.extra.power = { watts: Math.round(sp.power.totalWatts), read: sp.power.readWatts, supplies: sp.power.supplies.length,
+            scope: 'dpe', truncated: !!sp.truncated, source: 'svc_diag -s spinfo', at: Date.now() };
+        }
+      } catch { /* 전원은 참고값 — 파싱 실패가 스냅샷을 막지 않는다 */ }
+    }
     // v2.586 — 버전은 못 읽었지만 어느 후보가 모델을 줬다면 버리지 않는다(accept 가 버전만 성공으로 본다).
     if (!snap.extra.model) {
       for (const x of raw) {

@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-09-30T05:24:48.164Z",
-  "count": 93,
+  "generatedAt": "2026-09-30T07:56:34.635Z",
+  "count": 94,
   "tools": [
     {
       "k": "service-hub",
@@ -92,6 +92,14 @@
     },
     {
       "k": "bm-usage",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "power-total",
       "adminOnly": false,
       "perm": null,
       "external": null,
