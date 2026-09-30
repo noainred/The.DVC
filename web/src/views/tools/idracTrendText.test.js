@@ -84,10 +84,10 @@ describe('판별 근거 문구', () => {
 describe('v2.661 카드 순서 · 출처 문구', async () => {
   const m = await import('./idracTrendText.js');
   it('카드 6장 — 흡기·배기 추가, 기본 순서는 SERIES 순서', () => {
-    expect(m.DEFAULT_ORDER).toEqual(['cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp', 'powerW']);
+    expect(m.DEFAULT_ORDER).toEqual(['cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp', 'powerW', 'hostCpuPct']); // v2.666 ESXi CPU 카드(가상화 서버에만 보인다)
   });
   it('저장된 순서 정규화 — 모르는 키는 버리고 빠진 키는 뒤에 붙인다', () => {
-    expect(m.normalizeOrder(['powerW', 'zz', 'powerW', 'cpuPct'])).toEqual(['powerW', 'cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp']);
+    expect(m.normalizeOrder(['powerW', 'zz', 'powerW', 'cpuPct'])).toEqual(['powerW', 'cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp', 'hostCpuPct']);
     expect(m.normalizeOrder(null)).toEqual(m.DEFAULT_ORDER);
   });
   it('◀ ▶ 이동과 끌어서 놓기', () => {
@@ -208,5 +208,55 @@ describe('v2.663 서버 표 · 조건 검색 · CPU 진단', async () => {
     expect(m.idracStateBanner({ stale: 'stale', remote: true, collector: { known: false } }).lines.join()).toMatch(/모릅니다/);
     expect(m.idracStateBanner({ stale: 'stale', remote: false, sampleAt: T, ageMs: 60_000, maxAgeMs: 1 }).lines.join()).toMatch(/직접 폴링/);
     for (const b of [edge, pull]) expect(b.lines.join()).not.toMatch(/`/);
+  });
+});
+
+// v2.666 ────────────────────────────────────────────────────────────────
+import {
+  CHART_SERIES, HOST_CPU_SERIES, loadCpuRef, saveCpuRef, showCpuRef, maxBackOf, scrollWindow, scrollLabel, presetSpanOf,
+  hostCpuNote, DEFAULT_ORDER as ORDER2666, normalizeStyles as ns2666,
+} from './idracTrendText.js';
+import { SERIES as S2666, gapAreas as gap2666, kindBasisText as kb2666 } from './idracTrendText.js';
+
+describe('v2.666 ESXi CPU(vCenter) 계열 · 기준선 토글 · 과거 스크롤', () => {
+  it('ESXi CPU 는 차트 계열에만 — iDRAC 6계열(표·조건·무응답 판정)에는 넣지 않는다', () => {
+    expect(S2666.some((s) => s.k === 'hostCpuPct')).toBe(false);
+    expect(CHART_SERIES.at(-1)).toBe(HOST_CPU_SERIES);
+    expect(ORDER2666).toContain('hostCpuPct');
+    expect(ns2666(null).hostCpuPct.dash).toBe('dot');
+    // iDRAC 값이 모두 비고 vCenter 값만 있는 점은 여전히 'iDRAC 무응답' 이다
+    const pts = [{ t: 1, cpuPct: 5 }, { t: 2, hostCpuPct: 40 }, { t: 3, cpuPct: 6 }];
+    expect(gap2666(pts)).toEqual([{ x1: 2, x2: 3 }]);
+  });
+  it('기준선 토글 — 기본 켜짐 · 끄면 저장 · 저장 실패는 조용히', () => {
+    const m = new Map();
+    const st = { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: (k) => m.delete(k) };
+    expect(loadCpuRef(st)).toBe(true);
+    saveCpuRef(st, false); expect(loadCpuRef(st)).toBe(false);
+    saveCpuRef(st, true); expect(loadCpuRef(st)).toBe(true);
+    expect(loadCpuRef({ getItem: () => { throw new Error('x'); } })).toBe(true);
+    const s = { cpuPct: { cur: 1 } };
+    expect(showCpuRef(true, { cpuPct: true }, s)).toBe(true);
+    expect(showCpuRef(false, { cpuPct: true }, s)).toBe(false);
+    expect(showCpuRef(true, { cpuPct: false, hostCpuPct: true }, { hostCpuPct: { cur: 3 } })).toBe(true);
+    expect(showCpuRef(true, { cpuPct: true }, {})).toBe(false);
+  });
+  it('과거 스크롤 — 같은 길이 창을 칸 단위로 · 보관 기간 안 · 기준 끝 고정', () => {
+    const H = 3_600_000;
+    expect(presetSpanOf('1h')).toBe(H); expect(presetSpanOf('custom')).toBe(null);
+    expect(maxBackOf(H, 1)).toBe(23);
+    expect(maxBackOf(H, 0)).toBe(0);
+    const w = scrollWindow(H, 2, 10 * H);
+    expect(w).toEqual({ start: 7 * H, end: 8 * H, back: 2 });
+    expect(scrollWindow(H, 99, 10 * H, 3).back).toBe(3);
+    expect(scrollWindow(H, -5, 10 * H).back).toBe(0);
+    expect(scrollLabel(0, '1h')).toBe('최근 구간');
+    expect(scrollLabel(3, '1h')).toBe('3칸 전 (1시간 단위)');
+  });
+  it('매칭 근거·각주 — 호스트네임 매칭을 말하고, 매칭이 없으면 각주 없음', () => {
+    expect(kb2666({ kind: 'esxi', matchedBy: 'hostname', host: { name: 'esx01' }, serviceTag: '' })).toContain('호스트네임 일치');
+    expect(kb2666({ kind: 'baremetal', serviceTag: 'ABC', hostAmbiguous: true })).toContain('여럿');
+    expect(hostCpuNote({})).toBe('');
+    expect(hostCpuNote({ hostCpu: { hostName: 'esx01', matchedBy: 'serviceTag' } })).toContain('섞지 않습니다');
   });
 });

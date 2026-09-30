@@ -6,7 +6,7 @@ import {
 import { usePolling, fetchJson, putJson, can } from '../api.js';
 import { Kpi, Loading, ErrorBox, SeverityBadge } from '../components/ui.jsx';
 import STable from '../components/STable.jsx';
-import { unplacedRows, corpNoteText, physNoteText } from './overviewServerText.js';
+import { unplacedRows, corpNoteText } from './overviewServerText.js';
 import { vcStatusMeta } from '../console/consoleData.js'; // v2.618 ARCH-1
 import { unitText } from './unitText.js'; // v2.583: 미배치 물리 서버 행
 import { storageUsageUnknownNote } from './vcCardText.js'; // v2.621(감사 WEB-03)
@@ -80,29 +80,6 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   //  · 숫자(주기·상한)를 문구에 박지 않는다 — 서버가 준 값만 쓴다.
   const pbc = ov.physicalByCorp && !ov.physicalByCorp.error ? ov.physicalByCorp : null;
   const pbcErr = ov.physicalByCorp?.error || null;
-  // 합계·물리 전용은 서버 집계가 있을 때만 말한다(추정해서 채우지 않는다).
-  const serverUnion = pbc ? pbc.union : null;
-  const physOnly = pbc ? pbc.physicalOnly : null;
-
-  const unionNote = (() => {
-    if (pbcErr) return `물리 서버 집계 실패: ${pbcErr}`;
-    if (!pbc) return '물리 서버 귀속 정보를 불러오지 못했습니다';
-    const parts = [`물리 전용 ${fmt(physOnly)} + 가상화 호스트 ${fmt(pbc.hostsTotal)}`];
-    // '확인된 중복' 은 근거다 — 0 이어도 적는다. 0 은 '중복이 없다' 가 아니라 '못 찾았다' 일
-    // 수 있으므로(이름·서비스태그가 안 맞는 경우) 그 사실도 함께 말한다.
-    parts.push(pbc.matchedCount
-      ? `같은 장비로 확인돼 중복 제외한 서버 ${fmt(pbc.matchedCount)}대`
-      : '중복으로 확인된 장비 없음(이름·서비스태그가 맞지 않으면 못 찾을 수 있습니다)');
-    return parts.join(' · ');
-  })();
-  // v2.583(사용자 신고 "서버 합계에 물리서버 수량 안나오는거 수정해줘"): 예전에는 법인 미귀속 물리 서버가
-  // 문구 한 줄로만 밝혀지고 표에는 없어 '물리 전용' 열이 전 행 0 으로 보였다. 이제 서버가 법인(DataCenter)·
-  // 관리자 지정으로 vCenter 행을 정하고, 정하지 못한 것은 표 아래 고정 행으로 보인다(overviewServerText.js).
-  const physNote = (() => {
-    if (pbcErr) return 'iDRAC 집계 실패 — 설정 › iDRAC 등록을 확인하세요';
-    if (!pbc) return '물리 서버 귀속 정보를 불러오지 못했습니다';
-    return physNoteText(pbc);
-  })();
   const corpNote = (() => {
     if (pbcErr) return `물리 서버 집계 실패: ${pbcErr}`;
     if (!pbc) return '물리 서버 귀속 정보를 불러오지 못했습니다';
@@ -118,7 +95,12 @@ export default function Overview({ onSelectSite, onGotoTab }) {
     const vms = st.countable ? (m.vms || 0) : null;
     // 서버 집계를 못 받았으면 0 이 아니라 null 이다('서버가 없다' 는 거짓을 만들지 않는다).
     const only = pbc ? (pbc.byVcenterPhysicalOnly?.[s.id] ?? 0) : null;
+    // v2.666(사용자 요청 "물리서버 수량 안나오는거 수정 — idrac 수집 화면 수량 참고"): '물리 전용'(ESXi 가 아닌 서버) 열을
+    //   **이 법인(vCenter)에 귀속된 iDRAC 등록 서버 전체**(ESXi 겸용 포함)로 바꿨다. 서버 합계는 그대로 '같은 장비를 두 번 세지
+    //   않은 수'(물리 전용 + 가상화 호스트)다 — 그래서 합계 ≠ 물리 + 가상화 이고 표 머리 문구가 그 사실을 말한다.
+    const phys = pbc ? (pbc.byVcenter?.[s.id] ?? 0) : null;
     return {
+      phys,
       id: s.id,
       name: s.name || s.id,
       mark: st.mark,
@@ -168,25 +150,8 @@ export default function Overview({ onSelectSite, onGotoTab }) {
             같은 컴포넌트를 쓴다. 여기서만 뺀다. 서버의 `ui-settings` 지도 값(mapHeight/mapLambda/…)도
             그 화면이 계속 쓰므로 건드리지 않았다. */}
 
-      {/* v2.526(사용자 요청): 서버·게스트 수량. v2.527 에 '합 / 물리 전용 / 가상화 호스트' 로 재구성 */}
-      <div className="section-title">서버·게스트 수량</div>
-      {/* ⚠ `cols-4` 같은 클래스는 styles.css 에 없다 — `.kpis`(auto-fit minmax 180px)를 쓸 것.
-          쓰면 `.grid` 만 걸려 1열이 되고 카드가 세로로 쌓인다(v2.526 실제 결함). */}
-      <div className="kpis" style={{ marginBottom: 12 }}>
-        <Kpi label="서버 합계" value={serverUnion == null ? '—' : fmt(serverUnion)} accent="var(--accent)"
-          meta={unionNote} onClick={() => onGotoTab?.('hosts')} />
-        <Kpi label="물리 전용 서버" value={physOnly == null ? '—' : fmt(physOnly)} accent="var(--accent-2)"
-          meta={physNote} onClick={() => onGotoTab?.('tools')} />
-        <Kpi label="가상화 호스트(ESXi)" value={fmt(g.hosts)} accent="var(--accent)"
-          meta={`정상 ${fmt(g.hostsConnected)} · 점검 ${fmt(g.hostsMaintenance)} · 끊김 ${fmt(g.hostsDisconnected)}`}
-          onClick={() => onGotoTab?.('hosts')} />
-        <Kpi label="게스트 OS(VM)" value={fmt(g.vms)} accent="var(--green)"
-          meta={`구동중 ${fmt(g.vmsPoweredOn)} · 정지 ${fmt(g.vmsPoweredOff)}`}
-          onClick={() => onGotoTab?.('vms')} />
-        <Kpi label="호스트당 게스트" value={g.hosts ? (g.vms / g.hosts).toFixed(1) : '—'}
-          meta="전체 VM ÷ 가상화 호스트" />
-      </div>
-
+      {/* v2.666(사용자 요청 "노란색 표시한 부분 삭제" — '서버·게스트 수량' 카드 5장): 카드 줄을 지웠다. 같은 수는 위 카드 8장과
+          아래 법인별 표가 말한다. */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="flex between" style={{ marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
           <b>법인별 서버·게스트 수량</b>
@@ -196,7 +161,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
           <STable className="v3-table">
             <thead>
               <tr>
-                <th>법인(vCenter)</th><th>서버 합계</th><th>물리 전용</th><th>가상화 호스트</th>
+                <th>법인(vCenter)</th><th>서버 합계</th><th>물리 서버(iDRAC)</th><th>가상화 호스트</th>
                 <th>게스트 OS</th><th>구동중</th><th>호스트당 게스트</th>
               </tr>
             </thead>
@@ -220,7 +185,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
                   {/* 서버 집계를 못 받았으면 0 이 아니라 '—' 다 — iDRAC 에 등록되지 않았거나
                       이름·태그로 이 vCenter 에 연결되지 않은 것이지 '서버가 없다' 는 뜻이 아니다. */}
                   <td data-sort={String(r.total ?? '')}><b>{r.total == null ? '—' : fmt(r.total)}</b></td>
-                  <td data-sort={String(r.physOnly ?? '')}>{r.physOnly == null ? '—' : fmt(r.physOnly)}</td>
+                  <td data-sort={String(r.phys ?? '')} title={r.physOnly == null ? undefined : `iDRAC 등록 서버 — 그중 ESXi 가 아닌 물리 전용 ${fmt(r.physOnly)}대`}>{r.phys == null ? '—' : fmt(r.phys)}</td>
                   <td data-sort={String(r.hosts ?? '')}>{r.hosts == null ? '—' : fmt(r.hosts)}</td>
                   <td data-sort={String(r.vms ?? '')}>{r.vms == null ? '—' : fmt(r.vms)}</td>
                   <td data-sort={String(r.vmsOn ?? '')} className="muted">{r.vmsOn == null ? '—' : fmt(r.vmsOn)}</td>

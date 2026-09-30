@@ -8,7 +8,9 @@
 import { config } from '../config.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
-import { store } from './../store.js';
+import { store, usageReadable } from './../store.js';
+/** v2.666: 호스트별 vCenter CPU 사용률 적재(iDRAC 통합 추이의 비교 계열). '0' 이면 끈다. */
+const HOST_CPU_SERIES = String(process.env.HOST_CPU_SERIES ?? '').trim() !== '0';
 import { getMetricsDb } from './db.js';
 import { loadMetricsSettings } from './settings.js';
 import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
@@ -239,6 +241,18 @@ async function sampleOnceInner() {
   }
   for (const [k, arr] of byCluster) rows.push({ metric: 'temp_cluster', k, v: round1(avg(arr)) });
   for (const [k, arr] of byVc) rows.push({ metric: 'temp_vc', k, v: round1(avg(arr)) });
+
+  // v2.666: 호스트별 vCenter CPU 사용률 — iDRAC 통합 추이가 매칭된 ESXi 호스트 값을 '별도 계열' 로 보여 준다(iDRAC CPU 와 섞지 않는다).
+  //   연결된 호스트만(store.usageReadable — 끊긴 호스트의 마지막 값을 지금 값으로 쌓지 않는다) · 낡은 vCenter 는 freshHosts 가 이미 뺐다.
+  //   행 수: 호스트 658대 × 1행/분 → 롤업 연 576만 행(temp_host 와 같은 규모). HOST_CPU_SERIES=0 으로 끈다.
+  if (HOST_CPU_SERIES) {
+    for (const h of freshHosts) {
+      if (!usageReadable(h)) continue;
+      const v = numOrNull(h.cpuUsagePct);
+      if (v == null || v < 0 || v > 100) continue;
+      rows.push({ metric: 'host_cpu_pct', k: h.id, v: round1(v) });
+    }
+  }
 
   // Datastore used GB (for capacity forecast).
   for (const d of snap.datastores || []) {

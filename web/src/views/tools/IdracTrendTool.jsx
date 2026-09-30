@@ -17,10 +17,11 @@ import {
   corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
   loadOrder, saveOrder, moveKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
   cpuDiagText, idracStateBanner, loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
+  CHART_SERIES, hostCpuNote, loadCpuRef, saveCpuRef, showCpuRef, presetSpanOf, maxBackOf, scrollWindow, scrollLabel,
 } from './idracTrendText.js';
 
 const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12 };
-const ALL_ON = Object.fromEntries(SERIES.map((s) => [s.k, true]));
+const ALL_ON = Object.fromEntries(CHART_SERIES.map((s) => [s.k, true]));
 const store = () => { try { return window.localStorage; } catch { return null; } };
 const errText = (e) => e?.message || String(e);
 /** 선 모양 견본(카드·설정 공용) — 차트와 같은 dasharray·굵기로 그린다. */
@@ -55,6 +56,11 @@ export default function IdracTrendTool() {
   const [styles, setStyles] = useState(() => loadStyles(store()));  // v2.662: 계열별 선 모양(브라우저 저장)
   const [styling, setStyling] = useState(false);
   const applyStyles = (next) => { setStyles(next); saveStyles(store(), next); };
+  const [refOn, setRefOn] = useState(() => loadCpuRef(store()));   // v2.666: CPU 75/90 기준선 표시(브라우저 저장)
+  const applyRefOn = (v) => { setRefOn(v); saveCpuRef(store(), v); };
+  const [back, setBack] = useState(0);             // v2.666: 과거로 몇 칸(0 = 최근 구간 · 폴링)
+  const [dragBack, setDragBack] = useState(null);  // 슬라이더를 끄는 중인 값(놓을 때만 조회)
+  const [anchor, setAnchor] = useState(null);      // 스크롤을 시작한 순간의 끝 시각(칸 경계가 폴링 사이에 밀리지 않게)
 
   useEffect(() => {
     let alive = true;
@@ -76,10 +82,15 @@ export default function IdracTrendTool() {
   useEffect(() => { if (sites.length && !sites.some((s) => s.value === site)) setSite(sites[0].value); }, [sites, site]);
   useEffect(() => { if (!inSite.some((s) => s.id === serverId)) setServerId(inSite[0]?.id || ''); }, [inSite, serverId]);
 
-  const q = range === 'custom' && custom ? { start: custom.start, end: custom.end } : { range };
+  // v2.666: 서버·기간을 바꾸면 스크롤을 최근으로 되돌린다.
+  useEffect(() => { setBack(0); setDragBack(null); setAnchor(null); }, [range, serverId]);
+  const presetSpan = range === 'custom' ? null : presetSpanOf(range);
+  const scrolled = !!presetSpan && back > 0 && anchor != null;
+  const q = range === 'custom' && custom ? { start: custom.start, end: custom.end }
+    : scrolled ? (({ start, end }) => ({ start, end }))(scrollWindow(presetSpan, back, anchor)) : { range };
   // 폴링은 공용 usePolling(v2.613 WEB2613-09) — 1시간 범위만 30초 자동 갱신, 그 밖은 사실상 수동(6시간).
   //   파라미터(서버·기간)가 바뀌면 직전 데이터를 비운다(다른 서버의 추이를 새 선택처럼 보이지 않게 — 포탈 규약).
-  const { data, error: err } = usePolling(serverId ? `/admin/idrac/${encodeURIComponent(serverId)}/trend` : null, q, range === '1h' ? 30_000 : 6 * 3_600_000);
+  const { data, error: err } = usePolling(serverId ? `/admin/idrac/${encodeURIComponent(serverId)}/trend` : null, q, range === '1h' && !scrolled ? 30_000 : 6 * 3_600_000);
 
   if (listErr && !list) return <ErrorBox error={listErr} />;
   if (!list) return <Loading label="iDRAC 서버" />;
@@ -89,7 +100,8 @@ export default function IdracTrendTool() {
 
   const pts = data?.points || [];
   const span = data ? data.end - data.start : DAY;
-  const st = Object.fromEntries(SERIES.map((s) => [s.k, statsOf(pts, s.k)]));
+  const st = Object.fromEntries(CHART_SERIES.map((s) => [s.k, statsOf(pts, s.k)]));
+  const shownSeries = CHART_SERIES.filter((s) => !s.vc || data?.hostCpu); // ESXi CPU 는 매칭된 가상화 서버에만
   const srv = servers.find((s) => s.id === serverId);
   const esxi = data?.kind === 'esxi';
   const toggle = (k) => { if (st[k]) setOn((o) => ({ ...o, [k]: !o[k] })); };
@@ -142,7 +154,7 @@ export default function IdracTrendTool() {
 
       {/* KPI — 클릭 = 계열 켜기/끄기(별도 토글 행 없음). 값이 없는 계열은 클릭을 무시한다. */}
       <div className="idrac-trend-kpis">
-        {order.map((k, idx) => SERIES.find((x) => x.k === k)).filter(Boolean).map((s, idx) => {
+        {order.map((k) => shownSeries.find((x) => x.k === k)).filter(Boolean).map((s, idx) => {
           const x = st[s.k];
           const arrowBtn = (dir, label) => (
             <button type="button" className="tab" aria-label={`${s.label} ${dir < 0 ? '앞으로' : '뒤로'}`} disabled={dir < 0 ? idx === 0 : idx === order.length - 1}
@@ -166,7 +178,7 @@ export default function IdracTrendTool() {
               </div>
               <div style={{ fontSize: 22, fontWeight: 800, marginTop: 5, color: s.color, fontVariantNumeric: 'tabular-nums', textAlign: 'center' }}>{x ? valueText(x.cur, s.unit) : '—'}</div>
               <div style={{ fontSize: 11, marginTop: 5, color: 'var(--text-faint)', textAlign: 'center', overflowWrap: 'anywhere' }}>
-                {x ? `평균 ${valueText(x.avg, s.unit)} · 최대 ${valueText(x.max, s.unit)}` : s.k === 'gpuTemp' ? 'GPU 없음 — 센서 미보고' : s.k === 'cpuPct' ? '보고 없음 — 어느 경로로도 못 읽음' : s.k === 'powerW' && data?.power && !data.power.found ? '전력 보고 대기' : '보고 없음'}
+                {x ? `평균 ${valueText(x.avg, s.unit)} · 최대 ${valueText(x.max, s.unit)}` : s.k === 'gpuTemp' ? 'GPU 없음 — 센서 미보고' : s.k === 'cpuPct' ? '보고 없음 — 어느 경로로도 못 읽음' : s.k === 'powerW' && data?.power && !data.power.found ? '전력 보고 대기' : s.k === 'hostCpuPct' ? 'vCenter 값 없음 — v2.666 부터 쌓임' : '보고 없음'}
               </div>
             </div>
           );
@@ -177,6 +189,9 @@ export default function IdracTrendTool() {
         <button type="button" className={arrange ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }} onClick={() => setArrange((v) => !v)}>{arrange ? '✓ 순서 편집 끝' : '↔ 카드 순서 바꾸기'}</button>
         {arrange && <button type="button" className="tab" style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }} disabled={order.join() === DEFAULT_ORDER.join()} onClick={() => applyOrder([...DEFAULT_ORDER])}>기본 순서</button>}
         <button type="button" className={styling ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }} onClick={() => setStyling((v) => !v)}>{styling ? '✓ 선 모양 닫기' : '〰 선 모양'}</button>
+        <button type="button" className={refOn ? 'login-btn' : 'tab'} aria-pressed={refOn} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }}
+          title={`CPU 사용률 ${WARN_PCT}% 주의 · ${CRIT_PCT}% 위험 기준선을 차트에 그릴지 — 이 브라우저에 저장됩니다`}
+          onClick={() => applyRefOn(!refOn)}>{refOn ? `📏 CPU 기준선(${WARN_PCT}·${CRIT_PCT}%) 켜짐` : `📏 CPU 기준선(${WARN_PCT}·${CRIT_PCT}%) 꺼짐`}</button>
         <span style={{ color: 'var(--text-faint)' }}>{arrange ? '◀ ▶ 로 옮기거나 카드를 끌어다 놓으세요 — 이 브라우저에 저장됩니다.' : '카드를 끌어다 놓아도 순서가 바뀝니다.'}</span>
       </div>
       {styling && (
@@ -186,7 +201,7 @@ export default function IdracTrendTool() {
             <span className="muted" style={{ fontSize: 11 }}>계열마다 모양·굵기·점 표시를 고릅니다 — 이 브라우저에 저장되고 엑셀(차트) 내보내기에도 같이 들어갑니다.</span>
             <button type="button" className="tab" style={{ flex: 'none', padding: '3px 10px', marginTop: 0, marginLeft: 'auto' }} disabled={isDefaultStyles(styles)} onClick={() => applyStyles(normalizeStyles(null))}>기본 모양</button>
           </div>
-          {SERIES.map((s) => {
+          {shownSeries.map((s) => {
             const x = styles[s.k];
             return (
               <div key={s.k} className="flex wrap" style={{ alignItems: 'center', gap: 8, padding: '5px 0', borderTop: '1px solid var(--border)', minWidth: 0 }}>
@@ -296,24 +311,55 @@ export default function IdracTrendTool() {
                 <YAxis yAxisId="pct" domain={[0, 100]} stroke="#8b9bb4" fontSize={11} width={40} />
                 <YAxis yAxisId="w" orientation="right" domain={[0, pMaxOf(pts)]} stroke="#f59e0b" fontSize={11} width={56} unit=" W" />
                 {gaps.map((g) => <ReferenceArea key={g.x1} yAxisId="pct" x1={g.x1} x2={g.x2} fill="rgba(139,155,180,.10)" strokeOpacity={0} label={{ value: 'iDRAC 무응답 — 값 없음', fill: '#8b9bb4', fontSize: 11, position: 'insideTop' }} />)}
-                {on.cpuPct && st.cpuPct && <ReferenceLine yAxisId="pct" y={WARN_PCT} stroke="#f59e0b" strokeDasharray="5 4" label={{ value: `CPU ${WARN_PCT}% 주의`, fill: '#fbbf24', fontSize: 11, position: 'insideTopLeft' }} />}
-                {on.cpuPct && st.cpuPct && <ReferenceLine yAxisId="pct" y={CRIT_PCT} stroke="#ef4444" strokeDasharray="5 4" label={{ value: `CPU ${CRIT_PCT}% 위험`, fill: '#f87171', fontSize: 11, position: 'insideTopLeft' }} />}
+                {showCpuRef(refOn, on, st) && <ReferenceLine yAxisId="pct" y={WARN_PCT} stroke="#f59e0b" strokeDasharray="5 4" label={{ value: `CPU ${WARN_PCT}% 주의`, fill: '#fbbf24', fontSize: 11, position: 'insideTopLeft' }} />}
+                {showCpuRef(refOn, on, st) && <ReferenceLine yAxisId="pct" y={CRIT_PCT} stroke="#ef4444" strokeDasharray="5 4" label={{ value: `CPU ${CRIT_PCT}% 위험`, fill: '#f87171', fontSize: 11, position: 'insideTopLeft' }} />}
                 <Tooltip contentStyle={tipStyle} labelStyle={{ color: '#8b9bb4' }}
                   labelFormatter={(t) => `${span >= DAY ? `${ymd(t)} ` : ''}${hm(t)}${data.bucketMs > 60_000 ? ` · ${bucketLabel(data.bucketMs)} 평균` : ''}`}
-                  formatter={(v, name) => { const s = SERIES.find((x) => x.label === name); return [valueText(v, s?.unit || ''), name]; }} />
+                  formatter={(v, name) => { const s = CHART_SERIES.find((x) => x.label === name); return [valueText(v, s?.unit || ''), name]; }} />
                 {on.powerW && st.powerW && <Area yAxisId="w" type="monotone" dataKey="powerW" name="소비 전력" stroke="#f59e0b" strokeWidth={styles.powerW.width} strokeDasharray={dashArrayOf(styles.powerW.dash)} fill="url(#idracPwrFill)" dot={styles.powerW.dot ? { r: 2.5, fill: '#f59e0b', strokeWidth: 0 } : false} isAnimationActive={false} />}
-                {SERIES.filter((s) => s.axis === 'pct' && on[s.k] && st[s.k]).map((s) => (
+                {shownSeries.filter((s) => s.axis === 'pct' && on[s.k] && st[s.k]).map((s) => (
                   <Line key={s.k} yAxisId="pct" type="monotone" dataKey={s.k} name={s.label} stroke={s.color} strokeWidth={styles[s.k].width} strokeDasharray={dashArrayOf(styles[s.k].dash)} dot={styles[s.k].dot ? { r: 2.5, fill: s.color, strokeWidth: 0 } : false} isAnimationActive={false} />
                 ))}
               </ComposedChart>
             </ResponsiveContainer>
           )}
         </div>
+        {presetSpan && (() => { // v2.666: 과거 구간 스크롤 — 같은 길이의 창을 한 칸씩 과거로(오른쪽 끝 = 최근).
+          const maxB = maxBackOf(presetSpan, keep);
+          if (!maxB) return null;
+          const cur = dragBack ?? back;
+          const go = (b) => {
+            const nb = Math.max(0, Math.min(maxB, b));
+            setDragBack(null);
+            if (nb === 0) { setBack(0); setAnchor(null); return; }
+            setAnchor((a) => (a == null ? (Number.isFinite(data?.end) && !data?.custom ? data.end : Date.now()) : a)); setBack(nb); // 지금 보이는 창의 끝에 이어 붙인다
+          };
+          const w = scrollWindow(presetSpan, cur, anchor ?? (Number.isFinite(data?.end) ? data.end : Date.now()), maxB);
+          const lbl = (PRESETS.find(([k]) => k === range) || [])[1];
+          return (
+            <div className="idrac-trend-scroll" style={{ marginTop: 10, minWidth: 0 }}>
+              <div className="flex" style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <button type="button" className="tab" style={{ flex: 'none', padding: '3px 10px', marginTop: 0 }} disabled={cur >= maxB} onClick={() => go(cur + 1)} aria-label={`${lbl} 이전`}>◀ 이전 {lbl}</button>
+                <input type="range" min={0} max={maxB} step={1} value={maxB - cur} aria-label="조회 구간 스크롤(오른쪽 끝 = 최근)"
+                  style={{ flex: '1 1 auto', minWidth: 0, accentColor: '#3b82f6' }}
+                  onChange={(e) => setDragBack(maxB - Number(e.target.value))}
+                  onPointerUp={(e) => go(maxB - Number(e.currentTarget.value))}
+                  onKeyUp={(e) => go(maxB - Number(e.currentTarget.value))} />
+                <button type="button" className="tab" style={{ flex: 'none', padding: '3px 10px', marginTop: 0 }} disabled={cur <= 0} onClick={() => go(cur - 1)} aria-label={`${lbl} 다음`}>다음 {lbl} ▶</button>
+                <button type="button" className={cur === 0 ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '3px 10px', marginTop: 0 }} disabled={cur === 0} onClick={() => go(0)}>최신</button>
+              </div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 4, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+                {scrollLabel(cur, range)} · {periodText(w.start, w.end)}{cur > 0 ? ' · 과거 구간은 자동 갱신하지 않습니다' : ''}{dragBack != null ? ' · 놓으면 조회합니다' : ''}
+              </div>
+            </div>
+          );
+        })()}
         <div className="muted" style={{ fontSize: 11, marginTop: 12, lineHeight: 1.6 }}>
           왼쪽 축은 CPU 사용률(%) · CPU/GPU 온도(℃) 공통 0~100, 오른쪽 축은 소비 전력(W)입니다. 위 카드를 누르면 계열을 켜고 끕니다.<br />
           CPU 사용률은 iDRAC 에서 온 값만 씁니다 — 텔레메트리(Datacenter 라이선스) → Sensors 컬렉션의 CPU 센서 → 베어메탈 사용률의 iDRAC 대체 경로 순이고, vCenter·OS(SSH) 값은 쓰지 않습니다. {cpuSourceNote(data)} {cpuDiagText(data?.cpuDiag)}{' '}
           GPU 온도는 사용률이 아니라 GPU 가 동작하는지 가늠하는 근거입니다. 흡기는 서버가 빨아들이는 공기(전산실) 온도, 배기는 내보내는 공기 온도입니다.
           iDRAC 무응답 구간은 선을 끊고 0 으로 채우지 않습니다. {retentionNote(data)} 기간이 길면 집계 단위(5분 ~ 1일) 평균으로 표시합니다.
+          {hostCpuNote(data) ? ` ${hostCpuNote(data)}` : ''}
           {data?.firstTs ? ` 이 서버의 첫 적재는 ${ymd(data.firstTs)} ${hm(data.firstTs)} 입니다(그 이전은 비어 있습니다).` : ''}
         </div>
       </div>
@@ -321,7 +367,7 @@ export default function IdracTrendTool() {
       {modal === 'host' && data?.host && <HostDetailLoader host={data.host} onClose={() => setModal(null)} />}
       {modal === 'idrac' && srv && <IdracDetailModal server={{ id: srv.id, name: srv.name, remote: srv.remote, serviceTag: srv.serviceTag, datacenterId: srv.corp }} onClose={() => setModal(null)} />}
       {(modal === 'csv' || modal === 'xlsx') && (
-        <CsvModal fmt={modal} gpuOnly={gpuOnly} styles={styles} serverId={serverId} serverName={srv?.name || serverId} corp={corp} site={site} siteCount={inSite.length}
+        <CsvModal hasHost={!!data?.hostCpu} fmt={modal} gpuOnly={gpuOnly} styles={styles} serverId={serverId} serverName={srv?.name || serverId} corp={corp} site={site} siteCount={inSite.length}
           range={range} custom={custom} on={on} onClose={() => setModal(null)} />
       )}
     </>
@@ -348,12 +394,12 @@ function HostDetailLoader({ host, onClose }) {
   return <EntityDetail type="host" item={item} onClose={onClose} />;
 }
 
-function CsvModal({ fmt = 'csv', gpuOnly = false, styles = null, serverId, serverName, corp, site, siteCount, range, custom, on, onClose }) {
+function CsvModal({ hasHost = false, fmt = 'csv', gpuOnly = false, styles = null, serverId, serverName, corp, site, siteCount, range, custom, on, onClose }) {
   const [scope, setScope] = useState('server');
   const [r, setR] = useState(range === 'custom' && !custom ? '24h' : range);
   const [cols, setCols] = useState('all');
   const [busy, setBusy] = useState(false); const [e, setE] = useState(null);
-  const keys = SERIES.map((s) => s.k).filter((k) => cols === 'all' || on[k]);
+  const keys = CHART_SERIES.filter((s) => !s.vc || hasHost || scope === 'dc').map((s) => s.k).filter((k) => cols === 'all' || on[k]);
   const opt = (cur, k) => (cur === k ? 'login-btn' : 'tab');
   const xlsx = fmt === 'xlsx';
   const go = async () => {
@@ -376,7 +422,7 @@ function CsvModal({ fmt = 'csv', gpuOnly = false, styles = null, serverId, serve
       </div>
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>항목</div>
       <div className="flex wrap" style={{ gap: 8, marginBottom: 14 }}>
-        <button type="button" className={opt(cols, 'all')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setCols('all')}>전체 {SERIES.length}개</button>
+        <button type="button" className={opt(cols, 'all')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setCols('all')}>전체 {CHART_SERIES.filter((s) => !s.vc || hasHost || scope === 'dc').length}개</button>
         <button type="button" className={opt(cols, 'shown')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setCols('shown')}>표시 중인 항목만 ({Object.values(on).filter(Boolean).length}개)</button>
       </div>
       <div className="banner">

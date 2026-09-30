@@ -2251,6 +2251,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       · 범위 제한 계정용 절단(`routes/api/overviewNsx.js physicalByCorp`)은 **법인별 맵 5개를
         전부** 같은 기준으로 잘라야 한다(`byVcenter`·`…PhysicalOnly`·`…Matched`·`…Hosts`·`…Union`).
         하나라도 빠뜨리면 범위 밖 법인의 대수가 그대로 남는다. 합계 필드도 잘린 맵에서 다시 센다.
+    - **v2.666 — 법인별 표의 둘째 열은 '물리 서버(iDRAC)'(= `byVcenter`, ESXi 겸용 포함)이고 '서버·게스트 수량' 카드 5장은 지웠다**(사용자 요청).
+      예전 '물리 전용' 열은 iDRAC 서버가 전부 ESXi 인 법인에서 0 이라 '물리 서버 수가 안 나온다' 로 읽혔다. 서버 합계는 여전히 중복 제거 합이라
+      합계 ≠ 물리 + 가상화이고 표 머리 문구가 두 정의를 함께 말한다(물리 전용 대수는 칸 title).
     - ⚠ **표 안의 클릭 가능한 텍스트에 `<a>` 기본 링크 색을 쓰지 말 것**(v2.527 사용자 신고
       "법인 글자가 파란색이라서 안보여"): 이 어두운 표에서 링크 파랑은 읽기 어렵다. **표의 다른
       글자와 같은 색**(`color:'inherit'`)을 쓰고 클릭 가능함은 **점선 밑줄**로 알린다
@@ -3913,6 +3916,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **수집 멈춤 배너(v2.665)**: `/idrac/:id/trend` 응답 `idracState`(`idracStateOf` — 표본 시각·나이·경계, 엣지 서버는 중앙 pull 상태 `lastOkAt`·`ok`·`fails`
       와 `exportAt`)를 웹 `idracStateBanner` 가 판정한다 — pull 정상 + 표본 멈춤 = 엣지의 iDRAC 수집, pull 실패 = 통신. 오류 원문은 `idracScopeOf(req)` 가
       null(전체 범위)일 때만 싣는다. ⚠ 2026-09-30 02:32 멈춤 신고의 원인은 확정하지 못했다(운영 증거 필요 — 배너가 가른다).
+    - ⚠⚠ **v2.666 — ESXi CPU(vCenter) 는 '다른 선' 이다. v2.665 규칙을 어기지 않는다**(사용자 요청 "가상화 서버의 경우 hostname 이나
+      service tag 로 매칭되는 장비가 있으면 cpu 사용량을 불러와서 같이"): `cpuPct`(iDRAC) 에는 여전히 iDRAC 값만이고, 매칭된 호스트의 vCenter 값은
+      **별도 계열 `hostCpuPct`**(샘플러 `host_cpu_pct` — 연결된 호스트·신선한 vCenter 만, `HOST_CPU_SERIES=0` 으로 끔)이다. 웹은 iDRAC 6계열 `SERIES`
+      (서버 표·조건 검색·무응답 구간 판정)와 차트용 `CHART_SERIES`(+ESXi CPU)를 나눈다 — **ESXi CPU 를 SERIES 에 넣지 말 것**(무응답 구간을 가린다).
+      매칭은 `idrac/hostMatch.js` 의 서비스태그 → 짧은 호스트네임(소문자·첫 '.' 앞·끝 점 제거) 순이고 **IP 는 이름이 아니다**(v2.628 C2628-01) ·
+      같은 짧은 이름이 두 호스트면 정하지 않는다(`hostAmbiguous`) · 이름 후보(iDRAC 이름·hostName·인벤토리 hostName)가 서로 다른 호스트면 정하지 않는다.
+      CPU 75/90 기준선 토글은 브라우저 저장(`idracTrend.cpuRef`). 과거 스크롤은 같은 길이 창을 칸 단위로(`scrollWindow` — 기준 끝은 스크롤 시작 때 한 번
+      잡는다. 매번 Date.now() 면 폴링 사이에 칸이 밀린다) · 과거 구간은 폴링하지 않는다 · 슬라이더는 놓을 때만 조회. 기간 지정(custom)에는 스크롤이 없다.
   - ⚠⚠ **Overview 카드 8장 · 전체 소비 전력(v2.664) — 합산은 `server/src/power/total.js buildPowerTotal` 하나**(Overview 카드와 특수 기능
     `power-total` 이 같은 함수. `GET /overview/cards`·`GET /tools/power-total`, `routes/api/overviewCards.js` · 웹 `overviewCardsText.js`·`tools/PowerTotal.jsx`):
     · 서버 = `allMeasuredPower` 중 **vCenter 추정(source 'vcenter') 제외** · 네트워크 = CVP PSU `power.inW` 합(없으면 outW, `outputOnly` 로 밝힘 — 필드명 추정) ·

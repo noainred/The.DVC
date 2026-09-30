@@ -41,7 +41,7 @@ export function unplacedRows(pbc) {
 /** 표 머리 오른쪽 문구 — 무엇을 어디에 넣었는지 밝힌다. */
 export function corpNoteText(pbc) {
   if (!pbc) return '';
-  const parts = ['서버 합계 = 물리 전용 + 가상화 호스트(같은 장비를 두 번 세지 않습니다)'];
+  const parts = ['물리 서버 = 그 법인에 귀속된 iDRAC 등록 서버(ESXi 겸용 포함)', '서버 합계 = 물리 전용 + 가상화 호스트(같은 장비를 두 번 세지 않습니다)'];
   const by = pbc.matchedBy || {};
   const helped = [];
   if (Number(by.datacenter) > 0) helped.push(`법인(DataCenter)의 vCenter 로 ${fmt(by.datacenter)}대`);
