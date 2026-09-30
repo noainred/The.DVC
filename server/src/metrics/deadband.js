@@ -30,6 +30,9 @@ export const DEFAULT_POLICY = Object.freeze({
 export function policyKeyFor(metric) {
   const m = String(metric || '');
   if (m.startsWith('temp_') || m.startsWith('roomtemp_')) return 'temp';
+  // v2.660: iDRAC 통합 추이의 CPU·GPU 온도(서버당 2계열)도 온도 정책을 쓴다. idractemp_max·inlet·exhaust 는 예전 그대로
+  //   전량 저장이다(기존 화면의 분 단위 조회가 step 채움 없이 원본을 읽는다 — 바꾸면 그 화면에 공백이 생긴다).
+  if (m === 'idractemp_cpu' || m === 'idractemp_gpu') return 'temp';
   if (m === 'power' || m.startsWith('power_')) return 'power';
   return null;
 }

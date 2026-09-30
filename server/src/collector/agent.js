@@ -36,6 +36,8 @@ function compactSensors(serverId) {
   const cyc = sensorPollCycle();
   return {
     t: latest.t, temps: Object.fromEntries(Object.entries(temps).slice(0, 64)),
+    // v2.660: CPU 사용률(텔레메트리 SystemUsage) — 중앙 iDRAC 통합 추이가 위임 서버도 그린다. 없으면 싣지 않는다.
+    ...(typeof latest.cpu === 'number' && Number.isFinite(latest.cpu) ? { cpu: latest.cpu } : {}),
     ...(cyc?.durationMs != null ? { cycleMs: Math.round(cyc.durationMs) } : {}),
     ...(cyc?.intervalMs != null ? { intervalMs: cyc.intervalMs } : {}),
   };

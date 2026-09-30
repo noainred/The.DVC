@@ -180,7 +180,8 @@ adminRouter.get('/idrac/:id/temp-history', adminOnly, async (req, res) => {
     const kinds = TEMP_SERIES_DETAIL ? ['max', 'inlet', 'exhaust', 'cpu'] : ['max'];
     for (const kind of kinds) {
       const metric = idracTempMetric(kind);
-      series[kind] = db.history(metric, id, since, bucketMs, limit);
+      // v2.660: idractemp_cpu 는 dead-band 계열이 됐다 — 짧은 버킷은 step 채움(historyStep)으로 읽는다(그 외는 history 와 같다).
+      series[kind] = db.historyStep ? db.historyStep(metric, id, since, bucketMs, limit).points : db.history(metric, id, since, bucketMs, limit);
       // 첫 관측 시각 — 화면이 '수집 시작 이전' 을 소급 표시하지 않게 한다(v2.351 '+2만 TB' 교훈).
       try {
         const m = db.metaKey ? db.metaKey(metric, id) : null;
