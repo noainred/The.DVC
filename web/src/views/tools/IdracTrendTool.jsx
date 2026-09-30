@@ -11,11 +11,12 @@ import { EntityDetail } from '../../components/EntityDetail.jsx';
 import { IdracDetailModal } from '../idrac/IdracDetailModal.jsx';
 import { WARN_PCT, CRIT_PCT } from '../../console/consoleData.js';
 import { IdracTrendTable } from './IdracTrendTable.jsx';
+import BoldText from '../../components/boldText.jsx';
 import {
   PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
   corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
   loadOrder, saveOrder, moveKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
-  cpuDiagText, loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
+  cpuDiagText, idracStateBanner, loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
 } from './idracTrendText.js';
 
 const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12 };
@@ -228,6 +229,18 @@ export default function IdracTrendTool() {
           {srv?.dcSource && DC_SOURCE_TEXT[srv.dcSource] && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{DC_SOURCE_TEXT[srv.dcSource]}</span>}
         </div>
 
+        {(() => { // v2.665: iDRAC 표본이 멈췄으면 어디서 멈췄는지 먼저 말한다(차트만 보면 '그냥 끊겼다' 로 보인다).
+          const b = idracStateBanner(data?.idracState);
+          if (!b) return null;
+          const c = b.tone === 'red' ? 'var(--red)' : 'var(--amber)';
+          return (
+            <div role="status" style={{ border: `1px solid ${c}`, borderLeft: `4px solid ${c}`, borderRadius: 8, padding: '8px 12px', marginBottom: 10, fontSize: 12.5, lineHeight: 1.6, minWidth: 0, overflowWrap: 'anywhere' }}>
+              <b style={{ color: c }}>⚠ {b.title}</b>
+              {b.lines.map((l, i) => <div key={i}><BoldText text={l} /></div>)}
+            </div>
+          );
+        })()}
+
         <div className="flex wrap" style={{ gap: 6, alignItems: 'center', marginBottom: 10 }}>
           {PRESETS.map(([k, label]) => (
             <button key={k} type="button" className={range === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => { setRange(k); setRangeErr(null); }}>{label}</button>
@@ -298,7 +311,7 @@ export default function IdracTrendTool() {
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 12, lineHeight: 1.6 }}>
           왼쪽 축은 CPU 사용률(%) · CPU/GPU 온도(℃) 공통 0~100, 오른쪽 축은 소비 전력(W)입니다. 위 카드를 누르면 계열을 켜고 끕니다.<br />
-          CPU 사용률은 iDRAC 텔레메트리(Datacenter 라이선스) → 베어메탈 사용률 수집(OS·iDRAC 대체 경로) → vCenter ESXi 호스트 순으로 채웁니다. {cpuSourceNote(data)} {cpuDiagText(data?.cpuDiag)}{' '}
+          CPU 사용률은 iDRAC 에서 온 값만 씁니다 — 텔레메트리(Datacenter 라이선스) → Sensors 컬렉션의 CPU 센서 → 베어메탈 사용률의 iDRAC 대체 경로 순이고, vCenter·OS(SSH) 값은 쓰지 않습니다. {cpuSourceNote(data)} {cpuDiagText(data?.cpuDiag)}{' '}
           GPU 온도는 사용률이 아니라 GPU 가 동작하는지 가늠하는 근거입니다. 흡기는 서버가 빨아들이는 공기(전산실) 온도, 배기는 내보내는 공기 온도입니다.
           iDRAC 무응답 구간은 선을 끊고 0 으로 채우지 않습니다. {retentionNote(data)} 기간이 길면 집계 단위(5분 ~ 1일) 평균으로 표시합니다.
           {data?.firstTs ? ` 이 서버의 첫 적재는 ${ymd(data.firstTs)} ${hm(data.firstTs)} 입니다(그 이전은 비어 있습니다).` : ''}

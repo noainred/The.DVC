@@ -22,10 +22,9 @@
 import { getSensorSeries, sensorPollCycle } from './sensorStore.js';
 import { sampleStaleReason, serverTempKinds, TEMP_SERIES_DETAIL, idracTempMetric } from './serverTempSeries.js';
 import { DEFAULT_MAX_AGE_MS } from './roomTemp.js';
-import { roleOf } from './sensorDetail.js';
+import { roleOf, summarizeSensors, expandCompact } from './sensorDetail.js';
+import { localSensorDetail } from './sensorDetailCache.js';
 import { analysisServersWithRemote, invForServer } from '../insights/analysisServers.js';
-import { findHostByServiceTag } from './hostMatch.js';
-import { store, usageReadable } from '../store.js';
 import { cpuIndexOf } from '../tools/serverSensors.js';
 import { cpuLatestRows } from '../bmusage/cpuLatest.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -41,15 +40,22 @@ export const TREND_METRICS = Object.freeze({
 });
 export const TREND_AIRFLOW_ENABLED = process.env.IDRAC_TREND_AIRFLOW !== 'false';
 /**
- * v2.661 — CPU 사용률 대체 계열. Dell 텔레메트리(SystemUsage)는 **Datacenter 라이선스** 전용이라 Enterprise 현장에서는
- * `idracusage_cpu` 가 비었다(사용자 신고 "CPU 온도·GPU 온도는 나오는데 CPU 사용률은 안 나와"). 이미 수집 중인 값으로 채운다:
- *   idracusage_cpu_os — 베어메탈 사용률(bmusage — OS SSH·iDRAC Enterprise 대체 경로)의 최신 CPU %(v2.659 센서 상세와 같은 행)
- *   idracusage_cpu_vc — 가상화 호스트면 vCenter 가 보고한 ESXi 호스트 CPU %(서비스태그 일치 · 연결된 호스트 · 신선한 vCenter 만)
- * **한 서버·한 주기에 한 계열만** 적재한다(텔레메트리 > bmusage > vCenter). 출처가 다른 값을 한 계열에 섞지 않으므로
- * 조회가 버킷마다 어느 출처를 썼는지 밝힐 수 있다(`cpuSources`). 측정 방식이 달라 출처가 바뀌는 구간에서 값이 튈 수 있다.
+ * v2.665 — CPU 사용률은 **iDRAC 에서 온 값만** 쓴다(사용자 지시 "vcenter 에서 가져오지 말고 idarc 에서 가져오는걸로 수정해줘").
+ * v2.661~2.664 는 Dell 텔레메트리(SystemUsage — Datacenter 라이선스 전용)가 없으면 bmusage(OS SSH 포함)와 vCenter ESXi 호스트
+ * 값으로 채웠는데, 이 화면은 'iDRAC 통합 추이' 이고 출처가 다른 숫자가 섞이면 같은 서버의 다른 iDRAC 지표와 시각·의미가 맞지 않는다.
+ * 순서(한 서버·한 주기에 한 계열만 적재):
+ *   idracusage_cpu     — 텔레메트리 SystemUsage(1분 폴)
+ *   idracusage_cpu_rs  — iDRAC Sensors 컬렉션의 CPU 사용률 센서(인벤토리 주기 — 기본 30분, `SENSOR_CPU_FRESH_MS` 안의 값만)
+ *   idracusage_cpu_bm  — 베어메탈 사용률의 **iDRAC 경로 값만**(행의 출처 `src` 에 'os' 가 없는 것 — Enterprise 대체 경로 포함)
+ * 어느 것도 없으면 **행을 만들지 않는다**(빈칸이 정직하다 — 화면이 이유를 말한다).
+ * ⚠ 예전 계열 `idracusage_cpu_os`·`idracusage_cpu_vc`(`CPU_RETIRED_METRICS`)는 더 이상 쓰지도 읽지도 않는다 — `_os` 는 OS 값과
+ *   iDRAC 값이 섞여 있어 나중에 가를 수 없다. 행은 보존 설정에 따라 저절로 지워진다.
  */
-export const CPU_FALLBACK_METRICS = Object.freeze({ os: 'idracusage_cpu_os', vcenter: 'idracusage_cpu_vc' });
-export const CPU_SOURCES = Object.freeze(['telemetry', 'os', 'vcenter']);
+export const CPU_FALLBACK_METRICS = Object.freeze({ sensor: 'idracusage_cpu_rs', bmIdrac: 'idracusage_cpu_bm' });
+export const CPU_RETIRED_METRICS = Object.freeze({ os: 'idracusage_cpu_os', vcenter: 'idracusage_cpu_vc' });
+export const CPU_SOURCES = Object.freeze(['telemetry', 'sensor', 'bmIdrac']);
+/** Sensors 컬렉션은 인벤토리 주기(30분)로 읽는다 — 센서 상세 화면과 같은 75분을 '지금 값' 의 경계로 쓴다. */
+export const SENSOR_CPU_FRESH_MS = 75 * 60_000;
 
 const pct = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100 ? v : null);
 
@@ -72,8 +78,8 @@ export function buildServerTrendRows(servers, {
   now = Date.now(), maxAgeMs = DEFAULT_MAX_AGE_MS, detail = TEMP_SERIES_DETAIL,
   latestOf = (s) => (s.remote ? s.sensors : getSensorSeries(s.id).latest),
   localCycle = sensorPollCycle(now),
-  cpuIndex = null,          // bmusage 최신 행 색인(tools/serverSensors.js cpuIndexOf) — 없으면 그 대체를 쓰지 않는다
-  hostCpuOf = () => null,   // (s) => 가상화 호스트 CPU %(신선·연결) | null
+  cpuIndex = null,          // bmusage 최신 행 색인(tools/serverSensors.js cpuIndexOf) — 없으면 그 경로를 쓰지 않는다
+  detailOf = sensorDetailOf, // (s) => { list, collAt } | null — iDRAC Sensors 컬렉션
   airflow = TREND_AIRFLOW_ENABLED,
 } = {}) {
   const rows = [];
@@ -86,12 +92,12 @@ export function buildServerTrendRows(servers, {
     const v = stale ? { cpuPct: null, cpuTemp: null, gpuTemp: null, inletTemp: null, exhaustTemp: null } : trendValuesOf(latest);
     if (v.cpuPct != null) rows.push({ metric: TREND_METRICS.cpuPct, k: id, v: v.cpuPct });
     else {
-      // 대체 CPU 는 iDRAC 표본의 신선도와 무관하다(각자 자기 출처의 신선도로 판정) — 센서가 끊긴 서버도 OS 값은 있을 수 있다.
-      const os = bmCpuOf(s, cpuIndex, now);
-      if (os != null) rows.push({ metric: CPU_FALLBACK_METRICS.os, k: id, v: os });
+      // 텔레메트리가 없으면 iDRAC 의 다른 경로만 본다 — 각자 자기 수집 시각으로 신선도를 판정한다.
+      const sc = sensorCpuOf(s, { now, detailOf });
+      if (sc.v != null) rows.push({ metric: CPU_FALLBACK_METRICS.sensor, k: id, v: sc.v });
       else {
-        let vc = null; try { vc = pct(hostCpuOf(s)); } catch { vc = null; }
-        if (vc != null) rows.push({ metric: CPU_FALLBACK_METRICS.vcenter, k: id, v: vc });
+        const bm = bmCpuOf(s, cpuIndex, now, { idracOnly: true });
+        if (bm != null) rows.push({ metric: CPU_FALLBACK_METRICS.bmIdrac, k: id, v: bm });
       }
     }
     if (stale) continue;
@@ -103,8 +109,26 @@ export function buildServerTrendRows(servers, {
   return rows;
 }
 
-/** bmusage 최신 행 → 신선한 CPU %(서비스태그 → id → fleetId 순, 대소문자 무시) | null. 순수. */
-export function bmCpuOf(s, cpuIndex, now = Date.now()) {
+/**
+ * bmusage 행의 출처가 iDRAC 뿐인가(순수). `src` 는 지표별 출처의 합집합('os+idrac' 등 — bmusage/usage.js)이고 CPU 는
+ * os > idrac > idrac-ent 순으로 고르므로, 'os' 가 들어 있으면 CPU 가 OS 값일 수 있다 → iDRAC 값으로 보지 않는다.
+ * 출처를 모르는 행(빈 src)도 쓰지 않는다(지어내지 않는다).
+ */
+export function bmSrcIsIdrac(src) {
+  const toks = String(src || '').split('+').map((t) => t.trim()).filter(Boolean);
+  return toks.length > 0 && !toks.includes('os') && toks.some((t) => t === 'idrac' || t === 'idrac-ent');
+}
+
+/** bmusage 최신 행 → 신선한 CPU %(서비스태그 → id → fleetId 순, 대소문자 무시) | null. 순수. `idracOnly` 면 iDRAC 출처 행만. */
+export function bmCpuOf(s, cpuIndex, now = Date.now(), { idracOnly = false } = {}) {
+  const r = bmCpuRowOf(s, cpuIndex, now);
+  if (!r || !r.fresh) return null;
+  if (idracOnly && !bmSrcIsIdrac(r.src)) return null;
+  return r.v;
+}
+
+/** bmusage 최신 행 요약 { v, at, fresh, src } | null(진단용 — 값이 있는 첫 키). */
+export function bmCpuRowOf(s, cpuIndex, now = Date.now()) {
   if (!cpuIndex || typeof cpuIndex.get !== 'function') return null;
   let tag = s?.serviceTag; try { tag = serviceTagOf(s) || tag; } catch { /* 인벤토리 조회 실패 — 최상위 값만 */ }
   for (const k of [tag, s?.id, s?.fleetId]) {
@@ -113,36 +137,48 @@ export function bmCpuOf(s, cpuIndex, now = Date.now()) {
     const row = cpuIndex.get(key);
     if (!row) continue;
     const v = pct(numOrNull(row.cpu_pct));
+    if (v == null) continue;
     const at = numOrNull(row.ts);
     const fresh = at != null && now - at <= (numOrNull(row._freshMs) || 30 * 60_000);
-    if (v != null && fresh) return Math.round(v * 10) / 10;
+    return { v: Math.round(v * 10) / 10, at, fresh, src: String(row.src || '') };
   }
   return null;
 }
 
 /**
- * 서비스태그가 ESXi 호스트와 맞으면 그 호스트의 vCenter CPU %. `freshHosts` 는 샘플러가 낡은 vCenter(수집 실패 이월·
- * 위임 push 끊김·점검중)를 뺀 호스트 목록이다 — 그 밖의 호스트 값은 '지금 값' 이 아니라 쓰지 않는다(v2.620 SRV2620-03).
+ * 서버의 iDRAC Sensors 컬렉션 → { list, collAt } | null. 로컬은 sensorDetailCache, 엣지 서버는 export 의 콤팩트 목록을 되돌린다.
+ * CPU 사용률 센서는 컬렉션에서만 오므로 시각도 컬렉션 시각(sensorsAt/collAt)이다(Thermal 시각을 쓰면 낡은 값이 신선해 보인다).
  */
+export function sensorDetailOf(s) {
+  if (s?.remote) {
+    const d = s.sensorDetail;
+    if (!d || !Array.isArray(d.list)) return null;
+    return { list: d.list.map(expandCompact).filter(Boolean), collAt: numOrNull(d.collAt) };
+  }
+  const d = localSensorDetail(String(s?.id || ''));
+  if (!d) return null;
+  return { list: d.list || [], collAt: numOrNull(d.collection?.sensorsAt) };
+}
+
+/** Sensors 컬렉션의 CPU 사용률 → { v, at, name, stale } (순수 판정 — detailOf 주입). 값이 없으면 v:null. */
+export function sensorCpuOf(s, { now = Date.now(), detailOf = sensorDetailOf, freshMs = SENSOR_CPU_FRESH_MS } = {}) {
+  let d = null; try { d = detailOf(s); } catch { d = null; }
+  if (!d) return { v: null, at: null, name: '', stale: false, found: false };
+  const sum = summarizeSensors(d.list || []);
+  const raw = pct(numOrNull(sum.sensorCpuUsagePct));
+  if (raw == null) return { v: null, at: d.collAt ?? null, name: '', stale: false, found: false };
+  const at = numOrNull(d.collAt);
+  const stale = at == null || now - at > freshMs;
+  return { v: stale ? null : Math.round(raw * 10) / 10, at, name: sum.sensorCpuUsageName || '', stale, found: true };
+}
+
 /**
- * v2.663: 서버의 서비스태그 — 최상위 필드 → iDRAC 인벤토리(엣지 서버는 export 의 inv) 순. 화면 머리의 'ESXi 호스트 일치'
- * 판정(routes/admin/idracTrend.js kindOf)과 **같은 출처**를 봐야 한다 — 예전엔 적재기만 최상위 필드를 봐서, 태그가 인벤토리에만
- * 있는 엣지 서버는 화면이 '일치' 라 하는데 CPU 대체값이 한 번도 쌓이지 않았다(사용자 신고 "같은 데이터센터인데 CPU 사용률이
- * 나오는 게 있고 안 나오는 게 있어").
+ * v2.663: 서버의 서비스태그 — 최상위 필드 → iDRAC 인벤토리(엣지 서버는 export 의 inv) 순. bmusage 행 키가 서비스태그라
+ * 태그가 인벤토리에만 있는 엣지 서버도 찾으려면 이 순서여야 한다.
  */
 export function serviceTagOf(s) {
   let inv = null; try { inv = invForServer(s); } catch { inv = null; }
   return String(s?.serviceTag || inv?.system?.serviceTag || '').trim();
-}
-
-export function hostCpuFrom(freshHosts, tagOf = serviceTagOf) {
-  const hosts = (freshHosts || []).filter((h) => h && usageReadable(h));
-  return (s) => {
-    const tag = tagOf(s);
-    if (!tag) return null;
-    const h = findHostByServiceTag(tag, hosts);
-    return h ? numOrNull(h.cpuUsagePct) : null;
-  };
 }
 
 // bmusage 최신 행 캐시 — 샘플러는 1분 주기이고 조회는 비동기라, 직전 주기에 받은 색인을 쓰고 다음 것을 미리 받는다.
@@ -150,38 +186,36 @@ let _cpuIdx = null; let _cpuLoading = null;
 function refreshCpuIndex() {
   if (_cpuLoading) return;
   _cpuLoading = cpuLatestRows().then((r) => { _cpuIdx = cpuIndexOf(r.rows || []); })
-    .catch(() => { /* 대체값은 참고값 — 실패는 다음 주기에 다시 */ }).finally(() => { _cpuLoading = null; });
+    .catch(() => { /* 참고값 — 실패는 다음 주기에 다시 */ }).finally(() => { _cpuLoading = null; });
 }
 
 /** v2.663: 직전 주기의 bmusage 색인(진단용 — 없으면 null). */
 export const currentCpuIndex = () => _cpuIdx;
 
-/** 샘플러가 호출(부수효과는 여기만). `freshHosts`: 낡은 vCenter 를 뺀 호스트(sampler.js). */
-export function serverTrendRows({ freshHosts = null } = {}) {
+/** 샘플러가 호출(부수효과는 여기만). */
+export function serverTrendRows() {
   if (!TREND_SERIES_ENABLED) return [];
   refreshCpuIndex();
   const servers = analysisServersWithRemote();
-  const hosts = freshHosts || (store.get()?.hosts || []);
-  return servers?.length ? buildServerTrendRows(servers, { cpuIndex: _cpuIdx, hostCpuOf: hostCpuFrom(hosts) }) : [];
+  return servers?.length ? buildServerTrendRows(servers, { cpuIndex: _cpuIdx }) : [];
 }
 
 /**
- * v2.663: 지금 이 서버의 CPU 사용률을 어느 경로로 못 읽는지(순수 판정 — 화면이 사유를 말한다. 과거 구간의 원인은 알 수 없다).
- * 순서: iDRAC 텔레메트리 → 베어메탈 사용률 → vCenter 호스트(태그 없음 / 호스트 없음 / vCenter 를 지금 값으로 못 씀 / 연결 끊김 / 값 없음).
- * @returns {{code:string, source?:string, host?:object, reason?:string}}
+ * v2.665: 지금 이 서버의 CPU 사용률을 iDRAC 의 어느 경로로 읽는지 · 못 읽으면 왜인지(순수 판정 — 과거 구간의 원인은 알 수 없다).
+ * 순서: 텔레메트리 → Sensors 컬렉션 CPU 센서 → 베어메탈 사용률(iDRAC 경로).
+ * @returns {{code:string, source?:string, at?:number|null, ageMs?:number|null, name?:string}}
+ *   code: ok | sensor-stale(센서는 있는데 컬렉션이 오래됨) | bm-os-only(베어메탈 사용률 값이 OS 경로라 쓰지 않음) |
+ *         bm-stale(베어메탈 사용률 값이 오래됨) | no-idrac-cpu(iDRAC 의 어느 경로에도 CPU 사용률이 없음)
  */
-export function cpuFallbackDiag(s, { latest = null, cpuIndex = null, hosts = [], unread = new Map(), now = Date.now(), tagOf = serviceTagOf } = {}) {
+export function cpuFallbackDiag(s, { latest = null, cpuIndex = null, now = Date.now(), detailOf = sensorDetailOf } = {}) {
   const v = latest ? trendValuesOf(latest) : null;
   if (v && v.cpuPct != null) return { code: 'ok', source: 'telemetry' };
-  if (bmCpuOf(s, cpuIndex, now) != null) return { code: 'ok', source: 'os' };
-  const tag = tagOf(s);
-  if (!tag) return { code: 'no-tag' };
-  const h = findHostByServiceTag(tag, hosts);
-  if (!h) return { code: 'no-host', tag };
-  const host = { name: h.name || '', vcenterId: String(h.vcenterId || ''), connectionState: h.connectionState || '' };
-  const reason = unread.get(host.vcenterId);
-  if (reason) return { code: 'vcenter-unread', reason, host, tag };
-  if (!usageReadable(h)) return { code: 'host-disconnected', host, tag };
-  if (pct(numOrNull(h.cpuUsagePct)) == null) return { code: 'no-host-cpu', host, tag };
-  return { code: 'ok', source: 'vcenter', host, tag };
+  const sc = sensorCpuOf(s, { now, detailOf });
+  if (sc.v != null) return { code: 'ok', source: 'sensor', at: sc.at, name: sc.name };
+  const bm = bmCpuRowOf(s, cpuIndex, now);
+  if (bm && bm.fresh && bmSrcIsIdrac(bm.src)) return { code: 'ok', source: 'bmIdrac', at: bm.at };
+  if (sc.found && sc.stale) return { code: 'sensor-stale', at: sc.at, ageMs: sc.at != null ? now - sc.at : null, name: sc.name };
+  if (bm && bm.fresh && !bmSrcIsIdrac(bm.src)) return { code: 'bm-os-only', src: bm.src };
+  if (bm && !bm.fresh && bmSrcIsIdrac(bm.src)) return { code: 'bm-stale', at: bm.at, ageMs: bm.at != null ? now - bm.at : null };
+  return { code: 'no-idrac-cpu' };
 }

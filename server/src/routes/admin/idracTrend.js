@@ -25,9 +25,11 @@ import { getMetricsDb } from '../../metrics/db.js';
 import { loadMetricsSettings } from '../../metrics/settings.js';
 import { getDb as getPowerDb } from '../../idrac/db.js';
 import { TREND_METRICS, TREND_SERIES_ENABLED, TREND_AIRFLOW_ENABLED, CPU_FALLBACK_METRICS, trendValuesOf, cpuFallbackDiag, currentCpuIndex } from '../../idrac/serverTrendSeries.js';
-import { unreadVcenterReasons } from '../../metrics/sampler.js';
-import { remotePowerEntries } from '../../collector/state.js';
-import { getSensorSeries } from '../../idrac/sensorStore.js';
+import { remotePowerEntries, getCollectorStatus } from '../../collector/state.js';
+import { getSensorSeries, sensorPollCycle } from '../../idrac/sensorStore.js';
+import { sampleStaleReason } from '../../idrac/serverTempSeries.js';
+import { sampleMaxAgeMs, DEFAULT_MAX_AGE_MS } from '../../idrac/roomTemp.js';
+import { numOrNull } from '../../util/numOrNull.js';
 import { siteNameOf } from '../../idrac/scanSite.js';
 import { analysisServersWithRemote, scanSiteIndex, invForServer } from '../../insights/analysisServers.js';
 import { listDatacenters } from '../../datacenter/store.js';
@@ -125,12 +127,13 @@ export function powerKeyOf(s, { entries = [], hasSeries = () => false } = {}) {
 }
 
 /**
- * CPU 사용률 3계열을 버킷마다 하나로 고른다(순수). 우선순위 텔레메트리 > bmusage > vCenter — 적재부터 한 주기에 한 계열만
- * 쌓이지만(serverTrendSeries), 롤업 버킷 경계에서 두 출처가 한 버킷에 들어올 수 있어 여기서 다시 고른다.
- * 그 뒤 **아직 빈 버킷만** bmusage 원시 이력(`history`)으로 채운다 — 기존에 수집해 둔 값으로 과거 구간을 채우는 경로다.
- * 반환 `{ series:[{ts,v}], sources:{telemetry,os,vcenter,history} }` — 출처별 버킷 수(화면이 말한다).
+ * CPU 사용률 계열을 버킷마다 하나로 고른다(순수). v2.665 부터 **iDRAC 출처만** — 텔레메트리 > Sensors 컬렉션 CPU 센서 >
+ * 베어메탈 사용률의 iDRAC 경로 값. 적재부터 한 주기에 한 계열만 쌓이지만 롤업 버킷 경계에서 두 출처가 한 버킷에 들어올 수 있어
+ * 여기서 다시 고른다. 그 뒤 **아직 빈 버킷만** 베어메탈 사용률 원시 이력 중 iDRAC 출처 행(`history`)으로 채운다.
+ * vCenter·OS 값(예전 `_vc`·`_os` 계열)은 읽지 않는다(사용자 지시 — serverTrendSeries.js CPU_RETIRED_METRICS).
+ * 반환 `{ series:[{ts,v}], sources:{telemetry,sensor,bmIdrac,history} }` — 출처별 버킷 수(화면이 말한다).
  */
-export function mergeCpuSeries(win, { telemetry = [], os = [], vcenter = [], history = [] } = {}) {
+export function mergeCpuSeries(win, { telemetry = [], sensor = [], bmIdrac = [], history = [] } = {}) {
   const toMap = (pts) => {
     const m = new Map();
     for (const p of pts || []) {
@@ -139,8 +142,8 @@ export function mergeCpuSeries(win, { telemetry = [], os = [], vcenter = [], his
     }
     return m;
   };
-  const order = [['telemetry', toMap(telemetry)], ['os', toMap(os)], ['vcenter', toMap(vcenter)], ['history', toMap(history)]];
-  const sources = { telemetry: 0, os: 0, vcenter: 0, history: 0 };
+  const order = [['telemetry', toMap(telemetry)], ['sensor', toMap(sensor)], ['bmIdrac', toMap(bmIdrac)], ['history', toMap(history)]];
+  const sources = { telemetry: 0, sensor: 0, bmIdrac: 0, history: 0 };
   const series = [];
   for (let t = win.start; t < win.end; t += win.bucketMs) {
     for (const [name, m] of order) {
@@ -151,11 +154,44 @@ export function mergeCpuSeries(win, { telemetry = [], os = [], vcenter = [], his
   return { series, sources };
 }
 
+/**
+ * v2.665: 이 서버의 iDRAC 표본이 지금 들어오고 있는가(순수 — 사용자 신고 "데이터가 수집되다가 지금은 안되고 있어").
+ * 온도·전력은 iDRAC 표본이 신선할 때만 쌓이므로, 차트가 멈췄다면 표본 시각이 멈춘 것이다. 위임(엣지) 서버는
+ * ① 중앙이 그 엣지에서 마지막으로 정상 pull 한 시각 ② 엣지가 보낸 표본 시각 을 나눠 보여야 어디서 멈췄는지 가를 수 있다
+ * (① 이 멈췄으면 중앙↔엣지 통신, ① 은 도는데 ② 만 멈췄으면 엣지의 iDRAC 수집).
+ * `error` 는 전체 범위 계정에만 싣는다(엣지 주소가 들어갈 수 있다).
+ */
+export function idracStateOf(s, { now = Date.now(), latest = null, localCycle = null, collector = null, showError = false } = {}) {
+  const remote = !!s?.remote;
+  const at = numOrNull(latest?.t);
+  const reason = sampleStaleReason(latest, { now, remote, localCycle });
+  const maxAgeMs = sampleMaxAgeMs(DEFAULT_MAX_AGE_MS, latest, { remote, localCycle });
+  const out = { remote, sampleAt: at, ageMs: at != null ? Math.max(0, now - at) : null, maxAgeMs, stale: reason || null };
+  if (remote) {
+    const c = collector || null;
+    const lastOk = numOrNull(c?.at);
+    out.collector = {
+      id: String(s?.collectorId || ''),
+      known: !!c,
+      ok: c ? c.ok === true && !c.degraded : null,
+      degraded: !!c?.degraded,
+      lastOkAt: lastOk,
+      lastOkAgeMs: lastOk != null ? Math.max(0, now - lastOk) : null,
+      fails: numOrNull(c?.fails),
+      version: c?.version ? String(c.version).slice(0, 40) : '',
+      error: showError && c?.error ? String(c.error).slice(0, 300) : '',
+      errorHidden: !showError && !!c?.error,
+    };
+    out.exportAt = numOrNull(s?.pulledAt);
+  }
+  return out;
+}
+
 async function seriesFor(s, win) {
   const id = String(s?.id || '');
   const errors = {};
   const out = { cpuPct: [], cpuTemp: [], gpuTemp: [], inletTemp: [], exhaustTemp: [], powerW: [] };
-  const cpuParts = { telemetry: [], os: [], vcenter: [], history: [] };
+  const cpuParts = { telemetry: [], sensor: [], bmIdrac: [], history: [] };
   let firstTs = null;
   let cpuHistoryKey = null;
   try {
@@ -165,8 +201,8 @@ async function seriesFor(s, win) {
       catch (e) { errors[k] = e?.message || String(e); return []; }
     };
     cpuParts.telemetry = read('cpuPct', TREND_METRICS.cpuPct);
-    cpuParts.os = read('cpuPct', CPU_FALLBACK_METRICS.os);
-    cpuParts.vcenter = read('cpuPct', CPU_FALLBACK_METRICS.vcenter);
+    cpuParts.sensor = read('cpuPct', CPU_FALLBACK_METRICS.sensor);
+    cpuParts.bmIdrac = read('cpuPct', CPU_FALLBACK_METRICS.bmIdrac);
     out.cpuTemp = read('cpuTemp', TREND_METRICS.cpuTemp);
     out.gpuTemp = read('gpuTemp', TREND_METRICS.gpuTemp);
     out.inletTemp = read('inletTemp', TREND_METRICS.inletTemp);
@@ -175,11 +211,11 @@ async function seriesFor(s, win) {
       try { const m = db.metaKey?.(metric, id); if (m?.firstTs && (firstTs == null || m.firstTs < firstTs)) firstTs = m.firstTs; } catch { /* 첫 관측은 참고값 */ }
     }
   } catch (e) { errors.metrics = e?.message || String(e); }
-  // 과거 구간: 중앙이 직접 수집한 베어메탈 사용률 원시 이력(엣지 수집분은 엣지 DB 에만 있어 여기서 못 읽는다 — 정직 기록).
+  // 과거 구간: 중앙이 직접 수집한 베어메탈 사용률 원시 이력 중 **iDRAC 출처 행만**(엣지 수집분은 엣지 DB 에만 있어 여기서 못 읽는다 — 정직 기록).
   if (!s?.remote) {
     try {
       const { usageCpuRange } = await import('../../bmusage/db.js');
-      const r = await usageCpuRange([s.serviceTag, s.id, s.fleetId], { agent: config.agent?.name || '', start: win.start, end: win.end, bucketMs: win.bucketMs });
+      const r = await usageCpuRange([s.serviceTag, s.id, s.fleetId], { agent: config.agent?.name || '', start: win.start, end: win.end, bucketMs: win.bucketMs, idracOnly: true });
       cpuParts.history = r.rows; cpuHistoryKey = r.key;
       if (r.rows.length && (firstTs == null || r.rows[0].ts < firstTs)) firstTs = r.rows[0].ts;
     } catch (e) { errors.cpuHistory = e?.message || String(e); }
@@ -255,7 +291,7 @@ export function parseExportStyles(q) {
 const exportStyleOf = (styles, c) => styles[c] || { dash: EXPORT_DASH_DEFAULT[c] || 'solid', width: 2, marker: false };
 /** 엑셀은 서버마다 시트·차트 1장이라 CSV 보다 상한이 작다(뺀 대수는 밝힌다). */
 export const XLSX_SERVER_MAX = 40;
-const CPU_SOURCE_LABEL = { telemetry: 'iDRAC 텔레메트리', os: '베어메탈 사용률(OS·iDRAC)', vcenter: 'vCenter 호스트', history: '베어메탈 사용률 이력' };
+const CPU_SOURCE_LABEL = { telemetry: 'iDRAC 텔레메트리', sensor: 'iDRAC CPU 센서', bmIdrac: 'iDRAC 대체 경로', history: 'iDRAC 대체 경로 이력' };
 export function cpuSourceText(src) {
   const parts = Object.entries(src || {}).filter(([, n]) => n > 0).map(([k, n]) => `${CPU_SOURCE_LABEL[k] || k} ${n}`);
   return parts.length ? parts.join(' · ') : '없음';
@@ -381,7 +417,7 @@ export function registerIdracTrend(adminRouter) {
           try { stats[k].push(db.statsSinceAll(m, since)); latest[k].push(db.latestAll(m)); } catch (e) { errors[k] = e?.message || String(e); }
         }
       };
-      read('cpuPct', [TREND_METRICS.cpuPct, CPU_FALLBACK_METRICS.os, CPU_FALLBACK_METRICS.vcenter]);
+      read('cpuPct', [TREND_METRICS.cpuPct, CPU_FALLBACK_METRICS.sensor, CPU_FALLBACK_METRICS.bmIdrac]);
       for (const k of ['cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp']) read(k, [TREND_METRICS[k]]);
       for (const k of ['cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp']) stats[k] = stats[k][0] || new Map();
     } catch (e) { errors.metrics = e?.message || String(e); }
@@ -492,19 +528,26 @@ export function registerIdracTrend(adminRouter) {
     if (win.error) return res.status(400).json({ ok: false, reason: win.error });
     const k = kindOf(s);
     const { points, errors, firstTs, cpuSources, cpuHistoryKey, power } = await seriesFor(s, win);
-    // v2.663: 지금 CPU 사용률을 어느 경로로 읽는지 · 못 읽으면 왜인지(사용자 신고 "같은 데이터센터인데 CPU 사용률이 나오는 게 있고 안 나오는 게 있어").
-    let cpuDiag = null;
+    // v2.665: 지금 CPU 사용률을 iDRAC 의 어느 경로로 읽는지 · 못 읽으면 왜인지 + iDRAC 표본이 지금 들어오는지(멈춤 진단).
+    let cpuDiag = null; let idracState = null;
+    const now = Date.now();
+    let latest = null;
+    try { latest = s.remote ? s.sensors : getSensorSeries(String(s.id)).latest; } catch { latest = null; }
+    try { cpuDiag = cpuFallbackDiag(s, { latest, cpuIndex: currentCpuIndex(), now }); }
+    catch (e) { cpuDiag = { code: 'error', reason: e?.message || String(e) }; }
     try {
-      const snap = store.get() || {};
-      const latest = s.remote ? s.sensors : getSensorSeries(String(s.id)).latest;
-      cpuDiag = cpuFallbackDiag(s, { latest, cpuIndex: currentCpuIndex(), hosts: snap.hosts || [], unread: unreadVcenterReasons(snap) });
-    } catch (e) { cpuDiag = { code: 'error', reason: e?.message || String(e) }; }
+      idracState = idracStateOf(s, {
+        now, latest, localCycle: s.remote ? null : sensorPollCycle(now),
+        collector: s.remote ? getCollectorStatus(s.collectorId) : null,
+        showError: !idracScopeOf(req),
+      });
+    } catch (e) { idracState = { error: e?.message || String(e) }; }
     const errList = Object.entries(errors);
     if (errList.length) console.warn(`[idrac] 통합 추이 조회 일부 실패(${id}): ${errList.map(([a, b]) => `${a}=${b}`).join(' · ')}`); // 삼키지 않는다(v2.493)
     res.json({
       ok: true, id, ...k, remote: !!s.remote, start: win.start, end: win.end, bucketMs: win.bucketMs, custom: win.custom,
       retentionDays: keep, retention: { metricsDays: keep, powerDays: config.idrac.retentionDays || 0 },
-      enabled: TREND_SERIES_ENABLED, airflow: TREND_AIRFLOW_ENABLED, firstTs, points, cpuSources, cpuHistory: cpuHistoryKey ? true : undefined, power, cpuDiag,
+      enabled: TREND_SERIES_ENABLED, airflow: TREND_AIRFLOW_ENABLED, firstTs, points, cpuSources, cpuHistory: cpuHistoryKey ? true : undefined, power, cpuDiag, idracState,
       errors: errList.length ? errors : undefined,
     });
   });

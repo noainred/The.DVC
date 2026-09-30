@@ -107,8 +107,9 @@ describe('v2.661 카드 순서 · 출처 문구', async () => {
     expect(() => m.saveOrder(bad, ['cpuPct'])).not.toThrow();
   });
   it('CPU 출처 · 전력 사유 문구', () => {
-    expect(m.cpuSourceNote({ cpuSources: { telemetry: 0, os: 3, vcenter: 0, history: 2 } })).toMatch(/베어메탈 사용률\(OS·iDRAC 대체 경로\) 3구간 · 베어메탈 사용률 이력 2구간.*튈 수/);
-    expect(m.cpuSourceNote({ cpuSources: { telemetry: 0, os: 0, vcenter: 0, history: 0 } })).toMatch(/읽지 못했습니다/);
+    expect(m.cpuSourceNote({ cpuSources: { telemetry: 0, sensor: 3, bmIdrac: 0, history: 2 } })).toMatch(/iDRAC CPU 센서 3구간 · iDRAC 대체 경로 이력 2구간.*튈 수/);
+    expect(m.cpuSourceNote({ cpuSources: { telemetry: 0, sensor: 0, bmIdrac: 0, history: 0 } })).toMatch(/iDRAC 의 어느 경로로도 읽지 못했습니다/);
+    expect(Object.values(m.CPU_SRC).join()).not.toMatch(/vCenter|OS/);
     expect(m.cpuSourceNote({})).toBe('');
     expect(m.powerNote({ power: { found: false, reason: 'no-edge-report' } })).toMatch(/엣지의 전력 보고/);
     expect(m.powerNote({ power: { found: true } })).toBe('');
@@ -184,9 +185,28 @@ describe('v2.663 서버 표 · 조건 검색 · CPU 진단', async () => {
   });
   it('기간 라벨 · CPU 진단 문구', () => {
     expect(m.hoursLabel(6)).toBe('6시간'); expect(m.hoursLabel(168)).toBe('7일'); expect(m.hoursLabel(24)).toBe('24시간');
-    expect(m.cpuDiagText({ code: 'no-tag' })).toMatch(/서비스태그를 모릅니다/);
-    expect(m.cpuDiagText({ code: 'vcenter-unread', reason: 'stale', host: { name: 'esx4' } })).toMatch(/esx4 의 vCenter 가 위임\(엣지\) push 가 오래돼/);
-    expect(m.cpuDiagText({ code: 'ok', source: 'vcenter', host: { name: 'esx4' } })).toMatch(/esx4\(vCenter\)/);
+    expect(m.cpuDiagText({ code: 'ok', source: 'sensor', name: 'CPU Usage' })).toMatch(/CPU 센서\(CPU Usage\)/);
+    expect(m.cpuDiagText({ code: 'ok', source: 'bmIdrac' })).toMatch(/iDRAC 대체 경로/);
+    expect(m.cpuDiagText({ code: 'sensor-stale', ageMs: 3 * 3_600_000 })).toMatch(/3시간 전/);
+    expect(m.cpuDiagText({ code: 'bm-os-only' })).toMatch(/OS\(SSH\) 경로라/);
+    expect(m.cpuDiagText({ code: 'no-idrac-cpu' })).toMatch(/vCenter 값은 쓰지 않습니다/);
+    expect(m.cpuDiagText({ code: 'sensor-stale', ageMs: '' })).toMatch(/— 전/);
     expect(m.cpuDiagText(null)).toBe('');
+  });
+  it('v2.665 멈춤 배너 — 어디서 멈췄는지 가른다', () => {
+    expect(m.idracStateBanner(null)).toBe(null);
+    expect(m.idracStateBanner({ stale: null, remote: true })).toBe(null);
+    const T = new Date(2026, 8, 30, 2, 32).getTime();
+    const edge = m.idracStateBanner({ stale: 'stale', remote: true, sampleAt: T, ageMs: 80 * 60_000, maxAgeMs: 15 * 60_000, collector: { known: true, ok: true, id: 'OC2', lastOkAt: T, lastOkAgeMs: 60_000 } });
+    expect(edge.tone).toBe('amber'); expect(edge.title).toMatch(/엣지의 iDRAC 수집/);
+    expect(edge.lines.join()).toMatch(/1시간 20분 전\(02:32\).*15분/);
+    expect(edge.lines.join()).toMatch(/collect\.idrac/);
+    const pull = m.idracStateBanner({ stale: 'stale', remote: true, sampleAt: T, ageMs: 1, maxAgeMs: 1, collector: { known: true, ok: false, id: 'OC2', lastOkAt: null, fails: 5, error: 'timeout' } });
+    expect(pull.tone).toBe('red'); expect(pull.lines.join()).toMatch(/연속 실패 5회.*사유: timeout/);
+    const hidden = m.idracStateBanner({ stale: 'stale', remote: true, collector: { known: true, ok: false, id: 'c', errorHidden: true } });
+    expect(hidden.lines.join()).toMatch(/전체 범위 관리자에게만/);
+    expect(m.idracStateBanner({ stale: 'stale', remote: true, collector: { known: false } }).lines.join()).toMatch(/모릅니다/);
+    expect(m.idracStateBanner({ stale: 'stale', remote: false, sampleAt: T, ageMs: 60_000, maxAgeMs: 1 }).lines.join()).toMatch(/직접 폴링/);
+    for (const b of [edge, pull]) expect(b.lines.join()).not.toMatch(/`/);
   });
 });
