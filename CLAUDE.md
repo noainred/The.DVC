@@ -3899,6 +3899,11 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **선 모양(v2.662)**: 흡기·배기는 기본 점선(`SERIES[].dash`). 계열별 모양·굵기·점은 `idracTrendText.js` 의 `normalizeStyles`·`loadStyles`·`saveStyles`
       (브라우저 `idracTrend.lineStyle` — 기본과 다른 계열만 저장)가 소유하고 카드 견본·차트·엑셀이 같은 값을 쓴다. 엑셀은 `?styles=k:모양:굵기:점` 을
       서버 `parseExportStyles` 가 허용 목록으로 거르고 `xlsxChart.js PRST_DASH` 로 `<a:prstDash>` 를 싣는다 — 모양 키를 늘리면 **두 목록을 함께** 고칠 것.
+    - **서버 표 · 조건 검색(v2.663)**: `GET /admin/idrac/trend/table?hours=&corp=*&site=*` 가 지표마다 전 서버 요약을 **쿼리 1회**로 준다(metrics
+      `statsSinceAll`·전력 `statsSince` — 시간당 롤업, 창이 앞쪽으로 최대 1시간 넓다). 조건 판정은 화면 `idracTrendText.filterTable`(이상=기간 최대,
+      이하=기간 최소, 값 없음은 판정 불가로 따로 센다 — 0 으로 보지 않는다). ⚠ 서비스태그는 `serverTrendSeries.serviceTagOf`(최상위 → 인벤토리)
+      하나로 읽는다 — 적재기가 최상위만 봐서 엣지 서버의 vCenter CPU 대체가 쌓이지 않았다(화면 머리 판정과 출처가 달랐다). 지금 CPU 를 못 읽는
+      사유는 `cpuFallbackDiag` → 응답 `cpuDiag` → 웹 `cpuDiagText`.
   - **CVP Overview EOS 버전 패널은 버전 순(최신 먼저)이다**(v2.657, `cvpOverviewText.versionList`·`cmpEosVersion` — 재사용 Collator numeric): 예전 '갈린 버전 먼저 → 대수' 순은
     사용자 요청으로 바꿨다. '버전 갈림' 은 태그로만 남는다 · 상한 12 · 넘치면 생략 개수를 적는다.
   - **GPU 추이 창은 수집 공백을 잇지 않는다**(v2.656, `GpuHistModal.gapRows`): 간격이 `max(버킷, 수집 주기) × 2` 를 넘으면 null 행을 끼워 선을 끊고

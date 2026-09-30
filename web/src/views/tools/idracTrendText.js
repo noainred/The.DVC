@@ -7,6 +7,8 @@
  *  · 계열마다 보관 기간이 다르다(전력 DB 기본 90일) — retentionNote 가 그 사실을 말한다.
  *  · 문구에 백틱·별표를 쓰지 않는다(BoldText 규약 — uiText.test.js 스윕).
  */
+import { csvCell } from '../../util/csv.js';
+
 export const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 export const PRESETS = [['1h', '1시간', HOUR], ['6h', '6시간', 6 * HOUR], ['24h', '24시간', DAY], ['7d', '7일', 7 * DAY], ['30d', '30일', 30 * DAY], ['90d', '90일', 90 * DAY], ['1y', '1년', 365 * DAY]];
 export const BUCKET_LABELS = [[MIN, '1분'], [5 * MIN, '5분'], [30 * MIN, '30분'], [2 * HOUR, '2시간'], [6 * HOUR, '6시간'], [DAY, '1일']];
@@ -231,4 +233,85 @@ export function saveStyles(storage, styles) {
 /** 엑셀 내보내기 쿼리 — `k:모양:굵기:점` 을 쉼표로. 기본값이면 빈 문자열(서버 기본과 같다). */
 export function stylesQuery(styles, keys) {
   return (keys || []).filter((k) => styles?.[k]).map((k) => `${k}:${styles[k].dash}:${styles[k].width}:${styles[k].dot ? 1 : 0}`).join(',');
+}
+
+/*
+ * v2.663 — 서버 표 · 조건 검색(사용자 요청 "데이터 센터 선택하면 전체 서버 리스트를 표 형식으로" + "최근 몇 시간 동안 CPU/GPU 온도
+ * 몇 도 이상/이하, 소비 전력 몇 W 이상/이하 검색하는 조건식" — 선택: '최근 N시간 안에 한 번이라도').
+ * 판정: '이상' 은 그 기간 최대가 기준 이상, '이하' 는 최소가 기준 이하(= 한 번이라도 그랬다). 값이 없는 지표는 맞지 않은 것이 아니라
+ * **판정 불가**다 — 개수를 따로 센다(0 으로 보고 '이하' 에 걸리게 하면 거짓이다).
+ */
+export const TABLE_HOUR_PRESETS = [1, 6, 12, 24, 48, 72, 168, 720];
+export const TABLE_HOURS_MAX = 720;
+export const hoursLabel = (h) => (h % 24 === 0 && h >= 48 ? `${h / 24}일` : `${h}시간`);
+export const COND_OPS = [{ k: 'ge', label: '이상' }, { k: 'le', label: '이하' }];
+let condSeq = 0;
+export const newCond = (k = 'cpuTemp', op = 'ge', v = '') => ({ id: `c${(condSeq += 1)}`, k, op, v });
+/** 입력 칸 → 판정용 조건(값이 빈 칸·숫자 아님이면 뺀다 — 빈 칸을 0 으로 읽지 않는다). */
+export function activeConds(conds) {
+  return (conds || []).filter((c) => SERIES.some((s) => s.k === c.k) && (c.op === 'ge' || c.op === 'le'))
+    .map((c) => ({ ...c, n: typeof c.v === 'string' && c.v.trim() !== '' ? Number(c.v) : typeof c.v === 'number' ? c.v : NaN }))
+    .filter((c) => Number.isFinite(c.n));
+}
+/** 한 조건 → true | false | null(그 지표 값 없음). */
+export function condHit(row, c) {
+  const st = row?.[c.k];
+  if (!st) return null;
+  const x = c.op === 'ge' ? st.max : st.min;
+  if (typeof x !== 'number' || !Number.isFinite(x)) return null;
+  return c.op === 'ge' ? x >= c.n : x <= c.n;
+}
+/** 행 판정 — mode 'all'(모두) | 'any'(하나라도). { hit, unknown } — unknown 이면 판정에 필요한 값이 없어 결론을 못 냈다. */
+export function matchRow(row, conds, mode = 'all') {
+  if (!conds.length) return { hit: true, unknown: false };
+  const rs = conds.map((c) => condHit(row, c));
+  if (mode === 'any') {
+    if (rs.some((r) => r === true)) return { hit: true, unknown: false };
+    return { hit: false, unknown: rs.some((r) => r === null) };
+  }
+  if (rs.some((r) => r === false)) return { hit: false, unknown: false };
+  if (rs.some((r) => r === null)) return { hit: false, unknown: true };
+  return { hit: true, unknown: false };
+}
+export function filterTable(rows, conds, mode = 'all') {
+  const act = activeConds(conds);
+  const out = []; let unknown = 0;
+  for (const r of rows || []) { const m = matchRow(r, act, mode); if (m.hit) out.push(r); else if (m.unknown) unknown += 1; }
+  return { rows: out, unknown, active: act.length };
+}
+export function condText(conds, mode = 'all') {
+  const act = activeConds(conds);
+  if (!act.length) return '';
+  const parts = act.map((c) => { const s = SERIES.find((x) => x.k === c.k); return `${s.label} ${c.n}${s.unit.trim()} ${c.op === 'ge' ? '이상' : '이하'}`; });
+  return parts.join(mode === 'any' ? ' 또는 ' : ' 그리고 ');
+}
+/** 셀 강조 — 이 지표에 조건이 있고 그 조건을 만족하면 true. */
+export const cellHit = (row, k, conds) => activeConds(conds).some((c) => c.k === k && condHit(row, c) === true);
+/** 표 CSV(브라우저에서 만든다 — 화면에 있는 값 그대로). 결측은 빈 칸. */
+export function tableCsv(rows, hours) {
+  const q = csvCell; // 수식 인젝션 가드 공용 코어(util/csv.js)
+  const head = ['법인', '데이터센터', '서버', '서비스태그', '유형', ...SERIES.flatMap((s) => [`${s.label} 최대`, `${s.label} 평균`, `${s.label} 최소`])];
+  const lines = [`# 최근 ${hoursLabel(hours)}`, head.map(q).join(',')];
+  for (const r of rows || []) {
+    lines.push([r.corpName, r.site, r.name, r.serviceTag, r.kind === 'esxi' ? 'ESXi' : '베어메탈',
+      ...SERIES.flatMap((s) => [r[s.k]?.max, r[s.k]?.avg, r[s.k]?.min])].map(q).join(','));
+  }
+  return `﻿${lines.join('\r\n')}\r\n`;
+}
+
+/** v2.663: 지금 CPU 사용률을 못 읽는 사유(서버 cpuDiag). 과거 구간의 원인은 말하지 않는다 — '지금' 기준이다. */
+const VC_UNREAD = { stale: '위임(엣지) push 가 오래돼', unreachable: '수집 실패로 마지막 값을 이어 쓰는 중이라', maintenance: '점검중이라' };
+export function cpuDiagText(d) {
+  if (!d || !d.code) return '';
+  const h = d.host?.name ? `ESXi 호스트 ${d.host.name}` : 'ESXi 호스트';
+  switch (d.code) {
+    case 'ok': return d.source === 'telemetry' ? '지금 CPU 사용률: iDRAC 텔레메트리로 읽는 중.'
+      : d.source === 'os' ? '지금 CPU 사용률: 베어메탈 사용률 수집 값으로 채우는 중.' : `지금 CPU 사용률: ${h}(vCenter) 값으로 채우는 중.`;
+    case 'no-tag': return '지금 CPU 사용률을 채울 수 없습니다 — 서비스태그를 모릅니다(iDRAC 인벤토리 수집 전이거나 비어 있음). vCenter 호스트와 대조할 수 없습니다.';
+    case 'no-host': return `지금 CPU 사용률을 채울 수 없습니다 — 서비스태그 ${d.tag} 와 맞는 ESXi 호스트가 인벤토리에 없습니다.`;
+    case 'vcenter-unread': return `지금 CPU 사용률을 채울 수 없습니다 — ${h} 의 vCenter 가 ${VC_UNREAD[d.reason] || '지금 값을 주지 않아'} 그 값을 '지금 값' 으로 쌓지 않습니다.`;
+    case 'host-disconnected': return `지금 CPU 사용률을 채울 수 없습니다 — ${h} 가 vCenter 에서 연결 끊김(${d.host?.connectionState || '?'}) 상태입니다.`;
+    case 'no-host-cpu': return `지금 CPU 사용률을 채울 수 없습니다 — ${h} 의 CPU 사용량 값이 비어 있습니다.`;
+    default: return `CPU 사용률 진단 실패: ${d.reason || d.code}`;
+  }
 }

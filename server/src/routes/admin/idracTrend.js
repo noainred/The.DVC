@@ -24,7 +24,8 @@ import { config } from '../../config.js';
 import { getMetricsDb } from '../../metrics/db.js';
 import { loadMetricsSettings } from '../../metrics/settings.js';
 import { getDb as getPowerDb } from '../../idrac/db.js';
-import { TREND_METRICS, TREND_SERIES_ENABLED, TREND_AIRFLOW_ENABLED, CPU_FALLBACK_METRICS, trendValuesOf } from '../../idrac/serverTrendSeries.js';
+import { TREND_METRICS, TREND_SERIES_ENABLED, TREND_AIRFLOW_ENABLED, CPU_FALLBACK_METRICS, trendValuesOf, cpuFallbackDiag, currentCpuIndex } from '../../idrac/serverTrendSeries.js';
+import { unreadVcenterReasons } from '../../metrics/sampler.js';
 import { remotePowerEntries } from '../../collector/state.js';
 import { getSensorSeries } from '../../idrac/sensorStore.js';
 import { siteNameOf } from '../../idrac/scanSite.js';
@@ -316,11 +317,84 @@ function sendFile(res, names, ext, type, body, omitted) {
   res.send(body);
 }
 
+/*
+ * v2.663 — 서버 표 · 조건 검색(사용자 요청 "데이터 센터 선택하면 전체 서버 리스트를 표 형식으로" + "최근 몇 시간 동안 CPU/GPU 온도
+ * 몇 도 이상/이하, 소비 전력 몇 W 이상/이하 검색" — 선택: '최근 N시간 안에 한 번이라도' · 결과는 서버 목록).
+ * 한 번에 읽는다 — 지표마다 전 키 요약 1쿼리(metrics statsSinceAll · 전력 statsSince). 서버마다 조회하지 않는다.
+ * 조건 판정은 화면(idracTrendText.matchConds)이 한다 — 표 전체를 받으므로 조건을 바꿔도 다시 조회하지 않는다.
+ * 정직성: 값이 없는 지표는 null(0 아님). 시간당 롤업 기준이라 창이 앞쪽으로 최대 1시간 넓다 — 응답 since 가 실제 시작을 밝힌다.
+ */
+export const TABLE_HOURS = Object.freeze({ min: 1, max: 720, def: 24 });
+export function tableHoursOf(v) {
+  if (v == null || v === '') return TABLE_HOURS.def;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= TABLE_HOURS.min && n <= TABLE_HOURS.max ? n : null;
+}
+const TABLE_KEYS = ['cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp'];
+/** 여러 계열 요약을 하나로(CPU 사용률 — 샘플러가 서버·주기마다 한 출처만 적재하므로 합쳐도 이중 계수가 없다). */
+export function mergeStats(list) {
+  const xs = list.filter((x) => x && x.n > 0);
+  if (!xs.length) return null;
+  const n = xs.reduce((a, x) => a + x.n, 0);
+  return { avg: Math.round((xs.reduce((a, x) => a + x.avg * x.n, 0) / n) * 10) / 10, min: Math.min(...xs.map((x) => x.min)), max: Math.max(...xs.map((x) => x.max)), n };
+}
+/** 순수 — 서버 행 + 지표 요약 → 표 행. 값이 없으면 null. cur 는 창 안에서 마지막으로 본 값만(오래된 값을 '현재' 라 하지 않는다). */
+export function buildTableRows(rows, { stats = {}, latest = {}, power = new Map(), powerKeyFor = () => null, since = 0 } = {}) {
+  return rows.map((r) => {
+    const out = { ...r };
+    for (const k of TABLE_KEYS) {
+      const st = k === 'cpuPct' ? mergeStats((stats.cpuPct || []).map((m) => m.get(r.id))) : stats[k]?.get(r.id) || null;
+      const cands = (latest[k] || []).map((m) => m.get(r.id)).filter((x) => x && x.ts >= since).sort((a, b) => b.ts - a.ts);
+      out[k] = st ? { ...st, cur: cands[0] ? Math.round(cands[0].v * 10) / 10 : null } : null;
+    }
+    const pk = powerKeyFor(r);
+    const ps = pk ? power.get(pk) : null;
+    out.powerW = ps && ps.count > 0 ? { avg: ps.avg, min: ps.min, max: ps.peak, n: ps.count, cur: null } : null;
+    return out;
+  });
+}
+
 export function registerIdracTrend(adminRouter) {
   adminRouter.get('/idrac/trend/servers', adminOnly, async (req, res) => {
     const { rows, omitted, scoped } = serverRows(req, { gpuKeys: await gpuKeysFn() });
     res.json({ ok: true, servers: rows, retentionDays: trendRetentionDays(), powerRetentionDays: config.idrac.retentionDays || 0,
       enabled: TREND_SERIES_ENABLED, ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}) });
+  });
+
+  // v2.663: 서버 표 · 조건 검색. corp·site 에 '*' 를 주면 전체. 조건 판정은 화면이 한다(위 머리말).
+  adminRouter.get('/idrac/trend/table', adminOnly, async (req, res) => {
+    const hours = tableHoursOf(req.query.hours);
+    if (hours == null) return res.status(400).json({ ok: false, reason: `기간은 ${TABLE_HOURS.min}~${TABLE_HOURS.max}시간 정수입니다.` });
+    const now = Date.now();
+    const since = Math.floor((now - hours * HOUR) / HOUR) * HOUR;
+    const { rows, omitted, scoped } = serverRows(req, { gpuKeys: await gpuKeysFn() });
+    const corp = String(req.query.corp ?? '*'); const site = String(req.query.site ?? '*');
+    let targets = rows.filter((r) => (corp === '*' || r.corp === corp) && (site === '*' || r.site === site));
+    if (req.query.gpuOnly === '1') targets = targets.filter((r) => r.gpu);
+    const errors = {};
+    const stats = {}; const latest = {};
+    try {
+      const db = await getMetricsDb();
+      const read = (k, metrics) => {
+        stats[k] = []; latest[k] = [];
+        for (const m of metrics) {
+          try { stats[k].push(db.statsSinceAll(m, since)); latest[k].push(db.latestAll(m)); } catch (e) { errors[k] = e?.message || String(e); }
+        }
+      };
+      read('cpuPct', [TREND_METRICS.cpuPct, CPU_FALLBACK_METRICS.os, CPU_FALLBACK_METRICS.vcenter]);
+      for (const k of ['cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp']) read(k, [TREND_METRICS[k]]);
+      for (const k of ['cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp']) stats[k] = stats[k][0] || new Map();
+    } catch (e) { errors.metrics = e?.message || String(e); }
+    let power = new Map(); let powerKeyFor = () => null;
+    try {
+      const pdb = await getPowerDb();
+      power = pdb.statsSince(since);
+      const entries = remotePowerEntries();
+      powerKeyFor = (r) => { const s = serverById(r.id); return s ? powerKeyOf(s, { entries, hasSeries: (k) => power.has(k) }).key : null; };
+    } catch (e) { errors.powerW = e?.message || String(e); }
+    const out = buildTableRows(targets, { stats, latest, power, powerKeyFor, since });
+    res.json({ ok: true, hours, since, now, rows: out, total: out.length, errors,
+      ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}) });
   });
 
   adminRouter.get('/idrac/trend/export.csv', adminOnly, csvPerm, async (req, res) => {
@@ -418,12 +492,19 @@ export function registerIdracTrend(adminRouter) {
     if (win.error) return res.status(400).json({ ok: false, reason: win.error });
     const k = kindOf(s);
     const { points, errors, firstTs, cpuSources, cpuHistoryKey, power } = await seriesFor(s, win);
+    // v2.663: 지금 CPU 사용률을 어느 경로로 읽는지 · 못 읽으면 왜인지(사용자 신고 "같은 데이터센터인데 CPU 사용률이 나오는 게 있고 안 나오는 게 있어").
+    let cpuDiag = null;
+    try {
+      const snap = store.get() || {};
+      const latest = s.remote ? s.sensors : getSensorSeries(String(s.id)).latest;
+      cpuDiag = cpuFallbackDiag(s, { latest, cpuIndex: currentCpuIndex(), hosts: snap.hosts || [], unread: unreadVcenterReasons(snap) });
+    } catch (e) { cpuDiag = { code: 'error', reason: e?.message || String(e) }; }
     const errList = Object.entries(errors);
     if (errList.length) console.warn(`[idrac] 통합 추이 조회 일부 실패(${id}): ${errList.map(([a, b]) => `${a}=${b}`).join(' · ')}`); // 삼키지 않는다(v2.493)
     res.json({
       ok: true, id, ...k, remote: !!s.remote, start: win.start, end: win.end, bucketMs: win.bucketMs, custom: win.custom,
       retentionDays: keep, retention: { metricsDays: keep, powerDays: config.idrac.retentionDays || 0 },
-      enabled: TREND_SERIES_ENABLED, airflow: TREND_AIRFLOW_ENABLED, firstTs, points, cpuSources, cpuHistory: cpuHistoryKey ? true : undefined, power,
+      enabled: TREND_SERIES_ENABLED, airflow: TREND_AIRFLOW_ENABLED, firstTs, points, cpuSources, cpuHistory: cpuHistoryKey ? true : undefined, power, cpuDiag,
       errors: errList.length ? errors : undefined,
     });
   });

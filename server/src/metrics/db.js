@@ -73,6 +73,9 @@ function initSqlite() {
     const bucketHourly = db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max
       FROM samples_hourly WHERE metric=? AND k=? AND h>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
     const hourlyMin = db.prepare('SELECT MIN(h) AS mn FROM samples_hourly WHERE metric=? AND k=?');
+    // v2.663: 한 지표의 전 키 요약(시간당 롤업 — 생략분까지 정확). 서버 표·조건 검색이 한 번에 읽는다(서버마다 조회하지 않게).
+    const statsHourlyAll = db.prepare(`SELECT k, SUM(sum)/SUM(n) AS avg, MIN(mn) AS min, MAX(mx) AS max, SUM(n) AS n
+      FROM samples_hourly WHERE metric=? AND h>=? GROUP BY k`);
     // 키 하나의 첫/마지막 관측 시각(v2.504). **COUNT 를 넣지 않는다** — `meta(metric)` 의 COUNT(*) 는
     // 그 metric 파티션 전체를 훑는다(감사 P2 #11). MIN/MAX 만이면 PK/인덱스 양끝 seek 로 끝난다.
     // 용도: '수집 시작 이전' 을 화면이 소급 표시하지 않게 하는 기준선(v2.351 '+2만 TB' 오표시 교훈).
@@ -275,6 +278,12 @@ function initSqlite() {
        * (파티션 풀스캔을 유발한다 — `meta()` 주석 참조).
        */
       /** 그 지표에 계열이 있는 키 집합(v2.661 — iDRAC 통합 추이 'GPU 서버만'). PK 선행열(metric,k) 인덱스로 읽는다. */
+      /** v2.663: sinceTs 가 속한 시간부터의 키별 {avg,min,max,n}(시간당 롤업 기준 — 창 앞쪽으로 최대 1시간 넓다). */
+      statsSinceAll: (metric, sinceTs) => {
+        const m = new Map();
+        for (const r of statsHourlyAll.all(metric, Math.floor(sinceTs / HOUR) * HOUR)) m.set(r.k, { avg: round1(r.avg), min: round1(r.min), max: round1(r.max), n: r.n });
+        return m;
+      },
       keysOf: (metric) => {
         const out = new Set();
         try { for (const r of db.prepare('SELECT DISTINCT k FROM samples_hourly WHERE metric=?').all(metric)) out.add(r.k); } catch { /* 구버전 */ }
@@ -372,6 +381,11 @@ function initJson() {
     historyStep(metric, k, sinceTs, bucketMs, limit) { const points = this.history(metric, k, sinceTs, bucketMs, limit); return { points, carried: 0, stepped: false, maxGapMs: null, ...historyCut(points, limit, Math.floor(sinceTs / bucketMs) * bucketMs) }; },
     recentAvgStep(metric, sinceTs) { const m = new Map(); for (const [k, a] of this.recentAvg(metric, sinceTs)) m.set(k, { ...a, carried: false }); return m; },
     keysOf: (metric) => { const out = new Set(); for (const r of rows) if (r.m === metric) out.add(r.k); return out; },
+    statsSinceAll: (metric, sinceTs) => {
+      const since = Math.floor(sinceTs / 3_600_000) * 3_600_000; const agg = new Map();
+      for (const r of rows) if (r.m === metric && r.t >= since) { const g = agg.get(r.k) || { sum: 0, n: 0, min: Infinity, max: -Infinity }; g.sum += r.v; g.n++; g.min = Math.min(g.min, r.v); g.max = Math.max(g.max, r.v); agg.set(r.k, g); }
+      const m = new Map(); for (const [k, g] of agg) m.set(k, { avg: round1(g.sum / g.n), min: round1(g.min), max: round1(g.max), n: g.n }); return m;
+    },
     metaKey: (metric, k) => { let mn = null, mx = null; for (const r of rows) if (r.m === metric && r.k === k) { if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx }; },
     dump: (metric, sinceTs, untilTs, limit) => rows.filter((r) => r.m === metric && r.t >= sinceTs && r.t <= untilTs).sort((a, b) => a.t - b.t).slice(0, limit).map((r) => ({ k: r.k, v: r.v, ts: r.t })),
     prune: (beforeTs) => { const n = rows.filter((r) => r.t >= beforeTs); if (n.length !== rows.length) { rows = n; try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } } },

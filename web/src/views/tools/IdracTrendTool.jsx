@@ -2,7 +2,7 @@
 // 디자인: 사용자 제공 핸드오프 design_handoff_idrac_trend(README · iDRAC 통합 추이 (기존 포탈).dc.html).
 // 셸(← 특수 기능 · 제목)은 SpecialTools.jsx 가 그린다 — 여기서는 본문만.
 // 판정은 서버(routes/admin/idracTrend.js)가 하고 문구·요약은 idracTrendText.js 가 한다(읽기만).
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ResponsiveContainer, ComposedChart, Line, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea } from 'recharts';
 import { fetchJson, canCsv, CSV_DENIED_NOTE, downloadFile, usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
@@ -10,11 +10,12 @@ import { Modal } from '../../components/Modal.jsx';
 import { EntityDetail } from '../../components/EntityDetail.jsx';
 import { IdracDetailModal } from '../idrac/IdracDetailModal.jsx';
 import { WARN_PCT, CRIT_PCT } from '../../console/consoleData.js';
+import { IdracTrendTable } from './IdracTrendTable.jsx';
 import {
   PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
   corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
   loadOrder, saveOrder, moveKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
-  loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
+  cpuDiagText, loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
 } from './idracTrendText.js';
 
 const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12 };
@@ -45,6 +46,7 @@ export default function IdracTrendTool() {
   const [rangeErr, setRangeErr] = useState(null);
   const [on, setOn] = useState(ALL_ON);
   const [modal, setModal] = useState(null);        // 'host' | 'idrac' | 'csv' | 'xlsx'
+  const [view, setView] = useState('chart');       // v2.663: 'chart'(서버 추이) | 'table'(서버 표 · 조건 검색)
   const [order, setOrder] = useState(() => loadOrder(store()));   // v2.661: 카드 순서(브라우저 저장)
   const [arrange, setArrange] = useState(false);                   // 순서 편집 모드(◀ ▶ 버튼)
   const [dragK, setDragK] = useState(null);
@@ -66,6 +68,7 @@ export default function IdracTrendTool() {
   const servers = useMemo(() => (gpuOnly ? allServers.filter((s) => s.gpu) : allServers), [allServers, gpuOnly]);
   const corps = useMemo(() => corpsOf(servers), [servers]);
   const sites = useMemo(() => (corp == null ? [] : sitesOf(servers, corp)), [servers, corp]);
+  const sitesFor = useCallback((c) => sitesOf(servers, c), [servers]);
   const inSite = useMemo(() => (corp == null || site == null ? [] : serversOf(servers, corp, site)), [servers, corp, site]);
   // 법인 → 첫 데이터센터 → 첫 서버(상위를 바꾸면 하위를 첫 항목으로).
   useEffect(() => { if (corps.length && !corps.some((c) => c.value === corp)) setCorp(corps[0].value); }, [corps, corp]);
@@ -105,17 +108,33 @@ export default function IdracTrendTool() {
   );
   const empty = emptyNote(data);
   const gaps = data ? gapAreas(pts, data.firstTs) : [];
+  const viewBtn = (k, label) => <button type="button" className={view === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '5px 14px', marginTop: 0 }} aria-pressed={view === k} onClick={() => setView(k)}>{label}</button>;
+  const gpuBox = (
+    <label className="flex" style={{ alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }} title="GPU 온도 센서를 보고하거나 GPU 온도가 한 번이라도 쌓인 서버만 목록에 남깁니다">
+      <input type="checkbox" checked={gpuOnly} disabled={!gpuCount && !gpuOnly} onChange={(e) => setGpuOnly(e.target.checked)} />
+      GPU 온도 있는 서버만 ({gpuCount}대)
+    </label>
+  );
+  const viewBar = <div className="flex wrap" style={{ gap: 6, marginBottom: 12 }} role="group" aria-label="보기">{viewBtn('chart', '📈 서버 추이')}{viewBtn('table', '📋 서버 표 · 조건 검색')}</div>;
+  if (view === 'table') {
+    return (
+      <>
+        {viewBar}
+        <div className="flex wrap" style={{ gap: 12, marginBottom: 12, justifyContent: 'flex-end' }}>{gpuBox}</div>
+        <IdracTrendTable corps={corps} sitesFor={sitesFor} initCorp={corp} initSite={site} gpuOnly={gpuOnly}
+          onOpen={(r) => { setCorp(r.corp); setSite(r.site); setServerId(r.id); setView('chart'); }} />
+      </>
+    );
+  }
 
   return (
     <>
+      {viewBar}
       <div className="flex wrap" style={{ gap: 12, marginBottom: 14, justifyContent: 'flex-end' }}>
         {sel('법인', corp, setCorp, corps)}
         {sel('데이터센터', site, setSite, sites.map((s) => ({ value: s.value, label: `${s.value} · ${s.n}대` })))}
         {sel('서버', serverId, setServerId, inSite.map((s) => ({ value: s.id, label: `${serverLabel(s)}${s.gpu ? ' · GPU' : ''}` })), 180)}
-        <label className="flex" style={{ alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }} title="GPU 온도 센서를 보고하거나 GPU 온도가 한 번이라도 쌓인 서버만 목록에 남깁니다">
-          <input type="checkbox" checked={gpuOnly} disabled={!gpuCount && !gpuOnly} onChange={(e) => setGpuOnly(e.target.checked)} />
-          GPU 온도 있는 서버만 ({gpuCount}대)
-        </label>
+        {gpuBox}
       </div>
       {gpuOnly && !servers.length && <div className="banner" style={{ marginBottom: 10 }}>GPU 온도를 보고하는 서버가 없습니다 — 체크를 풀면 전체 서버가 보입니다.</div>}
       {list.scoped && list.omittedOutOfScope > 0 && <div className="banner" style={{ marginBottom: 10 }}>범위 밖 서버 {list.omittedOutOfScope}대는 목록에서 뺐습니다.</div>}
@@ -279,7 +298,7 @@ export default function IdracTrendTool() {
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 12, lineHeight: 1.6 }}>
           왼쪽 축은 CPU 사용률(%) · CPU/GPU 온도(℃) 공통 0~100, 오른쪽 축은 소비 전력(W)입니다. 위 카드를 누르면 계열을 켜고 끕니다.<br />
-          CPU 사용률은 iDRAC 텔레메트리(Datacenter 라이선스) → 베어메탈 사용률 수집(OS·iDRAC 대체 경로) → vCenter ESXi 호스트 순으로 채웁니다. {cpuSourceNote(data)}{' '}
+          CPU 사용률은 iDRAC 텔레메트리(Datacenter 라이선스) → 베어메탈 사용률 수집(OS·iDRAC 대체 경로) → vCenter ESXi 호스트 순으로 채웁니다. {cpuSourceNote(data)} {cpuDiagText(data?.cpuDiag)}{' '}
           GPU 온도는 사용률이 아니라 GPU 가 동작하는지 가늠하는 근거입니다. 흡기는 서버가 빨아들이는 공기(전산실) 온도, 배기는 내보내는 공기 온도입니다.
           iDRAC 무응답 구간은 선을 끊고 0 으로 채우지 않습니다. {retentionNote(data)} 기간이 길면 집계 단위(5분 ~ 1일) 평균으로 표시합니다.
           {data?.firstTs ? ` 이 서버의 첫 적재는 ${ymd(data.firstTs)} ${hm(data.firstTs)} 입니다(그 이전은 비어 있습니다).` : ''}
