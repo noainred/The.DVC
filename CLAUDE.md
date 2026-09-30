@@ -3830,6 +3830,26 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - **GPU '수집 점검' 창(v2.658)은 배너와 같은 판정(guestWhy)을 법인별로 전부 보여 준다**(`gpuWhyText.collectCheckGroups`·`readCell` +
     `GpuTool.jsx GpuCollectCheckModal`, 사용자 요청 "외 22건 말고 전체를 법인별로 클릭해서"): 배너는 앞 6줄 + '외 N건'(누르면 이 창)이고, 창은 '일부만 수집'
     까지 싣는다. 법인 칩으로 거르고 호스트 줄은 값마다 읽음(출처)/못 읽음을 적는다. 새 조회를 만들지 않는다(이미 받은 /tools/gpu 응답만).
+  - ⚠⚠ **서버 온도 › 센서 상세(v2.659) — iDRAC 전 센서. 판정은 장비 Health → 장비 임계값 순이고, 포탈은 임계를 지어내지 않는다**
+    (`idrac/sensorDetail.js`(순수 판정) · `sensorDetailCache.js` · `redfish.js fetchSensorCollection` · `tools/serverSensors.js` ·
+    `routes/api/serverSensors.js` + 웹 `views/tools/serverTemp/SensorDetailView.jsx`·`sensorDetailText.js`, 사용자 요청 "서버 온도를 세부적으로 ·
+    iDRAC 모든 센서 · inlet 으로 전산실 온도 · CPU 를 온도와 CPU performance 로 · GPU 를 GPU 온도로". 선택: Sensors 컬렉션 전부 · CPU 사용률은
+    베어메탈 사용률 재사용 · 전체 검증. 회귀 `server/test/serverSensors2659.test.js` + 웹 `sensorDetailText.test.js`):
+    - **Thermal 임계값은 원래 받던 응답에 있었다** — `fetchSensors` 가 버리던 것을 `thermalDetail` 로 살렸다(왕복 0). 시계열(sensorStore)에는 싣지 않는다.
+    - **Sensors 컬렉션은 인벤토리 주기(30분)에만** — `$expand=*($levels=1)` 1회가 기본, 거부하면 확장 없이 다시, 멤버를 하나씩 읽는 경우는
+      `IDRAC_SENSOR_MEMBER_MAX`(250)·`IDRAC_SENSOR_BUDGET_MS`(45초) 안에서 동시 4. 못 읽은 멤버는 `notRead`, 404 섀시는 `absent`(실패 아님),
+      인증 거부는 던진다. ⚠ 이 현장 iDRAC 의 $expand 응답은 확인하지 못했다(가짜 Redfish 로만 검증 — 정직 기록).
+    - 상태 다섯(ok/warn/crit/**unknown**/**absent**) — 순서 빈 슬롯 → Health → 임계. 임계도 Health 도 없으면 unknown(정상 아님).
+    - 역할은 **이름·PhysicalContext 추정**이고 순서가 계약이다: 전원공급장치 → 흡기·배기 → GPU → CPU → DIMM. PSU 를 흡기보다 먼저 보지 않으면
+      HPE '32-P/S 1 Inlet' 이 전산실 온도가 된다(v2.621 DATA-04 와 같은 규칙).
+    - CPU 사용률 출처 순서: bmusage 최신값(서비스태그·id·fleetId 대소문자 무시) → iDRAC 텔레메트리(sensorStore latest.cpu) → Sensors 퍼센트 CPU 센서.
+      **출처를 칸에 적고**, 오래된 값은 stale, 전부 없고 bmusage 가 꺼져 있으면 'off'. GPU 온도는 **사용률이 아니다**(v2.650 규약) — 문구가 말한다.
+    - 신선도: Thermal 이 있으면 `sampleMaxAgeMs`(폴 주기 반영), 컬렉션만 있으면 75분. 낡은 상세·상세 없음은 요약(전산실 온도·경고 수)에서 빼고 따로 센다.
+    - 엣지: export 에 `sensorDetail`(콤팩트, 서버당 150) — 중앙 `sanitizeRemoteSensorDetail` 가 `expandCompact` 로 되돌리며 **상태를 다시 판정**한다
+      (엣지 state 를 믿지 않는다). **새 필드를 엣지 export 에 더하면 이 정제에도 더할 것**(v2.611 CEN2611-01).
+    - 캐시 `idrac-sensor-cache.json` 은 상태 파일(백업 감시 제외)이고 손상이면 새로 시작한다(arch2582 CACHE_OK). 파일명은 리터럴로 둔다(config-doc 생성기).
+    - 화면: 폴링하지 않는다(마운트 1회 + 새로고침). 비-admin 은 IP 로 등록된 id·name 을 가린다(상세 조회는 토큰을 되찾는다). 표 `.sd-table` 최소폭 1000px.
+      ⚠ 탭 5개가 되며 서버 온도 `Segment` 가 400px 에서 페이지를 51px 밀어냈다 — `flexWrap:'wrap'` 로 고쳤다(같은 탭 묶음을 쓰는 '서버별' 탭도 같이 넘쳤다 · 수정 후 두 탭 모두 0 · 변경 전 코드와의 A/B 는 하지 않았다).
   - **CVP Overview EOS 버전 패널은 버전 순(최신 먼저)이다**(v2.657, `cvpOverviewText.versionList`·`cmpEosVersion` — 재사용 Collator numeric): 예전 '갈린 버전 먼저 → 대수' 순은
     사용자 요청으로 바꿨다. '버전 갈림' 은 태그로만 남는다 · 상한 12 · 넘치면 생략 개수를 적는다.
   - **GPU 추이 창은 수집 공백을 잇지 않는다**(v2.656, `GpuHistModal.gapRows`): 간격이 `max(버킷, 수집 주기) × 2` 를 넘으면 null 행을 끼워 선을 끊고

@@ -5,6 +5,7 @@
  * never re-exported remote data — so there are no pull loops.
  */
 
+import { exportSensorDetail } from '../idrac/sensorDetailCache.js'; // v2.659
 import os from 'node:os';
 import { config, currentVersion } from '../config.js';
 import { getCollectorDenyStats } from './denyLog.js'; // v2.579: 도메인은 routes 를 import 하지 않는다(ARCH-03)
@@ -17,6 +18,15 @@ import { getSensorSeries, sensorPollCycle } from '../idrac/sensorStore.js';
 
 // 최신 온도 센서(콤팩트) — 중앙 '법인별 온도'가 위임 법인(엣지 등록) 서버도 보이게 실어 보낸다.
 // 센서 이름→℃ 맵 + 관측 시각만(시계열 전체는 안 보냄, 센서 수 상한 64).
+// v2.659: 엣지 export 의 센서 상세 상한 — 서버당 150개(보통 60~120개). 60초 pull 마다 실리므로 줄인다.
+export const EXPORT_SENSOR_MAX = 150;
+function exportSensorDetailCapped(serverId) {
+  const d = exportSensorDetail(serverId);
+  if (!d) return null;
+  if (d.list.length <= EXPORT_SENSOR_MAX) return d;
+  return { ...d, list: d.list.slice(0, EXPORT_SENSOR_MAX), omitted: (d.omitted || 0) + (d.list.length - EXPORT_SENSOR_MAX) };
+}
+
 function compactSensors(serverId) {
   const latest = getSensorSeries(serverId).latest;
   const temps = latest?.temps;
@@ -98,6 +108,8 @@ function localServersForExport() {
       vendor: isHpeEntry(s) ? 'hpe' : 'dell',
       inv: compactInv(inv),
       sensors: compactSensors(s.id), // 최신 온도(중앙 '법인별 온도'용) — 구버전 중앙은 무시(하위호환)
+      // v2.659: 센서 상세(임계값·상태·전압 등 — 콤팩트, 서버당 상한). 구버전 중앙은 모르는 필드라 버린다.
+      sensorDetail: exportSensorDetailCapped(s.id),
     });
   }
   return out;

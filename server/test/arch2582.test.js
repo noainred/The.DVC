@@ -83,6 +83,7 @@ test('ARCH-1 스윕 — configDir JSON 을 읽고 원자 쓰기로 저장하는 
   const CACHE_OK = new Set([
     'central/storageEdge.js', 'central/sanSwitchEdge.js', // 엣지 push 캐시 — 다음 push 가 재구축
     'idrac/invCache.js',                                  // iDRAC 인벤토리 캐시 — 30분 주기 재수집
+    'idrac/sensorDetailCache.js',                         // v2.659 iDRAC 센서 상세 캐시 — 인벤토리 주기에 재수집
     'inventory/osStore.js', 'inventory/osScanner.js',     // OS 스캔 캐시
     'central/fleet.js',                                   // 엣지 fleet push 캐시
     'metrics/vmperfDb.js', 'vmseries/db.js',              // _index.json(표시용 인덱스)

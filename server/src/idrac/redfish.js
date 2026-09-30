@@ -22,6 +22,9 @@ import { pctFromMetric, pickReports, buildIdracUsage } from '../bmusage/parse/id
 import { readTextCapped } from '../util/readCapped.js';
 import { readBodyPrefix } from '../util/readPrefix.js';
 import { capStr } from '../util/capStr.js'; // v2.607 SEC2607-03
+import { trimTrailingSlashes } from '../util/trimSlashes.js';
+import { reqTimeoutMs } from '../util/envTimeout.js';
+import { parseThermalTemp, parseThermalFan, parseRedfishSensor } from './sensorDetail.js'; // v2.659: 센서 상세(임계값·상태)
 import { trustedRedirect } from '../util/resilientFetch.js'; // v2.612 SEC2612-03
 import { ssrfBlockReason } from '../util/ssrfBlock.js'; // v2.612 SEC2612-03
 /** 라이선스 항목 문자열 상한(v2.607 SEC2607-03). */
@@ -1074,6 +1077,8 @@ export async function fetchSensors(entry) {
 
   const temps = [];
   const fans = [];
+  // v2.659: 같은 Thermal 응답에서 임계값·상태까지 담은 상세 레코드(추가 HTTP 0회). 시계열(sensorStore)에는 싣지 않는다.
+  const thermalDetail = [];
   let thermalRead = 0;
   let thermalFailed = 0;
   let thermalErr = '';
@@ -1091,6 +1096,9 @@ export async function fetchSensors(entry) {
         if (e?.authFailed) throw e;
         continue;
       }
+      const chassisId = String(m).split('/').filter(Boolean).pop() || '';
+      for (const t of thermal.Temperatures || []) { const d = parseThermalTemp(t, { chassis: chassisId }); if (d) thermalDetail.push(d); }
+      for (const f of thermal.Fans || []) { const d = parseThermalFan(f, { chassis: chassisId }); if (d) thermalDetail.push(d); }
       for (const t of thermal.Temperatures || []) {
         // v2.611(감사 COL2611-03): 설치되지 않은 센서(`Status.State:"Absent"` — iLO 는 빈 DIMM·CPU 소켓을 ReadingCelsius:0
         //   으로 나열한다)는 값이 아니다. 예전에는 0℃ 선이 센서 탭·추이에 그려졌다. Enabled·미지정은 그대로 둔다.
@@ -1160,7 +1168,73 @@ export async function fetchSensors(entry) {
     }
   } catch { /* telemetry optional/unlicensed */ }
 
-  return { temps, fans, inletCelsius, maxCelsius, cpuUsagePct, thermalOk, error: thermalError };
+  return { temps, fans, inletCelsius, maxCelsius, cpuUsagePct, thermalOk, error: thermalError, thermalDetail };
+}
+
+/*
+ * ══ Sensors 컬렉션 전부(v2.659) ═══════════════════════════════════════════════
+ * 사용자 선택 '+ Sensors 컬렉션 전부' — 전압·전류·전력·퍼센트(CPU 사용률 등)까지 읽는다.
+ * ⚠ 왕복 예산: 섀시마다 `Sensors?$expand=*($levels=1)` 한 번이 기본이다(iDRAC9 는 $expand 를 지원한다고
+ *   알려져 있다 — ⚠ 이 현장 펌웨어의 응답은 확인하지 못했다, 정직 기록). 확장이 안 되면(멤버에 값이 없음)
+ *   멤버를 하나씩 읽는데, 센서가 100개를 넘는 장비가 흔하므로 **상한(SENSOR_MEMBER_MAX)과 시간 예산**을 둔다.
+ *   못 읽은 멤버 수는 `notRead` 로 밝힌다(조용한 상한 금지). 호출은 인벤토리 주기(30분)에만 한다.
+ * ⚠ 404 는 '이 장비에 Sensors 컬렉션이 없다'(구펌웨어·다른 벤더) — 실패가 아니라 `absent` 로 센다.
+ * ⚠ 인증 거부는 삼키지 않고 던진다(계정 잠금 — v2.535 규약).
+ */
+export const SENSOR_MEMBER_MAX = Math.max(20, Number(process.env.IDRAC_SENSOR_MEMBER_MAX) || 250);
+export const SENSOR_COLLECT_BUDGET_MS = reqTimeoutMs(process.env.IDRAC_SENSOR_BUDGET_MS, 45_000, { min: 5_000, max: 300_000 }); // 2^31 초과·빈 값·음수 정규화(v2.605 TIM2605-04)
+export async function fetchSensorCollection(entry, { signal = null, now = Date.now } = {}) {
+  const base = trimTrailingSlashes(String(entry.host || ''));
+  const G = (p) => get(base, p, entry.username, entry.password, { signal });
+  const started = now();
+  const sensors = [];
+  let chassisN = 0; let absent = 0; let failed = 0; let expanded = 0; let perMember = 0; let notRead = 0;
+  let firstErr = '';
+  const chassisRoot = await G('/redfish/v1/Chassis');
+  for (const m of (chassisRoot.Members || []).map((x) => x?.['@odata.id']).filter((x) => typeof x === 'string')) {
+    chassisN += 1;
+    const chassisId = m.split('/').filter(Boolean).pop() || '';
+    let coll = null;
+    try { coll = await G(`${m}/Sensors?$expand=*($levels=1)`); }
+    catch (e) {
+      if (e?.authFailed) throw e;
+      if (e?.status === 404 || /\b404\b/.test(String(e?.message))) { absent += 1; continue; }
+      // $expand 를 거부하는 구현 — 확장 없이 한 번 더.
+      try { coll = await G(`${m}/Sensors`); }
+      catch (e2) {
+        if (e2?.authFailed) throw e2;
+        if (e2?.status === 404 || /\b404\b/.test(String(e2?.message))) { absent += 1; continue; }
+        failed += 1; if (!firstErr) firstErr = String(e2?.message || e2).slice(0, 200); continue;
+      }
+    }
+    const members = Array.isArray(coll?.Members) ? coll.Members : [];
+    const withValue = members.filter((x) => x && typeof x === 'object' && (x.Reading !== undefined || x.ReadingType !== undefined || x.Name !== undefined));
+    if (withValue.length && withValue.length === members.length) {
+      expanded += 1;
+      for (const x of members) { const d = parseRedfishSensor(x, { chassis: chassisId }); if (d) sensors.push(d); }
+      continue;
+    }
+    // 확장되지 않았다 — 멤버를 하나씩(상한·시간 예산 안에서, 동시 4).
+    const links = members.map((x) => x?.['@odata.id']).filter((x) => typeof x === 'string');
+    const room = Math.max(0, SENSOR_MEMBER_MAX - perMember);
+    const take = links.slice(0, room);
+    notRead += links.length - take.length;
+    let i = 0;
+    const worker = async () => {
+      while (i < take.length) {
+        const link = take[i++];
+        if (now() - started > SENSOR_COLLECT_BUDGET_MS) { notRead += 1; continue; }
+        try { const o = await G(link); perMember += 1; const d = parseRedfishSensor(o, { chassis: chassisId }); if (d) sensors.push(d); }
+        catch (e) { if (e?.authFailed) throw e; notRead += 1; if (!firstErr) firstErr = String(e?.message || e).slice(0, 200); }
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+  }
+  return {
+    at: now(), ok: sensors.length > 0 || (chassisN > 0 && absent === chassisN),
+    sensors, chassis: chassisN, absent, failed, expanded, perMember, notRead,
+    ...(firstErr ? { error: firstErr } : {}),
+  };
 }
 
 /*

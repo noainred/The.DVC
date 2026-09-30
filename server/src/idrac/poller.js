@@ -8,7 +8,8 @@
 import { config } from '../config.js';
 import { withJob } from '../perf/monitor.js'; // v2.498: 스톨 발생 시 '진행 중 작업' 표시(계측 전용)
 import { loadRegistry, correctHpeServiceTag } from './registry.js';
-import { fetchPower, fetchInventory, fetchSensors } from './redfish.js';
+import { fetchPower, fetchInventory, fetchSensors, fetchSensorCollection } from './redfish.js';
+import { setThermalDetail, setSensorCollection, sensorCollectionStale } from './sensorDetailCache.js'; // v2.659 센서 상세
 import { pushSensorSample, setSensorPollCycle, markSensorPollStart } from './sensorStore.js';
 import { fetchOmeDevices } from './ome.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(예전 ome.eachLimited 와 같은 격리 의미)
@@ -195,7 +196,7 @@ async function pollOnceInner({ manual = false } = {}) {
           // v2.590(감사 F7): Thermal 을 하나도 못 읽었으면 **'읽었고 0개' 가 아니다** — 실패로 기록하고
           // 팬 컬렉션을 'failed' 로 올린다(파트 장애가 그 종류의 열린 장애를 닫지 않고 보류한다 — v2.548 F1).
           if (sn.thermalOk === false) sensorErr = new Error(sn.error || 'Thermal 을 읽지 못했습니다');
-          else sensorFans = sn.fans;
+          else { sensorFans = sn.fans; setThermalDetail(s.id, sn.thermalDetail, sensorAt); }
           // 빈 표본은 적재하지 않는다 — 온도도 CPU 도 없는 점을 매 분 쌓으면 센서 탭이 'N샘플' 을 말하며
           // 정상처럼 보인다. CPU(텔레메트리)만 읽힌 경우는 그 값만 싣는다(온도는 비어 있는 채로 — 지어내지 않는다).
           if (sn.thermalOk !== false || sn.cpuUsagePct != null) {
@@ -228,8 +229,16 @@ async function pollOnceInner({ manual = false } = {}) {
             if (inv.system?.hpe) { try { correctHpeServiceTag(s.id, { sku: inv.system.sku, serial: inv.system.serialNumber }); } catch { /* 교정 실패가 수집을 막지 않는다 */ } }
           } catch { /* keep last */ }
         }
+        // v2.659: Sensors 컬렉션(전압·전류·전력·퍼센트까지)은 인벤토리와 같은 느린 주기로만 — 매 주기 읽으면
+        //   서버당 GET 이 수십 번 늘 수 있다. 실패는 사유만 남기고 폴을 막지 않는다. 인증 거부는 위에서 이미 걸러졌다.
+        let collErr = null;
+        if (sensorCollectionStale(s.id, INVENTORY_MAX_AGE_MS)) {
+          try { setSensorCollection(s.id, await fetchSensorCollection(s)); }
+          catch (e) { collErr = e; setSensorCollection(s.id, { ok: false, sensors: [], error: describeError(e).message }); }
+        }
         results.push({
           id: s.id, name: s.name, type: 'idrac', watts: r ? r.watts : null,
+          ...(collErr ? { sensorCollectionError: describeError(collErr).message } : {}),
           ...(r?.partial ? { powerPartial: true, failedChassis: r.failedChassis, powerPartialReason: r.failedReason || '', powerNotStored: true } : {}),
           ...(powerErr ? { error: describeError(powerErr).message } : {}),
           ...(sensorErr ? { sensorError: describeError(sensorErr).message } : {}),

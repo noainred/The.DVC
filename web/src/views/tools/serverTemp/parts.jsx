@@ -31,7 +31,8 @@ export function MonoLabel({ children, size = 10.5, spacing = '.14em', color = 'v
 /** 세그먼트(뷰·구분 전환). 활성은 파란 채움 — 시안 §1. */
 export function Segment({ items, value, onPick, pad = '5px 12px', size = 12.5 }) {
   return (
-    <div style={{ display: 'flex', gap: 2, background: 'var(--panel-deep)', border: '1px solid var(--border)', borderRadius: 9, padding: 3 }}>
+    // v2.659: flexWrap — 탭이 5개가 되어 400px 에서 페이지를 51px 밀어냈다(좁은 폭에서는 두 줄로 접는다).
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2, background: 'var(--panel-deep)', border: '1px solid var(--border)', borderRadius: 9, padding: 3 }}>
       {items.map(([k, label]) => (
         <button key={k} onClick={() => onPick(k)}
           style={{
