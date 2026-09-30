@@ -49,6 +49,8 @@ export const TOOLS = [
   //   거부 설정과 사용자 북마크가 조용히 깨진다.
   //   옛 이름은 전부 `aka` 에 남긴다 — 그래야 예전 이름으로 찾던 사용자가 기능을 잃지 않는다.
   { k: 'waste', icon: '♻️', label: 'Optimization', aka: ['자원 최적화', '자원 최적화 (CPU/Memory/Disk)', '낭비 리소스', '낭비 자원', '최적화'], desc: 'CPU·메모리 과할당(할당 vs 실사용 추이 · 감축 근거 리포트) · 전원 꺼진 VM · 스냅샷 · thin 회수가능 · Tools 미실행 — 낭비 자원 회수' },
+  // v2.660 — 사용자 제공 핸드오프(design_handoff_idrac_trend). 주 API 가 /api/admin/idrac/*(adminOnly)라 adminOnly.
+  { k: 'idrac-trend', icon: '📈', label: 'iDRAC 통합 추이', desc: 'CPU 사용률 · CPU/GPU 온도 · 소비 전력을 한 차트로 — 법인 → 데이터센터(iDRAC 스캔 대역) → 서버 · 1시간~1년·기간 지정 · 서비스태그로 ESXi/베어메탈 판별 후 상세 · CSV(단일 서버/데이터센터 전체)', aka: ['iDRAC 추이', 'GPU 온도 차트', 'CPU 온도', '소비 전력 추이', '서버 추이', 'idrac trend'], adminOnly: true },
   { k: 'esxitemp', icon: '🌡️', label: '서버 온도', desc: 'iDRAC/ESXi 수집 온도 — 물리·가상화 구분, 법인별 평균, 5년 추이' },
   { k: 'forecast', icon: '🔮', label: '용량 추세/예측', desc: '데이터스토어 증가율·가득 찰 예상일' },
   { k: 'dsusage', icon: '💽', label: 'vCenter별 스토리지', desc: 'DataCenter/vCenter별 데이터스토어 연결 현황 · 가용/전체 용량' },

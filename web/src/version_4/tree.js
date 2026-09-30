@@ -67,7 +67,7 @@ export const TREE = Object.freeze([
     id: 'facility', label: '물리 · 설비', items: [
       page('facility'),
       page('power'),
-      tool('fleet'), tool('hardware'), tool('serveranalysis'), tool('gpu'), tool('esxitemp'),
+      tool('fleet'), tool('hardware'), tool('serveranalysis'), tool('idrac-trend'), tool('gpu'), tool('esxitemp'),
       tool('roomtemp'), tool('powermap'), tool('pdu'), tool('serial-lookup'), tool('part-faults'),
       tool('bm-usage'), tool('corp-usage'),
       tool('nic-speed', true), tool('nic-models', true),
