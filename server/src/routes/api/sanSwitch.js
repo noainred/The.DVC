@@ -27,6 +27,7 @@ import { loadPerfSettings, savePerfSettings, LIMITS as PERF_LIMITS } from '../..
 import { pollPerfOnce, sanSwitchPerfStatus } from '../../sanswitch/perfPoller.js';
 import { listActivity as listPerfActivity, latestEventByDevice as latestPerfEventByDevice } from '../../sanswitch/perfActivityLog.js';
 import { perfEmptyDiag } from '../../sanswitch/perfDiag.js';
+import { sumArrayTraffic } from '../../sanswitch/trafficTotal.js';
 import { edgePerfStatusFor, listEdgePerfStatus } from '../../central/sanSwitchPerfEdge.js';
 // 월간 점검(v2.519) — 판정은 순수 모듈, 기준선은 포탈 안에 저장(스위치 카운터는 건드리지 않는다).
 import { checkDevice, checkPorts, summarizeAll, CHECK_ITEMS } from '../../sanswitch/healthCheck.js';
@@ -727,6 +728,54 @@ api.get('/tools/sanswitch/perf/storage-summary', toolsPerm, fullScopeOnly, async
     switches: devices.map((d) => ({ id: d.id, name: d.name, host: d.host, datacenterId: d.datacenterId, datacenterName: dcNameOf(d.datacenterId) })),
     buckets: agg.buckets, bucketMs: agg.bucketMs, series, counts, unavailable: agg.unavailable || false,
     ...(admin ? {} : { addressHidden: true }),
+  });
+});
+
+/**
+ * 전체(또는 선택 법인) SAN 스토리지 트래픽 합계 — 카드 한 장용(v2.669, 시안 'SAN Switch v2').
+ * 어레이(endpointKind==='array') 시리즈만 더한다 — 서버 HBA 는 같은 트래픽의 반대편이라 더하면 두 배가 된다.
+ * 합산·이월·부분 합 규칙은 sanswitch/trafficTotal.js 머리말. 단위는 저장값 그대로 바이트/초(화면이 ×8).
+ * 응답에 스위치·주소를 싣지 않는다(법인 이름과 개수뿐) — 형제 라우트와 같은 게이트.
+ */
+api.get('/tools/sanswitch/perf/traffic-total', toolsPerm, fullScopeOnly, async (req, res) => {
+  const { hours, from, to, issue: rangeIssue } = rangeParams(req.query);
+  const dcs = String(req.query.datacenterId || '').split(',').map((x) => x.trim()).filter(Boolean).map((x) => (x === NONE_DC ? '' : x));
+  const dcSet = dcs.length ? new Set(dcs) : null;
+  const devices = listDevices().filter((d) => d.enabled !== false && (!dcSet || dcSet.has(String(d.datacenterId || ''))));
+  const ids = devices.map((d) => d.id);
+  const groupOf = new Map(devices.map((d) => [String(d.id), String(d.datacenterId || '')]));
+  const st = loadPerfSettings();
+  const agg = await storageSeriesMulti(ids, { hours, from, to, groupOf });
+  const t = sumArrayTraffic(agg, {
+    // matched(등록 스토리지 시리얼 일치)는 arraySerialOf 가 '::' 이름에서만 시리얼을 뽑으므로 결과가 같다 — storage-summary 와 같은 분류.
+    isArray: (s) => endpointKind(s.key, { matched: false }) === 'array',
+    carryMs: agg.carryMs,
+  });
+  const dcNameOf = (() => {
+    try { const m = new Map(listDatacenters().map((x) => [x.id, x.name || x.id])); return (id) => m.get(id) || id || '(법인 미지정)'; }
+    catch { return (id) => id || '(법인 미지정)'; }
+  })();
+  // 엣지 위임 스위치 중 표본이 한 번도 중앙에 오지 않은 것 — 합계에서 빠져 있다는 사실을 개수로 밝힌다.
+  let lastTs = new Map();
+  try { lastTs = await latestSampleTs(ids); } catch { /* DB 불가 — unavailable 이 말한다 */ }
+  const edgeRaw = devices.filter((d) => String(d.agent || '').trim());
+  const edgeMissing = edgeRaw.filter((d) => !lastTs.get(String(d.id))).length;
+  let lastSampleAt = null;
+  for (const v of lastTs.values()) if (Number.isFinite(Number(v)) && (lastSampleAt == null || Number(v) > lastSampleAt)) lastSampleAt = Number(v);
+  const byDatacenter = Object.entries(t.byGroupNow || {})
+    .map(([id, bps]) => ({ datacenterId: id || NONE_DC, name: dcNameOf(id), bps }))
+    .sort((a, b) => b.bps - a.bps);
+  res.json({
+    ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: rangeIssue || null,
+    datacenterIds: dcs.map((x) => x || NONE_DC),
+    buckets: agg.buckets, bucketMs: agg.bucketMs, carryMs: agg.carryMs ?? null, total: t.total,
+    now: t.now, avg: t.avg, peak: t.peak, byDatacenter,
+    datacenters: new Set(devices.map((d) => String(d.datacenterId || ''))).size,
+    switches: devices.length, arrays: t.arrays,
+    measuredBuckets: t.measuredBuckets, partialBuckets: t.partialBuckets, carriedCells: t.carriedCells,
+    edgeSwitches: edgeRaw.length, edgeMissing, lastSampleAt,
+    intervalMs: st.intervalMs, enabled: !!st.enabled,
+    unavailable: !!agg.unavailable,
   });
 });
 

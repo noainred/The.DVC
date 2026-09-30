@@ -102,6 +102,13 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     ⚠ 화면은 **'전체를 받았는지' 를 추측하지 않는다** — `ports.portsScope`('full'|'problem')로
     구버전 엣지(필드 없음 → 엣지 업그레이드) / 현장 되돌림 / 크기 가드를 **각각 다르게** 안내한다
     (조치가 다르다). 판정·문구는 `web/src/views/tools/sanPortsScopeText.js` 하나가 소유한다.
+  - **SAN 스토리지 트래픽 카드(v2.669, 시안 'SAN Switch v2') — 합계는 어레이 포트만, 이월은 한계 안에서만**
+    (`sanswitch/trafficTotal.js sumArrayTraffic`(순수) + `GET /tools/sanswitch/perf/traffic-total` + 웹 `SanSwitchV2Parts.jsx`·`sanSwitchViewText.js`):
+    · 서버 HBA 포트는 같은 트래픽의 반대편이라 더하지 않는다(더하면 두 배). 분류는 storage-summary 와 같은 `endpointKind`.
+    · ⚠ 시안 README 의 예시('한 시리즈라도 null 이면 합계 null')를 그대로 쓰지 말 것 — 팹 A/B 캡처 시각이 어긋나 짧은 버킷에서 선이
+      통째로 사라진다. 합계 단계에서 perfDb 와 같은 한계(carryMs = 수집 주기 × 2)로 이월하고, 부분 합 버킷·한계 초과·'곧 첫 값이 올'
+      시리즈는 null. ⚠ 판정 루프에서 break 하지 말 것 — 뒤 시리즈의 직전 값이 낡아 다음 버킷이 줄줄이 빈다(목 데이터 검증에서 발견, 테스트 ③-b).
+    · 값이 없으면 '—'(0 Gbps 금지) · 주기 문구는 서버 intervalMs · 화면 목록 정렬 세그먼트는 모르는 값을 뒤로(sortRows 규칙).
   - **장비당 타임아웃은 세션을 실제로 끊어야 한다**(v2.417, `proxy/sshExec.js withDeadline` + `withSsh`
     signal): `Promise.race` 로 결과만 포기하면 SSH 세션이 남은 명령을 끝까지 돌려(최대 ~8.5분) 동시성
     상한이 실효를 잃고 다음 주기가 같은 장비에 두 번째 세션을 연다. SAN·스토리지·perf 폴러 전부 이

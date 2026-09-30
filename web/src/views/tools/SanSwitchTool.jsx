@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';   // v2.447: 서버 문구의 **강조** 별표 노출 방지(감사 I6)
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
-import { fetchJson, postJson, delJson, canCsv } from '../../api.js';
+import { fetchJson, postJson, delJson, canCsv, hasRole } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { agoText } from './relTime.js';
 import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2.631 A6-2631-04: 엣지 시계 빠름 표지
@@ -23,6 +23,8 @@ import { authStopInfo, authStopSummary, credFpText } from './storageAuthText.js'
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 import { powerText } from './sanPowerText.js';
+import { CapacityCard, TrafficCard, DcGrid } from './SanSwitchV2Parts.jsx'; // v2.669 시안 'SAN Switch v2'
+import { headStatus, lastCollectedAt, sortSwitches, hotCount, rowMark, LIST_SORTS } from './sanSwitchViewText.js';
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
 
 /**
@@ -77,6 +79,7 @@ export default function SanSwitchTool() {
   const [infoOpen, setInfoOpen] = useState(false);   // 장비 일반 정보 펼침
   const [tab, setTab] = useState('ports');           // 포트 목록 / 사용량 분석
   const [sort, setSort] = useState({ key: 'index', dir: 'asc' });  // 표 정렬(제목 클릭)
+  const [listSort, setListSort] = useState('usage');   // v2.669 스위치 목록 정렬 세그먼트(기본 사용률 높은 순) — 훅은 조기 return 위에
   useEffect(() => () => { if (testTimer.current) clearInterval(testTimer.current); }, []); // 언마운트 시 테스트 폴링 정리
 
   // v2.630 WEB2630-04: 403 은 다시 물어도 결과가 같다 — 폴링을 멈추고, 오류 객체를 그대로 둬 ErrorBox 가 권한 안내로 그리게 한다.
@@ -201,69 +204,49 @@ export default function SanSwitchTool() {
 
   return (
     <>
-      <div className="section-title" style={{ marginTop: 0 }}>🔗 SAN 스위치 모니터링</div>
-
-      {/* 상단 KPI — '용량'은 포트 용량이다. 라이선스 없는 포트는 여유에서 빠진다. */}
-      <div className="kpis" style={{ marginBottom: 12 }}>
-        <Kpi label="스위치" value={agg.switches} meta={switchesMeta(agg)} accent={agg.failed ? 'var(--red)' : undefined} />
-        <Kpi label="물리 포트" value={agg.total.toLocaleString()} meta={`라이선스 ${agg.licensed.toLocaleString()}`} />
-        <Kpi label="사용 중" value={agg.online.toLocaleString()} pct={agg.usedPct ?? undefined} meta={`포트 사용률 ${usedPctText(agg.usedPct)}`} />
-        <Kpi label="여유 포트" value={agg.free.toLocaleString()} meta="라이선스 − 사용중(증설 가능분)" accent={capacityLevel(agg.usedPct) === 'bad' ? 'var(--red)' : capacityLevel(agg.usedPct) === 'warn' ? 'var(--amber)' : undefined} />
-        <Kpi label="장애/비활성 포트" value={`${agg.faulty} / ${agg.disabled}`} meta={alertsMeta(agg)} accent={agg.faulty ? 'var(--red)' : undefined} />
-      </div>
-
-      {/* 법인 필터 + 검색 + 등록 */}
-      <div className="vc-quicknav" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-        <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8 }}>
-          <span className="qn-label" style={{ minWidth: 60 }}>🏢 법인</span>
-          {dcChips.map((dc) => {
-            const on = dcSel.has(dc);
-            const list = searched.filter((r) => dcName(r.datacenterId) === dc);
-            const a = aggregate(list);
+      {/* v2.669 시안 'SAN Switch v2' — 머리 · 포트 용량 · 스토리지 트래픽 · 법인 카드 격자. 기능·API·권한은 그대로다. */}
+      <div className="san2-head">
+        <div style={{ minWidth: 0 }}>
+          <h1>SAN 스위치 모니터링</h1>
+          {(() => {
+            const hs = headStatus(rows, dcChips.length);
+            const dot = hs.tone === 'ok' ? 'var(--green)' : hs.tone === 'warn' ? 'var(--amber)' : hs.tone === 'bad' ? 'var(--red)' : 'var(--text-faint)';
+            const last = lastCollectedAt(rows);
             return (
-              <button key={dc} className={`qn-btn${on ? ' on' : ''}${a.failed ? ' down' : ''}`} aria-pressed={on}
-                onClick={() => setDcSel((p) => { const n = new Set(p); n.has(dc) ? n.delete(dc) : n.add(dc); return n; })}
-                title={`${dc} — 스위치 ${a.switches}대 · 포트 ${a.online}/${a.licensed} (${usedPctText(a.usedPct)}) · 여유 ${a.free}`}>
-                {dc}<span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{list.length}</span>
-              </button>
+              <div className="san2-status">
+                <span className="san2-dot" style={{ background: dot }} />
+                <span>{hs.text}</span>
+                {last ? <span>· 마지막 수집 {ago(last)}</span> : null}
+                <span>· 30초마다 갱신</span>
+              </div>
             );
-          })}
-          {/* 법인 단위 스토리지 사용량 분석(v2.412, 사용자 요구) — 어레이는 팹 A/B 두 스위치에
-              나눠 물리므로 스위치 하나만 보면 트래픽의 절반만 보인다. 선택한 법인의 모든
-              스위치를 합산해야 어레이의 실제 사용량이 나온다. */}
-          <button className="tab" style={{ flex: 'none', padding: '6px 12px' }}
-            onClick={() => setDcPerf({
-              // 선택한 법인을 **전부** 넘긴다(v2.414) — 예전에는 1개일 때만 그 법인이고 2개
-              // 이상이면 '전체'로 뭉쳐져 법인 구분이 사라졌다(사용자 신고).
-              datacenterIds: [...dcSel].map(dcIdOfName).filter(Boolean),
-              label: dcSel.size ? [...dcSel].join(', ') : '전체',
-            })}
-            title={dcSel.size
-              ? `선택한 법인(${[...dcSel].join(', ')})의 스위치를 법인별로 나눠 스토리지 사용량을 분석합니다.`
-              : '법인 칩을 고르면 그 법인들만, 고르지 않으면 전체를 분석합니다. 법인을 2곳 이상 고르면 법인별로 분리해 보여줍니다.'}>
-            📊 스토리지 사용량 분석{dcSel.size ? ` — ${[...dcSel].join(', ')}` : ' — 전체'}
-          </button>
-          <SearchBox className="input" style={{ marginLeft: 'auto', maxWidth: 260, minWidth: 180 }}
-            value={q} onChange={setQ} placeholder="스위치·host·모델·엣지 찾기" />
-          <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={busy}
-            title="중앙이 직접 수집하는 스위치를 지금 다시 수집하고, 엣지 위임 스위치는 재수집 요청을 등록합니다(엣지는 다음 설정 pull 때 수집 후 바로 push)."
-            onClick={collectAll}>🔄 전체 수집</button>
-          {/* 전체 점검(v2.519, 사용자 요청 "전체 SAN 스위치 점검하는 버튼") — 저장된 스냅샷을
-              판정한다(스위치 재접속 없음. 28대 동시 SSH 는 그 자체가 운영 사고다).
-              최신 상태가 필요하면 위 '전체 수집' 을 먼저 누른다. */}
-          <button className="tab" style={{ flex: 'none', padding: '6px 12px' }}
+          })()}
+        </div>
+        <div className="san2-actions">
+          {/* 전체 점검(v2.519) — 저장된 스냅샷을 판정한다(스위치 재접속 없음). 최신 상태가 필요하면 '전체 수집' 먼저. */}
+          <button type="button" className="san2-btn"
             title="등록된 SAN 스위치를 월간 점검 체크리스트로 판정해 이상 유무를 요약하고, 세부 보고서를 PDF 로 내려받습니다. 스위치에 새로 접속하지 않고 마지막 수집 스냅샷을 판정합니다."
-            onClick={() => setHealthOpen(true)}>🩺 전체 점검</button>
-          <button className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} onClick={() => openForm(null)}>+ 스위치 등록</button>
-          {/* v2.513(사용자 요청 "san switch 도 같은 메뉴") — CSV·자유텍스트 대량 등록/내보내기·샘플.
-              스토리지 모니터링과 **같은 공용 컴포넌트**를 쓴다(판정·문구 단일 소스 — BulkDeviceIo 헤더).
-              ⚠ 식별 키는 host **단독**이다(스토리지는 host+type) — sanswitch/registry.js 가 host
-                중복을 거부하므로 type 을 키에 넣으면 '드라이런 통과 → 저장 예외' 가 된다. */}
-          {canCsv() && <button className="tab" style={{ flex: 'none', padding: '6px 12px' }}
+            onClick={() => setHealthOpen(true)}>전체 점검</button>
+          <button type="button" className="san2-btn" disabled={busy}
+            title="중앙이 직접 수집하는 스위치를 지금 다시 수집하고, 엣지 위임 스위치는 재수집 요청을 등록합니다(엣지는 다음 설정 pull 때 수집 후 바로 push)."
+            onClick={collectAll}>전체 수집</button>
+          {/* v2.513 — CSV·자유텍스트 대량 등록. 식별 키는 host 단독(sanswitch/registry.js 가 host 중복을 거부한다). */}
+          {canCsv() && <button type="button" className="san2-btn"
             title="CSV 또는 자유텍스트로 스위치를 일괄 등록/수정합니다. 샘플 내려받기·형식 검증·실제 로그인 테스트·선택 등록을 한 창에서 합니다."
-            onClick={() => setBulkOpen(true)}>⬆ 대량 등록(CSV·텍스트)</button>}
+            onClick={() => setBulkOpen(true)}>대량 등록(CSV·텍스트)</button>}
+          <button type="button" className="san2-btn primary" onClick={() => openForm(null)}>+ 스위치 등록</button>
         </div>
       </div>
+
+      {/* 포트 용량 — '용량'은 포트 용량이다. 라이선스 없는 포트는 여유에서 빠진다. */}
+      <CapacityCard agg={agg} scopeLabel={dcSel.size ? `선택 ${dcSel.size}개 법인` : '전체'} />
+
+      {/* 스토리지 트래픽(v2.669) — 법인 선택을 그대로 범위로 쓴다. */}
+      <TrafficCard datacenterIds={[...dcSel].map(dcIdOfName).filter(Boolean)} selected={dcSel.size} isAdmin={hasRole('admin')} />
+
+      {/* 법인 카드 격자(기존 칩 대체). 스토리지 사용량 분석(v2.412) — 선택한 법인을 **전부** 넘긴다(v2.414). */}
+      <DcGrid chips={dcChips} searched={searched} dcName={dcName} dcSel={dcSel} setDcSel={setDcSel}
+        onAnalyze={() => setDcPerf({ datacenterIds: [...dcSel].map(dcIdOfName).filter(Boolean), label: dcSel.size ? [...dcSel].join(', ') : '전체' })} />
 
       {msg && <div className="muted" style={{ fontSize: 12, margin: '6px 0 10px 2px' }}>{msg}</div>}
 
@@ -291,49 +274,58 @@ export default function SanSwitchTool() {
         ) : null;
       })()}
 
-      {/* 스위치 목록 */}
-      <div className="table-wrap">
-        <STable>
+      {/* 스위치 목록(v2.669) — 정렬 세그먼트(기본 사용률 높은 순) + 검색. 열 제목 클릭 정렬(STable)도 그대로다. */}
+      <div className="san2-card san2-list">
+        <div className="san2-listhead">
+          <h2>스위치 목록</h2>
+          <span className="muted" style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{shown.length}대 표시</span>
+          {hotCount(shown) ? <span className="san2-hot" title="포트 사용률 75% 이상(90% 이상은 증설 검토)">여유 부족(75%↑) {hotCount(shown)}대</span> : null}
+          <div className="san2-listtools">
+            <div className="san2-seg" role="group" aria-label="정렬">
+              {LIST_SORTS.map((o) => (
+                <button key={o.key} type="button" className={listSort === o.key ? 'on' : ''} aria-pressed={listSort === o.key} onClick={() => setListSort(o.key)}>{o.label}</button>
+              ))}
+            </div>
+            <SearchBox className="input" style={{ maxWidth: 240, minWidth: 160 }} value={q} onChange={setQ} placeholder="스위치·host·모델·엣지 찾기" />
+          </div>
+        </div>
+        <STable className="san2-table" minWidth={1080}>
           <thead>
             <tr>
-              <th>스위치</th><th>법인</th><th>모델</th><th>FOS</th><th>Domain</th><th>상태</th>
-              <th title="사용중 / 라이선스 포트. 라이선스 없는 포트(No_License)는 분모에서 뺍니다.">포트 사용</th>
-              <th style={{ minWidth: 130 }}>포트 사용률</th>
-              <th title="라이선스 − 사용중. 지금 새로 물릴 수 있는 포트 수입니다.">여유</th>
-              <th>장애/비활성</th><th>수집</th><th>수집 시각</th><th></th>
+              <th>스위치</th><th>법인</th><th>모델 · FOS</th><th>상태</th>
+              <th style={{ minWidth: 150 }} title="사용 중 / 라이선스 포트. 라이선스 없는 포트(No_License)는 분모에서 뺍니다.">포트 사용률</th>
+              <th title="라이선스 − 사용 중. 지금 새로 물릴 수 있는 포트 수입니다.">여유</th>
+              <th>장애 · 비활성</th><th>수집</th><th data-nosort>동작</th>
             </tr>
           </thead>
           <tbody>
-            {shown.map((r) => {
+            {sortSwitches(shown, listSort).map((r) => {
               const s = r.snap;
               const p = s?.ports || {};
               const lvl = capacityLevel(p.usedPct);
+              const mark = rowMark(r);
               return (
-                <tr key={r.id}>
+                <tr key={r.id} {...(mark ? { 'data-mark': '1', style: { '--row-mark': mark } } : {})}>
                   <td>
                     <button className="tab" style={{ padding: '2px 8px', fontWeight: 600 }} onClick={() => openDetail(r)} title="클릭하면 포트 상세를 봅니다">{r.name}</button>
-                    {/* 스위치가 스스로 보고한 이름(switchshow 의 switchName)을 함께 보여준다 —
-                        등록 표시명은 사람이 정한 별칭이라, 현장에서 콘솔에 찍히는 실제 이름과
-                        다를 수 있고 그때 어느 장비인지 헷갈린다(사용자 요구). */}
+                    {/* 스위치가 스스로 보고한 이름(switchshow 의 switchName)을 함께 — 등록 표시명과 다를 수 있다(사용자 요구). */}
                     <div className="muted" style={{ fontSize: 11 }}>
                       {s?.name && s.name !== r.name ? <><b style={{ fontWeight: 600 }}>{s.name}</b>{' · '}</> : null}
                       {hostText(r.host)}{r.vfId ? ` · VF ${r.vfId}` : ''}
                     </div>
                   </td>
                   <td>{dcName(r.datacenterId)}</td>
-                  <td>{s?.model || (s?.extra?.switchType
-                    ? <span className="muted" title="chassisshow 에서 모델명을 읽지 못해 switchType 원값을 표시합니다.">type {s.extra.switchType}</span>
-                    : <span className="muted">—</span>)}</td>
-                  <td>{s?.fabricOs || <span className="muted">—</span>}</td>
-                  <td>{s?.domainId ?? <span className="muted">—</span>}</td>
+                  <td>
+                    <div>{s?.model || (s?.extra?.switchType
+                      ? <span title="chassisshow 에서 모델명을 읽지 못해 switchType 원값을 표시합니다.">type {s.extra.switchType}</span>
+                      : <span className="muted">—</span>)}</div>
+                    <div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>FOS {s?.fabricOs || '—'} · Domain {s?.domainId ?? '—'}</div>
+                  </td>
                   <td>
                     {s?.ok
-                      ? <span style={{ color: s.switchState === 'Online' ? TONE.ok : TONE.warn }}>{s.switchState || 'OK'}</span>
+                      ? <span style={{ color: s.switchState === 'Online' ? TONE.ok : TONE.warn, whiteSpace: 'nowrap' }}>● {s.switchState || 'OK'}</span>
                       : (
-                        // v2.516(사용자 요구 "실패일때 클릭하면 구체적인 로그 보여주는 기능"):
-                        // 예전에는 클릭 안 되는 <span title=…> 이라 사유가 툴팁에만 있었다 —
-                        // 복사·공유가 안 되고 모바일에서는 볼 수도 없었다. 스토리지 화면은 이미
-                        // 버튼이었다(게이팅 비대칭). 상세 창이 수집 오류 원문·섹션별 사유를 보여준다.
+                        // v2.516: 실패 배지는 버튼이다(툴팁에만 사유를 두지 않는다) — 상세 창이 수집 오류 원문·섹션별 사유를 보여준다.
                         <button type="button" className="badge" style={{ background: TONE.bad, color: '#fff', cursor: 'pointer', border: 0, whiteSpace: 'nowrap' }}
                           title={s?.extra?.authStopped
                             ? `인증 실패로 주기 수집을 멈췄습니다 — ${authStopInfo(s.extra.authStopped, { what: '이 스위치' })?.detail || ''}\n\n(클릭하면 상세 창에서 사유와 자격증명 지문을 봅니다)`
@@ -341,22 +333,33 @@ export default function SanSwitchTool() {
                           onClick={() => openDetail(r)}>{s?.extra?.authStopped ? '인증 실패 정지 ⓘ' : '실패 ⓘ'}</button>
                       )}
                   </td>
-                  <td>{s?.ok ? <>{p.online}<span className="muted"> / {p.licensed}</span>{p.noLicense ? <span className="muted" style={{ fontSize: 11 }}> (미라이선스 {p.noLicense})</span> : null}</> : <span className="muted">—</span>}</td>
-                  <td>{s?.ok ? lvl === 'unknown' ? <span className="muted" title="라이선스 포트 0 — 사용률 미상">—</span> : <span title={`${p.usedPct}% 사용 · ${lvl === 'bad' ? '증설 검토 필요' : lvl === 'warn' ? '여유 부족' : '여유 있음'}`}><UsageCell pct={p.usedPct || 0} /></span> : <span className="muted">—</span>}</td>
-                  <td style={{ color: lvl === 'bad' ? TONE.bad : lvl === 'warn' ? TONE.warn : undefined, fontWeight: 600 }}>{s?.ok ? p.free : '—'}</td>
+                  <td data-sort={s?.ok && lvl !== 'unknown' ? p.usedPct : ''}>
+                    {s?.ok && lvl !== 'unknown' ? (
+                      <div title={`${p.usedPct}% 사용 · ${lvl === 'bad' ? '증설 검토 필요' : lvl === 'warn' ? '여유 부족' : '여유 있음'}`}>
+                        <b style={{ color: lvl === 'bad' ? TONE.bad : lvl === 'warn' ? TONE.warn : undefined }}>{p.usedPct}%</b>
+                        <div className="san2-ubar"><span style={{ width: `${Math.min(100, p.usedPct)}%`, background: lvl === 'bad' ? TONE.bad : lvl === 'warn' ? TONE.warn : 'var(--accent)' }} /></div>
+                        <span className="muted" style={{ fontSize: 11 }}>{p.online} / {p.licensed}{p.noLicense ? ` · 미라이선스 ${p.noLicense}` : ''}</span>
+                      </div>
+                    ) : <span className="muted" title={s?.ok ? '라이선스 포트 0 — 사용률 미상' : '수집 실패 — 값을 모릅니다'}>—</span>}
+                  </td>
+                  <td style={{ color: lvl === 'bad' ? TONE.bad : lvl === 'warn' ? TONE.warn : undefined, fontWeight: 700 }}>{s?.ok ? p.free : <span className="muted">—</span>}</td>
                   <td>{s?.ok ? <span style={{ color: (p.faulty || p.disabled) ? TONE.warn : undefined }}>{p.faulty} / {p.disabled}</span> : <span className="muted">—</span>}</td>
-                  <td className="muted" style={{ fontSize: 11 }}>{r.agent ? `엣지 ${r.agent}` : '중앙 직접'}<div>{r.collectMethod === 'rest' ? 'REST' : 'SSH'}</div></td>
-                  <td className="muted" style={{ fontSize: 11 }}>{ago(s?.collectedAt)}{(() => { const m = edgeClockAheadMark(s); return m ? <span className="badge amber" style={{ marginLeft: 4, whiteSpace: 'nowrap', fontSize: 10 }} title={m.title}>{m.label}</span> : null; })()}{r.pending ? <div style={{ color: TONE.warn }}>재수집 대기</div> : null}</td>
+                  <td className="muted" style={{ fontSize: 11 }} data-sort={s?.collectedAt || ''}>
+                    <span className={`san2-pill${r.agent ? ' edge' : ''}`} title={r.agent ? `엣지 ${r.agent} 가 수집합니다` : '중앙이 직접 수집합니다'}>{r.agent ? `엣지 ${r.agent}` : '중앙'}</span>
+                    <div style={{ marginTop: 3 }}>{r.collectMethod === 'rest' ? 'REST' : 'SSH'} · {ago(s?.collectedAt)}
+                      {(() => { const m = edgeClockAheadMark(s); return m ? <span className="badge amber" style={{ marginLeft: 4, whiteSpace: 'nowrap', fontSize: 10 }} title={m.title}>{m.label}</span> : null; })()}</div>
+                    {r.pending ? <div style={{ color: TONE.warn }}>재수집 대기</div> : null}
+                  </td>
                   <td style={{ whiteSpace: 'nowrap' }}>
-                    <button className="tab" style={{ padding: '2px 8px' }} disabled={busy} onClick={() => collectNow(r)}>수집</button>{' '}
-                    <button className="tab" style={{ padding: '2px 8px' }} onClick={() => openForm(r)}>수정</button>{' '}
-                    <button className="tab" style={{ padding: '2px 8px' }} disabled={busy} onClick={() => remove(r)}>삭제</button>
+                    <button type="button" className="san2-ghost" disabled={busy} onClick={() => collectNow(r)}>수집</button>
+                    <button type="button" className="san2-ghost" onClick={() => openForm(r)}>수정</button>
+                    <button type="button" className="san2-ghost danger" disabled={busy} onClick={() => remove(r)}>삭제</button>
                   </td>
                 </tr>
               );
             })}
-            {!shown.length && <tr><td colSpan={13} className="muted" style={{ textAlign: 'center', padding: 24 }}>
-              {rows.length ? '검색어/법인 필터에 맞는 스위치가 없습니다 — 검색어를 지우거나 법인 칩을 해제하세요.' : "등록된 SAN 스위치가 없습니다. 오른쪽 위 '+ 스위치 등록'으로 추가하세요."}
+            {!shown.length && <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 24 }}>
+              {rows.length ? '검색어/법인 필터에 맞는 스위치가 없습니다 — 검색어를 지우거나 법인 선택을 해제하세요.' : "등록된 SAN 스위치가 없습니다. 오른쪽 위 '+ 스위치 등록'으로 추가하세요."}
             </td></tr>}
           </tbody>
         </STable>
