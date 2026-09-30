@@ -114,3 +114,39 @@ describe('v2.661 카드 순서 · 출처 문구', async () => {
     expect(m.powerNote({ power: { found: true } })).toBe('');
   });
 });
+
+describe('v2.662 선 모양', async () => {
+  const m = await import('./idracTrendText.js');
+  it('기본 — 흡기·배기는 점선, 나머지는 실선 · 굵기 2 · 점 없음', () => {
+    expect(m.DEFAULT_STYLES.inletTemp).toEqual({ dash: 'dash', width: 2, dot: false });
+    expect(m.DEFAULT_STYLES.exhaustTemp.dash).toBe('dash');
+    expect(m.DEFAULT_STYLES.cpuPct).toEqual({ dash: 'solid', width: 2, dot: false });
+    expect(m.dashArrayOf('dash')).toBe('6 4');
+    expect(m.dashArrayOf('solid')).toBeUndefined();
+    expect(m.isDefaultStyles(m.normalizeStyles(null))).toBe(true);
+  });
+  it('정규화 — 모르는 계열·모양·굵기는 기본값, 전 계열을 채운다', () => {
+    const s = m.normalizeStyles({ cpuPct: { dash: 'dot', width: 9, dot: 'y' }, zz: { dash: 'dot' }, gpuTemp: 'x' });
+    expect(s.cpuPct).toEqual({ dash: 'dot', width: 2, dot: false });
+    expect(s.gpuTemp).toEqual(m.DEFAULT_STYLES.gpuTemp);
+    expect(Object.keys(s)).toEqual(m.DEFAULT_ORDER);
+    expect(m.normalizeStyles([1, 2])).toEqual(m.DEFAULT_STYLES);
+  });
+  it('저장 — 기본과 다른 계열만 저장, 전부 기본이면 지운다 · 저장소가 던져도 동작', () => {
+    const mem = new Map(); const st = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v), removeItem: (k) => mem.delete(k) };
+    let s = m.setStyle(m.normalizeStyles(null), 'cpuTemp', { dash: 'dashdot', dot: true });
+    m.saveStyles(st, s);
+    expect(JSON.parse(mem.get(m.LINE_STYLE_KEY))).toEqual({ cpuTemp: { dash: 'dashdot', width: 2, dot: true } });
+    expect(m.loadStyles(st).cpuTemp.dash).toBe('dashdot');
+    s = m.setStyle(s, 'cpuTemp', { dash: 'solid', dot: false });
+    m.saveStyles(st, s); expect(mem.size).toBe(0);
+    const bad = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); } };
+    expect(m.loadStyles(bad)).toEqual(m.DEFAULT_STYLES);
+    expect(() => m.saveStyles(bad, s)).not.toThrow();
+  });
+  it('엑셀 쿼리 — 고른 항목만 k:모양:굵기:점', () => {
+    const s = m.setStyle(m.normalizeStyles(null), 'powerW', { width: 3, dot: true });
+    expect(m.stylesQuery(s, ['inletTemp', 'powerW'])).toBe('inletTemp:dash:2:0,powerW:solid:3:1');
+    expect(m.stylesQuery(s, [])).toBe('');
+  });
+});

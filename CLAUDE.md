@@ -3896,6 +3896,9 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - 'GPU 서버만' = 최신 센서의 GPU 역할 온도(roleOf) 또는 추이 DB 에 `idractemp_gpu` 계열이 있음(`metrics db.keysOf` — 한 번에 읽는다. 서버마다 metaKey 를 부르지 말 것 —
       NDJSON 폴백은 키마다 전량을 훑는다). 데이터센터 전체 내보내기도 `gpuOnly=1` 로 같은 필터.
     - 가상화 서버는 ESXi 호스트 상세 + iDRAC 상세 **둘 다** 버튼을 둔다(사용자 요청). CSV 권한이 없으면 버튼을 숨기되 그 사실을 한 줄로 말한다.
+    - **선 모양(v2.662)**: 흡기·배기는 기본 점선(`SERIES[].dash`). 계열별 모양·굵기·점은 `idracTrendText.js` 의 `normalizeStyles`·`loadStyles`·`saveStyles`
+      (브라우저 `idracTrend.lineStyle` — 기본과 다른 계열만 저장)가 소유하고 카드 견본·차트·엑셀이 같은 값을 쓴다. 엑셀은 `?styles=k:모양:굵기:점` 을
+      서버 `parseExportStyles` 가 허용 목록으로 거르고 `xlsxChart.js PRST_DASH` 로 `<a:prstDash>` 를 싣는다 — 모양 키를 늘리면 **두 목록을 함께** 고칠 것.
   - **CVP Overview EOS 버전 패널은 버전 순(최신 먼저)이다**(v2.657, `cvpOverviewText.versionList`·`cmpEosVersion` — 재사용 Collator numeric): 예전 '갈린 버전 먼저 → 대수' 순은
     사용자 요청으로 바꿨다. '버전 갈림' 은 태그로만 남는다 · 상한 12 · 넘치면 생략 개수를 적는다.
   - **GPU 추이 창은 수집 공백을 잇지 않는다**(v2.656, `GpuHistModal.gapRows`): 간격이 `max(버킷, 수집 주기) × 2` 를 넘으면 null 행을 끼워 선을 끊고
