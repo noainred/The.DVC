@@ -23,7 +23,7 @@ import { getSensorSeries, sensorPollCycle } from './sensorStore.js';
 import { sampleStaleReason, serverTempKinds, TEMP_SERIES_DETAIL, idracTempMetric } from './serverTempSeries.js';
 import { DEFAULT_MAX_AGE_MS } from './roomTemp.js';
 import { roleOf } from './sensorDetail.js';
-import { analysisServersWithRemote } from '../insights/analysisServers.js';
+import { analysisServersWithRemote, invForServer } from '../insights/analysisServers.js';
 import { findHostByServiceTag } from './hostMatch.js';
 import { store, usageReadable } from '../store.js';
 import { cpuIndexOf } from '../tools/serverSensors.js';
@@ -106,7 +106,8 @@ export function buildServerTrendRows(servers, {
 /** bmusage 최신 행 → 신선한 CPU %(서비스태그 → id → fleetId 순, 대소문자 무시) | null. 순수. */
 export function bmCpuOf(s, cpuIndex, now = Date.now()) {
   if (!cpuIndex || typeof cpuIndex.get !== 'function') return null;
-  for (const k of [s?.serviceTag, s?.id, s?.fleetId]) {
+  let tag = s?.serviceTag; try { tag = serviceTagOf(s) || tag; } catch { /* 인벤토리 조회 실패 — 최상위 값만 */ }
+  for (const k of [tag, s?.id, s?.fleetId]) {
     const key = typeof k === 'string' ? k.trim().toLowerCase() : '';
     if (!key) continue;
     const row = cpuIndex.get(key);
@@ -123,10 +124,21 @@ export function bmCpuOf(s, cpuIndex, now = Date.now()) {
  * 서비스태그가 ESXi 호스트와 맞으면 그 호스트의 vCenter CPU %. `freshHosts` 는 샘플러가 낡은 vCenter(수집 실패 이월·
  * 위임 push 끊김·점검중)를 뺀 호스트 목록이다 — 그 밖의 호스트 값은 '지금 값' 이 아니라 쓰지 않는다(v2.620 SRV2620-03).
  */
-export function hostCpuFrom(freshHosts) {
+/**
+ * v2.663: 서버의 서비스태그 — 최상위 필드 → iDRAC 인벤토리(엣지 서버는 export 의 inv) 순. 화면 머리의 'ESXi 호스트 일치'
+ * 판정(routes/admin/idracTrend.js kindOf)과 **같은 출처**를 봐야 한다 — 예전엔 적재기만 최상위 필드를 봐서, 태그가 인벤토리에만
+ * 있는 엣지 서버는 화면이 '일치' 라 하는데 CPU 대체값이 한 번도 쌓이지 않았다(사용자 신고 "같은 데이터센터인데 CPU 사용률이
+ * 나오는 게 있고 안 나오는 게 있어").
+ */
+export function serviceTagOf(s) {
+  let inv = null; try { inv = invForServer(s); } catch { inv = null; }
+  return String(s?.serviceTag || inv?.system?.serviceTag || '').trim();
+}
+
+export function hostCpuFrom(freshHosts, tagOf = serviceTagOf) {
   const hosts = (freshHosts || []).filter((h) => h && usageReadable(h));
   return (s) => {
-    const tag = String(s?.serviceTag || '').trim();
+    const tag = tagOf(s);
     if (!tag) return null;
     const h = findHostByServiceTag(tag, hosts);
     return h ? numOrNull(h.cpuUsagePct) : null;
@@ -141,6 +153,9 @@ function refreshCpuIndex() {
     .catch(() => { /* 대체값은 참고값 — 실패는 다음 주기에 다시 */ }).finally(() => { _cpuLoading = null; });
 }
 
+/** v2.663: 직전 주기의 bmusage 색인(진단용 — 없으면 null). */
+export const currentCpuIndex = () => _cpuIdx;
+
 /** 샘플러가 호출(부수효과는 여기만). `freshHosts`: 낡은 vCenter 를 뺀 호스트(sampler.js). */
 export function serverTrendRows({ freshHosts = null } = {}) {
   if (!TREND_SERIES_ENABLED) return [];
@@ -148,4 +163,25 @@ export function serverTrendRows({ freshHosts = null } = {}) {
   const servers = analysisServersWithRemote();
   const hosts = freshHosts || (store.get()?.hosts || []);
   return servers?.length ? buildServerTrendRows(servers, { cpuIndex: _cpuIdx, hostCpuOf: hostCpuFrom(hosts) }) : [];
+}
+
+/**
+ * v2.663: 지금 이 서버의 CPU 사용률을 어느 경로로 못 읽는지(순수 판정 — 화면이 사유를 말한다. 과거 구간의 원인은 알 수 없다).
+ * 순서: iDRAC 텔레메트리 → 베어메탈 사용률 → vCenter 호스트(태그 없음 / 호스트 없음 / vCenter 를 지금 값으로 못 씀 / 연결 끊김 / 값 없음).
+ * @returns {{code:string, source?:string, host?:object, reason?:string}}
+ */
+export function cpuFallbackDiag(s, { latest = null, cpuIndex = null, hosts = [], unread = new Map(), now = Date.now(), tagOf = serviceTagOf } = {}) {
+  const v = latest ? trendValuesOf(latest) : null;
+  if (v && v.cpuPct != null) return { code: 'ok', source: 'telemetry' };
+  if (bmCpuOf(s, cpuIndex, now) != null) return { code: 'ok', source: 'os' };
+  const tag = tagOf(s);
+  if (!tag) return { code: 'no-tag' };
+  const h = findHostByServiceTag(tag, hosts);
+  if (!h) return { code: 'no-host', tag };
+  const host = { name: h.name || '', vcenterId: String(h.vcenterId || ''), connectionState: h.connectionState || '' };
+  const reason = unread.get(host.vcenterId);
+  if (reason) return { code: 'vcenter-unread', reason, host, tag };
+  if (!usageReadable(h)) return { code: 'host-disconnected', host, tag };
+  if (pct(numOrNull(h.cpuUsagePct)) == null) return { code: 'no-host-cpu', host, tag };
+  return { code: 'ok', source: 'vcenter', host, tag };
 }

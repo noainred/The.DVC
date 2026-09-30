@@ -173,3 +173,54 @@ test('⑨ v2.662 선 모양 — 쿼리는 허용 목록으로 거르고, 차트 
   assert.match(x, /<a:ln w="19050" cap="rnd"><a:solidFill><a:srgbClr val="ef4444"\/><\/a:solidFill><a:round\/><\/a:ln>/, '모르는 모양은 실선');
   assert.doesNotMatch(x, /evil/);
 });
+
+test('⑩ v2.663 서버 표 — 기간 검사 · CPU 계열 합치기 · 창 밖 현재값은 null · 전력 키 · 값 없음은 null', async () => {
+  const { tableHoursOf, mergeStats, buildTableRows } = await import('../src/routes/admin/idracTrend.js');
+  assert.equal(tableHoursOf(undefined), 24); assert.equal(tableHoursOf('6'), 6);
+  for (const bad of ['0', '721', '1.5', 'x']) assert.equal(tableHoursOf(bad), null, bad);
+  assert.deepEqual(mergeStats([{ avg: 10, min: 5, max: 20, n: 2 }, undefined, { avg: 40, min: 30, max: 90, n: 1 }]), { avg: 20, min: 5, max: 90, n: 3 });
+  assert.equal(mergeStats([undefined, null]), null);
+  const since = NOW - 6 * HOUR;
+  const rows = buildTableRows([{ id: 'a' }, { id: 'b' }], {
+    stats: { cpuPct: [new Map([['a', { avg: 50, min: 10, max: 95, n: 6 }]])], cpuTemp: new Map([['a', { avg: 60, min: 40, max: 81, n: 6 }]]), gpuTemp: new Map(), inletTemp: new Map(), exhaustTemp: new Map() },
+    latest: { cpuTemp: [new Map([['a', { v: 55.26, ts: NOW }]])], cpuPct: [new Map([['a', { v: 70, ts: since - 1 }]])] },
+    power: new Map([['a', { avg: 300, min: 200, peak: 500, count: 6 }]]), powerKeyFor: (r) => r.id, since,
+  });
+  assert.deepEqual(rows[0].cpuTemp, { avg: 60, min: 40, max: 81, n: 6, cur: 55.3 });
+  assert.equal(rows[0].cpuPct.cur, null, '창 밖 최신값을 현재라 하지 않는다');
+  assert.deepEqual(rows[0].powerW, { avg: 300, min: 200, max: 500, n: 6, cur: null });
+  assert.equal(rows[1].cpuTemp, null); assert.equal(rows[1].powerW, null, '값 없음은 0 이 아니라 null');
+});
+
+test('⑪ v2.663 라우트 — /idrac/trend/table 200·행 · 잘못된 기간 400 · :id 라우트가 table 을 먹지 않는다', async () => {
+  const express = (await import('express')).default;
+  const { adminRouter } = await import('../src/routes/admin.js');
+  const app = express(); app.use(express.json()); app.use('/api/admin', adminRouter);
+  const srv = app.listen(0); await new Promise((ok) => srv.once('listening', ok));
+  const base = `http://127.0.0.1:${srv.address().port}/api/admin`;
+  try {
+    const r = await fetch(`${base}/idrac/trend/table?hours=6&corp=*&site=*`);
+    assert.equal(r.status, 200);
+    const j = await r.json();
+    assert.equal(j.hours, 6); assert.ok(Array.isArray(j.rows)); assert.equal(j.total, j.rows.length);
+    for (const row of j.rows) for (const k of ['cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp', 'powerW']) assert.ok(k in row, k);
+    assert.equal((await fetch(`${base}/idrac/trend/table?hours=0`)).status, 400);
+  } finally { srv.close(); }
+});
+
+test('⑫ v2.663 CPU 대체 — 태그가 인벤토리에만 있는 엣지 서버도 호스트를 찾고, 못 쓰는 사유를 코드로 준다', async () => {
+  const { serviceTagOf, hostCpuFrom, cpuFallbackDiag } = await import('../src/idrac/serverTrendSeries.js');
+  const edge = { id: 'e1', remote: true, serviceTag: '', inv: { system: { serviceTag: '6W4JNY3' } } };
+  assert.equal(serviceTagOf(edge), '6W4JNY3', '최상위가 비면 인벤토리 태그');
+  const hosts = [{ name: 'esx4', vcenterId: 'vc1', serviceTag: '6w4jny3', connectionState: 'CONNECTED', cpuUsagePct: 41 }];
+  assert.equal(hostCpuFrom(hosts)(edge), 41, '예전엔 최상위 태그만 봐서 null 이었다');
+  assert.equal(cpuFallbackDiag(edge, { hosts }).code, 'ok');
+  assert.equal(cpuFallbackDiag(edge, { hosts }).source, 'vcenter');
+  assert.equal(cpuFallbackDiag({ id: 'x', remote: true }, { hosts }).code, 'no-tag');
+  assert.equal(cpuFallbackDiag({ id: 'x', serviceTag: 'ZZZ' }, { hosts }).code, 'no-host');
+  const d = cpuFallbackDiag(edge, { hosts, unread: new Map([['vc1', 'stale']]) });
+  assert.deepEqual([d.code, d.reason, d.host.name], ['vcenter-unread', 'stale', 'esx4']);
+  assert.equal(cpuFallbackDiag(edge, { hosts: [{ ...hosts[0], connectionState: 'NOT_RESPONDING' }] }).code, 'host-disconnected');
+  assert.equal(cpuFallbackDiag(edge, { hosts: [{ ...hosts[0], cpuUsagePct: null }] }).code, 'no-host-cpu');
+  assert.equal(cpuFallbackDiag(edge, { hosts, latest: { at: Date.now(), cpu: 12 } }).source, 'telemetry');
+});

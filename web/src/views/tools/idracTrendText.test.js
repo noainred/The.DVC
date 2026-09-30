@@ -150,3 +150,43 @@ describe('v2.662 선 모양', async () => {
     expect(m.stylesQuery(s, [])).toBe('');
   });
 });
+
+describe('v2.663 서버 표 · 조건 검색 · CPU 진단', async () => {
+  const m = await import('./idracTrendText.js');
+  const rows = [
+    { id: 'a', name: 'a', cpuTemp: { max: 81, min: 40, avg: 60 }, gpuTemp: null, powerW: { max: 500, min: 200, avg: 300 } },
+    { id: 'b', name: 'b', cpuTemp: { max: 60, min: 30, avg: 45 }, gpuTemp: { max: 70, min: 25, avg: 50 }, powerW: { max: 250, min: 180, avg: 200 } },
+    { id: 'c', name: 'c', cpuTemp: null, gpuTemp: null, powerW: null },
+  ];
+  it('이상은 최대, 이하는 최소 · 빈 값 조건은 무시 · 값 없음은 판정 불가로 따로 센다', () => {
+    const c = [m.newCond('cpuTemp', 'ge', '70'), m.newCond('powerW', 'le', '')];
+    const r = m.filterTable(rows, c, 'all');
+    expect(r.rows.map((x) => x.id)).toEqual(['a']);
+    expect(r.unknown).toBe(1); expect(r.active).toBe(1);
+    expect(m.filterTable(rows, [m.newCond('powerW', 'le', '190')]).rows.map((x) => x.id)).toEqual(['b']);
+  });
+  it('모두 / 하나라도', () => {
+    const c = [m.newCond('cpuTemp', 'ge', '70'), m.newCond('gpuTemp', 'ge', '65')];
+    expect(m.filterTable(rows, c, 'all').rows).toEqual([]);
+    expect(m.filterTable(rows, c, 'any').rows.map((x) => x.id)).toEqual(['a', 'b']);
+    expect(m.filterTable(rows, c, 'any').unknown).toBe(1);
+  });
+  it('조건 없으면 전부 · 숫자 아닌 값은 조건이 아니다(0 으로 읽지 않는다)', () => {
+    expect(m.filterTable(rows, [m.newCond('cpuTemp', 'le', 'abc')]).rows).toHaveLength(3);
+    expect(m.condText([m.newCond('cpuTemp', 'ge', '70'), m.newCond('powerW', 'le', '300')], 'any')).toBe('CPU 온도 70℃ 이상 또는 소비 전력 300W 이하');
+    expect(m.cellHit(rows[0], 'cpuTemp', [m.newCond('cpuTemp', 'ge', '70')])).toBe(true);
+    expect(m.cellHit(rows[1], 'cpuTemp', [m.newCond('cpuTemp', 'ge', '70')])).toBe(false);
+  });
+  it('표 CSV — BOM · 결측은 빈 칸 · 수식 가드', () => {
+    const csv = m.tableCsv([{ ...rows[2], name: '=cmd', corpName: 'HM', site: 's', kind: 'esxi' }], 24);
+    expect(csv.startsWith('﻿# 최근 24시간')).toBe(true);
+    expect(csv).toContain("HM,s,'=cmd,,ESXi,,,");
+  });
+  it('기간 라벨 · CPU 진단 문구', () => {
+    expect(m.hoursLabel(6)).toBe('6시간'); expect(m.hoursLabel(168)).toBe('7일'); expect(m.hoursLabel(24)).toBe('24시간');
+    expect(m.cpuDiagText({ code: 'no-tag' })).toMatch(/서비스태그를 모릅니다/);
+    expect(m.cpuDiagText({ code: 'vcenter-unread', reason: 'stale', host: { name: 'esx4' } })).toMatch(/esx4 의 vCenter 가 위임\(엣지\) push 가 오래돼/);
+    expect(m.cpuDiagText({ code: 'ok', source: 'vcenter', host: { name: 'esx4' } })).toMatch(/esx4\(vCenter\)/);
+    expect(m.cpuDiagText(null)).toBe('');
+  });
+});
