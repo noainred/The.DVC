@@ -274,6 +274,13 @@ function initSqlite() {
        * 있으므로 **둘 중 더 이른 첫 관측·더 늦은 마지막 관측**을 돌려준다. 건수는 세지 않는다
        * (파티션 풀스캔을 유발한다 — `meta()` 주석 참조).
        */
+      /** 그 지표에 계열이 있는 키 집합(v2.661 — iDRAC 통합 추이 'GPU 서버만'). PK 선행열(metric,k) 인덱스로 읽는다. */
+      keysOf: (metric) => {
+        const out = new Set();
+        try { for (const r of db.prepare('SELECT DISTINCT k FROM samples_hourly WHERE metric=?').all(metric)) out.add(r.k); } catch { /* 구버전 */ }
+        try { for (const r of db.prepare('SELECT DISTINCT k FROM samples WHERE metric=?').all(metric)) out.add(r.k); } catch { /* */ }
+        return out;
+      },
       metaKey: (metric, k) => {
         const a = keyMinMax.get(metric, k) || {};
         let b = {};
@@ -364,6 +371,7 @@ function initJson() {
     },
     historyStep(metric, k, sinceTs, bucketMs, limit) { const points = this.history(metric, k, sinceTs, bucketMs, limit); return { points, carried: 0, stepped: false, maxGapMs: null, ...historyCut(points, limit, Math.floor(sinceTs / bucketMs) * bucketMs) }; },
     recentAvgStep(metric, sinceTs) { const m = new Map(); for (const [k, a] of this.recentAvg(metric, sinceTs)) m.set(k, { ...a, carried: false }); return m; },
+    keysOf: (metric) => { const out = new Set(); for (const r of rows) if (r.m === metric) out.add(r.k); return out; },
     metaKey: (metric, k) => { let mn = null, mx = null; for (const r of rows) if (r.m === metric && r.k === k) { if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx }; },
     dump: (metric, sinceTs, untilTs, limit) => rows.filter((r) => r.m === metric && r.t >= sinceTs && r.t <= untilTs).sort((a, b) => a.t - b.t).slice(0, limit).map((r) => ({ k: r.k, v: r.v, ts: r.t })),
     prune: (beforeTs) => { const n = rows.filter((r) => r.t >= beforeTs); if (n.length !== rows.length) { rows = n; try { fs.writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } } },

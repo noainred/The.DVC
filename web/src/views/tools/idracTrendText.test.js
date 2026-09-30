@@ -80,3 +80,37 @@ describe('판별 근거 문구', () => {
     expect(kindBasisText({ serviceTag: 'ABC', kind: 'esxi' })).toBe('서비스태그 ABC → ESXi 호스트 일치');
   });
 });
+
+describe('v2.661 카드 순서 · 출처 문구', async () => {
+  const m = await import('./idracTrendText.js');
+  it('카드 6장 — 흡기·배기 추가, 기본 순서는 SERIES 순서', () => {
+    expect(m.DEFAULT_ORDER).toEqual(['cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp', 'powerW']);
+  });
+  it('저장된 순서 정규화 — 모르는 키는 버리고 빠진 키는 뒤에 붙인다', () => {
+    expect(m.normalizeOrder(['powerW', 'zz', 'powerW', 'cpuPct'])).toEqual(['powerW', 'cpuPct', 'cpuTemp', 'gpuTemp', 'inletTemp', 'exhaustTemp']);
+    expect(m.normalizeOrder(null)).toEqual(m.DEFAULT_ORDER);
+  });
+  it('◀ ▶ 이동과 끌어서 놓기', () => {
+    const o = m.DEFAULT_ORDER;
+    expect(m.moveKey(o, 'cpuTemp', -1).slice(0, 2)).toEqual(['cpuTemp', 'cpuPct']);
+    expect(m.moveKey(o, 'cpuPct', -1)).toEqual(o, '맨 앞은 그대로');
+    expect(m.dropKey(o, 'powerW', 'cpuPct')[0]).toBe('powerW', '앞으로 끌면 그 자리 앞');
+    expect(m.dropKey(o, 'cpuPct', 'gpuTemp').slice(0, 3)).toEqual(['cpuTemp', 'gpuTemp', 'cpuPct'], '뒤로 끌면 그 자리 뒤');
+  });
+  it('저장 — 기본 순서면 지우고, 저장소가 던져도 화면은 동작한다', () => {
+    const mem = new Map(); const st = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v), removeItem: (k) => mem.delete(k) };
+    m.saveOrder(st, ['powerW', ...m.DEFAULT_ORDER.filter((k) => k !== 'powerW')]);
+    expect(m.loadOrder(st)[0]).toBe('powerW');
+    m.saveOrder(st, [...m.DEFAULT_ORDER]); expect(mem.size).toBe(0);
+    const bad = { getItem: () => { throw new Error('x'); }, setItem: () => { throw new Error('x'); } };
+    expect(m.loadOrder(bad)).toEqual(m.DEFAULT_ORDER);
+    expect(() => m.saveOrder(bad, ['cpuPct'])).not.toThrow();
+  });
+  it('CPU 출처 · 전력 사유 문구', () => {
+    expect(m.cpuSourceNote({ cpuSources: { telemetry: 0, os: 3, vcenter: 0, history: 2 } })).toMatch(/베어메탈 사용률\(OS·iDRAC 대체 경로\) 3구간 · 베어메탈 사용률 이력 2구간.*튈 수/);
+    expect(m.cpuSourceNote({ cpuSources: { telemetry: 0, os: 0, vcenter: 0, history: 0 } })).toMatch(/읽지 못했습니다/);
+    expect(m.cpuSourceNote({})).toBe('');
+    expect(m.powerNote({ power: { found: false, reason: 'no-edge-report' } })).toMatch(/엣지의 전력 보고/);
+    expect(m.powerNote({ power: { found: true } })).toBe('');
+  });
+});

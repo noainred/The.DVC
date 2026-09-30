@@ -4,7 +4,7 @@
 // 판정은 서버(routes/admin/idracTrend.js)가 하고 문구·요약은 idracTrendText.js 가 한다(읽기만).
 import React, { useEffect, useMemo, useState } from 'react';
 import { ResponsiveContainer, ComposedChart, Line, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, ReferenceArea } from 'recharts';
-import { fetchJson, canCsv, downloadFile, usePolling } from '../../api.js';
+import { fetchJson, canCsv, CSV_DENIED_NOTE, downloadFile, usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import { Modal } from '../../components/Modal.jsx';
 import { EntityDetail } from '../../components/EntityDetail.jsx';
@@ -13,10 +13,12 @@ import { WARN_PCT, CRIT_PCT } from '../../console/consoleData.js';
 import {
   PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
   corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
+  loadOrder, saveOrder, moveKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
 } from './idracTrendText.js';
 
 const tipStyle = { background: '#0c1322', border: '1px solid #243049', borderRadius: 8, color: '#e6edf6', fontSize: 12 };
-const ALL_ON = { cpuPct: true, cpuTemp: true, gpuTemp: true, powerW: true };
+const ALL_ON = Object.fromEntries(SERIES.map((s) => [s.k, true]));
+const store = () => { try { return window.localStorage; } catch { return null; } };
 const errText = (e) => e?.message || String(e);
 const pill = { fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: 999, color: '#7dd3fc', background: 'rgba(56,189,248,.12)', border: '1px solid rgba(56,189,248,.45)', lineHeight: 1.4 };
 
@@ -32,7 +34,11 @@ export default function IdracTrendTool() {
   const [draft, setDraft] = useState(() => ({ start: toLocalInput(Date.now() - 7 * DAY), end: toLocalInput(Date.now()) }));
   const [rangeErr, setRangeErr] = useState(null);
   const [on, setOn] = useState(ALL_ON);
-  const [modal, setModal] = useState(null);        // 'host' | 'idrac' | 'csv'
+  const [modal, setModal] = useState(null);        // 'host' | 'idrac' | 'csv' | 'xlsx'
+  const [order, setOrder] = useState(() => loadOrder(store()));   // v2.661: 카드 순서(브라우저 저장)
+  const [arrange, setArrange] = useState(false);                   // 순서 편집 모드(◀ ▶ 버튼)
+  const [dragK, setDragK] = useState(null);
+  const applyOrder = (next) => { setOrder(next); saveOrder(store(), next); };
 
   useEffect(() => {
     let alive = true;
@@ -41,7 +47,10 @@ export default function IdracTrendTool() {
     return () => { alive = false; };
   }, []);
 
-  const servers = useMemo(() => list?.servers || [], [list]);
+  const [gpuOnly, setGpuOnly] = useState(false); // v2.661: GPU 온도가 있는 서버만
+  const allServers = useMemo(() => list?.servers || [], [list]);
+  const gpuCount = useMemo(() => allServers.filter((s) => s.gpu).length, [allServers]);
+  const servers = useMemo(() => (gpuOnly ? allServers.filter((s) => s.gpu) : allServers), [allServers, gpuOnly]);
   const corps = useMemo(() => corpsOf(servers), [servers]);
   const sites = useMemo(() => (corp == null ? [] : sitesOf(servers, corp)), [servers, corp]);
   const inSite = useMemo(() => (corp == null || site == null ? [] : serversOf(servers, corp, site)), [servers, corp, site]);
@@ -57,7 +66,7 @@ export default function IdracTrendTool() {
 
   if (listErr && !list) return <ErrorBox error={listErr} />;
   if (!list) return <Loading label="iDRAC 서버" />;
-  if (!servers.length) {
+  if (!allServers.length) {
     return <div className="card muted">{list.scoped ? `범위 안에 보이는 iDRAC 서버가 없습니다(범위 밖 ${list.omittedOutOfScope || 0}대 제외).` : '등록된 iDRAC 서버가 없습니다 — 서버 분석에서 iDRAC 을 등록하거나 스캔하세요.'}</div>;
   }
 
@@ -89,30 +98,52 @@ export default function IdracTrendTool() {
       <div className="flex wrap" style={{ gap: 12, marginBottom: 14, justifyContent: 'flex-end' }}>
         {sel('법인', corp, setCorp, corps)}
         {sel('데이터센터', site, setSite, sites.map((s) => ({ value: s.value, label: `${s.value} · ${s.n}대` })))}
-        {sel('서버', serverId, setServerId, inSite.map((s) => ({ value: s.id, label: serverLabel(s) })), 180)}
+        {sel('서버', serverId, setServerId, inSite.map((s) => ({ value: s.id, label: `${serverLabel(s)}${s.gpu ? ' · GPU' : ''}` })), 180)}
+        <label className="flex" style={{ alignItems: 'center', gap: 6, fontSize: 13, whiteSpace: 'nowrap' }} title="GPU 온도 센서를 보고하거나 GPU 온도가 한 번이라도 쌓인 서버만 목록에 남깁니다">
+          <input type="checkbox" checked={gpuOnly} disabled={!gpuCount && !gpuOnly} onChange={(e) => setGpuOnly(e.target.checked)} />
+          GPU 온도 있는 서버만 ({gpuCount}대)
+        </label>
       </div>
+      {gpuOnly && !servers.length && <div className="banner" style={{ marginBottom: 10 }}>GPU 온도를 보고하는 서버가 없습니다 — 체크를 풀면 전체 서버가 보입니다.</div>}
       {list.scoped && list.omittedOutOfScope > 0 && <div className="banner" style={{ marginBottom: 10 }}>범위 밖 서버 {list.omittedOutOfScope}대는 목록에서 뺐습니다.</div>}
 
       {/* KPI — 클릭 = 계열 켜기/끄기(별도 토글 행 없음). 값이 없는 계열은 클릭을 무시한다. */}
       <div className="idrac-trend-kpis">
-        {SERIES.map((s) => {
+        {order.map((k, idx) => SERIES.find((x) => x.k === k)).filter(Boolean).map((s, idx) => {
           const x = st[s.k];
+          const arrowBtn = (dir, label) => (
+            <button type="button" className="tab" aria-label={`${s.label} ${dir < 0 ? '앞으로' : '뒤로'}`} disabled={dir < 0 ? idx === 0 : idx === order.length - 1}
+              style={{ flex: 'none', padding: '1px 8px', marginTop: 0, fontSize: 12 }}
+              onClick={(e) => { e.stopPropagation(); applyOrder(moveKey(order, s.k, dir)); }}>{label}</button>
+          );
           return (
             <div key={s.k} className="card" role="button" tabIndex={x ? 0 : -1} aria-pressed={!!on[s.k]}
-              onClick={() => toggle(s.k)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(s.k); } }}
-              style={{ padding: '10px 14px', minWidth: 0, cursor: x ? 'pointer' : 'default', opacity: !x ? 0.55 : on[s.k] ? 1 : 0.5, userSelect: 'none' }}>
+              draggable onDragStart={(e) => { setDragK(s.k); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', s.k); } catch { /* */ } }}
+              onDragOver={(e) => { if (dragK) e.preventDefault(); }} onDragEnd={() => setDragK(null)}
+              onDrop={(e) => { e.preventDefault(); if (dragK) applyOrder(dropKey(order, dragK, s.k)); setDragK(null); }}
+              title="누르면 계열을 켜고 끕니다 · 끌어서 위치를 바꿉니다"
+              onClick={() => { if (!arrange) toggle(s.k); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(s.k); } }}
+              style={{ padding: '10px 14px', minWidth: 0, cursor: arrange ? 'grab' : x ? 'pointer' : 'default', opacity: dragK === s.k ? 0.4 : !x ? 0.55 : on[s.k] ? 1 : 0.5, userSelect: 'none', outline: arrange ? '1px dashed var(--border)' : undefined }}>
               <div className="flex" style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
                 <i style={{ width: 12, height: 3, borderRadius: 2, background: s.color, display: 'block', flexShrink: 0 }} />
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label}</span>
-                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{x ? (on[s.k] ? '표시' : '숨김') : ''}</span>
+                {arrange
+                  ? <span className="flex" style={{ marginLeft: 'auto', gap: 4 }}>{arrowBtn(-1, '◀')}{arrowBtn(1, '▶')}</span>
+                  : <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{x ? (on[s.k] ? '표시' : '숨김') : ''}</span>}
               </div>
               <div style={{ fontSize: 22, fontWeight: 800, marginTop: 5, color: s.color, fontVariantNumeric: 'tabular-nums', textAlign: 'center' }}>{x ? valueText(x.cur, s.unit) : '—'}</div>
               <div style={{ fontSize: 11, marginTop: 5, color: 'var(--text-faint)', textAlign: 'center', overflowWrap: 'anywhere' }}>
-                {x ? `평균 ${valueText(x.avg, s.unit)} · 최대 ${valueText(x.max, s.unit)}` : s.k === 'gpuTemp' ? 'GPU 없음 — 센서 미보고' : s.k === 'cpuPct' ? '보고 없음 — 텔레메트리 미지원 가능' : '보고 없음'}
+                {x ? `평균 ${valueText(x.avg, s.unit)} · 최대 ${valueText(x.max, s.unit)}` : s.k === 'gpuTemp' ? 'GPU 없음 — 센서 미보고' : s.k === 'cpuPct' ? '보고 없음 — 어느 경로로도 못 읽음' : s.k === 'powerW' && data?.power && !data.power.found ? '전력 보고 대기' : '보고 없음'}
               </div>
             </div>
           );
         })}
+      </div>
+
+      <div className="flex wrap" style={{ gap: 8, alignItems: 'center', margin: '-6px 0 12px', fontSize: 12 }}>
+        <button type="button" className={arrange ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }} onClick={() => setArrange((v) => !v)}>{arrange ? '✓ 순서 편집 끝' : '↔ 카드 순서 바꾸기'}</button>
+        {arrange && <button type="button" className="tab" style={{ flex: 'none', padding: '4px 12px', marginTop: 0 }} disabled={order.join() === DEFAULT_ORDER.join()} onClick={() => applyOrder([...DEFAULT_ORDER])}>기본 순서</button>}
+        <span style={{ color: 'var(--text-faint)' }}>{arrange ? '◀ ▶ 로 옮기거나 카드를 끌어다 놓으세요 — 이 브라우저에 저장됩니다.' : '카드를 끌어다 놓아도 순서가 바뀝니다.'}</span>
       </div>
 
       <div className="card" style={{ padding: '16px 18px', minWidth: 0 }}>
@@ -123,9 +154,9 @@ export default function IdracTrendTool() {
           </span>
           {data && <span className={`badge ${esxi ? 'blue' : 'teal'}`}>{esxi ? 'VM호스트 (ESXi)' : '베어메탈'}</span>}
           {data?.remote && <span className="badge gray" title="엣지가 수집해 보낸 서버입니다">위임(엣지)</span>}
-          {data && (esxi ? data.host : true) && (
-            <button type="button" style={pill} onClick={() => setModal(esxi ? 'host' : 'idrac')}>{esxi ? '🖧 ESXi 호스트 상세 ›' : '🖥 iDRAC 상세 / 센서 ›'}</button>
-          )}
+          {/* v2.661: 가상화 서버는 둘 다 본다 — ESXi 호스트(vCenter 관점) + iDRAC(하드웨어 관점). 베어메탈은 iDRAC 만. */}
+          {data && esxi && data.host && <button type="button" style={pill} onClick={() => setModal('host')}>🖧 ESXi 호스트 상세 ›</button>}
+          {data && <button type="button" style={pill} onClick={() => setModal('idrac')}>🖥 iDRAC 상세 / 센서 ›</button>}
           {data && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{kindBasisText(data)}</span>}
           {srv?.dcSource && DC_SOURCE_TEXT[srv.dcSource] && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{DC_SOURCE_TEXT[srv.dcSource]}</span>}
         </div>
@@ -141,7 +172,12 @@ export default function IdracTrendTool() {
               <span style={{ color: 'var(--text-faint)', marginLeft: 8 }}>집계 {bucketLabel(data.bucketMs)} 평균 · 표본 {pts.length.toLocaleString()}개</span>
             </span>
           )}
-          {canCsv() && <button type="button" className="logout-btn" style={{ flex: 'none', padding: '7px 14px', marginLeft: 'auto' }} disabled={!data} onClick={() => setModal('csv')}>⬇ CSV 내보내기</button>}
+          {canCsv() ? (
+            <span className="flex" style={{ gap: 6, marginLeft: 'auto' }}>
+              <button type="button" className="logout-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={!data} onClick={() => setModal('xlsx')}>📊 엑셀(차트) 내보내기</button>
+              <button type="button" className="logout-btn" style={{ flex: 'none', padding: '7px 14px' }} disabled={!data} onClick={() => setModal('csv')}>⬇ CSV</button>
+            </span>
+          ) : <span className="muted" style={{ fontSize: 11, marginLeft: 'auto' }} title={CSV_DENIED_NOTE}>내보내기 권한 없음 — {CSV_DENIED_NOTE}</span>}
         </div>
 
         {(customOpen || range === 'custom') && (
@@ -162,6 +198,7 @@ export default function IdracTrendTool() {
         {err && data && <div className="banner warn" style={{ marginBottom: 10 }}>다시 불러오지 못했습니다({errText(err)}) — 아래는 마지막으로 불러온 추이입니다.</div>}
         {data?.errors && <div className="banner warn" style={{ marginBottom: 10 }}>일부 계열을 읽지 못했습니다: {Object.keys(data.errors).join(', ')} — 그 계열은 비어 보입니다(0 이 아닙니다).</div>}
         {empty && <div className="banner" style={{ marginBottom: 10 }}>{empty}</div>}
+        {data && powerNote(data) && <div className="banner" style={{ marginBottom: 10 }}>{powerNote(data)}</div>}
 
         <div style={{ height: 340, minWidth: 0 }}>
           {!data && !err && <Loading label="iDRAC 추이" />}
@@ -194,7 +231,8 @@ export default function IdracTrendTool() {
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 12, lineHeight: 1.6 }}>
           왼쪽 축은 CPU 사용률(%) · CPU/GPU 온도(℃) 공통 0~100, 오른쪽 축은 소비 전력(W)입니다. 위 카드를 누르면 계열을 켜고 끕니다.<br />
-          CPU 사용률은 Dell 텔레메트리(SystemUsage)를 보고하는 서버에서만 표시됩니다. GPU 온도는 사용률이 아니라 GPU 가 동작하는지 가늠하는 근거입니다.
+          CPU 사용률은 iDRAC 텔레메트리(Datacenter 라이선스) → 베어메탈 사용률 수집(OS·iDRAC 대체 경로) → vCenter ESXi 호스트 순으로 채웁니다. {cpuSourceNote(data)}{' '}
+          GPU 온도는 사용률이 아니라 GPU 가 동작하는지 가늠하는 근거입니다. 흡기는 서버가 빨아들이는 공기(전산실) 온도, 배기는 내보내는 공기 온도입니다.
           iDRAC 무응답 구간은 선을 끊고 0 으로 채우지 않습니다. {retentionNote(data)} 기간이 길면 집계 단위(5분 ~ 1일) 평균으로 표시합니다.
           {data?.firstTs ? ` 이 서버의 첫 적재는 ${ymd(data.firstTs)} ${hm(data.firstTs)} 입니다(그 이전은 비어 있습니다).` : ''}
         </div>
@@ -202,8 +240,8 @@ export default function IdracTrendTool() {
 
       {modal === 'host' && data?.host && <HostDetailLoader host={data.host} onClose={() => setModal(null)} />}
       {modal === 'idrac' && srv && <IdracDetailModal server={{ id: srv.id, name: srv.name, remote: srv.remote, serviceTag: srv.serviceTag, datacenterId: srv.corp }} onClose={() => setModal(null)} />}
-      {modal === 'csv' && (
-        <CsvModal serverId={serverId} serverName={srv?.name || serverId} corp={corp} site={site} siteCount={inSite.length}
+      {(modal === 'csv' || modal === 'xlsx') && (
+        <CsvModal fmt={modal} gpuOnly={gpuOnly} serverId={serverId} serverName={srv?.name || serverId} corp={corp} site={site} siteCount={inSite.length}
           range={range} custom={custom} on={on} onClose={() => setModal(null)} />
       )}
     </>
@@ -230,25 +268,26 @@ function HostDetailLoader({ host, onClose }) {
   return <EntityDetail type="host" item={item} onClose={onClose} />;
 }
 
-function CsvModal({ serverId, serverName, corp, site, siteCount, range, custom, on, onClose }) {
+function CsvModal({ fmt = 'csv', gpuOnly = false, serverId, serverName, corp, site, siteCount, range, custom, on, onClose }) {
   const [scope, setScope] = useState('server');
   const [r, setR] = useState(range === 'custom' && !custom ? '24h' : range);
   const [cols, setCols] = useState('all');
   const [busy, setBusy] = useState(false); const [e, setE] = useState(null);
   const keys = SERIES.map((s) => s.k).filter((k) => cols === 'all' || on[k]);
   const opt = (cur, k) => (cur === k ? 'login-btn' : 'tab');
+  const xlsx = fmt === 'xlsx';
   const go = async () => {
     setBusy(true); setE(null);
-    const q = { scope, cols: keys.join(','), ...(scope === 'dc' ? { corp, site } : { id: serverId }), ...(r === 'custom' && custom ? { start: custom.start, end: custom.end } : { range: r }) };
+    const q = { scope, cols: keys.join(','), ...(scope === 'dc' ? { corp, site, ...(gpuOnly ? { gpuOnly: 1 } : {}) } : { id: serverId }), ...(r === 'custom' && custom ? { start: custom.start, end: custom.end } : { range: r }) };
     const qs = new URLSearchParams(Object.entries(q).map(([k, v]) => [k, String(v)])).toString();
-    try { await downloadFile(`/admin/idrac/trend/export.csv?${qs}`); onClose(); } catch (x) { setE(x); } finally { setBusy(false); }
+    try { await downloadFile(`/admin/idrac/trend/export.${xlsx ? 'xlsx' : 'csv'}?${qs}`); onClose(); } catch (x) { setE(x); } finally { setBusy(false); }
   };
   return (
-    <Modal title="⬇ iDRAC 통합 추이 CSV 내보내기" onClose={onClose} width={560}>
+    <Modal title={xlsx ? '📊 iDRAC 통합 추이 엑셀(차트) 내보내기' : '⬇ iDRAC 통합 추이 CSV 내보내기'} onClose={onClose} width={560}>
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>범위</div>
       <div className="flex" style={{ flexDirection: 'column', gap: 8, marginBottom: 14 }}>
         <button type="button" className={opt(scope, 'server')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('server')}>단일 서버 — {serverName}</button>
-        <button type="button" className={opt(scope, 'dc')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('dc')}>데이터센터 전체 — {site} ({siteCount}대)</button>
+        <button type="button" className={opt(scope, 'dc')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('dc')}>데이터센터 전체 — {site} ({siteCount}대{gpuOnly ? ' · GPU 서버만' : ''})</button>
       </div>
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>기간</div>
       <div className="flex wrap" style={{ gap: 8, marginBottom: 14 }}>
@@ -257,18 +296,21 @@ function CsvModal({ serverId, serverName, corp, site, siteCount, range, custom, 
       </div>
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>항목</div>
       <div className="flex wrap" style={{ gap: 8, marginBottom: 14 }}>
-        <button type="button" className={opt(cols, 'all')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setCols('all')}>전체 4개</button>
+        <button type="button" className={opt(cols, 'all')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setCols('all')}>전체 {SERIES.length}개</button>
         <button type="button" className={opt(cols, 'shown')} style={{ flex: 'none', padding: '7px 13px', marginTop: 0 }} onClick={() => setCols('shown')}>표시 중인 항목만 ({Object.values(on).filter(Boolean).length}개)</button>
       </div>
       <div className="banner">
-        열: 법인 · 데이터센터 · 서버 · 서비스태그 · 유형 · 시각 + 측정 {keys.length}개. iDRAC 무응답 구간과 GPU 없는 서버의 GPU 온도는 빈 칸입니다(0 으로 채우지 않음). UTF-8 BOM 포함.
-        {scope === 'dc' && ' 데이터센터 전체는 한 번에 300대까지 담고, 넘으면 뺀 대수를 응답 헤더에 밝힙니다.'}
+        {xlsx
+          ? <>요약 시트 1장 + 서버마다 시트 1장(시각 + 측정 {keys.length}개 · 꺾은선 차트). 차트는 시트의 셀을 참조하므로 엑셀에서 값을 고치면 차트도 바뀝니다. 소비 전력은 오른쪽 보조 축입니다. 빈 칸은 선을 끊습니다(0 으로 채우지 않음).
+            {scope === 'dc' && ' 데이터센터 전체는 서버 40대까지 담습니다 — 넘으면 요약 시트에 뺀 대수를 적습니다(더 많으면 CSV 를 쓰세요).'}</>
+          : <>열: 법인 · 데이터센터 · 서버 · 서비스태그 · 유형 · 시각 + 측정 {keys.length}개. iDRAC 무응답 구간과 GPU 없는 서버의 GPU 온도는 빈 칸입니다(0 으로 채우지 않음). UTF-8 BOM 포함.
+            {scope === 'dc' && ' 데이터센터 전체는 한 번에 300대까지 담고, 넘으면 뺀 대수를 응답 헤더에 밝힙니다.'}</>}
       </div>
-      {!keys.length && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--amber)' }}>표시 중인 항목이 없습니다 — ‘전체 4개’ 를 고르세요.</div>}
+      {!keys.length && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--amber)' }}>표시 중인 항목이 없습니다 — ‘전체’ 를 고르세요.</div>}
       {e && <div style={{ marginTop: 8 }}><ErrorBox error={e} /></div>}
       <div className="flex" style={{ gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
         <button type="button" className="tab" onClick={onClose}>취소</button>
-        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px', marginTop: 0 }} disabled={!keys.length || busy} onClick={go}>{busy ? '내보내는 중…' : '⬇ CSV 다운로드'}</button>
+        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px', marginTop: 0 }} disabled={!keys.length || busy} onClick={go}>{busy ? '내보내는 중…' : xlsx ? '📊 엑셀 다운로드' : '⬇ CSV 다운로드'}</button>
       </div>
     </Modal>
   );

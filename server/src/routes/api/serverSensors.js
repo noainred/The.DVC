@@ -21,6 +21,7 @@ import { getSensorSeries, sensorPollCycle } from '../../idrac/sensorStore.js';
 import { DEFAULT_MAX_AGE_MS, sampleMaxAgeMs } from '../../idrac/roomTemp.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { buildSensorRows, cpuIndexOf, cpuOf } from '../../tools/serverSensors.js';
+import { cpuLatestRows } from '../../bmusage/cpuLatest.js';
 import { numOrNull } from '../../util/numOrNull.js';
 
 const toolsPerm = requirePerm('tools');
@@ -107,22 +108,8 @@ function maxAgeOf(localCycle) {
   };
 }
 
-async function cpuRows() {
-  const out = { rows: [], bmEnabled: null, error: '' };
-  try {
-    const [{ latestUsage }, { loadBmUsageSettings, bmUsageEnabled }, edge] = await Promise.all([
-      import('../../bmusage/db.js'), import('../../bmusage/settings.js'), import('../../central/bmUsageEdgePull.js'),
-    ]);
-    const central = await latestUsage().catch(() => []);
-    let s = null; try { s = loadBmUsageSettings(); } catch { s = null; }
-    try { out.bmEnabled = typeof bmUsageEnabled === 'function' ? !!bmUsageEnabled(s) : !!s?.enabled; } catch { out.bmEnabled = null; }
-    const freshOf = (ms) => Math.max(30 * 60_000, 3 * (numOrNull(ms) || 300_000));
-    const edges = (() => { try { return edge.listEdgeBmUsage(); } catch { return []; } })();
-    const edgeRows = edges.flatMap((e) => (e?.snap?.rows || []).filter((r) => r && typeof r === 'object').map((r) => ({ ...r, _freshMs: freshOf(e?.snap?.settings?.intervalMs) })));
-    out.rows = [...central.map((r) => ({ ...r, _freshMs: freshOf(s?.intervalMs) })), ...edgeRows];
-  } catch (e) { out.error = String(e?.message || e).slice(0, 200); }
-  return out;
-}
+// v2.661: cpuRows 는 bmusage/cpuLatest.js 로 옮겼다(iDRAC 통합 추이와 같은 행·같은 신선도 기준).
+const cpuRows = cpuLatestRows;
 
 function maskRow(row, match) {
   const o = { ...row };

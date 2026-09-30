@@ -16,6 +16,8 @@ export const SERIES = [
   { k: 'cpuPct', label: 'CPU 사용률', unit: '%', color: '#3b82f6', axis: 'pct' },
   { k: 'cpuTemp', label: 'CPU 온도', unit: '℃', color: '#ef4444', axis: 'pct' },
   { k: 'gpuTemp', label: 'GPU 온도', unit: '℃', color: '#a855f7', axis: 'pct' },
+  { k: 'inletTemp', label: '흡기 온도', unit: '℃', color: '#06b6d4', axis: 'pct' },   // v2.661
+  { k: 'exhaustTemp', label: '배기 온도', unit: '℃', color: '#ec4899', axis: 'pct' }, // v2.661
   { k: 'powerW', label: '소비 전력', unit: ' W', color: '#f59e0b', axis: 'w' },
 ];
 
@@ -121,4 +123,57 @@ export function kindBasisText(d) {
   if (!d) return '';
   if (!d.serviceTag) return '서비스태그 없음 — ESXi 호스트와 대조할 수 없어 베어메탈로 표시합니다';
   return d.kind === 'esxi' ? `서비스태그 ${d.serviceTag} → ESXi 호스트 일치` : `서비스태그 ${d.serviceTag} — 일치하는 ESXi 호스트 없음`;
+}
+
+/*
+ * v2.661 — 카드 순서(사용자 요청 "사용자가 위치를 변경할 수 있게"). 브라우저에만 저장한다(사람마다 보는 순서가 다르다 —
+ * 서버 설정으로 두면 한 사람이 바꾼 순서가 모두에게 바뀐다). 모르는 키는 버리고, 새 카드(다음 릴리스에 늘어난 계열)는 뒤에 붙인다.
+ */
+export const CARD_ORDER_KEY = 'idracTrend.cardOrder';
+export const DEFAULT_ORDER = SERIES.map((s) => s.k);
+export function normalizeOrder(saved) {
+  const known = new Set(DEFAULT_ORDER);
+  const seen = new Set();
+  const out = [];
+  for (const k of Array.isArray(saved) ? saved : []) if (known.has(k) && !seen.has(k)) { seen.add(k); out.push(k); }
+  for (const k of DEFAULT_ORDER) if (!seen.has(k)) out.push(k);
+  return out;
+}
+/** k 를 한 칸 옮긴다(dir -1 | +1). 끝에서는 그대로. */
+export function moveKey(order, k, dir) {
+  const a = [...order]; const i = a.indexOf(k); const j = i + dir;
+  if (i < 0 || j < 0 || j >= a.length) return a;
+  [a[i], a[j]] = [a[j], a[i]];
+  return a;
+}
+/** 끌어서 놓기 — from 을 to 자리로(to 뒤 카드들은 밀린다). */
+export function dropKey(order, from, to) {
+  if (from === to || !order.includes(from) || !order.includes(to)) return [...order];
+  const a = order.filter((k) => k !== from);
+  a.splice(a.indexOf(to) + (order.indexOf(from) < order.indexOf(to) ? 1 : 0), 0, from);
+  return a;
+}
+export function loadOrder(storage) {
+  try { return normalizeOrder(JSON.parse(storage?.getItem(CARD_ORDER_KEY) || 'null')); } catch { return [...DEFAULT_ORDER]; }
+}
+export function saveOrder(storage, order) {
+  try { if (order.join() === DEFAULT_ORDER.join()) storage?.removeItem(CARD_ORDER_KEY); else storage?.setItem(CARD_ORDER_KEY, JSON.stringify(order)); } catch { /* 저장 못 하면 이번 화면에서만 */ }
+}
+
+/** CPU 사용률 출처(버킷 수) — 어느 값으로 채웠는지 밝힌다(측정 방식이 달라 출처가 바뀌면 값이 튈 수 있다). */
+const CPU_SRC = { telemetry: 'iDRAC 텔레메트리', os: '베어메탈 사용률(OS·iDRAC 대체 경로)', vcenter: 'vCenter ESXi 호스트', history: '베어메탈 사용률 이력' };
+export function cpuSourceNote(data) {
+  const src = data?.cpuSources;
+  if (!src) return '';
+  const parts = Object.entries(src).filter(([, n]) => n > 0).map(([k, n]) => `${CPU_SRC[k] || k} ${n}구간`);
+  if (!parts.length) return 'CPU 사용률은 어느 경로로도 읽지 못했습니다 — iDRAC 텔레메트리(Datacenter 라이선스)·베어메탈 사용률 수집·vCenter 호스트(가상화 서버) 모두 값이 없습니다.';
+  const mixed = parts.length > 1 ? ' 출처가 바뀌는 구간은 측정 방식이 달라 값이 튈 수 있습니다.' : '';
+  return `CPU 사용률 출처: ${parts.join(' · ')}.${mixed}`;
+}
+/** 소비 전력을 못 찾은 이유. */
+export function powerNote(data) {
+  const p = data?.power;
+  if (!p || p.found) return '';
+  if (p.reason === 'no-edge-report') return '소비 전력 — 이 서버를 수집하는 엣지의 전력 보고를 아직 받지 못했습니다(중앙 재시작 직후면 1분 안에 채워집니다).';
+  return '소비 전력 계열을 찾지 못했습니다.';
 }
