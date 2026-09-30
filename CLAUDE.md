@@ -3924,6 +3924,12 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       같은 짧은 이름이 두 호스트면 정하지 않는다(`hostAmbiguous`) · 이름 후보(iDRAC 이름·hostName·인벤토리 hostName)가 서로 다른 호스트면 정하지 않는다.
       CPU 75/90 기준선 토글은 브라우저 저장(`idracTrend.cpuRef`). 과거 스크롤은 같은 길이 창을 칸 단위로(`scrollWindow` — 기준 끝은 스크롤 시작 때 한 번
       잡는다. 매번 Date.now() 면 폴링 사이에 칸이 밀린다) · 과거 구간은 폴링하지 않는다 · 슬라이더는 놓을 때만 조회. 기간 지정(custom)에는 스크롤이 없다.
+    - **v2.668 — 매칭된 ESXi 호스트의 GPU 사용률·GPU 메모리 점유도 '다른 선' 이다**(사용자 요청 "이 화면에서 수집한 GPU 사용량 붙여서
+      호스트 별로 사용량을 같이"): 계열 `hostGpuPct`·`hostGpuMemPct` 는 GPU 모니터링이 호스트 id 로 이미 적재하는 `gpu_util`·`gpu_mem`
+      (`routes/admin/idracTrend.js HOST_GPU_METRICS`)을 **읽기만** 한다 — 새 수집 없음. v2.666 ESXi CPU 와 같이 웹 `CHART_SERIES` 에만 넣고
+      iDRAC `SERIES` 에는 넣지 않는다(`gpu:true` 표지). 응답 `hostGpu.hasGpu`(`hostHasGpu` — 스냅샷 host.gpus, 모르면 null)가 **false 일 때만**
+      카드·선·내보내기 열을 숨긴다(모르면 보인다 — 'GPU 없음' 을 단정하지 않는다). GPU 온도는 iDRAC gpuTemp 가 있어 싣지 않는다.
+      샘플러의 gpu_util 은 ESXi 보고값 → 게스트 nvidia-smi 순이라 출처가 섞여 있다(각주가 둘 다 말한다).
   - ⚠⚠ **Overview 카드 8장 · 전체 소비 전력(v2.664) — 합산은 `server/src/power/total.js buildPowerTotal` 하나**(Overview 카드와 특수 기능
     `power-total` 이 같은 함수. `GET /overview/cards`·`GET /tools/power-total`, `routes/api/overviewCards.js` · 웹 `overviewCardsText.js`·`tools/PowerTotal.jsx`):
     · 서버 = `allMeasuredPower` 중 **vCenter 추정(source 'vcenter') 제외** · 네트워크 = CVP PSU `power.inW` 합(없으면 outW, `outputOnly` 로 밝힘 — 필드명 추정) ·

@@ -29,7 +29,42 @@ export const SERIES = [
  * 서버 표·조건 검색·무응답 구간 판정이 쓴다)에 넣지 않고 차트·카드·선 모양·내보내기 목록(CHART_SERIES)에만 넣는다.
  */
 export const HOST_CPU_SERIES = { k: 'hostCpuPct', label: 'ESXi CPU (vCenter)', unit: '%', color: '#22c55e', axis: 'pct', dash: 'dot', vc: true };
-export const CHART_SERIES = [...SERIES, HOST_CPU_SERIES];
+/*
+ * v2.668 — 매칭된 ESXi 호스트의 **GPU 사용률·GPU 메모리 점유**(특수 기능 GPU 모니터링이 호스트 id 로 적재하는 값 — 사용자 요청
+ * "이 화면에서 수집한 GPU 사용량 붙여서 호스트 별로 사용량을 같이"). ESXi CPU 와 같은 이유로 SERIES 에 넣지 않는다(iDRAC 값이 아니다).
+ * GPU 온도는 iDRAC 계열(gpuTemp)이 이미 있으므로 싣지 않는다. 호스트에 GPU 가 없다고 확인되면 카드·선을 숨긴다(gpu: true).
+ */
+export const HOST_GPU_SERIES = [
+  { k: 'hostGpuPct', label: 'ESXi GPU 사용률', unit: '%', color: '#84cc16', axis: 'pct', dash: 'dot', vc: true, gpu: true },
+  { k: 'hostGpuMemPct', label: 'ESXi GPU 메모리', unit: '%', color: '#14b8a6', axis: 'pct', dash: 'dot', vc: true, gpu: true },
+];
+export const CHART_SERIES = [...SERIES, HOST_CPU_SERIES, ...HOST_GPU_SERIES];
+
+/** 이 응답에서 보일 계열(순수). ESXi 계열은 매칭된 가상화 서버에만, GPU 계열은 호스트에 GPU 가 없다고 확인되면 숨긴다(모르면 보인다). */
+export function shownSeriesOf(data) {
+  return CHART_SERIES.filter((s) => {
+    if (!s.vc) return true;
+    if (!data?.hostCpu) return false;
+    if (s.gpu) return data?.hostGpu?.hasGpu !== false;
+    return true;
+  });
+}
+
+/** GPU 카드 빈 칸 문구 — 왜 비었는지(순수). */
+export function hostGpuEmptyText(data) {
+  const g = data?.hostGpu;
+  if (g?.hasGpu === false) return 'GPU 없음';
+  return 'GPU 값 없음 — GPU 모니터링 수집 확인';
+}
+
+/** GPU 계열 각주(순수). 출처를 밝힌다 — iDRAC 값이 아니다. */
+export function hostGpuNote(data) {
+  const g = data?.hostGpu;
+  if (!g || g.hasGpu === false) return '';
+  const firsts = Object.values(g.firstTs || {}).filter((x) => Number.isFinite(x));
+  const first = firsts.length ? ` 첫 적재는 ${ymd(Math.min(...firsts))} ${hm(Math.min(...firsts))} 입니다.` : ' 아직 적재된 값이 없습니다 — 특수 기능 › GPU 모니터링의 수집 상태를 확인하세요.';
+  return `연두·청록 점선(ESXi GPU 사용률·GPU 메모리)은 같은 호스트 ${g.hostName || g.hostId} 의 GPU 모니터링 값(ESXi 보고 또는 게스트 nvidia-smi)이고 iDRAC 값이 아닙니다.${first}`;
+}
 
 const p2 = (n) => String(n).padStart(2, '0');
 export const ymd = (t) => { const d = new Date(t); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; };
