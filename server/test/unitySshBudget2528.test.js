@@ -41,7 +41,13 @@ test('★ 명령 수 × 명령당 시한이 세션 예산 안에 들어간다 �
    * 한 항목의 최악은 `후보 수 × 그 항목의 시한` 이다(후보가 전부 시한까지 매달리는 경우).
    */
   const worstOf = (sp) => sp.cmds.length * (Number(sp.timeoutMs) || cmdMs);
-  const total = SPECS.reduce((a, sp) => a + worstOf(sp), 0);
+  // v2.664: lowPriority 항목(전원)은 **맨 뒤**라 예산이 남을 때만 돈다 — 앞 항목을 밀어내지 못하므로 1.25배 산수에서 뺀다.
+  //   대신 lowPriority 가 전부 맨 뒤에 모여 있고 required 가 아님을 아래에서 고정한다.
+  const firstLow = SPECS.findIndex((sp) => sp.lowPriority);
+  if (firstLow >= 0) {
+    assert.ok(SPECS.slice(firstLow).every((sp) => sp.lowPriority && !sp.required), 'lowPriority 항목은 맨 뒤에 모여 있고 required 가 아니어야 한다');
+  }
+  const total = SPECS.filter((sp) => !sp.lowPriority).reduce((a, sp) => a + worstOf(sp), 0);
   const req = SPECS.filter((sp) => sp.required).reduce((a, sp) => a + worstOf(sp), 0);
 
   /*

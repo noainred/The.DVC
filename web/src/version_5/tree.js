@@ -37,7 +37,7 @@ export const GROUPS = Object.freeze([
     id: 'assets', section: 'OPERATIONS', label: '자산', icon: 'server',
     items: [
       sub('인벤토리'), tab('vcenters', 'Platform'), tab('hosts', 'VM호스트'), tab('vms', '가상머신'), tab('datastores', '스토리지'),
-      tool('vm-export'), tool('fleet'), tool('serveranalysis'), tool('idrac-trend'),
+      tool('vm-export'), tool('fleet'), tool('serveranalysis'), tool('idrac-trend'), tool('power-total'),
       sub('장비'), tool('storage-mon'), tool('san-switch'), tool('pdu'), tool('hardware'), tool('hba'), tool('gpu'),
       tool('nic-speed'), tool('nic-models'),
       sub('검색'), tool('aisearch'), tool('explore'), tool('vmfinder'), tool('deepsearch'), tool('serial-lookup'),

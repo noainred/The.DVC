@@ -3904,6 +3904,14 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       이하=기간 최소, 값 없음은 판정 불가로 따로 센다 — 0 으로 보지 않는다). ⚠ 서비스태그는 `serverTrendSeries.serviceTagOf`(최상위 → 인벤토리)
       하나로 읽는다 — 적재기가 최상위만 봐서 엣지 서버의 vCenter CPU 대체가 쌓이지 않았다(화면 머리 판정과 출처가 달랐다). 지금 CPU 를 못 읽는
       사유는 `cpuFallbackDiag` → 응답 `cpuDiag` → 웹 `cpuDiagText`.
+  - ⚠⚠ **Overview 카드 8장 · 전체 소비 전력(v2.664) — 합산은 `server/src/power/total.js buildPowerTotal` 하나**(Overview 카드와 특수 기능
+    `power-total` 이 같은 함수. `GET /overview/cards`·`GET /tools/power-total`, `routes/api/overviewCards.js` · 웹 `overviewCardsText.js`·`tools/PowerTotal.jsx`):
+    · 서버 = `allMeasuredPower` 중 **vCenter 추정(source 'vcenter') 제외** · 네트워크 = CVP PSU `power.inW` 합(없으면 outW, `outputOnly` 로 밝힘 — 필드명 추정) ·
+      스토리지 = 스냅샷 `extra.power.watts`(지금은 Unity SSH 뿐 — 그 밖은 `unsupported`). 못 읽음·6시간 넘은 값은 더하지 않고 센다(0 W 금지).
+    · Unity 전원은 `SPECS` 맨 뒤 **lowPriority** 항목(`svc_diag -s spinfo`, 25초) — 예산 산수 테스트가 lowPriority 를 1.25배 합에서 빼되 '맨 뒤 · required 아님' 을
+      고정한다. 합계는 **DPE 만**(확장 DAE 없음). v2.542 '이 경로에서 spinfo 를 부르지 않는다' 는 이 항목 하나만 예외(테스트 고정).
+    · 카드 수치는 등록부·스냅샷 조합(장비 왕복 0). 범위 계정에는 vCenter 축이 없는 값(Agent·스토리지·CVP·전력)을 null + 사유. 가상 서버 수는 롤업과 같은 기준(템플릿 포함).
+    · 예전 한 줄 KPI 자동 숨김(kpisRef)은 지웠다 — 8장을 다 보여야 한다(`.ov-cards8` 4열 → 900px 이하 2열).
   - **CVP Overview EOS 버전 패널은 버전 순(최신 먼저)이다**(v2.657, `cvpOverviewText.versionList`·`cmpEosVersion` — 재사용 Collator numeric): 예전 '갈린 버전 먼저 → 대수' 순은
     사용자 요청으로 바꿨다. '버전 갈림' 은 태그로만 남는다 · 상한 12 · 넘치면 생략 개수를 적는다.
   - **GPU 추이 창은 수집 공백을 잇지 않는다**(v2.656, `GpuHistModal.gapRows`): 간격이 `max(버킷, 수집 주기) × 2` 를 넘으면 null 행을 끼워 선을 끊고
