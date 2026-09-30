@@ -116,11 +116,16 @@ export function modelBars(models, max = 6) {
   }));
 }
 
+/** EOS 버전 비교 — 숫자 구간을 수로 본다('4.30.10M' > '4.30.6M'). 비교기는 한 번 만들어 재사용한다. */
+const VERSION_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
+export function cmpEosVersion(a, b) { return VERSION_COLLATOR.compare(String(a ?? ''), String(b ?? '')); }
+
 /**
- * EOS 버전 행 — 같은 모델 안에서 버전이 갈린 버전을 먼저. 태그는 '버전 갈림' 또는 'N개 모델'.
- * 권장·지원 종료 같은 벤더 상태는 지어내지 않는다.
+ * EOS 버전 행 — 버전 순(최신 먼저, v2.657 사용자 요청 "EOS 버전별로 소팅"). 버전을 모르는 행은 맨 뒤.
+ * 같은 모델 안에서 버전이 갈린 버전은 '버전 갈림' 태그로 표시한다(순서는 바꾸지 않는다).
+ * 권장·지원 종료 같은 벤더 상태는 지어내지 않는다. 상한을 넘은 개수는 omitted 로 밝힌다.
  */
-export function versionRows(ov, max = 6) {
+export function versionList(ov, max = 12) {
   const o = ov && typeof ov === 'object' ? ov : {};
   const split = new Set((Array.isArray(o.models) ? o.models : []).filter((m) => Array.isArray(m?.versions) && m.versions.length > 1).map((m) => m.model));
   const rows = (Array.isArray(o.versions) ? o.versions : []).filter((v) => v && typeof v === 'object').map((v) => {
@@ -132,9 +137,10 @@ export function versionRows(ov, max = 6) {
       title: splitIn.length ? `같은 모델에 다른 버전이 섞여 있습니다: ${splitIn.map((m) => m || '(모델 미상)').join(', ')}` : models.map((m) => m || '(모델 미상)').join(', '),
     };
   });
-  rows.sort((a, b) => (Number(b.split) - Number(a.split)) || (b.count - a.count));
-  return rows.slice(0, max);
+  rows.sort((a, b) => (Number(!a.version) - Number(!b.version)) || -cmpEosVersion(a.version, b.version) || (b.count - a.count));
+  return { rows: rows.slice(0, max), omitted: Math.max(0, rows.length - max), total: rows.length };
 }
+export function versionRows(ov, max = 12) { return versionList(ov, max).rows; }
 
 /** 모델 화면 표 — 모델 × 버전(대수) · 법인 수 · 판정 분포. */
 export function modelTableRows(models) {

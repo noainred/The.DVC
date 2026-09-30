@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { ACTIVITY_TEXT, activityOf, memText, gbText, tempText, allocText, capacityNote, coverageText, activityRuleNote, activitySummary } from './gpuUsageText.js';
+import { ACTIVITY_TEXT, activityOf, memText, gbText, tempText, allocText, allocTitle, capacityNote, coverageText, activityRuleNote, activitySummary } from './gpuUsageText.js';
 
 describe('gpuUsageText (v2.650)', () => {
   it('값이 없으면 단위를 붙이지 않는다', () => {
@@ -20,6 +20,13 @@ describe('gpuUsageText (v2.650)', () => {
     expect(allocText({ allocGB: null, passthroughOn: 2 })).toBe('패스스루 2장');
     expect(allocText({ allocGB: null, passthroughOn: 0, allocUnknown: 1 })).toBe('프로파일 해석 불가 1대');
     expect(allocText({ allocGB: null, passthroughOn: 0 })).toMatch(/할당 없음/);
+    // v2.657: 분모는 명목 용량 — A40(보고 45GB) 에 24Q×2 = 48/48(100%), 보고 용량은 툴팁이 함께 말한다
+    const a40 = { allocGB: 48, capacityGB: 45, allocCapacityGB: 48, allocCapacityBasis: 'nominal', allocPct: 100 };
+    expect(allocText(a40)).toBe('vGPU 48 GB / 48 GB (100%)');
+    expect(allocTitle(a40)).toContain('명목 용량 48 GB'); expect(allocTitle(a40)).toContain('45 GB');
+    expect(allocTitle(a40)).not.toContain('넘습니다');
+    expect(allocTitle({ allocGB: 60, capacityGB: 48, allocCapacityGB: 48, allocCapacityBasis: 'reported', allocPct: 125 })).toContain('넘습니다');
+    expect(allocTitle({ allocGB: null })).toBe('');
   });
   it('용량 출처·수집 범위·판정 기준을 말한다', () => {
     expect(capacityNote({ capacityGB: 282, capacityEstimated: true })).toMatch(/추정/);

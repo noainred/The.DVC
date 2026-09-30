@@ -6,7 +6,7 @@ import { UsageCell } from './primitives.jsx';
 import { STable } from './STable.jsx';
 import BoldText from './boldText.jsx';
 import {
-  activityOf, memText, gbText, tempText, allocText, capacityNote, coverageText, activityRuleNote, activitySummary,
+  activityOf, memText, gbText, tempText, allocText, allocTitle, capacityNote, coverageText, activityRuleNote, activitySummary,
 } from '../views/tools/gpuUsageText.js';
 
 const GpuHistModal = React.lazy(() => import('../views/tools/GpuHistModal.jsx'));
@@ -59,7 +59,7 @@ export default function HostGpuPanel({ hostId, hostName }) {
           {d.memUsedMB == null ? <span className="muted">—</span> : <span>{memText(d.memUsedMB, d.memTotalMB)} <span className="muted" style={{ fontWeight: 400 }}>({d.memUsedPct}%)</span></span>}
         </Stat>
         <Stat label="GPU 메모리 할당" sub={d.capacityGB != null ? `설치 용량 ${gbText(d.capacityGB)}${d.capacityEstimated ? '(모델명 추정)' : ''}` : '설치 용량 모름'}>
-          <span style={{ fontSize: 13 }}>{allocText(d)}</span>
+          <span style={{ fontSize: 13 }} title={allocTitle(d)}>{allocText(d)}</span>
         </Stat>
       </div>
       {activitySummary(d.activity) && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>켜진 GPU VM 동작: <b>{activitySummary(d.activity)}</b></div>}

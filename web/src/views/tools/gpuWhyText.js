@@ -31,6 +31,29 @@ export function whyChip(why) {
   return { short, title: bits.join('\n') };
 }
 
+/**
+ * v2.657: 배너 한 줄의 '무엇을 못 읽었나' — 서버 missing(호스트 대수)에서 만든다. 없으면(구버전 서버) null.
+ * 사용률·메모리 사용·온도는 게스트 또는 ESXi 에서 오고, 메모리 할당은 vCenter 의 vGPU 프로파일에서 온다(게스트와 무관).
+ */
+export function missingText(x) {
+  const m = x && x.missing && typeof x.missing === 'object' ? x.missing : null;
+  const hosts = numOrNull(x && x.hosts) ?? 0;
+  if (!m || hosts <= 0) return null;
+  const n = (k) => Math.max(0, numOrNull(m[k]) ?? 0);
+  let read;
+  if (n('all') === hosts) read = '사용률·메모리 사용·온도 전부 못 읽음(이 호스트들의 GPU 동작 값을 하나도 모릅니다)';
+  else {
+    const parts = [['util', '사용률'], ['mem', '메모리 사용'], ['temp', '온도']].filter(([k]) => n(k) > 0).map(([k, l]) => `${l} ${n(k)}대`);
+    read = parts.length
+      ? `못 읽은 값 — ${parts.join(' · ')}${n('all') > 0 ? ` (셋 다 못 읽은 호스트 ${n('all')}대)` : ''} · 나머지는 ESXi 카운터로 채움`
+      : '사용률·메모리 사용·온도는 ESXi 카운터로 채웠습니다(게스트 값만 없음)';
+  }
+  const alloc = n('alloc') > 0
+    ? `메모리 할당: vGPU 프로파일을 해석하지 못한 호스트 ${n('alloc')}대`
+    : '메모리 할당은 읽음(vCenter 의 vGPU 프로파일 — 게스트 수집과 무관)';
+  return `${read} · ${alloc}`;
+}
+
 /** 표 위 배너: 켜진 GPU VM 을 한 대도 못 읽은 원인만 vCenter 단위로(일부만 수집은 배너에 올리지 않는다). */
 export function whyBannerItems(list) {
   const rows = (Array.isArray(list) ? list : []).filter((x) => x && x.code && x.code !== 'partial');
@@ -38,6 +61,7 @@ export function whyBannerItems(list) {
     key: `${x.vcenterId}|${x.code}`,
     vcenterId: x.vcenterId,
     text: `${x.vcenterId} — ${(WHY_TEXT[x.code] || WHY_TEXT.unknown).short}${x.agent ? `(엣지 ${x.agent})` : ''} · 호스트 ${x.hosts}대${numOrNull(x.vms) > 0 ? ` · 못 읽은 VM ${x.vms}대` : ''}`,
+    detail: missingText(x),
     title: (WHY_TEXT[x.code] || WHY_TEXT.unknown).fix,
   }));
 }

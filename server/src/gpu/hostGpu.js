@@ -13,6 +13,7 @@
 import { numOrNull } from '../util/numOrNull.js';
 import { gpuActivity, activityCounts } from './activity.js';
 import { vmVgpuAllocGB, vmGpuDevices } from './vgpuProfile.js';
+import { inferGpuMemGB } from './gpuModelMem.js';
 
 const round1 = (n) => Math.round(n * 10) / 10;
 
@@ -26,6 +27,16 @@ export function summarizeHostGpu(host, vms, guestByVm, { now = Date.now() } = {}
   const capKnown = gpus.every((g) => numOrNull(g.memGB) > 0);
   const capacityGB = gpus.length && capKnown ? gpus.reduce((a, g) => a + Number(g.memGB), 0) : null;
   const capacityEstimated = gpus.some((g) => g.mode === 'passthrough');
+  // v2.657: 할당률의 분모는 GPU 한 장의 '명목' 용량이다(vGPU 프로파일 이름의 GB 가 명목 단위다 — A40 의 24Q 둘 = 48).
+  //   vCenter 가 주는 memorySizeInKB 는 그보다 작게 온다(A40 → 45GB 로 반올림. 예약분으로 추정 — 실장비 미확인).
+  //   그 값으로 나누면 카드 최대 구성(24Q×2)이 107% '초과' 로 보인다. 모델명으로 명목 용량을 알면 그것을,
+  //   모르면 보고값을 쓴다(작은 쪽이 아니라 큰 쪽 — 명목보다 작은 보고값으로 나누지 않는다). 사용량 분모는 보고값 그대로.
+  let allocCapacityGB = null; let allocCapacityBasis = null;
+  if (capacityGB != null) {
+    let nominal = false;
+    allocCapacityGB = gpus.reduce((a, g) => { const n = inferGpuMemGB(g.model); if (n > Number(g.memGB)) { nominal = true; return a + n; } return a + Number(g.memGB); }, 0);
+    allocCapacityBasis = nominal ? 'nominal' : 'reported';
+  }
   const rows = [];
   let allocGB = 0; let allocKnown = 0; let allocUnknown = 0; let passthroughOn = 0;
   let memUsed = 0; let memTotal = 0; let memVms = 0;
@@ -88,7 +99,8 @@ export function summarizeHostGpu(host, vms, guestByVm, { now = Date.now() } = {}
     // 할당 — vGPU 는 GB, 패스스루는 장(한 장 통째)
     allocGB: allocKnown ? round1(allocGB) : null,
     allocUnknown,
-    allocPct: allocKnown && capacityGB ? Math.round((allocGB / capacityGB) * 100) : null,
+    allocPct: allocKnown && allocCapacityGB ? Math.round((allocGB / allocCapacityGB) * 100) : null,
+    allocCapacityGB, allocCapacityBasis,
     passthroughOn,
     // 사용 — 게스트 수집분만
     memUsedMB: mem ? mem.used : null,
