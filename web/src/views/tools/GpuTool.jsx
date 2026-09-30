@@ -8,7 +8,7 @@ import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../co
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { activityOf, memText, gbText, tempText, allocText, allocTitle, activityRuleNote, activitySummary } from './gpuUsageText.js';
-import { whyChip, whyBannerItems, vmChips, activityBar, srcText } from './gpuWhyText.js';
+import { whyChip, whyBannerItems, vmChips, activityBar, srcText, collectCheckGroups, readCell } from './gpuWhyText.js';
 const GpuHistModal = React.lazy(() => import('./GpuHistModal.jsx'));
 
 
@@ -104,6 +104,7 @@ export function Gpu({ scope }) {
   const [view, setView] = useHashTab({ base: ['tools', 'gpu'], valid: ['host', 'cluster', 'vc', 'model'], fallback: 'host' });
   const [hist, setHist] = useState(null);   // { level, key, metric } — v2.650: GpuHistModal 이 조회한다
   const [vmList, setVmList] = useState(null); // { title, params } for GpuVmsModal
+  const [checkOpen, setCheckOpen] = useState(false); // v2.658 수집 점검 창
   const openHist = (level, key, metric = 'util') => setHist({ level, key, metric });
   const closeHist = () => setHist(null);
   const [mode, setMode] = useState(''); // '' | vgpu | passthrough | vsga
@@ -358,6 +359,8 @@ export function Gpu({ scope }) {
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }}
               onClick={() => setVmList({ title: `GPU 할당 VM${modelFilter ? ` — ${modelFilter}` : ' 전체'}`, params: { ...(scope ? { vcenterId: scope } : {}), ...(mode ? { mode } : {}), ...(modelFilter ? { model: modelFilter } : {}) } })}>🎮 GPU 할당 VM 보기</button>
             {canCsv() && <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => setExportOpen(true)} title="수집된 GPU 사용률 데이터(전체/기간)를 CSV·JSON으로 내려받기.">⬇ 내보내기</button>}
+            <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => setCheckOpen(true)}
+              title="GPU 값을 읽지 못한 호스트를 법인별로 전부 봅니다(배너에 다 싣지 못한 것 포함).">🩺 수집 점검{(data.guestWhy || []).length ? ` (${new Set((data.guestWhy || []).map((x) => x.vcenterId)).size}개 법인)` : ''}</button>
           </div>
           {view === 'model' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별로 설치된 GPU 카드 모델·장수·할당 VM 수입니다(같은 법인·같은 모델은 합산). <b>할당 VM</b> 숫자를 클릭하면 해당 VM 목록과 사용 방식을 봅니다.</div>}
           {view === 'vc' && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>법인별 GPU 장수·사용 방식·할당 VM 수입니다. <b>할당 VM</b> 숫자를 클릭하면 VM별 사용 방식을 봅니다.</div>}
@@ -372,7 +375,7 @@ export function Gpu({ scope }) {
                 <div className="gpu-why-banner">
                   <span className="dot" />
                   <b>게스트 GPU 값을 읽지 못한 호스트가 있습니다</b>
-                  <span className="list">{whyBannerItems(data.guestWhy).slice(0, 6).map((x) => <span key={x.key} title={x.title} className="item"><span>{x.text}</span>{x.detail && <span className="detail">{x.detail}</span>}</span>)}{whyBannerItems(data.guestWhy).length > 6 && <span>외 {whyBannerItems(data.guestWhy).length - 6}건</span>}</span>
+                  <span className="list">{whyBannerItems(data.guestWhy).slice(0, 6).map((x) => <span key={x.key} title={x.title} className="item"><span>{x.text}</span>{x.detail && <span className="detail">{x.detail}</span>}</span>)}{whyBannerItems(data.guestWhy).length > 6 && <button type="button" className="gpu-why-more" onClick={() => setCheckOpen(true)} title="수집 점검 창에서 전부 봅니다">외 {whyBannerItems(data.guestWhy).length - 6}건 — 전부 보기</button>}</span>
                   <a href="#/settings/gpu-guest" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>수집 진단 열기 →</a>
                 </div>
               )}
@@ -390,8 +393,70 @@ export function Gpu({ scope }) {
 
       {hist && <React.Suspense fallback={null}><GpuHistModal level={hist.level} hkey={hist.key} initialMetric={hist.metric} onClose={closeHist} /></React.Suspense>}
       {vmList && <GpuVmsModal title={vmList.title} params={vmList.params} onClose={() => setVmList(null)} />}
+      {checkOpen && <GpuCollectCheckModal data={data} onClose={() => setCheckOpen(false)} />}
       {canCsv() && exportOpen && <GpuExportModal scope={scope} onClose={() => setExportOpen(false)} onSnapshot={exportGpu} />}
     </>
+  );
+}
+
+/**
+ * v2.658 '수집 점검' — GPU 값을 읽지 못한 호스트를 법인(vCenter)별로 전부 보여 준다.
+ * 배너(앞 6줄)와 같은 서버 판정(guestWhy)을 쓰고 '일부만 수집' 까지 싣는다. 왼쪽 법인 칩을 누르면 그 법인만 본다.
+ * 폴링하지 않는다 — 화면이 이미 받은 /tools/gpu 응답만 쓴다(장비 왕복 0).
+ */
+function GpuCollectCheckModal({ data, onClose }) {
+  const groups = collectCheckGroups(data.guestWhy, data.items);
+  const [sel, setSel] = useState('');
+  const shown = sel ? groups.filter((g) => g.vcenterId === sel) : groups;
+  const tot = groups.reduce((a, g) => ({ hosts: a.hosts + g.hosts, full: a.full + g.full, partial: a.partial + g.partial, vms: a.vms + g.vms }), { hosts: 0, full: 0, partial: 0, vms: 0 });
+  const cell = (ok, src) => { const c = readCell(ok, src); return <td style={{ color: c.bad ? 'var(--amber)' : 'var(--text-dim)', whiteSpace: 'nowrap' }}>{c.text}</td>; };
+  return (
+    <Modal title="GPU 수집 점검 — 법인별" onClose={onClose} width={1100}>
+      {groups.length === 0 ? <div className="muted">GPU 값을 읽지 못한 호스트가 없습니다.</div> : (
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div className="muted" style={{ fontSize: 12 }}>
+            법인 {groups.length}곳 · 호스트 {tot.hosts}대(전부 못 읽음 {tot.full} · 일부만 수집 {tot.partial}) · 못 읽은 켜진 VM {tot.vms}대.
+            메모리 할당은 게스트가 아니라 vCenter 의 vGPU 프로파일에서 옵니다. 조치는 <a href="#/settings/gpu-guest" style={{ color: '#7dd3fc' }}>설정 › GPU 게스트 수집 › 수집 진단</a>에서 합니다.
+          </div>
+          <div className="gpu-check-chips">
+            <button type="button" className={`tab${sel ? '' : ' active'}`} onClick={() => setSel('')}>전체 ({groups.length})</button>
+            {groups.map((g) => (
+              <button type="button" key={g.vcenterId} className={`tab${sel === g.vcenterId ? ' active' : ''}`} onClick={() => setSel(sel === g.vcenterId ? '' : g.vcenterId)}
+                title={`전부 못 읽음 ${g.full}대 · 일부만 수집 ${g.partial}대`}>{g.vcenterId || '(vCenter 미상)'} <span className="muted">{g.hosts}</span></button>
+            ))}
+          </div>
+          {shown.map((g) => (
+            <div key={g.vcenterId} className="card" style={{ padding: 12, minWidth: 0 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'baseline', marginBottom: 6 }}>
+                <b style={{ fontSize: 14 }}>{g.vcenterId || '(vCenter 미상)'}</b>
+                <span className="muted" style={{ fontSize: 12 }}>호스트 {g.hosts}대 · 전부 못 읽음 {g.full} · 일부만 수집 {g.partial} · 못 읽은 VM {g.vms}대</span>
+              </div>
+              {g.entries.map((e) => (
+                <div key={e.key} style={{ padding: '6px 0', borderTop: '1px solid var(--border)', fontSize: 12.5, display: 'grid', gap: 2 }}>
+                  <div><b style={{ color: e.partial ? 'var(--text-dim)' : 'var(--amber)' }}>{e.short}</b>{e.agent ? ` (엣지 ${e.agent})` : ''} · 호스트 {e.hosts}대{e.vms > 0 ? ` · 못 읽은 VM ${e.vms}대` : ''}</div>
+                  {e.detail && <div className="muted" style={{ overflowWrap: 'anywhere' }}>{e.detail}</div>}
+                  <div className="muted" style={{ overflowWrap: 'anywhere' }}>조치: {e.fix}</div>
+                </div>
+              ))}
+              {g.hostRows.length > 0 && (
+                <STable className="v3-table" minWidth={720} style={{ marginTop: 6, fontSize: 12 }}>
+                  <thead><tr><th>호스트</th><th>GPU</th><th>사유</th><th>못 읽은 VM</th><th>사용률</th><th>메모리 사용</th><th>온도</th></tr></thead>
+                  <tbody>{g.hostRows.map((r) => (
+                    <tr key={r.key}>
+                      <td>{r.host}</td>
+                      <td className="muted">{r.model}{r.count != null ? ` ×${r.count}` : ''}</td>
+                      <td title={r.whyTitle} style={{ color: r.partial ? 'var(--text-dim)' : 'var(--amber)', whiteSpace: 'nowrap' }}>{r.why}</td>
+                      <td data-sort={r.vmsUnread}>{r.vmsUnread}대</td>
+                      {cell(r.util, r.utilSrc)}{cell(r.mem, r.memSrc)}{cell(r.temp, r.tempSrc)}
+                    </tr>
+                  ))}</tbody>
+                </STable>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }
 

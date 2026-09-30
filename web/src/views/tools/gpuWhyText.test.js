@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { whyChip, whyBannerItems, missingText, vmChips, activityBar, WHY_CODES, srcText } from './gpuWhyText.js';
+import { whyChip, whyBannerItems, missingText, vmChips, activityBar, WHY_CODES, srcText, collectCheckGroups, readCell } from './gpuWhyText.js';
 
 describe('gpuWhyText (v2.653)', () => {
   it('코드마다 짧은 글자·조치가 있고 모르는 코드는 원인 미상', () => {
@@ -41,5 +41,30 @@ describe('gpuWhyText (v2.653)', () => {
     expect(missingText({ hosts: 1, missing: { util: 0, mem: 0, temp: 0, alloc: 0, all: 0 } })).toMatch(/ESXi 카운터로 채웠습니다.*할당은 읽음/);
     expect(missingText({ hosts: 1 })).toBeNull();
     expect(whyBannerItems([{ vcenterId: 'ST', code: 'not-enabled', hosts: 1, vms: 2, missing: { util: 0, mem: 1, temp: 0, alloc: 0, all: 0 } }])[0].detail).toContain('메모리 사용 1대');
+  });
+});
+
+describe('collectCheckGroups (v2.658 수집 점검)', () => {
+  it('법인별로 묶고 일부만 수집까지 전부 싣는다 · 호스트 줄은 무엇을 못 읽었나', () => {
+    const why = [
+      { vcenterId: 'WA', code: 'collect-failed', hosts: 2, vms: 5, missing: { util: 1, mem: 2, temp: 2, alloc: 0, all: 1 } },
+      { vcenterId: 'WA', code: 'partial', hosts: 1, vms: 1, detail: '3/4' },
+      { vcenterId: 'NJ', code: 'not-enabled', hosts: 5, vms: 9 },
+    ];
+    const items = [
+      { id: 'h1', vcenterId: 'WA', host: 'esx1', guestWhy: { code: 'collect-failed' }, utilPct: 10, utilSource: 'esxi', vmsUnread: 3 },
+      { id: 'h2', vcenterId: 'WA', host: 'esx2', guestWhy: { code: 'partial', detail: '3/4' }, tempC: 50, tempSource: 'guest', vmsUnread: 1 },
+      { id: 'h3', vcenterId: 'WA', host: 'esx3', guestWhy: null },
+    ];
+    const g = collectCheckGroups(why, items);
+    expect(g.map((x) => x.vcenterId)).toEqual(['NJ', 'WA']);
+    const wa = g[1];
+    expect(wa.hosts).toBe(3); expect(wa.full).toBe(2); expect(wa.partial).toBe(1);
+    expect(wa.entries.map((e) => e.code)).toEqual(['collect-failed', 'partial']);
+    expect(wa.entries[0].detail).toContain('메모리 사용 2대');
+    expect(wa.hostRows.map((r) => r.host)).toEqual(['esx1', 'esx2']);
+    expect(wa.hostRows[0].util).toBe(true); expect(wa.hostRows[0].mem).toBe(false);
+    expect(readCell(true, 'esxi').text).toBe('읽음(ESXi)'); expect(readCell(false).bad).toBe(true);
+    expect(collectCheckGroups(null, null)).toEqual([]);
   });
 });
