@@ -14,9 +14,13 @@ import { recentAlarms, alarmPanelText } from './overviewAlarmsText.js'; // v2.63
 import { corpSiteStatus } from './corpSiteStatus.js'; // v2.631(감사 WEB2631-03)
 import { countText, capText, kwText, cardMeta } from './overviewCardsText.js'; // v2.664 카드 8장
 
-const REGION_COLORS = { '아시아': '#22d3ee', '중국': '#ef4444', '유럽': '#a855f7', '북미': '#3b82f6', Unknown: '#64748b' };
+import { chartGroup, REGION_ORDER } from './execOverviewText.js'; // v2.670 리전 차트 묶음(region-chart-change.md)
 
-export default function Overview({ onSelectSite, onGotoTab }) {
+// v2.670: 차트는 유럽 / 북미 / 아시아(중국 포함) / 대한민국 — 데이터 리전 값(범위·필터·자연어 검색이 쓴다)은 그대로 두고
+//   화면에서만 사이트를 다시 묶는다(판정은 execOverviewText.chartGroup 하나 — 경영 보기와 같은 묶음).
+const REGION_COLORS = { '유럽': '#a855f7', '북미': '#3b82f6', '아시아(중국 포함)': '#22d3ee', '대한민국': '#34e0b4', Unknown: '#64748b' };
+
+export default function Overview({ onSelectSite, onGotoTab, modeToggle = null }) {
   const { data: ov, error, loading } = usePolling('/overview', {}, 15_000);
   // v2.631(감사 WEB2631-02): inv.alarms 권한이 없으면 부르지 않는다(403 을 만들고 '활성 알람이 없습니다' 라 말하던 것).
   const canAlarms = can('inv.alarms');
@@ -41,7 +45,6 @@ export default function Overview({ onSelectSite, onGotoTab }) {
   const cpuPct = g.hosts > 0 && Number(g.cpuTotalGhz) > 0 ? (g.cpuUsagePct ?? null) : null;
   const memPct = g.hosts > 0 && Number(g.memTotalGB) > 0 ? (g.memUsagePct ?? null) : null;
   const stoPct = g.datastores > 0 && Number(g.storageTotalTB) > 0 ? g.storageUsagePct : null;
-  const regions = ov.byRegion || [];
   const sites = ov.sites || [];
   // v2.631(감사 WEB2631-02): 스냅샷 순서의 앞 8건이 아니라 시각 내림차순 8건 — 비었을 때의 문구는 '못 읽음' 과 '없음' 을 가른다.
   const alarms = recentAlarms(alarmData?.items, 8);
@@ -60,7 +63,11 @@ export default function Overview({ onSelectSite, onGotoTab }) {
     { name: 'Memory', used: memPct },
     { name: 'Storage', used: stoPct },
   ];
-  const osPie = regions.map((r) => ({ name: r.key, value: r.vms, fill: REGION_COLORS[r.key] || '#64748b' }));
+  const grp = {};
+  sites.forEach((s) => { const k = chartGroup(s); grp[k] = (grp[k] || 0) + (s.metrics?.vms || 0); });
+  const osPie = [...REGION_ORDER, ...Object.keys(grp).filter((k) => !REGION_ORDER.includes(k))]
+    .filter((k) => grp[k] > 0)
+    .map((k) => ({ name: k, value: grp[k], fill: REGION_COLORS[k] || '#64748b' }));
 
   // ── 서버·게스트 수량 (v2.526, v2.527 에 '합/물리 전용/가상화 호스트' 로 재구성) ──────────
   // 사용자 요청: "전체 물리 서버 수량(idrac 에서 찾은 수량), 가상화 호스트 수량, 법인별 서버
@@ -129,6 +136,7 @@ export default function Overview({ onSelectSite, onGotoTab }) {
           <span style={{ color: 'var(--border)' }}>·</span>
           <span style={{ color: 'var(--mint)' }}>LIVE</span>
         </div>
+        {modeToggle}
       </div>
       {/* v2.664(사용자 요청): 카드 8장 — 데이터센터·서버 Farm·물리 서버·가상 서버·GPU·스토리지 용량·네트워크 장비·소비 전력.
           값은 서버 /overview/cards 가 이미 가진 등록부·스냅샷만 조합한다(장비 왕복 0). 못 읽은 값은 '—'(0 이 아니다).
