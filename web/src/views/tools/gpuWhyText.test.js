@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { whyChip, whyBannerItems, vmChips, activityBar, WHY_CODES, srcText } from './gpuWhyText.js';
+import { whyChip, whyBannerItems, missingText, vmChips, activityBar, WHY_CODES, srcText } from './gpuWhyText.js';
 
 describe('gpuWhyText (v2.653)', () => {
   it('코드마다 짧은 글자·조치가 있고 모르는 코드는 원인 미상', () => {
@@ -32,5 +32,14 @@ describe('gpuWhyText (v2.653)', () => {
     const fs = await import('node:fs'); const src = fs.readFileSync(new URL('./gpuWhyText.js', import.meta.url), 'utf8');
     for (const c of WHY_CODES) expect(whyChip({ code: c }).title).not.toMatch(/`/);
     expect(src.length).toBeGreaterThan(0);
+  });
+  it('missingText — 무엇을 못 읽었나(v2.657): 전부 / 일부 / ESXi 로 채움 / 할당', () => {
+    expect(missingText({ hosts: 2, missing: { util: 2, mem: 2, temp: 2, alloc: 0, all: 2 } })).toMatch(/전부 못 읽음/);
+    const p = missingText({ hosts: 3, missing: { util: 0, mem: 3, temp: 1, alloc: 1, all: 0 } });
+    expect(p).toContain('메모리 사용 3대'); expect(p).toContain('온도 1대'); expect(p).not.toContain('사용률');
+    expect(p).toContain('해석하지 못한 호스트 1대');
+    expect(missingText({ hosts: 1, missing: { util: 0, mem: 0, temp: 0, alloc: 0, all: 0 } })).toMatch(/ESXi 카운터로 채웠습니다.*할당은 읽음/);
+    expect(missingText({ hosts: 1 })).toBeNull();
+    expect(whyBannerItems([{ vcenterId: 'ST', code: 'not-enabled', hosts: 1, vms: 2, missing: { util: 0, mem: 1, temp: 0, alloc: 0, all: 0 } }])[0].detail).toContain('메모리 사용 1대');
   });
 });

@@ -1235,4 +1235,6 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .gpu-why-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 14px; margin-bottom: 10px; border: 1px solid #5a4516; background: #1d1809; border-radius: 10px; font-size: 13px; color: #fde68a; }
 .gpu-why-banner .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--amber); flex: none; }
 .gpu-why-banner a { color: #7dd3fc; font-weight: 600; }
-.gpu-why-banner .list { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; color: #c9b27a; font-size: 12px; }
+.gpu-why-banner .list { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; color: #c9b27a; font-size: 12px; min-width: 0; }
+.gpu-why-banner .list .item { display: inline-flex; flex-direction: column; gap: 1px; min-width: 0; }
+.gpu-why-banner .list .detail { color: #a8956a; font-size: 11.5px; overflow-wrap: anywhere; }

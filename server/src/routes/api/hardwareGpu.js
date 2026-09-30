@@ -75,6 +75,25 @@ export function gatherGuestWhyCtx(snap) {
   };
 }
 
+
+/**
+ * v2.657(사용자 요청 "GPU 사용율·메모리 할당·메모리 사용, 아니면 GPU 정보 전체를 못 읽는지 구체적으로"):
+ * 배너 한 줄(vCenter × 사유)에 '그 호스트들에서 무엇이 비었나' 를 싣는다. 호스트 대수로 센다.
+ *   util  사용률을 어느 출처(ESXi·게스트)로도 못 얻음
+ *   mem   메모리 사용을 어느 출처로도 못 얻음
+ *   temp  온도를 어느 출처로도 못 얻음
+ *   alloc 켜진 vGPU VM 의 프로파일을 해석하지 못함(할당은 게스트가 아니라 vCenter 프로파일에서 온다)
+ *   all   사용률·메모리 사용·온도가 전부 비었음(= 이 호스트의 GPU 동작 값을 하나도 모른다)
+ */
+export function missingZero() { return { util: 0, mem: 0, temp: 0, alloc: 0, all: 0 }; }
+export function addMissing(m, gs) {
+  const u = gs.utilPct == null; const me = gs.memUsedMB == null && gs.memUsedPct == null; const t = gs.tempC == null;
+  if (u) m.util++; if (me) m.mem++; if (t) m.temp++;
+  if ((gs.allocUnknown || 0) > 0) m.alloc++;
+  if (u && me && t) m.all++;
+  return m;
+}
+
 // GPU inventory per host + aggregate counts by model and vCenter.
 // GPU 인벤토리 집계(호스트별 GPU 장수·모드·사용률·할당 VM) — /tools/gpu 와 CSV/JSON export 공용.
 export function buildGpuInventory(snap, vcenterId, allowed = null) {
@@ -128,7 +147,12 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
     totalGpus += gpus.length;
     const gs = summarizeHostGpu(h, gpuVmsByHost.get(gpuHostKey(h.vcenterId, h.name)) || [], guestByVm);
     const why = guestWhyOf(gs, whyCtx(h.vcenterId));
-    if (why) { const k = `${h.vcenterId}\t${why.code}`; const e = whyCounts[k] || (whyCounts[k] = { vcenterId: h.vcenterId, code: why.code, agent: why.agent || null, detail: why.detail || null, hosts: 0, vms: 0 }); e.hosts++; e.vms += gs.vmsUnread || 0; }
+    if (why) {
+      const k = `${h.vcenterId}\t${why.code}`;
+      const e = whyCounts[k] || (whyCounts[k] = { vcenterId: h.vcenterId, code: why.code, agent: why.agent || null, detail: why.detail || null, hosts: 0, vms: 0, missing: missingZero() });
+      e.hosts++; e.vms += gs.vmsUnread || 0;
+      addMissing(e.missing, gs);
+    }
     if (gs.allocGB != null) { allocGBTotal += gs.allocGB; allocHosts++; }
     if (gs.memUsedMB != null && gs.memTotalMB > 0) { memUsedMBTotal += gs.memUsedMB; memTotalMBTotal += gs.memTotalMB; memHosts++; }
     if (gs.tempC != null) tempMax = tempMax == null ? gs.tempC : Math.max(tempMax, gs.tempC);
@@ -148,7 +172,7 @@ export function buildGpuInventory(snap, vcenterId, allowed = null) {
       vgpu: primaryMode === 'vgpu', utilPct, utilSource: h.gpuUtilPct != null ? 'esxi' : (guestUtil != null ? 'guest' : null),
       assignedVms: vmAlloc.vms, assignedVmsOn: vmAlloc.on || 0, assignedVmsOff: vmAlloc.off || 0, assignedVmNames: vmAlloc.names || [],
       // v2.650
-      capacityGB: gs.capacityGB, capacityEstimated: gs.capacityEstimated,
+      capacityGB: gs.capacityGB, capacityEstimated: gs.capacityEstimated, allocCapacityGB: gs.allocCapacityGB, allocCapacityBasis: gs.allocCapacityBasis,
       allocGB: gs.allocGB, allocUnknown: gs.allocUnknown, allocPct: gs.allocPct, passthroughOn: gs.passthroughOn,
       memUsedMB: gs.memUsedMB, memTotalMB: gs.memTotalMB, memUsedPct: gs.memUsedPct, memVms: gs.memVms, memSource: gs.memSource, tempSource: gs.tempSource,
       tempC: gs.tempC, vmsRead: gs.vmsRead, vmsUnread: gs.vmsUnread, activity: gs.activity,

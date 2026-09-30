@@ -108,6 +108,7 @@ test('⑧ 실제 api 라우터: /tools/gpu 가 guestWhy·호스트 VM 목록·ES
     assert.equal(row.vms.length, 1); assert.equal(row.vms[0].name, 'vdi-1'); assert.equal(row.vms[0].activity, 'unknown');
     assert.ok(row.guestWhy && GUEST_WHY_CODES.includes(row.guestWhy.code), `사유 코드: ${JSON.stringify(row.guestWhy)}`);
     assert.ok(Array.isArray(b.guestWhy) && b.guestWhy.length === 1 && b.guestWhy[0].hosts === 1);
+    assert.ok(b.guestWhy[0].missing && typeof b.guestWhy[0].missing.all === 'number', 'v2.657: 배너에 무엇을 못 읽었나(missing)를 싣는다');
   } finally { srv.close(); store.snapshot = prev; gstore._resetGuestGpuForTest(); }
 });
 

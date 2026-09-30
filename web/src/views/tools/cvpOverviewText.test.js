@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import {
-  healthRing, healthNote, overviewKpis, corpCards, modelBars, versionRows, freshnessRows, trafficRows,
+  healthRing, healthNote, overviewKpis, corpCards, modelBars, versionRows, versionList, cmpEosVersion, freshnessRows, trafficRows,
   facetRowsOf, corpNameFn, eventCorpChips, eventSevChips, deviceSummaryTiles, historyNotes, corpLabel, UNASSIGNED_LABEL, CORP_NOTE, TRAFFIC_NOTE,
 } from './cvpOverviewText.js';
 
@@ -39,12 +39,19 @@ describe('cvpOverviewText (v2.645)', () => {
     expect(c[2].name).toBe(UNASSIGNED_LABEL); expect(c[2].tone).toBe('unknown');
     expect(corpLabel({ corpId: 'x', corpName: 'x', missing: true })).toContain('삭제');
   });
-  it('modelBars·versionRows — 가장 큰 모델이 100%, 갈린 버전이 먼저', () => {
+  it('versionRows — 버전 순(최신 먼저, 숫자 구간은 수로), 미상은 맨 뒤, 상한은 omitted', () => {
+    const vs = ['4.28.6M', '4.30.6M', '4.33.6M', '4.30.10M', '', '4.9.1F'].map((version, i) => ({ version, count: i + 1, models: ['X'] }));
+    expect(versionRows({ versions: vs }).map((r) => r.version)).toEqual(['4.33.6M', '4.30.10M', '4.30.6M', '4.28.6M', '4.9.1F', '']);
+    const l = versionList({ versions: vs }, 3);
+    expect(l.rows).toHaveLength(3); expect(l.omitted).toBe(3); expect(l.total).toBe(6);
+    expect(cmpEosVersion('4.30.10M', '4.30.6M')).toBeGreaterThan(0);
+  });
+  it('modelBars·versionRows — 가장 큰 모델이 100%, 갈린 버전 태그', () => {
     const models = [{ model: 'A', count: 10, versions: [{ version: '4.30', count: 8 }, { version: '4.28', count: 2 }] }, { model: '', count: 5, versions: [{ version: '4.30', count: 5 }] }];
     const b = modelBars(models);
     expect(b[0].pct).toBe('100%'); expect(b[1].pct).toBe('50%'); expect(b[1].name).toBe('(모델 미상)');
     const v = versionRows({ models, versions: [{ version: '4.30', count: 13, models: ['A', ''] }, { version: '4.28', count: 2, models: ['A'] }, { version: '4.31', count: 20, models: ['B'] }] });
-    expect(v[0].split).toBe(true); expect(v.at(-1).version).toBe('4.31'); expect(v.at(-1).tag).toBe('1개 모델');
+    expect(v.map((r) => r.version)).toEqual(['4.31', '4.30', '4.28']); expect(v[1].split).toBe(true); expect(v[0].tag).toBe('1개 모델');
   });
   it('freshnessRows — 경계는 서버 값에서(숫자를 박지 않는다)', () => {
     const f = freshnessRows({ fresh: 8, late: 1, stale: 1, never: 0, freshMs: 600_000, staleMs: 1_800_000 });

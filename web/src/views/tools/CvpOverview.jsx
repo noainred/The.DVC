@@ -5,7 +5,7 @@ import { STable } from '../../components/STable.jsx';
 import { agoText, spanText, countText, bpsText, faultEventText, faultKindLabel } from './cvpText.js';
 import {
   HEALTH_KEYS, HEALTH_LABEL, HEALTH_COLOR, CORP_NOTE, TRAFFIC_NOTE,
-  healthRing, healthNote, overviewKpis, corpCards, modelBars, versionRows, freshnessRows, trafficRows, modelTableRows, corpLabel,
+  healthRing, healthNote, overviewKpis, corpCards, modelBars, versionList, freshnessRows, trafficRows, modelTableRows, corpLabel,
 } from './cvpOverviewText.js';
 
 /**
@@ -34,7 +34,8 @@ export function CvpOverviewView({ ov, err, onGo, onCorp, onOpenDevice }) {
   const kpis = overviewKpis(ov);
   const corps = corpCards(ov.corps);
   const models = modelBars(ov.models);
-  const versions = versionRows(ov);
+  const vl = versionList(ov);
+  const versions = vl.rows;
   const fr = freshnessRows(ov.freshness);
   const traffic = trafficRows(ov.corps).slice(0, 8);
   const recent = Array.isArray(ov.recentFaults) ? ov.recentFaults : [];
@@ -124,7 +125,7 @@ export function CvpOverviewView({ ov, err, onGo, onCorp, onOpenDevice }) {
         </div>
         <div className="card" style={{ ...CARD, display: 'grid', gap: 6, alignContent: 'start' }}>
           <h2 style={H2}>EOS 버전</h2>
-          <div style={NOTE}>같은 모델 안에서 버전이 갈린 곳을 먼저 봅니다 · 모델 {countText(ov.modelsSplit)}종이 갈려 있습니다</div>
+          <div style={NOTE}>버전 순(최신 먼저) · '버전 갈림' 은 같은 모델에 다른 버전이 섞인 것 · 모델 {countText(ov.modelsSplit)}종이 갈려 있습니다</div>
           {versions.length === 0 ? <div style={NOTE}>—</div> : versions.map((v) => (
             <div key={v.version || '(none)'} title={v.title} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
               <span style={{ ...MONO, fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</span>
@@ -132,6 +133,7 @@ export function CvpOverviewView({ ov, err, onGo, onCorp, onOpenDevice }) {
               <span style={{ ...MONO, fontSize: 13, width: 44, textAlign: 'right' }}>{countText(v.count)}</span>
             </div>
           ))}
+          {vl.omitted > 0 && <div style={NOTE}>그 밖 {countText(vl.omitted)}개 버전은 생략했습니다(전체 {countText(vl.total)}개 — 모델 화면의 EOS 버전 열에 전부 있습니다).</div>}
         </div>
         <div className="card" style={{ ...CARD, display: 'grid', gap: 10, alignContent: 'start' }}>
           <h2 style={H2}>데이터 신선도</h2>

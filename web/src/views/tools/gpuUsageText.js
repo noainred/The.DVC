@@ -31,12 +31,28 @@ export function tempText(c) { const n = numOrNull(c); return n == null ? '—' :
 export function allocText(h) {
   if (!h) return '—';
   const parts = [];
-  const cap = numOrNull(h.capacityGB);
+  // v2.657: 할당률의 분모는 명목 용량(allocCapacityGB — 모델명 기준)이다. 없으면(구버전 서버) 보고 용량.
+  const cap = numOrNull(h.allocCapacityGB) ?? numOrNull(h.capacityGB);
   const a = numOrNull(h.allocGB);
   if (a != null) parts.push(`vGPU ${gbText(a)}${cap ? ` / ${gbText(cap)}` : ''}${numOrNull(h.allocPct) != null ? ` (${h.allocPct}%)` : ''}`);
   if (numOrNull(h.passthroughOn) > 0) parts.push(`패스스루 ${h.passthroughOn}장`);
   if (numOrNull(h.allocUnknown) > 0) parts.push(`프로파일 해석 불가 ${h.allocUnknown}대`);
   return parts.length ? parts.join(' · ') : '할당 없음(켜진 GPU VM 없음)';
+}
+
+/**
+ * 할당 칸 툴팁(v2.657) — 분모가 무엇인지 말한다. vCenter 는 A40(명목 48GB)을 45GB 로 보고하는데 vGPU 프로파일은
+ * 명목 단위(24Q = 24GB)라, 보고값으로 나누면 카드 최대 구성이 107% '초과' 로 보였다. 두 값이 다르면 둘 다 적는다.
+ */
+export function allocTitle(h) {
+  if (!h || numOrNull(h.allocGB) == null) return '';
+  const nom = numOrNull(h.allocCapacityGB); const rep = numOrNull(h.capacityGB);
+  const bits = ['할당 = 켜진 VM 의 vGPU 프로파일 크기 합(vCenter 설정값 — 게스트 수집과 무관)'];
+  if (h.allocCapacityBasis === 'nominal' && nom != null) {
+    bits.push(`할당률 분모 = GPU 모델 명목 용량 ${gbText(nom)}${rep != null && rep !== nom ? ` (vCenter 보고 용량은 ${gbText(rep)} — 명목보다 작게 보고됩니다. 예약분으로 추정)` : ''}`);
+  } else if (nom != null) bits.push(`할당률 분모 = vCenter 가 보고한 GPU 메모리 ${gbText(nom)}`);
+  if (numOrNull(h.allocPct) > 100) bits.push('100% 를 넘습니다 — vGPU 는 프레임버퍼를 나눠 주는 방식이라 실제로 넘길 수 없으므로 프로파일 해석이나 모델 용량 추정이 어긋났을 수 있습니다.');
+  return bits.join('\n');
 }
 
 /** 용량 출처 각주 — 패스스루는 모델명으로 추정한다. */

@@ -3820,6 +3820,15 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
   - **CVP 서버 버전 칩(v2.656)** — `cvpOverviewText.cvpServerVersionMap/Of/Chips` + `DeviceFacetBar` 넷째 줄(`ver2*`, 없으면 예전 그대로):
     장비의 EOS 버전과 **다른 축**이다(장비를 관리하는 CVP 서버의 getCvpInfo 버전 — 서버 상태 `cvpVersion` 을 cvpId 로 붙인다). 칩 개수는 다른 축만
     적용한 집합 · 한 종류뿐이면 줄을 만들지 않는다 · 못 읽으면 '(CVP 버전 미상)'.
+  - ⚠⚠ **vGPU 할당률의 분모는 '명목 용량' 이고, 배너는 '무엇을 못 읽었나' 를 말한다**(v2.657, `gpu/gpuModelMem.js`(soapClient 에서 옮김) ·
+    `gpu/hostGpu.js allocCapacityGB/allocCapacityBasis` · `routes/api/hardwareGpu.js missingZero/addMissing` · 웹 `gpuUsageText.allocTitle`·
+    `gpuWhyText.missingText`, 사용자 캡처 "A40 ×1 에 48 GB / 45 GB (107%) 호박색" · "어떤 값을 못 읽었는지 구체적으로". 회귀 `server/test/gpuAlloc2657.test.js`):
+    vCenter `memorySizeInKB` 는 A40 을 45GB 로 보고하는데 vGPU 프로파일은 명목 단위(24Q = 24GB)라 카드 최대 구성이 107% '초과' 로 보였다.
+    할당률 분모 = GPU 마다 `max(보고값, 모델 명목값)` — 모델을 모르면 보고값(명목을 지어내지 않는다). **메모리 사용 분모(`capacityGB`)는 보고값 그대로**다(두 분모를
+    섞지 말 것). 보고값이 작은 이유(예약분)는 추정이다. 배너 한 줄(vCenter × 사유)에 `missing{util,mem,temp,alloc,all}`(호스트 대수) — 할당은 게스트가 아니라
+    vCenter 프로파일에서 오므로 따로 말한다. 100% 초과 툴팁은 '실제 초과' 라 단정하지 않는다(vGPU 는 프레임버퍼를 넘겨 줄 수 없다 — 해석·추정 어긋남 가능).
+  - **CVP Overview EOS 버전 패널은 버전 순(최신 먼저)이다**(v2.657, `cvpOverviewText.versionList`·`cmpEosVersion` — 재사용 Collator numeric): 예전 '갈린 버전 먼저 → 대수' 순은
+    사용자 요청으로 바꿨다. '버전 갈림' 은 태그로만 남는다 · 상한 12 · 넘치면 생략 개수를 적는다.
   - **GPU 추이 창은 수집 공백을 잇지 않는다**(v2.656, `GpuHistModal.gapRows`): 간격이 `max(버킷, 수집 주기) × 2` 를 넘으면 null 행을 끼워 선을 끊고
     (버킷을 모르면 이웃 간격 중앙값), 앞뒤가 빈 점은 점으로 찍는다(v2.551 bmUsageChart 규약과 같다). 끊은 곳 수를 창 아래에 적는다 · 평균/최고 범례.
   - **CVP 장비 목록 EOS 버전 칩 · 필터 연동 KPI(v2.652)** — 사용자 요청 "CVP 버전별로 보는 기능, 모델 아래 버전 표시" + "아래 조건 필터 걸면 위 숫자 변경":

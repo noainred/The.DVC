@@ -7,7 +7,7 @@ import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
-import { activityOf, memText, gbText, tempText, allocText, activityRuleNote, activitySummary } from './gpuUsageText.js';
+import { activityOf, memText, gbText, tempText, allocText, allocTitle, activityRuleNote, activitySummary } from './gpuUsageText.js';
 import { whyChip, whyBannerItems, vmChips, activityBar, srcText } from './gpuWhyText.js';
 const GpuHistModal = React.lazy(() => import('./GpuHistModal.jsx'));
 
@@ -145,7 +145,7 @@ export function Gpu({ scope }) {
     model: h.model, count: h.count, memGB: h.memGB, mode: h.mode, modes: h.modes, utilSource: h.utilSource, avg: h.utilPct, max: h.utilPct, util: h.utilPct, assignedVms: h.assignedVms || 0, assignedVmsOn: h.assignedVmsOn || 0, assignedVmsOff: h.assignedVmsOff || 0, assignedVmNames: h.assignedVmNames || [], level: 'host',
     // v2.650
     tempC: h.tempC ?? null, memUsedMB: h.memUsedMB ?? null, memTotalMB: h.memTotalMB ?? null, memUsedPct: h.memUsedPct ?? null,
-    allocGB: h.allocGB ?? null, allocPct: h.allocPct ?? null, capacityGB: h.capacityGB ?? null, passthroughOn: h.passthroughOn || 0, allocUnknown: h.allocUnknown || 0,
+    allocGB: h.allocGB ?? null, allocPct: h.allocPct ?? null, capacityGB: h.capacityGB ?? null, allocCapacityGB: h.allocCapacityGB ?? null, allocCapacityBasis: h.allocCapacityBasis ?? null, passthroughOn: h.passthroughOn || 0, allocUnknown: h.allocUnknown || 0,
     activity: h.activity || null,
     // v2.653
     guestWhy: h.guestWhy || null, collectPath: h.collectPath || null, collectAgent: h.collectAgent || null,
@@ -195,7 +195,7 @@ export function Gpu({ scope }) {
         {r.memUsedPct != null && <span className="gpu-bar"><span style={{ width: `${Math.max(0, Math.min(100, r.memUsedPct))}%` }} /></span>}
       </div>
     )) },
-    { key: 'allocGB', label: '메모리 할당', sortValue: (r) => r.allocGB, render: (r) => <span className="nowrap" style={{ fontSize: 12, color: numOver(r.allocPct) ? 'var(--amber)' : undefined }} title={numOver(r.allocPct) ? '할당 합이 GPU 용량을 넘습니다(vGPU 프로파일 합 > VRAM) — 동시에 켜진 VM 이 용량을 넘겨 요청하고 있습니다' : ''}>{allocText(r)}</span> },
+    { key: 'allocGB', label: '메모리 할당', sortValue: (r) => r.allocGB, render: (r) => <span className="nowrap" style={{ fontSize: 12, color: numOver(r.allocPct) ? 'var(--amber)' : undefined }} title={allocTitle(r)}>{allocText(r)}</span> },
     { key: 'activity', label: 'VM 동작', sortValue: (r) => (r.activity?.busy || 0), render: (r) => {
       const b = activityBar(r.activity);
       const txt = activitySummary(r.activity, { short: true });
@@ -372,7 +372,7 @@ export function Gpu({ scope }) {
                 <div className="gpu-why-banner">
                   <span className="dot" />
                   <b>게스트 GPU 값을 읽지 못한 호스트가 있습니다</b>
-                  <span className="list">{whyBannerItems(data.guestWhy).slice(0, 6).map((x) => <span key={x.key} title={x.title}>{x.text}</span>)}{whyBannerItems(data.guestWhy).length > 6 && <span>외 {whyBannerItems(data.guestWhy).length - 6}건</span>}</span>
+                  <span className="list">{whyBannerItems(data.guestWhy).slice(0, 6).map((x) => <span key={x.key} title={x.title} className="item"><span>{x.text}</span>{x.detail && <span className="detail">{x.detail}</span>}</span>)}{whyBannerItems(data.guestWhy).length > 6 && <span>외 {whyBannerItems(data.guestWhy).length - 6}건</span>}</span>
                   <a href="#/settings/gpu-guest" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>수집 진단 열기 →</a>
                 </div>
               )}
