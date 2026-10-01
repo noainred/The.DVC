@@ -80,7 +80,7 @@ export default function ExecOverview({ onSelectSite, onGotoTab, modeToggle = nul
       sub: `가상화 호스트 ${countText(g.hosts)} · 물리 전용 ${countText(pbc?.physicalOnly)}`,
       t: t?.physical, onClick: () => go('#/tools/serveranalysis/info') },
     { key: 'storage', label: '스토리지 용량', accent: 'var(--accent-2)', value: capText(stor?.totalBytes), unit: '',
-      sub: !stor ? '' : stor.reason ? stor.reason : stor.totalBytes == null ? cardMeta('storage', cards) : `사용 ${stor.usedPct == null ? '—' : `${stor.usedPct}%`} · ${capText(stor.usedBytes)} 사용 중`,
+      sub: !stor ? '' : stor.reason ? stor.reason : stor.totalBytes == null ? cardMeta('storage', cards) : `사용 ${stor.usedPct == null ? '—' : `${stor.usedPct}%`} · ${capText(stor.usedBytes)} 사용 중${stor.usedUnknown ? ` · 사용량 모름 ${stor.usedUnknown}대` : ''}${stor.stale ? ` · 오래된 값 ${stor.stale}대 제외` : ''}`,
       t: t?.storage, onClick: stor?.reason ? undefined : () => go('#/tools/storage-mon') },
     // v2.677: 소비 전력 카드 자리 — 네트워크 스위치 수량(CVP 등록 장비). 수량 추이는 기록하지 않는다.
     { key: 'network', label: '네트워크 스위치', accent: 'var(--amber)', value: countText(cards?.network?.count), unit: cards?.network?.count != null ? '대' : '',

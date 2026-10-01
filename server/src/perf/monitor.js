@@ -21,6 +21,7 @@ import { loadPerfSettings } from './settings.js';
 import { appendHang, hangLogStatus, trimHangLog, setHangRetentionProvider } from './hangLog.js';
 import { newRouteEntry, addSample, summarizeRoute, rankRoutes, routeKeyOf, downsampleMax, stallWindows } from './stats.js';
 import { sanitizeRid } from './requestId.js';
+import { capStr } from '../util/capStr.js';
 
 const MAX_ROUTES = 400;          // 넘으면 가장 오래 안 쓴 키를 퇴출한다(아래 routeEntryFor)
 const MAX_INFLIGHT = 5_000;      // 동시 요청 추적 상한(넘으면 추적만 생략 — 집계는 계속)
@@ -295,11 +296,13 @@ export function recordClientStall({ user = '', ip = '', view = '', path = '', ms
   try {
     const now = Date.now();
     const ev = {
-      kind: 'client', at: now, user: String(user || '').slice(0, 60), ip: String(ip || '').slice(0, 60),
-      view: String(view || '').slice(0, 120), path: String(path || '').slice(0, 200), ms: Math.round(Number(ms) || 0),
+      // v2.682 R3S-03 — 상주 링(hangRing)에 들어가므로 `.slice` 가 아니라 capStr(평탄화). slice 는 SlicedString 이라
+      // 0.9MB 본문의 120자가 원문 전체를 붙잡았다(50건 = 힙 44.7MB 잔존 실측).
+      kind: 'client', at: now, user: capStr(user, 60), ip: capStr(ip, 60),
+      view: capStr(view, 120), path: capStr(path, 200), ms: Math.round(Number(ms) || 0),
       clientInflight: (Array.isArray(clientInflight) ? clientInflight : []).slice(0, 10)
-        .map((x) => ({ path: String(x?.path || '').slice(0, 200), ms: Math.round(Number(x?.ms) || 0), rid: sanitizeRid(x?.rid) })),
-      userAgent: String(userAgent || '').slice(0, 160),
+        .map((x) => ({ path: capStr(x?.path, 200), ms: Math.round(Number(x?.ms) || 0), rid: sanitizeRid(x?.rid) })),
+      userAgent: capStr(userAgent, 160),
       serverInflight: inflightSnapshot(10), serverInflightN: inflight.size,
       loop: lastLoopWindow, jobs: activeJobNames(),
       rssMb: Math.round(process.memoryUsage.rss() / 1048576), uptimeSec: Math.round(process.uptime()),

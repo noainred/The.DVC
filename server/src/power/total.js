@@ -110,7 +110,8 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
   }
 
   // ③ 스토리지 — 수집기가 실은 extra.power(v2.667: 못 읽은 사유를 extra.powerProbe 로 받는다).
-  const sto = { watts: 0, devices: 0, measured: 0, unsupported: 0, unread: 0, stale: 0, byType: {}, unreadBy: {}, unsupportedBy: {}, items: [], issues: [], issuesOmitted: 0 };
+  // v2.682 R3D-03: partial = 일부 부품(PSU·노드)의 값을 못 읽은 장비 — 전력은 더하되 '측정' 이 아니다(네트워크 A-05 와 같은 규칙).
+  const sto = { watts: 0, devices: 0, measured: 0, partial: 0, partialWatts: 0, unsupported: 0, unread: 0, stale: 0, byType: {}, unreadBy: {}, unsupportedBy: {}, items: [], issues: [], issuesOmitted: 0 };
   const issue = (d, t, state, reason, extra = {}) => {
     if (sto.issues.length >= ISSUE_MAX) { sto.issuesOmitted += 1; return; }
     sto.issues.push({ id: String(d.id), name: d.name || String(d.id), type: t, method: d.collectMethod || '', corpId: String(d.datacenterId || ''), state, reason, ...extra });
@@ -145,8 +146,12 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
     let at = pAt != null && cAt != null ? Math.min(pAt, cAt) : (pAt ?? cAt);
     if (at != null && at > now) at = now;
     if (at == null || now - at > STORAGE_STALE_MS) { sto.stale += 1; issue(d, t, 'stale', 'stale', { ts: at }); continue; }
-    sto.watts += w; sto.measured += 1; bt.measured += 1; add('storage', d.datacenterId || '', w);
-    sto.items.push({ id: String(d.id), name: d.name || String(d.id), type: t, watts: Math.round(w), scope: pw.scope || '', basis: pw.basis || '', source: String(pw.source || '').slice(0, 200), corpId: String(d.datacenterId || ''), ts: at });
+    const part = pw.partial === true;
+    sto.watts += w; add('storage', d.datacenterId || '', w);
+    if (part) { sto.partial += 1; sto.partialWatts += w; } else { sto.measured += 1; bt.measured += 1; }
+    const miss = numOrNull(pw.missing);
+    sto.items.push({ id: String(d.id), name: d.name || String(d.id), type: t, watts: Math.round(w), scope: pw.scope || '', basis: pw.basis || '', source: String(pw.source || '').slice(0, 200), corpId: String(d.datacenterId || ''), ts: at,
+      ...(part ? { partial: true, missing: miss != null && miss > 0 ? Math.round(miss) : null } : {}) });
   }
 
   const trim = (x) => {
@@ -156,5 +161,6 @@ export function buildPowerTotal({ servers = [], network = [], storage = [], dcOf
   const byCorp = [...corps.values()].map((c) => ({ ...c, servers: Math.round(c.servers), network: Math.round(c.network), storage: Math.round(c.storage), total: Math.round(c.total) }))
     .sort((a, b) => b.total - a.total);
   const s = trim(srv); const n = trim(net); const t = trim(sto);
+  t.partialWatts = Math.round(t.partialWatts);
   return { totalWatts: s.watts + n.watts + t.watts, servers: s, network: n, storage: t, byCorp, at: now };
 }

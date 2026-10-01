@@ -102,7 +102,8 @@ export const ENDPOINTS = Object.freeze([
     path: '/capacity/storage-growth', group: 'capacity', method: 'GET', scoped: false, requiresFullScope: true,
     summary: '스토리지 증가량 — 기준선이 없으면 null(추정으로 메우지 않는다)',
     // v2.604: resolutionBytes — 반올림 표기 용량 장비의 해상도(정확하면 null).
-    fields: ['deviceId', 'name', 'usedBytes', 'totalBytes', 'observedDays', 'growth', 'unknownUsed', 'resolutionBytes'],
+    // v2.682(R3A-07): excludedFromTotals — 'retired'|'stale'|null(meta 합계 기준에서 빠졌는가).
+    fields: ['deviceId', 'name', 'usedBytes', 'totalBytes', 'observedDays', 'growth', 'unknownUsed', 'resolutionBytes', 'excludedFromTotals'],
   },
   {
     path: '/faults/alarms', group: 'faults', method: 'GET', scoped: true,

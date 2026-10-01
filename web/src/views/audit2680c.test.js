@@ -19,7 +19,7 @@ describe('v2.680 전체 소비 전력', () => {
     expect(T.powerTotalKw(none)).toBe('—');
     expect(T.powerTotalKw({ ...none, totalWatts: 500, servers: { watts: 500, measured: 1 } })).toBe('0.5 kW');
     expect(T.cardMeta('power', { power: { servers: { watts: 0, measured: 0 }, network: { watts: 400, measured: 0, partial: 1 }, storage: { watts: 0, measured: 0 } } }))
-      .toBe('서버 — · 네트워크 0.4 kW · 스토리지 —');
+      .toMatch(/^서버 — · 네트워크 0\.4 kW · 스토리지 —( · |$)/); // v2.682 R3D-01: 뒤에 측정 대수·빠진 대수가 붙는다
   });
   it('A-06 서버 분모 — 측정 m/n대 · 못 읽음 · OME', () => {
     expect(T.powerCatNote('servers', { measured: 3, ome: 1, devices: 5, unread: 3 })).toBe('iDRAC 실측 2/5대 · 못 읽음·오래된 값 3 · OME 로 읽음 1');

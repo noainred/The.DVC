@@ -48,10 +48,10 @@ export function buildHostMatchIndex(hosts = []) {
  * 이름 후보 둘이 서로 다른 호스트를 가리키면 판정하지 않는다(ambiguous).
  */
 export function matchHostForServer(index, { serviceTag = '', names = [] } = {}) {
-  const none = { host: null, matchedBy: null, ambiguous: false, name: '' };
+  const none = { host: null, matchedBy: null, ambiguous: false, name: '', tagMismatch: false };
   if (!index) return none;
   const t = String(serviceTag || '').trim().toLowerCase();
-  if (t && index.byTag.has(t)) return { host: index.byTag.get(t), matchedBy: 'serviceTag', ambiguous: false, name: '' };
+  if (t && index.byTag.has(t)) return { host: index.byTag.get(t), matchedBy: 'serviceTag', ambiguous: false, name: '', tagMismatch: false };
   let found = null; let foundName = ''; let ambiguous = false;
   for (const n of names || []) {
     const sh = hostShortName(n);
@@ -62,6 +62,12 @@ export function matchHostForServer(index, { serviceTag = '', names = [] } = {}) 
     if (found && found !== h) return { ...none, ambiguous: true };
     found = h; foundName = sh;
   }
-  if (found) return { host: found, matchedBy: 'hostname', ambiguous: false, name: foundName };
+  if (found) {
+    // v2.682(R3D-04): 서버 태그와 그 이름 호스트의 태그가 **둘 다 있고 다르면** 다른 박스라는 양성 증거다 — 이름만으로 잇지 않는다
+    // (하드웨어 교체 뒤 호스트명 재사용 시 다른 박스의 vCenter CPU·GPU 를 겹쳐 그리게 된다). 한쪽이 비어 있으면 판정 근거가 없으니 이름을 쓴다.
+    const ht = String(found.serviceTag || '').trim().toLowerCase();
+    if (t && ht && ht !== t) return { ...none, tagMismatch: true, name: foundName };
+    return { host: found, matchedBy: 'hostname', ambiguous: false, name: foundName, tagMismatch: false };
+  }
   return { ...none, ambiguous };
 }

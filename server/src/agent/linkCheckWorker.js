@@ -51,7 +51,10 @@ async function pushReport(base, agent, { results = [], note = '', disabled = fal
   const hdrs = { ...headers(), 'Content-Type': 'application/json', ...agentHeaders(agent) };
   let payload = json;
   try { payload = await gzipAsync(json); hdrs['Content-Encoding'] = 'gzip'; } catch { payload = json; }
-  const post = await resilientFetch(withAgentQuery(`${base}/api/central/link-check`, agent), { method: 'POST', headers: hdrs, body: payload, timeoutMs: 30_000, retries: 2 });
+  // v2.682(감사 R3A-09): 재전송하지 않는다(retries 0). resilientFetch 는 503 을 재시도 대상으로 보므로 중앙 DB 불가(503 dbUnavailable)
+  //   동안 엣지마다 주기당 3회 POST 하고 중앙이 매번 보고 전체를 처리했다(결과는 같다 — 저장되지 않는다). 이 보고는 주기마다
+  //   현재 측정 전체를 다시 보내므로 한 번 실패해도 다음 주기가 채운다.
+  const post = await resilientFetch(withAgentQuery(`${base}/api/central/link-check`, agent), { method: 'POST', headers: hdrs, body: payload, timeoutMs: 30_000, retries: 0 });
   if (post.status === 413) console.warn(`[linkcheck-worker] 중앙이 본문 크기를 거부(413) — 링크 ${results.length}개. 중앙의 BIG_JSON 등록을 확인하세요.`);
   if (!post.ok) {
     // ⚠ 무음 실패 금지 — 403 은 '개별 토큰이 아니다' 라는 가장 흔한 원인이다.

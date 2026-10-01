@@ -42,6 +42,14 @@ export function mergeLatestRows(...lists) {
   return out;
 }
 
+/** v2.682(R3S-01): 엣지 행 시각 clamp — 받은 시각(snapAt)보다 뒤면 받은 시각으로. 받은 시각을 모르면 원래 값(숫자만). 순수. */
+export function clampEdgeTs(ts, receivedAt) {
+  const v = numOrNull(ts);
+  const at = numOrNull(receivedAt);
+  if (v == null) return null;
+  return at != null && v > at ? at : v;
+}
+
 /**
  * v2.629(A6-03): 엣지 보관분 행을 `에이전트소문자|key소문자` 로도 색인한다 — 서비스태그 없는 엣지 서버는 중앙 키와 엣지 키가
  *   달라 key 하나로는 찾을 수 없고, 에이전트 축이 없으면 다른 엣지의 같은 fleetId 행이 섞인다. 같은 칸은 ts 가 큰 쪽. 순수.
@@ -106,11 +114,18 @@ export function registerCorpUsage(api) {
       const freshOf = (ms) => Math.max(30 * 60_000, 3 * (numOrNull(ms) || 300_000));
       const edgeRows = edges.flatMap((e) => {
         const f = freshOf(e?.snap?.settings?.intervalMs);
-        return (e?.snap?.rows || []).filter((r) => r && typeof r === 'object').map((r) => ({ ...r, _freshMs: f, _agent: t(e?.agent) }));
+        // v2.682(R3S-01 — 재현): 행 시각을 **중앙이 받은 시각(snapAt)** 이하로 clamp 한다 — 시계가 앞선·변조된 엣지의 미래 ts 는
+        //   `now - ts` 가 음수라 영원히 '신선' 이었다(v2.630 A4-02 와 같은 판단: 표시·판정은 중앙 시계).
+        const at = numOrNull(e?.snapAt);
+        return (e?.snap?.rows || []).filter((r) => r && typeof r === 'object').map((r) => ({ ...r, ts: clampEdgeTs(r.ts, at), _freshMs: f, _agent: t(e?.agent) }));
       });
       // v2.628(EDGE2628-01): 엣지 봉투는 대상 수 상한으로 잘릴 수 있다 — 잘린 서버는 이 화면에서 '못 읽음' 이 된다. 개수를 밝힌다.
       const edgeTruncated = edges.reduce((a, e) => a + (numOrNull(e?.snap?.truncated) || 0), 0);
-      const rowsByKey = mergeLatestRows(central, edgeRows);
+      // v2.682(R3S-01): 엣지 행은 key 하나로 합치지 않는다 — 담당 엣지(remoteAgent·site vCenter 의 collectedBy)일 때만
+      //   buildCorpUsage 가 `에이전트|key` 색인에서 고른다. 합치면 아무 엣지나 다른 법인 서버의 값을 덮는다.
+      const rowsByKey = mergeLatestRows(central);
+      const vcOwner = new Map((snap?.vcenters || []).filter((v) => v && (v.collectSource === 'site' || v.collectMode === 'site'))
+        .map((v) => [t(v.id), t(v.collectedBy || v.agent)]).filter(([id, a]) => id && a));
       const registry = (() => { try { return loadRegistry(); } catch { return []; } })();
       const remoteServers = (() => { try { return allRemoteServers(); } catch { return []; } })();
       const hostByKey = new Map((snap?.hosts || []).map((h) => [`${t(h.vcenterId)}|${t(h.name).toLowerCase()}`, h]));
@@ -123,7 +138,7 @@ export function registerCorpUsage(api) {
       const out = buildCorpUsage({
         vcenters: snap?.vcenters || [], bareMetal: attr.bareMetal, virtHosts: fleet.virtualizationHosts || [],
         rowsByKey, rowsByAgentKey: rowsByAgentKeyOf(edgeRows), hostByKey, capOf: makeCapOf({ getInventory, registry, remoteServers }),
-        allowed, now: Date.now(), freshMs, unreadVcenters,
+        allowed, now: Date.now(), freshMs, unreadVcenters, vcOwner,
       });
       // 법인마다 '수집을 켰는가' — 값이 없는 이유를 화면이 말하려면 필요하다(켠 법인 목록 자체는 범위 밖을 주지 않는다).
       // v2.628(R2628-07): 엣지가 수집하는 법인은 **그 엣지의 설정**이 정한다 — 중앙 설정만 보고 '안 켰다' 고 말하지 않는다.

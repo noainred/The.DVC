@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { authenticateAD } from './ad.js';
+import { authenticateAD, loadAdConfig } from './ad.js';
+import { capStr } from '../util/capStr.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
 import { userHasPermission } from './permissions.js';
@@ -938,13 +939,53 @@ export async function authenticate(username, password) {
   //   credentials.js reauth · isSettingsOwner · 단일 세션 키)를 전부 '본인' 으로 통과했다. 판정 다섯 곳을
   //   각각 고치는 대신 여기(발급)와 resolveTokenUser(검사) 두 곳에서 '로컬 이름 = AD 세션 불가' 를 집행한다.
   //   로컬 계정이 없는 이름의 AD 로그인은 예전 그대로다.
-  if (localNameTaken(username)) return authenticateLocal(username, password);
+  if (localNameTaken(username)) {
+    const local = authenticateLocal(username, password);
+    if (!local) noteAdShadowBlock(username);
+    return local;
+  }
   try {
     const adUser = await authenticateAD(username, password);
     if (adUser) return adUser;
   } catch { /* fall back to local */ }
   return authenticateLocal(username, password);
 }
+
+/*
+ * v2.682(감사 R3A-05): 위 차단은 응답이 일반 'invalid credentials' 라(이름 열거 방지 — 그대로 둔다) 같은 이름으로 AD 로그인하던
+ *   사용자는 원인을 알 수 없고 잠금까지 간다(중앙 '엣지 배포 사용자' 로 비밀번호 없는 로컬 계정이 생기거나 'Kim'(AD) vs
+ *   'kim'(로컬)처럼 대소문자만 다른 경우). AD 가 켜져 있는데 로컬 인증이 실패하면 **구분되는 사유**를 남긴다 — 콘솔 1줄
+ *   (이름당 1시간 1회) + 최근 기록(`adShadowBlocks()`·`adShadowBlockOf(name)`, 상한 200). 응답은 바꾸지 않는다.
+ */
+export const AD_SHADOW_REASON = 'AD 로그인 차단: 같은 이름(대소문자 무시)의 로컬 계정이 있어 로컬 인증만 시도했습니다';
+const AD_SHADOW_WARN_MS = 3_600_000;
+const AD_SHADOW_MAX = 200;
+const _adShadow = new Map();   // 소문자 이름 → { name, at, count, warnedAt }
+function noteAdShadowBlock(username, now = Date.now()) {
+  let adOn = false;
+  try { adOn = loadAdConfig()?.enabled === true; } catch { adOn = false; }
+  if (!adOn) return;
+  const name = capStr(String(username ?? '').trim(), 128);
+  if (!name) return;
+  const k = name.toLowerCase();
+  const prev = _adShadow.get(k);
+  if (prev) _adShadow.delete(k);
+  else if (_adShadow.size >= AD_SHADOW_MAX) { const first = _adShadow.keys().next().value; if (first !== undefined) _adShadow.delete(first); }
+  const rec = { name, at: now, count: (prev?.count || 0) + 1, warnedAt: prev?.warnedAt || 0 };
+  if (now - rec.warnedAt >= AD_SHADOW_WARN_MS) {
+    rec.warnedAt = now;
+    console.warn(`[auth] ${AD_SHADOW_REASON} — 사용자 '${name}'(최근 ${rec.count}회). 로컬 계정을 지우거나 이름을 바꾸면 AD 로그인이 다시 된다.`);
+  }
+  _adShadow.set(k, rec);
+}
+/** 최근 'AD 로그인 차단(같은 이름 로컬 계정)' 기록(최근 것이 뒤). */
+export function adShadowBlocks() { return [..._adShadow.values()].map(({ name, at, count }) => ({ name, at, count, reason: AD_SHADOW_REASON })); }
+/** 이 이름이 최근 그 사유로 막혔는가 — 로그인 실패 감사 detail 에 쓸 수 있다. */
+export function adShadowBlockOf(username) {
+  const r = _adShadow.get(String(username ?? '').trim().toLowerCase());
+  return r ? { name: r.name, at: r.at, count: r.count, reason: AD_SHADOW_REASON } : null;
+}
+export function _resetAdShadowForTest() { _adShadow.clear(); }
 
 /**
  * v2.681(R2B-01): 이 이름(대소문자 무시)의 로컬 계정이 있는가. AD 세션을 막는 판정 하나 —

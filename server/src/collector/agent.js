@@ -67,7 +67,9 @@ export function compactInv(inv) {
     // 서버가 전부 '정보없음'(모델 0종)으로 나왔다. 포트는 id/link/speedMbps만(콤팩트 유지).
     nics: Array.isArray(inv.nics) ? inv.nics.map((n) => ({
       name: n.name, model: n.model,
-      ports: Array.isArray(n.ports) ? n.ports.map((p) => ({ id: p.id, link: p.link, speedMbps: p.speedMbps })) : [],
+      // v2.682(R3E-01): 포트 MAC 도 싣는다 — 중앙 '통합 성능 모니터링' 의 MAC 규칙(ESXi NIC MAC ↔ iDRAC 포트 MAC)이 위임 서버에도 동작하게.
+      //   중앙 remoteInventory INV_SHAPE 에도 'mac' 이 있어야 한다(한쪽만이면 버려진다). 없으면 키를 만들지 않는다.
+      ports: Array.isArray(n.ports) ? n.ports.map((p) => ({ id: p.id, link: p.link, speedMbps: p.speedMbps, ...(typeof p.mac === 'string' && p.mac ? { mac: p.mac.slice(0, 64) } : {}) })) : [],
     })) : [],
     // 파트 인벤토리 탭용 — 집계에 필요한 식별 필드만(시리얼 등 자산정보 제외, 페이로드 절약).
     // 이 필드들을 빼면 위임(엣지) 법인의 서버가 파트 탭에서 전부 공백이 된다(과거 nics 누락과
@@ -114,6 +116,10 @@ function localServersForExport() {
       // v2.621(감사 WEB-04): BMC 벤더를 싣는다 — 예전에는 빠져 있어 중앙 서버 목록이 위임 HPE 서버를 'iDRAC' 으로 보였다.
       //   등록부 규약(vendor 없음 = Dell iDRAC)대로 'hpe' | 'dell' 을 명시한다. 필드 자체가 없으면 중앙은 구버전 엣지로 보고 '미상'.
       vendor: isHpeEntry(s) ? 'hpe' : 'dell',
+      // v2.682(R3E-01): OS 호스트네임·별칭 — 중앙 '통합 성능 모니터링' 의 호스트네임·IP 규칙 근거(로컬 서버와 같은 필드).
+      //   구버전 중앙은 hostNames 를 모르는 필드라 버린다. 상한: 별칭 16개 · 글자 255자.
+      ...(typeof s.hostName === 'string' && s.hostName ? { hostName: s.hostName.slice(0, 255) } : {}),
+      ...(Array.isArray(s.hostNames) ? { hostNames: s.hostNames.filter((h) => typeof h === 'string' && h.trim()).slice(0, 16).map((h) => h.trim().slice(0, 255)) } : {}),
       inv: compactInv(inv),
       sensors: compactSensors(s.id), // 최신 온도(중앙 '법인별 온도'용) — 구버전 중앙은 무시(하위호환)
       // v2.659: 센서 상세(임계값·상태·전압 등 — 콤팩트, 서버당 상한). 구버전 중앙은 모르는 필드라 버린다.

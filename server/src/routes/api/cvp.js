@@ -157,6 +157,20 @@ export function maskErrText(v, hosts = []) {
 }
 
 /**
+ * v2.682(감사 R3S-06): 장비 상세의 포트 목록 — 비-admin 은 포트 MAC 을 빼고(장비 MAC `info.mac` 을 publicDevice 가
+ * 빼는 것과 같은 '관리 식별자 등급') 포트 설명은 주소를 가린다(설명에는 피어 호스트명·IP 가 흔하다).
+ * null(포트를 못 읽음)은 그대로 둔다 — 빈 배열로 바꾸면 '포트 0개' 라는 거짓이 된다.
+ */
+export function maskDevicePorts(ports, admin, hosts = []) {
+  if (admin || !Array.isArray(ports)) return ports;
+  return ports.map((p) => {
+    if (!p || typeof p !== 'object') return p;
+    const { mac, ...rest } = p;
+    return { ...rest, desc: maskErrText(rest.desc, hosts) };
+  });
+}
+
+/**
  * v2.621(감사 RECENT-07): 비-admin 응답의 servers[].status 에서 **주소가 실릴 수 있는 문자열 칸 전부**를 가린다.
  *   v2.620 은 status.error 만 가렸는데 status.missing 의 값도 같은 사유 문구다 — 텔레메트리·인벤토리 경로가 리다이렉트되면
  *   `…실패(HTTP 302 → https://출처)`·`경로: 리다이렉트 사유` 를 싣고(cvp/client.js), 토큰 모드에서는 인벤토리가 첫 요청이라
@@ -312,7 +326,7 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
       unavailable: !!(of.unavailable || fe.unavailable || ev.unavailable),
     },
     parts: det.device.partsList,
-    ports: det.ports,
+    ports: maskDevicePorts(det.ports, admin, hosts),
     bgp: det.device.bgpPeers ? { peers: maskPeers(det.device.bgpPeers, admin), summary: bgpSummary(det.device.bgpPeers) } : null,
     partsMissingKinds: det.device.extra?.partsMissingKinds || [],
     usedPaths: st.usedPaths || {}, missing: st.missing || {}, seenFields: st.seenFields || {},

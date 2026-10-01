@@ -388,7 +388,7 @@
 | `CURUSER_LOCAL` | `''` |  | agent/curUserConfigPull.js, curuser/settings.js |
 | `CVP_CONFIG_PULL_MS` | `5` |  | agent/cvpConfigPull.js |
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
-| `LASTGOOD_HOLD_MS` | `6` |  | agent/inventoryPush.js, central/inventory.js 외 1 |
+| `LASTGOOD_HOLD_MS` | `6` |  | agent/inventoryPush.js, central/inventory.js 외 2 |
 | `SANSW_CONFIG_PULL_MS` | `5` |  | agent/sanSwitchConfigPull.js |
 | `SVCMON_CONFIG_FAIL_BACKOFF_MS` |  |  | agent/svcmonConfigPull.js |
 | `SVCMON_CONFIG_PULL` | `기본 적용('false' 로 끄기)` |  | agent/svcmonConfigPull.js |

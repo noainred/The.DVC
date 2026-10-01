@@ -243,7 +243,7 @@ export function growthPctText(pct) {
  *   같은 규칙으로 다시 더하는 것뿐이다(필터는 화면에만 있어 서버가 알 수 없다).
  *   규칙을 바꾸면 **양쪽을 같이** 바꿀 것 — 한쪽만 고치면 표와 합계가 다른 말을 한다.
  */
-export function aggregateGrowth(devices, periods) {
+export function aggregateGrowth(devices, periods, { asOfDay = null } = {}) {
   // v2.681(감사 R2D-02·03 — 서버 growth.totalsOf 와 같은 규칙): 퇴역·오래 미수집 장비(stale·retired 표지)는 '지금 합계' 에서 빼고
   //   개수를 밝힌다. 사용률·남은 용량의 분모는 사용량을 읽은 장비의 용량이다(미상 장비 용량을 넣으면 사용률 과소·남은 용량 과대).
   const all = devices || [];
@@ -254,14 +254,24 @@ export function aggregateGrowth(devices, periods) {
   const usedBytes = sumOrNull((d) => d.usedBytes);
   const totalBytes = sumOrNull((d) => d.totalBytes);
   const totalMeasured = sumOrNull((d) => (d.usedBytes != null && Number.isFinite(d.usedBytes) ? d.totalBytes : null));
+  // v2.682(R3A-06 — 서버 totalsOf 와 같은 규칙): 최신 관측이 기준일보다 하루 넘게 오래된 장비(lagging)의 증가량은 그 장비의 옛 날짜
+  //   기준이라 '이 기간' 함대 증가량에 더하지 않는다(못 더한 수로 센다). 하루 차이는 오늘 행이 아직 없는 정상 상태다.
+  //   기준일(서버 응답 asOfDay)·장비 latestDay 를 모르면 예전처럼 판정하지 않는다(지어내지 않는다).
+  const asOf = asOfDay != null && asOfDay !== '' && Number.isFinite(Number(asOfDay)) ? Number(asOfDay) : null;
+  const isLagging = (d) => {
+    if (asOf == null || d?.latestDay == null || d.latestDay === '') return false;
+    const ld = Number(d.latestDay);
+    return Number.isFinite(ld) && asOf - ld > 1;
+  };
   const growth = {};
   for (const p of periods || []) {
-    let sum = 0; let measured = 0; let missing = 0;
+    let sum = 0; let measured = 0; let missing = 0; let lagging = 0;
     for (const d of list) {
+      if (isLagging(d)) { missing += 1; lagging += 1; continue; }
       const b = d.growth?.[p.key]?.bytes;
       if (b != null && Number.isFinite(Number(b))) { sum += Number(b); measured += 1; } else missing += 1;
     }
-    growth[p.key] = { bytes: measured ? sum : null, measured, missing, partial: measured > 0 && missing > 0 };
+    growth[p.key] = { bytes: measured ? sum : null, measured, missing, partial: measured > 0 && missing > 0, ...(lagging ? { lagging } : {}) };
   }
   return {
     devices: list.length,

@@ -36,11 +36,27 @@ export function macKey(v) {
 }
 
 /** 서버 한 대의 식별 키(순수). inv = iDRAC 인벤토리(없으면 null). */
+/** v2.682(R3D-09): iDRAC 자체(BMC) 주소 — 'https://10.0.0.1:443/' 같은 등록 host 에서 스킴·포트·경로를 뗀 IPv4. 모르면 ''. */
+export function bmcIpOf(host) {
+  let h = String(host ?? '').trim().slice(0, 300);
+  const sch = h.indexOf('://');
+  if (sch >= 0) h = h.slice(sch + 3);
+  h = h.split('/')[0].split('@').pop();
+  if (/^[^:]+:\d+$/.test(h)) h = h.slice(0, h.lastIndexOf(':'));
+  return ipOf(h);
+}
+
 export function serverKeys(s, inv = null) {
   const names = [s?.name, s?.hostName, inv?.system?.hostName, ...(Array.isArray(s?.hostNames) ? s.hostNames : [])];
   const tag = tagOf(s?.serviceTag || inv?.system?.serviceTag);
   const shorts = new Set(names.map(hostShortName).filter(Boolean));
-  const ips = new Set(names.map(ipOf).filter(Boolean));
+  // v2.682(R3D-09·R3E-01): 스캔 등록 iDRAC 은 이름이 곧 BMC IP 다(엣지 export 도 hostname 이 없으면 BMC IP 를 이름으로 싣는다) —
+  // BMC 주소와 같은 IP 는 OS IP 후보가 아니다(머리말 ③ 규칙). 인벤토리의 BMC NIC 주소도 같은 이유로 뺀다.
+  const bmc = new Set([bmcIpOf(s?.host)].filter(Boolean));
+  for (const n of Array.isArray(inv?.network) ? inv.network.slice(0, 16) : []) {
+    for (const a of String(n?.ipv4 ?? '').slice(0, 400).split(',')) { const ip = ipOf(a); if (ip) bmc.add(ip); }
+  }
+  const ips = new Set(names.map(ipOf).filter((x) => x && !bmc.has(x)));
   const macs = new Set();
   for (const n of Array.isArray(inv?.nics) ? inv.nics : []) {
     for (const p of Array.isArray(n?.ports) ? n.ports : []) { const k = macKey(p?.mac); if (k) macs.add(k); }
@@ -65,16 +81,25 @@ export function resolveServerForHost(host, servers = [], { invOf = () => null, v
   const hk = hostKeys(host || {});
   const hits = { serviceTag: [], hostname: [], ip: [], mac: [] };
   const values = { serviceTag: '', hostname: '', ip: '', mac: '' };
+  const mismatched = []; // 이름·IP·MAC 은 맞았지만 서비스태그가 달라 버린 서버
   for (const s of Array.isArray(servers) ? servers : []) {
     if (!s || typeof s !== 'object' || s.id == null) continue;
     let inv = null;
     try { inv = invOf(s) || null; } catch { inv = null; }
     const k = serverKeys(s, inv);
     if (hk.tag && k.tag === hk.tag) { hits.serviceTag.push(s); values.serviceTag = hk.tag.toUpperCase(); }
-    if (hk.short && k.shorts.has(hk.short)) { hits.hostname.push(s); values.hostname = hk.short; }
+    // v2.682(R3D-04): 양쪽 태그가 **둘 다 있고 다르면** 다른 장비라는 양성 증거다 — 그 서버는 이름·IP·MAC 이 맞아도 잇지 않고
+    // 불일치로 기록한다(하드웨어 교체 뒤 호스트명·IP 재사용). 한쪽이 비어 있으면 판정 근거가 없으니 다른 규칙을 그대로 쓴다.
+    const vetoed = !!(hk.tag && k.tag && k.tag !== hk.tag);
+    const nameHit = hk.short && k.shorts.has(hk.short);
     const ip = [...hk.ips].find((x) => k.ips.has(x));
-    if (ip) { hits.ip.push(s); values.ip = ip; }
     const mac = [...hk.macs].find((x) => k.macs.has(x));
+    if (vetoed) {
+      if (nameHit || ip || mac) mismatched.push({ id: String(s.id), name: s.name || String(s.id), serviceTag: k.tag.toUpperCase(), by: [nameHit && 'hostname', ip && 'ip', mac && 'mac'].filter(Boolean) });
+      continue;
+    }
+    if (nameHit) { hits.hostname.push(s); values.hostname = hk.short; }
+    if (ip) { hits.ip.push(s); values.ip = ip; }
     if (mac) { hits.mac.push(s); values.mac = mac.replace(/(..)(?=.)/g, '$1:'); }
   }
   const rules = {};   // 규칙별 판정 { state:'match'|'ambiguous'|'none'|'no-key', serverId?, count?, narrowedBy? }
@@ -84,7 +109,13 @@ export function resolveServerForHost(host, servers = [], { invOf = () => null, v
     const keyless = r === 'serviceTag' ? !hk.tag : r === 'hostname' ? !hk.short : r === 'ip' ? !hk.ips.size : !hk.macs.size;
     const uniq = [...new Map(hits[r].map((s) => [String(s.id), s])).values()];
     if (keyless) { rules[r] = { state: 'no-key' }; continue; }
-    if (!uniq.length) { rules[r] = { state: 'none' }; continue; }
+    if (!uniq.length) {
+      // 태그 규칙: 다른 규칙이 가리킨 서버의 태그가 이 호스트 태그와 다르면 '없음' 이 아니라 '불일치' 다.
+      if (r === 'serviceTag' && mismatched.length) {
+        rules[r] = { state: 'mismatch', value: hk.tag.toUpperCase(), serverTags: [...new Set(mismatched.map((m) => m.serviceTag))].slice(0, CANDIDATE_MAX) };
+      } else rules[r] = { state: 'none' };
+      continue;
+    }
     if (uniq.length === 1) { rules[r] = { state: 'match', serverId: String(uniq[0].id), value: values[r] }; picks[r] = String(uniq[0].id); continue; }
     const inVc = hostVc ? uniq.filter((s) => String(vcOf(s) || '') === hostVc) : [];
     if (inVc.length === 1) {
@@ -105,8 +136,14 @@ export function resolveServerForHost(host, servers = [], { invOf = () => null, v
   const allCandidates = [...candidateMap.values()].sort((a, b) => b.by.length - a.by.length || String(a.name).localeCompare(String(b.name)));
   const candidates = allCandidates.slice(0, CANDIDATE_MAX);
   const base = { rules, candidates, candidatesOmitted: Math.max(0, allCandidates.length - CANDIDATE_MAX) };
+  if (mismatched.length) base.tagMismatch = mismatched.slice(0, CANDIDATE_MAX);
   if (!pickedIds.length) {
     const anyAmb = MATCH_RULES.some((r) => rules[r].state === 'ambiguous');
+    if (mismatched.length) {
+      // 이름·IP·MAC 이 가리킨 서버가 전부 다른 태그였다 — 연결하지 않고 '충돌' 로 밝힌다(조용히 '일치 없음' 으로 접지 않는다).
+      const conflicts = MATCH_RULES.filter((r) => r !== 'serviceTag' && mismatched.some((m) => m.by.includes(r)));
+      return { ...base, serverId: null, matchedBy: [], conflicts: ['serviceTag', ...conflicts], confidence: null, reason: 'conflict' };
+    }
     return { ...base, serverId: null, matchedBy: [], conflicts: [], confidence: null, reason: anyAmb ? 'ambiguous' : 'no-match' };
   }
   let chosen = pickedIds[0];

@@ -13,7 +13,7 @@ describe('v2.664 Overview 카드 · 전체 소비 전력 문구', () => {
   it('카드 부제 — 못 읽은 수와 측정 수', () => {
     expect(T.cardMeta('storage', { storage: { totalBytes: 100, usedPct: 40, read: 2, devices: 4, unread: 2 } })).toBe('사용 40% · 2/4대 · 못 읽음 2');
     expect(T.cardMeta('storage', { storage: { totalBytes: null, devices: 0 } })).toBe('등록된 스토리지 없음');
-        expect(T.cardMeta('power', { power: { servers: { watts: 800, measured: 2 }, network: { watts: 0, measured: 0 }, storage: { watts: 660, measured: 1 } } })).toBe('서버 0.8 kW · 네트워크 — · 스토리지 0.7 kW');
+        expect(T.cardMeta('power', { power: { servers: { watts: 800, measured: 2 }, network: { watts: 0, measured: 0 }, storage: { watts: 660, measured: 1 } } })).toBe('서버 0.8 kW · 네트워크 — · 스토리지 0.7 kW · 측정 3대'); // v2.682 R3D-01: 측정 대수를 함께
     expect(T.kwOrDash(0)).toBe('—');
     expect(T.powerCatNote('storage', { measured: 1, devices: 3, unread: 1, unsupported: 1 })).toBe('측정 1/3대 · 못 읽음 1 · 수집 경로 없음 1');
     expect(T.powerCatNote('servers', { measured: 2, excludedVcenter: 1 })).toMatch(/vCenter 추정 1대는 뺐습니다/);
