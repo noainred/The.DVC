@@ -67,13 +67,13 @@ const PURPOSES = {
   // ── v2.376~377 신규 ────────────────────────────────────────────────
   'vmperf.json': 'VM 성능 트래킹 설정(보존기간·대상 vCenter)',
   'vm-track.db': 'VM 수량·데이터스토어 사용량 추이(하루 2회 슬롯 스냅샷 + 변경분)',
-  'capacity.db': '리소스 적정성(용량) 샘플 시계열',
+  'capacity.db': '포탈 서버 자신의 리소스(CPU·메모리·디스크·네트워크) 샘플 — 리소스 적정성 진단용',
   'ping-monitor.db': '핑 모니터 응답/손실 시계열',
   'storage-history.db': '스토리지 장비(8종) 용량 이력',
   // ── v2.613 PERSIST2613-02: DB 위치 이전 대상(insights/dbLocation.js MIGRATABLE) 19개 중 13개가 여기 없어 '포탈 DB' 화면이
   //    용도 없이('SQLite 데이터베이스' 폴백) 나열했다. 테스트가 MIGRATABLE ⊆ PURPOSES 를 고정한다 — 새 DB 를 MIGRATABLE 에
   //    넣으면 여기에도 적어야 한다(한 줄 설명은 dbLocation 의 label 과 같은 뜻으로).
-  'sanswitch-perf.db': 'SAN 스위치 포트 처리량 표본(포트별 bps)·포트 연결 정보(v2.410)',
+  'sanswitch-perf.db': 'SAN 스위치 포트 처리량 표본(포트별 초당 바이트 — 화면은 bps)·포트 연결 정보(v2.410)',
   'rma-history.db': '원격 명령(RMA) 실행 이력(v2.416)',
   'rma-tests.db': '원격 명령(RMA) 점검 결과(v2.418)',
   'dirusage.db': '폴더 사용량 리포트 이력(엣지 공유 폴더 Top-N)',
@@ -161,7 +161,7 @@ const DETAILS = {
     note: '전량 로스터를 매 슬롯 적재하지 않고 변경분만 저장한다(5,850 VM·1,100 DS 규모에서 연 수백만 행을 피하기 위함).',
   },
   'capacity.db': {
-    keeps: '리소스 적정성 진단용 샘플(클러스터/호스트 여유·오버커밋 계산 입력) 시계열.',
+    keeps: '포탈이 설치된 서버 자신(중앙·엣지)의 CPU·메모리·디스크·네트워크 사용량 샘플 — 리소스 적정성 진단용(vCenter 클러스터 용량과는 무관).',
     writer: 'capacity 샘플러(기본 30초)',
     retention: '설정값',
     note: '',
