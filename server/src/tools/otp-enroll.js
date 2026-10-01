@@ -27,6 +27,11 @@ const valueOf = (flag) => { const i = argv.indexOf(flag); return i >= 0 ? argv[i
 const username = argv.find((a) => !a.startsWith('-') && argv[argv.indexOf(a) - 1] !== '--confirm');
 
 function die(msg, code = 1) { console.error(`\n✖ ${msg}\n`); process.exit(code); }
+// v2.674: 다음 단계를 안내할 때 '이 도구를 어떻게 불렀는가' 를 그대로 쓴다. 래퍼(otp-enroll.sh·vmware-portal-otp)가
+//   OTP_ENROLL_CMD 로 자기 호출 형태를 넘긴다. 예전에는 언제나 'node server/src/tools/otp-enroll.js' 를 안내해, 설치본에서
+//   그대로 따라 하면 CONFIG_DIR 이 /etc/vmware-portal 이 아니게 되거나(등록 대기 상태를 못 찾는다) root 로 users.json 을
+//   써 포탈이 그 파일을 쓸 수 없게 됐다(루트 CLAUDE.md '문서에서 node 를 직접 안내하지 말 것').
+const CMD = String(process.env.OTP_ENROLL_CMD || '').trim() || 'node server/src/tools/otp-enroll.js';
 
 console.log(`\nCONFIG_DIR = ${config.configDir}`);
 
@@ -40,8 +45,8 @@ OTP 콘솔 등록 도구 (admin/operator 는 OTP 전용 로그인)
   <username> --disable         OTP 해제(다시 등록하려면 처음부터)
 
 예)
-  node server/src/tools/otp-enroll.js admin
-  node server/src/tools/otp-enroll.js admin --confirm 482913
+  ${CMD} admin
+  ${CMD} admin --confirm 482913
 `);
   process.exit(0);
 }
@@ -110,7 +115,7 @@ console.log(`
 
   2) 앱에 표시된 6자리 코드로 확정하세요:
 
-     node server/src/tools/otp-enroll.js ${username} --confirm <6자리>
+     ${CMD} ${username} --confirm <6자리>
 
   ※ 확정 전까지는 기존 로그인 수단이 바뀌지 않습니다.
 `);

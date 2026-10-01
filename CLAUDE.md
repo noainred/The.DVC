@@ -2320,6 +2320,8 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
         '관리자가 아닙니다' 로 거부했다) · 보안 자가진단 OTP 범위 · OTP 콘솔 도구 `--list`. 셋 다 저장 역할을 `'admin'` 문자열로 비교했다 —
         **`getUser`·`listUsers` 의 역할을 비교할 때는 `isAdminTier`**(server/CLAUDE.md v2.643 절). OTP 콘솔 도구는 완료 뒤 '재시작' 을 안내한다
         (포탈은 users.json 을 기동 때 한 번 읽어 메모리에 두고 다시 읽지 않는다 — 재시작 전 저장이 도구의 변경을 덮어쓴다).
+        다음 단계 안내(`--confirm`)도 래퍼가 넘긴 호출 형태(`OTP_ENROLL_CMD` — 예 `sudo vmware-portal-otp`)를 쓴다. 예전에는 언제나
+        `node server/src/tools/otp-enroll.js` 를 안내해 그대로 따라 하면 CONFIG_DIR 이 달라졌다(회귀 `test/otpToolHint2674.test.js`).
       · ⚠ `registerStateFile('x.json')` 을 `path.join(config.configDir, …)` **안에** 넣지 말 것 — `scripts/config-doc.mjs` 가 그 리터럴 모양으로 파일을 찾아 문서에서 빠진다(이번에 185 → 184 로 줄었다).
     - ⚠ **표 안의 클릭 가능한 텍스트에 `<a>` 기본 링크 색을 쓰지 말 것**(v2.527 사용자 신고
       "법인 글자가 파란색이라서 안보여"): 이 어두운 표에서 링크 파랑은 읽기 어렵다. **표의 다른

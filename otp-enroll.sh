@@ -19,6 +19,8 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # …/app
 PREFIX="$(dirname "$APP_DIR")"                            # …/vmware-portal
 TOOL="$APP_DIR/server/src/tools/otp-enroll.js"
 SERVICE_NAME="${SERVICE_NAME:-vmware-portal}"
+# 도구가 다음 단계를 안내할 때 쓸 호출 형태(v2.674) — root 로 실행했으면 sudo 를 붙여 안내한다.
+CMD_HINT="$0"; [[ "$(id -u)" -eq 0 ]] && CMD_HINT="sudo $0"
 
 [[ -f "$TOOL" ]] || { echo "✖ 등록 도구를 찾을 수 없습니다: $TOOL (v2.205.0 이상 필요)" >&2; exit 1; }
 
@@ -52,6 +54,7 @@ if [[ "$(id -u)" -eq 0 ]]; then
 fi
 
 if [[ -n "$RUN_USER" ]] && id "$RUN_USER" &>/dev/null; then
-  exec sudo -u "$RUN_USER" env CONFIG_DIR="$CONFIG_DIR" "$NODE" "$TOOL" "$@"
+  exec sudo -u "$RUN_USER" env CONFIG_DIR="$CONFIG_DIR" SERVICE_NAME="$SERVICE_NAME" OTP_ENROLL_CMD="$CMD_HINT" "$NODE" "$TOOL" "$@"
 fi
-exec env CONFIG_DIR="$CONFIG_DIR" "$NODE" "$TOOL" "$@"
+# SERVICE_NAME 도 넘긴다(v2.674) — 도구의 완료 문구가 재시작할 서비스 이름을 이 래퍼가 본 이름 그대로 말하게.
+exec env CONFIG_DIR="$CONFIG_DIR" SERVICE_NAME="$SERVICE_NAME" OTP_ENROLL_CMD="$CMD_HINT" "$NODE" "$TOOL" "$@"
