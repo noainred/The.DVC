@@ -180,7 +180,7 @@ test('⑩ 라우트 — 실제 admin 라우터: 목록 200 · 추이 점 수 · 
     const buf = Buffer.from(await csv.arrayBuffer());
     assert.deepEqual([...buf.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'UTF-8 BOM');
     const lines = buf.toString('utf8').slice(1).split('\r\n');
-    assert.match(lines[0], /^법인,데이터센터,서버,서비스태그,유형,시각,CPU 사용률\(%\)/);
+    assert.match(lines[0], /^법인,서비스,서버,서비스태그,유형,시각,CPU 사용률\(%\)/);
     assert.match(lines[1], /,,,,$/, '결측은 빈 칸');
     assert.equal((await fetch(`${base}/idrac/trend/export.csv?scope=server&id=none`)).status, 404);
   } finally { srv.close(); }

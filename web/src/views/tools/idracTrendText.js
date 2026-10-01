@@ -124,7 +124,7 @@ export const toLocalInput = (t) => `${ymd(t)}T${hm(t)}`;
 /** 전력 축 상한 — 최대의 1.15배를 200W 단위로 올림. 값이 없으면 1000. */
 export const pMaxOf = (points) => { const m = statsOf(points, 'powerW')?.max; return m ? Math.ceil((m * 1.15) / 200) * 200 : 1000; };
 
-/** 법인 → 데이터센터 → 서버 목록(서버 응답 기준). 정렬은 사람 이름 순(숫자 인식). */
+/** 법인 → 서비스(스캔 대역 이름 — v2.676 사용자 요청으로 '데이터센터' 표기를 '서비스' 로) → 서버 목록(서버 응답 기준). 정렬은 사람 이름 순(숫자 인식). */
 const COLL = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' });
 export function corpsOf(servers) {
   const m = new Map();
@@ -362,7 +362,7 @@ export const cellHit = (row, k, conds) => activeConds(conds).some((c) => c.k ===
 /** 표 CSV(브라우저에서 만든다 — 화면에 있는 값 그대로). 결측은 빈 칸. */
 export function tableCsv(rows, hours) {
   const q = csvCell; // 수식 인젝션 가드 공용 코어(util/csv.js)
-  const head = ['법인', '데이터센터', '서버', '서비스태그', '유형', ...SERIES.flatMap((s) => [`${s.label} 최대`, `${s.label} 평균`, `${s.label} 최소`])];
+  const head = ['법인', '서비스', '서버', '서비스태그', '유형', ...SERIES.flatMap((s) => [`${s.label} 최대`, `${s.label} 평균`, `${s.label} 최소`])];
   const lines = [`# 최근 ${hoursLabel(hours)}`, head.map(q).join(',')];
   for (const r of rows || []) {
     lines.push([r.corpName, r.site, r.name, r.serviceTag, r.kind === 'esxi' ? 'ESXi' : '베어메탈',
@@ -451,4 +451,68 @@ export function scrollLabel(back, range) {
   if (!back) return '최근 구간';
   const lbl = (PRESETS.find(([k]) => k === range) || [])[1] || '';
   return `${back.toLocaleString()}칸 전 (${lbl} 단위)`;
+}
+
+/* ── v2.676: GPU 카드 · 호스트 상세에서 연결(사용자 요청 "GPU 어떤 카드가 몇 장 꽂혀 있는지 · 통합 성능 모니터링 · 복합 조회") ── */
+
+const cardsLine = (g) => (g?.cards || []).map((c) => `${c.model} ×${c.count}`).join(' · ');
+const MODE_TEXT = { vgpu: 'vGPU', vsga: 'vSGA', passthrough: '패스쓰루' };
+/**
+ * 서버 머리의 GPU 표지(순수). 서버 응답 gpuCards = { esxi, idrac } — 각각 null(못 읽음) | { cards:[{model,count,modes}], total }.
+ * ESXi(vCenter 가 본 GPU)가 먼저이고, 없거나 0장이면 iDRAC 인벤토리. 둘 다 읽었는데 장수가 다르면 그 사실을 말한다
+ * (패스쓰루 GPU 는 iDRAC 에 안 보일 수 있다 — 어느 쪽이 맞다고 단정하지 않는다). 둘 다 0장·모름이면 null(표지를 그리지 않는다).
+ */
+export function gpuCardsText(gc) {
+  if (!gc) return null;
+  const e = gc.esxi; const i = gc.idrac;
+  const main = e?.total > 0 ? { g: e, src: 'ESXi' } : i?.total > 0 ? { g: i, src: 'iDRAC' } : null;
+  if (!main) return null;
+  const modes = [...new Set((main.g.cards || []).flatMap((c) => c.modes || []))].map((m) => MODE_TEXT[m] || m);
+  const parts = [`${main.src === 'ESXi' ? 'vCenter(ESXi)' : 'iDRAC 인벤토리'} 기준 GPU ${main.g.total}장 — ${cardsLine(main.g)}${modes.length ? ` (${modes.join('·')})` : ''}`];
+  let differ = false;
+  if (e && i && e.total !== i.total) {
+    differ = true;
+    parts.push(`vCenter(ESXi) 는 ${e.total}장${e.total ? `(${cardsLine(e)})` : ''}, iDRAC 인벤토리는 ${i.total}장${i.total ? `(${cardsLine(i)})` : ''}으로 다릅니다 — 패스쓰루로 VM 에 준 GPU 는 iDRAC 에 안 보일 수 있고, vCenter 는 GPU 를 쓰도록 구성된 카드만 셉니다. 어느 쪽이 맞다고 단정하지 않습니다.`);
+  } else if (!e || !i) {
+    parts.push(main.src === 'ESXi' ? 'iDRAC 인벤토리의 GPU 목록은 읽지 못했거나 아직 없습니다.' : 'vCenter(ESXi) 쪽 GPU 목록은 없습니다(매칭된 ESXi 호스트가 없거나 읽지 못함).');
+  }
+  return { text: `GPU ${cardsLine(main.g)}`, src: main.src, total: main.g.total, differ, title: parts.join(' ') };
+}
+
+export const MATCH_RULE_LABEL = Object.freeze({ serviceTag: '서비스태그', hostname: '호스트네임', ip: 'IP', mac: 'MAC' });
+/** 호스트 상세 → 통합 추이 인계 키(hooks/searchHandoff target). */
+export const TREND_HANDOFF = 'idrac-trend';
+
+/** 인계 문자열 → { id, host, matchedBy, confidence, conflicts, reverseSame } | null (순수 · 잘못된 값은 null). */
+export function parseTrendHandoff(q) {
+  if (!q) return null;
+  try {
+    const o = JSON.parse(q);
+    if (!o || typeof o.id !== 'string' || !o.id) return null;
+    return { id: o.id, host: String(o.host || ''), matchedBy: Array.isArray(o.matchedBy) ? o.matchedBy.map(String) : [],
+      confidence: o.confidence === 'high' ? 'high' : o.confidence === 'medium' ? 'medium' : null,
+      conflicts: Array.isArray(o.conflicts) ? o.conflicts.map(String) : [], reverseSame: o.reverseSame === false ? false : o.reverseSame === true ? true : null };
+  } catch { return null; }
+}
+
+/** 연결 근거 문장(순수) — 통합 추이 화면 상단 안내. */
+export function linkBasisText(h) {
+  if (!h) return '';
+  const by = h.matchedBy.map((r) => MATCH_RULE_LABEL[r] || r).join(' · ') || '근거 없음';
+  const conf = h.confidence === 'high' ? '확실' : h.confidence === 'medium' ? '근거 1개' : '';
+  let s = `ESXi 호스트 ${h.host || '(이름 없음)'} 에서 연결 — 일치: ${by}${conf ? ` (${conf})` : ''}`;
+  if (h.conflicts.length) s += ` · ⚠ ${h.conflicts.map((r) => MATCH_RULE_LABEL[r] || r).join('·')} 은 다른 서버를 가리켜 서비스태그를 따랐습니다`;
+  if (h.reverseSame === false) s += ' · ⚠ 이 서버에서 거꾸로 찾은 ESXi 호스트는 다른 호스트입니다(아래 판정 문구 참조)';
+  return s;
+}
+
+const RULE_STATE_TEXT = { match: '일치', ambiguous: '여러 서버', none: '일치 없음', 'no-key': '값 없음' };
+/** 연결 실패 사유(순수) — 호스트 상세 버튼 아래. r = /admin/idrac/trend/resolve-host 응답. */
+export function resolveFailText(r) {
+  if (!r) return '';
+  const rules = Object.entries(r.rules || {}).map(([k, v]) => `${MATCH_RULE_LABEL[k] || k} ${RULE_STATE_TEXT[v?.state] || '—'}${v?.state === 'ambiguous' && v.count ? `(${v.count}대)` : ''}`).join(' · ');
+  const head = r.reason === 'conflict' ? '규칙마다 다른 iDRAC 서버를 가리켜 연결하지 않았습니다 — 아래 후보에서 고르세요.'
+    : r.reason === 'ambiguous' ? '같은 값을 가진 iDRAC 서버가 여럿이라 정하지 않았습니다 — 아래 후보에서 고르세요.'
+      : `이 호스트에 대응하는 iDRAC 서버를 찾지 못했습니다${r.scoped ? '(볼 수 있는 범위 안에서)' : ''} — iDRAC 이 등록·스캔되지 않았거나 서비스태그·호스트네임·IP·MAC 이 모두 다릅니다.`;
+  return `${head} 판정: ${rules}.`;
 }

@@ -20,6 +20,7 @@ import { loadRegistry as loadIdracRegistry } from '../../idrac/registry.js';
 import { findRemoteServer } from '../../collector/remoteInventory.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { buildHostMatchIndex, matchHostForServer } from '../../idrac/hostMatch.js';
+import { resolveServerForHost, gpuCardsOf } from '../../idrac/serverForHost.js';
 import { store } from '../../store.js';
 import { config } from '../../config.js';
 import { getMetricsDb } from '../../metrics/db.js';
@@ -293,6 +294,21 @@ export function hostHasGpu(host, hosts = null) {
   return Array.isArray(h.gpus) ? h.gpus.length > 0 : null;
 }
 
+/**
+ * v2.676: 서버의 GPU 카드(모델별 장수) — ESXi 스냅샷(매칭 호스트 host.gpus)과 iDRAC 인벤토리(inv.gpus) 둘 다.
+ * 모르면 null(못 읽음) · [] 는 '읽었고 0장'. iDRAC 인벤토리의 GPU 컬렉션을 못 읽었으면(collections.gpus==='failed') null 이다.
+ */
+export function gpuInfoOf(host, inv, hosts = null) {
+  let esxi = null;
+  if (host?.id) {
+    const h = (hosts || store.get().hosts || []).find((x) => x.id === host.id);
+    if (h) esxi = gpuCardsOf(Array.isArray(h.gpus) ? h.gpus : null);
+  }
+  const invFailed = inv?.collections?.gpus === 'failed';
+  const idrac = inv && !invFailed ? gpuCardsOf(Array.isArray(inv.gpus) ? inv.gpus : null) : null;
+  return { esxi, idrac };
+}
+
 /** 선택 목록(범위 절단 후). 법인 이름은 DataCenter 목록에서, 사이트는 스캔 대역 이름. */
 /**
  * GPU 온도가 있는 서버(v2.661 — 사용자 요청 "GPU 온도가 있는 서버만 보는 기능"). 판정: 최신 센서에 GPU 역할 온도가 있거나
@@ -484,6 +500,29 @@ export function registerIdracTrend(adminRouter) {
       ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}) });
   });
 
+  // v2.676: ESXi 호스트 → iDRAC 서버(호스트 상세 '통합 성능 모니터링'). 서비스태그·호스트네임·IP·MAC 을 각각 판정해 근거를 싣는다
+  //   (idrac/serverForHost.js). 범위 계정은 범위 안 서버만 후보다(범위 밖 서버의 존재를 말하지 않는다).
+  adminRouter.get('/idrac/trend/resolve-host', adminOnly, (req, res) => {
+    const hostId = String(req.query.hostId || '').slice(0, 256);
+    const hosts = store.get().hosts || [];
+    const host = hostId ? hosts.find((h) => String(h.id) === hostId) : null;
+    if (!host) return res.status(404).json({ ok: false, reason: 'no-host', message: '스냅샷에 그 ESXi 호스트가 없습니다(첫 수집 중이거나 삭제됨).' });
+    const all = analysisServersWithRemote(req).filter((s) => s.type !== 'ome');
+    const r = scopeIdracServers(req, all);
+    const out = resolveServerForHost(host, r.servers, {
+      invOf: (s) => invForServer(s),
+      vcOf: (s) => String(s.vcenterId || s.mappedVcenterId || ''),
+    });
+    // 양방향 확인 — 그 서버에서 거꾸로 찾은 호스트(kindOf)가 이 호스트인가. 다르면 화면이 말한다(연결은 그대로 — 근거가 있다).
+    let reverse = null;
+    if (out.serverId) {
+      const srv = r.servers.find((s) => String(s.id) === out.serverId);
+      try { const k = srv ? kindOf(srv) : null; reverse = k ? { hostId: k.host?.id || null, same: k.host?.id === host.id } : null; } catch { reverse = null; }
+    }
+    res.json({ ok: true, hostId: host.id, hostName: host.name, vcenterId: host.vcenterId || '', ...out, reverse,
+      ...(r.sc ? { scoped: true } : {}) });
+  });
+
   adminRouter.get('/idrac/trend/export.csv', adminOnly, csvPerm, async (req, res) => {
     const job = exportJob(req, res, 'csv', await gpuKeysFn());
     if (!job) return;
@@ -491,7 +530,7 @@ export function registerIdracTrend(adminRouter) {
     const lock = acquireExport('idrac-trend-csv', req);
     if (!lock.ok) return res.status(lock.status).json(lock.body);
     try {
-      const lines = [csvLine(['법인', '데이터센터', '서버', '서비스태그', '유형', '시각', ...cols.map((c) => EXPORT_COLS[c])])];
+      const lines = [csvLine(['법인', '서비스', '서버', '서비스태그', '유형', '시각', ...cols.map((c) => EXPORT_COLS[c])])];
       for (const s of targets) {
         const srv = serverById(s.id);
         if (!srv) continue;
@@ -525,7 +564,7 @@ export function registerIdracTrend(adminRouter) {
       sum.addRow(['만든 시각', localStamp(Date.now())]);
       if (omitted) sum.addRow(['뺀 서버', `${omitted}대(엑셀은 서버 ${XLSX_SERVER_MAX}대까지 — 나머지는 CSV 로 내보내세요)`]);
       sum.addRow([]);
-      const head = ['법인', '데이터센터', '서버', '서비스태그', '유형', ...cols.flatMap((c) => [`${EXPORT_COLS[c]} 평균`, `${EXPORT_COLS[c]} 최대`]), 'CPU 사용률 출처', '시트'];
+      const head = ['법인', '서비스', '서버', '서비스태그', '유형', ...cols.flatMap((c) => [`${EXPORT_COLS[c]} 평균`, `${EXPORT_COLS[c]} 최대`]), 'CPU 사용률 출처', '시트'];
       const headRow = sum.addRow(head);
       headRow.font = { bold: true };
       sum.getRow(1).font = { bold: true, size: 14 };
@@ -601,6 +640,7 @@ export function registerIdracTrend(adminRouter) {
       enabled: TREND_SERIES_ENABLED, airflow: TREND_AIRFLOW_ENABLED, firstTs, points, cpuSources, cpuHistory: cpuHistoryKey ? true : undefined, power, cpuDiag, idracState,
       hostCpu: k.host ? { hostId: k.host.id, hostName: k.host.name, matchedBy: k.matchedBy, firstTs: hostCpuFirstTs } : null,
       hostGpu: k.host ? { hostId: k.host.id, hostName: k.host.name, firstTs: hostGpuFirstTs, hasGpu: hostHasGpu(k.host) } : null,
+      gpuCards: (() => { try { return gpuInfoOf(k.host, invForServer(s)); } catch { return null; } })(),
       errors: errList.length ? errors : undefined,
     });
   });
