@@ -413,8 +413,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | PUT | `/host-access/draft` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/hostAccess.js:27](../server/src/routes/admin/hostAccess.js#L27) |
 | POST | `/host-access/plan` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/hostAccess.js:33](../server/src/routes/admin/hostAccess.js#L33) |
 | POST | `/host-access/revert` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/hostAccess.js:46](../server/src/routes/admin/hostAccess.js#L46) |
-| GET | `/idrac` | 역할 `admin` | [server/src/routes/admin/idracCore.js:182](../server/src/routes/admin/idracCore.js#L182) |
-| POST | `/idrac` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:211](../server/src/routes/admin/idracCore.js#L211) |
+| GET | `/idrac` | 역할 `admin` | [server/src/routes/admin/idracCore.js:183](../server/src/routes/admin/idracCore.js#L183) |
+| POST | `/idrac` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:212](../server/src/routes/admin/idracCore.js#L212) |
 | DELETE | `/idrac/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:531](../server/src/routes/admin/idracScan.js#L531) |
 | PUT | `/idrac/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:525](../server/src/routes/admin/idracScan.js#L525) |
 | GET | `/idrac/:id/gpu-probe` | 역할 `admin` · `liveFleetOnly` | [server/src/routes/admin/idracScan.js:204](../server/src/routes/admin/idracScan.js#L204) |
@@ -427,19 +427,19 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/idrac/bulk-add` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:236](../server/src/routes/admin/idracScan.js#L236) |
 | POST | `/idrac/delete` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:500](../server/src/routes/admin/idracScan.js#L500) |
 | POST | `/idrac/expand-ips` | 역할 `admin` | [server/src/routes/admin/idracScan.js:229](../server/src/routes/admin/idracScan.js#L229) |
-| GET | `/idrac/firmware-inventory` | 역할 `admin` | [server/src/routes/admin/idracCore.js:519](../server/src/routes/admin/idracCore.js#L519) |
-| GET | `/idrac/gpu-inventory` | 역할 `admin` | [server/src/routes/admin/idracCore.js:555](../server/src/routes/admin/idracCore.js#L555) |
-| GET | `/idrac/hardware-servers` | 역할 `admin` | [server/src/routes/admin/idracCore.js:451](../server/src/routes/admin/idracCore.js#L451) |
-| GET | `/idrac/hardware-summary` | 역할 `admin` | [server/src/routes/admin/idracCore.js:261](../server/src/routes/admin/idracCore.js#L261) |
+| GET | `/idrac/firmware-inventory` | 역할 `admin` | [server/src/routes/admin/idracCore.js:520](../server/src/routes/admin/idracCore.js#L520) |
+| GET | `/idrac/gpu-inventory` | 역할 `admin` | [server/src/routes/admin/idracCore.js:556](../server/src/routes/admin/idracCore.js#L556) |
+| GET | `/idrac/hardware-servers` | 역할 `admin` | [server/src/routes/admin/idracCore.js:452](../server/src/routes/admin/idracCore.js#L452) |
+| GET | `/idrac/hardware-summary` | 역할 `admin` | [server/src/routes/admin/idracCore.js:262](../server/src/routes/admin/idracCore.js#L262) |
 | POST | `/idrac/import` | 역할 `admin` · `csvPerm` · `fleetOnly` | [server/src/routes/admin/idracScan.js:218](../server/src/routes/admin/idracScan.js#L218) |
-| GET | `/idrac/nic-models` | 역할 `admin` | [server/src/routes/admin/idracCore.js:372](../server/src/routes/admin/idracCore.js#L372) |
-| GET | `/idrac/nic-speed` | 역할 `admin` | [server/src/routes/admin/idracCore.js:298](../server/src/routes/admin/idracCore.js#L298) |
-| GET | `/idrac/parts-inventory` | 역할 `admin` | [server/src/routes/admin/idracCore.js:619](../server/src/routes/admin/idracCore.js#L619) |
-| GET | `/idrac/parts-servers` | 역할 `admin` | [server/src/routes/admin/idracCore.js:639](../server/src/routes/admin/idracCore.js#L639) |
-| POST | `/idrac/poll` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:229](../server/src/routes/admin/idracCore.js#L229) |
-| POST | `/idrac/power-purge` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:247](../server/src/routes/admin/idracCore.js#L247) |
-| GET | `/idrac/power-settings` | 역할 `admin` | [server/src/routes/admin/idracCore.js:235](../server/src/routes/admin/idracCore.js#L235) |
-| PUT | `/idrac/power-settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:236](../server/src/routes/admin/idracCore.js#L236) |
+| GET | `/idrac/nic-models` | 역할 `admin` | [server/src/routes/admin/idracCore.js:373](../server/src/routes/admin/idracCore.js#L373) |
+| GET | `/idrac/nic-speed` | 역할 `admin` | [server/src/routes/admin/idracCore.js:299](../server/src/routes/admin/idracCore.js#L299) |
+| GET | `/idrac/parts-inventory` | 역할 `admin` | [server/src/routes/admin/idracCore.js:610](../server/src/routes/admin/idracCore.js#L610) |
+| GET | `/idrac/parts-servers` | 역할 `admin` | [server/src/routes/admin/idracCore.js:630](../server/src/routes/admin/idracCore.js#L630) |
+| POST | `/idrac/poll` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:230](../server/src/routes/admin/idracCore.js#L230) |
+| POST | `/idrac/power-purge` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:248](../server/src/routes/admin/idracCore.js#L248) |
+| GET | `/idrac/power-settings` | 역할 `admin` | [server/src/routes/admin/idracCore.js:236](../server/src/routes/admin/idracCore.js#L236) |
+| PUT | `/idrac/power-settings` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:237](../server/src/routes/admin/idracCore.js#L237) |
 | POST | `/idrac/register-scanned` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:307](../server/src/routes/admin/idracScan.js#L307) |
 | POST | `/idrac/scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:245](../server/src/routes/admin/idracScan.js#L245) |
 | GET | `/idrac/scan-agents` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:293](../server/src/routes/admin/idracScan.js#L293) |
@@ -458,14 +458,14 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/idrac/scan-ranges/status` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:435](../server/src/routes/admin/idracScan.js#L435) |
 | POST | `/idrac/scan-ranges/stop` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:445](../server/src/routes/admin/idracScan.js#L445) |
 | GET | `/idrac/scan-result` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracScan.js:284](../server/src/routes/admin/idracScan.js#L284) |
-| GET | `/idrac/temps` | 역할 `admin` | [server/src/routes/admin/idracCore.js:495](../server/src/routes/admin/idracCore.js#L495) |
-| POST | `/idrac/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:221](../server/src/routes/admin/idracCore.js#L221) |
+| GET | `/idrac/temps` | 역할 `admin` | [server/src/routes/admin/idracCore.js:496](../server/src/routes/admin/idracCore.js#L496) |
+| POST | `/idrac/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/idracCore.js:222](../server/src/routes/admin/idracCore.js#L222) |
 | GET | `/idrac/trend/export.csv` | 역할 `admin` · 권한 `data.csv` | [server/src/routes/admin/idracTrend.js:602](../server/src/routes/admin/idracTrend.js#L602) |
 | GET | `/idrac/trend/export.xlsx` | 역할 `admin` · 권한 `data.csv` | [server/src/routes/admin/idracTrend.js:626](../server/src/routes/admin/idracTrend.js#L626) |
 | GET | `/idrac/trend/resolve-host` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:579](../server/src/routes/admin/idracTrend.js#L579) |
 | GET | `/idrac/trend/servers` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:517](../server/src/routes/admin/idracTrend.js#L517) |
 | GET | `/idrac/trend/table` | 역할 `admin` | [server/src/routes/admin/idracTrend.js:524](../server/src/routes/admin/idracTrend.js#L524) |
-| GET | `/idrac/unsupported` | 역할 `admin` | [server/src/routes/admin/idracCore.js:486](../server/src/routes/admin/idracCore.js#L486) |
+| GET | `/idrac/unsupported` | 역할 `admin` | [server/src/routes/admin/idracCore.js:487](../server/src/routes/admin/idracCore.js#L487) |
 | GET | `/ipam/db-info` | 역할 `admin` | [server/src/routes/admin/centralIpam.js:56](../server/src/routes/admin/centralIpam.js#L56) |
 | GET | `/ipam/scan/log` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:175](../server/src/routes/admin/centralIpam.js#L175) |
 | GET | `/ipam/scan/ranges.csv` | 역할 `admin` · `csvPerm` · `fleetOnly` | [server/src/routes/admin/centralIpam.js:199](../server/src/routes/admin/centralIpam.js#L199) |
@@ -552,9 +552,9 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/report/daily` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:89](../server/src/routes/admin/opsSettings.js#L89) |
 | PUT | `/report/daily` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/opsSettings.js:90](../server/src/routes/admin/opsSettings.js#L90) |
 | POST | `/report/daily/run` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/opsSettings.js:95](../server/src/routes/admin/opsSettings.js#L95) |
-| GET | `/room-temp` | 역할 `admin` | [server/src/routes/admin/idracCore.js:167](../server/src/routes/admin/idracCore.js#L167) |
-| GET | `/room-temp/history` | 역할 `admin` | [server/src/routes/admin/idracCore.js:130](../server/src/routes/admin/idracCore.js#L130) |
-| GET | `/room-temp/spark` | 역할 `admin` | [server/src/routes/admin/idracCore.js:152](../server/src/routes/admin/idracCore.js#L152) |
+| GET | `/room-temp` | 역할 `admin` | [server/src/routes/admin/idracCore.js:168](../server/src/routes/admin/idracCore.js#L168) |
+| GET | `/room-temp/history` | 역할 `admin` | [server/src/routes/admin/idracCore.js:131](../server/src/routes/admin/idracCore.js#L131) |
+| GET | `/room-temp/spark` | 역할 `admin` | [server/src/routes/admin/idracCore.js:153](../server/src/routes/admin/idracCore.js#L153) |
 | GET | `/secrets/policy` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:142](../server/src/routes/admin/opsSettings.js#L142) |
 | PUT | `/secrets/policy` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:145](../server/src/routes/admin/opsSettings.js#L145) |
 | GET | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:290](../server/src/routes/admin/backupNetSec.js#L290) |
@@ -688,8 +688,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/nsx` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:229](../server/src/routes/api/overviewNsx.js#L229) |
 | GET | `/nsx/group-members` | 권한 `inv.nsx` | [server/src/routes/api/overviewNsx.js:263](../server/src/routes/api/overviewNsx.js#L263) |
 | GET | `/overview` | — | [server/src/routes/api/overviewNsx.js:180](../server/src/routes/api/overviewNsx.js#L180) |
-| GET | `/overview/cards` | — | [server/src/routes/api/overviewCards.js:167](../server/src/routes/api/overviewCards.js#L167) |
-| GET | `/overview/trend` | — | [server/src/routes/api/overviewCards.js:220](../server/src/routes/api/overviewCards.js#L220) |
+| GET | `/overview/cards` | — | [server/src/routes/api/overviewCards.js:147](../server/src/routes/api/overviewCards.js#L147) |
+| GET | `/overview/trend` | — | [server/src/routes/api/overviewCards.js:200](../server/src/routes/api/overviewCards.js#L200) |
 | GET | `/perf/client-config` | — | [server/src/routes/api/perfClient.js:115](../server/src/routes/api/perfClient.js#L115) |
 | POST | `/perf/client-stall` | — | [server/src/routes/api/perfClient.js:74](../server/src/routes/api/perfClient.js#L74) |
 | GET | `/perf/req-status` | — | [server/src/routes/api/perfClient.js:104](../server/src/routes/api/perfClient.js#L104) |
@@ -876,7 +876,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/portal-check/tokens` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/portalCheck.js:197](../server/src/routes/api/portalCheck.js#L197) |
 | POST | `/tools/portal-check/tokens/edge-pull` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/portalCheck.js:262](../server/src/routes/api/portalCheck.js#L262) |
 | POST | `/tools/portal-check/tokens/probe` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/portalCheck.js:230](../server/src/routes/api/portalCheck.js#L230) |
-| GET | `/tools/power-total` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/overviewCards.js:242](../server/src/routes/api/overviewCards.js#L242) |
+| GET | `/tools/power-total` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/overviewCards.js:222](../server/src/routes/api/overviewCards.js#L222) |
 | GET | `/tools/relaycheck` | 권한 `tools` | [server/src/routes/api/relaycheck.js:19](../server/src/routes/api/relaycheck.js#L19) |
 | POST | `/tools/relaycheck/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/relaycheck.js:44](../server/src/routes/api/relaycheck.js#L44) |
 | PUT | `/tools/relaycheck/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/relaycheck.js:37](../server/src/routes/api/relaycheck.js#L37) |

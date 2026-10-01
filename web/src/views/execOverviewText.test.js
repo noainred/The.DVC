@@ -155,7 +155,7 @@ describe('v2.678 GPU 카드 KPI — iDRAC 인벤토리 기준', () => {
   it('전부 읽었으면 개수 그대로', () => {
     const k = gpuKpi({ gpus: { count: 12, inventoryRead: 70, servers: 70 } });
     expect(k.value).toBe(12); expect(k.partial).toBe(false);
-    expect(k.sub).toBe('iDRAC 인벤토리 기준 · 수집 70/70대');
+    expect(k.sub).toBe('iDRAC 인벤토리 카드만 · 수집 70/70대'); // v2.683: 엔지니어 보기 카드와 같은 부제
   });
   it('한 대도 못 읽었으면 0 이 아니라 모름(null)', () => {
     const k = gpuKpi({ gpus: { count: 0, inventoryRead: 0, servers: 70 } });

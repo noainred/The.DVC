@@ -8,6 +8,7 @@ import { getPollerStatus, pollNow, pollNowManual, idracAuthStops } from '../../i
 import { purgeStalePower, measuredPowerBreakdown } from '../../idrac/service.js';
 import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
+import { idracGpuCounts, gpuModelOf, gpuCountable } from '../../idrac/gpuCount.js'; // v2.683: Overview GPU 카드와 같은 집계
 import { allPhysicalServers, vcIndexFromSnap } from '../../idrac/corpAttribution.js'; // v2.630 R2630-01: 범위 귀속 한 벌
 import { getSensorSeries } from '../../idrac/sensorStore.js';
 import { roomTempReport, UNASSIGNED_KEY } from '../../idrac/roomTemp.js';
@@ -557,56 +558,46 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
   const servers = scoped.servers;
   const byModel = new Map();
   const serverList = [];
-  const missing = [];
-  let collected = 0;
-  for (const s of servers) {
-    const inv = invForServer(s);
-    if (!inv) { missing.push({ id: s.id, name: s.name }); continue; }
-    collected++;
-    const gpus = inv.gpus || [];
+  // v2.683: 합계·모델 집계는 Overview 'GPU 카드' 와 같은 함수(idracGpuCounts) — 사용자 결정 "iDRAC 에 등록된 카드만".
+  //   비활성·OME 콘솔은 세지 않고, 오래된 인벤토리·모델 미상 GPU 는 합계에 넣되 따로 센다.
+  const counts = idracGpuCounts(servers, invForServer, Date.now(), (s, inv, gpus, stale) => {
     const serviceTag = s.serviceTag || inv.system?.serviceTag || '';
-    serverList.push({ id: s.id, name: s.name, serviceTag, vcenterId: s.vcenterId || '', host: (s.host || '').replace(/^https?:\/\//, ''), gpuCount: gpus.length, gpus });
+    serverList.push({ id: s.id, name: s.name, serviceTag, vcenterId: s.vcenterId || '', host: (s.host || '').replace(/^https?:\/\//, ''), gpuCount: gpus.length, gpus, ...(stale ? { inventoryStale: true } : {}) });
     for (const g of gpus) {
-      const model = (g.model || '미상').trim() || '미상';
+      const model = gpuModelOf(g) || '미상';
       const e = byModel.get(model) || { model, count: 0, servers: new Map() };
       e.count++;
       const sv = e.servers.get(s.id) || { id: s.id, name: s.name, serviceTag, vcenterId: s.vcenterId || '', count: 0 };
       sv.count++; e.servers.set(s.id, sv);
       byModel.set(model, e);
     }
-  }
-  // 추천: 물리(베어메탈) GPU 서버도 같은 모델 집계에 합친다(source='physical').
+  });
+  const missing = servers.filter((s) => gpuCountable(s) && !invForServer(s)).map((s) => ({ id: s.id, name: s.name }));
+  // v2.683: GPU 물리 서버(SSH nvidia-smi 등록)는 합계·모델 집계에 넣지 않는다 — 같은 박스가 iDRAC 에도 등록돼 있으면
+  //   같은 카드를 두 번 센다(OS IP 와 BMC IP 가 달라 가릴 수 없다). 목록에는 source='physical' 로 남기고 개수는 따로 싣는다.
   const vcFilter = String(req.query.vcenterId || '').trim();
   let physServers = listPhysical();
   if (vcFilter) physServers = physServers.filter((s) => (vcFilter === '__unmapped__' ? !s.vcenterId : s.vcenterId === vcFilter));
   // v2.629: 물리 GPU 서버도 범위 계정에는 귀속 vCenter 가 허용 집합인 것만(귀속 없음 미노출).
   let physOmitted = 0;
   if (scoped.sc) { const before = physServers.length; physServers = physServers.filter((s) => s.vcenterId && scoped.sc.allowed.has(String(s.vcenterId))); physOmitted = before - physServers.length; }
-  let physCount = 0;
+  let physCount = 0; let physGpus = 0;
   for (const s of physServers) {
     const gms = s.gpuModels || [];
     if (!gms.length) continue;
-    physCount++;
+    physCount++; physGpus += gms.length;
     serverList.push({ id: s.id, name: s.name, serviceTag: '', vcenterId: s.vcenterId || '', host: s.host, gpuCount: gms.length, source: 'physical', gpus: gms.map((m) => ({ model: m })) });
-    for (const gm of gms) {
-      const model = (gm || '미상').trim() || '미상';
-      const e = byModel.get(model) || { model, count: 0, servers: new Map() };
-      e.count++;
-      const key = `phys:${s.id}`;
-      const sv = e.servers.get(key) || { id: s.id, name: s.name, serviceTag: '', vcenterId: s.vcenterId || '', source: 'physical', count: 0 };
-      sv.count++; e.servers.set(key, sv);
-      byModel.set(model, e);
-    }
   }
   const models = [...byModel.values()]
     .map((e) => ({ model: e.model, count: e.count, serverCount: e.servers.size, servers: [...e.servers.values()].sort((a, b) => b.count - a.count) }))
     .sort((a, b) => b.count - a.count);
   res.json({
-    totalGpus: models.reduce((a, b) => a + b.count, 0),
+    totalGpus: counts.gpus,
     models,
     servers: serverList.sort((a, b) => b.gpuCount - a.gpuCount),
-    collectedServers: collected, totalServers: servers.length,
-    physicalServers: physCount,
+    collectedServers: counts.invRead + counts.invStale, totalServers: counts.count,
+    inventoryStale: counts.invStale, gpusStale: counts.gpusStale, gpusUnnamed: counts.gpusUnnamed, disabledServers: counts.disabled,
+    physicalServers: physCount, physicalGpus: physGpus,
     missing,
     ...(scoped.sc ? { scoped: true, omittedOutOfScope: scoped.omitted + physOmitted } : {}),
   });
