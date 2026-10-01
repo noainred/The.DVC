@@ -346,7 +346,12 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
     const id = s2?.deviceId || s2?.id;
     if (id && s2.extra?.capacityApprox && typeof s2.extra.capacityApprox === 'object') meta.set(id, { capacityApprox: s2.extra.capacityApprox });
   }
-  const m = g.growthMatrix(rows, { periods, meta });
+  // v2.681(R2D-03): 내부 화면과 같은 기준 — 오늘 기준(asOfDay)으로 장기 미관측 장비를 가르고, 등록부를 읽을 수 있으면
+  //   등록 해제 장비를 '퇴역' 으로 가른다(합계용 — 장비 행은 그대로 싣는다). 등록부를 못 읽으면 퇴역 판정은 하지 않는다.
+  const reg = await import('../storage/registry.js').catch(() => null);
+  let knownIds = null;
+  try { if (typeof reg?.listDevices === 'function' && !reg.registryLoadError?.()) knownIds = reg.listDevices().map((d) => d.id); } catch { knownIds = null; }
+  const m = g.growthMatrix(rows, { periods, meta, asOfDay: db.dayIndex(Date.now()), knownIds });
   // v2.604 AUTHZ-2604-01: 같은 장비 이름이 이 경로에도 실린다(형제 경로가 우회로가 되지 않게 — v2.550.3 규약).
   const hide = !isAdminReq(req);
   const maskName = hide ? await storageNameMasker() : () => null;
@@ -368,6 +373,9 @@ v1.get('/capacity/storage-growth', guarded('/capacity/storage-growth', async ({ 
     approxCount: m.totals?.approxDevices ?? 0,
     ...(hide ? { namesHidden } : {}),
     unknownUsedCount: m.totals?.unknownUsed ?? null,
+    // v2.681: 합계 기준에서 빠진 장비 수(장기 미관측 / 등록 해제). 장비 행은 그대로 실린다.
+    staleCount: m.totals?.staleDevices ?? null,
+    retiredCount: knownIds ? (m.totals?.retiredDevices ?? null) : null,
     note: '기준선이 없는 기간은 null 입니다 — 관측이 짧은 구간을 추정으로 메우지 않습니다.',
   });
 }));

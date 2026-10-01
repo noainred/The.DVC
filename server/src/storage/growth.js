@@ -33,6 +33,14 @@ export const DEFAULT_PERIODS = Object.freeze([
   { key: '365d', days: 365, label: '1년' },
 ]);
 
+/**
+ * v2.681(R2D-03): 마지막 관측이 이보다 오래된 장비는 함대 합계('지금' 사용량·용량·증가량)에서 뺀다.
+ *   7일인 이유 — 일 롤업이라 하루·이틀 빈 것(엣지 회선·인증 정지 같은 일시 장애)은 흔하고 용량은 완만히 변하므로
+ *   마지막 값을 '최근에 아는 값' 으로 둘 수 있다. 일주일(화면 기간 '1주')을 넘게 한 번도 수집되지 않은 장비의 값은
+ *   '지금' 이라 말할 근거가 없다. 장비 행에는 `stale:true` 로 남고 합계는 `staleDevices` 로 밝힌다(조용히 빼지 않는다).
+ */
+export const GROWTH_STALE_DAYS = 7;
+
 const MAX_PERIODS = 12;          // 표 열 수 상한 — 넘치면 화면이 가로로 깨진다
 const MAX_PERIOD_DAYS = 3650;    // 10년. 보존 상한(5년)보다 크게 두어 사용자가 물어볼 수는 있게 한다
 
@@ -132,11 +140,15 @@ export function growthFor(entry, latestDay, days) {
  *   (capacityApprox = 스냅샷 extra.capacityApprox — 반올림 표기 장비의 해상도. v2.604)
  * @returns {{devices:object[], totals:object, periods:object[], asOfDay:number}}
  */
-export function growthMatrix(rows, { periods = DEFAULT_PERIODS, asOfDay, meta = null } = {}) {
+export function growthMatrix(rows, { periods = DEFAULT_PERIODS, asOfDay, meta = null, knownIds = null, staleDays = GROWTH_STALE_DAYS } = {}) {
   const per = periods.length ? periods : DEFAULT_PERIODS;
   const grouped = byDevice(rows);
   const asOf = numOrNull(asOfDay);   // v2.576: 코어는 하나다(빈 문자열·배열이 0 = '1970년 1월 1일' 로 둔갑하지 않게)
   const metaOf = (id) => (meta instanceof Map ? meta.get(id) : meta?.[id]) || {};
+  // v2.681(R2D-03): knownIds(현재 등록부 id)가 주어지면 그 밖의 장비는 퇴역(retired) — 옛 이력만 남은 장비다.
+  const known = knownIds == null ? null : new Set([...(knownIds instanceof Set ? knownIds : Array.isArray(knownIds) ? knownIds : [])].map(String));
+  const sd = numOrNull(staleDays);
+  const staleLimit = sd != null && sd >= 0 ? sd : GROWTH_STALE_DAYS;
 
   const devices = [];
   for (const [id, entry] of grouped) {
@@ -193,25 +205,41 @@ export function growthMatrix(rows, { periods = DEFAULT_PERIODS, asOfDay, meta = 
       // 소진 예상(규칙 ⑤) — 증가 중 + 전체 용량을 알 때만.
       daysToFull: daysToFullFor(totalBytes, usedBytes, growth, per),
       ...(approx ? { capacityApprox: approx } : {}),
+      // v2.681(R2D-03): 합계에서 뺀 이유 — 행은 남긴다(이력·증가량은 그 장비 기준으로 여전히 볼 수 있다).
+      ...(asOf != null && asOf - latestDay > staleLimit ? { stale: true, staleDays: asOf - latestDay } : {}),
+      ...(known && !known.has(String(id)) ? { retired: true } : {}),
     });
   }
   devices.sort((a, b) => (b.usedBytes ?? -1) - (a.usedBytes ?? -1) || String(a.name).localeCompare(String(b.name), 'ko'));
 
-  return { devices, totals: totalsOf(devices, per), periods: per, asOfDay: asOf };
+  return { devices, totals: totalsOf(devices, per, { asOfDay: asOf, staleDays: staleLimit }), periods: per, asOfDay: asOf };
 }
 
 /**
  * 합계 행(규칙 ③) — 기준선이 있는 장비만 더하고 **뺀 장비 수를 밝힌다**.
  * `measured` 는 그 기간에 실제로 더해진 장비 수, `missing` 은 기준선이 없어 못 더한 수다.
  */
-export function totalsOf(devices, periods) {
+export function totalsOf(allDevices, periods, { asOfDay = null, staleDays = GROWTH_STALE_DAYS } = {}) {
+  // v2.681(R2D-03): 퇴역(등록부에 없음)·장기 미관측(stale) 장비의 마지막 값은 '지금' 이 아니다 — 합계에서 빼고 센다.
+  const all = Array.isArray(allDevices) ? allDevices : [];
+  const devices = all.filter((d) => !d.stale && !d.retired);
+  const staleDevices = all.filter((d) => d.stale && !d.retired).length;
+  const retiredDevices = all.filter((d) => d.retired).length;
+  const asOf = numOrNull(asOfDay);
   const usedBytes = sumOrNull(devices.map((d) => d.usedBytes));
   const totalBytes = sumOrNull(devices.map((d) => d.totalBytes));
+  // v2.681(R2D-02): 사용률·남은 용량은 **사용량을 읽은 장비끼리만** 계산한다(v2.594 capacityTotals 규약).
+  //   사용량 미상 장비의 전체 용량을 분모에 넣으면 사용률은 과소, 남은 용량은 과대가 된다(재현: 50/100 + ?/100 → 25%·150).
+  //   totalBytes(표시 총용량)는 그대로 두고 측정 분모를 totalBytesMeasured 로 따로 싣는다.
+  const totalBytesMeasured = sumOrNull(devices.filter((d) => d.usedBytes != null).map((d) => d.totalBytes));
   const growth = {};
   for (const p of periods) {
-    let sum = 0; let measured = 0; let missing = 0;
+    let sum = 0; let measured = 0; let missing = 0; let lagging = 0;
     for (const d of devices) {
       const g = d.growth[p.key];
+      // v2.681(R2D-03): 최신 관측이 어제보다 오래된 장비의 증가량은 '이 기간' 이 아니라 그 장비의 옛 날짜 기준이다 —
+      //   오늘 기준 함대 증가량에 더하지 않는다(못 더한 수로 센다). 하루 차이는 오늘 행이 아직 없는 정상 상태다.
+      if (asOf != null && asOf - d.latestDay > 1) { missing += 1; lagging += 1; continue; }
       if (g && g.bytes != null) { sum += g.bytes; measured += 1; } else missing += 1;
     }
     growth[p.key] = {
@@ -221,14 +249,22 @@ export function totalsOf(devices, periods) {
       // 일부만 더했으면 '전체' 라고 말하지 못하게 화면이 쓸 플래그.
       partial: measured > 0 && missing > 0,
       perDayBytes: measured && p.days > 0 ? sum / p.days : null,
+      ...(lagging ? { lagging } : {}),
     };
   }
   return {
     devices: devices.length,
     usedBytes,
     totalBytes,
-    freeBytes: totalBytes != null && usedBytes != null ? Math.max(0, totalBytes - usedBytes) : null,
-    pct: totalBytes && usedBytes != null ? Math.round((usedBytes / totalBytes) * 1000) / 10 : null,
+    totalBytesMeasured,
+    freeBytes: totalBytesMeasured != null && usedBytes != null ? Math.max(0, totalBytesMeasured - usedBytes) : null,
+    pct: totalBytesMeasured && usedBytes != null ? Math.round((usedBytes / totalBytesMeasured) * 1000) / 10 : null,
+    // v2.681: 합계에서 뺀 장비 — 퇴역(등록부에 없음)·마지막 관측이 GROWTH_STALE_DAYS 넘게 지난 장비.
+    staleDevices,
+    retiredDevices,
+    staleDaysLimit: staleDays,
+    // 등록부·관측 기준과 무관한 전체 행 수(예전 devices 와 같은 뜻이 필요할 때).
+    devicesListed: all.length,
     // 수치를 못 읽은 장비 수 — 합계가 '전 장비' 인지 화면이 판단하는 근거.
     unknownUsed: devices.filter((d) => d.usedBytes == null).length,
     // v2.604: 반올림 표기 용량 장비 수 — 합계에 그 해상도만큼의 불확실성이 섞였음을 화면이 밝히는 근거.
