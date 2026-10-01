@@ -365,6 +365,8 @@ function initSqlite() {
           arr.sort((a, b) => a.b - b.b);
           const kept = arr.length > cap ? arr.slice(-cap) : arr;
           out.set(k, kept.map((r) => ({ ts: r.b, avg: round1(r.avg), min: round1(r.min), max: round1(r.max) })));
+          // 마지막 조립(키 1,100 × 버킷 144 = 약 16만 개 · round1)도 한 덩어리면 약 200ms 다(합성 실측) — 키 사이에도 양보한다.
+          await maybeYield();
         }
         return out;
       },

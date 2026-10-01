@@ -98,6 +98,7 @@ import { alarmTotals } from './views/restFallbackText.js'; // v2.629 WEB2629-04 
 import OverviewModeToggle from './views/OverviewModeToggle.jsx'; // v2.670
 import { modeFromHash } from './views/execOverviewText.js';
 import { MODE_KEY, normMode, resolveMode } from './version_4/mode.js';
+import { statusCounts } from './views/statusBarText.js'; // v2.675 — 첫 수집 중 상태바는 0 이 아니라 '—'
 const readOvMode = () => { try { return normMode(window.localStorage.getItem(MODE_KEY)); } catch { return null; } };
 const writeOvMode = (m) => { try { window.localStorage.setItem(MODE_KEY, m); } catch { /* 저장 실패는 기능을 막지 않는다 */ } };
 
@@ -567,6 +568,9 @@ function Portal({ user, onLogout }) {
     );
   }
 
+  // v2.675: 하단 상태바 숫자 — 첫 수집 중(health.initial)이면 0 대신 '—'(일반 함수라 조기 반환 뒤에 둬도 훅 규칙과 무관하다).
+  const sbCounts = statusCounts(health);
+
   return (
     <div className="app">
       {/*
@@ -672,10 +676,11 @@ function Portal({ user, onLogout }) {
 
       <footer className="statusbar">
         <div className="sb-cell"><span className="sb-label">서버 Uptime</span><span className="sb-val">{fmtUptime(health?.uptimeSec)}</span></div>
-        <div className="sb-cell"><span className="sb-label">전체 호스트</span><span className="sb-val">{(health?.hosts || 0).toLocaleString()}</span></div>
-        <div className="sb-cell"><span className="sb-label">전체 VM</span><span className="sb-val">{(health?.vms || 0).toLocaleString()} <small className="muted">({(health?.vmsPoweredOn || 0).toLocaleString()} On)</small></span></div>
+        {/* v2.675: 첫 수집 중(health.initial)·미수신이면 0 이 아니라 '—' — 판정은 statusBarText.statusCounts 하나(V6 상태바와 공용). */}
+        <div className="sb-cell"><span className="sb-label">전체 호스트</span><span className="sb-val" title={sbCounts.title}>{sbCounts.hosts}</span></div>
+        <div className="sb-cell"><span className="sb-label">전체 VM</span><span className="sb-val" title={sbCounts.title}>{sbCounts.vms} <small className="muted">({sbCounts.vmsOn} On)</small></span></div>
         {/* v2.629 WEB2629-04: REST 폴백 vCenter 는 경보를 조회하지 않아 합계에 0 으로 들어간다 — 그 개수를 밝힌다(판정은 alarmTotals 하나). */}
-        <div className="sb-cell"><span className="sb-label">활성 알람</span><span className="sb-val" style={{ color: health?.alarmsCritical ? 'var(--red)' : undefined }}>{health ? (health.alarms || 0).toLocaleString() : '—'}{Array.isArray(vcenters) && alarmTotals(vcenters).unknown > 0 && <small className="muted" title="REST 폴백으로 수집된 vCenter 는 경보를 조회하지 않았습니다 — 합계에 들어 있지 않습니다"> (미조회 {alarmTotals(vcenters).unknown}곳 제외)</small>}</span></div>
+        <div className="sb-cell"><span className="sb-label">활성 알람</span><span className="sb-val" title={sbCounts.title} style={{ color: health?.alarmsCritical ? 'var(--red)' : undefined }}>{sbCounts.alarms}{Array.isArray(vcenters) && alarmTotals(vcenters).unknown > 0 && <small className="muted" title="REST 폴백으로 수집된 vCenter 는 경보를 조회하지 않았습니다 — 합계에 들어 있지 않습니다"> (미조회 {alarmTotals(vcenters).unknown}곳 제외)</small>}</span></div>
       </footer>
 
       {overlays}

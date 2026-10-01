@@ -6,6 +6,7 @@ import { parseMenuHash, menuHash } from './route.js';
 import { searchResults } from '../version_5/searchData.js';
 import { handoffSearch } from '../hooks/searchHandoff.js';
 import { vcStatusCounts } from '../console/consoleData.js';
+import { statusCounts } from '../views/statusBarText.js'; // v2.675 — 첫 수집 중 판정은 개발 포탈 상태바와 한 벌
 import MenuPage from './pages/MenuPage.jsx';
 import './v6.css';
 
@@ -115,6 +116,7 @@ export default function V6Shell({
   const pillTone = !health ? 'none' : upgrading ? 'crit' : healthError ? 'warn' : (vc?.unreach || 0) > 0 ? 'crit' : (vc?.pending || 0) > 0 ? 'warn' : 'ok';
   const pillText = !health ? '상태 확인 중' : upgrading ? 'Upgrading…' : `vCenter ${fmtInt(health.vcentersConnected)}/${fmtInt(vcActive)}`;
   const pillSub = !health ? '' : upgrading ? '' : healthError ? '응답 지연' : (vc?.unreach || 0) > 0 ? `불가 ${vc.unreach}` : (vc?.pending || 0) > 0 ? `첫 수집 중 ${vc.pending}` : 'OK';
+  const sb = statusCounts(health);   // v2.675: 하단 상태바 — 첫 수집 중이면 개수 대신 '—'
 
   let idx = 3;
   const navLink = (id, label, n, count, href) => (
@@ -232,9 +234,10 @@ export default function V6Shell({
         </main>
         <footer className="v6-statusbar">
           <div><span>서버 UPTIME</span><b>{uptimeText(health?.uptimeSec)}</b></div>
-          <div><span>전체 호스트</span><b>{fmtInt(health?.hosts)}</b></div>
-          <div><span>전체 VM</span><b>{fmtInt(health?.vms)}</b>{health?.vmsPoweredOn != null && <em>({fmtInt(health.vmsPoweredOn)} On)</em>}</div>
-          <div><span>활성 알람</span><b className={(health?.alarms || 0) > 0 ? 'alarm' : ''}>{fmtInt(health?.alarms)}</b></div>
+          {/* v2.675: 첫 수집 중(health.initial)이면 0 이 아니라 '—'(statusBarText.statusCounts — App 상태바와 같은 판정). */}
+          <div><span>전체 호스트</span><b title={sb.title}>{sb.pending ? '—' : fmtInt(health?.hosts)}</b></div>
+          <div><span>전체 VM</span><b title={sb.title}>{sb.pending ? '—' : fmtInt(health?.vms)}</b>{sb.pending ? <em>(— On)</em> : health?.vmsPoweredOn != null && <em>({fmtInt(health.vmsPoweredOn)} On)</em>}</div>
+          <div><span>활성 알람</span><b title={sb.title} className={!sb.pending && (health?.alarms || 0) > 0 ? 'alarm' : ''}>{sb.pending ? '—' : fmtInt(health?.alarms)}</b></div>
         </footer>
       </div>
     </div>

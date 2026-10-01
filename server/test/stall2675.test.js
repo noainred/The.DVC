@@ -9,7 +9,7 @@
  *  ⑥ iDRAC 최신값 시드 = 옛 GROUP BY MAX · 구버전 DB(롤업 없음) 마이그레이션은 EXISTS 로도 그대로 돈다
  *  ⑦ 이상 탐지는 조각 집계를 쓰고 결과가 예전 경로와 같다
  *  ⑧ 로그인 실패: 대상 판정이 옛 O(n²) 와 같다 · scan 에 rowsMax·days · 라우트는 같은 조건을 기억하고 '지금 분석' 이 비운다
- *  ⑨ 첫 병합 전 골격 · /overview initial · /metrics 생략 · GPU series-meta(meta 0회) · 샘플러 상태 범위 가림
+ *  ⑨ 첫 병합 전 골격 · /overview·/health initial · /metrics 생략 · GPU series-meta(meta 0회) · 샘플러 상태 범위 가림
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -450,7 +450,7 @@ test('⑧ 로그인 실패 — 대상 판정이 옛 O(n²) 와 같다 · scan �
   assert.doesNotMatch(lfSrc, /all\.filter\(\(f\) => \(label/, '대상마다 전체 목록을 다시 훑는 판정으로 되돌아갔다');
 });
 
-test('⑨ 첫 병합 전 골격 · /overview initial · /metrics 생략 · GPU series-meta · 병합 뒤에는 골격을 내지 않는다', async () => {
+test('⑨ 첫 병합 전 골격 · /overview·/health initial · /metrics 생략 · GPU series-meta · 병합 뒤에는 골격을 내지 않는다', async () => {
   const { store } = await import('../src/store.js');
   const { vcAuthGuard } = await import('../src/vcenter/restClient.js');
   assert.ok(!store._merged, '시험 조건: 아직 병합 전이어야 한다');
@@ -489,6 +489,11 @@ test('⑨ 첫 병합 전 골격 · /overview initial · /metrics 생략 · GPU s
   try {
     const ov = await (await fetch(`${base}/api/overview`)).json();
     assert.equal(ov.initial, true);
+    // /health 도 같은 표지 — 하단 상태바가 '전체 호스트 0 · 전체 VM 0' 대신 '—' 를 보인다 · 읽은 호스트가 없으면 CPU 사용률은 null(0% 아님)
+    const hl = await (await fetch(`${base}/api/health`)).json();
+    assert.equal(hl.initial, true, '/health 가 첫 수집 중 표지를 싣지 않는다');
+    assert.equal(hl.cpuUsagePct, null, '읽은 호스트가 없는데 CPU 사용률을 0 으로 보냈다');
+    assert.equal(hl.hosts, 0, '구버전 화면 호환 — 개수 필드는 그대로 둔다');
     const prom = await (await fetch(`${base}/metrics`)).text();
     assert.doesNotMatch(prom, /vmware_vcenter_up\{vcenter="vc-a"/, '첫 수집 중 vCenter 를 0(다운)으로 내보냈다');
     assert.match(prom, /vmware_vcenter_up\{vcenter="vc-e"[^}]*\} 0/, '연결 실패(인증 정지)는 그대로 0 이다');
@@ -500,6 +505,8 @@ test('⑨ 첫 병합 전 골격 · /overview initial · /metrics 생략 · GPU s
     assert.ok(!store.get().initial);
     const ov2 = await (await fetch(`${base}/api/overview`)).json();
     assert.equal(ov2.initial, undefined);
+    const hl2 = await (await fetch(`${base}/api/health`)).json();
+    assert.equal(hl2.initial, undefined, '병합 뒤에도 /health 가 첫 수집 중이라고 말한다');
     const prom2 = await (await fetch(`${base}/metrics`)).text();
     assert.match(prom2, /vmware_vcenter_up\{/);
 

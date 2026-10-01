@@ -2,6 +2,7 @@
  * v2.675 — 운영 멈춤 후보 개선의 화면 쪽(순수 문구 + 소스 스윕).
  *  ① 첫 병합 전 골격(/overview initial)이면 0 대가 아니라 '첫 수집 중' 을 말한다(엔지니어·경영 보기 · V6)
  *  ② 로그인 실패 분석: 무엇을 얼마나 훑었는지·잘렸는지·언제 분석한 값인지 말한다 · 분석은 상태보다 드물게 부른다
+ *  ③ 롤업 백필 상태 한 줄  ④ 하단 상태바(개발 포탈·V6) — 첫 수집 중이면 0 이 아니라 '—'
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -148,5 +149,41 @@ describe('③ 롤업 백필 상태 한 줄(설정 › 지표 수집)', () => {
   });
   it('소스 — 설정 화면이 상태를 그린다', () => {
     expect(src('MetricsSettings.jsx')).toMatch(/rollupBackfillNote\(status\.rollupBackfill\)/);
+  });
+});
+
+import { statusCounts, FIRST_COLLECT_TITLE } from './statusBarText.js';
+describe('④ 하단 상태바 — 첫 수집 중·미수신이면 0 이 아니라 —', () => {
+  it('/health 를 아직 받지 못했으면 — (0 이 아니다)', () => {
+    for (const h of [null, undefined, 'x']) {
+      const r = statusCounts(h);
+      expect([r.hosts, r.vms, r.vmsOn, r.alarms]).toEqual(['—', '—', '—', '—']);
+      expect(r.pending).toBe(false);
+    }
+  });
+  it('첫 병합 전 골격(initial)이면 서버가 0 을 보내도 — · 툴팁이 이유를 말한다', () => {
+    const r = statusCounts({ initial: true, hosts: 0, vms: 0, vmsPoweredOn: 0, alarms: 0 });
+    expect([r.hosts, r.vms, r.vmsOn, r.alarms]).toEqual(['—', '—', '—', '—']);
+    expect(r.pending).toBe(true);
+    expect(r.title).toBe(FIRST_COLLECT_TITLE);
+    expect(r.title).not.toMatch(/`|\*\*/);
+  });
+  it('보고가 있으면 개수 — 0 은 0 이다(카운터)', () => {
+    const r = statusCounts({ hosts: 1234, vms: 0, vmsPoweredOn: 0, alarms: 3 });
+    expect(r.hosts).toBe((1234).toLocaleString());
+    expect([r.vms, r.vmsOn, r.alarms]).toEqual(['0', '0', '3']);
+    expect(r.pending).toBe(false);
+    expect(r.title).toBeUndefined();
+    expect(statusCounts({ initial: false, hosts: 2 }).hosts).toBe('2');
+  });
+  it('소스 — 개발 포탈·V6 상태바가 같은 판정을 쓰고 health.hosts 를 0 으로 채우지 않는다', () => {
+    const app = src('../App.jsx');
+    expect(app).toMatch(/const sbCounts = statusCounts\(health\);/);
+    expect(app).toMatch(/\{sbCounts\.hosts\}/);
+    expect(app).not.toMatch(/\(health\?\.hosts \|\| 0\)/);
+    expect(app).not.toMatch(/\(health\?\.vms \|\| 0\)/);
+    const v6 = src('../version_6/V6Shell.jsx');
+    expect(v6).toMatch(/const sb = statusCounts\(health\);/);
+    expect(v6).toMatch(/sb\.pending \? '—' : fmtInt\(health\?\.hosts\)/);
   });
 });
