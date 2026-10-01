@@ -1,3 +1,5 @@
+import { gridIntro } from './toolVisibility.js';
+
 /**
  * views/toolSections.js — 특수 기능 카드를 카테고리 섹션으로 나눈다 (순수, v2.455).
  *
@@ -59,4 +61,131 @@ export function uncategorizedKeys(cfg, allKeys) {
   const placed = new Set();
   for (const c of cfg?.categories || []) for (const t of c?.tools || []) placed.add(String(t));
   return (allKeys || []).map(String).filter((k) => !placed.has(k));
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * v2.679 — 기능별 표시 이름·설명 덮어쓰기 + '개발 단계' 축(핸드오프 '특수 기능 화면 재구성').
+ * 서버 `toolcats/catalog.js` 가 저장·검증하고, 화면 계산은 여기(웹)가 한다(같은 판정을 두 곳에 두지 않는다).
+ * ⚠ 기능 키(k)는 절대 바꾸지 않는다 — 딥링크·권한 키·사용 횟수가 키 기준이다.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/** 단계 목록 — 없거나 비면 null(= 단계 축을 쓰지 않음 · 화면이 지금과 똑같다). */
+export function stagesOf(cfg) {
+  const st = Array.isArray(cfg?.stages) ? cfg.stages.filter((s) => s && s.id) : [];
+  return st.length ? st : null;
+}
+
+/** 기능의 단계 id — 덮어쓰기가 없거나 없는 단계를 가리키면 첫 단계(기본값). 단계 축이 없으면 null. */
+export function stageIdOf(cfg, toolKey) {
+  const st = stagesOf(cfg);
+  if (!st) return null;
+  const want = cfg?.overrides?.[String(toolKey)]?.stage;
+  return want && st.some((s) => s.id === want) ? want : st[0].id;
+}
+
+/**
+ * 도구 목록에 덮어쓰기를 입힌다 — `{ ...t, label, desc, origLabel, origDesc, stage, stageLabel, stageColor, renamed }`.
+ * 비운 값은 원래 값으로 돌아간다(서버가 빈 문자열을 저장하지 않지만, 화면 미리보기도 같은 규칙).
+ * 이름을 바꾼 기능은 원래 이름을 `aka` 에 더한다 — 옛 이름으로도 검색된다(toolSearch 가 aka 를 본다).
+ */
+export function applyOverrides(tools, cfg) {
+  const ov = cfg?.overrides || {};
+  const st = stagesOf(cfg);
+  const byId = new Map((st || []).map((s) => [s.id, s]));
+  return (tools || []).map((t) => {
+    const o = ov[t.k] || {};
+    const label = String(o.label || '').trim() || t.label;
+    const desc = String(o.desc || '').trim() || t.desc;
+    const sid = st ? stageIdOf(cfg, t.k) : null;
+    const s = sid ? byId.get(sid) : null;
+    const renamed = label !== t.label;
+    return {
+      ...t, label, desc, origLabel: t.label, origDesc: t.desc, renamed, redescribed: desc !== t.desc,
+      stage: sid, stageLabel: s?.label || '', stageColor: s?.color || '',
+      aka: renamed ? [...(t.aka || []), t.label] : t.aka,
+    };
+  });
+}
+
+/** 기본 단계(첫 단계)가 아닌가 — 배지는 이런 기능에만 붙인다(운영 배지까지 붙이면 화면이 시끄럽다). */
+export function isNonDefaultStage(cfg, t) {
+  const st = stagesOf(cfg);
+  return !!(st && t?.stage && t.stage !== st[0].id);
+}
+
+/** 화면에 보일 이름 — stageDisplay 가 suffix 면 기본 단계가 아닌 기능에 '(개발중)' 을 붙인다. */
+export function displayLabel(cfg, t) {
+  if (cfg?.stageDisplay === 'suffix' && isNonDefaultStage(cfg, t) && t.stageLabel) return `${t.label}(${t.stageLabel})`;
+  return t.label;
+}
+
+/**
+ * 단계별 섹션 — buildSections 와 같은 모양(id,label,icon,tools,color). 입력 순서를 보존하고 빈 단계는 뺀다.
+ * 단계 축이 없으면 빈 배열(화면은 업무 분류만 쓴다).
+ */
+export function buildStageSections(cfg, visibleKeys) {
+  const st = stagesOf(cfg);
+  if (!st) return [];
+  const keys = (visibleKeys || []).map(String);
+  const out = [];
+  for (const s of st) {
+    const tools = keys.filter((k) => stageIdOf(cfg, k) === s.id);
+    if (tools.length) out.push({ id: s.id, label: s.label || s.id, icon: '●', color: s.color || '', tools });
+  }
+  return out;
+}
+
+/** 덮어쓰기 개수(이름·설명 중 하나라도 바꾼 기능) — 드로어 하단 요약·필터 칩. */
+export function changedToolCount(cfg) {
+  return Object.values(cfg?.overrides || {}).filter((o) => o && (String(o.label || '').trim() || String(o.desc || '').trim())).length;
+}
+
+/**
+ * 단계를 지울 때의 결과 — 그 단계를 가리키던 덮어쓰기의 stage 를 지운다(기본 단계로 간다).
+ * 첫 단계(기본값)는 지울 수 없다 → { ok:false }.
+ */
+export function removeStage(cfg, stageId) {
+  const st = stagesOf(cfg) || [];
+  const idx = st.findIndex((s) => s.id === stageId);
+  if (idx <= 0) return { ok: false, cfg, moved: 0 };
+  const overrides = {};
+  let moved = 0;
+  for (const [k, o] of Object.entries(cfg?.overrides || {})) {
+    if (o?.stage === stageId) {
+      const { stage: _s, ...rest } = o;
+      moved++;
+      if (Object.keys(rest).length) overrides[k] = rest;
+    } else overrides[k] = o;
+  }
+  return { ok: true, moved, cfg: { ...cfg, stages: st.filter((s) => s.id !== stageId), overrides } };
+}
+
+/** 단계별 기능 수(덮어쓰기 기준 · 전체 키 목록 대상) — 단계 목록 탭의 '기능 n개'. */
+export function stageCounts(cfg, allKeys) {
+  const out = {};
+  for (const s of stagesOf(cfg) || []) out[s.id] = 0;
+  for (const k of allKeys || []) { const id = stageIdOf(cfg, k); if (id != null) out[id] = (out[id] || 0) + 1; }
+  return out;
+}
+
+/** 새 단계 id — 기존과 겹치지 않는 `stage<n>`. */
+export function nextStageId(stages) {
+  const ids = new Set((stages || []).map((s) => s.id));
+  let n = (stages || []).length + 1;
+  while (ids.has(`stage${n}`)) n++;
+  return `stage${n}`;
+}
+
+/**
+ * 특수 기능 머리 안내 줄 — `{n}개 기능 · 업무 분류 {a}개 · 개발 단계 {b}개 · 🔒 …`.
+ * 허용 목록 모드(관리자 아님 + 허용 배열)는 gridIntro 규칙을 그대로 따른다 — 회색 카드가 하나도 없으므로
+ * '🔒 회색 카드' 안내가 거짓이 된다(v2.555 Chromium 판독).
+ */
+export function introLine({ isAdmin = false, toolsAllowed = null, shownCount = 0, catCount = 0, stageCount = 0 } = {}) {
+  if (!isAdmin && Array.isArray(toolsAllowed)) return gridIntro({ isAdmin, toolsAllowed, shownCount });
+  const parts = [`**${shownCount}개** 기능`];
+  if (catCount > 0) parts.push(`업무 분류 ${catCount}개`);
+  if (stageCount > 0) parts.push(`개발 단계 ${stageCount}개`);
+  parts.push('🔒 표시는 접근 권한 없음(클릭할 수 없습니다)');
+  return parts.join(' · ');
 }

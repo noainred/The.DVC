@@ -3,6 +3,7 @@ import { fetchJson, sendJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { TOOLS } from './specialToolsList.js';
 import { uncategorizedKeys, categoriesOf } from './toolSections.js';
+import ToolNamesStages from './ToolNamesStages.jsx'; // v2.679 — 특수 기능 화면의 드로어와 같은 편집기(핸드오프 §5)
 
 /**
  * 설정 › 특수 기능 카테고리(v2.455, admin 전용) — 사용자 요구사항:
@@ -123,9 +124,8 @@ export default function ToolCategories() {
         <label className="flex gap" style={{ alignItems: 'center', fontSize: 12.5 }}>
           <input type="checkbox" checked={showUncat} onChange={(e) => setShowUncat(e.target.checked)} /> 분류 안 된 기능을 '기타'로 표시
         </label>
-        <label className="flex gap" style={{ alignItems: 'center', fontSize: 12.5 }}>
-          <input type="checkbox" checked={collapseOthers} onChange={(e) => setCollapseOthers(e.target.checked)} /> 첫 카테고리만 펼치고 시작
-        </label>
+        {/* v2.679: '첫 카테고리만 펼치고 시작' 체크는 지웠다 — 특수 기능 화면이 접는 섹션이 아니라 분류 탭이 됐다.
+            저장값(collapseOthers)은 그대로 보낸다(지우지 않는다). */}
       </div>
 
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
@@ -217,6 +217,13 @@ export default function ToolCategories() {
         <button className="logout-btn" style={{ padding: '7px 16px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
         {msg && <span className="muted" style={{ fontSize: 12.5, color: msg.startsWith('오류') ? '#f0a' : undefined }}>{msg}</span>}
       </div>
+
+      <h3 style={{ marginTop: 28 }}>메뉴 이름 · 설명 · 개발 단계</h3>
+      <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.7, marginTop: -4 }}>
+        특수 기능 화면의 ‘⚙ 이름·단계 설정’ 과 같은 편집기입니다. 위 카테고리 저장과 따로 저장됩니다.
+      </p>
+      <ToolNamesStages embedded settings={d.settings} limits={d.limits} defaultStages={d.defaultStages}
+        onSaved={(s) => setD((prev) => ({ ...prev, settings: s }))} />
     </div>
   );
 }
