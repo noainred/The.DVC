@@ -298,7 +298,8 @@ export function historyNotes(h) {
   const o = h && typeof h === 'object' ? h : {};
   const out = [];
   if (o.unavailable) out.push('중앙 CVP DB 를 일부 읽지 못했습니다 — 아래 목록이 전부가 아닐 수 있습니다.');
-  if (numOrNull(o.faultEventsOmitted) > 0) out.push(`장애 전이는 최근 100건만 보입니다(${countText(o.faultEventsOmitted)}건 생략).`);
+  if (o.faultEventsMore === true) out.push('장애 전이는 최근 100건만 보입니다(그 이전 이력은 생략 — 개수는 세지 않았습니다).');
+  else if (numOrNull(o.faultEventsOmitted) > 0) out.push(`장애 전이는 최근 100건만 보입니다(${countText(o.faultEventsOmitted)}건 생략).`);
   if (numOrNull(o.eventsOmitted) > 0) out.push(`이벤트는 최근 100건만 보입니다(${countText(o.eventsOmitted)}건 생략).`);
   if (o.eventsScanTruncated) out.push(`이 CVP 의 최근 이벤트 2,000건 안에서 이 장비를 골랐습니다 — ${o.eventDays || 7}일 전부를 본 것이 아닙니다.`);
   return out;

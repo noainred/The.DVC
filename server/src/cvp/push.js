@@ -47,7 +47,7 @@ const failLog = createChangeLogger({ windowMs: 10 * 60_000 });
  * 해시에는 처리량 값 대신 '값이 있는가' 만 넣는다 — 값이 null 로 바뀌면(카운터 리셋·링크 다운) 레코드가 다시 가서 중앙의 낡은 값을 지운다.
  * 한 시간에 한 번은 전량을 다시 보낸다(중앙 재시작·유실 대비).
  */
-const FULL_REFRESH_MS = 60 * 60_000;
+import { EDGE_FULL_REFRESH_MS as FULL_REFRESH_MS } from './faults.js'; // v2.681: 중앙 부품 신선도 경계와 한 벌
 const _sent = new Map(); // `${cvpId}|${key}` → { h, at }
 const _evSent = new Map(); // v2.641: cvpId → 보낸 이벤트의 최대 (updatedAt|ts) — 재기동하면 비어 최근 7일분을 다시 보낸다(중앙 upsert)
 export const EVENT_PUSH_MAX = 2000;

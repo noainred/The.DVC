@@ -473,6 +473,12 @@ async function adoptTable(db, t, key, variant, chunkRows) {
         FROM (SELECT * FROM cvp_fault_state WHERE ${IN_CHUNK}) AS v
         WHERE cvp_fault_state.agent=? AND ${pk.map((c) => `cvp_fault_state.${c}=v.${c}`).join(' AND ')}`)
     : null;
+  // v2.681(감사 R2A-04): 변형 행이 더 새로워 그쪽이 남는 경우도 처음 본 시각은 더 이른 쪽이어야 한다.
+  const keepFirstSeenVariant = t === 'cvp_fault_state'
+    ? db.conn.prepare(`UPDATE cvp_fault_state SET first_seen=MIN(cvp_fault_state.first_seen, k.first_seen)
+        FROM (SELECT * FROM cvp_fault_state WHERE agent=?) AS k
+        WHERE cvp_fault_state.${IN_CHUNK} AND ${pk.map((c) => `cvp_fault_state.${c}=k.${c}`).join(' AND ')}`)
+    : null;
   const newerVariant = nc
     ? db.conn.prepare(`DELETE FROM ${t} WHERE agent=? AND EXISTS (SELECT 1 FROM ${t} v WHERE v.${IN_CHUNK} AND v.agent=? AND ${pk.map((c) => `v.${c}=${t}.${c}`).join(' AND ')} AND v.${nc} > ${t}.${nc})`)
     : null;
@@ -486,7 +492,7 @@ async function adoptTable(db, t, key, variant, chunkRows) {
     const j = JSON.stringify(ids);
     db.conn.exec('BEGIN');
     try {
-      if (keepFirstSeen) keepFirstSeen.run(j, key);
+      if (keepFirstSeen) { keepFirstSeen.run(j, key); keepFirstSeenVariant.run(key, j); }
       if (newerVariant) newerVariant.run(key, j, variant);          // 변형 쪽이 더 새 최신 행이면 저장 키 행을 비운다
       if (mergeDaily) merged += Number(mergeDaily.run(j, key).changes); // 같은 날 일 롤업은 합친다
       moved += Number(move.run(key, variant, j).changes);

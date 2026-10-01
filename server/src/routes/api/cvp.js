@@ -301,7 +301,8 @@ api.get('/tools/cvp/device', toolsPerm, fullScopeOnly, async (req, res) => {
     history: {
       openFaults: devOpen,
       // v2.680(감사 B-04): 장비 키로 SQL 에서 고른다 — CVP 단위 상한 뒤에 거르면 그 장비 이력이 조용히 잘렸다.
-      faultEvents: devFaultEv.slice(0, HIST_MAX).map(maskF), faultEventsOmitted: Math.max(0, devFaultEv.length - HIST_MAX),
+      // v2.681(감사 R2A-03): HIST_MAX+1 건만 읽으므로 생략 개수는 모른다 — 숫자(언제나 1)를 지어내지 않고 '더 있음' 만 싣는다.
+      faultEvents: devFaultEv.slice(0, HIST_MAX).map(maskF), faultEventsOmitted: devFaultEv.length > HIST_MAX ? null : 0,
       faultEventsMore: devFaultEv.length > HIST_MAX,
       events: devEv.slice(0, HIST_MAX).map((e) => (admin ? e : { ...e, title: maskErrText(e.title, hosts), desc: maskErrText(e.desc, hosts) })),
       eventsOmitted: Math.max(0, devEv.length - HIST_MAX),

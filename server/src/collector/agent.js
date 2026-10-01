@@ -24,7 +24,11 @@ function exportSensorDetailCapped(serverId) {
   const d = exportSensorDetail(serverId);
   if (!d) return null;
   if (d.list.length <= EXPORT_SENSOR_MAX) return d;
-  return { ...d, list: d.list.slice(0, EXPORT_SENSOR_MAX), omitted: (d.omitted || 0) + (d.list.length - EXPORT_SENSOR_MAX) };
+  // v2.681(감사 R2A-02): 넘치면 사용률(%)·온도 센서를 먼저 남긴다 — v2.680 이 병합 순서를 Thermal 먼저로 바꾸며 컬렉션 꼬리의
+  //   CPU 사용률 센서가 잘려 중앙에서 그 서버의 CPU 값이 사라질 수 있었다. 같은 묶음 안의 순서는 그대로다.
+  const rank = (o) => (o?.k === 'percent' ? 0 : o?.k === 'temperature' ? 1 : 2);
+  const kept = d.list.map((o, i) => [o, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).slice(0, EXPORT_SENSOR_MAX).sort((a, b) => a[1] - b[1]).map((x) => x[0]);
+  return { ...d, list: kept, omitted: (d.omitted || 0) + (d.list.length - EXPORT_SENSOR_MAX) };
 }
 
 function compactSensors(serverId) {
