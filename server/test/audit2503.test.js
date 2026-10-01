@@ -189,7 +189,11 @@ test('/tools/capacity-forecast 는 memo + 양보를 쓴다(DS 1,100개 N+1 로 1
   const route = src.slice(src.indexOf("api.get('/tools/capacity-forecast'"));
   assert.ok(route.includes('memoJson'), 'memo 가 없다');
   assert.ok(route.includes('scopeKey('), 'memo 캐시 라우트는 scopeKey 필수(범위 누출 방지)');
-  assert.ok(route.includes('setImmediate'), '루프 중간 양보가 없다');
+  // v2.672: 계산은 tools/dsGrowth.js 로 옮겼다(롤업 전용 · 스냅샷 무관 캐시 · 시간 기준 양보) — 양보는 그쪽에서 본다.
+  //   예전의 '100개마다 setImmediate' 는 한 건이 느리면(원본 폴백) 100개 사이가 64~70초였다(2026-10-01 운영 장애).
+  assert.ok(route.includes('dsGrowthFor('), '증가율을 캐시 모듈에서 받지 않는다');
+  const growth = fs.readFileSync(new URL('../src/tools/dsGrowth.js', import.meta.url), 'utf8');
+  assert.ok(growth.includes('createYielder('), '증가율 계산 루프에 양보가 없다');
   // ⚠ '전 키 1쿼리 병합' 은 실측 2.3배 느렸다(1,563ms → 3,586ms) — 되돌리지 말 것.
   assert.ok(!route.includes('historyAll('), 'historyAll 병합은 이 스키마에서 더 느리다(측정 근거는 주석 참조)');
 });

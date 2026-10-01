@@ -2277,6 +2277,21 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
     - **v2.671 — Platform(vCenter 목록) 검색창이 전체 vCenter VM 이름도 찾는다**(`views/VCenters.jsx VmNameSearch` + `vcVmSearchText.js` +
       `GET /vms?nameOnly=1`): 두 글자 이상 · 입력 멈춘 뒤 300ms 1회(폴링 금지) · 앞 50대 + 전체 개수 · inv.vms 권한을 먼저 본다 · 범위는 서버
       applyFilters 가 강제. `nameOnly` 가 없으면 /vms 는 예전처럼 이름·게스트 OS·IP·호스트를 본다(다른 화면 영향 없음).
+    - ⚠⚠ **v2.672 — 운영 장애: 여러 키를 도는 장기 조회는 `historyRollup` 만 쓴다(원본 폴백 금지)**(`metrics/db.js historyRollup` ·
+      `tools/dsGrowth.js` · `util/timeSlice.js` · `insights/forecast.js`, 회귀 `server/test/capForecast2672.test.js` — 변이 4종 전부 검출):
+      · 증상(2026-10-01 운영 v2.671): ERR_CONNECTION_TIMED_OUT · stallwatch '약 64~70초 멈춤' 반복 · 스택 `metrics/db.js implHistory`(원본 폴백 줄) ←
+        `/tools/capacity-forecast` · 힙 16~18%(nmon: Commit_AS 4GB / RAM 48GB · 파일 캐시 43.8GB) — **메모리가 아니라 동기 SQL 이었다**.
+      · 원인 셋: ① `history()` 는 롤업 도입 이전 원본이 있으면 원본으로 폴백하는데(v2.600 DB2600-02) **원본 보존 기본은 5년**
+        (`TEMP_RAW_RETENTION_DAYS` 기본 0 = 롤업 기간을 따른다)이고 `ds_usedgb` 는 dead-band 대상이 아니라 분마다 저장된다 —
+        키 하나 120일 = 원본 약 17만 행 ② '100개마다 setImmediate' 라 한 건이 느리면 100개 사이가 64~70초 ③ memo 키가 스냅샷 시각이라
+        30초마다 새 계산이 **겹쳐** 시작됐다. v2.670 경영 보기가 마운트마다 부르면서 가끔이던 일이 늘 일어났다.
+      · 규칙: **여러 키를 도는 루프는 `historyRollup`**(원본으로 절대 떨어지지 않는다 · 버킷은 1시간 정배수로 맞춘다) · 무거운 파생값은
+        **스냅샷과 무관한 캐시 + 동시 계산 1건**(stale-while-revalidate — 캐시가 없거나 새 키가 많을 때만 기다린다) · 양보는 **시간 기준**
+        (`createYielder` — 개수 기준 금지). 구버전 db 객체(historyRollup 없음)면 `history()` 로 되돌리지 말고 오류로 밝힌다.
+      · 대가(정직): 롤업 도입 이전 구간은 예측에 쓰지 않는다 — 항목 `growthPoints`·`growthSince`, 응답 `growth`(출처·기준 시각)로 밝힌다.
+      · ⚠ 남은 위험(다음 릴리스 첫 후보): 한 키 차트의 장기 조회(`history()`)는 여전히 원본으로 폴백할 수 있다(키당 약 0.5초 추정) ·
+        이상 탐지(`historyAll`, 10분 버킷)는 원본을 한 SQL 문으로 집계한다(기본 24시간 · 데이터스토어 1,100개면 약 158만 행) ·
+        근본 해법은 롤업 이전 원본을 롤업으로 옮기는 백필이다. 첫 수집 중 화면의 0 표시(가상 서버 0대 · 0/0 vCenter)도 남았다.
     - ⚠ **표 안의 클릭 가능한 텍스트에 `<a>` 기본 링크 색을 쓰지 말 것**(v2.527 사용자 신고
       "법인 글자가 파란색이라서 안보여"): 이 어두운 표에서 링크 파랑은 읽기 어렵다. **표의 다른
       글자와 같은 색**(`color:'inherit'`)을 쓰고 클릭 가능함은 **점선 밑줄**로 알린다
