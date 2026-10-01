@@ -4040,6 +4040,18 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
       iDRAC `SERIES` 에는 넣지 않는다(`gpu:true` 표지). 응답 `hostGpu.hasGpu`(`hostHasGpu` — 스냅샷 host.gpus, 모르면 null)가 **false 일 때만**
       카드·선·내보내기 열을 숨긴다(모르면 보인다 — 'GPU 없음' 을 단정하지 않는다). GPU 온도는 iDRAC gpuTemp 가 있어 싣지 않는다.
       샘플러의 gpu_util 은 ESXi 보고값 → 게스트 nvidia-smi 순이라 출처가 섞여 있다(각주가 둘 다 말한다).
+    - ⚠⚠ **v2.676 — 호스트 상세 '통합 성능 모니터링'(ESXi 호스트 → iDRAC 서버)은 규칙 넷을 각각 판정한다**(`idrac/serverForHost.js`(순수) +
+      `GET /admin/idrac/trend/resolve-host` + 웹 `components/IdracTrendLinkButton.jsx` · 회귀 `server/test/idracLink2676.test.js`(변이 5/5) + 웹
+      `views/tools/idracLink2676.test.js`. 사용자 요청 "hostname, TAG 넘버, IP 등으로 복합 조회해서 확실하게 연결"):
+      · 규칙: 서비스태그 · 짧은 호스트네임(`hostMatch.hostShortName` — IP 는 이름이 아니다) · IP(ESXi `mgmtIp`·IP 형 host.name ↔ iDRAC 쪽 **OS IP** = 등록 이름·
+        hostName·hostNames 중 정규형 IPv4) · MAC(ESXi `nics[].mac` ↔ 인벤토리 `nics[].ports[].mac`). ⚠⚠ **iDRAC 자체 주소(`s.host`·인벤토리 network)는 IP 비교에
+        넣지 말 것** — BMC 주소와 ESXi 관리 IP 는 다른 주소다(변이 M3 가 잡는다). ⚠ `strictIpv4Num` 은 비정규 표기에 `false` 를 준다 — `!= null` 로 IP 판정하지 말 것(이번에 밟았다).
+      · 한 규칙이 서버 둘 이상을 가리키면 근거가 아니다(그 호스트 vCenter 귀속 서버가 하나면 좁힌다) · 규칙끼리 다른 서버면 태그가 있을 때만 태그를 따르고
+        `conflicts` 로 밝힌다, 없으면 **연결하지 않고 후보를 보여 준다** · 거꾸로 찾은 호스트(`kindOf`)가 다르면 `reverse.same:false` 를 화면이 말한다.
+      · 인계는 `hooks/searchHandoff.js`(메모리 · URL 에 싣지 않음, target `idrac-trend`)이고 통합 추이가 열려 있어도 구독으로 받는다. 버튼은 관리자 + 도구 허용일 때만.
+      · 서버 머리 GPU 표지 = 응답 `gpuCards{esxi, idrac}`(모델별 장수 — `gpuCardsOf`, 모르면 null · [] 는 0장). ESXi 먼저, 두 출처 장수가 다르면 ⚠ + 툴팁(단정하지 않는다).
+      · '데이터센터' 표기는 이 화면에서 **'서비스'** 다(사용자 요청 — 값은 그대로 스캔 대역 이름 `service`). 법인 귀속 문구처럼 진짜 DataCenter 를 뜻하는 곳은 바꾸지 않는다.
+      · 정직 기록: 목 호스트에는 서비스태그·mgmtIp·NIC MAC 이 없어 브라우저 검증은 호스트네임 규칙으로만 연결됐다.
   - ⚠⚠ **Overview 카드 8장 · 전체 소비 전력(v2.664) — 합산은 `server/src/power/total.js buildPowerTotal` 하나**(Overview 카드와 특수 기능
     `power-total` 이 같은 함수. `GET /overview/cards`·`GET /tools/power-total`, `routes/api/overviewCards.js` · 웹 `overviewCardsText.js`·`tools/PowerTotal.jsx`):
     · 서버 = `allMeasuredPower` 중 **vCenter 추정(source 'vcenter') 제외** · 네트워크 = CVP PSU `power.inW` 합(없으면 outW, `outputOnly` 로 밝힘 — 필드명 추정) ·

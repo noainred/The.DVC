@@ -12,11 +12,13 @@ import { IdracDetailModal } from '../idrac/IdracDetailModal.jsx';
 import { WARN_PCT, CRIT_PCT } from '../../console/consoleData.js';
 import { IdracTrendTable } from './IdracTrendTable.jsx';
 import BoldText from '../../components/boldText.jsx';
+import { takeSearch, onSearchHandoff } from '../../hooks/searchHandoff.js';
 import {
   PRESETS, SERIES, DAY, bucketLabel, fmtTick, periodText, statsOf, gapAreas, customRangeError, toLocalInput, pMaxOf, ymd, hm,
   corpsOf, sitesOf, serversOf, serverLabel, valueText, retentionNote, emptyNote, kindBasisText, DC_SOURCE_TEXT,
   loadOrder, saveOrder, moveKey, dropKey, DEFAULT_ORDER, cpuSourceNote, powerNote,
   cpuDiagText, idracStateBanner, loadStyles, saveStyles, setStyle, isDefaultStyles, normalizeStyles, dashArrayOf, DASHES, WIDTHS, stylesQuery,
+  gpuCardsText, TREND_HANDOFF, parseTrendHandoff, linkBasisText,
   CHART_SERIES, hostCpuNote, shownSeriesOf, hostGpuEmptyText, hostGpuNote, loadCpuRef, saveCpuRef, showCpuRef, presetSpanOf, maxBackOf, scrollWindow, scrollLabel,
 } from './idracTrendText.js';
 
@@ -70,6 +72,10 @@ export default function IdracTrendTool() {
   }, []);
 
   const [gpuOnly, setGpuOnly] = useState(false); // v2.661: GPU 온도가 있는 서버만
+  // v2.676: 호스트 상세 '통합 성능 모니터링' 에서 넘어온 서버(메모리 인계 — URL 에 싣지 않는다). 목록이 오면 그 서버를 고른다.
+  const [handoff, setHandoff] = useState(() => parseTrendHandoff(takeSearch(TREND_HANDOFF)));
+  const [linked, setLinked] = useState(null);       // 적용된 인계(안내 줄) · 목록에 없으면 { missing:true }
+  useEffect(() => onSearchHandoff((t) => { if (t === TREND_HANDOFF) setHandoff(parseTrendHandoff(takeSearch(TREND_HANDOFF))); }), []);
   const allServers = useMemo(() => list?.servers || [], [list]);
   const gpuCount = useMemo(() => allServers.filter((s) => s.gpu).length, [allServers]);
   const servers = useMemo(() => (gpuOnly ? allServers.filter((s) => s.gpu) : allServers), [allServers, gpuOnly]);
@@ -77,10 +83,21 @@ export default function IdracTrendTool() {
   const sites = useMemo(() => (corp == null ? [] : sitesOf(servers, corp)), [servers, corp]);
   const sitesFor = useCallback((c) => sitesOf(servers, c), [servers]);
   const inSite = useMemo(() => (corp == null || site == null ? [] : serversOf(servers, corp, site)), [servers, corp, site]);
-  // 법인 → 첫 데이터센터 → 첫 서버(상위를 바꾸면 하위를 첫 항목으로).
+  // 법인 → 첫 서비스 → 첫 서버(상위를 바꾸면 하위를 첫 항목으로).
   useEffect(() => { if (corps.length && !corps.some((c) => c.value === corp)) setCorp(corps[0].value); }, [corps, corp]);
   useEffect(() => { if (sites.length && !sites.some((s) => s.value === site)) setSite(sites[0].value); }, [sites, site]);
   useEffect(() => { if (!inSite.some((s) => s.id === serverId)) setServerId(inSite[0]?.id || ''); }, [inSite, serverId]);
+
+  useEffect(() => {
+    if (!handoff || !list) return;
+    const row = (list.servers || []).find((x) => x.id === handoff.id);
+    if (row) {
+      if (gpuOnly && !row.gpu) setGpuOnly(false);
+      setCorp(row.corp); setSite(row.site); setServerId(row.id); setView('chart');
+      setLinked({ ...handoff, missing: false });
+    } else setLinked({ ...handoff, missing: true });
+    setHandoff(null);
+  }, [handoff, list, gpuOnly]);
 
   // v2.666: 서버·기간을 바꾸면 스크롤을 최근으로 되돌린다.
   useEffect(() => { setBack(0); setDragBack(null); setAnchor(null); }, [range, serverId]);
@@ -145,7 +162,7 @@ export default function IdracTrendTool() {
       {viewBar}
       <div className="flex wrap" style={{ gap: 12, marginBottom: 14, justifyContent: 'flex-end' }}>
         {sel('법인', corp, setCorp, corps)}
-        {sel('데이터센터', site, setSite, sites.map((s) => ({ value: s.value, label: `${s.value} · ${s.n}대` })))}
+        {sel('서비스', site, setSite, sites.map((s) => ({ value: s.value, label: `${s.value} · ${s.n}대` })))}
         {sel('서버', serverId, setServerId, inSite.map((s) => ({ value: s.id, label: `${serverLabel(s)}${s.gpu ? ' · GPU' : ''}` })), 180)}
         {gpuBox}
       </div>
@@ -229,6 +246,15 @@ export default function IdracTrendTool() {
         </div>
       )}
 
+      {linked && ( // v2.676: 호스트 상세에서 연결한 근거(또는 목록에 없음)를 먼저 말한다.
+        <div className="flex" role="status" style={{ alignItems: 'flex-start', gap: 8, padding: '8px 12px', marginBottom: 10, borderRadius: 8, fontSize: 12.5,
+          border: `1px solid ${linked.missing ? 'var(--amber)' : 'rgba(56,189,248,.45)'}`, background: linked.missing ? 'rgba(245,158,11,.08)' : 'rgba(56,189,248,.08)' }}>
+          <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
+            {linked.missing ? `ESXi 호스트 ${linked.host} 에서 연결한 iDRAC 서버(${linked.id})가 이 화면 목록에 없습니다 — 범위 밖이거나 목록을 다시 받는 사이 등록이 바뀌었습니다.` : linkBasisText(linked)}
+          </span>
+          <button type="button" className="tab" style={{ flex: 'none', marginTop: 0, padding: '2px 8px' }} onClick={() => setLinked(null)} aria-label="안내 닫기">✕</button>
+        </div>
+      )}
       <div className="card" style={{ padding: '16px 18px', minWidth: 0 }}>
         <div className="flex wrap" style={{ alignItems: 'baseline', gap: 10, marginBottom: 10, minWidth: 0 }}>
           <b style={{ fontSize: 15, whiteSpace: 'nowrap' }}>🖥️ {srv?.name || serverId}</b>
@@ -236,6 +262,10 @@ export default function IdracTrendTool() {
             {[srv?.corpName, srv?.site].filter(Boolean).join(' › ')}{srv?.model ? ` · ${srv.model}` : ''}{data?.serviceTag ? ` · ${data.serviceTag}` : ''}
           </span>
           {data && <span className={`badge ${esxi ? 'blue' : 'teal'}`}>{esxi ? 'VM호스트 (ESXi)' : '베어메탈'}</span>}
+          {(() => { // v2.676: GPU 카드 모델 · 장수(vCenter 먼저, 없으면 iDRAC 인벤토리). 두 출처가 다르면 ⚠ 와 툴팁.
+            const g = gpuCardsText(data?.gpuCards);
+            return g ? <span className="badge" title={g.title} style={{ whiteSpace: 'nowrap', background: 'rgba(168,85,247,.14)', color: '#d8b4fe', border: '1px solid rgba(168,85,247,.45)' }}>🎮 {g.text}{g.differ ? ' ⚠' : ''}<span style={{ opacity: 0.7, fontWeight: 400 }}> · {g.src}</span></span> : null;
+          })()}
           {data?.remote && <span className="badge gray" title="엣지가 수집해 보낸 서버입니다">위임(엣지)</span>}
           {/* v2.661: 가상화 서버는 둘 다 본다 — ESXi 호스트(vCenter 관점) + iDRAC(하드웨어 관점). 베어메탈은 iDRAC 만. */}
           {data && esxi && data.host && <button type="button" style={pill} onClick={() => setModal('host')}>🖧 ESXi 호스트 상세 ›</button>}
@@ -414,7 +444,7 @@ function CsvModal({ hasHost = false, noGpu = false, fmt = 'csv', gpuOnly = false
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>범위</div>
       <div className="flex" style={{ flexDirection: 'column', gap: 8, marginBottom: 14 }}>
         <button type="button" className={opt(scope, 'server')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('server')}>단일 서버 — {serverName}</button>
-        <button type="button" className={opt(scope, 'dc')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('dc')}>데이터센터 전체 — {site} ({siteCount}대{gpuOnly ? ' · GPU 서버만' : ''})</button>
+        <button type="button" className={opt(scope, 'dc')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('dc')}>서비스 전체 — {site} ({siteCount}대{gpuOnly ? ' · GPU 서버만' : ''})</button>
       </div>
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>기간</div>
       <div className="flex wrap" style={{ gap: 8, marginBottom: 14 }}>
@@ -429,9 +459,9 @@ function CsvModal({ hasHost = false, noGpu = false, fmt = 'csv', gpuOnly = false
       <div className="banner">
         {xlsx
           ? <>요약 시트 1장 + 서버마다 시트 1장(시각 + 측정 {keys.length}개 · 꺾은선 차트). 차트는 시트의 셀을 참조하므로 엑셀에서 값을 고치면 차트도 바뀝니다. 소비 전력은 오른쪽 보조 축입니다. 빈 칸은 선을 끊습니다(0 으로 채우지 않음).
-            {scope === 'dc' && ' 데이터센터 전체는 서버 40대까지 담습니다 — 넘으면 요약 시트에 뺀 대수를 적습니다(더 많으면 CSV 를 쓰세요).'}</>
-          : <>열: 법인 · 데이터센터 · 서버 · 서비스태그 · 유형 · 시각 + 측정 {keys.length}개. iDRAC 무응답 구간과 GPU 없는 서버의 GPU 온도는 빈 칸입니다(0 으로 채우지 않음). UTF-8 BOM 포함.
-            {scope === 'dc' && ' 데이터센터 전체는 한 번에 300대까지 담고, 넘으면 뺀 대수를 응답 헤더에 밝힙니다.'}</>}
+            {scope === 'dc' && ' 서비스 전체는 서버 40대까지 담습니다 — 넘으면 요약 시트에 뺀 대수를 적습니다(더 많으면 CSV 를 쓰세요).'}</>
+          : <>열: 법인 · 서비스 · 서버 · 서비스태그 · 유형 · 시각 + 측정 {keys.length}개. iDRAC 무응답 구간과 GPU 없는 서버의 GPU 온도는 빈 칸입니다(0 으로 채우지 않음). UTF-8 BOM 포함.
+            {scope === 'dc' && ' 서비스 전체는 한 번에 300대까지 담고, 넘으면 뺀 대수를 응답 헤더에 밝힙니다.'}</>}
       </div>
       {!keys.length && <div style={{ marginTop: 8, fontSize: 12, color: 'var(--amber)' }}>표시 중인 항목이 없습니다 — ‘전체’ 를 고르세요.</div>}
       {e && <div style={{ marginTop: 8 }}><ErrorBox error={e} /></div>}

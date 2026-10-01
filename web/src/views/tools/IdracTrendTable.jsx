@@ -1,7 +1,7 @@
 // IdracTrendTable.jsx — iDRAC 통합 추이 › 서버 표 · 조건 검색(v2.663).
 // 사용자 요청: "데이터 센터 선택하면 전체 서버 리스트를 표 형식으로" + "최근 몇 시간 동안 CPU/GPU 온도 몇 도 이상/이하,
 // 소비 전력 몇 W 이상/이하 검색하는 조건식" + "제목별로 소팅". 판정·문구는 idracTrendText.js(순수 — vitest)가 한다.
-// 서버(`GET /admin/idrac/trend/table`)는 데이터센터(또는 전체)의 전 서버 요약을 한 번에 주고, 조건은 화면이 거른다 —
+// 서버(`GET /admin/idrac/trend/table`)는 서비스(또는 전체)의 전 서버 요약을 한 번에 주고, 조건은 화면이 거른다 —
 // 조건을 바꿔도 다시 조회하지 않는다. 폴링하지 않는다(마운트·기간·범위 변경 + 새로고침 버튼).
 import React, { useEffect, useMemo, useState } from 'react';
 import { fetchJson, canCsv } from '../../api.js';
@@ -76,9 +76,9 @@ export function IdracTrendTable({ corps, sitesFor, initCorp, initSite, gpuOnly, 
           </select>
         </label>
         <label className="flex" style={{ alignItems: 'center', gap: 6, fontSize: 13 }}>
-          <span className="muted">데이터센터</span>
+          <span className="muted">서비스</span>
           <select className="select" value={corp === ALL ? ALL : site} disabled={corp === ALL} onChange={(e) => setSite(e.target.value)}>
-            <option value={ALL}>(전체 데이터센터)</option>
+            <option value={ALL}>(전체 서비스)</option>
             {sites.map((s) => <option key={s.value} value={s.value}>{s.value} · {s.n}대</option>)}
           </select>
         </label>
@@ -148,7 +148,7 @@ export function IdracTrendTable({ corps, sitesFor, initCorp, initSite, gpuOnly, 
           <STable minWidth={1180} limit={2000}>
             <thead>
               <tr>
-                <th>서버</th><th>법인</th><th>데이터센터</th><th>유형</th>
+                <th>서버</th><th>법인</th><th>서비스</th><th>유형</th>
                 {SERIES.map((s) => <th key={s.k} className="right">{s.label}</th>)}
               </tr>
             </thead>
