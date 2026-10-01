@@ -19,7 +19,7 @@ import STable from '../components/STable.jsx';
 import { capText, countText, cardMeta, firstCollectNotice } from './overviewCardsText.js';
 import {
   briefingStamp, gauges, regionCards, siteRowsExec, sortSiteRows, usageTone, TONE_VAR,
-  sparkPaths, deltaText, trendNote, attentionItems, inventoryCells, TREND_DAYS, DAYS_KEY, normDays,
+  sparkPaths, deltaText, trendNote, attentionItems, inventoryCells, gpuKpi, TREND_DAYS, DAYS_KEY, normDays,
 } from './execOverviewText.js';
 
 const readDays = () => { try { return normDays(window.localStorage.getItem(DAYS_KEY)); } catch { return 7; } };
@@ -71,6 +71,7 @@ export default function ExecOverview({ onSelectSite, onGotoTab, modeToggle = nul
   const t = trend && Number(trend.days) === days ? trend : null;
 
   const stor = cards?.storage;
+  const gk = gpuKpi(cards);
   const kpis = [
     { key: 'virtual', label: '가상 서버', accent: 'var(--green)', value: countText(cards?.virtual?.count ?? g.vms), unit: '대',
       sub: cards?.virtual ? `구동 ${countText(cards.virtual.poweredOn)} · 템플릿 ${countText(cards.virtual.templates)} · vCenter ${countText(cards.virtual.vcenters)}` : `구동 ${countText(g.vmsPoweredOn)}`,
@@ -85,6 +86,9 @@ export default function ExecOverview({ onSelectSite, onGotoTab, modeToggle = nul
     { key: 'network', label: '네트워크 스위치', accent: 'var(--amber)', value: countText(cards?.network?.count), unit: cards?.network?.count != null ? '대' : '',
       sub: cardMeta('network', cards),
       t: cards?.network ? { reason: 'no-series' } : null, onClick: cards?.network?.reason ? undefined : () => go('#/tools/cvp') },
+    // v2.678: GPU 카드 수량 — iDRAC 인벤토리 기준(gpuKpi). 수량 추이는 기록하지 않는다.
+    { key: 'gpus', label: 'GPU 카드', accent: 'var(--purple)', value: countText(gk.value), unit: gk.value != null ? '장' : '',
+      sub: gk.sub, t: cards?.gpus ? { reason: 'no-series' } : null, onClick: () => go('#/tools/serveranalysis/gpu') },
   ];
 
   return (
