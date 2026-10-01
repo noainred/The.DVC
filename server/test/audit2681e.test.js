@@ -53,3 +53,14 @@ test('R2A-04 — 변형 행이 남아도 처음 본 시각은 더 이른 쪽', a
   assert.equal(Number(r[0].last_seen), now - 10);
   d.close();
 });
+
+test('R2E-01 — 기본 루트 import 그래프는 한 번만 만들고, 재판정은 진행 중 실행을 공유한다', async () => {
+  const A = await import('../src/portalcheck/archScan.js');
+  A._resetImportGraphMemo();
+  const t0 = performance.now(); const g1 = A.buildImportGraph(); const first = performance.now() - t0;
+  const t1 = performance.now(); const g2 = A.buildImportGraph(); const second = performance.now() - t1;
+  assert.equal(g1, g2, '같은 결과 객체(기억)');
+  assert.ok(second * 5 < first || second < 2, `두 번째 호출이 훨씬 빨라야 한다(${first.toFixed(1)}ms → ${second.toFixed(1)}ms)`);
+  const src = stripComments(fs.readFileSync(new URL('../src/routes/api/portalCheck.js', import.meta.url), 'utf8'));
+  assert.match(src, /if \(!_archRun\) _archRun = runArchScanOnce\(\)/);
+});

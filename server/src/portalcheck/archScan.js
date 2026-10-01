@@ -419,8 +419,18 @@ function listConfigFiles(dir) {
   return out.sort();
 }
 
-/** server/src 정적 import 그래프 — arch2579.test.js 와 같은 규칙(vendor 제외 · export … from 포함 · 동적 import 포함). */
+/**
+ * v2.681(감사 R2E-01): 배포된 소스 트리는 프로세스 수명 동안 바뀌지 않는다(업그레이드 = 재시작) — 기본 루트의 그래프는 한 번만
+ *   만든다. 예전에는 점검마다 파일 778개를 동기로 읽고 주석을 벗겨 약 0.4초 동안 이벤트 루프가 멈췄다(실측 365~395ms).
+ */
+let _graphMemo = null;
 export function buildImportGraph(root = SRC_ROOT) {
+  if (root === SRC_ROOT) { if (!_graphMemo) _graphMemo = buildImportGraphUncached(root); return _graphMemo; }
+  return buildImportGraphUncached(root);
+}
+export function _resetImportGraphMemo() { _graphMemo = null; }
+/** server/src 정적 import 그래프 — arch2579.test.js 와 같은 규칙(vendor 제외 · export … from 포함 · 동적 import 포함). */
+function buildImportGraphUncached(root) {
   const files = [];
   (function walk(d) {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
