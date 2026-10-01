@@ -4,11 +4,11 @@
 // Summary.jsx(GuestOsVmsModal) 호환을 위해 아래에서 재export 한다(IpamStandalone 재수출은 v2.613 WEB2613-08 에 삭제 — App 이 IpamCore 를 직접 lazy 한다).
 import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, usePolling, toolAllowed, can, getCurrentUser, hasRole } from '../api.js';
-import { SearchBox } from '../components/ui.jsx';
 import BoldText from '../components/boldText.jsx';
 import { TOOLS } from './specialToolsList.js';
-import { visibleTools, gridIntro, lockReasonOf as lockReason } from './toolVisibility.js'; // v2.613 CATALOG2613-07: 잠금 사유도 한 모듈
-import { buildSections } from './toolSections.js'; // 카테고리 섹션 계산(v2.455, 순수)
+import { visibleTools, lockReasonOf as lockReason } from './toolVisibility.js'; // v2.613 CATALOG2613-07: 잠금 사유도 한 모듈
+import { buildSections, applyOverrides, buildStageSections, stagesOf, displayLabel, isNonDefaultStage, introLine } from './toolSections.js'; // 섹션·덮어쓰기·단계 계산(v2.455 · v2.679, 순수)
+import { ToolNamesDrawer, StageDot, StageBadge } from './ToolNamesStages.jsx'; // 이름·설명·단계 편집(v2.679)
 import { searchTools } from './toolSearch.js'; // 도구 검색 매칭(v2.508, 순수 · V4 팔레트와 공용)
 
 
@@ -125,6 +125,13 @@ const toolFromHash = () => {
 
 // 최근 검색어(브라우저 로컬) — 특수 기능 '메뉴 빠른 찾기'에서 Enter 또는 검색 중 메뉴 클릭 시 기록.
 const RECENT_KEY = 'tools.recentSearches';
+// v2.679: 탭 기준(업무 분류/개발 단계)은 브라우저에 기억한다 — 사람마다 보는 축이 다르다(서버 설정이 아니다).
+const AXIS_KEY = 'tools.axis';
+const FAV_MAX = 6;          // 자주 쓰는 기능 상위 N
+const INDEX_ROWS = 6;       // '전체' 탭 분류 패널의 행 수
+const KO = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' }); // 이름순 — 비교기를 한 번만 만든다(v2.503)
+// 분류 바 sticky 기준 — 셸마다 머리(sticky) 요소가 다르다. 첫 번째로 찾은 것의 높이를 쓴다.
+const STICKY_HEADS = '.v6 .v6-top, .v5 .v5-top, .v3-top, .topbar';
 const loadRecent = () => { try { const a = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(a) ? a.filter((s) => typeof s === 'string' && s.trim()) : []; } catch { return []; } };
 
 export default function SpecialTools({ defaultScope = '' } = {}) {
@@ -133,17 +140,19 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
   const [isAdmin, setIsAdmin] = useState(false); // 관리자 전용 도구(VM 생성 등) 노출 제어
   // 외부 포탈 주소(서버 env SERVICE_HUB_URL). 인증 후에만 내려오며, 없으면 카드도 숨긴다.
   const [externalUrls, setExternalUrls] = useState({});
-  const [topKeys, setTopKeys] = useState([]); // 자주 쓰는 기능(전체 사용자 합산 상위)
-  // 메뉴 그리드 너비 측정용(v2.508) — ref 콜백으로 '지금 떠 있는' 그리드를 잡는다.
-  // useRef 로 단일 그리드에만 달려 있던 동안에는 **카테고리 모드에서 측정 대상이 없어**
-  // '자주 쓰는 기능' 칸 수(favCount)가 갱신되지 않았다. 상태로 두어야 그리드가 바뀔 때
-  // 효과가 다시 돌아 ResizeObserver 를 새 노드에 붙인다.
-  const [gridEl, setGridEl] = useState(null);
-  const [favCount, setFavCount] = useState(4); // 한 줄에 들어가는 카드 수(화면폭 자동, 기본 4)
+  const [topKeys, setTopKeys] = useState([]); // 사용 횟수(전체 사용자 합산)
   const [recent, setRecent] = useState(loadRecent); // 최근 검색어(최신순, 1줄 표시)
-  // 카테고리 설정(v2.455) — 카드(specialToolsList.js 의 전부)를 섹션으로 나눈다. 미설정/실패면 기존 단일 그리드 그대로.
+  // 카테고리·이름·단계 설정(v2.455 · v2.679) — 미설정/실패면 업무 분류·단계 없이 '전체' 격자 하나.
   const [cats, setCats] = useState(null);
-  const [openCats, setOpenCats] = useState({});
+  const [catMeta, setCatMeta] = useState({ limits: {}, defaultStages: [] });
+  // v2.679(핸드오프 '특수 기능 화면 재구성'): 탭 기준(업무 분류/개발 단계) · 탭 · 필터 · 정렬 · 설정 드로어.
+  const [axis, setAxis] = useState(() => { try { return localStorage.getItem(AXIS_KEY) === 'stage' ? 'stage' : 'cat'; } catch { return 'cat'; } });
+  const [tabId, setTabId] = useState('all');
+  const [filterId, setFilterId] = useState('all');
+  const [sortMode, setSortMode] = useState('usage');
+  const [drawer, setDrawer] = useState(false);
+  const [qFocus, setQFocus] = useState(false);
+  const [headH, setHeadH] = useState(0); // 셸 머리(sticky)의 실제 높이 — 분류 바의 top
   const addRecent = (q) => {
     const t = String(q || '').trim();
     if (!t) return;
@@ -167,21 +176,14 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
     if (k) addRecent(menuQ); // 검색 중에 메뉴를 열면 그 검색어를 최근 검색어로 기록
     setTool(k); window.location.hash = k ? `#/tools/${k}` : '#/tools';
   };
-  // 뒤로/앞으로 가기 및 외부에서 바로가기로 진입할 때 동기화.
-  // 카테고리 설정을 한 번만 읽는다(자주 바뀌지 않는다). 실패는 무시 — 섹션 없이 기존대로 그린다.
+  // 설정을 한 번만 읽는다(자주 바뀌지 않는다). 실패는 무시 — 분류·단계 없이 기존대로 그린다.
   useEffect(() => {
     let alive = true;
     fetchJson('/admin/tool-categories')
       .then((r) => {
         if (!alive) return;
         setCats(r?.settings || null);
-        // '첫 카테고리만 펼치기' 설정이면 나머지를 접은 상태로 시작한다.
-        if (r?.settings?.collapseOthers) {
-          const o = {};
-          (r.settings.categories || []).forEach((c, idx) => { o[c.id] = idx === 0; });
-          o._uncategorized = false;
-          setOpenCats(o);
-        }
+        setCatMeta({ limits: r?.limits || {}, defaultStages: r?.defaultStages || [] });
       })
       .catch(() => { /* 카테고리는 편의 기능이다 — 못 읽어도 화면은 동작해야 한다 */ });
     return () => { alive = false; };
@@ -198,24 +200,23 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
     setExternalUrls({ serviceHubUrl: getCurrentUser()?.serviceHubUrl || '' });
   }, []);
   // 그리드(메뉴 목록)로 돌아올 때마다 사용 횟수를 갱신. 전체 메뉴를 클릭순으로 정렬하므로
-  // 상위 몇 개가 아니라 전체 도구 수를 덮을 만큼 넉넉히 가져온다(현재 42개 → 200).
+  // 상위 몇 개가 아니라 전체 도구 수를 덮을 만큼 넉넉히 가져온다(→ 200).
   useEffect(() => {
     if (tool) return;
     fetchJson('/tool-usage/top', { n: 200 }).then((r) => setTopKeys(r.top || [])).catch(() => {});
   }, [tool]);
-  // '자주 쓰는 기능' 카드 수를 메뉴 그리드 한 줄에 들어가는 칸 수에 맞춘다(화면폭 자동, vc-grid=minmax 330px·gap 16px).
+  // 분류 바 sticky top = 셸 머리(sticky) 실제 높이 + 8px. 좁은 화면에서 머리가 여러 줄로 늘어나므로 잰다.
   useEffect(() => {
-    if (tool || !gridEl) return undefined;
-    const calc = () => {
-      const w = gridEl.clientWidth || gridEl.offsetWidth || 0;
-      setFavCount(Math.max(1, Math.floor((w + 16) / (330 + 16))));
-    };
+    if (tool) return undefined;
+    const el = document.querySelector(STICKY_HEADS);
+    if (!el) { setHeadH(0); return undefined; }
+    const calc = () => setHeadH(Math.round(el.getBoundingClientRect().height || 0));
     calc();
     const ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(calc) : null;
-    if (ro) ro.observe(gridEl);
+    if (ro) ro.observe(el);
     window.addEventListener('resize', calc);
     return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', calc); };
-  }, [tool, gridEl]);
+  }, [tool]);
   // 도구 잠금 사유 — 접근 가능하면 null. 특수 기능은 항목이 많아 '숨김'보다 '회색 잠금'이 낫다:
   // 어떤 기능이 있는지는 보이고, 권한이 없으면 클릭만 막아 관리자에게 요청할 수 있게 한다.
   // v2.613(CATALOG2613-07): 판정은 views/toolVisibility.js lockReasonOf 하나 — V4 내비·기능 찾기·팔레트와 같은 답.
@@ -233,166 +234,271 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
       </div>
     );
   }
-  if (tool) return <ToolPanel tool={tool} isAdmin={isAdmin} defaultScope={defaultScope} onBack={() => openTool(null)} />;
+  if (tool) return <ToolPanel tool={tool} isAdmin={isAdmin} defaultScope={defaultScope} cfg={cats} onBack={() => openTool(null)} />;
   // 전 도구를 노출하되, 권한이 없으면 disabled(회색·클릭불가)로 표시한다(숨기지 않음).
   // 외부 포탈 항목은 주소가 설정된 경우에만 노출한다(미설치 환경에 죽은 카드를 남기지 않음).
   // topTab(상단 메뉴로 승격) 항목은 카드로 노출하지 않는다(권한 매트릭스 편집용으로만 목록에 존재).
   // v2.555: **허용 목록 모드에서는 목록 밖 도구를 숨긴다**(사용자 선택 '아예 숨긴다').
   // 거부 목록 모드는 위 주석대로 회색 잠금을 유지한다 — 판정은 views/toolVisibility.js 하나.
-  const base = visibleTools(TOOLS, { isAdmin, toolsAllowed: getCurrentUser()?.toolsAllowed || null })
+  const toolsAllowedList = getCurrentUser()?.toolsAllowed || null;
+  const raw = visibleTools(TOOLS, { isAdmin, toolsAllowed: toolsAllowedList })
     .filter((t) => !t.topTab).filter((t) => !t.external || externalUrls[t.external]).map((t) => {
     const lock = lockReasonOf(t);
     return lock ? { ...t, disabled: true, comingSoon: false, lockReason: lock } : t;
   });
-  // 카테고리 설정(v2.455) — 카드를 섹션으로 나눈다. 실패해도 화면은 기존대로 그린다.
-  // ⚠ 훅은 조기 return 위 최상단에 있어야 한다(React #310) — 이 컴포넌트는 아래에서 return 하므로 안전.
+  // v2.679: 관리자가 바꾼 이름·설명·단계를 입힌다(키는 그대로 — 원래 이름은 aka 로 검색된다).
+  const base = applyOverrides(raw, cats);
   const ql = menuQ.trim().toLowerCase();
   // 검색 매칭은 공용 규칙(v2.508, toolSearch.js) — 라벨·설명뿐 아니라 **키**(gpu·ipam·rma)와
-  // **분류명**, **구 명칭 별칭**(aka)까지 본다. V4 커맨드 팔레트가 같은 모듈을 쓴다.
-  const catLabelsOf = (t) => (cats?.categories || [])
+  // **분류명**, **구 명칭 별칭**(aka)까지 본다. V4 커맨드 팔레트가 같은 모듈을 쓴다. v2.679: 단계 이름도 본다.
+  const catLabelsOf = (t) => (cats?.enabled ? (cats?.categories || []) : [])
     .filter((c) => c && c.enabled !== false && (c.tools || []).includes(t.k))
     .map((c) => c.label || '');
-  const shown = searchTools(base, ql, { catsOf: catLabelsOf });
-  // 상위 키를 실제 도구로 매핑(노출 불가/비활성은 제외). 검색 중에는 추천을 숨긴다.
+  const shown = searchTools(base, ql, { catsOf: (t) => [...catLabelsOf(t), t.stageLabel || ''] });
   const countOf = new Map(topKeys.map((u) => [u.k, u.count]));
-  const favorites = ql ? [] : topKeys
-    .map((u) => ({ ...base.find((t) => t.k === u.k), count: u.count }))
-    .filter((t) => t && t.k && !t.disabled)
-    .slice(0, favCount); // 한 줄에 들어가는 만큼만(화면폭 자동)
   // 전체 메뉴를 클릭(사용) 많은 순으로 정렬한다. 동점·미사용(0회)은 원래 순서를 유지(안정 정렬).
-  // 비활성(준비 중) 카드는 항상 맨 뒤로 보낸다.
+  // 비활성(준비 중·권한 없음) 카드는 항상 맨 뒤로 보낸다.
   const shownSorted = shown.slice().sort((a, b) =>
     (a.disabled ? 1 : 0) - (b.disabled ? 1 : 0) || (countOf.get(b.k) || 0) - (countOf.get(a.k) || 0));
-
-  // 카테고리 섹션. 검색 중에는 섹션을 나누지 않는다 — 찾는 중에 여러 섹션에 흩어지면 오히려 느리다
-  // (중복 소속이라 같은 카드가 두 번 나오기도 한다).
-  const sections = ql ? [] : buildSections(cats, shownSorted.map((t) => t.k));
   const byKey = new Map(shownSorted.map((t) => [t.k, t]));
-  const card = (t, sectionId) => renderToolCard(t, sectionId, { countOf, externalUrls, openTool });
+  const keysShown = shownSorted.map((t) => t.k);
+
+  // 두 축 — 업무 분류(카테고리 설정을 켰을 때) · 개발 단계(단계 목록이 있을 때). 없는 축은 나오지 않는다.
+  const catSecs = buildSections(cats, keysShown);
+  const stageSecs = buildStageSections(cats, keysShown);
+  const hasCat = catSecs.length > 0;
+  const hasStage = !!stagesOf(cats);
+  const curAxis = axis === 'stage' && hasStage ? 'stage' : (hasCat ? 'cat' : (hasStage ? 'stage' : null));
+  const primary = curAxis === 'stage' ? stageSecs : curAxis === 'cat' ? catSecs : [];
+  const secondary = curAxis === 'stage' ? catSecs : curAxis === 'cat' ? stageSecs : [];
+  const secMap = new Map(secondary.map((s) => [s.id, new Set(s.tools)]));
+  const filterSet = filterId !== 'all' ? secMap.get(filterId) : null;
+  const passFilter = (k) => !filterSet || filterSet.has(k);
+  const curTab = tabId !== 'all' && primary.some((s) => s.id === tabId) ? tabId : 'all';
+  const tabSec = curTab === 'all' ? null : primary.find((s) => s.id === curTab);
+  const inTab = (k) => !tabSec || tabSec.tools.includes(k);
+  const visibleKeys = keysShown.filter((k) => inTab(k) && passFilter(k));
+  const pickAxis = (a) => { setAxis(a); setTabId('all'); setFilterId('all'); try { localStorage.setItem(AXIS_KEY, a); } catch { /* ignore */ } };
+  const nameCmp = (a, b) => KO.compare(a.label || '', b.label || '');
+  const listed = visibleKeys.map((k) => byKey.get(k)).filter(Boolean);
+  const listedSorted = sortMode === 'name' ? listed.slice().sort((a, b) => (a.disabled ? 1 : 0) - (b.disabled ? 1 : 0) || nameCmp(a, b)) : listed;
+
+  // 자주 쓰는 기능 — '전체' 탭 · 필터 없음 · 검색 아님일 때만, 상위 6개.
+  const favorites = (curTab === 'all' && filterId === 'all' && !ql) ? topKeys
+    .map((u) => ({ ...(byKey.get(u.k) || {}), count: u.count }))
+    .filter((t) => t && t.k && !t.disabled && (t.count || 0) > 0)
+    .slice(0, FAV_MAX) : [];
+  const catCount = (cats?.enabled ? (cats?.categories || []).filter((c) => c && c.enabled !== false).length : 0);
+  const stageCount = (stagesOf(cats) || []).length;
+  const intro = introLine({ isAdmin, toolsAllowed: toolsAllowedList, shownCount: base.length, catCount, stageCount });
+  const curFilterLabel = filterId === 'all' ? '' : (secondary.find((s) => s.id === filterId)?.label || '');
+  const card = (t) => renderToolCard(t, null, { countOf, externalUrls, openTool, cfg: cats, catLabelsOf, tabLabel: curAxis === 'cat' ? tabSec?.label : '' });
+  const showIndex = curTab === 'all' && !ql && primary.length > 0;
 
   return (
-    <>
-      <div className="section-title" style={{ marginTop: 0 }}>🛠️ 특수 기능</div>
-      <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: recent.length ? 6 : 14 }}>
-        {/* v2.555: 허용 목록 모드에서는 회색 카드가 하나도 없으므로 그 안내가 **거짓**이 된다.
-            판정·문구는 toolVisibility.gridIntro 하나가 소유한다(Chromium 판독에서 발견). */}
-        <div className="muted" style={{ fontSize: 13 }}>
-          <BoldText text={gridIntro({ isAdmin, toolsAllowed: getCurrentUser()?.toolsAllowed || null, shownCount: base.length })} />
+    <div className="st-page">
+      <section className="st-head">
+        <div className="st-head-left">
+          <div className="st-eyebrow">SPECIAL TOOLS</div>
+          <div className="st-title-row">
+            <h1 className="st-h1">특수 기능</h1>
+            {isAdmin && (
+              <button className="st-set-btn" onClick={() => setDrawer(true)} title="기능별 표시 이름·설명·개발 단계를 바꿉니다(관리자)">
+                ⚙ 이름·단계 설정<span className="st-admin-tag">관리자</span>
+              </button>
+            )}
+          </div>
+          {/* v2.555: 허용 목록 모드에서는 회색 카드가 하나도 없으므로 그 안내가 **거짓**이 된다.
+              판정·문구는 toolVisibility.gridIntro 하나가 소유한다(Chromium 판독에서 발견) — introLine 이 그 규칙을 따른다. */}
+          <div className="st-intro"><BoldText text={intro} /></div>
         </div>
-        <SearchBox className="input" style={{ maxWidth: 280 }} placeholder="메뉴 빠른 찾기 (예: G, GPU, IP)" value={menuQ} onChange={setMenuQ}
-          onKeyDown={(e) => { if (e.key === 'Enter') addRecent(e.target.value); }} />
-      </div>
-      {recent.length > 0 && (
-        // 최근 검색어 — 정확히 1줄만: nowrap + overflow hidden으로 화면 폭에 들어가는 만큼만 표시.
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, flexWrap: 'nowrap', minWidth: 0 }}>
-          <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>🕘 최근 검색:</span>
-          <div style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' }}>
-            {recent.map((q) => (
-              <button key={q} className="tab" style={{ padding: '3px 10px', fontSize: 12, flexShrink: 0, background: menuQ === q ? 'rgba(34,211,238,.15)' : undefined }}
-                onClick={() => setMenuQ(menuQ === q ? '' : q)} title={`"${q}" 다시 검색 (다시 클릭하면 해제)`}>
-                {q}
+        <div className="st-head-right">
+          <div className={`st-search${qFocus || menuQ ? ' on' : ''}`}>
+            <span className="st-search-ico" aria-hidden>⌕</span>
+            <input value={menuQ} onChange={(e) => setMenuQ(e.target.value)} onFocus={() => setQFocus(true)} onBlur={() => setQFocus(false)}
+              placeholder="기능 찾기 — 이름·키·설명·단계 (예: GPU, 개발중)" aria-label="기능 찾기"
+              onKeyDown={(e) => { if (e.key === 'Enter') addRecent(e.target.value); if (e.key === 'Escape') setMenuQ(''); }} />
+            {menuQ && <button className="st-search-x" onClick={() => setMenuQ('')} title="검색어 지우기">✕</button>}
+          </div>
+          {recent.length > 0 && (
+            <div className="st-recent">
+              <span>최근</span>
+              {recent.slice(0, 8).map((q) => (
+                <button key={q} className={`st-recent-chip${menuQ === q ? ' on' : ''}`} onClick={() => setMenuQ(menuQ === q ? '' : q)}
+                  title={`"${q}" 다시 검색 (다시 클릭하면 해제)`}>{q}</button>
+              ))}
+              <button className="st-recent-chip st-recent-clear" onClick={clearRecent} title="최근 검색어 전체 지우기">✕ 지우기</button>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {favorites.length > 0 && (
+        <section className="st-block">
+          <div className="st-label"><span className="st-label-mark">▸</span>자주 쓰는 기능<span className="st-label-sub">· 전체 사용자 누적 실행</span></div>
+          <div className="st-fav-grid">
+            {favorites.map((t, i) => (
+              <button key={t.k} className={`st-fav${t.danger ? ' danger' : ''}`} onClick={() => openTool(t.k)} title={`바로가기: #/tools/${t.k}`}>
+                <span className={`st-rank${i < 3 ? ' top' : ''}`}>{i + 1}</span>
+                <span className="st-ico st-ico-sm">{t.icon}</span>
+                <span className="st-fav-text">
+                  <span className="st-ellipsis" style={{ fontWeight: 600 }}>{displayLabel(cats, t)}</span>
+                  <span className="st-fav-sub">{t.stageLabel && <><StageDot color={t.stageColor} size={6} />{t.stageLabel} · </>}{t.count}회</span>
+                </span>
               </button>
             ))}
           </div>
-          <button className="tab" style={{ padding: '3px 8px', fontSize: 11, flexShrink: 0, opacity: 0.6 }} onClick={clearRecent} title="최근 검색어 전체 지우기">✕ 지우기</button>
-        </div>
+        </section>
       )}
-      {favorites.length > 0 && (
-        <div style={{ marginBottom: 18 }}>
-          <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-            ⭐ 자주 쓰는 기능 <span style={{ fontWeight: 400 }}>· 전체 사용자가 가장 많이 연 메뉴</span>
-          </div>
-          <div className="vc-grid">
-            {favorites.map((t, i) => (
-              <div key={t.k} className="card vc-card"
-                style={{ cursor: 'pointer', borderColor: 'var(--accent, #6aa9ff)', ...(t.danger ? { borderColor: 'var(--red)' } : {}) }}
-                onClick={() => openTool(t.k)}
-                title={`바로가기: #/tools/${t.k}`}>
-                <div className="flex between" style={{ alignItems: 'flex-start' }}>
-                  <div style={{ fontSize: 30 }}>{t.icon}</div>
-                  <span className="badge" style={{ fontSize: 11 }}>{['🥇', '🥈', '🥉'][i] || `#${i + 1}`} {t.count}회</span>
-                </div>
-                <div className="vc-name" style={{ marginTop: 8, ...(t.danger ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
-                <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t.desc}</div>
-                <div className="vc-foot"><span className="muted">클릭하여 실행</span><span className="muted">→</span></div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
-        📋 전체 메뉴 <span style={{ fontWeight: 400 }}>· {sections.length ? '카테고리별' : '클릭(사용) 많은 순 정렬'}</span>
-      </div>
 
-      {/* 카테고리 사용 시: 섹션별로 나눠 그린다. 같은 도구가 여러 섹션에 나오는 것은 정상이다(중복 소속). */}
-      {sections.length > 0 && sections.map((sec, secIdx) => {
-        const open = openCats[sec.id] !== false;
-        return (
-          <div key={sec.id} style={{ marginBottom: 18 }}>
-            <button className="tab" onClick={() => setOpenCats((o) => ({ ...o, [sec.id]: !open }))}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
-                padding: '7px 12px', marginBottom: open ? 10 : 0, fontSize: 13, fontWeight: 600,
-                background: 'rgba(255,255,255,.04)' }}
-              title={open ? '접기' : '펼치기'}>
-              <span style={{ fontSize: 15 }}>{sec.icon}</span>
-              <span>{sec.label}</span>
-              <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>{sec.tools.length}개</span>
-              <span className="muted" style={{ marginLeft: 'auto', fontSize: 11 }}>{open ? '▾' : '▸'}</span>
-            </button>
-            {open && (
-              <div className="vc-grid" ref={secIdx === 0 ? setGridEl : undefined}>
-                {sec.tools.map((k) => byKey.get(k)).filter(Boolean).map((t) => card(t, sec.id))}
+      {curAxis && (
+        <div className="st-bar" style={{ top: headH + 8 }}>
+          <div className="st-bar-row">
+            {hasCat && hasStage && (
+              <div className="st-seg" role="tablist" aria-label="분류 기준">
+                <button className={curAxis === 'cat' ? 'on' : ''} onClick={() => pickAxis('cat')}>업무 분류</button>
+                <button className={curAxis === 'stage' ? 'on' : ''} onClick={() => pickAxis('stage')}>개발 단계</button>
               </div>
             )}
+            <nav className="st-tabs">
+              {[{ id: 'all', label: '전체', icon: '▦', tools: keysShown }, ...primary].map((s) => {
+                const n = s.tools.filter(passFilter).length;
+                const on = curTab === s.id;
+                return (
+                  <button key={s.id} className={`st-tab${on ? ' on' : ''}`} onClick={() => setTabId(s.id)}>
+                    {s.id !== 'all' && curAxis === 'stage' ? <StageDot color={s.color} /> : <span className="st-tab-ico">{s.icon}</span>}
+                    {s.label}<span className="st-tab-n">{n}</span>
+                  </button>
+                );
+              })}
+            </nav>
           </div>
-        );
-      })}
-
-      {sections.length === 0 && (
-      // 카드 1장의 모양은 renderToolCard 하나가 소유한다(v2.508) — 예전에는 이 자리에 같은 JSX 가
-      // 인라인으로 복제돼 있어 한쪽만 고치면 두 모드의 카드가 어긋났다.
-      <div className="vc-grid" ref={setGridEl}>
-        {shown.length === 0 && <div className="muted" style={{ gridColumn: '1 / -1', padding: 24 }}>“{menuQ}”에 해당하는 메뉴가 없습니다.</div>}
-        {shownSorted.map((t) => card(t, null))}
-      </div>
+          {secondary.length > 0 && (
+            <div className="st-bar-row st-bar-filter">
+              <span className="st-filter-label">{curAxis === 'cat' ? '개발 단계' : '업무 분류'}</span>
+              {[{ id: 'all', label: '전체', tools: keysShown }, ...secondary].map((s) => {
+                const n = s.tools.filter(inTab).length;
+                return (
+                  <button key={s.id} className={`st-chip${filterId === s.id ? ' on' : ''}`} onClick={() => setFilterId(s.id)}>
+                    {s.id !== 'all' && curAxis === 'cat' && <StageDot color={s.color} size={7} />}
+                    {s.id !== 'all' && curAxis === 'stage' && s.icon && <span className="st-chip-ico">{s.icon}</span>}
+                    {s.label}<span className="st-n">{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
-    </>
-  );
-}
 
-/**
- * 카드 1장 — 섹션 렌더와 기존 단일 그리드가 같은 모양을 쓰도록 함수로 뽑았다.
- * 중복 소속이면 같은 도구가 여러 섹션에 나오므로 key 에 섹션 id 를 섞는다(React key 충돌 방지).
- */
-function renderToolCard(t, sectionId, { countOf, externalUrls, openTool }) {
-  return (
-    <div key={sectionId ? `${sectionId}:${t.k}` : t.k} className="card vc-card"
-      style={{
-        cursor: t.disabled ? 'not-allowed' : 'pointer',
-        opacity: t.disabled ? 0.5 : 1,
-        ...(t.danger && !t.disabled ? { borderColor: 'var(--red)' } : {}),
-      }}
-      onClick={t.disabled ? undefined : () => openTool(t.k)}
-      title={t.lockReason || (t.disabled ? (t.comingSoon ? '준비 중 (곧 제공)' : '비활성화됨')
-        : t.external ? `새 탭으로 열기: ${externalUrls[t.external]}` : `바로가기: #/tools/${t.k}`)}>
-      <div className="flex between" style={{ alignItems: 'flex-start' }}>
-        <div style={{ fontSize: 30, filter: t.disabled ? 'grayscale(1)' : 'none' }}>{t.icon}</div>
-        {t.lockReason
-          ? <span className="badge gray" style={{ fontSize: 11 }} title={t.lockReason}>🔒 권한 없음</span>
-          : countOf.get(t.k) > 0 && <span className="badge gray" style={{ fontSize: 11 }} title="전체 사용자 누적 실행 횟수">{countOf.get(t.k)}회</span>}
-      </div>
-      <div className="vc-name" style={{ marginTop: 8, ...(t.danger && !t.disabled ? { color: 'var(--red)' } : {}) }}>{t.label}</div>
-      <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{t.desc}</div>
-      <div className="vc-foot">
-        <span className="muted">{t.lockReason ? (t.adminOnly ? '관리자 전용' : '접근 권한 없음') : t.disabled ? (t.comingSoon ? '준비 중' : '비활성화됨') : t.external ? '새 탭으로 열기' : '클릭하여 실행'}</span>
-        <span className="muted">{t.disabled ? '' : t.external ? '↗' : '→'}</span>
-      </div>
+      {showIndex ? (
+        <div className="st-index">
+          {primary.map((s) => {
+            const keys = s.tools.filter(passFilter);
+            if (!keys.length) return null;
+            const runs = keys.reduce((n, k) => n + (countOf.get(k) || 0), 0);
+            const top = keys.slice(0, INDEX_ROWS).map((k) => byKey.get(k)).filter(Boolean);
+            return (
+              <div key={s.id} className="st-panel">
+                <div className="st-panel-head">
+                  <span className="st-ico">{curAxis === 'stage' ? <StageDot color={s.color} size={12} /> : s.icon}</span>
+                  <span style={{ minWidth: 0, flex: 1 }}>
+                    <span className="st-panel-title">{s.label}</span>
+                    <span className="st-panel-sub">{keys.length}개 기능 · 실행 {runs.toLocaleString()}회</span>
+                  </span>
+                  <button className="st-more" onClick={() => setTabId(s.id)}>모두 보기 →</button>
+                </div>
+                <div className="st-panel-body">
+                  {top.map((t) => (
+                    <button key={t.k} className={`st-row${t.disabled ? ' off' : ''}`} disabled={!!t.disabled}
+                      onClick={t.disabled ? undefined : () => openTool(t.k)}
+                      title={t.lockReason || (t.disabled ? '준비 중 (곧 제공)' : `바로가기: #/tools/${t.k}`)}>
+                      <span className="st-row-ico">{t.icon}</span>
+                      <span className="st-ellipsis st-row-name">{displayLabel(cats, t)}</span>
+                      {cats?.stageDisplay !== 'suffix' && isNonDefaultStage(cats, t) && <StageBadge label={t.stageLabel} color={t.stageColor} />}
+                      {t.lockReason && <span className="st-faint" title={t.lockReason}>🔒</span>}
+                      <span className="st-row-n">{countOf.get(t.k) || 0}</span>
+                    </button>
+                  ))}
+                  {keys.length > top.length && (
+                    <button className="st-row st-row-more" onClick={() => setTabId(s.id)}>+ {keys.length - top.length}개 더 보기</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {primary.every((s) => !s.tools.some(passFilter)) && <div className="st-empty">조건에 맞는 기능이 없습니다.</div>}
+        </div>
+      ) : (
+        <section className="st-block">
+          <div className="st-grid-head">
+            <span className="st-ico st-ico-lg">{tabSec ? (curAxis === 'stage' ? <StageDot color={tabSec.color} size={14} /> : tabSec.icon) : (ql ? '⌕' : '▦')}</span>
+            <span style={{ minWidth: 0, flex: 1 }}>
+              <span className="st-grid-title">{ql ? `“${menuQ.trim()}” 검색 결과` : tabSec ? tabSec.label : '전체 기능'}</span>
+              <span className="st-panel-sub">{listedSorted.length}개 기능{curFilterLabel ? ` · ${curFilterLabel}만` : ''}</span>
+            </span>
+            <div className="st-seg" aria-label="정렬">
+              <button className={sortMode === 'usage' ? 'on' : ''} onClick={() => setSortMode('usage')}>많이 쓴 순</button>
+              <button className={sortMode === 'name' ? 'on' : ''} onClick={() => setSortMode('name')}>이름순</button>
+            </div>
+          </div>
+          <div className="st-card-grid">
+            {listedSorted.length === 0 && <div className="st-empty" style={{ gridColumn: '1 / -1' }}>{ql ? `“${menuQ}”에 해당하는 메뉴가 없습니다.` : '조건에 맞는 기능이 없습니다.'}</div>}
+            {listedSorted.map((t) => card(t))}
+          </div>
+        </section>
+      )}
+
+      {drawer && (
+        <ToolNamesDrawer settings={cats || {}} limits={catMeta.limits} defaultStages={catMeta.defaultStages}
+          onSaved={(s) => setCats(s)} onClose={() => setDrawer(false)} />
+      )}
     </div>
   );
 }
 
-function ToolPanel({ tool, onBack, isAdmin, defaultScope = '' }) {
-  const meta = TOOLS.find((t) => t.k === tool);
+/**
+ * 카드 1장 — 모든 격자가 같은 모양을 쓰도록 함수로 뽑았다(v2.508 — 예전에는 인라인 복제였다).
+ * 중복 소속이면 같은 도구가 여러 섹션에 나오므로 key 에 섹션 id 를 섞는다(React key 충돌 방지).
+ */
+function renderToolCard(t, sectionId, { countOf, externalUrls, openTool, cfg, catLabelsOf, tabLabel }) {
+  const n = countOf.get(t.k) || 0;
+  const otherCats = catLabelsOf ? catLabelsOf(t).filter((l) => l && l !== tabLabel) : [];
+  const showBadge = cfg?.stageDisplay !== 'suffix' && t.stageLabel;
+  return (
+    <div key={sectionId ? `${sectionId}:${t.k}` : t.k}
+      className={`st-card${t.disabled ? ' off' : ''}${t.danger && !t.disabled ? ' danger' : ''}`}
+      role={t.disabled ? undefined : 'button'} tabIndex={t.disabled ? -1 : 0}
+      onClick={t.disabled ? undefined : () => openTool(t.k)}
+      onKeyDown={t.disabled ? undefined : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTool(t.k); } }}
+      title={t.lockReason || (t.disabled ? (t.comingSoon ? '준비 중 (곧 제공)' : '비활성화됨')
+        : t.external ? `새 탭으로 열기: ${externalUrls[t.external]}` : `바로가기: #/tools/${t.k}`)}>
+      <div className="st-card-top">
+        <span className="st-ico st-ico-card">{t.icon}</span>
+        <span style={{ minWidth: 0, flex: 1 }}>
+          <span className="st-card-name">{displayLabel(cfg, t)}</span>
+          {t.renamed && <span className="st-card-orig">원래 이름 · {t.origLabel}</span>}
+        </span>
+        {t.lockReason
+          ? <span className="st-count" title={t.lockReason}>🔒 {t.adminOnly ? '관리자 전용' : '권한 없음'}</span>
+          : n > 0 && <span className={`st-count${n >= 50 ? ' hot' : ''}`} title="전체 사용자 누적 실행 횟수">{n}회</span>}
+      </div>
+      <div className="st-card-desc">{t.desc}</div>
+      {(showBadge || otherCats.length > 0 || t.disabled || t.external) && (
+        <div className="st-card-foot">
+          {showBadge && <StageBadge label={t.stageLabel} color={t.stageColor} />}
+          {otherCats.map((l) => <span key={l} className="st-cat-chip">{l}</span>)}
+          {t.disabled && !t.lockReason && <span className="st-faint">{t.comingSoon ? '준비 중' : '비활성화됨'}</span>}
+          {t.external && !t.disabled && <span className="st-faint">새 탭으로 열기 ↗</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
+  // v2.679: 제목도 관리자가 바꾼 표시 이름을 쓴다(키·링크는 그대로).
+  const meta = applyOverrides(TOOLS.filter((t) => t.k === tool), cfg)[0] || TOOLS.find((t) => t.k === tool);
   // v2.616: V5 틀의 법인 범위를 첫 값으로 받는다(바꾸면 따라간다). 개발 포탈은 넘기지 않아 예전 그대로('').
   const [scope, setScope] = useState(defaultScope);
   // v2.491: vCenter 아래 하위 범위 — 클러스터/폴더. vCenter 를 고른 뒤에만 쓴다(클러스터 이름은
@@ -420,7 +526,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '' }) {
     <>
       <div className="flex wrap" style={{ marginBottom: 12, alignItems: 'center', gap: 12 }}>
         <button className="tab" onClick={onBack}>← 특수 기능</button>
-        <div className="section-title" style={{ margin: 0 }}>{meta.icon} {meta.label}</div>
+        <div className="section-title" style={{ margin: 0 }}>{meta.icon} {displayLabel(cfg, meta)}</div>
         {scoped && (
           <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
             <span className="muted">범위</span>

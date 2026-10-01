@@ -90,3 +90,86 @@ describe('categoriesOf / uncategorizedKeys', () => {
     expect(uncategorizedKeys({ categories: [] }, ['a', 'b'])).toEqual(['a', 'b']);
   });
 });
+
+// ── v2.679 덮어쓰기·개발 단계(핸드오프 '특수 기능 화면 재구성') ─────────────────────────────
+import {
+  applyOverrides, stagesOf, stageIdOf, buildStageSections, displayLabel, isNonDefaultStage,
+  removeStage, stageCounts, nextStageId, changedToolCount, introLine,
+} from './toolSections.js';
+import { searchTools } from './toolSearch.js';
+
+const T = [
+  { k: 'gpu', label: 'GPU 모니터링', desc: 'GPU 사용률' },
+  { k: 'ipam', label: 'IP 관리', desc: '대장', aka: ['IPAM'] },
+  { k: 'hba', label: 'HBA', desc: 'FC' },
+];
+const STAGES = [
+  { id: 'prod', label: '운영', color: '#22c55e' },
+  { id: 'dev', label: '개발중', color: '#f59e0b' },
+];
+
+describe('v2.679 applyOverrides / 단계', () => {
+  it('단계가 없는 설정에서는 이름·설명·순서가 지금과 똑같다(단계 필드는 null)', () => {
+    const out = applyOverrides(T, { enabled: true, categories: [] });
+    expect(out.map((t) => [t.k, t.label, t.desc, t.stage])).toEqual(T.map((t) => [t.k, t.label, t.desc, null]));
+    expect(buildStageSections({ categories: [] }, T.map((t) => t.k))).toEqual([]);
+    expect(out.every((t) => !t.renamed)).toBe(true);
+  });
+  it('덮어쓴 이름·설명이 보이고 원래 이름은 aka 로 검색된다 — 키는 그대로', () => {
+    const cfg = { overrides: { gpu: { label: 'GPU 운영 현황', desc: '바꾼 설명' } } };
+    const [g] = applyOverrides(T, cfg);
+    expect(g).toMatchObject({ k: 'gpu', label: 'GPU 운영 현황', desc: '바꾼 설명', origLabel: 'GPU 모니터링', renamed: true });
+    expect(searchTools(applyOverrides(T, cfg), '모니터링').map((t) => t.k)).toEqual(['gpu']);
+  });
+  it('덮어쓰기를 비우면 원래 값으로 돌아온다', () => {
+    const [g] = applyOverrides(T, { overrides: { gpu: { label: '  ', desc: '' } } });
+    expect(g.label).toBe('GPU 모니터링');
+    expect(g.desc).toBe('GPU 사용률');
+    expect(g.renamed).toBe(false);
+  });
+  it('없는 단계를 가리키면 기본(첫) 단계로 간다', () => {
+    const cfg = { stages: STAGES, overrides: { gpu: { stage: 'gone' }, hba: { stage: 'dev' } } };
+    expect(stageIdOf(cfg, 'gpu')).toBe('prod');
+    expect(stageIdOf(cfg, 'hba')).toBe('dev');
+    expect(stageIdOf(cfg, 'ipam')).toBe('prod');
+    const secs = buildStageSections(cfg, ['gpu', 'ipam', 'hba']);
+    expect(secs.map((s) => [s.id, s.tools])).toEqual([['prod', ['gpu', 'ipam']], ['dev', ['hba']]]);
+  });
+  it('단계 이름으로도 검색된다(catsOf 에 단계 이름을 싣는다)', () => {
+    const cfg = { stages: STAGES, overrides: { hba: { stage: 'dev' } } };
+    const tools = applyOverrides(T, cfg);
+    expect(searchTools(tools, '개발중', { catsOf: (t) => [t.stageLabel] }).map((t) => t.k)).toEqual(['hba']);
+  });
+  it('suffix 표시는 기본 단계가 아닌 기능에만 붙는다', () => {
+    const cfg = { stages: STAGES, stageDisplay: 'suffix', overrides: { hba: { stage: 'dev' } } };
+    const [g, , h] = applyOverrides(T, cfg);
+    expect(displayLabel(cfg, h)).toBe('HBA(개발중)');
+    expect(displayLabel(cfg, g)).toBe('GPU 모니터링');
+    expect(isNonDefaultStage(cfg, g)).toBe(false);
+    expect(displayLabel({ ...cfg, stageDisplay: 'badge' }, h)).toBe('HBA');
+  });
+  it('단계 삭제 — 첫 단계는 못 지우고, 지운 단계의 기능은 기본 단계로(이름·설명은 남는다)', () => {
+    const cfg = { stages: STAGES, overrides: { hba: { stage: 'dev', label: 'X' }, gpu: { stage: 'dev' } } };
+    expect(removeStage(cfg, 'prod').ok).toBe(false);
+    const r = removeStage(cfg, 'dev');
+    expect(r.ok).toBe(true);
+    expect(r.moved).toBe(2);
+    expect(r.cfg.stages.map((s) => s.id)).toEqual(['prod']);
+    expect(r.cfg.overrides).toEqual({ hba: { label: 'X' } });
+    expect(stageCounts(r.cfg, ['gpu', 'hba', 'ipam'])).toEqual({ prod: 3 });
+  });
+  it('보조 함수: stagesOf·nextStageId·changedToolCount', () => {
+    expect(stagesOf({ stages: [] })).toBe(null);
+    expect(stagesOf({})).toBe(null);
+    expect(nextStageId([{ id: 'stage3' }, { id: 'x' }])).toBe('stage4');
+    expect(changedToolCount({ overrides: { a: { stage: 'dev' }, b: { label: 'B' }, c: { desc: 'd' } } })).toBe(2);
+  });
+  it('introLine — 허용 목록 모드는 gridIntro 규칙(🔒 안내 없음), 그 밖에는 축 개수를 말한다', () => {
+    expect(introLine({ isAdmin: false, toolsAllowed: ['gpu'], shownCount: 1 })).not.toContain('🔒');
+    const s = introLine({ isAdmin: true, shownCount: 80, catCount: 9, stageCount: 4 });
+    expect(s).toContain('**80개** 기능');
+    expect(s).toContain('업무 분류 9개');
+    expect(s).toContain('개발 단계 4개');
+    expect(introLine({ isAdmin: true, shownCount: 3 })).not.toContain('개발 단계');
+  });
+});

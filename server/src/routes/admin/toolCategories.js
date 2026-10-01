@@ -8,8 +8,8 @@ import { requireRole } from '../../auth/auth.js';
 import { fullScopeOnlyWith } from './shared.js'; // v2.614: 특수 기능 카테고리 배치는 전 사용자 공통 설정 — 범위 관리자가 바꾸면 다른 법인 화면까지 바뀐다
 const fleetOnly = fullScopeOnlyWith('특수 기능 카테고리 배치는 전 사용자 공통 설정이라 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다.');
 import { logAudit } from '../../audit.js';
-import { load as loadCfg, save as saveCfg, presetCategories } from '../../toolcats/settings.js';
-import { validate, PRESET } from '../../toolcats/catalog.js';
+import { load as loadCfg, save as saveCfg, presetCategories, defaultStages } from '../../toolcats/settings.js';
+import { validate, validateStages, PRESET, STAGE_COLORS, MAX_STAGES, MAX_DESC, MAX_LABEL } from '../../toolcats/catalog.js';
 
 const adminOnly = requireRole('admin');
 
@@ -17,21 +17,29 @@ export function registerToolCategories(adminRouter) {
 
   // 조회 — 특수 기능 화면이 매번 읽는다(로그인 사용자면 누구나).
   adminRouter.get('/tool-categories', (_req, res) => {
-    res.json({ settings: loadCfg(), presetCount: PRESET.length });
+    // v2.679: 단계 팔레트·상한·기본 단계를 함께 싣는다 — 화면이 숫자·색을 하드코딩하지 않게.
+    res.json({
+      settings: loadCfg(), presetCount: PRESET.length,
+      limits: { maxStages: MAX_STAGES, maxDesc: MAX_DESC, maxLabel: MAX_LABEL, stageColors: STAGE_COLORS },
+      defaultStages: defaultStages(),
+    });
   });
 
   adminRouter.put('/tool-categories', adminOnly, fleetOnly, (req, res) => {
     const body = req.body || {};
     const errs = validate({ ...loadCfg(), ...body });
     if (errs.length) return res.status(400).json({ ok: false, reason: errs[0], errors: errs });
-    const saved = saveCfg(body);
+    const { warnings } = validateStages({ ...loadCfg(), ...body });
+    const info = {};
+    const saved = saveCfg(body, info);
     const tools = saved.categories.reduce((n, c) => n + c.tools.length, 0);
     logAudit({
       user: req.user?.username, action: '특수 기능 카테고리 저장',
-      detail: `${saved.enabled ? '사용' : '미사용'} · 카테고리 ${saved.categories.length}개 · 배치 ${tools}건(중복 포함)`,
+      detail: `${saved.enabled ? '사용' : '미사용'} · 카테고리 ${saved.categories.length}개 · 배치 ${tools}건(중복 포함)`
+        + ` · 개발 단계 ${saved.stages ? `${saved.stages.length}개` : '안 씀'} · 이름·설명 바꾼 기능 ${Object.keys(saved.overrides || {}).length}개`,
       ip: req.ip,
     });
-    res.json({ ok: true, settings: saved });
+    res.json({ ok: true, settings: saved, warnings, stageRefsCleared: info.stageRefsCleared || 0 });
   });
 
   // '추천 분류로 시작' — 프리셋을 돌려주기만 한다. **저장은 하지 않는다**:

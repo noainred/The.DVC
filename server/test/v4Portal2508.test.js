@@ -50,9 +50,9 @@ test('F0-2 카드 모양은 renderToolCard 하나만 소유한다', () => {
   // 카드 본문의 특징 문자열이 두 번 이상 나오면 인라인 복제가 되살아난 것이다.
   const marks = web.match(/전체 사용자 누적 실행 횟수/g) || [];
   assert.equal(marks.length, 1, '카드 JSX 가 다시 복제됐다 — renderToolCard 로 단일화할 것');
-  // 폭 측정은 단일/섹션 그리드 어느 쪽이 떠 있어도 동작해야 한다(ref 콜백).
-  assert.ok(/ref=\{setGridEl\}/.test(web), '단일 그리드에 측정 ref 가 없다');
-  assert.ok(/ref=\{secIdx === 0 \? setGridEl : undefined\}/.test(web), '섹션 그리드에 측정 ref 가 없다 — 카테고리 모드에서 favCount 가 갱신되지 않는다');
+  // v2.679: 화면이 분류 탭·카드 격자로 바뀌었다 — 모든 격자가 renderToolCard 하나로 카드를 그린다.
+  assert.ok(/function renderToolCard\(/.test(web), 'renderToolCard 가 없다');
+  assert.equal((web.match(/className=\{`st-card\$\{/g) || []).length, 1, '카드 JSX 가 복제됐다');
 });
 
 // --- V4 셸 계약 --------------------------------------------------------------

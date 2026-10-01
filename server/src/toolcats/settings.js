@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { normCategory, MAX_CATEGORIES, PRESET } from './catalog.js';
+import { normCategory, MAX_CATEGORIES, PRESET, normStages, normOverrides, pruneStageRefs, STAGE_DISPLAYS, DEFAULT_STAGES } from './catalog.js';
 
 const FILE = path.join(config.configDir, 'tool-categories.json');
 
@@ -21,6 +21,10 @@ export const DEFAULTS = Object.freeze({
   categories: [],
   showUncategorized: true,    // 분류 안 된 도구를 '기타' 로 보여준다(사라지지 않게)
   collapseOthers: false,      // 첫 카테고리만 펼치고 나머지는 접어서 시작
+  // v2.679: 개발 단계 축 — null 이면 단계 UI 를 숨긴다(업그레이드로 자동으로 켜지지 않는다).
+  stages: null,
+  overrides: {},              // 기능 키 → { label?, desc?, stage? } — 화면 표시만 바꾼다
+  stageDisplay: 'badge',      // 'badge'(색 배지) | 'suffix'(이름 뒤에 '(개발중)')
 });
 
 let cache = null;
@@ -35,6 +39,9 @@ export function load() {
       if (typeof p.showUncategorized === 'boolean') out.showUncategorized = p.showUncategorized;
       if (typeof p.collapseOthers === 'boolean') out.collapseOthers = p.collapseOthers;
       if (Array.isArray(p.categories)) out.categories = p.categories.slice(0, MAX_CATEGORIES).map(normCategory);
+      out.stages = normStages(p.stages);
+      out.overrides = pruneStageRefs(normOverrides(p.overrides), out.stages).overrides;
+      if (STAGE_DISPLAYS.includes(p.stageDisplay)) out.stageDisplay = p.stageDisplay;
     }
   } catch (e) {
     preserveCorrupt(FILE);
@@ -44,15 +51,24 @@ export function load() {
   return cache;
 }
 
-export function save(body = {}) {
+/** info(선택) — 호출부가 받는 부가 정보: stageRefsCleared(지운 단계를 가리켜 기본 단계로 옮긴 기능 수). */
+export function save(body = {}, info = {}) {
   const cur = load();
   const next = structuredClone(cur);
   if (typeof body.enabled === 'boolean') next.enabled = body.enabled;
   if (typeof body.showUncategorized === 'boolean') next.showUncategorized = body.showUncategorized;
   if (typeof body.collapseOthers === 'boolean') next.collapseOthers = body.collapseOthers;
   if (Array.isArray(body.categories)) next.categories = body.categories.slice(0, MAX_CATEGORIES).map(normCategory);
+  // v2.679: stages 는 null(끄기)도 명시값이다 — 키가 있을 때만 바꾼다.
+  if (Object.hasOwn(body, 'stages')) next.stages = normStages(body.stages);
+  if (Object.hasOwn(body, 'overrides')) next.overrides = normOverrides(body.overrides);
+  if (STAGE_DISPLAYS.includes(body.stageDisplay)) next.stageDisplay = body.stageDisplay;
+  // 지운 단계를 가리키던 기능은 기본 단계로 간다(stage 만 지운다 — 이름·설명은 그대로).
+  const pr = pruneStageRefs(next.overrides, next.stages);
+  next.overrides = pr.overrides;
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
   cache = next;
+  info.stageRefsCleared = pr.cleared;
   return next;
 }
 
@@ -60,5 +76,8 @@ export function invalidate() { cache = null; }
 
 /** '추천 분류로 시작' — 프리셋을 그대로 정규화해 돌려준다(저장은 호출부가 한다). */
 export function presetCategories() { return PRESET.map(normCategory); }
+
+/** '개발 단계 사용 시작' 이 쓰는 기본 단계(저장은 호출부가 한다). */
+export function defaultStages() { return DEFAULT_STAGES.map((s) => ({ ...s })); }
 
 export const _FILE = FILE;

@@ -139,6 +139,8 @@ export function validate(cfg) {
   }
   const ids = cats.map((c) => String(c?.id || '').trim().toLowerCase());
   if (new Set(ids).size !== ids.length) out.push('카테고리 id 가 중복되었습니다.');
+  // v2.679: 개발 단계·이름 덮어쓰기 — 오류만 여기서 막는다(없는 단계 참조는 경고 — validateStages 참고).
+  for (const e of validateStages(cfg).errors) out.push(e);
   return out;
 }
 
@@ -147,3 +149,129 @@ export function validate(cfg) {
  * 같은 로직을 서버·웹 양쪽에 두면 어긋나는 날이 온다. 서버는 **저장·검증·프리셋**만 담당하고,
  * '어떤 섹션을 어떤 순서로 그릴지' 는 권한·검색 필터를 이미 적용한 웹이 판단한다.
  */
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * v2.679 — 기능별 표시 이름·설명 덮어쓰기 + '개발 단계' 축(사용자 제공 핸드오프 '특수 기능 화면 재구성').
+ *
+ *  - 덮어쓰는 것은 **화면에 보이는 이름·설명·단계뿐**이다. 기능 키(`#/tools/<k>`)·권한 키·사용 횟수
+ *    집계(/tool-usage)는 키 기준 그대로다 — 키를 바꾸면 permissions.json·toolAccess 집행이 깨진다.
+ *  - 단계 목록은 **업그레이드로 자동으로 생기지 않는다**(stages:null = 단계 UI 숨김, 전부 기본 단계).
+ *    관리자가 '개발 단계 사용 시작' 을 눌러야 DEFAULT_STAGES 가 들어간다(업그레이드만으로 화면이 바뀌면 안 된다).
+ *  - 첫 단계([0])가 기본값이다 — 덮어쓰기가 없는 기능, 지워진 단계를 가리키던 기능이 그리로 간다.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+export const MAX_STAGES = 12;
+export const MAX_DESC = 300;
+export const MAX_OVERRIDES = 400;
+/** 단계 색 팔레트 — 이 밖의 색은 받지 않는다(임의 CSS 문자열이 style 로 들어가지 않게). */
+export const STAGE_COLORS = Object.freeze(['#22c55e', '#22d3ee', '#f59e0b', '#a855f7', '#3b82f6', '#ef4444', '#8b9bb4']);
+export const STAGE_DISPLAYS = Object.freeze(['badge', 'suffix']);
+export const DEFAULT_STAGES = Object.freeze([
+  Object.freeze({ id: 'prod', label: '운영', color: '#22c55e' }),
+  Object.freeze({ id: 'verify', label: '검증 중', color: '#22d3ee' }),
+  Object.freeze({ id: 'dev', label: '개발중', color: '#f59e0b' }),
+  Object.freeze({ id: 'plan', label: '준비 중', color: '#8b9bb4' }),
+]);
+
+/** 단계 1건 정규화 — 형식이 틀린 id 는 `stage<n>`, 팔레트 밖 색은 팔레트 첫 색. */
+export function normStage(s, i = 0) {
+  const rawId = String(s?.id || '').trim().toLowerCase();
+  const id = CAT_ID_RE.test(rawId) ? rawId : `stage${i + 1}`;
+  const color = STAGE_COLORS.includes(String(s?.color || '').toLowerCase()) ? String(s.color).toLowerCase() : STAGE_COLORS[i % STAGE_COLORS.length];
+  return { id, label: clean(s?.label, MAX_LABEL) || id, color };
+}
+
+/** 단계 목록 정규화 — 배열이 아니면 null(= 단계 축을 쓰지 않음). 같은 id 는 뒤의 것을 버린다. */
+export function normStages(list) {
+  if (!Array.isArray(list)) return null;
+  const out = [];
+  const seen = new Set();
+  for (const [i, s] of list.slice(0, MAX_STAGES).entries()) {
+    const n = normStage(s, i);
+    if (seen.has(n.id)) continue;
+    seen.add(n.id);
+    out.push(n);
+  }
+  return out.length ? out : null;
+}
+
+/**
+ * 기능 1건의 덮어쓰기 정규화. 빈 문자열은 **키를 지운다**(비우면 원래 값으로 돌아간다).
+ * 남는 필드가 없으면 null(= 덮어쓰기 없음 — 저장하지 않는다).
+ */
+export function normOverride(o) {
+  if (!o || typeof o !== 'object') return null;
+  const out = {};
+  const label = clean(o.label, MAX_LABEL);
+  if (label) out.label = label;
+  // 설명은 줄바꿈도 제어문자라 지워진다 — 카드 설명은 2줄 clamp 한 단락이다.
+  const desc = clean(o.desc, MAX_DESC);
+  if (desc) out.desc = desc;
+  const stage = String(o.stage ?? '').trim().toLowerCase();
+  if (stage && CAT_ID_RE.test(stage)) out.stage = stage;
+  return Object.keys(out).length ? out : null;
+}
+
+/** 덮어쓰기 맵 정규화 — 키 형식이 틀린 항목·빈 항목을 버리고 상한을 지킨다. */
+export function normOverrides(map) {
+  const out = {};
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return out;
+  let n = 0;
+  for (const [rawK, v] of Object.entries(map)) {
+    const k = String(rawK || '').trim().toLowerCase();
+    if (!TOOL_KEY_RE.test(k)) continue;
+    const o = normOverride(v);
+    if (!o) continue;
+    out[k] = o;
+    if (++n >= MAX_OVERRIDES) break;
+  }
+  return out;
+}
+
+/**
+ * 지워진 단계를 가리키는 덮어쓰기의 stage 를 지운다(그 기능은 기본 단계로 간다). 순수 — 새 객체를 돌려준다.
+ * stages 가 null(단계 축 꺼짐)이면 손대지 않는다 — 다시 켰을 때 예전 배치가 돌아오게.
+ */
+export function pruneStageRefs(overrides, stages) {
+  const out = {};
+  let cleared = 0;
+  if (!Array.isArray(stages)) return { overrides: { ...(overrides || {}) }, cleared };
+  const ids = new Set(stages.map((s) => s.id));
+  for (const [k, o] of Object.entries(overrides || {})) {
+    if (o.stage && !ids.has(o.stage)) {
+      const { stage: _drop, ...rest } = o;
+      cleared++;
+      if (Object.keys(rest).length) out[k] = rest;
+    } else out[k] = o;
+  }
+  return { overrides: out, cleared };
+}
+
+/** 단계·덮어쓰기 검사 — { errors, warnings }. 없는 단계를 가리키는 덮어쓰기는 **경고만**(화면은 기본 단계로 본다). */
+export function validateStages(cfg) {
+  const errors = [];
+  const warnings = [];
+  const st = cfg?.stages;
+  if (st != null && !Array.isArray(st)) errors.push('개발 단계 목록 형식이 올바르지 않습니다.');
+  const stages = Array.isArray(st) ? st : [];
+  if (stages.length > MAX_STAGES) errors.push(`개발 단계는 최대 ${MAX_STAGES}개까지입니다.`);
+  const ids = [];
+  for (const [i, s] of stages.entries()) {
+    const id = String(s?.id || '').trim().toLowerCase();
+    if (!CAT_ID_RE.test(id)) errors.push(`단계 ${i + 1}: id 는 영소문자·숫자·하이픈만 쓸 수 있습니다.`);
+    if (!clean(s?.label, MAX_LABEL)) errors.push(`단계 ${i + 1}: 이름을 입력하세요.`);
+    if (s?.color != null && !STAGE_COLORS.includes(String(s.color).toLowerCase())) errors.push(`단계 ${i + 1}: 색은 정해진 팔레트에서만 고를 수 있습니다.`);
+    ids.push(id);
+  }
+  if (new Set(ids).size !== ids.length) errors.push('개발 단계 id 가 중복되었습니다.');
+  const ov = cfg?.overrides;
+  if (ov != null && (typeof ov !== 'object' || Array.isArray(ov))) errors.push('이름·설명 덮어쓰기 형식이 올바르지 않습니다.');
+  else if (ov && Object.keys(ov).length > MAX_OVERRIDES) errors.push(`이름·설명을 바꾼 기능은 최대 ${MAX_OVERRIDES}개까지입니다.`);
+  if (cfg?.stageDisplay != null && !STAGE_DISPLAYS.includes(cfg.stageDisplay)) errors.push('단계 표시 방식은 badge 또는 suffix 입니다.');
+  if (Array.isArray(st) && ov && typeof ov === 'object') {
+    const known = new Set(ids);
+    const dangling = Object.entries(ov).filter(([, o]) => o?.stage && !known.has(String(o.stage).toLowerCase())).map(([k]) => k);
+    if (dangling.length) warnings.push(`없는 단계를 가리키는 기능 ${dangling.length}개는 기본 단계로 옮겼습니다.`);
+  }
+  return { errors, warnings };
+}
