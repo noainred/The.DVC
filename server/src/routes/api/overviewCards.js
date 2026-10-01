@@ -27,6 +27,7 @@ import { latestMapByDevice } from '../../storage/latestSnapshots.js';
 import { allMeasuredPower } from '../../idrac/service.js';
 import { buildPowerTotal, STORAGE_STALE_MS } from '../../power/total.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { idracGpuCounts, INVENTORY_STALE_MS } from '../../idrac/gpuCount.js';
 import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName } from '../../auth/addressMask.js';
 import { vmtrackSeries } from '../../vmtrack/service.js';
 import { capacityHistoryAll } from '../../storage/db.js';
@@ -71,35 +72,14 @@ function storageStaleMsOf(devs) {
   return (d) => Math.max(STORAGE_STALE_MS, 3 * (pollOf.get(d?.agent || '') || envPoll));
 }
 
-/** v2.682 R3D-10: 인벤토리가 이보다 오래되면 '지금 수집된' 값이 아니다(인벤토리 주기 30분 — 넉넉히 하루). */
-export const INVENTORY_STALE_MS = 24 * 3_600_000;
-const tsMs = (v) => {
-  const n = numOrNull(v);
-  if (n != null) return n;
-  if (typeof v === 'string' && v.trim()) { const p = Date.parse(v); return Number.isFinite(p) ? p : null; }
-  return null;
-};
-
 /**
- * 물리 서버·GPU 카드 집계(순수, v2.682 R3D-10). 비활성 서버는 세지 않고 `disabled` 로 따로 센다(전력 분모와 같은 기준).
- * 인벤토리는 collectedAt 이 `INVENTORY_STALE_MS` 안일 때만 '읽음' 이다 — 오래된 인벤토리는 `inventoryStale` 로 따로 센다.
- * @param {object[]} servers  서버 분석 등록(범위 적용 뒤)
- * @param {(s:object)=>object|null} invOf
+ * 물리 서버·GPU 카드 집계 — v2.683 부터 판정은 `idrac/gpuCount.js idracGpuCounts` 하나(서버 분석 › GPU 찾기와 같은 함수).
+ * 사용자 결정 "iDRAC 에 등록된 카드만 GPU 카드 수량으로 카운트": 오래된 인벤토리·모델명 없는 GPU 도 합계에 넣고 따로 센다.
+ * 비활성 서버는 세지 않고 `disabled` 로 밝힌다. 반환 필드 이름(invRead·invStale·gpus)은 예전 그대로다.
  */
+export { INVENTORY_STALE_MS };
 export function physicalGpuCounts(servers, invOf, now = Date.now()) {
-  let gpus = 0; let invRead = 0; let invStale = 0; let disabled = 0; let count = 0;
-  for (const s of servers || []) {
-    if (!s) continue;
-    if (s.enabled === false) { disabled += 1; continue; }
-    count += 1;
-    const inv = invOf(s);
-    const at = tsMs(inv?.collectedAt);
-    if (at == null) continue;
-    if (now - at > INVENTORY_STALE_MS) { invStale += 1; continue; }
-    invRead += 1;
-    for (const g of inv.gpus || []) if (String(g?.model || g?.name || '').trim()) gpus += 1;
-  }
-  return { count, disabled, gpus, invRead, invStale };
+  return idracGpuCounts(servers, invOf, now);
 }
 
 /**
@@ -202,7 +182,7 @@ export function registerOverviewCards(api) {
         farms: farms || { count: null, reason: FLEET_ONLY },
         physical: { count: pc.count, inventoryRead: pc.invRead, inventoryStale: pc.invStale, disabled: pc.disabled },
         virtual: { count: vms.length, poweredOn: vms.filter((v) => v.powerState === 'POWERED_ON').length, templates: vms.filter((v) => v.template).length, vcenters: vcs.length, vcentersPending: vcPending },
-        gpus: { count: pc.gpus, inventoryRead: pc.invRead, inventoryStale: pc.invStale, servers: pc.count },
+        gpus: { count: pc.gpus, inventoryRead: pc.invRead, inventoryStale: pc.invStale, inventoryMissing: pc.invMissing, gpusStale: pc.gpusStale, gpusUnnamed: pc.gpusUnnamed, servers: pc.count },
         storage: storage || { totalBytes: null, reason: FLEET_ONLY },
         network: network || { count: null, reason: FLEET_ONLY },
         power: power || { totalWatts: null, reason: FLEET_ONLY },

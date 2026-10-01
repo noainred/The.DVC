@@ -16,6 +16,7 @@ import { intervalText } from './collectActivityText.js';
 // v2.621(감사 WEB-04·WEB-05): BMC 벤더 판정·미지원 서버 인증 칸 — 배지·CSV·필터가 같은 판정을 쓴다.
 import { serverVendorBadge, serverCsvType, serverCsvVendor, vendorFilterOptions, matchesVendor, unsupportedAuthBadge, detailServerOf } from './serverVendorText.js';
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
+import { gpuFinderNote } from './gpuFinderText.js';
 
 /**
  * v2.622(감사 RECENT-04): 상세 모달 열기 — 행이 벤더를 모르면(온도·GPU·드릴다운) 먼저 'BMC' 로 열고 서버 목록을
@@ -890,7 +891,8 @@ function ServerGpuFinder({ vc, onServer }) {
       <ScopeOmitBanner data={d} />
       <div className="flex between wrap gap" style={{ alignItems: 'center', marginBottom: 12 }}>
         <div className="muted" style={{ fontSize: 13 }}>
-GPU <b style={{ color: 'var(--accent)' }}>{d.totalGpus}</b>장 · <b>{d.models.length}</b>종 · iDRAC {d.collectedServers}/{d.totalServers}{d.physicalServers ? ` · 물리 ${d.physicalServers}대` : ''}
+GPU <b style={{ color: 'var(--accent)' }}>{d.totalGpus}</b>장 · <b>{d.models.length}</b>종 · iDRAC {d.collectedServers}/{d.totalServers}
+          <span title="Overview 'GPU 카드' 와 같은 기준입니다 — iDRAC 인벤토리에 있는 카드만 셉니다(비활성 서버 제외).">{gpuFinderNote(d)}</span>
           {d.missing?.length > 0 && <span className="badge amber" style={{ marginLeft: 8 }} title={d.missing.map((x) => x.name).join(', ')}>미수집 {d.missing.length}대</span>}
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>

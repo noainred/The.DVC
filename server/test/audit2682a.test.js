@@ -89,7 +89,7 @@ test('R3D-05 용량 카드 — 사용량 모름(usedUnknown)과 낡은 스냅샷
 
 /* ── R3D-10 ─────────────────────────────────────────────────────────────── */
 
-test('R3D-10 물리·GPU 카드 — 비활성 서버는 세지 않고, 오래된 인벤토리는 읽음이 아니다', async () => {
+test('R3D-10 물리·GPU 카드 — 비활성 서버는 세지 않고, 오래된 인벤토리는 따로 센다(v2.683: 카드는 합계에 포함)', async () => {
   const { physicalGpuCounts, INVENTORY_STALE_MS } = await import('../src/routes/api/overviewCards.js');
   const now = 1_800_000_000_000;
   const inv = {
@@ -104,7 +104,10 @@ test('R3D-10 물리·GPU 카드 — 비활성 서버는 세지 않고, 오래된
   assert.equal(r.disabled, 1);
   assert.equal(r.invRead, 2);
   assert.equal(r.invStale, 1);
-  assert.equal(r.gpus, 3, '오래된 인벤토리·비활성 서버의 GPU 는 세지 않는다');
+  // v2.683 사용자 결정 "iDRAC 에 등록된 카드만": 오래된 인벤토리의 카드도 iDRAC 에 등록된 카드다 — 합계에 넣고 따로 센다.
+  assert.equal(r.gpus, 4, '비활성 서버의 GPU 는 세지 않는다(오래된 인벤토리는 포함)');
+  assert.equal(r.gpusStale, 1);
+  assert.equal(r.invMissing, 1);
 });
 
 /* ── R3S-07 ─────────────────────────────────────────────────────────────── */

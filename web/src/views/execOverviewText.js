@@ -12,7 +12,7 @@ import { normMode, resolveMode } from '../version_4/mode.js';
 import { hashSegments } from '../hooks/hashTab.js';
 import { WARN_PCT, CRIT_PCT } from '../console/consoleData.js';
 import { corpSiteStatus } from './corpSiteStatus.js';
-import { countText, kwText, capText, gpuCardValue } from './overviewCardsText.js';
+import { countText, kwText, capText, gpuCardValue, gpuCardMeta } from './overviewCardsText.js';
 
 export { WARN_PCT, CRIT_PCT };
 
@@ -304,7 +304,7 @@ export function gpuKpi(cards) {
   if (!g) return { value: null, sub: '', partial: false };
   // v2.682 R3D-02: 판정은 overviewCardsText.gpuCardValue 하나(엔지니어 보기 카드와 같은 함수).
   const { value, unknown, partial } = gpuCardValue(g);
-  const sub = `iDRAC 인벤토리 기준 · 수집 ${countText(g.inventoryRead)}/${countText(g.servers)}대`
-    + (unknown ? ' · 아직 읽은 서버가 없습니다' : partial ? ' · 미수집 서버 제외(최소값)' : '');
+  // v2.683: 부제도 엔지니어 보기 카드와 같은 함수(서버 분석 › GPU 찾기와 같은 기준).
+  const sub = gpuCardMeta(g);
   return { value, sub, partial };
 }
