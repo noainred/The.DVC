@@ -50,7 +50,7 @@ const GUIDE_SECTIONS = [
   ['cautions', '주의할 점'],
   ['settings', '관련 설정'],
 ];
-function GuidePanel({ file }) {
+function GuidePanel({ file, fallback }) {
   const [state, setState] = useState({ loading: true, guide: null, error: null });
   useEffect(() => {
     let alive = true;
@@ -62,7 +62,18 @@ function GuidePanel({ file }) {
   if (state.loading) return <div className="muted" style={{ fontSize: 12.5 }}>설명을 불러오는 중…</div>;
   if (state.error) return <div className="badge amber" style={{ display: 'inline-block' }}>설명을 불러오지 못했습니다: {state.error}</div>;
   const g = state.guide;
-  if (!g) return <div className="muted" style={{ fontSize: 12.5 }}>이 파일은 아직 자세한 설명이 없습니다. 위 한 줄 설명을 참고하세요.</div>;
+  if (!g) {
+    // 자세한 설명이 없는 파일(목록 밖에서 발견된 파일 등) — 예전 짧은 설명이 있으면 그것을, 없으면 그 사실을 말한다.
+    if (!fallback) return <div className="muted" style={{ fontSize: 12.5 }}>이 파일은 아직 자세한 설명이 없습니다. 위 한 줄 설명을 참고하세요.</div>;
+    return (
+      <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.8 }}>
+        <div>{fallback.keeps}</div>
+        {fallback.writer ? <div>· 기록 주체: {fallback.writer}</div> : null}
+        {fallback.retention ? <div>· 보존 정책: {fallback.retention}</div> : null}
+        {fallback.note ? <div>· 주의: {fallback.note}</div> : null}
+      </div>
+    );
+  }
   const has = (v) => (Array.isArray(v) ? v.length > 0 : !!v);
   return (
     <div className="portal-db-guide" style={{ fontSize: 13, lineHeight: 1.8 }}>
@@ -96,21 +107,10 @@ function DbDetailModal({ f, health, onClose, onCheck, checking }) {
       </div>
 
       <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-        <b style={{ fontSize: 13 }}>보관하는 데이터</b>
-        <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.75 }}>{d?.keeps || f.purpose}</div>
-        {d && (
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 10, lineHeight: 1.8 }}>
-            <div>· <b>기록 주체</b>: {d.writer}</div>
-            <div>· <b>보존 정책</b>: {d.retention}</div>
-            {d.note ? <div>· <b>주의</b>: {d.note}</div> : null}
-          </div>
-        )}
-        <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}><code>{f.path}</code></div>
-      </div>
-
-      <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-        <b style={{ fontSize: 13 }}>자세한 설명</b>
-        <div style={{ marginTop: 8 }}><GuidePanel file={f.file} /></div>
+        <b style={{ fontSize: 13 }}>이 파일은 무엇인가요</b>
+        <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.75 }}>{f.purpose}</div>
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 4, overflowWrap: 'anywhere' }}><code>{f.path}</code></div>
+        <div style={{ marginTop: 12 }}><GuidePanel file={f.file} fallback={d} /></div>
       </div>
 
       {f.type === 'sqlite' && (

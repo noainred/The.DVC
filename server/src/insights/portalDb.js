@@ -48,7 +48,7 @@ const PURPOSES = {
   'packages.json': '업그레이드/설치 패키지 소스 설정',
   'os-scan.json': '실제 OS(게스트) 스캔 설정',
   'ipam-scan.json': 'IPAM 능동 스캔 설정',
-  'ipam-scan-agents.json': 'IPAM 스캔 에이전트 목록',
+  'ipam-scan-agents.json': 'IP 스캔 에이전트별 마지막 보고(시각·스캔 수·응답 수)',
   'ipam-scan-history.json': 'IPAM 스캔 이력',
   'ipam-scan-results.json': 'IPAM 스캔 결과(최근)',
   'ipam-scan-runs.json': 'IPAM 스캔 실행 기록',
@@ -73,7 +73,7 @@ const PURPOSES = {
   // ── v2.613 PERSIST2613-02: DB 위치 이전 대상(insights/dbLocation.js MIGRATABLE) 19개 중 13개가 여기 없어 '포탈 DB' 화면이
   //    용도 없이('SQLite 데이터베이스' 폴백) 나열했다. 테스트가 MIGRATABLE ⊆ PURPOSES 를 고정한다 — 새 DB 를 MIGRATABLE 에
   //    넣으면 여기에도 적어야 한다(한 줄 설명은 dbLocation 의 label 과 같은 뜻으로).
-  'sanswitch-perf.db': 'SAN 스위치 포트 처리량 이력(포트별 누적 카운터 델타·일 롤업, v2.410)',
+  'sanswitch-perf.db': 'SAN 스위치 포트 처리량 표본(포트별 bps)·포트 연결 정보(v2.410)',
   'rma-history.db': '원격 명령(RMA) 실행 이력(v2.416)',
   'rma-tests.db': '원격 명령(RMA) 점검 결과(v2.418)',
   'dirusage.db': '폴더 사용량 리포트 이력(엣지 공유 폴더 Top-N)',
@@ -90,7 +90,7 @@ const PURPOSES = {
   // ── v2.613 PERSIST2613-02: 신규 기능의 설정·등록부 JSON(화면에서 편집 — 백업 대상).
   'storage-devices.json': '스토리지 장비 등록부(호스트·계정·수집 방식·담당 엣지 — 비밀번호 봉인)',
   'sanswitch-devices.json': 'SAN 스위치 등록부(호스트·계정·담당 엣지 — 비밀번호 봉인)',
-  'pdu-devices.json': 'PDU 등록부(호스트·SNMP/CLI 계정·담당 엣지 — 비밀 봉인)',
+  'pdu-devices.json': 'PDU 등록부(호스트·SSH CLI 계정·담당 엣지 — 비밀 봉인)',
   'cvp-servers.json': 'Arista CloudVision(CVP) 서버 등록부(주소·토큰/계정·담당 엣지 — 비밀 봉인, v2.608)',
   'cvp-settings.json': 'CVP 수집 설정(켜짐·주기·보존일·동시성·장비 시한, v2.608)',
   'bm-storage.json': '베어메탈 스토리지 서버 등록부 + 수집 주기(마운트 경로·SSH 계정 — 비밀 봉인, v2.340)',

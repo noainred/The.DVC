@@ -20,6 +20,7 @@ import { ipToNum } from '../util/ipv4.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { agentKeyOf, agentValueOf } from '../util/agentKey.js'; // v2.604 RECENT2604-01
+import { registerStateFile } from '../util/stateFiles.js';
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 // v2.603(감사 CEN2603-02): **전체** 상한. MAX_MERGE 는 한 호출에만 걸려, 배정 범위가 없는 토큰이 보고를 반복하면 results·history 가
@@ -49,7 +50,10 @@ function managedChecker() {
 
 const CFG = path.join(config.configDir, 'ipam-scan.json');
 const RES = path.join(config.configDir, 'ipam-scan-results.json');
-const REP = path.join(config.configDir, 'ipam-scan-agents.json');
+// v2.674: 에이전트별 마지막 스캔 보고(시각·스캔 수·응답 수)라 **상태 파일**이다. 등록하지 않으면 엣지가 보고할 때마다
+//   백업의 '설정 변경' 감시가 반응해 change 백업이 보관 슬롯을 채웠다(v2.590 P1 · v2.613 PERSIST2613-01 과 같은 유형).
+const REP = path.join(config.configDir, 'ipam-scan-agents.json');   // ⚠ 리터럴 형태 유지 — scripts/config-doc.mjs 가 이 모양으로 파일을 찾는다
+registerStateFile(REP);
 const HIST = path.join(config.configDir, 'ipam-scan-history.json');
 export const LOCAL = '__local__';
 
