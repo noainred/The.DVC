@@ -8,6 +8,7 @@ import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { probeRelayPath } from '../../vcenter/relayProbe.js';
 import { portalDbReport, enumerateDbFiles } from '../../insights/portalDb.js';
+import { guideFor } from '../../insights/dbGuide.js';
 import { inspectMany } from '../../insights/dbHealth.js';
 import { dbDir, defaultDbDir, preflight, migrationInventory } from '../../insights/dbLocation.js';
 import { writeMigrationScript, listMigrationScripts, migrationsDir, DEFAULT_SERVICE, DEFAULT_USER, unitNameIssue } from '../../insights/migrateScript.js';
@@ -96,6 +97,14 @@ adminRouter.get('/vcenter/relay-test', adminOnly, async (req, res) => {
 
 // 포탈 DB 인벤토리 — 사용 중 모든 데이터 파일의 경로·파일명·용도·크기·증가 추이·용량 예측.
 adminRouter.get('/portal-db', adminOnly, fleetOnly, (_req, res) => res.json(portalDbReport()));
+
+// v2.674: '자세히' 팝업 — 파일 하나의 자세한 설명. 폴링 응답(위)에 싣지 않고 팝업을 열 때만 가져간다.
+//   파일명은 형식만 받는다(경로 문자 불가) — 설명 표에 없으면 guide:null 이고 화면은 한 줄 설명으로 대신한다.
+adminRouter.get('/portal-db/guide', adminOnly, fleetOnly, (req, res) => {
+  const file = typeof req.query.file === 'string' ? req.query.file : '';
+  if (!/^[\w.-]{1,120}$/.test(file)) return res.status(400).json({ ok: false, reason: '파일 이름 형식이 아닙니다.' });
+  res.json({ ok: true, file, guide: guideFor(file) });
+});
 
 /**
  * DB 정합성·일관성 점검(v2.378) — SQLite 파일을 **읽기 전용**으로 진단한다.

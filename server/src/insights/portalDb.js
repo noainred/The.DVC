@@ -11,6 +11,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config, clampIntervalMs } from '../config.js';
+import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { registerStateFile } from '../util/stateFiles.js';
+import { dayIndex } from '../util/dayKey.js';
+import { linregSlope } from '../util/linreg.js';
 
 const CONFIG_DIR = config.configDir;
 // 옮긴 DB 저장 경로(null = configDir 사용). db-location.json → config.dbDir (v2.379).
@@ -283,64 +287,152 @@ export function enumerateDbFiles() {
     (b.exists - a.exists) || ((b.sizeBytes || 0) - (a.sizeBytes || 0)) || a.file.localeCompare(b.file));
 }
 
-// ── 증가 추이 샘플러(메모리 링버퍼) ─────────────────────────────────────
-const HISTORY = new Map();          // absPath -> [{ at, bytes }]
+// ── 증가 추이 샘플러 ─────────────────────────────────────────────────────
+// v2.674(사용자 신고 "1개월·6개월·1년 후가 안 나온다"): 예전에는 표본이 **프로세스 메모리에만** 있어 재시작(업그레이드)
+//   마다 사라졌고, 관측이 1시간을 넘기 전에는 예측이 비었다. 업그레이드가 잦은 운영에서는 거의 늘 비어 있었다.
+//   그리고 30분 표본(4점)의 기울기를 365배 늘려 '+4.1 GB/일' 같은 값을 냈다(WAL 이 커졌다 줄었다 하는 것까지 증가로 읽는다).
+//   이제 ① 표본을 파일(portal-db-size-history.json — 상태 파일)에 남겨 재시작해도 이어 가고 ② 한국 시각 하루마다 마지막
+//   표본 하나를 일 표본으로 400일 보관해 ③ 일 표본이 2일 이상 쌓이면 **최근 30일 일 표본의 최소제곱 기울기**로 예측한다.
+const HISTORY = new Map();          // absPath -> [{ at, bytes }]  최근 표본(10분 간격)
+const DAILY = new Map();            // absPath -> [{ at, bytes, day }]  하루 마지막 표본(한국 시각 기준)
 const MAX_SAMPLES = 300;            // 파일당 보관 샘플 수(예: 10분 간격 ≈ 50시간)
+const MAX_DAILY = 400;              // 일 표본 보관 일수
+const DAILY_FIT_DAYS = 30;          // 예측 기울기에 쓰는 최근 일수
+const DAY_MS = 86_400_000;
+const MIN_DAILY_SPAN_MS = 2 * DAY_MS; // 일 표본 기울기는 2일 이상일 때만
+const SHRINK_RESET_RATIO = 0.8;     // 이보다 크게 줄면 그 앞 표본은 기울기에서 뺀다
 // v2.605(감사 TIM2605-04): 음수·2^31 초과 값은 setInterval 이 1ms 루프가 된다(재현: -5 → 1초에 statSync 4,405회) — 주기 헬퍼로 가둔다.
 const SAMPLE_INTERVAL_MS = clampIntervalMs(Number(process.env.PORTAL_DB_SAMPLE_MS) || 10 * 60_000, 10 * 60_000, 10_000);
+const HISTORY_FILE_NAME = registerStateFile('portal-db-size-history.json');
+const historyFile = () => path.join(CONFIG_DIR, HISTORY_FILE_NAME);
 
-/** 현재 크기를 1회 샘플링해 링버퍼에 적재. */
-export function recordDbSizeSample(now = Date.now()) {
-  for (const f of enumerateDbFiles()) {
-    if (!f.exists) continue;
-    let arr = HISTORY.get(f.path);
-    if (!arr) { arr = []; HISTORY.set(f.path, arr); }
-    const last = arr[arr.length - 1];
-    // 직전과 동일 크기면 타임스탬프만 의미가 적으므로 기록하되 버퍼는 bound.
-    arr.push({ at: now, bytes: f.sizeBytes || 0 });
-    if (arr.length > MAX_SAMPLES) arr.splice(0, arr.length - MAX_SAMPLES);
-    void last;
+let _loaded = false;
+/** 저장된 표본을 읽는다(1회). 손상이면 .corrupt 로 보존하고 빈 상태로 시작한다 — 지난 표본은 다시 만들 수 없다. */
+function loadHistory(now = Date.now()) {
+  if (_loaded) return;
+  _loaded = true;
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(historyFile(), 'utf8')); } catch (e) {
+    if (e?.code !== 'ENOENT') { console.warn(`[portal-db] 크기 표본 파일을 읽지 못했습니다(${e.message}) — 새로 시작합니다`); preserveCorrupt(historyFile(), e.message); }
+    return;
+  }
+  const take = (obj, map, maxAge, max) => {
+    if (!obj || typeof obj !== 'object') return;
+    for (const [p, arr] of Object.entries(obj)) {
+      if (!Array.isArray(arr)) continue;
+      const pts = arr.filter((x) => Array.isArray(x) && Number.isFinite(x[0]) && Number.isFinite(x[1]) && x[1] >= 0 && x[0] <= now + 60_000 && now - x[0] <= maxAge)
+        .map(([at, bytes]) => ({ at, bytes, day: dayIndex(at) }))
+        .sort((a, b) => a.at - b.at).slice(-max);
+      if (pts.length) map.set(p, pts);
+    }
+  };
+  take(raw?.recent, HISTORY, MAX_SAMPLES * SAMPLE_INTERVAL_MS * 2, MAX_SAMPLES);
+  take(raw?.daily, DAILY, MAX_DAILY * DAY_MS, MAX_DAILY);
+}
+
+function saveHistory() {
+  const pack = (map) => Object.fromEntries([...map].map(([p, arr]) => [p, arr.map((x) => [x.at, x.bytes])]));
+  try { atomicWriteFileSync(historyFile(), JSON.stringify({ v: 1, recent: pack(HISTORY), daily: pack(DAILY) })); } catch (e) {
+    console.warn(`[portal-db] 크기 표본을 저장하지 못했습니다: ${e.message}`);
   }
 }
 
+/** 현재 크기를 1회 샘플링해 적재(최근 표본 + 그날의 일 표본 갱신) 후 파일에 남긴다. */
+export function recordDbSizeSample(now = Date.now(), { persist = true } = {}) {
+  loadHistory(now);
+  const day = dayIndex(now);
+  for (const f of enumerateDbFiles()) {
+    if (!f.exists) continue;
+    const pt = { at: now, bytes: f.sizeBytes || 0, day };
+    let arr = HISTORY.get(f.path);
+    if (!arr) { arr = []; HISTORY.set(f.path, arr); }
+    arr.push(pt);
+    if (arr.length > MAX_SAMPLES) arr.splice(0, arr.length - MAX_SAMPLES);
+    let d = DAILY.get(f.path);
+    if (!d) { d = []; DAILY.set(f.path, d); }
+    if (d.length && d[d.length - 1].day === day) d[d.length - 1] = pt; else d.push(pt);
+    if (d.length > MAX_DAILY) d.splice(0, d.length - MAX_DAILY);
+  }
+  if (persist) saveHistory();
+}
+
 /**
- * 증가 추이 + **용량 예측**(v2.378).
+ * 증가 추이 + **용량 예측**(v2.378 · v2.674).
  *
- * 예측은 관측 구간의 선형 증가율(일 평균)을 그대로 연장한 **단순 추정**이다. 그래서:
- *  - 표본이 2개 미만이거나 관측 구간이 짧으면(기본 1시간 미만) 예측을 만들지 않고 null 을 준다
- *    (짧은 구간의 노이즈를 365배 증폭해 '1년 후 40TB' 같은 허수를 보여주지 않기 위함).
- *  - 감소 추세(prune 직후 등)면 예측은 현재 크기로 수렴시킨다(음수 용량 방지).
- *  - confidence: 관측 구간 길이로 low/medium/high 를 매겨 화면이 신뢰도를 함께 표기한다.
+ * 예측은 일 증가율을 그대로 연장한 **단순 선형 추정**이다. 기울기 출처는 둘이다:
+ *  - 일 표본이 2일 이상이면 최근 30일 일 표본의 최소제곱 기울기(basis 'daily') — 재시작·WAL 출렁임에 덜 흔들린다.
+ *  - 아니면 최근 표본의 처음·끝 차이(basis 'recent'). 관측이 1시간 미만이면 예측을 만들지 않는다
+ *    (짧은 구간의 노이즈를 365배 증폭해 허수를 보여주지 않기 위함) — 대신 '약 N분 뒤 표시' 를 말한다.
+ *  - 감소 추세(prune 직후 등)면 예측은 현재 크기로 둔다(shrinking:true). 크게 줄어든 지점(80% 미만) 앞의 일 표본은 쓰지 않는다.
+ *  - confidence: 관측 구간 길이로 low/medium/high.
  */
 const MIN_FORECAST_SPAN_MS = Number(process.env.PORTAL_DB_MIN_FORECAST_MS) || 3_600_000; // 1시간
 
 function forecastFrom(nowBytes, perDayBytes, spanMs) {
   if (!(spanMs >= MIN_FORECAST_SPAN_MS) || !Number.isFinite(perDayBytes)) {
-    return { available: false, reason: spanMs > 0 ? '관측 구간이 짧아 예측을 만들지 않습니다(1시간 이상 필요)' : '표본 부족', confidence: null, in1m: null, in6m: null, in1y: null };
+    const leftMin = spanMs > 0 ? Math.max(1, Math.ceil((MIN_FORECAST_SPAN_MS - spanMs) / 60_000)) : null;
+    return {
+      available: false,
+      reason: spanMs > 0 ? `관측 ${Math.max(1, Math.round(spanMs / 60_000))}분 — 1시간 이상 필요(약 ${leftMin}분 뒤 표시)` : '표본 부족(첫 표본 대기)',
+      readyInMs: spanMs > 0 ? MIN_FORECAST_SPAN_MS - spanMs : null,
+      confidence: null, in1d: null, in1w: null, in1m: null, in6m: null, in1y: null,
+    };
   }
-  const at = (days) => Math.max(0, Math.round(nowBytes + perDayBytes * days));
+  // 감소 추세면 현재 크기로 둔다 — 줄어드는 기울기를 1년 늘리면 '0 B' 가 되는데, 정리가 끝나면 다시 늘기 때문이다.
+  const at = (days) => Math.round(nowBytes + Math.max(0, perDayBytes) * days);
   // 관측 구간이 길수록 신뢰도 상향: 7일+ high · 1일+ medium · 그 외 low.
   const confidence = spanMs >= 7 * 86_400_000 ? 'high' : spanMs >= 86_400_000 ? 'medium' : 'low';
   return {
-    available: true, reason: null, confidence,
-    in1m: at(30), in6m: at(182), in1y: at(365),
+    available: true, reason: null, readyInMs: 0, confidence,
+    in1d: at(1), in1w: at(7), in1m: at(30), in6m: at(182), in1y: at(365),
     // 감소 추세면 '언제 0 이 되는가' 는 무의미하므로 표기하지 않는다.
     shrinking: perDayBytes < 0,
   };
 }
 
+/** 일 표본(최근 30일 + 지금 값)의 최소제곱 기울기(바이트/일). 2일 미만이면 null. */
+function dailySlope(daily, nowPt) {
+  if (!Array.isArray(daily) || !daily.length) return null;
+  const cut = (nowPt?.at ?? daily[daily.length - 1].at) - DAILY_FIT_DAYS * DAY_MS;
+  let pts = daily.filter((x) => x.at >= cut);
+  if (nowPt && (!pts.length || pts[pts.length - 1].at < nowPt.at)) pts.push(nowPt);
+  // 크게 줄어든 지점(정리·VACUUM·이전 — 직전의 80% 미만) 앞은 다른 기준이다. 섞으면 기울기가 큰 음수가 되어
+  // '1년 후 0 B' 가 나온다(v2.674 Chromium 검증에서 발견). 마지막 급감 지점부터만 쓴다.
+  for (let i = pts.length - 1; i > 0; i--) {
+    if (pts[i].bytes < pts[i - 1].bytes * SHRINK_RESET_RATIO) { pts = pts.slice(i); break; }
+  }
+  if (pts.length < 2) return null;
+  const span = pts[pts.length - 1].at - pts[0].at;
+  if (!(span >= MIN_DAILY_SPAN_MS)) return null;
+  const slope = linregSlope(pts.map((x) => x.at / DAY_MS), pts.map((x) => x.bytes));
+  return Number.isFinite(slope) ? { perDay: Math.round(slope), spanMs: span, points: pts.length } : null;
+}
+
 function trendFor(absPath, sizeBytes = 0) {
   const arr = HISTORY.get(absPath) || [];
+  const last = arr[arr.length - 1] || null;
+  const d = dailySlope(DAILY.get(absPath), last);
+  if (d) {
+    const growthBytes = arr.length >= 2 ? last.bytes - arr[0].bytes : 0;
+    // 재시작 직후처럼 최근 표본이 모자라면 추이 그림은 일 표본으로 그린다(빈 칸 대신).
+    const samples = arr.length >= 2 ? arr.slice(-60) : (DAILY.get(absPath) || []).slice(-60).map(({ at, bytes }) => ({ at, bytes }));
+    return { samples, growthBytes, spanMs: d.spanMs, perDayBytes: d.perDay, basis: 'daily', basisPoints: d.points,
+      // 출발점은 지금 실제 파일 크기다(마지막 표본은 최대 10분 전 값).
+      forecast: forecastFrom(Number.isFinite(sizeBytes) && sizeBytes > 0 ? sizeBytes : (last ? last.bytes : 0), d.perDay, d.spanMs) };
+  }
   if (arr.length < 2) {
-    return { samples: arr.slice(-60), growthBytes: 0, spanMs: 0, perDayBytes: 0, forecast: forecastFrom(sizeBytes, 0, 0) };
+    return { samples: arr.slice(-60), growthBytes: 0, spanMs: 0, perDayBytes: null, basis: null, forecast: forecastFrom(sizeBytes, 0, 0) };
   }
   const first = arr[0];
-  const last = arr[arr.length - 1];
   const spanMs = Math.max(0, last.at - first.at);
   const growthBytes = last.bytes - first.bytes;
-  const perDayBytes = spanMs > 0 ? Math.round((growthBytes / spanMs) * 86_400_000) : 0;
-  return { samples: arr.slice(-60), growthBytes, spanMs, perDayBytes, forecast: forecastFrom(last.bytes, perDayBytes, spanMs) };
+  // 1시간 미만이면 일 증가량을 내지 않는다(30분 차이를 48배로 늘린 값은 숫자처럼 보이지만 뜻이 없다).
+  const perDayBytes = spanMs >= MIN_FORECAST_SPAN_MS ? Math.round((growthBytes / spanMs) * 86_400_000) : null;
+  return { samples: arr.slice(-60), growthBytes, spanMs, perDayBytes, basis: 'recent', forecast: forecastFrom(last.bytes, perDayBytes ?? NaN, spanMs) };
 }
+
+/** 테스트 전용 — 메모리 표본을 비우고 다시 읽게 한다. */
+export function _resetDbSizeHistoryForTest() { HISTORY.clear(); DAILY.clear(); _loaded = false; }
 
 /**
  * DB 가 실제로 쌓이는 파일시스템의 여유 공간 — 예측이 디스크를 넘는지 판단하는 기준.
@@ -358,6 +450,7 @@ function diskFree() {
 
 /** 화면용 리포트 — 파일 목록 + 현재 크기 + 증가 추이. */
 export function portalDbReport(now = Date.now()) {
+  loadHistory(now);   // 기동 직후 첫 표본보다 먼저 화면을 열어도 저장분을 쓴다
   const files = enumerateDbFiles().map((f) => ({
     ...f,
     trend: trendFor(f.path, f.sizeBytes || 0),
@@ -367,7 +460,10 @@ export function portalDbReport(now = Date.now()) {
   // 전체 합계 예측 — 파일별 일 증가량을 합산해 같은 방식으로 연장한다.
   const perDayTotal = files.reduce((s, f) => s + (f.trend?.perDayBytes || 0), 0);
   const spanMax = files.reduce((m, f) => Math.max(m, f.trend?.spanMs || 0), 0);
+  // v2.674: 일 증가량을 낼 수 없는 파일(관측 1시간 미만)은 합계에서 빠진다 — 몇 개인지 밝힌다.
+  const perDayUnknown = files.filter((f) => f.exists && f.trend?.perDayBytes == null).length;
   const totalForecast = forecastFrom(totalBytes, perDayTotal, spanMax);
+  const persistedAt = (() => { try { return fs.statSync(historyFile()).mtimeMs; } catch { return null; } })();
   const disk = diskFree();
   // 디스크 소진 예상 — 여유 공간 ÷ 일 증가량. 증가가 0 이하면 '해당 없음'.
   let daysUntilFull = null;
@@ -380,7 +476,9 @@ export function portalDbReport(now = Date.now()) {
     sampleIntervalMs: SAMPLE_INTERVAL_MS,
     totalBytes,
     count: files.length,
-    perDayTotalBytes: perDayTotal,
+    perDayTotalBytes: totalForecast.available ? perDayTotal : null,
+    perDayUnknown,
+    historyPersistedAt: persistedAt,
     totalForecast,
     disk,
     daysUntilFull,
@@ -393,7 +491,7 @@ let _timer = null;
 /** 주기적으로 파일 크기를 샘플링해 증가 추이를 누적(기동 시 1회 즉시 기록). */
 export function startDbSizeSampler() {
   if (_timer) return;
-  try { recordDbSizeSample(); } catch { /* */ }
+  try { recordDbSizeSample(); } catch (e) { console.warn(`[portal-db] 크기 표본 실패: ${e.message}`); }
   _timer = setInterval(() => { try { recordDbSizeSample(); } catch { /* */ } }, SAMPLE_INTERVAL_MS);
   _timer.unref?.();
 }

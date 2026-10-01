@@ -4,21 +4,7 @@ import { fetchJson, postJson, usePolling } from '../../api.js';
 import { DataTable, Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
-
-
-// 바이트를 사람이 읽는 단위로.
-function fmtBytes(b) {
-  if (b == null || !Number.isFinite(Number(b))) return '—';
-  // v2.620(WEB2620-07): 줄어든 DB 는 추이가 음수다 — 부호를 떼고 단위를 고른 뒤 붙인다(예전엔 '-5368709120 B').
-  const raw = Number(b);
-  const sign = raw < 0 ? '-' : '';
-  const n = Math.abs(raw);
-  if (n < 1024) return `${sign}${n} B`;
-  const u = ['KB', 'MB', 'GB', 'TB'];
-  let v = n / 1024; let i = 0;
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return `${sign}${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${u[i]}`;
-}
+import { fmtBytes, fcText, perDayText, basisText } from './portalDbText.js';
 
 const DB_TYPE_BADGE = { sqlite: 'blue', json: 'green', ndjson: 'amber', file: 'gray' };
 const DB_TYPE_LABEL = { sqlite: 'SQLite', json: 'JSON', ndjson: 'ndjson', file: '파일' };
@@ -52,14 +38,60 @@ const CONF_LABEL = { high: '높음(7일+ 관측)', medium: '보통(1일+ 관측)
  * DB 상세 패널(v2.378) — "이 DB 가 무엇을 보관하는가"를 구체적으로 보여준다.
  * 서버 detail(보관내용·writer·보존정책·주의)과, 정합성 점검에서 얻은 테이블/행수/기간/스키마를 합쳐 표시.
  */
+// v2.674 '자세히' — 처음 쓰는 사람용 자세한 설명. 팝업을 열 때 그 파일 하나만 서버에서 가져온다(폴링하지 않는다).
+const GUIDE_SECTIONS = [
+  ['stores', '무엇을 저장하나요'],
+  ['writer', '누가, 얼마나 자주 기록하나요'],
+  ['usedBy', '어느 화면·기능이 이 데이터를 쓰나요'],
+  ['retention', '얼마나 오래 보관하나요'],
+  ['growth', '크기는 무엇에 따라 커지나요'],
+  ['shrink', '크기를 줄이려면'],
+  ['ifDeleted', '지우거나 손상되면'],
+  ['cautions', '주의할 점'],
+  ['settings', '관련 설정'],
+];
+function GuidePanel({ file }) {
+  const [state, setState] = useState({ loading: true, guide: null, error: null });
+  useEffect(() => {
+    let alive = true;
+    fetchJson(`/admin/portal-db/guide?file=${encodeURIComponent(file)}`)
+      .then((r) => { if (alive) setState({ loading: false, guide: r?.guide || null, error: null }); })
+      .catch((e) => { if (alive) setState({ loading: false, guide: null, error: e?.message || String(e) }); });
+    return () => { alive = false; };
+  }, [file]);
+  if (state.loading) return <div className="muted" style={{ fontSize: 12.5 }}>설명을 불러오는 중…</div>;
+  if (state.error) return <div className="badge amber" style={{ display: 'inline-block' }}>설명을 불러오지 못했습니다: {state.error}</div>;
+  const g = state.guide;
+  if (!g) return <div className="muted" style={{ fontSize: 12.5 }}>이 파일은 아직 자세한 설명이 없습니다. 위 한 줄 설명을 참고하세요.</div>;
+  const has = (v) => (Array.isArray(v) ? v.length > 0 : !!v);
+  return (
+    <div className="portal-db-guide" style={{ fontSize: 13, lineHeight: 1.8 }}>
+      {g.title ? <div style={{ fontWeight: 700, fontSize: 14 }}>{g.title}</div> : null}
+      {g.summary ? <p style={{ margin: '6px 0 10px' }}>{g.summary}</p> : null}
+      {GUIDE_SECTIONS.filter(([k]) => has(g[k])).map(([k, label]) => (
+        <div key={k} style={{ marginTop: 10 }}>
+          <b style={{ fontSize: 12.5, color: 'var(--accent, #5ab0ff)' }}>{label}</b>
+          {Array.isArray(g[k])
+            ? <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{g[k].map((x, i) => <li key={i} style={{ overflowWrap: 'anywhere' }}>{x}</li>)}</ul>
+            : <div style={{ marginTop: 2, overflowWrap: 'anywhere' }}>{g[k]}</div>}
+        </div>
+      ))}
+      {has(g.sources) ? (
+        <div className="muted" style={{ fontSize: 11.5, marginTop: 12, overflowWrap: 'anywhere' }}>근거 코드: {g.sources.join(' · ')}</div>
+      ) : null}
+    </div>
+  );
+}
+
 function DbDetailModal({ f, health, onClose, onCheck, checking }) {
   const d = f.detail;
   const h = health;   // inspectSqlite 결과(있으면)
   return (
-    <Modal title={`DB 상세 — ${f.file}`} onClose={onClose} width={900} resizable minWidth={560} minHeight={400}>
+    <Modal title={`자세히 — ${f.file}`} onClose={onClose} width={900} resizable minWidth={560} minHeight={400}>
       <div className="flex gap wrap" style={{ marginBottom: 12 }}>
         <Card label="크기" value={fmtBytes(f.sizeBytes)} meta={f.type === 'sqlite' ? 'WAL/SHM 합산' : ''} />
-        <Card label="증가/일(추정)" value={f.trend?.perDayBytes == null || !(f.trend?.spanMs > 0) ? '—' : `${f.trend.perDayBytes > 0 ? '+' : ''}${fmtBytes(f.trend.perDayBytes)}`} meta={`관측 ${fmtSpan(f.trend?.spanMs)}`} />
+        <Card label="증가/일(추정)" value={perDayText(f.trend?.perDayBytes, f.trend?.forecast)} meta={`관측 ${fmtSpan(f.trend?.spanMs)}${f.trend?.basis === 'daily' ? ' · 일 표본 기울기' : ''}`} />
+        <Card label="1주일 후(추정)" value={fcText(f.trend?.forecast, 'in1w')} />
         <Card label="1년 후(추정)" value={f.trend?.forecast?.available ? fmtBytes(f.trend.forecast.in1y) : '—'} meta={f.trend?.forecast?.available ? `신뢰도 ${CONF_LABEL[f.trend.forecast.confidence] || '—'}` : (f.trend?.forecast?.reason || '표본 부족')} />
       </div>
 
@@ -74,6 +106,11 @@ function DbDetailModal({ f, health, onClose, onCheck, checking }) {
           </div>
         )}
         <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}><code>{f.path}</code></div>
+      </div>
+
+      <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+        <b style={{ fontSize: 13 }}>자세한 설명</b>
+        <div style={{ marginTop: 8 }}><GuidePanel file={f.file} /></div>
       </div>
 
       {f.type === 'sqlite' && (
@@ -408,9 +445,9 @@ export function PortalDb() {
     { key: 'type', label: '종류', sortValue: (f) => f.type, render: (f) => <span className={`badge ${DB_TYPE_BADGE[f.type] || 'gray'}`}>{DB_TYPE_LABEL[f.type] || f.type}</span> },
     { key: 'purpose', label: '용도', render: (f) => <span style={{ fontSize: 13 }}>{f.purpose}</span> },
     { key: 'sizeBytes', label: '크기', align: 'right', sortValue: (f) => f.sizeBytes || -1, render: (f) => (f.exists ? <span>{fmtBytes(f.sizeBytes)}</span> : <span className="badge gray">미생성</span>) },
-    { key: 'growth', label: '증가/일(추정)', align: 'right', sortValue: (f) => f.trend?.perDayBytes || 0, render: (f) => {
-      const g = f.trend?.perDayBytes || 0;
-      if (!f.exists || (f.trend?.samples?.length || 0) < 2) return <span className="muted">—</span>;
+    { key: 'growth', label: '증가/일(추정)', align: 'right', sortValue: (f) => f.trend?.perDayBytes ?? '', render: (f) => {
+      const g = f.trend?.perDayBytes;
+      if (!f.exists || g == null) return <span className="muted" title={f.trend?.forecast?.reason || '표본 부족'}>—</span>;
       if (g === 0) return <span className="muted">변화 없음</span>;
       return <span style={{ color: g > 0 ? 'var(--green)' : 'var(--red)' }}>{g > 0 ? '+' : ''}{fmtBytes(g)}/일</span>;
     } },
@@ -419,10 +456,10 @@ export function PortalDb() {
       const fc = f.trend?.forecast;
       if (!f.exists) return <span className="muted">—</span>;
       if (!fc?.available) return <span className="muted" title={fc?.reason || '표본 부족'}>—</span>;
-      return <span title={`1개월 ${fmtBytes(fc.in1m)} · 6개월 ${fmtBytes(fc.in6m)} · 신뢰도 ${CONF_LABEL[fc.confidence] || '—'}`}>{fmtBytes(fc.in1y)}</span>;
+      return <span title={`1주 ${fmtBytes(fc.in1w)} · 1개월 ${fmtBytes(fc.in1m)} · 6개월 ${fmtBytes(fc.in6m)} · 신뢰도 ${CONF_LABEL[fc.confidence] || '—'}`}>{fmtBytes(fc.in1y)}</span>;
     } },
-    { key: 'detail', label: '상세', render: (f) => (
-      <button className="cell-link" onClick={() => setSel(f)} title="보관 데이터·스키마·행 수·데이터 기간·정합성">🔍 보기</button>
+    { key: 'detail', label: '자세히', render: (f) => (
+      <button className="cell-link" onClick={() => setSel(f)} title="무엇을 저장하는지·어느 화면이 쓰는지·보관 기간·줄이는 법·스키마·정합성">📖 자세히</button>
     ) },
     { key: 'path', label: '경로', render: (f) => <code style={{ fontSize: 11, color: 'var(--muted)' }}>{f.path}</code> },
   ];
@@ -434,12 +471,14 @@ export function PortalDb() {
         <Card label="SQLite DB" value={sqliteN} accent="var(--blue,#2563eb)" />
         <Card label="총 용량" value={fmtBytes(data.totalBytes)} accent="var(--green)" />
         <Card label="설정 디렉터리" value={<code style={{ fontSize: 12 }}>{data.configDir}</code>} meta={`추이 샘플 ${Math.round((data.sampleIntervalMs || 0) / 60000)}분 간격`} />
-        {/* 용량 예측(v2.378) — 관측 구간의 일 증가량을 선형 연장한 추정. 표본이 짧으면 표시하지 않는다. */}
-        <Card label="1개월 후(추정)" value={data.totalForecast?.available ? fmtBytes(data.totalForecast.in1m) : '—'}
-          meta={data.totalForecast?.available ? `일 증가 ${data.perDayTotalBytes > 0 ? '+' : ''}${fmtBytes(data.perDayTotalBytes)}` : (data.totalForecast?.reason || '표본 부족')} />
-        <Card label="6개월 후(추정)" value={data.totalForecast?.available ? fmtBytes(data.totalForecast.in6m) : '—'} />
-        <Card label="1년 후(추정)" value={data.totalForecast?.available ? fmtBytes(data.totalForecast.in1y) : '—'}
-          meta={data.totalForecast?.available ? `신뢰도 ${CONF_LABEL[data.totalForecast.confidence] || '—'}` : ''}
+        {/* 용량 예측(v2.378 · v2.674) — 일 증가율을 선형 연장한 추정. 관측 1시간 미만이면 '—' 와 표시까지 남은 시간을 말한다. */}
+        <Card label="1일 증가량(추정)" value={perDayText(data.perDayTotalBytes, data.totalForecast)}
+          meta={data.totalForecast?.available ? `${basisText(data)}${data.perDayUnknown ? ` · 미산정 ${data.perDayUnknown}개 제외` : ''}` : (data.totalForecast?.reason || '표본 부족')} />
+        <Card label="1주일 후(추정)" value={fcText(data.totalForecast, 'in1w')} />
+        <Card label="1개월 후(추정)" value={fcText(data.totalForecast, 'in1m')} />
+        <Card label="6개월 후(추정)" value={fcText(data.totalForecast, 'in6m')} />
+        <Card label="1년 후(추정)" value={fcText(data.totalForecast, 'in1y')}
+          meta={data.totalForecast?.available ? (data.totalForecast.shrinking ? '감소 추세 — 지금 크기로 표시' : `신뢰도 ${CONF_LABEL[data.totalForecast.confidence] || '—'}`) : ''}
           accent={data.totalForecast?.available && data.disk && data.totalForecast.in1y > data.disk.freeBytes ? 'var(--red)' : undefined} />
         {data.disk && (
           <Card label="디스크 여유" value={fmtBytes(data.disk.freeBytes)}
@@ -449,10 +488,10 @@ export function PortalDb() {
       </div>
       <DataTable columns={cols} rows={files} initialSort={{ key: 'sizeBytes', dir: 'desc' }} />
       <div className="muted" style={{ marginTop: 10, fontSize: 12, lineHeight: 1.7 }}>
-        · <b>증가 추이</b>는 서버 기동 후 {Math.round((data.sampleIntervalMs || 0) / 60000)}분 간격으로 측정한 크기 표본으로 추정합니다(재시작 시 표본 초기화).
+        · <b>증가 추이</b>는 {Math.round((data.sampleIntervalMs || 0) / 60000)}분 간격으로 측정한 크기 표본으로 추정합니다. 표본은 파일에 남아 재시작해도 이어지고, 일 표본이 2일 이상 쌓이면 <b>최근 30일 일 표본의 기울기</b>로 계산합니다(그 전에는 최근 표본의 처음·끝 차이).
         · SQLite는 <code>-wal</code>/<code>-shm</code> 사이드카 크기를 합산해 표시합니다.
         · <code>미생성</code>은 해당 기능을 아직 쓰지 않아 파일이 만들어지지 않은 상태입니다.
-        · <b>용량 예측</b>은 관측 구간의 일 증가량을 그대로 연장한 <b>단순 선형 추정</b>입니다(관측 1시간 미만이면 표시하지 않습니다). 수집 주기·보존기간·vCenter 수가 바뀌면 실제와 달라집니다.
+        · <b>용량 예측</b>은 관측 구간의 일 증가량을 그대로 연장한 <b>단순 선형 추정</b>입니다(관측 1시간 미만이면 표시하지 않고, 크게 줄어든 지점 — 정리·VACUUM — 앞의 표본은 쓰지 않으며, 감소 추세면 지금 크기로 둡니다). 수집 주기·보존기간·vCenter 수가 바뀌면 실제와 달라집니다.
       </div>
 
       {/* DB 정합성·일관성 점검(v2.378) — 읽기 전용이라 서비스 중단 불필요 */}
