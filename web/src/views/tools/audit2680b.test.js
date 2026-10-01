@@ -2,6 +2,8 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const here = path.dirname(fileURLToPath(import.meta.url));
 import { moveVisibleKey, DEFAULT_ORDER } from './idracTrendText.js';
 import { stripComments } from '../../test/_stripComments.js';
 
@@ -18,7 +20,7 @@ describe('D-08 moveVisibleKey', () => {
     expect(moveVisibleKey(DEFAULT_ORDER, DEFAULT_ORDER, 'nope', 1)).toEqual(DEFAULT_ORDER);
   });
   it('화면은 보이는 목록 길이로 ▶ 를 막고 moveVisibleKey 로 옮긴다', () => {
-    const src = stripComments(fs.readFileSync(path.join(__dirname, 'IdracTrendTool.jsx'), 'utf8'));
+    const src = stripComments(fs.readFileSync(path.join(here, 'IdracTrendTool.jsx'), 'utf8'));
     expect(src).not.toMatch(/order\.length\s*-\s*1/);
     expect(src).toMatch(/visibleCards\.length\s*-\s*1/);
     expect(src).toMatch(/moveVisibleKey\(/);
